@@ -11,6 +11,7 @@ import ctypes as C
 import random
 import re
 import struct
+import subprocess
 import typing
 
 import pytest
@@ -868,6 +869,32 @@ def test_corners_square_keeps_a_theme_s_bar_full_width_and_square(fw, layout, th
     own_shape(fw, theme_layout, layout, 6, 8)
     band = page.band() if page.paint() else {}
     assert list(band) == list(range(48, 96)) and all(r[:2] == (0, 375) and solid(r) == rgba(0x2f5bea) for r in band.values())
+
+
+def test_an_own_scheme_s_tones_compile_into_its_row(tmp_path):
+    """tools/theme.py's table for a theme whose own scheme states its tones: that row's tones are them, every ACCENTS
+    row's its own, as cc reads the emitted C."""
+    T = host.tools_theme
+    by_id = {n.attrs['id']: n for n in map(T.load, sorted((host.ROOT/'assets/themes').glob('*/theme.xml')))}
+    root = T.parse('<theme format="1" id="oled" name="OLED" index="3" extends="minimal">'
+                   '<colorScheme name="oled-blue" base="cobalt" label="Blue" tones="#2f5bea #2f5bea #5a7cee #5a7cee #2f5bea"/>'
+                   '<colorSchemes accents="oled-blue"/><option setting="accent" key="OLED_ACCENT" default="oled-blue"/></theme>',
+                   'oled/theme.xml')
+    t = T.resolve(root, {**by_id, 'oled': root})
+    T.validate(t, 'oled/theme.xml')
+    T.emit([t], tmp_path)
+    inc = (tmp_path/'themes.inc').read_text()
+    rows = inc[inc.index('static const unsigned oled_tones'):inc.index('static const option_t')]
+    (tmp_path/'tones.c').write_text(
+        '#include <stdio.h>\n#include "theme.h"\nenum { ACCENT_N = %d };\n%s\nstatic const unsigned accents[][5] = { ACCENTS };\n%s'
+        'int main(void) {\n    for (int v = 0; v < %d; ++v)\n'
+        '        printf("%%06x %%06x %%06x %%06x %%06x\\n", oled_schemes[v].tones[0], oled_schemes[v].tones[1],\n'
+        '               oled_schemes[v].tones[2], oled_schemes[v].tones[3], oled_schemes[v].tones[4]);\n}\n'
+        % (len(T.ACCENT_NAMES), T.ACCENTS_BLOCK, rows, len(t['schemes'])))
+    subprocess.run(['cc', '-std=gnu11', '-Wall', '-Werror', '-I', str(host.ROOT/'patch'), str(tmp_path/'tones.c'), '-o', str(tmp_path/'tones')],
+                   check=True)
+    out = subprocess.run([str(tmp_path/'tones')], capture_output=True, text=True, check=True).stdout.splitlines()
+    assert out == [' '.join(f'{x:06x}' for x in row) for row in T.ACCENT_TONES] + ['2f5bea 2f5bea 5a7cee 5a7cee 2f5bea']
 
 
 def test_a_radius_past_half_the_row_is_the_pill(fw, layout, theme_layout):

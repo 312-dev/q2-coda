@@ -46,7 +46,8 @@ typedef struct {
     unsigned rgb[13];
 } stops_t;
 typedef struct {
-    const unsigned *tones; /* its ACCENTS row: accents[v] (top, bottom, light, red, highlight) */
+    const unsigned *tones; /* its ACCENTS row, accents[v], or an own scheme's tones=, <id>_tones[k]
+                              (top, bottom, light, red, highlight) */
     unsigned char flags;   /* SCHEME_* */
     unsigned char mode; /* SCHEME_DERIVE: Light Mode picks the half; LIGHT/DARK: that half always.
                            Both halves carry it; light_on() reads the dark row's */

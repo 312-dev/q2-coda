@@ -783,6 +783,13 @@ def resolve(root, by_id, seen=()):
                     t['schemes'].append(dict(b, name=n, label=label, base=ACCENT_NAMES.index(c.attrs['base']),
                                              light=dict(b['light'])))
                     t['accents'] |= 1 << len(t['schemes']) - 1
+            elif 'tones' in c.attrs:
+                err(c, f'{n or "colorScheme"}: tones are an own scheme\'s (name, base, label)')
+            if own and 'tones' in c.attrs:  # its own ACCENTS-shaped row in place of the base's (emit's <id>_tones)
+                tones = c.attrs['tones'].split()
+                if len(tones) != len(ACCENT_TONES[0]) or not all(re.fullmatch('#[0-9a-fA-F]{6}', x) for x in tones):
+                    err(c, f'{n}: tones: expected {len(ACCENT_TONES[0])} of #rrggbb (top, bottom, light, red, highlight)')
+                t['schemes'][scheme_names(t).index(n)]['tones'] = tuple(int(x[1:], 16) for x in tones)
             names = scheme_names(t)
             if n is not None and n not in names:
                 err(c, f'unknown scheme {n}')
@@ -790,7 +797,7 @@ def resolve(root, by_id, seen=()):
                 named.append((c, n))
             targets = t['schemes'] if n is None else [t['schemes'][names.index(n)]]
             for attr, text in c.attrs.items():
-                if attr == 'name' or own and attr in ('base', 'label'):
+                if attr == 'name' or own and attr in ('base', 'label', 'tones'):
                     continue
                 h, k = split_half(attr)
                 path = f'scheme.{k}'
@@ -1115,6 +1122,11 @@ def builtins(root=ROOT/'assets/themes'):
     return [t for _, _, t in found]
 
 
+def own_tones(t):
+    """The distinct tones rows t's own schemes state, in scheme order: <id>_tones[]."""
+    return list(dict.fromkeys(s['tones'] for s in t['schemes'] if 'tones' in s))
+
+
 def stops_c(v):
     """A stops value's stops_t initialiser."""
     return '{0}' if not v else '{%d, {%s}, {%s}}' % (len(v), ', '.join(str(p) for p, _ in v), ', '.join(f'0x{c:06x}' for _, c in v))
@@ -1149,8 +1161,10 @@ def emit(themes, out, redirects={}):
             return '{%s}' % (', '.join(f'0x{c:08x}' for c in v) or '0')
         return list(CHOICES[k.path].values())[v] if k.type == 'enum' else v
     lines = ['/* tools/theme.py wrote this from assets/themes/<id>/theme.xml; edit those. */']
+    def tones(t, v, s):  # an own scheme's own row, else its ACCENTS row (its base's)
+        return f'{c_name(t)}_tones[{own_tones(t).index(s["tones"])}]' if 'tones' in s else f'accents[{s.get("base", v)}]'
     def rows(t, light):
-        return [f'    {{ .tones = accents[{s.get("base", v)}], .flags = {s["card"] | s["raw_red"] << 1}, .fill = 0x{s["fill"]:06x}, '
+        return [f'    {{ .tones = {tones(t, v, s)}, .flags = {s["card"] | s["raw_red"] << 1}, .fill = 0x{s["fill"]:06x}, '
                 f'.chevron = 0x{s["chevron"]:06x}, .muted = 0x{s["muted"]:06x}, .bar_light = 0x{s["bar_light"]:06x}, '
                 f'.sel = {stops_c(s["sel"])}, .sel_top = 0x{s["sel_top"]:06x}, .sel_edge = 0x{s["sel_edge"]:06x}, '
                 f'.sel_tall_edge = 0x{s["sel_tall_edge"]:06x}, .sel_tall_line = 0x{s["sel_tall_line"]:06x}, .sel_tall_top = 0x{s["sel_tall_top"]:06x}, '
@@ -1162,6 +1176,8 @@ def emit(themes, out, redirects={}):
     for t in themes:
         i, one = c_name(t), shared(t)
         # one: the light rows serve both halves (today's lines); else the dark rows, then the light ones
+        if own_tones(t):
+            lines += [f'static const unsigned {i}_tones[][5] = {{', *('    { %s },' % ', '.join(f'0x{x:06x}' for x in r) for r in own_tones(t)), '};']
         lines += [f'static const scheme_t {i}_schemes[] = {{', *rows(t, one), '};',
                   f'_Static_assert(sizeof {i}_schemes / sizeof *{i}_schemes >= ACCENT_N, "one scheme per ACCENTS row, then the theme\'s own");']
         if not one:

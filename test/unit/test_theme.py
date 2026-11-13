@@ -1030,6 +1030,52 @@ def test_track_rejects():
     assert error(resolved, body) == 't.xml:1: playing.scrubber.track: expected #rrggbb'
 
 
+# An OLED-style theme: one own scheme, an exact blue, offered alone; a flat bar inset 8 with 6 px ends; a grey track.
+OLED_BLUE = '#2f5bea #2f5bea #5a7cee #5a7cee #2f5bea'
+OLED = (f'<colorScheme name="oled-blue" base="cobalt" label="Blue" tones="{OLED_BLUE}"/><colorSchemes accents="oled-blue"/>'
+        '<option setting="accent" key="OLED_ACCENT" default="oled-blue"/>'
+        '<view name="list"><element name="selection" painter="bar" radius="6" inset="8"/></view>'
+        '<view name="playing"><element name="scrubber" track="#262626"/></view>')
+
+
+def test_own_scheme_states_its_tones(tmp_path):
+    t = resolved(OLED)
+    theme.validate(t, 't.xml')
+    blue = t['schemes'][9]
+    assert theme.scheme_names(t)[9:] == ['oled-blue'] and t['accents'] == 1 << 9
+    assert blue['tones'] == (0x2f5bea, 0x2f5bea, 0x5a7cee, 0x5a7cee, 0x2f5bea) and blue['base'] == 4
+    assert not any('tones' in s for s in t['schemes'][:9])  # the ACCENTS rows keep theirs
+    assert (t['sel_radius'], t['sel_inset'], t['np_track_rgb']) == (6, 8, 0x262626)
+    inc = boot_inc(tmp_path, [t])
+    assert 'static const unsigned t_tones[][5] = {\n    { 0x2f5bea, 0x2f5bea, 0x5a7cee, 0x5a7cee, 0x2f5bea },\n};\n' \
+           'static const scheme_t t_schemes[] = {' in inc
+    rows = inc.split('static const scheme_t t_schemes[] = {\n')[1].split('\n};')[0].splitlines()
+    assert [r.split(',')[0] for r in rows] == [f'    {{ .tones = accents[{v}]' for v in range(9)] + ['    { .tones = t_tones[0]']
+
+
+def test_own_scheme_without_tones_keeps_its_base_s():
+    t = resolved('<colorScheme name="sky" base="cobalt" label="Sky"/>')
+    assert 'tones' not in t['schemes'][9]
+
+
+def test_builtins_state_no_tones(tmp_path):
+    """Every built-in scheme's tones stay its ACCENTS row: no theme writes a tones table."""
+    inc = boot_inc(tmp_path, theme.builtins())
+    assert '_tones[]' not in inc and not any('tones' in s for t in theme.builtins() for s in t['schemes'])
+
+
+@pytest.mark.parametrize('body, message', [
+    (f'<colorScheme name="cobalt" tones="{OLED_BLUE}"/>', "cobalt: tones are an own scheme's (name, base, label)"),
+    (f'<colorScheme tones="{OLED_BLUE}"/>', "colorScheme: tones are an own scheme's (name, base, label)"),
+    ('<colorScheme name="sky" base="cobalt" label="Sky" tones="#2f5bea #2f5bea #5a7cee #5a7cee"/>',
+     'sky: tones: expected 5 of #rrggbb (top, bottom, light, red, highlight)'),
+    ('<colorScheme name="sky" base="cobalt" label="Sky" tones="#2f5bea #2f5bea #5a7cee #5a7cee blue"/>',
+     'sky: tones: expected 5 of #rrggbb (top, bottom, light, red, highlight)'),
+])
+def test_tones_reject(body, message):
+    assert error(resolved, body) == f't.xml:1: {message}'
+
+
 def test_own_option():
     m, n, c = theme.builtins()
     row_art = own('ROWART', 'Row Art', ('Off', 'On'), ('classic-light-text', 'classic-light'), default=1, preset=1)
