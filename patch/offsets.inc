@@ -310,9 +310,14 @@ static inline int arc_out(int r, int y) {
 #define SUDO_MUTED 0x8c8c8c
 #define HOME_CAPS_PX 18 /* Minimal's Home labels */
 #define MARK_PX 14 /* and the status bar's idle Q2 */
-/* Minimal's selection is a card SEL_INSET px in from each side of the row, corners SEL_RADIUS. */
+/* Minimal's selection is a card SEL_INSET px in from each side of the row, corners SEL_RADIUS.
+ * SEL_INSET is also list.selection.inset's default: the bar painter's (Modern) under Rounded
+ * Corners. */
 #define SEL_INSET 6
 #define SEL_RADIUS 6
+/* list.selection.radius's top and default: half the screen's height, more than half any row, so the
+ * bar's ends are always the pill (pill_radius) */
+#define SEL_MAX_RADIUS 160
 #define TILE_INSET 2 /* album cards stay inside their tile on all four sides */
 #define TILE_CLEARANCE 4 /* artwork and labels sit this far inside the card */
 #define EDIT_OK_PX 18 /* the date, time and sleep timer pages' OK label, on that card */

@@ -82,6 +82,10 @@ def key(path, field, type, hi=None, final=False):
 # theme_t declaration order; the scheme.* keys are scheme_t's.
 SCHEMA = {k.path: k for k in (
     key('list.selection.painter', 'painter[PAINT_SELECTION]', 'enum'),
+    # the bar painter's list row under Corners: Round: its ends' radius, at most half the row (SEL_MAX_RADIUS: always
+    # the pill), and its inset from each side of the row
+    Key('list.selection.radius', 'sel_radius', 'int', 0, O['SEL_MAX_RADIUS'], O['SEL_MAX_RADIUS'], 'live'),
+    Key('list.selection.inset', 'sel_inset', 'int', 0, 64, O['SEL_INSET'], 'live'),
     key('bar.fill.painter', 'painter[PAINT_BAR]', 'enum'),
     key('bar.battery.painter', 'painter[PAINT_BATTERY]', 'enum'),
     key('home.chevron.visible', 'chevron_home', 'bool'),
@@ -935,6 +939,10 @@ def validate(t, name):
     if t['painter[PAINT_SELECTION]'] == stops and not all(s['sel'] or s['light'].get('sel') for i, s in enumerate(t['schemes'])
                                                           if t['accents'] >> i & 1):
         err('selection: painter stops needs every offered scheme\'s sel.stops')
+    if t['painter[PAINT_SELECTION]'] != list(CHOICES['list.selection.painter']).index('bar'):
+        for f in ('sel_radius', 'sel_inset'):
+            if t[f] != FIELDS[f].default:
+                err(f'{FIELDS[f].path}: only the bar painter reads it')
     if t['painter[PAINT_BATTERY]'] == list(CHOICES['bar.battery.painter']).index('classic-light') and not t['batt']:
         err('battery: this painter needs stops')
     for n in sorted({t['geom_set'], *(s for o in t['opts'] for s in o.get('sets') or ())}):

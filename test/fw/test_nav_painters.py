@@ -820,6 +820,66 @@ def test_rounded_corners_make_modern_a_pill_inset_from_the_glass(fw, layout):
     assert band[48][0] > inset and band[95][0] > inset  # its ends round in
 
 
+# A theme's own selection shape and accent (an OLED theme's: a flat exact blue, 8 px in, 6 px ends), written into the
+# live theme as tools/theme.py's table would state them: list.selection.radius and inset, an own scheme's tones.
+OLED_TONES = (C.c_uint * 5)(0x2f5bea, 0x2f5bea, 0x5a7cee, 0x5a7cee, 0x2f5bea)
+
+
+@pytest.fixture(scope='module')
+def theme_layout(library):
+    return host.offsets(library.parent/'navigation.o', 'theme_t')
+
+
+def poke(address, ctype, value):
+    """Write value over the table's read-only copy (this test's own load of the library)."""
+    page = address & ~0xfff
+    assert not libc.mprotect(page, 0x2000, 3)  # PROT_READ | PROT_WRITE
+    ctype.from_address(address).value = value
+
+
+def own_shape(fw, theme_layout, layout, radius, inset):
+    T = fw.fn('theme', C.c_void_p)()
+    poke(T + theme_layout['sel_radius'], C.c_ubyte, radius)
+    poke(T + theme_layout['sel_inset'], C.c_ubyte, inset)
+    poke(fw.fn('scheme', C.c_void_p)() + layout[0]['tones'], C.c_void_p, C.addressof(OLED_TONES))
+
+
+def test_a_theme_s_own_bar_is_its_inset_its_radius_and_its_tones(fw, layout, theme_layout):
+    page = Page(fw, MODERN, ROUNDED=b'1')
+    own_shape(fw, theme_layout, layout, 6, 8)
+    band = page.band() if page.paint() else {}
+    blue = rgba(0x2f5bea)
+    assert list(band) == list(range(48, 96)) and solid(band[72]) == blue  # flat: its highlight is its top tone
+    # 6 px ends: the rows from the 7th to the 7th from the bottom span the row less 8 a side; those nearer round in
+    assert all(band[y][:2] == (8, 375 - 8) and solid(band[y]) == blue for y in range(48 + 6, 96 - 6))
+    assert all(band[y][0] > 8 and band[y][2][0] != blue for y in (48, 95))
+    assert band[48 + 5][:2] == (8, 375 - 8)  # the last row in, by under a pixel: its edge pixels all but opaque
+
+
+def test_a_theme_s_square_ended_bar_keeps_its_inset(fw, layout, theme_layout):
+    page = Page(fw, MODERN, ROUNDED=b'1')
+    own_shape(fw, theme_layout, layout, 0, 8)
+    band = page.band() if page.paint() else {}
+    assert list(band) == list(range(48, 96)) and all(r[:2] == (8, 375 - 8) and solid(r) == rgba(0x2f5bea) for r in band.values())
+
+
+def test_corners_square_keeps_a_theme_s_bar_full_width_and_square(fw, layout, theme_layout):
+    page = Page(fw, MODERN, ROUNDED=b'0')
+    own_shape(fw, theme_layout, layout, 6, 8)
+    band = page.band() if page.paint() else {}
+    assert list(band) == list(range(48, 96)) and all(r[:2] == (0, 375) and solid(r) == rgba(0x2f5bea) for r in band.values())
+
+
+def test_a_radius_past_half_the_row_is_the_pill(fw, layout, theme_layout):
+    """SEL_MAX_RADIUS, the default, and any radius past half the row draw the pill alike."""
+    bands = []
+    for radius in (O['SEL_MAX_RADIUS'], 24, 30):
+        page = Page(fw, MODERN, ROUNDED=b'1')
+        own_shape(fw, theme_layout, layout, radius, O['SEL_INSET'])
+        bands.append(page.band() if page.paint() else {})
+    assert bands[0] == bands[1] == bands[2] and bands[0][48][0] > O['SEL_INSET'] + 10
+
+
 def test_minimal_ivory_lays_a_card_under_the_row(fw, st, layout):
     page = Page(fw, MINIMAL, MINIMAL_ACCENT=b'7', ROUNDED=b'0')
     S = Scheme(fw, layout)

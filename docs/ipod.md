@@ -83,7 +83,7 @@ drawn with the anti-aliased rounded fill (square without a vgcanvas). Any other 
 card with its colour and leaves the rows' own (white) ink, as Classic's band does. Minimal's unselected
 secondary text, stock's `#AAAAAA`, is the quieter `SUDO_MUTED` (`#8C8C8C`) everywhere. **Theme:
 Classic** draws its accent's gloss band instead (`SEL_STOPS`), square and full width under white text, and a grid tile a square card in the accent's colour; **Theme: Modern** the accent's
-flat bar (`SEL_BAR`), full width, or an inset pill under Rounded Corners ([Theme](#theme)). The background
+flat bar (`SEL_BAR`), full width, or an inset pill under Rounded Corners ([Theme](#theme)); a theme can state that bar's inset and end radius ([internals](internals.md#themes)). The background
 hook resolves the selected row; the color hook maps its title to `#171717` and metadata to
 `#484848`, preserving alpha. Paint ancestry determines the colors, so no style overrides can
 remain on recycled rows or stale scrolling labels. Selected backgrounds stay transparent over

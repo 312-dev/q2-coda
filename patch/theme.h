@@ -175,6 +175,10 @@ typedef struct {
     short letter_px;          /* ... and its size, 0: LETTER_PX */
     short home_top, home_full_row, home_text_x, home_label_end[2] /* [0] split, [1] full */,
         set_top, np_bar, np_scrub;
+    /* SEL_BAR on a list row under Rounded Corners: its ends' radius, at most pill_radius's (so
+     * SEL_MAX_RADIUS is always the pill), and its inset from each side of the row; Corners: Square
+     * keeps the bar full width and square */
+    unsigned char sel_radius, sel_inset;
     stops_t np_track[2]; /* Classic's progress bar's track (paint_scrubber), final: [0] dark, [1]
                             light; n 0: stock's plain bar */
     stops_t np_fill;     /* ... its played part under the theme's own scheme (Classic Blue), both
