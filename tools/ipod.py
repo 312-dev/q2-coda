@@ -219,7 +219,7 @@ check([NP_MARGIN, NP_ART, NP_TEXT_X, NP_TEXT_W, *NP_BAR[::2], NP_TIMES_Y, NP_TIM
       [inc('SPOT_' + n) for n in 'ART_X ART_PX TEXT_X TEXT_W BAR_X BAR_W TIMES_Y TIME_X'.split()], 'SPOT_* != NP_*')
 check(inc('NP_ART_TOP') == NP_TOP + NP_ART_Y, 'NP_ART_TOP != NP_TOP + NP_ART_Y')
 NP_GREY = '#AAAAAA'              # stock secondary text (s_scrlabel_gray24l)
-# The track is TRACK_COLOR; the fill is Graphite's light tone until ringnav_playing sets the
+# The track is TRACK_COLOR until np_theme writes a theme's own; the fill is Graphite's light tone until ringnav_playing sets the
 # accent's (3.3:1 or more on the track for every preset).
 NP_TRACK = f'#{inc("TRACK_COLOR"):06x}'
 NP_FILL = '#' + need(re.search(r'#define ACCENTS \{ 0x\w+, 0x\w+, 0x(\w+),', INC), 'Missing ACCENTS')[1]

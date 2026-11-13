@@ -506,7 +506,7 @@ void spot_paint(void *w, void *canvas) {
         int x = (int)((ms >> 4) * SPOT_BAR_W / ((sp.duration >> 4) | 1)); /* 32-bit to 57 h */
         /* Minimal's 4 px line, Modern's 8 px capsule: the view's height at most */
         int h = theme()->np_bar < SPOT_BAR_H ? theme()->np_bar : SPOT_BAR_H;
-        box(canvas, 0, 0, SPOT_BAR_W, h, rgba(TRACK_COLOR, 255), h / 2);
+        box(canvas, 0, 0, SPOT_BAR_W, h, rgba(theme()->np_track_rgb, 255), h / 2);
         if (x) box(canvas, 0, 0, x < h ? h : x, h, ui.scrub ? 0xffffffffu : tone, h / 2);
     } else { /* a triangle playing, two bars otherwise */
         canvas_set_fill_color(canvas, 0xffffffffu);

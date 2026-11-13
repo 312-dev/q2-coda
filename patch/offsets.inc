@@ -135,7 +135,8 @@
 #define STYLE_COLOR_GRADIENT_RET 0x65d560 /* style_get_color's bal style_get_gradient (0x65d558) returns here */
 #define STOCK_RED 0xff1448
 #define RED_TOLERANCE 8 /* per channel, 0-255: how far a color may sit from a red/neutral blend */
-/* iPod black status chrome, in every theme; TRACK_COLOR is Now Playing's progress track. */
+/* iPod black status chrome, in every theme; TRACK_COLOR is Now Playing's progress track (a theme may
+ * state its own, playing.scrubber.track) and the track of the sliders drawn in its look. */
 #define BAR_COLOR 0x000000
 #define TRACK_COLOR 0x1c1c1c
 /* iPod: the confirm pop-up's Cancel row (tools/ipod.py confirm_dialog); its prompt is centred above

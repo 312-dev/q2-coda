@@ -153,6 +153,8 @@ SCHEMA = {k.path: k for k in (
     Key('playing.scrubber.light_fill', 'np_rows[3]', 'rows', 0, 0, (), 'live'),
     key('playing.scrubber.height', 'np_bar', 'int', 375),
     key('playing.scrubber.scrub_height', 'np_scrub', 'int', 375),
+    # the plain bar's track (np_theme), the volume's over it and Spotify's; Classic's bar is its stops
+    Key('playing.scrubber.track', 'np_track_rgb', 'color', 0, 0xffffff, O['TRACK_COLOR'], 'live'),
     Key('playing.scrubber.stops', 'np_track', 'stops', 0, 0, (), 'live', True),  # Classic's track, final (paint_scrubber); (): stock's bar
     Key('playing.scrubber.fill', 'np_fill', 'stops', 0, 0, (), 'live'),  # its played part under the theme's own scheme (ipod_bar); (): the scheme's band
     key('playing.art.square', 'art_square', 'bool'),

@@ -10,7 +10,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, Files, block, in_fork
+from conftest import O, Files, block, in_fork, libc
 
 W_X, W_Y, W_W, W_H, W_PARENT = O['W_X'], O['W_Y'], O['W_W'], O['W_H'], O['W_PARENT']
 CANVAS_LCD, LCD_FILL_COLOR = O['CANVAS_LCD'], O['LCD_FILL_COLOR']
@@ -2038,6 +2038,18 @@ def test_over_now_playing_the_volume_takes_the_times_band(fw, world, st):
     assert canvas.rounded[0] == (bar, rgba(O['TRACK_COLOR']), 2)
     assert canvas.rounded[1][0] == (66, bar[1], 243 * 37 // 100, 4)
     assert [(t, r, f[1]) for t, r, _, f in canvas.texts] == [('Volume 37', (0, 270, 375, 16), O['NP_TIMES_PX'])]
+
+
+def test_over_now_playing_the_volume_s_track_is_the_theme_s(fw, world, st, theme_t, layout):
+    """playing.scrubber.track: the volume over the progress bar draws the bar's own track."""
+    theme(fw, MINIMAL)
+    dialog, *_ = volume(fw, world, st, 37, under='playing_page', np=True)
+    track = fw.fn('theme', C.c_void_p)() + layout['theme']['np_track_rgb']
+    assert not libc.mprotect(track & ~0xfff, 0x2000, 3)  # this test's own load of the table, made writable
+    C.c_uint.from_address(track).value = 0x262626
+    canvas = Canvas(fw)
+    vol_paint(fw, dialog, canvas)
+    assert canvas.rounded[0][1] == rgba(0x262626)
 
 
 @pytest.mark.parametrize('level', [20, 80])

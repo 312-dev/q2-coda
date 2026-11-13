@@ -338,7 +338,7 @@ The pull-down (`dialog/statusbar_dialog.bin`) covers the whole screen when open.
 controls keep their four columns in two rows from y 20. Every label is the stock 16-pixel white
 style (`s_label_white16c`), 80 pixels wide and 40 high (two lines), top-aligned so one- and
 two-line labels start on the same line, 6 pixels under its icon and 12 above the next row. The
-brightness slider becomes a 6-pixel track in Now Playing's colours (`TRACK_COLOR`, filled with the accent's light tone as the progress bar, `quick_fill`) in a 48-pixel-high slider that
+brightness slider becomes a 6-pixel track in Now Playing's default colours (`TRACK_COLOR`, whatever the theme's progress track, filled with the accent's light tone as the progress bar, `quick_fill`) in a 48-pixel-high slider that
 still takes a tap or drag anywhere on it (`slide_with_bar`), from x 68 to 307. The stock dim and
 bright suns stay at its ends, in line with the first and last icon columns. Sizes are `QS_*` in
 `tools/ipod.py`. `dialog_statusbar_dialog_init` (`0x4a2338`) finds every widget by name and
@@ -593,7 +593,7 @@ vertical position. Both keep their stock images and handlers and swipe away with
 Internet Radio uses the same heart alignment in every theme.
 
 The bar is a four-pixel plain-colour line inside a 44-pixel seek target: a `#1C1C1C` track
-(`TRACK_COLOR`) and an off-white `MINIMAL_FILL` fill, with no thumb. **Theme: Modern** makes it an
+(`TRACK_COLOR`, or a theme's `playing.scrubber.track`) and an off-white `MINIMAL_FILL` fill, with no thumb. **Theme: Modern** makes it an
 8-pixel capsule (`NP_BAR_CLASSIC`; `bar_size` and `round_radius` set on the slider at runtime,
 `np_theme`) filled in the accent's light tone (Graphite `#6E6E6E`, 3.3:1; see [Display
 settings](#display-settings)), and shows stock's play/pause glyph on the art again. **Theme: Classic** makes it an iPod classic's

@@ -9,7 +9,7 @@ import pytest
 
 import host
 import art as tools_art  # tools/, on the path host.py set: the art's own sizes
-from conftest import NAVIGATION_SOURCE, O, Deques, Externpic, ask_cover, in_fork, ui_name
+from conftest import NAVIGATION_SOURCE, O, Deques, Externpic, ask_cover, in_fork, libc, ui_name
 
 THEMES = host.tools_theme.builtins()
 SETS = host.tools_theme.geometry_sets(THEMES)
@@ -1249,6 +1249,37 @@ def test_the_bar_takes_its_themes_height_and_ends_and_the_glyph_and_album_their_
     assert ui.ints[now.slider, b'bar_size'] == t['np_bar']
     assert {ui.ints[now.slider, k] for k in (b'style:normal:round_radius', b'style:focused:round_radius')} == {t['np_bar'] // 2}
     assert (opacity[now.state], opacity[now.album]) == (t['np_state_op'], t['np_album_op'])
+
+
+TRACK_KEYS = [f'style:{s}:bg_color'.encode() for s in ('normal', 'pressed', 'over', 'disable', 'focused')]
+
+
+def rgba_int(c):
+    """theme.h's RGBA(c) as widget_set_prop_int's int."""
+    return C.c_int(0xff000000 | (c & 255) << 16 | (c & 0xff00) | c >> 16).value
+
+
+@pytest.mark.parametrize('t', THEMES, ids=[t['name'] for t in THEMES])
+def test_a_theme_on_the_asset_s_track_writes_none(fw, ui, mcl, st, t):
+    theme(fw, st, t)
+    now = Now(fw, ui, mcl, st)
+    assert t['np_track_rgb'] == O['TRACK_COLOR'] and not [k for k in TRACK_KEYS if (now.slider, k) in ui.ints]
+
+
+def test_a_theme_s_own_track_is_written_and_the_asset_s_written_back_once(fw, ui, mcl, st, library):
+    """playing.scrubber.track, as an OLED theme's table states it; then a switch to a theme on TRACK_COLOR."""
+    theme(fw, st, MODERN)
+    track = fw.fn('theme', C.c_void_p)() + host.offsets(library.parent/'navigation.o', 'theme_t')['np_track_rgb']
+    assert not libc.mprotect(track & ~0xfff, 0x2000, 3)  # this test's own load of the table, made writable
+    C.c_uint.from_address(track).value = 0x262626
+    now = Now(fw, ui, mcl, st)
+    assert [ui.ints.get((now.slider, k)) for k in TRACK_KEYS] == [rgba_int(0x262626)] * 5
+    C.c_uint.from_address(track).value = O['TRACK_COLOR']
+    np_theme = fw.fn('np_theme', None)
+    np_theme()
+    assert [ui.ints.pop((now.slider, k)) for k in TRACK_KEYS] == [rgba_int(O['TRACK_COLOR'])] * 5
+    np_theme()
+    assert not [k for k in TRACK_KEYS if (now.slider, k) in ui.ints]
 
 
 def test_no_window_binds_nothing(fw, ui, mcl, st):
