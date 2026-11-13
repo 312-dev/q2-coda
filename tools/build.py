@@ -931,17 +931,30 @@ def play_mark(font):
     for table in font['cmap'].tables:
         if table.isUnicode(): table.cmap[PLAY_MARK] = name
 
-def subset_font(src, family, ranges_macro, notice=None):
+TABULAR = '0123456789:'
+
+def subset_font(src, family, ranges_macro, notice=None, tabular=''):
     """src given a play mark (play_mark), then cut to its Latin, Greek, Cyrillic, punctuation and that
     mark, renamed family (its own name is the font's reserved name under OFL and GUST alike): the font's
     bytes and ranges_macro listing exactly what it keeps. notice, if any, goes in its description (name
-    ID 10)."""
+    ID 10). tabular, if any, is the suffix of the font's tabular figures' glyph names (Inter's .tf):
+    TABULAR's characters map to those glyphs, as font_quotes remaps stock's quotes, so a clock or a
+    song's time keeps its width as it counts."""
     from fontTools import subset
     from fontTools.ttLib import TTFont
     font = TTFont(src, recalcTimestamp=False)
-    old = font['name'].getDebugName(1)
+    # the family: a weight's own file names it in ID 16 (Inter Medium's ID 1 is "Inter Medium")
+    old = font['name'].getDebugName(16) or font['name'].getDebugName(1)
     label = ranges_macro.split('_')[0].title()
-    have = sorted(u for u in font.getBestCmap() if 0x20 <= u < 0x530 or 0x2000 <= u < 0x2200)
+    cmap = font.getBestCmap()
+    have = sorted(u for u in cmap if 0x20 <= u < 0x530 or 0x2000 <= u < 0x2200)
+    if tabular:
+        glyphs = set(font.getGlyphOrder())
+        figures = {ord(c): cmap[ord(c)] + tabular for c in TABULAR}
+        for name in figures.values():
+            check(name in glyphs, f'{label} font without {name}')
+        for table in font['cmap'].tables:
+            if table.isUnicode(): table.cmap.update(figures)
     play_mark(font)
     have.append(PLAY_MARK)
     options = subset.Options()
@@ -954,7 +967,10 @@ def subset_font(src, family, ranges_macro, notice=None):
     # are the licence files FONT_NOTICES ships beside it)
     for rec in font['name'].names:
         if rec.nameID in (1, 3, 4, 6, 16, 17, 18, 21, 22):
-            rec.string = str(rec).replace(old, family).replace(old.replace(' ', ''), family.replace(' ', ''))
+            if rec.nameID == 6:  # the PostScript name has no spaces
+                rec.string = str(rec).replace(old.replace(' ', ''), family.replace(' ', ''))
+            else:
+                rec.string = str(rec).replace(old, family).replace(old.replace(' ', ''), family.replace(' ', ''))
             check(old.split()[0] not in str(rec), f'{label} font name {rec.nameID} keeps {old.split()[0]}')
     if notice:
         font['name'].setName(notice, 10, 3, 1, 0x409)
@@ -991,6 +1007,7 @@ class Face:
     # ascent - descent; stock's default.ttf has a cap height of 183 of 299), so a stand-in's capitals
     # match (test_ipod test_fallback_scale_matches_the_faces)
     fallback_pct: int = 100
+    tabular: str = ''  # its tabular figures' glyph name suffix, if 0-9 and the colon take them (subset_font)
 
     @property
     def c(self): return 'FONT_' + self.name.upper().replace('-', '_')
@@ -1013,13 +1030,17 @@ FACES = {
     # itself, and where the original is: assets/fonts/README-classic-light.txt
     'classic-light': Face('classic-light', 'texgyreheros-bold.otf', 'Q2 Pod Classic Light',
                           ('GUST-FONT-LICENSE.txt', 'README-classic-light.txt'), CLASSIC_LIGHT_NOTICE, 'bold', 83),
+    # Inter 4.1 (OFL), Regular and Medium, with tabular figures: no theme takes them yet
+    'inter': Face('inter', 'Inter-Regular.ttf', 'Q2 Pod OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98, tabular='.tf'),
+    'inter-medium': Face('inter-medium', 'Inter-Medium.ttf', 'Q2 Pod OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98,
+                         tabular='.tf'),
 }
 # OFL 2 asks each copy to hold its licence, and the subsets' name tables don't: these ship beside the fonts
 FONT_NOTICES = tuple(dict.fromkeys(n for f in FACES.values() for n in f.notices))
 
 def face_font(face):
     """The face's file and its ranges macro (subset_font)."""
-    return subset_font(ROOT/'assets/fonts'/face.source, face.family, face.ranges_macro, face.notice or None)
+    return subset_font(ROOT/'assets/fonts'/face.source, face.family, face.ranges_macro, face.notice or None, face.tabular)
 
 def font_indices():
     """FONT_<NAME>, each face's index in FACES' order, and FONT_N: theme_t.font[]'s values."""

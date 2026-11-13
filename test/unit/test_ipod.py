@@ -807,6 +807,12 @@ def test_fallback_scale_matches_the_faces():  # theme_font's bold.ttf, at the Cl
         f = TTFont(path, lazy=True)
         return f['OS/2'].sCapHeight / (f['hhea'].ascent - f['hhea'].descent)
     assert ipod.FACES['classic-light'].fallback_pct == round(100*cap(ipod.ROOT/'assets/fonts/texgyreheros-bold.otf')/cap(ipod.ROOT/'assets/fonts/LiberationSans-Bold.ttf')) == 83
+    # every face's, to the nearest point (bold, 100.6 of stock's, stays at its own size); stock's default.ttf: cap 183 of 299
+    for face in ipod.FACES.values():
+        if face.fallback:
+            fallback = ipod.FACES[face.fallback]
+            ratio = 100*cap(ipod.ROOT/'assets/fonts'/face.source)/(cap(ipod.ROOT/'assets/fonts'/fallback.source) if fallback.source else 183/299)
+            assert abs(face.fallback_pct - ratio) < 1, face.name
 
 
 def test_status_metrics_centre_the_caps_in_the_classic_light_bar():

@@ -491,6 +491,49 @@ def test_classic_light_font():
     assert 'CFF ' in font and 'glyf' not in font  # the chosen outline form
 
 
+@pytest.mark.parametrize('face', ['inter', 'inter-medium'])
+def test_inter_faces(face):
+    """Inter's weights, cut as the others and renamed in every record (a weight's family is its ID 16),
+    their figures and colon tabular: 0-9 one advance, so "1:11" and "8:88" are as wide."""
+    from fontTools.ttLib import TTFont
+    f = build.FACES[face]
+    font_bytes, ranges = build.face_font(f)
+    font, source = TTFont(io.BytesIO(font_bytes)), TTFont(build.ROOT/'assets/fonts'/f.source)
+    have = sorted(u for u in source.getBestCmap() if 0x20 <= u < 0x530 or 0x2000 <= u < 0x2200) + [build.PLAY_MARK]
+    assert sorted(font.getBestCmap()) == have and 0x416 in have and 0x3a9 in have  # Cyrillic, Greek
+    names = {rec.nameID: str(rec) for rec in font['name'].names}
+    assert all('Inter' not in names[i] for i in (1, 3, 4, 6)) and names[6] in ('Q2PodOLED-Regular', 'Q2PodOLED-Medium')
+    assert names[1] == ('Q2 Pod OLED' if face == 'inter' else 'Q2 Pod OLED Medium')
+    assert names[0] == str(source['name'].getName(0, 3, 1, 0x409))
+    assert re.fullmatch(rf'#define {f.ranges_macro} \{{0x20,0x7e,[0-9a-fx,]+\}}', ranges)
+    cmap, hmtx = font.getBestCmap(), font['hmtx']
+    digits = {hmtx[cmap[ord(c)]][0] for c in '0123456789'}
+    assert len(digits) == 1 and digits != {source['hmtx'][source.getBestCmap()[ord('1')]][0]}  # not the proportional 1
+    assert hmtx[cmap[ord(':')]][0] == source['hmtx']['colon.tf'][0]
+    width = lambda s: sum(hmtx[cmap[ord(c)]][0] for c in s)
+    assert width('1:11') == width('8:88') == width('3:47')
+
+
+def test_tabular_figures_must_be_in_the_font():
+    f = build.FACES['inter']
+    with pytest.raises(ValueError, match='^Inter font without zero.tnum$'):
+        build.subset_font(build.ROOT/'assets/fonts'/f.source, f.family, f.ranges_macro, tabular='.tnum')
+
+
+def test_the_faces_header_lists_each_face_by_its_index():
+    from theme import FONTS
+    header = dict(line.split(' ', 2)[1:] for line in build.faces_header(RANGES))
+    assert [header[f.c] for f in build.FACES.values()] == ['0', '1', '2', '3', '4'] and header['FONT_N'] == '5'
+    assert list(FONTS) == list(build.FACES) and list(FONTS.values()) == [f.c for f in build.FACES.values()]
+    assert header['FONT_NAMES'] == '{"default","bold","classic-light","inter","inter-medium"}'
+    assert header['FONT_FALLBACK'] == '{0,FONT_DEFAULT,FONT_BOLD,FONT_DEFAULT,FONT_DEFAULT}'
+    assert header['FONT_FALLBACK_PCT'] == '{100,100,83,98,98}'
+    assert header['FONT_RANGES'] == '{0x20,0x7e,0x20,0x7e,0x2013,0x2014,0x20,0x7e,0x25b6,0x25b6,0x30,0x3a}'
+    assert header['FONT_RANGE_AT'] == '{0,0,2,6,10,12}'  # stock's none: every character
+    with pytest.raises(ValueError, match='^One ranges macro per subset face$'):
+        build.faces_header(RANGES[:2])
+
+
 @pytest.mark.parametrize('face', ['bold', 'classic-light'])
 def test_both_faces_are_given_a_play_mark_on_the_middle_of_their_capitals(face):
     """View Queue's mark (navigation.c stock_row_style): neither source has U+25B6, and a title holding
@@ -527,10 +570,11 @@ def test_both_faces_are_given_a_play_mark_on_the_middle_of_their_capitals(face):
     assert font['maxp'].numGlyphs == len(font.getGlyphOrder()) and font.getGlyphOrder()[-1] == name
 
 
-@pytest.mark.parametrize('face', ['bold', 'classic-light'])
+@pytest.mark.parametrize('face', [k for k, f in build.FACES.items() if f.source])
 def test_the_faces_keep_every_other_glyph_as_drawn(face):
     """assets/fonts/README-classic-light.txt: no outline or metric of the original's is changed; the
-    mark is the one glyph added, at the end."""
+    mark is the one glyph added, at the end. A face with tabular figures draws TABULAR's characters
+    with its own tabular glyphs."""
     from fontTools.pens.recordingPen import DecomposingRecordingPen
     from fontTools.ttLib import TTFont
     font, source = TTFont(io.BytesIO(build.face_font(build.FACES[face])[0])), TTFont(build.ROOT/'assets/fonts'/build.FACES[face].source)
@@ -539,8 +583,9 @@ def test_the_faces_keep_every_other_glyph_as_drawn(face):
         pen = DecomposingRecordingPen(glyphs)
         glyphs[name].draw(pen)
         return pen.value, font['hmtx'][name]
-    cmap, was = font.getBestCmap(), source.getBestCmap()
-    assert all(drawn(font, cmap[u]) == drawn(source, was[u]) for u in cmap if u != build.PLAY_MARK)
+    cmap, was, tabular = font.getBestCmap(), source.getBestCmap(), build.FACES[face].tabular
+    def original(u): return was[u] + (tabular if chr(u) in build.TABULAR else '')
+    assert all(drawn(font, cmap[u]) == drawn(source, original(u)) for u in cmap if u != build.PLAY_MARK)
     assert font.getGlyphOrder()[-1] == cmap[build.PLAY_MARK]
 
 
@@ -1040,7 +1085,8 @@ def test_patch_m4b_cover_names_itself_in_a_mapping_error(monkeypatch):
         build.patch_m4b_cover(bytes(raw))
 
 
-RANGES = ['#define BOLD_RANGES {0x20,0x7e}', '#define CLASSIC_LIGHT_RANGES {0x20,0x7e,0x2013,0x2014}']
+RANGES = ['#define BOLD_RANGES {0x20,0x7e}', '#define CLASSIC_LIGHT_RANGES {0x20,0x7e,0x2013,0x2014}',
+          '#define INTER_RANGES {0x20,0x7e,0x25b6,0x25b6}', '#define INTER_MEDIUM_RANGES {0x30,0x3a}']
 
 
 def stock_h(dev=0, repo=build.REPO):
@@ -1058,7 +1104,7 @@ def test_stock_header_versions(dev, beta, repo, version, tag, flag, monkeypatch)
     lines = header.splitlines()
     assert header.endswith('\n') and all(line.startswith('#define ') for line in lines)
     macros = dict(line.split(' ', 2)[1:] for line in lines)
-    assert len(macros) == len(lines) and [f'#define {name} {macros[name]}' for name in ('BOLD_RANGES', 'CLASSIC_LIGHT_RANGES')] == RANGES
+    assert len(macros) == len(lines) and [f'#define {name} {macros[name]}' for name in ('BOLD_RANGES', 'CLASSIC_LIGHT_RANGES', 'INTER_RANGES', 'INTER_MEDIUM_RANGES')] == RANGES
     assert macros['Q2POD_VERSION'] == f'"{version}"' and macros['Q2POD_DEV'] == flag
     assert macros['Q2POD_TAG'] == f'"{tag}"'  # a dev build has none, and takes any release
     assert macros['Q2POD_REPO'] == f'"{repo}"'
@@ -1086,6 +1132,10 @@ const char h_lit[] = QS_LIT;
 const unsigned char *const h_context[] = {{{', '.join(build.CONTEXT_DATA)}}};
 const unsigned char *const h_round[] = ROUND_COVER;
 const unsigned short h_bold[] = BOLD_RANGES;
+const char *const h_faces[FONT_N] = FONT_NAMES;
+const unsigned char h_fallback[FONT_N] = FONT_FALLBACK, h_pct[FONT_N] = FONT_FALLBACK_PCT;
+const unsigned short h_ranges[] = FONT_RANGES, h_at[FONT_N + 1] = FONT_RANGE_AT;
+const int h_inter[] = {{FONT_INTER, FONT_INTER_MEDIUM}};
 const unsigned long h_sizes[] = {{sizeof h_zones / sizeof *h_zones, sizeof h_cities / sizeof *h_cities,
     sizeof h_order / sizeof *h_order, sizeof h_icons, sizeof h_lit, sizeof h_round / sizeof *h_round, sizeof h_bold / sizeof *h_bold}};
 ''')
@@ -1119,6 +1169,12 @@ const unsigned long h_sizes[] = {{sizeof h_zones / sizeof *h_zones, sizeof h_cit
     for r, p in enumerate(array(ctypes.c_void_p, 'h_round', rounds)):
         assert (ctypes.string_at(p, r * r) if p else None) == (bytes(art.corner_cover(r)) if r in art.CORNERS else None)
     assert array(ctypes.c_ushort, 'h_bold', bold) == [0x20, 0x7e]
+    # the faces' table (navigation.c face_has, theme_font), by FONT_*
+    n = len(build.FACES)
+    assert [s.decode() for s in array(ctypes.c_char_p, 'h_faces', n)] == [f.name for f in build.FACES.values()]
+    assert array(ctypes.c_ubyte, 'h_fallback', n) == [0, 0, 1, 0, 0] and array(ctypes.c_ubyte, 'h_pct', n) == [100, 100, 83, 98, 98]
+    assert array(ctypes.c_ushort, 'h_at', n + 1) == [0, 0, 2, 6, 10, 12] and array(ctypes.c_int, 'h_inter', 2) == [3, 4]
+    assert array(ctypes.c_ushort, 'h_ranges', 12)[6:] == [0x20, 0x7e, 0x25b6, 0x25b6, 0x30, 0x3a]
 
 
 def test_build_refuses_a_zip_that_is_not_the_audited_one(tmp_path):
