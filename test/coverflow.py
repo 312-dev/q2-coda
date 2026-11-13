@@ -10,7 +10,7 @@ import sqlite3
 import subprocess
 import tempfile
 import sys; sys.path.insert(0, sys.path[0] + '/../tools')  # tools/ first
-from build import FUNCTIONS, ROOT
+from build import FUNCTIONS, ROOT, font_indices
 from peq import LIBC
 
 PROTOTYPES = {**FUNCTIONS, **LIBC}  # the stock calls the host shims stand in for
@@ -25,6 +25,7 @@ SHELF_180 = {'cf.eye': 94, 'cf.tilt': 89, 'cf.x1': 116, 'cf.xs': 34, 'cf.z1': 77
 CF_SOURCES = '#include "coverflow.c"\n#include "coverflow_thumb.c"\n#include "coverflow_letters.c"\n#include "coverflow_loader.c"\n#include "playlist_art.c"\n'
 SHIM_H = r"""
 extern char system_bar[];
+""" + ''.join(line + '\n' for line in font_indices()) + r"""
 #include <dirent.h>
 #include <errno.h>
 #include <pthread.h>

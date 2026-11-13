@@ -427,7 +427,7 @@ def test_english_ui_refuses_a_file_it_cannot_rewrite():
 
 def test_bold_font():
     from fontTools.ttLib import TTFont
-    font_bytes, ranges = build.bold_font()
+    font_bytes, ranges = build.face_font(build.FACES['bold'])
     font = TTFont(io.BytesIO(font_bytes))
     source = TTFont(build.ROOT/'assets/fonts/LiberationSans-Bold.ttf')
     have = sorted(u for u in source.getBestCmap() if 0x20 <= u < 0x530 or 0x2000 <= u < 0x2200) + [build.PLAY_MARK]
@@ -458,7 +458,7 @@ def test_bold_font_refuses_the_reserved_name(tmp_path, monkeypatch):
     font.save(tmp_path/'assets/fonts/LiberationSans-Bold.ttf')
     monkeypatch.setattr(build, 'ROOT', tmp_path)
     with pytest.raises(ValueError, match='^Bold font name 4 keeps Liberation$'):
-        build.bold_font()
+        build.face_font(build.FACES['bold'])
 
 
 def test_bold_font_must_keep_its_characters(monkeypatch):
@@ -466,12 +466,12 @@ def test_bold_font_must_keep_its_characters(monkeypatch):
     keep = subset.Subsetter.populate
     monkeypatch.setattr(subset.Subsetter, 'populate', lambda self, unicodes: keep(self, unicodes=unicodes[:-1]))
     with pytest.raises(ValueError, match='^Bold font subset lost characters$'):
-        build.bold_font()
+        build.face_font(build.FACES['bold'])
 
 
 def test_classic_light_font():
     from fontTools.ttLib import TTFont
-    font_bytes, ranges = build.classic_light_font()
+    font_bytes, ranges = build.face_font(build.FACES['classic-light'])
     font, source = TTFont(io.BytesIO(font_bytes)), TTFont(build.ROOT/'assets/fonts/texgyreheros-bold.otf')
     have = sorted(u for u in source.getBestCmap() if 0x20 <= u < 0x530 or 0x2000 <= u < 0x2200) + [build.PLAY_MARK]
     assert sorted(font.getBestCmap()) == have and 0x41 in have and 0xe9 in have
@@ -491,13 +491,13 @@ def test_classic_light_font():
     assert 'CFF ' in font and 'glyf' not in font  # the chosen outline form
 
 
-@pytest.mark.parametrize('face', ['bold_font', 'classic_light_font'])
+@pytest.mark.parametrize('face', ['bold', 'classic-light'])
 def test_both_faces_are_given_a_play_mark_on_the_middle_of_their_capitals(face):
     """View Queue's mark (navigation.c stock_row_style): neither source has U+25B6, and a title holding
     a character its face lacks leaves that face."""
     from fontTools.pens.recordingPen import RecordingPen
     from fontTools.ttLib import TTFont
-    font_bytes, ranges = getattr(build, face)()
+    font_bytes, ranges = build.face_font(build.FACES[face])
     font = TTFont(io.BytesIO(font_bytes))
     assert ranges.endswith(',0x25b6,0x25b6}')
     name, cap = font.getBestCmap()[build.PLAY_MARK], font['OS/2'].sCapHeight
@@ -509,12 +509,11 @@ def test_both_faces_are_given_a_play_mark_on_the_middle_of_their_capitals(face):
     assert xs[0] == xs[1] and ys[1] == (ys[0] + ys[2]) // 2  # an upright edge on the left, its point level with the middle
     assert abs(ys[0] + ys[2] - cap) <= 1  # on the capitals' middle
     assert abs((ys[2] - ys[0]) / cap - .78) < .005 and abs((xs[2] - xs[0]) / cap - .70) < .005
-    # at a Classic row's title px, bold standing in at FACE_FALLBACK_PCT of it (navigation.c fallback_px),
-    # the upright edge lies on a pixel's, so it is drawn sharp
+    # at a Classic row's title px, bold standing in at classic-light's fallback_pct of it (navigation.c
+    # fallback_px), the upright edge lies on a pixel's, so it is drawn sharp
     px = next(t for t in theme.builtins() if t['id'] == 'classic-light')['font_px[ROLE_TITLE]']
-    pct = re.search(r'#define FACE_FALLBACK_PCT (\d+)', (build.ROOT/'patch/navigation.c').read_text())
-    assert pct
-    pixel = (font['hhea'].ascent - font['hhea'].descent) / (px if face == 'classic_light_font' else (px * int(pct[1]) + 50) // 100)
+    pct = build.FACES['classic-light'].fallback_pct
+    pixel = (font['hhea'].ascent - font['hhea'].descent) / (px if face == 'classic-light' else (px * pct + 50) // 100)
     assert abs(xs[0] / pixel - 1) < .02
     advance, bearing = font['hmtx'][name]
     assert bearing == xs[0] and advance == xs[2] + bearing  # as much room after it as before
@@ -528,13 +527,13 @@ def test_both_faces_are_given_a_play_mark_on_the_middle_of_their_capitals(face):
     assert font['maxp'].numGlyphs == len(font.getGlyphOrder()) and font.getGlyphOrder()[-1] == name
 
 
-@pytest.mark.parametrize('face, src', [('bold_font', 'LiberationSans-Bold.ttf'), ('classic_light_font', 'texgyreheros-bold.otf')])
-def test_the_faces_keep_every_other_glyph_as_drawn(face, src):
+@pytest.mark.parametrize('face', ['bold', 'classic-light'])
+def test_the_faces_keep_every_other_glyph_as_drawn(face):
     """assets/fonts/README-classic-light.txt: no outline or metric of the original's is changed; the
     mark is the one glyph added, at the end."""
     from fontTools.pens.recordingPen import DecomposingRecordingPen
     from fontTools.ttLib import TTFont
-    font, source = TTFont(io.BytesIO(getattr(build, face)()[0])), TTFont(build.ROOT/'assets/fonts'/src)
+    font, source = TTFont(io.BytesIO(build.face_font(build.FACES[face])[0])), TTFont(build.ROOT/'assets/fonts'/build.FACES[face].source)
     def drawn(font, name):  # components decomposed: the subset drops post's names, so a component's is uniXXXX
         glyphs = font.getGlyphSet()
         pen = DecomposingRecordingPen(glyphs)

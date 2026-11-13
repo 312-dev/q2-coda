@@ -12,7 +12,7 @@ import pathlib
 import re
 import struct
 import types
-from build import CLASSIC_LIGHT_TTF, ROOT, check, fileoff, need, sha, jal
+from build import FACES, ROOT, check, fileoff, need, sha, jal
 
 AUDIT = json.loads((pathlib.Path(__file__).resolve().parents[1]/'patch/ipod.json').read_text())
 UI_ASSETS = AUDIT['assets'] | AUDIT['navbar_only'] | AUDIT['slide_only']
@@ -456,8 +456,8 @@ BATT_H_W = inc('BATT_BODY_W') + inc('BATT_NUB_W') + inc('BATT_GAP') + BATT_PCT_W
 STATUS_RIGHT_CLASSIC_LIGHT = [*STATUS_RIGHT[:2], 'img_state', *STATUS_RIGHT[2:]]
 CLOCK_GAP = 4
 CLASSIC_LIGHT_CLOCK_GAP = 2  # Classic's right group's room, from the widest clock
-CLASSIC_LIGHT_FONT_SRC = ROOT/'assets/fonts/texgyreheros-bold.otf'  # the Classic face's source, subset to CLASSIC_LIGHT_TTF
-CLASSIC_LIGHT_FONT_NAME = pathlib.Path(CLASSIC_LIGHT_TTF).stem
+CLASSIC_LIGHT_FONT_SRC = ROOT/'assets/fonts'/FACES['classic-light'].source  # the Classic face's source, which build.py subsets
+CLASSIC_LIGHT_FONT_NAME = FACES['classic-light'].name
 
 
 def status_metrics(g, font):

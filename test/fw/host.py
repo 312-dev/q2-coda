@@ -63,7 +63,7 @@ def platform_header():
 
 def stock_header(themes):
     lines = [f'extern unsigned char fw_ctx_{name}[{size}];' for name, size in CONTEXT.items()]
-    ranges = [tools_build.bold_font()[1], tools_build.classic_light_font()[1]]
+    ranges = [tools_build.face_font(f)[1] for f in tools_build.FACES.values() if f.source]
     context = {name: f'fw_ctx_{name}' for name in tools_build.CONTEXT_DATA}
     return '\n'.join(lines) + '\n' + tools_build.stock_header(context, ranges, themes, repo='owner/repo')
 
