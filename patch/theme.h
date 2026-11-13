@@ -219,7 +219,8 @@ static inline int classic_pages(void) {
 }
 int theme_geom(const theme_t *T); /* navigation.c: the set T boots with its stored values */
 const scheme_t *scheme(void);     /* theme()'s scheme accent(), in the half Light Mode picks */
-extern const unsigned char theme_rows[]; /* the Theme picker's order, by stored THEME */
+/* the Theme picker's rows, each a stored THEME, by each theme.xml's order (themes.inc) */
+extern const unsigned char theme_rows[];
 const theme_t *bar_theme(void);          /* Status Bar's choice: the theme whose bar is painted */
 const scheme_t *bar_scheme(void);        /* scheme() for bar_theme() */
 int bar_geom_val(int v); /* geom_val for what bar_theme() paints: V_BATT_W, V_BATT_H */

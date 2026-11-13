@@ -119,7 +119,8 @@ def opt(setting, default=-1, preset=-1, keep=-1, values=0):
 def own(key, label, names, sets, default=-1, preset=-1, keep=-1):  # a theme's own option, as resolve() keeps it
     return {**opt('SETTING_OWN', default, preset, keep), 'key': key, 'label': label, 'names': list(names), 'sets': sets and list(sets)}
 HOMELIB, ROWPREVIEW = (own(k, label, ('Off', 'On'), None, default=1, preset=1) for k, label in (('HOMELIB', 'Library on Home'), ('ROWPREVIEW', 'Row Preview')))
-STATUSBAR = own('STATUSBAR', 'Status Bar', ('Theme', 'Minimal', 'Modern', 'Classic'), None, default=0, preset=0)
+PICKER = sorted(theme.builtins(), key=lambda t: t['order'])  # the Theme picker's rows
+STATUSBAR = own('STATUSBAR', 'Status Bar', ('Theme', *(t['name'] for t in PICKER)), None, default=0, preset=0)
 
 
 CLASSIC_THUMB = dict(thumb=1, ticks_turn=36, ticks_album=7, fast_at=23, fast_full=90, top_speed=20, track=30, snap=25, spin=130, far_left=250,
@@ -146,7 +147,7 @@ MOTION_TODAY = {**{f'motion.{k}.{a}': 0 for k in ('page', 'playing', 'coverflow'
 MINIMAL = {
     **MOTION_TODAY,
     'page_row': 48, 'page_detail': 64, 'page_title_h': 48, 'page_x': 36, 'page_cap_y': 4, 'page_cap_h': 32, 'page_det_y': 36, 'page_det_h': 24,
-    'id': 'minimal', 'index': 0, 'name': 'Minimal', 'accents': 0x1ff, 'accent_key': 'MINIMAL_ACCENT',
+    'id': 'minimal', 'index': 0, 'order': 0, 'name': 'Minimal', 'accents': 0x1ff, 'accent_key': 'MINIMAL_ACCENT',
     'painter[PAINT_SELECTION]': 0, 'painter[PAINT_BAR]': 0, 'painter[PAINT_BATTERY]': 0, 'chevron_home': 0, 'chevron_sel': 0, 'caps_mark': 1, 'caps_home': 1, 'caps_np': 1,
     'icons_mono': 1, 'icons_badge_muted': 1, 'icons_addon_mono': 1, 'icons_badge_ink': 0, 'art_final': 0, 'font[ROLE_NP]': 0, 'font[ROLE_INFO]': 0, 'font_px[ROLE_INFO]': 0, 'np_info_value': 0, 'np_album_op': 0, 'np_state_op': 0,
     'home_top': 8, 'home_full_row': 375, 'home_text_x': 39, 'home_label_end[0]': 8, 'home_label_end[1]': 33,
@@ -158,7 +159,7 @@ MINIMAL = {
              opt('SETTING_BATTERY'), opt('SETTING_TIMETITLE', preset=1), opt('SETTING_NPCENTRED')], 'undeclared': [], **CF_TODAY}
 # Modern: the hand-written table's Classic, before Classic took Classic Light's look.
 MODERN = {
-    **MINIMAL, 'id': 'modern', 'index': 2, 'name': 'Modern', 'accents': 0x17f, 'accent_key': 'ACCENT',
+    **MINIMAL, 'id': 'modern', 'index': 2, 'order': 1, 'name': 'Modern', 'accents': 0x17f, 'accent_key': 'ACCENT',
     'painter[PAINT_SELECTION]': 2, 'chevron_home': 1, 'caps_mark': 0, 'caps_home': 0, 'caps_np': 0,
     'icons_mono': 0, 'icons_badge_muted': 0, 'icons_addon_mono': 0, 'font[ROLE_NP]': 1, 'np_album_op': 255, 'np_state_op': 255,
     'home_top': 0, 'home_full_row': 369, 'home_text_x': 33, 'home_label_end[0]': 33, 'home_label_end[1]': 33,
@@ -204,7 +205,10 @@ def test_frozen_table():
 
 
 def test_extends():
-    assert bare(resolved('', 'id="t" name="T" index="2" extends="modern"')) == {**MODERN, 'id': 't', 'name': 'T', 'index': 2}
+    # its own row in the picker, so Status Bar lists it too, last at order 9
+    statusbar = {**STATUSBAR, 'names': [*STATUSBAR['names'], 'T']}
+    assert bare(resolved('', 'id="t" name="T" index="2" order="9" extends="modern"')) == {
+        **MODERN, 'id': 't', 'name': 'T', 'index': 2, 'order': 9, 'opts': [statusbar, *MODERN['opts'][1:]]}
     assert resolved('<option setting="accent" key="ACCENT"/>', 'id="t" name="T" index="2" extends="modern"')['opts'] == [opt('SETTING_ACCENT', values=0x17f)]
     t = resolved('<colorSchemes accents="cobalt green"/><option setting="accent" key="ACCENT" default="cobalt"/>',
                  'id="t" name="T" index="2" extends="modern"')
@@ -356,7 +360,7 @@ def test_builtins_rejects(tmp_path):
     put('b', 'id="c" name="B" index="1"')
     assert error(theme.builtins, tmp_path) == 'b/theme.xml:1: id c is not its folder name'
     put('b', 'id="b" name="B" index="0"')
-    assert error(theme.builtins, tmp_path) == 'b/theme.xml:1: index 0, expected 1'
+    assert error(theme.builtins, tmp_path) == "b/theme.xml:1: index 0 is a/theme.xml's too"
     (tmp_path/'b'/'theme.xml').write_text('<theme format="1" id="b" name="B" index="1"><option setting="accent"/></theme>')
     assert error(theme.builtins, tmp_path) == 'b/theme.xml:1: accent: no key'
 
@@ -390,6 +394,64 @@ def test_builtins_rejects_a_duplicate_id(tmp_path):
         (tmp_path/folder).mkdir()
         (tmp_path/folder/'theme.xml').write_text(f'<theme format="1" id="a" name="A" index="0"><option setting="accent" key="ACCENT"/>{CF_LO}</theme>')
     assert error(theme.builtins, tmp_path) == "b/theme.xml:1: id a is a/theme.xml's too"
+
+
+def test_builtins_rejects_a_duplicate_index(tmp_path):
+    """index is the stored THEME: two themes on one would share a unit's setting."""
+    shutil.copytree(THEMES, tmp_path, dirs_exist_ok=True)
+    p = tmp_path/'modern'/'theme.xml'
+    p.write_text(p.read_text().replace('index="2"', 'index="1"'))
+    assert error(theme.builtins, tmp_path) == "modern/theme.xml:3: index 1 is classic-light/theme.xml's too"
+
+
+def picker_themes(tmp_path, orders):
+    """The built-ins in tmp_path, each theme.xml's order replaced from orders (id -> attribute text, None: left out)."""
+    shutil.copytree(THEMES, tmp_path, dirs_exist_ok=True)
+    for tid, o in orders.items():
+        p = tmp_path/tid/'theme.xml'
+        text = re.sub(r' order="\d"', '' if o is None else f' order="{o}"', p.read_text(), count=1)
+        p.write_text(text)
+    return theme.builtins(tmp_path)
+
+
+def test_picker_order_is_the_theme_files(tmp_path):
+    """The picker lists each theme by its order, the stored THEME its index: Minimal, Modern, Classic, as shipped."""
+    ts = theme.builtins()
+    picked = sorted(ts, key=lambda t: t['order'])
+    assert [t['id'] for t in picked[:3]] == ['minimal', 'modern', 'classic-light']
+    assert [t['index'] for t in ts[:3]] == [0, 1, 2] and [t['id'] for t in ts[:3]] == ['minimal', 'classic-light', 'modern']
+    inc = boot_inc(tmp_path, ts)
+    assert f'const unsigned char theme_rows[THEME_N] = {{{", ".join(str(t["index"]) for t in picked)}}};' in inc
+    assert 'extern const unsigned char theme_rows[THEME_N];' in inc
+    # swapping two orders swaps their rows, with no other edit
+    (tmp_path/'x').mkdir()
+    swapped = picker_themes(tmp_path/'x', {'modern': 2, 'classic-light': 1})
+    assert boot_inc(tmp_path/'x', swapped).count('const unsigned char theme_rows[THEME_N] = {0, 1, 2') == 1
+    # and Status Bar follows the picker
+    assert next(o for o in swapped[0]['opts'] if o.get('key') == 'STATUSBAR')['names'][:4] == ['Theme', 'Minimal', 'Classic', 'Modern']
+
+
+def test_picker_order_defaults_to_the_index(tmp_path):
+    assert [t['order'] for t in picker_themes(tmp_path, {'minimal': None})][0] == 0
+
+
+@pytest.mark.parametrize('orders, message', [
+    ({'modern': 2}, "modern/theme.xml:3: order 2 is classic-light/theme.xml's too"),
+    ({'modern': 9}, 'classic-light/theme.xml:4: order 2, expected 1: the picker has no row 1'),
+    ({'modern': 'x'}, 'modern/theme.xml:3: order: expected a digit')])
+def test_builtins_rejects_a_duplicate_or_a_gap_in_the_order(tmp_path, orders, message):
+    assert error(picker_themes, tmp_path, orders) == message
+
+
+@pytest.mark.parametrize('body, message', [
+    ('<option key="STATUSBAR" label="Status Bar" default="Theme"><value label="Theme"/><value label="Minimal"/></option>',
+     'STATUSBAR: expected <value label="..."/><value themes="picker"/>: the theme\'s own, then every theme'),
+    ('<option key="STATUSBAR" label="Status Bar" default="Theme"><value label="Theme"/><value themes="all"/></option>',
+     'value.themes: unknown value all'),
+    ('<option key="HOMELIB" label="Library on Home" default="Off"><value label="Off"/><value themes="picker"/></option>',
+     'HOMELIB: themes is for STATUSBAR, which the payload maps by the picker')])
+def test_picker_values_reject(body, message):
+    assert error(resolved, body).endswith(message)
 
 
 def test_validate_rejects_unset_coverflow():
@@ -454,7 +516,14 @@ def test_home_rows_font_is_the_home_role():
 
 
 def test_resolve_takes_a_long_name():
-    assert resolved('', f'id="t" name="{"é" * 24}" index="2" extends="minimal"')['name'] == 'é' * 24
+    assert resolved('', f'id="t" name="{"é" * 24}" index="2"')['name'] == 'é' * 24
+
+
+def test_status_bar_takes_a_name_as_a_value():
+    """Status Bar's values name every theme, and a value's label holds 24 bytes."""
+    assert resolved('', f'id="t" name="{"é" * 12}" index="2" order="9" extends="minimal"')['opts'][0]['names'][-1] == 'é' * 12
+    assert error(resolved, '', f'id="t" name="{"é" * 13}" index="2" extends="minimal"') == (
+        f'minimal/theme.xml:10: STATUSBAR: theme name {"é" * 13} as a value label: expected 1..24 bytes')
 
 
 MINIMAL_FIELDS = [('name', '"Minimal"'), ('painter[PAINT_SELECTION]', 'SEL_CARD'), ('painter[PAINT_BAR]', 'BAR_FLAT'), ('painter[PAINT_BATTERY]', 'BATT_STOCK'), ('chevron_home', 0), ('chevron_sel', 0), ('art_x', 0), ('art_text_x', 0), ('art_text_end', 0), ('art_placeholder', 0), ('row_text_end', 0), ('sep', '{{0}, {0}}'), ('font[ROLE_TALL]', 'FONT_DEFAULT'), ('font_px[ROLE_TALL]', 0), ('chevron_x', 0), ('home_chevron_x', 0), ('letter_raw', 0), ('letter_px', 0), ('caps_mark', 1),
@@ -719,7 +788,9 @@ def test_set(monkeypatch):
 def minimal_with(geometry):
     text = (theme.ROOT/'assets/themes/minimal/theme.xml').read_text()
     text = re.sub(r'(<theme\b[^>]*>)', r'\1' + geometry, text, count=1)
-    t = theme.resolve(theme.parse(text, 'minimal.xml'), {})
+    by_id = {n.attrs['id']: n for n in map(theme.load, sorted(THEMES.glob('*/theme.xml')))}
+    root = theme.parse(text, 'minimal.xml')
+    t = theme.resolve(root, {**by_id, 'minimal': root})  # the others: Status Bar lists them
     theme.validate(t, 'minimal.xml')
     return t
 

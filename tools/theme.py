@@ -675,17 +675,50 @@ def offered(c, o, names, what):
 PLAIN_KEYS = {'HOMELIB', 'ROWPREVIEW', 'STATUSBAR'}  # the plain own keys the payload reads (theme_engine.c home_lib_on, row_preview_on, bar_theme)
 
 
-def own_option(c, known):
+def order(attrs):
+    """A <theme>'s row in the Theme picker: its order, else its index; None when neither is a digit (resolve()
+    rejects it). builtins() checks the rows run 0..N-1, each once."""
+    o = attrs.get('order', attrs.get('index', ''))
+    return int(o) if re.fullmatch('[0-9]', o) else None
+
+
+def picker(by_id):
+    """The Theme picker's rows: the root nodes in by_id (id -> node), by order()."""
+    return sorted((n for n in by_id.values() if order(n.attrs) is not None), key=lambda n: order(n.attrs))
+
+
+# The own keys whose values after the first are the built-in themes in the picker's order, which the payload maps
+# through theme_rows[] (theme_engine.c bar_theme): <value themes="picker"/> stands for them.
+PICKER_KEYS = {'STATUSBAR'}
+
+
+def own_option(c, known, themes=()):
     """A theme's own <option key label>: its values, each naming the geometry set it boots, one of known, or
-    none of them naming one: a plain choice the payload reads as st.own[OWN_<KEY>]."""
+    none of them naming one: a plain choice the payload reads as st.own[OWN_<KEY>]. themes: the picker's theme
+    names, which a PICKER_KEYS option's <value themes="picker"/> expands to."""
     def err(node, message): fail(node.file, node.line, message)
     key = own_key(c, c.attrs['key'])
     if 'values' in c.attrs:
         err(c, f'{key}: its <value>s are its values')
     if not label_ok(c.attrs.get('label', '')):
         err(c, f'{key}: label expected 1..24 bytes, no control characters')
+    if key in PICKER_KEYS and [sorted(v.attrs) for v in c.children] != [['label'], ['themes']]:
+        err(c, f'{key}: expected <value label="..."/><value themes="picker"/>: the theme\'s own, then every theme')
     names, sets = [], []
     for v in c.children:
+        if 'themes' in v.attrs:
+            if key not in PICKER_KEYS:
+                err(v, f'{key}: themes is for {", ".join(sorted(PICKER_KEYS))}, which the payload maps by the picker')
+            if v.attrs['themes'] != 'picker':
+                err(v, f'value.themes: unknown value {v.attrs["themes"]}')
+            for x in themes:
+                if not label_ok(x):
+                    err(v, f'{key}: theme name {x} as a value label: expected 1..24 bytes')
+                if x in names:
+                    err(v, f'{key}: duplicate value {x}')
+                names.append(x)
+                sets.append(None)
+            continue
         for k in v.attrs:
             if k not in ('label', 'set'):
                 err(v, f'unknown key value.{k}')
@@ -719,7 +752,7 @@ def resolve(root, by_id, seen=()):
     def err(node, message): fail(node.file, node.line, message)
     a = root.attrs
     for k in a:
-        if k not in ('format', 'id', 'name', 'index', 'extends'):
+        if k not in ('format', 'id', 'name', 'index', 'order', 'extends'):
             err(root, f'unknown key theme.{k}')
     tid = a.get('id', '')
     if not re.fullmatch('[a-z][a-z0-9_-]*', tid):
@@ -739,7 +772,11 @@ def resolve(root, by_id, seen=()):
     else:
         t = {'accents': ALL_ACCENTS, 'accent_key': None, 'schemes': [zero_scheme() for _ in ACCENT_NAMES], 'opts': [], 'geoms': {},
              **{k.field: k.default for k in SCHEMA.values() if not k.path.startswith('scheme.')}, 'light': {}}
-    t.update(id=tid, name=a['name'], index=int(a['index']), line=root.line)
+    if 'order' in a and not re.fullmatch('[0-9]', a['order']):
+        err(root, 'order: expected a digit')
+    rows = [n.attrs.get('name', '') for n in picker({**by_id, tid: root})]
+    # order is the theme's own, never its base's
+    t.update(id=tid, name=a['name'], index=int(a['index']), order=order(a), line=root.line)
     macros = ROLE_MACROS.get(tid, {})
     opts = None
     named = []
@@ -817,7 +854,7 @@ def resolve(root, by_id, seen=()):
                 if k not in OPTION_ATTRS:
                     err(c, f'unknown key option.{k}')
             if 'key' in c.attrs and 'setting' not in c.attrs:
-                opts.append(own_option(c, sets(t)))
+                opts.append(own_option(c, sets(t), rows))
                 continue
             s = c.attrs.get('setting', '')
             if s not in SETTINGS:
@@ -1068,9 +1105,12 @@ def builtins(root=ROOT/'assets/themes'):
         if i in by_id:
             fail(n.file, n.line, f"id {i} is {by_id[i].file}'s too")
         by_id[i] = n
-    found = []
+    found, indexes = [], {}
     for n in nodes:
         t = resolve(n, by_id)
+        if t['index'] in indexes:  # the stored THEME value: one theme's
+            fail(n.file, n.line, f"index {t['index']} is {indexes[t['index']].file}'s too")
+        indexes[t['index']] = n
         validate(t, n.file)
         if t['id'] != n.file.partition('/')[0]:
             fail(n.file, n.line, f'id {t["id"]} is not its folder name')
@@ -1102,6 +1142,15 @@ def builtins(root=ROOT/'assets/themes'):
     for i, (index, n, _) in enumerate(found):
         if index != i:
             fail(n.file, n.line, f'index {index}, expected {i}')
+    # The picker's rows (emit's theme_rows[]): one theme each, 0..N-1, so every theme is listed once.
+    rows = {}
+    for _, n, t in found:
+        if t['order'] in rows:
+            fail(n.file, n.line, f"order {t['order']} is {rows[t['order']].file}'s too")
+        rows[t['order']] = n
+    for i, o in enumerate(sorted(rows)):
+        if o != i:
+            fail(rows[o].file, rows[o].line, f'order {o}, expected {i}: the picker has no row {i}')
     return [t for _, _, t in found]
 
 
@@ -1202,6 +1251,9 @@ def emit(themes, out, redirects={}):
                   f'{{{a:#x}, G_{v.upper()}}}' for a, v in sites) + '};',
               'const char *const geom_names[GEOM_N] = {' + ', '.join(json.dumps(g.name) for g in sets) + '};',
               'const volatile ui_redirect_t ui_redirects[] = {' + ', '.join(ui) + '};',
+              # the Theme picker's rows, each a themes[] row, by the themes' order
+              'const unsigned char theme_rows[THEME_N] = {' + ', '.join(
+                  str(i) for i in sorted(range(len(themes)), key=lambda i: themes[i]['order'])) + '};',
               *(f'#define SETTING_N_{n.upper()} {len(v)}' for n, (_, v) in SETTINGS.items()),
               *(f'#define OWN_{k} {i}' for i, k in enumerate(theme_keys(themes))),
               # last: its sets are GEOM_* names

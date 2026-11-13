@@ -1,7 +1,7 @@
 <!-- Theme: Classic (IPOD/THEME 1, docs/ipod.md#display-settings): a light iPod look, with a dark half, on its own
      geometry sets, declared below. Its numbers are this file's, but for what ROLE_MACROS (tools/theme.py) and Minimal supply. Its id, classic-light,
      names its art, sets and face (classic_light_*, classic-light*). -->
-<theme format="1" id="classic-light" name="Classic" index="1" extends="minimal">
+<theme format="1" id="classic-light" name="Classic" index="1" order="2" extends="minimal">
   <!-- Classic's geometry sets: a 26 px bar over a 294 px window, 32 px rows, nine of them filling it (4 px above and
        below a 24 px line box). The Library is always 32 px text.
        classic-light (Row Art on) has 52 px album rows with the stock art drawn 1:1; classic-light-text (Row Art off)
@@ -129,7 +129,7 @@
   <!-- Its own pages: Quick Settings, the slider pages, the rating, T9 and Search, Set Time and Date, the message
        screens, the lock info screen, Cover Flow's flip -->
   <view name="pages"><element name="own" painter="classic-light" art_final="1"/></view>
-  <option key="STATUSBAR" label="Status Bar" default="Theme" preset="Theme"><value label="Theme"/><value label="Minimal"/><value label="Modern"/><value label="Classic"/></option>
+  <option key="STATUSBAR" label="Status Bar" default="Theme" preset="Theme"><value label="Theme"/><value themes="picker"/></option>
   <!-- Light Mode: On is the look as drawn, Off its dark half, Auto both by the clock -->
   <option setting="light" preset="on" keep="auto"/>
   <option setting="accent" key="CLASSIC_LIGHT_ACCENT" default="classic-blue" preset="classic-blue"/>

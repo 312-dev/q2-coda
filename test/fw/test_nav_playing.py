@@ -13,7 +13,9 @@ from conftest import NAVIGATION_SOURCE, O, Deques, Externpic, ask_cover, in_fork
 
 THEMES = host.tools_theme.builtins()
 SETS = host.tools_theme.geometry_sets(THEMES)
-MINIMAL, CLASSIC, MODERN = THEMES
+MINIMAL, CLASSIC, MODERN = ({t['id']: t for t in THEMES}[i] for i in ('minimal', 'classic-light', 'modern'))
+PICKER = sorted(THEMES, key=lambda t: t['order'])  # the Theme picker's rows: Status Bar's looks 1..N
+LOOK = {t['id']: 1 + i for i, t in enumerate(PICKER)}
 GEOM = {t['name']: SETS.index(host.tools_theme.geometry(t)) for t in THEMES}
 RET_REPEAT, STOP = 8, 11
 FONT_ROW = -2
@@ -546,10 +548,10 @@ def row_h(t):
 
 # Status Bar's look on every theme's row: Bluetooth and Wi-Fi on the look's rows off the layout's, and its battery
 # centred on the row's height, where the icons are, so each look's group reads as it does under its own theme.
-@pytest.mark.parametrize('t, look', [(t, look) for t in THEMES for look in range(4)],
-                         ids=lambda v: v['name'] if isinstance(v, dict) else ('Theme', 'Minimal', 'Modern', 'Classic')[v])
+@pytest.mark.parametrize('t, look', [(t, look) for t in THEMES for look in range(1 + len(PICKER))],
+                         ids=lambda v: v['name'] if isinstance(v, dict) else ('Theme', *(t['name'] for t in PICKER))[v])
 def test_a_look_keeps_its_icons_rows_and_its_battery_centred_on_any_row(fw, st, ui, t, look):
-    b = (MINIMAL, MODERN, CLASSIC)[look - 1] if look else t
+    b = PICKER[look - 1] if look else t
     theme(fw, st, t, BATTERY=0, STATUSBAR=look)
     bar = Bar(fw, ui)
     row = row_h(t)
@@ -703,7 +705,7 @@ def classic_battery(fw, st, ui, light=0, mode=0):
     return bar, Paint(fw, ui, bar)
 
 
-@pytest.mark.parametrize('t, look', [(CLASSIC, 1), (CLASSIC, 2)])
+@pytest.mark.parametrize('t, look', [(CLASSIC, LOOK['minimal']), (CLASSIC, LOOK['modern'])])
 def test_a_flat_status_bar_under_classic_is_minimals_battery(fw, st, ui, t, look):
     def drawn(**keys):
         bar = Bar(fw, ui)
@@ -715,7 +717,7 @@ def test_a_flat_status_bar_under_classic_is_minimals_battery(fw, st, ui, t, look
 
 
 def test_status_bar_classic_under_minimal_is_classics_battery_at_its_own_size(fw, st, ui):
-    theme(fw, st, MINIMAL, BATTERY=0, STATUSBAR=3)
+    theme(fw, st, MINIMAL, BATTERY=0, STATUSBAR=LOOK['classic-light'])
     bar = Bar(fw, ui)
     g, y = SETS[GEOM['Classic']], (row_h(MINIMAL) + 1 - SETS[GEOM['Classic']].batt_h) // 2
     rows = level_rows(Paint(fw, ui, bar)('50%'), 2, y + 1, g.batt_h - 2)
@@ -725,7 +727,7 @@ def test_status_bar_classic_under_minimal_is_classics_battery_at_its_own_size(fw
 
 
 def test_status_bar_classic_keeps_the_digits_the_row_has_room_for(fw, st, ui):
-    theme(fw, st, MINIMAL, BATTERY=2, STATUSBAR=3)
+    theme(fw, st, MINIMAL, BATTERY=2, STATUSBAR=LOOK['classic-light'])
     bar = Bar(fw, ui)
     canvas = Paint(fw, ui, bar)('100%')
     (text, _, (_, px), _, _), = canvas.texts
@@ -734,7 +736,7 @@ def test_status_bar_classic_keeps_the_digits_the_row_has_room_for(fw, st, ui):
     assert min(r[1] for r in canvas.rects) == (row_h(MINIMAL) + 1 - SETS[GEOM['Classic']].batt_h) // 2 - O['BATT_PCT_DY']
 
 
-@pytest.mark.parametrize('t, look, image', [(CLASSIC, 1, b'bar_play'), (CLASSIC, 2, b'bar_play'), (MINIMAL, 3, b'classic_light_play_d')])
+@pytest.mark.parametrize('t, look, image', [(CLASSIC, LOOK['minimal'], b'bar_play'), (CLASSIC, LOOK['modern'], b'bar_play'), (MINIMAL, LOOK['classic-light'], b'classic_light_play_d')])
 def test_status_bar_paints_its_look_s_play_state(fw, st, ui, t, look, image):
     theme(fw, st, t, STATUSBAR=look)
     bar = Bar(fw, ui)
@@ -745,7 +747,7 @@ def test_status_bar_paints_its_look_s_play_state(fw, st, ui, t, look, image):
 
 @pytest.mark.parametrize('t, mode', [(CLASSIC, 0), (MODERN, 3)])
 def test_the_battery_s_room_counts_the_row_the_theme_laid_out(fw, st, ui, t, mode):
-    theme(fw, st, t, BATTERY=3, STATUSBAR=1)  # a flat look: only Classic's row has the play state on the right
+    theme(fw, st, t, BATTERY=3, STATUSBAR=LOOK['minimal'])  # a flat look: only Classic's row has the play state on the right
     bar = Bar(fw, ui)
     C.c_int.from_address(bar.state + 8).value = 30
     ui.shown[bar.bt], ui.shown[bar.wifi] = 1, 1
@@ -755,7 +757,7 @@ def test_the_battery_s_room_counts_the_row_the_theme_laid_out(fw, st, ui, t, mod
 
 
 # EQ is stock's to show or hide: a bar without it keeps the label off-screen (tools/ipod.py), whatever the look.
-@pytest.mark.parametrize('t, look', [(CLASSIC, 1), (MINIMAL, 3)])
+@pytest.mark.parametrize('t, look', [(CLASSIC, LOOK['minimal']), (MINIMAL, LOOK['classic-light'])])
 def test_the_payload_leaves_eq_as_stock_set_it_whatever_the_status_bar(fw, st, ui, t, look):
     theme(fw, st, t, STATUSBAR=look)
     bar = Bar(fw, ui)
