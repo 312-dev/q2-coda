@@ -223,7 +223,7 @@ SCHEMA = {k.path: k for k in (
     *(Key(f'coverflow.{e}.{a}', f'cf.{a}', 'int', lo, hi, 0, 'open') for e, a, lo, hi in (
         ('shelf', 'top', 0, 50), ('shelf', 'x1', 0, 1023), ('shelf', 'xs', 0, 799), ('shelf', 'z1', 0, 799),
         ('shelf', 'zs', 0, 799), ('shelf', 'eye', 1, 2046), ('shelf', 'bright1', 1, 256), ('shelf', 'bright2', 1, 256),
-        ('shelf', 'reflect', 0, 50), ('shelf', 'reflect_top', 0, 256), ('shelf', 'stride', 1, 375),
+        ('shelf', 'reflect', 1, 50), ('shelf', 'reflect_top', 0, 256), ('shelf', 'stride', 1, 375),
         ('shelf', 'radius', 0, 83), ('shelf', 'tilt', 30, 90), ('shelf', 'horizon', 1, 99), ('shelf', 'third', 0, 1),
         ('shelf', 'swing', 0, 2), ('shelf', 'lift', 0, 40), ('shelf', 'eye_turn', 0, 400), ('shelf', 'view_h', O['CF_VIEW_H'], 294),
         *(('shelf', a, 0, hi) for a, hi in CF_THUMB.items()), ('caption', 'name_px', 1, 32), ('caption', 'artist_px', 1, 28),

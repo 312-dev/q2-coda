@@ -1777,11 +1777,9 @@ static void column(shelf_t *f, int col, const unsigned *tex, int h, int bright, 
             put(px, whole ? t : shade(t, (unsigned)bright) + wash, cov); /* put ignores t's alpha */
         }
     }
-    /* The reflection starts where the body ends, sharing the row the body only partly covers. A
-     * theme's reflect of 0 (OLED's) has none, nor does a cover too small for a row of it: the
-     * division takes 1 instead, and the first row's dist (>= 0, as ins is) ends the loop. */
+    /* The reflection starts where the body ends, sharing the row the body only partly covers. */
     int reflect = h * cfs.reflect / ART_SIZE, stop = (bottom + reflect + 255) >> 8;
-    int fade = (256 << 16) / (reflect + !reflect); /* fading per 1/256 px, 16.16 */
+    int fade = (256 << 16) / reflect; /* fading per 1/256 px, 16.16 */
     unsigned dim = (unsigned)bright * cfs.reflect_top >> 8;
     wash = shade(cf_paper, 256u - dim);
     if (stop > cfs.view_h) stop = cfs.view_h;

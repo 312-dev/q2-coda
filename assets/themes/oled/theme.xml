@@ -98,9 +98,10 @@
   <!-- page_list's rows (the Library's Shuffle, Most Played, card apps...): the grid's 32 px rows, 52 with a detail,
        at the text inset; the status row names the page, so no title row -->
   <!-- Cover Flow in the 262 px window under the status row (oled-design.md Screens: covers on black, no reflection
-       floor): no reflection under the covers, and the caption right under them, ending above y 282 on screen with the
-       lists, the album in the Song title role (22, 27 here) and the artist in the Artist role (18, 22 here) -->
-  <view name="coverflow"><element name="shelf" reflect="0"/>
+       floor): the reflection's top at 0 of its cover's brightness, so it is the page's own colour and none shows,
+       and the caption right under the covers, ending above y 282 on screen with the lists, the album in the Song
+       title role (22, 27 here) and the artist in the Artist role (18, 22 here) -->
+  <view name="coverflow"><element name="shelf" reflect_top="0"/>
     <element name="caption" name_px="27" artist_px="22" text_y="178" artist_y="22"/></view>
   <view name="page">
     <element name="rows" height="32" detail_height="52" text_x="24" title_y="4" title_h="24" detail_y="31" detail_h="20"/>
