@@ -10518,7 +10518,8 @@ static int chord_gate(void *e) {
     st.chord_at = now;
     int eat = st.chord_eat > 0;
     if (type == EVT_KEY_UP) st.chord_eat = st.centre_hold = 0;
-    /* a passing press: its time, for an edge press after it; its release ends that */
+    /* a passing press: its time, for an edge press after it and np_centre's hold (ringnav_keydown);
+     * its release ends that */
     if (!eat)
         st.centre_at = type == EVT_KEY_UP ? 0 : st.centre_at && !fresh ? st.centre_at : now | 1;
     return eat;
@@ -10702,7 +10703,10 @@ int ringnav_keydown(void *ctx, void *event) {
     unsigned key = event ? (unsigned)I(event, EVENT_KEY) : 0;
     if (ple_key(key, 1)) return STOP;
     void *top = window_manager_get_top_window(window_manager());
-    if (key == KEY_CENTER) st.center_down_at = (unsigned)time_now_ms() | 1; /* np_centre's hold */
+    /* np_centre's hold, timed from the press: its repeats (every 50 ms while held) keep
+     * chord_gate's centre_at, which ringnav_input set before this */
+    if (key == KEY_CENTER)
+        st.center_down_at = st.centre_at ? st.centre_at : (unsigned)time_now_ms() | 1;
     unsigned char tone = g_keytone_flag;
     void *row = (void *)0;
     entries_t s = { &row, 0, 1, 4096 };

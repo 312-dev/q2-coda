@@ -267,7 +267,8 @@ typedef struct {
      * scrub_to is the target second, scrub_moved set once the wheel changed it. */
     unsigned np_press, np_press_at, scrub_timer, scrub_track, settle_timer;
     /* Now Playing's Centre cycle (np_centre): its stage (NP_STAGE_*), the stage's timeout, and when
-     * Centre last went down (ringnav_keydown), which tells a short hold from a press */
+     * Centre's press went down (ringnav_keydown; its repeats don't move it), which tells a short
+     * hold from a press */
     unsigned np_stage, np_stage_timer, center_down_at;
     int scrub, scrub_to, scrub_moved, settle_played;
     int held_sec; /* a paused seek to scrub_to on scrub_track: the player's second then, +1; 0 none
