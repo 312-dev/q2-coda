@@ -623,6 +623,18 @@ def test_the_percentage_says_charging_or_low_in_its_colour(fw, st, ui, icon, col
     assert canvas.texts[0][3] == rgba(color)
 
 
+def test_a_cable_in_with_charging_held_off_is_not_shown_charging(fw, st, ui):
+    """Stock's icon is bar_charge for any cable; USB DAC with charging Off, or Charge Limit, charges nothing."""
+    from test_usb_charge import Charging
+    theme(fw, st, BATTERY=1)
+    paint, q = Paint(fw, ui, Bar(fw, ui)), Charging(fw, pref=0, mode=1, cable=1)
+    q.config()  # Audio and DAC, charging Off: held
+    assert [paint(text, b'bar_charge').texts[0][3] for text in ('50%', '14%')] == [rgba(0xffffff), rgba(O['BATT_LOW_RGB'])]
+    q.pref = 1
+    q.config()  # charging On
+    assert paint('14%', b'bar_charge').texts[0][3] == rgba(O['BATT_CHARGE_RGB'])
+
+
 def test_the_first_paint_measures_the_digits_and_the_slot_fits_them(fw, st, ui):
     theme(fw, st, BATTERY=1)
     bar = Bar(fw, ui)
@@ -1013,6 +1025,16 @@ def test_modern_names_the_page_in_its_bold_and_the_clock_goes_back_to_stocks_fac
     assert ui.prop(bar.clock, b'style:normal:font_name') == b'bold'
     bar_title(fw, bar, window(ui, 'home_page', 'Q2', navbar_shown=1))
     assert ui.prop(bar.clock, b'style:normal:font_name') == b'default' and len(ui.due('clock_due')) == 1
+
+
+def test_modern_clock_loses_a_cjk_titles_bold_mark_when_the_title_goes(fw, st, ui):
+    """A CJK page's name falls back to stock's face, kept bold by the mark; going Home the clock is plain."""
+    theme(fw, st, MODERN, TIMETITLE=0)
+    bar = Bar(fw, ui)
+    bar_title(fw, bar, window(ui, 'artist_page', '专辑'))
+    assert ui.prop(bar.clock, b'_q2_bold_fallback') == 1
+    bar_title(fw, bar, window(ui, 'home_page', 'Q2', navbar_shown=1))
+    assert ui.prop(bar.clock, b'_q2_bold_fallback') == 0
 
 
 def test_a_dialog_or_no_window_leaves_the_bar(fw, st, ui):

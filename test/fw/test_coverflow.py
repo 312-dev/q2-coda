@@ -2735,9 +2735,13 @@ def test_the_streaming_row_opens_the_page_in_full(fw, stock_bg):
     assert ui.click(h.rows['img_services']) == [9] and stock_bg[1] == 0
 
 
-@pytest.mark.parametrize('shortcut, shown, label', (('0', 0, 'Rockbox'), ('6', 1, 'Games')))
-def test_the_shortcut_row_sits_after_folder_unless_rockbox_is_missing(fw, shortcut, shown, label):
-    themed(fw, CLASSIC, SHORTCUT=shortcut)
+@pytest.mark.parametrize('home', ('0', '1', '2'))
+@pytest.mark.parametrize('theme', (MINIMAL, CLASSIC, MODERN))
+@pytest.mark.parametrize('shortcut, shown, label', (('0', 0, 'Rockbox'), ('6', 1, 'Games'), ('11', 0, 'Favorites'),
+                                                    ('12', 1, 'Favorites')))
+def test_the_shortcut_row_sits_after_folder_unless_rockbox_is_missing_or_none(fw, theme, home, shortcut, shown, label):
+    # None hides the row in every layout and theme; the carousel's card stays, naming the default as with no choice
+    themed(fw, theme, SHORTCUT=shortcut, HOME=home)
     ui = Ui(fw)
     h = Homes(ui, carousel=True, rockbox=True)
     rockbox = h.rows['img_rockbox']
@@ -2745,6 +2749,7 @@ def test_the_shortcut_row_sits_after_folder_unless_rockbox_is_missing(fw, shortc
     h.open(fw)
     rows = ui[h.view].kids
     assert rows.index(rockbox) == (rows.index(h.rows['img_folder']) + 1 if shown else len(rows) - 1)  # else last
+    assert [r for r in rows if r != rockbox] == [h.rows[n] for n in h.ROWS if n != 'img_rockbox']  # the others keep their order
     assert ui[rockbox].visible == shown and ui[rockbox].sensitive == shown
     assert ui[ui.named('label_rockbox')].text == label and ui[ui.lookup(h.carousel[0], 'label_rockbox')].text == label
 
@@ -3463,3 +3468,40 @@ def test_the_panel_s_paper_header_shadow_and_border(fw, light):
     assert [r[1:] for r in border] == [(39, 8, BACK_W + 2, 1), (39, 9 + 285, BACK_W + 2, 1), (39, 9, 1, 285), (40 + BACK_W, 9, 1, 285)]
     assert len({r[0] for r in border}) == 1 and border[0][0] >> 24 == 255  # one opaque colour all round
     assert (border[0][0] & 255 > 0x80) == bool(light)
+
+
+# The album panel's rows: the title runs to the length's text, not to the box reserved for it
+
+def panel_row(fw, text, canvas=1):
+    """panel_fit on two fake widgets, the length's box 66 wide (88 from an hour) and the title's 194; a character measures 10 px."""
+    wide = (C.c_uint * (len(text) + 1))(*map(ord, text))
+    title, time = bytearray(0x80), bytearray(0x80)
+    for w, (width, height) in ((title, (194, 45)), (time, (88 if len(text) > 5 else 66, 45))):
+        C.c_int.from_buffer(w, O['W_W']).value, C.c_int.from_buffer(w, O['W_H']).value = width, height
+    bufs = {C.addressof((C.c_char * 0x80).from_buffer(w)): w for w in (title, time)}
+    fw.mock('widget_get_canvas', lambda *a: 0x1000 * canvas)
+    fw.mock('widget_get_text', lambda *a: C.addressof(wide))
+    fw.mock('canvas_measure_text', lambda c, s, n, *a: 10.0 * n)
+    fit = fw.fn('coverflow__panel_fit', None, C.c_void_p, C.c_void_p, C.c_uint)
+    fit(C.addressof((C.c_char * 0x80).from_buffer(title)), C.addressof((C.c_char * 0x80).from_buffer(time)), len(text))
+    return list(bufs.values()), fw.calls('widget_resize'), fw.calls('widget_move_resize'), title, time
+
+
+@pytest.mark.parametrize('text,w', [('4:01', 40), ('14:57', 50), ('1:02:03', 70)])
+def test_a_panel_title_runs_to_its_length_s_own_text(fw, text, w):
+    _, resize, move, title, time = panel_row(fw, text)
+    gap, box = 8, w + 4  # hscroll_label paints in its width less two 2 px margins, and scrolls a text wider than that
+    assert [a[1:3] for _, a in resize] == [(BACK_W - 12 - box - gap - 12, 45)]  # from x 12, ending gap before the box
+    assert [a[1:5] for _, a in move] == [(BACK_W - 12 - box, 0, box, 45)]  # the length stays at the right margin
+
+
+def test_a_panel_length_too_wide_for_its_reserve_keeps_it(fw):
+    _, resize, move, *_ = panel_row(fw, '10:00:00')  # 80 px and its margins against the 88 px reserve: 84 fits
+    assert [a[3] for _, a in move] == [84]
+    _, resize, move, *_ = panel_row(fw, '100:00:00')  # 90 px: left alone
+    assert len(resize) == 1 and len(move) == 1
+
+
+def test_a_panel_row_keeps_its_reserve_with_no_canvas(fw):
+    _, resize, move, *_ = panel_row(fw, '4:01', canvas=0)
+    assert not resize and not move

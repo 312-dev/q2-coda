@@ -47,6 +47,7 @@ enum {
     POD_BIG_LIB, /* Display's Fast Navigation: Cover Flow's letters (ringnav_big_library) */
     POD_PL_CF,   /* Display's Playlist View: List or Cover Flow, as Artist View */
     POD_SCAN_DURATIONS,
+    POD_CF_POSITION,
     POD_COUNT
 };
 
@@ -147,7 +148,7 @@ typedef struct {
     int pod_read, charge_limit, wake_double, wake_pass, wake_eat,
         wake_down, /* 1: the held Centre press passes; 2: it is dropped */
         charge_held, artist_cf, year_old, resume, lock_clock, artist_az, hold_home, standby_limit,
-        eq_output, smart_wifi, big_library, playlist_cf, scan_durations;
+        eq_output, smart_wifi, big_library, playlist_cf, scan_durations, cf_position;
     void *pod_label[POD_COUNT];
     void *art_cf_win, *art_cf_list; /* the artist page given its Coverflow, the albums pending */
     void *art_cf_veil;              /* the artist page unseen until they show, and its anim_hint */
@@ -434,6 +435,13 @@ int pointer_down(void);
 unsigned qm_album_id(void *r);
 char *scrobble_tag(char *o, char *end, const char *s);
 
+/* font_weight.c: a marked label's foreground painted again 1 px right */
+void font_weight_paint(void *w, void *canvas);
+
+/* coverflow_position.c */
+int coverflow_position_enabled(void); /* navigation.c: persisted setting */
+void coverflow_position_reset(void);
+
 /* np_bar.c */
 int np_beside(void);
 int remain_due(const void *info);
@@ -526,7 +534,8 @@ void battery_paint(void *w, void *canvas);
 void power_poll(void);
 
 /* usb_charge.c: wrappers for charging, configuration loading and USB gadget dispatch. */
-int ringnav_usb_charge(int on);
+int ringnav_usb_charge(int on), usb_charge_held(void);
+void usb_charge_row(void *win, void *view); /* Power's USB DAC Charging */
 int ringnav_usb_config(void), ringnav_usb_detect(void), ringnav_usb_status(void);
 int stock_usb_config_trampoline(void), stock_usb_detect_trampoline(void);
 int stock_usb_status_trampoline(void);

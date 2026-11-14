@@ -22,7 +22,7 @@ SHELF_180 = {'cf.eye': 94, 'cf.tilt': 89, 'cf.x1': 116, 'cf.xs': 34, 'cf.z1': 77
 
 # coverflow.c, coverflow_thumb.c, coverflow_letters.c, coverflow_loader.c and playlist_art.c as one unit, so the shim's
 # stubs are defined once
-CF_SOURCES = '#include "coverflow.c"\n#include "coverflow_thumb.c"\n#include "coverflow_letters.c"\n#include "coverflow_loader.c"\n#include "playlist_art.c"\n'
+CF_SOURCES = '#include "coverflow.c"\n#include "coverflow_thumb.c"\n#include "coverflow_letters.c"\n#include "coverflow_loader.c"\n#include "playlist_art.c"\n#include "coverflow_position.c"\n'
 SHIM_H = r"""
 extern char system_bar[];
 """ + ''.join(line + '\n' for line in font_indices()) + r"""
@@ -72,7 +72,7 @@ slide_menu_set_value slide_menu_item_width list_view_create scroll_view_create l
 image_base_set_image widget_load_image widget_unload_image widget_set_name widget_use_style
 widget_set_text_utf8 widget_restack widget_animator_prop_create widget_animator_prop_set_params widget_animator_start widget_set_visible widget_get_prop_int widget_set_prop_int
 widget_get_prop_str widget_on widget_destroy_children widget_invalidate_force
-widget_count_children widget_get_child widget_lookup widget_move_resize widget_get_visible
+widget_count_children widget_get_child widget_lookup widget_move_resize widget_resize widget_get_canvas widget_get_visible
 canvas_get_clip_rect canvas_set_clip_rect widget_set_sensitive widget_get_type tk_strcmp widget_animator_destroy
 timer_add timer_remove navigator_back_to_home navigator_back navigator_window_is_exist window_manager_close_window_force navigator_to_with_context bitmap_create_ex bitmap_destroy bitmap_unlock_buffer
 bitmap_lock_buffer_for_read bitmap_lock_buffer_for_write bitmap_get_line_length
@@ -128,6 +128,7 @@ TEST = r"""
 #undef sem_post
 #undef memcpy
 int coverflow_home(void *, void *), coverflow_player_cover(const char *, const char *, int, int);
+int coverflow_artist(void *albums);
 const char *track_name(char *, unsigned, void *);
 
 /* Cache boundary: the duration service has its own tests, test/fw/test_durations.py. */
@@ -318,6 +319,8 @@ const unsigned *widget_get_text(void *w) { return 0; }
 int canvas_set_font(void *c, const char *f, unsigned px) { return 0; }
 float canvas_measure_text(void *c, const unsigned *s, unsigned n) { return 0; }
 const char *theme_face(const unsigned *s, int n, int *px) { return 0; }
+void font_weight_mark(void *w, int bold) {}
+int coverflow_position_enabled(void) { return 0; }
 void home_pane_read(int *services, int *games, int *free_tenths) { *services = 5; *games = 4; *free_tenths = 412; }
 extern volatile unsigned library_gen;
 static int count_calls, count_answer = 704;
@@ -414,6 +417,8 @@ int widget_move_resize(void *x, int left, int top, int ww, int h) {
     r[0] = left; r[1] = top; r[2] = ww; r[3] = h;
     return 0;
 }
+int widget_resize(void *x, int ww, int h) { return widget_move_resize(x, ((int *)W(x)->raw)[0], ((int *)W(x)->raw)[1], ww, h); }
+void *widget_get_canvas(void *x) { return 0; } /* no canvas: the panel keeps its reserve */
 static int insensitive; /* the widget last made insensitive */
 int widget_set_sensitive(void *x, int v) { W(x)->numb = !v; if (!v) insensitive = W(x) - w; return 0; }
 static int clip_rect[4] = { 0, 0, 375, 320 }; /* the canvas clip, screen x, y, w, h */
@@ -1765,22 +1770,41 @@ static void depth(void) {
     close_page();
     assert(frames == 0 && loads == unloads);
     {   /* Reopened, the covers centre the queue's song's album (#350), not the one last centred; no
-           queue, or a song with no album tag (a folder play's), leaves the last one. */
+           queue, a song with no album tag (a folder play's) or one whose album the list lacks (a
+           same-named album in another folder) leaves the last one. A compilation's track, with an artist of its own, still finds its album. */
         void *pos = mmap((void *)(MCL_POS & ~4095), 4096, PROT_READ | PROT_WRITE,
                          MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
         assert(pos != MAP_FAILED);
         deque playing = {0};
-        char untagged[sizeof records[0]] = {0};
-        int at[3];
-        void *songs[3] = { 0, untagged, records[1] };
-        for (int k = 0; k < 3; ++k) {
+        char untagged[sizeof records[0]] = {0}, elsewhere[sizeof records[0]], guest[sizeof records[0]];
+        memcpy(elsewhere, records[1], sizeof elsewhere);
+        *(char **)(elsewhere + REC_PATH) = "/mnt/mmc/audiobooks/Folder/01.m4b";
+        memcpy(guest, records[2], sizeof guest);
+        *(char **)(guest + REC_ARTIST) = "A guest";
+        int at[5];
+        void *songs[5] = { 0, untagged, elsewhere, guest, records[1] };
+        for (int k = 0; k < 5; ++k) {
             playing.n = 1; playing.at[0] = songs[k];
             shim_queue = songs[k] ? &playing : 0;
             open_page();
             at[k] = *(int *)(slide()->raw + SLIDE_INDEX);
             close_page();
         }
-        assert(at[0] == 6 && at[1] == 6 && at[2] == 1);
+        assert(at[0] == 6 && at[1] == 6 && at[2] == 6 && at[3] == 2 && at[4] == 1);
+        /* A scoped page (an artist's albums) opens where it does with nothing queued, whichever of
+           its albums plays. */
+        for (int k = 0; k < 2; ++k) {
+            deque *theirs = _create_deque(0);
+            theirs->at[theirs->n++] = records[6], theirs->at[theirs->n++] = records[8];
+            playing.at[0] = records[8];
+            shim_queue = k ? &playing : 0;
+            page = &w[nw + 1];
+            assert(coverflow_artist(theirs));
+            run();
+            at[k] = *(int *)(slide()->raw + SLIDE_INDEX);
+            close_page();
+        }
+        assert(at[0] == 0 && at[1] == 0); /* B; Tight, the one playing, is 1 */
         shim_queue = 0;
         munmap(pos, 4096);
     }
@@ -1936,7 +1960,6 @@ static void sorting(void) {
 
 /* Artist albums: Coverflow (navigation.c): an artist's albums alone, in their order, then All
    albums, no Sort or Refresh card; the library's list is back once the page closes. */
-int coverflow_artist(void *albums);
 static void artist_only(void) {
     rescan();
     open_page();

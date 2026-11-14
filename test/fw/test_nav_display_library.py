@@ -454,11 +454,17 @@ def test_classic_accent_takes_classic_blue_after_green_and_skips_ivory(fw):
 def test_shortcut_cycles_in_its_menu_order(fw):
     ui = Ui(fw)
     page = appearance(fw, ui, SHORTCUT=b'0')
-    seen = clicks_of(fw, ui, page, 'Shortcut', 10)
-    # Rockbox, Favorites, Shuffle, Rated Albums, Playlists, Artists, Albums, Games, Podcasts, Audiobooks, Rockbox
+    seen = clicks_of(fw, ui, page, 'Shortcut', 11)
+    # Rockbox, Favorites, Shuffle, Rated Albums, Playlists, Artists, Albums, Games, Podcasts, Audiobooks, None, Rockbox
     assert [v for v, _ in seen] == ['Favorites', 'Shuffle', 'Rated Albums', 'Playlists', 'Artists', 'Albums', 'Games',
-                                    'Podcasts', 'Audiobooks', 'Rockbox']
-    assert [w for _, w in seen] == [[('SHORTCUT', v)] for v in (3, 5, 4, 7, 1, 2, 6, 8, 9, 0)]
+                                    'Podcasts', 'Audiobooks', 'None', 'Rockbox']
+    assert [w for _, w in seen] == [[('SHORTCUT', v)] for v in (3, 5, 4, 7, 1, 2, 6, 8, 9, 11, 0)]
+
+
+def test_shortcut_none_reads_as_none_and_goes_on_to_rockbox(fw):
+    ui = Ui(fw)
+    page = appearance(fw, ui, SHORTCUT=b'11')
+    assert [(v, w) for v, w in clicks_of(fw, ui, page, 'Shortcut', 1)] == [('Rockbox', [('SHORTCUT', 0)])]
 
 
 def test_home_cycles_split_full_carousel(fw):
@@ -708,8 +714,8 @@ def test_cover_flow_page_holds_artist_view_playlists_sort_refresh_and_large_libr
     ui.click(button_of(page.view(), 'Cover Flow'))
     assert page.title() == 'Cover Flow'
     found = titles(page.view())
-    assert len(found) == 6 and found[:2] == ['Artist View', 'Playlist View'] and found[2].startswith('Cover Flow ')
-    assert found[3:] == ['Refresh Cover Flow', 'Fast Navigation', 'Scan Song Durations']
+    assert len(found) == 7 and found[:2] == ['Artist View', 'Playlist View'] and found[2].startswith('Cover Flow ')
+    assert found[3:] == ['Refresh Cover Flow', 'Fast Navigation', 'Scan Song Durations', 'Position Bar']
 
 
 class Settings:

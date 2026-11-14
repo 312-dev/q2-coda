@@ -2724,6 +2724,7 @@ int ringnav_paint(void *w, void *canvas) {
     if (st.pull_page && !pull_live()) pull_cancel();
     int result = search_del(w) ? 0 : stock_paint_trampoline(w, canvas);
     night_paint(canvas);
+    font_weight_paint(w, canvas);
     coverflow_paint(w, canvas);
     lockscreen_paint(w, canvas);
     if (w == st.cf_letter_surface && st.cf_letter &&
@@ -3146,7 +3147,8 @@ static int *const pod_values[] = { &st.charge_limit,
                                    0,
                                    &st.big_library,
                                    &st.playlist_cf,
-                                   &st.scan_durations };
+                                   &st.scan_durations,
+                                   &st.cf_position };
 _Static_assert(POD_LOCKCLOCK == 6, "lockscreen.c passes pod_rows 6");
 _Static_assert(sizeof pod_values / sizeof *pod_values == POD_COUNT, "a pod_values per row");
 static const char *const pod_keys[] = { "CHARGELIMIT",
@@ -3171,7 +3173,8 @@ static const char *const pod_keys[] = { "CHARGELIMIT",
                                         0,
                                         "BIGLIBRARY",
                                         "PLAYLISTCF",
-                                        "SCANDURATIONS" };
+                                        "SCANDURATIONS",
+                                        "CFPOSITION" };
 _Static_assert(sizeof pod_keys / sizeof *pod_keys == POD_COUNT, "a pod_keys entry per row");
 /* a row's choices: Artist albums three, Standby limit four, every other row two */
 static int pod_choices(unsigned i) { return i == POD_ARTIST_CF ? 3 : i == POD_STANDBY ? 4 : 2; }
@@ -3207,6 +3210,10 @@ int ringnav_lock_clock(void) {
 int ringnav_big_library(void) {
     pod_settings();
     return st.big_library;
+}
+int coverflow_position_enabled(void) {
+    pod_settings();
+    return st.cf_position;
 }
 int ringnav_eq_output(void) {
     pod_settings();
@@ -3272,6 +3279,7 @@ static void pod_text(int i) {
         { 0 }, /* Fast Navigation: a switch */
         { "Playlist View: List", "Playlist View: Cover Flow" },
         { 0 }, /* Scan Song Durations: a switch */
+        { 0 }, /* Position Bar: a switch */
     };
     _Static_assert(sizeof names / sizeof *names == POD_COUNT, "a names entry per row");
     if (i == POD_CF_SORT) {
@@ -3298,6 +3306,7 @@ static void pod_text(int i) {
                          : i == POD_FOLDERCOVER    ? "Folder Album Cover"
                          : i == POD_BIG_LIB        ? "Fast Navigation"
                          : i == POD_SCAN_DURATIONS ? "Scan Song Durations"
+                         : i == POD_CF_POSITION    ? "Position Bar"
                                                    : 0;
     if (toggle)
         list_toggle(st.pod_label[i], toggle, v);
@@ -3349,6 +3358,7 @@ static int pod_click(void *ctx, void *event) {
         *value = (*value + 1) % pod_choices(i);
         write_int_config(*value, "Q2POD", pod_keys[i]);
         if (i == POD_SCAN_DURATIONS && !*value) durations_cancel();
+        if (i == POD_CF_POSITION) coverflow_position_reset();
         st.charge_at = 0;
         /* Control Device Volume: off, stock's gain back at once; on, bt_volume_poll's next pass
          * sends the Q2's level to the device. */
@@ -3377,9 +3387,10 @@ int ringnav_powermanager(void *win, void *ctx) {
     pod_rows(win, "scroll_view_powermanager", POD_STANDBY, 1,
              icons + 1); /* beside stock's Standby */
     pod_rows(win, "scroll_view_powermanager", POD_CHARGE, 1, icons);
+    void *view = win ? widget_lookup(win, "scroll_view_powermanager", 1) : (void *)0;
+    usb_charge_row(win, view);
     pod_rows(win, "scroll_view_powermanager", POD_SMART_WIFI, 1, icons + 3);
     pod_rows(win, "scroll_view_powermanager", POD_CARMODE, 1, icons + 2);
-    void *view = win ? widget_lookup(win, "scroll_view_powermanager", 1) : (void *)0;
     if (view) /* battery.c's page */
         widget_set_text_utf8(list_row_into(view, "system_powermanager", battery_history, 0),
                              "Battery History");
@@ -3888,6 +3899,7 @@ static void dark_title(void *t) {
     int px = theme()->font_px[ROLE_BAR];
     const char *face = theme_face(s, (int)wide_len(s), &px);
     slider_label(t, 0, dark_title_y(), 375, 25, px, face ? face : "default");
+    font_weight_mark(t, !face); /* theme_font's rule: only stock's face stands in for bold */
 }
 /* w at x, y on the screen, unless it's there. */
 void bar_place(void *w, int x, int y, int ww, int h) {
@@ -3928,19 +3940,27 @@ static void bar_dark_sync(void *bar) {
     /* this paint may have drawn the bar already, and an invalidate mid-paint is lost */
     if (!st.bar_timer) st.bar_timer = timer_add(bar_repaint, (void *)0, 0);
 }
+/* Charging, as the bar says it: stock's icon is bar_charge whenever a cable is in, the charge
+ * enable held off or not (usb_charge.c's guard, Charge Limit), so a held one is not charging. */
+static int bar_charging(void) {
+    const char *icon = st.bar_icon ? widget_get_prop_str(st.bar_icon, "image", "") : "";
+    return icon && !tk_strcmp(icon, "bar_charge") && !usb_charge_held();
+}
 /* The battery view_battery shows: the level from label_battery's "88%" (stock zeroes
  * progress_battery while charging), then under Classic full on power (get_battery_capacity's
  * status 2 and stock's cable flag, memory both, as stock shows the plain icon then), charging
- * (bar_charge) and low (bar_lowcharge), as stock picks the icon. Reads stock's widgets, no I/O. */
+ * (bar_charging) and low (bar_lowcharge, or under 15% on a cable that charges nothing), as stock
+ * picks the icon. Reads stock's widgets, no I/O. */
 static unsigned battery_now(int classic_light) {
     const char *icon = widget_get_prop_str(st.bar_icon, "image", "");
     const unsigned *t = widget_get_text(st.bar_pct);
-    int level = 0;
+    int level = 0, charging = bar_charging();
     while (t && *t >= '0' && *t <= '9') level = level * 10 + (int)(*t++ - '0');
+    int held = !charging && icon && !tk_strcmp(icon, "bar_charge");
     return (unsigned)(level > 100 ? 100 : level) << 3 |
            (unsigned)(classic_light && I(g_power_chargestate, 0) == 2 && g_usbdet_value) << 2 |
-           (unsigned)(icon && !tk_strcmp(icon, "bar_charge")) << 1 |
-           (unsigned)(icon && !tk_strcmp(icon, "bar_lowcharge"));
+           (unsigned)charging << 1 |
+           (unsigned)((icon && !tk_strcmp(icon, "bar_lowcharge")) || (held && level < 15));
 }
 static void bar_sync(void *bar) {
     bar_dark_sync(bar);
@@ -4267,14 +4287,21 @@ int theme_font(void *w, int role, int was) {
                                                 "style:disable:font_size" };
     const theme_t *T = theme();
     int face = w ? T->font[role] : FONT_DEFAULT, px = T->font_px[role], row = was == FONT_ROW;
+    int wanted_bold = face == FONT_BOLD || face == FONT_CLASSIC_LIGHT; /* the bold faces; Inter's are not */
     if (row) {
-        if (!face && !px) return 0;
+        if (!face && !px) {
+            font_weight_mark(w, 0);
+            return 0;
+        }
         was = widget_get_prop_int(w, "_font", -1);
     }
     const unsigned *text = face ? widget_get_text(w) : (void *)0, none[1] = { 0 };
     if (face && !text) text = none; /* no text yet: keeps the face, as bold_label did */
     for (; face && !face_has(face, text, -1); face = face_fallback[face])
         px = fallback_px(px, face);
+    /* Keep weight separately from face/size: a cached answer or a reused row can change its
+     * bold intent even when its fallback face and size stay the same. */
+    font_weight_mark(w, wanted_bold && face == FONT_DEFAULT);
     int answer = face | px << FACE_BITS, kept = row ? answer | role << 16 : answer;
     if (!w || kept == was) return answer;
     for (unsigned i = 0; i < sizeof names / sizeof *names; ++i) {
@@ -5286,11 +5313,9 @@ void final_text(void *canvas, const char *face, const unsigned *s, const void *r
 }
 /* A key for paint_dark_bar: a battery label's "88%", charging as the status bar's icon says. */
 unsigned dark_bar_key(const unsigned *t) {
-    const char *icon = st.bar_icon ? widget_get_prop_str(st.bar_icon, "image", "") : "";
     unsigned level = 0;
     while (t && *t >= '0' && *t <= '9') level = level * 10 + (*t++ - '0');
-    return (level > 100 ? 100 : level) << 3 | (unsigned)(icon && !tk_strcmp(icon, "bar_charge"))
-                                                  << 1;
+    return (level > 100 ? 100 : level) << 3 | (unsigned)bar_charging() << 1;
 }
 /* The dark bar's rows and its line, the last of h rows from y: the scheme's dark half in either
  * half, over the bar's own line, with no second one; a flat Status Bar's plain black. Final
@@ -6466,7 +6491,8 @@ static void setting_text(int i) {
         if (i == 3)
             tk_snprintf(text, sizeof text, "Theme: %s", theme()->name);
         else if (i == 4)
-            tk_snprintf(text, sizeof text, "Shortcut: %s", ipod_home_shortcut());
+            tk_snprintf(text, sizeof text, "Shortcut: %s",
+                        shortcut() == SHORTCUT_NONE ? "None" : ipod_home_shortcut());
         else {
             const theme_key_t *K = &theme_keys[i - SETTING_OWN];
             if (theme()->set_text) { /* the label and the value's name, unsplit */
@@ -6536,8 +6562,10 @@ static int setting_click(void *ctx, void *event) {
     int *value = option_slot(T, i), was = *value;
     const char *key = option_key(T, i);
     /* Rockbox, Favorites, Shuffle, Rated Albums, Playlists, Artists, Albums, Games, Podcasts,
-     * Audiobooks, Groovebox (skipped unless the card has it; Rockbox is always offered) */
-    static const int shortcut_next[] = { 3, 2, 6, 5, 7, 4, 8, 1, 9, SHORTCUT_GROOVEBOX, 0 };
+     * Audiobooks, Groovebox (skipped unless the card has it; Rockbox is always offered), None */
+    static const int shortcut_next[] = {
+        3, 2, 6, 5, 7, 4, 8, 1, 9, SHORTCUT_GROOVEBOX, SHORTCUT_NONE, 0
+    };
     _Static_assert(sizeof shortcut_next / sizeof *shortcut_next == SETTING_N_SHORTCUT,
                    "one per shortcut");
     /* Graphite, ..., Plum, Green, then Ivory (masks skip it: Modern's to Graphite, Classic's to its
@@ -6848,6 +6876,7 @@ int ringnav_display(void *win, void *ctx) {
         pod_rows(win, "scroll_view_display", POD_CF_SORT, 2, cf_icons + 1);
         pod_rows(win, "scroll_view_display", POD_BIG_LIB, 1, cf_icons + 3);
         pod_rows(win, "scroll_view_display", POD_SCAN_DURATIONS, 1, cf_icons + 3);
+        pod_rows(win, "scroll_view_display", POD_CF_POSITION, 1, cf_icons + 3);
         return result;
     }
     if (sub == DISPLAY_APPEARANCE) {
@@ -11082,9 +11111,13 @@ int ringnav(void *ctx, void *event) {
         return STOP;
     else if (key == KEY_CENTER || st.scrub)
         return np_key(st.np_win, key);
+    /* A keyboard (T9's, every text box's) on top takes Centre as a listed page does: a single press
+     * does nothing, a double turns the screen off; stock turned it off on each one (#365). Its
+     * wheel stays stock's volume. */
+    int kb = key == KEY_CENTER && top && !tk_strcmp(widget_get_type(top), "keyboard");
     if (!allowed_top(top) && !usb_prompt()) {
         drop_input();
-        return result;
+        if (!kb) return result;
     }
     /* A double Centre turns the screen off on every listed page, also where the page takes Centre
      * itself (the Books reader's caption), has no row selected or is still sliding in. A list's
@@ -11101,6 +11134,7 @@ int ringnav(void *ctx, void *event) {
         st.dc_top = top;
         st.dc_at = now;
     }
+    if (kb) return STOP;
     int dir = key == KEY_NEXT ? 1 : key == KEY_PREV ? -1 : 0;
     if (window_manager_is_animating(wm) || pointer_down()) {
         drop_input();

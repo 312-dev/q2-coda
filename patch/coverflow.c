@@ -2510,6 +2510,7 @@ static int touched(void);
  * for every widget: over Coverflow's slide_menu it draws the frame, rendered again only when the
  * position or a texture has changed. */
 void coverflow_paint(void *w, void *canvas) {
+    coverflow_position_paint(w, canvas);
     int c, frac, n;
     if (fl.panel && w && flip_paint(w, canvas)) return;
     if (!w || w != cf.slide || !fx.frame || cf.screen != COVERS ||
@@ -2839,6 +2840,7 @@ static void covers(int dir) {
     }
     widget_set_visible(cf.body, 0, 0);
     if (!cf.covers) {
+        coverflow_position_reset();
         void *f = widget_factory();
         int depth = fx_open();
         cf.covers = widget_factory_create_widget(f, "view", cf.page, 0, 0, 375, client_h());
@@ -2947,6 +2949,7 @@ static void load_albums(unsigned t0) {
         cf.albums = 0;
     }
     drop();
+    coverflow_position_reset();
     widget_destroy_children(cf.page);
     cf.covers = cf.slide = cf.name = cf.artist = 0; /* destroyed with the page's children */
     if (cf.scoped != PLAYLISTS) cf.album = 0;       /* the playlists' read again keep their place */
@@ -3139,6 +3142,7 @@ void panel_font(void *label, int px, int bold) { /* shared with navigation.c */
                              *const sizes[] = { "style:normal:font_size", "style:focused:font_size",
                                                 "style:disable:font_size" };
     const char *face = bold ? theme_face(widget_get_text(label), -1, &px) : (const char *)0;
+    font_weight_mark(label, bold && !face && caption_bold());
     for (unsigned i = 0; i < sizeof names / sizeof *names; ++i) {
         widget_set_prop_str(label, names[i], face ? face : "default");
         widget_set_prop_int(label, sizes[i], px);
@@ -3152,6 +3156,23 @@ static void *panel_label(void *parent, int x, int y, int w, int h, const char *s
     widget_set_text_utf8(label, s);
     panel_font(label, px, bold);
     return label;
+}
+
+/* A row's title runs to its length's own text, not to the box reserved for the widest length: the
+ * length is cut to its measured width plus hscroll_label's two 2 px margins (it scrolls a text wider
+ * than its width less those), at the right margin, and the title ends PANEL_TIME_GAP before it. No
+ * canvas, or a text that doesn't measure or fit the reserve: the reserve stands. ponytail: measured
+ * once at the build, in the default face at 20 px, which is the label's. */
+#define PANEL_TIME_GAP 8
+static void panel_fit(void *title, void *time, unsigned n) {
+    void *canvas = widget_get_canvas(time);
+    if (!canvas) return;
+    canvas_set_font(canvas, (const char *)0, 20);
+    int w = (int)(canvas_measure_text(canvas, widget_get_text(time), n) + 0.5f);
+    if (w <= 0 || w + 4 > I(time, W_W)) return;
+    w += 4;
+    widget_move_resize(time, BACK_W - 12 - w, 0, w, I(time, W_H));
+    widget_resize(title, BACK_W - 12 - w - PANEL_TIME_GAP - 12, I(title, W_H));
 }
 
 /* The panel as it stands into fl.back, hidden after: painted by stock on an offline canvas of the
@@ -3252,13 +3273,14 @@ static int flip_open(void *r, int n) {
         char duration[24];
         duration_text(duration, sizeof duration, t);
         int time_w = strlen(duration) > 5 ? 88 : 66; /* h:mm:ss */
-        panel_label(item, 12, 0, *duration ? 260 - time_w : 270, pl ? 26 : row,
-                    track_name(name, sizeof name, t), 25, 1);
+        void *title = panel_label(item, 12, 0, *duration ? 260 - time_w : 270, pl ? 26 : row,
+                                  track_name(name, sizeof name, t), 25, 1);
         if (*duration) {
             void *label = panel_label(item, BACK_W - 12 - time_w, 0, time_w, pl ? 26 : row,
                                      duration, 20, 0);
             widget_set_prop_str(label, "style:normal:text_align_h", "right");
             widget_set_prop_int(label, "style:normal:text_color", (int)PANEL_MUTED);
+            panel_fit(title, label, (unsigned)strlen(duration));
         }
         if (pl) {
             const char *by = P(t, REC_ARTIST);
@@ -3519,6 +3541,7 @@ static void playlist_ready(int cd_num) {
 
 static int closed(void *ctx, void *event) {
     if (ctx != cf.page) return 0; /* a page scoped_open closed already */
+    coverflow_position_reset();
     stop_timer(&cf.title_timer);
     stop_timer(&pl_again);
     tc.down = 0;
