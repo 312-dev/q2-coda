@@ -1,0 +1,6 @@
+<!-- Theme: OLED (IPOD/THEME 3, docs/ipod.md#theme). A placeholder for the OLED design, whose docs are to follow: it
+     extends Classic and changes nothing, so it runs on Classic's geometry sets (32 px rows) with Classic's face and
+     options, and proves a fourth theme's slot end to end. art="classic-light": it draws Classic's generated images,
+     which the payload loads by their classic_light_* names. -->
+<theme format="1" id="oled" name="OLED" index="3" order="3" extends="classic-light" art="classic-light">
+</theme>

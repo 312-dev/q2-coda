@@ -17,6 +17,9 @@ KEYS = list(host.tools_theme.theme_keys(THEMES))  # the themes' own IPOD keys, s
 MINIMAL, CLASSIC, MODERN = (next(t['index'] for t in THEMES if t['id'] == i) for i in ('minimal', 'classic-light', 'modern'))
 
 
+PICKER = sorted(THEMES, key=lambda t: t['order'])  # the Theme picker's rows, and Status Bar's looks 1..N
+
+
 def theme_of(index):
     return next(t for t in THEMES if t['index'] == index)
 
@@ -547,11 +550,11 @@ def test_status_bar_steps_its_looks_and_repaints_the_bar_without_a_restart(fw, s
     page = appearance(fw, ui, THEME=b'1')
     st('pct_digit').value = 9
     before = repaints(fw)
-    assert clicks_of(fw, ui, page, 'Status Bar', 4) == [('Minimal', [('STATUSBAR', 1)]), ('Modern', [('STATUSBAR', 2)]),
-                                                        ('Classic', [('STATUSBAR', 3)]), ('Theme', [('STATUSBAR', 0)])]
+    looks = [(t['name'], [('STATUSBAR', 1 + i)]) for i, t in enumerate(PICKER)]  # every theme's look, in the picker's order
+    assert clicks_of(fw, ui, page, 'Status Bar', len(PICKER) + 1) == [*looks, ('Theme', [('STATUSBAR', 0)])]
     assert not fw.calls('navigator_to_with_context') and st('pct_digit').value == 0  # the digits, measured again
     after = repaints(fw)
-    assert after[0] == before[0] and after[1] == before[1] + 4  # the bar alone, no art dropped
+    assert after[0] == before[0] and after[1] == before[1] + len(PICKER) + 1  # the bar alone, no art dropped
 
 
 class Prompts:
@@ -592,12 +595,13 @@ def picks(view):
     return [(item.labels()[0].text, item.children[0].children[0].props['image'].decode()) for item in view.children]
 
 
-def test_the_theme_picker_lists_minimal_modern_classic_marking_the_running_one(fw):
+def test_the_theme_picker_lists_every_theme_in_order_marking_the_running_one(fw):
     ui = Ui(fw)
     page = appearance(fw, ui, THEME=b'2')
     themes_page(fw, ui, page)
     assert page.title() == 'Theme'
-    assert picks(page.view()) == [('Minimal', 'unselect'), ('Modern', 'select'), ('Classic', 'unselect')]
+    assert picks(page.view()) == [(t['name'], 'select' if t['index'] == MODERN else 'unselect') for t in PICKER]
+    assert [t['name'] for t in PICKER] == ['Minimal', 'Modern', 'Classic', 'OLED']  # as shipped
 
 
 def pick(ui, page, t):
@@ -612,6 +616,21 @@ def test_choosing_a_theme_puts_status_bar_back_on_theme(fw, st):
     themes_page(fw, ui, page)
     pick(ui, page, theme_of(MODERN))
     assert ('STATUSBAR', 0) in writes(fw) and st('own', i=KEYS.index('STATUSBAR')).value == 0
+
+
+def test_picking_oled_from_classic_switches_live_on_classics_set(fw, st, geometry):
+    """OLED extends Classic (assets/themes/oled): one set, so the pick needs no restart."""
+    names, _ = geometry
+    oled = next(t for t in THEMES if t['id'] == 'oled')
+    st('geom').value = names['GEOM_CLASSIC_LIGHT']  # Classic, as booted
+    ui = Ui(fw)
+    page = appearance(fw, ui, THEME=b'%d' % CLASSIC)
+    themes_page(fw, ui, page)
+    prompts = Prompts(fw)
+    pick(ui, page, oled)
+    assert prompts.seen == [] and not fw.calls('stock_reboot_trampoline')
+    assert writes(fw)[0] == ('THEME', oled['index']) and st('theme').value == oled['index'] == 3
+    assert [name for name, image in picks(page.view()) if image == 'select'] == ['OLED']
 
 
 def test_picking_modern_applies_its_preset_live(fw, st):
