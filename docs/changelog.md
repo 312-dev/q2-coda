@@ -1,5 +1,7 @@
 # Changelog
 
+- **Unreleased (q2-coda)**:
+  - Display: **Theme** lists **OLED** after **Classic**. It is a placeholder: it looks as **Theme: Classic** does until its own design arrives.
 - **1.8.2**:
   - Games: in Solitaire, Centre on a pile that can't take the cards you hold now picks that pile up instead. Before, nothing happened and the cards stayed held until you put them back or pressed Return, which looked like the game had stuck.
   - Themes: Chinese, Japanese and other text the theme's own face lacks is now drawn bold wherever **Classic** or **Modern** draws its text bold: Classic's lists, bar, info rows, Cover Flow, album panel and hold menu; Modern's bar title; and Now Playing's title in both. It used the regular system font.
@@ -13,7 +15,6 @@
   - Playlists: under **Theme: Classic**, **Edit Playlists…** is now **Select Playlists…**, since it marks playlists to import, export or delete. To change a playlist's songs, use its **More → Edit Playlist**.
   - Quick Settings: holding Play/Pause there shows **Wheel: Volume** or **Wheel: Brightness** as a pop-up in your theme's style, as other messages are. It was a thin black strip.
   - Search: with the keyboard up, one press of Centre turned the screen off, which looked like a freeze. It now takes a double press, as on every other page, and a single press does nothing ([#365](https://github.com/DiamondBond/q2-pod/issues/365)).
-  - Display: **Theme** lists **OLED** after **Classic**. It is a placeholder: it looks as **Theme: Classic** does until its own design arrives.
   - Settings: the **Language** row is hidden until the other languages are translated. Q2 Pod's own pages are in English only, so every other language read half-blank.
   - Home: **Display → Appearance → Shortcut** has a new choice, **None**, which takes the shortcut row off Home's list. The other rows stay as they are. **Home: Carousel** keeps its shortcut card, which opens Rockbox when it's on the card and Favorites otherwise ([#361](https://github.com/DiamondBond/q2-pod/issues/361)).
 - **1.8.1**:
