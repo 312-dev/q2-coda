@@ -6427,6 +6427,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
     grey_rows(w);
     if (form) confirm_labels(w, canvas);
     feedback_confirm_switch(w, canvas);
+    feedback_switch_bar(w, canvas);
     if (w && w == st.rate_box)
         paint_panel(w, canvas, &(rect_t){ PANEL_PAD, PANEL_PAD - PANEL_DROP, 304, 110 },
                     "classic_light_rate_shadow", 1);

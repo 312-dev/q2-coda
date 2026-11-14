@@ -273,6 +273,46 @@ int feedback_empty(void *parent, int free, const char *message, const char *hint
     return feedback_note(line, sub, free);
 }
 
+/* Sleep Timer's page with its switch off shows only the switch's row (navigation.c
+ * ringnav_sleeptimer), which Centre turns (edit_single): the selection's bar is on it from the
+ * moment the page opens, its words white as a selected row's (st.sel_accent). Under the row. */
+void feedback_switch_bar(void *w, void *canvas) {
+    if (!feedback_oled() || !w || !P(canvas, CANVAS_LCD) ||
+        tk_strcmp(widget_get_type(w), "button") || !widget_count_children(w))
+        return;
+    void *label = widget_get_child(w, 0), *win = window_of(w),
+         *fields = win ? widget_lookup(win, "view_sleep", 1) : (void *)0;
+    if (!fields || tk_strcmp(widget_get_prop_str(label, "name", ""), "_switch_row")) return;
+    if (widget_get_visible(fields)) { /* on: the fields have the selection, the words their ink */
+        if (st.sel_accent == w) st.sel_accent = (void *)0;
+        return;
+    }
+    const theme_t *T = theme();
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+    rect_t bar = { T->sel_inset, 0, I(w, W_W) - 2 * T->sel_inset, I(w, W_H) };
+    fill_box(canvas, &bar, RGBA(scheme()->tones[0]), (unsigned)T->sel_radius);
+    stock_canvas_set_fill_color(canvas, fill);
+    st.sel_accent = w;
+}
+
+/* A service's page with no link (oled-design.md Empty and offline): its name in the status row over
+ * the note, "Not connected" and the setting that gives it one; Return leaves. 1 when shown. */
+static void *offline_page __attribute__((section(".scratch")));
+static int offline_gone(void *page, void *event) {
+    if (offline_page == page) offline_page = (void *)0;
+    return 0;
+}
+int feedback_offline(const char *title) {
+    if (!feedback_oled()) return 0;
+    if (offline_page) return 1;
+    void *page = page_open("offline_page", offline_gone, page_keyup);
+    if (!page) return 0;
+    offline_page = page;
+    page_title(page, title, 1);
+    bar_title_sync(page);
+    return feedback_empty(page, 0, "Not connected", "Turn on Wi-Fi in System > Wireless");
+}
+
 /* Songs' page (allmusic_page) over an empty list, under a shuffle_row theme: the Shuffle row
  * would stand over nothing, so it hides and the page says what is missing, by the list's class
  * (g_class_type): My Fav (0xf00a), Recent (0xf007), Most Played's stock list (0xf008), Recently

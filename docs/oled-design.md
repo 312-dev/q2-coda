@@ -335,7 +335,9 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   No fake rows, and no Shuffle row over nothing: Favorites, Recent and the other song lists hide
   it and say what is missing ("No favorites", hint "Hold Play/Pause on a song to add it").
 - Offline and missing things use the same form (Spotify's "Spotify isn't on the card", the App
-  Store's "No apps listed").
+  Store's "No apps listed" under its Check for Updates row, one line in the list's pitch). TIDAL
+  with no Wi-Fi opens a page of its own titled TIDAL: "Not connected", hint "Turn on Wi-Fi in
+  System > Wireless".
 - Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done.
 
 ### Icons
@@ -385,7 +387,7 @@ pattern.
 | Songs, a playlist's songs           | Song rows                   | The artist inline                                                                                          |
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
 | Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; an artist's covers titled by the artist |
-| Playlists                           | Two-line row with icon      |                                                                                                            |
+| Playlists                           | Two-line row with icon      | New Playlist... and the other action rows take the same 52 px pitch once there is a playlist, the picker's too |
 | Hold menu                           | Dialog                      |                                                                                                            |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
 | About                               | Key/value table             | Inert: no selection; values in Text Secondary                                                              |

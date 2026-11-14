@@ -443,6 +443,8 @@ int feedback_confirm_dress(void *w);
 void feedback_confirm_bar(void *w, void *canvas);
 void feedback_confirm_switch(void *w, void *canvas);
 void feedback_songs(void *top, void *row);
+int feedback_offline(const char *title);
+void feedback_switch_bar(void *w, void *canvas);
 void feedback_shuffled(const char *what, int songs);
 void cf_veil(void *win, int on);              /* win unseen (1) or seen again under Coverflow */
 int ringnav_playlist_coverflow(void);         /* Display's Playlist View is Cover Flow */
