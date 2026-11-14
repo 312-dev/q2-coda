@@ -167,7 +167,7 @@ twice as sharp as a `[1,2,1]/4` softening with bilinear, and its sharpness chang
 about a tenth on a photo and a fifth on lettering. A frame costs about 4.8 million instructions,
 2.3 times the bilinear's, five a second while Home shows; the sharpening adds about 13 million
 once a cover. A cover whose zoomed fit passes `DRIFT_TEXELS` (four panels: wider
-than about 2:1, or taller than 5:1), a decode that is not 32-bit, the placeholder and Full stay still and unzoomed,
+than about 2:1, or taller than about 5.5:1), a decode that is not 32-bit, the placeholder and Full stay still and unzoomed,
 drawn by the stock fill. Nothing is stored: the pan's phase counts only time shown, so leaving
 Home, a new cover or a Theme change resumes it where it was. One `DRIFT_TICK_MS` (200 ms, about 0.3 px a step; a late tick steps at most `DRIFT_MAX_STEP_MS`, 500 ms) timer
 runs it, armed from Home's paint only while Home is the top window and not sliding, the screen is
@@ -183,15 +183,27 @@ stops the timer first.
 
 A set with `split_inset` (OLED's 2) keeps that percent of the zoomed cover clear at each edge
 (`drift_axis`), so a cover's own frame (many have a thin white border) never shows at the pane's
-edges even at the pan's ends: on OLED's 179 × 268 pane a square cover pans 26 pixels across and 16
+edges even at the pan's ends: on OLED's 179 × 320 pane a square cover pans 32 pixels across and 18
 down. An inset the zoom's margin cannot hold leaves the cover still in the zoom's middle, and no
 timer runs. A theme with `home.lists.full` (OLED's) opens the lists Home's rows open in Split
 (Settings, and Library and Streaming where a set keeps them on Home) as pages: the list takes the
 screen's width in Full's rows (`sub_full`), the art is hidden while it shows and no pan runs, and
 Return brings the main list back beside the art, whose last frame shows at once. A set with `split_art_up` starts the pane that many rows above Home's window: the
 frame is that much taller, Home's window draws its rows from the window's top down, and the bar
-draws the rest over its own black (`coverflow_home_bar`, from the bar's background paint, with Home
-on top and no window sliding, as Home's paint draws nothing outside its window). With nothing
+draws the rest (`coverflow_home_bar`, from the bar's background paint, with Home on top and no
+window sliding, as Home's paint draws nothing outside its window). OLED's `split_art_up` is the
+bar's whole 58, so the art reaches the top edge and the status row's play state and battery stand
+over it. Each of their pixels is inked white or black, whichever has the higher WCAG contrast
+against the art pixel under it (relative luminance from a 256-entry linear table; white while it
+is at most 0.179), and an antialiased edge blends that ink by its share, as Scrolly's feed-end line
+does. To get the glyphs alone, the bar's background leaves the pane's rows its flat ground when it
+draws straight onto the screen; the glyphs paint on that, and the bar's border paint
+(`coverflow_home_clip`, `home_ink`) reads each pixel's distance from the ground as the glyph's
+share and writes the art with the ink over it, only within the paint's clip. A pan step invalidates
+those rows of the bar with the window's, so the ink follows the art; the time stays left of the
+pane, grey on the list's ground. A glyph's own colour (the charging green, the low red, the
+battery's dim outline as a lighter share) becomes the contrast ink over the art. Where the bar
+draws off the screen, the art is painted under the glyphs as they are. With nothing
 playing, or a cover the frame cannot hold, the pane is the window's panel as in the other sets.
 
 ## Status bar and clock
@@ -1000,9 +1012,10 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
 - **Icons.** Phosphor's (MIT, [oled-design.md](oled-design.md#icons)): the caret on each row that opens a page,
   the play state, and Now Playing's shuffle, repeat, heart and More.
 - **Home.** Full by default. In Split the menu's rows are 204 px wide, so the selection bar ends at x 188 and the
-  chevrons stand at 176, and the playing album's art fills the rest from x 196 and y 52 (6 px up into the status
-  row) to the right and bottom edges, still, cut from the middle of the cover, the glass rounding its corner
-  (`split_row`, `split_art`, `split_art_up`, `split_inset`; [Home](#home)).
+  chevrons stand at 176, and the playing album's art fills the rest from x 196 and the top edge to the right and
+  bottom edges, panning slowly, the glass rounding its corners; the status row's play state and battery stand over
+  it, each pixel white or black by contrast with the art beneath (`split_row`, `split_art`, `split_art_up`,
+  `split_inset`; [Home](#home)).
 - **Song rows.** One line each, no chevron. In Songs and the other lists stock shows on Songs' page (a genre's
   songs among them) the artist follows the title two spaces on, in 15 px Text Tertiary, both ending in an ellipsis
   where they run out of room and the artist dropped when under 40 px would be left; an artist's own songs show

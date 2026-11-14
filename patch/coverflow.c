@@ -3945,6 +3945,10 @@ static struct {
     unsigned ring[4][HOME_PW];
     int clip[4];  /* the canvas clip while the art paints, restored after */
     int clipped;
+    /* the bar whose border paint inks the pane's rows (coverflow_home_bar), 0: none due; ground:
+     * the bar's background there (BGRA) */
+    void *ink_bar;
+    unsigned ground;
 } home __attribute__((section(".scratch")));
 extern int ipod_home(void), ipod_home_rockbox(void), home_shortcut_open(void *, void *),
     home_lib_on(void), row_preview_on(void), library_search(void);
@@ -4011,6 +4015,10 @@ static int pan_v(void) { return home.v0 * 256 + drift_at(home.ry, DRIFT_Y_MS); }
 static void pane_invalidate(void) {
     int pane[4] = { pane_x(), 0, pane_w(), client_h() }; /* rect_t, in the parent */
     widget_invalidate_force(P(home.art, W_PARENT), pane);
+    /* and the pane's rows in the bar, which paints them (coverflow_home_bar) */
+    void *bar = *(void *const *)system_bar;
+    int up = pane_up(), rows[4] = { pane[0], 320 - client_h() - up, pane[2], up };
+    if (up && bar) widget_invalidate_force(bar, rows);
 }
 static void drift_place(void) {
     if (pan_u() == home.du && pan_v() == home.dv) return;
@@ -4723,17 +4731,110 @@ void coverflow_home_art(void *top) {
     rearm(&home.repaint, home_repaint, 0);
 }
 
+/* The status row's glyphs over Split's art (docs/ipod.md#home), as Scrolly's feed-end line inks
+ * its own: each lit pixel white or black, whichever has the higher WCAG contrast against the art
+ * pixel under it. White wins while (L + 0.05)^2 <= 1.05 x 0.05, so up to a relative luminance L
+ * of sqrt(0.0525) - 0.05. srgb_lin is each sRGB byte's linear value in 1/65535; L is summed in
+ * 1/(10000 x 65535), so INK_WHITE_MAX is that bound at the same scale. */
+static const unsigned short srgb_lin[256] = {
+    0, 20, 40, 60, 80, 99, 119, 139, 159, 179, 199, 219, 241, 264, 288, 313, 340, 367, 396, 427,
+    458, 491, 526, 562, 599, 637, 677, 718, 761, 805, 851, 898, 947, 997, 1048, 1101, 1156,
+    1212, 1270, 1330, 1391, 1453, 1517, 1583, 1651, 1720, 1790, 1863, 1937, 2013, 2090, 2170,
+    2250, 2333, 2418, 2504, 2592, 2681, 2773, 2866, 2961, 3058, 3157, 3258, 3360, 3464, 3570,
+    3678, 3788, 3900, 4014, 4129, 4247, 4366, 4488, 4611, 4736, 4864, 4993, 5124, 5257, 5392,
+    5530, 5669, 5810, 5953, 6099, 6246, 6395, 6547, 6700, 6856, 7014, 7174, 7335, 7500, 7666,
+    7834, 8004, 8177, 8352, 8528, 8708, 8889, 9072, 9258, 9445, 9635, 9828, 10022, 10219, 10417,
+    10619, 10822, 11028, 11235, 11446, 11658, 11873, 12090, 12309, 12530, 12754, 12980, 13209,
+    13440, 13673, 13909, 14146, 14387, 14629, 14874, 15122, 15371, 15623, 15878, 16135, 16394,
+    16656, 16920, 17187, 17456, 17727, 18001, 18277, 18556, 18837, 19121, 19407, 19696, 19987,
+    20281, 20577, 20876, 21177, 21481, 21787, 22096, 22407, 22721, 23038, 23357, 23678, 24002,
+    24329, 24658, 24990, 25325, 25662, 26001, 26344, 26688, 27036, 27386, 27739, 28094, 28452,
+    28813, 29176, 29542, 29911, 30282, 30656, 31033, 31412, 31794, 32179, 32567, 32957, 33350,
+    33745, 34143, 34544, 34948, 35355, 35764, 36176, 36591, 37008, 37429, 37852, 38278, 38706,
+    39138, 39572, 40009, 40449, 40891, 41337, 41785, 42236, 42690, 43147, 43606, 44069, 44534,
+    45002, 45473, 45947, 46423, 46903, 47385, 47871, 48359, 48850, 49344, 49841, 50341, 50844,
+    51349, 51858, 52369, 52884, 53401, 53921, 54445, 54971, 55500, 56032, 56567, 57105, 57646,
+    58190, 58737, 59287, 59840, 60396, 60955, 61517, 62082, 62650, 63221, 63795, 64372, 64952,
+    65535
+};
+#define INK_WHITE_MAX 117392049u
+
+/* The bar's rows over the pane, w x h at fb (the screen's BGRA8888, pitch words a row), as its
+ * background and glyphs left them on the flat ground (BGRA): each pixel becomes the art's (art,
+ * the frame's RGBA8888, apitch words a row), and a glyph pixel blends the art's contrast ink over
+ * it by the glyph's share, its greatest channel's distance from the ground (an antialiased edge,
+ * or the slim battery's dim outline, a part). test/fw/test_coverflow.py */
+void home_ink(unsigned *fb, int pitch, const unsigned *art, int apitch, int w, int h,
+              unsigned ground) {
+    for (int y = 0; y < h; ++y, fb += pitch, art += apitch)
+        for (int x = 0; x < w; ++x) {
+            unsigned f = fb[x], a = bgra(art[x]), c = 0;
+            for (int s = 0; s < 24; s += 8) {
+                int d = (int)(f >> s & 255) - (int)(ground >> s & 255);
+                unsigned e = (unsigned)(d < 0 ? -d : d);
+                c = e > c ? e : c;
+            }
+            if (c) {
+                unsigned l = 722u * srgb_lin[a & 255] + 7152u * srgb_lin[a >> 8 & 255] +
+                             2126u * srgb_lin[a >> 16 & 255];
+                a = lerp(a, l <= INK_WHITE_MAX ? 0xffffffffu : 0xff000000u, c + (c >> 7));
+            }
+            fb[x] = a;
+        }
+}
+
+/* The screen's buffer while canvas draws straight into it (nightshift.c's warm reads it the same
+ * way: 375 words a row, BGRA8888), else 0. */
+static unsigned *screen_fb(void *canvas) {
+    void *lcd = P(canvas, CANVAS_LCD);
+    if (!lcd || I(lcd, LCD_DRAW_MODE) != LCD_DRAW_NORMAL || I(lcd, LCD_FORMAT) != LCD_BGRA8888 ||
+        I(lcd, LCD_W) != 375 || I(lcd, LCD_H) != 320 || I(lcd, LCD_LINE_LENGTH) != 375 * 4)
+        return 0;
+    return P(lcd, LCD_OFFLINE_FB);
+}
+
+/* The pane's rows in the bar that canvas's clip lets through, x y w h on screen; 0 for none. */
+static int bar_rows(void *canvas, int *r) {
+    int old[4], up = pane_up();
+    return clip_within(canvas, old, r, pane_x(), 320 - client_h() - up, pane_w(), up);
+}
+
 /* The bar's background (ringnav_paint_bg), with Home on top and still: the pane's rows above Home's
  * window, the cover's top, as Home's own paint draws none outside its window. A set with no
  * split_art_up draws nothing. Under a window's slide Home is a snapshot, so the rows wait for
- * it. */
+ * it. Where the canvas draws on the screen itself the rows keep the bar's flat ground for now: the
+ * bar's glyphs paint on it, and its border paint (coverflow_home_clip) puts the art there with
+ * them inked (home_ink). Elsewhere the art is drawn here, under the glyphs as they are. */
 void coverflow_home_bar(void *canvas, void *top) {
-    int up = pane_up();
+    int up = pane_up(), r[4];
+    home.ink_bar = 0;
     if (!up || !home.art || top != home.win || !widget_get_visible(home.art) || !home.tw ||
         !pane_covers() || window_manager_is_animating(window_manager()) || !home_frame())
         return;
+    unsigned *fb = screen_fb(canvas);
+    if (fb) {
+        if (bar_rows(canvas, r)) {
+            home.ground = fb[r[1] * 375 + r[0]]; /* the background just painted, no glyph yet */
+            home.ink_bar = *(void *const *)system_bar;
+        }
+        return;
+    }
     int src[4] = { 0, 0, pane_w(), up }, dst[4] = { pane_x(), 320 - client_h() - up, src[2], up };
     canvas_draw_image(canvas, home.frame, src, dst);
+}
+
+/* The bar's border paint, its glyphs drawn: the art into the rows coverflow_home_bar left, the
+ * glyphs over it inked by contrast. Only the pixels inside the clip, at most the pane's rows. */
+static void home_ink_bar(void *canvas) {
+    int r[4], top = 320 - client_h() - pane_up(), pw = pane_w();
+    unsigned *fb = screen_fb(canvas);
+    home.ink_bar = 0;
+    if (!fb || !bar_rows(canvas, r)) return;
+    const unsigned *art = (const unsigned *)bitmap_lock_buffer_for_read(home.frame);
+    if (!art) return;
+    home_ink(fb + r[1] * 375 + r[0], 375, art + (r[1] - top) * pw + (r[0] - pane_x()), pw, r[2],
+             r[3], home.ground);
+    bitmap_unlock_buffer(home.frame);
 }
 
 /* The art paints only inside its panel and the lists only left of it, so a sliding list
@@ -4741,6 +4842,10 @@ void coverflow_home_bar(void *canvas, void *top) {
  * origin is the widget's) before stock draws it, and ringnav_paint puts the old clip back after its
  * children, the pan's frame painted inside it first. */
 void coverflow_home_clip(void *w, void *canvas, int begin) {
+    if (w == home.ink_bar && !begin && w) {
+        home_ink_bar(canvas);
+        return;
+    }
     if (!w ||
         (w != home.art && w != home.list && w != home.sets && w != home.lib && w != home.stream))
         return;

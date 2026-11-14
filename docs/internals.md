@@ -536,7 +536,7 @@ is `320` less the bar of the set `theme_boot` wrote (`st.geom`), the window's he
 bar. Cover Flow's views, Home's art panel, its pan frame, render loop and clip read it, and the
 battery slot (`bar_sync`) takes the same bar. Before a set is written, after a failed `theme_boot`
 and while a switch waits for its restart, both stay SET0's. The page fallbacks
-(`widget_get_prop_int(page, "h", 290)`) stay sized for 290 and `DRIFT_TEXELS` for 294. On the
+(`widget_get_prop_int(page, "h", 290)`) stay sized for 290, and `DRIFT_TEXELS` for a pane the screen's height (a `split_art_up` as tall as the bar). On the
 build side `Geometry` and `with_geometry(g)` (`tools/ipod.py`) drive `ipod_home`, `status_bar`,
 `playing_page` and `patch_asset`; `patch_code` bakes `SET0`.
 

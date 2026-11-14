@@ -410,7 +410,7 @@ pattern.
 | Q2 Pod screen                       | Pattern                     | Notes                                                                                                      |
 | ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock |
-| Home (Split)                        | List row beside art         | Rows to x 204 (bar 16 to 188, chevrons 176); the art from x 196, y 52 to the edges, panning slowly        |
+| Home (Split)                        | List row beside art         | Rows to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges, panning slowly; the status row's play state and battery over it, each pixel white or black by contrast |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Library                             | List row                    |                                                                                                            |
 | Albums                              | Two-line row with art       |                                                                                                            |
@@ -479,7 +479,9 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - Menus as the inset modal over the page ([Menus](#menus)): the set's `modal`, `patch/menu_modal.c`, the
   Phosphor symbols as the theme's own art.
 - Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_inset` (the art from
-  x 196 and y 52 to the edges, its top rows painted by the bar, panning slowly across its 110 % zoom with an
+  x 196 and the top edge to the edges, its top 58 rows painted by the bar with the status row's play state and
+  battery over them, each of their pixels white or black, whichever has the higher WCAG contrast against the art
+  under it (`home_ink`, approved from `mock_split_top.py` on 2026-11-14), panning slowly across its 110 % zoom with an
   eased turn at each end and 2 % of the zoom kept clear of the pane at each edge, so a cover's own border never
   shows), and the lists Home's rows open as full-width pages with the art hidden (`home.lists.full`).
 - The toast, the confirm as a dialog page and the empty note (`dialog.confirm.painter="oled"`,
