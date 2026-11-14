@@ -1715,6 +1715,29 @@ def test_now_playings_rate_opens_the_picker_over_it(hold, recs, ui, st, rates):
     assert st('rate_on', C.c_void_p).value == hold.page and rates('rate_album', C.c_uint).value == 0
 
 
+def test_oled_rates_in_the_inset_modal(hold, recs, ui, st, rates, fw):
+    """A modal set's rating picker (Now Playing's Centre cycle, its menu's Rate) is the inset modal's picker: a row for
+    each rating, no hearts to five, the current one checked and selected; Centre on a row keeps that rating and closes
+    the picker, Return closes it with the rating as it was."""
+    use_set(st, 'oled')
+    songs = [song(recs, i) for i in range(3)]
+    hold.now_playing(songs)
+    st('rate_win', C.c_void_p).value = hold.page
+    key = fw.fn('listen_key', C.c_uint, C.c_void_p)(songs[1])
+    kept = lambda: fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, key)
+    fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)(0, key, 2)
+    assert fw.fn('rate_open', C.c_int)() == 1 and not st('rate_on', C.c_void_p).value
+    view = hold.view()
+    assert ui.rows(view) == ['Unrated', '1 Heart', '2 Hearts', '3 Hearts', '4 Hearts', '5 Hearts']
+    assert [ui.nodes[item].props.get('_mm_icon') for item in ui.kids(view)] == ['', '', 'check', '', '', '']
+    assert ui.prop(view, '_ringnav_index', -1) == 2
+    ui.click(ui.find(view, '4 Hearts'))
+    ui.due('pick_run')
+    assert kept() == 4 and hold.dialog not in ui.stack
+    fw.fn('rate_open', C.c_int)()
+    assert ui.key(hold.dialog, KEY_RETURN) == STOP and hold.dialog not in ui.stack and kept() == 4
+
+
 def advanced(fw, kind, value):
     """Playback's own Shuffle, Repeat or Group by, as its menu sets them."""
     return fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(kind, value)

@@ -687,6 +687,7 @@ void modal_paint(void *w, void *canvas);
 int modal_rows_of(void *w);
 int modal_win(void *w);
 void modal_row_paint(void *w, void *canvas, void *row, rect_t r, int selected);
+int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
 void modal_more(void *win);
 void modal_playlist_more(void *win);
 /* song_sort.c: Songs' order under the inset modal's Sort picker */

@@ -247,12 +247,12 @@ void modal_row_paint(void *w, void *canvas, void *row, rect_t r, int selected) {
     stock_canvas_set_text_color(canvas, text);
 }
 
-/* A picker in the panel (Multiple Speed's): stock's sortselect dialog, its rows rebuilt as names,
- * the current one checked, as the hold menu's choices are (navigation.c qm_open). The rows of the
- * dialog over which it opens, under, hide while it is up, and with them its dim and panel, so one
- * panel shows; they come back on the picker's close, the selection where it was. The dialog itself
- * stays shown: a hidden window would hand the keys to the page under it. A pick runs from the
- * next loop pass, after the close, with the picker's index. */
+/* A picker in the panel (Multiple Speed's, ratings.c's): stock's sortselect dialog, its rows
+ * rebuilt as names, the current one checked, as the hold menu's choices are (navigation.c qm_open).
+ * The rows of the dialog over which it opens, under, hide while it is up, and with them its dim and
+ * panel, so one panel shows; they come back on the picker's close, the selection where it was. The
+ * dialog itself stays shown: a hidden window would hand the keys to the page under it. A pick runs
+ * from the next loop pass, after the close, with the picker's index. 1 if it opened. */
 static struct {
     void (*pick)(int i);
     void *dialog, *under;
@@ -292,16 +292,15 @@ static int pick_gone(void *dialog, void *event) {
     return 0;
 }
 
-static void modal_pick(void *under, const char *const *names, int n, int current,
-                       void (*pick)(int i)) {
+int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i)) {
     void *wm = window_manager(), *page = window_manager_get_top_window(wm);
-    if (pk.dialog || n <= 0) return;
+    if (pk.dialog || n <= 0) return 0;
     navigator_to("dialog/sortselect_dialog");
     void *dialog = window_manager_get_top_window(wm);
-    if (dialog == page) return;
+    if (dialog == page) return 0;
     if (tk_strcmp(widget_get_prop_str(dialog, "name", ""), "sortselect_dialog")) {
         window_close(dialog);
-        return;
+        return 0;
     }
     void *back = widget_lookup(dialog, "img_return", 1),
          *view = widget_lookup(dialog, "scroll_view", 1);
@@ -326,6 +325,7 @@ static void modal_pick(void *under, const char *const *names, int n, int current
     if (under) widget_set_visible(under, 0, 0);
     modal_frame(dialog, widget_lookup(dialog, "list_view", 1));
     ringnav_select(view, current >= 0 && current < n ? current : 0, n);
+    return 1;
 }
 
 /* Now Playing's More (onlinematch.c ringnav_playermore): a dialog under a modal set

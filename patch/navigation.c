@@ -4900,10 +4900,11 @@ static void np_stage(unsigned stage) {
  * press shows the next control the wheel sets, scrubber, shuffle, repeat, rating, then back to
  * rest, where the wheel is the volume's (Apple's iPod classic guide: scrubber, Genius, shuffle,
  * rating, lyrics). The scrub's own press ends it (scrub_end seeks) and goes on to shuffle; the
- * rating picker's Centre saves and closes it (rate_key), back at rest. Shuffle and repeat have
- * no picker of their own: the theme's pair rings the one the wheel steps (np_modes); under a
- * theme without the pair the cycle skips them. A press held NP_HOLD_MS or longer, short of
- * stock's long press (Shut Down), turns the screen off instead, as stock's release does. */
+ * rating picker's Centre saves and closes it (rate_key; a modal set's picker, ratings.c
+ * rate_modal), back at rest. Shuffle and repeat have no picker of their own: the theme's pair
+ * rings the one the wheel steps (np_modes); under a theme without the pair the cycle skips them. A
+ * press held NP_HOLD_MS or longer, short of stock's long press (Shut Down), turns the screen off
+ * instead, as stock's release does. */
 #define NP_HOLD_MS 400
 static int np_centre(unsigned now) {
     int held = st.center_down_at && now - st.center_down_at >= NP_HOLD_MS;

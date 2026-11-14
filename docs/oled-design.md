@@ -309,6 +309,8 @@ an inset modal over the page, which stays on screen dimmed half way to black; no
 - **A setting** (Sorting, Speed, Shuffle, Repeat, Group by) has its symbol before the label, the
   label 26 px further in, and its value alone at the right in Text Secondary; Centre opens a picker
   in the same panel, the current choice with the accent's check before its label.
+- **Rating** (Now Playing's Centre cycle, a menu's Rate) is a picker in the same panel: Unrated, 1 Heart
+  to 5 Hearts, the current one checked; Centre keeps a row's rating and closes, Return closes.
 - **Gaps:** a setting heading the menu stands 12 px above the actions; a destructive row (Delete
   Song) comes last, 12 px below them, and asks before it acts. Space, never a rule.
 - The menu opens on its first action, lit; the wheel moves, Centre picks, Return closes it back to
