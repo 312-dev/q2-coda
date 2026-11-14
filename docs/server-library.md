@@ -49,11 +49,12 @@ channel, and an app that does not declare it is never read.
 #Q2CAT/1	seq=<n>	account=<8 hex>	rows=<N>
 s	<sid>	<title>	<artist>	<album artist>	<album>	<album id>	<year>	<disc>	<track>	<seconds>	<genre>	<suffix>	<local path or empty>	<size bytes>	<musicBrainzId or empty>
 p	<pid>	<playlist name>
-i	<pid>	<sid>
+i	<pid>	<sid>	<card path or empty>
 ```
 
   `s` rows are server songs **not already synced** (a synced song is a card row; listing it again
-  would show it twice). `p` and `i` rows are server playlists and their items in order.
+  would show it twice). `p` and `i` rows are server playlists and their items in order; an `i`
+  row's card path is a synced song's file, which has no `s` row.
   `<size bytes>` is the server's `size` and `<musicBrainzId or empty>` its OpenSubsonic
   `musicBrainzId` (the recording's id), both for the duplicate rule below. `<local path>` is a
   complete offline copy on the card (the Stream Cache), empty when there is none.
@@ -66,14 +67,14 @@ i	<pid>	<sid>
 - **Server state:** `server=up` or `server=down` in the app's existing `/tmp/q2-<id>.state`. With
   neither, the server counts as up while Wi-Fi is connected.
 - **Answer:** `/tmp/q2-<id>.catalogue.done`, `<seq> ok <rows>` or `<seq> error <why>`, as the
-  `library` extension answers. `<rows>` counts the `s` rows read, duplicates included.
+  `library` extension answers. `<rows>` counts the `s`, `p` and `i` rows read, as the header's `rows=` does.
 - **Play request:** `/tmp/q2-<id>.catplay`, written whole by the firmware when a list with server
-  rows is played online: `#Q2CATPLAY/1\tseq=<n>\tstart=<index>` on its first line, then one line
-  per row of the list in its order, `s\t<sid>` for a server row or `f\t<card path>` for a card row.
-  `<index>` counts those lines from 0. The app answers with its usual `.play` (an m3u of card
-  paths, Stream Cache copies for server songs, each waited for until it is there), the first entry
-  being the row at `<index>`. A `.play` that changes within `CATPLAY_WAIT_MS` (4 s) is the
-  answer; otherwise the firmware plays the list itself from card rows and offline copies.
+  rows is played online: `<seq> <start>` on its first line, then one line per row of the list in
+  its order, a server row's `fileurl` or a card file's path. `<start>` counts those lines from 0.
+  The app answers with its usual `.play` (`<seq> <m3u>`, the seq the catplay's): an m3u of card
+  paths from the row at `<start>` on, Stream Cache copies for server songs, each waited for until
+  it is there. A `.play` that changes within `CATPLAY_WAIT_MS` (4 s) is the answer; otherwise the
+  firmware plays the list itself from card rows and offline copies.
 
 ### Duplicates
 
@@ -203,21 +204,22 @@ for server rows and for synced card files alike, whenever the Q2 can reach the s
 - **Which songs:** server rows by their sid; a synced card file by the sid the Subsonic app recorded
   when it downloaded it, so the app owns the path-to-sid table and the firmware never needs one.
 - **Out:** each change on the Q2 is appended to `/mnt/mmc/.<id>/ratings.out`
-  (`<listen_key>\t<sid or empty>\t<hearts>\t<unix time>\t<path>`); the app sends it when the server
-  answers and removes the lines it sent. Offline changes wait there, as plays and stars already do.
-  `<listen_key>` is 8 lowercase hex digits (the firmware's own key, for the app to echo or ignore);
-  `<sid>` is filled for a server row and for a card file the duplicate rule linked to one;
-  `<path>` is the song's path as the Library has it (a card path, or a server row's `fileurl`), so
-  the app finds a synced file's sid in its own path-to-sid table. Lines go to every app that
-  declared `ratings=1`.
+  (`<listen_key>\t<sid or empty>\t<hearts>\t<unix time>`); the app sends it when the server answers
+  and removes the lines it sent. Offline changes wait there, as plays and stars already do.
+  `<listen_key>` is 8 lowercase hex digits: the FNV-1a 32 of the song's path (its bytes, then one
+  more multiply by the prime, never 0; a CUE track's start hashed in after), which the app computes
+  for its synced files to find their sids. `<sid>` is filled for a server row and for a card file
+  the duplicate rule linked to one. Lines go to every app that declared `ratings=1`. The app takes
+  the file by renaming it (to `ratings.out.taking`, whose lines it moves to `ratings.out.sending`
+  until they are sent), so the firmware only ever creates or appends to `ratings.out`, and the app
+  leaves out of `ratings.in` every song with a line still to send.
 - **In:** on each connection the app reads `userRating` and `starred` from the walk it already makes
   (`search3` pages carry both) and writes the differences to `/mnt/mmc/.<id>/ratings.in`, whole
-  (temp and rename) and only while no `ratings.in` is there: one line per song,
-  `<sid>\t<card path or empty>\t<hearts>\t<unix time>`, the card path for a synced file (the
-  firmware finds a server row, or a card file linked to one, by its sid). `<unix time>` is the
-  server's `starred` date where there is one, else 0. The firmware applies the lines through the
-  same path as a rating made on the device, skipping a song whose own `ratings.out` line is newer,
-  then deletes the file.
+  (temp and rename), in `ratings.out`'s columns: `<listen_key>\t<sid>\t<hearts>\t<unix time>`. The
+  firmware applies each line through the same path as a rating made on the device (the hearts by
+  `listen_key`; My Fav, for five, by the song's path: a server row's or a linked file's from its
+  sid, any other card file's found by its key in songtable), skipping a song whose own
+  `ratings.out` line is newer, then deletes the file.
 - **Conflicts:** the newer change wins, by the time the Q2 recorded it against the server's
   `starred` date where one exists; a rating has no server date, so a pending local change is sent
   before the server's value is read back.
