@@ -7903,6 +7903,7 @@ int ipod_list_layout(void *layout, void *view) {
         if (widget_get_visible(item)) set_row(item);
     }
     if (wifi) wifi_rows_post(view);
+    if (settings && about_list(list)) about_rows(view);
     return ret;
 }
 

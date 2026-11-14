@@ -543,6 +543,7 @@ typedef struct {
     int on, focus, adjusting; /* focus: 0 the tabs, 1 the switch, 2 Presets, 3 Reset, 4.. bands */
     double gain[3], max;
 } eq_rows_t;
+void lock_grid(void *view); /* settings_pages.c: Lock Screen's pictures on a set_switch theme */
 int eq_rows(void);
 void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e);
 void eq_tabs_paint(void *w, void *canvas, int simple, int focus);

@@ -453,6 +453,7 @@ int lockscreen_rows(void *win) {
         lk.thumb[id] = img; /* a rebuilt grid's thumbnails are the same size: small[id] stays */
         widget_on(img, EVT_DESTROY, forget, img);
     }
+    lock_grid(view);
     switch_row(win, view);
     return result;
 }

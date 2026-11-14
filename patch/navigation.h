@@ -465,6 +465,10 @@ int wifi_sig(const char *image); /* stock's signal image's level, 1-4, else 0 */
 void wifi_rows_pre(void *view);
 void wifi_rows_post(void *view);
 void wifi_mark(void *w, void *canvas, int level, int selected);
+
+/* settings_pages.c: a set_switch theme's About page as an inert table, from ipod_list_layout */
+int about_list(void *list);
+void about_rows(void *view);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
 void marquee_fade(void *w, void *canvas);
