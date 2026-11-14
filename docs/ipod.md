@@ -921,7 +921,7 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
 - **The grid.** 32 px rows from y 58 with their text at x 24, seven to a screen: the list ends at y 282, above
   the bottom corners, and the strip below it stays black (`list_fit`). Chevrons and values share one column 28 px
   from the right edge on every row. Settings, the Library, Home (Full and Split) and stock's own list pages all
-  take it; Albums and Search are two lines at 52 px, four to a page, the covers with 4 px corners. A row that
+  take it; Albums and stock's search results are two lines at 52 px, four to a page, the covers with 4 px corners. A row that
   opens a page and shows a value (Crossfade, Resume Songs) has the value just left of its chevron. The status row
   names the Library and Songs by those words, where stock calls both "Local Songs".
 - **Colour.** Black (white in Light Mode), white text, second lines in Text Tertiary (`#858585`), a settings row's
@@ -950,6 +950,18 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
   selected row's artist on the right column), Right (every row's) or Off. **Song Length**: Albums (the default), All
   Lists or Off; with a length on the right column, Right and Selected Row put the artist inline. Lists Q2 Pod builds
   itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep their own rows.
+- <a id="search"></a>**Search.** The Library's Search row (and Songs' pull) opens an iPod classic's letter strip, not
+  stock's search box and keyboard (`list.search.strip`, `patch/search_strip.c`): a `#1C1C1E` bar from y 216 to 254
+  with 12 px corners, the typed text in a black box at its left with the accent's caret, and A to Z, 0 to 9, a space
+  and delete passing under a fixed accent box, 17 px apart, the current one white Inter Medium, the rest Text
+  Secondary. The wheel walks the strip (round from delete to A), Centre enters the highlighted character, and, as
+  Apple's guide gives the iPod's own, Next enters a space and Previous deletes. The library's songs whose title,
+  artist or album holds the text list above it as they are typed, four single-line rows from y 58: the title in
+  20 px white, its artist after it in 15 px Text Tertiary. Return, as the iPod's Menu, moves to the results: the
+  selection bar takes the first one and the strip's highlight goes grey; the wheel moves the bar, Centre plays the
+  song with the other results after it as the queue, and a turn up from the first result, Next or Previous goes back
+  to the strip. Return on the results, or on the strip with no text or no match, closes Search. With text and no
+  match, "No results" stands in the list's place. Touch does nothing on the page.
 - **Appearance's rows.** Theme, Status Bar, Light Mode, Accent, Home, Shortcut, Battery (Icon or Percent), Song Artist
   and Song Length.
 

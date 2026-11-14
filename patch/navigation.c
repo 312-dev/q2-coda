@@ -1359,7 +1359,7 @@ static int pull_event(void *page, void *event) {
             if (!tk_strcmp(widget_get_prop_str(page, "name", ""), "radio_page"))
                 radio_search();
             else
-                stock_search(page, event);
+                library_search_open(page, event);
         }
         return STOP;
     }
@@ -2843,6 +2843,7 @@ int ringnav_paint(void *w, void *canvas) {
     battery_paint(w, canvas);
     visualizer_paint(w, canvas);
     games_paint(w, canvas);
+    search_strip_paint(w, canvas);
     /* Even a page with no navigable pane must end pending input when it is painted. */
     if (st.center_timer || st.home_surface) {
         void *wm = window_manager(), *top = window_manager_get_top_window(wm);
@@ -11285,6 +11286,8 @@ int ringnav(void *ctx, void *event) {
     if (usable() && rate_key(window_manager_get_top_window(window_manager()), key)) return STOP;
     /* A game's keys, before stock's lock filter, media keys and screen-off double Centre */
     if (usable() && games_key(window_manager_get_top_window(window_manager()), key)) return STOP;
+    if (usable() && search_strip_key(window_manager_get_top_window(window_manager()), key))
+        return STOP;
     /* Cover Flow's flip: a Centre during it does nothing. Its Return is the page's (coverflow.c
      * keyup), the wheel waits at the page's no surface (hold_wheel). */
     if (key == KEY_CENTER && coverflow_turning() && !g_power_longkey) return STOP;

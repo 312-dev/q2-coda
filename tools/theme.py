@@ -93,6 +93,7 @@ SCHEMA = {k.path: k for k in (
     key('list.marquee.fade', 'marquee_fade', 'bool'),  # a scrolling label's ends fade into what is behind it (list_marks.c)
     key('list.reopen.top', 'reopen_top', 'bool'),  # a list left by Return opens at its top when chosen again (navigation.c forget_left)
     key('list.shuffle.row', 'shuffle_row', 'bool'),  # Songs' action row reads Shuffle and takes the wheel's selection (navigation.c shuffle_key)
+    key('list.search.strip', 'search_strip', 'bool'),  # Search is an iPod's letter strip over live results (search_strip.c)
     key('playing.art.radius', 'np_art_radius', 'int', 75),  # Now Playing's art corners in px; 0: NP_ART_RADIUS's share of its size
     key('playing.modes.icons', 'np_modes', 'bool'),  # shuffle and repeat as the theme's own pair (np_bar.c np_modes)
     key('bar.fill.painter', 'painter[PAINT_BAR]', 'enum'),

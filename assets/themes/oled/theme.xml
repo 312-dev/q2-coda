@@ -71,6 +71,9 @@
     <!-- Songs', an album's and a playlist's action row reads Shuffle after Phosphor's shuffle, Accent Blue (white on the
          selection); the wheel steps onto it above the first song and Centre shuffles the list (navigation.c shuffle_key) -->
     <element name="shuffle" row="1"/>
+    <!-- Search opens an iPod classic's letter strip over the songs it matches, filtered as each letter goes in
+         (search_strip.c, docs/ipod.md#search) -->
+    <element name="search" strip="1"/>
     <element name="scrollbar" painter="wheel" w="4" right="5" top="134" bottom="206" min="8"
              dark.thumb="#e5e5e5" light.thumb="#1a1a1a" dark.track="#3a3a3a" light.track="#c5c5c5"/>
   </view>

@@ -2238,7 +2238,8 @@ def test_classic_s_library_leads_with_search_and_drops_its_icons(fw, ui, st):
     assert icons and all(w in ui.hidden for w in icons)
     assert not [w for w in images if ui.image[w] == 'list_into' and w in ui.hidden]  # the chevrons stay
     search, = [ui.kids[item][0] for item in ui.kids[view] if row_text(ui, item) == 'Search']
-    assert [fn for w, e, fn, _ in ui.handlers if w == search and e == EVT_CLICK] == [C.cast(fw.lib.stock_search, C.c_void_p).value]
+    # search_strip.c's opener, which is stock's search under every theme but OLED
+    assert [fn for w, e, fn, _ in ui.handlers if w == search and e == EVT_CLICK] == [C.cast(fw.lib.library_search_open, C.c_void_p).value]
 
 
 @pytest.mark.parametrize('theme, lead', LEADS)
