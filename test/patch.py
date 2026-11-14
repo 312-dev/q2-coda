@@ -11388,7 +11388,8 @@ def tex_of(w,h):  # the last cover loaded (opaque) as home_tex leaves it, and it
     rows=[[c_[y] for c_ in cols[:1]+cols+cols[-1:]*2] for y in range(th)]  # the edges a texel left and above, two right and below
     rows=rows[:1]+rows+rows[-1:]*2
     return dict(px=[p for r in rows for p in r],ts=tw+3,u0=(fw-PW)//2,v0=(fh-290)//2,rx=tw-fw,ry=th-fh)
-def at(r,period,t): t%=2*period; return r*256*((t if t<period else 2*period-t)>>4)//(period>>4)
+def at(r,period,t):  # drift_at: smoothstep ping-pong, s in 1/65536
+    t%=2*period; s=((t if t<period else 2*period-t)<<16)//period; return r*256*((s*s*(3*65536-2*s))>>24)>>24
 def bspline(t):  # bspline_w: the cubic B-spline's 4 weights at phase t/256, in 1/256
     s=256-t; w0=(s**3+196608)//393216; w3=(t**3+196608)//393216; w1=(3*t**3+4*16777216-6*256*t*t+196608)//393216
     return w0,w1,256-w0-w1-w3,w3

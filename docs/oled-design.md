@@ -228,8 +228,9 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   too.
 - Which list is which comes from its page: Songs' page (`allmusic_page`, which also holds a genre's songs
   and the other lists stock opens there) is mixed, the artist page's songs are an artist's, the album page is an
-  album, Folder view (`folder_page`) a folder. Lists Q2 Pod draws itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep
-  their own rows.
+  album, Folder view (`folder_page`) a folder, and an album's tracks opened from Cover Flow are an album too (their
+  status row names the album, with no row of its own above the tracks). Lists Q2 Pod draws itself (Most Played,
+  Long Songs, Ratings) keep their own rows.
 
 ### Now Playing
 
@@ -323,7 +324,7 @@ pattern.
 | Q2 Pod screen                       | Pattern                     | Notes                                                                                                      |
 | ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock |
-| Home (Split)                        | List row beside art         | Rows to x 204 (bar 16 to 188, chevrons 176); the art from x 196, y 52 to the edges, still, centre-cropped  |
+| Home (Split)                        | List row beside art         | Rows to x 204 (bar 16 to 188, chevrons 176); the art from x 196, y 52 to the edges, panning slowly        |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Library                             | List row                    |                                                                                                            |
 | Albums                              | Two-line row with art       |                                                                                                            |
@@ -332,7 +333,7 @@ pattern.
 | Artists, Genres, Composers          | List row                    |                                                                                                            |
 | Songs, a playlist's songs           | Song rows                   | The artist inline                                                                                          |
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
-| Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles                         |
+| Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; an artist's covers titled by the artist |
 | Playlists                           | Two-line row with icon      |                                                                                                            |
 | Hold menu                           | Dialog                      |                                                                                                            |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
@@ -382,8 +383,10 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - Now Playing on the set's grid (`np_art`, `np_bar_y`), its art's corners (`playing.art.radius`), its
   artist and album in Inter (`playing.artist.font`), shuffle and repeat as the theme's own glyphs
   (`playing.modes.icons`), and the marquee fades (`list.marquee.fade`).
-- Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_still` (the art from
-  x 196 and y 52 to the edges, still and centre-cropped, its top rows painted by the bar).
+- Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_inset` (the art from
+  x 196 and y 52 to the edges, its top rows painted by the bar, panning slowly across its 110 % zoom with an
+  eased turn at each end and 2 % of the zoom kept clear of the pane at each edge, so a cover's own border never
+  shows), and the lists Home's rows open as full-width pages with the art hidden (`home.lists.full`).
 
 Still to build:
 

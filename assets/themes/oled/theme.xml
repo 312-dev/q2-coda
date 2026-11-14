@@ -12,7 +12,8 @@
        art at x 24, the text at 72 (list.art below). Text y puts each line where the design's baselines are. Home in
        Split: the menu's rows 204 px wide, so the bar ends at 188 and the chevrons stand at 176 (the right column from
        the row's edge); the playing album's art from x 196 and y 52 to the screen's right and bottom edges, the glass
-       rounding its corner, still and centre-cropped (coverflow.c home_split). -->
+       rounding its corner, panning slowly across its 110 % zoom with 2 % of the zoom kept clear at each edge, so a
+       cover's own border never shows (coverflow.c drift_axis). -->
   <geometry name="oled" bar="58" pitch="32" body="32" art="40" art_inset="6" art_pitch="52"
             art_body="52" text_art="0" text_art_inset="0" lib_pitch="32" lib_body="32" lib_inset="0"
             lib_art="0" title24_y="4" title_y="6" meta_y="8"
@@ -24,7 +25,7 @@
             stock_row="32" stock_body="32" stock_title_y="0" stock_title_h="32" toolbar="0"
             search_row="52" search_body="52" search_art="0" search_title_y="4" search_title24_y="4" search_title_h="28"
             search_meta_y="31" search_meta_h="20" np_art="150" np_bar_y="228"
-            split_row="204" split_art="196" split_art_up="6" split_still="1"/>
+            split_row="204" split_art="196" split_art_up="6" split_inset="2"/>
   <geometry set="oled"/>
   <!-- Colour (oled-design.md Colour): Accent Blue, one value for the bar, the progress fill and every mapped red, as
        its own scheme's five tones; white text on it in both halves; second lines in Text Tertiary (stock's #aaaaaa secondary text
@@ -82,6 +83,9 @@
   <view name="home">
     <element name="rows" top="0" text_x="24" full_row="375" label_end_split="44" font="inter" font_px="24" caps="0"/>
     <element name="chevron" visible="1"/>
+    <!-- In Split the art is the main menu's alone: Settings, and Library and Streaming where they open in Home's
+         window, are full-width pages (audit RULES 1) -->
+    <element name="lists" full="1"/>
   </view>
   <!-- Now Playing on the grid (oled-design.md Now Playing; the set's np_art and np_bar_y, tools/ipod.py np_grid): 6 px
        art corners, the title Inter Medium 22 (27 here), the artist and album Inter at the page's 18 (22 here), a 6 px
@@ -97,9 +101,11 @@
   </view>
   <!-- page_list's rows (the Library's Shuffle, Most Played, card apps...): the grid's 32 px rows, 52 with a detail,
        at the text inset; the status row names the page, so no title row -->
-  <!-- Cover Flow in the 262 px window under the status row: the caption as low as the window lets it sit, the album
-       in the Song title role (22, 27 here) and the artist in the Artist role (18, 22 here) -->
-  <view name="coverflow"><element name="caption" name_px="27" artist_px="22" text_y="210" artist_y="22"/></view>
+  <!-- Cover Flow in the 262 px window under the status row (oled-design.md Screens: covers on black, no reflection
+       floor): no reflection under the covers, and the caption right under them, ending above y 282 on screen with the
+       lists, the album in the Song title role (22, 27 here) and the artist in the Artist role (18, 22 here) -->
+  <view name="coverflow"><element name="shelf" reflect="0"/>
+    <element name="caption" name_px="27" artist_px="22" text_y="178" artist_y="22"/></view>
   <view name="page">
     <element name="rows" height="32" detail_height="52" text_x="24" title_y="4" title_h="24" detail_y="31" detail_h="20"/>
     <element name="title" height="0"/>

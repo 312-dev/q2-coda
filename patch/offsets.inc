@@ -269,8 +269,9 @@ static inline int arc_out(int r, int y) {
 #define HOME_SPLIT_W 187
 #define LOCALMUSIC_BG 0x534fa0 /* the Library page's EVT_WINDOW_BACKGROUND: stops its play gif's timer */
 #define STREAM_BG 0x540d30 /* Streaming's, the same */
-/* Split's cover pans (docs/ipod.md#home): zoomed DRIFT_ZOOM_PCT, each axis a linear ping-pong of
- * its own period across the zoom's margin (about 1.5 px/s on a square cover, as iPod.js's), drawn
+/* Split's cover pans (docs/ipod.md#home): zoomed DRIFT_ZOOM_PCT, each axis an eased ping-pong of
+ * its own period across the zoom's margin (about 1.5 px/s on average on a square cover, as
+ * iPod.js's; coverflow.c drift_at), drawn
  * at sub-pixel positions every DRIFT_TICK_MS, a step at most DRIFT_MAX_STEP_MS. A cover whose zoomed
  * fit passes DRIFT_TEXELS (four panels) stays still. Tuned by eye; 2 x DRIFT_X_MS x DRIFT_Y_MS must
  * fit in 32 bits. */

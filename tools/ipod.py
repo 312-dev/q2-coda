@@ -107,12 +107,13 @@ class Geometry:
     np_bar_y: int = 0
     # Home in Split (coverflow.c home_split): the menu's width, which its rows, chevrons and selection bar take as theirs;
     # the art's pane from split_art to the screen's right edge; split_art_up rows of the pane above the window, in the
-    # bar, which paints them (coverflow_home_bar); split_still 1 keeps the cover still and centred in its 110 % zoom,
-    # 0 pans it.
+    # bar, which paints them (coverflow_home_bar); the cover pans across its 110 % zoom, and split_inset keeps that
+    # percent of the zoomed cover clear of the pane at each edge, so a cover's own frame never shows (coverflow.c
+    # drift_axis).
     split_row: int = inc('HOME_SPLIT_W')
     split_art: int = inc('HOME_SPLIT_W')
     split_art_up: int = 0
-    split_still: int = 0
+    split_inset: int = 0
 
 
 SET0 = Geometry()
@@ -221,7 +222,7 @@ def with_geometry(g):
         NP_TIME_X=max(MARGIN, corner_x(g.bar + NP_TIMES_Y + 1, 14)))
 
 
-GEOM_VALS = ('bar', 'set_row', 'set_icon', 'batt_w', 'batt_h', 'text_x', 'lib_art', 'list_end', 'action_row', 'stream_row', 'stock_row', 'toolbar', 'status_y', 'right_x', 'list_fit', 'split_row', 'split_art', 'split_art_up', 'split_still')  # Geometry fields the payload reads at run time (themes.inc geom_vals), not immediates
+GEOM_VALS = ('bar', 'set_row', 'set_icon', 'batt_w', 'batt_h', 'text_x', 'lib_art', 'list_end', 'action_row', 'stream_row', 'stock_row', 'toolbar', 'status_y', 'right_x', 'list_fit', 'split_row', 'split_art', 'split_art_up', 'split_inset')  # Geometry fields the payload reads at run time (themes.inc geom_vals), not immediates
 
 
 def folder_pitch(g):
