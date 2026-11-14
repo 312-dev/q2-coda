@@ -62,19 +62,38 @@ int peq_number(const char *s, double *out) {
     return 1;
 }
 
+/* A line left out: counted, the first one's line, reason and a word for it kept for the message. */
+static void skip(peq_error *e, unsigned line, const char *reason, const char *what, const char *word) {
+    if (!e->skipped++) {
+        e->line = line, e->reason = reason;
+        if (what) snprintf(e->what, sizeof e->what, "%s%s", what, word ? word : "");
+        else snprintf(e->what, sizeof e->what, "line %u", line);
+    }
+}
+
+static int is(const char *t, const char *word) { return !strcasecmp(t, word); }
+
+/* Equalizer APO's configuration text (docs/internals.md#lenient-import): Preamp, Channel and
+ * Filter lines, whatever the case, "1000Hz" as "1000 Hz". Lines the Q2 can't play are left out
+ * and counted in error->skipped, the first named in error->what; text without a colon is no
+ * command, as APO takes it. Only a file too big, a NUL, an over-long line, a summed preamp or
+ * balance out of range, or nothing usable at all fails it. */
 int peq_parse(const char *text, unsigned size, peq_preset *out, peq_error *error) {
     peq_preset p;
+    peq_error none;
     peq_default(&p);
     p.count = 0;
     p.bypass = 0;
-    unsigned pos = 0, line = 0, preamp_line = 0;
-    int scope = 1; /* APO Channel: 1 both, 2 left, 3 right, as peq_band.enabled */
+    unsigned pos = 0, line = 0, preamp_line = 0, used = 0, words = 0;
+    int scope = 1, automatic = 0, graphic = 0; /* APO Channel: 1 both, 2 left, 3 right, 0 neither */
     double side[4] = {0}; /* Preamp under Channel: L or R */
+    if (!error) error = &none;
+    memset(error, 0, sizeof *error);
     if (size > PEQ_FILE_LIMIT) return error_at(error, 1, "file exceeds 16384 bytes");
     if (size >= 3 && (unsigned char)text[0] == 239 && (unsigned char)text[1] == 187 &&
         (unsigned char)text[2] == 191) pos = 3;
     while (pos < size) {
-        char buf[PEQ_LINE_LIMIT + 1], *t[16];
+        char buf[PEQ_LINE_LIMIT + 1], split[2 * PEQ_LINE_LIMIT + 2], *t[16], *d = split;
         unsigned length = 0;
         ++line;
         while (pos < size && text[pos] != '\n') {
@@ -84,101 +103,147 @@ int peq_parse(const char *text, unsigned size, peq_preset *out, peq_error *error
         }
         if (pos < size) ++pos;
         buf[length] = 0;
-        int n = 0;
+        int n = 0, colon = 0, over = 0;
         char *s = buf;
+        while (*s == ' ' || *s == '\t') ++s;
+        /* "# q2: preamp auto" is the Q2's own setting (peq_export), a comment to anything else. */
+        if (*s == '#') {
+            for (++s; *s == ' ' || *s == '\t';) ++s;
+            if (!strncasecmp(s, "q2:", 3)) {
+                for (s += 3; *s == ' ' || *s == '\t';) ++s;
+                if (!strncasecmp(s, "preamp auto", 11)) automatic = 1;
+            }
+            continue;
+        }
+        /* Words into split, each ended: a colon is one of its own, even in "Filter 1:", and a
+         * number runs into its unit ("1000Hz", "-3dB") only up to the first letter past an
+         * exponent's e. */
         while (*s && *s != '#') {
             if (*s == ' ' || *s == '\t' || *s == '\r') { ++s; continue; }
-            if (n == 16) return error_at(error, line, "unsupported filter form");
-            /* A colon is a separate token, even in "Filter 1:" and "Preamp:". */
-            if (*s == ':') { t[n++] = ":"; ++s; continue; }
-            t[n++] = s;
-            while (*s && *s != ' ' && *s != '\t' && *s != '\r' && *s != ':' && *s != '#') ++s;
-            char delimiter = *s;
-            if (*s) *s++ = 0;
-            if (delimiter == ':') {
-                if (n == 16) return error_at(error, line, "unsupported filter form");
-                t[n++] = ":";
+            if (n == 16) { over = 1; break; }
+            t[n++] = d;
+            if (*s == ':') { *d++ = *s++, *d++ = 0, colon = 1; continue; }
+            int number = (*s >= '0' && *s <= '9') || *s == '+' || *s == '-' || *s == '.' || *s == ',';
+            while (*s && *s != ' ' && *s != '\t' && *s != '\r' && *s != ':' && *s != '#') {
+                int letter = (*s | 32) >= 'a' && (*s | 32) <= 'z';
+                if (number && letter && !((*s | 32) == 'e' && ((s[1] >= '0' && s[1] <= '9') || s[1] == '-' || s[1] == '+')))
+                    break;
+                *d++ = *s++;
             }
-            if (delimiter == '#') break;
+            *d++ = 0;
         }
         if (!n) continue;
-        if (!strcmp(t[0], "Preamp")) {
+        if (!colon) { ++words; continue; } /* not a command: a title, notes, REW's header */
+        if (over) { skip(error, line, "unsupported filter form", 0, 0); continue; }
+        if (is(t[0], "Preamp")) {
             double gain;
-            if (n != 4 || strcmp(t[1], ":") || strcmp(t[3], "dB"))
-                return error_at(error, line, "expected Preamp: <gain> dB");
-            if (!peq_number(t[2], &gain) || !between(gain, -60, 24))
-                return error_at(error, line, "preamp outside -60..24 dB or invalid number");
+            if (n < 3 || n > 4 || strcmp(t[1], ":") || (n == 4 && !is(t[3], "dB")) || !peq_number(t[2], &gain) ||
+                !between(gain, -60, 24)) {
+                skip(error, line, "Preamp: -60 to 24 dB", "Preamp", 0);
+                continue;
+            }
+            if (!scope) continue; /* another channel's, its Channel line skipped */
             if (scope == 1) p.preamp += gain;
             else side[scope] += gain;
-            preamp_line = line;
+            preamp_line = line, ++used;
             continue;
         }
-        if (!strcmp(t[0], "Channel")) {
-            int l = 0, r = 0;
-            if (n < 3 || strcmp(t[1], ":")) return error_at(error, line, "expected Channel: L, R or all");
+        if (is(t[0], "Channel")) {
+            int l = 0, r = 0, other = 0;
+            if (n < 3 || strcmp(t[1], ":")) { skip(error, line, "expected Channel: L, R or all", "Channel", 0); continue; }
             for (int i = 2; i < n; ++i) {
-                if (!strcmp(t[i], "L")) l = 1;
-                else if (!strcmp(t[i], "R")) r = 1;
-                else if (!strcmp(t[i], "all")) l = r = 1;
-                else return error_at(error, line, "only channels L, R and all are supported");
+                if (is(t[i], "L") || !strcmp(t[i], "1")) l = 1;
+                else if (is(t[i], "R") || !strcmp(t[i], "2")) r = 1;
+                else if (is(t[i], "all")) l = r = 1;
+                else if (!other++) skip(error, line, "channels L, R and all only", "Channel ", t[i]);
             }
-            scope = l && r ? 1 : l ? 2 : 3;
+            scope = l && r ? 1 : l ? 2 : r ? 3 : 0;
+            used += scope != 0;
             continue;
         }
-        if (strcmp(t[0], "Filter")) return error_at(error, line, "unsupported command");
+        if (is(t[0], "GraphicEQ")) graphic = 1;
+        if (strncasecmp(t[0], "Filter", 6)) { skip(error, line, "unsupported command", t[0], 0); continue; }
         int k = 1;
+        for (s = t[0] + 6; *s >= '0' && *s <= '9'; ++s) {}
+        if (*s) { skip(error, line, "unsupported command", t[0], 0); continue; }
         if (n > 1 && strcmp(t[1], ":")) {
-            for (s = t[1]; *s; ++s) if (*s < '0' || *s > '9')
-                return error_at(error, line, "invalid filter label");
+            for (s = t[1]; *s >= '0' && *s <= '9'; ++s) {}
+            if (*s) { skip(error, line, "invalid filter label", 0, 0); continue; }
             ++k;
         }
-        if (n <= k || strcmp(t[k++], ":")) return error_at(error, line, "expected Filter [number]:");
-        if (n - k == 2 && !strcmp(t[k+1], "None")) continue; /* REW/APO empty slot */
-        if (n - k != 8 && n - k != 10) return error_at(error, line, "unsupported filter form");
+        if (n <= k + 2 || strcmp(t[k++], ":")) {
+            if (!(n == k + 2 && is(t[k+1], "None"))) skip(error, line, "expected Filter: ON <type>", 0, 0);
+            continue; /* ... ON None: REW's and APO's empty slot */
+        }
         peq_band b = {0, 0, 0, 0, 0.7071067811865476};
-        if (!strcmp(t[k], "ON")) b.enabled = scope;
-        else if (strcmp(t[k], "OFF")) return error_at(error, line, "expected ON or OFF");
+        double slope = 0, bw = 0, gain = 0;
+        int fc = 0, has_gain = 0, has_q = 0;
+        if (is(t[k], "ON")) b.enabled = scope;
+        else if (!is(t[k], "OFF")) { skip(error, line, "expected ON or OFF", 0, 0); continue; }
         ++k;
-        if (!strcmp(t[k], "PK") || !strcmp(t[k], "PEQ")) b.type = 0;
-        else if (!strcmp(t[k], "LS") || !strcmp(t[k], "LSC")) b.type = 1;
-        else if (!strcmp(t[k], "HS") || !strcmp(t[k], "HSC")) b.type = 2;
-        else return error_at(error, line, "unsupported filter type");
-        int corner = !t[k][2]; /* APO: LS/HS take a corner frequency, LSC/HSC the centre */
-        ++k;
-        if (strcmp(t[k], "Fc") || strcmp(t[k+2], "Hz") || strcmp(t[k+3], "Gain") ||
-            strcmp(t[k+5], "dB")) return error_at(error, line, "expected Fc <Hz> Hz Gain <dB> dB");
-        if (!peq_number(t[k+1], &b.frequency) || !peq_number(t[k+4], &b.gain))
-            return error_at(error, line, "invalid frequency or gain number");
-        k += 6;
-        if (k < n) {
-            if (strcmp(t[k], "Q") || !peq_number(t[k+1], &b.q))
-                return error_at(error, line, "expected Q <number>");
-        } else if (!b.type) return error_at(error, line, "peaking filter requires Q");
+        const char *type = t[k++];
+        if (is(type, "PK") || is(type, "PEQ") || is(type, "Modal")) b.type = 0;
+        else if (is(type, "LS") || is(type, "LSC")) b.type = 1;
+        else if (is(type, "HS") || is(type, "HSC")) b.type = 2;
+        else {
+            if (b.enabled && !is(type, "None")) skip(error, line, "unsupported filter type", type, " filter");
+            continue;
+        }
+        int corner = !type[2], bad = 0; /* APO: LS/HS take a corner frequency, LSC/HSC the centre */
+        /* A shelf's slope, "LS 6dB" or "LSC 12 dB", comes first; then each named value. */
+        if (b.type && k + 1 < n && is(t[k+1], "dB") && peq_number(t[k], &slope)) k += 2;
+        while (k < n && !bad) {
+            if (is(t[k], "Fc") && k + 2 < n && is(t[k+2], "Hz")) fc = peq_number(t[k+1], &b.frequency), bad = !fc, k += 3;
+            else if (is(t[k], "Gain") && k + 2 < n && is(t[k+2], "dB")) has_gain = 1, bad = !peq_number(t[k+1], &gain), k += 3;
+            else if (is(t[k], "Q") && k + 1 < n) has_q = 1, bad = !peq_number(t[k+1], &b.q), k += 2;
+            else if (is(t[k], "BW") && k + 2 < n && is(t[k+1], "Oct")) bad = !peq_number(t[k+2], &bw) || bw <= 0, k += 3;
+            else bad = 1;
+        }
+        b.gain = gain;
+        /* APO takes bandwidth over Q on a peak, at the rate playing; here at 48 kHz, as the
+         * graph and Auto's figure: Q = 1 / (2 sinh(ln 2 / 2 * BW * w / sin w)). A shelf ignores it. */
+        if (!bad && fc && has_gain && !b.type && bw && between(b.frequency, 20, 20000)) {
+            double w = 6.283185307179586 * b.frequency / 48000, x = bw / 2 * w / sin(w);
+            b.q = 1 / (pow(2, x) - pow(2, -x));
+            has_q = 1;
+        }
+        if (bad || !fc || !has_gain || (!b.type && !has_q)) {
+            if (b.enabled) skip(error, line, "expected Fc, Gain and a peak's Q", 0, 0);
+            continue;
+        }
         if (b.type && valid_band(&b)) {
-            /* Match Equalizer APO: no Q means slope 0.9 at Fc; LS/HS with Q shift the corner to the centre. */
-            double a = pow(10, b.gain / 40), ab = a + 1 / a;
-            if (k >= n) b.q = 1 / __builtin_sqrt(ab * (1 / 0.9 - 1) + 2);
-            else if (corner) {
-                double f = pow(10, __builtin_fabs(b.gain) / 80 * ((1 / (b.q * b.q) - 2) / ab + 1));
+            /* Match Equalizer APO: a slope S (12 dB is 1), or 0.9 with neither it nor a Q, at Fc;
+             * LS and HS with either shift a corner to the centre. inverse is 1/S. */
+            double a = pow(10, b.gain / 40), ab = a + 1 / a, inverse = 1 / (slope ? slope / 12 : 0.9);
+            if (has_q && !slope) inverse = (1 / (b.q * b.q) - 2) / ab + 1;
+            else b.q = 1 / __builtin_sqrt(ab * (inverse - 1) + 2);
+            if (corner && (has_q || slope)) {
+                double f = pow(10, __builtin_fabs(b.gain) / 80 * inverse);
                 b.frequency = b.type == 1 ? b.frequency * f : b.frequency / f;
-                /* The shift can leave 20..20000 Hz; clamp instead of rejecting the whole file. */
+                /* The shift can leave 20..20000 Hz; clamp instead of leaving the band out. */
                 if (b.frequency > 20000) b.frequency = 20000;
                 if (b.frequency < 20) b.frequency = 20;
             }
         }
         if (!valid_band(&b)) {
-            if (!b.enabled) continue; /* APO ignores OFF filters; exporters fill blank slots with Fc 0 Q 0 */
-            return error_at(error, line, "range: 20..20000 Hz, -24..24 dB, Q 0.1..10");
+            /* APO ignores OFF filters; exporters fill blank slots with Fc 0 Q 0 */
+            if (b.enabled) skip(error, line, "filter outside the ranges", "band out of range", 0);
+            continue;
         }
-        if (p.count == PEQ_BANDS) return error_at(error, line, "more than 30 bands");
-        p.bands[p.count++] = b;
+        if (!scope) continue; /* another channel's, its Channel line skipped */
+        if (p.count == PEQ_BANDS) { skip(error, line, "more than 30 bands", "bands past 30", 0); continue; }
+        p.bands[p.count++] = b, ++used;
     }
     /* Per-channel preamps become the louder one's common preamp plus a balance that turns the other down. */
     p.preamp += side[2] > side[3] ? side[2] : side[3];
     p.balance = side[3] - side[2];
     if (!between(p.preamp, -60, 24)) return error_at(error, preamp_line, "summed preamp outside -60..24 dB");
-    if (!between(p.balance, -12, 12)) return error_at(error, preamp_line, "L/R preamp differ by more than 12 dB");
-    p.automatic = preamp_line ? 2 : 1; /* the file's preamp, as if picked; without one, Auto */
+    if (!between(p.balance, -12, 12)) return error_at(error, preamp_line, "L/R preamps over 12 dB apart");
+    if (!used && graphic) return error_at(error, 0, "Use the ParametricEQ file, not GraphicEQ"); /* no line to blame */
+    if (!used && error->skipped) return error_at(error, error->line, error->reason);
+    if (!used && words) return error_at(error, 1, "no Equalizer APO lines");
+    /* The file's preamp, as if picked; without one, or marked Auto, Auto */
+    p.automatic = automatic || !preamp_line ? 1 : 2;
     *out = p; /* Commit only after the complete file validates. */
     return 1;
 }
@@ -215,14 +280,14 @@ int peq_load(const char *path, peq_preset *out) {
     return 1;
 }
 
-/* magic (8 bytes) then data, fsynced under path.tmp and renamed over path. */
+/* magic (8 bytes, unless 0) then data, fsynced under path.tmp and renamed over path. */
 int peq_save_file(const char *path, const char *magic, const void *data, unsigned size) {
     char tmp[600];
     if (strlen(path) > 580) return 0;
     snprintf(tmp, sizeof(tmp), "%s.tmp", path);
     void *f = fopen(tmp, "wb");
     if (!f) return 0;
-    int ok = fwrite(magic, 1, 8, f) == 8 && fwrite(data, 1, size, f) == size;
+    int ok = (!magic || fwrite(magic, 1, 8, f) == 8) && fwrite(data, 1, size, f) == size;
     if (fflush(f) || fsync(fileno(f))) ok = 0;
     if (fclose(f)) ok = 0;
     if (ok && !rename(tmp, path)) return 1;
@@ -234,6 +299,49 @@ int peq_save(const char *path, const peq_preset *p, int replace) {
     if (!peq_valid(p)) return 0;
     if (!replace && !access(path, 0)) return 2;
     return peq_save_file(path, "Q2PEQ02", p, sizeof(*p));
+}
+
+/* v in the fewer digits of %.15g and %.17g that peq_number reads back as v. */
+static void decimal(char *s, double v) {
+    double back;
+    snprintf(s, 32, "%.15g", v);
+    if (!peq_number(s, &back) || back != v) snprintf(s, 32, "%.17g", v);
+}
+
+/* Equalizer APO's own lines (docs/internals.md#presets-on-the-card): Preamp, a balance as one
+ * side's Preamp, a Channel line where a band's side changes, and the bands as numbered Filter
+ * lines, PK, LSC and HSC with Q, since a band's frequency is the centre. OFF bands stay, for
+ * peq_parse; APO skips them. Only Auto has no APO form. */
+unsigned peq_export(const peq_preset *p, char *out, unsigned size) {
+    static const char *const types[] = {"PK", "LSC", "HSC"}, *const sides[] = {"", "all", "L", "R"};
+    char a[32], b[32], c[32];
+    unsigned n = 0;
+    int scope = 1;
+    if (!peq_valid(p)) return 0;
+    decimal(a, p->preamp);
+    decimal(b, -__builtin_fabs(p->balance));
+    n += snprintf(out, size, "# Equalizer APO preset from q2-coda. \"# q2:\" lines are the Q2's own.\n%s"
+                             "Preamp: %s dB\n", p->automatic == 2 ? "" : "# q2: preamp auto\n", a);
+    if (p->balance && n < size) /* a positive balance turns the left down */
+        n += snprintf(out + n, size - n, "Channel: %s\nPreamp: %s dB\nChannel: all\n", p->balance > 0 ? "L" : "R", b);
+    for (int i = 0; i < p->count && n < size; ++i) {
+        const peq_band *d = &p->bands[i];
+        if (d->enabled && d->enabled != scope)
+            n += snprintf(out + n, size - n, "Channel: %s\n", sides[scope = d->enabled]);
+        decimal(a, d->frequency), decimal(b, d->gain), decimal(c, d->q);
+        if (n < size)
+            n += snprintf(out + n, size - n, "Filter %d: %s %s Fc %s Hz Gain %s dB Q %s\n", i + 1,
+                          d->enabled ? "ON" : "OFF", types[d->type], a, b, c);
+    }
+    return n < size ? n : 0;
+}
+
+int peq_export_file(const char *path, const peq_preset *p, int replace) {
+    char text[4096]; /* 30 bands at 17 digits, each on its own side, take under 3.8 KB */
+    unsigned n = peq_export(p, text, sizeof text);
+    if (!n) return 0;
+    if (!replace && !access(path, 0)) return 2;
+    return peq_save_file(path, 0, text, n);
 }
 
 /* The 3EQ's fixed filters at gain dB each: a 155 Hz low shelf, a peak at 900 Hz to cut or 1750 Hz to
@@ -290,8 +398,8 @@ int eq_save_to(const char *path, const eq_state *s) {
 int eq_save(const eq_state *s) { return eq_save_to(PEQ_ACTIVE, s); }
 
 /* What plays: the mode's preset, bypassed when Off, or with hold the 3EQ's preamp alone. Only PEQ
- * plays Auto (1: the player's per-rate cut), unless picked: never picked (0) is Auto, as the editor
- * takes it. 3EQ (0) and the hold keep their saved preamp. */
+ * marks Auto (1), unless picked: never picked (0) is Auto, as the editor takes it. Either way the
+ * saved preamp is what plays, Auto's being demo's cut for every rate (peq_ui.c headroom). */
 void eq_effective(const eq_state *s, peq_preset *out) {
     *out = s->mode == EQ_3 ? s->eq3 : s->peq;
     if (s->mode == EQ_PEQ ? !out->automatic : out->automatic == 1)
@@ -390,24 +498,16 @@ double peq_auto(const peq_preset *p, int rate) {
     return v > 1 ? -decibels(v) : 0; /* no boost: +0, not -0.0 on screen */
 }
 
-/* The player's engine: Auto (1) takes the cut for this rate's own response, from the coefficients
- * just designed, in place of the saved number (the editor's 48 kHz figure). */
-static int prepare(const peq_preset *p, int rate, peq_engine *e) {
-    if (!peq_compile(p, rate, e)) return 0;
-    if (p->automatic == 1) level(e, pow(peak(e, p, rate), -0.5), p->balance);
-    return 1;
-}
-
 void peq_reset(peq_dsp *d, int rate, int channels, const peq_preset *p) {
     memset(d, 0, sizeof(*d));
     d->rate = rate;
     d->channels = channels;
     d->ramp_length = rate / 50; /* 20 ms */
-    if (!prepare(p, rate, &d->current)) d->current.bypass = 1;
+    if (!peq_compile(p, rate, &d->current)) d->current.bypass = 1; /* the saved preamp, Auto's too */
 }
 
 int peq_update(peq_dsp *d, const peq_preset *p) {
-    if (!prepare(p, d->rate, &d->pending)) return 0;
+    if (!peq_compile(p, d->rate, &d->pending)) return 0;
     d->waiting = 1; /* Latest complete update wins; never interrupt an in-flight crossfade. */
     return 1;
 }
