@@ -734,8 +734,8 @@ WHEEL_TS_READ = (0x638a4c, 0x0320f809)
 NET_TYPE_READS = ((0x5c1d6c, 0x8c4300d4), (0x5c1d70, 0x24020002), (0x5c2078, 0x8c4300d4), (0x5c207c, 0x24020002))
 # English labels renamed, as an iPod words them: Now Playing More's queue, which stock calls "Playlists"
 # (player_playlist, used nowhere else); the Library's plural categories; settings rows in title case
-# and plain words; the Lock screen help; Baidu without its (BETA); and My Fav as Favorites, US spelling, the name of
-# the row that opens it.
+# and plain words; the Lock screen help; Baidu without its (BETA); My Fav as Favorites, US spelling, the name of
+# the row that opens it; and toasts in sentence case.
 LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('msg_playlistfull', 'Playlist Is Full', 'Could not create playlist'),
     ('player_playlist', 'Playlists', 'Queue'), ('system_powermanager', 'Idle', 'Power'),
@@ -771,6 +771,9 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('msg_importplaylist', 'Import Playlist?', 'Import Playlists?'),  # it imports the whole folder
     ('fav', 'My Fav', 'Favorites'), ('local_fav', 'My Fav', 'Favorites'),  # the Favorites page's title, as Home's row names it
     ('scan_startscan', 'Scanning', 'Scan'),  # Scan specified folders' button; wifi_scan keeps its "Scanning"
+    ('msg_addplaylistsuccess', 'Added To Playlist', 'Added to Playlist'),
+    ('msg_addfavsuccess', 'Added To Fav', 'Added to Favorites'), ('msg_favsuccess', 'Added To Fav', 'Added to Favorites'),
+    ('msg_namenull', "The name can't be empty", "Name can't be empty"),
     # Screen Off Time's and Standby's choices: a number, a space, a unit (docs/oled-design.md Type)
     *((f'{page}_{n}{u}', f'{n}{u}', f'{n} {u}') for page, choices in (
         ('lighttime', ((15, 's'), (30, 's'), (1, 'min'), (2, 'min'), (5, 'min'), (30, 'min'))),
@@ -1865,7 +1868,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
          '-fno-stack-protector','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
          '-Oz','-Wall','-Wextra','-Werror','-Wno-unused-parameter']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c']
 
 def compile_payload(out):  # pragma: no mutate block
     """Compile and link the payload."""

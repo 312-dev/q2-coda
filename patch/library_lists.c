@@ -32,6 +32,7 @@ int shuffle_play(void *all) {
         config_playmode(2, 1);
         play_folder(all, at, 0xf001);
         playback_shuffle(mode); /* an order Up Next can list; stock's shuffle stays the fallback */
+        feedback_shuffled("Shuffled Songs", size); /* OLED's confirmation */
     }
     return size;
 }
@@ -49,6 +50,8 @@ static int shuffle_groups(void *ctx, void *event) {
     void *all = staged(songs_unsorted, (void *)1, &n);
     if (!playback_groups(all, (int)(long)ctx))
         toast(deque_size(all) ? "Too many songs to shuffle" : "Update Local Music first");
+    else
+        feedback_shuffled(ctx ? "Shuffled Folders" : "Shuffled Albums", (int)deque_size(all));
     deque_destroy(all);
     return 0;
 }
@@ -175,6 +178,7 @@ int most_played(void *ctx, void *event) {
     deque_destroy(from);
     st.mp_list = ranked;
     void *view = page_list_or(st.mp_page, st.mp_page, "Most Played", "No plays yet", top, 64);
+    page_fit(view);
     char name[512], detail[300];
     for (int i = 0; i < top; i++) { /* the artist, if tagged, and the play count, under the title */
         void *t = deque_at(st.mp_list, (unsigned)i);
@@ -558,6 +562,7 @@ static int era_open_decade(void *ctx, void *event) {
         return 0;
     }
     void *view = page_list(era.albums, era.albums, 0, era_name(name, from), (int)era.m + 2, 64);
+    page_fit(view);
     tk_snprintf(detail, sizeof detail, era.m == 1 ? "%u album" : "%u albums", era.m);
     page_row_detail(view, 0, "Play All", detail, era_pick);
     page_row_detail(view, 1, "Shuffle", "Every song, shuffled", era_pick);
@@ -584,6 +589,7 @@ int era_menu(void *ctx, void *event) {
     }
     if (!(era.page = page_open("era_page", era_closed, page_keyup))) return 0;
     void *view = page_list(era.page, era.page, 0, "Era", era.n, 64);
+    page_fit(view);
     char name[16], detail[32];
     for (int i = 0; i < era.n; ++i) {
         tk_snprintf(detail, sizeof detail, era.count[i] == 1 ? "%d album" : "%d albums",
@@ -623,7 +629,9 @@ static void ls_show(void) {
     if (n) qsort(v, n, sizeof *v, by_length);
     for (unsigned i = 0; i < n; i++) _deque_push_back(list, deque_at(songs, v[i].key));
     st.rt_list = list;
-    void *view = page_list(st.rt_page, st.rt_page, 0, "Long Songs", n ? (int)n : 1, 64);
+    void *view =
+        page_list_or(st.rt_page, st.rt_page, "Long Songs", "No songs over 10 minutes", (int)n, 64);
+    page_fit(view);
     char name[512], detail[300], t[16];
     for (unsigned i = 0; i < n; i++) {
         void *r = deque_at(list, i);
@@ -633,7 +641,6 @@ static void ls_show(void) {
                     artist && *artist ? artist : "", t);
         page_row_detail(view, (int)i, track_name(name, sizeof name, r), detail, rt_play);
     }
-    if (!n) page_row_detail(view, 0, "No songs over 10 minutes", 0, 0);
     free(v);
     deque_destroy(songs);
     ls.songs = 0;

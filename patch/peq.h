@@ -255,6 +255,11 @@ typedef struct {
 
 /* The payload's shared helpers: coverflow.c's pages, hashes and worker, photos.c's, navigation.c's. */
 void *text(void *parent, int x, int y, int w, int h);
+/* feedback.c: OLED's empty and offline note (docs/oled-design.md#empty-and-offline); 0 elsewhere */
+int feedback_empty(void *parent, int free, const char *message, const char *hint);
+int feedback_note(void *line, void *hint, int free);
+int feedback_below(void *w); /* the screen y under w */
+void page_fit(void *view);   /* a page_list's rows ending above the glass on a list_fit set */
 /* coverflow.c's flip panel, which navigation.c's hold menu wears under Classic */
 #define PANEL_X 40 /* the panel's first column: Cover Flow's axis less half of it */
 #define BACK_W 294 /* its width and its rows' */

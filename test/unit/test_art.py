@@ -441,14 +441,15 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     glyph (regular) in Accent Blue and white for the selection, Folder view's folder (regular) in Text Secondary (each
     half's) and white for the selection, a disabled row's caret in Text Tertiary (each half's), the pickers' check
     (bold) in Accent Blue and white for the selection, and the Wi-Fi page's signal and lock (regular) in Text Primary
-    (each half's), all from the vendored Phosphor SVGs."""
+    (each half's), and the confirmation's shuffle after a shuffle (bold) in Accent Blue, all from the vendored Phosphor
+    SVGs."""
     t = theme.builtins()[3]
     got = art.images(t)
     modes = [f'mode_{n}_{k}' for n in ('shuffle', 'repeat') for k in ('d', 'l', 'on')] + ['mode_repeat1_on']
     wifi = [f'{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'lock') for k in ('d', 'l')]
     assert set(got) == {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
-                                              'check_a', 'check_w', *modes, *wifi)}
+                                              'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi)}
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
                           ('play_d', art.STATE_PX, 0xffffff), ('play_l', art.STATE_PX, 0),

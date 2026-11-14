@@ -2195,7 +2195,9 @@ unsigned ringnav_hscroll_lull(void *w, int (*lulled)(const void *), unsigned ms)
  */
 #define BAR_ROWS geom_val(V_BAR)
 enum { FORM_NONE, FORM_PAGE, FORM_TRAY };
-static int dialogs_painted(void) { return theme()->painter[PAINT_CONFIRM] != CONFIRM_STOCK; }
+static int dialogs_painted(void) {
+    return theme()->painter[PAINT_CONFIRM] == CONFIRM_CLASSIC_LIGHT;
+}
 /* The confirm's form: the tray for the prompt confirm_over asked for, the page for any other. The
  * first confirm painted after the call takes the flag, so a prompt stock opens over it (a held
  * power key) stays a question. */
@@ -2453,6 +2455,10 @@ static void hold_paint(void *w, void *canvas, int over) {
 #define TOAST_LINE 24
 #define TOAST_PX 22
 static void toast_paint(void *w, void *canvas) {
+    if (feedback_oled()) {
+        feedback_toast_paint(w, canvas); /* OLED's pill */
+        return;
+    }
     if (!w || P(w, W_PARENT) != window_manager() || !dialogs_painted()) return;
     const char *name = widget_get_prop_str(w, "name", "");
     int qr = !tk_strcmp(name, "showsn_dialog");
@@ -2501,11 +2507,12 @@ static void paint_selection(void *w, void *canvas) {
     void *top = window_manager_get_top_window(window_manager());
     int i, shown = !st.touch_mode;
     void *own = window_of(w);
-    if (own && own != top && slides(top)) {
-        /* The page under a sliding one, painted into the animator's snapshot: draw the row it
-         * holds. Loading, recall and settling read the top page's state, so none of it runs.
-         * A pending untouch is a Return by button, which shows the row of the page behind. Home's
-         * carousel shows its selected card, as below. */
+    if (own && own != top && (slides(top) || feedback_toast(top))) {
+        /* The page under a sliding one, painted into the animator's snapshot, or under OLED's
+         * toast, which leaves the page in sight: draw the row it holds. Loading, recall and
+         * settling read the top page's state, so none of it runs. A pending untouch is a Return by
+         * button, which shows the row of the page behind. Home's carousel shows its selected card,
+         * as below. */
         if (!usable() || !load_rows(&g_menu, w) || g_menu.kind == 3) return;
         i = index_of(&g_menu, widget_get_prop_int(w, SEL, -1));
         top = own;
@@ -2667,8 +2674,16 @@ static void paint_selection(void *w, void *canvas) {
  * across the list. A row's two_lines is a few words of its children, on a pool of a few rows. A
  * page_list's rows are the view's own children, each page_detail high and named so, and every stock
  * scroll view comes here too: no walk, the screenful from the top's index, a name read only at that
- * height. Minimal stops at its empty sep. */
+ * height. Minimal stops at its empty sep. A theme with a divider (list.divider.ink) draws it under
+ * each two-line row followed by another, on the text and right columns, on neither edge of the
+ * selected row, a table's and a page_list's alike. */
 static int two_lines(void *row);
+/* A page_list's two-line row (coverflow.c page_row_detail): page_detail high, a label for its
+ * title and one for its second line (a stock row of that height, Streaming's, holds a button). */
+static int page_two(void *row) {
+    return I(row, W_H) == theme()->page_detail && widget_count_children(row) >= 2 &&
+           !tk_strcmp(widget_get_type(widget_get_child(row, 1)), "hscroll_label");
+}
 static void paint_separators(void *w, void *canvas) {
     rect_t old;
     int clip[4];
@@ -2694,6 +2709,23 @@ static void paint_separators(void *w, void *canvas) {
             rect_t r = bounds(&g_menu, i);
             if (i != sel && i + 1 != sel && r.h > geom(G_PITCH))
                 canvas_fill_rect(canvas, x, r.y + r.h - 1, end - x, 1);
+        }
+    } else if (div) { /* a page_list's two-line rows (Era, View Queue, Ratings): the same divider */
+        int top = I(w, SCROLL_Y), n = (int)widget_count_children(w), lit = -1,
+            first = top > 0 ? top / T->page_detail : 0, x = geom_val(V_TEXT_X),
+            end = I(w, W_W) - geom_val(V_RIGHT_X);
+        for (int i = first; sel_child && i < n && lit < 0; ++i) {
+            void *row = widget_get_child(w, i);
+            if (row == sel_child || P(sel_child, W_PARENT) == row) lit = i;
+        }
+        stock_canvas_set_fill_color(canvas, RGBA(div));
+        for (int i = first; i + 1 < n; ++i) {
+            void *row = widget_get_child(w, i), *next = widget_get_child(w, i + 1);
+            int y = I(row, W_Y) - top, rh = I(row, W_H);
+            if (y >= I(w, W_H)) break;
+            if (i != lit && i + 1 != lit && page_two(row) && page_two(next) &&
+                widget_get_visible(row) && widget_get_visible(next))
+                canvas_fill_rect(canvas, x, y + rh - 1, end - x, 1);
         }
     } else if (k == 2) {
         for (int i = 0; i < g_menu.n; ++i)
@@ -5996,6 +6028,7 @@ static void quick_scrub(void *w, void *canvas) {
  * ponytail: by position, any other non-button child above CONFIRM_TOP. */
 static void confirm_prompt(void *w, void *canvas) {
     if (tk_strcmp(widget_get_prop_str(w, "name", ""), "confirminfo_dialog")) return;
+    if (feedback_confirm_dress(w)) return; /* OLED's dialog page */
     int form = confirm_form(w);
     if (form) {
         confirm_dress(w, canvas, form);
@@ -6221,7 +6254,8 @@ static int title_due(const void *info) {
  * characters (stock draws a character its face lacks as nothing). */
 void bar_title_sync(void *win) {
     /* a page under the top window that writes its caption would flip the bar with each paint */
-    if (!st.bar_title || !win || win != window_manager_get_top_window(window_manager())) return;
+    if (feedback_toast(win)) win = feedback_under(win); /* OLED's toast leaves the page in sight */
+    if (!st.bar_title || !win || win != feedback_top()) return;
     static const unsigned none = 0;
     char s[256], now[256]; /* stock writes nothing unless all of it fits */
     /* Home names the list it shows; a status row names none of Home's own, and shows the clock */
@@ -6268,13 +6302,15 @@ void bar_title_sync(void *win) {
 }
 
 /* A page_title's caption was an empty page's message, and the bar holds captions: the message stays
- * the first line, and the bar reads name, the page's, from the hidden label. */
+ * the first line (OLED's is a note centred under the status row, feedback_empty), and the bar reads
+ * name, the page's, from the hidden label. */
 void page_empty(void *body, const char *name) {
     if (theme()->page_title_h) return;
     char message[64];
     void *caption = widget_get_child(body, 0);
     if (widget_get_text_utf8(caption, message, sizeof message)) return;
-    widget_set_name(page_title(body, message, 0), "");
+    if (!feedback_empty(body, 0, message, (const char *)0)) /* OLED's note, else a first line */
+        widget_set_name(page_title(body, message, 0), "");
     widget_set_text_utf8(caption, name);
     widget_set_visible(caption, 0, 0);
     bar_title_sync(window_manager_get_top_window(window_manager()));
@@ -6319,12 +6355,14 @@ int ringnav_paint_bg(void *w, void *canvas) {
         confirm_track(w, canvas, form);
         confirm_check(w, canvas);
     }
+    feedback_confirm_bar(w, canvas);
     hold_paint(w, canvas, 0);
     if (w && w == st.search_tabs) search_tabs_paint(w, canvas);
     paint_selection(w, canvas);
     paint_songs(w, canvas);
     grey_rows(w);
     if (form) confirm_labels(w, canvas);
+    feedback_confirm_switch(w, canvas);
     if (w && w == st.rate_box)
         paint_panel(w, canvas, &(rect_t){ PANEL_PAD, PANEL_PAD - PANEL_DROP, 304, 110 },
                     "classic_light_rate_shadow", 1);
@@ -6407,6 +6445,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         bar_title_sync(top);
         bar_title(bar, top);
         if (st.action_view) action_row(st.action_view);
+        feedback_songs(top, st.action_view); /* OLED: an empty list's note, no Shuffle row */
         if (np_sync(top) && np_beside()) rearm(&st.np_remain_timer, remain_due, 0); /* mid-paint */
         if (w == top) vol_paint(top, canvas);
         /* Boot may paint Home before the screen is usable, so nothing chose or drew its first
@@ -8853,13 +8892,13 @@ static int qm_apply(void *add, int next) {
     return n != 0;
 }
 
-/* A 2 s modal dialog: its loop runs every ringnav_sleep poll again, so a poll clears or latches
- * what it toasts first (logo_poll). */
+/* A 2 s modal dialog (OLED's 1.5 s, oled-design.md's toast): its loop runs every ringnav_sleep poll
+ * again, so a poll clears or latches what it toasts first (logo_poll). */
 void toast(const char *text) {
     struct {
         int kind, ms;
         char text[0x400];
-    } info = { 1, 2000, { 0 } };
+    } info = { 1, feedback_oled() ? 1500 : 2000, { 0 } };
     for (unsigned i = 0; text[i] && i < sizeof info.text - 1; ++i) info.text[i] = text[i];
     ++st.toasts; /* its loop runs the UI's polls, which may toast again */
     navigator_to_with_context("dialog/msginfo_dialog", &info);
@@ -9519,11 +9558,11 @@ static int qm_run(const void *unused) {
         qm_select();
         batch_add_file(cls, 0xf00a, qm_list(), P(p_vector_select_record, 0), 0);
         ratings_copy_due();
-        fav_told(r, 1);
+        if (fav_told(r, 1) && feedback_oled()) toast("Added to Favorites");
     } else if (r && a == QA_UNFAV) {
         deleteMusicFromFav(r);
         ratings_copy_due();
-        fav_told(r, 0);
+        if (fav_told(r, 0) && feedback_oled()) toast("Removed from Favorites");
         if (cls == 0xf00a)
             g_delete_flag = 1;          /* My Fav reloads, as Now Playing's heart (0x53cafc) */
     } else if (r && a == QA_PLAYLIST) { /* the playlist page's add mode adds the selected row */
@@ -9566,6 +9605,8 @@ static int qm_run(const void *unused) {
         void *add = r ? qm_collect(r) : (void *)0;
         if (!add || !(a == QA_SHUFFLE ? shuffle_play(add) : qm_apply(add, a == QA_NEXT)))
             toast("Queue unchanged");
+        else if (a != QA_SHUFFLE && feedback_oled()) /* OLED says what an in-place action did */
+            toast(a == QA_NEXT ? "Playing Next" : "Added to Queue");
         if (add) deque_destroy(add);
     }
     return 0;

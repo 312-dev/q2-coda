@@ -509,6 +509,7 @@ static int rated_open(void *ctx, void *event) {
     deque_destroy(songs);
     int count = (int)deque_size(list);
     void *view = page_list(st.rt_page, st.rt_page, 0, rt_names[k], count ? count : 1, 64);
+    page_fit(view);
     char name[512], detail[300], hs[16];
     for (int i = 0; i < count; i++) {
         void *t = deque_at(list, (unsigned)i);

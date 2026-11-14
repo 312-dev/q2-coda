@@ -204,7 +204,9 @@ Wear OS's position indicator, on the Q2's straight right edge:
 - Optional leading 40 px square art with 4 px corners (Albums) at x 24, 6 px down; text then
   starts at 72.
 - Dividers (Divider, 1 px) between two-line rows only, from the text column to the right column,
-  not drawn on either edge of the selected row. Single-line lists have no dividers.
+  not drawn on either edge of the selected row. Single-line lists have no dividers. Q2 Pod's own
+  two-line lists (Era, View Queue, Most Played, Ratings' lists) have them as stock's do, and end
+  on the last whole row above y 282 (`page_fit`).
 
 ### Song rows
 
@@ -215,8 +217,8 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   fits from the text column to the right column; the artist is dropped when less than about
   40 px would remain for it.
 - **A list reached through an artist** (their songs, one of their albums): no artist.
-- **Inside an album:** the track number in 15 px Text Tertiary right-aligned in a 14 px column
-  after the 24 px inset, the title from x 50, the length right-aligned on the right column in
+- **Inside an album:** the track number in 15 px Text Tertiary right-aligned in a 17 px column
+  after the 24 px inset, so two digits fit it, the title from x 50, the length right-aligned on the right column in
   15 px Text Tertiary, tabular digits.
 - Two of OLED's own options change this: **Song Artist** (Inline, Selected Row, Right, Off) and
   **Song Length** (Albums, All Lists, Off); a length takes the right column, so Right, and
@@ -299,14 +301,39 @@ Shown for a moment after a mode change (Shuffle, Repeat).
 - Centred glyph (Phosphor `shuffle` or `repeat`, bold), 56 px, Accent Blue, centred on y 140;
   label Inter Medium 22 px centred on y 200; count in Text Tertiary 15 px centred on y 228.
   Nothing else on screen but the status row, which names Now Playing.
-- Dismisses itself after 1.2 s or on any input.
+- Dismisses itself after 1.2 s or on any input, which it takes.
+- Built for shuffles (`patch/feedback.c` `feedback_shuffled`): the Library's Shuffle Songs, Albums and
+  Folders, a list's Shuffle row and the hold menu's Shuffle, over the Now Playing they open, with the
+  queue's song count. Repeat and Now Playing's own mode button do not show it yet.
 
 ### Dialogs and toasts
 
 - A dialog is a list: its question as the page title, its answers as rows, the selection bar
   on the default answer. No boxes, no shadows.
+- A confirm (stock's `confirminfo_dialog`: Shut Down, the three Resets, Delete Song, Delete
+  Playlist and the rest) is that dialog: the question in the status row in sentence case, naming
+  the object where it can ("Delete playlist “a”?"), then **Cancel**, selected when it opens, and
+  the verb that says what the other does ("Shut Down", "Reset", "Delete"), never "OK". Delete
+  Song's "Also delete source file" is a third row with a switch on the right column.
 - A toast is one line of 16 px Text Primary on a `#1C1C1E` pill, 12 px corners, 32 px tall,
-  centred on y 252, above the bottom glass curve. It is the only raised surface in the theme.
+  as wide as its text and 16 px each side, centred on y 252 (y 236 to 268), above the bottom
+  glass curve. It is the only raised surface in the theme. The page stays in sight round it,
+  with its status row and its selection; it lasts 1.5 s (stock's own toasts their own time).
+  Words in sentence case ("Added to Queue", "Name can't be empty").
+- Every in-place action says what it did in a toast: the hold menu's Play Next ("Playing Next"),
+  Add to Queue ("Added to Queue") and Add to and Remove from Favourites ("Added to Favorites",
+  "Removed from Favorites").
+
+### Empty and offline
+
+- A list with nothing in it keeps its action rows (New Playlist..., Check for Updates) as
+  normal rows with the selection; the message is one line of 16 px Text Secondary centred in the
+  free area below them, down to y 282, with an optional hint in 15 px Text Tertiary 24 px lower.
+  No fake rows, and no Shuffle row over nothing: Favorites, Recent and the other song lists hide
+  it and say what is missing ("No favorites", hint "Hold Play/Pause on a song to add it").
+- Offline and missing things use the same form (Spotify's "Spotify isn't on the card", the App
+  Store's "No apps listed").
+- Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done.
 
 ### Icons
 
@@ -405,8 +432,10 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   x 196 and y 52 to the edges, its top rows painted by the bar, panning slowly across its 110 % zoom with an
   eased turn at each end and 2 % of the zoom kept clear of the pane at each edge, so a cover's own border never
   shows), and the lists Home's rows open as full-width pages with the art hidden (`home.lists.full`).
+- The toast, the confirm as a dialog page and the empty note (`dialog.confirm.painter="oled"`,
+  `patch/feedback.c`), and the confirmation after a shuffle.
 
 Still to build:
 
-- A confirmation screen for Shuffle and Repeat, and the toast and dialog forms.
+- The confirmation for Repeat and Now Playing's mode changes.
 - The storage bar drawn as above.

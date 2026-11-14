@@ -782,7 +782,7 @@ def test_long_songs_with_none_says_so(fw, ui, song):
     Library(fw, ui, [song(b'/m/a.flac', b'A')])
     Files(fw, {LENGTHS: lengths((b'/m/a.flac', 60))})
     call(fw, 'long_songs')
-    assert ui.rows(ui.top()) == [('No songs over 10 minutes', None)]
+    assert 'No songs over 10 minutes' in ui.shown(ui.top()) and ui.rows(ui.top()) == []  # no fake row
     call(fw, 'long_songs')  # pressed again while it is open
     assert len(ui.windows) == 1
 

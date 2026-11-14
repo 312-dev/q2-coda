@@ -761,6 +761,12 @@ still finds both by name and binds its callbacks; the initial Cancel is stock's.
 still gives the discs (`confirm_ok`, `confirm_cancel`) `CONFIRM_SURFACE` (`#2B2B2B`) under every
 accent should stock draw them. Tidal's own confirm pop-up (cyan, black glyphs) keeps its look and
 its tiles, framed in white when selected (Minimal's card only; Classic's band has its own top line and edge, as an iPod's).
+Under **OLED** the confirm is a page of its own (`patch/feedback.c`, [oled-design](oled-design.md#dialogs-and-toasts)):
+the status row asks the question in sentence case ("Shut down?", "Delete playlist “a”?"), and the two
+rows from y 58 are **Cancel** and the action's verb ("Shut Down", "Reset", "Delete"), 32 pixels each at
+the text column; Delete Song's "Also delete source file" is a third row with a switch, which Centre
+turns. Its toasts are a pill near the screen's foot over the page, which keeps its status row and
+selection.
 
 | Dialog                        | Buttons                                         |
 | ----------------------------- | ----------------------------------------------- |
