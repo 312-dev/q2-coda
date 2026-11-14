@@ -1,8 +1,8 @@
-/* Release signatures (docs/internals.md#release-signatures). Network Update's update.tar and the App
- * Store's sources.list are signed with the q2-coda release key, Ed25519, whose public half
- * tools/build.py compiles in from assets/signing/q2-coda-release.pub; the list in turn pins each app
- * zip by its SHA-256. Monocypher 4.0.2 (patch/monocypher, BSD-2-Clause or CC0) checks a signature
- * and hashes with SHA-512; SHA-256 is here. tools/signing.py writes the same messages. */
+/* Release signatures (docs/internals.md#release-signatures). Network Update's update.tar and the
+ * App Store's sources.list are signed with the q2-coda release key, Ed25519, whose public half
+ * tools/build.py compiles in from assets/signing/q2-coda-release.pub; the list in turn pins each
+ * app zip by its SHA-256. Monocypher 4.0.2 (patch/monocypher, BSD-2-Clause or CC0) checks a
+ * signature and hashes with SHA-512; SHA-256 is here. tools/signing.py writes the same messages. */
 #include "monocypher/monocypher-ed25519.h"
 #include "peq.h"
 #include "stock.h"
@@ -43,9 +43,10 @@ static void sha256_block(sha256_t *s, const unsigned char *p) {
     memcpy(v, s->h, sizeof v);
     for (int i = 0; i < 64; ++i) {
         unsigned e = v[4], a = v[0];
-        unsigned t1 = v[7] + (ROR(e, 6) ^ ROR(e, 11) ^ ROR(e, 25)) + ((e & v[5]) ^ (~e & v[6])) +
-                      K[i] + w[i];
-        unsigned t2 = (ROR(a, 2) ^ ROR(a, 13) ^ ROR(a, 22)) + ((a & v[1]) ^ (a & v[2]) ^ (v[1] & v[2]));
+        unsigned t1 =
+            v[7] + (ROR(e, 6) ^ ROR(e, 11) ^ ROR(e, 25)) + ((e & v[5]) ^ (~e & v[6])) + K[i] + w[i];
+        unsigned t2 =
+            (ROR(a, 2) ^ ROR(a, 13) ^ ROR(a, 22)) + ((a & v[1]) ^ (a & v[2]) ^ (v[1] & v[2]));
         for (int k = 7; k; --k) v[k] = v[k - 1];
         v[4] += t1, v[0] = t1 + t2;
     }
@@ -81,12 +82,14 @@ static void sha256_final(sha256_t *s, unsigned char out[32]) {
 /* n bytes as lowercase hex into out (2n + 1 bytes). */
 void sig_hex(const unsigned char *in, unsigned n, char *out) {
     for (unsigned i = 0; i < n; ++i)
-        out[2 * i] = "0123456789abcdef"[in[i] >> 4], out[2 * i + 1] = "0123456789abcdef"[in[i] & 15];
+        out[2 * i] = "0123456789abcdef"[in[i] >> 4],
+                out[2 * i + 1] = "0123456789abcdef"[in[i] & 15];
     out[2 * n] = 0;
 }
 
 /* path's bytes through SHA-512 (out 64 bytes) or SHA-256 (out 32), a CHUNK at a time, so a 55 MB
- * update.tar needs 64 KB: SIG_OK, SIG_IO when it can't be read, SIG_CANCELLED once *cancel is set. */
+ * update.tar needs 64 KB: SIG_OK, SIG_IO when it can't be read, SIG_CANCELLED once *cancel is set.
+ */
 int sig_hash_file(const char *path, int sha512, unsigned char *out, volatile int *cancel) {
     crypto_sha512_ctx big;
     sha256_t small;
@@ -169,10 +172,11 @@ unsigned sig_list(const char *text, unsigned n) {
     if (end && text[end - 1] == '\n') --end;
     if (end && text[end - 1] == '\r') --end;
     for (at = end; at && text[at - 1] != '\n'; --at) {}
-    if (!at || end - at != sizeof SIG_LINE - 1 + 128 || memcmp(text + at, SIG_LINE, sizeof SIG_LINE - 1) ||
+    if (!at || end - at != sizeof SIG_LINE - 1 + 128 ||
+        memcmp(text + at, SIG_LINE, sizeof SIG_LINE - 1) ||
         !sig_unhex(text + at + sizeof SIG_LINE - 1, sig, 64))
         return 0;
     crypto_sha512(digest, (const unsigned char *)text, at);
     return sig_check(message, sig_message(message, sizeof message, "sources", 0, digest), sig) ? at
-                                                                                             : 0;
+                                                                                               : 0;
 }

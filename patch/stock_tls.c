@@ -11,7 +11,7 @@
  * libcurl does its TLS with an mbedTLS built without them (docs/internals.md#2038). */
 int ringnav_stock_tls(void *c, int option, long value) {
     (void)option, (void)value;
-    curl_easy_setopt(c, 10065, STOCK_CA);    /* CAINFO */
-    curl_easy_setopt(c, 81, 2L);             /* SSL_VERIFYHOST */
-    return curl_easy_setopt(c, 64, 1L);      /* SSL_VERIFYPEER */
+    curl_easy_setopt(c, 10065, STOCK_CA); /* CAINFO */
+    curl_easy_setopt(c, 81, 2L);          /* SSL_VERIFYHOST */
+    return curl_easy_setopt(c, 64, 1L);   /* SSL_VERIFYPEER */
 }
