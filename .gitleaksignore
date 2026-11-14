@@ -1,0 +1,22 @@
+# Accepted gitleaks findings (tools/scan.py, scan "secrets"): each is a fingerprint, commit:file:rule:line.
+# All are reviewed placeholders or file hashes, not credentials. A new finding still fails the scan.
+# stock asset file names
+32bb0d12deea6e2545d0a0c43bcab451e3833545:test/build.py:generic-api-key:179
+# a dummy q2remote key in a test
+cda2addff80369151992df7493218a173db569cc:test/remote.py:generic-api-key:84
+# the user guide's Last.fm example
+f59ff3d4b69fb17b21a7f7c42e17467811f8b3ec:docs/manual/guide.html:generic-api-key:390
+# the user guide's Last.fm example, "made-up credentials"
+dd987c158cbdc28af427a299f69268890367a7f8:docs/guide.md:generic-api-key:138
+# the user guide's Last.fm example, "made-up credentials"
+dd987c158cbdc28af427a299f69268890367a7f8:docs/guide.md:generic-api-key:139
+# the README's Last.fm example
+bea46dc7c3c64ddb908360871b31e7b92e49331a:README.md:generic-api-key:242
+# the README's Last.fm example
+bea46dc7c3c64ddb908360871b31e7b92e49331a:README.md:generic-api-key:243
+# asset file names and their hashes
+f0bd9bb5d20210a7aaaf93dbb0c07c20b34efb0a:patch/compact.json:generic-api-key:260
+# asset file names and their hashes
+f0bd9bb5d20210a7aaaf93dbb0c07c20b34efb0a:patch/compact.json:generic-api-key:261
+# asset file names and their hashes
+bbbe144cff29cd54598e1478db1c5c770f46ddfa:patch/compact.json:generic-api-key:25

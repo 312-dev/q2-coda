@@ -22,3 +22,6 @@ graphify-out/
 .claude/skills/
 .codex/skills/
 .agents/skills/
+
+# tools/scan.py output
+scan-out/

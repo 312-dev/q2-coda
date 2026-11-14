@@ -1,0 +1,55 @@
+# Project rules for the bug classes the firmware's audit found. The payload is freestanding C that
+# calls libcurl through numeric option ids (no curl.h), so the TLS rules match the numbers.
+rules:
+  - id: curl-tls-verification-off
+    languages: [c]
+    severity: ERROR
+    message: >-
+      TLS certificate checking is turned off (CURLOPT_SSL_VERIFYPEER is 64, CURLOPT_SSL_VERIFYHOST
+      is 81). A network attacker can then read and change the transfer. Bundle the server's root in
+      the firmware's CA file instead, or justify the exception with a nosemgrep comment.
+    pattern-either:
+      - pattern: curl_easy_setopt($C, 64, 0)
+      - pattern: curl_easy_setopt($C, 64, 0L)
+      - pattern: curl_easy_setopt($C, 81, 0)
+      - pattern: curl_easy_setopt($C, 81, 0L)
+      - pattern: curl_easy_setopt($C, CURLOPT_SSL_VERIFYPEER, 0L)
+      - pattern: curl_easy_setopt($C, CURLOPT_SSL_VERIFYHOST, 0L)
+
+  - id: shell-command-from-formatted-string
+    languages: [c]
+    severity: WARNING
+    message: >-
+      A shell command is built with a format string and then run. If any argument can come from a
+      file, a tag, the card or the network, it can inject commands as root. Prefer fork and execv
+      with an argument vector; if the arguments are constants, say so with a nosemgrep comment.
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $SPRINTF($BUF, ..., $FMT, ...);
+              ...
+              $RUN($BUF, ...);
+          - pattern: |
+              $SPRINTF($BUF, $FMT, ...);
+              ...
+              $RUN($BUF, ...);
+      - metavariable-regex:
+          metavariable: $SPRINTF
+          regex: ^(sprintf|snprintf|tk_snprintf)$
+      - metavariable-regex:
+          metavariable: $RUN
+          regex: ^(system|popen)$
+
+  - id: unbounded-sprintf
+    languages: [c]
+    severity: WARNING
+    message: sprintf has no length limit; use snprintf with the buffer's size.
+    pattern: sprintf(...)
+
+  - id: python-shell-true
+    languages: [python]
+    severity: WARNING
+    message: subprocess with shell=True runs a shell; pass an argument list instead.
+    pattern-either:
+      - pattern: subprocess.$F(..., shell=True, ...)
+      - pattern: os.system(...)

@@ -115,6 +115,16 @@ python3 -m pytest test/fw --basetemp ~/.cache/q2-pytest/fw  # the firmware's C o
 - **Guards:** the builder rejects any `patch/contexts.inc` name that isn't a window name in the stock rootfs UI assets, so an allowlist typo can't silently disable a screen. Widget offsets and shared ABI constants live in `patch/offsets.inc`, which both the payload and the test mocks read.
 - **Limits:** instruction counts are mocked-service measurements, not hardware latency.
 
+## Security scan
+
+```sh
+python3 tools/scan.py                       # all four scans, firmware from /tmp/q2-dev
+python3 tools/scan.py --only code,secrets   # a subset: code, secrets, deps, firmware
+python3 tools/scan.py --build /tmp/q2-build # another build's rootfs
+```
+
+`tools/scan.py` runs Semgrep over `patch/` and `tools/` (the project's rules in `.semgrep/q2pod.yml` and Semgrep's C and Python packs), gitleaks over the git history, osv-scanner over the requirements files, and syft and grype over a build's root filesystem. syft names few of the rootfs's components, as buildroot keeps no package database, so `PROBES` in the script finds the rest (OpenSSL, curl, BlueZ, wpa_supplicant and others) by their version strings and grype checks them by CPE. It writes `scan-out/SUMMARY.md` and each tool's JSON, and exits 1 when a scan reaches its failing level: a Semgrep error, any secret, any dependency vulnerability, a critical firmware vulnerability. Most firmware findings are in Shanling's own libraries, which a build carries unchanged. The scanners are pinned releases, fetched into `~/.cache/q2-scan` on first use and checked against the SHA-256 in the script before they run; Semgrep runs through `uvx`. Reviewed gitleaks findings (documentation placeholders, file hashes) are fingerprinted in `.gitleaksignore`, so a new one still fails.
+
 ## Firmware tests
 
 `test/patch.py` runs the real MIPS payload, but it needs a build, so a stock ZIP. `test/fw` runs the firmware's C without one, on every pull request and push to `main` (`.github/workflows/firmware.yml`, with the host suites above that need no build).
