@@ -8,10 +8,10 @@
 
 | Part | Choice | Size | Replaces |
 | --- | --- | --- | --- |
-| Demuxing and decoding | FFmpeg 7.1.5 (`libavformat`, `libavcodec`, `libavutil`), static, only the components in `tools/player.py` (`DEMUXERS`, `DECODERS`, `PARSERS`), compiled as C alone | the whole `q2player` is 2,787,320 bytes stripped, 1,638,400 in the root filesystem's squashfs (LZO, 128 KB blocks) | hciplayer's static FFmpeg 3.0, libmad, MPlayer's demuxers: 7,708,808 bytes patched, 4,251,648 in squashfs |
+| Demuxing and decoding | FFmpeg 7.1.5 (`libavformat`, `libavcodec`, `libavutil`), static, only the components in `tools/player.py` (`DEMUXERS`, `DECODERS`, `PARSERS`), compiled as C alone | the whole `q2player` is 2,788,456 bytes stripped, 1,638,400 in the root filesystem's squashfs (LZO, 128 KB blocks) | hciplayer's static FFmpeg 3.0, libmad, MPlayer's demuxers: 7,708,808 bytes patched, 4,251,648 in squashfs |
 | Rate conversion | `libswresample`, in the same build; only Bluetooth uses it | 124,946 bytes of archive, inside the figure above | MPlayer's `lavcresample` |
 | Output | stock's own `libasound.so.2` (alsa-lib 1.1.6), linked dynamically | 0 | the same library |
-| TLS for `https` | mbedTLS 3.6.7 as `tools/thirdparty.py` (branch `sec/libs`) builds it, static, through FFmpeg's `tls` protocol | adds 416,000 bytes (3,203,560 in all, built with `Q2_PLAYER_TLS=1`), 221,184 in squashfs | hciplayer's static OpenSSL 1.0.1 |
+| TLS for `https` | mbedTLS 3.6.7 as `tools/thirdparty.py` (branch `sec/libs`) builds it, static, through FFmpeg's `tls` protocol | adds about 416,000 bytes (measured on a build with `Q2_PLAYER_TLS=1`: 3,203,560 against 2,787,512 without), 221,184 in squashfs | hciplayer's static OpenSSL 1.0.1 |
 | QQ Music | stock's `libQMDecryption.so`, loaded with `dlopen` when a URL needs it | 0 | the same library |
 | SACD ISO | stock's `libsacd.so` (sacd-ripper's libsacdread and DST decoder, which demo needs too), loaded with `dlopen` | 0 | the copy of the same code compiled into hciplayer |
 
@@ -27,20 +27,25 @@ The root filesystem holds 50,688,000 bytes and this branch's `--dev` build uses 
 
 **CPU.** No Q2 was available, so the only measurement is relative: both players under the same `qemu-mipsel` user-mode emulator, playing the same files in real time, by the CPU time the emulator used (`# cpu` in each transcript).
 
-CPU_TABLE
+| Played in real time | stock hciplayer | Q2 Pod's hciplayer | q2player |
+| --- | --- | --- | --- |
+| 16-bit 44.1 kHz FLAC, two files, 40 s | 0.45 s | 0.21 s | 0.33 s |
+| 24-bit 96 kHz FLAC, 15 s | 0.43 s | 0.18 s | 0.25 s |
+| MP3 (LAME V2), two files, 40 s | 0.50 s | 0.36 s | 0.72 s |
+| nothing, for 4 s (start-up alone) | not measured | not measured | 0.02 s |
 
-Emulated time is not device time, and the emulator computes floating point in software, which overstates every float decoder. What it does show is in the table's last column. Device figures are phase 6's first task; the budget to meet there is stock's own load at each rate plus no more than a fifth, and under half of one core at 384 kHz.
+Emulated time is not device time, the tick is 10 ms, and each figure is under 2% of one emulated core, so this ranks nothing finely. What it shows: FLAC costs the new player less than stock and more than Q2 Pod's player (which sleeps where stock polls); MP3 costs it more than either, 1.4 times stock's libmad, which is the one decoder to look at first on a device; and none of the three cases is near a limit with no assembly at all. Device figures are phase 6's first task; the budget to meet there is stock's own load at each rate plus no more than a fifth, and under half of one core at 384 kHz.
 
 **RAM.** 128 MB, no swap. The player's own buffers are small: FFmpeg's probe and packet buffers (about 1 MB), one decoded block, a preloaded second file's context, and the ALSA ring (500 ms; 384 kHz stereo S32 is 1.5 MB). Crossfade's hold is the large one, 6 MB today, and stays that. Streams take the cache demo asks for (512 KB to 4 MB). Phase 6 measures resident size against hciplayer's.
 
 ## Architecture
 
 ```
-demo ── /tmp/sock_play ──▶ command thread (ipc.c) ──▶ ctl (requests, settings, status; one mutex)
-                                   ▲ answers                    │ wake
-                                   │                            ▼
-                         events ◀──┴────────────── playback thread (engine.c)
-                                                    source ▶ DSP chain ▶ output
+demo --- /tmp/sock_play ---> command thread (ipc.c) ---> ctl (requests, settings, status; one mutex)
+            ^ answers, events                                  | wake
+            |                                                  v
+            +------------------------------------- playback thread (engine.c)
+                                                    source -> DSP chain -> output
                                    preload thread: opens the next source while the current one plays
 ```
 
@@ -125,7 +130,27 @@ Each is sized for one agent. "Emulator" means `fakedemo.py --emu` with the MIPS 
 
 ### Phase 1 results
 
-PHASE1_RESULTS
+Measured on 2026-11-13 with the tree as it is at this document's commit.
+
+**On this machine** (`python3 test/player/run.py`, x86-64, the player writing files in place of ALSA):
+
+- Two 20 s 16-bit 44.1 kHz FLACs through a preloaded change: 1,764,000 frames in one PCM open, byte for byte the two reference decodes joined; and those two references joined are the WAV the files were cut from.
+- Two LAME V2 MP3s the same way: 1,764,000 frames in one PCM open (882,000 a file: LAME's delay and padding are gone), byte for byte the reference decodes joined.
+- A 15 s 24-bit 96 kHz FLAC: 1,440,000 S32 frames, byte for byte the reference.
+- A 24-bit FLAC, an M4A and an Ogg Vorbis file open the output as S32, float and float, which is what stock asks ALSA for with the same files.
+- Protocol: 20 of the 22 fixtures (11 scenarios, each answered by stock's hciplayer and by Q2 Pod's) give the same events and query answers in the same order, the same `media-info`, and positions within 2 s. The other two are stock ending a FLAC after a seek, which Q2 Pod fixes (`KNOWN` in `run.py`).
+- Each kind of check was seen to fail first: output scaled by 32767 in place of 32768 failed the MP3 comparison at frame 24 (with the float decoder then in use); `player-nextstatus` sent as `player-stopstatus` failed `pod-skip`; and the cut test drops five frames from a copy on every run and requires that to show.
+
+**In the emulator** (the MIPS binary, 2,788,456 bytes with stock's ELF flags `0x70001405`, under `qemu-mipsel` in the stock root filesystem, linked to stock's `libasound.so.2`; PCM captured at `snd_pcm_writei`):
+
+- The FLAC pair: 1,764,000 frames, one PCM open, no difference from the reference made on this machine.
+- The MP3 pair: 1,764,000 frames, one PCM open, no difference.
+- The 24-bit 96 kHz FLAC: 1,440,000 frames as `S32_LE`, no difference.
+- It asks ALSA for what stock asks, by the shim's log of both: `default`; `S32_LE` at 96,000 Hz, then `FLOAT_LE` at 44,100 Hz twice in the formats scenario; `S16_LE` at 44,100 Hz for 16-bit FLAC and MP3.
+- Its transcripts for all 11 scenarios have the fixtures' events and `media-info` (20 of 20 compared).
+- demo itself, the `--dev` build's, started it with its own `nice -n -5 hciplayer -ao alsa &` (the binary bound over `/usr/bin/hciplayer`); it connected to demo's socket and received demo's boot commands, `{mcl-dsdmode\0}` and `{mcl-replaygain\0}`.
+
+**What phase 1 leaves out**, all of it phase 2 or later: the preload on its own thread; `ss=` starts; exactness for any format but FLAC and MP3 (AAC and Vorbis play and report as stock does, unchecked sample for sample); every DSP stage, so `mcl-seteq`, `mcl-replaygain` and `mcl-setvol` are stored and change nothing; USB, Bluetooth and DSD; URLs, QQ Music and SACD; the DAC's ioctls; the meters' scale (`mcl-getuvmeter` answers a root mean square, `mcl-getspectrum` zeros); the fallback switch and the build's install step.
 
 ## Parity checklist
 
@@ -133,10 +158,10 @@ One row per behaviour. "How" is the test that proves it; "device" means it canno
 
 | # | Behaviour (stock or Q2 Pod's patched player) | How it is verified | Status |
 | --- | --- | --- | --- |
-| 1 | Connects to `/tmp/sock_play`; exits when demo closes it; started as `hciplayer -ao alsa` | emulator: fakedemo starts it by that name | done |
+| 1 | Connects to `/tmp/sock_play`; exits when demo closes it; started as `hciplayer -ao alsa` | emulator: demo itself starts it by that name and its boot commands arrive | done |
 | 2 | Parses `{name\arg}`, several per packet; `%0x7d` in a path | host: fixtures; a path with `}` | 2 |
-| 3 | `player-status`: `ready` until sound, then `playing`, also while paused | fixtures `transport`, `pause-seek` | done |
-| 4 | `media-info` fields and `no-playing-status` | fixtures, every scenario | done for FLAC, MP3; 2 for the rest |
+| 3 | `player-status`: `ready` until sound, then `playing`, also while paused | fixtures `transport`, `pause-seek` | done, but for how long `ready` lasts (stock's is about 600 ms after a start and 400 ms after a preloaded change; the new player's ends at its first write): 2 |
+| 4 | `media-info` fields and `no-playing-status` | fixtures, every scenario | done for FLAC at 16 and 24 bits, MP3, AAC in M4A and Vorbis; 2 for the rest |
 | 5 | `CODEC` names and `BITS` per format | fixture `formats`, extended to every format | 2 |
 | 6 | `set-songurl` starts a song; `ss=` start | fixture `transport`; a start-offset test | done; `ss=` 2 |
 | 7 | `set-nexturl` cuts and answers `player-nextstatus\exit` | fixture `skip` | done |
@@ -154,7 +179,7 @@ One row per behaviour. "How" is the test that proves it; "device" means it canno
 | 19 | CUE: tracks of one file by `ss=`, cut by demo with `set-nexturl` | host: three starts in one FLAC | 2 |
 | 20 | Every lossless format bit-exact: FLAC, ALAC, WAV, AIFF, APE, WavPack, TAK, WMA Lossless, at 16, 24 and 32 bits | host exactness per format | FLAC 16 and 24 done; rest 2 |
 | 21 | Every lossy format decodes: MP3, MP2, AAC (M4A, ADTS), Vorbis, Opus, WMA, AC-3, DTS | host exactness per format | MP3 done; rest 2 |
-| 22 | ALSA on the DAC: `default`, the file's rate, no resampling, 500 ms in 16 periods | emulator shim log against stock's | done for 44.1/16 and 96/24; device for the rest |
+| 22 | ALSA on the DAC: `default`, the file's rate, no resampling, 500 ms in 16 periods; `S16_LE`, `S32_LE` or `FLOAT_LE` by decoder | emulator shim log against stock's | done for the device name and for the format and rate of 16-bit and 24-bit FLAC, MP3, AAC and Vorbis; the buffer granted is a device question |
 | 23 | The DAC's mode, mute and unmute around start, seek, pause, reopen | emulator: ioctl order in the shim log; device: a recording | 2, 6 |
 | 24 | The fallback switch; `killall -9 hciplayer` | emulator | 2 |
 | 25 | PEQ: bands, scopes, preamp, Auto, balance, ramps, from `/mnt/data/peq-active` | `test/peq.py` on the player's chain | 3 |
