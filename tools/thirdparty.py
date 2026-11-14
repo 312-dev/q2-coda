@@ -37,6 +37,8 @@ SOURCES = {
                 'cf3098950cb4d853ad95c0841f1f9c6d3dc102dccfcacd521d93925208b76ac8'),
     'zlib': ('1.4', 'https://zlib.net/zlib-1.4.tar.gz',
              '02dd159783677a749c04adbdd02b55b8a2bcc7e054f51b76b549199a916ad584'),
+    'sqlite': ('3.54.1', 'https://www.sqlite.org/2026/sqlite-autoconf-3540100.tar.gz',
+               '926ef8d3eab93fbf6e06011901273eec076b25594a4e1cdadd50c987f4f6d64e'),
 }
 
 
@@ -165,8 +167,24 @@ def build_zlib(src, stage, env, log):
     run('make', 'install', f'DESTDIR={stage}', cwd=src, env=env.vars, log=log)
 
 
+def autotools(src, stage, env, log, *options, make=()):
+    """configure, make and make install for a cross build to stage."""
+    run('./configure', f'--host={env.host}', '--prefix=/usr', '--disable-static', '--enable-shared', *options,
+        cwd=src, env=env.vars, log=log)
+    run('make', f'-j{JOBS}', *make, cwd=src, env=env.vars, log=log)
+    run('make', 'install', f'DESTDIR={stage}', cwd=src, env=env.vars, log=log)
+
+
+def build_sqlite(src, stage, env, log):
+    # Stock's options (sqlite3_compileoption_get): FTS3, R*Tree, synchronous FULL, the system malloc.
+    # Nothing in the rootfs uses JSON, the math functions or extensions, which 3.19.3 did not build in.
+    autotools(src, stage, env, log, '--fts3', '--rtree', '--disable-json', '--disable-math', '--disable-load-extension',
+              '--disable-readline', '--disable-static-shell')
+
+
 RECIPES = {'openssl': (build_openssl, []),
-           'zlib': (build_zlib, [])}
+           'zlib': (build_zlib, []),
+           'sqlite': (build_sqlite, [])}
 
 
 # Each top-level function's and class's text as this module was imported (inspect.getsource rereads
@@ -336,6 +354,7 @@ INSTALL = {
     'openssl': {'usr/lib/libssl.so.1.1': 'usr/lib/libssl.so.1.1', 'usr/lib/libcrypto.so.1.1': 'usr/lib/libcrypto.so.1.1',
                 **{f'usr/lib/engines-1.1/{e}.so': f'usr/lib/engines-1.1/{e}.so' for e in ('afalg', 'capi', 'padlock')}},
     'zlib': {'usr/lib/libz.so.1.2.11': 'usr/lib/libz.so.1.4'},
+    'sqlite': {'usr/lib/libsqlite3.so.0.8.6': 'usr/lib/libsqlite3.so.3.54.1'},
 }
 
 
