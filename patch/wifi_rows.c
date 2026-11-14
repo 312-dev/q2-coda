@@ -1,6 +1,7 @@
 /* A set_switch theme's Wi-Fi page (docs/oled-design.md Screens: Wi-Fi), over the list stock's
- * wifimenu_rows_build (0x4d5950) makes each time it rebuilds: the switch row; stock's Scanning row
- * (its refresh image or spinner, wifi_search_icon) taken out; its centred "Select Network" header
+ * wifimenu_rows_build (0x4d5950) makes each time it rebuilds: the switch row; stock's Scanning row,
+ * whose tap starts a scan, as a plain "Search Again" row that acts in place (its refresh image or
+ * spinner, wifi_search_icon, hidden); its centred "Select Network" header
  * made a section label, "Networks", after a 12 px gap, in the section header's type on the text
  * column, with "Searching..." on the same line's right column while a scan runs (wifi_searchtime);
  * each network a row whose right column holds its signal (stock's wifi_sig1..4 image, its art
@@ -53,7 +54,7 @@ static void *small_label(void *parent, int x, int w, const char *name, const cha
     return l;
 }
 
-/* Before stock's layout: the Scanning row out of the flow, the header's height and its label, and,
+/* Before stock's layout: the Scanning row as Search Again, the header's height and its label, and,
  * when the rows run past the box, the list's box ending on the last whole row that fits from its
  * top, as list_fit's boxes do for one pitch: the section's gap puts the rows below it off the
  * 32 px grid. */
@@ -63,8 +64,13 @@ void wifi_rows_pre(void *view) {
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *item = widget_get_child(view, i), *label = head_label(item);
         if (!label) label = widget_lookup(item, WIFI_HEAD_NAME, 0); /* laid out before */
-        if (widget_lookup(item, "wifi_search_icon", 1)) {
-            widget_set_visible(item, 0, 0);
+        void *icon = widget_lookup(item, "wifi_search_icon", 1);
+        if (icon) {
+            widget_set_visible(icon, 0, 0);
+            void *b = widget_count_children(item) ? widget_get_child(item, 0) : (void *)0;
+            for (unsigned j = 0, k = b ? widget_count_children(b) : 0; j < k; ++j)
+                if (!tk_strcmp(widget_get_type(widget_get_child(b, j)), "hscroll_label"))
+                    widget_set_text_utf8(widget_get_child(b, j), "Search Again");
             continue;
         }
         if (!label) continue;
