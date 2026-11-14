@@ -889,6 +889,9 @@ def images(t):
     if t['set_switch']:  # a picker's check on the right column: the accent's top tone at rest, white on the selection
         on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
         out |= {f'{prefix}_check_{k}': phosphor('check-bold', CHECK_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
+        # the Wi-Fi page's network rows (wifi_rows.c): signal and lock in Text Primary per half, white on the selection
+        for name, glyph in (('wifi_3', 'wifi-high'), ('wifi_2', 'wifi-medium'), ('wifi_1', 'wifi-low'), ('lock', 'lock-simple')):
+            out |= {f'{prefix}_{name}_{k}': phosphor(glyph, ROW_ICON_PX, c) for k, c in STATE_INKS.items()}
     if t['painter[PAINT_SONGS]']:  # Folder view's folder glyph (song_rows.c folder_row): Text Secondary, white on the selection
         out |= {f'{prefix}_folder_{k}': phosphor('folder', ROW_ICON_PX, c) for k, c in FOLDER_INKS.items()}
     if t['bolt']:

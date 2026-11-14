@@ -458,6 +458,13 @@ void chevron_muted(void *w, void *canvas, int right, int y);
 void slider_page_open(void *win, void *s, unsigned kind);
 void slider_page_paint(void *w, void *canvas);
 void slider_page_dirty(void *page); /* its switch row, after a change of the hidden switch */
+
+/* wifi_rows.c: a set_switch theme's Wi-Fi page, from ipod_list_layout and paint_into */
+int wifi_list(void *list);
+int wifi_sig(const char *image); /* stock's signal image's level, 1-4, else 0 */
+void wifi_rows_pre(void *view);
+void wifi_rows_post(void *view);
+void wifi_mark(void *w, void *canvas, int level, int selected);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
 void marquee_fade(void *w, void *canvas);

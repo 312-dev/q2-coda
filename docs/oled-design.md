@@ -352,6 +352,7 @@ pattern.
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             |                                                                                                            |
+| Wi-Fi                               | Switch row, then a section  | "Networks" header after 12 px, "Searching..." on its line; signal, lock, check on the right                |
 | Bluetooth                           | Two-line row                | Second line "Connected" with the Positive dot                                                              |
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
@@ -388,7 +389,7 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   (`bar.battery.painter="slim"`); the wheel's scroll indicator (`list.scrollbar.painter="wheel"`);
   1 px dividers on the text and right columns (`list.divider.ink`); row art's 4 px corners
   (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column; the
-  switch, Gain's value, the pickers' check, disabled rows and the slider page as above (`settings.values.switch`); song rows
+  switch, Gain's value, the pickers' check, disabled rows, the slider page and the Wi-Fi page as above (`settings.values.switch`); song rows
   (`list.songs.painter="inline"`) and the Song Artist and Song Length options; Songs' action row
   as the Shuffle row (`list.shuffle.row`); a list left by Return opening at its top when chosen
   again (`list.reopen.top`, which Minimal sets for every theme).

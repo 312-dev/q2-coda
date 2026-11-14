@@ -2765,6 +2765,12 @@ static void paint_into(void *w, void *canvas) {
                    : !tk_strcmp(image, "gain_high")                   ? 1
                    : !tk_strcmp(image, "gain_low")                    ? 0
                                                                       : -1;
+        int sig =
+            sw < 0 && gain < 0 && theme()->set_switch && image[0] == 'w' ? wifi_sig(image) : 0;
+        if (sig) {
+            wifi_mark(w, canvas, sig, st.sel_accent && painting_in(st.sel_accent));
+            return;
+        }
         if (sw >= 0 && widget_get_visible(w))
             switch_mark(canvas, I(w, W_W), I(w, W_H) / 2, sw,
                         st.sel_accent && painting_in(st.sel_accent));
@@ -6724,11 +6730,12 @@ int ringnav_image_add(void *manager, const char *name, void *bitmap) {
         clear_bitmap(bitmap);
         mapped = 1;
     }
-    /* A set_switch theme: stock's switch art is emptied; paint_into draws the theme's switch, and
-     * Gain's value in place of its switch (paint_gain) */
+    /* A set_switch theme: stock's switch art is emptied; paint_into draws the theme's switch,
+     * Gain's value in place of its switch (paint_gain) and a Wi-Fi network's signal (wifi_mark) */
     if (T->set_switch && s && !*s && format < 4 &&
         (!tk_strcmp(name, "switch_on") || !tk_strcmp(name, "switch_off") ||
-         !tk_strcmp(name, "gain_high") || !tk_strcmp(name, "gain_low"))) {
+         !tk_strcmp(name, "gain_high") || !tk_strcmp(name, "gain_low") ||
+         (name[0] == 'w' && wifi_sig(name)))) {
         clear_bitmap(bitmap);
         mapped = 1;
     }
@@ -7871,7 +7878,9 @@ int ipod_list_layout(void *layout, void *view) {
     void *list = view ? P(view, W_PARENT) : (void *)0;
     int settings = settings_list(list);
     int row = stream_list(view) ? geom_val(V_STREAM_ROW) : settings ? geom_val(V_SET_ROW) : 0;
+    int wifi = settings && wifi_list(list);
     if (settings) settings_layout(list);
+    if (wifi) wifi_rows_pre(view);
     unsigned n = row ? widget_count_children(view) : 0;
     for (unsigned i = 0; i < n; ++i) {
         void *item = widget_get_child(view, i);
@@ -7893,6 +7902,7 @@ int ipod_list_layout(void *layout, void *view) {
         void *item = widget_get_child(view, i);
         if (widget_get_visible(item)) set_row(item);
     }
+    if (wifi) wifi_rows_post(view);
     return ret;
 }
 
