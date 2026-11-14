@@ -180,7 +180,8 @@ STATE_INKS = {'d': 0xffffff, 'l': 0x000000}
 # half, on in the theme's own accent's top tone in both; repeat-once is repeat's on glyph for Repeat One.
 MODE_PX = 22
 MODE_INKS = {'d': 0xababab, 'l': 0x5c5c5c}
-# A row's leading glyph (Songs' Shuffle row, list.shuffle.row), regular weight at the 20 px row type's size
+# A row's leading glyph (Songs' Shuffle row, list.shuffle.row) and Now Playing's heart and More, regular weight (the
+# full heart fill) at the 20 px row type's size
 ROW_ICON_PX = 20
 FOLDER_INKS = {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}  # Text Secondary in each half, white on the bar
 
@@ -881,6 +882,13 @@ def images(t):
         for n in ('shuffle', 'repeat'):
             out |= {f'{prefix}_mode_{n}_{k}': phosphor(f'{n}-bold', MODE_PX, c) for k, c in {**MODE_INKS, 'on': on}.items()}
         out[f'{prefix}_mode_repeat1_on'] = phosphor('repeat-once-bold', MODE_PX, on)
+        # and its heart and More (np_bar.c np_glyphs), named after stock's play_fav, play_unfav, play_more and
+        # play_moredown: the empty heart and More in Text Primary, More pressed in Text Secondary, the full heart in
+        # the accent, each half's but the accent's
+        out[f'{prefix}_np_fav'] = phosphor('heart-fill', ROW_ICON_PX, on)
+        for k, c in STATE_INKS.items():
+            out |= {f'{prefix}_np_unfav_{k}': phosphor('heart', ROW_ICON_PX, c), f'{prefix}_np_more_{k}': phosphor('dots-three', ROW_ICON_PX, c),
+                    f'{prefix}_np_moredown_{k}': phosphor('dots-three', ROW_ICON_PX, MODE_INKS[k])}
     if t['shuffle_row']:  # Songs' Shuffle row: the accent's top tone at rest, white on the selection, in both halves
         on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
         out |= {f'{prefix}_shuffle_{k}': phosphor('shuffle', ROW_ICON_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}

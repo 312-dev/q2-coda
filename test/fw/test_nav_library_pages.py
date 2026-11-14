@@ -1036,7 +1036,7 @@ class Heart:
     CTX = 0x5eed
 
     def __init__(self, fw, ui, song, mcl, kept=0, fav=False, bind=True, handler=FAV_CLICK, removing=0, table=None,
-                 path=b'/m/now.flac'):
+                 path=b'/m/now.flac', image=None):
         self.fw, self.ui = fw, ui
         self.track = song(path, b'Now')
         queue = ui.deques.new([self.track])
@@ -1052,7 +1052,7 @@ class Heart:
         self.win = ui.new('window_create', 0, 0, 0, 0, 0)
         self.heart = ui.new('image_create', self.win, 300, 200, 50, 40)
         ui.name[self.heart] = 'img_fav'
-        ui.image[self.heart] = 'play_fav' if fav else 'play_unfav'
+        ui.image[self.heart] = image or ('play_fav' if fav else 'play_unfav')
         self.emitter, self.item = C.create_string_buffer(0x40), C.create_string_buffer(0x40)
         struct.pack_into('<Q', self.emitter, 0, C.addressof(self.item))
         struct.pack_into('<Q', self.item, 0, self.CTX)  # emitter_on_with_tag's item: {ctx, id, type, handler...}
@@ -1120,6 +1120,13 @@ def test_a_heart_without_stock_s_click_is_left_alone(fw, ui, song, mcl, handler,
 @pytest.mark.parametrize('kept, fav, badge', [(3, False, '3'), (0, False, None), (3, True, None), (1, False, '1')])
 def test_the_badge_shows_the_kept_hearts_on_an_empty_heart(fw, ui, song, mcl, kept, fav, badge):
     heart = Heart(fw, ui, song, mcl, kept=kept, fav=fav)
+    assert heart.badge() == badge
+
+
+@pytest.mark.parametrize('image, badge', [('oled_np_fav', None), ('oled_np_unfav_d', '3'), ('tidal_fav_add', '3')])
+def test_the_badge_reads_a_themes_own_heart_as_stocks(fw, ui, song, mcl, image, badge):
+    """np_bar.c np_glyphs names OLED's hearts after stock's: a full one (ending "_fav") hides the badge, as play_fav."""
+    heart = Heart(fw, ui, song, mcl, kept=3, image=image)
     assert heart.badge() == badge
 
 

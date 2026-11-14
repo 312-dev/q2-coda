@@ -944,7 +944,7 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
   scrolling keeps its ellipsis.
 - **Now Playing.** On the grid as the mock-up shows ([Now Playing](#now-playing)).
 - **Icons.** Phosphor's (MIT, [oled-design.md](oled-design.md#icons)): the caret on each row that opens a page,
-  the play state.
+  the play state, and Now Playing's shuffle, repeat, heart and More.
 - **Home.** Full by default. In Split the menu's rows are 204 px wide, so the selection bar ends at x 188 and the
   chevrons stand at 176, and the playing album's art fills the rest from x 196 and y 52 (6 px up into the status
   row) to the right and bottom edges, still, cut from the middle of the cover, the glass rounding its corner

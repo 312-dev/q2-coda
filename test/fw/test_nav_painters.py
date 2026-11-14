@@ -734,6 +734,39 @@ def test_now_playings_modes_are_the_themes_pair_lit_by_stocks_mode(fw, st, mcl, 
     assert loads == []
 
 
+def test_now_playings_heart_and_more_are_the_themes_glyphs_in_each_half(fw, st):
+    """np_bar.c np_glyphs, on each paint of OLED's Now Playing: stock's play_fav and play_unfav become the theme's full
+    heart and its empty one in the half's ink, an empty heart follows a Light Mode change, an app's heart stays, and
+    More's states take the half's dots (pressed, the dimmer ones) once per half. Minimal keeps stock's."""
+    ui = Ui(fw)
+    theme(fw, OLED)
+    win = ui.window('playing_page')
+    fav = ui.add('image', win, (289, 145, 34, 34), 'img_fav', image='play_unfav')
+    more = ui.add('image', win, (323, 145, 34, 34), 'img_more', **{'style:normal:bg_image': 'play_more'})
+    st('np_win', C.c_void_p).value = win.addr
+    fw.fn('np_glyphs_bind', None, C.c_void_p)(win.addr)
+    glyphs = fw.fn('np_glyphs', None, C.c_void_p)
+    states = ('normal', 'pressed', 'selected', 'disable', 'focused')
+    glyphs(win.addr)
+    assert fav.props['image'] == 'oled_np_unfav_d'
+    assert [more.props[f'style:{s}:bg_image'] for s in states] == ['oled_np_more_d', 'oled_np_moredown_d'] + ['oled_np_more_d'] * 3
+    fav.props['image'] = 'play_fav'  # stock's click
+    glyphs(win.addr)
+    assert fav.props['image'] == 'oled_np_fav'
+    st('light').value = 1
+    glyphs(win.addr)
+    assert fav.props['image'] == 'oled_np_fav' and more.props['style:pressed:bg_image'] == 'oled_np_moredown_l'
+    fav.props['image'] = 'oled_np_unfav_d'
+    glyphs(win.addr)
+    assert fav.props['image'] == 'oled_np_unfav_l' and more.props['style:normal:bg_image'] == 'oled_np_more_l'
+    fav.props['image'] = 'tidal_fav_add'
+    glyphs(win.addr)
+    assert fav.props['image'] == 'tidal_fav_add'
+    st('theme').value, fav.props['image'] = MINIMAL, 'play_unfav'
+    glyphs(win.addr)
+    assert fav.props['image'] == 'play_unfav'
+
+
 class Modes:
     """OLED's Now Playing on top with the play mode's target at (143, 252, 88, 44): its left half shuffle's, its right
     repeat's (np_bar.c np_mode_click). config_playmode sets stock's mode as stock's does."""
