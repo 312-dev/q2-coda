@@ -2406,9 +2406,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         q2player = build_player('mips', alsa=alsa)
         stock_dir = need(re.search(rb'^usr/lib D (\d+) (\d+) (\d+) (\d+)$', p, re.M), 'Missing usr/lib pseudo inode')
         hci = need(inode(p, b'usr/bin/hciplayer'), 'Missing usr/bin/hciplayer pseudo inode')
-        at = p.index(b'# START OF DATA')
-        p = (p[:at] + PLAYER_STOCK_DIR + b' D ' + b' '.join(stock_dir.groups()) + b'\n' + PLAYER_STOCK_DIR + b'/hciplayer F ' +
-             b' '.join(hci.groups()) + b' cat ' + shlex.quote(str(out/'peq/hciplayer')).encode() + b'\n' + p[at:])
+        # p is the definitions alone (pseudo_data, after them, goes back on unchanged): these two follow them
+        p = (p + PLAYER_STOCK_DIR + b' D ' + b' '.join(stock_dir.groups()) + b'\n' + PLAYER_STOCK_DIR + b'/hciplayer F ' +
+             b' '.join(hci.groups()) + b' cat ' + shlex.quote(str(out/'peq/hciplayer')).encode() + b'\n')
         player_added = [[PLAYER_STOCK_DIR, b'D', *stock_dir.groups()], [PLAYER_STOCK_DIR + b'/hciplayer', b'R', *hci.groups()]]
     for path, src in ((b'release/bin/demo', out/'demo'), (b'usr/bin/hciplayer', q2player or out/'peq/hciplayer'),
                       (BLUEALSA.encode(), out/'bluealsa'), (WATCHDOG.encode(), out/'watchdog'),
