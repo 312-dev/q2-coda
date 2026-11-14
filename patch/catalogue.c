@@ -34,10 +34,11 @@
 #define CAT_BATCH 64      /* rows per insert statement */
 #define CAT_SQL (CAT_BATCH * 2600)
 #define CATPLAY_WAIT_MS 4000
-#define CAT_GREY 0x666666 /* an unavailable row's text */
-#define CAT_DIM 0xb3      /* on the selection: its own ink at this alpha (70%) */
-#define CAT_GREY_ROWS 48  /* bound rows of stock's pooled tables, more than a screen holds */
-#define CAT_PLAYLISTS 100 /* stock's playlist headers are ids 0 to 99 */
+#define CATPLAY_SHOW_MS 60000 /* Now Playing shows a pressed server song this long at most */
+#define CAT_GREY 0x666666     /* an unavailable row's text */
+#define CAT_DIM 0xb3          /* on the selection: its own ink at this alpha (70%) */
+#define CAT_GREY_ROWS 48      /* bound rows of stock's pooled tables, more than a screen holds */
+#define CAT_PLAYLISTS 100     /* stock's playlist headers are ids 0 to 99 */
 
 int catalogue_source __attribute__((section(".scratch"))); /* LIBRARYSOURCE: 1 Local + Server */
 
@@ -112,6 +113,13 @@ static struct {
     unsigned cp_at, cp_seq;
     void *cp_list;
     int cp_start;
+    /* Now Playing's song from a press until the player parses one (catalogue_np_now): its record
+     * (one copied into np_list), its place in its list, the parse count and time it began at, and
+     * the title and artist labels' text as set last, hashed */
+    void *np_list;
+    unsigned np_at, np_n, np_parses, np_since;
+    unsigned np_text[2];
+    char np_cover[160]; /* its art: "file://" and the app's cover, or stock's placeholder */
 } cat __attribute__((section(".scratch")));
 
 static unsigned long long fnv64(const char *s) {
@@ -1581,6 +1589,71 @@ static void *cat_offline(void *q, int *at) {
     *at = start < 0 ? 0 : start;
     return out;
 }
+/* ---- Now Playing while a catplay waits (server-library.md#now-playing-while-it-loads) ---- */
+
+/* The song pressed, q's at'th: Now Playing shows it (catalogue_np_now) until the player parses a
+ * song (id3_parses moves: the app's, the offline queue's or another the user picked), nothing
+ * was left to play, or CATPLAY_SHOW_MS pass. The song playing stops, so its time and audio don't
+ * run on under the new title. */
+static void np_press(void *q, int at) {
+    if (cat.np_list) deque_destroy(cat.np_list), cat.np_list = 0;
+    if (at < 0 || (unsigned)at >= deque_size(q)) return;
+    cat.np_list = _create_deque("stSongInfo");
+    deque_init(cat.np_list);
+    _deque_push_back(cat.np_list, deque_at(q, (unsigned)at));
+    cat.np_at = (unsigned)at, cat.np_n = deque_size(q);
+    cat.np_parses = id3_parses, cat.np_since = time_now_ms();
+    cat.np_text[0] = cat.np_text[1] = 0;
+    tk_snprintf(cat.np_cover, sizeof cat.np_cover, "file://");
+    if (!catalogue_cover(P(deque_at(cat.np_list, 0), REC_PATH), cat.np_cover + 7,
+                         sizeof cat.np_cover - 7))
+        tk_snprintf(cat.np_cover, sizeof cat.np_cover, "play_defaultcover");
+    if (mclGetPlayStatus() != 1) mclStop();
+}
+/* The pressed song shown no more: stock writes its own title and artist again
+ * (g_forcerefresh_flag, as Play/Pause has it do). */
+static void np_done(void) {
+    if (!cat.np_list) return;
+    deque_destroy(cat.np_list), cat.np_list = 0;
+    g_forcerefresh_flag = 1;
+}
+/* The record Now Playing shows in place of the playing one, *at and *n its place in its list, or
+ * 0 for none. */
+void *catalogue_np_now(unsigned *at, unsigned *n) {
+    if (cat.np_list &&
+        (id3_parses != cat.np_parses || time_now_ms() - cat.np_since >= CATPLAY_SHOW_MS))
+        np_done();
+    if (!cat.np_list) return 0;
+    *at = cat.np_at, *n = cat.np_n;
+    return deque_at(cat.np_list, 0);
+}
+static unsigned wide_hash(const unsigned *s) {
+    unsigned h = FNV_SEED;
+    while (s && *s) h = (h ^ *s++) * 16777619u;
+    return h;
+}
+/* win's title and artist (scrlabel_title, scrlabel_artist) as the shown song's, set again only
+ * when their text is not what was set last (stock rewrites them on its own refreshes). */
+void catalogue_np_text(void *win) {
+    static const char *const names[] = { "scrlabel_title", "scrlabel_artist" };
+    unsigned at, n;
+    void *r = catalogue_np_now(&at, &n);
+    for (int i = 0; r && i < 2; ++i) {
+        void *label = widget_lookup(win, names[i], 1);
+        const char *text = P(r, i ? REC_ARTIST : REC_TITLE);
+        if (!i && (!text || !*text)) text = P(r, REC_NAME); /* untagged: Search's name for it */
+        if (!label || wide_hash(widget_get_text(label)) == cat.np_text[i]) continue;
+        widget_set_text_utf8(label, text ? text : "");
+        cat.np_text[i] = wide_hash(widget_get_text(label));
+    }
+}
+/* Now Playing's art while it shows the pressed song: the app's cover of its album, else stock's
+ * placeholder; 0 when it shows the playing song. */
+const char *catalogue_np_cover(void) {
+    unsigned at, n;
+    return catalogue_np_now(&at, &n) ? cat.np_cover : 0;
+}
+
 /* ringnav_load's: 0 when q has no server row (stock loads it as it is). Otherwise 1 with *own the
  * queue to load instead (offline: card rows and copies, playback.c destroys it), or 2: nothing to
  * load now (sent to the app, or nothing playable, said in a toast). */
@@ -1610,6 +1683,7 @@ int catalogue_load(void *q, int *at, void **own) {
             deque_assign(cat.cp_list, q);
             cat.cp_start = *at, cat.cp_app = slot, cat.cp_at = time_now_ms() | 1;
             cat.app[slot].play = before;
+            np_press(q, *at);
             return 2;
         }
     }
@@ -1634,8 +1708,10 @@ static void catplay_poll(void) {
         if (own) {
             play_folder(own, at, 0xf001);
             deque_destroy(own);
-        } else
+        } else {
+            np_done();
             toast("Not available offline");
+        }
     }
     if (!cat.cp_at && cat.cp_list) deque_destroy(cat.cp_list), cat.cp_list = 0;
 }

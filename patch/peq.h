@@ -431,6 +431,11 @@ void catalogue_mark_paint(void *canvas, int x, int y, unsigned ink);
 void catalogue_fit(void *entry, void *surface, int limit);
 int catalogue_np_info(const char *path, char *genre, int *year);
 int catalogue_cover(const char *path, char *out, unsigned size);
+/* Now Playing while a pressed server song loads: the record it shows, its title and artist, its art */
+void *catalogue_np_now(unsigned *at, unsigned *n);
+void catalogue_np_text(void *win);
+const char *catalogue_np_cover(void);
+extern unsigned id3_parses; /* tags.c: the player's fresh parses (ringnav_id3_path) */
 int ringnav_row_selected(void *row); /* navigation.c: row holds the painted selection */
 void *ringnav_search_rows(void *win, int *tab); /* navigation.c: Search's results, while shown */
 extern unsigned auto_nexts; /* playback.c ringnav_next: tracks that ended by themselves */

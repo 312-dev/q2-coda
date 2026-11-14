@@ -792,3 +792,79 @@ def test_most_played_the_ratings_lists_and_searchs_tabs_grey_their_rows_as_they_
     fw.fn('ringnav_paint_bg', C.c_int, C.c_void_p, C.c_void_p)(view.addr, Canvas(fw).addr)
     greyed = fw.fn('catalogue_greyed', C.c_int, C.c_void_p, C.POINTER(C.c_uint))
     assert [bool(greyed(b.children[0].addr, C.byref(C.c_uint(0xffffffff)))) for b in rows] == [False, True]
+
+
+
+def test_now_playing_shows_a_pressed_server_song_until_the_player_parses_one(rig, fw):
+    """Online, a press hands the list to the app and nothing loads until its .play (or the 4 s fallback):
+    meanwhile Now Playing shows the pressed song, not the last one, with the app's cover of its album, and
+    the song playing stops. It shows the player's song again once the player parses one, or when nothing
+    could play, or after CATPLAY_SHOW_MS, and stock's page writes its own title and artist then."""
+    rig.online = True
+    rig.write(1, [song_row('s1', 'Cached', 'B', 'A', 1, 100, 1, local='/mnt/mmc/.subsonic/stream/s1.flac'),
+                  song_row('s2', 'Streamed', 'Band', 'Album', 2, 100, 2, album_id='al2')])
+    rig.poll()
+    rig.files.files['/mnt/mmc/.subsonic/covers/al2.jpg'] = b'jpeg'
+    status = [2]
+    fw.mock('mclGetPlayStatus', lambda *_: status[0])
+    fw.mock('mclStop', lambda *_: status.__setitem__(0, 1))
+    from test_nav_painters import Ui
+    ui = Ui(fw)
+    win = ui.window('playing_page')
+    labels = [ui.add('hscroll_label', win, name=n) for n in ('scrlabel_title', 'scrlabel_artist')]
+    for label, old in zip(labels, ('Last Song', 'Last Band')):
+        ui.set_text(label, old)
+    now = fw.fn('catalogue_np_now', C.c_void_p, C.POINTER(C.c_uint), C.POINTER(C.c_uint))
+    cover = fw.fn('catalogue_np_cover', C.c_char_p)
+    text = fw.fn('catalogue_np_text', None, C.c_void_p)
+    refresh = fw.var('g_forcerefresh_flag', C.c_ubyte)
+    parses = fw.var('id3_parses', C.c_uint)
+
+    def shown():
+        at, n = C.c_uint(), C.c_uint()
+        r = now(C.byref(at), C.byref(n))
+        return r and (r, at.value, n.value, cover().decode())
+
+    pressed = rig.record(url('s2', 'al2'))
+    q = rig.rows.rows([rig.record('/mnt/mmc/Music/a.flac'), pressed, rig.record(url('s1'))])
+    assert not shown()
+    assert load(rig, q, 1)[0] == 2
+    assert status == [1]  # the last song stopped
+    r, *place = shown()
+    assert place == [1, 3, 'file:///mnt/mmc/.subsonic/covers/al2.jpg']
+    assert C.string_at(C.c_void_p.from_address(r + O['REC_PATH']).value) == url('s2', 'al2').encode()
+    # its title and artist, as the pressed row has them (the title's host pointer overlaps the path's,
+    # which is not read again)
+    tags = [C.create_string_buffer(t) for t in (b'Streamed', b'Band')]
+    rig.keep += tags
+    C.c_void_p.from_address(r + O['REC_TITLE']).value = C.addressof(tags[0])
+    C.c_void_p.from_address(r + O['REC_ARTIST']).value = C.addressof(tags[1])
+    text(win.addr)
+    assert [ui.text(label) for label in labels] == ['Streamed', 'Band']
+    ui.set_text(labels[0], 'Last Song')  # stock's own refresh wrote its title again: written back
+    text(win.addr)
+    assert [ui.text(label) for label in labels] == ['Streamed', 'Band']
+    rig.files.files[f'/tmp/q2-{APP}.play'] = b'2 /mnt/mmc/.subsonic/queue.m3u'
+    rig.poll(5)  # answered: still shown while the app's song loads
+    assert shown() and not refresh.value
+    parses.value += 1  # the player parsed the app's first song
+    assert not shown() and refresh.value == 1
+    ui.set_text(labels[0], 'Next Song')  # stock's refresh: its labels are left alone
+    text(win.addr)
+    assert [ui.text(label) for label in labels] == ['Next Song', 'Band']
+    # no cover fetched: stock's placeholder; nothing playable when the 4 s pass: the last song's again
+    refresh.value = 0
+    assert load(rig, rig.rows.rows([rig.record(url('s1'))]), 0)[0] == 2 and shown()[3] == 'play_defaultcover'
+    rig.online = False
+    rig.files.files[AVAIL] = b'-s1\n'
+    rig.poll(5)
+    assert rig.toasts[-1] == b'Not available offline' and not shown() and refresh.value == 1
+    # never parsed: given up after CATPLAY_SHOW_MS
+    rig.online = True
+    rig.poll()
+    assert load(rig, q, 1)[0] == 2 and shown()
+    rig.files.files[f'/tmp/q2-{APP}.play'] = b'3 /mnt/mmc/.subsonic/queue.m3u'
+    rig.now += 59000
+    assert shown()
+    rig.now += 1000
+    assert not shown()

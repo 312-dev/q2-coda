@@ -163,7 +163,7 @@ playlists.
 | Search: stock's Search (Library > Search, pull-to-search) runs `SearchMusicByName` and its kin, `... from songtable where <field> like '%<text>%'`, through `toolsQueryDbTable`, which is `library_query`, outside a music load; with Local + Server such a query reads the union, so server songs are found (Songs, Artists, Albums and Genres tabs). Pressing a result is stock's `search_track_row_on_click`, one of the `CATALOGUE_ACCESS` sites, so the offline rule holds; each tab's rows (one per record of `p_deque_searchshowlist`) are greyed as the rows below are: a song that can't play, an artist, album or genre none of whose songs can | `navigation.c` (`library_query`, three lines; `grey_rows`, `ringnav_search_rows`), `catalogue.c` (`catalogue_search`) | yes |
 | Availability: an in-memory index of the server rows and linked card files (by path, and by sid), with each offline copy, from `servermeta.local` and `catalogue.avail`; online is `networkGetConnectStatus()` and no app's `server=down`, read once a second | `catalogue.c` | yes |
 | Greyed rows ([below](#greyed-rows)): stock's pooled Library rows as `ringnav_table_load` binds them to `p_deque_showlist`'s records; the scroll_view lists whose rows are one record each in order (an album's songs on `albuminfo_page` and Go to Album's `playerjumpinfo_page`, Cover Flow's tracks, where Go to Album lands with Artist View on, Most Played's and the Ratings lists' songs, and each of Search's tabs) as their surface paints; a press on one fails stock's play check (`CATALOGUE_ACCESS`), which says File Not Found. An album row (Library > Albums, an artist's, composer's or genre's albums), and Search's artist, album and genre rows, are greyed when none of their songs can play: offline, no card song has its name and none of its server songs has an offline copy | `navigation.c` (`ringnav_table_load`, one call; `grey_rows`, `paint_offline`, `ringnav_style_color`), `catalogue.c` (`catalogue_bind`, `catalogue_album_unavailable`, `group_unavailable`, `catalogue_mark`, `catalogue_greyed`, `catalogue_fit`, `catalogue_mark_paint`) | yes |
-| Play: a list with server rows played online writes `.catplay`; the app's `.play` within 4 s is the answer, else the firmware plays the list itself from card rows and offline copies; offline it does so at once | `playback.c` (`ringnav_load`), `catalogue.c` (`catalogue_load`) | yes |
+| Play: a list with server rows played online writes `.catplay`; the app's `.play` within 4 s is the answer, else the firmware plays the list itself from card rows and offline copies; offline it does so at once. Meanwhile Now Playing shows the pressed song ([below](#now-playing-while-it-loads)) | `playback.c` (`ringnav_load`), `catalogue.c` (`catalogue_load`, `catalogue_np_now`), `np_bar.c` (`np_sync`, two lines), `navigation.c` (`np_art`, two lines), `tags.c` (`id3_parses`) | yes |
 | Shuffle and connection loss: offline, the queue loaded is the playable rows only, so Shuffle Songs (which plays the whole library through the same load) leaves the greyed out; mid-queue, `upcoming()` skips rows that can't play now | `playback.c` | yes |
 | Covers: a server row's album cover is the app's `covers/<album id>.jpg` (the album id from the row's path, or from its offline copy's row), in the Library's album rows and grids and on Now Playing; Cover Flow's own art build still marks a server row "no art" | `catalogue.c` (`catalogue_cover`), `coverflow.c` (`grid_cover`, `coverflow_player_cover`) | yes |
 | Guards where code assumes a file exists: Cover Flow art writes its "no art" marker for a server row at once; durations use the catalogue's seconds | `coverflow.c`, `durations.c` | yes |
@@ -190,6 +190,17 @@ it reads on any background:
   a row that shows one (a drill row's, or the selected album row's). The row's labels end 14 px
   short of the mark's centre while it is greyed, so a long title ellipsizes or scrolls clear of
   it, and take their width back when the row plays again.
+
+### Now Playing while it loads
+
+Online, a pressed server song is the app's to fetch, and nothing loads until its `.play` (or
+the firmware's own queue, 4 s on). Stock opens Now Playing at the press all the same, so it
+shows the pressed song at once: its title, artist and album from the row, its place in the list
+("2 of 12"), and the app's cover of its album (stock's placeholder until the app has fetched
+one). The song that was playing stops, so its time and sound don't run on under the new title.
+Now Playing goes back to the player's song as soon as the player parses one (the pressed
+song once it plays, or another the user picked), when nothing of the list could play, or after
+60 s with neither (`CATPLAY_SHOW_MS`).
 
 ### Compatibility
 
@@ -320,9 +331,9 @@ Library; a Q2 has 128 MB, so this wants checking on a device. Every job copies t
    "Greatest Hits") is not greyed.
 2. **Scale** on a device: the emulator's numbers (above) are not a Q2's, and 50,000 server songs
    took demo's process from 70 to 96 MB there, QEMU included. To be measured on a Q2 (128 MB).
-3. **Code that expects a file** beyond the guards built: Long Songs leaves server songs out, and an
-   online press shows Now Playing on the last song until the app's `.play` (or the 4 s fallback)
-   replaces it.
+3. **Code that expects a file** beyond the guards built: Long Songs leaves server songs out. Home's
+   art and the status bar's play state follow the player, so they show the stopped song while a
+   pressed server song loads.
 4. **Connection loss mid-queue**: the firmware skips rows that can't play as playback reaches them;
    rows the app's `.play` already holds are the app's to drop.
 5. **Server deletions**: a song removed on the server but present in a Q2 playlist, a rating or play

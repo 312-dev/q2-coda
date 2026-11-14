@@ -74,8 +74,10 @@ int np_sync(void *top) {
     if (!top || top != st.np_win) return 0;
     st.np_bold = theme_font(st.np_title, ROLE_NP, st.np_bold); /* the title, as it changes */
     unsigned at, n;
-    void *r = queue_now(&at, &n);
-    const char *album = now_tag(r, REC_ALBUM);
+    /* a pressed server song while it loads (catalogue.c), else the playing one */
+    void *pressed = catalogue_np_now(&at, &n), *r = pressed ? pressed : queue_now(&at, &n);
+    const char *album = pressed ? P(pressed, REC_ALBUM) : now_tag(r, REC_ALBUM);
+    if (pressed) catalogue_np_text(top);
     char s[24] = "";
     unsigned pos[2] = { at, n };
     unsigned h = hash_bytes(fnv(FNV_SEED, (const unsigned char *)album), (const unsigned char *)pos,
