@@ -72,6 +72,14 @@ def test_what_a_q2_would_refuse():
     assert shelf.problems([1, big]) == [f'me/q2-foo: {(1 << 30) + 1} bytes, over {1 << 30}']
 
 
+def test_the_repos_list_is_pinned_and_numbered():
+    """Every app the shipped list offers has a pin; a signature, if there is one yet, is the release key's."""
+    body, sig = signing.signed_list(shelf.LIST.read_bytes())
+    items = shelf.parse(body.decode())
+    assert shelf.problems(items) == [] and [x for x in items if isinstance(x, shelf.App)]
+    assert sig is None or signing.verify(signing.list_message(body), sig)
+
+
 def releases(zips):
     def resolve(repo):
         name, data = zips[repo]

@@ -10,6 +10,7 @@ the UI loop, or when a test says; a transfer can hand the UI passes, presses or 
 runs, which is where cancels and skips land."""
 import ctypes as C
 import fnmatch
+import hashlib
 import json
 import re
 import shlex
@@ -748,15 +749,31 @@ def w(fw, mcl):
 
 # Network Update (System Update's second row)
 
-LATEST = 'https://github.com/owner/repo/releases/latest'  # host.py builds with --update-repo's owner/repo
-ASSET = LATEST + '/download/update.tar'
+RELEASES = 'https://github.com/owner/repo/releases'  # host.py builds with --update-repo's owner/repo
+LATEST = RELEASES + '/latest'
 TAR = '/mnt/mmc/update.tar'
 PART = TAR + '.part'
 UPDATE_TAR = bytes(range(256)) * 2048  # 512 KB
+PEM = None
+
+
+@pytest.fixture(autouse=True)
+def release_key(signing_pem):
+    """The private half of the key this library checks releases with (host.signing_key)."""
+    global PEM
+    PEM = signing_pem
 
 
 def tag_url(tag):
-    return f'https://github.com/owner/repo/releases/tag/{tag}'
+    return f'{RELEASES}/tag/{tag}'
+
+
+def asset(tag=NEWER):
+    return f'{RELEASES}/download/{tag}/update.tar'
+
+
+def signed(tar, tag=NEWER):
+    return host.tools_signing.sign(f'q2-coda-update-v1 {tag} {hashlib.sha512(tar).hexdigest()}\n'.encode(), PEM)
 
 
 class SystemUpdate:
@@ -782,9 +799,12 @@ class SystemUpdate:
         return self.w.ui.get(self.labels[1]).text
 
 
-def releases(w, tag=NEWER, tar=UPDATE_TAR, **asset):
+def releases(w, tag=NEWER, tar=UPDATE_TAR, sig=None, **reply):
+    """The latest release, tagged tag: update.tar and its update.tar.sig, signed by the release key for tar unless
+    sig (a Reply) says otherwise."""
     w.net.route(LATEST, Reply(302, location=tag_url(tag)))
-    w.net.route(ASSET, Reply(200, tar, chunk=len(tar) // 4, **asset))
+    w.net.route(asset(tag), Reply(200, tar, chunk=len(tar) // 4, **reply))
+    w.net.route(asset(tag) + '.sig', sig or Reply(200, signed(tar, tag)))
 
 
 def test_network_update_checks_downloads_and_hands_the_tar_to_stocks_tf_update(w):
@@ -802,7 +822,8 @@ def test_network_update_checks_downloads_and_hands_the_tar_to_stocks_tf_update(w
     # the part whole on the card, renamed, and the rename's entry on the card, before stock flashes it
     steps = [e for e in w.log if e[0] in ('fsync', 'rename', 'fwupdate_tf')]
     assert steps == [('fsync', PART), ('rename', PART, TAR), ('fsync', '/mnt/mmc'), ('fwupdate_tf',)]
-    assert w.net.asked == [LATEST, ASSET]
+    assert w.net.asked == [LATEST, asset() + '.sig', asset()]
+    assert '/tmp/q2-update.sig' not in w.card.files and w.card.reads[PART] == 1  # the part read back once, to check it
     held = w.calls('reset_poweroptions_timer')
     assert held and all(c[:3] == (1, 1, 0) for c in held)  # standby and auto power-off, not the screen
     w.ui.run(5000)
@@ -862,7 +883,7 @@ def test_a_second_press_cancels_the_download_and_a_third_before_it_ends_does_not
     releases(w, during=during)
     page.press()
     w.ui.work()
-    assert seen == ['Cancelling…'] and w.net.asked == [LATEST, ASSET]
+    assert seen == ['Cancelling…'] and w.net.asked == [LATEST, asset() + '.sig', asset()]
     page.press()  # the thread has ended, not yet joined
     w.ui.run(500)
     assert w.ui.started == 1 and w.ui.toasts == ['Download cancelled']
@@ -876,7 +897,7 @@ def test_leaving_system_update_cancels_its_download(w):
     page.press()
     w.ui.run(500)
     assert w.ui.toasts == ['Download cancelled'] and not w.card.tree()
-    assert len(w.net.asked) == 2 and not w.calls('fwupdate_tf')
+    assert len(w.net.asked) == 3 and not w.calls('fwupdate_tf')
 
 
 def test_a_download_that_ends_as_the_page_closes_says_where_it_is(w):
@@ -891,6 +912,35 @@ def test_a_download_that_ends_as_the_page_closes_says_where_it_is(w):
     assert not w.calls('fwupdate_tf')
 
 
+def test_network_update_refuses_an_unsigned_release_before_downloading_it(w):
+    """q2-pod's upstream releases carry no update.tar.sig."""
+    w.ui.wifi = 3
+    w.card.put(TAR, b'the release before', count=False)
+    page = SystemUpdate(w)
+    releases(w, sig=Reply(404, b'Not Found'))
+    page.press()
+    w.ui.run(500)
+    assert w.ui.toasts == ['Release not signed: not installed'] and w.net.asked == [LATEST, asset() + '.sig']
+    assert w.card.tree() == {'update.tar': b'the release before'} and not w.calls('fwupdate_tf')
+
+
+@pytest.mark.parametrize('how', ['tar', 'sig', 'tag'])
+def test_network_update_refuses_a_forged_release_and_keeps_the_old_tar(w, how):
+    """A tar changed after signing, a signature changed, and an older release's file and signature under a newer tag."""
+    w.ui.wifi = 3
+    w.card.put(TAR, b'the release before', count=False)
+    page = SystemUpdate(w)
+    sig = signed(UPDATE_TAR)
+    tar = UPDATE_TAR[:-1] + b'!' if how == 'tar' else UPDATE_TAR
+    sig = bytes([sig[0] ^ 1]) + sig[1:] if how == 'sig' else signed(UPDATE_TAR, TAG) if how == 'tag' else sig
+    releases(w, tar=tar, sig=Reply(200, sig))
+    page.press()
+    w.ui.run(500)
+    assert w.ui.toasts == ['Signature check failed: not installed'] and len(w.net.asked) == 3
+    assert w.card.tree() == {'update.tar': b'the release before'} and not w.calls('fwupdate_tf')
+    assert not [e for e in w.log if e[0] == 'rename'] and page.text == 'tr:update_online'
+
+
 def test_a_worker_done_before_pthread_create_returns_is_still_reported(w):
     w.ui.wifi, w.ui.eager = 3, True
     page = SystemUpdate(w)
@@ -902,19 +952,25 @@ def test_a_worker_done_before_pthread_create_returns_is_still_reported(w):
 
 # Q2 Shelf: System settings' App Store
 
-LIST_URL = 'https://raw.githubusercontent.com/DiamondBond/q2-pod/main/sources.list'
+LIST_URL = 'https://raw.githubusercontent.com/owner/repo/main/sources.list'  # host.py's --update-repo
 STAGING = '/mnt/mmc/.q2/staging'
 
 
-def api(repo):
-    return f'https://api.github.com/repos/{repo}/releases/latest'
+def pinned(sources, pins):
+    """sources' app lines with their pins (repo: (tag, asset, size, sha256 hex)) after the repo, as tools/shelf.py
+    writes them; a line whose repo has none as it is."""
+    out = []
+    for line in sources.splitlines():
+        repo, _, name = line.partition(' ')
+        pin = pins.get(repo.lstrip('-'))
+        out.append(f'{repo} {" ".join(map(str, pin))}{" " + name if name else ""}' if pin and not repo.startswith('-') else line)
+    return ''.join(x + '\n' for x in out)
 
 
-def release_json(tag, url, size):
-    """GitHub's releases/latest, trimmed: a notes file, then the zip."""
-    assets = [{'name': 'notes.txt', 'size': 5, 'browser_download_url': 'https://h/notes.txt'},
-              {'name': url.rsplit('/', 1)[1], 'size': size, 'browser_download_url': url}]
-    return json.dumps({'url': 'x', 'tag_name': tag, 'name': 'Release', 'assets': assets, 'body': 'notes'}).encode()
+def card_list(sources, tag='1.0', tags=None):
+    """The card's list as an earlier check left it, each app pinned to tag (or its own in tags)."""
+    pins = {line.split(' ')[0]: ((tags or {}).get(line.split(' ')[0], tag), 'app.zip', 5, 'ab' * 32) for line in sources.splitlines()}
+    return 'serial 1\n' + pinned(sources, pins)
 
 
 def app_zip(binary, **extra):
@@ -927,14 +983,26 @@ FOO_FILES = {'.foo/q2-foo', '.foo/q2app', '.foo/run'}
 
 
 class GitHub:
-    def __init__(self, w, sources):
-        self.w = w
-        w.net.route(LIST_URL, Reply(200, sources.encode()))
+    """q2-coda's signed list of sources, each app pinned to the release given it, and those releases' zips."""
+    def __init__(self, w, sources, serial=1):
+        self.w, self.sources, self.serial, self.pins = w, sources, serial, {}
+        self.publish()
+
+    def text(self):
+        """The list as the card keeps it after a check: unsigned."""
+        return f'serial {self.serial}\n' + pinned(self.sources, self.pins)
+
+    def publish(self):
+        body = self.text().encode()
+        sig = host.tools_signing.sign(host.tools_signing.list_message(body), PEM)
+        self.w.net.route(LIST_URL, Reply(200, body + b'signature ' + sig.hex().encode() + b'\n'))
 
     def release(self, repo, tag, files, **reply):
         data = zipped(files)
-        url = f'https://github.com/{repo}/releases/download/{tag}/{repo.split("/")[1]}.zip'
-        self.w.net.route(api(repo), Reply(200, release_json(tag, url, len(data))))
+        asset = f'{repo.split("/")[1]}.zip'
+        url = f'https://github.com/{repo}/releases/download/{tag}/{asset}'
+        self.pins[repo] = (tag, asset, len(data), hashlib.sha256(data).hexdigest())
+        self.publish()
         self.w.net.route(url, Reply(200, data, chunk=len(data) // 4 + 1, **reply))
         return url, data
 
@@ -961,11 +1029,11 @@ class AppStore:
         self.w.ui.press(self.page, name)
 
 
-def installed(w, tag='1.0', extra=None, sources='me/q2-foo Foo\n'):
-    """Foo as an install left it, with what it saved since."""
+def installed(w, tag='1.0', extra=None, sources='me/q2-foo Foo\n', tags=None):
+    """Foo as an install left it, with what it saved since, and the card's list as the last check left it."""
     for name, data in {'.foo/q2-foo': b'binary 1', '.foo/q2app': b'name=Foo\n', '.foo/run': b'#!/bin/sh\n',
                        '.q2/apps/foo.files': b'.foo/q2-foo\n.foo/q2app\n.foo/run\n', '.q2/apps/foo.tag': tag.encode(),
-                       '.q2/sources.list': sources.encode(), **(extra or {})}.items():
+                       '.q2/sources.list': card_list(sources, tag, tags).encode(), **(extra or {})}.items():
         w.card.put('/mnt/mmc/' + name, data, count=False)
 
 
@@ -983,9 +1051,9 @@ def test_the_app_store_lists_installs_and_streaming_finds_the_app(w):
     _, data = hub.release('me/q2-foo', '1.0', app_zip('x' * 40000), during=lambda sent: (w.ui.run(500), shown.append(store.detail('Foo'))))
     assert store.rows() == [] and store.detail(store.CHECK) == 'Checking…'  # no list on the card yet
     w.ui.run(500)
-    assert store.rows() == [('Foo', 'Install')] and w.net.asked == [LIST_URL, api('me/q2-foo')]
+    assert store.rows() == [('Foo', 'Install')] and w.net.asked == [LIST_URL]
     assert not w.ui.toasts  # nothing installed to update, and the opening check isn't Check for Updates
-    assert w.card.files['/mnt/mmc/.q2/sources.list'] == b'me/q2-foo Foo\n'  # the page's list offline
+    assert w.card.files['/mnt/mmc/.q2/sources.list'] == hub.text().encode()  # the page's list offline
     store.press('Foo')
     shown.append(store.detail('Foo'))
     w.shell.watch = lambda cmd: (w.ui.run(500), shown.append(store.detail('Foo')))
@@ -1033,7 +1101,7 @@ def test_the_app_store_updates_an_app_stopping_it_first_and_keeping_what_it_save
 def test_the_app_store_removes_an_app_with_what_it_saved_and_without_wifi(w):
     installed(w, extra={'.foo/login.json': b'{"token":1}', '.bar/q2-bar': b'b', '.bar/q2app': b'name=Bar\n', '.bar/run': b'',
                         '.q2/apps/bar.files': b'.bar/q2-bar\n.bar/q2app\n.bar/run\n', '.q2/apps/bar.tag': b'2.0'},
-              sources='me/q2-foo Foo\nme/q2-bar Bar\n')
+              sources='me/q2-foo Foo\nme/q2-bar Bar\n', tags={'me/q2-bar': '2.0'})
     assert streaming(w) == ['Bar', 'Foo']
     store = AppStore(w)
     assert store.rows() == [('Foo', 'Installed'), ('Bar', 'Installed')]
@@ -1138,6 +1206,33 @@ def test_a_second_press_cancels_an_install_and_another_app_waits(w):
     assert store.rows() == [('Foo', 'Install'), ('Bar', 'Install')]
     assert set(w.card.tree()) == {'.q2/sources.list'} and STAGING not in w.card.dirs
     assert not [u for u in w.net.asked if 'q2-bar.zip' in u]
+
+
+def test_the_app_store_refuses_a_zip_replaced_since_it_was_pinned(w):
+    """The repo's owner (or whoever holds it) uploads another zip under the pinned tag: it is never unpacked."""
+    w.ui.wifi = 3
+    hub = GitHub(w, 'me/q2-foo Foo\n')
+    url, _ = hub.release('me/q2-foo', '1.0', app_zip('x' * 400))
+    w.net.route(url, Reply(200, zipped(app_zip('evil'))))
+    store = AppStore(w)
+    w.ui.run(500)
+    store.press('Foo')
+    w.ui.run(500)
+    assert w.ui.toasts == ["Download doesn't match the list"] and store.rows() == [('Foo', 'Install')]
+    assert set(w.card.tree()) == {'.q2/sources.list'} and STAGING not in w.card.dirs
+    assert not [c for c in w.shell.ran if 'unzip' in c]
+
+
+def test_the_app_store_never_takes_an_unsigned_list(w):
+    """q2-pod's own list, or one rewritten in a repository taken over: no rows come from it, and none install."""
+    w.ui.wifi = 3
+    w.net.route(LIST_URL, Reply(200, b'serial 1\n' + pinned('me/q2-evil Evil\n', {'me/q2-evil': ('1.0', 'e.zip', 5, 'ab' * 32)}).encode()))
+    store = AppStore(w)
+    w.ui.run(500)
+    assert store.rows() == [] and w.net.asked == [LIST_URL] and not w.card.tree()
+    store.press(store.CHECK)
+    w.ui.run(500)
+    assert w.ui.toasts[-1] == 'App list not signed: not used'
 
 
 # An installed card app from Streaming: its page over Q2SPOT/1, and the library update its sync asks for

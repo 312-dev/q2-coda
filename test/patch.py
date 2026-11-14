@@ -18316,9 +18316,27 @@ assert [am.nodes[l].get('style:normal:font_name') for l in am.nodes[abutton]['ch
 
 # Network Update (netupdate.c): System Update's second row, built by stock's own row builder
 # (0x4c8660), is renamed "2" so stock's click (atoi of the name: 0 TF card, 1 Shanling) skips it, and
-# fetches the latest GitHub release over verified TLS to the card's update.tar (a .part, renamed),
-# then runs stock's TF card update (0x4c7eb4). A failure keeps the old update.tar.
-m=RadioMachine(); resume=int(manifest['patch_symbols']['stock_fwupdate_trampoline'],16); m.handlers[resume]='stock_fwupdate'
+# fetches the latest GitHub release's update.tar.sig, then its update.tar over verified TLS to the card
+# (a .part, renamed once its signature checks, docs/internals.md#release-signatures), then runs stock's
+# TF card update (0x4c7eb4). A failure keeps the old update.tar.
+# The payload's release key is the manifest's; these checks swap in a key made for this run, whose private half signs.
+import signing
+assert (B/'patch.bin').read_bytes()[payload_syms['release_key']-BASE:][:32].hex()==manifest['signing_key']
+KEY_DIR=pathlib.Path(tempfile.mkdtemp(prefix='q2-patch-key-'))
+subprocess.run(['openssl','genpkey','-algorithm','ed25519','-out',str(KEY_DIR/'k.pem')],check=True,capture_output=True)
+TEST_PEM=(KEY_DIR/'k.pem').read_text()
+TEST_PUB=signing.public_key(subprocess.run(['openssl','pkey','-in',str(KEY_DIR/'k.pem'),'-pubout'],check=True,capture_output=True).stdout)
+(KEY_DIR/'k.pem').unlink(); KEY_DIR.rmdir()
+def test_key(m): m.u.mem_write(payload_syms['release_key'],TEST_PUB)
+def update_sig(tar,tag): return signing.sign(f'q2-coda-update-v1 {tag} {hashlib.sha512(tar).hexdigest()}\n'.encode(),TEST_PEM)
+class UpdateMachine(RadioMachine):
+    """RadioMachine whose transfers each take their own reply: update.tar.sig's (sig) or any other's (reply)."""
+    def __init__(self): super().__init__(); self.sig=b''
+    def hook(self,u,address,size,unused):
+        if self.handlers.get(address,'')=='r:curl_easy_perform' and str(self.opts.get(10002,'')).endswith('.sig'):
+            self.reply,tar=self.sig,self.reply; super().hook(u,address,size,unused); self.reply=tar; return
+        return super().hook(u,address,size,unused)
+m=UpdateMachine(); test_key(m); resume=int(manifest['patch_symbols']['stock_fwupdate_trampoline'],16); m.handlers[resume]='stock_fwupdate'
 m.u.hook_add(UC_HOOK_CODE,m.hook,begin=resume,end=resume)  # fast(): payload addresses hook one by one
 m.handlers[0x4c7eb4]='fwupdate_tf'; m.mock('strcpy@GLIBC_2.0','widget_set_tr_text')
 view=m.node('scroll_view','scroll_view_fwupdate'); m.top=m.node('window','fwupdate_page',[view])
@@ -18336,46 +18354,66 @@ UPDATE='/mnt/mmc/update.tar'; ASSET='update.tar'
 RELEASES=f"https://github.com/{manifest['update_repo']}/releases"  # build.py --update-repo
 m.files[UPDATE]=bytearray(b'old')
 m.wifi=-1; press(); assert m.toasts[-1][3]=='Connect to Wi-Fi first' and not m.threads; m.wifi=3
-def fetch(codes,tag,reply=b'',done=500):
+def fetch(codes,tag,reply=b'',done=500,sig=None):
     press(); assert m.nodes[label]['text']=='Checking…'
-    m.codes=list(codes); m.location=f'{RELEASES}/tag/{tag}'; m.reply=reply
+    m.codes=list(codes); m.location=f'{RELEASES}/tag/{tag}'; m.reply=reply; m.sig=update_sig(reply,tag) if sig is None else sig
     m.advance(500,clear=False)  # while it runs: the percentage, and standby and auto power-off wait
     assert m.nodes[label]['text']=='Checking…' and ('reset_poweroptions_timer',1,1,0) in [c[:4] for c in m.calls]
-    worker,arg=m.threads[-1]; assert m.call(address=worker,args=(arg,0,0,0),gap=0,count=5_000_000)==0
+    worker,arg=m.threads[-1]; assert m.call(address=worker,args=(arg,0,0,0),gap=0,count=200_000_000)==0
     threads=len(m.threads); press(); assert len(m.threads)==threads  # ended, not yet joined: nothing
     m.advance(done,clear=False)
     assert ('widget_set_tr_text',label) in [c[:2] for c in m.calls] and UPDATE+'.part' not in m.files
-fetch([302,200],'9.9.9',b'TAR'*100)
-assert m.opts[10002]==f'{RELEASES}/latest/download/{ASSET}' and m.opts[52]==1
+fetch([302,200,200],'9.9.9',b'TAR'*100)
+assert m.opts[10002]==f'{RELEASES}/download/9.9.9/{ASSET}' and m.opts[52]==1
 assert m.opts[10065]=='/etc/scrobble-ca.pem' and m.opts[64]==1 and m.opts[81]==2 and m.opts[99]==1 and m.opts[20108]
 assert bytes(m.files[UPDATE])==b'TAR'*100 and 'fwupdate_tf' in [c[0] for c in m.calls]
 m.files[UPDATE]=bytearray(b'old')
-fetch([302,404],'9.9.9'); assert m.toasts[-1][3]=='No update for this build' and m.files[UPDATE]==b'old'
+fetch([302,200,404],'9.9.9'); assert m.toasts[-1][3]=='No update for this build' and m.files[UPDATE]==b'old'
+fetch([302,404],'9.9.9'); assert m.toasts[-1][3]=='Release not signed: not installed' and m.files[UPDATE]==b'old'
+flashes=lambda: [c[0] for c in m.calls].count('fwupdate_tf'); flashed=flashes()
+fetch([302,200,200],'9.9.9',b'TAR'*100,sig=update_sig(b'TAR'*99,'9.9.9'))
+assert m.toasts[-1][3]=='Signature check failed: not installed' and m.files[UPDATE]==b'old'
+fetch([302,200,200],'9.9.9',b'TAR'*100,sig=update_sig(b'TAR'*100,'9.9.8'))  # another release's: refused
+assert m.toasts[-1][3]=='Signature check failed: not installed' and m.files[UPDATE]==b'old' and flashes()==flashed
 fetch([200],'9.9.9'); assert m.toasts[-1][3]=="Can't reach GitHub"  # no redirect: no tag
 if not manifest['dev']:  # --dev builds have no release tag, so always fetch
     fetch([302],VERSION); assert m.toasts[-1][3]=='Latest firmware installed' and m.files[UPDATE]==b'old'
     fetch([302],'1.0.0'); assert m.toasts[-1][3]=='Latest firmware installed'  # older: never a downgrade
 # Leaving the page cancels before the download starts: the card may be unmounted or shared next.
-press(); m.codes=[302,200]; m.location=f'{RELEASES}/tag/9.9.9'; m.reply=b'NEW'
+press(); m.codes=[302,200,200]; m.location=f'{RELEASES}/tag/9.9.9'; m.reply=b'NEW'; m.sig=update_sig(b'NEW','9.9.9')
 f,ctx=m.handler(label,O['EVT_DESTROY']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
 worker,arg=m.threads[-1]; assert m.call(address=worker,args=(arg,0,0,0),gap=0,count=5_000_000)==0
 m.advance(500,clear=False); assert m.toasts[-1][3]=='Download cancelled' and m.files[UPDATE]==b'old'
 assert 'fwupdate_tf' not in [c[0] for c in m.calls]; passed()
 
 # Q2 Shelf (netupdate.c, docs/internals.md#q2-shelf): System settings' Apps page, Check for Updates
-# then a row per app with its state from .q2/apps/<id>.tag, a manual install's binary and, with Wi-Fi,
-# a check of GitHub's latest releases on opening, kept SH_STALE_MS, its end toasting how many apps can
-# be updated. Install and Update start a worker at once; Remove, Erase and Rockbox's first Install (the
+# then a row per app with its state from .q2/apps/<id>.tag against the list's pin, a manual install's
+# binary and, with Wi-Fi, a check on opening (the signed list alone, docs/internals.md#release-signatures),
+# kept SH_STALE_MS, its end toasting how many apps can be updated. Install and Update start a worker at
+# once, which takes the zip the list pins and nothing else; Remove, Erase and Rockbox's first Install (the
 # power-on default) want a second press. A press on the running install cancels it; one during the
-# opening check stops the check.
+# opening check stops the check. The lists here are signed with the run's test key (test_key).
 SPOT_TAG,SPOT_FILES='/mnt/mmc/.q2/apps/spotify.tag','/mnt/mmc/.q2/apps/spotify.files'
+REPO_LIST=signing.signed_list((ROOT/'sources.list').read_bytes())[0]  # the card's copy: a check leaves it unsigned
+SPOT_PIN=REPO_LIST.decode().split('DiamondBond/q2-librespot ')[1].split(' ')[0]
+ZIP=b'PK\x03\x04 the zip'  # every app download's bytes here (ShelfMachine's reply)
+def sign_list(body): return body+b'signature '+signing.sign(signing.list_message(body),TEST_PEM).hex().encode()+b'\n'
+def shelf_list(body=REPO_LIST,**tags):
+    """body signed by the test key, the apps named (repo: tag) pinned to ZIP at tag."""
+    lines=[]
+    for line in body.decode().splitlines(keepends=True):
+        repo=line.split(' ')[0]
+        if repo in tags:
+            words=line.split(' ',5); words[1:5]=[tags[repo],'app.zip',str(len(ZIP)),hashlib.sha256(ZIP).hexdigest()]; line=' '.join(words)
+        lines.append(line)
+    return sign_list(''.join(lines).encode())
 class ShelfMachine(RadioMachine):
     """RadioMachine with busybox's side scripted: unzip -l prints listing, unzip -o stages staged
     ((path, bytes), in find's order), find lists them; statfs has free bytes; renames kept in order;
-    listed, once set, answers every sources.list fetch (an install's first) in reply's place."""
+    listed, once set, answers every sources.list fetch in reply's place. The test key is the release key."""
     def __init__(self,files=None):
         super().__init__(files); self.free=1<<32; self.moves=[]; self.listing=''; self.staged=[]; self.listed=None
-        self.mock('rmdir@GLIBC_2.0')
+        self.mock('rmdir@GLIBC_2.0'); test_key(self)
     def hook(self,u,address,size,unused):
         name=self.handlers.get(address,'')
         if name=='r:curl_easy_perform' and self.listed is not None and self.opts.get(10002,'').endswith('/sources.list'):
@@ -18398,10 +18436,11 @@ def apps_open(m):
     assert m.call(address=payload_syms['shelf_open'],args=(0,m.event,0,0),gap=0,count=5_000_000)==0
     m.advance(0,clear=False); m.page=m.top; assert m.nodes[m.page]['name']=='apps_page'
 def shelf_job(m,ms=500):
-    worker,arg=m.threads[-1]; assert m.call(address=worker,args=(arg,0,0,0),gap=0,count=50_000_000)==0; m.advance(ms,clear=False)
+    worker,arg=m.threads[-1]; assert m.call(address=worker,args=(arg,0,0,0),gap=0,count=300_000_000)==0; m.advance(ms,clear=False)
 KILL='killall -9 librespot aplay'
 LIST='/mnt/mmc/.q2/sources.list'
-m=ShelfMachine({LIST:bytearray((ROOT/'sources.list').read_bytes()),SPOT_TAG:bytearray(b'q2-v1.8'),SPOT_FILES:bytearray(b'.spotify/run\n.spotify/librespot\n'),
+LIST_URL=f"https://raw.githubusercontent.com/{manifest['update_repo']}/main/sources.list"  # build.py --update-repo
+m=ShelfMachine({LIST:bytearray(REPO_LIST),SPOT_TAG:bytearray(SPOT_PIN.encode()),SPOT_FILES:bytearray(b'.spotify/run\n.spotify/librespot\n'),
                 '/mnt/mmc/.spotify/run':bytearray(b'sh'),'/mnt/mmc/.spotify/librespot':bytearray(b'ELF'),
                 '/proc/mounts':bytearray(b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n')})  # the card, for card_mounted before a remove
 m.rockbox_mode=0; m.wifi=-1; apps_open(m)
@@ -18409,61 +18448,71 @@ BLANK=m.labels()[2]; assert BLANK in ('',' ')  # Check for Updates' blank detail
 assert m.labels()==['App Store','Check for Updates',BLANK,'Rockbox','Install','Spotify','Installed','Deezer','Install','Soulseek','Install','File Browser','Install','Subsonic','Install','Podcasts','Install','Live Music Archive','Install','Buddy','Install','Groovebox','Install','AirPlay','Install'] and not m.threads; passed()  # no themes without Rockbox; the card apps last
 m.close(); m.wifi=3; m.rockbox_mode=0o100755; m.dirs['/mnt/mmc/.spotify']=[]; apps_open(m)
 assert m.labels()==['App Store','Check for Updates','Checking…','Rockbox','Update','Rockbox Themes','Install','Spotify','Installed','Deezer','Install','Soulseek','Install','File Browser','Install','Subsonic','Install','Podcasts','Install','Live Music Archive','Install','Buddy','Install','Groovebox','Install','AirPlay','Install']
-m.reply=(ROOT/'test/shelf/q2-librespot.json').read_bytes(); shelf_job(m)
-assert m.opts[10002]=='https://api.github.com/repos/group-a-study/q2-airplay/releases/latest' and m.opts[10018]=='Q2Pod'  # the last of twelve
+m.listed=shelf_list(**{'DiamondBond/q2-librespot':'q2-v9.9','DiamondBond/q2-rockbox':'v3.2'}); m.reply=ZIP; shelf_job(m)
+assert m.opts[10002]==LIST_URL and m.opts[10018]=='Q2Pod'  # the list, the check's one request
 assert m.opts[10065]=='/etc/scrobble-ca.pem' and m.opts[64]==1 and m.opts[81]==2 and m.opts[20108]
-assert m.labels()[8]=='Update' and m.labels()[2]==BLANK and '/tmp/q2-shelf.json' not in m.files  # q2-v1.8 against the latest q2-v1.9
+assert m.labels()[8]=='Update' and m.labels()[2]==BLANK and '/tmp/q2-shelf.json' not in m.files  # the pin's q2-v9.9 against the card's tag
 assert m.toasts[-1][3]=='1 app can be updated'; passed()  # the opening check's end, the page on top
+assert bytes(m.files[LIST]).startswith(b'serial 1\n') and b'DiamondBond/q2-librespot q2-v9.9 app.zip ' in bytes(m.files[LIST]) and b'signature' not in bytes(m.files[LIST]); passed()
 m.row(0); assert m.toasts[-1][3]=='1 app can be updated' and len(m.threads)==1; passed()  # within SH_RECHECK_MS: no requests
 toasts=len(m.toasts); m.close(); m.now+=9*60*1000; apps_open(m); assert len(m.threads)==1 and m.labels()[8]=='Update' and len(m.toasts)==toasts; passed()  # still fresh: no requests
-m.listed=(ROOT/'sources.list').read_bytes()  # an install fetches the list first
 m.row(3); assert m.labels()[8]=='Checking…' and len(m.threads)==2 and KILL in m.systems[-1]; m.row(3); assert m.labels()[8]=='Cancelling…'
 shelf_job(m); assert m.toasts[-1][3]=='Download cancelled' and m.labels()[8]=='Update'; passed()
 m.wifi=-1; m.row(3); assert m.toasts[-1][3]=='Connect to Wi-Fi first' and len(m.threads)==2; m.wifi=3; passed()
-m.codes=[200,403]; m.row(3); shelf_job(m); assert m.toasts[-1][3]=='GitHub is busy, try later'; passed()  # the list, then the API's rate limit
-m.files[SPOT_TAG]=bytearray(b'q2-v1.9'); m.close(); m.wifi=-1; apps_open(m); assert m.labels()[8]=='Installed' and len(m.threads)==3
-m.row(3); assert m.labels()[8]=='Press again to remove' and len(m.threads)==3
+m.codes=[429]; m.row(3); shelf_job(m); assert m.toasts[-1][3]=='GitHub is busy, try later'; passed()  # the list's host's rate limit
+good_list=m.listed; m.listed=good_list[:good_list.index(b"signature ")]; m.row(3); shelf_job(m)  # the list unsigned: nothing installs
+assert m.toasts[-1][3]=='App list not signed: not used' and bytes(m.files['/mnt/mmc/.spotify/librespot'])==b'ELF'; m.listed=good_list; passed()
+m.files[SPOT_TAG]=bytearray(b'q2-v9.9'); m.close(); m.wifi=-1; apps_open(m); assert m.labels()[8]=='Installed' and len(m.threads)==4
+m.row(3); assert m.labels()[8]=='Press again to remove' and len(m.threads)==4
 m.row(1); assert m.labels()[8]=='Installed' and m.toasts[-1][3]=='Connect to Wi-Fi first'  # another row's press drops it
 m.row(3); m.row(3); assert m.labels()[8]=='Removing…'; shelf_job(m)
 assert m.toasts[-1][3]=='Spotify removed' and KILL in m.systems[-3] and m.systems[-2]=='sync' and KILL in m.systems[-1]  # spot_stop: before and after
 assert not {SPOT_TAG,SPOT_FILES,'/mnt/mmc/.spotify/run','/mnt/mmc/.spotify/librespot'}&set(m.files) and m.labels()[8]=='Install'; passed()
-# A stale check, stopped by a press (it needs no answer); then Rockbox from its release to "ready".
-m.close(); m.wifi=3; m.now+=11*60*1000; apps_open(m); assert len(m.threads)==5
-m.row(2); assert m.toasts[-1][3]=='Stopped checking for updates'; shelf_job(m); assert len(m.threads)==5 and m.toasts[-1][3]=='Stopped checking for updates'; passed()
-m.close(); m.rockbox_mode=0; m.dirs.pop('/mnt/mmc/.spotify'); m.reply=(ROOT/'test/shelf/q2-rockbox.json').read_bytes()
+# A stale check, stopped by a press (it needs no answer); then Rockbox from its pin to "ready".
+m.close(); m.wifi=3; m.now+=11*60*1000; apps_open(m); assert len(m.threads)==6
+m.row(2); assert m.toasts[-1][3]=='Stopped checking for updates'; shelf_job(m); assert len(m.threads)==6 and m.toasts[-1][3]=='Stopped checking for updates'; passed()
+m.close(); m.rockbox_mode=0; m.dirs.pop('/mnt/mmc/.spotify')
 toasts=len(m.toasts); apps_open(m); shelf_job(m); assert len(m.toasts)==toasts  # the opening check: nothing to update, nothing said
 assert m.labels()==['App Store','Check for Updates',BLANK,'Rockbox','Install','Spotify','Install','Deezer','Install','Soulseek','Install','File Browser','Install','Subsonic','Install','Podcasts','Install','Live Music Archive','Install','Buddy','Install','Groovebox','Install','AirPlay','Install']  # not stopped: checked again
-m.row(1); assert m.labels()[4]=='Starts at power-on; Boot to changes that. Press again to install' and len(m.threads)==6
-m.row(1); assert len(m.threads)==7 and m.labels()[4]=='Checking…'; m.row(1); shelf_job(m); assert m.toasts[-1][3]=='Download cancelled'
-m.free=10<<20; m.row(1); m.row(1); shelf_job(m)  # the zip (13018581 bytes) and 64 MB left over
-assert m.toasts[-1][3]==f'Needs {(13018581+(54<<20)+(1<<20)-1)>>20} MB more space' and not [f for f in m.files if '.q2/staging/' in f]; passed()
+m.row(1); assert m.labels()[4]=='Starts at power-on; Boot to changes that. Press again to install' and len(m.threads)==7
+m.row(1); assert len(m.threads)==8 and m.labels()[4]=='Checking…'; m.row(1); shelf_job(m); assert m.toasts[-1][3]=='Download cancelled'
+m.free=10<<20; m.row(1); m.row(1); shelf_job(m)  # the pinned zip's size and 64 MB left over
+assert m.toasts[-1][3]==f'Needs {(len(ZIP)+(54<<20)+(1<<20)-1)>>20} MB more space' and not [f for f in m.files if '.q2/staging/' in f]; passed()
 m.free=1<<32; m.staged=[('.rockbox/rockbox',b'ELF3.2'),('.rockbox/codecs/flac.codec',b'c'),('.rockbox/fonts/a b.fnt',b'f')]
 m.listing=''.join(f'{len(d):9}  10-06-2026 13:18   {f}\n' for f,d in m.staged)
-m.row(1); m.row(1); m.rockbox_mode=0o100755; m.moves=[]; shelf_job(m)  # Rockbox on the card by the end
+m.reply=ZIP+b'!'; m.row(1); m.row(1); m.moves=[]; shelf_job(m)  # another zip at the pinned tag: refused before unzip
+assert m.toasts[-1][3]=="Download doesn't match the list" and not [x for x in m.moves if x.startswith('/mnt/mmc/.rockbox/')]
+assert not [c for c in m.systems if 'unzip' in c] and not [f for f in m.files if '.q2/staging' in f]; passed()
+m.reply=ZIP; m.row(1); m.row(1); m.rockbox_mode=0o100755; m.moves=[]; shelf_job(m)  # Rockbox on the card by the end
 assert m.toasts[-1][3]=='Rockbox is ready. Find it on Home'
 assert [x for x in m.moves if x.startswith('/mnt/mmc/.rockbox/')][-1]=='/mnt/mmc/.rockbox/rockbox'  # the binary last
 assert m.moves[-2:]==['/mnt/mmc/.q2/apps/rockbox.files','/mnt/mmc/.q2/apps/rockbox.tag'] and m.files['/mnt/mmc/.q2/apps/rockbox.tag']==b'v3.2'
 assert m.files['/mnt/mmc/.rockbox/rockbox']==b'ELF3.2' and m.files['/mnt/mmc/.rockbox/fonts/a b.fnt']==b'f'
 assert m.files['/mnt/mmc/.q2/apps/rockbox.files']==b'.rockbox/rockbox\n.rockbox/codecs/flac.codec\n.rockbox/fonts/a b.fnt\n'
+assert m.opts[10002]=='https://github.com/DiamondBond/q2-rockbox/releases/download/v3.2/app.zip'  # the pin's own asset
 assert not [f for f in m.files if '.q2/staging' in f] and 'sync' in m.systems; passed()
 assert m.labels()==['App Store','Check for Updates',BLANK,'Rockbox','Installed','Rockbox Themes','Install','Spotify','Install','Deezer','Install','Soulseek','Install','File Browser','Install','Subsonic','Install','Podcasts','Install','Live Music Archive','Install','Buddy','Install','Groovebox','Install','AirPlay','Install']; passed()  # the rows built again
 m.listing='        1  10-06-2026 13:18   .rockbox/../../x\n'; m.files.pop('/mnt/mmc/.q2/apps/rockbox.tag'); m.row(1); shelf_job(m)
 assert m.toasts[-1][3]=='The download is not a usable app' and m.files['/mnt/mmc/.rockbox/rockbox']==b'ELF3.2'; passed()
 m.close(); passed()
 # No list on the card yet: Check for Updates alone, which loads it with Wi-Fi. No reply says so; the
-# fetched list (its bad lines skipped) is kept on the card and its rows shown; a list with no app
-# leaves the one in use.
+# fetched list (its bad lines skipped) is kept on the card and its rows shown; a list with no app, or
+# one the release key didn't sign, leaves the one in use.
 m=ShelfMachine(); m.rockbox_mode=0; m.wifi=-1; apps_open(m)
 assert m.labels()==['App Store','Check for Updates','Connect to Wi-Fi to load the list'] and not m.threads
 m.row(0); assert m.toasts[-1][3]=='Connect to Wi-Fi first' and not m.threads; passed()
 m.wifi=3; m.row(0); assert m.labels()[2]=='Checking…' and len(m.threads)==1; m.row(0); assert len(m.threads)==1  # checking already
 m.codes=[404]; shelf_job(m); assert m.toasts[-1][3]=="Can't reach GitHub" and m.labels()[1:]==['Check for Updates','Connect to Wi-Fi to load the list']
 m.row(0); assert len(m.threads)==2; passed()  # failed: the next press fetches again
-m.reply=b'# apps\nme/q2-foo Foo\nme/q2-Bad\n'; shelf_job(m)
-assert m.labels()==['App Store','Check for Updates',BLANK,'Foo','Install'] and m.files[LIST]==b'me/q2-foo Foo\n'
-assert m.toasts[-1][3]=='All apps are up to date'; passed()  # pressed: said; foo's release is no JSON, so none
+FOO_PIN=b'1.0 f.zip 5 '+b'ab'*32
+m.reply=sign_list(b'serial 2\n# apps\nme/q2-foo '+FOO_PIN+b' Foo\nme/q2-Bad '+FOO_PIN+b'\nme/q2-bar Bar\n'); shelf_job(m)
+assert m.labels()==['App Store','Check for Updates',BLANK,'Foo','Install'] and m.files[LIST]==b'serial 2\nme/q2-foo '+FOO_PIN+b' Foo\n'
+assert m.toasts[-1][3]=='All apps are up to date'; passed()  # pressed: said
 m.close(); m.now+=11*60*1000; m.reply=b'nothing'; apps_open(m); shelf_job(m)
-assert m.labels()==['App Store','Check for Updates',BLANK,'Foo','Install'] and m.files[LIST]==b'me/q2-foo Foo\n'; m.close(); passed()
+assert m.labels()==['App Store','Check for Updates',BLANK,'Foo','Install'] and m.files[LIST]==b'serial 2\nme/q2-foo '+FOO_PIN+b' Foo\n'; passed()
+m.close(); m.now+=11*60*1000; m.reply=sign_list(b'serial 1\nme/q2-old '+FOO_PIN+b' Old\n'); apps_open(m); shelf_job(m)  # an older signed list
+assert m.labels()==['App Store','Check for Updates',BLANK,'Foo','Install'] and m.files[LIST]==b'serial 2\nme/q2-foo '+FOO_PIN+b' Foo\n'
+m.row(0); shelf_job(m); assert m.toasts[-1][3]=='App list not signed: not used'; m.close(); passed()
 
 # Resume: once a second the UI loop polls the playing track; one of Q2POD RESUMEMIN minutes (30) or
 # longer keeps its place in a ring written whole to /mnt/data (a .tmp, renamed), every RESUME_SAVE_S
@@ -20675,7 +20724,7 @@ nu_press(); assert m.toasts[-1][3]==SW_WAIT and not m.threads
 m.advance(500); m.link=1; nu_press(); assert m.toasts[-1][3]==SW_WAIT and not m.threads
 m.advance(500,clear=False); assert len(m.threads)==1 and m.nodes[label]['text']=='Checking…'; passed()
 class SmartShelf(SmartMixin,ShelfMachine): pass
-m=SmartShelf({LIST:bytearray((ROOT/'sources.list').read_bytes())}); m.rockbox_mode=0
+m=SmartShelf({LIST:bytearray(REPO_LIST)}); m.rockbox_mode=0
 m.poll(1); m.poll(SW_IDLE); assert m.flag()==0
 apps_open(m); m.nodes[m.wm]['children']=[m.page]
 deezer=(m.labels().index('Deezer')-1)//2; m.row(deezer); assert m.toasts[-1][3]==SW_WAIT and not m.threads

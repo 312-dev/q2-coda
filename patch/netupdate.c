@@ -1,16 +1,23 @@
 /* Network Update (docs/internals.md#network-update): System Update's second row fetches the latest
- * Q2 Pod release from GitHub to the card's update.tar, then hands over to stock's TF card update. */
+ * q2-coda release from GitHub to the card's update.tar, checks its signature
+ * (docs/internals.md#release-signatures), then hands over to stock's TF card update. */
 #include "peq.h"
 
-/* The tag in a releases/latest redirect, ".../releases/tag/1.3.4": what follows the last '/'. */
+/* The tag in a releases/latest redirect, ".../releases/tag/1.3.4": what follows the last '/', 1 to 31
+ * of A-Za-z0-9._- (it goes into the download's URL and the signed message), else 0. */
 const char *netupdate_tag(const char *location) {
-    const char *slash = location ? strrchr(location, '/') : 0;
-    return slash && strstr(location, "/releases/tag/") && slash[1] ? slash + 1 : 0;
+    const char *slash = location ? strrchr(location, '/') : 0, *t = slash ? slash + 1 : 0;
+    if (!slash || !strstr(location, "/releases/tag/") || !*t || strlen(t) > 31) return 0;
+    for (const char *c = t; *c; ++c)
+        if (!((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') ||
+              *c == '.' || *c == '_' || *c == '-'))
+            return 0;
+    return t;
 }
 
-/* Q2 Shelf (docs/internals.md#q2-shelf): the apps in sources.list (fetched from q2-pod's repo,
- * cached on the card) from their GitHub releases' zips, unpacked by unzip into the card's staging
- * folder, then moved into place file by file. */
+/* Q2 Shelf (docs/internals.md#q2-shelf): the apps in sources.list (fetched from q2-coda's repo,
+ * signed by its release key, cached on the card), each from the release zip the list pins by its
+ * SHA-256, unpacked by unzip into the card's staging folder, then moved into place file by file. */
 #ifdef PEQ_HOST
 #include <sys/stat.h>
 /* Info-ZIP's takes the same options; quiet, as it warns of -x patterns nothing matched. */
@@ -24,14 +31,20 @@ const char *netupdate_tag(const char *location) {
 #define SH_CAP (1u << 30) /* the most an install may unpack */
 #define SH_MAX 16
 
-enum { SH_OK, SH_NET, SH_SPACE, SH_CARD, SH_MISSING, SH_BAD, SH_CANCELLED, SH_BUSY };
+enum { SH_OK, SH_NET, SH_SPACE, SH_CARD, SH_MISSING, SH_BAD, SH_CANCELLED, SH_BUSY, SH_UNSIGNED,
+       SH_FORGED };
 /* repo: its GitHub owner/name; id: the repo's name less "q2-", for the card folder .<id>, the tag
  * and file list; keep: unzip -x patterns an update never writes (the user's); bin: the app's
  * binary, present without a tag file meaning a manual install, and moved after every other file:
- * power-on runs Rockbox's. dropped: gone from the list but installed, so it can only be removed. */
+ * power-on runs Rockbox's. dropped: gone from the list but installed, so it can only be removed.
+ * The pin, the one zip an install takes: latest the release's tag, asset its zip's name, size its
+ * bytes and sha256 their SHA-256; none (latest empty) on a dropped app. */
 typedef struct {
     char name[32], id[16], repo[80], dir[17], bin[40], latest[32], dropped;
     const char *keep;
+    char asset[64];
+    unsigned char sha256[32];
+    unsigned size;
 } shelf_app;
 shelf_app shelf_apps[SH_MAX];
 int shelf_n;
@@ -69,9 +82,52 @@ static int only(const char *s, unsigned n, int kind) {
     return n > 0;
 }
 
-/* sources.list's lines, "owner/repo [Name]" ("#" a comment, "-" before it a dropped app), into
- * out: at most max, each owner, repo and id checked (they go into URLs and shell commands; the id
- * as addon.c's, 1 to 15 of a-z0-9-), a bad or repeated id's line skipped. The count. */
+/* The word at *p (to the next space or tab, before end) and its length; *p past it and the blanks. */
+static unsigned word(const char **p, const char *end, const char **w) {
+    const char *q = *w = *p;
+    while (q < end && *q != ' ' && *q != '\t') ++q;
+    unsigned n = q - *w;
+    while (q < end && (*q == ' ' || *q == '\t')) ++q;
+    *p = q;
+    return n;
+}
+
+/* 2n lowercase hex digits at s into out's n bytes; whether all were. */
+static int unhex(const char *s, unsigned char *out, unsigned n) {
+    for (unsigned i = 0; i < 2 * n; ++i) {
+        int d = s[i] >= '0' && s[i] <= '9' ? s[i] - '0' : s[i] >= 'a' && s[i] <= 'f' ? s[i] - 'a' + 10 : -1;
+        if (d < 0) return 0;
+        out[i / 2] = (unsigned char)(i & 1 ? out[i / 2] << 4 | d : d);
+    }
+    return 1;
+}
+
+/* The pin after an app's repo, "TAG ASSET SIZE SHA256" (the tag 1 to 31 and the asset, ending in
+ * .zip, 5 to 63 of A-Za-z0-9._-: they go into the download's URL; the size 1 to SH_CAP), into a;
+ * *p past it when it is one. */
+static int parse_pin(const char **p, const char *end, shelf_app *a) {
+    const char *q = *p, *w[4];
+    unsigned n[4], size = 0;
+    for (int k = 0; k < 4; ++k) n[k] = word(&q, end, &w[k]);
+    if (!n[0] || n[0] >= sizeof a->latest || !only(w[0], n[0], 2) || n[1] < 5 ||
+        n[1] >= sizeof a->asset || !only(w[1], n[1], 2) || memcmp(w[1] + n[1] - 4, ".zip", 4) ||
+        !n[2] || n[2] > 10 || n[3] != 64 || !unhex(w[3], a->sha256, 32))
+        return 0;
+    for (unsigned k = 0; k < n[2]; ++k) {
+        if (w[2][k] < '0' || w[2][k] > '9' || size > (SH_CAP - (w[2][k] - '0')) / 10) return 0;
+        size = size * 10 + (w[2][k] - '0');
+    }
+    if (!size) return 0;
+    memcpy(a->latest, w[0], n[0]), a->latest[n[0]] = 0;
+    memcpy(a->asset, w[1], n[1]), a->asset[n[1]] = 0;
+    a->size = size, *p = q;
+    return 1;
+}
+
+/* sources.list's lines, "owner/repo TAG ASSET SIZE SHA256 [Name]" ("#" a comment, "-" before it a
+ * dropped app, which needs no pin), into out: at most max, each owner, repo and id checked (they go
+ * into URLs and shell commands; the id as addon.c's, 1 to 15 of a-z0-9-), a line without its pin, or
+ * with a bad or repeated id, skipped; "serial" and "signature" lines are no app's. The count. */
 int shelf_sources(const char *text, shelf_app *out, int max) {
     int n = 0;
     for (const char *p = text, *e; p && *p && n < max; p = *e ? e + 1 : e) {
@@ -86,14 +142,17 @@ int shelf_sources(const char *text, shelf_app *out, int max) {
         while (slash < sp && *slash != '/') ++slash;
         const char *repo = slash + 1, *name = sp;
         while (name < end && (*name == ' ' || *name == '\t')) ++name;
-        unsigned owner = slash - p, rn = sp < repo ? 0 : sp - repo, nn = end - name;
+        unsigned owner = slash - p, rn = sp < repo ? 0 : sp - repo;
         if (p == end || *p == '#') continue;
+        shelf_app a = { .dropped = (char)dropped };
+        if (!parse_pin(&name, end, &a) && !dropped) continue; /* nothing a Q2 could check */
+        if (dropped) memset(&a, 0, sizeof a), a.dropped = 1; /* its pin, and its last tag, let go */
+        unsigned nn = end - name;
         if (owner > 39 || !only(p, owner, 1) || !only(repo, rn, 2) ||
             owner + 1 + rn >= sizeof out->repo || nn >= sizeof out->name)
             continue;
         int bad = 0;
         for (const char *c = name; c < end; ++c) bad |= (unsigned char)*c < ' ' || *c == 127;
-        shelf_app a = { .dropped = (char)dropped };
         memcpy(a.repo, p, owner + 1 + rn);
         snprintf(a.name, sizeof a.name, "%.*s", (int)(nn ? nn : rn), nn ? name : repo);
         const char *id = rn > 3 && !memcmp(repo, "q2-", 3) ? repo + 3 : repo;
@@ -122,36 +181,13 @@ int shelf_sources(const char *text, shelf_app *out, int max) {
     return n;
 }
 
-/* The value after key in json, past its colon; 0 if none. */
-static const char *json_at(const char *json, const char *key) {
-    const char *p = json ? strstr(json, key) : 0;
-    if (!p) return 0;
-    for (p += strlen(key); *p == ' ' || *p == ':'; ++p) {}
-    return p;
-}
-
-/* The JSON string at p into out: none with escapes, which GitHub's tags, names and URLs lack. */
-static int json_string(const char *p, char *out, unsigned n) {
-    unsigned i = 0;
-    if (!p || *p++ != '"') return 0;
-    for (; p[i] && p[i] != '"' && p[i] != '\\' && i + 1 < n; ++i) out[i] = p[i];
-    out[i] = 0;
-    return i && p[i] == '"';
-}
-
-/* GitHub's releases/latest JSON: the tag, and the first asset whose name ends in .zip, its URL and
- * size. 0 when any is missing. */
-int shelf_release(const char *json, char *tag, unsigned tn, char *url, unsigned un,
-                  unsigned *size) {
-    char name[128];
-    if (!json_string(json_at(json, "\"tag_name\""), tag, tn)) return 0;
-    for (const char *p = json_at(json, "\"assets\""); (p = json_at(p, "\"name\""));) {
-        unsigned n = json_string(p, name, sizeof name) ? strlen(name) : 0;
-        if (n > 4 && !strcmp(name + n - 4, ".zip")) {
-            const char *s = json_at(p, "\"size\"");
-            *size = s ? (unsigned)atoi(s) : 0;
-            return *size && json_string(json_at(p, "\"browser_download_url\""), url, un);
-        }
+/* The list's number, its "serial N" line's; 0 without one. */
+unsigned shelf_serial(const char *text) {
+    for (const char *p = text; p && *p; p = strstr(p, "\n") ? strstr(p, "\n") + 1 : "") {
+        unsigned v = 0, k = 0;
+        if (strncmp(p, "serial ", 7)) continue;
+        for (p += 7; p[k] >= '0' && p[k] <= '9' && k < 9; ++k) v = v * 10 + (p[k] - '0');
+        if (k && (!p[k] || p[k] == '\n' || p[k] == '\r')) return v;
     }
     return 0;
 }
@@ -317,17 +353,20 @@ void shelf_remove(int i) {
 #include "offsets.inc"
 #include "stock.h"
 
-#define NU_REPO "https://github.com/" Q2POD_REPO "/releases/latest" /* tools/build.py --update-repo */
-#define NU_ASSET "update.tar"
+#define NU_REPO "https://github.com/" Q2POD_REPO "/releases" /* tools/build.py --update-repo */
+#define NU_ASSET "update.tar"  /* and NU_ASSET ".sig", tools/release.py's */
 #define NU_FILE "/mnt/mmc/update.tar"
+#define NU_SIG "/tmp/q2-update.sig"
 #define NU_CA "/etc/scrobble-ca.pem" /* scrobble.c's; github.com's and its asset host's roots */
 
-enum { NU_IDLE, NU_RUNNING, NU_DONE, NU_LATEST, NU_NET, NU_MISSING, NU_CARD, NU_CANCELLED };
+enum { NU_IDLE, NU_RUNNING, NU_DONE, NU_LATEST, NU_NET, NU_MISSING, NU_CARD, NU_CANCELLED,
+       NU_UNSIGNED, NU_FORGED };
 
 static struct {
     unsigned long thread;
     volatile int state, cancel, percent; /* cancel, percent: progress()'s pair */
     void *label; /* the row's label while System Update is open, for the percentage */
+    volatile int verifying; /* the download is whole and its signature being checked */
 } nu __attribute__((section(".scratch")));
 
 extern int stock_fwupdate_trampoline(void *win, void *ctx);
@@ -382,10 +421,32 @@ static int fetch(const char *url, void *file, char *tag, unsigned n, long *code,
     return err;
 }
 
-static void *worker(void *unused) {
-    char tag[64] = "";
+/* The release's update.tar.sig into sig: NU_DONE, NU_UNSIGNED when the release has none (q2-pod's
+ * upstream releases, or a release not yet signed) or it isn't 64 bytes, NU_NET or NU_CARD. */
+static int signature(const char *tag, unsigned char sig[64]) {
+    char url[160];
+    unsigned n = 0;
     long code = 0;
-    if (fetch(NU_REPO, 0, tag, sizeof tag, &code, &nu.cancel) || code != 302 || !*tag) {
+    snprintf(url, sizeof url, NU_REPO "/download/%s/" NU_ASSET ".sig", tag);
+    void *f = fopen(NU_SIG, "wb");
+    if (!f) return NU_CARD;
+    int err = fetch(url, f, 0, 0, &code, &nu.cancel);
+    err = fclose(f) || err;
+    unsigned char *got = err || code != 200 ? 0 : read_all(NU_SIG, 64, &n);
+    unlink(NU_SIG);
+    int r = err ? NU_NET : code == 404 || (code == 200 && n != 64) ? NU_UNSIGNED
+                         : code != 200                           ? NU_NET
+                                                                 : NU_DONE;
+    if (r == NU_DONE) memcpy(sig, got, 64);
+    free(got);
+    return r;
+}
+
+static void *worker(void *unused) {
+    char tag[64] = "", url[160];
+    unsigned char sig[64];
+    long code = 0;
+    if (fetch(NU_REPO "/latest", 0, tag, sizeof tag, &code, &nu.cancel) || code != 302 || !*tag) {
         nu.state = NU_NET;
         return 0;
     }
@@ -397,22 +458,35 @@ static void *worker(void *unused) {
         nu.state = NU_LATEST;
         return 0;
     }
-    /* The old update.tar stays until the new one is whole. ponytail: needs the tar's ~55 MB free
-     * beside it; TLS and curl's length check are the only integrity checks before stock's own MD5s. */
-    if (nu.cancel) { /* pressed while checking, or the page was left */
-        nu.state = NU_CANCELLED;
+    /* The signature before the tar: a release without one downloads nothing. */
+    int state = nu.cancel ? NU_CANCELLED : signature(tag, sig);
+    if (state != NU_DONE || nu.cancel) { /* pressed while checking, or the page was left */
+        nu.state = nu.cancel ? NU_CANCELLED : state;
         return 0;
     }
+    /* The old update.tar stays until the new one is whole and its signature checks. The tag's own
+     * asset, not releases/latest's: the one the signature names. ponytail: needs the tar's ~55 MB free
+     * beside it. */
+    snprintf(url, sizeof url, NU_REPO "/download/%s/" NU_ASSET, tag);
     void *f = fopen(NU_FILE ".part", "wb");
-    int err = !f, state = NU_CARD;
+    int err = !f;
+    state = NU_CARD;
     if (f) {
-        err = fetch(NU_REPO "/download/" NU_ASSET, f, 0, 0, &code, &nu.cancel);
+        err = fetch(url, f, 0, 0, &code, &nu.cancel);
         state = err ? (ferror(f) ? NU_CARD : NU_NET) : code != 200 ? NU_MISSING : NU_CARD;
         err = err || code != 200 || fflush(f) || fsync(fileno(f)) || ferror(f);
         err = fclose(f) || err;
     }
-    /* Read once, after the close: a press while the card took the last bytes (the fsync of the whole
-     * part, seconds on a slow card, the label at 100%) is a cancel too, not "Can't write". */
+    /* The bytes stock will flash, read back from the card: SHA-512 of 55 MB takes seconds. */
+    if (!err && !nu.cancel) {
+        nu.verifying = 1;
+        int v = sig_update(NU_FILE ".part", tag, sig, &nu.cancel);
+        err = v != SIG_OK;
+        state = v == SIG_BAD ? NU_FORGED : v == SIG_IO ? NU_CARD : state;
+    }
+    /* Read once, after the close and the check: a press while the card took the last bytes (the fsync
+     * of the whole part, seconds on a slow card, the label at 100%) or while the signature was
+     * checked is a cancel too, not "Can't write". */
     if (nu.cancel) state = NU_CANCELLED;
     if (!err && state != NU_CANCELLED && !rename(NU_FILE ".part", NU_FILE)) { /* a late cancel still cancels */
         void *dir = fopen("/mnt/mmc", "r"); /* the rename's directory entry, before stock flashes */
@@ -433,12 +507,14 @@ static int wait_done(const void *unused) {
         [NU_LATEST] = "Latest firmware installed", [NU_NET] = "Can't reach GitHub",
         [NU_MISSING] = "No update for this build", [NU_CARD] = "Can't write to the card",
         [NU_CANCELLED] = "Download cancelled",
+        [NU_UNSIGNED] = "Release not signed: not installed",
+        [NU_FORGED] = "Signature check failed: not installed",
     };
     char s[32];
     if (nu.state == NU_RUNNING) {
         reset_poweroptions_timer(1, 1, 0); /* standby, auto power-off; not the screen's */
         tk_snprintf(s, sizeof s, "Downloading %d%%", nu.percent);
-        show(nu.cancel ? "Cancelling…" : nu.percent ? s : "Checking…");
+        show(nu.cancel ? "Cancelling…" : nu.verifying ? "Verifying…" : nu.percent ? s : "Checking…");
         return 8; /* RET_REPEAT */
     }
     pthread_join(nu.thread, 0);
@@ -464,7 +540,7 @@ static int online_click(void *ctx, void *event) {
     } else if (!need_link(online_click, ctx)) {
         /* held for Smart Wi-Fi's link (a press while it waits takes its place), or none */
     } else {
-        nu.cancel = nu.percent = 0;
+        nu.cancel = nu.percent = nu.verifying = 0;
         nu.state = NU_RUNNING;
         if (pthread_create(&nu.thread, 0, worker, 0)) {
             nu.state = NU_IDLE;
@@ -501,16 +577,16 @@ int ringnav_fwupdate(void *win, void *ctx) {
 }
 
 /* The Apps page (System settings): Check for Updates, then a row per app in sources.list, its state
- * as the row's detail. One job at a time on one thread: a check (the list, then the latest tags) on
+ * as the row's detail. One job at a time on one thread: a check (the signed list, its pins) on
  * opening or from Check for Updates, an install, a remove or Spotify's erase (Streaming →
  * Configuration's, shelf_erase). Leaving the page leaves it running; its progress shows when the
  * page opens again. */
 #define SH_JSON "/tmp/q2-shelf.json"
 #define SH_LIST SH_DIR "/sources.list" /* the last list fetched, for the page offline */
-#define SH_LIST_URL "https://raw.githubusercontent.com/DiamondBond/q2-pod/main/sources.list"
+#define SH_LIST_URL "https://raw.githubusercontent.com/" Q2POD_REPO "/main/sources.list" /* --update-repo */
 #define SH_RESERVE (64ull << 20) /* left free on the card beyond a download or what it unpacks */
 #define SH_STALE_MS (10 * 60 * 1000ull)
-#define SH_RECHECK_MS (60 * 1000ull) /* Check for Updates' least gap: an API request per app */
+#define SH_RECHECK_MS (60 * 1000ull) /* Check for Updates' least gap */
 enum { JOB_CHECK = 1, JOB_INSTALL, JOB_REMOVE, JOB_ERASE };
 enum { ST_INSTALL, ST_UPDATE, ST_INSTALLED };
 enum { ROW_CHECK = SH_MAX }; /* map's row that is no app: Check for Updates, the first */
@@ -549,43 +625,45 @@ static unsigned file_mode(const char *path) {
     return __xstat(3, path, info) ? 0 : info[5] & 0170000;
 }
 
-/* url's body (1 MB at most) through SH_JSON, NUL-terminated; 0 unless a whole 200. */
-static char *get(const char *url, long *code) {
-    unsigned n = 0;
+/* url's body (1 MB at most) through SH_JSON, NUL-terminated, *n its bytes; 0 unless a whole 200. */
+static char *get(const char *url, long *code, unsigned *n) {
     void *f = fopen(SH_JSON, "wb");
     int err = !f || fetch(url, f, 0, 0, code, &sh.cancel);
     err = (f && fclose(f)) || err;
-    char *body = err || *code != 200 ? 0 : read_all(SH_JSON, 1u << 20, &n);
+    char *body = err || *code != 200 ? 0 : read_all(SH_JSON, 1u << 20, n);
     unlink(SH_JSON);
     sh.percent = 0;
     return body;
 }
 
-/* The release's tag (also a->latest), its zip's URL and size. */
-static int release(shelf_app *a, char *tag, char *url, unsigned *size) {
-    char api[160];
+/* The list as it is now, its signature line cut off, or 0 and *why: SH_NET, SH_BUSY (GitHub's rate
+ * limit), or SH_UNSIGNED when the release key didn't sign it (docs/internals.md#release-signatures)
+ * or its serial is below the card's list's, an older signed list served again. */
+static char *fresh_list(int *why) {
+    unsigned n = 0, have = 0;
     long code = 0;
-    snprintf(api, sizeof api, "https://api.github.com/repos/%s/releases/latest", a->repo);
-    char *json = get(api, &code);
-    int r = !json ? SH_NET : shelf_release(json, tag, 32, url, 256, size) ? SH_OK : SH_MISSING;
-    if (code == 404) r = SH_MISSING;             /* no release */
-    if (code == 403 || code == 429) r = SH_BUSY; /* 60 unauthenticated requests an hour */
-    free(json);
-    if (!r) snprintf(a->latest, sizeof a->latest, "%s", tag);
-    return r;
+    char *list = get(SH_LIST_URL, &code, &n), *card = read_all(SH_LIST, 1u << 16, &have);
+    unsigned body = list ? sig_list(list, n) : 0;
+    if (body) list[body] = 0;
+    have = card ? shelf_serial(card) : 0;
+    free(card);
+    *why = code == 403 || code == 429 ? SH_BUSY : !list ? SH_NET : SH_UNSIGNED;
+    if (!body || shelf_serial(list) < have) free(list), list = 0;
+    return list;
 }
 
-/* A check: the list fetched into sh.next, kept as SH_LIST with any app it dropped that is
- * still installed (so it can be removed), else the page's own; then each listed one's latest
- * release. A dropped app's is never asked, nor installed: dropping it is what stops a taken-over
- * repo's releases reaching a Q2 (GHSA-8wpr-pmqx-538x).
- * Whether every release was checked: a list that failed is fetched again with the next check. */
+/* A check: the list fetched into sh.next, kept as SH_LIST with any app it dropped that is still
+ * installed (so it can be removed), else the page's own. Each app's latest is its pin's tag, so a
+ * check is one request, never one per app. A dropped app is never installed: dropping it is what
+ * stops a taken-over repo's releases reaching a Q2 (GHSA-8wpr-pmqx-538x), as a pin does for any
+ * other. Whether the list was fetched: one that failed is fetched again with the next check. */
 static int check(void) {
-    char path[96], tag[32], url[256], text[SH_MAX * 120];
-    unsigned size, m = 0;
-    long code = 0;
-    char *list = get(SH_LIST_URL, &code);
-    int n = list ? shelf_sources(list, sh.next, SH_MAX) : 0, fresh = n > 0, ok = 1;
+    char path[96], hex[65], text[SH_MAX * 320];
+    unsigned m = 0;
+    int why = SH_NET;
+    char *list = fresh_list(&why);
+    unsigned serial = list ? shelf_serial(list) : 0;
+    int n = list ? shelf_sources(list, sh.next, SH_MAX) : 0, fresh = n > 0;
     free(list);
     if (!n) memcpy(sh.next, apps, sizeof apps), n = shelf_n; /* a bad list never replaces one */
     for (int i = 0; fresh && i < shelf_n && n < SH_MAX; ++i) {
@@ -595,37 +673,37 @@ static int check(void) {
         if (!listed && file_mode(path))
             sh.next[n] = apps[i], sh.next[n].dropped = 1, *sh.next[n++].latest = 0;
     }
-    for (int k = 0; fresh && k < n; ++k)
-        m += snprintf(text + m, sizeof text - m, "%s%s %s\n", sh.next[k].dropped ? "-" : "",
-                      sh.next[k].repo, sh.next[k].name);
+    /* the card's copy, for the page offline and the next list's serial: pins and all, unsigned, as
+     * the device wrote it; an install fetches the signed list again */
+    if (fresh) m = snprintf(text, sizeof text, "serial %u\n", serial);
+    for (int k = 0; fresh && k < n; ++k) {
+        shelf_app *a = &sh.next[k];
+        sig_hex(a->sha256, 32, hex);
+        if (a->dropped)
+            m += snprintf(text + m, sizeof text - m, "-%s %s\n", a->repo, a->name);
+        else
+            m += snprintf(text + m, sizeof text - m, "%s %s %s %u %s %s\n", a->repo, a->latest, a->asset,
+                          a->size, hex, a->name);
+    }
     if (fresh) mkdir(SH_DIR, 0755), blob_io(SH_LIST, SH_LIST ".tmp", text, m, 1);
     sh.n = n;
-    if (!n) sh.result = SH_NET, ok = 0; /* no list at all: said, and the next press fetches it */
-    for (int k = 0; k < n && !sh.cancel; ++k) {
-        if (sh.next[k].dropped) continue;
-        int r = release(&sh.next[k], tag, url, &size);
-        if (r == SH_MISSING) continue; /* checked: no release yet */
-        ok &= !r;
-        if (!sh.result) sh.result = r; /* SH_NET or SH_BUSY, for sh_told */
-    }
-    return ok;
+    if (!fresh) sh.result = why; /* said after Check for Updates; the next check fetches it again */
+    return fresh;
 }
 
-/* Whether the list as it is now, fetched for this install, still names app i's repo: SH_OK, SH_NET
- * with no list to be had, SH_MISSING once the repo is dropped or gone from it, SH_CANCELLED when
- * cancelled meanwhile. The page's list may be the card's of days ago (opened with no Wi-Fi, the
- * opening check stopped by a press, or the list out of reach while GitHub's API answered;
- * GHSA-8wpr-pmqx-538x).
- * ponytail: an install needs raw.githubusercontent.com as well as the API; a network that blocks
- * only the list's host installs nothing. */
-static int listed(int i) {
+/* App i's pin from the signed list as it is now, fetched for this install, into *pin: SH_OK, the
+ * list's SH_NET, SH_BUSY or SH_UNSIGNED with no list to be had, SH_MISSING once the repo is dropped
+ * or gone from it, SH_CANCELLED when cancelled meanwhile. The page's list is the card's, unsigned
+ * and maybe days old (opened with no Wi-Fi, the opening check stopped by a press;
+ * GHSA-8wpr-pmqx-538x), so nothing an install takes comes from it. */
+static int listed(int i, shelf_app *pin) {
     shelf_app now[SH_MAX];
-    long code = 0;
-    char *list = get(SH_LIST_URL, &code);
-    int n = list ? shelf_sources(list, now, SH_MAX) : 0, r = n ? SH_MISSING : SH_NET;
+    int why = SH_NET;
+    char *list = fresh_list(&why);
+    int n = list ? shelf_sources(list, now, SH_MAX) : 0, r = list ? SH_MISSING : why;
     free(list);
     for (int k = 0; k < n; ++k)
-        if (!now[k].dropped && !strcmp(now[k].repo, apps[i].repo)) r = SH_OK;
+        if (!now[k].dropped && !strcmp(now[k].repo, apps[i].repo)) r = SH_OK, *pin = now[k];
     return sh.cancel ? SH_CANCELLED : r;
 }
 
@@ -639,19 +717,23 @@ static int room(unsigned bytes) {
     return SH_SPACE;
 }
 
-/* Cancel lands during the download, else after the step it was pressed in; never once moving
- * starts. ponytail: TLS and curl's length check are the only checks on the zip; unzip's CRCs the
- * only ones in it. */
-static int install(int i) {
-    char tag[32], url[256], part[96], path[96];
-    unsigned size = 0, total = 0;
+/* App i from its pin: the zip at the pinned tag's release, nothing else unpacked unless its SHA-256
+ * is the pin's (SH_FORGED). Cancel lands during the download, else after the step it was pressed in;
+ * never once moving starts. */
+static int install(int i, const shelf_app *pin) {
+    char url[256], part[96], path[96];
+    unsigned char got[32];
+    unsigned total = 0;
     long code = 0;
-    int r = apps[i].dropped ? SH_MISSING : release(&apps[i], tag, url, &size);
+    if (apps[i].dropped) return SH_MISSING;
     if (sh.cancel) return SH_CANCELLED;
-    if (r) return r;
+    snprintf(apps[i].latest, sizeof apps[i].latest, "%s", pin->latest);
+    snprintf(url, sizeof url, "https://github.com/%s/releases/download/%s/%s", pin->repo, pin->latest,
+             pin->asset);
     system("rm -rf " STAGING); /* an interrupted install's, too */
     mkdir(SH_DIR, 0755), mkdir(STAGING, 0755), mkdir(SH_DIR "/apps", 0755);
-    if ((r = room(size))) return r;
+    int r = room(pin->size);
+    if (r) return r;
     staged(part, sizeof part, i, ".part");
     void *f = fopen(part, "wb");
     if (!f) return SH_CARD;
@@ -659,6 +741,10 @@ static int install(int i) {
     int err = fetch(url, f, 0, 0, &code, &sh.cancel), bad = ferror(f);
     bad = fclose(f) || bad;
     r = sh.cancel ? SH_CANCELLED : bad ? SH_CARD : err ? SH_NET : code != 200 ? SH_MISSING : SH_OK;
+    if (!r) { /* read back from the card, as unzip will read it */
+        int h = sig_hash_file(part, 0, got, &sh.cancel);
+        r = h == SIG_CANCELLED ? SH_CANCELLED : h ? SH_CARD : memcmp(got, pin->sha256, 32) ? SH_FORGED : SH_OK;
+    }
     if (!r) sh.stage = 2, r = shelf_list(i, &total);
     if (!r) r = room(total);
     if (!r) r = shelf_unpack(i);
@@ -672,7 +758,7 @@ static int install(int i) {
         r = shelf_place(i);
         char tmp[100];
         snprintf(tmp, sizeof tmp, "%s.tmp", path);
-        if (!r && !blob_io(path, tmp, tag, strlen(tag), 1)) r = SH_CARD;
+        if (!r && !blob_io(path, tmp, (void *)pin->latest, strlen(pin->latest), 1)) r = SH_CARD;
     }
     system("rm -rf " STAGING);
     return r;
@@ -683,8 +769,9 @@ static void *sh_worker(void *unused) {
     if (sh.job == JOB_CHECK) {
         if (check() && !sh.cancel) sh.checked = now_ms();
     } else if (sh.job == JOB_INSTALL) {
-        int r = listed(i);
-        sh.result = r ? r : install(i);
+        shelf_app pin;
+        int r = listed(i, &pin);
+        sh.result = r ? r : install(i, &pin);
     } else {
         /* Erase Spotify Data: the add-on's logs go too, as spot.log names the account and each
          * track played */
@@ -780,6 +867,8 @@ static int sh_wait(const void *unused) {
         [SH_NET] = "Can't reach GitHub",           [SH_CARD] = "Can't write to the card",
         [SH_MISSING] = "No update for this build", [SH_BAD] = "The download is not a usable app",
         [SH_CANCELLED] = "Download cancelled",     [SH_BUSY] = "GitHub is busy, try later",
+        [SH_UNSIGNED] = "App list not signed: not used",
+        [SH_FORGED] = "Download doesn't match the list",
     };
     char s[64];
     if (sh.running) {
@@ -916,8 +1005,8 @@ static int sh_check(void *ctx, void *event) {
 }
 
 /* System settings' Apps row. The card's last list, until a check fetches the list again: with Wi-Fi
- * when the last whole check is over SH_STALE_MS old (or none), as GitHub allows 60 unauthenticated
- * API requests an hour; while Smart Wi-Fi brings the radio back, once its link is up. */
+ * when the last whole check is over SH_STALE_MS old (or none), so opening the page often fetches it
+ * once; while Smart Wi-Fi brings the radio back, once its link is up. */
 int shelf_open(void *ctx, void *event) {
     if (sh.page || !(sh.page = page_open("apps_page", sh_closed, page_keyup))) return 0;
     if (sh.job != JOB_CHECK && !shelf_n) { /* an erase can run from Configuration before it opens */

@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Network Update: follows q2-coda's own releases, and installs one only once its signature checks against the q2-coda key built into the firmware. The row says **Verifying…** while it checks. A release without a signature, Q2 Pod's own included, says **Release not signed: not installed**, and one changed after signing **Signature check failed: not installed**; the update on the card stays as it was.
+  - App Store: the list of apps is q2-coda's own, signed with the same key, and names the exact download for each app. A list that isn't signed says **App list not signed: not used**, and a download that differs from the one the list names says **Download doesn't match the list**; nothing is installed. Checking for updates is one request now, so GitHub's limit no longer says **GitHub is busy** after a few checks.
   - Display: **Theme** lists **OLED** after **Classic**. It is a placeholder: it looks as **Theme: Classic** does until its own design arrives.
 - **1.8.2**:
   - Games: in Solitaire, Centre on a pile that can't take the cards you hold now picks that pile up instead. Before, nothing happened and the cards stayed held until you put them back or pressed Return, which looked like the game had stuck.

@@ -3,11 +3,13 @@ removing and checking apps, with the card and the network stubbed; then System U
 Store's jobs end to end, a press to the toast, on a card whose busybox runs on its files."""
 import ctypes as C
 import fnmatch
+import hashlib
 import io
 import pathlib
 import random
 import re
 import shlex
+import subprocess
 import zipfile
 
 import pytest
@@ -24,19 +26,34 @@ OLDER = b'0.9.9'
 
 SH_MAX = 16
 SH_CAP = 1 << 30
-SH_OK, SH_NET, SH_SPACE, SH_CARD, SH_MISSING, SH_BAD, SH_CANCELLED, SH_BUSY = range(8)
-NU_IDLE, NU_RUNNING, NU_DONE, NU_LATEST, NU_NET, NU_MISSING, NU_CARD, NU_CANCELLED = range(8)
+SH_OK, SH_NET, SH_SPACE, SH_CARD, SH_MISSING, SH_BAD, SH_CANCELLED, SH_BUSY, SH_UNSIGNED, SH_FORGED = range(10)
+NU_IDLE, NU_RUNNING, NU_DONE, NU_LATEST, NU_NET, NU_MISSING, NU_CARD, NU_CANCELLED, NU_UNSIGNED, NU_FORGED = range(10)
 JOB_CHECK, JOB_INSTALL, JOB_REMOVE, JOB_ERASE = 1, 2, 3, 4
 ST_INSTALL, ST_UPDATE, ST_INSTALLED = range(3)
 ROW_CHECK = SH_MAX
 STAGING = '/mnt/mmc/.q2/staging'
 JSON_PATH = b'/tmp/q2-shelf.json'
-SHELF = pathlib.Path(__file__).resolve().parents[1]/'shelf'
+LIST = pathlib.Path(__file__).resolve().parents[2]/'sources.list'
+PIN_SHA = b'ab' * 32
 
 
 class App(C.Structure):
     _fields_ = [('name', C.c_char * 32), ('id', C.c_char * 16), ('repo', C.c_char * 80), ('dir', C.c_char * 17),
-                ('bin', C.c_char * 40), ('latest', C.c_char * 32), ('dropped', C.c_char), ('keep', C.c_char_p)]
+                ('bin', C.c_char * 40), ('latest', C.c_char * 32), ('dropped', C.c_char), ('keep', C.c_char_p),
+                ('asset', C.c_char * 64), ('sha256', C.c_ubyte * 32), ('size', C.c_uint)]
+
+
+def pinned(text, tag=b'1.0', asset=b'app.zip', size=5, sha=PIN_SHA):
+    """Each app's line of text with a pin after its repo, as tools/shelf.py writes them; comments, blank lines and
+    serial lines as they are."""
+    out = []
+    for line in text.split(b'\n'):
+        m = re.match(rb'(\s*-?[^\s#]\S*)(.*)', line, re.S)
+        if not m or m[1].lstrip().startswith((b'serial', b'signature')):
+            out.append(line)
+        else:
+            out.append(m[1] + b' %s %s %d %s' % (tag, asset, size, sha) + m[2])
+    return b'\n'.join(out)
 
 
 class Sh(C.Structure):
@@ -46,7 +63,8 @@ class Sh(C.Structure):
 
 
 class Nu(C.Structure):
-    _fields_ = [('thread', C.c_ulong), ('state', C.c_int), ('cancel', C.c_int), ('percent', C.c_int), ('label', C.c_void_p)]
+    _fields_ = [('thread', C.c_ulong), ('state', C.c_int), ('cancel', C.c_int), ('percent', C.c_int), ('label', C.c_void_p),
+                ('verifying', C.c_int)]
 
 
 def hostile(seed, samples, count=2000, alphabet=b'"\\:/ \n{}[],\x00.'):
@@ -101,12 +119,12 @@ def test_only_looks_at_n_bytes_and_none_is_not_enough(fw):
     assert only(b'abc!', 3, 0) == 1 and only(b'abc!', 4, 0) == 0 and only(b'abc', 0, 0) == 0
 
 
-def sources(fw, text, count=SH_MAX):
-    """shelf_sources over an exact table of count apps."""
+def sources(fw, text, count=SH_MAX, pin=True, raw=False):
+    """shelf_sources over an exact table of count apps, each app's line pinned first unless pin is off; raw: the Apps."""
     out = block(fw, size=count * C.sizeof(App))
-    n = fw.fn('shelf_sources', C.c_int, C.c_void_p, C.c_void_p, C.c_int)(block(fw, text), out, count)
+    n = fw.fn('shelf_sources', C.c_int, C.c_void_p, C.c_void_p, C.c_int)(block(fw, pinned(text) if pin else text), out, count)
     table = C.cast(out, C.POINTER(App))
-    return [(a.repo, a.name, a.id, a.dir, a.bin, a.keep) for a in table[:n]]
+    return table[:n] if raw else [(a.repo, a.name, a.id, a.dir, a.bin, a.keep) for a in table[:n]]
 
 
 def test_a_card_app_from_its_line(fw):
@@ -173,116 +191,74 @@ def test_no_list_is_no_apps(fw):
     assert sources(fw, b'') == []
 
 
-def test_the_repo_ships_a_list_that_parses(fw):
-    lines = [x for x in (SHELF.parent.parent/'sources.list').read_bytes().splitlines() if x.strip() and not x.startswith(b'#')]
-    assert len(sources(fw, b'\n'.join(lines))) == len(lines)
+def test_the_repo_ships_a_list_that_parses_pins_and_all(fw):
+    lines = [x for x in LIST.read_bytes().splitlines() if x.strip() and not x.startswith((b'#', b'serial ', b'signature '))]
+    table = sources(fw, LIST.read_bytes(), pin=False, raw=True)
+    assert len(table) == len(lines) and all(a.latest and a.asset.endswith(b'.zip') and a.size and any(a.sha256) for a in table)
 
 
 def test_hostile_sources(fw):
-    samples = [(SHELF.parent.parent/'sources.list').read_bytes(), b'me/q2-foo Foo Bar\n# c\nx/q2-librespot\n\n']
-    for text in hostile(31, samples, alphabet=b'/ \t\n\r#.-\x01Q'):
-        for a in sources(fw, text.split(b'\0')[0]):
+    samples = [LIST.read_bytes(), pinned(b'me/q2-foo Foo Bar\n# c\nx/q2-librespot\n\n-me/old\n')]
+    for text in hostile(31, samples, alphabet=b'/ \t\n\r#.-\x01Q0a'):
+        for a in sources(fw, text.split(b'\0')[0], pin=False):
             assert 1 <= len(a[2]) <= 15 and set(a[2]) <= set(b'abcdefghijklmnopqrstuvwxyz0123456789-')
             assert a[3][:1] == b'.' and set(a[0]) <= set(b'abcdefghijklmnopqrstuvwxyz0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ._/')
 
 
-def json_at(fw, s, key):
-    buf = block(fw, s)
-    at = fw.fn('netupdate__json_at', C.c_void_p, C.c_void_p, C.c_char_p)(buf, key)
-    return C.string_at(at) if at else None
+def test_a_pin_and_its_fields(fw):
+    sha = bytes(range(32))
+    a, = sources(fw, b'me/q2-foo v1.2_rc-3 foo-1.2.zip 1234567 ' + sha.hex().encode() + b' Foo Bar\n', pin=False, raw=True)
+    assert (a.latest, a.asset, a.size, bytes(a.sha256), a.name, a.dropped) == (b'v1.2_rc-3', b'foo-1.2.zip', 1234567, sha, b'Foo Bar', b'\0')
 
 
-@pytest.mark.parametrize('s,value', [
-    (b'{"k":1}', b'1}'), (b'{"k" : "v"}', b'"v"}'), (b'{"k"   :::  2', b'2'), (b'"k"', b''), (b'{}', None), (b'', None),
+def test_a_pin_without_a_name_names_the_app_by_its_repo(fw):
+    a, = sources(fw, b'me/q2-foo 1.0 f.zip 5 ' + PIN_SHA, pin=False, raw=True)
+    assert a.name == b'q2-foo' and a.latest == b'1.0'
+
+
+@pytest.mark.parametrize('line', [
+    b'me/q2-foo Foo',                                     # no pin: nothing a Q2 could check
+    b'me/q2-foo 1.0 f.zip 5 Foo',
+    b'me/q2-foo 1.0 f.zip 5 ' + PIN_SHA[:-1],             # a digit short
+    b'me/q2-foo 1.0 f.zip 5 ' + PIN_SHA + b'a',           # a digit over
+    b'me/q2-foo 1.0 f.zip 5 ' + PIN_SHA.upper(),
+    b'me/q2-foo 1.0 f.zip 5 ' + b'g' * 64,
+    b'me/q2-foo 1.0 f.tar 5 ' + PIN_SHA, b'me/q2-foo 1.0 .zip 5 ' + PIN_SHA, b'me/q2-foo 1.0 f.ZIP 5 ' + PIN_SHA,
+    b'me/q2-foo 1.0 f/x.zip 5 ' + PIN_SHA, b"me/q2-foo 1.0 f'.zip 5 " + PIN_SHA, b'me/q2-foo 1.0 ' + b'f' * 60 + b'.zip 5 ' + PIN_SHA,
+    b'me/q2-foo ' + b't' * 32 + b' f.zip 5 ' + PIN_SHA, b'me/q2-foo 1/0 f.zip 5 ' + PIN_SHA, b'me/q2-foo 1?0 f.zip 5 ' + PIN_SHA,
+    b'me/q2-foo 1.0 f.zip 0 ' + PIN_SHA, b'me/q2-foo 1.0 f.zip -5 ' + PIN_SHA, b'me/q2-foo 1.0 f.zip 5x ' + PIN_SHA,
+    b'me/q2-foo 1.0 f.zip 1073741825 ' + PIN_SHA, b'me/q2-foo 1.0 f.zip 99999999999 ' + PIN_SHA,
+    b'serial 3', b'signature ' + b'00' * 64,
 ])
-def test_the_value_after_a_key(fw, s, value):
-    assert json_at(fw, s, b'"k"') == value
+def test_a_line_without_a_pin_a_q2_can_check_is_passed_over(fw, line):
+    assert [a[2] for a in sources(fw, line + b'\nme/good 1.0 g.zip 5 ' + PIN_SHA + b'\n', pin=False)] == [b'good']
 
 
-def test_no_json_no_value(fw):
-    assert fw.fn('netupdate__json_at', C.c_char_p, C.c_char_p, C.c_char_p)(None, b'"k"') is None
+def test_the_longest_pin(fw):
+    a, = sources(fw, b'me/q2-foo ' + b't' * 31 + b' ' + b'f' * 59 + b'.zip 1073741824 ' + PIN_SHA, pin=False, raw=True)
+    assert len(a.latest) == 31 and len(a.asset) == 63 and a.size == 1 << 30
 
 
-def json_string(fw, s, n=16):
-    out = block(fw, size=n)
-    ok = fw.fn('netupdate__json_string', C.c_int, C.c_void_p, C.c_void_p, C.c_uint)(block(fw, s), out, n)
-    return C.string_at(out) if ok else None
+def test_a_dropped_app_needs_no_pin_and_keeps_no_tag(fw):
+    table = sources(fw, b'-me/q2-old Old\n-me/q2-was 1.0 w.zip 5 ' + PIN_SHA + b' Was\n', pin=False, raw=True)
+    assert [(a.id, a.name, a.dropped, a.latest) for a in table] == [(b'old', b'Old', b'\x01', b''), (b'was', b'Was', b'\x01', b'')]
 
 
-@pytest.mark.parametrize('s,value', [
-    (b'"abc"', b'abc'), (b'"abc",x', b'abc'), (b'""', None), (b'"', None), (b'abc', None), (b'', None), (b'"abc', None),
-    (b'"a\\"b"', None),      # GitHub's have no escapes; any is refused
+def serial(fw, text):
+    return fw.fn('shelf_serial', C.c_uint, C.c_char_p)(text)
+
+
+@pytest.mark.parametrize('text,n', [
+    (b'serial 7\n', 7), (b'# x\nserial 12\r\nme/a\n', 12), (b'serial 3', 3), (b'serial 123456789\n', 123456789),
+    (b'', 0), (b'serial\n', 0), (b'serial x\n', 0), (b'serial 7 8\n', 0), (b' serial 7\n', 0), (b'serial 1234567890\n', 0),
+    (b'me/a\nserial 4\nserial 5\n', 4),
 ])
-def test_a_json_string(fw, s, value):
-    assert json_string(fw, s) == value
+def test_the_lists_serial(fw, text, n):
+    assert serial(fw, text) == n
 
 
-def test_a_json_string_fits_to_the_byte(fw):
-    assert json_string(fw, b'"abcd"', 5) == b'abcd' and json_string(fw, b'"abcd"', 4) is None
-    assert fw.fn('netupdate__json_string', C.c_int, C.c_void_p, C.c_void_p, C.c_uint)(None, None, 0) == 0
-
-
-def release(fw, json, tn=32, un=256):
-    tag, url, size = block(fw, size=tn), block(fw, size=un), C.c_uint(0)
-    fn = fw.fn('shelf_release', C.c_int, C.c_void_p, C.c_void_p, C.c_uint, C.c_void_p, C.c_uint, C.POINTER(C.c_uint))
-    ok = fn(block(fw, json), tag, tn, url, un, C.byref(size))
-    return (C.string_at(tag), C.string_at(url), size.value) if ok else None
-
-
-def github(tag='1.0', *assets):
-    rows = ','.join('{"url":"u","id":1,"name":"%s","label":"","uploader":{"login":"x","id":2},"content_type":"z","size":%s,'
-                    '"browser_download_url":"https://h/%s"}' % (n, s, n) for n, s in assets)
-    return ('{"url":"x","assets_url":"y","tag_name":"%s","name":"Release","assets":[%s],"body":"notes"}' % (tag, rows)).encode()
-
-
-def test_the_first_zip_of_a_release(fw):
-    assert release(fw, github('1.0', ('notes.txt', 9), ('a.zip', 5), ('b.zip', 6))) == (b'1.0', b'https://h/a.zip', 5)
-
-
-def test_the_releases_own_name_is_no_asset(fw):
-    assert release(fw, b'{"tag_name":"1","name":"x.zip","assets":[]}') is None
-
-
-@pytest.mark.parametrize('name', ['.zip', 'a.ZIP', 'a.zip.sig', 'zip', 'azip'])
-def test_what_is_no_zip(fw, name):
-    assert release(fw, github('1.0', (name, 5))) is None
-
-
-@pytest.mark.parametrize('json', [
-    b'', b'{}', b'{"assets":[]}', b'{"tag_name":"","assets":[]}', github('1.0'), github('a\\"b', ('a.zip', 5)),
-    github('1.0', ('a.zip', 0)), github('1.0', ('a.zip', 'x')),
-    b'{"tag_name":"1","assets":[{"name":"a.zip","browser_download_url":"https://h"}]}',
-    b'{"tag_name":"1","assets":[{"name":"a.zip","size":5}]}',
-])
-def test_a_release_with_something_missing(fw, json):
-    assert release(fw, json) is None
-
-
-def test_an_asset_name_too_long_is_passed_over(fw):
-    assert release(fw, github('1.0', ('a' * 124 + '.zip', 5), ('b.zip', 6)))[1] == b'https://h/b.zip'
-    assert release(fw, github('1.0', ('a' * 123 + '.zip', 5), ('b.zip', 6)))[1].endswith(b'a.zip')
-
-
-def test_tag_and_url_fit_to_the_byte(fw):
-    json = github('t' * 31, ('a.zip', 5))
-    assert release(fw, json)[0] == b't' * 31
-    assert release(fw, json, tn=31) is None
-    url = b'https://h/a.zip'
-    assert release(fw, github('1', ('a.zip', 5)), un=len(url) + 1)[1] == url
-    assert release(fw, github('1', ('a.zip', 5)), un=len(url)) is None
-
-
-def test_hostile_releases(fw):
-    samples = [github('1.0', ('notes', 9), ('a.zip', 5)), *[p.read_bytes()[:3000] for p in sorted(SHELF.glob('*.json'))]]
-    for json in hostile(32, samples):
-        release(fw, json.split(b'\0')[0])
-
-
-def test_each_real_release_truncated(fw):
-    for path in sorted(SHELF.glob('*.json')):
-        data = path.read_bytes()
-        for k in range(0, len(data), max(1, len(data) // 200)):
-            release(fw, data[:k])
+def test_no_list_has_no_serial(fw):
+    assert serial(fw, None) == 0
 
 
 def row(size, name):
@@ -375,9 +351,9 @@ def test_no_list_is_no_match(fw):
 
 
 def apps(fw, *lines):
-    """The Apps page's list, as shelf_sources filled it."""
+    """The Apps page's list, as shelf_sources filled it from lines pinned to tag 1.0."""
     table = (App * SH_MAX).in_dll(fw.lib, 'shelf_apps')
-    n = fw.fn('shelf_sources', C.c_int, C.c_char_p, C.c_void_p, C.c_int)(b'\n'.join(lines), table, SH_MAX)
+    n = fw.fn('shelf_sources', C.c_int, C.c_char_p, C.c_void_p, C.c_int)(pinned(b'\n'.join(lines)), table, SH_MAX)
     fw.var('shelf_n', C.c_int).value = n
     return table
 
@@ -699,9 +675,10 @@ class Net:
     """libcurl: each transfer answered by the first of its URL's replies: (result, code, location[, body]). A body goes
     through the transfer's own write callback in CHUNKS pieces, its progress callback told after each and during(k)
     run then, as a UI timer might: a short write ends it as curl's CURLE_WRITE_ERROR (23), a progress callback's
-    non-zero as CURLE_ABORTED_BY_CALLBACK (42)."""
-    def __init__(self, fw, replies, during=None):
-        self.replies, self.urls, self.opts, self.during = replies, [], {}, during
+    non-zero as CURLE_ABORTED_BY_CALLBACK (42). during(k) runs in update.tar.sig's transfer too only with sig_too."""
+    def __init__(self, fw, replies, during=None, sig_too=False):
+        self.replies, self.urls, self.opts, self.during, self.sig_too = replies, [], {}, during, sig_too
+        self.card_list = b''  # store_net's: the list a check leaves on the card
         self.location = None
         def setopt(c, opt, value, *_):
             self.opts[opt] = value
@@ -710,7 +687,7 @@ class Net:
             self.urls.append(url)
             self.result, self.code, location, *body = next(v for k, v in self.replies.items() if url.startswith(k))
             self.location = C.create_string_buffer(location) if location else None
-            return self.transfer(body[0]) if body and 20011 in self.opts else self.result
+            return self.transfer(body[0], self.sig_too or not url.endswith(b'.sig')) if body and 20011 in self.opts else self.result
         def info(c, what, out, *_):
             if what == 0x200002:
                 C.cast(out, C.POINTER(C.c_long))[0] = self.code
@@ -721,7 +698,7 @@ class Net:
         fw.mock('fw_curl_easy_perform', perform)
         fw.mock('fw_curl_easy_getinfo', info)
 
-    def transfer(self, body):
+    def transfer(self, body, watched=True):
         write = C.CFUNCTYPE(C.c_uint, C.c_void_p, C.c_uint, C.c_uint, C.c_void_p)(self.opts[20011])  # WRITEFUNCTION
         progress = C.CFUNCTYPE(C.c_int, C.c_void_p, *[C.c_longlong] * 4)(self.opts[20219]) if 20219 in self.opts else None
         step = max(1, -(-len(body) // CHUNKS))
@@ -731,7 +708,7 @@ class Net:
                 return 23
             if progress and progress(self.opts[10057], len(body), at + len(piece), 0, 0):
                 return 42
-            if self.during:
+            if self.during and watched:
                 self.during(k)
         return self.result
 
@@ -739,14 +716,37 @@ class Net:
 CHUNKS = 4
 
 
-LATEST = b'https://github.com/owner/repo/releases/latest'
-ASSET = LATEST + b'/download/update.tar'
+RELEASES = b'https://github.com/owner/repo/releases'
+LATEST = RELEASES + b'/latest'
+ASSET = RELEASES + b'/download/' + NEWER + b'/update.tar'
+SIG = ASSET + b'.sig'  # before ASSET in a Net's replies, as ASSET is its prefix
 PART = b'/mnt/mmc/update.tar.part'
+PEM = None
 
 
-def update(fw, code=302, location=b'https://github.com/owner/repo/releases/tag/' + NEWER, asset=(0, 200, None), card=None):
-    net = Net(fw, {ASSET: asset, LATEST: (0, code, location)})
-    card = card or Card(fw)
+@pytest.fixture(autouse=True)
+def release_key(signing_pem):
+    """The private half of the key this library checks releases with (host.signing_key), for signed()."""
+    global PEM
+    PEM = signing_pem
+
+
+def signed(body, tag=NEWER):
+    """update.tar.sig for body as the release tagged tag: tools/signing.py's message (test_release_sig.py checks
+    that the firmware's is the same)."""
+    return host.tools_signing.sign(b'q2-coda-update-v1 %s %s\n' % (tag, hashlib.sha512(body).hexdigest().encode()), PEM)
+
+
+def rel(asset=(0, 200, None, b'tar'), latest=(0, 302, RELEASES + b'/tag/' + NEWER), sig=None):
+    """A release's replies: the tag's redirect, update.tar.sig (signed for asset's body unless sig is given) and
+    update.tar."""
+    body = asset[3] if len(asset) > 3 else b''
+    return {SIG: sig if sig is not None else (0, 200, None, signed(body)), ASSET: asset, LATEST: latest}
+
+
+def update(fw, code=302, location=RELEASES + b'/tag/' + NEWER, asset=(0, 200, None, b'tar'), card=None, sig=None):
+    net = Net(fw, rel(asset, (0, code, location), sig))
+    card = card or Disk(fw)
     nu = fw.var('netupdate__nu', Nu)
     fw.fn('netupdate__worker', C.c_void_p, C.c_void_p)(None)
     return nu.state, net, card
@@ -754,13 +754,68 @@ def update(fw, code=302, location=b'https://github.com/owner/repo/releases/tag/'
 
 def test_a_newer_tag_downloads_and_renames_once_whole(fw):
     state, net, card = update(fw)
-    assert state == NU_DONE and net.urls == [LATEST, ASSET]
-    assert card.of('rename') == [(PART, b'/mnt/mmc/update.tar')]
+    assert state == NU_DONE and net.urls == [LATEST, SIG, ASSET]
+    assert card.of('rename') == [(PART, b'/mnt/mmc/update.tar')] and card.files[b'/mnt/mmc/update.tar'] == b'tar'
+    assert b'/tmp/q2-update.sig' not in card.files
+
+
+def test_a_release_without_a_signature_downloads_nothing(fw):
+    """q2-pod's upstream releases have no update.tar.sig: nothing is fetched past the signature's 404."""
+    state, net, card = update(fw, sig=(0, 404, None, b'Not Found'))
+    assert state == NU_UNSIGNED and net.urls == [LATEST, SIG] and PART not in card.written
+
+
+@pytest.mark.parametrize('sig', [b'', b'x' * 63, b'x' * 65, b'x' * 128])
+def test_a_signature_that_is_no_signature_downloads_nothing(fw, sig):
+    state, net, _ = update(fw, sig=(0, 200, None, sig))
+    assert state == NU_UNSIGNED and net.urls == [LATEST, SIG]
+
+
+def test_a_signature_that_cant_be_fetched_is_no_network(fw):
+    assert update(fw, sig=(7, 0, None))[0] == NU_NET
+    assert update(fw, sig=(0, 500, None, b'oops'))[0] == NU_NET
+
+
+def test_a_forged_update_never_replaces_the_tar(fw):
+    """The tar's bytes changed after signing, a signature of another tag's, of another key's, or flipped: the part is
+    deleted and the old update.tar stays."""
+    for sig in (signed(b'tar!'), signed(b'tar', TAG), bytes(64), bytes([signed(b'tar')[0] ^ 1]) + signed(b'tar')[1:]):
+        card = Disk(fw, {TAR: b'old'})
+        state, net, card = update(fw, sig=(0, 200, None, sig), card=card)
+        assert state == NU_FORGED and net.urls == [LATEST, SIG, ASSET]
+        assert card.files[TAR] == b'old' and PART not in card.files and not card.of('rename')
+
+
+def test_another_keys_signature_is_forged(fw, tmp_path):
+    other = tmp_path/'other.pem'
+    subprocess.run(['openssl', 'genpkey', '-algorithm', 'ed25519', '-out', str(other)], check=True, capture_output=True)
+    m = b'q2-coda-update-v1 %s %s\n' % (NEWER, hashlib.sha512(b'tar').hexdigest().encode())
+    assert update(fw, sig=(0, 200, None, host.tools_signing.sign(m, other.read_text())))[0] == NU_FORGED
+
+
+def test_the_check_reads_the_part_back_from_the_card(fw):
+    """What the card holds is what is checked, not what curl handed over: a byte the card got wrong fails."""
+    card = Disk(fw, {TAR: b'old'})
+    real = card.fclose
+
+    def fclose(f, *_):
+        r = real(f)
+        if card.names[f] == PART:
+            card.files[PART] = b'taR'
+        return r
+    fw.mock('fw_fclose', fclose)
+    assert update(fw, card=card)[0] == NU_FORGED and card.files[TAR] == b'old'
+
+
+@pytest.mark.parametrize('tag', [b'1.0 x', b'1.0?x', b'1.0%2F', b'9' * 32])
+def test_a_tag_that_cant_be_signed_or_fetched_is_no_tag(fw, tag):
+    state, net, _ = update(fw, location=RELEASES + b'/tag/' + tag)
+    assert state == NU_NET and net.urls == [LATEST]
 
 
 @pytest.mark.parametrize('tag', [TAG, OLDER])
 def test_nothing_older_or_equal_is_ever_flashed(fw, tag):
-    state, net, _ = update(fw, location=b'https://github.com/owner/repo/releases/tag/' + tag)
+    state, net, _ = update(fw, location=RELEASES + b'/tag/' + tag)
     assert state == NU_LATEST and net.urls == [LATEST]
 
 
@@ -769,14 +824,13 @@ def test_no_tag_is_no_network(fw, code, location):
     assert update(fw, code, location)[0] == NU_NET
 
 
-def test_a_long_redirect_is_held_to_the_tag_buffer(fw):
-    state, net, card = update(fw, location=b'https://x/releases/tag/9' + b'9' * 200)
-    assert state == NU_DONE
+def test_a_long_redirect_is_no_tag(fw):
+    assert update(fw, location=b'https://x/releases/tag/9' + b'9' * 200)[0] == NU_NET
 
 
 def test_a_missing_asset_leaves_no_part(fw):
     state, _, card = update(fw, asset=(0, 404, None))
-    assert state == NU_MISSING and card.of('unlink') == [(PART,)] and not card.of('rename')
+    assert state == NU_MISSING and card.of('unlink') == [(b'/tmp/q2-update.sig',), (PART,)] and not card.of('rename')
 
 
 def test_a_failed_transfer_says_network_a_write_error_card(fw):
@@ -786,15 +840,45 @@ def test_a_failed_transfer_says_network_a_write_error_card(fw):
 
 
 def test_a_card_that_cant_open_the_part(fw):
-    card = Card(fw)
-    fw.mock('fw_fopen', lambda *_: 0)
+    card = Disk(fw)
+    real = card.fopen
+    fw.mock('fw_fopen', lambda path, mode, *_: 0 if C.string_at(path) == PART else real(path, mode))
     assert update(fw, card=card)[0] == NU_CARD
+
+
+def test_no_room_for_the_signature(fw):
+    card = Disk(fw)
+    fw.mock('fw_fopen', lambda *_: 0)
+    state, net, _ = update(fw, card=card)
+    assert state == NU_CARD and net.urls == [LATEST]
 
 
 def test_a_cancel_during_the_check_downloads_nothing(fw):
     fw.var('netupdate__nu', Nu).cancel = 1
     state, net, _ = update(fw)
     assert state == NU_CANCELLED and net.urls == [LATEST]
+
+
+def test_a_cancel_during_the_signatures_fetch_downloads_nothing(fw):
+    nu = fw.var('netupdate__nu', Nu)
+    Disk(fw)
+    net = Net(fw, rel(), during=lambda k: setattr(nu, 'cancel', 1), sig_too=True)
+    fw.fn('netupdate__worker', C.c_void_p, C.c_void_p)(None)
+    assert nu.state == NU_CANCELLED and net.urls == [LATEST, SIG]
+
+
+def test_a_cancel_while_the_signature_is_checked_is_a_cancel(fw):
+    card = Disk(fw, {TAR: b'old'})
+    nu = fw.var('netupdate__nu', Nu)
+    real = card.fopen
+
+    def fopen(path, mode, *_):  # the check's read of the part
+        if C.string_at(path) == PART and b'r' in C.string_at(mode):
+            nu.cancel = 1
+        return real(path, mode)
+    fw.mock('fw_fopen', fopen)
+    state, _, card = update(fw, card=card)
+    assert state == NU_CANCELLED and nu.verifying == 1 and card.files[TAR] == b'old' and PART not in card.files
 
 
 def test_a_cancel_while_the_card_takes_the_last_bytes_is_a_cancel(fw):
@@ -836,36 +920,68 @@ def test_a_redirect_with_no_location_clears_the_tag(fw):
     assert fetch(fw)[:2] == (0, b'')
 
 
-def json_get(fw, card, body, code=200, result=0):
-    Net(fw, {b'https://api': (result, code, None)})
+def sign_list(body):
+    """body with its signature line, the release key's (this library's) signature of it."""
+    return body + b'signature ' + host.tools_signing.sign(host.tools_signing.list_message(body), PEM).hex().encode() + b'\n'
+
+
+def listing(text, serial=1, **pin):
+    """A list as q2-coda publishes it: numbered, each app pinned (pinned's pin), signed."""
+    return sign_list(b'serial %d\n' % serial + pinned(text, **pin))
+
+
+def fresh(fw, card, body, code=200, result=0):
+    """netupdate.c's fresh_list over a fetch answered with body: the list's text, or None and why."""
+    Net(fw, {b'https://raw': (result, code, None)})
     card.files[JSON_PATH] = body
-    table = apps(fw, b'me/foo')
-    tag, url, size = block(fw, size=32), block(fw, size=256), C.c_uint(0)
-    r = fw.fn('netupdate__release', C.c_int, C.c_void_p, C.c_void_p, C.c_void_p, C.POINTER(C.c_uint))(C.byref(table[0]), tag, url, C.byref(size))
-    return r, table[0].latest
+    why = C.c_int(-1)
+    got = fw.fn('netupdate__fresh_list', C.c_void_p, C.POINTER(C.c_int))(C.byref(why))
+    return (C.string_at(got) if got else None), why.value
 
 
-def test_a_release_read_through_its_temp_file(fw):
+def test_a_signed_list_is_taken_without_its_signature_line(fw):
     card = Card(fw)
-    assert json_get(fw, card, github('2.0', ('a.zip', 5))) == (SH_OK, b'2.0')
-    assert (JSON_PATH,) in card.of('unlink')
+    text = listing(b'me/foo Foo\n')
+    assert fresh(fw, card, text)[0] == text[:text.index(b'signature ')] and (JSON_PATH,) in card.of('unlink')
 
 
-@pytest.mark.parametrize('code,r', [(404, SH_MISSING), (403, SH_BUSY), (429, SH_BUSY), (500, SH_NET)])
-def test_githubs_refusals(fw, code, r):
-    assert json_get(fw, Card(fw), b'{}', code) == (r, b'')
+@pytest.mark.parametrize('mangle', [
+    lambda t: t[:t.index(b'signature ')],                    # unsigned: q2-pod's own list, or any edit not signed
+    lambda t: t.replace(b'Foo', b'Fop'),                     # changed after signing
+    lambda t: t.replace(PIN_SHA, b'cd' * 32, 1),            # another zip pinned
+    lambda t: t[:-3] + b'00\n',                              # the signature changed
+])
+def test_a_list_the_release_key_didnt_sign_is_refused(fw, mangle):
+    assert fresh(fw, Card(fw), mangle(listing(b'me/foo Foo\n'))) == (None, SH_UNSIGNED)
 
 
-def test_a_release_without_a_zip_is_missing(fw):
-    assert json_get(fw, Card(fw), github('2.0'))[0] == SH_MISSING
+def test_another_keys_list_is_refused(fw, tmp_path):
+    other = tmp_path/'other.pem'
+    subprocess.run(['openssl', 'genpkey', '-algorithm', 'ed25519', '-out', str(other)], check=True, capture_output=True)
+    body = b'serial 1\n' + pinned(b'me/foo Foo\n')
+    text = body + b'signature ' + host.tools_signing.sign(host.tools_signing.list_message(body), other.read_text()).hex().encode() + b'\n'
+    assert fresh(fw, Card(fw), text) == (None, SH_UNSIGNED)
 
 
-def test_a_failed_transfer_is_no_network(fw):
-    assert json_get(fw, Card(fw), b'', result=7)[0] == SH_NET
+def test_an_older_signed_list_is_refused(fw):
+    """A list signed before the card's was written, served again: its serial is below the card's list's."""
+    card = Card(fw, {SOURCES: b'serial 5\n' + pinned(b'me/foo Foo\n')})
+    assert fresh(fw, card, listing(b'me/foo Foo\n', 4)) == (None, SH_UNSIGNED)
+    assert fresh(fw, card, listing(b'me/foo Foo\n', 5))[0].startswith(b'serial 5\n')
+    assert fresh(fw, card, listing(b'me/foo Foo\n', 6))[0].startswith(b'serial 6\n')
 
 
-def test_a_reply_over_a_megabyte_is_refused(fw):
-    assert json_get(fw, Card(fw), b' ' * ((1 << 20) + 1))[0] == SH_NET
+def test_a_card_list_with_no_serial_takes_any_signed_list(fw):
+    assert fresh(fw, Card(fw, {SOURCES: pinned(b'me/foo Foo\n')}), listing(b'me/foo Foo\n', 1))[0]
+
+
+@pytest.mark.parametrize('code,result,why', [(404, 0, SH_NET), (500, 0, SH_NET), (403, 0, SH_BUSY), (429, 0, SH_BUSY), (0, 7, SH_NET)])
+def test_a_list_that_cant_be_fetched_says_why(fw, code, result, why):
+    assert fresh(fw, Card(fw), listing(b'me/foo\n'), code, result) == (None, why)
+
+
+def test_a_list_over_a_megabyte_is_refused(fw):
+    assert fresh(fw, Card(fw), b' ' * ((1 << 20) + 1))[0] is None
 
 
 def room(fw, bytes_, blocks, size=4096, ok=0):
@@ -897,15 +1013,27 @@ def test_no_statfs_is_a_card_error(fw):
     assert room(fw, 1, 1 << 20, ok=-1)[0] == SH_CARD
 
 
-def install(fw, card, net=None, size=5, blocks=1 << 24):
-    net = net or Net(fw, {b'https://api': (0, 200, None), b'https://h': (0, 200, None)})
-    card.files[JSON_PATH] = github('2.0', ('a.zip', size))
+ZIP_URL = b'https://github.com/me/foo/releases/download/1.0/app.zip'
+
+
+def install(fw, card, net=None, size=5, blocks=1 << 24, body=b'', sha=None, readable=True):
+    """netupdate.c's install of me/foo from its pin (tag 1.0, app.zip, size bytes, body's SHA-256 unless sha), the zip
+    answered with body; the part readable once written, as the card's is."""
+    net = net or Net(fw, {b'https://github.com/': (0, 200, None, body)})
     table = apps(fw, b'me/foo')
+    pin = App.from_buffer_copy(table[0])
+    pin.size = size
+    pin.sha256[:] = sha or hashlib.sha256(body).digest()
     def statfs(path, buf, *_):
         words = C.cast(buf, C.POINTER(C.c_uint))
         words[1], words[7] = 4096, blocks
     fw.mock('fw_statfs', statfs)
-    return fw.fn('netupdate__install', C.c_int, C.c_int)(0), fw.var('netupdate__sh', Sh), table
+    def fclose(f, *_):
+        if readable and card.names[f] in card.written:
+            card.files[card.names[f]] = card.written[card.names[f]]
+        return 0
+    fw.mock('fw_fclose', fclose)
+    return fw.fn('netupdate__install', C.c_int, C.c_int, C.c_void_p)(0, C.byref(pin)), fw.var('netupdate__sh', Sh), table
 
 
 def installing(fw):
@@ -915,12 +1043,33 @@ def installing(fw):
 
 def test_a_whole_install(fw):
     card = installing(fw)
-    r, sh, table = install(fw, card)
-    assert r == SH_OK and sh.stage == 3 and table[0].latest == b'2.0'
+    r, sh, table = install(fw, card, body=b'the zip')
+    assert r == SH_OK and sh.stage == 3 and table[0].latest == b'1.0'
     assert b'/mnt/mmc/.foo/q2-foo' in card.files and b'/mnt/mmc/.q2/apps/foo.files' in card.files
     assert card.of('rename')[-1] == (b'/mnt/mmc/.q2/apps/foo.tag.tmp', b'/mnt/mmc/.q2/apps/foo.tag')
-    assert card.written[b'/mnt/mmc/.q2/apps/foo.tag.tmp'] == b'2.0'
+    assert card.written[b'/mnt/mmc/.q2/apps/foo.tag.tmp'] == b'1.0'
     assert card.of('system')[-1] == (b'rm -rf ' + STAGING.encode(),)
+
+
+def test_the_pins_zip_is_what_is_fetched(fw):
+    card = installing(fw)
+    net = Net(fw, {b'https://github.com/': (0, 200, None, b'z')})
+    assert install(fw, card, net, body=b'z')[0] == SH_OK and net.urls == [ZIP_URL]
+
+
+@pytest.mark.parametrize('body', [b'the zip!', b'the zi', b'', b'the zip' * 2])
+def test_a_zip_that_isnt_the_pins_changes_nothing(fw, body):
+    """Another zip at the pinned tag (a release replaced since it was pinned): never listed, unpacked or moved."""
+    card = installing(fw)
+    r, sh, _ = install(fw, card, Net(fw, {b'https://github.com/': (0, 200, None, body)}), sha=hashlib.sha256(b'the zip').digest())
+    assert r == SH_FORGED and sh.stage == 1 and b'/mnt/mmc/.foo/q2-foo' not in card.files and not card.of('rename')
+    assert not [c for c in card.of('system') if b'unzip' in c[0]] and card.of('system')[-1] == (b'rm -rf ' + STAGING.encode(),)
+
+
+def test_a_part_that_cant_be_read_back_is_a_card_error(fw):
+    card = installing(fw)
+    r, _, _ = install(fw, card, body=b'z', readable=False)
+    assert r == SH_CARD and b'/mnt/mmc/.foo/q2-foo' not in card.files
 
 
 def test_a_cancel_before_moving_leaves_the_app_alone(fw):
@@ -930,10 +1079,10 @@ def test_a_cancel_before_moving_leaves_the_app_alone(fw):
     assert b'/mnt/mmc/.foo/q2-foo' not in card.files and not card.of('rename')
 
 
-def test_no_release_stops_it(fw):
+def test_no_zip_at_the_pinned_tag_stops_it(fw):
     card = installing(fw)
-    net = Net(fw, {b'https://api': (0, 404, None)})
-    assert install(fw, card, net)[0] == SH_MISSING and not card.of('system')
+    net = Net(fw, {b'https://github.com/': (0, 404, None)})
+    assert install(fw, card, net)[0] == SH_MISSING and b'/mnt/mmc/.foo/q2-foo' not in card.files
 
 
 def test_a_bad_zip_changes_nothing(fw):
@@ -950,9 +1099,9 @@ def test_no_room_for_the_zip(fw):
 
 def test_a_failed_download_says_why(fw):
     card = installing(fw)
-    net = Net(fw, {b'https://api': (0, 200, None), b'https://h': (7, 0, None)})
+    net = Net(fw, {b'https://github.com/': (7, 0, None)})
     assert install(fw, card, net)[0] == SH_NET
-    net.replies[b'https://h'] = (0, 404, None)
+    net.replies[b'https://github.com/'] = (0, 404, None)
     assert install(fw, card, net)[0] == SH_MISSING
 
 
@@ -1203,48 +1352,58 @@ def check(fw):
     return fw.fn('netupdate__check', C.c_int)()
 
 
-def test_the_check_takes_a_fresh_list_and_each_release(fw):
+def checking(fw, card, text):
+    """A check whose list fetch answers text; the card's list it writes."""
+    Net(fw, {b'https://raw': (0, 200, None)})
+    card.files[JSON_PATH] = text
+    return check(fw)
+
+
+def test_the_check_takes_a_fresh_list_alone(fw):
+    """One request: each app's latest is its pin's tag, no release is asked."""
     card = Card(fw)
-    Net(fw, {b'https://raw': (0, 200, None), b'https://api': (0, 200, None)})
-    card.files[JSON_PATH] = b'me/foo Foo\nme/bar\n'
+    net = Net(fw, {b'https://raw': (0, 200, None)})
+    card.files[JSON_PATH] = listing(b'me/foo Foo\nme/bar\n', 3, tag=b'2.0')
     sh = fw.var('netupdate__sh', Sh)
-    fw.mock('fw_fopen', fw_fopen_list(card))
-    assert check(fw) == 1
-    assert sh.n == 2 and sh.next[0].id == b'foo' and sh.next[0].latest == b'1.0'
+    assert check(fw) == 1 and net.urls == [b'https://raw.githubusercontent.com/owner/repo/main/sources.list']
+    assert sh.n == 2 and sh.next[0].id == b'foo' and sh.next[0].latest == b'2.0' and bytes(sh.next[1].sha256).hex().encode() == PIN_SHA
     assert b'/mnt/mmc/.q2/sources.list' in [c[1] for c in card.of('rename')]
-    assert card.written[b'/mnt/mmc/.q2/sources.list.tmp'] == b'me/foo Foo\nme/bar bar\n'
+    assert card.written[b'/mnt/mmc/.q2/sources.list.tmp'] == b'serial 3\n' + pinned(b'me/foo Foo\nme/bar bar\n', tag=b'2.0')
 
 
-def fw_fopen_list(card):
-    """The first read of the temp file is the list; the rest are releases."""
-    release_json = github('1.0', ('a.zip', 5))
-    reads = [0]
-    def fopen(path, mode, *_):
-        name, how = C.string_at(path), C.string_at(mode)
-        if name == JSON_PATH and b'r' in how:
-            reads[0] += 1
-            if reads[0] > 1:
-                card.files[JSON_PATH] = release_json
-        if b'r' in how and name not in card.files:
-            return 0
-        f = len(card.names) + 1
-        card.names[f], card.at[f] = name, 0
-        if b'w' in how:
-            card.written[name] = b''
-        return f
-    return fopen
-
-
-def test_a_check_keeps_why_a_release_failed_but_not_a_missing_one(fw):
+def test_the_cards_list_reads_back_as_the_check_left_it(fw):
     card = Card(fw)
+    checking(fw, card, listing(b'me/foo Foo\n-me/old Old\n', 2))
+    sh = fw.var('netupdate__sh', Sh)
+    again = sources(fw, card.written[b'/mnt/mmc/.q2/sources.list.tmp'], pin=False, raw=True)
+    assert [(a.repo, a.latest, a.asset, a.size, bytes(a.sha256), a.dropped) for a in again] == \
+        [(x.repo, x.latest, x.asset, x.size, bytes(x.sha256), x.dropped) for x in sh.next[:sh.n]]
+
+
+@pytest.mark.parametrize('result,code,why', [(7, 0, SH_NET), (0, 403, SH_BUSY), (0, 429, SH_BUSY), (0, 404, SH_NET)])
+def test_a_list_that_cant_be_fetched_keeps_the_page_s_and_says_why(fw, result, code, why):
+    Card(fw)
     apps(fw, b'me/foo', b'me/bar')
     sh = fw.var('netupdate__sh', Sh)
-    net = Net(fw, {b'https://raw': (7, 0, None), b'https://api.github.com/repos/me/foo': (0, 404, None),
-                   b'https://api': (0, 403, None)})
-    assert check(fw) == 0 and sh.result == SH_BUSY
-    sh.result = SH_OK
-    net.replies = {b'https://raw': (7, 0, None), b'https://api': (0, 404, None)}
-    assert check(fw) == 1 and sh.result == SH_OK  # no release yet: checked, the minute's gap holds
+    Net(fw, {b'https://raw': (result, code, None)})
+    assert check(fw) == 0 and sh.result == why and [sh.next[i].id for i in range(sh.n)] == [b'foo', b'bar']
+
+
+def test_an_unsigned_list_is_never_taken(fw):
+    """q2-pod's own list, or a list a taken-over repository rewrote: the page keeps the list it had."""
+    card = Card(fw)
+    apps(fw, b'me/kept')
+    sh = fw.var('netupdate__sh', Sh)
+    text = listing(b'me/evil Evil\n')
+    assert checking(fw, card, text[:text.index(b'signature ')]) == 0 and sh.result == SH_UNSIGNED
+    assert sh.n == 1 and sh.next[0].id == b'kept' and b'/mnt/mmc/.q2/sources.list.tmp' not in card.written
+
+
+def test_an_older_signed_list_is_never_taken(fw):
+    card = Card(fw, {SOURCES: b'serial 9\n' + pinned(b'me/kept\n')})
+    apps(fw, b'me/kept')
+    sh = fw.var('netupdate__sh', Sh)
+    assert checking(fw, card, listing(b'me/old\n', 8)) == 0 and sh.result == SH_UNSIGNED and sh.next[0].id == b'kept'
 
 
 def test_no_list_anywhere_is_a_failed_check(fw):
@@ -1258,49 +1417,39 @@ def test_no_list_anywhere_is_a_failed_check(fw):
 def test_a_bad_list_never_replaces_the_one_there(fw):
     card = Card(fw)
     apps(fw, b'me/kept')
-    Net(fw, {b'https://raw': (0, 200, None), b'https://api': (0, 200, None)})
-    card.files[JSON_PATH] = b'# nothing\n'
     sh = fw.var('netupdate__sh', Sh)
-    check(fw)
+    checking(fw, card, sign_list(b'serial 1\n# nothing\nme/unpinned Foo\n'))
     assert sh.n == 1 and sh.next[0].id == b'kept' and b'/mnt/mmc/.q2/sources.list.tmp' not in card.written
 
 
 def test_an_app_dropped_from_the_list_but_installed_stays_removable(fw):
     card = Card(fw, {b'/mnt/mmc/.q2/apps/old.tag': b'1'})
     apps(fw, b'me/old', b'me/gone')
-    Net(fw, {b'https://raw': (0, 200, None), b'https://api': (0, 200, None)})
-    fw.mock('fw_fopen', fw_fopen_list(card))
-    card.files[JSON_PATH] = b'me/new\n'
+    checking(fw, card, listing(b'me/new\n'))
     sh = fw.var('netupdate__sh', Sh)
-    check(fw)
     assert [sh.next[i].id for i in range(sh.n)] == [b'new', b'old']
 
 
-def test_a_dropped_app_gets_no_release_and_stays_dropped_on_the_card(fw):
-    """Dropping an app from the list is what stops a taken-over repo's releases (GHSA-8wpr-pmqx-538x): its release is
-    never asked, an earlier check's tag is let go, and the card's list marks it "-" so a later offline page knows."""
+def test_a_dropped_app_keeps_no_pin_and_stays_dropped_on_the_card(fw):
+    """Dropping an app from the list is what stops a taken-over repo's releases (GHSA-8wpr-pmqx-538x): its pin and
+    an earlier check's tag are let go, and the card's list marks it "-" so a later offline page knows."""
     card = Card(fw, {b'/mnt/mmc/.q2/apps/old.tag': b'1'})
     table = apps(fw, b'me/old')
     table[0].latest = b'2.0'
-    net = Net(fw, {b'https://raw': (0, 200, None), b'https://api': (0, 200, None)})
-    fw.mock('fw_fopen', fw_fopen_list(card))
-    card.files[JSON_PATH] = b'me/new\n'
+    checking(fw, card, listing(b'me/new\n'))
     sh = fw.var('netupdate__sh', Sh)
-    check(fw)
     assert sh.next[1].dropped == b'\x01' and sh.next[1].latest == b''
-    assert not [u for u in net.urls if b'repos/me/old' in u]
-    assert card.written[b'/mnt/mmc/.q2/sources.list.tmp'] == b'me/new new\n-me/old old\n'
-    reloaded = apps(fw, b'me/new new', b'-me/old old')
+    assert card.written[b'/mnt/mmc/.q2/sources.list.tmp'] == b'serial 1\n' + pinned(b'me/new new\n') + b'-me/old old\n'
+    reloaded = sources(fw, card.written[b'/mnt/mmc/.q2/sources.list.tmp'], pin=False, raw=True)
     assert [(a.id, a.dropped) for a in reloaded[:2]] == [(b'new', b'\x00'), (b'old', b'\x01')]
-    net.urls.clear()
-    assert check(fw) == 1 and not [u for u in net.urls if b'repos/me/old' in u]  # the list failed, the mark held
 
 
 def test_a_dropped_app_never_installs_and_shows_only_while_installed(fw):
     card = installing(fw)
-    net = Net(fw, {b'https://api': (0, 200, None), b'https://h': (0, 200, None)})
+    net = Net(fw, {b'https://github.com/': (0, 200, None)})
     apps(fw, b'-me/foo')
-    assert fw.fn('netupdate__install', C.c_int, C.c_int)(0) == SH_MISSING and not net.urls
+    pin = App()
+    assert fw.fn('netupdate__install', C.c_int, C.c_int, C.c_void_p)(0, C.byref(pin)) == SH_MISSING and not net.urls
     p = Page(fw, b'me/bar', b'-me/foo')
     assert p.sh.rows == 2  # Check for Updates and bar: foo isn't installed
     p.card.files[b'/mnt/mmc/.q2/apps/foo.tag'] = b'1.0'
@@ -1310,20 +1459,19 @@ def test_a_dropped_app_never_installs_and_shows_only_while_installed(fw):
 
 def test_a_full_list_keeps_the_cards_list_inside_its_buffer(fw):
     card = Card(fw)
-    Net(fw, {b'https://raw': (0, 200, None), b'https://api': (0, 200, None)})
     lines = b''.join(b'%s/%s%02d %s\n' % (b'o' * 39, b'a' * 13, i, b'n' * 31) for i in range(SH_MAX))
-    card.files[JSON_PATH] = lines
-    fw.mock('fw_fopen', fw_fopen_list(card))
-    check(fw)
-    assert card.written[b'/mnt/mmc/.q2/sources.list.tmp'] == lines
+    pins = dict(tag=b't' * 31, asset=b'f' * 59 + b'.zip', size=1 << 30)
+    checking(fw, card, listing(lines, 123456789, **pins))
+    assert card.written[b'/mnt/mmc/.q2/sources.list.tmp'] == b'serial 123456789\n' + pinned(lines, **pins)
 
 
 def test_the_page_opens_on_the_cards_last_list(fw):
-    card = Card(fw, {b'/mnt/mmc/.q2/sources.list': b'me/foo Foo\n'})
+    card = Card(fw, {b'/mnt/mmc/.q2/sources.list': b'serial 2\n' + pinned(b'me/foo Foo\n', tag=b'3.0')})
     fw.mock('window_create', lambda *_: 77)
     fw.mock('get_wifisignal', lambda *_: 0)
     fw.fn('shelf_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
-    assert fw.var('shelf_n', C.c_int).value == 1 and (App * SH_MAX).in_dll(fw.lib, 'shelf_apps')[0].id == b'foo'
+    table = (App * SH_MAX).in_dll(fw.lib, 'shelf_apps')
+    assert fw.var('shelf_n', C.c_int).value == 1 and table[0].id == b'foo' and table[0].latest == b'3.0'
 
 
 def test_the_page_opens_with_wifi_and_checks(fw):
@@ -1335,7 +1483,7 @@ def test_the_page_opens_with_wifi_and_checks(fw):
 
 
 def test_a_hostile_list_on_the_card_opens_the_page_safely(fw):
-    for raw in hostile(34, [b'me/foo Foo\nme/q2-bar\n'], 300, b'/ \n\xff'):
+    for raw in hostile(34, [pinned(b'me/foo Foo\nme/q2-bar\n')], 300, b'/ \n\xff0a'):
         fw.var('shelf_n', C.c_int).value = 0
         fw.var('netupdate__sh', Sh).page = None
         Card(fw, {b'/mnt/mmc/.q2/sources.list': raw})
@@ -1511,7 +1659,7 @@ def test_a_press_downloads_a_newer_release_and_hands_it_to_stock_s_card_update(f
     row.press()
     assert row.nu.state == NU_RUNNING and row.label() == 'Checking…' and row.wait() == RET_REPEAT
     seen = []
-    Net(fw, {ASSET: (0, 200, None, BODY), LATEST: (0, 302, TAG_URL + NEWER)}, during=lambda k: seen.append((row.wait(), row.label())))
+    Net(fw, rel((0, 200, None, BODY)), during=lambda k: seen.append((row.wait(), row.label())))
     row.run()
     assert seen == [(RET_REPEAT, f'Downloading {p}%') for p in (25, 50, 75, 100)]
     assert {args[:3] for _, args in fw.calls('reset_poweroptions_timer')} == {(1, 1, 0)}  # standby held, not the screen
@@ -1532,7 +1680,7 @@ def test_a_second_press_cancels_mid_download_and_keeps_the_old_tar(fw):
         if k == 1:
             row.press()
             seen.append((row.wait(), row.label()))  # the timer says so too, not the percentage
-    Net(fw, {ASSET: (0, 200, None, BODY), LATEST: (0, 302, TAG_URL + NEWER)}, during=during)
+    Net(fw, rel((0, 200, None, BODY)), during=during)
     row.run()
     assert seen == [(RET_REPEAT, 'Cancelling…')] and len(card.written[PART]) < len(BODY)  # ended at the next progress call
     assert row.wait() == 0 and row.toasts == ['Download cancelled'] and not row.flashed
@@ -1543,7 +1691,7 @@ def test_leaving_the_page_mid_download_cancels_it(fw):
     card = Disk(fw, {TAR: b'old'})
     row = UpdateRow(fw)
     row.press()
-    Net(fw, {ASSET: (0, 200, None, BODY), LATEST: (0, 302, TAG_URL + NEWER)}, during=lambda k: k == 1 and row.leave())
+    Net(fw, rel((0, 200, None, BODY)), during=lambda k: k == 1 and row.leave())
     row.run()
     assert row.wait() == 0 and row.toasts == ['Download cancelled'] and row.tr == {} and not row.flashed
     assert card.files[TAR] == b'old' and PART not in card.files
@@ -1554,7 +1702,7 @@ def test_a_cancel_after_the_last_byte_still_keeps_the_old_tar(fw, how):
     card = Disk(fw, {TAR: b'old'})
     row = UpdateRow(fw)
     row.press()
-    Net(fw, {ASSET: (0, 200, None, BODY), LATEST: (0, 302, TAG_URL + NEWER)}, during=lambda k: k == CHUNKS - 1 and getattr(row, how)())
+    Net(fw, rel((0, 200, None, BODY)), during=lambda k: k == CHUNKS - 1 and getattr(row, how)())
     row.run()
     assert card.written[PART] == BODY  # no progress call left to end it: the transfer itself came whole
     assert row.wait() == 0 and row.toasts == ['Download cancelled'] and not row.flashed
@@ -1566,7 +1714,7 @@ def test_a_part_the_card_can_t_sync_never_replaces_the_tar(fw):
     fw.mock('fw_fsync', lambda fd, *_: -1 if card.names[fd - 100] == PART else 0)
     row = UpdateRow(fw)
     row.press()
-    Net(fw, {ASSET: (0, 200, None, BODY), LATEST: (0, 302, TAG_URL + NEWER)})
+    Net(fw, rel((0, 200, None, BODY)))
     row.run()
     assert row.wait() == 0 and row.toasts == ["Can't write to the card"] and not row.flashed
     assert card.files[TAR] == b'old' and PART not in card.files and not card.of('rename')
@@ -1576,7 +1724,7 @@ def test_a_download_finished_off_the_page_waits_for_the_card_update(fw):
     card = Disk(fw)
     row = UpdateRow(fw)
     row.press()
-    Net(fw, {ASSET: (0, 200, None, BODY), LATEST: (0, 302, TAG_URL + NEWER)})
+    Net(fw, rel((0, 200, None, BODY)))
     row.run()
     row.leave()
     assert row.wait() == 0 and row.toasts == ['Update downloaded: use TF card update'] and not row.flashed
@@ -1584,17 +1732,19 @@ def test_a_download_finished_off_the_page_waits_for_the_card_update(fw):
 
 
 @pytest.mark.parametrize('replies, said', [
-    ({LATEST: (0, 302, TAG_URL + TAG)}, 'Latest firmware installed'),
-    ({LATEST: (6, 0, None)}, "Can't reach GitHub"),  # CURLE_COULDNT_RESOLVE_HOST
-    ({LATEST: (0, 200, None)}, "Can't reach GitHub"),  # no redirect
-    ({ASSET: (0, 404, None, b'Not Found'), LATEST: (0, 302, TAG_URL + NEWER)}, 'No update for this build'),
-    ({ASSET: (28, 200, None, BODY), LATEST: (0, 302, TAG_URL + NEWER)}, "Can't reach GitHub"),  # timed out
+    (lambda: {LATEST: (0, 302, TAG_URL + TAG)}, 'Latest firmware installed'),
+    (lambda: {LATEST: (6, 0, None)}, "Can't reach GitHub"),  # CURLE_COULDNT_RESOLVE_HOST
+    (lambda: {LATEST: (0, 200, None)}, "Can't reach GitHub"),  # no redirect
+    (lambda: rel((0, 404, None, b'Not Found')), 'No update for this build'),
+    (lambda: rel((28, 200, None, BODY)), "Can't reach GitHub"),  # timed out
+    (lambda: rel((0, 200, None, BODY), sig=(0, 404, None, b'Not Found')), 'Release not signed: not installed'),
+    (lambda: rel((0, 200, None, BODY), sig=(0, 200, None, signed(BODY[:-1]))), 'Signature check failed: not installed'),
 ])
 def test_each_ending_says_why_and_keeps_the_old_tar(fw, replies, said):
     card = Disk(fw, {TAR: b'old'})
     row = UpdateRow(fw)
     row.press()
-    Net(fw, replies)
+    Net(fw, replies())
     row.run()
     assert row.wait() == 0 and row.toasts == [said] and not row.flashed and row.tr == {row.LABEL: 'update_online'}
     assert card.files[TAR] == b'old' and PART not in card.files
@@ -1602,13 +1752,19 @@ def test_each_ending_says_why_and_keeps_the_old_tar(fw, replies, said):
 
 def test_a_full_card_fails_the_write_and_says_so(fw):
     card = Disk(fw, {TAR: b'old'})
-    fw.mock('fw_fwrite', lambda *_: 0)
-    fw.mock('fw_ferror', lambda *_: 1)
+
+    def fwrite(buf, size, n, f, *_):  # the card full; the signature in /tmp, RAM, still written
+        if card.names[f] == PART:
+            return 0
+        card.written[card.names[f]] += C.string_at(buf, size * n)
+        return n
+    fw.mock('fw_fwrite', fwrite)
+    fw.mock('fw_ferror', lambda f, *_: card.names[f] == PART)
     row = UpdateRow(fw)
     row.press()
-    net = Net(fw, {ASSET: (0, 200, None, BODY), LATEST: (0, 302, TAG_URL + NEWER)})
+    net = Net(fw, rel((0, 200, None, BODY)))
     row.run()
-    assert net.urls == [LATEST, ASSET] and row.wait() == 0 and row.toasts == ["Can't write to the card"]
+    assert net.urls == [LATEST, SIG, ASSET] and row.wait() == 0 and row.toasts == ["Can't write to the card"]
     assert card.files[TAR] == b'old' and PART not in card.files
 
 
@@ -1634,6 +1790,25 @@ def test_presses_between_the_end_and_the_join_do_nothing(fw):
     assert row.wait() == 0 and row.toasts == ['Latest firmware installed']
 
 
+def test_the_row_says_verifying_while_the_signature_is_checked(fw):
+    row = UpdateRow(fw)
+    row.nu.state, row.nu.percent, row.nu.verifying = NU_RUNNING, 100, 1
+    timers = len(row.timers)
+    row.fw.fn('netupdate__wait_done', C.c_int, C.c_void_p)(None)
+    assert row.label() == 'Verifying…' and len(row.timers) == timers
+    row.nu.cancel = 1
+    row.fw.fn('netupdate__wait_done', C.c_int, C.c_void_p)(None)
+    assert row.label() == 'Cancelling…'
+
+
+def test_a_new_press_forgets_the_last_check(fw):
+    Disk(fw)
+    row = UpdateRow(fw)
+    row.nu.verifying = 1
+    row.press()
+    assert row.nu.verifying == 0 and row.label() == 'Checking…'
+
+
 def test_system_update_opened_mid_download_says_so(fw):
     fw.var('netupdate__nu', Nu).state = NU_RUNNING
     row = UpdateRow(fw)
@@ -1655,11 +1830,20 @@ FOO = {'.foo/q2-foo': b'\x7fELF foo', '.foo/q2app': b'name=Foo\n', '.foo/lib/x.s
 
 
 def store_net(fw, files=FOO, listed=b'me/q2-foo Foo\n', size=None, **replies):
-    """The list, every release's JSON (tag 2.0, its zip of files) and the zip; api= or zip= replace those replies."""
+    """The signed list, each app pinned to tag 2.0's app.zip, the zip of files (size its pinned bytes, the zip's own
+    unless given), and the zip; list= or zip= replace those replies. net.card_list is the list a check leaves on the
+    card."""
     data = app_zip(files)
-    return Net(fw, {b'https://raw': (0, 200, None, listed),
-                    b'https://api': replies.get('api', (0, 200, None, github('2.0', ('app.zip', size or len(data))))),
-                    b'https://h/': replies.get('zip', (0, 200, None, data))})
+    pin = dict(tag=b'2.0', asset=b'app.zip', size=size or len(data), sha=hashlib.sha256(data).hexdigest().encode())
+    net = Net(fw, {b'https://raw': replies.get('list', (0, 200, None, listing(listed, **pin))),
+                   b'https://github.com/': replies.get('zip', (0, 200, None, data))})
+    net.card_list = b'serial 1\n' + pinned(listed, **pin)
+    return net
+
+
+def on_card(text):
+    """The card's list as an earlier check left it: each app pinned to tag 2.0."""
+    return b'serial 1\n' + pinned(text, tag=b'2.0')
 
 
 class Store:
@@ -1728,10 +1912,9 @@ def test_the_store_loads_its_list_then_not_again_for_ten_minutes(fw):
     assert s.toasts == [] and s.sh.cancel == 0 and s.sh.manual == 1 and len(s.workers) == 1
     assert s.wait() == RET_REPEAT and s.held == []  # a check holds no standby
     assert s.run() == 0 and s.sh.job == 0 and s.toasts == ['All apps are up to date']  # none installed has a newer one
-    assert s.labels() == ['Install'] and card.files[SOURCES] == b'me/q2-foo Foo\n' and s.sh.next[0].latest == b'2.0'
+    assert s.labels() == ['Install'] and card.files[SOURCES] == net.card_list and s.sh.next[0].latest == b'2.0'
     assert s.check_label().strip() == ''  # its detail blank again, the list loaded
-    assert net.urls == [b'https://raw.githubusercontent.com/DiamondBond/q2-pod/main/sources.list',
-                        b'https://api.github.com/repos/me/q2-foo/releases/latest']
+    assert net.urls == [LIST_URL]  # one request: the pins are the releases
     s.close()
     s.seconds += 600
     s.open()
@@ -1743,7 +1926,7 @@ def test_the_store_loads_its_list_then_not_again_for_ten_minutes(fw):
 
 
 def test_a_check_stopped_part_way_is_done_again_at_the_next_open(fw):
-    card = Disk(fw, {SOURCES: b'me/q2-foo Foo\n'})
+    card = Disk(fw, {SOURCES: on_card(b'me/q2-foo Foo\n')})
     net = store_net(fw)
     s = Store(fw, card)
     s.click()  # an app's row
@@ -1759,13 +1942,13 @@ def test_a_check_stopped_part_way_is_done_again_at_the_next_open(fw):
 # An install goes by the list as it is now, fetched as the install starts. The page's rows may be the card's
 # list of days ago, and a repo dropped since then must not install (GHSA-8wpr-pmqx-538x): on that list its
 # release was fetched and unpacked onto the card in each of the three ways below.
-LIST_URL = b'https://raw.githubusercontent.com/DiamondBond/q2-pod/main/sources.list'
+LIST_URL = b'https://raw.githubusercontent.com/owner/repo/main/sources.list'  # host.py's --update-repo
 FOO_APP = b'/mnt/mmc/.foo/q2-foo'
 
 
 def test_an_app_dropped_since_the_cards_list_is_not_installed_with_no_check_run(fw):
     """Opened with no Wi-Fi: no check runs and the rows are the card's list. The link comes up and the row is pressed."""
-    card = Disk(fw, {SOURCES: b'me/q2-foo Foo\n'})
+    card = Disk(fw, {SOURCES: on_card(b'me/q2-foo Foo\n')})
     net = store_net(fw, listed=b'me/q2-bar Bar\n')
     s = Store(fw, card, wifi=0)
     assert s.sh.job == 0 and s.labels() == ['Install']
@@ -1778,7 +1961,7 @@ def test_an_app_dropped_since_the_cards_list_is_not_installed_with_no_check_run(
 
 def test_an_app_dropped_since_the_cards_list_is_not_installed_after_the_check_is_stopped(fw):
     """A row pressed while the opening check loads the list stops the check; the next press acts on the card's list."""
-    card = Disk(fw, {SOURCES: b'me/q2-foo Foo\n'})
+    card = Disk(fw, {SOURCES: on_card(b'me/q2-foo Foo\n')})
     net = store_net(fw, listed=b'me/q2-bar Bar\n')
     s = Store(fw, card)
     s.click()
@@ -1789,21 +1972,21 @@ def test_an_app_dropped_since_the_cards_list_is_not_installed_after_the_check_is
 
 
 def test_no_app_installs_while_the_list_cant_be_fetched(fw):
-    """The list's host out of reach with the API answering: the check keeps the card's list and asks its releases."""
-    card = Disk(fw, {SOURCES: b'me/q2-foo Foo\n'})
+    """The list's host out of reach: the check keeps the card's list, which no install takes its pin from."""
+    card = Disk(fw, {SOURCES: on_card(b'me/q2-foo Foo\n')})
     net = store_net(fw)
     net.replies[b'https://raw'] = (7, 0, None)
     s = Store(fw, card)
     assert s.run() == 0 and s.labels() == ['Install'] and s.sh.next[0].latest == b'2.0'
     s.click()
     assert s.run() == 0 and s.toasts[-1] == "Can't reach GitHub"
-    assert not [u for u in net.urls if u.startswith(b'https://h/')] and FOO_APP not in card.files
+    assert not [u for u in net.urls if u.startswith(b'https://github.com/')] and FOO_APP not in card.files
 
 
 @pytest.mark.parametrize('listed', [b'other/q2-foo Foo\n', b'-me/q2-foo Foo\n', b'# me/q2-foo Foo\nme/q2-bar Bar\n'])
 def test_an_app_installs_only_from_the_repo_the_list_names_now(fw, listed):
     """Another owner's repo under the same name, the app marked dropped, and its line commented out."""
-    card = Disk(fw, {SOURCES: b'me/q2-foo Foo\n'})
+    card = Disk(fw, {SOURCES: on_card(b'me/q2-foo Foo\n')})
     net = store_net(fw, listed=listed)
     s = Store(fw, card, wifi=0)
     s.wifi = 1
@@ -1812,19 +1995,19 @@ def test_an_app_installs_only_from_the_repo_the_list_names_now(fw, listed):
     assert net.urls == [LIST_URL] and FOO_APP not in card.files
 
 
-def test_an_install_asks_for_the_list_then_the_release_and_its_zip(fw):
-    card = Disk(fw, {SOURCES: b'me/q2-foo Foo\n'})
+def test_an_install_asks_for_the_list_then_its_pinned_zip(fw):
+    card = Disk(fw, {SOURCES: on_card(b'me/q2-foo Foo\n')})
     net = store_net(fw, listed=b'# apps\nme/q2-bar Bar\nme/q2-foo Foo renamed\n')
     s = Store(fw, card, wifi=0)
     s.wifi = 1
     s.click()
     assert s.run() == 0 and s.toasts == ['Foo is ready in Streaming'] and card.files[FOO_APP] == FOO['.foo/q2-foo']
-    assert [u.split(b'/')[2] for u in net.urls] == [b'raw.githubusercontent.com', b'api.github.com', b'h']
-    assert card.files[SOURCES] == b'me/q2-foo Foo\n' and s.labels() == ['Installed']  # the page's list is the check's to change
+    assert net.urls == [LIST_URL, b'https://github.com/me/q2-foo/releases/download/2.0/app.zip']
+    assert card.files[SOURCES] == on_card(b'me/q2-foo Foo\n') and s.labels() == ['Installed']  # the page's list is the check's to change
 
 
 def test_an_install_cancelled_while_it_asks_for_the_list_installs_nothing(fw):
-    card = Disk(fw, {SOURCES: b'me/q2-foo Foo\n'})
+    card = Disk(fw, {SOURCES: on_card(b'me/q2-foo Foo\n')})
     net = store_net(fw)
     s = Store(fw, card, wifi=0)
     s.wifi = 1
@@ -1927,7 +2110,7 @@ def test_a_remove_cut_off_by_usb_storage_says_the_card_was_not_written(fw):
 
 # The same for Rockbox: its themes go with it only once the card is known to be there.
 def test_a_rockbox_remove_cut_off_by_usb_storage_keeps_the_themes(fw):
-    card = Disk(fw, {SOURCES: b'x/q2-rockbox Rockbox\nx/q2-rockbox-themes Rockbox Themes\n',
+    card = Disk(fw, {SOURCES: on_card(b'x/q2-rockbox Rockbox\nx/q2-rockbox-themes Rockbox Themes\n'),
                      b'/mnt/mmc/.rockbox/rockbox': b'bin', b'/mnt/mmc/.rockbox/wps/a.wps': b'wps',
                      b'/mnt/mmc/.q2/apps/rockbox.files': b'.rockbox/rockbox\n', b'/mnt/mmc/.q2/apps/rockbox.tag': b'2.0',
                      b'/mnt/mmc/.q2/apps/themes.files': b'.rockbox/wps/a.wps\n', b'/mnt/mmc/.q2/apps/themes.tag': b'2.0'})
@@ -1947,19 +2130,19 @@ def test_a_rockbox_remove_cut_off_by_usb_storage_keeps_the_themes(fw):
     assert not card.of('unlink') and b'/mnt/mmc/.rockbox/wps/a.wps' in card.files
 
 
-def test_a_cancel_during_the_release_request_downloads_nothing(fw):
-    card = Disk(fw, {SOURCES: b'me/q2-foo Foo\n'})
+def test_a_cancel_during_the_lists_fetch_downloads_nothing(fw):
+    card = Disk(fw, {SOURCES: on_card(b'me/q2-foo Foo\n')})
     net = store_net(fw)
     s = Store(fw, card, wifi=0)
     s.wifi = 1
-    net.during = lambda k: net.urls[-1].startswith(b'https://api') and k == CHUNKS - 1 and s.click()  # as it ends
+    net.during = lambda k: net.urls[-1].startswith(b'https://raw') and k == CHUNKS - 1 and s.click()  # as it ends
     s.click()
     assert s.run() == 0 and s.toasts == ['Download cancelled'] and s.labels() == ['Install']
-    assert not [u for u in net.urls if u.startswith(b'https://h/')] and sorted(card.files) == [SOURCES, MOUNTS]
+    assert not [u for u in net.urls if u.startswith(b'https://github.com/')] and sorted(card.files) == [SOURCES, MOUNTS]
 
 
 def test_a_cancel_while_unpacking_installs_nothing(fw):
-    card = Disk(fw, {SOURCES: b'me/q2-foo Foo\n'})
+    card = Disk(fw, {SOURCES: on_card(b'me/q2-foo Foo\n')})
     store_net(fw)
     s = Store(fw, card, wifi=0)
     s.wifi = 1
@@ -1983,11 +2166,13 @@ ROOM = 64 << 20  # left free beyond what a download or an unpack needs
 
 
 @pytest.mark.parametrize('case, said', [
-    (dict(api=(0, 404, None, b'{}')), 'No update for this build'),
-    (dict(api=(0, 403, None, b'{}')), 'GitHub is busy, try later'),
-    (dict(api=(0, 429, None, b'{}')), 'GitHub is busy, try later'),
-    (dict(api=(7, 0, None)), "Can't reach GitHub"),
+    (dict(list=(0, 404, None, b'Not Found')), "Can't reach GitHub"),
+    (dict(list=(0, 403, None, b'{}')), 'GitHub is busy, try later'),
+    (dict(list=(0, 429, None, b'{}')), 'GitHub is busy, try later'),
+    (dict(list=(7, 0, None)), "Can't reach GitHub"),
+    (dict(list=(0, 200, None, b'serial 2\n' + pinned(b'me/q2-foo Foo\n'))), 'App list not signed: not used'),
     (dict(zip=(0, 404, None, b'Not Found')), 'No update for this build'),
+    (dict(zip=(0, 200, None, app_zip({**FOO, '.foo/q2-foo': b'\x7fELF evil'}))), "Download doesn't match the list"),
     (dict(zip=(28, 200, None, b'PK partial')), "Can't reach GitHub"),
     (dict(files={'INSTALL.txt': b'x', 'other/q2-foo': b'y'}), 'The download is not a usable app'),
     (dict(files={**FOO, '.foo/../x': b'up'}), 'The download is not a usable app'),
@@ -1996,9 +2181,9 @@ ROOM = 64 << 20  # left free beyond what a download or an unpack needs
     (dict(free=ROOM + (1 << 20), files={'.foo/q2-foo': bytes(8 << 20)}), 'Needs 7 MB more space'),  # nor for what it unpacks to
 ])
 def test_an_install_that_fails_says_why_and_leaves_the_card_alone(fw, case, said):
-    card = Disk(fw, {SOURCES: b'me/q2-foo Foo\n'})
+    card = Disk(fw, {SOURCES: on_card(b'me/q2-foo Foo\n')})
     card.unpack_fails = case.get('unpack', 0)
-    store_net(fw, case.get('files', FOO), **{k: v for k, v in case.items() if k in ('api', 'zip', 'size')})
+    store_net(fw, case.get('files', FOO), **{k: v for k, v in case.items() if k in ('list', 'zip', 'size')})
     s = Store(fw, card, wifi=0, free=case.get('free', 1 << 30))
     s.wifi = 1
     s.click()
@@ -2007,7 +2192,7 @@ def test_an_install_that_fails_says_why_and_leaves_the_card_alone(fw, case, said
 
 
 def test_rockbox_installs_on_a_second_press_keeping_its_config(fw):
-    card = Disk(fw, {SOURCES: b'x/q2-rockbox Rockbox\n', b'/mnt/mmc/.rockbox/config.cfg': b'mine'})
+    card = Disk(fw, {SOURCES: on_card(b'x/q2-rockbox Rockbox\n'), b'/mnt/mmc/.rockbox/config.cfg': b'mine'})
     store_net(fw, {'.rockbox/rockbox': b'bin', '.rockbox/config.cfg': b'defaults', '.rockbox/fonts/a.fnt': b'font'},
               listed=b'x/q2-rockbox Rockbox\n')
     s = Store(fw, card, wifi=0)
@@ -2022,11 +2207,11 @@ def test_rockbox_installs_on_a_second_press_keeping_its_config(fw):
 
 
 def test_the_themes_come_with_rockbox_and_go_before_it(fw):
-    card = Disk(fw, {SOURCES: b'x/q2-rockbox Rockbox\nx/q2-rockbox-themes Rockbox Themes\n',
+    card = Disk(fw, {SOURCES: on_card(b'x/q2-rockbox Rockbox\nx/q2-rockbox-themes Rockbox Themes\n'),
                      b'/mnt/mmc/.rockbox/rockbox': b'bin', b'/mnt/mmc/.rockbox/fonts/a.fnt': b'font',
                      b'/mnt/mmc/.q2/apps/rockbox.files': b'.rockbox/rockbox\n.rockbox/fonts/a.fnt\n',
                      b'/mnt/mmc/.q2/apps/rockbox.tag': b'2.0'})
-    store_net(fw, {'.rockbox/wps/a.wps': b'wps', '.rockbox/fonts/a.fnt': b'font'}, listed=card.files[SOURCES])
+    store_net(fw, {'.rockbox/wps/a.wps': b'wps', '.rockbox/fonts/a.fnt': b'font'}, listed=b'x/q2-rockbox Rockbox\nx/q2-rockbox-themes Rockbox Themes\n')
     s = Store(fw, card, wifi=0)
     assert s.labels() == ['Installed', 'Install']
     s.wifi = 1
@@ -2047,7 +2232,7 @@ def test_another_app_s_remove_leaves_rockbox_and_its_themes(fw):
     rockbox = {b'/mnt/mmc/.rockbox/rockbox': b'bin', b'/mnt/mmc/.rockbox/wps/a.wps': b'wps',
                b'/mnt/mmc/.q2/apps/rockbox.files': b'.rockbox/rockbox\n', b'/mnt/mmc/.q2/apps/rockbox.tag': b'2.0',
                b'/mnt/mmc/.q2/apps/themes.files': b'.rockbox/wps/a.wps\n', b'/mnt/mmc/.q2/apps/themes.tag': b'2.0'}
-    card = Disk(fw, {SOURCES: b'x/q2-rockbox Rockbox\nx/q2-rockbox-themes Rockbox Themes\nme/q2-foo Foo\n', **rockbox,
+    card = Disk(fw, {SOURCES: on_card(b'x/q2-rockbox Rockbox\nx/q2-rockbox-themes Rockbox Themes\nme/q2-foo Foo\n'), **rockbox,
                      FOO_APP: b'bin', b'/mnt/mmc/.q2/apps/foo.files': b'.foo/q2-foo\n', b'/mnt/mmc/.q2/apps/foo.tag': b'2.0'})
     s = Store(fw, card, wifi=0)
     assert s.labels() == ['Installed', 'Installed', 'Installed']
@@ -2059,7 +2244,7 @@ def test_another_app_s_remove_leaves_rockbox_and_its_themes(fw):
 
 
 def test_the_themes_pressed_once_rockbox_left_the_card_ask_for_it(fw):
-    card = Disk(fw, {SOURCES: b'x/q2-rockbox Rockbox\nx/q2-rockbox-themes Rockbox Themes\n', b'/mnt/mmc/.rockbox/rockbox': b'bin'})
+    card = Disk(fw, {SOURCES: on_card(b'x/q2-rockbox Rockbox\nx/q2-rockbox-themes Rockbox Themes\n'), b'/mnt/mmc/.rockbox/rockbox': b'bin'})
     s = Store(fw, card, wifi=0)
     assert len(s.labels()) == 2  # Rockbox and its themes
     del card.files[b'/mnt/mmc/.rockbox/rockbox']
@@ -2070,7 +2255,7 @@ def test_the_themes_pressed_once_rockbox_left_the_card_ask_for_it(fw):
 
 def test_spotify_installs_with_librespot_stopped_and_its_cache_kept(fw):
     kill = b'kill -9 $(cat /tmp/q2-librespot)'
-    card = Disk(fw, {SOURCES: b'x/q2-librespot Spotify\n', b'/mnt/mmc/.spotify/cache/x': b'mine', b'/mnt/mmc/.spotify/.cache-size': b'2G'})
+    card = Disk(fw, {SOURCES: on_card(b'x/q2-librespot Spotify\n'), b'/mnt/mmc/.spotify/cache/x': b'mine', b'/mnt/mmc/.spotify/.cache-size': b'2G'})
     store_net(fw, {'.spotify/librespot': b'bin', '.spotify/run': b'sh', '.spotify/cache/x': b'theirs', '.spotify/.cache-size': b'0'},
               listed=b'x/q2-librespot Spotify\n')
     s = Store(fw, card, wifi=0)
@@ -2093,7 +2278,7 @@ def test_spotify_installs_with_librespot_stopped_and_its_cache_kept(fw):
 
 
 def test_erasing_spotify_s_data_runs_as_a_job(fw):
-    card = Disk(fw, {SOURCES: b'x/q2-librespot Spotify\n', b'/mnt/mmc/.spotify/librespot': b'bin',
+    card = Disk(fw, {SOURCES: on_card(b'x/q2-librespot Spotify\n'), b'/mnt/mmc/.spotify/librespot': b'bin',
                      b'/mnt/mmc/.spotify/cache/x': b'mine', b'/mnt/mmc/.spotify/.cache-size': b'2G'})
     s = Store(fw, card, wifi=0)
     erase = fw.fn('shelf_erase', C.c_int, C.c_int)
@@ -2112,7 +2297,7 @@ def test_erasing_spotify_s_data_takes_the_add_on_s_logs_and_leaves_its_settings(
     user put there, and a spot.log elsewhere on the card is not Spotify's."""
     kept = [b'/mnt/mmc/.spotify/.quality', b'/mnt/mmc/.spotify/debug', b'/mnt/mmc/.spotify/librespot',
             b'/mnt/mmc/Music/spot.log']
-    card = Disk(fw, {SOURCES: b'x/q2-librespot Spotify\n', b'/mnt/mmc/.spotify/cache/credentials.json': b'{}',
+    card = Disk(fw, {SOURCES: on_card(b'x/q2-librespot Spotify\n'), b'/mnt/mmc/.spotify/cache/credentials.json': b'{}',
                      **dict.fromkeys(kept + SPOT_LOGS, b"Authenticated as 'me' !\n")})
     s = Store(fw, card, wifi=0)
     assert fw.fn('shelf_erase', C.c_int, C.c_int)(1) == 1 and s.run() == 0
@@ -2122,7 +2307,7 @@ def test_erasing_spotify_s_data_takes_the_add_on_s_logs_and_leaves_its_settings(
 def test_erasing_spotify_s_data_after_removing_spotify_leaves_no_folder(fw):
     """Remove takes only the files the add-on's zip listed, so the logs, cache/ and .cache-size stay after it;
     the erase must take every one of them for the folder to go."""
-    card = Disk(fw, {SOURCES: b'x/q2-librespot Spotify\n', b'/mnt/mmc/.spotify/cache/credentials.json': b'{}',
+    card = Disk(fw, {SOURCES: on_card(b'x/q2-librespot Spotify\n'), b'/mnt/mmc/.spotify/cache/credentials.json': b'{}',
                      **dict.fromkeys(SPOT_LOGS, b'log')})
     card.dirs.add(b'/mnt/mmc/.spotify')
     s = Store(fw, card, wifi=0)
@@ -2139,7 +2324,7 @@ def test_erase_while_checking_stops_the_check(fw):
 
 
 def test_a_job_that_can_t_start_says_so_and_the_row_stays(fw):
-    card = Disk(fw, {SOURCES: b'me/q2-foo Foo\n'})
+    card = Disk(fw, {SOURCES: on_card(b'me/q2-foo Foo\n')})
     s = Store(fw, card, wifi=0, thread=11)
     s.wifi = 1
     s.click()
