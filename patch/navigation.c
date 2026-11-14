@@ -3487,7 +3487,7 @@ static void pod_text(int i) {
         { 0 }, /* Coverflow Sort's from coverflow.c */
         { "Refresh Cover Flow" },
         { 0 }, /* EQ per Output: a switch */
-        { 0 }, /* Key Tone: a switch */
+        { 0 }, /* Key Tone: the Clicker's (clicker.c) */
         { 0 }, /* In-Vehicle Mode: a switch */
         { 0 }, /* Smart Wi-Fi: a switch */
         { 0 }, /* Enlarged Album Art: a switch */
@@ -3499,6 +3499,10 @@ static void pod_text(int i) {
         { "Library: Local Only", "Library: Local + Server" },
     };
     _Static_assert(sizeof names / sizeof *names == POD_COUNT, "a names entry per row");
+    if (i == POD_KEYTONE) { /* the Clicker, Key Tone's row */
+        widget_set_text_utf8(st.pod_label[i], clicker_text());
+        return;
+    }
     if (i == POD_CF_SORT) {
         char sort[48];
         tk_snprintf(sort, sizeof sort, "Cover Flow %s", coverflow_sort_name());
@@ -3506,7 +3510,6 @@ static void pod_text(int i) {
         return;
     }
     int v = i == POD_ARTISTS       ? I(artist_type, 0) == 1
-            : i == POD_KEYTONE     ? g_keytone_flag != 0
             : i == POD_CARMODE     ? g_carmode != 0
             : i == POD_COVERMODE   ? g_bigcovermode == 1
             : i == POD_FOLDERCOVER ? g_foldercover_flag != 0
@@ -3516,7 +3519,6 @@ static void pod_text(int i) {
                          : i == POD_RESUME         ? "Resume on Connect"
                          : i == POD_VOL_GUARD      ? "Volume Guard"
                          : i == POD_BT_LINK        ? "Control Device Volume"
-                         : i == POD_KEYTONE        ? "Key Tone"
                          : i == POD_CARMODE        ? "In-Vehicle Mode"
                          : i == POD_SMART_WIFI     ? "Smart Wi-Fi"
                          : i == POD_COVERMODE      ? "Enlarged Album Art"
@@ -3530,7 +3532,6 @@ static void pod_text(int i) {
     else
         row_value_text(st.pod_label[i], names[i][v]);
     /* Stock's rows, so stock's translations */
-    if (i == POD_KEYTONE) widget_set_tr_text(st.pod_label[i], "system_keytone");
     if (i == POD_CARMODE) widget_set_tr_text(st.pod_label[i], "system_carmode");
     if (i == POD_COVERMODE) widget_set_tr_text(st.pod_label[i], "playset_covermode");
     if (i == POD_FOLDERCOVER) widget_set_tr_text(st.pod_label[i], "playset_foldercover");
@@ -3554,12 +3555,7 @@ static int pod_click(void *ctx, void *event) {
         I(artist_type, 0) = v;
         write_int_config(v, "PLAYSET", "ARTISTTYPE");
     } else if (i == POD_KEYTONE) {
-        g_keytone_flag = !g_keytone_flag;
-        write_int_config(g_keytone_flag, "SYSSET", "KEYTONE");
-        /* Click With Headphones, built just after this row on Controls, shows while it is on. */
-        void *item = P(P(st.setting_label[9], W_PARENT), W_PARENT);
-        widget_set_visible(item, g_keytone_flag != 0, 0);
-        widget_layout(P(item, W_PARENT));
+        clicker_step(); /* the Clicker's next value; Off is Key Tone off */
     } else if (i == POD_CARMODE) {
         g_carmode = !g_carmode;
         write_int_config(g_carmode, "SYSSET", "CARMODE");
@@ -6842,9 +6838,12 @@ static void setting_text(int i) {
         row_label(st.setting_label[i], text);
         return;
     }
-    static const char *const toggles[] = { "Rounded Corners",       0,
-                                           "Smart Awake",           "Centred Now Playing",
-                                           "Click With Headphones", "Single Press Scrub",
+    static const char *const toggles[] = { "Rounded Corners",
+                                           0,
+                                           "Smart Awake",
+                                           "Centred Now Playing",
+                                           0 /* 9: the Clicker's, no row */,
+                                           "Single Press Scrub",
                                            "Time in Title" };
     if (i == 5 || i >= 7) {
         list_toggle(st.setting_label[i], toggles[i - 5], *setting_values[i]);
@@ -7235,9 +7234,7 @@ int ringnav_display(void *win, void *ctx) {
     wheel_row(list_row_into(view, "system_display", xfade_open, (void *)1));
     pod_rows(win, "scroll_view_display", POD_HOLD_HOME, 1, hold_icon);
     setting_row(view, 10);
-    pod_rows(win, "scroll_view_display", POD_KEYTONE, 1, tone_icon);
-    setting_row(view, 9); /* Click With Headphones shows while Key Tone is on */
-    widget_set_visible(P(P(st.setting_label[9], W_PARENT), W_PARENT), g_keytone_flag != 0, 0);
+    pod_rows(win, "scroll_view_display", POD_KEYTONE, 1, tone_icon); /* the Clicker */
     widget_set_tr_text(list_row_into(view, "system_keylock", keylock_open, 0), "system_keylock");
     pod_rows(win, "scroll_view_display", POD_WAKE, 1, lock_icon);
     pod_rows(win, "scroll_view_display", POD_VOL_GUARD, 1, lock_icon);
@@ -10699,15 +10696,16 @@ int ringnav_wm_paint(void *wm) {
     return paint ? paint(wm) : away ? 0 : 0x10; /* RET_BAD_PARAMS, as stock */
 }
 
-/* buzzeer_switch (0x4fe3f8), every Key Tone click, stock's and ringnav()'s: the MCU's buzzer
- * (system("cmd_mcu write_str buzzer") when g_keytone_flag is set). Silent while headphones (either
- * jack) or a Bluetooth or USB output listen, since the buzzer is the device's own speaker;
- * hciplayer holds their PCM, so the click has no other way out. Playback alone leaves it clicking.
- * Click With Headphones (IPOD KEYTONEHP, off) keeps the buzzer clicking there too, as stock does;
- * Key Tone off is still silent.
+/* buzzeer_switch (0x4fe3f8), every Key Tone click, stock's and ringnav()'s: the Clicker's route
+ * (clicker.c, docs/internals.md#key-tone). The buzzer is the MCU's (system("cmd_mcu write_str
+ * buzzer") when g_keytone_flag is set), the device's own speaker, so Speaker keeps it silent while
+ * headphones (either jack) or a Bluetooth or USB output listen; Headphones sends the click to
+ * q2player to mix into what plays, and has the buzzer only while nothing is mixed; Both has both,
+ * the buzzer whatever listens. Off (Key Tone off) is silent. clicker_kind names the sound: a
+ * wheel's, unless ringnav_keydown marked a button's.
  * The command waits out the buzzer and the MCU's park (tools/mcu_pwm_clock.c), so it runs on a
- * worker, not the UI thread; a click while one sounds is dropped, as the buzzer is busy anyway.
- * With the screen off a pass clicks once (tone_dark; ringnav_sleep).
+ * worker, not the UI thread; a buzzer click while one sounds is dropped, as the buzzer is busy
+ * anyway. With the screen off a pass clicks once (tone_dark; ringnav_sleep).
  */
 static volatile int tone_busy;
 static void *tone_worker(void *on) {
@@ -10717,8 +10715,10 @@ static void *tone_worker(void *on) {
 }
 int ringnav_buzzer(int on) {
     int listening = g_po_status || g_bal_status || mclGetOutputWay();
-    if ((listening && (accent(), !st.keytone_hp)) || !g_keytone_flag || tone_busy || tone_dark)
-        return 0;
+    if (!g_keytone_flag || tone_dark) return 0;
+    int route = clicker_route(listening);
+    if (route & ROUTE_MIXED) tone_dark = !g_backlight_status;
+    if (!(route & ROUTE_BUZZER) || tone_busy) return 0;
     unsigned long tid;
     tone_busy = 1;
     if (pthread_create(&tid, 0, tone_worker, (void *)(long)on)) {
@@ -10751,7 +10751,10 @@ int ringnav_keydown(void *ctx, void *event) {
         if (s.n) st.tone_key = key;
     }
     if (st.tone_key) g_keytone_flag = 0;
+    if (key != KEY_PREV && key != KEY_NEXT)
+        clicker_kind = CLICK_KIND_BUTTON; /* stock's click is a button's */
     int result = stock_keydown_trampoline(ctx, event);
+    clicker_kind = 0; /* a wheel's again */
     if (st.tone_key) g_keytone_flag = tone;
     /* Coverflow moves on release; stop the press before it navigates the focused list below. */
     if (!result && (key == KEY_PREV || key == KEY_NEXT) && top &&

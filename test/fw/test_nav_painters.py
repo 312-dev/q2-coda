@@ -2196,21 +2196,22 @@ def test_scan_song_durations_turned_off_cancels_a_pass(fw):
     assert settings.written == [('SCANDURATIONS', 0)] and state.cancel and not state.due
 
 
-@pytest.mark.parametrize('was', [0, 1])
-def test_key_tone_shows_click_with_headphones_while_on(fw, st, scratch, was):
-    ui, win, view, settings, _ = settings_page(fw, MINIMAL, 'controls_page', 'scroll_view_controls')
-    g(fw, 'g_keytone_flag', was)
+# The Clicker, Key Tone's row (patch/clicker.c): Speaker, Headphones, Both, Off and round; Off is Key Tone off
+# (stock's byte and SYSSET KEYTONE), the others IPOD CLICKER (0 Both, 1 Speaker, 2 Headphones).
+@pytest.mark.parametrize('tone, clicker, now, then, written', [
+    (1, b'1', 'Speaker', 'Headphones', [('CLICKER', 2)]), (1, b'2', 'Headphones', 'Both', [('CLICKER', 0)]),
+    (1, b'0', 'Both', 'Off', [('KEYTONE', 0)]), (0, b'0', 'Off', 'Speaker', [('KEYTONE', 1), ('CLICKER', 1)]),
+    (0, b'1', 'Off', 'Speaker', [('KEYTONE', 1)]), (1, None, 'Both', 'Off', [('KEYTONE', 0)]),
+])
+def test_the_clicker_row_cycles_and_saves(fw, tone, clicker, now, then, written):
+    ui, win, view, settings, _ = settings_page(fw, MINIMAL, 'controls_page', 'scroll_view_controls', **({'CLICKER': clicker} if clicker else {}))
+    g(fw, 'g_keytone_flag', tone)
     pod_rows(fw, win, 'scroll_view_controls', POD['POD_KEYTONE'], 1)
-    item = ui.add('list_item', view, (0, 0, 375, 70), 'click_hp')
-    button = ui.add('button', item, (20, 0, 335, 70))
-    hp = ui.add('hscroll_label', button, (72, 0, 260, 70))
-    slot = scratch['setting_label'] + SETTING['SETTING_KEYTONEHP'] * C.sizeof(C.c_void_p)  # Click With Headphones' label
-    C.c_void_p.from_address(C.addressof(fw.var('st', C.c_char)) + slot).value = hp.addr
-    tone = view.children[0]
-    assert switch(tone) == ('switch_on' if was else 'switch_off')
-    click(ui, tone)
-    assert g(fw, 'g_keytone_flag') == (not was) and item.visible == (not was)
-    assert settings.written == [('KEYTONE', int(not was))] and [c[1][0] for c in fw.calls('widget_layout')] == [view.addr]
+    row = view.children[0]
+    assert ui.text(label_of(row)) == f'Clicker: {now}'
+    click(ui, row)
+    assert ui.text(label_of(row)) == f'Clicker: {then}' and g(fw, 'g_keytone_flag') == (then != 'Off')
+    assert settings.written == written
 
 
 @pytest.mark.parametrize('on', [1, 0])

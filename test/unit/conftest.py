@@ -28,7 +28,7 @@ if 'MUTANT_UNDER_TEST' in os.environ:
     threading.stack_size(1 << 20)
 sys.path.insert(0, str(ROOT))
 # build first: the others import it, or each other in this order, while they load.
-for name in ('build', 'signing', 'shelf', 'module_elf', 'rotator', 'ipod', 'theme', 'art', 'peq', 'aic', 'flac', 'mcu_park', 'pwm', 'q2remote', 'release', 'rebase', 'lastfm_key'):
+for name in ('build', 'signing', 'shelf', 'module_elf', 'rotator', 'ipod', 'theme', 'art', 'peq', 'aic', 'flac', 'mcu_park', 'pwm', 'q2remote', 'release', 'rebase', 'lastfm_key', 'player'):
     sys.modules[name] = importlib.import_module('tools.' + name)
 
 # The compilers a test may run, and openssl, which tools/signing.py signs and checks with in files

@@ -234,6 +234,7 @@ HELPER_LIBS = ['lib/libc-2.28.so', 'lib/libpthread-2.28.so', 'usr/lib/libasound.
 # ends the loop, so the watchdog reboots as stock's would. Wi-Fi is off while Rockbox runs (WIFI_OFF).
 BOOT = 'usr/bin/q2boot'
 REMOTE = 'usr/bin/q2remote'
+PLAYER_STOCK_DIR = b'usr/lib/hciplayer-stock'  # --new-player: hciplayer.xz's place, player/main.c's STOCK_XZ
 S90PLAY = 'etc/init.d/S90play'
 ROCKBOX_FLAG = '/tmp/q2pod-rockbox'
 # Rockbox can't use Wi-Fi and the radio costs battery, so rockbox() below stops it. Nothing is saved or restored
@@ -1271,7 +1272,8 @@ def source_sha256():
     manual = [ROOT/'docs/manual'/f for f in ('build.py', 'guide.html')]
     for path in sorted([*(p for p in ROOT.glob('assets/**/*') if p.is_file()), *(p for p in ROOT.glob('patch/**/*') if p.is_file()),
                         *ROOT.glob('tools/*.py'), *ROOT.glob('tools/*.c'),
-                        *ROOT.glob('tools/*.h'), *ROOT.glob('tools/*.S'), *manual]):
+                        *ROOT.glob('tools/*.h'), *ROOT.glob('tools/*.S'), *ROOT.glob('player/*.[ch]'),
+                        *ROOT.glob('player/Makefile'), *manual]):
         h.update(str(path.relative_to(ROOT)).encode() + b'\0')
         h.update(path.read_bytes())
     return h.hexdigest()
@@ -1851,7 +1853,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
          '-fno-stack-protector','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
          '-Oz','-Wall','-Wextra','-Werror','-Wno-unused-parameter']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c']
 
 def compile_payload(out):  # pragma: no mutate block
     """Compile and link the payload."""
@@ -2030,7 +2032,7 @@ def signing_key(path, dev):
     check(path.is_file(), f'{path}: no release public key (docs/releasing.md#signing-a-release)')
     return public_key(path.read_bytes())
 
-def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, flac_experiments='sync,lpc,output', signing_pub=None):  # pragma: no mutate block
+def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, flac_experiments='sync,lpc,output', signing_pub=None, new_player=False):  # pragma: no mutate block
     from flac import selection
     flac_experiments = selection(flac_experiments)
     # Kernel-module experiments: no measured saving (docs/clock-gating.md, pwm-clock-gating.md,
@@ -2039,6 +2041,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(not rotator_lazy_clock or dev, '--rotator-lazy-clock requires --dev')
     check(not pwm_idle_clock or dev, '--pwm-idle-clock requires --dev')
     check(not mcu_idle_sleep or (dev and pwm_idle_clock), '--mcu-idle-sleep requires --dev --pwm-idle-clock')
+    # The new player (docs/player-plan.md): in a --dev build only until it replaces hciplayer
+    check(not new_player or dev, '--new-player requires --dev')
     check(dev or version_ok(VERSION, BETA), f'VERSION must be three single digits (x.y.z) and BETA 0-9: {VERSION}, {BETA}')
     version = TAG
     check(re.fullmatch(r'[A-Za-z0-9-]+/[A-Za-z0-9._-]+', repo), f'{repo}: not a GitHub owner/name')  # a C string
@@ -2403,7 +2407,29 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     # Light Mode's splash: the default logo inverted. A custom --logo has no twin, so it shows either way.
     light = logo_data == (ROOT/'assets/boot-logo.jpg').read_bytes() and (ROOT/'assets/boot-logo-light.jpg').read_bytes()
     check(not light or jpeg_size(light) == (320, 375), 'Light logo must be 320x375 like the stock splash')
-    for path, src in ((b'release/bin/demo', out/'demo'), (b'usr/bin/hciplayer', out/'peq/hciplayer'),
+    q2player, player_added = None, []
+    if new_player:
+        # q2player at /usr/bin/hciplayer, and the patched hciplayer, which it runs while /mnt/data/q2player is
+        # absent, xz-compressed at STOCK_XZ (player/main.c), which unpacks it to /tmp/hciplayer-stock/hciplayer: a
+        # directory of its own, so its file and process name stay "hciplayer" for demo's killall. Compressed, it takes
+        # 1.27 MB less of the root filesystem, the room q2player and its TLS need (docs/player-plan.md#risks); the
+        # check is CRC32, which every xz decoder takes. q2player is linked against this image's own libasound.
+        import lzma
+        from player import build as build_player
+        stock_xz = out/'peq/hciplayer.xz'
+        stock_xz.write_bytes(lzma.compress((out/'peq/hciplayer').read_bytes(), format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC32,
+                                           preset=9 | lzma.PRESET_EXTREME))
+        alsa = out/'player-alsa/libasound.so.2.0.0'
+        alsa.parent.mkdir(exist_ok=True)
+        alsa.write_bytes(cat('usr/lib/libasound.so.2.0.0'))
+        q2player = build_player('mips', alsa=alsa)
+        stock_dir = need(re.search(rb'^usr/lib D (\d+) (\d+) (\d+) (\d+)$', p, re.M), 'Missing usr/lib pseudo inode')
+        hci = need(inode(p, b'usr/bin/hciplayer'), 'Missing usr/bin/hciplayer pseudo inode')
+        # p is the definitions alone (pseudo_data, after them, goes back on unchanged): these two follow them
+        p = (p + PLAYER_STOCK_DIR + b' D ' + b' '.join(stock_dir.groups()) + b'\n' + PLAYER_STOCK_DIR + b'/hciplayer.xz F ' +
+             b' '.join(hci.groups()) + b' cat ' + shlex.quote(str(stock_xz)).encode() + b'\n')
+        player_added = [[PLAYER_STOCK_DIR, b'D', *stock_dir.groups()], [PLAYER_STOCK_DIR + b'/hciplayer.xz', b'R', *hci.groups()]]
+    for path, src in ((b'release/bin/demo', out/'demo'), (b'usr/bin/hciplayer', q2player or out/'peq/hciplayer'),
                       (BLUEALSA.encode(), out/'bluealsa'), (WATCHDOG.encode(), out/'watchdog'),
                       (S90PLAY.encode(), out/'S90play'), (S11LOGO.encode(), out/'S11logo'),
                       (BLUEALSA2.encode(), out/'bluealsa2'), (DEFAULT_CONFIG.encode(), out/'config.ini'),
@@ -2466,7 +2492,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     icons['default_album_home.png'] = ('default_album_big.png', art)
     icons['default_album_flow.png'] = ('default_album_big.png', sized_art(art, 160))
     pages = {ui+PLAYING_STOCK: (ui+'playing_page.bin', english_ui(PLAYING_PAGE, playing_stock(cat(ui+'playing_page.bin')))), **set_pages}
-    added = []
+    added = list(player_added)
     changed_assets = {}
     from art import theme_images
     drawn = {xx+n+'.png': (xx+'list_tidal.png', d) for n, d in theme_images(builtin_themes()).items()}
@@ -2559,7 +2585,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
           'Repacked rootfs metadata differs from stock')
     blobs['recovery-update/rootfs.squashfs'] = newsq.read_bytes()
     # Stock image proves this size fits; do not enlarge beyond its padded size.
-    check(len(blobs['recovery-update/rootfs.squashfs']) <= sq.stat().st_size, 'Repacked rootfs exceeds stock size')
+    size, room = len(blobs['recovery-update/rootfs.squashfs']), sq.stat().st_size  # 50,688,000 bytes for V1.36
+    check(size <= room, f'Repacked rootfs is {size:,} bytes, {size - room:,} over the {room:,} the stock image holds'
+          + (' (--new-player adds q2player beside hciplayer: make room or build without it)' if new_player else ''))
     blobs['firmware_v20.info'] = (f'Shanling Q2\n{version}\n'+''.join(
         hashlib.md5(blobs[n]).hexdigest()+'  '+n+'\n' for n in [
             'recovery-update/xImage','recovery-update/rootfs.squashfs'])).encode()
@@ -2576,6 +2604,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         audio_extension_calls=[dict(address=hex(a), original='0x0320f809', replacement=hex(jal(ps['ringnav_audio_extension']))) for a in AUDIO_EXTENSION_CALLS],
         version=version, dev=dev, update_repo=repo, signing_key=key.hex(), peq=audio, bluealsa_sha256=sha(bluealsa), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
         **({'rotator_clock': rotator} if rotator else {}),
+        **({'q2player_sha256': sha(q2player.read_bytes()), 'rootfs_bytes': size} if q2player else {}),
         **({'pwm_clock': pwm} if pwm else {}),
         patch_symbols={n:hex(v) for n,v in ps.items() if n.startswith('stock_')},
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']} |
@@ -2603,10 +2632,12 @@ if __name__ == '__main__':
                     help='experimental: sleep the stopped PCM notifier until start or teardown (requires --dev)')
     ap.add_argument('--rotator-lazy-clock', action='store_true',
                     help='experimental: defer the rotator clock until its first conversion (requires --dev)')
+    ap.add_argument('--new-player', action='store_true',
+                    help='install q2player as /usr/bin/hciplayer, falling back to hciplayer unless /mnt/data/q2player exists (requires --dev)')
     ap.add_argument('--pwm-idle-clock', action='store_true',
                     help='experimental: cooperative Linux/MCU PWM clock gating (requires --dev)')
     a=ap.parse_args()
     try:
-        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.flac_experiments,a.signing_key)
+        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.flac_experiments,a.signing_key,a.new_player)
     except (OSError, ValueError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
         ap.error(str(exc))
