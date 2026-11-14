@@ -1416,10 +1416,24 @@ static void *rows_view(void *parent, int y, int w, int h, int n, int item_h) {
     return view;
 }
 
+/* view's list box (rows_view's) cut to the whole item rows that end by list_fit_end on screen, as
+ * tools/ipod.py fit_rows cuts stock's lists, so under a list_fit set (OLED's) no row runs under the
+ * bottom corners' glass. Elsewhere, or with the rows already above it, it stays as it is. */
+static void fit_view(void *view, int item) {
+    void *lv = P(view, W_PARENT), *wm = window_manager();
+    int end = list_fit_end(), y = 0;
+    if (!end || item <= 0) return;
+    for (void *w = lv; w && w != wm; w = P(w, W_PARENT)) y += I(w, W_Y);
+    int h = (end - y) - (end - y) % item;
+    if (h <= 0 || I(lv, W_H) <= h) return;
+    widget_resize(lv, I(lv, W_W), h);
+    widget_resize(view, I(view, W_W), h);
+}
+
 /* The peq_ui.c page: a title bar (*title, unless 0: its caller writes it again, so it stays on
  * show) over n item_h rows (page_h) in body, down to the page's bottom (the last row's selection
- * meets the screen's edge) or shrunk so the list's white background never shows below a short list.
- * Shared with photos.c. */
+ * meets the screen's edge) or shrunk so the list's white background never shows below a short list;
+ * under a list_fit set, to its last whole row above the glass (fit_view). Shared with photos.c. */
 void *page_list(void *page, void *body, void **title, const char *caption, int n, int item_h) {
     int h = widget_get_prop_int(page, "h", client_h());
     item_h = page_h(item_h);
@@ -1428,6 +1442,7 @@ void *page_list(void *page, void *body, void **title, const char *caption, int n
     void *t = page_title(body, caption, title ? TITLE_ON_SHOW : n);
     if (title) *title = t;
     void *view = rows_view(body, I(t, W_H), 375, h - I(t, W_H), n, item_h);
+    fit_view(view, item_h);
     if (!theme()->page_title_h) bar_title_sync(page);
     widget_invalidate_force(page, 0);
     return view;
@@ -3420,6 +3435,7 @@ static int to_tracks(const void *unused) {
             widget_set_visible(cf.title, 0, 0);
             widget_move_resize(lv, 0, 0, I(lv, W_W), h);
             widget_move_resize(view, 0, 0, I(view, W_W), h);
+            fit_view(view, page_h(48));
         }
         for (int i = 0; i < n; ++i) {
             void *row = page_row_detail(
