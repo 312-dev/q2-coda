@@ -2083,6 +2083,52 @@ def test_quick_settings_wheel_waits_while_it_slides(fw, keys, state, timer, visi
     assert keys(KEY_NEXT) == STOP and slider.ints[b'value'] == 50
 
 
+def oled_quick_window(fw, ui, gain='drop_highgain'):
+    """OLED's Quick Settings open: its slider and a button for each row after Brightness."""
+    Config(fw, THEME=b'3', QSVOLUME=b'1')  # the wheel's volume mode is not OLED's
+    fw.var('fw_ctx_g_dropdown_menu_state', C.c_int).value = 3
+    slider = quick_window(ui)
+    for name, image in (('img_wifiswitch', 'drop_wifi'), ('img_btswitch', 'drop_bt'), ('img_lock', 'drop_keylock'),
+                        ('img_gain', gain), ('img_po', 'drop_po'), ('img_usbmode', 'drop_usbaudio')):
+        slider.parent.add(W(ui, 'image', name)).strs[b'image'] = image.encode()
+    return slider.parent, slider
+
+
+def test_oled_s_quick_settings_wheel_walks_its_rows(fw, keys):
+    """The wheel walks the rows, past a disabled one (Gain under Line Out), and stops at the ends."""
+    ui = Ui(fw)
+    top, slider = oled_quick_window(fw, ui, gain='drop_highgaindisable')
+    rows = []
+    for key in [KEY_NEXT] * 7 + [KEY_PREV] * 7:
+        assert keys(key) == STOP
+        rows.append(top.ints[b'_qs_row'])
+    assert rows == [1, 2, 3, 5, 6, 6, 6, 5, 3, 2, 1, 0, 0, 0] and slider.ints[b'value'] == 50
+
+
+def test_centre_on_oled_s_brightness_gives_the_wheel_to_its_slider_until_centre_or_return(fw, keys):
+    ui = Ui(fw)
+    top, slider = oled_quick_window(fw, ui)
+    for key, adjust, value in ((KEY_CENTER, 1, 50), (KEY_NEXT, 1, 51), (KEY_NEXT, 1, 52), (KEY_RETURN, 0, 52),
+                               (KEY_CENTER, 1, 52), (KEY_PREV, 1, 51), (KEY_CENTER, 0, 51)):
+        assert keys(key) == STOP
+        assert (top.ints.get(b'_qs_adjust', 0), slider.ints[b'value'], top.ints.get(b'_qs_row', 0)) == (adjust, value, 0)
+    assert not fw.calls('dialog_quit')
+    keys(KEY_RETURN)  # back on the rows, Return closes it
+    assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p]
+
+
+@pytest.mark.parametrize('rows, clicked', [(3, [(b'img_lock', EVT_CLICK)]), (4, [])])
+def test_centre_on_an_oled_quick_settings_row_clicks_its_button(fw, keys, rows, clicked):
+    """Centre acts in place as a tap on the row does; a disabled row's does nothing."""
+    ui = Ui(fw)
+    top, _ = oled_quick_window(fw, ui)
+    top.ints[b'_qs_row'] = rows
+    if not clicked:
+        top.find(b'img_gain').strs[b'image'] = b'drop_highgaindisable'
+    assert keys(KEY_CENTER) == STOP
+    assert ui.clicks == clicked and not fw.calls('dialog_quit')
+
+
 def test_quick_settings_wheel_as_volume_is_stocks(fw, keys):
     Config(fw, QSVOLUME=b'1')
     ui = Ui(fw)

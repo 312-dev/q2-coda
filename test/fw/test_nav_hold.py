@@ -2126,6 +2126,19 @@ def test_a_hold_in_quick_settings_switches_the_wheel(fw, ui, st):
     assert not fw.calls('stock_keylong_trampoline')
 
 
+def test_oled_s_quick_settings_keeps_the_wheel_on_its_rows_through_a_hold(fw, ui):
+    """OLED's wheel walks its rows (navigation.c quick_walk): a held Play/Pause there is stock's, as on any page."""
+    def config(path, section, key, out, default, *_):
+        value = b'3' if C.string_at(key) == b'THEME' else C.string_at(default)  # IPOD THEME 3, OLED
+        C.memmove(out, value + b'\0', len(value) + 1)
+    fw.mock('toolsReadConfig', config)
+    ui.window('statusbar_dialog')
+    event = C.create_string_buffer(0x40)
+    struct.pack_into('<i', event, EVENT_KEY, KEY_PLAY)
+    fw.fn('ringnav_keylong', C.c_int, C.c_void_p, C.c_void_p)(None, event)
+    assert not fw.calls('write_int_config') and fw.calls('stock_keylong_trampoline')
+
+
 def test_a_hold_in_quick_settings_names_the_wheel_in_a_toast(fw, ui):
     ui.window('statusbar_dialog')
     keylong = fw.fn('ringnav_keylong', C.c_int, C.c_void_p, C.c_void_p)
