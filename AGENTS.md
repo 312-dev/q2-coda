@@ -45,6 +45,10 @@ Read [docs/architecture.md](docs/architecture.md) first (20 minutes: the payload
 | The hardware                              |                                                                                                                          | [hardware](docs/hardware.md)                                                                                                                                                                                                                          |
 | Known costs and fragile spots             |                                                                                                                          | [inefficiencies](docs/inefficiencies.md)                                                                                                                                                                                                              |
 
+## Plans
+
+Work planned but not built: [docs/backlog.md](docs/backlog.md) (the ordered list), [docs/oled-design.md](docs/oled-design.md) (the OLED theme), [docs/server-library.md](docs/server-library.md) (server songs in the Library).
+
 ## Commands
 
 Security scan (code, secrets, dependencies, firmware): `python3 tools/scan.py`, see [docs/building.md](docs/building.md#security-scan).
