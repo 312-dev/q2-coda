@@ -27,13 +27,15 @@
 #define SP_TRACK_LIGHT 0xd9d9d9
 
 static struct {
-    void *win, *slider, *value, *nav, *sw;
+    void *slider, *value, *nav, *sw;
     unsigned char kind; /* SLIDER_* */
 } sp __attribute__((section(".scratch")));
+/* the open slider page's window, which ringnav_paint compares before calling slider_page_paint */
+void *slider_page_win __attribute__((section(".scratch")));
 
 static int sp_gone(void *win, void *event) {
     (void)event;
-    if (win == sp.win) sp.win = sp.slider = sp.value = sp.nav = sp.sw = (void *)0;
+    if (win == slider_page_win) slider_page_win = sp.slider = sp.value = sp.nav = sp.sw = (void *)0;
     return 0;
 }
 
@@ -57,7 +59,7 @@ void slider_page_open(void *win, void *s, unsigned kind) {
     char key[STYLE_KEY];
     int top = geom_val(V_BAR), view_y = kind == SLIDER_BOOT ? SP_ROW : 0;
     void *view = P(s, W_PARENT), *c;
-    sp.win = win, sp.slider = s, sp.kind = (unsigned char)kind, sp.value = sp.sw = (void *)0;
+    slider_page_win = win, sp.slider = s, sp.kind = (unsigned char)kind, sp.value = sp.sw = (void *)0;
     widget_on(win, EVT_DESTROY, sp_gone, win);
     widget_move_resize(view, 0, view_y, 375, client_h() - view_y);
     /* the slider's box on the track, a knob's height either side for a finger; stock's own bar
@@ -93,7 +95,7 @@ void slider_page_open(void *win, void *s, unsigned kind) {
  * nothing (navigation.c slider_tray_dirty, for crossfade.c's switch). */
 void slider_page_dirty(void *page) {
     rect_t row = { 0, 0, 375, SP_ROW };
-    if (page && page == sp.win) widget_invalidate_force(page, &row);
+    if (page && page == slider_page_win) widget_invalidate_force(page, &row);
 }
 
 /* A pill (a rounded rectangle whose radius is half its height) on vg. */
@@ -129,7 +131,7 @@ static unsigned wide(unsigned *out, unsigned n, const char *s) {
 /* ringnav_paint, after the window's children: the switch row, the value, the track and the range
  * ends, in the window's coordinates. */
 void slider_page_paint(void *w, void *canvas) {
-    if (!w || w != sp.win || !P(canvas, CANVAS_LCD)) return;
+    if (!w || w != slider_page_win || !P(canvas, CANVAS_LCD)) return;
     static const char *const faces[] = FONT_NAMES;
     const scheme_t *S = scheme();
     void *lcd = P(canvas, CANVAS_LCD), *vg = canvas_get_vgcanvas(canvas);

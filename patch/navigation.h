@@ -457,6 +457,7 @@ void chevron_muted(void *w, void *canvas, int right, int y);
  * after its children */
 void slider_page_open(void *win, void *s, unsigned kind);
 void slider_page_paint(void *w, void *canvas);
+extern void *slider_page_win; /* the page slider_page_paint draws */
 void slider_page_dirty(void *page); /* its switch row, after a change of the hidden switch */
 
 /* wifi_rows.c: a set_switch theme's Wi-Fi page, from ipod_list_layout and paint_into */
