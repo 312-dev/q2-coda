@@ -1024,7 +1024,8 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
   to the strip. Return on the results, or on the strip with no text or no match, closes Search. With text and no
   match, "No results" stands in the list's place. By touch, a tap on a letter types it and a drag along the strip
   moves the alphabet a letter per 17 px; a tap on a result opens or plays it, and a drag up or down the results
-  scrolls them a row per 32 px.
+  scrolls them a row per 32 px. Each tick along the strip clicks as a list's row change does, and Centre, Next and
+  Previous click as a button does, through the Clicker setting.
 - <a id="keyboard"></a>**The keyboard.** The keyboard other text boxes open (New Playlist, Rename, the Wi-Fi password)
   keeps stock's layout and labels on the page's black: each key a `#1C1C1E` box with 8 px corners, every one inside
   the glass's corners (`patch/keyboard.c`, the same `list.entry.ipod`). The wheel walks the keys of the page showing,

@@ -146,6 +146,8 @@ int search_strip_key(void *top, unsigned key) {
     int wheel = key == KEY_NEXT ? 1 : key == KEY_PREV ? -1 : 0;
     if (ss.focus && (key == KEY_FWD_BTN || key == KEY_BACK_BTN || (wheel < 0 && !ss.sel)))
         ss.focus = 0, wheel = 0; /* back to the strip; a button still types */
+    if (ss.focus && !wheel && key != KEY_CENTER && key != KEY_RETURN)
+        return 0; /* Play/Pause, on the results too */
     if (ss.focus) {
         if (wheel && ss.sel + wheel >= 0 && ss.sel + wheel < ss.nmatch) ss.sel += wheel;
         if (ss.sel < ss.top) ss.top = ss.sel;
@@ -165,6 +167,8 @@ int search_strip_key(void *top, unsigned key) {
     else if (key != KEY_PREV && key != KEY_NEXT)
         return 0;
     if (ss.sheet) widget_invalidate_force(ss.sheet, (void *)0);
+    /* stock's key-up clears the click latch, and ringnav skips it: the next press clicks */
+    *(volatile signed char *)KEY_TONE_LATCH = 0;
     return 1;
 }
 

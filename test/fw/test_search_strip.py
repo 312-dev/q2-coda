@@ -247,3 +247,15 @@ def test_a_tap_below_the_results_does_nothing(fw, ui, song):
     s.type('joy')
     s.touch(100, 4 * 32 + 10)
     assert not ui.played and not ui.went and s.ss.focus == 0
+
+
+def test_a_key_the_strip_takes_frees_stock_s_click_latch(fw, ui, song):
+    """ringnav returns before stock's key-up, which is what clears the latch its key-down sets after a click: left
+    set, every later press on the strip was silent (docs/internals.md#ipod-row-clicks)."""
+    s = Strip(fw, ui, library(song))
+    latch = C.c_byte.from_address(O['KEY_TONE_LATCH'])
+    for key in (KEY_NEXT, KEY_CENTER, KEY_FWD_BTN, KEY_BACK_BTN, KEY_RETURN):
+        latch.value = 1
+        assert s.key(key) == [1] and latch.value == 0
+    latch.value = 1
+    assert s.key(KEY_PLAY) == [0] and latch.value == 1  # stock's key-up clears it for a key that goes on
