@@ -43,6 +43,10 @@ SOURCES = {
                 'a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6'),
     'busybox': ('1.38.0', 'https://busybox.net/downloads/busybox-1.38.0.tar.bz2',
                 '34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2'),
+    'libnl': ('3.5.0', 'https://github.com/thom311/libnl/releases/download/libnl3_5_0/libnl-3.5.0.tar.gz',
+              '352133ec9545da76f77e70ccb48c9d7e5324d67f6474744647a7ed382b5e05fa'),
+    'wpa_supplicant': ('2.12', 'https://w1.fi/releases/wpa_supplicant-2.12.tar.gz',
+                       '08e23937e16d0155e55cab2b51f51fbe10d80a1aa91c4e15442645059b737ef6'),
     'sqlite': ('3.54.1', 'https://www.sqlite.org/2026/sqlite-autoconf-3540100.tar.gz',
                '926ef8d3eab93fbf6e06011901273eec076b25594a4e1cdadd50c987f4f6d64e'),
     'libpng': ('1.2.59', 'https://download.sourceforge.net/libpng/libpng-1.2.59.tar.xz',
@@ -251,6 +255,78 @@ def build_libpng(src, stage, env, log):
     autotools(src, stage, env, log)
 
 
+def build_libnl(src, stage, env, log):
+    # Only to compile and link wpa_supplicant against: the rootfs keeps stock's libnl 3 (the same
+    # sonames, libnl-3.so.200 and libnl-genl-3.so.200; check_abi confirms stock's provides every import).
+    run('./configure', f'--host={env.host}', '--prefix=/usr', '--disable-static', '--disable-cli', '--disable-debug',
+        # configure insists on flex and bison, which only libnl-route's grammars (not built) use
+        cwd=src, env=dict(env.vars, FLEX='flex', YACC='bison -y'), log=log)
+    run('make', f'-j{JOBS}', 'lib/libnl-3.la', 'lib/libnl-genl-3.la', cwd=src, env=env.vars, log=log)
+    (stage/'usr/lib').mkdir(parents=True)
+    shutil.copytree(src/'include/netlink', stage/'usr/include/libnl3/netlink')
+    for so in ('libnl-3.so', 'libnl-genl-3.so'):
+        real = sorted((src/'lib/.libs').glob(so + '.200.*'))[0]
+        shutil.copy(real, stage/'usr/lib'/(so + '.200'))
+        (stage/'usr/lib'/so).symlink_to(so + '.200')
+
+
+# Stock 2.9's features, as its strings show them: nl80211 and wext, WPA2/WPA3 (SAE, OWE), WEP, the
+# common EAP methods over OpenSSL, WPS, 802.11r, Hotspot 2.0, AP and mesh modes, TDLS, FILS,
+# autoscan and bgscan; no D-Bus (the rootfs's has no D-Bus service for it), no P2P or DPP.
+WPA_CONFIG = '''
+CONFIG_DRIVER_WEXT=y
+CONFIG_DRIVER_NL80211=y
+CONFIG_LIBNL32=y
+CONFIG_IEEE8021X_EAPOL=y
+CONFIG_EAP_MD5=y
+CONFIG_EAP_MSCHAPV2=y
+CONFIG_EAP_TLS=y
+CONFIG_EAP_PEAP=y
+CONFIG_EAP_TTLS=y
+CONFIG_EAP_GTC=y
+CONFIG_EAP_OTP=y
+CONFIG_EAP_LEAP=y
+CONFIG_WPS=y
+CONFIG_PKCS12=y
+CONFIG_IPV6=y
+CONFIG_CTRL_IFACE=y
+CONFIG_SAE=y
+CONFIG_OWE=y
+CONFIG_WEP=y
+CONFIG_BACKEND=file
+CONFIG_IEEE80211R=y
+CONFIG_IEEE80211AC=y
+CONFIG_DEBUG_SYSLOG=y
+CONFIG_INTERWORKING=y
+CONFIG_HS20=y
+CONFIG_AP=y
+CONFIG_MESH=y
+CONFIG_TDLS=y
+CONFIG_FILS=y
+CONFIG_AUTOSCAN_EXPONENTIAL=y
+CONFIG_AUTOSCAN_PERIODIC=y
+CONFIG_BGSCAN_SIMPLE=y
+CONFIG_BGSCAN_LEARN=y
+CONFIG_TLS=openssl
+CONFIG_BUILD_WPA_CLIENT_SO=y
+'''
+
+
+def build_wpa_supplicant(src, stage, env, log):
+    d = src/'wpa_supplicant'
+    ssl, nl = env.deps['openssl'], env.deps['libnl']
+    (d/'.config').write_text(WPA_CONFIG + f'CFLAGS += -I{ssl}/usr/include -I{nl}/usr/include/libnl3\n'
+                             f'LIBS += -L{ssl}/usr/lib -L{nl}/usr/lib\n')
+    make = {k: v for k, v in env.vars.items() if k not in ('CFLAGS', 'CPPFLAGS', 'LDFLAGS')}
+    make.update(PKG_CONFIG='false', CFLAGS='-O2 -pipe -MMD')  # from the environment, so .config's CFLAGS += add to it
+    run('make', f'-j{JOBS}', 'wpa_supplicant', 'wpa_cli', 'libwpa_client.so', f'CC={env.cc}', 'V=1', cwd=d, env=make, log=log)
+    (stage/'usr/sbin').mkdir(parents=True)
+    (stage/'usr/lib').mkdir(parents=True)
+    for exe in ('wpa_supplicant', 'wpa_cli'):
+        shutil.copy(d/exe, stage/'usr/sbin'/exe)
+    shutil.copy(d/'libwpa_client.so', stage/'usr/lib/libwpa_client.so')
+
+
 # Stock busybox 1.31.1's applets (busybox --list); the rebuilt one has exactly these.
 BUSYBOX_APPLETS = '''
     [ [[ addgroup adduser ar arch arp arping ash awk base64 basename bc blkid bunzip2 bzcat cat chattr
@@ -319,7 +395,8 @@ RECIPES = {'openssl': (build_openssl, []),
            'mbedtls': (build_mbedtls, []), 'curl': (build_curl, ['mbedtls', 'zlib']),
            'sqlite': (build_sqlite, []),
            'libpng': (build_libpng, ['zlib']),
-           'busybox': (build_busybox, [])}
+           'busybox': (build_busybox, []),
+           'libnl': (build_libnl, []), 'wpa_supplicant': (build_wpa_supplicant, ['openssl', 'libnl'])}
 
 
 # Each top-level function's and class's text as this module was imported (inspect.getsource rereads
@@ -493,6 +570,8 @@ INSTALL = {
     'sqlite': {'usr/lib/libsqlite3.so.0.8.6': 'usr/lib/libsqlite3.so.3.54.1'},
     'libpng': {'usr/lib/libpng12.so.0.37.0': 'usr/lib/libpng12.so.0.59.0'},
     'busybox': {'bin/busybox': 'bin/busybox'},
+    'wpa_supplicant': {f'usr/sbin/{n}': f'usr/sbin/{n}' for n in ('wpa_supplicant', 'wpa_cli')} |
+                      {'usr/lib/libwpa_client.so': 'usr/lib/libwpa_client.so'},
 }
 
 
