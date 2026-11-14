@@ -521,6 +521,23 @@ def test_home_rows_font_is_the_home_role():
     assert (t['font[ROLE_HOME]'], t['font_px[ROLE_HOME]'], t['font[ROLE_NP]'], t['font_px[ROLE_NP]']) == (2, 27, 0, 0)
 
 
+FONT_KEYS = [path for path, values in theme.CHOICES.items() if values is theme.FONTS]
+
+
+@pytest.mark.parametrize('face, c', [('inter', 'FONT_INTER'), ('inter-medium', 'FONT_INTER_MEDIUM')])
+@pytest.mark.parametrize('path', FONT_KEYS)
+def test_a_theme_names_any_face_for_each_font_role(path, face, c):
+    view, element, attr = path.split('.')
+    t = resolved(f'<view name="{view}"><element name="{element}" {attr}="{face}"/></view>')
+    field = theme.SCHEMA[path].field
+    assert list(theme.CHOICES[path].values())[t[field]] == c
+    assert all(t[k.field] == 0 for p, k in theme.SCHEMA.items() if p in FONT_KEYS and p != path)  # the others stay stock's
+
+
+def test_every_font_role_takes_the_faces():
+    assert len(FONT_KEYS) == 7 and theme.FONTS == {k: f.c for k, f in theme.FACES.items()}
+
+
 def test_resolve_takes_a_long_name():
     assert resolved('', f'id="t" name="{"é" * 24}" index="2"')['name'] == 'é' * 24
 

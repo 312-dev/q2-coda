@@ -1060,7 +1060,7 @@ def test_classics_title_face_falls_back_by_the_text(fw, st, ui, ranges, text, fa
     label = ui.widget(ui.wm, 'label', text=text)
     answer = fw.fn('theme_font', C.c_int, C.c_void_p, C.c_int, C.c_int)(label, ROLE_TITLE, -1)
     got, px = label_font(ui, label)
-    assert got == face and answer == FACES.index(face) | px << 2
+    assert got == face and answer == FACES.index(face) | px << 4
     # bold's and stock's capitals stand taller: standing in for Classic's face either is smaller
     assert px == TITLE_PX if face == b'classic-light' else px == round(TITLE_PX * .83)
 

@@ -473,12 +473,14 @@ def validate_assets(directory):
     check_bluetooth_drop(directory)
     from build import SCROBBLE_CA
     assert read('rootfs.squashfs', SCROBBLE_CA) == (ROOT/'assets/scrobble-ca.pem').read_bytes()
-    # Classic's bold ships, cut to what BOLD_RANGES lists
-    from build import BOLD_TTF, CLASSIC_LIGHT_TTF, CLASSIC_LIGHT_NOTICE, FONT_NOTICES, bold_font, subset_font
-    assert read('rootfs.squashfs', BOLD_TTF) == bold_font()[0]
-    assert read('rootfs.squashfs', CLASSIC_LIGHT_TTF) == subset_font(ROOT/'assets/fonts/texgyreheros-bold.otf', 'Q2 Pod Classic Light', 'CLASSIC_LIGHT_RANGES', CLASSIC_LIGHT_NOTICE)[0]
+    # each subset face ships, cut to what its <NAME>_RANGES lists, with its licence files
+    from build import CLASSIC_LIGHT_NOTICE, FACES, FONT_DIR, FONT_NOTICES, face_font, subset_font
+    for face in FACES.values():
+        if face.source:
+            assert read('rootfs.squashfs', face.path) == face_font(face)[0]
+    assert read('rootfs.squashfs', FACES['classic-light'].path) == subset_font(ROOT/'assets/fonts/texgyreheros-bold.otf', 'Q2 Pod Classic Light', 'CLASSIC_LIGHT_RANGES', CLASSIC_LIGHT_NOTICE)[0]
     for name in FONT_NOTICES:
-        assert read('rootfs.squashfs', 'release/assets/default/raw/fonts/' + name) == (ROOT/'assets/fonts'/name).read_bytes()
+        assert read('rootfs.squashfs', FONT_DIR + name) == (ROOT/'assets/fonts'/name).read_bytes()
     # Centred Now Playing's page is English, as the iPod page is (english_ui)
     from build import CJK
     from ipod import PLAYING_STOCK

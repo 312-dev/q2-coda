@@ -7,7 +7,7 @@ import json
 import math
 import re
 from typing import NoReturn
-from build import ROOT, check, need
+from build import FACES, ROOT, check, need
 from ipod import AUDIT, GEOM_VALS, INC, O, SET0, SLIDE, VALUE_NAMES, Geometry, corner_inset, immediate_values
 
 
@@ -27,8 +27,8 @@ ACCENT_KEYS = {'ACCENT': '&st.accent', 'MINIMAL_ACCENT': '&st.minimal_accent'}
 PAYLOAD_KEYS = frozenset(
     re.findall(r'"([A-Z0-9_]+)"', need(re.search(r'setting_keys\[\] = \{([^}]*)\}', (ROOT/'patch/theme_engine.c').read_text()), 'Missing setting_keys')[1])
     + [k for f in sorted((ROOT/'patch').glob('*.c')) for k in re.findall(r'"IPOD", "([A-Z0-9_]+)"', f.read_text())])
-# value name -> its C name (theme.h); the font keys take FONTS
-FONTS = {'regular': 'FONT_DEFAULT', 'bold': 'FONT_BOLD', 'classic-light': 'FONT_CLASSIC_LIGHT'}
+# value name -> its C name (theme.h); the font keys take FONTS, build.py's faces (stock.h's FONT_*)
+FONTS = {k: f.c for k, f in FACES.items()}
 CHOICES = {'list.selection.painter': {'card': 'SEL_CARD', 'stops': 'SEL_STOPS', 'bar': 'SEL_BAR'},
            'bar.fill.painter': {'flat': 'BAR_FLAT', 'gloss': 'BAR_GLOSS'},
            'bar.battery.painter': {'stock': 'BATT_STOCK', 'classic-light': 'BATT_CLASSIC_LIGHT'},

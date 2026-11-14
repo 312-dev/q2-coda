@@ -3,7 +3,7 @@
 
 --logo swaps the boot splash JPEG (320x375); it defaults to assets/boot-logo.jpg.
 """
-import argparse, hashlib, io, json, pathlib, re, shlex, struct, subprocess, tarfile, zipfile
+import argparse, dataclasses, hashlib, io, json, pathlib, re, shlex, struct, subprocess, tarfile, zipfile
 from typing import TypeVar
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ZIP_SHA = '4e298cab6c12d86cfc55565645f7e3ae11d3fb44677a93ca13991e7184ecec4e'
@@ -931,17 +931,30 @@ def play_mark(font):
     for table in font['cmap'].tables:
         if table.isUnicode(): table.cmap[PLAY_MARK] = name
 
-def subset_font(src, family, ranges_macro, notice=None):
+TABULAR = '0123456789:'
+
+def subset_font(src, family, ranges_macro, notice=None, tabular=''):
     """src given a play mark (play_mark), then cut to its Latin, Greek, Cyrillic, punctuation and that
     mark, renamed family (its own name is the font's reserved name under OFL and GUST alike): the font's
     bytes and ranges_macro listing exactly what it keeps. notice, if any, goes in its description (name
-    ID 10)."""
+    ID 10). tabular, if any, is the suffix of the font's tabular figures' glyph names (Inter's .tf):
+    TABULAR's characters map to those glyphs, as font_quotes remaps stock's quotes, so a clock or a
+    song's time keeps its width as it counts."""
     from fontTools import subset
     from fontTools.ttLib import TTFont
     font = TTFont(src, recalcTimestamp=False)
-    old = font['name'].getDebugName(1)
+    # the family: a weight's own file names it in ID 16 (Inter Medium's ID 1 is "Inter Medium")
+    old = font['name'].getDebugName(16) or font['name'].getDebugName(1)
     label = ranges_macro.split('_')[0].title()
-    have = sorted(u for u in font.getBestCmap() if 0x20 <= u < 0x530 or 0x2000 <= u < 0x2200)
+    cmap = font.getBestCmap()
+    have = sorted(u for u in cmap if 0x20 <= u < 0x530 or 0x2000 <= u < 0x2200)
+    if tabular:
+        glyphs = set(font.getGlyphOrder())
+        figures = {ord(c): cmap[ord(c)] + tabular for c in TABULAR}
+        for name in figures.values():
+            check(name in glyphs, f'{label} font without {name}')
+        for table in font['cmap'].tables:
+            if table.isUnicode(): table.cmap.update(figures)
     play_mark(font)
     have.append(PLAY_MARK)
     options = subset.Options()
@@ -954,7 +967,10 @@ def subset_font(src, family, ranges_macro, notice=None):
     # are the licence files FONT_NOTICES ships beside it)
     for rec in font['name'].names:
         if rec.nameID in (1, 3, 4, 6, 16, 17, 18, 21, 22):
-            rec.string = str(rec).replace(old, family).replace(old.replace(' ', ''), family.replace(' ', ''))
+            if rec.nameID == 6:  # the PostScript name has no spaces
+                rec.string = str(rec).replace(old.replace(' ', ''), family.replace(' ', ''))
+            else:
+                rec.string = str(rec).replace(old, family).replace(old.replace(' ', ''), family.replace(' ', ''))
             check(old.split()[0] not in str(rec), f'{label} font name {rec.nameID} keeps {old.split()[0]}')
     if notice:
         font['name'].setName(notice, 10, 3, 1, 0x409)
@@ -973,24 +989,79 @@ def subset_font(src, family, ranges_macro, notice=None):
         else: runs.append([u, u])
     return out.getvalue(), f'#define {ranges_macro} {{' + ','.join(f'0x{u:x}' for r in runs for u in r) + '}'
 
-# The bold face (navigation.c theme_font; Modern's Now Playing title, Classic's fallback where its own lacks a character): Liberation Sans Bold (OFL, assets/fonts), cut to its Latin,
-# Greek, Cyrillic and punctuation, with a play mark (play_mark). BOLD_RANGES, from the same cmap, lists exactly what it keeps, so a
-# label holding anything else (CJK, say) keeps the stock font.
-BOLD_TTF = 'release/assets/default/raw/fonts/bold.ttf'
-
-def bold_font():
-    return subset_font(ROOT/'assets/fonts/LiberationSans-Bold.ttf', 'Q2 Pod Sans', 'BOLD_RANGES')
-
-# Classic's font (navigation.c theme_font): TeX Gyre Heros Bold (GUST Font License, assets/fonts), the same cut.
-# The LPPL asks a modified font to say so itself, and where the original is: assets/fonts/README-classic-light.txt
-CLASSIC_LIGHT_TTF = 'release/assets/default/raw/fonts/classic-light.ttf'
-# OFL 2 asks each copy to hold its licence, and the subsets' name tables don't: these ship beside the fonts
-FONT_NOTICES = ('LiberationSans-OFL.txt', 'GUST-FONT-LICENSE.txt', 'README-classic-light.txt')
 CLASSIC_LIGHT_NOTICE = ('Modified version of TeX Gyre Heros Bold 2.004: cut to part of its Latin and Greek and its punctuation, its layout features to frac, liga and locl, a play mark added at U+25B6, and renamed. '
                'The original: https://www.gust.org.pl/projects/e-foundry/tex-gyre/heros')
+FONT_DIR = 'release/assets/default/raw/fonts/'
 
-def classic_light_font():
-    return subset_font(ROOT/'assets/fonts/texgyreheros-bold.otf', 'Q2 Pod Classic Light', 'CLASSIC_LIGHT_RANGES', CLASSIC_LIGHT_NOTICE)
+@dataclasses.dataclass(frozen=True)
+class Face:
+    """A face a theme names for a font role (theme.xml's font values: FACES' keys). Its C names come
+    from name: FONT_<NAME> its index (stock.h, in FACES' order), <NAME>_RANGES what it keeps."""
+    name: str  # AWTK's font_name, and its file: FONT_DIR + name + '.ttf'
+    source: str = ''  # its original in assets/fonts, cut by subset_font; none: stock's own default.ttf, uncut
+    family: str = ''  # the subset's name
+    notices: tuple = ()  # assets/fonts' licence files, shipped beside it (FONT_NOTICES)
+    notice: str = ''  # its description (name ID 10), where its licence asks a modified font to say so
+    fallback: str = ''  # the face (FACES key) a text takes when this one lacks one of its characters
+    # the fallback's px, in % of this face's: the two faces' cap heights' ratio (stb sizes a font by its
+    # ascent - descent; stock's default.ttf has a cap height of 183 of 299), so a stand-in's capitals
+    # match (test_ipod test_fallback_scale_matches_the_faces)
+    fallback_pct: int = 100
+    tabular: str = ''  # its tabular figures' glyph name suffix, if 0-9 and the colon take them (subset_font)
+
+    @property
+    def c(self): return 'FONT_' + self.name.upper().replace('-', '_')
+
+    @property
+    def ranges_macro(self): return self.name.upper().replace('-', '_') + '_RANGES'
+
+    @property
+    def path(self): return FONT_DIR + self.name + '.ttf'
+
+# Each face but stock's is cut by subset_font to its Latin, Greek, Cyrillic and punctuation, with a play
+# mark (play_mark); its <NAME>_RANGES, from the same cmap, lists exactly what it keeps, so a label
+# holding anything else (CJK, say) takes the fallback (navigation.c theme_font), down to stock's, which
+# has CJK.
+FACES = {
+    'regular': Face('default'),
+    # Modern's Now Playing title, Classic's fallback: Liberation Sans Bold (OFL)
+    'bold': Face('bold', 'LiberationSans-Bold.ttf', 'Q2 Pod Sans', ('LiberationSans-OFL.txt',), fallback='regular'),
+    # Classic's: TeX Gyre Heros Bold (GUST Font License). The LPPL asks a modified font to say so
+    # itself, and where the original is: assets/fonts/README-classic-light.txt
+    'classic-light': Face('classic-light', 'texgyreheros-bold.otf', 'Q2 Pod Classic Light',
+                          ('GUST-FONT-LICENSE.txt', 'README-classic-light.txt'), CLASSIC_LIGHT_NOTICE, 'bold', 83),
+    # Inter 4.1 (OFL), Regular and Medium, with tabular figures: no theme takes them yet
+    'inter': Face('inter', 'Inter-Regular.ttf', 'Q2 Pod OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98, tabular='.tf'),
+    'inter-medium': Face('inter-medium', 'Inter-Medium.ttf', 'Q2 Pod OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98,
+                         tabular='.tf'),
+}
+# OFL 2 asks each copy to hold its licence, and the subsets' name tables don't: these ship beside the fonts
+FONT_NOTICES = tuple(dict.fromkeys(n for f in FACES.values() for n in f.notices))
+
+def face_font(face):
+    """The face's file and its ranges macro (subset_font)."""
+    return subset_font(ROOT/'assets/fonts'/face.source, face.family, face.ranges_macro, face.notice or None, face.tabular)
+
+def font_indices():
+    """FONT_<NAME>, each face's index in FACES' order, and FONT_N: theme_t.font[]'s values."""
+    return [*(f'#define {f.c} {i}' for i, f in enumerate(FACES.values())), f'#define FONT_N {len(FACES)}']
+
+def faces_header(ranges):
+    """stock.h's faces, ranges the subset faces' range macros in FACES' order: font_indices, then
+    FONT_NAMES, FONT_FALLBACK and FONT_FALLBACK_PCT by index, FONT_RANGES every subset face's runs one
+    after another, a face's from FONT_RANGE_AT[i] to [i + 1] (none: stock's, every character)."""
+    faces = list(FACES.values())
+    cut = [f for f in faces if f.source]
+    check(len(ranges) == len(cut), 'One ranges macro per subset face')
+    runs = dict(zip((f.name for f in cut), (r.split(' ', 2)[2][1:-1].split(',') for r in ranges)))
+    at = [0]
+    for f in faces: at.append(at[-1] + len(runs.get(f.name, ())))
+    return [*font_indices(), *ranges,
+            '#define FONT_NAMES {' + ','.join(json.dumps(f.name) for f in faces) + '}',
+            '#define FONT_FALLBACK {' + ','.join(FACES[f.fallback].c if f.fallback else '0' for f in faces) + '}',
+            '#define FONT_FALLBACK_PCT {' + ','.join(str(f.fallback_pct) for f in faces) + '}',
+            '#define FONT_RANGES {' + ','.join(v for f in cut for v in runs[f.name]) + '}',
+            '#define FONT_RANGE_AT {' + ','.join(map(str, at)) + '}']
 
 def relabel(data):
     """A strings/*.bin value replaced: after a u16 0 and a u16 pair count, a u32 offset to each key and
@@ -1732,11 +1803,11 @@ STOCK_VERSION = 'V1.36'
 
 def stock_header(context, ranges, themes, dev=0, repo=REPO):
     """stock.h, which the payload's C includes: context maps each CONTEXT_DATA name to the C address of
-    its data (demo's symbol on the Q2; test/fw/host.py's own array), ranges are the fonts' range macros
-    (subset_font) and themes theme.builtins()'s."""
+    its data (demo's symbol on the Q2; test/fw/host.py's own array), ranges are the subset faces' range macros
+    (subset_font, in FACES' order: faces_header) and themes theme.builtins()'s."""
     from ipod import SETTINGS_ICONS
     from theme import theme_keys
-    header = [f'#define RING_STEP {RING_STEP}', *ranges]
+    header = [f'#define RING_STEP {RING_STEP}', *faces_header(ranges)]
     header.append('#define TIMEZONE_NAMES {' + ','.join(json.dumps(zone) for _, zone in TIMEZONES) + '}')
     header.append('#define TIMEZONE_ORDER {' + ','.join(map(str, TIMEZONE_ORDER)) + '}')
     header.append('#define TIMEZONE_CITIES {' + ','.join(json.dumps(label.split(' ', 1)[1]) for label, _ in TIMEZONES) + '}')
@@ -1830,8 +1901,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     for name, address in APP_URL_CALLS.items():
         check(syms.get(name) == address, f'{name}: not at {address:#x} in the stock demo')
     syms.update(PRIVATE_FUNCTIONS)
-    bold, bold_ranges = bold_font()
-    classic_light, classic_light_ranges = classic_light_font()
+    fonts = {f.path: face_font(f) for f in FACES.values() if f.source}
     for name in GLOBALS:
         check(re.search(rf'\b1\s+OBJECT\s+GLOBAL\s+DEFAULT\s+\d+\s+{name}$',
                         symbol_table, re.M), f'{name}: byte global size mismatch')
@@ -1841,7 +1911,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     from theme import builtins, emit, geometry_sets
     themes = builtins()
     (out/'stock.h').write_text(stock_header({name: f'0x{syms[name]:x}u' for name in CONTEXT_DATA},
-                                            [bold_ranges, classic_light_ranges], themes, dev, repo))
+                                            [r for _, r in fonts.values()], themes, dev, repo))
     set_pages, redirects = {}, {}
     ui = 'release/assets/default/raw/ui/'
     for i, g in enumerate(geometry_sets(themes)[1:], 1):
@@ -2183,9 +2253,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                SCROBBLE_CA: ('etc/hosts', (ROOT/'assets/scrobble-ca.pem').read_bytes()),
                                BOOT: (HELPER_LIKE, compile_helper(out, cat, 'boot', 'q2boot', HELPER_LIBS[:1])),
                                **({LOGO_LIGHT: (xx+'list_tidal.png', light)} if light else {}),  # the swapped logo.jpg has no stock inode left
-                               BOLD_TTF: (FONT, bold),
-                               CLASSIC_LIGHT_TTF: (FONT, classic_light),
-                               **{'release/assets/default/raw/fonts/' + n: ('etc/hosts', (ROOT/'assets/fonts'/n).read_bytes()) for n in FONT_NOTICES},
+                               **{path: (FONT, data) for path, (data, _) in fonts.items()},
+                               **{FONT_DIR + n: ('etc/hosts', (ROOT/'assets/fonts'/n).read_bytes()) for n in FONT_NOTICES},
                                **({REMOTE: (HELPER_LIKE, compile_helper(out, cat, 'remote', 'q2remote', HELPER_LIBS[:1]))} if dev else {})}.items():
         stock = need(inode(p, like.encode()), f'Missing stock inode for {path}')
         name = path.rsplit('/', 1)[-1]

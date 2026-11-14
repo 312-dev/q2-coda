@@ -4223,16 +4223,19 @@ void label_font(void *w, int bold) {
     for (unsigned i = 0; i < sizeof font / sizeof *font; ++i)
         widget_set_prop_str(w, font[i], bold ? "bold" : "default");
 }
-static const unsigned short bold_ranges[] = BOLD_RANGES,
-                            classic_light_ranges[] = CLASSIC_LIGHT_RANGES;
+/* The faces, by FONT_* (stock.h, from tools/build.py FACES): each one's name, its fallback for a
+ * character it lacks and that fallback's px (% of its own), and its cmap's runs, FONT_RANGES from
+ * face_at[face] to face_at[face + 1]; stock's default.ttf has none listed, and every character. */
+static const char *const font_faces[FONT_N] = FONT_NAMES;
+static const unsigned char face_fallback[FONT_N] = FONT_FALLBACK,
+                           face_pct[FONT_N] = FONT_FALLBACK_PCT;
+static const unsigned short face_ranges[] = FONT_RANGES, face_at[FONT_N + 1] = FONT_RANGE_AT;
 
 /* 1 iff every character of c (n < 0: up to the NUL; NULL has none) is in face's cmap. */
 static int face_has(int face, const unsigned *c, int n) {
-    const unsigned short *r = face == FONT_CLASSIC_LIGHT ? classic_light_ranges : bold_ranges;
-    unsigned k = face == FONT_CLASSIC_LIGHT
-                     ? sizeof classic_light_ranges / sizeof *classic_light_ranges
-                     : sizeof bold_ranges / sizeof *bold_ranges;
-    if (face == FONT_DEFAULT) return 1;
+    const unsigned short *r = face_ranges + face_at[face];
+    unsigned k = face_at[face + 1] - face_at[face];
+    if (!k) return 1;
     if (!c) return 0;
     for (; n < 0 ? *c : n; ++c, --n) {
         unsigned i = 0;
@@ -4242,20 +4245,17 @@ static int face_has(int face, const unsigned *c, int n) {
     return 1;
 }
 
-/* The theme's font for role on w: its face (bold.ttf, classic-light.ttf: tools/build.py) when that
- * face has every character of w's text (BOLD_RANGES, CLASSIC_LIGHT_RANGES), else the next bold one
- * that does (classic-light, then bold), else stock's, which has CJK, either at FACE_FALLBACK_PCT
- * of classic-light's px; and its px, if the theme sets one. Written in every state the labels
- * style, only when the answer (face | px << 2) differs from was; returns it. A code-built row
- * passes FONT_ROW: the answer lives in its own "_font" prop with the role above it (row_faces reads
- * it), and a role the theme leaves to the style writes nothing. */
-static const char *const font_faces[] = { "default", "bold", "classic-light" }; /* [FONT_*] */
-/* bold.ttf or stock's default.ttf standing in for classic-light.ttf: that much of the px gives the
- * same capitals, their cap heights' ratio (test_ipod; stock's face, cap 183 of 299, comes to 83
- * too), so a CJK name sits a little over the capitals beside it, not a third. Only the fallback
- * takes it: Classic's bold stays at its px. */
-#define FACE_FALLBACK_PCT 83
-static int fallback_px(int px) { return (px * FACE_FALLBACK_PCT + 50) / 100; }
+/* The theme's font for role on w: its face when that face has every character of w's text, else its
+ * fallback's (face_fallback: classic-light's is bold, bold's stock's) that does, and so on down to
+ * stock's, which has CJK; and its px, if the theme sets one, scaled by each fallback taken
+ * (face_pct: bold or stock's standing in for classic-light at 83%, so a CJK name sits a little over
+ * the capitals beside it, not a third). Written in every state the labels style, only when the
+ * answer (face | px << FACE_BITS) differs from was; returns it. A code-built row passes FONT_ROW:
+ * the answer lives in its own "_font" prop with the role above it (row_faces reads it), and a role
+ * the theme leaves to the style writes nothing. */
+#define FACE_BITS 4
+_Static_assert(FONT_N <= 1 << FACE_BITS, "theme_font's answer holds the face in FACE_BITS");
+static int fallback_px(int px, int face) { return (px * face_pct[face] + 50) / 100; }
 int theme_font(void *w, int role, int was) {
     static const char *const names[] = { "style:normal:font_name", "style:focused:font_name",
                                          "style:disable:font_name" },
@@ -4269,10 +4269,9 @@ int theme_font(void *w, int role, int was) {
     }
     const unsigned *text = face ? widget_get_text(w) : (void *)0, none[1] = { 0 };
     if (face && !text) text = none; /* no text yet: keeps the face, as bold_label did */
-    int fell = face == FONT_CLASSIC_LIGHT && !face_has(FONT_CLASSIC_LIGHT, text, -1);
-    if (fell) face = FONT_BOLD, px = fallback_px(px); /* Cyrillic: still bold */
-    if (face == FONT_BOLD && !face_has(FONT_BOLD, text, -1)) face = FONT_DEFAULT; /* CJK */
-    int answer = face | px << 2, kept = row ? answer | role << 16 : answer;
+    for (; face && !face_has(face, text, -1); face = face_fallback[face])
+        px = fallback_px(px, face);
+    int answer = face | px << FACE_BITS, kept = row ? answer | role << 16 : answer;
     if (!w || kept == was) return answer;
     for (unsigned i = 0; i < sizeof names / sizeof *names; ++i) {
         widget_set_prop_str(w, names[i], font_faces[face]);
@@ -4300,14 +4299,14 @@ int ringnav_table_load(void *ctx, unsigned index, void *row) {
     return ret;
 }
 
-/* Canvas text in the theme's face where it has the characters, else bold.ttf where it has them
- * (still bold), else the system font, either at the fallback's px (draw_centred). A theme without
- * a face of its own draws the system font, as before. */
+/* Canvas text in the theme's list title face where it has the characters, else in its fallbacks as
+ * theme_font has them, at their px (draw_centred); stock's is the system font, NULL. A theme
+ * without a face of its own draws the system font. */
 const char *theme_face(const unsigned *s, int n, int *px) {
-    if (theme()->font[ROLE_TITLE] != FONT_CLASSIC_LIGHT) return (const char *)0;
-    if (face_has(FONT_CLASSIC_LIGHT, s, n)) return "classic-light";
-    if (px) *px = fallback_px(*px); /* bold and stock's here are always the fallback */
-    return face_has(FONT_BOLD, s, n) ? "bold" : (const char *)0;
+    int face = theme()->font[ROLE_TITLE];
+    for (; face && !face_has(face, s, n); face = face_fallback[face])
+        if (px) *px = fallback_px(*px, face);
+    return face ? font_faces[face] : (const char *)0;
 }
 
 /* Paused, the seek waits for Play (scrub_end) and the player's second stands still until then,

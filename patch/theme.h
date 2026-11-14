@@ -31,11 +31,6 @@ enum {
 enum { SCHEME_CARD = 1, SCHEME_RAW_RED = 2 };      /* scheme_t.flags (Ivory in Minimal; Crimson) */
 enum { SCHEME_DERIVE, SCHEME_LIGHT, SCHEME_DARK }; /* scheme_t.mode */
 enum { NP_IPOD, NP_CENTRED, NP_N };                /* theme_t.np_layout: np_pages[] index */
-enum {
-    FONT_DEFAULT,
-    FONT_BOLD,
-    FONT_CLASSIC_LIGHT
-}; /* theme_t.font[]: stock's, bold.ttf, classic-light.ttf */
 /* theme_t.font[] index: list title, list second line, bar title, Now Playing title, a two-line
  * row's title, Home rows, small text (the QR pages, the Time Zone caption, page notes) */
 enum { ROLE_TITLE, ROLE_META, ROLE_BAR, ROLE_NP, ROLE_TALL, ROLE_HOME, ROLE_INFO, ROLE_N };
@@ -148,7 +143,7 @@ typedef struct {
     unsigned char chevron_home, chevron_sel, set_text, caps_mark, caps_home, caps_np, icons_mono,
         icons_badge_muted, icons_addon_mono, icons_badge_ink, art_final, np_album_op,
         np_state_op;                             /* flags 0/1; *_op 0/255 */
-    unsigned char font[ROLE_N], font_px[ROLE_N]; /* FONT_*; px 0: the style's size */
+    unsigned char font[ROLE_N], font_px[ROLE_N]; /* FONT_* (stock.h); px 0: the style's size */
     stops_t batt;       /* BATT_CLASSIC_LIGHT: the level's stops, a hue in both halves */
     stops_t batt_empty; /* BATT_CLASSIC_LIGHT: the rows past the level */
     unsigned batt_low;  /* BATT_CLASSIC_LIGHT: the low level, batt_low_w columns */
