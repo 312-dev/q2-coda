@@ -68,7 +68,7 @@ int peq_parse(const char *text, unsigned size, peq_preset *out, peq_error *error
     p.count = 0;
     p.bypass = 0;
     unsigned pos = 0, line = 0, preamp_line = 0;
-    int scope = 1; /* APO Channel: 1 both, 2 left, 3 right, as peq_band.enabled */
+    int scope = 1, automatic = 0; /* APO Channel: 1 both, 2 left, 3 right, as peq_band.enabled */
     double side[4] = {0}; /* Preamp under Channel: L or R */
     if (size > PEQ_FILE_LIMIT) return error_at(error, 1, "file exceeds 16384 bytes");
     if (size >= 3 && (unsigned char)text[0] == 239 && (unsigned char)text[1] == 187 &&
@@ -86,6 +86,16 @@ int peq_parse(const char *text, unsigned size, peq_preset *out, peq_error *error
         buf[length] = 0;
         int n = 0;
         char *s = buf;
+        while (*s == ' ' || *s == '\t') ++s;
+        /* "# q2: preamp auto" is the Q2's own setting (peq_export), a comment to anything else. */
+        if (*s == '#') {
+            for (++s; *s == ' ' || *s == '\t';) ++s;
+            if (!strncasecmp(s, "q2:", 3)) {
+                for (s += 3; *s == ' ' || *s == '\t';) ++s;
+                if (!strncasecmp(s, "preamp auto", 11)) automatic = 1;
+            }
+            continue;
+        }
         while (*s && *s != '#') {
             if (*s == ' ' || *s == '\t' || *s == '\r') { ++s; continue; }
             if (n == 16) return error_at(error, line, "unsupported filter form");
@@ -178,7 +188,8 @@ int peq_parse(const char *text, unsigned size, peq_preset *out, peq_error *error
     p.balance = side[3] - side[2];
     if (!between(p.preamp, -60, 24)) return error_at(error, preamp_line, "summed preamp outside -60..24 dB");
     if (!between(p.balance, -12, 12)) return error_at(error, preamp_line, "L/R preamp differ by more than 12 dB");
-    p.automatic = preamp_line ? 2 : 1; /* the file's preamp, as if picked; without one, Auto */
+    /* The file's preamp, as if picked; without one, or marked Auto, Auto */
+    p.automatic = automatic || !preamp_line ? 1 : 2;
     *out = p; /* Commit only after the complete file validates. */
     return 1;
 }
@@ -215,14 +226,14 @@ int peq_load(const char *path, peq_preset *out) {
     return 1;
 }
 
-/* magic (8 bytes) then data, fsynced under path.tmp and renamed over path. */
+/* magic (8 bytes, unless 0) then data, fsynced under path.tmp and renamed over path. */
 int peq_save_file(const char *path, const char *magic, const void *data, unsigned size) {
     char tmp[600];
     if (strlen(path) > 580) return 0;
     snprintf(tmp, sizeof(tmp), "%s.tmp", path);
     void *f = fopen(tmp, "wb");
     if (!f) return 0;
-    int ok = fwrite(magic, 1, 8, f) == 8 && fwrite(data, 1, size, f) == size;
+    int ok = (!magic || fwrite(magic, 1, 8, f) == 8) && fwrite(data, 1, size, f) == size;
     if (fflush(f) || fsync(fileno(f))) ok = 0;
     if (fclose(f)) ok = 0;
     if (ok && !rename(tmp, path)) return 1;
@@ -234,6 +245,49 @@ int peq_save(const char *path, const peq_preset *p, int replace) {
     if (!peq_valid(p)) return 0;
     if (!replace && !access(path, 0)) return 2;
     return peq_save_file(path, "Q2PEQ02", p, sizeof(*p));
+}
+
+/* v in the fewer digits of %.15g and %.17g that peq_number reads back as v. */
+static void decimal(char *s, double v) {
+    double back;
+    snprintf(s, 32, "%.15g", v);
+    if (!peq_number(s, &back) || back != v) snprintf(s, 32, "%.17g", v);
+}
+
+/* Equalizer APO's own lines (docs/internals.md#presets-on-the-card): Preamp, a balance as one
+ * side's Preamp, a Channel line where a band's side changes, and the bands as numbered Filter
+ * lines, PK, LSC and HSC with Q, since a band's frequency is the centre. OFF bands stay, for
+ * peq_parse; APO skips them. Only Auto has no APO form. */
+unsigned peq_export(const peq_preset *p, char *out, unsigned size) {
+    static const char *const types[] = {"PK", "LSC", "HSC"}, *const sides[] = {"", "all", "L", "R"};
+    char a[32], b[32], c[32];
+    unsigned n = 0;
+    int scope = 1;
+    if (!peq_valid(p)) return 0;
+    decimal(a, p->preamp);
+    decimal(b, -__builtin_fabs(p->balance));
+    n += snprintf(out, size, "# Equalizer APO preset from q2-coda. \"# q2:\" lines are the Q2's own.\n%s"
+                             "Preamp: %s dB\n", p->automatic == 2 ? "" : "# q2: preamp auto\n", a);
+    if (p->balance && n < size) /* a positive balance turns the left down */
+        n += snprintf(out + n, size - n, "Channel: %s\nPreamp: %s dB\nChannel: all\n", p->balance > 0 ? "L" : "R", b);
+    for (int i = 0; i < p->count && n < size; ++i) {
+        const peq_band *d = &p->bands[i];
+        if (d->enabled && d->enabled != scope)
+            n += snprintf(out + n, size - n, "Channel: %s\n", sides[scope = d->enabled]);
+        decimal(a, d->frequency), decimal(b, d->gain), decimal(c, d->q);
+        if (n < size)
+            n += snprintf(out + n, size - n, "Filter %d: %s %s Fc %s Hz Gain %s dB Q %s\n", i + 1,
+                          d->enabled ? "ON" : "OFF", types[d->type], a, b, c);
+    }
+    return n < size ? n : 0;
+}
+
+int peq_export_file(const char *path, const peq_preset *p, int replace) {
+    char text[4096]; /* 30 bands at 17 digits, each on its own side, take under 3.8 KB */
+    unsigned n = peq_export(p, text, sizeof text);
+    if (!n) return 0;
+    if (!replace && !access(path, 0)) return 2;
+    return peq_save_file(path, 0, text, n);
 }
 
 /* The 3EQ's fixed filters at gain dB each: a 155 Hz low shelf, a peak at 900 Hz to cut or 1750 Hz to

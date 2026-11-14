@@ -1628,7 +1628,7 @@ def listed(fw):
 
 def test_list_files_by_extension_sorted(fw):
     files(fw, [b'b.peq', b'a.peq', b'x.txt', b'.peq', b'c.PEQ', b'peq'])(b'/d', b'.peq')
-    assert listed(fw) == [b'a.peq', b'b.peq']
+    assert listed(fw) == [b'a.peq', b'b.peq', b'c.PEQ']  # the extension in any case, as FAT keeps it
     assert ui(fw).capacity == 128
 
 
@@ -1658,7 +1658,14 @@ def test_list_files_says_why_it_is_empty(fw):
     assert ui(fw).status == b'Folder missing or unavailable' and ui(fw).count == 0
 
 
-SAVED = '/mnt/data/peq-presets'
+FOLDER = '/mnt/mmc/EQ'  # the presets, as text (peq_export)
+
+
+def apo(fw, p):
+    out = C.create_string_buffer(8192)
+    n = fw.fn('peq_export', C.c_uint, C.c_void_p, C.c_void_p, C.c_uint)(r(p), out, 8192)
+    assert n
+    return out.raw[:n]
 
 
 def typed(fw, text):
@@ -1671,10 +1678,10 @@ def typed(fw, text):
 
 def renamer(fw, text, old='Rock', others=()):
     u = ui(fw)
-    u.edit, u.screen = 0x7000, 11
-    u.destination = f'{SAVED}/{old}.peq'.encode()
+    u.edit, u.screen = 0x7000, NAMING
+    u.destination = f'{FOLDER}/{old}.txt'.encode()
     u.name, u.applied = old.encode(), b'Other'
-    card = Card(fw, {f'{SAVED}/{old}.peq': b'p', **{f'{SAVED}/{n}.peq': b'q' for n in others}})
+    card = Card(fw, {f'{FOLDER}/{old}.txt': b'p', **{f'{FOLDER}/{n}.txt': b'q' for n in others}})
     typed(fw, text)
     fw.fn('peq_ui__rename_preset', None)()
     return u, card
@@ -1682,49 +1689,49 @@ def renamer(fw, text, old='Rock', others=()):
 
 def test_a_rename_moves_the_file_and_the_names_that_follow_it(fw):
     u, card = renamer(fw, b'Jazz')
-    assert f'{SAVED}/Jazz.peq' in card.files and f'{SAVED}/Rock.peq' not in card.files
+    assert f'{FOLDER}/Jazz.txt' in card.files and f'{FOLDER}/Rock.txt' not in card.files
     assert u.name == b'Jazz' and u.applied == b'Other' and u.status == b'Renamed to Jazz' and u.screen == 2
 
 
 def test_a_rename_trims_what_fat_drops(fw):
     _, card = renamer(fw, b'  Jazz. . ')
-    assert f'{SAVED}/Jazz.peq' in card.files
+    assert f'{FOLDER}/Jazz.txt' in card.files
 
 
 def test_an_empty_edit_goes_back_to_the_list(fw):
     u, card = renamer(fw, b'')  # Return's cancel leaves it so
-    assert u.screen == RENAMES and u.status == b'' and list(card.files) == [f'{SAVED}/Rock.peq']
+    assert u.screen == RENAMES and u.status == b'' and list(card.files) == [f'{FOLDER}/Rock.txt']
 
 
 @pytest.mark.parametrize('text', (b'   ', b'...', b'.hidden', b'a/b', b'a\\b', b'a:b', b'a*b', b'a?b', b'a"b', b'a<b', b'a>b', b'a|b'))
 def test_a_name_fat_can_t_hold_keeps_the_preset(fw, text):
     u, card = renamer(fw, text)
-    assert u.status == b'Name not allowed; preset kept' and list(card.files) == [f'{SAVED}/Rock.peq']
+    assert u.status == b'Name not allowed; preset kept' and list(card.files) == [f'{FOLDER}/Rock.txt']
 
 
 def test_a_name_taken_keeps_the_preset(fw):
     u, card = renamer(fw, b'Jazz', others=('Jazz',))
-    assert u.status == b'Name taken; preset kept' and card.files[f'{SAVED}/Rock.peq'] == b'p'
+    assert u.status == b'Name taken; preset kept' and card.files[f'{FOLDER}/Rock.txt'] == b'p'
 
 
 def test_a_case_change_is_a_rename_though_fat_finds_the_name(fw):
     u = ui(fw)
-    u.edit, u.destination, u.name = 0x7000, f'{SAVED}/Rock.peq'.encode(), b'Rock'
+    u.edit, u.destination, u.name = 0x7000, f'{FOLDER}/Rock.txt'.encode(), b'Rock'
     typed(fw, b'ROCK')
-    fw.mock('fw_access', lambda *_: 0)  # FAT: ROCK.peq "exists"
+    fw.mock('fw_access', lambda *_: 0)  # FAT: ROCK.txt "exists"
     fw.fn('peq_ui__rename_preset', None)()
     assert u.status == b'Renamed to ROCK' and u.name == b'ROCK'
 
 
 def test_the_same_name_does_nothing(fw):
     u, card = renamer(fw, b'Rock')
-    assert u.status == b'' and card.files == {f'{SAVED}/Rock.peq': b'p'}
+    assert u.status == b'' and card.files == {f'{FOLDER}/Rock.txt': b'p'}
 
 
 def test_a_failed_rename_says_so(fw):
     u = ui(fw)
-    u.edit, u.destination = 0x7000, f'{SAVED}/Rock.peq'.encode()
-    card = Card(fw, {f'{SAVED}/Rock.peq': b'p'})
+    u.edit, u.destination = 0x7000, f'{FOLDER}/Rock.txt'.encode()
+    card = Card(fw, {f'{FOLDER}/Rock.txt': b'p'})
     card.bad_rename = True
     typed(fw, b'Jazz')
     fw.fn('peq_ui__rename_preset', None)()
@@ -1737,7 +1744,7 @@ def test_rename_hostile_sweep(fw):
         text = bytes(rng.choices(b'ab .\\/:*?"<>| \xc3\xa9', k=rng.randrange(0, 40)))
         u, card = renamer(fw, text)
         names = [n for n in card.files]
-        assert len(names) == 1 and not set(names[0][len(SAVED) + 1:]) & set('/\\:*?"<>|')
+        assert len(names) == 1 and not set(names[0][len(FOLDER) + 1:]) & set('/\\:*?"<>|')
 
 
 def test_load_draft_keeps_the_switch_and_follows_auto(fw):
@@ -1745,7 +1752,7 @@ def test_load_draft_keeps_the_switch_and_follows_auto(fw):
     u.draft.bypass, u.screen = 1, 2
     p = peak_preset(6)
     p.automatic = 1
-    fw.fn('peq_ui__load_draft', None, C.c_void_p, C.c_char_p, C.c_int)(r(p), b'Rock.peq', 4)
+    fw.fn('peq_ui__load_draft', None, C.c_void_p, C.c_char_p, C.c_int)(r(p), b'Rock.txt', 4)
     assert u.draft.bypass == 1 and u.draft.preamp == pytest.approx(-6, abs=1e-6)
     assert u.name == b'Rock' and u.screen == 0 and u.dirty == 1 and b'Apply' in u.status
 
@@ -1754,10 +1761,11 @@ def test_a_preamp_pick_sticks_to_the_saved_preset(fw):
     u = ui(fw)
     p = peak_preset(6)
     p.automatic = 2
-    card = Card(fw, {f'{SAVED}/Rock.peq': b'Q2PEQ02\0' + bytes(p)})
+    card = Card(fw, {f'{FOLDER}/Rock.txt': apo(fw, p)})
     u.name, u.draft.automatic, u.draft.preamp = b'Rock', 2, -9
     fw.fn('peq_ui__remember_preamp', None)()
-    saved = Preset.from_buffer_copy(card.files[f'{SAVED}/Rock.peq'], 8)
+    saved = Preset()
+    assert fw.fn('peq_import_file', C.c_int, C.c_char_p, C.c_void_p, C.c_void_p)(f'{FOLDER}/Rock.txt'.encode(), r(saved), None)
     assert saved.preamp == -9 and saved.automatic == 2 and saved.bands[0].gain == 6
 
 
@@ -1886,18 +1894,18 @@ def test_a_preamp_pick_sticks_to_a_long_named_preset(fw):
     assert len(name) > 63
     p = peak_preset(6)
     p.automatic = 2
-    path = f'{SAVED}/{name}.peq'
-    card = Card(fw, {path: b'Q2PEQ02\0' + bytes(p)})
-    fw.fn('peq_ui__load_draft', None, C.c_void_p, C.c_char_p, C.c_int)(r(p), (name + '.peq').encode(), len(name))
+    path = f'{FOLDER}/{name}.txt'
+    card = Card(fw, {path: apo(fw, p)})
+    fw.fn('peq_ui__load_draft', None, C.c_void_p, C.c_char_p, C.c_int)(r(p), (name + '.txt').encode(), len(name))
     u.draft.automatic, u.draft.preamp = 2, -9
     fw.fn('peq_ui__remember_preamp', None)()
-    assert Preset.from_buffer_copy(card.files[path], 8).preamp == -9
+    assert b'\nPreamp: -9 dB\n' in card.files[path]
 
 
-HOME, BAND, PRESETS, IMPORTS, SAVES, CONFIRM, DELETES, PICK, ADJUST, STOCKS, RENAMES, NAMING = range(12)
-ACT_BACK, ACT_APPLY, ACT_RESET, ACT_BYPASS, ACT_PER_OUTPUT, ACT_MENU, ACT_IMPORT, ACT_SAVE, ACT_ENABLE, ACT_TYPE, ACT_RAISE, ACT_LOWER, \
+HOME, BAND, PRESETS, SAVES, CONFIRM, DELETES, PICK, ADJUST, STOCKS, RENAMES, NAMING = range(11)
+ACT_BACK, ACT_APPLY, ACT_RESET, ACT_BYPASS, ACT_PER_OUTPUT, ACT_MENU, ACT_SAVE, ACT_ENABLE, ACT_TYPE, ACT_RAISE, ACT_LOWER, \
     ACT_TYPED, ACT_CHANNEL, ACT_STEP, ACT_YES, ACT_CANCEL, ACT_DELETE, ACT_BALANCE, ACT_PREAMP, ACT_GAIN, ACT_FREQUENCY, ACT_QUALITY, \
-    ACT_KEYBOARD, ACT_STOCK, ACT_FILE_PREV, ACT_FILE_NEXT, ACT_RENAME, ACT_NAMED = range(1000, 1029)
+    ACT_KEYBOARD, ACT_STOCK, ACT_FILE_PREV, ACT_FILE_NEXT, ACT_RENAME, ACT_NAMED = range(1000, 1028)
 
 
 def act(fw, *ids):
@@ -2025,7 +2033,7 @@ def test_preamp_s_first_row_is_auto_and_any_other_a_pick(fw):
 
 def test_back_steps_up_one_screen(fw):
     u = ui(fw)
-    for screen, pick, want in ((BAND, 0, HOME), (PRESETS, 0, HOME), (IMPORTS, 0, PRESETS), (SAVES, 0, PRESETS), (STOCKS, 0, PRESETS), (ADJUST, 0, BAND),
+    for screen, pick, want in ((BAND, 0, HOME), (PRESETS, 0, HOME), (SAVES, 0, PRESETS), (STOCKS, 0, PRESETS), (ADJUST, 0, BAND),
                                (PICK, ACT_GAIN, BAND), (PICK, ACT_PREAMP, HOME), (PICK, ACT_BALANCE, HOME)):
         u.screen, u.pick = screen, pick
         act(fw, ACT_BACK)
@@ -2069,8 +2077,8 @@ def test_saving_takes_a_slot_and_asks_before_replacing_it(fw):
     u.draft = peak_preset(6)
     u.screen = SAVES
     act(fw, 0)
-    path = f'{SAVED}/Manual 01.peq'
-    assert card.files[path][:8] == b'Q2PEQ02\0' and b'saved' in u.status
+    path = f'{FOLDER}/Manual 01.txt'
+    assert card.files[path].startswith(b'# Equalizer APO preset') and b'saved' in u.status
     first = card.files[path]
     u.draft.bands[0].gain = 3
     act(fw, 0)
@@ -2081,46 +2089,46 @@ def test_saving_takes_a_slot_and_asks_before_replacing_it(fw):
     assert u.screen == SAVES and card.files[path] != first
 
 
-def test_an_import_saves_a_copy_or_says_which_line_failed(fw):
+def test_a_preset_on_the_card_loads_or_says_which_line_failed(fw):
     files(fw, [b'good.txt', b'bad.txt'])(b'/mnt/mmc/EQ', b'.txt')
     card = Card(fw, {'/mnt/mmc/EQ/good.txt': b'Preamp: -3 dB\n', '/mnt/mmc/EQ/bad.txt': b'\nnonsense\n'})
     u = ui(fw)
-    u.screen = IMPORTS
+    u.screen = PRESETS
     act(fw, 0)  # sorted: bad.txt
-    assert u.status == b'Line 2: unsupported command'
+    assert u.status == b'Line 2: unsupported command' and u.screen == PRESETS
     act(fw, 1)
-    assert f'{SAVED}/good.peq' in card.files
+    assert u.screen == HOME and u.name == b'good' and u.draft.preamp == -3 and len(card.files) == 2  # nothing written
 
 
 def test_deleting_asks_first_and_leaves_what_plays(fw):
-    files(fw, [b'a.peq'])(b'/d', b'.peq')
-    card = Card(fw, {f'{SAVED}/a.peq': b'p', ACTIVE: b'x'})
+    files(fw, [b'a.txt'])(b'/d', b'.txt')
+    card = Card(fw, {f'{FOLDER}/a.txt': b'p', ACTIVE: b'x'})
     u = ui(fw)
     u.screen = DELETES
     act(fw, 0)
-    assert u.screen == CONFIRM and f'{SAVED}/a.peq' in card.files
+    assert u.screen == CONFIRM and f'{FOLDER}/a.txt' in card.files
     act(fw, ACT_YES)
-    assert f'{SAVED}/a.peq' not in card.files and card.files[ACTIVE] == b'x' and u.status == b'Deleted a.peq; active EQ unchanged'
+    assert f'{FOLDER}/a.txt' not in card.files and card.files[ACTIVE] == b'x' and u.status == b'Deleted a.txt; active EQ unchanged'
 
 
 def test_a_saved_preset_it_can_t_read_changes_nothing(fw):
-    files(fw, [b'a.peq'])(b'/d', b'.peq')
-    Card(fw, {f'{SAVED}/a.peq': b'junk'})
+    files(fw, [b'a.txt'])(b'/d', b'.txt')
+    Card(fw, {f'{FOLDER}/a.txt': b'junk'})
     u = ui(fw)
     u.draft = peak_preset(6)
     u.screen = PRESETS
     act(fw, 0)
-    assert u.draft.bands[0].gain == 6 and u.status == b'Cannot read preset; settings unchanged'
+    assert u.draft.bands[0].gain == 6 and u.status == b'Line 1: unsupported command'
 
 
 def test_a_file_row_counts_through_its_page(fw):
-    names = [b'%03d.peq' % k for k in range(200)]
-    files(fw, names)(b'/d', b'.peq')
-    Card(fw, {f'{SAVED}/130.peq': b'junk'})
+    names = [b'%03d.txt' % k for k in range(200)]
+    files(fw, names)(b'/d', b'.txt')
+    Card(fw, {f'{FOLDER}/130.txt': b'junk'})
     u = ui(fw)
     u.screen, u.file_page = RENAMES, 1
     act(fw, 2)  # 128 a page
-    assert u.screen == NAMING and u.destination == f'{SAVED}/130.peq'.encode()
+    assert u.screen == NAMING and u.destination == f'{FOLDER}/130.txt'.encode()
     assert u.file_page == 0  # a new screen starts on its first page
 
 

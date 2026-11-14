@@ -14,6 +14,7 @@
 #include <math.h>
 #include <unistd.h>
 #define child_exit _exit
+int card_mounted(void); /* the host checks' shim */
 static inline void child_oom_first(void) {
     int fd = open("/proc/self/oom_score_adj", O_WRONLY);
     if (fd >= 0) write(fd, "1000", 4), close(fd);
@@ -92,8 +93,8 @@ static inline int ink_vgcanvas_set_fill_linear_gradient(void *vg, float sx, floa
 #define PEQ_FILE_LIMIT 16384
 #define PEQ_LINE_LIMIT 512
 #define PEQ_ACTIVE PEQ_ROOT "/mnt/data/peq-active"
-#define PEQ_SAVED PEQ_ROOT "/mnt/data/peq-presets"
-#define PEQ_IMPORT PEQ_ROOT "/mnt/mmc/EQ"
+#define PEQ_SAVED PEQ_ROOT "/mnt/data/peq-presets" /* earlier firmware's binary presets: written out to PEQ_FOLDER once, kept */
+#define PEQ_FOLDER PEQ_ROOT "/mnt/mmc/EQ"         /* the presets, Equalizer APO text (peq_export) */
 #define EQ_OUTPUTS PEQ_ROOT "/mnt/data/peq-outputs" /* EQ per Output: an eq_state per output, and owner */
 #define EQ_DEVICES 32 /* Bluetooth devices remembered at once */
 
@@ -137,6 +138,10 @@ int peq_import_file(const char *path, peq_preset *out, peq_error *error);
 int peq_load(const char *path, peq_preset *out);
 int peq_load_active(peq_preset *p); /* the effective preset (eq_effective); 0 if none was read */
 int peq_save(const char *path, const peq_preset *p, int replace);
+/* p as Equalizer APO text that peq_parse reads back as p, its Auto in a "# q2:" comment: the
+ * length, or 0 if p is invalid or out holds less. peq_export_file is peq_save's, as text. */
+unsigned peq_export(const peq_preset *p, char *out, unsigned size);
+int peq_export_file(const char *path, const peq_preset *p, int replace);
 void eq3_bands(peq_preset *p, const double gain[3]);
 int eq_load(eq_state *s); /* 0: no readable state, s holds the defaults */
 int eq_save(const eq_state *s);
@@ -598,6 +603,7 @@ int ipod_square_art(void); /* navigation.c: Classic, and Modern under Square */
 #define SPOT_GREY 0xffaaaaaau
 void radio_search(void);       /* radio.c */
 void toast(const char *text); /* navigation.c */
+int feedback_oled(void);      /* feedback.c: OLED's toasts and dialogs */
 /* smart_wifi.c: its radio woken, 1 while its link comes up; its radio off; an action
  * held for that link (fn(ctx, 0) once it is up, if page, or any page when 0, is still in use) */
 int smart_wifi_wait(void), smart_wifi_off(void);

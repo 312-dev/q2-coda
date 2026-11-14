@@ -63,7 +63,8 @@ def api(fw):
            'peq_response': (None, ptr, i, d, ptr, ptr), 'peq_auto': (d, ptr, i), 'peq_reset': (None, ptr, i, i, ptr),
            'peq_update': (i, ptr, ptr), 'peq_process': (None, ptr, ptr, C.c_uint), 'decibels': (d, d),
            'peq__level': (None, ptr, d, d), 'peq__peak': (d, ptr, ptr, i), 'peq__live': (i, ptr, ptr),
-           'peq__sample': (d, ptr, ptr, i, d, i), 'peq__prepare': (i, ptr, i, ptr)}
+           'peq__sample': (d, ptr, ptr, i, d, i), 'peq__prepare': (i, ptr, i, ptr),
+           'peq_export': (C.c_uint, ptr, ptr, C.c_uint), 'peq_export_file': (i, C.c_char_p, ptr, i)}
     return SimpleNamespace(**{k.replace('peq__', ''): fw.fn(k, v[0], *v[1:]) for k, v in fns.items()})
 
 
@@ -1363,3 +1364,94 @@ def test_import_a_file_of_16385_bytes_is_too_long(fw):
 @pytest.mark.parametrize('power, want', ((1, 0), (10, 10), (100, 20), (.5, -3.0103)))
 def test_decibels_is_10_log10(fw, power, want):
     assert api(fw).decibels(power) == pytest.approx(want, abs=1e-4)
+
+
+# peq_export: presets on the card as Equalizer APO text (docs/internals.md#presets-on-the-card)
+
+def export(g, p, size=8192):
+    out = C.create_string_buffer(size)
+    n = g.peq_export(r(p), out, size)
+    return out.raw[:n] if n else None
+
+
+def same(p, q):
+    """p and q alike in every field, -0.0 as 0 as == has it."""
+    fields = lambda x: ([x.count, x.bypass, x.preamp, x.balance, x.automatic, x.spare] +
+                        [(b.enabled, b.type, b.frequency, b.gain, b.q) for b in x.bands])
+    return fields(p) == fields(q)
+
+
+def test_export_is_apo_text_with_auto_in_a_q2_comment(fw):
+    g = api(fw)
+    p = preset(g, (PK, 1000, -3.5, 1.41), (LS, 105, 5.5, .7, 2), (HS, 8000, 2, .7, 3), (PK, 200, 0, 1.41, 0),
+               preamp=-6.2, balance=1.5, automatic=1)
+    assert export(g, p) == (b'# Equalizer APO preset from q2-coda. "# q2:" lines are the Q2\'s own.\n'
+                            b'# q2: preamp auto\nPreamp: -6.2 dB\nChannel: L\nPreamp: -1.5 dB\nChannel: all\n'
+                            b'Filter 1: ON PK Fc 1000 Hz Gain -3.5 dB Q 1.41\nChannel: L\n'
+                            b'Filter 2: ON LSC Fc 105 Hz Gain 5.5 dB Q 0.7\nChannel: R\n'
+                            b'Filter 3: ON HSC Fc 8000 Hz Gain 2 dB Q 0.7\n'
+                            b'Filter 4: OFF PK Fc 200 Hz Gain 0 dB Q 1.41\n')
+
+
+def test_a_picked_preamp_is_plain_apo_and_a_right_cut_is_the_right_s_preamp(fw):
+    g = api(fw)
+    text = export(g, preset(g, preamp=-2, balance=-3, automatic=2))
+    assert b'q2:' not in text.split(b'\n', 1)[1] and b'Preamp: -2 dB\nChannel: R\nPreamp: -3 dB\nChannel: all\n' in text
+
+
+def test_parse_takes_the_q2_auto_comment_and_keeps_the_preamp(fw):
+    g = api(fw)
+    for text in (b'# q2: preamp auto\nPreamp: -3 dB\n', b'Preamp: -3 dB\n  #Q2:  Preamp Auto\n'):
+        p, _ = parse(g, text)
+        assert p.automatic == 1 and p.preamp == -3, text
+    p, _ = parse(g, b'# q2: something new\n# preamp auto\nPreamp: -3 dB\n')
+    assert p.automatic == 2
+
+
+def random_preset(g, rng):
+    def pick(lo, hi, *edges):
+        return rng.choice(edges) if rng.random() < .3 else rng.uniform(lo, hi)
+    p = Preset()
+    g.peq_default(r(p))
+    p.count, p.bypass, p.automatic = rng.randrange(31), 0, rng.choice((1, 2))
+    p.preamp = pick(-60, 24, -60, 24, 0, -6.5)
+    p.balance = pick(-12, 12, -12, 12, 0, 0, .5)
+    for i in range(p.count):
+        p.bands[i] = Band(rng.randrange(4), rng.randrange(3), min(20000, max(20, math.exp(pick(math.log(20), math.log(20000), math.log(20), math.log(20000))))),
+                          pick(-24, 24, -24, 24, 0, -0.0, 3), pick(.1, 10, .1, 10, .7071067811865476, 1.41))
+    assert g.peq_valid(r(p))
+    return p
+
+
+def test_export_round_trips_through_parse(fw):
+    g, rng = api(fw), random.Random(14)
+    for k in range(1500):
+        p = random_preset(g, rng)
+        q, err = parse(g, export(g, p))
+        assert q is not None and same(q, p), (k, err.line, err.reason, export(g, p))
+
+
+def test_a_preset_never_picked_round_trips_as_auto(fw):
+    g = api(fw)
+    p = preset(g, (PK, 1000, 6, 1), preamp=-6, automatic=0)
+    q, _ = parse(g, export(g, p))
+    p.automatic = 1
+    assert same(q, p)
+
+
+def test_export_refuses_an_invalid_preset_or_a_short_buffer(fw):
+    g = api(fw)
+    assert export(g, preset(g, (PK, 10, 6, 1))) is None
+    p = preset(g, *[(PK, 1000.0001, -0.12345678901234567, .12345678901234567, 3 - i % 2) for i in range(30)], preamp=-59.123456789, balance=-11.987654321)
+    text = export(g, p)
+    assert text and len(text) < 4096 and same(parse(g, text)[0], p)  # peq_export_file's buffer holds the longest
+    assert export(g, p, len(text)) is None and export(g, p, len(text) + 1) == text
+
+
+def test_export_file_asks_before_replacing_and_writes_plain_text(fw):
+    g = api(fw)
+    card = Card(fw, {'/x/a.txt': b'old'})
+    p = preset(g, (PK, 1000, 6, 1))
+    assert g.peq_export_file(b'/x/a.txt', r(p), 0) == 2 and card.files['/x/a.txt'] == b'old'
+    assert g.peq_export_file(b'/x/a.txt', r(p), 1) == 1 and card.files['/x/a.txt'] == export(g, p)
+    assert g.peq_export_file(b'/x/b.txt', r(preset(g, (PK, 1, 6, 1))), 1) == 0 and '/x/b.txt' not in card.files

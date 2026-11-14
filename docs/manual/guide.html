@@ -177,7 +177,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
     <li class="chap"><span class="n">{{p:c4}}</span><a href="#c4">Chapter 4: EQ</a></li>
     <li><span class="n">{{p:eq3}}</span><a href="#eq3">Simple</a></li>
     <li><span class="n">{{p:eq}}</span><a href="#eq">Advanced: the parametric EQ</a></li>
-    <li><span class="n">{{p:eqimport}}</span><a href="#eqimport">Importing a preset</a></li>
+    <li><span class="n">{{p:eqimport}}</span><a href="#eqimport">Presets on the card</a></li>
 
     <li class="chap"><span class="n">{{p:c5}}</span><a href="#c5">Chapter 5: Streaming</a></li>
     <li><span class="n">{{p:spotify}}</span><a href="#spotify">Spotify</a></li>
@@ -374,7 +374,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
     <li>On the Q2, choose <b>Library → Update Local Music</b>.</li>
   </ol>
   <p><b>Over Wi-Fi:</b> with the Q2 on your Wi-Fi network, open <b>System settings → Network → Wi-Fi File Transfer</b>. It shows an address and a six-digit PIN. Open the address in a browser on a computer on the same network and type the PIN when the page asks for it; then you can upload, download and delete files on the card. Each time you open Wi-Fi File Transfer it makes a new PIN. Five wrong PINs lock the page out: go back on the Q2 and open Wi-Fi File Transfer again for a new one. It turns itself off after 10 minutes with nothing uploaded, downloaded or listed, and when you go back.</p>
-  <p>These folders at the card’s root each add their own <b>Library</b> entry: <code>Podcasts/</code>, <code>Audiobooks/</code>, <code>Photos/</code>, <code>Books/</code> and <code>Videos/</code>; <code>EQ/</code> holds EQ presets to import. Other folder names, such as <code>Images/</code>, aren’t picked up. See <a href="#card">What goes on the microSD card</a> for supported formats.</p>
+  <p>These folders at the card’s root each add their own <b>Library</b> entry: <code>Podcasts/</code>, <code>Audiobooks/</code>, <code>Photos/</code>, <code>Books/</code> and <code>Videos/</code>; <code>EQ/</code> holds EQ presets. Other folder names, such as <code>Images/</code>, aren’t picked up. See <a href="#card">What goes on the microSD card</a> for supported formats.</p>
   <p>Update Local Music no longer stops at 20,000 songs, so with a larger library run it again after updating. Shanling rates the Q2 for 20,000 songs: a much larger library takes longer to scan and browse, and isn’t guaranteed to work.</p>
   <p><b>What the Library lists:</b> every song a scan finds, loose files beside your album folders included. On a very large card, <b>Songs</b>, <b>Albums</b> and <b>Artists</b> may not list everything; <b>Folder</b> view still plays every file. To list only part of a card, scan just those folders with <b>Scan Folders</b>, below.</p>
   <p><b>A large library:</b> Update Local Music goes through every folder on the card before it starts counting songs, so with tens of thousands of songs or a slow card it can stay at <b>No.0</b> for a long time. Leave it running; Return stops it. To add new music later without going through the whole card again, choose <b>System settings → Update Library → Scan Folders</b>, tick the folders you copied to, and press <b>Scan</b>. Open a folder, such as <code>Music</code>, to tick the artist or album folders inside it; tapping a folder that has no folders inside ticks it. Ticking the whole folder reads every song in it again, which takes about as long as a full update.</p>
@@ -405,7 +405,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
       <tr><td><code>Photos/</code></td><td><code>.jpg</code>, <code>.jpeg</code>, <code>.png</code> (JPEG up to 6 MB, PNG 1 MB); subfolders are albums</td><td>You</td></tr>
       <tr><td><code>Books/</code></td><td><code>.txt</code>, <code>.epub</code> (no DRM); one level of subfolders</td><td>You</td></tr>
       <tr><td><code>Videos/</code></td><td><code>.mp4</code>, <code>.m4v</code>, <code>.mkv</code>, <code>.avi</code>, <code>.mov</code>, <code>.mpg</code>; one level of subfolders</td><td>You</td></tr>
-      <tr><td><code>EQ/</code></td><td>AutoEQ / Equalizer APO presets to import</td><td>You</td></tr>
+      <tr><td><code>EQ/</code></td><td>EQ presets, as AutoEQ / Equalizer APO <code>.txt</code> files</td><td>Both</td></tr>
       <tr><td><code>Radio/</code></td><td>Internet Radio favourites, <code>.m3u</code> and <code>.pls</code></td><td>Both</td></tr>
       <tr><td><code>lockscreenimage/</code></td><td>Up to 5 lock screen images</td><td>You</td></tr>
       <tr><td><code>_explaylist_data/</code></td><td>M3U playlists to import, and a playlist’s own picture, <code>name.jpg</code> or <code>name.png</code> (<a href="#playlists">Playlists</a>)</td><td>Both</td></tr>
@@ -694,13 +694,15 @@ AUTO=1</pre>
 
   </div>
   <div class="sec">
-  <h2 id="eqimport">Importing a preset</h2>
-  <p class="task">Import an AutoEQ or Equalizer APO preset:</p>
+  <h2 id="eqimport">Presets on the card</h2>
+  <p>Presets are Equalizer APO text files in <code>/EQ/</code> on the card: the ones you save on the Q2 and the ones you copy there, such as AutoEQ’s <code>ParametricEQ.txt</code> for your headphones. A preset saved on the Q2 works in Equalizer APO or Peace on a computer too.</p>
+  <p class="task">Use an AutoEQ or Equalizer APO preset:</p>
   <ol class="steps">
-    <li>Copy an AutoEQ / Equalizer APO <code>.txt</code> file to <code>/EQ/</code> on the card. <code>Channel: L</code>, <code>R</code> and <code>all</code> sections work.</li>
-    <li>Choose <b>Presets → Import from SD /EQ</b>, then pick the file. Large collections are alphabetical; use <b>Next page</b> and <b>Previous page</b> to browse them.</li>
-    <li>Select the saved preset, then <b>Apply changes</b> (and <b>Enabled: On</b>).</li>
+    <li>Copy the <code>.txt</code> file to <code>/EQ/</code> on the card. <code>Channel: L</code>, <code>R</code> and <code>all</code> sections work.</li>
+    <li>Choose <b>Presets</b>, then pick the file. Large collections are alphabetical; use <b>Next page</b> and <b>Previous page</b> to browse them.</li>
+    <li>Choose <b>Apply changes</b> (and <b>Enabled: On</b>).</li>
   </ol>
+  <p><b>Save editor preset</b> writes <code>Manual 01.txt</code> to <code>Manual 10.txt</code>; rename them to keep them apart. Choosing Auto or a value for <b>Preamp</b> with a preset loaded writes it into that preset’s file. Presets saved by earlier firmware are copied to <code>/EQ/</code> the first time you open <b>Presets</b> with the card in.</p>
   </div>
 </section>
 

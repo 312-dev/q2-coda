@@ -43,8 +43,8 @@ void peq_attach(void) {
     if (s.mode == EQ_OFF || (s.mode = EQ_OFF, s.hold = 0, eq_save(&s))) peq_stock_eq(1);
 }
 
-enum { HOME, BAND, PRESETS, IMPORTS, SAVES, CONFIRM, DELETES, PICK, ADJUST, STOCKS, RENAMES, NAMING };
-enum { BACK = 1000, APPLY, RESET, BYPASS, PER_OUTPUT, MENU, IMPORT, SAVE, ENABLE, TYPE, RAISE, LOWER, TYPED, CHANNEL, STEP,
+enum { HOME, BAND, PRESETS, SAVES, CONFIRM, DELETES, PICK, ADJUST, STOCKS, RENAMES, NAMING };
+enum { BACK = 1000, APPLY, RESET, BYPASS, PER_OUTPUT, MENU, SAVE, ENABLE, TYPE, RAISE, LOWER, TYPED, CHANNEL, STEP,
        YES, CANCEL, DELETE, BALANCE, PREAMP, GAIN, /* these three open the picker, in picks[] order */
        FREQUENCY, QUALITY, /* and these two the value menu */ KEYBOARD, STOCK, FILE_PREV, FILE_NEXT, RENAME, NAMED };
 #define FILE_PAGE 128
@@ -364,16 +364,18 @@ static void auto_text(char *s, unsigned n) {
     snprintf(s, n, "Auto (44.1: %.1f / 48: %.1f)", autos()[0], autos()[1]);
 }
 
-/* A Preamp pick sticks to the saved preset it was loaded from (its copy in PEQ_SAVED, never the
- * card's .txt); its bands stay as saved until Save. ponytail: keyed on ui.name, so a stock preset
- * named like a saved one ("Rock") writes to that file; keep the loaded path if that matters. */
+/* A Preamp pick sticks to the preset on the card it was loaded from, written out again (peq_export);
+ * its bands stay as saved until Save. ponytail: the file's own comments go, and keyed on ui.name,
+ * a stock preset named like a saved one ("Rock") writes to that file; keep the loaded path if
+ * that matters. */
 static void remember_preamp(void) {
     char path[600];
     peq_preset p;
-    snprintf(path, sizeof(path), PEQ_SAVED "/%s.peq", ui.name);
-    if (!ui.name[0] || !peq_load(path, &p)) return; /* a stock preset, Reset or none */
+    peq_error e;
+    snprintf(path, sizeof(path), PEQ_FOLDER "/%s.txt", ui.name);
+    if (!ui.name[0] || !peq_import_file(path, &p, &e)) return; /* a stock preset, Reset or none */
     p.automatic = ui.draft.automatic, p.preamp = ui.draft.preamp;
-    peq_save(path, &p, 1);
+    peq_export_file(path, &p, 1);
 }
 
 static int compare_names(const void *a, const void *b) { return strcmp(a, b); }
@@ -387,7 +389,7 @@ static void list_files(const char *folder, const char *extension) {
         const char *name = entry->d_name;
         unsigned n = strlen(name), e = strlen(extension);
         if (entry->d_type != 8 && entry->d_type != 0) continue;
-        if (n <= e || n >= 256 || strcmp(name + n - e, extension)) continue;
+        if (n <= e || n >= 256 || strcasecmp(name + n - e, extension)) continue;
         if (ui.count == ui.capacity) {
             int capacity = ui.capacity ? ui.capacity * 2 : FILE_PAGE;
             void *names = calloc(capacity, 256);
@@ -408,8 +410,35 @@ static void list_files(const char *folder, const char *extension) {
     if (!ui.count && !ui.status[0]) snprintf(ui.status, sizeof(ui.status), "No presets found");
 }
 
-/* File name in ui.destination: sizeof skips PEQ_SAVED and its "/". */
-static const char *deleting(void) { return ui.destination + sizeof(PEQ_SAVED); }
+/* File name in ui.destination: sizeof skips PEQ_FOLDER and its "/". */
+static const char *deleting(void) { return ui.destination + sizeof(PEQ_FOLDER); }
+
+/* Earlier firmware's binary presets (PEQ_SAVED), written out to the card's folder once and kept
+ * there for a downgrade. A text preset of the same name stays, unless it reads and differs: the
+ * binary is then that file's import with a Preamp picked since, as remember_preamp keeps it. */
+static void write_out(void) {
+    char from[600], to[600];
+    struct dirent *entry;
+    void *dir;
+    int ok = 1;
+    if (!access(PEQ_SAVED "/.written", 0) || !card_mounted() || !(dir = opendir(PEQ_SAVED))) return;
+    mkdir(PEQ_FOLDER, 0700);
+    while ((entry = readdir(dir))) {
+        unsigned n = strlen(entry->d_name);
+        peq_preset p, text;
+        peq_error e;
+        if (n <= 4 || n >= 256 || strcmp(entry->d_name + n - 4, ".peq")) continue;
+        snprintf(from, sizeof from, PEQ_SAVED "/%s", entry->d_name);
+        snprintf(to, sizeof to, PEQ_FOLDER "/%.*s.txt", (int)n - 4, entry->d_name);
+        if (!peq_load(from, &p)) continue;
+        p.bypass = 0;
+        if (p.automatic != 2) p.automatic = 1; /* never picked is Auto, as the editor takes it */
+        if (!access(to, 0) && (!peq_import_file(to, &text, &e) || !memcmp(&text, &p, sizeof p))) continue;
+        ok &= peq_export_file(to, &p, 1);
+    }
+    closedir(dir);
+    if (ok) peq_save_file(PEQ_SAVED "/.written", 0, "", 0);
+}
 
 /* ui.destination (a saved preset's path) renamed to the edit's text, kept if that starts with a
  * dot, holds a character the card's FAT cannot, names another preset or is too long to read back
@@ -435,7 +464,7 @@ checked:
     else if (!*t || *t == '.' || *c)
         snprintf(ui.status, sizeof(ui.status), "Name not allowed; preset kept");
     else if (!strcmp(t, old)) return;
-    else if (snprintf(to, sizeof to, PEQ_SAVED "/%s.peq", t), strcasecmp(t, old) && !access(to, 0))
+    else if (snprintf(to, sizeof to, PEQ_FOLDER "/%s.txt", t), strcasecmp(t, old) && !access(to, 0))
         snprintf(ui.status, sizeof(ui.status), "Name taken; preset kept");
     else if (rename(ui.destination, to))
         snprintf(ui.status, sizeof(ui.status), "Rename failed; preset kept");
@@ -489,8 +518,8 @@ void *edit_create(void *item, const char *input_type, int y, int h) {
 }
 
 static void save_candidate(int replace) {
-    mkdir(PEQ_SAVED, 0700);
-    int result = peq_save(ui.destination, &ui.candidate, replace);
+    mkdir(PEQ_FOLDER, 0700);
+    int result = peq_export_file(ui.destination, &ui.candidate, replace);
     if (result == 2) { ui.previous = ui.screen; ui.screen = CONFIRM; }
     else snprintf(ui.status, sizeof(ui.status), result ? "Preset saved; active EQ unchanged" : "Save failed; settings unchanged");
 }
@@ -540,7 +569,6 @@ static int action(void *ctx, void *event) {
         else if (ui.screen == NAMING) ui.screen = RENAMES;
         else ui.screen = ui.from_simple || ui.screen == BAND || ui.screen == PRESETS ? HOME : PRESETS;
     } else if (id == MENU) ui.screen = PRESETS;
-    else if (id == IMPORT) ui.screen = IMPORTS;
     else if (id == FILE_PREV || id == FILE_NEXT) {
         ui.file_page += id == FILE_NEXT ? 1 : -1;
         ui.rendered = -1;
@@ -611,33 +639,23 @@ static int action(void *ctx, void *event) {
             load_draft(&p, stock_names[id], sizeof(stock_names[id]));
         }
         else if (ui.screen == SAVES && id < 10) {
-            snprintf(ui.destination, sizeof(ui.destination), PEQ_SAVED "/Manual %02d.peq", id + 1);
+            snprintf(ui.destination, sizeof(ui.destination), PEQ_FOLDER "/Manual %02d.txt", id + 1);
             ui.candidate = ui.draft;
             save_candidate(0);
-        } else if (file < ui.count && ui.screen == IMPORTS) {
-            char path[600];
-            peq_error error;
-            snprintf(path, sizeof(path), PEQ_IMPORT "/%s", ui.names[file]);
-            if (!peq_import_file(path, &ui.candidate, &error))
-                snprintf(ui.status, sizeof(ui.status), "Line %u: %s", error.line, error.reason);
-            else {
-                unsigned n = strlen(ui.names[file]) - 4;
-                snprintf(ui.destination, sizeof(ui.destination), PEQ_SAVED "/%.*s.peq", (int)n, ui.names[file]);
-                save_candidate(0);
-            }
         } else if (file < ui.count && ui.screen == RENAMES) {
-            snprintf(ui.destination, sizeof(ui.destination), PEQ_SAVED "/%s", ui.names[file]);
+            snprintf(ui.destination, sizeof(ui.destination), PEQ_FOLDER "/%s", ui.names[file]);
             ui.screen = NAMING;
         } else if (file < ui.count && ui.screen == DELETES) {
-            snprintf(ui.destination, sizeof(ui.destination), PEQ_SAVED "/%s", ui.names[file]);
+            snprintf(ui.destination, sizeof(ui.destination), PEQ_FOLDER "/%s", ui.names[file]);
             ui.previous = DELETES;
             ui.screen = CONFIRM;
         } else if (file < ui.count && ui.screen == PRESETS) {
             char path[600];
-            snprintf(path, sizeof(path), PEQ_SAVED "/%s", ui.names[file]);
             peq_preset p;
-            if (peq_load(path, &p)) load_draft(&p, ui.names[file], (int)strlen(ui.names[file]) - 4);
-            else snprintf(ui.status, sizeof(ui.status), "Cannot read preset; settings unchanged");
+            peq_error error;
+            snprintf(path, sizeof(path), PEQ_FOLDER "/%s", ui.names[file]);
+            if (peq_import_file(path, &p, &error)) load_draft(&p, ui.names[file], (int)strlen(ui.names[file]) - 4);
+            else snprintf(ui.status, sizeof(ui.status), "Line %u: %s", error.line, error.reason);
         }
     }
     if (edit) { /* ENABLE, TYPE, RAISE, LOWER, TYPED, CHANNEL and a picked gain */
@@ -658,6 +676,14 @@ static int action(void *ctx, void *event) {
     }
     if (screen != ui.screen) ui.file_page = 0;
     if (!ui.timer) ui.timer = timer_add(render, 0, 1);
+    /* Under OLED what an action did is a toast over the page, which keeps its title
+     * (docs/oled-design.md#dialogs-and-toasts); the render runs under it. */
+    if (feedback_oled() && ui.status[0]) {
+        char said[sizeof ui.status];
+        memcpy(said, ui.status, sizeof said);
+        ui.status[0] = 0;
+        toast(said);
+    }
     return 0;
 }
 
@@ -802,12 +828,12 @@ static int render(const void *unused) {
     } else {
         if (ui.screen == PRESETS) {
             row_dim(view, n++, "Stock presets", 0, STOCK, INTO);
-            row_dim(view, n++, "Import from SD /EQ", 0, IMPORT, INTO);
             row_dim(view, n++, "Save editor preset", 0, SAVE, INTO);
             row_dim(view, n++, "Rename a preset", 0, RENAME, INTO);
             row_dim(view, n++, "Delete a preset", 0, DELETE, INTO);
         }
-        list_files(ui.screen == IMPORTS ? PEQ_IMPORT : PEQ_SAVED, ui.screen == IMPORTS ? ".txt" : ".peq");
+        write_out();
+        list_files(PEQ_FOLDER, ".txt");
         int last = ui.count ? (ui.count - 1) / FILE_PAGE : 0;
         if (ui.file_page < 0) ui.file_page = 0;
         if (ui.file_page > last) { ui.file_page = last; selection = offset = 0; }
@@ -836,7 +862,7 @@ static int render(const void *unused) {
     else if (ui.screen == PICK && ui.pick == GAIN) snprintf(text, sizeof(text), "Band %d Gain", ui.band + 1);
     else if (ui.screen == PICK)
         snprintf(text, sizeof(text), ui.pick == PREAMP ? "Preamp" : "Balance");
-    else if ((ui.screen == IMPORTS || ui.screen == PRESETS || ui.screen == DELETES || ui.screen == RENAMES) &&
+    else if ((ui.screen == PRESETS || ui.screen == DELETES || ui.screen == RENAMES) &&
              ui.count > FILE_PAGE)
         snprintf(text, sizeof(text), "Presets %d/%d", ui.file_page + 1, (ui.count - 1) / FILE_PAGE + 1);
     else if (ui.screen != HOME && ui.screen != ADJUST && ui.screen != NAMING)

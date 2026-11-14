@@ -18,9 +18,9 @@ EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE, EVT_POINTER_UP_BEFORE = (O[k] for k i
 EVENT_KEY, EVENT_X, EVENT_Y, W_PARENT, IM_WIDGET, IM_KEYBOARD = (
     O['EVENT_KEY'], O['EVENT_X'], O['EVENT_Y'], O['W_PARENT'], O['IM_WIDGET'], 0x0c)
 RET_REMOVE, RET_REPEAT = 7, 8
-ACTIVE, SAVED, IMPORT, OUTPUTS = '/mnt/data/peq-active', '/mnt/data/peq-presets', '/mnt/mmc/EQ', '/mnt/data/peq-outputs'
+ACTIVE, SAVED, FOLDER, OUTPUTS = '/mnt/data/peq-active', '/mnt/data/peq-presets', '/mnt/mmc/EQ', '/mnt/data/peq-outputs'
 EQ_OFF, EQ_3, EQ_PEQ = range(3)
-HOME, BAND, PRESETS, IMPORTS, SAVES, CONFIRM, DELETES, PICK, ADJUST, STOCKS, RENAMES, NAMING = range(12)
+HOME, BAND, PRESETS, SAVES, CONFIRM, DELETES, PICK, ADJUST, STOCKS, RENAMES, NAMING = range(11)
 SIMPLE, ADVANCED = range(2)
 E3_TABS, E3_SWITCH, E3_PRESETS, E3_RESET, E3_LOW, E3_MID, E3_HIGH = range(7)
 GRAPH_X, GRAPH_W, PLOT_TOP, PLOT_BOTTOM, GRAPH_DB = 16, 343, 6, 78, 15
@@ -122,6 +122,14 @@ class Card:
     def state(self, path=ACTIVE):
         assert self.files[path][:8] == b'Q2PEQ03\0'
         return EqState.from_buffer_copy(self.files[path], 8)
+
+
+def apo(fw, p):
+    """p as a preset on the card (peq_export)."""
+    out = C.create_string_buffer(8192)
+    n = fw.fn('peq_export', C.c_uint, C.c_void_p, C.c_void_p, C.c_uint)(r(p), out, 8192)
+    assert n
+    return out.raw[:n]
 
 
 def default(fw):
@@ -524,10 +532,10 @@ def test_auto_s_two_cuts_are_drawn_smaller_to_fit(fw):
 def test_a_preset_s_name_and_a_picked_preamp_show_as_set(fw):
     s = state(fw, EQ_PEQ, peq=peak(fw, 3))
     s.peq.automatic, s.peq.preamp = 2, -4.5
-    files = {f'{SAVED}/Rock.peq': b'Q2PEQ02\0' + bytes(s.peq)}
+    files = {f'{FOLDER}/Rock.txt': apo(fw, s.peq)}
     p = page(fw, s, files).advanced()
     p.click('Presets')
-    p.click('Rock.peq')
+    p.click('Rock.txt')
     assert 'Presets Rock' in p.captions() and 'Preamp -4.5 dB' in p.captions()
     assert p.title() == 'Preset loaded; choose Apply to activate'
 
@@ -539,9 +547,9 @@ def test_a_long_preset_name_ellipsises_right_aligned_clear_of_its_caption(fw):
     fw.mock('widget_use_style', lambda w, name, *_: style.__setitem__(w, C.string_at(name).decode()))
     s = state(fw, EQ_PEQ, peq=peak(fw, 3))
     name = 'LETSHUOER DEFIANT-to-iBASSO Exemplar'
-    p = page(fw, s, {f'{SAVED}/{name}.peq': b'Q2PEQ02\0' + bytes(s.peq)}).advanced()
+    p = page(fw, s, {f'{FOLDER}/{name}.txt': apo(fw, s.peq)}).advanced()
     p.click('Presets')
-    p.click(f'{name}.peq')
+    p.click(f'{name}.txt')
     row = [item for t, item in p.rows() if t.startswith('Presets')][0]
     value = [c for c in p.children(row) if p.text.get(c) == name][0]
     x, _, w, _ = struct.unpack_from('<4i', p.blocks[value], 0)
@@ -792,35 +800,35 @@ def test_a_kept_screen_keeps_its_selection_and_scroll(fw):
 # The presets' screens.
 
 def test_the_presets_screen_lists_saved_presets_sorted(fw):
-    p = page(fw, files={f'{SAVED}/b.peq': b'x', f'{SAVED}/a.peq': b'x', f'{SAVED}/notes.txt': b'x'}).advanced()
+    p = page(fw, files={f'{FOLDER}/b.txt': b'x', f'{FOLDER}/a.txt': b'x', f'{FOLDER}/C.TXT': b'x', f'{FOLDER}/notes.md': b'x',
+                        f'{SAVED}/old.peq': b'x'}).advanced()
     p.click('Presets')
-    assert p.captions() == ['Stock presets', 'Import from SD /EQ', 'Save editor preset', 'Rename a preset', 'Delete a preset',
-                            'a.peq', 'b.peq']
+    assert p.captions() == ['Stock presets', 'Save editor preset', 'Rename a preset', 'Delete a preset', 'C.TXT', 'a.txt', 'b.txt']
     assert p.title() == 'Presets' and not p.ui.graph and p.ui.bar is None
     rows = dict(p.rows())
-    assert all(p.chevron(rows[t]) for t in p.captions()[:5]) and not p.chevron(rows['a.peq'])
+    assert all(p.chevron(rows[t]) for t in p.captions()[:4]) and not p.chevron(rows['a.txt'])
 
 
 def test_more_than_a_page_of_presets_pages(fw):
-    files = {f'{SAVED}/{k:03}.peq': b'x' for k in range(130)}
+    files = {f'{FOLDER}/{k:03}.txt': b'x' for k in range(130)}
     p = page(fw, files=files).advanced()
     p.click('Presets')
-    assert p.title() == 'Presets 1/2' and p.captions()[5:7] == ['Next page', '000.peq'] and p.captions()[-1] == '127.peq'
-    assert len(p.rows()) == 5 + 1 + 128
+    assert p.title() == 'Presets 1/2' and p.captions()[4:6] == ['Next page', '000.txt'] and p.captions()[-1] == '127.txt'
+    assert len(p.rows()) == 4 + 1 + 128
     p.click('Next page')
-    assert p.title() == 'Presets 2/2' and p.captions()[5:] == ['Previous page', '128.peq', '129.peq']
+    assert p.title() == 'Presets 2/2' and p.captions()[4:] == ['Previous page', '128.txt', '129.txt']
     p.click('Previous page')
     assert p.title() == 'Presets 1/2'
 
 
 def test_a_page_the_card_no_longer_fills_is_its_last(fw):
-    files = {f'{SAVED}/{k:03}.peq': b'x' for k in range(130)}
+    files = {f'{FOLDER}/{k:03}.txt': b'x' for k in range(130)}
     p = page(fw, files=files).advanced()
     p.click('Presets')
     p.click('Next page')
-    del p.card.files[f'{SAVED}/128.peq'], p.card.files[f'{SAVED}/129.peq']  # gone from the card meanwhile
-    p.click('128.peq')
-    assert p.ui.file_page == 0 and p.title() == 'Cannot read preset; settings unchanged' and p.captions()[5] == '000.peq'
+    del p.card.files[f'{FOLDER}/128.txt'], p.card.files[f'{FOLDER}/129.txt']  # gone from the card meanwhile
+    p.click('128.txt')
+    assert p.ui.file_page == 0 and p.title() == 'Line 1: cannot open file' and p.captions()[4] == '000.txt'
     assert p.props[(p.ui.view, 'offset')] == 0 and p.props[(p.ui.view, '_ringnav_index')] == 0
 
 
@@ -830,7 +838,7 @@ def test_saving_offers_ten_slots_and_asks_before_replacing(fw):
     p.click('Save editor preset')
     assert p.captions() == [f'Save as Manual {k:02}' for k in range(1, 11)] and p.title() == 'Presets'
     p.click('Save as Manual 03')
-    assert f'{SAVED}/Manual 03.peq' in p.card.files and p.title() == 'Preset saved; active EQ unchanged'
+    assert f'{FOLDER}/Manual 03.txt' in p.card.files and p.title() == 'Preset saved; active EQ unchanged'
     p.click('Save as Manual 03')
     assert p.captions() == ['Replace existing preset? Confirm', 'Cancel replacement'] and p.ui.screen == CONFIRM
     p.click('Cancel replacement')
@@ -843,31 +851,31 @@ def test_a_failed_save_says_so(fw):
     p.click('Save editor preset')
     p.card.fail_writes = True
     p.click('Save as Manual 01')
-    assert p.title() == 'Save failed; settings unchanged' and f'{SAVED}/Manual 01.peq' not in p.card.files
+    assert p.title() == 'Save failed; settings unchanged' and f'{FOLDER}/Manual 01.txt' not in p.card.files
 
 
 def test_deleting_asks_then_deletes(fw):
-    p = page(fw, files={f'{SAVED}/a.peq': b'x'}).advanced()
+    p = page(fw, files={f'{FOLDER}/a.txt': b'x'}).advanced()
     p.click('Presets')
     p.click('Delete a preset')
-    p.click('a.peq')
-    assert p.captions() == ['Delete a.peq? Confirm', 'Cancel']
+    p.click('a.txt')
+    assert p.captions() == ['Delete a.txt? Confirm', 'Cancel']
     rh = fw.fn('page_h', C.c_int, C.c_int)(48)
     shrunk = [h for (w, k), h in p.props.items() if k == 'resized' and w in p.alive]
     assert shrunk == [2 * rh, 2 * rh]  # the list and its view end at the last row: no white below
-    p.click('Delete a.peq? Confirm')
-    assert f'{SAVED}/a.peq' not in p.card.files and p.title() == 'Deleted a.peq; active EQ unchanged'
+    p.click('Delete a.txt? Confirm')
+    assert f'{FOLDER}/a.txt' not in p.card.files and p.title() == 'Deleted a.txt; active EQ unchanged'
     p.ret()
     assert p.ui.screen == PRESETS
 
 
 def test_a_failed_delete_says_so(fw):
-    p = page(fw, files={f'{SAVED}/a.peq': b'x'}).advanced()
+    p = page(fw, files={f'{FOLDER}/a.txt': b'x'}).advanced()
     p.click('Presets')
     p.click('Delete a preset')
-    p.click('a.peq')
+    p.click('a.txt')
     fw.mock('fw_unlink', lambda *_: -1)
-    p.click('Delete a.peq? Confirm')
+    p.click('Delete a.txt? Confirm')
     assert p.title() == 'Delete failed; preset kept'
 
 
@@ -880,27 +888,67 @@ def test_the_stock_presets(fw):
     assert p.ui.screen == HOME and 'Presets Jazz' in p.captions() and p.captions()[0] == 'Apply changes'
 
 
-def test_an_import_with_a_bad_line_says_which(fw):
-    p = page(fw, files={f'{IMPORT}/x.txt': b'Preamp: -3 dB\nnonsense\n'}).advanced()
+def test_a_preset_with_a_bad_line_says_which(fw):
+    p = page(fw, files={f'{FOLDER}/x.txt': b'Preamp: -3 dB\nnonsense\n'}).advanced()
     p.click('Presets')
-    p.click('Import from SD /EQ')
-    assert p.captions() == ['x.txt'] and p.title() == 'Presets'
+    assert p.captions()[4:] == ['x.txt'] and p.title() == 'Presets'
     p.click('x.txt')
-    assert p.title() == 'Line 2: unsupported command' and f'{SAVED}/x.peq' not in p.card.files
+    assert p.title() == 'Line 2: unsupported command' and p.ui.screen == PRESETS
 
 
-def test_no_imports_says_why(fw):
+def test_no_folder_on_the_card_says_why(fw):
     p = page(fw).advanced()
     p.click('Presets')
-    p.click('Import from SD /EQ')
-    assert p.captions() == [] and p.title() == 'Folder missing or unavailable'
+    assert p.captions()[4:] == [] and p.title() == 'Folder missing or unavailable'
+
+
+MOUNTS = {'/proc/mounts': b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n'}
+
+
+def binary(p):
+    return b'Q2PEQ02\0' + bytes(p)
+
+
+def test_earlier_binary_presets_are_written_out_once_and_kept(fw):
+    rock, imp, same = peak(fw, 3), peak(fw, 4), peak(fw, 5)
+    rock.automatic, same.automatic = 2, 2
+    imp.automatic, imp.preamp = 1, -4  # its file's preamp switched to Auto, which the file never held
+    imported = Preset.from_buffer_copy(imp)
+    imported.automatic, imported.preamp = 2, -1.5
+    files = {**MOUNTS, f'{SAVED}/Rock.peq': binary(rock), f'{SAVED}/Imp.peq': binary(imp), f'{SAVED}/Same.peq': binary(same),
+             f'{SAVED}/bad.peq': b'junk', f'{FOLDER}/Imp.txt': apo(fw, imported), f'{FOLDER}/Same.txt': b'# mine\n' + apo(fw, same)}
+    p = page(fw, files=files).advanced()
+    p.click('Presets')
+    assert p.captions()[4:] == ['Imp.txt', 'Rock.txt', 'Same.txt']
+    assert p.card.files[f'{FOLDER}/Rock.txt'] == apo(fw, rock) and p.card.files[f'{FOLDER}/Imp.txt'] == apo(fw, imp)
+    assert p.card.files[f'{FOLDER}/Same.txt'].startswith(b'# mine\n')  # the same preset: the file stays as it is
+    assert all(p.card.files[k] == v for k, v in files.items() if k.startswith(SAVED)) and f'{SAVED}/.written' in p.card.files
+    del p.card.files[f'{FOLDER}/Rock.txt']
+    p.ret()
+    p.click('Presets')
+    assert f'{FOLDER}/Rock.txt' not in p.card.files  # once
+
+
+def test_binary_presets_wait_for_the_card(fw):
+    p = page(fw, files={f'{SAVED}/Rock.peq': binary(peak(fw, 3))}).advanced()
+    p.click('Presets')
+    assert sorted(p.card.files) == [ACTIVE, f'{SAVED}/Rock.peq']
+    p.card.files.update(MOUNTS)
+    p.card.fail_writes = True
+    p.ret()
+    p.click('Presets')
+    assert f'{SAVED}/.written' not in p.card.files  # a failed write is tried again
+    p.card.fail_writes = False
+    p.ret()
+    p.click('Presets')
+    assert f'{FOLDER}/Rock.txt' in p.card.files and f'{SAVED}/.written' in p.card.files
 
 
 def test_renaming_opens_the_name_with_the_keyboard_up(fw):
-    p = page(fw, files={f'{SAVED}/Rock.peq': b'x'}).advanced()
+    p = page(fw, files={f'{FOLDER}/Rock.txt': b'x'}).advanced()
     p.click('Presets')
     p.click('Rename a preset')
-    p.click('Rock.peq')
+    p.click('Rock.txt')
     edit = p.edit()
     assert p.ui.screen == NAMING and p.captions() == ['Rename'] and p.text[edit] == 'Rock' and p.title() == ''
     assert p.props[(edit, 'select_none_when_focused')] == 1 and p.focused[-1] == (edit, 1)
@@ -909,29 +957,29 @@ def test_renaming_opens_the_name_with_the_keyboard_up(fw):
     p.handler(edit, EVT_IM_ACTION)()
     p.handler(edit, EVT_VALUE_CHANGED)()  # Done sends both: renamed once
     p.settle()
-    assert f'{SAVED}/Jazz.peq' in p.card.files and p.ui.screen == PRESETS and p.title() == 'Renamed to Jazz'
+    assert f'{FOLDER}/Jazz.txt' in p.card.files and p.ui.screen == PRESETS and p.title() == 'Renamed to Jazz'
 
 
 def test_return_from_the_name_goes_back_to_the_list(fw):
-    p = page(fw, files={f'{SAVED}/Rock.peq': b'x'}).advanced()
+    p = page(fw, files={f'{FOLDER}/Rock.txt': b'x'}).advanced()
     p.click('Presets')
     p.click('Rename a preset')
-    p.click('Rock.peq')
+    p.click('Rock.txt')
     p.ret()
-    assert p.ui.screen == RENAMES and p.captions() == ['Rock.peq'] and p.card.files[f'{SAVED}/Rock.peq'] == b'x'
+    assert p.ui.screen == RENAMES and p.captions() == ['Rock.txt'] and p.card.files[f'{FOLDER}/Rock.txt'] == b'x'
 
 
 def test_a_tap_on_the_row_renames_through_the_edit_s_blur_once(fw):
-    p = page(fw, files={f'{SAVED}/Rock.peq': b'x'}).advanced()
+    p = page(fw, files={f'{FOLDER}/Rock.txt': b'x'}).advanced()
     p.click('Presets')
     p.click('Rename a preset')
-    p.click('Rock.peq')
+    p.click('Rock.txt')
     p.text[p.edit()] = 'Jazz'
     row = p.rows()[0][1]
     p.handler(p.edit(), EVT_VALUE_CHANGED)()  # the blur, as the touch leaves the edit
     p.handler(row, EVT_CLICK)()  # then the row's own click: renamed already
     p.settle()
-    assert sorted(p.card.files) == [ACTIVE, f'{SAVED}/Jazz.peq'] and p.ui.screen == PRESETS and p.title() == 'Renamed to Jazz'
+    assert sorted(p.card.files) == [ACTIVE, f'{FOLDER}/Jazz.txt'] and p.ui.screen == PRESETS and p.title() == 'Renamed to Jazz'
 
 
 def test_return_steps_back_and_leaves_from_the_main_screen(fw):
@@ -984,7 +1032,7 @@ def test_closing_with_an_edit_up_lets_t9_go(fw):
 
 
 def test_closing_frees_the_preset_list(fw):
-    p = page(fw, files={f'{SAVED}/a.peq': b'x'}).advanced()
+    p = page(fw, files={f'{FOLDER}/a.txt': b'x'}).advanced()
     p.click('Presets')
     assert p.ui.capacity and p.ui.names
     p.handler(p.page, EVT_DESTROY)()

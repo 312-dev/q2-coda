@@ -54,6 +54,7 @@ def library(tmp):
         'peq_parse': [C.c_char_p, C.c_uint, C.POINTER(Preset), C.POINTER(Error)],
         'peq_import_file': [C.c_char_p, C.POINTER(Preset), C.POINTER(Error)],
         'peq_save': [C.c_char_p, C.POINTER(Preset), C.c_int],
+        'peq_export_file': [C.c_char_p, C.POINTER(Preset), C.c_int],
         'peq_load': [C.c_char_p, C.POINTER(Preset)],
         'peq_compile': [C.POINTER(Preset), C.c_int, C.POINTER(Engine)],
         'peq_reset': [C.POINTER(DSP), C.c_int, C.c_int, C.POINTER(Preset)],
@@ -437,6 +438,14 @@ static int stock_eq_calls;
 int stock_eq_trampoline(int mode) { ++stock_eq_calls; return mode; }
 int shim_chained(void) { return stock_eq_calls; }
 int client_h(void) { return 290; }
+int shim_unmounted, shim_toasts;
+int card_mounted(void) { return !shim_unmounted; }
+int feedback_oled(void) { return 0; }
+int eq_rows(void) { return 0; } /* the iPod themes': no set_switch (slider_page.c) */
+int eq_list_end(void) { return 290; }
+void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) { (void)w, (void)canvas, (void)e; }
+void eq_tabs_paint(void *w, void *canvas, int simple, int focus) { (void)w, (void)canvas, (void)simple, (void)focus; }
+void toast(const char *text) { (void)text; ++shim_toasts; }
 static void *make(void *parent, int h) {
     ++count; w[count].parent = (int)(long)parent; w[count].h = h; w[count].x = w[count].y = w[count].px = 0;
     w[count].text[0] = 0; chevrons[count] = 0; w[count].click = w[count].change = w[count].focus = w[count].down = w[count].action = 0; w[count].bg = 0; return (void *)(long)count;
@@ -790,8 +799,8 @@ def editor_check(lib, tmp):
                       '-I', ROOT/'patch', '-include', tmp/'shim.h')
     headroom_check(lib, ui)
     ui.shim_title.restype = C.c_char_p
-    data, saved = tmp/'root/mnt/data', tmp/'root/mnt/data/peq-presets'
-    saved.mkdir(parents=True); (tmp/'root/mnt/mmc/EQ').mkdir(parents=True)
+    data, eqdir = tmp/'root/mnt/data', tmp/'root/mnt/mmc/EQ'  # presets are text on the card
+    (data/'peq-presets').mkdir(parents=True); eqdir.mkdir(parents=True)
     active = data/'peq-active'
     def preset(**band):
         p = Preset(); lib.peq_default(C.byref(p)); p.bypass = 0
@@ -844,10 +853,10 @@ def editor_check(lib, tmp):
     assert ui.shim_e3_key(1) == 1 and ui.shim_selection() == 0
     click('1  '); assert ui.shim_row0_y() == 96 and ui.shim_e3_key(0) == 0; ui.shim_return()
     # Loading into the editor does not activate it.
-    assert lib.peq_save(bytes(saved/'HD650.peq'), C.byref(preset(enabled=1, gain=-3.0)), 1) == 1
+    assert lib.peq_export_file(bytes(eqdir/'HD650.txt'), C.byref(preset(enabled=1, gain=-3.0)), 1) == 1
     before = active.read_bytes()
     click('Presets'); assert ui.shim_row0_y() == 0 and ui.shim_virtual_h() == ui.shim_rows_bottom()  # no curve
-    click('HD650.peq')
+    click('HD650.txt')
     assert active.read_bytes() == before and title() == 'Preset loaded; choose Apply to activate'
     click('Enabled Off'); click('Enabled On')  # any action clears the message
     assert named('HD650') and read().bands[0].gain == 1  # the draft's name; still the applied preset
@@ -871,51 +880,51 @@ def editor_check(lib, tmp):
     # end (stock's focus selected it all, so a key replaced it). Return with the keyboard up goes back
     # to the list and keeps the name and the file.
     ui.shim_edit.restype = C.c_char_p; name = lambda: ui.shim_edit().decode()
-    click('Presets'); click('Rename a preset'); click('HD650.peq')
+    click('Presets'); click('Rename a preset'); click('HD650.txt')
     assert name() == 'HD650' and ui.shim_focused() and ui.shim_keyboard_owner() and title() == ''
     ui.shim_key(b'\b'); ui.shim_key(b'X'); assert name() == 'HD65X'
     ui.shim_cancel()  # back on the list: its preset, no Rename row
-    assert ui.shim_click(b'HD650.peq', 2) and not ui.shim_click(b'Rename', 2) and (saved/'HD650.peq').exists()
+    assert ui.shim_click(b'HD650.txt', 2) and not ui.shim_click(b'Rename', 2) and (eqdir/'HD650.txt').exists()
     # Done on the name unchanged (no EVT_VALUE_CHANGED) keeps it; the Rename row on a cleared name
     # goes back to the list, as Return does.
-    click('HD650.peq'); ui.shim_type(name().encode())
-    assert title() == 'Presets' and ui.shim_click(b'Rename a preset', 2) and (saved/'HD650.peq').exists()
-    click('Rename a preset'); click('HD650.peq')
+    click('HD650.txt'); ui.shim_type(name().encode())
+    assert title() == 'Presets' and ui.shim_click(b'Rename a preset', 2) and (eqdir/'HD650.txt').exists()
+    click('Rename a preset'); click('HD650.txt')
     for _ in range(5): ui.shim_key(b'\b')
     ui.shim_dismiss_keyboard(); click('Rename')
-    assert title() == 'Presets' and not ui.shim_click(b'Rename', 2) and (saved/'HD650.peq').exists()
+    assert title() == 'Presets' and not ui.shim_click(b'Rename', 2) and (eqdir/'HD650.txt').exists()
     # Done renames, a name past 3 bytes too (once read as empty, a cancel); so does a tap on the
     # Rename row, its blur first, the row's click then keeping the message. The editor's name follows.
-    click('HD650.peq'); ui.shim_key(b' v2'); ui.shim_type(name().encode())
-    assert title() == 'Renamed to HD650 v2' and (saved/'HD650 v2.peq').exists() and not (saved/'HD650.peq').exists()
-    click('Rename a preset'); click('HD650 v2.peq')
+    click('HD650.txt'); ui.shim_key(b' v2'); ui.shim_type(name().encode())
+    assert title() == 'Renamed to HD650 v2' and (eqdir/'HD650 v2.txt').exists() and not (eqdir/'HD650.txt').exists()
+    click('Rename a preset'); click('HD650 v2.txt')
     for _ in range(3): ui.shim_key(b'\b')
     ui.shim_blur(); click('Rename')
-    assert title() == 'Renamed to HD650' and (saved/'HD650.peq').exists()
+    assert title() == 'Renamed to HD650' and (eqdir/'HD650.txt').exists()
     # A name of any length a list shows (to 255 bytes) opens whole, so Done keeps it; one too long
     # to read back is refused, not taken as a cancel.
     long = 'L' * 250
-    (saved/f'{long}.peq').write_bytes((saved/'HD650.peq').read_bytes())
+    (eqdir/f'{long}.txt').write_bytes((eqdir/'HD650.txt').read_bytes())
     click('Rename a preset'); click(long[:50]); assert name() == long
-    ui.shim_type(name().encode()); assert title() == 'Presets' and (saved/f'{long}.peq').exists()
+    ui.shim_type(name().encode()); assert title() == 'Presets' and (eqdir/f'{long}.txt').exists()
     click('Rename a preset'); click(long[:50]); ui.shim_type(b'M' * 300)
-    assert title() == 'Name not allowed; preset kept' and (saved/f'{long}.peq').exists()
+    assert title() == 'Name not allowed; preset kept' and (eqdir/f'{long}.txt').exists()
     click('Rename a preset'); click(long[:50]); ui.shim_type(b' . ')  # all trimmed away: typed, not a cancel
-    assert title() == 'Name not allowed; preset kept' and (saved/f'{long}.peq').exists()
-    (saved/f'{long}.peq').unlink()
+    assert title() == 'Name not allowed; preset kept' and (eqdir/f'{long}.txt').exists()
+    (eqdir/f'{long}.txt').unlink()
     ui.shim_return(); assert named('HD650')
     # Deleting asks first, removes only the saved copy and leaves the active EQ alone.
     before = active.read_bytes()
-    click('Presets'); click('Delete a preset'); click('HD650.peq'); click('Cancel')
-    assert (saved/'HD650.peq').exists()
-    click('HD650.peq'); click('Delete HD650.peq? Confirm')
-    assert not (saved/'HD650.peq').exists() and active.read_bytes() == before
-    assert title() == 'Deleted HD650.peq; active EQ unchanged' and not ui.shim_click(b'HD650.peq', 0)
+    click('Presets'); click('Delete a preset'); click('HD650.txt'); click('Cancel')
+    assert (eqdir/'HD650.txt').exists()
+    click('HD650.txt'); click('Delete HD650.txt? Confirm')
+    assert not (eqdir/'HD650.txt').exists() and active.read_bytes() == before
+    assert title() == 'Deleted HD650.txt; active EQ unchanged' and not ui.shim_click(b'HD650.txt', 0)
     # Stock presets are built in: picking one loads stock's curve, writes nothing until Apply.
-    files, before = sorted(saved.iterdir()), active.read_bytes()
+    files, before = sorted(eqdir.iterdir()), active.read_bytes()
     ui.shim_return(); click('Stock presets'); click('Rock')
     assert title() == 'Preset loaded; choose Apply to activate' and active.read_bytes() == before
-    assert sorted(saved.iterdir()) == files
+    assert sorted(eqdir.iterdir()) == files
     click('Apply changes'); p = read()
     assert [p.bands[k].gain for k in range(10)] == [-2, 0, 2, 4, -2, -2, 0, 0, 4, 4]
     assert [p.bands[k].enabled for k in range(10)] == [1, 0, 1, 1, 1, 1, 0, 0, 1, 1] and p.preamp < -4
@@ -1025,8 +1034,8 @@ def editor_check(lib, tmp):
     before = active.read_bytes()
     assert shown(True) and ui.shim_click(b'Nothing to apply', 2) and active.read_bytes() == before
     assert read().automatic == 1 and read().preamp == -1
-    assert lib.peq_save(bytes(saved/'Auto.peq'), C.byref(p), 1) == 1  # presets carry it too
-    reopen(0, 2); click('Presets'); click('Auto.peq'); assert shown(True)
+    assert lib.peq_export_file(bytes(eqdir/'Auto.txt'), C.byref(p), 1) == 1  # presets carry it too
+    reopen(0, 2); click('Presets'); click('Auto.txt'); assert shown(True)
     click('Apply changes')  # Auto saves its 48 kHz cut
     t = State(); assert lib.eq_load(C.byref(t)) and t.peq.automatic == 1 and t.peq.preamp == want
     reopen(want, 2)  # set to exactly the 48 kHz cut: still set, through a band edit
@@ -1036,37 +1045,36 @@ def editor_check(lib, tmp):
     reopen(-1, 0, v2=True)  # 1.3.5's state loads; never picked, so Auto, in the editor and playing
     assert lib.eq_load(C.byref(t)) and t.peq.automatic == 0 and bytes(t.eq3) == bytes(s.eq3) and shown(True)
     assert ui.shim_click(b'Nothing to apply', 2) and read().automatic == 1
-    # An import plays its own preamp; Auto, once picked, sticks to the saved preset, not the card's file.
-    (tmp/'root/mnt/mmc/EQ').mkdir(parents=True, exist_ok=True)
+    # A file from AutoEQ plays its own preamp; Auto, once picked, is written to that file.
     text = 'Preamp: -2 dB\nFilter 1: ON PK Fc 1000 Hz Gain 6 dB Q 1.41\n'
-    (tmp/'root/mnt/mmc/EQ/Imp.txt').write_text(text)
-    click('Presets'); click('Import from SD /EQ'); click('Imp.txt'); ui.shim_close(); advanced()
-    click('Presets'); click('Imp.peq'); assert ui.shim_click(b'Preamp -2.0 dB', 2)
+    (eqdir/'Imp.txt').write_text(text)
+    click('Presets'); click('Imp.txt'); assert ui.shim_click(b'Preamp -2.0 dB', 2)
     click('Preamp -2.0 dB'); click(auto(p)); assert shown(True)
-    r = Preset(); assert lib.peq_load(bytes(saved/'Imp.peq'), C.byref(r)) and r.automatic == 1
-    assert (tmp/'root/mnt/mmc/EQ/Imp.txt').read_text() == text
-    click('Presets'); click('Imp.peq'); assert shown(True)
+    r = Preset(); assert lib.peq_import_file(bytes(eqdir/'Imp.txt'), C.byref(r), None) and r.automatic == 1
+    assert '# q2: preamp auto' in (eqdir/'Imp.txt').read_text()
+    click('Presets'); click('Imp.txt'); assert shown(True)
     click(f'Preamp {auto(p)}'); click('-3.0 dB'); click('Apply changes')
     ui.shim_close(); advanced(); assert ui.shim_click(b'Preamp -3.0 dB', 2) and not shown(True)
-    (tmp/'root/mnt/mmc/EQ/Imp.txt').unlink(); (saved/'Imp.peq').unlink()
+    (eqdir/'Imp.txt').unlink()
     # The reported preset: the Preamp row and its picker label the 44.1 and 48 kHz cuts; an edit refreshes them.
     rep = parse(lib, REPORTED_PRESET); assert rep.automatic == 2  # an import's preamp is set
-    rep.automatic = 1; assert lib.peq_save(bytes(saved/'Rep.peq'), C.byref(rep), 1) == 1
-    click('Presets'); click('Rep.peq'); assert ui.shim_click(b'Preamp Auto (44.1: -9.2 / 48: -8.8)', 2)
+    rep.automatic = 1; assert lib.peq_export_file(bytes(eqdir/'Rep.txt'), C.byref(rep), 1) == 1
+    click('Presets'); click('Rep.txt'); assert ui.shim_click(b'Preamp Auto (44.1: -9.2 / 48: -8.8)', 2)
     click('Preamp Auto'); assert ui.shim_selection() == 0 and ui.shim_click(b'Auto (44.1: -9.2 / 48: -8.8)', 2)
     ui.shim_return(); click('7  Peaking 10160 Hz L'); click('Band On'); ui.shim_return()
     rep.bands[6].enabled = 0; assert auto(rep) != 'Auto (44.1: -9.2 / 48: -8.8)'
     assert ui.shim_click(f'Preamp {auto(rep)}'.encode(), 2)
-    (saved/'Rep.peq').unlink()
+    (eqdir/'Rep.txt').unlink()
     print('EQ Advanced tab: bypass, apply, the scrolling curve, auto preamp, channels, balance, frequency and Q, load, rename, failed saves, delete, reset and close passed.')
     # A full pack stays sorted and reachable, with bounded widget counts and page-local action IDs.
     imports = tmp/'root/mnt/mmc/EQ'
+    for f in imports.glob('*.txt'): f.unlink()  # the presets saved above
     for i in reversed(range(8850)):
         (imports/f'Headphone {i:04}.txt').write_text('Preamp: -3 dB\nFilter: ON PK Fc 1000 Hz Gain -2 dB Q 1\n')
     (imports/'ignored.txt').mkdir()
     (imports/'ignored.wav').write_bytes(b'')
     before = active.read_bytes()
-    click('Presets'); click('Import from SD /EQ')
+    click('Presets')
     for start in range(0, 8850, 128):
         assert ui.shim_click(f'Headphone {start:04}.txt'.encode(), 2)
         assert ui.shim_click(f'Headphone {min(start + 127, 8849):04}.txt'.encode(), 2)
@@ -1075,25 +1083,21 @@ def editor_check(lib, tmp):
         assert ui.shim_selection() == ui.shim_offset() == 0
         if start < 8832: click('Next page')
     assert not ui.shim_click(b'Next page', 2)
-    click('Headphone 8849.txt')
-    imported = Preset()
-    assert lib.peq_load(bytes(saved/'Headphone 8849.peq'), C.byref(imported)) and imported.preamp == -3
-    assert active.read_bytes() == before  # importing only saves a copy
     click('Previous page'); assert title() == 'Presets 69/70'
-    ui.shim_return(); click('Import from SD /EQ')
-    assert title() == 'Presets 1/70' and not ui.shim_click(b'Previous page', 2)
-    click('Headphone 0000.txt'); assert (saved/'Headphone 0000.peq').exists()
-    click('Headphone 0000.txt'); assert title() == 'Presets'  # existing preset asks before replacement
-    assert ui.shim_click(b'Replace existing preset? Confirm', 2)
-    click('Cancel replacement'); ui.shim_return()
+    click('Headphone 8831.txt')
+    assert named('Headphone 8831') and active.read_bytes() == before  # loading only fills the editor
+    click('Presets'); assert title() == 'Presets 1/70' and not ui.shim_click(b'Previous page', 2)
+    ui.shim_return()
+    for f in imports.glob('Headphone *.txt'): f.unlink()
     # Saved presets and deletion use the same paging.
+    imported = parse(lib, 'Preamp: -3 dB\nFilter: ON PK Fc 1000 Hz Gain -2 dB Q 1\n')
     for i in range(257):
-        assert lib.peq_save(bytes(saved/f'Batch {i:04}.peq'), C.byref(imported), 1) == 1
+        assert lib.peq_export_file(bytes(eqdir/f'Batch {i:04}.txt'), C.byref(imported), 1) == 1
     ui.shim_return(); click('Presets')
-    click('Next page'); click('Batch 0128.peq'); assert named('Batch 0128')
+    click('Next page'); click('Batch 0128.txt'); assert named('Batch 0128')
     click('Presets'); click('Delete a preset'); click('Next page'); click('Next page')
-    click('Batch 0256.peq'); click('Delete Batch 0256.peq? Confirm')
-    assert not (saved/'Batch 0256.peq').exists() and active.read_bytes() == before
+    click('Batch 0256.txt'); click('Delete Batch 0256.txt? Confirm')
+    assert not (eqdir/'Batch 0256.txt').exists() and active.read_bytes() == before
     ui.shim_return(); ui.shim_return()
     # Under a theme's 28 px rows: the rows step 28 on its text column, the curve's head is whole rows
     # (the last row at the top of the list is not clipped), the list stays under the 48 px caption,
@@ -1117,10 +1121,10 @@ def editor_check(lib, tmp):
     ui.shim_return(); ui.shim_close(); ui.shim_theme_rows(48); advanced()
     # No memory for the list's names: said, and no rows to pick a wrong preset from; the next look lists them.
     ui.check_calloc_fails(1); click('Presets')
-    assert title() == 'Out of memory; cannot list presets' and not ui.shim_click(b'Batch 0000.peq', 2)
+    assert title() == 'Out of memory; cannot list presets' and not ui.shim_click(b'Batch 0000.txt', 2)
     assert ui.shim_click(b'Stock presets', 2)
     ui.check_calloc_fails(0); ui.shim_return(); click('Presets')
-    assert title().startswith('Presets 1/') and ui.shim_click(b'Batch 0000.peq', 2)
+    assert title().startswith('Presets 1/') and ui.shim_click(b'Batch 0000.txt', 2)
     ui.shim_return()
     print('EQ preset pages: all 8,850 imports, sorting, page boundaries, navigation, save/replace, load and deletion passed.')
     eq3_editor_check(lib, ui, tmp)
@@ -1472,11 +1476,11 @@ def eq3_editor_check(lib, ui, tmp):
     ui.shim_e3_touch(0x100, 230, 70); ui.shim_run(); assert ui.shim_click(b'Rock', 2)  # a tap on Presets
     ui.shim_close(); ui.shim_open(); assert simple(); ui.shim_close()
     # A saved preset applied in Advanced: the switch's name cut on a character boundary (byte 12 is ä's second).
-    presets = active.parent/'peq-presets'
-    for f in presets.glob('Batch *.peq'): f.unlink()
-    assert lib.peq_save(bytes(presets/'Kopfhörerbässe.peq'), C.byref(state().peq), 1) == 1
+    presets = tmp/'root/mnt/mmc/EQ'
+    for f in presets.glob('Batch *.txt'): f.unlink()
+    assert lib.peq_export_file(bytes(presets/'Kopfhörerbässe.txt'), C.byref(state().peq), 1) == 1
     ui.shim_e3_open(); assert ui.shim_tab_touch(300)
-    assert ui.shim_click(b'Presets', 1) and ui.shim_click('Kopfhörerbässe.peq'.encode(), 1) and ui.shim_click(b'Apply changes', 1)
+    assert ui.shim_click(b'Presets', 1) and ui.shim_click('Kopfhörerbässe.txt'.encode(), 1) and ui.shim_click(b'Apply changes', 1)
     assert ui.shim_click(b'Enabled Off', 1) and state().mode == EQ_PEQ and ui.shim_tab_touch(50)
     assert label(0) == 'Kopfhörerb'; ui.shim_e3_close()
     print('EQ Simple tab: entry without change, tabs, wheel and touch adjustment, coalesced saves, switch, held Off, reset, failed save and indicator passed.')
