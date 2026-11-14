@@ -2876,7 +2876,8 @@ void list_toggle(void *label, const char *title, int on) {
     void *button = P(label, W_PARENT);
     void *image = widget_lookup(button, "_setting_switch", 0);
     if (!image) {
-        int x = 302 - I(button, W_X);
+        /* on the set's right column, else stock's x 302 */
+        int right = geom_val(V_RIGHT_X), x = (right ? 375 - right - 50 : 302) - I(button, W_X);
         image = image_create(button, x, 0, 50, I(button, W_H));
         widget_set_name(image, "_setting_switch");
         image_set_draw_type(image, IMAGE_DRAW_CENTER);
@@ -2888,6 +2889,30 @@ void list_toggle(void *label, const char *title, int on) {
 
 /* Classic's settings rows (set_text): the title left and the value right-aligned in the
  * trailing column, the title ending short of it. Switches read On or Off as values. */
+/* On a set with a right column: the value's box ends on it, or VALUE_CHEVRON_GAP short of it on a
+ * row that opens a page (its chevron is there), and the title takes the row up to the value's own
+ * text, measured in its face; unmeasured (no canvas yet), the boxes stay as made. */
+#define VALUE_CHEVRON_GAP 21 /* the chevron's 15 px box and 6 px clear of it */
+#define VALUE_TITLE_GAP 12
+static void value_fit(void *label, void *text) {
+    void *button = P(label, W_PARENT), *canvas = widget_get_canvas(button);
+    const unsigned *s = widget_get_text(text);
+    int into =
+        drill(button); /* a drill page's row, or one with stock's list_into (list_row_into) */
+    for (unsigned i = 0, n = widget_count_children(button); !into && i < n; ++i)
+        into =
+            !tk_strcmp(widget_get_prop_str(widget_get_child(button, i), "image", ""), "list_into");
+    int right = 374 - geom_val(V_RIGHT_X) - (into ? VALUE_CHEVRON_GAP : 0) - I(button, W_X);
+    int w = I(text, W_W);
+    if (I(text, W_X) + w != right) widget_move_resize(text, right - w, 0, w, I(text, W_H));
+    if (!canvas || !s) return;
+    int px = theme()->font_px[ROLE_TITLE];
+    unsigned n = wide_len(s);
+    canvas_set_font(canvas, theme_face(s, (int)n, &px), (unsigned)px);
+    int ink = (int)(canvas_measure_text(canvas, s, n) + 0.5f) + 4; /* hscroll_label's margins */
+    int end = right - ink - VALUE_TITLE_GAP - I(label, W_X);
+    if (end > 0 && end != I(label, W_W)) widget_resize(label, end, I(label, W_H));
+}
 void list_value(void *label, const char *title, const char *value) {
     void *button = P(label, W_PARENT);
     void *text = widget_lookup(button, "_setting_value", 0);
@@ -2908,6 +2933,7 @@ void list_value(void *label, const char *title, const char *value) {
     /* a theme's value grey, final in each half (text_ink); the selection's sel_text still wins */
     unsigned ink = theme()->set_value_ink[ipod_light()];
     if (ink) text_ink(text, 0xff000000u | ink, INK_LABEL);
+    if (geom_val(V_RIGHT_X)) value_fit(label, text);
 }
 
 /* Under a set without stock's toolbars (toolbar 0) a page's switch is a row: stock's img_switch
@@ -2964,6 +2990,18 @@ int ringnav_sleeptimer(void *win, void *ctx) {
 
 /* A settings row's "Title: value" text; a set_text theme shows it as list_value, its bare text
  * (Accent's name) under Accent. */
+static void row_label(void *label, const char *text);
+/* A feature's settings row's "Title: value" (Crossfade, Resume Songs, Library & Folders' rows): on
+ * a set with a right column the title alone with the value on that column, as a key/value row
+ * (row_label), else as written. */
+void row_value_text(void *label, const char *text) {
+    const char *v = text;
+    while (*v && !(v[0] == ':' && v[1] == ' ')) ++v;
+    if (geom_val(V_RIGHT_X) && *v && theme()->set_text)
+        row_label(label, text);
+    else
+        widget_set_text_utf8(label, text);
+}
 static void row_label(void *label, const char *text) {
     if (!theme()->set_text) {
         widget_set_text_utf8(label, text);
@@ -3366,7 +3404,7 @@ static void pod_text(int i) {
     if (toggle)
         list_toggle(st.pod_label[i], toggle, v);
     else
-        widget_set_text_utf8(st.pod_label[i], names[i][v]);
+        row_value_text(st.pod_label[i], names[i][v]);
     /* Stock's rows, so stock's translations */
     if (i == POD_KEYTONE) widget_set_tr_text(st.pod_label[i], "system_keytone");
     if (i == POD_CARMODE) widget_set_tr_text(st.pod_label[i], "system_carmode");
@@ -3574,7 +3612,7 @@ static int root_dir(char *path) {
 static void root_text(const char *name) {
     char t[280];
     tk_snprintf(t, sizeof t, "Folder Root: %s", name[0] ? name : "Card");
-    widget_set_text_utf8(st.root_label, t);
+    row_value_text(st.root_label, t);
 }
 /* Centre or tap: the next root, saved; Folder opens there from its next visit. */
 static int root_click(void *ctx, void *event) {
@@ -5816,6 +5854,12 @@ static const char *bar_title_of(void *win, void **label) {
     const char *name = widget_get_prop_str(win, "name", "");
     /* a status row shows the clock on Now Playing (tools/ipod.py status_row) */
     if (tk_str_start_with(name, "playing_page")) return geom_val(V_STATUS_Y) ? "" : "Now Playing";
+    /* a status row names the Library and its whole Songs list as Home does, not by stock's "Local
+     * Songs" in both: allmusic_page's other lists (an album, a playlist, Recently Added) keep their
+     * own (0xf001: all songs, own_order's class) */
+    if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "localmusic_page")) return "Library";
+    if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "allmusic_page") && I(g_class_type, 0) == 0xf001)
+        return "Songs";
     if (!tk_strcmp(name, "coverflow_page")) return "Cover Flow";
     if (!tk_strcmp(name, "equalizer_page")) return "EQ"; /* its 48 px row is the tabs' own label */
     if (!tk_strcmp(name, "spotify_page")) return "Spotify"; /* they hide their own name's label */
@@ -6188,7 +6232,9 @@ static int settings_icon(const char *name) { return named_in(SETTINGS_ICON_NAMES
  * offsets. */
 /* Clamp straight alpha to the arc coverage: reusing an already rounded bitmap is harmless. */
 static void round_corners(unsigned char *px, int w, int h, int stride, int alpha) {
-    int r = (w < h ? w : h) * NP_ART_RADIUS / 166;
+    /* a theme's list.art.radius is on screen, at the set's art size: the bitmap's own scale */
+    int side = w < h ? w : h, art = geom(G_ART), radius = theme()->art_radius;
+    int r = radius && art ? (side * radius + art / 2) / art : side * NP_ART_RADIUS / 166;
     for (int y = 0; y < r; ++y) {
         int out = arc_out(r, y);
         for (int x = 0; x <= out / 16; ++x) {
@@ -7473,6 +7519,9 @@ void stock_more_into(void *win) {
  * fill the row and shorter ones keep their centre; the icon shrinks to the set's icon size, or
  * hides at 0; text starts at the corner-safe column; children from SET_RIGHT_SIDE, and wide ones'
  * right edges, move with the trailing image by `shift`, never past the text margin. */
+/* The settings rows' trailing images' right edge from the row's: the set's right column (a 50 px
+ * switch's glyph fills its box), else SET_EDGE. */
+static int set_edge(void) { return geom_val(V_RIGHT_X) ? geom_val(V_RIGHT_X) : SET_EDGE; }
 static void set_child(void *c, int row_w, int row_h, int shift) {
     int x = I(c, W_X), y = I(c, W_Y), w = I(c, W_W), h = I(c, W_H), right = x + w;
     /* Streaming's rows, taller than the set's, have an icon in a set with none */
@@ -7486,7 +7535,7 @@ static void set_child(void *c, int row_w, int row_h, int shift) {
     if (!icon && x < SET_RIGHT_SIDE && !tk_strcmp(widget_get_type(c), "image")) {
         const char *image = widget_get_prop_str(c, "image", "");
         if (!tk_strcmp(image, "select") || !tk_strcmp(image, "unselect"))
-            widget_move_resize(c, row_w - SET_EDGE - 50, 0, 50, row_h);
+            widget_move_resize(c, row_w - set_edge() - 50, 0, 50, row_h);
         else
             widget_set_visible(c, 0, 0);
         return;
@@ -7553,7 +7602,7 @@ static void set_row(void *item) {
         widget_move_resize(b, 0, 0, row_w, row_h);
         for (unsigned j = 0; j < n; ++j)
             set_child(widget_get_child(b, j), row_w, row_h,
-                      row_w - SET_EDGE - 50 - SET_STOCK_X - trail);
+                      row_w - set_edge() - 50 - SET_STOCK_X - trail);
         /* a marked row's text ends before the chevron's box, as row_into's; stock's box has no x */
         int chevron_x = theme()->chevron_x;
         if (chevron_x && into_mark(item))

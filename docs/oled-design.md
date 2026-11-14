@@ -329,14 +329,12 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - A theme's own art from Phosphor (`tools/art.py`), loaded by its own prefix (`theme_art`): the
   chevron (`list.chevron.painter="icon"`) and the play state; the slim battery
   (`bar.battery.painter="slim"`); the wheel's scroll indicator (`list.scrollbar.painter="wheel"`);
-  1 px dividers on the text and right columns (`list.divider.ink`).
+  1 px dividers on the text and right columns (`list.divider.ink`); row art's 4 px corners
+  (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column.
 
 Still to build:
 
 - Song rows as above, with the Song Artist and Song Length options.
-- Two-line rows' art corners (the art is square today).
-- The page's own titles where stock names a page otherwise (the Library's status row reads
-  stock's "Local Songs").
 - Now Playing's positions from the theme rather than fixed in `tools/ipod.py`.
 - A confirmation screen for Shuffle and Repeat, and the toast and dialog forms.
 - Switch rows, the pickers' check, the EQ slider and the storage bar drawn as above.

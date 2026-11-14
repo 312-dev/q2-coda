@@ -51,7 +51,7 @@ static void settings(void) {
 static void row_text(void *label) {
     char t[32] = "Crossfade: Off";
     if (xf.on) tk_snprintf(t, sizeof t, "Crossfade: %d s", xf.seconds);
-    widget_set_text_utf8(label, t);
+    row_value_text(label, t);
 }
 
 /* Playback's row (navigation.c ringnav_audioset makes it): the label, named for refresh(). */
@@ -64,7 +64,7 @@ void xfade_row(void *label) {
 static void wheel_text(void *label) {
     char t[32];
     tk_snprintf(t, sizeof t, "Wheel Sensitivity: %d%%", wheel_pct());
-    widget_set_text_utf8(label, t);
+    row_value_text(label, t);
 }
 
 /* Display's row (navigation.c ringnav_display makes it): the label, named for refresh(). */
@@ -90,7 +90,7 @@ int resume_min(void) {
 static void rs_text(void *label) {
     char t[32] = "Resume Songs: Off";
     if (resume_min()) tk_snprintf(t, sizeof t, "Resume Songs: %d min", resume_min());
-    widget_set_text_utf8(label, t);
+    row_value_text(label, t);
 }
 
 /* Playback's row (navigation.c ringnav_audioset makes it): the label, named for refresh(). */
@@ -105,7 +105,7 @@ static void night_text(void *label) {
         tk_snprintf(t, sizeof t, "Night Shift: Auto");
     else if (night_on())
         tk_snprintf(t, sizeof t, "Night Shift: %dK", night_kelvin());
-    widget_set_text_utf8(label, t);
+    row_value_text(label, t);
 }
 
 /* Display's row (navigation.c ringnav_display makes it): the label, named for refresh(). */

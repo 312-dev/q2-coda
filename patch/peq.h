@@ -517,6 +517,8 @@ unsigned dark_bar_key(const unsigned *t);
 int clock_minutes(void), bar_status(void);
 void slider_label(void *w, int x, int y, int ww, int h, int px, const char *face);
 void text_ink(void *w, unsigned color, int n); /* a label's final 0xAARRGGBB, in either half */
+/* navigation.c: a feature settings row's "Title: value", on the set's right column where it has one */
+void row_value_text(void *label, const char *text);
 void slider_number(void *label), slider_tray_dirty(void *page),
     slider_centre_hint(void *page, int night);
 void switch_row(void *win, void *view); /* the toolbar's, as a row */

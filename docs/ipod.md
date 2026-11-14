@@ -898,7 +898,9 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
 - **The grid.** 32 px rows from y 58 with their text at x 24, seven to a screen: the list ends at y 282, above
   the bottom corners, and the strip below it stays black (`list_fit`). Chevrons and values share one column 28 px
   from the right edge on every row. Settings, the Library, Home (Full and Split) and stock's own list pages all
-  take it; Albums and Search are two lines at 52 px, four to a page.
+  take it; Albums and Search are two lines at 52 px, four to a page, the covers with 4 px corners. A row that
+  opens a page and shows a value (Crossfade, Resume Songs) has the value just left of its chevron. The status row
+  names the Library and Songs by those words, where stock calls both "Local Songs".
 - **Colour.** Black (white in Light Mode), white text, second lines in Text Tertiary (`#858585`), a settings row's
   value in Text Secondary (`#ABABAB`, `#5C5C5C` on paper), and one blue, `#2160D8`, for the selection bar, the
   progress fill and every mark stock draws red. **Accent** offers that Blue alone (`OLED_ACCENT`).

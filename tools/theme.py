@@ -96,7 +96,8 @@ SCHEMA = {k.path: k for k in (
     key('list.art.x', 'art_x', 'int', 375),  # a row with art, on screen: the cover, 0: stock's layout
     key('list.art.text_x', 'art_text_x', 'int', 375),  # ... its text's first and last columns
     key('list.art.text_end', 'art_text_end', 'int', 375),
-    key('list.art.placeholder', 'art_placeholder', 'int', 51),  # stock's grey tiles (list_folder, list_song) this size, centred in their row; 0: stock's
+    key('list.art.placeholder', 'art_placeholder', 'int', 51),
+    key('list.art.radius', 'art_radius', 'int', 26),  # a row cover's corners on screen at the set's art size; 0: NP_ART_RADIUS's share  # stock's grey tiles (list_folder, list_song) this size, centred in their row; 0: stock's
     key('list.row.text_end', 'row_text_end', 'int', 375),  # a two-line row without art (Songs'): its text's last column on screen
     Key('list.separator.stops', 'sep', 'stops', 0, 0, (), 'live', True),  # ... its last rows, one stop a row, final
     key('list.divider.ink', 'div_ink', 'color', final=True),  # a 1 px divider under each row taller than the pitch, on the text and right columns
