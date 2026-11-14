@@ -1083,7 +1083,8 @@ def test_emit_own_scheme(tmp_path):
 
 def test_selection_shape_defaults_are_today_s():
     """Unstated, the bar is a pill SEL_INSET in under Rounded Corners, in every built-in."""
-    assert [(t['sel_radius'], t['sel_inset']) for t in theme.builtins()] == [(theme.O['SEL_MAX_RADIUS'], theme.O['SEL_INSET'])] * 3
+    themes = theme.builtins()
+    assert [(t['sel_radius'], t['sel_inset']) for t in themes] == [(theme.O['SEL_MAX_RADIUS'], theme.O['SEL_INSET'])] * len(themes)
 
 
 def test_selection_shape_resolves():
@@ -1109,7 +1110,8 @@ def test_selection_shape_rejects(body, message):
 
 
 def test_track_default_is_today_s():
-    assert [t['np_track_rgb'] for t in theme.builtins()] == [theme.O['TRACK_COLOR']] * 3
+    themes = theme.builtins()
+    assert [t['np_track_rgb'] for t in themes] == [theme.O['TRACK_COLOR']] * len(themes)
 
 
 @pytest.mark.parametrize('text, rgb', [('#262626', 0x262626), ('#000000', 0)])  # black is a colour here
