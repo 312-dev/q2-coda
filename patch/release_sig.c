@@ -46,7 +46,7 @@ static void sha256_block(sha256_t *s, const unsigned char *p) {
         unsigned t1 = v[7] + (ROR(e, 6) ^ ROR(e, 11) ^ ROR(e, 25)) + ((e & v[5]) ^ (~e & v[6])) +
                       K[i] + w[i];
         unsigned t2 = (ROR(a, 2) ^ ROR(a, 13) ^ ROR(a, 22)) + ((a & v[1]) ^ (a & v[2]) ^ (v[1] & v[2]));
-        memmove(v + 1, v, 7 * sizeof *v);
+        for (int k = 7; k; --k) v[k] = v[k - 1];
         v[4] += t1, v[0] = t1 + t2;
     }
     for (int i = 0; i < 8; ++i) s->h[i] += v[i];
