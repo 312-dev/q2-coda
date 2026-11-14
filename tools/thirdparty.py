@@ -41,6 +41,8 @@ SOURCES = {
              '8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5'),
     'mbedtls': ('3.6.7', 'https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2',
                 'a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6'),
+    'busybox': ('1.38.0', 'https://busybox.net/downloads/busybox-1.38.0.tar.bz2',
+                '34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2'),
     'sqlite': ('3.54.1', 'https://www.sqlite.org/2026/sqlite-autoconf-3540100.tar.gz',
                '926ef8d3eab93fbf6e06011901273eec076b25594a4e1cdadd50c987f4f6d64e'),
     'libpng': ('1.2.59', 'https://download.sourceforge.net/libpng/libpng-1.2.59.tar.xz',
@@ -249,11 +251,75 @@ def build_libpng(src, stage, env, log):
     autotools(src, stage, env, log)
 
 
+# Stock busybox 1.31.1's applets (busybox --list); the rebuilt one has exactly these.
+BUSYBOX_APPLETS = '''
+    [ [[ addgroup adduser ar arch arp arping ash awk base64 basename bc blkid bunzip2 bzcat cat chattr
+    chgrp chmod chown chroot chrt chvt cksum clear cmp cp cpio crond crontab cut date dc dd deallocvt
+    delgroup deluser devmem df dhcprelay diff dirname dmesg dnsd dnsdomainname dos2unix du dumpkmap
+    dumpleases echo egrep eject env ether-wake expr factor fallocate false fbset fdflush fdformat fdisk
+    fgrep find flock fold free freeramdisk fsck fsfreeze fstrim fuser getopt getty grep gunzip gzip halt
+    hdparm head hexdump hexedit hostid hostname hwclock i2cdetect i2cdump i2cget i2cset i2ctransfer id
+    ifconfig ifdown ifup inetd init insmod install ip ipaddr ipcrm ipcs iplink ipneigh iproute iprule
+    iptunnel kill killall killall5 last less link linux32 linux64 linuxrc ln loadfont loadkmap login
+    logname losetup ls lsattr lsmod lsof lspci lsscsi lsusb lzcat lzma lzopcat makedevs md5sum mdev mesg
+    microcom mkdir mkdosfs mke2fs mkfifo mknod mkpasswd mkswap mktemp modinfo more mount mountpoint mt
+    mv nameif netstat nice nl nohup nologin nproc nslookup nuke od openvt partprobe passwd paste patch
+    pgrep pidof ping ping6 pipe_progress pivot_root poweroff printenv printf ps pwd rdate readlink
+    readprofile realpath reboot renice reset resize resume rm rmdir rmmod route rtcwake run-init
+    run-parts runlevel sed seq setarch setconsole setfattr setkeycodes setlogcons setpriv setserial setsid
+    sh sha1sum sha256sum sha3sum sha512sum shred sleep sort start-stop-daemon strings stty su sulogin
+    svc svok swapoff swapon switch_root sync tail tar tc tee telnet test tftp time top touch tr
+    traceroute true truncate ts tty ubirename udhcpc udhcpd uevent umount uname uniq unix2dos unlink
+    unlzma unlzop unxz unzip uptime usleep uudecode uuencode vconfig vi vlock w watch watchdog wc wget
+    which who whoami xargs xxd xz xzcat yes zcat
+'''.split()
+
+
+def build_busybox(src, stage, env, log):
+    # defconfig (every applet, every feature) less the applets stock does not have: stock's set,
+    # each with at least stock's features. Dynamically linked, as stock's.
+    keep = set(BUSYBOX_APPLETS) | {'busybox'}  # busybox --list itself, which stock's lists not
+    owner = {}  # applet -> the config symbol that builds it
+    for f in src.rglob('*.c'):
+        # //applet:IF_DEPMOD(IF_NOT_MODPROBE_SMALL(APPLET(depmod, ...))): each IF_ but the IF_NOT_ ones
+        for chain, name in re.findall(r'//applet:\s*((?:IF_\w+\(\s*)+)APPLET\w*\(\s*([^,\s]+)', f.read_text(errors='replace')):
+            owner.setdefault(name, set()).update(s for s in re.findall(r'IF_(\w+)', chain) if not s.startswith('NOT_'))
+    run('make', 'defconfig', cwd=src, env=env.vars, log=log)
+    applets = {}  # config symbol -> the applets it builds
+    for name, syms in owner.items():
+        for sym in syms:
+            applets.setdefault(sym, set()).add(name)
+    # A symbol is on when every applet it builds is stock's: INSMOD, not MODPROBE_SMALL (which adds modprobe and depmod).
+    wanted = {sym for sym, names in applets.items() if names <= keep}
+    config = (src/'.config').read_text()
+    for sym in set().union(*owner.values()) - wanted:
+        config = re.sub(rf'^CONFIG_{sym}=y$', f'# CONFIG_{sym} is not set', config, flags=re.M)
+    for sym in wanted:  # defconfig leaves a few of stock's off (ar, nuke, unlzop)
+        config = re.sub(rf'^# CONFIG_{sym} is not set$', f'CONFIG_{sym}=y', config, flags=re.M)
+    flags = ' '.join(ARCH + REPRODUCIBLE)
+    config = re.sub(r'^CONFIG_EXTRA_CFLAGS=.*$', f'CONFIG_EXTRA_CFLAGS="{flags}"', config, flags=re.M)
+    config = re.sub(r'^CONFIG_EXTRA_LDFLAGS=.*$', f'CONFIG_EXTRA_LDFLAGS="{flags}"', config, flags=re.M)
+    config = re.sub(r'^CONFIG_CROSS_COMPILER_PREFIX=.*$', f'CONFIG_CROSS_COMPILER_PREFIX="{env.bin}/{TRIPLE}-"', config, flags=re.M)
+    (src/'.config').write_text(config)
+    run('sh', '-c', 'yes "" | make oldconfig', cwd=src, env=env.vars, log=log)
+    plain = {k: v for k, v in env.vars.items() if k not in ('CC', 'CPP', 'AR', 'RANLIB', 'STRIP', 'NM', 'LD', 'CFLAGS', 'CPPFLAGS', 'LDFLAGS')}
+    run('make', f'-j{JOBS}', 'busybox', cwd=src, env=plain, log=log)
+    names = (src/'include/applet_tables.h').read_text()
+    table = need(re.search(r'applet_names\[\] ALIGN1 = ""(.*?);', names, re.S), 'busybox: no applet table').group(1)
+    built = sorted(re.findall(r'^"([^"]+)" "\\0"$', table, re.M))
+    if built != sorted(keep):
+        sys.exit(f'thirdparty: busybox applets differ from stock: missing {sorted(keep - set(built))}, extra {sorted(set(built) - keep)}')
+    (stage/'bin').mkdir(parents=True)
+    shutil.copy(src/'busybox', stage/'bin/busybox')
+    shutil.copy(src/'.config', stage/'busybox.config')
+
+
 RECIPES = {'openssl': (build_openssl, []),
            'zlib': (build_zlib, []),
            'mbedtls': (build_mbedtls, []), 'curl': (build_curl, ['mbedtls', 'zlib']),
            'sqlite': (build_sqlite, []),
-           'libpng': (build_libpng, ['zlib'])}
+           'libpng': (build_libpng, ['zlib']),
+           'busybox': (build_busybox, [])}
 
 
 # Each top-level function's and class's text as this module was imported (inspect.getsource rereads
@@ -426,6 +492,7 @@ INSTALL = {
     'curl': {'usr/lib/libcurl.so.4.7.0': 'usr/lib/libcurl.so.4.8.0'},
     'sqlite': {'usr/lib/libsqlite3.so.0.8.6': 'usr/lib/libsqlite3.so.3.54.1'},
     'libpng': {'usr/lib/libpng12.so.0.37.0': 'usr/lib/libpng12.so.0.59.0'},
+    'busybox': {'bin/busybox': 'bin/busybox'},
 }
 
 
