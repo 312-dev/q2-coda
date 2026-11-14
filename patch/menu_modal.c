@@ -1,5 +1,5 @@
-/* The inset modal (docs/oled-design.md#menus): Now Playing's More as one flat panel over the page
- * it acts on, under a set with Geometry.modal (OLED's).
+/* The inset modal (docs/oled-design.md#menus): the hold menus and Now Playing's More as one flat
+ * panel over the page they act on, under a set with Geometry.modal (OLED's).
  * The page stays painted under it, dimmed half way to black; the panel is #1C1C1E, MODAL_W wide
  * at MODAL_X, from MODAL_TOP, with MODAL_R corners and MODAL_PAD padding round 32 px rows, at most
  * MODAL_ROWS of them in view before the rows scroll inside it. A row's text stands MODAL_TEXT in

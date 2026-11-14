@@ -1826,6 +1826,40 @@ def test_classic_draws_a_choice_as_the_panel_too(fw, ui, st, recs, mcl):
     assert ui.nodes[lv].rect()[3] == 2 * THEMES[st('theme').value]['page_row']
 
 
+def test_oled_draws_the_menu_as_the_inset_modal(fw, ui, st, recs, mcl):
+    """A modal set's hold menu (menu_modal.c): no title bar, its rows the panel's (259 px from x 58, 8 px padding, so
+    the rows' boxes reach the selection inset past it), 32 px each from y 66, six in view; the settings read as
+    settings, US English, and the menu opens on its first row."""
+    use_set(st, 'oled')
+    hold = Hold(fw, ui, st, recs, mcl).now_playing([song(recs, i) for i in range(3)])
+    hold.hold()
+    rows = hold.menu()
+    inset = THEMES[st('theme').value]['sel_inset']
+    lv = ui.lookup(hold.dialog, 'list_view', 1)
+    assert tuple(ui.nodes[lv].rect()) == (58 + 8 - inset, 66, 259 + 2 * (inset - 8), 6 * 32)
+    assert not ui.nodes[ui.lookup(hold.dialog, 'view_navbar', 1)].visible
+    assert all(tuple(ui.nodes[item].rect()[2:]) == (259 + 2 * (inset - 8), 32) for item in ui.kids(hold.view()))
+    assert rows[:4] == ['Play Next', 'Add to Queue', 'View Queue', 'Add to Favorites'] and 'Group by' in rows
+    assert ui.prop(hold.view(), '_ringnav_index', -1) == 0
+
+
+def test_oled_menu_on_songs_starts_with_sorting_a_gap_above_the_actions(fw, ui, st, recs, mcl):
+    """Songs (0xf001), whose action row holds stock's Sort: Sorting first, then a 12 px gap that is no row, then the
+    actions; the menu opens on Play Next, one tick under Sorting."""
+    use_set(st, 'oled')
+    hold = Hold(fw, ui, st, recs, mcl).songs_page('allmusic_page', [song(recs, i) for i in range(3)])
+    bar = ui.child(hold.page, 'view', 0, 0, 375, 32)
+    for _ in range(3):  # its label, Play All's image, Sort's bars
+        ui.child(bar, 'image')
+    st('action_view', C.c_void_p).value = bar
+    hold.hold()
+    rows = hold.menu()
+    kids = ui.kids(hold.view())
+    assert rows[0] == 'Sorting' and rows[1] is None and rows[2] == 'Play Next'
+    assert ui.nodes[kids[1]].rect()[3] == 12 and ui.nodes[kids[2]].rect()[1] == 32 + 12
+    assert ui.prop(hold.view(), '_ringnav_index', -1) == 1
+
+
 def test_add_to_playlist_opens_the_picker_guarded_by_the_menus_record(hold, recs, ui, st, fw):
     hold.now_playing([song(recs, i) for i in range(3)])
     picker = []
@@ -2927,3 +2961,4 @@ def test_the_rtcs_seconds(fw, ui, data, now):
 def test_no_rtc_reads_zero(fw, ui):
     Card(fw)
     assert fw.fn('system__rtc_now', C.c_uint)() == 0
+

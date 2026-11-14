@@ -5998,6 +5998,9 @@ static void action_row(void *view) {
     widget_move_resize(play, 0, 0, 300, h);
     if (n < 3) return; /* Recently Added and the like have no Sort */
     void *sort = widget_get_child(view, 2);
+    /* the inset modal's hold menu holds Sort as its Sorting row (qm_sorts): the bars stay, hidden,
+     * for its click */
+    if (modal_set()) widget_set_visible(sort, 0, 0);
     widget_use_style(sort, "default");
     image_base_set_image(sort, "classic_light_sort_bars");
     image_set_draw_type(sort, IMAGE_DRAW_CENTER);
@@ -7937,7 +7940,8 @@ enum {
     QA_CHAPTERS,
     QA_MORE,
     QA_NEW_PLAYLIST,
-    QA_EDIT_PLAYLISTS
+    QA_EDIT_PLAYLISTS,
+    QA_SORT /* the inset modal's Sorting row (menu_modal.c) */
 };
 
 static char *play_key(void) {
@@ -9271,6 +9275,12 @@ static int qm_run(const void *unused) {
             navigator_to("playerqueue_page");
     } else if (a == QA_MORE && st.qm_kind == QM_PLAYLIST) {
         if (r) navigator_to_with_context("localmusic/playlistsmore_page", (void *)(long)st.qm_idx);
+    } else if (a == QA_SORT) {
+        void *sort = st.action_view && widget_count_children(st.action_view) > 2
+                         ? widget_get_child(st.action_view, 2) /* a tap on its bars: stock's */
+                         : (void *)0;
+        char click[0x30];
+        if (sort) stock_dispatch_trampoline(sort, pointer_event_init(click, EVT_CLICK, sort, 0, 0));
     } else if (a == QA_NEW_PLAYLIST || a == QA_EDIT_PLAYLISTS) {
         /* the page's own, not the playlist's: qm_edit_due */
     } else if (a == QA_MORE) {
@@ -9398,6 +9408,40 @@ static void qm_title(void *dialog, const char *s) {
     widget_set_prop_int(title, "loop", 1);
     widget_set_text_utf8(title, s);
 }
+/* Now Playing's play modes as stock names them, its category as Group by sets it (album or
+ * folder): Shuffle's (kind 0), Repeat's (1) and Group by's (2) choices. */
+static int qm_choices(int kind) { return kind == 0 ? 5 : kind == 1 ? 6 : 2; }
+static const char *qm_choice_name(int kind, int i) {
+    static const char *const shuffle[2][5] = {
+        { "Off", "All Songs", "Songs in Album", "Albums", "Albums and Songs" },
+        { "Off", "All Songs", "Songs in Folder", "Folders", "Folders and Songs" }
+    };
+    static const char *const repeat[2][6] = { { "Play One Song", "Play One Album", "Play All",
+                                                "Repeat Song", "Repeat Album", "Repeat All" },
+                                              { "Play One Song", "Play One Folder", "Play All",
+                                                "Repeat Song", "Repeat Folder", "Repeat All" } };
+    static const char *const groups[] = { "Album", "Folder" };
+    int folder = playback_option(2);
+    return kind == 0 ? shuffle[folder][i] : kind == 1 ? repeat[folder][i] : groups[i];
+}
+
+/* The inset modal's Sorting row (menu_modal.c): on a list whose Songs action row has stock's Sort
+ * (Songs' own list, class 0xf001), its order as Sort's picker names it, and its direction. */
+#define MODAL_PITCH 32
+static int qm_sorts(void *page) {
+    void *row = st.action_view;
+    /* the page, or the page under the picker closing as the menu comes back */
+    return modal_set() && row && (window_of(row) == page || modal_win(page)) &&
+           widget_count_children(row) > 2 && I(g_class_type, 0) == 0xf001;
+}
+static const char *qm_sort_name(int *dir) {
+    static const char *const names[] = { "Title", "File Name", "Format", "Recently Added",
+                                         "Recently Added" };
+    unsigned flag = (unsigned)I(g_sort_flag, 0);
+    *dir = flag == 3 ? DIR_DOWN : flag == 4 ? DIR_UP : DIR_NONE;
+    return names[flag < 5 ? flag : 0];
+}
+
 static int qm_open(const void *unused) {
     st.qm_timer = 0;
     void *wm = window_manager(), *page = window_manager_get_top_window(wm);
@@ -9421,44 +9465,38 @@ static int qm_open(const void *unused) {
     widget_on(back, EVT_CLICK, qm_back, dialog);
     widget_on(dialog, EVT_DESTROY, qm_gone, dialog);
     if (st.qm_choice) {
-        /* stock's play modes, its category named as Group by sets it (album or folder) */
-        static const char *const shuffle[2][5] = {
-            { "Off", "All Songs", "Songs in Album", "Albums", "Albums and Songs" },
-            { "Off", "All Songs", "Songs in Folder", "Folders", "Folders and Songs" }
-        };
-        static const char *const repeat[2][6] = { { "Play One Song", "Play One Album", "Play All",
-                                                    "Repeat Song", "Repeat Album", "Repeat All" },
-                                                  { "Play One Song", "Play One Folder", "Play All",
-                                                    "Repeat Song", "Repeat Folder",
-                                                    "Repeat All" } };
-        static const char *const groups[] = { "Album", "Folder" };
-        int kind = st.qm_choice - 1,
-            count = kind == 0   ? 5
-                    : kind == 1 ? 6
-                                : 2,
-            folder = playback_option(2);
-        const char *const *names = kind == 0   ? shuffle[folder]
-                                   : kind == 1 ? repeat[folder]
-                                               : groups;
+        int kind = st.qm_choice - 1, count = qm_choices(kind), current = playback_option(kind);
         qm_title(dialog, kind == 0 ? "Shuffle" : kind == 1 ? "Repeat" : "Group by");
         widget_destroy_children(view);
-        int painted = dialogs_painted(), row = painted ? theme()->page_row : QM_ROW,
-            w = painted ? BACK_W : 375;
+        int painted = dialogs_painted(), modal = modal_set(),
+            row = modal     ? MODAL_PITCH
+                  : painted ? theme()->page_row
+                            : QM_ROW,
+            w = modal     ? modal_row_w()
+                : painted ? BACK_W
+                          : 375;
         for (int i = 0; i < count; ++i) {
             void *item = list_item_create(view, 0, i * row, w, row);
             widget_use_style(item, "s_listitem_black");
             void *label = hscroll_label_create(item, 30, 0, 310, row);
             widget_use_style(label, "s_scrlabel_white24l");
-            widget_set_text_utf8(label, names[i]);
-            if (painted) hold_label(item, label);
-            if (i == playback_option(kind))
+            widget_set_text_utf8(label, qm_choice_name(kind, i));
+            if (modal)
+                modal_row(item, label, i == current ? "check" : (const char *)0, (const char *)0,
+                          MM_CHOICE);
+            else if (painted)
+                hold_label(item, label);
+            if (i == current && !modal)
                 image_base_set_image(image_create(item, w - 35, 0, 24, row), "select");
             widget_on(item, EVT_CLICK, qm_pick, (void *)(long)(100 + i));
         }
         widget_set_prop_int(view, "virtual_h", count * row);
-        if (painted) hold_open(dialog, count);
+        if (modal)
+            modal_frame(dialog, widget_lookup(dialog, "list_view", 1));
+        else if (painted)
+            hold_open(dialog, count);
         st.qm_dialog = dialog;
-        ringnav_select(view, playback_option(kind), count);
+        ringnav_select(view, current, count);
         return 0;
     }
     unsigned cls = st.qm_cls;
@@ -9478,7 +9516,7 @@ static int qm_open(const void *unused) {
     /* Songs favourite, as stock's heart, and go to their album and artist; collections shuffle.
      * Go to is left out where its single-instance page is already open, or the album is the page.
      */
-    unsigned char acts[20], n = 0;
+    unsigned char acts[24], n = 0;
     /* Shuffle Albums/Folders only: skipping the group comes first */
     int group_first = st.qm_kind == QM_PLAYING && playback_option(0) >= 3;
     /* Rate (the heart's hold) follows Next/Previous album */
@@ -9546,12 +9584,47 @@ static int qm_open(const void *unused) {
                                         "Chapters",
                                         "More…",
                                         "New Playlist",
-                                        "Select Playlists…" };
+                                        "Select Playlists…",
+                                        "Sorting" };
+    /* the inset modal's symbols (tools/art.py MENU_ICONS), by row */
+    static const char *const icons[] = { "arrow-bend-down-right",
+                                         "queue",
+                                         "shuffle",
+                                         "heart",
+                                         "heart-break",
+                                         "list-plus",
+                                         "vinyl-record",
+                                         "microphone-stage",
+                                         "shuffle",
+                                         "repeat",
+                                         "stack",
+                                         "skip-forward",
+                                         "skip-back",
+                                         "heart-half",
+                                         "clock-counter-clockwise",
+                                         "list-numbers",
+                                         "folder",
+                                         "bookmark-simple",
+                                         "dots-three",
+                                         "plus",
+                                         "list-checks",
+                                         "funnel-simple" };
     char rated[32];
-    /* stock sortselect row styles */
-    int painted = dialogs_painted(), pitch = painted ? theme()->page_row : QM_ROW;
+    /* stock sortselect row styles; the inset modal's rows, a Sorting row first and a gap after it
+     * where the list sorts */
+    int painted = dialogs_painted(), modal = modal_set(), sorts = qm_sorts(page),
+        pitch = modal     ? MODAL_PITCH
+                : painted ? theme()->page_row
+                          : QM_ROW,
+        width = modal     ? modal_row_w()
+                : painted ? BACK_W
+                          : 375;
+    if (sorts) {
+        memmove(acts + 1, acts, n++);
+        acts[0] = QA_SORT;
+    }
     for (int i = 0; i < n; ++i) {
-        void *item = list_item_create(view, 0, i * pitch, painted ? BACK_W : 375, pitch);
+        void *item = list_item_create(view, 0, i * pitch, width, pitch);
         widget_use_style(item, "s_listitem_black");
         void *label = hscroll_label_create(item, 30, 0, 266, pitch);
         widget_use_style(label, "s_scrlabel_white24l");
@@ -9561,19 +9634,38 @@ static int qm_open(const void *unused) {
             char hs[16];
             tk_snprintf(rated, sizeof rated, h ? "%s  %s" : "%s", row, hearts_text(hs, h));
         }
+        /* a setting's value stands on its own on the modal's right column */
+        int setting =
+            modal && (acts[i] == QA_SORT || (acts[i] >= QA_ADV_SHUFFLE && acts[i] <= QA_GROUP));
         widget_set_text_utf8(label,
                              acts[i] == QA_RATE ? rated
-                             : acts[i] == QA_GROUP
+                             : acts[i] == QA_GROUP && !modal
                                  ? (playback_option(2) ? "Group by: Folder" : "Group by: Album")
                              : acts[i] == QA_NEXT_GROUP && playback_option(2) ? "Next Folder"
                              : acts[i] == QA_PREV_GROUP && playback_option(2) ? "Previous Folder"
-                                                                              : rows[acts[i] - 1]);
-        if (painted) hold_label(item, label);
+                             /* the inset modal's set writes US English (OLED's) */
+                             : acts[i] == QA_FAV && modal   ? "Add to Favorites"
+                             : acts[i] == QA_UNFAV && modal ? "Remove from Favorites"
+                                                            : rows[acts[i] - 1]);
+        if (modal) {
+            int dir = DIR_NONE, kind = acts[i] - QA_ADV_SHUFFLE;
+            const char *value = !setting             ? (const char *)0
+                                : acts[i] == QA_SORT ? qm_sort_name(&dir)
+                                                     : qm_choice_name(kind, playback_option(kind));
+            modal_row(item, label, icons[acts[i] - 1], value, setting ? MM_SETTING : MM_ACTION);
+            modal_dir(item, dir);
+            if (acts[i] == QA_SORT) modal_gap(view);
+        } else if (painted)
+            hold_label(item, label);
         widget_on(item, EVT_CLICK, qm_pick, (void *)(long)acts[i]);
     }
     widget_set_prop_int(view, "virtual_h", n * pitch);
-    if (painted) hold_open(dialog, n);
+    if (modal)
+        modal_frame(dialog, widget_lookup(dialog, "list_view", 1));
+    else if (painted)
+        hold_open(dialog, n);
     st.qm_dialog = dialog;
+    if (modal) ringnav_select(view, sorts, n); /* the first action, Sorting a tick up */
     return 0;
 }
 
@@ -11179,7 +11271,9 @@ static int shuffle_key(void *top, void *w, int dir) {
         st.shuffle_on = (void *)0;
         return 0;
     }
-    int stops = widget_count_children(row) > 2 ? SORT_STOP : SHUFFLE_STOP;
+    int stops = widget_count_children(row) > 2 && widget_get_visible(widget_get_child(row, 2))
+                    ? SORT_STOP
+                    : SHUFFLE_STOP;
     if (st.shuffle_on != row || st.shuffle_list != w) {
         if (dir >= 0 || widget_get_prop_int(w, SEL, -1) != 0) return 0;
         st.shuffle_on = row;

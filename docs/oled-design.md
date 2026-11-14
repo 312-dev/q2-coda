@@ -217,8 +217,8 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   Play All (a song already plays the rest of its list in order): Phosphor `shuffle` (regular, 20
   px) on the text column and "Shuffle" 28 px after it, both Accent Blue, white on the selection.
   The wheel reaches it from the first song; Centre shuffles the list, and Return from Now Playing
-  lands on it again. Sort's bars stay at its right,
-  one more tick up, until the options menu takes them.
+  lands on it again. Sort has no place on the row: it is the hold menu's Sorting row
+  ([Menus](#menus)).
 - **Folder view** reads as an album: the same 32 px rows. A song file is a track, its number in the
   album's column, the title from the library's tags (found by the file's path) at x 50 and its
   length on the right column when known; a file the library doesn't know shows its file name
@@ -310,8 +310,8 @@ an inset modal over the page, which stays on screen dimmed half way to black; no
 - The menu opens on its first action, lit; the wheel moves, Centre picks, Return closes it back to
   the row it came from.
 
-Built by `patch/menu_modal.c` under a set with `modal` (OLED's), so far for Now Playing's More, a
-stock page, which such a set loads as a dialog (`tools/ipod.py` `modal_page`).
+Built by `patch/menu_modal.c` under a set with `modal` (OLED's), so far for the hold menus and Now
+Playing's More, a stock page, which such a set loads as a dialog (`tools/ipod.py` `modal_page`).
 
 ### Icons
 
