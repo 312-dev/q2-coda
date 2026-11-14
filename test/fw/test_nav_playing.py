@@ -10,6 +10,7 @@ import pytest
 import host
 import art as tools_art  # tools/, on the path host.py set: the art's own sizes
 from conftest import NAVIGATION_SOURCE, O, Deques, Externpic, ask_cover, in_fork, libc, ui_name
+from test_nav_loop import DOWN, UP, key_event
 
 THEMES = host.tools_theme.builtins()
 SETS = host.tools_theme.geometry_sets(THEMES)
@@ -1622,6 +1623,32 @@ def test_a_short_hold_turns_the_screen_off(fw, ui, mcl, st):
     assert st.scrub == 1 and releases == [1]
     cpress(now, 201500, held=NP_HOLD_MS)  # held while scrubbing: the scrub ends, the screen stays on
     assert st.scrub == 0 and releases == [1]
+
+
+def test_a_short_hold_is_timed_from_the_press_not_its_repeats(fw, ui, mcl, st):
+    """A Q2's held Centre repeats its key-down every 50 ms after about 258 ms; each passes chord_gate and
+    ringnav_keydown, and the hold is still the press's."""
+    theme(fw, st, OLED, SCRUBSINGLE=1)
+    releases = []
+    fw.mock('on_wm_keyup_fun', lambda w, event, *_: releases.append(1))
+    fw.mock('stock_keydown_trampoline', lambda *_: 0)
+    now = Now(fw, ui, mcl, st)
+    gate = fw.fn('navigation__chord_gate', C.c_int, C.c_void_p)
+    keydown = fw.fn('ringnav_keydown', C.c_int, C.c_void_p, C.c_void_p)
+
+    def down(at):
+        ui.now = at
+        e = key_event(KEY_CENTER, DOWN)
+        gate(e)
+        keydown(None, e)
+
+    for at in [200000] + list(range(200258, 200800, 50)):
+        down(at)
+    gate(key_event(KEY_CENTER, UP))
+    assert press(now, 200800) == STOP and releases == [1] and st.scrub == 0
+    down(202000)  # the next press is timed afresh: a tap
+    gate(key_event(KEY_CENTER, UP))
+    assert press(now, 202080) == STOP and releases == [1] and st.scrub == 1
 
 
 def test_a_theme_without_the_pair_skips_shuffle_and_repeat(fw, ui, mcl, st):
