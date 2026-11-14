@@ -1420,9 +1420,9 @@ static void *rows_view(void *parent, int y, int w, int h, int n, int item_h) {
  * tools/ipod.py fit_rows cuts stock's lists, so under a list_fit set (OLED's) no row runs under the
  * bottom corners' glass. Elsewhere, or with the rows already above it, it stays as it is. */
 static void fit_view(void *view, int item) {
-    void *lv = P(view, W_PARENT), *wm = window_manager();
     int end = list_fit_end(), y = 0;
-    if (!end || item <= 0) return;
+    if (!end || item <= 0 || !view) return;
+    void *lv = P(view, W_PARENT), *wm = window_manager();
     for (void *w = lv; w && w != wm; w = P(w, W_PARENT)) y += I(w, W_Y);
     int h = (end - y) - (end - y) % item;
     if (h <= 0 || I(lv, W_H) <= h) return;
