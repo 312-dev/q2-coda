@@ -7263,9 +7263,12 @@ static int untouch(const void *info) {
 
 static void hide_outline(void) {
     if (st.touch_mode && !st.untouch_timer) return; /* already hidden: each touch move comes here */
+    void *top = window_manager_get_top_window(window_manager());
+    /* The keyboard's keys and the lock window's swipe touch no row: the list shown after them
+     * (a playlist just named, the page under the lock) keeps its bar. */
+    if (g_lockscreen_pageflag || (top && !tk_strcmp(widget_get_type(top), "keyboard"))) return;
     stop_timer(&st.untouch_timer);
     st.touch_mode = 1;
-    void *top = window_manager_get_top_window(window_manager());
     if (top) widget_invalidate_force(top, (void *)0);
 }
 

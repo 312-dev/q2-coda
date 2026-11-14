@@ -404,7 +404,7 @@ Non-virtual lists also remember hashes of the selected row's first two text valu
 
 ## Touch mode
 
-A session-wide touch-mode flag suppresses only custom drawing, independently of logical selection and gesture state. Touch-down and native clicks (including clicks without touch-down) set it and invalidate the visible window. It persists through settling and page changes. Accepted wheel input, including a turn at a boundary, centre selection or an accepted Return release restores drawing, so the page Return goes back to shows its row; iPod's Home list ignores the flag and always draws its bar; synchronous centre-generated clicks bypass the native-click observer.
+A session-wide touch-mode flag suppresses only custom drawing, independently of logical selection and gesture state. Touch-down and native clicks (including clicks without touch-down) set it and invalidate the visible window. A touch on the keyboard (a `keyboard` top window) or the lock window (`g_lockscreen_pageflag`) leaves it as it was: it touches no row, so the list shown after it (a playlist just named, the page under the lock) keeps its bar. It persists through settling and page changes. Accepted wheel input, including a turn at a boundary, centre selection or an accepted Return release restores drawing, so the page Return goes back to shows its row; iPod's Home list ignores the flag and always draws its bar; synchronous centre-generated clicks bypass the native-click observer.
 
 ## Drawing
 
