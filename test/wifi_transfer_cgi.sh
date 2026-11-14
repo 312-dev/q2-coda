@@ -1,7 +1,7 @@
 #!/bin/bash
-# Exercise assets/web/q2cgi — the safe Wi-Fi transfer file manager (docs/internals.md#safe-file-
-# manager) — under busybox ash with synthetic CGI requests. /mnt/mmc is a tmpfs, so the mount check
-# and the filesystem boundary are real. Needs busybox, python3, and that mount:
+# Exercise assets/web/q2cgi — the safe Wi-Fi transfer file manager
+# (docs/internals.md#safe-file-manager) — under busybox ash with synthetic CGI requests. /mnt/mmc is a
+# tmpfs, so the mount check and the filesystem boundary are real. Needs busybox, python3, and that mount:
 # - a tmpfs already at /mnt/mmc is used as it is, and emptied, so the suite needs no root itself:
 #   `sudo mkdir -p /mnt/mmc && sudo mount -t tmpfs -o uid=$(id -u),gid=$(id -g) tmpfs /mnt/mmc`
 #   first, as .github/workflows/firmware.yml does, or a container's `--tmpfs /mnt/mmc`;

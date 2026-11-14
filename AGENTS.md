@@ -93,7 +93,7 @@ The full list of suites, with what each needs, is in [docs/building.md](docs/bui
 - **A window the wheel should work on must be in `patch/contexts.inc`**, and the build rejects a name that is not a stock window or in `PAYLOAD_WINDOWS`.
 - **`ponytail:` in a comment or doc marks a known limit or cost left on purpose**, with what would lift it. Read it before "fixing" the code beside it.
 - **Don't change `VERSION`**, and add a plain-words line to [docs/changelog.md](docs/changelog.md) for anything a user would notice ([CONTRIBUTING](CONTRIBUTING.md#changing-the-firmware)).
-- **Docs follow the code in the same change**: how a fix works goes in [docs/internals.md](docs/internals.md) and the code's comments, and source comments cite doc anchors (`docs/internals.md#lock-screen`), so renaming a heading breaks them.
+- **Docs follow the code in the same change**: how a fix works goes in [docs/internals.md](docs/internals.md) and the code's comments, and source comments cite doc anchors (`docs/internals.md#lock-screen`), so renaming a heading breaks them: `test/unit/test_docs.py` fails on each citation that no longer resolves, and on a `file:LINE` in [architecture](docs/architecture.md), which names symbols by file.
 
 ## Where code goes
 
