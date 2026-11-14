@@ -35,6 +35,8 @@ REPRODUCIBLE = [f'-ffile-prefix-map={CACHE}=/q2-thirdparty']
 SOURCES = {
     'openssl': ('1.1.1w', 'https://github.com/openssl/openssl/releases/download/OpenSSL_1_1_1w/openssl-1.1.1w.tar.gz',
                 'cf3098950cb4d853ad95c0841f1f9c6d3dc102dccfcacd521d93925208b76ac8'),
+    'zlib': ('1.4', 'https://zlib.net/zlib-1.4.tar.gz',
+             '02dd159783677a749c04adbdd02b55b8a2bcc7e054f51b76b549199a916ad584'),
 }
 
 
@@ -157,7 +159,14 @@ def build_openssl(src, stage, env, log):
     run('make', 'install_sw', f'DESTDIR={stage}', cwd=src, env=env.vars, log=log)
 
 
-RECIPES = {'openssl': (build_openssl, [])}
+def build_zlib(src, stage, env, log):
+    run('./configure', '--prefix=/usr', '--shared', cwd=src, env=dict(env.vars, CHOST=env.host), log=log)
+    run('make', f'-j{JOBS}', 'libz.so.1.4', cwd=src, env=env.vars, log=log)
+    run('make', 'install', f'DESTDIR={stage}', cwd=src, env=env.vars, log=log)
+
+
+RECIPES = {'openssl': (build_openssl, []),
+           'zlib': (build_zlib, [])}
 
 
 # Each top-level function's and class's text as this module was imported (inspect.getsource rereads
@@ -326,6 +335,7 @@ def check_abi(stock_root, replacements):
 INSTALL = {
     'openssl': {'usr/lib/libssl.so.1.1': 'usr/lib/libssl.so.1.1', 'usr/lib/libcrypto.so.1.1': 'usr/lib/libcrypto.so.1.1',
                 **{f'usr/lib/engines-1.1/{e}.so': f'usr/lib/engines-1.1/{e}.so' for e in ('afalg', 'capi', 'padlock')}},
+    'zlib': {'usr/lib/libz.so.1.2.11': 'usr/lib/libz.so.1.4'},
 }
 
 
