@@ -423,7 +423,7 @@ char *catalogue_union(const char *sql), *catalogue_search(const char *sql);
 const char *catalogue_rows(void); /* library_query's union, "" without one */
 void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);
 void catalogue_changed(void), catalogue_card_away(void), catalogue_rated(void *r, int hearts);
-void catalogue_bind(void *row, unsigned index), catalogue_mark(void *row, void *r);
+void catalogue_bind(void *row, unsigned index), catalogue_mark(void *row, void *r, int tab);
 void catalogue_forget(void *row);
 int catalogue_greyed(void *w, unsigned *color), catalogue_row_ink(void *row, unsigned *ink);
 int catalogue_greys(void);
@@ -432,7 +432,7 @@ void catalogue_fit(void *entry, void *surface, int limit);
 int catalogue_np_info(const char *path, char *genre, int *year);
 int catalogue_cover(const char *path, char *out, unsigned size);
 int ringnav_row_selected(void *row); /* navigation.c: row holds the painted selection */
-void *ringnav_search_songs(void *win); /* navigation.c: Search's song results, while shown */
+void *ringnav_search_rows(void *win, int *tab); /* navigation.c: Search's results, while shown */
 extern unsigned auto_nexts; /* playback.c ringnav_next: tracks that ended by themselves */
 int stream_cache(int spotify); /* navigation.c: Streaming's Configuration, a cap of 512 << it MB */
 void album_memory(void *r);

@@ -1729,33 +1729,39 @@ static int offline_x(void *w, int i, const rect_t *r) {
     return r->x + r->w - CHEVRON_W + 25 - (chevron ? 28 : 0);
 }
 /* Before a list's rows paint: an album's songs (albuminfo_page; playerjumpinfo_page, Go to
- * Album's; Cover Flow's tracks, where Go to Album goes with Artist View or Cover Flow open) and
- * Search's songs are a scroll_view's rows, one per record in order (the showlist, Cover Flow's
- * tracks or Search's results), not a table's, so each whose song can't play now is greyed here, as
- * ringnav_table_load greys a table's. Then every greyed row's labels end short of its mark
- * (catalogue_fit), and any it narrowed before take their width back. */
-/* Search's results while its Songs tab (tab_button_group's first) is lit: p_deque_searchshowlist,
- * the list search_track_row_on_click plays from; else 0. */
-void *ringnav_search_songs(void *win) {
+ * Album's; Cover Flow's tracks, where Go to Album goes with Artist View or Cover Flow open), Most
+ * Played's and the Ratings lists' songs (page_tracks) and Search's results are a scroll_view's
+ * rows, one per record in order (the showlist, the page's tracks or Search's results), not a
+ * table's, so each that can't play now is greyed here, as ringnav_table_load greys a table's.
+ * Then every greyed row's labels end short of its mark (catalogue_fit), and any it narrowed before
+ * take their width back. */
+/* Search's results while they show: p_deque_searchshowlist, which each of its tab_button_group's
+ * tabs (Songs, Artists, Albums, Genres) fills with its rows, the Songs tab's the list
+ * search_track_row_on_click plays from; *tab the lit one's index. 0 for none (its history). */
+static void *page_tracks(void *page);
+void *ringnav_search_rows(void *win, int *tab) {
     void *tabs = win && !tk_strcmp(widget_get_prop_str(win, "name", ""), "search_dialog")
                      ? widget_lookup(win, "tab_button_group", 1)
-                     : (void *)0,
-         *songs = tabs && widget_count_children(tabs) ? widget_get_child(tabs, 0) : (void *)0;
-    return songs && widget_get_prop_int(songs, "value", 0) ? P(p_deque_searchshowlist, 0)
-                                                           : (void *)0;
+                     : (void *)0;
+    for (int i = 0, n = tabs && widget_get_visible(tabs) ? widget_count_children(tabs) : 0; i < n;
+         ++i)
+        if (widget_get_prop_int(widget_get_child(tabs, i), "value", 0))
+            return *tab = i, P(p_deque_searchshowlist, 0);
+    return (void *)0;
 }
 static void grey_rows(void *w) {
     if ((catalogue_source != 1 && !catalogue_greys()) || !kind(w) || !load_rows(&g_menu, w)) return;
     void *win = window_of(w), *list = (void *)0;
+    int tab = 0; /* Search's lit tab: 0 Songs */
     const char *page = widget_get_prop_str(win, "name", "");
     if (g_menu.kind == 1 && catalogue_source == 1)
         list = !tk_strcmp(page, "albuminfo_page") || !tk_strcmp(page, "playerjumpinfo_page")
                    ? P(p_deque_showlist, 0)
-                   : coverflow_tracks(win);
-    if (!list && g_menu.kind == 1 && catalogue_source == 1) list = ringnav_search_songs(win);
+                   : page_tracks(win);
+    if (!list && g_menu.kind == 1 && catalogue_source == 1) list = ringnav_search_rows(win, &tab);
     if (list && deque_size(list) != (unsigned)g_menu.rows) list = (void *)0;
     for (int i = 0; i < g_menu.n; ++i) {
-        if (list) catalogue_mark(g_menu.at[i], deque_at(list, (unsigned)g_menu.id[i]));
+        if (list) catalogue_mark(g_menu.at[i], deque_at(list, (unsigned)g_menu.id[i]), tab);
         rect_t r = bounds(&g_menu, i);
         if (2 * r.w >= I(w, W_W))
             catalogue_fit(g_menu.at[i], w,

@@ -10,6 +10,7 @@ import struct
 import pytest
 
 from conftest import FNV_SEED, O, Files, Rows
+from test_nav_painters import scratch, st  # noqa: F401  navigation.c's st by field
 
 APP = 'subsonic'
 CARD_DB = b'/mnt/mmc/.q2pod/'
@@ -707,3 +708,87 @@ def test_a_server_albums_cover_is_the_apps_by_its_album_id(rig, fw):
     album = fw.fn('coverflow_album_cover', C.c_int, C.c_char_p, C.c_char_p, C.c_int, C.c_int)
     assert album(url('s1', 'al1').encode(), b'/tmp/x', 100, 100) == 1 and thumbs == [cover]
     assert album(url('s2', 'al2').encode(), b'/tmp/x', 100, 100) == 0 and thumbs == [cover]
+
+
+def group_record(rig, field, name, rid=1):
+    """A row of Search's Artists, Albums or Genres tab as its callback fills it: a directory's type, its id
+    and the name in its tab's field alone (the others overlap it as host pointers)."""
+    r = C.create_string_buffer(O['REC_SIZE'] + 8)
+    s = C.create_string_buffer(name.encode())
+    rig.keep += [r, s]
+    struct.pack_into('<i', r, O['REC_ID'], rid)
+    struct.pack_into('<i', r, O['REC_TYPE'], 4)
+    struct.pack_into('<Q', r, O[field], C.addressof(s))
+    return C.addressof(r)
+
+
+def test_searchs_artists_albums_and_genres_rows_are_greyed_offline_when_nothing_of_theirs_can_play(rig, fw):
+    """Search's other tabs list artists, albums and genres (one record each, the name in its tab's field):
+    offline, one none of whose songs is on the card or has an offline copy is greyed, by its name as the
+    Library groups it (an album artist counts as the artist); online, none is."""
+    rig.card_song('/mnt/mmc/Music/a.flac', 'Card Song', 'Card Band', 'Mine', 1, 200, 1000)
+    rig.write(1, [song_row('s1', 'Streamed', 'Server Band', 'Server Only', 1, 100, 1, album_id='al1'),
+                  song_row('s2', 'Cached', 'Cached Band', 'Some Cached', 1, 100, 2, album_id='al2',
+                           local='/mnt/mmc/.subsonic/stream/s2.flac', album_artist='Various'),
+                  song_row('s3', 'Beside Mine', 'card band', 'Elsewhere', 2, 100, 3, album_id='al3')])
+    rig.poll()
+    from test_nav_painters import Ui
+    ui = Ui(fw)
+    row = ui.add('list_item', None)
+    label = ui.add('label', row)
+    mark = fw.fn('catalogue_mark', None, C.c_void_p, C.c_void_p, C.c_int)
+    greyed = fw.fn('catalogue_greyed', C.c_int, C.c_void_p, C.POINTER(C.c_uint))
+    tabs = {'REC_ARTIST': 1, 'REC_ALBUM': 2, 'REC_STYLE': 3}
+
+    def grey(field, name, rid=1):
+        mark(row.addr, group_record(rig, field, name, rid), tabs[field])
+        return bool(greyed(label.addr, C.byref(C.c_uint(0xffffffff))))
+    rows = [('REC_ARTIST', 'server band'), ('REC_ARTIST', 'Card Band'), ('REC_ARTIST', 'Various'),
+            ('REC_ARTIST', 'Cached Band'), ('REC_ARTIST', 'Not Known'),
+            ('REC_ALBUM', 'Server Only'), ('REC_ALBUM', 'some cached'), ('REC_ALBUM', 'Mine'),
+            ('REC_STYLE', 'Rock')]
+    # Rock: the server's genre, one song of it cached
+    assert [grey(*r) for r in rows] == [True, False, False, False, False, True, False, False, False]
+    assert not grey('REC_ARTIST', 'Server Band', -1)  # an Unknown row
+    # the copy evicted: its album, its artists and the genre have nothing left to play
+    rig.files.files[AVAIL] = b'-s2\n'
+    rig.poll()
+    assert [grey(*r) for r in rows] == [True, False, True, True, False, True, True, False, True]
+    # the card's songs have no genre: give one a server genre's name and it plays
+    db = sqlite3.connect(rig.tmp/'database.db')
+    db.execute("update songtable set style='ROCK'")
+    db.commit()
+    db.close()
+    rig.write(2, [song_row('s1', 'Streamed', 'Server Band', 'Server Only', 1, 100, 1, album_id='al1')])
+    rig.poll()
+    assert not grey('REC_STYLE', 'Rock') and grey('REC_ARTIST', 'Server Band')
+    rig.online = True
+    rig.poll()
+    assert not any(grey(*r) for r in rows)
+
+
+@pytest.mark.parametrize('page', ['mostplayed_page', 'rated_page', 'search_dialog'])
+def test_most_played_the_ratings_lists_and_searchs_tabs_grey_their_rows_as_they_paint(rig, fw, st, page):
+    """Most Played's and a Ratings list's songs (page_tracks) and Search's results (each tab's rows in
+    p_deque_searchshowlist) are a scroll_view's rows, one record each: as the list paints, a row that can't
+    play now is greyed (grey_rows), the others not."""
+    from test_nav_painters import Canvas, Ui, library
+    rig.card_song('/mnt/mmc/Music/a.flac', 'Card Song', 'Card Band', 'Mine', 1, 200, 1000)
+    rig.write(1, [song_row('s1', 'Streamed', 'Server Band', 'Server Only', 1, 100, 1)])
+    rig.poll()
+    ui = Ui(fw)
+    view, rows = library(fw, ui, 2, name=page)
+    win = C.c_void_p.from_address(view.addr + O['W_PARENT']).value
+    if page == 'search_dialog':  # the Albums tab lit
+        tabs = ui.add('view', ui.nodes[win], (0, 0, 375, 26), 'tab_button_group')
+        for lit in (0, 0, 1, 0):
+            ui.add('button', tabs, (0, 0, 90, 26), value=lit)
+        records = [group_record(rig, 'REC_ALBUM', 'Mine'), group_record(rig, 'REC_ALBUM', 'Server Only')]
+        fw.var('fw_ctx_p_deque_searchshowlist', C.c_uint).value = rig.rows.new(records)
+    else:
+        st('mp_page' if page == 'mostplayed_page' else 'rt_page', C.c_void_p).value = win
+        st('mp_list' if page == 'mostplayed_page' else 'rt_list', C.c_void_p).value = rig.rows.new(
+            [rig.record('/mnt/mmc/Music/a.flac'), rig.record(url('s1'))])
+    fw.fn('ringnav_paint_bg', C.c_int, C.c_void_p, C.c_void_p)(view.addr, Canvas(fw).addr)
+    greyed = fw.fn('catalogue_greyed', C.c_int, C.c_void_p, C.POINTER(C.c_uint))
+    assert [bool(greyed(b.children[0].addr, C.byref(C.c_uint(0xffffffff)))) for b in rows] == [False, True]

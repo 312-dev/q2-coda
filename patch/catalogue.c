@@ -46,19 +46,28 @@ typedef struct {
     unsigned sid, local;    /* offsets in the index's strings, 0 for none */
     unsigned path;          /* the path itself */
     int sec;                /* the catalogue's seconds */
-    unsigned album;         /* album_hash of a server row's album; 0 for a linked card file */
+    /* a server row's album, artist, album artist and genre, each its group_hash; 0 for a linked
+     * card file */
+    unsigned grp[4];
     unsigned char app, dup; /* the app's slot; dup: a card file the match linked */
 } cat_ent;
+
+/* The groups a Library row can stand for (an album's, an artist's or a genre's row): a server
+ * row's names in each, as cat_ent.grp holds them (an artist both its artist and album artist). */
+enum { G_ALBUM, G_ARTIST, G_GENRE, G_KINDS };
+typedef struct {
+    unsigned *h; /* group_hash values, sorted, each once */
+    unsigned n;
+} cat_set;
 
 typedef struct {
     cat_ent *e;
     unsigned n;
     char *str; /* the strings, from offset 1 */
     unsigned len, cap;
-    unsigned *by_sid;   /* e's indices, by sid_key */
-    unsigned *by_album; /* e's indices, by album */
-    unsigned *cards;    /* album_hash of every card song's album, sorted, repeats dropped */
-    unsigned ncards;
+    unsigned *by_sid;         /* e's indices, by sid_key */
+    cat_set cards[G_KINDS];   /* every card song's names, by group */
+    cat_set servers[G_KINDS]; /* every server row's */
 } cat_ix;
 
 typedef struct {
@@ -87,6 +96,10 @@ static struct {
     unsigned gen;  /* library_gen the last job matched against */
     int pending;   /* a match is due once no scan runs */
     cat_ix ix;
+    /* the server rows' names with an offline copy, by group (group_unavailable); built again when
+     * local_gen has moved since (an import, catalogue.avail) */
+    cat_set local[G_KINDS];
+    unsigned local_gen, local_built;
     void **stock_slot; /* stock's handle's global (stock_db_open's a1) */
     void *attached;    /* the stock handle cat is attached to */
     void *grey[CAT_GREY_ROWS];
@@ -115,7 +128,8 @@ int catalogue_on(void) {
 /* ---- The index (built on the job's thread, read on the UI thread once swapped in) ---- */
 
 static void ix_free(cat_ix *x) {
-    free(x->e), free(x->str), free(x->by_sid), free(x->by_album), free(x->cards);
+    free(x->e), free(x->str), free(x->by_sid);
+    for (int k = 0; k < G_KINDS; ++k) free(x->cards[k].h), free(x->servers[k].h);
     memset(x, 0, sizeof *x);
 }
 static unsigned ix_put(cat_ix *x, const char *s) {
@@ -169,33 +183,58 @@ static cat_ent *ix_sid(const cat_ix *x, int app, const char *sid) {
     cat_ent *e = lo < x->n && x->by_sid ? &x->e[x->by_sid[lo]] : 0;
     return e && e->app == app && !strcmp(ix_str(x, e->sid), sid) ? e : 0;
 }
-static int album_cmp_ix(const void *a, const void *b) {
-    unsigned x = sid_ix->e[*(const unsigned *)a].album, y = sid_ix->e[*(const unsigned *)b].album;
-    return x < y ? -1 : x > y;
-}
 static int u32_cmp(const void *a, const void *b) {
     unsigned x = *(const unsigned *)a, y = *(const unsigned *)b;
     return x < y ? -1 : x > y;
 }
-static int ix_sort(cat_ix *x) {
-    qsort(x->e, x->n, sizeof *x->e, ent_cmp);
-    if (!(x->by_sid = calloc(x->n + 1, sizeof *x->by_sid)) ||
-        !(x->by_album = calloc(x->n + 1, sizeof *x->by_album)))
-        return 0;
-    for (unsigned i = 0; i < x->n; ++i) x->by_sid[i] = x->by_album[i] = i;
-    sid_ix = x; /* the job's thread alone sorts */
-    qsort(x->by_sid, x->n, sizeof *x->by_sid, sid_cmp);
-    qsort(x->by_album, x->n, sizeof *x->by_album, album_cmp_ix);
-    if (x->ncards) qsort(x->cards, x->ncards, sizeof *x->cards, u32_cmp);
-    unsigned k = 0;
-    for (unsigned i = 0; i < x->ncards; ++i)
-        if (!k || x->cards[k - 1] != x->cards[i]) x->cards[k++] = x->cards[i];
-    x->ncards = k;
+/* h into set, unsorted (set_sort sorts it); 0 when out of memory. */
+static int set_add(cat_set *set, unsigned h) {
+    if (!h) return 1;
+    if (!(set->n & 1023)) {
+        unsigned *a = realloc(set->h, (set->n + 1024) * sizeof *a);
+        if (!a) return 0;
+        set->h = a;
+    }
+    set->h[set->n++] = h;
     return 1;
 }
-/* An album's name as the Albums list groups it (COLLATE NOCASE: ASCII letters folded): its FNV-1a
- * 32, 0 for none. */
-static unsigned album_hash(const char *s) {
+static void set_sort(cat_set *set) {
+    if (set->n) qsort(set->h, set->n, sizeof *set->h, u32_cmp);
+    unsigned k = 0;
+    for (unsigned i = 0; i < set->n; ++i)
+        if (!k || set->h[k - 1] != set->h[i]) set->h[k++] = set->h[i];
+    set->n = k;
+}
+static int set_has(const cat_set *set, unsigned h) {
+    unsigned lo = 0, hi = set->n;
+    while (lo < hi) {
+        unsigned mid = (lo + hi) / 2;
+        if (set->h[mid] < h)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo < set->n && set->h[lo] == h;
+}
+/* A server row's names into sets, by group: its artist and album artist both the artist's. */
+static int ent_groups(const cat_ent *e, cat_set *sets) {
+    return set_add(&sets[G_ALBUM], e->grp[0]) && set_add(&sets[G_ARTIST], e->grp[1]) &&
+           set_add(&sets[G_ARTIST], e->grp[2]) && set_add(&sets[G_GENRE], e->grp[3]);
+}
+static int ix_sort(cat_ix *x) {
+    qsort(x->e, x->n, sizeof *x->e, ent_cmp);
+    if (!(x->by_sid = calloc(x->n + 1, sizeof *x->by_sid))) return 0;
+    for (unsigned i = 0; i < x->n; ++i) x->by_sid[i] = i;
+    sid_ix = x; /* the job's thread alone sorts */
+    qsort(x->by_sid, x->n, sizeof *x->by_sid, sid_cmp);
+    for (unsigned i = 0; i < x->n; ++i)
+        if (!x->e[i].dup && !ent_groups(&x->e[i], x->servers)) return 0;
+    for (int k = 0; k < G_KINDS; ++k) set_sort(&x->cards[k]), set_sort(&x->servers[k]);
+    return 1;
+}
+/* A name as the Library's lists group it (COLLATE NOCASE: ASCII letters folded): its FNV-1a 32,
+ * 0 for none. */
+static unsigned group_hash(const char *s) {
     unsigned h = FNV_SEED;
     if (!s || !*s) return 0;
     for (; *s; ++s) h = (h ^ (unsigned char)(*s >= 'A' && *s <= 'Z' ? *s + 32 : *s)) * 16777619u;
@@ -902,21 +941,13 @@ static int ix_row(void *ctx, int n, char **v, char **c) {
     e->sid = ix_put(x, v[1]), e->local = e->dup ? 0 : ix_put(x, v[2]);
     e->sec = v[3] ? atoi(v[3]) : 0;
     e->app = (unsigned char)(v[5] ? atoi(v[5]) : 0);
-    e->album = e->dup ? 0 : album_hash(v[6]);
+    for (int k = 0; k < 4; ++k) e->grp[k] = e->dup ? 0 : group_hash(v[6 + k]);
     return 0;
 }
-/* A card song's album, for album_unavailable: the card's songs always play. */
-static int card_album_row(void *ctx, int n, char **v, char **c) {
-    cat_ix *x = jb.ix;
-    unsigned h = album_hash(v[0]);
-    if (!h) return 0;
-    if (!(x->ncards & 1023)) {
-        unsigned *a = realloc(x->cards, (x->ncards + 1024) * sizeof *a);
-        if (!a) return jb.bad = 1;
-        x->cards = a;
-    }
-    x->cards[x->ncards++] = h;
-    return 0;
+/* A card song's name in a group (ctx the set), for group_unavailable: the card's songs always
+ * play. */
+static int card_group_row(void *ctx, int n, char **v, char **c) {
+    return !set_add(ctx, group_hash(v[0])) && (jb.bad = 1);
 }
 static void ix_build(void) {
     jb.ix = &cat.job_ix;
@@ -929,11 +960,21 @@ static void ix_build(void) {
         o = sq(o, JEND, cat.app[i].id);
         PUT(o, JEND, " then %d", i);
     }
-    PUT(o, JEND, " else %d end,a.album from nw.serverall a,nw.servermeta m where m.id=a.id",
+    PUT(o, JEND,
+        " else %d end,a.album,a.songer,a.albumsonger,a.style from nw.serverall a,nw.servermeta m"
+        " where m.id=a.id",
         CAT_APPS);
     if (o >= JEND) jb.bad = 1;
+    cat_set *cards = jb.ix->cards;
     if (jb.bad || sqlite3_exec(jb.db, jb.sql, ix_row, 0, 0) || jb.bad ||
-        sqlite3_exec(jb.db, "select distinct album from main.songtable", card_album_row, 0, 0) ||
+        sqlite3_exec(jb.db, "select distinct album from main.songtable", card_group_row,
+                     &cards[G_ALBUM], 0) ||
+        sqlite3_exec(jb.db, "select distinct songer from main.songtable", card_group_row,
+                     &cards[G_ARTIST], 0) ||
+        sqlite3_exec(jb.db, "select distinct albumsonger from main.songtable", card_group_row,
+                     &cards[G_ARTIST], 0) ||
+        sqlite3_exec(jb.db, "select distinct style from main.songtable", card_group_row,
+                     &cards[G_GENRE], 0) ||
         jb.bad || !ix_sort(jb.ix))
         ix_free(jb.ix);
 }
@@ -1164,37 +1205,49 @@ static void grey_set(void *row, int on) {
         cat.grey[i] = cat.grey[cat.ngrey], cat.grey_ink[i] = cat.grey_ink[cat.ngrey];
     }
 }
-void catalogue_mark(void *row, void *r) { grey_set(row, catalogue_unavailable(r)); }
+static int search_group_unavailable(void *r, int tab);
+/* A list's row as it paints (navigation.c grey_rows): its record a song's, or, tab 1 to 3, a row
+ * of Search's Artists, Albums or Genres tab. */
+void catalogue_mark(void *row, void *r, int tab) {
+    grey_set(row, tab > 0 ? search_group_unavailable(r, tab) : catalogue_unavailable(r));
+}
 void catalogue_forget(void *row) { grey_set(row, 0); }
-/* Whether an album row (r, of an album list) can't play now: offline, no card song has its name
- * and none of its server rows has an offline copy. By name, as the Albums list groups them (an
- * artist's albums too): ponytail: a server-only album that shares its name with a card album
- * (another artist's "Greatest Hits") is not greyed; never the other way round. */
+/* The server rows' names with an offline copy, by group, as they are now. */
+static void local_sets(void) {
+    if (cat.local_built == cat.local_gen) return;
+    cat.local_built = cat.local_gen;
+    for (int k = 0; k < G_KINDS; ++k) cat.local[k].n = 0;
+    for (unsigned i = 0; i < cat.ix.n; ++i)
+        if (cat.ix.e[i].local && !cat.ix.e[i].dup && !ent_groups(&cat.ix.e[i], cat.local)) {
+            cat.local_built = cat.local_gen - 1; /* out of memory: none counted, tried again */
+            for (int k = 0; k < G_KINDS; ++k) cat.local[k].n = 0;
+            return;
+        }
+    for (int k = 0; k < G_KINDS; ++k) set_sort(&cat.local[k]);
+}
+/* Whether a group's row (its name's group_hash h) can't play now: offline, no card song has that
+ * name and no server row of it has an offline copy. A name the catalogue doesn't know is the
+ * card's. By name, as the Library's lists group them: ponytail: a server-only album that shares
+ * its name with a card album (another artist's "Greatest Hits"), or a server-only artist named as
+ * a card song's album artist, is not greyed; never the other way round. */
+static int group_unavailable(int kind, unsigned h) {
+    if (!h || !cat.ix.n || (catalogue_on() && cat_online())) return 0;
+    if (set_has(&cat.ix.cards[kind], h) || !set_has(&cat.ix.servers[kind], h)) return 0;
+    local_sets();
+    return !set_has(&cat.local[kind], h);
+}
+/* Whether an album row (r, of an album list) can't play now (group_unavailable). */
 int catalogue_album_unavailable(void *r) {
-    unsigned h = r && I(r, REC_ID) >= 0 ? album_hash(P(r, REC_ALBUM)) : 0;
-    const cat_ix *x = &cat.ix;
-    if (!h || !x->by_album || (catalogue_on() && cat_online())) return 0;
-    unsigned lo = 0, hi = x->ncards;
-    while (lo < hi) {
-        unsigned mid = (lo + hi) / 2;
-        if (x->cards[mid] < h)
-            lo = mid + 1;
-        else
-            hi = mid;
-    }
-    if (lo < x->ncards && x->cards[lo] == h) return 0;
-    lo = 0, hi = x->n;
-    while (lo < hi) {
-        unsigned mid = (lo + hi) / 2;
-        if (x->e[x->by_album[mid]].album < h)
-            lo = mid + 1;
-        else
-            hi = mid;
-    }
-    int server = 0;
-    for (; lo < x->n && x->e[x->by_album[lo]].album == h; ++lo, server = 1)
-        if (x->e[x->by_album[lo]].local) return 0;
-    return server; /* an album the catalogue doesn't know is the card's */
+    return group_unavailable(G_ALBUM, r && I(r, REC_ID) >= 0 ? group_hash(P(r, REC_ALBUM)) : 0);
+}
+/* Whether a row of Search's Artists (tab 1), Albums (2) or Genres (3) tab can't play now: a
+ * directory record its tab's callback (0x506904, 0x506e94, 0x506d60) fills with the name in
+ * REC_ARTIST, REC_ALBUM or REC_STYLE. */
+static int search_group_unavailable(void *r, int tab) {
+    static const int kind[] = { G_ARTIST, G_ALBUM, G_GENRE },
+                     field[] = { REC_ARTIST, REC_ALBUM, REC_STYLE };
+    if (!r || tab > 3 || I(r, REC_ID) < 0) return 0;
+    return group_unavailable(kind[tab - 1], group_hash(P(r, field[tab - 1])));
 }
 /* Whether the showlist holds albums: all of them, an artist's, a composer's or a genre's (an
  * artist's tabs set classinfo, not g_class_type, as qm_open reads them). */
@@ -1367,6 +1420,7 @@ static void cat_swap(void) {
             ix_free(&cat.ix);
             cat.ix = cat.job_ix;
             memset(&cat.job_ix, 0, sizeof cat.job_ix);
+            ++cat.local_gen;
             /* open lists query again; a scan since the job began (cat.gen is the generation it
              * matched against) leaves cat.gen behind, so the next poll matches again */
             int matched = cat.gen == library_gen;
@@ -1414,6 +1468,7 @@ static void cat_avail(int slot) {
             cat_ent *e = ix_sid(&cat.ix, slot, f2[0]);
             if (!e || e->dup) continue;
             e->local = gone || n < 2 || !card_path(f2[1]) ? 0 : ix_put(&cat.ix, f2[1]);
+            ++cat.local_gen;
         }
     /* a cut last line waits for its newline */
     fclose(f);
