@@ -106,12 +106,12 @@ static const char *codec_name(const struct source *s) {
     switch (s->dec->codec_id) {
     case AV_CODEC_ID_MP2: case AV_CODEC_ID_MP1: return "MP2";
     case AV_CODEC_ID_MP3: return "MP3";
-    case AV_CODEC_ID_AAC: case AV_CODEC_ID_AAC_LATM: return "AAC";
+    case AV_CODEC_ID_AAC: return "AAC";
     case AV_CODEC_ID_APE: return "APE";
     case AV_CODEC_ID_VORBIS: return "OGG";
     case AV_CODEC_ID_ALAC: return "ALAC";
     case AV_CODEC_ID_DTS: return "DTS";
-    case AV_CODEC_ID_AC3: case AV_CODEC_ID_EAC3: return "AC2"; /* stock's table names AC-3 so (captured) */
+    case AV_CODEC_ID_AC3: return "AC2"; /* stock's table names AC-3 so (captured) */
     case AV_CODEC_ID_WAVPACK: return "WMA";                    /* stock names WavPack so (captured); its table has no entry */
     case AV_CODEC_ID_FLAC: return "FLAC";
     case AV_CODEC_ID_TAK: return "TAK";
@@ -120,7 +120,7 @@ static const char *codec_name(const struct source *s) {
     default: break;
     }
     if (!strcmp(container, "aiff")) return "AIFF";
-    if (!strcmp(container, "wav") || !strcmp(container, "w64")) return "WAV";
+    if (!strcmp(container, "wav")) return "WAV";
     if (!strcmp(container, "dsf")) return "DSF";
     if (!strcmp(container, "iff")) return "DSD";
     return "UNK";

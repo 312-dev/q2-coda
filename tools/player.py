@@ -28,14 +28,16 @@ FFMPEG = ('7.1.5', 'https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz',
 TRIPLE = 'mips-mti-linux-gnu'
 ARCH = ['-EL', '-march=mips32r2', '-mabi=32', '-mhard-float', '-mfp64', '-mnan=2008', '-mabs=2008']
 
-# What stock's hciplayer plays (docs/player.md#formats), by FFmpeg component. MPEG audio is FFmpeg's integer
-# decoder: 16-bit output, as stock's libmad gives, and no float in the path.
-DEMUXERS = 'flac mp3 wav w64 aiff mov ogg ape wv asf aac ac3 eac3 dts dtshd dsf iff matroska mpegts hls tta tak'.split()
-DECODERS = ('flac mp3 mp2 mp1 aac aac_latm alac vorbis opus ape wavpack wmav1 wmav2 wmapro wmalossless '
-            'ac3 eac3 dca tta tak dsd_lsbf dsd_msbf dsd_lsbf_planar dsd_msbf_planar dst '
+# What stock's hciplayer plays (docs/player.md#formats), by FFmpeg component, and nothing a listed format or source
+# does not need: Tidal, DLNA and the phone's push hand over one file's URL, and Internet Radio is not the player, so
+# no HLS, MPEG-TS or Matroska. MPEG audio is FFmpeg's integer decoder: 16-bit output, as stock's libmad gives, and no
+# float in the path.
+DEMUXERS = 'flac mp3 wav aiff mov ogg ape wv asf aac ac3 dts dsf iff tak'.split()
+DECODERS = ('flac mp3 mp2 mp1 aac alac vorbis opus ape wavpack wmav1 wmav2 wmapro wmalossless '
+            'ac3 dca tak dsd_lsbf dsd_msbf dsd_lsbf_planar dsd_msbf_planar dst '
             'pcm_s8 pcm_u8 pcm_s16le pcm_s16be pcm_s24le pcm_s24be pcm_s32le pcm_s32be pcm_f32le pcm_f32be '
             'pcm_f64le pcm_f64be pcm_alaw pcm_mulaw adpcm_ms adpcm_ima_wav').split()
-PARSERS = 'flac mpegaudio aac aac_latm ac3 dca vorbis opus tak'.split()
+PARSERS = 'flac mpegaudio aac ac3 dca vorbis opus tak'.split()
 PROTOCOLS = 'file http tcp'.split()
 BSFS = 'aac_adtstoasc'.split()
 
@@ -52,7 +54,9 @@ def configure_args(prefix):
          '--disable-avdevice', '--disable-swscale', '--disable-avfilter', '--disable-postproc', '--disable-debug',
          '--enable-static', '--disable-shared', '--enable-pic', '--disable-iconv', '--enable-network',
          # C only: the same arithmetic on the Q2 and on the machine that runs the reference decodes
-         '--disable-asm', '--disable-runtime-cpudetect']
+         '--disable-asm', '--disable-runtime-cpudetect',
+         # one section a function, so the player's --gc-sections link drops what nothing calls (CFLAGS, not codegen)
+         '--extra-cflags=-ffunction-sections -fdata-sections']
     a += [f'--enable-demuxer={x}' for x in DEMUXERS] + [f'--enable-decoder={x}' for x in DECODERS]
     a += [f'--enable-parser={x}' for x in PARSERS] + [f'--enable-protocol={x}' for x in PROTOCOLS] + [f'--enable-bsf={x}' for x in BSFS]
     return a

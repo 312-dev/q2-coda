@@ -17,7 +17,8 @@ CFLAGS += -DHAVE_ALSA
 LIBS += $(ALSA) -Wl,--allow-shlib-undefined -Wl,-Bstatic -latomic -Wl,-Bdynamic
 endif
 
-$(OUT)/q2player: $(OBJ)
+# FFmpeg's archives too: another configuration (tools/player.py) is another prefix, and must relink
+$(OUT)/q2player: $(OBJ) $(wildcard $(FFMPEG)/lib/*.a)
 	$(CC) -o $@.debug $(OBJ) -Wl,--gc-sections $(LIBS)
 	$(STRIP) -o $@ $@.debug
 

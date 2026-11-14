@@ -81,6 +81,10 @@ curl 8.18 and later do not build against OpenSSL 1.1.1, and the last that do (8.
 
 4.2.11, the last 4.2 point release, with stock's configuration (`FFMPEG_CONFIG`, buildroot's). A 4.2 point release keeps every library's version (libavcodec 58.54.100 and the rest), so their exports match. Only `/usr/bin/ffmpeg` and the FFmpeg libraries themselves use them; the payload runs `/usr/bin/ffmpeg` to decode cover art, photos, playlist mosaics, the boot logo and chapters.
 
+### q2player's FFmpeg
+
+`q2player`, the player that is to replace hciplayer ([player-plan](player-plan.md)), links an FFmpeg of its own, 7.1.5, statically, built by `tools/player.py` and not by this script. It is configured `--disable-everything` and then given only what [player.md: Formats](player.md#formats) and the player's sources need, in `tools/player.py`'s lists: the demuxers `flac mp3 wav aiff mov ogg ape wv asf aac ac3 dts dsf iff tak`, a decoder for each codec they carry (DSD's and DST among them, MPEG audio as the integer decoder), their parsers, the protocols `file http tcp` (and `https` and `tls` over mbedTLS with `Q2_PLAYER_TLS`), the bitstream filter `aac_adtstoasc`, and `libswresample` for Bluetooth. No muxer, encoder, filter, scaler, device or hardware decoder is built, and no container nothing hands the player (Matroska, MPEG-TS, HLS: Tidal, DLNA and the phone's push send one file's URL, and Internet Radio does not use the player). It is C alone (`--disable-asm`), so the Q2 and the machine that makes the reference decodes run the same arithmetic, and each function is in its own section (`-ffunction-sections -fdata-sections`), so the player's `--gc-sections` link drops what it never calls.
+
 ## Not replaced
 
 - **hciplayer's FFmpeg.** hciplayer is Shanling's MPlayer 1.3.0 with FFmpeg linked in statically, and Q2 Pod patches its code in place (`tools/peq.py`). Its decoders cannot be swapped without Shanling's sources. They parse every file played.
