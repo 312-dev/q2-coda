@@ -743,19 +743,26 @@ The wheel's Previous and Next work as an iPod's, from any page where they contro
   recreation measured on the hardware also reports. Apple's iPod shuffle guides give 6 s for that
   model. A track holding a place to resume still asks first ([Resume](internals.md#resume)).
 - **Held** (half a second), Next fast-forwards and Previous rewinds, and you hear the song as it
-  goes: half a second of it at its own speed and pitch, then a jump, then another half second.
-  Each jump is 2 s for the first 3 s of the hold (4 times the song's speed), 4 s until 6 s (8
-  times), 8 s until 10 s (16 times), then 16 s (32 times). The bar and times follow. Letting go
-  plays on from there. Fast-forward stops a second before the end, plays out into the next track
-  and goes on scanning that; rewind stops at the start and plays from there. Paused, the track
-  stays silent and paused: the bar moves, and Play starts from where you let go. A held button
-  does not skip.
+  goes, faster the longer you hold. With the new player (`q2player`), the song plays at 2 times
+  its speed for the first 2 s of the hold, then 4 times, then 8 times, at its own pitch, like a
+  tape on fast-forward that does not squeak; from 6 s it jumps ahead 8 s each half second, still
+  heard at 4 times (16 times overall), and from 10 s 16 s each half second (32 times). Rewind does
+  the same with the song running backward, its pitch kept. Letting go plays on at normal speed
+  from exactly what you were hearing. With the stock player, or for a song the new player cannot
+  speed up (DSD, or above 192 kHz), you hear half a second of the song at its own speed, then a
+  jump, then another half second: each jump is 2 s for the first 3 s of the hold (4 times the
+  song's speed), 4 s until 6 s (8 times), 8 s until 10 s (16 times), then 16 s (32 times). The
+  bar and times follow. Fast-forward stops a second before the end, plays out into the next
+  track and goes on scanning that; rewind stops at the start and plays from there. Paused, the
+  track stays silent and paused: the bar moves, and Play starts from where you let go. A held
+  button does not skip.
 
-Apple's guides say only "press and hold" to fast-forward or rewind; the half-second stretches and
-the speeds are this firmware's, in the spirit of the iPod's audible scan. Streams (Spotify, radio,
-Tidal's online queues), games, the playlist editor and the time and sleep-timer fields keep the
-buttons as they were, and a held press there does what it did. Values are `SEEK_*` and
-`seek_steps` in `patch/seek.c`; see [internals.md](internals.md#scan).
+Apple's guides say only "press and hold" to fast-forward or rewind; the speeds and the stretches
+are this firmware's, in the spirit of the iPod's audible scan. At 96 kHz the new player plays at
+most 4 times and at 192 kHz at most 2, then jumps sooner. Streams (Spotify, radio, Tidal's online
+queues), games, the playlist editor and the time and sleep-timer fields keep the buttons as they
+were, and a held press there does what it did. Values are `SEEK_*` and `seek_phases` in
+`patch/seek.c`; see [internals.md](internals.md#scan) and [player.md](player.md#scan).
 
 ## Pop-ups
 
