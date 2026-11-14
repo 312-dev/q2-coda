@@ -578,6 +578,16 @@ stock's own reload.
 `NP_ALBUM_RGB`, `SUDO_TRACK` apart, `paint_caps`) over its label's transparent ink; Classic and
 Modern show the label, and Modern's title is bold. There is no on-screen transport row: the buttons play, pause and skip.
 
+**Theme: OLED** lays the page out on its own grid ([oled-design.md](oled-design.md#now-playing)): the
+150-pixel art at the 24-pixel text column under the status row, which shows the clock, its corners
+6 pixels; the title, artist and album 18 pixels right of it, ending on the 28-pixel right column,
+the artist and album in Inter's 18 in Text Secondary; "1 of 10" level with the art's foot, More and
+the heart at the end of its line; a 6-pixel bar from the text column to the right column at y 228,
+the times under its ends in Inter's tabular digits, and shuffle and repeat centred under them in the
+accent when on, grey when off, over the play mode button, which a tap still steps. The page dots
+sit under those, and the swipe's other pages stop above the bar. Each line that scrolls fades at
+the end it runs past (Display's [Theme](#theme)).
+
 The art, title, artist and album are the slide_view's first page, so a swipe replaces all of them
 with the lyrics or info page. The info page keeps its stock 225-pixel column, centred; the lyrics
 page spans the screen (**Lyrics** below). The info page's lines read `Label: value`, with spaced units
@@ -908,7 +918,11 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
   Now Playing's title (22 px), with tabular digits ([Its font](#oled-type) below).
 - **The selection.** The accent's flat bar, 16 px in from each side with 8 px ends on every row.
 - **Scrolling.** A short track and thumb on the right edge, beside the list's middle, while the wheel turns; it
-  fades a second after the last tick.
+  fades a second after the last tick. A title that scrolls (the selected row's, the status row's, Now Playing's
+  lines) stays in its own column and fades out over 12 px at the end it runs past: the right while there is more
+  to come, the left while its start is out of view, so at rest its start is crisp. A long title that isn't
+  scrolling keeps its ellipsis.
+- **Now Playing.** On the grid as the mock-up shows ([Now Playing](#now-playing)).
 - **Icons.** Phosphor's (MIT, [oled-design.md](oled-design.md#icons)): the caret on each row that opens a page,
   the play state.
 - **Song rows.** One line each, no chevron. In Songs and the other lists stock shows on Songs' page (a genre's

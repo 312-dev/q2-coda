@@ -188,8 +188,10 @@ typedef struct {
      */
     short chevron_x, home_chevron_x, art_placeholder; /* stock's grey tiles (list_folder, list_song)
                                                          this size, centred, 0: as stock */
-    unsigned char letter_raw; /* the fast-scroll letter's colours are final in both halves */
-    short letter_px;          /* ... and its size, 0: LETTER_PX */
+    unsigned char letter_raw;   /* the fast-scroll letter's colours are final in both halves */
+    unsigned char np_meta_font; /* Now Playing's artist and album: FONT_* at the asset's size, by
+                                   its text (np_bar.c np_sync); 0: the style's */
+    short letter_px;            /* ... and its size, 0: LETTER_PX */
     short home_top, home_full_row, home_text_x, home_label_end[2] /* [0] split, [1] full */,
         set_top, np_bar, np_scrub;
     /* SEL_BAR on a list row under Rounded Corners: its ends' radius, at most pill_radius's (so
@@ -197,6 +199,13 @@ typedef struct {
      * keeps the bar full width and square */
     unsigned char sel_radius, sel_inset;
     unsigned char sel_fixed; /* the bar keeps sel_inset and sel_radius under Corners: Square too */
+    /* a scrolling hscroll_label's ends fade into what is behind it (list_marks.c marquee_fade);
+     * Now Playing's art corners in px (paint_cover; 0: NP_ART_RADIUS's share of its size); its
+     * shuffle and repeat drawn as the theme's own pair (np_bar.c np_modes; 0: stock's one icon).
+     * Three chars in the padding before set_value_ink, so sizeof(theme_t) stays 1624, which clang
+     * indexes by a multiply: at 1632 it takes a shift chain, and every theme() call pays for it
+     * (test/patch.py's Cover Flow paint budget) */
+    unsigned char marquee_fade, np_art_radius, np_modes;
     /* a set_text settings row's value (list_value), final: [0] dark, [1] light; 0: its style's
      * white */
     unsigned set_value_ink[2];

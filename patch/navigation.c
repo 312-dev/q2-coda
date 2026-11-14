@@ -1837,9 +1837,9 @@ static void cf_label(void *w, void *canvas) {
 int ipod_square_art(void) { return theme()->art_square && !setting(SETTING_ROUNDED); }
 
 /* Playing art is rounded after scaling, so opposite corners share the same pixel grid.
- * NP_ART_RADIUS at 166px, painted over it in the page's
- * black: each corner row outside the arc, then its edge pixel at the alpha of its uncovered part
- * (1/16 px). */
+ * NP_ART_RADIUS at 166px (or the theme's playing.art.radius, in px at any size), painted over it in
+ * the page's black: each corner row outside the arc, then its edge pixel at the alpha of its
+ * uncovered part (1/16 px). */
 static void paint_cover(void *w, void *canvas) {
     if (!w || !P(canvas, CANVAS_LCD)) return;
     if ((w == st.np_cover || w == st.stream_art) &&
@@ -1856,8 +1856,8 @@ static void paint_cover(void *w, void *canvas) {
     } else if (w != st.np_cover && w != spot_art())
         return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-    int ww = I(w, W_W), h = I(w, W_H);
-    int r = (ww < h ? ww : h) * NP_ART_RADIUS / 166;
+    int ww = I(w, W_W), h = I(w, W_H), own = theme()->np_art_radius;
+    int r = own ? own : (ww < h ? ww : h) * NP_ART_RADIUS / 166;
     for (int i = 0; i < r; ++i) {
         int out = arc_out(r, i), n = out >> 4;
         for (int c = 0; c < 4; ++c) {
@@ -2829,6 +2829,8 @@ int ringnav_paint(void *w, void *canvas) {
     search_over(w, canvas);
     if (w && st.np_lrc && P(w, W_PARENT) == st.np_lrc) lyrics_paint(w, canvas);
     paint_caps(w, canvas);
+    if (theme()->marquee_fade) marquee_fade(w, canvas);
+    if (w && w == st.np_win) np_modes(w, canvas);
     hold_paint(w, canvas, 1);
     coverflow_home_clip(w, canvas, 0);
     st.paint_w = w ? P(w, W_PARENT) : (void *)0;
@@ -4404,13 +4406,12 @@ static int face_has(int face, const unsigned *c, int n) {
 #define FACE_BITS 4
 _Static_assert(FONT_N <= 1 << FACE_BITS, "theme_font's answer holds the face in FACE_BITS");
 static int fallback_px(int px, int face) { return (px * face_pct[face] + 50) / 100; }
-int theme_font(void *w, int role, int was) {
+static int role_font(void *w, int face, int px, int role, int was) {
     static const char *const names[] = { "style:normal:font_name", "style:focused:font_name",
                                          "style:disable:font_name" },
                              *const sizes[] = { "style:normal:font_size", "style:focused:font_size",
                                                 "style:disable:font_size" };
-    const theme_t *T = theme();
-    int face = w ? T->font[role] : FONT_DEFAULT, px = T->font_px[role], row = was == FONT_ROW;
+    int row = was == FONT_ROW;
     int wanted_bold =
         face == FONT_BOLD || face == FONT_CLASSIC_LIGHT; /* the bold faces; Inter's are not */
     if (row) {
@@ -4435,6 +4436,14 @@ int theme_font(void *w, int role, int was) {
     }
     if (row) widget_set_prop_int(w, "_font", kept);
     return answer;
+}
+int theme_font(void *w, int role, int was) {
+    const theme_t *T = theme();
+    return role_font(w, w ? T->font[role] : FONT_DEFAULT, T->font_px[role], role, was);
+}
+/* theme_font for a face named outright, at px (0: the style's size); never a row's FONT_ROW. */
+int face_font(void *w, int face, int px, int was) {
+    return w ? role_font(w, face, px, 0, was) : was;
 }
 
 /* Each label under w that theme_font gave a face finds it again for its text, in its own role. */
@@ -4869,7 +4878,7 @@ static int np_gone(void *win, void *event) {
         st.np_win = (void *)0;
         st.np_hash = 0;
         st.np_pos = st.np_album = st.np_remain = st.np_slider = st.np_elapsed = st.np_cover =
-            st.np_slide = st.np_lrc = st.np_title = (void *)0;
+            st.np_slide = st.np_lrc = st.np_title = st.np_artist = (void *)0;
         st.scrub_moved = 0; /* the page is going: no seek */
         st.np_off = st.np_full = st.lyric_held = 0;
         stop_timer(&st.np_marquee);
@@ -5014,7 +5023,8 @@ int ringnav_playing(void *win, void *ctx) {
     st.np_elapsed = widget_lookup(win, "label_playtime", 1);
     st.np_cover = widget_lookup(win, "img_cover", 1);
     st.np_title = widget_lookup(win, "scrlabel_title", 1);
-    st.np_bold = -1;
+    st.np_artist = widget_lookup(win, "scrlabel_artist", 1);
+    st.np_bold = st.np_meta[0] = st.np_meta[1] = -1;
     st.np_slide = widget_lookup(win, "slide_view", 1);
     st.np_lrc = widget_lookup(win, "scroll_lrc", 1);
     st.lyric_song = st.lyric_rows_song = np_track(); /* no song change at the start */

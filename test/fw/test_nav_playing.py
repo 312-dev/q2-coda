@@ -1290,11 +1290,21 @@ def rgba_int(c):
     return C.c_int(0xff000000 | (c & 255) << 16 | (c & 0xff00) | c >> 16).value
 
 
-@pytest.mark.parametrize('t', THEMES, ids=[t['name'] for t in THEMES])
+ASSET_TRACK = [t for t in THEMES if t['name'] != 'OLED']  # OLED's is its own Track grey
+
+
+@pytest.mark.parametrize('t', ASSET_TRACK, ids=[t['name'] for t in ASSET_TRACK])
 def test_a_theme_on_the_asset_s_track_writes_none(fw, ui, mcl, st, t):
     theme(fw, st, t)
     now = Now(fw, ui, mcl, st)
     assert t['np_track_rgb'] == O['TRACK_COLOR'] and not [k for k in TRACK_KEYS if (now.slider, k) in ui.ints]
+
+
+def test_oled_writes_its_own_track(fw, ui, mcl, st):
+    t = next(t for t in THEMES if t['name'] == 'OLED')
+    theme(fw, st, t)
+    now = Now(fw, ui, mcl, st)
+    assert [ui.ints.get((now.slider, k)) for k in TRACK_KEYS] == [rgba_int(0x333333)] * 5
 
 
 def test_a_theme_s_own_track_is_written_and_the_asset_s_written_back_once(fw, ui, mcl, st, library):

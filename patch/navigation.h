@@ -198,7 +198,9 @@ typedef struct {
     int pct_digit, pct_sign; /* BATT_PX advances of '0' and '%', measured on the first paint */
     unsigned letter_timer;   /* the fast-scroll letter shows while this runs */
     /* Now Playing's window and payload-filled widgets, and the sources they last showed. */
-    void *np_win, *np_pos, *np_album, *np_slider, *np_remain, *np_elapsed, *np_cover, *np_title;
+    void *np_win, *np_pos, *np_album, *np_slider, *np_remain, *np_elapsed, *np_cover, *np_title,
+        *np_artist;
+    int np_meta[2];          /* face_font's answers for np_artist and np_album, -1 none yet */
     int np_bold;             /* the title's font: theme_font's face | px << 2, -1 not set yet */
     void *np_slide, *np_lrc; /* the art/lyrics/info pages and the lyric lines' scroll_view */
     /* Now Playing's full-screen lyrics (np_full) and where the last touch on them came down
@@ -445,6 +447,11 @@ void coverflow_position_reset(void);
 /* list_marks.c */
 const char *theme_art(const char *name);
 void chevron_icon(void *w, void *canvas, int right, int y, int selected);
+/* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
+ */
+void marquee_fade(void *w, void *canvas);
+/* np_bar.c: Now Playing's shuffle and repeat as the theme's own pair (playing.modes.icons) */
+void np_modes(void *win, void *canvas);
 void wheel_sb_arm(void *list);
 unsigned wheel_sb_alpha(void *list);
 void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key);

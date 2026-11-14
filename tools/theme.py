@@ -39,7 +39,7 @@ CHOICES = {'list.selection.painter': {'card': 'SEL_CARD', 'stops': 'SEL_STOPS', 
            'volume.panel.painter': {'stock': 'VOL_STOCK', 'classic-light': 'VOL_CLASSIC_LIGHT'},
            'dialog.confirm.painter': {'stock': 'CONFIRM_STOCK', 'classic-light': 'CONFIRM_CLASSIC_LIGHT'},
            'pages.own.painter': {'stock': 'PAGES_STOCK', 'classic-light': 'PAGES_CLASSIC_LIGHT'},
-           **dict.fromkeys(('playing.title.font', 'playing.info.font', 'home.rows.font', 'list.row.font', 'list.row.meta_font', 'list.row.tall_font', 'bar.title.font'), FONTS),
+           **dict.fromkeys(('playing.title.font', 'playing.info.font', 'home.rows.font', 'list.row.font', 'list.row.meta_font', 'list.row.tall_font', 'bar.title.font', 'playing.artist.font'), FONTS),
            'playing.layout': {'ipod': 'NP_IPOD', 'centred': 'NP_CENTRED'},
            'scheme.mode': {'derive': 'SCHEME_DERIVE', 'light': 'SCHEME_LIGHT', 'dark': 'SCHEME_DARK'}}
 # coverflow.shelf's thumb: each value's top (docs/internals.md#coverflow-thumb); fold_near past 50 would
@@ -90,6 +90,9 @@ SCHEMA = {k.path: k for k in (
     Key('list.selection.radius', 'sel_radius', 'int', 0, O['SEL_MAX_RADIUS'], O['SEL_MAX_RADIUS'], 'live'),
     Key('list.selection.inset', 'sel_inset', 'int', 0, 64, O['SEL_INSET'], 'live'),
     key('list.selection.fixed', 'sel_fixed', 'bool'),  # ... kept under Corners: Square too
+    key('list.marquee.fade', 'marquee_fade', 'bool'),  # a scrolling label's ends fade into what is behind it (list_marks.c)
+    key('playing.art.radius', 'np_art_radius', 'int', 75),  # Now Playing's art corners in px; 0: NP_ART_RADIUS's share of its size
+    key('playing.modes.icons', 'np_modes', 'bool'),  # shuffle and repeat as the theme's own pair (np_bar.c np_modes)
     key('bar.fill.painter', 'painter[PAINT_BAR]', 'enum'),
     key('bar.battery.painter', 'painter[PAINT_BATTERY]', 'enum'),
     key('home.chevron.visible', 'chevron_home', 'bool'),
@@ -108,6 +111,7 @@ SCHEMA = {k.path: k for k in (
     key('list.chevron.x', 'chevron_x', 'int', 375),  # the theme's own chevron's box on screen in a full-width list; 0: stock's
     key('home.chevron.x', 'home_chevron_x', 'int', 375),  # ... and in Split's list
     key('list.letter.raw', 'letter_raw', 'bool'),  # the fast-scroll letter's colours are final in both halves
+    key('playing.artist.font', 'np_meta_font', 'enum'),  # Now Playing's artist and album, at the asset's size; 0: the style's
     key('list.letter.px', 'letter_px', 'int', 64),  # ... and its size, 0: LETTER_PX
     key('bar.title.caps', 'caps_mark', 'bool'),
     key('home.rows.caps', 'caps_home', 'bool'),
@@ -370,6 +374,8 @@ GEOM_RANGES = {
     'list_fit': (0, lambda g: 1 if g.list_end else 0),  # a list box ends at list_end only where there is one
     'status_y': (0, lambda g: g.bar - 12),  # its glyphs (12 px) inside the bar
     'right_x': (0, 60),
+    'np_art': (0, lambda g: 0 if g.np_ipod else 200),  # Now Playing on the grid, never as well as Classic's
+    'np_bar_y': (0, lambda g: 320 - 56 if g.np_art else 0),  # its bar, with the times and the state row under it, on screen
 }
 THEME_GEOM_OFF = 4  # offsetof(theme_t, geom), right after name so no field moves it; asserted in navigation.c; test/patch.py pokes it
 THEME_MOTION_OFF = 8  # offsetof(theme_t, motion), right after geom; asserted in navigation.c; test/patch.py pokes it

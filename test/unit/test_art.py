@@ -437,11 +437,16 @@ def test_a_theme_drawing_anothers_art_shares_its_images():
 
 def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     """OLED's own images: the caret in Chevron grey (each half's) and white for the selection, the play state in each
-    half's ink, all from the vendored Phosphor SVGs."""
-    got = art.images(theme.builtins()[3])
-    assert set(got) == {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'play_d', 'play_l', 'pause_d', 'pause_l')}
+    half's ink, Now Playing's shuffle and repeat in Text Secondary (each half's) and Accent Blue when on, all from the
+    vendored Phosphor SVGs."""
+    t = theme.builtins()[3]
+    got = art.images(t)
+    modes = [f'mode_{n}_{k}' for n in ('shuffle', 'repeat') for k in ('d', 'l', 'on')] + ['mode_repeat1_on']
+    assert set(got) == {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'play_d', 'play_l', 'pause_d', 'pause_l', *modes)}
+    blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
-                          ('play_d', art.STATE_PX, 0xffffff), ('play_l', art.STATE_PX, 0)):
+                          ('play_d', art.STATE_PX, 0xffffff), ('play_l', art.STATE_PX, 0),
+                          *((n, 22, {'d': 0xababab, 'l': 0x5c5c5c, 'on': blue}[n.rsplit('_', 1)[1]]) for n in modes)):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
         assert (w, h) == (px, px) and inked == {tuple(rgb >> s & 255 for s in (16, 8, 0))}

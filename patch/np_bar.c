@@ -73,6 +73,12 @@ int np_fit_due(const void *info) {
 int np_sync(void *top) {
     if (!top || top != st.np_win) return 0;
     st.np_bold = theme_font(st.np_title, ROLE_NP, st.np_bold); /* the title, as it changes */
+    const theme_t *T = theme();
+    if (T->np_meta_font) { /* the artist and album in the theme's face, as their text allows */
+        static void *const *const meta[] = { &st.np_artist, &st.np_album };
+        for (unsigned i = 0; i < 2; ++i)
+            st.np_meta[i] = face_font(*meta[i], T->np_meta_font, 0, st.np_meta[i]);
+    }
     unsigned at, n;
     void *r = queue_now(&at, &n);
     const char *album = now_tag(r, REC_ALBUM);
@@ -309,4 +315,26 @@ void np_theme(void) {
     if (glyph) widget_set_opacity(glyph, T->np_state_op);
     /* Minimal: the album is paint_caps' capitals. */
     if (st.np_album) widget_set_opacity(st.np_album, T->np_album_op);
+}
+
+/* playing.modes.icons: Now Playing's shuffle and repeat as the theme's own pair
+ * (docs/oled-design.md#now-playing), NP_MODES_APART apart about the centre of the play mode's
+ * target (tools/ipod.py np_grid), which keeps stock's image and handler under opacity 0, so a tap
+ * there still steps the mode. Each glyph is the accent's while on, else the half's grey
+ * (tools/art.py mode_*): shuffle at MCL_MODE 2, repeat at 3 (all) and 1 (one, its own glyph). */
+#define NP_MODES_APART 44
+void np_modes(void *win, void *canvas) {
+    void *mode = theme()->np_modes && P(canvas, CANVAS_LCD) ? widget_lookup(win, "img_playmode", 0)
+                                                            : (void *)0;
+    if (!mode) return;
+    int m = *(volatile int *)MCL_MODE, cx = I(mode, W_X) + I(mode, W_W) / 2,
+        cy = I(mode, W_Y) + I(mode, W_H) / 2;
+    const char *off = ipod_light() ? "_l" : "_d";
+    char name[2][24];
+    unsigned bitmap[64]; /* bitmap_t */
+    tk_snprintf(name[0], sizeof *name, "mode_shuffle%s", m == 2 ? "_on" : off);
+    tk_snprintf(name[1], sizeof *name, "mode_repeat%s", m == 1 ? "1_on" : m == 3 ? "_on" : off);
+    for (int i = 0; i < 2; ++i)
+        if (!widget_load_image(win, theme_art(name[i]), bitmap))
+            canvas_draw_icon(canvas, bitmap, cx + (2 * i - 1) * NP_MODES_APART / 2, cy);
 }

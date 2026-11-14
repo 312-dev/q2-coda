@@ -98,6 +98,11 @@ class Geometry:
     # right_x from the screen's right edge; the bar is drawn black, so the row reads as part of the page. 0: the bar's own layout.
     status_y: int = 0
     right_x: int = 0  # the right column, from the screen's right edge: the status row's battery, and a row's chevron and value (0: stock's)
+    # Now Playing on the set's grid (OLED's, oled-design.md Now Playing): the art np_art square at text_x on the window's
+    # top, the words NP_GRID_GAP right of it to the right column, a 6 px bar from text_x to the right column with its top
+    # np_bar_y on screen, the times under its ends, shuffle and repeat under them (playing_page np_grid). 0: the iPod layout.
+    np_art: int = 0
+    np_bar_y: int = 0
 
 
 SET0 = Geometry()
@@ -816,6 +821,87 @@ def playing_page(root, g=SET0):
                *(n[1][1] - title[1][1] for n in (artist, album, pos))] ==
               [inc('SPOT_ART_X'), *(inc('NP_IPOD_' + k) for k in 'ART_Y ART TEXT_X TEXT_Y FAV_X FAV_Y BAR_X BAR_Y'.split()), 34, 62, 90],
               "NP_IPOD_* != Classic's Now Playing")
+    if g.np_art:
+        np_grid(root, named, g, title, artist, album, pos, remain)
+
+
+# Now Playing on a set's grid (Geometry.np_art, OLED's: docs/oled-design.md#now-playing), in window rows from the set's
+# bar: the art np_art square at text_x on the window's top, its corners the theme's playing.art.radius; NP_GRID_GAP
+# right of it the title, artist and album, their line tops NP_GRID_LINES down the art, "1 of 10" on the art's bottom
+# row, More and the heart at its right end (the design has no place for them: they stay on the art's page); the slide
+# NP_GRID_SLIDE_GAP above the bar, which runs from text_x to the right column with its top at np_bar_y on screen; the
+# times NP_GRID_TIMES_DY under that, centred, on the same columns; shuffle and repeat (np_bar.c np_modes) centred
+# NP_GRID_MODES_DY under it, over the play mode's target; the page dots under them, NP_GRID_DOTS_DY. Sizes are AWTK's
+# (1.21 times the design's em): the artist and album 22, "1 of 10" 18, the times 19 in Inter, whose digits are tabular.
+NP_GRID_GAP = 18
+NP_GRID_LINES = (6, 38, 62)
+NP_GRID_TITLE_PX = 27  # the title's line: OLED's playing.title.font_px, which theme_font sets at run time
+NP_GRID_META_PX = 22
+NP_GRID_POS_PX = 18
+NP_GRID_POS_ASCENT = 14  # Inter's ascent at 18: 0.969 of its 1.21 em line, so its baseline sits on the art's bottom row
+NP_GRID_TIME_PX = 19
+NP_GRID_SECONDARY = '#ABABAB'  # Text Secondary; Light Mode flips it as every grey
+NP_GRID_ICON = 34  # More's and the heart's targets, their stock 50 px images centred in them
+NP_GRID_MORE_INSET = 12  # More's centre from the right column: its three dots end about on it
+NP_GRID_BAR = 6
+NP_GRID_TOUCH = 22  # the bar's target, short of the heart's above and the times' below
+NP_GRID_SLIDE_GAP = 5
+NP_GRID_TIMES_DY = 22
+NP_GRID_MODES_DY = 48
+NP_GRID_MODES = (88, 44)  # the play mode's target: both glyphs, 44 px apart (np_bar.c NP_MODES_APART)
+NP_GRID_DOTS_DY = 74
+NP_GRID_MARGIN = 2  # hscroll_label's own margin each side of its text (stock's margin_left and margin_right)
+
+
+def np_grid(root, named, g, title, artist, album, pos, remain):
+    """playing_page's boxes moved to g's grid (NP_GRID_* above); every name the payload binds keeps its widget."""
+    a, tx, right = g.np_art, g.text_x + g.np_art + NP_GRID_GAP, 375 - g.right_x
+    bar_y, page = g.np_bar_y - g.bar, named['view_album'][3]
+    named['img_cover'][1] = [g.text_x, 0, a, a]
+    named['img_playstate'][1] = [g.text_x + (a - 120) // 2, (a - 120) // 2, 120, 120]
+    named['image_wait'][1] = [g.text_x + (a - 54) // 2, (a - 54) // 2, 54, 54]
+    for n, top, px in zip((title, artist, album), NP_GRID_LINES, (NP_GRID_TITLE_PX, NP_GRID_META_PX, NP_GRID_META_PX)):
+        # the box takes the margins, so the text's column is tx to the right column, which clips it
+        n[1] = [tx - NP_GRID_MARGIN, top, right - tx + 2 * NP_GRID_MARGIN, px]
+        for key in n[2]:
+            if key.endswith(':font_size'): n[2][key] = str(px)
+            if n is not title and key.endswith(':text_color'): n[2][key] = NP_GRID_SECONDARY
+    for n in (named['img_more'], pos):
+        named['view_buttons'][3].remove(n)
+    cy = a - NP_GRID_POS_ASCENT + NP_GRID_POS_PX // 2
+    more_x = right - NP_GRID_MORE_INSET - NP_GRID_ICON // 2
+    fav_x = more_x - NP_GRID_ICON
+    named['img_more'][1] = [more_x, cy - NP_GRID_ICON // 2, NP_GRID_ICON, NP_GRID_ICON]
+    named['img_fav'][1] = [fav_x, cy - NP_GRID_ICON // 2, NP_GRID_ICON, NP_GRID_ICON]
+    # "1 of 10" ends where the heart starts: added after it, a box over the heart would take its taps
+    pos[1] = [tx, a - NP_GRID_POS_ASCENT, fav_x - tx, NP_GRID_POS_PX]
+    pos[2].update({'style:normal:font_size': str(NP_GRID_POS_PX), 'style:normal:font_name': FACES['inter'].name,
+                   'style:normal:text_color': NP_GRID_SECONDARY})
+    page.remove(named['img_playmode'])
+    page += [pos, named['img_more']]
+    slide_h = bar_y - NP_GRID_SLIDE_GAP
+    named['slide_view'][1] = [0, 0, 375, slide_h]
+    named['view_lrc'][2]['self_layout'] = f'default(x=0,y=0,w=375,h={slide_h})'
+    named['view_lrc'][1][3] = slide_h
+    dots_y = bar_y + NP_GRID_DOTS_DY
+    named['slide_view_view'][1] = [0, 0, 375, dots_y + 10]
+    dots = named['slide_indicator1']
+    dots[1][1] = dots_y
+    dots[2]['self_layout'] = f'default(x=0,y={dots_y},w=100%,h=10)'
+    np_slider(named['slider_play'], g.text_x, bar_y + NP_GRID_BAR // 2, right - g.text_x, NP_GRID_BAR)
+    named['slider_play'][1][1:4:2] = [bar_y + NP_GRID_BAR // 2 - NP_GRID_TOUCH // 2, NP_GRID_TOUCH]
+    for name in ('img_repeata', 'img_repeatb'):
+        named[name][1][0] = g.text_x
+    for n, x in ((named['label_playtime'], g.text_x), (remain, right - 80)):
+        n[1] = [x, bar_y + NP_GRID_TIMES_DY - NP_GRID_TIME_PX // 2, 80, NP_GRID_TIME_PX]
+        for state in [k.split(':')[1] for k in n[2] if k.endswith(':text_color')]:
+            n[2].update({f'style:{state}:text_color': '#FFFFFF', f'style:{state}:font_name': FACES['inter'].name,
+                         f'style:{state}:font_size': str(NP_GRID_TIME_PX)})
+    w, h = NP_GRID_MODES
+    mode = named['img_playmode']
+    mode[1] = [(375 - w) // 2, bar_y + NP_GRID_MODES_DY - h // 2, w, h]
+    mode[2]['opacity'] = '0'  # its target and handler stay; np_bar.c np_modes draws the pair over it
+    root[3].append(mode)
 
 
 # Display's Centred Now Playing (IPOD NPCENTRED) opens stock's own page, its art centred over the

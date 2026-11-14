@@ -235,6 +235,22 @@ clock.
 
 No page title, no background art blur, no reflection.
 
+Built as the `oled` set's `np_art` and `np_bar_y` (`tools/ipod.py` `np_grid`) with the theme's
+`playing.art.radius`, `playing.artist.font`, `playing.scrubber.height` and `playing.modes.icons`.
+The album is one line that scrolls, as the title and artist do, rather than two. What the design
+has no place for keeps a place of its own:
+
+- **More and the heart** stand at the right end of "1 of 10"'s line, on the art's page, so a swipe
+  takes them away with it.
+- **The page dots** sit under shuffle and repeat, centred on y 302; the lyrics, the track's details
+  and the visualizer are still the swipe's other pages, each ending 5 px above the bar.
+- **Shuffle and repeat** are one target, stock's play mode button: a tap steps Order, Repeat One,
+  Shuffle, Repeat All as before, and the glyphs show the mode (repeat-once's glyph for Repeat One).
+- **The volume** and the scrub draw on the bar where it is. The A-B markers follow the bar
+  across but keep stock's row, y 308 on screen, under the page dots. ponytail: a marker within
+  about 14 px of either end of the bar falls under the bottom corners' glass; moving them onto
+  the bar needs the y that stock's placement (`0x53baa4`) writes made per set.
+
 ### Progress and sliders
 
 - **Progress:** 6 px, round ends, Track and Accent Blue. Used for playback, scans and
@@ -276,6 +292,12 @@ Shown for a moment after a mode change (Shuffle, Repeat).
 - Page push and pop: 220 ms horizontal slide, `cubic_out`.
 - Selection bar: moves with the wheel, no animation of its own beyond the list's scroll.
 - Nothing pulses, glows or bounces.
+- **Marquee fades.** A scrolling text (the selected row's title, the status row's title, Now
+  Playing's title, artist and album) is clipped to its own column, inside the glass and before any
+  value or chevron on its row. A 12 px fade covers its right end while the text goes on past it,
+  and its left end while it is scrolled away from its start, so it rests crisp; each goes from
+  clear to the colour behind the text (the Canvas, or Accent Blue on the selection). A truncated
+  text that is not scrolling keeps its ellipsis (`list.marquee.fade`).
 
 ## Screens
 
@@ -337,9 +359,11 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   1 px dividers on the text and right columns (`list.divider.ink`); row art's 4 px corners
   (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column; song rows
   (`list.songs.painter="inline"`) and the Song Artist and Song Length options.
+- Now Playing on the set's grid (`np_art`, `np_bar_y`), its art's corners (`playing.art.radius`), its
+  artist and album in Inter (`playing.artist.font`), shuffle and repeat as the theme's own glyphs
+  (`playing.modes.icons`), and the marquee fades (`list.marquee.fade`).
 
 Still to build:
 
-- Now Playing's positions from the theme rather than fixed in `tools/ipod.py`.
 - A confirmation screen for Shuffle and Repeat, and the toast and dialog forms.
 - Switch rows, the pickers' check, the EQ slider and the storage bar drawn as above.

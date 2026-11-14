@@ -176,6 +176,10 @@ CARET_PX = 15
 STATE_PX = 13
 CHEVRON_INKS = {'d': 0x999999, 'l': 0x8a8a8a, 'w': 0xffffff}
 STATE_INKS = {'d': 0xffffff, 'l': 0x000000}
+# Now Playing's shuffle and repeat (playing.modes.icons, np_bar.c np_modes): bold, MODE_PX, off in Text Secondary per
+# half, on in the theme's own accent's top tone in both; repeat-once is repeat's on glyph for Repeat One.
+MODE_PX = 22
+MODE_INKS = {'d': 0xababab, 'l': 0x5c5c5c}
 
 
 def gradient(stops, y0, y1):
@@ -869,6 +873,11 @@ def images(t):
         out |= {f'{prefix}_chevron_{k}': phosphor('caret-right-bold', CARET_PX, c) for k, c in CHEVRON_INKS.items()}
     if t['painter[PAINT_BATTERY]'] == list(CHOICES['bar.battery.painter']).index('slim'):  # its play state is the theme's too
         out |= {f'{prefix}_{n}_{k}': phosphor(f'{n}-fill', STATE_PX, c) for n in ('play', 'pause') for k, c in STATE_INKS.items()}
+    if t['np_modes']:
+        on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
+        for n in ('shuffle', 'repeat'):
+            out |= {f'{prefix}_mode_{n}_{k}': phosphor(f'{n}-bold', MODE_PX, c) for k, c in {**MODE_INKS, 'on': on}.items()}
+        out[f'{prefix}_mode_repeat1_on'] = phosphor('repeat-once-bold', MODE_PX, on)
     if t['bolt']:
         shape = path(BOLT)
         out[f'{prefix}_bolt'] = png(*BOLT_BOX[2:], compose(BOLT_BOX, [(stroke(shape, 1.6), lambda x, y: (0xffffff, t['bolt_halo_a'] / 255)),

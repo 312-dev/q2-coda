@@ -20,7 +20,7 @@
             action_row="32" home_row="32" home_lib="0" np_ipod="0"
             stock_row="32" stock_body="32" stock_title_y="0" stock_title_h="32" toolbar="0"
             search_row="52" search_body="52" search_art="0" search_title_y="4" search_title24_y="4" search_title_h="28"
-            search_meta_y="31" search_meta_h="20"/>
+            search_meta_y="31" search_meta_h="20" np_art="150" np_bar_y="228"/>
   <geometry set="oled"/>
   <!-- Colour (oled-design.md Colour): Accent Blue, one value for the bar, the progress fill and every mapped red, as
        its own scheme's five tones; white text on it in both halves; second lines in Text Tertiary (stock's #aaaaaa secondary text
@@ -61,6 +61,9 @@
     <!-- Song rows, one line: a mixed list's artist after the title, an album's track numbers and lengths, in 15 px
          (18 here) in the scheme's muted, Text Tertiary (Light Mode flips it), white on the selection -->
     <element name="songs" painter="inline"/>
+    <!-- A scrolling text's ends fade into what is behind it (oled-design.md Motion, list_marks.c marquee_fade): rows,
+         the status row's title and Now Playing's lines -->
+    <element name="marquee" fade="1"/>
     <element name="scrollbar" painter="wheel" w="4" right="5" top="134" bottom="206" min="8"
              dark.thumb="#e5e5e5" light.thumb="#1a1a1a" dark.track="#3a3a3a" light.track="#c5c5c5"/>
   </view>
@@ -69,11 +72,17 @@
     <element name="rows" top="0" text_x="24" full_row="375" font="inter" font_px="24" caps="0"/>
     <element name="chevron" visible="1"/>
   </view>
+  <!-- Now Playing on the grid (oled-design.md Now Playing; the set's np_art and np_bar_y, tools/ipod.py np_grid): 6 px
+       art corners, the title Inter Medium 22 (27 here), the artist and album Inter at the page's 18 (22 here), a 6 px
+       bar on the Track grey, shuffle and repeat as the theme's own glyphs (tools/art.py mode_*) -->
   <view name="playing">
-    <element name="art" square="0"/>
+    <element name="art" square="0" radius="6"/>
     <element name="title" font="inter-medium" font_px="27"/>
+    <element name="artist" font="inter"/>
     <element name="album" caps="0" opacity="255"/>
     <element name="info" font="inter" font_size="18"/>
+    <element name="scrubber" height="6" scrub_height="6" track="#333333"/>
+    <element name="modes" icons="1"/>
   </view>
   <!-- page_list's rows (the Library's Shuffle, Most Played, card apps...): the grid's 32 px rows, 52 with a detail,
        at the text inset; the status row names the page, so no title row -->

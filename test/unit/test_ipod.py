@@ -440,6 +440,53 @@ def test_playing_page_classic_ipod():
     assert play[2]['style:normal:text_align_h'] == 'right' and remain[2]['style:normal:text_align_h'] == 'left'
 
 
+def test_playing_page_oled_grid():
+    """OLED's set (np_art): the art at the text column on the window's top, the words 18 px right of it on the
+    design's line tops, their boxes ending on the right column (the margins stock's hscroll_label keeps inside
+    them), "1 of 10" on the art's bottom row with More and the heart at its end on the art's page; the bar from the
+    text column to the right column at np_bar_y on screen, the times under its ends, the play mode's target centred
+    under them, the window's last child, the dots under it, and the slide stopping short of the bar."""
+    g = theme.geometry(theme.builtins()[3])
+    root, base = playing(), playing()
+    ipod.playing_page(root, g)
+    ipod.playing_page(base, dataclasses.replace(g, np_art=0, np_bar_y=0))
+    ipod.encode(root)
+    n, right = named(root), 375 - g.right_x
+    assert (g.np_art, g.np_bar_y, g.text_x, g.right_x) == (150, 228, 24, 28)
+    assert n['img_cover'][1] == [24, 0, 150, 150] and n['slide_view_view'][1][:2] == [0, 0]
+    tx = 24 + 150 + ipod.NP_GRID_GAP
+    for name, top, h in (('scrlabel_title', 6, 27), ('scrlabel_artist', 38, 22), ('label_ipod_album', 62, 22)):
+        box = n[name][1]
+        assert box == [tx - 2, top, right - tx + 4, h] and g.bar + top in (64, 96, 120), name  # the design's line tops
+        assert {v for k, v in n[name][2].items() if k.endswith(':font_size')} == {str(h)}, name
+    assert n['scrlabel_artist'][2]['style:normal:text_color'] == ipod.NP_GRID_SECONDARY == n['label_ipod_album'][2]['style:normal:text_color']
+    pos = n['label_ipod_pos']
+    assert pos[1][0] == tx and pos[1][1] + ipod.NP_GRID_POS_ASCENT == 150 and pos[2]['style:normal:font_name'] == 'inter'
+    page = n['view_album'][3]
+    assert pos in page and n['img_more'] in page and n['img_fav'] in page and n['img_playmode'] not in page
+    more, fav = n['img_more'][1], n['img_fav'][1]
+    assert more[0] + more[2] // 2 == right - ipod.NP_GRID_MORE_INSET and fav[0] + fav[2] == more[0] and fav[1] == more[1]
+    assert fav[0] >= tx + 60 and more[1] + more[3] <= n["slider_play"][1][1]  # clear of "1 of 10" and the bar's target
+    assert pos[1][0] + pos[1][2] <= fav[0]  # added after the heart, "1 of 10"'s box would take the heart's taps
+    bar_y = g.np_bar_y - g.bar
+    slider = n['slider_play']
+    assert slider[1] == [24, bar_y + 3 - ipod.NP_GRID_TOUCH // 2, right - 24, ipod.NP_GRID_TOUCH] and slider[2]['bar_size'] == '6'
+    assert n['slide_view'][1][3] == bar_y - 5 < slider[1][1] + (slider[1][3] - 6) // 2
+    assert n['view_lrc'][2]['self_layout'] == f'default(x=0,y=0,w=375,h={bar_y - 5})'
+    play, remain = n['label_playtime'], n['label_ipod_remain']
+    assert play[1] == [24, bar_y + 22 - 9, 80, 19] and remain[1] == [right - 80, bar_y + 22 - 9, 80, 19]
+    assert play[2]['style:normal:font_name'] == 'inter' == remain[2]['style:normal:font_name']
+    assert play[2]['style:normal:text_color'] == '#FFFFFF' == remain[2]['style:normal:text_color']
+    mode = n['img_playmode']
+    assert root[3][-1] is mode and mode[2]['opacity'] == '0' and mode[1] == [(375 - 88) // 2, bar_y + 48 - 22, 88, 44]
+    assert g.bar + mode[1][1] + mode[1][3] // 2 == 276
+    dots = n['slide_indicator1'][1]
+    assert dots[1] == bar_y + ipod.NP_GRID_DOTS_DY > mode[1][1] + mode[1][3] - 10 and n['slide_view_view'][1][3] == dots[1] + 10
+    assert g.bar + dots[1] + 10 <= 320 - 8
+    # the other sets' page is the base layout (np_art 0)
+    assert named(base)['img_cover'][1] != n['img_cover'][1] and named(base)['img_playmode'] in named(base)['view_album'][3]
+
+
 def test_playing_page_final_order(page):
     root, _ = page
     assert [c[2].get('name') for c in root[3]] == ['view_buttons', 'label_playtime', 'label_playlen', 'label_ipod_remain',
