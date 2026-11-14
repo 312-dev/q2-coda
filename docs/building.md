@@ -93,6 +93,7 @@ python3 test/m4b.py /tmp/q2-build          # native TagLib M4B/MP4 metadata disp
 python3 test/id3.py /tmp/q2-build          # the built player's MP3 ReplayGain on ID3v2.3/2.4 tags
 python3 test/hci_wait.py /tmp/q2-build     # the built player's futex waits for Play and while paused
 python3 test/hci_ao.py /tmp/q2-build       # a natural change in the real player against a kernel-faithful PCM: reopens, a kept PCM, a dry first write
+python3 test/player/run.py                  # the new player (player/): bit-exact output and the socket protocol; builds its FFmpeg on first use, needs ffmpeg and lame, no ZIP
 python3 test/bt_resample.py /tmp/q2-build  # the built player's Bluetooth resampler across a gapless change
 python3 test/xfade_player.py /tmp/q2-build  # the built player's crossfade: the hold, the mix at the same and another rate, the drops
 python3 test/hci_natural.py /tmp/q2-build   # natural changes in the real player: a bit-exact seam, a bad next file, an understated length, a late preload, Crossfade's late next and moved fade

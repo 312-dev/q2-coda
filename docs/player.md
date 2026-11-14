@@ -35,7 +35,7 @@ demo queues every message it receives as a (name, argument) pair (`0x5bb7f4`); a
 
 | Command | Argument | What hciplayer does (address) | Answer |
 | --- | --- | --- | --- |
-| `set-songurl` | `URL\|ss=S\|C\|P\|G\|H\|90` | Play this now (`0x42d404`): sets the play flag `0xb11e34`, clears a pending preload. | none; see [Events](#events) |
+| `set-songurl` | `URL\|ss=S\|C\|P\|G\|H\|90` | Sets the play flag `0xb11e34` and clears a pending preload (`0x42d404`). With nothing loaded the song starts. While a song plays it is not cut: the new one starts when that song has ended (captured, `stock-replace.txt`), and `mcl-stop` forgets it. | none; see [Events](#events) |
 | `set-nexturl` | the same | The same, and sets the next flag `0xb11e6c` (`0x42d1c8`): the song playing is cut. | `{player-nextstatus\exit}` when the old song is closed |
 | `set-gapless` | `URL\|ss=S\|C\|P\|G\|90` | Open this on the preload thread and play it when the current song ends (`0x42cf8c`, flag `0xb11df8`). | none |
 | `mcl-closegapless` | `null` | Forget a finished preload (`0x42c2bc`). | none |
@@ -76,12 +76,12 @@ The song fields, from demo's sender `0x5bf504` and hciplayer's parser:
 
 | Field | Meaning |
 | --- | --- |
-| `BITRATE` | bits a second: the demuxer's bytes a second times 8 (101696 for a 254,244-byte 20 s FLAC) |
+| `BITRATE` | bits a second: the demuxer's bytes a second times 8. For what MPlayer's own demuxer reads (MP3, FLAC, WAV) that is the file's size over its length (101696 for a 254,244-byte 20 s FLAC); for what libavformat reads it is the stream's declared rate (112000 for a Vorbis file whose average is 25 kbps) |
 | `RATE` | the sample rate in Hz; for DSD the PCM rate times 8, 16 or 32 by mode (`0x42c70c`-`0x42c954`) |
 | `LENGTH` | whole seconds |
 | `POSITION` | whole seconds, of what is being heard (the decoder's position less the output's delay) |
 | `CODEC` | one of `UNK MP2 MP3 AAC APE OGG RM ALAC RA DTS AIFF WAV AC2 FLAC DSD DSF ISO TAK OPUS WMA` (five-byte entries at `0xafb100`, indexed by `sh_audio+0xd4`) |
-| `BITS` | the sample width: 16 for FLAC at 16 bits and for every lossy codec seen |
+| `BITS` | the sample width: 16 for 16-bit FLAC and for MP3 (libmad), 24 for 24-bit FLAC, 32 for AAC and Vorbis (float decoders) |
 
 ### Events
 
@@ -116,7 +116,8 @@ From stock under qemu ([Capturing](#capturing)); times in seconds, polls every 2
 - **Next:** `{player-nextstatus\exit}` 60-80 ms after `set-nexturl`, then as a start.
 - **Stop:** `{player-stopstatus\exit}` 60-160 ms after `mcl-stop`. With nothing loaded, no answer.
 - **A missing file, a file of noise:** `{player-status\error}` about 55 ms after `set-songurl`, with `/tmp/notfile` and `/tmp/notsupport` made.
-- **Pause:** `player-status` goes on answering `playing`; the position stands still.
+- **Pause:** `player-status` goes on answering `playing`; the position stands still. A seek while paused shows in the position only after `mcl-play`.
+- **A seek:** the position follows 0.2 to 1.5 s later. A FLAC seek can end the song: to 15 s of a 20 s file it did, half a second later (`stock-transport.txt`, `stock-gapless-flac.txt`), and to 16 s of the same file it did not (`stock-end.txt`); Q2 Pod's player plays on in all three.
 
 The transcripts are in `test/player/fixtures/` (`stock-*.txt` from stock's binary, `pod-*.txt` from Q2 Pod's patched one), and `test/player/run.py` holds the new player to them.
 
@@ -130,7 +131,7 @@ ao_alsa's init (`0x438248`) picks the device from the output way and the hardwar
 | 1, Bluetooth | `plug:bluealsa` | bluealsa takes one client; the transport's rate (48 kHz for SBC and AAC, 96 kHz S32 for LDAC) is not the file's, so MPlayer adds `lavcresample` ([internals: Bluetooth resampler](internals.md#bluetooth-resampler)) |
 | 2, a USB DAC | `hw:2,0` | a 100 ms buffer in stock; software volume when `mcl-softvolflag` is 1 |
 
-Parameters: interleaved read/write access, the file's rate (`set_rate_near`), its channels, a 500 ms buffer (`0x4382fc`) in 16 periods (`0x438264`). Formats seen: `S16_LE` for 16-bit FLAC and for MP3. The player keeps the PCM open across a preloaded change when rate, channels and format are what it last asked for (`0xafb164`-`0xafb16c`), and otherwise closes and reopens. Pause is `snd_pcm_pause`, a seek is `snd_pcm_drop` and `snd_pcm_prepare`.
+Parameters: interleaved read/write access, the file's rate (`set_rate_near`), its channels, a 500 ms buffer (`0x4382fc`) in 16 periods (`0x438264`). The format is the decoder's (captured, the shim's log of `snd_pcm_hw_params_set_format`): `S16_LE` for 16-bit FLAC and for MP3, `S32_LE` for 24-bit FLAC, and `FLOAT_LE` for AAC and Vorbis, whose decoders put out float; `default`'s `plug` turns that into what the DAC takes. Where the device refuses a format the init tries others (`0x439060`-`0x439110`, "Format %s is not supported by hardware, trying default"). The player keeps the PCM open across a preloaded change when rate, channels and format are what it last asked for (`0xafb164`-`0xafb16c`), and otherwise closes and reopens. Pause is `snd_pcm_pause`, a seek is `snd_pcm_drop` and `snd_pcm_prepare`.
 
 `/dev/shanling_dac` is opened by the player too: `0xc0044d1b` sets PCM or DSD mode per track, `0xc0044d1f` is `user_mute` in `codec_cs43131.ko` (the mute line follows 90-100 ms after an unmute), and init also sends `0xc0044d0a`. Mutes surround every pause, seek, start and reopen ([internals: Wired start](internals.md#wired-start), [Unpause](internals.md#unpause)).
 
@@ -142,7 +143,7 @@ Parameters: interleaved read/write access, the file's rate (`set_rate_near`), it
 
 **EQ** (`mcl-seteq`): MPlayer's ten-band `af_equalizer`, refused above 48 kHz. Q2 Pod replaces it ([below](#what-q2-pod-patches)).
 
-**Meters.** With `mcl-setexplayinfo` 1 the play loop keeps a level per channel: a 441 Hz tone at -18 dBFS peak read `-21|-21`, its RMS in dB. With 2 it keeps twelve spectrum bands. Both read 0 with nothing playing.
+**Meters.** With `mcl-setexplayinfo` 1 the play loop keeps a level per channel, in dB: a 441 Hz tone at -18 dBFS peak read `-21|-21` (its RMS), and that tone with a louder sweep over it read `-24|-24`, so the window and scale are not yet known. With 2 it keeps twelve spectrum bands. Both read 0 with nothing playing.
 
 ## Sources
 
@@ -246,7 +247,7 @@ Each needs a Q2; none can be settled under qemu.
 | --- | --- |
 | Does the X2000 report MSA, and which FPU? The kernel has MSA support compiled in (`MSA revision is: %08x`), which does not say the CPU has it | `cat /proc/cpuinfo` (the `ASEs implemented` and `isa` lines) |
 | What `default` resolves to with the device's ALSA state, and the buffer and period it grants at each rate from 44.1 to 384 kHz | `hciplayer`'s `-v` log, or `cat /proc/asound/card0/pcm0p/sub0/hw_params` while each rate plays |
-| Formats at 24 and 32 bits: does stock open `S24_LE`, `S24_3LE` or `S32_LE`? (Under qemu the `null` device accepts anything) | the same `hw_params` for a 24-bit FLAC and a 32-bit WAV |
+| What the DAC is given for each request: the player asks for `S16_LE`, `S32_LE` or `FLOAT_LE` (captured), and under qemu the `null` device accepts anything | `hw_params` for a 16-bit FLAC, a 24-bit FLAC, a 32-bit WAV and an M4A |
 | DSD: the exact PCM formats and rates of DoP and Native on the DAC and on a USB DAC, and which hardware types force which mode | `hw_params` with a DSD64 and a DSD256 `.dsf` in each of the three modes, on each output |
 | Bluetooth: the rate and format bluealsa takes per codec, and the level `mcl-setvol` gives | `hw_params` equivalent from bluealsa's log, and a capture of its PCM |
 | The meters' scale at silence and full scale, and the twelve spectrum bands' edges | `mcl-getuvmeter` and `mcl-getspectrum` over `q2remote` with test tones |

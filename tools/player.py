@@ -66,14 +66,14 @@ def sha256(path):
     return h.hexdigest()
 
 
-def run(*cmd, cwd=None, env=None, log=None):
+def run(*cmd, cwd=None, env=None, log=None):  # pragma: no mutate block
     with open(log, 'a') as out:
         r = subprocess.run([str(c) for c in cmd], cwd=cwd, env=env, stdout=out, stderr=subprocess.STDOUT)
     if r.returncode:
         sys.exit(f'player: {" ".join(map(str, cmd))} failed ({r.returncode})\n' + pathlib.Path(log).read_text(errors='replace')[-3000:])
 
 
-def source():
+def source():  # pragma: no mutate block
     version, url, digest = FFMPEG
     path = CACHE/'dl'/url.rsplit('/', 1)[-1]
     if not (path.exists() and sha256(path) == digest):
@@ -94,7 +94,7 @@ def toolchain():
     return bindir
 
 
-def ffmpeg(target):
+def ffmpeg(target):  # pragma: no mutate block
     """The prefix of FFmpeg built for target ('host' or 'mips'), built on first use."""
     args = configure_args('PREFIX')
     tls = mbedtls() if target == 'mips' and os.environ.get('Q2_PLAYER_TLS') else None  # phase 5 turns this on for good
@@ -126,7 +126,7 @@ def ffmpeg(target):
     return prefix
 
 
-def build(target):
+def build(target):  # pragma: no mutate block
     """player/ compiled and linked for target; the binary's path."""
     ff = ffmpeg(target)
     tls = mbedtls() if target == 'mips' and os.environ.get('Q2_PLAYER_TLS') else None
