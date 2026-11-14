@@ -730,7 +730,8 @@ WHEEL_TS_READ = (0x638a4c, 0x0320f809)
 NET_TYPE_READS = ((0x5c1d6c, 0x8c4300d4), (0x5c1d70, 0x24020002), (0x5c2078, 0x8c4300d4), (0x5c207c, 0x24020002))
 # English labels renamed, as an iPod words them: Now Playing More's queue, which stock calls "Playlists"
 # (player_playlist, used nowhere else); the Library's plural categories; settings rows in title case
-# and plain words; the Lock screen help; and Baidu without its (BETA).
+# and plain words; the Lock screen help; Baidu without its (BETA); and My Fav as Favorites, US spelling, the name of
+# the row that opens it.
 LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('msg_playlistfull', 'Playlist Is Full', 'Could not create playlist'),
     ('player_playlist', 'Playlists', 'Queue'), ('system_powermanager', 'Idle', 'Power'),
@@ -764,6 +765,7 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('system_prove', '技术证明', 'Certification'),  # About's regulatory row, Chinese in stock's English
     ('genre', 'Genres', 'Genre'), ('player_era', 'Era', 'Year'), ('batch_addplaylist', 'Add to playlist', 'Add to Playlist'),
     ('msg_importplaylist', 'Import Playlist?', 'Import Playlists?'),  # it imports the whole folder
+    ('fav', 'My Fav', 'Favorites'), ('local_fav', 'My Fav', 'Favorites'),  # the Favorites page's title, as Home's row names it
     ('scan_startscan', 'Scanning', 'Scan')))  # Scan specified folders' button; wifi_scan keeps its "Scanning"
 
 # Wi-Fi transfer's web page (stock thttpd on :8888): in English, an Upload Folder button, and a folder,
