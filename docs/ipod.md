@@ -958,9 +958,10 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
 - **Icons.** Phosphor's (MIT, [oled-design.md](oled-design.md#icons)): the caret on each row that opens a page,
   the play state.
 - **Home.** Full by default. In Split the menu's rows are 204 px wide, so the selection bar ends at x 188 and the
-  chevrons stand at 176, and the playing album's art fills the rest from x 196 and y 52 (6 px up into the status
-  row) to the right and bottom edges, still, cut from the middle of the cover, the glass rounding its corner
-  (`split_row`, `split_art`, `split_art_up`, `split_inset`; [Home](#home)).
+  chevrons stand at 176, and the playing album's art fills the rest from x 196 and the top edge to the right and
+  bottom edges, panning slowly, the glass rounding its corners; the status row's play state and battery stand over
+  it, each pixel white or black by contrast with the art beneath (`split_row`, `split_art`, `split_art_up`,
+  `split_inset`; [Home](#home)).
 - **Song rows.** One line each, no chevron. In Songs and the other lists stock shows on Songs' page (a genre's
   songs among them) the artist follows the title two spaces on, in 15 px Text Tertiary, both ending in an ellipsis
   where they run out of room and the artist dropped when under 40 px would be left; an artist's own songs show
