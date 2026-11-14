@@ -432,7 +432,7 @@ pattern.
 | Bluetooth                           | Two-line row                | Second line "Connected" with the Positive dot                                                              |
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
-| Quick Settings                      | Own                         | Tiles become rows: the theme has no tiles                                                                  |
+| Quick Settings                      | Own                         | Seven rows under the status row, Brightness's slider inline: Centre on it gives it the wheel               |
 | Search                              | Own                         | An iPod classic's letter strip at y 216-254 under four single-line results ([ipod](ipod.md#search))         |
 | Keyboard                            | Own                         | Stock's keys as `#1C1C1E` boxes on black, the wheel's key in the accent ([ipod](ipod.md#keyboard))          |
 | Lock screen                         | Own                         | Clock 56 px Inter Medium centred, date 16 px Secondary, the song in two lines; black or the picture at 50% |

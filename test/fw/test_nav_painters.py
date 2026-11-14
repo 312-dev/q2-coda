@@ -2441,7 +2441,8 @@ class Quick:
         self.ui.add('label', self.menu, (0, 0, 80, 20), 'label_lock')
         for n in ('image0', 'image1'):
             self.ui.add('image', self.win, (0, 0, 10, 10), n)
-        self.slider = self.ui.add('slider', self.ui.add('view', self.win, (0, 250, 375, 60)), (20, 10, 335, 30), 'slider_backlight')
+        self.slider = self.ui.add('slider', self.ui.add('view', self.win, (0, 250, 375, 60), 'view_backlight'), (20, 10, 335, 30),
+                                  'slider_backlight')
         self.timers: list = []
         fw.mock('timer_add', lambda fn, ctx, ms, *_: self.timers.append((fn, i32(ms))) or len(self.timers))
         fw.mock('pointer_event_init', lambda out, kind, *_: C.memmove(out, struct.pack('<i', i32(kind)), 4) or out)
@@ -2561,6 +2562,18 @@ def test_classics_pressed_icon_repaints_under_the_finger_and_after(fw, st):
     assert [c[1][0] for c in fw.calls('widget_invalidate_force')][1:] == [quick.icons['img_gain'].addr, quick.icons['img_po'].addr]
     quick.dispatch('img_po', O['EVT_POINTER_UP_BEFORE'])
     assert [c[1][0] for c in fw.calls('widget_invalidate_force')][-1] == quick.icons['img_po'].addr
+
+
+def test_oled_s_quick_settings_lays_its_buttons_over_whole_rows(fw, st):
+    """OLED's page (quick_rows_open): Wi-Fi, Bluetooth, the lock, Gain, Output and USB each over a 32 px row from y 90
+    at opacity 0, so a tap there is stock's; Playback and System gone; the slider inline on the first row's right
+    column, its knob's 14 px reaching the track's ends."""
+    quick = Quick(fw, st, OLED)
+    rows = ['img_wifiswitch', 'img_btswitch', 'img_lock', 'img_gain', 'img_po', 'img_usbmode']
+    assert [quick.icons[n].box for n in rows] == [(0, 90 + 32 * i, 375, 32) for i in range(6)]
+    assert [quick.icons[n].visible for n in Quick.ICONS] == [1, 1, 1, 1, 1, 1, 0, 0]
+    assert sorted(c[1][0] for c in fw.calls('widget_set_opacity')) == sorted(quick.icons[n].addr for n in rows)
+    assert quick.slider.box == (183, 0, 171, 32) and quick.slider.parent.box == (0, 58, 375, 32)
 
 
 def test_closing_quick_settings_forgets_the_press(fw, st):

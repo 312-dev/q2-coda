@@ -405,6 +405,9 @@ static void info_paint(void *w, void *canvas) {
 #define OLED_DATE_PX 19 /* 16 */
 #define OLED_TITLE_PX 24 /* 20 */
 #define OLED_ARTIST_PX 18 /* 15 */
+#define OLED_HINT_PX 18 /* 15 */
+#define OLED_HINT_Y 280 /* the hint's line, under the song and clear of the glass's corners */
+#define OLED_TERTIARY 0xff858585
 static void oled_lock(void *win, void *img, int id) {
     static const char *const hidden[] = { "label_battery", "img_battery", "pgbar_battery",
                                           "view_shade",    "img_playcover", "img_slide" };
@@ -434,16 +437,37 @@ static void oled_lock(void *win, void *img, int id) {
     info_label(artist, 0, 32, 327, 24, OLED_ARTIST_PX, "inter", "center");
     if (artist) text_ink(artist, OLED_SECONDARY, 1);
     /* at rest on an ellipsis: a marquee's fades (marquee_fade) are the page's black, not the
-     * picture's */
+     * picture's. Stock's XML makes both yoyo, and stock paints a yoyo label without its ellipsis
+     * (hscroll_label_on_paint_self, 0x5fbffc), so a long title ended in a hard cut. */
     for (int i = 0; i < 2; ++i) {
         void *w = i ? artist : title;
-        if (w) hscroll_label_set_only_focus(w, 1), hscroll_label_set_ellipses(w, 1);
+        if (w) hscroll_label_set_only_focus(w, 1), hscroll_label_set_ellipses(w, 1), hscroll_label_set_yoyo(w, 0);
+    }
+    void *hint = label_create(win, 0, OLED_HINT_Y, 375, 24); /* lockscreen_hold */
+    if (hint) {
+        widget_set_text_utf8(hint, "Hold Centre to unlock");
+        info_label(hint, 0, OLED_HINT_Y, 375, 24, OLED_HINT_PX, "inter", "center");
+        text_ink(hint, OLED_TERTIARY, 1);
     }
     lk.title = title, lk.artist = artist, lk.date = date;
     lk.black = id == WALLS - 1;
     lk.img = img;
     lk.oled = 1;
     if (id < 0) widget_on(img, EVT_DESTROY, forget, img);
+}
+
+/* OLED's lock window, lit, unlocks on Centre held for stock's long press (ringnav_keylong; rule 17,
+ * a path by the wheel's buttons): as stock's slide does (0x53ec68), its timer goes and the window
+ * closes, whose destroy clears g_lockscreen_pageflag. 1 if it did; elsewhere the hold stays stock's
+ * (the Shut Down? prompt). A short press stays stock's screen-off. */
+int lockscreen_hold(void *top) {
+    if (!oled_pages() || !top || !g_lockscreen_pageflag || !g_backlight_status ||
+        tk_strcmp(widget_get_prop_str(top, "name", ""), "saverscreen_page"))
+        return 0;
+    int timer = widget_get_prop_int(top, "timer_idex", -1);
+    if (timer != -1) timer_remove((unsigned)timer), widget_set_prop_int(top, "timer_idex", -1);
+    window_close(top);
+    return 1;
 }
 
 /* saverscreen_page_init: stock builds the lock window; a built-in picture then paints in place of

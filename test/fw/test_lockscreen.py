@@ -1620,3 +1620,57 @@ def test_the_info_screen_repaints_on_each_percent_and_on_charging(fw, clock, st,
     playing.charging(True)
     assert tick(0) == RET_REPEAT and len(invalidated(fw)) == 2
     assert tick(0) == RET_REPEAT and len(invalidated(fw)) == 2
+
+
+# OLED's lock window (oled_lock, lockscreen_hold): the song at rest on an ellipsis, a hint, and a held Centre unlocks.
+def oled_window(fw):
+    """OLED's lock window over Tide, its init run: the window and the boxes label_create made (label1 the first)."""
+    Config(fw, THEME='3')
+    fw.var('fw_ctx_g_screensaver_picture', C.c_char * 256).value = WALLS[TIDE]
+    fw.mock('stock_saver_trampoline', lambda *_: 31)
+    win, made = Window(fw, INFO + ['label1']), []
+    fw.mock('label_create', lambda parent, x, y, w, h, *_: made.append((x, y, w, h)) or win['label1'])
+    fw.fn('lockscreen_init', C.c_int, C.c_void_p, C.c_void_p)(0x7700, 0x7800)
+    return win, made
+
+
+def test_oled_s_song_lines_rest_on_an_ellipsis_not_a_yoyo(fw):
+    """Stock's XML makes both labels yoyo, which stock paints without the ellipsis: a long title ended in a cut."""
+    win, _ = oled_window(fw)
+    for stub, value in (('hscroll_label_set_yoyo', 0), ('hscroll_label_set_ellipses', 1)):
+        assert sorted((n, a[0]) for n, a in win.calls(stub)) == [('scrlabel_artist', value), ('scrlabel_title', value)]
+
+
+def test_oled_s_lock_screen_says_how_to_unlock(fw):
+    """The hint, "Hold Centre to unlock": 15 px Text Tertiary, centred across the screen under the song, clear of the corners."""
+    win, made = oled_window(fw)
+    (x, y, w, h), = made
+    assert (x, w) == (0, 375) and 256 < y and y + h <= 306
+    text, = [a[0] for n, a in win.calls('widget_set_text_utf8') if n == 'label1']
+    assert C.string_at(text) == b'Hold Centre to unlock'
+    assert win.props('widget_set_prop_int', 'label1')['style:normal:font_size'] == 18  # AWTK's for 15 px
+    assert win.props('widget_set_prop_int', 'label1')['style:normal:text_color'] & 0xffffff == 0x858585
+    assert win.props('widget_set_prop_str', 'label1')['style:normal:text_align_h'] == 'center'
+
+
+def hold(fw, name=b'saverscreen_page', flag=1, lit=1, theme='3'):
+    """lockscreen_hold on a top window called name: its answer and the windows closed."""
+    Config(fw, THEME=theme)
+    fw.var('g_lockscreen_pageflag', C.c_ubyte).value = flag
+    fw.var('g_backlight_status', C.c_ubyte).value = lit
+    names = {0x7700: name}
+    props = C.create_string_buffer(name)
+    fw.mock('widget_get_prop_str', lambda w, key, default, *_: C.addressof(props) if C.string_at(key) == b'name' else default)
+    fw.mock('widget_get_prop_int', lambda w, key, default, *_: 42 if C.string_at(key) == b'timer_idex' else default)
+    answer = fw.fn('lockscreen_hold', C.c_int, C.c_void_p)(0x7700)
+    return answer, [a[0] for _, a in fw.calls('window_close')], [a[0] for _, a in fw.calls('timer_remove')]
+
+
+def test_a_held_centre_unlocks_oled_s_lit_lock_window(fw):
+    assert hold(fw) == (1, [0x7700], [42])  # its timer first, as stock's slide
+
+
+@pytest.mark.parametrize('kw', [dict(name=b'home_page'), dict(flag=0), dict(lit=0), dict(theme='0')])
+def test_a_held_centre_elsewhere_stays_stock_s(fw, kw):
+    """Only OLED's lock window while it's up and lit: elsewhere, and from dark, the hold is the Shut Down? prompt."""
+    assert hold(fw, **kw) == (0, [], [])
