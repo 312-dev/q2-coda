@@ -888,12 +888,21 @@ def test_the_stock_presets(fw):
     assert p.ui.screen == HOME and 'Presets Jazz' in p.captions() and p.captions()[0] == 'Apply changes'
 
 
-def test_a_preset_with_a_bad_line_says_which(fw):
-    p = page(fw, files={f'{FOLDER}/x.txt': b'Preamp: -3 dB\nnonsense\n'}).advanced()
+def test_a_preset_with_nothing_usable_says_which_line(fw):
+    p = page(fw, files={f'{FOLDER}/x.txt': b'# notes\nGraphicEQ: 20 -3; 40 -2\n'}).advanced()
     p.click('Presets')
     assert p.captions()[4:] == ['x.txt'] and p.title() == 'Presets'
     p.click('x.txt')
-    assert p.title() == 'Line 2: unsupported command' and p.ui.screen == PRESETS
+    assert p.title() == 'Use the ParametricEQ file, not GraphicEQ' and p.ui.screen == PRESETS and p.ui.draft.count == 10
+
+
+@pytest.mark.parametrize('extra, said', ((b'Filter: ON HP Fc 30 Hz\n', 'Loaded; skipped HP filter'),
+                                         (b'Device: all\nfilter: on hp fc 30hz\nCopy: L=R\n', 'Loaded; skipped Device, 2 more')))
+def test_a_preset_loads_what_plays_and_says_what_it_left_out(fw, extra, said):
+    p = page(fw, files={f'{FOLDER}/x.txt': b'Preamp: -3 dB\nFilter: ON PK Fc 1000 Hz Gain 2 dB Q 1\n' + extra}).advanced()
+    p.click('Presets')
+    p.click('x.txt')
+    assert p.title() == said and p.ui.screen == HOME and p.ui.draft.count == 1 and p.ui.draft.preamp == -3
 
 
 def test_no_folder_on_the_card_says_why(fw):
@@ -916,10 +925,12 @@ def test_earlier_binary_presets_are_written_out_once_and_kept(fw):
     imported = Preset.from_buffer_copy(imp)
     imported.automatic, imported.preamp = 2, -1.5
     files = {**MOUNTS, f'{SAVED}/Rock.peq': binary(rock), f'{SAVED}/Imp.peq': binary(imp), f'{SAVED}/Same.peq': binary(same),
+             f'{SAVED}/Apo.peq': binary(imp), f'{FOLDER}/Apo.txt': b'Device: all\n' + apo(fw, imported),
              f'{SAVED}/bad.peq': b'junk', f'{FOLDER}/Imp.txt': apo(fw, imported), f'{FOLDER}/Same.txt': b'# mine\n' + apo(fw, same)}
     p = page(fw, files=files).advanced()
     p.click('Presets')
-    assert p.captions()[4:] == ['Imp.txt', 'Rock.txt', 'Same.txt']
+    assert p.captions()[4:] == ['Apo.txt', 'Imp.txt', 'Rock.txt', 'Same.txt']
+    assert p.card.files[f'{FOLDER}/Apo.txt'] == files[f'{FOLDER}/Apo.txt']  # a line APO needs: kept
     assert p.card.files[f'{FOLDER}/Rock.txt'] == apo(fw, rock) and p.card.files[f'{FOLDER}/Imp.txt'] == apo(fw, imp)
     assert p.card.files[f'{FOLDER}/Same.txt'].startswith(b'# mine\n')  # the same preset: the file stays as it is
     assert all(p.card.files[k] == v for k, v in files.items() if k.startswith(SAVED)) and f'{SAVED}/.written' in p.card.files
@@ -1391,3 +1402,23 @@ def test_unsaved_gains_wait_for_the_next_pass(fw):
     card.fail_writes = True
     fw.fn('eq_output', None, C.c_char_p)(b'usb')
     assert owner(card) == '3.5mm' and p.e3.dirty
+
+
+def oled(fw):
+    """Theme: OLED (THEME 3), whose messages are toasts; the toasts' texts as they open."""
+    def config(path, section, key, out, default, *_):
+        value = b'3' if C.string_at(key) == b'THEME' else C.string_at(default)
+        C.memmove(out, value + b'\0', len(value) + 1)
+    fw.mock('toolsReadConfig', config)
+    said = []
+    fw.mock('navigator_to_with_context', lambda name, info, *_: said.append(C.string_at(info + 8).decode()) or 0)
+    return said
+
+
+def test_under_oled_a_message_is_a_toast_over_the_page_s_own_title(fw):
+    said = oled(fw)
+    assert fw.fn('feedback_oled', C.c_int)()
+    p = page(fw, files={f'{FOLDER}/x.txt': b'GraphicEQ: 20 -3\n'}).advanced()
+    p.click('Presets')
+    p.click('x.txt')
+    assert said == ['Use the ParametricEQ file, not GraphicEQ'] and p.title() == 'Presets'

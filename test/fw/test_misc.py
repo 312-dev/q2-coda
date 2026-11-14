@@ -1769,6 +1769,15 @@ def test_a_preamp_pick_sticks_to_the_saved_preset(fw):
     assert saved.preamp == -9 and saved.automatic == 2 and saved.bands[0].gain == 6
 
 
+def test_a_preamp_pick_leaves_a_file_with_lines_left_out_as_it_is(fw):
+    u = ui(fw)
+    text = b'Device: all\nPreamp: -3 dB\nFilter: ON PK Fc 1000 Hz Gain 6 dB Q 1\n'
+    card = Card(fw, {f'{FOLDER}/Rock.txt': text})
+    u.name, u.draft.automatic, u.draft.preamp = b'Rock', 1, -6
+    fw.fn('peq_ui__remember_preamp', None)()
+    assert card.files == {f'{FOLDER}/Rock.txt': text}
+
+
 def test_a_preamp_pick_of_a_stock_preset_writes_nothing(fw):
     u = ui(fw)
     card = Card(fw)
@@ -2095,7 +2104,7 @@ def test_a_preset_on_the_card_loads_or_says_which_line_failed(fw):
     u = ui(fw)
     u.screen = PRESETS
     act(fw, 0)  # sorted: bad.txt
-    assert u.status == b'Line 2: unsupported command' and u.screen == PRESETS
+    assert u.status == b'Line 1: no Equalizer APO lines' and u.screen == PRESETS
     act(fw, 1)
     assert u.screen == HOME and u.name == b'good' and u.draft.preamp == -3 and len(card.files) == 2  # nothing written
 
@@ -2118,7 +2127,7 @@ def test_a_saved_preset_it_can_t_read_changes_nothing(fw):
     u.draft = peak_preset(6)
     u.screen = PRESETS
     act(fw, 0)
-    assert u.draft.bands[0].gain == 6 and u.status == b'Line 1: unsupported command'
+    assert u.draft.bands[0].gain == 6 and u.status == b'Line 1: no Equalizer APO lines'
 
 
 def test_a_file_row_counts_through_its_page(fw):

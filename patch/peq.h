@@ -113,7 +113,9 @@ typedef struct {
     int automatic, spare;
 } peq_preset;
 #define PEQ_PRESET_V2 __builtin_offsetof(peq_preset, automatic)
-typedef struct { unsigned line; const char *reason; } peq_error;
+/* Why peq_parse failed, at line; or, when it loads, what it left out: skipped lines, the first at
+ * line, reason as a failure would give it, and what a word or two naming it for a message. */
+typedef struct { unsigned line; const char *reason; unsigned skipped; char what[24]; } peq_error;
 typedef struct { double b0, b1, b2, a1, a2; } peq_coeff;
 typedef struct {
     peq_coeff c[PEQ_BANDS];

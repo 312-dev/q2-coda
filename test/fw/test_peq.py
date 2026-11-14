@@ -42,7 +42,7 @@ class EqState(C.Structure):
 
 
 class Error(C.Structure):
-    _fields_ = [('line', C.c_uint), ('reason', C.c_char_p)]
+    _fields_ = [('line', C.c_uint), ('reason', C.c_char_p), ('skipped', C.c_uint), ('what', C.c_char * 24)]
 
 
 V2 = Preset.automatic.offset
@@ -816,6 +816,10 @@ def test_parse_an_empty_file_is_an_empty_preset(fw, text):
     assert p.count == 0 and p.automatic == 1
 
 
+def test_parse_a_preamp_without_its_db(fw):
+    assert parse(api(fw), b'Preamp: -1.5\n')[0].preamp == -1.5
+
+
 def test_parse_takes_a_bom_crlf_and_no_last_newline(fw):
     p, _ = parse(api(fw), b'\xef\xbb\xbfPreamp: 1 dB\r\nFilter 1: ON PK Fc 100 Hz Gain 1 dB Q 1')
     assert p.preamp == 1 and p.count == 1
@@ -883,14 +887,6 @@ def test_parse_an_off_filter_outside_the_ranges_is_a_blank_slot(fw):
     assert p.count == 0
 
 
-def test_parse_exactly_30_bands_then_no_more(fw):
-    g = api(fw)
-    line = b'Filter: ON PK Fc 100 Hz Gain 1 dB Q 1\n'
-    assert parse(g, line * 30)[0].count == 30
-    p, err = parse(g, line * 31)
-    assert p is None and err.line == 31 and b'30' in err.reason
-
-
 def test_parse_limits_a_file_to_16384_bytes(fw):
     g = api(fw)
     assert parse(g, b'#' * 511 + b'\n' + (b'#' * 511 + b'\n') * 31)[0] is not None
@@ -909,30 +905,36 @@ def test_parse_limits_a_line_to_512_bytes(fw):
 def test_parse_16_tokens_then_no_more(fw):
     g = api(fw)
     assert parse(g, b'Channel: ' + b'L ' * 14)[0] is not None  # 16 tokens with the colon
-    assert parse(g, b'Channel: ' + b'L ' * 15)[1].line == 1
+    p, err = parse(g, b'Channel: ' + b'L ' * 15)
+    assert p is None and err.line == 1 and b'form' in err.reason
+    p, err = parse(g, PEAK + b'Channel: ' + b'L ' * 15)
+    assert p.count == 1 and (err.skipped, err.what) == (1, b'line 2')
 
 
+# A file with nothing usable fails on its first line left out, as a whole file used to on any.
 @pytest.mark.parametrize('text, line, word', (
     (b'Filter 1: ON XX Fc 100 Hz Gain 1 dB Q 1\n', 1, b'type'),
-    (b'\n\nnonsense\n', 3, b'command'),
+    (b'\n\nnonsense\n', 1, b'no Equalizer APO'),
+    (b'\n\nnonsense: yes\n', 3, b'command'),
     (b'Filter a: ON PK Fc 100 Hz Gain 1 dB Q 1\n', 1, b'label'),
-    (b'Filter 1 ON PK Fc 100 Hz Gain 1 dB Q 1\n', 1, b'Filter'),
+    (b'Filter 1 ON PK Fc 100 Hz Gain 1 dB Q 1\n', 1, b'no Equalizer APO'),
     (b'Filter 1: MAYBE PK Fc 100 Hz Gain 1 dB Q 1\n', 1, b'ON or OFF'),
-    (b'Filter 1: ON PK Fc 100 Hz Gain 1 dB\n', 1, b'requires Q'),
+    (b'Filter 1: ON PK Fc 100 Hz Gain 1 dB\n', 1, b"a peak's Q"),
     (b'Filter 1: ON PK Fc 100 Hz Gain 1 dB R 1\n', 1, b'Q'),
     (b'Filter 1: ON PK Fc 100 kHz Gain 1 dB Q 1\n', 1, b'Fc'),
-    (b'Filter 1: ON PK Fc 0x10 Hz Gain 1 dB Q 1\n', 1, b'number'),
+    (b'Filter 1: ON PK Fc 0x10 Hz Gain 1 dB Q 1\n', 1, b'Fc'),
     (b'Filter 1: ON PK Fc 19 Hz Gain 1 dB Q 1\n', 1, b'range'),
     (b'Filter 1: ON PK Fc 100 Hz Gain 25 dB Q 1\n', 1, b'range'),
     (b'Filter 1: ON PK Fc 100 Hz Gain 1 dB Q 11\n', 1, b'range'),
-    (b'Filter 1: ON PK\n', 1, b'form'),
-    (b'Preamp: 1\n', 1, b'Preamp'),
-    (b'Preamp: 25 dB\n', 1, b'preamp'),
-    (b'Preamp: nan dB\n', 1, b'preamp'),
-    (b'Channel\n', 1, b'Channel'),
+    (b'Filter 1: ON PK\n', 1, b'Fc'),
+    (b'Preamp: 1 Hz\n', 1, b'Preamp'),
+    (b'Preamp: 25 dB\n', 1, b'-60 to 24'),
+    (b'Preamp: nan dB\n', 1, b'-60 to 24'),
+    (b'Channel\n', 1, b'no Equalizer APO'),
+    (b'Channel:\n', 1, b'Channel'),
     (b'Channel: C\n', 1, b'channels'),
     (b'Preamp: -40 dB\nPreamp: -40 dB\n', 2, b'summed'),
-    (b'Channel: L\nPreamp: -13 dB\n', 2, b'differ'),
+    (b'Channel: L\nPreamp: -13 dB\n', 2, b'apart'),
 ))
 def test_parse_refuses_with_the_line_and_why(fw, text, line, word):
     p, err = parse(api(fw), text)
@@ -948,7 +950,7 @@ def test_parse_a_failure_writes_nothing(fw):
     g = api(fw)
     out = preset(g, preamp=-9)
     before = bytes(out)
-    text = b'Filter 1: ON PK Fc 100 Hz Gain 1 dB Q 1\nbad\n'
+    text = b'Filter 1: ON PK Fc 100 Hz Gain 1 dB Q 1\nChannel: L\nPreamp: -13 dB\n'
     with Exact(text + b'\0') as p:
         assert not g.peq_parse(p, len(text), r(out), None)  # and no error record to fill
     assert bytes(out) == before
@@ -1455,3 +1457,113 @@ def test_export_file_asks_before_replacing_and_writes_plain_text(fw):
     assert g.peq_export_file(b'/x/a.txt', r(p), 0) == 2 and card.files['/x/a.txt'] == b'old'
     assert g.peq_export_file(b'/x/a.txt', r(p), 1) == 1 and card.files['/x/a.txt'] == export(g, p)
     assert g.peq_export_file(b'/x/b.txt', r(preset(g, (PK, 1, 6, 1))), 1) == 0 and '/x/b.txt' not in card.files
+
+
+# Lenient import (docs/internals.md#lenient-import): what plays loads, what can't is counted and named
+
+PEAK = b'Filter 1: ON PK Fc 1000 Hz Gain -3 dB Q 1\n'
+
+
+@pytest.mark.parametrize('extra, what', (
+    (b'Device: Speakers Realtek(R) Audio; all\n', b'Device'),
+    (b'Filter 2: ON HP Fc 30 Hz\n', b'HP filter'),
+    (b'Filter 2: ON LPQ Fc 18000 Hz Q 0.7\n', b'LPQ filter'),
+    (b'Include: other.txt\n', b'Include'),
+    (b'Delay: 10 ms\n', b'Delay'),
+    (b'Channel: C\n', b'Channel C'),
+    (b'Filter 2: ON PK Fc 30000 Hz Gain 1 dB Q 1\n', b'band out of range'),
+    (b'Filter 2: ON PK Fc 100 Hz Gain 1 dB\n', b'line 2'),
+    (b'Filter 2: ON PK Fc 100 kHz Gain 1 dB Q 1\n', b'line 2'),
+    (b'Filter 2: MAYBE PK Fc 100 Hz Gain 1 dB Q 1\n', b'line 2'),
+    (b'Preamp: 25 dB\n', b'Preamp'),
+    (b'GraphicEQ: 20 -3; 40 -2\n', b'GraphicEQ'),
+))
+def test_parse_leaves_out_one_line_and_names_it(fw, extra, what):
+    p, err = parse(api(fw), PEAK + extra)
+    assert p is not None and p.count == 1 and p.bands[0].gain == -3
+    assert (err.skipped, err.line, err.what) == (1, 2, what)
+
+
+def test_parse_counts_what_it_left_out_and_names_the_first(fw):
+    p, err = parse(api(fw), b'Device: all\n' + PEAK + b'Filter: ON HP Fc 30 Hz\nCopy: L=R\n')
+    assert p.count == 1 and (err.skipped, err.line, err.what) == (3, 1, b'Device')
+    p, err = parse(api(fw), PEAK)
+    assert (err.skipped, err.line) == (0, 0)
+
+
+def test_parse_takes_lower_case_and_units_run_into_numbers(fw):
+    g = api(fw)
+    p, err = parse(g, b'preamp: -6dB\nfilter 1: on pk fc 1000hz gain -3,5db q 1.41\nFILTER2: ON LSC FC 100 HZ GAIN 2 DB Q 0.7\n'
+                      b'channel: l\nfilter: on peq fc 1e3Hz gain 1dB q 2\n')
+    assert err.skipped == 0 and p.preamp == -6 and p.count == 3
+    assert [(b.enabled, b.type, b.frequency, b.gain, b.q) for b in p.bands[:3]] == [
+        (1, PK, 1000, -3.5, 1.41), (1, LS, 100, 2, .7), (2, PK, 1000, 1, 2)]
+
+
+def test_text_without_a_colon_is_no_command(fw):
+    p, err = parse(api(fw), b'Filter Settings file\n\nRoom EQ V5.20\n' + PEAK)  # REW's header
+    assert p.count == 1 and err.skipped == 0
+
+
+@pytest.mark.parametrize('bw', (0.5, 1.0, 2.0, 1/3))
+@pytest.mark.parametrize('f', (100.0, 1000.0, 10000.0, 18000.0))
+def test_bw_oct_is_apo_s_bandwidth_at_48_khz(fw, bw, f):
+    g = api(fw)
+    p, err = parse(g, b'Filter: ON PK Fc %r Hz Gain 6 dB BW Oct %r\n' % (f, bw))
+    assert err.skipped == 0
+    w = math.tau * f / 48000
+    alpha = math.sin(w) * math.sinh(math.log(2) / 2 * bw * w / math.sin(w))  # Equalizer APO's BiQuad.cpp
+    assert math.sin(w) / (2 * p.bands[0].q) == pytest.approx(alpha, rel=1e-12)
+
+
+def test_a_shelf_ignores_bw_and_takes_apo_s_default_slope(fw):
+    g = api(fw)
+    a, _ = parse(g, b'Filter: ON LSC Fc 100 Hz Gain 6 dB BW Oct 2\n')
+    b, _ = parse(g, b'Filter: ON LSC Fc 100 Hz Gain 6 dB\n')
+    assert (a.bands[0].frequency, a.bands[0].q) == (b.bands[0].frequency, b.bands[0].q)
+
+
+@pytest.mark.parametrize('name, down', ((b'LS', False), (b'HS', True)))
+@pytest.mark.parametrize('slope', (6.0, 12.0))
+def test_a_shelf_s_slope_in_db_is_apo_s_s(fw, name, down, slope):
+    g = api(fw)
+    p, err = parse(g, b'Filter: ON ' + name + b' %gdB Fc 1000 Hz Gain 6 dB\n' % slope)
+    s, a = slope / 12, 10 ** (6 / 40)
+    assert err.skipped == 0
+    assert p.bands[0].q == pytest.approx(1 / math.sqrt((a + 1 / a) * (1 / s - 1) + 2))
+    f = 10 ** (6 / 80 / s)  # APO's corner to centre (BiQuadFilter.cpp)
+    assert p.bands[0].frequency == pytest.approx(1000 / f if down else 1000 * f)
+    c, _ = parse(g, b'Filter: ON ' + name + b'C %g dB Fc 1000 Hz Gain 6 dB\n' % slope)
+    assert c.bands[0].frequency == 1000 and c.bands[0].q == p.bands[0].q
+
+
+def test_filters_for_another_channel_are_left_out_with_their_channel_line(fw):
+    p, err = parse(api(fw), b'Channel: C LFE\nFilter: ON PK Fc 100 Hz Gain 1 dB Q 1\nChannel: L C\n' + PEAK)
+    assert p.count == 1 and p.bands[0].enabled == 2 and (err.skipped, err.what) == (2, b'Channel C')
+
+
+def test_channels_by_number(fw):
+    p, _ = parse(api(fw), b'Channel: 2\n' + PEAK)
+    assert p.bands[0].enabled == 3
+
+
+def test_the_31st_band_is_left_out(fw):
+    p, err = parse(api(fw), b'Filter: ON PK Fc 100 Hz Gain 1 dB Q 1\n' * 31)
+    assert p.count == 30 and (err.skipped, err.line, err.what) == (1, 31, b'bands past 30')
+
+
+def test_graphic_eq_alone_says_to_use_the_parametric_file(fw):
+    p, err = parse(api(fw), b'Preamp: -6 dB\n' * 0 + b'GraphicEQ: 20 -3; 40 -2\n')
+    assert p is None and err.line == 0 and err.reason == b'Use the ParametricEQ file, not GraphicEQ'  # the whole file's
+
+
+def test_nothing_usable_fails_on_the_first_line_left_out(fw):
+    p, err = parse(api(fw), b'\nDevice: all\nFilter: ON HP Fc 30 Hz\n')
+    assert p is None and err.line == 2 and err.reason == b'unsupported command'
+    p, err = parse(api(fw), b'a shopping list\nmilk\n')
+    assert p is None and err.line == 1 and err.reason == b'no Equalizer APO lines'
+
+
+def test_an_off_filter_of_an_unsupported_type_is_left_alone(fw):
+    p, err = parse(api(fw), PEAK + b'Filter: OFF HP Fc 30 Hz\nFilter: ON None\n')
+    assert p.count == 1 and err.skipped == 0

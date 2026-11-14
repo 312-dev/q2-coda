@@ -365,15 +365,16 @@ static void auto_text(char *s, unsigned n) {
 }
 
 /* A Preamp pick sticks to the preset on the card it was loaded from, written out again (peq_export);
- * its bands stay as saved until Save. ponytail: the file's own comments go, and keyed on ui.name,
- * a stock preset named like a saved one ("Rock") writes to that file; keep the loaded path if
- * that matters. */
+ * its bands stay as saved until Save. A file with lines the parser left out stays as it is: written
+ * out, it would lose them for Equalizer APO, so its pick lasts until another load. ponytail: the
+ * file's own comments go, and keyed on ui.name, a stock preset named like a saved one ("Rock")
+ * writes to that file; keep the loaded path if that matters. */
 static void remember_preamp(void) {
     char path[600];
     peq_preset p;
     peq_error e;
     snprintf(path, sizeof(path), PEQ_FOLDER "/%s.txt", ui.name);
-    if (!ui.name[0] || !peq_import_file(path, &p, &e)) return; /* a stock preset, Reset or none */
+    if (!ui.name[0] || !peq_import_file(path, &p, &e) || e.skipped) return; /* a stock preset, Reset or none */
     p.automatic = ui.draft.automatic, p.preamp = ui.draft.preamp;
     peq_export_file(path, &p, 1);
 }
@@ -414,7 +415,7 @@ static void list_files(const char *folder, const char *extension) {
 static const char *deleting(void) { return ui.destination + sizeof(PEQ_FOLDER); }
 
 /* Earlier firmware's binary presets (PEQ_SAVED), written out to the card's folder once and kept
- * there for a downgrade. A text preset of the same name stays, unless it reads and differs: the
+ * there for a downgrade. A text preset of the same name stays, unless it reads whole and differs: the
  * binary is then that file's import with a Preamp picked since, as remember_preamp keeps it. */
 static void write_out(void) {
     char from[600], to[600];
@@ -433,7 +434,7 @@ static void write_out(void) {
         if (!peq_load(from, &p)) continue;
         p.bypass = 0;
         if (p.automatic != 2) p.automatic = 1; /* never picked is Auto, as the editor takes it */
-        if (!access(to, 0) && (!peq_import_file(to, &text, &e) || !memcmp(&text, &p, sizeof p))) continue;
+        if (!access(to, 0) && (!peq_import_file(to, &text, &e) || e.skipped || !memcmp(&text, &p, sizeof p))) continue;
         ok &= peq_export_file(to, &p, 1);
     }
     closedir(dir);
@@ -654,8 +655,16 @@ static int action(void *ctx, void *event) {
             peq_preset p;
             peq_error error;
             snprintf(path, sizeof(path), PEQ_FOLDER "/%s", ui.names[file]);
-            if (peq_import_file(path, &p, &error)) load_draft(&p, ui.names[file], (int)strlen(ui.names[file]) - 4);
-            else snprintf(ui.status, sizeof(ui.status), "Line %u: %s", error.line, error.reason);
+            /* Each message fits OLED's toast, 43 characters or so (docs/oled-design.md#dialogs-and-toasts). */
+            if (!peq_import_file(path, &p, &error)) /* line 0: the whole file's (GraphicEQ) */
+                snprintf(ui.status, sizeof(ui.status), error.line ? "Line %u: %s" : "%.0u%s", error.line, error.reason);
+            else {
+                load_draft(&p, ui.names[file], (int)strlen(ui.names[file]) - 4);
+                /* What it left out, by the first: "Loaded; skipped HP filter, 2 more" */
+                if (error.skipped == 1) snprintf(ui.status, sizeof(ui.status), "Loaded; skipped %.17s", error.what);
+                else if (error.skipped)
+                    snprintf(ui.status, sizeof(ui.status), "Loaded; skipped %.17s, %u more", error.what, error.skipped - 1);
+            }
         }
     }
     if (edit) { /* ENABLE, TYPE, RAISE, LOWER, TYPED, CHANNEL and a picked gain */

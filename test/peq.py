@@ -27,7 +27,7 @@ class State(C.Structure):
 EQ_OFF, EQ_3, EQ_PEQ = range(3)
 
 class Error(C.Structure):
-    _fields_ = [('line', C.c_uint), ('reason', C.c_char_p)]
+    _fields_ = [('line', C.c_uint), ('reason', C.c_char_p), ('skipped', C.c_uint), ('what', C.c_char * 24)]
 
 class Coeff(C.Structure):
     _fields_ = [(k, C.c_double) for k in ('b0', 'b1', 'b2', 'a1', 'a2')]
@@ -114,27 +114,30 @@ def parser_check(lib, tmp):
     active, saved = tmp/'active', tmp/'preset'
     for path in (active, saved): assert lib.peq_save(bytes(path), C.byref(p), 0) == 1
     baseline = bytes(p)
+    # A file with nothing usable fails on its first line left out; a file with something loads it.
     failures = [
-        (single * 30 + single.replace('ON', 'OFF'), 31, '30 bands'),
         ('Preamp: 24 dB\nPreamp: 1 dB', 2, 'summed'),
-        ('Preamp: -61 dB', 1, 'preamp'),
-        ('Preamp: -3', 1, 'expected'),
-        ('\nGraphicEQ: 20 0; 20000 0', 2, 'unsupported'),
-        ('Include: other.txt', 1, 'unsupported'), ('Channel: C', 1, 'only channels'), ('Channel:', 1, 'expected Channel'),
-        ('Channel: L\nPreamp: -13 dB', 2, 'differ'),
-        ('Eval: x=1', 1, 'unsupported'), ('garbage', 1, 'unsupported'),
-        (single.replace(' Q .7', ''), 1, 'requires Q'),
+        ('Preamp: -61 dB', 1, '-60 to 24'),
+        ('\nGraphicEQ: 20 0; 20000 0', 0, 'ParametricEQ'),
+        ('Include: other.txt', 1, 'unsupported'), ('Channel: C', 1, 'L, R and all only'), ('Channel:', 1, 'expected Channel'),
+        ('Channel: L\nPreamp: -13 dB', 2, 'apart'),
+        ('Eval: x=1', 1, 'unsupported'), ('garbage', 1, 'no Equalizer APO'),
+        (single.replace(' Q .7', ''), 1, "a peak's Q"),
         (single.replace('PK', 'HP'), 1, 'type'),
-        (single.replace('PK', 'LS 6dB'), 1, 'form'),
-        (single.replace('Q .7', 'BW Oct 1'), 1, 'form'),
-        (single.replace('1e3', '`1000`'), 1, 'number'),
+        (single.replace('1e3', '`1000`'), 1, 'expected Fc'),
         (single.replace('Filter:', 'Filter x:'), 1, 'label'),
-        (single + 'Filter: ON PK Fc 19 Hz Gain 0 dB Q 1', 2, 'range'),
         (b'\0', 1, 'NUL'), (b'#' * 513, 1, 'line'), (b'#' * 16385, 1, 'file'),
     ]
     for old, values in [('1e3', ['nan', 'inf', '-inf', '1e999', '20junk', '0x100', '20001', '-20']),
                         ('+6.0', ['nan', '25', '-25']), ('.7', ['NaN', '0', '-1', '10.1'])]:
-        failures += [(single.replace(old, value), 1, 'number' if value in ('nan', 'inf', '-inf', '1e999', '20junk', '0x100', 'NaN') else 'range') for value in values]
+        failures += [(single.replace(old, value), 1, 'expected Fc' if value in ('nan', 'inf', '-inf', '1e999', '20junk', '0x100', 'NaN') else 'range') for value in values]
+    for text, skipped, what in [(single * 30 + single.replace('ON', 'OFF'), 1, 'bands past 30'),
+                                (single + 'Filter: ON PK Fc 19 Hz Gain 0 dB Q 1', 1, 'band out of range'),
+                                ('Device: all\n' + single + 'Filter: ON HP Fc 20 Hz\n', 2, 'Device')]:
+        error, loaded, data = Error(), Preset(), text.encode()
+        assert lib.peq_parse(data, len(data), C.byref(loaded), C.byref(error)) and (error.skipped, error.what.decode()) == (skipped, what), text
+    loaded = parse(lib, single.replace('PK', 'LS 6dB') + single.replace('Q .7', 'BW Oct 1') + 'Preamp: -3')
+    assert loaded.count == 2 and loaded.preamp == -3
     for text, line, reason in failures:
         data = text.encode() if isinstance(text, str) else text
         error = Error()
