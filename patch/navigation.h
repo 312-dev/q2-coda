@@ -451,6 +451,7 @@ void coverflow_position_reset(void);
 /* list_marks.c */
 const char *theme_art(const char *name);
 void chevron_icon(void *w, void *canvas, int right, int y, int selected);
+void chevron_muted(void *w, void *canvas, int right, int y);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
 void marquee_fade(void *w, void *canvas);
@@ -459,6 +460,9 @@ void np_modes(void *win, void *canvas);
 void wheel_sb_arm(void *list);
 unsigned wheel_sb_alpha(void *list);
 void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key);
+/* list_marks.c: an on/off setting's switch, ending on canvas column right, centred on y
+ * (settings.values.switch) */
+void switch_mark(void *canvas, int right, int y, int on, int selected);
 
 /* song_rows.c: SONGS_INLINE's rows. Song Artist's and Song Length's values (theme_engine.c
  * song_artist, song_length), a list's kind (song_list) and where an artist stands (song_fit). */

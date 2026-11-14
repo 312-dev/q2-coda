@@ -175,6 +175,7 @@ def phosphor(name, px, rgb):
 CARET_PX = 15
 STATE_PX = 13
 CHEVRON_INKS = {'d': 0x999999, 'l': 0x8a8a8a, 'w': 0xffffff}
+CHEVRON_MUTED_INKS = {'td': 0x858585, 'tl': 0x6e6e6e}  # a disabled row's (list_intodown, list_marks.c chevron_muted): Text Tertiary per half
 STATE_INKS = {'d': 0xffffff, 'l': 0x000000}
 # Now Playing's shuffle and repeat (playing.modes.icons, np_bar.c np_modes): bold, MODE_PX, off in Text Secondary per
 # half, on in the theme's own accent's top tone in both; repeat-once is repeat's on glyph for Repeat One.
@@ -183,6 +184,7 @@ MODE_INKS = {'d': 0xababab, 'l': 0x5c5c5c}
 # A row's leading glyph (Songs' Shuffle row, list.shuffle.row), regular weight at the 20 px row type's size
 ROW_ICON_PX = 20
 FOLDER_INKS = {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}  # Text Secondary in each half, white on the bar
+CHECK_PX = 12  # a picker's current choice (settings.values.switch, navigation.c paint_radio): the accent, white on the bar
 
 
 def gradient(stops, y0, y1):
@@ -873,7 +875,7 @@ def images(t):
         out[f'{prefix}_chevron'] = png(*CHEVRON_BOX[2:], compose(CHEVRON_BOX, [
             (stroke(path(CHEVRON), CHEVRON_STROKE, closed=False), lambda x, y: (0xffffff, 1))]))
     if t['painter[PAINT_CHEVRON]']:  # CHEV_ICON
-        out |= {f'{prefix}_chevron_{k}': phosphor('caret-right-bold', CARET_PX, c) for k, c in CHEVRON_INKS.items()}
+        out |= {f'{prefix}_chevron_{k}': phosphor('caret-right-bold', CARET_PX, c) for k, c in (CHEVRON_INKS | CHEVRON_MUTED_INKS).items()}
     if t['painter[PAINT_BATTERY]'] == list(CHOICES['bar.battery.painter']).index('slim'):  # its play state is the theme's too
         out |= {f'{prefix}_{n}_{k}': phosphor(f'{n}-fill', STATE_PX, c) for n in ('play', 'pause') for k, c in STATE_INKS.items()}
     if t['np_modes']:
@@ -884,6 +886,9 @@ def images(t):
     if t['shuffle_row']:  # Songs' Shuffle row: the accent's top tone at rest, white on the selection, in both halves
         on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
         out |= {f'{prefix}_shuffle_{k}': phosphor('shuffle', ROW_ICON_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
+    if t['set_switch']:  # a picker's check on the right column: the accent's top tone at rest, white on the selection
+        on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
+        out |= {f'{prefix}_check_{k}': phosphor('check-bold', CHECK_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
     if t['painter[PAINT_SONGS]']:  # Folder view's folder glyph (song_rows.c folder_row): Text Secondary, white on the selection
         out |= {f'{prefix}_folder_{k}': phosphor('folder', ROW_ICON_PX, c) for k, c in FOLDER_INKS.items()}
     if t['bolt']:

@@ -756,7 +756,11 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('system_prove', '技术证明', 'Certification'),  # About's regulatory row, Chinese in stock's English
     ('genre', 'Genres', 'Genre'), ('player_era', 'Era', 'Year'), ('batch_addplaylist', 'Add to playlist', 'Add to Playlist'),
     ('msg_importplaylist', 'Import Playlist?', 'Import Playlists?'),  # it imports the whole folder
-    ('scan_startscan', 'Scanning', 'Scan')))  # Scan specified folders' button; wifi_scan keeps its "Scanning"
+    ('scan_startscan', 'Scanning', 'Scan'),  # Scan specified folders' button; wifi_scan keeps its "Scanning"
+    # Screen Off Time's and Standby's choices: a number, a space, a unit (docs/oled-design.md Type)
+    *((f'{page}_{n}{u}', f'{n}{u}', f'{n} {u}') for page, choices in (
+        ('lighttime', ((15, 's'), (30, 's'), (1, 'min'), (2, 'min'), (5, 'min'), (30, 'min'))),
+        ('standbyoff', ((1, 'min'), (3, 'min'), (5, 'min'), (10, 'min')))) for n, u in choices)))
 
 # Wi-Fi transfer's web page (stock thttpd on :8888): in English, an Upload Folder button, and a folder,
 # picked or dropped, keeps its tree: each file's folders are made with stock's create (a plain mkdir) before

@@ -153,6 +153,7 @@ SCHEMA = {k.path: k for k in (
     key('home.pane.svc_px', 'pane_svc_px', 'int', 188),
     key('settings.rows.top', 'set_top', 'int', 375),
     key('settings.values.text', 'set_text', 'bool'),
+    key('settings.values.switch', 'set_switch', 'bool'),  # an on/off row's switch, drawn (list_marks.c switch_mark) where set_text would write On or Off
     key('settings.values.ink', 'set_value_ink', 'color', final=True),  # a set_text row's value, right-aligned; 0: the label style's white
     key('playing.scrubber.painter', 'painter[PAINT_SCRUB]', 'enum'),
     key('volume.panel.painter', 'painter[PAINT_VOLUME]', 'enum'),

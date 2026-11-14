@@ -2664,6 +2664,15 @@ static void paint_radio(void *w, void *canvas) {
             return;
         }
         if (tk_strcmp(image, "select")) return;
+        /* settings.values.switch: the theme's 12 px check ending on the image's right end, the
+         * right column (docs/oled-design.md Pickers), the accent's, white on the selection */
+        if (theme()->set_switch) {
+            unsigned bitmap[64]; /* bitmap_t: width @0 */
+            if (!widget_load_image(w, theme_art(painting_in(st.sel_accent) ? "check_w" : "check_a"),
+                                   bitmap))
+                canvas_draw_icon(canvas, bitmap, I(w, W_W) - (int)bitmap[0] / 2, I(w, W_H) / 2);
+            return;
+        }
         stock_canvas_set_fill_color(canvas,
                                     RGBA(painting_in(st.sel_accent) ? S->sel_text : S->ink));
         paint_tick(canvas, x, y);
@@ -2711,6 +2720,29 @@ static void paint_radio(void *w, void *canvas) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
+/* A set_switch theme's Gain row (docs/oled-design.md List row): stock's gain_high or gain_low
+ * switch, which the image hook empties, read as a key/value row's value, High or Low, in the
+ * theme's value grey (set_value_ink), white on the selection, its text ending on the image's right
+ * end, which set_row puts on the right column as a value's. */
+#define GAIN_VALUE_END                                                                             \
+    1 /* the text's right end this far inside the image's, as a value label's                      \
+       */
+static void paint_gain(void *w, void *canvas, int high, int selected) {
+    static const unsigned hi[] = { 'H', 'i', 'g', 'h' }, lo[] = { 'L', 'o', 'w' };
+    const unsigned *s = high ? hi : lo;
+    unsigned n = high ? 4 : 3, ink = theme()->set_value_ink[ipod_light()];
+    int px = theme()->font_px[ROLE_TITLE];
+    const char *face = theme_face(s, (int)n, &px);
+    canvas_set_font(canvas, face, (unsigned)px);
+    int wide = (int)(canvas_measure_text(canvas, s, n) + 0.5f) + 2;
+    rect_t r = { I(w, W_W) - GAIN_VALUE_END - wide, 0, wide, I(w, W_H) };
+    unsigned raw = st.raw_ink;
+    st.raw_ink = 1; /* final in each half, as the value labels' text_ink */
+    draw_in_face(canvas, face, s, n, &r, (unsigned)px,
+                 selected || !ink ? 0xffffffffu : 0xff000000u | ink);
+    st.raw_ink = raw;
+}
+
 /* Light Mode: stock's own `>` (a list_into image) on the coloured bar or card's row, drawn again
  * white over the selection's colour, as paint_chevrons draws the payload's. A chevron_sel theme's
  * stock image is empty (ringnav_image_add), so this is its only one, in either half, over nothing
@@ -2721,9 +2753,29 @@ static void paint_into(void *w, void *canvas) {
     int box = w ? theme()->chevron_x : 0;
     /* CHEV_ICON: stock's is empty on every row, and each row's own stands on the right column */
     if (w && theme()->painter[PAINT_CHEVRON] == CHEV_ICON) {
-        if (P(canvas, CANVAS_LCD) && !tk_strcmp(widget_get_prop_str(w, "image", ""), "list_into"))
+        const char *image = P(canvas, CANVAS_LCD) ? widget_get_prop_str(w, "image", "") : "";
+        if (!image) image = ""; /* a widget whose image isn't a string */
+        /* a set_switch theme's switch, whose art the image hook empties: on the box's right end
+         * (the set's right column on a settings row) */
+        int sw = !theme()->set_switch || image[0] != 's' ? -1
+                 : !tk_strcmp(image, "switch_on")        ? 1
+                 : !tk_strcmp(image, "switch_off")       ? 0
+                                                         : -1;
+        int gain = sw >= 0 || !theme()->set_switch || image[0] != 'g' ? -1
+                   : !tk_strcmp(image, "gain_high")                   ? 1
+                   : !tk_strcmp(image, "gain_low")                    ? 0
+                                                                      : -1;
+        if (sw >= 0 && widget_get_visible(w))
+            switch_mark(canvas, I(w, W_W), I(w, W_H) / 2, sw,
+                        st.sel_accent && painting_in(st.sel_accent));
+        else if (gain >= 0 && widget_get_visible(w))
+            paint_gain(w, canvas, gain, st.sel_accent && painting_in(st.sel_accent));
+        else if (!tk_strcmp(image, "list_into"))
             chevron_icon(w, canvas, 375 - geom_val(V_RIGHT_X) - I(canvas, CANVAS_X), I(w, W_H) / 2,
                          st.sel_accent && painting_in(st.sel_accent));
+        else if (!tk_strcmp(image, "list_intodown"))
+            chevron_muted(w, canvas, 375 - geom_val(V_RIGHT_X) - I(canvas, CANVAS_X),
+                          I(w, W_H) / 2);
         return;
     }
     if (!w || !(ipod_light() || sel_only) || !st.sel_accent || !P(canvas, CANVAS_LCD) ||
@@ -2914,9 +2966,10 @@ static void *list_row_into(void *view, const char *icon, int (*click)(void *, vo
 
 /* Use the same trailing switch images and hit target as Shanling's settings rows: at screen x 302
  * whether the label sits in a settings button (x 20) or a full-width page row (page_row_detail,
- * peq_ui.c's). */
+ * peq_ui.c's). A set_text theme writes On or Off as the row's value instead, unless it is also
+ * set_switch, whose switch paint_into draws over the emptied image. */
 void list_toggle(void *label, const char *title, int on) {
-    if (theme()->set_text) {
+    if (theme()->set_text && !theme()->set_switch) {
         list_value(label, title, on ? "On" : "Off");
         return;
     }
@@ -2935,7 +2988,8 @@ void list_toggle(void *label, const char *title, int on) {
 }
 
 /* Classic's settings rows (set_text): the title left and the value right-aligned in the
- * trailing column, the title ending short of it. Switches read On or Off as values. */
+ * trailing column, the title ending short of it. Switches read On or Off as values, except on a
+ * set_switch theme (list_toggle). */
 /* On a set with a right column: the value's box ends on it, or VALUE_CHEVRON_GAP short of it on a
  * row that opens a page (its chevron is there), and the title takes the row up to the value's own
  * text, measured in its face; unmeasured (no canvas yet), the boxes stay as made. */
@@ -3425,7 +3479,7 @@ static void pod_text(int i) {
     if (i == POD_CF_SORT) {
         char sort[48];
         tk_snprintf(sort, sizeof sort, "Cover Flow %s", coverflow_sort_name());
-        widget_set_text_utf8(st.pod_label[i], sort);
+        row_value_text(st.pod_label[i], sort); /* key/value on a set with a right column */
         return;
     }
     int v = i == POD_ARTISTS       ? I(artist_type, 0) == 1
@@ -3435,7 +3489,9 @@ static void pod_text(int i) {
             : i == POD_FOLDERCOVER ? g_foldercover_flag != 0
             : pod_values[i]        ? *pod_values[i]
                                    : 0;
-    const char *toggle = i == POD_CHARGE           ? "Charge Limit (" STR(CHARGE_STOP) "%)"
+    /* a set_switch theme's Charge Limit is a key/value row, Off or its level, as names[] has it */
+    const char *toggle = i == POD_CHARGE && theme()->set_switch ? 0
+                         : i == POD_CHARGE         ? "Charge Limit (" STR(CHARGE_STOP) "%)"
                          : i == POD_RESUME         ? "Resume on Connect"
                          : i == POD_VOL_GUARD      ? "Volume Guard"
                          : i == POD_BT_LINK        ? "Control Device Volume"
@@ -6062,9 +6118,10 @@ void bar_title_sync(void *win) {
     if (!t) {
         *s = 0;
         if (st.title_lbl) widget_get_text_utf8(st.title_lbl, s, sizeof s);
-        t = !tk_strcmp(s, "Channel Balance") ? "Balance" /* English's only */
-            : !tk_strcmp(s, "(null)")        ? ""        /* stock's "%s" of a NULL name: no title */
-                                             : s;
+        /* English's only, for a bar too narrow for it; a status row's title has the room */
+        t = !geom_val(V_STATUS_Y) && !tk_strcmp(s, "Channel Balance") ? "Balance"
+            : !tk_strcmp(s, "(null)") ? "" /* stock's "%s" of a NULL name: no title */
+                                      : s;
     }
     if (widget_get_text_utf8(st.bar_title, now, sizeof now) || tk_strcmp(now, t)) {
         widget_set_text_utf8(st.bar_title, t);
@@ -6307,6 +6364,10 @@ unsigned *ringnav_style_color(unsigned *color, void *style, const char *name, un
                     return color;
                 }
         }
+        /* A set_switch theme's disabled row: stock's #777777 label in Text Tertiary (the
+         * scheme's muted), as its chevron (chevron_muted) */
+        if (T->set_switch && (*color & 0xffffff) == 0x777777)
+            *color = (*color & 0xff000000u) | S->muted;
         /* Minimal's secondary text is Sudo's quieter grey, but stock's on an accent's card. */
         if (S->muted && !selected && (*color & 0xffffff) == 0xaaaaaa)
             *color = (*color & 0xff000000u) | S->muted;
@@ -6650,9 +6711,20 @@ int ringnav_image_add(void *manager, const char *name, void *bitmap) {
         mapped = 1;
     }
     /* A chevron_sel theme (Classic): stock's grey `>` on every row is emptied; paint_into
-     * draws the selected row's, white. A CHEV_ICON theme's too: paint_into draws each row's own. */
+     * draws the selected row's, white. A CHEV_ICON theme's too: paint_into draws each row's own,
+     * and a disabled row's (list_intodown) in Text Tertiary. */
     if ((T->chevron_sel || T->painter[PAINT_CHEVRON] == CHEV_ICON) && s && !*s &&
-        !tk_strcmp(name, "list_into") && format < 4) {
+        (!tk_strcmp(name, "list_into") ||
+         (T->painter[PAINT_CHEVRON] == CHEV_ICON && !tk_strcmp(name, "list_intodown"))) &&
+        format < 4) {
+        clear_bitmap(bitmap);
+        mapped = 1;
+    }
+    /* A set_switch theme: stock's switch art is emptied; paint_into draws the theme's switch, and
+     * Gain's value in place of its switch (paint_gain) */
+    if (T->set_switch && s && !*s && format < 4 &&
+        (!tk_strcmp(name, "switch_on") || !tk_strcmp(name, "switch_off") ||
+         !tk_strcmp(name, "gain_high") || !tk_strcmp(name, "gain_low"))) {
         clear_bitmap(bitmap);
         mapped = 1;
     }
@@ -7662,6 +7734,10 @@ void stock_more_into(void *win) {
 /* The settings rows' trailing images' right edge from the row's: the set's right column (a 50 px
  * switch's glyph fills its box), else SET_EDGE. */
 static int set_edge(void) { return geom_val(V_RIGHT_X) ? geom_val(V_RIGHT_X) : SET_EDGE; }
+/* ... and their text's box's left edge: on a set with a right column, the set's text column less
+ * hscroll_label's 2 px margin, so the text starts on it as the status row's title does
+ * (docs/oled-design.md Spacing), else SET_TEXT_X. */
+static int set_text_x(void) { return geom_val(V_RIGHT_X) ? geom_val(V_TEXT_X) - 2 : SET_TEXT_X; }
 static void set_child(void *c, int row_w, int row_h, int shift) {
     int x = I(c, W_X), y = I(c, W_Y), w = I(c, W_W), h = I(c, W_H), right = x + w;
     /* Streaming's rows, taller than the set's, have an icon in a set with none */
@@ -7699,16 +7775,21 @@ static void set_child(void *c, int row_w, int row_h, int shift) {
     }
     int left = x >= SET_RIGHT_SIDE ? SET_STOCK_X + x + shift
                : x > SET_STOCK_ICON / 2 + 10 /* after a stock icon at x 10 */
-                   ? (!icon   ? SET_TEXT_X
+                   ? (!icon   ? set_text_x()
                       : art_x ? T->art_text_x - 2
                               : SET_ICON_X + icon + SET_GAP) +
                          x - (SET_STOCK_ICON + 20)
-                   : SET_TEXT_X + x - 10;
-    if (!icon && left < SET_TEXT_X) left = SET_TEXT_X;
+                   : set_text_x() + x - 10;
+    if (!icon && left < set_text_x()) left = set_text_x();
     right = right >= SET_RIGHT_SIDE ? SET_STOCK_X + right + shift : right + left - x;
     if (right > row_w - SET_TEXT_X) right = row_w - SET_TEXT_X;
     widget_move_resize(c, left, y, right > left ? right - left : 0, h);
-    if (!tk_strcmp(widget_get_type(c), "hscroll_label")) theme_font(c, ROLE_TITLE, FONT_ROW);
+    if (tk_strcmp(widget_get_type(c), "hscroll_label")) return;
+    theme_font(c, ROLE_TITLE, FONT_ROW);
+    /* a set_switch theme: a stock row's text on its right side is its value (About's), in the
+     * value grey as list_value's; the selection's text still wins */
+    unsigned ink = T->set_switch ? T->set_value_ink[ipod_light()] : 0;
+    if (ink && x >= SET_RIGHT_SIDE) text_ink(c, 0xff000000u | ink, INK_LABEL);
 }
 
 /* The row's stock settings button (SET_STOCK_X, SET_STOCK_W), or none: a row already mapped, or one

@@ -242,6 +242,9 @@ typedef struct {
     unsigned char n_schemes; /* ACCENT_N, then the theme's own (Classic: 10) */
     const option_t *opts;    /* Appearance rows after Theme, in order */
     unsigned char n_opts;
+    /* settings.values.switch: an on/off settings row shows a switch (list_marks.c switch_mark), on
+     * a set_text theme too, where it would read On or Off. In the padding before undeclared */
+    unsigned char set_switch;
     unsigned undeclared;     /* SETTING_* bits of the theme options it does not declare */
     unsigned char np_layout; /* NP_* */
     cf_style_t cf;
