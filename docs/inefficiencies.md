@@ -10,10 +10,10 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 
 | #   | Problem                                                             | Category  | Effort |
 | --- | ------------------------------------------------------------------- | --------- | ------ |
-| 1   | The UI payload has 1.3% of its room left                            | fragile   | M      |
+| 1   | The UI payload's room (resolved)                                    | fragile   | M      |
 | 2   | `tools/stock_sites.tsv` is not current, and nothing checks it       | test gap  | S      |
 | 3   | No test resolves the doc anchors the sources cite                   | test gap  | S      |
-| 4   | The theme picker's order and Status Bar's values are kept by hand   | fragile   | S      |
+| 4   | The theme picker's order and Status Bar's values (resolved)         | fragile   | S      |
 | 5   | A build runs `unsquashfs -cat` once per file, hundreds of times     | build     | S      |
 | 6   | Every build compiles all 55 objects one after another               | build     | S      |
 | 7   | Scrobble upload rewrites the log once a window                      | runtime   | S      |
@@ -53,13 +53,9 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 - **State:** `SCRATCH` is `0xc00000`, so code and constants have 1 MB below it. demo's heap starts where the scratch state ends (a running demo's `/proc/<pid>/maps` shows one anonymous mapping from the payload's end through the heap), so nothing of stock's lies in the range the move took.
 - **Watch:** `patch_bytes` in a build's `manifest.json` against `SCRATCH - BASE` (1,048,576).
 
-### 4. The theme picker's order and Status Bar's values are kept by hand
+### 4. The theme picker's order and Status Bar's values (resolved)
 
-- **Where:** `patch/theme_engine.c:266-267` (`theme_rows[] = { 0, 2, 1 }` with a `_Static_assert` against `THEME_N`), `patch/theme_engine.c:272-276` (`bar_theme`), and the `STATUSBAR` option repeated in `assets/themes/minimal/theme.xml:9`, `modern/theme.xml:5` and `classic-light/theme.xml:132`.
-- **Evidence:** the assert stops the compile until a row is added by hand, and `tools/theme.py` requires an own key shared by themes to have identical values, so a fourth theme edits all three files and the C. In flux on branch `oled-theme`: see [oled-design.md](oled-design.md).
-- **Impact:** each new theme is four coordinated edits a reviewer has to know about.
-- **Fix:** have `tools/theme.py`'s `emit` write the picker order (a `row` attribute, or the index) and the Status Bar values into `themes.inc`.
-- **Effort:** S.
+- **State:** each `theme.xml` states its `order`; `tools/theme.py` generates `theme_rows[]` and expands the Status Bar option's `<value themes="picker"/>` into every built-in theme in picker order, and refuses a duplicate or missing order. A new theme is one file.
 
 ### 20. `classic_light_*` art and the Classic face are named in C
 
