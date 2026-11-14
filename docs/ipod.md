@@ -647,10 +647,10 @@ the track jumps there once, when the scrub ends. A press of the centre button co
 and leaves the screen on (a double press does too), as do Return, a touch and
 3 seconds without a tick, and each gives the wheel back to the volume; Return then stays on the
 page. Ending without having moved the target does not seek. Paused, the track stays paused and
-plays from the target at Play. Outside a scrub a single press turns
-the screen off, as on every other page. With **Single Press Scrub** (below) the two swap: a single
-press starts scrubbing, `DOUBLE_CLICK_MS` later as a row opens, and a double press turns the screen
-off, as on the lists. The presses work the same while the volume shows over the page; starting a scrub closes it. The jump is stock's key seek, which can pause the player briefly, but only once, when the
+plays from the target at Play. Outside a scrub a single press starts scrubbing,
+`DOUBLE_CLICK_MS` later as a row opens, and a double press turns the screen off, as on the lists
+(**Single Press Scrub**, below, on unless chosen off). With it off the two swap: a single press
+turns the screen off and a double press starts scrubbing. The presses work the same while the volume shows over the page; starting a scrub closes it. The jump is stock's key seek, which can pause the player briefly, but only once, when the
 scrub ends, instead of after each pause between ticks. Values are `SCRUB_*` in
 `patch/offsets.inc`; see [internals.md](internals.md#scrub-ipod).
 
@@ -824,8 +824,8 @@ NPCENTRED`, off; `playset_covermode`): `ringnav_ui_load`, hooked on every window
   durations.c), and a "Position Bar" switch (`Q2POD CFPOSITION`, off; `playset_covermode`;
   coverflow_position.c).
 - Controls: Wheel Sensitivity, which opens its slider page; "Hold Return: Recent"
-  (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); a "Single Press Scrub" switch (`IPOD SCRUBSINGLE`, off; `np_key`): on Now Playing a single
-  centre press starts the scrub and a double press turns the screen off (Scrub, above); "Key Tone"; "Click With Headphones" (`IPOD KEYTONEHP`), shown while Key Tone is on ([Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; "Wake: Single Press"; and "Volume Guard".
+  (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); a "Single Press Scrub" switch (`IPOD SCRUBSINGLE`, on; `np_key`): on Now Playing a single
+  centre press starts the scrub and a double press turns the screen off (Scrub, above), off swaps them; "Key Tone"; "Click With Headphones" (`IPOD KEYTONEHP`), shown while Key Tone is on ([Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; "Wake: Single Press"; and "Volume Guard".
 
 All are among the [settings icons](#settings-icons) the build pre-sizes. A value row has its value
 in the label (260 pixels wide, to where the chevron ends) and no chevron, since Centre or a tap
