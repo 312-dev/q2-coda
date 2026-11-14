@@ -213,6 +213,11 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   **Song Length** (Albums, All Lists, Off); a length takes the right column, so Right, and
   Selected Row on the selected row, fall back to Inline beside it.
 - The artist's baseline is the title's; on the right column it takes at most half the row.
+- **The Shuffle row** stands first on Songs, a playlist's songs and an album's tracks, in place of
+  Play All (a song already plays the rest of its list in order): Phosphor `shuffle` (regular, 20
+  px) on the text column and "Shuffle" 28 px after it, both Accent Blue, white on the selection.
+  The wheel reaches it from the first song; Centre shuffles the list. Sort's bars stay at its right,
+  one more tick up, until the options menu takes them.
 - Which list is which comes from its page: Songs' page (`allmusic_page`, which also holds a genre's songs
   and the other lists stock opens there) is mixed, the artist page's songs are an artist's, the album page is an
   album. Lists Q2 Pod draws itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep
@@ -361,7 +366,8 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   1 px dividers on the text and right columns (`list.divider.ink`); row art's 4 px corners
   (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column; song rows
   (`list.songs.painter="inline"`) and the Song Artist and Song Length options; a list left by
-  Return opening at its top when chosen again (`list.reopen.top`).
+  Return opening at its top when chosen again (`list.reopen.top`); Songs' action row as the
+  Shuffle row (`list.shuffle.row`).
 - Now Playing on the set's grid (`np_art`, `np_bar_y`), its art's corners (`playing.art.radius`), its
   artist and album in Inter (`playing.artist.font`), shuffle and repeat as the theme's own glyphs
   (`playing.modes.icons`), and the marquee fades (`list.marquee.fade`).

@@ -189,7 +189,11 @@ typedef struct {
      * top window title_win and, when a label holds it, title_lbl (both found once per window). */
     void *bar_bt, *bar_wifi, *bar_pct, *bar_slot, *bar_icon, *bar_idle, *bar_state, *bar_eq,
         *bar_title, *title_win, *title_lbl,
-        *action_view; /* Songs' action bar on title_win, under a set with action_row */
+        *action_view, /* Songs' action bar on title_win, under a set with action_row */
+        /* a shuffle_row theme: the action bar the wheel's selection is on (else 0), the list under
+         * it, and which of its stops: SHUFFLE_STOP or SORT_STOP (navigation.c shuffle_key) */
+        *shuffle_on, *shuffle_list;
+    int shuffle_stop;
     /* The row action's confirm on show (confirm_over): its second cell's verb, and its window */
     const char *confirm_verb;
     void *confirm_win;

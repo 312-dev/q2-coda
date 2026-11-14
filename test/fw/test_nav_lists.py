@@ -2496,3 +2496,47 @@ def test_a_glide_that_cannot_hear_its_end_lands_at_once(fw, ui):
     key(fw, ui, KEY_NEXT)
     assert len(home.destroyed) == 1 and not home.started and home.menu.ptr(O['SLIDE_ANIMATOR']) == 0
     assert fw.calls('slide_menu_set_value')[-1][1][:2] == (home.menu.at, 3)
+
+
+# OLED's Shuffle row (list.shuffle.row): Songs' action bar takes the wheel's selection above the first song.
+@pytest.fixture(scope='module')
+def st_at(library):
+    return host.offsets(library.parent/'navigation.o', 'scratch_t')
+
+
+def action_bar(ui, page, sort=True):
+    view = ui.widget('view', page.win, (0, 0, 375, 32), name='view_navbar_allplay')
+    for name in ('label', 'play') + (('sort',) if sort else ()):
+        ui.widget('image' if name != 'label' else 'label', view, (0, 0, 40, 32), name=name)
+    return view
+
+
+@pytest.mark.parametrize('sort', [True, False])
+def test_the_wheel_steps_from_the_first_song_onto_shuffle_then_sort_and_back(fw, ui, st_at, sort):
+    theme(fw, 3)
+    base = C.addressof(fw.var('st', C.c_char))
+    field = lambda name: C.c_void_p.from_address(base + st_at[name])
+    page = Page(ui, titles(20))
+    view = action_bar(ui, page, sort)
+    field('action_view').value = view.at
+    paint(fw, page)
+    assert page.selected == 0
+    stops = []
+    for code in (KEY_PREV, KEY_PREV, KEY_PREV, KEY_NEXT, KEY_NEXT, KEY_NEXT):
+        key(fw, ui, code, ui.now + SLOW)
+        on = field('shuffle_on').value == view.at
+        stops.append((C.c_int.from_address(base + st_at['shuffle_stop']).value if on else 0, page.selected))
+    top = 2 if sort else 1  # nothing above the last stop
+    assert stops == [(1, 0), (top, 0), (top, 0), (top - 1, 0) if sort else (0, 0), (0, 0) if sort else (0, 1),
+                     (0, 1) if sort else (0, 2)]
+
+
+def test_without_the_shuffle_row_a_tick_up_from_the_first_song_stays_on_the_list(fw, ui, st_at):
+    theme(fw, 0)  # Minimal: Play All stays stock's tap target
+    base = C.addressof(fw.var('st', C.c_char))
+    page = Page(ui, titles(20))
+    view = action_bar(ui, page)
+    C.c_void_p.from_address(base + st_at['action_view']).value = view.at
+    paint(fw, page)
+    key(fw, ui, KEY_PREV, ui.now + SLOW)
+    assert C.c_void_p.from_address(base + st_at['shuffle_on']).value is None and page.selected == 0

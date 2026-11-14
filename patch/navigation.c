@@ -862,6 +862,7 @@ static int position(menu_t *m) {
  * Non-virtual lists also remember the row's first two text values, so a reordered list restores
  * the same item and duplicate names can be told apart by their second line. */
 static void select(menu_t *m, int id) {
+    st.shuffle_on = (void *)0; /* a row takes the selection from the Shuffle row */
     if (st.center_timer && (m->w != st.center_surface || id != st.center_id)) cancel_center();
     if (st.reveal_surface == m->w) st.reveal_surface = (void *)0;
     unsigned hash = 0, hash2 = 0;
@@ -2427,6 +2428,8 @@ static void paint_selection(void *w, void *canvas) {
     int home = home_menu(top);
     if (home && i >= 0) coverflow_home_row(w, g_menu.at[i], g_menu.id[i], 1);
     if (i < 0 || (!shown && !home && g_menu.kind != 4)) return;
+    if (st.shuffle_on && st.shuffle_on == st.action_view && st.shuffle_list == w)
+        return; /* the selection is on the Shuffle row above (shuffle_paint) */
     rect_t r = bounds(&g_menu, i), old;
     /* A boundary detent nudges the selection against the end until it springs back. */
     if (fx_live(w) && st.bump_dir) r.y -= st.bump_dir * theme()->bump_px;
@@ -5924,9 +5927,22 @@ static const char *bar_title_of(void *win, void **label) {
 int title_gone(void *w, void *event) {
     if (st.title_win) widget_off_by_func(st.title_win, EVT_DESTROY, title_gone, st.title_win);
     if (st.title_lbl) widget_off_by_func(st.title_lbl, EVT_DESTROY, title_gone, st.title_lbl);
-    st.title_win = st.title_lbl = st.action_view = (void *)0;
+    st.title_win = st.title_lbl = st.action_view = st.shuffle_on = (void *)0;
     return 0;
 }
+
+#define SHUFFLE_STOP 1 /* st.shuffle_stop: the row's Shuffle */
+#define SORT_STOP 2    /* ... its Sort bars */
+#define SHUFFLE_ICON                                                                               \
+    20 /* the Shuffle row's glyph (tools/art.py ROW_ICON_PX), at the text column                   \
+        */
+#define SHUFFLE_LABEL_DX 28 /* ... and its label this far after the text column */
+#define SORT_PILL_W                                                                                \
+    44 /* Sort's stop: its bars centred in a pill this wide, inside the bar inset                  \
+        */
+/* the Shuffle row's label and the ink last written to it (shuffle_paint) */
+static void *shuffle_label __attribute__((section(".scratch")));
+static int shuffle_ink __attribute__((section(".scratch")));
 
 /* Songs' action bar as a plain row (a set's action_row, its view tools/ipod.py sizes). Stock
  * rebuilds its children on each refresh (0x4a9e78): the label first, then Play All's image and
@@ -5937,7 +5953,13 @@ static void action_row(void *view) {
     int h = geom_val(V_ACTION_ROW), n = widget_count_children(view);
     if (n < 2 || I(widget_get_child(view, 0), W_H) == h) return;
     void *label = widget_get_child(view, 0), *play = widget_get_child(view, 1);
-    widget_move_resize(label, geom_val(V_TEXT_X), 0, 280, h);
+    int shuffle = theme()->shuffle_row;
+    /* a shuffle_row theme's label stands after its glyph (shuffle_paint) and reads Shuffle */
+    widget_move_resize(label, geom_val(V_TEXT_X) + (shuffle ? SHUFFLE_LABEL_DX : 0), 0, 280, h);
+    if (shuffle) {
+        widget_set_text_utf8(label, "Shuffle");
+        shuffle_label = (void *)0; /* a new label: shuffle_paint inks it */
+    }
     theme_font(label, ROLE_TITLE, FONT_ROW);
     widget_use_style(play, "default");
     widget_move_resize(play, 0, 0, 300, h);
@@ -5946,7 +5968,37 @@ static void action_row(void *view) {
     widget_use_style(sort, "default");
     image_base_set_image(sort, "classic_light_sort_bars");
     image_set_draw_type(sort, IMAGE_DRAW_CENTER);
-    widget_move_resize(sort, 301, 0, 48, h);
+    /* a shuffle_row theme's: centred in the pill the wheel's SORT_STOP lights, on the right column
+     */
+    if (shuffle)
+        widget_move_resize(sort, 375 - theme()->sel_inset - SORT_PILL_W, 0, SORT_PILL_W, h);
+    else
+        widget_move_resize(sort, 301, 0, 48, h);
+}
+
+/* A shuffle_row theme's action row (OLED; docs/oled-design.md#song-rows): Shuffle before the
+ * songs, a stop the wheel reaches from the first song, and Sort's three bars a stop after it.
+ * The selection's bar lights the stop shuffle_key put it on; the glyph is Accent Blue at rest and
+ * white on the bar, as the label is. */
+static void shuffle_paint(void *w, void *canvas) {
+    const theme_t *T = theme();
+    const scheme_t *S = scheme();
+    int h = I(w, W_H), on = st.shuffle_on == w ? st.shuffle_stop : 0;
+    void *label = widget_count_children(w) ? widget_get_child(w, 0) : (void *)0;
+    if (on) {
+        rect_t bar = { T->sel_inset, 0, 375 - 2 * T->sel_inset, h };
+        if (on == SORT_STOP) bar.x = 375 - T->sel_inset - SORT_PILL_W, bar.w = SORT_PILL_W;
+        gradient(canvas, bar, S->tones[0], S->tones[1], S->tones[4], T->sel_radius);
+    }
+    int ink = on == SHUFFLE_STOP ? (int)RGBA(0xffffff) : (int)RGBA(S->tones[0]);
+    if (label &&
+        (label != shuffle_label || ink != shuffle_ink)) { /* once per change: it repaints */
+        shuffle_label = label;
+        shuffle_ink = ink;
+        widget_set_prop_int(label, "style:normal:text_color", ink);
+    }
+    paint_art(w, canvas, theme_art(on == SHUFFLE_STOP ? "shuffle_w" : "shuffle_a"),
+              geom_val(V_TEXT_X), (h - SHUFFLE_ICON) / 2);
 }
 
 static int title_due(const void *info) {
@@ -6070,7 +6122,12 @@ int ringnav_paint_bg(void *w, void *canvas) {
     paint_separators(w, canvas);
     coverflow_home_clip(w, canvas, 1);
     if (w && w == st.bar_slot) paint_battery(w, canvas);
-    if (w && w == st.action_view && P(canvas, CANVAS_LCD)) { /* Play All's row: the same lines */
+    if (w && w == st.action_view && P(canvas, CANVAS_LCD) && theme()->shuffle_row) {
+        unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+        shuffle_paint(w, canvas);
+        stock_canvas_set_fill_color(canvas, fill);
+    } else if (w && w == st.action_view &&
+               P(canvas, CANVAS_LCD)) { /* Play All's row: the same lines */
         const stops_t *lines = &theme()->sep[ipod_light()];
         unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
         paint_stops(canvas, 0, I(w, W_H) - lines->n, I(w, W_W), lines->n, lines);
@@ -7213,6 +7270,15 @@ static void quick_swipe(void *target, void *event) {
 
 static void *np_more(void);
 
+/* The Shuffle row's action (a shuffle_row theme): the songs the page lists, p_deque_showlist, as
+ * Shuffle Songs plays them. The list must be the surface's, row for row, or nothing plays. */
+static void shuffle_page(void) {
+    void *list = P(p_deque_showlist, 0), *w = surface((void *)0, (void *)0);
+    if (!list || !w || !load_rows(&g_menu, w) || (int)deque_size(list) != g_menu.rows ||
+        !shuffle_play(list))
+        toast("Queue unchanged");
+}
+
 /* Observe actual clicks BEFORE app callbacks can navigate or destroy/rebind their widgets.
  * Do not turn pointer-down into selection: a swipe is not a tap. */
 int ringnav_dispatch(void *target, void *event) {
@@ -7303,6 +7369,13 @@ int ringnav_dispatch(void *target, void *event) {
         fx_cancel();
         keep_selected(
             target); /* a tap owns its live row: recall could scroll/rebind it before delivery */
+        /* a tap on the Shuffle row: its action, not stock's Play All under it (shuffle_key); the
+         * theme is asked only then, as theme() reads the accent's settings */
+        if (st.action_view && widget_count_children(st.action_view) > 1 &&
+            target == widget_get_child(st.action_view, 1) && theme()->shuffle_row) {
+            shuffle_page();
+            return STOP;
+        }
         /* Now Playing's ⋯: an app's page instead of stock's while the app's queue plays */
         return target == np_more() && addon_more() ? STOP : time_click(target, event);
     }
@@ -11051,6 +11124,51 @@ static void edit_paint(void *w, void *canvas) {
     stock_canvas_set_stroke_color(canvas, old);
 }
 
+/* A shuffle_row theme's wheel and Centre on Songs' action row (shuffle_paint draws it): a tick up
+ * from the first song puts the selection on Shuffle, another on Sort's bars when the list has
+ * them; a tick down comes back. Centre on Shuffle plays the page's songs (p_deque_showlist, the
+ * rows stock shows) as Shuffle Songs; on Sort it is a tap on the bars, stock's sort picker. 1 when
+ * the key was the row's. */
+static int shuffle_key(void *top, void *w, int dir) {
+    void *row = st.action_view;
+    if (!theme()->shuffle_row || !row || window_of(row) != top || !widget_get_visible(row) ||
+        widget_count_children(row) < 2) {
+        st.shuffle_on = (void *)0;
+        return 0;
+    }
+    int stops = widget_count_children(row) > 2 ? SORT_STOP : SHUFFLE_STOP;
+    if (st.shuffle_on != row || st.shuffle_list != w) {
+        if (dir >= 0 || widget_get_prop_int(w, SEL, -1) != 0) return 0;
+        st.shuffle_on = row;
+        st.shuffle_list = w;
+        st.shuffle_stop = SHUFFLE_STOP;
+        stop_scroll(&g_menu);
+        reveal(&g_menu, 0, 1); /* the row under it in view */
+    } else if (dir) {
+        int stop = st.shuffle_stop - dir; /* up the stops, down to the songs */
+        if (stop > stops) return 1;       /* the last stop: nothing above */
+        if (stop) {
+            st.shuffle_stop = stop;
+        } else {
+            select(&g_menu, 0); /* clears shuffle_on */
+            reveal(&g_menu, 0, 1);
+        }
+    } else {
+        cancel_center();
+        if (st.shuffle_stop == SORT_STOP) {
+            void *sort = widget_get_child(row, 2);
+            char click[0x30];
+            stock_dispatch_trampoline(sort, pointer_event_init(click, EVT_CLICK, sort, 0, 0));
+        } else
+            shuffle_page();
+        return 1;
+    }
+    st.touch_mode = 0;
+    widget_invalidate_force(row, (void *)0);
+    widget_invalidate_force(w, (void *)0);
+    return 1;
+}
+
 static int replay_wheel(const void *info);
 int ringnav(void *ctx, void *event);
 /* A wheel tick the page cannot take yet: counted, its event kept for replay. Replay's own tick,
@@ -11225,7 +11343,8 @@ int ringnav(void *ctx, void *event) {
             return STOP;
         }
     }
-    /* OLED: the list Return leaves opens at its top next time (a held Return's release is not one) */
+    /* OLED: the list Return leaves opens at its top next time (a held Return's release is not one)
+     */
     if (key == KEY_RETURN && theme()->reopen_top &&
         !*(volatile unsigned char *)RETURN_RELEASE_LATCH && usable())
         forget_left();
@@ -11324,6 +11443,7 @@ int ringnav(void *ctx, void *event) {
         drop_input();
         return dir ? hold_wheel(ctx, event, dir) : result;
     }
+    if (shuffle_key(top, w, dir)) return STOP; /* OLED's Shuffle row over the songs */
     if (st.center_timer && !pending_matches(top, &g_menu)) cancel_center();
     int touch = widget_get_prop_int(w, TOUCH, 0);
     if (touch) {

@@ -152,8 +152,10 @@ typedef struct {
     const char *name;   /* "Minimal": the Theme row's "Theme: %s" */
     unsigned char geom; /* second: THEME_GEOM_OFF (4) never moves */
     /* a list left by Return forgets its row, so choosing it again opens it at the top
-     * (navigation.c forget_left); in the padding before motion, so sizeof(theme_t) stays 1624 */
-    unsigned char reopen_top;
+     * (navigation.c forget_left); Songs' action row reads Shuffle with the theme's own glyph and
+     * the wheel selects it above the first song (navigation.c shuffle_key). In the padding before
+     * motion, so sizeof(theme_t) stays 1624 */
+    unsigned char reopen_top, shuffle_row;
     motion_t motion[MOTION_N];
     unsigned short recall_ms; /* a remembered row's glide; 0: shown at once */
     unsigned char bump_px;    /* the wheel's bump at a list's end */

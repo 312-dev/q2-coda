@@ -180,6 +180,8 @@ STATE_INKS = {'d': 0xffffff, 'l': 0x000000}
 # half, on in the theme's own accent's top tone in both; repeat-once is repeat's on glyph for Repeat One.
 MODE_PX = 22
 MODE_INKS = {'d': 0xababab, 'l': 0x5c5c5c}
+# A row's leading glyph (Songs' Shuffle row, list.shuffle.row), regular weight at the 20 px row type's size
+ROW_ICON_PX = 20
 
 
 def gradient(stops, y0, y1):
@@ -878,6 +880,9 @@ def images(t):
         for n in ('shuffle', 'repeat'):
             out |= {f'{prefix}_mode_{n}_{k}': phosphor(f'{n}-bold', MODE_PX, c) for k, c in {**MODE_INKS, 'on': on}.items()}
         out[f'{prefix}_mode_repeat1_on'] = phosphor('repeat-once-bold', MODE_PX, on)
+    if t['shuffle_row']:  # Songs' Shuffle row: the accent's top tone at rest, white on the selection, in both halves
+        on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
+        out |= {f'{prefix}_shuffle_{k}': phosphor('shuffle', ROW_ICON_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
     if t['bolt']:
         shape = path(BOLT)
         out[f'{prefix}_bolt'] = png(*BOLT_BOX[2:], compose(BOLT_BOX, [(stroke(shape, 1.6), lambda x, y: (0xffffff, t['bolt_halo_a'] / 255)),
