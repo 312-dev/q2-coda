@@ -41,6 +41,8 @@ struct source {
      * byte_rate a channel's bytes a second (the DSD rate over 8) */
     int raw, planar, lsb_first, byte_rate;
     struct dsd_pack pack;
+    struct stream *io; /* a URL's or QQ Music's bytes (stream.c); NULL for a file libavformat opens itself */
+    struct sacd *iso;  /* an SACD image's stereo area, as a DSDIFF file (sacd.c) */
 };
 
 static int interrupted(void *opaque) {
@@ -48,7 +50,12 @@ static int interrupted(void *opaque) {
     return s->cancel && __atomic_load_n(s->cancel, __ATOMIC_RELAXED);
 }
 
-void source_keep(struct source *s) { s->cancel = NULL; }
+void source_keep(struct source *s) {
+    s->cancel = NULL;
+    if (s->io) stream_keep(s->io);
+}
+
+struct stream *source_stream(const struct source *s) { return s->io; }
 
 /* MPEG audio Layer III frame header at h: its length in bytes and samples, and its rate; 0 if it is not one. */
 static int mp3_header(const uint8_t *h, int *bytes, int *samples, int *rate) {
@@ -107,6 +114,7 @@ static int64_t mp3_count(FILE *f) {
 /* The names stock's media-info uses (its table at 0xafb100), by codec and container. */
 static const char *codec_name(const struct source *s) {
     const char *container = s->fmt->iformat->name;
+    if (s->iso) return "ISO";
     switch (s->dec->codec_id) {
     case AV_CODEC_ID_MP2: case AV_CODEC_ID_MP1: return "MP2";
     case AV_CODEC_ID_MP3: return "MP3";
@@ -139,6 +147,15 @@ struct source *source_open(const struct song *song, int *error, const int *cance
     s->cancel = cancel;
     if (!(s->fmt = avformat_alloc_context())) goto fail;
     s->fmt->interrupt_callback = (AVIOInterruptCB){interrupted, s};
+    if (stream_is_url(song->url) || strstr(song->url, "qm_songid=")) {
+        if (!(s->io = stream_open(song, cancel, error))) goto fail;
+        s->fmt->pb = stream_avio(s->io);
+        s->fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+    } else if (sacd_is_image(song->url)) {
+        if (!(s->iso = sacd_open(song->url, error))) goto fail;
+        s->fmt->pb = sacd_avio(s->iso);
+        s->fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+    }
     if ((r = avformat_open_input(&s->fmt, song->url, NULL, NULL)) < 0) {
         *error = r == AVERROR(ENOENT) ? ERR_MISSING : ERR_UNSUPPORTED;
         goto fail;
@@ -194,7 +211,9 @@ void source_close(struct source *s) {
     av_packet_free(&s->pkt);
     av_packet_free(&s->ahead);
     avcodec_free_context(&s->dec);
-    avformat_close_input(&s->fmt);
+    avformat_close_input(&s->fmt); /* a stream's AVIOContext is its own, closed with it */
+    stream_close(s->io);
+    sacd_close(s->iso);
     if (s->file) fclose(s->file);
     free(s->buf);
     free(s->pack.buf);

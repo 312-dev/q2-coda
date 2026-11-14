@@ -50,12 +50,14 @@ def test_sha256(tmp_path):
 
 def test_mbedtls_is_the_newest_cached_build(tmp_path, monkeypatch):
     monkeypatch.setattr(player, 'THIRDPARTY', tmp_path)
-    assert player.mbedtls() is None
+    with pytest.raises(SystemExit) as e:  # https is always built: no mbedTLS stops the build, naming what makes it
+        player.mbedtls('mips')
+    assert 'no mbedTLS' in str(e.value) and 'thirdparty.py' in str(e.value)
     for name in ('mbedtls-3.6.6-aa', 'mbedtls-3.6.7-bb'):
         (tmp_path/'out'/name/'usr/lib').mkdir(parents=True)
         (tmp_path/'out'/name/'usr/lib/libmbedtls.a').write_bytes(b'')
     (tmp_path/'out/mbedtls-3.6.8-cc/usr/lib').mkdir(parents=True)  # no library in it: not a finished build
-    assert player.mbedtls() == tmp_path/'out/mbedtls-3.6.7-bb/usr'
+    assert player.mbedtls('mips') == tmp_path/'out/mbedtls-3.6.7-bb/usr'
 
 
 def test_toolchain(tmp_path, monkeypatch):

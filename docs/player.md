@@ -182,6 +182,18 @@ MPlayer's stream layer opens whatever `URL` names: a path, `http://` and, throug
 
 The last three share the PCM with the player, so demo stops the player before they open it.
 
+### Streams
+
+Captured from stock's and Q2 Pod's hciplayer under qemu against `test/player/httpd.py` (fixtures `stock-http*`, `pod-http*`, `-https-*`; the two agree but where named):
+
+- **The cache** is MPlayer's (`cache2.c`): `C` KB, and with `C` -1 (a preload, some queues) MPlayer's own size for an HTTP stream, 3072 KB (`Cache size set to 3072 KBytes` in its log). It fills on a thread of its own, keeps up to half of itself behind the read position, and the song waits until `P` percent is in or the stream has ended (`waiting for buffer fill...`). `get_cache_buffer` answers MPlayer's `cache_fill_status` (`0xb47aa0`, through `0x42c448`): what is held ahead of the read position as a percent of the cache, 0 while nothing is loaded or until the first fill is done, and as it last was once the stream has all come (19 for a 289 KB FLAC in a 1024 KB cache; 9 from stock and 0 from Q2 Pod's for the same FLAC in 3072 KB, by when the thread last ran). demo only asks whether it is above 0 (`mclGetCacheBuffer`'s one caller, `playerqueue_page_init` `0x53d1d4`).
+- **A slow server.** A WAV from a server at 150,000 B/s (it plays at 176,400) started 10 s after its command, one at 400,000 B/s with 4096 KB at 50% after 9 s: MPlayer's demuxer looks at the file's end and back before it plays, each look a new connection (three in the log), which the test server serves from the start of its rate. With the slow one it then played half a second in four.
+- **A stall, a drop, a short stream.** The server stopping for 8 s at 1 MB: stock waited it out before it began (its demuxer's look at the end waited on the stalled connection) and played the whole file. The first connection closed at 1 MB: it asked again from there and played the whole file. Every connection ending at 1 MB of 3.5: it played what came and then `{player-status\exit}`, as at a natural end.
+- **Errors.** A 404 and, from Q2 Pod's, a certificate its check refuses: `{player-status\error}` about 30-60 ms after the command, with `/tmp/notfile`.
+- **A redirect** (302) is followed. **A server without ranges** plays; a seek inside what the cache holds is served from it.
+- **A FLAC stream's seek near its end ends it**, half a second later, from both players (to 15 s of 20, to 12 s of 20): the fault Q2 Pod's player fixes for files ([internals](internals.md#a-flac-seek-near-the-end)) is still there for a stream.
+- **HTTPS**: stock plays a certificate for another name and a self-signed one; Q2 Pod's (the chain checked against `/etc/ssl/certs/ca-certificates.crt`, [internals: Stock HTTPS](internals.md#stock-https)) refuses the self-signed one and plays the other.
+
 ### QQ Music
 
 A stream filter in hciplayer (`0x4a9f90`-`0x4aa740`, log prefix `[qmdec]`) acts when the URL contains `qm_songid=ID` (each character checked, `bad songid char`). It reads the key demo wrote to `/tmp/qm_ID` (one line; demo removes old ones with `rm /tmp/qm_* -f`), and calls `libQMDecryption.so`, a C++ library with three C exports:
@@ -194,9 +206,11 @@ void DestroyDecryption(void *handle);
 
 Every block read from the inner stream is decrypted by its absolute offset in the file (`0x4aa034`-`0x4aa044`), so a seek only moves the offset. The format under the cipher is then demuxed as any other.
 
+The details, from the code (`0x4aa324` on): the song id runs from after `qm_songid=` to the next `&`, `#`, `|` or `}` or the end, 1 to 127 characters, each a letter, a digit, `_` or `-` (else `bad songid char 0x%02x`); the key file is `/tmp/qm_<id>` (`%s/qm_%s` with `/tmp`), opened `rb` up to five times 20 ms apart, its first line (`fgets`, 1024 bytes) with spaces, tabs, CR and LF cut from its end and spaces and tabs from its start, and `CreateDecryption` is given it and its length. No key file, an empty one or a key the library refuses (`NULL`) each logs its line and the stream is read as it is, undecrypted. A `Decrypt` that returns other than `n` fails the read (`decrypt failed at offset %lld`). A seek on an inner stream that cannot seek reads forward to the offset, decrypting as it goes, and cannot go back (`cannot seek backward`).
+
 ### SACD ISO
 
-libsacdread opens the image, and the player presents each track as DSD (DST-compressed areas are decoded by sacd-ripper's `dst_decoder`). demo lists the tracks itself and passes `ss=` starts; it never preloads an `.iso`.
+libsacdread opens the image (`SACD iso demuxer`, `Uncompressed SACD iso`), and the player plays the stereo area as DSD. demo lists the tracks itself and passes `ss=` starts; it never preloads an `.iso`. Captured with `test/player/music.py`'s images (fixtures `stock-sacd*`): from `ss=` the area plays to its end, not to the track's, as DoP on the DAC, D2P on a USB DAC, `CODEC` `ISO`, `BITS` 1, `LENGTH` the area's whole seconds and `RATE` and `BITRATE` as a DSF's. An area in DST is refused before it plays (`Check failed for iso demuxer(forced)`, `{player-status\error}`, `/tmp/notsupport`); a plain image with only its area's frame format byte set to 0, DST's, is refused the same, so the DST decoder compiled in is not reached from an image.
 
 ## Formats
 

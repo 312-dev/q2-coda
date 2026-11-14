@@ -15,7 +15,8 @@ TXXX frames in MP3, an iTunes freeform atom in M4A) and for each rule of the gai
 album gain alone), and rglame.mp3, whose only gain is the one LAME puts in its header. silence.wav and full.wav are 6 s of digital silence and of a full-scale square, for the click, and with tone20.wav, a 1 kHz sine at -20 dBFS, for the level meter.
 DSD (DSD): a DSD64 and a DSD128 DSF and a DSD64 DFF of the same 2205 Hz tone, made by a sigma-delta modulator here
 (nothing on this machine encodes DSD). h1.flac + h2.flac are h96.flac, 16-bit 96 kHz, cut in two at 10 s, for Bluetooth's
-resampler across a gapless change.
+resampler across a gapless change. qq.flac is a1.flac encrypted for test/player/qmstub.c's stand-in for QQ Music's
+library, with the key QQ_KEY.
 """
 import os, pathlib, struct, subprocess, sys, wave
 
@@ -103,6 +104,100 @@ def dsd(path, rate, kind):
     pathlib.Path(path).write_bytes(ck(b'FRM8', body))
 
 
+SACD_TRACKS = (2, 2)  # sacd.iso's two tracks, in seconds, of the DSD64 tone, which then ends
+
+
+def sacd_dsd():
+    """d64.dff's tone, 4 s of DSD64 a byte a channel at a time, MSB first, as SACD's plain DSD frames carry it."""
+    import itertools
+    rate, chans = 2822400, []
+    for phase in (0.0, 0.5):
+        bits = dsd_period(rate, phase)
+        per = [sum(b << (7 - i) for i, b in enumerate(bits[j:j + 8])) for j in range(0, len(bits), 8)]
+        chans.append(bytes(itertools.islice(itertools.cycle(per), rate * DSD_SECONDS // 8)))
+    return bytes(b for pair in zip(*chans) for b in pair)
+
+
+def dst_frames(dff):
+    """The DST frames of a DSDIFF file's DST chunk, each DSTF chunk's data."""
+    data, out, at = pathlib.Path(dff).read_bytes(), [], 0
+    while (at := data.find(b'DSTF', at)) >= 0:
+        n = struct.unpack('>Q', data[at + 4:at + 12])[0]
+        out.append(data[at + 12:at + 12 + n]); at += 12 + n + (n & 1)
+    return out
+
+
+def sacd_iso(path, frames=None, tracks=SACD_TRACKS, dst=False):
+    """A stereo SACD image in the Scarletbook layout sacd-ripper's libsacdread reads (scarletbook.h): the master TOC at
+    sector 510 with its eight text sectors and the manufacturer's, one stereo DSD64 area TOC with its two track lists,
+    and the area's frames of 1/75 s from sector 600 (by default sacd_dsd() cut in 9,408 bytes; tracks in seconds).
+    Plain DSD is frame format 3, three frames in each 16 sectors; DST (dst) frame format 0, the frames one after another.
+    An audio sector is a header byte (packets << 5 | frame starts << 2 | DST), two bytes a packet (frame start << 7 |
+    data type 2 << 3 | length, at most 2045), and for each frame that starts in it its time code (minutes, seconds,
+    frames) and, for DST, a byte with its packets' count << 2; then the packets' bytes."""
+    S, rate = 2048, 2822400
+    if frames is None:
+        data = sacd_dsd()
+        frames = [data[i:i + 9408] for i in range(0, len(data), 9408)]
+    sectors, f, at, start_lsn = [], 0, 0, {}
+    while f < len(frames):
+        if not dst and f % 3 == 0 and at == 0: block = len(sectors)
+        infos, times, body, room, counts = [], [], b'', S - 1, []
+        while f < len(frames) and len(infos) < 7 and room > 6:
+            first = at == 0
+            if not dst and first and f % 3 == 0 and len(sectors) != block: break
+            n = min(len(frames[f]) - at, room - 2 - (3 + dst if first else 0), 2045)
+            if n <= 0: break
+            if first: start_lsn[f] = len(sectors); times.append([f // 75 // 60, f // 75 % 60, f % 75] + ([0] if dst else []))
+            infos.append([first, n]); body += frames[f][at:at + n]
+            room -= 2 + (3 + dst if first else 0) + n; at += n
+            if at == len(frames[f]): f, at = f + 1, 0
+        sectors.append([infos, times, body])
+        if not dst and (f % 3 == 0 and at == 0 or f == len(frames)):
+            sectors += [[[], [], b'']] * (block + 16 - len(sectors))
+    if dst:  # each frame's packet count, in the time code's fourth byte of the sector it starts in
+        owner = []
+        for k, (infos, times, body) in enumerate(sectors):
+            for first, n in infos:
+                if first: owner.append([k, len([t for t in owner if t[0] == k]), 0])
+                owner[-1][2] += 1
+        for k, i, count in owner: sectors[k][1][i][3] = count << 2
+    audio = b''.join((bytes([len(i) << 5 | len(t) << 2 | dst]) + b''.join(struct.pack('>H', a << 15 | 2 << 11 | n) for a, n in i)
+                      + b''.join(bytes(x) for x in t) + body).ljust(S, b'\0') for i, t, body in sectors)
+    first_lsn, out, sec = 600, [], 0
+    for length in tracks:
+        a, b = sec * 75, min(sec * 75 + length * 75, len(frames))
+        lsn = start_lsn[a]; end = start_lsn[b] if b < len(frames) else len(sectors)
+        out.append((first_lsn + lsn, end - lsn, a, b - a)); sec += length
+    mtoc = bytearray(S)
+    mtoc[0:10] = b'SACDMTOC\x01\x14'
+    struct.pack_into('>HH', mtoc, 16, 1, 1)
+    struct.pack_into('>IIII', mtoc, 64, 540, 550, 0, 0)
+    struct.pack_into('>HH', mtoc, 84, 3, 0)
+    mtoc[128], mtoc[136:140] = 1, b'en\x02\x00'
+    atoc = bytearray(S)
+    atoc[0:10] = b'TWOCHTOC\x01\x14'
+    struct.pack_into('>H', atoc, 10, 3)
+    struct.pack_into('>I', atoc, 16, 2 * rate // 8)
+    atoc[20], atoc[21], atoc[32], atoc[34] = 4, 0 if dst else 3, 2, 2
+    total = len(frames)
+    atoc[64:67] = bytes((total // 75 // 60, total // 75 % 60, total % 75))
+    atoc[69] = len(out)
+    struct.pack_into('>II', atoc, 72, first_lsn, first_lsn + len(sectors) - 1)
+    atoc[80], atoc[88:92] = 1, b'en\x02\x00'
+    trl1, trl2 = bytearray(S), bytearray(S)
+    trl1[0:8], trl2[0:8] = b'SACDTRL1', b'SACDTRL2'
+    tc = lambda f: bytes((f // 75 // 60, f // 75 % 60, f % 75, 0))
+    for i, (lsn, n, st, du) in enumerate(out):
+        struct.pack_into('>II', trl1, 8 + 4 * i, lsn, 0); struct.pack_into('>I', trl1, 8 + 4 * 255 + 4 * i, n)
+        trl2[8 + 4 * i:12 + 4 * i], trl2[8 + 4 * 255 + 4 * i:12 + 4 * 255 + 4 * i] = tc(st), tc(du)
+    area = bytes(atoc) + bytes(trl1) + bytes(trl2)
+    img = bytearray(S * 510) + bytes(mtoc) + b'SACDText'.ljust(S, b'\0') * 8 + b'SACD_Man'.ljust(S, b'\0')
+    img += bytes(S * (540 - len(img) // S)) + area + bytes(S * 7) + area
+    img += bytes(S * (first_lsn - len(img) // S)) + audio
+    pathlib.Path(path).write_bytes(bytes(img))
+
+
 def ff(*a):
     subprocess.run(['ffmpeg', '-v', 'error', '-y', '-bitexact', *map(str, a)], check=True)
 
@@ -156,10 +251,48 @@ def freeform(path, tags):
     pathlib.Path(path).write_bytes(b)
 
 
+# QQ Music (qq.flac): a1.flac encrypted as test/player/qmstub.c's Decrypt undoes it for this key
+QQ_KEY = 'k3y'
+
+
+def qq_mask(key0, offset):
+    """qmstub.c's QM_MASK: the byte a file's byte at offset is XORed with."""
+    return (key0 ^ (offset * 7 + (offset >> 8))) & 0xff
+
+
+# FFmpeg's own DST test file (its FATE suite), for a DST image: nothing here encodes DST. Fetched once, by its hash.
+DST_SAMPLE = ('https://fate-suite.ffmpeg.org/dst/dst-64fs44-2ch.dff',
+              '29d305bd19731ce079324ed14ac17254f254115d7787b5646a943e367b238ed0')
+
+
+def sacd_dst(d):
+    """sacd-dst.iso: DST_SAMPLE's ten frames thirty times over, two tracks of 2 s; None when it cannot be fetched."""
+    import hashlib, urllib.request
+    url, digest = DST_SAMPLE
+    cached = d/'dst-64fs44-2ch.dff'
+    if not cached.exists():
+        try:
+            data = urllib.request.urlopen(url, timeout=60).read()
+        except OSError:
+            return None
+        if hashlib.sha256(data).hexdigest() != digest: return None
+        cached.write_bytes(data)
+    if not (d/'sacd-dst.iso').exists(): sacd_iso(d/'sacd-dst.iso', dst_frames(cached) * 30, dst=True)
+    return d/'sacd-dst.iso'
+
+
+def qq(d):
+    if not (d/'sacd.iso').exists(): sacd_iso(d/'sacd.iso')
+    sacd_dst(d)
+    if (d/'qq.flac').exists() or not (d/'a1.flac').exists(): return
+    k = ord(QQ_KEY[0])
+    (d/'qq.flac').write_bytes(bytes(b ^ qq_mask(k, i) for i, b in enumerate((d/'a1.flac').read_bytes())))
+
+
 def make(d):
     d = pathlib.Path(d); d.mkdir(parents=True, exist_ok=True)
     if not (d/'slow.flac').exists(): os.mkfifo(d/'slow.flac')  # a preload's open that blocks until a test writes it
-    if (d/'.made').exists() and (d/'.made').read_text() == RECIPE: return d
+    if (d/'.made').exists() and (d/'.made').read_text() == RECIPE: return qq(d) or d
     w = d/'whole.wav'
     ff('-f', 'lavfi', '-i', 'sine=f=441:r=44100:d=40', '-f', 'lavfi', '-i', 'aevalsrc=0.2*sin(2*PI*(200+20*t)*t):s=44100:d=40',
        '-filter_complex', 'amix=inputs=2:normalize=0,aformat=channel_layouts=stereo', '-c:a', 'pcm_s16le', w)
@@ -222,6 +355,7 @@ def make(d):
     ff('-f', 'lavfi', '-i', 'sine=f=997:r=96000:d=20', '-af', 'volume=0.5,aformat=channel_layouts=stereo', '-c:a', 'flac', '-sample_fmt', 's16', d/'h96.flac')
     ff('-i', d/'h96.flac', '-t', '10', '-c:a', 'flac', d/'h1.flac')
     ff('-ss', '10', '-i', d/'h96.flac', '-c:a', 'flac', d/'h2.flac')
+    qq(d)
     (d/'.made').write_text(RECIPE)
     return d
 

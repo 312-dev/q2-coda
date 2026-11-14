@@ -144,7 +144,7 @@ static int play(struct source *s, const struct song *song) {
     struct ctl *c = &ctl;
     struct info info;
     source_info(s, &info);
-    int untouched = !strcmp(info.codec, "DSF") || !strcmp(info.codec, "DSD"); /* DSD skips every filter, as stock */
+    int untouched = !strcmp(info.codec, "DSF") || !strcmp(info.codec, "DSD") || !strcmp(info.codec, "ISO"); /* DSD skips every filter, as stock */
     pthread_mutex_lock(&c->mu);
     if (untouched && source_format(s)->dsd == DSD_DOP && c->outputway == 0)
         info.rate /= 2; /* stock's RATE for the DAC's DoP, whatever mcl-dsdmode says (captured) */
@@ -152,6 +152,7 @@ static int play(struct source *s, const struct song *song) {
     c->info = info, c->has_info = 1, c->position = 0, c->state = OPENING;
     int rg = c->replaygain; /* taken at each file, as stock's */
     pthread_mutex_unlock(&c->mu);
+    stream_playing(source_stream(s)); /* get_cache_buffer reports this song's cache, or 0 */
     struct dsp *d = dsp_open(source_format(s), untouched, untouched ? 1 : source_replaygain(s, rg), info.length);
     int why = play_through(s, song, d, untouched);
     dsp_close(d, why == ENDED);
@@ -278,13 +279,23 @@ void *engine_thread(void *unused) {
             }
             song = c->play_song;
             song.dsd = dsd_out(c->outputway, song.hw, c->dsdmode);
-            c->play = c->next = c->stop = c->seek = c->paused = 0;
+            c->play = c->next = c->stop = c->seek = c->paused = c->cut = 0;
             c->state = OPENING;
             pthread_mutex_unlock(&c->mu);
             int error;
             preload_cancel();
-            if (!(cur = source_open(&song, &error, NULL))) {
+            /* a stream's open waits for its cache's first fill: a stop or a Next meanwhile gives it up */
+            if ((cur = source_open(&song, &error, &c->cut))) source_keep(cur);
+            if (!cur) {
                 close_output(0);
+                pthread_mutex_lock(&c->mu);
+                int stopped = c->stop, skipped = c->next;
+                if (stopped) c->play = c->next = 0;
+                pthread_mutex_unlock(&c->mu);
+                if (stopped || skipped) { /* given up, not failed: answered as a song cut while it played */
+                    ipc_send(stopped ? "{player-stopstatus\\exit}" : "{player-nextstatus\\exit}");
+                    continue;
+                }
                 touch(error == ERR_MISSING ? "/tmp/notfile" : "/tmp/notsupport");
                 ipc_send("{player-status\\error}");
                 continue;

@@ -42,11 +42,38 @@ PROTOCOLS = 'file http tcp'.split()
 BSFS = 'aac_adtstoasc'.split()
 
 
-def mbedtls():
-    """mbedTLS as tools/thirdparty.py (sec/libs) builds it for libcurl: a static, position-independent TLS 1.2 and
-    1.3 client. None when that cache has none, and then the player is built without https."""
-    found = sorted((THIRDPARTY/'out').glob('mbedtls-*/usr/lib/libmbedtls.a'))
-    return found[-1].parent.parent if found else None
+def mbedtls(target):  # pragma: no mutate block
+    """The prefix of mbedTLS for target, for FFmpeg's https: a static TLS 1.2 and 1.3 client configured as
+    tools/thirdparty.py configures it for the image (MBEDTLS_UNSET: no server side, no certificate dates). For mips the
+    one tools/thirdparty.py built; for host built here from the same release and settings."""
+    if target == 'mips':
+        found = sorted((THIRDPARTY/'out').glob('mbedtls-*/usr/lib/libmbedtls.a'))
+        if not found:
+            sys.exit(f'player: no mbedTLS under {THIRDPARTY}/out; run tools/thirdparty.py once to build it')
+        return found[-1].parent.parent
+    from thirdparty import MBEDTLS_UNSET, SOURCES, fetch
+    version, url, digest = SOURCES['mbedtls']
+    key = hashlib.sha256(repr((version, digest, MBEDTLS_UNSET)).encode()).hexdigest()[:16]
+    prefix = CACHE/'out'/f'mbedtls-{version}-host-{key}'
+    if (prefix/'.done').exists():
+        return prefix
+    work = CACHE/'work'/'mbedtls-host'
+    shutil.rmtree(work, ignore_errors=True); work.mkdir(parents=True)
+    shutil.rmtree(prefix, ignore_errors=True)
+    log = CACHE/'mbedtls-host.log'; log.write_text('')
+    with tarfile.open(fetch(url, digest, url.rsplit('/', 1)[-1])) as t:
+        t.extractall(work, filter='data')
+    src = work/f'mbedtls-{version}'
+    for option in MBEDTLS_UNSET:
+        run('python3', 'scripts/config.py', 'unset', option, cwd=src, log=log)
+    run('make', f'-j{JOBS}', '-C', 'library', 'static', cwd=src, env=dict(os.environ, CFLAGS='-O2 -fPIC'), log=log)
+    shutil.copytree(src/'include', prefix/'include')
+    (prefix/'lib').mkdir()
+    for a in ('libmbedtls.a', 'libmbedx509.a', 'libmbedcrypto.a'):
+        shutil.copy(src/'library'/a, prefix/'lib'/a)
+    (prefix/'.done').write_text('')
+    shutil.rmtree(work, ignore_errors=True)
+    return prefix
 
 
 def configure_args(prefix):
@@ -101,8 +128,8 @@ def toolchain():
 def ffmpeg(target):  # pragma: no mutate block
     """The prefix of FFmpeg built for target ('host' or 'mips'), built on first use."""
     args = configure_args('PREFIX')
-    tls = mbedtls() if target == 'mips' and os.environ.get('Q2_PLAYER_TLS') else None  # phase 5 turns this on for good
-    key = hashlib.sha256(repr((FFMPEG, args, target, ARCH if target == 'mips' else '') + ((str(tls),) if tls else ())).encode()).hexdigest()[:16]
+    tls = mbedtls(target)
+    key = hashlib.sha256(repr((FFMPEG, args, target, ARCH if target == 'mips' else '', str(tls))).encode()).hexdigest()[:16]
     prefix = CACHE/'out'/f'ffmpeg-{FFMPEG[0]}-{target}-{key}'
     if (prefix/'.done').exists():
         return prefix
@@ -118,10 +145,9 @@ def ffmpeg(target):  # pragma: no mutate block
         b = toolchain()
         conf += ['--enable-cross-compile', f'--cross-prefix={b}/{TRIPLE}-', '--arch=mips', '--target-os=linux', '--cpu=mips32r2',
                  '--extra-cflags=' + ' '.join(ARCH), '--extra-ldflags=' + ' '.join(ARCH)]
-        if tls:
-            # FFmpeg's mbedTLS support is under LGPL 3 (--enable-version3), which GPL 3 takes
-            conf += ['--enable-mbedtls', '--enable-version3', '--enable-protocol=https', '--enable-protocol=tls',
-                     f'--extra-cflags=-I{tls}/include', f'--extra-ldflags=-L{tls}/lib']
+    # https through mbedTLS; FFmpeg's mbedTLS support is under LGPL 3 (--enable-version3), which GPL 3 takes
+    conf += ['--enable-mbedtls', '--enable-version3', '--enable-protocol=https', '--enable-protocol=tls',
+             f'--extra-cflags=-I{tls}/include', f'--extra-ldflags=-L{tls}/lib']
     run(*conf, cwd=src, log=log)
     run('make', f'-j{JOBS}', cwd=src, log=log)
     run('make', 'install', cwd=src, log=log)
@@ -134,8 +160,8 @@ def build(target, alsa=None):  # pragma: no mutate block
     """player/ compiled and linked for target; the binary's path. For mips, alsa is the libasound.so.2 to link
     against, by default an unpacked stock root filesystem's (Q2_STOCKFS)."""
     ff = ffmpeg(target)
-    tls = mbedtls() if target == 'mips' and os.environ.get('Q2_PLAYER_TLS') else None
-    out = ROOT/'player/build'/(target + ('-tls' if tls else ''))
+    tls = mbedtls(target)
+    out = ROOT/'player/build'/target
     cc = ['cc'] if target == 'host' else [f'{toolchain()}/{TRIPLE}-gcc', *ARCH]
     strip = 'strip' if target == 'host' else f'{toolchain()}/{TRIPLE}-strip'
     # patch/peq.h's files (the EQ state, the fade, the taps) under the directory a host test starts the player in
@@ -147,8 +173,7 @@ def build(target, alsa=None):  # pragma: no mutate block
         if not alsa.exists():
             sys.exit(f'player: no {alsa}; set Q2_STOCKFS to an unpacked stock root filesystem')
         extra.append(f'ALSA={alsa}')
-        if tls:
-            extra.append(f'TLS=-L{tls}/lib -lmbedtls -lmbedx509 -lmbedcrypto')
+    extra.append(f'TLS=-L{tls}/lib -lmbedtls -lmbedx509 -lmbedcrypto')
     run('make', '-C', ROOT/'player', f'OUT={out}', 'CC=' + ' '.join(map(str, cc)), f'STRIP={strip}', f'FFMPEG={ff}',
         f'TARGET={target}', f'-j{JOBS}', *extra, log=_log(target))
     return out/'q2player'

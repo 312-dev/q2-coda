@@ -45,6 +45,7 @@ struct ctl {
     float eq[10];
     int eq_changed; /* an mcl-seteq since the playback thread last looked: the EQ state on disk is new */
     int click;      /* an mcl-click to mix in, CLICK_*, while a song plays */
+    int cut;        /* an mcl-stop or set-nexturl since the playback thread began opening a song: that open gives up */
     /* status */
     int state, has_info, position;
     struct info info;
@@ -74,6 +75,31 @@ int source_read(struct source *, const uint8_t **data);
 int source_seek(struct source *, int seconds);
 float source_replaygain(const struct source *, int mode); /* mcl-replaygain's scale for this file, 1 for none */
 int64_t source_frames(const struct source *); /* frames handed out since the start or the last seek, plus its target */
+struct stream *source_stream(const struct source *); /* NULL for a file on the card */
+
+/* stream.c: a URL's bytes, through demo's cache, and QQ Music's decryption (qq.c), for libavformat to read */
+struct stream;
+struct AVIOContext;
+int stream_is_url(const char *url);
+/* NULL with *error on failure; cancel as source_open's */
+struct stream *stream_open(const struct song *, const int *cancel, int *error);
+void stream_keep(struct stream *); /* as source_keep */
+struct AVIOContext *stream_avio(struct stream *);
+void stream_close(struct stream *);
+void stream_playing(struct stream *); /* the playing song's: its cache is what get_cache_buffer reports */
+int stream_cache_fill(void);         /* get_cache_buffer's answer: the playing song's cache fill in percent, or 0 */
+/* qq.c: QQ Music's songs, a URL with qm_songid=ID; NULL when it has none or it cannot be decrypted (read as it is) */
+struct qq;
+struct qq *qq_open(const char *url);
+int qq_decrypt(struct qq *, int64_t offset, uint8_t *data, int n); /* in place, by the bytes' offset in the file */
+void qq_close(struct qq *);
+
+/* sacd.c: an SACD image's stereo area as a DSDIFF file for libavformat */
+struct sacd;
+int sacd_is_image(const char *path); /* by its name: .iso */
+struct sacd *sacd_open(const char *path, int *error);
+struct AVIOContext *sacd_avio(struct sacd *);
+void sacd_close(struct sacd *);
 
 /* output.c */
 struct output;

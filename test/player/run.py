@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Host tests of q2player (player/): `python3 test/player/run.py [-k NAME]`.
 
-Needs ffmpeg and lame, no stock ZIP and no Q2. The player is built for this machine by tools/player.py
+Needs ffmpeg, lame, openssl (the HTTPS tests' certificates) and a C compiler, no stock ZIP and no Q2; the DST
+SACD image needs FFmpeg's DST sample, fetched once (music.py DST_SAMPLE), and is left out without it. The player is built for this machine by tools/player.py
 (its FFmpeg on first use, some minutes) and driven through its socket by fakedemo.py, writing PCM to
 files in place of ALSA.
 
@@ -547,8 +548,11 @@ def ffref(tmp, *args):
     out = tmp/'ffref'
     if not out.exists():
         ff = pathlib.Path(subprocess.run([sys.executable, ROOT/'tools/player.py', 'ffmpeg', 'host'], check=True, capture_output=True, text=True).stdout.strip())
+        sys.path.insert(0, str(ROOT/'tools'))
+        import player as tools_player  # its FFmpeg's https needs mbedTLS at the link
+        tls = tools_player.mbedtls('host')
         subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Werror', '-I', ff/'include', HERE/'ffref.c', '-L', ff/'lib', '-lavformat', '-lavcodec',
-                        '-lswresample', '-lavutil', '-lm', '-lpthread', '-o', out], check=True)
+                        '-lswresample', '-lavutil', '-L', tls/'lib', '-lmbedtls', '-lmbedx509', '-lmbedcrypto', '-lm', '-lpthread', '-o', out], check=True)
     return subprocess.run([out, *map(str, args)], check=True, capture_output=True).stdout
 
 
@@ -712,6 +716,190 @@ def test_way_change_waits_for_the_next_song(player, songs, tmp):
     return f'{len(pcm[0]) // 4} frames of a1 in one PCM through three changes of output'
 
 
+
+# Phase 5: streams (httpd.py's servers, fakedemo.py's http* and https-* scenarios) and QQ Music (qmstub.c).
+
+def events(s):
+    """The events that end a song or answer one, in order: exit, error, nextstatus, stopstatus."""
+    return [l.split()[-1] for l in s.lines if l.split()[-1].split('\\')[0] in ('{player-status', '{player-nextstatus', '{player-stopstatus')
+            and l.split()[-1].endswith(('exit}', 'error}'))]
+
+
+def wav_frames(path, nbytes):
+    """The whole 16-bit stereo frames of a WAV's data in its first nbytes bytes."""
+    data = pathlib.Path(path).read_bytes()
+    at = data.index(b'data') + 8
+    return (nbytes - at) // 4
+
+
+def test_http_whole(player, songs, tmp):
+    """A FLAC over HTTP with demo's cache -1 (3072 KB), and a WAV with 2048 KB: each its reference decode, one PCM."""
+    a = check_exact(player, songs, tmp, 'http-whole', ['a1.flac'], 's16le', '0000_44100_2_s16.raw')
+    b = check_exact(player, songs, tmp, 'http-whole-wav', ['p1.wav'], 's16le', '0000_44100_2_s16.raw')
+    return f'{a}; {b}'
+
+
+def test_http_seek(player, songs, tmp):
+    """A seek to 15 s of a FLAC over HTTP, inside the cache: the rest is the reference from frame 15 x 44100, to the
+    end, and the song ends with exit (stock and Q2 Pod end it at the seek, as they end a file's: a deviation)."""
+    s, pcm, names = play(player, songs, 'http', tmp/'http')
+    got, ref = b''.join(pcm), reference(songs/'a1.flac')
+    tail = ref[15 * 44100 * 4:]
+    assert got.endswith(tail), f'the PCM does not end with the reference from 15 s ({len(got) // 4} frames)'
+    head = got[:len(got) - len(tail)]
+    assert ref.startswith(head) and head, f'{len(head) // 4} frames before the seek are not the reference start'
+    assert events(s) == ['{player-status\\exit}'], events(s)
+    return f'{len(head) // 4} frames, then {len(tail) // 4} from frame {15 * 44100}'
+
+
+def test_http_drop_resumes(player, songs, tmp):
+    """The server closes the first connection at 1 MB: the player asks again from there (a range request) and the WAV
+    plays whole, as stock's does (captured)."""
+    s, pcm, names = play(player, songs, 'http-drop', tmp/'http-drop')
+    want, got = reference(songs/'p1.wav'), b''.join(pcm)
+    assert got == want, f'{len(got) // 4} frames, reference {len(want) // 4}, first difference {first_difference(got, want)}'
+    ranges = [r for p, r in s.web[0].log if 'p1.wav' in p]
+    assert 'bytes=1000000-' in ranges, ranges
+    assert events(s) == ['{player-status\\exit}'], events(s)
+    return f'{len(got) // 4} frames, requests {ranges}'
+
+
+def test_http_stall(player, songs, tmp):
+    """The server stops for 8 s at 1 MB and goes on: the WAV plays whole, nothing lost or doubled, one exit."""
+    s, pcm, names = play(player, songs, 'http-stall', tmp/'http-stall')
+    want, got = reference(songs/'p1.wav'), b''.join(pcm)
+    assert got == want, f'{len(got) // 4} frames, reference {len(want) // 4}, first difference {first_difference(got, want)}'
+    assert events(s) == ['{player-status\\exit}'], events(s)
+    return f'{len(got) // 4} frames through the stall'
+
+
+def test_http_cut(player, songs, tmp):
+    """Every connection ends at 1 MB of the 3.5: what came plays, then the song ends with exit, as stock's (captured)."""
+    s, pcm, names = play(player, songs, 'http-cut', tmp/'http-cut')
+    want, got = reference(songs/'p1.wav'), b''.join(pcm)
+    n = wav_frames(songs/'p1.wav', 1000000)
+    assert got == want[:n * 4], f'{len(got) // 4} frames, {n} came; first difference {first_difference(got, want[:n * 4])}'
+    assert events(s) == ['{player-status\\exit}'], events(s)
+    return f'{n} frames, then exit'
+
+
+def test_http_redirect(player, songs, tmp):
+    """A 302 is followed: the FLAC plays from its start."""
+    s, pcm, names = play(player, songs, 'http-redirect', tmp/'http-redirect')
+    got, ref = b''.join(pcm), reference(songs/'a1.flac')
+    assert len(got) > 44100 * 4 and ref.startswith(got), f'{len(got) // 4} frames, first difference {first_difference(got, ref)}'
+    paths = [p for p, r in s.web[0].log]
+    assert paths[0] == '/s/redirect/a1.flac' and '/s/-/a1.flac' in paths, paths
+    return f'{len(got) // 4} frames of the reference after {paths[:2]}'
+
+
+def test_http_missing(player, songs, tmp):
+    """A 404: error, as stock's (which makes /tmp/notfile, captured)."""
+    s, pcm, names = play(player, songs, 'http-missing', tmp/'http-missing')
+    assert events(s) == ['{player-status\\error}'] and not pcm, (events(s), names)
+    return 'error'
+
+
+def test_https_checks(player, songs, tmp):
+    """HTTPS against the CA bundle: a certificate the bundle's CA signed for localhost plays; one it signed for another
+    name and a self-signed one are refused (error, nothing played). Stock plays all three, Q2 Pod's player the first
+    two (it checks the chain, not the name): a deviation."""
+    s, pcm, names = play(player, songs, 'https-good', tmp/'https-good')
+    got, ref = b''.join(pcm), reference(songs/'a1.flac')
+    assert len(got) > 44100 * 4 and ref.startswith(got), f'good: {len(got) // 4} frames, first difference {first_difference(got, ref)}'
+    assert events(s) == ['{player-stopstatus\\exit}'], events(s)
+    for bad in ('https-wrong', 'https-self'):
+        s, pcm, names = play(player, songs, bad, tmp/bad)
+        assert events(s) == ['{player-status\\error}'] and not pcm, (bad, events(s), names)
+        assert not [p for p, r in s.web[('https-wrong', 'https-self').index(bad) + 2].log], f'{bad}: a request was sent'
+    return f'good: {len(got) // 4} frames; wrong name and self-signed: error, no request sent'
+
+
+def cache_answers(s):
+    """(time, percent) of each get_cache_buffer answer."""
+    return [(float(l.split()[0]), int(l.split('\\')[-1][:-1])) for l in s.lines if 'media-cache-buffer' in l]
+
+
+def test_cache_first_fill(player, songs, tmp):
+    """A 1024 KB cache at 20%, from a server at 50,000 B/s: nothing is heard before 209,715 bytes have come (4.2 s
+    after the command), get_cache_buffer answers 0 until then, a percent of the cache while the song plays, 0 after
+    the stop."""
+    s, pcm, names = play(player, songs, 'http-fill', tmp/'http-fill')
+    playing = [float(l.split()[0]) for l in s.lines if l.endswith('{player-status\\playing}')]
+    assert playing and playing[0] >= 1.0 + 1024 * 1024 * 0.2 / 50000, f'playing at {playing[:1]}, before the first fill could have come'
+    a = cache_answers(s)
+    stop = 10.0
+    before = [p for t, p in a if t < playing[0] - 0.3]
+    during = [p for t, p in a if playing[0] + 0.3 < t < stop]
+    after = [p for t, p in a if t > stop + 0.6]
+    assert before and not any(before), f'before the song: {before}'
+    assert during and all(0 < p <= 100 for p in during), f'while it plays: {during}'
+    assert after and not any(after), f'after the stop: {after}'
+    assert events(s) == ['{player-stopstatus\\exit}'], events(s)
+    return f'playing at {playing[0]:.2f} s; answers {before[-1]}, then {during[0]}..{during[-1]}, then {after[0]}'
+
+
+def test_stop_during_first_fill(player, songs, tmp):
+    """A stop while the first fill waits (20 s of it at 20,000 B/s): stopstatus at once, nothing played, no error."""
+    s, pcm, names = play(player, songs, 'http-stop-open', tmp/'http-stop-open')
+    t = [float(l.split()[0]) for l in s.lines if l.endswith('{player-stopstatus\\exit}')]
+    assert events(s) == ['{player-stopstatus\\exit}'] and t[0] - 3.0 < 0.5 and not pcm, (events(s), t, names)
+    return f'stopstatus {t[0] - 3.0:.3f} s after the stop'
+
+
+def qq_env(tmp):
+    """The environment that has q2player load qmstub.c as libQMDecryption.so."""
+    lib = tmp/'qmstub'/'libQMDecryption.so'
+    if not lib.exists():
+        lib.parent.mkdir(exist_ok=True)
+        subprocess.run(['cc', '-shared', '-fPIC', '-O2', '-o', lib, HERE/'qmstub.c'], check=True)
+    return {'LD_LIBRARY_PATH': str(lib.parent)}
+
+
+def test_qq(player, songs, tmp):
+    """QQ Music over HTTP with the key in /tmp/qm_ID: decrypted by each byte's offset, the FLAC plays whole and
+    exactly; a seek to 12 s lands exactly. No key file, a key the library refuses and a song id with a character stock
+    refuses read the file as it is, which is not audio: error, as stock's, after its log line."""
+    env = qq_env(tmp)
+    s, pcm, names = play(player, songs, 'qq', tmp/'qq', env=env)
+    got, ref = b''.join(pcm), reference(songs/'a1.flac')
+    assert got == ref, f'{len(got) // 4} frames, reference {len(ref) // 4}, first difference {first_difference(got, ref)}'
+    s, pcm, names = play(player, songs, 'qq-seek', tmp/'qq-seek', env=env)
+    got = b''.join(pcm)
+    assert got.endswith(ref[12 * 44100 * 4:]) and ref.startswith(got[:len(got) - len(ref[12 * 44100 * 4:])]), \
+        f'qq-seek: {len(got) // 4} frames are not the reference with a seek to 12 s'
+    logs = {'qq-nokey': 'ekey file ./tmp/qm_qq1 not found', 'qq-badkey': 'CreateDecryption failed (songid=qq1)',
+            'qq-badid': 'bad songid char 0x2e'}
+    for name, line in logs.items():
+        s, pcm, names = play(player, songs, name, tmp/name, env=env)
+        log = (tmp/name/'player.log').read_text()
+        assert events(s) == ['{player-status\\error}'] and not pcm and line in log, (name, events(s), names, log[-300:])
+    return f'{len(ref) // 4} frames exact, the seek exact, {len(logs)} refusals as stock logs them'
+
+
+
+def test_sacd(player, songs, tmp):
+    """An SACD image (music.py sacd.iso, the DSD64 tone in two tracks): on the DAC as DoP, each channel's bits the
+    area's, from its first track and from its second (ss=2) to the area's end, with stock's media-info (CODEC ISO,
+    LENGTH the area's 4 s; the bytes are stock's own capture's, docs/player-plan.md#phase-5-results); on a USB DAC as
+    D2P, exactly FFmpeg 7.1.5's decode of d64.dff, the same tone; an area in DST refused, as stock refuses it."""
+    want = dsd_bits(songs/'d64.dff')
+    for name, start in (('sacd', 0), ('sacd-2', 2)):
+        s, pcm, names = play(player, songs, name, tmp/name, speed=4)
+        bits, bad = unpack_dop(b''.join(pcm))
+        tail = [w[start * 352800:] for w in want]
+        assert names == ['0000_176400_2_dop.raw'] and not bad and bits == tail, f'{name}: {names}, {bad} bad markers, {[len(b) for b in bits]} bytes a channel'
+        info = [l.split()[-1] for l in s.lines if 'media-info\\5644800' in l]
+        assert info[:1] == ['{media-info\\5644800|1411200|4|POS|ISO|1}'] and events(s) == ['{player-status\\exit}'], (name, info, events(s))
+    s, pcm, names = play(player, songs, 'sacd-usb', tmp/'sacd-usb', speed=4)
+    ref = ffref(tmp, 'decode', songs/'d64.dff')
+    assert names == ['0000_352800_2_f32_usb.raw'] and pcm[0] == ref, f'sacd-usb: {names}, first difference {first_difference(b"".join(pcm), ref)}'
+    if (songs/'sacd-dst.iso').exists():
+        s, pcm, names = play(player, songs, 'sacd-dst', tmp/'sacd-dst')
+        assert events(s) == ['{player-status\\error}'] and not pcm, events(s)
+    return f'DoP from 0 s and 2 s the area\'s bits, D2P exact, DST {"refused" if (songs/"sacd-dst.iso").exists() else "not tried (no sample)"}'
+
+
 def parse(text):
     """A transcript's lines as (seconds, direction, name, argument), and its position samples."""
     lines, positions = [], []
@@ -729,9 +917,12 @@ def skeleton(lines, levels=True):
     200 ms poll's answers are compared apart (answers), since when "ready" turns to "playing" is not exact. The level
     meter's answers are compared with levels, but for a song whose peak moves within the meter's few ms (the
     controls scenario's tone under a sweep beats), where which block it measured decides; the spectrum's twelve
-    zeros are q2player's, a deviation."""
+    zeros are q2player's, a deviation. get_cache_buffer's answers are left out: MPlayer's figure depends on when its
+    cache thread last ran (stock and Q2 Pod's answer 9 and 0 to the same stream), demo only asks whether it is above 0
+    (playerqueue_page_init 0x53d1d4), and test_cache_first_fill checks them."""
     out = []
     for t, d, name, arg in lines:
+        if name in ('get_cache_buffer', 'media-cache-buffer'): continue
         if d == '>': out.append(f'> {name}')
         elif name in ('player-status', 'media-info') and arg in ('ready', 'playing', 'no-playing-status') or name == 'media-info': continue
         elif name == 'mcl-getspectrum' or name == 'mcl-getuvmeter' and not levels: out.append(f'< {name}')
@@ -763,6 +954,20 @@ KNOWN = {
     'stock-dsd-2-2': 'Native DSD on a USB DAC: stock asks ALSA for format 31, SND_PCM_FORMAT_SPECIAL, which is refused, and plays '
                      'nothing; q2player sends DSD_U32_BE (test_native_usb)',
     'pod-dsd-2-2': 'the same in Q2 Pod\'s hciplayer',
+    # streams (phase 5)
+    'stock-http-slow': 'a WAV from a server slower than it plays: stock starts 10 s on, after its demuxer has looked at the '
+                       'file\'s end over two more connections; q2player starts once the first fill is in (test_cache_first_fill)',
+    'pod-http-slow': 'the same in Q2 Pod\'s hciplayer',
+    'stock-http-big': 'the same at 4096 KB: stock starts 9 s on', 'pod-http-big': 'the same in Q2 Pod\'s hciplayer',
+    'stock-http-stall': 'the same: stock starts after the server\'s 8 s stall, q2player before it and waits in it (test_http_stall)',
+    'pod-http-stall': 'the same in Q2 Pod\'s hciplayer',
+    'stock-http-gapless': 'stock ends a FLAC stream half a second after a seek near its end, as it ends a file; Q2 Pod\'s fix '
+                          'is for files alone, so its player does too; q2player plays on (test_http_seek)',
+    'pod-http-gapless': 'the same in Q2 Pod\'s hciplayer',
+    'stock-http-norange': 'the same after a seek to 12 s of a server without ranges', 'pod-http-norange': 'the same in Q2 Pod\'s hciplayer',
+    'stock-https-wrong': 'stock checks no certificate and plays; q2player refuses a certificate for another name (test_https_checks)',
+    'pod-https-wrong': 'Q2 Pod\'s hciplayer checks the chain, not the name, and plays; q2player refuses it',
+    'stock-https-self': 'stock plays a self-signed certificate; q2player refuses it, as Q2 Pod\'s does',
 }
 
 

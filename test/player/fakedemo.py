@@ -35,6 +35,15 @@ def gapless(path, start=0, flag=0):
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from music import FORMATS, PAIRS, REPLAYGAIN  # noqa: E402
+import music  # noqa: E402
+import httpd  # noqa: E402
+
+# A scenario's URLs name the session's web servers (httpd.py) by these, which the session puts its servers' addresses
+# for as it sends: transcripts keep the names, so a fixture holds whatever ports a run had. WEB is plain HTTP; GOOD
+# is HTTPS with a certificate the test CA signed for localhost, WRONG one it signed for another name, SELF a
+# self-signed one for localhost.
+WEB_NAMES = ('http://WEB', 'https://GOOD', 'https://WRONG', 'https://SELF')
+CERTS = pathlib.Path(os.environ.get('Q2_PLAYER_CERTS') or pathlib.Path.home() / '.cache/q2-pytest/player/certs')
 
 # formats-all's files, in the order they play
 ALL_FORMATS = ['a1.flac', 'f24.flac', 'b1.mp3', 'd.m4a', 'e.ogg', *(n for n, _ in FORMATS)]
@@ -185,6 +194,82 @@ def scenarios(m):
         'idle': boot + [(1.0, '{player-status\\request}'), (1.2, '{media-info\\get-music-info}'), (1.4, '{mcl-pcmstate\\null}'),
                         (1.6, '{get_cache_buffer\\null}'), (1.8, '{mcl-getuvmeter\\null}'), (2.0, '{mcl-getspectrum\\null}'), (2.2, '{mcl-pause\\null}'),
                         (2.4, '{mcl-play\\null}'), (2.6, '{mcl-seek\\5}'), (2.8, '{mcl-stop\\null}'), (4.0, None)],
+        **streams(boot),
+        # SACD (music.py sacd.iso): the stereo area from its first track and from its second, as demo sends an .iso's
+        # tracks (ss= the track's start, 4096 KB at 50%); on a USB DAC as D2P, the image's DSD as PCM
+        'sacd': boot + [(1.0, song('set-songurl', f'{m}/sacd.iso', cache=4096, cache_min=50)), (7.0, None)],
+        'sacd-2': boot + [(1.0, song('set-songurl', f'{m}/sacd.iso', start=2, cache=4096, cache_min=50)), (5.0, None)],
+        'sacd-dst': boot + [(1.0, song('set-songurl', f'{m}/sacd-dst.iso', cache=4096, cache_min=50)), (7.0, None)],
+        'sacd-dst-2': boot + [(1.0, song('set-songurl', f'{m}/sacd-dst.iso', start=2, cache=4096, cache_min=50)), (5.0, None)],
+        'sacd-usb': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\2}'), (0.1, '{mcl-setvol\\25700}'),
+                     (1.0, song('set-songurl', f'{m}/sacd.iso', cache=4096, cache_min=50)), (7.0, None)],
+    }
+
+
+def web(plan, name, base='http://WEB'):
+    """A URL of the session's server (httpd.py) for the music directory's name, misbehaving as plan says."""
+    return f'{base}/s/{plan}/{name}'
+
+
+def cache_polls(start, end, every=0.5):
+    """get_cache_buffer from start to end, as a page that shows a stream's buffering asks."""
+    return [(round(start + i * every, 3), '{get_cache_buffer\\null}') for i in range(int((end - start) / every) + 1)]
+
+
+def streams(boot):
+    """Phase 5's scenarios (docs/player-plan.md): songs from the session's web servers, as DLNA, the phone's push
+    and Tidal hand them over, with demo's cache fields for each: 1024 KB at 20% for a FLAC, 2048 for WAV, -1 none."""
+    a1, a2, p1 = (web('-', n) for n in ('a1.flac', 'a2.flac', 'p1.wav'))
+    def one(url, cache=1024, pct=20, until=24.0, more=()):
+        return boot + sorted([(1.0, song('set-songurl', url, cache=cache, cache_min=pct))] + cache_polls(1.2, until - 1) + list(more),
+                             key=lambda x: x[0]) + [(until, None)]
+    def qq(songid, key, until, more=()):
+        keyfile = [(0.5, put(f'tmp/qm_{songid}', key.encode() + b'\n'))] if key else []
+        return one(web('-', f'qq.flac?vkey=x&qm_songid={songid}'), until=until, more=keyfile + list(more))
+    return {
+        # a FLAC over HTTP played to its end, a seek on the way
+        'http': one(a1, more=[(6.0, '{mcl-seek\\15}')]),
+        # no cache asked (demo's -1), then stop
+        'http-nocache': one(a1, cache=-1, until=8.0, more=[(6.0, '{mcl-stop\\null}')]),
+        # a WAV from a server slower than it plays (150,000 B/s against 176,400): the cache fills, drains, waits
+        'http-slow': one(web('rate=150000', 'p1.wav'), cache=2048, until=16.0, more=[(14.0, '{mcl-stop\\null}')]),
+        # a FLAC at 50,000 B/s: the first fill, 20% of 1024 KB, takes 4.2 s
+        'http-fill': one(web('rate=50000', 'a1.flac'), until=12.0, more=[(10.0, '{mcl-stop\\null}')]),
+        # the same at 4096 KB and 50%, as demo asks for DSD
+        'http-big': one(web('rate=400000', 'p1.wav'), cache=4096, pct=50, until=16.0, more=[(14.0, '{mcl-stop\\null}')]),
+        # the server stops for 8 s at 1 MB (about 5.7 s of the WAV) and then goes on
+        'http-stall': one(web('stall=1000000:8', 'p1.wav'), cache=2048, until=32.0),
+        # the first connection closes at 1 MB; a reconnect from there gets the rest
+        'http-drop': one(web('drop=1000000', 'p1.wav'), cache=2048, until=26.0),
+        # every connection ends at 1 MB of 3.5: the stream ends early
+        'http-cut': one(web('cut=1000000', 'p1.wav'), cache=2048, until=16.0),
+        # a redirect, and a server without ranges with a seek
+        'http-redirect': one(web('redirect', 'a1.flac'), until=10.0, more=[(8.0, '{mcl-stop\\null}')]),
+        'http-norange': one(web('norange', 'a1.flac'), until=12.0, more=[(4.0, '{mcl-seek\\12}'), (10.0, '{mcl-stop\\null}')]),
+        # not there (404)
+        'http-missing': one(web('-', 'nothing.flac'), until=4.0),
+        # a preloaded change from one stream to the next
+        'http-gapless': boot + [(1.0, song('set-songurl', a1, cache=1024, flag=1)), (2.0, '{mcl-seek\\12}'),
+                                (4.0, gapless(a2, flag=1)), (14.0, '{mcl-seek\\17}'), (20.0, None)],
+        # Next from one stream to another
+        'http-next': boot + [(1.0, song('set-songurl', a1, cache=1024)), (4.0, song('set-nexturl', p1, cache=2048)),
+                             (8.0, '{mcl-stop\\null}'), (10.0, None)],
+        # the whole of a FLAC and a WAV over HTTP, for the PCM: no cache asked (demo's -1), and 2048 KB
+        'http-whole': one(a1, cache=-1, until=23.0),
+        'http-whole-wav': one(p1, cache=2048, until=23.0),
+        # a stop while the first fill waits on a slow server (2048 KB at 20% at 20,000 B/s: 20 s)
+        'http-stop-open': one(web('rate=20000', 'p1.wav'), cache=2048, until=6.0, more=[(3.0, '{mcl-stop\\null}')]),
+        # QQ Music: the key in /tmp/qm_ID as demo writes it, an encrypted FLAC (music.py qq.flac); a seek; no key file; a
+        # key the library refuses; a song id with a character stock refuses
+        'qq': qq('qq1', music.QQ_KEY, until=23.0),
+        'qq-seek': qq('qq1', music.QQ_KEY, until=12.0, more=[(4.0, '{mcl-seek\\12}')]),
+        'qq-nokey': qq('qq1', None, until=4.0),
+        'qq-badkey': qq('qq1', 'bad', until=4.0),
+        'qq-badid': qq('qq.1', music.QQ_KEY, until=4.0),
+        # HTTPS: a certificate the bundle's CA signed for the name, one for another name, a self-signed one
+        'https-good': one(web('-', 'a1.flac', 'https://GOOD'), until=8.0, more=[(6.0, '{mcl-stop\\null}')]),
+        'https-wrong': one(web('-', 'a1.flac', 'https://WRONG'), until=6.0, more=[(5.0, '{mcl-stop\\null}')]),
+        'https-self': one(web('-', 'a1.flac', 'https://SELF'), until=6.0, more=[(5.0, '{mcl-stop\\null}')]),
     }
 
 
@@ -255,6 +340,16 @@ class Session:
         self.lines, self.seen, self.t0, self.conn, self.playing, self.preload, self.speed = [], {}, None, None, False, False, 1
         self.music = None  # the music directory on this machine, for steps that act on its files
         self.on_exit = []  # set-gapless commands sent one at each {player-status\\exit}, as demo sends one per song
+        certs = httpd.certificates(CERTS)
+        root = lambda: pathlib.Path(self.music)
+        self.web = [httpd.serve(root)] + [httpd.serve(root, (certs / f'{n}.pem', certs / f'{n}.key')) for n in ('good', 'wrong', 'self')]
+        self.ca = certs / 'ca.pem'
+
+    def url(self, text):
+        """text with each of WEB_NAMES made its server's address."""
+        for name, srv in zip(WEB_NAMES, self.web):
+            text = text.replace(name, f'{name.split(":")[0]}://{"127.0.0.1" if srv is self.web[0] else "localhost"}:{srv.port}')
+        return text
 
     def note(self, direction, text):
         self.lines.append(f'{self.now():8.3f} {direction} {text}')
@@ -264,7 +359,7 @@ class Session:
 
     def send(self, text, quiet=False):
         if not quiet: self.note('>', text)
-        try: self.conn.sendall(text.encode())
+        try: self.conn.sendall(self.url(text).encode())
         except OSError: pass
 
     def pump(self, until):
@@ -317,6 +412,7 @@ class Session:
             self.send(what)
         cpu = cpu_seconds(proc.pid)
         self.conn.close(); proc.terminate()
+        for srv in self.web: srv.shutdown(); srv.server_close()
         try: proc.wait(5)
         except subprocess.TimeoutExpired: proc.kill()
         pos = ' '.join(f'{t:.1f}:{p}' for t, p in self.positions[::5])  # one a second
@@ -329,6 +425,9 @@ def launch_host(player, music, speed=1, env=None):
         (s.out / 'pcm').mkdir(exist_ok=True)
         for f in (s.out / 'pcm').glob('*'): f.unlink()
         shutil.rmtree(s.out / 'mnt/data', ignore_errors=True); (s.out / 'mnt/data').mkdir(parents=True)
+        # the CA bundle q2player checks HTTPS against (Q2 Pod's player's, docs/internals.md#stock-https): the test CA's
+        (s.out / 'etc/ssl/certs').mkdir(parents=True, exist_ok=True)
+        shutil.copy(s.ca, s.out / 'etc/ssl/certs/ca-certificates.crt')
         e = dict(os.environ, Q2PLAYER_SOCK=str(s.tmp / 'sock_play'), Q2PLAYER_PCM=str(s.out / 'pcm'), Q2PLAYER_SPEED=str(speed), **(env or {}))
         # the host build reads patch/peq.h's files (/mnt/data/peq-active, /tmp/q2xfade, ...) under its directory
         return subprocess.Popen([player], stdout=open(s.out / 'player.log', 'w'), stderr=subprocess.STDOUT, env=e, cwd=s.out)
@@ -351,6 +450,8 @@ def launch_emu(emu, binary, music, name='hciplayer', args=('-ao', 'alsa'), stock
         shutil.rmtree(data, ignore_errors=True); data.mkdir(parents=True)
         if switch: (data / 'q2player').touch()
         extra = ['--bind', data, '/mnt/data']
+        if (emu / 'rootfs/etc/ssl/certs/ca-certificates.crt').exists():  # the test CA as the bundle HTTPS is checked against
+            extra += ['--ro-bind', s.ca, '/etc/ssl/certs/ca-certificates.crt']
         if stock:
             xz = s.out / 'hciplayer.xz'
             xz.write_bytes(lzma.compress(pathlib.Path(stock).read_bytes(), format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC32))

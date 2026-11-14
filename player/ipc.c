@@ -80,7 +80,7 @@ static void command(const char *name, const char *arg) {
                 reply("{media-info\\no-playing-status}");
         }
     } else if (!strcmp(name, "get_cache_buffer")) {
-        reply("{media-cache-buffer\\0}"); /* a file on the card has no cache; streams come in phase 5 */
+        reply("{media-cache-buffer\\%d}", stream_cache_fill()); /* 0 for a file on the card, which has no cache */
     } else if (!strcmp(name, "mcl-getuvmeter")) {
         reply("{mcl-getuvmeter\\%d|%d}", c->uv[0], c->uv[1]);
     } else if (!strcmp(name, "mcl-getspectrum")) {
@@ -92,7 +92,7 @@ static void command(const char *name, const char *arg) {
         parse_song(arg, &c->play_song, 1);
         c->play = 1;
         c->preload = c->close_preload = 0;
-        if (name[4] == 'n') c->next = 1;
+        if (name[4] == 'n') c->next = 1, c->cut = 1;
         wake = 1;
     } else if (!strcmp(name, "set-gapless")) {
         parse_song(arg, &c->preload_song, 0);
@@ -107,7 +107,7 @@ static void command(const char *name, const char *arg) {
     } else if (!strcmp(name, "mcl-seek")) {
         if (c->state != IDLE) c->seek = 1, c->seek_to = atoi(arg), wake = 1;
     } else if (!strcmp(name, "mcl-stop")) {
-        c->stop = 1, c->preload = 0, c->close_preload = 1, wake = 1;
+        c->stop = c->cut = 1, c->preload = 0, c->close_preload = 1, wake = 1;
     } else if (!strcmp(name, "mcl-orderstop")) {
         /* stock closes a PCM left open after the last song; this player has none open while idle */
     } else if (!strcmp(name, "mcl-setvol")) {
