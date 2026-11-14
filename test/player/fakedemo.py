@@ -46,7 +46,7 @@ def scenarios(m):
         'gapless-mp3': boot + [(1.0, song('set-songurl', b1, flag=1)), (2.0, '{mcl-seek\\12}'), (4.0, gapless(b2, flag=1)), (14.0, '{mcl-seek\\17}'), (20.0, None)],
         # the whole of two tracks, no seek: the PCM is compared with a reference decode
         'gapless-flac-full': boot + [(1.0, song('set-songurl', a1, flag=1)), (16.0, gapless(a2, flag=1)), (44.0, None)],
-        'gapless-mp3-full': boot + [(1.0, song('set-songurl', b1, flag=1)), (16.0, gapless(b2, flag=1)), (44.0, None)],
+        'gapless-mp3-full': boot + [(1.0, song('set-songurl', b1, flag=1)), (16.0, gapless(b2, flag=1)), (56.0, None)],
         # Next while playing (set-nexturl), then a natural end with nothing preloaded
         'skip': boot + [(1.0, song('set-songurl', a1)), (4.0, song('set-nexturl', b1)), (7.0, song('set-nexturl', a2)), (9.0, '{mcl-seek\\16}'), (16.0, None)],
         # volume, EQ, the meters and the odd queries while playing
@@ -73,6 +73,21 @@ def scenarios(m):
                         (1.6, '{get_cache_buffer\\null}'), (1.8, '{mcl-getuvmeter\\null}'), (2.0, '{mcl-getspectrum\\null}'), (2.2, '{mcl-pause\\null}'),
                         (2.4, '{mcl-play\\null}'), (2.6, '{mcl-seek\\5}'), (2.8, '{mcl-stop\\null}'), (4.0, None)],
     }
+
+
+def cpu_seconds(pid):
+    """User and system time so far of pid and everything under it (the sandbox's qemu is a grandchild)."""
+    tick, total, kids = os.sysconf('SC_CLK_TCK'), 0.0, {}
+    for d in pathlib.Path('/proc').iterdir():
+        if not d.name.isdigit(): continue
+        try: f = (d / 'stat').read_text().rsplit(')', 1)[1].split()
+        except OSError: continue
+        kids.setdefault(int(f[1]), []).append((int(d.name), (int(f[11]) + int(f[12])) / tick))
+    todo = [pid]
+    while todo:
+        for child, t in kids.get(todo.pop(), []):
+            total += t; todo.append(child)
+    return total
 
 
 class Session:
@@ -140,11 +155,12 @@ class Session:
             if what.startswith('{set-gapless'): self.preload = True
             if what.startswith('{mcl-closegapless'): self.preload = False
             self.send(what)
+        cpu = cpu_seconds(proc.pid)
         self.conn.close(); proc.terminate()
         try: proc.wait(5)
         except subprocess.TimeoutExpired: proc.kill()
         pos = ' '.join(f'{t:.1f}:{p}' for t, p in self.positions[::5])  # one a second
-        (self.out / 'transcript.txt').write_text('\n'.join(self.lines) + f'\n# positions (every fifth poll, time:seconds) {pos}\n')
+        (self.out / 'transcript.txt').write_text('\n'.join(self.lines) + f'\n# positions (every fifth poll, time:seconds) {pos}\n# cpu {cpu:.2f} s\n')
 
 
 def launch_host(player, music, speed=1):

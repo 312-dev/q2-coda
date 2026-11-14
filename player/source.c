@@ -1,12 +1,12 @@
 /* One file or stream, demuxed and decoded by FFmpeg and handed out as interleaved little-endian PCM.
  *
- * Nothing here changes a sample: integer decoders' output is copied (16-bit as S16, anything wider as S32, left
- * justified as the decoder gives it), and a float decoder's is rounded to 16 bits the way `ffmpeg -f s16le` does,
- * which is the width stock's lossy decoders put out. Encoder delay and padding (LAME's tag, iTunSMPB, an edit
- * list, Opus pre-skip, Vorbis granules) are cut by libavcodec from the side data libavformat attaches. */
+ * Nothing here changes a sample, and the width is the one stock opens its output with for the same file
+ * (docs/player.md#output): 16-bit integers as S16, wider integers as S32, left justified as the decoder gives
+ * them, and a float decoder's output as float. MPEG audio comes from FFmpeg's integer decoder, 16 bits as stock's
+ * libmad. Encoder delay and padding (LAME's tag, iTunSMPB, an edit list, Opus pre-skip, Vorbis granules) are cut
+ * by libavcodec from the side data libavformat attaches. */
 #include "q2player.h"
 #include <errno.h>
-#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <libavcodec/avcodec.h>
@@ -77,7 +77,8 @@ struct source *source_open(const struct song *song, int *error) {
     s->out.channels = s->dec->ch_layout.nb_channels;
     switch (av_get_packed_sample_fmt(s->dec->sample_fmt)) {
     case AV_SAMPLE_FMT_S32: s->out.bytes = 4; break;
-    case AV_SAMPLE_FMT_U8: case AV_SAMPLE_FMT_S16: case AV_SAMPLE_FMT_FLT: case AV_SAMPLE_FMT_DBL: s->out.bytes = 2; break;
+    case AV_SAMPLE_FMT_U8: case AV_SAMPLE_FMT_S16: s->out.bytes = 2; break;
+    case AV_SAMPLE_FMT_FLT: case AV_SAMPLE_FMT_DBL: s->out.bytes = 4, s->out.is_float = 1; break;
     default: goto fail;
     }
     if (song->start > 0 && source_seek(s, song->start) < 0) goto fail;
@@ -102,21 +103,21 @@ const struct pcm_format *source_format(const struct source *s) { return &s->out;
 int64_t source_frames(const struct source *s) { return s->base + s->frames; }
 
 void source_info(const struct source *s, struct info *i) {
-    int64_t rate = s->fmt->bit_rate > 0 ? s->fmt->bit_rate : s->dec->bit_rate;
+    /* Stock reports whole bytes a second, times 8: the file's size over its length for what MPlayer's own demuxer
+     * reads (MP3, FLAC, WAV), and the stream's declared rate for what libavformat reads (a Vorbis file's nominal
+     * rate, not its average). */
+    enum AVCodecID id = s->dec->codec_id;
+    int own = id == AV_CODEC_ID_MP3 || id == AV_CODEC_ID_MP2 || id == AV_CODEC_ID_FLAC || !strcmp(s->fmt->iformat->name, "wav");
+    int64_t rate = !own && s->dec->bit_rate > 0 ? s->dec->bit_rate : s->fmt->bit_rate > 0 ? s->fmt->bit_rate : s->dec->bit_rate;
     memset(i, 0, sizeof *i);
-    i->bitrate = (int)(rate / 8) * 8; /* stock reports whole bytes a second, times 8 */
+    i->bitrate = (int)(rate / 8) * 8;
     i->rate = s->out.rate;
     i->length = s->fmt->duration > 0 ? (int)(s->fmt->duration / AV_TIME_BASE) : 0;
-    i->bits = s->out.bytes == 2 ? 16 : s->dec->bits_per_raw_sample > 0 ? s->dec->bits_per_raw_sample : 32;
+    i->bits = s->out.bytes == 2 ? 16 : !s->out.is_float && s->dec->bits_per_raw_sample > 0 ? s->dec->bits_per_raw_sample : 32;
     snprintf(i->codec, sizeof i->codec, "%s", codec_name(s));
 }
 
-static inline int16_t round16(double v) {
-    long x = lrint(v * 32768.0);
-    return x > 32767 ? 32767 : x < -32768 ? -32768 : (int16_t)x;
-}
-
-/* frame, from sample `skip` on, into buf as interleaved S16 or S32. */
+/* frame, from sample `skip` on, into buf, interleaved. */
 static int convert(struct source *s, int skip) {
     const AVFrame *f = s->frame;
     int n = f->nb_samples - skip, ch = s->out.channels, planar = av_sample_fmt_is_planar(f->format);
@@ -139,8 +140,8 @@ static int convert(struct source *s, int skip) {
     case AV_SAMPLE_FMT_S16: { int16_t *out = (int16_t *)s->buf; EACH(int16_t, v) break; }
     case AV_SAMPLE_FMT_S32: { int32_t *out = (int32_t *)s->buf; EACH(int32_t, v) break; }
     case AV_SAMPLE_FMT_U8:  { int16_t *out = (int16_t *)s->buf; EACH(uint8_t, (int16_t)((v - 128) << 8)) break; }
-    case AV_SAMPLE_FMT_FLT: { int16_t *out = (int16_t *)s->buf; EACH(float, (int16_t)av_clip_int16(lrintf(v * 32768.0f))) break; }
-    case AV_SAMPLE_FMT_DBL: { int16_t *out = (int16_t *)s->buf; EACH(double, round16(v)) break; }
+    case AV_SAMPLE_FMT_FLT: { float *out = (float *)s->buf; EACH(float, v) break; }
+    case AV_SAMPLE_FMT_DBL: { float *out = (float *)s->buf; EACH(double, (float)v) break; }
     default: return AVERROR(EINVAL);
     }
 #undef EACH

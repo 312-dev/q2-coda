@@ -41,13 +41,16 @@ static void close_output(int drain) {
     out = NULL;
 }
 
-/* Root mean square of each of the first two channels in dB below full scale, as mcl-getuvmeter reports it. */
+/* A level for each of the first two channels, for mcl-getuvmeter: the block's root mean square in dB below full
+ * scale. ponytail: stock's scale is not known (it read -21 for one tone and -24 for a louder mix); phase 3
+ * reads its meter's code and a Q2 confirms. */
 static void meter(const uint8_t *data, int frames, const struct pcm_format *f, int uv[2]) {
     for (int c = 0; c < 2; c++) {
         double sum = 0;
         int ch = c < f->channels ? c : 0;
         for (int i = 0; i < frames; i++) {
-            double v = f->bytes == 2 ? ((const int16_t *)data)[i * f->channels + ch] / 32768.0
+            double v = f->is_float ? ((const float *)data)[i * f->channels + ch]
+                     : f->bytes == 2 ? ((const int16_t *)data)[i * f->channels + ch] / 32768.0
                                      : ((const int32_t *)data)[i * f->channels + ch] / 2147483648.0;
             sum += v * v;
         }
@@ -79,11 +82,13 @@ static int play(struct source *s, const struct song *song) {
     for (;;) {
         pthread_mutex_lock(&c->mu);
         c->state = PLAYING;
-        while (c->paused && !c->play && !c->stop && !c->seek) {
+        while (c->paused && !(c->play && c->next) && !c->stop && !c->seek) {
             output_pause(out, 1);
             pthread_cond_wait(&c->wake, &c->mu);
         }
-        if (c->play) { pthread_mutex_unlock(&c->mu); return NEXT; }
+        /* set-nexturl cuts the song. set-songurl alone does not: stock only notes it and plays it when this song
+         * has ended (captured: fixtures/stock-replace.txt). demo sends it only when it believes nothing plays. */
+        if (c->play && c->next) { pthread_mutex_unlock(&c->mu); return NEXT; }
         if (c->stop) { c->stop = 0; pthread_mutex_unlock(&c->mu); return STOPPED; }
         int seek = c->seek, to = c->seek_to, want = c->preload, unwant = c->close_preload, metering = c->explay == 1;
         struct song ps = c->preload_song;
@@ -155,11 +160,13 @@ void *engine_thread(void *unused) {
         source_close(cur);
         cur = NULL;
         pthread_mutex_lock(&c->mu);
-        int skipped = c->next;
+        int skipped = c->next, waiting = c->play;
         c->has_info = 0;
+        if (why == STOPPED) c->play = c->next = 0; /* a stop also forgets a song that was waiting, as stock's does */
         pthread_mutex_unlock(&c->mu);
         switch (why) {
         case ENDED:
+            if (waiting) drop_preload(); /* a set-songurl that came while this song played goes next, not the preload */
             if (next) { /* the preloaded song follows without a break; demo sends nothing more */
                 cur = next, next = NULL, song = next_song;
                 ipc_send("{player-status\\exit}");

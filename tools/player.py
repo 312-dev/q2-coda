@@ -28,15 +28,23 @@ FFMPEG = ('7.1.5', 'https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz',
 TRIPLE = 'mips-mti-linux-gnu'
 ARCH = ['-EL', '-march=mips32r2', '-mabi=32', '-mhard-float', '-mfp64', '-mnan=2008', '-mabs=2008']
 
-# What stock's hciplayer plays (docs/player.md#formats), by FFmpeg component.
+# What stock's hciplayer plays (docs/player.md#formats), by FFmpeg component. MPEG audio is FFmpeg's integer
+# decoder: 16-bit output, as stock's libmad gives, and no float in the path.
 DEMUXERS = 'flac mp3 wav w64 aiff mov ogg ape wv asf aac ac3 eac3 dts dtshd dsf iff matroska mpegts hls tta tak'.split()
-DECODERS = ('flac mp3float mp2float mp1float aac aac_latm alac vorbis opus ape wavpack wmav1 wmav2 wmapro wmalossless '
+DECODERS = ('flac mp3 mp2 mp1 aac aac_latm alac vorbis opus ape wavpack wmav1 wmav2 wmapro wmalossless '
             'ac3 eac3 dca tta tak dsd_lsbf dsd_msbf dsd_lsbf_planar dsd_msbf_planar dst '
             'pcm_s8 pcm_u8 pcm_s16le pcm_s16be pcm_s24le pcm_s24be pcm_s32le pcm_s32be pcm_f32le pcm_f32be '
             'pcm_f64le pcm_f64be pcm_alaw pcm_mulaw adpcm_ms adpcm_ima_wav').split()
 PARSERS = 'flac mpegaudio aac aac_latm ac3 dca vorbis opus tak'.split()
 PROTOCOLS = 'file http tcp'.split()
 BSFS = 'aac_adtstoasc'.split()
+
+
+def mbedtls():
+    """mbedTLS as tools/thirdparty.py (sec/libs) builds it for libcurl: a static, position-independent TLS 1.2 and
+    1.3 client. None when that cache has none, and then the player is built without https."""
+    found = sorted((THIRDPARTY/'out').glob('mbedtls-*/usr/lib/libmbedtls.a'))
+    return found[-1].parent.parent if found else None
 
 
 def configure_args(prefix):
@@ -89,7 +97,8 @@ def toolchain():
 def ffmpeg(target):
     """The prefix of FFmpeg built for target ('host' or 'mips'), built on first use."""
     args = configure_args('PREFIX')
-    key = hashlib.sha256(repr((FFMPEG, args, target, ARCH if target == 'mips' else '')).encode()).hexdigest()[:16]
+    tls = mbedtls() if target == 'mips' and os.environ.get('Q2_PLAYER_TLS') else None  # phase 5 turns this on for good
+    key = hashlib.sha256(repr((FFMPEG, args, target, ARCH if target == 'mips' else '') + ((str(tls),) if tls else ())).encode()).hexdigest()[:16]
     prefix = CACHE/'out'/f'ffmpeg-{FFMPEG[0]}-{target}-{key}'
     if (prefix/'.done').exists():
         return prefix
@@ -105,6 +114,10 @@ def ffmpeg(target):
         b = toolchain()
         conf += ['--enable-cross-compile', f'--cross-prefix={b}/{TRIPLE}-', '--arch=mips', '--target-os=linux', '--cpu=mips32r2',
                  '--extra-cflags=' + ' '.join(ARCH), '--extra-ldflags=' + ' '.join(ARCH)]
+        if tls:
+            # FFmpeg's mbedTLS support is under LGPL 3 (--enable-version3), which GPL 3 takes
+            conf += ['--enable-mbedtls', '--enable-version3', '--enable-protocol=https', '--enable-protocol=tls',
+                     f'--extra-cflags=-I{tls}/include', f'--extra-ldflags=-L{tls}/lib']
     run(*conf, cwd=src, log=log)
     run('make', f'-j{JOBS}', cwd=src, log=log)
     run('make', 'install', cwd=src, log=log)
@@ -116,7 +129,8 @@ def ffmpeg(target):
 def build(target):
     """player/ compiled and linked for target; the binary's path."""
     ff = ffmpeg(target)
-    out = ROOT/'player/build'/target
+    tls = mbedtls() if target == 'mips' and os.environ.get('Q2_PLAYER_TLS') else None
+    out = ROOT/'player/build'/(target + ('-tls' if tls else ''))
     cc = ['cc'] if target == 'host' else [f'{toolchain()}/{TRIPLE}-gcc', *ARCH]
     strip = 'strip' if target == 'host' else f'{toolchain()}/{TRIPLE}-strip'
     extra = []
@@ -127,6 +141,8 @@ def build(target):
         if not alsa.exists():
             sys.exit(f'player: no {alsa}; set Q2_STOCKFS to an unpacked stock root filesystem')
         extra = [f'ALSA={alsa}']
+        if tls:
+            extra.append(f'TLS=-L{tls}/lib -lmbedtls -lmbedx509 -lmbedcrypto')
     run('make', '-C', ROOT/'player', f'OUT={out}', 'CC=' + ' '.join(map(str, cc)), f'STRIP={strip}', f'FFMPEG={ff}',
         f'TARGET={target}', f'-j{JOBS}', *extra, log=_log(target))
     return out/'q2player'

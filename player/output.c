@@ -1,6 +1,6 @@
 /* Where PCM goes. On the Q2 that is ALSA, opened as stock opens it (docs/player.md#output): the device by output
  * way and hardware type, the file's own rate and width with ALSA's resampling off, a 500 ms buffer in 16 periods.
- * With Q2PLAYER_PCM set to a directory it is a file a test reads back: one per open, NNNN_RATE_CH_BYTES.raw,
+ * With Q2PLAYER_PCM set to a directory it is a file a test reads back: one per open, NNNN_RATE_CH_FORMAT.raw (s16, s32 or f32),
  * written as fast as it would play, or Q2PLAYER_SPEED times as fast (a test's clock runs that much faster too). */
 #include "q2player.h"
 #include <errno.h>
@@ -40,7 +40,9 @@ static double since(const struct timespec *t) {
 
 #ifdef HAVE_ALSA
 /* Stock's ao_alsa init (hciplayer 0x438f64-0x4391f8): Bluetooth through bluealsa, a USB DAC as card 2, and the
- * local DAC as "default" on a Q2 (hardware type 17); types 14 and 15 are other Shanling players' "plughw:1,0". */
+ * local DAC as "default" on a Q2 (hardware type 17); types 14 and 15 are other Shanling players' "plughw:1,0".
+ * "default" is a plug over the DAC, which is what takes a float decoder's FLOAT_LE.
+ * ponytail: on hw:2,0 a format the DAC lacks fails here; stock falls back to an integer format (phase 4). */
 static const char *device(int outputway, int hw) {
     const char *forced = getenv("Q2PLAYER_DEVICE");
     if (forced) return forced;
@@ -59,7 +61,7 @@ static int alsa_open(struct output *o, int outputway, int hw) {
     if (r < 0) { fprintf(stderr, "q2player: %s: %s\n", name, snd_strerror(r)); return -1; }
     if ((r = snd_pcm_hw_params_malloc(&p)) < 0 || (r = snd_pcm_hw_params_any(o->pcm, p)) < 0 ||
         (r = snd_pcm_hw_params_set_access(o->pcm, p, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0 ||
-        (r = snd_pcm_hw_params_set_format(o->pcm, p, o->f.bytes == 2 ? SND_PCM_FORMAT_S16_LE : SND_PCM_FORMAT_S32_LE)) < 0 ||
+        (r = snd_pcm_hw_params_set_format(o->pcm, p, o->f.is_float ? SND_PCM_FORMAT_FLOAT_LE : o->f.bytes == 2 ? SND_PCM_FORMAT_S16_LE : SND_PCM_FORMAT_S32_LE)) < 0 ||
         (r = snd_pcm_hw_params_set_channels(o->pcm, p, o->f.channels)) < 0 ||
         (r = snd_pcm_hw_params_set_rate_resample(o->pcm, p, 0)) < 0 ||
         (r = snd_pcm_hw_params_set_rate_near(o->pcm, p, &rate, NULL)) < 0 ||
@@ -87,7 +89,7 @@ struct output *output_open(const struct pcm_format *f, int outputway, int hw) {
     if (o->speed <= 0) o->speed = 1;
     if (dir) {
         char path[1024];
-        snprintf(path, sizeof path, "%s/%04d_%d_%d_%d.raw", dir, opens++, f->rate, f->channels, f->bytes);
+        snprintf(path, sizeof path, "%s/%04d_%d_%d_%s.raw", dir, opens++, f->rate, f->channels, f->is_float ? "f32" : f->bytes == 2 ? "s16" : "s32");
         if (!(o->file = fopen(path, "wb"))) { perror(path); free(o); return NULL; }
         clock_gettime(CLOCK_MONOTONIC, &o->t0);
         return o;

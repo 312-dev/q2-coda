@@ -54,7 +54,7 @@ void ipc_send(const char *text);
 void *ipc_thread(void *);
 
 /* source.c: one open file or stream, decoded to interleaved PCM in the format the output is opened with. */
-struct pcm_format { int rate, channels, bytes; /* per sample: 2 (S16_LE) or 4 (S32_LE) */ };
+struct pcm_format { int rate, channels, bytes, is_float; /* S16_LE (2 bytes), S32_LE (4) or FLOAT_LE (4, is_float) */ };
 struct source;
 struct source *source_open(const struct song *song, int *error);
 void source_close(struct source *);

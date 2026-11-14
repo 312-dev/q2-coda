@@ -8,6 +8,7 @@ files in place of ALSA.
 - exact: what reaches the output is, bit for bit, the reference decode (the system's ffmpeg with its
   assembly off): two FLACs and two MP3s through a preloaded change come out as one stream with no
   sample added or lost at the cut, and a 24-bit 96 kHz FLAC as S32.
+- formats: each output is opened in the width stock opens for the same file.
 - protocol: for each transcript in fixtures/ (stock's and Q2 Pod's hciplayer under qemu, captured by
   fakedemo.py), the same commands get the same events and answers from q2player.
 """
@@ -22,8 +23,10 @@ CACHE = pathlib.Path.home()/'.cache/q2-pytest/player'
 
 
 def reference(path, fmt='s16le'):
-    """path decoded by the system's ffmpeg in C alone, as raw PCM: no dither, no resampling."""
-    return subprocess.run(['ffmpeg', '-v', 'error', '-cpuflags', '0', '-i', str(path), '-f', fmt, '-'], check=True, capture_output=True).stdout
+    """path decoded by the system's ffmpeg in C alone, as raw PCM: no dither, no resampling. MPEG audio by its integer
+    decoder, the one the player is built with."""
+    decoder = ['-c:a', pathlib.Path(path).suffix[1:]] if pathlib.Path(path).suffix in ('.mp3', '.mp2') else []
+    return subprocess.run(['ffmpeg', '-v', 'error', '-cpuflags', '0', *decoder, '-i', str(path), '-f', fmt, '-'], check=True, capture_output=True).stdout
 
 
 def play(player, songs, scenario, out, speed=1):
@@ -58,7 +61,7 @@ def check_exact(player, songs, tmp, scenario, files, fmt, name):
 
 
 def test_exact_flac_gapless(player, songs, tmp):
-    return check_exact(player, songs, tmp, 'gapless-flac-full', ['a1.flac', 'a2.flac'], 's16le', '0000_44100_2_2.raw')
+    return check_exact(player, songs, tmp, 'gapless-flac-full', ['a1.flac', 'a2.flac'], 's16le', '0000_44100_2_s16.raw')
 
 
 def test_exact_flac_is_the_source(player, songs, tmp):
@@ -70,7 +73,7 @@ def test_exact_flac_is_the_source(player, songs, tmp):
 
 
 def test_exact_mp3_gapless(player, songs, tmp):
-    r = check_exact(player, songs, tmp, 'gapless-mp3-full', ['b1.mp3', 'b2.mp3'], 's16le', '0000_44100_2_2.raw')
+    r = check_exact(player, songs, tmp, 'gapless-mp3-full', ['b1.mp3', 'b2.mp3'], 's16le', '0000_44100_2_s16.raw')
     # each half is exactly its 20 s: LAME's delay and padding are gone
     assert len(reference(songs/'b1.mp3')) == len(reference(songs/'b2.mp3')) == 20 * 44100 * 4
     return r
@@ -80,7 +83,7 @@ def test_exact_mp3_no_step_at_the_cut(player, songs, tmp):
     """The signal is smooth, so samples dropped or repeated at the cut show as a step in the second difference there.
     The two halves were encoded apart, so the cut is a little rougher than its surroundings; five frames dropped
     there, tried here on a copy, is several times rougher still."""
-    pcm = (tmp/'gapless-mp3-full/pcm/0000_44100_2_2.raw').read_bytes()
+    pcm = (tmp/'gapless-mp3-full/pcm/0000_44100_2_s16.raw').read_bytes()
     cut = 20 * 44100
     def roughness(data, i):
         x = array.array('h'); x.frombytes(data[(i - 200) * 4:(i + 200) * 4])
@@ -95,7 +98,14 @@ def test_exact_mp3_no_step_at_the_cut(player, songs, tmp):
 
 
 def test_exact_flac_24_96(player, songs, tmp):
-    return check_exact(player, songs, tmp, 'hires', ['c96.flac'], 's32le', '0000_96000_2_4.raw')
+    return check_exact(player, songs, tmp, 'hires', ['c96.flac'], 's32le', '0000_96000_2_s32.raw')
+
+
+def test_formats_open_as_stock(player, songs, tmp):
+    """Stock's ALSA requests for the same scenario (the emulator shim's log): S32 for 24-bit FLAC, FLOAT for AAC and Vorbis."""
+    s, pcm, names = play(player, songs, 'formats', tmp/'formats')
+    assert names == ['0000_96000_2_s32.raw', '0001_44100_2_f32.raw', '0002_44100_2_f32.raw'], names
+    return ' '.join(names)
 
 
 # ---- protocol
@@ -119,6 +129,7 @@ def skeleton(lines):
     for t, d, name, arg in lines:
         if d == '>': out.append(f'> {name}')
         elif name in ('player-status', 'media-info') and arg in ('ready', 'playing', 'no-playing-status') or name == 'media-info': continue
+        elif name in ('mcl-getuvmeter', 'mcl-getspectrum'): out.append(f'< {name}')  # the meters' scale is phase 3's
         else: out.append(f'< {name}\\{arg}')
     return out
 
@@ -135,10 +146,8 @@ def answers(lines):
 
 # Where q2player differs from the fixture on purpose; docs/player-plan.md#deviations has each one's reason.
 KNOWN = {
-    'stock-transport': 'stock ends a FLAC after a seek near its end; Q2 Pod fixes it and so does q2player',
-    'stock-gapless-flac': 'the same seek',
-    'stock-skip': 'the same seek',
-    'stock-end': 'the same seek',
+    'stock-transport': 'stock ends this FLAC half a second after a seek to 15 s of its 20; Q2 Pod fixes it and so does q2player',
+    'stock-gapless-flac': 'the same: after the seek to 12 s stock ends the song at 15 s and is into the next by 6 s',
 }
 
 
@@ -155,10 +164,12 @@ def check_protocol(player, songs, tmp, fixture):
     assert [x[1:] for x in ia] == [x[1:] for x in ib], f'{name}: media-info differs\n  q2player: {ia}\n  fixture:  {ib}'
     for x, y in zip(ia, ib):
         assert abs(int(x[0]) - int(y[0])) <= max(2000, int(y[0]) // 50), f'{name}: bitrate {x[0]}, fixture {y[0]}'
-    # positions: at each of the fixture's samples, within 2 s (stock starts about half a second later, and rounds down)
+    # positions: each of the fixture's samples within 2 s of q2player's at about that time. hciplayer under qemu is up
+    # to a second and a half behind after a start or a seek (it mutes, sleeps 150 ms and reopens), so the window
+    # reaches back that far; a sample after the last command has no counterpart once q2player has stopped.
     for t, p in want_pos:
-        near = [q for u, q in got_pos if abs(u - t) < 0.5]
-        assert near and min(abs(q - p) for q in near) <= 2, f'{name}: at {t} s position {near}, fixture {p}'
+        near = [q for u, q in got_pos if t - 1.6 < u < t + 0.5]
+        assert not near or min(abs(q - p) for q in near) <= 2, f'{name}: at {t} s position {near}, fixture {p}'
     return f'{len(b)} events, {len(ib)} media-info answers, {len(want_pos)} positions'
 
 
