@@ -51,6 +51,9 @@ HOOKS = {
     'select_timezone': (0x503b40, 'ringnav_timezone', 'timezone'),
     'timezone_row': (0x4c1aac, 'ringnav_timezone_row', 'timezone_row'),  # autotime_page's row i (0: the switch)
     'home_page_init': (0x534b6c, 'coverflow_home', 'home'),
+    # Wi-Fi transfer's PIN (wifi_transfer.c): the server's switch, and the page that shows the PIN
+    'switch_wifitransport': (0x519b30, 'ringnav_wifi_transfer', 'wifi_transfer'),
+    'systemset_wifitransport_page_init': (0x4d797c, 'ringnav_wifi_transfer_page', 'wifi_transfer_page'),
     'localmusic_page_init': (0x535334, 'ringnav_localmusic', 'localmusic'),
     # Library lists: an Unknown row with no songs is dropped
     'load_localclass_list': (0x51357c, 'ringnav_localclass', 'localclass'),
@@ -715,6 +718,65 @@ function _esc(s) {
 }
 
 function _reload(path) {'''
+# Wi-Fi transfer's PIN (docs/internals.md#wi-fi-transfer-pin): every CGI answers 401 until the page has
+# sent the PIN the Q2 shows to cgi-bin/auth.cgi, which sets the session cookie; the browser then sends it
+# with each request. Any 401 opens the PIN box, so a page left open across a restart of transfer asks for
+# the new PIN.
+PIN_JS = r'''// The PIN the Q2 shows on its Wi-Fi File Transfer screen, asked for once; the server answers it
+// with a session cookie the browser sends with every request after.
+var _pinFor = null;
+function _askPin(path) {
+  _pinFor = path;
+  if ($("#pin-modal").hasClass("in"))
+    return;
+  $("#pin-error").text("");
+  $("#pin-input").val("");
+  $("#pin-modal").modal("show");
+}
+function _sendPin() {
+  var pin = $("#pin-input").val().replace(/\s/g, "");
+  if (!/^[0-9]{6}$/.test(pin)) {
+    $("#pin-error").text("The PIN is six digits.");
+    return false;
+  }
+  $.ajax({url: 'cgi-bin/auth.cgi', type: 'POST', data: {pin: pin}, dataType: 'json'})
+    .done(function() {
+      $("#pin-modal").modal("hide");
+      _reload(_pinFor || _home);
+    })
+    .fail(function(jqXHR) {
+      var r = {};
+      try { r = $.parseJSON(jqXHR.responseText) || {}; } catch (e) {}
+      $("#pin-error").text(r.error == "locked" ? "Too many wrong PINs. On the Q2, go back, then open Wi-Fi File Transfer again for a new PIN."
+        : r.error == "off" ? "Wi-Fi transfer is off on the Q2."
+        : "Wrong PIN" + (r.left != null ? " (" + r.left + (r.left == 1 ? " try" : " tries") + " left)." : "."));
+      $("#pin-input").val("").focus();
+    });
+  return false;
+}
+
+// A file or folder name as HTML text, quotes included, for markup built from strings.'''
+PIN_HTML = '''<div class="modal fade" id="pin-modal" tabindex="-1" data-backdrop="static" data-keyboard="false">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h4 class="modal-title">Enter the PIN</h4>
+          </div>
+          <div class="modal-body">
+            <p>The Q2 shows a six-digit PIN on its Wi-Fi File Transfer screen, above the address.</p>
+            <form id="pin-form">
+              <input type="text" class="form-control" id="pin-input" inputmode="numeric" autocomplete="one-time-code" maxlength="7">
+            </form>
+            <p class="text-danger" id="pin-error"></p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-primary" id="pin-ok">OK</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="create-modal" tabindex="-1">'''
 WEB = {
   'usr/share/web/index.html': [
     ('山灵音乐', 'Shanling Q2'),
@@ -730,12 +792,48 @@ WEB = {
           <span class="glyphicon glyphicon-folder-open"></span> Upload Folder
           <input id="folderupload" type="file" name="files[]" multiple webkitdirectory>
         </button>'''),
+    ('<div class="modal fade" id="create-modal" tabindex="-1">', PIN_HTML),
     ('创建文件夹', 'New Folder'), ('返回上一级', 'Up'), ('正在进行文件上传', 'Uploading'), ('新建文件夹', 'New Folder'),
     ('请输入要创建的文件夹的名称:', 'Folder name:'), ('取消', 'Cancel'), ('移动项目', 'Move'), ('请输入此项的新位置:', 'New location:')],
   'usr/share/web/js/index.js': [
     ('"LRC","BIN"];', '"LRC","BIN","M4B","MP4","M4V","MKV","AVI","MOV","MPG","TXT","EPUB"];'),
     ('function _showError(', MKDIR_JS),
     ('function _reload(path) {', ESC_JS),
+    ('// A file or folder name as HTML text, quotes included, for markup built from strings.', PIN_JS),
+    ('''    url: 'list',
+    type: 'GET',
+    data: {path: path},
+    dataType: 'json'
+  }).fail(function(jqXHR, textStatus, errorThrown) {
+''', '''    url: 'list',
+    type: 'GET',
+    data: {path: path},
+    dataType: 'json'
+  }).fail(function(jqXHR, textStatus, errorThrown) {
+    if (jqXHR.status == 401)
+      return;  // the PIN box (_askPin) takes it
+'''),
+    ('''          $("#path").append('<li data-path="' + subpath + '"><a style="cursor:pointer">' + components[i] + '</a></li>');''',
+     '''          $("#path").append('<li data-path="' + _esc(subpath) + '"><a style="cursor:pointer">' + _esc(components[i]) + '</a></li>');'''),
+    ('''        $("#path").append('<li class="active">' + components[components.length - 1] + '</li>');''',
+     '''        $("#path").append('<li class="active">' + _esc(components[components.length - 1]) + '</li>');'''),
+    ('''
+  _reload(_home);
+
+});''', '''
+  $("#pin-ok").click(_sendPin);
+  $("#pin-form").submit(_sendPin);
+  $("#pin-modal").on("shown.bs.modal", function() {
+    $("#pin-input").focus();
+  });
+  $(document).ajaxError(function(event, jqXHR) {
+    if (jqXHR.status == 401)
+      _askPin(_path || _home);
+  });
+
+  _reload(_home);
+
+});'''),
     ('''  $("#upload-file").click(function(event) {
     $("#fileupload").click();
   });
@@ -784,10 +882,6 @@ WEB = {
         data.context.find("button").click(function(event) {
           if (jqXHR) jqXHR.abort(); else data.context.remove();
         });'''),
-    ('''          $("#path").append('<li data-path="' + subpath + '"><a style="cursor:pointer">' + components[i] + '</a></li>');''',
-     '''          $("#path").append('<li data-path="' + _esc(subpath) + '"><a style="cursor:pointer">' + _esc(components[i]) + '</a></li>');'''),
-    ('''        $("#path").append('<li class="active">' + components[components.length - 1] + '</li>');''',
-     '''        $("#path").append('<li class="active">' + _esc(components[components.length - 1]) + '</li>');'''),
     ('"无法获取列表内容 - \\""', '"Can\'t list \\""'),
     ('"无法创建\\"" + name + "\\"到\\""', '"Can\'t create \\"" + name + "\\" in \\""'), ('"无法移动\\""', '"Can\'t move \\""'), ('"\\"到\\""', '"\\" to \\""'),
     ('"无效的命名 - \'\'"', '"Invalid name - \'\'"'), ('"你确定要删除吗?"', '"Delete this item?"'),
@@ -1674,7 +1768,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
          '-fno-stack-protector','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
          '-Oz','-Wall','-Wextra','-Werror','-Wno-unused-parameter']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c']
 
 def compile_payload(out):  # pragma: no mutate block
     """Compile and link the payload."""
@@ -2263,6 +2357,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                'etc/init.d/S12usbcharge': ('etc/init.d/S20urandom', (ROOT/'patch/usb_charge.sh').read_bytes()),
                                HELPER: (HELPER_LIKE, compile_helper(out, cat, 'video', 'q2video', HELPER_LIBS)),
                                SCROBBLE_CA: ('etc/hosts', (ROOT/'assets/scrobble-ca.pem').read_bytes()),
+                               # Wi-Fi transfer's PIN check (q2cgi auth), a CGI stock has no inode for
+                               'usr/share/web/cgi-bin/auth.cgi': ('usr/share/web/cgi-bin/list.cgi', (ROOT/'assets/web/q2cgi').read_bytes()),
                                BOOT: (HELPER_LIKE, compile_helper(out, cat, 'boot', 'q2boot', HELPER_LIBS[:1])),
                                **({LOGO_LIGHT: (xx+'list_tidal.png', light)} if light else {}),  # the swapped logo.jpg has no stock inode left
                                **{path: (FONT, data) for path, (data, _) in fonts.items()},
@@ -2297,7 +2393,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     # path/filename straight to system(), so a name with $(...) or a backtick runs as root, and they
     # read paths outside the card. q2cgi replaces all five, doing each operation with argv (never a
     # shell command built from input) and validating every path stays under /mnt/mmc. One script over
-    # every cgi-bin/*.cgi inode, so both /name and /cgi-bin/name.cgi resolve to it with no bypass.
+    # every cgi-bin/*.cgi inode, so both /name and /cgi-bin/name.cgi resolve to it with no bypass; it
+    # is also cgi-bin/auth.cgi (added above), the PIN check every other route requires.
     q2cgi = (ROOT/'assets/web/q2cgi').read_bytes()
     (out/'q2cgi').write_bytes(q2cgi)
     for n in ('create', 'delete', 'list', 'download', 'upload'):

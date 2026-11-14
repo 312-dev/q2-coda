@@ -2,6 +2,7 @@
 
 - **Unreleased (q2-coda)**:
   - Display: **Theme** lists **OLED** after **Classic**. It is a placeholder: it looks as **Theme: Classic** does until its own design arrives.
+  - Wi-Fi transfer: the web page asks for a PIN. **Wi-Fi File Transfer** shows a new six-digit PIN above the address each time you open it, and nothing on the card can be listed, downloaded, uploaded or deleted without it. Before, anyone on the same Wi-Fi network could reach the whole card while the page was open. Five wrong PINs lock the page out until you open Wi-Fi File Transfer again.
 - **1.8.2**:
   - Games: in Solitaire, Centre on a pile that can't take the cards you hold now picks that pile up instead. Before, nothing happened and the cards stayed held until you put them back or pressed Return, which looked like the game had stuck.
   - Themes: Chinese, Japanese and other text the theme's own face lacks is now drawn bold wherever **Classic** or **Modern** draws its text bold: Classic's lists, bar, info rows, Cover Flow, album panel and hold menu; Modern's bar title; and Now Playing's title in both. It used the regular system font.
