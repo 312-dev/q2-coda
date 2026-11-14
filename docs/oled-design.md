@@ -146,8 +146,9 @@ All lists share one grid.
 ### Status row
 
 - No band: the bar is the page's black, 58 px, with no rule under it. Its glyphs centre on y 37.
-- Left, on the 24 px text column: the page's title in Inter Medium 15 px, Text Secondary. Home
-  and Now Playing have no title, so the clock takes that place in the same face, size and colour.
+- Left, on the 24 px text column: the page's title in Inter Medium 15 px, Text Secondary. Home,
+  Now Playing and Cover Flow's covers (but an artist's, titled by the artist) have no title, so the
+  clock takes that place in the same face, size and colour.
 - Right: the play state (Phosphor `play`/`pause`, fill, 13 px, Text Primary, nothing when
   stopped), then the battery, its nub's end on the 28 px right column, the play state's centre
   12 px left of the battery's body.
@@ -410,7 +411,7 @@ pattern.
 | Q2 Pod screen                       | Pattern                     | Notes                                                                                                      |
 | ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock |
-| Home (Split)                        | List row beside art         | Rows to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges, panning slowly; the status row's play state and battery over it, each pixel white or black by contrast |
+| Home (Split)                        | List row beside art         | Rows to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges, panning slowly; the status row's play state and battery over it, each glyph white or black by contrast |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Library                             | List row                    |                                                                                                            |
 | Albums                              | Two-line row with art       |                                                                                                            |
@@ -419,7 +420,7 @@ pattern.
 | Artists, Genres, Composers          | List row                    |                                                                                                            |
 | Songs, a playlist's songs           | Song rows                   | The artist inline                                                                                          |
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
-| Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; an artist's covers titled by the artist |
+| Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; an artist's covers titled by the artist, other covers with the clock in the status row as Home |
 | Playlists                           | Two-line row with icon      | New Playlist... and the other action rows take the same 52 px pitch once there is a playlist, the picker's too |
 | Hold menu, More                     | [Menus](#menus)             | The inset modal over the page                                                                              |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
@@ -480,8 +481,10 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   Phosphor symbols as the theme's own art.
 - Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_inset` (the art from
   x 196 and the top edge to the edges, its top 58 rows painted by the bar with the status row's play state and
-  battery over them, each of their pixels white or black, whichever has the higher WCAG contrast against the art
-  under it (`home_ink`, approved from `mock_split_top.py` on 2026-11-14), panning slowly across its 110 % zoom with an
+  battery over them, each glyph in one ink, white or black, whichever has the higher WCAG contrast against the
+  art's mean luminance under it, weighted by the glyph's coverage and held 0.03 past the bound against flicker; the
+  charging green and low red keep their colours (`home_ink`, approved from `mock_split_top.py` on 2026-11-14, one
+  ink a glyph from the same day, as each pixel's own pick speckled over lettering), panning slowly across its 110 % zoom with an
   eased turn at each end and 2 % of the zoom kept clear of the pane at each edge, so a cover's own border never
   shows), and the lists Home's rows open as full-width pages with the art hidden (`home.lists.full`).
 - The toast, the confirm as a dialog page and the empty note (`dialog.confirm.painter="oled"`,

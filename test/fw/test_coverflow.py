@@ -47,7 +47,7 @@ class Home(C.Structure):
                 *((k, C.c_int) for k in 'kind songs albums services games free_tenths counted counting got_songs got_albums'.split()),
                 ('count_thread', C.c_ulong), *((k, C.c_uint) for k in 'asked pane_read count_timer pane_timer'.split()),
                 ('ring', (C.c_uint * HOME_PW) * 4), ('clip', C.c_int * 4), ('clipped', C.c_int),
-                ('ink_bar', C.c_void_p), ('ground', C.c_uint)]
+                ('ink_bar', C.c_void_p), ('ground', C.c_uint), ('held', C.c_ubyte * HOME_PW)]
 
 
 class Row(C.Structure):
@@ -792,21 +792,32 @@ def test_home_tex_a_cover_it_won_t_pan_stays_still(fw, w, h, format):
     assert tex(b'x') == 0 and home.tw == 0 and fw.calls('widget_unload_image')
 
 
-# The status row over Split's art: each glyph pixel inked white or black by WCAG contrast
+# The status row over Split's art: each glyph in one ink, white or black by WCAG contrast over its mean
+
+GAP = 4  # INK_GAP: empty columns that part two glyphs
+BLACK, WHITE = 0xff000000, 0xffffffff
+
+
+def lum(r, g, b):
+    lin = [c / 255 / 12.92 if c / 255 <= 0.04045 else ((c / 255 + 0.055) / 1.055) ** 2.4 for c in (r, g, b)]
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
 
 def wcag_white(r, g, b):
     """Whether white has at least black's WCAG contrast over the sRGB pixel (Scrolly's lampLineInk rule)."""
-    lin = [c / 255 / 12.92 if c / 255 <= 0.04045 else ((c / 255 + 0.055) / 1.055) ** 2.4 for c in (r, g, b)]
-    lum = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
-    return 1.05 / (lum + 0.05) >= (lum + 0.05) / 0.05, abs((lum + 0.05) ** 2 - 0.0525)
+    L = lum(r, g, b)
+    return 1.05 / (L + 0.05) >= (L + 0.05) / 0.05, abs((L + 0.05) ** 2 - 0.0525)
 
 
-def ink(fw, screen, art, ground):
-    """home_ink over one row: screen (BGRA words, the bar's glyphs on ground) and art (RGBA words) as long."""
+def ink(fw, screen, art, ground, held=None, h=1, cut=0):
+    """home_ink over h rows: screen (BGRA words, the bar's glyphs on ground) and art (RGBA words), row-major."""
     n = len(screen)
+    w = n // h
     fb, tex = (C.c_uint * n)(*screen), (C.c_uint * n)(*art)
-    fw.fn('home_ink', None, C.c_void_p, C.c_int, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_uint)(fb, n, tex, n, n, 1, ground)
-    return list(fb)
+    hold = (C.c_ubyte * w)(*(held or [0] * w))
+    fw.fn('home_ink', None, C.c_void_p, C.c_int, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_uint, C.c_void_p, C.c_int)(
+        fb, w, tex, w, w, h, ground, hold, cut)
+    return list(fb), list(hold)
 
 
 def art_px(r, g, b):
@@ -817,30 +828,124 @@ def screen_px(r, g, b):
     return 0xff000000 | r << 16 | g << 8 | b
 
 
-@pytest.mark.parametrize('ground, glyph', ((0xff000000, 0xffffffff), (0xffffffff, 0xff000000)))  # dark, Light Mode
+def apart(cells, ground):
+    """One-pixel glyphs, GAP columns of ground between them: the screen row and each glyph's column."""
+    row, at = [], []
+    for c in cells:
+        at.append(len(row))
+        row += [c] + [ground] * GAP
+    return row, at
+
+
+@pytest.mark.parametrize('ground, glyph', ((BLACK, WHITE), (WHITE, BLACK)))  # dark, Light Mode
 def test_home_ink_shows_the_art_where_no_glyph_is_and_inks_a_glyph_by_contrast(fw, ground, glyph):
-    art = [art_px(120, 190, 220), art_px(250, 250, 250), art_px(20, 24, 30), art_px(120, 190, 220)]
-    got = ink(fw, [ground, glyph, glyph, glyph], art, ground)
-    assert got[0] == screen_px(120, 190, 220)  # the art, in the screen's order
-    assert got[1:] == [screen_px(0, 0, 0), screen_px(255, 255, 255), screen_px(0, 0, 0)]  # white: black; dark: white; light blue: black
+    screen, at = apart([glyph] * 3, ground)
+    tones = [(250, 250, 250), (20, 24, 30), (120, 190, 220)]
+    art = [art_px(120, 190, 220)] * len(screen)
+    for i, t in zip(at, tones):
+        art[i] = art_px(*t)
+    got, _ = ink(fw, screen, art, ground)
+    assert got[1] == screen_px(120, 190, 220)  # the art, in the screen's order
+    assert [got[i] for i in at] == [screen_px(0, 0, 0), screen_px(255, 255, 255), screen_px(0, 0, 0)]  # white: black; dark: white; light blue: black
 
 
 def test_home_ink_blends_an_edge_by_its_coverage(fw):
     half = screen_px(128, 128, 128)  # a glyph's edge, half on the black ground
-    got = ink(fw, [half, half], [art_px(255, 255, 255), art_px(0, 0, 0)], 0xff000000)
-    assert abs((got[0] & 255) - 127) <= 1 and abs((got[1] & 255) - 128) <= 1  # white art half black, black half white
+    screen, at = apart([half, half], BLACK)
+    art = [art_px(0, 0, 0)] * len(screen)
+    art[at[0]] = art_px(255, 255, 255)
+    got, _ = ink(fw, screen, art, BLACK)
+    assert abs((got[at[0]] & 255) - 127) <= 1 and abs((got[at[1]] & 255) - 128) <= 1  # white art half black, black half white
     dim = screen_px(0x6e, 0x6e, 0x6e)  # the slim battery's outline: its tone is its share
-    assert abs((ink(fw, [dim], [art_px(255, 255, 255)], 0xff000000)[0] & 255) - (255 - 0x6e)) <= 1
+    assert abs((ink(fw, [dim], [art_px(255, 255, 255)], BLACK)[0][0] & 255) - (255 - 0x6e)) <= 1
 
 
 def test_home_ink_picks_as_wcag_does(fw):
     rnd = random.Random(7)
     pixels = [(v, v, v) for v in range(256)] + [tuple(rnd.randrange(256) for _ in range(3)) for _ in range(4000)]
-    got = ink(fw, [0xffffffff] * len(pixels), [art_px(*p) for p in pixels], 0xff000000)
-    for p, g in zip(pixels, got):
+    screen, at = apart([WHITE] * len(pixels), BLACK)
+    art = [art_px(0, 0, 0)] * len(screen)
+    for i, p in zip(at, pixels):
+        art[i] = art_px(*p)
+    got, held = ink(fw, screen, art, BLACK)
+    for i, p in zip(at, pixels):
         white, margin = wcag_white(*p)
         if margin > 1e-5:  # a tie within the table's rounding either way
-            assert g == (0xffffffff if white else 0xff000000), p
+            assert got[i] == (WHITE if white else BLACK), p
+            assert held[i] == (1 if white else 2), p
+
+
+def test_home_ink_gives_a_glyph_on_speckled_art_one_ink(fw):
+    """Lettering under the battery: art alternating light and dark under one solid glyph. Each pixel picked on its
+    own would speckle; the glyph takes the ink for its mean, white here (more dark than light)."""
+    w, h = 12, 6
+    dark, light = (10, 10, 10), (240, 240, 240)
+    art = [art_px(*(light if (x * 7 + y * 3) % 8 == 0 else dark)) for y in range(h) for x in range(w)]
+    got, held = ink(fw, [WHITE] * (w * h), art, BLACK, h=h)
+    assert set(got) == {WHITE} and set(held) == {1}
+    art = [art_px(*(dark if (x * 7 + y * 3) % 8 == 0 else light)) for y in range(h) for x in range(w)]
+    got, _ = ink(fw, [WHITE] * (w * h), art, BLACK, h=h)
+    assert set(got) == {BLACK}
+
+
+def test_home_ink_weighs_the_art_by_the_glyph_s_coverage(fw):
+    """A glyph whose solid part sits on dark art and whose faint edge sits on white: white, though most of its box
+    is light."""
+    faint = screen_px(8, 8, 8)
+    screen = [WHITE, faint, faint, faint, faint]
+    art = [art_px(0, 0, 0)] + [art_px(255, 255, 255)] * 4
+    got, _ = ink(fw, screen, art, BLACK)
+    assert got[0] == WHITE
+
+
+def test_home_ink_parts_glyphs_at_its_gap(fw):
+    """A pause's bars, a column apart, are one glyph; GAP empty columns part two."""
+    dark, light = art_px(0, 0, 0), art_px(255, 255, 255)
+    got, _ = ink(fw, [WHITE, BLACK, WHITE], [dark, light, light], BLACK)  # one glyph: one ink
+    assert got[0] == got[2]
+    screen = [WHITE] + [BLACK] * GAP + [WHITE]
+    got, _ = ink(fw, screen, [dark] + [dark] * GAP + [light], BLACK)
+    assert (got[0], got[-1]) == (WHITE, BLACK)
+
+
+def grey(L):
+    """The sRGB grey whose relative luminance is nearest L."""
+    return min(range(256), key=lambda v: abs(lum(v, v, v) - L))
+
+
+@pytest.mark.parametrize('L, was, want', (
+    (0.19, 0, BLACK), (0.19, 1, WHITE), (0.215, 1, BLACK),    # past the bound; held white within 0.03; past it
+    (0.17, 0, WHITE), (0.17, 2, BLACK), (0.145, 2, WHITE)))   # and the other way
+def test_home_ink_keeps_a_glyph_s_ink_near_the_bound(fw, L, was, want):
+    v = grey(L)
+    got, held = ink(fw, [WHITE, WHITE], [art_px(v, v, v)] * 2, BLACK, held=[0, was])
+    assert got == [want] * 2 and held == [1 if want == WHITE else 2] * 2
+
+
+@pytest.mark.parametrize('cut, at, want', ((1, 0, WHITE), (2, -1, WHITE), (4, 0, WHITE), (4, -1, WHITE), (2, 0, BLACK), (0, -1, BLACK)))
+def test_home_ink_keeps_the_ink_of_a_glyph_its_clip_cuts(fw, cut, at, want):
+    """Part of the battery repainted, on light art its whole would not be inked by: a glyph at an edge the clip cut
+    (INK_CUT_LEFT 1, RIGHT 2, ROWS 4) keeps its white; one clear of a cut takes its part's own ink."""
+    light = art_px(240, 240, 240)
+    screen = [WHITE] + [BLACK] * GAP + [WHITE]
+    got, held = ink(fw, screen, [light] * len(screen), BLACK, held=[1] * len(screen), cut=cut)
+    assert got[at] == want and held[at] == (1 if want == WHITE else 2)
+
+
+@pytest.mark.parametrize('ground', (BLACK, WHITE))
+def test_home_ink_leaves_a_battery_s_status_colour_its_own(fw, ground):
+    """Charging green over the art, at full and half cover; the dim outline beside it still inked
+    (INK_KEEP_STATUS_COLOURS 1: with 0 the green is inked as the rest)."""
+    green = (0x34, 0xc7, 0x59)
+    gr = ground & 255
+    half = screen_px(*((c + gr) // 2 for c in green))
+    dim = screen_px(*([0x6e if ground == BLACK else 0x91] * 3))
+    art = art_px(255, 255, 255)
+    got, _ = ink(fw, [dim, screen_px(*green), half], [art] * 3, ground)
+    assert got[1] == screen_px(*green)
+    mid = [(got[2] >> s & 255) for s in (16, 8, 0)]
+    assert all(abs(m - (g + 255) // 2) <= 3 for m, g in zip(mid, green))  # half green over the white art
+    assert got[0] & 255 < 0xc0  # the outline: black ink over white art, at its share
 
 
 # Touch: a fling's speed
@@ -2233,7 +2338,8 @@ def deque_of(fw, recs):
 @pytest.mark.parametrize('theme', ['oled', 'classic-light', 'minimal'])
 def test_the_bar_names_an_album_s_tracks_under_song_rows_and_an_artist_s_covers_under_a_status_row(fw, theme):
     """OLED's one-line song rows take the album's name from the tracks' hidden caption (0: read it); an artist's
-    covers read the artist under a status row; anything else is Cover Flow."""
+    covers read the artist under a status row, and other covers there no title, so the row shows the clock as
+    Home's does; anything else is Cover Flow."""
     index = {t['id']: t['index'] for t in THEMES}[theme]
     themed(fw, index)
     recs = [Rec(artist='Bob Dylan', path='/a')]
@@ -2245,7 +2351,9 @@ def test_the_bar_names_an_album_s_tracks_under_song_rows_and_an_artist_s_covers_
     c.screen = COVERS
     assert title(1) == b'Bob Dylan' and title(0) == b'Cover Flow'
     c.scoped = 0
-    assert title(1) == b'Cover Flow'
+    assert title(1) == b'' and title(0) == b'Cover Flow'
+    c.scoped, c.albums = ARTIST_ALBUMS, 0  # no albums read yet: no artist to name
+    assert title(1) == b''
 
 
 def test_the_live_album_is_the_centre_card_while_the_covers_show(fw):
