@@ -381,6 +381,8 @@ static int playlist_used(void *ctx, int n, char **v, char **names) {
     if (id >= 0 && id < 100) ((unsigned char *)ctx)[id] = 1;
     return 0;
 }
+/* The playlist just made, by name, for pl_first: the list it reloads into opens on it. */
+static char pl_made[64] __attribute__((section(".scratch")));
 int ringnav_playlist_create(void *list, const char *name) {
     void *db = 0;
     unsigned char used[100] = { 0 };
@@ -420,6 +422,7 @@ int ringnav_playlist_create(void *list, const char *name) {
     if (sqlite3_exec(db, sql, ple_changed, 0, 0) || sqlite3_exec(db, "commit", 0, 0, 0))
         goto rollback;
     result = id;
+    tk_snprintf(pl_made, sizeof pl_made, "%s", title);
     goto done;
 rollback:
     sqlite3_exec(db, "rollback", 0, 0, 0);
@@ -821,11 +824,22 @@ static void pl_rows(void *win) {
 }
 /* With nothing remembered (a first open, or a count changed) Classic's Playlists starts on its
  * first playlist, below New and Edit, as stock's and the iPod's lists of playlists alone do; an
- * empty list on New. */
+ * empty list on New. Just after New Playlist made one (pl_made), on that one, as an iPod's list
+ * lands on what was added; its rows are p_deque_playlist's records in order. */
 int pl_first(menu_t *m, int cur) {
-    for (int i = cur; i < m->n && widget_get_prop_int(P(m->at[cur], W_PARENT), PL_ACT, 0); ++i)
-        if (widget_get_prop_int(P(m->at[i], W_PARENT), PL_ROW, 0)) return i;
-    return cur;
+    void *lists = P(p_deque_playlist, 0);
+    int k = 0, first = -1, at = -1;
+    for (int i = 0; i < m->n && at < 0; ++i) {
+        if (!widget_get_prop_int(P(m->at[i], W_PARENT), PL_ROW, 0)) continue;
+        if (first < 0 && i >= cur) first = i;
+        if (pl_made[0] && lists && (unsigned)k < deque_size(lists) &&
+            !tk_strcmp(P(deque_at(lists, (unsigned)k), REC_TITLE), pl_made))
+            at = i;
+        ++k;
+    }
+    pl_made[0] = 0;
+    if (at >= 0) return at;
+    return first >= 0 && widget_get_prop_int(P(m->at[cur], W_PARENT), PL_ACT, 0) ? first : cur;
 }
 /* Stock's row click opens More from x 286 outside select mode (0x4b48a8, 0x4b4988): a picker has
  * no More, so a tap anywhere picks; in the list the dots' column at the edge (PL_MARK_X on) stays

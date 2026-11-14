@@ -1224,9 +1224,11 @@ static int reconcile(menu_t *m, int settle) {
         }
     }
     cur = best >= 0 ? best : partial;
-    if (!had && cur >= 0) cur = pl_first(m, cur);
+    int to = !had && cur >= 0 ? pl_first(m, cur) : cur, moved = to != cur;
+    cur = to;
     st.reveal_surface = (void *)0;
     select(m, cur >= 0 ? m->id[cur] : -1);
+    if (moved) reveal(m, m->id[cur], 1); /* a playlist just made may be below the view */
     return cur;
 }
 
@@ -3048,8 +3050,10 @@ int ringnav_paint(void *w, void *canvas) {
     paint_offline(w, canvas);
     paint_radio(w, canvas);
     paint_into(w, canvas);
-    rate_hearts_paint(w, canvas);
-    stream_mark_paint(w, canvas);
+    if (st.rt_page) rate_hearts_paint(w, canvas);
+    if (w && P(w, W_PARENT) &&
+        (P(w, W_PARENT) == stream_mark_views[0] || P(w, W_PARENT) == stream_mark_views[1]))
+        stream_mark_paint(w, canvas);
     paint_letter(w, canvas);
     paint_cover(w, canvas);
     paint_scrubber(w, canvas);

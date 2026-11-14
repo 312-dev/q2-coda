@@ -170,7 +170,12 @@ static const char *const stream_logos[][2] = {
 #define SVC_MARK_PX 20
 #define SVC_MARK_X 24
 #define SVC_MARK_TEXT_X 52
+/* the lists stream_marks tagged, the page's and Home's: ringnav_paint calls stream_mark_paint only
+ * for their rows (a stale one is only compared) */
+void *stream_mark_views[2] __attribute__((section(".scratch")));
 static void stream_marks(void *view) {
+    if (view != stream_mark_views[0] && view != stream_mark_views[1])
+        stream_mark_views[1] = stream_mark_views[0], stream_mark_views[0] = view;
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *row = widget_get_child(view, i),
              *button = widget_count_children(row) ? widget_get_child(row, 0) : (void *)0;

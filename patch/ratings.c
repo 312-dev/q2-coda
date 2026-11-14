@@ -504,7 +504,7 @@ static void rate_row(void *item, int n) {
                        I(label, W_H));
 }
 void rate_hearts_paint(void *w, void *canvas) {
-    if (!w || !st.rt_page || !feedback_oled()) return;
+    if (!w || !feedback_oled()) return; /* ringnav_paint calls it while st.rt_page is open */
     int n = widget_get_prop_int(w, RATE_HEARTS, 0);
     void *label = n ? widget_get_child(w, 1) : (void *)0;
     if (!label) return;
