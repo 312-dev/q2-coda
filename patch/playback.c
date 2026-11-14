@@ -1104,11 +1104,13 @@ int ringnav_seek_time(int sec) {
     press_stamp();
     return stock_seek_time_trampoline(sec);
 }
-/* player_prev_music's first move, its only caller, on anything playing or paused: past 10 s stock seeks
- * to the track's start and returns 1, in any queue and mode, without reaching player_change_music. A
- * refusal returns 1 too, so it goes no further. Under 11 s stock returns 0 and Previous changes track. */
+/* player_prev_music's first move, its only caller, on anything playing or paused: from PREV_RESTART_S
+ * stock seeks to the track's start and returns 1, in any queue and mode, without reaching
+ * player_change_music (its test of 11 s is 3 s: tools/build.py PREV_RESTART). A refusal returns 1 too, so
+ * it goes no further. Before it stock returns 0 and Previous changes track. */
+#define PREV_RESTART_S 3
 int ringnav_seek_start(void) {
-    int restarts = player_playtime() > 10;
+    int restarts = player_playtime() >= PREV_RESTART_S;
     if (restart_refused(0, restarts && place_held())) return 1;
     if (restarts) press_stamp();
     return stock_seek_start_trampoline();

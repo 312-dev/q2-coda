@@ -1339,8 +1339,8 @@ assert press()==1 and m.seen; m.poll(0,3); assert m.places()==[] and not m.seeks
 checks+=1
 
 # The same guard from the real keys: on_wm_keyup_fun's prev_quick_click and next_quick_click, through stock's
-# player_prev_music, whose first move on anything playing or paused is player_seek_start: past 10 s it seeks to the
-# start, in any queue and mode, without reaching player_change_music. Everything above enters below that seek, and
+# player_prev_music, whose first move on anything playing or paused is player_seek_start: from 3 s (PREV_RESTART) it
+# seeks to the start, in any queue and mode, without reaching player_change_music. Everything above enters below that seek, and
 # with one key at a time.
 PREV_KEY,NEXT_KEY=syms['prev_quick_click'],syms['next_quick_click']
 class KeyMixin:
@@ -1382,7 +1382,7 @@ m=keyed(); assert m.key(NEXT_KEY)=='ask'; m.held=0; assert m.key(NEXT_KEY)=='cha
 m=keyed(); assert m.key(PREV_KEY)=='ask'; m.held=0; assert m.key(PREV_KEY)=='seek'; m.held=1; m.sec=100; assert m.key(PREV_KEY)=='ask'
 m=keyed(); assert m.key(NEXT_KEY)=='ask'; m.word(O['MCL_TYPE'],0xf001); assert m.key(NEXT_KEY)=='none' and m.stops==1
 m.word(O['MCL_TYPE'],1); assert m.key(NEXT_KEY)=='ask'
-# Previous asks past 10 s in any queue, mode, class, Folder Skip, playing or paused; the second press seeks to the start.
+# Previous asks from 3 s in any queue, mode, class, Folder Skip, playing or paused; the second press seeks to the start.
 for k in (1,3):
     for mode in (0,1,2,3):
         for cls in (1,0xff10,0xf001):
@@ -1390,10 +1390,10 @@ for k in (1,3):
                 for status in (2,3):
                     m=keyed(k=k,mode=mode,cls=cls,skip=skip,status=status); assert m.key(PREV_KEY)=='ask',(k,mode,cls,skip,status)
                     assert m.key(PREV_KEY,IN)=='seek'; checks+=1
-# Nothing held: stock's seek at once. Under 11 s stock changes track: a queue moves on, and Next in one moves on too.
+# Nothing held: stock's seek at once. Under 3 s stock changes track: a queue moves on, and Next in one moves on too.
 m=keyed(k=3,held=0); assert m.key(PREV_KEY)=='seek'
-m=keyed(k=3,mode=1,sec=10); r=m.key(PREV_KEY); assert r=='change' and m.current()==2,(r,m.seen,m.current())
-m=keyed(k=3,sec=11); assert m.key(PREV_KEY)=='ask'
+m=keyed(k=3,mode=1,sec=2); r=m.key(PREV_KEY); assert r=='change' and m.current()==2,(r,m.seen,m.current())
+m=keyed(k=3,sec=3); assert m.key(PREV_KEY)=='ask'
 m=keyed(k=3); assert m.key(NEXT_KEY)=='change' and m.current()==1
 m=keyed(k=3,status=1); assert m.key(PREV_KEY)=='change'  # stopped: no seek
 m=keyed(status=1); assert m.key(PREV_KEY)=='ask'  # stopped, alone in the queue: player_change_music's restart
@@ -1965,7 +1965,7 @@ m=guarded(); q=m.get(syms['mcl_pdeqplaylist']); assert asks(m,'player_start',q,0
 m.now+=2000; assert asks(m,'player_start',q,0,1,2)==1 and m.nothing() and not m.stock
 m=guarded(); m.word(0xa50084,3); q=m.get(syms['mcl_pdeqplaylist']); assert asks(m,'player_start',q,0,1,2)==1 and m.nothing()
 m=guarded(); m.held=0; q=m.get(syms['mcl_pdeqplaylist']); asks(m,'player_start',q,0,1,2); assert m.stock==['xf:player_start']
-m=guarded(); m.sec=10; asks(m,'player_seek_start'); assert m.stock==['xf:seek_start'] and m.nothing()
+m=guarded(); m.sec=2; asks(m,'player_seek_start'); assert m.stock==['xf:seek_start'] and m.nothing()
 # An earlier stamp stands through a refusal: the press it was for, not this one.
 m=guarded(); m.held=0; asks(m,'player_change_music',1); assert m.at()==5001; m.held=1; m.now=9000; asks(m,'player_seek_start'); assert m.at()==5001
 # Never an automatic change: on_wm_timer_dialog's skip past an unplayable file goes to stock, unasked and unstamped.

@@ -708,6 +708,32 @@ and artist show at the bottom, in the style name's place. Tunables are `VIS_*` i
 `patch/offsets.inc`; `VIS_LATENCY_MS` sets how far the picture runs behind the decoder, to match
 what you hear. See [internals.md](internals.md#visualizer-ipod).
 
+## Previous and Next
+
+The wheel's Previous and Next work as an iPod's, from any page where they control the music:
+
+- **Next**, pressed, plays the next track.
+- **Previous**, pressed, starts the track again from 3 seconds in, and before that goes back to the
+  track before. So one press restarts a song, and two in a row go back one. Apple's iPod classic
+  guide says only "press Previous/Rewind" to start a song over and "press twice" for the one
+  before; 3 s is Rockbox's figure (`DEFAULT_SKIP_THRESH`, 3000 ms, `apps/gui/wps.h`), which an iPod
+  recreation measured on the hardware also reports. Apple's iPod shuffle guides give 6 s for that
+  model. A track holding a place to resume still asks first ([Resume](internals.md#resume)).
+- **Held** (half a second), Next fast-forwards and Previous rewinds, and you hear the song as it
+  goes: half a second of it at its own speed and pitch, then a jump, then another half second.
+  Each jump is 2 s for the first 3 s of the hold (4 times the song's speed), 4 s until 6 s (8
+  times), 8 s until 10 s (16 times), then 16 s (32 times). The bar and times follow. Letting go
+  plays on from there. Fast-forward stops a second before the end, plays out into the next track
+  and goes on scanning that; rewind stops at the start and plays from there. Paused, the track
+  stays silent and paused: the bar moves, and Play starts from where you let go. A held button
+  does not skip.
+
+Apple's guides say only "press and hold" to fast-forward or rewind; the half-second stretches and
+the speeds are this firmware's, in the spirit of the iPod's audible scan. Streams (Spotify, radio,
+Tidal's online queues), games, the playlist editor and the time and sleep-timer fields keep the
+buttons as they were, and a held press there does what it did. Values are `SEEK_*` and
+`seek_steps` in `patch/seek.c`; see [internals.md](internals.md#scan).
+
 ## Pop-ups
 
 The confirm and choice dialogs in `patch/contexts.inc` (flag `BUTTONS`) have no list: their buttons
