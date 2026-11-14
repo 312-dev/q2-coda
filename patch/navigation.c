@@ -4863,8 +4863,10 @@ static int np_gone(void *win, void *event) {
  * ponytail: one more decode per track change while the page is up, beside stock's own reload. */
 static unsigned np_art(const char **file) {
     unsigned at, n;
-    if ((*file = catalogue_np_cover())) /* a pressed server song's, while it loads */
-        return fnv(FNV_SEED, (const unsigned char *)*file) | 1;
+    if ((*file = catalogue_np_cover())) /* a pressed server song's, while it loads: whenever */
+        return tk_strcmp(widget_get_prop_str(st.np_cover, "image", ""), *file) /* not shown */
+                   ? ~st.np_art
+                   : fnv(FNV_SEED, (const unsigned char *)*file);
     void *r = queue_now(&at, &n);
     unsigned char type = now_cover(r, file);
     unsigned written = now_cover_written(*file);

@@ -808,6 +808,8 @@ def test_now_playing_shows_a_pressed_server_song_until_the_player_parses_one(rig
     status = [2]
     fw.mock('mclGetPlayStatus', lambda *_: status[0])
     fw.mock('mclStop', lambda *_: status.__setitem__(0, 1))
+    timers = []
+    fw.mock('timer_add', lambda fn, ctx, ms, *_: timers.append(fn) or len(timers))
     from test_nav_painters import Ui
     ui = Ui(fw)
     win = ui.window('playing_page')
@@ -829,7 +831,9 @@ def test_now_playing_shows_a_pressed_server_song_until_the_player_parses_one(rig
     q = rig.rows.rows([rig.record('/mnt/mmc/Music/a.flac'), pressed, rig.record(url('s1'))])
     assert not shown()
     assert load(rig, q, 1)[0] == 2
-    assert status == [1]  # the last song stopped
+    assert status == [2]  # stock's player_start, after the load, plays the last queue on
+    C.CFUNCTYPE(C.c_int, C.c_void_p)(timers.pop())(None)
+    assert status == [1]  # then it stops
     r, *place = shown()
     assert place == [1, 3, 'file:///mnt/mmc/.subsonic/covers/al2.jpg']
     assert C.string_at(C.c_void_p.from_address(r + O['REC_PATH']).value) == url('s2', 'al2').encode()

@@ -1591,10 +1591,17 @@ static void *cat_offline(void *q, int *at) {
 }
 /* ---- Now Playing while a catplay waits (server-library.md#now-playing-while-it-loads) ---- */
 
+/* The song playing, stopped once stock's press is over: its player_start, after ringnav_load
+ * loaded nothing, plays the queue it has again. So its time and sound don't run on under the
+ * pressed song's title. */
+static int np_stop(const void *unused) {
+    (void)unused;
+    if (cat.np_list && mclGetPlayStatus() != 1) mclStop();
+    return 0;
+}
 /* The song pressed, q's at'th: Now Playing shows it (catalogue_np_now) until the player parses a
  * song (id3_parses moves: the app's, the offline queue's or another the user picked), nothing
- * was left to play, or CATPLAY_SHOW_MS pass. The song playing stops, so its time and audio don't
- * run on under the new title. */
+ * was left to play, or CATPLAY_SHOW_MS pass; the song playing stops (np_stop). */
 static void np_press(void *q, int at) {
     if (cat.np_list) deque_destroy(cat.np_list), cat.np_list = 0;
     if (at < 0 || (unsigned)at >= deque_size(q)) return;
@@ -1608,7 +1615,7 @@ static void np_press(void *q, int at) {
     if (!catalogue_cover(P(deque_at(cat.np_list, 0), REC_PATH), cat.np_cover + 7,
                          sizeof cat.np_cover - 7))
         tk_snprintf(cat.np_cover, sizeof cat.np_cover, "play_defaultcover");
-    if (mclGetPlayStatus() != 1) mclStop();
+    timer_add(np_stop, 0, 0);
 }
 /* The pressed song shown no more: stock writes its own title and artist again
  * (g_forcerefresh_flag, as Play/Pause has it do). */
