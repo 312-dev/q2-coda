@@ -279,6 +279,12 @@ has no place for keeps a place of its own:
 
 - **Progress:** 6 px, round ends, Track and Accent Blue. Used for playback, scans and
   downloads.
+- **Slider page** (Max Volume, Default Volume, Channel Balance, Brightness, Crossfade, Resume Songs,
+  Night Shift, Wheel Sensitivity): the status row names it; a feature with a switch has it as the
+  first row, selected; the value in Inter Medium 22 centred on y 150; a 6 px track from the text
+  column to the right column with its top at y 186, Track behind and Accent Blue filled to a 14 px
+  white knob (Channel Balance fills from the centre); the range's ends in 15 px Text Tertiary
+  centred on y 214, at the two columns. The wheel moves it; there are no +/- buttons.
 - **Vertical slider (EQ):** 4 px Track line, Accent Blue fill from 0 dB to the value, a 14 px
   white knob. Band labels under it in Text Tertiary 15 px.
 
@@ -344,6 +350,7 @@ pattern.
 | Hold menu                           | Dialog                      |                                                                                                            |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
+| Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             |                                                                                                            |
 | Bluetooth                           | Two-line row                | Second line "Connected" with the Positive dot                                                              |
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
@@ -381,7 +388,7 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   (`bar.battery.painter="slim"`); the wheel's scroll indicator (`list.scrollbar.painter="wheel"`);
   1 px dividers on the text and right columns (`list.divider.ink`); row art's 4 px corners
   (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column; the
-  switch, Gain's value, the pickers' check and disabled rows as above (`settings.values.switch`); song rows
+  switch, Gain's value, the pickers' check, disabled rows and the slider page as above (`settings.values.switch`); song rows
   (`list.songs.painter="inline"`) and the Song Artist and Song Length options; Songs' action row
   as the Shuffle row (`list.shuffle.row`); a list left by Return opening at its top when chosen
   again (`list.reopen.top`, which Minimal sets for every theme).

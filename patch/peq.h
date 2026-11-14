@@ -528,6 +528,7 @@ void stock_more_speed(void *win);
 void stock_more_into(void *win);
 void info_poll(void);      /* lockscreen.c: the info screen's timer, with the screen lit */
 int xfade_page(void *top); /* crossfade.c */
+void xfade_ends(char *lo, char *hi, unsigned n); /* crossfade.c: its page's range ends */
 int ipod_battery(void);    /* theme_engine.c: IPOD BATTERY, 0 Icon, else a percentage */
 int title_gone(void *w, void *event); /* ... and looks for its source again at the next sync */
 int bar_title_fits(void *label);      /* label's text fits the bar's title box */

@@ -2913,6 +2913,7 @@ int ringnav_paint(void *w, void *canvas) {
     if (w && st.np_lrc && P(w, W_PARENT) == st.np_lrc) lyrics_paint(w, canvas);
     paint_caps(w, canvas);
     if (theme()->marquee_fade) marquee_fade(w, canvas);
+    slider_page_paint(w, canvas);
     if (w && w == st.np_win) np_modes(w, canvas);
     hold_paint(w, canvas, 1);
     coverflow_home_clip(w, canvas, 0);
@@ -5352,10 +5353,12 @@ static int slider_gone(void *win, void *event) {
     if (win == st.slider_win) st.slider_win = st.slider_w = st.slider_sw = (void *)0;
     return 0;
 }
-/* Crossfade's switch is hidden, so its image change repaints nothing: the tray, for crossfade.c. */
+/* Crossfade's switch is hidden, so its image change repaints nothing: the tray, for crossfade.c;
+ * a set_switch theme's switch row (slider_page_dirty). */
 void slider_tray_dirty(void *page) {
     rect_t tray = { 125, 28, 125, 44 };
     if (page && page == st.slider_win) widget_invalidate_force(page, &tray);
+    slider_page_dirty(page);
 }
 /* Max Volume's triangle moves past the slider's rect, inside the band. */
 static int slider_moved(void *win, void *event) {
@@ -5452,6 +5455,7 @@ static void slider_open(void *win) {
         s = widget_lookup(win, sliders[kind], 1);
     if (!s) return;
     slider_knobless(s); /* in every theme: the page's slider is a plain one */
+    if (theme()->set_switch) slider_page_open(win, s, kind - 1); /* OLED's one form */
     if (!classic_pages()) return;
     --kind;
     for (unsigned i = 0; i < sizeof hide / sizeof *hide; ++i)

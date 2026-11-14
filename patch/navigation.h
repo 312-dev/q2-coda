@@ -452,6 +452,12 @@ void coverflow_position_reset(void);
 const char *theme_art(const char *name);
 void chevron_icon(void *w, void *canvas, int right, int y, int selected);
 void chevron_muted(void *w, void *canvas, int right, int y);
+
+/* slider_page.c: a set_switch theme's slider page, laid out as stock's window loads and painted
+ * after its children */
+void slider_page_open(void *win, void *s, unsigned kind);
+void slider_page_paint(void *w, void *canvas);
+void slider_page_dirty(void *page); /* its switch row, after a change of the hidden switch */
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
 void marquee_fade(void *w, void *canvas);

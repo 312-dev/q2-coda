@@ -343,7 +343,10 @@ Brightness, Balance, Maximum Volume and Default Volume use eight-pixel rounded, 
 with their original touch areas. Crossfade, Wheel Sensitivity and Resume Songs reuse Default Volume's
 page and inherit its styling. All keep their ranges and wheel/touch controls, but lose their endpoint icons (`slider_plain`, tools/ipod.py):
 the images stay, named, with no image and no size, since stock looks them up. The quick
-settings slider and custom volume overlay retain their layouts.
+settings slider and custom volume overlay retain their layouts. Under OLED (`settings.values.switch`) the four
+windows and Default Volume's other uses take one slider page instead ([oled-design.md](oled-design.md#progress-and-sliders),
+`patch/slider_page.c`): the value centred, a 6 px track with a knob, the range's ends under it, and the feature's
+switch, where it has one, as a row; the +/- discs are hidden, and the wheel moves the value.
 
 ## Quick settings
 
