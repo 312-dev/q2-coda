@@ -1108,7 +1108,7 @@ def test_stock_header_versions(dev, beta, repo, version, tag, flag, monkeypatch)
     assert macros['Q2POD_VERSION'] == f'"{version}"' and macros['Q2POD_DEV'] == flag
     assert macros['Q2POD_TAG'] == f'"{tag}"'  # a dev build has none, and takes any release
     assert macros['Q2POD_REPO'] == f'"{repo}"'
-    assert macros['Q2POD_UA'] == f'"Q2Pod/{build.VERSION} (https://github.com/DiamondBond/q2-pod)"'  # the app's contact, not the fork's
+    assert macros['Q2POD_UA'] == f'"Q2Pod/{build.VERSION} (https://github.com/{build.REPO})"'  # the project's contact, not --update-repo's
     assert macros['bt_showcoding'] == '((const unsigned char *)0x700000u)'
 
 
@@ -1148,7 +1148,7 @@ const unsigned long h_sizes[] = {{sizeof h_zones / sizeof *h_zones, sizeof h_cit
     zones, cities, order, icons, lit, rounds, bold = array(ctypes.c_ulong, 'h_sizes', 7)
     assert array(ctypes.c_int, 'h_ints', 4) == [build.RING_STEP, len(themes), len(theme.theme_keys(themes)), 0]
     assert [s.decode() for s in array(ctypes.c_char_p, 'h_strings', 6)] == [
-        build.ROCKBOX_FLAG, 'V1.36', f'{build.VERSION} Pod', build.VERSION, build.REPO, f'Q2Pod/{build.VERSION} (https://github.com/DiamondBond/q2-pod)']
+        build.ROCKBOX_FLAG, 'V1.36', f'{build.VERSION} Pod', build.VERSION, build.REPO, f'Q2Pod/{build.VERSION} (https://github.com/{build.REPO})']
     assert [s.decode() for s in array(ctypes.c_char_p, 'h_zones', zones)] == [zone for _, zone in build.TIMEZONES]
     # each row's city, its label after the offset
     cities = [s.decode() for s in array(ctypes.c_char_p, 'h_cities', cities)]

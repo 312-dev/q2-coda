@@ -72,20 +72,15 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 - **Fix:** look themes up by id, and assert over `builtins()` instead of a literal length.
 - **Effort:** S.
 
-### 26. The stock version is written in three places in `build.py`
+### 26. The stock version is written in three places in `build.py` (resolved)
 
-- **Where:** `tools/build.py:1731` (`STOCK_VERSION = 'V1.36'`), `:1782` (`'Q2 Firmware V1.36/update.tar'`), and the docstring and usage text; `tools/build.py:1755` writes `DiamondBond/q2-pod` into `Q2POD_UA` although `REPO` (`:13`) holds it.
-- **Impact:** a rebase or a fork edits each by hand; `tools/rebase.py apply` rewrites pins, but whether it rewrites the member path is **unconfirmed** (read `apply`, `tools/rebase.py:774`).
-- **Fix:** build the member path from `STOCK_VERSION` and the user agent from `REPO`.
-- **Effort:** S.
+- **Where:** `tools/build.py` (`STOCK_VERSION`, the ZIP member `'Q2 Firmware V1.36/update.tar'`, `stock_header`'s `Q2POD_UA`), `pins()` in `tools/rebase.py`.
+- **State:** `Q2POD_UA`, the contact sent with lyrics and cover searches (`patch/onlinematch.c`), is built from the module's `REPO`, never from `--update-repo`; `test_stock_header_versions` in `test/unit/test_build.py` pins it, including for a build with another `--update-repo`. The stock version stays written out: on a rebase `pins()` rewrites the ZIP member path (`text.replace(old.member, new.member)`) and the version text, so a new stock firmware needs no hand edit of either.
 
-### 27. `DEMO_SHA` is recorded but never compared
+### 27. `DEMO_SHA` is recorded but never compared (resolved)
 
-- **Where:** `tools/build.py:10`, used only at `:2272` (`stock_demo_sha256=DEMO_SHA`).
-- **Evidence:** `grep -n DEMO_SHA tools/build.py` gives those two lines. The ZIP's hash (`:1780`) is what guards demo.
-- **Impact:** the manifest states a hash the build did not compute; a wrong constant would go unseen by the build.
-- **Fix:** `check(sha(raw_demo) == DEMO_SHA, ...)` after `:1792`, or write `sha(raw_demo)`.
-- **Effort:** S.
+- **Where:** `tools/build.py` (`DEMO_SHA`; `build()`, after `raw_demo = cat('release/bin/demo')`).
+- **State:** `build()` hashes the `demo` it read from the stock image and stops with `Unsupported demo: SHA-256 differs from the audited original` when it is not `DEMO_SHA`, so the manifest's `stock_demo_sha256` is a hash the build compared. `build()` is `# pragma: no mutate block`; the check was seen to stop a release build within a second with one hex digit of `DEMO_SHA` changed, and to pass with it restored.
 
 ### 30. A new theme's Corners default follows its index (resolved)
 
@@ -100,15 +95,15 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 - **Where:** `tools/build.py:1791` (`cat`), called in the window loop at `:1811-1815` and 24 more places (`grep -c 'cat(' tools/build.py` is 25), and per geometry set in `set_assets` (`tools/ipod.py:1289`).
 - **Evidence:** the stock rootfs has 127 `raw/ui/*.bin` files (`unsquashfs -l stock.squashfs`), each read by its own process from a 50 MB LZO image, before any asset is patched; a `--dev` build's output holds 325 files.
 - **Impact:** process start and a metadata walk per file, on a build that takes minutes.
-- **Fix:** one `unsquashfs -d` into a directory under `--out` at the start and `cat = lambda p: (root/p).read_bytes()`. The files are Shanling's either way, and `--out` is ignored by git.
-- **Effort:** S.
+- **Measured:** about 18 ms a call. cProfile of release builds on a 16-core machine put 1.6 s in `cat`'s 443 calls on a 273 s build, 3.0 s on a 136 s one under load from other jobs, and 1.5 s on an 82 s one; one whole `unsquashfs -n -q -d DIR stock.squashfs` takes 0.15 s.
+- **Decision:** left as it is. The whole stage is below the 5 s that a build-speed change has to save, so one extraction (and `thirdparty.install` reusing it) cannot pay for the extra tree under `--out` and the symlink fallback `cat` would need.
 
 ### 6. Every build compiles all 55 objects one after another
 
 - **Where:** `tools/build.py:1601-1602` (18 `NAVIGATION` files), `tools/peq.py:251-254` (30 `UI_SOURCES`, then the player's 4 to 7), each a blocking `run('clang', ...)`; `tools/build.py:1774` refuses an `--out` that holds `update.tar`, so nothing is reused.
 - **Impact:** `navigation.c` is 11,223 lines and `coverflow.c` 4,824 at `-Oz`; one core does all of it on a machine with several. Reproducibility needs the same objects, not the same order of compiling.
-- **Fix:** compile through a `concurrent.futures.ThreadPoolExecutor` and link in the fixed order. **Unconfirmed** how much of a build's wall time is compiling: time a build's stages first.
-- **Effort:** S.
+- **Measured:** cProfile puts 8 to 9 s of a release build in clang (`compile_payload` with `compile_common`'s UI sources, then the player's and the two helpers'). With `NAVIGATION` and `compile_common`'s sources each compiled through a `ThreadPoolExecutor(min(8, os.cpu_count()))` and linked in list order, the seven manifest hashes were unchanged, and the span from `stock.h` written to `patch.elf` written went from 7.7 s to 4.6 s: `navigation.c` alone is most of it. Release build wall time was 60.0 s without and 60.8 s and 66.7 s with, inside the noise of a shared machine.
+- **Decision:** left serial. About 3 s is below the 5 s (or 10%) a build-speed change has to save.
 
 ## Runtime cost on the Q2
 
