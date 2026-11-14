@@ -12,6 +12,10 @@
  * up from the first result, Next or Previous goes back to the strip; Return there closes Search,
  * as does Return on the strip with no text or no match. Play/Pause stays the player's.
  *
+ * Touch (ss_touch): a tap on a letter types it, a drag along the strip moves the alphabet a cell
+ * per 17 px, a tap on a result opens or plays it, and a drag up or down the results scrolls them a
+ * row per 32 px.
+ *
  * The page is one sheet painted here (search_strip_paint), not rows: the strip and the list share
  * the wheel, and only one of them shows a selection at a time. */
 #include "navigation.h"
@@ -47,6 +51,7 @@ static struct {
     unsigned char *kind;        /* ... each one's SS_* */
     int nmatch, letter, focus, sel, top; /* focus 1: the results list has the wheel */
     int songs_at;                        /* the first song's place in match */
+    short down_x, down_y, pressed;       /* a touch: where it went down on the sheet */
     char text[SS_TEXT_MAX + 1];
 } ss __attribute__((section(".scratch")));
 
@@ -298,6 +303,47 @@ void search_strip_paint(void *w, void *canvas) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
+#define SS_TAP 8 /* a touch that moves less than this is a tap */
+static int ss_dist(int d) { return d < 0 ? -d : d; }
+
+/* The sheet's press, and the page's release wherever it lands (as 3EQ's sliders take theirs). */
+static int ss_touch(void *ctx, void *event) {
+    int xy[2] = { I(event, EVENT_X), I(event, EVENT_Y) };
+    if (!ss.sheet) return 0;
+    widget_to_local(ss.sheet, xy);
+    if (I(event, EVENT_TYPE) == EVT_POINTER_DOWN) {
+        ss.down_x = (short)xy[0], ss.down_y = (short)xy[1], ss.pressed = 1;
+        return 0;
+    }
+    if (!ss.pressed) return 0;
+    ss.pressed = 0;
+    int dx = xy[0] - ss.down_x, dy = xy[1] - ss.down_y,
+        tap = ss_dist(dx) < SS_TAP && ss_dist(dy) < SS_TAP;
+    if (ss.down_y >= SS_STRIP_Y) {
+        int k = (ss.down_x - (SS_BOX_R + 8)) / SS_STEP;
+        ss.focus = 0;
+        if (!tap)
+            ss.letter = ((ss.letter - dx / SS_STEP) % SS_ENTRIES + SS_ENTRIES) % SS_ENTRIES;
+        else if (ss.down_x >= SS_BOX_R + 8 && k < SS_SLOTS) {
+            ss.letter = (ss.letter - SS_HIGH + k + SS_ENTRIES) % SS_ENTRIES;
+            ss_type(ss.letter);
+        }
+    } else if (!tap) {
+        int most = ss.nmatch > SS_ROWS ? ss.nmatch - SS_ROWS : 0;
+        ss.top -= dy / SS_PITCH;
+        ss.top = ss.top < 0 ? 0 : ss.top > most ? most : ss.top;
+        if (ss.sel < ss.top) ss.sel = ss.top;
+        if (ss.sel >= ss.top + SS_ROWS) ss.sel = ss.top + SS_ROWS - 1;
+    } else if (ss.down_y >= 0 && ss.top + ss.down_y / SS_PITCH < ss.nmatch &&
+               ss.down_y / SS_PITCH < SS_ROWS) {
+        ss.focus = 1;
+        ss.sel = ss.top + ss.down_y / SS_PITCH;
+        ss_play();
+    }
+    widget_invalidate_force(ss.sheet, (void *)0);
+    return 0;
+}
+
 static int ss_closed(void *ctx, void *event) {
     if (ss.songs) deque_destroy(ss.songs);
     free(ss.match);
@@ -323,5 +369,7 @@ int library_search_open(void *ctx, void *event) {
     widget_set_visible(title, 0, 0);
     ss.sheet = widget_factory_create_widget(widget_factory(), "view", ss.page, 0, 0, 375,
                                             widget_get_prop_int(ss.page, "h", client_h()));
+    widget_on(ss.sheet, EVT_POINTER_DOWN, ss_touch, 0);
+    widget_on(ss.page, EVT_POINTER_UP_BEFORE, ss_touch, 0);
     return 0;
 }

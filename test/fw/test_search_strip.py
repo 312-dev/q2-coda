@@ -2,6 +2,7 @@
 walks the strip, Centre types, Next and Previous type a space and delete, the songs filter live, and Return moves
 to the results or closes."""
 import ctypes as C
+import struct
 
 import pytest
 
@@ -11,12 +12,15 @@ from test_nav_library_pages import Config, Library, Songs, Ui, field
 KEY_RETURN, KEY_CENTER, KEY_PREV, KEY_NEXT, KEY_PLAY, KEY_FWD_BTN, KEY_BACK_BTN = (
     O[k] for k in ('KEY_RETURN', 'KEY_CENTER', 'KEY_PREV', 'KEY_NEXT', 'KEY_PLAY', 'KEY_FWD_BTN', 'KEY_BACK_BTN'))
 LIBRARY, SPACE, DELETE, ENTRIES = 0xf001, 36, 37, 38
+EVT_POINTER_DOWN, EVT_POINTER_UP_BEFORE, EVENT_X = O['EVT_POINTER_DOWN'], O['EVT_POINTER_UP_BEFORE'], O['EVENT_X']
+STRIP_Y, CELL_X, STEP = 158, 108, 17  # the strip's top on the page, its first letter cell, a cell's width
 OLED = b'3'
 
 
 class Ss(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'page sheet songs match kind'.split()),
-                *((k, C.c_int) for k in 'nmatch letter focus sel top songs_at'.split()), ('text', C.c_char * 49)]
+                *((k, C.c_int) for k in 'nmatch letter focus sel top songs_at'.split()),
+                *((k, C.c_short) for k in 'down_x down_y pressed'.split()), ('text', C.c_char * 49)]
 
 
 @pytest.fixture
@@ -50,6 +54,16 @@ class Strip:
             want = SPACE if ch == ' ' else ord(ch.upper()) - 65 if ch.isalpha() else 26 + int(ch)
             step = (want - self.ss.letter) % ENTRIES
             self.key(*[KEY_NEXT] * step, KEY_CENTER)
+
+    def touch(self, x0, y0, x1=None, y1=None):
+        """A press at x0, y0 on the sheet and its release at x1, y1 (the press's place: a tap), in the page's
+        coordinates."""
+        for evt, x, y, w in ((EVT_POINTER_DOWN, x0, y0, self.ss.sheet),
+                             (EVT_POINTER_UP_BEFORE, x0 if x1 is None else x1, y0 if y1 is None else y1, self.ss.page)):
+            event = C.create_string_buffer(0x40)
+            struct.pack_into('<i', event, 0, evt)
+            struct.pack_into('<ii', event, EVENT_X, x, y)
+            self.ui.handler(w, evt)(C.addressof(event))
 
     def titles(self):
         """Each result as its row reads: an artist's or album's name with its kind, a song's title."""
@@ -202,3 +216,34 @@ def test_closing_frees_and_forgets(fw, ui, song):
     s.type('lo')
     ui.close(ui.top())
     assert not s.ss.page and s.ss.text == b'' and s.ss.nmatch == 0
+
+
+def test_a_tap_on_a_letter_types_it(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.touch(CELL_X + 4 * STEP + 5, STRIP_Y + 19)  # the cell after the highlight's: B
+    assert s.ss.text == b'b' and s.ss.letter == 1
+    s.touch(CELL_X + STEP + 5, STRIP_Y + 19)  # two before the highlight, now on B: delete
+    assert s.ss.text == b'' and s.ss.letter == DELETE
+
+
+def test_a_drag_along_the_strip_moves_the_alphabet(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.touch(300, STRIP_Y + 19, 300 - 3 * STEP, STRIP_Y + 19)  # left: later letters come under the highlight
+    assert s.ss.letter == 3 and s.ss.text == b''
+
+
+def test_a_tap_on_a_result_opens_it_and_a_drag_scrolls(fw, ui, song):
+    songs = [song(b'/m/%d.flac' % i, b'Song %d' % i) for i in range(7)]
+    s = Strip(fw, ui, songs)
+    s.type('song')
+    s.touch(100, 140, 100, 140 - 2 * 32)  # up: two rows on
+    assert s.ss.top == 2 and not ui.played
+    s.touch(100, 32 + 10)  # the second row showing
+    assert s.ss.focus == 1 and s.ss.sel == 3 and ui.played == [(songs, 3, LIBRARY)]
+
+
+def test_a_tap_below_the_results_does_nothing(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.type('joy')
+    s.touch(100, 4 * 32 + 10)
+    assert not ui.played and not ui.went and s.ss.focus == 0
