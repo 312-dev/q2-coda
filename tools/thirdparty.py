@@ -47,6 +47,8 @@ SOURCES = {
               '352133ec9545da76f77e70ccb48c9d7e5324d67f6474744647a7ed382b5e05fa'),
     'wpa_supplicant': ('2.12', 'https://w1.fi/releases/wpa_supplicant-2.12.tar.gz',
                        '08e23937e16d0155e55cab2b51f51fbe10d80a1aa91c4e15442645059b737ef6'),
+    'ffmpeg': ('4.2.11', 'https://ffmpeg.org/releases/ffmpeg-4.2.11.tar.xz',
+               'd53f0ec8ebb8b03a9ca1efcb93f38ba3f1137b3dcc4ad3239809d511553c97f8'),
     'sqlite': ('3.54.1', 'https://www.sqlite.org/2026/sqlite-autoconf-3540100.tar.gz',
                '926ef8d3eab93fbf6e06011901273eec076b25594a4e1cdadd50c987f4f6d64e'),
     'libpng': ('1.2.59', 'https://download.sourceforge.net/libpng/libpng-1.2.59.tar.xz',
@@ -327,6 +329,43 @@ def build_wpa_supplicant(src, stage, env, log):
     shutil.copy(d/'libwpa_client.so', stage/'usr/lib/libwpa_client.so')
 
 
+# Stock FFmpeg 4.2.2's configuration (ffmpeg -version, a buildroot build) less the build-host paths.
+# A 4.2 point release keeps every library's version (libavcodec 58.54.100 and the rest).
+FFMPEG_CONFIG = '''
+    --disable-static --enable-shared --prefix=/usr --enable-avfilter --disable-version3 --enable-logging
+    --enable-optimizations --disable-extra-warnings --enable-avdevice --enable-avcodec --enable-avformat
+    --enable-network --disable-gray --enable-swscale-alpha --disable-small --enable-dct --enable-fft
+    --enable-mdct --enable-rdft --disable-crystalhd --disable-dxva2 --enable-runtime-cpudetect
+    --disable-hardcoded-tables --disable-mipsdsp --disable-mipsdspr2 --disable-msa --enable-hwaccels
+    --disable-cuda --disable-cuvid --disable-nvenc --disable-avisynth --disable-frei0r
+    --disable-libopencore-amrnb --disable-libopencore-amrwb --disable-libdc1394 --disable-libgsm
+    --disable-libilbc --disable-libvo-amrwbenc --disable-symver --disable-doc --disable-gpl --disable-nonfree
+    --enable-ffmpeg --disable-ffplay --enable-avresample --disable-ffprobe --disable-postproc --enable-swscale
+    --enable-indevs --disable-alsa --enable-outdevs --enable-pthreads --enable-zlib --disable-bzlib
+    --disable-libfdk-aac --disable-libcdio --disable-gnutls --enable-openssl --disable-libdrm
+    --disable-libopenh264 --disable-vaapi --disable-vdpau --disable-mmal --disable-omx --disable-omx-rpi
+    --disable-libopencv --disable-libopus --disable-libvpx --disable-libass --disable-libbluray --disable-libmfx
+    --disable-librtmp --disable-libmp3lame --disable-libmodplug --disable-libspeex --disable-libtheora
+    --disable-libwavpack --disable-iconv --disable-libfreetype --disable-fontconfig --disable-libopenjpeg
+    --disable-libx264 --disable-libx265 --disable-libdav1d --disable-x86asm --disable-mmx --disable-sse
+    --disable-sse2 --disable-sse3 --disable-ssse3 --disable-sse4 --disable-sse42 --disable-avx --disable-avx2
+    --disable-armv6 --disable-armv6t2 --disable-vfp --disable-neon --enable-mipsfpu --disable-altivec
+    --extra-libs=-latomic --enable-pic --cpu=generic
+'''.split()
+
+
+def build_ffmpeg(src, stage, env, log):
+    ssl, z = env.deps['openssl'], env.deps['zlib']
+    run('./configure', '--enable-cross-compile', f'--cross-prefix={env.bin}/{TRIPLE}-', '--arch=mipsel',
+        '--target-os=linux', '--host-cc=gcc', f'--cc={env.cc}', '--pkg-config=pkg-config', *FFMPEG_CONFIG,
+        f'--extra-cflags=-I{ssl}/usr/include -I{z}/usr/include',
+        f'--extra-ldflags=-L{ssl}/usr/lib -L{z}/usr/lib -Wl,-rpath-link,{ssl}/usr/lib:{z}/usr/lib',
+        # FFmpeg 4.2 finds OpenSSL 1.1 by its openssl.pc alone (its fallback test names 1.0's SSL_library_init)
+        cwd=src, env=dict(env.vars, PKG_CONFIG_LIBDIR=f'{ssl}/usr/lib/pkgconfig', PKG_CONFIG_SYSROOT_DIR=str(ssl)), log=log)
+    run('make', f'-j{JOBS}', cwd=src, env=env.vars, log=log)
+    run('make', 'install', f'DESTDIR={stage}', cwd=src, env=env.vars, log=log)
+
+
 # Stock busybox 1.31.1's applets (busybox --list); the rebuilt one has exactly these.
 BUSYBOX_APPLETS = '''
     [ [[ addgroup adduser ar arch arp arping ash awk base64 basename bc blkid bunzip2 bzcat cat chattr
@@ -396,7 +435,8 @@ RECIPES = {'openssl': (build_openssl, []),
            'sqlite': (build_sqlite, []),
            'libpng': (build_libpng, ['zlib']),
            'busybox': (build_busybox, []),
-           'libnl': (build_libnl, []), 'wpa_supplicant': (build_wpa_supplicant, ['openssl', 'libnl'])}
+           'libnl': (build_libnl, []), 'wpa_supplicant': (build_wpa_supplicant, ['openssl', 'libnl']),
+           'ffmpeg': (build_ffmpeg, ['openssl', 'zlib'])}
 
 
 # Each top-level function's and class's text as this module was imported (inspect.getsource rereads
@@ -572,6 +612,10 @@ INSTALL = {
     'busybox': {'bin/busybox': 'bin/busybox'},
     'wpa_supplicant': {f'usr/sbin/{n}': f'usr/sbin/{n}' for n in ('wpa_supplicant', 'wpa_cli')} |
                       {'usr/lib/libwpa_client.so': 'usr/lib/libwpa_client.so'},
+    'ffmpeg': {'usr/bin/ffmpeg': 'usr/bin/ffmpeg'} |
+              {f'usr/lib/{n}': f'usr/lib/{n}' for n in ('libavcodec.so.58.54.100', 'libavdevice.so.58.8.100',
+               'libavfilter.so.7.57.100', 'libavformat.so.58.29.100', 'libavresample.so.4.0.0', 'libavutil.so.56.31.100',
+               'libswresample.so.3.5.100', 'libswscale.so.5.5.100')},
 }
 
 
