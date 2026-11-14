@@ -1,4 +1,4 @@
-"""search_strip.c: Search as an iPod classic's letter strip under the OLED theme (list.search.strip): the wheel
+"""search_strip.c: Search as an iPod classic's letter strip under the OLED theme (list.entry.ipod): the wheel
 walks the strip, Centre types, Next and Previous type a space and delete, the songs filter live, and Return moves
 to the results or closes."""
 import ctypes as C

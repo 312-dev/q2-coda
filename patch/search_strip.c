@@ -1,7 +1,7 @@
-/* Search as an iPod classic's letter strip (search.strip, the OLED theme's; docs/ipod.md#search):
- * the Library's Search row opens a page with a bar along the bottom, the typed text at its left
- * and the alphabet passing under a fixed highlight, and the matching songs in the list above it,
- * filtered as each character goes in.
+/* Search as an iPod classic's letter strip (list.entry.ipod, the OLED theme's;
+ * docs/ipod.md#search): the Library's Search row opens a page with a bar along the bottom, the
+ * typed text at its left and the alphabet passing under a fixed highlight, and the matching songs
+ * in the list above it, filtered as each character goes in.
  *
  * Keys, as Apple's iPod classic guide gives them: the wheel walks the strip (A to Z, 0 to 9, a
  * space, then delete, round again), Centre enters what is highlighted, Next enters a space and
@@ -251,10 +251,10 @@ static int ss_closed(void *ctx, void *event) {
     return 0;
 }
 
-/* The Library's Search row and Local Songs' pull: the strip under a search.strip theme, stock's
+/* The Library's Search row and Local Songs' pull: the strip under a list.entry.ipod theme, stock's
  * search dialog under the others. */
 int library_search_open(void *ctx, void *event) {
-    if (!theme()->search_strip) return stock_search(ctx, event);
+    if (!theme()->entry_ipod) return stock_search(ctx, event);
     if (ss.page || !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup))) return 0;
     int n;
     ss.songs = staged_music(all_songs, (void *)1, &n);

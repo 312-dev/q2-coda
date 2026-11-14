@@ -340,9 +340,11 @@ extern int spot_media(unsigned key), spot_key(void *top, unsigned key),
     spot_open(void *ctx, void *event), spot_hold(void *top);
 extern int radio_media(unsigned key), radio_open(void *ctx, void *event);
 extern int games_key(void *top, unsigned key), games_open(void *ctx, void *event);
-/* search_strip.c: Search, the strip under a search.strip theme, else stock's dialog */
+/* search_strip.c: Search, the strip under a list.entry.ipod theme, else stock's dialog */
 int library_search_open(void *ctx, void *event), search_strip_key(void *top, unsigned key);
 void search_strip_paint(void *w, void *canvas);
+/* keyboard.c: the keyboard's keys by the wheel under a list.entry.ipod theme */
+int kb_wheel_key(unsigned key), kb_wheel_bg(void *w, void *canvas);
 extern int stock_keyup_trampoline(void *, void *), stock_touch_trampoline(void *, void *),
     stock_output_trampoline(int), stock_write_config_trampoline(int, const char *, const char *),
     stock_paint_trampoline(void *, void *), stock_dispatch_trampoline(void *, void *),

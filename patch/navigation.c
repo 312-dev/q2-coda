@@ -6122,6 +6122,8 @@ int ringnav_paint_bg(void *w, void *canvas) {
     int result = 0;
     if (kb_key(w))
         kb_paint_key(w, canvas);
+    else if (kb_wheel_bg(w, canvas))
+        ;
     else if (search_del(w) == 1)
         search_x(w, canvas);
     else if (!pressed_pill(w, canvas))
@@ -11288,6 +11290,7 @@ int ringnav(void *ctx, void *event) {
     if (usable() && games_key(window_manager_get_top_window(window_manager()), key)) return STOP;
     if (usable() && search_strip_key(window_manager_get_top_window(window_manager()), key))
         return STOP;
+    if (usable() && kb_wheel_key(key)) return STOP;
     /* Cover Flow's flip: a Centre during it does nothing. Its Return is the page's (coverflow.c
      * keyup), the wheel waits at the page's no surface (hold_wheel). */
     if (key == KEY_CENTER && coverflow_turning() && !g_power_longkey) return STOP;

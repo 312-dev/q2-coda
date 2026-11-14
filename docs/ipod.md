@@ -736,7 +736,7 @@ its tiles, framed in white when selected (Minimal's card only; Classic's band ha
 | `tidal_sortmode_dialog`       | three sort rows, `btn_cancel`                   |
 
 `sortselect_dialog` and the search result dialogs already navigate their lists. Left out, so the
-wheel stays on the volume: the text-entry dialogs (`addplaylist`, `editwifi`, `kbwifiadd`,
+wheel stays on the volume (under OLED the keyboard's keys take it instead, [OLED](#keyboard)): the text-entry dialogs (`addplaylist`, `editwifi`, `kbwifiadd`,
 `kbwifipass`, `renameplaylist`, `searchbox`, `tidal_searchbox` and Baidu's `edit_dialog`), the Update
 Local Music progress (`updatemusic_dialog`, whose only button cancels a scan that can run for
 minutes), the pull-down quick settings (`statusbar_dialog`, whose wheel sets the brightness, or the volume after a Play/Pause hold: see
@@ -951,7 +951,7 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
   Lists or Off; with a length on the right column, Right and Selected Row put the artist inline. Lists Q2 Pod builds
   itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep their own rows.
 - <a id="search"></a>**Search.** The Library's Search row (and Songs' pull) opens an iPod classic's letter strip, not
-  stock's search box and keyboard (`list.search.strip`, `patch/search_strip.c`): a `#1C1C1E` bar from y 216 to 254
+  stock's search box and keyboard (`list.entry.ipod`, `patch/search_strip.c`): a `#1C1C1E` bar from y 216 to 254
   with 12 px corners, the typed text in a black box at its left with the accent's caret, and A to Z, 0 to 9, a space
   and delete passing under a fixed accent box, 17 px apart, the current one white Inter Medium, the rest Text
   Secondary. The wheel walks the strip (round from delete to A), Centre enters the highlighted character, and, as
@@ -962,6 +962,13 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
   song with the other results after it as the queue, and a turn up from the first result, Next or Previous goes back
   to the strip. Return on the results, or on the strip with no text or no match, closes Search. With text and no
   match, "No results" stands in the list's place. Touch does nothing on the page.
+- <a id="keyboard"></a>**The keyboard.** The keyboard other text boxes open (New Playlist, Rename, the Wi-Fi password)
+  keeps stock's layout and labels on the page's black: each key a `#1C1C1E` box with 8 px corners, every one inside
+  the glass's corners (`patch/keyboard.c`, the same `list.entry.ipod`). The wheel walks the keys of the page showing,
+  the word candidates first while there are any: the first turn lights the first key in the accent, the next ones
+  move along, stopping at either end. Centre presses the lit key as a tap does, so a letter key typed twice in quick
+  succession gives its second letter, as on a phone, and the page keys (ABC, 123, sym) change the page with the light
+  kept in its place. Return is the box's own: it closes the keyboard, or the box with it.
 - **Appearance's rows.** Theme, Status Bar, Light Mode, Accent, Home, Shortcut, Battery (Icon or Percent), Song Artist
   and Song Length.
 
