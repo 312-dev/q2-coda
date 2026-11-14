@@ -739,7 +739,9 @@ def own_option(c, known, themes=()):
             err(v, f'unknown geometry set "{v.attrs["set"]}"')
         names.append(x)
         sets.append(v.attrs.get('set'))
-    if not 2 <= len(names) <= 10:  # config_value reads one digit
+    # Ten is this format's own bound, not a reader's: config_value reads up to three digits and write_int_config
+    # writes any. Past 32, setting_click's value mask (32 bits) could not reach a value.
+    if not 2 <= len(names) <= 10:
         err(c, f'{key}: 2 to 10 values expected')
     if not sets[0] and key not in PLAIN_KEYS:
         err(c, f'{key}: a plain choice the payload does not read (PLAIN_KEYS)')
@@ -981,7 +983,9 @@ def validate(t, name):
         err(f"{t['accent_key']} declared twice")
     if not t['accents']:
         err('colorSchemes is empty')
-    if len(t['schemes']) > 10:  # config_value reads one digit
+    # Ten is this format's own bound, not a reader's: config_value reads up to three digits and write_int_config
+    # writes any. Past 32, the accents mask (option_t.values, 32 bits) could not hold a scheme.
+    if len(t['schemes']) > 10:
         err(f"{len(t['schemes'])} accents, at most 10")
     # an enum holds its CHOICES index (value()); paint_stops draws nothing from no stops; a half that states
     # none takes the other's (half())

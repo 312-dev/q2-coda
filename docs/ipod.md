@@ -794,7 +794,7 @@ calls it: `(path, section, key, out, default)`. It reads the file line by line
 (`strcasecmp` on the section and the key), copies the trimmed value to `out` and returns 1; a
 missing key copies the default and returns -1. The default must not be null (stock reads its
 first byte). The payload passes `"0"`, so a missing or unreadable entry, or any value that is not
-one valid digit, is Split, Icon and Minimal (a stored `THEME=4` or past reads as Minimal); a missing `MINIMAL_ACCENT` is Ivory (7), a missing `CLASSIC_LIGHT_ACCENT` Classic Blue (9), a missing `ACCENT` Graphite (0), and a missing `ROUNDED` the live theme's Corners preset (Minimal's Round, Modern's Square), Square in a theme that states none. A
+a valid one (up to three digits, below the key's count), is Split, Icon and Minimal (a stored `THEME=4` or past reads as Minimal); a missing `MINIMAL_ACCENT` is Graphite (0), a missing `CLASSIC_LIGHT_ACCENT` Classic Blue (9), a missing `ACCENT` Graphite (0), and a missing `ROUNDED` the live theme's Corners preset (Minimal's Round, Modern's Square), Square in a theme that states none. A
 card from 1.0.1 or earlier, which has no `THEME`, keeps 1.0.1's look, and a Minimal card from before
 1.4.6 keeps its off-white look whatever `ACCENT` holds.
 
