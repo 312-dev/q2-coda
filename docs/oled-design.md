@@ -242,6 +242,12 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   album, Folder view (`folder_page`) a folder, and an album's tracks opened from Cover Flow are an album too (their
   status row names the album, with no row of its own above the tracks). Lists Q2 Pod draws itself (Most Played,
   Long Songs, Ratings) keep their own rows.
+- Streaming's rows are one line, 32 px, each service's mark (20 px, monochrome, no disc) centred on x 34 in Text
+  Secondary, white on the selection, its name from x 52: Phosphor's `spotify-logo`, `app-window` (a card app without
+  its own icon), `radio`, `airplay` and `sliders-horizontal` (Configuration), and TIDAL's own four diamonds, drawn in
+  `tools/art.py` (Phosphor has none); TIDAL and Tidal Downloads share it.
+- Ratings' lists show a song's hearts as five Phosphor glyphs at 14 px at the start of its second line, `heart-fill`
+  for its hearts and `heart` for the rest, in Text Secondary (white on the selection), then "· Artist".
 
 ### Now Playing
 

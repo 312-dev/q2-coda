@@ -162,6 +162,12 @@ def coverage_nonzero(polys, box):
 PHOSPHOR = ROOT/'assets/icons/phosphor'
 
 
+def tidal_mark(px, rgb):
+    """TIDAL's mark (TIDAL, a 20 unit box) as a px square PNG in rgb."""
+    polys = [[(x * px / 20, y * px / 20) for x, y in poly] for poly in path(TIDAL)]
+    return png(px, px, laid(px, px, [(coverage_nonzero(polys, (0, 0, px, px)), lambda x, y: (rgb, 1))]))
+
+
 def phosphor(name, px, rgb):
     """Phosphor's icon name (its file's stem, the weight in it) as a px square PNG in rgb, its paths filled nonzero."""
     svg = (PHOSPHOR/f'{name}.svg').read_text()
@@ -188,6 +194,15 @@ FOLDER_INKS = {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}  # Text Secondary in
 CHECK_PX = 12  # a picker's current choice (settings.values.switch, navigation.c paint_radio): the accent, white on the bar
 # The confirmation's glyph after a shuffle (feedback.c feedback_shuffled): bold, the accent's top tone in both halves
 CONFIRM_GLYPH_PX = 56
+# A Ratings row's hearts (ratings.c rate_hearts_paint): heart-fill for the song's, heart for the rest, regular, in the
+# folder's inks (Text Secondary in each half, white on the bar)
+RATE_PX = 14
+# Streaming's service marks (home.c stream_marks): monochrome at 20 px, no disc, in the folder's inks; Phosphor's
+# regular glyphs, and TIDAL's own mark (Phosphor has none) drawn here as its four diamonds, three across and one under
+# the middle, each corner to corner with the next
+STREAM_PX = 20
+STREAM_MARKS = {'spotify': 'spotify-logo', 'app': 'app-window', 'radio': 'radio', 'airplay': 'airplay', 'config': 'sliders-horizontal'}
+TIDAL = ''.join(f'M{x - 3.3} {y}L{x} {y - 3.3}L{x + 3.3} {y}L{x} {y + 3.3}Z' for x, y in ((3.4, 6.7), (10, 6.7), (16.6, 6.7), (10, 13.3)))
 
 
 def gradient(stops, y0, y1):
@@ -956,6 +971,11 @@ def images(t):
         out[f'{prefix}_confirm_shadow'] = png(*TRAY_SHADOW_BOX[2:], tray_shadow())
     if t['painter[PAINT_CONFIRM]'] == list(CHOICES['dialog.confirm.painter']).index('oled'):  # feedback.c's confirmation
         out[f'{prefix}_confirm_shuffle'] = phosphor('shuffle-bold', CONFIRM_GLYPH_PX, t['schemes'][t['accents'].bit_length() - 1]['tones'][0])
+        out |= {f'{prefix}_rate_{on}_{k}': phosphor(glyph, RATE_PX, c) for on, glyph in (('on', 'heart-fill'), ('off', 'heart'))
+                for k, c in FOLDER_INKS.items()}
+        for k, c in FOLDER_INKS.items():
+            out |= {f'{prefix}_stream_{n}_{k}': phosphor(glyph, STREAM_PX, c) for n, glyph in STREAM_MARKS.items()}
+            out[f'{prefix}_stream_tidal_{k}'] = tidal_mark(STREAM_PX, c)
     if t['station_stops']:  # Internet Radio's Now Playing art, as large as the slanted art (navigation.c stream_ipod)
         px = inc('NP_IPOD_ART')
         out[f'{prefix}_station'] = png(px, px, station(t['station_stops'], t['station_mast'], t['station_band_a'], t['station_shadow_a'], px))

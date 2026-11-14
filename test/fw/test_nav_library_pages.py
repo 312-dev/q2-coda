@@ -585,6 +585,33 @@ def test_a_ratings_list_is_its_hearts_most_first(fw, ui, song, row, title, want)
     assert ui.name[page] == 'rated_page' and title in ui.shown(page) and ui.rows(page) == want
 
 
+def test_oled_draws_a_ratings_rows_hearts_as_glyphs(fw, ui, song, st):
+    """OLED's second line (docs/oled-design.md): Phosphor's filled hearts for the song's, outlined for the rest, in
+    Text Secondary or white on the selection, the words after them."""
+    from test_nav_hold import use_set
+    use_set(st, 'oled')
+    Rated(fw, ui, song)
+    fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: struct.pack_into('<4i', ui.blocks[w], 0, *map(signed, (x, y, ww, h))))
+    call(fw, 'rated_open', 3)
+    page = ui.top()
+    assert ui.rows(page) == [('Fav', f'{DOT} F'), ('Four', ' '), ('Three', f'{DOT} T'), ('One', f'{DOT} O')]
+    drawn: list = []  # image names, each followed by where it was drawn
+    canvas = C.create_string_buffer(0x100)
+    fw.mock('widget_load_image', lambda w, name, bitmap, *_: drawn.append(C.string_at(name).decode()) or 0)
+    fw.mock('canvas_draw_image', lambda canvas, bitmap, src, dst, *_: drawn.append(struct.unpack_from('<2i', C.string_at(dst, 8))) or 0)
+    three = ui.kids[ui.view(page)][2]
+    paint = fw.fn('rate_hearts_paint', None, C.c_void_p, C.c_void_p)
+    paint(three, C.addressof(canvas))
+    names, at = drawn[0::2], drawn[1::2]
+    assert names == ['oled_rate_on_d'] * 3 + ['oled_rate_off_d'] * 2
+    words = struct.unpack_from('<i', ui.blocks[ui.kids[three][1]], 0)[0]
+    assert [x for x, _ in at] == [words - 84 + 16 * i for i in range(5)] and at[0][0] >= 0
+    drawn.clear()
+    st('sel_accent', C.c_void_p).value = st('paint_w', C.c_void_p).value = three
+    paint(three, C.addressof(canvas))
+    assert drawn[0::2] == ['oled_rate_on_w'] * 3 + ['oled_rate_off_w'] * 2
+
+
 def test_a_ratings_list_plays_from_its_row(fw, ui, song):
     rated = Rated(fw, ui, song)
     call(fw, 'rated_open', 3)
@@ -2080,6 +2107,39 @@ def test_streaming_drops_baidu_and_adds_the_payload_s_services(fw, ui):
     win, view = streaming(fw, ui)
     assert page_rows(ui, view) == [(c, True) for c in ('TIDAL', 'Qobuz', 'Spotify', 'Tidal Downloads', 'Internet Radio',
                                                        'AirPlay', 'Configuration')]
+
+
+def test_oled_marks_each_service_with_its_own_glyph(fw, ui, st):
+    """OLED (docs/oled-design.md): a service's logo on its disc gives way to the theme's 20 px mark centred on x 34,
+    in Text Secondary or white on the selection, the words from x 52; a row without a known logo keeps its own."""
+    from test_nav_hold import use_set
+    use_set(st, 'oled')
+    fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: struct.pack_into('<4i', ui.blocks[w], 0, *map(signed, (x, y, ww, h))))
+    win, view = streaming(fw, ui)
+    drawn: list = []  # image names, each followed by where it was drawn
+    canvas = C.create_string_buffer(0x100)
+    fw.mock('widget_load_image', lambda w, name, bitmap, *_: drawn.append(C.string_at(name).decode()) or 0)
+    fw.mock('canvas_draw_image', lambda canvas, bitmap, src, dst, *_: drawn.append(struct.unpack_from('<2i', C.string_at(dst, 8))) or 0)
+    paint = fw.fn('stream_mark_paint', None, C.c_void_p, C.c_void_p)
+    for item in ui.kids[view]:
+        struct.pack_into('<i', ui.blocks[item], 12, 32)  # the list's layout: stream_row's pitch, the payload's rows too
+        paint(item, C.addressof(canvas))
+    names = drawn[0::2]
+    assert names == [f'oled_stream_{n}_d' for n in ('tidal', 'spotify', 'tidal', 'radio', 'airplay', 'config')]  # not Qobuz
+    assert set(drawn[1::2]) == {(24, 6)}  # x 24 on the 375 px row, centred in the 32 px row
+    logos = [w for item in ui.kids[view] for w in ui.subtree(item) if ui.image.get(w, '').startswith(('list_tidal', 'stream_'))]
+    assert logos and all(w in ui.hidden for w in logos)
+    tidal = ui.kids[view][0]
+    label, = (w for w in ui.subtree(tidal) if ui.kind[w] == 'hscroll_label_create')
+    assert struct.unpack_from('<i', ui.blocks[label], 0)[0] == 52 - 20  # in its button at x 20
+    drawn.clear()
+    st('sel_accent', C.c_void_p).value = st('paint_w', C.c_void_p).value = tidal
+    paint(tidal, C.addressof(canvas))
+    assert drawn[0] == 'oled_stream_tidal_w'
+    drawn.clear()
+    st('sel_accent', C.c_void_p).value = ui.kids[tidal][0]  # a settings row's selection is its button
+    paint(tidal, C.addressof(canvas))
+    assert drawn[0] == 'oled_stream_tidal_w'
 
 
 def test_streaming_lists_the_card_s_apps_after_spotify(fw, ui):

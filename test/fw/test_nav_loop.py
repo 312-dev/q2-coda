@@ -3133,3 +3133,18 @@ def test_a_wheel_tick_after_an_overdue_centre_drops_its_click(fw, keys):
     keys(KEY_CENTER)
     keys(KEY_NEXT, O['DOUBLE_CLICK_MS'] + 50)
     assert ui.clicks == [] and sv.ints[SEL] == 2
+
+
+@pytest.mark.parametrize('where', ['list', 'keyboard', 'lock'])
+def test_touch_mode_is_a_touch_on_rows_not_on_the_keyboard_or_lock_window(fw, st, where):
+    """Typing a playlist's name or swiping the lock window away touches no row, so the list that
+    shows after it keeps its bar (rule 15); a touch on a page hides it."""
+    ui = Ui(fw)
+    list_page(ui)
+    if where == 'keyboard':
+        ui.window('keyboard', kind='keyboard')
+    fw.var('g_lockscreen_pageflag', C.c_ubyte).value = where == 'lock'
+    st('touch_mode').value = 0
+    fw.fn('ringnav_touch', C.c_int, C.c_void_p, C.c_void_p)(None, C.create_string_buffer(0x40))
+    fw.var('g_lockscreen_pageflag', C.c_ubyte).value = 0
+    assert st('touch_mode').value == (where == 'list')
