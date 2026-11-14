@@ -133,11 +133,24 @@ Entries 7 to 17 are costs the code marks itself.
 
 ### 9. A folder's play loads each subfolder on the UI thread
 
-- **Where:** `patch/navigation.c:8233` (`folder_tracks`); [internals.md](internals.md#queue-menu).
+- **Where:** `patch/navigation.c:8266` (`folder_tracks`); [internals.md](internals.md#queue-menu).
 - **Evidence:** "one toolsLoadDirectory per folder on the UI thread; a big tree takes a while".
-- **Impact:** the UI stops, and the watchdog feeds from the UI loop (`wdt_poll`), so a long enough pass reboots ([Watchdog](internals.md#watchdog)).
-- **Fix:** a worker that builds the list, taken by a poll; or the database path-prefix query the doc names, for scanned folders.
-- **Effort:** M.
+- **Impact:** the UI does not answer until the walk ends. `qm_tracks` calls `ringnav_wdt_long()` first, so the watchdog counts `WDT_LONG_MS` (15 minutes) for that pass, not its usual span, and the walk does not reboot ([Watchdog](internals.md#watchdog)).
+- **Measured:** the guest syscalls of one Add to Queue, taken with `Q2EMU_STRACE=1` in the emulator on a `--dev` build of `oled-theme` at `c056e7b4`, the library scanned (1,200 songs), from the key press to the frame with the menu gone. `Tree/` is 50 folders of 12 songs, `Flat/` 600 songs in one folder, each song the same 17 KB tagged MP3. Each folder is listed twice by `toolsLoadDirectory`: two `opendir` passes, each one `getdents64` with entries and one at the end.
+
+  |                          | Tree (51 folders, 600 songs) | Flat (1 folder, 600 songs) |
+  | ------------------------ | ---------------------------: | -------------------------: |
+  | directory opens          |                          102 |                          2 |
+  | `getdents64` calls       |                          204 |                          4 |
+  | dirent bytes             |                       45,696 |                     38,496 |
+  | opens of `.mp3` files    |                            0 |                          0 |
+  | bytes read from songs    |                            0 |                          0 |
+  | `database.db` operations |                            0 |                          0 |
+  | key to changed frame     |                       0.52 s |                     0.47 s |
+
+  The queue held both adds afterwards: the saved queue after Tree's add held 600 paths, `F01/S01.mp3` to `F50/S12.mp3` in order, and Now Playing showed "1 of 1200" after both. The times are the emulator's, with every syscall logged, the card in RAM: no figure for the Q2's card. The emulator's card had to be on tmpfs: on ext4 the host's 64-bit `d_off` cookies make the guest's 32-bit `readdir` stop after its first `getdents64`, so Folder showed nothing and a scan found no songs.
+
+- **Decision:** the rule was 600 or more `.mp3` opens, or 600 x 4 KB read from them, for the 600-song tree (each a random card read, about 5 ms at SD High Speed, an estimate). The add opens no song and reads nothing from one; a song costs a directory entry and memory. Not worth fixing. What a tree costs is two directory listings per folder.
 
 ### 10. A card app's import reads every song's tags on the UI thread
 
@@ -192,17 +205,26 @@ Entries 7 to 17 are costs the code marks itself.
 
 ### 18. Every painted widget passes through about 25 painters
 
-- **Where:** `patch/navigation.c:2719-2767` (`ringnav_paint`, the hook on `widget_on_paint_border`).
+- **Where:** `patch/navigation.c:2723-2772` (`ringnav_paint`, the hook on `widget_on_paint_border`).
 - **Evidence:** the function calls `night_paint`, `coverflow_paint`, `lockscreen_paint`, `edit_paint`, `photos_paint`, `books_paint`, `spot_paint`, `addon_paint`, `peq_paint`, `battery_paint`, `visualizer_paint`, `games_paint`, `paint_chevrons`, `paint_radio`, `paint_into`, `paint_letter`, `paint_cover`, `paint_scrubber`, `slider_scrub`, `quick_scrub`, `search_over`, `paint_caps`, `hold_paint` and `coverflow_home_clip` for every widget stock paints, and each decides for itself whether the widget is its own.
-- **Impact:** **unconfirmed**. Each is likely a pointer compare and a return, but several compare the widget's name as a string. `tools/q2remote.py prof` on a list scroll would show whether `ringnav_paint` is in the profile.
-- **Fix:** if it shows: one switch on the top window's owner before the chain.
-- **Effort:** M.
+- **Measured:** payload instructions of one `ringnav_paint` call, counted with a `UC_HOOK_BLOCK` hook over `BASE` to `SCRATCH` in a scratch copy of `test/patch.py` (the real MIPS payload under Unicorn; stock's paint and the mocks count nothing), on a `--dev` build of `oled-theme` at `c056e7b4`. The page is `folder_page` with eight rows from stock's own row constructor (`0x4b39f4`), laid out, after one whole paint. Every row's label and images, and the window, are owned by no painter:
+
+  |                    | row label | row image | window |
+  | ------------------ | --------: | --------: | -----: |
+  | Minimal, Light off |     1,393 |     1,381 |  1,443 |
+  | Minimal, Light on  |     1,398 |     1,386 |  1,448 |
+  | Classic, Light off |     1,586 |     1,586 |  1,648 |
+  | Classic, Light on  |     1,586 |     1,586 |  1,648 |
+
+  Median and largest are the same in every cell, and a second call gives the same count as the first. A list with a scrollbar, which Classic's scrollbar painter owns, counts 3,150. The ten functions with the most instructions for one row label under Classic, Light on (1,586): `ringnav_paint` 298, `accent` 240, `theme` 135, `lockscreen_paint` 94, `kind` 57, `light_on` 54, `peq_paint` 45, `visualizer_paint` 45, `coverflow_paint` 44, `coverflow_home_clip` 44. A third of it is `accent`, `theme` and `light_on`, asked again by painter after painter.
+
+- **Decision:** the rule: a full repaint of about 100 widgets in a 60 Hz frame of 8,300,000 instructions (5 x 10^8 a second, generous for the X2000), worth fixing at 2% of it, 1,600 instructions or more per unowned widget. The largest list page paints fewer than 100: about 77 row widgets (seven Songs rows of up to eleven in the table's 294 pixels), the page's own four and the status bar's 16. 1,586 is under it, by 1%; not worth fixing. Any painter added to the chain, or a lookup added to one, crosses the line: then the fix is one owner check before the chain, or `theme()` and `accent()` read once per call and passed down.
 
 ### 34. Boot reads `config.ini` once per key
 
-- **Where:** `patch/theme_engine.c:8-15` (`config_value` calls stock's `toolsReadConfig` with the file's path each time); 21 call sites in `patch/*.c`, most in the two loops at `patch/theme_engine.c:178-192` and `patch/navigation.c:3175-3179`.
-- **Impact:** **unconfirmed**: it is a cost only if `toolsReadConfig` opens and parses the file per call, which reading it in demo would settle. The values are cached after the first read (`st.pod_read`), so it is paid once a boot.
-- **Effort:** M.
+- **Where:** `patch/theme_engine.c:8-15` (`config_value` calls stock's `toolsReadConfig` with the file's path each time); 22 call sites in `patch/*.c`, most in the two loops at `patch/theme_engine.c:178-192` and `patch/navigation.c:3181-3187`.
+- **Measured:** one boot in the emulator with `Q2EMU_STRACE=1`, on a `--dev` build of `oled-theme` at `c056e7b4`, from the log's start to Home's first frame (the fifth flip): `config.ini` is opened 93 times (91 to read, one `O_RDWR` and one rewrite, stock's), all on demo's UI thread, 71 of them before stock prints `config_init end`. The file is 601 bytes, read whole with one 4,096-byte `read` per open. The span holds about 18,700 syscalls. The values are cached after the first read (`st.settings_read`, `st.pod_read`), so it is paid once a boot.
+- **Decision:** the rule: one open, read and parse of a small cached file is about 0.1 ms on the Q2 (an estimate), worth fixing at 100 ms a boot, 1,000 opens or more. 93 opens, stock's included, is about 9 ms: not worth fixing.
 
 ## Duplicated tables kept in step by hand
 
