@@ -885,6 +885,21 @@ static void select(menu_t *m, int id) {
     prop(m->w, SEL, id);
 }
 
+/* A reopen_top theme (OLED): Return out of a list drops its remembered row, so choosing it again
+ * opens it at the top as an iPod's menus do; the page Return lands on keeps its own
+ * (docs/internals.md#position-memory). Runs on Return's release before stock leaves the page, so
+ * context_now still names the list being left. */
+static void forget_left(void) {
+    unsigned scope;
+    int ctx = context_now(&scope);
+    if (ctx < 0) return;
+    for (int i = 0, j = 0; i < POS_MEM; ++i) {
+        position_t p = st.pos[i];
+        st.pos[i] = (position_t){ 0 };
+        if (p.id && !(p.ctx == ctx && p.scope == scope)) st.pos[j++] = p;
+    }
+}
+
 int load_rows(menu_t *m, void *w) {
     m->w = w;
     m->n = 0;
@@ -11210,6 +11225,10 @@ int ringnav(void *ctx, void *event) {
             return STOP;
         }
     }
+    /* OLED: the list Return leaves opens at its top next time (a held Return's release is not one) */
+    if (key == KEY_RETURN && theme()->reopen_top &&
+        !*(volatile unsigned char *)RETURN_RELEASE_LATCH && usable())
+        forget_left();
     /* Back by button: the page behind shows its row. A sliding page is painted once more, into its
      * closing snapshot, inside stock's handling of this release; it keeps hiding its own row until
      * that is done. */

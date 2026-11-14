@@ -18,7 +18,7 @@ from test_nav_display_library import Ple  # playlists.c's editor state
 from test_navigation import Config
 
 W_PARENT, W_EMITTER = O['W_PARENT'], O['W_EMITTER']
-KEY_NEXT, KEY_PREV, KEY_CENTER = O['KEY_NEXT'], O['KEY_PREV'], O['KEY_CENTER']
+KEY_NEXT, KEY_PREV, KEY_CENTER, KEY_RETURN = O['KEY_NEXT'], O['KEY_PREV'], O['KEY_CENTER'], O['KEY_RETURN']
 EVT_CLICK = O['EVT_CLICK']
 SCROLL_X, SCROLL_Y = O['SCROLL_X'], O['SCROLL_Y']
 # navigation.c's own tuning, read from its source so a retune moves the tests with it
@@ -657,6 +657,24 @@ def test_the_memory_holds_the_last_64_lists(fw, ui):
         paint(fw, again)
         recalled.append(again.selected)
     assert recalled == [2, 0]  # the oldest went; the next oldest is still there
+
+
+@pytest.mark.parametrize('index, top', [(3, True), (0, False)])  # OLED's list.reopen.top; Minimal remembers
+def test_a_list_left_by_return_opens_at_its_top_when_chosen_again(fw, ui, index, top):
+    theme(fw, index)
+    folder(fw, '/mnt/mmc/A')
+    chosen(fw, ui, Page(ui, titles(20), name='folder_page'), 6)
+    folder(fw, '/mnt/mmc/A/B')
+    chosen(fw, ui, Page(ui, titles(20), name='folder_page'), 4)
+    key(fw, ui, KEY_RETURN)  # out of B, to A
+    folder(fw, '/mnt/mmc/A')
+    back = Page(ui, titles(20), name='folder_page')
+    paint(fw, back)
+    assert back.selected == 6  # the page Return lands on keeps its row
+    folder(fw, '/mnt/mmc/A/B')
+    again = Page(ui, titles(20), name='folder_page')
+    paint(fw, again)
+    assert again.selected == (0 if top else 4)
 
 
 def checked(ui, page, row):

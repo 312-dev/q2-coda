@@ -68,6 +68,9 @@
     <!-- A scrolling text's ends fade into what is behind it (oled-design.md Motion, list_marks.c marquee_fade): rows,
          the status row's title and Now Playing's lines -->
     <element name="marquee" fade="1"/>
+    <!-- A list left by Return forgets its row: choosing it again opens it at the top, as an iPod's menus do
+         (navigation.c forget_left); Return still lands on the row the parent was left at -->
+    <element name="reopen" top="1"/>
     <element name="scrollbar" painter="wheel" w="4" right="5" top="134" bottom="206" min="8"
              dark.thumb="#e5e5e5" light.thumb="#1a1a1a" dark.track="#3a3a3a" light.track="#c5c5c5"/>
   </view>

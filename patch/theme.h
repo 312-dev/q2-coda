@@ -151,6 +151,9 @@ typedef struct {
 typedef struct {
     const char *name;   /* "Minimal": the Theme row's "Theme: %s" */
     unsigned char geom; /* second: THEME_GEOM_OFF (4) never moves */
+    /* a list left by Return forgets its row, so choosing it again opens it at the top
+     * (navigation.c forget_left); in the padding before motion, so sizeof(theme_t) stays 1624 */
+    unsigned char reopen_top;
     motion_t motion[MOTION_N];
     unsigned short recall_ms; /* a remembered row's glide; 0: shown at once */
     unsigned char bump_px;    /* the wheel's bump at a list's end */
