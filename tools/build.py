@@ -2355,6 +2355,10 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     pseudo = out/'root.pseudo'
     run('unsquashfs','-pf',pseudo,sq)
     p = pseudo.read_bytes()
+    # Two parts: p, the inode definitions (about 270 KB) every search and edit below works on, and
+    # pseudo_data, from the data marker on (about 108 MB of embedded file contents), written back unchanged.
+    at = p.index(b'# START OF DATA')
+    p, pseudo_data = p[:at], p[at:]
     # mksquashfs takes "/" from the source dir, not the pseudo file; carry stock values over.
     root = need(re.search(rb'^/ D (\d+) (\d+) (\d+) (\d+)$',p,re.M), 'Missing root pseudo inode')
     t,mode,uid,gid = (x.decode() for x in root.groups())
@@ -2473,8 +2477,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
             continue
         path = path.encode()
         entry = path+b' F '+b' '.join(stock.groups())+b' cat '+shlex.quote(str(out/name)).encode()+b'\n'
-        at = p.index(b'# START OF DATA')  # definitions precede the embedded data
-        p = p[:at]+entry+p[at:]
+        p += entry  # the definitions' end, before the embedded data
         added.append([path, b'R', *stock.groups()])
     removed = []
     for path in STOCK_EQ + STOCK_PAGES + OBSOLETE:
@@ -2527,7 +2530,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     # Shanling's outdated OpenSSL, curl, zlib and the rest, rebuilt from upstream (docs/third-party.md)
     from thirdparty import install as install_thirdparty
     p, thirdparty = install_thirdparty(p, out, cat, swap_inode, sq)
-    pseudo.write_bytes(p)
+    pseudo.write_bytes(p + pseudo_data)
     (out/'empty').mkdir(exist_ok=True)
     newsq = out/'rootfs.squashfs'
     epoch = struct.unpack_from('<I',sq.read_bytes(),8)[0]

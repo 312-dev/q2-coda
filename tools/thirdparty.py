@@ -639,7 +639,7 @@ def replacements(out):
 
 
 def install(p, out, cat, swap_inode, squashfs):
-    """The pseudo file p with stock's outdated components swapped for their rebuilds, and the
+    """The pseudo file's definitions p with stock's outdated components swapped for their rebuilds, and the
     manifest's record of them. Stops the build when check_abi finds a problem."""
     files, versions = replacements(out)
     root = out/'stockfs'
