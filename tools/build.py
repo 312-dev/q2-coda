@@ -234,7 +234,7 @@ HELPER_LIBS = ['lib/libc-2.28.so', 'lib/libpthread-2.28.so', 'usr/lib/libasound.
 # ends the loop, so the watchdog reboots as stock's would. Wi-Fi is off while Rockbox runs (WIFI_OFF).
 BOOT = 'usr/bin/q2boot'
 REMOTE = 'usr/bin/q2remote'
-PLAYER_STOCK_DIR = b'usr/lib/hciplayer-stock'  # --new-player: hciplayer's place, player/main.c's STOCK_PLAYER
+PLAYER_STOCK_DIR = b'usr/lib/hciplayer-stock'  # --new-player: hciplayer.xz's place, player/main.c's STOCK_XZ
 S90PLAY = 'etc/init.d/S90play'
 ROCKBOX_FLAG = '/tmp/q2pod-rockbox'
 # Rockbox can't use Wi-Fi and the radio costs battery, so rockbox() below stops it. Nothing is saved or restored
@@ -2397,9 +2397,15 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     q2player, player_added = None, []
     if new_player:
         # q2player at /usr/bin/hciplayer, and the patched hciplayer, which it runs while /mnt/data/q2player is
-        # absent, at STOCK_PLAYER (player/main.c): a directory of its own, so its file and process name stay
-        # "hciplayer" for demo's killall. Linked against this image's own libasound.
+        # absent, xz-compressed at STOCK_XZ (player/main.c), which unpacks it to /tmp/hciplayer-stock/hciplayer: a
+        # directory of its own, so its file and process name stay "hciplayer" for demo's killall. Compressed, it takes
+        # 1.27 MB less of the root filesystem, the room q2player and its TLS need (docs/player-plan.md#risks); the
+        # check is CRC32, which every xz decoder takes. q2player is linked against this image's own libasound.
+        import lzma
         from player import build as build_player
+        stock_xz = out/'peq/hciplayer.xz'
+        stock_xz.write_bytes(lzma.compress((out/'peq/hciplayer').read_bytes(), format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC32,
+                                           preset=9 | lzma.PRESET_EXTREME))
         alsa = out/'player-alsa/libasound.so.2.0.0'
         alsa.parent.mkdir(exist_ok=True)
         alsa.write_bytes(cat('usr/lib/libasound.so.2.0.0'))
@@ -2407,9 +2413,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         stock_dir = need(re.search(rb'^usr/lib D (\d+) (\d+) (\d+) (\d+)$', p, re.M), 'Missing usr/lib pseudo inode')
         hci = need(inode(p, b'usr/bin/hciplayer'), 'Missing usr/bin/hciplayer pseudo inode')
         # p is the definitions alone (pseudo_data, after them, goes back on unchanged): these two follow them
-        p = (p + PLAYER_STOCK_DIR + b' D ' + b' '.join(stock_dir.groups()) + b'\n' + PLAYER_STOCK_DIR + b'/hciplayer F ' +
-             b' '.join(hci.groups()) + b' cat ' + shlex.quote(str(out/'peq/hciplayer')).encode() + b'\n')
-        player_added = [[PLAYER_STOCK_DIR, b'D', *stock_dir.groups()], [PLAYER_STOCK_DIR + b'/hciplayer', b'R', *hci.groups()]]
+        p = (p + PLAYER_STOCK_DIR + b' D ' + b' '.join(stock_dir.groups()) + b'\n' + PLAYER_STOCK_DIR + b'/hciplayer.xz F ' +
+             b' '.join(hci.groups()) + b' cat ' + shlex.quote(str(stock_xz)).encode() + b'\n')
+        player_added = [[PLAYER_STOCK_DIR, b'D', *stock_dir.groups()], [PLAYER_STOCK_DIR + b'/hciplayer.xz', b'R', *hci.groups()]]
     for path, src in ((b'release/bin/demo', out/'demo'), (b'usr/bin/hciplayer', q2player or out/'peq/hciplayer'),
                       (BLUEALSA.encode(), out/'bluealsa'), (WATCHDOG.encode(), out/'watchdog'),
                       (S90PLAY.encode(), out/'S90play'), (S11LOGO.encode(), out/'S11logo'),

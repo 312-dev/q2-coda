@@ -16,7 +16,7 @@ Transcript lines are `seconds direction text`: `>` is demo to player, `<` player
 the 200 ms poll is written only when it changes; media-info's position is written as POS and
 sampled in the last line.
 """
-import argparse, os, pathlib, re, select, shutil, socket, subprocess, sys, threading, time
+import argparse, lzma, os, pathlib, re, select, shutil, socket, subprocess, sys, threading, time
 
 POLL = ('{player-status\\request}', '{media-info\\get-music-info}')
 
@@ -337,9 +337,10 @@ def launch_host(player, music, speed=1, env=None):
 
 def launch_emu(emu, binary, music, name='hciplayer', args=('-ao', 'alsa'), stock=None, switch=False, killall=None, buffer_ms=None, rate=None):
     """binary inside a bwrap sandbox of emu/rootfs under qemu, as run.sh starts demo; /tmp is the session's.
-    For q2player's fallback (player/main.c): stock is a player to put at /usr/lib/hciplayer-stock/hciplayer, switch
-    makes /mnt/data/q2player, and killall is when, in seconds, a shell in the sandbox runs demo's `killall -9
-    hciplayer`, after writing each process's name and command line to ps.txt. buffer_ms has the shim play the
+    For q2player's fallback (player/main.c): stock is a player to put, xz-compressed as tools/build.py installs it, at
+    /usr/lib/hciplayer-stock/hciplayer.xz (q2player unpacks it to the session's /tmp), switch makes /mnt/data/q2player,
+    and killall is when, in seconds, a shell in the sandbox runs demo's `killall -9 hciplayer`, after writing each
+    process's name and command line to ps.txt. buffer_ms has the shim play the
     capture as a card with that much buffer (Q2EMU_PCM_BUFFER_MS: a delay, and a rewind that takes frames back). rate has
     every PCM take that rate whatever is asked, as bluealsa offers only its transport's (Q2EMU_RATE)."""
     emu = pathlib.Path(emu)
@@ -349,7 +350,11 @@ def launch_emu(emu, binary, music, name='hciplayer', args=('-ao', 'alsa'), stock
         data = s.out / 'mnt/data'
         shutil.rmtree(data, ignore_errors=True); data.mkdir(parents=True)
         if switch: (data / 'q2player').touch()
-        extra = ['--bind', data, '/mnt/data'] + (['--ro-bind', stock, '/usr/lib/hciplayer-stock/hciplayer'] if stock else [])
+        extra = ['--bind', data, '/mnt/data']
+        if stock:
+            xz = s.out / 'hciplayer.xz'
+            xz.write_bytes(lzma.compress(pathlib.Path(stock).read_bytes(), format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC32))
+            extra += ['--ro-bind', xz, '/usr/lib/hciplayer-stock/hciplayer.xz']
         run = [f'/usr/bin/{name}', *args]
         if killall is not None:
             run = ['/bin/sh', '-c', f'{" ".join(run)} & sleep {killall}; for p in /proc/[0-9]*; do echo "$(cat $p/comm): '
@@ -377,7 +382,7 @@ def main():
     ap.add_argument('--player', help='a player built for this machine')
     ap.add_argument('--emu', help='an emulator directory (rootfs/, state/, shim/, qemu-mipsel-static)')
     ap.add_argument('--hciplayer', help='with --emu: the MIPS player binary to run as /usr/bin/hciplayer')
-    ap.add_argument('--stock', help='with --emu: the player q2player falls back to, at /usr/lib/hciplayer-stock/hciplayer')
+    ap.add_argument('--stock', help='with --emu: the player q2player falls back to, installed xz-compressed at /usr/lib/hciplayer-stock/hciplayer.xz')
     ap.add_argument('--switch', action='store_true', help='with --emu: make /mnt/data/q2player, which turns q2player on')
     ap.add_argument('--killall', type=float, help="with --emu: run demo's killall -9 hciplayer this many seconds in")
     ap.add_argument('--buffer-ms', type=int, help='with --emu: the capture plays as a card with this much buffer')
