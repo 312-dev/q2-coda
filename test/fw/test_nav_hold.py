@@ -1712,6 +1712,123 @@ def test_go_to_album_from_the_menu(hold, recs, ui):
     assert C.string_at(C.addressof(classinfo(hold.fw)) + 0xd) == b'Abbey Road'
 
 
+# Now Playing's art, artist and album as links (np_taps.c np_tap, on the window): the art and album go to the album,
+# the artist to the artist, as the menu's Go to rows, when the touch lifts within TAP_PX of where it came down.
+class Taps:
+    """Now Playing's art page at rest in its slide_view (the iPod layout's boxes, on screen at the art 16,42 166x166,
+    the artist 194,92 165x22 and the album 194,120 165x22), playing the second of three songs."""
+    def __init__(self, hold, recs, ui, st, fw):
+        self.ui, self.st, self.fw = ui, st, fw
+        hold.now_playing([song(recs, i) for i in range(3)])
+        self.page = hold.page
+        self.slide = ui.child(self.page, 'slide_view', 0, 40, 375, 186)
+        art_page = ui.child(self.slide, 'view', 0, 0, 375, 186)
+        self.cover = ui.child(art_page, 'image', 16, 2, 166, 166)
+        self.artist = ui.child(art_page, 'hscroll_label', 194, 52, 165, 22)
+        self.album = ui.child(art_page, 'label', 194, 80, 165, 22)
+        for name, w in (('np_win', self.page), ('np_slide', self.slide), ('np_cover', self.cover),
+                        ('np_artist', self.artist), ('np_album', self.album)):
+            st(name, C.c_void_p).value = w
+        ui.routes['playerjumpinfo_page'] = lambda ctx: ui.window('playerjumpinfo_page')
+        ui.routes['localmusic/artistinfo_page'] = lambda ctx: ui.window('artistinfo_page')
+        self.np_tap = fw.fn('np_tap', C.c_int, C.c_void_p, C.c_void_p)
+
+    def touch(self, kind, x, y):
+        event = C.create_string_buffer(0x40)
+        self.ui.pointer_event(C.addressof(event), kind, self.page, x, y)
+        return self.np_tap(None, C.addressof(event))
+
+    def tap(self, x, y, to=None, moves=()):
+        """A touch down at (x, y), through moves, lifted at to (else where it came down); the pass after. The answers
+        of each event, which must all be 0 so the touch goes on to the child that has it."""
+        answers = [self.touch(O['EVT_POINTER_DOWN'], x, y)]
+        answers += [self.touch(O['EVT_POINTER_MOVE_BEFORE'], *m) for m in moves]
+        answers.append(self.touch(EVT_POINTER_UP_BEFORE, *(to or (x, y))))
+        self.ui.due()
+        return answers
+
+    def lit(self, w):
+        return self.fw.fn('np_tap_lit', C.c_int, C.c_void_p)(w)
+
+
+@pytest.fixture
+def taps(hold, recs, ui, st, fw):
+    return Taps(hold, recs, ui, st, fw)
+
+
+def test_a_tap_on_the_artist_opens_the_artist(taps, ui, st):
+    assert taps.tap(250, 100) == [0, 0]
+    assert ui.went == ['localmusic/artistinfo_page'] and C.c_int.from_address(ui.contexts[-1][1]).value == 0xf001
+    assert ui.handlers(ui.top(), EVT_WINDOW_CLOSE) == [ui.fn('qm_restore')]  # as the menu's Go to Artist
+
+
+@pytest.mark.parametrize('x, y', [(250, 128), (100, 120)], ids=['album', 'art'])
+def test_a_tap_on_the_album_or_the_art_opens_the_album(taps, ui, hold, x, y):
+    taps.tap(x, y)
+    assert ui.went == ['playerjumpinfo_page']
+    assert C.string_at(C.addressof(classinfo(hold.fw)) + 0xd) == b'Abbey Road'
+
+
+def test_the_link_is_lit_while_held_and_only_there(taps, ui):
+    taps.touch(O['EVT_POINTER_DOWN'], 250, 100)
+    assert taps.lit(taps.artist) and not taps.lit(taps.album) and not taps.lit(taps.cover)
+    taps.touch(O['EVT_POINTER_MOVE_BEFORE'], 255, 104)  # a finger's wobble keeps it
+    assert taps.lit(taps.artist)
+    taps.touch(O['EVT_POINTER_MOVE_BEFORE'], 290, 100)  # a swipe starting: no longer
+    assert not taps.lit(taps.artist)
+    taps.touch(O['EVT_POINTER_DOWN'], 250, 128)
+    taps.touch(EVT_POINTER_ABORT, 250, 128)  # the slide_view took it
+    assert not taps.lit(taps.album) and not ui.pending()
+
+
+def test_classics_slanted_art_fades_while_held_rather_than_take_a_box_of_shade(taps, ui, fw):
+    ui.place(taps.cover, 16, 2, 166, 206)  # taller than wide: the reflection's room
+    taps.touch(O['EVT_POINTER_DOWN'], 100, 120)
+    taps.touch(EVT_POINTER_UP_BEFORE, 300, 120)
+    assert [a[:2] for _, a in fw.calls('widget_set_opacity')] == [(taps.cover, 217), (taps.cover, 255)]
+
+
+@pytest.mark.parametrize('to, moves', [((300, 120), ()), ((100, 120), ((200, 120),)), ((111, 120), ())],
+                         ids=['swipe-off', 'swipe-back', 'past-slop'])
+def test_a_swipe_or_a_drag_goes_nowhere(taps, ui, to, moves):
+    assert taps.tap(100, 120, to, moves) == [0] * (2 + len(moves))
+    assert not ui.went and not ui.pending()
+
+
+def test_off_the_art_page_or_with_lyrics_full_screen_nothing_is_a_link(taps, ui, st):
+    ui.nodes[taps.slide].props['value'] = 1  # the lyrics page in front
+    taps.tap(250, 100)
+    ui.nodes[taps.slide].props['value'] = 0
+    st('np_full').value = 1
+    taps.tap(100, 120)
+    st('np_full').value = 0
+    taps.tap(250, 160)  # under the album: the heart's row
+    taps.tap(200, 253)  # the bar
+    assert not ui.went
+
+
+def test_a_stream_or_a_go_to_already_open_goes_nowhere_and_lights_nothing(taps, ui, hold):
+    hold.mcl.type = 0x2  # not a Library or folder queue: a stream's
+    taps.touch(O['EVT_POINTER_DOWN'], 250, 100)
+    assert not taps.lit(taps.artist)
+    taps.tap(250, 100)
+    hold.mcl.type = 1
+    ui.window('artistinfo_page')  # Go to Artist's page is open, under this one
+    ui.stack.append(ui.stack.pop(-2))
+    taps.tap(250, 100)
+    assert not ui.went
+
+
+def test_the_arts_click_is_never_stocks_enlarged_art_and_the_hearts_still_is(taps, ui, fw):
+    dispatch = fw.fn('ringnav_dispatch', C.c_int, C.c_void_p, C.c_void_p)
+    heart = ui.child(taps.page, 'image', 300, 150, 50, 50)
+    for w in (taps.cover, heart):
+        event = C.create_string_buffer(0x40)
+        ui.pointer_event(C.addressof(event), EVT_CLICK, w, 10, 10)
+        dispatch(w, C.addressof(event))
+    assert ui.dispatched == [(heart, EVT_CLICK)]
+
+
 def test_more_clicks_now_playings_own_more(hold, recs, ui, st):
     hold.now_playing([song(recs, i) for i in range(3)])
     st('np_win', C.c_void_p).value = hold.page

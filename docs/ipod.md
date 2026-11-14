@@ -661,7 +661,19 @@ The asset holds Graphite's; `ringnav_playing` sets the current accent's. The vol
 is stock's label; the remaining time replaces stock's total. Sizes are `NP_*` constants in
 `tools/ipod.py`; see [internals.md](internals.md#now-playing-ipod).
 
-A tap on the art opens stock's full-screen art (`bigcover_page`; any tap closes it). Stock fits the
+**Links.** On the art page, a tap on the artist opens that artist, as ⋯'s Look up Artist does (in
+Cover Flow under Artist View: Cover Flow), and a tap on the album or the art opens that album's
+songs, as ⋯'s Look up Album does: stock's album page, never a carousel. Return comes back to Now
+Playing. Where the hold menu offers no Go to row (a stream, AirPlay, a song with no album or artist
+tag, its page already open) the tap does nothing. While the finger is down the artist or album
+turns the accent's text colour (white under a grey accent such as Graphite) and the art dims 15%
+(Classic's slanted art fades as much instead); a touch that moves more than 10 pixels is a swipe,
+which changes the page and goes nowhere. Every theme uses its own layout's boxes
+([internals](internals.md#now-playing-links), `np_taps.c`). The wheel's way to the same places is
+the hold menu or ⋯.
+
+Stock's tap on the art opened its full-screen art (`bigcover_page`; any tap closes it); the art is a
+link instead, so the full-screen art opens only by Enlarged Album Art's idle countdown. Stock fits the
 cover to the whole screen, 320 pixels high, so the glass hid its corners; iPod centres it on black as
 the largest box of the cover's own shape whose corners clear the glass by `GLASS_SLACK` (`bc_fit`; a
 square cover is `BC_ART` in `tools/ipod.py`, 292 pixels with the defaults: 41 from the sides, 14 from

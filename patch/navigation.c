@@ -1977,6 +1977,7 @@ static void paint_cover(void *w, void *canvas) {
         coverflow_slant(w, canvas, scheme()->paper & 255);
         return;
     }
+    if (w == st.np_cover) np_tap_dim(w, canvas); /* held: under the corners */
     if (ipod_square_art()) return;
     int x = 0, y0 = 0;
     if (w == st.bc[2]) {
@@ -2066,10 +2067,11 @@ static void paint_caps(void *w, void *canvas) {
             return;
         canvas_set_clip_rect(canvas, clip);
         int room = I(a, W_W) - NP_CAPS_INSET;
-        st.np_over = draw_spaced(canvas, widget_get_text(a), I(a, W_X) + NP_CAPS_INSET - st.np_off,
-                                 I(a, W_Y) + (I(a, W_H) - NP_CAPS_PX) / 2, NP_CAPS_PX,
-                                 RGBA(NP_ALBUM_RGB), room + st.np_off) -
-                     SUDO_TRACK - room;
+        st.np_over =
+            draw_spaced(canvas, widget_get_text(a), I(a, W_X) + NP_CAPS_INSET - st.np_off,
+                        I(a, W_Y) + (I(a, W_H) - NP_CAPS_PX) / 2, NP_CAPS_PX,
+                        RGBA(np_tap_lit(a) ? np_tap_ink() : NP_ALBUM_RGB), room + st.np_off) -
+            SUDO_TRACK - room;
         canvas_set_clip_rect(canvas, old);
         if (st.np_over > 0 && !st.np_marquee)
             st.np_marquee = timer_add(np_marquee, (void *)0, MARQUEE_HOLD_MS);
@@ -5253,6 +5255,7 @@ static int np_gone(void *win, void *event) {
             st.np_slide = st.np_lrc = st.np_title = st.np_artist = (void *)0;
         st.scrub_moved = 0; /* the page is going: no seek */
         st.np_off = st.np_full = st.lyric_held = 0;
+        np_tap_reset();
         stop_timer(&st.np_marquee);
         stop_timer(&st.np_remain_timer);
         stop_timer(&st.np_fit_timer);
@@ -5360,7 +5363,6 @@ int stream_ipod(void *art, void *const text[4], void *elapsed, void *remain, voi
  * (np_full), once there are lyrics to show. The slide_view or scroll_lrc taking the touch (its
  * abort) ends full screen at once, so the pages slide in their column. Returns 0: a STOP would
  * keep the slide_view's grab (rate_fav_click). */
-#define TAP_PX 10 /* AWTK's drag threshold */
 static int np_lyric_touch(void *ctx, void *event) {
     int type = I(event, EVENT_TYPE), x = I(event, EVENT_X), y = I(event, EVENT_Y);
     int tap = (unsigned)(x - st.np_tap_x + TAP_PX) <= 2 * TAP_PX &&
@@ -5413,6 +5415,11 @@ int ringnav_playing(void *win, void *ctx) {
         widget_on(lyric, touch[i], np_lyric_touch, (void *)0);
     for (unsigned i = 0; i < sizeof touch / sizeof *touch; ++i)
         widget_on(win, touch[i], np_time_tap, (void *)0); /* Track Time */
+    static const unsigned taps[] = { EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE,
+                                     EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
+    for (unsigned i = 0; i < sizeof taps / sizeof *taps; ++i)
+        widget_on(win, taps[i], np_tap, (void *)0); /* the art, artist and album (np_taps.c) */
+    np_tap_reset();
     st.np_time_down = 0;
     st.np_hash = 0;
     const char *file;
@@ -5958,11 +5965,12 @@ void *ringnav_ui_load(const char *name, void *parent) {
     return root;
 }
 
-/* bigcover_page_init: stock's full-screen art (a tap on Now Playing's opens it, any tap closes it)
+/* bigcover_page_init: stock's full-screen art (Enlarged Album Art's countdown opens it, any tap
+ * closes it; stock's tap on Now Playing's art is np_taps.c's link to the album instead)
  * shows the song name BC_MS, then bc_fade fades it out. Stock's own timer writes the next song's
- * name; ringnav_sleep shows it again when the track changes. Enlarged Album Art's countdown opens
- * it too; off the art page (lyrics, info, visualizer) there is no art to enlarge, so ringnav_sleep
- * holds the countdown full there (#57). Closing it after the open flashed it every 10 s (#153). */
+ * name; ringnav_sleep shows it again when the track changes. Off the art page (lyrics, info,
+ * visualizer) there is no art to enlarge, so ringnav_sleep holds the countdown full there (#57).
+ * Closing it after the open flashed it every 10 s (#153). */
 int ringnav_bigcover(void *win, void *ctx) {
     int result = stock_bigcover_trampoline(win, ctx);
     if (!win) return result;
@@ -6736,8 +6744,11 @@ static unsigned *style_color(unsigned *color, void *style, const char *name, uns
 /* A row that can't play now (catalogue.c) takes its text colour last, over the theme's. */
 unsigned *ringnav_style_color(unsigned *color, void *style, const char *name, unsigned fallback) {
     style_color(color, style, name, fallback);
-    if (!st.style_depth && st.paint_w && name && tk_str_end_with(name, "text_color"))
+    if (!st.style_depth && st.paint_w && name && tk_str_end_with(name, "text_color")) {
         catalogue_greyed(st.paint_w, color);
+        if (np_tap_lit(st.paint_w)) /* Now Playing's artist or album held (np_taps.c) */
+            *color = (*color & 0xff000000u) | (RGBA(np_tap_ink()) & 0xffffff);
+    }
     return color;
 }
 static unsigned *style_color(unsigned *color, void *style, const char *name, unsigned fallback) {
@@ -7946,6 +7957,8 @@ int ringnav_dispatch(void *target, void *event) {
         }
         /* Now Playing's ⋯: an app's page instead of stock's while the app's queue plays */
         if (np_mode_click(target, event)) return STOP; /* shuffle or repeat, one of the two */
+        /* the art's tap is np_tap's (its album), never stock's Enlarged Art */
+        if (target == st.np_cover) return STOP;
         return target == np_more() && addon_more() ? STOP : time_click(target, event);
     }
     return stock_dispatch_trampoline(target, event);
@@ -9752,14 +9765,16 @@ static int qm_restore(void *page, void *event) {
 /* Now Playing's More rows, for this record: Album info (0x5397cc) fills the album query and opens
  * playerjumpinfo_page; Artist info opens artistinfo_page with {class, record}. A song played in
  * Coverflow, or with Artist albums: Coverflow, goes to the album's tracks in Coverflow instead, as
- * Go to Artist reaches its covers. A card app's song goes to the app's page when it offers one
- * (addon.c addon_goto). */
+ * Go to Artist reaches its covers; album QM_LOOKUP_ALBUM (Now Playing's album and art taps,
+ * np_goto) keeps to playerjumpinfo_page, as the ⋯ page's Look up Album does. A card app's song goes
+ * to the app's page when it offers one (addon.c addon_goto). */
+#define QM_LOOKUP_ALBUM 2
 static void qm_goto(void *r, int album) {
     unsigned char *info = (unsigned char *)g_local_classinfo_save;
     void *wm = window_manager(), *page = window_manager_get_top_window(wm);
     /* a card app's song (Qobuz's): the app's own page for its album or artist, when it says so */
     if (addon_goto(P(r, REC_PATH), P(r, album ? REC_ALBUM : REC_ARTIST), album)) return;
-    if (album && (navigator_window_is_exist("coverflow_page") || ringnav_artist_view()) &&
+    if (album == 1 && (navigator_window_is_exist("coverflow_page") || ringnav_artist_view()) &&
         coverflow_goto_album(r))
         return;
     memcpy(st.qm_classinfo, info, sizeof st.qm_classinfo);
@@ -9779,6 +9794,36 @@ static void qm_goto(void *r, int album) {
     }
     void *top = window_manager_get_top_window(wm);
     if (top != page) widget_on(top, EVT_WINDOW_CLOSE, qm_restore, top);
+}
+
+/* Go to Album (album) or Go to Artist has somewhere to go for r: it names one, and its
+ * single-instance page is not open already (nor Cover Flow showing that album alone). */
+static int qm_goes(void *r, int album) {
+    const char *name = P(r, album ? REC_ALBUM : REC_ARTIST);
+    if (!name || !*name) return 0;
+    return album ? !navigator_window_is_exist("playerjumpinfo_page") && !coverflow_shows_album(r)
+                 : !navigator_window_is_exist("artistinfo_page");
+}
+
+/* Now Playing's taps on its album or art (album) and artist (np_taps.c): the playing song's album
+ * as the ⋯ page's Look up Album opens it (QM_LOOKUP_ALBUM), or Go to Artist (its Cover Flow under
+ * Artist View, as Look up Artist), where the hold menu would offer that row (qm_hold's and
+ * qm_open's gates: a local or Library queue, not AirPlay, a card app's song only to its app's
+ * page), so a stream goes nowhere. With go 0, only whether it would; 1 when it went or would. This
+ * is the hold menu's code: its record checks and qm_goto live here. */
+int np_goto(int album, int go) {
+    void *wm = window_manager();
+    unsigned at, n, type = (unsigned)MCL(MCL_TYPE);
+    if (!st.np_win || window_manager_get_top_window(wm) != st.np_win || st.qm_dialog ||
+        st.qm_timer || !usable() || window_manager_is_animating(wm) || airplayGetFlag() == 2 ||
+        g_navbar_status || (type != 1 && (type & 0xf000) != 0xf000))
+        return 0;
+    void *r = queue_now(&at, &n);
+    if (!r || !addon_goes(P(r, REC_PATH)) || !qm_goes(r, album)) return 0;
+    if (!go) return 1;
+    st.qm_cls = 0xf001; /* Go to Artist's class, as the hold's on Now Playing */
+    qm_goto(r, album ? QM_LOOKUP_ALBUM : 0);
+    return 1;
 }
 
 /* Deferred so the dialog is never closed under its own click dispatch. */
@@ -10072,7 +10117,7 @@ static int qm_open(const void *unused) {
     }
     unsigned cls = st.qm_cls;
     int song = st.qm_kind == QM_SONG || st.qm_kind == QM_COVERFLOW || st.qm_kind == QM_PLAYING;
-    const char *album = P(r, REC_ALBUM), *artist = P(r, REC_ARTIST);
+    const char *album = P(r, REC_ALBUM);
     /* a song by its title: the player's parse names a folder play's untagged record */
     char name[512];
     const char *tag = song ? now_tag(r, REC_TITLE) : (void *)0;
@@ -10110,13 +10155,10 @@ static int qm_open(const void *unused) {
     if (st.qm_kind < QM_COVERFLOW || st.qm_kind == QM_PLAYING) acts[n++] = QA_PLAYLIST;
     /* a card app's song isn't in the Library: Go to only to the app's own page */
     int hidden = song && !addon_goes(P(r, REC_PATH));
-    if ((st.qm_kind == QM_SONG || st.qm_kind == QM_PLAYING) && album && *album && !hidden &&
-        (cls & 0xfff0) != 0xff10 && !navigator_window_is_exist("playerjumpinfo_page") &&
-        !coverflow_shows_album(r))
+    if ((st.qm_kind == QM_SONG || st.qm_kind == QM_PLAYING) && !hidden &&
+        (cls & 0xfff0) != 0xff10 && qm_goes(r, 1))
         acts[n++] = QA_ALBUM;
-    if ((song || cls == CLASS_ALBUMS) && artist && *artist && !hidden &&
-        !navigator_window_is_exist("artistinfo_page"))
-        acts[n++] = QA_ARTIST;
+    if ((song || cls == CLASS_ALBUMS) && !hidden && qm_goes(r, 0)) acts[n++] = QA_ARTIST;
     /* ponytail: hidden while a folder_page is open (as Go to's single-instance pages), so a folder
      * play's Now Playing has none; Back reaches that folder_page instead. */
     if (song && !navigator_window_is_exist("folder_page") && song_folder(r, st.go_folder))
