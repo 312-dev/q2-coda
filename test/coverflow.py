@@ -67,7 +67,7 @@ float canvas_measure_text(void *, const unsigned *, unsigned);
 canvas_fill_rect getAllAlbum getMusicByAlbum toolsQueryDbTable toolsUpdateDbTable toolsGetUserStop album_row toolsThumbSpecCover toolsGetAlbumCover toolsGetExternCover _create_deque deque_init_copy deque_clear
 deque_init _deque_push_back deque_pop_back
 deque_assign deque_destroy deque_size deque_at window_create widget_factory
-widget_factory_create_widget image_create hscroll_label_create set_hscroll_label_attribute
+widget_factory_create_widget image_create hscroll_label_create set_hscroll_label_attribute hscroll_label_set_only_focus hscroll_label_set_ellipses
 slide_menu_set_value slide_menu_item_width list_view_create scroll_view_create list_item_create image_set_draw_type
 image_base_set_image widget_load_image widget_unload_image widget_set_name widget_use_style
 widget_set_text_utf8 widget_restack widget_animator_prop_create widget_animator_prop_set_params widget_animator_start widget_set_visible widget_get_prop_int widget_set_prop_int
@@ -227,6 +227,8 @@ int image_manager_unload_bitmap_by_name(void *m, const char *name) { snprintf(dr
 static int drops; /* image_manager_unload_all calls */
 int image_manager_unload_all(void *m) { ++drops; return 0; }
 void set_hscroll_label_attribute(void *x) { assert(!strcmp(W(x)->type, "hscroll_label")); }
+int hscroll_label_set_only_focus(void *x, int on) { (void)x, (void)on; return 0; }
+int hscroll_label_set_ellipses(void *x, int on) { (void)x, (void)on; return 0; }
 int slide_menu_set_value(void *x, int value) { *(int *)(W(x)->raw + SLIDE_INDEX) = value; return 0; }
 int widget_set_name(void *x, const char *s) { snprintf(W(x)->type, 32, "%s", s); return 0; }
 void page_empty(void *body, const char *name) { (void)body; (void)name; } /* navigation.c: page_list_or only */
