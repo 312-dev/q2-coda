@@ -2962,3 +2962,43 @@ def test_no_rtc_reads_zero(fw, ui):
     Card(fw)
     assert fw.fn('system__rtc_now', C.c_uint)() == 0
 
+
+def test_song_order_takes_the_sort_pickers_order_on_the_title_order(fw, st, recs):
+    """song_sort.c over a list loaded in stock's title order: Artist stably (the titles stay in order within an
+    artist), an untagged artist last either way; Album with its discs and tracks in their own order even descending;
+    Title descending reversed; nothing for Recently Added, which stock's query orders (g_sort_flag 3), or under a set
+    without the inset modal."""
+    use_set(st, 'oled')
+    saved = {}
+    fw.mock('write_int_config', lambda v, s, k, *_: saved.__setitem__(cstr(k), C.c_int(v).value))
+    flag = fw.var('fw_ctx_g_sort_flag', C.c_int)
+    rows = Rows(fw)
+    songs = [recs(title='A', artist='Beta', album='Two', track=2), recs(title='B', artist='', album='One', track=1),
+             recs(title='C', artist='alpha', album='Two', track=1), recs(title='D', artist='Beta', album='One', track=2)]
+    q = rows.rows(songs)
+    sort_set = fw.fn('song_sort_set', None, C.c_int, C.c_int)
+    order = fw.fn('song_order', None, C.c_void_p)
+
+    def titles():
+        return ''.join(field(r, REC_TITLE) for r in rows[q])
+    sort_set(1, 0)  # Artist, A to Z
+    order(q)
+    assert titles() == 'CADB' and flag.value == 0 and saved == {'SORTSELECT': 0, 'SONGSORT': 1, 'SONGDOWN': 0}
+    sort_set(1, 1)  # Z to A, the untagged one still last
+    order(q)
+    assert titles() == 'ADCB'
+    sort_set(2, 1)  # Album, Z to A: Two (tracks 1, 2), then One (tracks 1, 2)
+    order(q)
+    assert titles() == 'CABD'
+    sort_set(0, 1)  # Title, Z to A: the list reversed
+    order(q)
+    assert titles() == 'DBAC'
+    sort_set(3, 1)  # Recently Added, newest first: stock's flag 3, its query's order
+    assert flag.value == 3 and saved['SORTSELECT'] == 3
+    order(q)
+    assert titles() == 'DBAC'
+    flag.value = 0
+    sort_set(1, 0)
+    use_set(st, MINIMAL)
+    order(q)
+    assert titles() == 'DBAC'
