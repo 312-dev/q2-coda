@@ -869,7 +869,7 @@ NP_GRID_SLIDE_GAP = 5
 NP_GRID_TIMES_DY = 22
 NP_GRID_MODES_DY = 48
 NP_GRID_MODES = (88, 44)  # the play mode's target: both glyphs, 44 px apart (np_bar.c NP_MODES_APART)
-NP_GRID_DOTS_DY = 74
+NP_GRID_DOTS_DY = 70  # the page dots centred on y 302 on screen
 NP_GRID_MARGIN = 2  # hscroll_label's own margin each side of its text (stock's margin_left and margin_right)
 
 

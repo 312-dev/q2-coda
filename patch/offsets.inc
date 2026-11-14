@@ -144,6 +144,8 @@
 #define CONFIRM_TOP 208
 #define CONFIRM_PROMPT_PX 24
 #define NP_TIMES_PX 14 /* Now Playing's times, and the volume text in their place */
+#define VOL_NP_QUIET_PX 15          /* that text under a status row's set (OLED's) */
+#define VOL_NP_QUIET_RGB 0xababab /* its Text Secondary */
 #define VOL_PCT_PX 20 /* Classic's volume percentage, in the page dots' place */
 #define NP_ART_RADIUS 12 /* Now Playing's art corners (paint_cover), as stock's play_defaultcover scaled to the art */
 /* Classic's Now Playing, an iPod classic's (coverflow.c slant_render, np_bar.c paint_scrubber),

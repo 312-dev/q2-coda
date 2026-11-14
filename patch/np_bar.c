@@ -241,7 +241,10 @@ void slider_fill(void *slider, unsigned color) {
 }
 void np_fill(int scrub) {
     if (!st.np_slider) return;
-    slider_fill(st.np_slider, scrub ? 0xffffffff : RGBA(accent_tone(TONE_LIGHT)));
+    /* a status row's set (OLED's) keeps the accent and marks the scrub with paint_scrubber's knob
+     */
+    slider_fill(st.np_slider,
+                scrub && !geom_val(V_STATUS_Y) ? 0xffffffff : RGBA(accent_tone(TONE_LIGHT)));
     /* Minimal's fill is near white already: its scrub thickens the line to Classic's. */
     const theme_t *T = theme();
     if (T->np_scrub != T->np_bar)
@@ -320,7 +323,9 @@ static int glide_ms(int v, int playing) {
 }
 
 /* Classic's progress bar over stock's plain one, centred in the slider as stock's, the scrub's cue
- * on it while a scrub runs; the times sit beside it (tools/ipod.py np_ipod). */
+ * on it while a scrub runs; the times sit beside it (tools/ipod.py np_ipod). A status row's set
+ * (OLED's) marks a scrub with a NP_KNOB px white knob on the fill's end instead of a white fill. */
+#define NP_KNOB 14
 void paint_scrubber(void *w, void *canvas) {
     if (w && w == st.stream_bar && P(canvas, CANVAS_LCD))
         ipod_bar(canvas, 0, 0, I(w, W_W), I(w, W_W), 0);
@@ -337,6 +342,15 @@ void paint_scrubber(void *w, void *canvas) {
         rect_t r = { 0, (I(w, W_H) - h) / 2, fill, h };
         unsigned saved = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
         fill_box(canvas, &r, RGBA(accent_tone(TONE_LIGHT)), (unsigned)h / 2);
+        stock_canvas_set_fill_color(canvas, saved);
+    }
+    if (st.scrub && n > 0 && geom_val(V_STATUS_Y)) { /* the scrub's knob, as a slider's (np_fill) */
+        int x = fill < NP_KNOB / 2        ? NP_KNOB / 2
+                : fill > bw - NP_KNOB / 2 ? bw - NP_KNOB / 2
+                                          : fill;
+        rect_t knob = { x - NP_KNOB / 2, (I(w, W_H) - NP_KNOB) / 2, NP_KNOB, NP_KNOB };
+        unsigned saved = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+        fill_box(canvas, &knob, ui_ink(RGBA(0xffffff)), NP_KNOB / 2);
         stock_canvas_set_fill_color(canvas, saved);
     }
     if (playing && !st.np_glide_timer) {

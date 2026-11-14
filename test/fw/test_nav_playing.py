@@ -1830,6 +1830,21 @@ def test_stock_sliders_fill_is_drawn_again_to_the_glide(fw, ui, mcl, st):
     assert boxes == [((0, (h - 6) // 2, (w * 50 + w * 800 // 1000) // 200, 6), rgba, 3)]
 
 
+def test_oleds_scrub_keeps_the_accent_and_marks_the_playhead_with_a_knob(fw, ui, mcl, st):
+    """A status row's set (OLED's): the scrub keeps the accent's fill and puts a 14 px white knob on its end (audit N3)."""
+    theme(fw, st, OLED)
+    now = Now(fw, ui, mcl, st)
+    boxes = []
+    fw.mock('canvas_fill_rounded_rect', lambda c, r, sr, color, radius, *_: boxes.append(
+        (struct.unpack_from('<4i', (C.c_char * 16).from_address(r)), C.c_uint.from_address(color).value, radius)) or 0)
+    w, h = ui.box(now.slider)[2], ui.box(now.slider)[3]
+    fw.fn('navigation__scrub_start', None)()
+    assert now.fill() != 0xffffffff  # the accent's, not white
+    scrubber(fw, now.slider, Canvas(fw))
+    x = w * 50 // 200
+    assert boxes == [((x - 7, (h - 14) // 2, 14, 14), 0xffffffff, 7)]
+
+
 def test_the_radios_bar_paints_always_full(fw, ui, now, st):
     bar = ui.widget(now.win, 'bar', 66, 245, 243, 26)
     st.stream_bar = bar

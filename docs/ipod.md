@@ -642,7 +642,7 @@ once that is another track's (Tidal's URL never is a queue path, so its art stay
 
 **Scrub.** A press of the centre button starts scrubbing, as on an iPod classic (a double press with Single Press
 Scrub off; with the screen off it only
-wakes it, [Wake](internals.md#wake)), and the bar fill turns white while it lasts. Each wheel tick moves 5 seconds, times a ramp of one more step per 100 ms of spin
+wakes it, [Wake](internals.md#wake)), and the bar fill turns white while it lasts (under OLED it keeps the accent and a 14 px white knob marks the playhead). Each wheel tick moves 5 seconds, times a ramp of one more step per 100 ms of spin
 (up to 40 seconds a tick; the lists' gentler ramp does not apply), within the
 track. Both times and the bar follow the target at once;
 the track jumps there once, when the scrub ends. A press of the centre button confirms it at once
