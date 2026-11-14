@@ -87,7 +87,7 @@
     <element name="title" font="inter-medium" font_px="27"/>
     <element name="artist" font="inter"/>
     <element name="album" caps="0" opacity="255"/>
-    <element name="info" font="inter" font_size="18"/>
+    <element name="info" font="inter" font_size="18" light.value="#010101" dark.value="#FFFFFF"/>
     <element name="scrubber" height="6" scrub_height="6" track="#333333"/>
     <element name="modes" icons="1"/>
   </view>

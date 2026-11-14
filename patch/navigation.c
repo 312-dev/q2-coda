@@ -6989,7 +6989,9 @@ static int theme_pick(void *ctx, void *event) {
  * value, en_US's first player_unknown ("Unknown Artist"), reads "Unknown". Classic's page has
  * rows (tools/ipod.py np_ipod, #204's): stock's label keeps the name and its <name>_value the
  * value, in the info role's face, the value in the theme's grey (written through the flip, its own
- * inverse on the half's paper and ink), the genre with them, not genre_fill's marquee. */
+ * inverse on the half's paper and ink), the genre with them, not genre_fill's marquee. OLED's
+ * table has them too, with the bit depth in Format's value and its English names "Format" and
+ * "Bit Rate" for stock's "Encoding" and "Bitrate". */
 int ringnav_np_info(void *win) {
     static const char *const names[] = { "label_album", "label_genre",  "label_size",
                                          "label_year",  "label_encode", "label_bits",
@@ -6998,7 +7000,21 @@ int ringnav_np_info(void *win) {
                                  "", "", " MB", "", "", "-bit", " kbps", " kHz", ""
                              };
     int result = np_info(win), rows = win && widget_lookup(win, "label_album_value", 1);
-    char where[64] = "";
+    /* OLED's table (tools/ipod.py np_info_table): the bit depth joins Format ("FLAC, 16-bit") */
+    char depth[32] = "", where[64] = "";
+    void *bits = rows && oled_pages() ? widget_lookup(win, "label_bits", 1) : (void *)0;
+    if (bits && !widget_get_text_utf8(bits, depth, sizeof depth)) {
+        const char *v = depth;
+        while (*v && *v != ':') ++v;
+        v += *v == ':';
+        while (*v == ' ') ++v;
+        int n = (int)strlen(v),
+            bare = n > 3 && v[n - 4] >= '0' && v[n - 4] <= '9' && !strcmp(v + n - 3, "bit");
+        char t[32];
+        tk_snprintf(t, sizeof t, "%.*s%s", bare ? n - 3 : n, v, bare ? "-bit" : "");
+        memcpy(depth, t, sizeof depth);
+    } else
+        *depth = 0;
     getFormatString("player_location", where, sizeof where);
     const char *loc =
         *where && *where != '(' ? where : "Location"; /* a missing string reads "(key)" */
@@ -7026,10 +7042,13 @@ int ringnav_np_info(void *win) {
             tk_snprintf(key, sizeof key, "%s_value", names[i]);
             void *value = widget_lookup(win, key, 1);
             tk_snprintf(out, sizeof out, "%.*s", n, name);
+            if (bits && (i == 4 || i == 6) && !strcmp(out, i == 4 ? "Encoding" : "Bitrate"))
+                tk_snprintf(out, sizeof out, "%s", i == 4 ? "Format" : "Bit Rate");
             if (strcmp(out, s)) widget_set_text_utf8(label, out);
             theme_font(label, ROLE_INFO, FONT_ROW);
             if (!value) continue;
-            tk_snprintf(out, sizeof out, "%.*s%s", split ? len - u : len, v, split ? units[i] : "");
+            tk_snprintf(out, sizeof out, "%.*s%s%s%s", split ? len - u : len, v,
+                        split ? units[i] : "", i == 4 && *depth ? ", " : "", i == 4 ? depth : "");
             if (widget_get_text_utf8(value, s, sizeof s) || strcmp(s, out))
                 widget_set_text_utf8(value, out);
             theme_font(value, ROLE_INFO, FONT_ROW);
