@@ -2143,6 +2143,172 @@ def test_the_volume_polls_while_it_is_on_top(fw, world, st, vd):
     assert world.fire(1) == RET_OK and vd('vol_dialog', C.c_void_p).value is None and vd('vol_timer', C.c_uint).value == 0
 
 
+# The wheel's volume steps at its speed (vol_next) and the bar eases after them (vol_ease).
+KEY_NEXT, KEY_PREV = O['KEY_NEXT'], O['KEY_PREV']
+
+
+def volumes(fw, volume, maximum=100):
+    fw.var('g_volume', C.c_ubyte).value, fw.var('g_maxvolume', C.c_ubyte).value = volume, maximum
+    return fw.var('g_volume', C.c_ubyte)
+
+
+@pytest.mark.parametrize('speed', [0, 100, 270, 300, 350, 400, 450, 470, 500, 540, 2000, 1 << 30])
+def test_a_ticks_volume_steps_are_rockboxs_fourth_power_of_the_speed(fw, speed):
+    """(speed / 270)^4 rounded (Rockbox's iPod WHEEL_ACCELERATION 3, WHEEL_ACCEL_START 270), 1 to VOL_ACCEL_MAX."""
+    volumes(fw, 50)
+    fw.var('wheel_speed', C.c_int).value = speed
+    want = max(1, min(O['VOL_ACCEL_MAX'], round((speed / 270) ** 4)))
+    step = fw.fn('vol_next', C.c_int, C.c_uint)
+    assert (step(KEY_NEXT) - 50, 50 - step(KEY_PREV)) == (want, want)
+    assert fw.var('g_volume', C.c_ubyte).value == 50  # nothing set: the caller does
+
+
+@pytest.mark.parametrize('volume, maximum, key, want', [
+    (98, 100, 'next', 100), (100, 100, 'next', 100), (55, 60, 'next', 60), (60, 60, 'next', 60),
+    (70, 60, 'next', 70),  # over the limit (lowered since): up leaves it, as stock's dialog
+    (70, 60, 'prev', 60), (3, 100, 'prev', 0), (0, 100, 'prev', 0),
+])
+def test_a_fast_ticks_volume_stays_within_its_limits(fw, volume, maximum, key, want):
+    volumes(fw, volume, maximum)
+    fw.var('wheel_speed', C.c_int).value = 540
+    assert fw.fn('vol_next', C.c_int, C.c_uint)(KEY_NEXT if key == 'next' else KEY_PREV) == want
+
+
+@pytest.mark.parametrize('volume, key, want', [(40, 'next', 50), (40, 'prev', 30), (95, 'next', 100), (4, 'prev', 0),
+                                               (100, 'next', 100), (0, 'prev', 0)])
+def test_the_volume_dialogs_tick_leaves_stock_one_step_to_make(fw, volume, key, want):
+    """vol_keyup sets the volume a step short of vol_next's; stock's own step (mocked here as its +-1 within 0 and
+    the limits) lands on it, with its save, slider and count."""
+    g = volumes(fw, volume)
+    fw.var('wheel_speed', C.c_int).value = 540  # 10 a tick
+    k = KEY_NEXT if key == 'next' else KEY_PREV
+    seen = []
+
+    def stock(dialog, e, *_):
+        seen.append(g.value)
+        g.value = min(100, g.value + 1) if k == KEY_NEXT else max(0, g.value - 1)
+        return 11
+    fw.mock('stock_vol_keyup_trampoline', stock)
+    e = C.create_string_buffer(0x40)
+    struct.pack_into('<I', e, O['EVENT_KEY'], k)
+    assert fw.fn('vol_keyup', C.c_int, C.c_void_p, C.c_void_p)(None, C.addressof(e)) == 11
+    assert g.value == want and len(seen) == 1
+
+
+def test_other_keys_over_the_volume_dialog_are_stocks(fw):
+    g = volumes(fw, 40)
+    fw.var('wheel_speed', C.c_int).value = 540
+    fw.mock('stock_vol_keyup_trampoline', lambda *_: 0)
+    e = C.create_string_buffer(0x40)
+    struct.pack_into('<I', e, O['EVENT_KEY'], O['KEY_RETURN'])
+    assert fw.fn('vol_keyup', C.c_int, C.c_void_p, C.c_void_p)(None, C.addressof(e)) == 0 and g.value == 40
+
+
+def eased_widths(fw, world, st, clock, ms, polls, frm=40, to=50, maximum=100):
+    """The panel's bar over Home after a tick from frm to to: its width at each of polls, ms apart."""
+    theme(fw, MINIMAL)
+    dialog, vol, _ = volume(fw, world, st, frm, maximum)
+    vol_paint(fw, dialog, Canvas(fw))
+    volumes(fw, frm)
+    fw.var('wheel_speed', C.c_int).value = 540
+    world.set(vol, 'value', fw.fn('vol_next', C.c_int, C.c_uint)(KEY_NEXT if to > frm else KEY_PREV))
+    widths = []
+    for _ in range(polls):
+        canvas = Canvas(fw)
+        vol_paint(fw, dialog, canvas)
+        widths.append(canvas.rounded[2][0][2] if len(canvas.rounded) > 2 else 0)
+        clock[0] += ms
+        world.invalid.clear()
+        assert world.fire(1) == RET_REPEAT
+    return widths, canvas
+
+
+def track(level, maximum=100):
+    return (375 - 2 * O['VOL_PANEL_X'] - 2 * O['VOL_PANEL_PAD'] - O['VOL_PANEL_TEXT']) * level // maximum
+
+
+@pytest.fixture
+def clock(fw):
+    now = [5000]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    return now
+
+
+def test_the_volume_bar_eases_to_a_ticks_level(fw, world, st, clock):
+    widths, canvas = eased_widths(fw, world, st, clock, 16, 20)
+    assert widths[0] == track(40)  # the tick's paint: the bar where it was
+    assert widths == sorted(widths) and len(set(widths)) > 6  # moving, a frame at a time
+    assert widths[-1] == track(50) and canvas.texts[0][0] == '50'  # landed; the number is the value at once
+    tau, dt = O['VOL_EASE_MS'], 16  # each poll leaves tau / (tau + dt) of the way
+    for n in (1, 3, 6):
+        left = (tau / (tau + dt)) ** n
+        assert abs(widths[n] - track(40) - (track(50) - track(40)) * (1 - left)) <= 1.5, (n, widths)
+
+
+def test_the_volume_bar_eases_down_as_up(fw, world, st, clock):
+    widths, _ = eased_widths(fw, world, st, clock, 16, 20, frm=60, to=50)
+    assert widths[0] == track(60) and widths == sorted(widths, reverse=True) and widths[-1] == track(50)
+
+
+def test_a_slow_pass_moves_the_bar_further(fw, world, st, clock):
+    """The ease is by time: a pass that comes late finds the bar most of the way."""
+    widths, _ = eased_widths(fw, world, st, clock, 200, 3)
+    assert widths[0] == track(40) and widths[1] >= track(40) + (track(50) - track(40)) * 0.75
+
+
+def test_the_volume_poll_repaints_while_the_bar_eases_and_then_stops(fw, world, st, clock):
+    theme(fw, MINIMAL)
+    dialog, vol, _ = volume(fw, world, st, 40)
+    vol_paint(fw, dialog, Canvas(fw))
+    volumes(fw, 40)
+    world.set(vol, 'value', fw.fn('vol_next', C.c_int, C.c_uint)(KEY_NEXT))  # a slow tick: 41
+    repaints = 0
+    for _ in range(40):
+        vol_paint(fw, dialog, Canvas(fw))
+        clock[0] += 16
+        world.invalid.clear()
+        world.fire(1)
+        repaints += bool(world.invalid)
+    assert 2 < repaints < 30 and not world.invalid  # it settled, and the poll went quiet
+
+
+def test_a_new_volume_dialog_opens_on_its_value(fw, world, st, clock):
+    """A dialog the bar was easing in when it closed: the next one shows its value, not the old ease."""
+    theme(fw, MINIMAL)
+    dialog, vol, _ = volume(fw, world, st, 40)
+    vol_paint(fw, dialog, Canvas(fw))
+    volumes(fw, 40)
+    fw.var('wheel_speed', C.c_int).value = 540
+    world.set(vol, 'value', fw.fn('vol_next', C.c_int, C.c_uint)(KEY_NEXT))
+    again = world.window('volume_dialog', 'dialog')
+    world.add(again, 'slider_vol', 'slider', box=(0, 100, 375, 40), max=100, value=50)
+    canvas = Canvas(fw)
+    vol_paint(fw, again, canvas)
+    assert canvas.rounded[2][0][2] == track(50)
+
+
+def test_over_classic_s_now_playing_its_bar_eases_too(fw, world, st, clock):
+    theme(fw, CLASSIC)
+    dialog, vol, _ = volume(fw, world, st, 20, under='playing_page', np=True, beside=True)
+    vol_paint(fw, dialog, Canvas(fw))
+    volumes(fw, 20)
+    fw.var('wheel_speed', C.c_int).value = 540
+    world.set(vol, 'value', fw.fn('vol_next', C.c_int, C.c_uint)(KEY_NEXT))
+    top = 245 + (20 - 4) // 2
+
+    def end():
+        canvas = Canvas(fw)
+        vol_paint(fw, dialog, canvas)
+        return min(x for x, y, w, h, c in canvas.fills if h == 1 and y >= top and x > 66)
+    assert end() == 66 + 243 * 20 // 100  # the tick's paint: where it was
+    clock[0] += 50
+    world.fire(1)
+    assert 66 + 243 * 20 // 100 < end() < 66 + 243 * 30 // 100
+    clock[0] += 1000
+    world.fire(1)
+    assert end() == 66 + 243 * 30 // 100
+
+
 @pytest.mark.parametrize('name, below', [('home_page', 1), ('volume_dialog', 0)])
 def test_no_volume_dialog_no_volume(fw, world, st, name, below):
     theme(fw, MINIMAL)
@@ -3148,3 +3314,14 @@ def test_the_first_reachable_list_is_repainted_once(fw, world, st):
     paint_bg(fw, bar, Canvas(fw))
     paint_bg(fw, bar, Canvas(fw))
     assert world.invalid.count((rows, None)) == 1
+
+
+def test_over_oleds_now_playing_the_volume_reads_as_a_secondary_label(fw, world, st):
+    """A status row's set (OLED's): "Volume N" in 15 px Text Secondary (audit N2), not the times' 14 px white."""
+    theme(fw, '3')  # OLED
+    st('geom').value = fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())
+    dialog, *_ = volume(fw, world, st, 37, under='playing_page', np=True)
+    canvas = Canvas(fw)
+    vol_paint(fw, dialog, canvas)
+    (text, _, color, font), = canvas.texts
+    assert text == 'Volume 37' and font[1] == O['VOL_NP_QUIET_PX'] == 15 and color & 0xffffff == 0xababab

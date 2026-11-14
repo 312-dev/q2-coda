@@ -725,10 +725,19 @@ def test_relabel_wants_each_stock_label(change):
         pairs[2] = (key, build.LABELS[1][2])
     elif change == 'missing':
         del pairs[2]
-    else:
-        pairs.append(pairs[2])
+    else:  # listed again with another value
+        pairs.append((key, b'Other'))
     with pytest.raises(ValueError, match=f'^Unexpected {key.decode()} label$'):
         build.relabel(strings_bin(pairs))
+
+
+def test_relabel_replaces_a_pair_stock_lists_twice():
+    """Stock's en_US lists scan_now and scan_spec twice each, back to back: both copies take the new value."""
+    k, old, new = next(label for label in build.LABELS if label[0] == b'scan_now')
+    pairs = [(b'powerm_sleep', b'Sleep Timer'), *[(key, o) for key, o, _ in build.LABELS if key != k], (k, old), (k, old)]
+    out = build.relabel(strings_bin(pairs))
+    names = {key: n for key, _, n in build.LABELS}
+    assert out == strings_bin([(key, names.get(key, v)) for key, v in pairs])
 
 
 SOI = b'\xff\xd8'
@@ -794,11 +803,11 @@ def test_jpeg_size_refuses(data, message):
 def test_source_sha256_hashes_every_input_by_path(tmp_path, monkeypatch):
     monkeypatch.setattr(build, 'ROOT', tmp_path)
     files = ['assets/icons/a.png', 'assets/b.jpg', 'patch/c.c', 'tools/d.py', 'tools/e.c', 'tools/f.h', 'tools/g.S',
-             'docs/manual/build.py', 'docs/manual/guide.html']
+             'docs/manual/build.py', 'docs/manual/guide.html', 'player/h.c', 'player/i.h', 'player/Makefile']
     for name in files:
         (tmp_path/name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path/name).write_text(name)
-    for name in ('tools/note.txt', 'docs/other.md', 'test/x.py', 'tools/sub/deep.py'):
+    for name in ('tools/note.txt', 'docs/other.md', 'test/x.py', 'tools/sub/deep.py', 'player/build/host/q2player'):
         (tmp_path/name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path/name).write_text(name)
     expected = hashlib.sha256()

@@ -2,9 +2,9 @@
  * place, so its row has no chevron, and what stands beside the title depends on the list. A mixed
  * list (Songs, a genre's songs: anything stock opens on Songs' page) shows the artist after the
  * title; a list reached through an artist (artistinfo_page, their songs) shows none; an album
- * (albuminfo_page) shows each track's number in a column before the title and its length on the
- * right column; Folder view (folder_page) reads as an album too (folder_row). Song Artist and Song
- * Length, the theme's own options, change that.
+ * (albuminfo_page, and an album's tracks in Cover Flow) shows each track's number in a column
+ * before the title and its length on the right column; Folder view (folder_page) reads as an album
+ * too (folder_row). Song Artist and Song Length, the theme's own options, change that.
  *
  * navigation.c's background hook calls song_row for each row of such a list before the rows
  * paint: the title's box is fitted to what stands beside it, and the rest is drawn here, under
@@ -14,16 +14,18 @@
 #include "navigation.h"
 
 #define SONG_ARTIST_MIN 40 /* an inline artist with less room than this is dropped */
-#define SONG_NUM_W 14      /* an album's track number, right-aligned this wide after the inset */
+#define SONG_NUM_W 17      /* an album's track number, right-aligned this wide after the inset */
 #define SONG_NUM_TITLE 50  /* ... and the title's first column on screen */
 #define SONG_COL_GAP 12    /* a title's ink and the text on the right column */
 #define SONG_SMALL_DY 2 /* the small text's box below the row's, so its baseline is the title's */
 #define HSCROLL_MARGIN                                                                             \
     2 /* hscroll_label's own, each side of its text (rows' boxes start on the inset) */
 
+extern void *coverflow_tracks(void *page);
+
 /* The list w's window shows: SONGS_MIXED, SONGS_ARTIST, SONGS_ALBUM, SONGS_FOLDER, or 0, not a
- * song list. A list the payload builds itself (Most Played, Long Songs, Cover Flow's tracks) has
- * its own rows. */
+ * song list. Cover Flow's album tracks (coverflow_tracks) read as an album; the other lists the
+ * payload builds itself (Most Played, Long Songs) have their own rows. */
 int song_list(void *w) {
     void *win = window_of(w);
     const char *name = win ? widget_get_prop_str(win, "name", "") : "";
@@ -31,6 +33,7 @@ int song_list(void *w) {
            : !tk_strcmp(name, "artistinfo_page") ? SONGS_ARTIST
            : !tk_strcmp(name, "albuminfo_page")  ? SONGS_ALBUM
            : !tk_strcmp(name, "folder_page")     ? SONGS_FOLDER
+           : coverflow_tracks(win)               ? SONGS_ALBUM
                                                  : 0;
 }
 
@@ -294,7 +297,11 @@ void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected) 
         folder_row(w, canvas, row, title, id, r, selected);
         return;
     }
-    void *rec = song_record(id, title);
+    /* Cover Flow's rows are its tracks one for one, by index */
+    void *tracks = coverflow_tracks(window_of(w));
+    void *rec = !tracks                             ? song_record(id, title)
+                : (unsigned)id < deque_size(tracks) ? deque_at(tracks, (unsigned)id)
+                                                    : (void *)0;
     if (ctx == SONGS_ALBUM && !rec) return; /* not a track: Play All keeps its place */
     const theme_t *T = theme();
     const unsigned *name = widget_get_text(title), *artist = (void *)0;

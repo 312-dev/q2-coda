@@ -29,7 +29,7 @@ r = C.byref
 class Cf(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'page body covers slide name artist title albums tracks stock'.split()),
                 *((k, C.c_int) for k in 'sort sort_read year_old artists on_sort resort'.split()),
-                ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint), ('titled', C.c_int),
+                ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint), ('titled', C.c_int), ('offline', C.c_int),
                 ('saved_album', C.c_uint), ('albums_gen', C.c_uint),
                 *((k, C.c_int) for k in 'screen album running text_albums done total cancel scoped all_sort'.split()),
                 *((k, C.c_void_p) for k in 'all_albums all_stock hearts'.split())]
@@ -46,7 +46,8 @@ class Home(C.Structure):
                 *((k, C.c_void_p) for k in 'row row_image row_label svc'.split()), ('svc_name', C.c_char * 72),
                 *((k, C.c_int) for k in 'kind songs albums services games free_tenths counted counting got_songs got_albums'.split()),
                 ('count_thread', C.c_ulong), *((k, C.c_uint) for k in 'asked pane_read count_timer pane_timer'.split()),
-                ('ring', (C.c_uint * HOME_PW) * 4), ('clip', C.c_int * 4), ('clipped', C.c_int)]
+                ('ring', (C.c_uint * HOME_PW) * 4), ('clip', C.c_int * 4), ('clipped', C.c_int),
+                ('ink_bar', C.c_void_p), ('ground', C.c_uint)]
 
 
 class Row(C.Structure):
@@ -342,21 +343,31 @@ def test_home_fit_exact_cases(fw, w, h, want):
     assert fit(fw, w, h) == want
 
 
+def eased(range_, period, ms):
+    """drift_at's smoothstep ping-pong, in 1/256 px."""
+    t = ms % (2 * period)
+    x = ((t if t < period else 2 * period - t) << 16) // period
+    return range_ * 256 * ((x * x * (3 * 65536 - 2 * x)) >> 24) >> 24
+
+
 @pytest.mark.parametrize('period', (20000, 26000))
-def test_drift_is_a_ping_pong_of_its_period(fw, period):
+def test_drift_is_an_eased_ping_pong_of_its_period(fw, period):
     g = api(fw)
     home = fw.var('coverflow__home', Home)
     at = lambda ms: (setattr(home, 'drift_ms', ms), g.drift_at(30, period))[1]
-    step = 30 * 256 // (period >> 4) + 1  # time counts in 16 ms steps
     assert at(0) == 0
     assert at(period) == 30 * 256  # the far end
-    assert abs(at(period // 2) - 15 * 256) <= step
-    assert abs(at(period + period // 2) - 15 * 256) <= step  # on the way back
+    assert abs(at(period // 2) - 15 * 256) <= 1  # halfway at half the time
     assert at(2 * period) == 0  # a whole cycle later
     assert at(2 * period + 123) == at(123)
-    for ms in range(0, period, 997):
-        assert at(ms) == at(2 * period - ms), ms
-        assert at(ms) <= at(ms + 16)  # rising to the far end
+    for ms in range(0, period, 97):
+        assert at(ms) == at(2 * period - ms) == eased(30, period, ms), ms
+        assert at(ms) <= at(ms + 16)  # rising to the far end, never a step back
+    # eased: a 200 ms tick moves under a tenth of the middle's step next to each end, where it turns
+    tick = lambda ms: at(ms + 200) - at(ms)
+    middle = tick(period // 2 - 100)
+    assert tick(0) * 10 < middle and tick(period - 200) * 10 < middle
+    assert middle <= 30 * 256 * 200 * 3 // (2 * period) + 2  # at most 1.5 times the average speed
 
 
 def test_drift_range_zero_never_moves(fw):
@@ -378,7 +389,7 @@ def test_the_pan_starts_at_the_old_crop_and_moves_each_axis_by_its_own_period(fw
     assert (g.pan_u(), g.pan_v()) == (10 * 256, 20 * 256)
     home.drift_ms = 20000
     assert g.pan_u() == (10 + 18) * 256  # X's far end
-    assert g.pan_v() == 20 * 256 + 29 * 256 * (20000 >> 4) // (26000 >> 4)
+    assert g.pan_v() == 20 * 256 + eased(29, 26000, 20000)
 
 
 # The shelf's geometry
@@ -725,6 +736,32 @@ def test_home_tex_zooms_a_cover_by_a_tenth_with_its_pan_s_margin(fw):
     assert struct.unpack_from('<H', frame, 0xc)[0] & 1  # opaque
 
 
+def split_inset_set(fw, library, inset):
+    """st.geom on the first geometry set whose split_inset is inset; its client and pane as the C reads them."""
+    names = host.tools_theme.GEOM_VALS
+    table = (C.c_short * (fw.sizes['theme_engine__geom_vals'] // 2)).in_dll(fw.lib, 'theme_engine__geom_vals')
+    sets = [table[g * len(names):(g + 1) * len(names)] for g in range(len(table) // len(names))]
+    g = next(i for i, row in enumerate(sets) if row[names.index('split_inset')] == inset)
+    st = host.offsets(library.parent/'navigation.o', 'scratch_t')['geom']
+    C.c_int.from_address(C.addressof(fw.var('st', C.c_char)) + st).value = g
+    row = dict(zip(names, sets[g]))
+    return row, 320 - row['bar']
+
+
+def test_a_split_inset_keeps_the_pan_off_the_cover_s_edges(fw, library):
+    row, client = split_inset_set(fw, library, 2)  # OLED's
+    pw, ph = 375 - row['split_art'], client + row['split_art_up']
+    pixels = rgba(300, 300, lambda x, y: (10, 20, 30, 255))
+    tex, home, _ = tex_rig(fw, 300, 300, pixels)
+    assert tex(b'x') == 1
+    t = ph * 110 // 100  # a square cover fits the pane's height
+    ins = t * 2 // 100
+    assert home.tw == t
+    assert (home.v0, home.v0 + home.ry) == (ins, t - ph - ins)  # inside the inset at both ends
+    assert (home.u0, home.u0 + home.rx) == ((ph - pw) // 2, (ph - pw) // 2 + t - ph)  # the zoom's margin, far from both edges
+    assert home.rx > 0 and home.ry > 0  # it pans both ways
+
+
 def test_home_tex_a_flat_cover_stays_flat_out_to_its_border(fw):
     pixels = rgba(300, 300, lambda x, y: (10, 20, 30, 255))
     tex, home, _ = tex_rig(fw, 300, 300, pixels)
@@ -753,6 +790,57 @@ def test_home_tex_a_cover_it_won_t_pan_stays_still(fw, w, h, format):
     pixels = (C.c_ubyte * 4)()
     tex, home, _ = tex_rig(fw, w, h, pixels, format=format)
     assert tex(b'x') == 0 and home.tw == 0 and fw.calls('widget_unload_image')
+
+
+# The status row over Split's art: each glyph pixel inked white or black by WCAG contrast
+
+def wcag_white(r, g, b):
+    """Whether white has at least black's WCAG contrast over the sRGB pixel (Scrolly's lampLineInk rule)."""
+    lin = [c / 255 / 12.92 if c / 255 <= 0.04045 else ((c / 255 + 0.055) / 1.055) ** 2.4 for c in (r, g, b)]
+    lum = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+    return 1.05 / (lum + 0.05) >= (lum + 0.05) / 0.05, abs((lum + 0.05) ** 2 - 0.0525)
+
+
+def ink(fw, screen, art, ground):
+    """home_ink over one row: screen (BGRA words, the bar's glyphs on ground) and art (RGBA words) as long."""
+    n = len(screen)
+    fb, tex = (C.c_uint * n)(*screen), (C.c_uint * n)(*art)
+    fw.fn('home_ink', None, C.c_void_p, C.c_int, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_uint)(fb, n, tex, n, n, 1, ground)
+    return list(fb)
+
+
+def art_px(r, g, b):
+    return 0xff000000 | b << 16 | g << 8 | r
+
+
+def screen_px(r, g, b):
+    return 0xff000000 | r << 16 | g << 8 | b
+
+
+@pytest.mark.parametrize('ground, glyph', ((0xff000000, 0xffffffff), (0xffffffff, 0xff000000)))  # dark, Light Mode
+def test_home_ink_shows_the_art_where_no_glyph_is_and_inks_a_glyph_by_contrast(fw, ground, glyph):
+    art = [art_px(120, 190, 220), art_px(250, 250, 250), art_px(20, 24, 30), art_px(120, 190, 220)]
+    got = ink(fw, [ground, glyph, glyph, glyph], art, ground)
+    assert got[0] == screen_px(120, 190, 220)  # the art, in the screen's order
+    assert got[1:] == [screen_px(0, 0, 0), screen_px(255, 255, 255), screen_px(0, 0, 0)]  # white: black; dark: white; light blue: black
+
+
+def test_home_ink_blends_an_edge_by_its_coverage(fw):
+    half = screen_px(128, 128, 128)  # a glyph's edge, half on the black ground
+    got = ink(fw, [half, half], [art_px(255, 255, 255), art_px(0, 0, 0)], 0xff000000)
+    assert abs((got[0] & 255) - 127) <= 1 and abs((got[1] & 255) - 128) <= 1  # white art half black, black half white
+    dim = screen_px(0x6e, 0x6e, 0x6e)  # the slim battery's outline: its tone is its share
+    assert abs((ink(fw, [dim], [art_px(255, 255, 255)], 0xff000000)[0] & 255) - (255 - 0x6e)) <= 1
+
+
+def test_home_ink_picks_as_wcag_does(fw):
+    rnd = random.Random(7)
+    pixels = [(v, v, v) for v in range(256)] + [tuple(rnd.randrange(256) for _ in range(3)) for _ in range(4000)]
+    got = ink(fw, [0xffffffff] * len(pixels), [art_px(*p) for p in pixels], 0xff000000)
+    for p, g in zip(pixels, got):
+        white, margin = wcag_white(*p)
+        if margin > 1e-5:  # a tie within the table's rounding either way
+            assert g == (0xffffffff if white else 0xff000000), p
 
 
 # Touch: a fling's speed
@@ -2142,6 +2230,24 @@ def deque_of(fw, recs):
     fw.mock('fw_deque_at', lambda d, i, *_: recs[i].p if i < len(recs) else 0)
 
 
+@pytest.mark.parametrize('theme', ['oled', 'classic-light', 'minimal'])
+def test_the_bar_names_an_album_s_tracks_under_song_rows_and_an_artist_s_covers_under_a_status_row(fw, theme):
+    """OLED's one-line song rows take the album's name from the tracks' hidden caption (0: read it); an artist's
+    covers read the artist under a status row; anything else is Cover Flow."""
+    index = {t['id']: t['index'] for t in THEMES}[theme]
+    themed(fw, index)
+    recs = [Rec(artist='Bob Dylan', path='/a')]
+    deque_of(fw, recs)
+    title = fw.fn('coverflow_bar_title', C.c_char_p, C.c_int)
+    c = cf(fw)
+    c.albums, c.scoped, c.screen = 0x5000, ARTIST_ALBUMS, TRACKS
+    assert title(1) == (None if theme == 'oled' else b'Cover Flow')
+    c.screen = COVERS
+    assert title(1) == b'Bob Dylan' and title(0) == b'Cover Flow'
+    c.scoped = 0
+    assert title(1) == b'Cover Flow'
+
+
 def test_the_live_album_is_the_centre_card_while_the_covers_show(fw):
     s = Shelf(fw, n=3, index=1, scoped=RATED_ALBUMS)  # the rated albums: two, then their Sort card
     recs = [Rec('A'), Rec('B')]
@@ -2359,7 +2465,7 @@ def test_a_tap_in_the_flat_fallback_opens_the_centre_cover_alone(fw):
 # Stock's widgets, for the pages and Home
 
 THEMES = host.tools_theme.builtins()
-MINIMAL, CLASSIC, MODERN = ({t['id']: t['index'] for t in THEMES}[i] for i in ('minimal', 'classic-light', 'modern'))
+MINIMAL, CLASSIC, MODERN, OLED = ({t['id']: t['index'] for t in THEMES}[i] for i in ('minimal', 'classic-light', 'modern', 'oled'))
 EVT_CLICK, EVT_WINDOW_FOREGROUND = O['EVT_CLICK'], O['EVT_WINDOW_FOREGROUND']
 PANE_NOW, PANE_LIBRARY, PANE_SHUFFLE, PANE_COVERFLOW, PANE_FOLDER, PANE_GAMES, PANE_ROCKBOX, PANE_STREAM, PANE_SETTINGS, \
     PANE_SERVICE = range(10)
@@ -2615,6 +2721,30 @@ def test_a_theme_without_the_pane_asks_no_counts(fw):
     assert not ui.handlers(h.win, EVT_WINDOW_FOREGROUND) and not ui.timer(address(fw, 'coverflow__home_counts'))
 
 
+@pytest.mark.parametrize('fit', (True, False))
+def test_a_page_list_on_a_list_fit_set_ends_on_its_last_whole_row_above_the_glass(fw, library, fit):
+    """page_list under OLED's set (list_fit, list end 224 under a 58 px bar): twelve 32 px rows end by y 282 on
+    screen, the eighth row no longer under the glass; the built-in set keeps the list to the page's bottom."""
+    themed(fw, OLED if fit else MINIMAL)
+    if fit:
+        split_inset_set(fw, library, 2)  # OLED's set
+    ui = Ui(fw)
+    fw.mock('widget_resize', lambda w, ww, h, *_: ui.box(w, *ui.at(w)[:2], ww, h))
+    client = fw.fn('client_h', C.c_int)()
+    page = ui.make(ui.wm, 'window', 0, 320 - client, 375, client)
+    body = ui.make(page, 'view', 0, 0, 375, client)
+    view = fw.fn('page_list', C.c_void_p, C.c_void_p, C.c_void_p, C.c_void_p, C.c_char_p, C.c_int, C.c_int)(
+        page, body, None, b'Twelve', 12, 48)
+    lv = ui[view].parent
+    top, h = 320 - client + ui.at(lv)[1], ui.at(lv)[3]
+    row = fw.fn('page_h', C.c_int, C.c_int)(48)
+    if fit:
+        assert top + h <= 282 and top + h + row > 282 and h % row == 0, (top, h, row)
+        assert ui.at(view)[3] == h
+    else:
+        assert top + h == 320 or h == 12 * row
+
+
 def test_settings_slides_in_over_the_list_and_return_slides_the_list_back(fw):
     t, ui, h, _ = home_open(fw)
     title, back = fw.fn('coverflow_home_title', C.c_char_p), fw.fn('coverflow_home_back', C.c_int, C.c_void_p)
@@ -2630,6 +2760,26 @@ def test_settings_slides_in_over_the_list_and_return_slides_the_list_back(fw):
     assert ui[h.main].visible and ui[h.main].sensitive and not ui[h.sets].visible and not ui[h.sets].sensitive
     assert ui.at(h.main)[0] == -SPLIT_W and ui.animators[-1][0] == h.main  # in from the left
     assert title() == b'Q2 Pod' and not back(h.win)
+
+
+def test_under_home_lists_full_settings_is_a_page_and_return_brings_the_art_back(fw):
+    """OLED's home.lists.full: the list a row opens takes the screen's width with the art hidden, as a page; Return
+    shows the main list beside the art again."""
+    t, ui, h, home = home_open(fw, OLED, HOME='0')
+    assert t['home_lists_full'] and ui[h.art].visible
+    assert ui.at(h.sets)[2] == 375  # laid out a page's width while hidden
+    ui.click(h.rows['img_settings'])
+    assert ui[h.sets].visible and not ui[h.art].visible
+    assert ui.at(h.sets)[0] in (0, 375)  # in from the right by its own width, or in place with no slide
+    assert fw.fn('coverflow_home_back', C.c_int, C.c_void_p)(h.win) == 1
+    assert ui[h.main].visible and ui[h.art].visible
+
+
+def test_without_home_lists_full_settings_keeps_the_art_beside_it(fw):
+    t, ui, h, _ = home_open(fw, CLASSIC)
+    assert not t['home_lists_full']
+    ui.click(h.rows['img_settings'])
+    assert ui[h.sets].visible and ui[h.art].visible
 
 
 @pytest.mark.parametrize('theme', [MINIMAL, CLASSIC, MODERN])
@@ -2980,7 +3130,7 @@ def test_the_pan_stops_once_it_no_longer_shows(fw, change):
         ui.animating = 1
     elif change == 'still':
         home.tw = 0
-    elif change == 'margin':  # a split_still set's cover: no margin to pan across
+    elif change == 'margin':  # no margin left to pan across (a split_inset as wide as the zoom's)
         home.rx = home.ry = 0
     elif change == 'pane':
         home.pane = 1

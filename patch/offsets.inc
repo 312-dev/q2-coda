@@ -144,6 +144,8 @@
 #define CONFIRM_TOP 208
 #define CONFIRM_PROMPT_PX 24
 #define NP_TIMES_PX 14 /* Now Playing's times, and the volume text in their place */
+#define VOL_NP_QUIET_PX 15          /* that text under a status row's set (OLED's) */
+#define VOL_NP_QUIET_RGB 0xababab /* its Text Secondary */
 #define VOL_PCT_PX 20 /* Classic's volume percentage, in the page dots' place */
 #define NP_ART_RADIUS 12 /* Now Playing's art corners (paint_cover), as stock's play_defaultcover scaled to the art */
 /* Classic's Now Playing, an iPod classic's (coverflow.c slant_render, np_bar.c paint_scrubber),
@@ -191,7 +193,17 @@ static inline int arc_out(int r, int y) {
     return 16 * r - s;
 }
 #define PLACEHOLDER "default_album_flow" /* Cover Flow's and Spotify's missing art */
-#define VOL_POLL_MS 50 /* how often the volume indicator checks for a change */
+#define VOL_POLL_MS 16 /* how often the volume indicator checks for a change, and eases its bar */
+/* The volume bar's ease (volume.c vol_ease): a first-order follow with this time constant, so 95%
+ * of a step in 3 x VOL_EASE_MS. A choice, not a measurement: no source times an iPod's bar. */
+#define VOL_EASE_MS 60
+/* The wheel's volume acceleration (volume.c vol_accel): (speed / VOL_ACCEL_START)^4 steps a tick,
+ * speed in degrees a second, Rockbox's iPod curve; at most VOL_ACCEL_MAX (reached from 475 deg/s),
+ * the speed taken as at most VOL_ACCEL_TOP so the power fits 32 bits. VOL_ACCEL_MAX is ours: a
+ * tick is 50 degrees at 50% Wheel Sensitivity, so a fast turn moves the volume about 70. */
+#define VOL_ACCEL_START 270
+#define VOL_ACCEL_MAX 10
+#define VOL_ACCEL_TOP 1000
 /* The volume panel off Now Playing (vol_paint): exactly over Quick Settings' brightness row
  * (tools/ipod.py checks it), its rounded corners clear of the 80px glass corners. */
 #define VOL_PANEL_X 26
@@ -269,8 +281,9 @@ static inline int arc_out(int r, int y) {
 #define HOME_SPLIT_W 187
 #define LOCALMUSIC_BG 0x534fa0 /* the Library page's EVT_WINDOW_BACKGROUND: stops its play gif's timer */
 #define STREAM_BG 0x540d30 /* Streaming's, the same */
-/* Split's cover pans (docs/ipod.md#home): zoomed DRIFT_ZOOM_PCT, each axis a linear ping-pong of
- * its own period across the zoom's margin (about 1.5 px/s on a square cover, as iPod.js's), drawn
+/* Split's cover pans (docs/ipod.md#home): zoomed DRIFT_ZOOM_PCT, each axis an eased ping-pong of
+ * its own period across the zoom's margin (about 1.5 px/s on average on a square cover, as
+ * iPod.js's; coverflow.c drift_at), drawn
  * at sub-pixel positions every DRIFT_TICK_MS, a step at most DRIFT_MAX_STEP_MS. A cover whose zoomed
  * fit passes DRIFT_TEXELS (four panels) stays still. Tuned by eye; 2 x DRIFT_X_MS x DRIFT_Y_MS must
  * fit in 32 bits. */
@@ -279,7 +292,7 @@ static inline int arc_out(int r, int y) {
 #define DRIFT_Y_MS 26000
 #define DRIFT_TICK_MS 200
 #define DRIFT_MAX_STEP_MS 500 /* 2.5 ticks: a late tick keeps its time */
-#define DRIFT_TEXELS 221088 /* four panels: 4 x 188 x 294, the tallest set's client */
+#define DRIFT_TEXELS 240640 /* four panels: 4 x 188 x 320, a pane the screen's height */
 #define HOME_TOP 8 /* Minimal's decorative inset; Modern starts below the status bar. */
 #define HOME_CHEVRON_SHIFT 15
 #define HOME_FULL_CHEVRON_SHIFT 10
@@ -350,6 +363,7 @@ static inline int arc_out(int r, int y) {
 #define HSCROLL_SPEED 0x8c      /* a float, px per ms; 0 runs a pass in its duration (0x5fb394) */
 #define HSCROLL_XOFFSET 0x90    /* how far its text has scrolled, px: hscroll_label_set_xoffset */
 #define HSCROLL_TEXT_W 0x94     /* its measured text width: hscroll_label_get_range */
+#define HSCROLL_LOOP_GAP 0x9c   /* loop_interval_distance: a copy this far after the text, -1 none */
 #define HSCROLL_TIMER 0xa4      /* its running timer's id; 0 stopped (stock paints the ellipsis) */
 /* Every pass's fastest pace, 0.05f px per ms: stock Now Playing's title and artist (0x53d0e8); its
  * set_hscroll_label_attribute sets the same since V1.36 (0.1 before), some pages 0.2. As float bits,
@@ -547,6 +561,12 @@ static inline int arc_out(int r, int y) {
  * a turn), 200 a turn, and stock's poster encoderknob_thread_run+0x150, which dispatches the
  * thread info's key event. */
 #define WHEEL_TICK_UNITS 28
+/* The wheel's speed (playback.c wheel_speed_sample), Rockbox's iPod driver's: timed a click of
+ * WHEEL_SPEED_CLICK degrees at a time (its 4 of 96 positions), averaged (15 v + new) / 16, reset by
+ * WHEEL_SPEED_IDLE_MS without travel (its WHEEL_FAST_OFF_TIMEOUT, 250 ms). */
+#define WHEEL_SPEED_CLICK 15
+#define WHEEL_SPEED_IDLE_MS 250
+#define WHEEL_SPEED_TOP 4000 /* degrees a second: faster samples count as this */
 #define WHEEL_POST 0x6386d0
 #define WHEEL_INFO_EVENT 0x20 /* event type: 0x110 key down, 0x114 key up */
 #define WHEEL_INFO_KEY 0x38   /* the event's key (EVENT_KEY) */
@@ -586,6 +606,12 @@ static inline int arc_out(int r, int y) {
 #define WHEEL_ESCAPE_TICK_MS 300
 #define WHEEL_STOP_TICKS 3
 #define BOOT_KEY_GUARD 0xa4bbf9 /* no symbol: set after a Standby resume, on_wm_keyup_fun drops the next centre release */
+#define NP_KEY_HELD 0xa4e880 /* Now Playing's long press of 222/223 sets it (0x53b4d0), its release clears it */
+#define NP_KEY_MODE 0xa4e881 /* 1 once a key-down stepped the slider with NP_KEY_HELD set (0x53e000) */
+/* stock: on_wm_keydown_before_fun clicks (buzzeer_switch) only while it is clear and sets it after;
+ * on_wm_keyup_before_fun (ringnav's hook) clears it. A key ringnav takes before stock's key-up body
+ * clears it itself, or every later press is silent (docs/internals.md#ipod-row-clicks). */
+#define KEY_TONE_LATCH 0xa4bc00
 #define RETURN_RELEASE_LATCH 0xa4bbfa /* stock long Return arms it; the key-up filter consumes it */
 
 /* slide_menu_scroll_to @0x606290 and completion @0x6064e4; animator
@@ -619,6 +645,7 @@ static inline int arc_out(int r, int y) {
 #define REC_TITLE 0x10
 #define REC_ALBUM 0x14
 #define REC_ARTIST 0x18
+#define REC_STYLE 0x1c          /* the genre: a Search Genres row's (its callback 0x506d60) */
 #define REC_ALBUM_ARTIST 0x24   /* albumsonger; empty or null in folder-queue records */
 #define REC_COVER 0x28          /* an online row's cover, a Tidal row's a jpg in /tmp/tidal (player_get_id3info 0x51f6c0) */
 #define REC_TYPE 0x34           /* 8 song, 4 directory */

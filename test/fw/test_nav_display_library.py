@@ -714,8 +714,8 @@ def test_cover_flow_page_holds_artist_view_playlists_sort_refresh_and_large_libr
     ui.click(button_of(page.view(), 'Cover Flow'))
     assert page.title() == 'Cover Flow'
     found = titles(page.view())
-    assert len(found) == 7 and found[:2] == ['Artist View', 'Playlist View'] and found[2].startswith('Cover Flow ')
-    assert found[3:] == ['Refresh Cover Flow', 'Fast Navigation', 'Scan Song Durations', 'Position Bar']
+    assert len(found) == 8 and found[:2] == ['Artist View', 'Playlist View'] and found[2].startswith('Cover Flow ')
+    assert found[3:] == ['Refresh Cover Flow', 'Fast Navigation', 'Scan Song Durations', 'Position Bar', 'Library']
 
 
 class Settings:
@@ -756,9 +756,7 @@ def test_controls_opens_display_as_its_own_page(fw, keytone):
     assert page.title() == 'Controls'
     found = titles(page.view())
     assert found[:3] == ['Wheel Sensitivity', 'Hold Return', 'Single Press Scrub']
-    assert 'Click With Headphones' in found and 'system_keylock' in found
-    # Click With Headphones shows only while Key Tone is on
-    assert button_of(page.view(), 'Click With Headphones').parent.visible == keytone
+    assert 'Clicker' in found and 'system_keylock' in found and 'Click With Headphones' not in found
     # Key Lock opens stock's page
     opened = []
     fw.mock('navigator_to', lambda name, *_: opened.append(C.string_at(name).decode()))
@@ -791,7 +789,7 @@ class Power:
         fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(self.win.addr, None)
 
     def boot(self):
-        labels = [i.labels()[0] for i in self.view.children if i.labels()[0].text.startswith('Boot to: ')]
+        labels = [i.labels()[0] for i in self.view.children if i.labels() and i.labels()[0].text.startswith('Boot to: ')]
         return labels[0] if labels else None
 
 

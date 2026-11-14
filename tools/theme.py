@@ -37,7 +37,7 @@ CHOICES = {'list.selection.painter': {'card': 'SEL_CARD', 'stops': 'SEL_STOPS', 
            'list.songs.painter': {'stock': 'SONGS_STOCK', 'inline': 'SONGS_INLINE'},
            'playing.scrubber.painter': {'stock': 'SCRUB_STOCK', 'rows': 'SCRUB_ROWS'},
            'volume.panel.painter': {'stock': 'VOL_STOCK', 'classic-light': 'VOL_CLASSIC_LIGHT'},
-           'dialog.confirm.painter': {'stock': 'CONFIRM_STOCK', 'classic-light': 'CONFIRM_CLASSIC_LIGHT'},
+           'dialog.confirm.painter': {'stock': 'CONFIRM_STOCK', 'classic-light': 'CONFIRM_CLASSIC_LIGHT', 'oled': 'CONFIRM_OLED'},
            'pages.own.painter': {'stock': 'PAGES_STOCK', 'classic-light': 'PAGES_CLASSIC_LIGHT', 'oled': 'PAGES_OLED'},
            **dict.fromkeys(('playing.title.font', 'playing.info.font', 'home.rows.font', 'list.row.font', 'list.row.meta_font', 'list.row.tall_font', 'bar.title.font', 'playing.artist.font'), FONTS),
            'playing.layout': {'ipod': 'NP_IPOD', 'centred': 'NP_CENTRED'},
@@ -93,8 +93,10 @@ SCHEMA = {k.path: k for k in (
     key('list.marquee.fade', 'marquee_fade', 'bool'),  # a scrolling label's ends fade into what is behind it (list_marks.c)
     key('list.reopen.top', 'reopen_top', 'bool'),  # a list left by Return opens at its top when chosen again (navigation.c forget_left)
     key('list.shuffle.row', 'shuffle_row', 'bool'),  # Songs' action row reads Shuffle and takes the wheel's selection (navigation.c shuffle_key)
+    key('home.lists.full', 'home_lists_full', 'bool'),  # Split's Settings, Library and Streaming lists take the whole width, the art hidden (coverflow.c sub_full)
+    key('list.entry.ipod', 'entry_ipod', 'bool'),  # text entry the iPod's way: Search's letter strip (search_strip.c), the keyboard walked by the wheel (keyboard.c)
     key('playing.art.radius', 'np_art_radius', 'int', 75),  # Now Playing's art corners in px; 0: NP_ART_RADIUS's share of its size
-    key('playing.modes.icons', 'np_modes', 'bool'),  # shuffle and repeat as the theme's own pair (np_bar.c np_modes)
+    key('playing.modes.icons', 'np_modes', 'bool'),  # shuffle and repeat as the theme's own pair (np_bar.c np_modes), heart and More its own glyphs (np_glyphs)
     key('bar.fill.painter', 'painter[PAINT_BAR]', 'enum'),
     key('bar.battery.painter', 'painter[PAINT_BATTERY]', 'enum'),
     key('home.chevron.visible', 'chevron_home', 'bool'),
@@ -153,6 +155,7 @@ SCHEMA = {k.path: k for k in (
     key('home.pane.svc_px', 'pane_svc_px', 'int', 188),
     key('settings.rows.top', 'set_top', 'int', 375),
     key('settings.values.text', 'set_text', 'bool'),
+    key('settings.values.switch', 'set_switch', 'bool'),  # an on/off row's switch, drawn (list_marks.c switch_mark) where set_text would write On or Off
     key('settings.values.ink', 'set_value_ink', 'color', final=True),  # a set_text row's value, right-aligned; 0: the label style's white
     key('playing.scrubber.painter', 'painter[PAINT_SCRUB]', 'enum'),
     key('volume.panel.painter', 'painter[PAINT_VOLUME]', 'enum'),
@@ -226,7 +229,7 @@ SCHEMA = {k.path: k for k in (
         ('shelf', 'radius', 0, 83), ('shelf', 'tilt', 30, 90), ('shelf', 'horizon', 1, 99), ('shelf', 'third', 0, 1),
         ('shelf', 'swing', 0, 2), ('shelf', 'lift', 0, 40), ('shelf', 'eye_turn', 0, 400), ('shelf', 'view_h', O['CF_VIEW_H'], 294),
         *(('shelf', a, 0, hi) for a, hi in CF_THUMB.items()), ('caption', 'name_px', 1, 32), ('caption', 'artist_px', 1, 28),
-        ('caption', 'text_y', 210, 290), ('caption', 'artist_y', 20, 32))),
+        ('caption', 'text_y', 170, 290), ('caption', 'artist_y', 20, 32))),
     # % of the plane's own spacing of a cover's art, from even (0); 100, the plane's, is Minimal's
     Key('coverflow.shelf.art_persp', 'cf.art_persp', 'int', 0, 100, 100, 'open'),
     Key('page.rows.height', 'page_row', 'int', 20, 64, 48, 'open'),
@@ -381,11 +384,13 @@ GEOM_RANGES = {
     'np_art': (0, lambda g: 0 if g.np_ipod else 200),  # Now Playing on the grid, never as well as Classic's
     'np_bar_y': (0, lambda g: 320 - 56 if g.np_art else 0),  # its bar, with the times and the state row under it, on screen
     # Split: Home's rows never wider than the screen's half and the pane's overlap; the pane no wider than
-    # HOME_SPLIT_W leaves (home.ring, DRIFT_TEXELS), and no taller than CLIENT_H_MAX's 294
+    # HOME_SPLIT_W leaves (home.ring, DRIFT_TEXELS), and no taller than the screen: up to the bar's whole height, the
+    # status row's glyphs then over the art, inked by contrast (coverflow.c home_ink)
     'split_row': (120, lambda g: g.split_art + 16),
     'split_art': (O['HOME_SPLIT_W'], 260),
-    'split_art_up': (0, lambda g: g.bar - 26),
-    'split_still': (0, 1),
+    'split_art_up': (0, lambda g: g.bar),
+    'split_inset': (0, 4),  # percent of the zoomed cover; past about 4.5 the 110 % zoom leaves no pan
+    'modal': (0, 1),  # the More pages as dialogs, drawn with the hold menus as the inset modal (ipod.modal_page)
 }
 THEME_GEOM_OFF = 4  # offsetof(theme_t, geom), right after name so no field moves it; asserted in navigation.c; test/patch.py pokes it
 THEME_MOTION_OFF = 8  # offsetof(theme_t, motion), right after geom; asserted in navigation.c; test/patch.py pokes it
@@ -710,7 +715,7 @@ def offered(c, o, names, what):
     return sum(1 << names.index(n) for n in set(listed))
 
 
-PLAIN_KEYS = {'HOMELIB', 'ROWPREVIEW', 'STATUSBAR', 'SONGARTIST', 'SONGLENGTH'}  # the plain own keys the payload reads (theme_engine.c home_lib_on, row_preview_on, bar_theme, song_artist, song_length)
+PLAIN_KEYS = {'HOMELIB', 'ROWPREVIEW', 'STATUSBAR', 'SONGARTIST', 'SONGLENGTH', 'NPTIME'}  # the plain own keys the payload reads (theme_engine.c home_lib_on, row_preview_on, bar_theme, song_artist, song_length, np_time_total)
 
 
 def order(attrs):

@@ -162,6 +162,12 @@ def coverage_nonzero(polys, box):
 PHOSPHOR = ROOT/'assets/icons/phosphor'
 
 
+def tidal_mark(px, rgb):
+    """TIDAL's mark (TIDAL, a 20 unit box) as a px square PNG in rgb."""
+    polys = [[(x * px / 20, y * px / 20) for x, y in poly] for poly in path(TIDAL)]
+    return png(px, px, laid(px, px, [(coverage_nonzero(polys, (0, 0, px, px)), lambda x, y: (rgb, 1))]))
+
+
 def phosphor(name, px, rgb):
     """Phosphor's icon name (its file's stem, the weight in it) as a px square PNG in rgb, its paths filled nonzero."""
     svg = (PHOSPHOR/f'{name}.svg').read_text()
@@ -175,14 +181,36 @@ def phosphor(name, px, rgb):
 CARET_PX = 15
 STATE_PX = 13
 CHEVRON_INKS = {'d': 0x999999, 'l': 0x8a8a8a, 'w': 0xffffff}
+CHEVRON_MUTED_INKS = {'td': 0x858585, 'tl': 0x6e6e6e}  # a disabled row's (list_intodown, list_marks.c chevron_muted): Text Tertiary per half
 STATE_INKS = {'d': 0xffffff, 'l': 0x000000}
 # Now Playing's shuffle and repeat (playing.modes.icons, np_bar.c np_modes): bold, MODE_PX, off in Text Secondary per
 # half, on in the theme's own accent's top tone in both; repeat-once is repeat's on glyph for Repeat One.
 MODE_PX = 22
 MODE_INKS = {'d': 0xababab, 'l': 0x5c5c5c}
-# A row's leading glyph (Songs' Shuffle row, list.shuffle.row), regular weight at the 20 px row type's size
+# A row's leading glyph (Songs' Shuffle row, list.shuffle.row) and Now Playing's heart and More, regular weight (the
+# full heart fill) at the 20 px row type's size
 ROW_ICON_PX = 20
 FOLDER_INKS = {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}  # Text Secondary in each half, white on the bar
+CHECK_PX = 12  # a picker's current choice (settings.values.switch, navigation.c paint_radio): the accent, white on the bar
+# The confirmation's glyph after a shuffle (feedback.c feedback_shuffled): bold, the accent's top tone in both halves
+CONFIRM_GLYPH_PX = 56
+# A Ratings row's hearts (ratings.c rate_hearts_paint): heart-fill for the song's, heart for the rest, regular, in the
+# folder's inks (Text Secondary in each half, white on the bar)
+RATE_PX = 14
+# Streaming's service marks (home.c stream_marks): monochrome at 20 px, no disc, in the folder's inks; Phosphor's
+# regular glyphs, and TIDAL's own mark (Phosphor has none) drawn here as its four diamonds, three across and one under
+# the middle, each corner to corner with the next
+STREAM_PX = 20
+STREAM_MARKS = {'spotify': 'spotify-logo', 'app': 'app-window', 'radio': 'radio', 'airplay': 'airplay', 'config': 'sliders-horizontal'}
+TIDAL = ''.join(f'M{x - 3.3} {y}L{x} {y - 3.3}L{x + 3.3} {y}L{x} {y + 3.3}Z' for x, y in ((3.4, 6.7), (10, 6.7), (16.6, 6.7), (10, 13.3)))
+# The inset modal's symbols (menu_modal.c, a set with modal): regular weight at MENU_ICON_PX in FOLDER_INKS, and the
+# picker's check in the accent off the bar
+MENU_ICON_PX = 19
+MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart-break', 'list-plus', 'shuffle',
+              'vinyl-record', 'microphone-stage', 'folder', 'heart-half', 'clock-counter-clockwise', 'list-numbers',
+              'bookmark-simple', 'dots-three', 'plus', 'list-checks', 'skip-forward', 'skip-back', 'repeat', 'stack',
+              'airplay', 'download-simple', 'cloud-arrow-down', 'trash', 'speedometer', 'pencil-simple',
+              'caret-up', 'caret-down', 'check')
 
 
 def gradient(stops, y0, y1):
@@ -747,7 +775,7 @@ def band_rim():
 
 # A coverage table per radius of the round boxes the painter draws a row at a time (navigation.c paint_round_rows): their
 # corners' pixels take the row's colour at this alpha, so they stay the scheme's.
-CORNERS = (2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13)
+CORNERS = (2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16)
 def corner_cover(r):
     """A radius r corner's coverage out of 255, r rows of r pixels, the outermost first."""
     n = 16
@@ -854,6 +882,70 @@ def clock_shadow():
     return png(w, h, compose((0, 0, w, h), [(path(f'M0 {h / 2}A{w / 2} {h / 2} 0 1 1 {w} {h / 2}A{w / 2} {h / 2} 0 1 1 0 {h / 2}Z'), paint)]))
 
 
+# Search's key pop (search_strip.c, list.entry.ipod): when the wheel lands on a letter, the lit key grows a bubble
+# holding the letter at POP_LETTER_PX, and the key keeps the letter at the strip's size, dimmed (the echo). Panel px.
+# The bubble is one closed path: a POP_HEAD head with POP_HEAD_R corners whose sides each run one cubic S-curve
+# over POP_NECK px, leaving the head and meeting the key vertically (tangents continuous, so the edge never kinks),
+# ending inside the key's top 6 px; then the POP_KEY key with POP_KEY_R corners. Even widths with an even
+# difference, so head, key and letter share one centre. The image is the head's width and reaches the key's foot.
+POP_KEY_W, POP_KEY_H, POP_KEY_R = 18, 24, 5
+POP_HEAD_W, POP_HEAD_H, POP_HEAD_R = 30, 30, 9
+POP_NECK = 18
+POP_H = POP_HEAD_H + POP_NECK + POP_KEY_H - 6
+POP_LETTER_PX, POP_LETTER_DY = 26, 2  # the big letter's ink centred on the head, 2 px below its middle
+POP_ECHO_PX, POP_ECHO_A = 17, 153  # the echo: Inter Medium at the strip's size, white at 60 %
+POP_ECHO_H = 38  # the echo's box is the key's width by the strip's height, its baseline the strip letters' own
+POP_ECHO_BASELINE = 25  # ... where the payload's text rule puts the strip's 17 px letters (measured)
+POP_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+
+
+def pop_bubble_d():
+    """The bubble's SVG path, in the image's own pixels."""
+    w, s0, n, r, kr = POP_HEAD_W, POP_HEAD_H, POP_NECK, POP_HEAD_R, POP_KEY_R
+    k0, s1 = (w - POP_KEY_W) / 2, POP_HEAD_H + POP_NECK
+    k1, foot = k0 + POP_KEY_W, POP_H
+    return (f'M0,{r} A{r},{r} 0 0 1 {r},0 H{w - r} A{r},{r} 0 0 1 {w},{r} '
+            f'V{s0} C{w},{s0 + n * 0.55} {k1},{s1 - n * 0.55} {k1},{s1} '
+            f'V{foot - kr} A{kr},{kr} 0 0 1 {k1 - kr},{foot} H{k0 + kr} A{kr},{kr} 0 0 1 {k0},{foot - kr} '
+            f'V{s1} C{k0},{s1 - n * 0.55} 0,{s0 + n * 0.55} 0,{s0} Z')
+
+
+@functools.lru_cache(maxsize=None)
+def inter_medium():
+    return TTFont(ROOT/'assets/fonts/Inter-Medium.ttf')
+
+
+def ink_polys(ch, px, cx, cy=None, baseline=None):
+    """ch in Inter Medium at px (the em), its ink's horizontal centre on cx exactly, half pixels included (no
+    snapping: the rasteriser covers sub-pixels, as stb_truetype's subpixel bitmaps do); vertically its ink centred on
+    cy, or its baseline on baseline. One polygon per contour, filled nonzero."""
+    font = inter_medium()
+    name = font.getBestCmap()[ord(ch)]
+    g, k = font['glyf'][name], px / font['head'].unitsPerEm
+    x = cx - (g.xMin + g.xMax) / 2 * k
+    y = baseline if cy is None else cy + (g.yMin + g.yMax) / 2 * k
+    pen = SVGPathPen(font.getGlyphSet(), ntos=lambda v: f'{v:.4f}')
+    font.getGlyphSet()[name].draw(TransformPen(pen, (k, 0, 0, -k, x, y)))
+    return path(pen.getCommands())
+
+
+def pop_images(accent):
+    """{name: PNG}: the bubble in the accent, and two strips of the characters in POP_CHARS' order, white: the big
+    letters, one head's box each, and the echoes, one key's box each (one image a strip, not one a character: a
+    third of the bytes)."""
+    n, out = len(POP_CHARS), {}
+    out['search_pop'] = png(POP_HEAD_W, POP_H, laid(POP_HEAD_W, POP_H, [
+        (coverage_nonzero(path(pop_bubble_d()), (0, 0, POP_HEAD_W, POP_H)), lambda x, y: (accent, 1))]))
+    for name, cell, h, a, place in (
+            ('search_pop_letters', POP_HEAD_W, POP_HEAD_H, 1,
+             lambda ch, cx: ink_polys(ch, POP_LETTER_PX, cx, cy=POP_HEAD_H / 2 + POP_LETTER_DY)),
+            ('search_pop_echoes', POP_KEY_W, POP_ECHO_H, POP_ECHO_A / 255,
+             lambda ch, cx: ink_polys(ch, POP_ECHO_PX, cx, baseline=POP_ECHO_BASELINE))):
+        polys = [p for i, ch in enumerate(POP_CHARS) for p in place(ch, cell * i + cell / 2)]
+        out[name] = png(cell * n, h, laid(cell * n, h, [(coverage_nonzero(polys, (0, 0, cell * n, h)), lambda x, y, a=a: (0xffffff, a))]))
+    return out
+
+
 def theme_images(themes):
     """Every theme's images, {name: PNG bytes}, each name once. A theme that draws another's art (its art attribute)
     makes that theme's names, so its values must draw the same bytes: the payload has one image per name."""
@@ -873,7 +965,7 @@ def images(t):
         out[f'{prefix}_chevron'] = png(*CHEVRON_BOX[2:], compose(CHEVRON_BOX, [
             (stroke(path(CHEVRON), CHEVRON_STROKE, closed=False), lambda x, y: (0xffffff, 1))]))
     if t['painter[PAINT_CHEVRON]']:  # CHEV_ICON
-        out |= {f'{prefix}_chevron_{k}': phosphor('caret-right-bold', CARET_PX, c) for k, c in CHEVRON_INKS.items()}
+        out |= {f'{prefix}_chevron_{k}': phosphor('caret-right-bold', CARET_PX, c) for k, c in (CHEVRON_INKS | CHEVRON_MUTED_INKS).items()}
     if t['painter[PAINT_BATTERY]'] == list(CHOICES['bar.battery.painter']).index('slim'):  # its play state is the theme's too
         out |= {f'{prefix}_{n}_{k}': phosphor(f'{n}-fill', STATE_PX, c) for n in ('play', 'pause') for k, c in STATE_INKS.items()}
     if t['np_modes']:
@@ -881,9 +973,28 @@ def images(t):
         for n in ('shuffle', 'repeat'):
             out |= {f'{prefix}_mode_{n}_{k}': phosphor(f'{n}-bold', MODE_PX, c) for k, c in {**MODE_INKS, 'on': on}.items()}
         out[f'{prefix}_mode_repeat1_on'] = phosphor('repeat-once-bold', MODE_PX, on)
+        # and its heart and More (np_bar.c np_glyphs), named after stock's play_fav, play_unfav, play_more and
+        # play_moredown: the empty heart and More in Text Primary, More pressed in Text Secondary, the full heart in
+        # the accent, each half's but the accent's
+        out[f'{prefix}_np_fav'] = phosphor('heart-fill', ROW_ICON_PX, on)
+        for k, c in STATE_INKS.items():
+            out |= {f'{prefix}_np_unfav_{k}': phosphor('heart', ROW_ICON_PX, c), f'{prefix}_np_more_{k}': phosphor('dots-three', ROW_ICON_PX, c),
+                    f'{prefix}_np_moredown_{k}': phosphor('dots-three', ROW_ICON_PX, MODE_INKS[k])}
     if t['shuffle_row']:  # Songs' Shuffle row: the accent's top tone at rest, white on the selection, in both halves
         on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
         out |= {f'{prefix}_shuffle_{k}': phosphor('shuffle', ROW_ICON_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
+    if t['set_switch']:  # a picker's check on the right column: the accent's top tone at rest, white on the selection
+        on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
+        out |= {f'{prefix}_check_{k}': phosphor('check-bold', CHECK_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
+        # the Wi-Fi page's network rows (wifi_rows.c): signal and lock in Text Primary per half, white on the selection
+        for name, glyph in (('wifi_3', 'wifi-high'), ('wifi_2', 'wifi-medium'), ('wifi_1', 'wifi-low'), ('lock', 'lock-simple')):
+            out |= {f'{prefix}_{name}_{k}': phosphor(glyph, ROW_ICON_PX, c) for k, c in STATE_INKS.items()}
+    if any(g.modal for g in t['geoms'].values()):  # the inset modal's symbols (menu_modal.c)
+        on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
+        out |= {f'{prefix}_menu_{n}_{k}': phosphor(n, MENU_ICON_PX, c) for n in MENU_ICONS for k, c in FOLDER_INKS.items()}
+        out[f'{prefix}_menu_check_a'] = phosphor('check', MENU_ICON_PX, on)
+    if t['entry_ipod']:  # Search's key pop (search_strip.c): the accent's top tone, as the lit key's
+        out |= {f'{prefix}_{n}': d for n, d in pop_images(t['schemes'][t['accents'].bit_length() - 1]['tones'][0]).items()}
     if t['painter[PAINT_SONGS]']:  # Folder view's folder glyph (song_rows.c folder_row): Text Secondary, white on the selection
         out |= {f'{prefix}_folder_{k}': phosphor('folder', ROW_ICON_PX, c) for k, c in FOLDER_INKS.items()}
     if t['bolt']:
@@ -934,8 +1045,15 @@ def images(t):
         for w in CELL_WIDTHS:
             out |= {f'{prefix}_cell_{w}': cell(w, False), f'{prefix}_cell_lit_{w}': cell(w, True)}
         out |= {f'{prefix}_tile': tile(), f'{prefix}_clock_chrome': clock_chrome(), f'{prefix}_clock_shadow': clock_shadow(), f'{prefix}_hint_shadow': hint_shadow()}
-    if t['painter[PAINT_CONFIRM]']:
+    if t['painter[PAINT_CONFIRM]'] == list(CHOICES['dialog.confirm.painter']).index('classic-light'):
         out[f'{prefix}_confirm_shadow'] = png(*TRAY_SHADOW_BOX[2:], tray_shadow())
+    if t['painter[PAINT_CONFIRM]'] == list(CHOICES['dialog.confirm.painter']).index('oled'):  # feedback.c's confirmation
+        out[f'{prefix}_confirm_shuffle'] = phosphor('shuffle-bold', CONFIRM_GLYPH_PX, t['schemes'][t['accents'].bit_length() - 1]['tones'][0])
+        out |= {f'{prefix}_rate_{on}_{k}': phosphor(glyph, RATE_PX, c) for on, glyph in (('on', 'heart-fill'), ('off', 'heart'))
+                for k, c in FOLDER_INKS.items()}
+        for k, c in FOLDER_INKS.items():
+            out |= {f'{prefix}_stream_{n}_{k}': phosphor(glyph, STREAM_PX, c) for n, glyph in STREAM_MARKS.items()}
+            out[f'{prefix}_stream_tidal_{k}'] = tidal_mark(STREAM_PX, c)
     if t['station_stops']:  # Internet Radio's Now Playing art, as large as the slanted art (navigation.c stream_ipod)
         px = inc('NP_IPOD_ART')
         out[f'{prefix}_station'] = png(px, px, station(t['station_stops'], t['station_mast'], t['station_band_a'], t['station_shadow_a'], px))

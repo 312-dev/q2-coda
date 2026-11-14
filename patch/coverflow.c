@@ -334,7 +334,9 @@ static int marked_empty(const char *track) {
  * same-named album's embedded-only WebP or large PNG shows no art here; a per-track probe cache
  * if that matters. */
 int coverflow_player_cover(const char *track, const char *dst, int w, int h) {
+    char cover[512]; /* a server song's offline copy (catalogue.c): its app's cover of the album */
     return toolsGetExternCover(track, dst, w, h) == 1 || beside_art(track, dst, w, h, 0, ff_thumb) ||
+           (catalogue_cover(track, cover, sizeof cover) && ff_thumb(cover, dst, w, h)) ||
            (!marked_empty(track) && ff_thumb(track, dst, w, h));
 }
 
@@ -351,6 +353,11 @@ int coverflow_player_cover(const char *track, const char *dst, int w, int h) {
 static int grid_cover(const char *track, const char *dst, int w, int h, int album) {
     static unsigned *miss __attribute__((section(".scratch"))), n __attribute__((section(".scratch")));
     const char *dot = strrchr(track, '.');
+    char cover[512];
+    /* a server row (catalogue.c): no file, its app's cover of the album, a small baseline JPEG */
+    if (catalogue_path(track))
+        return catalogue_cover(track, cover, sizeof cover) &&
+               toolsThumbSpecCover(cover, dst, w, h) == 1;
     if (toolsGetAlbumCover(track, dst, w, h) == 1) return 1;
     if (!dot || (strcasecmp(dot, ".opus") && strcasecmp(dot, ".ogg"))) return 0;
     unsigned key = fnv(FNV_SEED, (const unsigned char *)track);
@@ -446,6 +453,21 @@ int album_art(const char *track, const char *dst, int shared) {
  * none. ponytail: an album whose ffmpeg is killed every time costs one kill per open. */
 static void build_art(const job_t *j) {
     char dst[512], tmp[512];
+    /* A server row (catalogue.c) has no file: its app's cover of the album, which load_albums
+     * queues only once the app has fetched it; one that won't decode is "no art". */
+    char cover[512];
+    if (catalogue_path(j->track)) {
+        art_path(dst, j->key, "");
+        art_path(tmp, j->key, ".tmp");
+        if (catalogue_cover(j->track, cover, sizeof cover) &&
+            thumb(cover, tmp, ART_SIZE, ART_SIZE) && !rename(tmp, dst))
+            return;
+        unlink(tmp);
+        if (access(cover, 0)) return; /* gone meanwhile (Sign Out): the next open asks again */
+        void *f = fopen(dst, "w");
+        if (f) fclose(f);
+        return;
+    }
     if (access(j->track, 0)) return; /* storage gone: no marker, the next open retries */
     art_path(dst, j->key, "");
     art_path(tmp, j->key, ".tmp");
@@ -595,6 +617,7 @@ void *staged(int (*query)(void *), void *arg, int *count) {
 
 /* getAllAlbum, as load_localclass_list 0xf003 runs it, or the album's getMusicByAlbum, as its row
  * opens it. Stock order, including the trailing "Unknown Album" (id -1) row. */
+static void *cf_staged(int (*query)(void *), void *arg, int *count);
 static int albums(void *album) {
     return album ? getMusicByAlbum(I(album, REC_ID) == -1 ? (const char *)0 : P(album, REC_ALBUM))
                  : getAllAlbum();
@@ -666,7 +689,7 @@ static void drop_unknown(void) {
     void *last = n ? deque_at(cf.stock, n - 1) : 0;
     if (!last || I(last, REC_ID) != -1) return;
     int found;
-    void *songs = staged(albums, last, &found);
+    void *songs = cf_staged(albums, last, &found);
     if (!deque_size(songs)) deque_pop_back(cf.stock);
     deque_destroy(songs);
 }
@@ -1170,13 +1193,19 @@ static int split_row(void *a, int n, char **v, char **c) {
     return 0;
 }
 static int rank_query(void *sql) { return toolsQueryDbTable("/mnt/data/database.db", sql, split_row, 0); }
+/* staged, with Local + Server reading the server library's songs too (catalogue.c): Cover Flow's
+ * albums, their ranks and the rated albums, as the Library's Albums list reads them. */
+extern void *staged_music(int (*query)(void *), void *arg, int *count);
+static void *cf_staged(int (*query)(void *), void *arg, int *count) {
+    return catalogue_on() ? staged_music(query, arg, count) : staged(query, arg, count);
+}
 
 /* list's albums with music, in a new deque (list goes), using a music track for their art even when
  * tags are shared with an audiobook. The card's files stay untouched. Out of memory,
  * audiobooks stay. */
 static void *music_albums(void *list) {
     int n;
-    void *rows = staged(rank_query, MUSIC_ALBUM_SQL, &n), *out;
+    void *rows = cf_staged(rank_query, MUSIC_ALBUM_SQL, &n), *out;
     unsigned m;
     row_t *v = album_rows(rows, &m, by_album, 0);
     if (!v) return deque_destroy(rows), list;
@@ -1200,7 +1229,7 @@ static void *music_albums(void *list) {
  * name's albums so far per row, its albums squared; fine unless one name has thousands. */
 static void *split(void *stock) {
     int n;
-    void *rows = staged(rank_query, ALBUM_SQL, &n), *out;
+    void *rows = cf_staged(rank_query, ALBUM_SQL, &n), *out;
     unsigned m;
     row_t *v = album_rows(rows, &m, by_name, 1);
     if (!v) return deque_destroy(rows), stock;
@@ -1256,7 +1285,7 @@ int album_only(void *list, void *r, int at) {
 }
 static void rank_by(order_t *v, const char *sql) {
     int n;
-    void *rows = staged(rank_query, (void *)sql, &n);
+    void *rows = cf_staged(rank_query, (void *)sql, &n);
     for (unsigned j = 0; j < deque_size(rows); ++j) {
         int i = album_index(deque_at(rows, j));
         int y = I(deque_at(rows, j), REC_YEAR);
@@ -1340,7 +1369,7 @@ void coverflow_by_year(void *albums) {
         free(taken);
         return;
     }
-    void *rows = staged(rank_query, (void *)(ringnav_artist_az() ? SORT_SQL "album COLLATE NOCASE" : year_sql()), &found), *out = _create_deque("stSongInfo");
+    void *rows = cf_staged(rank_query, (void *)(ringnav_artist_az() ? SORT_SQL "album COLLATE NOCASE" : year_sql()), &found), *out = _create_deque("stSongInfo");
     deque_init(out);
     for (unsigned j = 0; j < deque_size(rows); ++j) {
         int i = album_in(v, m, deque_at(rows, j));
@@ -1416,10 +1445,24 @@ static void *rows_view(void *parent, int y, int w, int h, int n, int item_h) {
     return view;
 }
 
+/* view's list box (rows_view's) cut to the whole item rows that end by list_fit_end on screen, as
+ * tools/ipod.py fit_rows cuts stock's lists, so under a list_fit set (OLED's) no row runs under the
+ * bottom corners' glass. Elsewhere, or with the rows already above it, it stays as it is. */
+static void fit_view(void *view, int item) {
+    int end = list_fit_end(), y = 0;
+    if (!end || item <= 0 || !view) return;
+    void *lv = P(view, W_PARENT), *wm = window_manager();
+    for (void *w = lv; w && w != wm; w = P(w, W_PARENT)) y += I(w, W_Y);
+    int h = (end - y) - (end - y) % item;
+    if (h <= 0 || I(lv, W_H) <= h) return;
+    widget_resize(lv, I(lv, W_W), h);
+    widget_resize(view, I(view, W_W), h);
+}
+
 /* The peq_ui.c page: a title bar (*title, unless 0: its caller writes it again, so it stays on
  * show) over n item_h rows (page_h) in body, down to the page's bottom (the last row's selection
- * meets the screen's edge) or shrunk so the list's white background never shows below a short list.
- * Shared with photos.c. */
+ * meets the screen's edge) or shrunk so the list's white background never shows below a short list;
+ * under a list_fit set, to its last whole row above the glass (fit_view). Shared with photos.c. */
 void *page_list(void *page, void *body, void **title, const char *caption, int n, int item_h) {
     int h = widget_get_prop_int(page, "h", client_h());
     item_h = page_h(item_h);
@@ -1428,6 +1471,7 @@ void *page_list(void *page, void *body, void **title, const char *caption, int n
     void *t = page_title(body, caption, title ? TITLE_ON_SHOW : n);
     if (title) *title = t;
     void *view = rows_view(body, I(t, W_H), 375, h - I(t, W_H), n, item_h);
+    fit_view(view, item_h);
     if (!theme()->page_title_h) bar_title_sync(page);
     widget_invalidate_force(page, 0);
     return view;
@@ -2505,12 +2549,15 @@ static void gap_note(void *w, unsigned t0, unsigned t1, unsigned t2) {
 }
 #endif
 static int touched(void);
+static int album_offline(unsigned c);
+static void caption_mark(void *w, void *canvas);
 
 /* ringnav_paint (the border hook, after stock painted the slide_menu's empty children) calls this
  * for every widget: over Coverflow's slide_menu it draws the frame, rendered again only when the
  * position or a texture has changed. */
 void coverflow_paint(void *w, void *canvas) {
     coverflow_position_paint(w, canvas);
+    caption_mark(w, canvas);
     int c, frac, n;
     if (fl.panel && w && flip_paint(w, canvas)) return;
     if (!w || w != cf.slide || !fx.frame || cf.screen != COVERS ||
@@ -2553,7 +2600,9 @@ void coverflow_paint(void *w, void *canvas) {
 #if Q2POD_DEV
     gap_note(w, gap_t0, gap_t1, (unsigned)time_now_ms());
 #endif
-    if (!th.on && c + 1 != cf.titled && !cf.title_timer) cf.title_timer = timer_add(retitle, 0, 0);
+    if (!th.on && (c + 1 != cf.titled || album_offline((unsigned)c) != cf.offline) &&
+        !cf.title_timer)
+        cf.title_timer = timer_add(retitle, 0, 0);
     int r[4] = { 0, 0, CF_VIEW_W, cfs.view_h };
     canvas_draw_image(canvas, fx.frame, r, r);
 }
@@ -2777,12 +2826,41 @@ static const char *songs_text(char *buf, unsigned k) {
     return buf;
 }
 
-/* The captions name album c (or a card's), once each time it changes; a playlist's are its name
- * and its count. */
+/* Whether album c can't play now (catalogue.c: a server album offline); a card's or a playlist's
+ * always can. */
+static int album_offline(unsigned c) {
+    void *r = c + CARDS < widget_count_children(cf.slide) && cf.scoped != PLAYLISTS
+                  ? deque_at(cf.albums, c)
+                  : (void *)0;
+    return r && catalogue_album_unavailable(r);
+}
+/* The captions of an album that can't play now are greyed, as a Library row is
+ * (docs/server-library.md#greyed-rows), the name narrowed CF_MARK_W a side, centred still, for
+ * the offline mark at its right (caption_mark); its own width again once it can. */
+#define CF_MARK_W 28
+static void caption_offline(int off) {
+    int x = CF_EDGE + (off ? CF_MARK_W : 0);
+    if (off != cf.offline) widget_invalidate_force(cf.artist, 0);
+    cf.offline = off;
+    catalogue_grey(cf.name, off), catalogue_grey(cf.artist, off);
+    if (I(cf.name, W_X) != x)
+        widget_move_resize(cf.name, x, I(cf.name, W_Y), 375 - 2 * x, I(cf.name, W_H));
+}
+static void caption_mark(void *w, void *canvas) {
+    unsigned ink;
+    if (w && w == cf.covers && cf.offline && cf.name && catalogue_row_ink(cf.name, &ink))
+        catalogue_mark_paint(canvas, I(cf.name, W_X) + I(cf.name, W_W) + CF_MARK_W / 2,
+                             I(cf.name, W_Y) + I(cf.name, W_H) / 2, ink);
+}
+
+/* The captions name album c (or a card's), once each time it changes (or whether it can play
+ * does); a playlist's are its name and its count. */
 void titles(unsigned c) {
     unsigned n = widget_count_children(cf.slide);
-    if ((int)c + 1 == cf.titled) return;
+    int off = album_offline(c);
+    if ((int)c + 1 == cf.titled && off == cf.offline) return;
     cf.titled = (int)c + 1;
+    caption_offline(off);
     void *r = c + CARDS < n ? deque_at(cf.albums, c) : (void *)0;
     const char *name = r ? P(r, REC_ALBUM) : 0, *by = r ? cover_artist(r) : "";
     char songs[24];
@@ -2879,10 +2957,34 @@ static void covers(int dir) {
 
 static int playlists_again(const void *unused);
 static unsigned pl_again __attribute__((section(".scratch"))); /* playlists_again's own */
+/* A theme whose album tracks are one-line song rows (OLED's, list.songs.painter inline), its pages'
+ * titles in the bar: to_tracks lists Cover Flow's tracks that way. */
+static int song_tracks(void) {
+    return theme()->painter[PAINT_SONGS] == SONGS_INLINE && !theme()->page_title_h;
+}
+
+/* The bar's title on Cover Flow's page (navigation.c bar_title_of): 0 on song_tracks' tracks, whose
+ * hidden caption names the album; under a status row (status, the set's status_y) an artist's
+ * covers by the artist's name, as the artist page under them; else "Cover Flow". */
+const char *coverflow_bar_title(int status) {
+    if (cf.screen == TRACKS && !fl.panel && song_tracks()) return (const char *)0;
+    if (status && cf.screen == COVERS && cf.scoped == ARTIST_ALBUMS && cf.albums &&
+        deque_size(cf.albums))
+        return cover_artist(deque_at(cf.albums, 0));
+    return "Cover Flow";
+}
+
+/* The bar looks for its title again: the page's stays the bar's source until it goes. */
+static void retitle_bar(void) {
+    title_gone(0, 0);
+    bar_title_sync(cf.page);
+}
+
 static int to_covers(const void *unused) {
     cf.timer = 0;
     stop();
     covers(-1); /* the text list's only way back here is from its tracks */
+    retitle_bar();
     if (cf.scoped == PLAYLISTS) rearm(&pl_again, playlists_again, 0); /* edits from the panel */
     return 0;
 }
@@ -2952,6 +3054,7 @@ static void load_albums(unsigned t0) {
     coverflow_position_reset();
     widget_destroy_children(cf.page);
     cf.covers = cf.slide = cf.name = cf.artist = 0; /* destroyed with the page's children */
+    cf.offline = 0;
     if (cf.scoped != PLAYLISTS) cf.album = 0;       /* the playlists' read again keep their place */
     cf.body =
         widget_factory_create_widget(widget_factory(), "view", cf.page, 0, 0, 375, client_h());
@@ -2964,7 +3067,7 @@ static void load_albums(unsigned t0) {
         n = (int)deque_size(cf.stock);
     else if (!library_scanning()) {
         cf_cold(t0);
-        cf.stock = staged(albums, 0, &n);
+        cf.stock = cf_staged(albums, 0, &n);
         cf_trace(t0, "staged albums=", n, 0);
         if (n > 0) {
             void *v = split(cf.stock);
@@ -3021,7 +3124,10 @@ static void load_albums(unsigned t0) {
         else if (key == cf.saved_album && !on_sort && !cf.scoped && !playing)
             cf.album = (int)i;
         job_t *j = cf.jobs ? &cf.jobs[cf.total] : 0;
-        if (j && P(r, REC_PATH) && access(art_path(path, key, ""), 0) && (j->track = strdup(P(r, REC_PATH)))) {
+        /* a server album's art is its app's cover: none fetched yet, the placeholder, no job */
+        if (j && P(r, REC_PATH) && access(art_path(path, key, ""), 0) &&
+            (!catalogue_path(P(r, REC_PATH)) || catalogue_cover(P(r, REC_PATH), path, sizeof path)) &&
+            (j->track = strdup(P(r, REC_PATH)))) {
             cf_cold(t0);
             j->key = key;
             j->shared = shared ? shared[i] : 1; /* no memory: no cover.jpg that may be another's */
@@ -3066,7 +3172,8 @@ static unsigned cover_load __attribute__((section(".scratch"))); /* playback_loa
 static int play(void *ctx, void *event) {
     int i = (int)(long)ctx;
     void *t = deque_at(cf.tracks, (unsigned)i);
-    if (!t || access(P(t, REC_PATH), 0)) {
+    /* a server row has no file: catalogue_load plays it, or says why it can't */
+    if (!t || catalogue_missing(P(t, REC_PATH))) {
         page_retitle(cf.page, cf.title, "Storage unavailable");
         return 0;
     }
@@ -3380,6 +3487,37 @@ static int to_tracks(const void *unused) {
     for (int i = 0; i < n && !timed; ++i)
         timed = duration_seconds(deque_at(cf.tracks, (unsigned)i)) > 0;
     const char *title = P(r, cf.scoped == PLAYLISTS ? REC_TITLE : REC_ALBUM);
+    if (song_tracks()) {
+        /* one-line song rows, as an album opened from Albums: song_rows.c draws each track's
+         * number and length (song_list knows these by coverflow_tracks), and the album names the
+         * page in the bar (coverflow_bar_title), never a row of its own above the tracks,
+         * whatever its length */
+        void *view = page_list(cf.page, cf.body, 0, title, n, 48);
+        cf.title = widget_get_child(cf.body, 0); /* page_title's label, for page_retitle */
+        if (widget_get_visible(cf.title)) { /* wider than the bar's box: hidden all the same */
+            void *lv = P(view, W_PARENT);
+            int all = n * page_h(48), page = widget_get_prop_int(cf.page, "h", client_h()),
+                h = all < page ? all : page;
+            widget_set_visible(cf.title, 0, 0);
+            widget_move_resize(lv, 0, 0, I(lv, W_W), h);
+            widget_move_resize(view, 0, 0, I(view, W_W), h);
+            fit_view(view, page_h(48));
+        }
+        for (int i = 0; i < n; ++i) {
+            void *row = page_row_detail(
+                view, i, track_name(name, sizeof name, deque_at(cf.tracks, (unsigned)i)), 0, play);
+            /* as stock's rows: a long title rests on its ellipsis, scrolling only while selected
+             * (navigation.c's marquee), where song_row's narrower box would make text()'s loop
+             * scroll it on every row */
+            void *label = widget_get_child(row, 0);
+            widget_set_prop_int(label, "loop", 0);
+            hscroll_label_set_only_focus(label, 1);
+            hscroll_label_set_ellipses(label, 1);
+        }
+        retitle_bar();
+        page_push(view, cf.text_albums && cf.scoped == ARTIST_ALBUMS);
+        return 0;
+    }
     void *view = timed ? page_list(cf.page, cf.body, &cf.title, title, n, 64) : list(title, n);
     /* the album over its tracks, all centred, but under a theme's own rows */
     int centred = theme()->page_title_h;
@@ -3410,7 +3548,7 @@ static int play_all(const void *unused) {
         for (unsigned j = 0; j < deque_size(t); ++j) _deque_push_back(all, deque_at(t, j));
         deque_destroy(t);
     }
-    if (deque_size(all) && !access(P(deque_at(all, 0), REC_PATH), 0))
+    if (deque_size(all) && !catalogue_missing(P(deque_at(all, 0), REC_PATH)))
         play_folder(all, 0, 0xf001);
     else
         widget_set_text_utf8(cf.name, "Storage unavailable");
@@ -3650,7 +3788,7 @@ int coverflow_shows_album(void *r) {
  * rated Sort card alone; 0 when none is. */
 int coverflow_rated(int (*hearts)(void *)) {
     int n;
-    void *all = staged(albums, 0, &n), *rated = _create_deque("stSongInfo");
+    void *all = cf_staged(albums, 0, &n), *rated = _create_deque("stSongInfo");
     if (n > 0) all = split(all);
     all = music_albums(all);
     deque_init(rated);
@@ -3807,6 +3945,10 @@ static struct {
     unsigned ring[4][HOME_PW];
     int clip[4];  /* the canvas clip while the art paints, restored after */
     int clipped;
+    /* the bar whose border paint inks the pane's rows (coverflow_home_bar), 0: none due; ground:
+     * the bar's background there (BGRA) */
+    void *ink_bar;
+    unsigned ground;
 } home __attribute__((section(".scratch")));
 extern int ipod_home(void), ipod_home_rockbox(void), home_shortcut_open(void *, void *),
     home_lib_on(void), row_preview_on(void), library_search(void);
@@ -3855,10 +3997,14 @@ static int home_repaint(const void *unused) {
 }
 
 /* One axis of the pan (an iPod classic's menu art): 0 to range px and back over 2 x period ms, in
- * 1/256 px. range is a tenth of a cover within DRIFT_TEXELS (under 100 px), so 32 bits hold it. */
+ * 1/256 px, eased in and out at each end (smoothstep, 3s^2 - 2s^3), so it slows to a stop and
+ * turns with no jolt; its speed peaks at 1.5 times the average halfway. s is in 1/65536 and e,
+ * unrounded so it never steps back, in 1/2^48 (64 bits); range is a tenth of a cover within
+ * DRIFT_TEXELS (under 100 px), so the result fits 32. */
 static int drift_at(int range, unsigned period) {
-    unsigned t = home.drift_ms % (2 * period);
-    return (int)((unsigned)range * 256 * ((t < period ? t : 2 * period - t) >> 4) / (period >> 4));
+    unsigned t = home.drift_ms % (2 * period), s = ((t < period ? t : 2 * period - t) << 16) / period;
+    unsigned long long e = (unsigned long long)s * s * (3 * 65536u - 2 * s);
+    return (int)((unsigned long long)range * 256 * (e >> 24) >> 24);
 }
 
 /* Where the panel's top left is in the zoomed cover, in 1/256 px: the old crop, then the pan. */
@@ -3869,6 +4015,10 @@ static int pan_v(void) { return home.v0 * 256 + drift_at(home.ry, DRIFT_Y_MS); }
 static void pane_invalidate(void) {
     int pane[4] = { pane_x(), 0, pane_w(), client_h() }; /* rect_t, in the parent */
     widget_invalidate_force(P(home.art, W_PARENT), pane);
+    /* and the pane's rows in the bar, which paints them (coverflow_home_bar) */
+    void *bar = *(void *const *)system_bar;
+    int up = pane_up(), rows[4] = { pane[0], 320 - client_h() - up, pane[2], up };
+    if (up && bar) widget_invalidate_force(bar, rows);
 }
 static void drift_place(void) {
     if (pan_u() == home.du && pan_v() == home.dv) return;
@@ -3902,7 +4052,8 @@ static int pane_covers(void) { return home.kind <= PANE_LIBRARY && !home.pane; }
  * that shows it. */
 static int drift_live(void) {
     void *wm = window_manager();
-    return home.tw && (home.rx || home.ry) && pane_covers() && g_backlight_status &&
+    return home.tw && (home.rx || home.ry) && pane_covers() && widget_get_visible(home.art) &&
+           g_backlight_status &&
            !g_lockscreen_pageflag &&
            window_manager_get_top_window(wm) == home.win && !window_manager_is_animating(wm);
 }
@@ -3984,6 +4135,18 @@ static void box_filter(const unsigned char *data, unsigned stride, const unsigne
     }
 }
 
+/* One axis's pan in the zoomed cover, t texels long, for a panel p long: from the old crop of the
+ * cover's fit f (half its overhang in), across the zoom's margin t - f, start *c0 and range *r.
+ * A set's split_inset keeps that percent of t clear at each edge too, so a cover's own frame (many
+ * have a thin white border) never shows; with no room left, the zoom's middle, still. */
+static void drift_axis(int f, int t, int p, int *c0, int *r) {
+    int lo = (f - p) / 2, hi = lo + t - f, ins = t * split_geom(SPLIT_INSET) / 100;
+    if (lo < ins) lo = ins;
+    if (hi > t - p - ins) hi = t - p - ins;
+    if (hi < lo) lo = hi = (t - p) / 2;
+    *c0 = lo, *r = hi - lo;
+}
+
 /* The cover at url, box filtered once to its fit zoomed DRIFT_ZOOM_PCT (home.tex, tw x th) and
  * composited over the page as Coverflow's decode does, for the pan to draw from. It pans across
  * the zoom's margin only (rx ry), from the old crop (u0 v0), so its edges never show. 1 when it
@@ -4025,10 +4188,9 @@ static int home_tex(const char *url) {
         memcpy(home.tex, home.tex + ts, (unsigned)ts * 4);
         for (int y = th + 1; y < th + 3; ++y)
             memcpy(home.tex + y * ts, home.tex + th * ts, (unsigned)ts * 4);
-        home.tw = tw, home.rx = tw - fw, home.ry = th - fh;
-        home.u0 = (fw - pane_w()) / 2, home.v0 = (fh - pane_h()) / 2, home.du = -1;
-        if (split_geom(SPLIT_STILL)) /* the zoom's middle, its edges (a cover's frame) cut */
-            home.u0 = (tw - pane_w()) / 2, home.v0 = (th - pane_h()) / 2, home.rx = home.ry = 0;
+        home.tw = tw, home.du = -1;
+        drift_axis(fw, tw, pane_w(), &home.u0, &home.rx);
+        drift_axis(fh, th, pane_h(), &home.v0, &home.ry);
     }
     widget_unload_image(home.art, bitmap);
     return data != 0;
@@ -4569,17 +4731,110 @@ void coverflow_home_art(void *top) {
     rearm(&home.repaint, home_repaint, 0);
 }
 
+/* The status row's glyphs over Split's art (docs/ipod.md#home), as Scrolly's feed-end line inks
+ * its own: each lit pixel white or black, whichever has the higher WCAG contrast against the art
+ * pixel under it. White wins while (L + 0.05)^2 <= 1.05 x 0.05, so up to a relative luminance L
+ * of sqrt(0.0525) - 0.05. srgb_lin is each sRGB byte's linear value in 1/65535; L is summed in
+ * 1/(10000 x 65535), so INK_WHITE_MAX is that bound at the same scale. */
+static const unsigned short srgb_lin[256] = {
+    0, 20, 40, 60, 80, 99, 119, 139, 159, 179, 199, 219, 241, 264, 288, 313, 340, 367, 396, 427,
+    458, 491, 526, 562, 599, 637, 677, 718, 761, 805, 851, 898, 947, 997, 1048, 1101, 1156,
+    1212, 1270, 1330, 1391, 1453, 1517, 1583, 1651, 1720, 1790, 1863, 1937, 2013, 2090, 2170,
+    2250, 2333, 2418, 2504, 2592, 2681, 2773, 2866, 2961, 3058, 3157, 3258, 3360, 3464, 3570,
+    3678, 3788, 3900, 4014, 4129, 4247, 4366, 4488, 4611, 4736, 4864, 4993, 5124, 5257, 5392,
+    5530, 5669, 5810, 5953, 6099, 6246, 6395, 6547, 6700, 6856, 7014, 7174, 7335, 7500, 7666,
+    7834, 8004, 8177, 8352, 8528, 8708, 8889, 9072, 9258, 9445, 9635, 9828, 10022, 10219, 10417,
+    10619, 10822, 11028, 11235, 11446, 11658, 11873, 12090, 12309, 12530, 12754, 12980, 13209,
+    13440, 13673, 13909, 14146, 14387, 14629, 14874, 15122, 15371, 15623, 15878, 16135, 16394,
+    16656, 16920, 17187, 17456, 17727, 18001, 18277, 18556, 18837, 19121, 19407, 19696, 19987,
+    20281, 20577, 20876, 21177, 21481, 21787, 22096, 22407, 22721, 23038, 23357, 23678, 24002,
+    24329, 24658, 24990, 25325, 25662, 26001, 26344, 26688, 27036, 27386, 27739, 28094, 28452,
+    28813, 29176, 29542, 29911, 30282, 30656, 31033, 31412, 31794, 32179, 32567, 32957, 33350,
+    33745, 34143, 34544, 34948, 35355, 35764, 36176, 36591, 37008, 37429, 37852, 38278, 38706,
+    39138, 39572, 40009, 40449, 40891, 41337, 41785, 42236, 42690, 43147, 43606, 44069, 44534,
+    45002, 45473, 45947, 46423, 46903, 47385, 47871, 48359, 48850, 49344, 49841, 50341, 50844,
+    51349, 51858, 52369, 52884, 53401, 53921, 54445, 54971, 55500, 56032, 56567, 57105, 57646,
+    58190, 58737, 59287, 59840, 60396, 60955, 61517, 62082, 62650, 63221, 63795, 64372, 64952,
+    65535
+};
+#define INK_WHITE_MAX 117392049u
+
+/* The bar's rows over the pane, w x h at fb (the screen's BGRA8888, pitch words a row), as its
+ * background and glyphs left them on the flat ground (BGRA): each pixel becomes the art's (art,
+ * the frame's RGBA8888, apitch words a row), and a glyph pixel blends the art's contrast ink over
+ * it by the glyph's share, its greatest channel's distance from the ground (an antialiased edge,
+ * or the slim battery's dim outline, a part). test/fw/test_coverflow.py */
+void home_ink(unsigned *fb, int pitch, const unsigned *art, int apitch, int w, int h,
+              unsigned ground) {
+    for (int y = 0; y < h; ++y, fb += pitch, art += apitch)
+        for (int x = 0; x < w; ++x) {
+            unsigned f = fb[x], a = bgra(art[x]), c = 0;
+            for (int s = 0; s < 24; s += 8) {
+                int d = (int)(f >> s & 255) - (int)(ground >> s & 255);
+                unsigned e = (unsigned)(d < 0 ? -d : d);
+                c = e > c ? e : c;
+            }
+            if (c) {
+                unsigned l = 722u * srgb_lin[a & 255] + 7152u * srgb_lin[a >> 8 & 255] +
+                             2126u * srgb_lin[a >> 16 & 255];
+                a = lerp(a, l <= INK_WHITE_MAX ? 0xffffffffu : 0xff000000u, c + (c >> 7));
+            }
+            fb[x] = a;
+        }
+}
+
+/* The screen's buffer while canvas draws straight into it (nightshift.c's warm reads it the same
+ * way: 375 words a row, BGRA8888), else 0. */
+static unsigned *screen_fb(void *canvas) {
+    void *lcd = P(canvas, CANVAS_LCD);
+    if (!lcd || I(lcd, LCD_DRAW_MODE) != LCD_DRAW_NORMAL || I(lcd, LCD_FORMAT) != LCD_BGRA8888 ||
+        I(lcd, LCD_W) != 375 || I(lcd, LCD_H) != 320 || I(lcd, LCD_LINE_LENGTH) != 375 * 4)
+        return 0;
+    return P(lcd, LCD_OFFLINE_FB);
+}
+
+/* The pane's rows in the bar that canvas's clip lets through, x y w h on screen; 0 for none. */
+static int bar_rows(void *canvas, int *r) {
+    int old[4], up = pane_up();
+    return clip_within(canvas, old, r, pane_x(), 320 - client_h() - up, pane_w(), up);
+}
+
 /* The bar's background (ringnav_paint_bg), with Home on top and still: the pane's rows above Home's
  * window, the cover's top, as Home's own paint draws none outside its window. A set with no
  * split_art_up draws nothing. Under a window's slide Home is a snapshot, so the rows wait for
- * it. */
+ * it. Where the canvas draws on the screen itself the rows keep the bar's flat ground for now: the
+ * bar's glyphs paint on it, and its border paint (coverflow_home_clip) puts the art there with
+ * them inked (home_ink). Elsewhere the art is drawn here, under the glyphs as they are. */
 void coverflow_home_bar(void *canvas, void *top) {
-    int up = pane_up();
+    int up = pane_up(), r[4];
+    home.ink_bar = 0;
     if (!up || !home.art || top != home.win || !widget_get_visible(home.art) || !home.tw ||
         !pane_covers() || window_manager_is_animating(window_manager()) || !home_frame())
         return;
+    unsigned *fb = screen_fb(canvas);
+    if (fb) {
+        if (bar_rows(canvas, r)) {
+            home.ground = fb[r[1] * 375 + r[0]]; /* the background just painted, no glyph yet */
+            home.ink_bar = *(void *const *)system_bar;
+        }
+        return;
+    }
     int src[4] = { 0, 0, pane_w(), up }, dst[4] = { pane_x(), 320 - client_h() - up, src[2], up };
     canvas_draw_image(canvas, home.frame, src, dst);
+}
+
+/* The bar's border paint, its glyphs drawn: the art into the rows coverflow_home_bar left, the
+ * glyphs over it inked by contrast. Only the pixels inside the clip, at most the pane's rows. */
+static void home_ink_bar(void *canvas) {
+    int r[4], top = 320 - client_h() - pane_up(), pw = pane_w();
+    unsigned *fb = screen_fb(canvas);
+    home.ink_bar = 0;
+    if (!fb || !bar_rows(canvas, r)) return;
+    const unsigned *art = (const unsigned *)bitmap_lock_buffer_for_read(home.frame);
+    if (!art) return;
+    home_ink(fb + r[1] * 375 + r[0], 375, art + (r[1] - top) * pw + (r[0] - pane_x()), pw, r[2],
+             r[3], home.ground);
+    bitmap_unlock_buffer(home.frame);
 }
 
 /* The art paints only inside its panel and the lists only left of it, so a sliding list
@@ -4587,6 +4842,10 @@ void coverflow_home_bar(void *canvas, void *top) {
  * origin is the widget's) before stock draws it, and ringnav_paint puts the old clip back after its
  * children, the pan's frame painted inside it first. */
 void coverflow_home_clip(void *w, void *canvas, int begin) {
+    if (w == home.ink_bar && !begin && w) {
+        home_ink_bar(canvas);
+        return;
+    }
     if (!w ||
         (w != home.art && w != home.list && w != home.sets && w != home.lib && w != home.stream))
         return;
@@ -4619,6 +4878,24 @@ int coverflow_home_owns(void *w) {
     for (; w && home.list; w = P(w, W_PARENT))
         if (w == home.list || w == home.sets || w == home.lib || w == home.stream) return 1;
     return 0;
+}
+
+/* The list open on Home, 0: its main list. */
+static void *home_open(void) {
+    return home.lib && widget_get_visible(home.lib)         ? home.lib
+           : home.stream && widget_get_visible(home.stream) ? home.stream
+           : home.sets && widget_get_visible(home.sets)     ? home.sets
+                                                            : (void *)0;
+}
+
+/* Split under a home_lists_full theme (OLED's): the lists Home's rows open take the whole width,
+ * as a page does, and the art is the main menu's alone. Other themes keep an iPod's submenu, the
+ * list in the main menu's place beside the art. */
+static int sub_full(void) { return theme()->home_lists_full && !ipod_home(); }
+
+/* The art beside shown, the list now on Home, under sub_full: there only beside the main list. */
+static void art_beside(void *shown) {
+    if (sub_full()) widget_set_visible(home.art, shown == home.list, 0);
 }
 
 /* Both menus' lists span outer, their rows and tap targets inner; labels start at x and end end
@@ -4672,9 +4949,11 @@ void coverflow_home_layout(void) {
         inner = !full ? split : T->home_full_row, x = T->home_text_x,
         end = T->home_label_end[full];
     home_width(home.list, outer, inner, x, end, 0);
-    if (home.sets) home_width(home.sets, outer, inner, x, end, 0);
+    if (home.sets)
+        home_width(home.sets, sub_full() ? 375 : outer, sub_full() ? T->home_full_row : inner, x,
+                   T->home_label_end[full || sub_full()], 0);
     widget_move_resize(home.art, pane_x(), 0, pane_w(), client_h());
-    widget_set_visible(home.art, !mode, 0);
+    widget_set_visible(home.art, !mode && !(sub_full() && home_open()), 0);
     for (int i = 0; mode && i < 2; ++i) { /* Split's alone */
         void *open = i ? home.stream : home.lib;
         if (!open || !widget_get_visible(open)) continue;
@@ -4721,29 +5000,31 @@ int page_push(void *view, int dir) {
 }
 
 /* Home's Settings row, as an iPod's submenu: the Settings list (stock's Playback and System
- * setting rows, which stock binds) slides in from the right over the list's place, the art staying;
- * Return (coverflow_home_back) slides the list back in from the left. Each list keeps its row. */
+ * setting rows, which stock binds) slides in from the right over the list's place, the art staying
+ * (under sub_full the list is a page's width and the art goes); Return (coverflow_home_back) slides
+ * the main list back in from the left. Each list keeps its row. */
 static void home_swap(void *from, void *to, int dx) {
     home_show(from, 0); /* only the shown list takes taps */
     /* A list still sliding goes to its rest first: push_x's goal, and where no push leaves it. */
     if (I(to, W_X)) widget_move_resize(to, 0, I(to, W_Y), I(to, W_W), I(to, W_H));
     push_x(to, dx, &theme()->motion[MOTION_SWAP]);
     home_show(to, 1);
+    art_beside(to);
     bar_title_sync(home.win); /* the bar's text follows the list at once, not at its next second */
 }
 
 static int home_settings(void *ctx, void *event) {
-    if (home.sets && !widget_get_visible(home.sets)) home_swap(home.list, home.sets, I(home.list, W_W));
+    if (home.sets && !widget_get_visible(home.sets)) home_swap(home.list, home.sets, I(home.sets, W_W));
     return 0;
 }
 
-/* A list its page's constructor just filled, slid in in Home's rows' shape. service: Streaming's,
- * whose 70 px rows take Home's row height, and the build's icons are decoded now, not on the
- * wheel's path (coverflow_home_row). */
+/* A list its page's constructor just filled, slid in in Home's rows' shape (under sub_full, Full's
+ * rows across the screen). service: Streaming's, whose 70 px rows take Home's row height, and the
+ * build's icons are decoded now, not on the wheel's path (coverflow_home_row). */
 static void home_fill(void *list, int service) {
     const theme_t *T = theme();
-    int split = split_geom(SPLIT_ROW);
-    home_width(list, split, split, T->home_text_x, T->home_label_end[0], 0);
+    int full = sub_full(), split = full ? T->home_full_row : split_geom(SPLIT_ROW);
+    home_width(list, full ? 375 : split, split, T->home_text_x, T->home_label_end[full], 0);
     void *view = widget_count_children(list) ? widget_get_child(list, 0) : (void *)0;
     void *first = service ? widget_get_child(widget_get_child(home.list, 0), 0) : (void *)0;
     for (unsigned i = 0, n = view ? widget_count_children(view) : 0; i < n; ++i) {
@@ -4763,7 +5044,7 @@ static void home_fill(void *list, int service) {
         }
     }
     widget_layout(list);
-    home_swap(home.list, list, I(home.list, W_W));
+    home_swap(home.list, list, I(list, W_W));
 }
 
 /* Home's Library row in Split (a set with home_lib, Library on Home on): its rows slide in as Settings' do, each filled
@@ -4789,14 +5070,6 @@ static int home_streaming(void *ctx, void *event) {
     return 0;
 }
 
-/* The list open on Home, 0: its main list. */
-static void *home_open(void) {
-    return home.lib && widget_get_visible(home.lib)         ? home.lib
-           : home.stream && widget_get_visible(home.stream) ? home.stream
-           : home.sets && widget_get_visible(home.sets)     ? home.sets
-                                                            : (void *)0;
-}
-
 /* Return on Home with a list open: 1 when it went back to the main list. A reopen_top theme's list
  * opens at its top next time (navigation.c forget_rows), as a page left by Return does. */
 int coverflow_home_back(void *top) {
@@ -4819,6 +5092,7 @@ void coverflow_home_top(void) {
     if (!open) return;
     home_show(open, 0);
     home_show(home.list, 1);
+    art_beside(home.list);
 }
 
 /* 1 while Home shows a list of its rows' (the Library's, Streaming's, Settings'), not its own. */

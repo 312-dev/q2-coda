@@ -16,8 +16,9 @@ enum {
     PAINTER_N
 }; /* theme_t.painter[] */
 enum { VOL_STOCK, VOL_CLASSIC_LIGHT }; /* painter[PAINT_VOLUME]: the volume */
-/* painter[PAINT_CONFIRM]: the confirm control, hold menu, toast and small dialogs */
-enum { CONFIRM_STOCK, CONFIRM_CLASSIC_LIGHT };
+/* painter[PAINT_CONFIRM]: the confirm control, hold menu, toast and small dialogs; OLED's draws
+ * only its toast and confirm (feedback.c) */
+enum { CONFIRM_STOCK, CONFIRM_CLASSIC_LIGHT, CONFIRM_OLED };
 /* painter[PAINT_PAGES]: the theme's own pages (classic_pages, oled_pages) */
 enum { PAGES_STOCK, PAGES_CLASSIC_LIGHT, PAGES_OLED };
 /* painter[PAINT_SCRUB]: SCRUB_ROWS, a gloss bar's rows (np_rows) for the volume panel and a card
@@ -153,9 +154,10 @@ typedef struct {
     unsigned char geom; /* second: THEME_GEOM_OFF (4) never moves */
     /* a list left by Return forgets its row, so choosing it again opens it at the top
      * (navigation.c forget_left); Songs' action row reads Shuffle with the theme's own glyph and
-     * the wheel selects it above the first song (navigation.c shuffle_key). In the padding before
-     * motion, so sizeof(theme_t) stays 1624 */
-    unsigned char reopen_top, shuffle_row;
+     * the wheel selects it above the first song (navigation.c shuffle_key); in Split, the lists
+     * Home's rows open (Settings, Library, Streaming) take the whole width with the art hidden, as
+     * a page (coverflow.c sub_full). In the padding before motion, so sizeof(theme_t) stays 1624 */
+    unsigned char reopen_top, shuffle_row, home_lists_full;
     motion_t motion[MOTION_N];
     unsigned short recall_ms; /* a remembered row's glide; 0: shown at once */
     unsigned char bump_px;    /* the wheel's bump at a list's end */
@@ -206,7 +208,8 @@ typedef struct {
     unsigned char sel_fixed; /* the bar keeps sel_inset and sel_radius under Corners: Square too */
     /* a scrolling hscroll_label's ends fade into what is behind it (list_marks.c marquee_fade);
      * Now Playing's art corners in px (paint_cover; 0: NP_ART_RADIUS's share of its size); its
-     * shuffle and repeat drawn as the theme's own pair (np_bar.c np_modes; 0: stock's one icon).
+     * shuffle and repeat drawn as the theme's own pair (np_bar.c np_modes; 0: stock's one icon),
+     * and its heart and More the theme's glyphs too (np_glyphs; 0: stock's).
      * Three chars in the padding before set_value_ink, so sizeof(theme_t) stays 1624, which clang
      * indexes by a multiply: at 1632 it takes a shift chain, and every theme() call pays for it
      * (test/patch.py's Cover Flow paint budget) */
@@ -242,10 +245,17 @@ typedef struct {
     unsigned char n_schemes; /* ACCENT_N, then the theme's own (Classic: 10) */
     const option_t *opts;    /* Appearance rows after Theme, in order */
     unsigned char n_opts;
+    /* settings.values.switch: an on/off settings row shows a switch (list_marks.c switch_mark), on
+     * a set_text theme too, where it would read On or Off. In the padding before undeclared */
+    unsigned char set_switch;
     unsigned undeclared;     /* SETTING_* bits of the theme options it does not declare */
     unsigned char np_layout; /* NP_* */
     cf_style_t cf;
     unsigned char art_square; /* art takes Corners: Square */
+    /* text entry the iPod's way: Search opens the letter strip (search_strip.c), the keyboard's
+     * keys are walked by the wheel (keyboard.c). In the padding after art_square, so
+     * sizeof(theme_t) stays 1624 */
+    unsigned char entry_ipod;
     /* page_list: a row, a row with a detail, the in-page title (0: the bar's) and the text's x; a
      * detail row's caption and detail boxes */
     short page_row, page_detail, page_title_h, page_x, page_cap_y, page_cap_h, page_det_y,
@@ -270,9 +280,11 @@ int bar_geom_val(int v);          /* geom_val for what bar_theme() paints: V_BAT
 int client_h(void); /* the window under the bar of the set theme_boot wrote (theme_engine.c) */
 /* Home's Split under the same set (its split_* fields, tools/ipod.py Geometry): SPLIT_ROW the
  * menu's width, SPLIT_ART the art pane's left edge, SPLIT_ART_UP the pane's rows above the window,
- * SPLIT_STILL 1 for a still, centred cover (coverflow.c) */
-enum { SPLIT_ROW, SPLIT_ART, SPLIT_ART_UP, SPLIT_STILL };
+ * SPLIT_INSET the percent of the zoomed cover the pan keeps clear at each edge (coverflow.c
+ * drift_axis) */
+enum { SPLIT_ROW, SPLIT_ART, SPLIT_ART_UP, SPLIT_INSET };
 int split_geom(int k);
+int list_fit_end(void); /* theme_engine.c: a list_fit set's lists' last screen row, 0: none */
 void paint_stops(void *canvas, int x, int y, int w, int h, const stops_t *s); /* navigation.c */
 /* The rows painter: the track across w, the played part over its first fill_w px; final colours
  * (the volume panel away from Now Playing, a card app's progress). */

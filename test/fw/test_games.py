@@ -1120,7 +1120,10 @@ class Card:
         return 0
 
 
-PAGE, LATCH = 0x7000, 0xa4bbfa
+# The page's window is zeroed memory, not a bare handle: under OLED's feedback painter bar_title_sync reads
+# the top window's parent (feedback.c top_named) as page_list opens the page.
+_PAGE_MEM = C.create_string_buffer(0x400)
+PAGE, LATCH = C.addressof(_PAGE_MEM), 0xa4bbfa
 
 
 class Page:

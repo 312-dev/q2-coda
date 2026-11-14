@@ -630,6 +630,33 @@ def test_minimal_has_no_thumb(fw, st):
     assert lists.paint() == [] and fw.calls('stock_paint_trampoline')
 
 
+def test_an_inset_modals_scroll_indicator_stays_in_its_panel(fw, st):
+    """OLED's wheel indicator on an inset modal's rows (menu_modal.c): inside the panel's right padding, clear of the
+    selection bar's end, so nothing lights past the panel's edge (x 58 to 317 on screen, the rows' box from 50)."""
+    now = [5000]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    ui = Ui(fw)
+    theme(fw, OLED)
+    T = THEMES[OLED]
+    win = ui.window('sortselect_dialog', kind='dialog')
+    lv = ui.add('list_view', win, (0, 44, 375, 210), 'list_view')
+    view = ui.add('scroll_view', lv, (0, 0, 375, 210), 'scroll_view')
+    for _ in range(10):
+        ui.add('list_item', view, (0, 0, 375, 32))
+    view.int_at(O['VIEW_CONTENT_H']).value = 320
+    bar = ui.add('scroll_bar_m', lv, (369, 0, 6, 210))
+    bar.int_at(O['BAR_MAX']).value = 320
+    fw.fn('modal_frame', None, C.c_void_p, C.c_void_p)(win.addr, lv.addr)
+    view.int_at(O['VIEW_CONTENT_H']).value = 320
+    fw.fn('wheel_sb_arm', None, C.c_void_p)(view.addr)
+    out = T['sel_inset'] - 8  # the panel's left edge in the rows' box
+    canvas = Canvas(fw, x=58 - out, y=66)
+    fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(lv.addr, canvas.addr)
+    x0, y0, x1, y1 = thumb_box(canvas.px)
+    assert x0 >= out + 259 - 8 and x1 <= out + 259  # in the right padding, past the bar's end
+    assert y0 >= -8 and y1 <= 6 * 32 + 8
+
+
 # A scrolling text's faded ends (list.marquee.fade, OLED's; list_marks.c marquee_fade): its own column inside stock's
 # 2 px margins, 12 columns at an end, clear inside to opaque at the end, in the colour behind the text.
 OLED = next(i for i, t in enumerate(THEMES) if t['name'] == 'OLED')
@@ -710,10 +737,11 @@ def test_a_fade_keeps_to_the_column_its_styles_margins_leave(fw, st):
 
 @pytest.mark.parametrize('mode, light, names', [
     (0, 0, ['oled_mode_shuffle_d', 'oled_mode_repeat_d']), (1, 0, ['oled_mode_shuffle_d', 'oled_mode_repeat1_on']),
-    (2, 1, ['oled_mode_shuffle_on', 'oled_mode_repeat_l']), (3, 1, ['oled_mode_shuffle_l', 'oled_mode_repeat_on'])])
+    (2, 1, ['oled_mode_shuffle_on', 'oled_mode_repeat_on']), (3, 1, ['oled_mode_shuffle_l', 'oled_mode_repeat_on'])])
 def test_now_playings_modes_are_the_themes_pair_lit_by_stocks_mode(fw, st, mcl, mode, light, names):
     """playing.modes.icons (np_bar.c np_modes): shuffle and repeat 44 px apart about the play mode's target's centre,
-    each the accent's while on (shuffle at MCL_MODE 2, repeat at 3, repeat-once's glyph at 1), else the half's grey."""
+    each the accent's while on (shuffle at MCL_MODE 2, repeat at 3 and at 2, as stock's Shuffle never ends, unless
+    Off was chosen under it; repeat-once's glyph at 1), else the half's grey."""
     ui = Ui(fw)
     theme(fw, OLED)
     st('light').value, mcl.mode = light, mode
@@ -731,6 +759,92 @@ def test_now_playings_modes_are_the_themes_pair_lit_by_stocks_mode(fw, st, mcl, 
     st('theme').value = MINIMAL  # stock's one icon: nothing drawn
     fw.fn('np_modes', None, C.c_void_p, C.c_void_p)(win.addr, C.addressof(raw))
     assert loads == []
+
+
+def test_now_playings_heart_and_more_are_the_themes_glyphs_in_each_half(fw, st):
+    """np_bar.c np_glyphs, on each paint of OLED's Now Playing: stock's play_fav and play_unfav become the theme's full
+    heart and its empty one in the half's ink, an empty heart follows a Light Mode change, an app's heart stays, and
+    More's states take the half's dots (pressed, the dimmer ones) once per half. Minimal keeps stock's."""
+    ui = Ui(fw)
+    theme(fw, OLED)
+    win = ui.window('playing_page')
+    fav = ui.add('image', win, (289, 145, 34, 34), 'img_fav', image='play_unfav')
+    more = ui.add('image', win, (323, 145, 34, 34), 'img_more', **{'style:normal:bg_image': 'play_more'})
+    st('np_win', C.c_void_p).value = win.addr
+    fw.fn('np_glyphs_bind', None, C.c_void_p)(win.addr)
+    glyphs = fw.fn('np_glyphs', None, C.c_void_p)
+    states = ('normal', 'pressed', 'selected', 'disable', 'focused')
+    glyphs(win.addr)
+    assert fav.props['image'] == 'oled_np_unfav_d'
+    assert [more.props[f'style:{s}:bg_image'] for s in states] == ['oled_np_more_d', 'oled_np_moredown_d'] + ['oled_np_more_d'] * 3
+    fav.props['image'] = 'play_fav'  # stock's click
+    glyphs(win.addr)
+    assert fav.props['image'] == 'oled_np_fav'
+    st('light').value = 1
+    glyphs(win.addr)
+    assert fav.props['image'] == 'oled_np_fav' and more.props['style:pressed:bg_image'] == 'oled_np_moredown_l'
+    fav.props['image'] = 'oled_np_unfav_d'
+    glyphs(win.addr)
+    assert fav.props['image'] == 'oled_np_unfav_l' and more.props['style:normal:bg_image'] == 'oled_np_more_l'
+    fav.props['image'] = 'tidal_fav_add'
+    glyphs(win.addr)
+    assert fav.props['image'] == 'tidal_fav_add'
+    st('theme').value, fav.props['image'] = MINIMAL, 'play_unfav'
+    glyphs(win.addr)
+    assert fav.props['image'] == 'play_unfav'
+
+
+class Modes:
+    """OLED's Now Playing on top with the play mode's target at (143, 252, 88, 44): its left half shuffle's, its right
+    repeat's (np_bar.c np_mode_click). config_playmode sets stock's mode as stock's does."""
+    def __init__(self, fw, st, mcl, mode):
+        self.fw, self.mcl = fw, mcl
+        ui = Ui(fw)
+        theme(fw, OLED)
+        mcl.mode = mode
+        self.win = ui.window('playing_page')
+        self.button = ui.add('image', self.win, (143, 252, 88, 44), 'img_playmode')
+        st('np_win', C.c_void_p).value = self.win.addr
+        fw.mock('widget_lookup', lambda w, name, deep, *_: self.button.addr if C.string_at(name) == b'img_playmode' else 0)
+        self.sent = []
+        fw.mock('config_playmode', lambda m, notify, *_: self.sent.append(i32(m)) or setattr(mcl, 'mode', i32(m)) or 0)
+
+    def tap(self, side):
+        event = C.create_string_buffer(0x40)
+        struct.pack_into('<i', event, 0, O['EVT_CLICK'])
+        struct.pack_into('<ii', event, O['EVENT_X'], 160 if side == 'shuffle' else 215, 270)
+        return self.fw.fn('np_mode_click', C.c_int, C.c_void_p, C.c_void_p)(self.button.addr, C.addressof(event))
+
+
+def test_shuffle_and_repeat_are_two_controls_over_stocks_one_mode(fw, st, mcl):
+    m = Modes(fw, st, mcl, 0)  # order: shuffle off, repeat Off
+    assert m.tap('shuffle') == 1 and m.sent == [2]  # shuffle on
+    m.tap('repeat')  # repeat All under shuffle: stock's Shuffle plays on either way, nothing sent
+    assert m.sent == [2] and mcl.mode == 2
+    m.tap('repeat')  # Repeat One
+    assert m.sent == [2, 1]
+    m.tap('shuffle')  # shuffle off under Repeat One: still Repeat One
+    assert m.sent == [2, 1]
+    m.tap('repeat')  # repeat Off, shuffle off: order
+    assert m.sent == [2, 1, 0]
+
+
+def test_each_control_finds_the_other_as_it_was(fw, st, mcl):
+    m = Modes(fw, st, mcl, 3)  # repeat All
+    m.tap('shuffle')
+    m.tap('shuffle')
+    assert m.sent == [2, 3]  # repeat All again, not order
+    m.tap('repeat')  # Repeat One, then shuffle on under it: kept until repeat leaves One
+    m.tap('shuffle')
+    assert m.sent == [2, 3, 1] and mcl.mode == 1
+    m.tap('repeat')  # Off: shuffle comes back
+    assert m.sent == [2, 3, 1, 2]
+
+
+def test_other_themes_keep_stocks_play_mode_tap(fw, st, mcl):
+    m = Modes(fw, st, mcl, 0)
+    st('theme').value = MINIMAL
+    assert m.tap('shuffle') == 0 and m.sent == []
 
 
 @pytest.mark.parametrize('timer, ellipses, faded', [(0, 1, False), (41, 1, True), (0, 0, True)])
@@ -1433,6 +1547,23 @@ def test_a_row_actions_question_is_the_tray_its_cell_the_verb(fw, st):
     assert ui.text(after.enter) == 'OK' and after.lines[0].visible
 
 
+@pytest.mark.parametrize('prompt, verb', [('Restart?', 'Restart'), ('Shut Down?', 'Shut Down')])
+def test_oleds_power_confirms_say_their_verb(fw, st, prompt, verb):
+    """Power's Restart and Shut Down rows (power_rows.c) as OLED's dialog page: Cancel, then the verb, never OK."""
+    theme(fw, OLED)
+    ui = Ui(fw)
+    confirm = Confirm(fw, ui, [prompt])
+
+    def utf8(w, out, size, *_):  # the prompt's words, as feedback_confirm_dress reads them
+        words = ui.text(ui.nodes[w]).encode()[:size - 1] + b'\0'
+        C.memmove(out, words, len(words))
+        return 0
+    fw.mock('widget_get_text_utf8', utf8)
+    confirm.paint()
+    assert (confirm.ui.text(confirm.cancel), confirm.ui.text(confirm.enter)) == ('Cancel', verb)
+    assert not confirm.lines[0].visible  # the question is the status row's title
+
+
 def test_minimal_leaves_stocks_confirm(fw, st):
     theme(fw, MINIMAL)
     confirm = Confirm(fw, Ui(fw))
@@ -1900,8 +2031,11 @@ def test_power_adds_standby_charge_and_in_vehicle_rows_after_stocks(fw):
     ui, win, view, settings, build = settings_page(fw, MINIMAL, 'powermanager_page', 'scroll_view_powermanager', 2)
     fw.mock('stock_power_trampoline', build)
     assert fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None) == 3
-    stock, ours = view.children[:2], view.children[2:]
+    stock, ours, power = view.children[:2], view.children[2:8], view.children[8:]
     assert [s.name for s in stock] == ['s0', 's1'] and len(ours) == 6
+    gap, restart, off = power  # Restart and Shut Down last, after a 12 px gap (power_rows.c)
+    assert gap.kind == 'label' and gap.box[3] == 12
+    assert [ui.text(label_of(r)) for r in (restart, off)] == ['Restart', 'Shut Down']
     icons = [next(c.props['image'] for c in r.walk() if c.kind == 'image') for r in ours]
     # Standby, Charge, USB DAC Charging, Smart Wi-Fi, In-Vehicle, Battery History
     assert icons == ['system_powermanager', 'usb_chargeswitch', 'usb_chargeswitch', 'wifiset_wifi', 'system_carmode',
@@ -2001,7 +2135,7 @@ def test_in_vehicle_mode_is_stocks_byte_and_key(fw):
     ui, win, view, settings, build = settings_page(fw, MINIMAL, 'powermanager_page', 'scroll_view_powermanager')
     fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     g(fw, 'g_carmode_state', 4)
-    standby, charge, dac, smart, car, history = view.children
+    standby, charge, dac, smart, car, history = view.children[:6]  # then the gap, Restart and Shut Down
     click(ui, car)
     assert (g(fw, 'g_carmode'), g(fw, 'g_carmode_state')) == (1, 0) and settings.written == [('CARMODE', 1)]
     assert switch(car) == 'switch_on'
@@ -2011,7 +2145,7 @@ def test_smart_wifi_switches_and_saves_its_own_key(fw, st):
     ui, win, view, settings, build = settings_page(fw, MINIMAL, 'powermanager_page', 'scroll_view_powermanager')
     fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     car_mode = g(fw, 'g_carmode')
-    standby, charge, dac, smart, car, history = view.children
+    standby, charge, dac, smart, car, history = view.children[:6]  # then the gap, Restart and Shut Down
     click(ui, smart)
     assert switch(smart) == 'switch_on' and settings.written == [('SMARTWIFI', 1)] and st('smart_wifi').value == 1
     assert switch(charge) == switch(car) == 'switch_off' and g(fw, 'g_carmode') == car_mode  # the other rows as they were
@@ -2022,7 +2156,7 @@ def test_smart_wifi_switches_and_saves_its_own_key(fw, st):
 def test_classic_shows_a_switch_as_its_value(fw, st):
     ui, win, view, settings, build = settings_page(fw, CLASSIC, 'powermanager_page', 'scroll_view_powermanager', CHARGELIMIT=b'1')
     fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
-    standby, charge, dac, smart, car, history = view.children
+    standby, charge, dac, smart, car, history = view.children[:6]  # then the gap, Restart and Shut Down
     assert value(ui, charge) == 'On' and value(ui, smart) == value(ui, car) == 'Off' and switch(charge) is None
     assert f'{O["CHARGE_STOP"]}%' in ui.text(label_of(charge))
     v = next(c for c in charge.walk() if c.name == '_setting_value')
@@ -2211,21 +2345,22 @@ def test_scan_song_durations_turned_off_cancels_a_pass(fw):
     assert settings.written == [('SCANDURATIONS', 0)] and state.cancel and not state.due
 
 
-@pytest.mark.parametrize('was', [0, 1])
-def test_key_tone_shows_click_with_headphones_while_on(fw, st, scratch, was):
-    ui, win, view, settings, _ = settings_page(fw, MINIMAL, 'controls_page', 'scroll_view_controls')
-    g(fw, 'g_keytone_flag', was)
+# The Clicker, Key Tone's row (patch/clicker.c): Speaker, Headphones, Both, Off and round; Off is Key Tone off
+# (stock's byte and SYSSET KEYTONE), the others IPOD CLICKER (0 Both, 1 Speaker, 2 Headphones).
+@pytest.mark.parametrize('tone, clicker, now, then, written', [
+    (1, b'1', 'Speaker', 'Headphones', [('CLICKER', 2)]), (1, b'2', 'Headphones', 'Both', [('CLICKER', 0)]),
+    (1, b'0', 'Both', 'Off', [('KEYTONE', 0)]), (0, b'0', 'Off', 'Speaker', [('KEYTONE', 1), ('CLICKER', 1)]),
+    (0, b'1', 'Off', 'Speaker', [('KEYTONE', 1)]), (1, None, 'Both', 'Off', [('KEYTONE', 0)]),
+])
+def test_the_clicker_row_cycles_and_saves(fw, tone, clicker, now, then, written):
+    ui, win, view, settings, _ = settings_page(fw, MINIMAL, 'controls_page', 'scroll_view_controls', **({'CLICKER': clicker} if clicker else {}))
+    g(fw, 'g_keytone_flag', tone)
     pod_rows(fw, win, 'scroll_view_controls', POD['POD_KEYTONE'], 1)
-    item = ui.add('list_item', view, (0, 0, 375, 70), 'click_hp')
-    button = ui.add('button', item, (20, 0, 335, 70))
-    hp = ui.add('hscroll_label', button, (72, 0, 260, 70))
-    slot = scratch['setting_label'] + SETTING['SETTING_KEYTONEHP'] * C.sizeof(C.c_void_p)  # Click With Headphones' label
-    C.c_void_p.from_address(C.addressof(fw.var('st', C.c_char)) + slot).value = hp.addr
-    tone = view.children[0]
-    assert switch(tone) == ('switch_on' if was else 'switch_off')
-    click(ui, tone)
-    assert g(fw, 'g_keytone_flag') == (not was) and item.visible == (not was)
-    assert settings.written == [('KEYTONE', int(not was))] and [c[1][0] for c in fw.calls('widget_layout')] == [view.addr]
+    row = view.children[0]
+    assert ui.text(label_of(row)) == f'Clicker: {now}'
+    click(ui, row)
+    assert ui.text(label_of(row)) == f'Clicker: {then}' and g(fw, 'g_keytone_flag') == (then != 'Off')
+    assert settings.written == written
 
 
 @pytest.mark.parametrize('on', [1, 0])
@@ -3158,3 +3293,78 @@ def test_classic_brings_a_cut_row_whole_when_tapped(fw, st, which, revealed):
     assert bool(offsets) == revealed
     if revealed:
         assert offsets[0] + 294 >= 336 and offsets[0] <= 288
+
+
+# A Library row that can't play now (catalogue.c): its text and its offline mark.
+def test_a_greyed_row_keeps_its_contrast_on_the_selection_and_carries_the_offline_mark(fw, st, layout):
+    """Off the selection a greyed row's text is CAT_GREY; on Modern's accent bar it is the bar's own ink at
+    70% (not grey on blue), and each greyed row has the cloud-slash mark at its right in its text's colour,
+    after the rows are painted (ringnav_paint)."""
+    page = Page(fw, MODERN)
+    labels = [b.children[0] for b in page.rows]
+    for label in labels:  # titles as wide as the row: they would run under the mark
+        label.move(10, 0, 320, 48)
+    page.paint()
+    normal = text_ink(fw, st, labels[1])  # the selected row's ink before any greying
+    url = C.create_string_buffer(b'/mnt/mmc/.subsonic/cat/al1/s1.flac')
+    record = C.create_string_buffer(O['REC_SIZE'] + 8)
+    struct.pack_into('<Q', record, O['REC_PATH'], C.addressof(url))
+    struct.pack_into('<i', record, O['REC_TYPE'], 8)
+    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    for i in (1, 2):  # Local Only: a server row can't play
+        fw.fn('catalogue_mark', None, C.c_void_p, C.c_void_p, C.c_int)(page.rows[i].parent.addr, C.addressof(record), 0)
+    page.paint()  # before the rows: the greyed rows' titles end clear of the mark's column (322 +- 10)
+    assert [label.box[2] for label in labels] == [320, 278, 278, 320]
+    assert text_ink(fw, st, labels[0]) == normal  # an ordinary row: as it was
+    assert text_ink(fw, st, labels[2]) == 0xff666666
+    dim = text_ink(fw, st, labels[1])
+    assert dim == (normal & 0xffffff) | 0xb3 << 24
+    page.canvas.px.clear()
+    fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(page.view.addr, page.canvas.addr)
+    mark = {(x, y): c for (x, y), c in page.canvas.px.items() if x >= 300}
+    rows = {y // 48: [] for x, y in mark}
+    for (x, y), c in mark.items():
+        rows[y // 48].append(c)
+    assert sorted(rows) == [1, 2]  # rows 1 and 2, none on 0 or 3
+    assert {c & 0xffffff for c in rows[1]} == {normal & 0xffffff} and max(c >> 24 for c in rows[1]) == 0xb3
+    assert {c & 0xffffff for c in rows[2]} == {0x666666} and max(c >> 24 for c in rows[2]) == 0xff
+    assert len(rows[2]) > 100  # the glyph's pixels, not a dot
+    assert min(x for x, y in mark) == 312  # the chevron's column: 322 less half the mark
+    # a row bound to a song that plays again takes its width back
+    fw.fn('catalogue_forget', None, C.c_void_p)(page.rows[2].parent.addr)
+    page.paint()
+    assert [label.box[2] for label in labels] == [320, 278, 320, 320]
+
+
+@pytest.mark.parametrize('name, tab, greyed', [('albuminfo_page', None, True), ('playerjumpinfo_page', None, True),
+                                               ('localmusic_page', None, False), ('search_dialog', 1, True),
+                                               ('search_dialog', 0, False)])
+def test_an_album_page_and_search_grey_their_songs_that_cannot_play(fw, st, name, tab, greyed):
+    """An album's songs, and Search's songs, are a scroll_view's rows, one per record of the showlist (Search's:
+    p_deque_searchshowlist, the lit tab's rows), not a pooled table: with Local + Server, offline, a
+    server song's row is greyed as the page paints; another page's rows, or another tab's, are left alone."""
+    page = Page(fw, MODERN, name=name, LIBRARYSOURCE=b'1')
+    if tab is not None:
+        group = page.ui.add('view', page.view.parent, name='tab_button_group')
+        page.ui.add('tab_button', group, value=tab)
+        page.ui.add('tab_button', group, value=1 - tab)
+    fw.var('catalogue_source', C.c_int).value = 1
+    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    keep = []
+
+    def record(path):
+        s, r = C.create_string_buffer(path), C.create_string_buffer(O['REC_SIZE'] + 8)
+        struct.pack_into('<Q', r, O['REC_PATH'], C.addressof(s))
+        struct.pack_into('<i', r, O['REC_TYPE'], 8)
+        keep.extend((s, r))
+        return C.addressof(r)
+    deques = Deques(fw)
+    shown = deques.new([record(p) for p in (b'/mnt/mmc/a.flac', b'/mnt/mmc/b.flac',
+                                            b'/mnt/mmc/.subsonic/cat/al1/s1.flac', b'/mnt/mmc/c.flac')])
+    # Search's results are its own list; the page under it keeps the showlist
+    fw.var('fw_ctx_p_deque_searchshowlist' if tab is not None else 'fw_ctx_p_deque_showlist', C.c_uint).value = shown
+    if tab is not None:
+        fw.var('fw_ctx_p_deque_showlist', C.c_uint).value = deques.new([record(b'/mnt/mmc/x.flac')] * 4)
+    page.paint()
+    labels = [b.children[0] for b in page.rows]
+    assert [text_ink(fw, st, label) == 0xff666666 for label in labels] == [False, False, greyed, False]

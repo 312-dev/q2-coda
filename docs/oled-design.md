@@ -115,6 +115,8 @@ Rules:
 - **Sentence case** for everything the theme writes (status, captions, values). Menu items and
   page names stay as the firmware names them, which is Title Case ("Sound Check"). Never all
   capitals.
+- **A number, a space, its unit:** "15 s", "1 min", "4000 K"; a percentage takes no space
+  ("50%").
 - **Size steps are 15, 16, 18, 20, 22** (56 for the confirmation's glyph). Nothing else.
 - **Row pitch is about 1.6 times the row size** (32 px for 20 px type), as the concept's is
   about twice its cap height.
@@ -174,8 +176,15 @@ All lists share one grid.
   Chevron grey, On Accent on the selection.
 - **Key/value row:** value in Text Secondary, right-aligned on the right column, no chevron.
   On the selection bar the value is On Accent.
-- **Switch row:** a 34x20 switch on the right column: Track when off, Accent Blue when on,
-  white knob. No "On"/"Off" text beside it.
+- **Switch row:** every on/off setting, a 34x20 fully round switch ending on the right column, its
+  16 px white knob 2 px in: Track when off, Accent Blue when on. On the selection bar: on is a white
+  track with an Accent Blue knob, off a 1.5 px white outline round the white knob. No "On"/"Off"
+  text beside it. A setting with two or three named choices (Gain's High and Low, Charge Limit's
+  Off and 80%) is a key/value row that Centre cycles; the value is never part of the label.
+- **Disabled row** (Set Time Manually while the time is set automatically): label, value and
+  chevron in Text Tertiary, and the wheel passes over it.
+- **Picker:** the current choice carries Phosphor's `check` (bold, 12 px) on the right column, Accent
+  Blue, white on the selection.
 
 ### Scroll indicator
 
@@ -195,7 +204,9 @@ Wear OS's position indicator, on the Q2's straight right edge:
 - Optional leading 40 px square art with 4 px corners (Albums) at x 24, 6 px down; text then
   starts at 72.
 - Dividers (Divider, 1 px) between two-line rows only, from the text column to the right column,
-  not drawn on either edge of the selected row. Single-line lists have no dividers.
+  not drawn on either edge of the selected row. Single-line lists have no dividers. Q2 Pod's own
+  two-line lists (Era, View Queue, Most Played, Ratings' lists) have them as stock's do, and end
+  on the last whole row above y 282 (`page_fit`).
 
 ### Song rows
 
@@ -206,8 +217,8 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   fits from the text column to the right column; the artist is dropped when less than about
   40 px would remain for it.
 - **A list reached through an artist** (their songs, one of their albums): no artist.
-- **Inside an album:** the track number in 15 px Text Tertiary right-aligned in a 14 px column
-  after the 24 px inset, the title from x 50, the length right-aligned on the right column in
+- **Inside an album:** the track number in 15 px Text Tertiary right-aligned in a 17 px column
+  after the 24 px inset, so two digits fit it, the title from x 50, the length right-aligned on the right column in
   15 px Text Tertiary, tabular digits.
 - Two of OLED's own options change this: **Song Artist** (Inline, Selected Row, Right, Off) and
   **Song Length** (Albums, All Lists, Off); a length takes the right column, so Right, and
@@ -217,8 +228,8 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   Play All (a song already plays the rest of its list in order): Phosphor `shuffle` (regular, 20
   px) on the text column and "Shuffle" 28 px after it, both Accent Blue, white on the selection.
   The wheel reaches it from the first song; Centre shuffles the list, and Return from Now Playing
-  lands on it again. Sort's bars stay at its right,
-  one more tick up, until the options menu takes them.
+  lands on it again. Sort has no place on the row: it is the hold menu's Sorting row
+  ([Menus](#menus)).
 - **Folder view** reads as an album: the same 32 px rows. A song file is a track, its number in the
   album's column, the title from the library's tags (found by the file's path) at x 50 and its
   length on the right column when known; a file the library doesn't know shows its file name
@@ -228,8 +239,15 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   too.
 - Which list is which comes from its page: Songs' page (`allmusic_page`, which also holds a genre's songs
   and the other lists stock opens there) is mixed, the artist page's songs are an artist's, the album page is an
-  album, Folder view (`folder_page`) a folder. Lists Q2 Pod draws itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep
-  their own rows.
+  album, Folder view (`folder_page`) a folder, and an album's tracks opened from Cover Flow are an album too (their
+  status row names the album, with no row of its own above the tracks). Lists Q2 Pod draws itself (Most Played,
+  Long Songs, Ratings) keep their own rows.
+- Streaming's rows are one line, 32 px, each service's mark (20 px, monochrome, no disc) centred on x 34 in Text
+  Secondary, white on the selection, its name from x 52: Phosphor's `spotify-logo`, `app-window` (a card app without
+  its own icon), `radio`, `airplay` and `sliders-horizontal` (Configuration), and TIDAL's own four diamonds, drawn in
+  `tools/art.py` (Phosphor has none); TIDAL and Tidal Downloads share it.
+- Ratings' lists show a song's hearts as five Phosphor glyphs at 14 px at the start of its second line, `heart-fill`
+  for its hearts and `heart` for the rest, in Text Secondary (white on the selection), then "· Artist".
 
 ### Now Playing
 
@@ -245,7 +263,7 @@ clock.
 | Track position | 192, baseline 208              | "1 of 10", 15 px, Text Secondary, baseline level with the art's bottom                     |
 | Progress bar   | 24 to 347, y 228, 6 px         | Track `#333333`, fill Accent Blue, round ends                                              |
 | Elapsed        | left on 24, centred on y 250   | 16 px, Text Primary, tabular                                                               |
-| Remaining      | right on 347, centred on y 250 | 16 px, Text Primary, with a leading minus                                                  |
+| Remaining      | right on 347, centred on y 250 | 16 px, Text Primary, with a leading minus; a tap shows the length instead (Track Time)     |
 | State row      | centred on y 276, 44 px apart  | Phosphor `shuffle` and `repeat`, bold, 22 px: Accent Blue when on, Text Secondary when off |
 
 No page title, no background art blur, no reflection.
@@ -256,12 +274,16 @@ The album is one line that scrolls, as the title and artist do, rather than two.
 has no place for keeps a place of its own:
 
 - **More and the heart** stand at the right end of "1 of 10"'s line, on the art's page, so a swipe
-  takes them away with it.
+  takes them away with it: Phosphor `dots-three` and `heart` (regular, 20 px, Text Primary;
+  More pressed in Text Secondary), the dots' ink ending on the right column, the heart `fill` in
+  Accent Blue while the song is a favourite.
 - **The page dots** sit under shuffle and repeat, centred on y 302; the lyrics, the track's details
   and the visualizer are still the swipe's other pages, each ending 5 px above the bar.
-- **Shuffle and repeat** are one target, stock's play mode button: a tap steps Order, Repeat One,
-  Shuffle, Repeat All as before, and the glyphs show the mode (repeat-once's glyph for Repeat One).
-- **The volume** and the scrub draw on the bar where it is. The A-B markers follow the bar
+- **Shuffle and repeat** are two controls on stock's play mode button: a tap on shuffle turns it
+  on or off, a tap on repeat steps Off, All, One (repeat-once's glyph for One), and each keeps the
+  other as it was. Stock's Shuffle never ends, so shuffle with repeat Off plays on as with All.
+- **The volume** and the scrub draw on the bar where it is: "Volume 66" under it in 15 px Text
+  Secondary, and the scrub as a 14 px white knob on the fill's end. The A-B markers follow the bar
   across but keep stock's row, y 308 on screen, under the page dots. ponytail: a marker within
   about 14 px of either end of the bar falls under the bottom corners' glass; moving them onto
   the bar needs the y that stock's placement (`0x53baa4`) writes made per set.
@@ -270,8 +292,16 @@ has no place for keeps a place of its own:
 
 - **Progress:** 6 px, round ends, Track and Accent Blue. Used for playback, scans and
   downloads.
-- **Vertical slider (EQ):** 4 px Track line, Accent Blue fill from 0 dB to the value, a 14 px
-  white knob. Band labels under it in Text Tertiary 15 px.
+- **Slider page** (Max Volume, Default Volume, Channel Balance, Brightness, Crossfade, Resume Songs,
+  Night Shift, Wheel Sensitivity): the status row names it; a feature with a switch has it as the
+  first row, selected; the value in Inter Medium 22 centred on y 150; a 6 px track from the text
+  column to the right column with its top at y 186, Track behind and Accent Blue filled to a 14 px
+  white knob (Channel Balance fills from the centre); the range's ends in 15 px Text Tertiary
+  centred on y 214, at the two columns. The wheel moves it; there are no +/- buttons.
+- **Vertical slider (EQ):** 4 px Track line, Accent Blue fill from 0 dB to the value (Text Tertiary
+  while the EQ is off), a 14 px white knob, ringed 2 px in Accent Blue while the wheel is on it.
+  The band's name and gain under it in 15 px Text Tertiary, Text Primary on the band the wheel is
+  on. Above the three, the EQ's switch, Presets and Reset are rows.
 - **Storage bar:** 12 px, round ends, segments in Accent Blue, Text Secondary and Track, with a
   legend of 8 px dots and 15 px labels. Segments never use more than three colours.
 
@@ -282,23 +312,75 @@ Shown for a moment after a mode change (Shuffle, Repeat).
 - Centred glyph (Phosphor `shuffle` or `repeat`, bold), 56 px, Accent Blue, centred on y 140;
   label Inter Medium 22 px centred on y 200; count in Text Tertiary 15 px centred on y 228.
   Nothing else on screen but the status row, which names Now Playing.
-- Dismisses itself after 1.2 s or on any input.
+- Dismisses itself after 1.2 s or on any input, which it takes.
+- Built for shuffles (`patch/feedback.c` `feedback_shuffled`): the Library's Shuffle Songs, Albums and
+  Folders, a list's Shuffle row and the hold menu's Shuffle, over the Now Playing they open, with the
+  queue's song count. Repeat and Now Playing's own mode button do not show it yet.
 
 ### Dialogs and toasts
 
 - A dialog is a list: its question as the page title, its answers as rows, the selection bar
   on the default answer. No boxes, no shadows.
+- A confirm (stock's `confirminfo_dialog`: Shut Down, Restart, the three Resets, Delete Song, Delete
+  Playlist and the rest) is that dialog: the question in the status row in sentence case, naming
+  the object where it can ("Delete playlist “a”?"), then **Cancel**, selected when it opens, and
+  the verb that says what the other does ("Shut Down", "Reset", "Delete"), never "OK". Delete
+  Song's "Also delete source file" is a third row with a switch on the right column.
 - A toast is one line of 16 px Text Primary on a `#1C1C1E` pill, 12 px corners, 32 px tall,
-  centred on y 252, above the bottom glass curve. It is the only raised surface in the theme.
+  as wide as its text and 16 px each side, centred on y 252 (y 236 to 268), above the bottom
+  glass curve. It is the only raised surface in the theme. The page stays in sight round it,
+  with its status row and its selection; it lasts 1.5 s (stock's own toasts their own time).
+  Words in sentence case ("Added to Queue", "Name can't be empty").
+- Every in-place action says what it did in a toast: the hold menu's Play Next ("Playing Next"),
+  Add to Queue ("Added to Queue") and Add to and Remove from Favourites ("Added to Favorites",
+  "Removed from Favorites").
+
+### Empty and offline
+
+- A list with nothing in it keeps its action rows (New Playlist..., Check for Updates) as
+  normal rows with the selection; the message is one line of 16 px Text Secondary centred in the
+  free area below them, down to y 282, with an optional hint in 15 px Text Tertiary 24 px lower.
+  No fake rows, and no Shuffle row over nothing: Favorites, Recent and the other song lists hide
+  it and say what is missing ("No favorites", hint "Hold Play/Pause on a song to add it").
+- Offline and missing things use the same form (Spotify's "Spotify isn't on the card", the App
+  Store's "No apps listed" under its Check for Updates row, one line in the list's pitch). TIDAL
+  with no Wi-Fi opens a page of its own titled TIDAL: "Not connected", hint "Turn on Wi-Fi in
+  System > Wireless".
+- Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done.
+
+### Menus
+
+Actions on the highlighted item (the hold menus, Now Playing's More and a playlist's More) open as
+an inset modal over the page, which stays on screen dimmed half way to black; nothing is blurred.
+
+- **Panel:** opaque `#1C1C1E`, 259 px wide from x 58, top at y 58, 16 px corners, 8 px padding, no
+  title (the row behind says which item). Rows are 32 px, at most six in view, then they scroll
+  inside the panel; the wheel's scroll indicator stands in the panel's right padding, never past its edge.
+- **Rows:** Inter Regular 20 at the panel's 16 px inset; an action's Phosphor symbol (regular,
+  19 px) at the right in Text Secondary, white on the selection. The selection is the list's bar, 8
+  px in from the panel with 8 px ends.
+- **A setting** (Sorting, Speed, Shuffle, Repeat, Group by) has its symbol before the label, the
+  label 26 px further in, and its value alone at the right in Text Secondary; Centre opens a picker
+  in the same panel, the current choice with the accent's check before its label.
+- **Rating** (Now Playing's Centre cycle, a menu's Rate) is a picker in the same panel: Unrated, 1 Heart
+  to 5 Hearts, the current one checked; Centre keeps a row's rating and closes, Return closes.
+- **Gaps:** a setting heading the menu stands 12 px above the actions; a destructive row (Delete
+  Song) comes last, 12 px below them, and asks before it acts. Space, never a rule.
+- The menu opens on its first action, lit; the wheel moves, Centre picks, Return closes it back to
+  the row it came from.
+
+Built by `patch/menu_modal.c` under a set with `modal` (OLED's). Now Playing's More and a
+playlist's More are stock pages, which such a set loads as dialogs (`tools/ipod.py` `modal_page`).
 
 ### Icons
 
 - One set: [Phosphor Icons](https://phosphoricons.com) (MIT), `@phosphor-icons/core` 2.1.1. The
   SVGs the theme uses are vendored in `assets/icons/phosphor/` with their licence, and
   `tools/art.py` draws the theme's bitmaps from them at build time, in final colours per half.
-- Weights by role: `fill` for the play state, `bold` for chevrons and Now Playing's and the
-  confirmation's shuffle and repeat. Sizes are the design's: 13 px play state, 15 px chevron,
-  22 px state row, 56 px confirmation.
+- Weights by role: `fill` for the play state and a favourite's heart, `bold` for chevrons and Now
+  Playing's and the confirmation's shuffle and repeat, `regular` for row symbols and Now Playing's
+  heart and More. Sizes are the design's: 13 px play state, 15 px chevron, 20 px row symbols,
+  heart and More, 22 px state row, 56 px confirmation.
 - No coloured app tiles: the concept's tinted "For You" squares are for content the Q2 does
   not have.
 
@@ -313,6 +395,11 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   and its left end while it is scrolled away from its start, so it rests crisp; each goes from
   clear to the colour behind the text (the Canvas, or Accent Blue on the selection). A truncated
   text that is not scrolling keeps its ellipsis (`list.marquee.fade`).
+- **Now Playing's lines** move as one marquee: the title, artist and album that overflow hold at
+  rest 2.75 s, slide left together at 35 px a second (the longest line's pace; the others take the
+  same time), and land back at rest together, each followed by its own copy 40 px behind, so
+  nothing snaps back. The progress bar's fill moves a pixel at a time between the player's
+  seconds rather than a second's width at once.
 
 ## Screens
 
@@ -323,7 +410,7 @@ pattern.
 | Q2 Pod screen                       | Pattern                     | Notes                                                                                                      |
 | ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock |
-| Home (Split)                        | List row beside art         | Rows to x 204 (bar 16 to 188, chevrons 176); the art from x 196, y 52 to the edges, still, centre-cropped  |
+| Home (Split)                        | List row beside art         | Rows to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges, panning slowly; the status row's play state and battery over it, each pixel white or black by contrast |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Library                             | List row                    |                                                                                                            |
 | Albums                              | Two-line row with art       |                                                                                                            |
@@ -332,16 +419,22 @@ pattern.
 | Artists, Genres, Composers          | List row                    |                                                                                                            |
 | Songs, a playlist's songs           | Song rows                   | The artist inline                                                                                          |
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
-| Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles                         |
-| Playlists                           | Two-line row with icon      |                                                                                                            |
-| Hold menu                           | Dialog                      |                                                                                                            |
+| Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; an artist's covers titled by the artist |
+| Playlists                           | Two-line row with icon      | New Playlist... and the other action rows take the same 52 px pitch once there is a playlist, the picker's too |
+| Hold menu, More                     | [Menus](#menus)             | The inset modal over the page                                                                              |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
+| About                               | Key/value table             | Inert: no selection; values in Text Secondary                                                              |
+| Lock Screen settings                | List row, then pictures     | Three a row from the text column to the right column; the check is the one accent                          |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
-| Equalizer (Simple)                  | Vertical slider             |                                                                                                            |
+| Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
+| Equalizer (Simple)                  | Vertical slider             | Its tabs, then rows: the switch, Presets, Reset                                                            |
+| Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right                      |
 | Bluetooth                           | Two-line row                | Second line "Connected" with the Positive dot                                                              |
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
 | Quick Settings                      | Own                         | Seven rows under the status row, Brightness's slider inline: Centre on it gives it the wheel               |
+| Search                              | Own                         | An iPod classic's letter strip at y 216-254 under four single-line results ([ipod](ipod.md#search))         |
+| Keyboard                            | Own                         | Stock's keys as `#1C1C1E` boxes on black, the wheel's key in the accent ([ipod](ipod.md#keyboard))          |
 | Lock screen                         | Own                         | Clock 56 px Inter Medium centred, date 16 px Secondary, the song in two lines; black or the picture at 50% |
 
 The concept's Apple Music, Apple TV, CD sync and storage pages have no Q2 Pod equivalent and are
@@ -373,17 +466,28 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   chevron (`list.chevron.painter="icon"`) and the play state; the slim battery
   (`bar.battery.painter="slim"`); the wheel's scroll indicator (`list.scrollbar.painter="wheel"`);
   1 px dividers on the text and right columns (`list.divider.ink`); row art's 4 px corners
-  (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column; song rows
+  (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column; the
+  switch, Gain's value, the pickers' check, disabled rows, the slider page, EQ's Simple tab and the Wi-Fi
+  page as above (`settings.values.switch`); song rows
   (`list.songs.painter="inline"`) and the Song Artist and Song Length options; Songs' action row
   as the Shuffle row (`list.shuffle.row`); a list left by Return opening at its top when chosen
   again (`list.reopen.top`, which Minimal sets for every theme).
 - Now Playing on the set's grid (`np_art`, `np_bar_y`), its art's corners (`playing.art.radius`), its
-  artist and album in Inter (`playing.artist.font`), shuffle and repeat as the theme's own glyphs
-  (`playing.modes.icons`), and the marquee fades (`list.marquee.fade`).
-- Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_still` (the art from
-  x 196 and y 52 to the edges, still and centre-cropped, its top rows painted by the bar).
+  artist and album in Inter (`playing.artist.font`), shuffle and repeat, the heart and More as the theme's
+  own glyphs (`playing.modes.icons`), the marquee fades (`list.marquee.fade`), and Track Time (`NPTIME`), whose
+  tap on the right-hand time shows the length or the time left.
+- Menus as the inset modal over the page ([Menus](#menus)): the set's `modal`, `patch/menu_modal.c`, the
+  Phosphor symbols as the theme's own art.
+- Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_inset` (the art from
+  x 196 and the top edge to the edges, its top 58 rows painted by the bar with the status row's play state and
+  battery over them, each of their pixels white or black, whichever has the higher WCAG contrast against the art
+  under it (`home_ink`, approved from `mock_split_top.py` on 2026-11-14), panning slowly across its 110 % zoom with an
+  eased turn at each end and 2 % of the zoom kept clear of the pane at each edge, so a cover's own border never
+  shows), and the lists Home's rows open as full-width pages with the art hidden (`home.lists.full`).
+- The toast, the confirm as a dialog page and the empty note (`dialog.confirm.painter="oled"`,
+  `patch/feedback.c`), and the confirmation after a shuffle.
 
 Still to build:
 
-- A confirmation screen for Shuffle and Repeat, and the toast and dialog forms.
-- Switch rows, the pickers' check, the EQ slider and the storage bar drawn as above.
+- The confirmation for Repeat and Now Playing's mode changes.
+- The storage bar drawn as above.

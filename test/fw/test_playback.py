@@ -224,6 +224,16 @@ def test_upcoming_skips_what_has_played(player):
     assert player.up_next() == [2]
 
 
+def test_upcoming_skips_a_server_row_that_cannot_play_now(fw, player):
+    """A server row (patch/catalogue.c) with no offline copy while it can't stream, here with Local only:
+    the queue keeps it, and playback passes it by."""
+    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    plan(player, [0, 1, 2, 3])
+    player.deques[player.handle][:] = [player.song(b'/mnt/mmc/Music/%d.flac' % i) for i in (0, 1)] + [
+        player.song(b'/mnt/mmc/.subsonic/cat/al1/s2.flac'), player.song(b'/mnt/mmc/Music/3.flac')]
+    assert player.up_next() == [1, 3]
+
+
 def test_play_next_comes_first_and_only_once(player):
     plan(player, [0, 1, 2, 3], pend=(3, 0))  # 0 is the playing track's own, played again: a Play Next of it
     assert player.up_next() == [3, 0, 1, 2]
@@ -1219,8 +1229,8 @@ class Wheel:
         self.now = 100000
         fw.mock('time_now_ms', lambda *_: self.now)
 
-    def touch(self, x, pressure=1, ret=1):
-        s = (C.c_int * 6)(x, 0, pressure)
+    def touch(self, x, pressure=1, ret=1, tv=()):
+        s = (C.c_int * 6)(x, 0, pressure, *tv)
         self.sample(s, ret, self.info)
         return s[0]
 
@@ -1317,6 +1327,103 @@ def test_wheel_lift_ends_the_touch(fw):
     assert wheel.lift(77) == 0  # lifted already: stock sees 0, as it sees after its own lift
     wheel.touch(140), wheel.touch(160)
     assert wheel.ticks() == []  # the carry went with the touch
+
+
+# The wheel's speed (wheel_speed_sample): Rockbox's iPod average, degrees a second, as each tick is posted.
+def spin(wheel, x, units, ms, samples):
+    """samples of units travel each, ms apart (x rising: back): the last x."""
+    for _ in range(samples):
+        wheel.now += ms
+        x += units
+        wheel.touch((x - 1) % 200 + 1)
+    return x
+
+
+def model(units, ms, samples):
+    """The average the C keeps, in floats: a click of 15 degrees (133 sixteenths of a unit) timed at a time,
+    weighing its travel against 15 clicks', as Rockbox's (15 v + new) / 16."""
+    v, moved, t = 0.0, 0, 0
+    for _ in range(samples):
+        moved, t = moved + abs(units) * 16, t + ms
+        if moved >= 133:
+            v += (moved * 112.5 / t - v) * moved / (15 * 133 + moved)
+            moved = t = 0
+    return v
+
+
+@in_fork
+@pytest.mark.parametrize('units, ms', [(3, 10), (1, 10), (6, 16)])
+def test_wheel_speed_is_rockboxs_average_of_the_spin(fw, units, ms):
+    wheel = Wheel(fw)
+    speed = fw.var('wheel_speed', C.c_int)
+    spin(wheel, wheel.touch(100), units, ms, 800 // units)  # timed from the touch-down
+    assert wheel.ticks()  # published with each tick
+    want = model(units, ms, 800 // units)
+    assert abs(speed.value - want) <= max(4, want * .02), (speed.value, want)
+    assert want > .99 * units * 1.8 * 1000 / ms  # four turns: settled on the spin's own speed
+
+
+@in_fork
+def test_wheel_speed_is_timed_by_the_samples_stamps(fw):
+    """A busy UI has this thread read samples late and in bunches: their kernel stamps (tv) keep the pace."""
+    wheel = Wheel(fw)
+    speed = fw.var('wheel_speed', C.c_int)
+    x, stamp = 100, 1_000_000
+    wheel.touch(x, tv=(stamp // 1000, stamp % 1000 * 1000))
+    for i in range(266):
+        wheel.now += 46 if i % 5 == 0 else 1  # read five at a time, a millisecond apart
+        x, stamp = x + 3, stamp + 10
+        wheel.touch((x - 1) % 200 + 1, tv=(stamp // 1000, stamp % 1000 * 1000))
+    want = model(3, 10, 266)
+    assert abs(speed.value - want) <= want * .02, (speed.value, want)
+
+
+@in_fork
+def test_wheel_speed_builds_over_the_first_turn(fw):
+    wheel = Wheel(fw)
+    speed = fw.var('wheel_speed', C.c_int)
+    x = wheel.touch(100)
+    seen = []
+    for _ in range(10):
+        x = spin(wheel, x, 3, 10, 7)
+        seen.append(speed.value)
+    assert seen == sorted(seen) and seen[0] < 200 < 400 < seen[-1] < 540  # 540 deg/s, the fourth power's ramp
+
+
+@in_fork
+@pytest.mark.parametrize('how', ['pause', 'reversal', 'lift'])
+def test_wheel_speed_starts_again_from_rest(fw, how):
+    wheel = Wheel(fw)
+    speed = fw.var('wheel_speed', C.c_int)
+    x = spin(wheel, wheel.touch(100), 3, 10, 200)
+    assert speed.value > 500
+    if how == 'pause':
+        wheel.now += O['WHEEL_SPEED_IDLE_MS']
+        wheel.touch((x - 1) % 200 + 1)
+    elif how == 'lift':
+        wheel.lift(x)
+        wheel.now += 20
+        x = wheel.touch(100)
+    if how == 'reversal':
+        x = spin(wheel, x, -3, 10, 1)
+        x = spin(wheel, x, -3, 10, 10)
+    else:
+        x = spin(wheel, x, 3, 10, 1)
+        x = spin(wheel, x, 3, 10, 10)
+    assert wheel.ticks() and speed.value <= model(3, 10, 11) + 4  # a tick since: from rest, the pace kept
+
+
+@in_fork
+def test_wheel_speed_stays_with_the_last_tick_after_a_lift(fw):
+    """The UI loop takes a tick a pass or a lift after it was posted: it reads the speed it was posted at."""
+    wheel = Wheel(fw)
+    speed = fw.var('wheel_speed', C.c_int)
+    x = spin(wheel, wheel.touch(100), 3, 10, 200)
+    at = speed.value
+    wheel.lift(x)
+    wheel.now += 1000
+    wheel.touch(50)
+    assert speed.value == at > 500
 
 
 @in_fork
@@ -2671,20 +2778,20 @@ def test_in_advanced_play_previous_asks_after_a_repeat(held, player):
     assert held.changes() == [] and held.armed(0)
 
 
-def test_previous_past_10_s_asks_before_going_back_to_the_start(fw, held, press):
+def test_previous_from_3_s_asks_before_going_back_to_the_start(fw, held, press):
     seek = fw.fn('ringnav_seek_start', C.c_int)
     fw.mock('stock_seek_start_trampoline', lambda *_: 7)
     assert seek() == 1 and not fw.calls('stock_seek_start_trampoline') and press.value == 0  # 1: no further
     assert seek() == 7 and press.value == 5001
 
 
-@pytest.mark.parametrize('sec, long_track, stamp', [(10, 1, 0), (11, 1, 5001), (600, 0, 5001)])
+@pytest.mark.parametrize('sec, long_track, stamp', [(2, 1, 0), (3, 1, 5001), (11, 1, 5001), (600, 0, 5001)])
 def test_previous_that_holds_nothing_goes_to_stock_at_once(fw, held, press, sec, long_track, stamp):
-    held.sec = sec  # 11 s: past stock's 10, but no place kept within RESUME_EDGE_S of the start
+    held.sec = sec  # 3 s: a restart (PREV_RESTART), but no place kept within RESUME_EDGE_S of the start
     held.st('rs_long').value = long_track
     fw.mock('stock_seek_start_trampoline', lambda *_: 0)
     assert fw.fn('ringnav_seek_start', C.c_int)() == 0 and not held.armed(0)
-    assert press.value == stamp  # under 11 s nothing seeks: the change that follows stamps
+    assert press.value == stamp  # under 3 s nothing seeks: the change that follows stamps
 
 
 def test_a_users_seek_stamps_before_stock(fw, mcl, press):

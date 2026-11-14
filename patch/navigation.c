@@ -137,12 +137,16 @@ static int library_query(int content, const char *db, const char *sql, void *row
     }
     const char *from = library_music && sql ? strstr(sql, " from songtable") : 0;
     if (from) { /* library_first: the Unknown row's check, which one song answers */
+        /* Local + Server: the server's songs beside them (catalogue.c) */
         int n = tk_snprintf(filtered, sizeof filtered,
-                            "%.*s from (select * from songtable where %s)%s%s", (int)(from - sql),
-                            sql, MUSIC_WHERE, from + 15, library_first ? " limit 1" : "");
+                            "%.*s from (select * from songtable where %s%s)%s%s", (int)(from - sql),
+                            sql, MUSIC_WHERE, catalogue_rows(), from + 15,
+                            library_first ? " limit 1" : "");
         if (n < 0 || (unsigned)n >= sizeof filtered) return -1;
         sql = filtered;
     }
+    char *search = from ? 0 : catalogue_search(sql); /* Search finds server songs too */
+    if (search) sql = search;
     if (sql && strstr(sql, "select * from playlist where id > 100 and cd_num=") == sql &&
         !strstr(sql, "order by")) {
         int n = tk_snprintf(filtered, sizeof filtered, "%s order by id asc", sql);
@@ -172,6 +176,7 @@ static int library_query(int content, const char *db, const char *sql, void *row
                  : content    ? stock_content_query_trampoline(db, query, row, arg, sort)
                               : stock_dbquery_trampoline(db, query, row, (int)arg);
     if (expanded) free(expanded);
+    free(search);
     return result;
 }
 int ringnav_library_query(const char *db, const char *sql, void *row, int sort) {
@@ -184,6 +189,7 @@ int ringnav_content_query(const char *db, const char *sql, void *row, void *arg,
     return library_query(1, db, sql, row, arg, sort);
 }
 extern void *coverflow_tracks(void *page);
+extern const char *coverflow_bar_title(int status);
 extern int coverflow_jump(void *w, int from, int dir, unsigned *letter), coverflow_bounded(void *w),
     coverflow_slide(void *w);
 extern void coverflow_lost_touch(void), coverflow_wheel_land(void);
@@ -1033,7 +1039,8 @@ static int view_top(menu_t *m) {
  * a selected one's text would not show. */
 static int sel_height(menu_t *m) {
     int y = 0, end = geom_val(V_LIST_END);
-    if (!end || m->kind == 3 || m->kind == 4) return m->height;
+    /* an inset modal's rows end in its panel, clear of the glass (menu_modal.c) */
+    if (!end || m->kind == 3 || m->kind == 4 || modal_rows_of(m->w)) return m->height;
     void *wm = window_manager();
     for (void *p = m->w; p && P(p, W_PARENT) != wm; p = P(p, W_PARENT)) y += I(p, W_Y);
     return end - y < m->height ? end - y : m->height;
@@ -1218,9 +1225,11 @@ static int reconcile(menu_t *m, int settle) {
         }
     }
     cur = best >= 0 ? best : partial;
-    if (!had && cur >= 0) cur = pl_first(m, cur);
+    int to = !had && cur >= 0 ? pl_first(m, cur) : cur, moved = to != cur;
+    cur = to;
     st.reveal_surface = (void *)0;
     select(m, cur >= 0 ? m->id[cur] : -1);
+    if (moved) reveal(m, m->id[cur], 1); /* a playlist just made may be below the view */
     return cur;
 }
 
@@ -1360,7 +1369,7 @@ static int pull_event(void *page, void *event) {
             if (!tk_strcmp(widget_get_prop_str(page, "name", ""), "radio_page"))
                 radio_search();
             else
-                stock_search(page, event);
+                library_search_open(page, event);
         }
         return STOP;
     }
@@ -1759,6 +1768,96 @@ static void paint_songs(void *w, void *canvas) {
     }
 }
 
+/* Rows that can't play now (catalogue.c) carry the offline mark at their right: in the chevron's
+ * column, or just left of a chevron the row shows (every drill row's, or a chevron_sel theme's
+ * selected one). Its centre on row i of g_menu, surface coordinates. */
+static int into_image(void *w, int depth) {
+    for (unsigned k = 0, n = widget_count_children(w); k < n; ++k) {
+        void *c = widget_get_child(w, k);
+        if (!widget_get_visible(c)) continue;
+        if (!tk_strcmp(widget_get_prop_str(c, "image", ""), "list_into") ||
+            (depth > 1 && into_image(c, depth - 1)))
+            return 1;
+    }
+    return 0;
+}
+static int offline_x(void *w, int i, const rect_t *r) {
+    int sel = st.sel_w == w && i == st.sel_row;
+    /* the payload's chevrons (paint_chevrons), or stock's list_into, which shows on the selection
+     */
+    int chevron = (drill(w) || page_into(g_menu.at[i]))
+                      ? !theme()->chevron_sel || sel
+                      : sel && into_image(P(g_menu.at[i], W_PARENT), 2);
+    return r->x + r->w - CHEVRON_W + 25 - (chevron ? 28 : 0);
+}
+/* Before a list's rows paint: an album's songs (albuminfo_page; playerjumpinfo_page, Go to
+ * Album's; Cover Flow's tracks, where Go to Album goes with Artist View or Cover Flow open), Most
+ * Played's and the Ratings lists' songs (page_tracks) and Search's results are a scroll_view's
+ * rows, one per record in order (the showlist, the page's tracks or Search's results), not a
+ * table's, so each that can't play now is greyed here, as ringnav_table_load greys a table's.
+ * Then every greyed row's labels end short of its mark (catalogue_fit), and any it narrowed before
+ * take their width back. */
+/* Search's results while they show: p_deque_searchshowlist, which each of its tab_button_group's
+ * tabs (Songs, Artists, Albums, Genres) fills with its rows, the Songs tab's the list
+ * search_track_row_on_click plays from; *tab the lit one's index. 0 for none (its history). */
+static void *page_tracks(void *page);
+void *ringnav_search_rows(void *win, int *tab) {
+    void *tabs = win && !tk_strcmp(widget_get_prop_str(win, "name", ""), "search_dialog")
+                     ? widget_lookup(win, "tab_button_group", 1)
+                     : (void *)0;
+    for (int i = 0, n = tabs && widget_get_visible(tabs) ? widget_count_children(tabs) : 0; i < n;
+         ++i)
+        if (widget_get_prop_int(widget_get_child(tabs, i), "value", 0))
+            return *tab = i, P(p_deque_searchshowlist, 0);
+    return (void *)0;
+}
+static void grey_rows(void *w) {
+    if ((catalogue_source != 1 && !catalogue_greys()) || !kind(w) || !load_rows(&g_menu, w)) return;
+    void *win = window_of(w), *list = (void *)0;
+    int tab = 0; /* Search's lit tab: 0 Songs */
+    const char *page = widget_get_prop_str(win, "name", "");
+    if (g_menu.kind == 1 && catalogue_source == 1)
+        list = !tk_strcmp(page, "albuminfo_page") || !tk_strcmp(page, "playerjumpinfo_page")
+                   ? P(p_deque_showlist, 0)
+                   : page_tracks(win);
+    if (!list && g_menu.kind == 1 && catalogue_source == 1) list = ringnav_search_rows(win, &tab);
+    if (list && deque_size(list) != (unsigned)g_menu.rows) list = (void *)0;
+    for (int i = 0; i < g_menu.n; ++i) {
+        if (list) catalogue_mark(g_menu.at[i], deque_at(list, (unsigned)g_menu.id[i]), tab);
+        rect_t r = bounds(&g_menu, i);
+        if (2 * r.w >= I(w, W_W))
+            catalogue_fit(g_menu.at[i], w,
+                          offline_x(w, i, &r) - 14 + (g_menu.kind == 1 ? I(w, SCROLL_X) : 0));
+    }
+}
+
+/* After the rows: each greyed row's mark, in its text's colour as last painted. */
+static void paint_offline(void *w, void *canvas) {
+    rect_t old;
+    unsigned ink;
+    if (!catalogue_greys() || !kind(w) || !P(canvas, CANVAS_LCD) || !load_rows(&g_menu, w) ||
+        !clip_surface(canvas, &g_menu, &old))
+        return;
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+    for (int i = 0; i < g_menu.n; ++i) {
+        rect_t r = bounds(&g_menu, i);
+        if (2 * r.w >= I(w, W_W) && catalogue_row_ink(g_menu.at[i], &ink))
+            catalogue_mark_paint(canvas, offline_x(w, i, &r), r.y + r.h / 2, ink);
+    }
+    stock_canvas_set_fill_color(canvas, fill);
+    canvas_set_clip_rect(canvas, &old);
+}
+
+/* An open inset modal's rows' symbols and values (menu_modal.c), over its selection bar. */
+static void paint_modal_rows(void *w, void *canvas) {
+    if (!modal_rows_of(w) || !P(canvas, CANVAS_LCD) || !load_rows(&g_menu, w)) return;
+    for (int i = 0; i < g_menu.n; ++i) {
+        rect_t r = bounds(&g_menu, i);
+        if (r.y + r.h > 0 && r.y < I(w, W_H))
+            modal_row_paint(w, canvas, g_menu.at[i], r, st.sel_w == w && i == st.sel_row);
+    }
+}
+
 /* Writes v (under 1000) in decimal to s; returns the digits written. */
 unsigned put_num(unsigned *s, unsigned v) {
     unsigned n = 0;
@@ -1798,7 +1897,7 @@ static int own_order(const char *page) {
     if (!tk_strcmp(page, "allmusic_page")) {
         int cls = I(g_class_type, 0), sort = I(g_sort_flag, 0);
         return (cls >= 0xf007 && cls <= 0xf009) || (cls == 0xff13 && I(g_playlistsort_flag, 0)) ||
-               (cls == 0xf001 && (sort == 3 || sort == 4));
+               (cls == 0xf001 && (sort == 3 || sort == 4 || song_sort_own()));
     }
     return !tk_strcmp(page, "albuminfo_page") || !tk_strcmp(page, "playerjumpinfo_page") ||
            !tk_strcmp(page, "upnext_page") || !tk_strcmp(page, "chapters_page") ||
@@ -2063,6 +2162,10 @@ static int marq_moved(const void *info) {
  * end), and runs at HSCROLL_PACE at most (or at it, for a label with no speed, which would cover
  * any length in its duration). Stock's start does nothing for a running label. */
 int ringnav_hscroll_start(void *w) {
+    if (np_marq_owns(w)) { /* Now Playing's lines move together (np_marquee.c), from rest */
+        np_marq_reset();
+        return 0;
+    }
     unsigned speed = (unsigned)I(w, HSCROLL_SPEED);
     I(w, HSCROLL_DELAY) = MARQUEE_HOLD_MS;
     if (!speed || speed > HSCROLL_PACE) I(w, HSCROLL_SPEED) = HSCROLL_PACE;
@@ -2111,7 +2214,9 @@ unsigned ringnav_hscroll_lull(void *w, int (*lulled)(const void *), unsigned ms)
  */
 #define BAR_ROWS geom_val(V_BAR)
 enum { FORM_NONE, FORM_PAGE, FORM_TRAY };
-static int dialogs_painted(void) { return theme()->painter[PAINT_CONFIRM] != CONFIRM_STOCK; }
+static int dialogs_painted(void) {
+    return theme()->painter[PAINT_CONFIRM] == CONFIRM_CLASSIC_LIGHT;
+}
 /* The confirm's form: the tray for the prompt confirm_over asked for, the page for any other. The
  * first confirm painted after the call takes the flag, so a prompt stock opens over it (a held
  * power key) stays a question. */
@@ -2369,6 +2474,10 @@ static void hold_paint(void *w, void *canvas, int over) {
 #define TOAST_LINE 24
 #define TOAST_PX 22
 static void toast_paint(void *w, void *canvas) {
+    if (feedback_oled()) {
+        feedback_toast_paint(w, canvas); /* OLED's pill */
+        return;
+    }
     if (!w || P(w, W_PARENT) != window_manager() || !dialogs_painted()) return;
     const char *name = widget_get_prop_str(w, "name", "");
     int qr = !tk_strcmp(name, "showsn_dialog");
@@ -2417,15 +2526,18 @@ static void paint_selection(void *w, void *canvas) {
     void *top = window_manager_get_top_window(window_manager());
     int i, shown = !st.touch_mode;
     void *own = window_of(w);
-    if (own && own != top && slides(top)) {
-        /* The page under a sliding one, painted into the animator's snapshot: draw the row it
-         * holds. Loading, recall and settling read the top page's state, so none of it runs.
-         * A pending untouch is a Return by button, which shows the row of the page behind. Home's
-         * carousel shows its selected card, as below. */
+    int under = own && own != top && modal_win(top); /* the row an inset modal acts on */
+    if (own && own != top && (slides(top) || feedback_toast(top) || under)) {
+        /* The page under a sliding one, painted into the animator's snapshot, or under OLED's
+         * toast, which leaves the page in sight: draw the row it holds. Loading, recall and
+         * settling read the top page's state, so none of it runs. A pending untouch is a Return by
+         * button, which shows the row of the page behind. Home's carousel shows its selected card,
+         * as below. Under an inset modal the row shows, dimmed with the page: it names what the
+         * menu acts on. */
         if (!usable() || !load_rows(&g_menu, w) || g_menu.kind == 3) return;
         i = index_of(&g_menu, widget_get_prop_int(w, SEL, -1));
         top = own;
-        if (st.untouch_timer) shown = 1;
+        if (st.untouch_timer || under) shown = 1;
     } else {
         if (surface((void *)0, (void *)0) != w) return;
         if (!load(&g_menu, w, !pointer_down())) {
@@ -2480,7 +2592,7 @@ static void paint_selection(void *w, void *canvas) {
         r.h = I(speed, W_H);
         tile = 0;
     }
-    if (!tile) {
+    if (!tile && !modal_rows_of(g_menu.w)) { /* an inset modal's rows keep the panel's */
         r.x = 0;
         r.w = I(g_menu.w, W_W);
         /* The Library's row is a button over the top BODY of its pitch: the bar takes the whole
@@ -2569,8 +2681,9 @@ static void paint_selection(void *w, void *canvas) {
         rearm(&st.marq_timer, marq_moved, 0);
     }
     /* a pop-up button's tile: framed white on any accent; Classic's band has its own top line and
-     * edge, as an iPod's */
-    if (g_menu.kind == 4 && r.w < I(g_menu.w, W_W) && painter != SEL_STOPS)
+     * edge, as an iPod's. An inset modal's row is no tile (menu_modal.c). */
+    if (g_menu.kind == 4 && r.w < I(g_menu.w, W_W) && painter != SEL_STOPS &&
+        !modal_rows_of(g_menu.w))
         frame_box(canvas, &r, 0xffffffff, SEL_RADIUS);
     /* Save/restore explicitly: this firmware's canvas_save/restore cover neither clip nor
      * either color, and the global alpha is deliberately never touched. */
@@ -2583,8 +2696,16 @@ static void paint_selection(void *w, void *canvas) {
  * across the list. A row's two_lines is a few words of its children, on a pool of a few rows. A
  * page_list's rows are the view's own children, each page_detail high and named so, and every stock
  * scroll view comes here too: no walk, the screenful from the top's index, a name read only at that
- * height. Minimal stops at its empty sep. */
+ * height. Minimal stops at its empty sep. A theme with a divider (list.divider.ink) draws it under
+ * each two-line row followed by another, on the text and right columns, on neither edge of the
+ * selected row, a table's and a page_list's alike. */
 static int two_lines(void *row);
+/* A page_list's two-line row (coverflow.c page_row_detail): page_detail high, a label for its
+ * title and one for its second line (a stock row of that height, Streaming's, holds a button). */
+static int page_two(void *row) {
+    return I(row, W_H) == theme()->page_detail && widget_count_children(row) >= 2 &&
+           !tk_strcmp(widget_get_type(widget_get_child(row, 1)), "hscroll_label");
+}
 static void paint_separators(void *w, void *canvas) {
     rect_t old;
     int clip[4];
@@ -2610,6 +2731,23 @@ static void paint_separators(void *w, void *canvas) {
             rect_t r = bounds(&g_menu, i);
             if (i != sel && i + 1 != sel && r.h > geom(G_PITCH))
                 canvas_fill_rect(canvas, x, r.y + r.h - 1, end - x, 1);
+        }
+    } else if (div) { /* a page_list's two-line rows (Era, View Queue, Ratings): the same divider */
+        int top = I(w, SCROLL_Y), n = (int)widget_count_children(w), lit = -1,
+            first = top > 0 ? top / T->page_detail : 0, x = geom_val(V_TEXT_X),
+            end = I(w, W_W) - geom_val(V_RIGHT_X);
+        for (int i = first; sel_child && i < n && lit < 0; ++i) {
+            void *row = widget_get_child(w, i);
+            if (row == sel_child || P(sel_child, W_PARENT) == row) lit = i;
+        }
+        stock_canvas_set_fill_color(canvas, RGBA(div));
+        for (int i = first; i + 1 < n; ++i) {
+            void *row = widget_get_child(w, i), *next = widget_get_child(w, i + 1);
+            int y = I(row, W_Y) - top, rh = I(row, W_H);
+            if (y >= I(w, W_H)) break;
+            if (i != lit && i + 1 != lit && page_two(row) && page_two(next) &&
+                widget_get_visible(row) && widget_get_visible(next))
+                canvas_fill_rect(canvas, x, y + rh - 1, end - x, 1);
         }
     } else if (k == 2) {
         for (int i = 0; i < g_menu.n; ++i)
@@ -2665,6 +2803,15 @@ static void paint_radio(void *w, void *canvas) {
             return;
         }
         if (tk_strcmp(image, "select")) return;
+        /* settings.values.switch: the theme's 12 px check ending on the image's right end, the
+         * right column (docs/oled-design.md Pickers), the accent's, white on the selection */
+        if (theme()->set_switch) {
+            unsigned bitmap[64]; /* bitmap_t: width @0 */
+            if (!widget_load_image(w, theme_art(painting_in(st.sel_accent) ? "check_w" : "check_a"),
+                                   bitmap))
+                canvas_draw_icon(canvas, bitmap, I(w, W_W) - (int)bitmap[0] / 2, I(w, W_H) / 2);
+            return;
+        }
         stock_canvas_set_fill_color(canvas,
                                     RGBA(painting_in(st.sel_accent) ? S->sel_text : S->ink));
         paint_tick(canvas, x, y);
@@ -2712,6 +2859,29 @@ static void paint_radio(void *w, void *canvas) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
+/* A set_switch theme's Gain row (docs/oled-design.md List row): stock's gain_high or gain_low
+ * switch, which the image hook empties, read as a key/value row's value, High or Low, in the
+ * theme's value grey (set_value_ink), white on the selection, its text ending on the image's right
+ * end, which set_row puts on the right column as a value's. */
+#define GAIN_VALUE_END                                                                             \
+    1 /* the text's right end this far inside the image's, as a value label's                      \
+       */
+static void paint_gain(void *w, void *canvas, int high, int selected) {
+    static const unsigned hi[] = { 'H', 'i', 'g', 'h' }, lo[] = { 'L', 'o', 'w' };
+    const unsigned *s = high ? hi : lo;
+    unsigned n = high ? 4 : 3, ink = theme()->set_value_ink[ipod_light()];
+    int px = theme()->font_px[ROLE_TITLE];
+    const char *face = theme_face(s, (int)n, &px);
+    canvas_set_font(canvas, face, (unsigned)px);
+    int wide = (int)(canvas_measure_text(canvas, s, n) + 0.5f) + 2;
+    rect_t r = { I(w, W_W) - GAIN_VALUE_END - wide, 0, wide, I(w, W_H) };
+    unsigned raw = st.raw_ink;
+    st.raw_ink = 1; /* final in each half, as the value labels' text_ink */
+    draw_in_face(canvas, face, s, n, &r, (unsigned)px,
+                 selected || !ink ? 0xffffffffu : 0xff000000u | ink);
+    st.raw_ink = raw;
+}
+
 /* Light Mode: stock's own `>` (a list_into image) on the coloured bar or card's row, drawn again
  * white over the selection's colour, as paint_chevrons draws the payload's. A chevron_sel theme's
  * stock image is empty (ringnav_image_add), so this is its only one, in either half, over nothing
@@ -2722,9 +2892,35 @@ static void paint_into(void *w, void *canvas) {
     int box = w ? theme()->chevron_x : 0;
     /* CHEV_ICON: stock's is empty on every row, and each row's own stands on the right column */
     if (w && theme()->painter[PAINT_CHEVRON] == CHEV_ICON) {
-        if (P(canvas, CANVAS_LCD) && !tk_strcmp(widget_get_prop_str(w, "image", ""), "list_into"))
+        const char *image = P(canvas, CANVAS_LCD) ? widget_get_prop_str(w, "image", "") : "";
+        if (!image) image = ""; /* a widget whose image isn't a string */
+        /* a set_switch theme's switch, whose art the image hook empties: on the box's right end
+         * (the set's right column on a settings row) */
+        int sw = !theme()->set_switch || image[0] != 's' ? -1
+                 : !tk_strcmp(image, "switch_on")        ? 1
+                 : !tk_strcmp(image, "switch_off")       ? 0
+                                                         : -1;
+        int gain = sw >= 0 || !theme()->set_switch || image[0] != 'g' ? -1
+                   : !tk_strcmp(image, "gain_high")                   ? 1
+                   : !tk_strcmp(image, "gain_low")                    ? 0
+                                                                      : -1;
+        int sig =
+            sw < 0 && gain < 0 && theme()->set_switch && image[0] == 'w' ? wifi_sig(image) : 0;
+        if (sig) {
+            wifi_mark(w, canvas, sig, st.sel_accent && painting_in(st.sel_accent));
+            return;
+        }
+        if (sw >= 0 && widget_get_visible(w))
+            switch_mark(canvas, I(w, W_W), I(w, W_H) / 2, sw,
+                        st.sel_accent && painting_in(st.sel_accent));
+        else if (gain >= 0 && widget_get_visible(w))
+            paint_gain(w, canvas, gain, st.sel_accent && painting_in(st.sel_accent));
+        else if (!tk_strcmp(image, "list_into"))
             chevron_icon(w, canvas, 375 - geom_val(V_RIGHT_X) - I(canvas, CANVAS_X), I(w, W_H) / 2,
                          st.sel_accent && painting_in(st.sel_accent));
+        else if (!tk_strcmp(image, "list_intodown"))
+            chevron_muted(w, canvas, 375 - geom_val(V_RIGHT_X) - I(canvas, CANVAS_X),
+                          I(w, W_H) / 2);
         return;
     }
     if (!w || !(ipod_light() || sel_only) || !st.sel_accent || !P(canvas, CANVAS_LCD) ||
@@ -2779,9 +2975,10 @@ static void paint_scrollbar(void *canvas, void *bar, int table) {
         if (!a || !lcd || max <= 0) return;
         value = value < 0 ? 0 : value > max ? max : value;
         while (max >> 22) max >>= 1, value >>= 1;
-        int at = track * value / max, len = track * h / max;
+        int at = track * value / max, len = track * h / max, right = modal_sb_right(list, T->sb_w);
         if (len > track - at) len = track - at;
-        rect_t t = { I(list, W_W) - T->sb_right - T->sb_w, T->sb_top - y0, T->sb_w, track },
+        if (right < 0) right = T->sb_right; /* an inset modal's: in its panel */
+        rect_t t = { I(list, W_W) - right - T->sb_w, T->sb_top - y0, T->sb_w, track },
                thumb = { t.x, t.y + at, t.w, len };
         unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), L = ipod_light();
         for (int i = 0; i < t.h; ++i)
@@ -2844,6 +3041,7 @@ int ringnav_paint(void *w, void *canvas) {
     battery_paint(w, canvas);
     visualizer_paint(w, canvas);
     games_paint(w, canvas);
+    search_strip_paint(w, canvas);
     /* Even a page with no navigable pane must end pending input when it is painted. */
     if (st.center_timer || st.home_surface) {
         void *wm = window_manager(), *top = window_manager_get_top_window(wm);
@@ -2851,8 +3049,13 @@ int ringnav_paint(void *w, void *canvas) {
         if (!carousel_page(top)) st.home_surface = (void *)0;
     }
     paint_chevrons(w, canvas);
+    paint_offline(w, canvas);
     paint_radio(w, canvas);
     paint_into(w, canvas);
+    if (st.rt_page) rate_hearts_paint(w, canvas);
+    if (w && P(w, W_PARENT) &&
+        (P(w, W_PARENT) == stream_mark_views[0] || P(w, W_PARENT) == stream_mark_views[1]))
+        stream_mark_paint(w, canvas);
     paint_letter(w, canvas);
     paint_cover(w, canvas);
     paint_scrubber(w, canvas);
@@ -2867,6 +3070,7 @@ int ringnav_paint(void *w, void *canvas) {
     }
     paint_caps(w, canvas);
     if (theme()->marquee_fade) marquee_fade(w, canvas);
+    if (w && w == slider_page_win) slider_page_paint(w, canvas);
     if (w && w == st.np_win) np_modes(w, canvas);
     hold_paint(w, canvas, 1);
     coverflow_home_clip(w, canvas, 0);
@@ -2920,9 +3124,10 @@ static void *list_row_into(void *view, const char *icon, int (*click)(void *, vo
 
 /* Use the same trailing switch images and hit target as Shanling's settings rows: at screen x 302
  * whether the label sits in a settings button (x 20) or a full-width page row (page_row_detail,
- * peq_ui.c's). */
+ * peq_ui.c's). A set_text theme writes On or Off as the row's value instead, unless it is also
+ * set_switch, whose switch paint_into draws over the emptied image. */
 void list_toggle(void *label, const char *title, int on) {
-    if (theme()->set_text) {
+    if (theme()->set_text && !theme()->set_switch) {
         list_value(label, title, on ? "On" : "Off");
         return;
     }
@@ -2941,7 +3146,8 @@ void list_toggle(void *label, const char *title, int on) {
 }
 
 /* Classic's settings rows (set_text): the title left and the value right-aligned in the
- * trailing column, the title ending short of it. Switches read On or Off as values. */
+ * trailing column, the title ending short of it. Switches read On or Off as values, except on a
+ * set_switch theme (list_toggle). */
 /* On a set with a right column: the value's box ends on it, or VALUE_CHEVRON_GAP short of it on a
  * row that opens a page (its chevron is there), and the title takes the row up to the value's own
  * text, measured in its face; unmeasured (no canvas yet), the boxes stay as made. */
@@ -3340,7 +3546,8 @@ static int *const pod_values[] = { &st.charge_limit,
                                    &st.big_library,
                                    &st.playlist_cf,
                                    &st.scan_durations,
-                                   &st.cf_position };
+                                   &st.cf_position,
+                                   &catalogue_source };
 _Static_assert(POD_LOCKCLOCK == 6, "lockscreen.c passes pod_rows 6");
 _Static_assert(sizeof pod_values / sizeof *pod_values == POD_COUNT, "a pod_values per row");
 static const char *const pod_keys[] = { "CHARGELIMIT",
@@ -3366,7 +3573,8 @@ static const char *const pod_keys[] = { "CHARGELIMIT",
                                         "BIGLIBRARY",
                                         "PLAYLISTCF",
                                         "SCANDURATIONS",
-                                        "CFPOSITION" };
+                                        "CFPOSITION",
+                                        "LIBRARYSOURCE" };
 _Static_assert(sizeof pod_keys / sizeof *pod_keys == POD_COUNT, "a pod_keys entry per row");
 /* a row's choices: Artist albums three, Standby limit four, every other row two */
 static int pod_choices(unsigned i) { return i == POD_ARTIST_CF ? 3 : i == POD_STANDBY ? 4 : 2; }
@@ -3463,7 +3671,7 @@ static void pod_text(int i) {
         { 0 }, /* Coverflow Sort's from coverflow.c */
         { "Refresh Cover Flow" },
         { 0 }, /* EQ per Output: a switch */
-        { 0 }, /* Key Tone: a switch */
+        { 0 }, /* Key Tone: the Clicker's (clicker.c) */
         { 0 }, /* In-Vehicle Mode: a switch */
         { 0 }, /* Smart Wi-Fi: a switch */
         { 0 }, /* Enlarged Album Art: a switch */
@@ -3472,26 +3680,31 @@ static void pod_text(int i) {
         { "Playlist View: List", "Playlist View: Cover Flow" },
         { 0 }, /* Scan Song Durations: a switch */
         { 0 }, /* Position Bar: a switch */
+        { "Library: Local Only", "Library: Local + Server" },
     };
     _Static_assert(sizeof names / sizeof *names == POD_COUNT, "a names entry per row");
+    if (i == POD_KEYTONE) { /* the Clicker, Key Tone's row */
+        widget_set_text_utf8(st.pod_label[i], clicker_text());
+        return;
+    }
     if (i == POD_CF_SORT) {
         char sort[48];
         tk_snprintf(sort, sizeof sort, "Cover Flow %s", coverflow_sort_name());
-        widget_set_text_utf8(st.pod_label[i], sort);
+        row_value_text(st.pod_label[i], sort); /* key/value on a set with a right column */
         return;
     }
     int v = i == POD_ARTISTS       ? I(artist_type, 0) == 1
-            : i == POD_KEYTONE     ? g_keytone_flag != 0
             : i == POD_CARMODE     ? g_carmode != 0
             : i == POD_COVERMODE   ? g_bigcovermode == 1
             : i == POD_FOLDERCOVER ? g_foldercover_flag != 0
             : pod_values[i]        ? *pod_values[i]
                                    : 0;
-    const char *toggle = i == POD_CHARGE           ? "Charge Limit (" STR(CHARGE_STOP) "%)"
+    /* a set_switch theme's Charge Limit is a key/value row, Off or its level, as names[] has it */
+    const char *toggle = i == POD_CHARGE && theme()->set_switch ? 0
+                         : i == POD_CHARGE         ? "Charge Limit (" STR(CHARGE_STOP) "%)"
                          : i == POD_RESUME         ? "Resume on Connect"
                          : i == POD_VOL_GUARD      ? "Volume Guard"
                          : i == POD_BT_LINK        ? "Control Device Volume"
-                         : i == POD_KEYTONE        ? "Key Tone"
                          : i == POD_CARMODE        ? "In-Vehicle Mode"
                          : i == POD_SMART_WIFI     ? "Smart Wi-Fi"
                          : i == POD_COVERMODE      ? "Enlarged Album Art"
@@ -3505,7 +3718,6 @@ static void pod_text(int i) {
     else
         row_value_text(st.pod_label[i], names[i][v]);
     /* Stock's rows, so stock's translations */
-    if (i == POD_KEYTONE) widget_set_tr_text(st.pod_label[i], "system_keytone");
     if (i == POD_CARMODE) widget_set_tr_text(st.pod_label[i], "system_carmode");
     if (i == POD_COVERMODE) widget_set_tr_text(st.pod_label[i], "playset_covermode");
     if (i == POD_FOLDERCOVER) widget_set_tr_text(st.pod_label[i], "playset_foldercover");
@@ -3529,12 +3741,7 @@ static int pod_click(void *ctx, void *event) {
         I(artist_type, 0) = v;
         write_int_config(v, "PLAYSET", "ARTISTTYPE");
     } else if (i == POD_KEYTONE) {
-        g_keytone_flag = !g_keytone_flag;
-        write_int_config(g_keytone_flag, "SYSSET", "KEYTONE");
-        /* Click With Headphones, built just after this row on Controls, shows while it is on. */
-        void *item = P(P(st.setting_label[9], W_PARENT), W_PARENT);
-        widget_set_visible(item, g_keytone_flag != 0, 0);
-        widget_layout(P(item, W_PARENT));
+        clicker_step(); /* the Clicker's next value; Off is Key Tone off */
     } else if (i == POD_CARMODE) {
         g_carmode = !g_carmode;
         write_int_config(g_carmode, "SYSSET", "CARMODE");
@@ -3551,6 +3758,7 @@ static int pod_click(void *ctx, void *event) {
         write_int_config(*value, "Q2POD", pod_keys[i]);
         if (i == POD_SCAN_DURATIONS && !*value) durations_cancel();
         if (i == POD_CF_POSITION) coverflow_position_reset();
+        if (i == POD_LIBRARY_SOURCE) catalogue_changed();
         st.charge_at = 0;
         /* Control Device Volume: off, stock's gain back at once; on, bt_volume_poll's next pass
          * sends the Q2's level to the device. */
@@ -3587,6 +3795,7 @@ int ringnav_powermanager(void *win, void *ctx) {
         widget_set_text_utf8(list_row_into(view, "system_powermanager", battery_history, 0),
                              "Battery History");
     boot_row(view);
+    power_rows(view); /* Restart and Shut Down, last */
     return result;
 }
 /* The Bluetooth page's list (stock's local builder, btmenu_rows), rebuilt whole on every search and
@@ -4544,6 +4753,7 @@ int ringnav_table_load(void *ctx, unsigned index, void *row) {
     int ret =
         ((int (*)(void *, unsigned, void *))P(P(row, W_PARENT), TABLE_LOAD_DATA))(ctx, index, row);
     row_faces(row);
+    catalogue_bind(row, index); /* greyed when it is a server row that can't play now */
     return ret;
 }
 
@@ -4576,15 +4786,17 @@ static int settle_poll(const void *info) {
     return 0;
 }
 
-/* Commits a target the wheel moved, unless the playing track changed since the scrub began; the
- * fill comes back, and the page's timer once the player is there (settle_poll), unless the page is
- * gone. */
+/* Commits a target the wheel moved, unless the playing track changed since the scrub began: a
+ * playing track's last seek if the player isn't there yet (seek_scrub_end), a paused one's only
+ * seek. The fill comes back, and the page's timer once the player is there (settle_poll), unless
+ * the page is gone. */
 static void scrub_end(void) {
     if (!st.scrub) return;
     st.scrub = 0;
     stop_timer(&st.scrub_timer);
     int seek = st.scrub_moved && np_track() == st.scrub_track;
-    if (seek) st.held_sec = seek_position(st.scrub_to);
+    /* playing, the player followed the target (seek_scrub) and goes to it now if it isn't there */
+    if (!seek_scrub_end(st.scrub_to, seek) && seek) st.held_sec = seek_position(st.scrub_to);
     st.scrub_moved = 0;
     if (!st.np_win) return;
     np_fill(0);
@@ -4856,18 +5068,46 @@ static int np_lyrics(unsigned key) {
     return 1;
 }
 
+static void np_stage(unsigned stage);
 static void np_cancel(void) {
     unsigned settle = st.settle_timer; /* an earlier scrub's wait; the one scrub_end arms stays */
     stop_timer(&st.np_press);
+    np_stage(NP_STAGE_REST);
     scrub_end();
     if (!settle) return;
     stop_timer(&st.settle_timer);
     if (st.np_win) playing_timer_start(st.np_win);
 }
 
+/* A hold of Previous or Next scans the track (seek.c): phase 0 as it starts, which ends a scrub
+ * under way and stops the bar's own timer as a scrub does; 1 at each jump, the bar and times on the
+ * target; 2 at the release or an end, where a paused track gets its one seek and stays paused
+ * (seek_position) and the bar holds the target until the player has it, as after a scrub
+ * (settle_poll). */
+void np_seek_bar(int phase, int to, int paused) {
+    if (phase == 0) {
+        scrub_end();
+        stop_timer(&st.settle_timer);
+    }
+    if (phase == 2) {
+        st.scrub_to = to;
+        st.scrub_track = np_track();
+        if (paused) st.held_sec = seek_position(to);
+        st.settle_played = 0;
+        if (st.np_win) rearm(&st.settle_timer, settle_poll, SETTLE_MS);
+        return;
+    }
+    if (!st.np_win || !st.np_slider) return;
+    playing_timer_clear(st.np_win);
+    if (phase != 1) return;
+    widget_set_prop_int(st.np_slider, "value", to);
+    clock_text(st.np_elapsed, 0, to);
+    np_sync(st.np_win);
+}
+
 /* A single centre press, DOUBLE_CLICK_MS on, never while scrubbing (with Single Press Scrub, a
- * double press): it replays the release to stock on_wm_keyup_fun, which turns the screen off (it
- * reads only the event's key). */
+ * short hold, np_centre): it replays the release to stock on_wm_keyup_fun, which turns the screen
+ * off (it reads only the event's key). */
 static int np_single(const void *info) {
     static const unsigned release[EVENT_KEY / 4 + 1] = { [EVENT_KEY / 4] = KEY_CENTER };
     st.np_press = 0;
@@ -4909,34 +5149,81 @@ static void scrub_start(void) {
     rearm(&st.scrub_timer, scrub_expire, SCRUB_MS);
 }
 
-/* Single Press Scrub (IPOD SCRUBSINGLE)'s single press, DOUBLE_CLICK_MS on: scrub starts. */
-static int np_scrub(const void *info) {
-    st.np_press = 0;
-    if (g_backlight_status) scrub_start();
+/* The Centre cycle's shuffle or repeat stage (NP_STAGE_*), or rest: np_modes rings the control
+ * the wheel sets, and NP_STAGE_MS without a key ends it. */
+#define NP_STAGE_MS SCRUB_MS
+static int np_stage_end(const void *info) {
+    st.np_stage_timer = 0;
+    np_stage(NP_STAGE_REST);
     return 0;
 }
+static void np_stage(unsigned stage) {
+    if (stage != NP_STAGE_REST)
+        rearm(&st.np_stage_timer, np_stage_end, NP_STAGE_MS);
+    else
+        stop_timer(&st.np_stage_timer);
+    if (st.np_stage == stage) return;
+    st.np_stage = stage;
+    void *mode = st.np_win ? widget_lookup(st.np_win, "img_playmode", 1) : (void *)0;
+    if (mode) widget_invalidate_force(mode, (void *)0);
+}
 
-/* Centre and, while scrubbing, the wheel on the top Now Playing page. A centre press waits
- * DOUBLE_CLICK_MS: a second one starts scrub, else it turns the screen off as anywhere else; with
- * Single Press Scrub the two swap, so a double press turns the screen off as on the lists. While
- * scrubbing one press ends it at once (center_press). The wheel moves the target SCRUB_STEP
- * seconds times the WHEEL_RAMP_MS ramp, within the track, and only previews it: the seek waits
- * for the scrub to end. Neither the volume nor its dialog sees the wheel. */
+/* Single Press Scrub's Centre (IPOD SCRUBSINGLE, on unless chosen off), an iPod classic's: each
+ * press shows the next control the wheel sets, scrubber, shuffle, repeat, rating, then back to
+ * rest, where the wheel is the volume's (Apple's iPod classic guide: scrubber, Genius, shuffle,
+ * rating, lyrics). The scrub's own press ends it (scrub_end seeks) and goes on to shuffle; the
+ * rating picker's Centre saves and closes it (rate_key; a modal set's picker, ratings.c
+ * rate_modal), back at rest. Shuffle and repeat have no picker of their own: the theme's pair
+ * rings the one the wheel steps (np_modes); under a theme without the pair the cycle skips them. A
+ * press held NP_HOLD_MS or longer, short of stock's long press (Shut Down), turns the screen off
+ * instead, as stock's release does. */
+#define NP_HOLD_MS 400
+static int np_centre(unsigned now) {
+    int held = st.center_down_at && now - st.center_down_at >= NP_HOLD_MS;
+    st.center_down_at = 0; /* this press's: a release with no press stamped is a press */
+    if (held && !st.scrub) {
+        np_cancel();
+        np_single((void *)0);
+        return STOP;
+    }
+    if (st.scrub) {
+        scrub_end();
+        if (theme()->np_modes)
+            np_stage(NP_STAGE_SHUFFLE);
+        else if (!rate_open())
+            np_stage(NP_STAGE_REST);
+    } else if (st.np_stage == NP_STAGE_SHUFFLE)
+        np_stage(NP_STAGE_REPEAT);
+    else if (st.np_stage == NP_STAGE_REPEAT) {
+        np_stage(NP_STAGE_REST);
+        rate_open();
+    } else
+        scrub_start();
+    return STOP;
+}
+
+/* Centre and, while scrubbing or in the Centre cycle, the wheel on the top Now Playing page. With
+ * Single Press Scrub, np_centre. Without, a centre press waits DOUBLE_CLICK_MS: a second one
+ * starts scrub, else it turns the screen off as anywhere else; while scrubbing one press ends it
+ * at once (center_press). While scrubbing the wheel moves the target SCRUB_STEP seconds times the
+ * WHEEL_RAMP_MS ramp, within the track; a playing track follows it, at most a seek every
+ * SCRUB_SEEK_MS (seek.c seek_scrub), a paused one only at the end. In the cycle's shuffle or
+ * repeat stage a tick steps that control. Neither the volume nor its dialog sees the wheel. */
 static int np_key(void *top, unsigned key) {
     unsigned now = (unsigned)time_now_ms();
     if (key == KEY_CENTER) {
-        int one = (accent(), st.scrub_single);
-        int press =
-            center_press(&st.np_press, &st.np_press_at, one ? np_scrub : np_single, st.scrub);
-        if (one && !press) /* an overdue single press just started a scrub: this one ends it */
-            press = 2, st.np_press_at = now;
+        if ((accent(), st.scrub_single)) return np_centre(now);
+        int press = center_press(&st.np_press, &st.np_press_at, np_single, st.scrub);
         if (press != 2) return press ? STOP : 0;
         if (st.scrub) /* one press ends a scrub */
             scrub_end();
-        else if (one)
-            np_single((void *)0);
         else
             scrub_start();
+        return STOP;
+    }
+    if (st.np_stage != NP_STAGE_REST && !st.scrub) {
+        np_mode_step(st.np_stage == NP_STAGE_REPEAT, key == KEY_NEXT ? 1 : -1);
+        np_stage(st.np_stage); /* its timeout from this tick */
         return STOP;
     }
     if (np_track() != st.scrub_track) { /* a new track: scrub_end drops the last one's target */
@@ -4949,6 +5236,7 @@ static int np_key(void *top, unsigned key) {
     int to = clamp_step(st.scrub_to, widget_get_prop_int(st.np_slider, "max", 0), dir * step);
     if (to != st.scrub_to) st.scrub_moved = 1;
     st.scrub_to = to;
+    if (st.scrub_moved) seek_scrub(to); /* heard as it moves while the track plays */
     widget_set_prop_int(st.np_slider, "value", to);
     clock_text(st.np_elapsed, 0, to);
     np_sync(top);
@@ -4988,6 +5276,10 @@ static int np_gone(void *win, void *event) {
  * ponytail: one more decode per track change while the page is up, beside stock's own reload. */
 static unsigned np_art(const char **file) {
     unsigned at, n;
+    if ((*file = catalogue_np_cover())) /* a pressed server song's, while it loads: whenever */
+        return tk_strcmp(widget_get_prop_str(st.np_cover, "image", ""), *file) /* not shown */
+                   ? ~st.np_art
+                   : fnv(FNV_SEED, (const unsigned char *)*file);
     void *r = queue_now(&at, &n);
     unsigned char type = now_cover(r, file);
     unsigned written = now_cover_written(*file);
@@ -5095,6 +5387,7 @@ int ringnav_playing(void *win, void *ctx) {
     int result = stock_playing_trampoline(win, ctx);
     if (!win || result == STOP) return result;
     rate_bind(win);
+    np_glyphs_bind(win);
     /* np_gone leaves a replaced page's state alone: its Genre line is that page's. */
     stop_timer(&st.genre_timer);
     st.genre_label = (void *)0;
@@ -5112,10 +5405,14 @@ int ringnav_playing(void *win, void *ctx) {
     st.np_lrc = widget_lookup(win, "scroll_lrc", 1);
     st.lyric_song = st.lyric_rows_song = np_track(); /* no song change at the start */
     lyric_init();                                    /* the rows stock's init built */
+    np_marq_reset();
     void *lyric = widget_lookup(win, "view_lyric", 1);
     static const unsigned touch[] = { EVT_POINTER_DOWN, EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
     for (unsigned i = 0; lyric && i < sizeof touch / sizeof *touch; ++i)
         widget_on(lyric, touch[i], np_lyric_touch, (void *)0);
+    for (unsigned i = 0; i < sizeof touch / sizeof *touch; ++i)
+        widget_on(win, touch[i], np_time_tap, (void *)0); /* Track Time */
+    st.np_time_down = 0;
     st.np_hash = 0;
     const char *file;
     st.np_art = np_art(&file); /* stock's init loaded it */
@@ -5348,10 +5645,12 @@ static int slider_gone(void *win, void *event) {
     if (win == st.slider_win) st.slider_win = st.slider_w = st.slider_sw = (void *)0;
     return 0;
 }
-/* Crossfade's switch is hidden, so its image change repaints nothing: the tray, for crossfade.c. */
+/* Crossfade's switch is hidden, so its image change repaints nothing: the tray, for crossfade.c;
+ * a set_switch theme's switch row (slider_page_dirty). */
 void slider_tray_dirty(void *page) {
     rect_t tray = { 125, 28, 125, 44 };
     if (page && page == st.slider_win) widget_invalidate_force(page, &tray);
+    slider_page_dirty(page);
 }
 /* Max Volume's triangle moves past the slider's rect, inside the band. */
 static int slider_moved(void *win, void *event) {
@@ -5448,6 +5747,7 @@ static void slider_open(void *win) {
         s = widget_lookup(win, sliders[kind], 1);
     if (!s) return;
     slider_knobless(s); /* in every theme: the page's slider is a plain one */
+    if (theme()->set_switch) slider_page_open(win, s, kind - 1); /* OLED's one form */
     if (!classic_pages()) return;
     --kind;
     for (unsigned i = 0; i < sizeof hide / sizeof *hide; ++i)
@@ -5955,6 +6255,7 @@ static void quick_rows(void *win, void *canvas) {
  * ponytail: by position, any other non-button child above CONFIRM_TOP. */
 static void confirm_prompt(void *w, void *canvas) {
     if (tk_strcmp(widget_get_prop_str(w, "name", ""), "confirminfo_dialog")) return;
+    if (feedback_confirm_dress(w)) return; /* OLED's dialog page */
     int form = confirm_form(w);
     if (form) {
         confirm_dress(w, canvas, form);
@@ -6049,8 +6350,9 @@ static void *page_caption(void *win) {
     return first;
 }
 
-/* The bar title for window win: Now Playing, Coverflow and EQ by name; else 0, and *label is
- * a stock page's (hidden) navbar title, else a payload page's 48 px caption row (page_title). */
+/* The bar title for window win: Now Playing and EQ by name, Coverflow by its screen
+ * (coverflow_bar_title); else 0, and *label is a stock page's (hidden) navbar title, else a payload
+ * page's 48 px caption row (page_title). */
 static const char *bar_title_of(void *win, void **label) {
     const char *name = widget_get_prop_str(win, "name", "");
     /* a status row shows the clock on Now Playing (tools/ipod.py status_row) */
@@ -6061,7 +6363,11 @@ static const char *bar_title_of(void *win, void **label) {
     if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "localmusic_page")) return "Library";
     if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "allmusic_page") && I(g_class_type, 0) == 0xf001)
         return "Songs";
-    if (!tk_strcmp(name, "coverflow_page")) return "Cover Flow";
+    if (!tk_strcmp(name, "coverflow_page")) { /* its screen's own, else its caption row's */
+        const char *t = coverflow_bar_title(geom_val(V_STATUS_Y));
+        if (!t) *label = page_caption(win);
+        return t;
+    }
     if (!tk_strcmp(name, "equalizer_page")) return "EQ"; /* its 48 px row is the tabs' own label */
     if (!tk_strcmp(name, "spotify_page")) return "Spotify"; /* they hide their own name's label */
     if (!tk_strcmp(name, "radionp_page")) return "Internet Radio";
@@ -6132,6 +6438,9 @@ static void action_row(void *view) {
     widget_move_resize(play, 0, 0, 300, h);
     if (n < 3) return; /* Recently Added and the like have no Sort */
     void *sort = widget_get_child(view, 2);
+    /* the inset modal's hold menu holds Sort as its Sorting row (qm_sorts): the bars stay, hidden,
+     * for its click */
+    if (modal_set()) widget_set_visible(sort, 0, 0);
     widget_use_style(sort, "default");
     image_base_set_image(sort, "classic_light_sort_bars");
     image_set_draw_type(sort, IMAGE_DRAW_CENTER);
@@ -6181,7 +6490,10 @@ static int title_due(const void *info) {
  * characters (stock draws a character its face lacks as nothing). */
 void bar_title_sync(void *win) {
     /* a page under the top window that writes its caption would flip the bar with each paint */
-    if (!st.bar_title || !win || win != window_manager_get_top_window(window_manager())) return;
+    if (feedback_toast(win)) win = feedback_under(win); /* OLED's toast leaves the page in sight */
+    if (!st.bar_title || !win || win != feedback_top()) return;
+    /* an inset modal has no title: the page under it keeps its own, and its Songs action row */
+    if (modal_win(win)) return;
     static const unsigned none = 0;
     char s[256], now[256]; /* stock writes nothing unless all of it fits */
     /* Home names the list it shows; a status row names none of Home's own, and shows the clock */
@@ -6212,9 +6524,10 @@ void bar_title_sync(void *win) {
     if (!t) {
         *s = 0;
         if (st.title_lbl) widget_get_text_utf8(st.title_lbl, s, sizeof s);
-        t = !tk_strcmp(s, "Channel Balance") ? "Balance" /* English's only */
-            : !tk_strcmp(s, "(null)")        ? ""        /* stock's "%s" of a NULL name: no title */
-                                             : s;
+        /* English's only, for a bar too narrow for it; a status row's title has the room */
+        t = !geom_val(V_STATUS_Y) && !tk_strcmp(s, "Channel Balance") ? "Balance"
+            : !tk_strcmp(s, "(null)") ? "" /* stock's "%s" of a NULL name: no title */
+                                      : s;
     }
     if (widget_get_text_utf8(st.bar_title, now, sizeof now) || tk_strcmp(now, t)) {
         widget_set_text_utf8(st.bar_title, t);
@@ -6230,13 +6543,15 @@ void bar_title_sync(void *win) {
 }
 
 /* A page_title's caption was an empty page's message, and the bar holds captions: the message stays
- * the first line, and the bar reads name, the page's, from the hidden label. */
+ * the first line (OLED's is a note centred under the status row, feedback_empty), and the bar reads
+ * name, the page's, from the hidden label. */
 void page_empty(void *body, const char *name) {
     if (theme()->page_title_h) return;
     char message[64];
     void *caption = widget_get_child(body, 0);
     if (widget_get_text_utf8(caption, message, sizeof message)) return;
-    widget_set_name(page_title(body, message, 0), "");
+    if (!feedback_empty(body, 0, message, (const char *)0)) /* OLED's note, else a first line */
+        widget_set_name(page_title(body, message, 0), "");
     widget_set_text_utf8(caption, name);
     widget_set_visible(caption, 0, 0);
     bar_title_sync(window_manager_get_top_window(window_manager()));
@@ -6271,6 +6586,8 @@ int ringnav_paint_bg(void *w, void *canvas) {
     int result = 0;
     if (kb_key(w))
         kb_paint_key(w, canvas);
+    else if (kb_wheel_bg(w, canvas))
+        ;
     else if (search_del(w) == 1)
         search_x(w, canvas);
     else if (!pressed_pill(w, canvas))
@@ -6281,11 +6598,17 @@ int ringnav_paint_bg(void *w, void *canvas) {
         confirm_track(w, canvas, form);
         confirm_check(w, canvas);
     }
+    feedback_confirm_bar(w, canvas);
     hold_paint(w, canvas, 0);
+    modal_paint(w, canvas);
     if (w && w == st.search_tabs) search_tabs_paint(w, canvas);
     paint_selection(w, canvas);
     paint_songs(w, canvas);
+    grey_rows(w);
+    paint_modal_rows(w, canvas);
     if (form) confirm_labels(w, canvas);
+    feedback_confirm_switch(w, canvas);
+    feedback_switch_bar(w, canvas);
     if (w && w == st.rate_box)
         paint_panel(w, canvas, &(rect_t){ PANEL_PAD, PANEL_PAD - PANEL_DROP, 304, 110 },
                     "classic_light_rate_shadow", 1);
@@ -6304,7 +6627,8 @@ int ringnav_paint_bg(void *w, void *canvas) {
         stock_canvas_set_fill_color(canvas, fill);
     }
     if (!w || P(w, W_PARENT) != wm) return result;
-    if (w == st.slider_win) { /* one sliding out too */
+    if (w == st.np_win) np_glyphs(w); /* before its buttons paint */
+    if (w == st.slider_win) {         /* one sliding out too */
         if (st.slider_w)
             slider_paint(w, canvas);
         else
@@ -6371,6 +6695,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         bar_title_sync(top);
         bar_title(bar, top);
         if (st.action_view) action_row(st.action_view);
+        feedback_songs(top, st.action_view); /* OLED: an empty list's note, no Shuffle row */
         if (np_sync(top) && np_beside()) rearm(&st.np_remain_timer, remain_due, 0); /* mid-paint */
         if (w == top) vol_paint(top, canvas);
         /* Boot may paint Home before the screen is usable, so nothing chose or drew its first
@@ -6396,8 +6721,25 @@ int painting_in(void *row) {
     return 0;
 }
 static int selected_ink(void) { return painting_in(st.sel_widget); }
+/* Whether row holds the selection painted now, or is inside it (catalogue.c's greyed rows). */
+int ringnav_row_selected(void *row) {
+    void *at = st.sel_w && st.sel_row >= 0 && st.sel_row < g_menu.n ? g_menu.at[st.sel_row] : 0;
+    for (void *w = at; row && w && w != st.sel_w; w = P(w, W_PARENT))
+        if (w == row) return 1;
+    for (void *w = row; at && w && w != st.sel_w; w = P(w, W_PARENT))
+        if (w == at) return 1;
+    return 0;
+}
 
+static unsigned *style_color(unsigned *color, void *style, const char *name, unsigned fallback);
+/* A row that can't play now (catalogue.c) takes its text colour last, over the theme's. */
 unsigned *ringnav_style_color(unsigned *color, void *style, const char *name, unsigned fallback) {
+    style_color(color, style, name, fallback);
+    if (!st.style_depth && st.paint_w && name && tk_str_end_with(name, "text_color"))
+        catalogue_greyed(st.paint_w, color);
+    return color;
+}
+static unsigned *style_color(unsigned *color, void *style, const char *name, unsigned fallback) {
     /* A mutable style (inline style:*) answers from its default style through style_get_color
      * again: only the outermost call maps, as Light Mode's flip is not idempotent. */
     ++st.style_depth;
@@ -6460,6 +6802,10 @@ unsigned *ringnav_style_color(unsigned *color, void *style, const char *name, un
                     return color;
                 }
         }
+        /* A set_switch theme's disabled row: stock's #777777 label in Text Tertiary (the
+         * scheme's muted), as its chevron (chevron_muted) */
+        if (T->set_switch && (*color & 0xffffff) == 0x777777)
+            *color = (*color & 0xff000000u) | S->muted;
         /* Minimal's secondary text is Sudo's quieter grey, but stock's on an accent's card. */
         if (S->muted && !selected && (*color & 0xffffff) == 0xaaaaaa)
             *color = (*color & 0xff000000u) | S->muted;
@@ -6803,9 +7149,21 @@ int ringnav_image_add(void *manager, const char *name, void *bitmap) {
         mapped = 1;
     }
     /* A chevron_sel theme (Classic): stock's grey `>` on every row is emptied; paint_into
-     * draws the selected row's, white. A CHEV_ICON theme's too: paint_into draws each row's own. */
+     * draws the selected row's, white. A CHEV_ICON theme's too: paint_into draws each row's own,
+     * and a disabled row's (list_intodown) in Text Tertiary. */
     if ((T->chevron_sel || T->painter[PAINT_CHEVRON] == CHEV_ICON) && s && !*s &&
-        !tk_strcmp(name, "list_into") && format < 4) {
+        (!tk_strcmp(name, "list_into") ||
+         (T->painter[PAINT_CHEVRON] == CHEV_ICON && !tk_strcmp(name, "list_intodown"))) &&
+        format < 4) {
+        clear_bitmap(bitmap);
+        mapped = 1;
+    }
+    /* A set_switch theme: stock's switch art is emptied; paint_into draws the theme's switch,
+     * Gain's value in place of its switch (paint_gain) and a Wi-Fi network's signal (wifi_mark) */
+    if (T->set_switch && s && !*s && format < 4 &&
+        (!tk_strcmp(name, "switch_on") || !tk_strcmp(name, "switch_off") ||
+         !tk_strcmp(name, "gain_high") || !tk_strcmp(name, "gain_low") ||
+         (name[0] == 'w' && wifi_sig(name)))) {
         clear_bitmap(bitmap);
         mapped = 1;
     }
@@ -6907,9 +7265,12 @@ static void setting_text(int i) {
         row_label(st.setting_label[i], text);
         return;
     }
-    static const char *const toggles[] = { "Rounded Corners",       0,
-                                           "Smart Awake",           "Centred Now Playing",
-                                           "Click With Headphones", "Single Press Scrub",
+    static const char *const toggles[] = { "Rounded Corners",
+                                           0,
+                                           "Smart Awake",
+                                           "Centred Now Playing",
+                                           0 /* 9: the Clicker's, no row */,
+                                           "Single Press Scrub",
                                            "Time in Title" };
     if (i == 5 || i >= 7) {
         list_toggle(st.setting_label[i], toggles[i - 5], *setting_values[i]);
@@ -7166,6 +7527,10 @@ int ringnav_np_info(void *win) {
     getFormatString("player_location", where, sizeof where);
     const char *loc =
         *where && *where != '(' ? where : "Location"; /* a missing string reads "(key)" */
+    /* a server song (catalogue.c): its genre and year are the catalogue's, its place the server */
+    char genre[96], year[12];
+    int y = 0, server = catalogue_np_info((const char *)g_play_id3_info, genre, &y);
+    tk_snprintf(year, sizeof year, "%d", y);
     for (unsigned i = 0; i < sizeof names / sizeof *names; ++i) {
         void *label = win ? widget_lookup(win, names[i], 1) : (void *)0;
         char s[1024], out[1024 + sizeof where + 8];
@@ -7180,6 +7545,9 @@ int ringnav_np_info(void *win) {
         else
             continue;
         while (*v == ' ') ++v;
+        if (server && i == 1 && *genre) v = genre;
+        if (server && i == 3 && y > 0) v = year;
+        if (server && i == 8) v = "Server";
         if (!strcmp(v, "Unknown Artist")) v = "Unknown";
         const char *unit = *units[i] ? units[i] + 1 : units[i];
         int len = (int)strlen(v), u = (int)strlen(unit);
@@ -7299,6 +7667,7 @@ int ringnav_display(void *win, void *ctx) {
         pod_rows(win, "scroll_view_display", POD_BIG_LIB, 1, cf_icons + 3);
         pod_rows(win, "scroll_view_display", POD_SCAN_DURATIONS, 1, cf_icons + 3);
         pod_rows(win, "scroll_view_display", POD_CF_POSITION, 1, cf_icons + 3);
+        pod_rows(win, "scroll_view_display", POD_LIBRARY_SOURCE, 1, cf_icons + 3);
         return result;
     }
     if (sub == DISPLAY_APPEARANCE) {
@@ -7311,9 +7680,7 @@ int ringnav_display(void *win, void *ctx) {
     wheel_row(list_row_into(view, "system_display", xfade_open, (void *)1));
     pod_rows(win, "scroll_view_display", POD_HOLD_HOME, 1, hold_icon);
     setting_row(view, 10);
-    pod_rows(win, "scroll_view_display", POD_KEYTONE, 1, tone_icon);
-    setting_row(view, 9); /* Click With Headphones shows while Key Tone is on */
-    widget_set_visible(P(P(st.setting_label[9], W_PARENT), W_PARENT), g_keytone_flag != 0, 0);
+    pod_rows(win, "scroll_view_display", POD_KEYTONE, 1, tone_icon); /* the Clicker */
     widget_set_tr_text(list_row_into(view, "system_keylock", keylock_open, 0), "system_keylock");
     pod_rows(win, "scroll_view_display", POD_WAKE, 1, lock_icon);
     pod_rows(win, "scroll_view_display", POD_VOL_GUARD, 1, lock_icon);
@@ -7395,9 +7762,12 @@ static int untouch(const void *info) {
 
 static void hide_outline(void) {
     if (st.touch_mode && !st.untouch_timer) return; /* already hidden: each touch move comes here */
+    void *top = window_manager_get_top_window(window_manager());
+    /* The keyboard's keys and the lock window's swipe touch no row: the list shown after them
+     * (a playlist just named, the page under the lock) keeps its bar. */
+    if (g_lockscreen_pageflag || (top && !tk_strcmp(widget_get_type(top), "keyboard"))) return;
     stop_timer(&st.untouch_timer);
     st.touch_mode = 1;
-    void *top = window_manager_get_top_window(window_manager());
     if (top) widget_invalidate_force(top, (void *)0);
 }
 
@@ -7574,6 +7944,7 @@ int ringnav_dispatch(void *target, void *event) {
             return STOP;
         }
         /* Now Playing's ⋯: an app's page instead of stock's while the app's queue plays */
+        if (np_mode_click(target, event)) return STOP; /* shuffle or repeat, one of the two */
         return target == np_more() && addon_more() ? STOP : time_click(target, event);
     }
     return stock_dispatch_trampoline(target, event);
@@ -7834,6 +8205,10 @@ void stock_more_into(void *win) {
 /* The settings rows' trailing images' right edge from the row's: the set's right column (a 50 px
  * switch's glyph fills its box), else SET_EDGE. */
 static int set_edge(void) { return geom_val(V_RIGHT_X) ? geom_val(V_RIGHT_X) : SET_EDGE; }
+/* ... and their text's box's left edge: on a set with a right column, the set's text column less
+ * hscroll_label's 2 px margin, so the text starts on it as the status row's title does
+ * (docs/oled-design.md Spacing), else SET_TEXT_X. */
+static int set_text_x(void) { return geom_val(V_RIGHT_X) ? geom_val(V_TEXT_X) - 2 : SET_TEXT_X; }
 static void set_child(void *c, int row_w, int row_h, int shift) {
     int x = I(c, W_X), y = I(c, W_Y), w = I(c, W_W), h = I(c, W_H), right = x + w;
     /* Streaming's rows, taller than the set's, have an icon in a set with none */
@@ -7871,16 +8246,21 @@ static void set_child(void *c, int row_w, int row_h, int shift) {
     }
     int left = x >= SET_RIGHT_SIDE ? SET_STOCK_X + x + shift
                : x > SET_STOCK_ICON / 2 + 10 /* after a stock icon at x 10 */
-                   ? (!icon   ? SET_TEXT_X
+                   ? (!icon   ? set_text_x()
                       : art_x ? T->art_text_x - 2
                               : SET_ICON_X + icon + SET_GAP) +
                          x - (SET_STOCK_ICON + 20)
-                   : SET_TEXT_X + x - 10;
-    if (!icon && left < SET_TEXT_X) left = SET_TEXT_X;
+                   : set_text_x() + x - 10;
+    if (!icon && left < set_text_x()) left = set_text_x();
     right = right >= SET_RIGHT_SIDE ? SET_STOCK_X + right + shift : right + left - x;
     if (right > row_w - SET_TEXT_X) right = row_w - SET_TEXT_X;
     widget_move_resize(c, left, y, right > left ? right - left : 0, h);
-    if (!tk_strcmp(widget_get_type(c), "hscroll_label")) theme_font(c, ROLE_TITLE, FONT_ROW);
+    if (tk_strcmp(widget_get_type(c), "hscroll_label")) return;
+    theme_font(c, ROLE_TITLE, FONT_ROW);
+    /* a set_switch theme: a stock row's text on its right side is its value (About's), in the
+     * value grey as list_value's; the selection's text still wins */
+    unsigned ink = T->set_switch ? T->set_value_ink[ipod_light()] : 0;
+    if (ink && x >= SET_RIGHT_SIDE) text_ink(c, 0xff000000u | ink, INK_LABEL);
 }
 
 /* The row's stock settings button (SET_STOCK_X, SET_STOCK_W), or none: a row already mapped, or one
@@ -7958,7 +8338,9 @@ int ipod_list_layout(void *layout, void *view) {
     void *list = view ? P(view, W_PARENT) : (void *)0;
     int settings = settings_list(list);
     int row = stream_list(view) ? geom_val(V_STREAM_ROW) : settings ? geom_val(V_SET_ROW) : 0;
+    int wifi = settings && wifi_list(list);
     if (settings) settings_layout(list);
+    if (wifi) wifi_rows_pre(view);
     unsigned n = row ? widget_count_children(view) : 0;
     for (unsigned i = 0; i < n; ++i) {
         void *item = widget_get_child(view, i);
@@ -7980,6 +8362,8 @@ int ipod_list_layout(void *layout, void *view) {
         void *item = widget_get_child(view, i);
         if (widget_get_visible(item)) set_row(item);
     }
+    if (wifi) wifi_rows_post(view);
+    if (settings && about_list(list)) about_rows(view);
     return ret;
 }
 
@@ -8092,7 +8476,8 @@ enum {
     QA_CHAPTERS,
     QA_MORE,
     QA_NEW_PLAYLIST,
-    QA_EDIT_PLAYLISTS
+    QA_EDIT_PLAYLISTS,
+    QA_SORT /* the inset modal's Sorting row (menu_modal.c) */
 };
 
 static char *play_key(void) {
@@ -8197,14 +8582,27 @@ static void qm_close(void) {
 }
 
 /* Return and the title bar arrow dismiss without the stock sort-change flag. */
+#define QM_SORT_CHOICE 4 /* st.qm_choice: the Sort picker, after Shuffle, Repeat and Group by */
+/* the menu reopened from the Sort picker: on its Sorting row */
+static int qm_on_sort __attribute__((section(".scratch")));
+static int qm_open(const void *unused);
 static int qm_back(void *dialog, void *event) {
     if (I(event, EVENT_TYPE) == EVT_KEY_UP && I(event, EVENT_KEY) != KEY_RETURN) return 0;
+    /* the Sort picker goes back to its menu, from the next pass, as a hold opens it; else the
+     * menu is gone for good, and Songs reloads in a new order as the close puts it on top */
+    int back = st.qm_choice == QM_SORT_CHOICE && !st.qm_timer;
+    if (!back) song_sort_commit();
     qm_close();
+    if (back) {
+        st.qm_choice = 0, qm_on_sort = 1;
+        st.qm_timer = timer_add(qm_open, (void *)0, 0);
+    }
     return STOP;
 }
 
 static int qm_gone(void *dialog, void *event) {
     if (st.qm_dialog == dialog) st.qm_dialog = (void *)0;
+    if (!st.qm_dialog && !st.qm_timer) song_sort_commit(); /* closed some other way */
     return 0;
 }
 
@@ -8650,6 +9048,7 @@ static int songs_load(void) {
     void *list = P(p_deque_showlist, 0);
     deque_clear(list);
     staged_into(list, songs_sorted, 0);
+    song_order(list);                        /* a modal set's Sort picker's order (song_sort.c) */
     deque_clear(P(tools_pdeq_directory, 0)); /* as stock leaves it */
     music_nagvation_title(0xf001);
     return (int)deque_size(list);
@@ -8782,13 +9181,13 @@ static int qm_apply(void *add, int next) {
     return n != 0;
 }
 
-/* A 2 s modal dialog: its loop runs every ringnav_sleep poll again, so a poll clears or latches
- * what it toasts first (logo_poll). */
+/* A 2 s modal dialog (OLED's 1.5 s, oled-design.md's toast): its loop runs every ringnav_sleep poll
+ * again, so a poll clears or latches what it toasts first (logo_poll). */
 void toast(const char *text) {
     struct {
         int kind, ms;
         char text[0x400];
-    } info = { 1, 2000, { 0 } };
+    } info = { 1, feedback_oled() ? 1500 : 2000, { 0 } };
     for (unsigned i = 0; text[i] && i < sizeof info.text - 1; ++i) info.text[i] = text[i];
     ++st.toasts; /* its loop runs the UI's polls, which may toast again */
     navigator_to_with_context("dialog/msginfo_dialog", &info);
@@ -9406,7 +9805,14 @@ static int qm_run(const void *unused) {
     void *r = qm_record();
     int a = st.qm_action, cls = st.qm_kind == QM_COVERFLOW ? 0xf001 : (int)st.qm_cls;
     unsigned aid = r ? qm_album_id(r) : 0; /* an album's own Favourites and Rate */
-    if (r && a >= 100) {
+    if (r && a >= 100 && st.qm_choice == QM_SORT_CHOICE) {
+        /* the current order flips and the picker stays; another takes its natural direction
+         * (titles, artists and albums A to Z, the newest first) and the menu comes back */
+        int i = a - 100, again = i == song_sort();
+        song_sort_set(i, again ? !song_down() : i == SORT_ADDED);
+        if (!again) st.qm_choice = 0, qm_on_sort = 1;
+        qm_open(0);
+    } else if (r && a >= 100) {
         if (!playback_set(st.qm_choice - 1, a - 100)) toast("Queue unchanged");
         st.qm_choice = 0;
     } else if (r && a == QA_CHAPTERS) {
@@ -9426,6 +9832,9 @@ static int qm_run(const void *unused) {
             navigator_to("playerqueue_page");
     } else if (a == QA_MORE && st.qm_kind == QM_PLAYLIST) {
         if (r) navigator_to_with_context("localmusic/playlistsmore_page", (void *)(long)st.qm_idx);
+    } else if (r && a == QA_SORT) {
+        st.qm_choice = QM_SORT_CHOICE;
+        qm_open(0);
     } else if (a == QA_NEW_PLAYLIST || a == QA_EDIT_PLAYLISTS) {
         /* the page's own, not the playlist's: qm_edit_due */
     } else if (a == QA_MORE) {
@@ -9448,11 +9857,11 @@ static int qm_run(const void *unused) {
         qm_select();
         batch_add_file(cls, 0xf00a, qm_list(), P(p_vector_select_record, 0), 0);
         ratings_copy_due();
-        fav_told(r, 1);
+        if (fav_told(r, 1) && feedback_oled()) toast("Added to Favorites");
     } else if (r && a == QA_UNFAV) {
         deleteMusicFromFav(r);
         ratings_copy_due();
-        fav_told(r, 0);
+        if (fav_told(r, 0) && feedback_oled()) toast("Removed from Favorites");
         if (cls == 0xf00a)
             g_delete_flag = 1;          /* My Fav reloads, as Now Playing's heart (0x53cafc) */
     } else if (r && a == QA_PLAYLIST) { /* the playlist page's add mode adds the selected row */
@@ -9495,7 +9904,20 @@ static int qm_run(const void *unused) {
         void *add = r ? qm_collect(r) : (void *)0;
         if (!add || !(a == QA_SHUFFLE ? shuffle_play(add) : qm_apply(add, a == QA_NEXT)))
             toast("Queue unchanged");
+        else if (a != QA_SHUFFLE && feedback_oled()) /* OLED says what an in-place action did */
+            toast(a == QA_NEXT ? "Playing Next" : "Added to Queue");
         if (add) deque_destroy(add);
+    }
+    /* closed for good after a new order: Songs, already on top again, reloads in it now, as its
+     * coming back to the top does after stock's Sort picker (the action needed the old list) */
+    void *top = window_manager_get_top_window(window_manager());
+    if (!st.qm_dialog && !st.qm_timer && song_sort_commit() && top &&
+        !tk_strcmp(widget_get_prop_str(top, "name", ""), "allmusic_page")) {
+        char front[0x30] = { 0 };
+        I(front, EVENT_TYPE) = EVT_WINDOW_FOREGROUND;
+        I(front, 4) = sizeof front;
+        P(front, EVENT_TARGET) = top;
+        stock_dispatch_trampoline(top, front);
     }
     return 0;
 }
@@ -9553,6 +9975,38 @@ static void qm_title(void *dialog, const char *s) {
     widget_set_prop_int(title, "loop", 1);
     widget_set_text_utf8(title, s);
 }
+/* Now Playing's play modes as stock names them, its category as Group by sets it (album or
+ * folder): Shuffle's (kind 0), Repeat's (1) and Group by's (2) choices. */
+static int qm_choices(int kind) { return kind == 0 ? 5 : kind == 1 ? 6 : 2; }
+static const char *qm_choice_name(int kind, int i) {
+    static const char *const shuffle[2][5] = {
+        { "Off", "All Songs", "Songs in Album", "Albums", "Albums and Songs" },
+        { "Off", "All Songs", "Songs in Folder", "Folders", "Folders and Songs" }
+    };
+    static const char *const repeat[2][6] = { { "Play One Song", "Play One Album", "Play All",
+                                                "Repeat Song", "Repeat Album", "Repeat All" },
+                                              { "Play One Song", "Play One Folder", "Play All",
+                                                "Repeat Song", "Repeat Folder", "Repeat All" } };
+    static const char *const groups[] = { "Album", "Folder" };
+    int folder = playback_option(2);
+    return kind == 0 ? shuffle[folder][i] : kind == 1 ? repeat[folder][i] : groups[i];
+}
+
+/* The inset modal's Sorting row (menu_modal.c): on a list whose Songs action row has stock's Sort
+ * (Songs' own list, class 0xf001), its order as Sort's picker names it, and its direction. */
+#define MODAL_PITCH 32
+static int qm_sorts(void *page) {
+    void *row = st.action_view;
+    /* the page, or the page under the picker closing as the menu comes back */
+    return modal_set() && row && (window_of(row) == page || modal_win(page)) &&
+           widget_count_children(row) > 2 && I(g_class_type, 0) == 0xf001;
+}
+static const char *const qm_sort_names[SORT_N] = { "Title", "Artist", "Album", "Recently Added" };
+static const char *qm_sort_name(int *dir) {
+    *dir = song_down() ? DIR_DOWN : DIR_UP;
+    return qm_sort_names[song_sort()];
+}
+
 static int qm_open(const void *unused) {
     st.qm_timer = 0;
     void *wm = window_manager(), *page = window_manager_get_top_window(wm);
@@ -9576,44 +10030,43 @@ static int qm_open(const void *unused) {
     widget_on(back, EVT_CLICK, qm_back, dialog);
     widget_on(dialog, EVT_DESTROY, qm_gone, dialog);
     if (st.qm_choice) {
-        /* stock's play modes, its category named as Group by sets it (album or folder) */
-        static const char *const shuffle[2][5] = {
-            { "Off", "All Songs", "Songs in Album", "Albums", "Albums and Songs" },
-            { "Off", "All Songs", "Songs in Folder", "Folders", "Folders and Songs" }
-        };
-        static const char *const repeat[2][6] = { { "Play One Song", "Play One Album", "Play All",
-                                                    "Repeat Song", "Repeat Album", "Repeat All" },
-                                                  { "Play One Song", "Play One Folder", "Play All",
-                                                    "Repeat Song", "Repeat Folder",
-                                                    "Repeat All" } };
-        static const char *const groups[] = { "Album", "Folder" };
-        int kind = st.qm_choice - 1,
-            count = kind == 0   ? 5
-                    : kind == 1 ? 6
-                                : 2,
-            folder = playback_option(2);
-        const char *const *names = kind == 0   ? shuffle[folder]
-                                   : kind == 1 ? repeat[folder]
-                                               : groups;
+        int kind = st.qm_choice - 1, sorting = st.qm_choice == QM_SORT_CHOICE,
+            count = sorting ? SORT_N : qm_choices(kind),
+            current = sorting ? song_sort() : playback_option(kind);
         qm_title(dialog, kind == 0 ? "Shuffle" : kind == 1 ? "Repeat" : "Group by");
         widget_destroy_children(view);
-        int painted = dialogs_painted(), row = painted ? theme()->page_row : QM_ROW,
-            w = painted ? BACK_W : 375;
+        int painted = dialogs_painted(), modal = modal_set(),
+            row = modal     ? MODAL_PITCH
+                  : painted ? theme()->page_row
+                            : QM_ROW,
+            w = modal     ? modal_row_w()
+                : painted ? BACK_W
+                          : 375;
         for (int i = 0; i < count; ++i) {
             void *item = list_item_create(view, 0, i * row, w, row);
             widget_use_style(item, "s_listitem_black");
             void *label = hscroll_label_create(item, 30, 0, 310, row);
             widget_use_style(label, "s_scrlabel_white24l");
-            widget_set_text_utf8(label, names[i]);
-            if (painted) hold_label(item, label);
-            if (i == playback_option(kind))
+            widget_set_text_utf8(label, sorting ? qm_sort_names[i] : qm_choice_name(kind, i));
+            if (modal)
+                modal_row(item, label, i == current ? "check" : (const char *)0, (const char *)0,
+                          MM_CHOICE);
+            /* the current order's direction, which Centre on it flips */
+            if (sorting && i == current)
+                modal_dir(item, song_down() ? DIR_DOWN : DIR_UP);
+            else if (painted)
+                hold_label(item, label);
+            if (i == current && !modal)
                 image_base_set_image(image_create(item, w - 35, 0, 24, row), "select");
             widget_on(item, EVT_CLICK, qm_pick, (void *)(long)(100 + i));
         }
         widget_set_prop_int(view, "virtual_h", count * row);
-        if (painted) hold_open(dialog, count);
+        if (modal)
+            modal_frame(dialog, widget_lookup(dialog, "list_view", 1));
+        else if (painted)
+            hold_open(dialog, count);
         st.qm_dialog = dialog;
-        ringnav_select(view, playback_option(kind), count);
+        ringnav_select(view, current, count);
         return 0;
     }
     unsigned cls = st.qm_cls;
@@ -9633,7 +10086,7 @@ static int qm_open(const void *unused) {
     /* Songs favourite, as stock's heart, and go to their album and artist; collections shuffle.
      * Go to is left out where its single-instance page is already open, or the album is the page.
      */
-    unsigned char acts[20], n = 0;
+    unsigned char acts[24], n = 0;
     /* Shuffle Albums/Folders only: skipping the group comes first */
     int group_first = st.qm_kind == QM_PLAYING && playback_option(0) >= 3;
     /* Rate (the heart's hold) follows Next/Previous album */
@@ -9701,12 +10154,47 @@ static int qm_open(const void *unused) {
                                         "Chapters",
                                         "More…",
                                         "New Playlist",
-                                        "Select Playlists…" };
+                                        "Select Playlists…",
+                                        "Sorting" };
+    /* the inset modal's symbols (tools/art.py MENU_ICONS), by row */
+    static const char *const icons[] = { "arrow-bend-down-right",
+                                         "queue",
+                                         "shuffle",
+                                         "heart",
+                                         "heart-break",
+                                         "list-plus",
+                                         "vinyl-record",
+                                         "microphone-stage",
+                                         "shuffle",
+                                         "repeat",
+                                         "stack",
+                                         "skip-forward",
+                                         "skip-back",
+                                         "heart-half",
+                                         "clock-counter-clockwise",
+                                         "list-numbers",
+                                         "folder",
+                                         "bookmark-simple",
+                                         "dots-three",
+                                         "plus",
+                                         "list-checks",
+                                         "funnel-simple" };
     char rated[32];
-    /* stock sortselect row styles */
-    int painted = dialogs_painted(), pitch = painted ? theme()->page_row : QM_ROW;
+    /* stock sortselect row styles; the inset modal's rows, a Sorting row first and a gap after it
+     * where the list sorts */
+    int painted = dialogs_painted(), modal = modal_set(), sorts = qm_sorts(page),
+        pitch = modal     ? MODAL_PITCH
+                : painted ? theme()->page_row
+                          : QM_ROW,
+        width = modal     ? modal_row_w()
+                : painted ? BACK_W
+                          : 375;
+    if (sorts) {
+        memmove(acts + 1, acts, n++);
+        acts[0] = QA_SORT;
+    }
     for (int i = 0; i < n; ++i) {
-        void *item = list_item_create(view, 0, i * pitch, painted ? BACK_W : 375, pitch);
+        void *item = list_item_create(view, 0, i * pitch, width, pitch);
         widget_use_style(item, "s_listitem_black");
         void *label = hscroll_label_create(item, 30, 0, 266, pitch);
         widget_use_style(label, "s_scrlabel_white24l");
@@ -9716,19 +10204,40 @@ static int qm_open(const void *unused) {
             char hs[16];
             tk_snprintf(rated, sizeof rated, h ? "%s  %s" : "%s", row, hearts_text(hs, h));
         }
+        /* a setting's value stands on its own on the modal's right column */
+        int setting =
+            modal && (acts[i] == QA_SORT || (acts[i] >= QA_ADV_SHUFFLE && acts[i] <= QA_GROUP));
         widget_set_text_utf8(label,
                              acts[i] == QA_RATE ? rated
-                             : acts[i] == QA_GROUP
+                             : acts[i] == QA_GROUP && !modal
                                  ? (playback_option(2) ? "Group by: Folder" : "Group by: Album")
                              : acts[i] == QA_NEXT_GROUP && playback_option(2) ? "Next Folder"
                              : acts[i] == QA_PREV_GROUP && playback_option(2) ? "Previous Folder"
-                                                                              : rows[acts[i] - 1]);
-        if (painted) hold_label(item, label);
+                             /* the inset modal's set writes US English (OLED's) */
+                             : acts[i] == QA_FAV && modal   ? "Add to Favorites"
+                             : acts[i] == QA_UNFAV && modal ? "Remove from Favorites"
+                                                            : rows[acts[i] - 1]);
+        if (modal) {
+            int dir = DIR_NONE, kind = acts[i] - QA_ADV_SHUFFLE;
+            const char *value = !setting             ? (const char *)0
+                                : acts[i] == QA_SORT ? qm_sort_name(&dir)
+                                                     : qm_choice_name(kind, playback_option(kind));
+            modal_row(item, label, icons[acts[i] - 1], value, setting ? MM_SETTING : MM_ACTION);
+            modal_dir(item, dir);
+            if (acts[i] == QA_SORT) modal_gap(view);
+        } else if (painted)
+            hold_label(item, label);
         widget_on(item, EVT_CLICK, qm_pick, (void *)(long)acts[i]);
     }
     widget_set_prop_int(view, "virtual_h", n * pitch);
-    if (painted) hold_open(dialog, n);
+    if (modal)
+        modal_frame(dialog, widget_lookup(dialog, "list_view", 1));
+    else if (painted)
+        hold_open(dialog, n);
     st.qm_dialog = dialog;
+    /* the first action, Sorting a tick up; Sorting itself, back from its picker */
+    if (modal) ringnav_select(view, qm_on_sort ? 0 : sorts, n);
+    qm_on_sort = 0;
     return 0;
 }
 
@@ -9962,9 +10471,11 @@ static int home_cf_hold(void *top) {
  * Internet Radio station it is the favourite toggle, on a Spotify track Add to Queue (its reply
  * toasts), on a card app's row its hold op (addon_hold: a Deezer list downloaded whole), in Quick
  * Settings (not OLED's) the wheel's brightness/volume switch, on View Queue's shuffle list
- * Play Next (un_hold), the release latched as the queue menu's. */
+ * Play Next (un_hold), the release latched as the queue menu's. A held Previous or Next that
+ * scans (seek_held) and Centre held on OLED's lock window (lockscreen_hold) stop first. */
 int ringnav_keylong(void *ctx, void *event) {
     if (event && ple_key((unsigned)I(event, EVENT_KEY), 3)) return STOP;
+    if (event && seek_held((unsigned)I(event, EVENT_KEY))) return STOP;
     /* OLED's lock window: Centre held unlocks (lockscreen.c lockscreen_hold); its release is the
      * held power key's, which stock's keyup takes and clears, as after the Shut Down? hold */
     if (event && I(event, EVENT_KEY) == KEY_CENTER &&
@@ -10060,6 +10571,7 @@ static void spot_keep(unsigned key, int sec, int total) {
 /* Counts key's play and moves it first, so among equal counts the least recently played is the
  * one replaced when no slot is free. */
 static void play_count(void *r, unsigned key) {
+    key = catalogue_play_key(r, key); /* a server song's offline copy counts as its row */
     plays_load();
     int i = 0;
     for (int j = 0; j < PLAYS_SLOTS && st.plays[i].key != key; j++)
@@ -10510,7 +11022,7 @@ int ringnav_sleep(void *loop) {
     } else if (time_now_ms() - st.last_input >= IDLE_MS &&
                !window_manager_is_animating(window_manager()) && !np_animating() &&
                !coverflow_turning())
-        sleep_ms(IDLE_SLEEP_MS);
+        sleep_ms(np_glide_wait(np_marq_wait(IDLE_SLEEP_MS))); /* by the next frame due */
     tone_dark = 0; /* after the polls: a click of theirs is this pass's too */
     return stock_sleep_trampoline(loop);
 }
@@ -10639,7 +11151,8 @@ static int chord_gate(void *e) {
     st.chord_at = now;
     int eat = st.chord_eat > 0;
     if (type == EVT_KEY_UP) st.chord_eat = st.centre_hold = 0;
-    /* a passing press: its time, for an edge press after it; its release ends that */
+    /* a passing press: its time, for an edge press after it and np_centre's hold (ringnav_keydown);
+     * its release ends that */
     if (!eat)
         st.centre_at = type == EVT_KEY_UP ? 0 : st.centre_at && !fresh ? st.centre_at : now | 1;
     return eat;
@@ -10701,13 +11214,10 @@ static int tick_gate(void *e) {
     if (Q2POD_DEV && !muted) wheel_gate_note();
     return 1;
 }
-/* A wheel tick's step of the volume, as stock's dialog makes it (volume_dialog_on_keyup): within 0
- * and the volume limit, set and saved. */
+/* A wheel tick's step of the volume, as stock's dialog makes it (volume_dialog_on_keyup, and
+ * vol_next's steps at the wheel's speed): within 0 and the volume limit, set and saved. */
 static void vol_step(unsigned key) {
-    int value = g_volume + (key == KEY_NEXT ? 1 : -1);
-    if (value < 0) value = 0;
-    if (value > g_maxvolume) value = g_maxvolume;
-    if (value > 100) value = 100;
+    int value = vol_next(key);
     if (value == g_volume) return;
     g_volume = value;
     device_set_volume(value, 1);
@@ -10724,6 +11234,7 @@ int ringnav_input(void *wm, void *e) {
         return 0;
     }
     if (addon_game_input(e)) return 0;
+    if (e && seek_input(e)) return 0; /* a held Previous or Next's repeats: seek.c */
     if (type >= EVT_POINTER_FIRST && type <= EVT_POINTER_ABORT) { /* a finger (stale_heal) */
         st.touch_at = st.last_input;
         st.touch_type = (int)type;
@@ -10782,15 +11293,16 @@ int ringnav_wm_paint(void *wm) {
     return paint ? paint(wm) : away ? 0 : 0x10; /* RET_BAD_PARAMS, as stock */
 }
 
-/* buzzeer_switch (0x4fe3f8), every Key Tone click, stock's and ringnav()'s: the MCU's buzzer
- * (system("cmd_mcu write_str buzzer") when g_keytone_flag is set). Silent while headphones (either
- * jack) or a Bluetooth or USB output listen, since the buzzer is the device's own speaker;
- * hciplayer holds their PCM, so the click has no other way out. Playback alone leaves it clicking.
- * Click With Headphones (IPOD KEYTONEHP, off) keeps the buzzer clicking there too, as stock does;
- * Key Tone off is still silent.
+/* buzzeer_switch (0x4fe3f8), every Key Tone click, stock's and ringnav()'s: the Clicker's route
+ * (clicker.c, docs/internals.md#key-tone). The buzzer is the MCU's (system("cmd_mcu write_str
+ * buzzer") when g_keytone_flag is set), the device's own speaker, so Speaker keeps it silent while
+ * headphones (either jack) or a Bluetooth or USB output listen; Headphones sends the click to
+ * q2player to mix into what plays, and has the buzzer only while nothing is mixed; Both has both,
+ * the buzzer whatever listens. Off (Key Tone off) is silent. clicker_kind names the sound: a
+ * wheel's, unless ringnav_keydown marked a button's.
  * The command waits out the buzzer and the MCU's park (tools/mcu_pwm_clock.c), so it runs on a
- * worker, not the UI thread; a click while one sounds is dropped, as the buzzer is busy anyway.
- * With the screen off a pass clicks once (tone_dark; ringnav_sleep).
+ * worker, not the UI thread; a buzzer click while one sounds is dropped, as the buzzer is busy
+ * anyway. With the screen off a pass clicks once (tone_dark; ringnav_sleep).
  */
 static volatile int tone_busy;
 static void *tone_worker(void *on) {
@@ -10800,8 +11312,10 @@ static void *tone_worker(void *on) {
 }
 int ringnav_buzzer(int on) {
     int listening = g_po_status || g_bal_status || mclGetOutputWay();
-    if ((listening && (accent(), !st.keytone_hp)) || !g_keytone_flag || tone_busy || tone_dark)
-        return 0;
+    if (!g_keytone_flag || tone_dark) return 0;
+    int route = clicker_route(listening);
+    if (route & ROUTE_MIXED) tone_dark = !g_backlight_status;
+    if (!(route & ROUTE_BUZZER) || tone_busy) return 0;
     unsigned long tid;
     tone_busy = 1;
     if (pthread_create(&tid, 0, tone_worker, (void *)(long)on)) {
@@ -10823,6 +11337,10 @@ int ringnav_keydown(void *ctx, void *event) {
     unsigned key = event ? (unsigned)I(event, EVENT_KEY) : 0;
     if (ple_key(key, 1)) return STOP;
     void *top = window_manager_get_top_window(window_manager());
+    /* np_centre's hold, timed from the press: its repeats (every 50 ms while held) keep
+     * chord_gate's centre_at, which ringnav_input set before this */
+    if (key == KEY_CENTER)
+        st.center_down_at = st.centre_at ? st.centre_at : (unsigned)time_now_ms() | 1;
     unsigned char tone = g_keytone_flag;
     void *row = (void *)0;
     entries_t s = { &row, 0, 1, 4096 };
@@ -10834,7 +11352,10 @@ int ringnav_keydown(void *ctx, void *event) {
         if (s.n) st.tone_key = key;
     }
     if (st.tone_key) g_keytone_flag = 0;
+    if (key != KEY_PREV && key != KEY_NEXT)
+        clicker_kind = CLICK_KIND_BUTTON; /* stock's click is a button's */
     int result = stock_keydown_trampoline(ctx, event);
+    clicker_kind = 0; /* a wheel's again */
     if (st.tone_key) g_keytone_flag = tone;
     /* Coverflow moves on release; stop the press before it navigates the focused list below. */
     if (!result && (key == KEY_PREV || key == KEY_NEXT) && top &&
@@ -11372,7 +11893,9 @@ static int shuffle_key(void *top, void *w, int dir) {
         st.shuffle_on = (void *)0;
         return 0;
     }
-    int stops = widget_count_children(row) > 2 ? SORT_STOP : SHUFFLE_STOP;
+    int stops = widget_count_children(row) > 2 && widget_get_visible(widget_get_child(row, 2))
+                    ? SORT_STOP
+                    : SHUFFLE_STOP;
     if (st.shuffle_on != row || st.shuffle_list != w) {
         if (dir >= 0 || widget_get_prop_int(w, SEL, -1) != 0) return 0;
         st.shuffle_on = row;
@@ -11467,6 +11990,7 @@ int ringnav(void *ctx, void *event) {
     }
     unsigned key = (unsigned)I(event, EVENT_KEY);
     if (ple_key(key, 2)) return STOP;
+    if (seek_release(key)) return STOP; /* a hold that scanned is no skip */
     /* This release's press was silenced by ringnav_keydown: a row change below clicks instead. */
     int owned = st.tone_key == key;
     st.tone_key = 0;
@@ -11495,6 +12019,9 @@ int ringnav(void *ctx, void *event) {
     if (usable() && rate_key(window_manager_get_top_window(window_manager()), key)) return STOP;
     /* A game's keys, before stock's lock filter, media keys and screen-off double Centre */
     if (usable() && games_key(window_manager_get_top_window(window_manager()), key)) return STOP;
+    if (usable() && search_strip_key(window_manager_get_top_window(window_manager()), key))
+        return STOP;
+    if (usable() && kb_wheel_key(key)) return STOP;
     /* Cover Flow's flip: a Centre during it does nothing. Its Return is the page's (coverflow.c
      * keyup), the wheel waits at the page's no surface (hold_wheel). */
     if (key == KEY_CENTER && coverflow_turning() && !g_power_longkey) return STOP;
@@ -11564,7 +12091,8 @@ int ringnav(void *ctx, void *event) {
         if (slider) widget_set_prop_int(slider, "value", g_volume);
         return STOP;
     }
-    if (key == KEY_RETURN && st.scrub) { /* ends the scrub without leaving the page */
+    if (key == KEY_RETURN && (st.scrub || st.np_stage)) { /* ends the scrub or the cycle's stage
+                                                            without leaving the page */
         np_cancel();
         if (window_manager_get_top_window(window_manager()) == st.np_win) return STOP;
     }
@@ -11655,7 +12183,7 @@ int ringnav(void *ctx, void *event) {
         np_cancel();
     else if (key != KEY_CENTER && np_lyrics(key))
         return STOP;
-    else if (key == KEY_CENTER || st.scrub)
+    else if (key == KEY_CENTER || st.scrub || st.np_stage)
         return np_key(st.np_win, key);
     /* A keyboard (T9's, every text box's) on top takes Centre as a listed page does: a single press
      * does nothing, a double turns the screen off; stock turned it off on each one (#365). Its

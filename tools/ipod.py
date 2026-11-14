@@ -107,12 +107,16 @@ class Geometry:
     np_bar_y: int = 0
     # Home in Split (coverflow.c home_split): the menu's width, which its rows, chevrons and selection bar take as theirs;
     # the art's pane from split_art to the screen's right edge; split_art_up rows of the pane above the window, in the
-    # bar, which paints them (coverflow_home_bar); split_still 1 keeps the cover still and centred in its 110 % zoom,
-    # 0 pans it.
+    # bar, which paints them (coverflow_home_bar) and inks its glyphs over them by contrast (home_ink); the cover pans
+    # across its 110 % zoom, and split_inset keeps that percent of the zoomed cover clear of the pane at each edge, so a
+    # cover's own frame never shows (coverflow.c drift_axis).
     split_row: int = inc('HOME_SPLIT_W')
     split_art: int = inc('HOME_SPLIT_W')
     split_art_up: int = 0
-    split_still: int = 0
+    split_inset: int = 0
+    # 1: Now Playing's More and a playlist's More open as dialogs over the page under them (MODAL_PAGES, modal_page), which
+    # the payload draws as the inset modal (menu_modal.c), as it does the hold menus; 0: full pages, the hold menus stock's
+    modal: int = 0
 
 
 SET0 = Geometry()
@@ -221,7 +225,7 @@ def with_geometry(g):
         NP_TIME_X=max(MARGIN, corner_x(g.bar + NP_TIMES_Y + 1, 14)))
 
 
-GEOM_VALS = ('bar', 'set_row', 'set_icon', 'batt_w', 'batt_h', 'text_x', 'lib_art', 'list_end', 'action_row', 'stream_row', 'stock_row', 'toolbar', 'status_y', 'right_x', 'list_fit', 'split_row', 'split_art', 'split_art_up', 'split_still')  # Geometry fields the payload reads at run time (themes.inc geom_vals), not immediates
+GEOM_VALS = ('bar', 'set_row', 'set_icon', 'batt_w', 'batt_h', 'text_x', 'lib_art', 'list_end', 'action_row', 'stream_row', 'stock_row', 'toolbar', 'status_y', 'right_x', 'list_fit', 'split_row', 'split_art', 'split_art_up', 'split_inset', 'modal')  # Geometry fields the payload reads at run time (themes.inc geom_vals), not immediates
 
 
 def folder_pitch(g):
@@ -861,15 +865,15 @@ NP_GRID_POS_PX = 18
 NP_GRID_POS_ASCENT = 14  # Inter's ascent at 18: 0.969 of its 1.21 em line, so its baseline sits on the art's bottom row
 NP_GRID_TIME_PX = 19
 NP_GRID_SECONDARY = '#ABABAB'  # Text Secondary; Light Mode flips it as every grey
-NP_GRID_ICON = 34  # More's and the heart's targets, their stock 50 px images centred in them
-NP_GRID_MORE_INSET = 12  # More's centre from the right column: its three dots end about on it
+NP_GRID_ICON = 34  # More's and the heart's targets, the theme's 20 px glyphs centred in them (np_bar.c np_glyphs)
+NP_GRID_MORE_INSET = 7  # More's centre from the right column: Phosphor's dots-three, 12.5 px of ink, ends on it
 NP_GRID_BAR = 6
 NP_GRID_TOUCH = 22  # the bar's target, short of the heart's above and the times' below
 NP_GRID_SLIDE_GAP = 5
 NP_GRID_TIMES_DY = 22
 NP_GRID_MODES_DY = 48
 NP_GRID_MODES = (88, 44)  # the play mode's target: both glyphs, 44 px apart (np_bar.c NP_MODES_APART)
-NP_GRID_DOTS_DY = 74
+NP_GRID_DOTS_DY = 70  # the page dots centred on y 302 on screen
 NP_GRID_MARGIN = 2  # hscroll_label's own margin each side of its text (stock's margin_left and margin_right)
 
 
@@ -920,7 +924,7 @@ def np_grid(root, named, g, title, artist, album, pos, remain):
     w, h = NP_GRID_MODES
     mode = named['img_playmode']
     mode[1] = [(375 - w) // 2, bar_y + NP_GRID_MODES_DY - h // 2, w, h]
-    mode[2]['opacity'] = '0'  # its target and handler stay; np_bar.c np_modes draws the pair over it
+    mode[2]['opacity'] = '0'  # its target stays, its halves np_bar.c np_mode_click's; np_modes draws the pair over it
     root[3].append(mode)
     np_info_table(named, g, slide_h)
 
@@ -1354,7 +1358,24 @@ def fit_rows(g, top, pitch):
     return (g.list_end - top) // pitch * pitch
 
 
+# The menus a modal set opens over the page under them (Geometry.modal): each stays the page its set makes, as a dialog.
+MODAL_PAGES = ('playermore_page.bin', 'localmusic/playlistsmore_page.bin')
+
+
+def modal_page(data):
+    """A page as a dialog with no slide: the window manager paints the page under it, which the payload dims and
+    insets the menu over (menu_modal.c modal_more). Its init makes it modeless (to_modal), so navigator_to returns."""
+    root = decode(data)
+    check(root[0] == 'window', 'Unexpected modal page')
+    root[0] = 'dialog'
+    root[1] = [0, 0, 375, 320]  # a window takes the screen from the window manager; a dialog keeps its own box
+    root[2].pop('anim_hint', None)
+    return encode(root)
+
+
 def patch_asset(path, data, g=SET0):  # pragma: no mutate block
+    if g.modal and path in MODAL_PAGES:
+        return modal_page(patch_asset(path, data, dataclasses.replace(g, modal=0)))
     geo = with_geometry(g)
     pitch, body, inset = page_rows(g, PAGE_KIND.get(path, 'text'))
     stock = path in STOCK_ROWS
