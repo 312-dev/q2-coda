@@ -195,7 +195,9 @@ Wear OS's position indicator, on the Q2's straight right edge:
 - Optional leading 40 px square art with 4 px corners (Albums) at x 24, 6 px down; text then
   starts at 72.
 - Dividers (Divider, 1 px) between two-line rows only, from the text column to the right column,
-  not drawn on either edge of the selected row. Single-line lists have no dividers.
+  not drawn on either edge of the selected row. Single-line lists have no dividers. Q2 Pod's own
+  two-line lists (Era, View Queue, Most Played, Ratings' lists) have them as stock's do, and end
+  on the last whole row above y 282 (`page_fit`).
 
 ### Song rows
 
@@ -206,8 +208,8 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   fits from the text column to the right column; the artist is dropped when less than about
   40 px would remain for it.
 - **A list reached through an artist** (their songs, one of their albums): no artist.
-- **Inside an album:** the track number in 15 px Text Tertiary right-aligned in a 14 px column
-  after the 24 px inset, the title from x 50, the length right-aligned on the right column in
+- **Inside an album:** the track number in 15 px Text Tertiary right-aligned in a 17 px column
+  after the 24 px inset, so two digits fit it, the title from x 50, the length right-aligned on the right column in
   15 px Text Tertiary, tabular digits.
 - Two of OLED's own options change this: **Song Artist** (Inline, Selected Row, Right, Off) and
   **Song Length** (Albums, All Lists, Off); a length takes the right column, so Right, and

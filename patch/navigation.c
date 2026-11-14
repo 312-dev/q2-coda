@@ -2589,8 +2589,16 @@ static void paint_selection(void *w, void *canvas) {
  * across the list. A row's two_lines is a few words of its children, on a pool of a few rows. A
  * page_list's rows are the view's own children, each page_detail high and named so, and every stock
  * scroll view comes here too: no walk, the screenful from the top's index, a name read only at that
- * height. Minimal stops at its empty sep. */
+ * height. Minimal stops at its empty sep. A theme with a divider (list.divider.ink) draws it under
+ * each two-line row followed by another, on the text and right columns, on neither edge of the
+ * selected row, a table's and a page_list's alike. */
 static int two_lines(void *row);
+/* A page_list's two-line row (coverflow.c page_row_detail): page_detail high, a label for its
+ * title and one for its second line (a stock row of that height, Streaming's, holds a button). */
+static int page_two(void *row) {
+    return I(row, W_H) == theme()->page_detail && widget_count_children(row) >= 2 &&
+           !tk_strcmp(widget_get_type(widget_get_child(row, 1)), "hscroll_label");
+}
 static void paint_separators(void *w, void *canvas) {
     rect_t old;
     int clip[4];
@@ -2616,6 +2624,23 @@ static void paint_separators(void *w, void *canvas) {
             rect_t r = bounds(&g_menu, i);
             if (i != sel && i + 1 != sel && r.h > geom(G_PITCH))
                 canvas_fill_rect(canvas, x, r.y + r.h - 1, end - x, 1);
+        }
+    } else if (div) { /* a page_list's two-line rows (Era, View Queue, Ratings): the same divider */
+        int top = I(w, SCROLL_Y), n = (int)widget_count_children(w), lit = -1,
+            first = top > 0 ? top / T->page_detail : 0, x = geom_val(V_TEXT_X),
+            end = I(w, W_W) - geom_val(V_RIGHT_X);
+        for (int i = first; sel_child && i < n && lit < 0; ++i) {
+            void *row = widget_get_child(w, i);
+            if (row == sel_child || P(sel_child, W_PARENT) == row) lit = i;
+        }
+        stock_canvas_set_fill_color(canvas, RGBA(div));
+        for (int i = first; i + 1 < n; ++i) {
+            void *row = widget_get_child(w, i), *next = widget_get_child(w, i + 1);
+            int y = I(row, W_Y) - top, rh = I(row, W_H);
+            if (y >= I(w, W_H)) break;
+            if (i != lit && i + 1 != lit && page_two(row) && page_two(next) &&
+                widget_get_visible(row) && widget_get_visible(next))
+                canvas_fill_rect(canvas, x, y + rh - 1, end - x, 1);
         }
     } else if (k == 2) {
         for (int i = 0; i < g_menu.n; ++i)
