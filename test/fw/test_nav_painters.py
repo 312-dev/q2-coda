@@ -3009,7 +3009,7 @@ def test_a_greyed_row_keeps_its_contrast_on_the_selection_and_carries_the_offlin
     struct.pack_into('<i', record, O['REC_TYPE'], 8)
     fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
     for i in (1, 2):  # Local Only: a server row can't play
-        fw.fn('catalogue_mark', None, C.c_void_p, C.c_void_p)(page.rows[i].parent.addr, C.addressof(record))
+        fw.fn('catalogue_mark', None, C.c_void_p, C.c_void_p, C.c_int)(page.rows[i].parent.addr, C.addressof(record), 0)
     page.paint()  # before the rows: the greyed rows' titles end clear of the mark's column (322 +- 10)
     assert [label.box[2] for label in labels] == [320, 278, 278, 320]
     assert text_ink(fw, st, labels[0]) == normal  # an ordinary row: as it was
@@ -3038,7 +3038,7 @@ def test_a_greyed_row_keeps_its_contrast_on_the_selection_and_carries_the_offlin
                                                ('search_dialog', 0, False)])
 def test_an_album_page_and_search_grey_their_songs_that_cannot_play(fw, st, name, tab, greyed):
     """An album's songs, and Search's songs, are a scroll_view's rows, one per record of the showlist (Search's:
-    p_deque_searchshowlist, while its Songs tab is lit), not a pooled table: with Local + Server, offline, a
+    p_deque_searchshowlist, the lit tab's rows), not a pooled table: with Local + Server, offline, a
     server song's row is greyed as the page paints; another page's rows, or another tab's, are left alone."""
     page = Page(fw, MODERN, name=name, LIBRARYSOURCE=b'1')
     if tab is not None:
