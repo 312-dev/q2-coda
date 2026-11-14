@@ -16,6 +16,7 @@
 { "photos_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/photos.c) */
 { "books_page", CTX_DYNAMIC, 0 },     /* runtime window (patch/books.c) */
 { "games_page", CTX_DYNAMIC, RING }, /* runtime window (patch/games.c) */
+{ "searchstrip_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/search_strip.c) */
 { "mostplayed_page", CTX_FIXED, 0 }, /* runtime window (patch/library_lists.c); fixed: the hold menu */
 { "shuffle_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/library_lists.c) */
 { "playlistedit_page", CTX_DYNAMIC, 0 },

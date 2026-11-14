@@ -70,7 +70,7 @@ int ringnav_localmusic(void *win, void *ctx) {
     for (int i = 0; i < L_STOCK; i++) stock[i] = widget_get_child(view, i);
     unsigned n = 0; /* each row moves to n as it comes, so Update Local Music, left, ends last */
     if (library_search())
-        widget_restack(library_row(view, (void *)0, stock_search, 0, "Search", 1), n++);
+        widget_restack(library_row(view, (void *)0, library_search_open, 0, "Search", 1), n++);
     widget_restack(library_row(view, "local_shuffle", shuffle_menu, 0, "Shuffle", 1), n++);
     static const unsigned char middle[] = { L_ARTISTS,   L_ALBUMS, L_SONGS, L_GENRES,
                                             L_PLAYLISTS, L_FAV,    L_ADDED, L_RECENT };

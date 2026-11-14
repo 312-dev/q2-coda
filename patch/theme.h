@@ -251,6 +251,10 @@ typedef struct {
     unsigned char np_layout; /* NP_* */
     cf_style_t cf;
     unsigned char art_square; /* art takes Corners: Square */
+    /* text entry the iPod's way: Search opens the letter strip (search_strip.c), the keyboard's
+     * keys are walked by the wheel (keyboard.c). In the padding after art_square, so
+     * sizeof(theme_t) stays 1624 */
+    unsigned char entry_ipod;
     /* page_list: a row, a row with a detail, the in-page title (0: the bar's) and the text's x; a
      * detail row's caption and detail boxes */
     short page_row, page_detail, page_title_h, page_x, page_cap_y, page_cap_h, page_det_y,

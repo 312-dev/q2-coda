@@ -2178,6 +2178,24 @@ def deque_of(fw, recs):
     fw.mock('fw_deque_at', lambda d, i, *_: recs[i].p if i < len(recs) else 0)
 
 
+@pytest.mark.parametrize('theme', ['oled', 'classic-light', 'minimal'])
+def test_the_bar_names_an_album_s_tracks_under_song_rows_and_an_artist_s_covers_under_a_status_row(fw, theme):
+    """OLED's one-line song rows take the album's name from the tracks' hidden caption (0: read it); an artist's
+    covers read the artist under a status row; anything else is Cover Flow."""
+    index = {t['id']: t['index'] for t in THEMES}[theme]
+    themed(fw, index)
+    recs = [Rec(artist='Bob Dylan', path='/a')]
+    deque_of(fw, recs)
+    title = fw.fn('coverflow_bar_title', C.c_char_p, C.c_int)
+    c = cf(fw)
+    c.albums, c.scoped, c.screen = 0x5000, ARTIST_ALBUMS, TRACKS
+    assert title(1) == (None if theme == 'oled' else b'Cover Flow')
+    c.screen = COVERS
+    assert title(1) == b'Bob Dylan' and title(0) == b'Cover Flow'
+    c.scoped = 0
+    assert title(1) == b'Cover Flow'
+
+
 def test_the_live_album_is_the_centre_card_while_the_covers_show(fw):
     s = Shelf(fw, n=3, index=1, scoped=RATED_ALBUMS)  # the rated albums: two, then their Sort card
     recs = [Rec('A'), Rec('B')]

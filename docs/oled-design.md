@@ -239,8 +239,9 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   too.
 - Which list is which comes from its page: Songs' page (`allmusic_page`, which also holds a genre's songs
   and the other lists stock opens there) is mixed, the artist page's songs are an artist's, the album page is an
-  album, Folder view (`folder_page`) a folder. Lists Q2 Pod draws itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep
-  their own rows.
+  album, Folder view (`folder_page`) a folder, and an album's tracks opened from Cover Flow are an album too (their
+  status row names the album, with no row of its own above the tracks). Lists Q2 Pod draws itself (Most Played,
+  Long Songs, Ratings) keep their own rows.
 
 ### Now Playing
 
@@ -376,7 +377,7 @@ pattern.
 | Artists, Genres, Composers          | List row                    |                                                                                                            |
 | Songs, a playlist's songs           | Song rows                   | The artist inline                                                                                          |
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
-| Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles                         |
+| Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; an artist's covers titled by the artist |
 | Playlists                           | Two-line row with icon      |                                                                                                            |
 | Hold menu                           | Dialog                      |                                                                                                            |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
@@ -388,6 +389,8 @@ pattern.
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
 | Quick Settings                      | Own                         | Tiles become rows: the theme has no tiles                                                                  |
+| Search                              | Own                         | An iPod classic's letter strip at y 216-254 under four single-line results ([ipod](ipod.md#search))         |
+| Keyboard                            | Own                         | Stock's keys as `#1C1C1E` boxes on black, the wheel's key in the accent ([ipod](ipod.md#keyboard))          |
 | Lock screen                         | Own                         | Clock 56 px Inter Medium centred, date 16 px Text Secondary, black                                         |
 
 The concept's Apple Music, Apple TV, CD sync and storage pages have no Q2 Pod equivalent and are
