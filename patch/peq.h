@@ -409,6 +409,20 @@ int airplay_on(void), airplay_lyrics(int *ms);
  * 0 when the card didn't take it. */
 int addon_fav(const char *id, const char *kind, const char *key, int on);
 int addon_fav_path(const char *path, int on);
+/* catalogue.c: the server library (docs/internals.md#server-library). catalogue_on: Local + Server;
+ * catalogue_path: a server row's path; catalogue_unavailable: a record that can't play now;
+ * catalogue_union: a Library query reading servertable too (0: as it is; the caller frees it);
+ * catalogue_load: ringnav_load's queue (0 as it is, 1 *own instead, 2 nothing loaded). */
+extern int catalogue_source;
+int catalogue_on(void), catalogue_path(const char *path), catalogue_unavailable(void *r);
+int catalogue_seconds(const char *path), catalogue_load(void *q, int *at, void **own);
+char *catalogue_union(const char *sql);
+const char *catalogue_rows(void); /* library_query's union, "" without one */
+void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);
+void catalogue_changed(void), catalogue_card_away(void), catalogue_rated(void *r, int hearts);
+void catalogue_bind(void *row, unsigned index), catalogue_mark(void *row, void *r);
+void catalogue_forget(void *row);
+int catalogue_greyed(void *w, unsigned *color);
 extern unsigned auto_nexts; /* playback.c ringnav_next: tracks that ended by themselves */
 int stream_cache(int spotify); /* navigation.c: Streaming's Configuration, a cap of 512 << it MB */
 void album_memory(void *r);

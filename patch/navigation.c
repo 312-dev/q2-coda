@@ -137,9 +137,11 @@ static int library_query(int content, const char *db, const char *sql, void *row
     }
     const char *from = library_music && sql ? strstr(sql, " from songtable") : 0;
     if (from) { /* library_first: the Unknown row's check, which one song answers */
+        /* Local + Server: the server's songs beside them (catalogue.c) */
         int n = tk_snprintf(filtered, sizeof filtered,
-                            "%.*s from (select * from songtable where %s)%s%s", (int)(from - sql),
-                            sql, MUSIC_WHERE, from + 15, library_first ? " limit 1" : "");
+                            "%.*s from (select * from songtable where %s%s)%s%s", (int)(from - sql),
+                            sql, MUSIC_WHERE, catalogue_rows(), from + 15,
+                            library_first ? " limit 1" : "");
         if (n < 0 || (unsigned)n >= sizeof filtered) return -1;
         sql = filtered;
     }
@@ -3148,7 +3150,8 @@ static int *const pod_values[] = { &st.charge_limit,
                                    &st.big_library,
                                    &st.playlist_cf,
                                    &st.scan_durations,
-                                   &st.cf_position };
+                                   &st.cf_position,
+                                   &catalogue_source };
 _Static_assert(POD_LOCKCLOCK == 6, "lockscreen.c passes pod_rows 6");
 _Static_assert(sizeof pod_values / sizeof *pod_values == POD_COUNT, "a pod_values per row");
 static const char *const pod_keys[] = { "CHARGELIMIT",
@@ -3174,7 +3177,8 @@ static const char *const pod_keys[] = { "CHARGELIMIT",
                                         "BIGLIBRARY",
                                         "PLAYLISTCF",
                                         "SCANDURATIONS",
-                                        "CFPOSITION" };
+                                        "CFPOSITION",
+                                        "LIBRARYSOURCE" };
 _Static_assert(sizeof pod_keys / sizeof *pod_keys == POD_COUNT, "a pod_keys entry per row");
 /* a row's choices: Artist albums three, Standby limit four, every other row two */
 static int pod_choices(unsigned i) { return i == POD_ARTIST_CF ? 3 : i == POD_STANDBY ? 4 : 2; }
@@ -3280,6 +3284,7 @@ static void pod_text(int i) {
         { "Playlist View: List", "Playlist View: Cover Flow" },
         { 0 }, /* Scan Song Durations: a switch */
         { 0 }, /* Position Bar: a switch */
+        { "Library: Local Only", "Library: Local + Server" },
     };
     _Static_assert(sizeof names / sizeof *names == POD_COUNT, "a names entry per row");
     if (i == POD_CF_SORT) {
@@ -3359,6 +3364,7 @@ static int pod_click(void *ctx, void *event) {
         write_int_config(*value, "Q2POD", pod_keys[i]);
         if (i == POD_SCAN_DURATIONS && !*value) durations_cancel();
         if (i == POD_CF_POSITION) coverflow_position_reset();
+        if (i == POD_LIBRARY_SOURCE) catalogue_changed();
         st.charge_at = 0;
         /* Control Device Volume: off, stock's gain back at once; on, bt_volume_poll's next pass
          * sends the Q2's level to the device. */
@@ -4328,6 +4334,7 @@ int ringnav_table_load(void *ctx, unsigned index, void *row) {
     int ret =
         ((int (*)(void *, unsigned, void *))P(P(row, W_PARENT), TABLE_LOAD_DATA))(ctx, index, row);
     row_faces(row);
+    catalogue_bind(row, index); /* greyed when it is a server row that can't play now */
     return ret;
 }
 
@@ -6027,6 +6034,7 @@ unsigned *ringnav_style_color(unsigned *color, void *style, const char *name, un
         return color;
     }
     if (st.paint_w && name && tk_str_end_with(name, "text_color")) {
+        if (catalogue_greyed(st.paint_w, color)) return color; /* a server row that can't play */
         if (kb_key(st.paint_w)) { /* kb_paint_key draws it */
             *color &= 0xffffff;
             return color;
@@ -6878,6 +6886,7 @@ int ringnav_display(void *win, void *ctx) {
         pod_rows(win, "scroll_view_display", POD_BIG_LIB, 1, cf_icons + 3);
         pod_rows(win, "scroll_view_display", POD_SCAN_DURATIONS, 1, cf_icons + 3);
         pod_rows(win, "scroll_view_display", POD_CF_POSITION, 1, cf_icons + 3);
+        pod_rows(win, "scroll_view_display", POD_LIBRARY_SOURCE, 1, cf_icons + 3);
         return result;
     }
     if (sub == DISPLAY_APPEARANCE) {

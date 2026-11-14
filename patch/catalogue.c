@@ -1,0 +1,1424 @@
+/* The server library (docs/internals.md#server-library, docs/server-library.md): a card app that
+ * knows a music server (q2app catalogue=1) writes the server's songs and playlists to
+ * /mnt/mmc/.<id>/catalogue.tsv, and with Local + Server on (LIBRARYSOURCE 1) they join the
+ * Library's lists beside the card's. The firmware never speaks to the server.
+ *
+ * Where they are kept: /mnt/mmc/.q2pod/catalogue.db, attached as schema cat to stock's shared
+ * connection (stock_db_open) and to Era's, so library_query's union reads servertable there.
+ * /mnt/data is too small for a large server's rows. A job on a pthread (cat_worker) writes a whole
+ * new file beside it, catalogue.db.new, from the old one and the app's file; the UI thread then
+ * detaches the old, renames the new over it and attaches again (cat_swap), so no reader ever waits
+ * on a long write and none sees half of one.
+ *
+ * A job imports an app's catalogue when its seq changes, or matches again when the card's library
+ * changed (library_gen moved: Update Local Music, a scan after files arrived). Matching hides a
+ * server song that is already a card file (cat_match: MusicBrainz id, then the same file, then the
+ * same tags) and links its sid to that file. Then the job builds the in-memory index the UI reads
+ * (cat_ix: by the path's 64-bit FNV-1a, each server row's or linked card file's sid, seconds and
+ * offline copy), which the swap takes.
+ *
+ * On the UI thread: availability (an offline copy, or online: Wi-Fi up and the app's server=up),
+ * catalogue.avail's changes to it, greyed rows, the play hand-off (catplay), the offline queue,
+ * and the ratings channel (ratings.out, ratings.in). */
+#include "navigation.h"
+
+#define CAT_DIR "/mnt/mmc/.q2pod"
+#define CAT_DB CAT_DIR "/catalogue.db"
+#define CAT_NEW CAT_DIR "/catalogue.db.new"
+#define CAT_APPS 4
+#define CAT_ID_BASE 0x40000000 /* server rows' ids: above any songtable id stock gives */
+#define CAT_APP_SPAN 0x01000000
+#define CAT_POLL_MS 1000
+#define CAT_SCAN_MS 10000 /* the card's apps looked for again this often */
+#define CAT_LINE 8192     /* a catalogue line read this far; a longer one is skipped */
+#define CAT_BATCH 64      /* rows per insert statement */
+#define CAT_SQL (CAT_BATCH * 2600)
+#define CATPLAY_WAIT_MS 4000
+#define CAT_GREY 0x666666 /* an unavailable row's text */
+#define CAT_GREY_ROWS 48  /* bound rows of stock's pooled tables, more than a screen holds */
+#define CAT_PLAYLISTS 100 /* stock's playlist headers are ids 0 to 99 */
+
+int catalogue_source __attribute__((section(".scratch"))); /* LIBRARYSOURCE: 1 Local + Server */
+
+typedef struct {
+    unsigned long long key; /* the path's FNV-1a 64: a server row's fileurl, a linked card file's */
+    unsigned sid, local;    /* offsets in the index's strings, 0 for none */
+    unsigned path;          /* the path itself */
+    int sec;                /* the catalogue's seconds */
+    unsigned char app, dup; /* the app's slot; dup: a card file the match linked */
+} cat_ent;
+
+typedef struct {
+    cat_ent *e;
+    unsigned n;
+    char *str; /* the strings, from offset 1 */
+    unsigned len, cap;
+    unsigned *by_sid; /* e's indices, by sid_key */
+} cat_ix;
+
+typedef struct {
+    char id[16];
+    int ratings;      /* q2app ratings=1 */
+    char seq[24];     /* the catalogue's seq taken last */
+    long avail_at;    /* catalogue.avail read this far */
+    int down;         /* its state file's server=down */
+    unsigned play;    /* its .play, hashed, when a catplay went */
+} cat_app_t;
+
+static struct {
+    cat_app_t app[CAT_APPS];
+    int napps;
+    unsigned scanned, polled;
+    int online;
+    /* the job: its thread, running, done (set by the thread), and what it was given and found */
+    unsigned long thread;
+    int running;
+    volatile int done;
+    int job_app;            /* the app imported, -1 for a match alone */
+    char job_seq[24];
+    char job_why[96];       /* its error, empty when it went well */
+    unsigned job_rows;
+    cat_ix job_ix;          /* the index it built */
+    unsigned gen;           /* library_gen the last job matched against */
+    int pending;            /* a match is due once no scan runs */
+    cat_ix ix;
+    void **stock_slot;      /* stock's handle's global (stock_db_open's a1) */
+    void *attached;         /* the stock handle cat is attached to */
+    void *grey[CAT_GREY_ROWS];
+    unsigned ngrey;
+    /* a catplay sent: its app, when, and the list to play offline if no answer comes */
+    int cp_app;
+    unsigned cp_at, cp_seq;
+    void *cp_list;
+    int cp_start;
+} cat __attribute__((section(".scratch")));
+
+static unsigned long long fnv64(const char *s) {
+    unsigned long long h = 0xcbf29ce484222325ull;
+    while (s && *s) h = (h ^ (unsigned char)*s++) * 0x100000001b3ull;
+    return h;
+}
+
+int catalogue_on(void) {
+    pod_settings();
+    return catalogue_source == 1;
+}
+
+/* ---- The index (built on the job's thread, read on the UI thread once swapped in) ---- */
+
+static void ix_free(cat_ix *x) {
+    free(x->e), free(x->str), free(x->by_sid);
+    memset(x, 0, sizeof *x);
+}
+static unsigned ix_put(cat_ix *x, const char *s) {
+    if (!s || !*s) return 0;
+    unsigned k = strlen(s) + 1;
+    if (!x->cap) x->len = 1; /* offset 0 is none */
+    if (x->len + k > x->cap) {
+        unsigned cap = (x->cap + k) * 2;
+        char *str = realloc(x->str, cap);
+        if (!str) return 0;
+        x->str = str, x->cap = cap;
+    }
+    memcpy(x->str + x->len, s, k);
+    x->len += k;
+    return x->len - k;
+}
+static int ent_cmp(const void *a, const void *b) {
+    unsigned long long x = ((const cat_ent *)a)->key, y = ((const cat_ent *)b)->key;
+    return x < y ? -1 : x > y;
+}
+static cat_ent *ix_find(const cat_ix *x, unsigned long long key) {
+    unsigned lo = 0, hi = x->n;
+    while (lo < hi) {
+        unsigned mid = (lo + hi) / 2;
+        if (x->e[mid].key < key)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo < x->n && x->e[lo].key == key ? &x->e[lo] : 0;
+}
+static const char *ix_str(const cat_ix *x, unsigned off) { return off ? x->str + off : ""; }
+static const cat_ix *sid_ix;
+static int sid_cmp(const void *a, const void *b) {
+    const cat_ent *x = &sid_ix->e[*(const unsigned *)a], *y = &sid_ix->e[*(const unsigned *)b];
+    if (x->app != y->app) return x->app < y->app ? -1 : 1;
+    return strcmp(ix_str(sid_ix, x->sid), ix_str(sid_ix, y->sid));
+}
+/* app's sid's entry, or 0: a server row's, else a linked card file's. */
+static cat_ent *ix_sid(const cat_ix *x, int app, const char *sid) {
+    unsigned lo = 0, hi = x->n;
+    while (lo < hi && x->by_sid) {
+        unsigned mid = (lo + hi) / 2;
+        const cat_ent *e = &x->e[x->by_sid[mid]];
+        int c = e->app != app ? (e->app < app ? -1 : 1) : strcmp(ix_str(x, e->sid), sid);
+        if (c < 0)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    cat_ent *e = lo < x->n && x->by_sid ? &x->e[x->by_sid[lo]] : 0;
+    return e && e->app == app && !strcmp(ix_str(x, e->sid), sid) ? e : 0;
+}
+static int ix_sort(cat_ix *x) {
+    qsort(x->e, x->n, sizeof *x->e, ent_cmp);
+    if (!(x->by_sid = calloc(x->n + 1, sizeof *x->by_sid))) return 0;
+    for (unsigned i = 0; i < x->n; ++i) x->by_sid[i] = i;
+    sid_ix = x; /* the job's thread alone sorts */
+    qsort(x->by_sid, x->n, sizeof *x->by_sid, sid_cmp);
+    return 1;
+}
+
+/* ---- Normalised tags, for the match (docs/server-library.md#duplicates) ---- */
+
+/* An edition note in brackets or after " - ": cut when it names one of these, unless it says
+ * live (a live take is another recording). */
+static int edition_note(const char *s, unsigned n) {
+    static const char *const words[] = { "remaster", "mix",    "edition", "version", "mono",
+                                         "stereo",   "deluxe", "bonus",   "anniversary" };
+    char low[96];
+    unsigned k = n < sizeof low - 1 ? n : sizeof low - 1;
+    for (unsigned i = 0; i < k; ++i) low[i] = (char)(s[i] >= 'A' && s[i] <= 'Z' ? s[i] + 32 : s[i]);
+    low[k] = 0;
+    if (strstr(low, "live")) return 0;
+    for (unsigned i = 0; i < sizeof words / sizeof *words; ++i)
+        if (strstr(low, words[i])) return 1;
+    return 0;
+}
+/* s normalised into out: a "feat." part and trailing edition notes cut, then lower case, letters
+ * and digits only (UTF-8's other bytes kept). Its FNV-1a 32, 0 for an empty one. */
+unsigned cat_norm(const char *s, char *out, unsigned size) {
+    unsigned n = s ? strlen(s) : 0, k = 0;
+    char low[512];
+    if (n >= sizeof low) n = sizeof low - 1;
+    for (unsigned i = 0; i < n; ++i) low[i] = (char)(s[i] >= 'A' && s[i] <= 'Z' ? s[i] + 32 : s[i]);
+    low[n] = 0;
+    static const char *const feats[] = { " feat.", " feat ", " ft.", "(feat.", "[feat.", "(ft.",
+                                         " featuring " };
+    for (unsigned i = 0; i < sizeof feats / sizeof *feats; ++i) {
+        char *f = strstr(low, feats[i]);
+        if (f && f > low) *f = 0, n = (unsigned)(f - low);
+    }
+    for (int again = 1; again && n;) { /* trailing notes, the last first */
+        again = 0;
+        while (n && low[n - 1] == ' ') low[--n] = 0;
+        char close = n ? low[n - 1] : 0, open = close == ')' ? '(' : close == ']' ? '[' : 0;
+        if (open) {
+            unsigned i = n - 1;
+            while (i && low[i] != open) --i;
+            if (low[i] == open && i && edition_note(low + i, n - i)) low[n = i] = 0, again = 1;
+        } else {
+            char *d = 0;
+            for (char *p = strstr(low, " - "); p; p = strstr(p + 1, " - ")) d = p;
+            if (d && d > low && edition_note(d + 3, n - (unsigned)(d - low) - 3))
+                *d = 0, n = (unsigned)(d - low), again = 1;
+        }
+    }
+    unsigned h = FNV_SEED;
+    for (unsigned i = 0; i < n; ++i) {
+        unsigned char c = (unsigned char)low[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c >= 0x80)) continue;
+        if (out && k + 1 < size) out[k] = (char)c;
+        ++k;
+        h = (h ^ c) * 16777619u;
+    }
+    if (out && size) out[k < size ? k : size - 1] = 0;
+    return k ? h | !h : 0;
+}
+
+/* ---- Card files, read only for a match's candidates ---- */
+
+/* The file's MusicBrainz recording id into out (37 bytes), empty if none: a Vorbis comment's
+ * MUSICBRAINZ_TRACKID (FLAC, Ogg), or ID3's UFID frame owned by http://musicbrainz.org. Only the
+ * first CAT_TAGS bytes: tags come first, before pictures as Picard writes them.
+ * ponytail: a FLAC whose pictures come before its comments is not read past CAT_TAGS. */
+#define CAT_TAGS (128 << 10)
+void cat_mbid(const char *path, char *out) {
+    out[0] = 0;
+    void *f = fopen(path, "rb");
+    char *b = f ? calloc(1, CAT_TAGS + 1) : 0;
+    unsigned n = b ? fread(b, 1, CAT_TAGS, f) : 0;
+    if (f) fclose(f);
+    if (!b) return;
+    static const char vorbis[] = "musicbrainz_trackid=", ufid[] = "UFID";
+    static const char owner[] = "http://musicbrainz.org";
+    for (unsigned i = 0; i + sizeof vorbis - 1 + 36 <= n && !out[0]; ++i) {
+        if ((b[i] | 32) == 'm' && !strncasecmp(b + i, vorbis, sizeof vorbis - 1)) {
+            memcpy(out, b + i + sizeof vorbis - 1, 36), out[36] = 0;
+        } else if (b[i] == 'U' && !memcmp(b + i, ufid, 4) && i + 10 + sizeof owner + 36 <= n &&
+                   !memcmp(b + i + 10, owner, sizeof owner)) { /* the frame's owner, its NUL */
+            memcpy(out, b + i + 10 + sizeof owner, 36), out[36] = 0;
+        }
+    }
+    for (unsigned i = 0; out[i]; ++i) /* an id is hex and dashes; anything else is not one */
+        if (!((out[i] >= '0' && out[i] <= '9') || ((out[i] | 32) >= 'a' && (out[i] | 32) <= 'f') ||
+              out[i] == '-'))
+            out[0] = 0;
+    free(b);
+}
+static long cat_size(const char *path) {
+    unsigned sx[64]; /* struct statx: stx_size at byte 40 */
+    if (ringnav_statx(-100, path, 0, 0x201 /* TYPE, SIZE */, sx) || (sx[7] & 0170000) != 0100000)
+        return -1;
+    return (long)sx[10];
+}
+static int cat_seconds(const char *path) {
+    void *f = taglib_file_new(path, 1);
+    void *p = f ? taglib_file_audioproperties(f) : (void *)0;
+    int sec = p ? ((int (*)(void *))(*(void ***)p)[3])(p) : 0; /* AudioProperties::length() */
+    if (f) taglib_file_free(f);
+    return sec > 0 ? sec : -1;
+}
+
+/* ---- The job (its own connection; touches only files, the database and its own fields) ---- */
+
+typedef struct {
+    char *path;
+    unsigned title, artist, aa, album; /* cat_norm's hashes */
+    int track;
+    long size;    /* -2 not read yet */
+    int sec;      /* -2 not read yet */
+    char mbid[37];
+    int mbid_read;
+} card_t;
+typedef struct {
+    void *db;
+    char *sql;
+    unsigned len;
+    int rows, bad;
+    card_t *card;
+    unsigned ncard, cap;
+    unsigned *by_size, nsize; /* untagged card songs, by size */
+    unsigned *dup, ndup, dcap; /* matched: a server row's id and its card row, in pairs */
+    cat_ix *ix;
+} job_t;
+static job_t jb __attribute__((section(".scratch")));
+
+/* SQL is built piece by piece into a buffer whose end is CAT_SLACK short of its size: a piece
+ * that does not fit leaves o at end or past it (a separator's byte or two lands in the slack), and
+ * a statement whose o is not short of end is never run, so a cut one (a delete without its where)
+ * can't be. */
+#define CAT_SLACK 64
+static unsigned room(const char *o, const char *end) { return o < end ? (unsigned)(end - o) : 0; }
+static char *clip(char *o, char *end, int n) {
+    return o >= end ? o : n >= 0 && (unsigned)n < room(o, end) ? o + n : end;
+}
+#define PUT(o, end, ...) ((o) = clip((o), (end), tk_snprintf((o), room((o), (end)), __VA_ARGS__)))
+/* s quoted for SQL into o, as far as end. */
+static char *sq(char *o, char *end, const char *s) {
+    if (o + 2 >= end) return o > end ? o : end;
+    *o++ = '\'';
+    for (; s && *s; ++s) {
+        if (o + 3 >= end) return end;
+        if (*s == '\'') *o++ = '\'';
+        *o++ = *s;
+    }
+    *o++ = '\'';
+    return o;
+}
+#define JEND (jb.sql + CAT_SQL - CAT_SLACK)
+static int job_exec(const char *sql) { return sqlite3_exec(jb.db, sql, 0, 0, 0) ? (jb.bad = 1) : 0; }
+/* jb.sql as built up to o, run when it fit. */
+static int job_run(char *o) {
+    if (o >= JEND) return jb.bad = 1;
+    *o = 0;
+    return job_exec(jb.sql);
+}
+
+static int card_row(void *ctx, int n, char **v, char **c) {
+    if (jb.ncard == jb.cap) {
+        unsigned cap = jb.cap ? jb.cap * 2 : 1024;
+        card_t *m = realloc(jb.card, cap * sizeof *m);
+        if (!m) return jb.bad = 1;
+        jb.card = m, jb.cap = cap;
+    }
+    card_t *k = &jb.card[jb.ncard];
+    memset(k, 0, sizeof *k);
+    if (!v[0] || !(k->path = strdup(v[0]))) return 0;
+    k->title = cat_norm(v[1], 0, 0), k->artist = cat_norm(v[2], 0, 0);
+    k->aa = cat_norm(v[3], 0, 0), k->album = cat_norm(v[4], 0, 0);
+    k->track = v[5] ? atoi(v[5]) : 0;
+    k->size = k->sec = -2;
+    ++jb.ncard;
+    return 0;
+}
+static int card_cmp(const void *a, const void *b) {
+    unsigned x = ((const card_t *)a)->title, y = ((const card_t *)b)->title;
+    return x < y ? -1 : x > y;
+}
+static int size_cmp(const void *a, const void *b) {
+    long x = jb.card[*(const unsigned *)a].size, y = jb.card[*(const unsigned *)b].size;
+    return x < y ? -1 : x > y;
+}
+static void cards_free(void) {
+    for (unsigned i = 0; i < jb.ncard; ++i) free(jb.card[i].path);
+    free(jb.card), free(jb.by_size), free(jb.dup);
+    jb.card = 0, jb.by_size = jb.dup = 0;
+    jb.ncard = jb.cap = jb.nsize = jb.ndup = jb.dcap = 0;
+}
+/* The card's songs, by normalised title; the untagged (no title) by size as well. */
+static int cards_read(void) {
+    if (sqlite3_exec(jb.db, "select fileurl,name,songer,albumsonger,album,track from songtable",
+                     card_row, 0, 0)) {
+        jb.ncard = 0; /* no songtable before the first scan: nothing on the card to match */
+        return !jb.bad;
+    }
+    qsort(jb.card, jb.ncard, sizeof *jb.card, card_cmp);
+    unsigned untagged = 0;
+    for (unsigned i = 0; i < jb.ncard; ++i) untagged += !jb.card[i].title;
+    if (untagged && !(jb.by_size = calloc(untagged, sizeof *jb.by_size))) return 0;
+    for (unsigned i = 0; i < jb.ncard; ++i)
+        if (!jb.card[i].title && (jb.card[i].size = cat_size(jb.card[i].path)) > 0)
+            jb.by_size[jb.nsize++] = i;
+    qsort(jb.by_size, jb.nsize, sizeof *jb.by_size, size_cmp);
+    return !jb.bad;
+}
+
+enum { M_NONE, M_MBID, M_FILE, M_TAGS };
+/* Whether server song s (servermeta's columns, as cat_server_row has them) is card song k, and
+ * by which layer. A layer that disagrees stops the weaker ones (docs/server-library.md). */
+typedef struct {
+    unsigned title, artist, aa, album;
+    int track, sec;
+    long size;
+    const char *suffix, *mbid;
+} srv_t;
+int cat_same(const srv_t *s, card_t *k) {
+    if (s->mbid && *s->mbid) {
+        if (!k->mbid_read) cat_mbid(k->path, k->mbid), k->mbid_read = 1;
+        if (k->mbid[0]) return strcasecmp(s->mbid, k->mbid) ? M_NONE : M_MBID;
+    }
+    if (k->size == -2) k->size = cat_size(k->path);
+    if (k->sec == -2) k->sec = cat_seconds(k->path);
+    const char *ext = strrchr(k->path, '.');
+    int suffix = ext && s->suffix && !strcasecmp(ext + 1, s->suffix);
+    int d = k->sec < 0 || s->sec <= 0 ? 1 << 30 : k->sec > s->sec ? k->sec - s->sec : s->sec - k->sec;
+    if (suffix && k->size > 0 && k->size == s->size && d <= 1) return M_FILE;
+    if (suffix && k->size > 0 && s->size > 0 && k->size != s->size && d > 2)
+        return M_NONE; /* the same kind of file, but another length: another recording */
+    int tags = s->title && k->title == s->title && k->album == s->album &&
+               (k->artist == s->artist || (k->aa && k->aa == s->aa)) && k->track == s->track;
+    return tags && d <= 2 ? M_TAGS : M_NONE;
+}
+static void dup_add(unsigned id, unsigned card) {
+    if (jb.ndup + 2 > jb.dcap) {
+        unsigned cap = jb.dcap ? jb.dcap * 2 : 256;
+        unsigned *d = realloc(jb.dup, cap * sizeof *d);
+        if (!d) {
+            jb.bad = 1;
+            return;
+        }
+        jb.dup = d, jb.dcap = cap;
+    }
+    jb.dup[jb.ndup++] = id, jb.dup[jb.ndup++] = card;
+}
+/* servermeta's id,title,artist,aa,album,track,seconds,size,suffix,mbid */
+static int cat_server_row(void *ctx, int n, char **v, char **c) {
+    srv_t s = { (unsigned)atoi(v[1] ?: "0"), (unsigned)atoi(v[2] ?: "0"), (unsigned)atoi(v[3] ?: "0"),
+                (unsigned)atoi(v[4] ?: "0"), atoi(v[5] ?: "0"),  atoi(v[6] ?: "0"),
+                atoi(v[7] ?: "0"),           v[8],               v[9] };
+    unsigned id = (unsigned)atoi(v[0]);
+    unsigned lo = 0, hi = jb.ncard;
+    while (lo < hi) /* the first of that title */
+        if (jb.card[(lo + hi) / 2].title < s.title)
+            lo = (lo + hi) / 2 + 1;
+        else
+            hi = (lo + hi) / 2;
+    for (unsigned i = lo; s.title && i < jb.ncard && jb.card[i].title == s.title; ++i)
+        if (cat_same(&s, &jb.card[i])) {
+            dup_add(id, i);
+            return jb.bad;
+        }
+    lo = 0, hi = jb.nsize; /* the untagged: the same file only */
+    while (lo < hi)
+        if (jb.card[jb.by_size[(lo + hi) / 2]].size < s.size)
+            lo = (lo + hi) / 2 + 1;
+        else
+            hi = (lo + hi) / 2;
+    for (unsigned i = lo; i < jb.nsize && jb.card[jb.by_size[i]].size == s.size; ++i)
+        if (cat_same(&s, &jb.card[jb.by_size[i]]) == M_FILE) {
+            dup_add(id, jb.by_size[i]);
+            break;
+        }
+    return jb.bad;
+}
+
+/* Each server song in nw matched against the card; dup set on those that are card files, and
+ * servertable rebuilt from serverall without them. */
+static void cat_match(void) {
+    if (!cards_read() ||
+        sqlite3_exec(jb.db,
+                     "select id,ntitle,nartist,naa,nalbum,track,seconds,size,suffix,mbid from "
+                     "nw.servermeta",
+                     cat_server_row, 0, 0))
+        jb.bad = 1;
+    job_exec("update nw.servermeta set dup=null");
+    for (unsigned i = 0; !jb.bad && i < jb.ndup; i += 2) {
+        char *o = jb.sql;
+        PUT(o, JEND, "update nw.servermeta set dup=");
+        o = sq(o, JEND, jb.card[jb.dup[i + 1]].path);
+        PUT(o, JEND, " where id=%u", jb.dup[i]);
+        job_run(o);
+    }
+    job_exec("delete from nw.servertable;insert into nw.servertable select s.* from nw.serverall s "
+             "join nw.servermeta m on m.id=s.id where m.dup is null");
+    cards_free();
+}
+
+/* The percent escapes of the card-app channel undone in place (docs/librespot.md). */
+static int hexv(char c) {
+    return c >= '0' && c <= '9' ? c - '0' : (c | 32) >= 'a' && (c | 32) <= 'f' ? (c | 32) - 'a' + 10 : -1;
+}
+static void unescape(char *s) {
+    char *o = s;
+    for (; *s; ++s)
+        if (*s == '%' && hexv(s[1]) >= 0 && hexv(s[2]) >= 0)
+            *o++ = (char)(hexv(s[1]) << 4 | hexv(s[2])), s += 2;
+        else
+            *o++ = *s;
+    *o = 0;
+}
+/* line split at tabs into f (at most max), unescaped; how many */
+static int split(char *line, char **f, int max) {
+    int n = 0;
+    for (char *p = line; n < max;) {
+        f[n++] = p;
+        char *t = strstr(p, "\t");
+        if (!t) break;
+        *t = 0, p = t + 1;
+    }
+    for (int i = 0; i < n; ++i) unescape(f[i]);
+    return n;
+}
+
+/* The letter stock files a title under (songtable's Initial): its first letter upper-cased, else
+ * '#'. ponytail: stock gives a CJK title its pinyin's letter; here those are '#'. */
+static int initial(const char *t) {
+    unsigned char c = t ? (unsigned char)*t : 0;
+    if (c >= 'a' && c <= 'z') c -= 32;
+    return c >= 'A' && c <= 'Z' ? c : '#';
+}
+
+typedef struct {
+    int slot;
+    const char *id;
+    unsigned next;  /* the next row's id */
+    unsigned pending;
+    char *o;        /* the open insert's end */
+    char *meta;     /* servermeta's insert, built beside it */
+    char *mo;
+    unsigned lists; /* catalogue playlists, for the playlist pass */
+} imp_t;
+
+#define MEND(im) ((im)->meta + CAT_SQL - CAT_SLACK)
+/* The open inserts run, if any: each whole, or the import fails (job_run). */
+static void imp_flush(imp_t *im) {
+    if (!im->pending) return;
+    im->pending = 0;
+    if (im->mo >= MEND(im)) {
+        jb.bad = 1;
+        return;
+    }
+    *im->mo = 0;
+    if (!job_run(im->o)) job_exec(im->meta);
+}
+/* An s row: serverall's row with songtable's columns, servermeta's with the rest. */
+static void imp_song(imp_t *im, char **f, int n) {
+    /* s sid title artist albumartist album albumid year disc track seconds genre suffix local
+     * size mbid: the last three may be missing (an app before them) */
+    if (n < 13 || !*f[1] || !*f[6] || !*f[12] || strstr(f[1], "/") || strstr(f[6], "/") ||
+        strstr(f[12], "/") || !strcmp(f[1], "..") || !strcmp(f[6], ".."))
+        return; /* no sid, album id or suffix, or one that is not a plain name */
+    /* a row is at most a line's fields, each quote doubled, and the url and name made from them */
+    if (im->pending && (room(im->o, JEND) < 2 * CAT_LINE + 2048 ||
+                        room(im->mo, MEND(im)) < 2 * CAT_LINE + 2048))
+        imp_flush(im);
+    char *o = im->o, *end = JEND, *mend = MEND(im);
+    if (!im->pending) {
+        o = jb.sql, im->mo = im->meta;
+        PUT(o, end, "insert into nw.serverall values ");
+        PUT(im->mo, mend, "insert into nw.servermeta values ");
+    } else
+        *o++ = ',', *im->mo++ = ',';
+    char url[512], name[600];
+    tk_snprintf(url, sizeof url, "/mnt/mmc/.%s/cat/%s/%s.%s", im->id, f[6], f[1], f[12]);
+    tk_snprintf(name, sizeof name, "%s.%s", *f[2] ? f[2] : f[1], f[12]);
+    const char *local = n > 13 && card_path(f[13]) ? f[13] : "";
+    unsigned id = im->next++;
+    PUT(o, end, "(%u,", id);
+    o = sq(o, end, name), *o++ = ',';
+    o = sq(o, end, url), *o++ = ',';
+    o = sq(o, end, f[5]), *o++ = ',';  /* album */
+    o = sq(o, end, f[3]), *o++ = ',';  /* songer: the artist */
+    o = sq(o, end, f[11]), *o++ = ','; /* style: the genre */
+    o = sq(o, end, f[2]), *o++ = ',';  /* name: the title */
+    o = sq(o, end, ""), *o++ = ',';    /* composer */
+    o = sq(o, end, f[4]), *o++ = ',';  /* albumsonger */
+    PUT(o, end, "%d,%d,%d,0,0,0,%d,0,0)", atoi(f[7]), atoi(f[9]), atoi(f[8]), initial(f[2]));
+    im->o = o;
+    o = im->mo;
+    PUT(o, mend, "(%u,", id);
+    o = sq(o, mend, url), *o++ = ',';
+    o = sq(o, mend, im->id), *o++ = ',';
+    o = sq(o, mend, f[1]), *o++ = ',';
+    if (*local)
+        o = sq(o, mend, local);
+    else
+        PUT(o, mend, "null");
+    PUT(o, mend, ",%d,%d,", atoi(f[10]), n > 14 ? atoi(f[14]) : 0);
+    o = sq(o, mend, n > 15 ? f[15] : ""), *o++ = ',';
+    o = sq(o, mend, f[12]);
+    /* the normalised tags' hashes, as signed ints: SQLite's and atoi's range */
+    PUT(o, mend, ",null,%d,%d,%d,%d,%d)", (int)cat_norm(f[2], 0, 0), (int)cat_norm(f[3], 0, 0),
+        (int)cat_norm(f[4], 0, 0), (int)cat_norm(f[5], 0, 0), atoi(f[9]));
+    im->mo = o;
+    if (++im->pending == CAT_BATCH) imp_flush(im);
+}
+
+/* A p or i row, kept for the playlist pass: nw.serverpl(app, pid, name) and serveritem(app, pid,
+ * sid, path), in the file's order; path a synced song's card file, which has no s row. */
+static void imp_list(imp_t *im, char **f, int n) {
+    char *o = jb.sql;
+    if (n < 3) return;
+    imp_flush(im);
+    if (f[0][0] == 'p') {
+        PUT(o, JEND, "insert into nw.serverpl values (");
+        o = sq(o, JEND, im->id), *o++ = ',', o = sq(o, JEND, f[1]), *o++ = ',';
+        o = sq(o, JEND, f[2]);
+        ++im->lists;
+    } else {
+        PUT(o, JEND, "insert into nw.serveritem values (");
+        o = sq(o, JEND, im->id), *o++ = ',', o = sq(o, JEND, f[1]), *o++ = ',';
+        o = sq(o, JEND, f[2]), *o++ = ',';
+        o = sq(o, JEND, n > 3 && card_path(f[3]) ? f[3] : "");
+    }
+    PUT(o, JEND, ")");
+    job_run(o);
+}
+
+static const char *const SCHEMA =
+    "create table if not exists nw.serverall(id integer,filename,fileurl,album,songer,style,name,"
+    "composer,albumsonger,year integer,track integer,cd_num integer,time integer,time_end "
+    "integer,time_create integer,Initial integer,bitdepth integer,samprate integer);"
+    "create table if not exists nw.servertable as select * from nw.serverall where 0;"
+    "create table if not exists nw.servermeta(id integer primary key,fileurl,app,sid,local,"
+    "seconds integer,size integer,mbid,suffix,dup,ntitle integer,nartist integer,naa integer,"
+    "nalbum integer,track integer);"
+    "create table if not exists nw.serverpl(app,pid,name);"
+    "create table if not exists nw.serveritem(app,pid,sid,path);"
+    "create table if not exists nw.serverlists(app,pid,list integer,twin integer);"
+    "create index if not exists nw.servertable_album on servertable(album collate nocase);"
+    "create index if not exists nw.servermeta_url on servermeta(fileurl);";
+
+/* The job's copy of the old file's tables into nw, less app's rows when it is imported again
+ * (serverlists kept: which stock playlist is the app's stays known across imports). */
+static void copy_old(const char *skip) {
+    if (sqlite3_exec(jb.db, "select 1 from cat.servermeta limit 0", 0, 0, 0)) return; /* none */
+    static const char *const tables[] = { "serverall", "servermeta", "serverpl", "serveritem",
+                                          "serverlists" };
+    for (unsigned i = 0; i < sizeof tables / sizeof *tables; ++i) {
+        char *o = jb.sql;
+        PUT(o, JEND, "insert into nw.%s select * from cat.%s", tables[i], tables[i]);
+        if (skip && i == 0)
+            PUT(o, JEND, " where id not in (select id from cat.servermeta where app="),
+                o = sq(o, JEND, skip), PUT(o, JEND, ")");
+        else if (skip && i < 4)
+            PUT(o, JEND, " where app<>"), o = sq(o, JEND, skip);
+        job_run(o);
+    }
+}
+
+/* The app's catalogue.tsv read into nw, streamed a line at a time. 0 and why when it is not one;
+ * a seq other than job_seq (rewritten since it was seen) is an error too: the next poll sees it.
+ * The s, p and i lines read (jb.rows, a row skipped as too long or not well formed included) must
+ * be the header's rows=, so a file cut short is not taken for a smaller library. */
+static int import_file(int slot, const char *id, const char *seq, char *why, unsigned size) {
+    char path[64], *line = calloc(1, CAT_LINE + 1), *f[20];
+    tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/catalogue.tsv", id);
+    void *in = line ? fopen(path, "rb") : 0;
+    imp_t im = { slot, id, CAT_ID_BASE + (unsigned)slot * CAT_APP_SPAN, 0, 0, calloc(1, CAT_SQL), 0, 0 };
+    int ok = in && im.meta, first = 1, skipping = 0, rows = -1, end = 0;
+    if (!ok) tk_snprintf(why, size, "Couldn't read the catalogue");
+    unsigned k = 0, got = 0;
+    char buf[4096];
+    while (ok && !end) {
+        got = (unsigned)fread(buf, 1, sizeof buf, in);
+        end = !got;
+        for (unsigned i = 0; ok && i < (end ? 1 : got); ++i) {
+            if (end && !k) break;  /* the file ended with its newline */
+            if (!end && buf[i] != '\n') {
+                if (k < CAT_LINE)
+                    line[k++] = buf[i];
+                else
+                    skipping = 1;
+                continue;
+            }
+            if (k && line[k - 1] == '\r') --k;
+            line[k] = 0;
+            int long_line = skipping;
+            k = 0, skipping = 0;
+            if (first) {
+                first = 0;
+                char want[40];
+                tk_snprintf(want, sizeof want, "\tseq=%s\t", seq);
+                const char *r = strstr(line, "\trows=");
+                rows = r && r[6] >= '0' && r[6] <= '9' ? atoi(r + 6) : -1;
+                if (long_line || !tk_str_start_with(line, "#Q2CAT/1\t") || !strstr(line, want) ||
+                    rows < 0) {
+                    tk_snprintf(why, size, "Not a Q2CAT/1 catalogue with seq %s", seq);
+                    ok = 0;
+                }
+                continue;
+            }
+            if ((line[0] == 's' || line[0] == 'p' || line[0] == 'i') && line[1] == '\t') ++jb.rows;
+            if (long_line) continue;
+            int n = split(line, f, 20);
+            if (!strcmp(f[0], "s"))
+                imp_song(&im, f, n);
+            else if (!strcmp(f[0], "p") || !strcmp(f[0], "i"))
+                imp_list(&im, f, n);
+            if (im.next - CAT_ID_BASE - (unsigned)slot * CAT_APP_SPAN >= CAT_APP_SPAN) {
+                tk_snprintf(why, size, "Too many songs");
+                ok = 0;
+            }
+            if (jb.bad) tk_snprintf(why, size, "Couldn't write the catalogue"), ok = 0;
+        }
+    }
+    if (ok && first) tk_snprintf(why, size, "Empty file"), ok = 0;
+    if (ok && jb.rows != rows) tk_snprintf(why, size, "Read %d of %d rows", jb.rows, rows), ok = 0;
+    if (ok) imp_flush(&im);
+    if (in) fclose(in);
+    free(line), free(im.meta);
+    return ok && !jb.bad;
+}
+
+/* ---- Playlists: each catalogue playlist is a stock playlist (playlist's rows: a header id 0-99
+ * whose cd_num is itself, its items' cd_num that id), so Library's Playlists lists them. A server
+ * row's item is its servertable row; a linked song's, its card file's. A playlist gone from the
+ * catalogue goes from the Q2 too. A playlist the app also synced to the card as an .m3u (imported
+ * by the library extension, so a stock playlist of that name holding those card files in that
+ * order) is its twin: the catalogue's takes the twin's place rather than showing beside it, and is
+ * only unlinked, not deleted, when it leaves the catalogue. A playlist of the user's with that name
+ * and other songs keeps the name, and the catalogue's is left out. Turning Local + Server off
+ * keeps them all (server rows greyed: catalogue_unavailable). ---- */
+
+static int one_int(void *ctx, int n, char **v, char **c) {
+    *(int *)ctx = v[0] ? atoi(v[0]) : -1;
+    return 0;
+}
+static int pl_used(void *ctx, int n, char **v, char **c) {
+    int id = v[0] ? atoi(v[0]) : -1;
+    if (id >= 0 && id < CAT_PLAYLISTS) ((unsigned char *)ctx)[id] = 1;
+    return 0;
+}
+typedef struct {
+    char app[16], pid[128], name[128];
+} pl_t;
+static int pl_row(void *ctx, int n, char **v, char **c) {
+    pl_t **p = ctx;
+    if (!v[0] || !v[1] || !v[2]) return 0;
+    tk_snprintf((*p)->app, sizeof(*p)->app, "%s", v[0]);
+    tk_snprintf((*p)->pid, sizeof(*p)->pid, "%s", v[1]);
+    tk_snprintf((*p)->name, sizeof(*p)->name, "%s", v[2]);
+    ++*p;
+    return 0;
+}
+/* jb.sql up to o run for its one number, into *v (left as it is when there is none). */
+static void job_int(char *o, int *v) {
+    if (o >= JEND) return;
+    *o = 0;
+    sqlite3_exec(jb.db, jb.sql, one_int, v, 0);
+}
+/* A catalogue item's card file: a synced song's path, or the card file the match linked. */
+#define PL_CARD "coalesce(nullif(i.path,''),m.dup)"
+/* Whether stock playlist list is p's twin: its items, in order, p's card files in order. */
+static int pl_twin(const pl_t *p, int list) {
+    int same = 0;
+    char *o = jb.sql;
+    PUT(o, JEND,
+        "select a is not null and a=b from (select (select group_concat(fileurl,char(10)) from "
+        "(select fileurl from playlist where id>100 and cd_num=%d order by id)) as a,(select "
+        "group_concat(f,char(10)) from (select " PL_CARD " as f from nw.serveritem i left join "
+        "nw.servermeta m on m.app=i.app and m.sid=i.sid where " PL_CARD " is not null and i.app=",
+        list);
+    o = sq(o, JEND, p->app), PUT(o, JEND, " and i.pid="), o = sq(o, JEND, p->pid);
+    PUT(o, JEND, " order by i.rowid)) as b)");
+    job_int(o, &same);
+    return same == 1;
+}
+/* p's header made in a free id, or -1 when stock's 100 are taken. */
+static int pl_create(const pl_t *p, unsigned char *used) {
+    int list = 0;
+    while (list < CAT_PLAYLISTS && used[list]) ++list;
+    if (list == CAT_PLAYLISTS) return -1;
+    used[list] = 1;
+    char *o = jb.sql;
+    PUT(o, JEND, "insert into playlist values (%d,", list);
+    o = sq(o, JEND, p->name);
+    PUT(o, JEND, ",'','','','',");
+    o = sq(o, JEND, p->name);
+    PUT(o, JEND, ",'','',0,0,%d,0,0,0,0,0,0)", list);
+    return job_run(o) ? -1 : list;
+}
+/* list's items again, in the file's order (serveritem's rowid): a card song as its card row */
+static void pl_items(const pl_t *p, int list) {
+    int top = 100;
+    sqlite3_exec(jb.db, "select max(100,ifnull(max(id),100)) from playlist", one_int, &top, 0);
+    char *o = jb.sql;
+    PUT(o, JEND,
+        "delete from playlist where id>100 and cd_num=%d;insert into playlist select %d+n,"
+        "filename,fileurl,album,songer,style,name,composer,albumsonger,year,track,%d,time,"
+        "time_end,time_create,Initial,bitdepth,samprate from (select i.rowid as n,"
+        "coalesce(c.filename,s.filename) as filename,coalesce(c.fileurl,s.fileurl) as fileurl,"
+        "coalesce(c.album,s.album) as album,coalesce(c.songer,s.songer) as songer,"
+        "coalesce(c.style,s.style) as style,coalesce(c.name,s.name) as name,'' as composer,"
+        "coalesce(c.albumsonger,s.albumsonger) as albumsonger,coalesce(c.year,s.year) as year,"
+        "coalesce(c.track,s.track) as track,coalesce(c.time,0) as time,coalesce(c.time_end,0) as "
+        "time_end,coalesce(c.time_create,0) as time_create,coalesce(c.Initial,s.Initial) as "
+        "Initial,coalesce(c.bitdepth,0) as bitdepth,coalesce(c.samprate,0) as samprate from "
+        "nw.serveritem i left join nw.servermeta m on m.app=i.app and m.sid=i.sid left join "
+        "nw.serverall s on s.id=m.id left join songtable c on c.fileurl=" PL_CARD " where (c.id "
+        "is not null or s.id is not null) and i.app=",
+        list, top, list);
+    o = sq(o, JEND, p->app), PUT(o, JEND, " and i.pid="), o = sq(o, JEND, p->pid);
+    PUT(o, JEND, " order by i.rowid)");
+    job_run(o);
+}
+static void cat_playlists(const char *app) {
+    pl_t *lists = calloc(CAT_PLAYLISTS + 1, sizeof *lists), *at = lists;
+    unsigned char used[CAT_PLAYLISTS] = { 0 };
+    char *o = jb.sql;
+    if (!lists) return;
+    PUT(o, JEND, "select app,pid,name from nw.serverpl where app=");
+    o = sq(o, JEND, app), PUT(o, JEND, " limit %d", CAT_PLAYLISTS);
+    if (o < JEND) *o = 0, sqlite3_exec(jb.db, jb.sql, pl_row, &at, 0);
+    if (job_exec("begin immediate")) {
+        free(lists);
+        jb.bad = 0;
+        return;
+    }
+    /* gone from the catalogue: the link, and the playlist unless it is a twin */
+    o = jb.sql;
+    PUT(o, JEND, "delete from playlist where cd_num in (select list from nw.serverlists where "
+                 "twin is not 1 and app=");
+    o = sq(o, JEND, app);
+    PUT(o, JEND, " and pid not in (select pid from nw.serverpl where app=");
+    o = sq(o, JEND, app), PUT(o, JEND, "));delete from nw.serverlists where app=");
+    o = sq(o, JEND, app);
+    PUT(o, JEND, " and pid not in (select pid from nw.serverpl where app=");
+    o = sq(o, JEND, app), PUT(o, JEND, ")");
+    job_run(o);
+    sqlite3_exec(jb.db, "select id from playlist where id < 100", pl_used, used, 0);
+    for (pl_t *p = lists; !jb.bad && p < at; ++p) {
+        int list = -1, twin = 0, taken = -1;
+        o = jb.sql, PUT(o, JEND, "select list from nw.serverlists where app=");
+        o = sq(o, JEND, p->app), PUT(o, JEND, " and pid="), o = sq(o, JEND, p->pid);
+        job_int(o, &list);
+        if (list < 0 || list >= CAT_PLAYLISTS || !used[list]) { /* new, or deleted on the Q2 */
+            o = jb.sql, PUT(o, JEND, "select id from playlist where id<100 and name=");
+            o = sq(o, JEND, p->name), PUT(o, JEND, " limit 1");
+            job_int(o, &taken);
+            if (taken >= 0 && taken < CAT_PLAYLISTS) {
+                if (!pl_twin(p, taken)) continue; /* the user's own of that name */
+                list = taken, twin = 1;
+            } else if ((list = pl_create(p, used)) < 0)
+                break;
+            o = jb.sql, PUT(o, JEND, "delete from nw.serverlists where app=");
+            o = sq(o, JEND, p->app), PUT(o, JEND, " and pid="), o = sq(o, JEND, p->pid);
+            PUT(o, JEND, ";insert into nw.serverlists values (");
+            o = sq(o, JEND, p->app), *o++ = ',', o = sq(o, JEND, p->pid);
+            PUT(o, JEND, ",%d,%d)", list, twin);
+            job_run(o);
+        }
+        pl_items(p, list);
+    }
+    /* a failure here leaves the import as it is: the playlists are tried again at the next job */
+    if (jb.bad || job_exec("commit")) sqlite3_exec(jb.db, "rollback", 0, 0, 0);
+    jb.bad = 0;
+    free(lists);
+}
+
+/* The index of nw: every server row by its fileurl, every linked card file by its path. */
+static int ix_row(void *ctx, int n, char **v, char **c) {
+    cat_ix *x = jb.ix;
+    if (!(x->n & 1023)) {
+        cat_ent *e = realloc(x->e, (x->n + 1024) * sizeof *e);
+        if (!e) return jb.bad = 1;
+        x->e = e;
+    }
+    cat_ent *e = &x->e[x->n++];
+    e->dup = v[4] != 0;
+    e->key = fnv64(e->dup ? v[4] : v[0]);
+    e->path = ix_put(x, e->dup ? v[4] : v[0]);
+    e->sid = ix_put(x, v[1]), e->local = e->dup ? 0 : ix_put(x, v[2]);
+    e->sec = v[3] ? atoi(v[3]) : 0;
+    e->app = (unsigned char)(v[5] ? atoi(v[5]) : 0);
+    return 0;
+}
+static void ix_build(void) {
+    jb.ix = &cat.job_ix;
+    ix_free(jb.ix);
+    /* the app's slot from its id's first appearance: the UI's slots (cat.app) by id */
+    char *o = jb.sql;
+    PUT(o, JEND, "select fileurl,sid,local,seconds,dup,case app");
+    for (int i = 0; i < cat.napps; ++i) {
+        PUT(o, JEND, " when ");
+        o = sq(o, JEND, cat.app[i].id);
+        PUT(o, JEND, " then %d", i);
+    }
+    PUT(o, JEND, " else %d end from nw.servermeta", CAT_APPS);
+    if (o >= JEND) jb.bad = 1;
+    if (jb.bad || sqlite3_exec(jb.db, jb.sql, ix_row, 0, 0) || jb.bad || !ix_sort(jb.ix))
+        ix_free(jb.ix);
+}
+
+static void *cat_worker(void *unused) {
+    char why[96] = "";
+    int slot = cat.job_app;
+    memset(&jb, 0, sizeof jb);
+    unlink(CAT_NEW), unlink(CAT_NEW "-journal");
+    mkdir(CAT_DIR, 0755);
+    if (!(jb.sql = calloc(1, CAT_SQL)) || sqlite3_open("/mnt/data/database.db", &jb.db) ||
+        sqlite3_exec(jb.db, "PRAGMA busy_timeout=2000;PRAGMA cache_size=256;PRAGMA temp_store=FILE",
+                     0, 0, 0) ||
+        sqlite3_exec(jb.db, "attach '" CAT_NEW "' as nw", 0, 0, 0) ||
+        sqlite3_exec(jb.db, "PRAGMA nw.journal_mode=OFF;PRAGMA nw.synchronous=OFF", 0, 0, 0))
+        tk_snprintf(why, sizeof why, "Couldn't open the database");
+    else {
+        if (!access(CAT_DB, 0)) sqlite3_exec(jb.db, "attach '" CAT_DB "' as cat", 0, 0, 0);
+        job_exec("begin");
+        job_exec(SCHEMA);
+        copy_old(slot >= 0 ? cat.app[slot].id : 0);
+        if (slot >= 0 && !jb.bad)
+            import_file(slot, cat.app[slot].id, cat.job_seq, why, sizeof why);
+        if (!why[0]) cat_match();
+        if (!jb.bad && job_exec("commit")) tk_snprintf(why, sizeof why, "Couldn't save");
+        if (!why[0] && jb.bad) tk_snprintf(why, sizeof why, "Couldn't write the catalogue");
+        sqlite3_exec(jb.db, "detach cat", 0, 0, 0);
+        /* every app's: a match moves songs between server rows and card files */
+        for (int i = 0; !why[0] && i < cat.napps; ++i) cat_playlists(cat.app[i].id);
+        if (!why[0]) ix_build();
+    }
+    if (jb.db) sqlite3_close(jb.db);
+    free(jb.sql);
+    if (why[0]) unlink(CAT_NEW);
+    tk_snprintf(cat.job_why, sizeof cat.job_why, "%s", why);
+    cat.job_rows = (unsigned)jb.rows;
+    __atomic_store_n(&cat.done, 1, __ATOMIC_RELEASE);
+    return 0;
+}
+
+/* ---- The UI thread ---- */
+
+/* Stock's shared connection (opened again after any error) and each other one stock_db_open
+ * opens: cat attached while Local + Server is on and the file is there. */
+void catalogue_attach(void **slot) {
+    if ((unsigned long)slot >= 0x400000 && (unsigned long)slot < 0xc00000) cat.stock_slot = slot;
+    if (slot == cat.stock_slot) cat.attached = 0;
+    if (!catalogue_on() || access(CAT_DB, 0) || !*slot) return;
+    if (!sqlite3_exec(*slot, "attach '" CAT_DB "' as cat", 0, 0, 0) && slot == cat.stock_slot)
+        cat.attached = *slot;
+}
+static void cat_detach(void) {
+    void *db = cat.stock_slot ? *cat.stock_slot : 0;
+    if (db && cat.attached == db) sqlite3_exec(db, "detach cat", 0, 0, 0);
+    cat.attached = 0;
+}
+/* Whether stock's Library queries may read servertable now: attached to its live handle. */
+static int cat_live(void) {
+    if (!catalogue_on() || !cat.ix.n || !cat.stock_slot) return 0;
+    void *db = *cat.stock_slot;
+    if (db && cat.attached != db && !access(CAT_DB, 0) &&
+        !sqlite3_exec(db, "attach '" CAT_DB "' as cat", 0, 0, 0))
+        cat.attached = db;
+    return db && cat.attached == db;
+}
+
+static int cat_ready(void) { return catalogue_on() && cat.ix.n && !access(CAT_DB, 0); }
+/* library_query's: the server's rows beside songtable's, while stock's connection has them. */
+const char *catalogue_rows(void) {
+    return cat_live() ? " union all select * from servertable" : "";
+}
+/* sql with each " from songtable" reading the union of the card's and the server's songs, or 0
+ * (Local only, no catalogue, no memory). The caller frees it. */
+char *catalogue_union(const char *sql) {
+    static const char from[] = " from songtable", with[] =
+        " from (select * from songtable union all select * from servertable)";
+    if (!sql || !strstr(sql, from) || !cat_ready()) return 0;
+    unsigned n = 1, k = strlen(sql);
+    for (const char *p = strstr(sql, from); p; p = strstr(p + 1, from)) ++n;
+    char *out = calloc(1, k + n * sizeof with), *o = out;
+    for (const char *p = sql, *q; out && (q = strstr(p, from)); p = q + sizeof from - 1) {
+        memcpy(o, p, (unsigned)(q - p)), o += q - p;
+        memcpy(o, with, sizeof with - 1), o += sizeof with - 1;
+        sql = q + sizeof from - 1;
+    }
+    if (out) memcpy(o, sql, strlen(sql) + 1);
+    return out;
+}
+/* Era's own connections: cat attached when the union reads it. */
+void catalogue_attach_db(void *db) {
+    if (cat_ready()) sqlite3_exec(db, "attach '" CAT_DB "' as cat", 0, 0, 0);
+}
+
+static const cat_ent *cat_lookup(const char *path) {
+    if (!path || !cat.ix.n || !tk_str_start_with(path, "/mnt/mmc/")) return 0;
+    return ix_find(&cat.ix, fnv64(path));
+}
+/* A server row's path: under a catalogue app's cat folder (known or not: a playlist's song kept
+ * from an earlier catalogue is one too). */
+int catalogue_path(const char *path) {
+    return path && tk_str_start_with(path, "/mnt/mmc/.") && strstr(path, "/cat/") &&
+           strstr(path, "/cat/") == strstr(path + 10, "/");
+}
+/* r's offline copy, or 0. */
+static const char *cat_local(const char *path) {
+    const cat_ent *e = cat_lookup(path);
+    return e && !e->dup && e->local ? ix_str(&cat.ix, e->local) : 0;
+}
+static int cat_online(void) { return cat.online; }
+/* Whether r cannot play now: a server row with no offline copy while offline, or any server row
+ * with Local only (its playlist kept, docs/server-library.md#compatibility). */
+int catalogue_unavailable(void *r) {
+    const char *path = r ? P(r, REC_PATH) : 0;
+    if (!catalogue_path(path)) return 0;
+    if (!catalogue_on()) return 1;
+    return !cat_local(path) && !(cat_online() && cat_lookup(path));
+}
+/* A server row's seconds for durations.c, -1 for any other path. */
+int catalogue_seconds(const char *path) {
+    const cat_ent *e = catalogue_path(path) ? cat_lookup(path) : 0;
+    return e ? e->sec : -1;
+}
+
+/* ---- Greyed rows: stock's pooled table rows as they are bound (ringnav_table_load), the
+ * payload's own lists' rows as they are made (catalogue_mark). ringnav_style_color asks
+ * catalogue_greyed for each text colour. ---- */
+
+static void grey_set(void *row, int on) {
+    unsigned i = 0;
+    while (i < cat.ngrey && cat.grey[i] != row) ++i;
+    if (on && i == cat.ngrey && cat.ngrey < CAT_GREY_ROWS) cat.grey[cat.ngrey++] = row;
+    if (!on && i < cat.ngrey) cat.grey[i] = cat.grey[--cat.ngrey];
+}
+void catalogue_mark(void *row, void *r) { grey_set(row, catalogue_unavailable(r)); }
+void catalogue_forget(void *row) { grey_set(row, 0); }
+/* A stock list's pooled row bound to its index'th record: the Library's lists are
+ * p_deque_showlist's, and the row shows its record's title or file name; any other table (whose
+ * index means something else) leaves its rows as they are. */
+void catalogue_bind(void *row, unsigned index) {
+    void *list = P(p_deque_showlist, 0);
+    void *r = list && index < deque_size(list) ? deque_at(list, index) : 0;
+    grey_set(row, r && I(r, REC_TYPE) == 8 && catalogue_unavailable(r));
+}
+/* The text colour of w, painted now: grey when it is in a greyed row. */
+int catalogue_greyed(void *w, unsigned *color) {
+    if (!cat.ngrey) return 0;
+    for (; w; w = P(w, W_PARENT))
+        for (unsigned i = 0; i < cat.ngrey; ++i)
+            if (cat.grey[i] == w) {
+                *color = (*color & 0xff000000u) | CAT_GREY;
+                return 1;
+            }
+    return 0;
+}
+
+/* ---- Apps, their files, the poll ---- */
+
+static void cat_scan(void) {
+    char path[64], raw[512];
+    void *d = card_mounted() ? opendir("/mnt/mmc") : 0;
+    int n = 0;
+    cat_app_t was[CAT_APPS];
+    memcpy(was, cat.app, sizeof was);
+    int wasn = cat.napps;
+    for (struct dirent *e; d && n < CAT_APPS && (e = readdir(d));) {
+        const char *id = e->d_name + 1;
+        if (e->d_name[0] != '.' || !*id || strlen(id) >= sizeof cat.app[0].id || !strcmp(id, "q2pod"))
+            continue;
+        tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/q2app", id);
+        if (!state_read(path, raw, sizeof raw) || number(raw, "catalogue") != 1) continue;
+        cat_app_t *a = &cat.app[n++];
+        memset(a, 0, sizeof *a);
+        for (int i = 0; i < wasn; ++i)
+            if (!strcmp(was[i].id, id)) *a = was[i];
+        tk_snprintf(a->id, sizeof a->id, "%s", id);
+        a->ratings = number(raw, "ratings") == 1;
+    }
+    if (d) closedir(d);
+    cat.napps = n;
+}
+
+/* The catalogue's first line: its seq, into seq (24 bytes), or 0. */
+static int cat_seq(const char *id, char *seq) {
+    char path[64], head[128];
+    tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/catalogue.tsv", id);
+    if (!state_read(path, head, sizeof head)) return 0;
+    const char *s = strstr(head, "\tseq=");
+    unsigned k = 0;
+    for (s = s ? s + 5 : 0; s && s[k] && s[k] != '\t' && s[k] != '\n' && k < 23; ++k) seq[k] = s[k];
+    seq[k] = 0;
+    return k > 0 && tk_str_start_with(head + 1, "#Q2CAT/1\t");
+}
+static void cat_answer(int slot, const char *seq, const char *why, unsigned rows) {
+    char path[64], line[160];
+    tk_snprintf(path, sizeof path, "/tmp/q2-%s.catalogue.done", cat.app[slot].id);
+    int n = why && *why ? tk_snprintf(line, sizeof line, "%s error %s\n", seq, why)
+                        : tk_snprintf(line, sizeof line, "%s ok %u\n", seq, rows);
+    blob_io(path, "/tmp/q2-catalogue.tmp", line, (unsigned)n, 1);
+}
+static void cat_start(int slot, const char *seq) {
+    cat.job_app = slot;
+    tk_snprintf(cat.job_seq, sizeof cat.job_seq, "%s", seq ? seq : "");
+    cat.done = 0;
+    cat.gen = library_gen;
+    cat.pending = 0;
+    if (!pthread_create(&cat.thread, 0, cat_worker, 0)) cat.running = 1;
+}
+/* The job's end: its file swapped in, its index taken, the app answered. */
+static void cat_swap(void) {
+    pthread_join(cat.thread, 0);
+    cat.running = 0;
+    int slot = cat.job_app;
+    if (!cat.job_why[0]) {
+        cat_detach();
+        if (!rename(CAT_NEW, CAT_DB)) {
+            ix_free(&cat.ix);
+            cat.ix = cat.job_ix;
+            memset(&cat.job_ix, 0, sizeof cat.job_ix);
+            /* open lists query again; a scan since the job began (cat.gen is the generation it
+             * matched against) leaves cat.gen behind, so the next poll matches again */
+            int matched = cat.gen == library_gen;
+            ++library_gen;
+            if (matched) cat.gen = library_gen;
+        } else
+            tk_snprintf(cat.job_why, sizeof cat.job_why, "Couldn't save");
+        for (int i = 0; i < cat.napps; ++i) cat.app[i].avail_at = 0; /* read whole again */
+    }
+    ix_free(&cat.job_ix);
+    if (slot >= 0) {
+        tk_snprintf(cat.app[slot].seq, sizeof cat.app[slot].seq, "%s", cat.job_seq);
+        cat_answer(slot, cat.job_seq, cat.job_why, cat.job_rows);
+    }
+}
+
+/* catalogue.avail's new lines: an offline copy for a sid, or none ("-<sid>"). */
+static void cat_avail(int slot) {
+    char path[64];
+    tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/catalogue.avail", cat.app[slot].id);
+    long size = file_size(path);
+    cat_app_t *a = &cat.app[slot];
+    if (size < 0 || size == a->avail_at) return;
+    if (size < a->avail_at) a->avail_at = 0;
+    void *f = fopen(path, "rb");
+    if (!f || fseek(f, a->avail_at, 0)) {
+        if (f) fclose(f);
+        return;
+    }
+    char buf[1024], line[600];
+    unsigned k = 0;
+    long at = a->avail_at;
+    for (unsigned got; (got = fread(buf, 1, sizeof buf, f)) > 0;)
+        for (unsigned i = 0; i < got; ++i) {
+            if (buf[i] != '\n') {
+                if (k < sizeof line - 1) line[k++] = buf[i];
+                continue;
+            }
+            a->avail_at = at + (long)i + 1;
+            if (k && line[k - 1] == '\r') --k;
+            line[k] = 0, k = 0;
+            char *f2[2];
+            int gone = line[0] == '-';
+            int n = split(line + gone, f2, 2);
+            cat_ent *e = ix_sid(&cat.ix, slot, f2[0]);
+            if (!e || e->dup) continue;
+            e->local = gone || n < 2 || !card_path(f2[1]) ? 0 : ix_put(&cat.ix, f2[1]);
+        }
+        /* a cut last line waits for its newline */
+    fclose(f);
+}
+
+static void ratings_in(int slot);
+static void catplay_poll(void);
+void catalogue_poll(void) {
+    unsigned now = time_now_ms();
+    if (cat.running && __atomic_load_n(&cat.done, __ATOMIC_ACQUIRE)) cat_swap();
+    if (now - cat.polled < CAT_POLL_MS) return;
+    cat.polled = now;
+    if (!catalogue_on()) return;
+    /* not while a job runs: it reads the slots */
+    if (!cat.running && (!cat.scanned || now - cat.scanned >= CAT_SCAN_MS))
+        cat.scanned = now | 1, cat_scan();
+    int up = 0;
+    for (int i = 0; i < cat.napps; ++i) {
+        char path[48], raw[256], v[8];
+        tk_snprintf(path, sizeof path, "/tmp/q2-%s.state", cat.app[i].id);
+        state_read(path, raw, sizeof raw);
+        field(raw, "server", v, sizeof v);
+        cat.app[i].down = tk_str_start_with(v, "down");
+        up |= !cat.app[i].down;
+        cat_avail(i);
+        ratings_in(i);
+    }
+    cat.online = up && networkGetConnectStatus() > 0;
+    catplay_poll();
+    if (cat.running || library_scanning() || !card_mounted()) return;
+    for (int i = 0; i < cat.napps; ++i) {
+        char seq[24];
+        if (cat_seq(cat.app[i].id, seq) && strcmp(seq, cat.app[i].seq)) {
+            cat_start(i, seq);
+            return;
+        }
+    }
+    /* the card's library changed: matched again, so a song copied there leaves the server rows */
+    if (cat.ix.n && library_gen != cat.gen) cat_start(-1, 0);
+}
+
+/* The setting, turned on or off: the union starts or stops, lists query again. */
+void catalogue_changed(void) {
+    if (!catalogue_on()) cat_detach();
+    cat.scanned = 0, cat.polled = 0;
+    ++library_gen;
+    cat.gen = library_gen;
+}
+/* The card going away (USB storage, addon_card_away): nothing of ours keeps it open. */
+void catalogue_card_away(void) { cat_detach(); }
+
+/* ---- Playing: a list with server rows ---- */
+
+static int cat_app_of(const char *path) {
+    for (int i = 0; i < cat.napps; ++i) {
+        unsigned k = strlen(cat.app[i].id);
+        if (!strncmp(path + 10, cat.app[i].id, k) && path[10 + k] == '/') return i;
+    }
+    return -1;
+}
+static unsigned play_hash(int slot) {
+    char path[48], raw[600];
+    tk_snprintf(path, sizeof path, "/tmp/q2-%s.play", cat.app[slot].id);
+    state_read(path, raw, sizeof raw);
+    return fnv(FNV_SEED, (const unsigned char *)raw);
+}
+/* The catplay request (docs/server-library.md): "<seq> <start>", then the list's paths. */
+static int catplay_write(int slot, void *q, int at) {
+    unsigned n = deque_size(q), cap = 64 + n * 160, len;
+    char *b = calloc(1, cap), path[48];
+    if (!b) return 0;
+    len = (unsigned)tk_snprintf(b, cap, "%u %d\n", ++cat.cp_seq, at);
+    for (unsigned i = 0; i < n; ++i) {
+        const char *p = P(deque_at(q, i), REC_PATH);
+        if (len + 1100 > cap) {
+            char *g = realloc(b, cap *= 2);
+            if (!g) break;
+            b = g;
+        }
+        len += (unsigned)tk_snprintf(b + len, cap - len, "%s\n", p ? p : "");
+    }
+    tk_snprintf(path, sizeof path, "/tmp/q2-%s.catplay", cat.app[slot].id);
+    int ok = blob_io(path, "/tmp/q2-catplay.tmp", b, len, 1);
+    free(b);
+    return ok;
+}
+/* q as the firmware plays it offline: card rows, and server rows by their offline copies; at
+ * moved with it. 0 when nothing of q is left, *at then -1. */
+static void *cat_offline(void *q, int *at) {
+    void *out = _create_deque("stSongInfo");
+    deque_init(out);
+    int start = -1;
+    for (unsigned i = 0, n = deque_size(q); i < n; ++i) {
+        void *r = deque_at(q, i);
+        const char *p = P(r, REC_PATH), *local = catalogue_path(p) ? cat_local(p) : p;
+        if (!local) continue;
+        if ((int)i >= *at && start < 0) start = (int)deque_size(out); /* it, or the next kept */
+        _deque_push_back(out, r);
+        if (local != p) { /* the copy's own record: its path the offline copy */
+            void *c = deque_at(out, deque_size(out) - 1);
+            char *s = strdup(local);
+            if (s) free(P(c, REC_PATH)), P(c, REC_PATH) = s;
+        }
+    }
+    if (!deque_size(out)) {
+        deque_destroy(out);
+        *at = -1;
+        return 0;
+    }
+    *at = start < 0 ? 0 : start;
+    return out;
+}
+/* ringnav_load's: 0 when q has no server row (stock loads it as it is). Otherwise 1 with *own the
+ * queue to load instead (offline: card rows and copies, playback.c destroys it), or 2: nothing to
+ * load now (sent to the app, or nothing playable, said in a toast). */
+int catalogue_load(void *q, int *at, void **own) {
+    unsigned n = q ? deque_size(q) : 0, server = 0;
+    *own = 0;
+    for (unsigned i = 0; i < n && !server; ++i) server = catalogue_path(P(deque_at(q, i), REC_PATH));
+    if (!server) return 0;
+    void *start = *at >= 0 && (unsigned)*at < n ? deque_at(q, (unsigned)*at) : 0;
+    if (start && catalogue_unavailable(start)) {
+        toast(catalogue_on() ? "Not available offline" : "Turn on Local + Server to play it");
+        return 2;
+    }
+    const char *sp = start ? P(start, REC_PATH) : 0;
+    int slot = sp && catalogue_path(sp) ? cat_app_of(sp) : -1;
+    for (unsigned i = 0; i < n && slot < 0; ++i) {
+        const char *p = P(deque_at(q, i), REC_PATH);
+        if (catalogue_path(p)) slot = cat_app_of(p);
+    }
+    if (catalogue_on() && cat_online() && slot >= 0 && !cat.app[slot].down) {
+        unsigned before = play_hash(slot);
+        if (catplay_write(slot, q, *at)) {
+            if (cat.cp_list) deque_destroy(cat.cp_list);
+            cat.cp_list = _create_deque("stSongInfo");
+            deque_init(cat.cp_list);
+            deque_assign(cat.cp_list, q);
+            cat.cp_start = *at, cat.cp_app = slot, cat.cp_at = time_now_ms() | 1;
+            cat.app[slot].play = before;
+            return 2;
+        }
+    }
+    *own = cat_offline(q, at);
+    if (!*own) {
+        toast("Not available offline");
+        return 2;
+    }
+    return 1;
+}
+/* A catplay unanswered for CATPLAY_WAIT_MS: its list played offline. One answered: done, the
+ * app's .play plays through addon.c's stream_poll. */
+static void catplay_poll(void) {
+    if (!cat.cp_at) return;
+    int slot = cat.cp_app;
+    if (slot < cat.napps && play_hash(slot) != cat.app[slot].play) {
+        cat.cp_at = 0;
+    } else if (time_now_ms() - cat.cp_at >= CATPLAY_WAIT_MS) {
+        cat.cp_at = 0;
+        int at = cat.cp_start;
+        void *own = cat_offline(cat.cp_list, &at);
+        if (own) {
+            play_folder(own, at, 0xf001);
+            deque_destroy(own);
+        } else
+            toast("Not available offline");
+    }
+    if (!cat.cp_at && cat.cp_list) deque_destroy(cat.cp_list), cat.cp_list = 0;
+}
+
+/* ---- Ratings (docs/server-library.md#ratings-and-favourites) ---- */
+
+/* A song's hearts changed on the Q2: a line to each app with ratings=1. */
+void catalogue_rated(void *r, int hearts) {
+    const char *path = r ? P(r, REC_PATH) : 0;
+    if (!path || !cat.napps) return;
+    const cat_ent *e = cat_lookup(path);
+    char line[1200], file[64];
+    for (int i = 0; i < cat.napps; ++i) {
+        if (!cat.app[i].ratings) continue;
+        const char *sid = e && e->app == i ? ix_str(&cat.ix, e->sid) : "";
+        int k = tk_snprintf(line, sizeof line, "%08x\t%s\t%d\t%u\n", listen_key(r), sid, hearts,
+                            (unsigned)time(0));
+        if (k <= 0 || (unsigned)k >= sizeof line) continue;
+        tk_snprintf(file, sizeof file, "/mnt/mmc/.%s/ratings.out", cat.app[i].id);
+        void *f = fopen(file, "ab");
+        if (f) fwrite(line, 1, (unsigned)k, f), fclose(f);
+    }
+}
+
+/* The newest time ratings.out holds for key (its first column), 0 for none. */
+static unsigned out_time(const char *out, const char *key) {
+    unsigned t = 0, k = strlen(key);
+    for (const char *l = out; l && *l;) {
+        const char *e = strstr(l, "\n"), *tab = l;
+        for (int c = 0; c < 3 && tab; ++c) tab = strstr(tab, "\t") ? strstr(tab, "\t") + 1 : 0;
+        if (tab && !strncmp(l, key, k) && l[k] == '\t' && (unsigned)atoi(tab) > t)
+            t = (unsigned)atoi(tab);
+        l = e ? e + 1 : 0;
+    }
+    return t;
+}
+static unsigned hex32(const char *s) {
+    unsigned v = 0;
+    for (int i = 0; i < 8; ++i) {
+        int d = hexv(s[i]);
+        if (d < 0) return 0;
+        v = v << 4 | (unsigned)d;
+    }
+    return s[8] ? 0 : v;
+}
+/* A card song's path by its listen_key, from songtable (the app's synced files are not in the
+ * catalogue), into out; 0 when none has it. */
+typedef struct {
+    unsigned key;
+    char *out;
+    unsigned size;
+    int found;
+} by_key;
+static int key_row(void *ctx, int n, char **v, char **c) {
+    by_key *k = ctx;
+    int rec[REC_CUE_END / 4 + 1] = { 0 };
+    if (!v[0]) return 0;
+    P(rec, REC_PATH) = v[0], I(rec, REC_CUE_START) = v[1] ? atoi(v[1]) : 0;
+    if (listen_key(rec) != k->key) return 0;
+    tk_snprintf(k->out, k->size, "%s", v[0]);
+    k->found = 1;
+    return 1; /* the first is enough */
+}
+extern int rate_keep(int album, unsigned key, int n);
+extern int stock_db_open(const char *path, void **db); /* playlists.c */
+/* My Fav: the song's row in or out, as stock keeps it. */
+static void fav_set(const char *path, int on) {
+    void *db = 0;
+    char sql[1400], *o = sql, *end = sql + sizeof sql - CAT_SLACK;
+    PUT(o, end, "delete from myfav where fileurl=");
+    o = sq(o, end, path);
+    if (on) {
+        PUT(o, end,
+            ";insert into myfav(filename,fileurl,album,songer,style,name,composer,albumsonger,year,"
+            "track,cd_num,time,time_end,time_create,Initial,bitdepth,samprate) select filename,"
+            "fileurl,album,songer,style,name,composer,albumsonger,year,track,cd_num,time,time_end,"
+            "time_create,Initial,bitdepth,samprate from %s where fileurl=",
+            catalogue_path(path) ? "servertable" : "songtable");
+        o = sq(o, end, path), PUT(o, end, " limit 1");
+    }
+    if (o >= end || stock_db_open("/mnt/data/database.db", &db)) return;
+    *o = 0;
+    sqlite3_exec(db, sql, 0, 0, 0);
+    sqlite3_close(db);
+}
+/* ratings.in's lines applied as a rating made here (rate_keep by the key, My Fav for five by the
+ * path), unless the Q2's own change to that song, still in ratings.out, is newer; then the file
+ * goes. */
+static void ratings_in(int slot) {
+    char in[64], outp[64];
+    if (!cat.app[slot].ratings) return;
+    tk_snprintf(in, sizeof in, "/mnt/mmc/.%s/ratings.in", cat.app[slot].id);
+    tk_snprintf(outp, sizeof outp, "/mnt/mmc/.%s/ratings.out", cat.app[slot].id);
+    unsigned size = 0, osize = 0;
+    char *raw = read_all(in, 1 << 20, &size);
+    if (!raw) return;
+    char *out = read_all(outp, 1 << 20, &osize);
+    void *db = 0;
+    for (char *l = raw, *e; l && *l; l = e) {
+        if ((e = strstr(l, "\n"))) *e++ = 0;
+        char *f[4], path[600] = "";
+        if (split(l, f, 4) < 4) continue;
+        unsigned key = hex32(f[0]);
+        int hearts = atoi(f[2]);
+        if (!key || hearts < 0 || hearts > 5) continue;
+        if (out && out_time(out, f[0]) > (unsigned)atoi(f[3])) continue;
+        rate_keep(0, key, hearts);
+        const cat_ent *x = *f[1] ? ix_sid(&cat.ix, slot, f[1]) : 0;
+        if (x)
+            tk_snprintf(path, sizeof path, "%s", ix_str(&cat.ix, x->path));
+        else { /* a synced or other card file: found by its key */
+            by_key k = { key, path, sizeof path, 0 };
+            if (db || !stock_db_open("/mnt/data/database.db", &db))
+                sqlite3_exec(db, "select fileurl,time from songtable", key_row, &k, 0);
+        }
+        if (path[0]) fav_set(path, hearts == 5);
+    }
+    if (db) sqlite3_close(db);
+    free(raw), free(out);
+    unlink(in);
+    ratings_copy_due();
+}

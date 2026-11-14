@@ -446,6 +446,14 @@ int album_art(const char *track, const char *dst, int shared) {
  * none. ponytail: an album whose ffmpeg is killed every time costs one kill per open. */
 static void build_art(const job_t *j) {
     char dst[512], tmp[512];
+    /* A server row (catalogue.c) has no file: its "no art" marker at once, not a retry per open.
+     * ponytail: an album cached since keeps the placeholder until Refresh Coverflow. */
+    if (catalogue_path(j->track)) {
+        art_path(dst, j->key, "");
+        void *f = fopen(dst, "w");
+        if (f) fclose(f);
+        return;
+    }
     if (access(j->track, 0)) return; /* storage gone: no marker, the next open retries */
     art_path(dst, j->key, "");
     art_path(tmp, j->key, ".tmp");

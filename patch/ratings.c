@@ -104,6 +104,7 @@ void rate_album_favs(void *album, int on) {
         void *r = deque_at(t, i);
         int was = on || checkFavExist(r) != 0;
         if (!on) deleteMusicFromFav(r);
+        if (was) catalogue_rated(r, on ? 5 : 0);
         if (was && told) told = fav_told(r, on);
     }
     deque_destroy(t);
@@ -270,6 +271,7 @@ static void rate_close(int save) {
     if (!r) return;
     int fav = checkFavExist(r) != 0;
     if (!rate_saved(rate_keep(0, listen_key(r), n))) return;
+    catalogue_rated(r, n); /* to the server too (docs/server-library.md#ratings-and-favourites) */
     if ((n == 5) != fav) FAV_CLICK(ra.rate_ctx, (void *)0), ratings_copy_due(), fav_told(r, n == 5);
     rate_badge();
 }
@@ -374,7 +376,11 @@ static int rate_fav_click(void *ctx, void *event) {
     FAV_CLICK(ctx, event);
     ratings_copy_due();
     void *r = rate_track();
-    if (r) rate_keep(0, listen_key(r), 0), fav_told(r, checkFavExist(r) != 0);
+    if (r) {
+        int fav = checkFavExist(r) != 0;
+        rate_keep(0, listen_key(r), 0), fav_told(r, fav);
+        catalogue_rated(r, fav ? 5 : 0);
+    }
     rate_badge();
     return 0;
 }

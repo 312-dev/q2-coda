@@ -48,6 +48,7 @@ enum {
     POD_PL_CF,   /* Display's Playlist View: List or Cover Flow, as Artist View */
     POD_SCAN_DURATIONS,
     POD_CF_POSITION,
+    POD_LIBRARY_SOURCE, /* Local Only or Local + Server (catalogue.c) */
     POD_COUNT
 };
 

@@ -367,12 +367,17 @@ int era_sql(const char *sql, int (*row)(void *, int, char **, char **), void *ct
     void *db = 0;
     /* Era uses SQLite directly rather than the stock library query wrappers. */
     char *expanded = library_scope_query(sql); /* none: the whole library, as library_query */
+    /* Local + Server: the server's songs too (catalogue.c), its file attached to this connection.
+     * ponytail: the scope's folders (MUSIC_WHERE) apply to the union here, so a scope leaves the
+     * server's songs out of Era; library_query scopes the card's alone. */
+    char *both = catalogue_union(expanded ? expanded : sql);
     /* Keep a full-library grouping query from competing with the player's song records for RAM. */
     int bad = sqlite3_open("/mnt/data/database.db", &db) ||
-              sqlite3_exec(db, "PRAGMA cache_size=64;PRAGMA temp_store=FILE", 0, 0, 0) ||
-              sqlite3_exec(db, expanded ? expanded : sql, row, ctx, 0);
+              sqlite3_exec(db, "PRAGMA cache_size=64;PRAGMA temp_store=FILE", 0, 0, 0);
+    if (!bad && both) catalogue_attach_db(db);
+    bad = bad || sqlite3_exec(db, both ? both : expanded ? expanded : sql, row, ctx, 0);
     if (db) sqlite3_close(db);
-    free(expanded);
+    free(expanded), free(both);
     return !bad;
 }
 /* Home pane's counts: sql's one number, -1 when it can't be had. On coverflow.c count_worker's

@@ -88,7 +88,7 @@
 #define CAPS_FILE "/tmp/q2-addon.caps"
 /* This firmware's card-app features, space-separated; a feature adds its word. */
 #define ADDON_CAPS                                                                                 \
-    "playlist progress pages library goto sleep game audio sections art window urls sort field more fav now"
+    "playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings"
 #define ADDON_SECTIONS 8  /* sections an app's first page may have */
 #define SWIPE_CLAIM_PX 24 /* a sideways move this far, twice as far as up or down, is a swipe's */
 #define SWIPE_PX 60       /* and this far at the lift, more than up or down, changes section */
@@ -963,6 +963,7 @@ void addon_poll(void) {
     sleep_check();
     now_poll();
     library_poll();
+    catalogue_poll(); /* the server library's apps (catalogue.c), running or not */
 }
 
 /* An app asked to end through its loop, not its socket, so a frozen one stops too; restart: started
@@ -996,6 +997,7 @@ void addon_stop(void) {
 void addon_card_away(void) {
     char cmd[96];
     int left = 0;
+    catalogue_card_away(); /* the server library's file, attached to stock's connection */
     for (int i = 0; i < ap.n; ++i) {
         app_t *a = &ap.a[i];
         int running = a->launched || a->restart || !access(a->pid, 0);
