@@ -789,7 +789,7 @@ class Power:
         fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(self.win.addr, None)
 
     def boot(self):
-        labels = [i.labels()[0] for i in self.view.children if i.labels()[0].text.startswith('Boot to: ')]
+        labels = [i.labels()[0] for i in self.view.children if i.labels() and i.labels()[0].text.startswith('Boot to: ')]
         return labels[0] if labels else None
 
 

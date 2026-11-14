@@ -650,6 +650,9 @@ void battery_paint(void *w, void *canvas);
 /* system.c */
 void power_poll(void);
 
+/* power_rows.c */
+void power_rows(void *view);
+
 /* usb_charge.c: wrappers for charging, configuration loading and USB gadget dispatch. */
 int ringnav_usb_charge(int on), usb_charge_held(void);
 void usb_charge_row(void *win, void *view); /* Power's USB DAC Charging */

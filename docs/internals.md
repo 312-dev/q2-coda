@@ -35,7 +35,7 @@ The table is the main hooks. `HOOKS` in `tools/build.py` is the whole list, each
 | `window_manager_dispatch_input_event` | `0x680a4c` | No input while a video plays ([Videos](#videos)); [Wake](#wake)'s screen-off gate                                                       |
 | `main_loop_post_key_event`            | `0x69ebac` | SyncLink's keys pass the [Buttons lock](#buttons-lock)                                                                                  |
 | `buzzeer_switch`                      | `0x4fe3f8` | The Clicker: the buzzer, q2player's click or both ([Key Tone](#key-tone))                                                               |
-| `systemset_powermanager_page_init`    | `0x4cded4` | Adds Standby Limit, Charge Limit, Smart Wi-Fi, In-Vehicle Mode, Battery History and Boot to ([Standby limit](#standby-limit) and after) |
+| `systemset_powermanager_page_init`    | `0x4cded4` | Adds Standby Limit, Charge Limit, Smart Wi-Fi, In-Vehicle Mode, Battery History, Boot to, and Restart and Shut Down last ([Standby limit](#standby-limit) and after; [ipod: Settings](ipod.md#settings)) |
 | `toolsIntoStandby`                    | `0x5d1110` | Standby's suspend between the RTC wake alarm's set and clear ([Standby limit](#standby-limit))                                          |
 | `playset_playset_page_init`           | `0x4bd4d0` | Adds Library & Folders and Playback's own rows ([Settings order](#crossfade))                                                           |
 | `stream_page_init`                    | `0x5410cc` | Adds the Spotify and Internet Radio rows to Streaming; wakes [Smart Wi-Fi](#smart-wi-fi)'s radio                                        |

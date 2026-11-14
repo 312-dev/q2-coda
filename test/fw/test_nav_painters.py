@@ -1547,6 +1547,23 @@ def test_a_row_actions_question_is_the_tray_its_cell_the_verb(fw, st):
     assert ui.text(after.enter) == 'OK' and after.lines[0].visible
 
 
+@pytest.mark.parametrize('prompt, verb', [('Restart?', 'Restart'), ('Shut Down?', 'Shut Down')])
+def test_oleds_power_confirms_say_their_verb(fw, st, prompt, verb):
+    """Power's Restart and Shut Down rows (power_rows.c) as OLED's dialog page: Cancel, then the verb, never OK."""
+    theme(fw, OLED)
+    ui = Ui(fw)
+    confirm = Confirm(fw, ui, [prompt])
+
+    def utf8(w, out, size, *_):  # the prompt's words, as feedback_confirm_dress reads them
+        words = ui.text(ui.nodes[w]).encode()[:size - 1] + b'\0'
+        C.memmove(out, words, len(words))
+        return 0
+    fw.mock('widget_get_text_utf8', utf8)
+    confirm.paint()
+    assert (confirm.ui.text(confirm.cancel), confirm.ui.text(confirm.enter)) == ('Cancel', verb)
+    assert not confirm.lines[0].visible  # the question is the status row's title
+
+
 def test_minimal_leaves_stocks_confirm(fw, st):
     theme(fw, MINIMAL)
     confirm = Confirm(fw, Ui(fw))
@@ -2014,8 +2031,11 @@ def test_power_adds_standby_charge_and_in_vehicle_rows_after_stocks(fw):
     ui, win, view, settings, build = settings_page(fw, MINIMAL, 'powermanager_page', 'scroll_view_powermanager', 2)
     fw.mock('stock_power_trampoline', build)
     assert fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None) == 3
-    stock, ours = view.children[:2], view.children[2:]
+    stock, ours, power = view.children[:2], view.children[2:8], view.children[8:]
     assert [s.name for s in stock] == ['s0', 's1'] and len(ours) == 6
+    gap, restart, off = power  # Restart and Shut Down last, after a 12 px gap (power_rows.c)
+    assert gap.kind == 'label' and gap.box[3] == 12
+    assert [ui.text(label_of(r)) for r in (restart, off)] == ['Restart', 'Shut Down']
     icons = [next(c.props['image'] for c in r.walk() if c.kind == 'image') for r in ours]
     # Standby, Charge, USB DAC Charging, Smart Wi-Fi, In-Vehicle, Battery History
     assert icons == ['system_powermanager', 'usb_chargeswitch', 'usb_chargeswitch', 'wifiset_wifi', 'system_carmode',
@@ -2115,7 +2135,7 @@ def test_in_vehicle_mode_is_stocks_byte_and_key(fw):
     ui, win, view, settings, build = settings_page(fw, MINIMAL, 'powermanager_page', 'scroll_view_powermanager')
     fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     g(fw, 'g_carmode_state', 4)
-    standby, charge, dac, smart, car, history = view.children
+    standby, charge, dac, smart, car, history = view.children[:6]  # then the gap, Restart and Shut Down
     click(ui, car)
     assert (g(fw, 'g_carmode'), g(fw, 'g_carmode_state')) == (1, 0) and settings.written == [('CARMODE', 1)]
     assert switch(car) == 'switch_on'
@@ -2125,7 +2145,7 @@ def test_smart_wifi_switches_and_saves_its_own_key(fw, st):
     ui, win, view, settings, build = settings_page(fw, MINIMAL, 'powermanager_page', 'scroll_view_powermanager')
     fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     car_mode = g(fw, 'g_carmode')
-    standby, charge, dac, smart, car, history = view.children
+    standby, charge, dac, smart, car, history = view.children[:6]  # then the gap, Restart and Shut Down
     click(ui, smart)
     assert switch(smart) == 'switch_on' and settings.written == [('SMARTWIFI', 1)] and st('smart_wifi').value == 1
     assert switch(charge) == switch(car) == 'switch_off' and g(fw, 'g_carmode') == car_mode  # the other rows as they were
@@ -2136,7 +2156,7 @@ def test_smart_wifi_switches_and_saves_its_own_key(fw, st):
 def test_classic_shows_a_switch_as_its_value(fw, st):
     ui, win, view, settings, build = settings_page(fw, CLASSIC, 'powermanager_page', 'scroll_view_powermanager', CHARGELIMIT=b'1')
     fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
-    standby, charge, dac, smart, car, history = view.children
+    standby, charge, dac, smart, car, history = view.children[:6]  # then the gap, Restart and Shut Down
     assert value(ui, charge) == 'On' and value(ui, smart) == value(ui, car) == 'Off' and switch(charge) is None
     assert f'{O["CHARGE_STOP"]}%' in ui.text(label_of(charge))
     v = next(c for c in charge.walk() if c.name == '_setting_value')

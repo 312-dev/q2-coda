@@ -321,7 +321,7 @@ Shown for a moment after a mode change (Shuffle, Repeat).
 
 - A dialog is a list: its question as the page title, its answers as rows, the selection bar
   on the default answer. No boxes, no shadows.
-- A confirm (stock's `confirminfo_dialog`: Shut Down, the three Resets, Delete Song, Delete
+- A confirm (stock's `confirminfo_dialog`: Shut Down, Restart, the three Resets, Delete Song, Delete
   Playlist and the rest) is that dialog: the question in the status row in sentence case, naming
   the object where it can ("Delete playlist “a”?"), then **Cancel**, selected when it opens, and
   the verb that says what the other does ("Shut Down", "Reset", "Delete"), never "OK". Delete

@@ -3795,6 +3795,7 @@ int ringnav_powermanager(void *win, void *ctx) {
         widget_set_text_utf8(list_row_into(view, "system_powermanager", battery_history, 0),
                              "Battery History");
     boot_row(view);
+    power_rows(view); /* Restart and Shut Down, last */
     return result;
 }
 /* The Bluetooth page's list (stock's local builder, btmenu_rows), rebuilt whole on every search and
