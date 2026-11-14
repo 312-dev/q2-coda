@@ -1853,30 +1853,30 @@ MB_SEARCH = 'https://musicbrainz.org/ws/2/release/?fmt=json&limit=10&query=relea
 GROUP = 'abcdefgh-0000-0000-0000-00000000000%d'
 
 
-def test_the_cover_search_offers_musicbrainz_and_itunes_first_then_stocks(w):
+def test_the_cover_search_offers_musicbrainz_and_itunes_alone(w):
     CJson(w)
     keywords(w, 'Song 2', 'Album B', 'Artist B')
     covers = []
     w.mock('online_addcoverlist', lambda url, *_: covers.append(s(url)))
     w.mock('online_getsize_coverlist', lambda *_: len(covers))
-    w.mock('stock_kugoucover_trampoline', lambda *_: w.log.append(('kugou', list(covers))))
     groups = [GROUP % 1, GROUP % 1, GROUP % 2]  # two releases of one group
     w.net.route(MB_SEARCH, Reply(200, json.dumps({'releases': [{'release-group': {'id': g}} for g in groups]}).encode()))
     w.net.route('https://coverartarchive.org/release-group/' + GROUP % 1, Reply(307, location='https://archive.org/download/mbid-1/front-500.jpg'))
     w.net.route('https://coverartarchive.org/release-group/' + GROUP % 2, Reply(404))
     w.net.route('https://itunes.apple.com/search', Reply(200, json.dumps({'results': [{'artworkUrl100': 'https://is1.mzstatic.com/a/100x100bb.jpg'}]}).encode()))
     w.fn('ringnav_cover_search', None, C.c_char_p)(b'Album B Artist B')
-    ours = ['https://archive.org/download/mbid-1/front-500.jpg', 'https://is1.mzstatic.com/a/600x600bb.jpg']
-    assert covers == ours and ('kugou', ours) in w.log  # stock's sources after ours
+    # online_coverthd's NetEase and Baidu sources, after Kugou's entry: nothing asked, nothing added
+    w.fn('ringnav_cover_none', None, C.c_char_p)(b'Album B Artist B')
+    assert covers == ['https://archive.org/download/mbid-1/front-500.jpg', 'https://is1.mzstatic.com/a/600x600bb.jpg']
     assert [u for u in w.net.asked if 'coverartarchive' in u] == [f'https://coverartarchive.org/release-group/{g}/front-500' for g in (GROUP % 1, GROUP % 2)]
+    assert all(u.startswith(('https://musicbrainz.org/', 'https://coverartarchive.org/', 'https://itunes.apple.com/')) for u in w.net.asked)
 
 
-def test_the_cover_search_offline_asks_once_and_leaves_stocks_sources(w):
+def test_the_cover_search_offline_asks_once(w):
     CJson(w)
     keywords(w, 'Song 2', 'Album B', 'Artist B')
     w.net.up = False
     covers = []
     w.mock('online_addcoverlist', lambda url, *_: covers.append(s(url)))
-    w.mock('stock_kugoucover_trampoline', lambda *_: w.log.append(('kugou',)))
     w.fn('ringnav_cover_search', None, C.c_char_p)(b'Album B Artist B')
-    assert w.net.asked == [MB_SEARCH] and not covers and ('kugou',) in w.log
+    assert w.net.asked == [MB_SEARCH] and not covers

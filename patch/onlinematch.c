@@ -1,6 +1,6 @@
 /* Online match (docs/internals.md#lyrics-search, #cover-search): Now Playing's ⋯ lyrics match asks
  * LRCLIB alone (no Kugou or NetEase), and its cover match MusicBrainz's Cover Art Archive and iTunes
- * before stock's Kugou search. */
+ * alone (no Kugou, NetEase or Baidu). */
 #include "peq.h"
 
 /* part joined into out, the odd ones percent-encoded and, with lucene, a backslash before each " and \
@@ -253,7 +253,7 @@ void album_note(char *out, unsigned n, const lyr_job *job) {
                                        * DigiCert G2 MusicBrainz and iTunes */
 #define LRCLIB_MAX (512 << 10)       /* up to 20 results, each with plain and synced text */
 #define COVER_MAX (256 << 10)        /* 10 MusicBrainz releases or 5 iTunes albums: ~15 KB in all */
-#define COVER_FILL 10                /* our candidates stop at this list size; stock's sources fill to 12 */
+#define COVER_FILL 10                /* our candidates stop at this list size (stock's page shows 12) */
 
 typedef struct { char *buf; unsigned len, max; } body_t;
 
@@ -636,7 +636,7 @@ static void covers(void) {
     int mb = mb_url(url, sizeof url, album, artist);
     char *body = mb ? get(url, COVER_MAX, 0) : 0;
     /* ponytail: MusicBrainz unreachable means likely offline, so iTunes isn't tried either (one
-     * timeout, not two, before stock's sources); ask iTunes anyway if one service is down alone. */
+     * timeout, not two, before the page shows the song's own cover); ask iTunes anyway if one service is down alone. */
     if (mb && !body) return;
     void *json = cJSON_Parse(body), *list = json ? cJSON_GetObjectItem(json, "releases") : 0;
     n = list ? cJSON_GetArraySize(list) : 0;
@@ -669,11 +669,15 @@ static void covers(void) {
 /* Smart Wi-Fi (smart_wifi.c smart_needed): Download Album Lyrics running keeps the radio on. */
 int album_lyrics_busy(void) { return al.running; }
 
-/* kugou_obtaincover(keyword), online_coverthd's first source, then com163's and Baidu's: each adds
- * image URLs to stock's list (online_addcoverlist), which the page downloads and shows. ours go first. */
-extern void stock_kugoucover_trampoline(const char *keyword);
+/* online_coverthd's sources (docs/internals.md#cover-search): kugou_obtaincover(keyword), then
+ * com163_obtaincover and, under 12 covers, baidu_obtaincover, each adding image URLs to stock's list
+ * (online_addcoverlist), which the page downloads and shows. Kugou's entry jumps here, so the list
+ * holds the Cover Art Archive's and iTunes's covers alone; NetEase's and Baidu's entries jump to
+ * ringnav_cover_none, so the song's title and artist go to none of the three (each asked over
+ * plain HTTP). */
 void ringnav_cover_search(const char *keyword) {
+    (void)keyword; /* stock's title&artist, URL-encoded: covers() reads keyinfo itself */
     covers();
-    stock_kugoucover_trampoline(keyword);
 }
+void ringnav_cover_none(const char *keyword) { (void)keyword; }
 #endif

@@ -134,8 +134,11 @@ HOOKS = {
     'systemset_manualtime_page_init': (0x4cc83c, 'ringnav_manualtime', 'manualtime'),
     # any Tidal track asked for, from a queue or Now Playing, wakes its stream thread (tidal.c)
     'get_tidal_trackurl': (0x483f28, 'ringnav_tidal_track', 'tidaltrack'),
-    # its cover match: MusicBrainz/Cover Art Archive and iTunes candidates, then stock's Kugou search
-    'kugou_obtaincover': (0x51bf74, 'ringnav_cover_search', 'kugoucover'),
+    # its cover match: MusicBrainz/Cover Art Archive and iTunes candidates in place of stock's Kugou search,
+    # and none from NetEase's or Baidu's, online_coverthd's other two sources (onlinematch.c)
+    'kugou_obtaincover': (0x51bf74, 'ringnav_cover_search', None),
+    'com163_obtaincover': (0x51c46c, 'ringnav_cover_none', None),
+    'baidu_obtaincover': (0x51bbdc, 'ringnav_cover_none', None),
     'mclPrevSong': (0x5c0518, 'ringnav_prev', 'prev'),
     'mclSetPlayMode': (0x5bd94c, 'ringnav_mode', 'mode'),
     'mclSetPlaySpeed': (0x5bd9dc, 'ringnav_speed', 'speed'),

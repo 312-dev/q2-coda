@@ -868,14 +868,18 @@ def test_a_copy_that_fails_leaves_no_part_file(fw):
         assert copy.card.log == [('unlink', b'/a/1.lrc.part')], kind
 
 
-def test_our_covers_go_before_stocks_kugou_search(fw):
+def test_our_covers_are_the_only_ones(fw):
     art = json.dumps({'results': [{'artworkUrl100': 'https://i/100x100.jpg'}]}).encode()
     net = Net(fw, {'https://musicbrainz': groups(ID % 1), 'https://coverartarchive': b'', ITUNES: art})
     redirects(net, fw)
-    covers, seen = Covers(fw, album=b'Al', artist=b'Ar'), []
-    fw.mock('stock_kugoucover_trampoline', lambda keyword, *_: seen.append((C.string_at(keyword), list(covers.added))))
+    covers = Covers(fw, album=b'Al', artist=b'Ar')
     fw.fn('ringnav_cover_search', None, C.c_char_p)(b'Ti&Ar')
-    assert seen == [(b'Ti&Ar', ['https://archive.org/x.jpg', 'https://i/600x600.jpg'])]
+    assert covers.added == ['https://archive.org/x.jpg', 'https://i/600x600.jpg']
+    asked = list(net.urls)
+    assert asked and all(u.startswith(('https://musicbrainz.org/', 'https://coverartarchive.org/', 'https://itunes.apple.com/')) for u in asked)
+    # NetEase's and Baidu's entries (com163_obtaincover, baidu_obtaincover) ask and add nothing
+    fw.fn('ringnav_cover_none', None, C.c_char_p)(b'Ti&Ar')
+    assert net.urls == asked and covers.added == ['https://archive.org/x.jpg', 'https://i/600x600.jpg']
 
 
 # Stock's records, its queue and library, and the card, for the lyrics save and Download Album Lyrics.
