@@ -395,8 +395,8 @@ int cat_same(const srv_t *s, card_t *k) {
     int suffix = ext && s->suffix && !strcasecmp(ext + 1, s->suffix);
     int d = k->sec < 0 || s->sec <= 0 ? 1 << 30 : k->sec > s->sec ? k->sec - s->sec : s->sec - k->sec;
     if (suffix && k->size > 0 && k->size == s->size && d <= 1) return M_FILE;
-    if (suffix && k->size > 0 && s->size > 0 && k->size != s->size && d > 2)
-        return M_NONE; /* the same kind of file, but another length: another recording */
+    /* a size that differs is no disagreement (a retagged copy, new art); a length more than 2 s off
+     * is, and fails the tags too: a live take beside the studio one */
     int tags = s->title && k->title == s->title && k->album == s->album &&
                (k->artist == s->artist || (k->aa && k->aa == s->aa)) && k->track == s->track;
     return tags && d <= 2 ? M_TAGS : M_NONE;
@@ -1345,23 +1345,34 @@ static unsigned hex32(const char *s) {
     }
     return s[8] ? 0 : v;
 }
-/* A card song's path by its listen_key, from songtable (the app's synced files are not in the
- * catalogue), into out; 0 when none has it. */
+/* ratings.in's lines, by key: a card song's path found in songtable by its listen_key (the app's
+ * synced files are not in the catalogue), in one pass over it for all of them. */
 typedef struct {
     unsigned key;
-    char *out;
-    unsigned size;
-    int found;
-} by_key;
+    int hearts;
+    char *path;
+} in_t;
+typedef struct {
+    in_t *l;
+    unsigned n;
+} in_set;
+static int in_cmp(const void *a, const void *b) {
+    unsigned x = ((const in_t *)a)->key, y = ((const in_t *)b)->key;
+    return x < y ? -1 : x > y;
+}
 static int key_row(void *ctx, int n, char **v, char **c) {
-    by_key *k = ctx;
-    int rec[REC_CUE_END / 4 + 1] = { 0 };
+    in_set *k = ctx;
+    int rec[REC_CUE_END / 4 + 2] = { 0 };
     if (!v[0]) return 0;
     P(rec, REC_PATH) = v[0], I(rec, REC_CUE_START) = v[1] ? atoi(v[1]) : 0;
-    if (listen_key(rec) != k->key) return 0;
-    tk_snprintf(k->out, k->size, "%s", v[0]);
-    k->found = 1;
-    return 1; /* the first is enough */
+    unsigned key = listen_key(rec), lo = 0, hi = k->n;
+    while (lo < hi)
+        if (k->l[(lo + hi) / 2].key < key)
+            lo = (lo + hi) / 2 + 1;
+        else
+            hi = (lo + hi) / 2;
+    if (lo < k->n && k->l[lo].key == key && !k->l[lo].path) k->l[lo].path = strdup(v[0]);
+    return 0;
 }
 extern int rate_keep(int album, unsigned key, int n);
 extern int stock_db_open(const char *path, void **db); /* playlists.c */
@@ -1386,39 +1397,47 @@ static void fav_set(const char *path, int on) {
     sqlite3_close(db);
 }
 /* ratings.in's lines applied as a rating made here (rate_keep by the key, My Fav for five by the
- * path), unless the Q2's own change to that song, still in ratings.out, is newer; then the file
- * goes. */
+ * path), unless the Q2's own change to that song, still in ratings.out, is newer. The file is
+ * renamed before it is read, so lines the app writes meanwhile go to a new ratings.in, not lost. */
 static void ratings_in(int slot) {
-    char in[64], outp[64];
+    char in[64], taking[72], outp[64];
     if (!cat.app[slot].ratings) return;
     tk_snprintf(in, sizeof in, "/mnt/mmc/.%s/ratings.in", cat.app[slot].id);
+    tk_snprintf(taking, sizeof taking, "%s.taking", in);
     tk_snprintf(outp, sizeof outp, "/mnt/mmc/.%s/ratings.out", cat.app[slot].id);
-    unsigned size = 0, osize = 0;
-    char *raw = read_all(in, 1 << 20, &size);
-    if (!raw) return;
-    char *out = read_all(outp, 1 << 20, &osize);
-    void *db = 0;
-    for (char *l = raw, *e; l && *l; l = e) {
+    if (access(taking, 0) && (access(in, 0) || rename(in, taking))) return;
+    unsigned size = 0, osize = 0, lines = 0;
+    char *raw = read_all(taking, 1 << 20, &size);
+    char *out = raw ? read_all(outp, 1 << 20, &osize) : 0;
+    for (char *l = raw; l && *l; l = strstr(l, "\n") ? strstr(l, "\n") + 1 : 0) ++lines;
+    in_set k = { lines ? calloc(lines, sizeof *k.l) : 0, 0 };
+    for (char *l = raw, *e; k.l && l && *l; l = e) {
         if ((e = strstr(l, "\n"))) *e++ = 0;
-        char *f[4], path[600] = "";
+        char *f[4];
         if (split(l, f, 4) < 4) continue;
         unsigned key = hex32(f[0]);
         int hearts = atoi(f[2]);
         if (!key || hearts < 0 || hearts > 5) continue;
         if (out && out_time(out, f[0]) > (unsigned)atoi(f[3])) continue;
-        rate_keep(0, key, hearts);
+        in_t *t = &k.l[k.n++];
+        t->key = key, t->hearts = hearts;
         const cat_ent *x = *f[1] ? ix_sid(&cat.ix, slot, f[1]) : 0;
-        if (x)
-            tk_snprintf(path, sizeof path, "%s", ix_str(&cat.ix, x->path));
-        else { /* a synced or other card file: found by its key */
-            by_key k = { key, path, sizeof path, 0 };
-            if (db || !stock_db_open("/mnt/data/database.db", &db))
-                sqlite3_exec(db, "select fileurl,time from songtable", key_row, &k, 0);
-        }
-        if (path[0]) fav_set(path, hearts == 5);
+        if (x) t->path = strdup(ix_str(&cat.ix, x->path));
     }
-    if (db) sqlite3_close(db);
-    free(raw), free(out);
-    unlink(in);
+    qsort(k.l, k.n, sizeof *k.l, in_cmp);
+    unsigned unknown = 0;
+    for (unsigned i = 0; i < k.n; ++i) unknown += !k.l[i].path;
+    void *db = 0;
+    if (unknown && !stock_db_open("/mnt/data/database.db", &db)) {
+        sqlite3_exec(db, "select fileurl,time from songtable", key_row, &k, 0);
+        sqlite3_close(db);
+    }
+    for (unsigned i = 0; i < k.n; ++i) {
+        rate_keep(0, k.l[i].key, k.l[i].hearts);
+        if (k.l[i].path) fav_set(k.l[i].path, k.l[i].hearts == 5);
+        free(k.l[i].path);
+    }
+    free(k.l), free(raw), free(out);
+    unlink(taking);
     ratings_copy_due();
 }

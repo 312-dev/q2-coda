@@ -54,6 +54,7 @@ class Rig:
     def __init__(self, fw, tmp_path, online=False):
         self.fw, self.tmp = fw, tmp_path
         self.now, self.online, self.toasts, self.played, self.keep = 100000, online, [], [], []
+        self.source = 1  # LIBRARYSOURCE: Local + Server
         self.card = {}  # a card file's path: (size, seconds, bytes at its start)
         self.lib = C.CDLL(ctypes.util.find_library('sqlite3'))
         self.lib.sqlite3_open.argtypes = [C.c_char_p, C.c_void_p]
@@ -153,7 +154,7 @@ class Rig:
         return C.addressof(ent)
 
     def config(self, path, section, key, out, default, *_):
-        v = b'1' if C.string_at(key) == b'LIBRARYSOURCE' else C.string_at(default)
+        v = str(self.source).encode() if C.string_at(key) == b'LIBRARYSOURCE' else C.string_at(default)
         C.memmove(out, v + b'\0', len(v) + 1)
 
     def statx(self, dirfd, path, flags, mask, out, *_):
@@ -330,6 +331,7 @@ def test_each_layer_hides_a_server_song_that_is_a_card_file(rig, layer):
 
 @pytest.mark.parametrize('case', ['other mbid', 'live take', 'longer', 'unreadable length'])
 def test_tags_alone_never_merge_when_a_stronger_layer_disagrees(rig, case):
+    """Equal tags, but the MusicBrainz ids differ, or the lengths are more than 2 s apart (or unknown)."""
     head = b'MUSICBRAINZ_TRACKID=' + MBID.replace('a1', 'b2').encode() if case == 'other mbid' else b''
     seconds = {'other mbid': 160, 'live take': 230, 'longer': 164, 'unreadable length': None}[case]
     rig.card_song('/mnt/mmc/Music/x.flac', 'Wild Honey', 'The Beach Boys', '50 Big Ones', 3, seconds, 4000, head)
@@ -438,6 +440,7 @@ def test_ratings_in_are_applied_unless_the_q2_s_own_change_is_newer(rig, fw):
     rig.files.files['/mnt/data/ringnav-ratings'] = b''
     rig.poll()
     assert f'/mnt/mmc/.{APP}/ratings.in' not in rig.files.files
+    assert f'/mnt/mmc/.{APP}/ratings.in.taking' not in rig.files.files
     db = sqlite3.connect(rig.tmp/'database.db')
     assert db.execute('select fileurl from myfav').fetchall() == [('/mnt/mmc/Music/a.flac',)]
     rate = fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)
@@ -464,3 +467,102 @@ def test_a_scan_that_ends_while_a_job_runs_is_matched_after_it(rig, fw):
     assert rig.shown() == ['Stick Season']  # matched against the card before the copy
     rig.poll(2)
     assert rig.shown() == []
+
+
+def playlists(rig):
+    db = sqlite3.connect(rig.tmp/'database.db')
+    heads = db.execute('select id,name from playlist where id<100 order by id').fetchall()
+    items = {h: [r[0] for r in db.execute('select fileurl from playlist where id>100 and cd_num=? order by id', (h,))]
+             for h, _ in heads}
+    db.close()
+    return heads, items
+
+
+def test_a_playlist_synced_as_an_m3u_is_shown_once_as_the_catalogue_s(rig):
+    """The app synced "Road Trip" to the card (an .m3u the library extension imported: a stock playlist of
+    card files) and lists it in the catalogue too. The catalogue's takes the twin's place; "Mine", the
+    user's own playlist that shares a catalogue playlist's name but not its songs, keeps its place."""
+    a, b = '/mnt/mmc/Subsonic/a.flac', '/mnt/mmc/Subsonic/b.flac'
+    rig.card_song(a, 'A', 'B', 'C', 1, 100, 1)
+    rig.card_song(b, 'B', 'B', 'C', 2, 100, 2)
+    db = sqlite3.connect(rig.tmp/'database.db')
+    for row in [(3, 'Road Trip', 3), (101, a, 3), (102, b, 3), (5, 'Mine', 5), (103, a, 5)]:
+        db.execute('insert into playlist(id,filename,fileurl,name,cd_num) values (?,?,?,?,?)',
+                   (row[0], row[1] if row[0] < 100 else 'x', row[1] if row[0] > 100 else '', row[1], row[2]))
+    db.commit()
+    db.close()
+    rig.write(1, [song_row('s9', 'Server', 'B', 'A', 1, 100, 9),
+                  'p\tpl1\tRoad Trip\n', f'i\tpl1\tsa\t{a}\n', f'i\tpl1\tsb\t{b}\n',
+                  'p\tpl2\tMine\n', 'i\tpl2\ts9\t\n'])
+    rig.poll()
+    heads, items = playlists(rig)
+    assert heads == [(3, 'Road Trip'), (5, 'Mine')]  # one Road Trip, and no second Mine
+    assert items[3] == [a, b] and items[5] == [a]
+    assert rig.query('select app,pid,list,twin from cat.serverlists') == [(APP, 'pl1', 3, 1)]
+    # the server adds a song to it: the catalogue's list is the one shown
+    rig.write(2, [song_row('s9', 'Server', 'B', 'A', 1, 100, 9),
+                  'p\tpl1\tRoad Trip\n', f'i\tpl1\tsa\t{a}\n', f'i\tpl1\tsb\t{b}\n', 'i\tpl1\ts9\t\n'])
+    rig.poll()
+    heads, items = playlists(rig)
+    assert heads == [(3, 'Road Trip'), (5, 'Mine')] and items[3] == [a, b, url('s9')]
+    # gone from the server: the twin is the user's synced file's, so it stays; a playlist the
+    # catalogue made goes
+    rig.write(3, ['p\tpl3\tNew\n', 'i\tpl3\ts9\t\n', song_row('s9', 'Server', 'B', 'A', 1, 100, 9)])
+    rig.poll()
+    assert playlists(rig)[0] == [(0, 'New'), (3, 'Road Trip'), (5, 'Mine')]
+    rig.write(4, [song_row('s9', 'Server', 'B', 'A', 1, 100, 9)])
+    rig.poll()
+    assert playlists(rig)[0] == [(3, 'Road Trip'), (5, 'Mine')]
+
+
+STOCK_SLOT = 0xbff000  # stock's shared connection's global: a stock address, so catalogue_attach keeps it
+
+
+def test_the_library_s_queries_read_the_server_s_songs_only_with_local_and_server(rig, fw):
+    from test_nav_lists import Loads
+    rig.card_song('/mnt/mmc/Music/a.flac', 'Card Song', 'Me', 'Album', 1, 200, 1000)
+    rig.write(1, [song_row('s1', 'Server One', 'Band', 'Album', 2, 180, 5000)])
+    rig.poll()
+    slot = C.c_void_p.from_address(STOCK_SLOT)
+    rig.lib.sqlite3_open(str(rig.tmp/'database.db').encode(), C.byref(slot))
+    attach = fw.fn('catalogue_attach', None, C.c_void_p)
+    attach(STOCK_SLOT)  # stock_db_open on stock's own handle
+    loads = Loads(fw)
+    loads.music("select * from songtable where album='Album'")
+    sql = loads.ran[-1]
+    assert 'union all select * from servertable' in sql
+    assert sorted(r[6] for r in rig.query(sql)) == ['Card Song', 'Server One']
+    # Local only: the card's songs alone, and the server's file let go
+    fw.var('catalogue_source', C.c_int).value = 0  # pod_click's change, then its call
+    fw.fn('catalogue_changed', None)()
+    loads.music("select * from songtable where album='Album'")
+    assert 'servertable' not in loads.ran[-1]
+    assert b'detach cat' in rig.sqls
+    rig.lib.sqlite3_close(slot)
+    slot.value = 0
+
+
+def test_a_bound_row_is_greyed_while_its_server_song_cannot_play(rig, fw):
+    """Stock's pooled rows of a Library list (p_deque_showlist's records, bound by ringnav_table_load): the
+    text of one bound to an unplayable server row is painted grey; the same row bound to a card song, or the
+    list once online, is not."""
+    rig.write(1, [song_row('s2', 'Streamed', 'B', 'A', 2, 100, 2)])
+    rig.poll()
+    fw.var('fw_ctx_p_deque_showlist', C.c_uint).value = rig.rows.new(
+        [rig.record('/mnt/mmc/Music/a.flac'), rig.record(url('s2'))])
+    row, label = (C.create_string_buffer(0x400) for _ in range(2))
+    struct.pack_into('<Q', label, O['W_PARENT'], C.addressof(row))
+    bind = fw.fn('catalogue_bind', None, C.c_void_p, C.c_uint)
+    greyed = fw.fn('catalogue_greyed', C.c_int, C.c_void_p, C.POINTER(C.c_uint))
+
+    def colour():
+        c = C.c_uint(0xffffffff)
+        return c.value if greyed(C.addressof(label), C.byref(c)) else None
+    bind(C.addressof(row), 1)
+    assert colour() == 0xff666666
+    bind(C.addressof(row), 0)  # the pool reuses the row for a card song
+    assert colour() is None
+    rig.online = True
+    rig.poll()
+    bind(C.addressof(row), 1)
+    assert colour() is None

@@ -224,6 +224,16 @@ def test_upcoming_skips_what_has_played(player):
     assert player.up_next() == [2]
 
 
+def test_upcoming_skips_a_server_row_that_cannot_play_now(fw, player):
+    """A server row (patch/catalogue.c) with no offline copy while it can't stream, here with Local only:
+    the queue keeps it, and playback passes it by."""
+    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    plan(player, [0, 1, 2, 3])
+    player.deques[player.handle][:] = [player.song(b'/mnt/mmc/Music/%d.flac' % i) for i in (0, 1)] + [
+        player.song(b'/mnt/mmc/.subsonic/cat/al1/s2.flac'), player.song(b'/mnt/mmc/Music/3.flac')]
+    assert player.up_next() == [1, 3]
+
+
 def test_play_next_comes_first_and_only_once(player):
     plan(player, [0, 1, 2, 3], pend=(3, 0))  # 0 is the playing track's own, played again: a Play Next of it
     assert player.up_next() == [3, 0, 1, 2]
