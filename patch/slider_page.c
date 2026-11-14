@@ -7,7 +7,8 @@
  * accent's fill to a white knob; the range's ends in Text Tertiary under it. Stock's -/+ discs go
  * (the wheel and edit_key still click them) and its value label stays, unseen, so its writes keep
  * repainting where the value is drawn. Everything is laid out as the window loads, before stock's
- * init, and painted by slider_page_paint after the window's children. */
+ * init, and painted by slider_page_paint after the window's children. EQ's Simple tab draws its
+ * rows and vertical sliders here too (eq_rows_paint, at the end). */
 #include "navigation.h"
 
 /* Screen rows (docs/oled-design.md), less the window's top at the set's bar */
@@ -211,6 +212,112 @@ void slider_page_paint(void *w, void *canvas) {
             face, px, RGBA(S->muted));
     sp_text(canvas, buf, wide(buf, sizeof buf / sizeof *buf, hi), x0, x1 - x0, SP_ENDS_Y - top, 3,
             face, px, RGBA(S->muted));
+    stock_canvas_set_fill_color(canvas, fill);
+    stock_canvas_set_text_color(canvas, text);
+}
+
+/* EQ's Simple tab under a set_switch theme (eq_rows, peq_ui.c e3_paint and tabs_paint), in the
+ * page's coordinates: under the tabs, the switch, Presets and Reset as rows, then Low, Mid and
+ * High as the standard's vertical sliders (docs/oled-design.md Progress and sliders): a 4 px
+ * Track line, the fill from 0 dB to the gain in the accent (Text Tertiary while 3EQ is off), a
+ * 14 px white knob ringed in the accent while the wheel is on it, and the band's name and gain
+ * under it in 15 px, Text Tertiary, Text Primary on the focused band. */
+#define EQ_KNOB_RING 2
+#define EQ_LINE 4
+int eq_rows(void) { return theme()->set_switch; }
+
+static void eq_ink_text(void *canvas, const char *s, int x, int w, int y, int align, int px,
+                        unsigned rgb) {
+    static const char *const faces[] = FONT_NAMES;
+    unsigned buf[48], n = wide(buf, sizeof buf / sizeof *buf, s);
+    int fpx = px;
+    const char *face = theme_face(buf, (int)n, &fpx);
+    sp_text(canvas, buf, n, x, w, y, align, face ? face : faces[0], fpx, RGBA(rgb));
+}
+
+static unsigned eq_primary(void) { return ipod_light() ? 0x000000 : 0xffffff; }
+
+void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) {
+    void *lcd = P(canvas, CANVAS_LCD), *vg = canvas_get_vgcanvas(canvas);
+    if (!lcd) return;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), text = (unsigned)I(lcd, LCD_TEXT_COLOR),
+             raw = st.raw_ink, accent = scheme()->tones[0] & 0xffffffu;
+    int x0 = geom_val(V_TEXT_X), x1 = 375 - geom_val(V_RIGHT_X),
+        row_px = theme()->font_px[ROLE_TITLE];
+    st.raw_ink = 1; /* final colours, each half's */
+    static const char *const rows[] = { 0, "Presets", "Reset" };
+    for (int i = 0; i < 3; ++i) {
+        int y = EQ_ROWS_Y + i * EQ_ROW, cy = y + EQ_ROW / 2, sel = e->focus == 1 + i;
+        if (sel) {
+            rect_t bar = { SP_BAR_INSET, y, 375 - 2 * SP_BAR_INSET, EQ_ROW };
+            fill_box(canvas, &bar, RGBA(accent), SP_BAR_R);
+        }
+        eq_ink_text(canvas, i ? rows[i] : e->label, x0, x1 - x0 - 48, cy, 2, row_px,
+                    sel ? 0xffffff : eq_primary());
+        if (!i) switch_mark(canvas, x1, cy, e->on, sel);
+        if (i == 1) chevron_icon(w, canvas, x1, cy, sel);
+    }
+    for (int i = 0; vg && i < 3; ++i) { /* the columns stock's touch reads (peq_ui.c e3_touch) */
+        static const char *const names[] = { "Low", "Mid", "High" };
+        int x = 62 + 125 * i, focus = e->focus == 4 + i;
+        float zero = (float)(EQ_SLIDERS_TOP + EQ_SLIDERS_BOTTOM) / 2,
+              y = zero - (float)(e->gain[i] * (EQ_SLIDERS_BOTTOM - EQ_SLIDERS_TOP) / (2 * e->max)),
+              a = y < zero ? y : zero, b = y < zero ? zero : y;
+        stock_canvas_set_fill_color(canvas, RGBA(ipod_light() ? SP_TRACK_LIGHT : SP_TRACK_DARK));
+        canvas_fill_rect(canvas, x - EQ_LINE / 2, EQ_SLIDERS_TOP, EQ_LINE,
+                         EQ_SLIDERS_BOTTOM - EQ_SLIDERS_TOP);
+        if (b - a >= 1) {
+            stock_canvas_set_fill_color(canvas, RGBA(e->on ? accent : scheme()->muted));
+            canvas_fill_rect(canvas, x - EQ_LINE / 2, (int)a, EQ_LINE, (int)(b - a + 0.5f));
+        }
+        vgcanvas_save(vg);
+        vgcanvas_translate(vg, (float)I(canvas, CANVAS_X), (float)I(canvas, CANVAS_Y));
+        if (focus) { /* the accent's ring round the knob */
+            vgcanvas_begin_path(vg);
+            vgcanvas_arc(vg, (float)x, y, SP_KNOB / 2.0f + EQ_KNOB_RING, 0, 6.2831853f, 0);
+            vgcanvas_set_fill_color(vg, RGBA(accent));
+            vgcanvas_fill(vg);
+        }
+        vgcanvas_begin_path(vg);
+        vgcanvas_arc(vg, (float)x, y, SP_KNOB / 2.0f, 0, 6.2831853f, 0);
+        vgcanvas_set_fill_color(vg, RGBA(0xffffff));
+        vgcanvas_fill(vg);
+        vgcanvas_restore(vg);
+        char gain[16];
+        tk_snprintf(gain, sizeof gain, e->gain[i] ? "%+.1f dB" : "0 dB", e->gain[i]);
+        unsigned ink = focus ? eq_primary() : scheme()->muted;
+        eq_ink_text(canvas, names[i], x - 56, 112, EQ_NAME_Y, 1, SP_ENDS_PX, ink);
+        eq_ink_text(canvas, gain, x - 56, 112, EQ_GAIN_Y, 1, SP_ENDS_PX,
+                    focus && e->adjusting ? eq_primary() : scheme()->muted);
+    }
+    st.raw_ink = raw;
+    stock_canvas_set_fill_color(canvas, fill);
+    stock_canvas_set_text_color(canvas, text);
+}
+
+/* ... and its tabs, Simple and Advanced, each half of the bar's EQ_TABS_H: the open one in Text
+ * Primary, the other in Text Tertiary; while the wheel is on the bar, the other (what Centre
+ * opens) on the accent's bar, white. */
+void eq_tabs_paint(void *w, void *canvas, int simple, int focus) {
+    (void)w;
+    void *lcd = P(canvas, CANVAS_LCD);
+    if (!lcd) return;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), text = (unsigned)I(lcd, LCD_TEXT_COLOR),
+             raw = st.raw_ink;
+    int row_px = theme()->font_px[ROLE_TITLE];
+    st.raw_ink = 1;
+    for (int i = 0; i < 2; ++i) {
+        int shown = i == !simple, x = i ? 375 / 2 : SP_BAR_INSET, half = 375 / 2 - SP_BAR_INSET;
+        if (focus && !shown) {
+            rect_t bar = { x, (EQ_TABS_H - EQ_ROW) / 2, half, EQ_ROW };
+            fill_box(canvas, &bar, RGBA(scheme()->tones[0] & 0xffffffu), SP_BAR_R);
+        }
+        eq_ink_text(canvas, i ? "Advanced" : "Simple", x, half, EQ_TABS_H / 2, 1, row_px,
+                    focus && !shown ? 0xffffff
+                    : shown         ? eq_primary()
+                                    : scheme()->muted);
+    }
+    st.raw_ink = raw;
     stock_canvas_set_fill_color(canvas, fill);
     stock_canvas_set_text_color(canvas, text);
 }

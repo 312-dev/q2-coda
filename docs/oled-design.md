@@ -285,8 +285,12 @@ has no place for keeps a place of its own:
   column to the right column with its top at y 186, Track behind and Accent Blue filled to a 14 px
   white knob (Channel Balance fills from the centre); the range's ends in 15 px Text Tertiary
   centred on y 214, at the two columns. The wheel moves it; there are no +/- buttons.
-- **Vertical slider (EQ):** 4 px Track line, Accent Blue fill from 0 dB to the value, a 14 px
-  white knob. Band labels under it in Text Tertiary 15 px.
+- **Vertical slider (EQ):** 4 px Track line, Accent Blue fill from 0 dB to the value (Text Tertiary
+  while the EQ is off), a 14 px white knob, ringed 2 px in Accent Blue while the wheel is on it.
+  The band's name and gain under it in 15 px Text Tertiary, Text Primary on the band the wheel is
+  on. Above the three, the EQ's switch, Presets and Reset are rows.
+- **Storage bar:** 12 px, round ends, segments in Accent Blue, Text Secondary and Track, with a
+  legend of 8 px dots and 15 px labels. Segments never use more than three colours.
 
 ### Confirmation
 
@@ -351,7 +355,7 @@ pattern.
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
-| Equalizer (Simple)                  | Vertical slider             |                                                                                                            |
+| Equalizer (Simple)                  | Vertical slider             | Its tabs, then rows: the switch, Presets, Reset                                                            |
 | Wi-Fi                               | Switch row, then a section  | "Networks" header after 12 px, "Searching..." on its line; signal, lock, check on the right                |
 | Bluetooth                           | Two-line row                | Second line "Connected" with the Positive dot                                                              |
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
@@ -389,7 +393,8 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   (`bar.battery.painter="slim"`); the wheel's scroll indicator (`list.scrollbar.painter="wheel"`);
   1 px dividers on the text and right columns (`list.divider.ink`); row art's 4 px corners
   (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column; the
-  switch, Gain's value, the pickers' check, disabled rows, the slider page and the Wi-Fi page as above (`settings.values.switch`); song rows
+  switch, Gain's value, the pickers' check, disabled rows, the slider page, EQ's Simple tab and the Wi-Fi
+  page as above (`settings.values.switch`); song rows
   (`list.songs.painter="inline"`) and the Song Artist and Song Length options; Songs' action row
   as the Shuffle row (`list.shuffle.row`); a list left by Return opening at its top when chosen
   again (`list.reopen.top`, which Minimal sets for every theme).
@@ -402,4 +407,4 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 Still to build:
 
 - A confirmation screen for Shuffle and Repeat, and the toast and dialog forms.
-- The EQ slider and the storage bar drawn as above.
+- The storage bar drawn as above.

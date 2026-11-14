@@ -529,6 +529,23 @@ void stock_more_into(void *win);
 void info_poll(void);      /* lockscreen.c: the info screen's timer, with the screen lit */
 int xfade_page(void *top); /* crossfade.c */
 void xfade_ends(char *lo, char *hi, unsigned n); /* crossfade.c: its page's range ends */
+/* slider_page.c: EQ's Simple tab as a set_switch theme draws it (docs/oled-design.md Progress and
+ * sliders): rows under the tabs, then the bands' vertical sliders, in the page's coordinates */
+#define EQ_TABS_H 48 /* the tab bar (peq_ui.c bar) */
+#define EQ_ROWS_Y EQ_TABS_H
+#define EQ_ROW 32 /* the switch, Presets and Reset */
+#define EQ_SLIDERS_TOP 150 /* a band's travel, +max dB to -max */
+#define EQ_SLIDERS_BOTTOM 186
+#define EQ_NAME_Y 200 /* the band's name's and gain's centres */
+#define EQ_GAIN_Y 216
+typedef struct {
+    const char *label; /* the switch row's: "Enabled", or the PEQ preset playing */
+    int on, focus, adjusting; /* focus: 0 the tabs, 1 the switch, 2 Presets, 3 Reset, 4.. bands */
+    double gain[3], max;
+} eq_rows_t;
+int eq_rows(void);
+void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e);
+void eq_tabs_paint(void *w, void *canvas, int simple, int focus);
 int ipod_battery(void);    /* theme_engine.c: IPOD BATTERY, 0 Icon, else a percentage */
 int title_gone(void *w, void *event); /* ... and looks for its source again at the next sync */
 int bar_title_fits(void *label);      /* label's text fits the bar's title box */
