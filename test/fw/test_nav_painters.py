@@ -630,6 +630,33 @@ def test_minimal_has_no_thumb(fw, st):
     assert lists.paint() == [] and fw.calls('stock_paint_trampoline')
 
 
+def test_an_inset_modals_scroll_indicator_stays_in_its_panel(fw, st):
+    """OLED's wheel indicator on an inset modal's rows (menu_modal.c): inside the panel's right padding, clear of the
+    selection bar's end, so nothing lights past the panel's edge (x 58 to 317 on screen, the rows' box from 50)."""
+    now = [5000]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    ui = Ui(fw)
+    theme(fw, OLED)
+    T = THEMES[OLED]
+    win = ui.window('sortselect_dialog', kind='dialog')
+    lv = ui.add('list_view', win, (0, 44, 375, 210), 'list_view')
+    view = ui.add('scroll_view', lv, (0, 0, 375, 210), 'scroll_view')
+    for _ in range(10):
+        ui.add('list_item', view, (0, 0, 375, 32))
+    view.int_at(O['VIEW_CONTENT_H']).value = 320
+    bar = ui.add('scroll_bar_m', lv, (369, 0, 6, 210))
+    bar.int_at(O['BAR_MAX']).value = 320
+    fw.fn('modal_frame', None, C.c_void_p, C.c_void_p)(win.addr, lv.addr)
+    view.int_at(O['VIEW_CONTENT_H']).value = 320
+    fw.fn('wheel_sb_arm', None, C.c_void_p)(view.addr)
+    out = T['sel_inset'] - 8  # the panel's left edge in the rows' box
+    canvas = Canvas(fw, x=58 - out, y=66)
+    fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(lv.addr, canvas.addr)
+    x0, y0, x1, y1 = thumb_box(canvas.px)
+    assert x0 >= out + 259 - 8 and x1 <= out + 259  # in the right padding, past the bar's end
+    assert y0 >= -8 and y1 <= 6 * 32 + 8
+
+
 # A scrolling text's faded ends (list.marquee.fade, OLED's; list_marks.c marquee_fade): its own column inside stock's
 # 2 px margins, 12 columns at an end, clear inside to opaque at the end, in the colour behind the text.
 OLED = next(i for i, t in enumerate(THEMES) if t['name'] == 'OLED')

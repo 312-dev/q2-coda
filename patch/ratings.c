@@ -248,9 +248,8 @@ static void rate_outside(void *win, int on) {
     widget_set_sensitive(out, on);
 }
 
-/* Closes the picker, and with save rates rate_pick: an album (rate_album) if still Coverflow's
- * centre card, else the playing track, My Fav in or out through the heart's own click and the
- * rest kept here. */
+static void rate_save(void *win);
+/* Closes the picker, and with save keeps rate_pick (rate_save). */
 static void rate_close(int save) {
     void *win = st.rate_on;
     if (!win) return;
@@ -259,8 +258,15 @@ static void rate_close(int save) {
     widget_set_visible(panel, 0, 0);
     widget_set_sensitive(panel, 0); /* stock's hit test skips only the insensitive, hidden or not */
     rate_outside(win, 0);
+    if (save) rate_save(win);
+}
+
+/* Keeps rate_pick for the picker that was over win: an album (rate_album) if still Coverflow's
+ * centre card, else the playing track, My Fav in or out through the heart's own click and the
+ * rest kept here. */
+static void rate_save(void *win) {
     int n = ra.rate_pick;
-    if (save && ra.rate_album) { /* the menu's album, still on its page */
+    if (ra.rate_album) { /* the menu's album, still on its page */
         void *a = window_manager_get_top_window(window_manager()) == win ? qm_record() : (void *)0;
         if (!a || qm_album_id(a) != ra.rate_album) {
             toast("Album changed");
@@ -270,7 +276,7 @@ static void rate_close(int save) {
             rate_album_favs(a, n == 5);
         return;
     }
-    void *r = save ? rate_track() : (void *)0;
+    void *r = rate_track();
     if (!r) return;
     int fav = checkFavExist(r) != 0;
     if (!rate_saved(rate_keep(0, listen_key(r), n))) return;
@@ -308,11 +314,29 @@ static int rate_out(void *ctx, void *event) {
     return STOP;
 }
 
+/* A modal set's picker (docs/oled-design.md#menus): the inset modal's, a row for each rating, the
+ * current one checked; a pick keeps its row's rating, as Centre on the hearts does, and Return
+ * leaves the rating as it was. */
+static const char *const rate_rows[] = { "Unrated",  "1 Heart",  "2 Hearts",
+                                         "3 Hearts", "4 Hearts", "5 Hearts" };
+static void *rate_page __attribute__((section(".scratch")));
+static void rate_picked(int n) {
+    ra.rate_pick = n;
+    rate_save(rate_page);
+}
+static int rate_modal(void *win, int pick, unsigned album) {
+    ra.rate_pick = ra.rate_was = pick;
+    ra.rate_album = album;
+    rate_page = win;
+    return modal_pick((void *)0, rate_rows, 6, pick, rate_picked);
+}
+
 /* The picker over win on pick hearts, for the queue menu's album album or, with 0, the playing
  * track: the wheel moves the rating, Centre saves it and Return leaves it as it was; a tap on a
  * heart saves that many, or none on the one it opened on. */
 int rate_show(void *win, int pick, unsigned album) {
     if (!win || st.rate_on) return 0;
+    if (modal_set()) return rate_modal(win, pick, album);
     st.rate_on = win;
     ra.rate_pick = ra.rate_was = pick;
     ra.rate_album = album;

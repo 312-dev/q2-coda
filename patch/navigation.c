@@ -2974,9 +2974,10 @@ static void paint_scrollbar(void *canvas, void *bar, int table) {
         if (!a || !lcd || max <= 0) return;
         value = value < 0 ? 0 : value > max ? max : value;
         while (max >> 22) max >>= 1, value >>= 1;
-        int at = track * value / max, len = track * h / max;
+        int at = track * value / max, len = track * h / max, right = modal_sb_right(list, T->sb_w);
         if (len > track - at) len = track - at;
-        rect_t t = { I(list, W_W) - T->sb_right - T->sb_w, T->sb_top - y0, T->sb_w, track },
+        if (right < 0) right = T->sb_right; /* an inset modal's: in its panel */
+        rect_t t = { I(list, W_W) - right - T->sb_w, T->sb_top - y0, T->sb_w, track },
                thumb = { t.x, t.y + at, t.w, len };
         unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), L = ipod_light();
         for (int i = 0; i < t.h; ++i)
@@ -5123,10 +5124,11 @@ static void np_stage(unsigned stage) {
  * press shows the next control the wheel sets, scrubber, shuffle, repeat, rating, then back to
  * rest, where the wheel is the volume's (Apple's iPod classic guide: scrubber, Genius, shuffle,
  * rating, lyrics). The scrub's own press ends it (scrub_end seeks) and goes on to shuffle; the
- * rating picker's Centre saves and closes it (rate_key), back at rest. Shuffle and repeat have
- * no picker of their own: the theme's pair rings the one the wheel steps (np_modes); under a
- * theme without the pair the cycle skips them. A press held NP_HOLD_MS or longer, short of
- * stock's long press (Shut Down), turns the screen off instead, as stock's release does. */
+ * rating picker's Centre saves and closes it (rate_key; a modal set's picker, ratings.c
+ * rate_modal), back at rest. Shuffle and repeat have no picker of their own: the theme's pair
+ * rings the one the wheel steps (np_modes); under a theme without the pair the cycle skips them. A
+ * press held NP_HOLD_MS or longer, short of stock's long press (Shut Down), turns the screen off
+ * instead, as stock's release does. */
 #define NP_HOLD_MS 400
 static int np_centre(unsigned now) {
     int held = st.center_down_at && now - st.center_down_at >= NP_HOLD_MS;

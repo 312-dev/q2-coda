@@ -355,13 +355,15 @@ an inset modal over the page, which stays on screen dimmed half way to black; no
 
 - **Panel:** opaque `#1C1C1E`, 259 px wide from x 58, top at y 58, 16 px corners, 8 px padding, no
   title (the row behind says which item). Rows are 32 px, at most six in view, then they scroll
-  inside the panel.
+  inside the panel; the wheel's scroll indicator stands in the panel's right padding, never past its edge.
 - **Rows:** Inter Regular 20 at the panel's 16 px inset; an action's Phosphor symbol (regular,
   19 px) at the right in Text Secondary, white on the selection. The selection is the list's bar, 8
   px in from the panel with 8 px ends.
 - **A setting** (Sorting, Speed, Shuffle, Repeat, Group by) has its symbol before the label, the
   label 26 px further in, and its value alone at the right in Text Secondary; Centre opens a picker
   in the same panel, the current choice with the accent's check before its label.
+- **Rating** (Now Playing's Centre cycle, a menu's Rate) is a picker in the same panel: Unrated, 1 Heart
+  to 5 Hearts, the current one checked; Centre keeps a row's rating and closes, Return closes.
 - **Gaps:** a setting heading the menu stands 12 px above the actions; a destructive row (Delete
   Song) comes last, 12 px below them, and asks before it acts. Space, never a rule.
 - The menu opens on its first action, lit; the wheel moves, Centre picks, Return closes it back to

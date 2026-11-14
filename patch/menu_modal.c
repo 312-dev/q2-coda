@@ -16,11 +16,12 @@
 #define MODAL_R 16
 #define MODAL_ROW 32
 #define MODAL_ROWS 6
-#define MODAL_GAP 12  /* between Sorting and the actions, and before a destructive row */
-#define MODAL_TEXT 16 /* a row's text and symbols from the panel's sides */
-#define MODAL_LEAD 26 /* a setting's or a choice's label after its leading symbol */
-#define MODAL_ICON 19 /* tools/art.py MENU_ICON_PX */
-#define MODAL_CARET 4 /* a value's room before its direction caret */
+#define MODAL_GAP 12    /* between Sorting and the actions, and before a destructive row */
+#define MODAL_TEXT 16   /* a row's text and symbols from the panel's sides */
+#define MODAL_LEAD 26   /* a setting's or a choice's label after its leading symbol */
+#define MODAL_ICON 19   /* tools/art.py MENU_ICON_PX */
+#define MODAL_CARET 4   /* a value's room before its direction caret */
+#define MODAL_SWITCH 34 /* list_marks.c switch_mark's width */
 #define MODAL_FILL 0x1c1c1e
 #define MODAL_DIM 0x80000000u    /* black at 50% */
 #define MODAL_SECONDARY 0xababab /* Text Secondary; the light half's below */
@@ -61,6 +62,15 @@ int modal_win(void *w) {
     return 0;
 }
 
+/* The wheel's scroll indicator's inset from the right of an open modal's list, sb_w wide
+ * (navigation.c paint_scrollbar): centred in the panel's right padding, clear of the selection
+ * bar's end and inside the panel. -1 for any other list. */
+int modal_sb_right(void *list, int sb_w) {
+    for (int i = 0; list && i < MODAL_MAX; ++i)
+        if (modals[i].list == list) return row_out() + (MODAL_PAD - sb_w) / 2;
+    return -1;
+}
+
 /* The rows' surface (the list's scroll_view) of an open modal, painted by modal_row_paint. */
 int modal_rows_of(void *w) {
     for (int i = 0; w && i < MODAL_MAX; ++i)
@@ -78,12 +88,14 @@ void *modal_gap(void *view) {
 
 /* Row lays out its label for the panel and keeps its symbol and value for modal_row_paint: an
  * action's label from the text column to its symbol, a setting's or choice's after its leading
- * symbol, short of the value. icon 0: none. */
+ * symbol, short of the value, a switch's short of the switch. icon 0: none. */
 void modal_row(void *row, void *label, const char *icon, const char *value, int how) {
-    int x = text_x() + (how != MM_ACTION ? MODAL_LEAD : 0), end = modal_row_w() - text_x() -
-                                                                  (value  ? 96
-                                                                   : icon ? MODAL_ICON + 8
-                                                                          : 0);
+    int x = text_x() + (how == MM_SETTING || how == MM_CHOICE ? MODAL_LEAD : 0),
+        end = modal_row_w() - text_x() -
+              (value              ? 96
+               : icon             ? MODAL_ICON + 8
+               : how == MM_SWITCH ? MODAL_SWITCH + 8
+                                  : 0);
     widget_set_prop_str(row, MM_ICON, icon ? icon : "");
     widget_set_prop_str(row, MM_VALUE, value ? value : "");
     widget_set_prop_int(row, MM_HOW, how);
@@ -214,9 +226,18 @@ void modal_row_paint(void *w, void *canvas, void *row, rect_t r, int selected) {
     if (!value) value = "";
     int how = widget_get_prop_int(row, MM_HOW, MM_ACTION), light = ipod_light();
     int dir = widget_get_prop_int(row, MM_DIR, DIR_NONE);
+    int right = modal_row_w() - text_x(), lead = text_x(), raw = st.raw_ink;
+    if (how == MM_SWITCH) { /* by stock's own switch image, hidden on the row */
+        for (unsigned i = 0, n = widget_count_children(row); i < n; ++i) {
+            const char *image = widget_get_prop_str(widget_get_child(row, i), "image", "");
+            if (image && !strncmp(image, "switch_", 7))
+                switch_mark(canvas, r.x + right, r.y + r.h / 2, !tk_strcmp(image, "switch_on"),
+                            selected);
+        }
+        return;
+    }
     if (!*icon && !*value && !dir) return;
     const char *ink = selected ? "w" : light ? "l" : "d";
-    int right = modal_row_w() - text_x(), lead = text_x(), raw = st.raw_ink;
     unsigned text = (unsigned)I(P(canvas, CANVAS_LCD), LCD_TEXT_COLOR);
     if (*icon && how != MM_ACTION)
         icon_at(w, canvas, icon, how == MM_CHOICE && !selected ? "a" : ink, lead, &r);
@@ -247,12 +268,12 @@ void modal_row_paint(void *w, void *canvas, void *row, rect_t r, int selected) {
     stock_canvas_set_text_color(canvas, text);
 }
 
-/* A picker in the panel (Multiple Speed's): stock's sortselect dialog, its rows rebuilt as names,
- * the current one checked, as the hold menu's choices are (navigation.c qm_open). The rows of the
- * dialog over which it opens, under, hide while it is up, and with them its dim and panel, so one
- * panel shows; they come back on the picker's close, the selection where it was. The dialog itself
- * stays shown: a hidden window would hand the keys to the page under it. A pick runs from the
- * next loop pass, after the close, with the picker's index. */
+/* A picker in the panel (Multiple Speed's, ratings.c's): stock's sortselect dialog, its rows
+ * rebuilt as names, the current one checked, as the hold menu's choices are (navigation.c qm_open).
+ * The rows of the dialog over which it opens, under, hide while it is up, and with them its dim and
+ * panel, so one panel shows; they come back on the picker's close, the selection where it was. The
+ * dialog itself stays shown: a hidden window would hand the keys to the page under it. A pick runs
+ * from the next loop pass, after the close, with the picker's index. 1 if it opened. */
 static struct {
     void (*pick)(int i);
     void *dialog, *under;
@@ -292,16 +313,15 @@ static int pick_gone(void *dialog, void *event) {
     return 0;
 }
 
-static void modal_pick(void *under, const char *const *names, int n, int current,
-                       void (*pick)(int i)) {
+int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i)) {
     void *wm = window_manager(), *page = window_manager_get_top_window(wm);
-    if (pk.dialog || n <= 0) return;
+    if (pk.dialog || n <= 0) return 0;
     navigator_to("dialog/sortselect_dialog");
     void *dialog = window_manager_get_top_window(wm);
-    if (dialog == page) return;
+    if (dialog == page) return 0;
     if (tk_strcmp(widget_get_prop_str(dialog, "name", ""), "sortselect_dialog")) {
         window_close(dialog);
-        return;
+        return 0;
     }
     void *back = widget_lookup(dialog, "img_return", 1),
          *view = widget_lookup(dialog, "scroll_view", 1);
@@ -326,15 +346,17 @@ static void modal_pick(void *under, const char *const *names, int n, int current
     if (under) widget_set_visible(under, 0, 0);
     modal_frame(dialog, widget_lookup(dialog, "list_view", 1));
     ringnav_select(view, current >= 0 && current < n ? current : 0, n);
+    return 1;
 }
 
 /* Now Playing's More (onlinematch.c ringnav_playermore): a dialog under a modal set
  * (tools/ipod.py modal_page), modeless, as the hold menu's, so navigator_to returns. Its rows as
  * the panel's, each with its symbol: stock's by their kind (PLAYMORE_ROWS, the button's name its
  * index), AirPlay's and Download Album Lyrics' by their images. Delete Song, which asks first, goes
- * last after a gap. A-B Repeat keeps its switch on the right column. Multiple Speed is a setting
- * row, its value the speed, opening a picker of the four (M3); a pick is a click on stock's own
- * speed button for it, which the hidden row keeps. The menu opens on its first row. */
+ * last after a gap. A-B Repeat's stock switch hides, and the row paints the theme's (switch_mark)
+ * on the right column by its image. Multiple Speed is a setting row, its value the speed, opening
+ * a picker of the four (M3); a pick is a click on stock's own speed button for it, which the
+ * hidden row keeps. The menu opens on its first row. */
 static const char *const more_icons[] = { 0,
                                           "speedometer",
                                           "queue",
@@ -378,6 +400,12 @@ static void modal_return(void *w, void *win) {
     widget_off_by_func(w, EVT_KEY_UP, (void *)COMMON_KEYUP, win);
     widget_on(w, EVT_KEY_UP, modal_back, win);
     if (w != win) widget_on(win, EVT_KEY_UP, modal_back, win);
+}
+
+/* A switch row's flip, which stock draws on its hidden image: the row shows it. */
+static int switch_flipped(void *row, void *event) {
+    widget_invalidate_force(row, (void *)0);
+    return 0;
 }
 
 static int more_gone(void *win, void *event) {
@@ -434,12 +462,14 @@ void modal_more(void *win) {
             widget_on(button, EVT_CLICK, more_speed, win);
             if (label) widget_set_text_utf8(label, "Speed");
         }
+        if (sw) { /* A-B Repeat: the theme's switch in its place (rule 7), by its state */
+            how = MM_SWITCH;
+            widget_set_visible(sw, 0, 0);
+            widget_on(button, EVT_CLICK, switch_flipped,
+                      button); /* after stock's, which flips it */
+        }
         modal_row(button, label, icon, kind == 1 ? speeds[g_playspeed_mode & 3] : (const char *)0,
                   how);
-        if (sw)
-            widget_move_resize(sw,
-                               modal_row_w() - (theme()->sel_inset - MODAL_PAD) - MODAL_TEXT - 50,
-                               0, 50, MODAL_ROW);
         if (kind == PLAYMORE_DELETE && widget_get_visible(item)) last = item;
     }
     if (last) { /* last, after a gap */

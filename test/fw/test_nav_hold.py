@@ -1750,6 +1750,64 @@ def test_now_playings_rate_opens_the_picker_over_it(hold, recs, ui, st, rates):
     assert st('rate_on', C.c_void_p).value == hold.page and rates('rate_album', C.c_uint).value == 0
 
 
+def test_oled_rates_in_the_inset_modal(hold, recs, ui, st, rates, fw):
+    """A modal set's rating picker (Now Playing's Centre cycle, its menu's Rate) is the inset modal's picker: a row for
+    each rating, no hearts to five, the current one checked and selected; Centre on a row keeps that rating and closes
+    the picker, Return closes it with the rating as it was."""
+    use_set(st, 'oled')
+    songs = [song(recs, i) for i in range(3)]
+    hold.now_playing(songs)
+    st('rate_win', C.c_void_p).value = hold.page
+    key = fw.fn('listen_key', C.c_uint, C.c_void_p)(songs[1])
+    kept = lambda: fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, key)
+    fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)(0, key, 2)
+    assert fw.fn('rate_open', C.c_int)() == 1 and not st('rate_on', C.c_void_p).value
+    view = hold.view()
+    assert ui.rows(view) == ['Unrated', '1 Heart', '2 Hearts', '3 Hearts', '4 Hearts', '5 Hearts']
+    assert [ui.nodes[item].props.get('_mm_icon') for item in ui.kids(view)] == ['', '', 'check', '', '', '']
+    assert ui.prop(view, '_ringnav_index', -1) == 2
+    ui.click(ui.find(view, '4 Hearts'))
+    ui.due('pick_run')
+    assert kept() == 4 and hold.dialog not in ui.stack
+    fw.fn('rate_open', C.c_int)()
+    assert ui.key(hold.dialog, KEY_RETURN) == STOP and hold.dialog not in ui.stack and kept() == 4
+
+
+class Rect(C.Structure):
+    _fields_ = [('x', C.c_int), ('y', C.c_int), ('w', C.c_int), ('h', C.c_int)]
+
+
+@pytest.mark.parametrize('image, selected, strokes, fills', [('switch_on', 0, 0, 2), ('switch_off', 1, 1, 1)])
+def test_oled_more_shows_ab_repeat_as_the_themes_switch(fw, ui, st, image, selected, strokes, fills):
+    """Now Playing's More under a modal set: A-B Repeat's stock switch hides and its row paints the theme's switch
+    (list_marks.c switch_mark, rule 7) by the hidden image's state, its label ending short of it: a track and a knob,
+    or on the selection when off, an outline round the knob."""
+    use_set(st, 'oled')
+    win = ui.window('playermore_page', 'dialog')
+    lv = ui.child(win, 'list_view', 0, 44, 375, 270)
+    ui.nodes[lv].name = 'list_view_more'
+    view = ui.child(lv, 'scroll_view', 0, 0, 375, 270)
+    ui.nodes[view].name = 'scroll_view_more'
+    button = ui.child(ui.child(view, 'list_item', 0, 0, 375, 70), 'button', 0, 0, 375, 70)
+    label = ui.child(button, 'hscroll_label', 20, 0, 280, 70)
+    ui.nodes[label].text = 'AB Repeat'
+    sw = ui.child(button, 'image', 300, 10, 50, 50)
+    ui.nodes[sw].image = image
+    fw.fn('modal_more', None, C.c_void_p)(win)
+    inset = THEMES[st('theme').value]['sel_inset']
+    right = 259 + (inset - 8) - 16  # the row's right column, in the row
+    x, _, w, _ = ui.nodes[label].rect()
+    assert not ui.nodes[sw].visible and x + w <= right - 34
+    assert ui.fn('switch_flipped') in ui.handlers(button, EVT_CLICK)  # stock flips the hidden image: the row repaints
+    lcd = C.create_string_buffer(0x400)
+    canvas = C.create_string_buffer(0x400)
+    struct.pack_into('<Q', canvas, O['CANVAS_LCD'], C.addressof(lcd))
+    fw.mock('canvas_get_vgcanvas', lambda *_: 1)
+    paint = fw.fn('modal_row_paint', None, C.c_void_p, C.c_void_p, C.c_void_p, Rect, C.c_int)
+    paint(view, C.addressof(canvas), button, Rect(0, 0, 259 + 2 * (inset - 8), 32), selected)
+    assert len(fw.calls('vgcanvas_stroke')) == strokes and len(fw.calls('vgcanvas_fill')) == fills
+
+
 def advanced(fw, kind, value):
     """Playback's own Shuffle, Repeat or Group by, as its menu sets them."""
     return fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(kind, value)

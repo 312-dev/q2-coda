@@ -444,8 +444,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     (each half's), the shuffle confirmation's glyph (bold) in Accent Blue, Now Playing's heart and More (regular) in
     Text Primary (each half's), More pressed in Text Secondary and the full heart (fill) in Accent Blue, and the
     Ratings rows' filled and outlined hearts and Streaming's service marks in the folder's inks, all from the vendored
-    Phosphor SVGs but TIDAL's mark, drawn in art.py, and the inset
-    modal's symbols (regular, 19 px) in the folder's inks and the picker's check in Accent Blue."""
+    Phosphor SVGs but TIDAL's mark, drawn in art.py, and the inset modal's symbols (regular, 19 px) in Text Secondary
+    (each half's) and white for the selection and the picker's check in Accent Blue."""
     t = theme.builtins()[3]
     got = art.images(t)
     modes = [f'mode_{n}_{k}' for n in ('shuffle', 'repeat') for k in ('d', 'l', 'on')] + ['mode_repeat1_on']
