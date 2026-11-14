@@ -5,18 +5,22 @@ import hashlib
 import importlib.util
 import itertools
 import json
+import os
 import pathlib
 import re
 import subprocess
 import sys
 import tarfile
 import tempfile
+import shelf
+import signing
 from signing import PUBLIC_KEY, public_key
 from build import ROOT, REPO, VERSION, BETA, TAG, ZIP_SHA, DEMO_SHA, build, check, need, run, sha, source_sha256, version_ok
 
-# Network Update (patch/netupdate.c) fetches releases/latest/download/<ASSET>, so the name can't
-# carry the version.
+# Network Update (patch/netupdate.c) fetches releases/download/<tag>/<ASSET> and <SIGNATURE>, so the
+# names can't carry the version.
 ASSET = 'update.tar'
+SIGNATURE = ASSET + '.sig'  # the release key's signature of signing.update_message (docs/releasing.md#signing-a-release)
 # Rebuilt from docs/manual every release; the README links releases/latest/download/<GUIDE>.
 GUIDE = 'Q2-Pod-User-Guide.pdf'
 
@@ -85,6 +89,7 @@ def package(stock, out):
     text = notes()  # its changelog entry is the newest, before anything is built
     check(not run('git', '-C', ROOT, 'status', '--porcelain', '--', 'patch', 'tools', 'assets', 'docs', 'test', 'requirements.txt').strip(),
           'Commit the build inputs before packaging')
+    check(shelf.verify(), 'sources.list is not signed by the release key: docs/releasing.md#the-app-list')
     out.mkdir(parents=True)
     source = source_sha256()
     revision = run('git', '-C', ROOT, 'rev-parse', 'HEAD').strip()
@@ -107,6 +112,26 @@ def package(stock, out):
     print(f'Validated and reproducible: {out}')
 
 
+def digest(out, env=signing.ENV):
+    """The broker's command that signs the packaged update.tar (docs/releasing.md#signing-a-release)."""
+    record = json.loads((out/'release.json').read_text())
+    check(record['tag'] == VERSION and sha((out/ASSET).read_bytes()) == record['assets'][ASSET], 'Wrong release tag or update')
+    return signing.broker_command(signing.update_message(VERSION, out/ASSET), env)
+
+
+def sign(out, signature=None, key=None):
+    """update.tar.sig beside the packaged update.tar: signature (the broker's base64) checked against the release
+    key, or one made with key (a private key's PEM); its hash in release.json."""
+    record = json.loads((out/'release.json').read_text())
+    check(record['tag'] == VERSION and sha((out/ASSET).read_bytes()) == record['assets'][ASSET], 'Wrong release tag or update')
+    message = signing.update_message(VERSION, out/ASSET)
+    sig = signing.signature_b64(signature) if signature is not None else signing.sign(message, key)
+    check(signing.verify(message, sig), f'That signature does not check against {PUBLIC_KEY.relative_to(ROOT)}')
+    (out/SIGNATURE).write_bytes(sig)
+    record['signature_sha256'] = sha(sig)
+    (out/'release.json').write_text(json.dumps(record, indent=2)+'\n')
+
+
 def upload(out, publish=False):
     check(not (publish and BETA), 'A beta is a pre-release: set BETA = 0 in tools/build.py to publish')
     record = json.loads((out/'release.json').read_text())
@@ -122,6 +147,10 @@ def upload(out, publish=False):
           'Release notes mismatch, or release.json is from an older package: package again')
     sums = f'{record["assets"][ASSET]}  {ASSET}\n'
     check((out/'SHA256SUMS').read_text() == sums, 'Release checksums mismatch')
+    # A Q2 refuses a release without its signature: never upload one.
+    sig = (out/SIGNATURE).read_bytes() if (out/SIGNATURE).exists() else b''
+    check(sig and sha(sig) == record.get('signature_sha256') and signing.verify(signing.update_message(VERSION, out/ASSET), sig),
+          f'No {SIGNATURE} that checks against {PUBLIC_KEY.relative_to(ROOT)}: tools/release.py digest, then sign')
     gh = ['gh', '--repo', REPO, 'release']
     # Listing distinguishes an absent tag from an authentication/network failure.
     releases = json.loads(run(*gh, 'list', '--limit', '1000', '--json', 'tagName,isDraft'))
@@ -135,7 +164,7 @@ def upload(out, publish=False):
           f'Tag {VERSION} is on another commit: gh release delete {VERSION} --cleanup-tag, or delete the tag')
     run(*gh, 'edit' if existing else 'create', VERSION, '--draft', '--target', record['revision'], '--title', VERSION,
         '--notes-file', out/'release-notes.md')
-    files = [ASSET, GUIDE]
+    files = [ASSET, SIGNATURE, GUIDE]
     run(*gh, 'upload', VERSION, *(out/name for name in files), '--clobber')
     with tempfile.TemporaryDirectory(prefix='q2-release-verify-') as tmp:
         run(*gh, 'download', VERSION, '--dir', tmp)
@@ -152,6 +181,12 @@ if __name__ == '__main__':
     p = commands.add_parser('package')
     p.add_argument('zip', type=pathlib.Path)
     p.add_argument('--out', type=pathlib.Path, required=True)
+    p = commands.add_parser('digest', help="print the secret broker's command that signs the packaged update.tar")
+    p.add_argument('out', type=pathlib.Path)
+    p.add_argument('--env', default=signing.ENV, help='the variable the broker puts the PEM in (default %(default)s)')
+    p = commands.add_parser('sign', help=f'check and write {SIGNATURE}')
+    p.add_argument('out', type=pathlib.Path)
+    p.add_argument('--signature', help=f"the broker's base64; without it, the PEM in ${signing.ENV} signs")
     p = commands.add_parser('upload')
     p.add_argument('out', type=pathlib.Path)
     p.add_argument('--publish', action='store_true')
@@ -162,6 +197,12 @@ if __name__ == '__main__':
             check(importlib.util.find_spec('unicorn') is not None,
                   'Release validation needs the requirements.txt environment: pip install -r requirements.txt')
             package(a.zip, a.out.resolve())
+        elif a.command == 'digest':
+            print(digest(a.out.resolve(), a.env))
+        elif a.command == 'sign':
+            check(a.signature is not None or os.environ.get(signing.ENV), f'--signature, or the private key in ${signing.ENV}')
+            sign(a.out.resolve(), a.signature, os.environ.get(signing.ENV))
+            print(f'Signed: {a.out/SIGNATURE}')
         else:
             upload(a.out.resolve(), publish=a.publish)
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as exc:

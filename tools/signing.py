@@ -56,7 +56,9 @@ def list_message(body):
 def _openssl(*args, key=None):
     """openssl with key's text (if any) readable at /dev/fd/N through a pipe, N in place of {key} in args."""
     if key is None:
-        return subprocess.run(['openssl', *args], capture_output=True)
+        proc = subprocess.Popen(['openssl', *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out, err = proc.communicate()
+        return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
     read, write = os.pipe()
     try:
         proc = subprocess.Popen(['openssl', *(a.replace('{key}', f'/dev/fd/{read}') for a in args)],
@@ -85,10 +87,12 @@ def sign(message, key_pem):
     return r.stdout
 
 
-def verify(message, signature, public=PUBLIC_KEY):
-    """Whether signature is the Ed25519 signature of message by the public key in the PEM file public."""
+def verify(message, signature, public=None):
+    """Whether signature is the Ed25519 signature of message by the public key in the PEM file public (PUBLIC_KEY's
+    by default)."""
     if len(signature) != 64:
         return False
+    public = public or PUBLIC_KEY
     public_key(pathlib.Path(public).read_bytes())  # an Ed25519 key, not just any openssl takes
     with tempfile.TemporaryDirectory(prefix='q2-verify-') as tmp:
         (pathlib.Path(tmp)/'m').write_bytes(message)
