@@ -221,6 +221,41 @@ def test_seek_exact(player, songs, tmp):
     return f'{len(head) // 4} frames, then {len(tail) // 4} from frame {9 * 44100}'
 
 
+def heard_seconds(pcm, rate=44100):
+    """pos.flac's seconds heard in s16 stereo PCM, one a 20 ms window (None where silent), each with its tone's error
+    in Hz: the frequency from the window's first and last rising zero crossings, interpolated."""
+    left = array.array('h', pcm)[::2]
+    w, out = rate // 50, []
+    for at in range(0, len(left) - w, w):
+        x = left[at:at + w]
+        ups = [i + x[i] / (x[i] - x[i + 1]) for i in range(w - 1) if x[i] < 0 <= x[i + 1]]
+        if max(x) < 4000 or len(ups) < 3: out.append((None, 0)); continue
+        f = (len(ups) - 1) * rate / (ups[-1] - ups[0])
+        n = round((f - music.POS_BASE) / music.POS_STEP)
+        out.append((n, f - (music.POS_BASE + music.POS_STEP * n)))
+    return out
+
+
+def test_scan(player, songs, tmp):
+    """mcl-scan (player/stretch.c): from 10 s, 2 s as it is, 2 s heard at 4 times, 2 s as it is, 2 s backward at twice,
+    then as it is. Every window is on its second's tone (the pitch kept), the scan reaches 20 s (8 s in 2) and runs
+    back about 4, and nothing is skipped: from window to window the second moves by one at most, at the releases too."""
+    s, pcm, names = play(player, songs, 'scan', tmp/'scan', speed=2)  # a turn's 150 ms wait is real time: more would eat the run back
+    heard = [(n, e) for n, e in heard_seconds(b''.join(pcm)) if n is not None]
+    off = [e for _, e in heard if abs(e) > 3]
+    assert len(off) <= len(heard) // 50, f'{len(off)} of {len(heard)} windows off their tone, by up to {max(map(abs, off))} Hz'
+    secs = [n for n, e in heard if abs(e) <= 3]  # a window across a seek's splice reads between two tones
+    top = secs.index(max(secs))
+    back = min(secs[top:])
+    # the file sink keeps what the turn backward drops from the PCM, up to half a second played as it is: 22 s
+    assert 19 <= max(secs) <= 22 and 15 <= back <= max(secs) - 4, f'reached {max(secs)} s, then back to {back} s'
+    steps = [b - a for a, b in zip(secs, secs[1:])]
+    jumps = [d for d in steps if abs(d) > 1]
+    assert jumps in ([], [-2]), f'jumps of {jumps} s'  # -2: the dropped half second, never heard on a Q2
+    assert secs[0] == 10 and secs[-1] > back, f'from {secs[0]} s, ending at {secs[-1]} s'
+    return f'{len(heard)} windows: 10 s to {max(secs)} s, back to {back} s, on to {secs[-1]} s; {len(off)} off their tone'
+
+
 def test_cue_tracks(player, songs, tmp):
     """A CUE sheet's tracks of one file, started by ss= and cut by set-nexturl: each from its own start, the last to
     the file's end, in one PCM open (the same format)."""

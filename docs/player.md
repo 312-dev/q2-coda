@@ -50,7 +50,8 @@ demo queues every message it receives as a (name, argument) pair (`0x5bb7f4`); a
 | `mcl-dsdmode` | 0, 1, 2 | DSD output: D2P (to PCM), DoP, Native (`0xb11e60`; demo's `dsdmode_d2p`, `dsdmode_dop`, `dsdmode_native`). On a Q2 it counts on USB alone: the DAC always gets DoP and Bluetooth PCM ([Output](#output)). | none |
 | `mcl-replaygain` | mode | `0xb11e48`, taken at the next file (`0xb11e40` = 2). | none |
 | `mcl-seteq` | ten floats and a flag, `\|` between | The ten band gains (`0xb11e0c` on) and on (1), "preset changed" (2) or off (0) (`0x42cb08`). Stock refuses it above 48 kHz. | none |
-| `mcl-playspeed` | integer | Stored (`0xb11e00`). | none |
+| `mcl-playspeed` | 0 to 3 | Stored (`0xb11e00`, `0x42c7c4`) and read only where a file's audio chain is built (`0x42e7c8`, in `reinit_audio_chain`): 1, 2 and 3 play at 1.25, 1.5 and 2 times (floats at `0x88c910`, `0x88c90c`, `0x88c908`) through MPlayer's `scaletempo`, pitch kept (a filter control `0x40003500`, MPlayer's `AF_CONTROL_PLAYBACK_SPEED` set), and only for a file of 48 kHz or less, as demo's Speed page says; 0 and anything above 48 kHz play at 1. | none |
+| `mcl-scan` | hundredths, below 0 backward | Not stock's: Q2 Pod's hold-to-scan ([Scan](#scan)), which only q2player takes. | none |
 | `mcl-setexplayinfo` | 0, 1, 2 | Which meter the play loop fills: none, level, spectrum (`0xb11db0`). | none |
 | `mcl-mqadecodemode` | integer | Stored and read by nothing. | none |
 | `player-status` | `request` | | `{player-status\playing}` when `flag` is 2, else `{player-status\ready}` |
@@ -272,6 +273,16 @@ A WMA file's `LENGTH` is its whole seconds (5 for 5.99 s), and its position star
 | `PAUSE_WAIT`, `CMD_DONE`, `IDLE_WAIT` | Paused and stopped, the player sleeps on a futex, not a 10-20 ms poll | [Battery](internals.md#battery) |
 
 Outside the player: `patch_bluealsa` and `tools/bt_silence.S` change bluealsa (AAC, silence when the player writes nothing), and stay as they are.
+
+## Scan
+
+A held Previous or Next scans the track (`patch/seek.c`, [internals: Scan](internals.md#scan)). Stock's `scaletempo` could play a scan at speed, but only at a file's start, up to 2 times and at 48 kHz or less (`mcl-playspeed` above), so with stock's player the scan is jumps with half a second of the song at its own speed after each. q2player takes `{mcl-scan\N}`: N hundredths of the song's speed from the next block on, below 0 backward, 0 its own speed again (`player/engine.c`, `player/stretch.c`). The payload sends it only while `/tmp/q2scan` is there, which q2player makes at each song it can stretch and removes at one it cannot (DSD, or a rate whose top speed, `stretch_top`, is under 2) and when it hands over to stock's player.
+
+**Forward.** The decoded song goes through a WSOLA time-stretch, the method of MPlayer's `scaletempo`: 40 ms segments out, each taken from where the song would be at that speed, moved up to 15 ms to where it best continues the segment before (the highest correlation of mono sums over 10 ms, over the candidate's energy's root), and crossfaded into it over those 10 ms. The pitch stays the song's. Above 48 kHz the search looks at every `rate / 48000`-th frame at every `rate / 48000`-th place, so its cost is about the same at every rate. The speed is capped at `384000 / rate` (`stretch_top`): no more frames a second decoded than a 384 kHz file at its own speed, which a Q2 plays. So 44.1 and 48 kHz go to 8 times, 96 kHz to 4, 192 kHz to 2, and nothing above 192 kHz stretches. While a scan runs only `SCAN_LEAD_MS` (150 ms) is written ahead, not the PCM's half second, so a change of speed and the release are heard that soon. N 0 plays on from the frame after the last segment's: nothing is skipped or played twice at the release.
+
+**Backward.** The song is decoded a whole second at a time from a seek (`rewind_block`), and each second is played last frame first, then the second before it, so the song runs backward without a break; the same stretch keeps its pitch. A turn between forward and backward starts again from the second being heard, with `mcl-seek`'s mute and 150 ms wait. At the song's start a backward scan waits, silent. `media-info`'s position is the second heard in either direction (`heard_at`: the frames decoded less what the stretch holds and the PCM's backlog at its speed).
+
+**Cost.** Measured on this machine (one core, scalar C, `-O2 -fno-tree-vectorize`): the stretch costs 0.20 to 0.33% of real time a second of output at any speed and rate (44.1 kHz at 1 to 8 times, 96 kHz at 4, 192 kHz at 2), about what decoding 44.1 kHz FLAC costs at its own speed (0.21%; MP3 and AAC 0.34%, 192 kHz 24-bit FLAC 0.65%, FFmpeg C alone). The decoding scales with the speed: at 8 times, 44.1 kHz FLAC is 1.7% and MP3 2.7% of this core, so a scan's cost is mostly its decoding. By count, the search is about 7.3 million multiply-adds a second of output at 44.1 kHz, in four running sums. Under `qemu-mipsel` the float arithmetic is emulated in software and the stretch reads 24% of real time, which says nothing of a Q2's FPU. ponytail: on a Q2, `top -b -d 1` during 8 times on a 44.1 kHz MP3 and 2 times on a 192 kHz FLAC is the measurement that says whether `stretch_top`'s 384 kHz ceiling is right; a decoder that falls behind is heard as gaps in the scan only, never at the song's own speed.
 
 ## Capturing
 

@@ -564,6 +564,7 @@ void np_fill(int scrub);
 /* seek.c: a held Previous or Next scans the track; np_seek_bar is navigation.c's */
 int seek_input(void *e), seek_release(unsigned key), seek_held(unsigned key), seek_tick(void);
 int seek_step(unsigned held_ms), seek_target(int to, int dir, int step, int total);
+int seek_plan(int dir, int paused); /* a row of seek.c's seek_phases */
 void np_seek_bar(int phase, int to, int paused);
 void seek_scrub(int to);
 int seek_scrub_end(int to, int seek);

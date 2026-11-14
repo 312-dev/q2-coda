@@ -22,6 +22,7 @@ import os, pathlib, struct, subprocess, sys, wave
 
 # Bumped when a file is added or changed, so a directory made by an older recipe is made again.
 RECIPE = '9'
+POS_BASE, POS_STEP = 1000, 20  # pos.flac's second n: a sine of POS_BASE + POS_STEP n Hz
 
 # (name, ffmpeg output arguments): 6 s of the noise source, in each format and width. APE, TAK and WMA Lossless
 # have no encoder in ffmpeg or on this machine, so none is made.
@@ -292,6 +293,9 @@ def qq(d):
 def make(d):
     d = pathlib.Path(d); d.mkdir(parents=True, exist_ok=True)
     if not (d/'slow.flac').exists(): os.mkfifo(d/'slow.flac')  # a preload's open that blocks until a test writes it
+    if not (d/'pos.flac').exists():  # the scan's: second n a sine of POS_HZ(n), so what is heard says where it is from
+        ff('-f', 'lavfi', '-i', f'aevalsrc=0.5*sin(2*PI*({POS_BASE}+{POS_STEP}*floor(t))*t):s=44100:d=60',
+           '-af', 'aformat=channel_layouts=stereo', '-c:a', 'flac', '-sample_fmt', 's16', d/'pos.flac')
     if (d/'.made').exists() and (d/'.made').read_text() == RECIPE: return qq(d) or d
     w = d/'whole.wav'
     ff('-f', 'lavfi', '-i', 'sine=f=441:r=44100:d=40', '-f', 'lavfi', '-i', 'aevalsrc=0.2*sin(2*PI*(200+20*t)*t):s=44100:d=40',

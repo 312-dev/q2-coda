@@ -1,5 +1,6 @@
-"""patch/seek.c: holding Previous or Next scans the playing track, a jump then a stretch at the song's own speed, the
-jumps growing the longer the button is held (docs/internals.md#scan); a tap stays stock's skip."""
+"""patch/seek.c: holding Previous or Next scans the playing track, faster the longer the button is held: on q2player
+heard at 2, 4 and 8 times (mcl-scan) and then in jumps heard at 4; otherwise a jump then a stretch at the song's own
+speed, the jumps growing (docs/internals.md#scan). A tap stays stock's skip."""
 import ctypes as C
 
 import pytest
@@ -16,8 +17,13 @@ PLAYING, PAUSED = 2, 3
 class Scan:
     """A Q2 playing a 240 s local track at sec, its buttons pressed through ringnav_input and released through ringnav,
     the key-up hook, with the clock the test moves and the timers Ui keeps."""
-    def __init__(self, fw, mcl, stock_bytes, sec=60, total=240, cue=0, status=PLAYING):
+    def __init__(self, fw, mcl, stock_bytes, sec=60, total=240, cue=0, status=PLAYING, q2player=False):
+        """q2player: the player's SCAN_FILE is there, so the song can be heard at speed."""
         self.fw, self.sec, self.total, self.status = fw, sec, total, status
+        self.sent = []
+        C.c_int.from_address(O['MCL_FD']).value = 7
+        fw.mock('fw_access', lambda path, *_: 0 if q2player and C.string_at(path) == b'/tmp/q2scan' else -1)
+        fw.mock('fw_send', lambda fd, data, n, flags, *_: self.sent.append((fd, C.string_at(data, n), flags)) or n)
         self.ui = Ui(fw)
         self.ui.window('playing_page')
         self.clock = Clock(fw, 100000)
@@ -73,6 +79,11 @@ class Scan:
     def seeks(self):
         return [c[1][0] for c in self.fw.calls('mclSetSeek')]
 
+    def scans(self):
+        """The mcl-scan speeds sent, in hundredths."""
+        assert all(fd == 7 and flags == 0x4040 for fd, _, flags in self.sent)  # never waits, never a SIGPIPE
+        return [int(m[len(b'{mcl-scan\\'):-1]) for _, m, _ in self.sent]
+
     def stock_downs(self):
         return [c for c in self.fw.calls('stock_input_trampoline')]
 
@@ -120,6 +131,71 @@ def test_the_jumps_speed_up(scan):
     jumps = [b - a for a, b in zip(s.seeks(), s.seeks()[1:])]
     assert jumps[:5] == [2] * 5 and 4 in jumps and 8 in jumps and jumps[-1] == 16
     assert jumps == sorted(jumps)
+
+
+def test_without_q2player_nothing_is_sent(scan):
+    s = scan()
+    s.hold(NEXT, HOLD + 3 * CYCLE)
+    s.up(NEXT)
+    assert s.scans() == [] and s.seeks()
+
+
+@pytest.mark.parametrize('direction, paused, there, plan', [
+    (1, 0, True, 1), (-1, 0, True, 2),  # forward, backward
+    (1, 1, True, 0), (-1, 1, True, 0), (1, 0, False, 0), (-1, 0, False, 0),  # paused, or not q2player: jumps
+])
+def test_the_plan_is_heard_at_speed_only_on_q2player_while_playing(fw, direction, paused, there, plan):
+    fw.mock('fw_access', lambda path, *_: 0 if there and C.string_at(path) == b'/tmp/q2scan' else -1)
+    assert fw.fn('seek_plan', C.c_int, C.c_int, C.c_int)(direction, paused) == plan
+
+
+class Moving:
+    """The player's second, moved on as a scan heard at speed would move it: the speed sent, times the time."""
+    def __init__(self, s):
+        self.s, self.last, self.at = s, s.clock.now, float(s.sec)
+        s.fw.mock('player_playtime_and_length', self.position)
+
+    def position(self, sec, total, *_):
+        speed = (self.s.scans() or [100])[-1] / 100 or 1
+        self.at = max(0.0, self.at + speed * (self.s.clock.now - self.last) / 1000)
+        self.last = self.s.clock.now
+        self.s.sec = int(self.at)
+        return self.s.position(sec, total)
+
+
+def test_on_q2player_the_hold_is_heard_at_2_4_then_8_times_then_jumps_heard_at_4(scan):
+    s = scan(sec=0, total=3600, q2player=True)
+    Moving(s)
+    s.hold(NEXT, HOLD + 6000 - CYCLE)
+    assert s.scans() == [200, 400, 800] and s.seeks() == []  # the player runs on at speed: no seek
+    s.hold(NEXT, 6000)
+    assert s.scans() == [200, 400, 800, 400]
+    jumps = [b - a for a, b in zip(s.seeks(), s.seeks()[1:])]
+    assert jumps and set(jumps) == {8, 16} and jumps == sorted(jumps)  # 16, then 32 times
+    assert s.up(NEXT) == STOP and s.scans()[-1] == 0  # the release: its own speed again
+
+
+def test_on_q2player_previous_runs_backward_and_turns_at_the_start(scan):
+    s = scan(sec=5, q2player=True)
+    Moving(s)
+    s.hold(PREV, HOLD + 5000)
+    assert s.scans() == [-200, -400, 0] and s.seeks() == []  # at the start it plays on forward from there
+    assert s.up(PREV) == STOP and s.scans()[-1] == 0
+
+
+def test_paused_on_q2player_nothing_is_heard(scan):
+    s = scan(status=PAUSED, q2player=True)
+    s.hold(NEXT, HOLD + 2 * CYCLE)
+    assert s.scans() == [] and s.seeks() == []
+
+
+def test_a_lost_release_stops_the_speed(scan):
+    s = scan(q2player=True)
+    s.hold(NEXT, HOLD + CYCLE)
+    assert s.scans() == [200]
+    s.clock.now += 800  # no repeat
+    s.fire_due()
+    assert s.scans() == [200, 0]
 
 
 def test_a_hold_rewinds_to_the_start_and_plays_on_from_there(scan):

@@ -1,35 +1,101 @@
-/* Holding Previous or Next (keys 222 and 223) scans the playing track as an iPod's click wheel
- * does: a short stretch of the song at its own speed and pitch, a jump, another stretch, the jumps
- * growing the longer the button stays down (docs/ipod.md#previous-and-next,
- * docs/internals.md#scan). A press let go before SEEK_HOLD_MS is a tap and stays stock's: Next
- * changes track, Previous restarts the track or goes back one (ringnav_seek_start). */
+/* Holding Previous or Next (keys 222 and 223) scans the playing track, faster the longer the
+ * button stays down (docs/ipod.md#previous-and-next, docs/internals.md#scan). With q2player
+ * playing a song it can stretch (its SCAN_FILE), the song is heard running at 2, then 4, then 8
+ * times its speed at its own pitch ({mcl-scan\HUNDREDTHS}, player/stretch.c), and past that in
+ * jumps of growing length, each played at 4 times; Previous runs it backward the same way, or
+ * with SEEK_REWIND_SNIPPETS steps back by short stretches played forward, as a CD player does.
+ * Otherwise (the stock player, a paused song, DSD) it scans as an iPod's click wheel does: a
+ * jump, a short stretch at the song's own speed, another jump, the jumps growing. A press let go
+ * before SEEK_HOLD_MS is a tap and stays stock's: Next changes track, Previous restarts the track
+ * or goes back one (ringnav_seek_start). */
 #include "navigation.h"
 
-#define SEEK_HOLD_MS 500  /* a press held this long scans instead of skipping */
-#define SEEK_CYCLE_MS 500 /* one jump and the stretch heard after it */
-#define SEEK_LOST_MS 700  /* no repeat for this long: the release was lost */
+#define SEEK_HOLD_MS 500        /* a press held this long scans instead of skipping */
+#define SEEK_CYCLE_MS 500       /* one jump and the stretch heard after it */
+#define SEEK_LOST_MS 700        /* no repeat for this long: the release was lost */
+#define SCAN_FILE "/tmp/q2scan" /* player/q2player.h: there while q2player can scan the song */
+/* 1: Previous steps back by stretches played forward, not backward */
+#ifndef SEEK_REWIND_SNIPPETS
+#define SEEK_REWIND_SNIPPETS 0
+#endif
 
-/* Track seconds each jump moves while the button has been held at least `after` ms past
- * SEEK_HOLD_MS: 4, 8, 16 then 32 times the song's speed. */
-static const struct {
-    unsigned after;
-    int step;
-} seek_steps[] = { { 0, 2 }, { 3000, 4 }, { 6000, 8 }, { 10000, 16 } };
+/* A scan's phases: from `after` ms held past SEEK_HOLD_MS, `times` the song's speed overall;
+ * `play` the speed the player runs at, in hundredths (mcl-scan, below 0 backward; 0 its own);
+ * `jump` set where each cycle also seeks on by times / 2 seconds, so the scan covers `times`. */
+typedef struct {
+    unsigned short after;
+    signed char times;
+    short play;
+    unsigned char jump;
+} seek_phase_t;
+#define PHASES 5
+static const seek_phase_t seek_phases[][PHASES] = {
+    /* SEEK_PLAN_JUMPS: the stock player, a pause, DSD: 4, 8, 16 then 32 times (the last twice:
+     * every row has PHASES) */
+    { { 0, 4, 0, 1 },
+      { 3000, 8, 0, 1 },
+      { 6000, 16, 0, 1 },
+      { 10000, 32, 0, 1 },
+      { 10000, 32, 0, 1 } },
+    /* SEEK_PLAN_FORWARD: heard at 2, 4 and 8 times, then jumps heard at 4 */
+    { { 0, 2, 200, 0 },
+      { 2000, 4, 400, 0 },
+      { 4000, 8, 800, 0 },
+      { 6000, 16, 400, 1 },
+      { 10000, 32, 400, 1 } },
+    /* SEEK_PLAN_BACKWARD: the same, backward */
+    { { 0, 2, -200, 0 },
+      { 2000, 4, -400, 0 },
+      { 4000, 8, -800, 0 },
+      { 6000, 16, -400, 1 },
+      { 10000, 32, -400, 1 } },
+    /* SEEK_PLAN_SNIPPETS: steps back, each heard forward at twice the speed */
+    { { 0, 2, 200, 1 },
+      { 2000, 4, 200, 1 },
+      { 4000, 8, 200, 1 },
+      { 6000, 16, 200, 1 },
+      { 10000, 32, 200, 1 } },
+};
+enum { SEEK_PLAN_JUMPS, SEEK_PLAN_FORWARD, SEEK_PLAN_BACKWARD, SEEK_PLAN_SNIPPETS };
 
 /* key: the button held (0 none); scanning once the hold began; at its press and its last key-down
  * (the Q2's buttons repeat theirs while held); to the track second the scan has reached, of the
  * record at queue place track; edge set at the track's start or end, where it waits for another
- * track (Next) or for the release (Previous); eat the key whose release ringnav stops. */
+ * track (Next) or for the release (Previous); eat the key whose release ringnav stops; plan, a
+ * row of seek_phases; sent, the mcl-scan the player was last sent (0: none, or its own speed);
+ * live while the phase is heard at speed without jumps. */
 static struct {
     unsigned key, at, seen, timer, track, eat;
-    int scanning, to, edge, paused, total;
+    int scanning, to, edge, paused, total, plan, sent, live;
 } sk __attribute__((section(".scratch")));
 
-int seek_step(unsigned held_ms) {
-    int step = seek_steps[0].step;
-    for (unsigned i = 0; i < sizeof seek_steps / sizeof *seek_steps; ++i)
-        if (held_ms >= seek_steps[i].after) step = seek_steps[i].step;
-    return step;
+static const seek_phase_t *seek_phase(int plan, unsigned held_ms) {
+    const seek_phase_t *p = seek_phases[plan];
+    for (int i = 1; i < PHASES; ++i)
+        if (held_ms >= seek_phases[plan][i].after) p = &seek_phases[plan][i];
+    return p;
+}
+
+/* The track seconds each jump of the stock player's scan moves. */
+int seek_step(unsigned held_ms) { return seek_phase(SEEK_PLAN_JUMPS, held_ms)->times / 2; }
+
+/* The plan for a scan one way (dir 1 forward): heard at speed when the song plays on q2player and
+ * it can stretch the song. */
+int seek_plan(int dir, int paused) {
+    if (paused || access(SCAN_FILE, 0)) return SEEK_PLAN_JUMPS; /* F_OK */
+    return dir > 0                ? SEEK_PLAN_FORWARD
+           : SEEK_REWIND_SNIPPETS ? SEEK_PLAN_SNIPPETS
+                                  : SEEK_PLAN_BACKWARD;
+}
+
+/* The player run at play hundredths of the song's speed, unless it already is. Never waits on
+ * the player, nor dies with it (MSG_DONTWAIT | MSG_NOSIGNAL), as patch/clicker.c's clicks. */
+static void seek_send(int play) {
+    if (play == sk.sent) return;
+    char m[24];
+    int fd = *(volatile int *)MCL_FD, n = tk_snprintf(m, sizeof m, "{mcl-scan\\%d}", play);
+    if (fd != -1) send(fd, m, (unsigned)n, 0x4040);
+    sk.sent = play;
 }
 
 /* The next target from `to`, a step one way, within a track of `total` seconds: Next stops a second
@@ -79,14 +145,21 @@ static unsigned seek_now(int *cue, int *sec, int *total) {
 
 static void seek_stop(void) {
     stop_timer(&sk.timer);
-    if (sk.scanning && !sk.edge) np_seek_bar(2, sk.to, sk.paused);
-    sk.scanning = sk.edge = 0;
+    seek_send(0); /* the player plays on at its own speed from what was heard */
+    if (sk.scanning && !sk.edge) {
+        int cue, sec = -1, total;
+        if (sk.live) seek_now(&cue, &sec, &total);
+        np_seek_bar(2, sk.live && sec >= 0 ? sec : sk.to, sk.paused);
+    }
+    sk.scanning = sk.edge = sk.live = 0;
     sk.key = 0;
 }
 
-/* One jump: the player goes to the target and plays on from it until the next, or, paused, only
- * the bar moves and the release sends the seek. At an end the scan waits: Next for the following
- * track, which the player starts as it would at the end of any track, Previous for the release. */
+/* One cycle of the scan. Heard at speed, the player runs on its own and the bar follows its
+ * second; at the track's start a backward run turns and plays on from there. Otherwise one jump:
+ * the player goes to the target and plays on from it until the next, or, paused, only the bar
+ * moves and the release sends the seek. At an end the scan waits: Next for the following track,
+ * which the player starts as it would at the end of any track, Previous for the release. */
 int seek_tick(void) {
     unsigned now = (unsigned)time_now_ms();
     if (!sk.key || now - sk.seen > SEEK_LOST_MS) {
@@ -107,17 +180,35 @@ int seek_tick(void) {
         sk.track = track;
         sk.to = sec < 0 ? 0 : sec;
         sk.paused = status == 3;
+        sk.plan = seek_plan(dir, sk.paused);
         np_seek_bar(0, sk.to, sk.paused);
     }
     if (sk.edge) return 8;
-    int to = seek_target(sk.to, dir, seek_step(now - sk.at - SEEK_HOLD_MS), total);
     sk.paused = status == 3;
+    if (sk.paused) sk.plan = SEEK_PLAN_JUMPS; /* paused mid-scan: nothing more is heard */
     sk.total = total;
+    const seek_phase_t *p = seek_phase(sk.plan, now - sk.at - SEEK_HOLD_MS);
+    seek_send(p->play);
+    if (!p->jump) {
+        sk.live = 1;
+        sk.to = sec < 0 ? sk.to : sec;
+        np_seek_bar(1, sk.to, sk.paused);
+        if (dir < 0 && sk.to == 0) {
+            seek_send(0);
+            np_seek_bar(2, 0, sk.paused);
+            sk.edge = 1;
+        }
+        return 8;
+    }
+    sk.live = 0;
+    int to = seek_target(sk.to, dir, p->times / 2, total);
     if (!sk.paused) mclSetSeek(to + cue);
     sk.to = to;
     np_seek_bar(1, to, sk.paused);
     if ((dir > 0 && total > 0 && to >= total - 1) || (dir < 0 && to == 0)) {
-        /* playing on from the edge: the bar goes back to the player's second */
+        /* playing on from the edge (at the start, forward at its own speed): the bar goes back
+         * to the player's second */
+        if (dir < 0) seek_send(0);
         np_seek_bar(2, to, sk.paused);
         sk.edge = 1;
     }

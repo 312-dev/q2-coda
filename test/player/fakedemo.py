@@ -90,6 +90,9 @@ def scenarios(m):
         # every format demo lists, one after another by set-nexturl: CODEC, BITS, LENGTH, BITRATE and the PCM opened
         'formats-all': boot + [(1.0 + 2.5 * i, song('set-songurl' if i == 0 else 'set-nexturl', f'{m}/{f}')) for i, f in enumerate(ALL_FORMATS)]
                        + [(1.0 + 2.5 * len(ALL_FORMATS), '{mcl-stop\\null}'), (3.0 + 2.5 * len(ALL_FORMATS), None)],
+        # a held Next heard at 4 times (patch/seek.c's mcl-scan), let go, then a held Previous heard backward at twice
+        'scan': boot + [(1.0, song('set-songurl', f'{m}/pos.flac', start=10)), (3.0, '{mcl-scan\\400}'), (5.0, '{mcl-scan\\0}'),
+                        (7.0, '{mcl-scan\\-200}'), (9.0, '{mcl-scan\\0}'), (11.0, '{mcl-stop\\null}'), (12.0, None)],
         # a start offset (a resumed song): from 7 s to the end
         'start': boot + [(1.0, song('set-songurl', a1, start=7)), (16.0, None)],
         # a CUE sheet's three tracks of one file: demo starts each by ss= and cuts the one before with set-nexturl when
