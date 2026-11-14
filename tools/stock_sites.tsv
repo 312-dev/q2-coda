@@ -282,6 +282,7 @@ demo	0x51e068	0x4	player_initconfig	the only call to set_equalizer_value; patch/
 demo	0x51e0c4	0x4	player_initconfig	the load of $25 for the only call to mclSetPlayMode; tools/build.py build
 demo	0x51e0c8	0x4	player_initconfig	the only call to mclSetPlayMode; patch/offsets.inc INITCONFIG_MODE_RET
 demo	0x51e0d0	0x4	player_initconfig	`lw $gp, 0x10($sp)` (8th of 9 such), before the only call to mclGetDsdMode; patch/offsets.inc INITCONFIG_MODE_RET
+demo	0x51f0ec	0x4	player_seek_start	`slti $2, $2, 0xb`, before 2nd of 4 calls to mclGetPlayStatus; tools/build.py PREV_RESTART
 demo	0x51f5c8	0x4	player_get_id3info	the load of $25 for 1st of 2 calls to strcpy; tools/build.py ID3_PATH, tools/build.py build
 demo	0x51f5d0	0x4	player_get_id3info	1st of 2 calls to strcpy; tools/build.py ID3_PATH
 demo	0x51f6c0	0x4	player_get_id3info	`lw $4, 0x28($16)` (2nd of 4 such), before 2nd of 4 calls to player_set_coverinfo; patch/offsets.inc REC_COVER

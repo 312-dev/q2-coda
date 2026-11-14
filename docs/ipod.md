@@ -649,16 +649,16 @@ once that is another track's (Tidal's URL never is a queue path, so its art stay
 **Scrub.** A double press of the centre button starts scrubbing, as on an iPod classic (with the screen off it only
 wakes it, [Wake](internals.md#wake)), and the bar fill turns white while it lasts. Each wheel tick moves 5 seconds, times a ramp of one more step per 100 ms of spin
 (up to 40 seconds a tick; the lists' gentler ramp does not apply), within the
-track. Both times and the bar follow the target at once;
-the track jumps there once, when the scrub ends. A press of the centre button confirms it at once
+track. Both times and the bar follow the target at once, and so does the music: playing, the
+track jumps to the target as you turn, at most every 200 ms (`SCRUB_SEEK_MS`, `patch/seek.c`), so a
+fast spin is heard as a few jumps and lands on the target. A press of the centre button ends it at once
 and leaves the screen on (a double press does too), as do Return, a touch and
 3 seconds without a tick, and each gives the wheel back to the volume; Return then stays on the
 page. Ending without having moved the target does not seek. Paused, the track stays paused and
 plays from the target at Play. Outside a scrub a single press starts scrubbing,
 `DOUBLE_CLICK_MS` later as a row opens, and a double press turns the screen off, as on the lists
 (**Single Press Scrub**, below, on unless chosen off). With it off the two swap: a single press
-turns the screen off and a double press starts scrubbing. The presses work the same while the volume shows over the page; starting a scrub closes it. The jump is stock's key seek, which can pause the player briefly, but only once, when the
-scrub ends, instead of after each pause between ticks. Values are `SCRUB_*` in
+turns the screen off and a double press starts scrubbing. The presses work the same while the volume shows over the page; starting a scrub closes it. Paused, the scrub is silent and the track jumps once, when it ends, so it stays paused. No Apple guide says whether an iPod's music follows its scrubber; it follows here as the hold of Previous or Next does ([Previous and Next](#previous-and-next)). Values are `SCRUB_*` in
 `patch/offsets.inc`; see [internals.md](internals.md#scrub-ipod).
 
 The top row's text and icons, the bar's ends and the times keep clear of the corners
@@ -714,6 +714,32 @@ page shows with the screen on, and comes to rest when playback pauses; at rest t
 and artist show at the bottom, in the style name's place. Tunables are `VIS_*` in
 `patch/offsets.inc`; `VIS_LATENCY_MS` sets how far the picture runs behind the decoder, to match
 what you hear. See [internals.md](internals.md#visualizer-ipod).
+
+## Previous and Next
+
+The wheel's Previous and Next work as an iPod's, from any page where they control the music:
+
+- **Next**, pressed, plays the next track.
+- **Previous**, pressed, starts the track again from 3 seconds in, and before that goes back to the
+  track before. So one press restarts a song, and two in a row go back one. Apple's iPod classic
+  guide says only "press Previous/Rewind" to start a song over and "press twice" for the one
+  before; 3 s is Rockbox's figure (`DEFAULT_SKIP_THRESH`, 3000 ms, `apps/gui/wps.h`), which an iPod
+  recreation measured on the hardware also reports. Apple's iPod shuffle guides give 6 s for that
+  model. A track holding a place to resume still asks first ([Resume](internals.md#resume)).
+- **Held** (half a second), Next fast-forwards and Previous rewinds, and you hear the song as it
+  goes: half a second of it at its own speed and pitch, then a jump, then another half second.
+  Each jump is 2 s for the first 3 s of the hold (4 times the song's speed), 4 s until 6 s (8
+  times), 8 s until 10 s (16 times), then 16 s (32 times). The bar and times follow. Letting go
+  plays on from there. Fast-forward stops a second before the end, plays out into the next track
+  and goes on scanning that; rewind stops at the start and plays from there. Paused, the track
+  stays silent and paused: the bar moves, and Play starts from where you let go. A held button
+  does not skip.
+
+Apple's guides say only "press and hold" to fast-forward or rewind; the half-second stretches and
+the speeds are this firmware's, in the spirit of the iPod's audible scan. Streams (Spotify, radio,
+Tidal's online queues), games, the playlist editor and the time and sleep-timer fields keep the
+buttons as they were, and a held press there does what it did. Values are `SEEK_*` and
+`seek_steps` in `patch/seek.c`; see [internals.md](internals.md#scan).
 
 ## Pop-ups
 

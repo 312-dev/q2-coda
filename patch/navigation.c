@@ -4611,15 +4611,17 @@ static int settle_poll(const void *info) {
     return 0;
 }
 
-/* Commits a target the wheel moved, unless the playing track changed since the scrub began; the
- * fill comes back, and the page's timer once the player is there (settle_poll), unless the page is
- * gone. */
+/* Commits a target the wheel moved, unless the playing track changed since the scrub began: a
+ * playing track's last seek if the player isn't there yet (seek_scrub_end), a paused one's only
+ * seek. The fill comes back, and the page's timer once the player is there (settle_poll), unless
+ * the page is gone. */
 static void scrub_end(void) {
     if (!st.scrub) return;
     st.scrub = 0;
     stop_timer(&st.scrub_timer);
     int seek = st.scrub_moved && np_track() == st.scrub_track;
-    if (seek) st.held_sec = seek_position(st.scrub_to);
+    /* playing, the player followed the target (seek_scrub) and goes to it now if it isn't there */
+    if (!seek_scrub_end(st.scrub_to, seek) && seek) st.held_sec = seek_position(st.scrub_to);
     st.scrub_moved = 0;
     if (!st.np_win) return;
     np_fill(0);
@@ -4900,6 +4902,32 @@ static void np_cancel(void) {
     if (st.np_win) playing_timer_start(st.np_win);
 }
 
+/* A hold of Previous or Next scans the track (seek.c): phase 0 as it starts, which ends a scrub
+ * under way and stops the bar's own timer as a scrub does; 1 at each jump, the bar and times on the
+ * target; 2 at the release or an end, where a paused track gets its one seek and stays paused
+ * (seek_position) and the bar holds the target until the player has it, as after a scrub
+ * (settle_poll). */
+void np_seek_bar(int phase, int to, int paused) {
+    if (phase == 0) {
+        scrub_end();
+        stop_timer(&st.settle_timer);
+    }
+    if (phase == 2) {
+        st.scrub_to = to;
+        st.scrub_track = np_track();
+        if (paused) st.held_sec = seek_position(to);
+        st.settle_played = 0;
+        if (st.np_win) rearm(&st.settle_timer, settle_poll, SETTLE_MS);
+        return;
+    }
+    if (!st.np_win || !st.np_slider) return;
+    playing_timer_clear(st.np_win);
+    if (phase != 1) return;
+    widget_set_prop_int(st.np_slider, "value", to);
+    clock_text(st.np_elapsed, 0, to);
+    np_sync(st.np_win);
+}
+
 /* A single centre press, DOUBLE_CLICK_MS on, never while scrubbing (with Single Press Scrub, a
  * double press): it replays the release to stock on_wm_keyup_fun, which turns the screen off (it
  * reads only the event's key). */
@@ -4955,8 +4983,9 @@ static int np_scrub(const void *info) {
  * DOUBLE_CLICK_MS: a second one starts scrub, else it turns the screen off as anywhere else; with
  * Single Press Scrub the two swap, so a double press turns the screen off as on the lists. While
  * scrubbing one press ends it at once (center_press). The wheel moves the target SCRUB_STEP
- * seconds times the WHEEL_RAMP_MS ramp, within the track, and only previews it: the seek waits
- * for the scrub to end. Neither the volume nor its dialog sees the wheel. */
+ * seconds times the WHEEL_RAMP_MS ramp, within the track; a playing track follows it, at most a
+ * seek every SCRUB_SEEK_MS (seek.c seek_scrub), a paused one only at the end. Neither the volume
+ * nor its dialog sees the wheel. */
 static int np_key(void *top, unsigned key) {
     unsigned now = (unsigned)time_now_ms();
     if (key == KEY_CENTER) {
@@ -4984,6 +5013,7 @@ static int np_key(void *top, unsigned key) {
     int to = clamp_step(st.scrub_to, widget_get_prop_int(st.np_slider, "max", 0), dir * step);
     if (to != st.scrub_to) st.scrub_moved = 1;
     st.scrub_to = to;
+    if (st.scrub_moved) seek_scrub(to); /* heard as it moves while the track plays */
     widget_set_prop_int(st.np_slider, "value", to);
     clock_text(st.np_elapsed, 0, to);
     np_sync(top);
@@ -9910,6 +9940,7 @@ static int home_cf_hold(void *top) {
  * Play Next (un_hold), the release latched as the queue menu's. */
 int ringnav_keylong(void *ctx, void *event) {
     if (event && ple_key((unsigned)I(event, EVENT_KEY), 3)) return STOP;
+    if (event && seek_held((unsigned)I(event, EVENT_KEY))) return STOP;
     if (!event || I(event, EVENT_KEY) != KEY_PLAY) return stock_keylong_trampoline(ctx, event);
     void *top = window_manager_get_top_window(window_manager());
     const char *fav = radio_hold(top);
@@ -10663,6 +10694,7 @@ int ringnav_input(void *wm, void *e) {
         return 0;
     }
     if (addon_game_input(e)) return 0;
+    if (e && seek_input(e)) return 0; /* a held Previous or Next's repeats: seek.c */
     if (type >= EVT_POINTER_FIRST && type <= EVT_POINTER_ABORT) { /* a finger (stale_heal) */
         st.touch_at = st.last_input;
         st.touch_type = (int)type;
@@ -11382,6 +11414,7 @@ int ringnav(void *ctx, void *event) {
     }
     unsigned key = (unsigned)I(event, EVENT_KEY);
     if (ple_key(key, 2)) return STOP;
+    if (seek_release(key)) return STOP; /* a hold that scanned is no skip */
     /* This release's press was silenced by ringnav_keydown: a row change below clicks instead. */
     int owned = st.tone_key == key;
     st.tone_key = 0;

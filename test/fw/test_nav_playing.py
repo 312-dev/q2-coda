@@ -1235,7 +1235,9 @@ class Now:
         return self.ui.ints[self.slider, b'value']
 
     def seeks(self):
-        return [a[0] for _, a in self.fw.calls('player_seek_time')] + [('paused', a[0]) for _, a in self.fw.calls('mclSetSeek')]
+        """player_seek_time's track seconds, then each mclSetSeek's file seconds as ('set', s): a playing scrub's
+        (seek.c seek_scrub) and a paused one's commit."""
+        return [a[0] for _, a in self.fw.calls('player_seek_time')] + [('set', a[0]) for _, a in self.fw.calls('mclSetSeek')]
 
     def fill(self):
         return self.ui.prop(self.slider, b'style:normal:fg_color') & 0xffffffff
@@ -1392,21 +1394,59 @@ def test_a_double_press_starts_a_scrub_white_on_the_held_bar(fw, ui, now, st):
     assert ui.due('np_single') == []  # the first press's single was called off
 
 
-def test_the_wheel_previews_the_target_in_steps_and_one_press_seeks_there(fw, ui, now, st):
+def test_the_wheel_moves_the_target_in_steps_the_track_follows_and_one_press_ends_there(fw, ui, now, st):
     scrub(now)
     step = O['SCRUB_STEP']
     for _ in range(3):
-        ui.now += 300  # slow ticks: a step each
+        ui.now += 300  # slow ticks: a step each, each heard (SCRUB_SEEK_MS apart and more)
         assert now.key(KEY_NEXT) == STOP
     to = now.sec + 3 * step
     assert now.value() == to and ui.text(now.elapsed) == clock(to) and ui.text(now.remain) == '-' + clock(now.total - to)
-    assert now.seeks() == []  # only a preview
+    assert now.seeks() == [('set', now.sec + step), ('set', now.sec + 2 * step), ('set', to)]
     ui.now += 300
     now.key(KEY_PREV)
     assert now.value() == to - step
     press(now, ui.now + 1000)
-    assert now.seeks() == [to - step] and st.scrub == 0 and now.fill() != 0xffffffff
+    assert now.seeks()[-1] == ('set', to - step) and len(now.seeks()) == 4  # the player is there: no seek at the end
+    assert st.scrub == 0 and now.fill() != 0xffffffff
     assert len(ui.due('settle_poll')) == 1  # the bar holds the target until the player gets there
+
+
+SCRUB_SEEK_MS = 200  # seek.c
+
+
+def test_a_fast_spin_is_heard_at_most_every_scrub_seek_ms_and_lands_on_the_target(fw, ui, mcl, st):
+    theme(fw, st, CLASSIC)
+    now = Now(fw, ui, mcl, st, sec=0, total=3000)
+    scrub(now)
+    sent = []  # (when, file second)
+    fw.mock('mclSetSeek', lambda s, *_: sent.append((ui.now, s)))
+    armed = {}  # timer: when it was added
+    for _ in range(25):
+        ui.now += 40
+        for t in ui.due('scrub_due'):
+            if ui.now >= armed.setdefault(t, ui.now - 40) + ui.timers[t][2]:
+                ui.run(t)
+        now.key(KEY_NEXT)
+        for t in ui.due('scrub_due'):
+            armed.setdefault(t, ui.now)
+    gaps = [b[0] - a[0] for a, b in zip(sent, sent[1:])]
+    assert sent and len(sent) <= 25 * 40 // SCRUB_SEEK_MS + 1 and min(gaps) >= SCRUB_SEEK_MS - 40, sent
+    assert sent[0] == (ui.now - 24 * 40, O['SCRUB_STEP'])  # the first tick at once
+    press(now, ui.now + 50)
+    assert sent[-1][1] == now.value() and st.scrub == 0  # the end goes to the last target if the player isn't there
+
+
+def test_a_paused_scrub_is_silent_until_it_ends(fw, ui, mcl, st):
+    theme(fw, st, CLASSIC)
+    now = Now(fw, ui, mcl, st, status=3)
+    scrub(now)
+    for _ in range(3):
+        ui.now += 300
+        now.key(KEY_NEXT)
+    assert now.seeks() == [] and ui.due('scrub_due') == []
+    press(now, ui.now + 1000)
+    assert now.seeks() == [('set', now.sec + 3 * O['SCRUB_STEP'])]
 
 
 def test_a_fast_spin_steps_further_than_slow_ticks(fw, ui, mcl, st):
@@ -1448,7 +1488,7 @@ def test_a_scrub_ends_by_itself_after_its_time_and_seeks(fw, ui, now, st):
     now.key(KEY_NEXT)
     expire, = ui.due('scrub_expire')
     ui.run(expire)
-    assert st.scrub == 0 and now.seeks() == [now.sec + O['SCRUB_STEP']]
+    assert st.scrub == 0 and now.seeks() == [('set', now.sec + O['SCRUB_STEP'])]  # heard at the tick, not again
 
 
 def test_another_track_drops_the_scrub_without_a_seek(fw, ui, mcl, now, st):
@@ -1457,7 +1497,7 @@ def test_another_track_drops_the_scrub_without_a_seek(fw, ui, mcl, now, st):
     now.key(KEY_NEXT)
     mcl.pos = 5
     assert now.key(KEY_NEXT) == STOP
-    assert st.scrub == 0 and now.seeks() == []
+    assert st.scrub == 0 and now.seeks() == [('set', now.sec + O['SCRUB_STEP'])]  # the tick's own, before it changed
 
 
 def test_a_paused_scrub_seeks_on_play_and_the_bar_holds_its_target(fw, ui, mcl, st):
@@ -1470,7 +1510,7 @@ def test_a_paused_scrub_seeks_on_play_and_the_bar_holds_its_target(fw, ui, mcl, 
     now.key(KEY_NEXT)
     press(now, ui.now + 1000)
     to = now.sec + O['SCRUB_STEP']
-    assert now.seeks() == [('paused', cue + to)] and st.held_sec == now.sec + 1  # the player's second then, +1
+    assert now.seeks() == [('set', cue + to)] and st.held_sec == now.sec + 1  # the player's second then, +1
     settle, = ui.due('settle_poll')
     for _ in range(20):
         assert ui.run(settle) == RET_REPEAT  # paused: the player's second stands still
@@ -1570,7 +1610,7 @@ def test_the_page_going_mid_scrub_seeks_nowhere_and_forgets_it(fw, ui, now, st):
     assert st.np_win == now.win
     ui.emit(now.win, O['EVT_DESTROY'], 0)
     assert (st.np_win, st.np_slider, st.np_lrc, st.scrub, st.np_marquee) == (0, 0, 0, 0, 0)
-    assert now.seeks() == [] and ui.due('scrub_expire') == []
+    assert now.seeks() == [('set', now.sec + O['SCRUB_STEP'])] and ui.due('scrub_expire') == []  # the tick's own only
 
 
 def test_closing_mid_wait_restarts_stocks_timer(fw, ui, mcl, st):

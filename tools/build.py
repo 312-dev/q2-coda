@@ -494,6 +494,10 @@ HOME_KEYUP = (0x534c28, 0x0320f809, 0)
 # the guard after Standby), whose flags only that function clears. So the handler's test for Centre never matches (its
 # bne is a b), and Centre is one more key it knows nothing of, as until V1.34.
 NP_CENTRE = (0x53dbac, 0x1443000d, 0x1000000d)
+# Previous restarts the track from 3 s in, as an iPod's does (docs/ipod.md#previous-and-next), and goes back a track
+# before that: player_seek_start's test of player_playtime against 11 (slti $2, $2, 11) is against 3.
+# patch/playback.c ringnav_seek_start asks the same question for the restart guard.
+PREV_RESTART = (0x51f0ec, 0x2842000b, 0x28420003)
 # V1.36's on_wm_keyup_before_fun applies Buttons lock on the lit lock window too (beqz g_lockscreen_pageflag past the lock).
 # Buttons lock stays the dark screen's (navigation.c lock_names), as V1.32's: the branch is taken always.
 KEYLOCK_LIT = (0x4f2728, 0x10400010, 0x10000010)
@@ -1855,7 +1859,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
          '-fno-stack-protector','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
          '-Oz','-Wall','-Wextra','-Werror','-Wno-unused-parameter']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c']
 
 def compile_payload(out):  # pragma: no mutate block
     """Compile and link the payload."""
@@ -2192,6 +2196,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patch_word(patched, *HOME_KEYUP, 'Home binds no key-up of its own')
     patch_word(patched, *NP_CENTRE, "Now Playing leaves Centre to stock's power-key handling")
     patch_word(patched, *KEYLOCK_LIT, 'Buttons lock acts only with the screen off')
+    patch_word(patched, *PREV_RESTART, 'Previous restarts the track from 3 s in')
     patch_word(patched, *VOL_DARK, 'The volume dialog steps with the screen off')
     for site in MORE_ARTIST_CLOSE:
         patch_word(patched, *site, "Artist info closes the artist and album pages it found")

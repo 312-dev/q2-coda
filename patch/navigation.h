@@ -495,6 +495,14 @@ static inline void scrub_row(void *canvas, unsigned c, int x, int y, int w) {
 }
 void np_fill(int scrub);
 
+/* seek.c: a held Previous or Next scans the track; np_seek_bar is navigation.c's */
+int seek_input(void *e), seek_release(unsigned key), seek_held(unsigned key), seek_tick(void);
+int seek_step(unsigned held_ms), seek_target(int to, int dir, int step, int total);
+void np_seek_bar(int phase, int to, int paused);
+void seek_scrub(int to);
+int seek_scrub_end(int to, int seek);
+int video_on(void);
+
 /* theme_engine.c */
 #define ACCENT_N SETTING_N_ACCENT /* the ACCENTS rows: theme_engine.c's accents[] has as many */
 enum {

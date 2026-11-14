@@ -200,8 +200,9 @@ void slider_knobless(void *slider) {
 }
 
 /* Scrub (docs/internals.md#scrub-ipod) follows stock's own key seek (0x53e000): the page's 250 ms
- * timer stops, the slider and label_playtime preview the target, player_seek_time commits it once
- * on exit in track seconds (it adds a CUE track's start), and the timer restarts. */
+ * timer stops, the slider and label_playtime show the target, a playing track follows it (seek.c
+ * seek_scrub) and a paused one seeks there once on exit, in track seconds plus a CUE track's
+ * start, and the timer restarts. */
 /* The accent's light tone (Minimal's own accent: MINIMAL_FILL) fills the progress bar in every
  * state a touch passes through; a white fill (Minimal: a thicker line) marks the scrub. */
 void slider_fill(void *slider, unsigned color) {

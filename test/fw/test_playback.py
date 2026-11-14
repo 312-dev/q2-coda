@@ -2681,20 +2681,20 @@ def test_in_advanced_play_previous_asks_after_a_repeat(held, player):
     assert held.changes() == [] and held.armed(0)
 
 
-def test_previous_past_10_s_asks_before_going_back_to_the_start(fw, held, press):
+def test_previous_from_3_s_asks_before_going_back_to_the_start(fw, held, press):
     seek = fw.fn('ringnav_seek_start', C.c_int)
     fw.mock('stock_seek_start_trampoline', lambda *_: 7)
     assert seek() == 1 and not fw.calls('stock_seek_start_trampoline') and press.value == 0  # 1: no further
     assert seek() == 7 and press.value == 5001
 
 
-@pytest.mark.parametrize('sec, long_track, stamp', [(10, 1, 0), (11, 1, 5001), (600, 0, 5001)])
+@pytest.mark.parametrize('sec, long_track, stamp', [(2, 1, 0), (3, 1, 5001), (11, 1, 5001), (600, 0, 5001)])
 def test_previous_that_holds_nothing_goes_to_stock_at_once(fw, held, press, sec, long_track, stamp):
-    held.sec = sec  # 11 s: past stock's 10, but no place kept within RESUME_EDGE_S of the start
+    held.sec = sec  # 3 s: a restart (PREV_RESTART), but no place kept within RESUME_EDGE_S of the start
     held.st('rs_long').value = long_track
     fw.mock('stock_seek_start_trampoline', lambda *_: 0)
     assert fw.fn('ringnav_seek_start', C.c_int)() == 0 and not held.armed(0)
-    assert press.value == stamp  # under 11 s nothing seeks: the change that follows stamps
+    assert press.value == stamp  # under 3 s nothing seeks: the change that follows stamps
 
 
 def test_a_users_seek_stamps_before_stock(fw, mcl, press):
