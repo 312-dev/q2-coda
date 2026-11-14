@@ -573,3 +573,27 @@ def test_a_bound_row_is_greyed_while_its_server_song_cannot_play(rig, fw):
     rig.poll()
     bind(C.addressof(row), 1)
     assert colour() is None
+
+
+def test_search_finds_server_songs_with_local_and_server(rig, fw):
+    """Stock's Search runs SearchMusicByName's SQL through toolsQueryDbTable (library_query) outside a music
+    load: with Local + Server it reads the union, so a server song is found; Local only, as stock's."""
+    from test_nav_lists import Loads
+    rig.card_song('/mnt/mmc/Music/a.flac', 'Wild Honey', 'Me', 'Album', 1, 200, 1000)
+    rig.write(1, [song_row('s1', 'Wild Horses', 'Band', 'Sticky', 2, 180, 5000)])
+    rig.poll()
+    slot = C.c_void_p.from_address(STOCK_SLOT)
+    rig.lib.sqlite3_open(str(rig.tmp/'database.db').encode(), C.byref(slot))
+    fw.fn('catalogue_attach', None, C.c_void_p)(STOCK_SLOT)
+    loads = Loads(fw)
+    search = "select * from songtable where (name like '%wild%') or (name==\"\" and filename like '%wild%')"
+    loads.query(b'db', search.encode(), None, 0)
+    assert sorted(r[6] for r in rig.query(loads.ran[-1])) == ['Wild Honey', 'Wild Horses']
+    loads.query(b'db', b"select * from songtable where album like 'Sticky'", None, 0)  # not a search: as it is
+    assert 'servertable' not in loads.ran[-1]
+    fw.var('catalogue_source', C.c_int).value = 0
+    fw.fn('catalogue_changed', None)()
+    loads.query(b'db', search.encode(), None, 0)
+    assert loads.ran[-1] == search
+    rig.lib.sqlite3_close(slot)
+    slot.value = 0

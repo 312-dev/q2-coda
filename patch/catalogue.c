@@ -951,7 +951,8 @@ static int cat_live(void) {
     return db && cat.attached == db;
 }
 
-static int cat_ready(void) { return catalogue_on() && cat.ix.n && !access(CAT_DB, 0); }
+/* Era's and the counts' worker threads ask too: the setting as loaded, never the config file. */
+static int cat_ready(void) { return catalogue_source == 1 && cat.ix.n && !access(CAT_DB, 0); }
 /* library_query's: the server's rows beside songtable's, while stock's connection has them. */
 const char *catalogue_rows(void) {
     return cat_live() ? " union all select * from servertable" : "";
@@ -973,6 +974,12 @@ char *catalogue_union(const char *sql) {
     }
     if (out) memcpy(o, sql, strlen(sql) + 1);
     return out;
+}
+/* Stock's Search (SearchMusicByName and its kin, each "... from songtable where <field> like
+ * '%<text>%'", run outside a music load): sql reading the union, or 0 (not a search, or no union
+ * now). The caller frees it. */
+char *catalogue_search(const char *sql) {
+    return sql && strstr(sql, " like '%") && cat_live() ? catalogue_union(sql) : 0;
 }
 /* Era's own connections: cat attached when the union reads it. */
 void catalogue_attach_db(void *db) {

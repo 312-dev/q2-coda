@@ -581,7 +581,8 @@ int library_count(const char *sql);
  * 47,000-song library's rows are too many to hold beside the scan. Detached, as nothing may wait
  * for it when the dialog closes; msg_sync takes the answer. */
 static void *msg_count(void *unused) {
-    cp.msg_counting = 3 + library_count("select count(*) from songtable");
+    /* main.: the card's files alone, which the scan walks (no server library union, catalogue.c) */
+    cp.msg_counting = 3 + library_count("select count(*) from main.songtable");
     return 0;
 }
 int msg_counting(void) { return cp.msg_counting == 1; } /* coverflow.c's library_counting */

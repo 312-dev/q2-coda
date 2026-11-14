@@ -145,6 +145,8 @@ static int library_query(int content, const char *db, const char *sql, void *row
         if (n < 0 || (unsigned)n >= sizeof filtered) return -1;
         sql = filtered;
     }
+    char *search = from ? 0 : catalogue_search(sql); /* Search finds server songs too */
+    if (search) sql = search;
     if (sql && strstr(sql, "select * from playlist where id > 100 and cd_num=") == sql &&
         !strstr(sql, "order by")) {
         int n = tk_snprintf(filtered, sizeof filtered, "%s order by id asc", sql);
@@ -174,6 +176,7 @@ static int library_query(int content, const char *db, const char *sql, void *row
                  : content    ? stock_content_query_trampoline(db, query, row, arg, sort)
                               : stock_dbquery_trampoline(db, query, row, (int)arg);
     if (expanded) free(expanded);
+    free(search);
     return result;
 }
 int ringnav_library_query(const char *db, const char *sql, void *row, int sort) {
