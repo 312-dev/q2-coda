@@ -92,6 +92,12 @@ class Geometry:
     search_meta_y: int = 41
     search_meta_h: int = 16
     toolbar: int = 1  # 0: the toolbars of TOOLBAR_SWITCHES and STOCK_ROWS hide and the bar holds the title, as on NAVBAR_ONLY pages
+    list_fit: int = 0  # 1: list boxes end by list_end on a whole row (fit_rows), so nothing draws below it (0: they reach the window's bottom)
+    # A status row in place of a bar band (OLED's): its glyphs centred on screen row status_y, the page's title (or the
+    # clock, where there is none) at text_x in the bar's face and px (bar_px), the play state and battery ending
+    # right_x from the screen's right edge; the bar is drawn black, so the row reads as part of the page. 0: the bar's own layout.
+    status_y: int = 0
+    right_x: int = 0  # the right column, from the screen's right edge: the status row's battery, and a row's chevron and value (0: stock's)
 
 
 SET0 = Geometry()
@@ -200,7 +206,7 @@ def with_geometry(g):
         NP_TIME_X=max(MARGIN, corner_x(g.bar + NP_TIMES_Y + 1, 14)))
 
 
-GEOM_VALS = ('bar', 'set_row', 'set_icon', 'batt_w', 'batt_h', 'text_x', 'lib_art', 'list_end', 'action_row', 'stream_row', 'stock_row', 'toolbar')  # Geometry fields the payload reads at run time (themes.inc geom_vals), not immediates
+GEOM_VALS = ('bar', 'set_row', 'set_icon', 'batt_w', 'batt_h', 'text_x', 'lib_art', 'list_end', 'action_row', 'stream_row', 'stock_row', 'toolbar', 'status_y', 'right_x', 'list_fit')  # Geometry fields the payload reads at run time (themes.inc geom_vals), not immediates
 
 
 def immediate_values(g=SET0):
@@ -515,6 +521,9 @@ def status_bar(root, g=SET0):
         pct[2].update({f'style:{s}:font_size': str(BATT_PCT_PX), f'style:{s}:text_align_h': 'right'})
     pct[2]['visible'] = 'false'
     widgets['view_battery'] = ['view', [0, 0, BATT_H_W, 0], {'name': 'view_battery', 'visible': 'false'}, []]
+    if g.status_y:
+        status_row(root, g, widgets, left, right, eq)
+        return
     # Classic's set (bar_px): the title on the left in the Classic face, the clock centred, the icons right of it
     m = g.bar_px and status_metrics(g, CLASSIC_LIGHT_FONT_SRC)
     left[3] = [] if m else [widgets[n] for n in STATUS_LEFT]
@@ -569,6 +578,47 @@ def status_bar(root, g=SET0):
     # The payload writes the local time here (ringnav_paint_bg).
     root[3].append(['hscroll_label', [extent, 0, width, g.bar], {
         'name': 'label_clock', 'style': 's_scrlabel_white20c', 'style:normal:font_size': '16', 'only_focus': 'true', 'ellipses': 'true'}, []])
+
+
+STATUS_ROW_RIGHT = ['img_state', *STATUS_RIGHT[2:]]  # a status row's right group: the play state, then the battery
+STATUS_ROW_ICON = 16  # stock's status icon canvases (bar_play, bar_pause), their glyph centred
+STATUS_ROW_TITLE_W = 240  # the title's box from text_x: it ends well clear of the play state
+
+
+def status_row(root, g, widgets, left, right, eq):
+    """A set's status row (g.status_y): no band, the bar black, its glyphs centred on row status_y. The title and the
+    clock share one box at the list's text column, in the bar's face at bar_px in Text Secondary; the payload empties
+    the clock while the page has a title (np_bar.c bar_title), so the row names the page or tells the time. The right
+    group is the play state, then the battery, its nub's last column right_x from the screen's edge. Bluetooth,
+    Wi-Fi, EQ and the rest stay, off-screen, for stock to update."""
+    box_y = g.status_y - STATUS_ROW_ICON // 2
+    left[3] = []
+    right[3] = [widgets[n] for n in STATUS_ROW_RIGHT]
+    layout = right[2]['children_layout']
+    check('xm=50,s=5)' in layout, 'Unexpected status bar layout')
+    right[2]['children_layout'] = layout.replace('xm=50,s=5', f'xm={g.right_x},s={STATUS_ROW_GAP}')
+    right[1][1], right[1][3] = box_y, STATUS_ROW_ICON
+    widgets['img_state'][1][2] = STATUS_ROW_ICON
+    for name in (*STATUS_HIDDEN, 'img_bt', 'img_wifi'):
+        box = widgets[name][1]
+        box[0], box[3] = -200, g.bar  # still updated by stock, drawn off-screen
+        root[3].append(widgets[name])
+    eq[1][:2] = [-200, -200]
+    eq[2]['floating'] = 'true'
+    root[3].append(eq)
+    root[3].append(['label', [-200, 0, 28, g.bar], {
+        'name': 'label_idle', 'text': 'Q2', 'visible': 'false', 'style:normal:font_size': '18'}, []])
+    # The title's and the clock's box: hscroll_label keeps 2 px each side, so its text starts on text_x
+    text = {f'style:{s}:{k}': v for s in ('normal', 'disable', 'focused')
+            for k, v in (('font_size', str(g.bar_px)), ('text_color', STATUS_ROW_INK))}
+    for name in ('title', 'clock'):
+        root[3].append(['hscroll_label', [g.text_x - 2, g.status_y - STATUS_ROW_LINE // 2, STATUS_ROW_TITLE_W, STATUS_ROW_LINE],
+                        {'name': 'label_' + name, 'style': 's_scrlabel_white20l', 'only_focus': 'true', 'ellipses': 'true', **text}, []])
+
+
+STATUS_ROW_GAP = 3  # the play state's 16 px box this far left of the battery: its 10 px glyph 16 px left of the body
+STATUS_ROW_LINE = 24  # the title's and clock's line box, centred on status_y
+STATUS_ROW_INK = '#ABABAB'  # Text Secondary (docs/oled-design.md): Light Mode's flip gives the paper's grey
 
 
 # Stock finds every Now Playing widget by name, recursively, so they can move: title, artist
@@ -1147,9 +1197,16 @@ def songs_action_row(root, g):
     row[1][3] = g.action_row
     for n in root[3]:
         if n[1][1] == 50 and n is not row:
-            if n[0] == 'table_view':
+            if g.list_fit and n[0] in ('table_view', 'list_view'):  # the whole rows under it
+                n[1][3] = fit_rows(g, g.action_row, g.song_pitch)
+            elif n[0] == 'table_view':
                 n[1][3] = 320 - g.bar - g.action_row
             n[1][1] = g.action_row
+
+
+def fit_rows(g, top, pitch):
+    """A list_fit set's list box from top: the whole rows of pitch that end by list_end, so no part row shows below."""
+    return (g.list_end - top) // pitch * pitch
 
 
 def patch_asset(path, data, g=SET0):  # pragma: no mutate block
@@ -1218,12 +1275,12 @@ def patch_asset(path, data, g=SET0):  # pragma: no mutate block
                     'item_height' not in props, f'{path}: unexpected settings list')
             row = g.stream_row if path == 'stream_page.bin' else g.set_row
             props['default_item_height'] = str(row)
-            box[1], box[3] = g.set_top, geo.BOTTOM - g.set_top if g.list_end else g.set_rows * g.set_row // row * row
+            box[1], box[3] = g.set_top, (fit_rows(g, g.set_top, row) if g.list_fit else geo.BOTTOM - g.set_top) if g.list_end else g.set_rows * g.set_row // row * row
         elif kind in ('list_view', 'table_view', 'tab_control'):
             check(box[1] in (50, 100), f'{path}: unexpected list position')
             if not playlist:
                 box[1] -= 50
-            box[3] = geo.BOTTOM - box[1]
+            box[3] = fit_rows(g, box[1], pitch) if g.list_fit else geo.BOTTOM - box[1]
         elif props.get('name') == 'view_navbar_allplay':
             check(box == [0, 50, 375, 50], f'{path}: unexpected action bar')
             box[1] = 0
@@ -1244,7 +1301,9 @@ def patch_asset(path, data, g=SET0):  # pragma: no mutate block
             if n[0] == 'hscroll_label' and n[1][1:2] == [25] and n[1][3] == 20:
                 n[1][1], n[1][3] = 0, SET_STOCK_BODY
         return encode(root)
-    if path == 'localmusic/allmusic_page.bin' and g.action_row:
+    # Songs' action bar as a plain row; a list_fit set's album and other song pages' too, so every list holds whole rows
+    if g.action_row and (path == 'localmusic/allmusic_page.bin' or
+                         g.list_fit and any(n[2].get('name') == 'view_navbar_allplay' for n in root[3])):
         songs_action_row(root, g)
 
     def rows(n, in_row=False):

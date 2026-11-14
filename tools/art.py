@@ -10,6 +10,7 @@ from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
 from build import ROOT, check, need
 from ipod import CLASSIC_LIGHT_FONT_SRC, STATE_W, inc
+from theme import CHOICES
 
 SUB = 8  # sub-rows per pixel; columns are exact within a sub-row
 
@@ -134,6 +135,47 @@ def coverage(polys, box):
             for px in range(int(a), math.ceil(b)):
                 cov[row + px] += (min(b, px + 1) - max(a, px)) / SUB
     return cov
+
+
+def coverage_nonzero(polys, box):
+    """As coverage, but the polygons filled together by the nonzero rule, as an SVG path's default: a ring's inner
+    contour, wound the other way, is a hole."""
+    x0, y0, w, h = box
+    cov = [0.0] * (w * h)
+    for sub in range(h * SUB):
+        y = y0 + (sub + 0.5) / SUB
+        cross = sorted((ax + (y - ay) * (bx - ax) / (by - ay), 1 if by > ay else -1)
+                       for poly in polys for (ax, ay), (bx, by) in zip(poly, poly[1:] + poly[:1]) if (ay <= y) != (by <= y))
+        row, wind = sub // SUB * w, 0
+        for (xa, d), (xb, _) in zip(cross, cross[1:]):
+            wind += d
+            if not wind:
+                continue
+            a, b = max(xa - x0, 0), min(xb - x0, w)
+            for px in range(int(a), math.ceil(b)) if a < b else ():
+                cov[row + px] += (min(b, px + 1) - max(a, px)) / SUB
+    return cov
+
+
+# Phosphor Icons (MIT, assets/icons/phosphor/LICENSE), @phosphor-icons/core 2.1.1: each file a 256 unit viewBox of
+# filled paths. A theme's icons are these, drawn at its sizes; no other set.
+PHOSPHOR = ROOT/'assets/icons/phosphor'
+
+
+def phosphor(name, px, rgb):
+    """Phosphor's icon name (its file's stem, the weight in it) as a px square PNG in rgb, its paths filled nonzero."""
+    svg = (PHOSPHOR/f'{name}.svg').read_text()
+    check('viewBox="0 0 256 256"' in svg, f'{name}: expected a 256 unit viewBox')
+    polys = [[(x * px / 256, y * px / 256) for x, y in poly] for d in re.findall(r'\sd="([^"]+)"', svg) for poly in path(d)]
+    return png(px, px, laid(px, px, [(coverage_nonzero(polys, (0, 0, px, px)), lambda x, y: (rgb, 1))]))
+
+
+# A theme's own glyphs (docs/oled-design.md Icons), in final colours per half: _d on black, _l on paper, _w on the
+# selection. The list's caret-right (list_marks.c chevron_icon) and the status row's play state.
+CARET_PX = 15
+STATE_PX = 13
+CHEVRON_INKS = {'d': 0x999999, 'l': 0x8a8a8a, 'w': 0xffffff}
+STATE_INKS = {'d': 0xffffff, 'l': 0x000000}
 
 
 def gradient(stops, y0, y1):
@@ -823,6 +865,10 @@ def images(t):
         out[f'{prefix}_sort_bars'] = png(*SORT_BOX[2:], compose(SORT_BOX, [(path(SORT), lambda x, y: (0xffffff, 1))]))
         out[f'{prefix}_chevron'] = png(*CHEVRON_BOX[2:], compose(CHEVRON_BOX, [
             (stroke(path(CHEVRON), CHEVRON_STROKE, closed=False), lambda x, y: (0xffffff, 1))]))
+    if t['painter[PAINT_CHEVRON]']:  # CHEV_ICON
+        out |= {f'{prefix}_chevron_{k}': phosphor('caret-right-bold', CARET_PX, c) for k, c in CHEVRON_INKS.items()}
+    if t['painter[PAINT_BATTERY]'] == list(CHOICES['bar.battery.painter']).index('slim'):  # its play state is the theme's too
+        out |= {f'{prefix}_{n}_{k}': phosphor(f'{n}-fill', STATE_PX, c) for n in ('play', 'pause') for k, c in STATE_INKS.items()}
     if t['bolt']:
         shape = path(BOLT)
         out[f'{prefix}_bolt'] = png(*BOLT_BOX[2:], compose(BOLT_BOX, [(stroke(shape, 1.6), lambda x, y: (0xffffff, t['bolt_halo_a'] / 255)),

@@ -31,7 +31,9 @@ PAYLOAD_KEYS = frozenset(
 FONTS = {k: f.c for k, f in FACES.items()}
 CHOICES = {'list.selection.painter': {'card': 'SEL_CARD', 'stops': 'SEL_STOPS', 'bar': 'SEL_BAR'},
            'bar.fill.painter': {'flat': 'BAR_FLAT', 'gloss': 'BAR_GLOSS'},
-           'bar.battery.painter': {'stock': 'BATT_STOCK', 'classic-light': 'BATT_CLASSIC_LIGHT'},
+           'bar.battery.painter': {'stock': 'BATT_STOCK', 'classic-light': 'BATT_CLASSIC_LIGHT', 'slim': 'BATT_SLIM'},
+           'list.chevron.painter': {'image': 'CHEV_IMAGE', 'icon': 'CHEV_ICON'},
+           'list.scrollbar.painter': {'thumb': 'SB_THUMB', 'wheel': 'SB_WHEEL'},
            'playing.scrubber.painter': {'stock': 'SCRUB_STOCK', 'rows': 'SCRUB_ROWS'},
            'volume.panel.painter': {'stock': 'VOL_STOCK', 'classic-light': 'VOL_CLASSIC_LIGHT'},
            'dialog.confirm.painter': {'stock': 'CONFIRM_STOCK', 'classic-light': 'CONFIRM_CLASSIC_LIGHT'},
@@ -86,6 +88,7 @@ SCHEMA = {k.path: k for k in (
     # the pill), and its inset from each side of the row
     Key('list.selection.radius', 'sel_radius', 'int', 0, O['SEL_MAX_RADIUS'], O['SEL_MAX_RADIUS'], 'live'),
     Key('list.selection.inset', 'sel_inset', 'int', 0, 64, O['SEL_INSET'], 'live'),
+    key('list.selection.fixed', 'sel_fixed', 'bool'),  # ... kept under Corners: Square too
     key('bar.fill.painter', 'painter[PAINT_BAR]', 'enum'),
     key('bar.battery.painter', 'painter[PAINT_BATTERY]', 'enum'),
     key('home.chevron.visible', 'chevron_home', 'bool'),
@@ -96,8 +99,10 @@ SCHEMA = {k.path: k for k in (
     key('list.art.placeholder', 'art_placeholder', 'int', 51),  # stock's grey tiles (list_folder, list_song) this size, centred in their row; 0: stock's
     key('list.row.text_end', 'row_text_end', 'int', 375),  # a two-line row without art (Songs'): its text's last column on screen
     Key('list.separator.stops', 'sep', 'stops', 0, 0, (), 'live', True),  # ... its last rows, one stop a row, final
+    key('list.divider.ink', 'div_ink', 'color', final=True),  # a 1 px divider under each row taller than the pitch, on the text and right columns
     key('list.row.tall_font', 'font[ROLE_TALL]', 'enum'),  # a two-line row's title
     key('list.row.tall_px', 'font_px[ROLE_TALL]', 'int', 64),
+    key('list.chevron.painter', 'painter[PAINT_CHEVRON]', 'enum'),  # icon: every drill row's `>`, the theme's own art, at the set's right_x
     key('list.chevron.x', 'chevron_x', 'int', 375),  # the theme's own chevron's box on screen in a full-width list; 0: stock's
     key('home.chevron.x', 'home_chevron_x', 'int', 375),  # ... and in Split's list
     key('list.letter.raw', 'letter_raw', 'bool'),  # the fast-scroll letter's colours are final in both halves
@@ -140,6 +145,7 @@ SCHEMA = {k.path: k for k in (
     key('home.pane.svc_px', 'pane_svc_px', 'int', 188),
     key('settings.rows.top', 'set_top', 'int', 375),
     key('settings.values.text', 'set_text', 'bool'),
+    key('settings.values.ink', 'set_value_ink', 'color', final=True),  # a set_text row's value, right-aligned; 0: the label style's white
     key('playing.scrubber.painter', 'painter[PAINT_SCRUB]', 'enum'),
     key('volume.panel.painter', 'painter[PAINT_VOLUME]', 'enum'),
     key('dialog.confirm.painter', 'painter[PAINT_CONFIRM]', 'enum'),
@@ -181,6 +187,8 @@ SCHEMA = {k.path: k for k in (
     Key('bar.icons.wifi_dy', 'bar_wifi_dy', 'int', -4, 4, 0, 'live'),
     *(key(f'list.scrollbar.{a}', f'sb_{a}', 'int', 375) for a in ('w', 'right', 'top', 'bottom', 'min')),  # paint_scrollbar's thumb
     key('list.scrollbar.thumb', 'sb_thumb', 'color', final=True),
+    key('list.scrollbar.painter', 'painter[PAINT_SCROLL]', 'enum'),  # wheel: track and thumb while the wheel turns
+    key('list.scrollbar.track', 'sb_track', 'color', final=True),
     key('scheme.card', 'card', 'bool'),
     key('scheme.raw_red', 'raw_red', 'bool'),
     key('scheme.fill', 'fill', 'color'),
@@ -302,7 +310,9 @@ GEOMETRIES = {SET0.name: SET0}  # the built-in set; a theme declares its others 
 GEOM_NAME = re.compile('(?!n$)[a-z][a-z0-9-]{0,23}')  # GEOM_<NAME> stays one C name per set, never GEOM_N
 # Geometry field -> its inclusive (lo, hi), each an int or a function of the finished set.
 GEOM_RANGES = {
-    'bar': (26, 40),  # 26: Home's scratch frame (DRIFT_TEXELS, 4 x 188 x 294) holds a client of 294 at most; 40: an eighth of the screen
+    # 26: Home's scratch frame (DRIFT_TEXELS, 4 x 188 x 294) holds a client of 294 at most; 40: an eighth of the screen,
+    # or 58 under a status row (status_y), whose bar is the page's black above its first row
+    'bar': (26, lambda g: 58 if g.status_y else 40),
     'pitch': (28, 78),  # 28: the smallest row proved to fill the stock row pool at h 294; 78: stock's own row
     'body': (24, lambda g: g.pitch),  # inside its row, and tall enough for stock's 24 px title box
     'art': (0, lambda g: min(52, g.art_body)),  # stock covers are 52 px, drawn 1:1 or smaller; 0 hides them
@@ -354,6 +364,9 @@ GEOM_RANGES = {
     'search_meta_y': (0, lambda g: g.search_body - g.search_meta_h),
     'search_meta_h': (16, lambda g: g.search_body),
     'toolbar': (0, 1),
+    'list_fit': (0, lambda g: 1 if g.list_end else 0),  # a list box ends at list_end only where there is one
+    'status_y': (0, lambda g: g.bar - 12),  # its glyphs (12 px) inside the bar
+    'right_x': (0, 60),
 }
 THEME_GEOM_OFF = 4  # offsetof(theme_t, geom), right after name so no field moves it; asserted in navigation.c; test/patch.py pokes it
 THEME_MOTION_OFF = 8  # offsetof(theme_t, motion), right after geom; asserted in navigation.c; test/patch.py pokes it
@@ -964,8 +977,7 @@ def validate(t, name):
     for s in settings:
         if settings.count(s) > 1:
             err(f'{s} declared twice')
-    if t['art_final'] and t['art_id'] != 'classic-light':  # navigation.c's image hook knows its names alone
-        err('pages.own: art_final is for classic-light\'s own images only; a theme drawing them states art="classic-light"')
+
     for end in ('top', 'bottom') if t['sb_w'] else ():  # the thumb's round end gives its corner pixel to the glass
         y = t['sb_' + end]
         if corner_inset(y) > t['sb_right'] + 1:
@@ -990,9 +1002,14 @@ def validate(t, name):
                                                           if t['accents'] >> i & 1):
         err('selection: painter stops needs every offered scheme\'s sel.stops')
     if t['painter[PAINT_SELECTION]'] != list(CHOICES['list.selection.painter']).index('bar'):
-        for f in ('sel_radius', 'sel_inset'):
+        for f in ('sel_radius', 'sel_inset', 'sel_fixed'):
             if t[f] != FIELDS[f].default:
                 err(f'{FIELDS[f].path}: only the bar painter reads it')
+    # the line chevron stands on the set's right column; the wheel's indicator draws sb_w wide between sb_top and sb_bottom
+    if t['painter[PAINT_CHEVRON]'] and not sets(t)[t['geom_set']].right_x:
+        err('list.chevron.painter: icon needs its set\'s right_x')
+    if t['painter[PAINT_SCROLL]'] and not (t['sb_w'] and t['sb_bottom'] > t['sb_top']):
+        err('list.scrollbar.painter: wheel needs w, top and bottom')
     if t['painter[PAINT_BATTERY]'] == list(CHOICES['bar.battery.painter']).index('classic-light') and not t['batt']:
         err('battery: this painter needs stops')
     for n in sorted({t['geom_set'], *(s for o in t['opts'] for s in o.get('sets') or ())}):
@@ -1069,7 +1086,7 @@ def validate(t, name):
             err(f'motion.{k}.easing: follow is only for coverflow_step and coverflow_step_fast')
     if t['cf.bright2'] > t['cf.bright1']:
         err(f'coverflow.shelf: bright2 {t["cf.bright2"]} exceeds bright1 {t["cf.bright1"]}')
-    h = O['CF_NAME_H'] + O['CF_ARTIST_H']
+    h = max(O['CF_NAME_H'], t['cf.artist_y'] + O['CF_ARTIST_H'])  # the album's box, and the artist's under it (coverflow.c)
     bar = geometry(t).bar
     if t['cf.view_h'] > 320 - bar:
         err(f"coverflow.shelf: view_h {t['cf.view_h']} exceeds the client height {320 - bar}")
@@ -1255,7 +1272,8 @@ def emit(themes, out, redirects={}):
                   ('opts', f'{c_name(t)}_opts'), ('n_opts', len(t['opts'])),
                   ('undeclared', ' | '.join(f'(1 << {m})' for m in t['undeclared']) or 0),
                   *((k.field, c(k, t[k.field])) for k in SCHEMA.values() if k.cls == 'open'),
-                  ('geom', sets.index(geometry(t))), *motion_fields(t)]
+                  ('geom', sets.index(geometry(t))), *motion_fields(t),
+                  ('art', json.dumps(t['art_id'].replace('-', '_') + '_'))]  # theme_art's prefix (list_marks.c)
         lines += ['    {', *(f'        .{k} = {v},' for k, v in fields), '    },']
     lines.append('};')
     for name, bits in redirects.items():

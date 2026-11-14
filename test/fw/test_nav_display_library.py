@@ -624,19 +624,19 @@ def test_choosing_a_theme_puts_status_bar_back_on_theme(fw, st):
     assert ('STATUSBAR', 0) in writes(fw) and st('own', i=KEYS.index('STATUSBAR')).value == 0
 
 
-def test_picking_oled_from_classic_switches_live_on_classics_set(fw, st, geometry):
-    """OLED extends Classic (assets/themes/oled): one set, so the pick needs no restart."""
+def test_picking_oled_from_classic_asks_to_restart_into_its_own_set(fw, st, geometry):
+    """OLED boots its own oled set (assets/themes/oled), so a pick from Classic's set asks to restart."""
     names, _ = geometry
     oled = next(t for t in THEMES if t['id'] == 'oled')
     st('geom').value = names['GEOM_CLASSIC_LIGHT']  # Classic, as booted
     ui = Ui(fw)
     page = appearance(fw, ui, THEME=b'%d' % CLASSIC)
     themes_page(fw, ui, page)
-    prompts = Prompts(fw)
+    prompts = Prompts(fw, 10)
     pick(ui, page, oled)
-    assert prompts.seen == [] and not fw.calls('stock_reboot_trampoline')
-    assert writes(fw)[0] == ('THEME', oled['index']) and st('theme').value == oled['index'] == 3
-    assert [name for name, image in picks(page.view()) if image == 'select'] == ['OLED']
+    assert [p[3] for p in prompts.seen] == ['Restart to apply?'] and len(fw.calls('stock_reboot_trampoline')) == 1
+    assert writes(fw)[0] == ('THEME', oled['index']) == ('THEME', 3)
+    assert st('theme').value == CLASSIC  # the running state stays Classic's until the restart
 
 
 def test_picking_modern_applies_its_preset_live(fw, st):

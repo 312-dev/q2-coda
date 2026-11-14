@@ -321,6 +321,7 @@ class Canvas:
                                                                     *(self.clip or (0, 0, 375, 320))))
         m('canvas_set_clip_rect', lambda c, r, *_: setattr(self, 'clip', struct.unpack_from('<4i', (C.c_char * 16).from_address(r))))
         m('widget_load_image', self.load)
+        m('canvas_get_vgcanvas', lambda *_: 1)  # a vgcanvas: its calls are in fw.calls, its float arguments are not
         m('canvas_draw_image', lambda c, bitmap, src, dst, *_: self.images.append(
             (self.loaded[C.c_uint.from_address(bitmap + 8).value], struct.unpack_from('<4i', (C.c_char * 16).from_address(dst)))))
 
@@ -557,8 +558,14 @@ def test_a_look_keeps_its_icons_rows_and_its_battery_centred_on_any_row(fw, st, 
     row = row_h(t)
     ui.place(bar.row, 240, 0, 135, row)
     bt, wifi = ui.box(bar.bt), ui.box(bar.wifi)
-    top = min(r[1] for r in Paint(fw, ui, bar)().rects)  # the dark half: no ink above the body
+    canvas = Paint(fw, ui, bar)()
     assert ui.box(bar.bt) == (bt[0], b['bar_bt_dy'], *bt[2:]) and ui.box(bar.wifi) == (wifi[0], b['bar_wifi_dy'], *wifi[2:])
+    if b['painter[PAINT_BATTERY]'] == list(host.tools_theme.CHOICES['bar.battery.painter']).index('slim'):
+        # OLED's slim battery is vgcanvas paths, whose float coordinates the stubs can't see: its outline, the
+        # charge and the nub (the emulator's screenshots check where it lands)
+        assert canvas.rects == [] and len(fw.calls('vgcanvas_stroke')) == 1 and len(fw.calls('vgcanvas_fill')) == 2
+        return
+    top = min(r[1] for r in canvas.rects)  # the dark half: no ink above the body
     assert top == (row + 1 - SETS[GEOM[b['name']]].batt_h) // 2
 
 
@@ -2904,3 +2911,36 @@ def test_a_playlist_dialog_missing_a_part_stays_stocks(fw, st, ui):
     ui.widget(win, 'ssedit', 0, 0, 300, 40)
     load(fw, ui, win)
     assert st.pl_box == 0 and ui.due('pl_box_due') == []
+
+
+OLED = {t['id']: t for t in THEMES}['oled']
+
+
+@pytest.mark.parametrize('t, prefix', [(OLED, b'oled_'), (CLASSIC, b'classic_light_'), (MINIMAL, b'minimal_')])
+def test_theme_art_names_the_live_themes_own_image(fw, st, t, prefix):
+    """theme_art (list_marks.c): the theme's art prefix (tools/theme.py, its art attribute's id) before the name."""
+    theme(fw, st, t)
+    assert fw.fn('theme_art', C.c_char_p, C.c_char_p)(b'chevron_d') == prefix + b'chevron_d'
+
+
+def test_the_wheels_scroll_indicator_shows_a_second_then_fades(fw, st, ui):
+    """SB_WHEEL (OLED): a tick arms it on the list it moved and on that list's own view; full for 800 ms, fading
+    to nothing at a second; another list never shows it. Minimal's thumb painter arms nothing."""
+    now = [5000]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    arm = fw.fn('wheel_sb_arm', None, C.c_void_p)
+    alpha = fw.fn('wheel_sb_alpha', C.c_uint, C.c_void_p)
+    owner = ui.widget(ui.wm, 'list_view', 0, 58, 375, 224)
+    view = ui.widget(owner, 'scroll_view', 0, 0, 375, 224)
+    other = ui.widget(ui.wm, 'list_view', 0, 58, 375, 224)
+    theme(fw, st, MINIMAL)
+    arm(view)
+    assert alpha(view) == 0
+    theme(fw, st, OLED)
+    arm(view)
+    assert (alpha(view), alpha(owner), alpha(other)) == (255, 255, 0)
+    seen = []
+    for t in (800, 900, 999, 1000):
+        now[0] = 5000 + t
+        seen.append(alpha(owner))
+    assert seen == [255, 127, 1, 0]

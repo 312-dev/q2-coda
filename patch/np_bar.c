@@ -110,7 +110,9 @@ void bar_title(void *bar, void *top) {
         cover_flow[] = { 'C', 'o', 'v', 'e', 'r', ' ', 'F', 'l', 'o', 'w', 0 }, none = 0;
     if (st.bar_title) { /* this bar names the page in its own label: off, the clock makes way */
         const unsigned *own = widget_get_text(st.bar_title);
-        int titled = !st.time_title && own && *own;
+        /* a status row (tools/ipod.py status_row) holds one or the other in one place: the title
+         * where the page has one, else the clock */
+        int titled = (!st.time_title || geom_val(V_STATUS_Y)) && own && *own;
         void *clock = titled != st.bar_titled ? widget_lookup(bar, "label_clock", 1) : (void *)0;
         if (!clock) return;
         st.bar_titled = titled;

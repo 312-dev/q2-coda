@@ -10,6 +10,8 @@ enum {
     PAINT_VOLUME,
     PAINT_CONFIRM,
     PAINT_PAGES,
+    PAINT_CHEVRON,
+    PAINT_SCROLL,
     PAINTER_N
 }; /* theme_t.painter[] */
 enum { VOL_STOCK, VOL_CLASSIC_LIGHT }; /* painter[PAINT_VOLUME]: the volume */
@@ -26,8 +28,15 @@ enum { SEL_CARD, SEL_STOPS, SEL_BAR };
 enum { BAR_FLAT, BAR_GLOSS }; /* painter[PAINT_BAR]: the status bar's fill (Classic gloss) */
 enum {
     BATT_STOCK,
-    BATT_CLASSIC_LIGHT
-}; /* painter[PAINT_BATTERY]: the bar's battery and status marks */
+    BATT_CLASSIC_LIGHT,
+    BATT_SLIM
+}; /* painter[PAINT_BATTERY]: the bar's battery and status marks (BATT_SLIM: list_marks.c) */
+/* painter[PAINT_CHEVRON]: a row's `>`, stock's list_into image, or CHEV_ICON's, the theme's own
+ * <art>chevron_* images (tools/art.py) on every row that opens a page, at the set's right column */
+enum { CHEV_IMAGE, CHEV_ICON };
+/* painter[PAINT_SCROLL]: SB_THUMB a lasting thumb (paint_scrollbar), SB_WHEEL a track and thumb
+ * shown while the wheel turns (list_marks.c) */
+enum { SB_THUMB, SB_WHEEL };
 enum { SCHEME_CARD = 1, SCHEME_RAW_RED = 2 };      /* scheme_t.flags (Ivory in Minimal; Crimson) */
 enum { SCHEME_DERIVE, SCHEME_LIGHT, SCHEME_DARK }; /* scheme_t.mode */
 enum { NP_IPOD, NP_CENTRED, NP_N };                /* theme_t.np_layout: np_pages[] index */
@@ -158,10 +167,15 @@ typedef struct {
      * place from the list's right; the screen rows its ends stay in; its shortest length */
     short sb_w, sb_right, sb_top, sb_bottom, sb_min;
     unsigned sb_thumb[2]; /* final: [0] dark, [1] light */
+    unsigned sb_track[2]; /* SB_WHEEL's track, final: [0] dark, [1] light */
     /* a row with art, on screen: the cover's x and its text's first and last columns; 0: stock's */
     short art_x, art_text_x, art_text_end;
     short row_text_end; /* a two-line row without art: its text's last column on screen */
     stops_t sep[2];     /* its last rows, one stop a row, final: [0] dark, [1] light; 0: none */
+    /* a 1 px divider under each row taller than the set's pitch, from its text column to the right
+     * column, on neither edge of the selected row (paint_separators), final: [0] dark, [1] light;
+     * 0: none */
+    unsigned div_ink[2];
     /* the theme's classic_light_chevron's box on screen: a full-width list's, Split's; 0: stock's
      * list_into
      */
@@ -175,6 +189,10 @@ typedef struct {
      * SEL_MAX_RADIUS is always the pill), and its inset from each side of the row; Corners: Square
      * keeps the bar full width and square */
     unsigned char sel_radius, sel_inset;
+    unsigned char sel_fixed; /* the bar keeps sel_inset and sel_radius under Corners: Square too */
+    /* a set_text settings row's value (list_value), final: [0] dark, [1] light; 0: its style's
+     * white */
+    unsigned set_value_ink[2];
     unsigned np_track_rgb; /* 0xRRGGBB: the plain progress bar's track, the volume's over it */
     stops_t np_track[2]; /* Classic's progress bar's track (paint_scrubber), final: [0] dark, [1]
                             light; n 0: stock's plain bar */
@@ -211,6 +229,7 @@ typedef struct {
      * detail row's caption and detail boxes */
     short page_row, page_detail, page_title_h, page_x, page_cap_y, page_cap_h, page_det_y,
         page_det_h;
+    const char *art; /* its own images' prefix (tools/art.py, its art attribute's id): "oled_" */
 } theme_t;
 const theme_t *theme(void); /* accent(); return &themes[st.theme]; */
 /* Classic's own pages: Quick Settings, sliders, rating, dialogs' pages, T9 and Search, Set Time,

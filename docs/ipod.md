@@ -754,7 +754,7 @@ NPCENTRED`, off; `playset_covermode`): `ringnav_ui_load`, hooked on every window
   down to the page dots, wrapped again at that width (`np_full`, `lyrics_fit`) and back on the playing line; a tap or
   Return brings the column back, as do a swipe, another page and leaving the page; a window over the page leaves it
   full screen
-  ([Word-timed lyrics](internals.md#word-timed-lyrics)). Choosing a Theme loads its preset (`theme_preset`), before the restart where there is one: Minimal sets Light Mode Off, Graphite (`MINIMAL_ACCENT` 0), rounded corners, Split and Time in Title on; Classic sets Light Mode On, Classic Blue (`CLASSIC_LIGHT_ACCENT` 9), Split, and Time in Title, Library on Home, Row Preview and Row Art on; Modern sets Light Mode On, Cobalt (`ACCENT` 4), Square, Split and Time in Title off; OLED sets what Classic sets; Light Mode's Auto, Battery, Shortcut and Centred Now Playing are kept, and only changed values are saved.
+  ([Word-timed lyrics](internals.md#word-timed-lyrics)). Choosing a Theme loads its preset (`theme_preset`), before the restart where there is one: Minimal sets Light Mode Off, Graphite (`MINIMAL_ACCENT` 0), rounded corners, Split and Time in Title on; Classic sets Light Mode On, Classic Blue (`CLASSIC_LIGHT_ACCENT` 9), Split, and Time in Title, Library on Home, Row Preview and Row Art on; Modern sets Light Mode On, Cobalt (`ACCENT` 4), Square, Split and Time in Title off; OLED sets Light Mode Off, its Blue (`OLED_ACCENT` 9) and Full; Light Mode's Auto, Battery, Shortcut and Centred Now Playing are kept, and only changed values are saved.
 - Display's main page: a "Smart Awake" switch (`IPOD KEEPLIT`, off;
   `keep_lit_poll`): with Now Playing lit in front on its lyrics, info or visualizer page, or its
   full-screen art (`bigcover_page`) in front, and a song playing, it calls
@@ -787,7 +787,7 @@ The page is `CTX_FIXED`, so the wheel walks onto them like the stock rows.
 
 A change is saved at once with the stock `write_int_config(value, "IPOD", key)` (`0x4fe67c`):
 `sprintf("%d")`, then `toolsWriteConfig("/mnt/data/config.ini", section, key, text)`, which
-rewrites the key or appends `[IPOD]` with it (`"[%s]\n%s=%s\n"`). The keys are `MINIMAL_ACCENT` (Minimal's accent), `CLASSIC_LIGHT_ACCENT` (Classic's and OLED's), `ACCENT` (Modern's), `ROUNDED` (Rounded Corners: 0 off, 1 on), `LIGHT` (Light Mode: 0 Off, 1 On, 2 Auto; missing is Off), `HOME`, `BATTERY`, `THEME`, every theme's `STATUSBAR` (Status Bar), and Classic's own `HOMELIB`, `ROWPREVIEW` and `ROWART` (OLED's too). The values are read once,
+rewrites the key or appends `[IPOD]` with it (`"[%s]\n%s=%s\n"`). The keys are `MINIMAL_ACCENT` (Minimal's accent), `CLASSIC_LIGHT_ACCENT` (Classic's), `OLED_ACCENT` (OLED's), `ACCENT` (Modern's), `ROUNDED` (Rounded Corners: 0 off, 1 on), `LIGHT` (Light Mode: 0 Off, 1 On, 2 Auto; missing is Off), `HOME`, `BATTERY`, `THEME`, every theme's `STATUSBAR` (Status Bar), and Classic's own `HOMELIB`, `ROWPREVIEW` and `ROWART`. The values are read once,
 on the payload's first use (after stock `config_init`: `application_init` runs `platform_init`, which
 calls it, before it opens any window), with `toolsReadConfig` (`0x5cfff4`), in the order stock `config_init`
 calls it: `(path, section, key, out, default)`. It reads the file line by line
@@ -830,10 +830,10 @@ Now Playing uses 24 px monochrome control glyphs on 28 px canvases inside the ex
 The Theme list shows Minimal, Modern, Classic, OLED (`theme_rows`, by each theme.xml's `order`), whatever their stored numbers.
 **Theme: Minimal** (`THEME=0`, the default) is the look described above. **Theme: Classic**
 (`1`) is a light iPod look with a dark half, on its own layout (below). **Theme: Modern** (`2`)
-is 1.6.5's Classic on Minimal's layout (below). **Theme: OLED** (`3`) is a placeholder for the
-OLED design (below). A stored `THEME=4` or past reads as Minimal.
-Choosing Classic or OLED from Minimal or Modern, or the other way, asks "Restart to apply?", because Classic and OLED lay their rows out
-from Classic's geometry sets ([internals.md](internals.md#themes)): Cancel changes nothing; OK
+is 1.6.5's Classic on Minimal's layout (below). **Theme: OLED** (`3`) is a black screen with
+white Inter type and one blue accent, on its own layout ([oled-design.md](oled-design.md), below). A stored `THEME=4` or past reads as Minimal.
+Choosing a theme on another layout asks "Restart to apply?": Classic lays its rows out from Classic's geometry
+sets and OLED from its own, while Minimal and Modern share the built-in one ([internals.md](internals.md#themes)): Cancel changes nothing; OK
 saves the theme and its preset ([Display settings](#display-settings)) and restarts the Q2.
 
 Corners is Minimal's and Modern's setting, Square until chosen; Classic's covers are always square. Every theme insets an album grid's cover inside the tile (`album_children`), so the selection card frames it; Classic's and Modern's card is in the accent's colour, Classic's square.
@@ -889,11 +889,30 @@ photo pages' own drawing) keeps Minimal's layout under this theme's colours and 
 
 #### OLED
 
-**Theme: OLED** is a placeholder for the OLED design, whose own docs are to follow. Its
-`assets/themes/oled/theme.xml` extends Classic and changes nothing, so it looks and behaves as
-Theme: Classic does: Classic's geometry sets, art, face, options and accent (`CLASSIC_LIGHT_ACCENT`, shared
-with Classic). Classic and OLED share their sets, so a change between them applies at once, as one between
-Minimal and Modern does.
+**Theme: OLED** is built to [oled-design.md](oled-design.md): black, white sentence-case Inter, one blue.
+Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as the `oled` geometry set.
+
+- **The status row.** No bar band: the page's title, small and grey, on the list's left column (the clock instead
+  on Home and Now Playing), and the play state and a slim battery ending on the list's right column, centred
+  on y 37, clear of the glass's corners.
+- **The grid.** 32 px rows from y 58 with their text at x 24, seven to a screen: the list ends at y 282, above
+  the bottom corners, and the strip below it stays black (`list_fit`). Chevrons and values share one column 28 px
+  from the right edge on every row. Settings, the Library, Home (Full and Split) and stock's own list pages all
+  take it; Albums and Search are two lines at 52 px, four to a page.
+- **Colour.** Black (white in Light Mode), white text, second lines in Text Tertiary (`#858585`), a settings row's
+  value in Text Secondary (`#ABABAB`, `#5C5C5C` on paper), and one blue, `#2160D8`, for the selection bar, the
+  progress fill and every mark stock draws red. **Accent** offers that Blue alone (`OLED_ACCENT`).
+- **Type.** Inter Regular for rows (20 px) and second lines (15 px), Inter Medium for the status row (15 px) and
+  Now Playing's title (22 px), with tabular digits ([Its font](#oled-type) below).
+- **The selection.** The accent's flat bar, 16 px in from each side with 8 px ends on every row.
+- **Scrolling.** A short track and thumb on the right edge, beside the list's middle, while the wheel turns; it
+  fades a second after the last tick.
+- **Icons.** Phosphor's (MIT, [oled-design.md](oled-design.md#icons)): the caret on each row that opens a page,
+  the play state.
+- **Appearance's rows.** Theme, Status Bar, Light Mode, Accent, Home, Shortcut and Battery (Icon or Percent).
+
+<a id="oled-type"></a>Inter 4.1 Regular and Medium (`assets/fonts`, SIL OFL 1.1) ship as `fonts/inter.ttf` and
+`fonts/inter-medium.ttf`, subset as the other faces are; where Inter lacks a character, stock's face stands in.
 
 ### Light Mode
 

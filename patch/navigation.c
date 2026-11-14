@@ -201,6 +201,7 @@ extern void coverflow_slant(void *w, void *canvas, unsigned paper), coverflow_sl
 extern int coverflow_home_back(void *top), coverflow_home_owns(void *w);
 extern void coverflow_home_top(void);
 extern const char *coverflow_home_title(void);
+extern int coverflow_home_sub(void);
 extern void coverflow_home_row(void *surface, void *row, int id, int painting);
 extern void lockscreen_paint(void *w, void *canvas);
 extern void coverflow_paint(void *w, void *canvas), photos_paint(void *w, void *canvas),
@@ -1108,8 +1109,11 @@ void reveal(menu_t *m, int id, int immediate) {
         y = r.y + top;
         h = r.h;
     }
-    /* A tall row cannot fit: show its title consistently instead of alternating edges. */
-    int height = sel_height(m), margin = clamp_step((height - h) / 2, SCROLL_MARGIN, 0);
+    /* A tall row cannot fit: show its title consistently instead of alternating edges. A list_fit
+     * set's list holds whole rows and keeps them whole: no margin, so it scrolls a row at a
+     * time. */
+    int height = sel_height(m),
+        margin = geom_val(V_LIST_FIT) ? 0 : clamp_step((height - h) / 2, SCROLL_MARGIN, 0);
     int want = h > height || y - top < margin  ? y - margin
                : y - top > height - h - margin ? y - (height - h - margin)
                                                : top;
@@ -1660,19 +1664,20 @@ static int folder_into(const menu_t *m, int i) {
 /* The iPod `>` of each drill row, where stock rows place img_into, as stock hides its own
  * list_into: not in multi-select, and not on grid tiles. Home has none but a chevron_home theme's:
  * Modern's rides its selection bar alone, nudge included, Classic's sits at home_chevron_x. A
- * chevron_sel theme (Classic) draws only the selected row's, white. The image manager caches the
- * bitmap. */
+ * chevron_sel theme (Classic) draws only the selected row's, white; a CHEV_ICON theme draws its own
+ * on each row, on the set's right column (list_marks.c). The image manager caches the bitmap. */
 static void paint_chevrons(void *w, void *canvas) {
     unsigned bitmap[64], white[64]; /* bitmap_t */
     rect_t old;
     void *win = window_of(w);
     const theme_t *T = theme();
     int home = home_menu(win), sel_only = T->chevron_sel,
-        box = home && ipod_home() != 1 ? T->home_chevron_x : T->chevron_x;
+        box = home && ipod_home() != 1 ? T->home_chevron_x : T->chevron_x,
+        icon = T->painter[PAINT_CHEVRON] == CHEV_ICON; /* every row's, Home's too */
     /* a picker's tap adds and closes: no `>` */
     if (g_navbar_status || !kind(w) || !P(canvas, CANVAS_LCD) || !(drill(w) || T->chevron_sel) ||
         (sel_only && widget_get_prop_int(win, PL_MODE, 0)) ||
-        (home && (!T->chevron_home || st.sel_w != w)) ||
+        (home && (!T->chevron_home || (st.sel_w != w && !icon))) ||
         (T->chevron_sel && st.sel_w != w && !drill(w)) || !load_rows(&g_menu, w) ||
         (T->chevron_sel && !drill(w) &&
          (st.sel_row >= g_menu.n ||
@@ -1686,10 +1691,18 @@ static void paint_chevrons(void *w, void *canvas) {
     for (int i = 0; i < g_menu.n; ++i) {
         rect_t r = bounds(&g_menu, i);
         /* the row's own tests last: an unmarked row under a selected-only chevron pays nothing */
-        if (2 * r.w >= I(w, W_W) && (!home || i == st.sel_row) &&
+        if (2 * r.w >= I(w, W_W) && (!home || i == st.sel_row || icon) &&
             (!sel_only || (lit && i == st.sel_row)) &&
             (drill(g_menu.at[i]) ||
-             (T->chevron_sel && (page_into(g_menu.at[i]) || folder_into(&g_menu, i)))))
+             (T->chevron_sel && (page_into(g_menu.at[i]) || folder_into(&g_menu, i))))) {
+            /* the theme's own, on the right column; Home's Shuffle Songs plays in place */
+            if (icon) {
+                if (!home || shortcut() != SHORTCUT_SHUFFLE ||
+                    tk_strcmp(widget_get_prop_str(g_menu.at[i], "name", ""), "img_rockbox"))
+                    chevron_icon(w, canvas, I(w, W_W) - geom_val(V_RIGHT_X), r.y + r.h / 2,
+                                 st.sel_w == w && i == st.sel_row);
+                continue;
+            }
             canvas_draw_icon(
                 canvas, lit && i == st.sel_row ? white : bitmap,
                 box ? r.x + box + (int)(lit && i == st.sel_row ? white : bitmap)[0] / 2
@@ -1697,6 +1710,7 @@ static void paint_chevrons(void *w, void *canvas) {
                           (home ? (ipod_home() == 1 ? HOME_FULL_CHEVRON_SHIFT : HOME_CHEVRON_SHIFT)
                                 : 0),
                 home ? st.sel_y : r.y + r.h / 2); /* bitmap_t width @0 */
+        }
     }
     canvas_set_clip_rect(canvas, &old);
 }
@@ -2468,11 +2482,12 @@ static void paint_selection(void *w, void *canvas) {
                 canvas_fill_rect(canvas, r.x, r.y + r.h - 1, r.w, 1);
             }
         } else {
-            /* Modern's bar; under Rounded Corners a list row's is the theme's sel_inset in from
-             * each side, its ends sel_radius at most pill_radius's (Modern: SEL_INSET, a pill) */
+            /* Modern's bar; under Rounded Corners (or always, sel_fixed) a list row's is the
+             * theme's sel_inset in from each side, its ends sel_radius at most pill_radius's
+             * (Modern: SEL_INSET, a pill) */
             const theme_t *T = theme();
             rect_t bar = r;
-            int pill = !tile && corners, in = pill ? T->sel_inset : 0;
+            int pill = !tile && (corners || T->sel_fixed), in = pill ? T->sel_inset : 0;
             int radius = pill ? pill_radius(g_menu.at[i], r.h, in) : 0;
             if (radius > T->sel_radius) radius = T->sel_radius;
             bar.x += in, bar.w -= 2 * in;
@@ -2528,7 +2543,8 @@ static void paint_separators(void *w, void *canvas) {
     rect_t old;
     int clip[4];
     const theme_t *T = theme();
-    int k = w && T->sep[0].n ? kind(w) : 0;
+    unsigned div = T->div_ink[ipod_light()];
+    int k = w && (T->sep[0].n || div) ? kind(w) : 0;
     if (!(k == 1 || (k == 2 && I(w, ROW_HEIGHT) > geom(G_PITCH))) || !P(canvas, CANVAS_LCD) ||
         (k == 2 && !load_rows(&g_menu, w)) ||
         !clip_within(canvas, &old.x, clip, I(canvas, CANVAS_X), I(canvas, CANVAS_Y), I(w, W_W),
@@ -2540,7 +2556,16 @@ static void paint_separators(void *w, void *canvas) {
     /* st.sel_row counts load_rows' clickable entries, which a view's children needn't all be */
     int sel = st.sel_w == w ? st.sel_row : -1;
     void *sel_child = st.sel_w == w ? st.sel_accent : (void *)0;
-    if (k == 2) {
+    if (k == 2 && div) { /* the divider: from the text (or art's text) column to the right one */
+        int x = T->art_x ? T->art_text_x : geom_val(V_TEXT_X),
+            end = I(w, W_W) - geom_val(V_RIGHT_X);
+        stock_canvas_set_fill_color(canvas, RGBA(div));
+        for (int i = 0; i + 1 < g_menu.n; ++i) {
+            rect_t r = bounds(&g_menu, i);
+            if (i != sel && i + 1 != sel && r.h > geom(G_PITCH))
+                canvas_fill_rect(canvas, x, r.y + r.h - 1, end - x, 1);
+        }
+    } else if (k == 2) {
         for (int i = 0; i < g_menu.n; ++i)
             if (i != sel && two_lines(g_menu.at[i])) {
                 rect_t r = bounds(&g_menu, i);
@@ -2649,6 +2674,14 @@ static void paint_into(void *w, void *canvas) {
     unsigned bitmap[64];                         /* bitmap_t: width @0, height @4 */
     int sel_only = w ? theme()->chevron_sel : 0; /* in either half: stock's own is empty */
     int box = w ? theme()->chevron_x : 0;
+    /* CHEV_ICON: stock's is empty on every row, and each row's own stands on the right column */
+    if (w && theme()->painter[PAINT_CHEVRON] == CHEV_ICON) {
+        if (P(canvas, CANVAS_LCD) &&
+            !tk_strcmp(widget_get_prop_str(w, "image", ""), "list_into"))
+            chevron_icon(w, canvas, 375 - geom_val(V_RIGHT_X) - I(canvas, CANVAS_X), I(w, W_H) / 2,
+                         st.sel_accent && painting_in(st.sel_accent));
+        return;
+    }
     if (!w || !(ipod_light() || sel_only) || !st.sel_accent || !P(canvas, CANVAS_LCD) ||
         tk_strcmp(widget_get_prop_str(w, "image", ""), "list_into") ||
         !painting_in(st.sel_accent) ||
@@ -2695,6 +2728,24 @@ static void paint_scrollbar(void *canvas, void *bar, int table) {
     void *list = P(bar, W_PARENT), *lcd = P(canvas, CANVAS_LCD);
     int max = table ? table : I(bar, BAR_MAX), value = I(bar, BAR_VALUE);
     int y0 = I(canvas, CANVAS_Y), h = I(list, W_H);
+    if (T->painter[PAINT_SCROLL] == SB_WHEEL) { /* list_marks.c: while the wheel turns */
+        unsigned a = wheel_sb_alpha(list);
+        int track = T->sb_bottom - T->sb_top;
+        if (!a || !lcd || max <= 0) return;
+        value = value < 0 ? 0 : value > max ? max : value;
+        while (max >> 22) max >>= 1, value >>= 1;
+        int at = track * value / max, len = track * h / max;
+        if (len > track - at) len = track - at;
+        rect_t t = { I(list, W_W) - T->sb_right - T->sb_w, T->sb_top - y0, T->sb_w, track },
+               thumb = { t.x, t.y + at, t.w, len };
+        unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), L = ipod_light();
+        for (int i = 0; i < t.h; ++i)
+            round_row(canvas, &t, T->sb_w / 2, i, a << 24 | T->sb_track[L]);
+        for (int i = 0; i < thumb.h; ++i)
+            round_row(canvas, &thumb, T->sb_w / 2, i, a << 24 | T->sb_thumb[L]);
+        stock_canvas_set_fill_color(canvas, fill);
+        return;
+    }
     int top = (y0 > T->sb_top ? y0 : T->sb_top) - y0,
         bottom = (y0 + h < T->sb_bottom ? y0 + h : T->sb_bottom) - y0, track = bottom - top;
     if (!lcd || max <= 0 || track <= 0) return;
@@ -2842,7 +2893,9 @@ void list_value(void *label, const char *title, const char *value) {
     void *button = P(label, W_PARENT);
     void *text = widget_lookup(button, "_setting_value", 0);
     if (!text) {
-        int x = 302 - I(button, W_X) - 80;
+        /* its text's right end on the set's right column (hscroll_label keeps 2 px), else 356 */
+        int right = geom_val(V_RIGHT_X),
+            x = (right ? 374 - right - 134 : 302 - 80) - I(button, W_X);
         text = hscroll_label_create(button, x, 0, 134, I(button, W_H));
         widget_set_name(text, "_setting_value");
         widget_use_style(text, "s_scrlabel_white20r");
@@ -2853,6 +2906,9 @@ void list_value(void *label, const char *title, const char *value) {
     widget_set_text_utf8(label, title);
     widget_set_text_utf8(text, value);
     theme_font(text, ROLE_TITLE, FONT_ROW);
+    /* a theme's value grey, final in each half (text_ink); the selection's sel_text still wins */
+    unsigned ink = theme()->set_value_ink[ipod_light()];
+    if (ink) text_ink(text, 0xff000000u | ink, INK_LABEL);
 }
 
 /* Under a set without stock's toolbars (toolbar 0) a page's switch is a row: stock's img_switch
@@ -3785,6 +3841,8 @@ static void clock_show(void) {
         tk_snprintf(s, sizeof s, "%d:%02d %s", (tm[2] + 11) % 12 + 1, tm[1],
                     tm[2] < 12 ? "AM" : "PM");
     widget_set_text_utf8(label, s);
+    /* a status row's clock: the title's face, in its place */
+    if (geom_val(V_STATUS_Y)) theme_font(label, ROLE_BAR, FONT_ROW);
 }
 static void clock_zone(void) {
     if (st.clock_timer) clock_show(); /* the bar runs; boot's call comes before it */
@@ -3850,10 +3908,17 @@ static int bar_state_sync(void *bar) {
                 { "classic_light_play_d", "classic_light_pause_d" },
                 { "classic_light_play_l", "classic_light_pause_l" }
             };
+            /* BATT_SLIM's is the bar theme's own (tools/art.py), by state and half */
+            int slim = bar_theme()->painter[PAINT_BATTERY] == BATT_SLIM;
+            char slim_icon[32];
+            if (slim)
+                tk_snprintf(slim_icon, sizeof slim_icon, "%s%s_%c", bar_theme()->art,
+                            status == 2 ? "play" : "pause", ipod_light() ? 'l' : 'd');
             const char *icon = st.bar_dark
                                    ? status == 2 ? "classic_light_play_w" : "classic_light_pause_w"
                                : bar_theme()->painter[PAINT_BATTERY] == BATT_CLASSIC_LIGHT
                                    ? classic_light_icon[ipod_light()][status != 2]
+                               : slim ? slim_icon
                                : status == 2 ? "bar_play"
                                              : "bar_pause";
             if (tk_strcmp(widget_get_prop_str(st.bar_state, "image", ""), icon)) {
@@ -3995,8 +4060,10 @@ static void bar_sync(void *bar) {
                            I(st.bar_wifi, W_H));
     int classic_row = T->painter[PAINT_BATTERY] == BATT_CLASSIC_LIGHT, /* the row's layout */
         classic_light = B->painter[PAINT_BATTERY] == BATT_CLASSIC_LIGHT,
-        body =
-            classic_light ? bar_geom_val(V_BATT_W) + 1 : BATT_BODY_W, /* its soft edge's column */
+        slim = B->painter[PAINT_BATTERY] == BATT_SLIM, /* the set's body too */
+        body = classic_light ? bar_geom_val(V_BATT_W) + 1   /* its soft edge's column */
+               : slim        ? bar_geom_val(V_BATT_W)
+                             : BATT_BODY_W,
         inside = classic_light ? body : BATT_INSIDE_W;
     int mode = st.battery;
     if (mode) {
@@ -4185,6 +4252,12 @@ static void paint_battery(void *w, void *canvas) {
     if (st.batt_mode == 1) {
         rect_t r = { 0, 0, I(w, W_W), I(w, W_H) };
         draw_centred(canvas, s, n, &r, px, color);
+        return;
+    }
+    if (T->painter[PAINT_BATTERY] == BATT_SLIM) { /* list_marks.c, the set's body from column 0 */
+        int bh = bar_geom_val(V_BATT_H);
+        battery_slim(canvas, 0, batt_top(w, bh), bar_geom_val(V_BATT_W), bh, key);
+        stock_canvas_set_fill_color(canvas, fill);
         return;
     }
     if (classic_light) { /* the body's soft edge at 0; on Classic's own row batt_top is the middle
@@ -5741,7 +5814,8 @@ static void *page_caption(void *win) {
  * a stock page's (hidden) navbar title, else a payload page's 48 px caption row (page_title). */
 static const char *bar_title_of(void *win, void **label) {
     const char *name = widget_get_prop_str(win, "name", "");
-    if (tk_str_start_with(name, "playing_page")) return "Now Playing";
+    /* a status row shows the clock on Now Playing (tools/ipod.py status_row) */
+    if (tk_str_start_with(name, "playing_page")) return geom_val(V_STATUS_Y) ? "" : "Now Playing";
     if (!tk_strcmp(name, "coverflow_page")) return "Cover Flow";
     if (!tk_strcmp(name, "equalizer_page")) return "EQ"; /* its 48 px row is the tabs' own label */
     if (!tk_strcmp(name, "spotify_page")) return "Spotify"; /* they hide their own name's label */
@@ -5807,7 +5881,10 @@ void bar_title_sync(void *win) {
     if (!st.bar_title || !win || win != window_manager_get_top_window(window_manager())) return;
     static const unsigned none = 0;
     char s[256], now[256]; /* stock writes nothing unless all of it fits */
-    const char *t = home_menu(win) ? coverflow_home_title() : (const char *)0;
+    /* Home names the list it shows; a status row names none of Home's own, and shows the clock */
+    const char *t = !home_menu(win)                             ? (const char *)0
+                    : geom_val(V_STATUS_Y) && !coverflow_home_sub() ? ""
+                                                                 : coverflow_home_title();
     if (t)
         ;
     else if (win != st.title_win) {
@@ -6239,11 +6316,13 @@ int ringnav_image_add(void *manager, const char *name, void *bitmap) {
     if (s && !*s && tk_str_start_with(name, "menu_") && tk_strcmp(name, "menu_left") &&
         tk_strcmp(name, "menu_right"))
         s = (void *)0;
-    /* art_final, Classic Light's (tools/theme.py refuses it for another theme), and so on its
-     * Status Bar under any theme: its own images (tools/art.py) are final, but for Sort's bars and
-     * the volume's speakers: marks on the paper, in the half's ink */
-    if (s && !*s && (T->art_final || bar_theme()->art_final) &&
-        tk_str_start_with(name, "classic_light_") && tk_strcmp(name, "classic_light_sort_bars") &&
+    /* art_final, and so on its Status Bar under any theme: a theme's own images (tools/art.py,
+     * named by its art prefix) are final, but for Classic's Sort bars and volume speakers: marks on
+     * the paper, in the half's ink */
+    if (s && !*s &&
+        ((T->art_final && tk_str_start_with(name, T->art)) ||
+         (bar_theme()->art_final && tk_str_start_with(name, bar_theme()->art))) &&
+        tk_strcmp(name, "classic_light_sort_bars") &&
         !tk_str_start_with(name, "classic_light_vol_"))
         s = (void *)0;
     /* Minimal: the codec badges (img_flac, img_mp3, ...: red with the name cut out) take the
@@ -6401,8 +6480,9 @@ int ringnav_image_add(void *manager, const char *name, void *bitmap) {
         mapped = 1;
     }
     /* A chevron_sel theme (Classic): stock's grey `>` on every row is emptied; paint_into
-     * draws the selected row's, white. */
-    if (T->chevron_sel && s && !*s && !tk_strcmp(name, "list_into") && format < 4) {
+     * draws the selected row's, white. A CHEV_ICON theme's too: paint_into draws each row's own. */
+    if ((T->chevron_sel || T->painter[PAINT_CHEVRON] == CHEV_ICON) && s && !*s &&
+        !tk_strcmp(name, "list_into") && format < 4) {
         clear_bitmap(bitmap);
         mapped = 1;
     }
@@ -11205,6 +11285,7 @@ int ringnav(void *ctx, void *event) {
         step = 1;
     }
     native_scrollbar(&g_menu);
+    wheel_sb_arm(g_menu.w);
     if (g_menu.kind == 3) {
         if (dir > 0)
             slide_menu_scroll_to_next(w);

@@ -1705,3 +1705,27 @@ def test_patch_word_wants_the_stock_instruction():
     with pytest.raises(ValueError, match=r'^0x400004: unexpected instruction \(LDAC HQ sends 990 kbps\)$'):
         ipod.patch_word(data, 0x400004, 0x0320f809, 0, 'LDAC HQ sends 990 kbps', changes)
     assert data == program(0x0320f809, 0x0411fc39) and changes == []
+
+
+def test_status_row_names_the_page_on_the_lists_columns():
+    """A set's status row (OLED's): the bar black and 58 px, its title and clock sharing one box on the text column
+    in Text Secondary at bar_px, centred on status_y; the play state then the battery, right_x from the edge;
+    Bluetooth, Wi-Fi and EQ off-screen, still there for stock."""
+    g = dataclasses.replace(ipod.SET0, bar=58, status_y=37, text_x=24, right_x=28, bar_px=18)
+    root = bar()
+    ipod.status_bar(root, g)
+    n = named(root)
+    left, right = root[3][:2]
+    assert left[3] == [] and [c[2]['name'] for c in right[3]] == ipod.STATUS_ROW_RIGHT
+    assert right[2]['children_layout'] == f'default(c=3,xm=28,s={ipod.STATUS_ROW_GAP})' and right[1][1::2] == [29, 16]
+    for name in ('label_title', 'label_clock'):
+        assert n[name][1] == [22, 25, ipod.STATUS_ROW_TITLE_W, 24]
+        assert {n[name][2][f'style:{s}:{k}'] for s in STATES for k in ('font_size', 'text_color')} == {'18', '#ABABAB'}
+    assert all(n[k][1][0] == -200 for k in ('img_bt', 'img_wifi', 'label_eq', 'label_idle', *ipod.STATUS_HIDDEN))
+    assert root[1][3] == 58
+
+
+@pytest.mark.parametrize('pitch, rows', [(32, 7), (52, 4)])
+def test_fit_rows_ends_a_list_on_a_whole_row(pitch, rows):
+    g = dataclasses.replace(ipod.SET0, list_end=224, list_fit=1)
+    assert ipod.fit_rows(g, 0, pitch) == rows * pitch

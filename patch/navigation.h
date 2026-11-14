@@ -442,6 +442,13 @@ void font_weight_paint(void *w, void *canvas);
 int coverflow_position_enabled(void); /* navigation.c: persisted setting */
 void coverflow_position_reset(void);
 
+/* list_marks.c */
+const char *theme_art(const char *name);
+void chevron_icon(void *w, void *canvas, int right, int y, int selected);
+void wheel_sb_arm(void *list);
+unsigned wheel_sb_alpha(void *list);
+void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key);
+
 /* np_bar.c */
 int np_beside(void);
 int remain_due(const void *info);

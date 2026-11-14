@@ -4787,6 +4787,9 @@ void coverflow_home_top(void) {
     home_show(home.list, 1);
 }
 
+/* 1 while Home shows a list of its rows' (the Library's, Streaming's, Settings'), not its own. */
+int coverflow_home_sub(void) { return home_open() != (void *)0; }
+
 /* Classic's bar title on Home (navigation.c bar_title_sync). */
 const char *coverflow_home_title(void) {
     void *open = home_open();

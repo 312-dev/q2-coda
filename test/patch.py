@@ -21,7 +21,8 @@ assert manifest['version'] == (dev_tag(manifest['dev']) if manifest.get('dev') e
 assert manifest.get('compact_code')
 from ipod import INC, O  # patch/offsets.inc and its integer #defines
 from theme import MOTION_WIDGET, MOTION_WINDOW, SCHEME_MODE_OFF, THEME_GEOM_OFF, THEME_MOTION_OFF, builtins as theme_builtins, geometry_sets
-from theme import derive_gloss, turn, GLOSS_TOP  # tools/theme.py: the derived accents' bands
+from theme import derive_gloss, turn, GLOSS_TOP, theme_keys  # tools/theme.py: the derived accents' bands, the themes' own keys
+CONFIG_READS=13+len(theme_keys(theme_builtins()))  # settings_read: the payload's thirteen keys, then the themes' own
 PAST_THEMES=str(len(theme_builtins()))  # a stored THEME past the last theme: read as Minimal's 0
 PICKER=sorted(theme_builtins(),key=lambda t:t['order'])  # the Theme picker's rows (theme_rows)
 PICK_ROW={t['index']:i for i,t in enumerate(PICKER)}  # stored THEME -> its picker row
@@ -11519,7 +11520,7 @@ for config,preset in (({},0),({**C,K:'1'},1),({**C,K:'2'},2),({**C,K:'3','HOME':
         want=ACCENTS[preset][3 if name.endswith('text_color') else 2]
         assert style_color(m,red,name)[1]==(red if preset==O['CRIMSON'] else color_t(want)),(config,name)
     assert style_color(m,grey)[1]==grey
-    assert len(m.config_reads)==18  # every key, once, on first use
+    assert len(m.config_reads)==CONFIG_READS  # every key, once, on first use
     passed()
 # Real paint order, no persistent widget styles: normal, metadata, disabled alpha,
 # recycled text, touch hiding, Home siblings, and every accent.
@@ -11582,7 +11583,7 @@ passed()
 
 m=Machine(); style_color(m,red)
 # config_value passes its default in decimal: SHORTCUT's SETTING_N_SHORTCUT (12) is out of range, so no shortcut
-assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY','THEME')]+[('/mnt/data/config.ini','IPOD','SHORTCUT','12'),('/mnt/data/config.ini','IPOD','MINIMAL_ACCENT','0'),('/mnt/data/config.ini','IPOD','ROUNDED','1'),('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','0'),('/mnt/data/config.ini','IPOD','NPCENTRED','0'),('/mnt/data/config.ini','IPOD','KEYTONEHP','0'),('/mnt/data/config.ini','IPOD','SCRUBSINGLE','0'),('/mnt/data/config.ini','IPOD','TIMETITLE','1')]+[('/mnt/data/config.ini','IPOD',key,v) for key,v in (('STATUSBAR','0'),('CLASSIC_LIGHT_ACCENT','9'),('HOMELIB','1'),('ROWPREVIEW','1'),('ROWART','1'))]; passed()
+assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY','THEME')]+[('/mnt/data/config.ini','IPOD','SHORTCUT','12'),('/mnt/data/config.ini','IPOD','MINIMAL_ACCENT','0'),('/mnt/data/config.ini','IPOD','ROUNDED','1'),('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','0'),('/mnt/data/config.ini','IPOD','NPCENTRED','0'),('/mnt/data/config.ini','IPOD','KEYTONEHP','0'),('/mnt/data/config.ini','IPOD','SCRUBSINGLE','0'),('/mnt/data/config.ini','IPOD','TIMETITLE','1')]+[('/mnt/data/config.ini','IPOD',key,str(d)) for key,(_,d,_) in theme_keys(theme_builtins()).items()]; passed()  # the themes' own, in table order
 # theme()/scheme(): the active built-in and its scheme, settings read on first use. THEME out of
 # range is Minimal; Classic's stored Ivory and an out-of-range CLASSIC_LIGHT_ACCENT are Classic Blue, on Cobalt's
 # tones; Modern's stored Ivory and an out-of-range ACCENT are Graphite's scheme; a missing MINIMAL_ACCENT is Graphite, a stored Ivory
@@ -11595,16 +11596,16 @@ for config,name,want in (({},'Minimal',0),({'MINIMAL_ACCENT':'7'},'Minimal',7),(
                          ({'THEME':'2','ACCENT':'1'},'Modern',1),({'THEME':'2','ACCENT':'8'},'Modern',8)):
     k=Machine(); k.config=dict(config); k.seed={}
     t=k.call(address=payload_syms['theme'],args=(0,0,0,0),gap=0)&0xffffffff
-    assert k.text(k.get(t))==name and len(k.config_reads)==18,config
+    assert k.text(k.get(t))==name and len(k.config_reads)==CONFIG_READS,config
     s=k.call(address=payload_syms['scheme'],args=(0,0,0,0),gap=0)&0xffffffff
     flags=k.u.mem_read(s+4,1)[0]  # scheme_t: tones @0, flags @4
     assert k.get(s)==payload_syms['accents']+20*want and flags==(1 if name=='Minimal' and want==7 else 2 if want==1 else 0),(config,flags)
 passed()
 # A paint before any config read draws a built-in theme, never zeroed scratch.
 k=Machine(); k.config=dict(THEME='1'); kw,_=k.page_list(5,extent=1000); assert k.config_reads==[]
-k.paint(kw); assert len(k.config_reads)==18 and k.bands[0][4]==color_t(0x08a6e7),hex(k.bands[0][4])  # Classic Blue's band's top row: the dark half's, no light rim
+k.paint(kw); assert len(k.config_reads)==CONFIG_READS and k.bands[0][4]==color_t(0x08a6e7),hex(k.bands[0][4])  # Classic Blue's band's top row: the dark half's, no light rim
 k=Machine(); k.config=dict(THEME='2',ACCENT='4'); kw,_=k.page_list(5,extent=1000); assert k.config_reads==[]
-k.paint(kw); assert len(k.config_reads)==18 and [k.bands[i][4] for i in (0,1,47)]==[color_t(ACCENTS[4][i]) for i in (4,0,1)]
+k.paint(kw); assert len(k.config_reads)==CONFIG_READS and [k.bands[i][4] for i in (0,1,47)]==[color_t(ACCENTS[4][i]) for i in (4,0,1)]
 k=Machine(); k.config={}; kw,_=k.page_list(5,extent=1000); k.paint(kw)
 assert not k.bands and k.rounded[-1]['color']==color_t(O['MINIMAL_FILL']); passed()
 # THEME=1 is Classic, on its own CLASSIC_LIGHT_ACCENT, whose stored value outside
@@ -11612,7 +11613,7 @@ assert not k.bands and k.rounded[-1]['color']==color_t(O['MINIMAL_FILL']); passe
 for config,want in (({},4),({'CLASSIC_LIGHT_ACCENT':'2'},2),({'CLASSIC_LIGHT_ACCENT':'7'},4),({'ACCENT':'2'},4)):
     k=classic_light(Machine()); k.config.update(config)
     t=k.call(address=payload_syms['theme'],args=(0,0,0,0),gap=0)&0xffffffff
-    assert k.text(k.get(t))=='Classic' and len(k.config_reads)==18 and [r[2] for r in k.config_reads[13:]]==['STATUSBAR','CLASSIC_LIGHT_ACCENT','HOMELIB','ROWPREVIEW','ROWART'],config
+    assert k.text(k.get(t))=='Classic' and len(k.config_reads)==CONFIG_READS and [r[2] for r in k.config_reads[13:]]==list(theme_keys(theme_builtins())),config
     s=k.call(address=payload_syms['scheme'],args=(0,0,0,0),gap=0)&0xffffffff
     assert k.get(s)==payload_syms['accents']+20*want,config
 passed()
@@ -13373,11 +13374,11 @@ for i,key,label in ((8,'HOMELIB','Library on Home'),(9,'ROWPREVIEW','Row Preview
     assert [(c[1],m.text(c[3])) for c in m.calls if c[0]=='write_int_config']==[(0,key)],key
 passed()
 # The restart test applies the chosen theme's presets: from a booted Classic with Row Art Off (classic-light-text),
-# Classic with its preset (On) boots classic_light, another set; with Row Art On, the set running. OLED, on Classic's
-# sets, as Classic. Minimal and Modern: always. From SET0, Classic and OLED restart and Minimal and Modern don't.
+# Classic with its preset (On) boots classic_light, another set; with Row Art On, the set running. OLED, on its own
+# oled set, always. Minimal and Modern: always. From SET0, Classic and OLED restart and Minimal and Modern don't.
 for art,want in (('0',1),('1',0)):
     k=Machine(); k.config['ROWART']=art; classic_light_boot(k)
-    assert [k.call(address=payload_syms['theme_restart'],args=(t,0,0,0),gap=0) for t in (1,0,2,3)]==[want,1,1,want],art
+    assert [k.call(address=payload_syms['theme_restart'],args=(t,0,0,0),gap=0) for t in (1,0,2,3)]==[want,1,1,1],art
 k=Machine(); assert [k.call(address=payload_syms['theme_restart'],args=(t,0,0,0),gap=0) for t in (0,1,2,3)]==[0,1,0,1]
 passed()
 # Classic's rows take its font inline in every state, at its title size, once (a second layout writes

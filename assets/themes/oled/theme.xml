@@ -1,6 +1,81 @@
-<!-- Theme: OLED (IPOD/THEME 3, docs/ipod.md#theme). A placeholder for the OLED design, whose docs are to follow: it
-     extends Classic and changes nothing, so it runs on Classic's geometry sets (32 px rows) with Classic's face and
-     options, and proves a fourth theme's slot end to end. art="classic-light": it draws Classic's generated images,
-     which the payload loads by their classic_light_* names. -->
-<theme format="1" id="oled" name="OLED" index="3" order="3" extends="classic-light" art="classic-light">
+<!-- Theme: OLED (IPOD/THEME 3, docs/ipod.md#theme), built to docs/oled-design.md: a black screen, white Inter in
+     sentence case, one blue accent. It extends Minimal, whose layout code it shares, states its own grid as the
+     oled geometry set and draws its own art (tools/art.py oled_*: Phosphor's glyphs). Sizes here are AWTK's, which
+     scales a face so that its ascent less its descent is the size: Inter's line is 1.21 em, so the design's 20 px
+     type is 24 here, its 15 px 18, its 22 px 27. -->
+<theme format="1" id="oled" name="OLED" index="3" order="3" extends="minimal">
+  <!-- The grid (oled-design.md Corners and Spacing): a status row centred on y 37 in a 58 px bar drawn black, so
+       no band shows; the page's title at x 24, the play state and battery ending 28 px from the right edge. Then
+       32 px rows from y 58, the text at x 24, seven of them: list_end and list_fit end the list at y 282, the
+       strip below stays black and the selection never lands there; a list scrolls a row at a time. Songs are one
+       32 px line; Albums and Search are two lines at 52 px, four to a page (a list box holds whole rows): 40 px
+       art at x 24, the text at 72 (list.art below). Text y puts each line where the design's baselines are. -->
+  <geometry name="oled" bar="58" pitch="32" body="32" art="40" art_inset="6" art_pitch="52"
+            art_body="52" text_art="0" text_art_inset="0" lib_pitch="32" lib_body="32" lib_inset="0"
+            lib_art="0" title24_y="4" title_y="6" meta_y="8"
+            count_y="8" art_title24_y="6" art_meta_y="33" song_pitch="32" song_body="32" song_title24_y="4"
+            song_meta_y="8" set_row="32" set_top="0" set_rows="7"
+            set_icon="0" stream_row="52" bar_px="18" bar_title_w="0" bar_right="0" batt_w="25" batt_h="12"
+            text_x="24" list_end="224" list_fit="1" status_y="37" right_x="28"
+            action_row="32" home_row="32" home_lib="0" np_ipod="0"
+            stock_row="32" stock_body="32" stock_title_y="0" stock_title_h="32" toolbar="0"
+            search_row="52" search_body="52" search_art="0" search_title_y="4" search_title24_y="4" search_title_h="28"
+            search_meta_y="31" search_meta_h="20"/>
+  <geometry set="oled"/>
+  <!-- Colour (oled-design.md Colour): Accent Blue, one value for the bar, the progress fill and every mapped red, as
+       its own scheme's five tones; white text on it in both halves; second lines in Text Tertiary (stock's #aaaaaa secondary text
+       turns muted); the light half on white paper with black ink. -->
+  <colorScheme name="oled-blue" base="cobalt" label="Blue" tones="#2160d8 #2160d8 #2160d8 #2160d8 #2160d8"/>
+  <colorSchemes accents="oled-blue"/>
+  <colorScheme sel.text="#ffffff" light.sel.text="#ffffff" muted="#858585" light.paper="#ffffff" light.ink="#000000"/>
+  <option key="STATUSBAR" label="Status Bar" default="Theme" preset="Theme"><value label="Theme"/><value themes="picker"/></option>
+  <option setting="light" preset="off" keep="auto"/>
+  <option setting="accent" key="OLED_ACCENT" default="oled-blue" preset="oled-blue"/>
+  <option setting="home" preset="full"/>
+  <option setting="shortcut"/>
+  <option setting="battery" values="icon percent" default="icon"/>
+  <!-- The status row's title and clock: Inter Medium 15 (18 here); the slim battery and its play state, the
+       theme's own art -->
+  <view name="bar">
+    <element name="title" caps="0" font="inter-medium" font_size="18"/>
+    <element name="battery" painter="slim"/>
+  </view>
+  <!-- The type roles (oled-design.md Type): rows and values Inter Regular 20 (24), second lines 15 (18), the Now
+       Playing title Inter Medium 22 (27), small text 15 (18). The selection is the accent's flat bar, 16 px in
+       from each side with 8 px ends on every row, whatever Corners says. Each row that opens a page has the theme's
+       caret on the right column; a settings row's value is right-aligned there in Text Secondary (#5c5c5c on
+       paper). The scroll indicator: a 4 px track 72 px tall centred on the list (y 134 to 206), 5 px from the
+       edge, with its thumb, while the wheel turns. -->
+  <view name="list">
+    <element name="selection" painter="bar" inset="16" radius="8" fixed="1"/>
+    <element name="icons" mono="1" badge_muted="1" addon_mono="1"/>
+    <element name="row" font="inter" title_px="24" meta_font="inter" meta_px="18" tall_font="inter" tall_px="24"/>
+    <element name="chevron" painter="icon"/>
+    <element name="art" x="24" text_x="72" text_end="319" placeholder="40"/>
+    <!-- Divider (#222222, the light half's #e5e5e5) under each two-line row, on the text and right columns -->
+    <element name="divider" dark.ink="#222222" light.ink="#e5e5e5"/>
+    <element name="scrollbar" painter="wheel" w="4" right="5" top="134" bottom="206" min="8"
+             dark.thumb="#e5e5e5" light.thumb="#1a1a1a" dark.track="#3a3a3a" light.track="#c5c5c5"/>
+  </view>
+  <view name="settings"><element name="rows" top="0"/><element name="values" text="1" dark.ink="#ababab" light.ink="#5c5c5c"/></view>
+  <view name="home">
+    <element name="rows" top="0" text_x="24" full_row="375" font="inter" font_px="24" caps="0"/>
+    <element name="chevron" visible="1"/>
+  </view>
+  <view name="playing">
+    <element name="art" square="0"/>
+    <element name="title" font="inter-medium" font_px="27"/>
+    <element name="album" caps="0" opacity="255"/>
+    <element name="info" font="inter" font_size="18"/>
+  </view>
+  <!-- page_list's rows (the Library's Shuffle, Most Played, card apps...): the grid's 32 px rows, 52 with a detail,
+       at the text inset; the status row names the page, so no title row -->
+  <!-- Cover Flow in the 262 px window under the status row: the caption as low as the window lets it sit, the album
+       in the Song title role (22, 27 here) and the artist in the Artist role (18, 22 here) -->
+  <view name="coverflow"><element name="caption" name_px="27" artist_px="22" text_y="210" artist_y="22"/></view>
+  <view name="page">
+    <element name="rows" height="32" detail_height="52" text_x="24" title_y="4" title_h="24" detail_y="31" detail_h="20"/>
+    <element name="title" height="0"/>
+  </view>
+  <view name="pages"><element name="own" art_final="1"/></view>
 </theme>
