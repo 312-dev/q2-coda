@@ -2879,10 +2879,34 @@ static void covers(int dir) {
 
 static int playlists_again(const void *unused);
 static unsigned pl_again __attribute__((section(".scratch"))); /* playlists_again's own */
+/* A theme whose album tracks are one-line song rows (OLED's, list.songs.painter inline), its pages'
+ * titles in the bar: to_tracks lists Cover Flow's tracks that way. */
+static int song_tracks(void) {
+    return theme()->painter[PAINT_SONGS] == SONGS_INLINE && !theme()->page_title_h;
+}
+
+/* The bar's title on Cover Flow's page (navigation.c bar_title_of): 0 on song_tracks' tracks, whose
+ * hidden caption names the album; under a status row (status, the set's status_y) an artist's
+ * covers by the artist's name, as the artist page under them; else "Cover Flow". */
+const char *coverflow_bar_title(int status) {
+    if (cf.screen == TRACKS && !fl.panel && song_tracks()) return (const char *)0;
+    if (status && cf.screen == COVERS && cf.scoped == ARTIST_ALBUMS && cf.albums &&
+        deque_size(cf.albums))
+        return cover_artist(deque_at(cf.albums, 0));
+    return "Cover Flow";
+}
+
+/* The bar looks for its title again: the page's stays the bar's source until it goes. */
+static void retitle_bar(void) {
+    title_gone(0, 0);
+    bar_title_sync(cf.page);
+}
+
 static int to_covers(const void *unused) {
     cf.timer = 0;
     stop();
     covers(-1); /* the text list's only way back here is from its tracks */
+    retitle_bar();
     if (cf.scoped == PLAYLISTS) rearm(&pl_again, playlists_again, 0); /* edits from the panel */
     return 0;
 }
@@ -3380,6 +3404,36 @@ static int to_tracks(const void *unused) {
     for (int i = 0; i < n && !timed; ++i)
         timed = duration_seconds(deque_at(cf.tracks, (unsigned)i)) > 0;
     const char *title = P(r, cf.scoped == PLAYLISTS ? REC_TITLE : REC_ALBUM);
+    if (song_tracks()) {
+        /* one-line song rows, as an album opened from Albums: song_rows.c draws each track's
+         * number and length (song_list knows these by coverflow_tracks), and the album names the
+         * page in the bar (coverflow_bar_title), never a row of its own above the tracks,
+         * whatever its length */
+        void *view = page_list(cf.page, cf.body, 0, title, n, 48);
+        cf.title = widget_get_child(cf.body, 0); /* page_title's label, for page_retitle */
+        if (widget_get_visible(cf.title)) { /* wider than the bar's box: hidden all the same */
+            void *lv = P(view, W_PARENT);
+            int all = n * page_h(48), page = widget_get_prop_int(cf.page, "h", client_h()),
+                h = all < page ? all : page;
+            widget_set_visible(cf.title, 0, 0);
+            widget_move_resize(lv, 0, 0, I(lv, W_W), h);
+            widget_move_resize(view, 0, 0, I(view, W_W), h);
+        }
+        for (int i = 0; i < n; ++i) {
+            void *row = page_row_detail(
+                view, i, track_name(name, sizeof name, deque_at(cf.tracks, (unsigned)i)), 0, play);
+            /* as stock's rows: a long title rests on its ellipsis, scrolling only while selected
+             * (navigation.c's marquee), where song_row's narrower box would make text()'s loop
+             * scroll it on every row */
+            void *label = widget_get_child(row, 0);
+            widget_set_prop_int(label, "loop", 0);
+            hscroll_label_set_only_focus(label, 1);
+            hscroll_label_set_ellipses(label, 1);
+        }
+        retitle_bar();
+        page_push(view, cf.text_albums && cf.scoped == ARTIST_ALBUMS);
+        return 0;
+    }
     void *view = timed ? page_list(cf.page, cf.body, &cf.title, title, n, 64) : list(title, n);
     /* the album over its tracks, all centred, but under a theme's own rows */
     int centred = theme()->page_title_h;

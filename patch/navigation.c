@@ -184,6 +184,7 @@ int ringnav_content_query(const char *db, const char *sql, void *row, void *arg,
     return library_query(1, db, sql, row, arg, sort);
 }
 extern void *coverflow_tracks(void *page);
+extern const char *coverflow_bar_title(int status);
 extern int coverflow_jump(void *w, int from, int dir, unsigned *letter), coverflow_bounded(void *w),
     coverflow_slide(void *w);
 extern void coverflow_lost_touch(void), coverflow_wheel_land(void);
@@ -5903,8 +5904,9 @@ static void *page_caption(void *win) {
     return first;
 }
 
-/* The bar title for window win: Now Playing, Coverflow and EQ by name; else 0, and *label is
- * a stock page's (hidden) navbar title, else a payload page's 48 px caption row (page_title). */
+/* The bar title for window win: Now Playing and EQ by name, Coverflow by its screen
+ * (coverflow_bar_title); else 0, and *label is a stock page's (hidden) navbar title, else a payload
+ * page's 48 px caption row (page_title). */
 static const char *bar_title_of(void *win, void **label) {
     const char *name = widget_get_prop_str(win, "name", "");
     /* a status row shows the clock on Now Playing (tools/ipod.py status_row) */
@@ -5915,7 +5917,11 @@ static const char *bar_title_of(void *win, void **label) {
     if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "localmusic_page")) return "Library";
     if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "allmusic_page") && I(g_class_type, 0) == 0xf001)
         return "Songs";
-    if (!tk_strcmp(name, "coverflow_page")) return "Cover Flow";
+    if (!tk_strcmp(name, "coverflow_page")) { /* its screen's own, else its caption row's */
+        const char *t = coverflow_bar_title(geom_val(V_STATUS_Y));
+        if (!t) *label = page_caption(win);
+        return t;
+    }
     if (!tk_strcmp(name, "equalizer_page")) return "EQ"; /* its 48 px row is the tabs' own label */
     if (!tk_strcmp(name, "spotify_page")) return "Spotify"; /* they hide their own name's label */
     if (!tk_strcmp(name, "radionp_page")) return "Internet Radio";
