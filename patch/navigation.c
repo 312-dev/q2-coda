@@ -11213,13 +11213,10 @@ static int tick_gate(void *e) {
     if (Q2POD_DEV && !muted) wheel_gate_note();
     return 1;
 }
-/* A wheel tick's step of the volume, as stock's dialog makes it (volume_dialog_on_keyup): within 0
- * and the volume limit, set and saved. */
+/* A wheel tick's step of the volume, as stock's dialog makes it (volume_dialog_on_keyup, and
+ * vol_next's steps at the wheel's speed): within 0 and the volume limit, set and saved. */
 static void vol_step(unsigned key) {
-    int value = g_volume + (key == KEY_NEXT ? 1 : -1);
-    if (value < 0) value = 0;
-    if (value > g_maxvolume) value = g_maxvolume;
-    if (value > 100) value = 100;
+    int value = vol_next(key);
     if (value == g_volume) return;
     g_volume = value;
     device_set_volume(value, 1);

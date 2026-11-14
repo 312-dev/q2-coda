@@ -1229,8 +1229,8 @@ class Wheel:
         self.now = 100000
         fw.mock('time_now_ms', lambda *_: self.now)
 
-    def touch(self, x, pressure=1, ret=1):
-        s = (C.c_int * 6)(x, 0, pressure)
+    def touch(self, x, pressure=1, ret=1, tv=()):
+        s = (C.c_int * 6)(x, 0, pressure, *tv)
         self.sample(s, ret, self.info)
         return s[0]
 
@@ -1327,6 +1327,103 @@ def test_wheel_lift_ends_the_touch(fw):
     assert wheel.lift(77) == 0  # lifted already: stock sees 0, as it sees after its own lift
     wheel.touch(140), wheel.touch(160)
     assert wheel.ticks() == []  # the carry went with the touch
+
+
+# The wheel's speed (wheel_speed_sample): Rockbox's iPod average, degrees a second, as each tick is posted.
+def spin(wheel, x, units, ms, samples):
+    """samples of units travel each, ms apart (x rising: back): the last x."""
+    for _ in range(samples):
+        wheel.now += ms
+        x += units
+        wheel.touch((x - 1) % 200 + 1)
+    return x
+
+
+def model(units, ms, samples):
+    """The average the C keeps, in floats: a click of 15 degrees (133 sixteenths of a unit) timed at a time,
+    weighing its travel against 15 clicks', as Rockbox's (15 v + new) / 16."""
+    v, moved, t = 0.0, 0, 0
+    for _ in range(samples):
+        moved, t = moved + abs(units) * 16, t + ms
+        if moved >= 133:
+            v += (moved * 112.5 / t - v) * moved / (15 * 133 + moved)
+            moved = t = 0
+    return v
+
+
+@in_fork
+@pytest.mark.parametrize('units, ms', [(3, 10), (1, 10), (6, 16)])
+def test_wheel_speed_is_rockboxs_average_of_the_spin(fw, units, ms):
+    wheel = Wheel(fw)
+    speed = fw.var('wheel_speed', C.c_int)
+    spin(wheel, wheel.touch(100), units, ms, 800 // units)  # timed from the touch-down
+    assert wheel.ticks()  # published with each tick
+    want = model(units, ms, 800 // units)
+    assert abs(speed.value - want) <= max(4, want * .02), (speed.value, want)
+    assert want > .99 * units * 1.8 * 1000 / ms  # four turns: settled on the spin's own speed
+
+
+@in_fork
+def test_wheel_speed_is_timed_by_the_samples_stamps(fw):
+    """A busy UI has this thread read samples late and in bunches: their kernel stamps (tv) keep the pace."""
+    wheel = Wheel(fw)
+    speed = fw.var('wheel_speed', C.c_int)
+    x, stamp = 100, 1_000_000
+    wheel.touch(x, tv=(stamp // 1000, stamp % 1000 * 1000))
+    for i in range(266):
+        wheel.now += 46 if i % 5 == 0 else 1  # read five at a time, a millisecond apart
+        x, stamp = x + 3, stamp + 10
+        wheel.touch((x - 1) % 200 + 1, tv=(stamp // 1000, stamp % 1000 * 1000))
+    want = model(3, 10, 266)
+    assert abs(speed.value - want) <= want * .02, (speed.value, want)
+
+
+@in_fork
+def test_wheel_speed_builds_over_the_first_turn(fw):
+    wheel = Wheel(fw)
+    speed = fw.var('wheel_speed', C.c_int)
+    x = wheel.touch(100)
+    seen = []
+    for _ in range(10):
+        x = spin(wheel, x, 3, 10, 7)
+        seen.append(speed.value)
+    assert seen == sorted(seen) and seen[0] < 200 < 400 < seen[-1] < 540  # 540 deg/s, the fourth power's ramp
+
+
+@in_fork
+@pytest.mark.parametrize('how', ['pause', 'reversal', 'lift'])
+def test_wheel_speed_starts_again_from_rest(fw, how):
+    wheel = Wheel(fw)
+    speed = fw.var('wheel_speed', C.c_int)
+    x = spin(wheel, wheel.touch(100), 3, 10, 200)
+    assert speed.value > 500
+    if how == 'pause':
+        wheel.now += O['WHEEL_SPEED_IDLE_MS']
+        wheel.touch((x - 1) % 200 + 1)
+    elif how == 'lift':
+        wheel.lift(x)
+        wheel.now += 20
+        x = wheel.touch(100)
+    if how == 'reversal':
+        x = spin(wheel, x, -3, 10, 1)
+        x = spin(wheel, x, -3, 10, 10)
+    else:
+        x = spin(wheel, x, 3, 10, 1)
+        x = spin(wheel, x, 3, 10, 10)
+    assert wheel.ticks() and speed.value <= model(3, 10, 11) + 4  # a tick since: from rest, the pace kept
+
+
+@in_fork
+def test_wheel_speed_stays_with_the_last_tick_after_a_lift(fw):
+    """The UI loop takes a tick a pass or a lift after it was posted: it reads the speed it was posted at."""
+    wheel = Wheel(fw)
+    speed = fw.var('wheel_speed', C.c_int)
+    x = spin(wheel, wheel.touch(100), 3, 10, 200)
+    at = speed.value
+    wheel.lift(x)
+    wheel.now += 1000
+    wheel.touch(50)
+    assert speed.value == at > 500
 
 
 @in_fork
