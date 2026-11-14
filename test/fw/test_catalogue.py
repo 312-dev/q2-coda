@@ -925,7 +925,7 @@ def test_now_playing_shows_a_pressed_server_song_until_the_player_parses_one(rig
     assert status == [1]  # then it stops
     r, *place = shown()
     assert place == [1, 3, 'file:///mnt/mmc/.subsonic/covers/al2.jpg']
-    assert C.string_at(C.c_void_p.from_address(r + O['REC_PATH']).value) == url('s2', 'al2').encode()
+    assert C.c_char_p.from_address(r + O['REC_PATH']).value == url('s2', 'al2').encode()
     # its title and artist, as the pressed row has them (the title's host pointer overlaps the path's,
     # which is not read again)
     tags = [C.create_string_buffer(t) for t in (b'Streamed', b'Band')]
