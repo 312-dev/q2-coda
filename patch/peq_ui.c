@@ -687,8 +687,9 @@ static int render(const void *unused) {
     int selection = 0, offset = 0;
     int height = widget_get_prop_int(ui.page, "h", 320), graph = ui.screen == HOME || ui.screen == BAND;
     int head = graph * graph_head(), rh = page_h(48);
-    /* Whole rows only, so the last row is never clipped. */
-    int rows = (height - 48) / rh * rh;
+    /* Whole rows only, so the last row is never clipped; a set_switch theme's end above the bottom
+     * corners' glass, as its other lists do (list_end) */
+    int rows = ((eq_rows() ? eq_list_end() : height) - 48) / rh * rh;
     if (ui.view && ui.rendered == ui.screen) {
         selection = widget_get_prop_int(ui.view, "_ringnav_index", 0);
         offset = widget_get_prop_int(ui.view, "yoffset", 0);

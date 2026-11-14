@@ -545,6 +545,7 @@ typedef struct {
 } eq_rows_t;
 void lock_grid(void *view); /* settings_pages.c: Lock Screen's pictures on a set_switch theme */
 int eq_rows(void);
+int eq_list_end(void); /* the page's rows end here (the set's list_end) */
 void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e);
 void eq_tabs_paint(void *w, void *canvas, int simple, int focus);
 int ipod_battery(void);    /* theme_engine.c: IPOD BATTERY, 0 Icon, else a percentage */

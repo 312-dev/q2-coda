@@ -225,6 +225,7 @@ void slider_page_paint(void *w, void *canvas) {
 #define EQ_KNOB_RING 2
 #define EQ_LINE 4
 int eq_rows(void) { return theme()->set_switch; }
+int eq_list_end(void) { return geom_val(V_LIST_END); }
 
 static void eq_ink_text(void *canvas, const char *s, int x, int w, int y, int align, int px,
                         unsigned rgb) {
