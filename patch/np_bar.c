@@ -260,6 +260,29 @@ int ipod_bar(void *canvas, int x, int y, int bw, int on, int mark) {
     return 1;
 }
 
+/* Now Playing's bar between the player's whole seconds (docs/internals.md#now-playing-ipod): stock
+ * sets the slider's value once a second, so the fill stepped a second's width at a time. While
+ * playing, outside a scrub, it runs on from the value by the time since that changed, at most a
+ * second, so it never goes back; bar_glide repaints the slider each time that moves it a pixel.
+ * Classic's bar is ipod_bar's, drawn at that fill; the others' is stock's slider, whose fill is
+ * drawn again to it over stock's, in np_fill's colour, bar_size high with np_theme's round ends. */
+#define GLIDE_MIN_MS 33 /* the fastest repaint, about 30 a second */
+static int bar_glide(const void *info) {
+    (void)info;
+    st.np_glide_timer = 0;
+    if (st.np_slider) widget_invalidate_force(st.np_slider, (void *)0);
+    return 0; /* one shot: the paint arms the next */
+}
+/* ms the fill has run on past the slider's value v, which is the playing track's */
+static int glide_ms(int v, int playing) {
+    unsigned now = (unsigned)time_now_ms();
+    if (v != st.np_glide_v || !playing || !st.np_glide_play)
+        st.np_glide_v = v, st.np_glide_at = now;
+    st.np_glide_play = playing;
+    unsigned ms = now - st.np_glide_at;
+    return ms > 1000 ? 1000 : (int)ms;
+}
+
 /* Classic's progress bar over stock's plain one, centred in the slider as stock's, the scrub's cue
  * on it while a scrub runs; the times sit beside it (tools/ipod.py np_ipod). */
 void paint_scrubber(void *w, void *canvas) {
@@ -269,7 +292,24 @@ void paint_scrubber(void *w, void *canvas) {
     int bw = I(w, W_W), lo = widget_get_prop_int(w, "min", 0),
         n = widget_get_prop_int(w, "max", 100) - lo,
         v = clamp_step(0, n, widget_get_prop_int(w, "value", 0) - lo);
-    ipod_bar(canvas, 0, (I(w, W_H) - theme()->np_bar) / 2, bw, n > 0 ? bw * v / n : 0, st.scrub);
+    int playing = !st.scrub && n > 0 && v < n && mclGetPlayStatus() == 2,
+        fill = n > 0 ? (bw * v + bw * glide_ms(v, playing) / 1000) / n : 0;
+    if (fill > bw) fill = bw;
+    if (!ipod_bar(canvas, 0, (I(w, W_H) - theme()->np_bar) / 2, bw, fill, st.scrub) && n > 0 &&
+        fill > bw * v / n) {
+        int h = widget_get_prop_int(w, "bar_size", theme()->np_bar);
+        rect_t r = { 0, (I(w, W_H) - h) / 2, fill, h };
+        unsigned saved = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+        fill_box(canvas, &r, RGBA(accent_tone(TONE_LIGHT)), (unsigned)h / 2);
+        stock_canvas_set_fill_color(canvas, saved);
+    }
+    if (playing && !st.np_glide_timer) {
+        int per_px = n * 1000 / (bw > 0 ? bw : 1);
+        st.np_glide_timer = timer_add(bar_glide, (void *)0,
+                                      per_px < GLIDE_MIN_MS ? GLIDE_MIN_MS
+                                      : per_px > 1000       ? 1000
+                                                            : per_px);
+    }
 }
 
 /* The rows painter's bar (the volume panel, a card app's progress): the track's rows, then the

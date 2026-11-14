@@ -243,6 +243,10 @@ typedef struct {
     unsigned np_marquee;
     unsigned np_remain_timer; /* remain_due */
     unsigned np_fit_timer;    /* np_fit_due */
+    /* np_bar.c paint_scrubber's glide: the slider value it runs on from, since when, whether it was
+     * playing, and its repaint */
+    int np_glide_v, np_glide_play;
+    unsigned np_glide_at, np_glide_timer;
     /* Classic's Spotify or Internet Radio Now Playing (stream_ipod): its slanted art's widget, and
      * the radio's bar, always full */
     void *stream_art, *stream_bar;
