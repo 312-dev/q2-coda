@@ -36,6 +36,8 @@ class Q2:
         fw.mock('ringnav_statx', self.statx)
         fw.mock('stock_wifi_transfer_trampoline', self.stock_switch)
         fw.mock('stock_wifi_transfer_page_trampoline', self.stock_page)
+        self.name = C.create_string_buffer(b'wifitransport_page')
+        self.ip = (C.c_char * 0x400)()  # img_wifitransport's widget: zeroed, its parent read through P()
         fw.mock('window_manager', lambda *_: WM)
         fw.mock('widget_count_children', lambda w, *_: 1 if w == WM and self.page_open else 0)
         fw.mock('widget_get_child', lambda *_: PAGE)
@@ -44,8 +46,6 @@ class Q2:
         fw.mock('window_close', self.close)
         fw.mock('widget_lookup', lambda w, n, *_: C.addressof(self.ip) if s(n) == 'img_wifitransport' else 0)
         fw.mock('widget_set_text_utf8', lambda w, t, *_: self.texts.__setitem__(w, s(t)))
-        self.name = C.create_string_buffer(b'wifitransport_page')
-        self.ip = (C.c_char * 0x400)()  # img_wifitransport's widget: zeroed, its parent read through P()
 
     # the stock side
     def stock_switch(self, on, *_):
@@ -165,8 +165,7 @@ def start(fw, **kw):
 def test_a_session_is_written_before_the_server_starts_and_shown(fw):
     q = Q2(fw)
     seen = []
-    q.stock_switch = lambda on, *_: seen.append(dict(q.session())) or 1
-    fw.mock('stock_wifi_transfer_trampoline', q.stock_switch)
+    fw.mock('stock_wifi_transfer_trampoline', lambda on, *_: seen.append(dict(q.session())) or 1)
     fw.mock('hscroll_label_create', lambda parent, x, y, *_: PARENT + y)
     q.page_init(PAGE, 0)
     first = seen[0]

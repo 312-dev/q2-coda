@@ -167,6 +167,16 @@ Q2_FW_STRICT=1 python3 -m pytest test/fw    # fail a test that reaches a stub to
 - **A known bug** stays as `@pytest.mark.xfail(strict=True, reason='BUG: ...')`: the test fails the job as soon as the bug is fixed, until the mark goes.
 - **Limits:** the code runs 64-bit, so `long` and pointers are wider than on the Q2, and stock widgets' layouts don't hold. Code that depends on those stays with `test/patch.py`. `peq_player.c`, `mp3_gapless.c` and the FLAC paths are the player's, tested by `test/peq.py`, `test/mp3_gapless.py` and the `test/flac_*.py` scripts.
 
+## Formatting
+
+```sh
+./tools/format.sh          # clang-format 18 over the payload's C, prettier over the Markdown
+./tools/format.sh --check  # the same files: changes nothing, exits non-zero on drift
+CLANG_FORMAT='uvx --quiet --from clang-format==18.1.8 clang-format' PRETTIER='npx --yes prettier@3' ./tools/format.sh --check
+```
+
+The C is `NAVIGATION` (`tools/build.py`) and `UI_SOURCES` (`tools/peq.py`), but the files `UNFORMATTED` beside it names, and the headers `tools/format.sh` lists. `UNFORMATTED` holds upstream's files that were written before the formatter and are kept as upstream writes them, so merges of them stay clean, and the vendored `patch/monocypher/`; a new file is formatted unless it is added there. `CLANG_FORMAT` and `PRETTIER` name the commands where neither is installed. No workflow runs it.
+
 ## Type check
 
 `.github/workflows/types.yml` runs [mypy](https://mypy-lang.org) over `tools/`, `test/unit` and `test/fw` on every pull request and push to `main`. Few functions carry annotations, so mypy checks the bodies of unannotated ones too (`check_untyped_defs` in `pyproject.toml`): a misspelt name, a wrong argument count, a `None` used as a value, bytes for a str.

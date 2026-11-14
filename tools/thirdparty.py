@@ -212,7 +212,7 @@ MBEDTLS_UNSET = '''
 
 
 def build_mbedtls(src, stage, env, log):
-    # A static, position-independent library linked into libcurl only (docs/third-party.md#curl).
+    # A static, position-independent library linked into libcurl only (docs/third-party.md#curl-and-mbedtls).
     # Without MBEDTLS_HAVE_TIME_DATE no certificate's dates are checked: the Q2's clock may be unset
     # or years off, and past 2038 its 32-bit time wraps.
     for option in MBEDTLS_UNSET:

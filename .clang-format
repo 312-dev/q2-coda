@@ -1,5 +1,10 @@
 # C style for the firmware patch, tuned to the existing patch/navigation.c layout:
-# 4-space indent, 100 columns, right-aligned pointers, one-line guards.
+# 4-space indent, 100 columns, right-aligned pointers, one-line guards. The tree is formatted
+# with clang-format 18.
+#
+# tools/format.sh formats tools/build.py's NAVIGATION, tools/peq.py's UI_SOURCES but the files
+# its UNFORMATTED names (upstream's, written before this file, kept as upstream writes them), and
+# the headers it names. The vendored patch/monocypher/ is never formatted.
 #
 # Do not run clang-format on patch/trampoline.S, patch/link.ld or patch/contexts.inc:
 # it cannot parse GAS or linker scripts, and it packs contexts.inc onto few lines.

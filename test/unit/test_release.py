@@ -165,8 +165,8 @@ def repo(tmp_path, monkeypatch):
 
 
 class Packaging:
-    def __init__(self, monkeypatch, sources=('source',) * 2, revisions=('rev',) * 2, status='', repeat=b'tar'):
-        self.calls, self.builds, self.validated, self.scripts = [], [], [], []
+    def __init__(self, monkeypatch, sources=('source',) * 2, revisions=('rev',) * 2, status='', repeat=b'tar', sites=0):
+        self.calls, self.builds, self.validated, self.scripts, self.sites = [], [], [], [], []
         sources, revisions = iter(sources), iter(revisions)
         def run(*args):
             self.calls.append(args)
@@ -175,7 +175,10 @@ class Packaging:
             self.builds.append((stock, directory, logo))
             directory.mkdir()
             (directory/'update.tar').write_bytes(repeat if directory.name.endswith('-repeat') else b'tar')
-        def script(args, check):
+        def script(args, check=False):
+            if args[1] == '-I':  # sitenotes.py --check
+                self.sites.append(args)
+                return subprocess.CompletedProcess(args, sites)
             self.scripts.append((args, check))
             pathlib.Path(args[2]).write_bytes(b'%PDF')
         monkeypatch.setattr(release, 'run', run)
@@ -194,6 +197,7 @@ def test_package(repo, monkeypatch, tmp_path, capsys):
     logo = repo/'assets/boot-logo.jpg'
     assert p.builds == [(pathlib.Path('stock.zip'), out/'build', logo), (pathlib.Path('stock.zip'), out/'build-repeat', logo)]
     assert p.validated == [out/'build']
+    assert p.sites == [[release.sys.executable, '-I', repo/'docs/rebasing/sitenotes.py', pathlib.Path('stock.zip'), '--check']]
     assert (out/release.ASSET).read_bytes() == b'tar'
     assert p.scripts == [([release.sys.executable, str(repo/'docs/manual/build.py'), str(out/release.GUIDE)], True)]
     assert (out/'SHA256SUMS').read_text() == f'{sha(b"tar")}  update.tar\n'
@@ -212,6 +216,14 @@ def test_package_wants_a_signed_app_list(repo, monkeypatch, tmp_path):
     with pytest.raises(ValueError, match='^sources.list is not signed by the release key'):
         release.package(pathlib.Path('stock.zip'), tmp_path/'out')
     assert not (tmp_path/'out').exists() and not p.builds
+
+
+def test_package_wants_current_stock_sites(repo, monkeypatch, tmp_path):
+    # checked against the stock ZIP before anything is built or written
+    p = Packaging(monkeypatch, sites=1)
+    with pytest.raises(ValueError, match='^' + re.escape("tools/stock_sites.tsv is not current: run python3 -I docs/rebasing/sitenotes.py 'stock.zip' and commit it") + '$'):
+        release.package(pathlib.Path('stock.zip'), tmp_path/'out')
+    assert len(p.sites) == 1 and not (tmp_path/'out').exists() and not p.builds
 
 
 def test_package_wants_a_fresh_directory(repo, monkeypatch, tmp_path):
