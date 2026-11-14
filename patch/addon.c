@@ -222,6 +222,31 @@ static void launch(app_t *a) {
     system(a->run); /* exits at once when the app runs already */
 }
 
+/* The server library's play hand-off (catalogue.c catalogue_load, docs/server-library.md): app id
+ * started in the background when it isn't running, as its Streaming row starts it, so a .catplay
+ * pressed on the Library is answered without the app opened since boot, or after its own idle
+ * exit. The capability line is written first (addon_scan, as Streaming's page does, once the
+ * app is found): the app reads it once, at its start. 0: it runs, and reads a catplay now; 1: started, and reads one once
+ * its socket is there (addon_ready: it reads the catplay file at its start, as one answered, and
+ * makes its socket after that); -1: it can't start (not on the card, or the Apps page replacing
+ * its files). A socket a killed app left is removed first, so it is not taken for the new one's. */
+int addon_wake(const char *id) {
+    app_t *a = valid_id(id) ? slot(id) : 0;
+    if (a && !a->present) addon_scan();
+    if (!a || !a->present) return -1;
+    if (!access(a->pid, 0)) {
+        if (!a->launched) a->launched = 1, a->launch_at = time_now_ms(); /* its .play polled */
+        return 0;
+    }
+    unlink(a->browse);
+    launch(a);
+    return a->launched ? 1 : -1;
+}
+int addon_ready(const char *id) {
+    app_t *a = valid_id(id) ? slot(id) : 0;
+    return a && !access(a->browse, 0);
+}
+
 /* Stream mode (q2-deezer's stream.go): an app's /tmp/q2-<id>.play holds "<seq> <folder>", a hidden
  * card folder it fills with a list's songs, named in play order ("01 - Title [id].flac"), as they
  * download. A new one is played from its first song once one is there (the folder's songs in name

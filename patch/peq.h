@@ -374,6 +374,9 @@ int card_path(const char *path); /* on the card, no ".." segment: what an app or
 int addon_is_icon(const char *name); /* a card app's Streaming icon, by its file:// name */
 void addon_poll(void), addon_stop(void), addon_paint(void *w, void *canvas), addon_card_away(void);
 void addon_forget(const char *dir), addon_quit(const char *dir);
+/* addon.c: a catalogue app started for a catplay (0 running, 1 started, -1 can't), and whether a
+ * started one reads it yet */
+int addon_wake(const char *id), addon_ready(const char *id);
 /* addon.c's card games (q2app game=1), Games' rows after its own: how many (a scan), one's name,
  * its start over the screen (1 when it runs), whether one runs, and ringnav_input's events for it */
 int addon_games(void), addon_game_start(int k), addon_game_on(void);

@@ -415,8 +415,15 @@ def test_offline_a_list_plays_its_card_rows_and_copies_and_shuffle_leaves_the_re
     assert load(rig, queue(rig, ['/mnt/mmc/Music/a.flac']), 0) == (0, 0, None)
 
 
+def app_running(rig):
+    """The catalogue app on the card and running: its binary, and its launcher's pid file."""
+    rig.files.files[f'/mnt/mmc/.{APP}/q2-{APP}'] = b''
+    rig.files.files[f'/tmp/q2-{APP}'] = b'42'
+
+
 def test_online_a_list_is_handed_to_the_app_and_played_offline_if_it_does_not_answer(rig):
     rig.online = True
+    app_running(rig)
     rig.write(1, [song_row('s1', 'Cached', 'B', 'A', 1, 100, 1, local='/mnt/mmc/.subsonic/stream/s1.flac'),
                   song_row('s2', 'Streamed', 'B', 'A', 2, 100, 2)])
     rig.poll()
@@ -433,6 +440,66 @@ def test_online_a_list_is_handed_to_the_app_and_played_offline_if_it_does_not_an
     rig.files.files[f'/tmp/q2-{APP}.play'] = b'2 /mnt/mmc/.subsonic/queue.m3u'
     rig.poll(5)
     assert len(rig.played) == 1
+
+
+def test_a_catalogue_app_not_running_is_started_and_handed_the_list_once_it_listens(rig, fw):
+    """After a boot, or the app's own idle exit, nothing answers a catplay: the press starts the app, as its
+    Streaming row does (the capability line written first, which it reads at its start), and the catplay is
+    written once its socket is there (it takes a catplay present at its start as answered); the 4 s wait
+    runs from then. An app that never listens: the list plays offline CATPLAY_START_MS on."""
+    rig.online = True
+    rig.write(1, [song_row('s1', 'Cached', 'B', 'A', 1, 100, 1, local='/mnt/mmc/.subsonic/stream/s1.flac'),
+                  song_row('s2', 'Streamed', 'B', 'A', 2, 100, 2)])
+    rig.poll()
+    rig.files.files[f'/mnt/mmc/.{APP}/q2-{APP}'] = b''
+    sock, catplay = f'/tmp/q2-{APP}.browse.sock', f'/tmp/q2-{APP}.catplay'
+    rig.files.files[sock] = b''  # a killed app's
+    started = []
+    fw.mock('fw_system', lambda cmd, *_: started.append(C.string_at(cmd)) or 0)
+    q = queue(rig, ['/mnt/mmc/Music/a.flac', url('s2'), url('s1')])
+    assert load(rig, q, 1)[0] == 2
+    assert started == [f'/bin/sh /mnt/mmc/.{APP}/run'.encode()] and b'catalogue' in rig.files.files['/tmp/q2-addon.caps']
+    assert catplay not in rig.files.files and sock not in rig.files.files
+    rig.poll(6)  # 6.6 s starting: no catplay yet, and nothing played meanwhile
+    assert catplay not in rig.files.files and not rig.played
+    rig.files.files[f'/tmp/q2-{APP}'] = b'42'
+    rig.files.files[sock] = b''  # it listens
+    rig.poll(1)
+    assert rig.files.files[catplay] == f'1 1\n/mnt/mmc/Music/a.flac\n{url("s2")}\n{url("s1")}\n'.encode()
+    rig.files.files[f'/tmp/q2-{APP}.play'] = b'1 /mnt/mmc/.subsonic/queue.m3u'  # answered
+    rig.poll(5)
+    assert not rig.played and len(started) == 1
+    # running now: the next press writes its catplay at once, starting nothing
+    assert load(rig, q, 2)[0] == 2 and rig.files.files[catplay].startswith(b'2 2\n') and len(started) == 1
+    rig.files.files[f'/tmp/q2-{APP}.play'] = b'2 /mnt/mmc/.subsonic/queue.m3u'
+    rig.poll(1)
+    # its idle exit: started again by the next press; one that never listens plays offline
+    del rig.files.files[f'/tmp/q2-{APP}'], rig.files.files[sock]
+    assert load(rig, q, 1)[0] == 2 and len(started) == 2
+    rig.poll(13)  # 14.3 s
+    assert not rig.played
+    rig.poll(1)
+    assert rig.played == [(['/mnt/mmc/Music/a.flac'.encode(), b'/mnt/mmc/.subsonic/stream/s1.flac'], 1)]
+    assert rig.files.files[catplay].startswith(b'2 2\n')  # never written for it
+
+
+@pytest.mark.parametrize('case', ['offline', 'local only', 'no app'])
+def test_no_app_is_started_offline_with_local_only_or_without_a_catalogue_app(rig, fw, case):
+    """Offline the list plays from the card at once, Local only refuses a server row, and a catalogue app whose
+    binary is not on the card is never started (its catplay goes unanswered, as before)."""
+    rig.online = case != 'offline'
+    rig.write(1, [song_row('s1', 'Cached', 'B', 'A', 1, 100, 1, local='/mnt/mmc/.subsonic/stream/s1.flac')])
+    rig.poll()
+    if case != 'no app':
+        rig.files.files[f'/mnt/mmc/.{APP}/q2-{APP}'] = b''
+    if case == 'local only':
+        fw.var('catalogue_source', C.c_int).value = rig.source = 0  # pod_click's change, then its call
+        fw.fn('catalogue_changed', None)()
+    started = []
+    fw.mock('fw_system', lambda cmd, *_: started.append(C.string_at(cmd)) or 0)
+    load(rig, queue(rig, [url('s1')]), 0)
+    rig.poll(2)
+    assert not started
 
 
 def test_ratings_in_are_applied_unless_the_q2_s_own_change_is_newer(rig, fw):

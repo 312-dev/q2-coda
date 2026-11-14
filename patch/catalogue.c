@@ -18,8 +18,9 @@
  * offline copy), which the swap takes.
  *
  * On the UI thread: availability (an offline copy, or online: Wi-Fi up and the app's server=up),
- * catalogue.avail's changes to it, greyed rows, the play hand-off (catplay), the offline queue,
- * and the ratings channel (ratings.out, ratings.in). */
+ * catalogue.avail's changes to it, greyed rows, the play hand-off (catplay, its app started when
+ * it isn't running: addon.c addon_wake), the offline queue, and the ratings channel (ratings.out,
+ * ratings.in). */
 #include "navigation.h"
 
 #define CAT_DIR "/mnt/mmc/.q2pod"
@@ -34,11 +35,12 @@
 #define CAT_BATCH 64      /* rows per insert statement */
 #define CAT_SQL (CAT_BATCH * 2600)
 #define CATPLAY_WAIT_MS 4000
-#define CATPLAY_SHOW_MS 60000 /* Now Playing shows a pressed server song this long at most */
-#define CAT_GREY 0x666666     /* an unavailable row's text */
-#define CAT_DIM 0xb3          /* on the selection: its own ink at this alpha (70%) */
-#define CAT_GREY_ROWS 48      /* bound rows of stock's pooled tables, more than a screen holds */
-#define CAT_PLAYLISTS 100     /* stock's playlist headers are ids 0 to 99 */
+#define CATPLAY_START_MS 15000 /* a catalogue app started for a catplay has this long to listen */
+#define CATPLAY_SHOW_MS 60000  /* Now Playing shows a pressed server song this long at most */
+#define CAT_GREY 0x666666      /* an unavailable row's text */
+#define CAT_DIM 0xb3           /* on the selection: its own ink at this alpha (70%) */
+#define CAT_GREY_ROWS 48       /* bound rows of stock's pooled tables, more than a screen holds */
+#define CAT_PLAYLISTS 100      /* stock's playlist headers are ids 0 to 99 */
 
 int catalogue_source __attribute__((section(".scratch"))); /* LIBRARYSOURCE: 1 Local + Server */
 
@@ -108,9 +110,10 @@ static struct {
         grey_ink[CAT_GREY_ROWS]; /* each greyed row's text colour as last painted, for its mark */
     unsigned ngrey;
     int fitted; /* a greyed row's labels were narrowed (catalogue_fit) since the Q2 started */
-    /* a catplay sent: its app, when, and the list to play offline if no answer comes */
+    /* a catplay sent: its app, when, and the list to play offline if no answer comes; cp_wake:
+     * when its app was started for it, the catplay not written until the app listens */
     int cp_app;
-    unsigned cp_at, cp_seq;
+    unsigned cp_at, cp_seq, cp_wake;
     void *cp_list;
     int cp_start;
     /* Now Playing's song from a press until the player parses one (catalogue_np_now): its record
@@ -1667,6 +1670,7 @@ const char *catalogue_np_cover(void) {
     return catalogue_np_now(&at, &n) ? cat.np_cover : 0;
 }
 
+static int catplay_send(void);
 /* ringnav_load's: 0 when q has no server row (stock loads it as it is). Otherwise 1 with *own the
  * queue to load instead (offline: card rows and copies, playback.c destroys it), or 2: nothing to
  * load now (sent to the app, or nothing playable, said in a toast). */
@@ -1688,17 +1692,19 @@ int catalogue_load(void *q, int *at, void **own) {
         if (catalogue_path(p)) slot = cat_app_of(p);
     }
     if (catalogue_on() && cat_online() && slot >= 0 && !cat.app[slot].down) {
-        unsigned before = play_hash(slot);
-        if (catplay_write(slot, q, *at)) {
-            if (cat.cp_list) deque_destroy(cat.cp_list);
-            cat.cp_list = _create_deque("stSongInfo");
-            deque_init(cat.cp_list);
-            deque_assign(cat.cp_list, q);
-            cat.cp_start = *at, cat.cp_app = slot, cat.cp_at = time_now_ms() | 1;
-            cat.app[slot].play = before;
+        /* its app started first when it isn't running (after a boot, or its idle exit) */
+        int woke = addon_wake(cat.app[slot].id);
+        if (cat.cp_list) deque_destroy(cat.cp_list);
+        cat.cp_list = _create_deque("stSongInfo");
+        deque_init(cat.cp_list);
+        deque_assign(cat.cp_list, q);
+        cat.cp_start = *at, cat.cp_app = slot, cat.cp_at = cat.cp_wake = 0;
+        if (woke == 1) cat.cp_wake = time_now_ms() | 1; /* written once it listens */
+        if (cat.cp_wake || catplay_send()) {
             np_press(q, *at);
             return 2;
         }
+        deque_destroy(cat.cp_list), cat.cp_list = 0;
     }
     *own = cat_offline(q, at);
     if (!*own) {
@@ -1707,26 +1713,46 @@ int catalogue_load(void *q, int *at, void **own) {
     }
     return 1;
 }
-/* A catplay unanswered for CATPLAY_WAIT_MS: its list played offline. One answered: done, the
- * app's .play plays through addon.c's stream_poll. */
-static void catplay_poll(void) {
-    if (!cat.cp_at) return;
+/* The catplay pending, cp_list from cp_start, written for cp_app; its wait begins. 0 when it
+ * couldn't be written. */
+static int catplay_send(void) {
     int slot = cat.cp_app;
-    if (slot < cat.napps && play_hash(slot) != cat.app[slot].play) {
-        cat.cp_at = 0;
-    } else if (time_now_ms() - cat.cp_at >= CATPLAY_WAIT_MS) {
-        cat.cp_at = 0;
-        int at = cat.cp_start;
-        void *own = cat_offline(cat.cp_list, &at);
-        if (own) {
-            play_folder(own, at, 0xf001);
-            deque_destroy(own);
-        } else {
-            np_done();
-            toast("Not available offline");
-        }
+    unsigned before = play_hash(slot);
+    if (!catplay_write(slot, cat.cp_list, cat.cp_start)) return 0;
+    cat.app[slot].play = before;
+    cat.cp_at = time_now_ms() | 1;
+    return 1;
+}
+/* The pending list played by the firmware, from card rows and offline copies. */
+static void catplay_offline(void) {
+    int at = cat.cp_start;
+    void *own = cat_offline(cat.cp_list, &at);
+    if (own) {
+        play_folder(own, at, 0xf001);
+        deque_destroy(own);
+    } else {
+        np_done();
+        toast("Not available offline");
     }
-    if (!cat.cp_at && cat.cp_list) deque_destroy(cat.cp_list), cat.cp_list = 0;
+}
+/* An app started for a catplay: the catplay written once it listens, the list played offline if
+ * it doesn't within CATPLAY_START_MS. A catplay unanswered for CATPLAY_WAIT_MS: its list played
+ * offline. One answered: done, the app's .play plays through addon.c's stream_poll. */
+static void catplay_poll(void) {
+    int slot = cat.cp_app;
+    if (cat.cp_wake && slot < cat.napps && addon_ready(cat.app[slot].id)) {
+        cat.cp_wake = 0;
+        if (!catplay_send()) catplay_offline();
+    } else if (cat.cp_wake && time_now_ms() - cat.cp_wake >= CATPLAY_START_MS) {
+        cat.cp_wake = 0;
+        catplay_offline();
+    } else if (cat.cp_at && slot < cat.napps && play_hash(slot) != cat.app[slot].play) {
+        cat.cp_at = 0;
+    } else if (cat.cp_at && time_now_ms() - cat.cp_at >= CATPLAY_WAIT_MS) {
+        cat.cp_at = 0;
+        catplay_offline();
+    }
+    if (!cat.cp_at && !cat.cp_wake && cat.cp_list) deque_destroy(cat.cp_list), cat.cp_list = 0;
 }
 
 /* ---- Ratings (docs/server-library.md#ratings-and-favourites) ---- */
