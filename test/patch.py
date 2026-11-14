@@ -39,7 +39,7 @@ O_GLYPH=re.search(r'#define BT_GLYPH "(\w+)"',INC)[1]  # the plain Bluetooth gly
 CONFIG={}  # config.ini [IPOD] keys a new Machine starts with; the payload reads them on first use
 # Minimal's look the pixel checks were drawn under, read for a missing key: Ivory, square (the defaults are its
 # preset's, Graphite and round)
-SEED={'MINIMAL_ACCENT':'7','ROUNDED':'0'}
+SEED={'MINIMAL_ACCENT':'7','ROUNDED':'0','SCRUBSINGLE':'0'}  # and Single Press Scrub off, the press the scrub checks were written for
 SETUP=[]  # functions a new Machine runs before anything can read config (QueueMachine's constructor does)
 FILL,RADIUS=(0x40<<24)|O['FILL_RGB'],9  # the stock rounded-rect checks' translucent fill and radius
 LCD_COLORS=(0x9abcdef0,0x12345678)
@@ -11583,7 +11583,7 @@ passed()
 
 m=Machine(); style_color(m,red)
 # config_value passes its default in decimal: SHORTCUT's SETTING_N_SHORTCUT (12) is out of range, so no shortcut
-assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY','THEME')]+[('/mnt/data/config.ini','IPOD','SHORTCUT','12'),('/mnt/data/config.ini','IPOD','MINIMAL_ACCENT','0'),('/mnt/data/config.ini','IPOD','ROUNDED','1'),('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','0'),('/mnt/data/config.ini','IPOD','NPCENTRED','0'),('/mnt/data/config.ini','IPOD','KEYTONEHP','0'),('/mnt/data/config.ini','IPOD','SCRUBSINGLE','0'),('/mnt/data/config.ini','IPOD','TIMETITLE','1')]+[('/mnt/data/config.ini','IPOD',key,str(d)) for key,(_,d,_) in theme_keys(theme_builtins()).items()]; passed()  # the themes' own, in table order
+assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY','THEME')]+[('/mnt/data/config.ini','IPOD','SHORTCUT','12'),('/mnt/data/config.ini','IPOD','MINIMAL_ACCENT','0'),('/mnt/data/config.ini','IPOD','ROUNDED','1'),('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','0'),('/mnt/data/config.ini','IPOD','NPCENTRED','0'),('/mnt/data/config.ini','IPOD','KEYTONEHP','0'),('/mnt/data/config.ini','IPOD','SCRUBSINGLE','1'),('/mnt/data/config.ini','IPOD','TIMETITLE','1')]+[('/mnt/data/config.ini','IPOD',key,str(d)) for key,(_,d,_) in theme_keys(theme_builtins()).items()]; passed()  # the themes' own, in table order
 # theme()/scheme(): the active built-in and its scheme, settings read on first use. THEME out of
 # range is Minimal; Classic's stored Ivory and an out-of-range CLASSIC_LIGHT_ACCENT are Classic Blue, on Cobalt's
 # tones; Modern's stored Ivory and an out-of-range ACCENT are Graphite's scheme; a missing MINIMAL_ACCENT is Graphite, a stored Ivory
@@ -12006,7 +12006,7 @@ f,ctx=m.handler(m.nodes[time_title]['children'][0],O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and not did(m,'image_manager_unload_all')
 assert [(c[1],m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='write_int_config']==[(0,'IPOD','TIMETITLE')]
 m.call(address=f,args=(ctx,m.event,0,0),gap=0)
-# Single Press Scrub (IPOD SCRUBSINGLE): a switch, off unless chosen, that only saves.
+# Single Press Scrub (IPOD SCRUBSINGLE): a switch, on unless chosen off (SEED reads it off here), that only saves.
 one_label=m.nodes[m.nodes[scrub_one]['children'][0]]['children'][1]; assert m.nodes[one_label]['text']=='Single Press Scrub'
 f,ctx=m.handler(m.nodes[scrub_one]['children'][0],O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and not did(m,'image_manager_unload_all')

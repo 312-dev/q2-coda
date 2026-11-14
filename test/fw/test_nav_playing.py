@@ -352,7 +352,9 @@ class Canvas:
 
 
 def theme(fw, st, t=MINIMAL, light=0, **keys):
-    """The theme t on its own geometry set (theme_boot's), light or dark."""
+    """The theme t on its own geometry set (theme_boot's), light or dark. Single Press Scrub is off unless keys
+    say, the presses the scrub tests were written for (it is on unless chosen off)."""
+    keys.setdefault('SCRUBSINGLE', 0)
     Config(fw, THEME=t['index'], LIGHT=light, **keys)
     st.settings_read = 0
     fw.fn('accent', C.c_int)()
