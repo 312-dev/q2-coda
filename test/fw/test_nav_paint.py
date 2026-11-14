@@ -2710,8 +2710,8 @@ def whole(fw):
     flag.value = saved
 
 
-def scan_dialog(fw, world, st, text='Scanned 0', create=0):
-    theme(fw, CLASSIC)
+def scan_dialog(fw, world, st, text='Scanned 0', create=0, look=CLASSIC):
+    theme(fw, look)
     win = world.window('updatemusic_dialog', 'dialog')
     for name in ('img_animation', 'label_scanfolder'):
         world.add(win, name, 'image')
@@ -2819,6 +2819,35 @@ def test_the_scan_counts_against_the_library_before_it(fw, world, st, whole):
     assert target == win and scan_bar(bar) and inside(world.at(line), box)
     assert all(inside(f[:4], box) for f in bar)  # the line and the bar repainted
     assert poll(world) == RET_REPEAT and len(world.invalid) == 1  # nothing new: nothing repainted
+
+
+OLED = '3'
+
+
+def test_under_oled_the_scan_dialog_is_a_page_of_rows(fw, world, st, whole):
+    """OLED's scan page (oled_scan): the title in the status row's place, Songs and Folder rows from y 58, stock's
+    Cancel as the row after them on the selection bar; the count against the library's songs on the Songs row
+    ("312 of 704"), the name of stock's folder on the Folder row, and the 6 px bar at y 228 from the text column to the right
+    column, its fill the count's share."""
+    whole.value = 1
+    win, threads = scan_dialog(fw, world, st, 'Scanned 312', look=OLED)
+    for name in ('img_animation', 'label_msg', 'label_scanfolder'):
+        assert world[named(world, win, name)].visible == 0
+    world[named(world, win, 'label_scanfolder')].text = 'SD:/Music/Brent Faiyaz/'
+    heading, line, button = (named(world, win, n) for n in ('msg_heading', 'msg_line', 'btn_no'))
+    assert world[heading].text == 'Update Library' and world.at(heading)[0] == 22
+    assert world.at(button) == (16, 122, 343, 32) and world[button].props['style:normal:round_radius'] == 8
+    before = msg_paint(fw, win)
+    count(fw, threads, 704)
+    poll(world)
+    assert world[line].text == '312 of 704' and world.at(line)[1] == 58
+    source = world[named(world, win, 'label_scanfolder')]
+    assert [n for n in world.nodes.values() if n is not source and n.text == 'Brent Faiyaz']  # the folder's own name
+    bar = added(msg_paint(fw, win), before)
+    rows = {f[1] for f in bar}
+    assert rows == set(range(228, 234)) and min(f[0] for f in bar) == 24 and max(f[0] + f[2] for f in bar) == 347
+    lit = [f for f in bar if f[4] & 0xffffff not in (0x333333, 0)]
+    assert max(f[0] + f[2] for f in lit) <= 24 + 323 * 312 // 704 + 1
 
 
 @pytest.mark.parametrize('text, held', [('704', True), ('Scanned 700 of the', True), ('Scanned 600', False)])

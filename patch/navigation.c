@@ -5602,7 +5602,8 @@ void *ringnav_ui_load(const char *name, void *parent) {
         if (!tk_strcmp(loaded, "addplaylist_dialog") || !tk_strcmp(loaded, "renameplaylist_dialog"))
             pl_box_open(root);
         if (time_form(root)) time_open(root);
-    }
+    } else if (root && oled_pages())
+        msg_open(root); /* OLED's scan page (classic_pages.c oled_scan); USB's page stays stock's */
     if (root && g_usbmode != 1 && !tk_strcmp(widget_get_prop_str(root, "name", ""), "usbmode_page"))
         st.usb_lun = 0, widget_add_timer(root, usb_poll, 500);
     if (root) motion_load(root, np);
@@ -11332,6 +11333,17 @@ int ringnav(void *ctx, void *event) {
         if (top && *(volatile int *)SCAN_DONE &&
             !tk_strcmp(widget_get_prop_str(top, "name", ""), "updatemusic_dialog")) {
             dialog_quit(top, 0);
+            return STOP;
+        }
+        /* OLED's scan page (classic_pages.c oled_scan) has Cancel on the selection bar: Centre
+         * presses it, as a tap does, and stops the scan */
+        void *cancel = key == KEY_CENTER && oled_pages() && top &&
+                               !tk_strcmp(widget_get_prop_str(top, "name", ""), "updatemusic_dialog")
+                           ? widget_lookup(top, "btn_no", 1)
+                           : (void *)0;
+        if (cancel) {
+            unsigned click[12];
+            stock_dispatch_trampoline(cancel, pointer_event_init(click, EVT_CLICK, cancel, 0, 0));
             return STOP;
         }
     }
