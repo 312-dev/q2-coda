@@ -132,6 +132,29 @@ full copy cheaply, and none uses the server's change hints to drive sync; the pl
   refuses some names, such as a folder ending in a period (an Ultrasonic bug). Plays and stars made
   offline are queued on the card and sent when the server returns.
 
+## Ratings and favourites
+
+A song's hearts ([internals.md: Ratings](internals.md#ratings)) follow it to the server and back,
+for server rows and for synced card files alike, whenever the Q2 can reach the server.
+
+- **Mapping:** 1 to 5 hearts is OpenSubsonic's `userRating` 1 to 5, set with `setRating`; 0 hearts
+  is `setRating` 0. Five hearts is also stock's My Fav, so five hearts stars the song (`star`), and
+  taking the fifth heart away unstars it. A song starred on the server with no rating arrives as five
+  hearts.
+- **Which songs:** server rows by their sid; a synced card file by the sid the Subsonic app recorded
+  when it downloaded it, so the app owns the path-to-sid table and the firmware never needs one.
+- **Out:** each change on the Q2 is appended to `/mnt/mmc/.<id>/ratings.out`
+  (`<listen_key>\t<sid or empty>\t<hearts>\t<unix time>`); the app sends it when the server answers
+  and removes the lines it sent. Offline changes wait there, as plays and stars already do.
+- **In:** on each connection the app reads `userRating` and `starred` from the walk it already makes
+  (`search3` pages carry both) and writes the differences to `/mnt/mmc/.<id>/ratings.in`; the firmware
+  applies them through the same path as a rating made on the device.
+- **Conflicts:** the newer change wins, by the time the Q2 recorded it against the server's
+  `starred` date where one exists; a rating has no server date, so a pending local change is sent
+  before the server's value is read back.
+- **Capability:** the app declares `ratings=1` in its `q2app`, and the firmware adds `ratings` to its
+  capability line, as the catalogue does; without both, ratings stay on the device.
+
 ## Risks and open questions
 
 1. **Greying stock's own lists**: getting from a stock list's row widget to its song record at paint
