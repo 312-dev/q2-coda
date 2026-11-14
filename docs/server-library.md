@@ -47,18 +47,77 @@ channel, and an app that does not declare it is never read.
 
 ```text
 #Q2CAT/1	seq=<n>	account=<8 hex>	rows=<N>
-s	<sid>	<title>	<artist>	<album artist>	<album>	<album id>	<year>	<disc>	<track>	<seconds>	<genre>	<suffix>	<local path or empty>
+s	<sid>	<title>	<artist>	<album artist>	<album>	<album id>	<year>	<disc>	<track>	<seconds>	<genre>	<suffix>	<local path or empty>	<size bytes>	<musicBrainzId or empty>
 p	<pid>	<playlist name>
 i	<pid>	<sid>
 ```
 
   `s` rows are server songs **not already synced** (a synced song is a card row; listing it again
   would show it twice). `p` and `i` rows are server playlists and their items in order.
+  `<size bytes>` is the server's `size` and `<musicBrainzId or empty>` its OpenSubsonic
+  `musicBrainzId` (the recording's id), both for the duplicate rule below. `<local path>` is a
+  complete offline copy on the card (the Stream Cache), empty when there is none.
 - **Availability changes** without rewriting the catalogue: `/mnt/mmc/.<id>/catalogue.avail`,
-  `<sid>\t<local path>` to add an offline copy, `-<sid>` when one is evicted.
-- **Server state:** `server=up` or `server=down` in the app's existing `/tmp/q2-<id>.state`.
+  `<sid>\t<local path>` to add an offline copy, `-<sid>` when one is evicted. The app appends
+  lines; the firmware applies them in order, reading on from where it stopped while the file
+  grows, and reads it whole again when it shrinks or a new catalogue is imported (each line sets a
+  state, so reading one twice is harmless). The app may truncate it when it writes a new
+  `catalogue.tsv`, whose local paths are then current.
+- **Server state:** `server=up` or `server=down` in the app's existing `/tmp/q2-<id>.state`. With
+  neither, the server counts as up while Wi-Fi is connected.
 - **Answer:** `/tmp/q2-<id>.catalogue.done`, `<seq> ok <rows>` or `<seq> error <why>`, as the
-  `library` extension answers.
+  `library` extension answers. `<rows>` counts the `s` rows read, duplicates included.
+- **Play request:** `/tmp/q2-<id>.catplay`, written whole by the firmware when a list with server
+  rows is played online: `#Q2CATPLAY/1\tseq=<n>\tstart=<index>` on its first line, then one line
+  per row of the list in its order, `s\t<sid>` for a server row or `f\t<card path>` for a card row.
+  `<index>` counts those lines from 0. The app answers with its usual `.play` (an m3u of card
+  paths, Stream Cache copies for server songs, each waited for until it is there), the first entry
+  being the row at `<index>`. A `.play` that changes within `CATPLAY_WAIT_MS` (4 s) is the
+  answer; otherwise the firmware plays the list itself from card rows and offline copies.
+
+### Duplicates
+
+The catalogue leaves out only the songs the app synced. A song that reached the card another way
+(copied over USB, sent by Wi-Fi transfer, synced before the app kept track) and is also on the
+server would show twice, so the firmware matches each server song against the card's songtable,
+strongest evidence first:
+
+1. **MusicBrainz recording id.** The server's `musicBrainzId` against the card file's own: a FLAC's
+   or Ogg's `MUSICBRAINZ_TRACKID` comment, an MP3's ID3 `UFID` frame owned by
+   `http://musicbrainz.org` (both are Picard's recording id; ID3's `TXXX:MusicBrainz Release Track
+   Id` is a release track's id, not the recording's, and is not read). Equal ids are the same song.
+2. **Same file.** Equal size in bytes, equal suffix, and durations within 1 s.
+3. **Tags.** Equal normalised artist, album and title (lower case, punctuation and spaces dropped,
+   a "feat." part and a trailing bracketed or dashed "Remaster", "Remastered", "Live"-free
+   edition note such as "(Remastered 2009)" or "- 2012 Stereo Mix" cut), equal track number, and
+   durations within 2 s.
+
+A match on any layer hides the server row and links its sid to the card file (`servermeta.dup`):
+the song plays from the card, and ratings sync by that sid. Layer 3 never matches on its own when a
+stronger layer disagrees: both sides have MusicBrainz ids and they differ, or the suffixes are equal
+and the sizes and durations clearly differ (more than 2 s), as a live take beside the studio one
+does. A duration the firmware cannot read (no tag length) fails layers 2 and 3.
+
+The match runs at each import and again whenever the card's library changes (Update Local Music, a
+scan after files arrive over USB or Wi-Fi transfer: each moves `library_gen`), from the songs kept
+in `serverall`, so a song copied to the card later leaves the server rows without a new catalogue.
+Card files are read (their size, and their MusicBrainz id and length) only where a server song has
+the same normalised title or the same size, so a large card is not read whole.
+
+### Where it is kept
+
+The server songs are not in `/mnt/data/database.db`: that partition is 17.7 MB and a 50,000-song
+catalogue is about 25 MB of rows. They live on the card, in `/mnt/mmc/.q2pod/catalogue.db`, which
+the firmware attaches to stock's shared database connection (`stock_db_open`) and to Era's, as
+schema `cat`, while Local + Server is on and the card is in:
+
+- `cat.serverall`: every catalogue song, with songtable's own columns, ids from `0x40000000`.
+- `cat.servermeta(id, fileurl, app, sid, local, seconds, size, mbid, suffix, dup)`: what songtable
+  has no column for. `local` is the offline copy, `dup` the linked card path.
+- `cat.servertable`: the rows the Library shows, `serverall` less the duplicates, rebuilt after
+  each match.
+- `cat.serverlists(app, pid, list)`: which stock playlist (`playlist`'s header id) holds each
+  catalogue playlist.
 
 ### Core firmware changes
 
@@ -144,11 +203,21 @@ for server rows and for synced card files alike, whenever the Q2 can reach the s
 - **Which songs:** server rows by their sid; a synced card file by the sid the Subsonic app recorded
   when it downloaded it, so the app owns the path-to-sid table and the firmware never needs one.
 - **Out:** each change on the Q2 is appended to `/mnt/mmc/.<id>/ratings.out`
-  (`<listen_key>\t<sid or empty>\t<hearts>\t<unix time>`); the app sends it when the server answers
-  and removes the lines it sent. Offline changes wait there, as plays and stars already do.
+  (`<listen_key>\t<sid or empty>\t<hearts>\t<unix time>\t<path>`); the app sends it when the server
+  answers and removes the lines it sent. Offline changes wait there, as plays and stars already do.
+  `<listen_key>` is 8 lowercase hex digits (the firmware's own key, for the app to echo or ignore);
+  `<sid>` is filled for a server row and for a card file the duplicate rule linked to one;
+  `<path>` is the song's path as the Library has it (a card path, or a server row's `fileurl`), so
+  the app finds a synced file's sid in its own path-to-sid table. Lines go to every app that
+  declared `ratings=1`.
 - **In:** on each connection the app reads `userRating` and `starred` from the walk it already makes
-  (`search3` pages carry both) and writes the differences to `/mnt/mmc/.<id>/ratings.in`; the firmware
-  applies them through the same path as a rating made on the device.
+  (`search3` pages carry both) and writes the differences to `/mnt/mmc/.<id>/ratings.in`, whole
+  (temp and rename) and only while no `ratings.in` is there: one line per song,
+  `<sid>\t<card path or empty>\t<hearts>\t<unix time>`, the card path for a synced file (the
+  firmware finds a server row, or a card file linked to one, by its sid). `<unix time>` is the
+  server's `starred` date where there is one, else 0. The firmware applies the lines through the
+  same path as a rating made on the device, skipping a song whose own `ratings.out` line is newer,
+  then deletes the file.
 - **Conflicts:** the newer change wins, by the time the Q2 recorded it against the server's
   `starred` date where one exists; a rating has no server date, so a pending local change is sent
   before the server's value is read back.
