@@ -11,6 +11,7 @@ import ctypes as C
 import random
 import re
 import struct
+import subprocess
 import typing
 
 import pytest
@@ -818,6 +819,92 @@ def test_rounded_corners_make_modern_a_pill_inset_from_the_glass(fw, layout):
     inset = O['SEL_INSET']
     assert band[72][:2] == (inset, 375 - inset)
     assert band[48][0] > inset and band[95][0] > inset  # its ends round in
+
+
+# A theme's own selection shape and accent (an OLED theme's: a flat exact blue, 8 px in, 6 px ends), written into the
+# live theme as tools/theme.py's table would state them: list.selection.radius and inset, an own scheme's tones.
+OLED_TONES = (C.c_uint * 5)(0x2f5bea, 0x2f5bea, 0x5a7cee, 0x5a7cee, 0x2f5bea)
+
+
+@pytest.fixture(scope='module')
+def theme_layout(library):
+    return host.offsets(library.parent/'navigation.o', 'theme_t')
+
+
+def poke(address, ctype, value):
+    """Write value over the table's read-only copy (this test's own load of the library)."""
+    page = address & ~0xfff
+    assert not libc.mprotect(page, 0x2000, 3)  # PROT_READ | PROT_WRITE
+    ctype.from_address(address).value = value
+
+
+def own_shape(fw, theme_layout, layout, radius, inset):
+    T = fw.fn('theme', C.c_void_p)()
+    poke(T + theme_layout['sel_radius'], C.c_ubyte, radius)
+    poke(T + theme_layout['sel_inset'], C.c_ubyte, inset)
+    poke(fw.fn('scheme', C.c_void_p)() + layout[0]['tones'], C.c_void_p, C.addressof(OLED_TONES))
+
+
+def test_a_theme_s_own_bar_is_its_inset_its_radius_and_its_tones(fw, layout, theme_layout):
+    page = Page(fw, MODERN, ROUNDED=b'1')
+    own_shape(fw, theme_layout, layout, 6, 8)
+    band = page.band() if page.paint() else {}
+    blue = rgba(0x2f5bea)
+    assert list(band) == list(range(48, 96)) and solid(band[72]) == blue  # flat: its highlight is its top tone
+    # 6 px ends: the rows from the 7th to the 7th from the bottom span the row less 8 a side; those nearer round in
+    assert all(band[y][:2] == (8, 375 - 8) and solid(band[y]) == blue for y in range(48 + 6, 96 - 6))
+    assert all(band[y][0] > 8 and band[y][2][0] != blue for y in (48, 95))
+    assert band[48 + 5][:2] == (8, 375 - 8)  # the last row in, by under a pixel: its edge pixels all but opaque
+
+
+def test_a_theme_s_square_ended_bar_keeps_its_inset(fw, layout, theme_layout):
+    page = Page(fw, MODERN, ROUNDED=b'1')
+    own_shape(fw, theme_layout, layout, 0, 8)
+    band = page.band() if page.paint() else {}
+    assert list(band) == list(range(48, 96)) and all(r[:2] == (8, 375 - 8) and solid(r) == rgba(0x2f5bea) for r in band.values())
+
+
+def test_corners_square_keeps_a_theme_s_bar_full_width_and_square(fw, layout, theme_layout):
+    page = Page(fw, MODERN, ROUNDED=b'0')
+    own_shape(fw, theme_layout, layout, 6, 8)
+    band = page.band() if page.paint() else {}
+    assert list(band) == list(range(48, 96)) and all(r[:2] == (0, 375) and solid(r) == rgba(0x2f5bea) for r in band.values())
+
+
+def test_an_own_scheme_s_tones_compile_into_its_row(tmp_path):
+    """tools/theme.py's table for a theme whose own scheme states its tones: that row's tones are them, every ACCENTS
+    row's its own, as cc reads the emitted C."""
+    T = host.tools_theme
+    by_id = {n.attrs['id']: n for n in map(T.load, sorted((host.ROOT/'assets/themes').glob('*/theme.xml')))}
+    root = T.parse('<theme format="1" id="oled" name="OLED" index="3" extends="minimal">'
+                   '<colorScheme name="oled-blue" base="cobalt" label="Blue" tones="#2f5bea #2f5bea #5a7cee #5a7cee #2f5bea"/>'
+                   '<colorSchemes accents="oled-blue"/><option setting="accent" key="OLED_ACCENT" default="oled-blue"/></theme>',
+                   'oled/theme.xml')
+    t = T.resolve(root, {**by_id, 'oled': root})
+    T.validate(t, 'oled/theme.xml')
+    T.emit([t], tmp_path)
+    inc = (tmp_path/'themes.inc').read_text()
+    rows = inc[inc.index('static const unsigned oled_tones'):inc.index('static const option_t')]
+    (tmp_path/'tones.c').write_text(
+        '#include <stdio.h>\n#include "theme.h"\nenum { ACCENT_N = %d };\n%s\nstatic const unsigned accents[][5] = { ACCENTS };\n%s'
+        'int main(void) {\n    for (int v = 0; v < %d; ++v)\n'
+        '        printf("%%06x %%06x %%06x %%06x %%06x\\n", oled_schemes[v].tones[0], oled_schemes[v].tones[1],\n'
+        '               oled_schemes[v].tones[2], oled_schemes[v].tones[3], oled_schemes[v].tones[4]);\n}\n'
+        % (len(T.ACCENT_NAMES), T.ACCENTS_BLOCK, rows, len(t['schemes'])))
+    subprocess.run(['cc', '-std=gnu11', '-Wall', '-Werror', '-I', str(host.ROOT/'patch'), str(tmp_path/'tones.c'), '-o', str(tmp_path/'tones')],
+                   check=True)
+    out = subprocess.run([str(tmp_path/'tones')], capture_output=True, text=True, check=True).stdout.splitlines()
+    assert out == [' '.join(f'{x:06x}' for x in row) for row in T.ACCENT_TONES] + ['2f5bea 2f5bea 5a7cee 5a7cee 2f5bea']
+
+
+def test_a_radius_past_half_the_row_is_the_pill(fw, layout, theme_layout):
+    """SEL_MAX_RADIUS, the default, and any radius past half the row draw the pill alike."""
+    bands = []
+    for radius in (O['SEL_MAX_RADIUS'], 24, 30):
+        page = Page(fw, MODERN, ROUNDED=b'1')
+        own_shape(fw, theme_layout, layout, radius, O['SEL_INSET'])
+        bands.append(page.band() if page.paint() else {})
+    assert bands[0] == bands[1] == bands[2] and bands[0][48][0] > O['SEL_INSET'] + 10
 
 
 def test_minimal_ivory_lays_a_card_under_the_row(fw, st, layout):

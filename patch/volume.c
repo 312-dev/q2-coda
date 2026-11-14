@@ -130,7 +130,7 @@ void vol_paint(void *top, void *canvas) {
     /* Pills, like the progress capsule: a non-zero fill is at least round, never a sliver. Over
      * Classic's Now Playing, its own bar. */
     if (!np || !ipod_bar(canvas, bar.x, bar.y, bar.w, w, 0)) {
-        fill_box(canvas, &bar, RGBA(np ? TRACK_COLOR : VOL_PANEL_TRACK), bar.h / 2);
+        fill_box(canvas, &bar, RGBA(np ? theme()->np_track_rgb : VOL_PANEL_TRACK), bar.h / 2);
         rect_t on = { bar.x, bar.y, w < bar.h ? bar.h : w, bar.h };
         /* Over Now Playing it is the progress bar's own: the accent's fill */
         if (w) fill_box(canvas, &on, RGBA(np ? accent_tone(TONE_LIGHT) : 0xffffff), bar.h / 2);

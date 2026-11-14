@@ -2468,11 +2468,15 @@ static void paint_selection(void *w, void *canvas) {
                 canvas_fill_rect(canvas, r.x, r.y + r.h - 1, r.w, 1);
             }
         } else {
-            /* Modern's bar, a list row's a pill under Rounded Corners, inset like Minimal's card */
+            /* Modern's bar; under Rounded Corners a list row's is the theme's sel_inset in from
+             * each side, its ends sel_radius at most pill_radius's (Modern: SEL_INSET, a pill) */
+            const theme_t *T = theme();
             rect_t bar = r;
-            int pill = !tile && corners ? pill_radius(g_menu.at[i], r.h, SEL_INSET) : 0;
-            if (pill) bar.x += SEL_INSET, bar.w -= 2 * SEL_INSET;
-            gradient(canvas, bar, S->tones[0], S->tones[1], S->tones[4], pill);
+            int pill = !tile && corners, in = pill ? T->sel_inset : 0;
+            int radius = pill ? pill_radius(g_menu.at[i], r.h, in) : 0;
+            if (radius > T->sel_radius) radius = T->sel_radius;
+            bar.x += in, bar.w -= 2 * in;
+            gradient(canvas, bar, S->tones[0], S->tones[1], S->tones[4], radius);
         }
     } else if (home) {
         rect_t dot = { HOME_DOT_X, r.y + (r.h - HOME_DOT) / 2, HOME_DOT, HOME_DOT };

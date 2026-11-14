@@ -292,6 +292,17 @@ void np_theme(void) {
     for (unsigned i = 0; st.np_slider && i < sizeof radius / sizeof *radius; ++i)
         widget_set_prop_int(st.np_slider, radius[i], h / 2);
     if (st.np_slider) widget_set_prop_int(st.np_slider, "bar_size", h);
+    /* The track: the asset's is TRACK_COLOR. A theme's own (playing.scrubber.track) is written,
+     * and TRACK_COLOR written back after one, so a theme on the asset's colour writes nothing. */
+    static const char *const track[] = { "style:normal:bg_color", "style:pressed:bg_color",
+                                         "style:over:bg_color", "style:disable:bg_color",
+                                         "style:focused:bg_color" };
+    static unsigned written = TRACK_COLOR;
+    if (st.np_slider && (T->np_track_rgb != TRACK_COLOR || written != TRACK_COLOR)) {
+        for (unsigned i = 0; i < sizeof track / sizeof *track; ++i)
+            widget_set_prop_int(st.np_slider, track[i], (int)RGBA(T->np_track_rgb));
+        written = T->np_track_rgb;
+    }
     if (glyph) widget_set_opacity(glyph, T->np_state_op);
     /* Minimal: the album is paint_caps' capitals. */
     if (st.np_album) widget_set_opacity(st.np_album, T->np_album_op);

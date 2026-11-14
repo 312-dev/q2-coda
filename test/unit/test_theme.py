@@ -148,11 +148,11 @@ MINIMAL = {
     **MOTION_TODAY,
     'page_row': 48, 'page_detail': 64, 'page_title_h': 48, 'page_x': 36, 'page_cap_y': 4, 'page_cap_h': 32, 'page_det_y': 36, 'page_det_h': 24,
     'id': 'minimal', 'index': 0, 'order': 0, 'art_id': 'minimal', 'name': 'Minimal', 'accents': 0x1ff, 'accent_key': 'MINIMAL_ACCENT',
-    'painter[PAINT_SELECTION]': 0, 'painter[PAINT_BAR]': 0, 'painter[PAINT_BATTERY]': 0, 'chevron_home': 0, 'chevron_sel': 0, 'caps_mark': 1, 'caps_home': 1, 'caps_np': 1,
+    'painter[PAINT_SELECTION]': 0, 'sel_radius': 160, 'sel_inset': 6, 'painter[PAINT_BAR]': 0, 'painter[PAINT_BATTERY]': 0, 'chevron_home': 0, 'chevron_sel': 0, 'caps_mark': 1, 'caps_home': 1, 'caps_np': 1,
     'icons_mono': 1, 'icons_badge_muted': 1, 'icons_addon_mono': 1, 'icons_badge_ink': 0, 'art_final': 0, 'font[ROLE_NP]': 0, 'font[ROLE_INFO]': 0, 'font_px[ROLE_INFO]': 0, 'np_info_value': 0, 'np_album_op': 0, 'np_state_op': 0,
     'home_top': 8, 'home_full_row': 375, 'home_text_x': 39, 'home_label_end[0]': 8, 'home_label_end[1]': 33,
     'home_pane': (), 'pane_shadow': 0, 'pane_shadow_w': 0, 'pane_shadow_a': (), 'pane_light_a': 0, 'pane_icon_x': 0, 'pane_icon_y': 0, 'pane_note_x': 0, 'pane_note_y': 0, 'pane_count_y': 0, 'pane_count_w': 0, 'pane_count_px': 0, 'pane_svc_x': 0, 'pane_svc_y': 0, 'pane_svc_px': 0,
-    'set_top': 8, 'set_text': 0, 'painter[PAINT_SCRUB]': 0, 'painter[PAINT_VOLUME]': 0, 'painter[PAINT_CONFIRM]': 0, 'painter[PAINT_PAGES]': 0, 'np_rows[0]': (), 'np_rows[1]': (), 'np_rows[2]': (), 'np_rows[3]': (), 'np_bar': 4, 'np_scrub': 8, 'np_track': (), 'np_fill': (), 'font[ROLE_TITLE]': 0, 'font[ROLE_META]': 0, 'font_px[ROLE_TITLE]': 0, 'font_px[ROLE_META]': 0, 'font_px[ROLE_NP]': 0, 'font[ROLE_HOME]': 0, 'font_px[ROLE_HOME]': 0, 'font[ROLE_BAR]': 0, 'font_px[ROLE_BAR]': 0, 'art_square': 0, 'art_x': 0, 'art_text_x': 0, 'art_text_end': 0, 'art_placeholder': 0, 'row_text_end': 0, 'sep': (), 'font[ROLE_TALL]': 0, 'font_px[ROLE_TALL]': 0, 'chevron_x': 0, 'home_chevron_x': 0, 'letter_raw': 0, 'letter_px': 0, 'batt': (), 'batt_empty': (), 'batt_low': 0, 'batt_low_w': 0, 'batt_line': 0, 'batt_edge': 0, 'batt_corner_a': 0, 'batt_foot_a': 0, 'batt_shade_a': 0, 'batt_soft_a': 0, 'batt_soft_top_a': 0, 'batt_emboss_a': 0, 'batt_emboss_nub_a': 0, 'bar_bt_dy': 0, 'bar_wifi_dy': 0, 'sb_w': 0, 'sb_right': 0, 'sb_top': 0, 'sb_bottom': 0, 'sb_min': 0, 'sb_thumb': 0, 'bolt': 0, 'bolt_halo_a': 0, 'state_stops': (), 'state_edge': (), 'state_halo_light': 0, 'state_halo_dark': 0, 'station_stops': (), 'station_mast': (), 'station_band_a': 0, 'station_shadow_a': 0, 'light': {}, 'np_layout': 0, 'geom_set': 'ipod', 'geoms': {},
+    'set_top': 8, 'set_text': 0, 'painter[PAINT_SCRUB]': 0, 'painter[PAINT_VOLUME]': 0, 'painter[PAINT_CONFIRM]': 0, 'painter[PAINT_PAGES]': 0, 'np_rows[0]': (), 'np_rows[1]': (), 'np_rows[2]': (), 'np_rows[3]': (), 'np_bar': 4, 'np_scrub': 8, 'np_track_rgb': 0x1c1c1c, 'np_track': (), 'np_fill': (), 'font[ROLE_TITLE]': 0, 'font[ROLE_META]': 0, 'font_px[ROLE_TITLE]': 0, 'font_px[ROLE_META]': 0, 'font_px[ROLE_NP]': 0, 'font[ROLE_HOME]': 0, 'font_px[ROLE_HOME]': 0, 'font[ROLE_BAR]': 0, 'font_px[ROLE_BAR]': 0, 'art_square': 0, 'art_x': 0, 'art_text_x': 0, 'art_text_end': 0, 'art_placeholder': 0, 'row_text_end': 0, 'sep': (), 'font[ROLE_TALL]': 0, 'font_px[ROLE_TALL]': 0, 'chevron_x': 0, 'home_chevron_x': 0, 'letter_raw': 0, 'letter_px': 0, 'batt': (), 'batt_empty': (), 'batt_low': 0, 'batt_low_w': 0, 'batt_line': 0, 'batt_edge': 0, 'batt_corner_a': 0, 'batt_foot_a': 0, 'batt_shade_a': 0, 'batt_soft_a': 0, 'batt_soft_top_a': 0, 'batt_emboss_a': 0, 'batt_emboss_nub_a': 0, 'bar_bt_dy': 0, 'bar_wifi_dy': 0, 'sb_w': 0, 'sb_right': 0, 'sb_top': 0, 'sb_bottom': 0, 'sb_min': 0, 'sb_thumb': 0, 'bolt': 0, 'bolt_halo_a': 0, 'state_stops': (), 'state_edge': (), 'state_halo_light': 0, 'state_halo_dark': 0, 'station_stops': (), 'station_mast': (), 'station_band_a': 0, 'station_shadow_a': 0, 'light': {}, 'np_layout': 0, 'geom_set': 'ipod', 'geoms': {},
     'schemes': [{**MINIMAL_ROLES, 'raw_red': int(v == 1), 'card': int(v == 7)} for v in range(9)],
     'opts': [STATUSBAR, opt('SETTING_LIGHT', preset=0, keep=2), opt('SETTING_ACCENT', default=0, preset=0),
              opt('SETTING_ROUNDED', preset=1), opt('SETTING_HOME', preset=0), opt('SETTING_SHORTCUT'),
@@ -549,11 +549,11 @@ def test_status_bar_takes_a_name_as_a_value():
         f'minimal/theme.xml:10: STATUSBAR: theme name {"é" * 13} as a value label: expected 1..24 bytes')
 
 
-MINIMAL_FIELDS = [('name', '"Minimal"'), ('painter[PAINT_SELECTION]', 'SEL_CARD'), ('painter[PAINT_BAR]', 'BAR_FLAT'), ('painter[PAINT_BATTERY]', 'BATT_STOCK'), ('chevron_home', 0), ('chevron_sel', 0), ('art_x', 0), ('art_text_x', 0), ('art_text_end', 0), ('art_placeholder', 0), ('row_text_end', 0), ('sep', '{{0}, {0}}'), ('font[ROLE_TALL]', 'FONT_DEFAULT'), ('font_px[ROLE_TALL]', 0), ('chevron_x', 0), ('home_chevron_x', 0), ('letter_raw', 0), ('letter_px', 0), ('caps_mark', 1),
+MINIMAL_FIELDS = [('name', '"Minimal"'), ('painter[PAINT_SELECTION]', 'SEL_CARD'), ('sel_radius', 160), ('sel_inset', 6), ('painter[PAINT_BAR]', 'BAR_FLAT'), ('painter[PAINT_BATTERY]', 'BATT_STOCK'), ('chevron_home', 0), ('chevron_sel', 0), ('art_x', 0), ('art_text_x', 0), ('art_text_end', 0), ('art_placeholder', 0), ('row_text_end', 0), ('sep', '{{0}, {0}}'), ('font[ROLE_TALL]', 'FONT_DEFAULT'), ('font_px[ROLE_TALL]', 0), ('chevron_x', 0), ('home_chevron_x', 0), ('letter_raw', 0), ('letter_px', 0), ('caps_mark', 1),
                   ('caps_home', 1), ('caps_np', 1), ('icons_mono', 1), ('icons_badge_muted', 1), ('icons_addon_mono', 1), ('icons_badge_ink', 0),
                   ('font[ROLE_NP]', 'FONT_DEFAULT'), ('font_px[ROLE_NP]', 0), ('font[ROLE_INFO]', 'FONT_DEFAULT'), ('font_px[ROLE_INFO]', 0), ('np_info_value', '{0, 0}'), ('np_album_op', 0), ('np_state_op', 0), ('home_top', 8), ('home_full_row', 375),
                   ('home_text_x', 39), ('home_label_end[0]', 8), ('home_label_end[1]', 33), ('font[ROLE_HOME]', 'FONT_DEFAULT'), ('font_px[ROLE_HOME]', 0), ('home_pane', '{{0}, {0}}'), ('pane_shadow', 0), ('pane_shadow_w', 0), ('pane_shadow_a', '{0}'), ('pane_light_a', 0), ('pane_icon_x', 0), ('pane_icon_y', 0), ('pane_note_x', 0), ('pane_note_y', 0), ('pane_count_y', 0), ('pane_count_w', 0), ('pane_count_px', 0), ('pane_svc_x', 0), ('pane_svc_y', 0), ('pane_svc_px', 0), ('set_top', 8), ('set_text', 0), ('painter[PAINT_SCRUB]', 'SCRUB_STOCK'), ('painter[PAINT_VOLUME]', 'VOL_STOCK'), ('painter[PAINT_CONFIRM]', 'CONFIRM_STOCK'), ('painter[PAINT_PAGES]', 'PAGES_STOCK'), ('art_final', 0), ('np_rows[0]', '{0}'), ('np_rows[1]', '{0}'), ('np_rows[2]', '{0}'), ('np_rows[3]', '{0}'), ('np_bar', 4),
-                  ('np_scrub', 8), ('np_track', '{{0}, {0}}'), ('np_fill', '{0}'), ('art_square', 0), ('font[ROLE_TITLE]', 'FONT_DEFAULT'), ('font[ROLE_META]', 'FONT_DEFAULT'),
+                  ('np_scrub', 8), ('np_track_rgb', 0x1c1c1c), ('np_track', '{{0}, {0}}'), ('np_fill', '{0}'), ('art_square', 0), ('font[ROLE_TITLE]', 'FONT_DEFAULT'), ('font[ROLE_META]', 'FONT_DEFAULT'),
                   ('font_px[ROLE_TITLE]', 0), ('font_px[ROLE_META]', 0), ('font[ROLE_BAR]', 'FONT_DEFAULT'), ('font_px[ROLE_BAR]', 0),
                   ('batt', '{0}'), ('batt_line', '{0, 0}'), ('batt_empty', '{0}'), ('batt_low', 0), ('batt_low_w', 0), ('batt_edge', 0), ('batt_corner_a', 0), ('batt_foot_a', 0), ('batt_shade_a', 0), ('batt_soft_a', 0), ('batt_soft_top_a', 0), ('batt_emboss_a', 0), ('batt_emboss_nub_a', 0), ('bar_bt_dy', 0), ('bar_wifi_dy', 0), ('sb_w', 0), ('sb_right', 0), ('sb_top', 0), ('sb_bottom', 0), ('sb_min', 0), ('sb_thumb', '{0, 0}'),
                   ('accent_slot', '&st.minimal_accent'), ('accent_key', '"MINIMAL_ACCENT"'),
@@ -1079,6 +1079,95 @@ def test_emit_own_scheme(tmp_path):
     assert '    { .tones = accents[4], ' in inc.split('static const scheme_t classic_light_schemes[] = {')[1].split('\n')[10]
     assert '.label = "Classic Blue" }' in inc and inc.count('.n_schemes = 9,') == 2 and '.n_schemes = 10,' in inc
     assert inc.count('/ sizeof *minimal_schemes >= ACCENT_N') == 1
+
+
+def test_selection_shape_defaults_are_today_s():
+    """Unstated, the bar is a pill SEL_INSET in under Rounded Corners, in every built-in."""
+    assert [(t['sel_radius'], t['sel_inset']) for t in theme.builtins()] == [(theme.O['SEL_MAX_RADIUS'], theme.O['SEL_INSET'])] * 3
+
+
+def test_selection_shape_resolves():
+    t = resolved('<view name="list"><element name="selection" painter="bar" radius="6" inset="8"/></view>')
+    theme.validate(t, 't.xml')
+    assert (t['sel_radius'], t['sel_inset']) == (6, 8)
+
+
+@pytest.mark.parametrize('body, message', [
+    ('<view name="list"><element name="selection" radius="4"/></view>', 'list.selection.radius: only the bar painter reads it'),
+    ('<view name="list"><element name="selection" painter="card" inset="0"/></view>', 'list.selection.inset: only the bar painter reads it'),
+])
+def test_selection_shape_is_the_bar_s(body, message):
+    assert error(theme.validate, resolved(body), 't.xml') == f't.xml:1: {message}'
+
+
+@pytest.mark.parametrize('body, message', [
+    ('<view name="list"><element name="selection" painter="bar" radius="161"/></view>', 'list.selection.radius: 161 outside 0..160'),
+    ('<view name="list"><element name="selection" painter="bar" inset="65"/></view>', 'list.selection.inset: 65 outside 0..64'),
+])
+def test_selection_shape_rejects(body, message):
+    assert error(resolved, body) == f't.xml:1: {message}'
+
+
+def test_track_default_is_today_s():
+    assert [t['np_track_rgb'] for t in theme.builtins()] == [theme.O['TRACK_COLOR']] * 3
+
+
+@pytest.mark.parametrize('text, rgb', [('#262626', 0x262626), ('#000000', 0)])  # black is a colour here
+def test_track_resolves(text, rgb):
+    t = resolved(f'<view name="playing"><element name="scrubber" track="{text}"/></view>')
+    theme.validate(t, 't.xml')
+    assert t['np_track_rgb'] == rgb
+
+
+def test_track_rejects():
+    body = '<view name="playing"><element name="scrubber" track="grey"/></view>'
+    assert error(resolved, body) == 't.xml:1: playing.scrubber.track: expected #rrggbb'
+
+
+# An OLED-style theme: one own scheme, an exact blue, offered alone; a flat bar inset 8 with 6 px ends; a grey track.
+OLED_BLUE = '#2f5bea #2f5bea #5a7cee #5a7cee #2f5bea'
+OLED = (f'<colorScheme name="oled-blue" base="cobalt" label="Blue" tones="{OLED_BLUE}"/><colorSchemes accents="oled-blue"/>'
+        '<option setting="accent" key="OLED_ACCENT" default="oled-blue"/>'
+        '<view name="list"><element name="selection" painter="bar" radius="6" inset="8"/></view>'
+        '<view name="playing"><element name="scrubber" track="#262626"/></view>')
+
+
+def test_own_scheme_states_its_tones(tmp_path):
+    t = resolved(OLED)
+    theme.validate(t, 't.xml')
+    blue = t['schemes'][9]
+    assert theme.scheme_names(t)[9:] == ['oled-blue'] and t['accents'] == 1 << 9
+    assert blue['tones'] == (0x2f5bea, 0x2f5bea, 0x5a7cee, 0x5a7cee, 0x2f5bea) and blue['base'] == 4
+    assert not any('tones' in s for s in t['schemes'][:9])  # the ACCENTS rows keep theirs
+    assert (t['sel_radius'], t['sel_inset'], t['np_track_rgb']) == (6, 8, 0x262626)
+    inc = boot_inc(tmp_path, [t])
+    assert 'static const unsigned t_tones[][5] = {\n    { 0x2f5bea, 0x2f5bea, 0x5a7cee, 0x5a7cee, 0x2f5bea },\n};\n' \
+           'static const scheme_t t_schemes[] = {' in inc
+    rows = inc.split('static const scheme_t t_schemes[] = {\n')[1].split('\n};')[0].splitlines()
+    assert [r.split(',')[0] for r in rows] == [f'    {{ .tones = accents[{v}]' for v in range(9)] + ['    { .tones = t_tones[0]']
+
+
+def test_own_scheme_without_tones_keeps_its_base_s():
+    t = resolved('<colorScheme name="sky" base="cobalt" label="Sky"/>')
+    assert 'tones' not in t['schemes'][9]
+
+
+def test_builtins_state_no_tones(tmp_path):
+    """Every built-in scheme's tones stay its ACCENTS row: no theme writes a tones table."""
+    inc = boot_inc(tmp_path, theme.builtins())
+    assert '_tones[]' not in inc and not any('tones' in s for t in theme.builtins() for s in t['schemes'])
+
+
+@pytest.mark.parametrize('body, message', [
+    (f'<colorScheme name="cobalt" tones="{OLED_BLUE}"/>', "cobalt: tones are an own scheme's (name, base, label)"),
+    (f'<colorScheme tones="{OLED_BLUE}"/>', "colorScheme: tones are an own scheme's (name, base, label)"),
+    ('<colorScheme name="sky" base="cobalt" label="Sky" tones="#2f5bea #2f5bea #5a7cee #5a7cee"/>',
+     'sky: tones: expected 5 of #rrggbb (top, bottom, light, red, highlight)'),
+    ('<colorScheme name="sky" base="cobalt" label="Sky" tones="#2f5bea #2f5bea #5a7cee #5a7cee blue"/>',
+     'sky: tones: expected 5 of #rrggbb (top, bottom, light, red, highlight)'),
+])
+def test_tones_reject(body, message):
+    assert error(resolved, body) == f't.xml:1: {message}'
 
 
 def test_own_option():
