@@ -103,6 +103,11 @@ _Static_assert(__builtin_offsetof(scheme_t, mode) == SCHEME_MODE_OFF, "test/patc
 /* A value of the set theme_boot wrote (st.geom), never the live theme's: V_BAR, ... */
 int geom_val(int v) { return geom_vals[st.geom][v]; }
 int client_h(void) { return 320 - geom_val(V_BAR); }
+_Static_assert(V_SPLIT_ART == V_SPLIT_ROW + SPLIT_ART &&
+                   V_SPLIT_ART_UP == V_SPLIT_ROW + SPLIT_ART_UP &&
+                   V_SPLIT_STILL == V_SPLIT_ROW + SPLIT_STILL,
+               "tools/ipod.py GEOM_VALS keeps split_* in SPLIT_* order");
+int split_geom(int k) { return geom_val(V_SPLIT_ROW + k); }
 /* The Display rows' settings, by ringnav_display's index: 0 Accent, 1 Home (0 Split, 1 Full,
  * 2 Carousel), 2 Battery, 3 Theme, 4 Shortcut, 5 Corners, 6 Light Mode, 7 Smart Awake, 8 Centred
  * Now Playing, 9 Click With Headphones (Controls, under Key Tone), 10 Single Press Scrub, 11 Time
@@ -248,6 +253,10 @@ static int theme_own(int k) { return option_of(theme(), SETTING_OWN + k) ? st.ow
 /* Classic's Home in Split (coverflow.c): Library on Home and Row Preview */
 int home_lib_on(void) { return theme_own(OWN_HOMELIB); }
 int row_preview_on(void) { return theme_own(OWN_ROWPREVIEW); }
+/* OLED's song rows (song_rows.c): Song Artist's and Song Length's values, SONG_ARTIST_* and
+ * SONG_LENGTH_* (navigation.h) in theme.xml's order */
+int song_artist(void) { return theme_own(OWN_SONGARTIST); }
+int song_length(void) { return theme_own(OWN_SONGLENGTH); }
 const char *const np_pages[] = { "playing_page", "playing_page_stock" }; /* [NP_*] */
 _Static_assert(sizeof np_pages / sizeof *np_pages == NP_N, "one page per NP_* layout");
 /* The Now Playing page: the theme's layout, which Centred Now Playing forces to NP_CENTRED. */

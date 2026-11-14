@@ -189,7 +189,11 @@ typedef struct {
      * top window title_win and, when a label holds it, title_lbl (both found once per window). */
     void *bar_bt, *bar_wifi, *bar_pct, *bar_slot, *bar_icon, *bar_idle, *bar_state, *bar_eq,
         *bar_title, *title_win, *title_lbl,
-        *action_view; /* Songs' action bar on title_win, under a set with action_row */
+        *action_view, /* Songs' action bar on title_win, under a set with action_row */
+        /* a shuffle_row theme: the action bar the wheel's selection is on (else 0), the list under
+         * it, and which of its stops: SHUFFLE_STOP or SORT_STOP (navigation.c shuffle_key) */
+        *shuffle_on, *shuffle_list;
+    int shuffle_stop;
     /* The row action's confirm on show (confirm_over): its second cell's verb, and its window */
     const char *confirm_verb;
     void *confirm_win;
@@ -198,7 +202,9 @@ typedef struct {
     int pct_digit, pct_sign; /* BATT_PX advances of '0' and '%', measured on the first paint */
     unsigned letter_timer;   /* the fast-scroll letter shows while this runs */
     /* Now Playing's window and payload-filled widgets, and the sources they last showed. */
-    void *np_win, *np_pos, *np_album, *np_slider, *np_remain, *np_elapsed, *np_cover, *np_title;
+    void *np_win, *np_pos, *np_album, *np_slider, *np_remain, *np_elapsed, *np_cover, *np_title,
+        *np_artist;
+    int np_meta[2];          /* face_font's answers for np_artist and np_album, -1 none yet */
     int np_bold;             /* the title's font: theme_font's face | px << 2, -1 not set yet */
     void *np_slide, *np_lrc; /* the art/lyrics/info pages and the lyric lines' scroll_view */
     /* Now Playing's full-screen lyrics (np_full) and where the last touch on them came down
@@ -441,6 +447,29 @@ void font_weight_paint(void *w, void *canvas);
 /* coverflow_position.c */
 int coverflow_position_enabled(void); /* navigation.c: persisted setting */
 void coverflow_position_reset(void);
+
+/* list_marks.c */
+const char *theme_art(const char *name);
+void chevron_icon(void *w, void *canvas, int right, int y, int selected);
+/* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
+ */
+void marquee_fade(void *w, void *canvas);
+/* np_bar.c: Now Playing's shuffle and repeat as the theme's own pair (playing.modes.icons) */
+void np_modes(void *win, void *canvas);
+void wheel_sb_arm(void *list);
+unsigned wheel_sb_alpha(void *list);
+void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key);
+
+/* song_rows.c: SONGS_INLINE's rows. Song Artist's and Song Length's values (theme_engine.c
+ * song_artist, song_length), a list's kind (song_list) and where an artist stands (song_fit). */
+enum { SONG_ARTIST_INLINE, SONG_ARTIST_SELECTED, SONG_ARTIST_RIGHT, SONG_ARTIST_OFF };
+enum { SONG_LENGTH_ALBUMS, SONG_LENGTH_ALL, SONG_LENGTH_OFF };
+enum { SONGS_MIXED = 1, SONGS_ARTIST, SONGS_ALBUM };
+enum { SONG_INLINE = 1, SONG_RIGHT };
+int song_artist(void), song_length(void);
+int song_list(void *w);
+int song_fit(int place, int room, int title, int gap, int artist, int *shown);
+void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected);
 
 /* np_bar.c */
 int np_beside(void);

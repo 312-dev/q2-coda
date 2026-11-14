@@ -630,6 +630,146 @@ def test_minimal_has_no_thumb(fw, st):
     assert lists.paint() == [] and fw.calls('stock_paint_trampoline')
 
 
+# A scrolling text's faded ends (list.marquee.fade, OLED's; list_marks.c marquee_fade): its own column inside stock's
+# 2 px margins, 12 columns at an end, clear inside to opaque at the end, in the colour behind the text.
+OLED = next(i for i, t in enumerate(THEMES) if t['name'] == 'OLED')
+FADE = 12
+
+
+class Fade:
+    """An hscroll_label 200 x 24 whose text is text_w wide, scrolled off px, painted by marquee_fade into a canvas that
+    keeps each fill as (x, y, w, h, color_t)."""
+    def __init__(self, fw, st, text_w=260, off=0, timer=41, ellipses=1):
+        self.fw, self.ui = fw, Ui(fw)
+        theme(fw, OLED)
+        self.label = self.ui.add('hscroll_label', None, (100, 50, 200, 24), 'title')
+        self.label.int_at(O['HSCROLL_TEXT_W']).value = text_w
+        self.label.int_at(O['HSCROLL_XOFFSET']).value = off
+        self.label.int_at(O['HSCROLL_TIMER']).value = timer
+        self.label.byte_at(O['HSCROLL_ELLIPSES']).value = ellipses
+        self.lcd, self.raw = C.create_string_buffer(0x200), C.create_string_buffer(0x100)
+        struct.pack_into('<Q', self.raw, CANVAS_LCD, C.addressof(self.lcd))
+        struct.pack_into('<I', self.lcd, LCD_FILL, 0xff102030)
+        self.fills: list = []
+        fw.mock('style_get_int', lambda style, key, default, *_: i32(default))  # stock's margins: 2 px each
+        fw.mock('canvas_set_fill_color', lambda c, color, *_: struct.pack_into('<I', self.lcd, LCD_FILL, color & 0xffffffff))
+        fw.mock('canvas_fill_rect', lambda c, x, y, w, h, *_: self.fills.append(
+            (i32(x), i32(y), i32(w), i32(h), struct.unpack_from('<I', self.lcd, LCD_FILL)[0])))
+
+    def paint(self):
+        self.fills.clear()
+        self.fw.fn('marquee_fade', None, C.c_void_p, C.c_void_p)(self.label.addr, C.addressof(self.raw))
+        assert struct.unpack_from('<I', self.lcd, LCD_FILL)[0] == 0xff102030  # the canvas's fill is put back
+        return self.fills
+
+    def ends(self):
+        """{'left' | 'right': [(x, alpha), ...] from the end inwards}, every fill a 1 x 24 column of one colour."""
+        assert all(f[1:4] == (0, 1, 24) for f in self.fills) and len({f[4] & 0xffffff for f in self.fills}) <= 1
+        left = sorted((f[0], f[4] >> 24) for f in self.fills if f[0] < 100)
+        right = sorted(((f[0], f[4] >> 24) for f in self.fills if f[0] >= 100), reverse=True)
+        return {k: v for k, v in (('left', left), ('right', right)) if v}
+
+
+def test_a_fade_needs_text_wider_than_its_column(fw, st):
+    assert Fade(fw, st, text_w=196).paint() == []  # 196 + the margins: exactly the box
+    assert Fade(fw, st, text_w=197).paint()
+
+
+def test_text_at_its_start_fades_at_the_right_alone(fw, st):
+    fade = Fade(fw, st)
+    fade.paint()
+    ends = fade.ends()
+    assert list(ends) == ['right'] and [x for x, _ in ends['right']] == list(range(200 - 2 - 1, 200 - 2 - 1 - FADE, -1))
+    alphas = [a for _, a in ends['right']]
+    assert alphas[0] == 255 and alphas == sorted(alphas, reverse=True) and alphas[-1] < 255 // FADE + 1
+    assert fade.fills[0][4] & 0xffffff == 0  # on the page's black
+
+
+def test_text_scrolled_off_its_start_fades_at_both_ends_until_its_end_shows(fw, st):
+    fade = Fade(fw, st, off=30)
+    fade.paint()
+    ends = fade.ends()
+    assert [x for x, _ in ends['left']] == list(range(2, 2 + FADE)) and len(ends['right']) == FADE
+    assert [a for _, a in ends['left']] == [a for _, a in ends['right']]
+    fade = Fade(fw, st, off=260 + 4 - 200)  # its end in view: nothing past the right
+    fade.paint()
+    assert list(fade.ends()) == ['left']
+
+
+def test_a_fade_keeps_to_the_column_its_styles_margins_leave(fw, st):
+    """A folder row's label starts under its icon, its text past margin_left: the fades end on that column."""
+    fade = Fade(fw, st, text_w=200, off=10)
+    margins = {b'margin_left': 40, b'margin_right': 6}
+    fw.mock('style_get_int', lambda style, key, default, *_: margins.get(C.string_at(key), i32(default)))
+    fade.paint()
+    ends = fade.ends()  # 200 - 46 = 154 px of column: 46 over
+    assert [x for x, _ in ends['left']] == list(range(40, 40 + FADE)) and ends['right'][0][0] == 200 - 6 - 1
+    fade.label.int_at(O['HSCROLL_TEXT_W']).value = 154
+    assert fade.paint() == []
+
+
+@pytest.mark.parametrize('mode, light, names', [
+    (0, 0, ['oled_mode_shuffle_d', 'oled_mode_repeat_d']), (1, 0, ['oled_mode_shuffle_d', 'oled_mode_repeat1_on']),
+    (2, 1, ['oled_mode_shuffle_on', 'oled_mode_repeat_l']), (3, 1, ['oled_mode_shuffle_l', 'oled_mode_repeat_on'])])
+def test_now_playings_modes_are_the_themes_pair_lit_by_stocks_mode(fw, st, mcl, mode, light, names):
+    """playing.modes.icons (np_bar.c np_modes): shuffle and repeat 44 px apart about the play mode's target's centre,
+    each the accent's while on (shuffle at MCL_MODE 2, repeat at 3, repeat-once's glyph at 1), else the half's grey."""
+    ui = Ui(fw)
+    theme(fw, OLED)
+    st('light').value, mcl.mode = light, mode
+    win = ui.window('playing_page')
+    button = ui.add('image', win, (143, 196, 88, 44), 'img_playmode')
+    fw.mock('widget_lookup', lambda w, name, deep, *_: button.addr if C.string_at(name) == b'img_playmode' and not deep else 0)
+    loads, drawn = [], []
+    fw.mock('widget_load_image', lambda w, name, bitmap, *_: loads.append(C.string_at(name).decode()) or 0)
+    fw.mock('canvas_draw_icon', lambda c, bitmap, x, y, *_: drawn.append((i32(x), i32(y))))
+    lcd, raw = C.create_string_buffer(0x200), C.create_string_buffer(0x100)
+    struct.pack_into('<Q', raw, CANVAS_LCD, C.addressof(lcd))
+    fw.fn('np_modes', None, C.c_void_p, C.c_void_p)(win.addr, C.addressof(raw))
+    assert loads == names and drawn == [(187 - 22, 218), (187 + 22, 218)]
+    loads.clear()
+    st('theme').value = MINIMAL  # stock's one icon: nothing drawn
+    fw.fn('np_modes', None, C.c_void_p, C.c_void_p)(win.addr, C.addressof(raw))
+    assert loads == []
+
+
+@pytest.mark.parametrize('timer, ellipses, faded', [(0, 1, False), (41, 1, True), (0, 0, True)])
+def test_a_label_at_rest_on_its_ellipsis_keeps_it(fw, st, timer, ellipses, faded):
+    """Stock ends a stopped label with ellipses in "...": that one is left alone. Running, or stopped without an ellipsis
+    (cut at its column), it fades."""
+    assert bool(Fade(fw, st, timer=timer, ellipses=ellipses).paint()) == faded
+
+
+def test_the_selected_rows_marquee_fades_into_the_selection_and_light_mode_into_the_paper(fw, st, layout):
+    fade = Fade(fw, st)
+    st('marq_label', C.c_void_p).value = fade.label.addr
+    fade.paint()
+    tones = C.c_void_p.from_address(fw.fn('scheme', C.c_void_p)() + layout[0]['tones']).value or 0
+    top = C.c_uint.from_address(tones).value  # the selection bar's top tone, the colour under the text
+    assert top and {f[4] & 0xffffff for f in fade.fills} == {rgba(top) & 0xffffff}
+    t = THEMES[OLED]
+    assert top == t['schemes'][t['accents'].bit_length() - 1]['tones'][0]  # OLED's Accent Blue
+    st('marq_label', C.c_void_p).value = None
+    st('light').value = 1
+    fade.paint()
+    paper = C.c_uint.from_address(fw.fn('scheme', C.c_void_p)() + layout[0]['paper']).value  # the light half's
+    assert paper > 0xe00000 and {f[4] & 0xffffff for f in fade.fills} == {rgba(paper) & 0xffffff}
+
+
+def test_other_themes_and_widgets_get_no_fade(fw, st):
+    fade = Fade(fw, st)
+    fade.paint()
+    assert fade.fills
+    label = fade.label
+    fade.label = fade.ui.add('label', None, (100, 50, 200, 24), 'plain')
+    fade.label.int_at(O['HSCROLL_TEXT_W']).value = 260
+    assert fade.paint() == []
+    fade.label = label
+    st('theme').value = MINIMAL  # ringnav_paint asks list.marquee.fade first: Minimal's is 0
+    assert THEMES[MINIMAL]['marquee_fade'] == 0 == THEMES[CLASSIC]['marquee_fade'] == THEMES[MODERN]['marquee_fade']
+    assert THEMES[OLED]['marquee_fade'] == 1
+
+
 # The status bar's play state (ringnav_showface, each second).
 class Bar:
     NAMES = ('img_bt', 'img_wifi', 'label_battery', 'view_battery', 'img_battery', 'label_idle', 'img_state',

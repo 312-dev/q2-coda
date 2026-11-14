@@ -9,7 +9,8 @@
 #define VIS_X 16             /* tools/ipod.py NP_MARGIN */
 #define VIS_W (375 - 2 * VIS_X) /* the widest page's drawing, its buffers' size */
 #define PAGE_W (vz.w - 2 * VIS_X) /* this page's: the slide's width, 375 or the centred page's 225 */
-#define VIS_H 186            /* tools/ipod.py NP_SLIDE_H, the page's height, from the lyrics' top */
+#define VIS_SLIDE_H 186      /* tools/ipod.py NP_SLIDE_H, the page's height, from the lyrics' top */
+#define VIS_H (vz.h ? vz.h : VIS_SLIDE_H) /* ... or less where the slide ends sooner (OLED's np_grid) */
 #define VIS_ART 88           /* the Halo's centre */
 #define TAU 6.2831853f
 enum { SPECTRUM, SCOPE, METERS, HALO, STYLES };
@@ -18,7 +19,7 @@ static struct {
     float re[VIS_N], im[VIS_N], pcm[VIS_N][2], hann[VIS_N]; /* hann[VIS_N / 2] is 0 until filled */
     float level[VIS_HALO], peak[VIS_BARS], fall[VIS_BARS], wave[2][VIS_W], vu[2], spin, bass;
     unsigned held[VIS_BARS], lit[2], bin_rate;
-    int w; /* the page's width (visualizer_attach) */
+    int w, h; /* the page's width and height (visualizer_attach; h 0: VIS_SLIDE_H) */
     int bin[VIS_HALO + 1]; /* each band's first FFT bin at bin_rate */
 #ifndef PEQ_HOST
     void *win, *slide, *page, *art, *cover;
@@ -515,6 +516,7 @@ void visualizer_attach(void *win) {
      * page starts where they do, so it stays where the others have it on screen */
     void *lrc = widget_lookup(slide, "view_lrc", 1);
     int top = lrc ? I(lrc, W_Y) : 0;
+    vz.h = I(slide, W_H) - top < VIS_SLIDE_H ? I(slide, W_H) - top : VIS_SLIDE_H;
     vz.page = list_item_create(slide, 0, top, vz.w, VIS_H);
     widget_use_style(vz.page, "s_listitem_black");
     widget_on(vz.page, EVT_CLICK, next_style, 0);

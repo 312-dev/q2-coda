@@ -89,6 +89,15 @@ curl 8.18 and later do not build against OpenSSL 1.1.1, and the last that do (8.
 - **The Linux kernel (5.10.21).** It is Shanling's, with drivers for the X2000 SoC, its codec and its Wi-Fi and Bluetooth chips, and they publish no source. Out of reach.
 - **Others the scan does not name.** syft names few components, and `PROBES` in `tools/scan.py` covers the ones above. The rootfs also has, unchanged: thttpd 2.29 (the Wi-Fi transfer server; its CGIs are Q2 Pod's own, `assets/web/q2cgi`), shairport (AirPlay receiver), ntpdate 4.2.8p15, D-Bus 1.12, GLib 2.74, expat, libjpeg 7, ncurses, readline, ALSA, TagLib and Shanling's own libraries.
 
+## Artwork
+
+Artwork that ships in the firmware, drawn from someone else's design. Fonts are in `assets/fonts`, each with its
+licence (`docs/ipod.md`).
+
+| Component                                    | Licence | Files                                                          | Used for                                                                                                       |
+| -------------------------------------------- | ------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Phosphor Icons, `@phosphor-icons/core` 2.1.1 | MIT     | `assets/icons/phosphor/*.svg`, `assets/icons/phosphor/LICENSE` | Theme: OLED's glyphs, drawn into bitmaps at build time by `tools/art.py` ([oled-design](oled-design.md#icons)) |
+
 ## What the scan still finds
 
 `tools/scan.py --only firmware` on a stock-library build and on one with these replacements (November 2026):

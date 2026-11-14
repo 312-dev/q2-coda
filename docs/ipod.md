@@ -123,7 +123,7 @@ window while sliding.
 
 Display settings offers **Home: Split / Full / Carousel**, stored as `IPOD/HOME` 0, 1 or 2; invalid or absent
 values mean Split. `coverflow_home_layout` moves the asset's widgets at runtime, in every theme:
-Split narrows both menus to `HOME_SPLIT_W` (187, half the screen) and shows the cover itself in the 290-pixel-high panel right of them
+Split narrows both menus to the geometry set's `split_row` (`HOME_SPLIT_W`, 187, half the screen, but in OLED's set) and shows the cover itself in the panel right of them, from `split_art` (the same 187) to the screen's edge and the window's full height, 290 pixels under a 30-pixel bar
 (`img_homeart` is an `image` for this, fitted to the cover's proportions and clipped to the panel,
 the menus clipped left of it; `default_album_home` without a cover); Full hides the art and
 widens the menus to the screen, their rows to `HOME_FULL_ROW` (375; Classic's `full_row`, the same). Minimal's labels keep x 39 and end 33 pixels from the screen edge in Full, `HOME_SPLIT_LABEL_END` (8) before the art in Split, where no corner needs clearing (140 pixels wide). Classic's
@@ -173,6 +173,14 @@ small for a 290 px panel, so each change would decode a full cover), and Light M
 a transparent cover follows only the next cover change. The timer trusts `home.win` as Home's
 identity, as the art's paint always has: Home is only replaced through `coverflow_home`, which
 stops the timer first.
+
+A set with `split_still` (OLED's) keeps the cover still instead: the same 110 % zoom, cut from its
+middle, so a cover's own frame (many have a thin white border) never shows at the pane's edges, and
+no timer runs. A set with `split_art_up` starts the pane that many rows above Home's window: the
+frame is that much taller, Home's window draws its rows from the window's top down, and the bar
+draws the rest over its own black (`coverflow_home_bar`, from the bar's background paint, with Home
+on top and no window sliding, as Home's paint draws nothing outside its window). With nothing
+playing, or a cover the frame cannot hold, the pane is the window's panel as in the other sets.
 
 ## Status bar and clock
 
@@ -578,6 +586,16 @@ stock's own reload.
 `NP_ALBUM_RGB`, `SUDO_TRACK` apart, `paint_caps`) over its label's transparent ink; Classic and
 Modern show the label, and Modern's title is bold. There is no on-screen transport row: the buttons play, pause and skip.
 
+**Theme: OLED** lays the page out on its own grid ([oled-design.md](oled-design.md#now-playing)): the
+150-pixel art at the 24-pixel text column under the status row, which shows the clock, its corners
+6 pixels; the title, artist and album 18 pixels right of it, ending on the 28-pixel right column,
+the artist and album in Inter's 18 in Text Secondary; "1 of 10" level with the art's foot, More and
+the heart at the end of its line; a 6-pixel bar from the text column to the right column at y 228,
+the times under its ends in Inter's tabular digits, and shuffle and repeat centred under them in the
+accent when on, grey when off, over the play mode button, which a tap still steps. The page dots
+sit under those, and the swipe's other pages stop above the bar. Each line that scrolls fades at
+the end it runs past (Display's [Theme](#theme)).
+
 The art, title, artist and album are the slide_view's first page, so a swipe replaces all of them
 with the lyrics or info page. The info page keeps its stock 225-pixel column, centred; the lyrics
 page spans the screen (**Lyrics** below). The info page's lines read `Label: value`, with spaced units
@@ -754,7 +772,7 @@ NPCENTRED`, off; `playset_covermode`): `ringnav_ui_load`, hooked on every window
   down to the page dots, wrapped again at that width (`np_full`, `lyrics_fit`) and back on the playing line; a tap or
   Return brings the column back, as do a swipe, another page and leaving the page; a window over the page leaves it
   full screen
-  ([Word-timed lyrics](internals.md#word-timed-lyrics)). Choosing a Theme loads its preset (`theme_preset`), before the restart where there is one: Minimal sets Light Mode Off, Graphite (`MINIMAL_ACCENT` 0), rounded corners, Split and Time in Title on; Classic sets Light Mode On, Classic Blue (`CLASSIC_LIGHT_ACCENT` 9), Split, and Time in Title, Library on Home, Row Preview and Row Art on; Modern sets Light Mode On, Cobalt (`ACCENT` 4), Square, Split and Time in Title off; OLED sets what Classic sets; Light Mode's Auto, Battery, Shortcut and Centred Now Playing are kept, and only changed values are saved.
+  ([Word-timed lyrics](internals.md#word-timed-lyrics)). Choosing a Theme loads its preset (`theme_preset`), before the restart where there is one: Minimal sets Light Mode Off, Graphite (`MINIMAL_ACCENT` 0), rounded corners, Split and Time in Title on; Classic sets Light Mode On, Classic Blue (`CLASSIC_LIGHT_ACCENT` 9), Split, and Time in Title, Library on Home, Row Preview and Row Art on; Modern sets Light Mode On, Cobalt (`ACCENT` 4), Square, Split and Time in Title off; OLED sets Light Mode Off, its Blue (`OLED_ACCENT` 9) and Full; Light Mode's Auto, Battery, Shortcut and Centred Now Playing are kept, and only changed values are saved.
 - Display's main page: a "Smart Awake" switch (`IPOD KEEPLIT`, off;
   `keep_lit_poll`): with Now Playing lit in front on its lyrics, info or visualizer page, or its
   full-screen art (`bigcover_page`) in front, and a song playing, it calls
@@ -787,7 +805,7 @@ The page is `CTX_FIXED`, so the wheel walks onto them like the stock rows.
 
 A change is saved at once with the stock `write_int_config(value, "IPOD", key)` (`0x4fe67c`):
 `sprintf("%d")`, then `toolsWriteConfig("/mnt/data/config.ini", section, key, text)`, which
-rewrites the key or appends `[IPOD]` with it (`"[%s]\n%s=%s\n"`). The keys are `MINIMAL_ACCENT` (Minimal's accent), `CLASSIC_LIGHT_ACCENT` (Classic's and OLED's), `ACCENT` (Modern's), `ROUNDED` (Rounded Corners: 0 off, 1 on), `LIGHT` (Light Mode: 0 Off, 1 On, 2 Auto; missing is Off), `HOME`, `BATTERY`, `THEME`, every theme's `STATUSBAR` (Status Bar), and Classic's own `HOMELIB`, `ROWPREVIEW` and `ROWART` (OLED's too). The values are read once,
+rewrites the key or appends `[IPOD]` with it (`"[%s]\n%s=%s\n"`). The keys are `MINIMAL_ACCENT` (Minimal's accent), `CLASSIC_LIGHT_ACCENT` (Classic's), `OLED_ACCENT` (OLED's), `ACCENT` (Modern's), `ROUNDED` (Rounded Corners: 0 off, 1 on), `LIGHT` (Light Mode: 0 Off, 1 On, 2 Auto; missing is Off), `HOME`, `BATTERY`, `THEME`, every theme's `STATUSBAR` (Status Bar), and Classic's own `HOMELIB`, `ROWPREVIEW` and `ROWART`. The values are read once,
 on the payload's first use (after stock `config_init`: `application_init` runs `platform_init`, which
 calls it, before it opens any window), with `toolsReadConfig` (`0x5cfff4`), in the order stock `config_init`
 calls it: `(path, section, key, out, default)`. It reads the file line by line
@@ -830,10 +848,10 @@ Now Playing uses 24 px monochrome control glyphs on 28 px canvases inside the ex
 The Theme list shows Minimal, Modern, Classic, OLED (`theme_rows`, by each theme.xml's `order`), whatever their stored numbers.
 **Theme: Minimal** (`THEME=0`, the default) is the look described above. **Theme: Classic**
 (`1`) is a light iPod look with a dark half, on its own layout (below). **Theme: Modern** (`2`)
-is 1.6.5's Classic on Minimal's layout (below). **Theme: OLED** (`3`) is a placeholder for the
-OLED design (below). A stored `THEME=4` or past reads as Minimal.
-Choosing Classic or OLED from Minimal or Modern, or the other way, asks "Restart to apply?", because Classic and OLED lay their rows out
-from Classic's geometry sets ([internals.md](internals.md#themes)): Cancel changes nothing; OK
+is 1.6.5's Classic on Minimal's layout (below). **Theme: OLED** (`3`) is a black screen with
+white Inter type and one blue accent, on its own layout ([oled-design.md](oled-design.md), below). A stored `THEME=4` or past reads as Minimal.
+Choosing a theme on another layout asks "Restart to apply?": Classic lays its rows out from Classic's geometry
+sets and OLED from its own, while Minimal and Modern share the built-in one ([internals.md](internals.md#themes)): Cancel changes nothing; OK
 saves the theme and its preset ([Display settings](#display-settings)) and restarts the Q2.
 
 Corners is Minimal's and Modern's setting, each theme's preset until chosen (Minimal's Round, Modern's Square); Classic's covers are always square. Every theme insets an album grid's cover inside the tile (`album_children`), so the selection card frames it; Classic's and Modern's card is in the accent's colour, Classic's square.
@@ -889,11 +907,49 @@ photo pages' own drawing) keeps Minimal's layout under this theme's colours and 
 
 #### OLED
 
-**Theme: OLED** is a placeholder for the OLED design, whose own docs are to follow. Its
-`assets/themes/oled/theme.xml` extends Classic and changes nothing, so it looks and behaves as
-Theme: Classic does: Classic's geometry sets, art, face, options and accent (`CLASSIC_LIGHT_ACCENT`, shared
-with Classic). Classic and OLED share their sets, so a change between them applies at once, as one between
-Minimal and Modern does.
+**Theme: OLED** is built to [oled-design.md](oled-design.md): black, white sentence-case Inter, one blue.
+Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as the `oled` geometry set.
+
+- **The status row.** No bar band: the page's title, small and grey, on the list's left column (the clock instead
+  on Home and Now Playing), and the play state and a slim battery ending on the list's right column, centred
+  on y 37, clear of the glass's corners.
+- **The grid.** 32 px rows from y 58 with their text at x 24, seven to a screen: the list ends at y 282, above
+  the bottom corners, and the strip below it stays black (`list_fit`). Chevrons and values share one column 28 px
+  from the right edge on every row. Settings, the Library, Home (Full and Split) and stock's own list pages all
+  take it; Albums and Search are two lines at 52 px, four to a page, the covers with 4 px corners. A row that
+  opens a page and shows a value (Crossfade, Resume Songs) has the value just left of its chevron. The status row
+  names the Library and Songs by those words, where stock calls both "Local Songs".
+- **Colour.** Black (white in Light Mode), white text, second lines in Text Tertiary (`#858585`), a settings row's
+  value in Text Secondary (`#ABABAB`, `#5C5C5C` on paper), and one blue, `#2160D8`, for the selection bar, the
+  progress fill and every mark stock draws red. **Accent** offers that Blue alone (`OLED_ACCENT`).
+- **Type.** Inter Regular for rows (20 px) and second lines (15 px), Inter Medium for the status row (15 px) and
+  Now Playing's title (22 px), with tabular digits ([Its font](#oled-type) below).
+- **The selection.** The accent's flat bar, 16 px in from each side with 8 px ends on every row.
+- **Scrolling.** A short track and thumb on the right edge, beside the list's middle, while the wheel turns; it
+  fades a second after the last tick. A title that scrolls (the selected row's, the status row's, Now Playing's
+  lines) stays in its own column and fades out over 12 px at the end it runs past: the right while there is more
+  to come, the left while its start is out of view, so at rest its start is crisp. A long title that isn't
+  scrolling keeps its ellipsis.
+- **Now Playing.** On the grid as the mock-up shows ([Now Playing](#now-playing)).
+- **Icons.** Phosphor's (MIT, [oled-design.md](oled-design.md#icons)): the caret on each row that opens a page,
+  the play state.
+- **Home.** Full by default. In Split the menu's rows are 204 px wide, so the selection bar ends at x 188 and the
+  chevrons stand at 176, and the playing album's art fills the rest from x 196 and y 52 (6 px up into the status
+  row) to the right and bottom edges, still, cut from the middle of the cover, the glass rounding its corner
+  (`split_row`, `split_art`, `split_art_up`, `split_still`; [Home](#home)).
+- **Song rows.** One line each, no chevron. In Songs and the other lists stock shows on Songs' page (a genre's
+  songs among them) the artist follows the title two spaces on, in 15 px Text Tertiary, both ending in an ellipsis
+  where they run out of room and the artist dropped when under 40 px would be left; an artist's own songs show
+  none; an album shows each track's number in a 14 px column before the title (from x 50) and its length on the
+  right column, once Scan Song Durations has measured it. **Song Artist**: Inline (the default), Selected Row (the
+  selected row's artist on the right column), Right (every row's) or Off. **Song Length**: Albums (the default), All
+  Lists or Off; with a length on the right column, Right and Selected Row put the artist inline. Lists Q2 Pod builds
+  itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep their own rows.
+- **Appearance's rows.** Theme, Status Bar, Light Mode, Accent, Home, Shortcut, Battery (Icon or Percent), Song Artist
+  and Song Length.
+
+<a id="oled-type"></a>Inter 4.1 Regular and Medium (`assets/fonts`, SIL OFL 1.1) ship as `fonts/inter.ttf` and
+`fonts/inter-medium.ttf`, subset as the other faces are; where Inter lacks a character, stock's face stands in.
 
 ### Light Mode
 

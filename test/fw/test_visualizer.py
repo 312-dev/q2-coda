@@ -24,7 +24,7 @@ class Vz(C.Structure):
     _fields_ = [('re', C.c_float * N), ('im', C.c_float * N), ('pcm', (C.c_float * 2) * N), ('hann', C.c_float * N),
                 ('level', C.c_float * HALO), ('peak', C.c_float * BARS), ('fall', C.c_float * BARS),
                 ('wave', (C.c_float * W) * 2), ('vu', C.c_float * 2), ('spin', C.c_float), ('bass', C.c_float),
-                ('held', C.c_uint * BARS), ('lit', C.c_uint * 2), ('bin_rate', C.c_uint), ('w', C.c_int), ('bin', C.c_int * 65),
+                ('held', C.c_uint * BARS), ('lit', C.c_uint * 2), ('bin_rate', C.c_uint), ('w', C.c_int), ('h', C.c_int), ('bin', C.c_int * 65),
                 *((k, C.c_void_p) for k in 'win slide page art cover tap'.split()),
                 *((k, C.c_uint) for k in 'timer last named heard retry'.split()),
                 *((k, C.c_int) for k in 'ox oy page_x style quiet'.split())]
@@ -700,11 +700,11 @@ class Now:
     views, so only a recursive lookup finds them. page, art: whether stock makes the page's list_item and the
     Halo's image."""
     def __init__(self, fw, width=375, lrc_y=0, style=None, now=100000, box_x=0, slide_x=0, page=True, art=True,
-                 dots=True, win_y=0):
+                 dots=True, win_y=0, slide_h=None):
         self.fw, self.now, self.blocks, self.timers = fw, now, [], []
         self.win = self.widget(0, win_y, 375, 320)
         self.box = self.widget(box_x, 60, 375, 200, self.win)
-        self.slide = self.widget(slide_x, 0, width, 186, self.box)
+        self.slide = self.widget(slide_x, 0, width, 186 + lrc_y if slide_h is None else slide_h, self.box)  # as laid out
         self.cover, self.dots = self.widget(0, 0, 200, 200), self.widget(0, 0, 60, 10) if dots else 0
         self.lrc = self.widget(0, lrc_y, width, 100) if lrc_y else 0
         self.pages = 4 if page else 3  # art, lyrics, info and this
@@ -919,6 +919,15 @@ def test_classic_s_centred_page_starts_where_its_lyrics_do(fw):
     now = Now(fw, width=225, lrc_y=18)
     page = struct.unpack_from('<4i', (C.c_char * 16).from_address(now.v.page))
     assert page == (0, 18, 225, 186) and (now.v.w, now.v.oy) == (225, 78)
+
+
+@pytest.mark.parametrize('slide_h, lrc_y, h', [(160, 0, 160), (178, 18, 160), (186, 0, 186), (250, 18, 186)])
+def test_a_slide_that_ends_sooner_ends_the_page_with_it(fw, slide_h, lrc_y, h):
+    """OLED's slide stops above its progress bar (tools/ipod.py np_grid): the page takes the slide's height below the
+    lyrics' top where that is under the 186 px a slide has elsewhere, which stays the page's height at most."""
+    now = Now(fw, lrc_y=lrc_y, slide_h=slide_h)
+    page = struct.unpack_from('<4i', (C.c_char * 16).from_address(now.v.page))
+    assert page == (0, lrc_y, 375, h) and now.v.h == h
 
 
 @pytest.mark.parametrize('saved, style', [('3', HALO_STYLE), ('1', SCOPE), ('7', SPECTRUM), ('x', SPECTRUM)])

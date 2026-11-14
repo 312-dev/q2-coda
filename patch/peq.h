@@ -479,6 +479,7 @@ void dac_take(void);                          /* books.c */
 /* navigation.c: the theme's font for role on w, or stock's; canvas text's face, 0: the system
  * font */
 int theme_font(void *w, int role, int was);
+int face_font(void *w, int face, int px, int was); /* ... a FONT_* face at px (0: the style's) */
 #define FONT_ROW -2 /* was: cache the answer in w's own "_font" prop */
 /* font_weight.c: w keeps the theme's bold intent where its text fell back to stock's face */
 void font_weight_mark(void *w, int bold);
@@ -517,6 +518,8 @@ unsigned dark_bar_key(const unsigned *t);
 int clock_minutes(void), bar_status(void);
 void slider_label(void *w, int x, int y, int ww, int h, int px, const char *face);
 void text_ink(void *w, unsigned color, int n); /* a label's final 0xAARRGGBB, in either half */
+/* navigation.c: a feature settings row's "Title: value", on the set's right column where it has one */
+void row_value_text(void *label, const char *text);
 void slider_number(void *label), slider_tray_dirty(void *page),
     slider_centre_hint(void *page, int night);
 void switch_row(void *win, void *view); /* the toolbar's, as a row */
@@ -557,6 +560,7 @@ unsigned playlist_index(int cd_num);
 void playlists_edit(int edit);
 int rockbox_available(void);  /* theme_engine.c: a regular Rockbox binary on the card */
 int groovebox_available(void); /* theme_engine.c: the Groovebox card app's binary on the card */
+#define SHORTCUT_SHUFFLE 5     /* IPOD SHORTCUT's Shuffle Songs: it plays in place */
 #define SHORTCUT_GROOVEBOX 10  /* IPOD SHORTCUT's Groovebox, after the ten stock-era values */
 #define SHORTCUT_NONE 11       /* IPOD SHORTCUT's None: Home has no Shortcut row */
 int page_keyup(void *ctx, void *event); /* navigation.c: Return leaves a payload page */

@@ -381,6 +381,7 @@ const scheme_t *scheme(void) { /* light is only asked of it in its light half */
     return &s;
 }
 int client_h(void) { return 320 - stub_bar_h; }
+int split_geom(int k) { return k == SPLIT_ROW || k == SPLIT_ART ? HOME_SPLIT_W : 0; } /* the built-in set's */
 int theme_font(void *w, int role, int was) { return was; } /* the font only: no geometry */
 /* The Split pane's painters: the stops asked for, each fill in the colour last set, the count's text. */
 #define SHADOW_A(i) ((int[]){ 116, 100, 93, 86, 79, 73, 68, 62, 56, 50, 44, 39, 34, 28, 24, 19, 16, 13, 10, 8, 6, 4, 3, 2, 1 }[i])
@@ -2769,13 +2770,13 @@ static int quad_cols(const int *q) { /* whether draw_quad draws any column of q:
 }
 static void held_row(void) {
     static unsigned f[300 * PITCH], g[300 * PITCH], art[43][160 * 160];
-    static const cf_style_t shipped[3] = { CF_SHIPPED0, CF_SHIPPED, CF_SHIPPED2 };
+    static const cf_style_t shipped[CF_THEMES] = CF_SHIPPED_ALL; /* every built-in theme's, in index order */
     const cf_style_t fixture = shim_themes[1].cf;
     #define ART(a) (abs(a) <= 21 ? art[(a) + 21] : 0) /* album a */
     for (int i = 0; i < 43; ++i)
         for (int k = 0; k < 160 * 160; ++k) art[i][k] = 0xff000000u | ((unsigned)(i * 160 * 160 + k) * 2654435761u >> 8 & 0xffffff);
     square_art = 1, classic = 1;
-    for (int ti = 0; ti < 3; ++ti) {
+    for (int ti = 0; ti < CF_THEMES; ++ti) {
         shim_themes[1].cf = shipped[ti];
         open_page();
         const cf_style_t *cs = &shim_themes[1].cf;
@@ -2911,10 +2912,10 @@ static int fold_x(int xc, int zc, int c, int s, int eye, int u) { /* project()'s
     return (xc + (u * c >> 16)) * eye / (eye + zc - (u * s >> 16));
 }
 static void fold_clearance(void) {
-    static const cf_style_t shipped[3] = { CF_SHIPPED0, CF_SHIPPED, CF_SHIPPED2 };
+    static const cf_style_t shipped[CF_THEMES] = CF_SHIPPED_ALL; /* every built-in theme's, in index order */
     const cf_style_t fixture = shim_themes[1].cf;
     classic = 1;
-    for (int ti = 0; ti < 3; ++ti) {
+    for (int ti = 0; ti < CF_THEMES; ++ti) {
         shim_themes[1].cf = shipped[ti];
         const cf_style_t *cs = &shim_themes[1].cf;
         for (int lean = -1; lean <= 1; lean += 2) {
@@ -2994,7 +2995,7 @@ static void fold_clearance(void) {
 void cf_shelf_still(int still);
 static void fold_frames(void) {
     static unsigned f[300 * PITCH], g[300 * PITCH], one_f[300 * PITCH], art[15][160 * 160], line[15][CF_VIEW_W];
-    static const cf_style_t shipped[3] = { CF_SHIPPED0, CF_SHIPPED, CF_SHIPPED2 };
+    static const cf_style_t shipped[CF_THEMES] = CF_SHIPPED_ALL; /* every built-in theme's, in index order */
     const cf_style_t fixture = shim_themes[1].cf;
     const unsigned *ring[15];
     for (int i = 0; i < 15; ++i) {
@@ -3002,7 +3003,7 @@ static void fold_frames(void) {
         for (int k = 0; k < 160 * 160; ++k) art[i][k] = 0xff000000u | ((unsigned)(i * 160 * 160 + k) * 2654435761u >> 8 & 0xffffff);
     }
     square_art = 1, classic = 1;
-    for (int ti = 0; ti < 3; ++ti) {
+    for (int ti = 0; ti < CF_THEMES; ++ti) {
         shim_themes[1].cf = shipped[ti];
         open_page();
         const cf_style_t *cs = &shim_themes[1].cf;
@@ -3129,13 +3130,13 @@ static int turned_on(int frac, float lead, float enter, int lean, float at) { /*
 }
 static void enter_frames(void) {
     static unsigned f[300 * PITCH], g[300 * PITCH], one_f[300 * PITCH], last_f[300 * PITCH], art[43][160 * 160], line[15][CF_VIEW_W];
-    static const cf_style_t shipped[3] = { CF_SHIPPED0, CF_SHIPPED, CF_SHIPPED2 };
+    static const cf_style_t shipped[CF_THEMES] = CF_SHIPPED_ALL; /* every built-in theme's, in index order */
     const cf_style_t fixture = shim_themes[1].cf;
     #define ART(a) (abs(a) <= 21 ? art[(a) + 21] : 0) /* album a from frac's centre */
     for (int i = 0; i < 43; ++i)
         for (int k = 0; k < 160 * 160; ++k) art[i][k] = 0xff000000u | ((unsigned)(i * 160 * 160 + k) * 2654435761u >> 8 & 0xffffff);
     square_art = 1, classic = 1;
-    for (int ti = 0; ti < 3; ++ti) {
+    for (int ti = 0; ti < CF_THEMES; ++ti) {
         shim_themes[1].cf = shipped[ti];
         open_page(); /* cf_restyle's */
         const cf_style_t *cs = &shim_themes[1].cf;
@@ -3346,8 +3347,8 @@ static void enter_frames(void) {
    the cover coming in at the edge. ---- */
 void cf_shelf_still(int still);
 static void rest_pinned(void) {
-    static const cf_style_t shipped[3] = { CF_SHIPPED0, CF_SHIPPED, CF_SHIPPED2 };
-    static const unsigned pinned[3] = { 0x09b59e69u, 0x40a22303u, 0x09b59e69u };
+    static const cf_style_t shipped[CF_THEMES] = CF_SHIPPED_ALL; /* every built-in theme's, in index order */
+    static const unsigned pinned[CF_THEMES] = { 0x09b59e69u, 0x40a22303u, 0x09b59e69u, 0x09b59e69u };
     static unsigned f[300 * PITCH], art[15][160 * 160];
     const cf_style_t fixture = shim_themes[1].cf;
     for (int i = 0; i < 15; ++i)
@@ -3356,7 +3357,7 @@ static void rest_pinned(void) {
     for (int j = 0; j < 15; ++j) ring[j] = art[j];
     classic = 1;
     cf_shelf_still(1); /* nothing moving, as coverflow_paint has it */
-    for (int ti = 0; ti < 3; ++ti) {
+    for (int ti = 0; ti < CF_THEMES; ++ti) {
         shim_themes[1].cf = shipped[ti];
         open_page();
         unsigned hash = 2166136261u;
@@ -3419,14 +3420,14 @@ static int edge_levels(const unsigned *a, const unsigned *b, int h) { /* the mos
 }
 static void edge_drawn(void) {
     static unsigned f[300 * PITCH], last[300 * PITCH], g[300 * PITCH];
-    static const cf_style_t shipped[3] = { CF_SHIPPED0, CF_SHIPPED, CF_SHIPPED2 };
+    static const cf_style_t shipped[CF_THEMES] = CF_SHIPPED_ALL; /* every built-in theme's, in index order */
     static const float leads[] = { 0, .05f, .3f, 1, 2, 3.2f, 5 };
-    static const int row_out_min[3] = CF_ROW_OUT_MIN; /* tools/theme.py's, each theme's */
+    static const int row_out_min[CF_THEMES] = CF_ROW_OUT_MIN; /* tools/theme.py's, each theme's */
     const cf_style_t fixture = shim_themes[1].cf;
     for (int i = 0; i < 64; ++i)
         for (int k = 0; k < 160 * 160; ++k) edge_art[i][k] = 0xff000000u | ((unsigned)(i * 160 * 160 + k) * 2654435761u >> 8 & 0xffffff);
     square_art = 1, classic = 1;
-    for (int ti = 0; ti < 3; ++ti) {
+    for (int ti = 0; ti < CF_THEMES; ++ti) {
         shim_themes[1].cf = shipped[ti];
         open_page(); /* cf_restyle's */
         const cf_style_t *cs = &shim_themes[1].cf;
@@ -4000,12 +4001,12 @@ static void letters_176(void) {
    second, gone by the landing, and none with Fast Navigation on, which keeps the row at speed. ---- */
 void cf_thumb_arch(float arch), cf_arch_pose(int t, float arch, int *out);
 static void arch(void) {
-    static const cf_style_t shipped[3] = { CF_SHIPPED0, CF_SHIPPED, CF_SHIPPED2 };
+    static const cf_style_t shipped[CF_THEMES] = CF_SHIPPED_ALL; /* every built-in theme's, in index order */
     static unsigned f[300 * PITCH];
     const cf_style_t fixture = shim_themes[1].cf;
     const unsigned *wide[15], **ring = flat_ring(wide);
     classic = 1, frame_fail = 0, square_art = 1, pressed = 0, big_library = 0;
-    for (int ti = 0; ti < 3; ++ti) {
+    for (int ti = 0; ti < CF_THEMES; ++ti) {
         const cf_style_t *cs = &shim_themes[1].cf;
         shim_themes[1].cf = shipped[ti];
         open_page();
@@ -4568,7 +4569,7 @@ static void letters_slide(void) {
    there. In every theme (Classic and Modern take Minimal's by extends) fold_near is the same and at
    most 50, and the sweep reaches a hand-off over a third of an album out. ---- */
 static void lift_handoff(void) {
-    static const cf_style_t shipped[3] = { CF_SHIPPED0, CF_SHIPPED, CF_SHIPPED2 };
+    static const cf_style_t shipped[CF_THEMES] = CF_SHIPPED_ALL; /* every built-in theme's, in index order */
     static char nm[101][32];
     const cf_style_t fixture = shim_themes[1].cf;
     int keep = albums, starts[3] = { keep + 5, keep + 30, keep + 45 }, runs = 0;
@@ -7850,6 +7851,9 @@ def main():
     cf_style.append('-DCF_SHIPPED={ ' + ', '.join(f'.{f[3:]} = {v}' for f, v in classic_light.items() if f.startswith('cf.')) + ' }')
     cf_style.append('-DCF_SHIPPED0={ ' + ', '.join(f'.{f[3:]} = {v}' for f, v in builtins()[0].items() if f.startswith('cf.')) + ' }')
     cf_style.append('-DCF_SHIPPED2={ ' + ', '.join(f'.{f[3:]} = {v}' for f, v in builtins()[2].items() if f.startswith('cf.')) + ' }')
+    # every built-in theme's .cf, for the checks that run each shipped look in turn
+    cf_style.append(f'-DCF_THEMES={len(builtins())}')
+    cf_style.append('-DCF_SHIPPED_ALL={ ' + ', '.join('{ ' + ', '.join(f'.{f[3:]} = {v}' for f, v in t.items() if f.startswith('cf.')) + ' }' for t in builtins()) + ' }')
     cf_style.append('-DPINNED_FRAMES=0x055534d4u')
     # The built-in numbers the checks use, as coverflow.h and coverflow.c have them
     cf_style += [f'-D{k}={v}' for k, v in re.findall(r'^#define (CF_FOLD_MS|CF_ENTER_SPEED|FOLD_FROM|FOLD_TO|ENTER_RUN|LD_SLOTS|FX_ENTER_MS|FX_LETTERS_MS|FX_SLACK_MS|FX_LATE_MS|HALF_GAP_MS) (\d+)',

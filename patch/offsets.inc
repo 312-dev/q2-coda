@@ -253,7 +253,8 @@ static inline int arc_out(int r, int y) {
 /* iPod drill rows: the stock list_into image sits where stock rows put their own img_into, its left
  * edge CHEVRON_W from the row's right edge (8 px margin + 50 px image), so every `>` lines up. */
 #define CHEVRON_W 58
-/* iPod Home: Split gives the menu half the screen (HOME_SPLIT_W) in every theme, the art the rest right of it;
+/* iPod Home: Split gives the menu half the screen (HOME_SPLIT_W, the geometry sets' split_row and split_art
+ * but OLED's, tools/ipod.py), the art the rest right of it;
  * Minimal's Full rows are full width. Labels end HOME_LABEL_END from the row's edge. The selection
  * dot (HOME_DOT px) sits at HOME_DOT_X, clear of the bottom row's corner, HOME_DOT_GAP before the
  * labels (HOME_TEXT_X in tools/ipod.py). */
@@ -344,8 +345,10 @@ static inline int arc_out(int r, int y) {
 #define HSCROLL_ONLY_FOCUS 0x78 /* hscroll_label_t, a char: hscroll_label_set_only_focus */
 #define HSCROLL_LOOP 0x7a       /* a char: a pass ends on its lull and starts again (0x5fb86c) */
 #define HSCROLL_YOYO 0x7b       /* a char: it scrolls back instead of snapping (0x5fb888) */
+#define HSCROLL_ELLIPSES 0x7c   /* a char: stopped, it ends in an ellipsis (hscroll_label_set_ellipses) */
 #define HSCROLL_DELAY 0x88      /* ms its start waits before the first step (hscroll_label_start) */
 #define HSCROLL_SPEED 0x8c      /* a float, px per ms; 0 runs a pass in its duration (0x5fb394) */
+#define HSCROLL_XOFFSET 0x90    /* how far its text has scrolled, px: hscroll_label_set_xoffset */
 #define HSCROLL_TEXT_W 0x94     /* its measured text width: hscroll_label_get_range */
 #define HSCROLL_TIMER 0xa4      /* its running timer's id; 0 stopped (stock paints the ellipsis) */
 /* Every pass's fastest pace, 0.05f px per ms: stock Now Playing's title and artist (0x53d0e8); its

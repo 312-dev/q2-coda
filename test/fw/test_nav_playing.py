@@ -321,6 +321,7 @@ class Canvas:
                                                                     *(self.clip or (0, 0, 375, 320))))
         m('canvas_set_clip_rect', lambda c, r, *_: setattr(self, 'clip', struct.unpack_from('<4i', (C.c_char * 16).from_address(r))))
         m('widget_load_image', self.load)
+        m('canvas_get_vgcanvas', lambda *_: 1)  # a vgcanvas: its calls are in fw.calls, its float arguments are not
         m('canvas_draw_image', lambda c, bitmap, src, dst, *_: self.images.append(
             (self.loaded[C.c_uint.from_address(bitmap + 8).value], struct.unpack_from('<4i', (C.c_char * 16).from_address(dst)))))
 
@@ -557,8 +558,14 @@ def test_a_look_keeps_its_icons_rows_and_its_battery_centred_on_any_row(fw, st, 
     row = row_h(t)
     ui.place(bar.row, 240, 0, 135, row)
     bt, wifi = ui.box(bar.bt), ui.box(bar.wifi)
-    top = min(r[1] for r in Paint(fw, ui, bar)().rects)  # the dark half: no ink above the body
+    canvas = Paint(fw, ui, bar)()
     assert ui.box(bar.bt) == (bt[0], b['bar_bt_dy'], *bt[2:]) and ui.box(bar.wifi) == (wifi[0], b['bar_wifi_dy'], *wifi[2:])
+    if b['painter[PAINT_BATTERY]'] == list(host.tools_theme.CHOICES['bar.battery.painter']).index('slim'):
+        # OLED's slim battery is vgcanvas paths, whose float coordinates the stubs can't see: its outline, the
+        # charge and the nub (the emulator's screenshots check where it lands)
+        assert canvas.rects == [] and len(fw.calls('vgcanvas_stroke')) == 1 and len(fw.calls('vgcanvas_fill')) == 2
+        return
+    top = min(r[1] for r in canvas.rects)  # the dark half: no ink above the body
     assert top == (row + 1 - SETS[GEOM[b['name']]].batt_h) // 2
 
 
@@ -1283,11 +1290,21 @@ def rgba_int(c):
     return C.c_int(0xff000000 | (c & 255) << 16 | (c & 0xff00) | c >> 16).value
 
 
-@pytest.mark.parametrize('t', THEMES, ids=[t['name'] for t in THEMES])
+ASSET_TRACK = [t for t in THEMES if t['name'] != 'OLED']  # OLED's is its own Track grey
+
+
+@pytest.mark.parametrize('t', ASSET_TRACK, ids=[t['name'] for t in ASSET_TRACK])
 def test_a_theme_on_the_asset_s_track_writes_none(fw, ui, mcl, st, t):
     theme(fw, st, t)
     now = Now(fw, ui, mcl, st)
     assert t['np_track_rgb'] == O['TRACK_COLOR'] and not [k for k in TRACK_KEYS if (now.slider, k) in ui.ints]
+
+
+def test_oled_writes_its_own_track(fw, ui, mcl, st):
+    t = next(t for t in THEMES if t['name'] == 'OLED')
+    theme(fw, st, t)
+    now = Now(fw, ui, mcl, st)
+    assert [ui.ints.get((now.slider, k)) for k in TRACK_KEYS] == [rgba_int(0x333333)] * 5
 
 
 def test_a_theme_s_own_track_is_written_and_the_asset_s_written_back_once(fw, ui, mcl, st, library):
@@ -2904,3 +2921,60 @@ def test_a_playlist_dialog_missing_a_part_stays_stocks(fw, st, ui):
     ui.widget(win, 'ssedit', 0, 0, 300, 40)
     load(fw, ui, win)
     assert st.pl_box == 0 and ui.due('pl_box_due') == []
+
+
+OLED = {t['id']: t for t in THEMES}['oled']
+
+
+@pytest.mark.parametrize('t, prefix', [(OLED, b'oled_'), (CLASSIC, b'classic_light_'), (MINIMAL, b'minimal_')])
+def test_theme_art_names_the_live_themes_own_image(fw, st, t, prefix):
+    """theme_art (list_marks.c): the theme's art prefix (tools/theme.py, its art attribute's id) before the name."""
+    theme(fw, st, t)
+    assert fw.fn('theme_art', C.c_char_p, C.c_char_p)(b'chevron_d') == prefix + b'chevron_d'
+
+
+def test_the_wheels_scroll_indicator_shows_a_second_then_fades(fw, st, ui):
+    """SB_WHEEL (OLED): a tick arms it on the list it moved and on that list's own view; full for 800 ms, fading
+    to nothing at a second; another list never shows it. Minimal's thumb painter arms nothing."""
+    now = [5000]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    arm = fw.fn('wheel_sb_arm', None, C.c_void_p)
+    alpha = fw.fn('wheel_sb_alpha', C.c_uint, C.c_void_p)
+    owner = ui.widget(ui.wm, 'list_view', 0, 58, 375, 224)
+    view = ui.widget(owner, 'scroll_view', 0, 0, 375, 224)
+    other = ui.widget(ui.wm, 'list_view', 0, 58, 375, 224)
+    theme(fw, st, MINIMAL)
+    arm(view)
+    assert alpha(view) == 0
+    theme(fw, st, OLED)
+    arm(view)
+    assert (alpha(view), alpha(owner), alpha(other)) == (255, 255, 0)
+    seen = []
+    for t in (800, 900, 999, 1000):
+        now[0] = 5000 + t
+        seen.append(alpha(owner))
+    assert seen == [255, 127, 1, 0]
+
+
+INLINE, RIGHT = 1, 2  # navigation.h SONG_INLINE, SONG_RIGHT
+
+
+@pytest.mark.parametrize('place, room, title, artist, fit', [
+    (INLINE, 323, 100, 80, (100, 80)),     # both fit: the title, two spaces, the artist
+    (INLINE, 323, 200, 200, (200, 112)),   # the artist ends in an ellipsis in what is left
+    (INLINE, 323, 272, 80, (272, 40)),     # 40 px left after the gap: still shown
+    (INLINE, 323, 273, 80, (273, 0)),      # 39: dropped
+    (INLINE, 323, 400, 80, (323, 0)),      # a title wider than the row ends in its own ellipsis
+    (INLINE, 323, 100, 0, (100, 0)),       # no artist on the record
+    (RIGHT, 323, 100, 80, (100, 80)),      # on the right column
+    (RIGHT, 323, 300, 300, (161, 151)),    # each to about half
+    (RIGHT, 102, 60, 80, (51, 40)),        # the title gives way to half the row, the artist its least
+    (RIGHT, 100, 60, 80, (60, 0)),         # under that the artist goes
+    (0, 323, 400, 80, (323, 0))])          # Off: the title alone
+def test_song_fit_keeps_the_title_and_drops_a_squeezed_artist(fw, place, room, title, artist, fit):
+    """song_fit (song_rows.c): a mixed list's title keeps the ink it needs and the artist takes what is left after
+    the gap, ellipsised, and goes under 40 px; on the right column it takes at most half the row."""
+    shown = C.c_int(-1)
+    got = fw.fn('song_fit', C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.POINTER(C.c_int))(
+        place, room, title, 11, artist, C.byref(shown))
+    assert (got, shown.value) == fit
