@@ -161,7 +161,7 @@ playlists.
 | Setting: `[Q2POD] LIBRARYSOURCE`, 0 Local Only (default) or 1 Local + Server, a row on Display > Cover Flow | `navigation.c` (`pod_keys` and the rows' tables beside it) | yes |
 | Ratings: `ratings.out` appended for every app with `ratings=1`; `ratings.in` renamed to `ratings.in.taking`, applied, then deleted | `catalogue.c`, `ratings.c` (three calls) | yes |
 
-`catalogue.o` is about 32 KB of the payload (`llvm-size`: 32,334 bytes of text, 720 of constants); `patch_bytes` in this branch's `--dev` build is 853,784 of the 1 MB. All catalogue data lives on the heap or the card.
+The server library adds 33,024 bytes to the payload: `patch_bytes` is 853,928 of the 1 MB in this branch's `--dev` build against 820,904 at the commit it branched from, `catalogue.o` being 32,611 bytes of code and 720 of constants. All catalogue data lives on the heap or the card.
 
 ### Compatibility
 
