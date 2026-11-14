@@ -18,7 +18,7 @@ static unsigned sb_at __attribute__((section(".scratch")));    /* the last tick,
 static void *sb_list __attribute__((section(".scratch")));     /* the list it moved */
 static void *sb_owner __attribute__((section(".scratch")));    /* ... and its list view */
 static unsigned sb_timer __attribute__((section(".scratch"))); /* the fade's next repaint */
-static char art_name[48] __attribute__((section(".scratch")));  /* theme_art's answer */
+static char art_name[48] __attribute__((section(".scratch"))); /* theme_art's answer */
 
 /* The active theme's own image name: its art prefix (tools/art.py) then name. The answer lasts
  * until the next call. */
@@ -31,8 +31,7 @@ const char *theme_art(const char *name) {
  * canvas reaches at right (canvas columns): white on the selection, else the half's grey. */
 void chevron_icon(void *w, void *canvas, int right, int y, int selected) {
     unsigned bitmap[64]; /* bitmap_t */
-    const char *name =
-        theme_art(selected ? "chevron_w" : ipod_light() ? "chevron_l" : "chevron_d");
+    const char *name = theme_art(selected ? "chevron_w" : ipod_light() ? "chevron_l" : "chevron_d");
     if (!widget_load_image(w, name, bitmap))
         canvas_draw_icon(canvas, bitmap, right - CHEV_SHIFT, y);
 }

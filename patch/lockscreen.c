@@ -1,5 +1,5 @@
-/* Lock screen (docs/internals.md#lock-screen): six built-in wallpapers, drawn here since the rootfs
- * has no room for image files, and the Large clock. wall_render is plain C, so test/patch.py also
+/* Lock screen (docs/internals.md#lock-screen): six built-in wallpapers, drawn by wall_render and
+ * shipped as no image files, and the Large clock. wall_render is plain C, so test/patch.py also
  * builds it on the host (PEQ_HOST) to check it and write previews. */
 #include "peq.h"
 

@@ -39,7 +39,8 @@ with tempfile.TemporaryDirectory() as tmp:
         (directory/'update.tar').write_bytes(b'pod')
         (directory/'manifest.json').write_text('{}')
     with patch('release.build', side_effect=fail_repeat), patch('release.validate'), patch('release.shelf.verify', return_value=True), \
-            patch('release.run', side_effect=lambda *a: '' if 'status' in a else 'revision'):
+            patch('release.run', side_effect=lambda *a: '' if 'status' in a else 'revision'), \
+            patch('release.subprocess.run', return_value=subprocess.CompletedProcess([], 0)):  # sitenotes.py --check
         try:
             release.package(pathlib.Path('stock.zip'), out)
         except ValueError as e:

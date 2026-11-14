@@ -296,6 +296,7 @@ demo	0x533d64	0x4	folder_row_pool_init	`addiu $6, $zero, 0x9` (1st of 2 such), b
 demo	0x533d6c	0x4	folder_row_pool_init	`addiu $5, $zero, 0x4` (1st of 2 such), before 2nd of 3 calls to image_create, after "img_choice"; patch/ipod.json immediates text pages' playing overlay at the 8px top inset (folder artwork on the row layout's 8px left margin)
 demo	0x533dd4	0x4	folder_row_pool_init	`addiu $6, $zero, 0x9` (2nd of 2 such), before the only call to gif_image_create, after "list_folder"; patch/ipod.json immediates art_inset (artwork and playing overlay at the 8px top/left inset)
 demo	0x534c28	0x4	home_page_init	1st of 9 calls to widget_on, after "guide_page"; tools/build.py HOME_KEYUP
+demo	0x534c4c	0x4	home_page_init	`bnez $2, +61 words` (1st of 7 such), after "guide_page"; tools/ipod.py patch_code
 demo	0x534cf8	0x4	home_page_init	the only call to navigator_to_with_context, after "playing_page"; tools/ipod.py patch_code
 demo	0x534d84	0x4	home_page_init	`addiu $5, $zero, 0x112`, before 2nd of 9 calls to widget_on, after "PE31"; patch/ipod.json event_abi_words, patch/offsets.inc EVT_KEY_DOWN_BEFORE
 demo	0x534d98	0x4	home_page_init	`addiu $5, $zero, 0x115`, before 3rd of 9 calls to widget_on, after "PE31"; patch/ipod.json event_abi_words, patch/offsets.inc EVT_KEY_UP_BEFORE

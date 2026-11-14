@@ -2359,7 +2359,7 @@ def test_a_tap_in_the_flat_fallback_opens_the_centre_cover_alone(fw):
 # Stock's widgets, for the pages and Home
 
 THEMES = host.tools_theme.builtins()
-MINIMAL, CLASSIC, MODERN = range(3)
+MINIMAL, CLASSIC, MODERN = ({t['id']: t['index'] for t in THEMES}[i] for i in ('minimal', 'classic-light', 'modern'))
 EVT_CLICK, EVT_WINDOW_FOREGROUND = O['EVT_CLICK'], O['EVT_WINDOW_FOREGROUND']
 PANE_NOW, PANE_LIBRARY, PANE_SHUFFLE, PANE_COVERFLOW, PANE_FOLDER, PANE_GAMES, PANE_ROCKBOX, PANE_STREAM, PANE_SETTINGS, \
     PANE_SERVICE = range(10)

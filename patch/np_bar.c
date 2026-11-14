@@ -271,7 +271,7 @@ void paint_scrubber(void *w, void *canvas) {
  * (ipod_bar). */
 void paint_rows_bar(void *canvas, int x, int y, int w, int h, int fill_w) {
     const theme_t *T = theme();
-    const unsigned (*rows)[NP_ROWS] = T->np_rows + 2 * ipod_light();
+    const unsigned(*rows)[NP_ROWS] = T->np_rows + 2 * ipod_light();
     const stops_t *band = T->schemes[accent()].label ? (const stops_t *)0 : &scheme()->sel;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     for (int j = 0; j < h && j < NP_ROWS; ++j) {

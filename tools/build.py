@@ -2003,7 +2003,7 @@ def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
                f'#define Q2POD_DEV {1 if dev else 0}',  # navigation.c stale_note
                f'#define Q2POD_REPO "{repo}"',  # netupdate.c: the repo whose latest release it fetches
                '#define Q2POD_SIGN_KEY {' + ','.join(f'0x{b:02x}' for b in key or signing_key(None, False)) + '}',  # release_sig.c
-               f'#define Q2POD_UA "Q2Pod/{VERSION} (https://github.com/DiamondBond/q2-pod)"']  # onlinematch.c, as MusicBrainz asks
+               f'#define Q2POD_UA "Q2Pod/{VERSION} (https://github.com/{REPO})"']  # onlinematch.c, as MusicBrainz asks: the project's contact, not --update-repo's
     header.append(f'#define THEME_N {len(themes)}')  # theme_engine.c setting_counts[]
     header.append(f'#define THEME_KEYS {len(theme_keys(themes))}')  # navigation.c st.own[], themes.inc theme_keys[]
     from art import corner_table, qs_lit
@@ -2054,6 +2054,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     sq = out/'stock.squashfs'; sq.write_bytes(blobs['recovery-update/rootfs.squashfs'])
     def cat(path): return subprocess.check_output(['unsquashfs', '-cat', str(sq), path])
     raw_demo = cat('release/bin/demo')
+    check(sha(raw_demo) == DEMO_SHA, 'Unsupported demo: SHA-256 differs from the audited original')
     (out/'libc-2.28.so').write_bytes(cat('lib/libc-2.28.so'))
     # Every allowlisted context must be a window name. The runtime name is the root "name"
     # property of the UI asset, not the asset path, so check the stock rootfs assets directly:
@@ -2355,6 +2356,10 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     pseudo = out/'root.pseudo'
     run('unsquashfs','-pf',pseudo,sq)
     p = pseudo.read_bytes()
+    # Two parts: p, the inode definitions (about 270 KB) every search and edit below works on, and
+    # pseudo_data, from the data marker on (about 108 MB of embedded file contents), written back unchanged.
+    at = p.index(b'# START OF DATA')
+    p, pseudo_data = p[:at], p[at:]
     # mksquashfs takes "/" from the source dir, not the pseudo file; carry stock values over.
     root = need(re.search(rb'^/ D (\d+) (\d+) (\d+) (\d+)$',p,re.M), 'Missing root pseudo inode')
     t,mode,uid,gid = (x.decode() for x in root.groups())
@@ -2473,8 +2478,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
             continue
         path = path.encode()
         entry = path+b' F '+b' '.join(stock.groups())+b' cat '+shlex.quote(str(out/name)).encode()+b'\n'
-        at = p.index(b'# START OF DATA')  # definitions precede the embedded data
-        p = p[:at]+entry+p[at:]
+        p += entry  # the definitions' end, before the embedded data
         added.append([path, b'R', *stock.groups()])
     removed = []
     for path in STOCK_EQ + STOCK_PAGES + OBSOLETE:
@@ -2527,12 +2531,13 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     # Shanling's outdated OpenSSL, curl, zlib and the rest, rebuilt from upstream (docs/third-party.md)
     from thirdparty import install as install_thirdparty
     p, thirdparty = install_thirdparty(p, out, cat, swap_inode, sq)
-    pseudo.write_bytes(p)
+    pseudo.write_bytes(p + pseudo_data)
     (out/'empty').mkdir(exist_ok=True)
     newsq = out/'rootfs.squashfs'
     epoch = struct.unpack_from('<I',sq.read_bytes(),8)[0]
+    # On every core: squashfs-tools 4.6.1 wrote the same image with 1, 2, 3, 5, 8 and 16 threads.
     run('mksquashfs',out/'empty',newsq,'-pf',pseudo,'-noappend','-comp','lzo',
-        '-b','131072','-Xcompression-level','9','-tailends','-mkfs-time',epoch,*rootargs,'-processors','1','-no-progress')
+        '-b','131072','-Xcompression-level','9','-tailends','-mkfs-time',epoch,*rootargs,'-no-progress')
     # All inodes, including demo and the logo, keep name/type/mtime/mode/uid/gid (sizes/offsets shift).
     def inodes(image):
         text = subprocess.check_output(['unsquashfs','-pf','-',str(image)]).split(b'\n# START OF DATA')[0]

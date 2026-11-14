@@ -212,7 +212,7 @@ MBEDTLS_UNSET = '''
 
 
 def build_mbedtls(src, stage, env, log):
-    # A static, position-independent library linked into libcurl only (docs/third-party.md#curl).
+    # A static, position-independent library linked into libcurl only (docs/third-party.md#curl-and-mbedtls).
     # Without MBEDTLS_HAVE_TIME_DATE no certificate's dates are checked: the Q2's clock may be unset
     # or years off, and past 2038 its 32-bit time wraps.
     for option in MBEDTLS_UNSET:
@@ -639,7 +639,7 @@ def replacements(out):
 
 
 def install(p, out, cat, swap_inode, squashfs):
-    """The pseudo file p with stock's outdated components swapped for their rebuilds, and the
+    """The pseudo file's definitions p with stock's outdated components swapped for their rebuilds, and the
     manifest's record of them. Stops the build when check_abi finds a problem."""
     files, versions = replacements(out)
     root = out/'stockfs'

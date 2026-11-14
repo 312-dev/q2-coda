@@ -25,13 +25,13 @@ its rules. Where the concept contradicts itself, this file picks one answer and 
 
 ## The screen
 
-| Property | Value | Notes |
-|---|---|---|
-| Panel | 375x320, upright | The concept's screens are near square; the Q2 is wider, so layouts gain width, not rows |
-| Glass corners | 80 px radius (`GLASS_R`) | Hides up to 46 px at each end of a row 8 px from an edge; see [Corners](#corners) |
-| Status row | glyphs centred on y 37 | No band and no rule: the bar is 58 px of the page's black |
-| Content area | 375x262 from y 58 | Seven 32 px rows, y 58 to 282 |
-| Panel type | LCD (`lcd_h0209s`), not OLED | Black is a colour here, not "off": keep large areas black anyway, it is the look |
+| Property      | Value                        | Notes                                                                                   |
+| ------------- | ---------------------------- | --------------------------------------------------------------------------------------- |
+| Panel         | 375x320, upright             | The concept's screens are near square; the Q2 is wider, so layouts gain width, not rows |
+| Glass corners | 80 px radius (`GLASS_R`)     | Hides up to 46 px at each end of a row 8 px from an edge; see [Corners](#corners)       |
+| Status row    | glyphs centred on y 37       | No band and no rule: the bar is 58 px of the page's black                               |
+| Content area  | 375x262 from y 58            | Seven 32 px rows, y 58 to 282                                                           |
+| Panel type    | LCD (`lcd_h0209s`), not OLED | Black is a colour here, not "off": keep large areas black anyway, it is the look        |
 
 The geometry below (the status row, the 58 px list top, the 16 px selection inset, the 28 px right column and
 the scroll indicator) is what the user chose from mock-ups on 2026-11-13 (mock-up E and its six-screen
@@ -58,18 +58,18 @@ those spots are under the glass. So:
 
 All colours are opaque. Alpha is not used for text: greys are stated as greys.
 
-| Token | Hex | Use | Concept measurement |
-|---|---|---|---|
-| Canvas | `#000000` | Every background | `#000000` on all grid screens |
-| Text Primary | `#FFFFFF` | Row titles, page titles, song title, times | `#FCFCFC` to `#FFFFFF` |
-| Text Secondary | `#ABABAB` | Artist, album, "1 of 10", values in key/value rows ("Off", "Flat") | `#AAAAAA` to `#B2B2B2` |
-| Text Tertiary | `#858585` | Second lines ("1,234 Songs", "Connected"), section headers, captions | `#7D` to `#8C` by ratio (est) |
-| Chevron | `#999999` | List chevrons on black | `#8C8C8C` read on a 1 px stroke, so lighter in truth (est) |
-| Divider | `#222222` | 1 px rules between two-line rows only | `#222222` |
-| Track | `#333333` | Unfilled progress, slider and storage tracks; switch off | `#313131` |
-| Accent Blue | `#2160D8` | Selection bar, progress fill, switch on, slider knob ring, big status glyphs | Bar `#1544B2` to `#225BCB`, progress `#2368D9` |
-| On Accent | `#FFFFFF` | Text and chevrons on the selection bar | |
-| Positive | `#30D158` | "Connected" dots only | Green dot on Bluetooth |
+| Token          | Hex       | Use                                                                          | Concept measurement                                        |
+| -------------- | --------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Canvas         | `#000000` | Every background                                                             | `#000000` on all grid screens                              |
+| Text Primary   | `#FFFFFF` | Row titles, page titles, song title, times                                   | `#FCFCFC` to `#FFFFFF`                                     |
+| Text Secondary | `#ABABAB` | Artist, album, "1 of 10", values in key/value rows ("Off", "Flat")           | `#AAAAAA` to `#B2B2B2`                                     |
+| Text Tertiary  | `#858585` | Second lines ("1,234 Songs", "Connected"), section headers, captions         | `#7D` to `#8C` by ratio (est)                              |
+| Chevron        | `#999999` | List chevrons on black                                                       | `#8C8C8C` read on a 1 px stroke, so lighter in truth (est) |
+| Divider        | `#222222` | 1 px rules between two-line rows only                                        | `#222222`                                                  |
+| Track          | `#333333` | Unfilled progress, slider and storage tracks; switch off                     | `#313131`                                                  |
+| Accent Blue    | `#2160D8` | Selection bar, progress fill, switch on, slider knob ring, big status glyphs | Bar `#1544B2` to `#225BCB`, progress `#2368D9`             |
+| On Accent      | `#FFFFFF` | Text and chevrons on the selection bar                                       |                                                            |
+| Positive       | `#30D158` | "Connected" dots only                                                        | Green dot on Bluetooth                                     |
 
 The concept grades its blue differently in each image. Accent Blue is one value between the bar
 and the progress fill, chosen so white text on it reads at about 5:1. Use it everywhere; do not
@@ -80,16 +80,16 @@ add a lighter or darker blue.
 The concept has no light screens; Q2 Pod's Light Mode exists and must keep working. The light
 half flips greys, not hues:
 
-| Token | Dark | Light |
-|---|---|---|
-| Canvas | `#000000` | `#FFFFFF` |
-| Text Primary | `#FFFFFF` | `#000000` |
+| Token          | Dark      | Light     |
+| -------------- | --------- | --------- |
+| Canvas         | `#000000` | `#FFFFFF` |
+| Text Primary   | `#FFFFFF` | `#000000` |
 | Text Secondary | `#ABABAB` | `#5C5C5C` |
-| Text Tertiary | `#858585` | `#6E6E6E` |
-| Chevron | `#999999` | `#8A8A8A` |
-| Divider | `#222222` | `#E5E5E5` |
-| Track | `#333333` | `#D9D9D9` |
-| Accent Blue | `#2160D8` | `#2160D8` |
+| Text Tertiary  | `#858585` | `#6E6E6E` |
+| Chevron        | `#999999` | `#8A8A8A` |
+| Divider        | `#222222` | `#E5E5E5` |
+| Track          | `#333333` | `#D9D9D9` |
+| Accent Blue    | `#2160D8` | `#2160D8` |
 
 ## Type
 
@@ -97,18 +97,18 @@ Face: **Inter** (SIL OFL 1.1), Regular and Medium, subset as the build subsets i
 with tabular digits so a running time never changes width. Inter stands in for the concept's
 San Francisco, which cannot ship. See `assets/fonts/` for the files and licence.
 
-| Role | Face | Size | Colour | Example |
-|---|---|---|---|---|
-| Status row (page title, or the clock) | Inter Medium | 15 px | Text Secondary | Playback, 9:41 |
-| Row | Inter Regular | 20 px | Text Primary | Playlists |
-| Row value | Inter Regular | 20 px | Text Secondary | Off |
-| Row second line | Inter Regular | 15 px | Text Tertiary | 1,234 Songs |
-| Section header | Inter Regular | 15 px | Text Tertiary | Devices |
-| Song title | Inter Medium | 22 px | Text Primary | Time |
-| Artist, album | Inter Regular | 18 px | Text Secondary | Pink Floyd |
-| Track position | Inter Regular | 15 px | Text Secondary | 1 of 10 |
-| Times | Inter Regular | 16 px | Text Primary | 3:47 and -3:22 |
-| Confirmation label | Inter Medium | 22 px | Text Primary | Shuffled Songs |
+| Role                                  | Face          | Size  | Colour         | Example        |
+| ------------------------------------- | ------------- | ----- | -------------- | -------------- |
+| Status row (page title, or the clock) | Inter Medium  | 15 px | Text Secondary | Playback, 9:41 |
+| Row                                   | Inter Regular | 20 px | Text Primary   | Playlists      |
+| Row value                             | Inter Regular | 20 px | Text Secondary | Off            |
+| Row second line                       | Inter Regular | 15 px | Text Tertiary  | 1,234 Songs    |
+| Section header                        | Inter Regular | 15 px | Text Tertiary  | Devices        |
+| Song title                            | Inter Medium  | 22 px | Text Primary   | Time           |
+| Artist, album                         | Inter Regular | 18 px | Text Secondary | Pink Floyd     |
+| Track position                        | Inter Regular | 15 px | Text Secondary | 1 of 10        |
+| Times                                 | Inter Regular | 16 px | Text Primary   | 3:47 and -3:22 |
+| Confirmation label                    | Inter Medium  | 22 px | Text Primary   | Shuffled Songs |
 
 Rules:
 
@@ -128,16 +128,16 @@ Rules:
 
 All lists share one grid.
 
-| Token | Value | Notes |
-|---|---|---|
-| List top | y 58 | 14 px under the status row's glyphs |
-| Row pitch | 32 px | seven rows, y 58 to 282 (see [Corners](#corners)) |
-| Two-line row pitch | 52 px | four rows, y 58 to 266 |
-| Text inset (left) | 24 px | the status row's title, the rows and the art share this column |
-| Right column | 28 px from the right edge | chevrons, values and the battery's end, on every row: they never move between rows |
-| Leading art | 40 px at x 24, 6 px down its row, text at 72 | 4 px corners, in two-line rows |
-| Bar inset | 16 px each side, every row | no corner stepping: at the bottom row the corner hides 14.5 px |
-| Bar radius | 8 px | |
+| Token              | Value                                        | Notes                                                                              |
+| ------------------ | -------------------------------------------- | ---------------------------------------------------------------------------------- |
+| List top           | y 58                                         | 14 px under the status row's glyphs                                                |
+| Row pitch          | 32 px                                        | seven rows, y 58 to 282 (see [Corners](#corners))                                  |
+| Two-line row pitch | 52 px                                        | four rows, y 58 to 266                                                             |
+| Text inset (left)  | 24 px                                        | the status row's title, the rows and the art share this column                     |
+| Right column       | 28 px from the right edge                    | chevrons, values and the battery's end, on every row: they never move between rows |
+| Leading art        | 40 px at x 24, 6 px down its row, text at 72 | 4 px corners, in two-line rows                                                     |
+| Bar inset          | 16 px each side, every row                   | no corner stepping: at the bottom row the corner hides 14.5 px                     |
+| Bar radius         | 8 px                                         |                                                                                    |
 
 ## Components
 
@@ -216,17 +216,17 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
 The most-seen screen. Art left, words right, time across the bottom; the status row shows the
 clock.
 
-| Element | Position (x, y) and size | Notes |
-|---|---|---|
-| Art | 24, 58, 150x150 | Square, 6 px corners |
-| Song title | 192, top 64 | Inter Medium 22 px, Text Primary, one line, scrolls when long |
-| Artist | 192, top 96 | Inter Regular 18 px, Text Secondary |
-| Album | 192, top 120 | Inter Regular 18 px, Text Secondary, up to two lines |
-| Track position | 192, baseline 208 | "1 of 10", 15 px, Text Secondary, baseline level with the art's bottom |
-| Progress bar | 24 to 347, y 228, 6 px | Track `#333333`, fill Accent Blue, round ends |
-| Elapsed | left on 24, centred on y 250 | 16 px, Text Primary, tabular |
-| Remaining | right on 347, centred on y 250 | 16 px, Text Primary, with a leading minus |
-| State row | centred on y 276, 44 px apart | Phosphor `shuffle` and `repeat`, bold, 22 px: Accent Blue when on, Text Secondary when off |
+| Element        | Position (x, y) and size       | Notes                                                                                      |
+| -------------- | ------------------------------ | ------------------------------------------------------------------------------------------ |
+| Art            | 24, 58, 150x150                | Square, 6 px corners                                                                       |
+| Song title     | 192, top 64                    | Inter Medium 22 px, Text Primary, one line, scrolls when long                              |
+| Artist         | 192, top 96                    | Inter Regular 18 px, Text Secondary                                                        |
+| Album          | 192, top 120                   | Inter Regular 18 px, Text Secondary, up to two lines                                       |
+| Track position | 192, baseline 208              | "1 of 10", 15 px, Text Secondary, baseline level with the art's bottom                     |
+| Progress bar   | 24 to 347, y 228, 6 px         | Track `#333333`, fill Accent Blue, round ends                                              |
+| Elapsed        | left on 24, centred on y 250   | 16 px, Text Primary, tabular                                                               |
+| Remaining      | right on 347, centred on y 250 | 16 px, Text Primary, with a leading minus                                                  |
+| State row      | centred on y 276, 44 px apart  | Phosphor `shuffle` and `repeat`, bold, 22 px: Accent Blue when on, Text Secondary when off |
 
 No page title, no background art blur, no reflection.
 
@@ -278,42 +278,42 @@ Q2 Pod's screens mapped to the patterns above, most-seen first. The inventory be
 table is the 126-screen survey in the design notes; screens not listed follow their nearest
 pattern.
 
-| Q2 Pod screen | Pattern | Notes |
-|---|---|---|
-| Home (Full) | List row | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock |
-| Home (Split) | List row beside art | Allowed: list left, art pane right; the pane is square art on black, no placeholder gradient |
-| Now Playing | [Now Playing](#now-playing) | |
-| Library | List row | |
-| Albums | Two-line row with art | |
-| Album tracks | Song rows | Track number, title, length |
-| Artists, Genres, Composers | List row | |
-| Songs, a playlist's songs | Song rows | The artist inline |
-| Volume | Progress | A 6 px bar across the bottom of Now Playing, not a panel |
-| Cover Flow | Own | Covers on black, no reflection floor; the caption uses Song title and Artist roles |
-| Playlists | Two-line row with icon | |
-| Hold menu | Dialog | |
-| Settings and its pages | Key/value and switch rows | |
-| Pickers (Play mode, Sort, Language) | List row | The current choice carries a 12 px Accent Blue check on the right column |
-| Equalizer (Simple) | Vertical slider | |
-| Bluetooth | Two-line row | Second line "Connected" with the Positive dot |
-| Update Local Music | Progress | Counts as key/value rows under the status row |
-| Shuffle, Repeat changes | Confirmation | New in this theme |
-| Quick Settings | Own | Tiles become rows: the theme has no tiles |
-| Lock screen | Own | Clock 56 px Inter Medium centred, date 16 px Text Secondary, black |
+| Q2 Pod screen                       | Pattern                     | Notes                                                                                                      |
+| ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock |
+| Home (Split)                        | List row beside art         | Allowed: list left, art pane right; the pane is square art on black, no placeholder gradient               |
+| Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
+| Library                             | List row                    |                                                                                                            |
+| Albums                              | Two-line row with art       |                                                                                                            |
+| Album tracks                        | Song rows                   | Track number, title, length                                                                                |
+| Artists, Genres, Composers          | List row                    |                                                                                                            |
+| Songs, a playlist's songs           | Song rows                   | The artist inline                                                                                          |
+| Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
+| Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles                         |
+| Playlists                           | Two-line row with icon      |                                                                                                            |
+| Hold menu                           | Dialog                      |                                                                                                            |
+| Settings and its pages              | Key/value and switch rows   |                                                                                                            |
+| Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
+| Equalizer (Simple)                  | Vertical slider             |                                                                                                            |
+| Bluetooth                           | Two-line row                | Second line "Connected" with the Positive dot                                                              |
+| Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
+| Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
+| Quick Settings                      | Own                         | Tiles become rows: the theme has no tiles                                                                  |
+| Lock screen                         | Own                         | Clock 56 px Inter Medium centred, date 16 px Text Secondary, black                                         |
 
 The concept's Apple Music, Apple TV, CD sync and storage pages have no Q2 Pod equivalent and are
 out of scope. Spotify's pages follow the list patterns.
 
 ## Do and don't
 
-| Do | Don't |
-|---|---|
-| Separate with space and grey | Add boxes, cards or panels behind lists |
-| Use Accent Blue for the one selected or active thing | Tint icons, headers or second lines blue |
-| Keep every list on the 32 px grid | Mix pitches in one list |
-| Let titles scroll when selected | Shrink type to fit |
-| Inset from the glass with `corner_x` | Put anything in the corners the glass hides |
-| Write sentence case | Write capitals or add letter spacing |
+| Do                                                   | Don't                                       |
+| ---------------------------------------------------- | ------------------------------------------- |
+| Separate with space and grey                         | Add boxes, cards or panels behind lists     |
+| Use Accent Blue for the one selected or active thing | Tint icons, headers or second lines blue    |
+| Keep every list on the 32 px grid                    | Mix pitches in one list                     |
+| Let titles scroll when selected                      | Shrink type to fit                          |
+| Inset from the glass with `corner_x`                 | Put anything in the corners the glass hides |
+| Write sentence case                                  | Write capitals or add letter spacing        |
 
 ## What the engine needs
 

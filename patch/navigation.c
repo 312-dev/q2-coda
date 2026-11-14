@@ -2676,8 +2676,7 @@ static void paint_into(void *w, void *canvas) {
     int box = w ? theme()->chevron_x : 0;
     /* CHEV_ICON: stock's is empty on every row, and each row's own stands on the right column */
     if (w && theme()->painter[PAINT_CHEVRON] == CHEV_ICON) {
-        if (P(canvas, CANVAS_LCD) &&
-            !tk_strcmp(widget_get_prop_str(w, "image", ""), "list_into"))
+        if (P(canvas, CANVAS_LCD) && !tk_strcmp(widget_get_prop_str(w, "image", ""), "list_into"))
             chevron_icon(w, canvas, 375 - geom_val(V_RIGHT_X) - I(canvas, CANVAS_X), I(w, W_H) / 2,
                          st.sel_accent && painting_in(st.sel_accent));
         return;
@@ -3918,7 +3917,7 @@ static int bar_state_sync(void *bar) {
                                    ? status == 2 ? "classic_light_play_w" : "classic_light_pause_w"
                                : bar_theme()->painter[PAINT_BATTERY] == BATT_CLASSIC_LIGHT
                                    ? classic_light_icon[ipod_light()][status != 2]
-                               : slim ? slim_icon
+                               : slim        ? slim_icon
                                : status == 2 ? "bar_play"
                                              : "bar_pause";
             if (tk_strcmp(widget_get_prop_str(st.bar_state, "image", ""), icon)) {
@@ -4060,8 +4059,8 @@ static void bar_sync(void *bar) {
                            I(st.bar_wifi, W_H));
     int classic_row = T->painter[PAINT_BATTERY] == BATT_CLASSIC_LIGHT, /* the row's layout */
         classic_light = B->painter[PAINT_BATTERY] == BATT_CLASSIC_LIGHT,
-        slim = B->painter[PAINT_BATTERY] == BATT_SLIM, /* the set's body too */
-        body = classic_light ? bar_geom_val(V_BATT_W) + 1   /* its soft edge's column */
+        slim = B->painter[PAINT_BATTERY] == BATT_SLIM,    /* the set's body too */
+        body = classic_light ? bar_geom_val(V_BATT_W) + 1 /* its soft edge's column */
                : slim        ? bar_geom_val(V_BATT_W)
                              : BATT_BODY_W,
         inside = classic_light ? body : BATT_INSIDE_W;
@@ -4360,7 +4359,8 @@ int theme_font(void *w, int role, int was) {
                                                 "style:disable:font_size" };
     const theme_t *T = theme();
     int face = w ? T->font[role] : FONT_DEFAULT, px = T->font_px[role], row = was == FONT_ROW;
-    int wanted_bold = face == FONT_BOLD || face == FONT_CLASSIC_LIGHT; /* the bold faces; Inter's are not */
+    int wanted_bold =
+        face == FONT_BOLD || face == FONT_CLASSIC_LIGHT; /* the bold faces; Inter's are not */
     if (row) {
         if (!face && !px) {
             font_weight_mark(w, 0);
@@ -5882,9 +5882,9 @@ void bar_title_sync(void *win) {
     static const unsigned none = 0;
     char s[256], now[256]; /* stock writes nothing unless all of it fits */
     /* Home names the list it shows; a status row names none of Home's own, and shows the clock */
-    const char *t = !home_menu(win)                             ? (const char *)0
+    const char *t = !home_menu(win)                                 ? (const char *)0
                     : geom_val(V_STATUS_Y) && !coverflow_home_sub() ? ""
-                                                                 : coverflow_home_title();
+                                                                    : coverflow_home_title();
     if (t)
         ;
     else if (win != st.title_win) {

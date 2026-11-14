@@ -4,11 +4,11 @@
 /* Stock runs Wi-Fi transfer's web server, thttpd on port 8888, for as long as its page is open: the
  * page's init calls switch_wifitransport(1), which starts it, and the page's close handler calls
  * switch_wifitransport(0), which kills it. ringnav_wifi_transfer stands in front of that switch.
- * Before thttpd starts it writes a fresh PIN and session token, both from /dev/urandom, to WT_DIR in
- * RAM (/tmp is a tmpfs), where the web page's CGI (assets/web/q2cgi) checks every request against
- * them; after thttpd is killed it removes them. ringnav_wifi_transfer_page shows the PIN on the page,
- * above the address. wifi_transfer_poll closes the page, which stops the server as Return would,
- * once no request has been admitted for WT_IDLE_MS and none is running.
+ * Before thttpd starts it writes a fresh PIN and session token, both from /dev/urandom, to WT_DIR
+ * in RAM (/tmp is a tmpfs), where the web page's CGI (assets/web/q2cgi) checks every request
+ * against them; after thttpd is killed it removes them. ringnav_wifi_transfer_page shows the PIN on
+ * the page, above the address. wifi_transfer_poll closes the page, which stops the server as Return
+ * would, once no request has been admitted for WT_IDLE_MS and none is running.
  *
  * wt: live, a session this file started and has not ended; pin, its six digits; locked, the page
  * shows the lockout; at, the last poll; idle_at, the last sign of use; seen, the mtime of q2cgi's
@@ -62,8 +62,8 @@ static int wt_write(const char *name, const char *text) {
 }
 
 /* A new session: WT_DIR (root's alone) with a six-digit PIN and a 32-hex-digit token. The PIN is a
- * 32-bit draw below 4,294,000,000, the largest multiple of a million that fits, taken mod a million,
- * so every PIN is as likely. Fails, leaving nothing, when /dev/urandom can't be read. */
+ * 32-bit draw below 4,294,000,000, the largest multiple of a million that fits, taken mod a
+ * million, so every PIN is as likely. Fails, leaving nothing, when /dev/urandom can't be read. */
 static int wt_start(void) {
     unsigned char b[16 + 4 * 8];
     unsigned x = 0, ok = 0;
@@ -118,9 +118,9 @@ static void wt_show(void) {
     else if (wt.pin[0])
         snprintf(text, sizeof text, "%.3s %.3s", wt.pin, wt.pin + 3);
     widget_set_text_utf8(wt.pin_l, text);
-    widget_set_text_utf8(wt.note_l, wt.locked    ? "Go back and reopen for a new PIN"
-                                     : wt.pin[0] ? "PIN for the web page"
-                                                 : "Wi-Fi transfer could not start");
+    widget_set_text_utf8(wt.note_l, wt.locked   ? "Go back and reopen for a new PIN"
+                                    : wt.pin[0] ? "PIN for the web page"
+                                                : "Wi-Fi transfer could not start");
 }
 
 /* systemset_wifitransport_page_init's hook: stock builds the page and starts the server (the hook
@@ -167,15 +167,16 @@ static int wt_busy(void) {
 }
 
 /* power_poll, every WT_POLL_MS while a session is live: the page shows the lockout once q2cgi has
- * given out the last try, and closes after WT_IDLE_MS unused. Use is q2cgi's seen mark changing (its
- * mtime, never compared with demo's clock) or a request running; the time is counted on the
+ * given out the last try, and closes after WT_IDLE_MS unused. Use is q2cgi's seen mark changing
+ * (its mtime, never compared with demo's clock) or a request running; the time is counted on the
  * monotonic clock, so a clock set by a time sync can't end a session early. */
 void wifi_transfer_poll(void) {
     unsigned now = time_now_ms();
     if (!wt.live || (wt.at && now - wt.at < WT_POLL_MS)) return;
     wt.at = now | !now;
     void *page = wt_page();
-    if (page != wt.win) wt.win = wt.pin_l = wt.note_l = (void *)0; /* not the page the labels are on */
+    if (page != wt.win)
+        wt.win = wt.pin_l = wt.note_l = (void *)0; /* not the page the labels are on */
     if (!wt.idle_at) wt.idle_at = now;
     unsigned sx[64]; /* struct statx: stx_mtime's seconds at byte 112, its nanoseconds at 120 */
     if (!ringnav_statx(-100, WT_DIR "/seen", 0, 0x40 /* MTIME */, sx) &&

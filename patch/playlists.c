@@ -345,9 +345,9 @@ static void ple_show(void) {
             const char *caption =
                 mode == 0 && i < 2 ? (i ? "Done" : "Add Songs")
                 : mode == 2        ? actions[i]
-                : mode == 3 ? (i ? "Cancel" : "Remove from Playlist")
-                            : track_name(name, sizeof name,
-                                         deque_at(ple.songs, (unsigned)(i - (mode == 0 ? 2 : 0))));
+                : mode == 3        ? (i ? "Cancel" : "Remove from Playlist")
+                                   : track_name(name, sizeof name,
+                                                deque_at(ple.songs, (unsigned)(i - (mode == 0 ? 2 : 0))));
             page_row_detail(ple.view, i, caption, 0, ple_pick);
         }
     /* only the selected row's long title moves, as Songs' */

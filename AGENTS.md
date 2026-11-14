@@ -72,7 +72,7 @@ python3 tools/build.py 'Q2 Firmware V1.36.zip' --out /tmp/q2-build       # relea
 python3 test/patch.py /tmp/q2-dev        # the UI payload (about 3.5 minutes)
 python3 test/playback.py /tmp/q2-dev     # queue traversal and the wheel's ticks
 
-./tools/format.sh                        # clang-format and prettier, before a pull request
+./tools/format.sh                        # clang-format and prettier, before a pull request; --check changes nothing
 ```
 
 The full list of suites, with what each needs, is in [docs/building.md](docs/building.md#tests). CI (`.github/workflows/`) runs `test/unit`, `test/fw`, the host suites that need no build, and mypy; nothing that needs the stock ZIP runs there, so run `test/patch.py` yourself after a change to `patch/`.
@@ -84,6 +84,7 @@ The full list of suites, with what each needs, is in [docs/building.md](docs/bui
 - **`test/fw` refuses a non-PIE python.** The payload's C uses stock's fixed addresses (`0x400000`-`0xc00000`), where a non-PIE python is mapped. Debian's and Ubuntu's `/usr/bin/python3` is non-PIE; `test/fw/conftest.py` stops with a message. Use a python built with `-pie` (`actions/setup-python`'s builds are) and make the venv from it.
 - **`--basetemp` needs its parent to exist**, and should be on disk: pytest's default is under `/tmp`, often RAM, and each test loads a 20 MB library.
 - **`tools/build.py` fails under `python3 -I`.** It imports its siblings (`from flac import selection`), and isolated mode drops the script's folder from `sys.path`. `tools/rebase.py` and `docs/rebasing/sitenotes.py` are the opposite: they read untrusted stock files and say to run with `-I`.
+- **`tools/format.sh` formats a new `patch/*.c` in either list** unless it is in `UNFORMATTED` (`tools/peq.py`), and needs clang-format 18, the version the tree is formatted with. Without it installed, `CLANG_FORMAT='uvx --quiet --from clang-format==18.1.8 clang-format'`.
 - **`tools/build.py` refuses an `--out` that already holds `update.tar`.** Build into a fresh directory, then swap.
 - **A build is stale after any edit.** `test/patch.py` and the other `BUILD` suites refuse a build whose `manifest.json` `source_sha256` is not the tree's (`patch/`, `tools/`, `assets/`, `docs/manual/`). Rebuild, don't work around it.
 - **A new `patch/*.c` is not compiled until it is listed**: in `NAVIGATION` (`tools/build.py`) if it includes `navigation.h`, else in `UI_SOURCES` (`tools/peq.py`). `test/fw` builds from the same two lists.
@@ -93,7 +94,7 @@ The full list of suites, with what each needs, is in [docs/building.md](docs/bui
 - **A window the wheel should work on must be in `patch/contexts.inc`**, and the build rejects a name that is not a stock window or in `PAYLOAD_WINDOWS`.
 - **`ponytail:` in a comment or doc marks a known limit or cost left on purpose**, with what would lift it. Read it before "fixing" the code beside it.
 - **Don't change `VERSION`**, and add a plain-words line to [docs/changelog.md](docs/changelog.md) for anything a user would notice ([CONTRIBUTING](CONTRIBUTING.md#changing-the-firmware)).
-- **Docs follow the code in the same change**: how a fix works goes in [docs/internals.md](docs/internals.md) and the code's comments, and source comments cite doc anchors (`docs/internals.md#lock-screen`), so renaming a heading breaks them.
+- **Docs follow the code in the same change**: how a fix works goes in [docs/internals.md](docs/internals.md) and the code's comments, and source comments cite doc anchors (`docs/internals.md#lock-screen`), so renaming a heading breaks them: `test/unit/test_docs.py` fails on each citation that no longer resolves, and on a `file:LINE` in [architecture](docs/architecture.md), which names symbols by file.
 
 ## Where code goes
 

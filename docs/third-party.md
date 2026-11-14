@@ -94,8 +94,8 @@ curl 8.18 and later do not build against OpenSSL 1.1.1, and the last that do (8.
 Artwork that ships in the firmware, drawn from someone else's design. Fonts are in `assets/fonts`, each with its
 licence (`docs/ipod.md`).
 
-| Component                                 | Licence | Files                                                         | Used for                                                                                                     |
-| ----------------------------------------- | ------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Component                                    | Licence | Files                                                          | Used for                                                                                                       |
+| -------------------------------------------- | ------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | Phosphor Icons, `@phosphor-icons/core` 2.1.1 | MIT     | `assets/icons/phosphor/*.svg`, `assets/icons/phosphor/LICENSE` | Theme: OLED's glyphs, drawn into bitmaps at build time by `tools/art.py` ([oled-design](oled-design.md#icons)) |
 
 ## What the scan still finds

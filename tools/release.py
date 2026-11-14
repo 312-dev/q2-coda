@@ -90,6 +90,9 @@ def package(stock, out):
     check(not run('git', '-C', ROOT, 'status', '--porcelain', '--', 'patch', 'tools', 'assets', 'docs', 'test', 'requirements.txt').strip(),
           'Commit the build inputs before packaging')
     check(shelf.verify(), 'sources.list is not signed by the release key: docs/releasing.md#the-app-list')
+    # the record of each patched stock site (docs/rebasing.md), which only the stock ZIP can check; -I: it reads stock's files
+    check(subprocess.run([sys.executable, '-I', ROOT/'docs/rebasing/sitenotes.py', stock, '--check']).returncode == 0,
+          f"tools/stock_sites.tsv is not current: run python3 -I docs/rebasing/sitenotes.py '{stock}' and commit it")
     out.mkdir(parents=True)
     source = source_sha256()
     revision = run('git', '-C', ROOT, 'rev-parse', 'HEAD').strip()
