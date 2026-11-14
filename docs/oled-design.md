@@ -218,9 +218,16 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   px) on the text column and "Shuffle" 28 px after it, both Accent Blue, white on the selection.
   The wheel reaches it from the first song; Centre shuffles the list. Sort's bars stay at its right,
   one more tick up, until the options menu takes them.
+- **Folder view** reads as an album: the same 32 px rows. A song file is a track, its number in the
+  album's column, the title from the library's tags (found by the file's path) at x 50 and its
+  length on the right column when known; a file the library doesn't know shows its file name
+  without the extension, a leading track number ("01. ") or the "Artist - " every such name in the
+  folder starts with. A folder has Phosphor `folder` (regular, 20 px, Text Secondary, white on the
+  selection) centred on x 34, its name at x 52 and the chevron on the right column; the card's root
+  too.
 - Which list is which comes from its page: Songs' page (`allmusic_page`, which also holds a genre's songs
   and the other lists stock opens there) is mixed, the artist page's songs are an artist's, the album page is an
-  album. Lists Q2 Pod draws itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep
+  album, Folder view (`folder_page`) a folder. Lists Q2 Pod draws itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep
   their own rows.
 
 ### Now Playing
@@ -320,6 +327,7 @@ pattern.
 | Library                             | List row                    |                                                                                                            |
 | Albums                              | Two-line row with art       |                                                                                                            |
 | Album tracks                        | Song rows                   | Track number, title, length                                                                                |
+| Folder view                         | Song rows                   | Songs as album tracks; folders with the folder glyph and a chevron                                         |
 | Artists, Genres, Composers          | List row                    |                                                                                                            |
 | Songs, a playlist's songs           | Song rows                   | The artist inline                                                                                          |
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |

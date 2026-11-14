@@ -1271,7 +1271,7 @@ def test_classic_light_sets_from_its_theme_file():
     assert theme.sets(m) == theme.sets(c) == {'ipod': SET0} and (m['geoms'], c['geoms']) == ({}, {})
     decl = {e.attrs['name']: e.attrs for e in theme.load(THEMES/'classic-light'/'theme.xml').children
             if e.tag == 'geometry' and 'name' in e.attrs}
-    assert set(decl['classic-light']) == {f.name for f in dataclasses.fields(Geometry)} - {'list_fit', 'status_y', 'right_x', 'np_art', 'np_bar_y', 'split_row', 'split_art', 'split_art_up', 'split_still'} and decl['classic-light-text']['extends'] == 'classic-light'
+    assert set(decl['classic-light']) == {f.name for f in dataclasses.fields(Geometry)} - {'list_fit', 'status_y', 'right_x', 'np_art', 'np_bar_y', 'split_row', 'split_art', 'split_art_up', 'split_still', 'folder_pitch', 'folder_body'} and decl['classic-light-text']['extends'] == 'classic-light'
     assert not hasattr(ipod, 'CLASSIC_LIGHT') and not hasattr(ipod, 'CLASSIC_LIGHT_TEXT')
 
 

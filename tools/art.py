@@ -182,6 +182,7 @@ MODE_PX = 22
 MODE_INKS = {'d': 0xababab, 'l': 0x5c5c5c}
 # A row's leading glyph (Songs' Shuffle row, list.shuffle.row), regular weight at the 20 px row type's size
 ROW_ICON_PX = 20
+FOLDER_INKS = {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}  # Text Secondary in each half, white on the bar
 
 
 def gradient(stops, y0, y1):
@@ -883,6 +884,8 @@ def images(t):
     if t['shuffle_row']:  # Songs' Shuffle row: the accent's top tone at rest, white on the selection, in both halves
         on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
         out |= {f'{prefix}_shuffle_{k}': phosphor('shuffle', ROW_ICON_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
+    if t['painter[PAINT_SONGS]']:  # Folder view's folder glyph (song_rows.c folder_row): Text Secondary, white on the selection
+        out |= {f'{prefix}_folder_{k}': phosphor('folder', ROW_ICON_PX, c) for k, c in FOLDER_INKS.items()}
     if t['bolt']:
         shape = path(BOLT)
         out[f'{prefix}_bolt'] = png(*BOLT_BOX[2:], compose(BOLT_BOX, [(stroke(shape, 1.6), lambda x, y: (0xffffff, t['bolt_halo_a'] / 255)),

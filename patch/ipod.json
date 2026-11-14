@@ -86,7 +86,13 @@
         ["0x4a45c8", "0x2402004e"],
         ["0x4a45cc", "0x2406004e"],
         ["0x4a5e74", "0x2410004e"],
-        ["0x4a69c4", "0x2402004e"],
+        ["0x4a69c4", "0x2402004e"]
+      ]
+    },
+    {
+      "value": "folder_pitch",
+      "purpose": "Folder view: row creation, reset and artwork offset divisors (art_pitch unless the set gives its own)",
+      "sites": [
         ["0x532000", "0x2405004e"],
         ["0x532308", "0x2403004e"],
         ["0x533288", "0x2410004e"],
@@ -117,7 +123,13 @@
       "value": "art_body",
       "purpose": "row background, hit target and full-height children",
       "sites": [
-        ["0x4a69e0", "0x24150046"],
+        ["0x4a69e0", "0x24150046"]
+      ]
+    },
+    {
+      "value": "folder_body",
+      "purpose": "Folder view: row background, hit target and full-height children (art_body unless the set gives its own)",
+      "sites": [
         ["0x532d18", "0x24060046"],
         ["0x533c8c", "0x24110046"]
       ]

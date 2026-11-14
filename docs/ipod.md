@@ -32,7 +32,8 @@ Native local row-pool constructors are at 0x533bc4 (folder), 0x4ac588 (songs),
 0x4b39f4 (local categories) and 0x4a6910 (album list/grid). The album grid branch
 is unchanged. Album detail, artist track and playlist constructors have their own
 explicit sites in the audit. Folder reset at 0x532000, return offset division at
-0x532308 and scrolling cover division at 0x533288 all use the same compact pitch.
+0x532308, scrolling cover division at 0x533288 and the folder constructor's own pitch at
+0x533c54 take the set's `folder_pitch`, the art rows' unless the set gives its own (OLED's 32).
 The category cover callback originally divides by 120 despite using 78-pixel
 rows; iPod corrects its audited divisor at 0x4b2a48 to 72. Rebinding and delayed
 cover callbacks keep the same widget geometry and saved cover preferences.

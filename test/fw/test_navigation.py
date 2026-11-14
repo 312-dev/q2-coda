@@ -3031,3 +3031,54 @@ def test_a_card_game_with_the_sound_fails_every_start_of_stocks_player(fw):
     gm.audio = 0  # a game without the sound: stock's start runs
     start()
     assert len(fw.calls('stock_start_player_trampoline')) == 1
+
+
+# Folder view as an album (song_rows.c folder_tracks): the library's tags by path, else the file name trimmed.
+class FTrack(C.Structure):
+    _fields_ = [('title', C.c_char_p), ('track', C.c_int), ('own', C.c_int)]
+
+
+def folder_rows(fw, folder, records, tags):
+    """folder_tracks over records in folder, the library answering tags ((fileurl, name, track) rows): each row's
+    (title, track) and the queries asked."""
+    deques, sql = Deques(fw), []
+    fw.var('fw_ctx_p_deque_showlist', C.c_uint).value = deques.new(records)
+    fw.var('fw_ctx_g_folder_path', C.c_char * 1024).value = folder
+
+    def run(db, query, callback, *_):
+        sql.append(C.string_at(query))
+        if callback:
+            call = C.CFUNCTYPE(*ROW)(callback)
+            for tag in tags:
+                call(None, 3, row(*tag), None)
+        return 0
+    fw.mock('sqlite3_exec', run)
+    got = C.cast(fw.fn('song_rows__folder_tracks', C.c_void_p)(), C.POINTER(FTrack))
+    return [(got[i].title, got[i].track) for i in range(len(records))], [q for q in sql if b'songtable' in q]
+
+
+def test_a_folders_songs_take_their_tags_by_path(fw):
+    # A host record holds one of REC_NAME and REC_PATH (P reads 8 bytes, 4 apart), so these carry their paths, every
+    # one tagged; test_only_what_every_file_name_shares_is_trimmed has the names. A song under a subfolder is not
+    # the folder's own.
+    keep, d = [], b'/mnt/mmc/Jack'
+    records = [record(keep, kind=4)] + [record(keep, path=d + n, kind=8) for n in (b'/a.flac', b'/b.flac')]
+    rows, sql = folder_rows(fw, d, records, [(d + b'/Sub/a.flac', b'Deeper', b'3'), (d + b'/b.flac', b'Bee', b'0'),
+                                             (d + b'/a.flac', b'Ay', b'7'), (d + b'/b.flac', b'', b'2')])
+    assert rows == [(None, 0), (b'Ay', 7), (b'Bee', 2)]
+    assert sql == [b"select fileurl,name,track from songtable where fileurl>'/mnt/mmc/Jack/' and fileurl<'/mnt/mmc/Jack0'"]
+
+
+@pytest.mark.parametrize('names, titles', [
+    ((b'01. Jack Johnson - I Got You.mp3', b'02. Jack Johnson - Washing Dishes.flac'), (b'I Got You', b'Washing Dishes')),
+    ((b'Alpha - One.mp3', b'Beta - Two.mp3'), (b'Alpha - One', b'Beta - Two')),  # no "Artist - " they all share
+    ((b'A - B - One.mp3', b'A - B - Two.mp3'), (b'One', b'Two')),                # the longest one shared
+    ((b'A - B - One.mp3', b'A - C - Two.mp3'), (b'B - One', b'C - Two')),
+    ((b'03 Song.mp3', b'Band - .mp3'), (b'Song', b'Band - '))])                 # nothing would be left: kept
+def test_only_what_every_file_name_shares_is_trimmed(fw, names, titles):
+    keep, d = [], b"/mnt/mmc/It's"
+    records = [record(keep, name=n, kind=8) for n in names]
+    rows, sql = folder_rows(fw, d, records, [])
+    assert [t for t, _ in rows] == list(titles) and b"It''s/' and" in sql[0]
+    if names[0].startswith(b'01'):
+        assert [n for _, n in rows] == [1, 2]  # the file name's number, the tags having none

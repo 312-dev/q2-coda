@@ -57,6 +57,8 @@ class Geometry:
     count_y: int = 40
     art_title24_y: int = 13
     art_meta_y: int = 39
+    folder_pitch: int = 0  # Folder view's rows, a kind of their own: its pitch and body (0: art_pitch's and art_body's)
+    folder_body: int = 0
     song_pitch: int = 72  # Songs' rows, a kind of their own: its pitch, body, title and metadata y
     song_body: int = 68
     song_title24_y: int = 13
@@ -222,11 +224,21 @@ def with_geometry(g):
 GEOM_VALS = ('bar', 'set_row', 'set_icon', 'batt_w', 'batt_h', 'text_x', 'lib_art', 'list_end', 'action_row', 'stream_row', 'stock_row', 'toolbar', 'status_y', 'right_x', 'list_fit', 'split_row', 'split_art', 'split_art_up', 'split_still')  # Geometry fields the payload reads at run time (themes.inc geom_vals), not immediates
 
 
+def folder_pitch(g):
+    """Folder view's row pitch under g: its own, else its art rows'."""
+    return g.folder_pitch or g.art_pitch
+
+
+def folder_body(g):
+    return g.folder_body or g.art_body
+
+
 def immediate_values(g=SET0):
     """{value name: word} for the named ipod.json immediates under geometry g."""
     geo = with_geometry(g)
     values = {k: v for k, v in dataclasses.asdict(g).items() if k in VALUE_NAMES}
-    return values | {'scroll': geo.BOTTOM - (g.action_row or 50), 'np_bar_x': geo.NP_BAR[0], 'np_bar_w': geo.NP_BAR[2]}
+    return values | {'folder_pitch': folder_pitch(g), 'folder_body': folder_body(g),
+                     'scroll': geo.BOTTOM - (g.action_row or 50), 'np_bar_x': geo.NP_BAR[0], 'np_bar_w': geo.NP_BAR[2]}
 
 
 IPOD = with_geometry(SET0)
@@ -1090,11 +1102,11 @@ def volume_dialog(root):
 NAVBAR_ONLY = AUDIT['navbar_only']
 SET_ROW, SET_TOP, SET_ROWS, SET_STOCK_ROW, SET_STOCK_BODY = (inc(n) for n in ('SET_ROW', 'SET_TOP', 'SET_ROWS', 'SET_STOCK_ROW', 'SET_STOCK_BODY'))
 
-# The re-pitched list pages' rows: art pages' carry artwork (Albums, Folder), the Library's are its own
-# (lib_*), text pages' carry none. Any other page rows() re-pitches (the playlist actions) is text. test/build.py imports it.
+# The re-pitched list pages' rows: art pages' carry artwork (Albums), Folder's are its own (folder_*, an
+# art page's unless the set says), the Library's too (lib_*), text pages' carry none. Any other page rows() re-pitches (the playlist actions) is text. test/build.py imports it.
 PAGE_KIND = {'localmusic/allmusic_page.bin': 'song', 'localmusic/albuminfo_page.bin': 'text',
              'localmusic/artistinfo_page.bin': 'text', 'localmusic/playlist_page.bin': 'playlist',
-             'localmusic/album_page.bin': 'art', 'folder_page.bin': 'art', 'localmusic_page.bin': 'lib',
+             'localmusic/album_page.bin': 'art', 'folder_page.bin': 'folder', 'localmusic_page.bin': 'lib',
              'localmusic/localclass_page.bin': 'text'}
 
 
@@ -1102,6 +1114,7 @@ def page_rows(g, kind):
     """(pitch, body, artwork inset) of a page kind's rows under g."""
     return {'art': (g.art_pitch, g.art_body, g.art_inset), 'lib': (g.lib_pitch, g.lib_body, g.lib_inset),
             'song': (g.song_pitch, g.song_body, g.text_art_inset),
+            'folder': (folder_pitch(g), folder_body(g), g.art_inset),
             # a set without toolbars gives Playlists two-line rows; playlists.c's pl_dress sizes them
             'playlist': (g.pitch, g.body, g.text_art_inset) if g.toolbar else (g.song_pitch, g.song_body, g.text_art_inset)
             }.get(kind, (g.pitch, g.body, g.text_art_inset))
