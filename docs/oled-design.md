@@ -302,7 +302,7 @@ an inset modal over the page, which stays on screen dimmed half way to black; no
 
 - **Panel:** opaque `#1C1C1E`, 259 px wide from x 58, top at y 58, 16 px corners, 8 px padding, no
   title (the row behind says which item). Rows are 32 px, at most six in view, then they scroll
-  inside the panel.
+  inside the panel; the wheel's scroll indicator stands in the panel's right padding, never past its edge.
 - **Rows:** Inter Regular 20 at the panel's 16 px inset; an action's Phosphor symbol (regular,
   19 px) at the right in Text Secondary, white on the selection. The selection is the list's bar, 8
   px in from the panel with 8 px ends.

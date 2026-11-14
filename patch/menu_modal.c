@@ -62,6 +62,15 @@ int modal_win(void *w) {
     return 0;
 }
 
+/* The wheel's scroll indicator's inset from the right of an open modal's list, sb_w wide
+ * (navigation.c paint_scrollbar): centred in the panel's right padding, clear of the selection
+ * bar's end and inside the panel. -1 for any other list. */
+int modal_sb_right(void *list, int sb_w) {
+    for (int i = 0; list && i < MODAL_MAX; ++i)
+        if (modals[i].list == list) return row_out() + (MODAL_PAD - sb_w) / 2;
+    return -1;
+}
+
 /* The rows' surface (the list's scroll_view) of an open modal, painted by modal_row_paint. */
 int modal_rows_of(void *w) {
     for (int i = 0; w && i < MODAL_MAX; ++i)

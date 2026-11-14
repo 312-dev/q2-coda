@@ -2796,9 +2796,10 @@ static void paint_scrollbar(void *canvas, void *bar, int table) {
         if (!a || !lcd || max <= 0) return;
         value = value < 0 ? 0 : value > max ? max : value;
         while (max >> 22) max >>= 1, value >>= 1;
-        int at = track * value / max, len = track * h / max;
+        int at = track * value / max, len = track * h / max, right = modal_sb_right(list, T->sb_w);
         if (len > track - at) len = track - at;
-        rect_t t = { I(list, W_W) - T->sb_right - T->sb_w, T->sb_top - y0, T->sb_w, track },
+        if (right < 0) right = T->sb_right; /* an inset modal's: in its panel */
+        rect_t t = { I(list, W_W) - right - T->sb_w, T->sb_top - y0, T->sb_w, track },
                thumb = { t.x, t.y + at, t.w, len };
         unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), L = ipod_light();
         for (int i = 0; i < t.h; ++i)
