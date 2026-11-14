@@ -361,7 +361,7 @@ accent's red tone (`DROPDOWN_SUN`).
 
 ## Cover Flow
 
-The covers are drawn with depth ([internals](internals.md#coverflow-depth)): the
+<a id="coverflow"></a>The covers are drawn with depth ([internals](internals.md#coverflow-depth)): the
 selected cover at its native 160 pixels, its neighbours a side turned edge-on to it and, while they move, the ones coming in at the
 frame's edge, drawn whole from their first pixel, and Classic's reflection (46 pixels from 35% of the cover's
 brightness), all in the top 220 pixels of the page
@@ -634,7 +634,7 @@ scrub ends, instead of after each pause between ticks. Values are `SCRUB_*` in
 The top row's text and icons, the bar's ends and the times keep clear of the corners
 ([Rounded corners](#rounded-corners)).
 
-**Lyrics.** The lyrics page shows the lyrics large, for reading at a glance, as Apple Music's do:
+<a id="lyrics"></a>**Lyrics.** The lyrics page shows the lyrics large, for reading at a glance, as Apple Music's do:
 the playing line centred, the one before above it and the next below, its text `LYRIC_X` (16
 pixels, as the art) from the left.
 Every line is 34 pixels, as large as reads well in the page's width; a long one wraps, at a space
