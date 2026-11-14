@@ -1,49 +1,49 @@
 # Inefficiencies
 
-Problems worth fixing, ranked by impact over effort, as read on branch `oled-theme` at 1.8.2. Each has where it is, what shows it, what it costs, a fix and an effort (S: an hour or two, M: a day, L: several days). Nothing here is fixed in this file's change; an entry marked **unconfirmed** says what would confirm it.
+Problems found worth fixing, ranked by impact over effort, as read on branch `oled-theme` at 1.8.2; the `file:LINE` references are from that reading. Each entry has where it is, what shows it and what it costs, and its status in the table. A **resolved** entry's section says in **State** what the tree does and which check guards it. A **measured** one has the figures under **Measured** and a **Decision** to leave it. A **deferred** or **left as is** entry has a **Decision**: why not now, or why the cost is acceptable, and what would bring it back. An **open** one has a fix and an effort (S: an hour or two, M: a day, L: several days). An entry marked **unconfirmed** says what would confirm it.
 
 The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squashfs` and `rootfs.squashfs`. The Q2 is a 2-core Ingenic X2000 with 128 MB of RAM ([hardware.md](hardware.md)).
 
-`ponytail:` in a comment or a doc marks a limit the code leaves on purpose, with the upgrade it names. It is on 238 lines of `patch/` and `tools/` (`grep -c ponytail`); the ones that are costs are entries 7 to 17 below.
+`ponytail:` in a comment or a doc marks a limit the code leaves on purpose, with the upgrade it names. It is on 237 lines of `patch/` and `tools/` (`grep -r ponytail patch tools | wc -l`); entries 7 to 17 below are costs the code marked so, 13 among them before it was resolved.
 
 ## Ranked
 
-| #   | Problem                                                             | Category  | Effort |
-| --- | ------------------------------------------------------------------- | --------- | ------ |
-| 1   | The UI payload's room (resolved)                                    | fragile   | M      |
-| 2   | `tools/stock_sites.tsv` is not current, and nothing checks it       | test gap  | S      |
-| 3   | No test resolves the doc anchors the sources cite                   | test gap  | S      |
-| 4   | The theme picker's order and Status Bar's values (resolved)         | fragile   | S      |
-| 5   | A build runs `unsquashfs -cat` once per file, hundreds of times     | build     | S      |
-| 6   | Every build compiles all 55 objects one after another               | build     | S      |
-| 7   | Scrobble upload rewrites the log once a window                      | runtime   | S      |
-| 8   | Playlist art reads the playlist table once per playlist             | runtime   | S      |
-| 9   | A folder's play loads each subfolder on the UI thread               | runtime   | M      |
-| 10  | A card app's import reads every song's tags on the UI thread        | runtime   | M      |
-| 11  | Spotify's cover is decoded on the UI thread                         | runtime   | S      |
-| 12  | A stock database write on the UI thread waits for a count           | runtime   | M      |
-| 13  | Ratings compare every song with every rated one                     | runtime   | S      |
-| 14  | An EPUB's spine is quadratic in its items                           | runtime   | S      |
-| 15  | Tidal's cache trim walks the cache on the UI thread, under a lock   | runtime   | M      |
-| 16  | A refused cover costs a process each                                | runtime   | M      |
-| 17  | A whole-library read holds a second copy of the library             | runtime   | L      |
-| 18  | Every painted widget passes through about 25 painters               | runtime   | M      |
-| 19  | Nothing that needs a build runs in CI                               | test gap  | L      |
-| 20  | `classic_light_*` art and the Classic face are named in C           | fragile   | M      |
-| 21  | Tests unpack the themes by count                                    | fragile   | S      |
-| 22  | Two source lists, a link list and a format list name the same files | duplicate | S      |
-| 23  | `internals.md` is 832 KB in 1,752 lines                             | docs      | M      |
-| 24  | The Hooks table lists 43 of 108 hooks                               | docs      | S      |
-| 25  | `format.sh` formats 21 of the UI payload's 48 C files, and CI none  | duplicate | S      |
-| 26  | The stock version is written in three places in `build.py`          | fragile   | S      |
-| 27  | `DEMO_SHA` is recorded but never compared                           | fragile   | S      |
-| 28  | The 10-accent limit's stated reason does not match the reader       | docs      | S      |
-| 29  | `lockscreen.c` says the rootfs has no room                          | docs      | S      |
-| 30  | A new theme's Corners default follows its index                     | fragile   | S      |
-| 31  | `test/patch.py` is one 21,462-line file                             | test gap  | L      |
-| 32  | C mutation testing reaches 8 files                                  | test gap  | L      |
-| 33  | The C coverage floors are 40% and 38%                               | test gap  | M      |
-| 34  | Boot reads `config.ini` once per key                                | runtime   | M      |
+| #   | Problem                                                                        | Category  | Effort | Status     |
+| --- | ------------------------------------------------------------------------------ | --------- | ------ | ---------- |
+| 1   | The UI payload's room (resolved)                                               | fragile   | M      | resolved   |
+| 2   | `tools/stock_sites.tsv` is not current, and nothing checks it (resolved)       | test gap  | S      | resolved   |
+| 3   | No test resolves the doc anchors the sources cite (resolved)                   | test gap  | S      | resolved   |
+| 4   | The theme picker's order and Status Bar's values (resolved)                    | fragile   | S      | resolved   |
+| 5   | A build runs `unsquashfs -cat` once per file, hundreds of times                | build     | S      | measured   |
+| 6   | Every build compiles all 55 objects one after another                          | build     | S      | measured   |
+| 7   | Scrobble upload rewrites the log once a window                                 | runtime   | S      | left as is |
+| 8   | Playlist art reads the playlist table once per playlist                        | runtime   | S      | deferred   |
+| 9   | A folder's play loads each subfolder on the UI thread                          | runtime   | M      | measured   |
+| 10  | A card app's import reads every song's tags on the UI thread                   | runtime   | M      | deferred   |
+| 11  | Spotify's cover is decoded on the UI thread                                    | runtime   | S      | deferred   |
+| 12  | A stock database write on the UI thread waits for a count                      | runtime   | M      | left as is |
+| 13  | Ratings compare every song with every rated one (resolved)                     | runtime   | S      | resolved   |
+| 14  | An EPUB's spine is quadratic in its items                                      | runtime   | S      | left as is |
+| 15  | Tidal's Clear All Downloads unlinks the cache on the UI thread, under a lock   | runtime   | M      | left as is |
+| 16  | A refused cover costs a process each                                           | runtime   | M      | left as is |
+| 17  | A whole-library read holds a second copy of the library                        | runtime   | L      | deferred   |
+| 18  | Every painted widget passes through about 25 painters                          | runtime   | M      | measured   |
+| 19  | Nothing that needs a build runs in CI                                          | test gap  | L      | deferred   |
+| 20  | `classic_light_*` art and the Classic face are named in C                      | fragile   | M      | deferred   |
+| 21  | Tests unpack the themes by count (resolved)                                    | fragile   | S      | resolved   |
+| 22  | Two source lists, a link list and a format list name the same files (resolved) | duplicate | S      | resolved   |
+| 23  | `internals.md` is 832 KB in 1,752 lines                                        | docs      | M      | deferred   |
+| 24  | The Hooks table lists 43 of 108 hooks (resolved)                               | docs      | S      | resolved   |
+| 25  | `format.sh` formats 21 of the UI payload's 48 C files, and CI none (resolved)  | duplicate | S      | resolved   |
+| 26  | The stock version is written in three places in `build.py` (resolved)          | fragile   | S      | resolved   |
+| 27  | `DEMO_SHA` is recorded but never compared (resolved)                           | fragile   | S      | resolved   |
+| 28  | The 10-accent limit's stated reason does not match the reader (resolved)       | docs      | S      | resolved   |
+| 29  | `lockscreen.c` says the rootfs has no room (resolved)                          | docs      | S      | resolved   |
+| 30  | A new theme's Corners default follows its index (resolved)                     | fragile   | S      | resolved   |
+| 31  | `test/patch.py` is one 21,462-line file                                        | test gap  | L      | deferred   |
+| 32  | C mutation testing reaches 8 files                                             | test gap  | L      | deferred   |
+| 33  | The C coverage floors are 40% and 38%                                          | test gap  | M      | deferred   |
+| 34  | Boot reads `config.ini` once per key                                           | runtime   | M      | measured   |
 
 ## Fragile hard-coding
 
@@ -59,18 +59,15 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 
 ### 20. `classic_light_*` art and the Classic face are named in C
 
-- **Where:** 72 string literals `"classic_light_..."` or `"classic-light"` in `patch/navigation.c` (34), `patch/classic_pages.c` (18), `patch/lockscreen.c` (7), `patch/coverflow.c` (5), `patch/volume.c` (5), `patch/ratings.c` (2), `patch/radio.c` (1) (`grep -c '"classic_light_\|"classic-light"' patch/*.c`). `tools/theme.py:913` allows `art_final` for the id `classic-light` alone.
-- **Evidence:** `tools/art.py`'s `images(t)` names generated art by the theme's id, and the C loads Classic's names literally, so another theme's generated art ships and is never drawn.
-- **Impact:** a second theme cannot use the `classic-light` painters with its own art. In flux on branch `oled-theme`.
-- **Fix:** a per-theme art prefix in `theme_t`, written by `emit`, and a helper that joins it.
-- **Effort:** M.
+- **Where:** 70 lines with a string literal `"classic_light_..."` or `"classic-light"`, in `patch/navigation.c` (32), `patch/classic_pages.c` (18), `patch/lockscreen.c` (7), `patch/coverflow.c` (5), `patch/volume.c` (5), `patch/ratings.c` (2) and `patch/radio.c` (1) (`grep -c '"classic_light_\|"classic-light"' patch/*.c`, recounted at the hygiene pass). `validate` in `tools/theme.py` allows `art_final` only for a theme whose `art_id` is `classic-light`.
+- **Evidence:** the C loads Classic's names literally. A theme's `art` attribute (`art_id` in `tools/theme.py`) names the theme whose generated images it draws, and OLED (`art="classic-light"`) draws Classic's through it.
+- **Impact:** a theme cannot use the `classic-light` painters with art of its own.
+- **Decision:** deferred. What is left is a theme with its own art under Classic's painters, and none exists. Then the fix is a per-theme art prefix in `theme_t`, written by `emit`, and a helper that joins it (M).
 
-### 21. Tests unpack the themes by count
+### 21. Tests unpack the themes by count (resolved)
 
 - **Where:** `test/fw/test_nav_playing.py:16` (`MINIMAL, CLASSIC, MODERN = THEMES`), `:549-550` (`range(4)` Status Bar looks with four labels), `test/fw/test_coverflow.py:2362` (`range(3)`), `test/unit/test_theme.py:522` (`== [0, 0, 0]`), `:536` (`== 3`), `test/ui_preview.py:21-24` (three ids).
-- **Impact:** a fourth theme fails tests that are not about it.
-- **Fix:** look themes up by id, and assert over `builtins()` instead of a literal length.
-- **Effort:** S.
+- **State:** `test/fw/test_nav_playing.py` and `test/fw/test_coverflow.py` look each theme, or its `index`, up by id in `host.tools_theme.builtins()`, so a theme added or moved fails no test that is not about it. `test/ui_preview.py`'s three ids are a review tool's arguments and `three()` in `test/unit/test_theme.py` a stated fixture: both stay. Guard: `test_coverflow.py`'s 503 tests, which fail in dozens when two of its ids are swapped.
 
 ### 26. The stock version is written in three places in `build.py` (resolved)
 
@@ -114,16 +111,14 @@ Entries 7 to 17 are costs the code marks itself.
 - **Where:** `patch/scrobble.c:344-347`; [internals.md](internals.md#scrobbling).
 - **Evidence:** its comment: "each pass rewrites the rest of the log under the lock, so card writes grow with the square of the backlog (a 3 MB log writes about 3 MB extra, 10 MB about 45 MB)".
 - **Impact:** card wear and a long upload after weeks offline.
-- **Fix:** the comment's own: carry an offset across windows and rewrite once.
-- **Effort:** S.
+- **Decision:** left as is. Nothing is rewritten twice until the log passes `LOG_HEAD` (1 MB, about 7,000 scrobbles of some 150 bytes). Beyond that the extra writes are small beside one song file, and carrying an offset would mean one `retire` for the whole backlog: its `calloc(1, done + 1)` grows with the backlog, and a crash mid-upload re-sends all of it. The `ponytail:` stays.
 
 ### 8. Playlist art reads the playlist table once per playlist
 
 - **Where:** `patch/playlist_art.c:151-153`.
 - **Evidence:** "each job reads the table again for its own cd_num (no index), so a first build of N playlists reads it N + 1 times". `test/fw/messy_playlists.py` models 101 playlists over about 55,000 songs.
 - **Impact:** the first build after a big import, on the worker, competing with the UI for the card.
-- **Fix:** the comment's: collect each playlist's first albums in the refresh's one pass.
-- **Effort:** S.
+- **Decision:** deferred. The reads are on the worker (`pl_worker`, below the player and the UI by `thread_lower`), for a first build only, and a typical library (ten playlists of some hundreds of rows) reads little. Each job's own read is also what names its 2x2 ("named by the songs this read", `pl_build`). Revisit if a profile on a device shows first builds of 50 or more playlists dominated by the reads; the fix is then the comment's: collect each playlist's first albums in the refresh's one pass (S).
 
 ### 9. A folder's play loads each subfolder on the UI thread
 
@@ -149,23 +144,20 @@ Entries 7 to 17 are costs the code marks itself.
 ### 10. A card app's import reads every song's tags on the UI thread
 
 - **Where:** `patch/addon_library.c:295`.
-- **Impact:** as 9, for a sync's playlists.
-- **Fix:** stage it as Update Local Music is staged.
-- **Effort:** M.
+- **Impact:** the UI does not answer while stock's `importPlayList()` reads every listed song's tags, as stock's own Import row runs it. `addon_m3u_dir` calls `ringnav_wdt_long()` first, so the watchdog does not reset the Q2 during it.
+- **Decision:** deferred. Moving it means proving stock's import safe on another thread, or replacing it; staging it as Update Local Music is staged is the fix (M).
 
 ### 11. Spotify's cover is decoded on the UI thread
 
 - **Where:** `patch/spotify.c:443`: "the cover is sized on the UI thread, one decode a track; a worker if it stutters".
 - **Impact:** a stall at each track change while Spotify plays.
-- **Fix:** Cover Flow's art worker already sizes covers off the UI thread.
-- **Effort:** S.
+- **Decision:** deferred. One `thumb()` a track, unmeasured, and the emulator has no Wi-Fi. It needs `tools/q2remote.py prof` on a device across a track change; worth Cover Flow's art worker (S) if the decode holds the UI more than 100 ms.
 
 ### 12. A stock database write on the UI thread waits for a count
 
 - **Where:** `patch/coverflow.c:4416` (`count_worker`); [internals.md](internals.md#playlist-art) (the paragraph on the wait).
 - **Evidence:** the doc: a write on the UI thread "that meets Home's or the update dialog's count ... a read of the whole `songtable` on their own connections, seconds on a big library" holds the UI.
-- **Fix:** cache the counts by library generation, so a count runs once a scan.
-- **Effort:** M.
+- **Decision:** left as is. The fix proposed, a count once a scan, is what `home_counts` does: it starts a count only when `library_gen` differs from the generation it last asked at. What remains is a stock write that waits at most 500 ms a statement (`PRAGMA busy_timeout=500`, `stock_db_open` in `patch/playlists.c`) when it meets a running count.
 
 ### 13. Ratings compare every song with every rated one (resolved)
 
@@ -177,26 +169,24 @@ Entries 7 to 17 are costs the code marks itself.
 ### 14. An EPUB's spine is quadratic in its items
 
 - **Where:** `patch/books.c:358`.
-- **Fix:** an id index, as the comment says.
-- **Effort:** S.
+- **Decision:** left as is. The OPF is capped at `META_MAX` (1 MB), the scan is in memory on the Books worker and can be cancelled at each itemref, and each itemref then inflates a document, which dwarfs it. An id index, as the comment says, if big books prepare slowly.
 
-### 15. Tidal's cache trim walks the cache on the UI thread, under a lock
+### 15. Tidal's Clear All Downloads unlinks the cache on the UI thread, under a lock
 
-- **Where:** `patch/tidal.c:203`: "on the UI thread, holding the lock, a moment for a full 8 GB cache".
-- **Fix:** trim on the download thread.
-- **Effort:** M.
+- **Where:** `patch/tidal.c:203` (`tidal_clear`): "on the UI thread, holding the lock, a moment for a full 8 GB cache". `trim()`, the cache's size cap, runs on the download thread: `download` calls it.
+- **Decision:** left as is. The `ponytail:` is on Clear All Downloads, one user action that unlinks the cache's files under the lock.
 
 ### 16. A refused cover costs a process each
 
 - **Where:** `patch/coverflow.c:182`: "a process per cover; a resident decoder if first builds drag".
 - **Impact:** first art builds of a library whose covers stock's decoder refuses (WebP, large PNG).
-- **Effort:** M.
+- **Decision:** left as is. The process is deliberate: these are the pictures stock's in-process decoder refuses, and the child is marked for the kernel to kill first (`child_oom_first`), so a picture that needs tens of MB costs ffmpeg, not demo. A resident decoder would trade that for a faster first build.
 
 ### 17. A whole-library read holds a second copy of the library
 
 - **Where:** [internals.md](internals.md#play-counts) (Most Played's paragraph and the one after): "one copy per whole-library read is the floor ... the next whole-library read holds two".
 - **Impact:** memory on a 128 MB device with a large library.
-- **Effort:** L.
+- **Decision:** deferred, L effort; the design is in the doc (Most Played ranks with `sqlite3_exec` over `fileurl` and fetches only the top rows). Revisit on an out-of-memory kill in a `q2-crash.log` from a large library.
 
 ### 18. Every painted widget passes through about 25 painters
 
@@ -223,36 +213,31 @@ Entries 7 to 17 are costs the code marks itself.
 
 ## Duplicated tables kept in step by hand
 
-### 22. Two source lists, a link list and a format list name the same files
+### 22. Two source lists, a link list and a format list name the same files (resolved)
 
 - **Where:** `NAVIGATION` (`tools/build.py:1594`), `UI_SOURCES` (`tools/peq.py:187`), the `--undefined=` names at `tools/build.py:1611-1615` (symbols stock's patched words call, beside `HOOKS`), `tools/format.sh:9` (three Cover Flow files by name), the table in `test/cmut/sandbox.sh:22-39`, and the suite list in `.github/workflows/firmware.yml:42` beside [building.md](building.md#tests)'s.
-- **Impact:** a new file or suite is added in up to four places; a miss is silent (not formatted, not mutated, not run in CI).
-- **Fix:** derive `format.sh`'s list from both source lists, as it already does for `NAVIGATION`; derive the `--undefined` names from the tables that hold the call sites.
-- **Effort:** S.
+- **State:** `tools/format.sh` reads `NAVIGATION` and `UI_SOURCES` but `UNFORMATTED` (beside `UI_SOURCES` in `tools/peq.py`) in one `python3 -c`, so a new file in either list is formatted unless it is exempted by name (entry 25). Guard: `test_unformatted_names_ui_sources_files` in `test/unit/test_peq_tool.py`.
+- **Not done, on purpose:** no CI step runs the formatter (a workflow edit cannot be proven from a local run). The `--undefined=` names in `compile_payload` are not derived: a missing one fails the build at once, when `build()` looks the symbol up, so it is not a silent miss. `test/cmut/sandbox.sh`'s table and the workflow's suite list stay by hand.
 
-### 25. `format.sh` formats 21 of the UI payload's 48 C files, and CI none
+### 25. `format.sh` formats 21 of the UI payload's 48 C files, and CI none (resolved)
 
 - **Where:** `tools/format.sh:8-9`: `NAVIGATION`'s 18 files, three headers and three Cover Flow files. `UI_SOURCES`' other 27 files of 30 (`coverflow.c`, `addon.c`, `spotify.c`, `books.c` and the rest) are not named. No workflow runs `clang-format` (`grep -n format .github/workflows/*.yml` finds only coverage's report format).
-- **Impact:** **unconfirmed** whether those files conform: `clang-format` was not installed where this was written. `clang-format --dry-run` over `UI_SOURCES` would say.
-- **Fix:** if they conform, add them; if not, decide and say so in `.clang-format`'s head.
-- **Effort:** S.
+- **Measured:** `clang-format --dry-run` (18.1.8, which leaves upstream's formatted files unchanged) over `UI_SOURCES`: 24 of upstream's files do not conform, and never did: `coverflow.c` (441 warnings), `peq_ui.c` (312), `peq.c` (218), `spotify.c` (177) and 20 more down to `upnext.c` (2). `upstream/main`'s copies warn as much, but for four the fork has added to: `netupdate.c` (32 there, 91 here), `tidal.c` (59, 61), `coverflow.c` and `scrobble.c` (one each); the fork's lines in them stay unformatted with the rest. The fork's own `release_sig.c` and `stock_tls.c` did not either, nor `wifi_transfer.c` in `NAVIGATION`.
+- **State:** reformatting upstream's files would make every later merge of them a conflict, so `UNFORMATTED` in `tools/peq.py` names them, and the vendored `patch/monocypher/` files, and `tools/format.sh` formats the rest of `UI_SOURCES` with `NAVIGATION` and six headers; `.clang-format`'s head says so and names version 18. The fork's files were formatted. `tools/format.sh --check` runs `clang-format --dry-run -Werror` over the same list and `prettier --check` over the docs, changing nothing; its C half passes, and fails on one misformatted line. `docs/backlog.md`, `docs/oled-design.md`, `docs/server-library.md` and `docs/source-map.md` fail prettier's check and are left as they are. Not done: a CI step (entry 22).
 
 ## Test gaps
 
-### 2. `tools/stock_sites.tsv` is not current, and nothing checks it
+### 2. `tools/stock_sites.tsv` is not current, and nothing checks it (resolved)
 
 - **Where:** `docs/rebasing/sitenotes.py`, `tools/stock_sites.tsv`.
 - **Evidence:** `python3 -I docs/rebasing/sitenotes.py 'Q2 Firmware V1.36.zip' --check` exits 1 with `tools/stock_sites.tsv is not current: run docs/rebasing/sitenotes.py`. No test or workflow names `sitenotes` (`grep -rn sitenotes test .github`).
-- **Impact:** the table is the record of how to find each patched instruction in the next stock version, and "a note is only of use written while the site is still known" (its docstring). Sites added since the last run have none.
-- **Fix:** run it and commit the table; add `--check` to the release procedure ([releasing.md](releasing.md)), as it needs the stock ZIP and so cannot run in CI.
-- **Effort:** S.
+- **State:** the table is current (580 sites, none in no named function); one row was missing, the `bnez` in `home_page_init` at `0x534c4c` that `patch_code` in `tools/ipod.py` changes. `tools/release.py package`, which holds the ZIP, runs `python3 -I docs/rebasing/sitenotes.py ZIP --check` before either build and stops with the command to run ([releasing.md](releasing.md)); `test_package_wants_current_stock_sites` in `test/unit/test_release.py` guards the call. It cannot run in CI.
 
-### 3. No test resolves the doc anchors the sources cite
+### 3. No test resolves the doc anchors the sources cite (resolved)
 
 - **Where:** comments such as `patch/onlinematch.c:1` (`docs/internals.md#lyrics-search`), `patch/coverflow.c:2560` (`#coverflow-touch`), `patch/lyrics.c:2` (`docs/ipod.md#lyrics`).
 - **Evidence:** a script over `git ls-files patch tools test` found 12 citations of anchors that no heading or `<a id>` defined, in 6 files. The anchors were added to the docs beside this report; nothing stops the next rename from breaking them.
-- **Fix:** a `test/unit` test that collects `docs/<file>.md#<anchor>` from the sources and the Markdown links, and checks each against the headings and `<a id>`s. It needs no stock file.
-- **Effort:** S.
+- **State:** `test/unit/test_docs.py` resolves every `docs/<name>.md#<anchor>` in `patch/`, `tools/` and `test/` (279) and every relative Markdown link with an anchor in `docs/*.md`, `AGENTS.md`, `CONTRIBUTING.md` and `README.md` (772 in all) against each file's GitHub heading anchors and `<a id>`s, and lists each broken one as `file:line: target#anchor`. It found three: `#curl` (the heading is curl and mbedTLS), `#cover-search` (an `<a id>` added) and `#safe-file-manager` split over two comment lines. It also refuses a `file:LINE` in [architecture.md](architecture.md), which names each symbol by its file, and checks each symbol it pairs with a file is in that file.
 
 ### 19. Nothing that needs a build runs in CI
 
@@ -261,6 +246,7 @@ Entries 7 to 17 are costs the code marks itself.
 - **Impact:** a pull request can break the MIPS payload, the player hooks or the packaging and pass CI.
 - **Fix:** a self-hosted runner, or a private CI job, that holds the ZIP; at least a release checklist line that names the suites ([releasing.md](releasing.md) runs them through `tools/release.py`'s `suites`, `tools/release.py:61`).
 - **Effort:** L.
+- **Decision:** deferred. It needs a private runner that holds the stock ZIP: the owner's infrastructure decision. Meanwhile `tools/release.py package` runs every suite before a release, and checks `tools/stock_sites.tsv` against the ZIP (entry 2).
 
 ### 31. `test/patch.py` is one 21,462-line file
 
@@ -268,11 +254,13 @@ Entries 7 to 17 are costs the code marks itself.
 - **Impact:** no way to run one area; too slow for per-mutant runs; hard for a reader or an agent to open.
 - **Fix:** split by area behind the same machine (`test/playback.py` and `test/headset_io.py` already import it), with a case filter on the command line.
 - **Effort:** L.
+- **Decision:** deferred: the same merge cost as 23, at L effort.
 
 ### 32. C mutation testing reaches 8 files
 
 - **Where:** [building.md](building.md#c)'s table: `library_scope.c`, `chapters.c`, `mp3_gapless.c`, `lockscreen.c`, `photos.c`, `headset.c`, `radio.c`, `visualizer.c`. `navigation.c`, `playback.c`, `coverflow.c` and the `peq*` files are listed there as still to do.
 - **Effort:** L.
+- **Decision:** deferred: L effort of test infrastructure with no defect behind it.
 
 ### 33. The C coverage floors are 40% and 38%
 
@@ -280,6 +268,7 @@ Entries 7 to 17 are costs the code marks itself.
 - **Evidence:** [building.md](building.md#coverage): most of `navigation.c` is `test/patch.py`'s, which CI cannot run.
 - **Fix:** follows from 19.
 - **Effort:** M.
+- **Decision:** deferred: follows from 19.
 
 ## Documentation
 
@@ -289,24 +278,21 @@ Entries 7 to 17 are costs the code marks itself.
 - **Impact:** a diff of one changed sentence is the whole paragraph; `grep` prints kilobytes per hit; an agent that reads the file whole spends most of its context on it. [AGENTS.md](../AGENTS.md) tells agents to read by heading.
 - **Fix:** one sentence a line (prettier leaves line breaks inside a paragraph alone), and a split by area along the headings, keeping the anchors.
 - **Effort:** M.
+- **Decision:** deferred. This tree merges upstream, which edits `internals.md` in most changes; a reflow or a split would make each merge of it a whole-file conflict. For upstream to do, or not at all.
 
-### 24. The Hooks table lists 43 of 108 hooks
+### 24. The Hooks table lists 43 of 108 hooks (resolved)
 
 - **Where:** [internals.md](internals.md#hooks) against `HOOKS` (`tools/build.py:34`).
 - **Evidence:** importing `tools/build.py` and comparing addresses: 68 hooks are not in the table, and the addresses of 25 appear nowhere in `internals.md` (`config_init`, `usb_detect`, `createPlayListItem`, `mclSetBtVol`, `mclSetOutputWay`, `write_int_config`, `mclLoadPlayList`, `mclPrevSong`, `mcl_preload`, `ui_loader_load_widget_with_parent`, `list_get_img_pic` among them).
-- **Fix:** generate the table from `HOOKS` and its comments, or head it "the main hooks" and point at `HOOKS`.
-- **Effort:** S.
+- **State:** the table is the main hooks, and the sentence above it says `HOOKS` is the whole list (112 entries), each group under a comment that says what it is for. Three rows named a row click, not the hook (`stream_row`, `netservice_row`, `playermore_online`); they name it. `test_internals_hooks_table_agrees_with_build` in `test/unit/test_docs.py` checks every row's function and address against `HOOKS` and the `*_LEAF` tuples.
 
-### 28. The 10-accent limit's stated reason does not match the reader
+### 28. The 10-accent limit's stated reason does not match the reader (resolved)
 
 - **Where:** `tools/theme.py:930` (`if len(t['schemes']) > 10:  # config_value reads one digit`) against `patch/theme_engine.c:13`, whose loop reads up to three digits (`for (; i < 3 && ...`).
-- **Impact:** **unconfirmed** whether another reader of the accent's key takes one digit; if none does, the cap that blocks a tenth accent beside Classic's ten schemes has no cause. In flux on branch `oled-theme`.
-- **Fix:** trace the stored accent's readers and correct the comment or lift the cap.
-- **Effort:** S.
+- **State:** no reader needs one digit: `config_value` reads up to three, stock's `write_int_config` writes any with `%d`, the boot scripts match only `LIGHT=1` and `LIGHT=2` whole lines (`LOGO_HOOK`), and the tests' config mocks pass the stored text through. Both bounds in `tools/theme.py` (an own option's values, a theme's schemes) say ten is the format's own bound, and that past 32 the 32-bit value masks (`option_t.values`, `setting_click`'s) could not hold a value; `docs/internals.md`'s Themes paragraph says the same. The bounds stay, guarded by `test/unit/test_theme.py`'s cases for each.
 
-### 29. `lockscreen.c` says the rootfs has no room
+### 29. `lockscreen.c` says the rootfs has no room (resolved)
 
 - **Where:** `patch/lockscreen.c:1-2`: "drawn here since the rootfs has no room for image files".
 - **Evidence:** the stock image is 50,688,000 bytes and a 1.8.2 `--dev` build's rootfs 48,549,888 (`stat`; `tools/build.py:2263` compares the two): about 2.1 MB to spare.
-- **Fix:** reword the comment; the doc's sentence is corrected.
-- **Effort:** S.
+- **State:** the head comment says the wallpapers are drawn by `wall_render` and ship as no image files, as `docs/internals.md`'s Lock screen section does.
