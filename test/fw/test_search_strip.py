@@ -6,7 +6,7 @@ import ctypes as C
 import pytest
 
 from conftest import O
-from test_nav_library_pages import Config, Library, Songs, Ui
+from test_nav_library_pages import Config, Library, Songs, Ui, field
 
 KEY_RETURN, KEY_CENTER, KEY_PREV, KEY_NEXT, KEY_PLAY, KEY_FWD_BTN, KEY_BACK_BTN = (
     O[k] for k in ('KEY_RETURN', 'KEY_CENTER', 'KEY_PREV', 'KEY_NEXT', 'KEY_PLAY', 'KEY_FWD_BTN', 'KEY_BACK_BTN'))
@@ -15,8 +15,8 @@ OLED = b'3'
 
 
 class Ss(C.Structure):
-    _fields_ = [*((k, C.c_void_p) for k in 'page sheet songs match'.split()),
-                *((k, C.c_int) for k in 'nmatch letter focus sel top'.split()), ('text', C.c_char * 49)]
+    _fields_ = [*((k, C.c_void_p) for k in 'page sheet songs match kind'.split()),
+                *((k, C.c_int) for k in 'nmatch letter focus sel top songs_at'.split()), ('text', C.c_char * 49)]
 
 
 @pytest.fixture
@@ -52,9 +52,16 @@ class Strip:
             self.key(*[KEY_NEXT] * step, KEY_CENTER)
 
     def titles(self):
+        """Each result as its row reads: an artist's or album's name with its kind, a song's title."""
         name = self.fw.fn('track_name', C.c_char_p, C.c_char_p, C.c_uint, C.c_void_p)
         out, match = C.create_string_buffer(256), C.cast(self.ss.match, C.POINTER(C.c_void_p))
-        return [name(out, 256, match[i]).decode() for i in range(self.ss.nmatch)]
+        kind = C.cast(self.ss.kind, C.POINTER(C.c_ubyte))
+        rows = []
+        for i in range(self.ss.nmatch):
+            k = kind[i]
+            rows.append(name(out, 256, match[i]).decode() if k == 0 else
+                        ('artist: ' if k == 1 else 'album: ') + field(match[i], 'artist' if k == 1 else 'album').decode())
+        return rows
 
 
 def library(song):
@@ -90,9 +97,9 @@ def test_the_wheel_walks_letters_then_digits_space_and_delete_and_wraps(fw, ui, 
 def test_results_filter_as_each_letter_goes_in(fw, ui, song):
     s = Strip(fw, ui, library(song))
     s.type('lo')
-    assert s.ss.text == b'lo' and s.titles() == ['Lovely Day', 'Love Will Tear Us Apart', 'Glove']
-    s.type('ve s')  # an album's name matches too
-    assert s.ss.text == b'love s' and s.titles() == ['Glove']
+    assert s.ss.text == b'lo' and s.titles() == ['album: Love Songs', 'Lovely Day', 'Love Will Tear Us Apart', 'Glove']
+    s.type('ve s')  # a song's album matches too
+    assert s.ss.text == b'love s' and s.titles() == ['album: Love Songs', 'Glove']
 
 
 def test_previous_deletes_and_next_types_a_space(fw, ui, song):
@@ -100,7 +107,7 @@ def test_previous_deletes_and_next_types_a_space(fw, ui, song):
     s.type('joyx')
     assert s.titles() == []
     s.key(KEY_BACK_BTN)
-    assert s.ss.text == b'joy' and s.titles() == ['Love Will Tear Us Apart', 'Atmosphere']
+    assert s.ss.text == b'joy' and s.titles() == ['artist: Joy Division', 'Love Will Tear Us Apart', 'Atmosphere']
     s.key(KEY_FWD_BTN, KEY_FWD_BTN)  # one space, never two in a row
     assert s.ss.text == b'joy '
 
@@ -125,10 +132,30 @@ def test_return_with_results_moves_to_the_list_and_centre_plays_from_it(fw, ui, 
     s.type('joy')
     s.key(KEY_RETURN)
     assert s.ss.focus == 1 and s.ss.sel == 0 and ui.backs == 0
-    s.key(KEY_NEXT, KEY_NEXT)  # the bar stops at the last result
-    assert s.ss.sel == 1
+    s.key(KEY_NEXT, KEY_NEXT, KEY_NEXT)  # the bar stops at the last result
+    assert s.ss.sel == 2
     s.key(KEY_CENTER)
-    assert ui.played == [([songs[1], songs[2]], 1, LIBRARY)]
+    assert ui.played == [([songs[1], songs[2]], 1, LIBRARY)]  # the songs alone are the queue
+
+
+def test_an_artist_is_listed_once_and_opens_its_page(fw, ui, song):
+    songs = library(song)
+    s = Strip(fw, ui, songs)
+    s.type('division')
+    assert s.titles() == ['artist: Joy Division', 'Love Will Tear Us Apart', 'Atmosphere']
+    s.key(KEY_RETURN, KEY_CENTER)
+    assert ui.went == ['localmusic/artistinfo_page'] and not ui.played
+
+
+def test_an_album_opens_its_tracks(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.type('menag')
+    assert s.titles() == ['album: Menagerie', 'Lovely Day']
+    opened = []
+    s.key(KEY_RETURN)
+    fw.mock('getMusicByAlbum', lambda *a: opened.append(a) or 0)  # Cover Flow reads the album's tracks
+    s.key(KEY_CENTER)
+    assert opened and not ui.played
 
 
 def test_results_go_back_to_the_strip_by_wheel_or_button(fw, ui, song):

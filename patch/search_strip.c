@@ -1,12 +1,14 @@
 /* Search as an iPod classic's letter strip (list.entry.ipod, the OLED theme's;
  * docs/ipod.md#search): the Library's Search row opens a page with a bar along the bottom, the
- * typed text at its left and the alphabet passing under a fixed highlight, and the matching songs
- * in the list above it, filtered as each character goes in.
+ * typed text at its left and the alphabet passing under a fixed highlight, and what matches in the
+ * list above it, filtered as each character goes in: the artists, then the albums, then the songs,
+ * as an iPod's results mix them.
  *
  * Keys, as Apple's iPod classic guide gives them: the wheel walks the strip (A to Z, 0 to 9, a
  * space, then delete, round again), Centre enters what is highlighted, Next enters a space and
  * Previous deletes the last character. Return, as the iPod's Menu, shows the results list to
- * navigate: the wheel moves its bar, Centre plays the song, its list after it as the queue. A turn
+ * navigate: the wheel moves its bar, Centre opens an artist (stock's artist page) or an album (its
+ * tracks in Cover Flow) or plays a song, the songs after it as the queue. A turn
  * up from the first result, Next or Previous goes back to the strip; Return there closes Search,
  * as does Return on the strip with no text or no match. Play/Pause stays the player's.
  *
@@ -35,11 +37,16 @@
 #define SS_PX_LETTER 21
 #define SS_PX_NOTE 19
 #define SS_PX_ARTIST 18
+#define SS_GROUP                                                                                   \
+    32 /* artists, and albums, listed at most: each is checked against those before it */
+enum { SS_SONG, SS_ARTIST, SS_ALBUM };
 
 static struct {
     void *page, *sheet, *songs; /* the page, what it paints on, the library's songs A to Z */
-    void **match;               /* the songs holding the text, in that order */
+    void **match;               /* the results: artists, albums, songs; a record of each */
+    unsigned char *kind;        /* ... each one's SS_* */
     int nmatch, letter, focus, sel, top; /* focus 1: the results list has the wheel */
+    int songs_at;                        /* the first song's place in match */
     char text[SS_TEXT_MAX + 1];
 } ss __attribute__((section(".scratch")));
 
@@ -48,12 +55,31 @@ static unsigned ss_char(int e) {
     return e < 26 ? 'A' + (unsigned)e : e < 36 ? '0' + (unsigned)(e - 26) : 0;
 }
 
-/* The songs whose title, artist or album holds the text, ASCII case aside (as the playlist
- * editor's Add Songs search); none while the text is empty, as on an iPod. */
+/* Whether the results from from on already hold field off's text of r, case aside. */
+static int ss_listed(int from, int off, void *r) {
+    for (int i = from; i < ss.nmatch; ++i)
+        if (!strcasecmp(P(ss.match[i], off), P(r, off))) return 1;
+    return 0;
+}
+
+/* The artists, then the albums, whose name holds the text (one row each, SS_GROUP at most), then
+ * the songs whose title, artist or album holds it, ASCII case aside (as the playlist editor's Add
+ * Songs search); none while the text is empty, as on an iPod. */
 static void ss_filter(void) {
     int n = ss.songs ? (int)deque_size(ss.songs) : 0;
-    ss.nmatch = ss.sel = ss.top = 0;
+    ss.nmatch = ss.sel = ss.top = ss.songs_at = 0;
     if (!ss.text[0] || !ss.match) return;
+    static const int group[] = { REC_ARTIST, REC_ALBUM };
+    for (int g = 0; g < 2; ++g)
+        for (int i = 0, from = ss.nmatch; i < n && ss.nmatch - from < SS_GROUP; ++i) {
+            void *r = deque_at(ss.songs, (unsigned)i);
+            const char *name = P(r, group[g]);
+            if (name && *name && strcasestr(name, ss.text) && !ss_listed(from, group[g], r)) {
+                ss.kind[ss.nmatch] = g ? SS_ALBUM : SS_ARTIST;
+                ss.match[ss.nmatch++] = r;
+            }
+        }
+    ss.songs_at = ss.nmatch;
     for (int i = 0; i < n; ++i) {
         void *r = deque_at(ss.songs, (unsigned)i);
         char name[512];
@@ -61,6 +87,7 @@ static void ss_filter(void) {
                                  P(r, REC_ALBUM) };
         for (unsigned f = 0; f < sizeof fields / sizeof *fields; ++f)
             if (fields[f] && strcasestr(fields[f], ss.text)) {
+                ss.kind[ss.nmatch] = SS_SONG;
                 ss.match[ss.nmatch++] = r;
                 break;
             }
@@ -83,15 +110,28 @@ static void ss_type(int e) {
     ss_filter();
 }
 
-/* The song at sel plays, the results after it as the queue (a song list's class, as Most
- * Played's); playing_page copies the list before it returns. */
+/* The result at sel: an artist opens stock's artist page, as Now Playing's Artist info does; an
+ * album its tracks in Cover Flow, as Era's albums do; a song plays, the songs found after it as
+ * the queue (a song list's class, as Most Played's), which playing_page copies before it returns.
+ */
+extern int coverflow_goto_album(void *r);
 static void ss_play(void) {
-    void *dq = ss.sel < ss.nmatch ? _create_deque("stSongInfo") : (void *)0;
-    if (!dq) return;
-    deque_init(dq);
-    for (int i = 0; i < ss.nmatch; ++i) _deque_push_back(dq, ss.match[i]);
-    play_folder(dq, ss.sel, 0xf001);
-    deque_destroy(dq);
+    if (ss.sel >= ss.nmatch) return;
+    void *r = ss.match[ss.sel], *dq;
+    if (ss.kind[ss.sel] == SS_ARTIST) {
+        struct {
+            int cls;
+            void *r;
+        } context = { 0xf001, r };
+        navigator_to_with_context("localmusic/artistinfo_page", &context);
+    } else if (ss.kind[ss.sel] == SS_ALBUM) {
+        if (!coverflow_goto_album(r)) toast("Album not found");
+    } else if ((dq = _create_deque("stSongInfo"))) {
+        deque_init(dq);
+        for (int i = ss.songs_at; i < ss.nmatch; ++i) _deque_push_back(dq, ss.match[i]);
+        play_folder(dq, ss.sel - ss.songs_at, 0xf001);
+        deque_destroy(dq);
+    }
 }
 
 /* ringnav: the page's keys before stock's (Play/Pause and a held Return's release go on). */
@@ -191,9 +231,23 @@ void search_strip_paint(void *w, void *canvas) {
         int y = i * SS_PITCH, on = ss.focus && ss.top + i == ss.sel;
         char name[512];
         if (on) fill_box(canvas, &(rect_t){ 16, y, 375 - 32, SS_PITCH }, RGBA(accent), 8);
-        int tw = ss_text(canvas, 0, track_name(name, sizeof name, r), 24, y, SS_PITCH, SS_TITLE_W,
-                         SS_PX_ROW, on ? 0xffffff : primary);
+        int kind = ss.kind[ss.top + i];
+        const char *title = kind == SS_ARTIST  ? P(r, REC_ARTIST)
+                            : kind == SS_ALBUM ? P(r, REC_ALBUM)
+                                               : track_name(name, sizeof name, r);
+        int tw = ss_text(canvas, 0, title, 24, y, SS_PITCH, SS_TITLE_W, SS_PX_ROW,
+                         on ? 0xffffff : primary);
+        /* beside it, what the row is, as an iPod's result icons say: "Artist", "Album" and its
+         * artist, or a song's artist */
+        char what[300];
         const char *artist = P(r, REC_ARTIST);
+        if (kind == SS_ARTIST)
+            artist = "Artist";
+        else if (kind == SS_ALBUM) {
+            tk_snprintf(what, sizeof what, artist && *artist ? "Album \xc2\xb7 %s" : "Album",
+                        artist);
+            artist = what;
+        }
         int ax = 24 + tw + 10;
         if (artist && *artist && SS_RIGHT - ax >= SS_ARTIST_MIN)
             ss_text(canvas, 0, artist, ax, y + 1, SS_PITCH, SS_RIGHT - ax, SS_PX_ARTIST,
@@ -247,6 +301,7 @@ void search_strip_paint(void *w, void *canvas) {
 static int ss_closed(void *ctx, void *event) {
     if (ss.songs) deque_destroy(ss.songs);
     free(ss.match);
+    free(ss.kind);
     memset(&ss, 0, sizeof ss);
     return 0;
 }
@@ -259,7 +314,9 @@ int library_search_open(void *ctx, void *event) {
     int n;
     ss.songs = staged_music(all_songs, (void *)1, &n);
     n = ss.songs ? (int)deque_size(ss.songs) : 0;
-    ss.match = n ? calloc((unsigned)n, sizeof *ss.match) : (void *)0;
+    ss.match = n ? calloc((unsigned)n + 2 * SS_GROUP, sizeof *ss.match) : (void *)0;
+    ss.kind = ss.match ? calloc((unsigned)n + 2 * SS_GROUP, 1) : (void *)0;
+    if (!ss.kind) free(ss.match), ss.match = (void *)0;
     void *title = text(ss.page, 0, 0, 375, 28); /* what the status row reads */
     widget_set_text_utf8(title, "Search");
     widget_set_name(title, PAGE_TITLE);

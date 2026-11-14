@@ -962,11 +962,13 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
   with 12 px corners, the typed text in a black box at its left with the accent's caret, and A to Z, 0 to 9, a space
   and delete passing under a fixed accent box, 17 px apart, the current one white Inter Medium, the rest Text
   Secondary. The wheel walks the strip (round from delete to A), Centre enters the highlighted character, and, as
-  Apple's guide gives the iPod's own, Next enters a space and Previous deletes. The library's songs whose title,
-  artist or album holds the text list above it as they are typed, four single-line rows from y 58: the title in
-  20 px white, its artist after it in 15 px Text Tertiary. Return, as the iPod's Menu, moves to the results: the
-  selection bar takes the first one and the strip's highlight goes grey; the wheel moves the bar, Centre plays the
-  song with the other results after it as the queue, and a turn up from the first result, Next or Previous goes back
+  Apple's guide gives the iPod's own, Next enters a space and Previous deletes. What holds the text lists above it as
+  it is typed, as an iPod's results mix artists, albums and songs: the artists whose name holds it, then the albums,
+  32 of each at most, then the songs whose title, artist or album holds it; four single-line rows from y 58, the
+  name in 20 px white and after it, in 15 px Text Tertiary, "Artist" on an artist's row, "Album" and its artist
+  on an album's, the artist on a song's. Return, as the iPod's Menu, moves to the results: the
+  selection bar takes the first one and the strip's highlight goes grey; the wheel moves the bar, and Centre opens an
+  artist's page or an album's tracks in Cover Flow, or plays a song with the songs found after it as the queue, and a turn up from the first result, Next or Previous goes back
   to the strip. Return on the results, or on the strip with no text or no match, closes Search. With text and no
   match, "No results" stands in the list's place. Touch does nothing on the page.
 - <a id="keyboard"></a>**The keyboard.** The keyboard other text boxes open (New Playlist, Rename, the Wi-Fi password)
