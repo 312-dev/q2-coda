@@ -20,7 +20,8 @@ OLED = b'3'
 class Ss(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'page sheet songs match kind'.split()),
                 *((k, C.c_int) for k in 'nmatch letter focus sel top songs_at'.split()),
-                *((k, C.c_short) for k in 'down_x down_y pressed'.split()), ('text', C.c_char * 49)]
+                *((k, C.c_short) for k in 'down_x down_y pressed'.split()), ('text', C.c_char * 49),
+                ('pop_timer', C.c_uint), ('pop_step_at', C.c_uint), ('pop', C.c_ubyte)]
 
 
 @pytest.fixture
@@ -259,3 +260,59 @@ def test_a_key_the_strip_takes_frees_stock_s_click_latch(fw, ui, song):
         assert s.key(key) == [1] and latch.value == 0
     latch.value = 1
     assert s.key(KEY_PLAY) == [0] and latch.value == 1  # stock's key-up clears it for a key that goes on
+
+
+# The key pop: shown when the wheel lands on a letter, gone POP_MS after the last step; a spin (steps under FAST_MS
+# apart) shows none until it stops, then one.
+POP_MS, FAST_MS = 300, 125
+
+
+class Popping(Strip):
+    def __init__(self, fw, ui, songs):
+        self.now = [100000]
+        fw.mock('time_now_ms', lambda *_: self.now[0])
+        super().__init__(fw, ui, songs)
+
+    def step(self, ms, key=KEY_NEXT):
+        self.now[0] += ms
+        self.key(key)
+
+    def timer(self):
+        """The pop's timer: (its ms, it fires and returns what it returned)."""
+        (_, ms), = self.ui.pending('search_strip__ss_pop_due')
+        return ms
+
+    def due(self):
+        self.ui.fire('search_strip__ss_pop_due')
+
+
+def test_a_slow_step_pops_at_once_and_the_pop_goes_after_the_wheel_stops(fw, ui, song):
+    p = Popping(fw, ui, library(song))
+    assert p.ss.pop == 0
+    p.step(1000)
+    assert p.ss.pop == 1 and p.timer() == POP_MS
+    p.step(400)  # another slow step: still shown, its time counted again
+    assert p.ss.pop == 1 and p.timer() == POP_MS
+    p.due()
+    assert p.ss.pop == 0 and not ui.pending('search_strip__ss_pop_due')
+
+
+def test_a_spin_shows_no_pop_until_it_stops_then_one(fw, ui, song):
+    p = Popping(fw, ui, library(song))
+    p.step(1000)
+    for _ in range(5):
+        p.step(60)  # 16 letters a second
+        assert p.ss.pop == 2 and p.timer() == FAST_MS
+    p.due()  # FAST_MS without a step: the spin has stopped
+    assert p.ss.pop == 1 and p.timer() == POP_MS
+    p.due()
+    assert p.ss.pop == 0
+
+
+def test_only_the_wheel_pops_and_closing_stops_its_timer(fw, ui, song):
+    p = Popping(fw, ui, library(song))
+    p.key(KEY_CENTER, KEY_FWD_BTN)
+    assert p.ss.pop == 0 and not ui.pending('search_strip__ss_pop_due')
+    p.step(1000)
+    ui.close(ui.top())
+    assert not ui.pending('search_strip__ss_pop_due') and p.ss.pop == 0

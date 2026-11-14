@@ -12,6 +12,11 @@
  * up from the first result, Next or Previous goes back to the strip; Return there closes Search,
  * as does Return on the strip with no text or no match. Play/Pause stays the player's.
  *
+ * The key pop (ss_pop_paint): when the wheel lands on a letter or digit, its key grows a bubble
+ * holding the letter large, and the key keeps it at the strip's size, dimmed; it goes SS_POP_MS
+ * after the wheel stops. A spin faster than SS_POP_FAST_MS a step shows none until it stops, then
+ * one. The bubble and the letters are tools/art.py's images (pop_images), drawn at whole pixels.
+ *
  * Touch (ss_touch): a tap on a letter types it, a drag along the strip moves the alphabet a cell
  * per 17 px, a tap on a result opens or plays it, and a drag up or down the results scrolls them a
  * row per 32 px.
@@ -41,8 +46,20 @@
 #define SS_PX_LETTER 21
 #define SS_PX_NOTE 19
 #define SS_PX_ARTIST 18
-#define SS_GROUP                                                                                   \
-    32 /* artists, and albums, listed at most: each is checked against those before it */
+/* The key pop (tools/art.py POP_*): the bubble's image is the head's width, its foot the key's,
+ * the key 18 px wide from the lit slot's x - 2 and 7 px below the strip's top; the big letters and
+ * the echoes are strips of a cell per strip character, a head's and a key's box each */
+#define SS_POP_W 30
+#define SS_POP_H 66
+#define SS_POP_HEAD 30
+#define SS_POP_KEY_W 18
+#define SS_POP_KEY_H 24
+#define SS_POP_ECHO_H 38
+#define SS_POP_MS 300 /* the pop goes this long after the wheel's last step */
+#define SS_POP_FAST_MS                                                                             \
+    125 /* steps closer than this, 8 a second, are a spin: no pop until it stops */
+/* artists, and albums, listed at most: each is checked against those before it */
+#define SS_GROUP 32
 enum { SS_SONG, SS_ARTIST, SS_ALBUM };
 
 static struct {
@@ -53,6 +70,8 @@ static struct {
     int songs_at;                        /* the first song's place in match */
     short down_x, down_y, pressed;       /* a touch: where it went down on the sheet */
     char text[SS_TEXT_MAX + 1];
+    unsigned pop_timer, pop_step_at; /* the pop's timer; the wheel's last step on the strip */
+    unsigned char pop;               /* 1 shown, 2 a spin's, shown when it stops */
 } ss __attribute__((section(".scratch")));
 
 /* The strip's entry e as text: a capital, a digit, or 0 for the space and delete (drawn). */
@@ -139,6 +158,54 @@ static void ss_play(void) {
     }
 }
 
+/* The pop's box on the sheet: the bubble's, whose key sits on the lit slot (x - 2 of the slot at
+ * SS_HIGH, whole pixels, as tools/art.py's key is 18 px about the slot's centre). */
+static rect_t ss_pop_box(void) {
+    int key_left = SS_BOX_R + 10 + SS_HIGH * SS_STEP - 2;
+    return (rect_t){ key_left - (SS_POP_W - SS_POP_KEY_W) / 2,
+                     SS_STRIP_Y + 7 + SS_POP_KEY_H - SS_POP_H, SS_POP_W, SS_POP_H };
+}
+static int ss_popping(void) { return ss.pop == 1 && !ss.focus && ss.letter < SS_SPACE; }
+static void ss_pop_dirty(void) {
+    rect_t r = ss_pop_box();
+    if (ss.sheet) widget_invalidate_force(ss.sheet, &r); /* the bubble's box alone */
+}
+/* A spin has stopped: its one pop; a pop's time is up: gone. */
+static int ss_pop_due(const void *unused) {
+    ss.pop_timer = 0;
+    if (ss.pop == 2) {
+        ss.pop = 1;
+        ss.pop_timer = timer_add(ss_pop_due, (void *)0, SS_POP_MS);
+    } else
+        ss.pop = 0;
+    ss_pop_dirty();
+    return 0;
+}
+/* A wheel step on the strip: the pop at once, or, inside a spin, once it stops. */
+static void ss_pop_step(void) {
+    unsigned now = (unsigned)time_now_ms();
+    int spin = ss.pop_step_at && now - ss.pop_step_at < SS_POP_FAST_MS;
+    ss.pop_step_at = now | 1;
+    ss.pop = spin ? 2 : 1;
+    rearm(&ss.pop_timer, ss_pop_due, spin ? SS_POP_FAST_MS : SS_POP_MS);
+}
+
+/* Cell i of the image name, w by h, at x, y. */
+static void ss_cell(void *canvas, const char *name, int i, int w, int h, int x, int y) {
+    unsigned bitmap[64]; /* bitmap_t: width @0, height @4 */
+    if (!ss.sheet || widget_load_image(ss.sheet, theme_art(name), bitmap)) return;
+    rect_t src = { i * w, 0, w, h }, dst = { x, y, w, h };
+    canvas_draw_image(canvas, bitmap, &src, &dst);
+}
+/* The bubble over the lit slot, the big letter in its head, the echo on its key. */
+static void ss_pop_paint(void *canvas) {
+    rect_t b = ss_pop_box();
+    ss_cell(canvas, "search_pop", 0, SS_POP_W, SS_POP_H, b.x, b.y);
+    ss_cell(canvas, "search_pop_letters", ss.letter, SS_POP_HEAD, SS_POP_HEAD, b.x, b.y);
+    ss_cell(canvas, "search_pop_echoes", ss.letter, SS_POP_KEY_W, SS_POP_ECHO_H,
+            b.x + (SS_POP_W - SS_POP_KEY_W) / 2, SS_STRIP_Y);
+}
+
 /* ringnav: the page's keys before stock's (Play/Pause and a held Return's release go on). */
 int search_strip_key(void *top, unsigned key) {
     if (!ss.page || top != ss.page) return 0;
@@ -154,9 +221,10 @@ int search_strip_key(void *top, unsigned key) {
         if (ss.sel >= ss.top + SS_ROWS) ss.top = ss.sel - SS_ROWS + 1;
         if (key == KEY_CENTER) ss_play();
         if (key == KEY_RETURN) navigator_back();
-    } else if (wheel)
+    } else if (wheel) {
         ss.letter = (ss.letter + wheel + SS_ENTRIES) % SS_ENTRIES;
-    else if (key == KEY_CENTER)
+        ss_pop_step();
+    } else if (key == KEY_CENTER)
         ss_type(ss.letter);
     else if (key == KEY_FWD_BTN || key == KEY_BACK_BTN)
         ss_type(key == KEY_FWD_BTN ? SS_SPACE : SS_DELETE);
@@ -282,6 +350,7 @@ void search_strip_paint(void *w, void *canvas) {
     for (int k = 0, x = SS_BOX_R + 10; k < SS_SLOTS; ++k, x += SS_STEP) {
         int e = (ss.letter - SS_HIGH + k + 2 * SS_ENTRIES) % SS_ENTRIES, on = k == SS_HIGH;
         unsigned ink = on && !ss.focus ? 0xffffff : on ? primary : secondary;
+        if (on && ss_popping()) continue; /* ss_pop_paint draws the slot */
         if (on && !ss.focus)
             fill_box(canvas, &(rect_t){ x - 2, y0 + 7, SS_STEP, SS_STRIP_H - 14 }, RGBA(accent), 5);
         unsigned c[2] = { ss_char(e), 0 };
@@ -303,6 +372,7 @@ void search_strip_paint(void *w, void *canvas) {
             final_text(canvas, face, c, &r, (unsigned)px, 0xff000000u | ink);
         }
     }
+    if (ss_popping()) ss_pop_paint(canvas);
     ui_ink_raw(raw);
     stock_canvas_set_fill_color(canvas, fill);
 }
@@ -349,6 +419,7 @@ static int ss_touch(void *ctx, void *event) {
 }
 
 static int ss_closed(void *ctx, void *event) {
+    stop_timer(&ss.pop_timer);
     if (ss.songs) deque_destroy(ss.songs);
     free(ss.match);
     free(ss.kind);

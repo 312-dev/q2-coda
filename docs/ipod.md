@@ -1013,7 +1013,11 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
   stock's search box and keyboard (`list.entry.ipod`, `patch/search_strip.c`): a `#1C1C1E` bar from y 216 to 254
   with 12 px corners, the typed text in a black box at its left with the accent's caret, and A to Z, 0 to 9, a space
   and delete passing under a fixed accent box, 17 px apart, the current one white Inter Medium, the rest Text
-  Secondary. The wheel walks the strip (round from delete to A), Centre enters the highlighted character, and, as
+  Secondary. When the wheel lands on a letter or digit its key pops up, as an iPhone's keyboard does: the key grows a
+  bubble above the strip (a 30 px head with 9 px corners narrowing over 18 px to the 18 px key, the accent) holding
+  the letter in 26 px white Inter Medium, and the key keeps the letter at 17 px in white at 60 %; it goes 300 ms
+  after the wheel stops. Turning faster than 8 letters a second shows none until the wheel stops, then one. The
+  bubble may cover the last result row while it shows. The wheel walks the strip (round from delete to A), Centre enters the highlighted character, and, as
   Apple's guide gives the iPod's own, Next enters a space and Previous deletes. What holds the text lists above it as
   it is typed, as an iPod's results mix artists, albums and songs: the artists whose name holds it, then the albums,
   32 of each at most, then the songs whose title, artist or album holds it; four single-line rows from y 58, the

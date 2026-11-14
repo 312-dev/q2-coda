@@ -457,7 +457,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     menus = [f'menu_{n}_{k}' for n in art.MENU_ICONS for k in ('d', 'l', 'w')] + ['menu_check_a']
     assert set(got) == {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
-                                              'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus)}
+                                              'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus,
+                                              'search_pop', 'search_pop_letters', 'search_pop_echoes')}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
@@ -485,6 +486,30 @@ def test_phosphor_fills_nonzero_so_an_inner_contour_is_a_hole():
     cov = art.coverage_nonzero(ring, (0, 0, 16, 16))
     assert cov[8 * 16 + 8] == 0 and cov[3 * 16 + 3] == 1 and cov[0] == 0
     assert art.coverage(ring, (0, 0, 16, 16))[8 * 16 + 8] == 1  # the union rule would fill it
+
+
+def test_oleds_search_pop_is_one_bubble_and_two_letter_strips():
+    """Search's key pop (search_strip.c): the bubble, 30 px wide to the key's foot 66 px down, in Accent Blue, a
+    rounded head over a neck narrowing to the 18 px key, clear beside the key; the letters' and echoes' strips, a head's
+    and a key's cell per strip character, white, the echo at 60 %; each glyph's ink centred on its cell's middle
+    within a tenth of a pixel, read from the edge columns' coverage (H: two upright stems)."""
+    t = theme.builtins()[3]
+    got = art.images(t)
+    blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
+    w, h, at = pixels(got['oled_search_pop'])
+    assert (w, h) == (30, 66) and at(15, 15) == (*blue.to_bytes(3, 'big'), 255) and at(15, 60) == (*blue.to_bytes(3, 'big'), 255)
+    assert at(0, 0)[3] == 0 and at(0, 15)[3] == 255 and at(29, 15)[3] == 255  # the head's rounded corner; its sides
+    assert at(3, 60)[3] == 0 and at(26, 60)[3] == 0 and at(6, 60)[3] == 255 and at(23, 60)[3] == 255  # the key, 6 px in
+    n = len(art.POP_CHARS)
+    for name, cell, ch, alpha in (('letters', 30, 30, 255), ('echoes', 18, 38, 153)):
+        w, h, at = pixels(got[f'oled_search_pop_{name}'])
+        assert (w, h) == (cell * n, ch)
+        i = art.POP_CHARS.index('H')
+        cols = [max(at(cell * i + x, y)[3] for y in range(h)) / alpha for x in range(cell)]
+        assert max(cols) == pytest.approx(1, abs=0.01) and {at(cell * i + x, y)[:3] for x in range(cell) for y in range(h) if at(cell * i + x, y)[3]} == {(255, 255, 255)}
+        lit = [x for x, c in enumerate(cols) if c > 0.01]
+        left, right = lit[0] + 1 - cols[lit[0]], cell - (lit[-1] + cols[lit[-1]])
+        assert left == pytest.approx(right, abs=0.1)
 
 
 def test_oleds_rating_hearts_are_phosphors_filled_and_outlined_heart():
