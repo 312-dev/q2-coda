@@ -46,6 +46,8 @@ HOOKS = {
     'widget_on_paint_border': (0x66cc10, 'ringnav_paint', 'paint'),
     'widget_dispatch': (0x67165c, 'ringnav_dispatch', 'dispatch'),
     'on_wm_keylong_fun': (0x4f27e4, 'ringnav_keylong', 'keylong'),
+    # The volume dialog's wheel ticks step at the wheel's speed, then stock's own step (volume.c vol_keyup)
+    'volume_dialog_on_keyup': (0x4a3688, 'vol_keyup', 'vol_keyup'),
     'playset_equalizer_page_init': (0x4b9c94, 'peq_page_init', None),
     'set_equalizer_value': (0x5039c0, 'peq_stock_eq', 'eq'),
     'select_timezone': (0x503b40, 'ringnav_timezone', 'timezone'),
@@ -1765,6 +1767,7 @@ FUNCTIONS = {
 # Local stock routines in the SHA-256-pinned V1.36 executable.
 PRIVATE_FUNCTIONS = {
     "playlist_delete_click": 0x4b62c8,
+    'volume_dialog_on_keyup': HOOKS['volume_dialog_on_keyup'][0],
     'keylock_rows': HOOKS['keylock_rows'][0],
     'timezone_row': HOOKS['timezone_row'][0],
     'quick_lock': HOOKS['quick_lock'][0],

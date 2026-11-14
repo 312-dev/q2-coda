@@ -193,7 +193,17 @@ static inline int arc_out(int r, int y) {
     return 16 * r - s;
 }
 #define PLACEHOLDER "default_album_flow" /* Cover Flow's and Spotify's missing art */
-#define VOL_POLL_MS 50 /* how often the volume indicator checks for a change */
+#define VOL_POLL_MS 16 /* how often the volume indicator checks for a change, and eases its bar */
+/* The volume bar's ease (volume.c vol_ease): a first-order follow with this time constant, so 95%
+ * of a step in 3 x VOL_EASE_MS. A choice, not a measurement: no source times an iPod's bar. */
+#define VOL_EASE_MS 60
+/* The wheel's volume acceleration (volume.c vol_accel): (speed / VOL_ACCEL_START)^4 steps a tick,
+ * speed in degrees a second, Rockbox's iPod curve; at most VOL_ACCEL_MAX (reached from 475 deg/s),
+ * the speed taken as at most VOL_ACCEL_TOP so the power fits 32 bits. VOL_ACCEL_MAX is ours: a
+ * tick is 50 degrees at 50% Wheel Sensitivity, so a fast turn moves the volume about 70. */
+#define VOL_ACCEL_START 270
+#define VOL_ACCEL_MAX 10
+#define VOL_ACCEL_TOP 1000
 /* The volume panel off Now Playing (vol_paint): exactly over Quick Settings' brightness row
  * (tools/ipod.py checks it), its rounded corners clear of the 80px glass corners. */
 #define VOL_PANEL_X 26
@@ -551,6 +561,12 @@ static inline int arc_out(int r, int y) {
  * a turn), 200 a turn, and stock's poster encoderknob_thread_run+0x150, which dispatches the
  * thread info's key event. */
 #define WHEEL_TICK_UNITS 28
+/* The wheel's speed (playback.c wheel_speed_sample), Rockbox's iPod driver's: timed a click of
+ * WHEEL_SPEED_CLICK degrees at a time (its 4 of 96 positions), averaged (15 v + new) / 16, reset by
+ * WHEEL_SPEED_IDLE_MS without travel (its WHEEL_FAST_OFF_TIMEOUT, 250 ms). */
+#define WHEEL_SPEED_CLICK 15
+#define WHEEL_SPEED_IDLE_MS 250
+#define WHEEL_SPEED_TOP 4000 /* degrees a second: faster samples count as this */
 #define WHEEL_POST 0x6386d0
 #define WHEEL_INFO_EVENT 0x20 /* event type: 0x110 key down, 0x114 key up */
 #define WHEEL_INFO_KEY 0x38   /* the event's key (EVENT_KEY) */

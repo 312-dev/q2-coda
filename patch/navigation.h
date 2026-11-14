@@ -361,6 +361,7 @@ extern int stock_keyup_trampoline(void *, void *), stock_touch_trampoline(void *
     stock_output_trampoline(int), stock_write_config_trampoline(int, const char *, const char *),
     stock_paint_trampoline(void *, void *), stock_dispatch_trampoline(void *, void *),
     stock_keylong_trampoline(void *, void *), stock_paint_bg_trampoline(void *, void *),
+    stock_vol_keyup_trampoline(void *, void *),
     stock_showface_trampoline(void *), stock_playing_trampoline(void *, void *),
     stock_display_trampoline(void *, void *), stock_bigcover_trampoline(void *, void *),
     stock_localmusic_trampoline(void *, void *), stock_keydown_trampoline(void *, void *),
@@ -626,6 +627,7 @@ int upload_scrobbles(void *ctx, void *event);
 
 /* volume.c */
 void vol_paint(void *top, void *canvas);
+int vol_keyup(void *dialog, void *e); /* volume_dialog_on_keyup's hook: the wheel's steps */
 
 /* smart_wifi.c */
 void smart_wake(void); /* Smart Wi-Fi's radio back now, if it had it off */
