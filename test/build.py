@@ -471,6 +471,10 @@ def validate_assets(directory):
     for path in DEBUG_TOOLS + DEBUG_LINKS:
         assert path in stock_listing and path not in listing, path
     print('Removed from the rootfs:', ' '.join(DEBUG_TOOLS + DEBUG_LINKS))
+    # Bluetooth is discoverable for 180 s, not for as long as it is on.
+    from build import BT_MAIN, BT_DISCOVERABLE
+    assert read('rootfs.squashfs', BT_MAIN) == read('stock.squashfs', BT_MAIN).replace(*BT_DISCOVERABLE)
+    assert b'\nDiscoverableTimeout = 180\n' in read('rootfs.squashfs', BT_MAIN)
     # bluealsa: AAC capability, the two DROP jumps, the silence sites, and one appended LOAD payload.
     from build import BT_DROP, BT_DROP_HANDLER, BT_DROP_PAYLOAD, BT_SILENCE_SITES, patch_bluealsa, segments
     old, new = read('stock.squashfs', BLUEALSA), read('rootfs.squashfs', BLUEALSA)

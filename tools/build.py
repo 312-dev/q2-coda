@@ -364,6 +364,10 @@ BLUEALSA = 'usr/bin/bluealsa'
 BLUEALSA2 = 'usr/bin/bluealsa2'
 BT_KEEPALIVE = (b'bluealsa -c LDAC', b'bluealsa --keep-alive=5 -c LDAC')
 SCROBBLE_CA = 'etc/scrobble-ca.pem'
+# BlueZ's settings. demo sets Discoverable each time it starts Bluetooth (openBluetooth), and stock's 0 kept the Q2
+# discoverable for as long as Bluetooth stayed on; 180 s gives a phone three minutes from then to find it.
+BT_MAIN = 'etc/bluetooth/main.conf'
+BT_DISCOVERABLE = (b'\nDiscoverableTimeout = 0\n', b'\nDiscoverableTimeout = 180\n')
 # Every V1.36 unit has the same root password hash, and init runs a login on the board's serial pad (ttyS3).
 # Nothing on the Q2 logs in (q2remote, --dev only, runs /bin/sh itself), so root is locked and the getty goes;
 # the kernel's and init's messages still reach the console.
@@ -2002,6 +2006,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     inittab, gettys = inittab.replace(*SERIAL_GETTY), inittab.count(SERIAL_GETTY[0])
     check(gettys == 1 and b'getty' not in inittab, 'Unexpected inittab')
     (out/'inittab').write_bytes(inittab)
+    bt_main = cat(BT_MAIN)
+    check(bt_main.count(BT_DISCOVERABLE[0]) == 1, 'Unexpected Bluetooth main.conf')
+    (out/'main.conf').write_bytes(bt_main.replace(*BT_DISCOVERABLE))
     for address, old, new in ARTIST_ALBUMS:
         patch_word(patched, address, old, new, 'artist detail opens on Albums')
     patch_word(patched, *SHUFFLE_CALL, jal(ps['ringnav_shuffle']),
@@ -2226,6 +2233,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         p = swap_inode(p, path, src)
     p = swap_inode(p, SHADOW.encode(), out/'shadow')
     p = swap_inode(p, INITTAB.encode(), out/'inittab')
+    p = swap_inode(p, BT_MAIN.encode(), out/'main.conf')
     aic_notifier = None
     if aic_idle_wait:
         from aic import MODULE_PATH, PATCH_POLICY, STOCK_SHA256, patch_module

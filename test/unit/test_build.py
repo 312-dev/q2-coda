@@ -1234,3 +1234,9 @@ def test_the_debugging_tools_are_dropped():
         assert f'usr/bin/{tool}' in removed, tool
     assert {'usr/sbin/nandtest', 'usr/sbin/inetd'} <= removed
     assert 'usr/lib/libsqlite3.so.0.8.6' not in removed  # the library demo uses stays
+
+
+def test_bluetooth_discovery_times_out():
+    main = b'# 0 = disable timer\n#DiscoverableTimeout = 0\nDiscoverableTimeout = 0\n'
+    assert main.count(build.BT_DISCOVERABLE[0]) == 1
+    assert main.replace(*build.BT_DISCOVERABLE) == b'# 0 = disable timer\n#DiscoverableTimeout = 0\nDiscoverableTimeout = 180\n'
