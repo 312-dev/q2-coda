@@ -18,7 +18,7 @@ It aligns the two `.text` streams between exported symbols on words with their a
 Two tracked tables go with it, both carried by `apply`:
 
 - `tools/stock_map.tsv`: our names for stock's unnamed functions, with a line on what each does. A name goes in only on evidence (a string it loads, what it calls, how its caller uses it). `report` and `refs` print these names.
-- `tools/stock_sites.tsv`: for every stock code address `patch/` and `tools/` name, the function it is in and how to find it again: the call it is, or the instruction, with the last string loaded before it and the next call after it, and what of ours uses it. `docs/rebasing/sitenotes.py` writes it. A row `apply` cannot carry keeps its old address, and `report` lists it under "Patch sites to find by hand".
+- `tools/stock_sites.tsv`: for every stock code address `patch/` and `tools/` name, the function it is in and how to find it again: the call it is, or the instruction, with the last string loaded before it and the next call after it, and what of ours uses it. `docs/rebasing/sitenotes.py` writes it, and with `--check` writes nothing and fails when the table is not current; `tools/release.py package` runs that check, so a release needs the table current ([releasing](releasing.md)). A row `apply` cannot carry keeps its old address, and `report` lists it under "Patch sites to find by hand".
 
 ## The routine
 
