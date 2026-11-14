@@ -162,7 +162,7 @@ All lists share one grid.
   bold, no indent).
 - It moves one row per wheel tick, with no easing longer than the theme's list motion.
 - A list left by Return opens at its top when it is chosen again; Return lands on the row the
-  page behind was left at (`list.reopen.top`).
+  page behind was left at (`list.reopen.top`, every theme's, from Minimal).
 - Exactly one per screen. A dialog over a list takes the selection; the list's bar is hidden
   while the dialog is open.
 
@@ -373,9 +373,9 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   (`bar.battery.painter="slim"`); the wheel's scroll indicator (`list.scrollbar.painter="wheel"`);
   1 px dividers on the text and right columns (`list.divider.ink`); row art's 4 px corners
   (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column; song rows
-  (`list.songs.painter="inline"`) and the Song Artist and Song Length options; a list left by
-  Return opening at its top when chosen again (`list.reopen.top`); Songs' action row as the
-  Shuffle row (`list.shuffle.row`).
+  (`list.songs.painter="inline"`) and the Song Artist and Song Length options; Songs' action row
+  as the Shuffle row (`list.shuffle.row`); a list left by Return opening at its top when chosen
+  again (`list.reopen.top`, which Minimal sets for every theme).
 - Now Playing on the set's grid (`np_art`, `np_bar_y`), its art's corners (`playing.art.radius`), its
   artist and album in Inter (`playing.artist.font`), shuffle and repeat as the theme's own glyphs
   (`playing.modes.icons`), and the marquee fades (`list.marquee.fade`).

@@ -68,9 +68,6 @@
     <!-- A scrolling text's ends fade into what is behind it (oled-design.md Motion, list_marks.c marquee_fade): rows,
          the status row's title and Now Playing's lines -->
     <element name="marquee" fade="1"/>
-    <!-- A list left by Return forgets its row: choosing it again opens it at the top, as an iPod's menus do
-         (navigation.c forget_left); Return still lands on the row the parent was left at -->
-    <element name="reopen" top="1"/>
     <!-- Songs', an album's and a playlist's action row reads Shuffle after Phosphor's shuffle, Accent Blue (white on the
          selection); the wheel steps onto it above the first song and Centre shuffles the list (navigation.c shuffle_key) -->
     <element name="shuffle" row="1"/>

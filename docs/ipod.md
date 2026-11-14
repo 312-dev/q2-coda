@@ -95,6 +95,10 @@ grid's, the playlist page's pair) is the tile's selection card, `TILE_INSET` ins
 corners (square under Square); other pressed widgets keep stock's box. The same hooks cover settings, streaming, dialogs, PEQ rows and media browser
 chrome. Photos, video, book content, EQ plots and visualizers keep their own drawing.
 
+A list left with Return opens at its top when it is chosen again, in every theme (`list.reopen.top`,
+set by Minimal, which the others extend), as an iPod's menus and stock's own pages do; Return
+still lands on the row the page behind was left at ([internals](internals.md#position-memory)).
+
 ## Home
 
 Home splits the screen: the menu on the left, the current local track's art in the right panel.

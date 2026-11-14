@@ -2632,6 +2632,18 @@ def test_settings_slides_in_over_the_list_and_return_slides_the_list_back(fw):
     assert title() == b'Q2 Pod' and not back(h.win)
 
 
+@pytest.mark.parametrize('theme', [MINIMAL, CLASSIC, MODERN])
+def test_a_list_return_leaves_on_home_opens_at_its_top_again(fw, theme):
+    """list.reopen.top on Home's own lists, which stay alive hidden: Return drops the row the list was left on and
+    scrolls it to its top (navigation.c forget_rows), so choosing it again opens there."""
+    _, ui, h, _ = home_open(fw, theme)
+    ui.click(h.rows['img_settings'])
+    view = ui[h.sets].kids[0]
+    ui[view].props['_ringnav_index'] = 1  # the wheel left it on its second row
+    assert fw.fn('coverflow_home_back', C.c_int, C.c_void_p)(h.win) == 1
+    assert ui[view].props['_ringnav_index'] == -1
+
+
 def test_a_swap_with_no_animator_shows_the_list_in_place(fw):
     _, ui, h, _ = home_open(fw)
     ui.animate = False

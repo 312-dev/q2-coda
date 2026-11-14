@@ -659,8 +659,8 @@ def test_the_memory_holds_the_last_64_lists(fw, ui):
     assert recalled == [2, 0]  # the oldest went; the next oldest is still there
 
 
-@pytest.mark.parametrize('index, top', [(3, True), (0, False)])  # OLED's list.reopen.top; Minimal remembers
-def test_a_list_left_by_return_opens_at_its_top_when_chosen_again(fw, ui, index, top):
+@pytest.mark.parametrize('index', [0, 1, 2, 3])  # list.reopen.top: Minimal's, which every built-in theme extends
+def test_a_list_left_by_return_opens_at_its_top_when_chosen_again(fw, ui, index):
     theme(fw, index)
     folder(fw, '/mnt/mmc/A')
     chosen(fw, ui, Page(ui, titles(20), name='folder_page'), 6)
@@ -674,7 +674,7 @@ def test_a_list_left_by_return_opens_at_its_top_when_chosen_again(fw, ui, index,
     folder(fw, '/mnt/mmc/A/B')
     again = Page(ui, titles(20), name='folder_page')
     paint(fw, again)
-    assert again.selected == (0 if top else 4)
+    assert again.selected == 0
 
 
 def checked(ui, page, row):

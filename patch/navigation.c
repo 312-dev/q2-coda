@@ -886,10 +886,10 @@ static void select(menu_t *m, int id) {
     prop(m->w, SEL, id);
 }
 
-/* A reopen_top theme (OLED): Return out of a list drops its remembered row, so choosing it again
- * opens it at the top as an iPod's menus do; the page Return lands on keeps its own
- * (docs/internals.md#position-memory). Runs on Return's release before stock leaves the page, so
- * context_now still names the list being left. */
+/* A reopen_top theme (every built-in one, from Minimal): Return out of a list drops its remembered
+ * row, so choosing it again opens it at the top as an iPod's menus do; the page Return lands on
+ * keeps its own (docs/internals.md#position-memory). Runs on Return's release before stock leaves
+ * the page, so context_now still names the list being left. */
 static void forget_left(void) {
     unsigned scope;
     int ctx = context_now(&scope);
@@ -1109,6 +1109,18 @@ static void wheel_offset(menu_t *m, int top) {
     } else
         return;
     widget_dispatch_simple_event(m->w, EVT_SCROLL_END);
+}
+
+/* A reopen_top theme's list that outlives its Return, hidden rather than closed (Home's Library,
+ * Streaming and Settings lists, coverflow.c coverflow_home_back): position memory doesn't key
+ * Home, so the row its view keeps (SEL) goes and the view scrolls back to its top, where it opens
+ * next. list: a list_view, its scroll view the first child (coverflow.c home_fill's shape). */
+void forget_rows(void *list) {
+    void *view = widget_count_children(list) ? widget_get_child(list, 0) : (void *)0;
+    menu_t m;
+    if (!view) return;
+    prop(view, SEL, -1);
+    if (load_rows(&m, view)) wheel_offset(&m, 0);
 }
 
 /* Least viewport move that reveals logical row id with a small reading margin.
@@ -11343,8 +11355,8 @@ int ringnav(void *ctx, void *event) {
             return STOP;
         }
     }
-    /* OLED: the list Return leaves opens at its top next time (a held Return's release is not one)
-     */
+    /* reopen_top: the list Return leaves opens at its top next time (a held Return's release is not
+     * one) */
     if (key == KEY_RETURN && theme()->reopen_top &&
         !*(volatile unsigned char *)RETURN_RELEASE_LATCH && usable())
         forget_left();

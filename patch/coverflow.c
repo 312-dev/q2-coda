@@ -4797,10 +4797,12 @@ static void *home_open(void) {
                                                             : (void *)0;
 }
 
-/* Return on Home with a list open: 1 when it went back to the main list. */
+/* Return on Home with a list open: 1 when it went back to the main list. A reopen_top theme's list
+ * opens at its top next time (navigation.c forget_rows), as a page left by Return does. */
 int coverflow_home_back(void *top) {
     void *open = top == home.win ? home_open() : (void *)0;
     if (!open) return 0;
+    if (theme()->reopen_top) forget_rows(open);
     home_swap(open, home.list, -I(home.list, W_W));
     return 1;
 }
