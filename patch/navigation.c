@@ -6034,7 +6034,8 @@ unsigned *ringnav_style_color(unsigned *color, void *style, const char *name, un
         return color;
     }
     if (st.paint_w && name && tk_str_end_with(name, "text_color")) {
-        if (catalogue_greyed(st.paint_w, color)) return color; /* a server row that can't play */
+        /* a server row that can't play now (catalogue.c) */
+        if (catalogue_greyed(st.paint_w, color)) return color;
         if (kb_key(st.paint_w)) { /* kb_paint_key draws it */
             *color &= 0xffffff;
             return color;

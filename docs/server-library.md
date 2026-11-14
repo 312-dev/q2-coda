@@ -160,7 +160,7 @@ playlists.
 | Setting: `[Q2POD] LIBRARYSOURCE`, 0 Local Only (default) or 1 Local + Server, a row on Display > Cover Flow | `navigation.c` (`pod_keys` and the rows' tables beside it) | yes |
 | Ratings: `ratings.out` appended for every app with `ratings=1`; `ratings.in` renamed to `ratings.in.taking`, applied, then deleted | `catalogue.c`, `ratings.c` (three calls) | yes |
 
-PATCH_BYTES_PLACEHOLDER All catalogue data lives on the heap or the card.
+`catalogue.o` is about 32 KB of the payload (`llvm-size`: 32,334 bytes of text, 720 of constants); `patch_bytes` in this branch's `--dev` build is 853,784 of the 1 MB. All catalogue data lives on the heap or the card.
 
 ### Compatibility
 
@@ -251,6 +251,23 @@ for server rows and for synced card files alike, whenever the Q2 can reach the s
   before the server's value is read back.
 - **Capability:** the app declares `ratings=1` in its `q2app`, and the firmware adds `ratings` to its
   capability line, as the catalogue does; without both, ratings stay on the device.
+
+## Scale
+
+Measured on the emulator (`~/q2-emu-server`: the build's own `demo` under `qemu-user` on a
+laptop, so time is not a Q2's and memory includes QEMU's), with catalogues from
+`test/server_catalogue.py` (made-up songs in albums of 12, five playlists, and the card's 24 FLAC
+files listed again, which the size layer hides):
+
+| Server songs | Import (file written to the new file swapped in, 1 s poll included) | `catalogue.db` | Library > Songs open |
+|---|---|---|---|
+| 100 | 1.0 s | 0.1 MB | under 0.5 s (124 songs) |
+| 10,000 | 1.8 s | 4.8 MB | not measured |
+| 50,000 | 9.8 s | 24.7 MB | about 0.5 s (50,024 songs) |
+
+demo's process (QEMU included) held 70 MB after boot and 96 MB after browsing the 50,000-song
+Library; a Q2 has 128 MB, so this wants checking on a device. Every job copies the whole file
+(the old tables into the new one), so a match after a card change costs about what an import does.
 
 ## Risks and open questions
 

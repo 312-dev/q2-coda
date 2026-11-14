@@ -58,11 +58,11 @@ typedef struct {
 
 typedef struct {
     char id[16];
-    int ratings;      /* q2app ratings=1 */
-    char seq[24];     /* the catalogue's seq taken last */
-    long avail_at;    /* catalogue.avail read this far */
-    int down;         /* its state file's server=down */
-    unsigned play;    /* its .play, hashed, when a catplay went */
+    int ratings;   /* q2app ratings=1 */
+    char seq[24];  /* the catalogue's seq taken last */
+    long avail_at; /* catalogue.avail read this far */
+    int down;      /* its state file's server=down */
+    unsigned play; /* its .play, hashed, when a catplay went */
 } cat_app_t;
 
 static struct {
@@ -74,16 +74,16 @@ static struct {
     unsigned long thread;
     int running;
     volatile int done;
-    int job_app;            /* the app imported, -1 for a match alone */
+    int job_app; /* the app imported, -1 for a match alone */
     char job_seq[24];
-    char job_why[96];       /* its error, empty when it went well */
+    char job_why[96]; /* its error, empty when it went well */
     unsigned job_rows;
-    cat_ix job_ix;          /* the index it built */
-    unsigned gen;           /* library_gen the last job matched against */
-    int pending;            /* a match is due once no scan runs */
+    cat_ix job_ix; /* the index it built */
+    unsigned gen;  /* library_gen the last job matched against */
+    int pending;   /* a match is due once no scan runs */
     cat_ix ix;
-    void **stock_slot;      /* stock's handle's global (stock_db_open's a1) */
-    void *attached;         /* the stock handle cat is attached to */
+    void **stock_slot; /* stock's handle's global (stock_db_open's a1) */
+    void *attached;    /* the stock handle cat is attached to */
     void *grey[CAT_GREY_ROWS];
     unsigned ngrey;
     /* a catplay sent: its app, when, and the list to play offline if no answer comes */
@@ -175,7 +175,7 @@ static int ix_sort(cat_ix *x) {
 /* An edition note in brackets or after " - ": cut when it names one of these, unless it says
  * live (a live take is another recording). */
 static int edition_note(const char *s, unsigned n) {
-    static const char *const words[] = { "remaster", "mix",    "edition", "version", "mono",
+    static const char *const words[] = { "remaster", "mix",    "edition", "version",    "mono",
                                          "stereo",   "deluxe", "bonus",   "anniversary" };
     char low[96];
     unsigned k = n < sizeof low - 1 ? n : sizeof low - 1;
@@ -194,8 +194,8 @@ unsigned cat_norm(const char *s, char *out, unsigned size) {
     if (n >= sizeof low) n = sizeof low - 1;
     for (unsigned i = 0; i < n; ++i) low[i] = (char)(s[i] >= 'A' && s[i] <= 'Z' ? s[i] + 32 : s[i]);
     low[n] = 0;
-    static const char *const feats[] = { " feat.", " feat ", " ft.", "(feat.", "[feat.", "(ft.",
-                                         " featuring " };
+    static const char *const feats[] = { " feat.", " feat ", " ft.",       "(feat.",
+                                         "[feat.", "(ft.",   " featuring " };
     for (unsigned i = 0; i < sizeof feats / sizeof *feats; ++i) {
         char *f = strstr(low, feats[i]);
         if (f && f > low) *f = 0, n = (unsigned)(f - low);
@@ -277,8 +277,8 @@ typedef struct {
     char *path;
     unsigned title, artist, aa, album; /* cat_norm's hashes */
     int track;
-    long size;    /* -2 not read yet */
-    int sec;      /* -2 not read yet */
+    long size; /* -2 not read yet */
+    int sec;   /* -2 not read yet */
     char mbid[37];
     int mbid_read;
 } card_t;
@@ -289,7 +289,7 @@ typedef struct {
     int rows, bad;
     card_t *card;
     unsigned ncard, cap;
-    unsigned *by_size, nsize; /* untagged card songs, by size */
+    unsigned *by_size, nsize;  /* untagged card songs, by size */
     unsigned *dup, ndup, dcap; /* matched: a server row's id and its card row, in pairs */
     cat_ix *ix;
 } job_t;
@@ -318,7 +318,9 @@ static char *sq(char *o, char *end, const char *s) {
     return o;
 }
 #define JEND (jb.sql + CAT_SQL - CAT_SLACK)
-static int job_exec(const char *sql) { return sqlite3_exec(jb.db, sql, 0, 0, 0) ? (jb.bad = 1) : 0; }
+static int job_exec(const char *sql) {
+    return sqlite3_exec(jb.db, sql, 0, 0, 0) ? (jb.bad = 1) : 0;
+}
 /* jb.sql as built up to o, run when it fit. */
 static int job_run(char *o) {
     if (o >= JEND) return jb.bad = 1;
@@ -393,7 +395,9 @@ int cat_same(const srv_t *s, card_t *k) {
     if (k->sec == -2) k->sec = cat_seconds(k->path);
     const char *ext = strrchr(k->path, '.');
     int suffix = ext && s->suffix && !strcasecmp(ext + 1, s->suffix);
-    int d = k->sec < 0 || s->sec <= 0 ? 1 << 30 : k->sec > s->sec ? k->sec - s->sec : s->sec - k->sec;
+    int d = k->sec < 0 || s->sec <= 0 ? 1 << 30
+            : k->sec > s->sec         ? k->sec - s->sec
+                                      : s->sec - k->sec;
     if (suffix && k->size > 0 && k->size == s->size && d <= 1) return M_FILE;
     /* a size that differs is no disagreement (a retagged copy, new art); a length more than 2 s off
      * is, and fails the tags too: a live take beside the studio one */
@@ -415,9 +419,15 @@ static void dup_add(unsigned id, unsigned card) {
 }
 /* servermeta's id,title,artist,aa,album,track,seconds,size,suffix,mbid */
 static int cat_server_row(void *ctx, int n, char **v, char **c) {
-    srv_t s = { (unsigned)atoi(v[1] ?: "0"), (unsigned)atoi(v[2] ?: "0"), (unsigned)atoi(v[3] ?: "0"),
-                (unsigned)atoi(v[4] ?: "0"), atoi(v[5] ?: "0"),  atoi(v[6] ?: "0"),
-                atoi(v[7] ?: "0"),           v[8],               v[9] };
+    srv_t s = { (unsigned)atoi(v[1] ?: "0"),
+                (unsigned)atoi(v[2] ?: "0"),
+                (unsigned)atoi(v[3] ?: "0"),
+                (unsigned)atoi(v[4] ?: "0"),
+                atoi(v[5] ?: "0"),
+                atoi(v[6] ?: "0"),
+                atoi(v[7] ?: "0"),
+                v[8],
+                v[9] };
     unsigned id = (unsigned)atoi(v[0]);
     unsigned lo = 0, hi = jb.ncard;
     while (lo < hi) /* the first of that title */
@@ -468,7 +478,9 @@ static void cat_match(void) {
 
 /* The percent escapes of the card-app channel undone in place (docs/librespot.md). */
 static int hexv(char c) {
-    return c >= '0' && c <= '9' ? c - '0' : (c | 32) >= 'a' && (c | 32) <= 'f' ? (c | 32) - 'a' + 10 : -1;
+    return c >= '0' && c <= '9'                 ? c - '0'
+           : (c | 32) >= 'a' && (c | 32) <= 'f' ? (c | 32) - 'a' + 10
+                                                : -1;
 }
 static void unescape(char *s) {
     char *o = s;
@@ -503,10 +515,10 @@ static int initial(const char *t) {
 typedef struct {
     int slot;
     const char *id;
-    unsigned next;  /* the next row's id */
+    unsigned next; /* the next row's id */
     unsigned pending;
-    char *o;        /* the open insert's end */
-    char *meta;     /* servermeta's insert, built beside it */
+    char *o;    /* the open insert's end */
+    char *meta; /* servermeta's insert, built beside it */
     char *mo;
     unsigned lists; /* catalogue playlists, for the playlist pass */
 } imp_t;
@@ -531,8 +543,8 @@ static void imp_song(imp_t *im, char **f, int n) {
         strstr(f[12], "/") || !strcmp(f[1], "..") || !strcmp(f[6], ".."))
         return; /* no sid, album id or suffix, or one that is not a plain name */
     /* a row is at most a line's fields, each quote doubled, and the url and name made from them */
-    if (im->pending && (room(im->o, JEND) < 2 * CAT_LINE + 2048 ||
-                        room(im->mo, MEND(im)) < 2 * CAT_LINE + 2048))
+    if (im->pending &&
+        (room(im->o, JEND) < 2 * CAT_LINE + 2048 || room(im->mo, MEND(im)) < 2 * CAT_LINE + 2048))
         imp_flush(im);
     char *o = im->o, *end = JEND, *mend = MEND(im);
     if (!im->pending) {
@@ -637,7 +649,8 @@ static int import_file(int slot, const char *id, const char *seq, char *why, uns
     char path[64], *line = calloc(1, CAT_LINE + 1), *f[20];
     tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/catalogue.tsv", id);
     void *in = line ? fopen(path, "rb") : 0;
-    imp_t im = { slot, id, CAT_ID_BASE + (unsigned)slot * CAT_APP_SPAN, 0, 0, calloc(1, CAT_SQL), 0, 0 };
+    imp_t im = { slot, id, CAT_ID_BASE + (unsigned)slot * CAT_APP_SPAN, 0, 0, calloc(1, CAT_SQL),
+                 0,    0 };
     int ok = in && im.meta, first = 1, skipping = 0, rows = -1, end = 0;
     if (!ok) tk_snprintf(why, size, "Couldn't read the catalogue");
     unsigned k = 0, got = 0;
@@ -646,7 +659,7 @@ static int import_file(int slot, const char *id, const char *seq, char *why, uns
         got = (unsigned)fread(buf, 1, sizeof buf, in);
         end = !got;
         for (unsigned i = 0; ok && i < (end ? 1 : got); ++i) {
-            if (end && !k) break;  /* the file ended with its newline */
+            if (end && !k) break; /* the file ended with its newline */
             if (!end && buf[i] != '\n') {
                 if (k < CAT_LINE)
                     line[k++] = buf[i];
@@ -800,8 +813,9 @@ static void cat_playlists(const char *app) {
     }
     /* gone from the catalogue: the link, and the playlist unless it is a twin */
     o = jb.sql;
-    PUT(o, JEND, "delete from playlist where cd_num in (select list from nw.serverlists where "
-                 "twin is not 1 and app=");
+    PUT(o, JEND,
+        "delete from playlist where cd_num in (select list from nw.serverlists where "
+        "twin is not 1 and app=");
     o = sq(o, JEND, app);
     PUT(o, JEND, " and pid not in (select pid from nw.serverpl where app=");
     o = sq(o, JEND, app), PUT(o, JEND, "));delete from nw.serverlists where app=");
@@ -890,8 +904,7 @@ static void *cat_worker(void *unused) {
         job_exec("begin");
         job_exec(SCHEMA);
         copy_old(slot >= 0 ? cat.app[slot].id : 0);
-        if (slot >= 0 && !jb.bad)
-            import_file(slot, cat.app[slot].id, cat.job_seq, why, sizeof why);
+        if (slot >= 0 && !jb.bad) import_file(slot, cat.app[slot].id, cat.job_seq, why, sizeof why);
         if (!why[0]) cat_match();
         if (!jb.bad && job_exec("commit")) tk_snprintf(why, sizeof why, "Couldn't save");
         if (!why[0] && jb.bad) tk_snprintf(why, sizeof why, "Couldn't write the catalogue");
@@ -943,8 +956,9 @@ const char *catalogue_rows(void) {
 /* sql with each " from songtable" reading the union of the card's and the server's songs, or 0
  * (Local only, no catalogue, no memory). The caller frees it. */
 char *catalogue_union(const char *sql) {
-    static const char from[] = " from songtable", with[] =
-        " from (select * from songtable union all select * from servertable)";
+    static const char from[] = " from songtable",
+                      with[] =
+                          " from (select * from songtable union all select * from servertable)";
     if (!sql || !strstr(sql, from) || !cat_ready()) return 0;
     unsigned n = 1, k = strlen(sql);
     for (const char *p = strstr(sql, from); p; p = strstr(p + 1, from)) ++n;
@@ -1043,7 +1057,8 @@ static void cat_scan(void) {
     int wasn = cat.napps;
     for (struct dirent *e; d && n < CAT_APPS && (e = readdir(d));) {
         const char *id = e->d_name + 1;
-        if (e->d_name[0] != '.' || !*id || strlen(id) >= sizeof cat.app[0].id || !strcmp(id, "q2pod"))
+        if (e->d_name[0] != '.' || !*id || strlen(id) >= sizeof cat.app[0].id ||
+            !strcmp(id, "q2pod"))
             continue;
         tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/q2app", id);
         if (!state_read(path, raw, sizeof raw) || number(raw, "catalogue") != 1) continue;
@@ -1143,7 +1158,7 @@ static void cat_avail(int slot) {
             if (!e || e->dup) continue;
             e->local = gone || n < 2 || !card_path(f2[1]) ? 0 : ix_put(&cat.ix, f2[1]);
         }
-        /* a cut last line waits for its newline */
+    /* a cut last line waits for its newline */
     fclose(f);
 }
 
@@ -1260,7 +1275,8 @@ static void *cat_offline(void *q, int *at) {
 int catalogue_load(void *q, int *at, void **own) {
     unsigned n = q ? deque_size(q) : 0, server = 0;
     *own = 0;
-    for (unsigned i = 0; i < n && !server; ++i) server = catalogue_path(P(deque_at(q, i), REC_PATH));
+    for (unsigned i = 0; i < n && !server; ++i)
+        server = catalogue_path(P(deque_at(q, i), REC_PATH));
     if (!server) return 0;
     void *start = *at >= 0 && (unsigned)*at < n ? deque_at(q, (unsigned)*at) : 0;
     if (start && catalogue_unavailable(start)) {
