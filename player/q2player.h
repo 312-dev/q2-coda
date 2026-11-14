@@ -39,8 +39,9 @@ struct ctl {
     struct song play_song, preload_song;
     int seek_to;
     int paused;
-    /* settings demo pushes; speed and mqa are stored and read by nothing, as stock's */
+    /* settings demo pushes; speed and mqa are stored and read by nothing (stock reads speed, docs/player.md) */
     int outputway, volume, softvol, dsdmode, replaygain, speed, explay, mqa, eq_on;
+    int scan; /* mcl-scan: a held Previous or Next heard at speed, in hundredths, below 0 backwards; 0 none */
     int volume_changed; /* an mcl-setvol since the playback thread last looked */
     float eq[10];
     int eq_changed; /* an mcl-seteq since the playback thread last looked: the EQ state on disk is new */
@@ -150,6 +151,19 @@ void dsd_reset(struct dsd_pack *);
 /* bytes of packet data (planar: a block a channel; lsb_first: DSF's bit order), from skip bytes into each channel on:
  * the frames made, at *out; below 0 with no memory */
 int dsd_pack(struct dsd_pack *, const uint8_t *data, int bytes, int planar, int lsb_first, int skip, const uint8_t **out);
+
+#define SCAN_FILE "/tmp/q2scan" /* there while the song playing can be scanned at speed (mcl-scan, patch/seek.c) */
+/* stretch.c: scan's time-stretch, the song at 2 to 8 times its speed at its own pitch (docs/player.md#scan) */
+struct stretch;
+double stretch_top(int rate);                         /* the highest speed at a rate */
+struct stretch *stretch_open(const struct pcm_format *); /* NULL for a format it does not take: DSD, or over 192 kHz */
+void stretch_close(struct stretch *);
+void stretch_reset(struct stretch *); /* a seek: forget what is held */
+void stretch_speed(struct stretch *, double speed); /* 0: off, playing on from where the stretch had got to */
+double stretch_rate(const struct stretch *);        /* the speed in force, 0 for none */
+int64_t stretch_behind(const struct stretch *);     /* frames given that the output has not yet reached */
+/* frames of data in (the song's format): the frames to write, at *out; data itself while passing through */
+int stretch_run(struct stretch *, const uint8_t *data, int frames, const uint8_t **out);
 
 /* engine.c */
 void *engine_thread(void *);

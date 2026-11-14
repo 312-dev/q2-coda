@@ -54,6 +54,7 @@ int main(int argc, char **argv) {
     (void)argc;
     if (access(SWITCH_FILE, F_OK) != 0 && access(STOCK_XZ, F_OK) == 0) {
         unlink(CLICKS_FILE);
+        unlink(SCAN_FILE);
         if (unpack_stock() == 0) execv(STOCK_PLAYER, argv);
         fprintf(stderr, "q2player: %s: %s; playing with q2player\n", STOCK_PLAYER, strerror(errno));
     }

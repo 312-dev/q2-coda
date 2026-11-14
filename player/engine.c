@@ -139,7 +139,7 @@ static void close_output(int drain) {
 
 /* Plays s to its end or to the request that cuts it short, through its DSP chain (dsp.c). The PCM stays open on
  * return. */
-static int play_through(struct source *s, const struct song *song, struct dsp *d, int untouched);
+static int play_through(struct source *s, const struct song *song, struct dsp *d, int untouched, struct stretch *sx);
 static int play(struct source *s, const struct song *song) {
     struct ctl *c = &ctl;
     struct info info;
@@ -154,14 +154,80 @@ static int play(struct source *s, const struct song *song) {
     pthread_mutex_unlock(&c->mu);
     stream_playing(source_stream(s)); /* get_cache_buffer reports this song's cache, or 0 */
     struct dsp *d = dsp_open(source_format(s), untouched, untouched ? 1 : source_replaygain(s, rg), info.length);
-    int why = play_through(s, song, d, untouched);
+    /* SCAN_FILE is there while the song playing can be scanned at speed (patch/seek.c looks at a hold's start) */
+    struct stretch *sx = untouched ? NULL : stretch_open(source_format(s));
+    if (sx) touch(SCAN_FILE);
+    else unlink(SCAN_FILE);
+    int why = play_through(s, song, d, untouched, sx);
+    stretch_close(sx);
     dsp_close(d, why == ENDED);
     return why;
 }
 
-static int play_through(struct source *s, const struct song *song, struct dsp *d, int untouched) {
+/* ---- the scan at speed (docs/player.md#scan): mcl-scan's hundredths of the song's speed, through the stretch
+ * (stretch.c), forward as the song comes, or backward: whole seconds decoded from a seek, each played last frame
+ * first, the one before it next, so the song runs backward without a break and stretch.c's search keeps its pitch.
+ * While scanning only SCAN_LEAD_MS is written ahead, not the PCM's half second, so a change of speed and the
+ * release are heard that soon. */
+enum { SCAN_LEAD_MS = 150 };
+struct rewind {
+    int on, at;     /* backward; the whole second the next block ends at */
+    int64_t origin; /* the song's frame the backward run began at */
+    int64_t fed;    /* frames handed to the stretch since */
+    uint8_t *buf;   /* the block, reversed: n frames, used of them handed on */
+    int n, used, cap;
+};
+
+/* The second before r->at, decoded and reversed into r->buf: its frames, 0 at the song's start, below 0 when it would
+ * not seek. */
+static int rewind_block(struct source *s, struct rewind *r) {
+    const struct pcm_format *f = source_format(s);
+    int fb = f->channels * f->bytes, got = 0;
+    if (r->at <= 0) return 0;
+    if (r->cap < f->rate * fb) {
+        uint8_t *b = realloc(r->buf, (size_t)f->rate * fb);
+        if (!b) return -1;
+        r->buf = b, r->cap = f->rate * fb;
+    }
+    if (source_seek(s, r->at - 1) < 0) return -1;
+    while (got < f->rate) {
+        const uint8_t *data;
+        int n = source_read(s, &data);
+        if (n <= 0) break;
+        if (n > f->rate - got) n = f->rate - got;
+        memcpy(r->buf + (size_t)got * fb, data, (size_t)n * fb);
+        got += n;
+    }
+    uint8_t t[64]; /* a frame: 8 channels of 8 bytes at most */
+    for (int i = 0, j = got - 1; i < j; ++i, --j) {
+        memcpy(t, r->buf + (size_t)i * fb, fb);
+        memcpy(r->buf + (size_t)i * fb, r->buf + (size_t)j * fb, fb);
+        memcpy(r->buf + (size_t)j * fb, t, fb);
+    }
+    r->at--, r->n = got, r->used = 0;
+    return got;
+}
+
+/* The song's frame being heard: forward, the frames decoded since the seek at origin (the song's frame offset), less
+ * those the stretch holds and the PCM's backlog at the speed it was written; backward, the frames handed on since the
+ * run began at rw->origin, counted down. */
+static int64_t heard_at(struct source *s, struct stretch *sx, const struct rewind *rw, int64_t origin, int64_t offset) {
+    double speed = stretch_rate(sx) > 0 ? stretch_rate(sx) : 1;
+    int64_t back = stretch_behind(sx) + (int64_t)(output_delay(out) * speed);
+    if (rw->on) {
+        int64_t at = rw->origin - (rw->fed - back);
+        return at < 0 ? 0 : at;
+    }
+    return offset + source_frames(s) - origin - back;
+}
+
+static int play_through(struct source *s, const struct song *song, struct dsp *d, int untouched, struct stretch *sx) {
     struct ctl *c = &ctl;
     const struct pcm_format *f = source_format(s);
+    static struct rewind rw; /* its block's buffer kept for the next song */
+    rw.on = 0;
+    int scan = 0; /* the mcl-scan in force */
+    int fb = f->channels * f->bytes;
 
     pthread_mutex_lock(&c->mu);
     int way = c->outputway;
@@ -199,7 +265,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
         if (c->play && c->next) { pthread_mutex_unlock(&c->mu); return NEXT; }
         if (c->stop) { c->stop = 0; pthread_mutex_unlock(&c->mu); return STOPPED; }
         int seek = c->seek, to = c->seek_to, want = c->preload, unwant = c->close_preload, metering = c->explay == 1;
-        int eq = c->eq_changed, click = c->click, volume = c->volume_changed ? c->volume : -1;
+        int eq = c->eq_changed, click = c->click, volume = c->volume_changed ? c->volume : -1, want_scan = sx ? c->scan : 0;
         c->volume_changed = 0;
         struct song ps = c->preload_song;
         c->seek = c->preload = c->close_preload = c->eq_changed = c->click = 0;
@@ -208,15 +274,25 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
 
         if (unwant) preload_cancel();
         if (want) preload_start(&ps);
-        if (seek) {
+        /* a turn between forward and backward starts the song again from the second heard, as a seek there */
+        int turn = (want_scan < 0) != rw.on;
+        if (seek || turn) {
+            int64_t here = heard_at(s, sx, &rw, origin, offset);
             dac_mute(way);
             if (!paused) usleep(150000); /* stock's wait after the mute, before the drop */
             output_drop(out);
-            if (source_seek(s, to) < 0) return ENDED;
+            if (sx) stretch_reset(sx);
+            int target = seek ? to : (int)(here / f->rate);
+            if (turn) rw.on = want_scan < 0;
+            if (rw.on) /* the next block is the second before target */
+                rw.at = target, rw.origin = (int64_t)target * f->rate, rw.fed = 0, rw.n = rw.used = 0;
+            else if (source_seek(s, target) < 0)
+                return ENDED;
             if (!paused) dac_unmute(way, dac_stamp(1)); /* paused, the resume unmutes */
             origin = offset = source_frames(s);
             /* paused, the position shows the seek only once playing again, as stock's */
         }
+        if (want_scan != scan) stretch_speed(sx, (scan = want_scan) < 0 ? -scan / 100.0 : scan / 100.0);
         if (volume >= 0 && (way == 1 || way == 2)) output_volume(out, volume);
         if (paused) continue; /* a preload or a seek taken while paused: back to waiting */
         if (pausing) dac_unmute(way, 1), output_pause(out, 0), pausing = 0; /* a resume is always a person's */
@@ -224,19 +300,33 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
         if (click) output_click(out, click);
 
         const uint8_t *data;
-        int n = source_read(s, &data);
-        if (n <= 0) return ENDED;
-        n = dsp_run(d, data, n, (double)source_frames(s) / f->rate, &data);
+        int n;
+        if (rw.on) { /* backward: the block in hand, or the second before it; at the song's start, a wait */
+            if (rw.used == rw.n && rewind_block(s, &rw) <= 0) {
+                usleep(20000);
+                continue;
+            }
+            n = rw.n - rw.used < 4096 ? rw.n - rw.used : 4096;
+            data = rw.buf + (size_t)rw.used * fb;
+            rw.used += n, rw.fed += n;
+        } else if ((n = source_read(s, &data)) <= 0) {
+            return ENDED;
+        }
+        if (sx) n = stretch_run(sx, data, n, &data);
         int uv[2] = {0, 0};
-        if (metering) dsp_meter(f, untouched, data, n, uv);
-        if (output_write(out, data, n) < 0) return FAILED;
+        if (n > 0) {
+            n = dsp_run(d, data, n, (double)heard_at(s, sx, &rw, origin, offset) / f->rate, &data);
+            if (metering) dsp_meter(f, untouched, data, n, uv);
+            if (output_write(out, data, n) < 0) return FAILED;
+        }
+        if (scan && output_delay(out) > (int64_t)f->rate * SCAN_LEAD_MS / 1000) usleep(5000);
 
         /* What is still in the PCM is this song's newest frames, and under a gapless change the tail of the song
          * before as well: the position stays at the start, and the status "ready", until that tail has played. */
-        int64_t played = source_frames(s) - origin - output_delay(out);
+        int64_t played = rw.on ? 1 : heard_at(s, sx, &rw, origin, offset) - offset;
         if (played > 0) heard = 1;
         pthread_mutex_lock(&c->mu);
-        if (played > 0) c->position = (int)((offset + played) / f->rate);
+        if (played > 0) c->position = (int)(heard_at(s, sx, &rw, origin, offset) / f->rate);
         if (heard) c->state = PLAYING;
         if (metering) c->uv[0] = uv[0], c->uv[1] = uv[1]; /* the last levels stand otherwise, as stock's */
         pthread_mutex_unlock(&c->mu);

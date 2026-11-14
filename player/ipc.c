@@ -122,6 +122,9 @@ static void command(const char *name, const char *arg) {
         c->replaygain = atoi(arg);
     } else if (!strcmp(name, "mcl-playspeed")) {
         c->speed = atoi(arg);
+    } else if (!strcmp(name, "mcl-scan")) {
+        /* Q2 Pod's own: the payload's hold-to-scan (patch/seek.c), sent only while SCAN_FILE says this player plays */
+        c->scan = atoi(arg), wake = 1;
     } else if (!strcmp(name, "mcl-setexplayinfo")) {
         if ((unsigned)atoi(arg) < 3) c->explay = atoi(arg);
     } else if (!strcmp(name, "mcl-mqadecodemode")) {
