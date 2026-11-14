@@ -698,9 +698,18 @@ static int pl_click(void *action, void *event) {
     pl_timer = timer_add(pl_due, action, 0);
     return 0;
 }
+/* OLED keeps one pitch a list (oled-design.md Do and don't): its action rows as tall as the
+ * playlists' rows, when there are any; else every theme's row pitch. */
+static int pl_pitch(void *view) {
+    for (unsigned i = 0, n = widget_count_children(view); feedback_oled() && i < n; ++i) {
+        void *item = widget_get_child(view, i);
+        if (widget_get_prop_int(item, PL_ROW, 0)) return I(item, W_H);
+    }
+    return geom(G_PITCH);
+}
 /* The row goes to index at, or after the rest when at < 0. */
 static void pl_action(void *view, const char *caption, int action, int into, int at) {
-    int h = geom(G_PITCH);
+    int h = pl_pitch(view);
     void *item = list_item_create(view, 0, 0, 0, h);
     widget_use_style(item, "s_listitem_black");
     void *button = button_create(item, 0, 0, 375, h);
@@ -783,6 +792,10 @@ static void pl_rows(void *win) {
     }
     if (none) widget_set_visible(none, !n, 0);
     widget_set_prop_int(win, PL_MARKING, marking);
+    if (feedback_oled()) { /* the list lays its rows out at pl_pitch's one pitch */
+        widget_set_prop_int(P(view, W_PARENT), "item_height", pl_pitch(view));
+        widget_layout(P(view, W_PARENT));
+    }
     if (!marking && marking == was) return;
     /* Stock showed its marks or the dots: the rows go to their places, the list to its new height.
      */

@@ -360,7 +360,7 @@ pattern.
 | Songs, a playlist's songs           | Song rows                   | The artist inline                                                                                          |
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
 | Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles                         |
-| Playlists                           | Two-line row with icon      |                                                                                                            |
+| Playlists                           | Two-line row with icon      | New Playlist... and the other action rows take the same 52 px pitch once there is a playlist, the picker's too |
 | Hold menu                           | Dialog                      |                                                                                                            |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
