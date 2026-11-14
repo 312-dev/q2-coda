@@ -210,6 +210,10 @@ typedef struct {
     /* Now Playing's full-screen lyrics (np_full) and where the last touch on them came down
      * (np_lyric_touch) */
     int np_full, np_tap_x, np_tap_y;
+    int np_time_down; /* np_time_tap: a touch came down on the right-hand time */
+    /* np_bar.c's shuffle and repeat: shuffle kept under Repeat One, repeat Off chosen under shuffle
+     */
+    unsigned char np_shuf_one, np_rep_off;
     int np_was[9]; /* the column before full screen (np_full) */
     /* The full-screen art's song name, its shade and its window, the fade's step and timer
      * (ringnav_bigcover) */
@@ -243,6 +247,10 @@ typedef struct {
     unsigned np_marquee;
     unsigned np_remain_timer; /* remain_due */
     unsigned np_fit_timer;    /* np_fit_due */
+    /* np_bar.c paint_scrubber's glide: the slider value it runs on from, since when, whether it was
+     * playing, and its repaint */
+    int np_glide_v, np_glide_play;
+    unsigned np_glide_at, np_glide_timer, np_glide_due;
     /* Classic's Spotify or Internet Radio Now Playing (stream_ipod): its slanted art's widget, and
      * the radio's bar, always full */
     void *stream_art, *stream_bar;
@@ -258,6 +266,9 @@ typedef struct {
     /* Scrub: a centre press at np_press_at waits DOUBLE_CLICK_MS in np_press for a second one;
      * scrub_to is the target second, scrub_moved set once the wheel changed it. */
     unsigned np_press, np_press_at, scrub_timer, scrub_track, settle_timer;
+    /* Now Playing's Centre cycle (np_centre): its stage (NP_STAGE_*), the stage's timeout, and when
+     * Centre last went down (ringnav_keydown), which tells a short hold from a press */
+    unsigned np_stage, np_stage_timer, center_down_at;
     int scrub, scrub_to, scrub_moved, settle_played;
     int held_sec; /* a paused seek to scrub_to on scrub_track: the player's second then, +1; 0 none
                    */
@@ -454,8 +465,15 @@ void chevron_icon(void *w, void *canvas, int right, int y, int selected);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
 void marquee_fade(void *w, void *canvas);
+/* np_marquee.c: Now Playing's lines as one marquee under a fading theme */
+int np_marq_owns(void *w);
+void np_marq_kick(void *w), np_marq_reset(void);
+unsigned np_marq_wait(unsigned max);
+unsigned np_glide_wait(unsigned max); /* np_bar.c: the progress bar's next pixel */
 /* np_bar.c: Now Playing's shuffle and repeat as the theme's own pair (playing.modes.icons) */
 void np_modes(void *win, void *canvas);
+/* np_bar.c: ... and its own heart and More over stock's (playing.modes.icons) */
+void np_glyphs_bind(void *win), np_glyphs(void *win);
 void wheel_sb_arm(void *list);
 unsigned wheel_sb_alpha(void *list);
 void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key);
@@ -467,6 +485,15 @@ enum { SONG_LENGTH_ALBUMS, SONG_LENGTH_ALL, SONG_LENGTH_OFF };
 enum { SONGS_MIXED = 1, SONGS_ARTIST, SONGS_ALBUM, SONGS_FOLDER };
 enum { SONG_INLINE = 1, SONG_RIGHT };
 int song_artist(void), song_length(void);
+/* theme_engine.c: Track Time's value, and its switch on a tap (np_bar.c np_time_tap) */
+int np_time_total(void), np_time_toggle(void);
+int np_time_tap(void *ctx, void *event);
+/* np_bar.c: Now Playing's shuffle and repeat as two controls */
+void np_mode_set(int on, int rep), np_mode_step(int repeat, int dir);
+/* Now Playing's Centre cycle: at rest (the wheel is the volume's), the scrubber, shuffle, repeat
+ * and the rating picker (navigation.c np_centre; np_bar.c np_modes marks shuffle's and repeat's) */
+enum { NP_STAGE_REST, NP_STAGE_SHUFFLE, NP_STAGE_REPEAT };
+int np_mode_click(void *target, void *event);
 int song_list(void *w);
 int song_fit(int place, int room, int title, int gap, int artist, int *shown);
 void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected);

@@ -94,7 +94,7 @@ SCHEMA = {k.path: k for k in (
     key('list.reopen.top', 'reopen_top', 'bool'),  # a list left by Return opens at its top when chosen again (navigation.c forget_left)
     key('list.shuffle.row', 'shuffle_row', 'bool'),  # Songs' action row reads Shuffle and takes the wheel's selection (navigation.c shuffle_key)
     key('playing.art.radius', 'np_art_radius', 'int', 75),  # Now Playing's art corners in px; 0: NP_ART_RADIUS's share of its size
-    key('playing.modes.icons', 'np_modes', 'bool'),  # shuffle and repeat as the theme's own pair (np_bar.c np_modes)
+    key('playing.modes.icons', 'np_modes', 'bool'),  # shuffle and repeat as the theme's own pair (np_bar.c np_modes), heart and More its own glyphs (np_glyphs)
     key('bar.fill.painter', 'painter[PAINT_BAR]', 'enum'),
     key('bar.battery.painter', 'painter[PAINT_BATTERY]', 'enum'),
     key('home.chevron.visible', 'chevron_home', 'bool'),
@@ -711,7 +711,7 @@ def offered(c, o, names, what):
     return sum(1 << names.index(n) for n in set(listed))
 
 
-PLAIN_KEYS = {'HOMELIB', 'ROWPREVIEW', 'STATUSBAR', 'SONGARTIST', 'SONGLENGTH'}  # the plain own keys the payload reads (theme_engine.c home_lib_on, row_preview_on, bar_theme, song_artist, song_length)
+PLAIN_KEYS = {'HOMELIB', 'ROWPREVIEW', 'STATUSBAR', 'SONGARTIST', 'SONGLENGTH', 'NPTIME'}  # the plain own keys the payload reads (theme_engine.c home_lib_on, row_preview_on, bar_theme, song_artist, song_length, np_time_total)
 
 
 def order(attrs):

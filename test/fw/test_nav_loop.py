@@ -3026,6 +3026,8 @@ def test_an_overdue_click_that_locks_the_screen_drops_the_next_centre(fw, keys):
 
 
 def test_a_lone_centre_on_now_playing_turns_the_screen_off(fw, keys, st):
+    Config(fw, SCRUBSINGLE=b'0')  # Single Press Scrub chosen off
+    st('settings_read').value = 0
     ui = Ui(fw)
     top = ui.window('playing_page')
     st('np_win', C.c_void_p).value = top.p
@@ -3033,6 +3035,17 @@ def test_a_lone_centre_on_now_playing_turns_the_screen_off(fw, keys, st):
     assert [ui.timers[t][2] for t in ui.due('navigation__np_single')] == [O['DOUBLE_CLICK_MS']]
     ui.fire('navigation__np_single')
     assert [C.c_int.from_address(c[1][1] + EVENT_KEY).value for c in fw.calls('on_wm_keyup_fun')] == [KEY_CENTER]
+
+
+def test_a_lone_centre_on_now_playing_scrubs_unless_chosen_otherwise(fw, keys, st):
+    """Single Press Scrub is on unless chosen off: Centre on Now Playing starts a scrub, never sleeps."""
+    Config(fw)
+    st('settings_read').value = 0
+    ui = Ui(fw)
+    top = ui.window('playing_page')
+    st('np_win', C.c_void_p).value = top.p
+    assert keys(KEY_CENTER) == STOP and not fw.calls('on_wm_keyup_fun')
+    assert not ui.due('navigation__np_single') and not ui.timers  # a scrub at once (np_centre): no double-press wait
 
 
 def test_a_wheel_tick_after_an_overdue_centre_drops_its_click(fw, keys):

@@ -710,10 +710,11 @@ def test_a_fade_keeps_to_the_column_its_styles_margins_leave(fw, st):
 
 @pytest.mark.parametrize('mode, light, names', [
     (0, 0, ['oled_mode_shuffle_d', 'oled_mode_repeat_d']), (1, 0, ['oled_mode_shuffle_d', 'oled_mode_repeat1_on']),
-    (2, 1, ['oled_mode_shuffle_on', 'oled_mode_repeat_l']), (3, 1, ['oled_mode_shuffle_l', 'oled_mode_repeat_on'])])
+    (2, 1, ['oled_mode_shuffle_on', 'oled_mode_repeat_on']), (3, 1, ['oled_mode_shuffle_l', 'oled_mode_repeat_on'])])
 def test_now_playings_modes_are_the_themes_pair_lit_by_stocks_mode(fw, st, mcl, mode, light, names):
     """playing.modes.icons (np_bar.c np_modes): shuffle and repeat 44 px apart about the play mode's target's centre,
-    each the accent's while on (shuffle at MCL_MODE 2, repeat at 3, repeat-once's glyph at 1), else the half's grey."""
+    each the accent's while on (shuffle at MCL_MODE 2, repeat at 3 and at 2, as stock's Shuffle never ends, unless
+    Off was chosen under it; repeat-once's glyph at 1), else the half's grey."""
     ui = Ui(fw)
     theme(fw, OLED)
     st('light').value, mcl.mode = light, mode
@@ -731,6 +732,92 @@ def test_now_playings_modes_are_the_themes_pair_lit_by_stocks_mode(fw, st, mcl, 
     st('theme').value = MINIMAL  # stock's one icon: nothing drawn
     fw.fn('np_modes', None, C.c_void_p, C.c_void_p)(win.addr, C.addressof(raw))
     assert loads == []
+
+
+def test_now_playings_heart_and_more_are_the_themes_glyphs_in_each_half(fw, st):
+    """np_bar.c np_glyphs, on each paint of OLED's Now Playing: stock's play_fav and play_unfav become the theme's full
+    heart and its empty one in the half's ink, an empty heart follows a Light Mode change, an app's heart stays, and
+    More's states take the half's dots (pressed, the dimmer ones) once per half. Minimal keeps stock's."""
+    ui = Ui(fw)
+    theme(fw, OLED)
+    win = ui.window('playing_page')
+    fav = ui.add('image', win, (289, 145, 34, 34), 'img_fav', image='play_unfav')
+    more = ui.add('image', win, (323, 145, 34, 34), 'img_more', **{'style:normal:bg_image': 'play_more'})
+    st('np_win', C.c_void_p).value = win.addr
+    fw.fn('np_glyphs_bind', None, C.c_void_p)(win.addr)
+    glyphs = fw.fn('np_glyphs', None, C.c_void_p)
+    states = ('normal', 'pressed', 'selected', 'disable', 'focused')
+    glyphs(win.addr)
+    assert fav.props['image'] == 'oled_np_unfav_d'
+    assert [more.props[f'style:{s}:bg_image'] for s in states] == ['oled_np_more_d', 'oled_np_moredown_d'] + ['oled_np_more_d'] * 3
+    fav.props['image'] = 'play_fav'  # stock's click
+    glyphs(win.addr)
+    assert fav.props['image'] == 'oled_np_fav'
+    st('light').value = 1
+    glyphs(win.addr)
+    assert fav.props['image'] == 'oled_np_fav' and more.props['style:pressed:bg_image'] == 'oled_np_moredown_l'
+    fav.props['image'] = 'oled_np_unfav_d'
+    glyphs(win.addr)
+    assert fav.props['image'] == 'oled_np_unfav_l' and more.props['style:normal:bg_image'] == 'oled_np_more_l'
+    fav.props['image'] = 'tidal_fav_add'
+    glyphs(win.addr)
+    assert fav.props['image'] == 'tidal_fav_add'
+    st('theme').value, fav.props['image'] = MINIMAL, 'play_unfav'
+    glyphs(win.addr)
+    assert fav.props['image'] == 'play_unfav'
+
+
+class Modes:
+    """OLED's Now Playing on top with the play mode's target at (143, 252, 88, 44): its left half shuffle's, its right
+    repeat's (np_bar.c np_mode_click). config_playmode sets stock's mode as stock's does."""
+    def __init__(self, fw, st, mcl, mode):
+        self.fw, self.mcl = fw, mcl
+        ui = Ui(fw)
+        theme(fw, OLED)
+        mcl.mode = mode
+        self.win = ui.window('playing_page')
+        self.button = ui.add('image', self.win, (143, 252, 88, 44), 'img_playmode')
+        st('np_win', C.c_void_p).value = self.win.addr
+        fw.mock('widget_lookup', lambda w, name, deep, *_: self.button.addr if C.string_at(name) == b'img_playmode' else 0)
+        self.sent = []
+        fw.mock('config_playmode', lambda m, notify, *_: self.sent.append(i32(m)) or setattr(mcl, 'mode', i32(m)) or 0)
+
+    def tap(self, side):
+        event = C.create_string_buffer(0x40)
+        struct.pack_into('<i', event, 0, O['EVT_CLICK'])
+        struct.pack_into('<ii', event, O['EVENT_X'], 160 if side == 'shuffle' else 215, 270)
+        return self.fw.fn('np_mode_click', C.c_int, C.c_void_p, C.c_void_p)(self.button.addr, C.addressof(event))
+
+
+def test_shuffle_and_repeat_are_two_controls_over_stocks_one_mode(fw, st, mcl):
+    m = Modes(fw, st, mcl, 0)  # order: shuffle off, repeat Off
+    assert m.tap('shuffle') == 1 and m.sent == [2]  # shuffle on
+    m.tap('repeat')  # repeat All under shuffle: stock's Shuffle plays on either way, nothing sent
+    assert m.sent == [2] and mcl.mode == 2
+    m.tap('repeat')  # Repeat One
+    assert m.sent == [2, 1]
+    m.tap('shuffle')  # shuffle off under Repeat One: still Repeat One
+    assert m.sent == [2, 1]
+    m.tap('repeat')  # repeat Off, shuffle off: order
+    assert m.sent == [2, 1, 0]
+
+
+def test_each_control_finds_the_other_as_it_was(fw, st, mcl):
+    m = Modes(fw, st, mcl, 3)  # repeat All
+    m.tap('shuffle')
+    m.tap('shuffle')
+    assert m.sent == [2, 3]  # repeat All again, not order
+    m.tap('repeat')  # Repeat One, then shuffle on under it: kept until repeat leaves One
+    m.tap('shuffle')
+    assert m.sent == [2, 3, 1] and mcl.mode == 1
+    m.tap('repeat')  # Off: shuffle comes back
+    assert m.sent == [2, 3, 1, 2]
+
+
+def test_other_themes_keep_stocks_play_mode_tap(fw, st, mcl):
+    m = Modes(fw, st, mcl, 0)
+    st('theme').value = MINIMAL
+    assert m.tap('shuffle') == 0 and m.sent == []
 
 
 @pytest.mark.parametrize('timer, ellipses, faded', [(0, 1, False), (41, 1, True), (0, 0, True)])

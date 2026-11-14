@@ -864,15 +864,15 @@ NP_GRID_POS_PX = 18
 NP_GRID_POS_ASCENT = 14  # Inter's ascent at 18: 0.969 of its 1.21 em line, so its baseline sits on the art's bottom row
 NP_GRID_TIME_PX = 19
 NP_GRID_SECONDARY = '#ABABAB'  # Text Secondary; Light Mode flips it as every grey
-NP_GRID_ICON = 34  # More's and the heart's targets, their stock 50 px images centred in them
-NP_GRID_MORE_INSET = 12  # More's centre from the right column: its three dots end about on it
+NP_GRID_ICON = 34  # More's and the heart's targets, the theme's 20 px glyphs centred in them (np_bar.c np_glyphs)
+NP_GRID_MORE_INSET = 7  # More's centre from the right column: Phosphor's dots-three, 12.5 px of ink, ends on it
 NP_GRID_BAR = 6
 NP_GRID_TOUCH = 22  # the bar's target, short of the heart's above and the times' below
 NP_GRID_SLIDE_GAP = 5
 NP_GRID_TIMES_DY = 22
 NP_GRID_MODES_DY = 48
 NP_GRID_MODES = (88, 44)  # the play mode's target: both glyphs, 44 px apart (np_bar.c NP_MODES_APART)
-NP_GRID_DOTS_DY = 74
+NP_GRID_DOTS_DY = 70  # the page dots centred on y 302 on screen
 NP_GRID_MARGIN = 2  # hscroll_label's own margin each side of its text (stock's margin_left and margin_right)
 
 
@@ -923,7 +923,7 @@ def np_grid(root, named, g, title, artist, album, pos, remain):
     w, h = NP_GRID_MODES
     mode = named['img_playmode']
     mode[1] = [(375 - w) // 2, bar_y + NP_GRID_MODES_DY - h // 2, w, h]
-    mode[2]['opacity'] = '0'  # its target and handler stay; np_bar.c np_modes draws the pair over it
+    mode[2]['opacity'] = '0'  # its target stays, its halves np_bar.c np_mode_click's; np_modes draws the pair over it
     root[3].append(mode)
 
 

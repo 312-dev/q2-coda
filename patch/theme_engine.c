@@ -194,7 +194,9 @@ __attribute__((noinline)) static void settings_read(void) {
     st.keep_lit = config_value("IPOD", "KEEPLIT", 2, 0);
     st.np_centred = config_value("IPOD", "NPCENTRED", 2, 0);
     st.keytone_hp = config_value("IPOD", "KEYTONEHP", 2, 0);
-    st.scrub_single = config_value("IPOD", "SCRUBSINGLE", 2, 0);
+    /* on unless chosen off: Centre on Now Playing scrubs and a double press turns the screen off,
+     * as on the other pages */
+    st.scrub_single = config_value("IPOD", "SCRUBSINGLE", 2, 1);
     st.time_title = config_value("IPOD", "TIMETITLE", 2, 1); /* the clock unless chosen */
     /* the themes' own keys, after the thirteen, in table order */
     for (int k = 0; k < THEME_KEYS; ++k)
@@ -257,6 +259,16 @@ int row_preview_on(void) { return theme_own(OWN_ROWPREVIEW); }
  * SONG_LENGTH_* (navigation.h) in theme.xml's order */
 int song_artist(void) { return theme_own(OWN_SONGARTIST); }
 int song_length(void) { return theme_own(OWN_SONGLENGTH); }
+/* OLED's Track Time (np_bar.c np_sync): 1 when Now Playing's right-hand time is the track's length,
+ * 0 for what is left of it */
+int np_time_total(void) { return theme_own(OWN_NPTIME); }
+/* A tap on that time (np_time_tap): the other one, saved. 0 under a theme without the option. */
+int np_time_toggle(void) {
+    if (!option_of(theme(), SETTING_OWN + OWN_NPTIME)) return 0;
+    st.own[OWN_NPTIME] = !st.own[OWN_NPTIME];
+    write_int_config(st.own[OWN_NPTIME], "IPOD", theme_keys[OWN_NPTIME].key);
+    return 1;
+}
 const char *const np_pages[] = { "playing_page", "playing_page_stock" }; /* [NP_*] */
 _Static_assert(sizeof np_pages / sizeof *np_pages == NP_N, "one page per NP_* layout");
 /* The Now Playing page: the theme's layout, which Centred Now Playing forces to NP_CENTRED. */

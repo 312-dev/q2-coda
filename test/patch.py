@@ -39,7 +39,7 @@ O_GLYPH=re.search(r'#define BT_GLYPH "(\w+)"',INC)[1]  # the plain Bluetooth gly
 CONFIG={}  # config.ini [IPOD] keys a new Machine starts with; the payload reads them on first use
 # Minimal's look the pixel checks were drawn under, read for a missing key: Ivory, square (the defaults are its
 # preset's, Graphite and round)
-SEED={'MINIMAL_ACCENT':'7','ROUNDED':'0'}
+SEED={'MINIMAL_ACCENT':'7','ROUNDED':'0','SCRUBSINGLE':'0'}  # and Single Press Scrub off, the press the scrub checks were written for
 SETUP=[]  # functions a new Machine runs before anything can read config (QueueMachine's constructor does)
 FILL,RADIUS=(0x40<<24)|O['FILL_RGB'],9  # the stock rounded-rect checks' translucent fill and radius
 LCD_COLORS=(0x9abcdef0,0x12345678)
@@ -8390,21 +8390,18 @@ for presses in (1,2):
     if presses==2: assert step(m,O['KEY_CENTER'],gap=100)==11
     step(m,DC+O['SCRUB_MS'],wait=True); assert not m.screens and m.u.mem_read(syms['g_backlight_status'],1)[0]
     ended(m,[105],presses); passed()
-# Single Press Scrub (IPOD SCRUBSINGLE=1) swaps them: a single press starts the scrub DOUBLE_CLICK_MS
-# later, a double press turns the screen off as on the lists. One press still ends a scrub, and a press
-# after an overdue first ends the scrub that first one started instead of reaching stock.
+# Single Press Scrub (IPOD SCRUBSINGLE=1), the Centre cycle (np_centre): a press starts the scrub at
+# once and the next ends it (the theme here has no shuffle and repeat pair, so the rating picker is
+# next); a quick second press ends the scrub rather than turning the screen off, which a short hold
+# does (no key-down stamp here: a press).
 CONFIG['SCRUBSINGLE']='1'
 m=scrub_page()
-assert m.call(O['KEY_CENTER'])==11; m.advance(DC-1,clear=False); assert not did(m,'playing_timer_clear')
-m.advance(1,clear=False); assert did(m,'playing_timer_clear')==[m.win] and m.nodes[m.slider][FG]==-1 and not m.screens
+assert m.call(O['KEY_CENTER'])==11 and did(m,'playing_timer_clear')==[m.win] and m.nodes[m.slider][FG]==-1 and not m.screens
 keep(m); assert step(m)==11 and m.nodes[m.slider]['value']==105
 assert step(m,O['KEY_CENTER'])==11 and m.seeks==[105]
 step(m,DC+O['SCRUB_MS'],wait=True); assert not m.screens; ended(m,[105]); passed()
 m=scrub_page()
-assert m.call(O['KEY_CENTER'])==11 and m.call(O['KEY_CENTER'],gap=100,clear=False)==11 and m.screens==[0]
-m.advance(DC,clear=False); assert m.screens==[0] and not did(m,'playing_timer_clear') and not m.timers; passed()
-m=scrub_page(); assert m.call(O['KEY_CENTER'])==11; m.now+=DC+1
-assert m.call(O['KEY_CENTER'],gap=0,clear=False)==11 and did(m,'playing_timer_clear')==[m.win] and not m.screens
+assert m.call(O['KEY_CENTER'])==11 and m.call(O['KEY_CENTER'],gap=100,clear=False)==11 and not m.screens
 keep(m); ended(m,[]); passed()
 del CONFIG['SCRUBSINGLE']
 # Centre over the volume's band on Now Playing is Now Playing's either way: starting the scrub closes
@@ -8423,20 +8420,16 @@ for one in (1,0):
     CONFIG.pop('SCRUBSINGLE',None)
 m=scrub_page(); vol_up(m); assert m.call(O['KEY_CENTER'])==11 and not m.screens
 m.advance(DC,clear=False); assert m.screens==[0] and not did(m,'window_close'); passed()
-# A tick between the press and its DOUBLE_CLICK_MS stays the volume's and keeps the press, as on the
-# bare page: the scrub still starts (closing the dialog) or the screen still turns off.
-for one in (1,0):
-    if one: CONFIG['SCRUBSINGLE']='1'
-    m=scrub_page(); vol_up(m); assert m.call(O['KEY_CENTER'])==11 and m.call(gap=100,clear=False)==0
-    m.advance(DC,clear=False)
-    if one: assert did(m,'window_close')==[m.dlg] and did(m,'playing_timer_clear')==[m.win] and not m.screens
-    else: assert m.screens==[0] and not did(m,'window_close')
-    passed(); CONFIG.pop('SCRUBSINGLE',None)
-# With Single Press Scrub a double press over the band turns the screen off and leaves the dialog.
+# Without Single Press Scrub a tick between the press and its DOUBLE_CLICK_MS stays the volume's and
+# keeps the press, as on the bare page: the screen still turns off. (With it nothing waits.)
+m=scrub_page(); vol_up(m); assert m.call(O['KEY_CENTER'])==11 and m.call(gap=100,clear=False)==0
+m.advance(DC,clear=False); assert m.screens==[0] and not did(m,'window_close'); passed()
+# With Single Press Scrub a quick second press over the band ends the scrub the first started (which
+# closed the dialog); the screen stays on.
 CONFIG['SCRUBSINGLE']='1'
 m=scrub_page(); vol_up(m)
-assert m.call(O['KEY_CENTER'])==11 and m.call(O['KEY_CENTER'],gap=100,clear=False)==11 and m.screens==[0]
-m.advance(DC,clear=False); assert m.screens==[0] and not did(m,'window_close') and not did(m,'playing_timer_clear'); passed()
+assert m.call(O['KEY_CENTER'])==11 and m.call(O['KEY_CENTER'],gap=100,clear=False)==11 and not m.screens
+m.advance(DC,clear=False); assert not m.screens and did(m,'window_close')==[m.dlg]; passed()
 del CONFIG['SCRUBSINGLE']
 # Not directly over Now Playing (the panel), Centre is stock's at once and nothing closes.
 m=scrub_page(); vol_up(m); other=m.node('window','home_page'); m.word(other+O['W_PARENT'],m.wm)
@@ -11583,7 +11576,7 @@ passed()
 
 m=Machine(); style_color(m,red)
 # config_value passes its default in decimal: SHORTCUT's SETTING_N_SHORTCUT (12) is out of range, so no shortcut
-assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY','THEME')]+[('/mnt/data/config.ini','IPOD','SHORTCUT','12'),('/mnt/data/config.ini','IPOD','MINIMAL_ACCENT','0'),('/mnt/data/config.ini','IPOD','ROUNDED','1'),('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','0'),('/mnt/data/config.ini','IPOD','NPCENTRED','0'),('/mnt/data/config.ini','IPOD','KEYTONEHP','0'),('/mnt/data/config.ini','IPOD','SCRUBSINGLE','0'),('/mnt/data/config.ini','IPOD','TIMETITLE','1')]+[('/mnt/data/config.ini','IPOD',key,str(d)) for key,(_,d,_) in theme_keys(theme_builtins()).items()]; passed()  # the themes' own, in table order
+assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY','THEME')]+[('/mnt/data/config.ini','IPOD','SHORTCUT','12'),('/mnt/data/config.ini','IPOD','MINIMAL_ACCENT','0'),('/mnt/data/config.ini','IPOD','ROUNDED','1'),('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','0'),('/mnt/data/config.ini','IPOD','NPCENTRED','0'),('/mnt/data/config.ini','IPOD','KEYTONEHP','0'),('/mnt/data/config.ini','IPOD','SCRUBSINGLE','1'),('/mnt/data/config.ini','IPOD','TIMETITLE','1')]+[('/mnt/data/config.ini','IPOD',key,str(d)) for key,(_,d,_) in theme_keys(theme_builtins()).items()]; passed()  # the themes' own, in table order
 # theme()/scheme(): the active built-in and its scheme, settings read on first use. THEME out of
 # range is Minimal; Classic's stored Ivory and an out-of-range CLASSIC_LIGHT_ACCENT are Classic Blue, on Cobalt's
 # tones; Modern's stored Ivory and an out-of-range ACCENT are Graphite's scheme; a missing MINIMAL_ACCENT is Graphite, a stored Ivory
@@ -12006,7 +11999,7 @@ f,ctx=m.handler(m.nodes[time_title]['children'][0],O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and not did(m,'image_manager_unload_all')
 assert [(c[1],m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='write_int_config']==[(0,'IPOD','TIMETITLE')]
 m.call(address=f,args=(ctx,m.event,0,0),gap=0)
-# Single Press Scrub (IPOD SCRUBSINGLE): a switch, off unless chosen, that only saves.
+# Single Press Scrub (IPOD SCRUBSINGLE): a switch, on unless chosen off (SEED reads it off here), that only saves.
 one_label=m.nodes[m.nodes[scrub_one]['children'][0]]['children'][1]; assert m.nodes[one_label]['text']=='Single Press Scrub'
 f,ctx=m.handler(m.nodes[scrub_one]['children'][0],O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and not did(m,'image_manager_unload_all')

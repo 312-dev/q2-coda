@@ -245,7 +245,7 @@ clock.
 | Track position | 192, baseline 208              | "1 of 10", 15 px, Text Secondary, baseline level with the art's bottom                     |
 | Progress bar   | 24 to 347, y 228, 6 px         | Track `#333333`, fill Accent Blue, round ends                                              |
 | Elapsed        | left on 24, centred on y 250   | 16 px, Text Primary, tabular                                                               |
-| Remaining      | right on 347, centred on y 250 | 16 px, Text Primary, with a leading minus                                                  |
+| Remaining      | right on 347, centred on y 250 | 16 px, Text Primary, with a leading minus; a tap shows the length instead (Track Time)     |
 | State row      | centred on y 276, 44 px apart  | Phosphor `shuffle` and `repeat`, bold, 22 px: Accent Blue when on, Text Secondary when off |
 
 No page title, no background art blur, no reflection.
@@ -256,12 +256,16 @@ The album is one line that scrolls, as the title and artist do, rather than two.
 has no place for keeps a place of its own:
 
 - **More and the heart** stand at the right end of "1 of 10"'s line, on the art's page, so a swipe
-  takes them away with it.
+  takes them away with it: Phosphor `dots-three` and `heart` (regular, 20 px, Text Primary;
+  More pressed in Text Secondary), the dots' ink ending on the right column, the heart `fill` in
+  Accent Blue while the song is a favourite.
 - **The page dots** sit under shuffle and repeat, centred on y 302; the lyrics, the track's details
   and the visualizer are still the swipe's other pages, each ending 5 px above the bar.
-- **Shuffle and repeat** are one target, stock's play mode button: a tap steps Order, Repeat One,
-  Shuffle, Repeat All as before, and the glyphs show the mode (repeat-once's glyph for Repeat One).
-- **The volume** and the scrub draw on the bar where it is. The A-B markers follow the bar
+- **Shuffle and repeat** are two controls on stock's play mode button: a tap on shuffle turns it
+  on or off, a tap on repeat steps Off, All, One (repeat-once's glyph for One), and each keeps the
+  other as it was. Stock's Shuffle never ends, so shuffle with repeat Off plays on as with All.
+- **The volume** and the scrub draw on the bar where it is: "Volume 66" under it in 15 px Text
+  Secondary, and the scrub as a 14 px white knob on the fill's end. The A-B markers follow the bar
   across but keep stock's row, y 308 on screen, under the page dots. ponytail: a marker within
   about 14 px of either end of the bar falls under the bottom corners' glass; moving them onto
   the bar needs the y that stock's placement (`0x53baa4`) writes made per set.
@@ -318,9 +322,10 @@ playlist's More are stock pages, which such a set loads as dialogs (`tools/ipod.
 - One set: [Phosphor Icons](https://phosphoricons.com) (MIT), `@phosphor-icons/core` 2.1.1. The
   SVGs the theme uses are vendored in `assets/icons/phosphor/` with their licence, and
   `tools/art.py` draws the theme's bitmaps from them at build time, in final colours per half.
-- Weights by role: `fill` for the play state, `bold` for chevrons and Now Playing's and the
-  confirmation's shuffle and repeat. Sizes are the design's: 13 px play state, 15 px chevron,
-  22 px state row, 56 px confirmation.
+- Weights by role: `fill` for the play state and a favourite's heart, `bold` for chevrons and Now
+  Playing's and the confirmation's shuffle and repeat, `regular` for row symbols and Now Playing's
+  heart and More. Sizes are the design's: 13 px play state, 15 px chevron, 20 px row symbols,
+  heart and More, 22 px state row, 56 px confirmation.
 - No coloured app tiles: the concept's tinted "For You" squares are for content the Q2 does
   not have.
 
@@ -335,6 +340,11 @@ playlist's More are stock pages, which such a set loads as dialogs (`tools/ipod.
   and its left end while it is scrolled away from its start, so it rests crisp; each goes from
   clear to the colour behind the text (the Canvas, or Accent Blue on the selection). A truncated
   text that is not scrolling keeps its ellipsis (`list.marquee.fade`).
+- **Now Playing's lines** move as one marquee: the title, artist and album that overflow hold at
+  rest 2.75 s, slide left together at 35 px a second (the longest line's pace; the others take the
+  same time), and land back at rest together, each followed by its own copy 40 px behind, so
+  nothing snaps back. The progress bar's fill moves a pixel at a time between the player's
+  seconds rather than a second's width at once.
 
 ## Screens
 
@@ -400,8 +410,9 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   as the Shuffle row (`list.shuffle.row`); a list left by Return opening at its top when chosen
   again (`list.reopen.top`, which Minimal sets for every theme).
 - Now Playing on the set's grid (`np_art`, `np_bar_y`), its art's corners (`playing.art.radius`), its
-  artist and album in Inter (`playing.artist.font`), shuffle and repeat as the theme's own glyphs
-  (`playing.modes.icons`), and the marquee fades (`list.marquee.fade`).
+  artist and album in Inter (`playing.artist.font`), shuffle and repeat, the heart and More as the theme's
+  own glyphs (`playing.modes.icons`), the marquee fades (`list.marquee.fade`), and Track Time (`NPTIME`), whose
+  tap on the right-hand time shows the length or the time left.
 - Menus as the inset modal over the page ([Menus](#menus)): the set's `modal`, `patch/menu_modal.c`, the
   Phosphor symbols as the theme's own art.
 - Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_still` (the art from
