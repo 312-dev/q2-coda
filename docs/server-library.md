@@ -175,7 +175,7 @@ playlists.
 | Setting: `[Q2POD] LIBRARYSOURCE`, 0 Local Only (default) or 1 Local + Server, a row on Display > Cover Flow | `navigation.c` (`pod_keys` and the rows' tables beside it) | yes |
 | Ratings: `ratings.out` appended for every app with `ratings=1`; `ratings.in` renamed to `ratings.in.taking`, applied, then deleted | `catalogue.c`, `ratings.c` (three calls) | yes |
 
-The server library adds 40,160 bytes to the payload: `patch_bytes` is 861,064 of the 1 MB in this branch's `--dev` build against 820,904 at the commit it branched from, `catalogue.o` being 37,531 bytes of text and 944 of data (`llvm-size`). All catalogue data lives on the heap or the card.
+The server library adds 43,600 bytes to the payload: `patch_bytes` is 864,504 of the 1 MB in this branch's `--dev` build against 820,904 at the commit it branched from, `catalogue.o` being 39,870 bytes of text and 1,236 of data (`llvm-size`). All catalogue data lives on the heap or the card.
 
 ### Greyed rows
 
@@ -221,7 +221,7 @@ its 20,000-song cap; `catalogue.avail` when the Stream Cache changes; `server=up
 firmware does not wait on them.
 
 **Covers** (`covers/`, above): the app fetches them with `getCoverArt` (`id` the album id,
-`size=160`), two at a time, while the Q2 is idle or charging and the server answers, for at most
+`size=160`), two at a time, while no sync runs and the stream has no song still to fetch (a list playing what it already fetched, or from the Stream Cache, does not stop it) or the Q2 charges, and the server answers, for at most
 30 s a minute, through the network slot syncs and streams take first; a stopped round goes on at
 the next. The folder holds at most 256 MB, each file counted as whole clusters of the card (about
 8,000 albums with 32 KB clusters, 2,000 with 128 KB), and no cover is written while the card has
@@ -315,6 +315,8 @@ files listed again, which the size layer hides):
 | 100 | 1.0 s | 0.1 MB | under 0.5 s (124 songs) |
 | 10,000 | 1.8 s | 4.8 MB | not measured |
 | 50,000 | 9.8 s | 24.7 MB | about 0.5 s (50,024 songs) |
+
+Cover Flow, Local + Server, with the developer's Navidrome (9,199 songs, 6,175 albums with the card's): a cold open (the albums queried and split, art jobs listed) took 878 ms, of which `getAllAlbum` 524 ms, and building 6,169 albums' art from the app's covers about 20 s (some 330 a second) on the first open only; Local Only, with the card's 5 albums, opens in tens of milliseconds.
 
 demo's process (QEMU included) held 70 MB after boot and 96 MB after browsing the 50,000-song
 Library; a Q2 has 128 MB, so this wants checking on a device. Every job copies the whole file
