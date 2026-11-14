@@ -39,6 +39,8 @@ SOURCES = {
              '02dd159783677a749c04adbdd02b55b8a2bcc7e054f51b76b549199a916ad584'),
     'sqlite': ('3.54.1', 'https://www.sqlite.org/2026/sqlite-autoconf-3540100.tar.gz',
                '926ef8d3eab93fbf6e06011901273eec076b25594a4e1cdadd50c987f4f6d64e'),
+    'libpng': ('1.2.59', 'https://download.sourceforge.net/libpng/libpng-1.2.59.tar.xz',
+               'b4635f15b8adccc8ad0934eea485ef59cc4cae24d0f0300a9a941e51974ffcc7'),
 }
 
 
@@ -182,9 +184,14 @@ def build_sqlite(src, stage, env, log):
               '--disable-readline', '--disable-static-shell')
 
 
+def build_libpng(src, stage, env, log):
+    autotools(src, stage, env, log)
+
+
 RECIPES = {'openssl': (build_openssl, []),
            'zlib': (build_zlib, []),
-           'sqlite': (build_sqlite, [])}
+           'sqlite': (build_sqlite, []),
+           'libpng': (build_libpng, ['zlib'])}
 
 
 # Each top-level function's and class's text as this module was imported (inspect.getsource rereads
@@ -355,6 +362,7 @@ INSTALL = {
                 **{f'usr/lib/engines-1.1/{e}.so': f'usr/lib/engines-1.1/{e}.so' for e in ('afalg', 'capi', 'padlock')}},
     'zlib': {'usr/lib/libz.so.1.2.11': 'usr/lib/libz.so.1.4'},
     'sqlite': {'usr/lib/libsqlite3.so.0.8.6': 'usr/lib/libsqlite3.so.3.54.1'},
+    'libpng': {'usr/lib/libpng12.so.0.37.0': 'usr/lib/libpng12.so.0.59.0'},
 }
 
 
