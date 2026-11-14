@@ -418,10 +418,10 @@ void np_mode_set(int on, int rep) {
     void *mode = st.np_win ? widget_lookup(st.np_win, "img_playmode", 1) : (void *)0;
     if (mode) widget_invalidate_force(mode, (void *)0);
 }
-/* A step of one control: shuffle (repeat 0) on or off, or repeat Off, All, One. */
-void np_mode_step(int repeat) {
+/* A step of one control: shuffle (repeat 0) on or off, or repeat Off, All, One (dir 1) or back. */
+void np_mode_step(int repeat, int dir) {
     int m = *(volatile int *)MCL_MODE, on = np_shuffle_on(m), rep = np_repeat_of(m);
-    np_mode_set(repeat ? on : !on, repeat ? (rep + 1) % 3 : rep);
+    np_mode_set(repeat ? on : !on, repeat ? (rep + (dir < 0 ? 2 : 1)) % 3 : rep);
 }
 /* A tap on the play mode's target under the theme's pair: its left half is shuffle's, its right
  * repeat's, instead of stock's step through the one mode. 1 when it took the tap. */
@@ -431,15 +431,18 @@ int np_mode_click(void *target, void *event) {
         return 0;
     int x = I(event, EVENT_X);
     for (void *p = target; p && p != window_manager(); p = P(p, W_PARENT)) x -= I(p, W_X);
-    np_mode_step(x >= I(target, W_W) / 2);
+    np_mode_step(x >= I(target, W_W) / 2, 1);
     return 1;
 }
 
 /* playing.modes.icons: the pair (docs/oled-design.md#now-playing), NP_MODES_APART apart about the
  * centre of the play mode's target (tools/ipod.py np_grid), which keeps stock's image under
  * opacity 0 and np_mode_click's halves. Each glyph is the accent's while on, else the half's grey
- * (tools/art.py mode_*); Repeat One has its own glyph. */
+ * (tools/art.py mode_*); Repeat One has its own glyph. The one the Centre cycle's wheel sets
+ * (np_stage) stands in a Text Primary ring, rounded as the selection bar. */
 #define NP_MODES_APART 44
+#define NP_RING_W 38 /* the ring round the glyph the Centre cycle's wheel sets, 2 px wide */
+#define NP_RING_H 34
 void np_modes(void *win, void *canvas) {
     void *mode = theme()->np_modes && P(canvas, CANVAS_LCD) ? widget_lookup(win, "img_playmode", 0)
                                                             : (void *)0;
@@ -454,7 +457,17 @@ void np_modes(void *win, void *canvas) {
                 rep == NP_REPEAT_ONE   ? "1_on"
                 : rep == NP_REPEAT_ALL ? "_on"
                                        : off);
-    for (int i = 0; i < 2; ++i)
+    for (int i = 0; i < 2; ++i) {
+        int x = cx + (2 * i - 1) * NP_MODES_APART / 2;
+        if (st.np_stage == (unsigned)(NP_STAGE_SHUFFLE + i)) { /* the wheel's: a ring round it */
+            rect_t ring = { x - NP_RING_W / 2, cy - NP_RING_H / 2, NP_RING_W, NP_RING_H },
+                   in = { ring.x + 2, ring.y + 2, NP_RING_W - 4, NP_RING_H - 4 };
+            unsigned saved = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+            fill_box(canvas, &ring, ui_ink(RGBA(0xffffff)), 8);
+            fill_box(canvas, &in, ui_ink(RGBA(0)), 6);
+            stock_canvas_set_fill_color(canvas, saved);
+        }
         if (!widget_load_image(win, theme_art(name[i]), bitmap))
-            canvas_draw_icon(canvas, bitmap, cx + (2 * i - 1) * NP_MODES_APART / 2, cy);
+            canvas_draw_icon(canvas, bitmap, x, cy);
+    }
 }

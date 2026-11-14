@@ -1521,27 +1521,75 @@ def test_a_single_press_turns_the_screen_off_as_stocks_release(fw, ui, now):
     assert releases == [KEY_CENTER]  # dark: nothing to turn off
 
 
-def test_single_press_scrub_swaps_the_presses(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC, SCRUBSINGLE=1)
+# Single Press Scrub (on unless chosen off): Centre cycles the controls the wheel sets, as an iPod classic's: scrubber,
+# shuffle, repeat, rating, rest. A short hold turns the screen off.
+NP_HOLD_MS, NP_STAGE_MS = (int(re.findall(rf'#define {n} (\w+)', NAVIGATION_SOURCE)[0].replace('SCRUB_MS', str(O['SCRUB_MS'])))
+                           for n in ('NP_HOLD_MS', 'NP_STAGE_MS'))
+REST, SHUFFLE, REPEAT = range(3)
+
+
+def cpress(now, at, held=60):
+    """Centre down at - held, up at at"""
+    now.st.center_down_at = at - held
+    return press(now, at)
+
+
+def test_centre_cycles_scrubber_shuffle_repeat_and_rating(fw, ui, mcl, st):
+    theme(fw, st, OLED, SCRUBSINGLE=1)
+    releases, modes = [], []
+    fw.mock('on_wm_keyup_fun', lambda w, event, *_: releases.append(1))
+    fw.mock('config_playmode', lambda m, notify, *_: modes.append(m) or setattr(mcl, 'mode', m) or 0)
+    now = Now(fw, ui, mcl, st)
+    mcl.mode = 0
+    assert cpress(now, 200000) == STOP and st.scrub == 1 and not ui.due('np_single')  # at once: no double-press wait
+    cpress(now, 200500)  # the scrub ends, shuffle's turn
+    assert st.scrub == 0 and st.np_stage == SHUFFLE
+    assert now.key(KEY_NEXT) == STOP and modes == [2]  # the wheel turns shuffle on
+    cpress(now, 201000)
+    assert st.np_stage == REPEAT
+    now.key(KEY_NEXT)  # repeat All under shuffle: the mode stays Shuffle
+    now.key(KEY_NEXT)  # Repeat One
+    assert modes == [2, 1]
+    now.key(KEY_PREV)  # back to All
+    assert modes == [2, 1, 2]
+    cpress(now, 201500)  # the rating picker's turn: the cycle rests behind it
+    assert st.np_stage == REST and releases == []
+
+
+def test_a_stage_ends_by_itself_and_return_ends_it(fw, ui, mcl, st):
+    theme(fw, st, OLED, SCRUBSINGLE=1)
+    now = Now(fw, ui, mcl, st)
+    cpress(now, 200000)
+    cpress(now, 200500)
+    assert st.np_stage == SHUFFLE
+    (t,) = ui.due('np_stage_end')
+    assert ui.timers[t][2] == NP_STAGE_MS
+    ui.run(t)
+    assert st.np_stage == REST
+    cpress(now, 210000)
+    cpress(now, 210500)
+    fw.fn('navigation__np_cancel', None)()  # Return, a touch, another window
+    assert st.np_stage == REST and not ui.due('np_stage_end')
+
+
+def test_a_short_hold_turns_the_screen_off(fw, ui, mcl, st):
+    theme(fw, st, OLED, SCRUBSINGLE=1)
     releases = []
     fw.mock('on_wm_keyup_fun', lambda w, event, *_: releases.append(1))
     now = Now(fw, ui, mcl, st)
-    press(now, 200000)
-    ui.run(ui.due('np_scrub')[0])
-    assert st.scrub == 1 and releases == []
-    press(now, 200500)  # one press ends it
-    assert st.scrub == 0
-    press(now, 201000)
-    press(now, 201100)  # a double press: the screen off
-    assert releases == [1] and st.scrub == 0
+    assert cpress(now, 200000, held=NP_HOLD_MS) == STOP and releases == [1] and st.scrub == 0
+    cpress(now, 201000, held=NP_HOLD_MS - 50)  # shorter: a press
+    assert st.scrub == 1 and releases == [1]
+    cpress(now, 201500, held=NP_HOLD_MS)  # held while scrubbing: the scrub ends, the screen stays on
+    assert st.scrub == 0 and releases == [1]
 
 
-def test_single_press_scrubs_overdue_press_starts_and_ends_one(fw, ui, mcl, st):
+def test_a_theme_without_the_pair_skips_shuffle_and_repeat(fw, ui, mcl, st):
     theme(fw, st, CLASSIC, SCRUBSINGLE=1)
     now = Now(fw, ui, mcl, st)
-    press(now, 200000)
-    assert press(now, 200400) == STOP  # its timer not yet run: the single now, and this press ends it
-    assert st.scrub == 0 and now.seeks() == [] and len(fw.calls('playing_timer_clear')) == 1
+    cpress(now, 200000)
+    cpress(now, 200500)
+    assert st.scrub == 0 and st.np_stage == REST
 
 
 def test_a_scrub_closes_the_volume_band_over_the_page_first(fw, ui, now, st):

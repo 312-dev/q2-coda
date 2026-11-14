@@ -266,6 +266,9 @@ typedef struct {
     /* Scrub: a centre press at np_press_at waits DOUBLE_CLICK_MS in np_press for a second one;
      * scrub_to is the target second, scrub_moved set once the wheel changed it. */
     unsigned np_press, np_press_at, scrub_timer, scrub_track, settle_timer;
+    /* Now Playing's Centre cycle (np_centre): its stage (NP_STAGE_*), the stage's timeout, and when
+     * Centre last went down (ringnav_keydown), which tells a short hold from a press */
+    unsigned np_stage, np_stage_timer, center_down_at;
     int scrub, scrub_to, scrub_moved, settle_played;
     int held_sec; /* a paused seek to scrub_to on scrub_track: the player's second then, +1; 0 none
                    */
@@ -484,7 +487,10 @@ int song_artist(void), song_length(void);
 int np_time_total(void), np_time_toggle(void);
 int np_time_tap(void *ctx, void *event);
 /* np_bar.c: Now Playing's shuffle and repeat as two controls */
-void np_mode_set(int on, int rep), np_mode_step(int repeat);
+void np_mode_set(int on, int rep), np_mode_step(int repeat, int dir);
+/* Now Playing's Centre cycle: at rest (the wheel is the volume's), the scrubber, shuffle, repeat
+ * and the rating picker (navigation.c np_centre; np_bar.c np_modes marks shuffle's and repeat's) */
+enum { NP_STAGE_REST, NP_STAGE_SHUFFLE, NP_STAGE_REPEAT };
 int np_mode_click(void *target, void *event);
 int song_list(void *w);
 int song_fit(int place, int room, int title, int gap, int artist, int *shown);

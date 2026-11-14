@@ -4808,9 +4808,11 @@ static int np_lyrics(unsigned key) {
     return 1;
 }
 
+static void np_stage(unsigned stage);
 static void np_cancel(void) {
     unsigned settle = st.settle_timer; /* an earlier scrub's wait; the one scrub_end arms stays */
     stop_timer(&st.np_press);
+    np_stage(NP_STAGE_REST);
     scrub_end();
     if (!settle) return;
     stop_timer(&st.settle_timer);
@@ -4818,8 +4820,8 @@ static void np_cancel(void) {
 }
 
 /* A single centre press, DOUBLE_CLICK_MS on, never while scrubbing (with Single Press Scrub, a
- * double press): it replays the release to stock on_wm_keyup_fun, which turns the screen off (it
- * reads only the event's key). */
+ * short hold, np_centre): it replays the release to stock on_wm_keyup_fun, which turns the screen
+ * off (it reads only the event's key). */
 static int np_single(const void *info) {
     static const unsigned release[EVENT_KEY / 4 + 1] = { [EVENT_KEY / 4] = KEY_CENTER };
     st.np_press = 0;
@@ -4861,34 +4863,80 @@ static void scrub_start(void) {
     rearm(&st.scrub_timer, scrub_expire, SCRUB_MS);
 }
 
-/* Single Press Scrub (IPOD SCRUBSINGLE)'s single press, DOUBLE_CLICK_MS on: scrub starts. */
-static int np_scrub(const void *info) {
-    st.np_press = 0;
-    if (g_backlight_status) scrub_start();
+/* The Centre cycle's shuffle or repeat stage (NP_STAGE_*), or rest: np_modes rings the control
+ * the wheel sets, and NP_STAGE_MS without a key ends it. */
+#define NP_STAGE_MS SCRUB_MS
+static int np_stage_end(const void *info) {
+    st.np_stage_timer = 0;
+    np_stage(NP_STAGE_REST);
     return 0;
 }
+static void np_stage(unsigned stage) {
+    if (stage != NP_STAGE_REST)
+        rearm(&st.np_stage_timer, np_stage_end, NP_STAGE_MS);
+    else
+        stop_timer(&st.np_stage_timer);
+    if (st.np_stage == stage) return;
+    st.np_stage = stage;
+    void *mode = st.np_win ? widget_lookup(st.np_win, "img_playmode", 1) : (void *)0;
+    if (mode) widget_invalidate_force(mode, (void *)0);
+}
 
-/* Centre and, while scrubbing, the wheel on the top Now Playing page. A centre press waits
- * DOUBLE_CLICK_MS: a second one starts scrub, else it turns the screen off as anywhere else; with
- * Single Press Scrub the two swap, so a double press turns the screen off as on the lists. While
- * scrubbing one press ends it at once (center_press). The wheel moves the target SCRUB_STEP
- * seconds times the WHEEL_RAMP_MS ramp, within the track, and only previews it: the seek waits
- * for the scrub to end. Neither the volume nor its dialog sees the wheel. */
+/* Single Press Scrub's Centre (IPOD SCRUBSINGLE, on unless chosen off), an iPod classic's: each
+ * press shows the next control the wheel sets, scrubber, shuffle, repeat, rating, then back to
+ * rest, where the wheel is the volume's (Apple's iPod classic guide: scrubber, Genius, shuffle,
+ * rating, lyrics). The scrub's own press ends it (scrub_end seeks) and goes on to shuffle; the
+ * rating picker's Centre saves and closes it (rate_key), back at rest. Shuffle and repeat have
+ * no picker of their own: the theme's pair rings the one the wheel steps (np_modes); under a
+ * theme without the pair the cycle skips them. A press held NP_HOLD_MS or longer, short of
+ * stock's long press (Shut Down), turns the screen off instead, as stock's release does. */
+#define NP_HOLD_MS 400
+static int np_centre(unsigned now) {
+    int held = st.center_down_at && now - st.center_down_at >= NP_HOLD_MS;
+    st.center_down_at = 0; /* this press's: a release with no press stamped is a press */
+    if (held && !st.scrub) {
+        np_cancel();
+        np_single((void *)0);
+        return STOP;
+    }
+    if (st.scrub) {
+        scrub_end();
+        if (theme()->np_modes)
+            np_stage(NP_STAGE_SHUFFLE);
+        else if (!rate_open())
+            np_stage(NP_STAGE_REST);
+    } else if (st.np_stage == NP_STAGE_SHUFFLE)
+        np_stage(NP_STAGE_REPEAT);
+    else if (st.np_stage == NP_STAGE_REPEAT) {
+        np_stage(NP_STAGE_REST);
+        rate_open();
+    } else
+        scrub_start();
+    return STOP;
+}
+
+/* Centre and, while scrubbing or in the Centre cycle, the wheel on the top Now Playing page. With
+ * Single Press Scrub, np_centre. Without, a centre press waits DOUBLE_CLICK_MS: a second one
+ * starts scrub, else it turns the screen off as anywhere else; while scrubbing one press ends it
+ * at once (center_press). While scrubbing the wheel moves the target SCRUB_STEP seconds times the
+ * WHEEL_RAMP_MS ramp, within the track, and only previews it: the seek waits for the scrub to
+ * end. In the cycle's shuffle or repeat stage a tick steps that control. Neither the volume nor
+ * its dialog sees the wheel. */
 static int np_key(void *top, unsigned key) {
     unsigned now = (unsigned)time_now_ms();
     if (key == KEY_CENTER) {
-        int one = (accent(), st.scrub_single);
-        int press =
-            center_press(&st.np_press, &st.np_press_at, one ? np_scrub : np_single, st.scrub);
-        if (one && !press) /* an overdue single press just started a scrub: this one ends it */
-            press = 2, st.np_press_at = now;
+        if ((accent(), st.scrub_single)) return np_centre(now);
+        int press = center_press(&st.np_press, &st.np_press_at, np_single, st.scrub);
         if (press != 2) return press ? STOP : 0;
         if (st.scrub) /* one press ends a scrub */
             scrub_end();
-        else if (one)
-            np_single((void *)0);
         else
             scrub_start();
+        return STOP;
+    }
+    if (st.np_stage != NP_STAGE_REST && !st.scrub) {
+        np_mode_step(st.np_stage == NP_STAGE_REPEAT, key == KEY_NEXT ? 1 : -1);
+        np_stage(st.np_stage); /* its timeout from this tick */
         return STOP;
     }
     if (np_track() != st.scrub_track) { /* a new track: scrub_end drops the last one's target */
@@ -10652,6 +10700,7 @@ int ringnav_keydown(void *ctx, void *event) {
     unsigned key = event ? (unsigned)I(event, EVENT_KEY) : 0;
     if (ple_key(key, 1)) return STOP;
     void *top = window_manager_get_top_window(window_manager());
+    if (key == KEY_CENTER) st.center_down_at = (unsigned)time_now_ms() | 1; /* np_centre's hold */
     unsigned char tone = g_keytone_flag;
     void *row = (void *)0;
     entries_t s = { &row, 0, 1, 4096 };
@@ -11349,7 +11398,8 @@ int ringnav(void *ctx, void *event) {
         if (slider) widget_set_prop_int(slider, "value", g_volume);
         return STOP;
     }
-    if (key == KEY_RETURN && st.scrub) { /* ends the scrub without leaving the page */
+    if (key == KEY_RETURN && (st.scrub || st.np_stage)) { /* ends the scrub or the cycle's stage
+                                                            without leaving the page */
         np_cancel();
         if (window_manager_get_top_window(window_manager()) == st.np_win) return STOP;
     }
@@ -11440,7 +11490,7 @@ int ringnav(void *ctx, void *event) {
         np_cancel();
     else if (key != KEY_CENTER && np_lyrics(key))
         return STOP;
-    else if (key == KEY_CENTER || st.scrub)
+    else if (key == KEY_CENTER || st.scrub || st.np_stage)
         return np_key(st.np_win, key);
     /* A keyboard (T9's, every text box's) on top takes Centre as a listed page does: a single press
      * does nothing, a double turns the screen off; stock turned it off on each one (#365). Its

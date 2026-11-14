@@ -640,18 +640,23 @@ once that is another track's (Tidal's URL never is a queue path, so its art stay
 `default_bigcover` placeholder is the square. A layout back to the square refits from the kept shape. Its song name and the shade band behind it sit on the art's foot, show for `BC_MS` (3 s), then fade out together over `BC_STEPS` steps
 `BC_STEP_MS` apart (`ringnav_bigcover`, after stock's init). They show again for each new song while it is open.
 
-**Scrub.** A double press of the centre button starts scrubbing, as on an iPod classic (with the screen off it only
+**Scrub.** A press of the centre button starts scrubbing, as on an iPod classic (a double press with Single Press
+Scrub off; with the screen off it only
 wakes it, [Wake](internals.md#wake)), and the bar fill turns white while it lasts. Each wheel tick moves 5 seconds, times a ramp of one more step per 100 ms of spin
 (up to 40 seconds a tick; the lists' gentler ramp does not apply), within the
 track. Both times and the bar follow the target at once;
 the track jumps there once, when the scrub ends. A press of the centre button confirms it at once
-and leaves the screen on (a double press does too), as do Return, a touch and
+and leaves the screen on (and moves on to shuffle, below), as do Return, a touch and
 3 seconds without a tick, and each gives the wheel back to the volume; Return then stays on the
 page. Ending without having moved the target does not seek. Paused, the track stays paused and
-plays from the target at Play. Outside a scrub a single press starts scrubbing,
-`DOUBLE_CLICK_MS` later as a row opens, and a double press turns the screen off, as on the lists
-(**Single Press Scrub**, below, on unless chosen off). With it off the two swap: a single press
-turns the screen off and a double press starts scrubbing. The presses work the same while the volume shows over the page; starting a scrub closes it. The jump is stock's key seek, which can pause the player briefly, but only once, when the
+plays from the target at Play. With **Single Press Scrub** (below, on unless chosen off) Centre
+cycles the controls the wheel sets, as an iPod classic's does: a press starts scrubbing at once,
+the next ends the scrub and rings shuffle, the next repeat (a tick toggles shuffle or steps repeat
+Off, All, One; under a theme without the pair these two are skipped), the next opens the rating
+picker, whose Centre saves and leaves the page at rest, the wheel back on the volume. Return, a
+touch or 3 seconds without a key end a stage. A short hold (`NP_HOLD_MS`, 400 ms) turns the
+screen off, and a long hold is still Shut Down. With it off a single press turns the screen off
+and a double press starts scrubbing. The presses work the same while the volume shows over the page; starting a scrub closes it. The jump is stock's key seek, which can pause the player briefly, but only once, when the
 scrub ends, instead of after each pause between ticks. Values are `SCRUB_*` in
 `patch/offsets.inc`; see [internals.md](internals.md#scrub-ipod).
 
@@ -799,8 +804,9 @@ NPCENTRED`, off; `playset_covermode`): `ringnav_ui_load`, hooked on every window
   durations.c), and a "Position Bar" switch (`Q2POD CFPOSITION`, off; `playset_covermode`;
   coverflow_position.c).
 - Controls: Wheel Sensitivity, which opens its slider page; "Hold Return: Recent"
-  (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); a "Single Press Scrub" switch (`IPOD SCRUBSINGLE`, on; `np_key`): on Now Playing a single
-  centre press starts the scrub and a double press turns the screen off (Scrub, above), off swaps them; "Key Tone"; "Click With Headphones" (`IPOD KEYTONEHP`), shown while Key Tone is on ([Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; "Wake: Single Press"; and "Volume Guard".
+  (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); a "Single Press Scrub" switch (`IPOD SCRUBSINGLE`, on; `np_key`, `np_centre`): on Now Playing
+  Centre cycles scrubber, shuffle, repeat and rating and a short hold turns the screen off (Scrub, above); off,
+  a single press turns the screen off and a double press scrubs; "Key Tone"; "Click With Headphones" (`IPOD KEYTONEHP`), shown while Key Tone is on ([Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; "Wake: Single Press"; and "Volume Guard".
 
 All are among the [settings icons](#settings-icons) the build pre-sizes. A value row has its value
 in the label (260 pixels wide, to where the chevron ends) and no chevron, since Centre or a tap
