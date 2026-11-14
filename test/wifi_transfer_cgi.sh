@@ -596,7 +596,7 @@ run list GET 'path=/mnt/mmc/pin' '' -
 [ "$(status)" = 401 ] && ok "an empty token matches nothing" || bad "empty token ($(status))"
 new_session; COOKIE=$SAVED; rm -rf /mnt/mmc/pin
 
-echo; echo "############ DEVICE APPLET: no dependency on 'stat' (absent on device busybox 1.31.1)"
+echo; echo "############ DEVICE APPLET: no dependency on 'stat' (absent from the device's busybox, which has stock 1.31.1's applets)"
 grep -qE 'stat -c|busybox stat' "$CGI" && bad "q2cgi invokes the 'stat' applet, which the device busybox lacks" || ok "no 'stat' applet dependency (size via ls -ln, mtime via date -r)"
 
 echo; echo "############ FILESYSTEM BOUNDARY"

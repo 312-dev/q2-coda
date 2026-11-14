@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Security: the open-source libraries and tools Shanling built years ago are rebuilt from current upstream releases: OpenSSL 1.1.1w, curl 8.23.0 (with mbedTLS 3.6.7 for its TLS), zlib 1.4, SQLite 3.54.1, libpng 1.2.59, BusyBox 1.38.0, wpa_supplicant 2.12 and FFmpeg 4.2.11, closing hundreds of known vulnerabilities. Downloads, the App Store, radio, scrobbling and lyrics connect as before. A server that offers only TLS 1.0 or 1.1 can't be reached. Bluetooth, the player's own decoders, glibc and the kernel are still Shanling's ([third-party](third-party.md)).
   - Network Update: follows q2-coda's own releases, and installs one only once its signature checks against the q2-coda key built into the firmware. The row says **Verifying…** while it checks. A release without a signature, Q2 Pod's own included, says **Release not signed: not installed**, and one changed after signing **Signature check failed: not installed**; the update on the card stays as it was.
   - App Store: the list of apps is q2-coda's own, signed with the same key, and names the exact download for each app. A list that isn't signed says **App list not signed: not used**, and a download that differs from the one the list names says **Download doesn't match the list**; nothing is installed. Checking for updates is one request now, so GitHub's limit no longer says **GitHub is busy** after a few checks.
   - Display: **Theme** lists **OLED** after **Classic**. It is a placeholder: it looks as **Theme: Classic** does until its own design arrives.

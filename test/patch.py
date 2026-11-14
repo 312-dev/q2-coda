@@ -16134,8 +16134,7 @@ m.reply=b'#EXTM3U\n#RADIOBROWSERUUID:7\n#EXTINF:1,MANGORADIO\nhttps://mango/r\n\
 m.worker(); assert m.labels()==['Top Stations','MANGORADIO','Dance Wave!']
 assert m.opts[10002]=='https://all.api.radio-browser.info/m3u/stations/topvote/100?hidebroken=true'
 assert m.opts[10065]=='/etc/scrobble-ca.pem' and m.opts[64]==1 and m.opts[81]==2 and m.opts[99]==1
-ctx,param=m.alloc(0x104),m.alloc(16); m.word(ctx+0x100,param); m.word(param+12,1)  # OpenSSL 1.1.1f's offsets
-assert m.nested(m.opts[20108],0x5150,ctx,0)==0 and m.get(param+12)==0x200001  # | X509_V_FLAG_NO_CHECK_TIME
+assert 20108 not in m.opts  # no SSL_CTX_FUNCTION: libcurl's mbedTLS checks no dates (docs/internals.md#2038)
 m.back(); assert m.labels()[0]=='Internet Radio'
 m.wifi=-1; m.row(3); assert m.labels()==['No Wi-Fi'] and len(m.threads)==1; m.back(); m.wifi=3; passed()
 # By Genre: the tags' CSV, then a tag's stations by its name, %-encoded. Both A-Z, a leading article
@@ -18365,7 +18364,7 @@ def fetch(codes,tag,reply=b'',done=500,sig=None):
     assert ('widget_set_tr_text',label) in [c[:2] for c in m.calls] and UPDATE+'.part' not in m.files
 fetch([302,200,200],'9.9.9',b'TAR'*100)
 assert m.opts[10002]==f'{RELEASES}/download/9.9.9/{ASSET}' and m.opts[52]==1
-assert m.opts[10065]=='/etc/scrobble-ca.pem' and m.opts[64]==1 and m.opts[81]==2 and m.opts[99]==1 and m.opts[20108]
+assert m.opts[10065]=='/etc/scrobble-ca.pem' and m.opts[64]==1 and m.opts[81]==2 and m.opts[99]==1 and 20108 not in m.opts
 assert bytes(m.files[UPDATE])==b'TAR'*100 and 'fwupdate_tf' in [c[0] for c in m.calls]
 m.files[UPDATE]=bytearray(b'old')
 fetch([302,200,404],'9.9.9'); assert m.toasts[-1][3]=='No update for this build' and m.files[UPDATE]==b'old'
@@ -18450,7 +18449,7 @@ m.close(); m.wifi=3; m.rockbox_mode=0o100755; m.dirs['/mnt/mmc/.spotify']=[]; ap
 assert m.labels()==['App Store','Check for Updates','Checking…','Rockbox','Update','Rockbox Themes','Install','Spotify','Installed','Deezer','Install','Soulseek','Install','File Browser','Install','Subsonic','Install','Podcasts','Install','Live Music Archive','Install','Buddy','Install','Groovebox','Install','AirPlay','Install']
 m.listed=shelf_list(**{'DiamondBond/q2-librespot':'q2-v9.9','DiamondBond/q2-rockbox':'v3.2'}); m.reply=ZIP; shelf_job(m)
 assert m.opts[10002]==LIST_URL and m.opts[10018]=='Q2Pod'  # the list, the check's one request
-assert m.opts[10065]=='/etc/scrobble-ca.pem' and m.opts[64]==1 and m.opts[81]==2 and m.opts[20108]
+assert m.opts[10065]=='/etc/scrobble-ca.pem' and m.opts[64]==1 and m.opts[81]==2 and 20108 not in m.opts
 assert m.labels()[8]=='Update' and m.labels()[2]==BLANK and '/tmp/q2-shelf.json' not in m.files  # the pin's q2-v9.9 against the card's tag
 assert m.toasts[-1][3]=='1 app can be updated'; passed()  # the opening check's end, the page on top
 assert bytes(m.files[LIST]).startswith(b'serial 1\n') and b'DiamondBond/q2-librespot q2-v9.9 app.zip ' in bytes(m.files[LIST]) and b'signature' not in bytes(m.files[LIST]); passed()

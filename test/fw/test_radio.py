@@ -31,7 +31,6 @@ SPOT_SOCK = '/tmp/q2-librespot.sock'
 CURLOPT_NOPROGRESS, CURLOPT_WRITEFUNCTION = 43, 20011
 CURLOPT_SSL_CTX_FUNCTION, CURLOPT_XFERINFOFUNCTION, CURLINFO_RESPONSE_CODE = 20108, 20219, 0x200002
 CURLE_WRITE_ERROR, CURLE_ABORTED_BY_CALLBACK, CURLE_UNKNOWN_OPTION = 23, 42, 48
-X509_V_FLAG_NO_CHECK_TIME = 0x200000  # OpenSSL's x509_vfy.h
 
 
 class List(C.Structure):
@@ -1099,13 +1098,12 @@ def test_favourites_are_favourites_m3u_s_to_the_toggle_and_the_heart(fw):
 # The directory.
 
 class Curl:
-    """demo's libcurl: perform calls the SSL_CTX callback with an OpenSSL 1.1.1 SSL_CTX (its verify params at 0x100,
-    their flags the fourth word), then hands the body to the write callback in chunks, the progress callback asked
-    first each time (with CURLOPT_NOPROGRESS off); its answer and the HTTP code, for CURLINFO_RESPONSE_CODE alone.
-    result: perform's; flags: the verify params' after the callback; cleaned: the handles cleaned up."""
+    """demo's libcurl: perform hands the body to the write callback in chunks, the progress callback asked first
+    each time (with CURLOPT_NOPROGRESS off); its answer and the HTTP code, for CURLINFO_RESPONSE_CODE alone.
+    result: perform's; cleaned: the handles cleaned up."""
     def __init__(self, fw, body=b'', code=200, error=0, chunk=1000):
         self.fw, self.body, self.code, self.error, self.chunk, self.opts, self.wrote = fw, body, code, error, chunk, {}, []
-        self.result, self.flags, self.cleaned = None, 0, []
+        self.result, self.cleaned = None, []
         fw.mock('fw_curl_easy_init', lambda *_: 0x9000)
         fw.mock('fw_curl_easy_setopt', self.setopt)
         fw.mock('fw_curl_easy_perform', self.perform)
@@ -1127,11 +1125,6 @@ class Curl:
         return self.result
 
     def transfer(self, c):
-        if CURLOPT_SSL_CTX_FUNCTION in self.opts:
-            params, ctx = (C.c_uint * 4)(), (C.c_char * 0x108)()
-            C.c_void_p.from_buffer(ctx, 0x100).value = C.addressof(params)
-            C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p, C.c_void_p)(self.opts[CURLOPT_SSL_CTX_FUNCTION])(c, C.addressof(ctx), None)
-            self.flags = params[3]
         progress = None
         if self.opts.get(CURLOPT_NOPROGRESS, 1) == 0 and CURLOPT_XFERINFOFUNCTION in self.opts:
             progress = C.CFUNCTYPE(C.c_int, C.c_void_p, *[C.c_longlong] * 4)(self.opts[CURLOPT_XFERINFOFUNCTION])
@@ -1502,13 +1495,14 @@ def test_return_while_connecting_ends_the_transfer_through_its_progress_callback
 
 
 def test_the_directory_s_certificate_is_checked_without_the_clock(fw):
-    """CURLOPT_SSL_CTX_FUNCTION sets X509_V_FLAG_NO_CHECK_TIME on the context: the Q2's clock may be years off, and the
-    pinned roots expire."""
+    """No CURLOPT_SSL_CTX_FUNCTION: the rootfs's libcurl does TLS with an mbedTLS that checks no certificate's dates
+    (the Q2's clock may be years off, and the pinned roots expire), and a callback would be handed mbedTLS's config,
+    not an OpenSSL SSL_CTX."""
     p = page(fw)
     curl = Curl(fw, m3u(('A', 'http://a.example/')))
     p.menu('Top Stations')
     fetched(fw, p, curl)
-    assert curl.flags & X509_V_FLAG_NO_CHECK_TIME and ui(fw).list.n == 1
+    assert CURLOPT_SSL_CTX_FUNCTION not in curl.opts and ui(fw).list.n == 1
 
 
 # Search.
