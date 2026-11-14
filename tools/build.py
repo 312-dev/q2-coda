@@ -421,6 +421,9 @@ def default_config(config):
     return config
 # toolsSetRtcTime's command, with its padding; -u keeps the RTC in UTC. See docs/internals.md#clock.
 RTC_WRITE = (b'hwclock -w\0\0', b'hwclock -wu\0')
+# networktime_adjust_thd's time servers (0x7836bc, after time.apple.com, before time.windows.com): stock's
+# China pool becomes the worldwide one, NUL-padded to its length. See docs/internals.md#clock.
+NTP_POOL = (b'\0cn.pool.ntp.org\0time.', b'\x000.pool.ntp.org\0\0time.')
 # network_checkstatus's command once Wi-Fi connects (its digit at file offset 0x3852bd): stock turns
 # the radio's power save (LPS) off for the whole connection; 2 restores the driver's own default,
 # PS_MODE_MAX. See docs/internals.md#battery.
@@ -2182,6 +2185,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(patched.count(b'V1.36\0') == 1, 'Version literal is not unique')
     patched = patched.replace(b'V1.36\0', version.encode()+b'\0')
     patched = patched.replace(*RTC_WRITE)
+    check(patched.count(NTP_POOL[0]) == 1, 'Unexpected NTP servers')
+    patched = patched.replace(*NTP_POOL)
     check(patched.count(WIFI_LPS[0]) == 1, 'Unexpected Wi-Fi power save command')
     patched = patched.replace(*WIFI_LPS)
     check(patched.count(LOCK_CLOCK_12H[0]) == 1, 'Unexpected lock clock formats')

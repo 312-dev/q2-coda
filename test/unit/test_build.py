@@ -1240,3 +1240,9 @@ def test_bluetooth_discovery_times_out():
     main = b'# 0 = disable timer\n#DiscoverableTimeout = 0\nDiscoverableTimeout = 0\n'
     assert main.count(build.BT_DISCOVERABLE[0]) == 1
     assert main.replace(*build.BT_DISCOVERABLE) == b'# 0 = disable timer\n#DiscoverableTimeout = 0\nDiscoverableTimeout = 180\n'
+
+
+def test_network_time_asks_the_worldwide_pool_in_place():
+    servers = b'time.apple.com\0\0cn.pool.ntp.org\0time.windows.com\0'
+    assert len(build.NTP_POOL[0]) == len(build.NTP_POOL[1])
+    assert servers.replace(*build.NTP_POOL) == b'time.apple.com\0\x000.pool.ntp.org\0\0time.windows.com\0'

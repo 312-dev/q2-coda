@@ -316,6 +316,9 @@ def validate_assets(directory):
     assert demo[PDR[0]:PDR[0]+PDR[1]] == bytes(PDR[1]) and any(stock[PDR[0]:PDR[0]+PDR[1]])
     # The RTC is written in UTC: the one hwclock -w literal gains -u in its own padding.
     assert demo.index(RTC_WRITE[1]) == stock.index(RTC_WRITE[0])
+    # Network time asks the worldwide NTP pool, not China's: one server name, the same length, in place.
+    from build import NTP_POOL
+    assert demo.index(NTP_POOL[1]) == stock.index(NTP_POOL[0]) == fileoff(stock, 0x7836bc) - 1 and b'cn.pool.ntp.org' not in demo
     # Wi-Fi keeps its power save: network_checkstatus's lps=0 becomes lps=2, the one byte at file
     # offset 0x3852bd, and networkGetWifiSignal jumps to the payload, which reads rx_signal instead.
     assert demo.index(WIFI_LPS[1]) == stock.index(WIFI_LPS[0]) == 0x3852bd - 25 and WIFI_LPS[0] not in demo
