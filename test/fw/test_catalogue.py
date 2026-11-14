@@ -502,6 +502,28 @@ def test_no_app_is_started_offline_with_local_only_or_without_a_catalogue_app(ri
     assert not started
 
 
+def test_a_listen_of_a_server_songs_offline_copy_counts_as_its_server_row(rig, fw, st):
+    """A server song plays from its Stream Cache copy (the app's .play, or the offline queue), a file no Library
+    row has: its play counts under the server row's key (its fileurl's listen_key), so Most Played and Cover
+    Flow's album plays find the song; a card file's and a server row's own count under their paths. Most
+    Played's kept tracks don't take the copy's record, which would never match the row's count."""
+    copy = '/mnt/mmc/.subsonic/stream/x/s1.flac'
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, local=copy)])
+    rig.poll()
+    key = fw.fn('listen_key', C.c_uint, C.c_void_p)
+    count = fw.fn('navigation__play_count', None, C.c_void_p, C.c_uint)
+    table = st('plays', C.c_uint * 2)
+    for path, counted in ((copy, url('s1')), ('/mnt/mmc/Music/a.flac', None), (url('s1'), None)):
+        r = rig.record(path)
+        count(r, key(r))
+        assert table[0] == key(rig.record(counted or path))
+    assert table[1] == 2  # the copy's listen and the row's own: one song, two plays
+    st('mp_list', C.c_void_p).value = kept = rig.rows.new([rig.record('/mnt/mmc/Music/a.flac')])
+    r = rig.record(copy)
+    count(r, key(r))
+    assert len(rig.rows[kept]) == 1  # not the copy: the next open reads the library again
+
+
 def test_ratings_in_are_applied_unless_the_q2_s_own_change_is_newer(rig, fw):
     rig.card_song('/mnt/mmc/Music/a.flac', 'A', 'B', 'C', 1, 100, 1)
     rig.card_song('/mnt/mmc/Music/b.flac', 'B', 'B', 'C', 2, 100, 1)

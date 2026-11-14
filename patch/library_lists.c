@@ -141,7 +141,8 @@ void mp_counted(void *r, unsigned key, unsigned evicted) {
     if (evicted && mp_find(evicted) >= 0)
         ll.mp_gen = ~library_gen;
     else if (st.mp_list && mp_find(key) < 0) {
-        if (!st.mp_page && deque_size(st.mp_list) < 2 * PLAYS_TOP)
+        /* r is the counted song's own record, not an offline copy counted as its server row */
+        if (!st.mp_page && deque_size(st.mp_list) < 2 * PLAYS_TOP && listen_key(r) == key)
             _deque_push_back(st.mp_list, r);
         else
             ll.mp_gen = ~library_gen;

@@ -1140,6 +1140,17 @@ static const cat_ent *cat_copy_of(const char *path) {
             return &cat.ix.e[i];
     return 0;
 }
+/* navigation.c play_count's key for a listen of r (key, its listen_key): a server song played
+ * from its offline copy, a Stream Cache file no Library row has, counts as its server row, so
+ * Most Played and Cover Flow's album plays follow the song (docs/server-library.md: play counts
+ * key on the row's fileurl). key for any other. */
+unsigned catalogue_play_key(void *r, unsigned key) {
+    const char *path = r ? P(r, REC_PATH) : 0;
+    const cat_ent *e = path && !catalogue_path(path) ? cat_copy_of(path) : 0;
+    if (!e || e->dup) return key;
+    unsigned row = fnv(FNV_SEED, (const unsigned char *)ix_str(&cat.ix, e->path));
+    return row | !row; /* listen_key's, for the row's record: a server row has no CUE start */
+}
 typedef struct {
     unsigned long long key; /* the path's fnv64 */
     int known;

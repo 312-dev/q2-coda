@@ -9733,6 +9733,7 @@ static void spot_keep(unsigned key, int sec, int total) {
 /* Counts key's play and moves it first, so among equal counts the least recently played is the
  * one replaced when no slot is free. */
 static void play_count(void *r, unsigned key) {
+    key = catalogue_play_key(r, key); /* a server song's offline copy counts as its row */
     plays_load();
     int i = 0;
     for (int j = 0; j < PLAYS_SLOTS && st.plays[i].key != key; j++)
