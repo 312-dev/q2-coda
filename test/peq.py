@@ -437,6 +437,10 @@ static int stock_eq_calls;
 int stock_eq_trampoline(int mode) { ++stock_eq_calls; return mode; }
 int shim_chained(void) { return stock_eq_calls; }
 int client_h(void) { return 290; }
+int eq_rows(void) { return 0; } /* the iPod themes': no set_switch (slider_page.c) */
+int eq_list_end(void) { return 290; }
+void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) { (void)w, (void)canvas, (void)e; }
+void eq_tabs_paint(void *w, void *canvas, int simple, int focus) { (void)w, (void)canvas, (void)simple, (void)focus; }
 static void *make(void *parent, int h) {
     ++count; w[count].parent = (int)(long)parent; w[count].h = h; w[count].x = w[count].y = w[count].px = 0;
     w[count].text[0] = 0; chevrons[count] = 0; w[count].click = w[count].change = w[count].focus = w[count].down = w[count].action = 0; w[count].bg = 0; return (void *)(long)count;
