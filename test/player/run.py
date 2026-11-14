@@ -29,10 +29,10 @@ def reference(path, fmt='s16le'):
     return subprocess.run(['ffmpeg', '-v', 'error', '-cpuflags', '0', *decoder, '-i', str(path), '-f', fmt, '-'], check=True, capture_output=True).stdout
 
 
-def play(player, songs, scenario, out, speed=1):
+def play(player, songs, scenario, out, speed=1, env=None):
     s = fakedemo.Session(out)
     s.music = songs
-    s.run(fakedemo.scenarios(str(songs))[scenario], fakedemo.launch_host(player, str(songs), speed), speed)
+    s.run(fakedemo.scenarios(str(songs))[scenario], fakedemo.launch_host(player, str(songs), speed, env), speed)
     return s, [p.read_bytes() for p in sorted((pathlib.Path(out)/'pcm').glob('*.raw'))], sorted(p.name for p in (pathlib.Path(out)/'pcm').glob('*.raw'))
 
 
@@ -304,6 +304,10 @@ def test_formats_open_as_stock(player, songs, tmp):
 def tool(tmp, name, *defines):
     """test/player/NAME.c with player/dsp.c and patch/peq.c as the player builds them, for this machine."""
     out = tmp/name
+    if not out.exists() and name == 'volume_test':  # output.c's law alone, with FFmpeg's headers for its includes
+        ff = pathlib.Path(subprocess.run([sys.executable, ROOT/'tools/player.py', 'ffmpeg', 'host'], check=True, capture_output=True, text=True).stdout.strip())
+        subprocess.run(['cc', '-std=c11', '-D_GNU_SOURCE', '-O2', '-Wall', '-Werror', '-I', ROOT/'player', '-I', ff/'include', HERE/'volume_test.c',
+                        ROOT/'player/output.c', '-L', ff/'lib', '-lswresample', '-lavutil', '-lm', '-lpthread', '-o', out], check=True)
     if not out.exists():
         subprocess.run(['cc', '-std=c11', '-D_GNU_SOURCE', '-DPEQ_HOST', *defines, '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
                         '-I', ROOT/'player', '-I', ROOT/'patch', HERE/f'{name}.c', ROOT/'player/dsp.c', ROOT/'patch/peq.c',
@@ -480,6 +484,234 @@ def test_click(player, songs, tmp):
 
 # ---- protocol
 
+# ---- phase 4: DSD and the outputs
+
+def dsd_bits(path):
+    """A DSD file's bits, each channel's bytes in the order heard with the first bit most significant: from a DSF's
+    blocks (least significant bit first) or a DSDIFF's interleaved bytes."""
+    b = pathlib.Path(path).read_bytes()
+    rev = bytes(int(f'{i:08b}'[::-1], 2) for i in range(256))
+    if b[:4] == b'DSD ':
+        ch, = struct.unpack_from('<I', b, 28 + 24); count, = struct.unpack_from('<Q', b, 28 + 36); block, = struct.unpack_from('<I', b, 28 + 44)
+        data = b[28 + 52 + 12:]
+        out = [bytearray() for _ in range(ch)]
+        for at in range(0, len(data), block * ch):
+            for c in range(ch): out[c] += data[at + c * block:at + (c + 1) * block]
+        return [bytes(o[:count // 8]).translate(rev) for o in out]
+    at = 16  # the chunks after FRM8's header and form type, to the sound data's
+    while b[at:at + 4] != b'DSD ':
+        n, = struct.unpack_from('>Q', b, at + 4)
+        at += 12 + n + n % 2
+    n, = struct.unpack_from('>Q', b, at + 4)
+    data = b[at + 12:at + 12 + n]
+    return [data[c::2] for c in range(2)]
+
+
+def unpack_dop(pcm, channels=2):
+    """DoP frames (S24_3LE: the second DSD byte, the first, the marker, as stock writes them) back to each channel's
+    DSD bytes; the markers must go 0x05, 0xFA in turn from the first frame, the same in every channel."""
+    out, bad = [bytearray() for _ in range(channels)], 0
+    for f in range(len(pcm) // (3 * channels)):
+        for c in range(channels):
+            lo, mid, marker = pcm[3 * (f * channels + c):3 * (f * channels + c) + 3]
+            bad += marker != (0x05 if f % 2 == 0 else 0xfa)
+            out[c] += bytes((mid, lo))
+    return [bytes(o) for o in out], bad
+
+
+def unpack_native(pcm, channels=2):
+    """DSD_U32_BE frames: each channel's 4 bytes a frame, the first heard first."""
+    return [b''.join(pcm[i:i + 4] for i in range(4 * c, len(pcm), 4 * channels)) for c in range(channels)]
+
+
+def check_dsd_raw(player, songs, tmp, way, mode, kind):
+    s, pcm, names = play(player, songs, f'dsd-full-{way}-{mode}', tmp/f'dsd-{way}-{mode}', speed=8)
+    suffix = {0: '', 1: '_bt', 2: '_usb'}[way]
+    rates = [2822400 // (16 if kind == 'dop' else 32), 2822400 // (16 if kind == 'dop' else 32), 5644800 // (16 if kind == 'dop' else 32)]
+    assert len(pcm) == 3 and [n.split('_', 1)[1] for n in names] == [f'{r}_2_{kind}{suffix}.raw' for r in rates], names
+    for f, got in zip(('d64.dsf', 'd64.dff', 'd128.dsf'), pcm):
+        want = dsd_bits(songs/f)
+        bits, bad = unpack_dop(got) if kind == 'dop' else (unpack_native(got), 0)
+        assert not bad, f'{f}: {bad} DoP frames with a wrong marker'
+        assert bits == want, f'{f}: {[len(b) for b in bits]} bytes a channel, the file {[len(b) for b in want]}; first difference at {first_difference(bits[0], want[0])}'
+    return f'3 files, {sum(len(x) for x in pcm)} bytes, each channel the file\'s bits'
+
+
+def test_dop_usb(player, songs, tmp): return check_dsd_raw(player, songs, tmp, 2, 1, 'dop')
+def test_dop_dac(player, songs, tmp): return check_dsd_raw(player, songs, tmp, 0, 0, 'dop')  # a Q2's DAC: DoP whatever the mode
+def test_native_usb(player, songs, tmp): return check_dsd_raw(player, songs, tmp, 2, 2, 'dsd')
+
+
+def ffref(tmp, *args):
+    """test/player/ffref.c's output, built against the player's FFmpeg: a decode or a resample by FFmpeg 7.1.5 itself."""
+    out = tmp/'ffref'
+    if not out.exists():
+        ff = pathlib.Path(subprocess.run([sys.executable, ROOT/'tools/player.py', 'ffmpeg', 'host'], check=True, capture_output=True, text=True).stdout.strip())
+        subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Werror', '-I', ff/'include', HERE/'ffref.c', '-L', ff/'lib', '-lavformat', '-lavcodec',
+                        '-lswresample', '-lavutil', '-lm', '-lpthread', '-o', out], check=True)
+    return subprocess.run([out, *map(str, args)], check=True, capture_output=True).stdout
+
+
+def test_d2p_usb(player, songs, tmp):
+    """D2P: FFmpeg's DSD decoder, float at the DSD rate over 8, exactly as FFmpeg 7.1.5 decodes the file (the
+    system's ffmpeg, 6.1, decodes the same tone and differs from it in the last place)."""
+    s, pcm, names = play(player, songs, 'dsd-full-2-0', tmp/'d2p', speed=8)
+    want = [ffref(tmp, 'decode', songs/f) for f in ('d64.dsf', 'd64.dff', 'd128.dsf')]
+    assert [n.split('_', 1)[1] for n in names] == ['352800_2_f32_usb.raw', '352800_2_f32_usb.raw', '705600_2_f32_usb.raw'], names
+    for f, g, w in zip(('d64.dsf', 'd64.dff', 'd128.dsf'), pcm, want):
+        assert g == w, f'{f}: {len(g) // 8} frames, reference {len(w) // 8}, first difference at frame {(first_difference(g, w) or 0) // 8}'
+    return f'3 files, {sum(len(x) for x in pcm) // 8} frames'
+
+
+def scaled16(pcm, gain):
+    """16-bit samples through the volume as stock's af_volume scales them, and output.c too: (x * vol) >> 8 saturated,
+    vol = (int)(255 * level); gain 1 is the samples as they are (the filter taken out)."""
+    if gain == 1: return pcm
+    vol = int(255 * array.array('f', [gain])[0])
+    return array.array('h', (max(-32768, min(32767, (v * vol) >> 8)) for v in array.array('h', pcm))).tobytes()
+
+
+def runs_of_gain(got, ref, gains, block=441):
+    """For got against ref from the same first frame, each block of 16-bit stereo frames named by the gain in gains
+    that makes it exactly; the runs of names in order, and where the first block no gain explains starts. A block a
+    change falls in is explained by none, and is passed over when the next one is explained."""
+    names, at, missed = [], 0, 0
+    for at in range(0, min(len(got), len(ref)) - 4 * block, 4 * block):
+        g = next((x for x in gains if scaled16(ref[at:at + 4 * block], x) == got[at:at + 4 * block]), None)
+        if g is None:
+            if missed: return names, at - 4 * block
+            missed = 1
+            continue
+        missed = 0
+        if not names or names[-1] != g: names.append(g)
+    return names, at
+
+
+def test_usb_volume(player, songs, tmp):
+    """A USB DAC: mcl-setvol scales what plays from a block on, as stock's mixer_setvolume reaches it between songs;
+    a song starts at unity unless mcl-softvolflag is 1 (stock's 0x4235a8). 40 is 20/256, 50 25/256, as stock's own capture
+    of this scenario (fixtures: stock-usb) is sample for sample."""
+    s, pcm, names = play(player, songs, 'usb', tmp/'usb')
+    assert names[:1] == ['0000_44100_2_s16_usb.raw'], names
+    a1, a2, got = reference(songs/'a1.flac'), reference(songs/'a2.flac'), pcm[0]
+    seen, cut = runs_of_gain(got, a1, (1.0, 0.08, 0.1))
+    assert seen == [1.0, 0.08, 0.1], f'gains in turn {seen}'
+    # a2 follows in the same PCM from its first frame, at 0.1 from its start (soft volume on by then)
+    head = scaled16(a2[:4000], 0.1)
+    k = got.find(head, cut - 4 * 441)
+    assert k >= 0 and k % 4 == 0, 'a2 at 0.1 not found after a1'
+    n = min(len(got) - k, len(a2))
+    assert got[k:k + n] == scaled16(a2[:n], 0.1), f'a2 at 0.1 differs at frame {first_difference(got[k:k + n], scaled16(a2[:n], 0.1)) // 4}'
+    return f'a1 at {seen}, then a2 at 0.1 from its first frame for {n // 4} frames'
+
+
+def test_usb_next_song_at_unity(player, songs, tmp):
+    """With mcl-softvolflag 0 the next song starts at unity, though the one before was scaled by an mcl-setvol: stock
+    builds each song's filters afresh (0x4235a8 puts the volume in only with the flag)."""
+    s, pcm, names = play(player, songs, 'usb-next', tmp/'usb-next')
+    a1, a2, got = reference(songs/'a1.flac'), reference(songs/'a2.flac'), b''.join(pcm)
+    seen, cut = runs_of_gain(got, a1, (1.0, 0.1))
+    assert seen == [1.0, 0.1], f'a1 at {seen}'
+    k = got.find(a2[:4000], cut - 4 * 441)
+    assert k >= 0 and k % 4 == 0, 'a2 at unity not found after a1'
+    n = min(len(got) - k, len(a2))
+    assert got[k:k + n] == a2[:n], f'a2 differs from unity at frame {first_difference(got[k:k + n], a2[:n]) // 4}'
+    return f'a1 at {seen}, then a2 at unity for {n // 4} frames'
+
+
+def test_volume_law(player, songs, tmp):
+    """Stock's law, read in its mixer_setvolume (0x4287a4): either at 100 is unity; L chooses; 50 0.1, 40 0.08, 255 3.79."""
+    want = {(100, 100): (1, 1), (100, 50): (1, 1), (50, 50): (0.1, 0.1), (40, 40): (0.08, 0.08), (255, 255): (3.79, 3.79), (80, 40): (0.64, 0), (0, 0): (0, 0)}
+    tool_out = tool(tmp, 'volume_test')
+    got = subprocess.run([tool_out], check=True, capture_output=True, text=True).stdout.split('\n')
+    have = {tuple(map(int, l.split()[:2])): tuple(map(float, l.split()[2:])) for l in got if l}
+    bad = [f'{k}: {have.get(k)} want {v}' for k, v in want.items() if not have.get(k) or any(abs(a - b) > 1e-6 for a, b in zip(have[k], v))]
+    assert not bad, bad
+    return f'{len(want)} levels'
+
+
+def test_usb_formats(player, songs, tmp):
+    """A USB DAC that takes only S16_LE and S24_3LE: 16 bits as they are, a 24-bit FLAC as its 24 bits exactly
+    (S24_3LE, not stock's S16_LE fallback), a float decoder's output rounded to 24 bits."""
+    s, pcm, names = play(player, songs, 'usb-formats', tmp/'usbf', env={'Q2PLAYER_FORMATS': 's16,s24'})
+    assert [n.split('_', 1)[1] for n in names] == ['44100_2_s16_usb.raw', '44100_2_s24_usb.raw', '44100_2_s24_usb.raw'], names
+    a1 = reference(songs/'a1.flac')
+    assert a1.startswith(pcm[0]) and len(pcm[0]) > 44100 * 4, 'a1 is not its reference'
+    w = reference(songs/'f24.flac', 's32le')
+    top = b''.join(w[i + 1:i + 4] for i in range(0, len(w), 4))
+    assert pcm[1] == top, f'f24: {len(pcm[1]) // 6} frames, first difference at {first_difference(pcm[1], top)}'
+    f = array.array('f', reference(songs/'d.m4a', 'f32le'))
+    g = pcm[2]
+    got = [int.from_bytes(g[i:i + 3], 'little', signed=True) for i in range(0, len(g), 3)]
+    far = max(abs(x - max(-8388608, min(8388607, round(y * 8388608)))) for x, y in zip(got, f))
+    assert far <= 1 and len(got) > 44100, f'm4a: {len(got)} samples, at most {far} steps off'
+    return f'{len(names)} opens: S16_LE, S24_3LE from S32 exactly, S24_3LE from float within a step'
+
+
+def check_bt_split(player, songs, tmp, pair, whole, source, rate, frames):
+    """Bluetooth: a tone cut in two and played through a preloaded change comes out as the whole file resampled, in
+    one PCM at the transport's rate, and that is FFmpeg 7.1.5's libswresample with lavcresample's settings, its tail
+    flushed. docs/internals.md#bluetooth-resampler"""
+    env = {'Q2PLAYER_BT_RATE': str(rate)}
+    _, a, an = play(player, songs, pair, tmp/f'{pair}-{rate}', speed=4, env=env)
+    _, b, bn = play(player, songs, whole, tmp/f'{whole}-{rate}', speed=4, env=env)
+    name = f'0000_{rate}_2_s16_bt.raw'
+    assert an == [name] and bn == [name], (an, bn)
+    want = ffref(tmp, 'resample', songs/source, rate, 's16')
+    assert b[0] == want, f'{whole}: {len(b[0]) // 4} frames, the reference {len(want) // 4}, first difference at {(first_difference(b[0], want) or 0) // 4}'
+    assert a[0] == b[0], f'{pair}: {len(a[0]) // 4} frames, the whole {len(b[0]) // 4}, first difference at frame {(first_difference(a[0], b[0]) or 0) // 4}'
+    assert len(a[0]) // 4 == frames, f'{len(a[0]) // 4} frames, not {frames}'
+    return f'{frames} frames at {rate} Hz, the pair the whole file resampled'
+
+
+def test_bt_resample_44_48(player, songs, tmp): return check_bt_split(player, songs, tmp, 'bt-pair', 'bt-whole', 'whole.wav', 48000, 1920000)
+def test_bt_resample_96_48(player, songs, tmp): return check_bt_split(player, songs, tmp, 'bt-pair96', 'bt-whole96', 'h96.flac', 48000, 960000)
+def test_bt_resample_44_96(player, songs, tmp): return check_bt_split(player, songs, tmp, 'bt-pair', 'bt-whole', 'whole.wav', 96000, 3840000)
+
+
+def test_bt_formats_and_volume(player, songs, tmp):
+    """Bluetooth (the 'bt' scenario, as stock's capture of it): each song in its own format at the transport's 48 kHz,
+    and the volume's levels in turn, measured against the song: 1, 25/256, 10/256, 484/256 (clipped), 163/256 left
+    with the right silent. Stock's right channel there is about 8.4 times (its dB of a negative level)."""
+    s, pcm, names = play(player, songs, 'bt', tmp/'bt')
+    assert [n.split('_', 1)[1] for n in names] == ['48000_2_s16_bt.raw', '48000_2_s32_bt.raw', '48000_2_f32_bt.raw'], names
+    got, ref = array.array('h', pcm[0]), array.array('h', reference(songs/'a1.flac'))
+    def rms(x): return math.sqrt(sum(v * v for v in x) / max(1, len(x)))
+    levels = []
+    for i in range(int(len(got) / 2 / 48000 / 0.25)):
+        t = i * 0.25
+        g, r = got[2 * int(t * 48000):2 * int((t + 0.25) * 48000)], ref[2 * int(t * 44100):2 * int((t + 0.25) * 44100)]
+        levels.append(tuple(round(rms(g[c::2]) / rms(r[c::2]), 2) for c in (0, 1)))
+    runs = [l for i, l in enumerate(levels) if 0 < i < len(levels) - 1 and levels[i - 1] == l == levels[i + 1]]
+    order = [l for i, l in enumerate(runs) if not i or runs[i - 1] != l]
+    want = [(1.0, 1.0), (0.1, 0.1), (0.04, 0.04), (1.89, 1.89), (0.64, 0.0)]  # unity's last half second is too short to count
+    assert order == want, f'levels in turn {order}, want {want}'
+    return f'3 opens at 48 kHz in the songs\' formats, levels {order}'
+
+
+def test_click_volume(player, songs, tmp):
+    """A click where the volume is in software (a USB DAC at 50: 25/256) is scaled with what plays, within a step."""
+    s, pcm, names = play(player, songs, 'click-usb', tmp/'click-usb')
+    assert names == ['0000_44100_2_s16_usb.raw'], names
+    x = array.array('h', pcm[0])
+    at = next(i for i, v in enumerate(x) if v)
+    want = [max(-32768, min(32767, round(c * 25 / 256 * 32768))) for _, c in click_sound('wheel')]
+    got = list(x[at - at % 2::2][:len(want)])
+    lead = next(i for i, w in enumerate(want) if w)  # the table's first frames round to 0 at this level
+    far = max(abs(a - b) for a, b in zip(got, want[lead:]))
+    assert far <= 1, f'the click is {far} steps from the table at 25/256'
+    return f'{len(want)} frames within a step of the click at 25/256'
+
+
+def test_way_change_waits_for_the_next_song(player, songs, tmp):
+    """mcl-setoutputway while a song plays: it plays on in the same PCM, as stock's does (fixtures: stock-way)."""
+    s, pcm, names = play(player, songs, 'way', tmp/'way')
+    assert names == ['0000_44100_2_s16.raw'], names
+    a1 = reference(songs/'a1.flac')
+    assert a1.startswith(pcm[0]) and len(pcm[0]) > 10 * 44100 * 4, f'{len(pcm[0]) // 4} frames, not a1 from its start'
+    return f'{len(pcm[0]) // 4} frames of a1 in one PCM through three changes of output'
+
+
 def parse(text):
     """A transcript's lines as (seconds, direction, name, argument), and its position samples."""
     lines, positions = [], []
@@ -528,6 +760,9 @@ KNOWN = {
     'stock-badnext': 'stock stops the song when its preload is not audio; Q2 Pod plays it to its end, and so does q2player',
     'stock-formats-all': 'compared per file by test_media_info_per_format, with its deviations',
     'pod-formats-all': 'compared per file by test_media_info_per_format, with its deviations',
+    'stock-dsd-2-2': 'Native DSD on a USB DAC: stock asks ALSA for format 31, SND_PCM_FORMAT_SPECIAL, which is refused, and plays '
+                     'nothing; q2player sends DSD_U32_BE (test_native_usb)',
+    'pod-dsd-2-2': 'the same in Q2 Pod\'s hciplayer',
 }
 
 

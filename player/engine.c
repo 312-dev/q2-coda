@@ -20,11 +20,30 @@
 struct ctl ctl = {.mu = PTHREAD_MUTEX_INITIALIZER, .wake = PTHREAD_COND_INITIALIZER};
 
 static struct output *out;
-static struct pcm_format out_format;
 static int out_way; /* the output way out was opened on */
 static int out_cut; /* out was dropped for a skip: its tail is not to be played out */
 
-enum { ENDED, NEXT, STOPPED, FAILED };
+enum { ENDED, NEXT, STOPPED, FAILED, MOVED /* reopen: opened for another output */ };
+
+/* How a DSD file goes out on an output, as stock decides it at each file (0x4210d4-0x421a24): on Bluetooth as PCM;
+ * on a Q2's own DAC (hardware type 17) as DoP whatever mcl-dsdmode says; elsewhere, a USB DAC, as mcl-dsdmode says. */
+static int dsd_out(int way, int hw, int mode) {
+    if (way == 1) return DSD_PCM;
+    if (way == 0 && (hw == 17 || !hw)) return DSD_DOP; /* a preload's song has no type: the Q2's */
+    return mode == 1 ? DSD_DOP : mode == 2 ? DSD_NATIVE : DSD_PCM;
+}
+
+/* Stock's software volume, set at each song (0x4235a8): always on Bluetooth, on a USB DAC with mcl-softvolflag 1,
+ * and otherwise unity, since stock builds each song's filters afresh; while a song plays an mcl-setvol reaches it on
+ * either (0x42c820). */
+enum { UNITY = 100 << 8 | 100 };
+static void volume_at_start(int way) {
+    pthread_mutex_lock(&ctl.mu);
+    int v = ctl.volume, on = way == 1 || (way == 2 && ctl.softvol);
+    ctl.volume_changed = 0;
+    pthread_mutex_unlock(&ctl.mu);
+    output_volume(out, on ? v : UNITY);
+}
 
 static void touch(const char *path) {
     int fd = open(path, O_WRONLY | O_CREAT, 0644);
@@ -100,6 +119,7 @@ static void preload_start(const struct song *song) {
     preload_cancel();
     if (!(pre = calloc(1, sizeof *pre))) return;
     pre->song = *song;
+    pre->song.dsd = dsd_out(ctl.outputway, song->hw, ctl.dsdmode);
     pthread_attr_init(&a);
     pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
     if (pthread_create(&t, &a, preload_thread, pre)) { /* no thread: the song's end opens it, as a cold start */
@@ -124,12 +144,14 @@ static int play(struct source *s, const struct song *song) {
     struct ctl *c = &ctl;
     struct info info;
     source_info(s, &info);
+    int untouched = !strcmp(info.codec, "DSF") || !strcmp(info.codec, "DSD"); /* DSD skips every filter, as stock */
     pthread_mutex_lock(&c->mu);
+    if (untouched && source_format(s)->dsd == DSD_DOP && c->outputway == 0)
+        info.rate /= 2; /* stock's RATE for the DAC's DoP, whatever mcl-dsdmode says (captured) */
     /* until the song is heard its position reads 0, a start offset's too, as stock's does (fixtures/pod-start.txt) */
     c->info = info, c->has_info = 1, c->position = 0, c->state = OPENING;
     int rg = c->replaygain; /* taken at each file, as stock's */
     pthread_mutex_unlock(&c->mu);
-    int untouched = !strcmp(info.codec, "DSF") || !strcmp(info.codec, "DSD"); /* DSD skips every filter, as stock */
     struct dsp *d = dsp_open(source_format(s), untouched, untouched ? 1 : source_replaygain(s, rg), info.length);
     int why = play_through(s, song, d, untouched);
     dsp_close(d, why == ENDED);
@@ -143,9 +165,12 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
     pthread_mutex_lock(&c->mu);
     int way = c->outputway;
     pthread_mutex_unlock(&c->mu);
-    dac_song(way);
+    /* mcl-setoutputway takes effect here, at a song's start, as stock's: a song playing goes on where it is (captured).
+     * A DSD song opened for another output (a preload) is opened again for this one. */
+    if (untouched && f->dsd != dsd_out(way, song->hw, c->dsdmode)) return MOVED;
+    dac_song(way, f->dsd);
     int natural = 0; /* a preloaded change that reopens: the old song played out first, and nobody pressed */
-    if (out && (memcmp(&out_format, f, sizeof *f) || out_way != way)) {
+    if (out && !output_take(out, f, way)) {
         if (!out_cut) output_drain(out), natural = 1;
         dac_mute(out_way);
         close_output(0);
@@ -153,9 +178,10 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
     if (!out) {
         dac_mute(way);
         if (!(out = output_open(f, way, song->hw))) return FAILED;
-        out_format = *f, out_way = way;
+        out_way = way;
     }
     out_cut = 0;
+    volume_at_start(way);
     dac_unmute(way, natural || dac_stamp(1) || dac_stamp(0));
     int64_t origin = source_frames(s); /* frames of this song written to the PCM count from here */
     int64_t offset = origin;           /* and this is where in the song that was */
@@ -172,7 +198,8 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
         if (c->play && c->next) { pthread_mutex_unlock(&c->mu); return NEXT; }
         if (c->stop) { c->stop = 0; pthread_mutex_unlock(&c->mu); return STOPPED; }
         int seek = c->seek, to = c->seek_to, want = c->preload, unwant = c->close_preload, metering = c->explay == 1;
-        int eq = c->eq_changed, click = c->click;
+        int eq = c->eq_changed, click = c->click, volume = c->volume_changed ? c->volume : -1;
+        c->volume_changed = 0;
         struct song ps = c->preload_song;
         c->seek = c->preload = c->close_preload = c->eq_changed = c->click = 0;
         int paused = c->paused;
@@ -189,6 +216,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
             origin = offset = source_frames(s);
             /* paused, the position shows the seek only once playing again, as stock's */
         }
+        if (volume >= 0 && (way == 1 || way == 2)) output_volume(out, volume);
         if (paused) continue; /* a preload or a seek taken while paused: back to waiting */
         if (pausing) dac_unmute(way, 1), output_pause(out, 0), pausing = 0; /* a resume is always a person's */
         if (eq) dsp_eq_changed(d);
@@ -249,6 +277,7 @@ void *engine_thread(void *unused) {
                 pthread_cond_wait(&c->wake, &c->mu);
             }
             song = c->play_song;
+            song.dsd = dsd_out(c->outputway, song.hw, c->dsdmode);
             c->play = c->next = c->stop = c->seek = c->paused = 0;
             c->state = OPENING;
             pthread_mutex_unlock(&c->mu);
@@ -324,6 +353,17 @@ void *engine_thread(void *unused) {
             pthread_mutex_unlock(&c->mu);
             ipc_send("{player-stopstatus\\exit}");
             break;
+        case MOVED: { /* a DSD song opened for another output than the one it starts on: opened again for this one */
+            int error;
+            pthread_mutex_lock(&c->mu);
+            song.dsd = dsd_out(c->outputway, song.hw, c->dsdmode);
+            pthread_mutex_unlock(&c->mu);
+            if ((cur = source_open(&song, &error, NULL))) break;
+            close_output(0);
+            touch("/tmp/notsupport");
+            ipc_send("{player-status\\error}");
+            break;
+        }
         case FAILED:
             close_output(0);
             preload_cancel();

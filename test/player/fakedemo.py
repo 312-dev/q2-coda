@@ -137,11 +137,59 @@ def scenarios(m):
                          (3.0, '{mcl-getuvmeter\\null}'), (3.5, song('set-nexturl', f'{m}/silence.wav')), (5.0, '{mcl-getuvmeter\\null}'),
                          (5.5, '{mcl-getuvmeter\\null}'), (6.0, song('set-nexturl', f'{m}/tone20.wav')), (7.5, '{mcl-getuvmeter\\null}'),
                          (8.0, '{mcl-getuvmeter\\null}'), (8.5, '{mcl-stop\\null}'), (9.5, '{mcl-getuvmeter\\null}'), (10.0, None)],
+        # Outputs and DSD (docs/player-plan.md, phase 4). vol(l, r) is mcl-setvol's L << 8 | R, as demo's mclSetBtVol
+        # and mclUsbAudioSetVol send it; 100 is unity in stock's law. DSD per output way and mode: a DSD64 DSF, the
+        # DFF, a DSD128 DSF, one after another
+        **{f'dsd-{way}-{mode}': [(0.0, '{mcl-dsdmode\\%d}' % mode), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\%d}' % way),
+                                 (0.1, vol(100, 100)), (1.0, song('set-songurl', f'{m}/d64.dsf', cache=4096, cache_min=50)),
+                                 (3.5, song('set-nexturl', f'{m}/d64.dff', cache=4096, cache_min=50)),
+                                 (6.0, song('set-nexturl', f'{m}/d128.dsf', cache=4096, cache_min=50)), (8.5, '{mcl-stop\\null}'), (9.5, None)]
+           for way, mode in ((0, 0), (0, 2), (1, 2), (2, 0), (2, 1), (2, 2))},
+        # the same three DSD files whole, one after another, for the bits (host): DSD64 DSF, DFF, DSD128 DSF
+        **{f'dsd-full-{way}-{mode}': [(0.0, '{mcl-dsdmode\\%d}' % mode), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\%d}' % way),
+                                      (0.1, vol(100, 100)), (1.0, song('set-songurl', f'{m}/d64.dsf', cache=4096, cache_min=50)),
+                                      (6.5, song('set-nexturl', f'{m}/d64.dff', cache=4096, cache_min=50)),
+                                      (12.0, song('set-nexturl', f'{m}/d128.dsf', cache=4096, cache_min=50)), (18.0, None)]
+           for way, mode in ((0, 0), (2, 0), (2, 1), (2, 2), (1, 0))},
+        # Bluetooth: 16-bit, 24-bit 96 kHz and float songs, and the volume at unity, half, a tenth, past unity, unbalanced
+        'bt': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'), (0.1, vol(100, 100)),
+               (1.0, song('set-songurl', a1)), (2.0, vol(50, 50)), (3.0, vol(20, 20)), (4.0, vol(150, 150)), (5.0, vol(80, 40)),
+               (6.0, vol(100, 100)), (6.5, song('set-nexturl', c96)), (9.0, song('set-nexturl', m4a)), (11.5, '{mcl-stop\\null}'), (12.5, None)],
+        # Bluetooth across a gapless change: the 44.1 kHz pair and the 96 kHz pair, whole, at unity
+        'bt-pair': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'), (0.1, vol(100, 100)),
+                    (1.0, song('set-songurl', a1, flag=1)), (16.0, gapless(a2, flag=1)), (44.0, None)],
+        'bt-whole': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'), (0.1, vol(100, 100)),
+                     (1.0, song('set-songurl', f'{m}/whole.wav')), (44.0, None)],
+        'bt-pair96': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'), (0.1, vol(100, 100)),
+                      (1.0, song('set-songurl', f'{m}/h1.flac', flag=1)), (6.0, gapless(f'{m}/h2.flac', flag=1)), (24.0, None)],
+        'bt-whole96': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'), (0.1, vol(100, 100)),
+                       (1.0, song('set-songurl', f'{m}/h96.flac')), (24.0, None)],
+        # a USB DAC: its volume in software only after mcl-softvolflag 1, then the songs of each width
+        'usb': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\2}'), (0.1, '{mcl-softvolflag\\0}'),
+                (0.1, vol(50, 50)), (1.0, song('set-songurl', a1)), (2.5, vol(40, 40)), (3.5, '{mcl-softvolflag\\1}'), (4.0, vol(50, 50)),
+                (5.0, song('set-nexturl', a2)), (6.5, song('set-nexturl', f'{m}/f24.flac')), (8.0, song('set-nexturl', m4a)),
+                (9.5, '{mcl-stop\\null}'), (10.5, None)],
+        # a USB DAC at unity: a song of each width, for the formats a DAC takes
+        'usb-formats': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\2}'), (0.1, '{mcl-softvolflag\\0}'),
+                        (1.0, song('set-songurl', a1)), (3.0, song('set-nexturl', f'{m}/f24.flac')), (10.0, song('set-nexturl', m4a)), (13.0, '{mcl-stop\\null}'), (14.0, None)],
+        # the click on a USB DAC with its volume in software at 50 (25/256): the click is scaled with the music
+        'click-usb': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\2}'), (0.1, '{mcl-softvolflag\\1}'),
+                      (0.1, vol(50, 50)), (1.0, song('set-songurl', f'{m}/silence.wav')), (2.0, '{mcl-click\\wheel}'), (3.0, '{mcl-stop\\null}'), (3.5, None)],
+        # a USB DAC with mcl-softvolflag 0: an mcl-setvol mid-song scales it (stock's quirk), and the next song starts at unity
+        'usb-next': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\2}'), (0.1, '{mcl-softvolflag\\0}'),
+                     (1.0, song('set-songurl', a1)), (2.0, vol(50, 50)), (3.5, song('set-nexturl', a2)), (5.0, '{mcl-stop\\null}'), (6.0, None)],
+        # the output way changed while a song plays: the DAC, then Bluetooth, then USB, then the DAC
+        'way': boot + [(1.0, song('set-songurl', a1)), (3.0, '{mcl-setoutputway\\1}'), (3.0, vol(100, 100)), (6.0, '{mcl-setoutputway\\2}'),
+                       (9.0, '{mcl-setoutputway\\0}'), (12.0, '{mcl-stop\\null}'), (13.0, None)],
         # queries with nothing loaded
         'idle': boot + [(1.0, '{player-status\\request}'), (1.2, '{media-info\\get-music-info}'), (1.4, '{mcl-pcmstate\\null}'),
                         (1.6, '{get_cache_buffer\\null}'), (1.8, '{mcl-getuvmeter\\null}'), (2.0, '{mcl-getspectrum\\null}'), (2.2, '{mcl-pause\\null}'),
                         (2.4, '{mcl-play\\null}'), (2.6, '{mcl-seek\\5}'), (2.8, '{mcl-stop\\null}'), (4.0, None)],
     }
+
+
+def vol(l, r):
+    return '{mcl-setvol\\%d}' % (l << 8 | r)
 
 
 def chain(m, names, length=6):
@@ -275,23 +323,25 @@ class Session:
         (self.out / 'transcript.txt').write_text('\n'.join(self.lines) + f'\n# positions (every fifth poll, time:seconds) {pos}\n# cpu {cpu:.2f} s\n')
 
 
-def launch_host(player, music, speed=1):
+def launch_host(player, music, speed=1, env=None):
+    """env: more of the player's environment, such as the file sink's Q2PLAYER_BT_RATE and Q2PLAYER_FORMATS."""
     def go(s):
         (s.out / 'pcm').mkdir(exist_ok=True)
         for f in (s.out / 'pcm').glob('*'): f.unlink()
         shutil.rmtree(s.out / 'mnt/data', ignore_errors=True); (s.out / 'mnt/data').mkdir(parents=True)
-        env = dict(os.environ, Q2PLAYER_SOCK=str(s.tmp / 'sock_play'), Q2PLAYER_PCM=str(s.out / 'pcm'), Q2PLAYER_SPEED=str(speed))
+        e = dict(os.environ, Q2PLAYER_SOCK=str(s.tmp / 'sock_play'), Q2PLAYER_PCM=str(s.out / 'pcm'), Q2PLAYER_SPEED=str(speed), **(env or {}))
         # the host build reads patch/peq.h's files (/mnt/data/peq-active, /tmp/q2xfade, ...) under its directory
-        return subprocess.Popen([player], stdout=open(s.out / 'player.log', 'w'), stderr=subprocess.STDOUT, env=env, cwd=s.out)
+        return subprocess.Popen([player], stdout=open(s.out / 'player.log', 'w'), stderr=subprocess.STDOUT, env=e, cwd=s.out)
     return go
 
 
-def launch_emu(emu, binary, music, name='hciplayer', args=('-ao', 'alsa'), stock=None, switch=False, killall=None, buffer_ms=None):
+def launch_emu(emu, binary, music, name='hciplayer', args=('-ao', 'alsa'), stock=None, switch=False, killall=None, buffer_ms=None, rate=None):
     """binary inside a bwrap sandbox of emu/rootfs under qemu, as run.sh starts demo; /tmp is the session's.
     For q2player's fallback (player/main.c): stock is a player to put at /usr/lib/hciplayer-stock/hciplayer, switch
     makes /mnt/data/q2player, and killall is when, in seconds, a shell in the sandbox runs demo's `killall -9
     hciplayer`, after writing each process's name and command line to ps.txt. buffer_ms has the shim play the
-    capture as a card with that much buffer (Q2EMU_PCM_BUFFER_MS: a delay, and a rewind that takes frames back)."""
+    capture as a card with that much buffer (Q2EMU_PCM_BUFFER_MS: a delay, and a rewind that takes frames back). rate has
+    every PCM take that rate whatever is asked, as bluealsa offers only its transport's (Q2EMU_RATE)."""
     emu = pathlib.Path(emu)
     def go(s):
         (s.out / 'pcm').mkdir(exist_ok=True)
@@ -313,6 +363,7 @@ def launch_emu(emu, binary, music, name='hciplayer', args=('-ao', 'alsa'), stock
                '--setenv', 'PATH', '/usr/bin:/bin:/usr/sbin:/sbin', '--setenv', 'HOME', '/root',
                '--setenv', 'Q2EMU_LOG', '/emu-log/shim.log', '--setenv', 'Q2EMU_PCM', 'null', '--setenv', 'Q2EMU_PCMDIR', '/emu-log/pcm',
                *(['--setenv', 'Q2EMU_PCM_BUFFER_MS', str(buffer_ms)] if buffer_ms else []),
+               *(['--setenv', 'Q2EMU_RATE', str(rate)] if rate else []),
                '--setenv', 'LD_PRELOAD', '/lib/libq2emu.so', '--chdir', '/tmp', *run]
         return subprocess.Popen([str(c) for c in cmd], stdout=open(s.out / 'player.log', 'w'), stderr=subprocess.STDOUT)
     return go
@@ -330,11 +381,12 @@ def main():
     ap.add_argument('--switch', action='store_true', help='with --emu: make /mnt/data/q2player, which turns q2player on')
     ap.add_argument('--killall', type=float, help="with --emu: run demo's killall -9 hciplayer this many seconds in")
     ap.add_argument('--buffer-ms', type=int, help='with --emu: the capture plays as a card with this much buffer')
+    ap.add_argument('--rate', type=int, help="with --emu: every PCM takes this rate, as bluealsa's transport does")
     a = ap.parse_args()
     music = str(pathlib.Path(a.music).resolve())
     if a.emu:
         launch, m = launch_emu(a.emu, pathlib.Path(a.hciplayer).resolve(), music, stock=a.stock and pathlib.Path(a.stock).resolve(),
-                               switch=a.switch, killall=a.killall, buffer_ms=a.buffer_ms), '/mnt/mmc'
+                               switch=a.switch, killall=a.killall, buffer_ms=a.buffer_ms, rate=a.rate), '/mnt/mmc'
     else:
         launch, m = launch_host(a.player, music), music
     s = Session(a.out)

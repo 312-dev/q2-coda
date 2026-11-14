@@ -13,11 +13,14 @@ FORMATS is one short file of each other format demo lists, at each width a forma
 REPLAYGAIN is a 6 s file for each form a ReplayGain tag takes (Vorbis comments in FLAC and Ogg, ID3v2.3 and 2.4
 TXXX frames in MP3, an iTunes freeform atom in M4A) and for each rule of the gain (the peak's limit, no peak, an
 album gain alone), and rglame.mp3, whose only gain is the one LAME puts in its header. silence.wav and full.wav are 6 s of digital silence and of a full-scale square, for the click, and with tone20.wav, a 1 kHz sine at -20 dBFS, for the level meter.
+DSD (DSD): a DSD64 and a DSD128 DSF and a DSD64 DFF of the same 2205 Hz tone, made by a sigma-delta modulator here
+(nothing on this machine encodes DSD). h1.flac + h2.flac are h96.flac, 16-bit 96 kHz, cut in two at 10 s, for Bluetooth's
+resampler across a gapless change.
 """
 import os, pathlib, struct, subprocess, sys, wave
 
 # Bumped when a file is added or changed, so a directory made by an older recipe is made again.
-RECIPE = '7'
+RECIPE = '9'
 
 # (name, ffmpeg output arguments): 6 s of the noise source, in each format and width. APE, TAK and WMA Lossless
 # have no encoder in ffmpeg or on this machine, so none is made.
@@ -51,6 +54,53 @@ REPLAYGAIN = [
 
 # The lossy pairs, each two files cut from whole.wav (whole48.wav for Opus) at 20 s.
 PAIRS = {'m4a': 'm4a', 'itunes': 'm4a', 'lamef': 'mp3', 'ogg': 'ogg', 'opus': 'opus'}
+
+
+# (name, DSD rate, container): a 2205 Hz tone, 4 s, stereo (the right channel half a period behind). 2205 Hz is a
+# whole number of bytes a period at DSD64 (160) and DSD128 (320), so one period is modulated and repeated.
+DSD = [('d64.dsf', 2822400, 'dsf'), ('d128.dsf', 5644800, 'dsf'), ('d64.dff', 2822400, 'dff')]
+DSD_SECONDS = 4
+
+
+def dsd_period(rate, phase):
+    """One period of a 2205 Hz sine at -6 dB through a second-order sigma-delta modulator, as bits, first in time
+    first; the modulator runs ten periods first so that the one kept starts from its settled state."""
+    import math
+    n = rate // 2205
+    i1 = i2 = 0.0
+    bits = []
+    for k in range(11 * n):
+        x = 0.5 * math.sin(2 * math.pi * ((k % n) / n + phase))
+        y = 1.0 if i2 >= 0 else -1.0
+        i1 += x - y
+        i2 += i1 - y
+        if k >= 10 * n: bits.append(y > 0)
+    return bits
+
+
+def dsd(path, rate, kind):
+    """A DSF (LSB first, 4096-byte blocks a channel) or a DSDIFF file (MSB first, a byte a channel at a time)."""
+    import itertools
+    frames = rate * DSD_SECONDS // 8  # bytes a channel
+    chans = []
+    for phase in (0.0, 0.5):
+        bits = dsd_period(rate, phase)
+        per = [sum(b << (i if kind == 'dsf' else 7 - i) for i, b in enumerate(bits[j:j + 8])) for j in range(0, len(bits), 8)]
+        chans.append(bytes(itertools.islice(itertools.cycle(per), frames)))
+    if kind == 'dsf':
+        block = 4096
+        data = b''.join(c[j:j + block].ljust(block, b'\0') for j in range(0, frames, block) for c in chans)
+        fmt = struct.pack('<4sQIIIIIIQI4x', b'fmt ', 52, 1, 0, 2, 2, rate, 1, frames * 8, block)
+        body = fmt + struct.pack('<4sQ', b'data', 12 + len(data)) + data
+        head = struct.pack('<4sQQQ', b'DSD ', 28, 28 + len(body), 0)
+        pathlib.Path(path).write_bytes(head + body)
+        return
+    data = bytes(b for pair in zip(*chans) for b in pair)
+    ck = lambda name, body: name + struct.pack('>Q', len(body)) + body + (b'\0' if len(body) % 2 else b'')
+    prop = b'SND ' + ck(b'FS  ', struct.pack('>I', rate)) + ck(b'CHNL', struct.pack('>H', 2) + b'SLFTSRGT') \
+        + ck(b'CMPR', b'DSD ' + bytes([14]) + b'not compressed' + b'\0')
+    body = b'DSD ' + ck(b'FVER', struct.pack('>I', 0x01050000)) + ck(b'PROP', prop) + ck(b'DSD ', data)
+    pathlib.Path(path).write_bytes(ck(b'FRM8', body))
 
 
 def ff(*a):
@@ -166,6 +216,12 @@ def make(d):
                    'lamef': ['-c:a', 'libmp3lame', '-q:a', '2'], 'ogg': ['-c:a', 'libvorbis'], 'opus': ['-c:a', 'libopus', '-b:a', '128k']}[name]
             ff(*cut if n == '2' else [], '-i', src, *cut if n == '1' else [], *enc, *tags(f'{name} {n}', name, n), out)
             if name == 'itunes': itunes(out, 20 * 44100)
+    # DSD, and a 96 kHz tone cut in two for Bluetooth's resampler
+    for name, rate, kind in DSD:
+        dsd(d/name, rate, kind)
+    ff('-f', 'lavfi', '-i', 'sine=f=997:r=96000:d=20', '-af', 'volume=0.5,aformat=channel_layouts=stereo', '-c:a', 'flac', '-sample_fmt', 's16', d/'h96.flac')
+    ff('-i', d/'h96.flac', '-t', '10', '-c:a', 'flac', d/'h1.flac')
+    ff('-ss', '10', '-i', d/'h96.flac', '-c:a', 'flac', d/'h2.flac')
     (d/'.made').write_text(RECIPE)
     return d
 

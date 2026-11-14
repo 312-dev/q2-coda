@@ -44,10 +44,10 @@ demo queues every message it receives as a (name, argument) pair (`0x5bb7f4`); a
 | `mcl-seek` | seconds | With `flag` not 0: mute (`0x43b004`), sleep 150 ms, then the target (float `0xb11be0`) and the seek flag `0xb11c40` (`0x42c614`). | none |
 | `mcl-stop` | `null` | The stop flag `0xb11e70` (`0x42c9d0`). | `{player-stopstatus\exit}` when a song was loaded, else nothing |
 | `mcl-orderstop` | `null` | Forgets the open PCM's format (`0xafb164`-`0xafb16c` to -1) and, off Bluetooth with `flag` 0, closes a PCM left open (`0x43af54`). | none |
-| `mcl-setoutputway` | 0, 1, 2 | The output way `0xb11e54` and "changed" `0xb11e4c` (`0x42c90c`): 0 the DAC, 1 Bluetooth, 2 a USB DAC. | none |
-| `mcl-setvol` | `L<<8 \| R`, each 0-255 | Stored (`0xb11e04`); applied as software volume (`0x4287a4`) only on Bluetooth, or on USB when the DAC has no volume of its own (`0x42c7fc`). | none |
-| `mcl-softvolflag` | 0, 1 | `usbaudio_softvol` (`0xb11e50`): the USB DAC's volume is done in software. | none |
-| `mcl-dsdmode` | 0, 1, 2 | DSD output: D2P (to PCM), DoP, Native (`0xb11e60`; demo's `dsdmode_d2p`, `dsdmode_dop`, `dsdmode_native`). | none |
+| `mcl-setoutputway` | 0, 1, 2 | The output way `0xb11e54` and "changed" `0xb11e4c` (`0x42c90c`): 0 the DAC, 1 Bluetooth, 2 a USB DAC. A song playing goes on where it is; the way is taken at the next song (captured, `stock-way.txt`). | none |
+| `mcl-setvol` | `L<<8 \| R`, each 0-255 | Stored (`0xb11e04`). While a song plays, on Bluetooth or USB, it reaches the software volume at once (`0x42c820`, [Volume and gain](#output)), on USB whatever `mcl-softvolflag` says, but not for DSD sent as DoP or Native; at each song's start it is applied on Bluetooth, and on USB with `mcl-softvolflag` 1 (`0x4235a8`). | none |
+| `mcl-softvolflag` | 0, 1 | `usbaudio_softvol` (`0xb11e50`): the USB DAC's volume is done in software from each song's start. | none |
+| `mcl-dsdmode` | 0, 1, 2 | DSD output: D2P (to PCM), DoP, Native (`0xb11e60`; demo's `dsdmode_d2p`, `dsdmode_dop`, `dsdmode_native`). On a Q2 it counts on USB alone: the DAC always gets DoP and Bluetooth PCM ([Output](#output)). | none |
 | `mcl-replaygain` | mode | `0xb11e48`, taken at the next file (`0xb11e40` = 2). | none |
 | `mcl-seteq` | ten floats and a flag, `\|` between | The ten band gains (`0xb11e0c` on) and on (1), "preset changed" (2) or off (0) (`0x42cb08`). Stock refuses it above 48 kHz. | none |
 | `mcl-playspeed` | integer | Stored (`0xb11e00`). | none |
@@ -130,7 +130,7 @@ ao_alsa's init (`0x438248`) picks the device from the output way and the hardwar
 | --- | --- | --- |
 | 0, the DAC | `default` on a Q2 (hardware type 17; captured). Types 14 and 15 open `plughw:1,0`, types 7 and 11 `hw:1,0`: other Shanling players | The CS43131 is card 0 and the only card. stock's `alsa.conf` makes `default` a `plug` over `hw:0,0`, and the player turns ALSA's resampling off (`snd_pcm_hw_params_set_rate_resample`, "Unable to disable resampling") |
 | 1, Bluetooth | `plug:bluealsa` | bluealsa takes one client; the transport's rate (48 kHz for SBC and AAC, 96 kHz S32 for LDAC) is not the file's, so MPlayer adds `lavcresample` ([internals: Bluetooth resampler](internals.md#bluetooth-resampler)) |
-| 2, a USB DAC | `hw:2,0` | a 100 ms buffer in stock; software volume when `mcl-softvolflag` is 1 |
+| 2, a USB DAC | `hw:1,0` on a Q2 (hardware type 17; captured) | a 100 ms buffer in stock; software volume when `mcl-softvolflag` is 1 |
 
 Parameters: interleaved read/write access, the file's rate (`set_rate_near`), its channels, a 500 ms buffer (`0x4382fc`) in 16 periods (`0x438264`). The format is the decoder's (captured, the shim's log of `snd_pcm_hw_params_set_format`): `S16_LE` for 16-bit FLAC and for MP3, `S32_LE` for 24-bit FLAC, and `FLOAT_LE` for AAC and Vorbis, whose decoders put out float; `default`'s `plug` turns that into what the DAC takes. Where the device refuses a format the init tries others (`0x439060`-`0x439110`, "Format %s is not supported by hardware, trying default"). The player keeps the PCM open across a preloaded change when rate, channels and format are what it last asked for (`0xafb164`-`0xafb16c`), and otherwise closes and reopens. Pause is `snd_pcm_pause`, a seek is `snd_pcm_drop` and `snd_pcm_prepare`.
 
@@ -144,9 +144,21 @@ Parameters: interleaved read/write access, the file's rate (`set_rate_near`), it
 
 Q2 Pod's player adds the wait for the line after an unmute on a press, a seek and a resume, and its resume drops, prepares and rewrites what the ring held ([internals: Unpause](internals.md#unpause)); the shim shows its resume as drop, prepare, unmute.
 
-**DSD** (`.dsf`, `.dff`, SACD `.iso`): mode 0 converts to PCM (MPD's `pcm_dsd`), mode 1 packs DoP (`pcm_dsd_to_dop`: 24-bit PCM frames at the DSD rate over 16 carrying the bits and the `0x05`/`0xFA` markers), mode 2 writes native DSD. `ET3 not force dsd native` (`0x888abc`) and the hardware type gate which modes a given output takes. DSD skips every filter.
+**DSD** (`.dsf`, `.dff`, SACD `.iso`): mode 0 converts to PCM (MPD's `pcm_dsd`), mode 1 packs DoP (`pcm_dsd_to_dop`: 24-bit PCM frames at the DSD rate over 16 carrying the bits and the `0x05`/`0xFA` markers), mode 2 writes native DSD. `ET3 not force dsd native` (`0x888abc`) and the hardware type gate which modes a given output takes. DSD skips every filter but the volume. At each file (`0x4210d4`-`0x421a24`) the mode in use is `mcl-dsdmode`'s, then 0 on Bluetooth, and on a Q2 (type 17) 1 on the DAC whatever was asked; other types put 2 on the DAC. Captured, a DSD64 and a DSD128 DSF and a DSD64 DFF in each case:
 
-**Volume and gain.** On the DAC nothing in the player touches a sample unless the EQ or ReplayGain is on: volume is the DAC's. On Bluetooth, `mcl-setvol`'s two bytes scale the PCM in MPlayer's float volume filter (`0x45be84`), which multiplies and then saturates at the conversion to integers.
+| Output, mode | ALSA | `RATE`, `BITRATE` (DSD64) | ioctl `0x1b` |
+| --- | --- | --- | --- |
+| the DAC, any mode | DoP, `S24_3LE` at the DSD rate over 16 (176,400 Hz for DSD64) | 1,411,200, 5,644,800: half the DSD rate | 1 |
+| USB, DoP | the same | 2,822,400, 5,644,800 | 1 |
+| USB, D2P | `S16_LE` at the DSD rate over 8 (352,800 Hz) | 2,822,400, 11,289,600 | 0 |
+| Bluetooth, any mode | `S16_LE` at 48,000 Hz | 2,822,400, 11,289,600 | 0 |
+| USB, Native | format 31 (`SND_PCM_FORMAT_SPECIAL`), refused: nothing plays and no `media-info` | | 0 |
+
+DoP's frames are the second DSD byte heard, the first, then the marker (0x05 first, then 0xFA, in turn), and carry the file's bits exactly. `BITS` is 1 and `LENGTH` the whole seconds. Off the DAC the only ioctl is `0x1b` at each song: no `0x0a`, no mutes.
+
+**Formats off the DAC** (captured). Bluetooth is asked for 48,000 Hz whatever the file (`0x42ecc0`) and in the file's own format (`S16_LE`, `S32_LE`, `FLOAT_LE`); bluealsa offers its transport's rate alone, and MPlayer's `lavcresample` makes the file that rate. At a change of format stock closes and reopens the PCM on either output, and at a skip too. Where the device refuses the format, the init tries `S16_LE` and then `S32_LE` (`0x4390c4`-`0x439108`).
+
+**Volume and gain.** On the DAC nothing in the player touches a sample unless the EQ or ReplayGain is on: volume is the DAC's. On Bluetooth and USB, `mcl-setvol`'s two bytes, L and R, go to MPlayer's `mixer_setvolume` (`0x4287a4`) as levels, by the vendor's law: either at 100 takes the volume filter out (unity); otherwise from 50 up a level is `0.1 + 0.018 * (byte - 50)` (255 is 3.79, +11.6 dB), below 50 `byte * 0.002` (`soft_vol_max` 20 times `1e-4`), the branch chosen by L alone, so R takes L's law (R well below L comes out negative, and stock's dB of it is not a number: its right channel was 8.4 times louder, captured). `soft_vol` is 0 (no `/etc/mplayer.conf`), so it first asks ao_alsa's mixer (`ao_control` 5), which fails, since hciplayer imports no `snd_mixer` call ([internals: Videos](internals.md#videos)), and the software filter is put in. The filter scales a 16-bit song in integers, `(x * (int)(255 * level)) >> 8` saturated (50 is 25/256: the USB capture is that sample for sample), and anything wider in float, `x * level` clipped at full scale.
 
 **ReplayGain** (`mcl-replaygain`): the vendor changed FFmpeg's `ff_replaygain_export` (`0x538c84`) to leave the track and album gains and peaks in a global (`0xafd790`), and a filter set up at the next file (`0x4282c0`) applies them. Mode 1 takes the track's gain, or the album's when the file has no track gain; mode 2 the album's; 0 removes the filter, and any other value changes nothing. The gain (in 1/100000 dB) becomes a factor `min(10^(gain/20), 1/peak)`, a peak of 0 (none given) counting as 1, so without a peak a gain only cuts; a gain of exactly 100000 (+1 dB) is skipped, stock's compare against that constant. The filter is MPlayer's volume filter under the name `replaygain`, which multiplies in float and clips at full scale. MP3 goes through MPlayer's own demuxer and a vendor ID3v2 walker that misses most tags ([internals: MP3 ReplayGain](internals.md#mp3-replaygain)).
 
@@ -254,6 +266,7 @@ Outside the player: `patch_bluealsa` and `tools/bt_silence.S` change bluealsa (A
 - `/dev/shanling_dac` opens as `/dev/null` and its ioctls answer 0;
 - `mtd_debug` hands out a unit record (as the q2-emu emulator's does);
 - `snd_pcm_open` opens ALSA's `null` device, whatever was asked for, and the shim logs the name, format, channels and rate; `snd_pcm_writei` copies what is written to a file per open and sleeps for its duration, so the player runs in real time. (`snd_pcm_hw_params_set_rate_near` must be found with `dlvsym(…, "ALSA_0.9.0rc4")`: the unversioned name is the 0.9 ABI, which takes the rate by value.)
+- `Q2EMU_RATE`, when set, is the one rate every PCM takes whatever is asked, as bluealsa offers only its transport's (`fakedemo.py --rate`: 48,000 for SBC and AAC, 96,000 for LDAC);
 - every log line has the monotonic time in ms; the DAC's ioctls are logged with their argument, and `snd_pcm_pause`, `snd_pcm_drop`, `snd_pcm_drain` and `snd_pcm_prepare` with their order among them;
 - `readdir` and `scandir` are rebuilt on `readdir64`: under qemu-user the host hands out 64-bit directory offsets, which the guest's 32-bit `readdir` cannot hold, so on ext4 every directory read as empty after its first entry (demo's Folder page, its library scan, ALSA's `alsa.conf.d`); and a stand-in `nice` runs demo's `nice -n -5 hciplayer` at the priority the sandbox has.
 
@@ -277,7 +290,7 @@ Each needs a Q2; none can be settled under qemu.
 | Does the X2000 report MSA, and which FPU? The kernel has MSA support compiled in (`MSA revision is: %08x`), which does not say the CPU has it | `cat /proc/cpuinfo` (the `ASEs implemented` and `isa` lines) |
 | What `default` resolves to with the device's ALSA state, and the buffer and period it grants at each rate from 44.1 to 384 kHz | `hciplayer`'s `-v` log, or `cat /proc/asound/card0/pcm0p/sub0/hw_params` while each rate plays |
 | What the DAC is given for each request: the player asks for `S16_LE`, `S32_LE` or `FLOAT_LE` (captured), and under qemu the `null` device accepts anything | `hw_params` for a 16-bit FLAC, a 24-bit FLAC, a 32-bit WAV and an M4A |
-| DSD: the exact PCM formats and rates of DoP and Native on the DAC and on a USB DAC, and which hardware types force which mode | `hw_params` with a DSD64 and a DSD256 `.dsf` in each of the three modes, on each output |
+| DSD: what the DAC makes of DoP through `default` (`S24_3LE` at 176.4 and 352.8 kHz, captured as asked: whether the CS43131 plays it as DSD after ioctl `0x1b` 1), whether a USB DAC is always card 1, and whether one takes q2player's Native (`DSD_U32_BE`) where stock's format 31 is refused | `hw_params` and a listen with a DSD64 and a DSD256 `.dsf` in each of the three modes, on each output; `cat /proc/asound/cards` with a USB DAC in |
 | Bluetooth: the rate and format bluealsa takes per codec, and the level `mcl-setvol` gives | `hw_params` equivalent from bluealsa's log, and a capture of its PCM |
 | Whether `snd_pcm_rewind` works through `default` on the DAC, and how soon after a turn of the wheel q2player's click is heard (the Clicker, [player-plan](player-plan.md#the-clicker)) | `snd_pcm_rewindable` in q2player's log while a song plays; a recording of the headphone output against the wheel's tick |
 | CPU: stock's load at 44.1, 192 and 384 kHz, the new player's at the same | `top -b -d 1` for a minute of each |

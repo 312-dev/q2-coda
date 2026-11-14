@@ -53,7 +53,7 @@ static vis_tap *tap_view(void) {
 }
 
 static struct dsp *track(int rate, int nch) {
-    struct pcm_format f = {rate, nch, 4, 1};
+    struct pcm_format f = {rate, nch, 4, 1, DSD_PCM};
     struct dsp *d = dsp_open(&f, 0, 1, length);
     assert(d);
     return d;
@@ -482,7 +482,7 @@ static void bypass_check(void) {
     int32_t w[2048], wkeep[2048];
     for (int i = 0; i < 2048; ++i) s[i] = keep[i] = (int16_t)(i * 37 - 32768), w[i] = wkeep[i] = (int32_t)((i * 4099 - 4000000) * 256);
     unlink(PEQ_ACTIVE), xfade_view(0);
-    const struct pcm_format f16 = {44100, 2, 2, 0}, f32 = {44100, 2, 4, 0};
+    const struct pcm_format f16 = {44100, 2, 2, 0, DSD_PCM}, f32 = {44100, 2, 4, 0, DSD_PCM};
     struct dsp *d = dsp_open(&f16, 0, 1, 60); /* a 60 s song: its fade's window is far off */
     const uint8_t *out;
     for (int i = 0; i < 100; ++i) assert(dsp_run(d, (uint8_t *)s, 1024, 1, &out) == 1024 && out == (uint8_t *)s); /* the tap settles unwatched */
@@ -504,7 +504,7 @@ static void bypass_check(void) {
     }
     dsp_close(d, 1);
     /* the clip is ReplayGain's own, before the EQ: a float stream, which no conversion saturates, stops at 1 */
-    const struct pcm_format ff = {44100, 2, 4, 1};
+    const struct pcm_format ff = {44100, 2, 4, 1, DSD_PCM};
     float fl[4] = {0.75f, -0.75f, 0.25f, -0.25f};
     d = dsp_open(&ff, 0, 2, 60);
     assert(dsp_run(d, (uint8_t *)fl, 2, 1, &out) == 2);
@@ -588,7 +588,7 @@ static void rates_check(void) {
 static void meter_check(void) {
     int16_t s[512] = {0};
     int uv[2];
-    const struct pcm_format f16 = {44100, 2, 2, 0}, ff = {44100, 2, 4, 1};
+    const struct pcm_format f16 = {44100, 2, 2, 0, DSD_PCM}, ff = {44100, 2, 4, 1, DSD_PCM};
     s[0] = 3276, s[1] = -32767, s[239] = 100, s[240] = 32767; /* s[240] is past the first 480 bytes */
     dsp_meter(&f16, 0, (uint8_t *)s, 256, uv);
     assert(uv[0] == -20 && uv[1] == 0);

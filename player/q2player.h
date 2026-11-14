@@ -15,6 +15,7 @@ struct song {
     int cache_pct; /* how full the cache is before playing starts */
     int gapless;   /* demo's Gapless setting */
     int hw;        /* demo's hardware type, 17 on a Q2; absent from set-gapless */
+    int dsd;       /* how a DSD file goes out, DSD_*: set by the player for the output it will play on */
 };
 
 /* What media-info reports. */
@@ -38,8 +39,9 @@ struct ctl {
     struct song play_song, preload_song;
     int seek_to;
     int paused;
-    /* settings demo pushes; volume, softvol and dsdmode take effect in phase 4, speed and mqa never (as stock) */
+    /* settings demo pushes; speed and mqa are stored and read by nothing, as stock's */
     int outputway, volume, softvol, dsdmode, replaygain, speed, explay, mqa, eq_on;
+    int volume_changed; /* an mcl-setvol since the playback thread last looked */
     float eq[10];
     int eq_changed; /* an mcl-seteq since the playback thread last looked: the EQ state on disk is new */
     int click;      /* an mcl-click to mix in, CLICK_*, while a song plays */
@@ -56,7 +58,10 @@ void ipc_send(const char *text);
 void *ipc_thread(void *);
 
 /* source.c: one open file or stream, decoded to interleaved PCM in the format the output is opened with. */
-struct pcm_format { int rate, channels, bytes, is_float; /* S16_LE (2 bytes), S32_LE (4) or FLOAT_LE (4, is_float) */ };
+/* S16_LE (2 bytes), S32_LE (4) or FLOAT_LE (4, is_float); S24_3LE (3) as a device's. dsd: DSD's own bits, which
+ * nothing may change: DoP frames in S24_3LE (3) or Native's DSD_U32_BE (4), dsd.c */
+enum { DSD_PCM, DSD_DOP, DSD_NATIVE };
+struct pcm_format { int rate, channels, bytes, is_float, dsd; };
 struct source;
 /* cancel, when not NULL, is read during the open: once it is nonzero a blocking read gives up and the open fails. */
 struct source *source_open(const struct song *song, int *error, const int *cancel);
@@ -73,16 +78,22 @@ int64_t source_frames(const struct source *); /* frames handed out since the sta
 /* output.c */
 struct output;
 struct output *output_open(const struct pcm_format *, int outputway, int hw);
+/* Whether an open output goes on with format f on outputway (a gapless change): Bluetooth takes the same channels
+ * and width at any rate and resamples it; the others the same format. 1 when it does, and f is then what is written. */
+int output_take(struct output *, const struct pcm_format *f, int outputway);
+/* Software volume, mcl-setvol's L << 8 | R by stock's law (output.c); 0x6464, 100 each, is unity */
+void output_volume(struct output *, int volume);
+void volume_gains(int volume, float gain[2]); /* left, right */
 int output_write(struct output *, const uint8_t *data, int frames);
-int64_t output_delay(struct output *); /* frames written and not yet played */
+int64_t output_delay(struct output *); /* frames written and not yet played, at the rate written */
 void output_pause(struct output *, int on);
 void output_drop(struct output *);     /* forget what is buffered: a seek, a skip, a stop */
 void output_drain(struct output *);    /* play what is buffered to its end */
 void output_close(struct output *);
 enum { CLICK_WHEEL = 1, CLICK_BUTTON, CLICK_BEEP }; /* mcl-click's wheel, button and beep */
 int output_click(struct output *, int kind); /* mixed into what is about to be heard */
-/* the headphone DAC (output way 0; nothing on the others) */
-void dac_song(int outputway);              /* at each song's start: PCM mode */
+/* the headphone DAC (output way 0; on the others only dac_song's mode) */
+void dac_song(int outputway, int dsd);     /* at each song's start: DoP or PCM mode */
 void dac_mute(int outputway);
 void dac_unmute(int outputway, int wait);  /* wait: hold sound back until the mute line has let go */
 int dac_stamp(int pressed);                /* a fresh press (1) or natural-start mark (0) from demo, each once */
@@ -97,6 +108,22 @@ int dsp_run(struct dsp *, const uint8_t *data, int frames, double pts, const uin
 void dsp_eq_changed(struct dsp *);
 void dsp_close(struct dsp *, int ended); /* ended: the song played to its end, nobody cut it */
 void dsp_meter(const struct pcm_format *, int untouched, const uint8_t *data, int frames, int uv[2]);
+
+/* dsd.c: DSD packets made into DoP or Native frames */
+enum { DSD_CHANNELS = 8 };
+struct dsd_pack {
+    int mode, channels;
+    int left;                       /* bytes of each channel waiting for the next packet, below a frame's */
+    uint8_t wait[DSD_CHANNELS][4];
+    int64_t frame;                  /* frames made: DoP's marker goes by it */
+    uint8_t *buf;
+    size_t cap;
+};
+int dsd_unit(int mode); /* bytes of each channel a frame */
+void dsd_reset(struct dsd_pack *);
+/* bytes of packet data (planar: a block a channel; lsb_first: DSF's bit order), from skip bytes into each channel on:
+ * the frames made, at *out; below 0 with no memory */
+int dsd_pack(struct dsd_pack *, const uint8_t *data, int bytes, int planar, int lsb_first, int skip, const uint8_t **out);
 
 /* engine.c */
 void *engine_thread(void *);

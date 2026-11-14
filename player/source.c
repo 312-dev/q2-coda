@@ -37,6 +37,10 @@ struct source {
     int64_t limit, next_pos;
     FILE *file;
     int aac_mp4; /* AAC from the mov demuxer, in a time base of one sample */
+    /* DSD as it is, DoP or Native (dsd.c): packets are not decoded. drop_until is then in bytes of a channel, and
+     * byte_rate a channel's bytes a second (the DSD rate over 8) */
+    int raw, planar, lsb_first, byte_rate;
+    struct dsd_pack pack;
 };
 
 static int interrupted(void *opaque) {
@@ -166,6 +170,16 @@ struct source *source_open(const struct song *song, int *error, const int *cance
     case AV_SAMPLE_FMT_FLT: case AV_SAMPLE_FMT_DBL: s->out.bytes = 4, s->out.is_float = 1; break;
     default: goto fail;
     }
+    enum AVCodecID id = codec->id;
+    if (song->dsd && (id == AV_CODEC_ID_DSD_LSBF || id == AV_CODEC_ID_DSD_MSBF || id == AV_CODEC_ID_DSD_LSBF_PLANAR || id == AV_CODEC_ID_DSD_MSBF_PLANAR)) {
+        /* DoP or Native: the decoder's rate is a channel's bytes a second; frames hold 2 or 4 of them */
+        s->raw = 1, s->planar = id == AV_CODEC_ID_DSD_LSBF_PLANAR || id == AV_CODEC_ID_DSD_MSBF_PLANAR;
+        s->lsb_first = id == AV_CODEC_ID_DSD_LSBF || id == AV_CODEC_ID_DSD_LSBF_PLANAR;
+        s->byte_rate = s->dec->sample_rate;
+        s->pack.mode = song->dsd, s->pack.channels = s->out.channels;
+        if (s->out.channels > DSD_CHANNELS) goto fail;
+        s->out.rate = s->byte_rate / dsd_unit(song->dsd), s->out.bytes = song->dsd == DSD_DOP ? 3 : 4, s->out.is_float = 0, s->out.dsd = song->dsd;
+    }
     if (song->start > 0 && source_seek(s, song->start) < 0) goto fail;
     *error = ERR_NONE;
     return s;
@@ -183,6 +197,7 @@ void source_close(struct source *s) {
     avformat_close_input(&s->fmt);
     if (s->file) fclose(s->file);
     free(s->buf);
+    free(s->pack.buf);
     free(s);
 }
 
@@ -204,6 +219,12 @@ void source_info(const struct source *s, struct info *i) {
     i->length = s->limit >= 0 ? (int)(s->limit / s->out.rate) : s->fmt->duration > 0 ? (int)(s->fmt->duration / AV_TIME_BASE) : 0;
     i->bits = s->out.bytes == 2 ? 16 : !s->out.is_float && s->dec->bits_per_raw_sample > 0 ? s->dec->bits_per_raw_sample : 32;
     snprintf(i->codec, sizeof i->codec, "%s", codec_name(s));
+    if (id == AV_CODEC_ID_DSD_LSBF || id == AV_CODEC_ID_DSD_MSBF || id == AV_CODEC_ID_DSD_LSBF_PLANAR || id == AV_CODEC_ID_DSD_MSBF_PLANAR) {
+        /* as stock's (captured): BITS 1, RATE the DSD rate, BITRATE twice it sent as it is and four times as PCM. The
+         * DAC's DoP halves RATE in stock; play() does that, knowing the output */
+        int dsd = s->dec->sample_rate * 8;
+        i->bits = 1, i->rate = dsd, i->bitrate = s->raw ? 2 * dsd : 4 * dsd;
+    }
 }
 
 /* mcl-replaygain's scale for this file, as hciplayer's replaygain filter sets it up at each file (0x4282c0): mode 1
@@ -258,7 +279,30 @@ static int convert(struct source *s, int skip) {
     return n;
 }
 
+/* DoP or Native: the next packet's DSD made into frames (dsd.c), from the byte a seek aimed at */
+static int raw_read(struct source *s, const uint8_t **data) {
+    for (;;) {
+        if (s->done || av_read_frame(s->fmt, s->pkt) < 0) return s->done = 1, 0;
+        if (s->pkt->stream_index != s->stream) { av_packet_unref(s->pkt); continue; }
+        int skip = 0, per = s->pkt->size / s->out.channels;
+        if (s->drop_until >= 0) {
+            AVStream *st = s->fmt->streams[s->stream];
+            int64_t at = s->pkt->pts == AV_NOPTS_VALUE ? s->drop_until : av_rescale_q(s->pkt->pts, st->time_base, (AVRational){1, s->byte_rate});
+            if (at + per <= s->drop_until) { av_packet_unref(s->pkt); continue; }
+            if (at < s->drop_until) skip = (int)(s->drop_until - at);
+            s->drop_until = -1;
+        }
+        int n = dsd_pack(&s->pack, s->pkt->data, s->pkt->size, s->planar, s->lsb_first, skip, data);
+        av_packet_unref(s->pkt);
+        if (n < 0) return n;
+        if (n == 0) continue;
+        s->frames += n;
+        return n;
+    }
+}
+
 int source_read(struct source *s, const uint8_t **data) {
+    if (s->raw) return raw_read(s, data);
     for (;;) {
         int r = s->done ? AVERROR_EOF : avcodec_receive_frame(s->dec, s->frame);
         if (r == AVERROR_EOF) return s->done = 1, 0;
@@ -329,5 +373,6 @@ int source_seek(struct source *s, int seconds) {
     s->frames = 0;
     s->base = target;
     s->drop_until = st->start_time != AV_NOPTS_VALUE ? target + av_rescale_q(st->start_time, st->time_base, (AVRational){1, s->out.rate}) : target;
+    if (s->raw) s->drop_until = (int64_t)seconds * s->byte_rate, dsd_reset(&s->pack); /* in a channel's bytes */
     return 0;
 }

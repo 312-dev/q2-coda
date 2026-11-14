@@ -111,7 +111,7 @@ static void command(const char *name, const char *arg) {
     } else if (!strcmp(name, "mcl-orderstop")) {
         /* stock closes a PCM left open after the last song; this player has none open while idle */
     } else if (!strcmp(name, "mcl-setvol")) {
-        c->volume = atoi(arg);
+        c->volume = atoi(arg), c->volume_changed = 1;
     } else if (!strcmp(name, "mcl-softvolflag")) {
         c->softvol = atoi(arg);
     } else if (!strcmp(name, "mcl-setoutputway")) {
