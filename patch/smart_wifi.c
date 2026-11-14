@@ -251,9 +251,10 @@ static int online_match_again(void *win, void *unused) {
  * there too if that surprises. */
 int ringnav_stream_row(void *button, void *event) {
     int row = row_of(button);
-    return row >= 0 && smart_hold(stream_row_again, (void *)(long)row, 0)
-               ? 0
-               : stock_stream_row_trampoline(button, event);
+    if (row >= 0 && smart_hold(stream_row_again, (void *)(long)row, 0)) return 0;
+    /* OLED: Tidal with no link is a page saying so (feedback.c), not stock's toast */
+    if (!row && get_wifisignal() <= 0 && feedback_offline("TIDAL")) return 0;
+    return stock_stream_row_trampoline(button, event);
 }
 
 /* Network service's rows (0x4cce64): DLNA (0) and AirPlay (1) switch at once (stock starts their

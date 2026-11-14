@@ -295,6 +295,24 @@ void feedback_switch_bar(void *w, void *canvas) {
     st.sel_accent = w;
 }
 
+/* A service's page with no link (oled-design.md Empty and offline): its name in the status row over
+ * the note, "Not connected" and the setting that gives it one; Return leaves. 1 when shown. */
+static void *offline_page __attribute__((section(".scratch")));
+static int offline_gone(void *page, void *event) {
+    if (offline_page == page) offline_page = (void *)0;
+    return 0;
+}
+int feedback_offline(const char *title) {
+    if (!feedback_oled()) return 0;
+    if (offline_page) return 1;
+    void *page = page_open("offline_page", offline_gone, page_keyup);
+    if (!page) return 0;
+    offline_page = page;
+    page_title(page, title, 1);
+    bar_title_sync(page);
+    return feedback_empty(page, 0, "Not connected", "Turn on Wi-Fi in System > Wireless");
+}
+
 /* Songs' page (allmusic_page) over an empty list, under a shuffle_row theme: the Shuffle row
  * would stand over nothing, so it hides and the page says what is missing, by the list's class
  * (g_class_type): My Fav (0xf00a), Recent (0xf007), Most Played's stock list (0xf008), Recently

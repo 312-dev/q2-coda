@@ -315,7 +315,9 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   No fake rows, and no Shuffle row over nothing: Favorites, Recent and the other song lists hide
   it and say what is missing ("No favorites", hint "Hold Play/Pause on a song to add it").
 - Offline and missing things use the same form (Spotify's "Spotify isn't on the card", the App
-  Store's "No apps listed").
+  Store's "No apps listed"). TIDAL
+  with no Wi-Fi opens a page of its own titled TIDAL: "Not connected", hint "Turn on Wi-Fi in
+  System > Wireless".
 - Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done.
 
 ### Icons
