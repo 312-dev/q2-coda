@@ -416,6 +416,7 @@ int addon_fav_path(const char *path, int on);
 extern int catalogue_source;
 int catalogue_on(void), catalogue_path(const char *path), catalogue_unavailable(void *r);
 int catalogue_seconds(const char *path), catalogue_load(void *q, int *at, void **own);
+int catalogue_access(const char *path, int mode); /* stock's play check, tools/build.py */
 char *catalogue_union(const char *sql);
 const char *catalogue_rows(void); /* library_query's union, "" without one */
 void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);

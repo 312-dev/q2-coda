@@ -978,13 +978,21 @@ static const char *cat_local(const char *path) {
     return e && !e->dup && e->local ? ix_str(&cat.ix, e->local) : 0;
 }
 static int cat_online(void) { return cat.online; }
-/* Whether r cannot play now: a server row with no offline copy while offline, or any server row
- * with Local only (its playlist kept, docs/server-library.md#compatibility). */
-int catalogue_unavailable(void *r) {
-    const char *path = r ? P(r, REC_PATH) : 0;
+/* Whether path, a server row's, cannot play now: no offline copy while offline, or Local only (its
+ * playlist kept, docs/server-library.md#compatibility). Any other path can. */
+static int path_unavailable(const char *path) {
     if (!catalogue_path(path)) return 0;
     if (!catalogue_on()) return 1;
     return !cat_local(path) && !(cat_online() && cat_lookup(path));
+}
+int catalogue_unavailable(void *r) { return path_unavailable(r ? P(r, REC_PATH) : 0); }
+/* Stock's play check on a Library row (tools/build.py CATALOGUE_ACCESS): a server row that can play
+ * now passes, and ringnav_load (catalogue_load) streams it or plays its copy; one that can't fails
+ * as a missing file does, so stock says File Not Found and opens no Now Playing. ponytail: stock's
+ * words, not "Not available offline": each of the eight callers shows its own toast on a failure,
+ * and the page after a pass. */
+int catalogue_access(const char *path, int mode) {
+    return catalogue_path(path) ? -path_unavailable(path) : access(path, mode);
 }
 /* A server row's seconds for durations.c, -1 for any other path. */
 int catalogue_seconds(const char *path) {

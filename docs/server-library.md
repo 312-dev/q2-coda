@@ -1,11 +1,13 @@
-# Server library (design)
+# Server library
 
 A planned library mode, **Local + Server**, in which a music server's songs (Navidrome or another
 OpenSubsonic server) appear in the Library beside the card's own: Artists, Albums, Songs, Cover Flow
 and playlists. When the Q2 is online every row plays; offline, rows that are not on the card are
 greyed and only card files and cached copies play, and shuffle leaves the greyed rows out. **Local
-only** stays the default and behaves as the Library does today. Nothing here is built yet; this file
-is the plan, written so the work can start once the security and efficiency branches have merged.
+only** stays the default and behaves as the Library does without it. The firmware's half is built
+(`patch/catalogue.c`, [internals.md: Server library](internals.md#server-library)); the Subsonic
+app's half is on its branch `feat/q2-catalogue`. This file is the contract between them and the
+design behind both.
 
 It rests on two studies made while planning it: one of the Subsonic card app and of the firmware's
 library, playback and card-app code, and one of how open-source Subsonic clients (Ultrasonic, Tempus,
@@ -95,15 +97,15 @@ strongest evidence first:
 
 A match on any layer hides the server row and links its sid to the card file (`servermeta.dup`):
 the song plays from the card, and ratings sync by that sid. Layer 3 never matches on its own when a
-stronger layer disagrees: both sides have MusicBrainz ids and they differ, or the suffixes are equal
-and the sizes and durations clearly differ (more than 2 s), as a live take beside the studio one
-does. A duration the firmware cannot read (no tag length) fails layers 2 and 3.
+stronger layer disagrees: both sides have MusicBrainz ids and they differ. A duration the firmware cannot read (taglib finds no length) fails layers 2 and 3.
 
 The match runs at each import and again whenever the card's library changes (Update Local Music, a
 scan after files arrive over USB or Wi-Fi transfer: each moves `library_gen`), from the songs kept
 in `serverall`, so a song copied to the card later leaves the server rows without a new catalogue.
 Card files are read (their size, and their MusicBrainz id and length) only where a server song has
-the same normalised title or the same size, so a large card is not read whole.
+the same normalised title, or, for a card file with no title tag, the same size, so a large card is
+not read whole. A size that differs is no disagreement (a retagged copy, new cover art), and the
+tag layer's 2 s keeps a live take apart from the studio one.
 
 ### Where it is kept
 
@@ -117,33 +119,57 @@ schema `cat`, while Local + Server is on and the card is in:
   has no column for. `local` is the offline copy, `dup` the linked card path.
 - `cat.servertable`: the rows the Library shows, `serverall` less the duplicates, rebuilt after
   each match.
-- `cat.serverlists(app, pid, list)`: which stock playlist (`playlist`'s header id) holds each
-  catalogue playlist.
+- `cat.serverpl(app, pid, name)` and `cat.serveritem(app, pid, sid, path)`: the catalogue's
+  playlists and their items, in the file's order.
+- `cat.serverlists(app, pid, list, twin)`: which stock playlist (`playlist`'s header id) holds each
+  catalogue playlist; `twin` when it was the app's synced copy (below).
+
+The job that imports a catalogue, or matches again, writes a whole new file beside it
+(`catalogue.db.new`) on its own thread and connection; the UI thread then detaches the old file,
+renames the new one over it and attaches it again, so no Library query waits on a long write.
+
+### Playlists
+
+Each catalogue playlist is a stock playlist (a header row, id 0 to 99, and its items), so Library >
+Playlists lists it with the user's: a server song's item is its `servertable` row, a synced or
+linked song's its card file's. A playlist the app also synced to the card as an `.m3u` (imported by
+the [library extension](internals.md#card-apps)) is the same playlist twice; the firmware shows one,
+the catalogue's: a stock playlist with the catalogue playlist's name whose items are that
+playlist's card files in order is its twin, and the catalogue playlist takes the twin's place (its
+id, its items replaced by the catalogue's, which also hold the server songs). A twin is only
+unlinked, never deleted, when its playlist leaves the catalogue, since it is the user's synced
+file's. A playlist of the user's with that name and other songs keeps the name, and the catalogue's
+is left out. A catalogue playlist that leaves the catalogue is deleted. At most stock's 100
+playlists.
 
 ### Core firmware changes
 
-| Change | Where | Payload (estimate) |
+| Change | Where | Built |
 |---|---|---|
-| Import: read `catalogue.tsv` on a pthread when its `seq` changes; create `servertable` with `songtable`'s own columns (`create table servertable as select * from songtable where 0`) and a side table `servermeta(fileurl, app, sid, local)`; insert in one transaction through the payload's own SQLite connection, as Era does (`library_lists.c:371-374`); bump the library generation so open lists query again | new `patch/catalogue.c`, polled from `addon_poll` | 6-10 KB |
-| Each server row's identity: `fileurl` = `/mnt/mmc/.<id>/cat/<album id>/<sid>.<suffix>`, a hidden folder the scan skips, stable across imports, so playlists, ratings, favourites and play counts key on it as on a card path | `catalogue.c` | in the above |
-| Merge: `union all select * from servertable` inside `library_query` and in Era's SQL, only in Local + Server | `navigation.c:138-144` (where the query is built), `library_lists.c` | under 2 KB |
-| Availability: an in-memory set of sids with an offline copy (from `servermeta.local` and `.avail`); `online()` from `networkGetConnectStatus()` cached once per poll, and the app's `server=` | `catalogue.c` | about 2 KB |
-| Greyed rows: in `ringnav_style_color`, before the selected-row branches, a server row that is unavailable while offline takes the muted grey; a press on one says "Not available offline" | `navigation.c:6036-6062`, `coverflow.c:1468-1492` | 1-2 KB |
-| Play: a press on a list containing server rows writes `/tmp/q2-<id>.catplay` (the list and the start row) when online; the app answers with its usual `.play` m3u. Offline, or with no answer in a few seconds, the firmware builds the queue itself from card rows and cached copies only | the Library's play-from-row path | 3-5 KB |
-| Shuffle and connection loss: offline, shuffle filters greyed rows out before it orders the queue (the pattern of `no_videos`, `playback.c:886-898`); if the link drops mid-queue, `upcoming()` (`playback.c:782-803`) skips unavailable rows from then on | `patch/playback.c` | 1-2 KB |
-| Guards where code assumes a file exists: Cover Flow art writes a "no art" marker instead of retrying a missing file (`coverflow.c:431-448`); durations use the catalogue's seconds; delete is refused; Long Songs, Go to Album and the info page read the catalogue's fields | `coverflow.c`, `durations.c`, `folder_delete.c`, `library_lists.c` | 2-3 KB |
-| Setting: `[Q2POD] library_source`, 0 Local only (default) or 1 Local + Server, as a Library settings row | `pod_keys` (`navigation.c:3148`) | under 1 KB |
+| Import: `catalogue.tsv` read on a pthread when its `seq` changes, a line at a time, into a new `catalogue.db` (`serverall` with `songtable`'s own columns, `servermeta` beside it), in one transaction on the job's own SQLite connection; the header's `rows=` checked against the rows read; answered in `.catalogue.done`; the library generation bumped so open lists query again | `catalogue.c` (`cat_worker`, `import_file`), polled from `addon_poll` | yes |
+| Each server row's identity: `fileurl` = `/mnt/mmc/.<id>/cat/<album id>/<sid>.<suffix>`, a hidden folder the scan skips, stable across imports, so playlists, ratings, favourites and play counts key on it as on a card path | `catalogue.c` (`imp_song`) | yes |
+| Duplicates: the three layers, again whenever `library_gen` moves (Update Local Music, the scans after USB storage and Wi-Fi transfer), including a scan that ends while a job runs | `catalogue.c` (`cat_match`, `cat_same`, `cat_poll`) | yes |
+| Merge: `union all select * from servertable` inside `library_query`'s music loads and in Era's SQL, only in Local + Server and while the file is attached | `navigation.c` (`library_query`), `library_lists.c` (`era_sql`) | yes |
+| Availability: an in-memory index of the server rows and linked card files (by path, and by sid), with each offline copy, from `servermeta.local` and `catalogue.avail`; online is `networkGetConnectStatus()` and no app's `server=down`, read once a second | `catalogue.c` | yes |
+| Greyed rows: stock's pooled Library rows as `ringnav_table_load` binds them to `p_deque_showlist`'s records, and `ringnav_style_color` greys the text of a bound row that can't play; a press on one fails stock's play check (`CATALOGUE_ACCESS`), which says File Not Found | `navigation.c` (`ringnav_table_load`, one call; `ringnav_style_color`), `catalogue.c` | yes; Cover Flow's own rows are not greyed |
+| Play: a list with server rows played online writes `.catplay`; the app's `.play` within 4 s is the answer, else the firmware plays the list itself from card rows and offline copies; offline it does so at once | `playback.c` (`ringnav_load`), `catalogue.c` (`catalogue_load`) | yes |
+| Shuffle and connection loss: offline, the queue loaded is the playable rows only, so Shuffle Songs (which plays the whole library through the same load) leaves the greyed out; mid-queue, `upcoming()` skips rows that can't play now | `playback.c` | yes |
+| Guards where code assumes a file exists: Cover Flow art writes its "no art" marker for a server row at once; durations use the catalogue's seconds | `coverflow.c`, `durations.c` | yes |
+| Delete Song | | not needed: a server row never plays under its own `fileurl` (the app's `.play` and the offline queue both hold card files), so Now Playing's Delete only ever sees a card file, a Stream Cache copy included |
+| Long Songs, Go to Album and the info page for a server row | | not built: Long Songs reads `songtable` alone, so server songs are not in it; Go to Album and the info page are unchecked for a server row |
+| Setting: `[Q2POD] LIBRARYSOURCE`, 0 Local Only (default) or 1 Local + Server, a row on Display > Cover Flow | `navigation.c` (`pod_keys` and the rows' tables beside it) | yes |
+| Ratings: `ratings.out` appended for every app with `ratings=1`; `ratings.in` renamed to `ratings.in.taking`, applied, then deleted | `catalogue.c`, `ratings.c` (three calls) | yes |
 
-Total about 17 to 27 KB of the payload's 1 MB (`patch_bytes` in a build's `manifest.json` was 787 to
-818 KB in this session's builds); all catalogue data lives on the heap.
+PATCH_BYTES_PLACEHOLDER All catalogue data lives on the heap or the card.
 
 ### Compatibility
 
 - **Local only** runs no union, no grey test and no import, and ignores catalogue files.
 - **Local + Server** with no catalogue app installed behaves as Local only.
 - Existing card apps see only a longer capability line; no existing file format changes.
-- Turning the mode off stops the union and bumps the library generation. Whether the playlists the
-  catalogue created are kept (as playlists of greyed songs) or removed is an open decision.
+- Turning the mode off stops the union, detaches the file and bumps the library generation. The
+  playlists the catalogue made are kept, their server songs greyed and refused ("Turn on Local +
+  Server to play it"); turning it on again needs no new import.
 
 ### The app's side
 

@@ -362,9 +362,14 @@ def test_availability_offline_online_copies_and_the_server_state(rig):
     rig.poll()
     assert not rig.unavailable(url('s1')) and rig.unavailable(url('s2'))
     assert not rig.unavailable('/mnt/mmc/Music/card.flac')
+    # stock's play check on a Library row (CATALOGUE_ACCESS): a server row passes only when it can play
+    check = rig.fw.fn('catalogue_access', C.c_int, C.c_char_p, C.c_int)
+    assert check(url('s1').encode(), 4) == 0 and check(url('s2').encode(), 4) == -1
+    assert check(b'/mnt/mmc/Music/card.flac', 4) == -1  # no such card file: access's own answer
     rig.online = True
     rig.poll()
     assert not rig.unavailable(url('s2'))
+    assert check(url('s2').encode(), 4) == 0
     rig.files.files[STATE] = b'hold=0\nserver=down\n'
     rig.poll()
     assert rig.unavailable(url('s2'))
