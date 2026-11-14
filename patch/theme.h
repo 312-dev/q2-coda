@@ -281,6 +281,7 @@ int client_h(void); /* the window under the bar of the set theme_boot wrote (the
  * drift_axis) */
 enum { SPLIT_ROW, SPLIT_ART, SPLIT_ART_UP, SPLIT_INSET };
 int split_geom(int k);
+int list_fit_end(void); /* theme_engine.c: a list_fit set's lists' last screen row, 0: none */
 void paint_stops(void *canvas, int x, int y, int w, int h, const stops_t *s); /* navigation.c */
 /* The rows painter: the track across w, the played part over its first fill_w px; final colours
  * (the volume panel away from Now Playing, a card app's progress). */

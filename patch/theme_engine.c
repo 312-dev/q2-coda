@@ -108,6 +108,8 @@ _Static_assert(V_SPLIT_ART == V_SPLIT_ROW + SPLIT_ART &&
                    V_SPLIT_INSET == V_SPLIT_ROW + SPLIT_INSET,
                "tools/ipod.py GEOM_VALS keeps split_* in SPLIT_* order");
 int split_geom(int k) { return geom_val(V_SPLIT_ROW + k); }
+/* A list_fit set's lists end their whole rows by this screen row (OLED's 282), 0: no such set. */
+int list_fit_end(void) { return geom_val(V_LIST_FIT) ? geom_val(V_BAR) + geom_val(V_LIST_END) : 0; }
 /* The Display rows' settings, by ringnav_display's index: 0 Accent, 1 Home (0 Split, 1 Full,
  * 2 Carousel), 2 Battery, 3 Theme, 4 Shortcut, 5 Corners, 6 Light Mode, 7 Smart Awake, 8 Centred
  * Now Playing, 9 the Clicker's output (no row of its own: Controls' Key Tone row shows it,
