@@ -342,7 +342,7 @@ pattern.
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
 | Quick Settings                      | Own                         | Tiles become rows: the theme has no tiles                                                                  |
-| Lock screen                         | Own                         | Clock 56 px Inter Medium centred, date 16 px Text Secondary, black                                         |
+| Lock screen                         | Own                         | Clock 56 px Inter Medium centred, date 16 px Secondary, the song in two lines; black or the picture at 50% |
 
 The concept's Apple Music, Apple TV, CD sync and storage pages have no Q2 Pod equivalent and are
 out of scope. Spotify's pages follow the list patterns.

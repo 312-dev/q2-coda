@@ -19889,8 +19889,8 @@ assert [c[:2] for c in m.calls if c[0] in ('stock_savercover','widget_invalidate
 def put(m,w,*g):
     for k,v in zip(('W_X','W_Y','W_W','W_H'),g): m.word(w+O[k],v)
 def blank(m): m.bands=[]; m.letters=[]; m.rounded=[]; m.image_draws=[]; m.calls=[]
-def lock_cl(large=0,light='1',picture='screensaver_default',battery='1',status=0,clock=(16,42),bar_y=None):
-    SETUP[:]=[lambda k:(k.config.update(THEME='1',LIGHT=light,LOCKCLOCK=str(large),BATTERY=battery),k)]
+def lock_cl(large=0,light='1',picture='screensaver_default',battery='1',status=0,clock=(16,42),bar_y=None,theme='1'):
+    SETUP[:]=[lambda k:(k.config.update(THEME=theme,LIGHT=light,LOCKCLOCK=str(large),BATTERY=battery),k)]
     try: m=lock_machine(picture)
     finally: SETUP.clear()
     w={n:m.node(k,n) for k,n in (('image','img_screensaver'),('view','view_shade'),('digit_clock','clock_time'),('digit_clock','clock_date'),('label','label_battery'),
@@ -19957,6 +19957,19 @@ def tapped(x,y):
         bx,by,bw,bh=screen_box(lk,k)
         if lk.nodes[k]['visible'] and bx<=x<bx+bw and by<=y<by+bh: return k
 assert all(tapped(x,y)==w['view_playinfo'] for x in (16,187,358) for y in range(185,192)) and tapped(187,184)==w['view_timeinfo']; passed()
+# OLED's lock screen (AWTK's sizes, the design's px times 1.21): the time 56 px Inter Medium centred with its digits on y 120 (Large 96), the date 16 px under it in
+# Text Secondary, the song two centred lines at rest on an ellipsis, with no card, cover, battery or hint; the picture
+# dimmed 50% toward black over the whole window, Black black. (Dark half: a label stores its final ink there.)
+lk,w=lock_cl(theme='3',light='0'); box_=lambda n: screen_box(lk,w[n]); font_=lambda n:(lk.nodes[w[n]]['style:normal:font_name'],lk.nodes[w[n]]['style:normal:font_size'])
+assert box_('clock_time')==(0,69,375,102) and font_('clock_time')==('inter-medium',68) and lk.nodes[w['clock_time']]['style:normal:text_align_h']=='center'
+assert box_('clock_date')==(0,157,375,24) and font_('clock_date')==('inter',19) and lk.nodes[w['clock_date']]['format']=='MMM D, Y'
+assert (lk.nodes[w['clock_date']]['style:normal:text_color']&0xffffffff)==color_t(0xababab)==(lk.nodes[w['scrlabel_artist']]['style:normal:text_color']&0xffffffff)
+assert all(lk.nodes[w[n]]['visible']==0 for n in ('label_battery','img_battery','pgbar_battery','view_shade','img_playcover','img_slide'))
+assert box_('scrlabel_title')==(24,200,327,30) and font_('scrlabel_title')[1]==24 and box_('scrlabel_artist')==(24,232,327,24) and font_('scrlabel_artist')[1]==18
+assert all(lk.nodes[w[n]].get('hscroll_label_set_ellipses')==1 and lk.nodes[w[n]].get('hscroll_label_set_only_focus')==1 for n in ('scrlabel_title','scrlabel_artist'))
+lock_paint(lk,w); assert (0,0,375,320,0x80000000) in [b[:5] for b in lk.bands] and lk.nodes[w['view_playinfo']]['style:normal:bg_color']==0; passed()
+lk,w=lock_cl(theme='3',large=1); assert screen_box(lk,w['clock_time'])==(0,33,375,174) and lk.nodes[w['clock_time']]['style:normal:font_size']==116
+lk,w=lock_cl(theme='3',picture='q2pod:black'); lock_paint(lk,w); assert (0,0,375,320,color_t(0)) in [b[:5] for b in lk.bands]; passed()
 # A corner painter with no table for its radius takes a hard corner: a ring whose radius, or its radius less one, has none (and 0, its less-one off the table's front).
 def ring(R):
     lk,_=lock_cl(); r=lk.alloc(16)

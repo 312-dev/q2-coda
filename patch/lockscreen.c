@@ -1,6 +1,6 @@
 /* Lock screen (docs/internals.md#lock-screen): six built-in wallpapers, drawn by wall_render and
- * shipped as no image files, and the Large clock. wall_render is plain C, so test/patch.py also
- * builds it on the host (PEQ_HOST) to check it and write previews. */
+ * shipped as no image files, the Large clock and OLED's screen. wall_render is plain C, so
+ * test/patch.py also builds it on the host (PEQ_HOST) to check it and write previews. */
 #include "peq.h"
 
 #define WALLS 6
@@ -154,6 +154,7 @@ static struct {
      * (the page shows), Black and Large's clock; its timer and the state it last painted. */
     void *date, *pct, *card, *title, *artist, *hint;
     int built_in, info, page, black, large; /* built_in: img is a built-in's, either theme */
+    int oled;                               /* OLED's screen (oled_lock): img is dimmed */
     unsigned timer, shown;
     unsigned full_key;                     /* full's id, width and height, kept between windows */
     void *thumb[WALLS], *small[WALLS];     /* the picker's built-in thumbnails and theirs */
@@ -191,7 +192,7 @@ static void *wall_bitmap(int w, int h, int id) {
 static int forget(void *ctx, void *event) {
     if (ctx == lk.img) { /* full stays for the next lock window */
         lk.img = lk.date = lk.pct = lk.card = lk.title = lk.artist = lk.hint = 0;
-        lk.info = 0;
+        lk.info = lk.oled = 0;
         stop_timer(&lk.timer);
     }
     for (int i = 0; i < WALLS; ++i)
@@ -392,8 +393,61 @@ static void info_paint(void *w, void *canvas) {
     }
 }
 
+/* OLED's screen (docs/oled-design.md#screens), stock's widgets in screen pixels, sizes AWTK's (the
+ * design's px times 1.21, docs/oled-design.md#type): the time in Inter Medium, the design's 56 px
+ * (Clock: Large 96), centred with its digits on y 120; the date under it, 16 px Text Secondary;
+ * the song as two centred lines, its title 20 px and its artist 15 px Text Secondary, at rest on
+ * an ellipsis, with no card, cover or hint; the picture under them dimmed 50% toward black
+ * (lockscreen_paint), Black black in either half. Nothing reaches the glass's corners. */
+#define OLED_SECONDARY 0xffababab
+#define OLED_TIME_PX 68 /* 56 */
+#define OLED_TIME_LARGE_PX 116 /* 96 */
+#define OLED_DATE_PX 19 /* 16 */
+#define OLED_TITLE_PX 24 /* 20 */
+#define OLED_ARTIST_PX 18 /* 15 */
+static void oled_lock(void *win, void *img, int id) {
+    static const char *const hidden[] = { "label_battery", "img_battery", "pgbar_battery",
+                                          "view_shade",    "img_playcover", "img_slide" };
+    for (unsigned i = 0; i < sizeof hidden / sizeof *hidden; ++i) {
+        void *w = widget_lookup(win, hidden[i], 1);
+        if (w) widget_set_visible(w, 0, 0);
+    }
+    int px = ringnav_lock_clock() ? OLED_TIME_LARGE_PX : OLED_TIME_PX;
+    void *info = widget_lookup(win, "view_timeinfo", 1),
+         *time = widget_lookup(win, "clock_time", 1), *date = widget_lookup(win, "clock_date", 1),
+         *card = widget_lookup(win, "view_playinfo", 1),
+         *title = widget_lookup(win, "scrlabel_title", 1),
+         *artist = widget_lookup(win, "scrlabel_artist", 1);
+    if (info) widget_move_resize(info, 0, 0, 375, 192);
+    if (time) slider_label(time, 0, 120 - px * 3 / 4, 375, px * 3 / 2, px, "inter-medium");
+    if (date) {
+        info_label(date, 0, 120 + px * 3 / 8 + 12, 375, 24, OLED_DATE_PX, "inter", "center");
+        widget_set_prop_str(date, "format", "MMM D, Y");
+        text_ink(date, OLED_SECONDARY, 1);
+    }
+    if (card) {
+        widget_move_resize(card, 24, 200, 327, 60);
+        widget_set_prop_int(card, "style:normal:bg_color", 0);
+        widget_set_prop_int(card, "style:normal:border_color", 0);
+    }
+    info_label(title, 0, 0, 327, 30, OLED_TITLE_PX, "inter", "center");
+    info_label(artist, 0, 32, 327, 24, OLED_ARTIST_PX, "inter", "center");
+    if (artist) text_ink(artist, OLED_SECONDARY, 1);
+    /* at rest on an ellipsis: a marquee's fades (marquee_fade) are the page's black, not the
+     * picture's */
+    for (int i = 0; i < 2; ++i) {
+        void *w = i ? artist : title;
+        if (w) hscroll_label_set_only_focus(w, 1), hscroll_label_set_ellipses(w, 1);
+    }
+    lk.title = title, lk.artist = artist, lk.date = date;
+    lk.black = id == WALLS - 1;
+    lk.img = img;
+    lk.oled = 1;
+    if (id < 0) widget_on(img, EVT_DESTROY, forget, img);
+}
+
 /* saverscreen_page_init: stock builds the lock window; a built-in picture then paints in place of
- * stock's (lockscreen_paint), and Large lays the clock out again. */
+ * stock's (lockscreen_paint), and Classic's info screen, OLED's screen or Large lays it out again. */
 int lockscreen_init(void *win, void *ctx) {
     int result = stock_saver_trampoline(win, ctx);
     void *img = widget_lookup(win, "img_screensaver", 1);
@@ -415,6 +469,8 @@ int lockscreen_init(void *win, void *ctx) {
     }
     if (info)
         info_screen(win, img, id);
+    else if (img && oled_pages())
+        oled_lock(win, img, id);
     else if (ringnav_lock_clock())
         big_clock(win);
     return result;
@@ -457,6 +513,22 @@ int lockscreen_rows(void *win) {
     return result;
 }
 
+/* OLED: the picture at half its light, Black black, under the labels, painted again over it; the
+ * labels' faces by their text's script. */
+static void oled_dim(void *w, void *canvas) {
+    void *lcd = P(canvas, CANVAS_LCD);
+    if (!lcd) return;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
+    int px = OLED_TITLE_PX;
+    info_face(lk.title, &px);
+    px = OLED_ARTIST_PX;
+    info_face(lk.artist, &px);
+    stock_canvas_set_fill_color(canvas, lk.black ? RGBA(0) : 0x80000000u);
+    canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
+    stock_canvas_set_fill_color(canvas, fill);
+    widget_on_paint_children(w, canvas);
+}
+
 /* ringnav_paint (the border hook, after stock painted the widget) calls this for every widget:
  * over a built-in picture it draws the wallpaper; thumbnails render on first sight. Stock painted
  * the children (a thumbnail's img_choice, the check badge) first, so they are painted again on top. */
@@ -469,8 +541,12 @@ void lockscreen_paint(void *w, void *canvas) {
     if (bm) {
         int r[4] = { 0, 0, I(w, W_W), I(w, W_H) };
         canvas_draw_image(canvas, bm, r, r);
-        widget_on_paint_children(w, canvas);
+        if (w != lk.img || !lk.oled) widget_on_paint_children(w, canvas);
     }
-    if (w == lk.img && lk.info) info_paint(w, canvas);
+    /* one test on every other widget's paint (test/patch.py's Cover Flow paint budget) */
+    if (w == lk.img) {
+        if (lk.oled) oled_dim(w, canvas);
+        if (lk.info) info_paint(w, canvas);
+    }
 }
 #endif

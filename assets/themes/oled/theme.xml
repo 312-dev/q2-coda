@@ -100,5 +100,5 @@
     <element name="rows" height="32" detail_height="52" text_x="24" title_y="4" title_h="24" detail_y="31" detail_h="20"/>
     <element name="title" height="0"/>
   </view>
-  <view name="pages"><element name="own" art_final="1"/></view>
+  <view name="pages"><element name="own" painter="oled" art_final="1"/></view>
 </theme>
