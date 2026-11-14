@@ -989,10 +989,11 @@ def list_page(name):
              w('list_view', row, kind='list_view', at=[0, 50, 375, 240], default_item_height='78'), kind='window')
 
 
-@pytest.mark.parametrize('path, kind', [('localmusic/albuminfo_page.bin', 'text'), ('folder_page.bin', 'art')])
+@pytest.mark.parametrize('path, kind', [('localmusic/albuminfo_page.bin', 'text'), ('localmusic/album_page.bin', 'art'),
+                                        ('folder_page.bin', 'folder')])
 def test_patch_asset_rows_by_page_kind(monkeypatch, path, kind):
-    # A text page's rows take pitch/body, an art page's art_pitch/art_body; both move their text to the
-    # set's y. SET0 builds what it did.
+    # A text page's rows take pitch/body, an art page's art_pitch/art_body, Folder's art_pitch/art_body while the
+    # set gives no folder_pitch; each moves its text to the set's y. SET0 builds what it did.
     data = ipod.encode(list_page(path))
     monkeypatch.setitem(ipod.UI_ASSETS, path, ipod.sha(data))
     pitch, body, inset = (28, 26, 5) if kind == 'text' else (52, 50, 3)
@@ -1003,6 +1004,14 @@ def test_patch_asset_rows_by_page_kind(monkeypatch, path, kind):
     n = named(ipod.decode(ipod.patch_asset(path, data)))
     assert n['list_view'][2]['default_item_height'] == '72' and (n['row'][1][3], n['button'][1][3]) == (72, 68)
     assert (n['gif'][1][1], n['title'][1][1], n['meta'][1][1]) == (8, 10, 39)
+
+
+def test_folder_rows_are_their_own_kind():
+    # A set's folder_pitch and folder_body, else its art rows'; the immediates follow.
+    g = dataclasses.replace(PAGE_T, folder_pitch=32, folder_body=30)
+    assert ipod.page_rows(g, 'folder') == (32, 30, 3) and ipod.page_rows(PAGE_T, 'folder') == (52, 50, 3)
+    assert (ipod.immediate_values(g)['folder_pitch'], ipod.immediate_values(g)['folder_body']) == (32, 30)
+    assert (ipod.immediate_values(PAGE_T)['folder_pitch'], ipod.immediate_values(PAGE_T)['folder_body']) == (52, 50)
 
 
 def test_songs_rows_are_their_own_kind():
@@ -1032,7 +1041,7 @@ def test_immediate_values_set0_are_the_baked_values():
     assert ipod.VALUE_NAMES[0] == 'pitch'
     for name in ipod.VALUE_NAMES:
         if not name.startswith(('np_bar', 'stock_', 'search_')):
-            assert values[name] == SET0_WORDS[name if name in SET0_WORDS else name.removeprefix('art_').removeprefix('song_')], name
+            assert values[name] == SET0_WORDS[name if name in SET0_WORDS else name.removeprefix('art_').removeprefix('song_').removeprefix('folder_')], name
 
 
 def test_only_split_names_take_the_art_prefix():
@@ -1255,7 +1264,7 @@ SYMBOLS = {'compact_set_row_layout': 0x40a000, 'ipod_list_layout': 0x40b000, 'ri
            'stock_set_row_layout': 0x40d000, 'stock_row_text': 0x40e000, 'stock_row_style': 0x40f000}
 # SET0's word for each named immediate, as test_immediate_values_set0_are_the_baked_values reads SET0_WORDS.
 # The stock_ and search_ rows' words are SET0's fields, as immediate_values gives them; that test leaves them out too.
-IMMEDIATES = ipod.immediate_values(ipod.SET0) | {name: SET0_WORDS[name if name in SET0_WORDS else name.removeprefix('art_').removeprefix('song_')]
+IMMEDIATES = ipod.immediate_values(ipod.SET0) | {name: SET0_WORDS[name if name in SET0_WORDS else name.removeprefix('art_').removeprefix('song_').removeprefix('folder_')]
               for name in ipod.VALUE_NAMES if not name.startswith(('np_bar', 'stock_', 'search_'))} | {'np_bar_x': ipod.NP_BAR[0], 'np_bar_w': ipod.NP_BAR[2]}
 
 

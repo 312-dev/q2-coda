@@ -32,7 +32,8 @@ Native local row-pool constructors are at 0x533bc4 (folder), 0x4ac588 (songs),
 0x4b39f4 (local categories) and 0x4a6910 (album list/grid). The album grid branch
 is unchanged. Album detail, artist track and playlist constructors have their own
 explicit sites in the audit. Folder reset at 0x532000, return offset division at
-0x532308 and scrolling cover division at 0x533288 all use the same compact pitch.
+0x532308, scrolling cover division at 0x533288 and the folder constructor's own pitch at
+0x533c54 take the set's `folder_pitch`, the art rows' unless the set gives its own (OLED's 32).
 The category cover callback originally divides by 120 despite using 78-pixel
 rows; iPod corrects its audited divisor at 0x4b2a48 to 72. Rebinding and delayed
 cover callbacks keep the same widget geometry and saved cover preferences.
@@ -93,6 +94,10 @@ selection's inset pill instead (`pressed_pill`), and a pressed tile under half i
 grid's, the playlist page's pair) is the tile's selection card, `TILE_INSET` inside it with `SEL_RADIUS`
 corners (square under Square); other pressed widgets keep stock's box. The same hooks cover settings, streaming, dialogs, PEQ rows and media browser
 chrome. Photos, video, book content, EQ plots and visualizers keep their own drawing.
+
+A list left with Return opens at its top when it is chosen again, in every theme (`list.reopen.top`,
+set by Minimal, which the others extend), as an iPod's menus and stock's own pages do; Return
+still lands on the row the page behind was left at ([internals](internals.md#position-memory)).
 
 ## Home
 
@@ -642,10 +647,10 @@ the track jumps there once, when the scrub ends. A press of the centre button co
 and leaves the screen on (a double press does too), as do Return, a touch and
 3 seconds without a tick, and each gives the wheel back to the volume; Return then stays on the
 page. Ending without having moved the target does not seek. Paused, the track stays paused and
-plays from the target at Play. Outside a scrub a single press turns
-the screen off, as on every other page. With **Single Press Scrub** (below) the two swap: a single
-press starts scrubbing, `DOUBLE_CLICK_MS` later as a row opens, and a double press turns the screen
-off, as on the lists. The presses work the same while the volume shows over the page; starting a scrub closes it. The jump is stock's key seek, which can pause the player briefly, but only once, when the
+plays from the target at Play. Outside a scrub a single press starts scrubbing,
+`DOUBLE_CLICK_MS` later as a row opens, and a double press turns the screen off, as on the lists
+(**Single Press Scrub**, below, on unless chosen off). With it off the two swap: a single press
+turns the screen off and a double press starts scrubbing. The presses work the same while the volume shows over the page; starting a scrub closes it. The jump is stock's key seek, which can pause the player briefly, but only once, when the
 scrub ends, instead of after each pause between ticks. Values are `SCRUB_*` in
 `patch/offsets.inc`; see [internals.md](internals.md#scrub-ipod).
 
@@ -796,8 +801,8 @@ NPCENTRED`, off; `playset_covermode`): `ringnav_ui_load`, hooked on every window
   playlists of a music server that a card app such as the Subsonic app lists join the Library,
   greyed while they can't play ([Server library](internals.md#server-library)).
 - Controls: Wheel Sensitivity, which opens its slider page; "Hold Return: Recent"
-  (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); a "Single Press Scrub" switch (`IPOD SCRUBSINGLE`, off; `np_key`): on Now Playing a single
-  centre press starts the scrub and a double press turns the screen off (Scrub, above); "Clicker: Both", Key Tone's row, cycling Speaker, Headphones, Both and Off (`IPOD CLICKER`, Off being Key Tone off; [Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; "Wake: Single Press"; and "Volume Guard".
+  (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); a "Single Press Scrub" switch (`IPOD SCRUBSINGLE`, on; `np_key`): on Now Playing a single
+  centre press starts the scrub and a double press turns the screen off (Scrub, above), off swaps them; "Clicker: Both", Key Tone's row, cycling Speaker, Headphones, Both and Off (`IPOD CLICKER`, Off being Key Tone off; [Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; "Wake: Single Press"; and "Volume Guard".
 
 All are among the [settings icons](#settings-icons) the build pre-sizes. A value row has its value
 in the label (260 pixels wide, to where the chevron ends) and no chevron, since Centre or a tap

@@ -340,6 +340,8 @@ GEOM_RANGES = {
     'count_y': (0, lambda g: g.body - 16),
     'art_title24_y': (0, lambda g: g.art_body - 24),
     'art_meta_y': (0, lambda g: g.art_body - 16),
+    'folder_pitch': (lambda g: 28 if g.folder_pitch else 0, 78),  # Folder view's own rows; 0 takes art_pitch (ipod.folder_pitch)
+    'folder_body': (0, lambda g: g.folder_pitch or g.art_pitch),
     'song_pitch': (28, 78),  # Songs' own rows
     'song_body': (24, lambda g: g.song_pitch),
     'song_title24_y': (0, lambda g: g.song_body - 24),

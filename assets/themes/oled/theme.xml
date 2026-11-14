@@ -7,8 +7,8 @@
   <!-- The grid (oled-design.md Corners and Spacing): a status row centred on y 37 in a 58 px bar drawn black, so
        no band shows; the page's title at x 24, the play state and battery ending 28 px from the right edge. Then
        32 px rows from y 58, the text at x 24, seven of them: list_end and list_fit end the list at y 282, the
-       strip below stays black and the selection never lands there; a list scrolls a row at a time. Songs are one
-       32 px line; Albums and Search are two lines at 52 px, four to a page (a list box holds whole rows): 40 px
+       strip below stays black and the selection never lands there; a list scrolls a row at a time. Songs and Folder's
+       rows are one 32 px line; Albums and Search are two lines at 52 px, four to a page (a list box holds whole rows): 40 px
        art at x 24, the text at 72 (list.art below). Text y puts each line where the design's baselines are. Home in
        Split: the menu's rows 204 px wide, so the bar ends at 188 and the chevrons stand at 176 (the right column from
        the row's edge); the playing album's art from x 196 and y 52 to the screen's right and bottom edges, the glass
@@ -16,7 +16,7 @@
   <geometry name="oled" bar="58" pitch="32" body="32" art="40" art_inset="6" art_pitch="52"
             art_body="52" text_art="0" text_art_inset="0" lib_pitch="32" lib_body="32" lib_inset="0"
             lib_art="0" title24_y="4" title_y="6" meta_y="8"
-            count_y="8" art_title24_y="6" art_meta_y="33" song_pitch="32" song_body="32" song_title24_y="4"
+            count_y="8" art_title24_y="6" art_meta_y="33" folder_pitch="32" folder_body="32" song_pitch="32" song_body="32" song_title24_y="4"
             song_meta_y="8" set_row="32" set_top="0" set_rows="7"
             set_icon="0" stream_row="52" bar_px="18" bar_title_w="0" bar_right="0" batt_w="25" batt_h="12"
             text_x="24" list_end="224" list_fit="1" status_y="37" right_x="28"
@@ -68,9 +68,6 @@
     <!-- A scrolling text's ends fade into what is behind it (oled-design.md Motion, list_marks.c marquee_fade): rows,
          the status row's title and Now Playing's lines -->
     <element name="marquee" fade="1"/>
-    <!-- A list left by Return forgets its row: choosing it again opens it at the top, as an iPod's menus do
-         (navigation.c forget_left); Return still lands on the row the parent was left at -->
-    <element name="reopen" top="1"/>
     <!-- Songs', an album's and a playlist's action row reads Shuffle after Phosphor's shuffle, Accent Blue (white on the
          selection); the wheel steps onto it above the first song and Centre shuffles the list (navigation.c shuffle_key) -->
     <element name="shuffle" row="1"/>

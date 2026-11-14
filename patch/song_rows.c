@@ -3,7 +3,8 @@
  * list (Songs, a genre's songs: anything stock opens on Songs' page) shows the artist after the
  * title; a list reached through an artist (artistinfo_page, their songs) shows none; an album
  * (albuminfo_page) shows each track's number in a column before the title and its length on the
- * right column. Song Artist and Song Length, the theme's own options, change that.
+ * right column; Folder view (folder_page) reads as an album too (folder_row). Song Artist and Song
+ * Length, the theme's own options, change that.
  *
  * navigation.c's background hook calls song_row for each row of such a list before the rows
  * paint: the title's box is fitted to what stands beside it, and the rest is drawn here, under
@@ -20,14 +21,16 @@
 #define HSCROLL_MARGIN                                                                             \
     2 /* hscroll_label's own, each side of its text (rows' boxes start on the inset) */
 
-/* The list w's window shows: SONGS_MIXED, SONGS_ARTIST, SONGS_ALBUM, or 0, not a song list. A list
- * the payload builds itself (Most Played, Long Songs, Cover Flow's tracks) has its own rows. */
+/* The list w's window shows: SONGS_MIXED, SONGS_ARTIST, SONGS_ALBUM, SONGS_FOLDER, or 0, not a
+ * song list. A list the payload builds itself (Most Played, Long Songs, Cover Flow's tracks) has
+ * its own rows. */
 int song_list(void *w) {
     void *win = window_of(w);
     const char *name = win ? widget_get_prop_str(win, "name", "") : "";
     return !tk_strcmp(name, "allmusic_page")     ? SONGS_MIXED
            : !tk_strcmp(name, "artistinfo_page") ? SONGS_ARTIST
            : !tk_strcmp(name, "albuminfo_page")  ? SONGS_ALBUM
+           : !tk_strcmp(name, "folder_page")     ? SONGS_FOLDER
                                                  : 0;
 }
 
@@ -106,11 +109,191 @@ static void small_text(void *canvas, const unsigned *s, int x, int w, int right,
     I(canvas, CANVAS_ALIGN_H) = align_h;
 }
 
+/* Folder view as an album (SONGS_FOLDER, docs/oled-design.md#song-rows): a song file's row reads
+ * as a track, its number before the title and its length on the right column; a folder's (and any
+ * other file's) has the theme's folder glyph before its name, and stock's chevron where stock gives
+ * one. A row's title is the library's tag, found by the file's path; a file the library doesn't
+ * know shows its file name without the extension, a leading track number or the "Artist - " every
+ * such name in the folder starts with. */
+#define FOLDER_ICON_X 24    /* the folder glyph's left, so its 20 px centre on x 34 */
+#define FOLDER_ICON 20      /* its size (tools/art.py ROW_ICON_PX) */
+#define FOLDER_TITLE 52     /* a folder's name's first column on screen */
+#define FOLDER_CHEV_ROOM 20 /* a folder's chevron on the right column, and its gap */
+
+typedef struct {
+    char *title; /* what the row says: the tag's title or the trimmed file name; 0, not a song */
+    int track;   /* the tag's track number, else the file name's; 0 for none */
+    int own;     /* title is the file name's */
+} ftrack_t;
+/* The folder the rows were worked out for: its path's hash and showlist size, and the records */
+static struct {
+    unsigned key, n;
+    void *first;
+    ftrack_t *t;
+} fold __attribute__((section(".scratch")));
+
+/* A file name's end, before its extension (a dot after the last '/', not leading). */
+static unsigned stem_len(const char *s) {
+    const char *dot = strrchr(s, '.');
+    unsigned n = strlen(s);
+    return dot && dot > s ? (unsigned)(dot - s) : n;
+}
+/* s past a leading track number ("01. ", "1 - ", "03 "), *num that number; s itself where none
+ * stands, or nothing would be left. */
+static const char *strip_number(const char *s, unsigned n, int *num) {
+    unsigned i = 0, v = 0;
+    while (i < n && i < 3 && s[i] >= '0' && s[i] <= '9') v = v * 10 + (unsigned)(s[i++] - '0');
+    unsigned j = i;
+    if (j < n && (s[j] == '.' || s[j] == ')')) ++j;
+    while (j < n && (s[j] == ' ' || s[j] == '-' || s[j] == '_')) ++j;
+    if (!i || j == i || j >= n) return s;
+    *num = (int)v;
+    return s + j;
+}
+
+static int folder_tag(void *ctx, int cols, char **v, char **names) {
+    unsigned at = (unsigned)strlen((const char *)g_folder_path) + 1;
+    void *list = P(p_deque_showlist, 0);
+    (void)ctx, (void)names;
+    if (cols != 3 || !v[0] || strlen(v[0]) <= at || strrchr(v[0], '/') != v[0] + at - 1) return 0;
+    for (unsigned j = 0; j < fold.n; ++j) {
+        void *r = deque_at(list, j);
+        const char *path = P(r, REC_PATH);
+        if (I(r, REC_TYPE) != 8 || !path || strcmp(path, v[0])) continue;
+        if (v[1] && *v[1] && !fold.t[j].title) fold.t[j].title = strdup(v[1]);
+        if (v[2] && atoi(v[2]) > 0) fold.t[j].track = atoi(v[2]);
+        break;
+    }
+    return 0;
+}
+
+/* The showlist's rows as folder_row shows them, worked out once per folder listing: the library's
+ * tags for the folder's own files (one query, on the UI thread), then the file names of the rest.
+ * ponytail: the query scans the songs under the folder by fileurl's order; a large card root with
+ * few files of its own pays for every song under it. */
+static const ftrack_t *folder_tracks(void) {
+    void *list = P(p_deque_showlist, 0);
+    const char *dir = (const char *)g_folder_path;
+    unsigned n = list ? deque_size(list) : 0, len = strlen(dir);
+    unsigned key = hash_bytes(FNV_SEED, (const unsigned char *)dir, len);
+    void *first = n ? deque_at(list, 0) : (void *)0;
+    if (fold.t && fold.key == key && fold.n == n && fold.first == first) return fold.t;
+    for (unsigned j = 0; fold.t && j < fold.n; ++j) free(fold.t[j].title);
+    free(fold.t);
+    fold.t = n ? calloc(n, sizeof *fold.t) : (void *)0;
+    fold.key = key, fold.n = fold.t ? n : 0, fold.first = first;
+    if (!fold.t) return (void *)0;
+    /* the folder's songs: fileurl from dir/ up to (not including) dir0, '0' being '/' + 1 */
+    char sql[4 * 1024 + 128], *o = sql; /* the path twice, each ' doubled */
+    o += tk_snprintf(o, 64, "select fileurl,name,track from songtable where fileurl>'");
+    for (int k = 0; k < 2; ++k) {
+        for (const char *c = dir; *c; ++c) {
+            if (*c == '\'') *o++ = '\'';
+            *o++ = *c;
+        }
+        o += tk_snprintf(o, 64, k ? "0'" : "/' and fileurl<'");
+    }
+    era_sql(sql, folder_tag, 0);
+    /* the rest by file name: the number off, then the "Artist - " every one of them starts with */
+    const char *base = (void *)0;
+    unsigned cut = 0;
+    for (unsigned j = 0; j < n; ++j) {
+        void *r = deque_at(list, j);
+        const char *name = P(r, REC_NAME);
+        if (I(r, REC_TYPE) != 8 || !name || fold.t[j].title) continue;
+        int num = 0;
+        unsigned sl = stem_len(name);
+        const char *t = strip_number(name, sl, &num);
+        sl -= (unsigned)(t - name);
+        if (!fold.t[j].track) fold.t[j].track = num;
+        if (!(fold.t[j].title = calloc(1, sl + 1))) continue;
+        memcpy(fold.t[j].title, t, sl);
+        fold.t[j].own = 1;
+        t = fold.t[j].title;
+        if (!base) { /* the first name's longest "... - " with text after it */
+            base = t;
+            for (unsigned k = 0; k + 3 < sl; ++k)
+                if (!strncmp(t + k, " - ", 3)) cut = k + 3;
+        }
+        /* ... cut back to the longest one this name shares */
+        while (cut && (sl <= cut || strncmp(t, base, cut))) {
+            for (--cut; cut >= 3 && strncmp(base + cut - 3, " - ", 3); --cut);
+            if (cut < 3) cut = 0;
+        }
+    }
+    for (unsigned j = 0; cut && j < n; ++j)
+        if (fold.t[j].own)
+            memmove(fold.t[j].title, fold.t[j].title + cut, strlen(fold.t[j].title + cut) + 1);
+    return fold.t;
+}
+
+/* Folder view's row id (SONGS_FOLDER): as folder_tracks says, its title's box fitted to it */
+static void folder_row(void *w, void *canvas, void *row, void *title, int id, rect_t r,
+                       int selected) {
+    void *list = P(p_deque_showlist, 0);
+    const ftrack_t *ft = folder_tracks();
+    if (!ft || (unsigned)id >= fold.n) return;
+    void *rec = deque_at(list, (unsigned)id);
+    const char *text = I(rec, REC_TYPE) == 8 ? ft[id].title : (const char *)0;
+    char now[256];
+    /* a song's title as worked out, once: stock binds the file name */
+    if (text && !widget_get_text_utf8(title, now, sizeof now) && strcmp(now, text))
+        widget_set_text_utf8(title, text);
+    const theme_t *T = theme();
+    int tpx = T->font_px[ROLE_TITLE], spx = T->font_px[ROLE_META];
+    char len[16] = "";
+    unsigned wlen[16], nlen = 0;
+    if (text && song_length() != SONG_LENGTH_OFF) duration_text(len, sizeof len, rec);
+    while (len[nlen] && nlen < sizeof wlen / sizeof *wlen - 1)
+        wlen[nlen] = (unsigned char)len[nlen], ++nlen;
+    wlen[nlen] = 0;
+    int left = text ? SONG_NUM_TITLE : FOLDER_TITLE,
+        column = I(w, W_W) - 1 - geom_val(V_RIGHT_X) - HSCROLL_MARGIN,
+        len_w = measure(canvas, wlen, nlen, spx),
+        end = nlen   ? column - len_w - SONG_COL_GAP
+              : text ? column
+                     : column - FOLDER_CHEV_ROOM;
+    const unsigned *name = widget_get_text(title);
+    int ink = name ? measure(canvas, name, wide_len(name), tpx) : 0,
+        room = end - left - HSCROLL_MARGIN;
+    if (ink > room) ink = room;
+    int x = r.x;
+    for (void *p = P(title, W_PARENT); p && p != row; p = P(p, W_PARENT)) x += I(p, W_X);
+    int bx = left - x, bw = ink + 2 * HSCROLL_MARGIN;
+    if (I(title, W_X) != bx || I(title, W_W) != bw)
+        widget_move_resize(title, bx, I(title, W_Y), bw, I(title, W_H));
+    if (!text) {
+        paint_art(w, canvas,
+                  theme_art(selected       ? "folder_w"
+                            : ipod_light() ? "folder_l"
+                                           : "folder_d"),
+                  FOLDER_ICON_X, r.y + (r.h - FOLDER_ICON) / 2);
+        return;
+    }
+    unsigned ink0 = (unsigned)I(P(canvas, CANVAS_LCD), LCD_TEXT_COLOR), raw = st.raw_ink;
+    unsigned color =
+        selected ? (scheme()->sel_text ? scheme()->sel_text : 0xffffff) : scheme()->muted;
+    st.raw_ink = selected;
+    canvas_set_text_color(canvas, RGBA(color));
+    if (ft[id].track > 0) {
+        unsigned num[4], n = put_num(num, (unsigned)ft[id].track % 1000);
+        num[n] = 0;
+        small_text(canvas, num, geom_val(V_TEXT_X) + HSCROLL_MARGIN + SONG_NUM_W - 40, 40, 1, &r);
+    }
+    if (nlen) small_text(canvas, wlen, column - len_w, len_w, 1, &r);
+    stock_canvas_set_text_color(canvas, ink0);
+    st.raw_ink = raw;
+}
+
 void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected) {
     int ctx = song_list(w);
     void *title = (void *)0, *meta = (void *)0;
     song_labels(row, &title, &meta, 0);
     if (!ctx || !title || !widget_get_visible(title)) return;
+    if (ctx == SONGS_FOLDER) {
+        folder_row(w, canvas, row, title, id, r, selected);
+        return;
+    }
     void *rec = song_record(id, title);
     if (ctx == SONGS_ALBUM && !rec) return; /* not a track: Play All keeps its place */
     const theme_t *T = theme();

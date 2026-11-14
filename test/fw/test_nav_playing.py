@@ -352,7 +352,9 @@ class Canvas:
 
 
 def theme(fw, st, t=MINIMAL, light=0, **keys):
-    """The theme t on its own geometry set (theme_boot's), light or dark."""
+    """The theme t on its own geometry set (theme_boot's), light or dark. Single Press Scrub is off unless keys
+    say, the presses the scrub tests were written for (it is on unless chosen off)."""
+    keys.setdefault('SCRUBSINGLE', 0)
     Config(fw, THEME=t['index'], LIGHT=light, **keys)
     st.settings_read = 0
     fw.fn('accent', C.c_int)()
@@ -1717,6 +1719,67 @@ def test_a_scrubs_cue_is_a_diamond_at_the_fills_end_kept_in_the_bar(fw, ui, now,
     assert [(r[1], r[2]) for r in ink] == [(cy + j, 2 * (mark - abs(j)) + 1) for j in range(-mark, mark + 1)]
     fill_end = w * value // ui.ints[now.slider, b'max']
     assert {r[0] + r[2] // 2 for r in ink} == {min(max(fill_end, mark), w - 1 - mark)}  # its widest row whole in the bar
+
+
+# The glide between the player's whole seconds (np_bar.c paint_scrubber): the fill runs on from the value by the time
+# since it changed, at most a second, while playing; a timer repaints it a pixel at a time.
+def played(canvas, w):
+    """Classic's played part: its first row's width."""
+    return [r for r in canvas.rects if r[3] == 1 and r[0] == 0][0][2]
+
+
+@pytest.mark.parametrize('status, later, ms', [(2, 500, 500), (2, 1700, 1000), (3, 500, 0)])
+def test_the_fill_glides_on_from_the_value_while_playing_up_to_a_second(fw, ui, now, st, status, later, ms):
+    now.status = status
+    w = ui.box(now.slider)[2]
+    scrubber(fw, now.slider, Canvas(fw))  # the value 50 of 200 seen at ui.now
+    ui.now += later
+    canvas = Canvas(fw)
+    scrubber(fw, now.slider, canvas)
+    assert played(canvas, w) == (w * 50 + w * ms // 1000) // 200
+
+
+def test_a_new_value_starts_the_glide_again_and_never_goes_back(fw, ui, now, st):
+    w = ui.box(now.slider)[2]
+    scrubber(fw, now.slider, Canvas(fw))
+    ui.now += 900
+    canvas = Canvas(fw)
+    scrubber(fw, now.slider, canvas)
+    before = played(canvas, w)
+    ui.ints[now.slider, b'value'] = 51  # stock's next second
+    canvas = Canvas(fw)
+    scrubber(fw, now.slider, canvas)
+    assert played(canvas, w) == w * 51 // 200 >= before
+
+
+def test_the_glide_repaints_the_slider_a_pixel_at_a_time(fw, ui, now, st):
+    w = ui.box(now.slider)[2]
+    scrubber(fw, now.slider, Canvas(fw))
+    (t,) = ui.due('bar_glide')
+    assert ui.timers[t][2] == max(33, min(1000, 200 * 1000 // w))  # a 200 s track: ms per pixel
+    scrubber(fw, now.slider, Canvas(fw))
+    assert len(ui.due('bar_glide')) == 1  # one at a time
+    now.status = 3
+    ui.run(t)
+    scrubber(fw, now.slider, Canvas(fw))
+    assert not ui.due('bar_glide')  # paused: nothing moves
+
+
+def test_stock_sliders_fill_is_drawn_again_to_the_glide(fw, ui, mcl, st):
+    theme(fw, st, OLED)
+    now = Now(fw, ui, mcl, st)
+    boxes = []
+    fw.mock('canvas_fill_rounded_rect', lambda c, r, sr, color, radius, *_: boxes.append(
+        (struct.unpack_from('<4i', (C.c_char * 16).from_address(r)), C.c_uint.from_address(color).value, radius)) or 0)
+    ui.ints[now.slider, b'bar_size'] = 6
+    w, h = ui.box(now.slider)[2], ui.box(now.slider)[3]
+    scrubber(fw, now.slider, Canvas(fw))
+    assert boxes == []  # no further than stock's own fill
+    ui.now += 800
+    scrubber(fw, now.slider, Canvas(fw))
+    tone = fw.fn('accent_tone', C.c_uint, C.c_int)(2)  # navigation.h TONE_LIGHT
+    rgba = 0xff000000 | (tone & 255) << 16 | tone & 0xff00 | tone >> 16 & 255  # RGBA: the canvas's byte order
+    assert boxes == [((0, (h - 6) // 2, (w * 50 + w * 800 // 1000) // 200, 6), rgba, 3)]
 
 
 def test_the_radios_bar_paints_always_full(fw, ui, now, st):

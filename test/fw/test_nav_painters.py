@@ -1080,6 +1080,21 @@ def test_minimal_accent_card_is_its_tone_and_a_coloured_ones_row_keeps_white_ink
     assert (text_ink(fw, st, page.rows[1].children[0]) == 0xffffffff) == bool(coloured)
 
 
+@pytest.mark.parametrize('stop, lit', [(1, True), (2, False)])
+def test_the_shuffle_rows_label_on_the_bar_keeps_the_selections_ink_in_light_mode(fw, st, stop, lit):
+    """OLED's Shuffle row stands outside the list (navigation.c shuffle_paint): while its Shuffle is lit its label takes
+    the selection's text colour, white on the bar in Light Mode too, not the page's flipped ink; on Sort's stop it is
+    page text again."""
+    page = Page(fw, OLED)
+    page.paint()
+    st('light').value = 1
+    label, view = page.rows[2].children[0], page.rows[3]
+    fw.var('navigation__shuffle_label', C.c_void_p).value = label.addr
+    st('action_view', C.c_void_p).value = st('shuffle_on', C.c_void_p).value = view.addr
+    st('shuffle_stop').value = stop
+    assert (text_ink(fw, st, label) == 0xffffffff) == lit
+
+
 @pytest.mark.parametrize('tall', [0, 1])
 def test_classic_lays_its_stops_band_with_its_lines(fw, layout, tall):
     """A crisp top line, the stops, an edge; a row taller than the set's pitch ends on its two rows."""

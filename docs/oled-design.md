@@ -162,7 +162,7 @@ All lists share one grid.
   bold, no indent).
 - It moves one row per wheel tick, with no easing longer than the theme's list motion.
 - A list left by Return opens at its top when it is chosen again; Return lands on the row the
-  page behind was left at (`list.reopen.top`).
+  page behind was left at (`list.reopen.top`, every theme's, from Minimal).
 - Exactly one per screen. A dialog over a list takes the selection; the list's bar is hidden
   while the dialog is open.
 
@@ -216,11 +216,19 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
 - **The Shuffle row** stands first on Songs, a playlist's songs and an album's tracks, in place of
   Play All (a song already plays the rest of its list in order): Phosphor `shuffle` (regular, 20
   px) on the text column and "Shuffle" 28 px after it, both Accent Blue, white on the selection.
-  The wheel reaches it from the first song; Centre shuffles the list. Sort's bars stay at its right,
+  The wheel reaches it from the first song; Centre shuffles the list, and Return from Now Playing
+  lands on it again. Sort's bars stay at its right,
   one more tick up, until the options menu takes them.
+- **Folder view** reads as an album: the same 32 px rows. A song file is a track, its number in the
+  album's column, the title from the library's tags (found by the file's path) at x 50 and its
+  length on the right column when known; a file the library doesn't know shows its file name
+  without the extension, a leading track number ("01. ") or the "Artist - " every such name in the
+  folder starts with. A folder has Phosphor `folder` (regular, 20 px, Text Secondary, white on the
+  selection) centred on x 34, its name at x 52 and the chevron on the right column; the card's root
+  too.
 - Which list is which comes from its page: Songs' page (`allmusic_page`, which also holds a genre's songs
   and the other lists stock opens there) is mixed, the artist page's songs are an artist's, the album page is an
-  album. Lists Q2 Pod draws itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep
+  album, Folder view (`folder_page`) a folder. Lists Q2 Pod draws itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep
   their own rows.
 
 ### Now Playing
@@ -320,6 +328,7 @@ pattern.
 | Library                             | List row                    |                                                                                                            |
 | Albums                              | Two-line row with art       |                                                                                                            |
 | Album tracks                        | Song rows                   | Track number, title, length                                                                                |
+| Folder view                         | Song rows                   | Songs as album tracks; folders with the folder glyph and a chevron                                         |
 | Artists, Genres, Composers          | List row                    |                                                                                                            |
 | Songs, a playlist's songs           | Song rows                   | The artist inline                                                                                          |
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
@@ -365,9 +374,9 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   (`bar.battery.painter="slim"`); the wheel's scroll indicator (`list.scrollbar.painter="wheel"`);
   1 px dividers on the text and right columns (`list.divider.ink`); row art's 4 px corners
   (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column; song rows
-  (`list.songs.painter="inline"`) and the Song Artist and Song Length options; a list left by
-  Return opening at its top when chosen again (`list.reopen.top`); Songs' action row as the
-  Shuffle row (`list.shuffle.row`).
+  (`list.songs.painter="inline"`) and the Song Artist and Song Length options; Songs' action row
+  as the Shuffle row (`list.shuffle.row`); a list left by Return opening at its top when chosen
+  again (`list.reopen.top`, which Minimal sets for every theme).
 - Now Playing on the set's grid (`np_art`, `np_bar_y`), its art's corners (`playing.art.radius`), its
   artist and album in Inter (`playing.artist.font`), shuffle and repeat as the theme's own glyphs
   (`playing.modes.icons`), and the marquee fades (`list.marquee.fade`).
