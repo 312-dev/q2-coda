@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Security: the open-source libraries and tools Shanling built years ago are rebuilt from current upstream releases: OpenSSL 1.1.1w, curl 8.23.0 (with mbedTLS 3.6.7 for its TLS), zlib 1.4, SQLite 3.54.1, libpng 1.2.59, BusyBox 1.38.0, wpa_supplicant 2.12 and FFmpeg 4.2.11, closing hundreds of known vulnerabilities. Downloads, the App Store, radio, scrobbling and lyrics connect as before. A server that offers only TLS 1.0 or 1.1 can't be reached. Bluetooth, the player's own decoders, glibc and the kernel are still Shanling's ([third-party](third-party.md)).
   - Display: **Theme** lists **OLED** after **Classic**. It is a placeholder: it looks as **Theme: Classic** does until its own design arrives.
 - **1.8.2**:
   - Games: in Solitaire, Centre on a pile that can't take the cards you hold now picks that pile up instead. Before, nothing happened and the cards stayed held until you put them back or pressed Return, which looked like the game had stuck.

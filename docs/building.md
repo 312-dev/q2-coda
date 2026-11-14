@@ -14,6 +14,7 @@
 - squashfs-tools 4.6 or later (tested with 4.6.1 and 4.7.5)
 - ImageMagick 6 or 7 for the iPod UI's settings icons (`convert` or `magick`; tested with 6.9.12)
 - The test dependencies: `pip install -r requirements.txt`
+- For the rebuilt third-party libraries ([third-party.md](third-party.md)): network access on the first build, which fetches the Codescape MIPS toolchain (2.3 GB) and the pinned sources into `~/.cache/q2-thirdparty`, and about an hour to compile them once; bwrap and qemu-mipsel for `test/thirdparty.py`
 - The original stock ZIP. Its SHA-256 is:
 
 ```text
@@ -83,7 +84,7 @@ python3 test/build.py --build BUILD         # a finished build's payloads and pa
 python3 test/aic.py STOCKFS               # stopped audio notifier: actual MIPS hooks and modeled wait races
 python3 test/aic_build.py STOCKFS BUILD    # notifier development guard, ABI, default/experimental packaging
 python3 test/remote.py                     # q2remote protocol, auth, event and framebuffer checks
-bash test/wifi_transfer_cgi.sh             # Wi-Fi transfer's file manager (assets/web/q2cgi) under the host's busybox ash (the Q2's is 1.31.1): no ZIP or build; on a tmpfs at /mnt/mmc (one already there, or its own as root); --fat for a FAT32 image and its short-name cases (root). GitHub runs it on every pull request
+bash test/wifi_transfer_cgi.sh             # Wi-Fi transfer's file manager (assets/web/q2cgi) under the host's busybox ash (the Q2's is 1.38.0, [third-party.md](third-party.md#busybox)): no ZIP or build; on a tmpfs at /mnt/mmc (one already there, or its own as root); --fat for a FAT32 image and its short-name cases (root). GitHub runs it on every pull request
 python3 test/rotator.py STOCK_MODULE        # actual MIPS rotator clock ownership and failure paths
 python3 test/rotator_build.py [BUILD...]    # dev-only guard (no build needed); given builds, packed/default module isolation
 python3 test/playback.py /tmp/q2-build     # grouped traversal, snapshots and the wheel's ticks (cc)
@@ -102,6 +103,7 @@ python3 test/ldac.py /tmp/q2-build         # shipped LDAC intermediate rates and
 python3 test/headset_io.py /tmp/q2-build   # real MIPS headset worker with simulated kernel I/O (cc)
 python3 test/bluealsa.py /tmp/q2-build     # the patched bluealsa's DROP paths against stock's, delayed encoder signal
 python3 test/alsa.py BUILD QEMU_MIPSEL     # ALSA startup lock regression (see internals.md)
+python3 test/thirdparty.py BUILD QEMU_MIPSEL  # the rebuilt OpenSSL, curl, zlib, SQLite, libpng, BusyBox, wpa_supplicant and FFmpeg in a bwrap chroot of BUILD's rootfs: versions, links, TLS (network; --offline skips it) (third-party.md)
 python3 test/ui_preview.py BEFORE AFTER OUT_DIR  # not a test: side-by-side iPod layout review sheets of two builds (or one build's two themes; --themes, ImageMagick)
 python3 -m pytest test/unit                # tools/: no stock ZIP, no build, no Q2 (pip install -r test/unit/requirements.txt); GitHub runs it on every pull request
 python3 -m pytest test/fw --basetemp ~/.cache/q2-pytest/fw  # the firmware's C on this machine: no stock ZIP, no build, no Q2 (see Firmware tests)
@@ -125,7 +127,7 @@ python3 tools/scan.py --only code,secrets   # a subset: code, secrets, deps, fir
 python3 tools/scan.py --build /tmp/q2-build # another build's rootfs
 ```
 
-`tools/scan.py` runs Semgrep over `patch/` and `tools/` (the project's rules in `.semgrep/q2pod.yml` and Semgrep's C and Python packs), gitleaks over the git history, osv-scanner over the requirements files, and syft and grype over a build's root filesystem. syft names few of the rootfs's components, as buildroot keeps no package database, so `PROBES` in the script finds the rest (OpenSSL, curl, BlueZ, wpa_supplicant and others) by their version strings and grype checks them by CPE. It writes `scan-out/SUMMARY.md` and each tool's JSON, and exits 1 when a scan reaches its failing level: a Semgrep error, any secret, any dependency vulnerability, a critical firmware vulnerability. Most firmware findings are in Shanling's own libraries, which a build carries unchanged. The scanners are pinned releases, fetched into `~/.cache/q2-scan` on first use and checked against the SHA-256 in the script before they run; Semgrep runs through `uvx`. Reviewed gitleaks findings (documentation placeholders, file hashes) are fingerprinted in `.gitleaksignore`, so a new one still fails.
+`tools/scan.py` runs Semgrep over `patch/` and `tools/` (the project's rules in `.semgrep/q2pod.yml` and Semgrep's C and Python packs), gitleaks over the git history, osv-scanner over the requirements files, and syft and grype over a build's root filesystem. syft names few of the rootfs's components, as buildroot keeps no package database, so `PROBES` in the script finds the rest (OpenSSL, curl, BlueZ, wpa_supplicant and others) by their version strings and grype checks them by CPE. It writes `scan-out/SUMMARY.md` and each tool's JSON, and exits 1 when a scan reaches its failing level: a Semgrep error, any secret, any dependency vulnerability, a critical firmware vulnerability. Most firmware findings are in components Shanling built, a build replaces the worst of them ([third-party.md](third-party.md)), and those left (glibc, BlueZ, the kernel) are listed there with why. The scanners are pinned releases, fetched into `~/.cache/q2-scan` on first use and checked against the SHA-256 in the script before they run; Semgrep runs through `uvx`. Reviewed gitleaks findings (documentation placeholders, file hashes) are fingerprinted in `.gitleaksignore`, so a new one still fails.
 
 ## Firmware tests
 

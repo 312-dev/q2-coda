@@ -575,9 +575,10 @@ def elf_files(root):
 
 def check_abi(stock_root, replacements):
     """Problems with replacing stock_root's files by replacements ({rootfs path: new file}): a header
-    or FP ABI that differs from the stock file's, a symbol some file imports that it no longer finds,
-    a data object whose size changed. Problems stock already had (a plugin's import from its host
-    program) are not counted. An empty list means the swap keeps every stock import satisfied."""
+    or FP ABI that differs from the stock file's, a symbol some file imports that the replacements
+    leave undefined, a data object whose size changed. Problems stock already had (a plugin's import
+    from its host program) are not counted. An empty list means the swap keeps every stock import
+    satisfied."""
     stock_root = pathlib.Path(stock_root)
     files = elf_files(stock_root)
     before = {rel: Elf(p) for rel, p in files.items()}
