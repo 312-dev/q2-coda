@@ -20,3 +20,5 @@ f0bd9bb5d20210a7aaaf93dbb0c07c20b34efb0a:patch/compact.json:generic-api-key:260
 f0bd9bb5d20210a7aaaf93dbb0c07c20b34efb0a:patch/compact.json:generic-api-key:261
 # asset file names and their hashes
 bbbe144cff29cd54598e1478db1c5c770f46ddfa:patch/compact.json:generic-api-key:25
+# docs/manual/guide.html: the Last.fm example config, a placeholder key beside ExamplePassword123
+2f98935c05af8bf8ee156d4bed9830d6418c0c62:docs/manual/guide.html:generic-api-key:883
