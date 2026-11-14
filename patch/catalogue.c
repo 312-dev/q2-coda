@@ -1120,6 +1120,21 @@ int catalogue_np_info(const char *path, char *genre, int *year) {
     return 1;
 }
 
+/* The album cover the app keeps for path's album (docs/server-library.md#covers): path a server
+ * row's (/mnt/mmc/.<id>/cat/<album id>/<sid>.<suffix>) or its offline copy's, the cover
+ * /mnt/mmc/.<id>/covers/<album id>.jpg, into out, when it is there. 0 for any other path, or none
+ * fetched yet. */
+int catalogue_cover(const char *path, char *out, unsigned size) {
+    const cat_ent *e = path && !catalogue_path(path) ? cat_copy_of(path) : 0;
+    const char *row = e && !e->dup ? ix_str(&cat.ix, e->path) : path;
+    if (!catalogue_path(row)) return 0;
+    const char *cat_at = strstr(row + 10, "/cat/"), *album = cat_at + 5, *end = strstr(album, "/");
+    if (!end || end == album) return 0;
+    int n = tk_snprintf(out, size, "%.*s/covers/%.*s.jpg", (int)(cat_at - row), row,
+                        (int)(end - album), album);
+    return n > 0 && (unsigned)n < size && !access(out, 4);
+}
+
 /* ---- Greyed rows: stock's pooled table rows as they are bound (ringnav_table_load), the
  * payload's own lists' rows as they are made (catalogue_mark). ringnav_style_color asks
  * catalogue_greyed for each text colour. ---- */

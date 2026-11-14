@@ -681,3 +681,27 @@ def test_now_playings_info_page_has_the_catalogues_genre_and_year_for_a_server_s
     rig.lib.sqlite3_close(slot)
     slot.value = 0
 
+
+def test_a_server_albums_cover_is_the_apps_by_its_album_id(rig, fw):
+    """The app keeps /mnt/mmc/.<id>/covers/<album id>.jpg (docs/server-library.md#covers): a server row's path,
+    or its offline copy's, names it, and the Library's album rows and grids (grid_cover) thumbnail it with
+    stock's thumbnailer, as they would a card album's art."""
+    copy = '/mnt/mmc/.subsonic/stream/s1.flac'
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, album_id='al1', local=copy),
+                  song_row('s2', 'Two', 'B', 'C', 1, 100, 2, album_id='al2')])
+    rig.poll()
+    cover = '/mnt/mmc/.subsonic/covers/al1.jpg'
+    rig.files.files[cover] = b'jpeg'
+    find = fw.fn('catalogue_cover', C.c_int, C.c_char_p, C.c_char_p, C.c_uint)
+
+    def ask(path):
+        out = C.create_string_buffer(512)
+        return out.value.decode() if find(path.encode(), out, 512) else None
+    assert ask(url('s1', 'al1')) == cover and ask(copy) == cover
+    assert ask(url('s2', 'al2')) is None  # not fetched yet: the placeholder
+    assert ask('/mnt/mmc/Music/a.flac') is None
+    thumbs = []
+    fw.mock('toolsThumbSpecCover', lambda src, dst, *_: thumbs.append(C.string_at(src).decode()) or 1)
+    album = fw.fn('coverflow_album_cover', C.c_int, C.c_char_p, C.c_char_p, C.c_int, C.c_int)
+    assert album(url('s1', 'al1').encode(), b'/tmp/x', 100, 100) == 1 and thumbs == [cover]
+    assert album(url('s2', 'al2').encode(), b'/tmp/x', 100, 100) == 0 and thumbs == [cover]

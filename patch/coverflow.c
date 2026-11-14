@@ -334,7 +334,9 @@ static int marked_empty(const char *track) {
  * same-named album's embedded-only WebP or large PNG shows no art here; a per-track probe cache
  * if that matters. */
 int coverflow_player_cover(const char *track, const char *dst, int w, int h) {
+    char cover[512]; /* a server song's offline copy (catalogue.c): its app's cover of the album */
     return toolsGetExternCover(track, dst, w, h) == 1 || beside_art(track, dst, w, h, 0, ff_thumb) ||
+           (catalogue_cover(track, cover, sizeof cover) && ff_thumb(cover, dst, w, h)) ||
            (!marked_empty(track) && ff_thumb(track, dst, w, h));
 }
 
@@ -351,6 +353,11 @@ int coverflow_player_cover(const char *track, const char *dst, int w, int h) {
 static int grid_cover(const char *track, const char *dst, int w, int h, int album) {
     static unsigned *miss __attribute__((section(".scratch"))), n __attribute__((section(".scratch")));
     const char *dot = strrchr(track, '.');
+    char cover[512];
+    /* a server row (catalogue.c): no file, its app's cover of the album, a small baseline JPEG */
+    if (catalogue_path(track))
+        return catalogue_cover(track, cover, sizeof cover) &&
+               toolsThumbSpecCover(cover, dst, w, h) == 1;
     if (toolsGetAlbumCover(track, dst, w, h) == 1) return 1;
     if (!dot || (strcasecmp(dot, ".opus") && strcasecmp(dot, ".ogg"))) return 0;
     unsigned key = fnv(FNV_SEED, (const unsigned char *)track);

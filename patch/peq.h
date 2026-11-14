@@ -430,6 +430,7 @@ int catalogue_greys(void);
 void catalogue_mark_paint(void *canvas, int x, int y, unsigned ink);
 void catalogue_fit(void *entry, void *surface, int limit);
 int catalogue_np_info(const char *path, char *genre, int *year);
+int catalogue_cover(const char *path, char *out, unsigned size);
 int ringnav_row_selected(void *row); /* navigation.c: row holds the painted selection */
 void *ringnav_search_songs(void *win); /* navigation.c: Search's song results, while shown */
 extern unsigned auto_nexts; /* playback.c ringnav_next: tracks that ended by themselves */

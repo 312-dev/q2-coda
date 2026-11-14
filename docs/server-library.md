@@ -78,6 +78,16 @@ i	<pid>	<sid>	<card path or empty>
   it is there. A `.play` that changes within `CATPLAY_WAIT_MS` (4 s) is the answer; otherwise the
   firmware plays the list itself from card rows and offline copies.
 
+- **Covers:** `/mnt/mmc/.<id>/covers/<album id>.jpg`, written whole (temp and rename) by the app
+  whenever it has one: the cover of an album the catalogue has `s` rows of, a baseline JPEG of at
+  most 160 px a side (Cover Flow's texture; the Library's rows and grids are smaller). The
+  firmware finds it by the album id in a server row's path, or in the path of that row's offline
+  copy, and uses it where it would use a card album's cover: the Library's album rows and grids
+  (`grid_cover`, through stock's thumbnailer) and Now Playing (`coverflow_player_cover`, after the
+  file's own art and folder images). Until it is there the placeholder shows; nothing waits for
+  it. The app keeps the folder within its own budget and deletes an album's cover when the album
+  leaves the catalogue ([The app's side](#the-apps-side)).
+
 ### Duplicates
 
 The catalogue leaves out only the songs the app synced. A song that reached the card another way
@@ -155,6 +165,7 @@ playlists.
 | Greyed rows ([below](#greyed-rows)): stock's pooled Library rows as `ringnav_table_load` binds them to `p_deque_showlist`'s records; the scroll_view lists whose rows are one record each in order (an album's songs on `albuminfo_page` and Go to Album's `playerjumpinfo_page`, and Search's Songs) as their surface paints; a press on one fails stock's play check (`CATALOGUE_ACCESS`), which says File Not Found. An album row (Library > Albums, an artist's, composer's or genre's albums) is greyed when none of its songs can play: offline, no card song has its name and none of its server songs has an offline copy | `navigation.c` (`ringnav_table_load`, one call; `grey_rows`, `paint_offline`, `ringnav_style_color`), `catalogue.c` (`catalogue_bind`, `catalogue_album_unavailable`, `catalogue_greyed`, `catalogue_fit`, `catalogue_mark_paint`) | yes |
 | Play: a list with server rows played online writes `.catplay`; the app's `.play` within 4 s is the answer, else the firmware plays the list itself from card rows and offline copies; offline it does so at once | `playback.c` (`ringnav_load`), `catalogue.c` (`catalogue_load`) | yes |
 | Shuffle and connection loss: offline, the queue loaded is the playable rows only, so Shuffle Songs (which plays the whole library through the same load) leaves the greyed out; mid-queue, `upcoming()` skips rows that can't play now | `playback.c` | yes |
+| Covers: a server row's album cover is the app's `covers/<album id>.jpg` (the album id from the row's path, or from its offline copy's row), in the Library's album rows and grids and on Now Playing; Cover Flow's own art build still marks a server row "no art" | `catalogue.c` (`catalogue_cover`), `coverflow.c` (`grid_cover`, `coverflow_player_cover`) | yes |
 | Guards where code assumes a file exists: Cover Flow art writes its "no art" marker for a server row at once; durations use the catalogue's seconds | `coverflow.c`, `durations.c` | yes |
 | Delete Song | | not needed: a server row never plays under its own `fileurl` (the app's `.play` and the offline queue both hold card files), so Now Playing's Delete only ever sees a card file, a Stream Cache copy included |
 | Go to Album and Go to Artist on a server row (the queue menu): the Library's own pages for the row's album and artist, never the app's (`goto_app` leaves a server row out, `addon_goes` offers Go to on it), so they work offline and list the album's card and server songs | `addon.c` (`goto_app`, `addon_goes`) | yes |
@@ -196,6 +207,16 @@ option; writing `catalogue.tsv` after each server check, streamed rather than he
 its 20,000-song cap; `catalogue.avail` when the Stream Cache changes; `server=up/down`; answering
 `.catplay`; and, when the server is lost mid-queue, dropping uncached songs from its m3u so the
 firmware does not wait on them.
+
+**Covers** (`covers/`, above): the app fetches them with `getCoverArt` (`id` the album id,
+`size=160`), two at a time, while the Q2 is idle or charging and the server answers, for at most
+30 s a minute, through the network slot syncs and streams take first; a stopped round goes on at
+the next. The folder holds at most 256 MB, each file counted as whole clusters of the card (about
+8,000 albums with 32 KB clusters, 2,000 with 128 KB), and no cover is written while the card has
+under 1 GB free. Albums are taken in the Library's order (by name), so the top of Albums fills
+first. An album the server has none for (error 70, a 404, or a picture over 160 px) is noted in
+`covers/.none` and not asked again; Show in Library off and Sign Out delete the folder. Measured
+on the developer's Navidrome: a 160 px baseline JPEG of 3 to 6 KB, 50 to 350 ms each.
 
 ## Keeping in step with the server
 
