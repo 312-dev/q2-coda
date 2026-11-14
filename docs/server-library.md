@@ -83,9 +83,9 @@ i	<pid>	<sid>	<card path or empty>
   most 160 px a side (Cover Flow's texture; the Library's rows and grids are smaller). The
   firmware finds it by the album id in a server row's path, or in the path of that row's offline
   copy, and uses it where it would use a card album's cover: the Library's album rows and grids
-  (`grid_cover`, through stock's thumbnailer) and Now Playing (`coverflow_player_cover`, after the
-  file's own art and folder images). Until it is there the placeholder shows; nothing waits for
-  it. The app keeps the folder within its own budget and deletes an album's cover when the album
+  (`grid_cover`, through stock's thumbnailer), Cover Flow's carousel (its art cache, built from
+  it) and Now Playing (`coverflow_player_cover`, after the file's own art and folder images).
+  Until it is there the placeholder shows; nothing waits for it. The app keeps the folder within its own budget and deletes an album's cover when the album
   leaves the catalogue ([The app's side](#the-apps-side)).
 
 ### Duplicates
@@ -165,8 +165,9 @@ playlists.
 | Greyed rows ([below](#greyed-rows)): stock's pooled Library rows as `ringnav_table_load` binds them to `p_deque_showlist`'s records; the scroll_view lists whose rows are one record each in order (an album's songs on `albuminfo_page` and Go to Album's `playerjumpinfo_page`, Cover Flow's tracks, where Go to Album lands with Artist View on, Most Played's and the Ratings lists' songs, and each of Search's tabs) as their surface paints; a press on one fails stock's play check (`CATALOGUE_ACCESS`), which says File Not Found. An album row (Library > Albums, an artist's, composer's or genre's albums), and Search's artist, album and genre rows, are greyed when none of their songs can play: offline, no card song has its name and none of its server songs has an offline copy | `navigation.c` (`ringnav_table_load`, one call; `grey_rows`, `paint_offline`, `ringnav_style_color`), `catalogue.c` (`catalogue_bind`, `catalogue_album_unavailable`, `group_unavailable`, `catalogue_mark`, `catalogue_greyed`, `catalogue_fit`, `catalogue_mark_paint`) | yes |
 | Play: a list with server rows played online writes `.catplay`; the app's `.play` within 4 s is the answer, else the firmware plays the list itself from card rows and offline copies; offline it does so at once. Meanwhile Now Playing shows the pressed song ([below](#now-playing-while-it-loads)) | `playback.c` (`ringnav_load`), `catalogue.c` (`catalogue_load`, `catalogue_np_now`), `np_bar.c` (`np_sync`, two lines), `navigation.c` (`np_art`, two lines), `tags.c` (`id3_parses`) | yes |
 | Shuffle and connection loss: offline, the queue loaded is the playable rows only, so Shuffle Songs (which plays the whole library through the same load) leaves the greyed out; mid-queue, `upcoming()` skips rows that can't play now | `playback.c` | yes |
-| Covers: a server row's album cover is the app's `covers/<album id>.jpg` (the album id from the row's path, or from its offline copy's row), in the Library's album rows and grids and on Now Playing; Cover Flow's own art build still marks a server row "no art" | `catalogue.c` (`catalogue_cover`), `coverflow.c` (`grid_cover`, `coverflow_player_cover`) | yes |
-| Guards where code assumes a file exists: Cover Flow art writes its "no art" marker for a server row at once; durations use the catalogue's seconds | `coverflow.c`, `durations.c` | yes |
+| Covers: a server row's album cover is the app's `covers/<album id>.jpg` (the album id from the row's path, or from its offline copy's row), in the Library's album rows and grids, Cover Flow's carousel and Now Playing | `catalogue.c` (`catalogue_cover`), `coverflow.c` (`grid_cover`, `build_art`, `coverflow_player_cover`) | yes |
+| Cover Flow: with Local + Server its album queries read the union (`cf_staged`), so the carousel has the server's albums; a server album's art is built from its app's cover once that is fetched (no job until then, so no "no art" marker); the centred album's captions are greyed with the offline mark while none of its songs can play | `coverflow.c` (`cf_staged`, `build_art`, `load_albums`, `caption_offline`, `caption_mark`) | yes |
+| Guards where code assumes a file exists: durations use the catalogue's seconds | `durations.c` | yes |
 | Delete Song | | not needed: a server row never plays under its own `fileurl` (the app's `.play` and the offline queue both hold card files), so Now Playing's Delete only ever sees a card file, a Stream Cache copy included |
 | Go to Album and Go to Artist on a server row (the queue menu): the Library's own pages for the row's album and artist, never the app's (`goto_app` leaves a server row out, `addon_goes` offers Go to on it), so they work offline and list the album's card and server songs | `addon.c` (`goto_app`, `addon_goes`) | yes |
 | Now Playing's info page for a server song, which plays from its Stream Cache copy (a file no `songtable` row describes): Genre and Year are the catalogue's, Location reads `Server` | `navigation.c` (`ringnav_np_info`, three lines), `catalogue.c` (`catalogue_np_info`) | yes |
@@ -324,9 +325,7 @@ Library; a Q2 has 128 MB, so this wants checking on a device. Every job copies t
 1. **Greying** covers stock's pooled Library lists (bound in `ringnav_table_load`), song rows and
    album rows, and the one-record-per-row lists `grey_rows` knows (an album's songs, Cover Flow's
    tracks, Most Played, the Ratings lists, each of Search's tabs); a list built another way is not
-   greyed, though its rows' play check still refuses. Cover Flow's covers showed the card's
-   albums only in the end-to-end emulator run; a server album's tracks reach Cover Flow through
-   Go to Album. An album, artist or genre row is matched by its name, as the Library's lists
+   greyed, though its rows' play check still refuses. An album, artist or genre row is matched by its name, as the Library's lists
    group it, so a server-only album that shares its name with a card album (another artist's
    "Greatest Hits") is not greyed.
 2. **Scale** on a device: the emulator's numbers (above) are not a Q2's, and 50,000 server songs

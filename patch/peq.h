@@ -424,7 +424,7 @@ const char *catalogue_rows(void); /* library_query's union, "" without one */
 void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);
 void catalogue_changed(void), catalogue_card_away(void), catalogue_rated(void *r, int hearts);
 void catalogue_bind(void *row, unsigned index), catalogue_mark(void *row, void *r, int tab);
-void catalogue_forget(void *row);
+void catalogue_forget(void *row), catalogue_grey(void *w, int on);
 int catalogue_greyed(void *w, unsigned *color), catalogue_row_ink(void *row, unsigned *ink);
 int catalogue_greys(void);
 void catalogue_mark_paint(void *canvas, int x, int y, unsigned ink);

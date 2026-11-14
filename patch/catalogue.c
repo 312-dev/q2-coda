@@ -1220,6 +1220,8 @@ void catalogue_mark(void *row, void *r, int tab) {
     grey_set(row, tab > 0 ? search_group_unavailable(r, tab) : catalogue_unavailable(r));
 }
 void catalogue_forget(void *row) { grey_set(row, 0); }
+/* w's text greyed (on) as a row's that can't play, or not: Cover Flow's captions. */
+void catalogue_grey(void *w, int on) { grey_set(w, on); }
 /* The server rows' names with an offline copy, by group, as they are now. */
 static void local_sets(void) {
     if (cat.local_built == cat.local_gen) return;

@@ -872,3 +872,84 @@ def test_now_playing_shows_a_pressed_server_song_until_the_player_parses_one(rig
     assert shown()
     rig.now += 1000
     assert not shown()
+
+
+def test_cover_flow_shows_server_albums_with_the_apps_cover_and_greys_them_offline(rig, fw):
+    """With Local + Server, Cover Flow's album queries read the server's songs too (as the Library's
+    Albums list does), so its carousel has the server's albums; a server album's art is its app's cover,
+    built only once the app has fetched it (the placeholder until then, no marker); and the centred
+    album's captions are greyed, with the offline mark, while none of its songs can play."""
+    from test_coverflow import Cf
+    from test_nav_lists import Loads
+    from test_nav_painters import Canvas, Ui
+    rig.card_song('/mnt/mmc/Music/a.flac', 'Card Song', 'Card Band', 'Mine', 1, 200, 1000)
+    rig.write(1, [song_row('s1', 'Streamed', 'Band', 'Server Only', 1, 100, 1, album_id='al1'),
+                  song_row('s2', 'Other', 'Band', 'Not Fetched', 1, 100, 2, album_id='al2')])
+    rig.poll()
+    slot = C.c_void_p.from_address(STOCK_SLOT)
+    rig.lib.sqlite3_open(str(rig.tmp/'database.db').encode(), C.byref(slot))
+    fw.fn('catalogue_attach', None, C.c_void_p)(STOCK_SLOT)
+    loads = Loads(fw)
+    query = fw.fn('ringnav_library_query', C.c_int, C.c_void_p, C.c_void_p, C.c_void_p, C.c_int)
+    fw.mock('toolsQueryDbTable', lambda db, sql, row, arg, *_: query(db, sql, row, arg))
+    split = fw.fn('coverflow__split', C.c_void_p, C.c_void_p)  # ALBUM_SQL: each album's own row
+    split(rig.rows.rows([]))
+    assert sorted(r[1] for r in rig.query(loads.ran[-1])) == ['Mine', 'Not Fetched', 'Server Only']
+    fw.var('catalogue_source', C.c_int).value = 0
+    rig.source = 0
+    fw.fn('catalogue_changed', None)()
+    split(rig.rows.rows([]))
+    assert 'servertable' not in loads.ran[-1]  # Local only: the card's, as before
+    rig.source = 1
+    fw.var('catalogue_source', C.c_int).value = 1
+    fw.fn('catalogue_changed', None)()
+    rig.poll()
+
+    # the art: the app's cover, thumbnailed into the cache; none fetched yet, nothing written
+    rig.files.files['/mnt/mmc/.subsonic/covers/al1.jpg'] = b'\xff\xd8 baseline'
+    fw.mock('toolsThumbSpecCover', lambda src, dst, w, h, *_: rig.files.files.__setitem__(
+        C.string_at(dst).decode(), C.string_at(src) + b' %d' % w) or 1)
+
+    class Job(C.Structure):
+        _fields_ = [('track', C.c_char_p), ('key', C.c_uint), ('shared', C.c_int)]
+    build = fw.fn('coverflow__build_art', None, C.c_void_p)
+    for key, sid, album in ((0x11, 's1', 'al1'), (0x22, 's2', 'al2')):
+        build(C.byref(Job(url(sid, album).encode(), key, 1)))
+    art = {k: v for k, v in rig.files.files.items() if k.startswith('/mnt/mmc/.coverflow/')}
+    assert art == {'/mnt/mmc/.coverflow/00000011.jpg': b'/mnt/mmc/.subsonic/covers/al1.jpg 160'}
+
+    # the captions: greyed, the name narrowed a mark's width a side, the mark at its right
+    ui = Ui(fw)
+    covers = ui.add('view', ui.window('coverflow_page'), (0, 0, 375, 300))
+    name, artist = ui.add('hscroll_label', covers, (36, 250, 303, 26)), ui.add('label', covers, (36, 276, 303, 20))
+    cf = fw.var('cf', Cf)
+    cf.covers, cf.name, cf.artist = covers.addr, name.addr, artist.addr
+    caption = fw.fn('coverflow__caption_offline', None, C.c_int)
+    greyed = fw.fn('catalogue_greyed', C.c_int, C.c_void_p, C.POINTER(C.c_uint))
+    caption(1)
+    assert cf.offline == 1 and name.box[0] == 64 and name.box[2] == 247
+    assert greyed(name.addr, C.byref(C.c_uint(0xffffffff))) and greyed(artist.addr, C.byref(C.c_uint(0xff8a8a8a)))
+    canvas = Canvas(fw)
+    fw.fn('coverflow_paint', None, C.c_void_p, C.c_void_p)(covers.addr, canvas.addr)
+    xs = {x for (x, y) in canvas.px if 250 <= y < 276}
+    assert xs and min(xs) >= 64 + 247 and max(xs) < 375 - 36 + 5
+    caption(0)
+    assert cf.offline == 0 and name.box[0] == 36 and name.box[2] == 303
+    assert not greyed(name.addr, C.byref(C.c_uint(0xffffffff)))
+    rig.lib.sqlite3_close(slot)
+    slot.value = 0
+
+
+def test_a_server_track_pressed_in_cover_flow_plays_rather_than_saying_storage_unavailable(rig, fw):
+    """Cover Flow's track rows check the card is there before they play: a server row has no file, so it
+    goes on to play_folder (ringnav_load hands it to the app, or says why it can't), as a card track does."""
+    from test_coverflow import Cf
+    rig.write(1, [song_row('s1', 'Streamed', 'Band', 'Server Only', 1, 100, 1)])
+    rig.poll()
+    cf = fw.var('cf', Cf)
+    cf.tracks = rig.rows.rows([rig.record(url('s1')), rig.record('/mnt/mmc/Music/gone.flac')])
+    play = fw.fn('coverflow__play', C.c_int, C.c_void_p, C.c_void_p)
+    play(0, None)
+    assert len(rig.played) == 1 and rig.played[-1][1] == 0
+    play(1, None)  # a card track whose file is gone: as before, nothing plays
+    assert len(rig.played) == 1

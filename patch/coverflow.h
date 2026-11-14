@@ -39,6 +39,7 @@ typedef struct {
     unsigned long thread;
     unsigned timer, title_timer; /* title_timer: the captions follow the centre cover mid-move */
     int titled;                  /* the album the captions name, + 1 */
+    int offline;                 /* that album can't play now: its captions greyed (caption_mark) */
     unsigned saved_album, albums_gen; /* albums_gen: library_gen when albums was queried */
     int screen, album, running, text_albums;
     volatile int done, total, cancel;
