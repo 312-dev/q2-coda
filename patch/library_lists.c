@@ -32,6 +32,7 @@ int shuffle_play(void *all) {
         config_playmode(2, 1);
         play_folder(all, at, 0xf001);
         playback_shuffle(mode); /* an order Up Next can list; stock's shuffle stays the fallback */
+        feedback_shuffled("Shuffled Songs", size); /* OLED's confirmation */
     }
     return size;
 }
@@ -49,6 +50,8 @@ static int shuffle_groups(void *ctx, void *event) {
     void *all = staged(songs_unsorted, (void *)1, &n);
     if (!playback_groups(all, (int)(long)ctx))
         toast(deque_size(all) ? "Too many songs to shuffle" : "Update Local Music first");
+    else
+        feedback_shuffled(ctx ? "Shuffled Folders" : "Shuffled Albums", (int)deque_size(all));
     deque_destroy(all);
     return 0;
 }

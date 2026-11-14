@@ -1,7 +1,7 @@
 /* OLED's feedback forms (docs/oled-design.md#dialogs-and-toasts, a theme whose
  * dialog.confirm.painter is "oled"): stock's toast as a pill over the page, and stock's confirm
  * pop-up as a dialog page whose status row asks the question over Cancel and the action's verb;
- * an empty or offline page's note. */
+ * an empty or offline page's note; the confirmation after a shuffle. */
 #include "navigation.h"
 
 int feedback_oled(void) { return theme()->painter[PAINT_CONFIRM] == CONFIRM_OLED; }
@@ -279,4 +279,66 @@ void feedback_songs(void *top, void *row) {
                                           : "No songs";
     feedback_empty(top, CONFIRM_Y, empty ? message : (const char *)0,
                    cls == 0xf00a ? "Hold Play/Pause on a song to add it" : (const char *)0);
+}
+
+/* The confirmation after a shuffle (docs/oled-design.md#confirmation): over Now Playing, the
+ * accent's 56 px bold shuffle centred on y 140, what was shuffled in the Song title role centred on
+ * y 200 and the queue's song count in 15 px Text Tertiary centred on y 228, under a status row that
+ * names Now Playing. It goes after 1.2 s or at the first key, which it takes. */
+#define CONF_MS 1200
+#define CONF_GLYPH 56
+static struct {
+    void *page;
+    unsigned timer;
+} conf __attribute__((section(".scratch")));
+static int conf_gone(void *page, void *event) {
+    if (conf.page == page) {
+        conf.page = (void *)0;
+        stop_timer(&conf.timer);
+    }
+    return 0;
+}
+static int conf_due(const void *info) {
+    conf.timer = 0;
+    if (conf.page) window_close(conf.page);
+    return 0;
+}
+static int conf_key(void *ctx, void *event) {
+    if (conf.page && !conf.timer) return STOP; /* closing */
+    stop_timer(&conf.timer);
+    conf.timer = timer_add(conf_due, (void *)0, 0);
+    return STOP;
+}
+static void *conf_line(void *page, int cy, int h, const char *s, int role, int px, unsigned ink) {
+    void *label = text(page, 0, cy - h / 2 - geom_val(V_BAR), 375, h);
+    widget_set_text_utf8(label, s);
+    if (role >= 0) theme_font(label, role, FONT_ROW);
+    if (px) widget_set_prop_int(label, "style:normal:font_size", px);
+    text_ink(label, RGBA(ink), INK_LABEL);
+    return label;
+}
+void feedback_shuffled(const char *what, int songs) {
+    if (!feedback_oled() || conf.page || songs <= 0) return;
+    void *page = window_create(0, 0, 0, 0, 0);
+    if (!page) return;
+    conf.page = page;
+    widget_set_name(page, "shuffle_confirm");
+    widget_set_prop_int(page, "style:normal:bg_color", (int)RGBA(scheme()->paper));
+    widget_on(page, EVT_DESTROY, conf_gone, page);
+    widget_on(page, EVT_KEY_DOWN, conf_key, 0);
+    widget_on(page, EVT_KEY_UP, conf_key, 0);
+    page_title(page, "Now Playing", 1); /* the status row's, hidden here */
+    void *glyph = image_create(page, (375 - CONF_GLYPH) / 2, 140 - CONF_GLYPH / 2 - geom_val(V_BAR),
+                               CONF_GLYPH, CONF_GLYPH);
+    image_base_set_image(glyph, theme_art("confirm_shuffle"));
+    int light = ipod_light();
+    conf_line(page, 200, 32, what, ROLE_NP, 0, light ? 0x000000 : 0xffffff);
+    char count[24];
+    int k = songs / 1000;
+    if (k)
+        tk_snprintf(count, sizeof count, "%d,%03d song%s", k, songs % 1000, "s");
+    else
+        tk_snprintf(count, sizeof count, "%d song%s", songs, songs == 1 ? "" : "s");
+    conf_line(page, 228, 24, count, -1, 18, light ? 0x6e6e6e : 0x858585);
+    conf.timer = timer_add(conf_due, (void *)0, CONF_MS);
 }

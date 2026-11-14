@@ -183,6 +183,8 @@ MODE_INKS = {'d': 0xababab, 'l': 0x5c5c5c}
 # A row's leading glyph (Songs' Shuffle row, list.shuffle.row), regular weight at the 20 px row type's size
 ROW_ICON_PX = 20
 FOLDER_INKS = {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}  # Text Secondary in each half, white on the bar
+# The confirmation's glyph after a shuffle (feedback.c feedback_shuffled): bold, the accent's top tone in both halves
+CONFIRM_GLYPH_PX = 56
 
 
 def gradient(stops, y0, y1):
@@ -936,6 +938,8 @@ def images(t):
         out |= {f'{prefix}_tile': tile(), f'{prefix}_clock_chrome': clock_chrome(), f'{prefix}_clock_shadow': clock_shadow(), f'{prefix}_hint_shadow': hint_shadow()}
     if t['painter[PAINT_CONFIRM]'] == list(CHOICES['dialog.confirm.painter']).index('classic-light'):
         out[f'{prefix}_confirm_shadow'] = png(*TRAY_SHADOW_BOX[2:], tray_shadow())
+    if t['painter[PAINT_CONFIRM]'] == list(CHOICES['dialog.confirm.painter']).index('oled'):  # feedback.c's confirmation
+        out[f'{prefix}_confirm_shuffle'] = phosphor('shuffle-bold', CONFIRM_GLYPH_PX, t['schemes'][t['accents'].bit_length() - 1]['tones'][0])
     if t['station_stops']:  # Internet Radio's Now Playing art, as large as the slanted art (navigation.c stream_ipod)
         px = inc('NP_IPOD_ART')
         out[f'{prefix}_station'] = png(px, px, station(t['station_stops'], t['station_mast'], t['station_band_a'], t['station_shadow_a'], px))

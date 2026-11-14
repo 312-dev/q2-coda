@@ -282,7 +282,10 @@ Shown for a moment after a mode change (Shuffle, Repeat).
 - Centred glyph (Phosphor `shuffle` or `repeat`, bold), 56 px, Accent Blue, centred on y 140;
   label Inter Medium 22 px centred on y 200; count in Text Tertiary 15 px centred on y 228.
   Nothing else on screen but the status row, which names Now Playing.
-- Dismisses itself after 1.2 s or on any input.
+- Dismisses itself after 1.2 s or on any input, which it takes.
+- Built for shuffles (`patch/feedback.c` `feedback_shuffled`): the Library's Shuffle Songs, Albums and
+  Folders, a list's Shuffle row and the hold menu's Shuffle, over the Now Playing they open, with the
+  queue's song count. Repeat and Now Playing's own mode button do not show it yet.
 
 ### Dialogs and toasts
 
@@ -405,9 +408,9 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_still` (the art from
   x 196 and y 52 to the edges, still and centre-cropped, its top rows painted by the bar).
 - The toast, the confirm as a dialog page and the empty note (`dialog.confirm.painter="oled"`,
-  `patch/feedback.c`).
+  `patch/feedback.c`), and the confirmation after a shuffle.
 
 Still to build:
 
-- A confirmation screen for Shuffle and Repeat.
+- The confirmation for Repeat and Now Playing's mode changes.
 - Switch rows, the pickers' check, the EQ slider and the storage bar drawn as above.
