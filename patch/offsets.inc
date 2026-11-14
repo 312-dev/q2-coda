@@ -592,6 +592,10 @@ static inline int arc_out(int r, int y) {
 #define BOOT_KEY_GUARD 0xa4bbf9 /* no symbol: set after a Standby resume, on_wm_keyup_fun drops the next centre release */
 #define NP_KEY_HELD 0xa4e880 /* Now Playing's long press of 222/223 sets it (0x53b4d0), its release clears it */
 #define NP_KEY_MODE 0xa4e881 /* 1 once a key-down stepped the slider with NP_KEY_HELD set (0x53e000) */
+/* stock: on_wm_keydown_before_fun clicks (buzzeer_switch) only while it is clear and sets it after;
+ * on_wm_keyup_before_fun (ringnav's hook) clears it. A key ringnav takes before stock's key-up body
+ * clears it itself, or every later press is silent (docs/internals.md#ipod-row-clicks). */
+#define KEY_TONE_LATCH 0xa4bc00
 #define RETURN_RELEASE_LATCH 0xa4bbfa /* stock long Return arms it; the key-up filter consumes it */
 
 /* slide_menu_scroll_to @0x606290 and completion @0x6064e4; animator

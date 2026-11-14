@@ -1015,7 +1015,11 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
   stock's search box and keyboard (`list.entry.ipod`, `patch/search_strip.c`): a `#1C1C1E` bar from y 216 to 254
   with 12 px corners, the typed text in a black box at its left with the accent's caret, and A to Z, 0 to 9, a space
   and delete passing under a fixed accent box, 17 px apart, the current one white Inter Medium, the rest Text
-  Secondary. The wheel walks the strip (round from delete to A), Centre enters the highlighted character, and, as
+  Secondary. When the wheel lands on a letter or digit its key pops up, as an iPhone's keyboard does: the key grows a
+  bubble above the strip (a 30 px head with 9 px corners narrowing over 18 px to the 18 px key, the accent) holding
+  the letter in 26 px white Inter Medium, and the key keeps the letter at 17 px in white at 60 %; it goes 300 ms
+  after the wheel stops. Turning faster than 8 letters a second shows none until the wheel stops, then one. The
+  bubble may cover the last result row while it shows. The wheel walks the strip (round from delete to A), Centre enters the highlighted character, and, as
   Apple's guide gives the iPod's own, Next enters a space and Previous deletes. What holds the text lists above it as
   it is typed, as an iPod's results mix artists, albums and songs: the artists whose name holds it, then the albums,
   32 of each at most, then the songs whose title, artist or album holds it; four single-line rows from y 58, the
@@ -1026,7 +1030,8 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
   to the strip. Return on the results, or on the strip with no text or no match, closes Search. With text and no
   match, "No results" stands in the list's place. By touch, a tap on a letter types it and a drag along the strip
   moves the alphabet a letter per 17 px; a tap on a result opens or plays it, and a drag up or down the results
-  scrolls them a row per 32 px.
+  scrolls them a row per 32 px. Each tick along the strip clicks as a list's row change does, and Centre, Next and
+  Previous click as a button does, through the Clicker setting.
 - <a id="keyboard"></a>**The keyboard.** The keyboard other text boxes open (New Playlist, Rename, the Wi-Fi password)
   keeps stock's layout and labels on the page's black: each key a `#1C1C1E` box with 8 px corners, every one inside
   the glass's corners (`patch/keyboard.c`, the same `list.entry.ipod`). The wheel walks the keys of the page showing,
