@@ -59,6 +59,7 @@ demo queues every message it receives as a (name, argument) pair (`0x5bb7f4`); a
 | `mcl-getuvmeter` | `null` | | `{mcl-getuvmeter\L\|R}` |
 | `mcl-getspectrum` | `null` | | `{mcl-getspectrum\` twelve integers `}` |
 | `mcl-pcmstate` | `null` | | `{mcl-pcmstate\N}`, `0xb11c24` or 0 when it is negative: the MQA decoder's state, 1 to 3, which the UI shows as its MQA mark (the M1 Plus's `mclGetMQAState`, in [shanling-m1plus-navidrome](https://github.com/shivaluma/shanling-m1plus-navidrome)'s `docs/research/native-integration-evidence.md`). Always 0 on V1.36, where the decoder is never made |
+| `mcl-click` | `wheel`, `button`, `beep` | Not stock's: q2player's, sent by Q2 Pod's payload for the Clicker (`patch/clicker.c`, [internals: Key Tone](internals.md#key-tone)) while a song plays. q2player mixes the sound into what is about to be heard ([player-plan: Clicker](player-plan.md#the-clicker)); stock's hciplayer, and Q2 Pod's, ignore it as any name they do not know (captured) | none |
 
 The song fields, from demo's sender `0x5bf504` and hciplayer's parser:
 
@@ -147,11 +148,11 @@ Q2 Pod's player adds the wait for the line after an unmute on a press, a seek an
 
 **Volume and gain.** On the DAC nothing in the player touches a sample unless the EQ or ReplayGain is on: volume is the DAC's. On Bluetooth, `mcl-setvol`'s two bytes scale the PCM in MPlayer's float volume filter (`0x45be84`), which multiplies and then saturates at the conversion to integers.
 
-**ReplayGain** (`mcl-replaygain`): the vendor changed FFmpeg's `ff_replaygain_export` (`0x538c84`) to leave the track and album gains and peaks in a global (`0xafd790`), and a filter set up at the next file (`0x4282c0`) applies them. MP3 goes through MPlayer's own demuxer and a vendor ID3v2 walker that misses most tags ([internals: MP3 ReplayGain](internals.md#mp3-replaygain)).
+**ReplayGain** (`mcl-replaygain`): the vendor changed FFmpeg's `ff_replaygain_export` (`0x538c84`) to leave the track and album gains and peaks in a global (`0xafd790`), and a filter set up at the next file (`0x4282c0`) applies them. Mode 1 takes the track's gain, or the album's when the file has no track gain; mode 2 the album's; 0 removes the filter, and any other value changes nothing. The gain (in 1/100000 dB) becomes a factor `min(10^(gain/20), 1/peak)`, a peak of 0 (none given) counting as 1, so without a peak a gain only cuts; a gain of exactly 100000 (+1 dB) is skipped, stock's compare against that constant. The filter is MPlayer's volume filter under the name `replaygain`, which multiplies in float and clips at full scale. MP3 goes through MPlayer's own demuxer and a vendor ID3v2 walker that misses most tags ([internals: MP3 ReplayGain](internals.md#mp3-replaygain)).
 
 **EQ** (`mcl-seteq`): MPlayer's ten-band `af_equalizer`, refused above 48 kHz. Q2 Pod replaces it ([below](#what-q2-pod-patches)).
 
-**Meters.** With `mcl-setexplayinfo` 1 the play loop keeps a level per channel, in dB: a 441 Hz tone at -18 dBFS peak read `-21|-21` (its RMS), and that tone with a louder sweep over it read `-24|-24`, so the window and scale are not yet known. With 2 it keeps twelve spectrum bands. Both read 0 with nothing playing.
+**Meters.** With `mcl-setexplayinfo` 1 ao_alsa's play (`0x43ac54`) measures each write before `snd_pcm_writei` (`0x43a778`): the peak of the first 480 bytes' samples (240 at 16 bits, 160 at 24, 120 at 32 or float), even samples for the left and odd for the right, as whole dB of full scale truncated toward 0 (`20 * log10(peak / full)`, full 32767, 8388607, 2147483647 or 1.0), -60 for a channel at 0, a write under 481 bytes, another format or DSD. The two go to `0xb11dac` and `0xb11da8`, which nothing else writes, so a level stands until the next measured write. With 2 it runs an FFT into twelve spectrum bands (`0x43962c`). Both read 0 before anything is measured. Only demo's VU and spectrum pages ask (`mclGetUVmeter`, `mclGetSpectrum` and `mclSetExPlayInfoMode` are reached from `spectrum_page_init`, `vu_page_init` and their pages' timers alone), and Q2 Pod leaves those pages out ([internals: Stock options held](internals.md#stock-options-held)).
 
 ## Sources
 
@@ -278,6 +279,6 @@ Each needs a Q2; none can be settled under qemu.
 | What the DAC is given for each request: the player asks for `S16_LE`, `S32_LE` or `FLOAT_LE` (captured), and under qemu the `null` device accepts anything | `hw_params` for a 16-bit FLAC, a 24-bit FLAC, a 32-bit WAV and an M4A |
 | DSD: the exact PCM formats and rates of DoP and Native on the DAC and on a USB DAC, and which hardware types force which mode | `hw_params` with a DSD64 and a DSD256 `.dsf` in each of the three modes, on each output |
 | Bluetooth: the rate and format bluealsa takes per codec, and the level `mcl-setvol` gives | `hw_params` equivalent from bluealsa's log, and a capture of its PCM |
-| The meters' scale at silence and full scale, and the twelve spectrum bands' edges | `mcl-getuvmeter` and `mcl-getspectrum` over `q2remote` with test tones |
+| Whether `snd_pcm_rewind` works through `default` on the DAC, and how soon after a turn of the wheel q2player's click is heard (the Clicker, [player-plan](player-plan.md#the-clicker)) | `snd_pcm_rewindable` in q2player's log while a song plays; a recording of the headphone output against the wheel's tick |
 | CPU: stock's load at 44.1, 192 and 384 kHz, the new player's at the same | `top -b -d 1` for a minute of each |
 | `set-songurl` while a song plays, which demo never sends: stock's answer under qemu is in `stock-replace.txt`, and whether any demo path relies on it is unknown | a trace of the socket on a Q2 over a day's use |

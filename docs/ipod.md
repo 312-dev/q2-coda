@@ -776,7 +776,7 @@ NPCENTRED`, off; `playset_covermode`): `ringnav_ui_load`, hooked on every window
   coverflow_position.c).
 - Controls: Wheel Sensitivity, which opens its slider page; "Hold Return: Recent"
   (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); a "Single Press Scrub" switch (`IPOD SCRUBSINGLE`, off; `np_key`): on Now Playing a single
-  centre press starts the scrub and a double press turns the screen off (Scrub, above); "Key Tone"; "Click With Headphones" (`IPOD KEYTONEHP`), shown while Key Tone is on ([Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; "Wake: Single Press"; and "Volume Guard".
+  centre press starts the scrub and a double press turns the screen off (Scrub, above); "Clicker: Both", Key Tone's row, cycling Speaker, Headphones, Both and Off (`IPOD CLICKER`, Off being Key Tone off; [Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; "Wake: Single Press"; and "Volume Guard".
 
 All are among the [settings icons](#settings-icons) the build pre-sizes. A value row has its value
 in the label (260 pixels wide, to where the chevron ends) and no chevron, since Centre or a tap
