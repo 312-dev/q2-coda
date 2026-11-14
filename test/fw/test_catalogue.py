@@ -658,3 +658,26 @@ def test_an_album_row_is_greyed_offline_when_none_of_its_songs_can_play(rig, fw)
     rig.online = True
     rig.poll()
     assert [grey(i) for i in range(5)] == [False] * 5
+
+
+def test_now_playings_info_page_has_the_catalogues_genre_and_year_for_a_server_song(rig, fw):
+    """A server song plays from its Stream Cache copy, a file no songtable row describes: the info page takes
+    the catalogue's genre and year for it (by the copy's path, or the row's own), and nothing for a card file."""
+    copy = '/mnt/mmc/.subsonic/stream/s1.flac'
+    rig.write(1, [song_row('s1', 'Streamed', 'B', 'A', 1, 100, 1, local=copy)])
+    rig.poll()
+    slot = C.c_void_p.from_address(STOCK_SLOT)
+    rig.lib.sqlite3_open(str(rig.tmp/'database.db').encode(), C.byref(slot))
+    fw.fn('catalogue_attach', None, C.c_void_p)(STOCK_SLOT)
+    info = fw.fn('catalogue_np_info', C.c_int, C.c_char_p, C.c_char_p, C.POINTER(C.c_int))
+
+    def ask(path):
+        genre, year = C.create_string_buffer(96), C.c_int(-1)
+        return (genre.value.decode(), year.value) if info(path.encode(), genre, C.byref(year)) else None
+    assert ask(copy) == ('Rock', 2001)
+    assert ask(url('s1')) == ('Rock', 2001)
+    assert ask('/mnt/mmc/Music/a.flac') is None
+    assert ask(copy) == ('Rock', 2001)  # asked again: the kept answer
+    rig.lib.sqlite3_close(slot)
+    slot.value = 0
+

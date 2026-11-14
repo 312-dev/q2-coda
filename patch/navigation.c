@@ -6849,6 +6849,10 @@ int ringnav_np_info(void *win) {
     getFormatString("player_location", where, sizeof where);
     const char *loc =
         *where && *where != '(' ? where : "Location"; /* a missing string reads "(key)" */
+    /* a server song (catalogue.c): its genre and year are the catalogue's, its place the server */
+    char genre[96], year[12];
+    int y = 0, server = catalogue_np_info((const char *)g_play_id3_info, genre, &y);
+    tk_snprintf(year, sizeof year, "%d", y);
     for (unsigned i = 0; i < sizeof names / sizeof *names; ++i) {
         void *label = win ? widget_lookup(win, names[i], 1) : (void *)0;
         char s[1024], out[1024 + sizeof where + 8];
@@ -6863,6 +6867,9 @@ int ringnav_np_info(void *win) {
         else
             continue;
         while (*v == ' ') ++v;
+        if (server && i == 1 && *genre) v = genre;
+        if (server && i == 3 && y > 0) v = year;
+        if (server && i == 8) v = "Server";
         if (!strcmp(v, "Unknown Artist")) v = "Unknown";
         const char *unit = *units[i] ? units[i] + 1 : units[i];
         int len = (int)strlen(v), u = (int)strlen(unit);

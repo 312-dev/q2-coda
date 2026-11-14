@@ -1073,6 +1073,53 @@ int catalogue_seconds(const char *path) {
     return e ? e->sec : -1;
 }
 
+/* The server row whose offline copy path is, or 0: a Stream Cache file the app played it from. */
+static const cat_ent *cat_copy_of(const char *path) {
+    if (!path || !tk_str_start_with(path, "/mnt/mmc/.")) return 0;
+    for (unsigned i = 0; i < cat.ix.n; ++i)
+        if (cat.ix.e[i].local && !strcmp(ix_str(&cat.ix, cat.ix.e[i].local), path))
+            return &cat.ix.e[i];
+    return 0;
+}
+typedef struct {
+    unsigned long long key; /* the path's fnv64 */
+    int known;
+    char genre[96];
+    int year;
+} np_t;
+static int np_row(void *ctx, int n, char **v, char **c) {
+    np_t *np = ctx;
+    tk_snprintf(np->genre, sizeof np->genre, "%s", v[0] ? v[0] : "");
+    np->year = v[1] ? atoi(v[1]) : 0;
+    return 0;
+}
+/* Now Playing's info page (navigation.c ringnav_np_info) for the playing path: a server row's, or
+ * its offline copy's, a Stream Cache file no songtable row describes, so stock finds no genre or
+ * year for it. The catalogue's, into genre (96 bytes) and *year (0 for none); 0 for any other
+ * path. Kept for the last path asked: the page asks every 250 ms. */
+int catalogue_np_info(const char *path, char *genre, int *year) {
+    static np_t *np __attribute__((section(".scratch")));
+    if (!path || !cat.ix.n || !tk_str_start_with(path, "/mnt/mmc/.")) return 0;
+    if (!np && !(np = calloc(1, sizeof *np))) return 0;
+    unsigned long long key = fnv64(path);
+    if (np->key != key) {
+        const cat_ent *e = catalogue_path(path) ? cat_lookup(path) : cat_copy_of(path);
+        char sql[640], *o = sql;
+        np->key = key, np->known = 0, np->genre[0] = 0, np->year = 0;
+        if (e && !e->dup && cat_live()) {
+            PUT(o, sql + sizeof sql - CAT_SLACK,
+                "select style,year from cat.serverall where fileurl=");
+            o = sq(o, sql + sizeof sql - CAT_SLACK, ix_str(&cat.ix, e->path));
+            if (o < sql + sizeof sql - CAT_SLACK)
+                np->known = !sqlite3_exec(*cat.stock_slot, sql, np_row, np, 0);
+        }
+    }
+    if (!np->known) return 0;
+    tk_snprintf(genre, 96, "%s", np->genre);
+    *year = np->year;
+    return 1;
+}
+
 /* ---- Greyed rows: stock's pooled table rows as they are bound (ringnav_table_load), the
  * payload's own lists' rows as they are made (catalogue_mark). ringnav_style_color asks
  * catalogue_greyed for each text colour. ---- */

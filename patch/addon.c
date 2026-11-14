@@ -2141,7 +2141,7 @@ static int card_id(const char *path, char *id) {
 /* The app whose folder holds path, when its q2app says goto=1; 0 for any other. */
 static app_t *goto_app(const char *path) {
     char id[APP_ID], raw[512], file[64];
-    if (!card_id(path, id)) return 0;
+    if (catalogue_path(path) || !card_id(path, id)) return 0; /* a server row is the Library's */
     tk_snprintf(file, sizeof file, CARD "/.%s/q2app", id);
     if (!state_read(file, raw, sizeof raw) || number(raw, "goto") != 1) return 0;
     app_t *a = slot(id);
@@ -2149,10 +2149,12 @@ static app_t *goto_app(const char *path) {
     return a && a->present ? a : 0;
 }
 /* The hold menu's: whether Go to on path opens a page, its app's (goto=1) or, outside an app's
- * folder, stock's. An app's folder is hidden, so the Library never holds its songs. */
+ * folder, stock's. An app's folder is hidden, so the Library never holds its songs, but for a
+ * server row (catalogue.c), whose path is in its app's folder and whose album and artist are the
+ * Library's: stock's pages. */
 int addon_goes(const char *path) {
     char id[APP_ID];
-    return !card_id(path, id) || goto_app(path);
+    return catalogue_path(path) || !card_id(path, id) || goto_app(path);
 }
 /* Whether a listen of path goes in the scrobble log (navigation.c scrobble): not when it is in an
  * app's folder and its q2app says scrobble=0, a line a Windows editor may end in \r. Compared as

@@ -157,7 +157,9 @@ playlists.
 | Shuffle and connection loss: offline, the queue loaded is the playable rows only, so Shuffle Songs (which plays the whole library through the same load) leaves the greyed out; mid-queue, `upcoming()` skips rows that can't play now | `playback.c` | yes |
 | Guards where code assumes a file exists: Cover Flow art writes its "no art" marker for a server row at once; durations use the catalogue's seconds | `coverflow.c`, `durations.c` | yes |
 | Delete Song | | not needed: a server row never plays under its own `fileurl` (the app's `.play` and the offline queue both hold card files), so Now Playing's Delete only ever sees a card file, a Stream Cache copy included |
-| Long Songs, Go to Album and the info page for a server row | | not built: Long Songs reads `songtable` alone, so server songs are not in it; Go to Album and the info page are unchecked for a server row |
+| Go to Album and Go to Artist on a server row (the queue menu): the Library's own pages for the row's album and artist, never the app's (`goto_app` leaves a server row out, `addon_goes` offers Go to on it), so they work offline and list the album's card and server songs | `addon.c` (`goto_app`, `addon_goes`) | yes |
+| Now Playing's info page for a server song, which plays from its Stream Cache copy (a file no `songtable` row describes): Genre and Year are the catalogue's, Location reads `Server` | `navigation.c` (`ringnav_np_info`, three lines), `catalogue.c` (`catalogue_np_info`) | yes |
+| Long Songs for a server row | | not built: Long Songs reads `songtable` alone, so server songs are not in it |
 | Setting: `[Q2POD] LIBRARYSOURCE`, 0 Local Only (default) or 1 Local + Server, a row on Display > Cover Flow | `navigation.c` (`pod_keys` and the rows' tables beside it) | yes |
 | Ratings: `ratings.out` appended for every app with `ratings=1`; `ratings.in` renamed to `ratings.in.taking`, applied, then deleted | `catalogue.c`, `ratings.c` (three calls) | yes |
 
@@ -297,9 +299,9 @@ Library; a Q2 has 128 MB, so this wants checking on a device. Every job copies t
    not greyed.
 2. **Scale** on a device: the emulator's numbers (above) are not a Q2's, and 50,000 server songs
    took demo's process from 70 to 96 MB there, QEMU included. To be measured on a Q2 (128 MB).
-3. **Code that expects a file** beyond the guards built: Go to Album and the info page for a server
-   row are unchecked, Long Songs leaves server songs out, and an online press shows Now Playing on
-   the last song until the app's `.play` (or the 4 s fallback) replaces it.
+3. **Code that expects a file** beyond the guards built: Long Songs leaves server songs out, and an
+   online press shows Now Playing on the last song until the app's `.play` (or the 4 s fallback)
+   replaces it.
 4. **Connection loss mid-queue**: the firmware skips rows that can't play as playback reaches them;
    rows the app's `.play` already holds are the app's to drop.
 5. **Server deletions**: a song removed on the server but present in a Q2 playlist, a rating or play
