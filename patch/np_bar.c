@@ -392,23 +392,68 @@ void np_theme(void) {
     if (st.np_album) widget_set_opacity(st.np_album, T->np_album_op);
 }
 
-/* playing.modes.icons: Now Playing's shuffle and repeat as the theme's own pair
- * (docs/oled-design.md#now-playing), NP_MODES_APART apart about the centre of the play mode's
- * target (tools/ipod.py np_grid), which keeps stock's image and handler under opacity 0, so a tap
- * there still steps the mode. Each glyph is the accent's while on, else the half's grey
- * (tools/art.py mode_*): shuffle at MCL_MODE 2, repeat at 3 (all) and 1 (one, its own glyph). */
+/* Shuffle and repeat as two controls (playing.modes.icons): shuffle on or off, and repeat Off, All
+ * or One, from stock's one play mode (MCL_MODE: 0 order, 1 repeat one, 2 shuffle, 3 repeat all).
+ * Stock has no shuffle under Repeat One, and its Shuffle never ends (it draws again once every
+ * track has played), so Repeat One plays as 1 whatever shuffle says, and shuffle with repeat Off
+ * or All both play as 2. What a mode can't say is kept here: shuffle under Repeat One
+ * (np_shuf_one) and Off chosen under shuffle (np_rep_off; All otherwise), so a control turned
+ * back finds the other as it was. NP_REPEAT_* are repeat's values. */
+enum { NP_REPEAT_OFF, NP_REPEAT_ALL, NP_REPEAT_ONE };
+static int np_shuffle_on(int m) { return m == 2 || (m == 1 && st.np_shuf_one); }
+static int np_repeat_of(int m) {
+    return m == 1                                 ? NP_REPEAT_ONE
+           : m == 3 || (m == 2 && !st.np_rep_off) ? NP_REPEAT_ALL
+                                                  : NP_REPEAT_OFF;
+}
+/* Shuffle (on) and repeat (rep) set: the mode they play as, through config_playmode as stock's
+ * own play mode setting saves it, and so ringnav_mode's rules (Shuffle Albums or Folders kept
+ * under stock Shuffle, other advanced play ended). Unchanged, nothing is sent: repeat between
+ * Off and All under shuffle keeps whatever plays. */
+void np_mode_set(int on, int rep) {
+    if (rep != NP_REPEAT_ONE) st.np_rep_off = rep == NP_REPEAT_OFF;
+    st.np_shuf_one = on;
+    int to = rep == NP_REPEAT_ONE ? 1 : on ? 2 : rep == NP_REPEAT_ALL ? 3 : 0;
+    if (to != *(volatile int *)MCL_MODE) config_playmode(to, 1);
+    void *mode = st.np_win ? widget_lookup(st.np_win, "img_playmode", 1) : (void *)0;
+    if (mode) widget_invalidate_force(mode, (void *)0);
+}
+/* A step of one control: shuffle (repeat 0) on or off, or repeat Off, All, One. */
+void np_mode_step(int repeat) {
+    int m = *(volatile int *)MCL_MODE, on = np_shuffle_on(m), rep = np_repeat_of(m);
+    np_mode_set(repeat ? on : !on, repeat ? (rep + 1) % 3 : rep);
+}
+/* A tap on the play mode's target under the theme's pair: its left half is shuffle's, its right
+ * repeat's, instead of stock's step through the one mode. 1 when it took the tap. */
+int np_mode_click(void *target, void *event) {
+    if (!target || target != (st.np_win ? widget_lookup(st.np_win, "img_playmode", 1) : 0) ||
+        !theme()->np_modes) /* the theme last: theme() reads the settings */
+        return 0;
+    int x = I(event, EVENT_X);
+    for (void *p = target; p && p != window_manager(); p = P(p, W_PARENT)) x -= I(p, W_X);
+    np_mode_step(x >= I(target, W_W) / 2);
+    return 1;
+}
+
+/* playing.modes.icons: the pair (docs/oled-design.md#now-playing), NP_MODES_APART apart about the
+ * centre of the play mode's target (tools/ipod.py np_grid), which keeps stock's image under
+ * opacity 0 and np_mode_click's halves. Each glyph is the accent's while on, else the half's grey
+ * (tools/art.py mode_*); Repeat One has its own glyph. */
 #define NP_MODES_APART 44
 void np_modes(void *win, void *canvas) {
     void *mode = theme()->np_modes && P(canvas, CANVAS_LCD) ? widget_lookup(win, "img_playmode", 0)
                                                             : (void *)0;
     if (!mode) return;
     int m = *(volatile int *)MCL_MODE, cx = I(mode, W_X) + I(mode, W_W) / 2,
-        cy = I(mode, W_Y) + I(mode, W_H) / 2;
+        cy = I(mode, W_Y) + I(mode, W_H) / 2, rep = np_repeat_of(m);
     const char *off = ipod_light() ? "_l" : "_d";
     char name[2][24];
     unsigned bitmap[64]; /* bitmap_t */
-    tk_snprintf(name[0], sizeof *name, "mode_shuffle%s", m == 2 ? "_on" : off);
-    tk_snprintf(name[1], sizeof *name, "mode_repeat%s", m == 1 ? "1_on" : m == 3 ? "_on" : off);
+    tk_snprintf(name[0], sizeof *name, "mode_shuffle%s", np_shuffle_on(m) ? "_on" : off);
+    tk_snprintf(name[1], sizeof *name, "mode_repeat%s",
+                rep == NP_REPEAT_ONE   ? "1_on"
+                : rep == NP_REPEAT_ALL ? "_on"
+                                       : off);
     for (int i = 0; i < 2; ++i)
         if (!widget_load_image(win, theme_art(name[i]), bitmap))
             canvas_draw_icon(canvas, bitmap, cx + (2 * i - 1) * NP_MODES_APART / 2, cy);

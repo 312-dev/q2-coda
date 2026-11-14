@@ -597,7 +597,8 @@ Modern show the label, and Modern's title is bold. There is no on-screen transpo
 the artist and album in Inter's 18 in Text Secondary; "1 of 10" level with the art's foot, More and
 the heart at the end of its line; a 6-pixel bar from the text column to the right column at y 228,
 the times under its ends in Inter's tabular digits, and shuffle and repeat centred under them in the
-accent when on, grey when off, over the play mode button, which a tap still steps. The page dots
+accent when on, grey when off, over the play mode button: a tap on shuffle turns it on or off and
+a tap on repeat steps Off, All, One, each keeping the other. The page dots
 sit under those, and the swipe's other pages stop above the bar. Each line that scrolls fades at
 the end it runs past (Display's [Theme](#theme)).
 

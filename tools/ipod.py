@@ -920,7 +920,7 @@ def np_grid(root, named, g, title, artist, album, pos, remain):
     w, h = NP_GRID_MODES
     mode = named['img_playmode']
     mode[1] = [(375 - w) // 2, bar_y + NP_GRID_MODES_DY - h // 2, w, h]
-    mode[2]['opacity'] = '0'  # its target and handler stay; np_bar.c np_modes draws the pair over it
+    mode[2]['opacity'] = '0'  # its target stays, its halves np_bar.c np_mode_click's; np_modes draws the pair over it
     root[3].append(mode)
 
 

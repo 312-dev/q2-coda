@@ -259,8 +259,9 @@ has no place for keeps a place of its own:
   takes them away with it.
 - **The page dots** sit under shuffle and repeat, centred on y 302; the lyrics, the track's details
   and the visualizer are still the swipe's other pages, each ending 5 px above the bar.
-- **Shuffle and repeat** are one target, stock's play mode button: a tap steps Order, Repeat One,
-  Shuffle, Repeat All as before, and the glyphs show the mode (repeat-once's glyph for Repeat One).
+- **Shuffle and repeat** are two controls on stock's play mode button: a tap on shuffle turns it
+  on or off, a tap on repeat steps Off, All, One (repeat-once's glyph for One), and each keeps the
+  other as it was. Stock's Shuffle never ends, so shuffle with repeat Off plays on as with All.
 - **The volume** and the scrub draw on the bar where it is. The A-B markers follow the bar
   across but keep stock's row, y 308 on screen, under the page dots. ponytail: a marker within
   about 14 px of either end of the bar falls under the bottom corners' glass; moving them onto

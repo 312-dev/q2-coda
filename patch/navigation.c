@@ -7410,6 +7410,7 @@ int ringnav_dispatch(void *target, void *event) {
             return STOP;
         }
         /* Now Playing's ⋯: an app's page instead of stock's while the app's queue plays */
+        if (np_mode_click(target, event)) return STOP; /* shuffle or repeat, one of the two */
         return target == np_more() && addon_more() ? STOP : time_click(target, event);
     }
     return stock_dispatch_trampoline(target, event);
