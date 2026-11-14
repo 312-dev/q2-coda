@@ -21,7 +21,7 @@ Apps live in their own repos. To list one on the App Store page, open a pull req
 
 1. Build and test as in [building.md](docs/building.md). `python3 -m pytest test/unit` and the [type check](docs/building.md#type-check) run on every pull request; run the scripts in `test/` that cover what you changed too.
 2. Try it on a Q2 if you can. A `--dev` build installs over any other and starts [`q2remote`](docs/remote.md) for screenshots and input over Wi-Fi.
-3. Run `./tools/format.sh`.
+3. Run `./tools/format.sh` (clang-format 18 and prettier; `--check` reports drift and changes nothing).
 4. Add a line for anything a user would notice under the top version in [changelog.md](docs/changelog.md), in plain words: what changed, not how. Don't change `VERSION`.
 5. Explain how a fix works, and anything it doesn't cover, in [internals.md](docs/internals.md) and the code.
 
@@ -29,7 +29,7 @@ Commit titles are `area: what changed`, such as `audio: a skip on Bluetooth no l
 
 ### Where new code goes
 
-`patch/navigation.c` is the UI's core: the hooks, input, the shared paint helpers and Now Playing. Don't add a feature to it. Give the feature its own file in `patch/`, list it in `NAVIGATION` in [`tools/build.py`](tools/build.py) (`tools/format.sh` reads it there), and declare what other files use in `patch/navigation.h` under its file's name, as `smart_wifi.c` and `system.c` do. Change navigation.c only where the code you change lives there, and say why in the pull request if you add to it.
+`patch/navigation.c` is the UI's core: the hooks, input, the shared paint helpers and Now Playing. Don't add a feature to it. Give the feature its own file in `patch/`, list it in `NAVIGATION` in [`tools/build.py`](tools/build.py) (`tools/format.sh` reads it there, and `UI_SOURCES` in `tools/peq.py`), and declare what other files use in `patch/navigation.h` under its file's name, as `smart_wifi.c` and `system.c` do. Change navigation.c only where the code you change lives there, and say why in the pull request if you add to it.
 
 A helper another file calls for every row or pixel goes in `navigation.h` as `static inline`. Mark one `__attribute__((pure))` only if it writes nothing, not even a lazy first load (`accent()` reads the settings on its first call), always returns, and reads no `volatile` memory or state another thread writes: clang may keep one call for several, across a change it can't see. Called across files without that, it runs slower, and the paints can outgrow `test/patch.py`'s instruction limit.
 
