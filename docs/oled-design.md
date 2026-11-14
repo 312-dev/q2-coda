@@ -245,7 +245,7 @@ clock.
 | Track position | 192, baseline 208              | "1 of 10", 15 px, Text Secondary, baseline level with the art's bottom                     |
 | Progress bar   | 24 to 347, y 228, 6 px         | Track `#333333`, fill Accent Blue, round ends                                              |
 | Elapsed        | left on 24, centred on y 250   | 16 px, Text Primary, tabular                                                               |
-| Remaining      | right on 347, centred on y 250 | 16 px, Text Primary, with a leading minus                                                  |
+| Remaining      | right on 347, centred on y 250 | 16 px, Text Primary, with a leading minus; a tap shows the length instead (Track Time)     |
 | State row      | centred on y 276, 44 px apart  | Phosphor `shuffle` and `repeat`, bold, 22 px: Accent Blue when on, Text Secondary when off |
 
 No page title, no background art blur, no reflection.
@@ -384,7 +384,8 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   again (`list.reopen.top`, which Minimal sets for every theme).
 - Now Playing on the set's grid (`np_art`, `np_bar_y`), its art's corners (`playing.art.radius`), its
   artist and album in Inter (`playing.artist.font`), shuffle and repeat as the theme's own glyphs
-  (`playing.modes.icons`), and the marquee fades (`list.marquee.fade`).
+  (`playing.modes.icons`), the marquee fades (`list.marquee.fade`), and Track Time (`NPTIME`), whose
+  tap on the right-hand time shows the length or the time left.
 - Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_still` (the art from
   x 196 and y 52 to the edges, still and centre-cropped, its top rows painted by the bar).
 

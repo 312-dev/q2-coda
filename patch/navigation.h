@@ -210,7 +210,8 @@ typedef struct {
     /* Now Playing's full-screen lyrics (np_full) and where the last touch on them came down
      * (np_lyric_touch) */
     int np_full, np_tap_x, np_tap_y;
-    int np_was[9]; /* the column before full screen (np_full) */
+    int np_time_down; /* np_time_tap: a touch came down on the right-hand time */
+    int np_was[9];    /* the column before full screen (np_full) */
     /* The full-screen art's song name, its shade and its window, the fade's step and timer
      * (ringnav_bigcover) */
     void *bc[3];
@@ -476,6 +477,9 @@ enum { SONG_LENGTH_ALBUMS, SONG_LENGTH_ALL, SONG_LENGTH_OFF };
 enum { SONGS_MIXED = 1, SONGS_ARTIST, SONGS_ALBUM, SONGS_FOLDER };
 enum { SONG_INLINE = 1, SONG_RIGHT };
 int song_artist(void), song_length(void);
+/* theme_engine.c: Track Time's value, and its switch on a tap (np_bar.c np_time_tap) */
+int np_time_total(void), np_time_toggle(void);
+int np_time_tap(void *ctx, void *event);
 int song_list(void *w);
 int song_fit(int place, int room, int title, int gap, int artist, int *shown);
 void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected);

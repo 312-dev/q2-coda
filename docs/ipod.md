@@ -950,8 +950,12 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
   selected row's artist on the right column), Right (every row's) or Off. **Song Length**: Albums (the default), All
   Lists or Off; with a length on the right column, Right and Selected Row put the artist inline. Lists Q2 Pod builds
   itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep their own rows.
-- **Appearance's rows.** Theme, Status Bar, Light Mode, Accent, Home, Shortcut, Battery (Icon or Percent), Song Artist
-  and Song Length.
+- **Track Time.** Now Playing's right-hand time shows what is left of the track ("-3:29", the default) or its
+  length ("4:12"). A tap on the time switches it and the choice is kept across tracks and restarts (`IPOD NPTIME`,
+  an own option; `np_time_tap`, outside the bar's target, so it never seeks); Appearance's Track Time row is the
+  wheel's way to it.
+- **Appearance's rows.** Theme, Status Bar, Light Mode, Accent, Home, Shortcut, Battery (Icon or Percent), Song Artist,
+  Song Length and Track Time.
 
 <a id="oled-type"></a>Inter 4.1 Regular and Medium (`assets/fonts`, SIL OFL 1.1) ship as `fonts/inter.ttf` and
 `fonts/inter-medium.ttf`, subset as the other faces are; where Inter lacks a character, stock's face stands in.

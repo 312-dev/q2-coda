@@ -5069,6 +5069,9 @@ int ringnav_playing(void *win, void *ctx) {
     static const unsigned touch[] = { EVT_POINTER_DOWN, EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
     for (unsigned i = 0; lyric && i < sizeof touch / sizeof *touch; ++i)
         widget_on(lyric, touch[i], np_lyric_touch, (void *)0);
+    for (unsigned i = 0; i < sizeof touch / sizeof *touch; ++i)
+        widget_on(win, touch[i], np_time_tap, (void *)0); /* Track Time */
+    st.np_time_down = 0;
     st.np_hash = 0;
     const char *file;
     st.np_art = np_art(&file); /* stock's init loaded it */

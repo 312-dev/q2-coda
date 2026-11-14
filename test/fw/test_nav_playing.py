@@ -3135,3 +3135,37 @@ def test_a_covered_page_rests_its_lines_and_a_new_text_starts_from_rest(fw, ui, 
     # a new title: stock's start comes to ringnav_hscroll_start, which leaves it to the marquee, from rest
     assert fw.fn('ringnav_hscroll_start', C.c_int, C.c_void_p)(m.now.title) == 0
     assert not ui.due('npm_tick') and not fw.calls('stock_hscroll_start_trampoline')
+
+
+# OLED's Track Time (NPTIME): the right-hand time is what is left or the track's length, and a tap on it switches. The
+# page takes the touch (np_time_tap on the window) and hit-tests the label.
+def time_tap(ui, now, x=330, y=250, up=None):
+    tap(ui, now.win, O['EVT_POINTER_DOWN'], x, y)
+    tap(ui, now.win, O['EVT_POINTER_UP_BEFORE'], *(up or (x, y)))
+
+
+def test_a_tap_on_the_right_hand_time_shows_the_tracks_length_and_saves_it(fw, ui, mcl, st):
+    theme(fw, st, OLED)
+    now = Now(fw, ui, mcl, st, sec=50, total=200)
+    assert ui.text(now.remain) == '-2:30'
+    time_tap(ui, now)
+    assert ui.text(now.remain) == '3:20'  # the length, with no minus
+    writes = [(C.string_at(a[2]).decode(), C.c_int(a[0]).value) for _, a in fw.calls('write_int_config')]
+    assert writes[-1] == ('NPTIME', 1)
+    ui.ints[now.slider, b'value'] = 60
+    fw.fn('np_sync', C.c_int, C.c_void_p)(now.win)
+    assert ui.text(now.remain) == '3:20' and now.value() == 60  # the length stays as the track plays; no seek
+    time_tap(ui, now)
+    assert ui.text(now.remain) == '-2:20'
+
+
+def test_a_touch_off_the_time_or_under_another_theme_changes_nothing(fw, ui, mcl, st):
+    theme(fw, st, OLED)
+    now = Now(fw, ui, mcl, st, sec=50, total=200)
+    tap(ui, now.win, O['EVT_POINTER_UP_BEFORE'], 330, 250)  # a touch that came down elsewhere
+    time_tap(ui, now, up=(200, 250))  # down on the time, lifted off it
+    time_tap(ui, now, x=200)  # the elapsed side of the row
+    assert ui.text(now.remain) == '-2:30' and not fw.calls('write_int_config')
+    theme(fw, st, CLASSIC)
+    time_tap(ui, now)
+    assert ui.text(now.remain) == '-2:30' and not fw.calls('write_int_config')

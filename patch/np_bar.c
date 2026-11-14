@@ -66,9 +66,10 @@ int np_fit_due(const void *info) {
     return 0;
 }
 
-/* Now Playing's "3 of 12", album and remaining time (slider max less value, stock's seconds, so a
- * drag or scrub previews it). Labels are written only when their source changes; 1 when the
- * remaining time was. Classic's times beside the bar refit when the length's class changes: a
+/* Now Playing's "3 of 12", album and right-hand time: the remaining time (slider max less value,
+ * stock's seconds, so a drag or scrub previews it), or the track's length under Track Time's Total
+ * (np_time_total). Labels are written only when their source changes; 1 when the right-hand time
+ * was. Classic's times beside the bar refit when the length's class changes: a
  * seek, a pause or a rate change keeps it. */
 int np_sync(void *top) {
     if (!top || top != st.np_win) return 0;
@@ -99,10 +100,39 @@ int np_sync(void *top) {
     if (max > 0 && !st.np_fit_timer && np_beside() && I(st.np_slider, W_X) != ipod_bar_x(max))
         st.np_fit_timer = timer_add(np_fit_due, (void *)0, 0); /* mid-paint */
     if (left < 0) left = 0;
-    if (left == st.np_left) return 0;
-    st.np_left = left;
-    clock_text(st.np_remain, 1, left);
+    int total = np_time_total(), shown = total ? max : left, key = shown << 1 | total;
+    if (key == st.np_left) return 0;
+    st.np_left = key;
+    clock_text(st.np_remain, !total, shown);
     return 1;
+}
+
+/* 1 when the screen's (x, y) is inside w */
+static int np_hit(void *w, int x, int y) {
+    for (void *p = w; p && p != window_manager(); p = P(p, W_PARENT))
+        x -= I(p, W_X), y -= I(p, W_Y);
+    return (unsigned)x < (unsigned)I(w, W_W) && (unsigned)y < (unsigned)I(w, W_H);
+}
+
+/* A tap on the right-hand time (playing_page's label_ipod_remain): a touch that came down on it and
+ * lifts on it switches Track Time. The page takes the touch, as the lyrics' column
+ * (slide_view_view) lies over the label and gets it; the time is outside the slider's target, so
+ * it never seeks. Returns 0, so the window manager keeps the touch as it would. */
+int np_time_tap(void *ctx, void *event) {
+    (void)ctx;
+    int type = I(event, EVENT_TYPE),
+        on = st.np_remain && np_hit(st.np_remain, I(event, EVENT_X), I(event, EVENT_Y));
+    if (type == EVT_POINTER_DOWN) {
+        st.np_time_down = on;
+        return 0;
+    }
+    int tap = type == EVT_POINTER_UP_BEFORE && st.np_time_down && on;
+    st.np_time_down = 0;
+    if (tap && np_time_toggle()) {
+        st.np_left = -1;
+        np_sync(st.np_win);
+    }
+    return 0;
 }
 
 /* Time in Title off: the bar's centre names the page in front, as an iPod's, in Modern's bold:
