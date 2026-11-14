@@ -45,6 +45,7 @@ typedef struct {
     unsigned sid, local;    /* offsets in the index's strings, 0 for none */
     unsigned path;          /* the path itself */
     int sec;                /* the catalogue's seconds */
+    unsigned album;         /* album_hash of a server row's album; 0 for a linked card file */
     unsigned char app, dup; /* the app's slot; dup: a card file the match linked */
 } cat_ent;
 
@@ -53,7 +54,10 @@ typedef struct {
     unsigned n;
     char *str; /* the strings, from offset 1 */
     unsigned len, cap;
-    unsigned *by_sid; /* e's indices, by sid_key */
+    unsigned *by_sid;   /* e's indices, by sid_key */
+    unsigned *by_album; /* e's indices, by album */
+    unsigned *cards;    /* album_hash of every card song's album, sorted, repeats dropped */
+    unsigned ncards;
 } cat_ix;
 
 typedef struct {
@@ -107,7 +111,7 @@ int catalogue_on(void) {
 /* ---- The index (built on the job's thread, read on the UI thread once swapped in) ---- */
 
 static void ix_free(cat_ix *x) {
-    free(x->e), free(x->str), free(x->by_sid);
+    free(x->e), free(x->str), free(x->by_sid), free(x->by_album), free(x->cards);
     memset(x, 0, sizeof *x);
 }
 static unsigned ix_put(cat_ix *x, const char *s) {
@@ -161,13 +165,37 @@ static cat_ent *ix_sid(const cat_ix *x, int app, const char *sid) {
     cat_ent *e = lo < x->n && x->by_sid ? &x->e[x->by_sid[lo]] : 0;
     return e && e->app == app && !strcmp(ix_str(x, e->sid), sid) ? e : 0;
 }
+static int album_cmp_ix(const void *a, const void *b) {
+    unsigned x = sid_ix->e[*(const unsigned *)a].album, y = sid_ix->e[*(const unsigned *)b].album;
+    return x < y ? -1 : x > y;
+}
+static int u32_cmp(const void *a, const void *b) {
+    unsigned x = *(const unsigned *)a, y = *(const unsigned *)b;
+    return x < y ? -1 : x > y;
+}
 static int ix_sort(cat_ix *x) {
     qsort(x->e, x->n, sizeof *x->e, ent_cmp);
-    if (!(x->by_sid = calloc(x->n + 1, sizeof *x->by_sid))) return 0;
-    for (unsigned i = 0; i < x->n; ++i) x->by_sid[i] = i;
+    if (!(x->by_sid = calloc(x->n + 1, sizeof *x->by_sid)) ||
+        !(x->by_album = calloc(x->n + 1, sizeof *x->by_album)))
+        return 0;
+    for (unsigned i = 0; i < x->n; ++i) x->by_sid[i] = x->by_album[i] = i;
     sid_ix = x; /* the job's thread alone sorts */
     qsort(x->by_sid, x->n, sizeof *x->by_sid, sid_cmp);
+    qsort(x->by_album, x->n, sizeof *x->by_album, album_cmp_ix);
+    if (x->ncards) qsort(x->cards, x->ncards, sizeof *x->cards, u32_cmp);
+    unsigned k = 0;
+    for (unsigned i = 0; i < x->ncards; ++i)
+        if (!k || x->cards[k - 1] != x->cards[i]) x->cards[k++] = x->cards[i];
+    x->ncards = k;
     return 1;
+}
+/* An album's name as the Albums list groups it (COLLATE NOCASE: ASCII letters folded): its FNV-1a
+ * 32, 0 for none. */
+static unsigned album_hash(const char *s) {
+    unsigned h = FNV_SEED;
+    if (!s || !*s) return 0;
+    for (; *s; ++s) h = (h ^ (unsigned char)(*s >= 'A' && *s <= 'Z' ? *s + 32 : *s)) * 16777619u;
+    return h ? h : 1;
 }
 
 /* ---- Normalised tags, for the match (docs/server-library.md#duplicates) ---- */
@@ -868,6 +896,20 @@ static int ix_row(void *ctx, int n, char **v, char **c) {
     e->sid = ix_put(x, v[1]), e->local = e->dup ? 0 : ix_put(x, v[2]);
     e->sec = v[3] ? atoi(v[3]) : 0;
     e->app = (unsigned char)(v[5] ? atoi(v[5]) : 0);
+    e->album = e->dup ? 0 : album_hash(v[6]);
+    return 0;
+}
+/* A card song's album, for album_unavailable: the card's songs always play. */
+static int card_album_row(void *ctx, int n, char **v, char **c) {
+    cat_ix *x = jb.ix;
+    unsigned h = album_hash(v[0]);
+    if (!h) return 0;
+    if (!(x->ncards & 1023)) {
+        unsigned *a = realloc(x->cards, (x->ncards + 1024) * sizeof *a);
+        if (!a) return jb.bad = 1;
+        x->cards = a;
+    }
+    x->cards[x->ncards++] = h;
     return 0;
 }
 static void ix_build(void) {
@@ -875,15 +917,18 @@ static void ix_build(void) {
     ix_free(jb.ix);
     /* the app's slot from its id's first appearance: the UI's slots (cat.app) by id */
     char *o = jb.sql;
-    PUT(o, JEND, "select fileurl,sid,local,seconds,dup,case app");
+    PUT(o, JEND, "select m.fileurl,m.sid,m.local,m.seconds,m.dup,case m.app");
     for (int i = 0; i < cat.napps; ++i) {
         PUT(o, JEND, " when ");
         o = sq(o, JEND, cat.app[i].id);
         PUT(o, JEND, " then %d", i);
     }
-    PUT(o, JEND, " else %d end from nw.servermeta", CAT_APPS);
+    PUT(o, JEND, " else %d end,a.album from nw.serverall a,nw.servermeta m where m.id=a.id",
+        CAT_APPS);
     if (o >= JEND) jb.bad = 1;
-    if (jb.bad || sqlite3_exec(jb.db, jb.sql, ix_row, 0, 0) || jb.bad || !ix_sort(jb.ix))
+    if (jb.bad || sqlite3_exec(jb.db, jb.sql, ix_row, 0, 0) || jb.bad ||
+        sqlite3_exec(jb.db, "select distinct album from main.songtable", card_album_row, 0, 0) ||
+        jb.bad || !ix_sort(jb.ix))
         ix_free(jb.ix);
 }
 
@@ -1036,13 +1081,56 @@ static void grey_set(void *row, int on) {
 }
 void catalogue_mark(void *row, void *r) { grey_set(row, catalogue_unavailable(r)); }
 void catalogue_forget(void *row) { grey_set(row, 0); }
+/* Whether an album row (r, of an album list) can't play now: offline, no card song has its name
+ * and none of its server rows has an offline copy. By name, as the Albums list groups them (an
+ * artist's albums too): ponytail: a server-only album that shares its name with a card album
+ * (another artist's "Greatest Hits") is not greyed; never the other way round. */
+int catalogue_album_unavailable(void *r) {
+    unsigned h = r && I(r, REC_ID) >= 0 ? album_hash(P(r, REC_ALBUM)) : 0;
+    const cat_ix *x = &cat.ix;
+    if (!h || !x->by_album || (catalogue_on() && cat_online())) return 0;
+    unsigned lo = 0, hi = x->ncards;
+    while (lo < hi) {
+        unsigned mid = (lo + hi) / 2;
+        if (x->cards[mid] < h)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    if (lo < x->ncards && x->cards[lo] == h) return 0;
+    lo = 0, hi = x->n;
+    while (lo < hi) {
+        unsigned mid = (lo + hi) / 2;
+        if (x->e[x->by_album[mid]].album < h)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    int server = 0;
+    for (; lo < x->n && x->e[x->by_album[lo]].album == h; ++lo, server = 1)
+        if (x->e[x->by_album[lo]].local) return 0;
+    return server; /* an album the catalogue doesn't know is the card's */
+}
+/* Whether the showlist holds albums: all of them, an artist's, a composer's or a genre's (an
+ * artist's tabs set classinfo, not g_class_type, as qm_open reads them). */
+static int album_list(void *row) {
+    void *win = window_of(row);
+    unsigned cls =
+        (unsigned)(win && !tk_strcmp(widget_get_prop_str(win, "name", ""), "artistinfo_page")
+                       ? I(g_local_classinfo_save, 0)
+                       : I(g_class_type, 0));
+    return cls == CLASS_ALBUMS || (cls >= CLASS_ARTIST_ALBUMS && cls <= 0xff03);
+}
 /* A stock list's pooled row bound to its index'th record: the Library's lists are
- * p_deque_showlist's, and the row shows its record's title or file name; any other table (whose
- * index means something else) leaves its rows as they are. */
+ * p_deque_showlist's, and the row shows its record's title or file name (a song's), or its album
+ * (an album list's); any other table (whose index means something else) leaves its rows as they
+ * are. */
 void catalogue_bind(void *row, unsigned index) {
     void *list = P(p_deque_showlist, 0);
     void *r = list && index < deque_size(list) ? deque_at(list, index) : 0;
-    grey_set(row, r && I(r, REC_TYPE) == 8 && catalogue_unavailable(r));
+    grey_set(row, r && (I(r, REC_TYPE) == 8
+                            ? catalogue_unavailable(r)
+                            : cat.ix.n && album_list(row) && catalogue_album_unavailable(r)));
 }
 /* The text colour of w, painted now: grey when it is in a greyed row. */
 int catalogue_greyed(void *w, unsigned *color) {

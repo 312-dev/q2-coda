@@ -411,10 +411,12 @@ int addon_fav(const char *id, const char *kind, const char *key, int on);
 int addon_fav_path(const char *path, int on);
 /* catalogue.c: the server library (docs/internals.md#server-library). catalogue_on: Local + Server;
  * catalogue_path: a server row's path; catalogue_unavailable: a record that can't play now;
+ * catalogue_album_unavailable: an album list's record none of whose songs can play now;
  * catalogue_union: a Library query reading servertable too (0: as it is; the caller frees it);
  * catalogue_load: ringnav_load's queue (0 as it is, 1 *own instead, 2 nothing loaded). */
 extern int catalogue_source;
 int catalogue_on(void), catalogue_path(const char *path), catalogue_unavailable(void *r);
+int catalogue_album_unavailable(void *r);
 int catalogue_seconds(const char *path), catalogue_load(void *q, int *at, void **own);
 int catalogue_access(const char *path, int mode); /* stock's play check, tools/build.py */
 char *catalogue_union(const char *sql), *catalogue_search(const char *sql);
