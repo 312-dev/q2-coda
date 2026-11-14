@@ -81,6 +81,8 @@ All three kernel-module experiments were on by default from 1.5.0 to 1.6.1 and w
 
 `--dev --mcu-idle-sleep` is off in release builds. It adds an interruptible MCU sleep with an explicit wake handshake. See [MCU sleep](mcu-sleep.md).
 
+`--dev --new-player` installs the new player, `q2player` ([player-plan.md](player-plan.md)), as `/usr/bin/hciplayer`, and the patched hciplayer xz-compressed at `/usr/lib/hciplayer-stock/hciplayer.xz`. `q2player` unpacks it to `/tmp/hciplayer-stock/hciplayer` and runs it unless `/mnt/data/q2player` exists ([the fallback](player-plan.md#architecture)), so the image plays as any `--dev` build until the file is made (`touch /mnt/data/q2player` over `q2remote`, then restart the player). It builds `q2player` with `tools/player.py` (FFmpeg on first use, some minutes; the toolchain and mbedTLS that `tools/thirdparty.py` keeps in `~/.cache/q2-thirdparty`) against the image's own `libasound.so.2`, and records `q2player_sha256` and `rootfs_bytes` in the manifest. The root filesystem holds 50,688,000 bytes: past that the build stops and says by how much.
+
 ## Tests
 
 ```sh
@@ -108,6 +110,7 @@ python3 test/m4b.py /tmp/q2-build          # native TagLib M4B/MP4 metadata disp
 python3 test/id3.py /tmp/q2-build          # the built player's MP3 ReplayGain on ID3v2.3/2.4 tags
 python3 test/hci_wait.py /tmp/q2-build     # the built player's futex waits for Play and while paused
 python3 test/hci_ao.py /tmp/q2-build       # a natural change in the real player against a kernel-faithful PCM: reopens, a kept PCM, a dry first write
+python3 test/player/run.py                  # the new player (player/): bit-exact output, the DSP, the click and the socket protocol; builds its FFmpeg on first use, needs ffmpeg, lame and cc, no ZIP
 python3 test/bt_resample.py /tmp/q2-build  # the built player's Bluetooth resampler across a gapless change
 python3 test/xfade_player.py /tmp/q2-build  # the built player's crossfade: the hold, the mix at the same and another rate, the drops
 python3 test/hci_natural.py /tmp/q2-build   # natural changes in the real player: a bit-exact seam, a bad next file, an understated length, a late preload, Crossfade's late next and moved fade

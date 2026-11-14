@@ -1,0 +1,128 @@
+/* Now Playing's lines as one marquee (docs/oled-design.md#motion), under a theme whose scrolling
+ * text fades (list.marquee.fade, OLED's): the title, artist and album that overflow their column
+ * hold at rest NPM_HOLD_MS, then slide left together and land back at rest together, then hold
+ * again. Each slides its text's width and NPM_GAP more, so the copy stock's hscroll_label draws
+ * after its loop_interval_distance arrives where the text began: no snap back. The longest sets
+ * the pass at NPM_PX_S, linear; the others are stretched to it. A line that fits never moves. A
+ * new text, the page opening and the page back on top start from rest.
+ *
+ * Stock's own timer never runs for these labels (ringnav_hscroll_start asks np_marq_owns, and
+ * np_marq_reset stops the one stock's page init starts), so stock never paints their ellipsis;
+ * npm_tick sets each one's xoffset, a frame per pixel the fastest line moves, and asks nothing
+ * while they rest. ringnav_sleep's idle sleep ends by the next frame (np_marq_wait), so frames come
+ * when due rather than on the loop's 25 ms pass. */
+#include "navigation.h"
+
+#define NPM_GAP 40       /* px between a line's end and its copy */
+#define NPM_HOLD_MS 2750 /* at rest before each pass */
+#define NPM_PX_S 35      /* the longest line's speed, px a second */
+
+static struct {
+    unsigned timer, start, due; /* the frame timer, the cycle's start, and when the timer runs */
+} npm __attribute__((section(".scratch")));
+
+static void *npm_line(int i) { return i == 0 ? st.np_title : i == 1 ? st.np_artist : st.np_album; }
+
+/* 1 when w is one of the lines this drives */
+int np_marq_owns(void *w) {
+    return w && st.np_win && theme()->marquee_fade &&
+           (w == st.np_title || w == st.np_artist || w == st.np_album);
+}
+
+/* px w's text runs past its column, 0 when it fits */
+static int npm_over(void *w) {
+    void *style = P(w, W_ASTYLE);
+    int col = I(w, W_W) - style_get_int(style, "margin_left", 2) -
+              style_get_int(style, "margin_right", 2),
+        over = I(w, HSCROLL_TEXT_W) - col;
+    return over > 0 ? over : 0;
+}
+
+static void npm_rest(void) {
+    for (int i = 0; i < 3; ++i) {
+        void *w = npm_line(i);
+        if (w && I(w, HSCROLL_XOFFSET)) hscroll_label_set_xoffset(w, 0);
+    }
+}
+
+static int npm_tick(const void *info);
+static void npm_arm(unsigned now, unsigned ms) {
+    npm.due = now + ms;
+    npm.timer = timer_add(npm_tick, (void *)0, ms);
+}
+
+/* One frame: every line's offset at the cycle's time, then the timer for the next pixel or the
+ * hold's end. Off screen, dark or covered, the lines go back to rest and nothing runs until a
+ * paint asks again (np_marq_kick). */
+static int npm_tick(const void *info) {
+    (void)info;
+    npm.timer = 0;
+    unsigned now = (unsigned)time_now_ms();
+    if (!st.np_win || !theme()->marquee_fade || !g_backlight_status ||
+        window_manager_get_top_window(window_manager()) != st.np_win) {
+        npm_rest();
+        npm.start = 0;
+        return 0;
+    }
+    int span[3], longest = 0;
+    for (int i = 0; i < 3; ++i) {
+        void *w = npm_line(i);
+        span[i] = w && widget_get_visible(w) && npm_over(w) ? I(w, HSCROLL_TEXT_W) + NPM_GAP : 0;
+        if (span[i] > longest) longest = span[i];
+    }
+    if (!longest) { /* everything fits: rest, and nothing to wake for */
+        npm_rest();
+        npm.start = 0;
+        return 0;
+    }
+    unsigned pass = (unsigned)longest * 1000u / NPM_PX_S, t = now - npm.start;
+    if (t >= NPM_HOLD_MS + pass) npm.start = now, t = 0; /* landed: the next cycle's hold */
+    if (t < NPM_HOLD_MS) {
+        npm_rest();
+        npm_arm(now, NPM_HOLD_MS - t);
+        return 0;
+    }
+    t -= NPM_HOLD_MS;
+    for (int i = 0; i < 3; ++i) {
+        void *w = npm_line(i);
+        int off = span[i] ? (int)((unsigned)span[i] * t / pass) : 0;
+        if (w && I(w, HSCROLL_XOFFSET) != off) hscroll_label_set_xoffset(w, off);
+    }
+    /* the longest line's next pixel, or the landing */
+    unsigned next = (((unsigned)longest * t / pass + 1) * pass + (unsigned)longest - 1) /
+                    (unsigned)longest; /* rounded up: the frame lands on the pixel */
+    npm_arm(now, next > pass ? pass - t : next - t ? next - t : 1);
+    return 0;
+}
+
+/* A line of the page painted: the cycle runs if it isn't running. Its loop gap and no ellipsis are
+ * set here, as stock rebinds the labels' attributes with the page. */
+void np_marq_kick(void *w) {
+    if (!np_marq_owns(w)) return;
+    if (I(w, HSCROLL_LOOP_GAP) != NPM_GAP) hscroll_label_set_loop_interval_distance(w, NPM_GAP);
+    if (B(w, HSCROLL_ELLIPSES)) hscroll_label_set_ellipses(w, 0);
+    if (npm.timer || !npm_over(w)) return;
+    npm.start = (unsigned)time_now_ms();
+    npm_tick((void *)0);
+}
+
+/* A new text on a line (stock's start on a new text, ringnav_hscroll_start) or the page opening:
+ * from rest again. Stock's own timer stops on each line: its page init starts the title's before
+ * the payload binds the lines, and left running it moved the title through the hold and between
+ * this clock's frames, so the line jumped back and forth. */
+void np_marq_reset(void) {
+    stop_timer(&npm.timer);
+    npm.start = 0;
+    for (int i = 0; i < 3; ++i) {
+        void *w = npm_line(i);
+        if (np_marq_owns(w) && I(w, HSCROLL_TIMER)) hscroll_label_stop(w);
+    }
+    npm_rest();
+}
+
+/* ms until the next frame the marquee wants, or max when it wants none that soon */
+unsigned np_marq_wait(unsigned max) {
+    if (!npm.timer) return max;
+    unsigned left = npm.due - (unsigned)time_now_ms();
+    return (int)left < 0 ? 0 : left < max ? left : max;
+}

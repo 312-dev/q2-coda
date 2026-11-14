@@ -48,6 +48,7 @@ static int ple_number(void *ctx, int n, char **v, char **names) {
 int stock_db_open(const char *path, void **db) {
     int bad = sqlite3_open(path, db);
     if (!bad) sqlite3_exec(*db, "PRAGMA busy_timeout=500", 0, 0, 0);
+    if (!bad) catalogue_attach(db); /* the server library's songs, with Local + Server */
     return bad;
 }
 /* The database for a write that waits out a reader, playlist_art.c's worker reading the table,
@@ -380,6 +381,8 @@ static int playlist_used(void *ctx, int n, char **v, char **names) {
     if (id >= 0 && id < 100) ((unsigned char *)ctx)[id] = 1;
     return 0;
 }
+/* The playlist just made, by name, for pl_first: the list it reloads into opens on it. */
+static char pl_made[64] __attribute__((section(".scratch")));
 int ringnav_playlist_create(void *list, const char *name) {
     void *db = 0;
     unsigned char used[100] = { 0 };
@@ -419,6 +422,7 @@ int ringnav_playlist_create(void *list, const char *name) {
     if (sqlite3_exec(db, sql, ple_changed, 0, 0) || sqlite3_exec(db, "commit", 0, 0, 0))
         goto rollback;
     result = id;
+    tk_snprintf(pl_made, sizeof pl_made, "%s", title);
     goto done;
 rollback:
     sqlite3_exec(db, "rollback", 0, 0, 0);
@@ -446,6 +450,9 @@ int ringnav_playlist_delete(void *win, void *event) {
         int kind, ms;
         char text[0x400];
     } prompt = { 1, 0, "Delete Playlist?" };
+    const char *name = P(deque_at(list, (unsigned)row), REC_TITLE);
+    if (feedback_oled() && name) /* OLED's dialog asks it in its status row, naming the playlist */
+        tk_snprintf(prompt.text, sizeof prompt.text, "Delete playlist \u201c%s\u201d?", name);
     if (confirm_over(&prompt, "Delete") != 10) return 0;
     char sql[256];
     if (pl_db(&db)) goto done;
@@ -515,6 +522,7 @@ int ringnav_playlistsmore(void *win, void *ctx) {
             widget_move_resize(c, x, I(c, W_Y), I(c, W_W), I(c, W_H));
             theme_font(c, ROLE_TITLE, FONT_ROW);
         }
+        if (modal_set()) modal_playlist_more(win); /* a dialog over Playlists (menu_modal.c) */
     }
     return result;
 }
@@ -695,9 +703,18 @@ static int pl_click(void *action, void *event) {
     pl_timer = timer_add(pl_due, action, 0);
     return 0;
 }
+/* OLED keeps one pitch a list (oled-design.md Do and don't): its action rows as tall as the
+ * playlists' rows, when there are any; else every theme's row pitch. */
+static int pl_pitch(void *view) {
+    for (unsigned i = 0, n = widget_count_children(view); feedback_oled() && i < n; ++i) {
+        void *item = widget_get_child(view, i);
+        if (widget_get_prop_int(item, PL_ROW, 0)) return I(item, W_H);
+    }
+    return geom(G_PITCH);
+}
 /* The row goes to index at, or after the rest when at < 0. */
 static void pl_action(void *view, const char *caption, int action, int into, int at) {
-    int h = geom(G_PITCH);
+    int h = pl_pitch(view);
     void *item = list_item_create(view, 0, 0, 0, h);
     widget_use_style(item, "s_listitem_black");
     void *button = button_create(item, 0, 0, 375, h);
@@ -764,7 +781,14 @@ static void pl_rows(void *win) {
     if (nav && widget_count_children(nav)) widget_set_text_utf8(widget_get_child(nav, 0), words);
     bar_title_sync(win);
     void *none = widget_lookup(win, PL_NONE, 0);
-    if (!none && !n) {
+    void *wait = feedback_oled() ? widget_lookup(win, "image_wait", 1) : (void *)0;
+    if (wait) widget_resize(wait, 0, 0); /* OLED: no stock spinner (oled-design.md Empty) */
+    if (feedback_oled()) { /* OLED's note under the rows shown (feedback_empty), or none */
+        int shown = 0;
+        for (int i = 0; i < count; ++i) shown += widget_get_visible(widget_get_child(view, i));
+        feedback_empty(win, geom_val(V_BAR) + shown * geom(G_PITCH), n ? 0 : "No playlists",
+                       add ? 0 : "Hold Play/Pause on a song to add it");
+    } else if (!none && !n) {
         none = text(win, 0, 124, 375, 32);
         widget_set_name(none, PL_NONE);
         widget_set_text_utf8(none, "No Playlists");
@@ -773,6 +797,10 @@ static void pl_rows(void *win) {
     }
     if (none) widget_set_visible(none, !n, 0);
     widget_set_prop_int(win, PL_MARKING, marking);
+    if (feedback_oled()) { /* the list lays its rows out at pl_pitch's one pitch */
+        widget_set_prop_int(P(view, W_PARENT), "item_height", pl_pitch(view));
+        widget_layout(P(view, W_PARENT));
+    }
     if (!marking && marking == was) return;
     /* Stock showed its marks or the dots: the rows go to their places, the list to its new height.
      */
@@ -796,11 +824,22 @@ static void pl_rows(void *win) {
 }
 /* With nothing remembered (a first open, or a count changed) Classic's Playlists starts on its
  * first playlist, below New and Edit, as stock's and the iPod's lists of playlists alone do; an
- * empty list on New. */
+ * empty list on New. Just after New Playlist made one (pl_made), on that one, as an iPod's list
+ * lands on what was added; its rows are p_deque_playlist's records in order. */
 int pl_first(menu_t *m, int cur) {
-    for (int i = cur; i < m->n && widget_get_prop_int(P(m->at[cur], W_PARENT), PL_ACT, 0); ++i)
-        if (widget_get_prop_int(P(m->at[i], W_PARENT), PL_ROW, 0)) return i;
-    return cur;
+    void *lists = P(p_deque_playlist, 0);
+    int k = 0, first = -1, at = -1;
+    for (int i = 0; i < m->n && at < 0; ++i) {
+        if (!widget_get_prop_int(P(m->at[i], W_PARENT), PL_ROW, 0)) continue;
+        if (first < 0 && i >= cur) first = i;
+        if (pl_made[0] && lists && (unsigned)k < deque_size(lists) &&
+            !tk_strcmp(P(deque_at(lists, (unsigned)k), REC_TITLE), pl_made))
+            at = i;
+        ++k;
+    }
+    pl_made[0] = 0;
+    if (at >= 0) return at;
+    return first >= 0 && widget_get_prop_int(P(m->at[cur], W_PARENT), PL_ACT, 0) ? first : cur;
 }
 /* Stock's row click opens More from x 286 outside select mode (0x4b48a8, 0x4b4988): a picker has
  * no More, so a tap anywhere picks; in the list the dots' column at the edge (PL_MARK_X on) stays

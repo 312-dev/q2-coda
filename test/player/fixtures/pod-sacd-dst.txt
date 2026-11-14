@@ -1,0 +1,10 @@
+   0.000 > {mcl-dsdmode\0}
+   0.000 > {mcl-replaygain\0}
+   0.100 > {mcl-setoutputway\0}
+   0.100 > {mcl-setvol\60}
+   1.000 > {set-songurl\/mnt/mmc/sacd-dst.iso|ss=0|4096|50|0|17|90}
+   1.001 < {player-status\ready}
+   1.001 < {media-info\no-playing-status}
+   1.024 < {player-status\error}
+# positions (every fifth poll, time:seconds) 
+# cpu 0.04 s

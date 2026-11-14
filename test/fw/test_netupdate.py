@@ -949,7 +949,7 @@ def test_a_signed_list_is_taken_without_its_signature_line(fw):
     lambda t: t[:t.index(b'signature ')],                    # unsigned: q2-pod's own list, or any edit not signed
     lambda t: t.replace(b'Foo', b'Fop'),                     # changed after signing
     lambda t: t.replace(PIN_SHA, b'cd' * 32, 1),            # another zip pinned
-    lambda t: t[:-3] + b'00\n',                              # the signature changed
+    lambda t: t[:-3] + b'%02x\n' % (int(t[-3:-1], 16) ^ 0xff),  # the signature changed: its last byte flipped, never itself
 ])
 def test_a_list_the_release_key_didnt_sign_is_refused(fw, mangle):
     assert fresh(fw, Card(fw), mangle(listing(b'me/foo Foo\n'))) == (None, SH_UNSIGNED)

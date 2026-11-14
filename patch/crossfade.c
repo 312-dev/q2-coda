@@ -104,7 +104,7 @@ static void night_text(void *label) {
     if (night_on() == 2)
         tk_snprintf(t, sizeof t, "Night Shift: Auto");
     else if (night_on())
-        tk_snprintf(t, sizeof t, "Night Shift: %dK", night_kelvin());
+        tk_snprintf(t, sizeof t, "Night Shift: %d K", night_kelvin());
     row_value_text(label, t);
 }
 
@@ -266,7 +266,7 @@ static void refresh(int save) {
     else if (xf.ctx == 3) {
         tk_snprintf(t, sizeof t,
                     night_on() == 2 ? "Auto"
-                    : night_on()    ? "%dK"
+                    : night_on()    ? "%d K"
                                     : "Off",
                     night_kelvin());
         image_base_set_image(xf.sw, night_on() ? "switch_on" : "switch_off");
@@ -353,6 +353,24 @@ static int gone(void *ctx, void *event) {
 }
 
 int xfade_page(void *top) { return xf.page && top == xf.page; }
+
+/* The open page's range ends as its value reads them, into lo and hi, n bytes each: the slider's
+ * minimum and maximum (slider_page.c). */
+void xfade_ends(char *lo, char *hi, unsigned n) {
+    if (xf.ctx == 3) { /* the slider runs cool to warm */
+        tk_snprintf(lo, n, "%d K", NS_COOL);
+        tk_snprintf(hi, n, "%d K", NS_WARM);
+    } else if (xf.ctx == 2) {
+        tk_snprintf(lo, n, "Off");
+        tk_snprintf(hi, n, "%d min", RS_MAX);
+    } else if (xf.ctx == 1) {
+        tk_snprintf(lo, n, "%d%%", WHEEL_PCT_MIN);
+        tk_snprintf(hi, n, "%d%%", 200);
+    } else {
+        tk_snprintf(lo, n, "Off");
+        tk_snprintf(hi, n, "%d s", XF_MAX);
+    }
+}
 
 /* The row's click: stock's Boot volume page, its handlers swapped for these; ctx 1 for Wheel
  * sensitivity's row, 2 for Resume Songs', 3 for Night Shift's. */

@@ -105,16 +105,19 @@ int geom_val(int v) { return geom_vals[st.geom][v]; }
 int client_h(void) { return 320 - geom_val(V_BAR); }
 _Static_assert(V_SPLIT_ART == V_SPLIT_ROW + SPLIT_ART &&
                    V_SPLIT_ART_UP == V_SPLIT_ROW + SPLIT_ART_UP &&
-                   V_SPLIT_STILL == V_SPLIT_ROW + SPLIT_STILL,
+                   V_SPLIT_INSET == V_SPLIT_ROW + SPLIT_INSET,
                "tools/ipod.py GEOM_VALS keeps split_* in SPLIT_* order");
 int split_geom(int k) { return geom_val(V_SPLIT_ROW + k); }
+/* A list_fit set's lists end their whole rows by this screen row (OLED's 282), 0: no such set. */
+int list_fit_end(void) { return geom_val(V_LIST_FIT) ? geom_val(V_BAR) + geom_val(V_LIST_END) : 0; }
 /* The Display rows' settings, by ringnav_display's index: 0 Accent, 1 Home (0 Split, 1 Full,
  * 2 Carousel), 2 Battery, 3 Theme, 4 Shortcut, 5 Corners, 6 Light Mode, 7 Smart Awake, 8 Centred
- * Now Playing, 9 Click With Headphones (Controls, under Key Tone), 10 Single Press Scrub, 11 Time
- * in Title; 12 on: a theme's own options, SETTING_OWN + k for theme_keys[k]. */
-static const char *const setting_keys[] = { "ACCENT",    "HOME",      "BATTERY",     "THEME",
-                                            "SHORTCUT",  "ROUNDED",   "LIGHT",       "KEEPLIT",
-                                            "NPCENTRED", "KEYTONEHP", "SCRUBSINGLE", "TIMETITLE" };
+ * Now Playing, 9 the Clicker's output (no row of its own: Controls' Key Tone row shows it,
+ * clicker.c), 10 Single Press Scrub, 11 Time in Title; 12 on: a theme's own options, SETTING_OWN +
+ * k for theme_keys[k]. */
+static const char *const setting_keys[] = { "ACCENT",    "HOME",    "BATTERY",     "THEME",
+                                            "SHORTCUT",  "ROUNDED", "LIGHT",       "KEEPLIT",
+                                            "NPCENTRED", "CLICKER", "SCRUBSINGLE", "TIMETITLE" };
 const int setting_counts[] = { SETTING_N_ACCENT,
                                SETTING_N_HOME,
                                SETTING_N_BATTERY,
@@ -124,12 +127,12 @@ const int setting_counts[] = { SETTING_N_ACCENT,
                                SETTING_N_LIGHT,
                                2,
                                SETTING_N_NP_LAYOUT,
-                               2,
+                               3,
                                2,
                                2 };
-int *const setting_values[] = { &st.accent,     &st.home,       &st.battery,      &st.theme,
-                                &st.shortcut,   &st.rounded,    &st.light,        &st.keep_lit,
-                                &st.np_centred, &st.keytone_hp, &st.scrub_single, &st.time_title };
+int *const setting_values[] = { &st.accent,     &st.home,    &st.battery,      &st.theme,
+                                &st.shortcut,   &st.rounded, &st.light,        &st.keep_lit,
+                                &st.np_centred, &st.clicker, &st.scrub_single, &st.time_title };
 /* An option's value and config key: the accent's are the theme's own, an own option's st.own[] and
  * theme_keys[], the rest setting_values'. */
 int *option_slot(const theme_t *T, int setting) {
@@ -193,7 +196,7 @@ __attribute__((noinline)) static void settings_read(void) {
     st.light = config_value("IPOD", "LIGHT", 3, 0); /* dark unless chosen; 2 Auto */
     st.keep_lit = config_value("IPOD", "KEEPLIT", 2, 0);
     st.np_centred = config_value("IPOD", "NPCENTRED", 2, 0);
-    st.keytone_hp = config_value("IPOD", "KEYTONEHP", 2, 0);
+    st.clicker = config_value("IPOD", "CLICKER", 3, 0); /* Both unless chosen (clicker.c) */
     /* on unless chosen off: Centre on Now Playing scrubs and a double press turns the screen off,
      * as on the other pages */
     st.scrub_single = config_value("IPOD", "SCRUBSINGLE", 2, 1);
@@ -259,6 +262,16 @@ int row_preview_on(void) { return theme_own(OWN_ROWPREVIEW); }
  * SONG_LENGTH_* (navigation.h) in theme.xml's order */
 int song_artist(void) { return theme_own(OWN_SONGARTIST); }
 int song_length(void) { return theme_own(OWN_SONGLENGTH); }
+/* OLED's Track Time (np_bar.c np_sync): 1 when Now Playing's right-hand time is the track's length,
+ * 0 for what is left of it */
+int np_time_total(void) { return theme_own(OWN_NPTIME); }
+/* A tap on that time (np_time_tap): the other one, saved. 0 under a theme without the option. */
+int np_time_toggle(void) {
+    if (!option_of(theme(), SETTING_OWN + OWN_NPTIME)) return 0;
+    st.own[OWN_NPTIME] = !st.own[OWN_NPTIME];
+    write_int_config(st.own[OWN_NPTIME], "IPOD", theme_keys[OWN_NPTIME].key);
+    return 1;
+}
 const char *const np_pages[] = { "playing_page", "playing_page_stock" }; /* [NP_*] */
 _Static_assert(sizeof np_pages / sizeof *np_pages == NP_N, "one page per NP_* layout");
 /* The Now Playing page: the theme's layout, which Centred Now Playing forces to NP_CENTRED. */

@@ -27,7 +27,8 @@ class Vz(C.Structure):
                 ('held', C.c_uint * BARS), ('lit', C.c_uint * 2), ('bin_rate', C.c_uint), ('w', C.c_int), ('h', C.c_int), ('bin', C.c_int * 65),
                 *((k, C.c_void_p) for k in 'win slide page art cover tap'.split()),
                 *((k, C.c_uint) for k in 'timer last named heard retry'.split()),
-                *((k, C.c_int) for k in 'ox oy page_x style quiet'.split())]
+                *((k, C.c_int) for k in 'ox oy page_x style'.split()), ('flow', C.c_float), ('glow', (C.c_void_p * 4) * 5),
+                ('quiet', C.c_int)]
 
 
 def vz(fw):
@@ -1811,3 +1812,66 @@ def test_the_window_s_end_stops_a_pending_look(fw):
     look = now.v.retry
     now.handler(now.win, EVT_DESTROY)()
     assert look and now.v.retry == 0 and look in [a[0] for _, a in fw.calls('timer_remove')]
+
+
+FIELD = 4  # OLED's fifth style
+
+
+def oled_now(fw, vis=None):
+    """Now under OLED (THEME 3, the theme with pages.own.painter="oled"), IPOD VIS as given or unset."""
+    def config(path, section, key, out, default, *_):
+        k = C.string_at(key)
+        value = b'3' if k == b'THEME' else vis.encode() if k == b'VIS' and vis is not None else C.string_at(default)
+        C.memmove(out, value + b'\0', len(value) + 1)
+    fw.mock('toolsReadConfig', config)
+    return Now(fw)
+
+
+def test_oled_opens_on_field_until_a_style_is_saved(fw):
+    assert oled_now(fw).v.style == FIELD
+
+
+def test_oled_keeps_a_saved_style(fw):
+    assert oled_now(fw, '3').v.style == HALO_STYLE
+
+
+def test_under_oled_a_tap_goes_from_halo_to_field_then_spectrum(fw):
+    now = oled_now(fw, '3')
+    tap = now.handler(now.v.page, EVT_CLICK)
+    fw.mock('write_int_config', lambda *_: 0)
+    styles = []
+    for _ in range(2):
+        tap()
+        styles.append(now.v.style)
+    assert styles == [FIELD, SPECTRUM]
+
+
+def test_another_theme_never_shows_field(fw):
+    assert Now(fw, style='4').v.style == SPECTRUM
+
+
+def test_field_draws_five_bands_of_glow_sprites_inside_the_page(fw):
+    """Each band's FIELD_DOTS sprites, 32 px, drawn whole at their size (no scaling), all round the page's centre;
+    the sprites are made once, four strengths a band, and a sprite's corners are clear."""
+    now = oled_now(fw)
+    bufs, made, drawn = [], [], []
+
+    def create(w, h, line, fmt, *_):
+        bufs.append(C.create_string_buffer(w * h * 4))
+        made.append((w, h, fmt))
+        return len(bufs)
+    fw.mock('bitmap_create_ex', create)
+    fw.mock('bitmap_lock_buffer_for_write', lambda bm, *_: C.addressof(bufs[bm - 1]))
+    fw.mock('bitmap_get_line_length', lambda bm, *_: 32 * 4)
+    fw.mock('bitmap_unlock_buffer', lambda *_: 0)
+    fw.mock('canvas_draw_image', lambda c, bm, src, dst, *_: drawn.append(
+        (bm, tuple((C.c_int * 4).from_address(src)), tuple((C.c_int * 4).from_address(dst)))) or 0)
+    for _ in range(2):
+        paint(fw, now.win, Canvas(fw))
+    assert made == [(32, 32, 1)] * 20 and len(drawn) == 2 * 5 * 40
+    assert all(src == (0, 0, 32, 32) and dst[2:] == (32, 32) for _, src, dst in drawn)
+    cx, cy = 375 / 2, 186 / 2
+    assert all(abs(x + 16 - cx) <= 375 / 2 and abs(y + 16 - cy) <= 186 / 2 for _, _, (x, y, _, _) in drawn)
+    corner = struct.unpack_from('<I', bufs[0], 0)[0]
+    centre = struct.unpack_from('<I', bufs[0], (16 * 32 + 16) * 4)[0]
+    assert corner >> 24 == 0 and centre >> 24 > 0x80

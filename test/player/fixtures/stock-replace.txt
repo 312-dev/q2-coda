@@ -1,0 +1,13 @@
+   0.000 > {mcl-dsdmode\0}
+   0.000 > {mcl-replaygain\0}
+   0.100 > {mcl-setoutputway\0}
+   0.100 > {mcl-setvol\60}
+   1.000 > {set-songurl\/mnt/mmc/a1.flac|ss=0|512|20|0|17|90}
+   1.001 < {player-status\ready}
+   1.001 < {media-info\no-playing-status}
+   1.202 < {media-info\115752|44100|20|POS|FLAC|16}
+   1.605 < {player-status\playing}
+   4.000 > {set-songurl\/mnt/mmc/b1.mp3|ss=0|512|20|0|17|90}
+   7.000 > {mcl-stop\null}
+   7.060 < {player-stopstatus\exit}
+# positions (every fifth poll, time:seconds) 1.2:0 2.2:0 3.2:1 4.2:2 5.2:3 6.2:4

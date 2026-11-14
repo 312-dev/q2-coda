@@ -1,0 +1,15 @@
+   0.000 > {mcl-dsdmode\0}
+   0.000 > {mcl-replaygain\0}
+   0.100 > {mcl-setoutputway\0}
+   0.100 > {mcl-setvol\60}
+   1.000 > {set-songurl\http://WEB/s/-/a1.flac|ss=0|1024|20|1|17|90}
+   1.001 < {player-status\ready}
+   1.001 < {media-info\no-playing-status}
+   1.203 < {media-info\115752|44100|20|POS|FLAC|16}
+   1.605 < {player-status\playing}
+   2.000 > {mcl-seek\12}
+   2.676 < {player-status\exit}
+   4.000 > {set-gapless\http://WEB/s/-/a2.flac|ss=0|-1|20|1|90}
+  14.000 > {mcl-seek\17}
+# positions (every fifth poll, time:seconds) 1.2:0 2.2:0
+# cpu 0.15 s

@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
+import art
 import ipod
 import theme
 from ipod import Geometry, O, SET0
@@ -152,7 +153,7 @@ MINIMAL = {
     'icons_mono': 1, 'icons_badge_muted': 1, 'icons_addon_mono': 1, 'icons_badge_ink': 0, 'art_final': 0, 'font[ROLE_NP]': 0, 'font[ROLE_INFO]': 0, 'font_px[ROLE_INFO]': 0, 'np_info_value': 0, 'np_album_op': 0, 'np_state_op': 0,
     'home_top': 8, 'home_full_row': 375, 'home_text_x': 39, 'home_label_end[0]': 8, 'home_label_end[1]': 33,
     'home_pane': (), 'pane_shadow': 0, 'pane_shadow_w': 0, 'pane_shadow_a': (), 'pane_light_a': 0, 'pane_icon_x': 0, 'pane_icon_y': 0, 'pane_note_x': 0, 'pane_note_y': 0, 'pane_count_y': 0, 'pane_count_w': 0, 'pane_count_px': 0, 'pane_svc_x': 0, 'pane_svc_y': 0, 'pane_svc_px': 0,
-    'set_top': 8, 'set_text': 0, 'set_value_ink': 0, 'painter[PAINT_SCRUB]': 0, 'painter[PAINT_VOLUME]': 0, 'painter[PAINT_CONFIRM]': 0, 'painter[PAINT_PAGES]': 0, 'np_rows[0]': (), 'np_rows[1]': (), 'np_rows[2]': (), 'np_rows[3]': (), 'np_bar': 4, 'np_scrub': 8, 'np_track_rgb': 0x1c1c1c, 'np_track': (), 'np_fill': (), 'font[ROLE_TITLE]': 0, 'font[ROLE_META]': 0, 'font_px[ROLE_TITLE]': 0, 'font_px[ROLE_META]': 0, 'font_px[ROLE_NP]': 0, 'font[ROLE_HOME]': 0, 'font_px[ROLE_HOME]': 0, 'font[ROLE_BAR]': 0, 'font_px[ROLE_BAR]': 0, 'art_square': 0, 'art_x': 0, 'art_text_x': 0, 'art_text_end': 0, 'art_placeholder': 0, 'art_radius': 0, 'row_text_end': 0, 'sep': (), 'div_ink': 0, 'font[ROLE_TALL]': 0, 'font_px[ROLE_TALL]': 0, 'chevron_x': 0, 'home_chevron_x': 0, 'letter_raw': 0, 'letter_px': 0, 'marquee_fade': 0, 'reopen_top': 1, 'shuffle_row': 0, 'np_art_radius': 0, 'np_meta_font': 0, 'np_modes': 0, 'batt': (), 'batt_empty': (), 'batt_low': 0, 'batt_low_w': 0, 'batt_line': 0, 'batt_edge': 0, 'batt_corner_a': 0, 'batt_foot_a': 0, 'batt_shade_a': 0, 'batt_soft_a': 0, 'batt_soft_top_a': 0, 'batt_emboss_a': 0, 'batt_emboss_nub_a': 0, 'bar_bt_dy': 0, 'bar_wifi_dy': 0, 'sb_w': 0, 'sb_right': 0, 'sb_top': 0, 'sb_bottom': 0, 'sb_min': 0, 'sb_thumb': 0, 'painter[PAINT_SCROLL]': 0, 'sb_track': 0, 'painter[PAINT_CHEVRON]': 0, 'painter[PAINT_SONGS]': 0, 'bolt': 0, 'bolt_halo_a': 0, 'state_stops': (), 'state_edge': (), 'state_halo_light': 0, 'state_halo_dark': 0, 'station_stops': (), 'station_mast': (), 'station_band_a': 0, 'station_shadow_a': 0, 'light': {}, 'np_layout': 0, 'geom_set': 'ipod', 'geoms': {},
+    'set_top': 8, 'set_text': 0, 'set_value_ink': 0, 'painter[PAINT_SCRUB]': 0, 'painter[PAINT_VOLUME]': 0, 'painter[PAINT_CONFIRM]': 0, 'painter[PAINT_PAGES]': 0, 'np_rows[0]': (), 'np_rows[1]': (), 'np_rows[2]': (), 'np_rows[3]': (), 'np_bar': 4, 'np_scrub': 8, 'np_track_rgb': 0x1c1c1c, 'np_track': (), 'np_fill': (), 'font[ROLE_TITLE]': 0, 'font[ROLE_META]': 0, 'font_px[ROLE_TITLE]': 0, 'font_px[ROLE_META]': 0, 'font_px[ROLE_NP]': 0, 'font[ROLE_HOME]': 0, 'font_px[ROLE_HOME]': 0, 'font[ROLE_BAR]': 0, 'font_px[ROLE_BAR]': 0, 'art_square': 0, 'art_x': 0, 'art_text_x': 0, 'art_text_end': 0, 'art_placeholder': 0, 'art_radius': 0, 'row_text_end': 0, 'sep': (), 'div_ink': 0, 'font[ROLE_TALL]': 0, 'font_px[ROLE_TALL]': 0, 'chevron_x': 0, 'home_chevron_x': 0, 'letter_raw': 0, 'letter_px': 0, 'marquee_fade': 0, 'reopen_top': 1, 'shuffle_row': 0, 'home_lists_full': 0, 'set_switch': 0, 'entry_ipod': 0, 'np_art_radius': 0, 'np_meta_font': 0, 'np_modes': 0, 'batt': (), 'batt_empty': (), 'batt_low': 0, 'batt_low_w': 0, 'batt_line': 0, 'batt_edge': 0, 'batt_corner_a': 0, 'batt_foot_a': 0, 'batt_shade_a': 0, 'batt_soft_a': 0, 'batt_soft_top_a': 0, 'batt_emboss_a': 0, 'batt_emboss_nub_a': 0, 'bar_bt_dy': 0, 'bar_wifi_dy': 0, 'sb_w': 0, 'sb_right': 0, 'sb_top': 0, 'sb_bottom': 0, 'sb_min': 0, 'sb_thumb': 0, 'painter[PAINT_SCROLL]': 0, 'sb_track': 0, 'painter[PAINT_CHEVRON]': 0, 'painter[PAINT_SONGS]': 0, 'bolt': 0, 'bolt_halo_a': 0, 'state_stops': (), 'state_edge': (), 'state_halo_light': 0, 'state_halo_dark': 0, 'station_stops': (), 'station_mast': (), 'station_band_a': 0, 'station_shadow_a': 0, 'light': {}, 'np_layout': 0, 'geom_set': 'ipod', 'geoms': {},
     'schemes': [{**MINIMAL_ROLES, 'raw_red': int(v == 1), 'card': int(v == 7)} for v in range(9)],
     'opts': [STATUSBAR, opt('SETTING_LIGHT', preset=0, keep=2), opt('SETTING_ACCENT', default=0, preset=0),
              opt('SETTING_ROUNDED', preset=1), opt('SETTING_HOME', preset=0), opt('SETTING_SHORTCUT'),
@@ -548,10 +549,10 @@ def test_status_bar_takes_a_name_as_a_value():
         f'minimal/theme.xml:10: STATUSBAR: theme name {"é" * 13} as a value label: expected 1..24 bytes')
 
 
-MINIMAL_FIELDS = [('name', '"Minimal"'), ('painter[PAINT_SELECTION]', 'SEL_CARD'), ('sel_radius', 160), ('sel_inset', 6), ('sel_fixed', 0), ('marquee_fade', 0), ('reopen_top', 1), ('shuffle_row', 0), ('np_art_radius', 0), ('np_modes', 0), ('painter[PAINT_BAR]', 'BAR_FLAT'), ('painter[PAINT_BATTERY]', 'BATT_STOCK'), ('chevron_home', 0), ('chevron_sel', 0), ('art_x', 0), ('art_text_x', 0), ('art_text_end', 0), ('art_placeholder', 0), ('art_radius', 0), ('row_text_end', 0), ('sep', '{{0}, {0}}'), ('div_ink', '{0, 0}'), ('font[ROLE_TALL]', 'FONT_DEFAULT'), ('font_px[ROLE_TALL]', 0), ('painter[PAINT_CHEVRON]', 'CHEV_IMAGE'), ('chevron_x', 0), ('home_chevron_x', 0), ('letter_raw', 0), ('np_meta_font', 'FONT_DEFAULT'), ('letter_px', 0), ('caps_mark', 1),
+MINIMAL_FIELDS = [('name', '"Minimal"'), ('painter[PAINT_SELECTION]', 'SEL_CARD'), ('sel_radius', 160), ('sel_inset', 6), ('sel_fixed', 0), ('marquee_fade', 0), ('reopen_top', 1), ('shuffle_row', 0), ('home_lists_full', 0), ('entry_ipod', 0), ('np_art_radius', 0), ('np_modes', 0), ('painter[PAINT_BAR]', 'BAR_FLAT'), ('painter[PAINT_BATTERY]', 'BATT_STOCK'), ('chevron_home', 0), ('chevron_sel', 0), ('art_x', 0), ('art_text_x', 0), ('art_text_end', 0), ('art_placeholder', 0), ('art_radius', 0), ('row_text_end', 0), ('sep', '{{0}, {0}}'), ('div_ink', '{0, 0}'), ('font[ROLE_TALL]', 'FONT_DEFAULT'), ('font_px[ROLE_TALL]', 0), ('painter[PAINT_CHEVRON]', 'CHEV_IMAGE'), ('chevron_x', 0), ('home_chevron_x', 0), ('letter_raw', 0), ('np_meta_font', 'FONT_DEFAULT'), ('letter_px', 0), ('caps_mark', 1),
                   ('caps_home', 1), ('caps_np', 1), ('icons_mono', 1), ('icons_badge_muted', 1), ('icons_addon_mono', 1), ('icons_badge_ink', 0),
                   ('font[ROLE_NP]', 'FONT_DEFAULT'), ('font_px[ROLE_NP]', 0), ('font[ROLE_INFO]', 'FONT_DEFAULT'), ('font_px[ROLE_INFO]', 0), ('np_info_value', '{0, 0}'), ('np_album_op', 0), ('np_state_op', 0), ('home_top', 8), ('home_full_row', 375),
-                  ('home_text_x', 39), ('home_label_end[0]', 8), ('home_label_end[1]', 33), ('font[ROLE_HOME]', 'FONT_DEFAULT'), ('font_px[ROLE_HOME]', 0), ('home_pane', '{{0}, {0}}'), ('pane_shadow', 0), ('pane_shadow_w', 0), ('pane_shadow_a', '{0}'), ('pane_light_a', 0), ('pane_icon_x', 0), ('pane_icon_y', 0), ('pane_note_x', 0), ('pane_note_y', 0), ('pane_count_y', 0), ('pane_count_w', 0), ('pane_count_px', 0), ('pane_svc_x', 0), ('pane_svc_y', 0), ('pane_svc_px', 0), ('set_top', 8), ('set_text', 0), ('set_value_ink', '{0, 0}'), ('painter[PAINT_SCRUB]', 'SCRUB_STOCK'), ('painter[PAINT_VOLUME]', 'VOL_STOCK'), ('painter[PAINT_CONFIRM]', 'CONFIRM_STOCK'), ('painter[PAINT_PAGES]', 'PAGES_STOCK'), ('art_final', 0), ('np_rows[0]', '{0}'), ('np_rows[1]', '{0}'), ('np_rows[2]', '{0}'), ('np_rows[3]', '{0}'), ('np_bar', 4),
+                  ('home_text_x', 39), ('home_label_end[0]', 8), ('home_label_end[1]', 33), ('font[ROLE_HOME]', 'FONT_DEFAULT'), ('font_px[ROLE_HOME]', 0), ('home_pane', '{{0}, {0}}'), ('pane_shadow', 0), ('pane_shadow_w', 0), ('pane_shadow_a', '{0}'), ('pane_light_a', 0), ('pane_icon_x', 0), ('pane_icon_y', 0), ('pane_note_x', 0), ('pane_note_y', 0), ('pane_count_y', 0), ('pane_count_w', 0), ('pane_count_px', 0), ('pane_svc_x', 0), ('pane_svc_y', 0), ('pane_svc_px', 0), ('set_top', 8), ('set_text', 0), ('set_switch', 0), ('set_value_ink', '{0, 0}'), ('painter[PAINT_SCRUB]', 'SCRUB_STOCK'), ('painter[PAINT_VOLUME]', 'VOL_STOCK'), ('painter[PAINT_CONFIRM]', 'CONFIRM_STOCK'), ('painter[PAINT_PAGES]', 'PAGES_STOCK'), ('art_final', 0), ('np_rows[0]', '{0}'), ('np_rows[1]', '{0}'), ('np_rows[2]', '{0}'), ('np_rows[3]', '{0}'), ('np_bar', 4),
                   ('np_scrub', 8), ('np_track_rgb', 0x1c1c1c), ('np_track', '{{0}, {0}}'), ('np_fill', '{0}'), ('art_square', 0), ('font[ROLE_TITLE]', 'FONT_DEFAULT'), ('font[ROLE_META]', 'FONT_DEFAULT'),
                   ('font_px[ROLE_TITLE]', 0), ('font_px[ROLE_META]', 0), ('font[ROLE_BAR]', 'FONT_DEFAULT'), ('font_px[ROLE_BAR]', 0),
                   ('batt', '{0}'), ('batt_line', '{0, 0}'), ('batt_empty', '{0}'), ('batt_low', 0), ('batt_low_w', 0), ('batt_edge', 0), ('batt_corner_a', 0), ('batt_foot_a', 0), ('batt_shade_a', 0), ('batt_soft_a', 0), ('batt_soft_top_a', 0), ('batt_emboss_a', 0), ('batt_emboss_nub_a', 0), ('bar_bt_dy', 0), ('bar_wifi_dy', 0), ('sb_w', 0), ('sb_right', 0), ('sb_top', 0), ('sb_bottom', 0), ('sb_min', 0), ('sb_thumb', '{0, 0}'), ('painter[PAINT_SCROLL]', 'SB_THUMB'), ('sb_track', '{0, 0}'), ('painter[PAINT_SONGS]', 'SONGS_STOCK'),
@@ -647,7 +648,7 @@ def with_role(monkeypatch, **cf):
 
 
 @pytest.mark.parametrize('field,value', [('eye', 2047), ('eye', 0), ('xs', 800), ('zs', 800), ('x1', 1024), ('reflect', 0),
-    ('bright2', 0), ('text_y', 209), ('name_px', 33), ('artist_px', 29), ('radius', 84), ('stride', 0),
+    ('bright2', 0), ('text_y', 169), ('name_px', 33), ('artist_px', 29), ('radius', 84), ('stride', 0),
     ('tilt', 29), ('tilt', 91), ('horizon', 0), ('horizon', 100), ('third', 2), ('swing', 3), ('lift', 41), ('eye_turn', 401), ('view_h', 209), ('view_h', 295),
     ('thumb', 2), ('detent', 101), ('hold_ms', 30001), ('dead', 21), ('row_width', 101), ('art_persp', 101),
     ('jump_ms', 5001), ('jump_ticks', 201), ('jump_at', 1001), ('jump_pace', 2001), ('big_jump_at', 1001), ('big_jump_ms', 5001),
@@ -1271,7 +1272,7 @@ def test_classic_light_sets_from_its_theme_file():
     assert theme.sets(m) == theme.sets(c) == {'ipod': SET0} and (m['geoms'], c['geoms']) == ({}, {})
     decl = {e.attrs['name']: e.attrs for e in theme.load(THEMES/'classic-light'/'theme.xml').children
             if e.tag == 'geometry' and 'name' in e.attrs}
-    assert set(decl['classic-light']) == {f.name for f in dataclasses.fields(Geometry)} - {'list_fit', 'status_y', 'right_x', 'np_art', 'np_bar_y', 'split_row', 'split_art', 'split_art_up', 'split_still', 'folder_pitch', 'folder_body'} and decl['classic-light-text']['extends'] == 'classic-light'
+    assert set(decl['classic-light']) == {f.name for f in dataclasses.fields(Geometry)} - {'list_fit', 'status_y', 'right_x', 'np_art', 'np_bar_y', 'split_row', 'split_art', 'split_art_up', 'split_inset', 'folder_pitch', 'folder_body', 'modal'} and decl['classic-light-text']['extends'] == 'classic-light'
     assert not hasattr(ipod, 'CLASSIC_LIGHT') and not hasattr(ipod, 'CLASSIC_LIGHT_TEXT')
 
 
@@ -1539,7 +1540,7 @@ def test_oled_states_its_grid_type_and_colour(tmp_path):
     blue = oled['schemes'][9]
     assert theme.scheme_names(oled)[9:] == ['oled-blue'] and oled['accents'] == 1 << 9 and blue['tones'] == (0x2160d8,) * 5
     assert (blue['sel_text'], blue['light']['sel_text'], blue['muted'], blue['paper'], blue['ink']) == (0xffffff, 0xffffff, 0x858585, 0xffffff, 0)
-    assert (oled['set_text'], oled['set_value_ink'], oled['light']['set_value_ink']) == (1, 0xababab, 0x5c5c5c)
+    assert (oled['set_text'], oled['set_switch'], oled['set_value_ink'], oled['light']['set_value_ink']) == (1, 1, 0xababab, 0x5c5c5c)
     assert (oled['sel_inset'], oled['sel_radius'], oled['sel_fixed']) == (16, 8, 1)
     assert (oled['div_ink'], oled['light']['div_ink'], oled['sep']) == (0x222222, 0xe5e5e5, ())
     # song rows: inline, the small text in Text Tertiary; Song Artist and Song Length, Inline and Albums first
@@ -1551,13 +1552,19 @@ def test_oled_states_its_grid_type_and_colour(tmp_path):
     # Now Playing on the grid: 150 px art with 6 px corners, the bar's top at y 228, 6 px on the Track grey, the artist
     # and album in Inter, the theme's own shuffle and repeat; and every scrolling text's faded ends
     assert (g.np_art, g.np_bar_y, oled['np_art_radius'], oled['np_bar'], oled['np_track_rgb']) == (150, 228, 6, 6, 0x333333)
-    assert (oled['np_meta_font'], oled['np_modes'], oled['marquee_fade'], oled['reopen_top'], oled['shuffle_row']) == (inter, 1, 1, 1, 1)
+    assert (oled['np_meta_font'], oled['np_modes'], oled['marquee_fade'], oled['reopen_top'], oled['shuffle_row'], oled['home_lists_full']) == (inter, 1, 1, 1, 1, 1)
     # Home's Split: rows to 204 (the bar to 188, chevrons at 176), the art from x 196 and 6 px up into the bar, still;
     # the other sets keep half the screen, the art under the bar, panning
-    assert (g.split_row, g.split_art, g.split_art_up, g.split_still, oled['home_label_end[0]']) == (204, 196, 6, 1, 44)
-    assert all((s.split_row, s.split_art, s.split_art_up, s.split_still) == (187, 187, 0, 0) for s in map(theme.geometry, ts[:3]))
-    assert all(t['np_modes'] == t['marquee_fade'] == t['shuffle_row'] == t['np_art_radius'] == 0 == theme.geometry(t).np_art for t in ts[:3])
+    assert (g.split_row, g.split_art, g.split_art_up, g.split_inset, oled['home_label_end[0]']) == (204, 196, 6, 2, 44)
+    assert all((s.split_row, s.split_art, s.split_art_up, s.split_inset) == (187, 187, 0, 0) for s in map(theme.geometry, ts[:3]))
+    # The More pages and hold menus as the inset modal (menu_modal.c): OLED's set alone
+    assert g.modal == 1 and all(theme.geometry(t).modal == 0 for t in ts[:3])
+    assert all(t['np_modes'] == t['marquee_fade'] == t['shuffle_row'] == t['home_lists_full'] == t['np_art_radius'] == 0 == theme.geometry(t).np_art for t in ts[:3])
     assert all(t['reopen_top'] == 1 for t in ts)  # Minimal's, every theme's
+    # its toast and confirm (patch/feedback.c), and the confirmation's glyph; Classic's dialog art is Classic's alone
+    painters = [list(theme.CHOICES['dialog.confirm.painter'])[t['painter[PAINT_CONFIRM]']] for t in ts]
+    assert painters == ['stock', 'classic-light', 'stock', 'oled']
+    assert 'oled_confirm_shuffle' in art.images(oled) and 'oled_confirm_shadow' not in art.images(oled)
     inc = boot_inc(tmp_path, ts)
     assert '#define OWN_OLED_ACCENT' in inc and '        .name = "OLED",' in inc and 'static const scheme_t oled_schemes[] = {' in inc
     assert re.findall(r'\.geom = (\d+)', inc) == ['0', '1', '0', '2'] and '.art = "oled_",' in inc

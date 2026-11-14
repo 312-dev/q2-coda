@@ -107,12 +107,16 @@ class Geometry:
     np_bar_y: int = 0
     # Home in Split (coverflow.c home_split): the menu's width, which its rows, chevrons and selection bar take as theirs;
     # the art's pane from split_art to the screen's right edge; split_art_up rows of the pane above the window, in the
-    # bar, which paints them (coverflow_home_bar); split_still 1 keeps the cover still and centred in its 110 % zoom,
-    # 0 pans it.
+    # bar, which paints them (coverflow_home_bar); the cover pans across its 110 % zoom, and split_inset keeps that
+    # percent of the zoomed cover clear of the pane at each edge, so a cover's own frame never shows (coverflow.c
+    # drift_axis).
     split_row: int = inc('HOME_SPLIT_W')
     split_art: int = inc('HOME_SPLIT_W')
     split_art_up: int = 0
-    split_still: int = 0
+    split_inset: int = 0
+    # 1: Now Playing's More and a playlist's More open as dialogs over the page under them (MODAL_PAGES, modal_page), which
+    # the payload draws as the inset modal (menu_modal.c), as it does the hold menus; 0: full pages, the hold menus stock's
+    modal: int = 0
 
 
 SET0 = Geometry()
@@ -221,7 +225,7 @@ def with_geometry(g):
         NP_TIME_X=max(MARGIN, corner_x(g.bar + NP_TIMES_Y + 1, 14)))
 
 
-GEOM_VALS = ('bar', 'set_row', 'set_icon', 'batt_w', 'batt_h', 'text_x', 'lib_art', 'list_end', 'action_row', 'stream_row', 'stock_row', 'toolbar', 'status_y', 'right_x', 'list_fit', 'split_row', 'split_art', 'split_art_up', 'split_still')  # Geometry fields the payload reads at run time (themes.inc geom_vals), not immediates
+GEOM_VALS = ('bar', 'set_row', 'set_icon', 'batt_w', 'batt_h', 'text_x', 'lib_art', 'list_end', 'action_row', 'stream_row', 'stock_row', 'toolbar', 'status_y', 'right_x', 'list_fit', 'split_row', 'split_art', 'split_art_up', 'split_inset', 'modal')  # Geometry fields the payload reads at run time (themes.inc geom_vals), not immediates
 
 
 def folder_pitch(g):
@@ -861,15 +865,15 @@ NP_GRID_POS_PX = 18
 NP_GRID_POS_ASCENT = 14  # Inter's ascent at 18: 0.969 of its 1.21 em line, so its baseline sits on the art's bottom row
 NP_GRID_TIME_PX = 19
 NP_GRID_SECONDARY = '#ABABAB'  # Text Secondary; Light Mode flips it as every grey
-NP_GRID_ICON = 34  # More's and the heart's targets, their stock 50 px images centred in them
-NP_GRID_MORE_INSET = 12  # More's centre from the right column: its three dots end about on it
+NP_GRID_ICON = 34  # More's and the heart's targets, the theme's 20 px glyphs centred in them (np_bar.c np_glyphs)
+NP_GRID_MORE_INSET = 7  # More's centre from the right column: Phosphor's dots-three, 12.5 px of ink, ends on it
 NP_GRID_BAR = 6
 NP_GRID_TOUCH = 22  # the bar's target, short of the heart's above and the times' below
 NP_GRID_SLIDE_GAP = 5
 NP_GRID_TIMES_DY = 22
 NP_GRID_MODES_DY = 48
 NP_GRID_MODES = (88, 44)  # the play mode's target: both glyphs, 44 px apart (np_bar.c NP_MODES_APART)
-NP_GRID_DOTS_DY = 74
+NP_GRID_DOTS_DY = 70  # the page dots centred on y 302 on screen
 NP_GRID_MARGIN = 2  # hscroll_label's own margin each side of its text (stock's margin_left and margin_right)
 
 
@@ -920,8 +924,46 @@ def np_grid(root, named, g, title, artist, album, pos, remain):
     w, h = NP_GRID_MODES
     mode = named['img_playmode']
     mode[1] = [(375 - w) // 2, bar_y + NP_GRID_MODES_DY - h // 2, w, h]
-    mode[2]['opacity'] = '0'  # its target and handler stay; np_bar.c np_modes draws the pair over it
+    mode[2]['opacity'] = '0'  # its target stays, its halves np_bar.c np_mode_click's; np_modes draws the pair over it
     root[3].append(mode)
+    np_info_table(named, g, slide_h)
+
+
+# The grid's info page as a table (oled-design.md Now Playing, SPEC-next 4's mock-info-table): a fact a row, NP_INFO_ROW
+# apart in the slide's height, in NP_INFO_ORDER; the name left on the text column in Text Secondary, the value
+# right-aligned on the right column (the theme's playing.info.value), both in the info role's face and ellipsized (stock's
+# label holds the name, a <name>_value hscroll_label the value: navigation.c ringnav_np_info, which also folds the bit depth
+# into Format); a 1 px NP_INFO_RULE line between rows, as an inert table may have (RULES.md). label_bits stays, hidden, as
+# stock's np_info writes it.
+NP_INFO_ROW = 20
+NP_INFO_ORDER = ('label_album', 'label_genre', 'label_year', 'label_encode', 'label_sample', 'label_kbps', 'label_size',
+                 'label_location')
+NP_INFO_GRID_NAME_W = 110  # "Sample Rate", the longest English name, is about 84 px in Inter at 18
+NP_INFO_RULE = '#1F1F1F'
+
+
+def np_info_table(named, g, slide_h):
+    info = named['view_info'][3]
+    check(sorted(n[2]['name'] for n in info) == sorted(NP_INFO_ORDER + ('label_bits',)), 'Unexpected info page')
+    by = {n[2]['name']: n for n in info}
+    right, top = 375 - g.right_x, (slide_h - NP_INFO_ROW * len(NP_INFO_ORDER)) // 2
+    check(top >= 0, 'The info table must fit the slide')
+    keep = ('name', 'text', 'tr_text')
+    for i, key in enumerate(NP_INFO_ORDER):
+        n, y = by[key], top + NP_INFO_ROW * i
+        n[0] = 'hscroll_label'
+        n[1] = [g.text_x - NP_GRID_MARGIN, y, NP_INFO_GRID_NAME_W, NP_INFO_ROW]
+        n[2] = {k: v for k, v in n[2].items() if k in keep}
+        n[2].update({'style': 's_scrlabel_white20l', 'style:normal:text_align_h': 'left', 'style:normal:text_color': NP_GRID_SECONDARY,
+                     'only_focus': 'true', 'ellipses': 'true'})
+        x = g.text_x + NP_INFO_GRID_NAME_W
+        info.append(['hscroll_label', [x - NP_GRID_MARGIN, y, right - x + 2 * NP_GRID_MARGIN, NP_INFO_ROW], {
+            'name': key + '_value', 'style': 's_scrlabel_white20r', 'only_focus': 'true', 'ellipses': 'true'}, []])
+        if i:
+            info.append(['view', [g.text_x, y, right - g.text_x, 1], {'style:normal:bg_color': NP_INFO_RULE}, []])
+    bits = by['label_bits']
+    bits[1] = [0, 0, 0, 0]
+    bits[2]['visible'] = 'false'
 
 
 # Display's Centred Now Playing (IPOD NPCENTRED) opens stock's own page, its art centred over the
@@ -1316,7 +1358,24 @@ def fit_rows(g, top, pitch):
     return (g.list_end - top) // pitch * pitch
 
 
+# The menus a modal set opens over the page under them (Geometry.modal): each stays the page its set makes, as a dialog.
+MODAL_PAGES = ('playermore_page.bin', 'localmusic/playlistsmore_page.bin')
+
+
+def modal_page(data):
+    """A page as a dialog with no slide: the window manager paints the page under it, which the payload dims and
+    insets the menu over (menu_modal.c modal_more). Its init makes it modeless (to_modal), so navigator_to returns."""
+    root = decode(data)
+    check(root[0] == 'window', 'Unexpected modal page')
+    root[0] = 'dialog'
+    root[1] = [0, 0, 375, 320]  # a window takes the screen from the window manager; a dialog keeps its own box
+    root[2].pop('anim_hint', None)
+    return encode(root)
+
+
 def patch_asset(path, data, g=SET0):  # pragma: no mutate block
+    if g.modal and path in MODAL_PAGES:
+        return modal_page(patch_asset(path, data, dataclasses.replace(g, modal=0)))
     geo = with_geometry(g)
     pitch, body, inset = page_rows(g, PAGE_KIND.get(path, 'text'))
     stock = path in STOCK_ROWS
