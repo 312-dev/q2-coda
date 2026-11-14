@@ -5939,7 +5939,15 @@ static const char *bar_title_of(void *win, void **label) {
 int title_gone(void *w, void *event) {
     if (st.title_win) widget_off_by_func(st.title_win, EVT_DESTROY, title_gone, st.title_win);
     if (st.title_lbl) widget_off_by_func(st.title_lbl, EVT_DESTROY, title_gone, st.title_lbl);
-    st.title_win = st.title_lbl = st.action_view = st.shuffle_on = (void *)0;
+    /* the Shuffle row keeps its selection under another page (Return lands on it): its own destroy
+     * lets it go (shuffle_gone) */
+    st.title_win = st.title_lbl = st.action_view = (void *)0;
+    return 0;
+}
+
+/* The Shuffle row's action view going: its selection with it. */
+static int shuffle_gone(void *row, void *event) {
+    if (st.shuffle_on == row) st.shuffle_on = (void *)0;
     return 0;
 }
 
@@ -6274,7 +6282,12 @@ unsigned *ringnav_style_color(unsigned *color, void *style, const char *name, un
                 if (!widget_get_prop_bool(w, "enable", 1)) enabled = 0;
             *color = (*color & 0xff000000u) | (enabled ? 0xffffff : 0xaaaaaa);
         }
-        if ((ipod_light() || S->sel_text) && painting_in(st.sel_accent)) {
+        /* the selection's row, or the Shuffle row's label while its Shuffle is lit (outside the
+         * list: shuffle_paint) */
+        if ((ipod_light() || S->sel_text) &&
+            (painting_in(st.sel_accent) ||
+             (shuffle_label && st.paint_w == shuffle_label && st.shuffle_on == st.action_view &&
+              st.shuffle_stop == SHUFFLE_STOP))) {
             if (S->sel_text) *color = (*color & 0xff000000u) | (RGBA(S->sel_text) & 0xffffff);
             return color;
         }
@@ -11143,8 +11156,9 @@ static void edit_paint(void *w, void *canvas) {
  * the key was the row's. */
 static int shuffle_key(void *top, void *w, int dir) {
     void *row = st.action_view;
-    if (!theme()->shuffle_row || !row || window_of(row) != top || !widget_get_visible(row) ||
-        widget_count_children(row) < 2) {
+    /* another page on top (Now Playing, after Centre on Shuffle) keeps it for Return */
+    if (!theme()->shuffle_row || !row || window_of(row) != top) return 0;
+    if (!widget_get_visible(row) || widget_count_children(row) < 2) {
         st.shuffle_on = (void *)0;
         return 0;
     }
@@ -11154,6 +11168,8 @@ static int shuffle_key(void *top, void *w, int dir) {
         st.shuffle_on = row;
         st.shuffle_list = w;
         st.shuffle_stop = SHUFFLE_STOP;
+        widget_off_by_func(row, EVT_DESTROY, shuffle_gone, row);
+        widget_on(row, EVT_DESTROY, shuffle_gone, row);
         stop_scroll(&g_menu);
         reveal(&g_menu, 0, 1); /* the row under it in view */
     } else if (dir) {

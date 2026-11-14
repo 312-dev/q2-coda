@@ -2531,6 +2531,32 @@ def test_the_wheel_steps_from_the_first_song_onto_shuffle_then_sort_and_back(fw,
                      (0, 1) if sort else (0, 2)]
 
 
+def test_a_page_over_the_shuffle_row_leaves_it_selected_for_return(fw, ui, st_at):
+    """Rule 15, Return lands on the row that was left: Centre on Shuffle opens Now Playing, whose window takes the
+    status row (bar_title_sync's title_gone) and whose keys are its own; back on Songs the bar is on Shuffle again,
+    and its destroy is what lets it go."""
+    theme(fw, 3)
+    base = C.addressof(fw.var('st', C.c_char))
+    field = lambda name: C.c_void_p.from_address(base + st_at[name])
+    page = Page(ui, titles(20))
+    view = action_bar(ui, page)
+    field('action_view').value = view.at
+    paint(fw, page)
+    key(fw, ui, KEY_PREV, ui.now + SLOW)
+    assert field('shuffle_on').value == view.at
+    fw.fn('title_gone', C.c_int, C.c_void_p, C.c_void_p)(None, None)  # another window on top
+    ui.top = Page(ui, titles(3), name='playing_page').win
+    key(fw, ui, KEY_NEXT, ui.now + SLOW)  # a key on that page
+    assert field('shuffle_on').value == view.at
+    ui.top = page.win
+    field('action_view').value = view.at  # bar_title_sync finds it again on Songs
+    paint(fw, page)
+    assert field('shuffle_on').value == view.at and C.c_int.from_address(base + st_at['shuffle_stop']).value == 1
+    (fn, ctx), = [a[2:4] for _, a in fw.calls('widget_on') if a[0] == view.at and a[1] == O['EVT_DESTROY']]
+    C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, None)
+    assert field('shuffle_on').value is None
+
+
 def test_without_the_shuffle_row_a_tick_up_from_the_first_song_stays_on_the_list(fw, ui, st_at):
     theme(fw, 0)  # Minimal: Play All stays stock's tap target
     base = C.addressof(fw.var('st', C.c_char))
