@@ -1729,8 +1729,9 @@ static int offline_x(void *w, int i, const rect_t *r) {
     return r->x + r->w - CHEVRON_W + 25 - (chevron ? 28 : 0);
 }
 /* Before a list's rows paint: an album's songs (albuminfo_page; playerjumpinfo_page, Go to
- * Album's) and Search's songs are a scroll_view's rows, one per record in order (the showlist, or
- * Search's results), not a table's, so each whose song can't play now is greyed here, as
+ * Album's; Cover Flow's tracks, where Go to Album goes with Artist View or Cover Flow open) and
+ * Search's songs are a scroll_view's rows, one per record in order (the showlist, Cover Flow's
+ * tracks or Search's results), not a table's, so each whose song can't play now is greyed here, as
  * ringnav_table_load greys a table's. Then every greyed row's labels end short of its mark
  * (catalogue_fit), and any it narrowed before take their width back. */
 /* Search's results while its Songs tab (tab_button_group's first) is lit: p_deque_searchshowlist,
@@ -1750,7 +1751,8 @@ static void grey_rows(void *w) {
     if (g_menu.kind == 1 && catalogue_source == 1)
         list = !tk_strcmp(page, "albuminfo_page") || !tk_strcmp(page, "playerjumpinfo_page")
                    ? P(p_deque_showlist, 0)
-                   : ringnav_search_songs(win);
+                   : coverflow_tracks(win);
+    if (!list && g_menu.kind == 1 && catalogue_source == 1) list = ringnav_search_songs(win);
     if (list && deque_size(list) != (unsigned)g_menu.rows) list = (void *)0;
     for (int i = 0; i < g_menu.n; ++i) {
         if (list) catalogue_mark(g_menu.at[i], deque_at(list, (unsigned)g_menu.id[i]));
