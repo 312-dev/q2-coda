@@ -47,13 +47,11 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 
 ## Fragile hard-coding
 
-### 1. The UI payload has 1.3% of its room left
+### 1. The UI payload's room (resolved)
 
-- **Where:** `tools/build.py:32` (`SCRATCH = 0xbc0000`), `tools/build.py:1620-1624` (`check_layout`), `patch/link.ld:2-6`.
-- **Evidence:** `check(len(payload) <= SCRATCH-BASE, 'Payload overlaps its scratch page')`: 786,432 bytes. A `--dev` build's `manifest.json` has `patch_bytes` 776,568, so 9,864 bytes are left. The flags are already `-Oz` with `--gc-sections` (`tools/build.py:1589-1592`, `:1610`).
-- **Impact:** the next feature of a few KB fails the build, on every branch at once. The OLED theme adds a face, schemes and painters to this payload.
-- **Fix:** move `SCRATCH` up (the build maps one segment from `BASE` to `__scratch_end`, `tools/build.py:2080`, so the gap between them is only addresses), after checking nothing of stock's or hciplayer's lies there, and that `test/patch.py`'s machine maps the same range. Or move a self-contained feature (Games, Books) out of the payload into a card app. Record the headroom in the build's printed summary either way (`tools/build.py:2285`), so it is seen before it is gone.
-- **Effort:** M.
+- **Where:** `tools/build.py:32` (`SCRATCH`), `check_layout` in `tools/build.py`, `patch/link.ld`.
+- **State:** `SCRATCH` is `0xc00000`, so code and constants have 1 MB below it. demo's heap starts where the scratch state ends (a running demo's `/proc/<pid>/maps` shows one anonymous mapping from the payload's end through the heap), so nothing of stock's lies in the range the move took.
+- **Watch:** `patch_bytes` in a build's `manifest.json` against `SCRATCH - BASE` (1,048,576).
 
 ### 4. The theme picker's order and Status Bar's values are kept by hand
 

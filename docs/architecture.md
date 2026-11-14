@@ -19,9 +19,9 @@ Q2 Pod ships no program of Shanling's and no source of theirs. `tools/build.py` 
 
 ## The payload
 
-The payload is one MIPS o32 image linked by `patch/link.ld`: `.text` and `.rodata` from `0xb00000` (`BASE`), and `.scratch`, zero-filled writable state, at `0xbc0000` (`SCRATCH`). `append_payload` (`tools/build.py:1641`) maps it through demo's last, unused `PT_NULL` program header. A variable that must keep its value goes in `.scratch`: `static int x __attribute__((section(".scratch")));`, as `st`, the UI's shared state (`scratch_t`, `patch/navigation.h:326`), does.
+The payload is one MIPS o32 image linked by `patch/link.ld`: `.text` and `.rodata` from `0xb00000` (`BASE`), and `.scratch`, zero-filled writable state, at `0xc00000` (`SCRATCH`). `append_payload` (`tools/build.py:1641`) maps it through demo's last, unused `PT_NULL` program header. A variable that must keep its value goes in `.scratch`: `static int x __attribute__((section(".scratch")));`, as `st`, the UI's shared state (`scratch_t`, `patch/navigation.h:326`), does.
 
-`check_layout` (`tools/build.py:1620`) holds the two limits: the code and constants fit the 768 KB below `SCRATCH`, and the state fits 128 KB. A 1.8.2 `--dev` build's payload is 776,568 bytes of 786,432 (its `manifest.json`, `patch_bytes`), so a feature of a few KB can fail the build with `Payload overlaps its scratch page`. `-Oz` and `--gc-sections` are already on (`FLAGS`, `tools/build.py:1589`).
+`check_layout` (`tools/build.py:1620`) holds the two limits: the code and constants fit the 1 MB below `SCRATCH`, and the state fits 128 KB. demo's heap begins where the scratch state ends, so `SCRATCH` can move up without colliding with anything of stock's.
 
 It is compiled from two lists, and a new file in neither is not part of it:
 

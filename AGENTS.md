@@ -82,7 +82,7 @@ The full list of suites, with what each needs, is in [docs/building.md](docs/bui
 - **`tools/build.py` refuses an `--out` that already holds `update.tar`.** Build into a fresh directory, then swap.
 - **A build is stale after any edit.** `test/patch.py` and the other `BUILD` suites refuse a build whose `manifest.json` `source_sha256` is not the tree's (`patch/`, `tools/`, `assets/`, `docs/manual/`). Rebuild, don't work around it.
 - **A new `patch/*.c` is not compiled until it is listed**: in `NAVIGATION` (`tools/build.py`) if it includes `navigation.h`, else in `UI_SOURCES` (`tools/peq.py`). `test/fw` builds from the same two lists.
-- **The payload is nearly full.** Code and constants must fit 768 KB and a 1.8.2 `--dev` build uses 776,568 of 786,432 bytes; the build fails with `Payload overlaps its scratch page`. See [architecture](docs/architecture.md#the-payload).
+- **The payload has a hard limit.** Code and constants must fit the 1 MB below `SCRATCH` (`tools/build.py`); past it the build fails with `Payload overlaps its scratch page`. Check `patch_bytes` in a build's `manifest.json`. See [architecture](docs/architecture.md).
 - **Writable state goes in `.scratch`** (`__attribute__((section(".scratch")))`), zero at start. The link script has no `.data`.
 - **Every stock address is V1.36's.** A new one needs its guard (the expected stock word in `patch_word`, or a prologue check through `HOOKS`), a name in `tools/stock_map.tsv` if Shanling left the function unnamed, and its row in `tools/stock_sites.tsv` ([rebasing](docs/rebasing.md#writing-hooks-that-survive)).
 - **A window the wheel should work on must be in `patch/contexts.inc`**, and the build rejects a name that is not a stock window or in `PAYLOAD_WINDOWS`.
