@@ -3352,7 +3352,7 @@ static void enter_frames(void) {
 void cf_shelf_still(int still);
 static void rest_pinned(void) {
     static const cf_style_t shipped[CF_THEMES] = CF_SHIPPED_ALL; /* every built-in theme's, in index order */
-    static const unsigned pinned[CF_THEMES] = { 0x09b59e69u, 0x40a22303u, 0x09b59e69u, 0x09b59e69u };
+    static const unsigned pinned[CF_THEMES] = { 0x09b59e69u, 0x40a22303u, 0x09b59e69u, 0xe50a4224u };
     static unsigned f[300 * PITCH], art[15][160 * 160];
     const cf_style_t fixture = shim_themes[1].cf;
     for (int i = 0; i < 15; ++i)
@@ -3370,6 +3370,10 @@ static void rest_pinned(void) {
                 for (unsigned i = 0; i < sizeof f / 4; ++i) f[i] = 0;
                 coverflow_render(f, PITCH, 0, ring + 4);
                 for (int i = 0; i < shipped[ti].view_h * PITCH; ++i) hash = (hash ^ f[i]) * 16777619u;
+                /* a theme with no reflection (OLED's): under the centre cover each row is one colour,
+                   the page's, across the cover's width */
+                for (int y = shipped[ti].top + 161; !shipped[ti].reflect && y < shipped[ti].view_h; ++y)
+                    for (int x = CF_CX - 70; x < CF_CX + 70; ++x) assert(f[y * PITCH + x] == f[y * PITCH + CF_CX - 70]);
             }
         if (hash != pinned[ti]) fprintf(stderr, "rest_pinned: theme %d 0x%08xu\n", ti, hash);
         assert(hash == pinned[ti]);
