@@ -624,31 +624,36 @@ def test_an_album_row_is_greyed_offline_when_none_of_its_songs_can_play(rig, fw)
     records.append(album_record(rig, 'Server Only', -1))  # the Unknown Album row
     fw.var('fw_ctx_p_deque_showlist', C.c_uint).value = rig.rows.new(records)
     fw.var('fw_ctx_g_class_type', C.c_int).value = 0xf003  # CLASS_ALBUMS
-    row, label = (C.create_string_buffer(0x400) for _ in range(2))
-    struct.pack_into('<Q', label, O['W_PARENT'], C.addressof(row))
+    from test_nav_painters import Ui
+    ui = Ui(fw)
+    row = ui.add('list_item', None)
+    label = ui.add('label', row)
     bind = fw.fn('catalogue_bind', None, C.c_void_p, C.c_uint)
     greyed = fw.fn('catalogue_greyed', C.c_int, C.c_void_p, C.POINTER(C.c_uint))
 
     def grey(i):
-        bind(C.addressof(row), i)
-        return bool(greyed(C.addressof(label), C.byref(C.c_uint(0xffffffff))))
+        bind(row.addr, i)
+        return bool(greyed(label.addr, C.byref(C.c_uint(0xffffffff))))
     assert [grey(i) for i in range(5)] == [True, False, False, False, False]
     # the cached copy evicted: that album has nothing left to play
     rig.files.files[AVAIL] = b'-s2\n'
     rig.poll()
     assert [grey(i) for i in range(5)] == [True, True, False, False, False]
     # an artist's albums tab: the artist page's classinfo says so, g_class_type still the Artists list's
-    from test_nav_painters import Ui
-    ui = Ui(fw)
     page = ui.add('view', ui.window('artistinfo_page'))
     fw.var('fw_ctx_g_class_type', C.c_int).value = 0xf004
     info = fw.var('fw_ctx_g_local_classinfo_save', C.c_char * 912)
     struct.pack_into('<i', info, 0, 0xff01)  # CLASS_ARTIST_ALBUMS
     assert not grey(0)  # the row on no page: the Artists list's rows are not albums
-    struct.pack_into('<Q', row, O['W_PARENT'], page.addr)
+    C.c_void_p.from_address(row.addr + O['W_PARENT']).value = page.addr
     assert grey(0) and not grey(2)
     struct.pack_into('<i', info, 0, 0xff07)  # the artist's songs tab
     assert not grey(0)
+    # a row destroyed with its page is forgotten: a widget made later at its address is not greyed
+    struct.pack_into('<i', info, 0, 0xff01)
+    assert grey(0)
+    ui.fire(row, O['EVT_DESTROY'])
+    assert not greyed(label.addr, C.byref(C.c_uint(0xffffffff)))
     fw.var('fw_ctx_g_class_type', C.c_int).value = 0xf003
     rig.online = True
     rig.poll()

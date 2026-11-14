@@ -35,6 +35,7 @@
 #define CAT_SQL (CAT_BATCH * 2600)
 #define CATPLAY_WAIT_MS 4000
 #define CAT_GREY 0x666666 /* an unavailable row's text */
+#define CAT_DIM 0xb3      /* on the selection: its own ink at this alpha (70%) */
 #define CAT_GREY_ROWS 48  /* bound rows of stock's pooled tables, more than a screen holds */
 #define CAT_PLAYLISTS 100 /* stock's playlist headers are ids 0 to 99 */
 
@@ -89,7 +90,10 @@ static struct {
     void **stock_slot; /* stock's handle's global (stock_db_open's a1) */
     void *attached;    /* the stock handle cat is attached to */
     void *grey[CAT_GREY_ROWS];
+    unsigned
+        grey_ink[CAT_GREY_ROWS]; /* each greyed row's text colour as last painted, for its mark */
     unsigned ngrey;
+    int fitted; /* a greyed row's labels were narrowed (catalogue_fit) since the Q2 started */
     /* a catplay sent: its app, when, and the list to play offline if no answer comes */
     int cp_app;
     unsigned cp_at, cp_seq;
@@ -1073,11 +1077,25 @@ int catalogue_seconds(const char *path) {
  * payload's own lists' rows as they are made (catalogue_mark). ringnav_style_color asks
  * catalogue_greyed for each text colour. ---- */
 
+static void grey_set(void *row, int on);
+static int grey_gone(void *row, void *event) {
+    grey_set(row, 0);
+    return 0;
+}
+/* A row greyed is forgotten when it is destroyed (its page closed), so a widget made later at its
+ * address is not greyed with it. */
 static void grey_set(void *row, int on) {
     unsigned i = 0;
     while (i < cat.ngrey && cat.grey[i] != row) ++i;
-    if (on && i == cat.ngrey && cat.ngrey < CAT_GREY_ROWS) cat.grey[cat.ngrey++] = row;
-    if (!on && i < cat.ngrey) cat.grey[i] = cat.grey[--cat.ngrey];
+    if (on && i == cat.ngrey && cat.ngrey < CAT_GREY_ROWS) {
+        cat.grey_ink[cat.ngrey] = 0, cat.grey[cat.ngrey++] = row;
+        if (!widget_get_prop_int(row, "_catgrey", 0) && widget_on(row, EVT_DESTROY, grey_gone, row))
+            widget_set_prop_int(row, "_catgrey", 1);
+    }
+    if (!on && i < cat.ngrey) {
+        --cat.ngrey;
+        cat.grey[i] = cat.grey[cat.ngrey], cat.grey_ink[i] = cat.grey_ink[cat.ngrey];
+    }
 }
 void catalogue_mark(void *row, void *r) { grey_set(row, catalogue_unavailable(r)); }
 void catalogue_forget(void *row) { grey_set(row, 0); }
@@ -1122,9 +1140,9 @@ static int album_list(void *row) {
     return cls == CLASS_ALBUMS || (cls >= CLASS_ARTIST_ALBUMS && cls <= 0xff03);
 }
 /* A stock list's pooled row bound to its index'th record: the Library's lists are
- * p_deque_showlist's, and the row shows its record's title or file name (a song's), or its album
- * (an album list's); any other table (whose index means something else) leaves its rows as they
- * are. */
+ * p_deque_showlist's, and the row shows its record's
+ * title or file name (a song's), or its album (an album list's); any other table (whose index means
+ * something else) leaves its rows as they are. */
 void catalogue_bind(void *row, unsigned index) {
     void *list = P(p_deque_showlist, 0);
     void *r = list && index < deque_size(list) ? deque_at(list, index) : 0;
@@ -1132,16 +1150,90 @@ void catalogue_bind(void *row, unsigned index) {
                             ? catalogue_unavailable(r)
                             : cat.ix.n && album_list(row) && catalogue_album_unavailable(r)));
 }
-/* The text colour of w, painted now: grey when it is in a greyed row. */
-int catalogue_greyed(void *w, unsigned *color) {
-    if (!cat.ngrey) return 0;
-    for (; w; w = P(w, W_PARENT))
+/* The greyed row w is in, or -1; up to depth levels above w. */
+static int grey_of(void *w, int depth) {
+    for (; w && cat.ngrey && depth-- > 0; w = P(w, W_PARENT))
         for (unsigned i = 0; i < cat.ngrey; ++i)
-            if (cat.grey[i] == w) {
-                *color = (*color & 0xff000000u) | CAT_GREY;
-                return 1;
+            if (cat.grey[i] == w) return (int)i;
+    return -1;
+}
+/* The text colour of w, painted now, as the theme gave it: in a greyed row, CAT_GREY, or on the
+ * selection that row's own ink at CAT_DIM, so it keeps its contrast with the bar or card
+ * (docs/server-library.md#greyed-rows). Kept for the row's mark. */
+int catalogue_greyed(void *w, unsigned *color) {
+    int i = grey_of(w, 64);
+    if (i < 0) return 0;
+    unsigned a = *color >> 24;
+    *color = ringnav_row_selected(cat.grey[i]) ? (*color & 0xffffffu) | (a * CAT_DIM / 255) << 24
+                                               : (*color & 0xff000000u) | CAT_GREY;
+    cat.grey_ink[i] = *color;
+    return 1;
+}
+/* How many rows are greyed now: none, and nothing needs a mark. */
+int catalogue_greys(void) { return (int)cat.ngrey; }
+/* Whether row (a list's entry, or a widget a few levels inside its row) is a greyed row's, and that
+ * row's text colour as last painted, for its mark. */
+int catalogue_row_ink(void *row, unsigned *ink) {
+    int i = grey_of(row, 4);
+    if (i < 0 || !cat.grey_ink[i]) return 0;
+    *ink = cat.grey_ink[i];
+    return 1;
+}
+/* The labels under w (depth levels down) that reach past limit, an x in surface's coordinates (x
+ * the left of w there): each ends at limit, its own width kept in _catw; on a row no longer greyed,
+ * or limit wider again, each takes back what it can of that. */
+static void fit_labels(void *w, int x, int limit, int greyed, int depth) {
+    for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) {
+        void *c = widget_get_child(w, i);
+        int cx = x + I(c, W_X), own = widget_get_prop_int(c, "_catw", 0);
+        const char *t = widget_get_type(c);
+        if (!tk_strcmp(t, "label") || !tk_strcmp(t, "hscroll_label")) {
+            int full = own ? own : I(c, W_W),
+                want = greyed && cx + full > limit ? limit - cx : full;
+            if (want < 0) want = 0;
+            if (want != I(c, W_W)) {
+                if (!own) widget_set_prop_int(c, "_catw", full);
+                widget_resize(c, want, I(c, W_H));
             }
-    return 0;
+        } else if (depth > 1)
+            fit_labels(c, cx, limit, greyed, depth - 1);
+    }
+}
+/* entry, a row of surface's list (navigation.c grey_rows), before it paints: a greyed row's labels
+ * end at limit, clear of its mark; another row's take back the width they had. The row whose
+ * labels these are: the greyed one entry is in, else entry's parent (a list item). */
+void catalogue_fit(void *entry, void *surface, int limit) {
+    int i = grey_of(entry, 4);
+    void *row = i >= 0 ? cat.grey[i] : P(entry, W_PARENT);
+    if (!row || (i < 0 && !cat.fitted)) return;
+    int x = 0;
+    for (void *p = row; p && p != surface; p = P(p, W_PARENT)) x += I(p, W_X);
+    if (i >= 0) cat.fitted = 1;
+    fit_labels(row, x, limit, i >= 0, 3);
+}
+
+/* The offline mark: Phosphor's cloud-slash, bold (phosphoricons.com, @phosphor-icons/core 2.1.1;
+ * MIT, Copyright (c) 2023 Phosphor Icons), rasterised at 20 px by tools/art.py's path and
+ * coverage, each pixel's coverage in 16 steps, cropped to its 20 x 16 ink. */
+static const char MARK[16][21] = {
+    "001b6000000222000000", "001ef50018dfffd81000", "0004ff408ffcacffd300", "00005fe327100019fe20",
+    "00015bfe200000008fc0", "006effffd20000000cf3", "07ffacfdfc10000006f8", "2fe40af4bfc1000003fa",
+    "8f8007c11cfb000003fa", "af40000001cf900006f8", "af400000002df8000cf4", "6fa000000002ef705fc0",
+    "1ef7000000003ef51920", "04ffdbbbbbbbbeff4000", "003bffffffffffefe100", "0000122222222206a100",
+};
+/* The mark centred on (x, y), in ink (a final colour) with each pixel's coverage on its alpha: a
+ * run of equal coverage is one rect. */
+void catalogue_mark_paint(void *canvas, int x, int y, unsigned ink) {
+    x -= 10, y -= 8;
+    for (int r = 0; r < 16; ++r)
+        for (int c = 0, n; c < 20; c += n) {
+            char k = MARK[r][c];
+            for (n = 1; c + n < 20 && MARK[r][c + n] == k; ++n);
+            int v = k <= '9' ? k - '0' : k - 'a' + 10;
+            if (!v) continue;
+            stock_canvas_set_fill_color(canvas, (ink & 0xffffffu) | ((ink >> 24) * v / 15) << 24);
+            canvas_fill_rect(canvas, x + c, y + r, n, 1);
+        }
 }
 
 /* ---- Apps, their files, the poll ---- */

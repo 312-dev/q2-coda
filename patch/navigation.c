@@ -1706,6 +1706,78 @@ static void paint_chevrons(void *w, void *canvas) {
     canvas_set_clip_rect(canvas, &old);
 }
 
+/* Rows that can't play now (catalogue.c) carry the offline mark at their right: in the chevron's
+ * column, or just left of a chevron the row shows (every drill row's, or a chevron_sel theme's
+ * selected one). Its centre on row i of g_menu, surface coordinates. */
+static int into_image(void *w, int depth) {
+    for (unsigned k = 0, n = widget_count_children(w); k < n; ++k) {
+        void *c = widget_get_child(w, k);
+        if (!widget_get_visible(c)) continue;
+        if (!tk_strcmp(widget_get_prop_str(c, "image", ""), "list_into") ||
+            (depth > 1 && into_image(c, depth - 1)))
+            return 1;
+    }
+    return 0;
+}
+static int offline_x(void *w, int i, const rect_t *r) {
+    int sel = st.sel_w == w && i == st.sel_row;
+    /* the payload's chevrons (paint_chevrons), or stock's list_into, which shows on the selection
+     */
+    int chevron = (drill(w) || page_into(g_menu.at[i]))
+                      ? !theme()->chevron_sel || sel
+                      : sel && into_image(P(g_menu.at[i], W_PARENT), 2);
+    return r->x + r->w - CHEVRON_W + 25 - (chevron ? 28 : 0);
+}
+/* Before a list's rows paint: an album's songs (albuminfo_page; playerjumpinfo_page, Go to
+ * Album's) and Search's songs are a scroll_view's rows, one per record in order (the showlist, or
+ * Search's results), not a table's, so each whose song can't play now is greyed here, as
+ * ringnav_table_load greys a table's. Then every greyed row's labels end short of its mark
+ * (catalogue_fit), and any it narrowed before take their width back. */
+/* Search's results while its Songs tab (tab_button_group's first) is lit: p_deque_searchshowlist,
+ * the list search_track_row_on_click plays from; else 0. */
+void *ringnav_search_songs(void *win) {
+    void *tabs = win && !tk_strcmp(widget_get_prop_str(win, "name", ""), "search_dialog")
+                     ? widget_lookup(win, "tab_button_group", 1)
+                     : (void *)0,
+         *songs = tabs && widget_count_children(tabs) ? widget_get_child(tabs, 0) : (void *)0;
+    return songs && widget_get_prop_int(songs, "value", 0) ? P(p_deque_searchshowlist, 0)
+                                                           : (void *)0;
+}
+static void grey_rows(void *w) {
+    if ((catalogue_source != 1 && !catalogue_greys()) || !kind(w) || !load_rows(&g_menu, w)) return;
+    void *win = window_of(w), *list = (void *)0;
+    const char *page = widget_get_prop_str(win, "name", "");
+    if (g_menu.kind == 1 && catalogue_source == 1)
+        list = !tk_strcmp(page, "albuminfo_page") || !tk_strcmp(page, "playerjumpinfo_page")
+                   ? P(p_deque_showlist, 0)
+                   : ringnav_search_songs(win);
+    if (list && deque_size(list) != (unsigned)g_menu.rows) list = (void *)0;
+    for (int i = 0; i < g_menu.n; ++i) {
+        if (list) catalogue_mark(g_menu.at[i], deque_at(list, (unsigned)g_menu.id[i]));
+        rect_t r = bounds(&g_menu, i);
+        if (2 * r.w >= I(w, W_W))
+            catalogue_fit(g_menu.at[i], w,
+                          offline_x(w, i, &r) - 14 + (g_menu.kind == 1 ? I(w, SCROLL_X) : 0));
+    }
+}
+
+/* After the rows: each greyed row's mark, in its text's colour as last painted. */
+static void paint_offline(void *w, void *canvas) {
+    rect_t old;
+    unsigned ink;
+    if (!catalogue_greys() || !kind(w) || !P(canvas, CANVAS_LCD) || !load_rows(&g_menu, w) ||
+        !clip_surface(canvas, &g_menu, &old))
+        return;
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+    for (int i = 0; i < g_menu.n; ++i) {
+        rect_t r = bounds(&g_menu, i);
+        if (2 * r.w >= I(w, W_W) && catalogue_row_ink(g_menu.at[i], &ink))
+            catalogue_mark_paint(canvas, offline_x(w, i, &r), r.y + r.h / 2, ink);
+    }
+    stock_canvas_set_fill_color(canvas, fill);
+    canvas_set_clip_rect(canvas, &old);
+}
+
 /* Writes v (under 1000) in decimal to s; returns the digits written. */
 unsigned put_num(unsigned *s, unsigned v) {
     unsigned n = 0;
@@ -2760,6 +2832,7 @@ int ringnav_paint(void *w, void *canvas) {
         if (!carousel_page(top)) st.home_surface = (void *)0;
     }
     paint_chevrons(w, canvas);
+    paint_offline(w, canvas);
     paint_radio(w, canvas);
     paint_into(w, canvas);
     paint_letter(w, canvas);
@@ -5912,6 +5985,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
     hold_paint(w, canvas, 0);
     if (w && w == st.search_tabs) search_tabs_paint(w, canvas);
     paint_selection(w, canvas);
+    grey_rows(w);
     if (form) confirm_labels(w, canvas);
     if (w && w == st.rate_box)
         paint_panel(w, canvas, &(rect_t){ PANEL_PAD, PANEL_PAD - PANEL_DROP, 304, 110 },
@@ -6014,8 +6088,25 @@ int painting_in(void *row) {
     return 0;
 }
 static int selected_ink(void) { return painting_in(st.sel_widget); }
+/* Whether row holds the selection painted now, or is inside it (catalogue.c's greyed rows). */
+int ringnav_row_selected(void *row) {
+    void *at = st.sel_w && st.sel_row >= 0 && st.sel_row < g_menu.n ? g_menu.at[st.sel_row] : 0;
+    for (void *w = at; row && w && w != st.sel_w; w = P(w, W_PARENT))
+        if (w == row) return 1;
+    for (void *w = row; at && w && w != st.sel_w; w = P(w, W_PARENT))
+        if (w == at) return 1;
+    return 0;
+}
 
+static unsigned *style_color(unsigned *color, void *style, const char *name, unsigned fallback);
+/* A row that can't play now (catalogue.c) takes its text colour last, over the theme's. */
 unsigned *ringnav_style_color(unsigned *color, void *style, const char *name, unsigned fallback) {
+    style_color(color, style, name, fallback);
+    if (!st.style_depth && st.paint_w && name && tk_str_end_with(name, "text_color"))
+        catalogue_greyed(st.paint_w, color);
+    return color;
+}
+static unsigned *style_color(unsigned *color, void *style, const char *name, unsigned fallback) {
     /* A mutable style (inline style:*) answers from its default style through style_get_color
      * again: only the outermost call maps, as Light Mode's flip is not idempotent. */
     ++st.style_depth;
@@ -6037,8 +6128,6 @@ unsigned *ringnav_style_color(unsigned *color, void *style, const char *name, un
         return color;
     }
     if (st.paint_w && name && tk_str_end_with(name, "text_color")) {
-        /* a server row that can't play now (catalogue.c) */
-        if (catalogue_greyed(st.paint_w, color)) return color;
         if (kb_key(st.paint_w)) { /* kb_paint_key draws it */
             *color &= 0xffffff;
             return color;

@@ -425,7 +425,12 @@ void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_pol
 void catalogue_changed(void), catalogue_card_away(void), catalogue_rated(void *r, int hearts);
 void catalogue_bind(void *row, unsigned index), catalogue_mark(void *row, void *r);
 void catalogue_forget(void *row);
-int catalogue_greyed(void *w, unsigned *color);
+int catalogue_greyed(void *w, unsigned *color), catalogue_row_ink(void *row, unsigned *ink);
+int catalogue_greys(void);
+void catalogue_mark_paint(void *canvas, int x, int y, unsigned ink);
+void catalogue_fit(void *entry, void *surface, int limit);
+int ringnav_row_selected(void *row); /* navigation.c: row holds the painted selection */
+void *ringnav_search_songs(void *win); /* navigation.c: Search's song results, while shown */
 extern unsigned auto_nexts; /* playback.c ringnav_next: tracks that ended by themselves */
 int stream_cache(int spotify); /* navigation.c: Streaming's Configuration, a cap of 512 << it MB */
 void album_memory(void *r);
