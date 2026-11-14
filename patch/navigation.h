@@ -477,6 +477,8 @@ void np_glyphs_bind(void *win), np_glyphs(void *win);
 void wheel_sb_arm(void *list);
 unsigned wheel_sb_alpha(void *list);
 void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key);
+/* list_marks.c: an on/off setting's switch, ending on canvas column right, centred on y */
+void switch_mark(void *canvas, int right, int y, int on, int selected);
 
 /* song_rows.c: SONGS_INLINE's rows. Song Artist's and Song Length's values (theme_engine.c
  * song_artist, song_length), a list's kind (song_list) and where an artist stands (song_fit). */
@@ -675,8 +677,8 @@ int pl_first(menu_t *m, int cur);
 void pl_fit(void *button);
 
 /* menu_modal.c: the inset modal (docs/oled-design.md#menus) */
-enum { MM_ACTION, MM_SETTING, MM_CHOICE }; /* modal_row's how */
-enum { DIR_NONE, DIR_UP, DIR_DOWN };       /* modal_dir: a sort's direction */
+enum { MM_ACTION, MM_SETTING, MM_CHOICE, MM_SWITCH }; /* modal_row's how */
+enum { DIR_NONE, DIR_UP, DIR_DOWN };                  /* modal_dir: a sort's direction */
 int modal_set(void);
 int modal_row_w(void);
 void *modal_gap(void *view);
