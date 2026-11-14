@@ -689,10 +689,8 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
 # Wi-Fi transfer's web page (stock thttpd on :8888): in English, an Upload Folder button, and a folder,
 # picked or dropped, keeps its tree: each file's folders are made with stock's create (a plain mkdir) before
 # it goes, as stock's upload only moves a file into an existing folder. The formats Q2 Pod's pages read are allowed too.
-MKDIR_JS = r'''// Each folder of a folder upload is made once per batch, parents first; stock's create is a plain mkdir,
-// so a folder that exists fails harmlessly and a real failure shows as its files' upload error.
-// ponytail: the stock CGIs run mkdir and mv through system() in double quotes, so a name with " ` or $
-// can't be uploaded (plain files too); replacing the CGIs would lift it.
+MKDIR_JS = r'''// Each folder of a folder upload is made once per batch, parents first; one that exists is no
+// error, and a folder that really couldn't be made shows as its files' upload errors.
 var _made = {};
 function _mkdir(path, base) {
   if (path == base)
@@ -709,6 +707,14 @@ function _mkdir(path, base) {
 }
 
 function _showError('''
+# The breadcrumb is built as HTML: _esc puts each folder's name into it as text, as a folder named like
+# markup would otherwise run as script in the page (docs/internals.md#wi-fi-transfer).
+ESC_JS = r'''// A file or folder name as HTML text, quotes included, for markup built from strings.
+function _esc(s) {
+  return $("<div>").text(s).html().replace(/"/g, "&quot;");
+}
+
+function _reload(path) {'''
 WEB = {
   'usr/share/web/index.html': [
     ('山灵音乐', 'Shanling Q2'),
@@ -729,6 +735,7 @@ WEB = {
   'usr/share/web/js/index.js': [
     ('"LRC","BIN"];', '"LRC","BIN","M4B","MP4","M4V","MKV","AVI","MOV","MPG","TXT","EPUB"];'),
     ('function _showError(', MKDIR_JS),
+    ('function _reload(path) {', ESC_JS),
     ('''  $("#upload-file").click(function(event) {
     $("#fileupload").click();
   });
@@ -777,6 +784,10 @@ WEB = {
         data.context.find("button").click(function(event) {
           if (jqXHR) jqXHR.abort(); else data.context.remove();
         });'''),
+    ('''          $("#path").append('<li data-path="' + subpath + '"><a style="cursor:pointer">' + components[i] + '</a></li>');''',
+     '''          $("#path").append('<li data-path="' + _esc(subpath) + '"><a style="cursor:pointer">' + _esc(components[i]) + '</a></li>');'''),
+    ('''        $("#path").append('<li class="active">' + components[components.length - 1] + '</li>');''',
+     '''        $("#path").append('<li class="active">' + _esc(components[components.length - 1]) + '</li>');'''),
     ('"无法获取列表内容 - \\""', '"Can\'t list \\""'),
     ('"无法创建\\"" + name + "\\"到\\""', '"Can\'t create \\"" + name + "\\" in \\""'), ('"无法移动\\""', '"Can\'t move \\""'), ('"\\"到\\""', '"\\" to \\""'),
     ('"无效的命名 - \'\'"', '"Invalid name - \'\'"'), ('"你确定要删除吗?"', '"Delete this item?"'),
