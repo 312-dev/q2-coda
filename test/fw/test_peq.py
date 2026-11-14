@@ -63,7 +63,7 @@ def api(fw):
            'peq_response': (None, ptr, i, d, ptr, ptr), 'peq_auto': (d, ptr, i), 'peq_reset': (None, ptr, i, i, ptr),
            'peq_update': (i, ptr, ptr), 'peq_process': (None, ptr, ptr, C.c_uint), 'decibels': (d, d),
            'peq__level': (None, ptr, d, d), 'peq__peak': (d, ptr, ptr, i), 'peq__live': (i, ptr, ptr),
-           'peq__sample': (d, ptr, ptr, i, d, i), 'peq__prepare': (i, ptr, i, ptr),
+           'peq__sample': (d, ptr, ptr, i, d, i),
            'peq_export': (C.c_uint, ptr, ptr, C.c_uint), 'peq_export_file': (i, C.c_char_p, ptr, i)}
     return SimpleNamespace(**{k.replace('peq__', ''): fw.fn(k, v[0], *v[1:]) for k, v in fns.items()})
 
@@ -715,40 +715,17 @@ def test_a_band_with_no_memory_past_the_new_end_is_dropped(fw):
     assert d.next.used == 1
 
 
-# Auto in the player
+# Auto in the player: the saved number, which demo keeps as the cut for every rate (peq_ui.c headroom)
 
-def test_auto_takes_this_rate_s_cut_and_a_picked_preamp_stands(fw):
+@pytest.mark.parametrize('automatic', (0, 1, 2))
+def test_the_player_plays_the_saved_preamp_auto_s_too(fw, automatic):
     g = api(fw)
-    bands = (PK, 1000, 6, 1),
-    e = Engine()
-    assert g.prepare(r(preset(g, *bands, preamp=-1, automatic=1)), 48000, r(e))
-    assert e.gain[0] == pytest.approx(10 ** (-6 / 20))
-    assert g.prepare(r(preset(g, *bands, preamp=-1, automatic=2)), 48000, r(e))
-    assert e.gain[0] == pytest.approx(10 ** (-1 / 20))
-    assert g.prepare(r(preset(g, *bands, preamp=-1, automatic=0)), 48000, r(e))
-    assert e.gain[0] == pytest.approx(10 ** (-1 / 20))
-
-
-def test_auto_keeps_the_balance(fw):
-    g = api(fw)
-    e = Engine()
-    g.prepare(r(preset(g, (PK, 1000, 6, 1), balance=6, automatic=1)), 48000, r(e))
-    assert e.gain[0] == pytest.approx(10 ** (-12 / 20)) and e.gain[1] == pytest.approx(10 ** (-6 / 20))
-
-
-def test_auto_differs_by_rate_where_a_band_is_past_nyquist(fw):
-    g = api(fw)
-    p = preset(g, (PK, 15000, 12, 1), automatic=1)
-    e = Engine()
-    g.prepare(r(p), 96000, r(e))
-    assert e.gain[0] == pytest.approx(10 ** (-12 / 20))
-    g.prepare(r(p), 16000, r(e))  # the band can't play there: nothing to cut
-    assert e.gain[0] == 1
-
-
-def test_prepare_refuses_what_compile_refuses(fw):
-    g = api(fw)
-    assert not g.prepare(r(preset(g)), 100, r(Engine()))
+    p = preset(g, (PK, 1000, 6, 1), preamp=-1, balance=6, automatic=automatic)
+    for rate in (32000, 44100, 48000, 96000):
+        d = Dsp()
+        g.peq_reset(r(d), rate, 2, r(p))
+        assert d.current.gain[0] == pytest.approx(10 ** (-7 / 20)) and d.current.gain[1] == pytest.approx(10 ** (-1 / 20))
+        assert g.peq_update(r(d), r(p)) and d.pending.gain[0] == d.current.gain[0]
 
 
 # eq_effective, every case of its comment

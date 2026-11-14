@@ -346,8 +346,9 @@ Filter 10: ON PK Fc 13560 Hz Gain -0.62 dB Q 2.940
 """
 
 def headroom_check(lib, ui):
-    """The reported preset stays linear; PEQ's Auto plays each rate's own cut, and 3EQ's saved headroom covers every
-    standard rate, neither changing a set gain or the filters."""
+    """The reported preset stays linear; each rate's own cut (peq_auto) leaves it under full scale there, and Auto,
+    PEQ's and 3EQ's, is one saved cut covering every standard rate, which the player plays as saved; neither changes a
+    set gain or the filters."""
     p = parse(lib, REPORTED_PRESET)
     before = bytes(p)
     assert p.count == 26 and p.preamp == -8.5 and p.balance == 0
@@ -362,9 +363,9 @@ def headroom_check(lib, ui):
             assert max(abs(x/16-y) for x, y in zip(loud, quiet)) < 2e-7, (rate, f)
             if f == 9840 and rate in (44100, 48000):
                 assert max(loud[::2]) > 1 and min(loud[::2]) < -1 and max(map(abs, loud[1::2])) < 1
-    # PEQ's Auto as the player prepares it (peq_reset, peq_update): the rate's own response, against a
-    # denser scan than the engine's 1024 points (8192, with DC, Nyquist and the band centres): within 0.005 dB, the
-    # grid's sampling error here (0.003 dB at 44.1 kHz). A steady-state peak, not a transient or intersample bound.
+    # Each rate's own cut (peq_auto), played as saved, against a denser scan than the engine's 1024 points (8192,
+    # with DC, Nyquist and the band centres): within 0.005 dB, the grid's sampling error here (0.003 dB at 44.1 kHz).
+    # A steady-state peak, not a transient or intersample bound. The rates' cuts differ by up to 4.5 dB.
     p.automatic = 1
     for rate, want in ((32000, -12.3492), (44100, -9.2466), (48000, -8.8120), (96000, -7.8743)):
         assert abs(lib.peq_auto(C.byref(p), rate) - want) < 0.005, (rate, lib.peq_auto(C.byref(p), rate))
@@ -372,8 +373,9 @@ def headroom_check(lib, ui):
     for rate in (8000, 32000, 44100, 48000, 50000, 96000, 384000):
         cut = lib.peq_auto(C.byref(p), rate)
         manual = Preset.from_buffer_copy(p); manual.automatic, manual.preamp = 2, cut
+        marked = Preset.from_buffer_copy(p); marked.preamp = cut  # Auto: its saved number plays
         a, b = DSP(), DSP()
-        lib.peq_reset(C.byref(a), rate, 2, C.byref(p)); lib.peq_reset(C.byref(b), rate, 2, C.byref(manual))
+        lib.peq_reset(C.byref(a), rate, 2, C.byref(marked)); lib.peq_reset(C.byref(b), rate, 2, C.byref(manual))
         e = a.current
         assert bytes(e.c) == bytes(b.current.c) and bytes(e.only) == bytes(b.current.only) and e.used == b.current.used
         assert all(abs(e.gain[ch] - 10**(cut/20)) < 1e-12 and abs(e.gain[ch] - b.current.gain[ch]) < 1e-12 for ch in range(8))
@@ -388,9 +390,11 @@ def headroom_check(lib, ui):
         assert all(b.current.gain[ch] == 10**(-8.5/20) for ch in range(2)) and bytes(b.current.c) == bytes(e.c)
     p.automatic = 2  # as imported
     assert bytes(p) == before
+    a = DSP(); lib.peq_reset(C.byref(a), 32000, 2, C.byref(p))  # no sweep at a track's start: the saved -8.5 dB
+    assert a.current.gain[0] == 10**(-8.5/20)
     ui.check_headroom.argtypes = [C.POINTER(Preset)]
     ui.check_headroom.restype = C.c_double
-    auto = ui.check_headroom(C.byref(p))  # 3EQ's: the loudest standard rate's
+    auto = ui.check_headroom(C.byref(p))  # Auto's: the loudest standard rate's
     assert -12.37 < auto < -12.34, auto  # strongest response is at 32 kHz, not the old 48 kHz estimate
     assert bytes(p) == before and ui.check_headroom(C.byref(p)) == auto
     p.preamp = auto
@@ -408,7 +412,7 @@ def headroom_check(lib, ui):
         p = parse(lib, source); actual = ui.check_headroom(C.byref(p))
         assert abs(actual-want) < .0001, (source, actual)
         if not want: assert math.copysign(1, actual) == 1
-    print('PEQ headroom: reported 26-band preset, unclipped float output, per-rate Auto and 3EQ across standard PCM rates passed.')
+    print('PEQ headroom: reported 26-band preset, unclipped float output, each rate\'s cut and one Auto across standard PCM rates passed.')
 
 # Host stand-ins for the stock services peq_platform.h maps on the device.
 SHIM_H = r"""
@@ -813,8 +817,8 @@ def editor_check(lib, tmp):
         p = Preset(); assert lib.peq_load_active(C.byref(p)); return p
     def click(text): assert ui.shim_click(text.encode(), 1), (text, ui.shim_title())
     title = lambda: ui.shim_title().decode()
-    def auto(p):  # the Preamp row's and picker's Auto: the 44.1 and 48 kHz cuts
-        return 'Auto (44.1: %.1f / 48: %.1f)' % (lib.peq_auto(C.byref(p), 44100), lib.peq_auto(C.byref(p), 48000))
+    def auto(p):  # the Preamp row's and picker's Auto: the cut for every standard rate
+        return 'Auto (%.1f dB)' % ui.check_headroom(C.byref(p))
     def advanced():  # the EQ page opens on Simple; its tab bar's right half is Advanced
         r = ui.shim_open(); assert ui.shim_tab_touch(300); return r
     named = lambda name: ui.shim_click(b'Presets ' + name.encode(), 2)  # the draft's preset, on its row
@@ -937,7 +941,7 @@ def editor_check(lib, tmp):
     ui.shim_close(); advanced(); click('1  '); click('Gain +6.0 dB'); click('+6.5 dB'); ui.shim_return(); click('Apply changes')
     assert read().preamp == -1, read().preamp  # a picked preamp sticks through band edits
     click('Preamp -1.0 dB'); assert title() == 'Preamp' and ui.shim_selection() == 27  # opens on -1.0
-    assert auto(read()) == 'Auto (44.1: -12.5 / 48: -12.5)'
+    assert auto(read()) == 'Auto (-12.5 dB)'
     click(auto(read())); click('Apply changes')
     assert abs(read().preamp + 12.5) < 0.05 and read().automatic == 1, read().preamp
     # Rows that open a screen or picker end in list_into; the switches and cyclers don't.
@@ -1009,7 +1013,7 @@ def editor_check(lib, tmp):
     before = active.read_bytes()
     click('Reset to defaults')
     assert title() == 'Reset; choose Apply to activate' and active.read_bytes() == before
-    assert ui.shim_click(b'Preamp Auto (44.1: 0.0 / 48: 0.0)', 2) and ui.shim_click(b'Balance Centre', 2)
+    assert ui.shim_click(b'Preamp Auto (0.0 dB)', 2) and ui.shim_click(b'Balance Centre', 2)
     assert not ui.shim_click(b'Presets ', 2)  # the draft is no longer a named preset
     click('Apply changes')
     r = read()
@@ -1025,23 +1029,23 @@ def editor_check(lib, tmp):
     r = read()
     assert (r.count, r.preamp, r.balance, r.bypass) == (10, 0, 0, 1)
     s = State(); assert lib.eq_load(C.byref(s)) and s.mode == EQ_OFF
-    # Auto is saved (automatic), so it survives a restart; the player works out each rate's cut, so the
-    # number saved with it (the 48 kHz cut, or another version's) is never applied again. A set preamp stays set.
-    p = preset(enabled=1, gain=6.0); want = lib.peq_auto(C.byref(p), 48000); assert want < -5
+    # Auto is saved (automatic), so it survives a restart, with its cut for every rate, which plays as saved; another
+    # version's number (its 48 kHz cut) is put right by peq_boot, not by opening the page. A set preamp stays set.
+    p = preset(enabled=1, gain=6.0); want = ui.check_headroom(C.byref(p)); assert want < -5
     shown = lambda a: ui.shim_click(f'Preamp {auto(p) if a else f"{want:.1f} dB"}'.encode(), 2)
     def reopen(preamp, automatic, v2=False):
         p.preamp, p.automatic, s.peq, s.mode = preamp, automatic, p, EQ_PEQ; assert lib.eq_save(C.byref(s))
         if v2: active.write_bytes(b'Q2PEQ03\0' + bytes(s)[:8] + bytes(s.peq)[:V2] + bytes(s.eq3)[:V2])  # 1.3.5's
         ui.shim_close(); advanced()
-    reopen(-1, 1)  # Auto saved with another number: Auto, plays as Auto, and opening writes nothing
+    reopen(-1, 1)  # Auto saved with another number: Auto in the editor, and opening writes nothing
     before = active.read_bytes()
     assert shown(True) and ui.shim_click(b'Nothing to apply', 2) and active.read_bytes() == before
     assert read().automatic == 1 and read().preamp == -1
     assert lib.peq_export_file(bytes(eqdir/'Auto.txt'), C.byref(p), 1) == 1  # presets carry it too
     reopen(0, 2); click('Presets'); click('Auto.txt'); assert shown(True)
-    click('Apply changes')  # Auto saves its 48 kHz cut
+    click('Apply changes')  # Auto saves its cut
     t = State(); assert lib.eq_load(C.byref(t)) and t.peq.automatic == 1 and t.peq.preamp == want
-    reopen(want, 2)  # set to exactly the 48 kHz cut: still set, through a band edit
+    reopen(want, 2)  # set to exactly the cut: still set, through a band edit
     assert shown(False) and not shown(True)
     click('1  '); click('Gain +6.0 dB'); click('+7.0 dB'); ui.shim_return(); click('Apply changes')
     assert read().preamp == want and read().automatic == 2 and lib.eq_load(C.byref(t)) and t.peq.automatic == 2
@@ -1059,13 +1063,13 @@ def editor_check(lib, tmp):
     click(f'Preamp {auto(p)}'); click('-3.0 dB'); click('Apply changes')
     ui.shim_close(); advanced(); assert ui.shim_click(b'Preamp -3.0 dB', 2) and not shown(True)
     (eqdir/'Imp.txt').unlink()
-    # The reported preset: the Preamp row and its picker label the 44.1 and 48 kHz cuts; an edit refreshes them.
+    # The reported preset: the Preamp row and its picker label the cut for every rate, 32 kHz's; an edit refreshes it.
     rep = parse(lib, REPORTED_PRESET); assert rep.automatic == 2  # an import's preamp is set
     rep.automatic = 1; assert lib.peq_export_file(bytes(eqdir/'Rep.txt'), C.byref(rep), 1) == 1
-    click('Presets'); click('Rep.txt'); assert ui.shim_click(b'Preamp Auto (44.1: -9.2 / 48: -8.8)', 2)
-    click('Preamp Auto'); assert ui.shim_selection() == 0 and ui.shim_click(b'Auto (44.1: -9.2 / 48: -8.8)', 2)
+    click('Presets'); click('Rep.txt'); assert ui.shim_click(b'Preamp Auto (-12.3 dB)', 2)
+    click('Preamp Auto'); assert ui.shim_selection() == 0 and ui.shim_click(b'Auto (-12.3 dB)', 2)
     ui.shim_return(); click('7  Peaking 10160 Hz L'); click('Band On'); ui.shim_return()
-    rep.bands[6].enabled = 0; assert auto(rep) != 'Auto (44.1: -9.2 / 48: -8.8)'
+    rep.bands[6].enabled = 0; assert auto(rep) != 'Auto (-12.3 dB)'
     assert ui.shim_click(f'Preamp {auto(rep)}'.encode(), 2)
     (eqdir/'Rep.txt').unlink()
     print('EQ Advanced tab: bypass, apply, the scrolling curve, auto preamp, channels, balance, frequency and Q, load, rename, failed saves, delete, reset and close passed.')
@@ -1115,10 +1119,10 @@ def editor_check(lib, tmp):
     assert px(b'Reset to defaults') == px(b'Balance') == px(b'Balance', 1) == 27
     assert (px(b'1  '), px(b'1  ', 1)) == (16, 20)  # the longest caption leaves room for the gain
     assert ui.shim_label(b'Balance', 0, 2) == ui.shim_label(b'1  ', 1, 2) == 28
-    # The long texts stay at the style's 20 px, Auto's value at 15 beside the wider caption.
+    # The long texts stay at the style's 20 px, Auto's one cut at the other values' size.
     assert px(b'Presets', 1) == 20
     click('Preamp'); assert title() == 'Preamp' and ui.shim_label(b'Auto (', 0, 1) == 20
-    click('Auto ('); assert title() == '' and px(b'Preamp', 1) == 15
+    click('Auto ('); assert title() == '' and px(b'Preamp', 1) == px(b'Balance', 1)
     # A picker opens centred on the pitch: its list 224 high, 8 rows.
     click('Balance'); assert (ui.shim_selection() * 28 - 98) == ui.shim_offset() > 0
     ui.shim_return(); ui.shim_close(); ui.shim_theme_rows(48); advanced()
@@ -2139,9 +2143,9 @@ int main(void) {
     memcpy(a, keep, sizeof(a));
     af_data old = {a, 256, 48000, 2, 0x1d, 4};
     assert(af.play(&af, &old) == &old && !memcmp(a, keep, sizeof(a)));
-    /* Auto (1, or never picked: 0) plays each rate's own cut, worked out as a track negotiates, the
-     * editor never opened, whatever number was saved with it; a picked preamp (2) plays as set at
-     * every rate. 50 kHz: not a standard rate, its own response all the same. */
+    /* Every preamp plays as saved at every rate, Auto (1, or never picked: 0) too: demo saves Auto as
+     * the cut for every standard rate (peq_ui.c headroom), so the player works out nothing as a track
+     * negotiates. 50 kHz: not a standard rate, the saved number all the same. */
     peq_preset hi;
     peq_default(&hi);
     hi.bypass = 0, hi.count = 2, hi.preamp = -1;
@@ -2154,7 +2158,7 @@ int main(void) {
             assert(peq_save(PEQ_ACTIVE, &hi, 1) == 1);
             in = (af_data){0, 0, rates[i], 2, 0x1d, 4};
             assert(negotiate(&af, &in) == 1 && s->preset.automatic == (modes[m] == 2 ? 2 : 1));
-            double want = modes[m] == 2 ? -1 : peq_auto(&hi, rates[i]);
+            double want = -1;
             assert(fabs(s->dsp.current.gain[0] - pow(10, want / 20)) < 1e-12 && s->dsp.current.gain[1] == s->dsp.current.gain[0]);
             /* Only the gain moves: the filters are the saved preamp's, and nothing is written back. */
             peq_engine e;
@@ -2163,14 +2167,14 @@ int main(void) {
             assert(!memcmp(e.only, s->dsp.current.only, sizeof(e.only)) && e.used == s->dsp.current.used);
             assert(peq_load(PEQ_ACTIVE, &saved) && !memcmp(&saved, &hi, sizeof(hi)));
         }
-    assert(peq_auto(&hi, 32000) < peq_auto(&hi, 96000) - 0.5); /* -12.0 against -11.4 dB */
-    /* An applied edit: the new cut at the playing rate, through the update ramp. */
+    assert(peq_auto(&hi, 32000) < peq_auto(&hi, 96000) - 0.5); /* -12.0 against -11.4 dB: once a jump between tracks */
+    /* An applied edit: the saved preamp, through the update ramp. */
     peq_reset(&ref, 50000, 2, &s->preset);
     same(&af, &ref, 50000, 2);
     hi.bands[1].gain = 9;
     ext.gain = gains, ext.channel = 0;
     assert(peq_save(PEQ_ACTIVE, &hi, 1) == 1 && af.control(&af, 0x40001d00, &ext) == 1 && s->dsp.waiting);
-    assert(fabs(s->dsp.pending.gain[0] - pow(10, peq_auto(&hi, 50000) / 20)) < 1e-12);
+    assert(fabs(s->dsp.pending.gain[0] - pow(10, -1 / 20.0)) < 1e-12);
     assert(peq_update(&ref, &s->preset));
     for (int i = 0; i < 4; ++i) same(&af, &ref, 50000, 2);
     in = (af_data){0, 0, 96000, 1, 0x1d, 4};

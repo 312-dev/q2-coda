@@ -398,8 +398,8 @@ int eq_save_to(const char *path, const eq_state *s) {
 int eq_save(const eq_state *s) { return eq_save_to(PEQ_ACTIVE, s); }
 
 /* What plays: the mode's preset, bypassed when Off, or with hold the 3EQ's preamp alone. Only PEQ
- * plays Auto (1: the player's per-rate cut), unless picked: never picked (0) is Auto, as the editor
- * takes it. 3EQ (0) and the hold keep their saved preamp. */
+ * marks Auto (1), unless picked: never picked (0) is Auto, as the editor takes it. Either way the
+ * saved preamp is what plays, Auto's being demo's cut for every rate (peq_ui.c headroom). */
 void eq_effective(const eq_state *s, peq_preset *out) {
     *out = s->mode == EQ_3 ? s->eq3 : s->peq;
     if (s->mode == EQ_PEQ ? !out->automatic : out->automatic == 1)
@@ -498,24 +498,16 @@ double peq_auto(const peq_preset *p, int rate) {
     return v > 1 ? -decibels(v) : 0; /* no boost: +0, not -0.0 on screen */
 }
 
-/* The player's engine: Auto (1) takes the cut for this rate's own response, from the coefficients
- * just designed, in place of the saved number (the editor's 48 kHz figure). */
-static int prepare(const peq_preset *p, int rate, peq_engine *e) {
-    if (!peq_compile(p, rate, e)) return 0;
-    if (p->automatic == 1) level(e, pow(peak(e, p, rate), -0.5), p->balance);
-    return 1;
-}
-
 void peq_reset(peq_dsp *d, int rate, int channels, const peq_preset *p) {
     memset(d, 0, sizeof(*d));
     d->rate = rate;
     d->channels = channels;
     d->ramp_length = rate / 50; /* 20 ms */
-    if (!prepare(p, rate, &d->current)) d->current.bypass = 1;
+    if (!peq_compile(p, rate, &d->current)) d->current.bypass = 1; /* the saved preamp, Auto's too */
 }
 
 int peq_update(peq_dsp *d, const peq_preset *p) {
-    if (!prepare(p, d->rate, &d->pending)) return 0;
+    if (!peq_compile(p, d->rate, &d->pending)) return 0;
     d->waiting = 1; /* Latest complete update wins; never interrupt an in-flight crossfade. */
     return 1;
 }

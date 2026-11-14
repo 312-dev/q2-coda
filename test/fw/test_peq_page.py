@@ -485,7 +485,7 @@ def test_advanced_s_rows_under_the_curve(fw):
     rh, x = fw.fn('page_h', C.c_int, C.c_int)(48), fw.fn('page_x', C.c_int)()
     # a +6 dB peak: Auto cuts 6 dB at either rate; the other nine of the ten default bands are off
     assert p.captions()[:9] == ['Nothing to apply', 'Reset to defaults', 'Enabled On', 'EQ per Output Off', 'Balance L 1.5 dB',
-                                'Preamp Auto (44.1: -6.0 / 48: -6.0)', 'Presets', '1  Peaking 1000 Hz +6.0 dB', '2  Peaking 63 Hz Off']
+                                'Preamp Auto (-6.0 dB)', 'Presets', '1  Peaking 1000 Hz +6.0 dB', '2  Peaking 63 Hz Off']
     assert len(p.rows()) == 7 + 10 and p.captions()[-1] == '10  Peaking 16000 Hz Off'
     canvas = Canvas(fw)
     paint(fw, p.ui.graph, canvas)
@@ -519,14 +519,49 @@ def test_nothing_to_apply_is_display_only_until_an_edit(fw):
     assert p.captions()[0] == 'Nothing to apply'
 
 
-def test_auto_s_two_cuts_are_drawn_smaller_to_fit(fw):
-    s = state(fw, EQ_PEQ, peq=peak(fw, 24))
-    s.peq.balance = 12
+def headroom(fw, p):
+    return fw.fn('peq_ui__headroom', C.c_double, C.c_void_p)(r(p))
+
+
+def test_auto_is_one_cut_for_every_rate_at_the_row_s_size(fw):
+    s = state(fw, EQ_PEQ, peq=peak(fw, 12, 15000))
     p = page(fw, s).advanced()
-    assert 'Balance R 12.0 dB' in p.captions()
+    cut = headroom(fw, s.peq)
+    assert f'Preamp Auto ({cut:.1f} dB)' in p.captions() and cut < fw.fn('peq_auto', C.c_double, C.c_void_p, C.c_int)(r(s.peq), 48000)
     preamp = [item for t, item in p.rows() if t.startswith('Preamp')][0]
     value = [c for c in p.children(preamp) if p.text.get(c, '').startswith('Auto')][0]
-    assert p.props[(value, 'style:normal:font_size')] < 20  # two double-digit cuts beside the caption
+    assert (value, 'style:normal:font_size') not in p.props
+
+
+def test_applying_auto_saves_the_cut_the_player_plays(fw):
+    p = page(fw).advanced()
+    p.click('1  ')
+    p.click('Gain')
+    p.click('+12.0 dB')
+    p.ret()
+    p.click('Apply changes')
+    saved = p.card.state().peq
+    assert saved.automatic == 1 and saved.preamp == headroom(fw, saved) < -11
+
+
+@pytest.mark.parametrize('automatic', (0, 1))
+def test_boot_turns_another_version_s_auto_into_the_cut_for_every_rate(fw, automatic):
+    s = state(fw, EQ_PEQ, peq=peak(fw, 12, 15000))
+    s.peq.automatic, s.peq.preamp = automatic, -1  # a 48 kHz figure, or 1.3.5's never-picked preamp
+    card = Card(fw, {ACTIVE: saved(s)})
+    fw.fn('peq_boot', None)()
+    assert card.state().peq.automatic == 1 and card.state().peq.preamp == headroom(fw, s.peq)
+    before = dict(card.files)
+    fw.fn('peq_boot', None)()
+    assert card.files == before  # once right, left alone
+
+
+def test_the_switch_puts_another_version_s_auto_right_before_it_plays(fw):
+    s = state(fw, EQ_OFF, peq=peak(fw, 12, 15000))
+    s.peq.automatic, s.peq.preamp = 1, -1
+    p = page(fw, s).advanced()
+    p.click('Enabled Off')
+    assert p.card.state().mode == EQ_PEQ and p.card.state().peq.preamp == headroom(fw, s.peq)
 
 
 def test_a_preset_s_name_and_a_picked_preamp_show_as_set(fw):

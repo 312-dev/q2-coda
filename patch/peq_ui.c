@@ -16,18 +16,32 @@ int peq_stock_eq(int mode) {
     return result;
 }
 
-/* Off's comparison preamp belongs to the open page, which cannot survive a restart. */
-void peq_boot(void) {
-    eq_state s;
-    if (eq_load(&s) && s.hold) {
-        s.hold = 0;
-        if (eq_save(&s) && peq_chained) peq_stock_eq(1);
-    }
+static double headroom(const peq_preset *p);
+/* PEQ's Auto (or never picked) preamp as the cut for every rate, which the player plays as saved
+ * (docs/internals.md#parametric-eq). 1 if that changed it. */
+static int auto_level(eq_state *s) {
+    if (s->peq.automatic == 2) return 0;
+    double cut = headroom(&s->peq);
+    int changed = s->peq.automatic != 1 || s->peq.preamp != cut;
+    s->peq.automatic = 1, s->peq.preamp = cut;
+    return changed;
 }
 
-/* Every EQ change goes through here: s saved, the stock switch's config key (boot instantiates
- * the filter only when it is set) written when on/off changes, and the player told. */
+/* Off's comparison preamp belongs to the open page, which cannot survive a restart; and an Auto saved
+ * by another version (its 48 kHz cut) becomes the cut for every rate before anything plays. */
+void peq_boot(void) {
+    eq_state s;
+    if (!eq_load(&s)) return;
+    int changed = auto_level(&s);
+    if (s.hold) s.hold = 0, changed = 1;
+    if (changed && eq_save(&s) && peq_chained) peq_stock_eq(1);
+}
+
+/* Every EQ change goes through here: s saved, PEQ's Auto as the cut for every rate, the stock switch's
+ * config key (boot instantiates the filter only when it is set) written when on/off changes, and the
+ * player told. */
 static int eq_commit(eq_state *s) {
+    auto_level(s);
     if (!eq_save(s)) return 0;
     int on = s->mode != EQ_OFF;
     if (on != g_equalizer_flag) write_int_config(on, "PLAYSET", "EQFLAG");
@@ -274,40 +288,28 @@ static void curve(void) {
     }
 }
 
-/* 3EQ's preamp is a saved number (its player keeps it), so it covers the standard PCM rates' Auto
- * instead of the current track's. shortcut: no bound for nonstandard rates. */
+/* Auto, PEQ's and 3EQ's: one saved cut that covers every standard PCM rate's peak, so tracks at
+ * different rates play at one level and the player works nothing out at a track's start. Kept until
+ * a band changes, as preamp, balance and the switch move none. ponytail: no bound for nonstandard
+ * rates (37.8 kHz and the like), whose peak can sit between two of these. */
 static double headroom(const peq_preset *p) {
     static const int rates[] = {8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100,
                                48000, 64000, 88200, 96000, 176400, 192000, 352800, 384000};
     static peq_preset cached;
     static int have_cache;
     static double gain;
-    if (!peq_valid(p)) return p->preamp;
-    if (have_cache && !memcmp(p, &cached, sizeof(*p))) return gain;
+    peq_preset key = *p;
+    key.preamp = key.balance = 0, key.bypass = key.automatic = key.spare = 0;
+    if (!peq_valid(&key)) return p->preamp;
+    if (have_cache && !memcmp(&key, &cached, sizeof(key))) return gain;
     gain = 0;
     for (unsigned i = 0; i < sizeof(rates) / sizeof(*rates); ++i) {
-        double g = peq_auto(p, rates[i]);
+        double g = peq_auto(&key, rates[i]);
         if (g < gain) gain = g;
     }
-    cached = *p;
+    cached = key;
     have_cache = 1;
     return gain;
-}
-
-/* PEQ's Auto at 44.1 and 48 kHz, for the Preamp row and its picker: the player's cut at those rates
- * (any other rate plays its own). Kept until a band changes, as preamp, balance and the switch move
- * none. */
-static const double *autos(void) {
-    static peq_preset key;
-    static double cut[2];
-    static int have;
-    peq_preset p = ui.draft;
-    p.preamp = p.balance = 0, p.bypass = p.automatic = 0;
-    if (!have || memcmp(&p, &key, sizeof(p))) {
-        cut[0] = peq_auto(&p, 44100), cut[1] = peq_auto(&p, 48000);
-        key = p, have = 1;
-    }
-    return cut;
 }
 
 static double *picked(void) {
@@ -354,14 +356,14 @@ static int focused(void *ctx, void *event) {
 /* Auto unless the preamp was picked (2): imports and presets or states from before 1.3.6 take it. */
 static int on_auto(void) { return ui.draft.automatic != 2; }
 
-/* A draft on Auto saves its 48 kHz cut, a fallback: the player works out its own for each rate. */
+/* A draft on Auto takes the cut for every rate, which plays as saved. */
 static void follow_auto(void) {
-    if (on_auto()) ui.draft.automatic = 1, ui.draft.preamp = autos()[1];
+    if (on_auto()) ui.draft.automatic = 1, ui.draft.preamp = headroom(&ui.draft);
 }
 
 /* The Preamp row's and the picker's Auto. */
 static void auto_text(char *s, unsigned n) {
-    snprintf(s, n, "Auto (44.1: %.1f / 48: %.1f)", autos()[0], autos()[1]);
+    snprintf(s, n, "Auto (%.1f dB)", headroom(&ui.draft));
 }
 
 /* A Preamp pick sticks to the preset on the card it was loaded from, written out again (peq_export);
@@ -625,7 +627,7 @@ static int action(void *ctx, void *event) {
         else if (ui.screen == PICK && id < picks[ui.pick - BALANCE].rows) {
             /* Preamp's Auto row: the band-edit cut, which later band edits then keep up to date. */
             *picked() = ui.pick == PREAMP && !id
-                            ? autos()[1]
+                            ? headroom(&ui.draft)
                             : picks[ui.pick - BALANCE].first + picks[ui.pick - BALANCE].step * id;
             if (ui.pick == PREAMP) ui.draft.automatic = id ? 2 : 1, remember_preamp();
             if (ui.pick == GAIN && !b->enabled) b->enabled = 1; /* picking a gain is using the band */
@@ -772,11 +774,7 @@ static int render(const void *unused) {
             auto_text(value, sizeof(value));
         else
             snprintf(value, sizeof(value), "%.1f dB", ui.draft.preamp);
-        void *shown = row_dim(view, n++, "Preamp", value, PREAMP, INTO);
-        /* At 20px two double-digit cuts overrun the iPod's 280px column beside the caption and
-         * chevron; at 16 the longest, -60.0 at both, leaves 6px (the stock font's widths), and a
-         * theme's row font, its caption wider, 4 at 15. */
-        if (on_auto()) widget_set_prop_int(shown, "style:normal:font_size", rh == 48 ? 16 : 15);
+        row_dim(view, n++, "Preamp", value, PREAMP, INTO);
         /* the draft's preset */
         row_dim(view, n++, "Presets", ui.name[0] ? ui.name : 0, MENU, INTO | LONG);
         /* 16px band captions leave room for the gain and chevron, even at 20000 Hz on one channel. */
@@ -1086,8 +1084,7 @@ static void page_load(void) {
     const char *output = eq_output_caption();
     eq_load(&s);
     ui.draft = s.peq;
-    /* Auto's saved number may be older (another version's); the player never plays it, so nothing
-     * to apply. */
+    /* Auto's number follows the bands, as peq_boot saved it, so this finds nothing to apply. */
     follow_auto();
     load(&s);
     ui.named.bypass = ui.draft.bypass;

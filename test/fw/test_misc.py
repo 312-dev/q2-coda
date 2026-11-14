@@ -1543,7 +1543,7 @@ def test_on_auto_unless_the_preamp_was_picked(fw, automatic, want):
     assert fw.fn('peq_ui__on_auto', C.c_int)() == want
 
 
-def test_a_draft_on_auto_saves_its_48k_cut(fw):
+def test_a_draft_on_auto_saves_its_cut_for_every_rate(fw):
     u = ui(fw)
     u.draft = peak_preset(6)
     fw.fn('peq_ui__follow_auto', None)()
@@ -1560,13 +1560,23 @@ def test_a_picked_preamp_is_left(fw):
 
 def test_auto_is_kept_until_a_band_changes(fw):
     u = ui(fw)
-    autos = fw.fn('peq_ui__autos', C.POINTER(C.c_double))
+    headroom = fw.fn('peq_ui__headroom', C.c_double, C.c_void_p)
     u.draft = peak_preset(6)
-    assert autos()[1] == pytest.approx(-6, abs=1e-6)
+    assert headroom(r(u.draft)) == pytest.approx(-6, abs=1e-6)
     u.draft.preamp, u.draft.balance, u.draft.bypass, u.draft.automatic = -3, 2, 1, 2  # none of these move it
-    assert autos()[1] == pytest.approx(-6, abs=1e-6)
+    assert headroom(r(u.draft)) == pytest.approx(-6, abs=1e-6)
     u.draft.bands[0].gain = 3
-    assert autos()[1] == pytest.approx(-3, abs=1e-6)
+    assert headroom(r(u.draft)) == pytest.approx(-3, abs=1e-6)
+
+
+def test_auto_is_the_loudest_cut_of_every_standard_rate(fw):
+    ui(fw)
+    headroom = fw.fn('peq_ui__headroom', C.c_double, C.c_void_p)
+    auto = fw.fn('peq_auto', C.c_double, C.c_void_p, C.c_int)
+    p = peak_preset(12, 15000)  # skipped below 30 kHz, and its response differs by rate above
+    rates = (8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000, 352800, 384000)
+    cuts = [auto(r(p), rate) for rate in rates]
+    assert min(cuts) < cuts[rates.index(48000)] and headroom(r(p)) == min(cuts)
 
 
 def test_3eq_s_headroom_covers_every_standard_rate(fw):
@@ -1815,7 +1825,9 @@ def test_boot_tells_the_filter_if_it_is_in(fw):
 
 
 def test_boot_with_no_hold_writes_nothing(fw):
-    data = saved_state(fw, 2, 0)
+    s = eq_state(fw, 2, 0)
+    s.peq.automatic = 1  # Auto, its cut (0 dB, flat) already right; never picked (0) is saved as Auto
+    data = b'Q2PEQ03\0' + bytes(s)
     card = Card(fw, {ACTIVE: data})
     fw.fn('peq_boot', None)()
     assert card.files[ACTIVE] == data and not fw.calls('fw_fwrite')
