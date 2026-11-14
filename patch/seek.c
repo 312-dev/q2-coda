@@ -143,6 +143,60 @@ static int seek_hold(const void *info) {
     return 0;
 }
 
+/* A scrub (navigation.c np_key; docs/internals.md#scrub-ipod) is heard as it goes. While the track
+ * plays, each move of the target sends the player there, at most every SCRUB_SEEK_MS, and the
+ * latest target once that wait is over, so a fast spin sends a few seeks, not one a tick. Paused,
+ * nothing is sent until the scrub ends, which seeks once and stays paused (seek_position). */
+#define SCRUB_SEEK_MS 200
+static struct {
+    unsigned at, timer;
+    int to, sent, live;
+} sc __attribute__((section(".scratch")));
+
+static void scrub_send(void) {
+    unsigned at, n;
+    void *r = queue_now(&at, &n);
+    sc.at = (unsigned)time_now_ms();
+    sc.sent = sc.to;
+    sc.live = 1;
+    if (r) mclSetSeek(sc.to + I(r, REC_CUE_START));
+}
+
+static int scrub_due(const void *info) {
+    (void)info;
+    sc.timer = 0;
+    if (sc.to != sc.sent && mclGetPlayStatus() == 2) scrub_send();
+    return 0;
+}
+
+void seek_scrub(int to) {
+    if (mclGetPlayStatus() != 2) return;
+    sc.to = to;
+    if (sc.timer) return; /* sent when it fires */
+    unsigned since = (unsigned)time_now_ms() - sc.at;
+    if (!sc.live || since >= SCRUB_SEEK_MS)
+        scrub_send();
+    else
+        sc.timer = timer_add(scrub_due, (void *)0, SCRUB_SEEK_MS - since);
+}
+
+/* The scrub's end, its target `to` committed when `seek`: 1 when the track plays and the player
+ * followed the scrub, sent there now unless the last seek already went there; 0 leaves the commit
+ * to the caller's seek_position: paused, or a target the wheel never moved live (a chapter row's).
+ */
+int seek_scrub_end(int to, int seek) {
+    stop_timer(&sc.timer);
+    int live = sc.live;
+    sc.live = 0;
+    if (!seek || !live || mclGetPlayStatus() != 2) return 0;
+    if (sc.sent != to) {
+        sc.to = to;
+        scrub_send();
+        sc.live = 0;
+    }
+    return 1;
+}
+
 /* window_manager_dispatch_input_event (ringnav_input), before stock: 1 drops the event. A press
  * passes, so stock's input status sees it and its release; its repeats are dropped, which would
  * otherwise step Now Playing's slider (0x53e000), and SEEK_HOLD_MS on the scan starts. A release

@@ -642,16 +642,16 @@ once that is another track's (Tidal's URL never is a queue path, so its art stay
 **Scrub.** A double press of the centre button starts scrubbing, as on an iPod classic (with the screen off it only
 wakes it, [Wake](internals.md#wake)), and the bar fill turns white while it lasts. Each wheel tick moves 5 seconds, times a ramp of one more step per 100 ms of spin
 (up to 40 seconds a tick; the lists' gentler ramp does not apply), within the
-track. Both times and the bar follow the target at once;
-the track jumps there once, when the scrub ends. A press of the centre button confirms it at once
+track. Both times and the bar follow the target at once, and so does the music: playing, the
+track jumps to the target as you turn, at most every 200 ms (`SCRUB_SEEK_MS`, `patch/seek.c`), so a
+fast spin is heard as a few jumps and lands on the target. A press of the centre button ends it at once
 and leaves the screen on (a double press does too), as do Return, a touch and
 3 seconds without a tick, and each gives the wheel back to the volume; Return then stays on the
 page. Ending without having moved the target does not seek. Paused, the track stays paused and
 plays from the target at Play. Outside a scrub a single press starts scrubbing,
 `DOUBLE_CLICK_MS` later as a row opens, and a double press turns the screen off, as on the lists
 (**Single Press Scrub**, below, on unless chosen off). With it off the two swap: a single press
-turns the screen off and a double press starts scrubbing. The presses work the same while the volume shows over the page; starting a scrub closes it. The jump is stock's key seek, which can pause the player briefly, but only once, when the
-scrub ends, instead of after each pause between ticks. Values are `SCRUB_*` in
+turns the screen off and a double press starts scrubbing. The presses work the same while the volume shows over the page; starting a scrub closes it. Paused, the scrub is silent and the track jumps once, when it ends, so it stays paused. No Apple guide says whether an iPod's music follows its scrubber; it follows here as the hold of Previous or Next does ([Previous and Next](#previous-and-next)). Values are `SCRUB_*` in
 `patch/offsets.inc`; see [internals.md](internals.md#scrub-ipod).
 
 The top row's text and icons, the bar's ends and the times keep clear of the corners
