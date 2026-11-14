@@ -694,8 +694,8 @@ page back. See [internals.md](internals.md#scrub-ipod) and [Word-timed lyrics](i
 ### Visualizer
 
 The slide_view gains a fourth page, after the art, lyrics and info pages, and the page dots a fourth
-dot. It shows the music as heard, EQ included, in one of four styles on black, tinted with the
-accent's light tone; a tap moves to the next, saved as `IPOD/VIS` in `config.ini`, and its name shows
+dot. It shows the music as heard, EQ included, in one of four styles (five under OLED) on black,
+tinted with the accent's light tone (Field has its own five colours); a tap moves to the next, saved as `IPOD/VIS` in `config.ini`, and its name shows
 at the bottom for a second and a half:
 
 | Style            | After                     | Drawing                                                                                                                                      |
@@ -704,8 +704,11 @@ at the bottom for a second and a half:
 | **Oscilloscope** | Rockbox Oscilloscope      | The left channel in the accent with a glow, the right a faint accent line; it starts on a rising zero crossing, so the wave stands still     |
 | **VU Meters**    | Rockbox VU Meter (analog) | Left and right needles over an arc from -20 to +3 VU, heavier and brighter past 0, with 300 ms ballistics and a peak LED                     |
 | **Halo**         | Apple's radial spectrum   | 64 mirrored bars around Now Playing's art in a circle, turning slowly, the bass pulsing the ring                                             |
+| **Field** (OLED) | iTunes' Magnetosphere     | 40 soft glowing points in each of five bands, a colour each, flowing round the centre on rings each band's level swells and ripples          |
 
-Everything is anti-aliased vector drawing (AWTK's vgcanvas) within the 375x186 page: 16-pixel side
+Field shows only under OLED, where it is the style the page opens on until a tap picks another; it
+is drawn from glow sprites (`field_sprites`), the others are anti-aliased vector drawing (AWTK's
+vgcanvas), all within the 375x186 page: 16-pixel side
 margins (`NP_MARGIN`), labels in the stock grey `#AAAAAA`. It animates at `VIS_FPS` only while the
 page shows with the screen on, and comes to rest when playback pauses; at rest the track's title
 and artist show at the bottom, in the style name's place. Tunables are `VIS_*` in
