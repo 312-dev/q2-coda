@@ -381,10 +381,12 @@ pattern.
 | Playlists                           | Two-line row with icon      |                                                                                                            |
 | Hold menu                           | Dialog                      |                                                                                                            |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
+| About                               | Key/value table             | Inert: no selection; values in Text Secondary                                                              |
+| Lock Screen settings                | List row, then pictures     | Three a row from the text column to the right column; the check is the one accent                          |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             | Its tabs, then rows: the switch, Presets, Reset                                                            |
-| Wi-Fi                               | Switch row, then a section  | "Networks" header after 12 px, "Searching..." on its line; signal, lock, check on the right                |
+| Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right                      |
 | Bluetooth                           | Two-line row                | Second line "Connected" with the Positive dot                                                              |
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |

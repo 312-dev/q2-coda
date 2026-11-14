@@ -53,10 +53,13 @@ def wifi_list(fw, st, geometry, stand_in, searching):
     return lst, rows
 
 
-def test_the_wifi_page_has_a_networks_section_and_no_scanning_row(fw, st, geometry, stand_in):
+def test_the_wifi_page_has_a_networks_section_and_search_again_for_scanning(fw, st, geometry, stand_in):
     lst, rows = wifi_list(fw, st, geometry, stand_in, searching=1)
     lst()
-    assert not rows['scan'].visible and rows['switch'].visible and rows['add'].visible
+    assert rows['scan'].visible and rows['switch'].visible and rows['add'].visible
+    # stock's Scanning row, whose tap scans: a plain row reading Search Again, its spinner hidden
+    label, icon = rows['scan'].children[0].children
+    assert label.text == 'Search Again' and not icon.visible
     head = rows['head']
     stock, section, busy = head.children
     # stock's centred header hidden; the section's label on the text column after the 12 px gap, the busy line's

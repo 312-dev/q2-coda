@@ -3039,7 +3039,7 @@ int ringnav_paint(void *w, void *canvas) {
     if (w && st.np_lrc && P(w, W_PARENT) == st.np_lrc) lyrics_paint(w, canvas);
     paint_caps(w, canvas);
     if (theme()->marquee_fade) marquee_fade(w, canvas);
-    slider_page_paint(w, canvas);
+    if (w && w == slider_page_win) slider_page_paint(w, canvas);
     if (w && w == st.np_win) np_modes(w, canvas);
     hold_paint(w, canvas, 1);
     coverflow_home_clip(w, canvas, 0);
@@ -8099,6 +8099,7 @@ int ipod_list_layout(void *layout, void *view) {
         if (widget_get_visible(item)) set_row(item);
     }
     if (wifi) wifi_rows_post(view);
+    if (settings && about_list(list)) about_rows(view);
     return ret;
 }
 

@@ -774,6 +774,7 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('msg_addplaylistsuccess', 'Added To Playlist', 'Added to Playlist'),
     ('msg_addfavsuccess', 'Added To Fav', 'Added to Favorites'), ('msg_favsuccess', 'Added To Fav', 'Added to Favorites'),
     ('msg_namenull', "The name can't be empty", "Name can't be empty"),
+    ('scan_now', 'Scan music now', 'Scan Music Now'), ('scan_spec', 'Scan specified folders', 'Scan Specified Folders'),
     # Screen Off Time's and Standby's choices: a number, a space, a unit (docs/oled-design.md Type)
     *((f'{page}_{n}{u}', f'{n}{u}', f'{n} {u}') for page, choices in (
         ('lighttime', ((15, 's'), (30, 's'), (1, 'min'), (2, 'min'), (5, 'min'), (30, 'min'))),
@@ -1260,15 +1261,18 @@ def faces_header(ranges):
 
 def relabel(data):
     """A strings/*.bin value replaced: after a u16 0 and a u16 pair count, a u32 offset to each key and
-    value, in file order; the offsets past each change move with it."""
+    value, in file order; the offsets past each change move with it. A key stock lists more than once
+    (scan_now, scan_spec: each pair twice) has every pair replaced, each holding the old value."""
     for key, old, new in LABELS:
-        at = data.find(b'\0' + key + b'\0' + old + b'\0')
-        check(at > 0 and data.count(b'\0' + key + b'\0') == 1, f'Unexpected {key.decode()} label')
-        at += len(key) + 2
-        n = 2 * struct.unpack_from('<H', data, 2)[0]
-        offsets = [o + len(new) - len(old) if o > at else o for o in struct.unpack_from(f'<{n}I', data, 4)]
-        data = bytearray(data[:at] + new + data[at + len(old):])
-        struct.pack_into(f'<{n}I', data, 4, *offsets)
+        pair = b'\0' + key + b'\0' + old + b'\0'  # back to back, two such pairs share a NUL
+        pairs = sum(data.startswith(pair, i) for i in range(len(data)) if data[i] == 0)
+        check(pairs > 0 and data.count(b'\0' + key + b'\0') == pairs, f'Unexpected {key.decode()} label')
+        for _ in range(pairs):
+            at = data.find(b'\0' + key + b'\0' + old + b'\0') + len(key) + 2
+            n = 2 * struct.unpack_from('<H', data, 2)[0]
+            offsets = [o + len(new) - len(old) if o > at else o for o in struct.unpack_from(f'<{n}I', data, 4)]
+            data = bytearray(data[:at] + new + data[at + len(old):])
+            struct.pack_into(f'<{n}I', data, 4, *offsets)
     return bytes(data)
 
 # demo's .pdr section (offset, size): MIPS procedure descriptors past every LOAD segment, which nothing
@@ -1868,7 +1872,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
          '-fno-stack-protector','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
          '-Oz','-Wall','-Wextra','-Werror','-Wno-unused-parameter']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c']
 
 def compile_payload(out):  # pragma: no mutate block
     """Compile and link the payload."""
