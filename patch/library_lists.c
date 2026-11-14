@@ -617,7 +617,8 @@ static void ls_show(void) {
     if (n) qsort(v, n, sizeof *v, by_length);
     for (unsigned i = 0; i < n; i++) _deque_push_back(list, deque_at(songs, v[i].key));
     st.rt_list = list;
-    void *view = page_list(st.rt_page, st.rt_page, 0, "Long Songs", n ? (int)n : 1, 64);
+    void *view =
+        page_list_or(st.rt_page, st.rt_page, "Long Songs", "No songs over 10 minutes", (int)n, 64);
     char name[512], detail[300], t[16];
     for (unsigned i = 0; i < n; i++) {
         void *r = deque_at(list, i);
@@ -627,7 +628,6 @@ static void ls_show(void) {
                     artist && *artist ? artist : "", t);
         page_row_detail(view, (int)i, track_name(name, sizeof name, r), detail, rt_play);
     }
-    if (!n) page_row_detail(view, 0, "No songs over 10 minutes", 0, 0);
     free(v);
     deque_destroy(songs);
     ls.songs = 0;

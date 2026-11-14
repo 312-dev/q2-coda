@@ -592,6 +592,7 @@ static void spot_np(void) {
         label(ui.msg, CF_EDGE, 100, 375 - 2 * CF_EDGE, 30, "s_scrlabel_white20c", 20, 0xffffffffu);
     ui.sub =
         label(ui.msg, CF_EDGE, 134, 375 - 2 * CF_EDGE, 24, "s_scrlabel_white20c", 16, SPOT_GREY);
+    feedback_note(ui.note, ui.sub, 0); /* OLED: its empty and offline note */
     ui.timer = timer_add(tick, 0, 250);
     spot_refresh();
 }

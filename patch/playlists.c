@@ -767,7 +767,14 @@ static void pl_rows(void *win) {
     if (nav && widget_count_children(nav)) widget_set_text_utf8(widget_get_child(nav, 0), words);
     bar_title_sync(win);
     void *none = widget_lookup(win, PL_NONE, 0);
-    if (!none && !n) {
+    void *wait = feedback_oled() ? widget_lookup(win, "image_wait", 1) : (void *)0;
+    if (wait) widget_resize(wait, 0, 0); /* OLED: no stock spinner (oled-design.md Empty) */
+    if (feedback_oled()) { /* OLED's note under the rows shown (feedback_empty), or none */
+        int shown = 0;
+        for (int i = 0; i < count; ++i) shown += widget_get_visible(widget_get_child(view, i));
+        feedback_empty(win, geom_val(V_BAR) + shown * geom(G_PITCH), n ? 0 : "No playlists",
+                       add ? 0 : "Hold Play/Pause on a song to add it");
+    } else if (!none && !n) {
         none = text(win, 0, 124, 375, 32);
         widget_set_name(none, PL_NONE);
         widget_set_text_utf8(none, "No Playlists");

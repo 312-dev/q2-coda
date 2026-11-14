@@ -814,6 +814,7 @@ static int sh_state(int i) {
     return ST_INSTALL;
 }
 
+int feedback_oled(void); /* feedback.c */
 static void sh_text(int r) {
     static const char *const stages[] = { "Checking…", "Downloading", "Unpacking…", "Installing…",
                                           "Removing…" };
@@ -824,8 +825,13 @@ static void sh_text(int r) {
     const char *t = s;
     if (i == ROW_CHECK && sh.job == JOB_CHECK)
         t = "Checking…";
-    else if (i == ROW_CHECK) /* with no list yet, the press loads it */
-        t = !shelf_n ? "Connect to Wi-Fi to load the list" : theme()->sep[0].n ? " " : "";
+    else if (i == ROW_CHECK) { /* with no list yet, the press loads it; OLED says so under the row */
+        int noted = feedback_oled() &&
+                    feedback_empty(sh.page, feedback_below(sh.row[r]),
+                                   shelf_n ? (const char *)0 : "No apps listed",
+                                   "Connect to Wi-Fi, then Check for Updates");
+        t = !shelf_n && !noted ? "Connect to Wi-Fi to load the list" : theme()->sep[0].n ? " " : "";
+    }
     else if (busy && sh.cancel)
         t = "Cancelling…";
     else if (busy && sh.stage == 1 && sh.percent)

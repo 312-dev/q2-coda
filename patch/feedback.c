@@ -1,6 +1,7 @@
 /* OLED's feedback forms (docs/oled-design.md#dialogs-and-toasts, a theme whose
  * dialog.confirm.painter is "oled"): stock's toast as a pill over the page, and stock's confirm
- * pop-up as a dialog page whose status row asks the question over Cancel and the action's verb. */
+ * pop-up as a dialog page whose status row asks the question over Cancel and the action's verb;
+ * an empty or offline page's note. */
 #include "navigation.h"
 
 int feedback_oled(void) { return theme()->painter[PAINT_CONFIRM] == CONFIRM_OLED; }
@@ -203,4 +204,79 @@ void feedback_confirm_bar(void *w, void *canvas) {
     if (!confirm_on(w) || !bar || !P(canvas, CANVAS_LCD)) return;
     widget_paint(bar, canvas);
     st.paint_w = w;
+}
+
+/* An empty or offline page's note (docs/oled-design.md#empty-and-offline): one line of 16 px Text
+ * Secondary centred in the free area, from free (a screen y: the end of any rows above it) to the
+ * list's end at y 282, and an optional hint in 15 px Text Tertiary 24 px lower. Its two labels are
+ * parent's, made once and written again on each call; message 0 hides them. 0 when the theme has
+ * no such note (the caller keeps its own form). */
+#define NOTE_END 282
+#define NOTE_H 24
+#define NOTE_HINT_DY 24
+static int screen_y(void *w) {
+    int y = 0;
+    for (; w && w != window_manager(); w = P(w, W_PARENT)) y += I(w, W_Y);
+    return y;
+}
+int feedback_below(void *w) { return w ? screen_y(w) + I(w, W_H) : 0; }
+/* Two labels of one parent placed and inked as the note, their text left as it is: line centred
+ * between free and NOTE_END, hint (if any) 24 px lower. */
+int feedback_note(void *line, void *hint, int free) {
+    if (!feedback_oled() || !line) return 0;
+    int py = screen_y(P(line, W_PARENT)), light = ipod_light();
+    if (free < py) free = py;
+    int mid = (free + NOTE_END) / 2 - NOTE_H / 2 - py;
+    void *both[2] = { line, hint };
+    for (int k = 0; k < 2 && both[k]; ++k) {
+        widget_move_resize(both[k], 0, mid + k * NOTE_HINT_DY, 375, NOTE_H);
+        int px = k ? 18 : 19;
+        const char *face = theme_face(widget_get_text(both[k]), -1, &px);
+        widget_set_prop_str(both[k], "style:normal:font_name", face ? face : "default");
+        widget_set_prop_int(both[k], "style:normal:font_size", px);
+        widget_set_prop_str(both[k], "style:normal:text_align_h", "center");
+        text_ink(both[k],
+                 RGBA(k       ? (light ? 0x6e6e6e : 0x858585)
+                      : light ? 0x5c5c5c
+                              : 0xababab),
+                 INK_LABEL);
+    }
+    return 1;
+}
+int feedback_empty(void *parent, int free, const char *message, const char *hint) {
+    if (!feedback_oled() || !parent) return 0;
+    void *line = widget_lookup(parent, "_empty", 0), *sub = widget_lookup(parent, "_empty_hint", 0);
+    if (!line) {
+        line = text(parent, 0, 0, 375, NOTE_H);
+        widget_set_name(line, "_empty");
+        sub = text(parent, 0, 0, 375, NOTE_H);
+        widget_set_name(sub, "_empty_hint");
+    }
+    if (!message) hint = (const char *)0;
+    widget_set_visible(line, message && *message, 0);
+    widget_set_visible(sub, hint && *hint, 0);
+    widget_set_text_utf8(line, message ? message : "");
+    widget_set_text_utf8(sub, hint ? hint : "");
+    return feedback_note(line, sub, free);
+}
+
+/* Songs' page (allmusic_page) over an empty list, under a shuffle_row theme: the Shuffle row
+ * would stand over nothing, so it hides and the page says what is missing, by the list's class
+ * (g_class_type): My Fav (0xf00a), Recent (0xf007), Most Played's stock list (0xf008), Recently
+ * Added (0xf009). Runs on the bar's paint; writes only when the list's emptiness changes. */
+void feedback_songs(void *top, void *row) {
+    if (!feedback_oled() || !theme()->shuffle_row || !row || window_of(row) != top) return;
+    void *list = P(p_deque_showlist, 0);
+    int empty = list && !deque_size(list), was = widget_get_prop_int(top, "_empty_songs", 0);
+    if (empty == was) return;
+    widget_set_prop_int(top, "_empty_songs", empty);
+    widget_set_visible(row, !empty, 0);
+    int cls = I(g_class_type, 0);
+    const char *message = cls == 0xf00a   ? "No favorites"
+                          : cls == 0xf007 ? "No recent songs"
+                          : cls == 0xf008 ? "No plays yet"
+                          : cls == 0xf009 ? "No songs added yet"
+                                          : "No songs";
+    feedback_empty(top, CONFIRM_Y, empty ? message : (const char *)0,
+                   cls == 0xf00a ? "Hold Play/Pause on a song to add it" : (const char *)0);
 }

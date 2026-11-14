@@ -6089,13 +6089,15 @@ void bar_title_sync(void *win) {
 }
 
 /* A page_title's caption was an empty page's message, and the bar holds captions: the message stays
- * the first line, and the bar reads name, the page's, from the hidden label. */
+ * the first line (OLED's is a note centred under the status row, feedback_empty), and the bar reads
+ * name, the page's, from the hidden label. */
 void page_empty(void *body, const char *name) {
     if (theme()->page_title_h) return;
     char message[64];
     void *caption = widget_get_child(body, 0);
     if (widget_get_text_utf8(caption, message, sizeof message)) return;
-    widget_set_name(page_title(body, message, 0), "");
+    if (!feedback_empty(body, 0, message, (const char *)0)) /* OLED's note, else a first line */
+        widget_set_name(page_title(body, message, 0), "");
     widget_set_text_utf8(caption, name);
     widget_set_visible(caption, 0, 0);
     bar_title_sync(window_manager_get_top_window(window_manager()));
@@ -6229,6 +6231,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         bar_title_sync(top);
         bar_title(bar, top);
         if (st.action_view) action_row(st.action_view);
+        feedback_songs(top, st.action_view); /* OLED: an empty list's note, no Shuffle row */
         if (np_sync(top) && np_beside()) rearm(&st.np_remain_timer, remain_due, 0); /* mid-paint */
         if (w == top) vol_paint(top, canvas);
         /* Boot may paint Home before the screen is usable, so nothing chose or drew its first

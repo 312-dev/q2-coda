@@ -302,6 +302,17 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   Add to Queue ("Added to Queue") and Add to and Remove from Favourites ("Added to Favorites",
   "Removed from Favorites").
 
+### Empty and offline
+
+- A list with nothing in it keeps its action rows (New Playlist..., Check for Updates) as
+  normal rows with the selection; the message is one line of 16 px Text Secondary centred in the
+  free area below them, down to y 282, with an optional hint in 15 px Text Tertiary 24 px lower.
+  No fake rows, and no Shuffle row over nothing: Favorites, Recent and the other song lists hide
+  it and say what is missing ("No favorites", hint "Hold Play/Pause on a song to add it").
+- Offline and missing things use the same form (Spotify's "Spotify isn't on the card", the App
+  Store's "No apps listed").
+- Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done.
+
 ### Icons
 
 - One set: [Phosphor Icons](https://phosphoricons.com) (MIT), `@phosphor-icons/core` 2.1.1. The
@@ -393,7 +404,7 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   (`playing.modes.icons`), and the marquee fades (`list.marquee.fade`).
 - Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_still` (the art from
   x 196 and y 52 to the edges, still and centre-cropped, its top rows painted by the bar).
-- The toast and the confirm as a dialog page (`dialog.confirm.painter="oled"`,
+- The toast, the confirm as a dialog page and the empty note (`dialog.confirm.painter="oled"`,
   `patch/feedback.c`).
 
 Still to build:
