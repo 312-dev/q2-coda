@@ -867,6 +867,12 @@ in the label (260 pixels wide, to where the chevron ends) and no chevron, since 
 changes it in place. Theme opens a picker of the themes instead; choosing Classic, or leaving it,
 restarts the Q2 ([Theme](#theme)).
 The build also appends **Boot to: Rockbox / Q2 Pod** to Power when Rockbox is present; see [Boot](boot.md#rockbox).
+Power ends with **Restart** and **Shut Down** (`patch/power_rows.c`), 12 px below the rows above them (an empty `label`, which
+the wheel passes) and with no chevron, in every theme. Each asks first in stock's `confirminfo_dialog`, in the theme's form (under OLED
+"Restart?" or "Shut down?" as the title, then Cancel, selected, and the verb); Cancel or Return leaves the page as it was.
+Restart reboots as a theme change does (`ringnav_reboot`: the queue saved, then stock's `device_reboot`), with no message first,
+as there. Shut Down asks stock's own `msg_poweroff` and opens stock's `poweroff_page`, as the power key's Shut Down? and Auto
+power-off do; its `into_poweroff` saves the queue.
 The page is `CTX_FIXED`, so the wheel walks onto them like the stock rows.
 
 A change is saved at once with the stock `write_int_config(value, "IPOD", key)` (`0x4fe67c`):
