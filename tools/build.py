@@ -376,6 +376,11 @@ BT_DISCOVERABLE = (b'\nDiscoverableTimeout = 0\n', b'\nDiscoverableTimeout = 180
 SHADOW = 'etc/shadow'
 INITTAB = 'etc/inittab'
 SERIAL_GETTY = (b'# Put a getty on the serial port\nconsole::respawn:/sbin/getty -L ttyS3 115200 vt100 # GENERIC_SERIAL\n\n', b'')
+def mozilla_ca():
+    """assets/mozilla-ca.pem, refused unless it is the pinned curl release (STOCK_CA_SHA)."""
+    data = (ROOT/'assets/mozilla-ca.pem').read_bytes()
+    check(sha(data) == STOCK_CA_SHA, 'Unexpected assets/mozilla-ca.pem')
+    return data
 def lock_root(shadow):
     """shadow with root's password field '*', which no password matches."""
     lines = shadow.split(b'\n')
@@ -661,6 +666,26 @@ DARK_POLLS = ((0x5bbc3c, 'ringnav_dark_usleep'), (0x4f8300, 'ringnav_dark_cover_
 # system(); that jalr snprintf becomes jal ringnav_lyric_save (onlinematch.c), which writes the lyrics beside
 # the song instead. The word before it, addiu $a2,$a2,0x67f0 (the format at 0x7867f0), is pinned.
 LYRIC_SAVE_CALL, LYRIC_SAVE_FMT = 0x536488, (0x536484, 0x24c667f0)
+# Stock's HTTPS helpers turn certificate checks off (curl_easy_setopt(c, SSL_VERIFYPEER or SSL_VERIFYHOST, 0)) and set
+# no CA file, so Tidal's sign-in and API, covers by URL and Baidu's calls could be intercepted. Each of those calls
+# (a jalr through curl_easy_setopt's GOT slot, $5 0x40 or 0x51 just before) becomes jal ringnav_stock_tls
+# (patch/stock_tls.c), which verifies against STOCK_CA. See docs/internals.md#stock-https.
+STOCK_TLS_CALLS = (
+    (0x481ad8, 0x40), (0x481af4, 0x51),  # baidu_curl_download_file
+    (0x4845a8, 0x40), (0x4845c0, 0x51),  # 0x484514: Tidal's favourites added and removed
+    (0x48485c, 0x40), (0x484874, 0x51),  # 0x4847c8: a Tidal playlist's tracks added and removed
+    (0x484d00, 0x40), (0x484d18, 0x51),  # httpRequest: Tidal's sign-in, browsing and favourites
+    (0x506254, 0x40), (0x50626c, 0x51))  # curl_http_request: covers by URL, Baidu, the update check
+SETOPT_GOT = 0x8f99f620  # lw $25, -0x9e0($gp): curl_easy_setopt
+def stock_tls_site(data, address, option):
+    """1 if the word at address is a jalr $25 to curl_easy_setopt with $5 = option, set in the four words before."""
+    off = fileoff(data, address)
+    before = struct.unpack_from('<4I', data, off - 16)
+    return struct.unpack_from('<I', data, off)[0] == 0x0320f809 and SETOPT_GOT in before and 0x24050000 | option in before
+# Mozilla's CA bundle as curl publishes it, whole, for stock's HTTPS (above), whose hosts no list of ours could
+# cover; /etc/scrobble-ca.pem stays the few roots Q2 Pod's own code needs.
+STOCK_CA = 'etc/ssl/certs/ca-certificates.crt'
+STOCK_CA_SHA = '796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe'  # https://curl.se/ca/cacert-2026-10-20.pem
 # The same function's other command, no lyrics chosen: rm -rf "/mnt/mmc/.downpic/<name>" for the same system().
 # Its jalr snprintf becomes jal ringnav_lyric_drop (onlinematch.c), which unlinks the copy itself. The call's delay
 # slot, addiu $a2,$a2,0x6814 (the format at 0x786814), is pinned.
@@ -1718,7 +1743,7 @@ def compile_payload(out):  # pragma: no mutate block
     run('ld.lld','-m','elf32ltsmip','--gc-sections','-T',ROOT/'patch/link.ld','-e','ringnav',
         *[f'--undefined={name}' for _, name, _ in HOOKS.values()], f'--undefined={GRADIENT_LEAF[2]}', '--undefined=ringnav_lrc_open',
         f'--undefined={WM_PAINT_LEAF[2]}', f'--undefined={QUEUE_LEAF[2]}', '--undefined=ringnav_audio_extension', '--undefined=start_mute', '--undefined=start_sleep', '--undefined=ringnav_genre_copy', '--undefined=ringnav_lyric_save', '--undefined=ringnav_lyric_drop', '--undefined=ringnav_cover_copy','--undefined=ringnav_folder_rm','--undefined=ringnav_bootmode', '--undefined=lockscreen_access','--undefined=ringnav_ts_read',
-        '--undefined=ringnav_baidu_poll', '--undefined=ringnav_tidal_poll', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
+        '--undefined=ringnav_baidu_poll', '--undefined=ringnav_stock_tls', '--undefined=ringnav_tidal_poll', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
         '--undefined=coverflow_player_cover', '--undefined=coverflow_grid_cover', '--undefined=coverflow_album_cover', '--undefined=coverflow_folder_cover', '--undefined=headset_bt_init',
         '--undefined=headset_status_register', '--undefined=headset_bt_autolink',
         *nav,out/'trampoline.o',*extra,'-o',out/'patch.elf')
@@ -2106,6 +2131,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(struct.unpack_from('<I', patched, fileoff(patched, LYRIC_SAVE_FMT[0]))[0] == LYRIC_SAVE_FMT[1],
           'Unexpected Download Cover & Lyrics save')
     patch_word(patched, LYRIC_SAVE_CALL, 0x0320f809, jal(ps['ringnav_lyric_save']), 'lyrics saved beside the song')
+    for address, option in STOCK_TLS_CALLS:
+        check(stock_tls_site(patched, address, option), f'{address:#x}: not a TLS check setopt')
+        patch_word(patched, address, 0x0320f809, jal(ps['ringnav_stock_tls']), 'stock HTTPS verifies its peer')
     check(struct.unpack_from('<I', patched, fileoff(patched, LYRIC_DROP_FMT[0]))[0] == LYRIC_DROP_FMT[1],
           'Unexpected Download Cover & Lyrics removal')
     patch_word(patched, LYRIC_DROP_CALL, 0x0320f809, jal(ps['ringnav_lyric_drop']), "no lyrics removes .downpic's copy")
@@ -2303,6 +2331,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                'etc/init.d/S12usbcharge': ('etc/init.d/S20urandom', (ROOT/'patch/usb_charge.sh').read_bytes()),
                                HELPER: (HELPER_LIKE, compile_helper(out, cat, 'video', 'q2video', HELPER_LIBS)),
                                SCROBBLE_CA: ('etc/hosts', (ROOT/'assets/scrobble-ca.pem').read_bytes()),
+                               STOCK_CA: ('etc/hosts', mozilla_ca()),
                                BOOT: (HELPER_LIKE, compile_helper(out, cat, 'boot', 'q2boot', HELPER_LIBS[:1])),
                                **({LOGO_LIGHT: (xx+'list_tidal.png', light)} if light else {}),  # the swapped logo.jpg has no stock inode left
                                **{path: (FONT, data) for path, (data, _) in fonts.items()},

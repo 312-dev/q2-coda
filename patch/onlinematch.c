@@ -266,8 +266,8 @@ static unsigned got(const char *data, unsigned size, unsigned n, void *ctx) {
     return add;
 }
 
-/* A libcurl handle for url, verified with the bundled CA file (stock's curl_http_request turns
- * checks off), timed to keep stock's worker thread from hanging. */
+/* A libcurl handle for url, verified with the bundled CA file, timed to keep stock's worker thread
+ * from hanging. */
 static void *easy(const char *url) {
     void *c = curl_easy_init();
     if (!c) return 0;

@@ -1,11 +1,19 @@
 # How to find each stock code address our files name again, at stock V1.36's addresses. docs/rebasing.md
 binary	address	size	function	where in it; what uses it
 demo	0x4805b8	0x4	baidu_pthread_playurl	the only call to usleep; tools/build.py STREAM_POLL_CALLS
+demo	0x481ad8	0x4	baidu_curl_download_file	1st of 15 calls to curl_easy_setopt, after "ab+"; tools/build.py STOCK_TLS_CALLS
+demo	0x481af4	0x4	baidu_curl_download_file	2nd of 15 calls to curl_easy_setopt, after "ab+"; tools/build.py STOCK_TLS_CALLS
 demo	0x483f54	0x4	get_tidal_trackurl	`blez $2, +50 words`, before the only call to curl_stop_httpget; patch/tidal.c app_track
 demo	0x483f5c	0x4	get_tidal_trackurl	`lw $16, GOT[a page]`, before the only call to curl_stop_httpget; patch/tidal.c app_track
 demo	0x483fdc	0x4	get_tidal_trackurl	`lw $5, 0x4($17)`, the delay slot of the only call to strcpy; patch/offsets.inc REC_TIDAL_ID
 demo	0x483ff8	0x4	get_tidal_trackurl	the load of $25 for the only call to tidal_playurl; patch/tidal.c app_track
 demo	0x484018	0x4	get_tidal_trackurl	`sb $2, 0x0($16), forming tidalfurlstart`; patch/tidal.c ringnav_tidal_track
+demo	0x4845a8	0x4	tidal_favourite_request	1st of 8 calls to curl_easy_setopt, after "/tmp/testurl"; tools/build.py STOCK_TLS_CALLS
+demo	0x4845c0	0x4	tidal_favourite_request	2nd of 8 calls to curl_easy_setopt, after "/tmp/testurl"; tools/build.py STOCK_TLS_CALLS
+demo	0x48485c	0x4	tidal_playlist_track_request	1st of 8 calls to curl_easy_setopt, after "/tmp/header"; tools/build.py STOCK_TLS_CALLS
+demo	0x484874	0x4	tidal_playlist_track_request	2nd of 8 calls to curl_easy_setopt, after "/tmp/header"; tools/build.py STOCK_TLS_CALLS
+demo	0x484d00	0x4	httpRequest	1st of 12 calls to curl_easy_setopt; tools/build.py STOCK_TLS_CALLS
+demo	0x484d18	0x4	httpRequest	2nd of 12 calls to curl_easy_setopt; tools/build.py STOCK_TLS_CALLS
 demo	0x4871a4	0x4	tidal_stream_url_thread	the only call to usleep, after "Authorization:%s %s"; tools/build.py STREAM_POLL_CALLS
 demo	0x48721c	0x4	tidal_stream_url_thread	`move $18, $2`, the delay slot of 2nd of 11 calls to strlen, after "Authorization:%s %s"; patch/tidal.c TIDAL_TAG, tools/build.py build
 demo	0x487b28	0x4	tidal_stream_url_thread	the load of $25 for the only call to mcl_tidalStartPlayer, after "urls"; patch/tidal.c TIDAL_TAG, patch/tidal.c app_lyrics, tools/build.py build
@@ -252,6 +260,8 @@ demo	0x504ba4	0x4	config_init	`movz $2, $zero, $3` (16th of 26 such), before 37t
 demo	0x504d24	0x4	config_init	4th of 5 calls to access, after "SCREENSAVERPATH"; tools/build.py build
 demo	0x504eec	0x4	config_init	`sltiu $3, $2, 0x1b`, before the only call to select_timezone, after "TIMEZONE"; tools/build.py patch_timezones
 demo	0x505724	0x4	get_screensaver_image	the only call to access, after "screensaver_default"; tools/build.py build
+demo	0x506254	0x4	curl_http_request	1st of 11 calls to curl_easy_setopt; tools/build.py STOCK_TLS_CALLS
+demo	0x50626c	0x4	curl_http_request	2nd of 11 calls to curl_easy_setopt; tools/build.py STOCK_TLS_CALLS
 demo	0x518768	0x4	importPlayList	the only call to toolsGetDirectoryM3u8, after "stSongInfo"; tools/build.py M3U_DIR_CALL
 demo	0x51cd04	0x4	check_mem_thd	`addiu $gp, $gp, -0x2220`; tools/build.py DROP_CACHES
 demo	0x51d248	0x4	platform_init	the only call to btctl_create_daemon_thread, after "int"; tools/build.py BT_INIT

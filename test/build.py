@@ -316,6 +316,12 @@ def validate_assets(directory):
     assert demo[PDR[0]:PDR[0]+PDR[1]] == bytes(PDR[1]) and any(stock[PDR[0]:PDR[0]+PDR[1]])
     # The RTC is written in UTC: the one hwclock -w literal gains -u in its own padding.
     assert demo.index(RTC_WRITE[1]) == stock.index(RTC_WRITE[0])
+    # Stock's HTTPS verifies (docs/internals.md#stock-https): each setopt that turned a check off calls ringnav_stock_tls.
+    from build import STOCK_TLS_CALLS, stock_tls_site
+    stock_tls = jal(symbols(directory/'patch.elf')['ringnav_stock_tls'])
+    for address, option in STOCK_TLS_CALLS:
+        assert stock_tls_site(stock, address, option)
+        assert struct.unpack_from('<I', demo, fileoff(stock, address))[0] == stock_tls, hex(address)
     # Network time asks the worldwide NTP pool, not China's: one server name, the same length, in place.
     from build import NTP_POOL
     assert demo.index(NTP_POOL[1]) == stock.index(NTP_POOL[0]) == fileoff(stock, 0x7836bc) - 1 and b'cn.pool.ntp.org' not in demo
@@ -496,6 +502,9 @@ def validate_assets(directory):
     check_bluetooth_drop(directory)
     from build import SCROBBLE_CA
     assert read('rootfs.squashfs', SCROBBLE_CA) == (ROOT/'assets/scrobble-ca.pem').read_bytes()
+    # The whole Mozilla bundle, for stock's HTTPS.
+    from build import STOCK_CA, STOCK_CA_SHA
+    assert sha(read('rootfs.squashfs', STOCK_CA)) == STOCK_CA_SHA
     # each subset face ships, cut to what its <NAME>_RANGES lists, with its licence files
     from build import CLASSIC_LIGHT_NOTICE, FACES, FONT_DIR, FONT_NOTICES, face_font, subset_font
     for face in FACES.values():

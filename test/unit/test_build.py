@@ -1246,3 +1246,37 @@ def test_network_time_asks_the_worldwide_pool_in_place():
     servers = b'time.apple.com\0\0cn.pool.ntp.org\0time.windows.com\0'
     assert len(build.NTP_POOL[0]) == len(build.NTP_POOL[1])
     assert servers.replace(*build.NTP_POOL) == b'time.apple.com\0\x000.pool.ntp.org\0\0time.windows.com\0'
+
+
+# Stock's HTTPS (docs/internals.md#stock-https): the setopt sites patched and the bundle pinned.
+def setopt_site(*words):
+    """A 0x400000-based image holding words from 0x400100, and its address of the last one."""
+    data = image(0x1000)
+    for k, w in enumerate(words):
+        struct.pack_into('<I', data, 0x1100 + 4 * k, w)
+    return data, 0x400100 + 4 * (len(words) - 1)
+
+
+@pytest.mark.parametrize('option', [0x40, 0x51])
+def test_stock_tls_site_is_a_setopt_of_that_option(option):
+    data, at = setopt_site(build.SETOPT_GOT, 0x00003025, 0x24050000 | option, 0x8fbc0010, 0x0320f809)
+    assert build.stock_tls_site(data, at, option)
+    assert not build.stock_tls_site(data, at, 0x51 if option == 0x40 else 0x40)  # another option
+    data, at = setopt_site(0x8f99f600, 0x00003025, 0x24050000 | option, 0x8fbc0010, 0x0320f809)
+    assert not build.stock_tls_site(data, at, option)  # another function's GOT slot
+    data, at = setopt_site(build.SETOPT_GOT, 0x00003025, 0x24050000 | option, 0x8fbc0010, 0x0c000000)
+    assert not build.stock_tls_site(data, at, option)  # not a jalr $25
+
+
+def test_the_stock_tls_sites_are_ten_checks_turned_off():
+    assert len(set(build.STOCK_TLS_CALLS)) == 10 and {o for _, o in build.STOCK_TLS_CALLS} == {0x40, 0x51}
+
+
+def test_the_mozilla_bundle_is_the_pinned_one(monkeypatch, tmp_path):
+    assert hashlib.sha256(build.mozilla_ca()).hexdigest() == build.STOCK_CA_SHA
+    (tmp_path/'assets').mkdir()
+    (tmp_path/'assets/mozilla-ca.pem').write_bytes(build.mozilla_ca() + b'\n')
+    monkeypatch.setattr(build, 'ROOT', tmp_path)
+    with pytest.raises(ValueError, match='Unexpected assets/mozilla-ca.pem'):
+        build.mozilla_ca()
+
