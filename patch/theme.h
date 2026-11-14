@@ -16,8 +16,9 @@ enum {
     PAINTER_N
 }; /* theme_t.painter[] */
 enum { VOL_STOCK, VOL_CLASSIC_LIGHT }; /* painter[PAINT_VOLUME]: the volume */
-/* painter[PAINT_CONFIRM]: the confirm control, hold menu, toast and small dialogs */
-enum { CONFIRM_STOCK, CONFIRM_CLASSIC_LIGHT };
+/* painter[PAINT_CONFIRM]: the confirm control, hold menu, toast and small dialogs; OLED's draws
+ * only its toast and confirm (feedback.c) */
+enum { CONFIRM_STOCK, CONFIRM_CLASSIC_LIGHT, CONFIRM_OLED };
 /* painter[PAINT_PAGES]: the theme's own pages (classic_pages) */
 enum { PAGES_STOCK, PAGES_CLASSIC_LIGHT };
 /* painter[PAINT_SCRUB]: SCRUB_ROWS, a gloss bar's rows (np_rows) for the volume panel and a card

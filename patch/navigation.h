@@ -415,6 +415,16 @@ void slider_switch(void *w, void *canvas, void *sw);
 const char *style_key(char *key, const char *state, const char *name);
 unsigned wide_len(const unsigned *s);
 void *window_of(void *w);
+/* feedback.c: OLED's feedback forms: toast and confirm
+ * (docs/oled-design.md#dialogs-and-toasts) */
+int feedback_oled(void);
+int feedback_toast(void *top);
+void *feedback_under(void *toast);
+void *feedback_top(void);
+void feedback_toast_paint(void *w, void *canvas);
+int feedback_confirm_dress(void *w);
+void feedback_confirm_bar(void *w, void *canvas);
+void feedback_confirm_switch(void *w, void *canvas);
 void cf_veil(void *win, int on);              /* win unseen (1) or seen again under Coverflow */
 int ringnav_playlist_coverflow(void);         /* Display's Playlist View is Cover Flow */
 int music_records(void *list, int discovery); /* list's songs less spoken (0) or hidden (1) ones */

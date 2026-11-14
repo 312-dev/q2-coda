@@ -934,7 +934,7 @@ def images(t):
         for w in CELL_WIDTHS:
             out |= {f'{prefix}_cell_{w}': cell(w, False), f'{prefix}_cell_lit_{w}': cell(w, True)}
         out |= {f'{prefix}_tile': tile(), f'{prefix}_clock_chrome': clock_chrome(), f'{prefix}_clock_shadow': clock_shadow(), f'{prefix}_hint_shadow': hint_shadow()}
-    if t['painter[PAINT_CONFIRM]']:
+    if t['painter[PAINT_CONFIRM]'] == list(CHOICES['dialog.confirm.painter']).index('classic-light'):
         out[f'{prefix}_confirm_shadow'] = png(*TRAY_SHADOW_BOX[2:], tray_shadow())
     if t['station_stops']:  # Internet Radio's Now Playing art, as large as the slanted art (navigation.c stream_ipod)
         px = inc('NP_IPOD_ART')

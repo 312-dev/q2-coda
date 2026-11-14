@@ -288,8 +288,19 @@ Shown for a moment after a mode change (Shuffle, Repeat).
 
 - A dialog is a list: its question as the page title, its answers as rows, the selection bar
   on the default answer. No boxes, no shadows.
+- A confirm (stock's `confirminfo_dialog`: Shut Down, the three Resets, Delete Song, Delete
+  Playlist and the rest) is that dialog: the question in the status row in sentence case, naming
+  the object where it can ("Delete playlist “a”?"), then **Cancel**, selected when it opens, and
+  the verb that says what the other does ("Shut Down", "Reset", "Delete"), never "OK". Delete
+  Song's "Also delete source file" is a third row with a switch on the right column.
 - A toast is one line of 16 px Text Primary on a `#1C1C1E` pill, 12 px corners, 32 px tall,
-  centred on y 252, above the bottom glass curve. It is the only raised surface in the theme.
+  as wide as its text and 16 px each side, centred on y 252 (y 236 to 268), above the bottom
+  glass curve. It is the only raised surface in the theme. The page stays in sight round it,
+  with its status row and its selection; it lasts 1.5 s (stock's own toasts their own time).
+  Words in sentence case ("Added to Queue", "Name can't be empty").
+- Every in-place action says what it did in a toast: the hold menu's Play Next ("Playing Next"),
+  Add to Queue ("Added to Queue") and Add to and Remove from Favourites ("Added to Favorites",
+  "Removed from Favorites").
 
 ### Icons
 
@@ -382,8 +393,10 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   (`playing.modes.icons`), and the marquee fades (`list.marquee.fade`).
 - Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_still` (the art from
   x 196 and y 52 to the edges, still and centre-cropped, its top rows painted by the bar).
+- The toast and the confirm as a dialog page (`dialog.confirm.painter="oled"`,
+  `patch/feedback.c`).
 
 Still to build:
 
-- A confirmation screen for Shuffle and Repeat, and the toast and dialog forms.
+- A confirmation screen for Shuffle and Repeat.
 - Switch rows, the pickers' check, the EQ slider and the storage bar drawn as above.

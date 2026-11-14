@@ -1,0 +1,206 @@
+/* OLED's feedback forms (docs/oled-design.md#dialogs-and-toasts, a theme whose
+ * dialog.confirm.painter is "oled"): stock's toast as a pill over the page, and stock's confirm
+ * pop-up as a dialog page whose status row asks the question over Cancel and the action's verb. */
+#include "navigation.h"
+
+int feedback_oled(void) { return theme()->painter[PAINT_CONFIRM] == CONFIRM_OLED; }
+
+static int top_named(void *w, const char *name) {
+    return w && P(w, W_PARENT) == window_manager() &&
+           !tk_strcmp(widget_get_prop_str(w, "name", ""), name);
+}
+
+/* The toast: one line of 16 px Text Primary (19 in AWTK's sizes) on a #1C1C1E pill 32 px tall with
+ * 12 px corners, 16 px of pill each side of the text, centred on y 252 so the page and its status
+ * row stay in sight round it. */
+#define PILL_Y 236
+#define PILL_H 32
+#define PILL_PX 19
+#define PILL_PAD 16
+#define PILL_R 12
+#define PILL_RGB 0x1c1c1e
+#define PILL_MAX 327 /* the text column to the right column */
+
+int feedback_toast(void *top) { return feedback_oled() && top_named(top, "msginfo_dialog"); }
+/* The window under OLED's toast: the window manager's last window before it. */
+void *feedback_under(void *toast) {
+    void *wm = window_manager(), *under = (void *)0;
+    for (unsigned i = 0, n = widget_count_children(wm); i < n; ++i) {
+        void *w = widget_get_child(wm, i);
+        if (w == toast) break;
+        if (!tk_strcmp(widget_get_type(w), "window")) under = w;
+    }
+    return under;
+}
+/* The top window, or the page under OLED's toast, which stays the page in sight. */
+void *feedback_top(void) {
+    void *top = window_manager_get_top_window(window_manager());
+    return feedback_toast(top) ? feedback_under(top) : top;
+}
+
+/* Under the dialog's children: its background cleared once, its first line placed on the pill and
+ * every other line hidden (stock's kind 1 is one word-wrapping label; V1.32's kinds a line each).
+ */
+void feedback_toast_paint(void *w, void *canvas) {
+    if (!feedback_toast(w) || !P(canvas, CANVAS_LCD)) return;
+    if (!widget_get_prop_int(w, "_pill", 0)) {
+        widget_set_prop_int(w, "_pill", 1);
+        widget_set_prop_int(w, "style:normal:bg_color", 0);
+        widget_set_prop_int(w, "style:normal:border_color", 0);
+    }
+    void *line = (void *)0;
+    for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) {
+        void *c = widget_get_child(w, i);
+        if (tk_strcmp(widget_get_type(c), "label") &&
+            tk_strcmp(widget_get_type(c), "hscroll_label"))
+            continue;
+        if (line || !widget_get_text(c) || !*widget_get_text(c))
+            widget_set_visible(c, 0, 0);
+        else
+            line = c;
+    }
+    if (!line) return;
+    const unsigned *s = widget_get_text(line);
+    int px = PILL_PX, n = (int)wide_len(s);
+    const char *face = theme_face(s, n, &px);
+    canvas_set_font(canvas, face, px);
+    int pw = (int)(canvas_measure_text(canvas, s, n) + 0.5f) + 2 * PILL_PAD;
+    if (pw > PILL_MAX) pw = PILL_MAX;
+    rect_t pill = { (375 - pw) / 2, PILL_Y, pw, PILL_H };
+    if (I(line, W_Y) != PILL_Y || I(line, W_W) != pw) {
+        widget_move_resize(line, pill.x, pill.y, pill.w, pill.h);
+        widget_set_prop_int(line, "line_wrap", 0);
+        widget_set_prop_str(line, "style:normal:font_name", face ? face : "default");
+        widget_set_prop_int(line, "style:normal:font_size", px);
+        widget_set_prop_str(line, "style:normal:text_align_h", "center");
+        widget_set_prop_str(line, "style:normal:text_align_v", "middle");
+        text_ink(line, 0xffffffffu, INK_LABEL);
+    }
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+    fill_box(canvas, &pill, RGBA(flip_if(ipod_light(), PILL_RGB)), PILL_R);
+    stock_canvas_set_fill_color(canvas, fill);
+}
+
+/* A click handler on the check, so the wheel's rows (navigation.c clickable) count it: the check
+ * turns itself on a click, Centre's as a tap's. */
+static int feedback_check_click(void *check, void *event) { return 0; }
+
+/* The confirm pop-up as a dialog (docs/oled-design.md#dialogs-and-toasts): stock's prompt becomes
+ * the status row's title, in sentence case and asking the question, and its two cells are the
+ * list's first rows, Cancel then the verb that says what the other does ("Shut Down", "Delete",
+ * "Reset"), never OK. Prompts not listed keep their words, and their verb is the prompt's first
+ * word when it is one of verbs[]; else OK. */
+static const struct {
+    const char *prompt, *title, *verb;
+} asks[] = {
+    { "Shut Down?", "Shut down?", "Shut Down" },
+    { "Reset Settings Only", "Reset settings only?", "Reset" },
+    { "Reset Database", "Reset the database?", "Reset" },
+    { "Full Factory Reset", "Full factory reset?", "Reset" },
+    { "Delete Song?", "Delete this song?", "Delete" },
+    { "Delete File?", "Delete this file?", "Delete" },
+    { "Scan music?", "Scan music?", "Scan" },
+};
+static const char *const verbs[] = {
+    "Delete", "Import", "Export", "Quit", "Disconnect", "Reconnect"
+};
+#define CONFIRM_ROW 32
+#define CONFIRM_Y 58 /* the list's top (oled-design.md Spacing) */
+
+static int confirm_on(void *w) { return feedback_oled() && top_named(w, "confirminfo_dialog"); }
+
+/* The dialog's first paint, before its background: its prompt into the bar and hidden, the cells
+ * moved onto the rows (stock binds them by name), the second one's text the verb. Once: the first
+ * cell's height says it is done. */
+int feedback_confirm_dress(void *w) {
+    if (!confirm_on(w)) return 0;
+    void *cell[2] = { widget_lookup(w, "img_cancel", 0), widget_lookup(w, "img_enter", 0) };
+    if (!cell[0] || !cell[1] || I(cell[0], W_H) == CONFIRM_ROW) return 1;
+    char prompt[128] = "", word[16];
+    for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) {
+        void *c = widget_get_child(w, i);
+        if (!tk_strcmp(widget_get_type(c), "button") ||
+            !tk_strcmp(widget_get_prop_str(c, "name", ""), "msg_delcheckbutton"))
+            continue;
+        if (!*prompt) widget_get_text_utf8(c, prompt, sizeof prompt);
+        widget_set_visible(c, 0, 0);
+    }
+    const char *title = prompt, *verb = st.confirm_verb ? st.confirm_verb : "OK";
+    for (unsigned k = 0; k < sizeof asks / sizeof *asks; ++k)
+        if (!tk_strcmp(prompt, asks[k].prompt)) title = asks[k].title, verb = asks[k].verb;
+    unsigned len = 0;
+    while (prompt[len] && prompt[len] != ' ' && len < sizeof word - 1)
+        word[len] = prompt[len], ++len;
+    word[len] = 0;
+    for (unsigned k = 0; !st.confirm_verb && k < sizeof verbs / sizeof *verbs; ++k)
+        if (!tk_strcmp(word, verbs[k])) verb = verbs[k];
+    widget_set_prop_int(w, "style:normal:bg_color", (int)RGBA(scheme()->paper));
+    widget_set_prop_int(w, "style:normal:border_color", 0);
+    for (int k = 0; k < 2; ++k) {
+        widget_move_resize(cell[k], 0, CONFIRM_Y + k * CONFIRM_ROW, 375, CONFIRM_ROW);
+        widget_set_text_utf8(cell[k], k ? verb : "Cancel");
+        widget_set_prop_str(cell[k], "style:normal:text_align_h", "left");
+        widget_set_prop_int(cell[k], "style:normal:margin_left", geom_val(V_TEXT_X));
+        theme_font(cell[k], ROLE_TITLE, FONT_ROW);
+    }
+    /* Delete Song's "Also delete source file": the third row, its words a label of ours at the text
+     * column (stock's check_button centres its own with its icon) that lets taps through to it, and
+     * a click handler that makes it a stop for the wheel (feedback_check_click) */
+    void *check = widget_lookup(w, "msg_delcheckbutton", 0);
+    if (check) {
+        int y = CONFIRM_Y + 2 * CONFIRM_ROW;
+        char words[64];
+        widget_get_text_utf8(check, words, sizeof words);
+        widget_set_text_utf8(check, "");
+        widget_move_resize(check, 0, y, 375, CONFIRM_ROW);
+        widget_on(check, EVT_CLICK, feedback_check_click, check);
+        void *label = text(w, geom_val(V_TEXT_X) - 2, y, 280, CONFIRM_ROW);
+        widget_set_name(label, "_check_words");
+        widget_set_text_utf8(label, words);
+        widget_set_prop_str(label, "style:normal:text_align_h", "left");
+        theme_font(label, ROLE_TITLE, FONT_ROW);
+        widget_set_sensitive(label, 0);
+    }
+    if (st.bar_title) {
+        widget_set_text_utf8(st.bar_title, title);
+        theme_font(st.bar_title, ROLE_BAR, FONT_ROW);
+        widget_invalidate_force(st.bar_title, (void *)0);
+    }
+    return 1;
+}
+
+/* Delete Song's third row, a switch on the right column (docs/oled-design.md Switch row): 34x20, a
+ * 16 px white knob 2 px in; off the bar the Track grey or the accent, on the bar a white track with
+ * the accent's knob when on, a white outline round a white knob when off. Over the selection. */
+#define SWITCH_W 34
+#define SWITCH_H 20
+#define KNOB 16
+void feedback_confirm_switch(void *w, void *canvas) {
+    void *check = confirm_on(w) ? widget_lookup(w, "msg_delcheckbutton", 0) : (void *)0;
+    if (!check || I(check, W_H) != CONFIRM_ROW || !P(canvas, CANVAS_LCD)) return;
+    int on = widget_get_prop_int(check, "value", 0), lit = st.sel_w == w && st.sel_row == 2;
+    unsigned accent = RGBA(scheme()->tones[0]), white = RGBA(0xffffff),
+             fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+    rect_t track = { 375 - geom_val(V_RIGHT_X) - SWITCH_W,
+                     I(check, W_Y) + (CONFIRM_ROW - SWITCH_H) / 2, SWITCH_W, SWITCH_H },
+           knob = { track.x + (on ? SWITCH_W - 2 - KNOB : 2), track.y + 2, KNOB, KNOB };
+    if (lit && !on)
+        round_ring(canvas, &track, SWITCH_H / 2, white);
+    else
+        fill_box(canvas, &track,
+                 lit  ? white
+                 : on ? accent
+                      : RGBA(flip_if(ipod_light(), 0x333333)),
+                 SWITCH_H / 2);
+    fill_box(canvas, &knob, lit && on ? accent : white, KNOB / 2);
+    stock_canvas_set_fill_color(canvas, fill);
+}
+
+/* Over the dialog's background, under its rows: the status row, which the full-screen dialog
+ * covers (over Quick Settings nothing else draws it). */
+void feedback_confirm_bar(void *w, void *canvas) {
+    void *bar = *(void *const *)system_bar;
+    if (!confirm_on(w) || !bar || !P(canvas, CANVAS_LCD)) return;
+    widget_paint(bar, canvas);
+    st.paint_w = w;
+}

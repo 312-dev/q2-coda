@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
+import art
 import ipod
 import theme
 from ipod import Geometry, O, SET0
@@ -1558,6 +1559,10 @@ def test_oled_states_its_grid_type_and_colour(tmp_path):
     assert all((s.split_row, s.split_art, s.split_art_up, s.split_still) == (187, 187, 0, 0) for s in map(theme.geometry, ts[:3]))
     assert all(t['np_modes'] == t['marquee_fade'] == t['shuffle_row'] == t['np_art_radius'] == 0 == theme.geometry(t).np_art for t in ts[:3])
     assert all(t['reopen_top'] == 1 for t in ts)  # Minimal's, every theme's
+    # its toast and confirm (patch/feedback.c); Classic's dialog art is Classic's alone
+    painters = [list(theme.CHOICES['dialog.confirm.painter'])[t['painter[PAINT_CONFIRM]']] for t in ts]
+    assert painters == ['stock', 'classic-light', 'stock', 'oled']
+    assert 'oled_confirm_shadow' not in art.images(oled)
     inc = boot_inc(tmp_path, ts)
     assert '#define OWN_OLED_ACCENT' in inc and '        .name = "OLED",' in inc and 'static const scheme_t oled_schemes[] = {' in inc
     assert re.findall(r'\.geom = (\d+)', inc) == ['0', '1', '0', '2'] and '.art = "oled_",' in inc

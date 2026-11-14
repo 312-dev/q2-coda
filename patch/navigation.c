@@ -2110,7 +2110,9 @@ unsigned ringnav_hscroll_lull(void *w, int (*lulled)(const void *), unsigned ms)
  */
 #define BAR_ROWS geom_val(V_BAR)
 enum { FORM_NONE, FORM_PAGE, FORM_TRAY };
-static int dialogs_painted(void) { return theme()->painter[PAINT_CONFIRM] != CONFIRM_STOCK; }
+static int dialogs_painted(void) {
+    return theme()->painter[PAINT_CONFIRM] == CONFIRM_CLASSIC_LIGHT;
+}
 /* The confirm's form: the tray for the prompt confirm_over asked for, the page for any other. The
  * first confirm painted after the call takes the flag, so a prompt stock opens over it (a held
  * power key) stays a question. */
@@ -2368,6 +2370,10 @@ static void hold_paint(void *w, void *canvas, int over) {
 #define TOAST_LINE 24
 #define TOAST_PX 22
 static void toast_paint(void *w, void *canvas) {
+    if (feedback_oled()) {
+        feedback_toast_paint(w, canvas); /* OLED's pill */
+        return;
+    }
     if (!w || P(w, W_PARENT) != window_manager() || !dialogs_painted()) return;
     const char *name = widget_get_prop_str(w, "name", "");
     int qr = !tk_strcmp(name, "showsn_dialog");
@@ -2416,11 +2422,12 @@ static void paint_selection(void *w, void *canvas) {
     void *top = window_manager_get_top_window(window_manager());
     int i, shown = !st.touch_mode;
     void *own = window_of(w);
-    if (own && own != top && slides(top)) {
-        /* The page under a sliding one, painted into the animator's snapshot: draw the row it
-         * holds. Loading, recall and settling read the top page's state, so none of it runs.
-         * A pending untouch is a Return by button, which shows the row of the page behind. Home's
-         * carousel shows its selected card, as below. */
+    if (own && own != top && (slides(top) || feedback_toast(top))) {
+        /* The page under a sliding one, painted into the animator's snapshot, or under OLED's
+         * toast, which leaves the page in sight: draw the row it holds. Loading, recall and
+         * settling read the top page's state, so none of it runs. A pending untouch is a Return by
+         * button, which shows the row of the page behind. Home's carousel shows its selected card,
+         * as below. */
         if (!usable() || !load_rows(&g_menu, w) || g_menu.kind == 3) return;
         i = index_of(&g_menu, widget_get_prop_int(w, SEL, -1));
         top = own;
@@ -5809,6 +5816,7 @@ static void quick_scrub(void *w, void *canvas) {
  * ponytail: by position, any other non-button child above CONFIRM_TOP. */
 static void confirm_prompt(void *w, void *canvas) {
     if (tk_strcmp(widget_get_prop_str(w, "name", ""), "confirminfo_dialog")) return;
+    if (feedback_confirm_dress(w)) return; /* OLED's dialog page */
     int form = confirm_form(w);
     if (form) {
         confirm_dress(w, canvas, form);
@@ -6034,7 +6042,8 @@ static int title_due(const void *info) {
  * characters (stock draws a character its face lacks as nothing). */
 void bar_title_sync(void *win) {
     /* a page under the top window that writes its caption would flip the bar with each paint */
-    if (!st.bar_title || !win || win != window_manager_get_top_window(window_manager())) return;
+    if (feedback_toast(win)) win = feedback_under(win); /* OLED's toast leaves the page in sight */
+    if (!st.bar_title || !win || win != feedback_top()) return;
     static const unsigned none = 0;
     char s[256], now[256]; /* stock writes nothing unless all of it fits */
     /* Home names the list it shows; a status row names none of Home's own, and shows the clock */
@@ -6131,11 +6140,13 @@ int ringnav_paint_bg(void *w, void *canvas) {
         confirm_track(w, canvas, form);
         confirm_check(w, canvas);
     }
+    feedback_confirm_bar(w, canvas);
     hold_paint(w, canvas, 0);
     if (w && w == st.search_tabs) search_tabs_paint(w, canvas);
     paint_selection(w, canvas);
     paint_songs(w, canvas);
     if (form) confirm_labels(w, canvas);
+    feedback_confirm_switch(w, canvas);
     if (w && w == st.rate_box)
         paint_panel(w, canvas, &(rect_t){ PANEL_PAD, PANEL_PAD - PANEL_DROP, 304, 110 },
                     "classic_light_rate_shadow", 1);
@@ -8610,13 +8621,13 @@ static int qm_apply(void *add, int next) {
     return n != 0;
 }
 
-/* A 2 s modal dialog: its loop runs every ringnav_sleep poll again, so a poll clears or latches
- * what it toasts first (logo_poll). */
+/* A 2 s modal dialog (OLED's 1.5 s, oled-design.md's toast): its loop runs every ringnav_sleep poll
+ * again, so a poll clears or latches what it toasts first (logo_poll). */
 void toast(const char *text) {
     struct {
         int kind, ms;
         char text[0x400];
-    } info = { 1, 2000, { 0 } };
+    } info = { 1, feedback_oled() ? 1500 : 2000, { 0 } };
     for (unsigned i = 0; text[i] && i < sizeof info.text - 1; ++i) info.text[i] = text[i];
     ++st.toasts; /* its loop runs the UI's polls, which may toast again */
     navigator_to_with_context("dialog/msginfo_dialog", &info);
@@ -9276,11 +9287,11 @@ static int qm_run(const void *unused) {
         qm_select();
         batch_add_file(cls, 0xf00a, qm_list(), P(p_vector_select_record, 0), 0);
         ratings_copy_due();
-        fav_told(r, 1);
+        if (fav_told(r, 1) && feedback_oled()) toast("Added to Favorites");
     } else if (r && a == QA_UNFAV) {
         deleteMusicFromFav(r);
         ratings_copy_due();
-        fav_told(r, 0);
+        if (fav_told(r, 0) && feedback_oled()) toast("Removed from Favorites");
         if (cls == 0xf00a)
             g_delete_flag = 1;          /* My Fav reloads, as Now Playing's heart (0x53cafc) */
     } else if (r && a == QA_PLAYLIST) { /* the playlist page's add mode adds the selected row */
@@ -9323,6 +9334,8 @@ static int qm_run(const void *unused) {
         void *add = r ? qm_collect(r) : (void *)0;
         if (!add || !(a == QA_SHUFFLE ? shuffle_play(add) : qm_apply(add, a == QA_NEXT)))
             toast("Queue unchanged");
+        else if (a != QA_SHUFFLE && feedback_oled()) /* OLED says what an in-place action did */
+            toast(a == QA_NEXT ? "Playing Next" : "Added to Queue");
         if (add) deque_destroy(add);
     }
     return 0;

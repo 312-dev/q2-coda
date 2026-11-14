@@ -101,4 +101,8 @@
     <element name="title" height="0"/>
   </view>
   <view name="pages"><element name="own" art_final="1"/></view>
+  <!-- Toasts and confirms (oled-design.md Dialogs and toasts, patch/feedback.c): a toast is a #1c1c1e pill centred on
+       y 252 over the page, which keeps its status row and selection; a confirm is a dialog page, its question the
+       status row's title, its rows Cancel (selected) and the action's verb -->
+  <view name="dialog"><element name="confirm" painter="oled"/></view>
 </theme>

@@ -1637,6 +1637,30 @@ def test_play_next_puts_the_song_after_the_playing_one(hold, recs, ui):
     assert [field(r, REC_PATH) for r in hold.deques[hold.queue]] == [field(r, REC_PATH) for r in want]
 
 
+@pytest.mark.parametrize('row, said', [('Add to Queue', 'Added to Queue'), ('Play Next', 'Playing Next')])
+def test_oled_says_what_an_in_place_action_did(hold, recs, ui, st, row, said):
+    """OLED's feedback (docs/oled-design.md#dialogs-and-toasts): every in-place action gets a toast."""
+    use_set(st, 'oled')
+    songs = [song(recs, i) for i in range(3)]
+    hold.now_playing(songs, at=0, held=True)
+    hold.hold()
+    hold.menu()
+    hold.pick(row)
+    assert ui.toasts == [said] and len(hold.deques[hold.queue]) == 4
+
+
+@pytest.mark.parametrize('row, said', [('Add to Favourites', 'Added to Favorites'),
+                                       ('Remove from Favourites', 'Removed from Favorites')])
+def test_oled_says_a_favourite_was_kept(hold, recs, ui, fw, st, row, said):
+    use_set(st, 'oled')
+    hold.now_playing([song(recs, i) for i in range(3)])
+    fw.mock('checkFavExist', lambda *_: row.startswith('Remove'))
+    hold.hold()
+    hold.menu()
+    hold.pick(row)
+    assert ui.toasts == [said]
+
+
 def test_a_queue_changed_under_the_menu_is_left_alone(hold, recs, ui):
     songs = [song(recs, i) for i in range(3)]
     hold.now_playing(songs)

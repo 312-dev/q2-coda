@@ -446,6 +446,9 @@ int ringnav_playlist_delete(void *win, void *event) {
         int kind, ms;
         char text[0x400];
     } prompt = { 1, 0, "Delete Playlist?" };
+    const char *name = P(deque_at(list, (unsigned)row), REC_TITLE);
+    if (feedback_oled() && name) /* OLED's dialog asks it in its status row, naming the playlist */
+        tk_snprintf(prompt.text, sizeof prompt.text, "Delete playlist \u201c%s\u201d?", name);
     if (confirm_over(&prompt, "Delete") != 10) return 0;
     char sql[256];
     if (pl_db(&db)) goto done;
