@@ -232,6 +232,8 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   and the other lists stock opens there) is mixed, the artist page's songs are an artist's, the album page is an
   album, Folder view (`folder_page`) a folder. Lists Q2 Pod draws itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep
   their own rows.
+- Ratings' lists show a song's hearts as five Phosphor glyphs at 14 px at the start of its second line, `heart-fill`
+  for its hearts and `heart` for the rest, in Text Secondary (white on the selection), then "· Artist".
 
 ### Now Playing
 

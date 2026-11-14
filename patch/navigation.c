@@ -2884,6 +2884,7 @@ int ringnav_paint(void *w, void *canvas) {
     paint_chevrons(w, canvas);
     paint_radio(w, canvas);
     paint_into(w, canvas);
+    rate_hearts_paint(w, canvas);
     paint_letter(w, canvas);
     paint_cover(w, canvas);
     paint_scrubber(w, canvas);

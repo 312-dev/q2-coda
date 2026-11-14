@@ -185,6 +185,9 @@ ROW_ICON_PX = 20
 FOLDER_INKS = {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}  # Text Secondary in each half, white on the bar
 # The confirmation's glyph after a shuffle (feedback.c feedback_shuffled): bold, the accent's top tone in both halves
 CONFIRM_GLYPH_PX = 56
+# A Ratings row's hearts (ratings.c rate_hearts_paint): heart-fill for the song's, heart for the rest, regular, in the
+# folder's inks (Text Secondary in each half, white on the bar)
+RATE_PX = 14
 
 
 def gradient(stops, y0, y1):
@@ -940,6 +943,8 @@ def images(t):
         out[f'{prefix}_confirm_shadow'] = png(*TRAY_SHADOW_BOX[2:], tray_shadow())
     if t['painter[PAINT_CONFIRM]'] == list(CHOICES['dialog.confirm.painter']).index('oled'):  # feedback.c's confirmation
         out[f'{prefix}_confirm_shuffle'] = phosphor('shuffle-bold', CONFIRM_GLYPH_PX, t['schemes'][t['accents'].bit_length() - 1]['tones'][0])
+        out |= {f'{prefix}_rate_{on}_{k}': phosphor(glyph, RATE_PX, c) for on, glyph in (('on', 'heart-fill'), ('off', 'heart'))
+                for k, c in FOLDER_INKS.items()}
     if t['station_stops']:  # Internet Radio's Now Playing art, as large as the slanted art (navigation.c stream_ipod)
         px = inc('NP_IPOD_ART')
         out[f'{prefix}_station'] = png(px, px, station(t['station_stops'], t['station_mast'], t['station_band_a'], t['station_shadow_a'], px))

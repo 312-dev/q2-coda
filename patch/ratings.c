@@ -479,8 +479,37 @@ static void rate_all(void *songs, unsigned char *h) {
     deque_destroy(favs);
 }
 
+/* OLED's Ratings rows (feedback_oled): the hearts on the second line are Phosphor glyphs, filled
+ * for the song's and outlined for the rest, in Text Secondary or white on the selection
+ * (tools/art.py RATE_PX, oled_rate_on_* and oled_rate_off_*), drawn with the row from its
+ * RATE_HEARTS; the line's words start after them. */
+#define RATE_PX 14
+#define RATE_GAP 2
+#define RATE_ROOM (5 * RATE_PX + 4 * RATE_GAP + 6) /* the hearts and a space */
+#define RATE_HEARTS "_hearts"
+static void rate_row(void *item, int n) {
+    void *label = widget_get_child(item, 1);
+    if (!label) return;
+    widget_set_prop_int(item, RATE_HEARTS, n);
+    widget_move_resize(label, I(label, W_X) + RATE_ROOM, I(label, W_Y), I(label, W_W) - RATE_ROOM,
+                       I(label, W_H));
+}
+void rate_hearts_paint(void *w, void *canvas) {
+    if (!w || !st.rt_page || !feedback_oled()) return;
+    int n = widget_get_prop_int(w, RATE_HEARTS, 0);
+    void *label = n ? widget_get_child(w, 1) : (void *)0;
+    if (!label) return;
+    const char *ink = st.sel_accent && painting_in(st.sel_accent) ? "w" : ipod_light() ? "l" : "d";
+    int x = I(label, W_X) - RATE_ROOM, y = I(label, W_Y) + (I(label, W_H) - RATE_PX) / 2;
+    char name[16];
+    for (int i = 0; i < 5; i++, x += RATE_PX + RATE_GAP) {
+        tk_snprintf(name, sizeof name, "rate_%s_%s", i < n ? "on" : "off", ink);
+        paint_art(w, canvas, theme_art(name), x, y);
+    }
+}
+
 /* Top Rated (4-5 hearts), Loved (5), All Rated (1-5) and Disliked (1): most hearts first, then
- * the library's title order, each row's hearts under its title. */
+ * the library's title order, each row's hearts under its title (OLED's as glyphs, rate_row). */
 static const char *const rt_names[] = { "Top Rated", "Loved", "All Rated", "Disliked" };
 #define RT_ALBUMS 2 /* the Ratings menu's Albums row, after Loved */
 static int rated_open(void *ctx, void *event) {
@@ -505,12 +534,18 @@ static int rated_open(void *ctx, void *event) {
     void *view = page_list(st.rt_page, st.rt_page, 0, rt_names[k], count ? count : 1, 64);
     page_fit(view);
     char name[512], detail[300], hs[16];
+    int glyphs = feedback_oled();
     for (int i = 0; i < count; i++) {
         void *t = deque_at(list, (unsigned)i);
         const char *artist = P(t, REC_ARTIST);
-        tk_snprintf(detail, sizeof detail, artist && *artist ? "%s · %s" : "%s%s",
-                    hearts_text(hs, of[i]), artist && *artist ? artist : "");
-        page_row_detail(view, i, track_name(name, sizeof name, t), detail, rt_play);
+        if (glyphs) /* a space for no artist: an empty detail would centre the title alone */
+            tk_snprintf(detail, sizeof detail, artist && *artist ? "· %s" : " ",
+                        artist && *artist ? artist : "");
+        else
+            tk_snprintf(detail, sizeof detail, artist && *artist ? "%s · %s" : "%s%s",
+                        hearts_text(hs, of[i]), artist && *artist ? artist : "");
+        void *row = page_row_detail(view, i, track_name(name, sizeof name, t), detail, rt_play);
+        if (glyphs) rate_row(row, of[i]);
     }
     if (!count)
         page_row_detail(view, 0, "No songs yet", "Hold the heart on Now Playing to rate", 0);

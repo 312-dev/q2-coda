@@ -439,20 +439,22 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     """OLED's own images: the caret in Chevron grey (each half's) and white for the selection, the play state in each
     half's ink, Now Playing's shuffle and repeat in Text Secondary (each half's) and Accent Blue when on, the Shuffle row's
     glyph (regular) in Accent Blue and white for the selection, Folder view's folder (regular) in Text Secondary (each
-    half's) and white for the selection, the shuffle confirmation's glyph (bold) in Accent Blue, all from the vendored
-    Phosphor SVGs."""
+    half's) and white for the selection, the shuffle confirmation's glyph (bold) in Accent Blue, the Ratings rows' filled
+    and outlined hearts in the folder's inks, all from the vendored Phosphor SVGs."""
     t = theme.builtins()[3]
     got = art.images(t)
     modes = [f'mode_{n}_{k}' for n in ('shuffle', 'repeat') for k in ('d', 'l', 'on')] + ['mode_repeat1_on']
+    rates = [f'rate_{on}_{k}' for on in ('on', 'off') for k in ('d', 'l', 'w')]
     assert set(got) == {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'play_d', 'play_l', 'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w',
-                                                       'folder_d', 'folder_l', 'folder_w', 'confirm_shuffle', *modes)}
+                                                       'folder_d', 'folder_l', 'folder_w', 'confirm_shuffle', *modes, *rates)}
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
                           ('play_d', art.STATE_PX, 0xffffff), ('play_l', art.STATE_PX, 0),
                           ('shuffle_a', art.ROW_ICON_PX, blue), ('shuffle_w', art.ROW_ICON_PX, 0xffffff),
                           ('folder_d', art.ROW_ICON_PX, 0xababab), ('folder_l', art.ROW_ICON_PX, 0x5c5c5c),
                           ('folder_w', art.ROW_ICON_PX, 0xffffff), ('confirm_shuffle', art.CONFIRM_GLYPH_PX, blue),
-                          *((n, 22, {'d': 0xababab, 'l': 0x5c5c5c, 'on': blue}[n.rsplit('_', 1)[1]]) for n in modes)):
+                          *((n, 22, {'d': 0xababab, 'l': 0x5c5c5c, 'on': blue}[n.rsplit('_', 1)[1]]) for n in modes),
+                          *((n, art.RATE_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in rates)):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
         assert (w, h) == (px, px) and inked == {tuple(rgb >> s & 255 for s in (16, 8, 0))}
@@ -465,3 +467,12 @@ def test_phosphor_fills_nonzero_so_an_inner_contour_is_a_hole():
     cov = art.coverage_nonzero(ring, (0, 0, 16, 16))
     assert cov[8 * 16 + 8] == 0 and cov[3 * 16 + 3] == 1 and cov[0] == 0
     assert art.coverage(ring, (0, 0, 16, 16))[8 * 16 + 8] == 1  # the union rule would fill it
+
+
+def test_oleds_rating_hearts_are_phosphors_filled_and_outlined_heart():
+    """A filled heart inks its middle, the outlined one leaves it clear."""
+    got = art.images(theme.builtins()[3])
+    mid = art.RATE_PX // 2
+    for name, middle in (('oled_rate_on_d', True), ('oled_rate_off_d', False)):
+        w, h, at = pixels(got[name])
+        assert bool(at(mid, mid)[3]) == middle

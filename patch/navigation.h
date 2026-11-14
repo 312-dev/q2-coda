@@ -606,6 +606,7 @@ int tidal_downloads(void *ctx, void *event);
 
 /* ratings.c */
 const char *hearts_text(char *s, int n);
+void rate_hearts_paint(void *w, void *canvas); /* ratings.c: OLED's Ratings rows' hearts */
 int rate_keep(int album, unsigned key, int n);
 int rate_kept(int album, unsigned key);
 int rate_key(void *top, unsigned key);
