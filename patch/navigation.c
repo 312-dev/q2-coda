@@ -2884,8 +2884,10 @@ int ringnav_paint(void *w, void *canvas) {
     paint_chevrons(w, canvas);
     paint_radio(w, canvas);
     paint_into(w, canvas);
-    rate_hearts_paint(w, canvas);
-    stream_mark_paint(w, canvas);
+    if (st.rt_page) rate_hearts_paint(w, canvas);
+    if (w && P(w, W_PARENT) &&
+        (P(w, W_PARENT) == stream_mark_views[0] || P(w, W_PARENT) == stream_mark_views[1]))
+        stream_mark_paint(w, canvas);
     paint_letter(w, canvas);
     paint_cover(w, canvas);
     paint_scrubber(w, canvas);
