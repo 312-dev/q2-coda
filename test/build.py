@@ -406,6 +406,8 @@ def validate_assets(directory):
         old, new = read('stock.squashfs', path), read('rootfs.squashfs', path)
         assert new == q2cgi
         assert changed[path] == dict(original_sha256=sha(old), sha256=sha(q2cgi))
+    # and is the PIN check, cgi-bin/auth.cgi, a CGI stock has none of (docs/internals.md#wi-fi-transfer-pin)
+    assert read('rootfs.squashfs', 'usr/share/web/cgi-bin/auth.cgi') == q2cgi
     from build import segments
     tag_segment = segments(tag_new)[-1][1]
     assert tag_segment[0] == 1 and tag_segment[2] == 0x30000 and tag_segment[4:7] == (48, 48, 5)

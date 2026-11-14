@@ -38,8 +38,13 @@ rm -rf /mnt/mmc/* /mnt/mmc/.[!.]* 2>/dev/null
 # (notably NO bare `stat`), so a reliance on a tool the device lacks fails here too.
 BB=$(command -v busybox)
 DEV=/tmp/devbin; rm -rf "$DEV"; mkdir -p "$DEV"
-for a in sh ash sed tr grep awk tail head cat ls date mkdir rm rmdir mv cut printf dd wc mountpoint realpath busybox; do ln -sf "$BB" "$DEV/$a"; done
+for a in sh ash sed tr grep awk tail head cat ls date mkdir rm rmdir mv cut printf dd wc mountpoint realpath sha256sum touch busybox; do ln -sf "$BB" "$DEV/$a"; done
 DEVPATH="$DEV"
+# The PIN check (docs/internals.md#wi-fi-transfer-pin): demo writes these when transfer starts. Every
+# request below carries the session cookie ($COOKIE) unless a case sets it otherwise.
+AUTH=/tmp/q2wifi; PIN=482019; TOKEN=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')  # 32 hex digits, as demo writes
+new_session() { rm -rf "$AUTH"; mkdir -p "$AUTH"; chmod 700 "$AUTH"; printf '%s' "$PIN" > "$AUTH/pin"; printf '%s' "$TOKEN" > "$AUTH/token"; }
+new_session; COOKIE="q2s=$TOKEN"
 pass=0; fail=0
 ok()  { pass=$((pass+1)); echo "  PASS: $1"; }
 bad() { fail=$((fail+1)); echo "  FAIL: $1"; }
@@ -48,7 +53,7 @@ bad() { fail=$((fail+1)); echo "  FAIL: $1"; }
 run() {
   local nm=$1 meth=$2 q=$3 ct=$4 bf=$5 len=0 src=/dev/null
   [ "$bf" != "-" ] && { len=$(stat -c %s "$bf"); src=$bf; }
-  OUT=$(env -i PATH="$DEVPATH" SCRIPT_NAME="/$nm" REQUEST_METHOD="$meth" \
+  OUT=$(env -i PATH="$DEVPATH" HTTP_COOKIE="$COOKIE" SCRIPT_NAME="/$nm" REQUEST_METHOD="$meth" \
         QUERY_STRING="$q" CONTENT_TYPE="$ct" CONTENT_LENGTH="$len" \
         $SH "$CGI" < "$src" 2>/dev/null); RC=$?
 }
@@ -66,7 +71,7 @@ mp() { { printf -- "--$2\r\nContent-Disposition: form-data; name=\"path\"\r\n\r\
 # after 4 s. No body sends no CONTENT_LENGTH, as thttpd does for a GET.
 held() {
   local cl=(); [ -n "$4" ] && cl=("CONTENT_LENGTH=${#4}")
-  OUT=$(timeout 4 env -i PATH="$DEVPATH" SCRIPT_NAME="/$1" REQUEST_METHOD="$2" QUERY_STRING="$3" \
+  OUT=$(timeout 4 env -i PATH="$DEVPATH" HTTP_COOKIE="$COOKIE" SCRIPT_NAME="/$1" REQUEST_METHOD="$2" QUERY_STRING="$3" \
         CONTENT_TYPE='application/x-www-form-urlencoded' "${cl[@]}" $SH "$CGI" 2>/dev/null < <(printf '%s' "$4"; sleep 8)); RC=$?
 }
 
@@ -123,7 +128,7 @@ B=/tmp/mp_evil; BND=----q2e
 { printf -- "--$BND\r\nContent-Disposition: form-data; name=\"path\"\r\n\r\n/mnt/mmc/\r\n"
   printf -- "--$BND\r\nContent-Disposition: form-data; name=\"files[]\"; filename=\"x\$(touch pwned4y).mp3\"\r\nContent-Type: audio/mpeg\r\n\r\nAUDIOBYTES\r\n--$BND--\r\n"; } > "$B"
 L=$(stat -c %s "$B")
-OUT=$( cd /mnt/mmc && env -i PATH="$DEVPATH" SCRIPT_NAME=/upload REQUEST_METHOD=POST \
+OUT=$( cd /mnt/mmc && env -i PATH="$DEVPATH" HTTP_COOKIE="$COOKIE" SCRIPT_NAME=/upload REQUEST_METHOD=POST \
        CONTENT_TYPE="multipart/form-data; boundary=$BND" CONTENT_LENGTH="$L" busybox ash "$CGI" < "$B" 2>/dev/null )
 [ -e /mnt/mmc/pwned4y ] && bad "upload filename injection executed" || ok "upload filename \$() injection inert"
 [ "$(cat "/mnt/mmc/x\$(touch pwned4y).mp3" 2>/dev/null)" = "AUDIOBYTES" ] && ok "upload stored literal \$()-name file safely (preserved, not executed)" || bad "upload literal-name content wrong"
@@ -213,7 +218,7 @@ B=/tmp/mp_cl; BND=----q2cl
   printf -- "--$BND\r\nContent-Disposition: form-data; name=\"files[]\"; filename=\"cl.txt\"\r\nContent-Type: text/plain\r\n\r\nX\r\n--$BND--\r\n"; } > "$B"
 clbad=0
 for badlen in -1 abc ""; do
-  O=$(env -i PATH="$DEVPATH" SCRIPT_NAME=/upload REQUEST_METHOD=POST \
+  O=$(env -i PATH="$DEVPATH" HTTP_COOKIE="$COOKIE" SCRIPT_NAME=/upload REQUEST_METHOD=POST \
       CONTENT_TYPE="multipart/form-data; boundary=$BND" CONTENT_LENGTH="$badlen" \
       busybox ash "$CGI" < "$B" 2>/dev/null)
   st=$(printf '%s' "$O" | sed -n 's/^Status: \([0-9]*\).*/\1/p' | head -1)
@@ -366,10 +371,10 @@ held create GET 'path=/mnt/mmc/HeldGet' ''
 held delete POST '' 'path=/mnt/mmc/HeldPost'
 { [ "$RC" != 124 ] && [ ! -e /mnt/mmc/HeldPost ]; } && ok "POST delete answers while the connection stays open" || bad "POST delete waited for end-of-file (rc $RC)"
 printf 'path=/mnt/mmc/CutHereNOT-THE-BODY' > /tmp/bcut      # CONTENT_LENGTH covers "path=/mnt/mmc/CutHere" only
-OUT=$(env -i PATH="$DEVPATH" SCRIPT_NAME=/create REQUEST_METHOD=POST CONTENT_TYPE='application/x-www-form-urlencoded' CONTENT_LENGTH=21 $SH "$CGI" < /tmp/bcut 2>/dev/null)
+OUT=$(env -i PATH="$DEVPATH" HTTP_COOKIE="$COOKIE" SCRIPT_NAME=/create REQUEST_METHOD=POST CONTENT_TYPE='application/x-www-form-urlencoded' CONTENT_LENGTH=21 $SH "$CGI" < /tmp/bcut 2>/dev/null)
 { [ -d /mnt/mmc/CutHere ] && [ ! -e /mnt/mmc/CutHereNOT-THE-BODY ]; } && ok "bytes past CONTENT_LENGTH are not read as the body" || bad "the body was not cut at CONTENT_LENGTH ($(status))"
 printf 'path=/mnt/mmc/HugeLength' > /tmp/bhuge
-OUT=$(env -i PATH="$DEVPATH" SCRIPT_NAME=/create REQUEST_METHOD=POST CONTENT_TYPE='application/x-www-form-urlencoded' CONTENT_LENGTH=99999999999999999999 $SH "$CGI" < /tmp/bhuge 2>/dev/null)
+OUT=$(env -i PATH="$DEVPATH" HTTP_COOKIE="$COOKIE" SCRIPT_NAME=/create REQUEST_METHOD=POST CONTENT_TYPE='application/x-www-form-urlencoded' CONTENT_LENGTH=99999999999999999999 $SH "$CGI" < /tmp/bhuge 2>/dev/null)
 [ -d /mnt/mmc/HugeLength ] && ok "a CONTENT_LENGTH too long for the shell to compare is capped at 64 KB, not an error" || bad "huge CONTENT_LENGTH ($(status))"
 
 echo; echo "############ MULTIPART NEWLINES: content is kept to the byte whatever newlines it holds"
@@ -526,10 +531,76 @@ else
   echo "  SKIP: /mnt/mmc is a $FS, which keeps no short names: run with --fat (see the header) for these 16 cases"
 fi
 
+echo; echo "############ PIN: nothing without the session cookie, which only the right PIN gets"
+new_session; rm -rf /mnt/mmc/pin; mkdir -p /mnt/mmc/pin; printf 'PRIVATE' > /mnt/mmc/pin/keep.txt
+SAVED=$COOKIE
+pinpost() { printf 'pin=%s' "$1" > /tmp/bp.$$; run auth POST '' 'application/x-www-form-urlencoded' /tmp/bp.$$; rm -f /tmp/bp.$$; }
+setcookie() { printf '%s' "$OUT" | sed -n 's/^Set-Cookie: q2s=\([0-9a-f]*\);.*/\1/p' | head -1; }
+for c in '' "q2s=ffffffffffffffffffffffffffffffff" "q2s=$TOKEN"x "q2s=${TOKEN%?}" "q2s=$(printf %s "$TOKEN" | tr a-f A-F)" "other=$TOKEN" "q2s=$PIN"; do
+  COOKIE=$c
+  run list GET 'path=/mnt/mmc/pin' '' -
+  { [ "$(status)" = 401 ] && ! leaks keep.txt; } && ok "list refused with cookie '${c:-none}'" || bad "list with cookie '${c:-none}' ($(status))"
+done
+COOKIE=
+run download GET 'path=/mnt/mmc/pin/keep.txt' '' -
+{ [ "$(status)" = 401 ] && ! leaks PRIVATE; } && ok "download refused without the cookie, no leak" || bad "download without cookie ($(status))"
+run create GET 'path=/mnt/mmc/pin/made' '' -
+{ [ "$(status)" = 401 ] && [ ! -e /mnt/mmc/pin/made ]; } && ok "create refused without the cookie, nothing made" || bad "create without cookie ($(status))"
+post delete /mnt/mmc/pin/keep.txt
+{ [ "$(status)" = 401 ] && [ -f /mnt/mmc/pin/keep.txt ]; } && ok "delete refused without the cookie, file kept" || bad "delete without cookie ($(status))"
+mp /tmp/mp_p1 ----q2p1 /mnt/mmc/pin new.txt NEW; run upload POST '' 'multipart/form-data; boundary=----q2p1' /tmp/mp_p1
+{ [ "$(status)" = 401 ] && [ ! -e /mnt/mmc/pin/new.txt ]; } && ok "upload refused without the cookie, nothing written" || bad "upload without cookie ($(status))"
+run nosuch GET '' '' -
+[ "$(status)" = 401 ] && ok "an unknown route is refused before it is looked at" || bad "unknown route ($(status))"
+[ ! -e "$AUTH/seen" ] && ok "refused requests leave the idle timer alone" || bad "a refused request touched seen"
+run auth GET 'pin=482019' '' -
+{ [ "$(status)" = 405 ] && [ -z "$(setcookie)" ]; } && ok "auth refuses a GET (the PIN never rides in a URL)" || bad "auth GET ($(status))"
+pinpost 000000
+{ [ "$(status)" = 403 ] && [ -z "$(setcookie)" ] && leaks '"left":4'; } && ok "a wrong PIN: 403, no cookie, 4 tries left" || bad "wrong PIN ($(status): $(body))"
+pinpost "$PIN"
+{ [ -z "$(status)" ] && [ "$(setcookie)" = "$TOKEN" ] && leaks 'HttpOnly; SameSite=Strict'; } && ok "the right PIN sets the session cookie (HttpOnly, SameSite=Strict)" || bad "right PIN ($(status): $OUT)"
+COOKIE="theme=dark; q2s=$(setcookie); lang=en"
+run list GET 'path=/mnt/mmc/pin' '' -
+leaks keep.txt && ok "the cookie it set lists, among other cookies" || bad "list with the new cookie ($(status))"
+[ -e "$AUTH/seen" ] && ok "an admitted request marks the idle timer" || bad "seen not touched"
+ls "$AUTH"/busy.* >/dev/null 2>&1 && bad "a busy mark outlived its request" || ok "the busy mark goes when the request ends"
+run download GET 'path=/mnt/mmc/pin/keep.txt' '' -
+[ "$(body)" = PRIVATE ] && ok "download works with the cookie" || bad "download with cookie ($(status))"
+mp /tmp/mp_p2 ----q2p2 /mnt/mmc/pin new.txt NEW; run upload POST '' 'multipart/form-data; boundary=----q2p2' /tmp/mp_p2
+[ "$(cat /mnt/mmc/pin/new.txt 2>/dev/null)" = NEW ] && ok "upload works with the cookie" || bad "upload with cookie ($(status))"
+run create GET 'path=/mnt/mmc/pin/made' '' -; [ -d /mnt/mmc/pin/made ] && ok "create works with the cookie" || bad "create with cookie ($(status))"
+post delete /mnt/mmc/pin/made; [ ! -e /mnt/mmc/pin/made ] && ok "delete works with the cookie" || bad "delete with cookie ($(status))"
+run download GET 'path=/mnt/mmc/../../etc/hostname' '' -
+refused && ok "traversal is still refused with the cookie" || bad "traversal with cookie ($(status))"
+for t in 1 2 3 4; do pinpost 11111$t; done
+{ [ "$(status)" = 403 ] && leaks '"left":0'; } && ok "four more wrong PINs: none left" || bad "tries count ($(status): $(body))"
+pinpost "$PIN"
+{ [ "$(status)" = 429 ] && [ -z "$(setcookie)" ]; } && ok "locked: the right PIN is refused after five wrong ones" || bad "lockout ($(status))"
+run list GET 'path=/mnt/mmc/pin' '' -
+leaks keep.txt && ok "a session made before the lockout keeps working" || bad "session after lockout ($(status))"
+new_session; COOKIE=
+for t in 0 1 2 3 4 5 6 7 8 9 10 11; do  # wrong PINs sent at once can't share a try
+  printf 'pin=9999%02d' "$t" > /tmp/bpp.$t
+  ( env -i PATH="$DEVPATH" SCRIPT_NAME=/auth REQUEST_METHOD=POST CONTENT_TYPE=application/x-www-form-urlencoded \
+      CONTENT_LENGTH=10 $SH "$CGI" < /tmp/bpp.$t > /tmp/bpo.$t 2>/dev/null ) &
+done; wait
+n403=$(grep -l '^Status: 403' /tmp/bpo.* | wc -l); n429=$(grep -l '^Status: 429' /tmp/bpo.* | wc -l); rm -f /tmp/bpp.* /tmp/bpo.*
+{ [ "$n403" = 5 ] && [ "$n429" = 7 ]; } && ok "12 wrong PINs at once: 5 tried, 7 refused as locked" || bad "concurrent tries: $n403 tried, $n429 locked"
+pinpost "$PIN"; [ "$(status)" = 429 ] && ok "and the right PIN after them is locked out" || bad "right PIN after concurrent tries ($(status))"
+new_session; COOKIE="q2s=$TOKEN"; rm -rf "$AUTH"
+run list GET 'path=/mnt/mmc/pin' '' -
+{ [ "$(status)" = 403 ] && ! leaks keep.txt; } && ok "transfer stopped (no session folder): even the old cookie is refused" || bad "no session ($(status))"
+pinpost "$PIN"; { [ "$(status)" = 403 ] && [ -z "$(setcookie)" ]; } && ok "and auth gives no cookie" || bad "auth with no session ($(status))"
+new_session; : > "$AUTH/token"; COOKIE="q2s="
+run list GET 'path=/mnt/mmc/pin' '' -
+[ "$(status)" = 401 ] && ok "an empty token matches nothing" || bad "empty token ($(status))"
+new_session; COOKIE=$SAVED; rm -rf /mnt/mmc/pin
+
 echo; echo "############ DEVICE APPLET: no dependency on 'stat' (absent on device busybox 1.31.1)"
 grep -qE 'stat -c|busybox stat' "$CGI" && bad "q2cgi invokes the 'stat' applet, which the device busybox lacks" || ok "no 'stat' applet dependency (size via ls -ln, mtime via date -r)"
 
 echo; echo "############ FILESYSTEM BOUNDARY"
 ls /tmp/pwned* 2>/dev/null && bad "markers leaked" || ok "no injection markers anywhere"
 
+rm -rf "$AUTH"
 echo; echo "============ RESULT: $pass passed, $fail failed"; [ "$fail" = 0 ]

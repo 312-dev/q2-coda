@@ -11,6 +11,8 @@
   - Security: Bluetooth stays discoverable for 3 minutes after it turns on, instead of for as long as it's on. Headphones and devices already paired connect as before; to pair a new phone with the Q2 as a Bluetooth receiver after that, turn Bluetooth off and on.
   - Security: the firmware leaves out debugging and network tools nothing uses (strace, sqlite3, hcidump, memtester, nandtest, telnet, tftp and inetd among them).
   - Time: setting the clock from the internet asks the worldwide NTP pool instead of China's.
+  - Wi-Fi transfer: the web page asks for a PIN. **Wi-Fi File Transfer** shows a new six-digit PIN above the address each time you open it, and nothing on the card can be listed, downloaded, uploaded or deleted without it. Before, anyone on the same Wi-Fi network could reach the whole card while the page was open. Five wrong PINs lock the page out until you open Wi-Fi File Transfer again.
+  - Wi-Fi transfer: it turns itself off after 10 minutes with no uploads, downloads or browsing, so a Q2 left on that screen doesn't keep the card open to the network.
 - **1.8.2**:
   - Games: in Solitaire, Centre on a pile that can't take the cards you hold now picks that pile up instead. Before, nothing happened and the cards stayed held until you put them back or pressed Return, which looked like the game had stuck.
   - Themes: Chinese, Japanese and other text the theme's own face lacks is now drawn bold wherever **Classic** or **Modern** draws its text bold: Classic's lists, bar, info rows, Cover Flow, album panel and hold menu; Modern's bar title; and Now Playing's title in both. It used the regular system font.

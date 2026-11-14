@@ -930,6 +930,18 @@ photos, wallpapers and videos are never changed.
 ponytail: a non-square or transparent cover in Cover Flow keeps black bars and a black background
 inside its square (`cf_decode`).
 
+## Wi-Fi File Transfer
+
+**System settings → Network → Wi-Fi File Transfer** keeps stock's page, with the address to open in
+a browser on the same Wi-Fi network (`http://<address>:8888`) at the bottom. In place of its picture
+is a line, **PIN for the web page**, and under it a new six-digit PIN each time the page opens, in
+56 px type as two groups of three. The
+web page asks for the PIN once; without it nothing on the card can be listed, downloaded, uploaded
+or deleted. Five wrong PINs show **Locked** in the PIN's place: Return and open the page again for a
+new PIN. Leaving the page turns transfer off, as in stock, and so do 10 minutes with no request,
+with a toast saying so. How the PIN and the timer work:
+[internals.md](internals.md#wi-fi-transfer-pin).
+
 ## Games
 
 **Library → Games** opens Sudoku, Vortex, Solitaire and Snake ([internals](internals.md#games)). A game

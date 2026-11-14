@@ -524,6 +524,11 @@ void smart_wake(void); /* Smart Wi-Fi's radio back now, if it had it off */
 int smart_config(const char *section, const char *key);
 void smart_poll(void);
 
+/* wifi_transfer.c */
+int ringnav_wifi_transfer(int on), stock_wifi_transfer_trampoline(int on);
+int ringnav_wifi_transfer_page(void *win, void *ctx), stock_wifi_transfer_page_trampoline(void *win, void *ctx);
+void wifi_transfer_poll(void);
+
 /* battery.c */
 void battery_tick(int level, int cable);
 unsigned battery_log(char *out, unsigned size);
