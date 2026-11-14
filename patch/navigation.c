@@ -3040,7 +3040,12 @@ int ringnav_paint(void *w, void *canvas) {
     slider_scrub(w, canvas);
     quick_scrub(w, canvas);
     search_over(w, canvas);
-    if (w && st.np_lrc && P(w, W_PARENT) == st.np_lrc) lyrics_paint(w, canvas);
+    if (w && st.np_lrc) { /* one test on every other page's paints (the Cover Flow paint budget) */
+        if (P(w, W_PARENT) == st.np_lrc)
+            lyrics_paint(w, canvas);
+        else if (w == st.np_lrc)
+            lyrics_fade(w, canvas);
+    }
     paint_caps(w, canvas);
     if (theme()->marquee_fade) marquee_fade(w, canvas);
     if (w && w == slider_page_win) slider_page_paint(w, canvas);
@@ -5873,7 +5878,8 @@ void *ringnav_ui_load(const char *name, void *parent) {
         if (!tk_strcmp(loaded, "addplaylist_dialog") || !tk_strcmp(loaded, "renameplaylist_dialog"))
             pl_box_open(root);
         if (time_form(root)) time_open(root);
-    }
+    } else if (root && oled_pages())
+        msg_open(root); /* OLED's scan page (classic_pages.c oled_scan); USB's page stays stock's */
     if (root && g_usbmode != 1 && !tk_strcmp(widget_get_prop_str(root, "name", ""), "usbmode_page"))
         st.usb_lun = 0, widget_add_timer(root, usb_poll, 500);
     if (root) motion_load(root, np);
@@ -7313,7 +7319,9 @@ static int theme_pick(void *ctx, void *event) {
  * value, en_US's first player_unknown ("Unknown Artist"), reads "Unknown". Classic's page has
  * rows (tools/ipod.py np_ipod, #204's): stock's label keeps the name and its <name>_value the
  * value, in the info role's face, the value in the theme's grey (written through the flip, its own
- * inverse on the half's paper and ink), the genre with them, not genre_fill's marquee. */
+ * inverse on the half's paper and ink), the genre with them, not genre_fill's marquee. OLED's
+ * table has them too, with the bit depth in Format's value and its English names "Format" and
+ * "Bit Rate" for stock's "Encoding" and "Bitrate". */
 int ringnav_np_info(void *win) {
     static const char *const names[] = { "label_album", "label_genre",  "label_size",
                                          "label_year",  "label_encode", "label_bits",
@@ -7322,7 +7330,21 @@ int ringnav_np_info(void *win) {
                                  "", "", " MB", "", "", "-bit", " kbps", " kHz", ""
                              };
     int result = np_info(win), rows = win && widget_lookup(win, "label_album_value", 1);
-    char where[64] = "";
+    /* OLED's table (tools/ipod.py np_info_table): the bit depth joins Format ("FLAC, 16-bit") */
+    char depth[32] = "", where[64] = "";
+    void *bits = rows && oled_pages() ? widget_lookup(win, "label_bits", 1) : (void *)0;
+    if (bits && !widget_get_text_utf8(bits, depth, sizeof depth)) {
+        const char *v = depth;
+        while (*v && *v != ':') ++v;
+        v += *v == ':';
+        while (*v == ' ') ++v;
+        int n = (int)strlen(v),
+            bare = n > 3 && v[n - 4] >= '0' && v[n - 4] <= '9' && !strcmp(v + n - 3, "bit");
+        char t[32];
+        tk_snprintf(t, sizeof t, "%.*s%s", bare ? n - 3 : n, v, bare ? "-bit" : "");
+        memcpy(depth, t, sizeof depth);
+    } else
+        *depth = 0;
     getFormatString("player_location", where, sizeof where);
     const char *loc =
         *where && *where != '(' ? where : "Location"; /* a missing string reads "(key)" */
@@ -7357,10 +7379,13 @@ int ringnav_np_info(void *win) {
             tk_snprintf(key, sizeof key, "%s_value", names[i]);
             void *value = widget_lookup(win, key, 1);
             tk_snprintf(out, sizeof out, "%.*s", n, name);
+            if (bits && (i == 4 || i == 6) && !strcmp(out, i == 4 ? "Encoding" : "Bitrate"))
+                tk_snprintf(out, sizeof out, "%s", i == 4 ? "Format" : "Bit Rate");
             if (strcmp(out, s)) widget_set_text_utf8(label, out);
             theme_font(label, ROLE_INFO, FONT_ROW);
             if (!value) continue;
-            tk_snprintf(out, sizeof out, "%.*s%s", split ? len - u : len, v, split ? units[i] : "");
+            tk_snprintf(out, sizeof out, "%.*s%s%s%s", split ? len - u : len, v,
+                        split ? units[i] : "", i == 4 && *depth ? ", " : "", i == 4 ? depth : "");
             if (widget_get_text_utf8(value, s, sizeof s) || strcmp(s, out))
                 widget_set_text_utf8(value, out);
             theme_font(value, ROLE_INFO, FONT_ROW);
@@ -11673,6 +11698,17 @@ int ringnav(void *ctx, void *event) {
         if (top && *(volatile int *)SCAN_DONE &&
             !tk_strcmp(widget_get_prop_str(top, "name", ""), "updatemusic_dialog")) {
             dialog_quit(top, 0);
+            return STOP;
+        }
+        /* OLED's scan page (classic_pages.c oled_scan) has Cancel on the selection bar: Centre
+         * presses it, as a tap does, and stops the scan */
+        void *cancel = key == KEY_CENTER && oled_pages() && top &&
+                               !tk_strcmp(widget_get_prop_str(top, "name", ""), "updatemusic_dialog")
+                           ? widget_lookup(top, "btn_no", 1)
+                           : (void *)0;
+        if (cancel) {
+            unsigned click[12];
+            stock_dispatch_trampoline(cancel, pointer_event_init(click, EVT_CLICK, cancel, 0, 0));
             return STOP;
         }
     }

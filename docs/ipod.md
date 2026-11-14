@@ -616,7 +616,7 @@ The art, title, artist and album are the slide_view's first page, so a swipe rep
 with the lyrics or info page. The info page keeps its stock 225-pixel column, centred; the lyrics
 page spans the screen (**Lyrics** below). The info page's lines read `Label: value`, with spaced units
 (`35.92 MB`, `16-bit`, `950 kbps`, `44.1 kHz`), **Genre** and **Year** for stock's Genres and Era,
-`Unknown` for a missing value and `Location:` before the folder (`ringnav_np_info`). A Genre line too long for the column scrolls at the album marquee's pace while the page shows (`genre_step`). The play/pause overlay has zero opacity, retaining its original gesture target without
+`Unknown` for a missing value and `Location:` before the folder (`ringnav_np_info`). Under OLED the info page is a table instead (`tools/ipod.py` `np_info_table`): a fact a row, 20 pixels apart in the slide above the bar, Album, Genre, Year, Format, Sample Rate, Bit Rate, File Size and Location; the name on the text column in Text Secondary, the value right-aligned on the right column in white, both ending in an ellipsis when long; a 1-pixel `#1F1F1F` rule between rows; the bit depth joins Format (`FLAC, 16-bit`). A Genre line too long for the column scrolls at the album marquee's pace while the page shows (`genre_step`). The play/pause overlay has zero opacity, retaining its original gesture target without
 a transport glyph; stock may update its visibility without making it appear. The loading
 spinner stays centred on the artwork. The on-screen Return icon moves off-screen, as on the pages whose navbars are
 hidden; the hardware Return does the same. More keeps its place at the top row's right. The play
@@ -682,7 +682,11 @@ or beside a CJK character, onto as many rows as it takes, up to four, which stil
 weight like Apple Music's. A line's row is its rows
 (38 pixels apart) plus 21 pixels between lines: `LYRIC_SLOT` (59 pixels) for one row, so three
 such lines fill the 178-pixel page. A line the page's edge cuts fades with the square of the share
-of it out of view, so no sliver of a line shows. The playing line lights white (`LYRIC_LIT`); the other lines are darker (`LYRIC_REST`,
+of it out of view, so no sliver of a line shows. Under OLED the lines are Inter (the design's 22 px, AWTK's 27) on the 24-pixel text
+column, the playing line in Medium and the rest in Regular, the playing line's unsung part and the other
+lines in Text Secondary (`#ABABAB`); no row is dimmed whole: the top and foot 32 pixels of what shows
+of the page fade linearly to the page's ground (`lyrics_fade`), so a line leaving the view thins out
+rather than being cut, while it scrolls too. The playing line lights white (`LYRIC_LIT`); the other lines are darker (`LYRIC_REST`,
 `#5F5F5F`). A line with word stamps (A2's enhanced LRC, `<mm:ss.xx>` before a word, in a .lrc or a
 LYRICS tag) lights word by word as it is sung, each word from its stamp to the next (the last, with
 no stamp after it, at `LYRIC_UNIT_MS`, 90 ms, a letter, done by the next line), its unsung part
@@ -706,8 +710,8 @@ page back. See [internals.md](internals.md#scrub-ipod) and [Word-timed lyrics](i
 ### Visualizer
 
 The slide_view gains a fourth page, after the art, lyrics and info pages, and the page dots a fourth
-dot. It shows the music as heard, EQ included, in one of four styles on black, tinted with the
-accent's light tone; a tap moves to the next, saved as `IPOD/VIS` in `config.ini`, and its name shows
+dot. It shows the music as heard, EQ included, in one of four styles (five under OLED) on black,
+tinted with the accent's light tone (Field has its own five colours); a tap moves to the next, saved as `IPOD/VIS` in `config.ini`, and its name shows
 at the bottom for a second and a half:
 
 | Style            | After                     | Drawing                                                                                                                                      |
@@ -716,8 +720,11 @@ at the bottom for a second and a half:
 | **Oscilloscope** | Rockbox Oscilloscope      | The left channel in the accent with a glow, the right a faint accent line; it starts on a rising zero crossing, so the wave stands still     |
 | **VU Meters**    | Rockbox VU Meter (analog) | Left and right needles over an arc from -20 to +3 VU, heavier and brighter past 0, with 300 ms ballistics and a peak LED                     |
 | **Halo**         | Apple's radial spectrum   | 64 mirrored bars around Now Playing's art in a circle, turning slowly, the bass pulsing the ring                                             |
+| **Field** (OLED) | iTunes' Magnetosphere     | 40 soft glowing points in each of five bands, a colour each, flowing round the centre on rings each band's level swells and ripples          |
 
-Everything is anti-aliased vector drawing (AWTK's vgcanvas) within the 375x186 page: 16-pixel side
+Field shows only under OLED, where it is the style the page opens on until a tap picks another; it
+is drawn from glow sprites (`field_sprites`), the others are anti-aliased vector drawing (AWTK's
+vgcanvas), all within the 375x186 page: 16-pixel side
 margins (`NP_MARGIN`), labels in the stock grey `#AAAAAA`. It animates at `VIS_FPS` only while the
 page shows with the screen on, and comes to rest when playback pauses; at rest the track's title
 and artist show at the bottom, in the style name's place. Tunables are `VIS_*` in

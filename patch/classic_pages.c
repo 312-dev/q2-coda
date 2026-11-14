@@ -1,5 +1,5 @@
 /* Classic's own pages: the T9 keyboard, Search, the playlist name box, the slider pages and the
- * message screens. */
+ * message screens; and OLED's form of the library scan's message screen (oled_scan). */
 #include "navigation.h"
 
 /* Classic's message screens (msg_open; st has their windows): stock's label_msg in the scan's
@@ -8,7 +8,7 @@
  * failed): one word, so the UI thread can't see the flag before the value. search_px:
  * search_edit's size in its disabled state, 0 until set. */
 static struct {
-    void *msg_src, *msg_line, *msg_btn;
+    void *msg_src, *msg_line, *msg_btn, *msg_folder; /* msg_folder: OLED's Folder value */
     int msg_total;
     volatile int msg_counting;
     short msg_part;
@@ -522,6 +522,14 @@ void slider_scrub(void *w, void *canvas) {
 #define MSG_BAR_Y 218
 #define MSG_BAR_W 229
 #define MSG_BAR_H 14
+/* OLED's scan page (oled_scan): its rows, columns and bar */
+#define SCAN_TOP 58
+#define SCAN_ROW 32
+#define SCAN_X 24
+#define SCAN_RIGHT 347 /* the right column */
+#define SCAN_NAME_W 110
+#define SCAN_BAR_Y 228
+#define SCAN_BAR_W (SCAN_RIGHT - SCAN_X)
 static const stops_t msg_fill = { 12,
                                   { 0, 8, 16, 25, 33, 42, 50, 58, 67, 75, 83, 100 },
                                   { 0xf7ffff, 0xfcfdff, 0xf4f4f4, 0xedebec, 0xeae8e9, 0xe2e1df,
@@ -533,7 +541,7 @@ static int msg_gone(void *win, void *event) {
     if (win == st.usb_win) st.usb_win = (void *)0;
     if (win == st.msg_win) {
         stop_timer(&cp.msg_timer);
-        st.msg_win = (void *)0;
+        st.msg_win = cp.msg_folder = (void *)0;
     }
     return 0;
 }
@@ -545,6 +553,20 @@ static int msg_gone(void *win, void *event) {
 static int msg_sync(void) {
     char now[sizeof cp.msg_seen], line[48];
     *now = 0;
+    if (cp.msg_folder) { /* OLED's Folder row: the last name in stock's hidden label_scanfolder */
+        void *from = widget_lookup(st.msg_win, "label_scanfolder", 1);
+        char was[128];
+        if (from && !widget_get_text_utf8(from, now, sizeof now)) {
+            int n = (int)strlen(now);
+            while (n > 1 && now[n - 1] == '/') now[--n] = 0; /* "SD:/Music/" */
+            const char *last = now + n;
+            while (last > now && last[-1] != '/') --last;
+            if (!*last) last = now; /* the card's root, "SD:/" */
+            if (widget_get_text_utf8(cp.msg_folder, was, sizeof was) || tk_strcmp(last, was))
+                widget_set_text_utf8(cp.msg_folder, last);
+        }
+        *now = 0;
+    }
     int answer = cp.msg_counting;
     if (answer > 1) { /* the total: read stock's text against it */
         cp.msg_total = answer - 3, cp.msg_counting = 0, cp.msg_seen[0] = 0;
@@ -559,12 +581,16 @@ static int msg_sync(void) {
     tk_snprintf(cp.msg_seen, sizeof cp.msg_seen, "%s", now);
     const char *p = now;
     while (*p && (*p < '0' || *p > '9')) ++p;
-    int count = atoi(p), total = cp.msg_total;
+    int count = atoi(p), total = cp.msg_total, oled = cp.msg_folder != 0,
+        w = oled ? SCAN_BAR_W : MSG_BAR_W;
     cp.msg_part = -1;
     if (*p && total && count <= total && *(volatile char *)SCAN_WHOLE == 1) {
-        cp.msg_part = (short)(MSG_BAR_W * count / total);
-        if (cp.msg_part > MSG_BAR_W * 99 / 100) cp.msg_part = MSG_BAR_W * 99 / 100;
-        tk_snprintf(line, sizeof line, "%d of %d songs", count, total);
+        cp.msg_part = (short)(w * count / total);
+        if (cp.msg_part > w * 99 / 100) cp.msg_part = (short)(w * 99 / 100);
+        tk_snprintf(line, sizeof line, oled ? "%d of %d" : "%d of %d songs", count, total);
+        widget_set_text_utf8(cp.msg_line, line);
+    } else if (oled && *p) { /* the Songs row's value: the count alone */
+        tk_snprintf(line, sizeof line, "%d", count);
         widget_set_text_utf8(cp.msg_line, line);
     } else
         widget_set_text_utf8(cp.msg_line, now);
@@ -573,7 +599,10 @@ static int msg_sync(void) {
 /* Stock's hidden label repaints nothing, so this does, at the rate stock writes it. */
 static int msg_poll(const void *info) {
     (void)info;
-    if (msg_sync()) widget_invalidate_force(st.msg_win, &(rect_t){ 16, 188, 343, 45 });
+    if (msg_sync())
+        widget_invalidate_force(st.msg_win, cp.msg_folder
+                                                ? &(rect_t){ 0, SCAN_TOP, 375, 282 - SCAN_TOP }
+                                                : &(rect_t){ 16, 188, 343, 45 });
     return 8; /* RET_REPEAT */
 }
 int library_count(const char *sql);
@@ -586,6 +615,52 @@ static void *msg_count(void *unused) {
     return 0;
 }
 int msg_counting(void) { return cp.msg_counting == 1; } /* coverflow.c's library_counting */
+/* OLED's scan page (docs/oled-design.md#screens): a page over stock's full-screen dialog, its title
+ * in the status row's place and face (Inter Medium 15, Text Secondary, on the 24 px column; the
+ * dialog covers the bar, so its play state and battery are not shown), then rows from y 58: Songs
+ * with the count (or "312 of 704" against the library's songs before the scan), Folder with the
+ * name of the folder stock is scanning, and Cancel, stock's btn_no as the page's one action row on
+ * the selection bar; the 6 px progress bar at y 228 from the text column to the right column while
+ * the scan is measurable (msg_sync's part), as RULES.md 12 has it. Sizes are AWTK's, the design's
+ * px times 1.21. */
+static void *scan_label(void *win, const char *s, int x, int y, int w, const char *face, int px,
+                        unsigned ink, const char *align) {
+    void *l = text(win, x - 2, y, w + 4, SCAN_ROW); /* hscroll_label's own 2 px margins */
+    if (!l) return 0;
+    if (s) widget_set_text_utf8(l, s);
+    slider_label(l, x - 2, y, w + 4, SCAN_ROW, px, face);
+    widget_set_prop_str(l, "style:normal:text_align_h", align);
+    text_ink(l, ink, INK_LABEL);
+    hscroll_label_set_only_focus(l, 1), hscroll_label_set_ellipses(l, 1);
+    return l;
+}
+static void oled_scan(void *win, void *src, void *btn) {
+    static const char *const state[] = { "normal", "pressed", "over", "disable", "focused" };
+    char key[STYLE_KEY];
+    void *c = scan_label(win, "Update Library", SCAN_X, 37 - SCAN_ROW / 2, 240, "inter-medium", 18,
+                         0xffababab, "left");
+    if (c) widget_set_name(c, "msg_heading");
+    scan_label(win, "Songs", SCAN_X, SCAN_TOP, SCAN_NAME_W, "inter", 24, 0xffffffff, "left");
+    scan_label(win, "Folder", SCAN_X, SCAN_TOP + SCAN_ROW, SCAN_NAME_W, "inter", 24, 0xffffffff,
+               "left");
+    int vx = SCAN_X + SCAN_NAME_W, vw = SCAN_RIGHT - vx;
+    cp.msg_line = scan_label(win, 0, vx, SCAN_TOP, vw, "inter", 24, 0xffababab, "right");
+    cp.msg_folder =
+        scan_label(win, 0, vx, SCAN_TOP + SCAN_ROW, vw, "inter", 24, 0xffababab, "right");
+    if (cp.msg_line) widget_set_name(cp.msg_line, "msg_line");
+    widget_move_resize(btn, 16, SCAN_TOP + 2 * SCAN_ROW, 343, SCAN_ROW);
+    for (unsigned i = 0; i < sizeof state / sizeof *state; ++i) {
+        widget_set_prop_int(btn, style_key(key, state[i], "bg_color"),
+                            (int)RGBA(scheme()->tones[0]));
+        widget_set_prop_int(btn, style_key(key, state[i], "round_radius"), 8);
+        widget_set_prop_str(btn, style_key(key, state[i], "font_name"), "inter");
+        widget_set_prop_int(btn, style_key(key, state[i], "font_size"), 24);
+        widget_set_prop_str(btn, style_key(key, state[i], "text_align_h"), "left");
+        widget_set_prop_int(btn, style_key(key, state[i], "margin_left"), SCAN_X - 16);
+    }
+    text_ink(btn, 0xffffffffu, INK_BUTTON);
+    cp.msg_src = src, cp.msg_btn = btn;
+}
 #define MSG_HEAD_PX 29
 #define MSG_HEAD_H 32 /* holds the font */
 #define MSG_LINE_PX 18
@@ -601,29 +676,36 @@ void msg_open(void *win) {
     int scan = !tk_strcmp(name, "updatemusic_dialog");
     void *c, *src = widget_lookup(win, "label_msg", 1), *btn = widget_lookup(win, "btn_no", 1);
     if (scan ? !src || !btn : tk_strcmp(name, "usbmode_page") != 0) return;
+    if (!scan && oled_pages()) return; /* OLED keeps stock's USB page */
     for (unsigned i = 0; i < sizeof hide / sizeof *hide; ++i)
         if ((c = widget_lookup(win, hide[i], 1))) widget_set_visible(c, 0, 0);
     widget_on(win, EVT_DESTROY, msg_gone, win);
-    c = text(win, 16, 0, 343, 24);
-    widget_set_name(c, "msg_heading");
-    widget_set_text_utf8(c, scan ? "Updating Local Music" : "Connected");
-    slider_label(c, 16, 0, 343, MSG_HEAD_H, MSG_HEAD_PX, "classic-light");
-    c = text(win, 16, 0, 343, 20);
-    widget_set_name(c, "msg_line");
-    slider_label(c, 16, 0, 343, 20, MSG_LINE_PX, "default");
-    if (!scan) {
-        st.usb_win = win;
-        if (g_usbmode != 1) widget_set_text_utf8(c, "Eject before disconnecting");
-        return;
+    cp.msg_folder = 0;
+    if (scan && oled_pages()) {
+        st.msg_win = win;
+        oled_scan(win, src, btn);
+    } else {
+        c = text(win, 16, 0, 343, 24);
+        widget_set_name(c, "msg_heading");
+        widget_set_text_utf8(c, scan ? "Updating Local Music" : "Connected");
+        slider_label(c, 16, 0, 343, MSG_HEAD_H, MSG_HEAD_PX, "classic-light");
+        c = text(win, 16, 0, 343, 20);
+        widget_set_name(c, "msg_line");
+        slider_label(c, 16, 0, 343, 20, MSG_LINE_PX, "default");
+        if (!scan) {
+            st.usb_win = win;
+            if (g_usbmode != 1) widget_set_text_utf8(c, "Eject before disconnecting");
+            return;
+        }
+        st.msg_win = win, cp.msg_src = src, cp.msg_btn = btn, cp.msg_line = c;
+        widget_move_resize(btn, 127, 248, 121, 34);
+        for (unsigned i = 0; i < sizeof state / sizeof *state; ++i) {
+            widget_set_prop_int(btn, style_key(key, state[i], "bg_color"), 0);
+            widget_set_prop_str(btn, style_key(key, state[i], "font_name"), "classic-light");
+            widget_set_prop_int(btn, style_key(key, state[i], "font_size"), CONFIRM_CELL_PX);
+        }
+        text_ink(btn, 0xffffffffu, INK_BUTTON);
     }
-    st.msg_win = win, cp.msg_src = src, cp.msg_btn = btn, cp.msg_line = c;
-    widget_move_resize(btn, 127, 248, 121, 34);
-    for (unsigned i = 0; i < sizeof state / sizeof *state; ++i) {
-        widget_set_prop_int(btn, style_key(key, state[i], "bg_color"), 0);
-        widget_set_prop_str(btn, style_key(key, state[i], "font_name"), "classic-light");
-        widget_set_prop_int(btn, style_key(key, state[i], "font_size"), CONFIRM_CELL_PX);
-    }
-    text_ink(btn, 0xffffffffu, INK_BUTTON);
     cp.msg_seen[0] = 0, cp.msg_part = -1, cp.msg_total = 0;
     if (cp.msg_counting != 1) { /* one running answers this dialog too */
         unsigned long thread;
@@ -644,6 +726,18 @@ void msg_paint(void *w, void *canvas) {
     if (!lcd) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
     int scan = w == st.msg_win, dy = I(w, W_Y), head = scan ? 159 : 228, line = scan ? 188 : 255;
+    if (scan && cp.msg_folder) { /* OLED's: the rows are widgets; the bar while measurable */
+        msg_sync();
+        rect_t track = { SCAN_X, SCAN_BAR_Y - dy, SCAN_BAR_W, 6 }, part = track;
+        part.w = cp.msg_part < 6 ? 6 : cp.msg_part;
+        unsigned rest = ipod_light() ? 0xffd1d1d1u : 0xff000000u | theme()->np_track_rgb;
+        for (int i = 0; cp.msg_part >= 0 && i < 6; ++i) {
+            round_row(canvas, &track, 3, i, rest);
+            round_row(canvas, &part, 3, i, 0xff000000u | scheme()->tones[0]);
+        }
+        stock_canvas_set_fill_color(canvas, fill);
+        return;
+    }
     void *heading = widget_lookup(w, "msg_heading", 1), *below = widget_lookup(w, "msg_line", 1);
     if (scan) msg_sync();
     bar_place(heading, 16, head, 343, MSG_HEAD_H);

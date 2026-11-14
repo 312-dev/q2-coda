@@ -30,7 +30,7 @@ SUNRISE_RGB = [(1.00, 0.74, 0.38), (0.96, 0.56, 0.46), (0.92, 0.38, 0.36), (0.74
 
 class Lk(C.Structure):
     _fields_ = [*((n, C.c_void_p) for n in 'img full date pct card title artist hint'.split()),
-                *((n, C.c_int) for n in 'built_in info page black large'.split()),
+                *((n, C.c_int) for n in 'built_in info page black large oled'.split()),
                 ('timer', C.c_uint), ('shown', C.c_uint), ('full_key', C.c_uint),
                 ('thumb', C.c_void_p * 6), ('small', C.c_void_p * 6)]
 

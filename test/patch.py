@@ -8867,6 +8867,21 @@ m.playtime=30; settle(m); off=SLOT+hs[0]+hs[1]-(178-hs[2])//2; assert y(m)==off;
 def seen(i): top=SLOT+sum(hs[:i])-off; return max(0,min(top+hs[i],178)-max(top,0))
 assert [seen(i) for i in range(5)]==[0,21,135,22,0]
 assert [{x[3]>>24 for x in m.ink(i)} for i in range(5)]==[set(),{255*21*21//(97*97)},{255},{255*22*22//(SLOT*SLOT)},set()]; passed()
+# OLED: Inter from the 24 px text column with no extra strikes, the playing line in Medium and LYRIC_LIT, the others
+# in Regular and Text Secondary; then the view's border paint fades its top and foot 32 rows, each a fill of the
+# page's black from opaque at the edge to clear inside, at the edges of what its ancestors show of it.
+CONFIG['THEME']='3'
+try:
+    m=karaoke(); m.show(8); m.at_ms(); m.at_ms(1000); m.playtime=9; m.at_ms(); m.at_ms(275); loop(m,ms=0)
+    m.k_inks=[]; m.clip=(0,0,375,SLOT); m.paint(m.lyric_row(1),gap=0)
+    assert [(x[0],x[1],x[3],x[4],x[6]) for x in m.k_inks]==[('Two two',24,LIT,27,'inter-medium')],m.k_inks
+    m.k_inks=[]; m.paint(m.lyric_row(2),gap=0)
+    assert [(x[0],x[1],x[3],x[6]) for x in m.k_inks]==[('Three',24,color_t(0xababab),'inter')],m.k_inks
+    m.word(m.slide+O['W_H'],178); m.word(m.win+O['W_H'],262); m.bands=[]; m.paint(m.lrc,gap=0)
+    fades=sorted((b[1],b[4]) for b in m.bands if b[3]==1 and b[2]==375)
+    want=sorted([(i,(255*(32-i)//32)<<24) for i in range(32)]+[(177-i,(255*(32-i)//32)<<24) for i in range(32)])
+    assert fades==want,fades[:4]; passed()
+finally: del CONFIG['THEME']
 # Let go, the wheel leaves a row at the top, its lines all LYRIC_REST; Play/Pause held there moves nothing and opens
 # the song menu, as anywhere on Now Playing.
 SEEK='[00:05.00]One\n[00:09.70]'+'abcdefghi '*3+'abcdefghi\n[00:12.00]Three\n[00:20.00]Four\n'
@@ -19903,8 +19918,8 @@ assert [c[:2] for c in m.calls if c[0] in ('stock_savercover','widget_invalidate
 def put(m,w,*g):
     for k,v in zip(('W_X','W_Y','W_W','W_H'),g): m.word(w+O[k],v)
 def blank(m): m.bands=[]; m.letters=[]; m.rounded=[]; m.image_draws=[]; m.calls=[]
-def lock_cl(large=0,light='1',picture='screensaver_default',battery='1',status=0,clock=(16,42),bar_y=None):
-    SETUP[:]=[lambda k:(k.config.update(THEME='1',LIGHT=light,LOCKCLOCK=str(large),BATTERY=battery),k)]
+def lock_cl(large=0,light='1',picture='screensaver_default',battery='1',status=0,clock=(16,42),bar_y=None,theme='1'):
+    SETUP[:]=[lambda k:(k.config.update(THEME=theme,LIGHT=light,LOCKCLOCK=str(large),BATTERY=battery),k)]
     try: m=lock_machine(picture)
     finally: SETUP.clear()
     w={n:m.node(k,n) for k,n in (('image','img_screensaver'),('view','view_shade'),('digit_clock','clock_time'),('digit_clock','clock_date'),('label','label_battery'),
@@ -19971,6 +19986,19 @@ def tapped(x,y):
         bx,by,bw,bh=screen_box(lk,k)
         if lk.nodes[k]['visible'] and bx<=x<bx+bw and by<=y<by+bh: return k
 assert all(tapped(x,y)==w['view_playinfo'] for x in (16,187,358) for y in range(185,192)) and tapped(187,184)==w['view_timeinfo']; passed()
+# OLED's lock screen (AWTK's sizes, the design's px times 1.21): the time 56 px Inter Medium centred with its digits on y 120 (Large 96), the date 16 px under it in
+# Text Secondary, the song two centred lines at rest on an ellipsis, with no card, cover, battery or hint; the picture
+# dimmed 50% toward black over the whole window, Black black. (Dark half: a label stores its final ink there.)
+lk,w=lock_cl(theme='3',light='0'); box_=lambda n: screen_box(lk,w[n]); font_=lambda n:(lk.nodes[w[n]]['style:normal:font_name'],lk.nodes[w[n]]['style:normal:font_size'])
+assert box_('clock_time')==(0,69,375,102) and font_('clock_time')==('inter-medium',68) and lk.nodes[w['clock_time']]['style:normal:text_align_h']=='center'
+assert box_('clock_date')==(0,157,375,24) and font_('clock_date')==('inter',19) and lk.nodes[w['clock_date']]['format']=='MMM D, Y'
+assert (lk.nodes[w['clock_date']]['style:normal:text_color']&0xffffffff)==color_t(0xababab)==(lk.nodes[w['scrlabel_artist']]['style:normal:text_color']&0xffffffff)
+assert all(lk.nodes[w[n]]['visible']==0 for n in ('label_battery','img_battery','pgbar_battery','view_shade','img_playcover','img_slide'))
+assert box_('scrlabel_title')==(24,200,327,30) and font_('scrlabel_title')[1]==24 and box_('scrlabel_artist')==(24,232,327,24) and font_('scrlabel_artist')[1]==18
+assert all(lk.nodes[w[n]].get('hscroll_label_set_ellipses')==1 and lk.nodes[w[n]].get('hscroll_label_set_only_focus')==1 for n in ('scrlabel_title','scrlabel_artist'))
+lock_paint(lk,w); assert (0,0,375,320,0x80000000) in [b[:5] for b in lk.bands] and lk.nodes[w['view_playinfo']]['style:normal:bg_color']==0; passed()
+lk,w=lock_cl(theme='3',large=1); assert screen_box(lk,w['clock_time'])==(0,33,375,174) and lk.nodes[w['clock_time']]['style:normal:font_size']==116
+lk,w=lock_cl(theme='3',picture='q2pod:black'); lock_paint(lk,w); assert (0,0,375,320,color_t(0)) in [b[:5] for b in lk.bands]; passed()
 # A corner painter with no table for its radius takes a hard corner: a ring whose radius, or its radius less one, has none (and 0, its less-one off the table's front).
 def ring(R):
     lk,_=lock_cl(); r=lk.alloc(16)
@@ -21271,6 +21299,18 @@ for w in (*lines.values(),*values.values()):
     assert (m.nodes[w]['style:normal:font_name'],m.nodes[w]['style:normal:font_size'])==('classic-light',17),m.nodes[w]
 assert {m.nodes[v]['style:normal:text_color'] for v in values.values()}=={signed(color_t(0x8a8a8a))}
 assert not any(n.get('name')=='ringnav_genre_scroll' for n in m.nodes.values()); passed()
+# OLED's table (tools/ipod.py np_info_table) takes the same rows: the bit depth joins Format's value ("FLAC, 16-bit"),
+# stock's English "Encoding" and "Bitrate" read "Format" and "Bit Rate", the values white in the dark half.
+CONFIG.clear(); CONFIG.update(THEME='3',LIGHT='0')
+m=InfoMachine(); m.handlers[syms['getFormatString']]='i:format'
+lines={k:m.node('label',k,text=v) for k,v in stock_lines.items()}
+values={k:m.node('hscroll_label',k+'_value') for k in stock_lines}
+win=m.node('window','playing_page',[*lines.values(),*values.values()])
+for l in (*lines.values(),*values.values()): m.word(l+O['W_PARENT'],win)
+m.call(address=payload_syms['ringnav_np_info'],args=(win,0,0,0),gap=0)
+assert [m.nodes[l]['text'] for l in lines.values()]==['Album','Genre','File Size','Year','Format','Bit Depth','Bit Rate','Sample Rate','Location']
+assert [m.nodes[v]['text'] for v in values.values()]==['Kid A','Unknown','35.92 MB','2000','FLAC, 16-bit','16-bit','950 kbps','44.1 kHz','SD:/Music/Radiohead']
+assert {m.nodes[v]['style:normal:text_color'] for v in values.values()}=={signed(color_t(0xffffff))}; passed()
 CONFIG.clear()
 # Genre shows in a private scroller, stock's label hidden as its source and left alone; its text is set once,
 # so stock's next 250 ms fill resets nothing. Only a value wider than the label moves, on the album marquee's

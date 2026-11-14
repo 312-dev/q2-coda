@@ -925,7 +925,7 @@ def images(t):
     if t['painter[PAINT_VOLUME]']:
         for half, rgb in SPEAKER_INKS.items():
             out |= {f'{prefix}_spk_quiet_{half}': speaker(False, rgb), f'{prefix}_spk_loud_{half}': speaker(True, rgb)}
-    if t['painter[PAINT_PAGES]']:
+    if t['painter[PAINT_PAGES]'] == 1:  # PAGES_CLASSIC_LIGHT: Classic's own pages' art
         out |= {f'{prefix}_sun_{name}': sun(*a) for name, a in SUNS.items()}
         out |= {f'{prefix}_{name}_w': png(10, 11, compose((0, 0, 10, 11), [(path(d), lambda x, y: (0xffffff, 1))])) for name, d in DARK_STATE.items()}
         out |= {f'{prefix}_orb_note': png(116, 116, orb(100, False)), f'{prefix}_orb_usb': png(130, 130, orb(114, True))}

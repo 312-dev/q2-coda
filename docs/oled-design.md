@@ -402,7 +402,7 @@ pattern.
 | Quick Settings                      | Own                         | Tiles become rows: the theme has no tiles                                                                  |
 | Search                              | Own                         | An iPod classic's letter strip at y 216-254 under four single-line results ([ipod](ipod.md#search))         |
 | Keyboard                            | Own                         | Stock's keys as `#1C1C1E` boxes on black, the wheel's key in the accent ([ipod](ipod.md#keyboard))          |
-| Lock screen                         | Own                         | Clock 56 px Inter Medium centred, date 16 px Text Secondary, black                                         |
+| Lock screen                         | Own                         | Clock 56 px Inter Medium centred, date 16 px Secondary, the song in two lines; black or the picture at 50% |
 
 The concept's Apple Music, Apple TV, CD sync and storage pages have no Q2 Pod equivalent and are
 out of scope. Spotify's pages follow the list patterns.

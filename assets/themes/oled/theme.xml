@@ -99,7 +99,7 @@
     <element name="title" font="inter-medium" font_px="27"/>
     <element name="artist" font="inter"/>
     <element name="album" caps="0" opacity="255"/>
-    <element name="info" font="inter" font_size="18"/>
+    <element name="info" font="inter" font_size="18" light.value="#010101" dark.value="#FFFFFF"/>
     <element name="scrubber" height="6" scrub_height="6" track="#333333"/>
     <element name="modes" icons="1"/>
   </view>
@@ -115,7 +115,7 @@
     <element name="rows" height="32" detail_height="52" text_x="24" title_y="4" title_h="24" detail_y="31" detail_h="20"/>
     <element name="title" height="0"/>
   </view>
-  <view name="pages"><element name="own" art_final="1"/></view>
+  <view name="pages"><element name="own" painter="oled" art_final="1"/></view>
   <!-- Toasts and confirms (oled-design.md Dialogs and toasts, patch/feedback.c): a toast is a #1c1c1e pill centred on
        y 252 over the page, which keeps its status row and selection; a confirm is a dialog page, its question the
        status row's title, its rows Cancel (selected) and the action's verb -->
