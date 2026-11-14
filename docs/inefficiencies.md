@@ -72,12 +72,10 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 - **Fix:** look themes up by id, and assert over `builtins()` instead of a literal length.
 - **Effort:** S.
 
-### 26. The stock version is written in three places in `build.py`
+### 26. The stock version is written in three places in `build.py` (resolved)
 
-- **Where:** `tools/build.py:1731` (`STOCK_VERSION = 'V1.36'`), `:1782` (`'Q2 Firmware V1.36/update.tar'`), and the docstring and usage text; `tools/build.py:1755` writes `DiamondBond/q2-pod` into `Q2POD_UA` although `REPO` (`:13`) holds it.
-- **Impact:** a rebase or a fork edits each by hand; `tools/rebase.py apply` rewrites pins, but whether it rewrites the member path is **unconfirmed** (read `apply`, `tools/rebase.py:774`).
-- **Fix:** build the member path from `STOCK_VERSION` and the user agent from `REPO`.
-- **Effort:** S.
+- **Where:** `tools/build.py` (`STOCK_VERSION`, the ZIP member `'Q2 Firmware V1.36/update.tar'`, `stock_header`'s `Q2POD_UA`), `pins()` in `tools/rebase.py`.
+- **State:** `Q2POD_UA`, the contact sent with lyrics and cover searches (`patch/onlinematch.c`), is built from the module's `REPO`, never from `--update-repo`; `test_stock_header_versions` in `test/unit/test_build.py` pins it, including for a build with another `--update-repo`. The stock version stays written out: on a rebase `pins()` rewrites the ZIP member path (`text.replace(old.member, new.member)`) and the version text, so a new stock firmware needs no hand edit of either.
 
 ### 27. `DEMO_SHA` is recorded but never compared (resolved)
 

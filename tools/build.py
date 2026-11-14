@@ -2003,7 +2003,7 @@ def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
                f'#define Q2POD_DEV {1 if dev else 0}',  # navigation.c stale_note
                f'#define Q2POD_REPO "{repo}"',  # netupdate.c: the repo whose latest release it fetches
                '#define Q2POD_SIGN_KEY {' + ','.join(f'0x{b:02x}' for b in key or signing_key(None, False)) + '}',  # release_sig.c
-               f'#define Q2POD_UA "Q2Pod/{VERSION} (https://github.com/DiamondBond/q2-pod)"']  # onlinematch.c, as MusicBrainz asks
+               f'#define Q2POD_UA "Q2Pod/{VERSION} (https://github.com/{REPO})"']  # onlinematch.c, as MusicBrainz asks: the project's contact, not --update-repo's
     header.append(f'#define THEME_N {len(themes)}')  # theme_engine.c setting_counts[]
     header.append(f'#define THEME_KEYS {len(theme_keys(themes))}')  # navigation.c st.own[], themes.inc theme_keys[]
     from art import corner_table, qs_lit
