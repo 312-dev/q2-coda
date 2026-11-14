@@ -469,7 +469,7 @@ the hook and shows every recoloured part; nothing needs a restart.
 
 ## Themes
 
-Minimal (`THEME` 0), Classic (1) and Modern (2) are rows of `themes[]` (`patch/navigation.c`; the types are in
+Minimal (`THEME` 0), Classic (1) and Modern (2) are rows of `themes[]` (`patch/theme_engine.c`, from the generated `themes.inc`; the types are in
 `patch/theme.h`); a stored `THEME` past the last row reads as 0 (`config_value`). Code asks the active theme for a field, never which theme it is. `theme()` and
 `scheme()` read the settings first (`accent()`), then return `&themes[st.theme]` and its scheme for
 the stored accent.
