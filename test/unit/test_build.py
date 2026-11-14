@@ -1199,3 +1199,30 @@ def test_build_refuses_a_version_not_of_three_single_digits(tmp_path, monkeypatc
                                              ('17.6', 0, False), ('1.8.0', 10, False)])
 def test_version_ok(version, beta, ok):
     assert build.version_ok(version, beta) == ok
+
+
+# The rootfs's hardening (docs/building.md#what-the-rootfs-drops), on stand-in files shaped as stock's.
+STOCK_SHADOW = b'root:$5$salt$hash:::::::\ndaemon:*:::::::\nnobody:*:::::::\n'
+
+
+def test_lock_root_leaves_no_password_login():
+    assert build.password_logins(STOCK_SHADOW) == ['root']
+    locked = build.lock_root(STOCK_SHADOW)
+    assert locked == b'root:*:::::::\ndaemon:*:::::::\nnobody:*:::::::\n' and build.password_logins(locked) == []
+
+
+@pytest.mark.parametrize('field, logs_in', [(b'$5$s$h', True), (b'', True), (b'*', False), (b'!', False), (b'!$5$s$h', False)])
+def test_password_logins_counts_an_empty_field_or_a_hash(field, logs_in):
+    assert build.password_logins(b'daemon:*:::::::\nuser:' + field + b':::::::\n') == (['user'] if logs_in else [])
+
+
+@pytest.mark.parametrize('shadow', [b'daemon:*:::::::\n', STOCK_SHADOW + b'root:x:::::::\n'])
+def test_lock_root_wants_one_root(shadow):
+    with pytest.raises(ValueError, match='Unexpected /etc/shadow'):
+        build.lock_root(shadow)
+
+
+def test_the_serial_getty_goes():
+    inittab = (b'::sysinit:/etc/init.d/rcS\n\n# Put a getty on the serial port\n'
+               b'console::respawn:/sbin/getty -L ttyS3 115200 vt100 # GENERIC_SERIAL\n\n# Stuff to do\n')
+    assert inittab.replace(*build.SERIAL_GETTY) == b'::sysinit:/etc/init.d/rcS\n\n# Stuff to do\n'

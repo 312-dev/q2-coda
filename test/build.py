@@ -457,6 +457,13 @@ def validate_assets(directory):
     assert read('rootfs.squashfs', S90PLAY) == expected_start
     assert read('rootfs.squashfs', S11LOGO) == read('stock.squashfs', S11LOGO).replace(*LOGO_HOOK)  # the card's logo, if saved
     assert read('rootfs.squashfs', BLUEALSA2) == read('stock.squashfs', BLUEALSA2).replace(*BT_KEEPALIVE)  # keep-alive 5 s
+    # No password logs in and no getty runs on the serial pad (docs/building.md#what-the-rootfs-drops).
+    from build import SHADOW, INITTAB, SERIAL_GETTY, lock_root, password_logins
+    shadow = read('rootfs.squashfs', SHADOW)
+    assert password_logins(read('stock.squashfs', SHADOW)) == ['root'] and password_logins(shadow) == []
+    assert shadow == lock_root(read('stock.squashfs', SHADOW))
+    inittab = read('rootfs.squashfs', INITTAB)
+    assert b'getty' not in inittab and inittab == read('stock.squashfs', INITTAB).replace(*SERIAL_GETTY)
     # bluealsa: AAC capability, the two DROP jumps, the silence sites, and one appended LOAD payload.
     from build import BT_DROP, BT_DROP_HANDLER, BT_DROP_PAYLOAD, BT_SILENCE_SITES, patch_bluealsa, segments
     old, new = read('stock.squashfs', BLUEALSA), read('rootfs.squashfs', BLUEALSA)

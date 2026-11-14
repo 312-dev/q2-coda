@@ -364,6 +364,25 @@ BLUEALSA = 'usr/bin/bluealsa'
 BLUEALSA2 = 'usr/bin/bluealsa2'
 BT_KEEPALIVE = (b'bluealsa -c LDAC', b'bluealsa --keep-alive=5 -c LDAC')
 SCROBBLE_CA = 'etc/scrobble-ca.pem'
+# Every V1.36 unit has the same root password hash, and init runs a login on the board's serial pad (ttyS3).
+# Nothing on the Q2 logs in (q2remote, --dev only, runs /bin/sh itself), so root is locked and the getty goes;
+# the kernel's and init's messages still reach the console.
+SHADOW = 'etc/shadow'
+INITTAB = 'etc/inittab'
+SERIAL_GETTY = (b'# Put a getty on the serial port\nconsole::respawn:/sbin/getty -L ttyS3 115200 vt100 # GENERIC_SERIAL\n\n', b'')
+def lock_root(shadow):
+    """shadow with root's password field '*', which no password matches."""
+    lines = shadow.split(b'\n')
+    rows = [i for i, l in enumerate(lines) if l.startswith(b'root:')]
+    check(len(rows) == 1, 'Unexpected /etc/shadow')
+    fields = lines[rows[0]].split(b':')
+    fields[1] = b'*'
+    lines[rows[0]] = b':'.join(fields)
+    return b'\n'.join(lines)
+def password_logins(shadow):
+    """The accounts in shadow a password logs in to: an empty field or a hash, not one starting * or !."""
+    return [l.split(b':')[0].decode() for l in shadow.split(b'\n')
+            if l.strip() and not l.split(b':')[1].startswith((b'*', b'!'))]
 AAC_44K1 = 0x317b8
 # DROP is acknowledged before the encoder handles its signal. Flush in the control
 # thread instead, so a delayed signal cannot discard the next track's first PCM.
@@ -1971,6 +1990,13 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     bluealsa = patch_bluealsa(cat(BLUEALSA))
     (out/'bluealsa').write_bytes(bluealsa)
     (out/'watchdog').write_bytes(cat(WATCHDOG).replace(*WATCHDOG_SLEEP))
+    shadow = lock_root(cat(SHADOW))
+    check(not password_logins(shadow), 'A password still logs in')
+    (out/'shadow').write_bytes(shadow)
+    inittab = cat(INITTAB)
+    inittab, gettys = inittab.replace(*SERIAL_GETTY), inittab.count(SERIAL_GETTY[0])
+    check(gettys == 1 and b'getty' not in inittab, 'Unexpected inittab')
+    (out/'inittab').write_bytes(inittab)
     for address, old, new in ARTIST_ALBUMS:
         patch_word(patched, address, old, new, 'artist detail opens on Albums')
     patch_word(patched, *SHUFFLE_CALL, jal(ps['ringnav_shuffle']),
@@ -2193,6 +2219,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                       (BLUEALSA2.encode(), out/'bluealsa2'), (DEFAULT_CONFIG.encode(), out/'config.ini'),
                       (LOGO.encode(), logo)):
         p = swap_inode(p, path, src)
+    p = swap_inode(p, SHADOW.encode(), out/'shadow')
+    p = swap_inode(p, INITTAB.encode(), out/'inittab')
     aic_notifier = None
     if aic_idle_wait:
         from aic import MODULE_PATH, PATCH_POLICY, STOCK_SHA256, patch_module
