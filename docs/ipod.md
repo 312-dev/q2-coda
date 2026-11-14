@@ -193,16 +193,27 @@ frame is that much taller, Home's window draws its rows from the window's top do
 draws the rest (`coverflow_home_bar`, from the bar's background paint, with Home on top and no
 window sliding, as Home's paint draws nothing outside its window). OLED's `split_art_up` is the
 bar's whole 58, so the art reaches the top edge and the status row's play state and battery stand
-over it. Each of their pixels is inked white or black, whichever has the higher WCAG contrast
-against the art pixel under it (relative luminance from a 256-entry linear table; white while it
-is at most 0.179), and an antialiased edge blends that ink by its share, as Scrolly's feed-end line
-does. To get the glyphs alone, the bar's background leaves the pane's rows its flat ground when it
-draws straight onto the screen; the glyphs paint on that, and the bar's border paint
+over it. Each glyph is drawn in one ink, white or black, whichever has the higher WCAG contrast
+against the art under it, as Scrolly's feed-end line does: the art's relative luminance (from a
+256-entry linear table) averaged over the glyph, each pixel weighted by the glyph's coverage
+there, white while that is at most 0.179. The glyph keeps its shape, and an antialiased edge blends
+the ink over the art by its share, so a play state or battery over lettering stays one smooth
+shape rather than a speckle of both inks. A glyph is a run of the bar's columns with ink, parted
+from the next by four empty ones (`INK_GAP`; a pause's two bars are one glyph). It keeps its ink
+until the mean passes the bound by 0.03 (`INK_HOLD`), so a mean the pan carries along the bound
+doesn't flicker: on the emulator's test covers (30 s pans) a hold of 0.03 left a glyph changing ink
+at most twice, each time for seconds, where with none a battery over lettering changed up to ten
+times, and inside that band either ink still has at least 3.98:1. The ink last chosen is held per pane column
+(`home.held`). To get the glyphs alone, the bar's background leaves the pane's rows its flat ground
+when it draws straight onto the screen; the glyphs paint on that, and the bar's border paint
 (`coverflow_home_clip`, `home_ink`) reads each pixel's distance from the ground as the glyph's
-share and writes the art with the ink over it, only within the paint's clip. A pan step invalidates
-those rows of the bar with the window's, so the ink follows the art; the time stays left of the
-pane, grey on the list's ground. A glyph's own colour (the charging green, the low red, the
-battery's dim outline as a lighter share) becomes the contrast ink over the art. Where the bar
+share and writes the art with the ink over it, only within the paint's clip. A glyph at an edge
+where the clip, not the pane, ends (a repaint of part of the battery) keeps the ink it has, as its
+part alone would average differently. A pan step invalidates those rows of the bar with the
+window's, so the ink follows the art; the time stays left of the pane, grey on the list's ground.
+The battery's charging green and low red keep their own colours over the art, each pixel's share
+read against the glyph's most saturated pixel, and only its grey part (the dim outline as a
+lighter share, the nub) is inked (`INK_KEEP_STATUS_COLOURS`; 0 inks them with the rest). Where the bar
 draws off the screen, the art is painted under the glyphs as they are. With nothing
 playing, or a cover the frame cannot hold, the pane is the window's panel as in the other sets.
 
