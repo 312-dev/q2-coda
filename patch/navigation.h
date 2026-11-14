@@ -246,7 +246,7 @@ typedef struct {
     /* np_bar.c paint_scrubber's glide: the slider value it runs on from, since when, whether it was
      * playing, and its repaint */
     int np_glide_v, np_glide_play;
-    unsigned np_glide_at, np_glide_timer;
+    unsigned np_glide_at, np_glide_timer, np_glide_due;
     /* Classic's Spotify or Internet Radio Now Playing (stream_ipod): its slanted art's widget, and
      * the radio's bar, always full */
     void *stream_art, *stream_bar;
@@ -458,6 +458,11 @@ void chevron_icon(void *w, void *canvas, int right, int y, int selected);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
 void marquee_fade(void *w, void *canvas);
+/* np_marquee.c: Now Playing's lines as one marquee under a fading theme */
+int np_marq_owns(void *w);
+void np_marq_kick(void *w), np_marq_reset(void);
+unsigned np_marq_wait(unsigned max);
+unsigned np_glide_wait(unsigned max); /* np_bar.c: the progress bar's next pixel */
 /* np_bar.c: Now Playing's shuffle and repeat as the theme's own pair (playing.modes.icons) */
 void np_modes(void *win, void *canvas);
 void wheel_sb_arm(void *list);

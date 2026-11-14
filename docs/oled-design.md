@@ -313,6 +313,11 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   and its left end while it is scrolled away from its start, so it rests crisp; each goes from
   clear to the colour behind the text (the Canvas, or Accent Blue on the selection). A truncated
   text that is not scrolling keeps its ellipsis (`list.marquee.fade`).
+- **Now Playing's lines** move as one marquee: the title, artist and album that overflow hold at
+  rest 2.75 s, slide left together at 35 px a second (the longest line's pace; the others take the
+  same time), and land back at rest together, each followed by its own copy 40 px behind, so
+  nothing snaps back. The progress bar's fill moves a pixel at a time between the player's
+  seconds rather than a second's width at once.
 
 ## Screens
 

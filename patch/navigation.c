@@ -2062,6 +2062,10 @@ static int marq_moved(const void *info) {
  * end), and runs at HSCROLL_PACE at most (or at it, for a label with no speed, which would cover
  * any length in its duration). Stock's start does nothing for a running label. */
 int ringnav_hscroll_start(void *w) {
+    if (np_marq_owns(w)) { /* Now Playing's lines move together (np_marquee.c), from rest */
+        np_marq_reset();
+        return 0;
+    }
     unsigned speed = (unsigned)I(w, HSCROLL_SPEED);
     I(w, HSCROLL_DELAY) = MARQUEE_HOLD_MS;
     if (!speed || speed > HSCROLL_PACE) I(w, HSCROLL_SPEED) = HSCROLL_PACE;
@@ -5060,6 +5064,7 @@ int ringnav_playing(void *win, void *ctx) {
     st.np_lrc = widget_lookup(win, "scroll_lrc", 1);
     st.lyric_song = st.lyric_rows_song = np_track(); /* no song change at the start */
     lyric_init();                                    /* the rows stock's init built */
+    np_marq_reset();
     void *lyric = widget_lookup(win, "view_lyric", 1);
     static const unsigned touch[] = { EVT_POINTER_DOWN, EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
     for (unsigned i = 0; lyric && i < sizeof touch / sizeof *touch; ++i)
@@ -10330,7 +10335,7 @@ int ringnav_sleep(void *loop) {
     } else if (time_now_ms() - st.last_input >= IDLE_MS &&
                !window_manager_is_animating(window_manager()) && !np_animating() &&
                !coverflow_turning())
-        sleep_ms(IDLE_SLEEP_MS);
+        sleep_ms(np_glide_wait(np_marq_wait(IDLE_SLEEP_MS))); /* by the next frame due */
     tone_dark = 0; /* after the polls: a click of theirs is this pass's too */
     return stock_sleep_trampoline(loop);
 }

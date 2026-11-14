@@ -1756,7 +1756,7 @@ def test_the_glide_repaints_the_slider_a_pixel_at_a_time(fw, ui, now, st):
     w = ui.box(now.slider)[2]
     scrubber(fw, now.slider, Canvas(fw))
     (t,) = ui.due('bar_glide')
-    assert ui.timers[t][2] == max(33, min(1000, 200 * 1000 // w))  # a 200 s track: ms per pixel
+    assert ui.timers[t][2] == max(33, min(1000, -(-200 * 1000 // w)))  # a 200 s track: ms per pixel, rounded up
     scrubber(fw, now.slider, Canvas(fw))
     assert len(ui.due('bar_glide')) == 1  # one at a time
     now.status = 3
@@ -3041,3 +3041,97 @@ def test_song_fit_keeps_the_title_and_drops_a_squeezed_artist(fw, place, room, t
     got = fw.fn('song_fit', C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.POINTER(C.c_int))(
         place, room, title, 11, artist, C.byref(shown))
     assert (got, shown.value) == fit
+
+
+# Now Playing's lines as one marquee (np_marquee.c): hold, then every overflowing line slides its text and the gap
+# in the same time, a frame a pixel, and lands back at rest.
+NPM_GAP, NPM_HOLD, NPM_PX_S = (int(re.findall(rf'#define {n} (\d+)', NAVIGATION_SOURCE)[0])
+                               for n in ('NPM_GAP', 'NPM_HOLD_MS', 'NPM_PX_S'))
+
+
+class Marquee:
+    """OLED's Now Playing with a title text_w px wide and an album album_w, each 160 px of column."""
+    def __init__(self, fw, ui, mcl, st, text_w=300, album_w=200):
+        theme(fw, st, OLED)
+        self.now = Now(fw, ui, mcl, st)
+        self.fw, self.ui = fw, ui
+        fw.mock('style_get_int', lambda s, name, d, *_: 0)
+        fw.mock('hscroll_label_set_xoffset', lambda w, x, *_: struct.pack_into('<i', (C.c_char * 4).from_address(w + O['HSCROLL_XOFFSET']), 0, x))
+        for w, tw in ((self.now.title, text_w), (self.now.album, album_w)):
+            struct.pack_into('<i', (C.c_char * 4).from_address(w + O['HSCROLL_TEXT_W']), 0, tw)
+        self.pass_ms = (text_w + NPM_GAP) * 1000 // NPM_PX_S if text_w > 160 else (album_w + NPM_GAP) * 1000 // NPM_PX_S
+
+    def off(self, w):
+        return C.c_int.from_address(w + O['HSCROLL_XOFFSET']).value
+
+    def kick(self):
+        self.fw.fn('np_marq_kick', None, C.c_void_p)(self.now.title)
+
+    def step(self, ms):
+        """ms on, then the marquee's due timer"""
+        self.ui.now += ms
+        (t,) = self.ui.due('npm_tick')
+        self.ui.run(t)
+
+
+def test_the_lines_hold_then_slide_together_and_land_back_at_rest(fw, ui, mcl, st):
+    m = Marquee(fw, ui, mcl, st)
+    m.kick()
+    (t,) = ui.due('npm_tick')
+    assert ui.timers[t][2] == NPM_HOLD and m.off(m.now.title) == m.off(m.now.album) == 0  # at rest first
+    m.step(NPM_HOLD + m.pass_ms // 2)
+    half = m.pass_ms // 2
+    assert m.off(m.now.title) == (300 + NPM_GAP) * half // m.pass_ms  # each its own span in the same time
+    assert m.off(m.now.album) == (200 + NPM_GAP) * half // m.pass_ms
+    (t,) = ui.due('npm_tick')
+    assert ui.timers[t][2] <= 1000 // NPM_PX_S + 1  # the longest line's next pixel
+    m.step(m.pass_ms - half)  # landed: at rest together, the next hold
+    assert m.off(m.now.title) == m.off(m.now.album) == 0
+    (t,) = ui.due('npm_tick')
+    assert ui.timers[t][2] == NPM_HOLD
+
+
+def test_every_frame_moves_the_longest_line_one_pixel(fw, ui, mcl, st):
+    m = Marquee(fw, ui, mcl, st)
+    m.kick()
+    m.step(NPM_HOLD)
+    seen = [m.off(m.now.title)]
+    for _ in range(40):
+        (t,) = ui.due('npm_tick')
+        m.step(ui.timers[t][2])
+        seen.append(m.off(m.now.title))
+    assert [b - a for a, b in zip(seen, seen[1:])] == [1] * 40
+
+
+def test_the_page_opening_stops_stocks_own_timer_on_the_lines(fw, ui, mcl, st):
+    # stock's page init starts the title's own timer before the lines are bound: left running, it moved the
+    # title through the hold and between the marquee's frames
+    m = Marquee(fw, ui, mcl, st)
+    stopped = []
+    fw.mock('hscroll_label_stop', lambda w, *_: stopped.append(w) or C.c_int.from_address(w + O['HSCROLL_TIMER']).__setattr__('value', 0))
+    C.c_int.from_address(m.now.title + O['HSCROLL_TIMER']).value = 23
+    fw.fn('np_marq_reset', None)()
+    assert stopped == [m.now.title] and C.c_int.from_address(m.now.title + O['HSCROLL_TIMER']).value == 0
+
+
+def test_lines_that_fit_never_move_and_nothing_runs(fw, ui, mcl, st):
+    m = Marquee(fw, ui, mcl, st, text_w=100, album_w=150)
+    m.kick()
+    assert not ui.due('npm_tick') and m.off(m.now.title) == 0
+
+
+def test_a_covered_page_rests_its_lines_and_a_new_text_starts_from_rest(fw, ui, mcl, st):
+    m = Marquee(fw, ui, mcl, st)
+    m.kick()
+    m.step(NPM_HOLD + 2000)
+    assert m.off(m.now.title) > 0
+    ui.top = None  # another window on top
+    m.step(50)
+    assert m.off(m.now.title) == 0 and not ui.due('npm_tick')
+    ui.top = m.now.win
+    m.kick()
+    m.step(NPM_HOLD // 2)
+    assert m.off(m.now.title) == 0  # back on top: the hold first
+    # a new title: stock's start comes to ringnav_hscroll_start, which leaves it to the marquee, from rest
+    assert fw.fn('ringnav_hscroll_start', C.c_int, C.c_void_p)(m.now.title) == 0
+    assert not ui.due('npm_tick') and not fw.calls('stock_hscroll_start_trampoline')

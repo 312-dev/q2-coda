@@ -1545,6 +1545,7 @@ FUNCTIONS = {
  'hscroll_label_set_only_parent_focus': ('int', 'void *, int'),
  'hscroll_label_set_ellipses': ('int', 'void *, int'),
  'hscroll_label_set_xoffset': ('int', 'void *, int'),
+ 'hscroll_label_set_loop_interval_distance': ('int', 'void *, int'),  # Now Playing's lines' copy (np_marquee.c)
  'hscroll_label_start': ('int', 'void *'),
  'hscroll_label_stop': ('int', 'void *'),
  'widget_add_timer': ('unsigned', 'void *, int (*)(const void *), unsigned'),
@@ -1844,7 +1845,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
          '-fno-stack-protector','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
          '-Oz','-Wall','-Wextra','-Werror','-Wno-unused-parameter']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'np_marquee.c']
 
 def compile_payload(out):  # pragma: no mutate block
     """Compile and link the payload."""

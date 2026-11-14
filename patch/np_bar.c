@@ -267,6 +267,12 @@ int ipod_bar(void *canvas, int x, int y, int bw, int on, int mark) {
  * Classic's bar is ipod_bar's, drawn at that fill; the others' is stock's slider, whose fill is
  * drawn again to it over stock's, in np_fill's colour, bar_size high with np_theme's round ends. */
 #define GLIDE_MIN_MS 33 /* the fastest repaint, about 30 a second */
+/* ms until the bar's next pixel, or max when it wants none that soon (ringnav_sleep) */
+unsigned np_glide_wait(unsigned max) {
+    if (!st.np_glide_timer) return max;
+    unsigned left = st.np_glide_due - (unsigned)time_now_ms();
+    return (int)left < 0 ? 0 : left < max ? left : max;
+}
 static int bar_glide(const void *info) {
     (void)info;
     st.np_glide_timer = 0;
@@ -304,11 +310,10 @@ void paint_scrubber(void *w, void *canvas) {
         stock_canvas_set_fill_color(canvas, saved);
     }
     if (playing && !st.np_glide_timer) {
-        int per_px = n * 1000 / (bw > 0 ? bw : 1);
-        st.np_glide_timer = timer_add(bar_glide, (void *)0,
-                                      per_px < GLIDE_MIN_MS ? GLIDE_MIN_MS
-                                      : per_px > 1000       ? 1000
-                                                            : per_px);
+        int per_px = (n * 1000 + bw - 1) / (bw > 0 ? bw : 1); /* rounded up: a pixel a frame */
+        unsigned ms = per_px < GLIDE_MIN_MS ? GLIDE_MIN_MS : per_px > 1000 ? 1000 : per_px;
+        st.np_glide_due = (unsigned)time_now_ms() + ms;
+        st.np_glide_timer = timer_add(bar_glide, (void *)0, ms);
     }
 }
 
