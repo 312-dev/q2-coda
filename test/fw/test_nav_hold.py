@@ -1649,8 +1649,9 @@ def test_oled_says_what_an_in_place_action_did(hold, recs, ui, st, row, said):
     assert ui.toasts == [said] and len(hold.deques[hold.queue]) == 4
 
 
-@pytest.mark.parametrize('row, said', [('Add to Favourites', 'Added to Favorites'),
-                                       ('Remove from Favourites', 'Removed from Favorites')])
+# OLED's inset modal names the rows in US English, as its toasts do
+@pytest.mark.parametrize('row, said', [('Add to Favorites', 'Added to Favorites'),
+                                       ('Remove from Favorites', 'Removed from Favorites')])
 def test_oled_says_a_favourite_was_kept(hold, recs, ui, fw, st, row, said):
     use_set(st, 'oled')
     hold.now_playing([song(recs, i) for i in range(3)])
@@ -1848,6 +1849,40 @@ def test_classic_draws_a_choice_as_the_panel_too(fw, ui, st, recs, mcl):
     hold.pick('Group by: Album')
     lv = ui.lookup(hold.dialog, 'list_view', 1)
     assert ui.nodes[lv].rect()[3] == 2 * THEMES[st('theme').value]['page_row']
+
+
+def test_oled_draws_the_menu_as_the_inset_modal(fw, ui, st, recs, mcl):
+    """A modal set's hold menu (menu_modal.c): no title bar, its rows the panel's (259 px from x 58, 8 px padding, so
+    the rows' boxes reach the selection inset past it), 32 px each from y 66, six in view; the settings read as
+    settings, US English, and the menu opens on its first row."""
+    use_set(st, 'oled')
+    hold = Hold(fw, ui, st, recs, mcl).now_playing([song(recs, i) for i in range(3)])
+    hold.hold()
+    rows = hold.menu()
+    inset = THEMES[st('theme').value]['sel_inset']
+    lv = ui.lookup(hold.dialog, 'list_view', 1)
+    assert tuple(ui.nodes[lv].rect()) == (58 + 8 - inset, 66, 259 + 2 * (inset - 8), 6 * 32)
+    assert not ui.nodes[ui.lookup(hold.dialog, 'view_navbar', 1)].visible
+    assert all(tuple(ui.nodes[item].rect()[2:]) == (259 + 2 * (inset - 8), 32) for item in ui.kids(hold.view()))
+    assert rows[:4] == ['Play Next', 'Add to Queue', 'View Queue', 'Add to Favorites'] and 'Group by' in rows
+    assert ui.prop(hold.view(), '_ringnav_index', -1) == 0
+
+
+def test_oled_menu_on_songs_starts_with_sorting_a_gap_above_the_actions(fw, ui, st, recs, mcl):
+    """Songs (0xf001), whose action row holds stock's Sort: Sorting first, then a 12 px gap that is no row, then the
+    actions; the menu opens on Play Next, one tick under Sorting."""
+    use_set(st, 'oled')
+    hold = Hold(fw, ui, st, recs, mcl).songs_page('allmusic_page', [song(recs, i) for i in range(3)])
+    bar = ui.child(hold.page, 'view', 0, 0, 375, 32)
+    for _ in range(3):  # its label, Play All's image, Sort's bars
+        ui.child(bar, 'image')
+    st('action_view', C.c_void_p).value = bar
+    hold.hold()
+    rows = hold.menu()
+    kids = ui.kids(hold.view())
+    assert rows[0] == 'Sorting' and rows[1] is None and rows[2] == 'Play Next'
+    assert ui.nodes[kids[1]].rect()[3] == 12 and ui.nodes[kids[2]].rect()[1] == 32 + 12
+    assert ui.prop(hold.view(), '_ringnav_index', -1) == 1
 
 
 def test_add_to_playlist_opens_the_picker_guarded_by_the_menus_record(hold, recs, ui, st, fw):
@@ -2951,3 +2986,44 @@ def test_the_rtcs_seconds(fw, ui, data, now):
 def test_no_rtc_reads_zero(fw, ui):
     Card(fw)
     assert fw.fn('system__rtc_now', C.c_uint)() == 0
+
+
+def test_song_order_takes_the_sort_pickers_order_on_the_title_order(fw, st, recs):
+    """song_sort.c over a list loaded in stock's title order: Artist stably (the titles stay in order within an
+    artist), an untagged artist last either way; Album with its discs and tracks in their own order even descending;
+    Title descending reversed; nothing for Recently Added, which stock's query orders (g_sort_flag 3), or under a set
+    without the inset modal."""
+    use_set(st, 'oled')
+    saved = {}
+    fw.mock('write_int_config', lambda v, s, k, *_: saved.__setitem__(cstr(k), C.c_int(v).value))
+    flag = fw.var('fw_ctx_g_sort_flag', C.c_int)
+    rows = Rows(fw)
+    songs = [recs(title='A', artist='Beta', album='Two', track=2), recs(title='B', artist='', album='One', track=1),
+             recs(title='C', artist='alpha', album='Two', track=1), recs(title='D', artist='Beta', album='One', track=2)]
+    q = rows.rows(songs)
+    sort_set = fw.fn('song_sort_set', None, C.c_int, C.c_int)
+    order = fw.fn('song_order', None, C.c_void_p)
+
+    def titles():
+        return ''.join(field(r, REC_TITLE) for r in rows[q])
+    sort_set(1, 0)  # Artist, A to Z
+    order(q)
+    assert titles() == 'CADB' and flag.value == 0 and saved == {'SORTSELECT': 0, 'SONGSORT': 1, 'SONGDOWN': 0}
+    sort_set(1, 1)  # Z to A, the untagged one still last
+    order(q)
+    assert titles() == 'ADCB'
+    sort_set(2, 1)  # Album, Z to A: Two (tracks 1, 2), then One (tracks 1, 2)
+    order(q)
+    assert titles() == 'CABD'
+    sort_set(0, 1)  # Title, Z to A: the list reversed
+    order(q)
+    assert titles() == 'DBAC'
+    sort_set(3, 1)  # Recently Added, newest first: stock's flag 3, its query's order
+    assert flag.value == 3 and saved['SORTSELECT'] == 3
+    order(q)
+    assert titles() == 'DBAC'
+    flag.value = 0
+    sort_set(1, 0)
+    use_set(st, MINIMAL)
+    order(q)
+    assert titles() == 'DBAC'

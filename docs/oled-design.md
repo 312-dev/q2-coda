@@ -228,8 +228,8 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   Play All (a song already plays the rest of its list in order): Phosphor `shuffle` (regular, 20
   px) on the text column and "Shuffle" 28 px after it, both Accent Blue, white on the selection.
   The wheel reaches it from the first song; Centre shuffles the list, and Return from Now Playing
-  lands on it again. Sort's bars stay at its right,
-  one more tick up, until the options menu takes them.
+  lands on it again. Sort has no place on the row: it is the hold menu's Sorting row
+  ([Menus](#menus)).
 - **Folder view** reads as an album: the same 32 px rows. A song file is a track, its number in the
   album's column, the title from the library's tags (found by the file's path) at x 50 and its
   length on the right column when known; a file the library doesn't know shows its file name
@@ -348,6 +348,28 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   System > Wireless".
 - Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done.
 
+### Menus
+
+Actions on the highlighted item (the hold menus, Now Playing's More and a playlist's More) open as
+an inset modal over the page, which stays on screen dimmed half way to black; nothing is blurred.
+
+- **Panel:** opaque `#1C1C1E`, 259 px wide from x 58, top at y 58, 16 px corners, 8 px padding, no
+  title (the row behind says which item). Rows are 32 px, at most six in view, then they scroll
+  inside the panel.
+- **Rows:** Inter Regular 20 at the panel's 16 px inset; an action's Phosphor symbol (regular,
+  19 px) at the right in Text Secondary, white on the selection. The selection is the list's bar, 8
+  px in from the panel with 8 px ends.
+- **A setting** (Sorting, Speed, Shuffle, Repeat, Group by) has its symbol before the label, the
+  label 26 px further in, and its value alone at the right in Text Secondary; Centre opens a picker
+  in the same panel, the current choice with the accent's check before its label.
+- **Gaps:** a setting heading the menu stands 12 px above the actions; a destructive row (Delete
+  Song) comes last, 12 px below them, and asks before it acts. Space, never a rule.
+- The menu opens on its first action, lit; the wheel moves, Centre picks, Return closes it back to
+  the row it came from.
+
+Built by `patch/menu_modal.c` under a set with `modal` (OLED's). Now Playing's More and a
+playlist's More are stock pages, which such a set loads as dialogs (`tools/ipod.py` `modal_page`).
+
 ### Icons
 
 - One set: [Phosphor Icons](https://phosphoricons.com) (MIT), `@phosphor-icons/core` 2.1.1. The
@@ -397,7 +419,7 @@ pattern.
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
 | Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; an artist's covers titled by the artist |
 | Playlists                           | Two-line row with icon      | New Playlist... and the other action rows take the same 52 px pitch once there is a playlist, the picker's too |
-| Hold menu                           | Dialog                      |                                                                                                            |
+| Hold menu, More                     | [Menus](#menus)             | The inset modal over the page                                                                              |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
 | About                               | Key/value table             | Inert: no selection; values in Text Secondary                                                              |
 | Lock Screen settings                | List row, then pictures     | Three a row from the text column to the right column; the check is the one accent                          |
@@ -452,6 +474,8 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   artist and album in Inter (`playing.artist.font`), shuffle and repeat, the heart and More as the theme's
   own glyphs (`playing.modes.icons`), the marquee fades (`list.marquee.fade`), and Track Time (`NPTIME`), whose
   tap on the right-hand time shows the length or the time left.
+- Menus as the inset modal over the page ([Menus](#menus)): the set's `modal`, `patch/menu_modal.c`, the
+  Phosphor symbols as the theme's own art.
 - Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_inset` (the art from
   x 196 and y 52 to the edges, its top rows painted by the bar, panning slowly across its 110 % zoom with an
   eased turn at each end and 2 % of the zoom kept clear of the pane at each edge, so a cover's own border never

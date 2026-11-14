@@ -25,7 +25,7 @@
             stock_row="32" stock_body="32" stock_title_y="0" stock_title_h="32" toolbar="0"
             search_row="52" search_body="52" search_art="0" search_title_y="4" search_title24_y="4" search_title_h="28"
             search_meta_y="31" search_meta_h="20" np_art="150" np_bar_y="228"
-            split_row="204" split_art="196" split_art_up="6" split_inset="2"/>
+            split_row="204" split_art="196" split_art_up="6" split_inset="2" modal="1"/>
   <geometry set="oled"/>
   <!-- Colour (oled-design.md Colour): Accent Blue, one value for the bar, the progress fill and every mapped red, as
        its own scheme's five tones; white text on it in both halves; second lines in Text Tertiary (stock's #aaaaaa secondary text

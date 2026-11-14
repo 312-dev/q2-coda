@@ -735,4 +735,28 @@ extern int clicker_kind; /* CLICK_KIND_*, 0 the wheel's (zero at start, as .scra
 const char *clicker_text(void);
 void clicker_step(void);
 int clicker_route(int listening);
+/* menu_modal.c: the inset modal (docs/oled-design.md#menus) */
+enum { MM_ACTION, MM_SETTING, MM_CHOICE }; /* modal_row's how */
+enum { DIR_NONE, DIR_UP, DIR_DOWN };       /* modal_dir: a sort's direction */
+int modal_set(void);
+int modal_row_w(void);
+void *modal_gap(void *view);
+void modal_row(void *row, void *label, const char *icon, const char *value, int how);
+void modal_dir(void *row, int dir);
+void modal_frame(void *win, void *list);
+void modal_paint(void *w, void *canvas);
+int modal_rows_of(void *w);
+int modal_win(void *w);
+void modal_row_paint(void *w, void *canvas, void *row, rect_t r, int selected);
+void modal_more(void *win);
+void modal_playlist_more(void *win);
+/* song_sort.c: Songs' order under the inset modal's Sort picker */
+enum { SORT_TITLE, SORT_ARTIST, SORT_ALBUM, SORT_ADDED, SORT_N };
+int song_sort(void);
+int song_down(void);
+void song_sort_set(int sort, int down);
+int song_sort_commit(void);
+int song_sort_own(void);
+void song_order(void *list);
+
 #endif

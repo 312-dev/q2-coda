@@ -114,6 +114,9 @@ class Geometry:
     split_art: int = inc('HOME_SPLIT_W')
     split_art_up: int = 0
     split_inset: int = 0
+    # 1: Now Playing's More and a playlist's More open as dialogs over the page under them (MODAL_PAGES, modal_page), which
+    # the payload draws as the inset modal (menu_modal.c), as it does the hold menus; 0: full pages, the hold menus stock's
+    modal: int = 0
 
 
 SET0 = Geometry()
@@ -222,7 +225,7 @@ def with_geometry(g):
         NP_TIME_X=max(MARGIN, corner_x(g.bar + NP_TIMES_Y + 1, 14)))
 
 
-GEOM_VALS = ('bar', 'set_row', 'set_icon', 'batt_w', 'batt_h', 'text_x', 'lib_art', 'list_end', 'action_row', 'stream_row', 'stock_row', 'toolbar', 'status_y', 'right_x', 'list_fit', 'split_row', 'split_art', 'split_art_up', 'split_inset')  # Geometry fields the payload reads at run time (themes.inc geom_vals), not immediates
+GEOM_VALS = ('bar', 'set_row', 'set_icon', 'batt_w', 'batt_h', 'text_x', 'lib_art', 'list_end', 'action_row', 'stream_row', 'stock_row', 'toolbar', 'status_y', 'right_x', 'list_fit', 'split_row', 'split_art', 'split_art_up', 'split_inset', 'modal')  # Geometry fields the payload reads at run time (themes.inc geom_vals), not immediates
 
 
 def folder_pitch(g):
@@ -1355,7 +1358,24 @@ def fit_rows(g, top, pitch):
     return (g.list_end - top) // pitch * pitch
 
 
+# The menus a modal set opens over the page under them (Geometry.modal): each stays the page its set makes, as a dialog.
+MODAL_PAGES = ('playermore_page.bin', 'localmusic/playlistsmore_page.bin')
+
+
+def modal_page(data):
+    """A page as a dialog with no slide: the window manager paints the page under it, which the payload dims and
+    insets the menu over (menu_modal.c modal_more). Its init makes it modeless (to_modal), so navigator_to returns."""
+    root = decode(data)
+    check(root[0] == 'window', 'Unexpected modal page')
+    root[0] = 'dialog'
+    root[1] = [0, 0, 375, 320]  # a window takes the screen from the window manager; a dialog keeps its own box
+    root[2].pop('anim_hint', None)
+    return encode(root)
+
+
 def patch_asset(path, data, g=SET0):  # pragma: no mutate block
+    if g.modal and path in MODAL_PAGES:
+        return modal_page(patch_asset(path, data, dataclasses.replace(g, modal=0)))
     geo = with_geometry(g)
     pitch, body, inset = page_rows(g, PAGE_KIND.get(path, 'text'))
     stock = path in STOCK_ROWS
