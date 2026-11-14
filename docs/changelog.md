@@ -23,6 +23,7 @@
   - Now Playing: under **Theme: OLED** the track details page is a table, the name on the left in grey and the value on the right, one fact a line with thin rules between; the bit depth is part of Format ("FLAC, 16-bit").
   - Now Playing: under **Theme: OLED** the visualizer page opens on a new style, **Field**: soft glowing points in five colours that flow round the middle of the page and swell with the music, like iTunes' Magnetosphere. A tap still moves through the styles.
   - Library: under **Theme: OLED**, **Update Library**'s scan is a page like the others: the songs found ("312 of 704"), the folder being scanned and a **Cancel** row, with a thin progress bar under them. Centre on Cancel stops the scan, as Return does.
+  - Games: under **Theme: OLED** the Sudoku grid fits between the title and the bottom of the screen; its last row was cut off by the screen's rounded corners.
 - **1.8.2**:
   - Games: in Solitaire, Centre on a pile that can't take the cards you hold now picks that pile up instead. Before, nothing happened and the cards stayed held until you put them back or pressed Return, which looked like the game had stuck.
   - Themes: Chinese, Japanese and other text the theme's own face lacks is now drawn bold wherever **Classic** or **Modern** draws its text bold: Classic's lists, bar, info rows, Cover Flow, album panel and hold menu; Modern's bar title; and Now Playing's title in both. It used the regular system font.
