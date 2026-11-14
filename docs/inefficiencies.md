@@ -87,12 +87,11 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 - **Fix:** `check(sha(raw_demo) == DEMO_SHA, ...)` after `:1792`, or write `sha(raw_demo)`.
 - **Effort:** S.
 
-### 30. A new theme's Corners default follows its index
+### 30. A new theme's Corners default follows its index (resolved)
 
-- **Where:** `patch/theme_engine.c:183`: `config_value("IPOD", "ROUNDED", 2, !st.theme)`.
-- **Impact:** Round is the default for theme 0 alone, so any other theme's missing key reads Square whatever its `preset` says until the theme is picked once.
-- **Fix:** read the default from the theme's option row, as the own keys do (`theme_keys[k].def`, `patch/theme_engine.c:192`).
-- **Effort:** S.
+- **Where:** `settings_read` in `patch/theme_engine.c`.
+- **State:** a missing `ROUNDED` key reads the live theme's Corners `preset` (`option_of(&themes[st.theme], SETTING_ROUNDED)`), Square where the theme states none, so a new theme's preset holds before it is picked. The built-in themes read as before: Minimal Round; Modern, Classic and OLED Square.
+- **Guard:** `test_a_missing_rounded_follows_the_live_theme_s_preset_not_its_place` and `test_a_missing_rounded_reads_the_theme_s_corners` in `test/fw/test_navigation.py`.
 
 ## Build-time cost
 
