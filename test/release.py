@@ -38,7 +38,8 @@ with tempfile.TemporaryDirectory() as tmp:
         directory.mkdir()
         (directory/'update.tar').write_bytes(b'pod')
         (directory/'manifest.json').write_text('{}')
-    with patch('release.build', side_effect=fail_repeat), patch('release.validate'), patch('release.run', side_effect=lambda *a: '' if 'status' in a else 'revision'):
+    with patch('release.build', side_effect=fail_repeat), patch('release.validate'), patch('release.shelf.verify', return_value=True), \
+            patch('release.run', side_effect=lambda *a: '' if 'status' in a else 'revision'):
         try:
             release.package(pathlib.Path('stock.zip'), out)
         except ValueError as e:
@@ -64,6 +65,20 @@ with tempfile.TemporaryDirectory() as tmp:
     assert release.notes() == f'**{release.VERSION}**\n- A.\n  - B.'
     changelog.write_text(single)
     (out/'SHA256SUMS').write_text(''.join(f'{v}  {k}\n' for k, v in assets.items()))
+    # Signed with a key made here, standing in for the release key, as release.sign checks it.
+    key = pathlib.Path(tmp)/'k.pem'
+    subprocess.run(['openssl', 'genpkey', '-algorithm', 'ed25519', '-out', str(key)], check=True, capture_output=True)
+    pub = subprocess.run(['openssl', 'pkey', '-in', str(key), '-pubout'], check=True, capture_output=True).stdout
+    (pathlib.Path(tmp)/'assets/signing').mkdir(parents=True)
+    (pathlib.Path(tmp)/'assets/signing/q2-coda-release.pub').write_bytes(pub)
+    patch('release.PUBLIC_KEY', pathlib.Path(tmp)/'assets/signing/q2-coda-release.pub').start()
+    patch('signing.PUBLIC_KEY', pathlib.Path(tmp)/'assets/signing/q2-coda-release.pub').start()
+    with patch('release.run') as gh:  # unsigned: refused before contacting GitHub, as a Q2 would refuse it
+        try: release.upload(out)
+        except ValueError as e: assert 'update.tar.sig' in str(e)
+        else: raise AssertionError('Uploaded an unsigned release')
+        gh.assert_not_called()
+    release.sign(out, key=key.read_text())
     for failure in ('upload', 'download', 'corrupt', None):
         calls = []
         def gh(*args):
@@ -74,7 +89,7 @@ with tempfile.TemporaryDirectory() as tmp:
                 raise subprocess.CalledProcessError(1, args)
             if command == 'download':
                 target = pathlib.Path(args[-1])
-                for name in [*assets, release.GUIDE]:
+                for name in [*assets, release.SIGNATURE, release.GUIDE]:
                     (target/name).write_bytes((out/name).read_bytes() if failure != 'corrupt' else b'bad')
             return ''
         with patch('release.run', side_effect=gh), patch('release.BETA', 0):  # a beta never publishes
@@ -87,7 +102,7 @@ with tempfile.TemporaryDirectory() as tmp:
         assert any('--draft=false' in c for c in calls) == (failure is None)
         # Network Update's fixed names and the guide, no ZIPs.
         sent = {pathlib.Path(a).name for c in calls if c[4] == 'upload' for a in c[6:]}
-        assert failure == 'upload' or sent == {'update.tar', release.GUIDE, '--clobber'}, sent
+        assert failure == 'upload' or sent == {'update.tar', 'update.tar.sig', release.GUIDE, '--clobber'}, sent
     # An asset that isn't the build's update.tar must fail before contacting GitHub.
     (out/release.ASSET).write_bytes(b'other')
     with patch('release.run') as gh:

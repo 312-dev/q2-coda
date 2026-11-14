@@ -79,6 +79,12 @@ def library(tmp_path_factory):
     return host.build(tmp_path_factory.mktemp('fw'), extra)
 
 
+@pytest.fixture(scope='session')
+def signing_pem(library):
+    """The private half of the release key the library was built with (host.signing_key), as PEM text."""
+    return (library.parent/host.SIGNING_KEY).read_text()
+
+
 @pytest.fixture
 def fw(library, tmp_path):
     loaded = host.Fw(library, tmp_path)

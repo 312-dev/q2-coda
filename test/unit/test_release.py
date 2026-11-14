@@ -1,4 +1,5 @@
 """tools/release.py with fake builds and a fake gh: nothing is packaged for real or sent anywhere."""
+import base64
 import hashlib
 import io
 import json
@@ -11,6 +12,7 @@ import types
 import pytest
 
 import release
+import signing
 
 
 def sha(data):
@@ -21,6 +23,7 @@ def md5(data):
     return hashlib.md5(data).hexdigest()
 
 
+TRACKED = release.public_key(release.PUBLIC_KEY.read_bytes()).hex()  # assets/signing/q2-coda-release.pub's bytes
 MEMBERS = ['firmware_v20.info', 'recovery-update', 'recovery-update/xImage', 'recovery-update/rootfs.squashfs']
 KERNEL, ROOTFS = b'kernel', b'rootfs'
 
@@ -45,7 +48,7 @@ def built(directory, manifest=None, **tar):
     directory.mkdir(exist_ok=True)
     (directory/'rootfs.squashfs').write_bytes(ROOTFS)
     update_tar(directory/'update.tar', **tar)
-    fields = dict(version=release.TAG, update_repo=release.REPO, input_zip_sha256=release.ZIP_SHA,
+    fields = dict(version=release.TAG, update_repo=release.REPO, signing_key=TRACKED, input_zip_sha256=release.ZIP_SHA,
                   stock_demo_sha256=release.DEMO_SHA, rootfs_sha256=sha(ROOTFS), kernel_sha256=sha(KERNEL),
                   update_sha256=sha((directory/'update.tar').read_bytes()), **(manifest or {}))
     (directory/'manifest.json').write_text(json.dumps(fields))
@@ -90,7 +93,9 @@ def test_validate_names_the_suites_that_fail(tmp_path, scripts):
 
 @pytest.mark.parametrize('field,value,message', [
     ('version', 'V000I', '^Wrong build identity$'),
-    ('update_repo', 'someone/fork', "^Network Update fetches someone/fork's releases, not DiamondBond/q2-pod's$"),
+    ('update_repo', 'someone/fork', f"^Network Update fetches someone/fork's releases, not {release.REPO}'s$"),
+    ('signing_key', '00' * 32, '^Built with another release key than assets/signing/q2-coda-release.pub$'),
+    ('signing_key', None, '^Built with another release key than'),
     ('input_zip_sha256', 'x', '^Wrong stock identity$'),
     ('stock_demo_sha256', 'x', '^Wrong stock identity$'),
     ('rootfs_sha256', 'x', 'rootfs.squashfs: hash mismatch$'),
@@ -136,13 +141,26 @@ def test_validate_refuses_wrong_checksum_lines(tmp_path, scripts, line2, line3):
         release.validate(d)
 
 
+KEY = None
+
+
 @pytest.fixture
 def repo(tmp_path, monkeypatch):
-    """release's module globals pointed at a temporary checkout with this version's changelog entry."""
+    """release's module globals pointed at a temporary checkout with this version's changelog entry, a release key
+    made for the test (KEY its private PEM) and a signed sources.list."""
+    global KEY
     (tmp_path/'docs').mkdir()
     (tmp_path/'docs/changelog.md').write_text(f'- **{release.VERSION}**: One.\n')
     monkeypatch.setattr(release, 'ROOT', tmp_path)
     monkeypatch.setattr(release, 'source_sha256', lambda: 'source')
+    pem, pub = tmp_path/'k.pem', tmp_path/'assets/signing/q2-coda-release.pub'
+    pub.parent.mkdir(parents=True)
+    subprocess.run(['openssl', 'genpkey', '-algorithm', 'ed25519', '-out', str(pem)], check=True, capture_output=True)
+    subprocess.run(['openssl', 'pkey', '-in', str(pem), '-pubout', '-out', str(pub)], check=True, capture_output=True)
+    KEY = pem.read_text()
+    monkeypatch.setattr(signing, 'PUBLIC_KEY', pub)
+    monkeypatch.setattr(release, 'PUBLIC_KEY', pub)
+    monkeypatch.setattr(release.shelf, 'verify', lambda: True)
     return tmp_path
 
 
@@ -186,6 +204,14 @@ def test_package(repo, monkeypatch, tmp_path, capsys):
                           guide_sha256=sha(b'%PDF'), notes_sha256=sha(notes.encode()))
     assert (out/'release.json').read_text().endswith('}\n') and '\n  "tag"' in (out/'release.json').read_text()
     assert capsys.readouterr().out == f'Validated and reproducible: {out}\n'
+
+
+def test_package_wants_a_signed_app_list(repo, monkeypatch, tmp_path):
+    p = Packaging(monkeypatch)
+    monkeypatch.setattr(release.shelf, 'verify', lambda: False)
+    with pytest.raises(ValueError, match='^sources.list is not signed by the release key'):
+        release.package(pathlib.Path('stock.zip'), tmp_path/'out')
+    assert not (tmp_path/'out').exists() and not p.builds
 
 
 def test_package_wants_a_fresh_directory(repo, monkeypatch, tmp_path):
@@ -241,7 +267,8 @@ def test_package_wants_a_steady_source(repo, monkeypatch, tmp_path, kwargs):
     assert not (tmp_path/'out/release.json').exists()
 
 
-def packaged(root):
+def packaged(root, signed=True):
+    """A package as release.package leaves it, then signed with the test's key (release.sign) unless signed is off."""
     out = root/'package'
     (out/'build').mkdir(parents=True)
     (out/'build/update.tar').write_bytes(b'pod')
@@ -252,6 +279,8 @@ def packaged(root):
     (out/'release.json').write_text(json.dumps(dict(tag=release.VERSION, revision='rev', source_sha256='source',
                                                     assets={release.ASSET: sha(b'pod')}, guide_sha256=sha(b'%PDF'),
                                                     notes_sha256=sha(b'notes\n'))))
+    if signed:
+        release.sign(out, key=KEY)
     return out
 
 
@@ -269,7 +298,7 @@ class Gh:
             return self.tag
         if 'download' in args:
             target = pathlib.Path(args[-1])
-            for name in (release.ASSET, release.GUIDE):
+            for name in (release.ASSET, release.SIGNATURE, release.GUIDE):
                 (target/name).write_bytes(b'bad' if name == self.corrupt else (self.out/name).read_bytes())
         return ''
 
@@ -284,7 +313,7 @@ def test_upload_draft(repo, monkeypatch, capsys):
                            f'refs/tags/{release.VERSION}^{{}}')
     assert gh.calls[2] == (*prefix, 'create', release.VERSION, '--draft', '--target', 'rev', '--title', release.VERSION,
                            '--notes-file', out/'release-notes.md')
-    assert gh.calls[3] == (*prefix, 'upload', release.VERSION, out/release.ASSET, out/release.GUIDE, '--clobber')
+    assert gh.calls[3] == (*prefix, 'upload', release.VERSION, out/release.ASSET, out/release.SIGNATURE, out/release.GUIDE, '--clobber')
     assert gh.calls[4][:6] == (*prefix, 'download', release.VERSION) and gh.calls[4][6] == '--dir' and len(gh.calls) == 5
     assert (out/'release-notes.md').read_bytes() == b'notes\n'  # sent as packaged
     assert capsys.readouterr().out == f'Verified draft: https://github.com/{release.REPO}/releases/tag/{release.VERSION}\n'
@@ -295,6 +324,7 @@ def test_upload_sends_the_packaged_notes(repo, monkeypatch, tmp_path):
     Packaging(monkeypatch)
     out = tmp_path/'out'
     release.package(pathlib.Path('stock.zip'), out)
+    release.sign(out, key=KEY)
     body = (out/'release-notes.md').read_text()
     (repo/'docs/changelog.md').write_text(f'- **9.9.9**: Newer.\n- **{release.VERSION}**: Edited.\n')
     monkeypatch.setattr(release, 'source_sha256', lambda: 'source')
@@ -355,7 +385,7 @@ def test_upload_never_overwrites_a_published_release(repo, monkeypatch):
     assert len(gh.calls) == 1
 
 
-@pytest.mark.parametrize('name', [release.ASSET, release.GUIDE])
+@pytest.mark.parametrize('name', [release.ASSET, release.SIGNATURE, release.GUIDE])
 def test_upload_checks_what_landed(repo, monkeypatch, name):
     monkeypatch.setattr(release, 'BETA', 0)
     out = packaged(repo)
@@ -408,6 +438,66 @@ def test_upload_wants_matching_checksums(repo, monkeypatch):
     (out/'SHA256SUMS').write_text('wrong\n')
     gh = Gh(monkeypatch, out)
     with pytest.raises(ValueError, match='^Release checksums mismatch$'):
+        release.upload(out)
+    assert not gh.calls
+
+
+def test_sign_writes_a_signature_that_checks_and_records_it(repo):
+    out = packaged(repo, signed=False)
+    release.sign(out, key=KEY)
+    sig = (out/release.SIGNATURE).read_bytes()
+    assert len(sig) == 64 and signing.verify(signing.update_message(release.VERSION, out/release.ASSET), sig)
+    assert json.loads((out/'release.json').read_text())['signature_sha256'] == sha(sig)
+
+
+def test_sign_takes_the_brokers_base64(repo):
+    out = packaged(repo, signed=False)
+    sig = signing.sign(signing.update_message(release.VERSION, out/release.ASSET), KEY)
+    release.sign(out, base64.b64encode(sig).decode() + '\n')
+    assert (out/release.SIGNATURE).read_bytes() == sig
+
+
+def other_key(tmp_path):
+    pem = tmp_path/'other.pem'
+    subprocess.run(['openssl', 'genpkey', '-algorithm', 'ed25519', '-out', str(pem)], check=True, capture_output=True)
+    return pem.read_text()
+
+
+def test_sign_refuses_a_signature_that_doesnt_check(repo, tmp_path):
+    out = packaged(repo, signed=False)
+    message = signing.update_message(release.VERSION, out/release.ASSET)
+    for sig in (signing.sign(message, other_key(tmp_path)), signing.sign(message.replace(b'-v1 ', b'-v1 0'), KEY), bytes(64)):
+        with pytest.raises(ValueError, match='^That signature does not check against assets/signing/q2-coda-release.pub$'):
+            release.sign(out, base64.b64encode(sig).decode())
+    assert not (out/release.SIGNATURE).exists()
+
+
+def test_sign_and_digest_want_the_packaged_update(repo):
+    out = packaged(repo, signed=False)
+    (out/release.ASSET).write_bytes(b'changed')
+    with pytest.raises(ValueError, match='^Wrong release tag or update$'):
+        release.sign(out, key=KEY)
+    with pytest.raises(ValueError, match='^Wrong release tag or update$'):
+        release.digest(out)
+
+
+def test_digest_is_the_brokers_command_for_the_update(repo):
+    out = packaged(repo, signed=False)
+    assert release.digest(out, 'K') == signing.broker_command(signing.update_message(release.VERSION, out/release.ASSET), 'K')
+
+
+@pytest.mark.parametrize('how', ['missing', 'forged', 'unrecorded'])
+def test_upload_refuses_an_unsigned_release(repo, monkeypatch, tmp_path, how):
+    out = packaged(repo, signed=how != 'missing')
+    if how == 'forged':
+        (out/release.SIGNATURE).write_bytes(signing.sign(signing.update_message(release.VERSION, out/release.ASSET), other_key(tmp_path)))
+        record = json.loads((out/'release.json').read_text())
+        record['signature_sha256'] = sha((out/release.SIGNATURE).read_bytes())
+        (out/'release.json').write_text(json.dumps(record))
+    if how == 'unrecorded':
+        (out/release.SIGNATURE).write_bytes(bytes(64))
+    gh = Gh(monkeypatch, out)
+    with pytest.raises(ValueError, match='^No update.tar.sig that checks against'):
         release.upload(out)
     assert not gh.calls
 

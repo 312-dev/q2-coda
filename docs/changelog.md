@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Network Update: follows q2-coda's own releases, and installs one only once its signature checks against the q2-coda key built into the firmware. The row says **Verifying…** while it checks. A release without a signature, Q2 Pod's own included, says **Release not signed: not installed**, and one changed after signing **Signature check failed: not installed**; the update on the card stays as it was.
+  - App Store: the list of apps is q2-coda's own, signed with the same key, and names the exact download for each app. A list that isn't signed says **App list not signed: not used**, and a download that differs from the one the list names says **Download doesn't match the list**; nothing is installed. Checking for updates is one request now, so GitHub's limit no longer says **GitHub is busy** after a few checks.
   - Display: **Theme** lists **OLED** after **Classic**. It is a placeholder: it looks as **Theme: Classic** does until its own design arrives.
   - Privacy: Now Playing's cover search (⋯ menu) offers covers from MusicBrainz's Cover Art Archive and Apple's iTunes only. It no longer sends the song's title and artist to Kugou, NetEase or Baidu, which it asked over an unencrypted connection, so a song neither service knows offers only the cover it already has.
   - Privacy: a Baidu Netdisk sign-in left from Shanling's firmware is deleted at start-up. Q2 Pod has no Baidu Netdisk, and Shanling's code sent that sign-in unencrypted.
