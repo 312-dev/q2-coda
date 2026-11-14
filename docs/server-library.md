@@ -271,29 +271,17 @@ Library; a Q2 has 128 MB, so this wants checking on a device. Every job copies t
 
 ## Risks and open questions
 
-1. **Greying stock's own lists**: getting from a stock list's row widget to its song record at paint
-   time is not confirmed. Payload-built lists are straightforward.
-2. **Scale**: stock builds a full in-memory row for every song on the UI thread. Import time, list
-   open time and memory at 50,000 server songs must be measured on a device (128 MB of RAM).
-3. **Code that expects a file** beyond the guards listed above: an audit of every path that opens
-   `fileurl`.
-4. **Connection loss mid-queue** needs both the firmware skip and the app change; until both exist,
-   playback stalls at the first uncached song.
+1. **Greying** is done for stock's pooled Library lists (bound in `ringnav_table_load`); Cover
+   Flow's own track lists are not greyed, and a greyed selected row is grey on the highlight.
+2. **Scale** on a device: the emulator's numbers (above) are not a Q2's, and 50,000 server songs
+   took demo's process from 70 to 96 MB there, QEMU included. To be measured on a Q2 (128 MB).
+3. **Code that expects a file** beyond the guards built: Go to Album and the info page for a server
+   row are unchecked, Long Songs leaves server songs out, and an online press shows Now Playing on
+   the last song until the app's `.play` (or the 4 s fallback) replaces it.
+4. **Connection loss mid-queue**: the firmware skips rows that can't play as playback reaches them;
+   rows the app's `.play` already holds are the app's to drop.
 5. **Server deletions**: a song removed on the server but present in a Q2 playlist, a rating or play
    history.
-
-## Effort
-
-| Part | Effort |
-|---|---|
-| Catalogue format and protocol docs | 1 day |
-| Import (`catalogue.c`, schema copy, transaction, answer, generation) with host tests in `test/fw` | 3-4 days |
-| Union in `library_query` and Era, setting | 1 day |
-| Greying: payload lists half a day; stock lists 1-3 days | 1.5-3.5 days |
-| Playback hand-off and the offline queue | 2-3 days |
-| Shuffle filter and mid-queue skip | 1-2 days |
-| Guards for rows without files | 2 days |
-| Device testing at scale | 2 days |
-| The app's side | 3-4 days |
-
-About three to four weeks of firmware work and one week in the app.
+6. **Duplicates the match can't see**: a tagged card file is compared only with server songs of its
+   normalised title, so a file whose title tag differs from the server's shows twice even at equal
+   size.
