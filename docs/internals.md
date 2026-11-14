@@ -8,7 +8,7 @@ How the scroll-wheel payload hooks the stock Shanling Q2 firmware. For the user-
 
 Checked MIPS prologues redirect into a payload at `0xb00000`, using the final unused `PT_NULL` program header. demo's `.pdr` section, outside every segment, is zeroed for rootfs space ([building.md](building.md)). Trampolines restore the stock GOT base and resume each original function after its PIC setup. Writable input and position state is mapped at `0xbc0000`, a `NOLOAD` section (with any stray `.bss`): the segment's memory size covers it, the file does not.
 
-`HOOKS`, `GRADIENT_LEAF` and `WM_PAINT_LEAF` in `tools/build.py` are the hooked entry points.
+The table is the main hooks. `HOOKS` in `tools/build.py` is the whole list, each group under a comment that says what it is for; `WM_PAINT_LEAF`, `GRADIENT_LEAF` and `QUEUE_LEAF` beside it are the hooked functions with no PIC prologue, each replaced whole.
 
 | Stock callback                        | Address    | Purpose                                                                                                                                 |
 | ------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
@@ -39,9 +39,9 @@ Checked MIPS prologues redirect into a payload at `0xb00000`, using the final un
 | `playset_playset_page_init`           | `0x4bd4d0` | Adds Library & Folders and Playback's own rows ([Settings order](#crossfade))                                                           |
 | `stream_page_init`                    | `0x5410cc` | Adds the Spotify and Internet Radio rows to Streaming; wakes [Smart Wi-Fi](#smart-wi-fi)'s radio                                        |
 | `systemset_wifi_page_init`            | `0x4d67ac` | Wakes [Smart Wi-Fi](#smart-wi-fi)'s radio before the page reads the switch                                                              |
-| (Streaming's row click)               | `0x540f7c` | Tidal's row waits for [Smart Wi-Fi](#smart-wi-fi)'s link                                                                                |
-| (Network service's row click)         | `0x4cce64` | Wi-Fi transfer waits for [Smart Wi-Fi](#smart-wi-fi)'s link                                                                             |
-| (More's Download Cover & Lyrics)      | `0x539614` | Waits for [Smart Wi-Fi](#smart-wi-fi)'s link                                                                                            |
+| `stream_row` (unnamed)                | `0x540f7c` | Streaming's row click: Tidal's row waits for [Smart Wi-Fi](#smart-wi-fi)'s link                                                         |
+| `netservice_row` (unnamed)            | `0x4cce64` | Network service's row click: Wi-Fi transfer waits for [Smart Wi-Fi](#smart-wi-fi)'s link                                                |
+| `playermore_online` (unnamed)         | `0x539614` | More's Download Cover & Lyrics waits for [Smart Wi-Fi](#smart-wi-fi)'s link                                                             |
 | `mclStartPlayer`                      | `0x5c0118` | A local track's start pauses librespot and stops the radio first                                                                        |
 | `networkGetWifiSignal`                | `0x5c25d8` | The Wi-Fi signal from the driver's `rx_signal`, not an ioctl that ends power save ([Battery](#battery))                                 |
 | `window_manager_paint`                | `0x680a1c` | `WM_PAINT_LEAF`: no PIC prologue; no painting while a video plays or the screen is off ([Battery](#battery))                            |

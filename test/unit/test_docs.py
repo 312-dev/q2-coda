@@ -87,3 +87,19 @@ def test_architecture_s_symbols_are_in_their_files():
     missing = [f'docs/architecture.md:{i}: {name} not in {path}' for i, name, path in pairs
                if not re.search(rf'\b{name}\b', (ROOT/path).read_text())]
     assert not missing, '\n'.join(missing)
+
+
+def test_internals_hooks_table_agrees_with_build():
+    """Each row of internals.md's Hooks table names a hooked stock function at its address: a row of
+    HOOKS, or a *_LEAF, hooked whole as it has no PIC prologue."""
+    import build
+    text = (ROOT/'docs/internals.md').read_text().split('\n## Hooks\n', 1)[1].split('\n## ', 1)[0]
+    body = re.findall(r'^\| (?!Stock callback|-).*', text, re.M)
+    rows = [m.groups() if m else (line, '') for line in body
+            for m in [re.match(r'\| `(\w+)`(?: \(unnamed\))? +\| `(0x[0-9a-f]+)` +\|', line)]]
+    assert len(rows) > 40  # the table is still read: 46 rows at the time of writing
+    hooked = {name: address for name, (address, _, _) in build.HOOKS.items()}
+    hooked.update((leaf[0], leaf[1]) for leaf in (build.WM_PAINT_LEAF, build.GRADIENT_LEAF, build.QUEUE_LEAF))
+    wrong = [f'docs/internals.md#hooks: {name} {address}: {hex(hooked[name]) if name in hooked else "no hook of that name"}'
+             for name, address in rows if not address or hooked.get(name) != int(address, 16)]
+    assert not wrong, '\n'.join(wrong)
