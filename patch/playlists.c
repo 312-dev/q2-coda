@@ -515,6 +515,7 @@ int ringnav_playlistsmore(void *win, void *ctx) {
             widget_move_resize(c, x, I(c, W_Y), I(c, W_W), I(c, W_H));
             theme_font(c, ROLE_TITLE, FONT_ROW);
         }
+        if (modal_set()) modal_playlist_more(win); /* a dialog over Playlists (menu_modal.c) */
     }
     return result;
 }

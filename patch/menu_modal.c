@@ -1,5 +1,5 @@
-/* The inset modal (docs/oled-design.md#menus): the hold menus and Now Playing's More as one flat
- * panel over the page they act on, under a set with Geometry.modal (OLED's).
+/* The inset modal (docs/oled-design.md#menus): the hold menus, Now Playing's More and a playlist's
+ * More as one flat panel over the page they act on, under a set with Geometry.modal (OLED's).
  * The page stays painted under it, dimmed half way to black; the panel is #1C1C1E, MODAL_W wide
  * at MODAL_X, from MODAL_TOP, with MODAL_R corners and MODAL_PAD padding round 32 px rows, at most
  * MODAL_ROWS of them in view before the rows scroll inside it. A row's text stands MODAL_TEXT in
@@ -448,4 +448,46 @@ void modal_more(void *win) {
     }
     modal_frame(win, list);
     ringnav_select(view, 0, (int)widget_count_children(view));
+}
+
+/* A playlist's More (playlists.c ringnav_playlistsmore), a dialog over Playlists under a modal
+ * set as Now Playing's is: Rename and Edit Playlist, then Delete Playlist after a gap, which asks
+ * first (stock's confirm). Its rows are list_items in the dialog itself, placed in the panel. */
+void modal_playlist_more(void *win) {
+    if (tk_strcmp(widget_get_type(win), "dialog")) return;
+    widget_set_prop_int(win, "to_modal", 0);
+    modal_return(win, win);
+    void *del = (void *)0;
+    unsigned n = widget_count_children(win);
+    for (unsigned i = 0; i < n; ++i) {
+        void *item = widget_get_child(win, i),
+             *button = widget_count_children(item) ? widget_get_child(item, 0) : (void *)0;
+        if (!button || tk_strcmp(widget_get_type(item), "list_item")) continue;
+        void *label = (void *)0;
+        for (unsigned j = 0, m = widget_count_children(button); j < m; ++j) {
+            void *c = widget_get_child(button, j);
+            if (!tk_strcmp(widget_get_type(c), "hscroll_label"))
+                label = c;
+            else
+                widget_set_visible(c, 0, 0); /* stock's icons */
+        }
+        for (unsigned j = 0, m = widget_count_children(item); j < m; ++j)
+            if (widget_get_child(item, j) != button)
+                widget_set_visible(widget_get_child(item, j), 0, 0);
+        const char *name = widget_get_prop_str(item, "name", "");
+        if (!name) name = "";
+        int is_del = !tk_strcmp(name, "item_del");
+        const char *icon = is_del                            ? "trash"
+                           : !tk_strcmp(name, "item_rename") ? "pencil-simple"
+                                                             : "list-checks";
+        widget_move_resize(button, 0, 0, modal_row_w(), MODAL_ROW);
+        modal_row(button, label, icon, (const char *)0, MM_ACTION);
+        modal_row(item, (void *)0, icon, (const char *)0, MM_ACTION); /* stock's rows click there */
+        if (is_del && widget_get_visible(item)) del = item;
+    }
+    if (del) { /* last, after a gap */
+        widget_restack(del, n - 1);
+        widget_restack(modal_gap(win), n - 1);
+    }
+    modal_frame(win, (void *)0);
 }

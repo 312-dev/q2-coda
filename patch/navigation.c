@@ -2581,8 +2581,9 @@ static void paint_selection(void *w, void *canvas) {
         rearm(&st.marq_timer, marq_moved, 0);
     }
     /* a pop-up button's tile: framed white on any accent; Classic's band has its own top line and
-     * edge, as an iPod's */
-    if (g_menu.kind == 4 && r.w < I(g_menu.w, W_W) && painter != SEL_STOPS)
+     * edge, as an iPod's. An inset modal's row is no tile (menu_modal.c). */
+    if (g_menu.kind == 4 && r.w < I(g_menu.w, W_W) && painter != SEL_STOPS &&
+        !modal_rows_of(g_menu.w))
         frame_box(canvas, &r, 0xffffffff, SEL_RADIUS);
     /* Save/restore explicitly: this firmware's canvas_save/restore cover neither clip nor
      * either color, and the global alpha is deliberately never touched. */

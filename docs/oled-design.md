@@ -310,8 +310,8 @@ an inset modal over the page, which stays on screen dimmed half way to black; no
 - The menu opens on its first action, lit; the wheel moves, Centre picks, Return closes it back to
   the row it came from.
 
-Built by `patch/menu_modal.c` under a set with `modal` (OLED's), so far for the hold menus and Now
-Playing's More, a stock page, which such a set loads as a dialog (`tools/ipod.py` `modal_page`).
+Built by `patch/menu_modal.c` under a set with `modal` (OLED's). Now Playing's More and a
+playlist's More are stock pages, which such a set loads as dialogs (`tools/ipod.py` `modal_page`).
 
 ### Icons
 
