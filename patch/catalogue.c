@@ -940,9 +940,10 @@ static void cat_detach(void) {
     if (db && cat.attached == db) sqlite3_exec(db, "detach cat", 0, 0, 0);
     cat.attached = 0;
 }
-/* Whether stock's Library queries may read servertable now: attached to its live handle. */
+/* Whether stock's Library queries may read servertable now: attached to its live handle. Run on
+ * stock's scan thread too, so the setting as loaded, as catalogue_attach reads it. */
 static int cat_live(void) {
-    if (!catalogue_on() || !cat.ix.n || !cat.stock_slot) return 0;
+    if (catalogue_source != 1 || !cat.ix.n || !cat.stock_slot) return 0;
     void *db = *cat.stock_slot;
     if (db && cat.attached != db && !access(CAT_DB, 0) &&
         !sqlite3_exec(db, "attach '" CAT_DB "' as cat", 0, 0, 0))
