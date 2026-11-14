@@ -1675,10 +1675,15 @@ STOCK_PAGES = [f'release/assets/default/raw/ui/{n}_page.bin' for n in ('coverflo
     ['default_album_coverflow', 'play_spectrum', 'play_spectrumdown', 'play_vu', 'play_vudown', 'spectrum_back', 'spectrum_bar',
      *(f'spectrum_point{i}' for i in range(12)), 'vu_back', 'vu_dot', 'vu_left', 'vu_right']]
 # Superseded library versions (the unversioned and soname links already resolve to the newer ones)
-# and on-device debugging tools; nothing in the rootfs names them.
+# and on-device debugging and network tools; no script, program or library in the rootfs, and nothing
+# in patch/, names them as a command (libcurl's telnet and tftp protocols are its own code). The
+# links are busybox applets: busybox keeps the code, the command goes.
+DEBUG_TOOLS = [*(f'usr/bin/{n}' for n in ('strace', 'strace-log-merge', 'sqlite3', 'hcidump', 'memtester')),
+               'usr/sbin/nandtest']
+DEBUG_LINKS = [*(f'usr/bin/{n}' for n in ('telnet', 'tftp')),
+               *(f'usr/sbin/{n}' for n in ('inetd', 'dnsd', 'dhcprelay'))]
 OBSOLETE = ['usr/lib/libdbus-1.so.3.19.8', *(f'usr/lib/lib{n}-2.0.so.0.5400.3' for n in
-            ('gio', 'glib', 'gmodule', 'gobject', 'gthread')),
-            *(f'usr/bin/{n}' for n in ('strace', 'strace-log-merge', 'sqlite3', 'hcidump'))]
+            ('gio', 'glib', 'gmodule', 'gobject', 'gthread')), *DEBUG_TOOLS, *DEBUG_LINKS]
 
 FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
          '-mno-abicalls','-fno-pic','-G0','-ffreestanding','-fno-builtin',
@@ -2302,7 +2307,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         added.append([path, b'R', *stock.groups()])
     removed = []
     for path in STOCK_EQ + STOCK_PAGES + OBSOLETE:
-        line = need(re.search(rb'^'+re.escape(path.encode())+rb' R .+\n', p, re.M), f'Missing stock inode {path}')
+        line = need(re.search(rb'^'+re.escape(path.encode())+rb' [RS] .+\n', p, re.M), f'Missing stock inode {path}')
         removed.append(line.group().split()[:6])
         p = p[:line.start()]+p[line.end():]
     for path, fix, name in ((TAG_C, patch_m4b_cover, 'libtag_c.so.2.0.1'), (FONT, font_quotes, 'default.ttf'),

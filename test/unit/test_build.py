@@ -1226,3 +1226,11 @@ def test_the_serial_getty_goes():
     inittab = (b'::sysinit:/etc/init.d/rcS\n\n# Put a getty on the serial port\n'
                b'console::respawn:/sbin/getty -L ttyS3 115200 vt100 # GENERIC_SERIAL\n\n# Stuff to do\n')
     assert inittab.replace(*build.SERIAL_GETTY) == b'::sysinit:/etc/init.d/rcS\n\n# Stuff to do\n'
+
+
+def test_the_debugging_tools_are_dropped():
+    removed = set(build.OBSOLETE)
+    for tool in ('strace', 'sqlite3', 'hcidump', 'memtester', 'telnet', 'tftp'):
+        assert f'usr/bin/{tool}' in removed, tool
+    assert {'usr/sbin/nandtest', 'usr/sbin/inetd'} <= removed
+    assert 'usr/lib/libsqlite3.so.0.8.6' not in removed  # the library demo uses stays

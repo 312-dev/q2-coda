@@ -464,6 +464,13 @@ def validate_assets(directory):
     assert shadow == lock_root(read('stock.squashfs', SHADOW))
     inittab = read('rootfs.squashfs', INITTAB)
     assert b'getty' not in inittab and inittab == read('stock.squashfs', INITTAB).replace(*SERIAL_GETTY)
+    # The debugging and network tools stock ships are gone.
+    from build import DEBUG_TOOLS, DEBUG_LINKS
+    def paths(image): return {l.removeprefix('squashfs-root/') for l in run('unsquashfs', '-l', directory/image).splitlines()}
+    listing, stock_listing = paths('rootfs.squashfs'), paths('stock.squashfs')
+    for path in DEBUG_TOOLS + DEBUG_LINKS:
+        assert path in stock_listing and path not in listing, path
+    print('Removed from the rootfs:', ' '.join(DEBUG_TOOLS + DEBUG_LINKS))
     # bluealsa: AAC capability, the two DROP jumps, the silence sites, and one appended LOAD payload.
     from build import BT_DROP, BT_DROP_HANDLER, BT_DROP_PAYLOAD, BT_SILENCE_SITES, patch_bluealsa, segments
     old, new = read('stock.squashfs', BLUEALSA), read('rootfs.squashfs', BLUEALSA)
