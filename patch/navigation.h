@@ -532,6 +532,19 @@ int song_artist(void), song_length(void);
 /* theme_engine.c: Track Time's value, and its switch on a tap (np_bar.c np_time_tap) */
 int np_time_total(void), np_time_toggle(void);
 int np_time_tap(void *ctx, void *event);
+/* np_bar.c: 1 when the screen's (x, y) is inside w */
+int np_hit(void *w, int x, int y);
+/* A touch that lifts within TAP_PX of where it came down is a tap, not a swipe or a drag */
+#define TAP_PX 10 /* AWTK's drag threshold */
+/* np_taps.c: Now Playing's art, artist and album taps (np_tap on the window), the one held lit
+ * (np_tap_lit: its text in the accent, np_tap_dim: the art dimmed); navigation.c np_goto is where
+ * they go, with go 0 only whether they would */
+int np_tap(void *ctx, void *event);
+int np_tap_lit(void *w);
+unsigned np_tap_ink(void);
+void np_tap_dim(void *w, void *canvas);
+void np_tap_reset(void);
+int np_goto(int album, int go);
 /* np_bar.c: Now Playing's shuffle and repeat as two controls */
 void np_mode_set(int on, int rep), np_mode_step(int repeat, int dir);
 /* Now Playing's Centre cycle: at rest (the wheel is the volume's), the scrubber, shuffle, repeat
