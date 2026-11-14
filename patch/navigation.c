@@ -228,6 +228,7 @@ extern int xfade_open(void *ctx, void *event), xfade_key(void *top, unsigned key
 extern int eq_key(void *top, unsigned key); /* peq_ui.c */
 extern const char *radio_hold(void *top);
 extern void visualizer_paint(void *w, void *canvas), visualizer_attach(void *win);
+extern int visualizer_full(void); /* OLED's full-screen Field draws the modes itself */
 extern int visualizer_live(void), games_live(void);
 extern unsigned char now_cover(void *r, const char **file);
 extern unsigned now_cover_written(const char *file);
@@ -3071,7 +3072,7 @@ int ringnav_paint(void *w, void *canvas) {
     paint_caps(w, canvas);
     if (theme()->marquee_fade) marquee_fade(w, canvas);
     if (w && w == slider_page_win) slider_page_paint(w, canvas);
-    if (w && w == st.np_win) np_modes(w, canvas);
+    if (w && w == st.np_win && !visualizer_full()) np_modes(w, canvas); /* else the page's own */
     hold_paint(w, canvas, 1);
     coverflow_home_clip(w, canvas, 0);
     st.paint_w = w ? P(w, W_PARENT) : (void *)0;

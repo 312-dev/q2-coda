@@ -748,7 +748,9 @@ at the bottom for a second and a half:
 | **Field** (OLED) | iTunes' Magnetosphere     | 40 soft glowing points in each of five bands, a colour each, flowing round the centre on rings each band's level swells and ripples          |
 
 Field shows only under OLED, where it is the style the page opens on until a tap picks another; it
-is drawn from glow sprites (`field_sprites`), the others are anti-aliased vector drawing (AWTK's
+is drawn from glow sprites (`field_sprites`) over the whole screen, with the status row, the progress bar, the song's
+line and the page dots shown over it only while a thumb rests on the wheel
+([internals](internals.md#visualizer-ipod)); the others are anti-aliased vector drawing (AWTK's
 vgcanvas), all within the 375x186 page: 16-pixel side
 margins (`NP_MARGIN`), labels in the stock grey `#AAAAAA`. It animates at `VIS_FPS` only while the
 page shows with the screen on, and comes to rest when playback pauses; at rest the track's title
