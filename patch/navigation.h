@@ -647,4 +647,19 @@ int ple_listing(void);
 int pl_first(menu_t *m, int cur);
 void pl_fit(void *button);
 
+/* menu_modal.c: the inset modal (docs/oled-design.md#menus) */
+enum { MM_ACTION, MM_SETTING, MM_CHOICE }; /* modal_row's how */
+enum { DIR_NONE, DIR_UP, DIR_DOWN };       /* modal_dir: a sort's direction */
+int modal_set(void);
+int modal_row_w(void);
+void *modal_gap(void *view);
+void modal_row(void *row, void *label, const char *icon, const char *value, int how);
+void modal_dir(void *row, int dir);
+void modal_frame(void *win, void *list);
+void modal_paint(void *w, void *canvas);
+int modal_rows_of(void *w);
+int modal_win(void *w);
+void modal_row_paint(void *w, void *canvas, void *row, rect_t r, int selected);
+void modal_more(void *win);
+
 #endif

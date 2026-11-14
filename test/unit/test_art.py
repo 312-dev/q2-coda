@@ -439,19 +439,23 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     """OLED's own images: the caret in Chevron grey (each half's) and white for the selection, the play state in each
     half's ink, Now Playing's shuffle and repeat in Text Secondary (each half's) and Accent Blue when on, the Shuffle row's
     glyph (regular) in Accent Blue and white for the selection, Folder view's folder (regular) in Text Secondary (each
-    half's) and white for the selection, all from the vendored Phosphor SVGs."""
+    half's) and white for the selection, the inset modal's symbols (regular, 19 px) the same way and the picker's check
+    in Accent Blue too, all from the vendored Phosphor SVGs."""
     t = theme.builtins()[3]
     got = art.images(t)
     modes = [f'mode_{n}_{k}' for n in ('shuffle', 'repeat') for k in ('d', 'l', 'on')] + ['mode_repeat1_on']
+    menus = [f'menu_{n}_{k}' for n in art.MENU_ICONS for k in ('d', 'l', 'w')] + ['menu_check_a']
     assert set(got) == {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'play_d', 'play_l', 'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w',
-                                                       'folder_d', 'folder_l', 'folder_w', *modes)}
+                                                       'folder_d', 'folder_l', 'folder_w', *modes, *menus)}
+    assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
                           ('play_d', art.STATE_PX, 0xffffff), ('play_l', art.STATE_PX, 0),
                           ('shuffle_a', art.ROW_ICON_PX, blue), ('shuffle_w', art.ROW_ICON_PX, 0xffffff),
                           ('folder_d', art.ROW_ICON_PX, 0xababab), ('folder_l', art.ROW_ICON_PX, 0x5c5c5c),
                           ('folder_w', art.ROW_ICON_PX, 0xffffff),
-                          *((n, 22, {'d': 0xababab, 'l': 0x5c5c5c, 'on': blue}[n.rsplit('_', 1)[1]]) for n in modes)):
+                          *((n, 22, {'d': 0xababab, 'l': 0x5c5c5c, 'on': blue}[n.rsplit('_', 1)[1]]) for n in modes),
+                          *((n, art.MENU_ICON_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff, 'a': blue}[n.rsplit('_', 1)[1]]) for n in menus)):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
         assert (w, h) == (px, px) and inked == {tuple(rgb >> s & 255 for s in (16, 8, 0))}

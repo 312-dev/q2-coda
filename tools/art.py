@@ -183,6 +183,14 @@ MODE_INKS = {'d': 0xababab, 'l': 0x5c5c5c}
 # A row's leading glyph (Songs' Shuffle row, list.shuffle.row), regular weight at the 20 px row type's size
 ROW_ICON_PX = 20
 FOLDER_INKS = {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}  # Text Secondary in each half, white on the bar
+# The inset modal's symbols (menu_modal.c, a set with modal): regular weight at MENU_ICON_PX in FOLDER_INKS, and the
+# picker's check in the accent off the bar
+MENU_ICON_PX = 19
+MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart-break', 'list-plus', 'shuffle',
+              'vinyl-record', 'microphone-stage', 'folder', 'heart-half', 'clock-counter-clockwise', 'list-numbers',
+              'bookmark-simple', 'dots-three', 'plus', 'list-checks', 'skip-forward', 'skip-back', 'repeat', 'stack',
+              'airplay', 'download-simple', 'cloud-arrow-down', 'trash', 'speedometer', 'pencil-simple',
+              'caret-up', 'caret-down', 'check')
 
 
 def gradient(stops, y0, y1):
@@ -747,7 +755,7 @@ def band_rim():
 
 # A coverage table per radius of the round boxes the painter draws a row at a time (navigation.c paint_round_rows): their
 # corners' pixels take the row's colour at this alpha, so they stay the scheme's.
-CORNERS = (2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13)
+CORNERS = (2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16)
 def corner_cover(r):
     """A radius r corner's coverage out of 255, r rows of r pixels, the outermost first."""
     n = 16
@@ -884,6 +892,10 @@ def images(t):
     if t['shuffle_row']:  # Songs' Shuffle row: the accent's top tone at rest, white on the selection, in both halves
         on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
         out |= {f'{prefix}_shuffle_{k}': phosphor('shuffle', ROW_ICON_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
+    if any(g.modal for g in t['geoms'].values()):  # the inset modal's symbols (menu_modal.c)
+        on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
+        out |= {f'{prefix}_menu_{n}_{k}': phosphor(n, MENU_ICON_PX, c) for n in MENU_ICONS for k, c in FOLDER_INKS.items()}
+        out[f'{prefix}_menu_check_a'] = phosphor('check', MENU_ICON_PX, on)
     if t['painter[PAINT_SONGS]']:  # Folder view's folder glyph (song_rows.c folder_row): Text Secondary, white on the selection
         out |= {f'{prefix}_folder_{k}': phosphor('folder', ROW_ICON_PX, c) for k, c in FOLDER_INKS.items()}
     if t['bolt']:

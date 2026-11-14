@@ -386,6 +386,7 @@ GEOM_RANGES = {
     'split_art': (O['HOME_SPLIT_W'], 260),
     'split_art_up': (0, lambda g: g.bar - 26),
     'split_still': (0, 1),
+    'modal': (0, 1),  # the More pages as dialogs, drawn with the hold menus as the inset modal (ipod.modal_page)
 }
 THEME_GEOM_OFF = 4  # offsetof(theme_t, geom), right after name so no field moves it; asserted in navigation.c; test/patch.py pokes it
 THEME_MOTION_OFF = 8  # offsetof(theme_t, motion), right after geom; asserted in navigation.c; test/patch.py pokes it

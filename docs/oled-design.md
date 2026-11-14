@@ -291,6 +291,28 @@ Shown for a moment after a mode change (Shuffle, Repeat).
 - A toast is one line of 16 px Text Primary on a `#1C1C1E` pill, 12 px corners, 32 px tall,
   centred on y 252, above the bottom glass curve. It is the only raised surface in the theme.
 
+### Menus
+
+Actions on the highlighted item (the hold menus, Now Playing's More and a playlist's More) open as
+an inset modal over the page, which stays on screen dimmed half way to black; nothing is blurred.
+
+- **Panel:** opaque `#1C1C1E`, 259 px wide from x 58, top at y 58, 16 px corners, 8 px padding, no
+  title (the row behind says which item). Rows are 32 px, at most six in view, then they scroll
+  inside the panel.
+- **Rows:** Inter Regular 20 at the panel's 16 px inset; an action's Phosphor symbol (regular,
+  19 px) at the right in Text Secondary, white on the selection. The selection is the list's bar, 8
+  px in from the panel with 8 px ends.
+- **A setting** (Sorting, Speed, Shuffle, Repeat, Group by) has its symbol before the label, the
+  label 26 px further in, and its value alone at the right in Text Secondary; Centre opens a picker
+  in the same panel, the current choice with the accent's check before its label.
+- **Gaps:** a setting heading the menu stands 12 px above the actions; a destructive row (Delete
+  Song) comes last, 12 px below them, and asks before it acts. Space, never a rule.
+- The menu opens on its first action, lit; the wheel moves, Centre picks, Return closes it back to
+  the row it came from.
+
+Built by `patch/menu_modal.c` under a set with `modal` (OLED's), so far for Now Playing's More, a
+stock page, which such a set loads as a dialog (`tools/ipod.py` `modal_page`).
+
 ### Icons
 
 - One set: [Phosphor Icons](https://phosphoricons.com) (MIT), `@phosphor-icons/core` 2.1.1. The
@@ -334,7 +356,7 @@ pattern.
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
 | Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles                         |
 | Playlists                           | Two-line row with icon      |                                                                                                            |
-| Hold menu                           | Dialog                      |                                                                                                            |
+| Hold menu, More                     | [Menus](#menus)             | The inset modal over the page                                                                              |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
 | Equalizer (Simple)                  | Vertical slider             |                                                                                                            |
@@ -380,6 +402,8 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - Now Playing on the set's grid (`np_art`, `np_bar_y`), its art's corners (`playing.art.radius`), its
   artist and album in Inter (`playing.artist.font`), shuffle and repeat as the theme's own glyphs
   (`playing.modes.icons`), and the marquee fades (`list.marquee.fade`).
+- Menus as the inset modal over the page ([Menus](#menus)): the set's `modal`, `patch/menu_modal.c`, the
+  Phosphor symbols as the theme's own art.
 - Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_still` (the art from
   x 196 and y 52 to the edges, still and centre-cropped, its top rows painted by the bar).
 

@@ -1032,7 +1032,8 @@ static int view_top(menu_t *m) {
  * a selected one's text would not show. */
 static int sel_height(menu_t *m) {
     int y = 0, end = geom_val(V_LIST_END);
-    if (!end || m->kind == 3 || m->kind == 4) return m->height;
+    /* an inset modal's rows end in its panel, clear of the glass (menu_modal.c) */
+    if (!end || m->kind == 3 || m->kind == 4 || modal_rows_of(m->w)) return m->height;
     void *wm = window_manager();
     for (void *p = m->w; p && P(p, W_PARENT) != wm; p = P(p, W_PARENT)) y += I(p, W_Y);
     return end - y < m->height ? end - y : m->height;
@@ -1758,6 +1759,16 @@ static void paint_songs(void *w, void *canvas) {
     }
 }
 
+/* An open inset modal's rows' symbols and values (menu_modal.c), over its selection bar. */
+static void paint_modal_rows(void *w, void *canvas) {
+    if (!modal_rows_of(w) || !P(canvas, CANVAS_LCD) || !load_rows(&g_menu, w)) return;
+    for (int i = 0; i < g_menu.n; ++i) {
+        rect_t r = bounds(&g_menu, i);
+        if (r.y + r.h > 0 && r.y < I(w, W_H))
+            modal_row_paint(w, canvas, g_menu.at[i], r, st.sel_w == w && i == st.sel_row);
+    }
+}
+
 /* Writes v (under 1000) in decimal to s; returns the digits written. */
 unsigned put_num(unsigned *s, unsigned v) {
     unsigned n = 0;
@@ -2416,15 +2427,17 @@ static void paint_selection(void *w, void *canvas) {
     void *top = window_manager_get_top_window(window_manager());
     int i, shown = !st.touch_mode;
     void *own = window_of(w);
-    if (own && own != top && slides(top)) {
+    int under = own && own != top && modal_win(top); /* the row an inset modal acts on */
+    if (own && own != top && (slides(top) || under)) {
         /* The page under a sliding one, painted into the animator's snapshot: draw the row it
          * holds. Loading, recall and settling read the top page's state, so none of it runs.
          * A pending untouch is a Return by button, which shows the row of the page behind. Home's
-         * carousel shows its selected card, as below. */
+         * carousel shows its selected card, as below. Under an inset modal the row shows,
+         * dimmed with the page: it names what the menu acts on. */
         if (!usable() || !load_rows(&g_menu, w) || g_menu.kind == 3) return;
         i = index_of(&g_menu, widget_get_prop_int(w, SEL, -1));
         top = own;
-        if (st.untouch_timer) shown = 1;
+        if (st.untouch_timer || under) shown = 1;
     } else {
         if (surface((void *)0, (void *)0) != w) return;
         if (!load(&g_menu, w, !pointer_down())) {
@@ -2479,7 +2492,7 @@ static void paint_selection(void *w, void *canvas) {
         r.h = I(speed, W_H);
         tile = 0;
     }
-    if (!tile) {
+    if (!tile && !modal_rows_of(g_menu.w)) { /* an inset modal's rows keep the panel's */
         r.x = 0;
         r.w = I(g_menu.w, W_W);
         /* The Library's row is a button over the top BODY of its pitch: the bar takes the whole
@@ -6035,6 +6048,8 @@ static int title_due(const void *info) {
 void bar_title_sync(void *win) {
     /* a page under the top window that writes its caption would flip the bar with each paint */
     if (!st.bar_title || !win || win != window_manager_get_top_window(window_manager())) return;
+    /* an inset modal has no title: the page under it keeps its own, and its Songs action row */
+    if (modal_win(win)) return;
     static const unsigned none = 0;
     char s[256], now[256]; /* stock writes nothing unless all of it fits */
     /* Home names the list it shows; a status row names none of Home's own, and shows the clock */
@@ -6132,9 +6147,11 @@ int ringnav_paint_bg(void *w, void *canvas) {
         confirm_check(w, canvas);
     }
     hold_paint(w, canvas, 0);
+    modal_paint(w, canvas);
     if (w && w == st.search_tabs) search_tabs_paint(w, canvas);
     paint_selection(w, canvas);
     paint_songs(w, canvas);
+    paint_modal_rows(w, canvas);
     if (form) confirm_labels(w, canvas);
     if (w && w == st.rate_box)
         paint_panel(w, canvas, &(rect_t){ PANEL_PAD, PANEL_PAD - PANEL_DROP, 304, 110 },
