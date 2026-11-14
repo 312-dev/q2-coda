@@ -316,12 +316,16 @@ def validate_assets(directory):
     assert demo[PDR[0]:PDR[0]+PDR[1]] == bytes(PDR[1]) and any(stock[PDR[0]:PDR[0]+PDR[1]])
     # The RTC is written in UTC: the one hwclock -w literal gains -u in its own padding.
     assert demo.index(RTC_WRITE[1]) == stock.index(RTC_WRITE[0])
-    # Stock's HTTPS verifies (docs/internals.md#stock-https): each setopt that turned a check off calls ringnav_stock_tls.
-    from build import STOCK_TLS_CALLS, stock_tls_site
+    # Stock's HTTPS verifies (docs/internals.md#stock-https): each setopt that turned a check off calls ringnav_stock_tls,
+    # and the Tidal API URLs that were plain HTTP are https://, in place.
+    from build import STOCK_TLS_CALLS, stock_tls_site, TIDAL_HTTP
     stock_tls = jal(symbols(directory/'patch.elf')['ringnav_stock_tls'])
     for address, option in STOCK_TLS_CALLS:
         assert stock_tls_site(stock, address, option)
         assert struct.unpack_from('<I', demo, fileoff(stock, address))[0] == stock_tls, hex(address)
+    for path in TIDAL_HTTP:
+        assert demo.index(b'\0https://api.tidal.com' + path + b'\0') == stock.index(b'\0http://api.tidal.com' + path + b'\0')
+    assert b'http://api.tidal.com' not in demo
     # Network time asks the worldwide NTP pool, not China's: one server name, the same length, in place.
     from build import NTP_POOL
     assert demo.index(NTP_POOL[1]) == stock.index(NTP_POOL[0]) == fileoff(stock, 0x7836bc) - 1 and b'cn.pool.ntp.org' not in demo

@@ -1248,7 +1248,7 @@ def test_network_time_asks_the_worldwide_pool_in_place():
     assert servers.replace(*build.NTP_POOL) == b'time.apple.com\0\x000.pool.ntp.org\0\0time.windows.com\0'
 
 
-# Stock's HTTPS (docs/internals.md#stock-https): the setopt sites patched and the bundle pinned.
+# Stock's HTTPS (docs/internals.md#stock-https): the setopt sites patched, the bundle pinned, the plain-HTTP Tidal URLs.
 def setopt_site(*words):
     """A 0x400000-based image holding words from 0x400100, and its address of the last one."""
     data = image(0x1000)
@@ -1280,3 +1280,11 @@ def test_the_mozilla_bundle_is_the_pinned_one(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match='Unexpected assets/mozilla-ca.pem'):
         build.mozilla_ca()
 
+
+def test_tidal_https_takes_a_padding_nul():
+    urls = b''.join(b'\0http://api.tidal.com' + p + b'\0\0\0' for p in build.TIDAL_HTTP)
+    made = build.tidal_https(urls)
+    assert len(made) == len(urls) and b'http://' not in made
+    assert made == b''.join(b'\0https://api.tidal.com' + p + b'\0\0' for p in build.TIDAL_HTTP)
+    with pytest.raises(ValueError, match='Unexpected Tidal URL'):
+        build.tidal_https(urls.replace(build.TIDAL_HTTP[0] + b'\0\0', build.TIDAL_HTTP[0] + b'\0X'))  # no spare NUL after it

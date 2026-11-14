@@ -682,6 +682,19 @@ def stock_tls_site(data, address, option):
     off = fileoff(data, address)
     before = struct.unpack_from('<4I', data, off - 16)
     return struct.unpack_from('<I', data, off)[0] == 0x0320f809 and SETOPT_GOT in before and 0x24050000 | option in before
+# Three of stock's Tidal API URLs are plain HTTP, though they carry the session's access token: the subscription check,
+# a track's stream URL (playbackinfopostpaywall) and an album's tracks. Each becomes https://, taking one of the NULs
+# that pad it to its word; only its start is referenced (docs/internals.md#stock-https).
+TIDAL_HTTP = (b'/v1/users/%u/subscription',
+              b'/v1/tracks/%lld/playbackinfopostpaywall?playbackmode=STREAM&assetpresentation=FULL&audioquality=%s',
+              b'/v1/albums/%u/tracks?offset=%d&limit=%d&countryCode=%s')
+def tidal_https(data):
+    """data with each TIDAL_HTTP URL made https://, in place; each must be whole and once, with a spare NUL after it."""
+    for path in TIDAL_HTTP:
+        old, new = b'\0http://api.tidal.com' + path + b'\0\0', b'\0https://api.tidal.com' + path + b'\0'
+        check(data.count(old) == 1, f'Unexpected Tidal URL {path.decode()}')
+        data = data.replace(old, new)
+    return data
 # Mozilla's CA bundle as curl publishes it, whole, for stock's HTTPS (above), whose hosts no list of ours could
 # cover; /etc/scrobble-ca.pem stays the few roots Q2 Pod's own code needs.
 STOCK_CA = 'etc/ssl/certs/ca-certificates.crt'
@@ -2215,6 +2228,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(patched.count(b'V1.36\0') == 1, 'Version literal is not unique')
     patched = patched.replace(b'V1.36\0', version.encode()+b'\0')
     patched = patched.replace(*RTC_WRITE)
+    patched = tidal_https(patched)
     check(patched.count(NTP_POOL[0]) == 1, 'Unexpected NTP servers')
     patched = patched.replace(*NTP_POOL)
     check(patched.count(WIFI_LPS[0]) == 1, 'Unexpected Wi-Fi power save command')
