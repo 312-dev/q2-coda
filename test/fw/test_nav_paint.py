@@ -3076,3 +3076,14 @@ def test_the_first_reachable_list_is_repainted_once(fw, world, st):
     paint_bg(fw, bar, Canvas(fw))
     paint_bg(fw, bar, Canvas(fw))
     assert world.invalid.count((rows, None)) == 1
+
+
+def test_over_oleds_now_playing_the_volume_reads_as_a_secondary_label(fw, world, st):
+    """A status row's set (OLED's): "Volume N" in 15 px Text Secondary (audit N2), not the times' 14 px white."""
+    theme(fw, '3')  # OLED
+    st('geom').value = fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())
+    dialog, *_ = volume(fw, world, st, 37, under='playing_page', np=True)
+    canvas = Canvas(fw)
+    vol_paint(fw, dialog, canvas)
+    (text, _, color, font), = canvas.texts
+    assert text == 'Volume 37' and font[1] == O['VOL_NP_QUIET_PX'] == 15 and color & 0xffffff == 0xababab

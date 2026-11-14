@@ -43,6 +43,8 @@
        show each song's length -->
   <option key="SONGARTIST" label="Song Artist" default="Inline" preset="Inline"><value label="Inline"/><value label="Selected Row"/><value label="Right"/><value label="Off"/></option>
   <option key="SONGLENGTH" label="Song Length" default="Albums" preset="Albums"><value label="Albums"/><value label="All Lists"/><value label="Off"/></option>
+  <!-- Now Playing's right-hand time: what is left of the track or its length; a tap on it switches (np_bar.c) -->
+  <option key="NPTIME" label="Track Time" default="Remaining" preset="Remaining"><value label="Remaining"/><value label="Total"/></option>
   <!-- The status row's title and clock: Inter Medium 15 (18 here); the slim battery and its play state, the
        theme's own art -->
   <view name="bar">

@@ -260,6 +260,16 @@ int row_preview_on(void) { return theme_own(OWN_ROWPREVIEW); }
  * SONG_LENGTH_* (navigation.h) in theme.xml's order */
 int song_artist(void) { return theme_own(OWN_SONGARTIST); }
 int song_length(void) { return theme_own(OWN_SONGLENGTH); }
+/* OLED's Track Time (np_bar.c np_sync): 1 when Now Playing's right-hand time is the track's length,
+ * 0 for what is left of it */
+int np_time_total(void) { return theme_own(OWN_NPTIME); }
+/* A tap on that time (np_time_tap): the other one, saved. 0 under a theme without the option. */
+int np_time_toggle(void) {
+    if (!option_of(theme(), SETTING_OWN + OWN_NPTIME)) return 0;
+    st.own[OWN_NPTIME] = !st.own[OWN_NPTIME];
+    write_int_config(st.own[OWN_NPTIME], "IPOD", theme_keys[OWN_NPTIME].key);
+    return 1;
+}
 const char *const np_pages[] = { "playing_page", "playing_page_stock" }; /* [NP_*] */
 _Static_assert(sizeof np_pages / sizeof *np_pages == NP_N, "one page per NP_* layout");
 /* The Now Playing page: the theme's layout, which Centred Now Playing forces to NP_CENTRED. */

@@ -56,14 +56,16 @@ void chevron_muted(void *w, void *canvas, int right, int y) {
 void marquee_fade(void *w, void *canvas) {
     void *lcd = w && canvas ? P(canvas, CANVAS_LCD) : (void *)0;
     if (!lcd || tk_strcmp(widget_get_type(w), "hscroll_label")) return;
+    int loop = np_marq_owns(w); /* Now Playing's lines: their copy follows, so the right fades on */
+    if (loop) np_marq_kick(w);
     void *style = P(w, W_ASTYLE);
     int x0 = style_get_int(style, "margin_left", 2),
         x1 = I(w, W_W) - style_get_int(style, "margin_right", 2), h = I(w, W_H),
         off = I(w, HSCROLL_XOFFSET), over = I(w, HSCROLL_TEXT_W) - (x1 - x0);
-    if (over <= 0 || (B(w, HSCROLL_ELLIPSES) && !I(w, HSCROLL_TIMER))) return;
+    if (over <= 0 || (!loop && B(w, HSCROLL_ELLIPSES) && !I(w, HSCROLL_TIMER))) return;
     unsigned saved = (unsigned)I(lcd, LCD_FILL_COLOR),
              behind = (w == st.marq_label ? RGBA(scheme()->tones[0]) : ui_ink(RGBA(0))) & 0xffffffu;
-    int left = off > 0, right = off < over;
+    int left = off > 0, right = loop || off < over;
     for (int i = 0; i < MARQUEE_FADE_PX && (left || right); ++i) {
         unsigned a = 255u * (unsigned)(MARQUEE_FADE_PX - i) / MARQUEE_FADE_PX;
         stock_canvas_set_fill_color(canvas, behind | a << 24);

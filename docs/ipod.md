@@ -607,7 +607,8 @@ Modern show the label, and Modern's title is bold. There is no on-screen transpo
 the artist and album in Inter's 18 in Text Secondary; "1 of 10" level with the art's foot, More and
 the heart at the end of its line; a 6-pixel bar from the text column to the right column at y 228,
 the times under its ends in Inter's tabular digits, and shuffle and repeat centred under them in the
-accent when on, grey when off, over the play mode button, which a tap still steps. The page dots
+accent when on, grey when off, over the play mode button: a tap on shuffle turns it on or off and
+a tap on repeat steps Off, All, One, each keeping the other. The page dots
 sit under those, and the swipe's other pages stop above the bar. Each line that scrolls fades at
 the end it runs past (Display's [Theme](#theme)).
 
@@ -649,19 +650,24 @@ once that is another track's (Tidal's URL never is a queue path, so its art stay
 `default_bigcover` placeholder is the square. A layout back to the square refits from the kept shape. Its song name and the shade band behind it sit on the art's foot, show for `BC_MS` (3 s), then fade out together over `BC_STEPS` steps
 `BC_STEP_MS` apart (`ringnav_bigcover`, after stock's init). They show again for each new song while it is open.
 
-**Scrub.** A double press of the centre button starts scrubbing, as on an iPod classic (with the screen off it only
-wakes it, [Wake](internals.md#wake)), and the bar fill turns white while it lasts. Each wheel tick moves 5 seconds, times a ramp of one more step per 100 ms of spin
+**Scrub.** A press of the centre button starts scrubbing, as on an iPod classic (a double press with Single Press
+Scrub off; with the screen off it only
+wakes it, [Wake](internals.md#wake)), and the bar fill turns white while it lasts (under OLED it keeps the accent and a 14 px white knob marks the playhead). Each wheel tick moves 5 seconds, times a ramp of one more step per 100 ms of spin
 (up to 40 seconds a tick; the lists' gentler ramp does not apply), within the
 track. Both times and the bar follow the target at once, and so does the music: playing, the
 track jumps to the target as you turn, at most every 200 ms (`SCRUB_SEEK_MS`, `patch/seek.c`), so a
-fast spin is heard as a few jumps and lands on the target. A press of the centre button ends it at once
-and leaves the screen on (a double press does too), as do Return, a touch and
+fast spin is heard as a few jumps and lands on the target. A press of the centre button confirms it at once
+and leaves the screen on (and moves on to shuffle, below), as do Return, a touch and
 3 seconds without a tick, and each gives the wheel back to the volume; Return then stays on the
 page. Ending without having moved the target does not seek. Paused, the track stays paused and
-plays from the target at Play. Outside a scrub a single press starts scrubbing,
-`DOUBLE_CLICK_MS` later as a row opens, and a double press turns the screen off, as on the lists
-(**Single Press Scrub**, below, on unless chosen off). With it off the two swap: a single press
-turns the screen off and a double press starts scrubbing. The presses work the same while the volume shows over the page; starting a scrub closes it. Paused, the scrub is silent and the track jumps once, when it ends, so it stays paused. No Apple guide says whether an iPod's music follows its scrubber; it follows here as the hold of Previous or Next does ([Previous and Next](#previous-and-next)). Values are `SCRUB_*` in
+plays from the target at Play. With **Single Press Scrub** (below, on unless chosen off) Centre
+cycles the controls the wheel sets, as an iPod classic's does: a press starts scrubbing at once,
+the next ends the scrub and rings shuffle, the next repeat (a tick toggles shuffle or steps repeat
+Off, All, One; under a theme without the pair these two are skipped), the next opens the rating
+picker, whose Centre saves and leaves the page at rest, the wheel back on the volume. Return, a
+touch or 3 seconds without a key end a stage. A short hold (`NP_HOLD_MS`, 400 ms) turns the
+screen off, and a long hold is still Shut Down. With it off a single press turns the screen off
+and a double press starts scrubbing. The presses work the same while the volume shows over the page; starting a scrub closes it. Paused, the scrub is silent and the track jumps once, when it ends, so it stays paused. No Apple guide says whether an iPod's music follows its scrubber; it follows here as the hold of Previous or Next does ([Previous and Next](#previous-and-next)). Values are `SCRUB_*` in
 `patch/offsets.inc`; see [internals.md](internals.md#scrub-ipod).
 
 The top row's text and icons, the bar's ends and the times keep clear of the corners
@@ -843,8 +849,9 @@ NPCENTRED`, off; `playset_covermode`): `ringnav_ui_load`, hooked on every window
   playlists of a music server that a card app such as the Subsonic app lists join the Library,
   greyed while they can't play ([Server library](internals.md#server-library)).
 - Controls: Wheel Sensitivity, which opens its slider page; "Hold Return: Recent"
-  (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); a "Single Press Scrub" switch (`IPOD SCRUBSINGLE`, on; `np_key`): on Now Playing a single
-  centre press starts the scrub and a double press turns the screen off (Scrub, above), off swaps them; "Clicker: Both", Key Tone's row, cycling Speaker, Headphones, Both and Off (`IPOD CLICKER`, Off being Key Tone off; [Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; "Wake: Single Press"; and "Volume Guard".
+  (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); a "Single Press Scrub" switch (`IPOD SCRUBSINGLE`, on; `np_key`, `np_centre`): on Now Playing
+  Centre cycles scrubber, shuffle, repeat and rating and a short hold turns the screen off (Scrub, above); off,
+  a single press turns the screen off and a double press scrubs; "Clicker: Both", Key Tone's row, cycling Speaker, Headphones, Both and Off (`IPOD CLICKER`, Off being Key Tone off; [Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; "Wake: Single Press"; and "Volume Guard".
 
 All are among the [settings icons](#settings-icons) the build pre-sizes. A value row has its value
 in the label (260 pixels wide, to where the chevron ends) and no chevron, since Centre or a tap
@@ -1018,8 +1025,12 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
   move along, stopping at either end. Centre presses the lit key as a tap does, so a letter key typed twice in quick
   succession gives its second letter, as on a phone, and the page keys (ABC, 123, sym) change the page with the light
   kept in its place. Return is the box's own: it closes the keyboard, or the box with it.
-- **Appearance's rows.** Theme, Status Bar, Light Mode, Accent, Home, Shortcut, Battery (Icon or Percent), Song Artist
-  and Song Length.
+- **Track Time.** Now Playing's right-hand time shows what is left of the track ("-3:29", the default) or its
+  length ("4:12"). A tap on the time switches it and the choice is kept across tracks and restarts (`IPOD NPTIME`,
+  an own option; `np_time_tap`, outside the bar's target, so it never seeks); Appearance's Track Time row is the
+  wheel's way to it.
+- **Appearance's rows.** Theme, Status Bar, Light Mode, Accent, Home, Shortcut, Battery (Icon or Percent), Song Artist,
+  Song Length and Track Time.
 
 <a id="oled-type"></a>Inter 4.1 Regular and Medium (`assets/fonts`, SIL OFL 1.1) ship as `fonts/inter.ttf` and
 `fonts/inter-medium.ttf`, subset as the other faces are; where Inter lacks a character, stock's face stands in.

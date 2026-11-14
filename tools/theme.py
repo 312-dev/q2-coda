@@ -713,7 +713,7 @@ def offered(c, o, names, what):
     return sum(1 << names.index(n) for n in set(listed))
 
 
-PLAIN_KEYS = {'HOMELIB', 'ROWPREVIEW', 'STATUSBAR', 'SONGARTIST', 'SONGLENGTH'}  # the plain own keys the payload reads (theme_engine.c home_lib_on, row_preview_on, bar_theme, song_artist, song_length)
+PLAIN_KEYS = {'HOMELIB', 'ROWPREVIEW', 'STATUSBAR', 'SONGARTIST', 'SONGLENGTH', 'NPTIME'}  # the plain own keys the payload reads (theme_engine.c home_lib_on, row_preview_on, bar_theme, song_artist, song_length, np_time_total)
 
 
 def order(attrs):

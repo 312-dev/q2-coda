@@ -3123,7 +3123,7 @@ def test_a_lone_centre_on_now_playing_scrubs_unless_chosen_otherwise(fw, keys, s
     top = ui.window('playing_page')
     st('np_win', C.c_void_p).value = top.p
     assert keys(KEY_CENTER) == STOP and not fw.calls('on_wm_keyup_fun')
-    assert ui.due('navigation__np_scrub') and not ui.due('navigation__np_single')
+    assert not ui.due('navigation__np_single') and not ui.timers  # a scrub at once (np_centre): no double-press wait
 
 
 def test_a_wheel_tick_after_an_overdue_centre_drops_its_click(fw, keys):

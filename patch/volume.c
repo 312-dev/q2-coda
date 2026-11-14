@@ -164,5 +164,11 @@ void vol_paint(void *top, void *canvas) {
         return;
     }
     k += put_num(s + k, (unsigned)clamp_step(0, 999, level));
-    draw_centred(canvas, s, k, &text, np ? NP_TIMES_PX : VOL_PANEL_PX, 0xffffffff);
+    /* a status row's set (OLED's) sets it as a secondary label, 15 px Text Secondary */
+    int quiet = np && geom_val(V_STATUS_Y);
+    draw_centred(canvas, s, k, &text,
+                 quiet ? VOL_NP_QUIET_PX
+                 : np  ? NP_TIMES_PX
+                       : VOL_PANEL_PX,
+                 quiet ? RGBA(flip_if(ipod_light(), VOL_NP_QUIET_RGB)) : 0xffffffff);
 }

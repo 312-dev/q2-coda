@@ -870,7 +870,7 @@ NP_GRID_SLIDE_GAP = 5
 NP_GRID_TIMES_DY = 22
 NP_GRID_MODES_DY = 48
 NP_GRID_MODES = (88, 44)  # the play mode's target: both glyphs, 44 px apart (np_bar.c NP_MODES_APART)
-NP_GRID_DOTS_DY = 74
+NP_GRID_DOTS_DY = 70  # the page dots centred on y 302 on screen
 NP_GRID_MARGIN = 2  # hscroll_label's own margin each side of its text (stock's margin_left and margin_right)
 
 
@@ -921,7 +921,7 @@ def np_grid(root, named, g, title, artist, album, pos, remain):
     w, h = NP_GRID_MODES
     mode = named['img_playmode']
     mode[1] = [(375 - w) // 2, bar_y + NP_GRID_MODES_DY - h // 2, w, h]
-    mode[2]['opacity'] = '0'  # its target and handler stay; np_bar.c np_modes draws the pair over it
+    mode[2]['opacity'] = '0'  # its target stays, its halves np_bar.c np_mode_click's; np_modes draws the pair over it
     root[3].append(mode)
 
 
