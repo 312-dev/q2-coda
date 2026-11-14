@@ -953,3 +953,27 @@ def test_a_server_track_pressed_in_cover_flow_plays_rather_than_saying_storage_u
     assert len(rig.played) == 1 and rig.played[-1][1] == 0
     play(1, None)  # a card track whose file is gone: as before, nothing plays
     assert len(rig.played) == 1
+
+
+def test_now_playing_takes_the_apps_cover_for_a_stream_cache_copy_without_art(rig, fw):
+    """A server song plays from its Stream Cache copy (coverflow_player_cover, stock's cover thread, after its
+    embedded art failed): stock's folder image and beside_art find nothing in the cache's folder, so the app's
+    cover of its album goes to ffmpeg next, before the copy's own embedded probe; with none fetched, only the
+    probe runs. Each ffmpeg run is a fork, refused here."""
+    copy = '/mnt/mmc/.subsonic/stream/x/s1.flac'
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, album_id='al1', local=copy)])
+    rig.poll()
+    fw.mock('toolsGetExternCover', lambda *_: 0)
+    forks = []
+    fw.mock('fw_fork', lambda *_: forks.append(1) and -1)
+    player = fw.fn('coverflow_player_cover', C.c_int, C.c_char_p, C.c_char_p, C.c_int, C.c_int)
+    assert player(copy.encode(), b'/tmp/externpic.jpg', 300, 300) == 0 and len(forks) == 1  # the probe
+    rig.files.files['/mnt/mmc/.subsonic/covers/al1.jpg'] = b'\xff\xd8'
+    ff = []
+    fw.mock('fw_fork', lambda *_: ff.append(1) and -1)
+    player(copy.encode(), b'/tmp/externpic.jpg', 300, 300)
+    assert len(ff) == 2  # the app's cover, then the probe
+    rig.files.files['/mnt/mmc/Music/a.flac'] = b''
+    ff.clear()
+    player(b'/mnt/mmc/Music/a.flac', b'/tmp/externpic.jpg', 300, 300)  # a card file: the probe alone
+    assert len(ff) == 1
