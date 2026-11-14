@@ -1310,7 +1310,7 @@ def test_geometry_ranges():
     ('<geometry name="pico" home_row="41"/>', 'geometry.home_row: 41 outside 28..40'),
     ('<geometry name="pico" split_art="186"/>', 'geometry.split_art: 186 outside 187..260'),
     ('<geometry name="pico" split_row="204"/>', 'geometry.split_row: 204 outside 120..203'),
-    ('<geometry name="pico" split_art_up="5"/>', 'geometry.split_art_up: 5 outside 0..4'),
+    ('<geometry name="pico" split_art_up="31"/>', 'geometry.split_art_up: 31 outside 0..30'),
     ('<geometry name="pico" extends="flat"/>', 'unknown geometry set "flat"'),
     ('<geometry set="pico"/><geometry name="pico" bar="26"/>', 'unknown geometry set "pico"'),
 ])
@@ -1554,7 +1554,7 @@ def test_oled_states_its_grid_type_and_colour(tmp_path):
     assert (oled['np_meta_font'], oled['np_modes'], oled['marquee_fade'], oled['reopen_top'], oled['shuffle_row'], oled['home_lists_full']) == (inter, 1, 1, 1, 1, 1)
     # Home's Split: rows to 204 (the bar to 188, chevrons at 176), the art from x 196 and 6 px up into the bar, still;
     # the other sets keep half the screen, the art under the bar, panning
-    assert (g.split_row, g.split_art, g.split_art_up, g.split_inset, oled['home_label_end[0]']) == (204, 196, 6, 2, 44)
+    assert (g.split_row, g.split_art, g.split_art_up, g.split_inset, oled['home_label_end[0]']) == (204, 196, 58, 2, 44)
     assert all((s.split_row, s.split_art, s.split_art_up, s.split_inset) == (187, 187, 0, 0) for s in map(theme.geometry, ts[:3]))
     assert all(t['np_modes'] == t['marquee_fade'] == t['shuffle_row'] == t['home_lists_full'] == t['np_art_radius'] == 0 == theme.geometry(t).np_art for t in ts[:3])
     assert all(t['reopen_top'] == 1 for t in ts)  # Minimal's, every theme's

@@ -90,7 +90,7 @@ _Static_assert(sizeof accent_names / sizeof *accent_names == ACCENT_N, "one name
 _Static_assert(sizeof st.setting_label / sizeof *st.setting_label == SETTING_OWN + THEME_KEYS,
                "one label per Display row");
 #include "themes.inc" /* tools/theme.py, from assets/themes/<id>/theme.xml */
-_Static_assert(DRIFT_TEXELS >= 4 * (375 - HOME_SPLIT_W) * CLIENT_H_MAX,
+_Static_assert(DRIFT_TEXELS >= 4 * (375 - HOME_SPLIT_W) * 320, /* a pane to the top edge */
                "Home drift frame fits every set");
 #if __SIZEOF_POINTER__ == 4 /* the Q2's layout; test/fw's 64-bit build has its own */
 _Static_assert(__builtin_offsetof(theme_t, geom) == THEME_GEOM_OFF, "test/patch.py's set_geom");

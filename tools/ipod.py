@@ -107,9 +107,9 @@ class Geometry:
     np_bar_y: int = 0
     # Home in Split (coverflow.c home_split): the menu's width, which its rows, chevrons and selection bar take as theirs;
     # the art's pane from split_art to the screen's right edge; split_art_up rows of the pane above the window, in the
-    # bar, which paints them (coverflow_home_bar); the cover pans across its 110 % zoom, and split_inset keeps that
-    # percent of the zoomed cover clear of the pane at each edge, so a cover's own frame never shows (coverflow.c
-    # drift_axis).
+    # bar, which paints them (coverflow_home_bar) and inks its glyphs over them by contrast (home_ink); the cover pans
+    # across its 110 % zoom, and split_inset keeps that percent of the zoomed cover clear of the pane at each edge, so a
+    # cover's own frame never shows (coverflow.c drift_axis).
     split_row: int = inc('HOME_SPLIT_W')
     split_art: int = inc('HOME_SPLIT_W')
     split_art_up: int = 0

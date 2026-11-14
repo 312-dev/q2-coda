@@ -46,7 +46,8 @@ class Home(C.Structure):
                 *((k, C.c_void_p) for k in 'row row_image row_label svc'.split()), ('svc_name', C.c_char * 72),
                 *((k, C.c_int) for k in 'kind songs albums services games free_tenths counted counting got_songs got_albums'.split()),
                 ('count_thread', C.c_ulong), *((k, C.c_uint) for k in 'asked pane_read count_timer pane_timer'.split()),
-                ('ring', (C.c_uint * HOME_PW) * 4), ('clip', C.c_int * 4), ('clipped', C.c_int)]
+                ('ring', (C.c_uint * HOME_PW) * 4), ('clip', C.c_int * 4), ('clipped', C.c_int),
+                ('ink_bar', C.c_void_p), ('ground', C.c_uint)]
 
 
 class Row(C.Structure):
@@ -789,6 +790,57 @@ def test_home_tex_a_cover_it_won_t_pan_stays_still(fw, w, h, format):
     pixels = (C.c_ubyte * 4)()
     tex, home, _ = tex_rig(fw, w, h, pixels, format=format)
     assert tex(b'x') == 0 and home.tw == 0 and fw.calls('widget_unload_image')
+
+
+# The status row over Split's art: each glyph pixel inked white or black by WCAG contrast
+
+def wcag_white(r, g, b):
+    """Whether white has at least black's WCAG contrast over the sRGB pixel (Scrolly's lampLineInk rule)."""
+    lin = [c / 255 / 12.92 if c / 255 <= 0.04045 else ((c / 255 + 0.055) / 1.055) ** 2.4 for c in (r, g, b)]
+    lum = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+    return 1.05 / (lum + 0.05) >= (lum + 0.05) / 0.05, abs((lum + 0.05) ** 2 - 0.0525)
+
+
+def ink(fw, screen, art, ground):
+    """home_ink over one row: screen (BGRA words, the bar's glyphs on ground) and art (RGBA words) as long."""
+    n = len(screen)
+    fb, tex = (C.c_uint * n)(*screen), (C.c_uint * n)(*art)
+    fw.fn('home_ink', None, C.c_void_p, C.c_int, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_uint)(fb, n, tex, n, n, 1, ground)
+    return list(fb)
+
+
+def art_px(r, g, b):
+    return 0xff000000 | b << 16 | g << 8 | r
+
+
+def screen_px(r, g, b):
+    return 0xff000000 | r << 16 | g << 8 | b
+
+
+@pytest.mark.parametrize('ground, glyph', ((0xff000000, 0xffffffff), (0xffffffff, 0xff000000)))  # dark, Light Mode
+def test_home_ink_shows_the_art_where_no_glyph_is_and_inks_a_glyph_by_contrast(fw, ground, glyph):
+    art = [art_px(120, 190, 220), art_px(250, 250, 250), art_px(20, 24, 30), art_px(120, 190, 220)]
+    got = ink(fw, [ground, glyph, glyph, glyph], art, ground)
+    assert got[0] == screen_px(120, 190, 220)  # the art, in the screen's order
+    assert got[1:] == [screen_px(0, 0, 0), screen_px(255, 255, 255), screen_px(0, 0, 0)]  # white: black; dark: white; light blue: black
+
+
+def test_home_ink_blends_an_edge_by_its_coverage(fw):
+    half = screen_px(128, 128, 128)  # a glyph's edge, half on the black ground
+    got = ink(fw, [half, half], [art_px(255, 255, 255), art_px(0, 0, 0)], 0xff000000)
+    assert abs((got[0] & 255) - 127) <= 1 and abs((got[1] & 255) - 128) <= 1  # white art half black, black half white
+    dim = screen_px(0x6e, 0x6e, 0x6e)  # the slim battery's outline: its tone is its share
+    assert abs((ink(fw, [dim], [art_px(255, 255, 255)], 0xff000000)[0] & 255) - (255 - 0x6e)) <= 1
+
+
+def test_home_ink_picks_as_wcag_does(fw):
+    rnd = random.Random(7)
+    pixels = [(v, v, v) for v in range(256)] + [tuple(rnd.randrange(256) for _ in range(3)) for _ in range(4000)]
+    got = ink(fw, [0xffffffff] * len(pixels), [art_px(*p) for p in pixels], 0xff000000)
+    for p, g in zip(pixels, got):
+        white, margin = wcag_white(*p)
+        if margin > 1e-5:  # a tie within the table's rounding either way
+            assert g == (0xffffffff if white else 0xff000000), p
 
 
 # Touch: a fling's speed

@@ -280,7 +280,7 @@ static inline int arc_out(int r, int y) {
 #define DRIFT_Y_MS 26000
 #define DRIFT_TICK_MS 200
 #define DRIFT_MAX_STEP_MS 500 /* 2.5 ticks: a late tick keeps its time */
-#define DRIFT_TEXELS 221088 /* four panels: 4 x 188 x 294, the tallest set's client */
+#define DRIFT_TEXELS 240640 /* four panels: 4 x 188 x 320, a pane the screen's height */
 #define HOME_TOP 8 /* Minimal's decorative inset; Modern starts below the status bar. */
 #define HOME_CHEVRON_SHIFT 15
 #define HOME_FULL_CHEVRON_SHIFT 10
