@@ -133,8 +133,10 @@ static void card_tags(char *id3, const char *path) {
  * before Now Playing's lines. A CUE track's tags are its record's, the stock parser's TITLE and
  * PERFORMER (the track's, else the sheet's); a sheet without them takes the file's (issue #59).
  * ponytail: the playing track only; the database keeps the sheet's empty fields for Library. */
+unsigned id3_parses __attribute__((section(".scratch"))); /* each fresh parse: catalogue.c */
 char *ringnav_id3_path(char *id3, const char *path) {
     static const int fields[] = { ID3_ALBUM, ID3_ARTIST, ID3_ALBUM_ARTIST };
+    ++id3_parses;
     if (mclGetCueFlag() && (!id3[ID3_ALBUM] || !id3[ID3_ARTIST] || !id3[ID3_ALBUM_ARTIST])) {
         char info[0x698] = { 0 };
         if (toolsGetMusicInfo(0, info, path) == 1)

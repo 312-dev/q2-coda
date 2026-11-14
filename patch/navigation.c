@@ -137,12 +137,16 @@ static int library_query(int content, const char *db, const char *sql, void *row
     }
     const char *from = library_music && sql ? strstr(sql, " from songtable") : 0;
     if (from) { /* library_first: the Unknown row's check, which one song answers */
+        /* Local + Server: the server's songs beside them (catalogue.c) */
         int n = tk_snprintf(filtered, sizeof filtered,
-                            "%.*s from (select * from songtable where %s)%s%s", (int)(from - sql),
-                            sql, MUSIC_WHERE, from + 15, library_first ? " limit 1" : "");
+                            "%.*s from (select * from songtable where %s%s)%s%s", (int)(from - sql),
+                            sql, MUSIC_WHERE, catalogue_rows(), from + 15,
+                            library_first ? " limit 1" : "");
         if (n < 0 || (unsigned)n >= sizeof filtered) return -1;
         sql = filtered;
     }
+    char *search = from ? 0 : catalogue_search(sql); /* Search finds server songs too */
+    if (search) sql = search;
     if (sql && strstr(sql, "select * from playlist where id > 100 and cd_num=") == sql &&
         !strstr(sql, "order by")) {
         int n = tk_snprintf(filtered, sizeof filtered, "%s order by id asc", sql);
@@ -172,6 +176,7 @@ static int library_query(int content, const char *db, const char *sql, void *row
                  : content    ? stock_content_query_trampoline(db, query, row, arg, sort)
                               : stock_dbquery_trampoline(db, query, row, (int)arg);
     if (expanded) free(expanded);
+    free(search);
     return result;
 }
 int ringnav_library_query(const char *db, const char *sql, void *row, int sort) {
@@ -1746,6 +1751,86 @@ static void paint_songs(void *w, void *canvas) {
     }
 }
 
+/* Rows that can't play now (catalogue.c) carry the offline mark at their right: in the chevron's
+ * column, or just left of a chevron the row shows (every drill row's, or a chevron_sel theme's
+ * selected one). Its centre on row i of g_menu, surface coordinates. */
+static int into_image(void *w, int depth) {
+    for (unsigned k = 0, n = widget_count_children(w); k < n; ++k) {
+        void *c = widget_get_child(w, k);
+        if (!widget_get_visible(c)) continue;
+        if (!tk_strcmp(widget_get_prop_str(c, "image", ""), "list_into") ||
+            (depth > 1 && into_image(c, depth - 1)))
+            return 1;
+    }
+    return 0;
+}
+static int offline_x(void *w, int i, const rect_t *r) {
+    int sel = st.sel_w == w && i == st.sel_row;
+    /* the payload's chevrons (paint_chevrons), or stock's list_into, which shows on the selection
+     */
+    int chevron = (drill(w) || page_into(g_menu.at[i]))
+                      ? !theme()->chevron_sel || sel
+                      : sel && into_image(P(g_menu.at[i], W_PARENT), 2);
+    return r->x + r->w - CHEVRON_W + 25 - (chevron ? 28 : 0);
+}
+/* Before a list's rows paint: an album's songs (albuminfo_page; playerjumpinfo_page, Go to
+ * Album's; Cover Flow's tracks, where Go to Album goes with Artist View or Cover Flow open), Most
+ * Played's and the Ratings lists' songs (page_tracks) and Search's results are a scroll_view's
+ * rows, one per record in order (the showlist, the page's tracks or Search's results), not a
+ * table's, so each that can't play now is greyed here, as ringnav_table_load greys a table's.
+ * Then every greyed row's labels end short of its mark (catalogue_fit), and any it narrowed before
+ * take their width back. */
+/* Search's results while they show: p_deque_searchshowlist, which each of its tab_button_group's
+ * tabs (Songs, Artists, Albums, Genres) fills with its rows, the Songs tab's the list
+ * search_track_row_on_click plays from; *tab the lit one's index. 0 for none (its history). */
+static void *page_tracks(void *page);
+void *ringnav_search_rows(void *win, int *tab) {
+    void *tabs = win && !tk_strcmp(widget_get_prop_str(win, "name", ""), "search_dialog")
+                     ? widget_lookup(win, "tab_button_group", 1)
+                     : (void *)0;
+    for (int i = 0, n = tabs && widget_get_visible(tabs) ? widget_count_children(tabs) : 0; i < n;
+         ++i)
+        if (widget_get_prop_int(widget_get_child(tabs, i), "value", 0))
+            return *tab = i, P(p_deque_searchshowlist, 0);
+    return (void *)0;
+}
+static void grey_rows(void *w) {
+    if ((catalogue_source != 1 && !catalogue_greys()) || !kind(w) || !load_rows(&g_menu, w)) return;
+    void *win = window_of(w), *list = (void *)0;
+    int tab = 0; /* Search's lit tab: 0 Songs */
+    const char *page = widget_get_prop_str(win, "name", "");
+    if (g_menu.kind == 1 && catalogue_source == 1)
+        list = !tk_strcmp(page, "albuminfo_page") || !tk_strcmp(page, "playerjumpinfo_page")
+                   ? P(p_deque_showlist, 0)
+                   : page_tracks(win);
+    if (!list && g_menu.kind == 1 && catalogue_source == 1) list = ringnav_search_rows(win, &tab);
+    if (list && deque_size(list) != (unsigned)g_menu.rows) list = (void *)0;
+    for (int i = 0; i < g_menu.n; ++i) {
+        if (list) catalogue_mark(g_menu.at[i], deque_at(list, (unsigned)g_menu.id[i]), tab);
+        rect_t r = bounds(&g_menu, i);
+        if (2 * r.w >= I(w, W_W))
+            catalogue_fit(g_menu.at[i], w,
+                          offline_x(w, i, &r) - 14 + (g_menu.kind == 1 ? I(w, SCROLL_X) : 0));
+    }
+}
+
+/* After the rows: each greyed row's mark, in its text's colour as last painted. */
+static void paint_offline(void *w, void *canvas) {
+    rect_t old;
+    unsigned ink;
+    if (!catalogue_greys() || !kind(w) || !P(canvas, CANVAS_LCD) || !load_rows(&g_menu, w) ||
+        !clip_surface(canvas, &g_menu, &old))
+        return;
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+    for (int i = 0; i < g_menu.n; ++i) {
+        rect_t r = bounds(&g_menu, i);
+        if (2 * r.w >= I(w, W_W) && catalogue_row_ink(g_menu.at[i], &ink))
+            catalogue_mark_paint(canvas, offline_x(w, i, &r), r.y + r.h / 2, ink);
+    }
+    stock_canvas_set_fill_color(canvas, fill);
+    canvas_set_clip_rect(canvas, &old);
+}
+
 /* Writes v (under 1000) in decimal to s; returns the digits written. */
 unsigned put_num(unsigned *s, unsigned v) {
     unsigned n = 0;
@@ -2838,6 +2923,7 @@ int ringnav_paint(void *w, void *canvas) {
         if (!carousel_page(top)) st.home_surface = (void *)0;
     }
     paint_chevrons(w, canvas);
+    paint_offline(w, canvas);
     paint_radio(w, canvas);
     paint_into(w, canvas);
     paint_letter(w, canvas);
@@ -3276,7 +3362,8 @@ static int *const pod_values[] = { &st.charge_limit,
                                    &st.big_library,
                                    &st.playlist_cf,
                                    &st.scan_durations,
-                                   &st.cf_position };
+                                   &st.cf_position,
+                                   &catalogue_source };
 _Static_assert(POD_LOCKCLOCK == 6, "lockscreen.c passes pod_rows 6");
 _Static_assert(sizeof pod_values / sizeof *pod_values == POD_COUNT, "a pod_values per row");
 static const char *const pod_keys[] = { "CHARGELIMIT",
@@ -3302,7 +3389,8 @@ static const char *const pod_keys[] = { "CHARGELIMIT",
                                         "BIGLIBRARY",
                                         "PLAYLISTCF",
                                         "SCANDURATIONS",
-                                        "CFPOSITION" };
+                                        "CFPOSITION",
+                                        "LIBRARYSOURCE" };
 _Static_assert(sizeof pod_keys / sizeof *pod_keys == POD_COUNT, "a pod_keys entry per row");
 /* a row's choices: Artist albums three, Standby limit four, every other row two */
 static int pod_choices(unsigned i) { return i == POD_ARTIST_CF ? 3 : i == POD_STANDBY ? 4 : 2; }
@@ -3408,6 +3496,7 @@ static void pod_text(int i) {
         { "Playlist View: List", "Playlist View: Cover Flow" },
         { 0 }, /* Scan Song Durations: a switch */
         { 0 }, /* Position Bar: a switch */
+        { "Library: Local Only", "Library: Local + Server" },
     };
     _Static_assert(sizeof names / sizeof *names == POD_COUNT, "a names entry per row");
     if (i == POD_CF_SORT) {
@@ -3487,6 +3576,7 @@ static int pod_click(void *ctx, void *event) {
         write_int_config(*value, "Q2POD", pod_keys[i]);
         if (i == POD_SCAN_DURATIONS && !*value) durations_cancel();
         if (i == POD_CF_POSITION) coverflow_position_reset();
+        if (i == POD_LIBRARY_SOURCE) catalogue_changed();
         st.charge_at = 0;
         /* Control Device Volume: off, stock's gain back at once; on, bt_volume_poll's next pass
          * sends the Q2's level to the device. */
@@ -4480,6 +4570,7 @@ int ringnav_table_load(void *ctx, unsigned index, void *row) {
     int ret =
         ((int (*)(void *, unsigned, void *))P(P(row, W_PARENT), TABLE_LOAD_DATA))(ctx, index, row);
     row_faces(row);
+    catalogue_bind(row, index); /* greyed when it is a server row that can't play now */
     return ret;
 }
 
@@ -4924,6 +5015,10 @@ static int np_gone(void *win, void *event) {
  * ponytail: one more decode per track change while the page is up, beside stock's own reload. */
 static unsigned np_art(const char **file) {
     unsigned at, n;
+    if ((*file = catalogue_np_cover())) /* a pressed server song's, while it loads: whenever */
+        return tk_strcmp(widget_get_prop_str(st.np_cover, "image", ""), *file) /* not shown */
+                   ? ~st.np_art
+                   : fnv(FNV_SEED, (const unsigned char *)*file);
     void *r = queue_now(&at, &n);
     unsigned char type = now_cover(r, file);
     unsigned written = now_cover_written(*file);
@@ -6115,6 +6210,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
     if (w && w == st.search_tabs) search_tabs_paint(w, canvas);
     paint_selection(w, canvas);
     paint_songs(w, canvas);
+    grey_rows(w);
     if (form) confirm_labels(w, canvas);
     if (w && w == st.rate_box)
         paint_panel(w, canvas, &(rect_t){ PANEL_PAD, PANEL_PAD - PANEL_DROP, 304, 110 },
@@ -6223,8 +6319,25 @@ int painting_in(void *row) {
     return 0;
 }
 static int selected_ink(void) { return painting_in(st.sel_widget); }
+/* Whether row holds the selection painted now, or is inside it (catalogue.c's greyed rows). */
+int ringnav_row_selected(void *row) {
+    void *at = st.sel_w && st.sel_row >= 0 && st.sel_row < g_menu.n ? g_menu.at[st.sel_row] : 0;
+    for (void *w = at; row && w && w != st.sel_w; w = P(w, W_PARENT))
+        if (w == row) return 1;
+    for (void *w = row; at && w && w != st.sel_w; w = P(w, W_PARENT))
+        if (w == at) return 1;
+    return 0;
+}
 
+static unsigned *style_color(unsigned *color, void *style, const char *name, unsigned fallback);
+/* A row that can't play now (catalogue.c) takes its text colour last, over the theme's. */
 unsigned *ringnav_style_color(unsigned *color, void *style, const char *name, unsigned fallback) {
+    style_color(color, style, name, fallback);
+    if (!st.style_depth && st.paint_w && name && tk_str_end_with(name, "text_color"))
+        catalogue_greyed(st.paint_w, color);
+    return color;
+}
+static unsigned *style_color(unsigned *color, void *style, const char *name, unsigned fallback) {
     /* A mutable style (inline style:*) answers from its default style through style_get_color
      * again: only the outermost call maps, as Light Mode's flip is not idempotent. */
     ++st.style_depth;
@@ -6972,6 +7085,10 @@ int ringnav_np_info(void *win) {
     getFormatString("player_location", where, sizeof where);
     const char *loc =
         *where && *where != '(' ? where : "Location"; /* a missing string reads "(key)" */
+    /* a server song (catalogue.c): its genre and year are the catalogue's, its place the server */
+    char genre[96], year[12];
+    int y = 0, server = catalogue_np_info((const char *)g_play_id3_info, genre, &y);
+    tk_snprintf(year, sizeof year, "%d", y);
     for (unsigned i = 0; i < sizeof names / sizeof *names; ++i) {
         void *label = win ? widget_lookup(win, names[i], 1) : (void *)0;
         char s[1024], out[1024 + sizeof where + 8];
@@ -6986,6 +7103,9 @@ int ringnav_np_info(void *win) {
         else
             continue;
         while (*v == ' ') ++v;
+        if (server && i == 1 && *genre) v = genre;
+        if (server && i == 3 && y > 0) v = year;
+        if (server && i == 8) v = "Server";
         if (!strcmp(v, "Unknown Artist")) v = "Unknown";
         const char *unit = *units[i] ? units[i] + 1 : units[i];
         int len = (int)strlen(v), u = (int)strlen(unit);
@@ -7102,6 +7222,7 @@ int ringnav_display(void *win, void *ctx) {
         pod_rows(win, "scroll_view_display", POD_BIG_LIB, 1, cf_icons + 3);
         pod_rows(win, "scroll_view_display", POD_SCAN_DURATIONS, 1, cf_icons + 3);
         pod_rows(win, "scroll_view_display", POD_CF_POSITION, 1, cf_icons + 3);
+        pod_rows(win, "scroll_view_display", POD_LIBRARY_SOURCE, 1, cf_icons + 3);
         return result;
     }
     if (sub == DISPLAY_APPEARANCE) {
@@ -9855,6 +9976,7 @@ static void spot_keep(unsigned key, int sec, int total) {
 /* Counts key's play and moves it first, so among equal counts the least recently played is the
  * one replaced when no slot is free. */
 static void play_count(void *r, unsigned key) {
+    key = catalogue_play_key(r, key); /* a server song's offline copy counts as its row */
     plays_load();
     int i = 0;
     for (int j = 0; j < PLAYS_SLOTS && st.plays[i].key != key; j++)

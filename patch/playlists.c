@@ -48,6 +48,7 @@ static int ple_number(void *ctx, int n, char **v, char **names) {
 int stock_db_open(const char *path, void **db) {
     int bad = sqlite3_open(path, db);
     if (!bad) sqlite3_exec(*db, "PRAGMA busy_timeout=500", 0, 0, 0);
+    if (!bad) catalogue_attach(db); /* the server library's songs, with Local + Server */
     return bad;
 }
 /* The database for a write that waits out a reader, playlist_art.c's worker reading the table,

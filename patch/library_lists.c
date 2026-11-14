@@ -141,7 +141,8 @@ void mp_counted(void *r, unsigned key, unsigned evicted) {
     if (evicted && mp_find(evicted) >= 0)
         ll.mp_gen = ~library_gen;
     else if (st.mp_list && mp_find(key) < 0) {
-        if (!st.mp_page && deque_size(st.mp_list) < 2 * PLAYS_TOP)
+        /* r is the counted song's own record, not an offline copy counted as its server row */
+        if (!st.mp_page && deque_size(st.mp_list) < 2 * PLAYS_TOP && listen_key(r) == key)
             _deque_push_back(st.mp_list, r);
         else
             ll.mp_gen = ~library_gen;
@@ -367,12 +368,17 @@ int era_sql(const char *sql, int (*row)(void *, int, char **, char **), void *ct
     void *db = 0;
     /* Era uses SQLite directly rather than the stock library query wrappers. */
     char *expanded = library_scope_query(sql); /* none: the whole library, as library_query */
+    /* Local + Server: the server's songs too (catalogue.c), its file attached to this connection.
+     * ponytail: the scope's folders (MUSIC_WHERE) apply to the union here, so a scope leaves the
+     * server's songs out of Era; library_query scopes the card's alone. */
+    char *both = catalogue_union(expanded ? expanded : sql);
     /* Keep a full-library grouping query from competing with the player's song records for RAM. */
     int bad = sqlite3_open("/mnt/data/database.db", &db) ||
-              sqlite3_exec(db, "PRAGMA cache_size=64;PRAGMA temp_store=FILE", 0, 0, 0) ||
-              sqlite3_exec(db, expanded ? expanded : sql, row, ctx, 0);
+              sqlite3_exec(db, "PRAGMA cache_size=64;PRAGMA temp_store=FILE", 0, 0, 0);
+    if (!bad && both) catalogue_attach_db(db);
+    bad = bad || sqlite3_exec(db, both ? both : expanded ? expanded : sql, row, ctx, 0);
     if (db) sqlite3_close(db);
-    free(expanded);
+    free(expanded), free(both);
     return !bad;
 }
 /* Home pane's counts: sql's one number, -1 when it can't be had. On coverflow.c count_worker's
@@ -513,7 +519,7 @@ static int era_pick(void *ctx, void *event) {
             toast("Era unavailable"); /* as a decade's albums: not a card that's away */
             return 0;
         }
-        if (!deque_size(all) || access(P(deque_at(all, 0), REC_PATH), 0))
+        if (!deque_size(all) || catalogue_missing(P(deque_at(all, 0), REC_PATH)))
             toast("Storage unavailable");
         else if (i)
             shuffle_play(all);

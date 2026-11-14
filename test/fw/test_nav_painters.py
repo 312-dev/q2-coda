@@ -3130,3 +3130,78 @@ def test_classic_brings_a_cut_row_whole_when_tapped(fw, st, which, revealed):
     assert bool(offsets) == revealed
     if revealed:
         assert offsets[0] + 294 >= 336 and offsets[0] <= 288
+
+
+# A Library row that can't play now (catalogue.c): its text and its offline mark.
+def test_a_greyed_row_keeps_its_contrast_on_the_selection_and_carries_the_offline_mark(fw, st, layout):
+    """Off the selection a greyed row's text is CAT_GREY; on Modern's accent bar it is the bar's own ink at
+    70% (not grey on blue), and each greyed row has the cloud-slash mark at its right in its text's colour,
+    after the rows are painted (ringnav_paint)."""
+    page = Page(fw, MODERN)
+    labels = [b.children[0] for b in page.rows]
+    for label in labels:  # titles as wide as the row: they would run under the mark
+        label.move(10, 0, 320, 48)
+    page.paint()
+    normal = text_ink(fw, st, labels[1])  # the selected row's ink before any greying
+    url = C.create_string_buffer(b'/mnt/mmc/.subsonic/cat/al1/s1.flac')
+    record = C.create_string_buffer(O['REC_SIZE'] + 8)
+    struct.pack_into('<Q', record, O['REC_PATH'], C.addressof(url))
+    struct.pack_into('<i', record, O['REC_TYPE'], 8)
+    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    for i in (1, 2):  # Local Only: a server row can't play
+        fw.fn('catalogue_mark', None, C.c_void_p, C.c_void_p, C.c_int)(page.rows[i].parent.addr, C.addressof(record), 0)
+    page.paint()  # before the rows: the greyed rows' titles end clear of the mark's column (322 +- 10)
+    assert [label.box[2] for label in labels] == [320, 278, 278, 320]
+    assert text_ink(fw, st, labels[0]) == normal  # an ordinary row: as it was
+    assert text_ink(fw, st, labels[2]) == 0xff666666
+    dim = text_ink(fw, st, labels[1])
+    assert dim == (normal & 0xffffff) | 0xb3 << 24
+    page.canvas.px.clear()
+    fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(page.view.addr, page.canvas.addr)
+    mark = {(x, y): c for (x, y), c in page.canvas.px.items() if x >= 300}
+    rows = {y // 48: [] for x, y in mark}
+    for (x, y), c in mark.items():
+        rows[y // 48].append(c)
+    assert sorted(rows) == [1, 2]  # rows 1 and 2, none on 0 or 3
+    assert {c & 0xffffff for c in rows[1]} == {normal & 0xffffff} and max(c >> 24 for c in rows[1]) == 0xb3
+    assert {c & 0xffffff for c in rows[2]} == {0x666666} and max(c >> 24 for c in rows[2]) == 0xff
+    assert len(rows[2]) > 100  # the glyph's pixels, not a dot
+    assert min(x for x, y in mark) == 312  # the chevron's column: 322 less half the mark
+    # a row bound to a song that plays again takes its width back
+    fw.fn('catalogue_forget', None, C.c_void_p)(page.rows[2].parent.addr)
+    page.paint()
+    assert [label.box[2] for label in labels] == [320, 278, 320, 320]
+
+
+@pytest.mark.parametrize('name, tab, greyed', [('albuminfo_page', None, True), ('playerjumpinfo_page', None, True),
+                                               ('localmusic_page', None, False), ('search_dialog', 1, True),
+                                               ('search_dialog', 0, False)])
+def test_an_album_page_and_search_grey_their_songs_that_cannot_play(fw, st, name, tab, greyed):
+    """An album's songs, and Search's songs, are a scroll_view's rows, one per record of the showlist (Search's:
+    p_deque_searchshowlist, the lit tab's rows), not a pooled table: with Local + Server, offline, a
+    server song's row is greyed as the page paints; another page's rows, or another tab's, are left alone."""
+    page = Page(fw, MODERN, name=name, LIBRARYSOURCE=b'1')
+    if tab is not None:
+        group = page.ui.add('view', page.view.parent, name='tab_button_group')
+        page.ui.add('tab_button', group, value=tab)
+        page.ui.add('tab_button', group, value=1 - tab)
+    fw.var('catalogue_source', C.c_int).value = 1
+    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    keep = []
+
+    def record(path):
+        s, r = C.create_string_buffer(path), C.create_string_buffer(O['REC_SIZE'] + 8)
+        struct.pack_into('<Q', r, O['REC_PATH'], C.addressof(s))
+        struct.pack_into('<i', r, O['REC_TYPE'], 8)
+        keep.extend((s, r))
+        return C.addressof(r)
+    deques = Deques(fw)
+    shown = deques.new([record(p) for p in (b'/mnt/mmc/a.flac', b'/mnt/mmc/b.flac',
+                                            b'/mnt/mmc/.subsonic/cat/al1/s1.flac', b'/mnt/mmc/c.flac')])
+    # Search's results are its own list; the page under it keeps the showlist
+    fw.var('fw_ctx_p_deque_searchshowlist' if tab is not None else 'fw_ctx_p_deque_showlist', C.c_uint).value = shown
+    if tab is not None:
+        fw.var('fw_ctx_p_deque_showlist', C.c_uint).value = deques.new([record(b'/mnt/mmc/x.flac')] * 4)
+    page.paint()
+    labels = [b.children[0] for b in page.rows]
+    assert [text_ink(fw, st, label) == 0xff666666 for label in labels] == [False, False, greyed, False]

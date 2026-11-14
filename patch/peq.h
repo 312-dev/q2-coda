@@ -374,6 +374,9 @@ int card_path(const char *path); /* on the card, no ".." segment: what an app or
 int addon_is_icon(const char *name); /* a card app's Streaming icon, by its file:// name */
 void addon_poll(void), addon_stop(void), addon_paint(void *w, void *canvas), addon_card_away(void);
 void addon_forget(const char *dir), addon_quit(const char *dir);
+/* addon.c: a catalogue app started for a catplay (0 running, 1 started, -1 can't), and whether a
+ * started one reads it yet */
+int addon_wake(const char *id), addon_ready(const char *id);
 /* addon.c's card games (q2app game=1), Games' rows after its own: how many (a scan), one's name,
  * its start over the screen (1 when it runs), whether one runs, and ringnav_input's events for it */
 int addon_games(void), addon_game_start(int k), addon_game_on(void);
@@ -409,6 +412,37 @@ int airplay_on(void), airplay_lyrics(int *ms);
  * 0 when the card didn't take it. */
 int addon_fav(const char *id, const char *kind, const char *key, int on);
 int addon_fav_path(const char *path, int on);
+/* catalogue.c: the server library (docs/internals.md#server-library). catalogue_on: Local + Server;
+ * catalogue_path: a server row's path; catalogue_unavailable: a record that can't play now;
+ * catalogue_album_unavailable: an album list's record none of whose songs can play now;
+ * catalogue_union: a Library query reading servertable too (0: as it is; the caller frees it);
+ * catalogue_load: ringnav_load's queue (0 as it is, 1 *own instead, 2 nothing loaded). */
+extern int catalogue_source;
+int catalogue_on(void), catalogue_path(const char *path), catalogue_unavailable(void *r);
+int catalogue_album_unavailable(void *r);
+int catalogue_seconds(const char *path), catalogue_load(void *q, int *at, void **own);
+int catalogue_access(const char *path, int mode); /* stock's play check, tools/build.py */
+int catalogue_missing(const char *path); /* the payload's own lists' check before a play */
+unsigned catalogue_play_key(void *r, unsigned key); /* a listen's key: a copy's is its row's */
+char *catalogue_union(const char *sql), *catalogue_search(const char *sql);
+const char *catalogue_rows(void); /* library_query's union, "" without one */
+void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);
+void catalogue_changed(void), catalogue_card_away(void), catalogue_rated(void *r, int hearts);
+void catalogue_bind(void *row, unsigned index), catalogue_mark(void *row, void *r, int tab);
+void catalogue_forget(void *row), catalogue_grey(void *w, int on);
+int catalogue_greyed(void *w, unsigned *color), catalogue_row_ink(void *row, unsigned *ink);
+int catalogue_greys(void);
+void catalogue_mark_paint(void *canvas, int x, int y, unsigned ink);
+void catalogue_fit(void *entry, void *surface, int limit);
+int catalogue_np_info(const char *path, char *genre, int *year);
+int catalogue_cover(const char *path, char *out, unsigned size);
+/* Now Playing while a pressed server song loads: the record it shows, its title and artist, its art */
+void *catalogue_np_now(unsigned *at, unsigned *n);
+void catalogue_np_text(void *win);
+const char *catalogue_np_cover(void);
+extern unsigned id3_parses; /* tags.c: the player's fresh parses (ringnav_id3_path) */
+int ringnav_row_selected(void *row); /* navigation.c: row holds the painted selection */
+void *ringnav_search_rows(void *win, int *tab); /* navigation.c: Search's results, while shown */
 extern unsigned auto_nexts; /* playback.c ringnav_next: tracks that ended by themselves */
 int stream_cache(int spotify); /* navigation.c: Streaming's Configuration, a cap of 512 << it MB */
 void album_memory(void *r);

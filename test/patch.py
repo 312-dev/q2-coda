@@ -8117,7 +8117,7 @@ for light in '10':
     assert cancel[0]==color_t(0x232c33) and cancel[33]==color_t(0x333c43)
     assert [b[:5] for b in rest if b[1]==282 and b[2]>1]==[(127+corner_in(7),282,121-2*corner_in(7),1,0x26000000|0xffffff)] and um.lcd_colors()==LCD_COLORS; passed()
 # ... its count: "312 of 704 songs", the bar 229*312//704 wide; past the total, stock's text and no bar; a tap on Cancel reaches stock's handler.
-assert um.sqls[-1]=='select count(*) from songtable' and sum('select count' in s for s in um.sqls)==1  # read once, on open, with no rows in memory
+assert um.sqls[-1]=='select count(*) from main.songtable' and sum('select count' in s for s in um.sqls)==1  # read once, on open, with no rows in memory
 um.nodes[umsg]['text']='Updating No.312'; bare(um); bg(um,uwin); track,fillrows=msg_track(um),msg_fill(um)
 assert um.nodes[uline]['text']=='312 of 704 songs' and [b[1] for b in track]==list(range(218,232)) and [b[4]>>24 for b in track]==[0x87,0x5c,0x4d,0x3d,0x3d]+[0x3b]*7+[0x54,0x54] and {b[4]&0xffffff for b in track}=={0}
 tinset=[b[0]-72 for b in track]; assert [b[2] for b in track]==[229-2*n for n in tinset] and tinset[0]>0==tinset[7] and tinset==tinset[::-1]
@@ -8143,7 +8143,7 @@ bare(b3); bg(b3,b3win); assert not [c for c in b3.calls if c[0]=='widget_set_tex
 q,qwin,_,qmsg,_,_=msg_dialog(text='Updating No.312',counted=False)
 assert not q.sqls and not [c for c in q.calls if c[0] in ('sqlite3_open','pthread_join')] and len(q.threads)==1 and [c for c in q.calls if c[0]=='pthread_detach@GLIBC_2.0']
 bare(q); bg(q,qwin); qline=named(q,qwin,'msg_line'); assert q.nodes[qline]['text']=='Updating No.312' and not msg_track(q) and not msg_fill(q) and not q.sqls
-q.counted(); assert q.sqls[-1]=='select count(*) from songtable'; q.calls=[]; q.advance(200); assert q.nodes[qline]['text']=='312 of 704 songs' and [c[1] for c in q.calls if c[0]=='widget_invalidate_force']==[qwin]; passed()
+q.counted(); assert q.sqls[-1]=='select count(*) from main.songtable'; q.calls=[]; q.advance(200); assert q.nodes[qline]['text']=='312 of 704 songs' and [c[1] for c in q.calls if c[0]=='widget_invalidate_force']==[qwin]; passed()
 # ... the dialog closed first: nothing waits on the worker. A new dialog with it still running shares its answer; with it done, drops the old answer and asks again.
 q,qwin,*_=msg_dialog(counted=False); msg_close(q,qwin); q2win,_,q2msg,_,_=msg_win(q,'Updating No.3'); assert len(q.threads)==1
 q.counted(); bare(q); bg(q,q2win); assert q.nodes[named(q,q2win,'msg_line')]['text']=='3 of 704 songs'; msg_close(q,q2win)

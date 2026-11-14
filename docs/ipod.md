@@ -790,8 +790,11 @@ NPCENTRED`, off; `playset_covermode`): `ringnav_ui_load`, hooked on every window
   with the albums', which builds again), a "Fast Navigation" switch (`Q2POD BIGLIBRARY`, off;
   `playset_covermode`): letters held until the lift and years on a fast spin, and the half copies
   they read, a "Scan Song Durations" switch (`Q2POD SCANDURATIONS`, off; `playset_covermode`;
-  durations.c), and a "Position Bar" switch (`Q2POD CFPOSITION`, off; `playset_covermode`;
-  coverflow_position.c).
+  durations.c), a "Position Bar" switch (`Q2POD CFPOSITION`, off; `playset_covermode`;
+  coverflow_position.c), and "Library: Local Only" or "Library: Local + Server" (`Q2POD
+  LIBRARYSOURCE`, Local Only by default; `playset_covermode`): with Local + Server, the songs and
+  playlists of a music server that a card app such as the Subsonic app lists join the Library,
+  greyed while they can't play ([Server library](internals.md#server-library)).
 - Controls: Wheel Sensitivity, which opens its slider page; "Hold Return: Recent"
   (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); a "Single Press Scrub" switch (`IPOD SCRUBSINGLE`, off; `np_key`): on Now Playing a single
   centre press starts the scrub and a double press turns the screen off (Scrub, above); "Key Tone"; "Click With Headphones" (`IPOD KEYTONEHP`), shown while Key Tone is on ([Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; "Wake: Single Press"; and "Volume Guard".
