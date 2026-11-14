@@ -79,13 +79,10 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 - **Fix:** build the member path from `STOCK_VERSION` and the user agent from `REPO`.
 - **Effort:** S.
 
-### 27. `DEMO_SHA` is recorded but never compared
+### 27. `DEMO_SHA` is recorded but never compared (resolved)
 
-- **Where:** `tools/build.py:10`, used only at `:2272` (`stock_demo_sha256=DEMO_SHA`).
-- **Evidence:** `grep -n DEMO_SHA tools/build.py` gives those two lines. The ZIP's hash (`:1780`) is what guards demo.
-- **Impact:** the manifest states a hash the build did not compute; a wrong constant would go unseen by the build.
-- **Fix:** `check(sha(raw_demo) == DEMO_SHA, ...)` after `:1792`, or write `sha(raw_demo)`.
-- **Effort:** S.
+- **Where:** `tools/build.py` (`DEMO_SHA`; `build()`, after `raw_demo = cat('release/bin/demo')`).
+- **State:** `build()` hashes the `demo` it read from the stock image and stops with `Unsupported demo: SHA-256 differs from the audited original` when it is not `DEMO_SHA`, so the manifest's `stock_demo_sha256` is a hash the build compared. `build()` is `# pragma: no mutate block`; the check was seen to stop a release build within a second with one hex digit of `DEMO_SHA` changed, and to pass with it restored.
 
 ### 30. A new theme's Corners default follows its index
 

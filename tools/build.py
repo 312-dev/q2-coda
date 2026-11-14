@@ -2054,6 +2054,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     sq = out/'stock.squashfs'; sq.write_bytes(blobs['recovery-update/rootfs.squashfs'])
     def cat(path): return subprocess.check_output(['unsquashfs', '-cat', str(sq), path])
     raw_demo = cat('release/bin/demo')
+    check(sha(raw_demo) == DEMO_SHA, 'Unsupported demo: SHA-256 differs from the audited original')
     (out/'libc-2.28.so').write_bytes(cat('lib/libc-2.28.so'))
     # Every allowlisted context must be a window name. The runtime name is the root "name"
     # property of the UI asset, not the asset path, so check the stock rootfs assets directly:
