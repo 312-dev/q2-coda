@@ -158,8 +158,9 @@ form_body() {
 }
 
 # The PIN check (docs/internals.md#wi-fi-transfer-pin). $AUTH is a folder only root can open, made by
-# demo when transfer starts and removed when it stops: pin (six digits), token (32 hex digits) and
-# try.1 to try.5 (the PIN tries spent).
+# demo when transfer starts and removed when it stops: pin (six digits), token (32 hex digits), seen
+# (touched by each admitted request, which demo's idle timer reads), busy.<pid> (a request still
+# running, so a long upload or download is not idle) and try.1 to try.5 (the PIN tries spent).
 AUTH=/tmp/q2wifi
 MAXTRIES=5
 # Secrets are compared as SHA-256 digests, so how long the comparison takes depends on the digests,
@@ -209,6 +210,12 @@ if [ "$name" = auth ]; then
   deny 403 Forbidden "{\"error\":\"pin\",\"left\":$(tries_left)}"
 fi
 signed_in || deny 401 Unauthorized '{"error":"pin"}'
+# Admitted: the idle timer's mark, and this request's busy mark for as long as it runs.
+touch "$AUTH/seen" 2>/dev/null
+busy=$AUTH/busy.$$
+: > "$busy" 2>/dev/null
+cleanup() { rm -f "$busy" ${out:+"$out"} 2>/dev/null; }
+trap cleanup EXIT
 
 case $name in
   list)
@@ -329,8 +336,7 @@ case $name in
       pid=${leftover##*.}
       [ -d "/proc/$pid" ] || rm -f "$leftover"
     done
-    out=$up/out.$$
-    trap 'rm -f "$out" 2>/dev/null' EXIT
+    out=$up/out.$$                                     # cleanup (the EXIT trap) removes it
     # The one write. The closing boundary goes to the card with the file and is held against what it
     # must be (CR, LF and NUL made visible, as $() drops trailing LFs); a short or wrong ending is a
     # refused upload, never a file with bytes missing or added. dd with no count, from /dev/null,

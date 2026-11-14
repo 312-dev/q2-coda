@@ -1,4 +1,4 @@
-"""Wi-Fi transfer's PIN: the real wifi_transfer.c around stock's server switch, with /tmp, /proc
+"""Wi-Fi transfer's PIN and idle timer: the real wifi_transfer.c around stock's server switch, with /tmp, /proc
 and /dev/urandom as a dict and the window manager as one page (docs/internals.md#wi-fi-transfer-pin)."""
 import ctypes as C
 
@@ -6,7 +6,7 @@ import pytest
 
 DIR = '/tmp/q2wifi'
 PAGE, WM, PARENT = 0x5100, 0x5200, 0x5400
-MINUTE = 60 * 1000
+IDLE_MS = 10 * 60 * 1000
 
 
 class Q2:
@@ -137,6 +137,11 @@ class Q2:
         words[28], words[30] = self.mtime.get(p, (0, 0))
         return 0
 
+    # what q2cgi does
+    def request(self):
+        self.files[f'{DIR}/seen'] = b''
+        self.mtime = {**self.mtime, f'{DIR}/seen': (self.ms // 1000, self.ms % 1000 * 1000000)}
+
     def wait(self, ms, step=1000):
         for _ in range(ms // step):
             self.ms += step
@@ -211,6 +216,47 @@ def test_a_session_left_by_a_crash_is_replaced_whole(fw):
     assert f'{DIR}/try.5' not in q.dirs and q.server == [1]
 
 
+def test_ten_idle_minutes_close_the_page_and_end_the_session(fw):
+    q = start(fw)
+    q.wait(IDLE_MS - 2000)
+    assert q.page_open and q.server == [1]
+    q.wait(3000)
+    assert not q.page_open and q.server == [1, 0] and not q.session()
+    assert q.closed == 1
+    q.wait(IDLE_MS)
+    assert q.closed == 1
+
+
+def test_a_request_restarts_the_count(fw):
+    q = start(fw)
+    q.wait(IDLE_MS - 5000)
+    q.request()
+    q.wait(IDLE_MS - 5000)
+    assert q.page_open
+    q.wait(10000)
+    assert not q.page_open
+
+
+def test_a_running_request_is_never_idle_and_a_dead_ones_mark_counts_for_nothing(fw):
+    q = start(fw)
+    q.files[f'{DIR}/busy.42'] = b''
+    q.procs.add(42)
+    q.wait(3 * IDLE_MS)
+    assert q.page_open  # a long upload
+    q.procs.clear()  # killed before its trap removed the mark
+    q.wait(IDLE_MS + 2000)
+    assert not q.page_open
+
+
+def test_the_count_is_monotonic_whatever_the_seen_marks_clock_says(fw):
+    q = start(fw)
+    q.wait(IDLE_MS // 2)
+    q.request()
+    q.mtime = {f'{DIR}/seen': (5, 0)}  # a time sync moved the wall clock back: still a change, still a request
+    q.wait(IDLE_MS - 3000)
+    assert q.page_open
+
+
 def test_five_tries_spent_show_locked(fw):
     q = start(fw)
     q.dirs |= {f'{DIR}/try.{k}' for k in range(1, 5)}
@@ -223,5 +269,5 @@ def test_five_tries_spent_show_locked(fw):
 
 def test_no_session_no_poll(fw):
     q = Q2(fw)
-    q.wait(30 * MINUTE)
+    q.wait(3 * IDLE_MS)
     assert not q.closed and not fw.calls('fw_opendir')

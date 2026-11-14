@@ -938,7 +938,8 @@ is a line, **PIN for the web page**, and under it a new six-digit PIN each time 
 56 px type as two groups of three. The
 web page asks for the PIN once; without it nothing on the card can be listed, downloaded, uploaded
 or deleted. Five wrong PINs show **Locked** in the PIN's place: Return and open the page again for a
-new PIN. Leaving the page turns transfer off, as in stock. How the PIN works:
+new PIN. Leaving the page turns transfer off, as in stock, and so do 10 minutes with no request,
+with a toast saying so. How the PIN and the timer work:
 [internals.md](internals.md#wi-fi-transfer-pin).
 
 ## Games

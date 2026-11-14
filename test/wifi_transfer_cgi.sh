@@ -552,6 +552,7 @@ mp /tmp/mp_p1 ----q2p1 /mnt/mmc/pin new.txt NEW; run upload POST '' 'multipart/f
 { [ "$(status)" = 401 ] && [ ! -e /mnt/mmc/pin/new.txt ]; } && ok "upload refused without the cookie, nothing written" || bad "upload without cookie ($(status))"
 run nosuch GET '' '' -
 [ "$(status)" = 401 ] && ok "an unknown route is refused before it is looked at" || bad "unknown route ($(status))"
+[ ! -e "$AUTH/seen" ] && ok "refused requests leave the idle timer alone" || bad "a refused request touched seen"
 run auth GET 'pin=482019' '' -
 { [ "$(status)" = 405 ] && [ -z "$(setcookie)" ]; } && ok "auth refuses a GET (the PIN never rides in a URL)" || bad "auth GET ($(status))"
 pinpost 000000
@@ -561,6 +562,8 @@ pinpost "$PIN"
 COOKIE="theme=dark; q2s=$(setcookie); lang=en"
 run list GET 'path=/mnt/mmc/pin' '' -
 leaks keep.txt && ok "the cookie it set lists, among other cookies" || bad "list with the new cookie ($(status))"
+[ -e "$AUTH/seen" ] && ok "an admitted request marks the idle timer" || bad "seen not touched"
+ls "$AUTH"/busy.* >/dev/null 2>&1 && bad "a busy mark outlived its request" || ok "the busy mark goes when the request ends"
 run download GET 'path=/mnt/mmc/pin/keep.txt' '' -
 [ "$(body)" = PRIVATE ] && ok "download works with the cookie" || bad "download with cookie ($(status))"
 mp /tmp/mp_p2 ----q2p2 /mnt/mmc/pin new.txt NEW; run upload POST '' 'multipart/form-data; boundary=----q2p2' /tmp/mp_p2
