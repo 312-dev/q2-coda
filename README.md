@@ -1,3 +1,9 @@
+> **q2-coda** is a fork of [Q2 Pod](https://github.com/DiamondBond/q2-pod) by DiamondBond, maintained by
+> 312.dev LLC. It follows upstream and adds an OLED theme in progress ([design standard](docs/oled-design.md)),
+> developer documentation ([architecture](docs/architecture.md), [source map](docs/source-map.md)) and a local
+> [security scan](docs/building.md#security-scan). The rest of this README is upstream's, and its download links
+> point at upstream's releases. Not affiliated with Shanling or Apple.
+
 <h1 align="center">Q2 Pod</h1>
 
 <p align="center">
