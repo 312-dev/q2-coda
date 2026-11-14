@@ -147,7 +147,7 @@ MOTION_TODAY = {**{f'motion.{k}.{a}': 0 for k in ('page', 'playing', 'coverflow'
 MINIMAL = {
     **MOTION_TODAY,
     'page_row': 48, 'page_detail': 64, 'page_title_h': 48, 'page_x': 36, 'page_cap_y': 4, 'page_cap_h': 32, 'page_det_y': 36, 'page_det_h': 24,
-    'id': 'minimal', 'index': 0, 'order': 0, 'name': 'Minimal', 'accents': 0x1ff, 'accent_key': 'MINIMAL_ACCENT',
+    'id': 'minimal', 'index': 0, 'order': 0, 'art_id': 'minimal', 'name': 'Minimal', 'accents': 0x1ff, 'accent_key': 'MINIMAL_ACCENT',
     'painter[PAINT_SELECTION]': 0, 'painter[PAINT_BAR]': 0, 'painter[PAINT_BATTERY]': 0, 'chevron_home': 0, 'chevron_sel': 0, 'caps_mark': 1, 'caps_home': 1, 'caps_np': 1,
     'icons_mono': 1, 'icons_badge_muted': 1, 'icons_addon_mono': 1, 'icons_badge_ink': 0, 'art_final': 0, 'font[ROLE_NP]': 0, 'font[ROLE_INFO]': 0, 'font_px[ROLE_INFO]': 0, 'np_info_value': 0, 'np_album_op': 0, 'np_state_op': 0,
     'home_top': 8, 'home_full_row': 375, 'home_text_x': 39, 'home_label_end[0]': 8, 'home_label_end[1]': 33,
@@ -159,7 +159,7 @@ MINIMAL = {
              opt('SETTING_BATTERY'), opt('SETTING_TIMETITLE', preset=1), opt('SETTING_NPCENTRED')], 'undeclared': [], **CF_TODAY}
 # Modern: the hand-written table's Classic, before Classic took Classic Light's look.
 MODERN = {
-    **MINIMAL, 'id': 'modern', 'index': 2, 'order': 1, 'name': 'Modern', 'accents': 0x17f, 'accent_key': 'ACCENT',
+    **MINIMAL, 'id': 'modern', 'index': 2, 'order': 1, 'art_id': 'modern', 'name': 'Modern', 'accents': 0x17f, 'accent_key': 'ACCENT',
     'painter[PAINT_SELECTION]': 2, 'chevron_home': 1, 'caps_mark': 0, 'caps_home': 0, 'caps_np': 0,
     'icons_mono': 0, 'icons_badge_muted': 0, 'icons_addon_mono': 0, 'font[ROLE_NP]': 1, 'np_album_op': 255, 'np_state_op': 255,
     'home_top': 0, 'home_full_row': 369, 'home_text_x': 33, 'home_label_end[0]': 33, 'home_label_end[1]': 33,
@@ -208,7 +208,7 @@ def test_extends():
     # its own row in the picker, so Status Bar lists it too, last at order 9
     statusbar = {**STATUSBAR, 'names': [*STATUSBAR['names'], 'T']}
     assert bare(resolved('', 'id="t" name="T" index="2" order="9" extends="modern"')) == {
-        **MODERN, 'id': 't', 'name': 'T', 'index': 2, 'order': 9, 'opts': [statusbar, *MODERN['opts'][1:]]}
+        **MODERN, 'id': 't', 'name': 'T', 'index': 2, 'order': 9, 'art_id': 't', 'opts': [statusbar, *MODERN['opts'][1:]]}
     assert resolved('<option setting="accent" key="ACCENT"/>', 'id="t" name="T" index="2" extends="modern"')['opts'] == [opt('SETTING_ACCENT', values=0x17f)]
     t = resolved('<colorSchemes accents="cobalt green"/><option setting="accent" key="ACCENT" default="cobalt"/>',
                  'id="t" name="T" index="2" extends="modern"')
@@ -314,7 +314,7 @@ C = '<colorSchemes accents="cobalt"/><option setting="accent" key="ACCENT" defau
     (C.replace('"cobalt"/>', '"cobalt green"/>', 1) + '<colorScheme name="cobalt" sel.stops="#08a6e7 0, #0065d6 100"/>'
      '<view name="list"><element name="selection" painter="stops"/></view>', None, "selection: painter stops needs every offered scheme's sel.stops"),
     ('<view name="bar"><element name="battery" painter="classic-light"/></view>', None, 'battery: this painter needs stops'),
-    (C + '<view name="pages"><element name="own" art_final="1"/></view>', None, "pages.own: art_final is for classic-light's own images only"),
+    (C + '<view name="pages"><element name="own" art_final="1"/></view>', None, 'pages.own: art_final is for classic-light\'s own images only; a theme drawing them states art="classic-light"'),
 ])
 def test_validate_rejects(body, attrs, message):
     t = resolved(body, *([attrs] if attrs else []))
@@ -1399,3 +1399,7 @@ def test_scrollbar_at_the_glass_or_absent_passes():
     theme.validate(resolved('<view name="list"><element name="scrollbar" w="4" right="2" top="59" bottom="261" min="16" thumb="#8f98a8"/></view>'), 't.xml')
     theme.validate(resolved('<view name="list"><element name="scrollbar" w="4" right="2" top="59" bottom="261" min="16" light.thumb="#8f98a8"/></view>'), 't.xml')
     theme.validate(resolved('<view name="list"><element name="scrollbar" right="2" top="0" bottom="320"/></view>'), 't.xml')
+
+
+def test_resolve_rejects_an_unknown_art():
+    assert error(resolved, '', 'id="t" name="T" index="2" extends="minimal" art="pico"') == 't.xml:1: art: unknown theme pico'

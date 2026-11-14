@@ -476,7 +476,7 @@ the stored accent.
 
 - `theme_t` holds the painters (`painter[PAINT_SELECTION]`: Minimal's `SEL_CARD`, Classic's `SEL_STOPS` or Modern's `SEL_BAR`), the
   surface flags (capitals, chevrons, monochrome icons, codec badges in the half's ink
-  (`icons_badge_ink`), Classic Light's own art left final (`art_final`, which `tools/theme.py` refuses for another theme), bold labels, Now Playing
+  (`icons_badge_ink`), Classic Light's own art left final (`art_final`, which `tools/theme.py` refuses for a theme that does not draw Classic's art), bold labels, Now Playing
   opacities), the Home
   and settings geometry, the Now Playing bar heights, `art_square` (art takes Corners: Square,
   `ipod_square_art`), the accent's slot and config key
@@ -497,7 +497,7 @@ each theme in this order: the schema defaults, its `extends` base, its own eleme
 scheme colours) from `patch/offsets.inc`, so a theme file never names a macro. Any unknown name or
 value stops the build. The tool writes `themes.h` (the enums and macros, which navigation.h includes) and `themes.inc`
 (the tables, which theme_engine.c includes after the accent tables, where the hand-written table
-stood) into the build directory, and `THEME_N` into `stock.h`, because `setting_counts[]` uses it. `edit_paint` stays Minimal's card in every theme.
+stood) into the build directory, and `THEME_N` into `stock.h`, because `setting_counts[]` uses it. `edit_paint` stays Minimal's card in every theme. A theme's `art` attribute (its own id by default) names the theme whose generated images (`tools/art.py`, `<art_id>_*`) it draws: the payload loads Classic's by their `classic_light_*` names alone, so a theme extending Classic states `art="classic-light"`, and `art.theme_images` packages each name once, stopping the build if two themes would draw one name otherwise.
 
 **Now Playing layout.** `theme_t.np_layout` (`<view name="playing" layout="ipod|centred">`, ipod in
 every built-in) picks the page `ringnav_ui_load` loads for `playing_page`: `np_pages[np_layout()]`,

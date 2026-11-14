@@ -752,7 +752,7 @@ def resolve(root, by_id, seen=()):
     def err(node, message): fail(node.file, node.line, message)
     a = root.attrs
     for k in a:
-        if k not in ('format', 'id', 'name', 'index', 'order', 'extends'):
+        if k not in ('format', 'id', 'name', 'index', 'order', 'extends', 'art'):
             err(root, f'unknown key theme.{k}')
     tid = a.get('id', '')
     if not re.fullmatch('[a-z][a-z0-9_-]*', tid):
@@ -777,6 +777,10 @@ def resolve(root, by_id, seen=()):
     rows = [n.attrs.get('name', '') for n in picker({**by_id, tid: root})]
     # order is the theme's own, never its base's
     t.update(id=tid, name=a['name'], index=int(a['index']), order=order(a), line=root.line)
+    # art: the theme whose generated images (tools/art.py <art_id>_*) this one draws, as the payload loads them by name
+    if a.get('art', tid) not in (*by_id, tid):
+        err(root, f'art: unknown theme {a["art"]}')
+    t['art_id'] = a.get('art', tid)
     macros = ROLE_MACROS.get(tid, {})
     opts = None
     named = []
@@ -947,8 +951,8 @@ def validate(t, name):
     for s in settings:
         if settings.count(s) > 1:
             err(f'{s} declared twice')
-    if t['art_final'] and t['id'] != 'classic-light':  # navigation.c's image hook knows its names alone
-        err('pages.own: art_final is for classic-light\'s own images only')
+    if t['art_final'] and t['art_id'] != 'classic-light':  # navigation.c's image hook knows its names alone
+        err('pages.own: art_final is for classic-light\'s own images only; a theme drawing them states art="classic-light"')
     for end in ('top', 'bottom') if t['sb_w'] else ():  # the thumb's round end gives its corner pixel to the glass
         y = t['sb_' + end]
         if corner_inset(y) > t['sb_right'] + 1:
