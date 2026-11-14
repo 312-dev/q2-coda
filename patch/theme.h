@@ -208,7 +208,8 @@ typedef struct {
     unsigned char sel_fixed; /* the bar keeps sel_inset and sel_radius under Corners: Square too */
     /* a scrolling hscroll_label's ends fade into what is behind it (list_marks.c marquee_fade);
      * Now Playing's art corners in px (paint_cover; 0: NP_ART_RADIUS's share of its size); its
-     * shuffle and repeat drawn as the theme's own pair (np_bar.c np_modes; 0: stock's one icon).
+     * shuffle and repeat drawn as the theme's own pair (np_bar.c np_modes; 0: stock's one icon),
+     * and its heart and More the theme's glyphs too (np_glyphs; 0: stock's).
      * Three chars in the padding before set_value_ink, so sizeof(theme_t) stays 1624, which clang
      * indexes by a multiply: at 1632 it takes a shift chain, and every theme() call pays for it
      * (test/patch.py's Cover Flow paint budget) */

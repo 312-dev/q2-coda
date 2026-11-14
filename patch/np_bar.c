@@ -488,3 +488,43 @@ void np_modes(void *win, void *canvas) {
             canvas_draw_icon(canvas, bitmap, x, cy);
     }
 }
+
+/* playing.modes.icons: the theme's own heart and More as well (tools/art.py np_fav, np_unfav_*,
+ * np_more_*, np_moredown_*). Stock's update and click, and rate_fav_click, keep setting the heart
+ * to play_fav or play_unfav, so each paint of the window (ringnav_paint_bg, before the buttons
+ * paint) turns either into the theme's, and an empty heart or More drawn for the other half into
+ * this one's. An app's heart (tidal_fav_*) stays stock's. ringnav_playing binds the two buttons. */
+static void *glyph_fav __attribute__((section(".scratch")));
+static void *glyph_more __attribute__((section(".scratch")));
+static int glyph_half __attribute__((section(".scratch"))); /* More's: 0 none, else 'd' or 'l' */
+void np_glyphs_bind(void *win) {
+    glyph_fav = widget_lookup(win, "img_fav", 1);
+    glyph_more = widget_lookup(win, "img_more", 1);
+    glyph_half = 0;
+}
+void np_glyphs(void *win) {
+    if (win != st.np_win || !theme()->np_modes) return;
+    static const char *const state[] = { "style:normal:bg_image", "style:pressed:bg_image",
+                                         "style:selected:bg_image", "style:disable:bg_image",
+                                         "style:focused:bg_image" };
+    int half = ipod_light() ? 'l' : 'd';
+    char name[40], own[24];
+    const char *now = glyph_fav ? widget_get_prop_str(glyph_fav, "image", "") : "";
+    tk_snprintf(own, sizeof own, "%s", theme_art("np_"));
+    unsigned n = (unsigned)strlen(own);
+    int mine = !strncmp(now, own, n),
+        on = !tk_strcmp(now, "play_fav") || (mine && !tk_strcmp(now + n, "fav")),
+        off = !tk_strcmp(now, "play_unfav") || (mine && !strncmp(now + n, "unfav_", 6));
+    tk_snprintf(name, sizeof name, on ? "%sfav" : "%sunfav_%c", own, half);
+    if ((on || off) && tk_strcmp(now, name)) {
+        image_base_set_image(glyph_fav, name);
+        widget_invalidate_force(glyph_fav, (void *)0);
+    }
+    if (!glyph_more || glyph_half == half) return;
+    glyph_half = half;
+    for (unsigned i = 0; i < sizeof state / sizeof *state; ++i) {
+        tk_snprintf(name, sizeof name, i == 1 ? "%smoredown_%c" : "%smore_%c", own, half);
+        widget_set_prop_str(glyph_more, state[i], name);
+    }
+    widget_invalidate_force(glyph_more, (void *)0);
+}

@@ -440,16 +440,19 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     half's ink, Now Playing's shuffle and repeat in Text Secondary (each half's) and Accent Blue when on, the Shuffle row's
     glyph (regular) in Accent Blue and white for the selection, Folder view's folder (regular) in Text Secondary (each
     half's) and white for the selection, a disabled row's caret in Text Tertiary (each half's), the pickers' check
-    (bold) in Accent Blue and white for the selection, and the Wi-Fi page's signal and lock (regular) in Text Primary
-    (each half's), and the confirmation's shuffle after a shuffle (bold) in Accent Blue, all from the vendored Phosphor
-    SVGs."""
+    (bold) in Accent Blue and white for the selection, the Wi-Fi page's signal and lock (regular) in Text Primary
+    (each half's), the confirmation's shuffle after a shuffle (bold) in Accent Blue, and Now Playing's heart and More
+    (regular) in Text Primary (each half's), More pressed in Text Secondary and the full heart (fill) in Accent Blue,
+    all from the vendored Phosphor SVGs."""
     t = theme.builtins()[3]
     got = art.images(t)
     modes = [f'mode_{n}_{k}' for n in ('shuffle', 'repeat') for k in ('d', 'l', 'on')] + ['mode_repeat1_on']
     wifi = [f'{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'lock') for k in ('d', 'l')]
+    glyphs = {'np_fav': 0, 'np_unfav_d': 0xffffff, 'np_unfav_l': 0, 'np_more_d': 0xffffff, 'np_more_l': 0,
+              'np_moredown_d': 0xababab, 'np_moredown_l': 0x5c5c5c}
     assert set(got) == {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
-                                              'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi)}
+                                              'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs)}
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
                           ('play_d', art.STATE_PX, 0xffffff), ('play_l', art.STATE_PX, 0),
@@ -459,7 +462,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           ('chevron_td', art.CARET_PX, 0x858585), ('chevron_tl', art.CARET_PX, 0x6e6e6e),
                           ('check_a', art.CHECK_PX, blue), ('check_w', art.CHECK_PX, 0xffffff),
                           *((n, art.ROW_ICON_PX, 0 if n.endswith('_l') else 0xffffff) for n in wifi),
-                          *((n, 22, {'d': 0xababab, 'l': 0x5c5c5c, 'on': blue}[n.rsplit('_', 1)[1]]) for n in modes)):
+                          *((n, 22, {'d': 0xababab, 'l': 0x5c5c5c, 'on': blue}[n.rsplit('_', 1)[1]]) for n in modes),
+                          *((n, art.ROW_ICON_PX, blue if n == 'np_fav' else rgb) for n, rgb in glyphs.items())):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
         assert (w, h) == (px, px) and inked == {tuple(rgb >> s & 255 for s in (16, 8, 0))}

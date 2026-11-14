@@ -511,6 +511,8 @@ unsigned np_marq_wait(unsigned max);
 unsigned np_glide_wait(unsigned max); /* np_bar.c: the progress bar's next pixel */
 /* np_bar.c: Now Playing's shuffle and repeat as the theme's own pair (playing.modes.icons) */
 void np_modes(void *win, void *canvas);
+/* np_bar.c: ... and its own heart and More over stock's (playing.modes.icons) */
+void np_glyphs_bind(void *win), np_glyphs(void *win);
 void wheel_sb_arm(void *list);
 unsigned wheel_sb_alpha(void *list);
 void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key);

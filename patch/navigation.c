@@ -5317,6 +5317,7 @@ int ringnav_playing(void *win, void *ctx) {
     int result = stock_playing_trampoline(win, ctx);
     if (!win || result == STOP) return result;
     rate_bind(win);
+    np_glyphs_bind(win);
     /* np_gone leaves a replaced page's state alone: its Genre line is that page's. */
     stop_timer(&st.genre_timer);
     st.genre_label = (void *)0;
@@ -6452,7 +6453,8 @@ int ringnav_paint_bg(void *w, void *canvas) {
         stock_canvas_set_fill_color(canvas, fill);
     }
     if (!w || P(w, W_PARENT) != wm) return result;
-    if (w == st.slider_win) { /* one sliding out too */
+    if (w == st.np_win) np_glyphs(w); /* before its buttons paint */
+    if (w == st.slider_win) {         /* one sliding out too */
         if (st.slider_w)
             slider_paint(w, canvas);
         else

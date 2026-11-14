@@ -140,7 +140,10 @@ static void rate_badge(void) {
     if (!ra.rate_badge) return;
     void *r = rate_track();
     int n = r ? rate_kept(0, listen_key(r)) : 0;
-    if (n && !tk_strcmp(widget_get_prop_str(ra.rate_fav, "image", ""), "play_fav")) n = 0;
+    /* play_fav, or the theme's own full heart (np_bar.c np_glyphs: "<art>np_fav") */
+    const char *image = widget_get_prop_str(ra.rate_fav, "image", "");
+    unsigned k = (unsigned)strlen(image);
+    if (n && k >= 4 && !tk_strcmp(image + k - 4, "_fav")) n = 0;
     /* each set repaints the badge, and this runs every 500 ms: only a change (AWTK's "text" is
      * a wide string widget_get_prop_str doesn't read) */
     if (ra.rate_shown == n + 1) return;

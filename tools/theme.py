@@ -96,7 +96,7 @@ SCHEMA = {k.path: k for k in (
     key('home.lists.full', 'home_lists_full', 'bool'),  # Split's Settings, Library and Streaming lists take the whole width, the art hidden (coverflow.c sub_full)
     key('list.entry.ipod', 'entry_ipod', 'bool'),  # text entry the iPod's way: Search's letter strip (search_strip.c), the keyboard walked by the wheel (keyboard.c)
     key('playing.art.radius', 'np_art_radius', 'int', 75),  # Now Playing's art corners in px; 0: NP_ART_RADIUS's share of its size
-    key('playing.modes.icons', 'np_modes', 'bool'),  # shuffle and repeat as the theme's own pair (np_bar.c np_modes)
+    key('playing.modes.icons', 'np_modes', 'bool'),  # shuffle and repeat as the theme's own pair (np_bar.c np_modes), heart and More its own glyphs (np_glyphs)
     key('bar.fill.painter', 'painter[PAINT_BAR]', 'enum'),
     key('bar.battery.painter', 'painter[PAINT_BATTERY]', 'enum'),
     key('home.chevron.visible', 'chevron_home', 'bool'),

@@ -268,7 +268,9 @@ The album is one line that scrolls, as the title and artist do, rather than two.
 has no place for keeps a place of its own:
 
 - **More and the heart** stand at the right end of "1 of 10"'s line, on the art's page, so a swipe
-  takes them away with it.
+  takes them away with it: Phosphor `dots-three` and `heart` (regular, 20 px, Text Primary;
+  More pressed in Text Secondary), the dots' ink ending on the right column, the heart `fill` in
+  Accent Blue while the song is a favourite.
 - **The page dots** sit under shuffle and repeat, centred on y 302; the lyrics, the track's details
   and the visualizer are still the swipe's other pages, each ending 5 px above the bar.
 - **Shuffle and repeat** are two controls on stock's play mode button: a tap on shuffle turns it
@@ -345,9 +347,10 @@ Shown for a moment after a mode change (Shuffle, Repeat).
 - One set: [Phosphor Icons](https://phosphoricons.com) (MIT), `@phosphor-icons/core` 2.1.1. The
   SVGs the theme uses are vendored in `assets/icons/phosphor/` with their licence, and
   `tools/art.py` draws the theme's bitmaps from them at build time, in final colours per half.
-- Weights by role: `fill` for the play state, `bold` for chevrons and Now Playing's and the
-  confirmation's shuffle and repeat. Sizes are the design's: 13 px play state, 15 px chevron,
-  22 px state row, 56 px confirmation.
+- Weights by role: `fill` for the play state and a favourite's heart, `bold` for chevrons and Now
+  Playing's and the confirmation's shuffle and repeat, `regular` for row symbols and Now Playing's
+  heart and More. Sizes are the design's: 13 px play state, 15 px chevron, 20 px row symbols,
+  heart and More, 22 px state row, 56 px confirmation.
 - No coloured app tiles: the concept's tinted "For You" squares are for content the Q2 does
   not have.
 
@@ -440,8 +443,8 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   as the Shuffle row (`list.shuffle.row`); a list left by Return opening at its top when chosen
   again (`list.reopen.top`, which Minimal sets for every theme).
 - Now Playing on the set's grid (`np_art`, `np_bar_y`), its art's corners (`playing.art.radius`), its
-  artist and album in Inter (`playing.artist.font`), shuffle and repeat as the theme's own glyphs
-  (`playing.modes.icons`), the marquee fades (`list.marquee.fade`), and Track Time (`NPTIME`), whose
+  artist and album in Inter (`playing.artist.font`), shuffle and repeat, the heart and More as the theme's
+  own glyphs (`playing.modes.icons`), the marquee fades (`list.marquee.fade`), and Track Time (`NPTIME`), whose
   tap on the right-hand time shows the length or the time left.
 - Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_inset` (the art from
   x 196 and y 52 to the edges, its top rows painted by the bar, panning slowly across its 110 % zoom with an
