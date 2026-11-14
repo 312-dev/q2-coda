@@ -440,13 +440,15 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     half's ink, Now Playing's shuffle and repeat in Text Secondary (each half's) and Accent Blue when on, the Shuffle row's
     glyph (regular) in Accent Blue and white for the selection, Folder view's folder (regular) in Text Secondary (each
     half's) and white for the selection, the shuffle confirmation's glyph (bold) in Accent Blue, the Ratings rows' filled
-    and outlined hearts in the folder's inks, all from the vendored Phosphor SVGs."""
+    and outlined hearts and Streaming's service marks in the folder's inks, all from the vendored Phosphor SVGs but
+    TIDAL's mark, drawn in art.py."""
     t = theme.builtins()[3]
     got = art.images(t)
     modes = [f'mode_{n}_{k}' for n in ('shuffle', 'repeat') for k in ('d', 'l', 'on')] + ['mode_repeat1_on']
     rates = [f'rate_{on}_{k}' for on in ('on', 'off') for k in ('d', 'l', 'w')]
+    marks = [f'stream_{n}_{k}' for n in ('tidal', 'spotify', 'app', 'radio', 'airplay', 'config') for k in ('d', 'l', 'w')]
     assert set(got) == {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'play_d', 'play_l', 'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w',
-                                                       'folder_d', 'folder_l', 'folder_w', 'confirm_shuffle', *modes, *rates)}
+                                                       'folder_d', 'folder_l', 'folder_w', 'confirm_shuffle', *modes, *rates, *marks)}
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
                           ('play_d', art.STATE_PX, 0xffffff), ('play_l', art.STATE_PX, 0),
@@ -454,7 +456,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           ('folder_d', art.ROW_ICON_PX, 0xababab), ('folder_l', art.ROW_ICON_PX, 0x5c5c5c),
                           ('folder_w', art.ROW_ICON_PX, 0xffffff), ('confirm_shuffle', art.CONFIRM_GLYPH_PX, blue),
                           *((n, 22, {'d': 0xababab, 'l': 0x5c5c5c, 'on': blue}[n.rsplit('_', 1)[1]]) for n in modes),
-                          *((n, art.RATE_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in rates)):
+                          *((n, art.RATE_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in rates),
+                          *((n, art.STREAM_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in marks)):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
         assert (w, h) == (px, px) and inked == {tuple(rgb >> s & 255 for s in (16, 8, 0))}
@@ -476,3 +479,10 @@ def test_oleds_rating_hearts_are_phosphors_filled_and_outlined_heart():
     for name, middle in (('oled_rate_on_d', True), ('oled_rate_off_d', False)):
         w, h, at = pixels(got[name])
         assert bool(at(mid, mid)[3]) == middle
+
+
+def test_oleds_tidal_mark_is_four_diamonds_three_across_one_under():
+    """TIDAL's mark: the three top diamonds' centres and the lower one's are inked, the corners between them clear."""
+    w, h, at = pixels(art.images(theme.builtins()[3])['oled_stream_tidal_d'])
+    assert all(at(x, 6)[3] > 200 for x in (3, 10, 16)) and at(10, 13)[3] > 200
+    assert at(3, 13)[3] == 0 and at(16, 13)[3] == 0 and at(10, 1)[3] == 0

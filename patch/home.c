@@ -158,6 +158,56 @@ static void svc_row(void *row, int i, char *hide) {
     if (svc_find(hide, i)) widget_set_visible(row, 0, 0);
 }
 
+/* OLED's Streaming marks (feedback_oled, docs/oled-design.md): a service row's logo on its disc
+ * gives way to the theme's 20 px monochrome mark (tools/art.py STREAM_MARKS), drawn with the row
+ * by stream_mark_paint in Text Secondary, white on the selection, centred on x 34 as Folder view's
+ * glyph, the row's words from x 52. A card app with its own icon keeps it. */
+static const char *const stream_logos[][2] = {
+    { "list_tidal", "tidal" },   { "stream_spotify", "spotify" }, { "stream_app", "app" },
+    { "stream_radio", "radio" }, { "stream_airplay", "airplay" }, { "stream_config", "config" }
+};
+#define SVC_MARK_PROP "_stream_mark"
+#define SVC_MARK_PX 20
+#define SVC_MARK_X 24
+#define SVC_MARK_TEXT_X 52
+static void stream_marks(void *view) {
+    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
+        void *row = widget_get_child(view, i),
+             *button = widget_count_children(row) ? widget_get_child(row, 0) : (void *)0;
+        for (unsigned j = 0, k = button ? widget_count_children(button) : 0; j < k; ++j) {
+            void *c = widget_get_child(button, j);
+            for (unsigned m = 0; m < sizeof stream_logos / sizeof *stream_logos; ++m)
+                if (!tk_strcmp(widget_get_prop_str(c, "image", ""), stream_logos[m][0])) {
+                    widget_set_visible(c, 0, 0);
+                    prop(row, SVC_MARK_PROP, (int)m + 1);
+                }
+        }
+    }
+}
+void stream_mark_paint(void *w, void *canvas) {
+    if (!w || !feedback_oled()) return;
+    int m = widget_get_prop_int(w, SVC_MARK_PROP, 0);
+    if (m < 1 || m > (int)(sizeof stream_logos / sizeof *stream_logos)) return;
+    /* selected: the row, or (a settings row's) its button */
+    int sel = st.sel_accent && (painting_in(st.sel_accent) || P(st.sel_accent, W_PARENT) == w);
+    char name[24];
+    tk_snprintf(name, sizeof name, "stream_%s_%s", stream_logos[m - 1][1],
+                sel            ? "w"
+                : ipod_light() ? "l"
+                               : "d");
+    int cx = I(canvas, CANVAS_X); /* the row's x on screen */
+    paint_art(w, canvas, theme_art(name), SVC_MARK_X - cx, (I(w, W_H) - SVC_MARK_PX) / 2);
+    /* the words after the mark: here, as the settings layout (set_row) and Home's (library_look)
+     * place them later than stream_marks; a move repaints once */
+    void *button = widget_count_children(w) ? widget_get_child(w, 0) : (void *)0;
+    for (unsigned j = 0, k = button ? widget_count_children(button) : 0; j < k; ++j) {
+        void *c = widget_get_child(button, j);
+        int x = SVC_MARK_TEXT_X - cx - I(button, W_X);
+        if (I(c, W_X) != x && !tk_strcmp(widget_get_type(c), "hscroll_label"))
+            widget_move_resize(c, x, I(c, W_Y), I(c, W_W) + I(c, W_X) - x, I(c, W_H));
+    }
+}
+
 /* stream_page_init: stock's rows but Baidu Netdisk (a Chinese cloud drive, signed in to from
  * Baidu's app: its row, the one with list_baidu's icon, removed), then Spotify (spotify.c), which
  * opens its browser, the card apps on the card (addon.c: Deezer, Soulseek, File Browser… as System
@@ -188,6 +238,7 @@ int ringnav_stream(void *win, void *ctx) {
         svc_row(library_row(view, "stream_radio", radio_open, 0, "Internet Radio", 1), i++, hide);
         svc_row(library_row(view, "stream_airplay", airplay_open, 0, "AirPlay", 1), i, hide);
         library_row(view, "stream_config", stream_config, 0, "Configuration", 1);
+        if (feedback_oled()) stream_marks(view);
     }
     return result;
 }

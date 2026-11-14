@@ -274,7 +274,7 @@ count and icon size come from the set (`set_row`, `set_top`, `set_rows`, `set_ic
 reads `set_row` and `set_icon` from the set `theme_boot` wrote, hides the icon at 0 and starts the
 text where a row without an icon starts. Streaming's own row height is the set's `stream_row`, matched
 by the view's name (`scroll_view_streamsset`) at layout time; where it differs from `set_row` (52 under Classic
-Light's Row Art on) its rows keep their `SET_ICON` icons, on the art rows' columns. A payload picker's `select` or `unselect` (Theme, Key Lock)
+Light's Row Art on) its rows keep their `SET_ICON` icons, on the art rows' columns. Under OLED (`stream_row` 32, its `set_row`) the logos give way to the theme's 20 px monochrome marks (`patch/home.c` `stream_marks`, [internals: Themes](internals.md#themes)). A payload picker's `select` or `unselect` (Theme, Key Lock)
 is not an icon: at 0 it stays, in the column of stock's own marks, and the Theme picker, whose page
 is no `CHOICE` context, opens on its mark under a `set_text` theme as a `CHOICE` picker does, and
 under such a theme every picker does so when a tap opened it too. Another list whose `default_item_height` equals the set's
