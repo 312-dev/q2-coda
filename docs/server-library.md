@@ -174,7 +174,7 @@ playlists.
 | Setting: `[Q2POD] LIBRARYSOURCE`, 0 Local Only (default) or 1 Local + Server, a row on Display > Cover Flow | `navigation.c` (`pod_keys` and the rows' tables beside it) | yes |
 | Ratings: `ratings.out` appended for every app with `ratings=1`; `ratings.in` renamed to `ratings.in.taking`, applied, then deleted | `catalogue.c`, `ratings.c` (three calls) | yes |
 
-The server library adds 33,024 bytes to the payload: `patch_bytes` is 853,928 of the 1 MB in this branch's `--dev` build against 820,904 at the commit it branched from, `catalogue.o` being 32,611 bytes of code and 720 of constants. All catalogue data lives on the heap or the card.
+The server library adds 40,160 bytes to the payload: `patch_bytes` is 861,064 of the 1 MB in this branch's `--dev` build against 820,904 at the commit it branched from, `catalogue.o` being 37,531 bytes of text and 944 of data (`llvm-size`). All catalogue data lives on the heap or the card.
 
 ### Greyed rows
 
