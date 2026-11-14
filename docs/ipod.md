@@ -666,7 +666,11 @@ or beside a CJK character, onto as many rows as it takes, up to four, which stil
 weight like Apple Music's. A line's row is its rows
 (38 pixels apart) plus 21 pixels between lines: `LYRIC_SLOT` (59 pixels) for one row, so three
 such lines fill the 178-pixel page. A line the page's edge cuts fades with the square of the share
-of it out of view, so no sliver of a line shows. The playing line lights white (`LYRIC_LIT`); the other lines are darker (`LYRIC_REST`,
+of it out of view, so no sliver of a line shows. Under OLED the lines are Inter (the design's 22 px, AWTK's 27) on the 24-pixel text
+column, the playing line in Medium and the rest in Regular, the playing line's unsung part and the other
+lines in Text Secondary (`#ABABAB`); no row is dimmed whole: the top and foot 32 pixels of what shows
+of the page fade linearly to the page's ground (`lyrics_fade`), so a line leaving the view thins out
+rather than being cut, while it scrolls too. The playing line lights white (`LYRIC_LIT`); the other lines are darker (`LYRIC_REST`,
 `#5F5F5F`). A line with word stamps (A2's enhanced LRC, `<mm:ss.xx>` before a word, in a .lrc or a
 LYRICS tag) lights word by word as it is sung, each word from its stamp to the next (the last, with
 no stamp after it, at `LYRIC_UNIT_MS`, 90 ms, a letter, done by the next line), its unsung part

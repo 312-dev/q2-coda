@@ -2858,7 +2858,12 @@ int ringnav_paint(void *w, void *canvas) {
     slider_scrub(w, canvas);
     quick_scrub(w, canvas);
     search_over(w, canvas);
-    if (w && st.np_lrc && P(w, W_PARENT) == st.np_lrc) lyrics_paint(w, canvas);
+    if (w && st.np_lrc) { /* one test on every other page's paints (the Cover Flow paint budget) */
+        if (P(w, W_PARENT) == st.np_lrc)
+            lyrics_paint(w, canvas);
+        else if (w == st.np_lrc)
+            lyrics_fade(w, canvas);
+    }
     paint_caps(w, canvas);
     if (theme()->marquee_fade) marquee_fade(w, canvas);
     if (w && w == st.np_win) np_modes(w, canvas);

@@ -8873,6 +8873,21 @@ m.playtime=30; settle(m); off=SLOT+hs[0]+hs[1]-(178-hs[2])//2; assert y(m)==off;
 def seen(i): top=SLOT+sum(hs[:i])-off; return max(0,min(top+hs[i],178)-max(top,0))
 assert [seen(i) for i in range(5)]==[0,21,135,22,0]
 assert [{x[3]>>24 for x in m.ink(i)} for i in range(5)]==[set(),{255*21*21//(97*97)},{255},{255*22*22//(SLOT*SLOT)},set()]; passed()
+# OLED: Inter from the 24 px text column with no extra strikes, the playing line in Medium and LYRIC_LIT, the others
+# in Regular and Text Secondary; then the view's border paint fades its top and foot 32 rows, each a fill of the
+# page's black from opaque at the edge to clear inside, at the edges of what its ancestors show of it.
+CONFIG['THEME']='3'
+try:
+    m=karaoke(); m.show(8); m.at_ms(); m.at_ms(1000); m.playtime=9; m.at_ms(); m.at_ms(275); loop(m,ms=0)
+    m.k_inks=[]; m.clip=(0,0,375,SLOT); m.paint(m.lyric_row(1),gap=0)
+    assert [(x[0],x[1],x[3],x[4],x[6]) for x in m.k_inks]==[('Two two',24,LIT,27,'inter-medium')],m.k_inks
+    m.k_inks=[]; m.paint(m.lyric_row(2),gap=0)
+    assert [(x[0],x[1],x[3],x[6]) for x in m.k_inks]==[('Three',24,color_t(0xababab),'inter')],m.k_inks
+    m.word(m.slide+O['W_H'],178); m.word(m.win+O['W_H'],262); m.bands=[]; m.paint(m.lrc,gap=0)
+    fades=sorted((b[1],b[4]) for b in m.bands if b[3]==1 and b[2]==375)
+    want=sorted([(i,(255*(32-i)//32)<<24) for i in range(32)]+[(177-i,(255*(32-i)//32)<<24) for i in range(32)])
+    assert fades==want,fades[:4]; passed()
+finally: del CONFIG['THEME']
 # Let go, the wheel leaves a row at the top, its lines all LYRIC_REST; Play/Pause held there moves nothing and opens
 # the song menu, as anywhere on Now Playing.
 SEEK='[00:05.00]One\n[00:09.70]'+'abcdefghi '*3+'abcdefghi\n[00:12.00]Three\n[00:20.00]Four\n'
