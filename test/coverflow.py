@@ -139,6 +139,17 @@ const char *duration_text(char *text, unsigned size, void *song) {
     return text;
 }
 
+/* Server boundary: catalogue.c with no server rows, a card library under Local; Cover Flow's server
+ * rows and art are test/fw/test_catalogue.py's, against the real catalogue.c. */
+int catalogue_on(void) { return 0; }
+int catalogue_path(const char *path) { return 0; }
+int catalogue_missing(const char *path) { return access(path, 0); } /* a card row: its file gone */
+int catalogue_album_unavailable(void *r) { return 0; }
+int catalogue_cover(const char *path, char *out, unsigned size) { return 0; }
+void catalogue_grey(void *w, int on) {}
+int catalogue_row_ink(void *row, unsigned *ink) { return 0; }
+void catalogue_mark_paint(void *canvas, int x, int y, unsigned ink) {}
+
 /* Widgets: raw memory first, so the payload's field reads (SLIDE_INDEX) land in it. */
 typedef struct { char raw[0x100]; int parent, visible, numb, kids[1024], nkids, bg, fg, right; char type[32], text[160], image[600];
                  handler click; void *ctx; } widget;
