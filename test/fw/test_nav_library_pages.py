@@ -627,6 +627,78 @@ def test_a_ratings_list_closes_with_its_page(fw, ui, song, st):
     assert 'Loved' in ui.shown(ui.top())
 
 
+# rate_all's hearts, case by case and against a model of the rule.
+def rate_all(fw, ui, records, favs=(), slots=()):
+    """rate_all's hearts for records, with favs (records) in My Fav and slots (raw words) in the kept table. Once a
+    test: the table is read on first use."""
+    fw.mock('getAllFav', lambda *_: ui.deques[fw.var('fw_ctx_tools_pdeq_directory', C.c_uint).value].extend(favs) or len(favs))
+    Files(fw, {RATINGS: b''.join(struct.pack('<I', s) for s in slots) + b'\0' * (RATE_SLOTS - len(slots)) * 4})
+    h = (C.c_ubyte * (len(records) + 1))()
+    fw.fn('ratings__rate_all', None, C.c_void_p, C.c_void_p)(ui.deques.new(records), h)
+    return list(h[:len(records)])
+
+
+def hearts_model(keys, favs, slots):
+    """The rule: favourites (5) then the kept slots in slot order, each entry that matches the song's key above
+    its low three bits setting the hearts, until they are 5 or more."""
+    entries = [(f | 7, 5) for f in favs] + [(s, s & 7) for s in slots if s]
+    out = []
+    for key in keys:
+        h = 0
+        for e, v in entries:
+            if h >= 5:
+                break
+            if (e ^ key) < 8:
+                h = v
+        out.append(h)
+    return out
+
+
+def test_a_favourite_also_kept_is_five_hearts(fw, ui, song):
+    a = song(b'/m/a.flac')
+    assert rate_all(fw, ui, [a], favs=[song(b'/m/a.flac')], slots=[listen_key(b'/m/a.flac') & ~7 | 2]) == [5]
+
+
+def test_a_kept_song_is_its_hearts(fw, ui, song):
+    a, b = song(b'/m/a.flac'), song(b'/m/b.flac')
+    assert rate_all(fw, ui, [a, b], slots=[0, listen_key(b'/m/b.flac') & ~7 | 3]) == [0, 3]
+
+
+def test_keys_alike_below_bit_3_keep_their_own_hearts(fw, ui, song):
+    paths = [b'/m/%d.flac' % i for i in range(64)]
+    p, q = next((p, q) for p in paths for q in paths if p < q and listen_key(p) & 7 == listen_key(q) & 7)
+    assert listen_key(p) >> 3 != listen_key(q) >> 3
+    assert rate_all(fw, ui, [song(p), song(q)], slots=[listen_key(p) & ~7 | 1, listen_key(q) & ~7 | 4]) == [1, 4]
+
+
+@pytest.mark.parametrize('slots, want', [((2, None, 4), 4), ((4, 2), 2)])  # None: a free slot between
+def test_two_slots_of_one_key_read_the_later(fw, ui, song, slots, want):
+    k = listen_key(b'/m/a.flac') & ~7
+    assert rate_all(fw, ui, [song(b'/m/a.flac')], slots=[0 if n is None else k | n for n in slots]) == [want]
+
+
+@pytest.mark.parametrize('low', [5, 6, 7])
+@pytest.mark.parametrize('before', [(), (2,)])
+def test_a_slot_of_five_or_more_ends_the_scan(fw, ui, song, low, before):
+    k = listen_key(b'/m/a.flac') & ~7
+    assert rate_all(fw, ui, [song(b'/m/a.flac')], slots=[k | n for n in (*before, low, 3)]) == [low]
+
+
+def test_a_large_library_reads_as_the_model(fw, ui, song):
+    import random
+    rng = random.Random(13)
+    paths = [b'/m/%04d.flac' % i for i in range(300)]
+    keys = [listen_key(p) for p in paths]
+    gone = [listen_key(b'/x/%d.flac' % i) for i in range(20)]  # rated, no longer in the library
+    favs = rng.sample(paths, 40) + [b'/x/0.flac']
+    slots = [0] * 600
+    for key in rng.sample(keys, 120) + rng.sample(keys, 30) + gone:  # some songs twice: a damaged table
+        slots[rng.randrange(len(slots))] = key & ~7 | rng.choice([0, 1, 2, 3, 4, 4, 5, 6, 7])
+    want = hearts_model(keys, [listen_key(p) for p in favs], slots)
+    assert {0, 5} < set(want) and len(set(want)) >= 6  # the cases are all there
+    assert rate_all(fw, ui, [song(p) for p in paths], favs=[song(p) for p in favs], slots=slots) == want
+
+
 def test_no_rated_albums_says_so(fw, ui, song):
     Files(fw)
     fw.mock('getAllAlbum', lambda *_: 0)

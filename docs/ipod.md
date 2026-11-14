@@ -794,7 +794,7 @@ calls it: `(path, section, key, out, default)`. It reads the file line by line
 (`strcasecmp` on the section and the key), copies the trimmed value to `out` and returns 1; a
 missing key copies the default and returns -1. The default must not be null (stock reads its
 first byte). The payload passes `"0"`, so a missing or unreadable entry, or any value that is not
-one valid digit, is Split, Icon and Minimal (a stored `THEME=4` or past reads as Minimal); a missing `MINIMAL_ACCENT` is Ivory (7), a missing `CLASSIC_LIGHT_ACCENT` Classic Blue (9), a missing `ACCENT` Graphite (0), and a missing `ROUNDED` Square. A
+one valid digit, is Split, Icon and Minimal (a stored `THEME=4` or past reads as Minimal); a missing `MINIMAL_ACCENT` is Ivory (7), a missing `CLASSIC_LIGHT_ACCENT` Classic Blue (9), a missing `ACCENT` Graphite (0), and a missing `ROUNDED` the live theme's Corners preset (Minimal's Round, Modern's Square), Square in a theme that states none. A
 card from 1.0.1 or earlier, which has no `THEME`, keeps 1.0.1's look, and a Minimal card from before
 1.4.6 keeps its off-white look whatever `ACCENT` holds.
 
@@ -836,7 +836,7 @@ Choosing Classic or OLED from Minimal or Modern, or the other way, asks "Restart
 from Classic's geometry sets ([internals.md](internals.md#themes)): Cancel changes nothing; OK
 saves the theme and its preset ([Display settings](#display-settings)) and restarts the Q2.
 
-Corners is Minimal's and Modern's setting, Square until chosen; Classic's covers are always square. Every theme insets an album grid's cover inside the tile (`album_children`), so the selection card frames it; Classic's and Modern's card is in the accent's colour, Classic's square.
+Corners is Minimal's and Modern's setting, each theme's preset until chosen (Minimal's Round, Modern's Square); Classic's covers are always square. Every theme insets an album grid's cover inside the tile (`album_children`), so the selection card frames it; Classic's and Modern's card is in the accent's colour, Classic's square.
 
 Each theme keeps its own accent, and the Accent row follows Theme in each. Minimal's
 (`MINIMAL_ACCENT`) cycles Ivory, Graphite, Crimson, Tidal, Champagne, Cobalt, Tangerine, Plum, Green;

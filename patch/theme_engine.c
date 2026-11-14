@@ -179,9 +179,13 @@ __attribute__((noinline)) static void settings_read(void) {
     st.shortcut = config_value("IPOD", "SHORTCUT", SETTING_N_SHORTCUT,
                                SETTING_N_SHORTCUT); /* no key, see shortcut() */
     st.minimal_accent =
-        config_value("IPOD", "MINIMAL_ACCENT", ACCENT_N, 0);    /* Graphite, its preset */
-    st.rounded = config_value("IPOD", "ROUNDED", 2, !st.theme); /* Minimal's preset: Round */
-    st.light = config_value("IPOD", "LIGHT", 3, 0);             /* dark unless chosen; 2 Auto */
+        config_value("IPOD", "MINIMAL_ACCENT", ACCENT_N, 0); /* Graphite, its preset */
+    /* a missing key reads the live theme's Corners preset (Minimal's: Round); Square where the
+     * theme states none */
+    const option_t *corners = option_of(&themes[st.theme], SETTING_ROUNDED);
+    st.rounded =
+        config_value("IPOD", "ROUNDED", 2, corners && corners->preset >= 0 ? corners->preset : 0);
+    st.light = config_value("IPOD", "LIGHT", 3, 0); /* dark unless chosen; 2 Auto */
     st.keep_lit = config_value("IPOD", "KEEPLIT", 2, 0);
     st.np_centred = config_value("IPOD", "NPCENTRED", 2, 0);
     st.keytone_hp = config_value("IPOD", "KEYTONEHP", 2, 0);

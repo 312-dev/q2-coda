@@ -87,12 +87,11 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 - **Fix:** `check(sha(raw_demo) == DEMO_SHA, ...)` after `:1792`, or write `sha(raw_demo)`.
 - **Effort:** S.
 
-### 30. A new theme's Corners default follows its index
+### 30. A new theme's Corners default follows its index (resolved)
 
-- **Where:** `patch/theme_engine.c:183`: `config_value("IPOD", "ROUNDED", 2, !st.theme)`.
-- **Impact:** Round is the default for theme 0 alone, so any other theme's missing key reads Square whatever its `preset` says until the theme is picked once.
-- **Fix:** read the default from the theme's option row, as the own keys do (`theme_keys[k].def`, `patch/theme_engine.c:192`).
-- **Effort:** S.
+- **Where:** `settings_read` in `patch/theme_engine.c`.
+- **State:** a missing `ROUNDED` key reads the live theme's Corners `preset` (`option_of(&themes[st.theme], SETTING_ROUNDED)`), Square where the theme states none, so a new theme's preset holds before it is picked. The built-in themes read as before: Minimal Round; Modern, Classic and OLED Square.
+- **Guard:** `test_a_missing_rounded_follows_the_live_theme_s_preset_not_its_place` and `test_a_missing_rounded_reads_the_theme_s_corners` in `test/fw/test_navigation.py`.
 
 ## Build-time cost
 
@@ -173,11 +172,12 @@ Entries 7 to 17 are costs the code marks itself.
 - **Fix:** cache the counts by library generation, so a count runs once a scan.
 - **Effort:** M.
 
-### 13. Ratings compare every song with every rated one
+### 13. Ratings compare every song with every rated one (resolved)
 
-- **Where:** `patch/ratings.c:441`.
-- **Fix:** sort the rated hashes once and search.
-- **Effort:** S.
+- **Where:** `rate_all` in `patch/ratings.c`, inlined into `rated_open`: once per Ratings list opened, on the UI thread.
+- **Measured:** the scan compared each song with every favourite and kept slot, 12 MIPS instructions per entry that did not match (`-Oz`, `llvm-objdump` of `rated_open`). At 20,000 songs and 1,000 rated that is 240,000,000 instructions, about 480 ms at 5 x 10^8 a second.
+- **State:** the favourites and kept slots are sorted once (`qsort`, by key above the hearts' three bits, then by their place in the old scan), and each song binary-searches its run and reads it in that order, so every song's hearts are the scan's. A search step is 16 instructions: about 180 a song at 1,000 rated, 3,600,000 for 20,000 songs, plus the sort (about 10,000 comparisons of an 11-instruction comparator through libc's `qsort`), under 10 ms in all.
+- **Guard:** the `rate_all` cases in `test/fw/test_nav_library_pages.py` (favourite and kept, a damaged table's repeated keys, slots of 5 to 7 hearts, and 300 songs against a model of the scan).
 
 ### 14. An EPUB's spine is quadratic in its items
 
