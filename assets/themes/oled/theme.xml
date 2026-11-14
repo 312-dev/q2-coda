@@ -12,7 +12,8 @@
        art at x 24, the text at 72 (list.art below). Text y puts each line where the design's baselines are. Home in
        Split: the menu's rows 204 px wide, so the bar ends at 188 and the chevrons stand at 176 (the right column from
        the row's edge); the playing album's art from x 196 and y 52 to the screen's right and bottom edges, the glass
-       rounding its corner, still and centre-cropped (coverflow.c home_split). -->
+       rounding its corner, panning slowly across its 110 % zoom with 2 % of the zoom kept clear at each edge, so a
+       cover's own border never shows (coverflow.c drift_axis). -->
   <geometry name="oled" bar="58" pitch="32" body="32" art="40" art_inset="6" art_pitch="52"
             art_body="52" text_art="0" text_art_inset="0" lib_pitch="32" lib_body="32" lib_inset="0"
             lib_art="0" title24_y="4" title_y="6" meta_y="8"
@@ -24,7 +25,7 @@
             stock_row="32" stock_body="32" stock_title_y="0" stock_title_h="32" toolbar="0"
             search_row="52" search_body="52" search_art="0" search_title_y="4" search_title24_y="4" search_title_h="28"
             search_meta_y="31" search_meta_h="20" np_art="150" np_bar_y="228"
-            split_row="204" split_art="196" split_art_up="6" split_still="1"/>
+            split_row="204" split_art="196" split_art_up="6" split_inset="2"/>
   <geometry set="oled"/>
   <!-- Colour (oled-design.md Colour): Accent Blue, one value for the bar, the progress fill and every mapped red, as
        its own scheme's five tones; white text on it in both halves; second lines in Text Tertiary (stock's #aaaaaa secondary text

@@ -342,21 +342,31 @@ def test_home_fit_exact_cases(fw, w, h, want):
     assert fit(fw, w, h) == want
 
 
+def eased(range_, period, ms):
+    """drift_at's smoothstep ping-pong, in 1/256 px."""
+    t = ms % (2 * period)
+    x = ((t if t < period else 2 * period - t) << 16) // period
+    return range_ * 256 * ((x * x * (3 * 65536 - 2 * x)) >> 24) >> 24
+
+
 @pytest.mark.parametrize('period', (20000, 26000))
-def test_drift_is_a_ping_pong_of_its_period(fw, period):
+def test_drift_is_an_eased_ping_pong_of_its_period(fw, period):
     g = api(fw)
     home = fw.var('coverflow__home', Home)
     at = lambda ms: (setattr(home, 'drift_ms', ms), g.drift_at(30, period))[1]
-    step = 30 * 256 // (period >> 4) + 1  # time counts in 16 ms steps
     assert at(0) == 0
     assert at(period) == 30 * 256  # the far end
-    assert abs(at(period // 2) - 15 * 256) <= step
-    assert abs(at(period + period // 2) - 15 * 256) <= step  # on the way back
+    assert abs(at(period // 2) - 15 * 256) <= 1  # halfway at half the time
     assert at(2 * period) == 0  # a whole cycle later
     assert at(2 * period + 123) == at(123)
-    for ms in range(0, period, 997):
-        assert at(ms) == at(2 * period - ms), ms
-        assert at(ms) <= at(ms + 16)  # rising to the far end
+    for ms in range(0, period, 97):
+        assert at(ms) == at(2 * period - ms) == eased(30, period, ms), ms
+        assert at(ms) <= at(ms + 16)  # rising to the far end, never a step back
+    # eased: a 200 ms tick moves under a tenth of the middle's step next to each end, where it turns
+    tick = lambda ms: at(ms + 200) - at(ms)
+    middle = tick(period // 2 - 100)
+    assert tick(0) * 10 < middle and tick(period - 200) * 10 < middle
+    assert middle <= 30 * 256 * 200 * 3 // (2 * period) + 2  # at most 1.5 times the average speed
 
 
 def test_drift_range_zero_never_moves(fw):
@@ -378,7 +388,7 @@ def test_the_pan_starts_at_the_old_crop_and_moves_each_axis_by_its_own_period(fw
     assert (g.pan_u(), g.pan_v()) == (10 * 256, 20 * 256)
     home.drift_ms = 20000
     assert g.pan_u() == (10 + 18) * 256  # X's far end
-    assert g.pan_v() == 20 * 256 + 29 * 256 * (20000 >> 4) // (26000 >> 4)
+    assert g.pan_v() == 20 * 256 + eased(29, 26000, 20000)
 
 
 # The shelf's geometry
@@ -723,6 +733,32 @@ def test_home_tex_zooms_a_cover_by_a_tenth_with_its_pan_s_margin(fw):
     assert (home.tw, home.rx, home.ry) == (319, 29, 29)  # the fit, 290 square, plus 10%
     assert (home.u0, home.v0, home.du) == ((290 - 188) // 2, 0, -1)  # the old crop, the frame not drawn yet
     assert struct.unpack_from('<H', frame, 0xc)[0] & 1  # opaque
+
+
+def split_inset_set(fw, library, inset):
+    """st.geom on the first geometry set whose split_inset is inset; its client and pane as the C reads them."""
+    names = host.tools_theme.GEOM_VALS
+    table = (C.c_short * (fw.sizes['theme_engine__geom_vals'] // 2)).in_dll(fw.lib, 'theme_engine__geom_vals')
+    sets = [table[g * len(names):(g + 1) * len(names)] for g in range(len(table) // len(names))]
+    g = next(i for i, row in enumerate(sets) if row[names.index('split_inset')] == inset)
+    st = host.offsets(library.parent/'navigation.o', 'scratch_t')['geom']
+    C.c_int.from_address(C.addressof(fw.var('st', C.c_char)) + st).value = g
+    row = dict(zip(names, sets[g]))
+    return row, 320 - row['bar']
+
+
+def test_a_split_inset_keeps_the_pan_off_the_cover_s_edges(fw, library):
+    row, client = split_inset_set(fw, library, 2)  # OLED's
+    pw, ph = 375 - row['split_art'], client + row['split_art_up']
+    pixels = rgba(300, 300, lambda x, y: (10, 20, 30, 255))
+    tex, home, _ = tex_rig(fw, 300, 300, pixels)
+    assert tex(b'x') == 1
+    t = ph * 110 // 100  # a square cover fits the pane's height
+    ins = t * 2 // 100
+    assert home.tw == t
+    assert (home.v0, home.v0 + home.ry) == (ins, t - ph - ins)  # inside the inset at both ends
+    assert (home.u0, home.u0 + home.rx) == ((ph - pw) // 2, (ph - pw) // 2 + t - ph)  # the zoom's margin, far from both edges
+    assert home.rx > 0 and home.ry > 0  # it pans both ways
 
 
 def test_home_tex_a_flat_cover_stays_flat_out_to_its_border(fw):
@@ -2359,7 +2395,7 @@ def test_a_tap_in_the_flat_fallback_opens_the_centre_cover_alone(fw):
 # Stock's widgets, for the pages and Home
 
 THEMES = host.tools_theme.builtins()
-MINIMAL, CLASSIC, MODERN = ({t['id']: t['index'] for t in THEMES}[i] for i in ('minimal', 'classic-light', 'modern'))
+MINIMAL, CLASSIC, MODERN, OLED = ({t['id']: t['index'] for t in THEMES}[i] for i in ('minimal', 'classic-light', 'modern', 'oled'))
 EVT_CLICK, EVT_WINDOW_FOREGROUND = O['EVT_CLICK'], O['EVT_WINDOW_FOREGROUND']
 PANE_NOW, PANE_LIBRARY, PANE_SHUFFLE, PANE_COVERFLOW, PANE_FOLDER, PANE_GAMES, PANE_ROCKBOX, PANE_STREAM, PANE_SETTINGS, \
     PANE_SERVICE = range(10)
@@ -2980,7 +3016,7 @@ def test_the_pan_stops_once_it_no_longer_shows(fw, change):
         ui.animating = 1
     elif change == 'still':
         home.tw = 0
-    elif change == 'margin':  # a split_still set's cover: no margin to pan across
+    elif change == 'margin':  # no margin left to pan across (a split_inset as wide as the zoom's)
         home.rx = home.ry = 0
     elif change == 'pane':
         home.pane = 1

@@ -268,8 +268,9 @@ int bar_geom_val(int v);          /* geom_val for what bar_theme() paints: V_BAT
 int client_h(void); /* the window under the bar of the set theme_boot wrote (theme_engine.c) */
 /* Home's Split under the same set (its split_* fields, tools/ipod.py Geometry): SPLIT_ROW the
  * menu's width, SPLIT_ART the art pane's left edge, SPLIT_ART_UP the pane's rows above the window,
- * SPLIT_STILL 1 for a still, centred cover (coverflow.c) */
-enum { SPLIT_ROW, SPLIT_ART, SPLIT_ART_UP, SPLIT_STILL };
+ * SPLIT_INSET the percent of the zoomed cover the pan keeps clear at each edge (coverflow.c
+ * drift_axis) */
+enum { SPLIT_ROW, SPLIT_ART, SPLIT_ART_UP, SPLIT_INSET };
 int split_geom(int k);
 void paint_stops(void *canvas, int x, int y, int w, int h, const stops_t *s); /* navigation.c */
 /* The rows painter: the track across w, the played part over its first fill_w px; final colours

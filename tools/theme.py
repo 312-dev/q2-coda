@@ -385,7 +385,7 @@ GEOM_RANGES = {
     'split_row': (120, lambda g: g.split_art + 16),
     'split_art': (O['HOME_SPLIT_W'], 260),
     'split_art_up': (0, lambda g: g.bar - 26),
-    'split_still': (0, 1),
+    'split_inset': (0, 4),  # percent of the zoomed cover; past about 4.5 the 110 % zoom leaves no pan
 }
 THEME_GEOM_OFF = 4  # offsetof(theme_t, geom), right after name so no field moves it; asserted in navigation.c; test/patch.py pokes it
 THEME_MOTION_OFF = 8  # offsetof(theme_t, motion), right after geom; asserted in navigation.c; test/patch.py pokes it

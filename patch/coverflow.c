@@ -3855,10 +3855,14 @@ static int home_repaint(const void *unused) {
 }
 
 /* One axis of the pan (an iPod classic's menu art): 0 to range px and back over 2 x period ms, in
- * 1/256 px. range is a tenth of a cover within DRIFT_TEXELS (under 100 px), so 32 bits hold it. */
+ * 1/256 px, eased in and out at each end (smoothstep, 3s^2 - 2s^3), so it slows to a stop and
+ * turns with no jolt; its speed peaks at 1.5 times the average halfway. s is in 1/65536 and e,
+ * unrounded so it never steps back, in 1/2^48 (64 bits); range is a tenth of a cover within
+ * DRIFT_TEXELS (under 100 px), so the result fits 32. */
 static int drift_at(int range, unsigned period) {
-    unsigned t = home.drift_ms % (2 * period);
-    return (int)((unsigned)range * 256 * ((t < period ? t : 2 * period - t) >> 4) / (period >> 4));
+    unsigned t = home.drift_ms % (2 * period), s = ((t < period ? t : 2 * period - t) << 16) / period;
+    unsigned long long e = (unsigned long long)s * s * (3 * 65536u - 2 * s);
+    return (int)((unsigned long long)range * 256 * (e >> 24) >> 24);
 }
 
 /* Where the panel's top left is in the zoomed cover, in 1/256 px: the old crop, then the pan. */
@@ -3984,6 +3988,18 @@ static void box_filter(const unsigned char *data, unsigned stride, const unsigne
     }
 }
 
+/* One axis's pan in the zoomed cover, t texels long, for a panel p long: from the old crop of the
+ * cover's fit f (half its overhang in), across the zoom's margin t - f, start *c0 and range *r.
+ * A set's split_inset keeps that percent of t clear at each edge too, so a cover's own frame (many
+ * have a thin white border) never shows; with no room left, the zoom's middle, still. */
+static void drift_axis(int f, int t, int p, int *c0, int *r) {
+    int lo = (f - p) / 2, hi = lo + t - f, ins = t * split_geom(SPLIT_INSET) / 100;
+    if (lo < ins) lo = ins;
+    if (hi > t - p - ins) hi = t - p - ins;
+    if (hi < lo) lo = hi = (t - p) / 2;
+    *c0 = lo, *r = hi - lo;
+}
+
 /* The cover at url, box filtered once to its fit zoomed DRIFT_ZOOM_PCT (home.tex, tw x th) and
  * composited over the page as Coverflow's decode does, for the pan to draw from. It pans across
  * the zoom's margin only (rx ry), from the old crop (u0 v0), so its edges never show. 1 when it
@@ -4025,10 +4041,9 @@ static int home_tex(const char *url) {
         memcpy(home.tex, home.tex + ts, (unsigned)ts * 4);
         for (int y = th + 1; y < th + 3; ++y)
             memcpy(home.tex + y * ts, home.tex + th * ts, (unsigned)ts * 4);
-        home.tw = tw, home.rx = tw - fw, home.ry = th - fh;
-        home.u0 = (fw - pane_w()) / 2, home.v0 = (fh - pane_h()) / 2, home.du = -1;
-        if (split_geom(SPLIT_STILL)) /* the zoom's middle, its edges (a cover's frame) cut */
-            home.u0 = (tw - pane_w()) / 2, home.v0 = (th - pane_h()) / 2, home.rx = home.ry = 0;
+        home.tw = tw, home.du = -1;
+        drift_axis(fw, tw, pane_w(), &home.u0, &home.rx);
+        drift_axis(fh, th, pane_h(), &home.v0, &home.ry);
     }
     widget_unload_image(home.art, bitmap);
     return data != 0;

@@ -1271,7 +1271,7 @@ def test_classic_light_sets_from_its_theme_file():
     assert theme.sets(m) == theme.sets(c) == {'ipod': SET0} and (m['geoms'], c['geoms']) == ({}, {})
     decl = {e.attrs['name']: e.attrs for e in theme.load(THEMES/'classic-light'/'theme.xml').children
             if e.tag == 'geometry' and 'name' in e.attrs}
-    assert set(decl['classic-light']) == {f.name for f in dataclasses.fields(Geometry)} - {'list_fit', 'status_y', 'right_x', 'np_art', 'np_bar_y', 'split_row', 'split_art', 'split_art_up', 'split_still', 'folder_pitch', 'folder_body'} and decl['classic-light-text']['extends'] == 'classic-light'
+    assert set(decl['classic-light']) == {f.name for f in dataclasses.fields(Geometry)} - {'list_fit', 'status_y', 'right_x', 'np_art', 'np_bar_y', 'split_row', 'split_art', 'split_art_up', 'split_inset', 'folder_pitch', 'folder_body'} and decl['classic-light-text']['extends'] == 'classic-light'
     assert not hasattr(ipod, 'CLASSIC_LIGHT') and not hasattr(ipod, 'CLASSIC_LIGHT_TEXT')
 
 
@@ -1554,8 +1554,8 @@ def test_oled_states_its_grid_type_and_colour(tmp_path):
     assert (oled['np_meta_font'], oled['np_modes'], oled['marquee_fade'], oled['reopen_top'], oled['shuffle_row']) == (inter, 1, 1, 1, 1)
     # Home's Split: rows to 204 (the bar to 188, chevrons at 176), the art from x 196 and 6 px up into the bar, still;
     # the other sets keep half the screen, the art under the bar, panning
-    assert (g.split_row, g.split_art, g.split_art_up, g.split_still, oled['home_label_end[0]']) == (204, 196, 6, 1, 44)
-    assert all((s.split_row, s.split_art, s.split_art_up, s.split_still) == (187, 187, 0, 0) for s in map(theme.geometry, ts[:3]))
+    assert (g.split_row, g.split_art, g.split_art_up, g.split_inset, oled['home_label_end[0]']) == (204, 196, 6, 2, 44)
+    assert all((s.split_row, s.split_art, s.split_art_up, s.split_inset) == (187, 187, 0, 0) for s in map(theme.geometry, ts[:3]))
     assert all(t['np_modes'] == t['marquee_fade'] == t['shuffle_row'] == t['np_art_radius'] == 0 == theme.geometry(t).np_art for t in ts[:3])
     assert all(t['reopen_top'] == 1 for t in ts)  # Minimal's, every theme's
     inc = boot_inc(tmp_path, ts)
