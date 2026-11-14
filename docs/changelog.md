@@ -3,6 +3,7 @@
 - **Unreleased (q2-coda)**:
   - Display: **Theme** lists **OLED** after **Classic**. It is a placeholder: it looks as **Theme: Classic** does until its own design arrives.
   - Privacy: Now Playing's cover search (⋯ menu) offers covers from MusicBrainz's Cover Art Archive and Apple's iTunes only. It no longer sends the song's title and artist to Kugou, NetEase or Baidu, which it asked over an unencrypted connection, so a song neither service knows offers only the cover it already has.
+  - Privacy: a Baidu Netdisk sign-in left from Shanling's firmware is deleted at start-up. Q2 Pod has no Baidu Netdisk, and Shanling's code sent that sign-in unencrypted.
   - Security: Tidal Downloads checks Tidal's certificate before it saves a track, so a hostile Wi-Fi network can't swap in a file of its own. If the check fails, the track still plays, but isn't saved to the card.
   - Security: the Q2 has no root password, and the circuit board's serial connector no longer offers a login. Every Q2 shipped with the same root password.
   - Security: Bluetooth stays discoverable for 3 minutes after it turns on, instead of for as long as it's on. Headphones and devices already paired connect as before; to pair a new phone with the Q2 as a Bluetooth receiver after that, turn Bluetooth off and on.

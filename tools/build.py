@@ -261,6 +261,8 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             rm -f $m
         }}
         rm -f /mnt/data/q2-cf-trace /mnt/data/q2-stall
+        # Baidu Netdisk's sign-in, which stock sends over plain HTTP: Q2 Pod has no Baidu row to use it from
+        rm -f /mnt/data/baidu_token.conf
         [ -f $c ] && (
             i=0
             while [ $i -lt 60 ] && ! grep -q ' /mnt/mmc ' /proc/mounts; do usleep 500000; i=$((i+1)); done

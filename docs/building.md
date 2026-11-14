@@ -39,6 +39,7 @@ Every build, release and `--dev`, hardens stock's root filesystem (`tools/build.
 - **Debugging and network tools** (`DEBUG_TOOLS`, `DEBUG_LINKS` in `OBSOLETE`): `strace`, `strace-log-merge`, `sqlite3` (the program; demo's `libsqlite3` stays), `hcidump`, `memtester` and `nandtest`, and busybox's `telnet`, `tftp`, `inetd`, `dnsd` and `dhcprelay` links. No script, program or library in the rootfs, and nothing in `patch/`, names them as a command; `libcurl`'s telnet and TFTP protocol code is its own.
 - **Bluetooth** is discoverable for 180 s after demo turns it on (`BT_DISCOVERABLE` in `/etc/bluetooth/main.conf`), not for as long as it is on.
 - **Network time** asks `0.pool.ntp.org` in place of `cn.pool.ntp.org` (`NTP_POOL`, [Clock](internals.md#clock)).
+- **Baidu Netdisk's saved sign-in**, `/mnt/data/baidu_token.conf`, is deleted at boot (`BOOT_HOOK`).
 
 `test/build.py --build DIR` checks each against the stock image.
 
