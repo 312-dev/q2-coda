@@ -85,7 +85,7 @@ The full list of suites, with what each needs, is in [docs/building.md](docs/bui
 - **`--basetemp` needs its parent to exist**, and should be on disk: pytest's default is under `/tmp`, often RAM, and each test loads a 20 MB library.
 - **`tools/build.py` fails under `python3 -I`.** It imports its siblings (`from flac import selection`), and isolated mode drops the script's folder from `sys.path`. `tools/rebase.py` and `docs/rebasing/sitenotes.py` are the opposite: they read untrusted stock files and say to run with `-I`.
 - **`tools/build.py` refuses an `--out` that already holds `update.tar`.** Build into a fresh directory, then swap.
-- **A build is stale after any edit.** `test/patch.py` and the other `BUILD` suites refuse a build whose `manifest.json` `source_sha256` is not the tree's (`patch/`, `tools/`, `assets/`, `docs/manual/`). Rebuild, don't work around it.
+- **A build is stale after any edit.** `test/patch.py` and the other `BUILD` suites refuse a build whose `manifest.json` `source_sha256` is not the tree's (`patch/`, `tools/`, `player/`, `assets/`, `docs/manual/`). Rebuild, don't work around it.
 - **A new `patch/*.c` is not compiled until it is listed**: in `NAVIGATION` (`tools/build.py`) if it includes `navigation.h`, else in `UI_SOURCES` (`tools/peq.py`). `test/fw` builds from the same two lists.
 - **The payload has a hard limit.** Code and constants must fit the 1 MB below `SCRATCH` (`tools/build.py`); past it the build fails with `Payload overlaps its scratch page`. Check `patch_bytes` in a build's `manifest.json`. See [architecture](docs/architecture.md).
 - **Writable state goes in `.scratch`** (`__attribute__((section(".scratch")))`), zero at start. The link script has no `.data`.

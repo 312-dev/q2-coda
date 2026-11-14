@@ -126,8 +126,9 @@ def ffmpeg(target):  # pragma: no mutate block
     return prefix
 
 
-def build(target):  # pragma: no mutate block
-    """player/ compiled and linked for target; the binary's path."""
+def build(target, alsa=None):  # pragma: no mutate block
+    """player/ compiled and linked for target; the binary's path. For mips, alsa is the libasound.so.2 to link
+    against, by default an unpacked stock root filesystem's (Q2_STOCKFS)."""
     ff = ffmpeg(target)
     tls = mbedtls() if target == 'mips' and os.environ.get('Q2_PLAYER_TLS') else None
     out = ROOT/'player/build'/(target + ('-tls' if tls else ''))
@@ -137,7 +138,7 @@ def build(target):  # pragma: no mutate block
     if target == 'mips':
         # stock's own libasound.so.2, from an unpacked root filesystem (Q2_STOCKFS; tools/thirdparty.py keeps one)
         fs = pathlib.Path(os.environ.get('Q2_STOCKFS') or THIRDPARTY/'stockfs')
-        alsa = fs/'usr/lib/libasound.so.2.0.0'
+        alsa = pathlib.Path(alsa or fs/'usr/lib/libasound.so.2.0.0')
         if not alsa.exists():
             sys.exit(f'player: no {alsa}; set Q2_STOCKFS to an unpacked stock root filesystem')
         extra = [f'ALSA={alsa}']

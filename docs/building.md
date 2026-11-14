@@ -66,6 +66,8 @@ All three kernel-module experiments were on by default from 1.5.0 to 1.6.1 and w
 
 `--dev --mcu-idle-sleep` is off in release builds. It adds an interruptible MCU sleep with an explicit wake handshake. See [MCU sleep](mcu-sleep.md).
 
+`--dev --new-player` installs the new player, `q2player` ([player-plan.md](player-plan.md)), as `/usr/bin/hciplayer`, and the patched hciplayer at `/usr/lib/hciplayer-stock/hciplayer`. `q2player` runs that hciplayer unless `/mnt/data/q2player` exists ([the fallback](player-plan.md#architecture)), so the image plays as any `--dev` build until the file is made (`touch /mnt/data/q2player` over `q2remote`, then restart the player). It builds `q2player` with `tools/player.py` (FFmpeg on first use, some minutes; the `sec/libs` toolchain in `~/.cache/q2-thirdparty`) against the image's own `libasound.so.2`, and records `q2player_sha256` and `rootfs_bytes` in the manifest. The root filesystem holds 50,688,000 bytes: past that the build stops and says by how much.
+
 ## Tests
 
 ```sh
