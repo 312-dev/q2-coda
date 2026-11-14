@@ -695,8 +695,8 @@ def tidal_https(data):
         check(data.count(old) == 1, f'Unexpected Tidal URL {path.decode()}')
         data = data.replace(old, new)
     return data
-# Mozilla's CA bundle as curl publishes it, whole, for stock's HTTPS (above), whose hosts no list of ours could
-# cover; /etc/scrobble-ca.pem stays the few roots Q2 Pod's own code needs.
+# Mozilla's CA bundle as curl publishes it, whole, for stock's HTTPS (above) and the player's (tools/peq.py TLS_OPTIONS),
+# whose hosts no list of ours could cover; /etc/scrobble-ca.pem stays the few roots Q2 Pod's own code needs.
 STOCK_CA = 'etc/ssl/certs/ca-certificates.crt'
 STOCK_CA_SHA = '796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe'  # https://curl.se/ca/cacert-2026-10-20.pem
 # The same function's other command, no lyrics chosen: rm -rf "/mnt/mmc/.downpic/<name>" for the same system().

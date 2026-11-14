@@ -161,8 +161,7 @@ static void *download(void *unused) {
             curl_easy_setopt(c, 20219, progress);    /* XFERINFOFUNCTION */
             curl_easy_setopt(c, 10057, &stopped_at); /* XFERINFODATA */
             curl_easy_setopt(c, 43, 0L);             /* NOPROGRESS off, for it */
-            /* verified against the bundle's GlobalSign R3 and Amazon roots (Tidal's media hosts);
-             * hciplayer's own stream of the same URL is stock's and unverified (ffmpeg's tls_verify=0) */
+            /* verified against the bundle's GlobalSign R3 and Amazon roots (Tidal's media hosts) */
             curl_easy_setopt(c, 10065, TIDAL_CA);    /* CAINFO */
             curl_easy_setopt(c, 64, 1L);             /* SSL_VERIFYPEER */
             curl_easy_setopt(c, 81, 2L);             /* SSL_VERIFYHOST */

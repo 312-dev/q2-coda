@@ -506,9 +506,17 @@ def validate_assets(directory):
     check_bluetooth_drop(directory)
     from build import SCROBBLE_CA
     assert read('rootfs.squashfs', SCROBBLE_CA) == (ROOT/'assets/scrobble-ca.pem').read_bytes()
-    # The whole Mozilla bundle, for stock's HTTPS.
+    # The whole Mozilla bundle, for stock's HTTPS and the player's; ffmpeg's tls options in hciplayer default to it.
     from build import STOCK_CA, STOCK_CA_SHA
     assert sha(read('rootfs.squashfs', STOCK_CA)) == STOCK_CA_SHA
+    from peq import TLS_OPTIONS, TLS_DEFAULTS
+    player, stock_player, pps = read('rootfs.squashfs', 'usr/bin/hciplayer'), read('stock.squashfs', 'usr/bin/hciplayer'), symbols(directory/'peq'/'peq.elf')
+    for address, value in TLS_DEFAULTS:
+        off = fileoff(stock_player, address)
+        assert struct.unpack_from('<I', stock_player, off)[0] == 0
+        assert struct.unpack_from('<I', player, off)[0] == (pps[value] if isinstance(value, str) else value)
+    ca = fileoff(player, pps['player_ca_file'])
+    assert player[ca:player.index(b'\0', ca)] == b'/' + STOCK_CA.encode()
     # each subset face ships, cut to what its <NAME>_RANGES lists, with its licence files
     from build import CLASSIC_LIGHT_NOTICE, FACES, FONT_DIR, FONT_NOTICES, face_font, subset_font
     for face in FACES.values():

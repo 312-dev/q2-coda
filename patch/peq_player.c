@@ -4,6 +4,10 @@ _Static_assert(sizeof(af_data) == 24, "audio ABI");
 _Static_assert(__builtin_offsetof(af_instance, setup) == 16, "setup ABI");
 _Static_assert(__builtin_offsetof(af_instance, mul) == 40, "multiplier ABI");
 
+/* ffmpeg's tls ca_file default (tools/peq.py TLS_OPTIONS): the player's HTTPS streams verify their
+ * chain against the firmware's Mozilla bundle (docs/internals.md#stock-https). */
+const char player_ca_file[] = "/etc/ssl/certs/ca-certificates.crt";
+
 /* DSD (the vendor's dsdiff driver: dsf, dff, SACD iso; or FFmpeg's ffdsd*) reaches the chain as integer PCM,
  * possibly DoP, whose bits must arrive unchanged: pass it through. Never detach (2): the insert's af_add
  * (0x44ce18) returns the filter its reinit just freed, and the caller (0x42920c) then calls into it.
