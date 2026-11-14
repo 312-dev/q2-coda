@@ -153,9 +153,10 @@ typedef struct {
     unsigned char geom; /* second: THEME_GEOM_OFF (4) never moves */
     /* a list left by Return forgets its row, so choosing it again opens it at the top
      * (navigation.c forget_left); Songs' action row reads Shuffle with the theme's own glyph and
-     * the wheel selects it above the first song (navigation.c shuffle_key). In the padding before
-     * motion, so sizeof(theme_t) stays 1624 */
-    unsigned char reopen_top, shuffle_row;
+     * the wheel selects it above the first song (navigation.c shuffle_key); in Split, the lists
+     * Home's rows open (Settings, Library, Streaming) take the whole width with the art hidden, as
+     * a page (coverflow.c sub_full). In the padding before motion, so sizeof(theme_t) stays 1624 */
+    unsigned char reopen_top, shuffle_row, home_lists_full;
     motion_t motion[MOTION_N];
     unsigned short recall_ms; /* a remembered row's glide; 0: shown at once */
     unsigned char bump_px;    /* the wheel's bump at a list's end */

@@ -2668,6 +2668,26 @@ def test_settings_slides_in_over_the_list_and_return_slides_the_list_back(fw):
     assert title() == b'Q2 Pod' and not back(h.win)
 
 
+def test_under_home_lists_full_settings_is_a_page_and_return_brings_the_art_back(fw):
+    """OLED's home.lists.full: the list a row opens takes the screen's width with the art hidden, as a page; Return
+    shows the main list beside the art again."""
+    t, ui, h, home = home_open(fw, OLED, HOME='0')
+    assert t['home_lists_full'] and ui[h.art].visible
+    assert ui.at(h.sets)[2] == 375  # laid out a page's width while hidden
+    ui.click(h.rows['img_settings'])
+    assert ui[h.sets].visible and not ui[h.art].visible
+    assert ui.at(h.sets)[0] in (0, 375)  # in from the right by its own width, or in place with no slide
+    assert fw.fn('coverflow_home_back', C.c_int, C.c_void_p)(h.win) == 1
+    assert ui[h.main].visible and ui[h.art].visible
+
+
+def test_without_home_lists_full_settings_keeps_the_art_beside_it(fw):
+    t, ui, h, _ = home_open(fw, CLASSIC)
+    assert not t['home_lists_full']
+    ui.click(h.rows['img_settings'])
+    assert ui[h.sets].visible and ui[h.art].visible
+
+
 @pytest.mark.parametrize('theme', [MINIMAL, CLASSIC, MODERN])
 def test_a_list_return_leaves_on_home_opens_at_its_top_again(fw, theme):
     """list.reopen.top on Home's own lists, which stay alive hidden: Return drops the row the list was left on and

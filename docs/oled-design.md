@@ -383,7 +383,7 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_inset` (the art from
   x 196 and y 52 to the edges, its top rows painted by the bar, panning slowly across its 110 % zoom with an
   eased turn at each end and 2 % of the zoom kept clear of the pane at each edge, so a cover's own border never
-  shows).
+  shows), and the lists Home's rows open as full-width pages with the art hidden (`home.lists.full`).
 
 Still to build:
 

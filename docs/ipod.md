@@ -185,7 +185,10 @@ A set with `split_inset` (OLED's 2) keeps that percent of the zoomed cover clear
 (`drift_axis`), so a cover's own frame (many have a thin white border) never shows at the pane's
 edges even at the pan's ends: on OLED's 179 × 268 pane a square cover pans 26 pixels across and 16
 down. An inset the zoom's margin cannot hold leaves the cover still in the zoom's middle, and no
-timer runs. A set with `split_art_up` starts the pane that many rows above Home's window: the
+timer runs. A theme with `home.lists.full` (OLED's) opens the lists Home's rows open in Split
+(Settings, and Library and Streaming where a set keeps them on Home) as pages: the list takes the
+screen's width in Full's rows (`sub_full`), the art is hidden while it shows and no pan runs, and
+Return brings the main list back beside the art, whose last frame shows at once. A set with `split_art_up` starts the pane that many rows above Home's window: the
 frame is that much taller, Home's window draws its rows from the window's top down, and the bar
 draws the rest over its own black (`coverflow_home_bar`, from the bar's background paint, with Home
 on top and no window sliding, as Home's paint draws nothing outside its window). With nothing

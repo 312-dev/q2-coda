@@ -3906,7 +3906,8 @@ static int pane_covers(void) { return home.kind <= PANE_LIBRARY && !home.pane; }
  * that shows it. */
 static int drift_live(void) {
     void *wm = window_manager();
-    return home.tw && (home.rx || home.ry) && pane_covers() && g_backlight_status &&
+    return home.tw && (home.rx || home.ry) && pane_covers() && widget_get_visible(home.art) &&
+           g_backlight_status &&
            !g_lockscreen_pageflag &&
            window_manager_get_top_window(wm) == home.win && !window_manager_is_animating(wm);
 }
@@ -4636,6 +4637,24 @@ int coverflow_home_owns(void *w) {
     return 0;
 }
 
+/* The list open on Home, 0: its main list. */
+static void *home_open(void) {
+    return home.lib && widget_get_visible(home.lib)         ? home.lib
+           : home.stream && widget_get_visible(home.stream) ? home.stream
+           : home.sets && widget_get_visible(home.sets)     ? home.sets
+                                                            : (void *)0;
+}
+
+/* Split under a home_lists_full theme (OLED's): the lists Home's rows open take the whole width,
+ * as a page does, and the art is the main menu's alone. Other themes keep an iPod's submenu, the
+ * list in the main menu's place beside the art. */
+static int sub_full(void) { return theme()->home_lists_full && !ipod_home(); }
+
+/* The art beside shown, the list now on Home, under sub_full: there only beside the main list. */
+static void art_beside(void *shown) {
+    if (sub_full()) widget_set_visible(home.art, shown == home.list, 0);
+}
+
 /* Both menus' lists span outer, their rows and tap targets inner; labels start at x and end end
  * before the row's edge (Classic: before the chevron). */
 static void home_width(void *w, int outer, int inner, int x, int end, int depth) {
@@ -4687,9 +4706,11 @@ void coverflow_home_layout(void) {
         inner = !full ? split : T->home_full_row, x = T->home_text_x,
         end = T->home_label_end[full];
     home_width(home.list, outer, inner, x, end, 0);
-    if (home.sets) home_width(home.sets, outer, inner, x, end, 0);
+    if (home.sets)
+        home_width(home.sets, sub_full() ? 375 : outer, sub_full() ? T->home_full_row : inner, x,
+                   T->home_label_end[full || sub_full()], 0);
     widget_move_resize(home.art, pane_x(), 0, pane_w(), client_h());
-    widget_set_visible(home.art, !mode, 0);
+    widget_set_visible(home.art, !mode && !(sub_full() && home_open()), 0);
     for (int i = 0; mode && i < 2; ++i) { /* Split's alone */
         void *open = i ? home.stream : home.lib;
         if (!open || !widget_get_visible(open)) continue;
@@ -4736,29 +4757,31 @@ int page_push(void *view, int dir) {
 }
 
 /* Home's Settings row, as an iPod's submenu: the Settings list (stock's Playback and System
- * setting rows, which stock binds) slides in from the right over the list's place, the art staying;
- * Return (coverflow_home_back) slides the list back in from the left. Each list keeps its row. */
+ * setting rows, which stock binds) slides in from the right over the list's place, the art staying
+ * (under sub_full the list is a page's width and the art goes); Return (coverflow_home_back) slides
+ * the main list back in from the left. Each list keeps its row. */
 static void home_swap(void *from, void *to, int dx) {
     home_show(from, 0); /* only the shown list takes taps */
     /* A list still sliding goes to its rest first: push_x's goal, and where no push leaves it. */
     if (I(to, W_X)) widget_move_resize(to, 0, I(to, W_Y), I(to, W_W), I(to, W_H));
     push_x(to, dx, &theme()->motion[MOTION_SWAP]);
     home_show(to, 1);
+    art_beside(to);
     bar_title_sync(home.win); /* the bar's text follows the list at once, not at its next second */
 }
 
 static int home_settings(void *ctx, void *event) {
-    if (home.sets && !widget_get_visible(home.sets)) home_swap(home.list, home.sets, I(home.list, W_W));
+    if (home.sets && !widget_get_visible(home.sets)) home_swap(home.list, home.sets, I(home.sets, W_W));
     return 0;
 }
 
-/* A list its page's constructor just filled, slid in in Home's rows' shape. service: Streaming's,
- * whose 70 px rows take Home's row height, and the build's icons are decoded now, not on the
- * wheel's path (coverflow_home_row). */
+/* A list its page's constructor just filled, slid in in Home's rows' shape (under sub_full, Full's
+ * rows across the screen). service: Streaming's, whose 70 px rows take Home's row height, and the
+ * build's icons are decoded now, not on the wheel's path (coverflow_home_row). */
 static void home_fill(void *list, int service) {
     const theme_t *T = theme();
-    int split = split_geom(SPLIT_ROW);
-    home_width(list, split, split, T->home_text_x, T->home_label_end[0], 0);
+    int full = sub_full(), split = full ? T->home_full_row : split_geom(SPLIT_ROW);
+    home_width(list, full ? 375 : split, split, T->home_text_x, T->home_label_end[full], 0);
     void *view = widget_count_children(list) ? widget_get_child(list, 0) : (void *)0;
     void *first = service ? widget_get_child(widget_get_child(home.list, 0), 0) : (void *)0;
     for (unsigned i = 0, n = view ? widget_count_children(view) : 0; i < n; ++i) {
@@ -4778,7 +4801,7 @@ static void home_fill(void *list, int service) {
         }
     }
     widget_layout(list);
-    home_swap(home.list, list, I(home.list, W_W));
+    home_swap(home.list, list, I(list, W_W));
 }
 
 /* Home's Library row in Split (a set with home_lib, Library on Home on): its rows slide in as Settings' do, each filled
@@ -4804,14 +4827,6 @@ static int home_streaming(void *ctx, void *event) {
     return 0;
 }
 
-/* The list open on Home, 0: its main list. */
-static void *home_open(void) {
-    return home.lib && widget_get_visible(home.lib)         ? home.lib
-           : home.stream && widget_get_visible(home.stream) ? home.stream
-           : home.sets && widget_get_visible(home.sets)     ? home.sets
-                                                            : (void *)0;
-}
-
 /* Return on Home with a list open: 1 when it went back to the main list. A reopen_top theme's list
  * opens at its top next time (navigation.c forget_rows), as a page left by Return does. */
 int coverflow_home_back(void *top) {
@@ -4834,6 +4849,7 @@ void coverflow_home_top(void) {
     if (!open) return;
     home_show(open, 0);
     home_show(home.list, 1);
+    art_beside(home.list);
 }
 
 /* 1 while Home shows a list of its rows' (the Library's, Streaming's, Settings'), not its own. */

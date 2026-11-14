@@ -79,6 +79,9 @@
   <view name="home">
     <element name="rows" top="0" text_x="24" full_row="375" label_end_split="44" font="inter" font_px="24" caps="0"/>
     <element name="chevron" visible="1"/>
+    <!-- In Split the art is the main menu's alone: Settings, and Library and Streaming where they open in Home's
+         window, are full-width pages (audit RULES 1) -->
+    <element name="lists" full="1"/>
   </view>
   <!-- Now Playing on the grid (oled-design.md Now Playing; the set's np_art and np_bar_y, tools/ipod.py np_grid): 6 px
        art corners, the title Inter Medium 22 (27 here), the artist and album Inter at the page's 18 (22 here), a 6 px
