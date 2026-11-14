@@ -1042,8 +1042,9 @@ static const cat_ent *cat_lookup(const char *path) {
 /* A server row's path: under a catalogue app's cat folder (known or not: a playlist's song kept
  * from an earlier catalogue is one too). */
 int catalogue_path(const char *path) {
-    return path && tk_str_start_with(path, "/mnt/mmc/.") && strstr(path, "/cat/") &&
-           strstr(path, "/cat/") == strstr(path + 10, "/");
+    const char *p = path && tk_str_start_with(path, "/mnt/mmc/.") ? path + 10 : 0;
+    while (p && *p && *p != '/') ++p;
+    return p && p > path + 10 && tk_str_start_with(p, "/cat/");
 }
 /* r's offline copy, or 0. */
 static const char *cat_local(const char *path) {
@@ -1128,8 +1129,10 @@ int catalogue_cover(const char *path, char *out, unsigned size) {
     const cat_ent *e = path && !catalogue_path(path) ? cat_copy_of(path) : 0;
     const char *row = e && !e->dup ? ix_str(&cat.ix, e->path) : path;
     if (!catalogue_path(row)) return 0;
-    const char *cat_at = strstr(row + 10, "/cat/"), *album = cat_at + 5, *end = strstr(album, "/");
-    if (!end || end == album) return 0;
+    const char *cat_at = row + 10, *album, *end;
+    while (*cat_at != '/') ++cat_at; /* catalogue_path: the app's id, then /cat/ */
+    for (album = end = cat_at + 5; *end && *end != '/'; ++end);
+    if (!*end || end == album) return 0;
     int n = tk_snprintf(out, size, "%.*s/covers/%.*s.jpg", (int)(cat_at - row), row,
                         (int)(end - album), album);
     return n > 0 && (unsigned)n < size && !access(out, 4);
