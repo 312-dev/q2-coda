@@ -358,6 +358,7 @@ int canvas_offline_destroy(void *c) { return 0; }
 unsigned unflip(unsigned v) { return v; }
 unsigned mix(unsigned a, unsigned b, int j, int n) { return a; }
 void bar_title_sync(void *win) {}
+void forget_rows(void *list) { (void)list; }
 int bar_title_fits(void *label) { return 1; }
 void list_value(void *l, const char *t, const char *v) { (void)l, (void)t, (void)v; }
 /* CF_STYLE0: main() passes Minimal's .cf from tools/theme.py ROLE_MACROS, thumb off: the tick cases' (Modern inherits it);
