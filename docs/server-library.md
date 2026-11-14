@@ -8,8 +8,8 @@ only** stays the default and behaves as the Library does today. Nothing here is 
 is the plan, written so the work can start once the security and efficiency branches have merged.
 
 It rests on two studies made while planning it: one of the Subsonic card app and of the firmware's
-library, playback and card-app code, and one of how open-source Subsonic clients (Ultrasonic, Tempo,
-Amperfy and others) model offline libraries and keep them in step with the server.
+library, playback and card-app code, and one of how open-source Subsonic clients (Ultrasonic, Tempus,
+Amperfy, Supersonic) model offline libraries and keep them in step with the server.
 
 ## What exists today
 
@@ -95,11 +95,42 @@ firmware does not wait on them.
 
 ## Keeping in step with the server
 
-The catalogue is only as fresh as the app's last check. What is known so far: the Subsonic API has
-no "changes since" call; the app reuses its index while `getScanStatus` reports the same `lastScan`
-and song count (Navidrome reports both), and re-reads playlists every time. How established clients
-detect changed, added and removed songs cheaply, and what OpenSubsonic and Navidrome offer for it, is
-the subject of the client study; this section takes its recommendations when that study is done.
+From a study of Ultrasonic, Tempus, Amperfy and Supersonic (all GPL-3.0, so their ideas and not their
+code), the OpenSubsonic specification and Navidrome's source. None of those clients keeps a fresh
+full copy cheaply, and none uses the server's change hints to drive sync; the plan below is ours.
+
+- **First copy:** page through every song with an empty `search3` query, 500 per request, writing each
+  page to the card as it arrives (about 100 requests for 50,000 songs). The specification requires
+  servers to accept the empty query for offline sync, and Navidrome returns songs in a stable order.
+  Then playlists and starred items. Never one request per album: that is what overloaded servers and
+  doubled songs for Amperfy ([#345](https://github.com/BLeeEZ/amperfy/issues/345),
+  [#778](https://github.com/BLeeEZ/amperfy/issues/778)). One sync runs at a time.
+- **Noticing a change:** on each connection, `getScanStatus`'s `lastScan` and `count` (Navidrome's
+  fields), or `getIndexes` with `ifModifiedSince` on other servers. Either only says something may
+  have changed: songs and albums carry no change date, Navidrome moves `lastScan` on every scan even
+  when nothing changed, and its `getArtists` ignores `ifModifiedSince`.
+- **Applying it:** a full walk again, marking every song seen; after a complete walk, a song not seen
+  is gone from the server. The walk runs when the hint changed and the Q2 is idle or charging, and on
+  a manual resync. Playlists' `changed` dates and starred items are checked on every connection, since
+  a scan does not cover them.
+- **Deletions:** Navidrome hides a missing file rather than deleting it and reuses its id if the file
+  returns, so a song gone from the server is marked, not removed, and a downloaded copy of it is kept
+  until the user clears it.
+- **Two flags per song:** on the server (present, gone) and on the Q2 (none, partial, cached, pinned).
+  A song plays if it has a complete local copy, or if the server is reachable and has it. A gone song
+  without a local copy is hidden; a playable-later one is greyed. (The clients studied all hide
+  unavailable songs; greying is this design's choice, so a list keeps its shape offline.)
+- **Online means the server answers,** not that Wi-Fi is up: only connection failures (name lookup,
+  refused, timeout) switch to offline; a sign-in error is shown, not treated as offline; after a
+  playback error the app pings before deciding. A hotspot with no internet can still reach a server
+  on that hotspot ([Tempus #1184](https://github.com/eddyizm/tempus/issues/1184)).
+- **Connection lost mid-queue:** keep the queue, skip unplayable songs as playback reaches them, stop
+  after a full pass finds none playable, and download the next song ahead so a short drop rarely
+  interrupts.
+- **On the card, not in RAM:** the catalogue and long queues live on the card (an estimated 10 to
+  15 MB for 50,000 songs). Downloaded files are named by server id, not by artist and album: FAT
+  refuses some names, such as a folder ending in a period (an Ultrasonic bug). Plays and stars made
+  offline are queued on the card and sent when the server returns.
 
 ## Risks and open questions
 
