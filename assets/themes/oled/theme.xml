@@ -34,6 +34,10 @@
   <option setting="home" preset="full"/>
   <option setting="shortcut"/>
   <option setting="battery" values="icon percent" default="icon"/>
+  <!-- Song rows (oled-design.md Song rows, patch/song_rows.c): where a mixed list's artist stands, and which lists
+       show each song's length -->
+  <option key="SONGARTIST" label="Song Artist" default="Inline" preset="Inline"><value label="Inline"/><value label="Selected Row"/><value label="Right"/><value label="Off"/></option>
+  <option key="SONGLENGTH" label="Song Length" default="Albums" preset="Albums"><value label="Albums"/><value label="All Lists"/><value label="Off"/></option>
   <!-- The status row's title and clock: Inter Medium 15 (18 here); the slim battery and its play state, the
        theme's own art -->
   <view name="bar">
@@ -54,6 +58,9 @@
     <element name="art" x="24" text_x="72" text_end="319" placeholder="40" radius="4"/>
     <!-- Divider (#222222, the light half's #e5e5e5) under each two-line row, on the text and right columns -->
     <element name="divider" dark.ink="#222222" light.ink="#e5e5e5"/>
+    <!-- Song rows, one line: a mixed list's artist after the title, an album's track numbers and lengths, in 15 px
+         (18 here) in the scheme's muted, Text Tertiary (Light Mode flips it), white on the selection -->
+    <element name="songs" painter="inline"/>
     <element name="scrollbar" painter="wheel" w="4" right="5" top="134" bottom="206" min="8"
              dark.thumb="#e5e5e5" light.thumb="#1a1a1a" dark.track="#3a3a3a" light.track="#c5c5c5"/>
   </view>

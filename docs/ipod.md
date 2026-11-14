@@ -911,7 +911,16 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
   fades a second after the last tick.
 - **Icons.** Phosphor's (MIT, [oled-design.md](oled-design.md#icons)): the caret on each row that opens a page,
   the play state.
-- **Appearance's rows.** Theme, Status Bar, Light Mode, Accent, Home, Shortcut and Battery (Icon or Percent).
+- **Song rows.** One line each, no chevron. In Songs and the other lists stock shows on Songs' page (a genre's
+  songs among them) the artist follows the title two spaces on, in 15 px Text Tertiary, both ending in an ellipsis
+  where they run out of room and the artist dropped when under 40 px would be left; an artist's own songs show
+  none; an album shows each track's number in a 14 px column before the title (from x 50) and its length on the
+  right column, once Scan Song Durations has measured it. **Song Artist**: Inline (the default), Selected Row (the
+  selected row's artist on the right column), Right (every row's) or Off. **Song Length**: Albums (the default), All
+  Lists or Off; with a length on the right column, Right and Selected Row put the artist inline. Lists Q2 Pod builds
+  itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep their own rows.
+- **Appearance's rows.** Theme, Status Bar, Light Mode, Accent, Home, Shortcut, Battery (Icon or Percent), Song Artist
+  and Song Length.
 
 <a id="oled-type"></a>Inter 4.1 Regular and Medium (`assets/fonts`, SIL OFL 1.1) ship as `fonts/inter.ttf` and
 `fonts/inter-medium.ttf`, subset as the other faces are; where Inter lacks a character, stock's face stands in.

@@ -1715,6 +1715,20 @@ static void paint_chevrons(void *w, void *canvas) {
     canvas_set_clip_rect(canvas, &old);
 }
 
+/* A song list's rows under SONGS_INLINE, from the list's background, so before the rows paint:
+ * song_rows.c fits each title's box and draws what stands beside it. Here, as the rows and their
+ * bounds are this file's. */
+static void paint_songs(void *w, void *canvas) {
+    if (theme()->painter[PAINT_SONGS] != SONGS_INLINE || !w || !kind(w) || !P(canvas, CANVAS_LCD) ||
+        !song_list(w) || !load_rows(&g_menu, w))
+        return;
+    for (int i = 0; i < g_menu.n; ++i) {
+        rect_t r = bounds(&g_menu, i);
+        if (r.y + r.h > 0 && r.y < I(w, W_H))
+            song_row(w, canvas, g_menu.at[i], g_menu.id[i], r, st.sel_w == w && i == st.sel_row);
+    }
+}
+
 /* Writes v (under 1000) in decimal to s; returns the digits written. */
 unsigned put_num(unsigned *s, unsigned v) {
     unsigned n = 0;
@@ -6022,6 +6036,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
     hold_paint(w, canvas, 0);
     if (w && w == st.search_tabs) search_tabs_paint(w, canvas);
     paint_selection(w, canvas);
+    paint_songs(w, canvas);
     if (form) confirm_labels(w, canvas);
     if (w && w == st.rate_box)
         paint_panel(w, canvas, &(rect_t){ PANEL_PAD, PANEL_PAD - PANEL_DROP, 304, 110 },

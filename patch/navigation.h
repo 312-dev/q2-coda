@@ -449,6 +449,17 @@ void wheel_sb_arm(void *list);
 unsigned wheel_sb_alpha(void *list);
 void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key);
 
+/* song_rows.c: SONGS_INLINE's rows. Song Artist's and Song Length's values (theme_engine.c
+ * song_artist, song_length), a list's kind (song_list) and where an artist stands (song_fit). */
+enum { SONG_ARTIST_INLINE, SONG_ARTIST_SELECTED, SONG_ARTIST_RIGHT, SONG_ARTIST_OFF };
+enum { SONG_LENGTH_ALBUMS, SONG_LENGTH_ALL, SONG_LENGTH_OFF };
+enum { SONGS_MIXED = 1, SONGS_ARTIST, SONGS_ALBUM };
+enum { SONG_INLINE = 1, SONG_RIGHT };
+int song_artist(void), song_length(void);
+int song_list(void *w);
+int song_fit(int place, int room, int title, int gap, int artist, int *shown);
+void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected);
+
 /* np_bar.c */
 int np_beside(void);
 int remain_due(const void *info);

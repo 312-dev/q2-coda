@@ -2944,3 +2944,27 @@ def test_the_wheels_scroll_indicator_shows_a_second_then_fades(fw, st, ui):
         now[0] = 5000 + t
         seen.append(alpha(owner))
     assert seen == [255, 127, 1, 0]
+
+
+INLINE, RIGHT = 1, 2  # navigation.h SONG_INLINE, SONG_RIGHT
+
+
+@pytest.mark.parametrize('place, room, title, artist, fit', [
+    (INLINE, 323, 100, 80, (100, 80)),     # both fit: the title, two spaces, the artist
+    (INLINE, 323, 200, 200, (200, 112)),   # the artist ends in an ellipsis in what is left
+    (INLINE, 323, 272, 80, (272, 40)),     # 40 px left after the gap: still shown
+    (INLINE, 323, 273, 80, (273, 0)),      # 39: dropped
+    (INLINE, 323, 400, 80, (323, 0)),      # a title wider than the row ends in its own ellipsis
+    (INLINE, 323, 100, 0, (100, 0)),       # no artist on the record
+    (RIGHT, 323, 100, 80, (100, 80)),      # on the right column
+    (RIGHT, 323, 300, 300, (161, 151)),    # each to about half
+    (RIGHT, 102, 60, 80, (51, 40)),        # the title gives way to half the row, the artist its least
+    (RIGHT, 100, 60, 80, (60, 0)),         # under that the artist goes
+    (0, 323, 400, 80, (323, 0))])          # Off: the title alone
+def test_song_fit_keeps_the_title_and_drops_a_squeezed_artist(fw, place, room, title, artist, fit):
+    """song_fit (song_rows.c): a mixed list's title keeps the ink it needs and the artist takes what is left after
+    the gap, ellipsised, and goes under 40 px; on the right column it takes at most half the row."""
+    shown = C.c_int(-1)
+    got = fw.fn('song_fit', C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.POINTER(C.c_int))(
+        place, room, title, 11, artist, C.byref(shown))
+    assert (got, shown.value) == fit

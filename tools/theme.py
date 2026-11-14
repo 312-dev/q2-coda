@@ -34,6 +34,7 @@ CHOICES = {'list.selection.painter': {'card': 'SEL_CARD', 'stops': 'SEL_STOPS', 
            'bar.battery.painter': {'stock': 'BATT_STOCK', 'classic-light': 'BATT_CLASSIC_LIGHT', 'slim': 'BATT_SLIM'},
            'list.chevron.painter': {'image': 'CHEV_IMAGE', 'icon': 'CHEV_ICON'},
            'list.scrollbar.painter': {'thumb': 'SB_THUMB', 'wheel': 'SB_WHEEL'},
+           'list.songs.painter': {'stock': 'SONGS_STOCK', 'inline': 'SONGS_INLINE'},
            'playing.scrubber.painter': {'stock': 'SCRUB_STOCK', 'rows': 'SCRUB_ROWS'},
            'volume.panel.painter': {'stock': 'VOL_STOCK', 'classic-light': 'VOL_CLASSIC_LIGHT'},
            'dialog.confirm.painter': {'stock': 'CONFIRM_STOCK', 'classic-light': 'CONFIRM_CLASSIC_LIGHT'},
@@ -190,6 +191,7 @@ SCHEMA = {k.path: k for k in (
     key('list.scrollbar.thumb', 'sb_thumb', 'color', final=True),
     key('list.scrollbar.painter', 'painter[PAINT_SCROLL]', 'enum'),  # wheel: track and thumb while the wheel turns
     key('list.scrollbar.track', 'sb_track', 'color', final=True),
+    key('list.songs.painter', 'painter[PAINT_SONGS]', 'enum'),  # inline: one-line song rows by Song Artist and Song Length (song_rows.c)
     key('scheme.card', 'card', 'bool'),
     key('scheme.raw_red', 'raw_red', 'bool'),
     key('scheme.fill', 'fill', 'color'),
@@ -692,7 +694,7 @@ def offered(c, o, names, what):
     return sum(1 << names.index(n) for n in set(listed))
 
 
-PLAIN_KEYS = {'HOMELIB', 'ROWPREVIEW', 'STATUSBAR'}  # the plain own keys the payload reads (theme_engine.c home_lib_on, row_preview_on, bar_theme)
+PLAIN_KEYS = {'HOMELIB', 'ROWPREVIEW', 'STATUSBAR', 'SONGARTIST', 'SONGLENGTH'}  # the plain own keys the payload reads (theme_engine.c home_lib_on, row_preview_on, bar_theme, song_artist, song_length)
 
 
 def order(attrs):
@@ -1013,6 +1015,8 @@ def validate(t, name):
     # the line chevron stands on the set's right column; the wheel's indicator draws sb_w wide between sb_top and sb_bottom
     if t['painter[PAINT_CHEVRON]'] and not sets(t)[t['geom_set']].right_x:
         err('list.chevron.painter: icon needs its set\'s right_x')
+    if t['painter[PAINT_SONGS]'] and not sets(t)[t['geom_set']].right_x:
+        err('list.songs.painter: inline needs its set\'s right_x')
     if t['painter[PAINT_SCROLL]'] and not (t['sb_w'] and t['sb_bottom'] > t['sb_top']):
         err('list.scrollbar.painter: wheel needs w, top and bottom')
     if t['painter[PAINT_BATTERY]'] == list(CHOICES['bar.battery.painter']).index('classic-light') and not t['batt']:

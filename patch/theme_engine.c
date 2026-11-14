@@ -248,6 +248,10 @@ static int theme_own(int k) { return option_of(theme(), SETTING_OWN + k) ? st.ow
 /* Classic's Home in Split (coverflow.c): Library on Home and Row Preview */
 int home_lib_on(void) { return theme_own(OWN_HOMELIB); }
 int row_preview_on(void) { return theme_own(OWN_ROWPREVIEW); }
+/* OLED's song rows (song_rows.c): Song Artist's and Song Length's values, SONG_ARTIST_* and
+ * SONG_LENGTH_* (navigation.h) in theme.xml's order */
+int song_artist(void) { return theme_own(OWN_SONGARTIST); }
+int song_length(void) { return theme_own(OWN_SONGLENGTH); }
 const char *const np_pages[] = { "playing_page", "playing_page_stock" }; /* [NP_*] */
 _Static_assert(sizeof np_pages / sizeof *np_pages == NP_N, "one page per NP_* layout");
 /* The Now Playing page: the theme's layout, which Centred Now Playing forces to NP_CENTRED. */

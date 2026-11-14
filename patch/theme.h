@@ -12,6 +12,7 @@ enum {
     PAINT_PAGES,
     PAINT_CHEVRON,
     PAINT_SCROLL,
+    PAINT_SONGS,
     PAINTER_N
 }; /* theme_t.painter[] */
 enum { VOL_STOCK, VOL_CLASSIC_LIGHT }; /* painter[PAINT_VOLUME]: the volume */
@@ -37,6 +38,10 @@ enum { CHEV_IMAGE, CHEV_ICON };
 /* painter[PAINT_SCROLL]: SB_THUMB a lasting thumb (paint_scrollbar), SB_WHEEL a track and thumb
  * shown while the wheel turns (list_marks.c) */
 enum { SB_THUMB, SB_WHEEL };
+/* painter[PAINT_SONGS]: a one-line song row as stock lays it out, or SONGS_INLINE's (song_rows.c):
+ * the artist after the title, an album's track numbers and lengths, by Song Artist and Song Length
+ */
+enum { SONGS_STOCK, SONGS_INLINE };
 enum { SCHEME_CARD = 1, SCHEME_RAW_RED = 2 };      /* scheme_t.flags (Ivory in Minimal; Crimson) */
 enum { SCHEME_DERIVE, SCHEME_LIGHT, SCHEME_DARK }; /* scheme_t.mode */
 enum { NP_IPOD, NP_CENTRED, NP_N };                /* theme_t.np_layout: np_pages[] index */

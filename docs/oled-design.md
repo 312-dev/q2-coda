@@ -208,8 +208,13 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   after the 24 px inset, the title from x 50, the length right-aligned on the right column in
   15 px Text Tertiary, tabular digits.
 - Two of OLED's own options change this: **Song Artist** (Inline, Selected Row, Right, Off) and
-  **Song Length** (Albums, All Lists, Off); a length on every row takes the right column, so
-  Right falls back to Inline.
+  **Song Length** (Albums, All Lists, Off); a length takes the right column, so Right, and
+  Selected Row on the selected row, fall back to Inline beside it.
+- The artist's baseline is the title's; on the right column it takes at most half the row.
+- Which list is which comes from its page: Songs' page (`allmusic_page`, which also holds a genre's songs
+  and the other lists stock opens there) is mixed, the artist page's songs are an artist's, the album page is an
+  album. Lists Q2 Pod draws itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep
+  their own rows.
 
 ### Now Playing
 
@@ -330,11 +335,11 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   chevron (`list.chevron.painter="icon"`) and the play state; the slim battery
   (`bar.battery.painter="slim"`); the wheel's scroll indicator (`list.scrollbar.painter="wheel"`);
   1 px dividers on the text and right columns (`list.divider.ink`); row art's 4 px corners
-  (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column.
+  (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column; song rows
+  (`list.songs.painter="inline"`) and the Song Artist and Song Length options.
 
 Still to build:
 
-- Song rows as above, with the Song Artist and Song Length options.
 - Now Playing's positions from the theme rather than fixed in `tools/ipod.py`.
 - A confirmation screen for Shuffle and Repeat, and the toast and dialog forms.
 - Switch rows, the pickers' check, the EQ slider and the storage bar drawn as above.
