@@ -67,7 +67,7 @@ class Dirent(C.Structure):
 
 def api(fw):
     ptr, i, u = C.c_void_p, C.c_int, C.c_uint
-    fns = {'coverflow__bspline_w': (None, u, ptr), 'home_sharpen': (None, ptr, i, i), 'coverflow__home_fit': (None, u, u, ptr, ptr),
+    fns = {'coverflow__bspline_w': (None, u, ptr), 'home_sharpen': (None, ptr, i, i), 'coverflow__home_fit': (None, u, u, i, ptr, ptr),
            'coverflow__home_render': (None, ptr, i, i, i), 'coverflow__drift_at': (i, i, u), 'coverflow__pan_u': (i,),
            'coverflow__pan_v': (i,), 'coverflow__velocity': (i, u), 'coverflow__sample': (None, i, u),
            'coverflow__round_stride': (i, i, i), 'coverflow__floor_div': (i, i, i), 'covers_live': (i,),
@@ -313,7 +313,7 @@ def test_render_honours_the_bitmap_s_pitch(fw):
 
 def fit(fw, w, h):
     a, b = C.c_int(), C.c_int()
-    api(fw).home_fit(w, h, r(a), r(b))
+    api(fw).home_fit(w, h, HOME_H, r(a), r(b))  # the panel's height, as the caller passes it
     return a.value, b.value
 
 
@@ -2947,13 +2947,14 @@ def test_the_pan_steps_while_it_shows_capped_after_a_stall(fw):
 def test_a_pan_that_has_not_moved_repaints_nothing(fw):
     _, ui, h, _ = home_open(fw)
     home = drifting(fw)
-    home.rx = home.ry = 0  # no margin: nothing to pan across
     fw.mock('time_now_ms', lambda *_: 1100)
+    home.drift_last = 1100  # no time shown since the last step: the pan is where the frame was drawn
+    home.du, home.dv = fw.fn('coverflow__pan_u', C.c_int)(), fw.fn('coverflow__pan_v', C.c_int)()
     ui.dirty.clear()
     assert fw.fn('coverflow__home_drift', C.c_int, C.c_void_p)(None) == 8 and not ui.dirty
 
 
-@pytest.mark.parametrize('change', ('dark', 'locked', 'covered', 'sliding', 'still', 'pane', 'row'))
+@pytest.mark.parametrize('change', ('dark', 'locked', 'covered', 'sliding', 'still', 'margin', 'pane', 'row'))
 def test_the_pan_stops_once_it_no_longer_shows(fw, change):
     _, ui, h, _ = home_open(fw)
     home = drifting(fw)
@@ -2967,6 +2968,8 @@ def test_the_pan_stops_once_it_no_longer_shows(fw, change):
         ui.animating = 1
     elif change == 'still':
         home.tw = 0
+    elif change == 'margin':  # a split_still set's cover: no margin to pan across
+        home.rx = home.ry = 0
     elif change == 'pane':
         home.pane = 1
     else:

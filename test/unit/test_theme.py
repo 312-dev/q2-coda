@@ -1271,7 +1271,7 @@ def test_classic_light_sets_from_its_theme_file():
     assert theme.sets(m) == theme.sets(c) == {'ipod': SET0} and (m['geoms'], c['geoms']) == ({}, {})
     decl = {e.attrs['name']: e.attrs for e in theme.load(THEMES/'classic-light'/'theme.xml').children
             if e.tag == 'geometry' and 'name' in e.attrs}
-    assert set(decl['classic-light']) == {f.name for f in dataclasses.fields(Geometry)} - {'list_fit', 'status_y', 'right_x', 'np_art', 'np_bar_y'} and decl['classic-light-text']['extends'] == 'classic-light'
+    assert set(decl['classic-light']) == {f.name for f in dataclasses.fields(Geometry)} - {'list_fit', 'status_y', 'right_x', 'np_art', 'np_bar_y', 'split_row', 'split_art', 'split_art_up', 'split_still'} and decl['classic-light-text']['extends'] == 'classic-light'
     assert not hasattr(ipod, 'CLASSIC_LIGHT') and not hasattr(ipod, 'CLASSIC_LIGHT_TEXT')
 
 
@@ -1308,6 +1308,9 @@ def test_geometry_ranges():
     ('<geometry name="pico" art_inset="9"/>', 'geometry.art_inset: 9 outside 0..8'),
     ('<geometry name="pico" pitch="28" body="28"/>', 'geometry.text_art: 52 outside 0..28'),
     ('<geometry name="pico" home_row="41"/>', 'geometry.home_row: 41 outside 28..40'),
+    ('<geometry name="pico" split_art="186"/>', 'geometry.split_art: 186 outside 187..260'),
+    ('<geometry name="pico" split_row="204"/>', 'geometry.split_row: 204 outside 120..203'),
+    ('<geometry name="pico" split_art_up="5"/>', 'geometry.split_art_up: 5 outside 0..4'),
     ('<geometry name="pico" extends="flat"/>', 'unknown geometry set "flat"'),
     ('<geometry set="pico"/><geometry name="pico" bar="26"/>', 'unknown geometry set "pico"'),
 ])
@@ -1549,6 +1552,10 @@ def test_oled_states_its_grid_type_and_colour(tmp_path):
     # and album in Inter, the theme's own shuffle and repeat; and every scrolling text's faded ends
     assert (g.np_art, g.np_bar_y, oled['np_art_radius'], oled['np_bar'], oled['np_track_rgb']) == (150, 228, 6, 6, 0x333333)
     assert (oled['np_meta_font'], oled['np_modes'], oled['marquee_fade']) == (inter, 1, 1)
+    # Home's Split: rows to 204 (the bar to 188, chevrons at 176), the art from x 196 and 6 px up into the bar, still;
+    # the other sets keep half the screen, the art under the bar, panning
+    assert (g.split_row, g.split_art, g.split_art_up, g.split_still, oled['home_label_end[0]']) == (204, 196, 6, 1, 44)
+    assert all((s.split_row, s.split_art, s.split_art_up, s.split_still) == (187, 187, 0, 0) for s in map(theme.geometry, ts[:3]))
     assert all(t['np_modes'] == t['marquee_fade'] == t['np_art_radius'] == 0 == theme.geometry(t).np_art for t in ts[:3])
     inc = boot_inc(tmp_path, ts)
     assert '#define OWN_OLED_ACCENT' in inc and '        .name = "OLED",' in inc and 'static const scheme_t oled_schemes[] = {' in inc

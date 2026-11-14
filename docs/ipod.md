@@ -123,7 +123,7 @@ window while sliding.
 
 Display settings offers **Home: Split / Full / Carousel**, stored as `IPOD/HOME` 0, 1 or 2; invalid or absent
 values mean Split. `coverflow_home_layout` moves the asset's widgets at runtime, in every theme:
-Split narrows both menus to `HOME_SPLIT_W` (187, half the screen) and shows the cover itself in the 290-pixel-high panel right of them
+Split narrows both menus to the geometry set's `split_row` (`HOME_SPLIT_W`, 187, half the screen, but in OLED's set) and shows the cover itself in the panel right of them, from `split_art` (the same 187) to the screen's edge and the window's full height, 290 pixels under a 30-pixel bar
 (`img_homeart` is an `image` for this, fitted to the cover's proportions and clipped to the panel,
 the menus clipped left of it; `default_album_home` without a cover); Full hides the art and
 widens the menus to the screen, their rows to `HOME_FULL_ROW` (375; Classic's `full_row`, the same). Minimal's labels keep x 39 and end 33 pixels from the screen edge in Full, `HOME_SPLIT_LABEL_END` (8) before the art in Split, where no corner needs clearing (140 pixels wide). Classic's
@@ -173,6 +173,14 @@ small for a 290 px panel, so each change would decode a full cover), and Light M
 a transparent cover follows only the next cover change. The timer trusts `home.win` as Home's
 identity, as the art's paint always has: Home is only replaced through `coverflow_home`, which
 stops the timer first.
+
+A set with `split_still` (OLED's) keeps the cover still instead: the same 110 % zoom, cut from its
+middle, so a cover's own frame (many have a thin white border) never shows at the pane's edges, and
+no timer runs. A set with `split_art_up` starts the pane that many rows above Home's window: the
+frame is that much taller, Home's window draws its rows from the window's top down, and the bar
+draws the rest over its own black (`coverflow_home_bar`, from the bar's background paint, with Home
+on top and no window sliding, as Home's paint draws nothing outside its window). With nothing
+playing, or a cover the frame cannot hold, the pane is the window's panel as in the other sets.
 
 ## Status bar and clock
 
@@ -925,6 +933,10 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
 - **Now Playing.** On the grid as the mock-up shows ([Now Playing](#now-playing)).
 - **Icons.** Phosphor's (MIT, [oled-design.md](oled-design.md#icons)): the caret on each row that opens a page,
   the play state.
+- **Home.** Full by default. In Split the menu's rows are 204 px wide, so the selection bar ends at x 188 and the
+  chevrons stand at 176, and the playing album's art fills the rest from x 196 and y 52 (6 px up into the status
+  row) to the right and bottom edges, still, cut from the middle of the cover, the glass rounding its corner
+  (`split_row`, `split_art`, `split_art_up`, `split_still`; [Home](#home)).
 - **Song rows.** One line each, no chevron. In Songs and the other lists stock shows on Songs' page (a genre's
   songs among them) the artist follows the title two spaces on, in 15 px Text Tertiary, both ending in an ellipsis
   where they run out of room and the artist dropped when under 40 px would be left; an artist's own songs show

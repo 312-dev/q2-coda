@@ -381,6 +381,7 @@ const scheme_t *scheme(void) { /* light is only asked of it in its light half */
     return &s;
 }
 int client_h(void) { return 320 - stub_bar_h; }
+int split_geom(int k) { return k == SPLIT_ROW || k == SPLIT_ART ? HOME_SPLIT_W : 0; } /* the built-in set's */
 int theme_font(void *w, int role, int was) { return was; } /* the font only: no geometry */
 /* The Split pane's painters: the stops asked for, each fill in the colour last set, the count's text. */
 #define SHADOW_A(i) ((int[]){ 116, 100, 93, 86, 79, 73, 68, 62, 56, 50, 44, 39, 34, 28, 24, 19, 16, 13, 10, 8, 6, 4, 3, 2, 1 }[i])

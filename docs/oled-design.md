@@ -308,7 +308,7 @@ pattern.
 | Q2 Pod screen                       | Pattern                     | Notes                                                                                                      |
 | ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock |
-| Home (Split)                        | List row beside art         | Allowed: list left, art pane right; the pane is square art on black, no placeholder gradient               |
+| Home (Split)                        | List row beside art         | Rows to x 204 (bar 16 to 188, chevrons 176); the art from x 196, y 52 to the edges, still, centre-cropped  |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Library                             | List row                    |                                                                                                            |
 | Albums                              | Two-line row with art       |                                                                                                            |
@@ -362,6 +362,8 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - Now Playing on the set's grid (`np_art`, `np_bar_y`), its art's corners (`playing.art.radius`), its
   artist and album in Inter (`playing.artist.font`), shuffle and repeat as the theme's own glyphs
   (`playing.modes.icons`), and the marquee fades (`list.marquee.fade`).
+- Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_still` (the art from
+  x 196 and y 52 to the edges, still and centre-cropped, its top rows painted by the bar).
 
 Still to build:
 

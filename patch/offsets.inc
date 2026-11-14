@@ -253,7 +253,8 @@ static inline int arc_out(int r, int y) {
 /* iPod drill rows: the stock list_into image sits where stock rows put their own img_into, its left
  * edge CHEVRON_W from the row's right edge (8 px margin + 50 px image), so every `>` lines up. */
 #define CHEVRON_W 58
-/* iPod Home: Split gives the menu half the screen (HOME_SPLIT_W) in every theme, the art the rest right of it;
+/* iPod Home: Split gives the menu half the screen (HOME_SPLIT_W, the geometry sets' split_row and split_art
+ * but OLED's, tools/ipod.py), the art the rest right of it;
  * Minimal's Full rows are full width. Labels end HOME_LABEL_END from the row's edge. The selection
  * dot (HOME_DOT px) sits at HOME_DOT_X, clear of the bottom row's corner, HOME_DOT_GAP before the
  * labels (HOME_TEXT_X in tools/ipod.py). */

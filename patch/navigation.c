@@ -197,6 +197,7 @@ extern void coverflow_home_art(void *top);
 extern void coverflow_home_layout(void);
 extern int ringnav_reboot(void);
 extern void coverflow_home_clip(void *w, void *canvas, int begin);
+extern void coverflow_home_bar(void *canvas, void *top);
 extern void coverflow_slant(void *w, void *canvas, unsigned paper), coverflow_slant_close(void);
 extern int coverflow_home_back(void *top), coverflow_home_owns(void *w);
 extern void coverflow_home_top(void);
@@ -6110,6 +6111,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
             canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
         }
         stock_canvas_set_fill_color(canvas, fill);
+        coverflow_home_bar(canvas, window_manager_get_top_window(wm)); /* OLED's art in the bar */
     }
     void *top = window_manager_get_top_window(wm);
     /* Any painted window, not only the top one: Home slides back in from a snapshot. */

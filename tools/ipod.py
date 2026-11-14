@@ -103,6 +103,14 @@ class Geometry:
     # np_bar_y on screen, the times under its ends, shuffle and repeat under them (playing_page np_grid). 0: the iPod layout.
     np_art: int = 0
     np_bar_y: int = 0
+    # Home in Split (coverflow.c home_split): the menu's width, which its rows, chevrons and selection bar take as theirs;
+    # the art's pane from split_art to the screen's right edge; split_art_up rows of the pane above the window, in the
+    # bar, which paints them (coverflow_home_bar); split_still 1 keeps the cover still and centred in its 110 % zoom,
+    # 0 pans it.
+    split_row: int = inc('HOME_SPLIT_W')
+    split_art: int = inc('HOME_SPLIT_W')
+    split_art_up: int = 0
+    split_still: int = 0
 
 
 SET0 = Geometry()
@@ -143,7 +151,7 @@ STATUS_MARGIN = corner_x(7, 16) + STATUS_PAD
 CLOCK_MIN = 105
 CLOCK_TEXT = 70
 # Seven full-width Home rows share one left edge clear of the rounded glass. The payload lays them out
-# at runtime (coverflow_home_layout): Split narrows the list to HOME_SPLIT_W, the art right of it.
+# at runtime (coverflow_home_layout): Split narrows the list to the set's split_row, the art from split_art.
 
 
 # iPod page transition: the window anim_hint of the browsing, settings and equalizer pages. Stock's
@@ -211,7 +219,7 @@ def with_geometry(g):
         NP_TIME_X=max(MARGIN, corner_x(g.bar + NP_TIMES_Y + 1, 14)))
 
 
-GEOM_VALS = ('bar', 'set_row', 'set_icon', 'batt_w', 'batt_h', 'text_x', 'lib_art', 'list_end', 'action_row', 'stream_row', 'stock_row', 'toolbar', 'status_y', 'right_x', 'list_fit')  # Geometry fields the payload reads at run time (themes.inc geom_vals), not immediates
+GEOM_VALS = ('bar', 'set_row', 'set_icon', 'batt_w', 'batt_h', 'text_x', 'lib_art', 'list_end', 'action_row', 'stream_row', 'stock_row', 'toolbar', 'status_y', 'right_x', 'list_fit', 'split_row', 'split_art', 'split_art_up', 'split_still')  # Geometry fields the payload reads at run time (themes.inc geom_vals), not immediates
 
 
 def immediate_values(g=SET0):
