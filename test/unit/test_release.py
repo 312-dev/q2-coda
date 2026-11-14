@@ -21,6 +21,7 @@ def md5(data):
     return hashlib.md5(data).hexdigest()
 
 
+TRACKED = release.public_key(release.PUBLIC_KEY.read_bytes()).hex()  # assets/signing/q2-coda-release.pub's bytes
 MEMBERS = ['firmware_v20.info', 'recovery-update', 'recovery-update/xImage', 'recovery-update/rootfs.squashfs']
 KERNEL, ROOTFS = b'kernel', b'rootfs'
 
@@ -45,7 +46,7 @@ def built(directory, manifest=None, **tar):
     directory.mkdir(exist_ok=True)
     (directory/'rootfs.squashfs').write_bytes(ROOTFS)
     update_tar(directory/'update.tar', **tar)
-    fields = dict(version=release.TAG, update_repo=release.REPO, input_zip_sha256=release.ZIP_SHA,
+    fields = dict(version=release.TAG, update_repo=release.REPO, signing_key=TRACKED, input_zip_sha256=release.ZIP_SHA,
                   stock_demo_sha256=release.DEMO_SHA, rootfs_sha256=sha(ROOTFS), kernel_sha256=sha(KERNEL),
                   update_sha256=sha((directory/'update.tar').read_bytes()), **(manifest or {}))
     (directory/'manifest.json').write_text(json.dumps(fields))
@@ -91,6 +92,8 @@ def test_validate_names_the_suites_that_fail(tmp_path, scripts):
 @pytest.mark.parametrize('field,value,message', [
     ('version', 'V000I', '^Wrong build identity$'),
     ('update_repo', 'someone/fork', "^Network Update fetches someone/fork's releases, not DiamondBond/q2-pod's$"),
+    ('signing_key', '00' * 32, '^Built with another release key than assets/signing/q2-coda-release.pub$'),
+    ('signing_key', None, '^Built with another release key than'),
     ('input_zip_sha256', 'x', '^Wrong stock identity$'),
     ('stock_demo_sha256', 'x', '^Wrong stock identity$'),
     ('rootfs_sha256', 'x', 'rootfs.squashfs: hash mismatch$'),

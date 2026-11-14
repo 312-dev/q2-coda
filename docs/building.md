@@ -56,6 +56,8 @@ About's **FW. Version** row reads the same literal, so it shows the stock firmwa
 
 `--update-repo OWNER/NAME` points **Network Update** at another GitHub repo's latest release, so a fork's test builds update from the fork's own releases. It defaults to `DiamondBond/q2-pod`, so a build without it is unchanged. The manifest records it as `update_repo`, and `tools/release.py` refuses a build that points anywhere else.
 
+Network Update and the App Store take only what the q2-coda release key signed ([Release signatures](internals.md#release-signatures)). Every build compiles in that key's public half from `assets/signing/q2-coda-release.pub` and stops without it. `--signing-key PUB.PEM` compiles in another Ed25519 public key instead, for a test build that should take updates and app lists signed by a key whose private half you hold (`openssl genpkey -algorithm ed25519 -out /tmp/dev.pem`, then `openssl pkey -in /tmp/dev.pem -pubout -out /tmp/dev.pub`; keep both out of the repository). It requires `--dev`. The manifest records the key as `signing_key`, and `tools/release.py` refuses a build with any other.
+
 Development builds also start `q2remote`, a key-gated root shell with screenshots and input over Wi-Fi, for developers and agents; see [remote.md](remote.md).
 
 Off by default, `--dev --rotator-lazy-clock`: the rotator clock is held only from its first conversion. See [clock gating](clock-gating.md) for the exact module guard and tests.

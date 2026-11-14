@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from signing import PUBLIC_KEY, public_key
 from build import ROOT, REPO, VERSION, BETA, TAG, ZIP_SHA, DEMO_SHA, build, check, need, run, sha, source_sha256, version_ok
 
 # Network Update (patch/netupdate.c) fetches releases/latest/download/<ASSET>, so the name can't
@@ -42,6 +43,8 @@ def validate(directory):
     m = json.loads((directory/'manifest.json').read_text())
     check(m['version'] == TAG, 'Wrong build identity')
     check(m['update_repo'] == REPO, f"Network Update fetches {m['update_repo']}'s releases, not {REPO}'s")
+    check(m.get('signing_key') == public_key(PUBLIC_KEY.read_bytes()).hex(),
+          f'Built with another release key than {PUBLIC_KEY.relative_to(ROOT)}')
     check(m['input_zip_sha256'] == ZIP_SHA and m['stock_demo_sha256'] == DEMO_SHA, 'Wrong stock identity')
     # test/patch.py (below) checks the sources and the demo, stock-demo and patch.bin hashes.
     for name, key in [('rootfs.squashfs', 'rootfs_sha256'), ('update.tar', 'update_sha256')]:

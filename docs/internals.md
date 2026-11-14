@@ -1654,6 +1654,19 @@ The stock title sorter queries `toolsQueryDbTableAndSort` (`0x5daf44`), now scop
 
 Stock startup and wallpaper-list validation call `lockscreen_access` only at their two audited access sites (`0x504d24`, `0x505724`). Valid built-in names succeed; other paths use normal access checks. The list wrapper no longer writes a repaired choice back to config.ini. Factory reset still selects stock’s default.
 
+## Release signatures
+
+q2-coda's releases are signed, so a GitHub account or repository taken over can't ship code that Network Update or the App Store runs as root. The key is Ed25519. Its private half lives in the maintainer's password vault and never in the repository; its public half is `assets/signing/q2-coda-release.pub`, which `tools/build.py` (`signing_key`) reads into `stock.h` as `Q2POD_SIGN_KEY`, and `patch/release_sig.c` keeps as `release_key`. A release build refuses to run without that file, and `--signing-key` (another public key, for a test build whose private half is at hand) requires `--dev`. The manifest records the key (`signing_key`), and `tools/release.py` refuses a package built with any other.
+
+A signature covers a short ASCII message, never the file itself, so the Q2 hashes a 55 MB `update.tar` in 64 KB pieces (`sig_hash_file`) rather than holding it in memory:
+
+- `update.tar`: `q2-coda-update-v1 TAG SHA512\n`, `TAG` the release's tag and `SHA512` the file's SHA-512 in lowercase hex. The tag is in it so that an older release's file and signature, published under a newer tag, fail. Its signature is the release's `update.tar.sig`, 64 bytes ([Network Update](#network-update)).
+- `sources.list`: `q2-coda-sources-v1 SHA512\n` over every byte before the list's last line, which is `signature ` and the 64-byte signature in hex ([Q2 Shelf](#q2-shelf)).
+
+`tools/signing.py` writes the same messages; [releasing](releasing.md#signing-a-release) has the commands. Monocypher 4.0.2 (`patch/monocypher/`, BSD-2-Clause or CC0: its `LICENCE.md`) checks the signature (`crypto_ed25519_check`, RFC 8032's Ed25519, which `openssl pkeyutl -rawin` makes) and hashes with SHA-512; `release_sig.c` adds SHA-256 for the App Store's pins. Its four files are Monocypher's own, unchanged (the release tarball's `src/` and `src/optional/`, SHA-256 `38d07179738c0c90677dba3ceb7a7b8496bcfea758ba1a53e803fed30ae0879c`, the same as GitHub's 4.0.2 tag but for the version line), and `--gc-sections` keeps only what the checks use, about 26 KB. `test/fw/test_release_sig.py` checks that a good signature passes and a flipped byte in the file or the signature, another tag, another key and no signature fail; `test/patch.py` swaps `release_key` for a test key in the emulated payload, whose private half it holds.
+
+ponytail: the key can't be rotated without a release signed by the old one: a Q2 trusts only the key it was built with. A compromised private key is the one thing a signature can't survive; the next firmware would have to carry a new key, and be installed from the card by hand.
+
 ## Network Update
 
 **System settings → System Update** keeps stock's page (`systemset_fwupdate_page_init`, hooked by `ringnav_fwupdate` in `patch/netupdate.c`). Stock's row builder (`0x4c8660`) names each row's button by its index, and stock's click (`0x4c84cc`) runs `atoi` on the name: 0 is the TF card update (`0x4c7eb4`), 1 Shanling's plain-HTTP server (`openwin.shanling.com:9000`, `/tmp/versioninfo`, `download_ota_thd`). The hook renames the second button "2", which stock's click ignores, and adds its own click (`online_click`).

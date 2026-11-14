@@ -567,6 +567,16 @@ const char *shelf_moving(void);         /* netupdate.c: the app folder deleted o
 int shelf_erase(int start);             /* netupdate.c: Spotify's erase, started or running */
 void stream_erased(void);               /* navigation.c: Configuration follows a finished erase */
 void album_lyrics_stop(void);           /* onlinematch.c: Download Album Lyrics before USB storage */
+/* release_sig.c (docs/internals.md#release-signatures): the release key's checks */
+enum { SIG_OK, SIG_BAD, SIG_IO, SIG_CANCELLED };
+void sig_hex(const unsigned char *in, unsigned n, char *out);
+int sig_unhex(const char *s, unsigned char *out, unsigned n);
+int sig_hash_file(const char *path, int sha512, unsigned char *out, volatile int *cancel);
+unsigned sig_message(char *out, unsigned n, const char *kind, const char *tag,
+                     const unsigned char digest[64]);
+int sig_check(const char *message, unsigned n, const unsigned char sig[64]);
+int sig_update(const char *path, const char *tag, const unsigned char sig[64], volatile int *cancel);
+unsigned sig_list(const char *text, unsigned n);
 
 /* 2038 (docs/internals.md#2038). glibc 2.28's time() truncates the kernel's 64-bit seconds to 32
  * bits, so read unsigned it is right until 2106; -1 still means it failed. */
