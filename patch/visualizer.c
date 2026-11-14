@@ -1,6 +1,7 @@
 /* iPod Now Playing's fourth page (docs/ipod.md#visualizer): the music as heard, read from
  * hciplayer's tap (peq.h), in one of four styles after Rockbox's FFT, Oscilloscope and VU Meter
- * plugins; a tap moves to the next style. */
+ * plugins, and under OLED a fifth, Field, after iTunes' Magnetosphere; a tap moves to the next
+ * style. */
 #include "peq.h"
 #include "offsets.inc"
 
@@ -13,7 +14,7 @@
 #define VIS_H (vz.h ? vz.h : VIS_SLIDE_H) /* ... or less where the slide ends sooner (OLED's np_grid) */
 #define VIS_ART 88           /* the Halo's centre */
 #define TAU 6.2831853f
-enum { SPECTRUM, SCOPE, METERS, HALO, STYLES };
+enum { SPECTRUM, SCOPE, METERS, HALO, FIELD, STYLES }; /* FIELD: OLED's only (styles()) */
 
 static struct {
     float re[VIS_N], im[VIS_N], pcm[VIS_N][2], hann[VIS_N]; /* hann[VIS_N / 2] is 0 until filled */
@@ -28,6 +29,9 @@ static struct {
     unsigned retry; /* a paint missed while not settled looks again (look) */
     int ox, oy, page_x; /* the slide area in the window; the page's canvas x there as last painted */
     int style;
+    float flow; /* Field's clock, seconds of music, moved on while it plays */
+    void *glow[5][4]; /* Field's sprites (field_sprites), each band's at four strengths; kept for
+                       * demo's life: 5 x 4 x 32 x 32 x 4 bytes, 80 KB */
     int quiet; /* at rest (not playing, nothing heard), the style's name gone, as last ticked: the
                 * track's name shows, and its change repaints */
 #endif
@@ -107,7 +111,7 @@ void vis_reset(void) {
 /* Only the visible style consumes analysis work; scope and meters do not need an FFT. */
 void vis_analyze(int style, unsigned rate, float dt, unsigned now) {
     float target[VIS_HALO] = { 0 };
-    if (style == SPECTRUM || style == HALO) {
+    if (style == SPECTRUM || style == HALO || style == FIELD) {
         if (rate) vis_bands(vz.pcm, rate, target);
         for (int b = 0; b < VIS_HALO; ++b) {
             float fall = vz.level[b] - VIS_DECAY * dt;
@@ -258,6 +262,7 @@ static int tick(const void *unused) {
     }
     if (!visualizer_live() || !still) return 8; /* RET_REPEAT */
     vz.spin += dt * 0.2f; /* radians a second */
+    if (rate) vz.flow += dt;
     /* The slide_view: the page's own rect does not map to the screen inside it. */
     widget_invalidate_force(vz.slide, 0);
     return 8; /* RET_REPEAT */
@@ -413,6 +418,67 @@ static void halo(void *vg, unsigned tone) {
     vgcanvas_set_line_cap(vg, "butt");
 }
 
+/* Field (OLED's, after iTunes' Magnetosphere, SPEC-next 4): FIELD_DOTS soft glowing points in each
+ * of five bands of the spectrum, flowing round the page's centre on rings that the band's level
+ * swells and ripples, each band its own colour and way round. Every point is a sprite drawn as is
+ * (canvas_draw_image, no scaling): a FIELD_PX glow made once per band and strength, so a frame
+ * is 5 x FIELD_DOTS image blends of FIELD_PX squared pixels and no vector path. */
+#define FIELD_DOTS 40
+#define FIELD_PX 32
+static const unsigned field_rgb[5] = { 0x3c78ff, 0x7850ff, 0x28c8ff, 0xff5ab4, 0x5affc8 };
+static void field_sprites(void) {
+    for (int b = 0; b < 5; ++b)
+        for (int k = 0; k < 4; ++k) {
+            if (vz.glow[b][k]) continue;
+            void *bm = bitmap_create_ex(FIELD_PX, FIELD_PX, FIELD_PX * 4, 1 /* RGBA8888 */);
+            unsigned *d = bm ? (unsigned *)bitmap_lock_buffer_for_write(bm) : 0;
+            if (!d) {
+                if (bm) bitmap_destroy(bm);
+                return;
+            }
+            int stride = (int)(bitmap_get_line_length(bm) / 4);
+            float strength = 0.35f + 0.65f * (float)k / 3;
+            for (int y = 0; y < FIELD_PX; ++y)
+                for (int x = 0; x < FIELD_PX; ++x) {
+                    float dx = (x + 0.5f - FIELD_PX / 2.0f) / (FIELD_PX / 2.0f),
+                          dy = (y + 0.5f - FIELD_PX / 2.0f) / (FIELD_PX / 2.0f), r2 = dx * dx + dy * dy;
+                    /* a soft halo to the edge, a bright core in its middle sixth (no expf in demo) */
+                    float q = 1 - r2, c = 1 - 9 * r2, halo = q * q * q, core = c > 0 ? c * c : 0,
+                          a = strength * (0.5f * halo + core);
+                    unsigned rgb = mix(field_rgb[b], 0xffffff, (int)(60 * core), 100);
+                    unsigned alpha = r2 >= 1 ? 0 : a >= 1 ? 255 : (unsigned)(a * 255);
+                    /* RGBA8888 in memory: r, g, b, a */
+                    d[y * stride + x] = alpha << 24 | (rgb & 255) << 16 | (rgb & 0xff00) | rgb >> 16;
+                }
+            bitmap_unlock_buffer(bm);
+            vz.glow[b][k] = bm;
+        }
+}
+static void field_paint(void *canvas) {
+    field_sprites();
+    float cx = vz.w / 2.0f, cy = VIS_H / 2.0f, t0 = vz.flow;
+    for (int b = 0; b < 5; ++b) {
+        float level = 0;
+        for (int i = b * VIS_HALO / 5; i < (b + 1) * VIS_HALO / 5; ++i) level += vz.level[i];
+        level /= VIS_HALO / 5;
+        float swell = 0.25f + 0.75f * level, turn = (b & 1 ? -1 : 1) * (0.12f + 0.04f * b) * t0;
+        int k = level > 0.6f ? 3 : level > 0.35f ? 2 : level > 0.12f ? 1 : 0;
+        if (!vz.glow[b][k]) return;
+        for (int i = 0; i < FIELD_DOTS; ++i) {
+            float a = TAU * i / FIELD_DOTS + turn,
+                  r = 34 + b * 13 + 24 * swell * sinf(3 * a + b + t0 * (0.5f + 0.1f * b)) +
+                      5 * sinf(2.3f * i + b); /* each point a little off its ring */
+            int x = (int)(cx + r * cosf(a) * 1.45f) - FIELD_PX / 2,
+                y = (int)(cy + r * sinf(a) * 0.74f) - FIELD_PX / 2;
+            int src[4] = { 0, 0, FIELD_PX, FIELD_PX }, dst[4] = { x, y, FIELD_PX, FIELD_PX };
+            canvas_draw_image(canvas, vz.glow[b][k], src, dst);
+        }
+    }
+}
+
+/* The styles a tap steps through: Field only under OLED. */
+static int styles(void) { return oled_pages() ? STYLES : FIELD; }
+
 /* A paint missed while not settled: once settled, the page paints again. */
 static int look(const void *unused) {
     if (on_page() && !settled()) return 8; /* RET_REPEAT: an overlay can outlast one retry. */
@@ -426,7 +492,7 @@ static int look(const void *unused) {
  * second. Drawing on the window, clipped to the slide area, not on the page: the slide_view clips the
  * page it was given at run time to a sliver. Painting starts the timer. */
 void visualizer_paint(void *w, void *canvas) {
-    static const char *const names[] = { "Spectrum", "Oscilloscope", "VU Meters", "Halo" };
+    static const char *const names[] = { "Spectrum", "Oscilloscope", "VU Meters", "Halo", "Field" };
     if (!w) return;
     if (w == vz.page) { /* the page paints first, its canvas x 0 only when still */
         vz.page_x = I(canvas, CANVAS_X) - vz.ox;
@@ -448,7 +514,9 @@ void visualizer_paint(void *w, void *canvas) {
     I(canvas, CANVAS_Y) += y;
     void *vg = canvas_get_vgcanvas(canvas);
     unsigned tone = accent_tone(2), now = time_now_ms();
-    if (vg) {
+    if (vz.style == FIELD)
+        field_paint(canvas);
+    else if (vg) {
         vgcanvas_save(vg);
         vgcanvas_translate(vg, (float)I(canvas, CANVAS_X), (float)I(canvas, CANVAS_Y));
         if (vz.style == SPECTRUM) spectrum(vg, tone);
@@ -481,7 +549,7 @@ void visualizer_paint(void *w, void *canvas) {
 }
 
 static int next_style(void *ctx, void *event) {
-    vz.style = (vz.style + 1) % STYLES;
+    vz.style = (vz.style + 1) % styles();
     vis_reset();
     vz.named = time_now_ms() | 1; /* never 0, which is none */
     write_int_config(vz.style, "IPOD", "VIS");
@@ -507,7 +575,9 @@ static int gone(void *win, void *event) {
 void visualizer_attach(void *win) {
     void *slide = widget_lookup(win, "slide_view", 1), *dots = widget_lookup(win, "slide_indicator1", 1);
     if (!slide) return;
-    vz.style = config_value("IPOD", "VIS", STYLES, 0);
+    /* OLED opens on Field until a tap picks another; another theme never shows it */
+    vz.style = config_value("IPOD", "VIS", STYLES, oled_pages() ? FIELD : 0);
+    if (vz.style >= styles()) vz.style = 0;
     vz.win = win;
     vz.slide = slide;
     vz.cover = widget_lookup(win, "img_cover", 1);

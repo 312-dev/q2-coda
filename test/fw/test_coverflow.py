@@ -29,7 +29,7 @@ r = C.byref
 class Cf(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'page body covers slide name artist title albums tracks stock'.split()),
                 *((k, C.c_int) for k in 'sort sort_read year_old artists on_sort resort'.split()),
-                ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint), ('titled', C.c_int),
+                ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint), ('titled', C.c_int), ('offline', C.c_int),
                 ('saved_album', C.c_uint), ('albums_gen', C.c_uint),
                 *((k, C.c_int) for k in 'screen album running text_albums done total cancel scoped all_sort'.split()),
                 *((k, C.c_void_p) for k in 'all_albums all_stock hearts'.split())]
@@ -2667,6 +2667,30 @@ def test_home_binds_its_cards_and_lists_and_asks_the_pane_s_counts_after_boot(fw
 def test_a_theme_without_the_pane_asks_no_counts(fw):
     _, ui, h, _ = home_open(fw, MINIMAL)
     assert not ui.handlers(h.win, EVT_WINDOW_FOREGROUND) and not ui.timer(address(fw, 'coverflow__home_counts'))
+
+
+@pytest.mark.parametrize('fit', (True, False))
+def test_a_page_list_on_a_list_fit_set_ends_on_its_last_whole_row_above_the_glass(fw, library, fit):
+    """page_list under OLED's set (list_fit, list end 224 under a 58 px bar): twelve 32 px rows end by y 282 on
+    screen, the eighth row no longer under the glass; the built-in set keeps the list to the page's bottom."""
+    themed(fw, OLED if fit else MINIMAL)
+    if fit:
+        split_inset_set(fw, library, 2)  # OLED's set
+    ui = Ui(fw)
+    fw.mock('widget_resize', lambda w, ww, h, *_: ui.box(w, *ui.at(w)[:2], ww, h))
+    client = fw.fn('client_h', C.c_int)()
+    page = ui.make(ui.wm, 'window', 0, 320 - client, 375, client)
+    body = ui.make(page, 'view', 0, 0, 375, client)
+    view = fw.fn('page_list', C.c_void_p, C.c_void_p, C.c_void_p, C.c_void_p, C.c_char_p, C.c_int, C.c_int)(
+        page, body, None, b'Twelve', 12, 48)
+    lv = ui[view].parent
+    top, h = 320 - client + ui.at(lv)[1], ui.at(lv)[3]
+    row = fw.fn('page_h', C.c_int, C.c_int)(48)
+    if fit:
+        assert top + h <= 282 and top + h + row > 282 and h % row == 0, (top, h, row)
+        assert ui.at(view)[3] == h
+    else:
+        assert top + h == 320 or h == 12 * row
 
 
 def test_settings_slides_in_over_the_list_and_return_slides_the_list_back(fw):

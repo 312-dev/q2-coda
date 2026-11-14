@@ -584,19 +584,18 @@ static int al_gone(void *ctx, void *event) {
  * its cover (coverflow_playlist_queue): there it would delete from the library. AirPlay's row
  * (airplay.c) goes over them all, for any song. */
 extern int stock_playermore_trampoline(void *win, void *ctx);
-int ringnav_playermore(void *win, void *ctx) {
-    int result = stock_playermore_trampoline(win, ctx);
+static void more_rows(void *win) {
     if (win) stock_more_speed(win), stock_more_into(win);
     void *view = win ? widget_lookup(win, "scroll_view_more", 1) : (void *)0;
     unsigned at = 0;
-    if (!view || widget_count_children(view) != PLAYMORE_COUNT) return result;
+    if (!view || widget_count_children(view) != PLAYMORE_COUNT) return;
     for (unsigned i = 0; i < PLAYMORE_COUNT && coverflow_playlist_queue(); ++i)
         if (((const int *)PLAYMORE_ROWS)[i] == PLAYMORE_DELETE)
             widget_set_visible(widget_get_child(view, i), 0, 0);
     airplay_more(view); /* first, over stock's rows */
-    if (!al_playing()) return result;
+    if (!al_playing()) return;
     while (at < PLAYMORE_COUNT && ((const int *)PLAYMORE_ROWS)[at] != PLAYMORE_SEARCH) ++at;
-    if (at == PLAYMORE_COUNT) return result;
+    if (at == PLAYMORE_COUNT) return;
     void *label = list_row(view, "player_onlinesearch", al_click, 0);
     widget_use_style(label, "s_scrlabel_white24l");
     widget_resize(label, 253, I(label, W_H));
@@ -604,6 +603,15 @@ int ringnav_playermore(void *win, void *ctx) {
     widget_on(label, EVT_DESTROY, al_gone, label);
     al.label = label;
     al_show();
+}
+int modal_set(void);           /* menu_modal.c */
+void modal_more(void *win);
+/* ... and under a modal set (OLED's), the page is a dialog over Now Playing, drawn as the inset
+ * modal (menu_modal.c modal_more). */
+int ringnav_playermore(void *win, void *ctx) {
+    int result = stock_playermore_trampoline(win, ctx);
+    more_rows(win);
+    if (win && modal_set()) modal_more(win);
     return result;
 }
 

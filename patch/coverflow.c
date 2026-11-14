@@ -334,7 +334,9 @@ static int marked_empty(const char *track) {
  * same-named album's embedded-only WebP or large PNG shows no art here; a per-track probe cache
  * if that matters. */
 int coverflow_player_cover(const char *track, const char *dst, int w, int h) {
+    char cover[512]; /* a server song's offline copy (catalogue.c): its app's cover of the album */
     return toolsGetExternCover(track, dst, w, h) == 1 || beside_art(track, dst, w, h, 0, ff_thumb) ||
+           (catalogue_cover(track, cover, sizeof cover) && ff_thumb(cover, dst, w, h)) ||
            (!marked_empty(track) && ff_thumb(track, dst, w, h));
 }
 
@@ -351,6 +353,11 @@ int coverflow_player_cover(const char *track, const char *dst, int w, int h) {
 static int grid_cover(const char *track, const char *dst, int w, int h, int album) {
     static unsigned *miss __attribute__((section(".scratch"))), n __attribute__((section(".scratch")));
     const char *dot = strrchr(track, '.');
+    char cover[512];
+    /* a server row (catalogue.c): no file, its app's cover of the album, a small baseline JPEG */
+    if (catalogue_path(track))
+        return catalogue_cover(track, cover, sizeof cover) &&
+               toolsThumbSpecCover(cover, dst, w, h) == 1;
     if (toolsGetAlbumCover(track, dst, w, h) == 1) return 1;
     if (!dot || (strcasecmp(dot, ".opus") && strcasecmp(dot, ".ogg"))) return 0;
     unsigned key = fnv(FNV_SEED, (const unsigned char *)track);
@@ -446,6 +453,21 @@ int album_art(const char *track, const char *dst, int shared) {
  * none. ponytail: an album whose ffmpeg is killed every time costs one kill per open. */
 static void build_art(const job_t *j) {
     char dst[512], tmp[512];
+    /* A server row (catalogue.c) has no file: its app's cover of the album, which load_albums
+     * queues only once the app has fetched it; one that won't decode is "no art". */
+    char cover[512];
+    if (catalogue_path(j->track)) {
+        art_path(dst, j->key, "");
+        art_path(tmp, j->key, ".tmp");
+        if (catalogue_cover(j->track, cover, sizeof cover) &&
+            thumb(cover, tmp, ART_SIZE, ART_SIZE) && !rename(tmp, dst))
+            return;
+        unlink(tmp);
+        if (access(cover, 0)) return; /* gone meanwhile (Sign Out): the next open asks again */
+        void *f = fopen(dst, "w");
+        if (f) fclose(f);
+        return;
+    }
     if (access(j->track, 0)) return; /* storage gone: no marker, the next open retries */
     art_path(dst, j->key, "");
     art_path(tmp, j->key, ".tmp");
@@ -595,6 +617,7 @@ void *staged(int (*query)(void *), void *arg, int *count) {
 
 /* getAllAlbum, as load_localclass_list 0xf003 runs it, or the album's getMusicByAlbum, as its row
  * opens it. Stock order, including the trailing "Unknown Album" (id -1) row. */
+static void *cf_staged(int (*query)(void *), void *arg, int *count);
 static int albums(void *album) {
     return album ? getMusicByAlbum(I(album, REC_ID) == -1 ? (const char *)0 : P(album, REC_ALBUM))
                  : getAllAlbum();
@@ -666,7 +689,7 @@ static void drop_unknown(void) {
     void *last = n ? deque_at(cf.stock, n - 1) : 0;
     if (!last || I(last, REC_ID) != -1) return;
     int found;
-    void *songs = staged(albums, last, &found);
+    void *songs = cf_staged(albums, last, &found);
     if (!deque_size(songs)) deque_pop_back(cf.stock);
     deque_destroy(songs);
 }
@@ -1170,13 +1193,19 @@ static int split_row(void *a, int n, char **v, char **c) {
     return 0;
 }
 static int rank_query(void *sql) { return toolsQueryDbTable("/mnt/data/database.db", sql, split_row, 0); }
+/* staged, with Local + Server reading the server library's songs too (catalogue.c): Cover Flow's
+ * albums, their ranks and the rated albums, as the Library's Albums list reads them. */
+extern void *staged_music(int (*query)(void *), void *arg, int *count);
+static void *cf_staged(int (*query)(void *), void *arg, int *count) {
+    return catalogue_on() ? staged_music(query, arg, count) : staged(query, arg, count);
+}
 
 /* list's albums with music, in a new deque (list goes), using a music track for their art even when
  * tags are shared with an audiobook. The card's files stay untouched. Out of memory,
  * audiobooks stay. */
 static void *music_albums(void *list) {
     int n;
-    void *rows = staged(rank_query, MUSIC_ALBUM_SQL, &n), *out;
+    void *rows = cf_staged(rank_query, MUSIC_ALBUM_SQL, &n), *out;
     unsigned m;
     row_t *v = album_rows(rows, &m, by_album, 0);
     if (!v) return deque_destroy(rows), list;
@@ -1200,7 +1229,7 @@ static void *music_albums(void *list) {
  * name's albums so far per row, its albums squared; fine unless one name has thousands. */
 static void *split(void *stock) {
     int n;
-    void *rows = staged(rank_query, ALBUM_SQL, &n), *out;
+    void *rows = cf_staged(rank_query, ALBUM_SQL, &n), *out;
     unsigned m;
     row_t *v = album_rows(rows, &m, by_name, 1);
     if (!v) return deque_destroy(rows), stock;
@@ -1256,7 +1285,7 @@ int album_only(void *list, void *r, int at) {
 }
 static void rank_by(order_t *v, const char *sql) {
     int n;
-    void *rows = staged(rank_query, (void *)sql, &n);
+    void *rows = cf_staged(rank_query, (void *)sql, &n);
     for (unsigned j = 0; j < deque_size(rows); ++j) {
         int i = album_index(deque_at(rows, j));
         int y = I(deque_at(rows, j), REC_YEAR);
@@ -1340,7 +1369,7 @@ void coverflow_by_year(void *albums) {
         free(taken);
         return;
     }
-    void *rows = staged(rank_query, (void *)(ringnav_artist_az() ? SORT_SQL "album COLLATE NOCASE" : year_sql()), &found), *out = _create_deque("stSongInfo");
+    void *rows = cf_staged(rank_query, (void *)(ringnav_artist_az() ? SORT_SQL "album COLLATE NOCASE" : year_sql()), &found), *out = _create_deque("stSongInfo");
     deque_init(out);
     for (unsigned j = 0; j < deque_size(rows); ++j) {
         int i = album_in(v, m, deque_at(rows, j));
@@ -1416,10 +1445,24 @@ static void *rows_view(void *parent, int y, int w, int h, int n, int item_h) {
     return view;
 }
 
+/* view's list box (rows_view's) cut to the whole item rows that end by list_fit_end on screen, as
+ * tools/ipod.py fit_rows cuts stock's lists, so under a list_fit set (OLED's) no row runs under the
+ * bottom corners' glass. Elsewhere, or with the rows already above it, it stays as it is. */
+static void fit_view(void *view, int item) {
+    int end = list_fit_end(), y = 0;
+    if (!end || item <= 0 || !view) return;
+    void *lv = P(view, W_PARENT), *wm = window_manager();
+    for (void *w = lv; w && w != wm; w = P(w, W_PARENT)) y += I(w, W_Y);
+    int h = (end - y) - (end - y) % item;
+    if (h <= 0 || I(lv, W_H) <= h) return;
+    widget_resize(lv, I(lv, W_W), h);
+    widget_resize(view, I(view, W_W), h);
+}
+
 /* The peq_ui.c page: a title bar (*title, unless 0: its caller writes it again, so it stays on
  * show) over n item_h rows (page_h) in body, down to the page's bottom (the last row's selection
- * meets the screen's edge) or shrunk so the list's white background never shows below a short list.
- * Shared with photos.c. */
+ * meets the screen's edge) or shrunk so the list's white background never shows below a short list;
+ * under a list_fit set, to its last whole row above the glass (fit_view). Shared with photos.c. */
 void *page_list(void *page, void *body, void **title, const char *caption, int n, int item_h) {
     int h = widget_get_prop_int(page, "h", client_h());
     item_h = page_h(item_h);
@@ -1428,6 +1471,7 @@ void *page_list(void *page, void *body, void **title, const char *caption, int n
     void *t = page_title(body, caption, title ? TITLE_ON_SHOW : n);
     if (title) *title = t;
     void *view = rows_view(body, I(t, W_H), 375, h - I(t, W_H), n, item_h);
+    fit_view(view, item_h);
     if (!theme()->page_title_h) bar_title_sync(page);
     widget_invalidate_force(page, 0);
     return view;
@@ -1762,11 +1806,9 @@ static void column(shelf_t *f, int col, const unsigned *tex, int h, int bright, 
             put(px, whole ? t : shade(t, (unsigned)bright) + wash, cov); /* put ignores t's alpha */
         }
     }
-    /* The reflection starts where the body ends, sharing the row the body only partly covers. A
-     * theme's reflect of 0 (OLED's) has none, nor does a cover too small for a row of it. */
+    /* The reflection starts where the body ends, sharing the row the body only partly covers. */
     int reflect = h * cfs.reflect / ART_SIZE, stop = (bottom + reflect + 255) >> 8;
-    int fade = reflect > 0 ? (256 << 16) / reflect : 0; /* fading per 1/256 px, 16.16 */
-    if (reflect <= 0) stop = 0; /* the loop below runs no row */
+    int fade = (256 << 16) / reflect; /* fading per 1/256 px, 16.16 */
     unsigned dim = (unsigned)bright * cfs.reflect_top >> 8;
     wash = shade(cf_paper, 256u - dim);
     if (stop > cfs.view_h) stop = cfs.view_h;
@@ -2507,12 +2549,15 @@ static void gap_note(void *w, unsigned t0, unsigned t1, unsigned t2) {
 }
 #endif
 static int touched(void);
+static int album_offline(unsigned c);
+static void caption_mark(void *w, void *canvas);
 
 /* ringnav_paint (the border hook, after stock painted the slide_menu's empty children) calls this
  * for every widget: over Coverflow's slide_menu it draws the frame, rendered again only when the
  * position or a texture has changed. */
 void coverflow_paint(void *w, void *canvas) {
     coverflow_position_paint(w, canvas);
+    caption_mark(w, canvas);
     int c, frac, n;
     if (fl.panel && w && flip_paint(w, canvas)) return;
     if (!w || w != cf.slide || !fx.frame || cf.screen != COVERS ||
@@ -2555,7 +2600,9 @@ void coverflow_paint(void *w, void *canvas) {
 #if Q2POD_DEV
     gap_note(w, gap_t0, gap_t1, (unsigned)time_now_ms());
 #endif
-    if (!th.on && c + 1 != cf.titled && !cf.title_timer) cf.title_timer = timer_add(retitle, 0, 0);
+    if (!th.on && (c + 1 != cf.titled || album_offline((unsigned)c) != cf.offline) &&
+        !cf.title_timer)
+        cf.title_timer = timer_add(retitle, 0, 0);
     int r[4] = { 0, 0, CF_VIEW_W, cfs.view_h };
     canvas_draw_image(canvas, fx.frame, r, r);
 }
@@ -2779,12 +2826,41 @@ static const char *songs_text(char *buf, unsigned k) {
     return buf;
 }
 
-/* The captions name album c (or a card's), once each time it changes; a playlist's are its name
- * and its count. */
+/* Whether album c can't play now (catalogue.c: a server album offline); a card's or a playlist's
+ * always can. */
+static int album_offline(unsigned c) {
+    void *r = c + CARDS < widget_count_children(cf.slide) && cf.scoped != PLAYLISTS
+                  ? deque_at(cf.albums, c)
+                  : (void *)0;
+    return r && catalogue_album_unavailable(r);
+}
+/* The captions of an album that can't play now are greyed, as a Library row is
+ * (docs/server-library.md#greyed-rows), the name narrowed CF_MARK_W a side, centred still, for
+ * the offline mark at its right (caption_mark); its own width again once it can. */
+#define CF_MARK_W 28
+static void caption_offline(int off) {
+    int x = CF_EDGE + (off ? CF_MARK_W : 0);
+    if (off != cf.offline) widget_invalidate_force(cf.artist, 0);
+    cf.offline = off;
+    catalogue_grey(cf.name, off), catalogue_grey(cf.artist, off);
+    if (I(cf.name, W_X) != x)
+        widget_move_resize(cf.name, x, I(cf.name, W_Y), 375 - 2 * x, I(cf.name, W_H));
+}
+static void caption_mark(void *w, void *canvas) {
+    unsigned ink;
+    if (w && w == cf.covers && cf.offline && cf.name && catalogue_row_ink(cf.name, &ink))
+        catalogue_mark_paint(canvas, I(cf.name, W_X) + I(cf.name, W_W) + CF_MARK_W / 2,
+                             I(cf.name, W_Y) + I(cf.name, W_H) / 2, ink);
+}
+
+/* The captions name album c (or a card's), once each time it changes (or whether it can play
+ * does); a playlist's are its name and its count. */
 void titles(unsigned c) {
     unsigned n = widget_count_children(cf.slide);
-    if ((int)c + 1 == cf.titled) return;
+    int off = album_offline(c);
+    if ((int)c + 1 == cf.titled && off == cf.offline) return;
     cf.titled = (int)c + 1;
+    caption_offline(off);
     void *r = c + CARDS < n ? deque_at(cf.albums, c) : (void *)0;
     const char *name = r ? P(r, REC_ALBUM) : 0, *by = r ? cover_artist(r) : "";
     char songs[24];
@@ -2978,6 +3054,7 @@ static void load_albums(unsigned t0) {
     coverflow_position_reset();
     widget_destroy_children(cf.page);
     cf.covers = cf.slide = cf.name = cf.artist = 0; /* destroyed with the page's children */
+    cf.offline = 0;
     if (cf.scoped != PLAYLISTS) cf.album = 0;       /* the playlists' read again keep their place */
     cf.body =
         widget_factory_create_widget(widget_factory(), "view", cf.page, 0, 0, 375, client_h());
@@ -2990,7 +3067,7 @@ static void load_albums(unsigned t0) {
         n = (int)deque_size(cf.stock);
     else if (!library_scanning()) {
         cf_cold(t0);
-        cf.stock = staged(albums, 0, &n);
+        cf.stock = cf_staged(albums, 0, &n);
         cf_trace(t0, "staged albums=", n, 0);
         if (n > 0) {
             void *v = split(cf.stock);
@@ -3047,7 +3124,10 @@ static void load_albums(unsigned t0) {
         else if (key == cf.saved_album && !on_sort && !cf.scoped && !playing)
             cf.album = (int)i;
         job_t *j = cf.jobs ? &cf.jobs[cf.total] : 0;
-        if (j && P(r, REC_PATH) && access(art_path(path, key, ""), 0) && (j->track = strdup(P(r, REC_PATH)))) {
+        /* a server album's art is its app's cover: none fetched yet, the placeholder, no job */
+        if (j && P(r, REC_PATH) && access(art_path(path, key, ""), 0) &&
+            (!catalogue_path(P(r, REC_PATH)) || catalogue_cover(P(r, REC_PATH), path, sizeof path)) &&
+            (j->track = strdup(P(r, REC_PATH)))) {
             cf_cold(t0);
             j->key = key;
             j->shared = shared ? shared[i] : 1; /* no memory: no cover.jpg that may be another's */
@@ -3092,7 +3172,8 @@ static unsigned cover_load __attribute__((section(".scratch"))); /* playback_loa
 static int play(void *ctx, void *event) {
     int i = (int)(long)ctx;
     void *t = deque_at(cf.tracks, (unsigned)i);
-    if (!t || access(P(t, REC_PATH), 0)) {
+    /* a server row has no file: catalogue_load plays it, or says why it can't */
+    if (!t || catalogue_missing(P(t, REC_PATH))) {
         page_retitle(cf.page, cf.title, "Storage unavailable");
         return 0;
     }
@@ -3420,6 +3501,7 @@ static int to_tracks(const void *unused) {
             widget_set_visible(cf.title, 0, 0);
             widget_move_resize(lv, 0, 0, I(lv, W_W), h);
             widget_move_resize(view, 0, 0, I(view, W_W), h);
+            fit_view(view, page_h(48));
         }
         for (int i = 0; i < n; ++i) {
             void *row = page_row_detail(
@@ -3466,7 +3548,7 @@ static int play_all(const void *unused) {
         for (unsigned j = 0; j < deque_size(t); ++j) _deque_push_back(all, deque_at(t, j));
         deque_destroy(t);
     }
-    if (deque_size(all) && !access(P(deque_at(all, 0), REC_PATH), 0))
+    if (deque_size(all) && !catalogue_missing(P(deque_at(all, 0), REC_PATH)))
         play_folder(all, 0, 0xf001);
     else
         widget_set_text_utf8(cf.name, "Storage unavailable");
@@ -3706,7 +3788,7 @@ int coverflow_shows_album(void *r) {
  * rated Sort card alone; 0 when none is. */
 int coverflow_rated(int (*hearts)(void *)) {
     int n;
-    void *all = staged(albums, 0, &n), *rated = _create_deque("stSongInfo");
+    void *all = cf_staged(albums, 0, &n), *rated = _create_deque("stSongInfo");
     if (n > 0) all = split(all);
     all = music_albums(all);
     deque_init(rated);

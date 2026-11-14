@@ -279,7 +279,12 @@ def test_plain_slider_is_used_by_np_slider():
     assert props['style:normal:round_radius'] == '2'
 
 
-def playing():
+# Stock's info page's labels, in its order
+STOCK_INFO = ('label_album', 'label_genre', 'label_size', 'label_year', 'label_encode', 'label_bits', 'label_kbps',
+              'label_sample', 'label_location')
+
+
+def playing(info_names=()):
     buttons = w('view_buttons', w('img_return', at=[1, 2, 3, 4], self_layout='default(x=1,y=2,w=3,h=4)'), w('img_spectrum', kind='image'),
                 w('img_fav', kind='image', image='fav', x_offset='1', **{'style:normal:text_align_h': 'left', 'keep': 'yes'}),
                 w('img_more', kind='image', image='more', y_offset='1', self_layout='default(x=9,y=9,w=9,h=9)'), w('img_vu', kind='image'),
@@ -288,7 +293,8 @@ def playing():
     artist = w('scrlabel_artist', kind='hscroll_label', **{'style:normal:font_size': '20', 'style:normal:text_color': '#123456',
                                                            'style:normal:text_align_h': 'center', 'text': 'x'})
     lrc = w('view_lrc', w('scroll_lrc', kind='scroll_view', self_layout='default(x=0,y=0,w=-10,h=-20)'), self_layout='default(x=0,y=0,w=100%,h=178)')
-    info = w('view_info', w('label_a', at=[5, 6, 7, 8]), w('label_b', at=[10, 6, 7, 8]))
+    info = w('view_info', *([w(k, kind='label', at=[0, 22 * i, 225, 22], text=k) for i, k in enumerate(info_names)] or
+                            [w('label_a', at=[5, 6, 7, 8]), w('label_b', at=[10, 6, 7, 8])]))
     album = w('view_album', w('img_cover', kind='image'), w('img_playstate', kind='image'))
     slide = w('slide_view_view', w('slide_view', album, lrc, info, w('label_lyricmsg', at=[3, 4, 5, 6])),
               w('slide_indicator1', at=[0, 1, 2, 3], **{'style:normal:fg_color': '#1', 'style:normal:selected_fg_color': '#2'}))
@@ -447,7 +453,7 @@ def test_playing_page_oled_grid():
     text column to the right column at np_bar_y on screen, the times under its ends, the play mode's target centred
     under them, the window's last child, the dots under it, and the slide stopping short of the bar."""
     g = theme.geometry(theme.builtins()[3])
-    root, base = playing(), playing()
+    root, base = playing(STOCK_INFO), playing()
     ipod.playing_page(root, g)
     ipod.playing_page(base, dataclasses.replace(g, np_art=0, np_bar_y=0))
     ipod.encode(root)
@@ -485,6 +491,32 @@ def test_playing_page_oled_grid():
     assert g.bar + dots[1] + 10 <= 320 - 8
     # the other sets' page is the base layout (np_art 0)
     assert named(base)['img_cover'][1] != n['img_cover'][1] and named(base)['img_playmode'] in named(base)['view_album'][3]
+
+
+def test_playing_page_oled_info_table():
+    """OLED's info page is a table in the slide above the bar: a fact a row, 20 px apart, Album, Genre, Year, Format,
+    Sample Rate, Bit Rate, File Size, Location; stock's label the name on the text column in Text Secondary, a
+    <name>_value hscroll_label the value right-aligned to the right column, both ellipsized; a 1 px #1F1F1F rule on the
+    text and right columns between rows; Bit Depth hidden (its value joins Format at run time)."""
+    g = theme.geometry(theme.builtins()[3])
+    root = playing(STOCK_INFO)
+    ipod.playing_page(root, g)
+    n, right, slide_h = named(root), 375 - g.right_x, g.np_bar_y - g.bar - ipod.NP_GRID_SLIDE_GAP
+    info = n['view_info'][3]
+    order = ['label_album', 'label_genre', 'label_year', 'label_encode', 'label_sample', 'label_kbps', 'label_size',
+             'label_location']
+    top = (slide_h - 20 * len(order)) // 2
+    assert top >= 0
+    for i, k in enumerate(order):
+        name, value, y = n[k], n[k + '_value'], top + 20 * i
+        assert name[0] == value[0] == 'hscroll_label' and name[1] == [22, y, ipod.NP_INFO_GRID_NAME_W, 20], k
+        assert name[2]['style:normal:text_color'] == ipod.NP_GRID_SECONDARY and name[2]['style:normal:text_align_h'] == 'left'
+        assert value[1] == [24 + ipod.NP_INFO_GRID_NAME_W - 2, y, right - 24 - ipod.NP_INFO_GRID_NAME_W + 4, 20], k
+        assert value[2]['style'] == 's_scrlabel_white20r' and name[2]['ellipses'] == value[2]['ellipses'] == 'true'
+    rules = [c[1] for c in info if c[0] == 'view' and 'name' not in c[2]]
+    assert rules == [[24, top + 20 * i, right - 24, 1] for i in range(1, len(order))]
+    assert all(c[2]['style:normal:bg_color'] == '#1F1F1F' for c in info if c[0] == 'view' and 'name' not in c[2])
+    assert n['label_bits'][2]['visible'] == 'false' and n['label_bits'][1][2:] == [0, 0]
 
 
 def test_playing_page_final_order(page):

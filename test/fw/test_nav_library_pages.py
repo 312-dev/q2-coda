@@ -585,6 +585,33 @@ def test_a_ratings_list_is_its_hearts_most_first(fw, ui, song, row, title, want)
     assert ui.name[page] == 'rated_page' and title in ui.shown(page) and ui.rows(page) == want
 
 
+def test_oled_draws_a_ratings_rows_hearts_as_glyphs(fw, ui, song, st):
+    """OLED's second line (docs/oled-design.md): Phosphor's filled hearts for the song's, outlined for the rest, in
+    Text Secondary or white on the selection, the words after them."""
+    from test_nav_hold import use_set
+    use_set(st, 'oled')
+    Rated(fw, ui, song)
+    fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: struct.pack_into('<4i', ui.blocks[w], 0, *map(signed, (x, y, ww, h))))
+    call(fw, 'rated_open', 3)
+    page = ui.top()
+    assert ui.rows(page) == [('Fav', f'{DOT} F'), ('Four', ' '), ('Three', f'{DOT} T'), ('One', f'{DOT} O')]
+    drawn: list = []  # image names, each followed by where it was drawn
+    canvas = C.create_string_buffer(0x100)
+    fw.mock('widget_load_image', lambda w, name, bitmap, *_: drawn.append(C.string_at(name).decode()) or 0)
+    fw.mock('canvas_draw_image', lambda canvas, bitmap, src, dst, *_: drawn.append(struct.unpack_from('<2i', C.string_at(dst, 8))) or 0)
+    three = ui.kids[ui.view(page)][2]
+    paint = fw.fn('rate_hearts_paint', None, C.c_void_p, C.c_void_p)
+    paint(three, C.addressof(canvas))
+    names, at = drawn[0::2], drawn[1::2]
+    assert names == ['oled_rate_on_d'] * 3 + ['oled_rate_off_d'] * 2
+    words = struct.unpack_from('<i', ui.blocks[ui.kids[three][1]], 0)[0]
+    assert [x for x, _ in at] == [words - 84 + 16 * i for i in range(5)] and at[0][0] >= 0
+    drawn.clear()
+    st('sel_accent', C.c_void_p).value = st('paint_w', C.c_void_p).value = three
+    paint(three, C.addressof(canvas))
+    assert drawn[0::2] == ['oled_rate_on_w'] * 3 + ['oled_rate_off_w'] * 2
+
+
 def test_a_ratings_list_plays_from_its_row(fw, ui, song):
     rated = Rated(fw, ui, song)
     call(fw, 'rated_open', 3)
@@ -782,7 +809,7 @@ def test_long_songs_with_none_says_so(fw, ui, song):
     Library(fw, ui, [song(b'/m/a.flac', b'A')])
     Files(fw, {LENGTHS: lengths((b'/m/a.flac', 60))})
     call(fw, 'long_songs')
-    assert ui.rows(ui.top()) == [('No songs over 10 minutes', None)]
+    assert 'No songs over 10 minutes' in ui.shown(ui.top()) and ui.rows(ui.top()) == []  # no fake row
     call(fw, 'long_songs')  # pressed again while it is open
     assert len(ui.windows) == 1
 
@@ -1036,7 +1063,7 @@ class Heart:
     CTX = 0x5eed
 
     def __init__(self, fw, ui, song, mcl, kept=0, fav=False, bind=True, handler=FAV_CLICK, removing=0, table=None,
-                 path=b'/m/now.flac'):
+                 path=b'/m/now.flac', image=None):
         self.fw, self.ui = fw, ui
         self.track = song(path, b'Now')
         queue = ui.deques.new([self.track])
@@ -1052,7 +1079,7 @@ class Heart:
         self.win = ui.new('window_create', 0, 0, 0, 0, 0)
         self.heart = ui.new('image_create', self.win, 300, 200, 50, 40)
         ui.name[self.heart] = 'img_fav'
-        ui.image[self.heart] = 'play_fav' if fav else 'play_unfav'
+        ui.image[self.heart] = image or ('play_fav' if fav else 'play_unfav')
         self.emitter, self.item = C.create_string_buffer(0x40), C.create_string_buffer(0x40)
         struct.pack_into('<Q', self.emitter, 0, C.addressof(self.item))
         struct.pack_into('<Q', self.item, 0, self.CTX)  # emitter_on_with_tag's item: {ctx, id, type, handler...}
@@ -1120,6 +1147,13 @@ def test_a_heart_without_stock_s_click_is_left_alone(fw, ui, song, mcl, handler,
 @pytest.mark.parametrize('kept, fav, badge', [(3, False, '3'), (0, False, None), (3, True, None), (1, False, '1')])
 def test_the_badge_shows_the_kept_hearts_on_an_empty_heart(fw, ui, song, mcl, kept, fav, badge):
     heart = Heart(fw, ui, song, mcl, kept=kept, fav=fav)
+    assert heart.badge() == badge
+
+
+@pytest.mark.parametrize('image, badge', [('oled_np_fav', None), ('oled_np_unfav_d', '3'), ('tidal_fav_add', '3')])
+def test_the_badge_reads_a_themes_own_heart_as_stocks(fw, ui, song, mcl, image, badge):
+    """np_bar.c np_glyphs names OLED's hearts after stock's: a full one (ending "_fav") hides the badge, as play_fav."""
+    heart = Heart(fw, ui, song, mcl, kept=3, image=image)
     assert heart.badge() == badge
 
 
@@ -2075,6 +2109,39 @@ def test_streaming_drops_baidu_and_adds_the_payload_s_services(fw, ui):
                                                        'AirPlay', 'Configuration')]
 
 
+def test_oled_marks_each_service_with_its_own_glyph(fw, ui, st):
+    """OLED (docs/oled-design.md): a service's logo on its disc gives way to the theme's 20 px mark centred on x 34,
+    in Text Secondary or white on the selection, the words from x 52; a row without a known logo keeps its own."""
+    from test_nav_hold import use_set
+    use_set(st, 'oled')
+    fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: struct.pack_into('<4i', ui.blocks[w], 0, *map(signed, (x, y, ww, h))))
+    win, view = streaming(fw, ui)
+    drawn: list = []  # image names, each followed by where it was drawn
+    canvas = C.create_string_buffer(0x100)
+    fw.mock('widget_load_image', lambda w, name, bitmap, *_: drawn.append(C.string_at(name).decode()) or 0)
+    fw.mock('canvas_draw_image', lambda canvas, bitmap, src, dst, *_: drawn.append(struct.unpack_from('<2i', C.string_at(dst, 8))) or 0)
+    paint = fw.fn('stream_mark_paint', None, C.c_void_p, C.c_void_p)
+    for item in ui.kids[view]:
+        struct.pack_into('<i', ui.blocks[item], 12, 32)  # the list's layout: stream_row's pitch, the payload's rows too
+        paint(item, C.addressof(canvas))
+    names = drawn[0::2]
+    assert names == [f'oled_stream_{n}_d' for n in ('tidal', 'spotify', 'tidal', 'radio', 'airplay', 'config')]  # not Qobuz
+    assert set(drawn[1::2]) == {(24, 6)}  # x 24 on the 375 px row, centred in the 32 px row
+    logos = [w for item in ui.kids[view] for w in ui.subtree(item) if ui.image.get(w, '').startswith(('list_tidal', 'stream_'))]
+    assert logos and all(w in ui.hidden for w in logos)
+    tidal = ui.kids[view][0]
+    label, = (w for w in ui.subtree(tidal) if ui.kind[w] == 'hscroll_label_create')
+    assert struct.unpack_from('<i', ui.blocks[label], 0)[0] == 52 - 20  # in its button at x 20
+    drawn.clear()
+    st('sel_accent', C.c_void_p).value = st('paint_w', C.c_void_p).value = tidal
+    paint(tidal, C.addressof(canvas))
+    assert drawn[0] == 'oled_stream_tidal_w'
+    drawn.clear()
+    st('sel_accent', C.c_void_p).value = ui.kids[tidal][0]  # a settings row's selection is its button
+    paint(tidal, C.addressof(canvas))
+    assert drawn[0] == 'oled_stream_tidal_w'
+
+
 def test_streaming_lists_the_card_s_apps_after_spotify(fw, ui):
     win, view = streaming(fw, ui, files=deezer())
     assert [c for c, _ in page_rows(ui, view)][2:5] == ['Spotify', 'Deezer', 'Tidal Downloads']
@@ -2521,6 +2588,38 @@ def test_play_all_with_the_card_away_says_so(fw, ui, song):
     db, page = era_decade(fw, ui)
     ui.click(page, 0)
     assert ui.toasts == ['Storage unavailable'] and not ui.played
+
+
+# a server row (catalogue.c) has no file: Play All goes on to play_folder, whose load hands it to the app or says
+# why it can't, as a server track pressed in Cover Flow does; a card file that is gone still says the card is away
+def test_play_all_from_a_server_song_plays_rather_than_saying_storage_unavailable(fw, ui, song):
+    server = b'/mnt/mmc/.subsonic/cat/al1/s%d.flac'
+    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))  # stock's, for catalogue_path
+    albums = Albums(fw, ui, song, gone={server % 1, server % 2})
+    albums.songs[b'Blue'] = [song(server % 2, b'B2', album=b'Blue', track=2), song(server % 1, b'B1', album=b'Blue', track=1)]
+    db, page = era_decade(fw, ui, albums=[(b'Blue', b'Band', b'1991', server % 1), *ERA_ALBUMS[1:]])
+    ui.click(page, 0)
+    (queue, at, cls), = ui.played
+    assert [field(r, 'title') for r in queue] == [b'B1', b'B2', b'G1', b'R1'] and not ui.toasts
+
+
+# Cover Flow's All albums card (an artist's covers) checks its first song the same way
+@pytest.mark.parametrize('first,plays', [(b'/mnt/mmc/.subsonic/cat/al1/s1.flac', True), (b'/m/blue/1.flac', False)])
+def test_cover_flows_all_albums_from_a_server_song_plays_and_from_a_gone_card_file_says_so(fw, ui, song, first, plays):
+    from test_coverflow import Cf
+    second = first.replace(b'1.flac', b'2.flac')
+    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    albums = Albums(fw, ui, song, gone={first, second})
+    albums.songs[b'Blue'] = [song(second, b'B2', album=b'Blue', track=2), song(first, b'B1', album=b'Blue', track=1)]
+    c = fw.var('cf', Cf)
+    c.name = ui.new('label_create', 0, 0, 0, 0, 0)  # its caption, which says why nothing plays
+    c.albums = ui.deques.new([song(first, album=b'Blue'), song(b'/m/red/1.flac', album=b'Red')])
+    fw.fn('coverflow__play_all', C.c_int, C.c_void_p)(None)
+    if plays:
+        (queue, at, cls), = ui.played
+        assert [field(r, 'title') for r in queue][:2] == [b'B1', b'B2'] and at == 0
+    else:
+        assert not ui.played and ui.text[c.name] == 'Storage unavailable'
 
 
 def test_shuffle_plays_the_decade_s_songs_shuffled(fw, ui, song, mcl):

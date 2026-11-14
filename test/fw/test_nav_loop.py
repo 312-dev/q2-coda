@@ -1291,17 +1291,83 @@ def test_key_tone_off_is_silent(fw):
     assert not fw.calls('fw_pthread_create')
 
 
-@pytest.mark.parametrize('listener', ['g_po_status', 'g_bal_status', 'bluetooth'])
-@pytest.mark.parametrize('keytone_hp', [b'0', b'1'])
-def test_headphones_silence_the_speaker_unless_click_with_headphones(fw, listener, keytone_hp):
-    Config(fw, KEYTONEHP=keytone_hp)
-    buzzer = Buzzer(fw)
-    if listener == 'bluetooth':
-        fw.mock('mclGetOutputWay', lambda *_: 1)
-    else:
-        fw.var(listener, C.c_ubyte).value = 1
+class Player:
+    """q2player's side of a click (patch/clicker.c): whether it is the player (its /tmp/q2clicks), demo's play status
+    (2 playing, 3 paused, 1 stopped) and what the payload sent on the player's socket."""
+    def __init__(self, fw, there=True, status=2):
+        self.sent = []
+        C.c_int.from_address(O['MCL_FD']).value = 7
+        fw.mock('fw_access', lambda path, *_: 0 if there and C.string_at(path) == b'/tmp/q2clicks' else -1)
+        fw.mock('mclGetPlayStatus', lambda *_: status)
+        fw.mock('fw_send', lambda fd, data, n, flags, *_: self.sent.append((fd, C.string_at(data, n), flags)) or n)
+
+    def clicks(self):
+        return [m for _, m, _ in self.sent]
+
+
+# Clicker (IPOD CLICKER: 0 Both, 1 Speaker, 2 Headphones) against who listens and whether q2player mixes: the
+# buzzer's clicks and the mixed ones sent. Speaker is Key Tone as it was; Headphones has the buzzer only while
+# nothing mixes, under Speaker's gate; Both has the buzzer whatever listens.
+WHEEL = b'{mcl-click\\wheel}'
+@pytest.mark.parametrize('clicker, listening, there, status, buzzed, sent', [
+    (b'1', False, True, 2, True, False), (b'1', True, True, 2, False, False),
+    (b'2', False, True, 2, False, True), (b'2', True, True, 2, False, True),
+    (b'2', False, True, 3, True, False), (b'2', True, True, 3, False, False),
+    (b'2', False, False, 2, True, False), (b'2', True, False, 2, False, False),
+    (b'0', True, True, 2, True, True), (b'0', False, True, 1, True, False), (b'0', True, False, 2, True, False),
+])
+def test_the_clicker_routes_a_click(fw, clicker, listening, there, status, buzzed, sent):
+    Config(fw, CLICKER=clicker)
+    buzzer, player = Buzzer(fw), Player(fw, there, status)
+    if listening: fw.var('g_po_status', C.c_ubyte).value = 1
     buzzer.click(1)
-    assert buzzer.clicks() == ([1] if keytone_hp == b'1' else [])
+    assert buzzer.clicks() == ([1] if buzzed else [])
+    assert player.clicks() == ([WHEEL] if sent else [])
+    assert all(fd == 7 and flags == 0x4040 for fd, _, flags in player.sent)  # never waits, never a SIGPIPE
+
+
+@pytest.mark.parametrize('keytone_hp', [b'0', b'1'])
+def test_an_old_config_is_both(fw, keytone_hp):
+    """No CLICKER key: Both, whatever Click With Headphones (KEYTONEHP) said; Key Tone off is Off."""
+    Config(fw, KEYTONEHP=keytone_hp)
+    buzzer, player = Buzzer(fw), Player(fw)
+    fw.var('g_bal_status', C.c_ubyte).value = 1
+    buzzer.click(1)
+    assert buzzer.clicks() == [1] and player.clicks() == [WHEEL]
+    fw.var('g_keytone_flag', C.c_ubyte).value = 0
+    buzzer.click(1)
+    assert buzzer.clicks() == [1] and player.clicks() == [WHEEL]
+
+
+def test_a_button_sends_a_buttons_click(fw):
+    Config(fw, CLICKER=b'2')
+    buzzer, player = Buzzer(fw), Player(fw)
+    kind = fw.var('clicker_kind', C.c_int)
+    kind.value = 2
+    buzzer.click(1)
+    kind.value = 3
+    buzzer.click(1)
+    assert player.clicks() == [b'{mcl-click\\button}', b'{mcl-click\\beep}']
+
+
+def test_a_dark_pass_mixes_one_click(fw):
+    Config(fw, CLICKER=b'2')
+    buzzer, player = Buzzer(fw, lit=False), Player(fw)
+    buzzer.click(1), buzzer.click(1)
+    assert player.clicks() == [WHEEL]
+
+
+def test_the_player_is_looked_for_once_a_second(fw):
+    Config(fw, CLICKER=b'2')
+    buzzer, player = Buzzer(fw), Player(fw)
+    now = [5000]
+    fw.mock('fw_clock_gettime', lambda kind, ts, *_: C.memmove(ts, struct.pack('<qq', now[0] // 1000, now[0] % 1000 * 1000000), 16) and 0)
+    looks = lambda: len([a for _, a in fw.calls('fw_access') if C.string_at(a[0]) == b'/tmp/q2clicks'])
+    for _ in range(5): buzzer.click(1)
+    assert len(player.clicks()) == 5 and looks() == 1
+    now[0] += 1000
+    buzzer.click(1)
+    assert looks() == 2
 
 
 # Widgets: a tree the C walks through stock's accessors, each widget a zeroed block holding the fields
@@ -1775,6 +1841,18 @@ def test_other_keys_keep_stocks_press_click(fw, keys, key):
     fw.mock('stock_keydown_trampoline', lambda *_: seen.append(tone.value) and 0)
     keys.press(key)
     assert seen == [1]
+
+
+@pytest.mark.parametrize('key, kind', [(KEY_PLAY, 2), (KEY_CENTER, 2), (KEY_FWD_BTN, 2), (KEY_NEXT, 0)])
+def test_stocks_click_names_a_button_or_the_wheel(fw, keys, key, kind):
+    """The Clicker's sound for stock's click on a press: a button's for any key but the wheel's, then the wheel's again."""
+    ui = Ui(fw)
+    ui.window('sysset_page')
+    now = fw.var('clicker_kind', C.c_int)
+    seen = []
+    fw.mock('stock_keydown_trampoline', lambda *_: seen.append(now.value) and 0)
+    keys.press(key)
+    assert seen == [kind] and now.value == 0  # 0: the wheel's
 
 
 def test_a_press_on_a_page_without_rows_keeps_its_click(fw, keys):
@@ -3026,6 +3104,8 @@ def test_an_overdue_click_that_locks_the_screen_drops_the_next_centre(fw, keys):
 
 
 def test_a_lone_centre_on_now_playing_turns_the_screen_off(fw, keys, st):
+    Config(fw, SCRUBSINGLE=b'0')  # Single Press Scrub chosen off
+    st('settings_read').value = 0
     ui = Ui(fw)
     top = ui.window('playing_page')
     st('np_win', C.c_void_p).value = top.p
@@ -3035,6 +3115,17 @@ def test_a_lone_centre_on_now_playing_turns_the_screen_off(fw, keys, st):
     assert [C.c_int.from_address(c[1][1] + EVENT_KEY).value for c in fw.calls('on_wm_keyup_fun')] == [KEY_CENTER]
 
 
+def test_a_lone_centre_on_now_playing_scrubs_unless_chosen_otherwise(fw, keys, st):
+    """Single Press Scrub is on unless chosen off: Centre on Now Playing starts a scrub, never sleeps."""
+    Config(fw)
+    st('settings_read').value = 0
+    ui = Ui(fw)
+    top = ui.window('playing_page')
+    st('np_win', C.c_void_p).value = top.p
+    assert keys(KEY_CENTER) == STOP and not fw.calls('on_wm_keyup_fun')
+    assert not ui.due('navigation__np_single') and not ui.timers  # a scrub at once (np_centre): no double-press wait
+
+
 def test_a_wheel_tick_after_an_overdue_centre_drops_its_click(fw, keys):
     ui = Ui(fw)
     sv = list_page(ui)
@@ -3042,3 +3133,18 @@ def test_a_wheel_tick_after_an_overdue_centre_drops_its_click(fw, keys):
     keys(KEY_CENTER)
     keys(KEY_NEXT, O['DOUBLE_CLICK_MS'] + 50)
     assert ui.clicks == [] and sv.ints[SEL] == 2
+
+
+@pytest.mark.parametrize('where', ['list', 'keyboard', 'lock'])
+def test_touch_mode_is_a_touch_on_rows_not_on_the_keyboard_or_lock_window(fw, st, where):
+    """Typing a playlist's name or swiping the lock window away touches no row, so the list that
+    shows after it keeps its bar (rule 15); a touch on a page hides it."""
+    ui = Ui(fw)
+    list_page(ui)
+    if where == 'keyboard':
+        ui.window('keyboard', kind='keyboard')
+    fw.var('g_lockscreen_pageflag', C.c_ubyte).value = where == 'lock'
+    st('touch_mode').value = 0
+    fw.fn('ringnav_touch', C.c_int, C.c_void_p, C.c_void_p)(None, C.create_string_buffer(0x40))
+    fw.var('g_lockscreen_pageflag', C.c_ubyte).value = 0
+    assert st('touch_mode').value == (where == 'list')

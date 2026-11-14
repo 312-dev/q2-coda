@@ -144,6 +144,8 @@
 #define CONFIRM_TOP 208
 #define CONFIRM_PROMPT_PX 24
 #define NP_TIMES_PX 14 /* Now Playing's times, and the volume text in their place */
+#define VOL_NP_QUIET_PX 15          /* that text under a status row's set (OLED's) */
+#define VOL_NP_QUIET_RGB 0xababab /* its Text Secondary */
 #define VOL_PCT_PX 20 /* Classic's volume percentage, in the page dots' place */
 #define NP_ART_RADIUS 12 /* Now Playing's art corners (paint_cover), as stock's play_defaultcover scaled to the art */
 /* Classic's Now Playing, an iPod classic's (coverflow.c slant_render, np_bar.c paint_scrubber),
@@ -351,6 +353,7 @@ static inline int arc_out(int r, int y) {
 #define HSCROLL_SPEED 0x8c      /* a float, px per ms; 0 runs a pass in its duration (0x5fb394) */
 #define HSCROLL_XOFFSET 0x90    /* how far its text has scrolled, px: hscroll_label_set_xoffset */
 #define HSCROLL_TEXT_W 0x94     /* its measured text width: hscroll_label_get_range */
+#define HSCROLL_LOOP_GAP 0x9c   /* loop_interval_distance: a copy this far after the text, -1 none */
 #define HSCROLL_TIMER 0xa4      /* its running timer's id; 0 stopped (stock paints the ellipsis) */
 /* Every pass's fastest pace, 0.05f px per ms: stock Now Playing's title and artist (0x53d0e8); its
  * set_hscroll_label_attribute sets the same since V1.36 (0.1 before), some pages 0.2. As float bits,
@@ -587,6 +590,8 @@ static inline int arc_out(int r, int y) {
 #define WHEEL_ESCAPE_TICK_MS 300
 #define WHEEL_STOP_TICKS 3
 #define BOOT_KEY_GUARD 0xa4bbf9 /* no symbol: set after a Standby resume, on_wm_keyup_fun drops the next centre release */
+#define NP_KEY_HELD 0xa4e880 /* Now Playing's long press of 222/223 sets it (0x53b4d0), its release clears it */
+#define NP_KEY_MODE 0xa4e881 /* 1 once a key-down stepped the slider with NP_KEY_HELD set (0x53e000) */
 #define RETURN_RELEASE_LATCH 0xa4bbfa /* stock long Return arms it; the key-up filter consumes it */
 
 /* slide_menu_scroll_to @0x606290 and completion @0x6064e4; animator
@@ -620,6 +625,7 @@ static inline int arc_out(int r, int y) {
 #define REC_TITLE 0x10
 #define REC_ALBUM 0x14
 #define REC_ARTIST 0x18
+#define REC_STYLE 0x1c          /* the genre: a Search Genres row's (its callback 0x506d60) */
 #define REC_ALBUM_ARTIST 0x24   /* albumsonger; empty or null in folder-queue records */
 #define REC_COVER 0x28          /* an online row's cover, a Tidal row's a jpg in /tmp/tidal (player_get_id3info 0x51f6c0) */
 #define REC_TYPE 0x34           /* 8 song, 4 directory */

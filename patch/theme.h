@@ -16,10 +16,11 @@ enum {
     PAINTER_N
 }; /* theme_t.painter[] */
 enum { VOL_STOCK, VOL_CLASSIC_LIGHT }; /* painter[PAINT_VOLUME]: the volume */
-/* painter[PAINT_CONFIRM]: the confirm control, hold menu, toast and small dialogs */
-enum { CONFIRM_STOCK, CONFIRM_CLASSIC_LIGHT };
-/* painter[PAINT_PAGES]: the theme's own pages (classic_pages) */
-enum { PAGES_STOCK, PAGES_CLASSIC_LIGHT };
+/* painter[PAINT_CONFIRM]: the confirm control, hold menu, toast and small dialogs; OLED's draws
+ * only its toast and confirm (feedback.c) */
+enum { CONFIRM_STOCK, CONFIRM_CLASSIC_LIGHT, CONFIRM_OLED };
+/* painter[PAINT_PAGES]: the theme's own pages (classic_pages, oled_pages) */
+enum { PAGES_STOCK, PAGES_CLASSIC_LIGHT, PAGES_OLED };
 /* painter[PAINT_SCRUB]: SCRUB_ROWS, a gloss bar's rows (np_rows) for the volume panel and a card
  * app's progress */
 enum { SCRUB_STOCK, SCRUB_ROWS };
@@ -207,7 +208,8 @@ typedef struct {
     unsigned char sel_fixed; /* the bar keeps sel_inset and sel_radius under Corners: Square too */
     /* a scrolling hscroll_label's ends fade into what is behind it (list_marks.c marquee_fade);
      * Now Playing's art corners in px (paint_cover; 0: NP_ART_RADIUS's share of its size); its
-     * shuffle and repeat drawn as the theme's own pair (np_bar.c np_modes; 0: stock's one icon).
+     * shuffle and repeat drawn as the theme's own pair (np_bar.c np_modes; 0: stock's one icon),
+     * and its heart and More the theme's glyphs too (np_glyphs; 0: stock's).
      * Three chars in the padding before set_value_ink, so sizeof(theme_t) stays 1624, which clang
      * indexes by a multiply: at 1632 it takes a shift chain, and every theme() call pays for it
      * (test/patch.py's Cover Flow paint budget) */
@@ -243,6 +245,9 @@ typedef struct {
     unsigned char n_schemes; /* ACCENT_N, then the theme's own (Classic: 10) */
     const option_t *opts;    /* Appearance rows after Theme, in order */
     unsigned char n_opts;
+    /* settings.values.switch: an on/off settings row shows a switch (list_marks.c switch_mark), on
+     * a set_text theme too, where it would read On or Off. In the padding before undeclared */
+    unsigned char set_switch;
     unsigned undeclared;     /* SETTING_* bits of the theme options it does not declare */
     unsigned char np_layout; /* NP_* */
     cf_style_t cf;
@@ -263,6 +268,8 @@ const theme_t *theme(void); /* accent(); return &themes[st.theme]; */
 static inline int classic_pages(void) {
     return theme()->painter[PAINT_PAGES] == PAGES_CLASSIC_LIGHT;
 }
+/* OLED's own forms of stock's overlays (docs/oled-design.md#screens): the lock screen */
+static inline int oled_pages(void) { return theme()->painter[PAINT_PAGES] == PAGES_OLED; }
 int theme_geom(const theme_t *T); /* navigation.c: the set T boots with its stored values */
 const scheme_t *scheme(void);     /* theme()'s scheme accent(), in the half Light Mode picks */
 /* the Theme picker's rows, each a stored THEME, by each theme.xml's order (themes.inc) */
@@ -277,6 +284,7 @@ int client_h(void); /* the window under the bar of the set theme_boot wrote (the
  * drift_axis) */
 enum { SPLIT_ROW, SPLIT_ART, SPLIT_ART_UP, SPLIT_INSET };
 int split_geom(int k);
+int list_fit_end(void); /* theme_engine.c: a list_fit set's lists' last screen row, 0: none */
 void paint_stops(void *canvas, int x, int y, int w, int h, const stops_t *s); /* navigation.c */
 /* The rows painter: the track across w, the played part over its first fill_w px; final colours
  * (the volume panel away from Now Playing, a card app's progress). */

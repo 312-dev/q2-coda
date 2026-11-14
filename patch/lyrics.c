@@ -7,6 +7,7 @@
 #include "offsets.inc"
 #include "peq.h"
 #include "stock.h"
+#include "theme.h"
 #include "xiph.h"
 
 /* Lyrics from tags: stock reads a local track's lyrics only from a .lrc beside it. Without one,
@@ -352,8 +353,21 @@ int lyrics_on(void *lrc) {
            (unsigned)widget_count_children(lrc) == ly.rows;
 }
 
-/* Lines are drawn in the system font, LYRIC_BOLD more times a pixel right for weight. */
+/* Lines are drawn in the system font, LYRIC_BOLD more times a pixel right for weight, from
+ * LYRIC_X. OLED's (docs/oled-design.md#screens) are Inter on the 24 px text column, LYRIC_OLED_PX:
+ * the playing line in Medium, the rest in Regular and Text Secondary, faded out at the view's top
+ * and bottom (lyrics_fade) instead of each cut row dimmed whole. */
 #define LYRIC_BOLD 2
+#define LYRIC_OLED_PX 27 /* the design's 22, AWTK's size (docs/oled-design.md#type) */
+#define LYRIC_OLED_X 24
+#define LYRIC_OLED_REST 0xababab
+static int ly_px(void) { return oled_pages() ? LYRIC_OLED_PX : LYRIC_PX; }
+static int ly_x(void) { return oled_pages() ? LYRIC_OLED_X : LYRIC_X; }
+static int ly_bold(void) { return oled_pages() ? 0 : LYRIC_BOLD; }
+/* The face (0: the system's) of a line, the playing one's when on; wraps measure with it on. */
+static const char *ly_face(int on) {
+    return !oled_pages() ? (const char *)0 : on ? "inter-medium" : "inter";
+}
 static int ly_cjk(unsigned c) {
     return (c >= 0x2e80 && c < 0xa000) || (c >= 0xac00 && c < 0xd7b0) ||
            (c >= 0xff00 && c < 0xfff0);
@@ -373,7 +387,7 @@ static int ly_wrap(ly_line *l, const unsigned *s, const unsigned short *adv) {
                 brk = i, wbrk = x, resume = i + 1;
             else if (i > start && (ly_cjk(s[i]) || ly_cjk(s[i - 1])))
                 brk = i, wbrk = x, resume = i;
-            if (i > start && x + adv[i] + LYRIC_BOLD > (ly.w ? ly.w : 375 - 2 * LYRIC_X)) break;
+            if (i > start && x + adv[i] + ly_bold() > (ly.w ? ly.w : 375 - 2 * ly_x())) break;
         }
         unsigned end = i;
         if (i < l->n && brk > start) end = brk, x = wbrk, i = resume;
@@ -387,11 +401,11 @@ static int ly_wrap(ly_line *l, const unsigned *s, const unsigned short *adv) {
 static void ly_layout(void *canvas, ly_line *l) {
     const unsigned *s = ly.tab->text + l->text;
     unsigned short *adv = ly.tab->adv + l->text;
-    canvas_set_font(canvas, (const char *)0, LYRIC_PX); /* the system default font */
+    canvas_set_font(canvas, ly_face(1), (unsigned)ly_px());
     for (unsigned k = 0; k < l->n; ++k)
         adv[k] = (unsigned short)(canvas_measure_text(canvas, s + k, 1) + 0.5f);
     int rows = ly_wrap(l, s, adv);
-    l->px = LYRIC_PX, l->rows = rows < LYRIC_ROWS ? rows : LYRIC_ROWS;
+    l->px = (unsigned char)ly_px(), l->rows = rows < LYRIC_ROWS ? rows : LYRIC_ROWS;
 }
 
 /* Stock built lrc's rows (navigation.c ringnav_lyric_rows), a label a line: their table is the
@@ -431,8 +445,8 @@ int lyrics_rows(void *lrc) {
  * np_full). */
 int lyrics_fit(void *lrc) {
     if (!lyrics_on(lrc)) return 0; /* none, or out of memory: stock's rows stay */
-    if (ly.w != I(lrc, W_W) - 2 * LYRIC_X) {
-        ly.w = I(lrc, W_W) - 2 * LYRIC_X;
+    if (ly.w != I(lrc, W_W) - 2 * ly_x()) { /* the theme's column too: OLED's is narrower */
+        ly.w = I(lrc, W_W) - 2 * ly_x();
         for (unsigned i = 0; i < ly.tab->n; ++i) ly.tab->line[i].px = 0;
     }
     void *canvas = widget_get_canvas(lrc);
@@ -442,7 +456,7 @@ int lyrics_fit(void *lrc) {
         if (canvas && !l->px) ly_layout(canvas, l);
         widget_set_text_utf8(row, "");
         widget_resize(row, I(lrc, W_W),
-                      (l->rows > 1 ? l->rows : 1) * LY_PITCH(LYRIC_PX) + LYRIC_GAP);
+                      (l->rows > 1 ? l->rows : 1) * LY_PITCH(ly_px()) + LYRIC_GAP);
     }
     char layout[48]; /* only now: out of memory, stock's rows keep stock's layout */
     tk_snprintf(layout, sizeof layout, "list_view(x=0,y=%d,s=0)", LYRIC_SLOT);
@@ -602,13 +616,15 @@ static void ly_ink(void *canvas, const int *base, const unsigned *s, unsigned n,
     if (clip[2] <= 0 || clip[3] <= 0) return;
     canvas_set_clip_rect(canvas, clip);
     canvas_set_text_color(canvas, color);
-    for (int b = 0; b <= LYRIC_BOLD; ++b) canvas_draw_text(canvas, s, n, LYRIC_X + b, y);
+    for (int b = 0; b <= ly_bold(); ++b) canvas_draw_text(canvas, s, n, ly_x() + b, y);
 }
 
 /* ringnav_paint, after stock painted a lyrics row (blank): its line, centred in it, bold
  * (LYRIC_BOLD), LYRIC_LIT as far as it is sung while it plays and LYRIC_DIM past that; any other
  * line LYRIC_REST. A row the page's edge cuts fades with the square of the share of it out of view,
- * so no sliver of a line shows. The text color and clip are restored, the font is not. */
+ * so no sliver of a line shows. OLED: Inter (ly_face), the unsung part and other lines in Text
+ * Secondary, and every row at full strength: lyrics_fade fades the view's edges instead. The text
+ * color and clip are restored, the font is not. */
 void lyrics_paint(void *row, void *canvas) {
     void *lrc = row ? P(row, W_PARENT) : (void *)0;
     int i = -1, base[4];
@@ -620,6 +636,8 @@ void lyrics_paint(void *row, void *canvas) {
         alpha = seen >= h  ? 255
                 : seen > 0 ? 255 * seen * seen / (h * h)
                            : 0;
+    int oled = oled_pages();
+    if (oled && seen > 0) alpha = 255;
     if (alpha < 8) return;
     ly_line *l = &ly.tab->line[i];
     if (!l->px) ly_layout(canvas, l);
@@ -628,15 +646,44 @@ void lyrics_paint(void *row, void *canvas) {
         y = (h - l->rows * pitch) / 2 + (pitch - l->px) / 2, w = I(row, W_W);
     unsigned text = (unsigned)I(P(canvas, CANVAS_LCD), LCD_TEXT_COLOR);
     canvas_get_clip_rect(canvas, base);
-    canvas_set_font(canvas, (const char *)0, l->px);
+    canvas_set_font(canvas, ly_face(on), l->px);
+    unsigned dim = oled ? LYRIC_OLED_REST : on ? LYRIC_DIM : LYRIC_REST;
     for (unsigned r = 0; r < l->rows; lit -= l->w[r++], y += pitch) {
         const unsigned *s = ly.tab->text + l->text + l->start[r];
-        int cut = lit <= 0 ? LYRIC_X : lit >= l->w[r] ? w : LYRIC_X + lit;
-        if (cut < w)
-            ly_ink(canvas, base, s, l->len[r], y, cut, w, rgba(on ? LYRIC_DIM : LYRIC_REST, alpha));
-        if (cut > LYRIC_X)
+        int cut = lit <= 0 ? ly_x() : lit >= l->w[r] ? w : ly_x() + lit;
+        if (cut < w) ly_ink(canvas, base, s, l->len[r], y, cut, w, rgba(dim, alpha));
+        if (cut > ly_x())
             ly_ink(canvas, base, s, l->len[r], y, 0, cut, rgba(LYRIC_LIT, alpha));
     }
     canvas_set_clip_rect(canvas, base);
     stock_canvas_set_text_color(canvas, text);
+}
+
+/* OLED's lyrics view, after its rows (ringnav_paint): LYRIC_FADE_PX rows at the top and the foot
+ * of what shows of it, each a fill of the page's ground from clear at the inside to opaque
+ * at the edge, linear, as marquee_fade's columns: a line leaving
+ * the view fades away rather than being cut. It paints over whatever the rows drew this pass, in
+ * the canvas's clip, so a scroll fades each line where it now is; 2 x LYRIC_FADE_PX one-row fills
+ * a repaint, no loop over pixels in the payload. */
+#define LYRIC_FADE_PX 32
+void lyrics_fade(void *lrc, void *canvas) {
+    void *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
+    if (!lcd || !oled_pages() || !lyrics_on(lrc)) return;
+    /* what shows of it: its ancestors clip it (the window starts under the status row, the slide
+     * ends above the progress bar), so the fades go at the edges of their boxes, in its rows */
+    int w = I(lrc, W_W), top = 0, h = I(lrc, W_H), at = 0;
+    for (void *c = lrc, *p; (p = P(c, W_PARENT)); c = p) {
+        at -= I(c, W_Y); /* p's top, from lrc's */
+        if (at > top) top = at;
+        if (at + I(p, W_H) < h) h = at + I(p, W_H);
+    }
+    if (h - top < 3 * LYRIC_FADE_PX) return;
+    unsigned saved = (unsigned)I(lcd, LCD_FILL_COLOR), behind = ui_ink(RGBA(0)) & 0xffffffu;
+    for (int i = 0; i < LYRIC_FADE_PX; ++i) {
+        unsigned a = 255u * (unsigned)(LYRIC_FADE_PX - i) / LYRIC_FADE_PX;
+        stock_canvas_set_fill_color(canvas, behind | a << 24);
+        canvas_fill_rect(canvas, 0, top + i, w, 1);
+        canvas_fill_rect(canvas, 0, h - 1 - i, w, 1);
+    }
+    stock_canvas_set_fill_color(canvas, saved);
 }

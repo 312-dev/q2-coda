@@ -508,6 +508,9 @@ int snake_step(struct snake *s) {
 #define FRAME_MS 33
 #define SAVE_MS 2000 /* a move's save waits this long; a power-off loses at most this */
 #define CELL 30
+#define OLED_CELL 24 /* Sudoku under OLED: the grid's 216 px in the content area's 224 */
+#define OLED_ROOM 224 /* ... the window's rows above y 282 on screen, under the 58 px status row */
+#define OLED_DIGIT_PX 19 /* the design's 16 px, AWTK's size */
 #define TURN (6.2831853f / 1024)
 #define POP_MS 240 /* Vortex: a broken brick's flash fading out */
 #define TRAIL 4    /* Vortex: the ball's last frames, fading behind it */
@@ -920,7 +923,7 @@ static void hud(void *canvas, const char *name, unsigned v, int x, int y, int ri
  * the panel and no chevron on the band; paint_panel's shadow images are per size. */
 /* its own panel needs the scheme's gloss and band: fewer than two stops are none */
 static int pop_own(const theme_t *T, const scheme_t *S) {
-    return T->painter[PAINT_CONFIRM] != CONFIRM_STOCK && S->bar.n > 1 && S->sel.n > 1;
+    return T->painter[PAINT_CONFIRM] == CONFIRM_CLASSIC_LIGHT && S->bar.n > 1 && S->sel.n > 1;
 }
 /* the panel's chosen row, its row i of POP_ROW */
 static unsigned pop_band(const scheme_t *S, int i) {
@@ -1030,31 +1033,33 @@ static void paused_popup(void *canvas, int over) {
 static void sudoku_paint(void *canvas, unsigned tone) {
     const struct sudoku *s = &g->sud;
     const scheme_t *S = scheme();
-    int x0 = (375 - 9 * CELL) / 2, y0 = (g->h - 9 * CELL) / 2;
+    /* OLED: the grid in the content area, y 58 to 282 on screen (docs/oled-design.md#the-screen) */
+    int oled = oled_pages(), cell = oled ? OLED_CELL : CELL, x0 = (375 - 9 * cell) / 2,
+        y0 = oled ? (OLED_ROOM - 9 * cell) / 2 : (g->h - 9 * cell) / 2;
     int same = g->picking ? g->pick : s->cell[s->cur] & 15, own = classic_pages() && S->sel.n > 1;
     unsigned pale = mix(S->sel.rgb[S->sel.n / 2], ipod_light() ? S->paper : 0, 3, 4);
     char d[2] = { 0, 0 };
-    box(canvas, x0, y0, 9 * CELL, 9 * CELL, 0x555555);
+    box(canvas, x0, y0, 9 * cell, 9 * cell, 0x555555);
     for (int i = 0; i < 81; ++i) {
-        int x = x0 + i % 9 * CELL, y = y0 + i / 9 * CELL, v = s->cell[i] & 15;
+        int x = x0 + i % 9 * cell, y = y0 + i / 9 * cell, v = s->cell[i] & 15;
         int picked = g->picking && i == s->cur, bad = !picked && sud_conflict(s, i);
         if (picked) v = g->pick;
         int lit = v && v == same;                         /* the picked cell too */
         int band = own && i == s->cur && !g->picking; /* the cursor's, on the band */
-        box(canvas, x + 1, y + 1, CELL - 2, CELL - 2,
+        box(canvas, x + 1, y + 1, cell - 2, cell - 2,
             lit && !own         ? tone
             : s->cell[i] & CLUE ? 0x333333
                                 : 0);
         if (band)
-            paint_stops(canvas, x + 1, y + 1, CELL - 2, CELL - 2, &S->sel);
+            paint_stops(canvas, x + 1, y + 1, cell - 2, cell - 2, &S->sel);
         else if (lit && own) { /* final, whatever Light Mode */
             stock_canvas_set_fill_color(canvas, RGBA(pale));
-            canvas_fill_rect(canvas, x + 1, y + 1, CELL - 2, CELL - 2);
+            canvas_fill_rect(canvas, x + 1, y + 1, cell - 2, cell - 2);
         }
         if (!v) continue;
         d[0] = (char)('0' + v);
         if (band) ui_ink_raw(1);
-        caption(canvas, d, x, y, CELL, CELL, 20,
+        caption(canvas, d, x, y, cell, cell, oled ? OLED_DIGIT_PX : 20,
                 rgba(band                    ? S->sel_text ? S->sel_text : 0xffffff
                      : bad                   ? 0xff5050
                      : lit && !own           ? 0
@@ -1063,15 +1068,15 @@ static void sudoku_paint(void *canvas, unsigned tone) {
                                              : tone,
                      255));
         if (band) ui_ink_raw(0);
-        if (bad) box(canvas, x + 9, y + CELL - 6, CELL - 18, 2, 0xff5050);
+        if (bad) box(canvas, x + cell * 3 / 10, y + cell - 6, cell - cell * 3 / 5, 2, 0xff5050);
     }
     for (int k = 0; k <= 9; k += 3) {
-        box(canvas, x0 + k * CELL - 1, y0 - 1, 2, 9 * CELL + 2, 0xaaaaaa);
-        box(canvas, x0 - 1, y0 + k * CELL - 1, 9 * CELL + 2, 2, 0xaaaaaa);
+        box(canvas, x0 + k * cell - 1, y0 - 1, 2, 9 * cell + 2, 0xaaaaaa);
+        box(canvas, x0 - 1, y0 + k * cell - 1, 9 * cell + 2, 2, 0xaaaaaa);
     }
     /* the accent's text tone: Graphite's light tone is the grid's grey */
     if (!own || g->picking)
-        frame_rect(canvas, x0 + s->cur % 9 * CELL, y0 + s->cur / 9 * CELL, CELL, CELL,
+        frame_rect(canvas, x0 + s->cur % 9 * cell, y0 + s->cur / 9 * cell, cell, cell,
                    g->picking ? 0xffffff : accent_tone(3), 0);
     if (g->confirm)
         popup(canvas, "New game?", "Centre: yes   Return: no", 0, 0);

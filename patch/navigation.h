@@ -48,6 +48,7 @@ enum {
     POD_PL_CF,   /* Display's Playlist View: List or Cover Flow, as Artist View */
     POD_SCAN_DURATIONS,
     POD_CF_POSITION,
+    POD_LIBRARY_SOURCE, /* Local Only or Local + Server (catalogue.c) */
     POD_COUNT
 };
 
@@ -210,6 +211,10 @@ typedef struct {
     /* Now Playing's full-screen lyrics (np_full) and where the last touch on them came down
      * (np_lyric_touch) */
     int np_full, np_tap_x, np_tap_y;
+    int np_time_down; /* np_time_tap: a touch came down on the right-hand time */
+    /* np_bar.c's shuffle and repeat: shuffle kept under Repeat One, repeat Off chosen under shuffle
+     */
+    unsigned char np_shuf_one, np_rep_off;
     int np_was[9]; /* the column before full screen (np_full) */
     /* The full-screen art's song name, its shade and its window, the fade's step and timer
      * (ringnav_bigcover) */
@@ -243,6 +248,10 @@ typedef struct {
     unsigned np_marquee;
     unsigned np_remain_timer; /* remain_due */
     unsigned np_fit_timer;    /* np_fit_due */
+    /* np_bar.c paint_scrubber's glide: the slider value it runs on from, since when, whether it was
+     * playing, and its repaint */
+    int np_glide_v, np_glide_play;
+    unsigned np_glide_at, np_glide_timer, np_glide_due;
     /* Classic's Spotify or Internet Radio Now Playing (stream_ipod): its slanted art's widget, and
      * the radio's bar, always full */
     void *stream_art, *stream_bar;
@@ -258,6 +267,9 @@ typedef struct {
     /* Scrub: a centre press at np_press_at waits DOUBLE_CLICK_MS in np_press for a second one;
      * scrub_to is the target second, scrub_moved set once the wheel changed it. */
     unsigned np_press, np_press_at, scrub_timer, scrub_track, settle_timer;
+    /* Now Playing's Centre cycle (np_centre): its stage (NP_STAGE_*), the stage's timeout, and when
+     * Centre last went down (ringnav_keydown), which tells a short hold from a press */
+    unsigned np_stage, np_stage_timer, center_down_at;
     int scrub, scrub_to, scrub_moved, settle_played;
     int held_sec; /* a paused seek to scrub_to on scrub_track: the player's second then, +1; 0 none
                    */
@@ -278,7 +290,7 @@ typedef struct {
         shortcut, rounded, light, light_day, /* light_day: Auto's answer for now (LIGHT=2) */
         keep_lit,                            /* Smart Awake (#57, keep_lit_poll) */
         np_centred,                          /* Centred Now Playing (ringnav_ui_load) */
-        keytone_hp,                          /* Click With Headphones (ringnav_buzzer) */
+        clicker,                             /* the Clicker's output (clicker.c), IPOD CLICKER */
         scrub_single,                        /* Single Press Scrub (np_key) */
         theme_booted,                        /* theme_boot ran (ringnav_ui_load) */
         raw_ink,                             /* a final colour's draw: ui_ink leaves it alone */
@@ -420,6 +432,20 @@ void slider_switch(void *w, void *canvas, void *sw);
 const char *style_key(char *key, const char *state, const char *name);
 unsigned wide_len(const unsigned *s);
 void *window_of(void *w);
+/* feedback.c: OLED's feedback forms: toast, confirm, empty songs page, shuffle confirmation
+ * (docs/oled-design.md#dialogs-and-toasts) */
+int feedback_oled(void);
+int feedback_toast(void *top);
+void *feedback_under(void *toast);
+void *feedback_top(void);
+void feedback_toast_paint(void *w, void *canvas);
+int feedback_confirm_dress(void *w);
+void feedback_confirm_bar(void *w, void *canvas);
+void feedback_confirm_switch(void *w, void *canvas);
+void feedback_songs(void *top, void *row);
+int feedback_offline(const char *title);
+void feedback_switch_bar(void *w, void *canvas);
+void feedback_shuffled(const char *what, int songs);
 void cf_veil(void *win, int on);              /* win unseen (1) or seen again under Coverflow */
 int ringnav_playlist_coverflow(void);         /* Display's Playlist View is Cover Flow */
 int music_records(void *list, int discovery); /* list's songs less spoken (0) or hidden (1) ones */
@@ -456,14 +482,43 @@ void coverflow_position_reset(void);
 /* list_marks.c */
 const char *theme_art(const char *name);
 void chevron_icon(void *w, void *canvas, int right, int y, int selected);
+void chevron_muted(void *w, void *canvas, int right, int y);
+
+/* slider_page.c: a set_switch theme's slider page, laid out as stock's window loads and painted
+ * after its children */
+void slider_page_open(void *win, void *s, unsigned kind);
+void slider_page_paint(void *w, void *canvas);
+extern void *slider_page_win; /* the page slider_page_paint draws */
+void slider_page_dirty(void *page); /* its switch row, after a change of the hidden switch */
+
+/* wifi_rows.c: a set_switch theme's Wi-Fi page, from ipod_list_layout and paint_into */
+int wifi_list(void *list);
+int wifi_sig(const char *image); /* stock's signal image's level, 1-4, else 0 */
+void wifi_rows_pre(void *view);
+void wifi_rows_post(void *view);
+void wifi_mark(void *w, void *canvas, int level, int selected);
+
+/* settings_pages.c: a set_switch theme's About page as an inert table, from ipod_list_layout */
+int about_list(void *list);
+void about_rows(void *view);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
 void marquee_fade(void *w, void *canvas);
+/* np_marquee.c: Now Playing's lines as one marquee under a fading theme */
+int np_marq_owns(void *w);
+void np_marq_kick(void *w), np_marq_reset(void);
+unsigned np_marq_wait(unsigned max);
+unsigned np_glide_wait(unsigned max); /* np_bar.c: the progress bar's next pixel */
 /* np_bar.c: Now Playing's shuffle and repeat as the theme's own pair (playing.modes.icons) */
 void np_modes(void *win, void *canvas);
+/* np_bar.c: ... and its own heart and More over stock's (playing.modes.icons) */
+void np_glyphs_bind(void *win), np_glyphs(void *win);
 void wheel_sb_arm(void *list);
 unsigned wheel_sb_alpha(void *list);
 void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key);
+/* list_marks.c: an on/off setting's switch, ending on canvas column right, centred on y
+ * (settings.values.switch) */
+void switch_mark(void *canvas, int right, int y, int on, int selected);
 
 /* song_rows.c: SONGS_INLINE's rows. Song Artist's and Song Length's values (theme_engine.c
  * song_artist, song_length), a list's kind (song_list) and where an artist stands (song_fit). */
@@ -472,6 +527,15 @@ enum { SONG_LENGTH_ALBUMS, SONG_LENGTH_ALL, SONG_LENGTH_OFF };
 enum { SONGS_MIXED = 1, SONGS_ARTIST, SONGS_ALBUM, SONGS_FOLDER };
 enum { SONG_INLINE = 1, SONG_RIGHT };
 int song_artist(void), song_length(void);
+/* theme_engine.c: Track Time's value, and its switch on a tap (np_bar.c np_time_tap) */
+int np_time_total(void), np_time_toggle(void);
+int np_time_tap(void *ctx, void *event);
+/* np_bar.c: Now Playing's shuffle and repeat as two controls */
+void np_mode_set(int on, int rep), np_mode_step(int repeat, int dir);
+/* Now Playing's Centre cycle: at rest (the wheel is the volume's), the scrubber, shuffle, repeat
+ * and the rating picker (navigation.c np_centre; np_bar.c np_modes marks shuffle's and repeat's) */
+enum { NP_STAGE_REST, NP_STAGE_SHUFFLE, NP_STAGE_REPEAT };
+int np_mode_click(void *target, void *event);
 int song_list(void *w);
 int song_fit(int place, int room, int title, int gap, int artist, int *shown);
 void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected);
@@ -495,6 +559,14 @@ static inline void scrub_row(void *canvas, unsigned c, int x, int y, int w) {
 }
 void np_fill(int scrub);
 
+/* seek.c: a held Previous or Next scans the track; np_seek_bar is navigation.c's */
+int seek_input(void *e), seek_release(unsigned key), seek_held(unsigned key), seek_tick(void);
+int seek_step(unsigned held_ms), seek_target(int to, int dir, int step, int total);
+void np_seek_bar(int phase, int to, int paused);
+void seek_scrub(int to);
+int seek_scrub_end(int to, int seek);
+int video_on(void);
+
 /* theme_engine.c */
 #define ACCENT_N SETTING_N_ACCENT /* the ACCENTS rows: theme_engine.c's accents[] has as many */
 enum {
@@ -507,7 +579,8 @@ enum {
     SETTING_LIGHT,
     SETTING_KEEPLIT,
     SETTING_NPCENTRED,
-    SETTING_KEYTONEHP,
+    SETTING_CLICKER, /* the Clicker's output: stored here, its row Controls' Key Tone row
+                        (clicker.c) */
     SETTING_SCRUBSINGLE,
     SETTING_TIMETITLE,
     SETTING_OWN
@@ -597,6 +670,9 @@ int tidal_downloads(void *ctx, void *event);
 
 /* ratings.c */
 const char *hearts_text(char *s, int n);
+void rate_hearts_paint(void *w, void *canvas); /* ratings.c: OLED's Ratings rows' hearts */
+void stream_mark_paint(void *w, void *canvas); /* home.c: OLED's Streaming rows' marks */
+extern void *stream_mark_views[2];             /* home.c: the lists whose rows it marks */
 int rate_keep(int album, unsigned key, int n);
 int rate_kept(int album, unsigned key);
 int rate_key(void *top, unsigned key);
@@ -651,5 +727,39 @@ int ple_key(unsigned key, int phase);
 int ple_listing(void);
 int pl_first(menu_t *m, int cur);
 void pl_fit(void *button);
+
+/* clicker.c: the Clicker (docs/internals.md#key-tone), the Key Tone row's value and click, and a
+ * click's route */
+enum { CLICK_KIND_WHEEL = 1, CLICK_KIND_BUTTON, CLICK_KIND_BEEP }; /* q2player's mcl-click sounds */
+enum { ROUTE_BUZZER = 1, ROUTE_MIXED = 2 };
+extern int clicker_kind; /* CLICK_KIND_*, 0 the wheel's (zero at start, as .scratch is) */
+const char *clicker_text(void);
+void clicker_step(void);
+int clicker_route(int listening);
+/* menu_modal.c: the inset modal (docs/oled-design.md#menus) */
+enum { MM_ACTION, MM_SETTING, MM_CHOICE, MM_SWITCH }; /* modal_row's how */
+enum { DIR_NONE, DIR_UP, DIR_DOWN };                  /* modal_dir: a sort's direction */
+int modal_set(void);
+int modal_row_w(void);
+void *modal_gap(void *view);
+void modal_row(void *row, void *label, const char *icon, const char *value, int how);
+void modal_dir(void *row, int dir);
+void modal_frame(void *win, void *list);
+void modal_paint(void *w, void *canvas);
+int modal_rows_of(void *w);
+int modal_sb_right(void *list, int sb_w);
+int modal_win(void *w);
+void modal_row_paint(void *w, void *canvas, void *row, rect_t r, int selected);
+int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
+void modal_more(void *win);
+void modal_playlist_more(void *win);
+/* song_sort.c: Songs' order under the inset modal's Sort picker */
+enum { SORT_TITLE, SORT_ARTIST, SORT_ALBUM, SORT_ADDED, SORT_N };
+int song_sort(void);
+int song_down(void);
+void song_sort_set(int sort, int down);
+int song_sort_commit(void);
+int song_sort_own(void);
+void song_order(void *list);
 
 #endif

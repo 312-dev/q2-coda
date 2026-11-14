@@ -281,7 +281,7 @@ count and icon size come from the set (`set_row`, `set_top`, `set_rows`, `set_ic
 reads `set_row` and `set_icon` from the set `theme_boot` wrote, hides the icon at 0 and starts the
 text where a row without an icon starts. Streaming's own row height is the set's `stream_row`, matched
 by the view's name (`scroll_view_streamsset`) at layout time; where it differs from `set_row` (52 under Classic
-Light's Row Art on) its rows keep their `SET_ICON` icons, on the art rows' columns. A payload picker's `select` or `unselect` (Theme, Key Lock)
+Light's Row Art on) its rows keep their `SET_ICON` icons, on the art rows' columns. Under OLED (`stream_row` 32, its `set_row`) the logos give way to the theme's 20 px monochrome marks (`patch/home.c` `stream_marks`, [internals: Themes](internals.md#themes)). A payload picker's `select` or `unselect` (Theme, Key Lock)
 is not an icon: at 0 it stays, in the column of stock's own marks, and the Theme picker, whose page
 is no `CHOICE` context, opens on its mark under a `set_text` theme as a `CHOICE` picker does, and
 under such a theme every picker does so when a tap opened it too. Another list whose `default_item_height` equals the set's
@@ -350,7 +350,10 @@ Brightness, Balance, Maximum Volume and Default Volume use eight-pixel rounded, 
 with their original touch areas. Crossfade, Wheel Sensitivity and Resume Songs reuse Default Volume's
 page and inherit its styling. All keep their ranges and wheel/touch controls, but lose their endpoint icons (`slider_plain`, tools/ipod.py):
 the images stay, named, with no image and no size, since stock looks them up. The quick
-settings slider and custom volume overlay retain their layouts.
+settings slider and custom volume overlay retain their layouts. Under OLED (`settings.values.switch`) the four
+windows and Default Volume's other uses take one slider page instead ([oled-design.md](oled-design.md#progress-and-sliders),
+`patch/slider_page.c`): the value centred, a 6 px track with a knob, the range's ends under it, and the feature's
+switch, where it has one, as a row; the +/- discs are hidden, and the wheel moves the value.
 
 ## Quick settings
 
@@ -604,7 +607,8 @@ Modern show the label, and Modern's title is bold. There is no on-screen transpo
 the artist and album in Inter's 18 in Text Secondary; "1 of 10" level with the art's foot, More and
 the heart at the end of its line; a 6-pixel bar from the text column to the right column at y 228,
 the times under its ends in Inter's tabular digits, and shuffle and repeat centred under them in the
-accent when on, grey when off, over the play mode button, which a tap still steps. The page dots
+accent when on, grey when off, over the play mode button: a tap on shuffle turns it on or off and
+a tap on repeat steps Off, All, One, each keeping the other. The page dots
 sit under those, and the swipe's other pages stop above the bar. Each line that scrolls fades at
 the end it runs past (Display's [Theme](#theme)).
 
@@ -612,7 +616,7 @@ The art, title, artist and album are the slide_view's first page, so a swipe rep
 with the lyrics or info page. The info page keeps its stock 225-pixel column, centred; the lyrics
 page spans the screen (**Lyrics** below). The info page's lines read `Label: value`, with spaced units
 (`35.92 MB`, `16-bit`, `950 kbps`, `44.1 kHz`), **Genre** and **Year** for stock's Genres and Era,
-`Unknown` for a missing value and `Location:` before the folder (`ringnav_np_info`). A Genre line too long for the column scrolls at the album marquee's pace while the page shows (`genre_step`). The play/pause overlay has zero opacity, retaining its original gesture target without
+`Unknown` for a missing value and `Location:` before the folder (`ringnav_np_info`). Under OLED the info page is a table instead (`tools/ipod.py` `np_info_table`): a fact a row, 20 pixels apart in the slide above the bar, Album, Genre, Year, Format, Sample Rate, Bit Rate, File Size and Location; the name on the text column in Text Secondary, the value right-aligned on the right column in white, both ending in an ellipsis when long; a 1-pixel `#1F1F1F` rule between rows; the bit depth joins Format (`FLAC, 16-bit`). A Genre line too long for the column scrolls at the album marquee's pace while the page shows (`genre_step`). The play/pause overlay has zero opacity, retaining its original gesture target without
 a transport glyph; stock may update its visibility without making it appear. The loading
 spinner stays centred on the artwork. The on-screen Return icon moves off-screen, as on the pages whose navbars are
 hidden; the hardware Return does the same. More keeps its place at the top row's right. The play
@@ -646,19 +650,24 @@ once that is another track's (Tidal's URL never is a queue path, so its art stay
 `default_bigcover` placeholder is the square. A layout back to the square refits from the kept shape. Its song name and the shade band behind it sit on the art's foot, show for `BC_MS` (3 s), then fade out together over `BC_STEPS` steps
 `BC_STEP_MS` apart (`ringnav_bigcover`, after stock's init). They show again for each new song while it is open.
 
-**Scrub.** A double press of the centre button starts scrubbing, as on an iPod classic (with the screen off it only
-wakes it, [Wake](internals.md#wake)), and the bar fill turns white while it lasts. Each wheel tick moves 5 seconds, times a ramp of one more step per 100 ms of spin
+**Scrub.** A press of the centre button starts scrubbing, as on an iPod classic (a double press with Single Press
+Scrub off; with the screen off it only
+wakes it, [Wake](internals.md#wake)), and the bar fill turns white while it lasts (under OLED it keeps the accent and a 14 px white knob marks the playhead). Each wheel tick moves 5 seconds, times a ramp of one more step per 100 ms of spin
 (up to 40 seconds a tick; the lists' gentler ramp does not apply), within the
-track. Both times and the bar follow the target at once;
-the track jumps there once, when the scrub ends. A press of the centre button confirms it at once
-and leaves the screen on (a double press does too), as do Return, a touch and
+track. Both times and the bar follow the target at once, and so does the music: playing, the
+track jumps to the target as you turn, at most every 200 ms (`SCRUB_SEEK_MS`, `patch/seek.c`), so a
+fast spin is heard as a few jumps and lands on the target. A press of the centre button confirms it at once
+and leaves the screen on (and moves on to shuffle, below), as do Return, a touch and
 3 seconds without a tick, and each gives the wheel back to the volume; Return then stays on the
 page. Ending without having moved the target does not seek. Paused, the track stays paused and
-plays from the target at Play. Outside a scrub a single press turns
-the screen off, as on every other page. With **Single Press Scrub** (below) the two swap: a single
-press starts scrubbing, `DOUBLE_CLICK_MS` later as a row opens, and a double press turns the screen
-off, as on the lists. The presses work the same while the volume shows over the page; starting a scrub closes it. The jump is stock's key seek, which can pause the player briefly, but only once, when the
-scrub ends, instead of after each pause between ticks. Values are `SCRUB_*` in
+plays from the target at Play. With **Single Press Scrub** (below, on unless chosen off) Centre
+cycles the controls the wheel sets, as an iPod classic's does: a press starts scrubbing at once,
+the next ends the scrub and rings shuffle, the next repeat (a tick toggles shuffle or steps repeat
+Off, All, One; under a theme without the pair these two are skipped), the next opens the rating
+picker, whose Centre saves and leaves the page at rest, the wheel back on the volume. Return, a
+touch or 3 seconds without a key end a stage. A short hold (`NP_HOLD_MS`, 400 ms) turns the
+screen off, and a long hold is still Shut Down. With it off a single press turns the screen off
+and a double press starts scrubbing. The presses work the same while the volume shows over the page; starting a scrub closes it. Paused, the scrub is silent and the track jumps once, when it ends, so it stays paused. No Apple guide says whether an iPod's music follows its scrubber; it follows here as the hold of Previous or Next does ([Previous and Next](#previous-and-next)). Values are `SCRUB_*` in
 `patch/offsets.inc`; see [internals.md](internals.md#scrub-ipod).
 
 The top row's text and icons, the bar's ends and the times keep clear of the corners
@@ -673,7 +682,11 @@ or beside a CJK character, onto as many rows as it takes, up to four, which stil
 weight like Apple Music's. A line's row is its rows
 (38 pixels apart) plus 21 pixels between lines: `LYRIC_SLOT` (59 pixels) for one row, so three
 such lines fill the 178-pixel page. A line the page's edge cuts fades with the square of the share
-of it out of view, so no sliver of a line shows. The playing line lights white (`LYRIC_LIT`); the other lines are darker (`LYRIC_REST`,
+of it out of view, so no sliver of a line shows. Under OLED the lines are Inter (the design's 22 px, AWTK's 27) on the 24-pixel text
+column, the playing line in Medium and the rest in Regular, the playing line's unsung part and the other
+lines in Text Secondary (`#ABABAB`); no row is dimmed whole: the top and foot 32 pixels of what shows
+of the page fade linearly to the page's ground (`lyrics_fade`), so a line leaving the view thins out
+rather than being cut, while it scrolls too. The playing line lights white (`LYRIC_LIT`); the other lines are darker (`LYRIC_REST`,
 `#5F5F5F`). A line with word stamps (A2's enhanced LRC, `<mm:ss.xx>` before a word, in a .lrc or a
 LYRICS tag) lights word by word as it is sung, each word from its stamp to the next (the last, with
 no stamp after it, at `LYRIC_UNIT_MS`, 90 ms, a letter, done by the next line), its unsung part
@@ -697,8 +710,8 @@ page back. See [internals.md](internals.md#scrub-ipod) and [Word-timed lyrics](i
 ### Visualizer
 
 The slide_view gains a fourth page, after the art, lyrics and info pages, and the page dots a fourth
-dot. It shows the music as heard, EQ included, in one of four styles on black, tinted with the
-accent's light tone; a tap moves to the next, saved as `IPOD/VIS` in `config.ini`, and its name shows
+dot. It shows the music as heard, EQ included, in one of four styles (five under OLED) on black,
+tinted with the accent's light tone (Field has its own five colours); a tap moves to the next, saved as `IPOD/VIS` in `config.ini`, and its name shows
 at the bottom for a second and a half:
 
 | Style            | After                     | Drawing                                                                                                                                      |
@@ -707,13 +720,42 @@ at the bottom for a second and a half:
 | **Oscilloscope** | Rockbox Oscilloscope      | The left channel in the accent with a glow, the right a faint accent line; it starts on a rising zero crossing, so the wave stands still     |
 | **VU Meters**    | Rockbox VU Meter (analog) | Left and right needles over an arc from -20 to +3 VU, heavier and brighter past 0, with 300 ms ballistics and a peak LED                     |
 | **Halo**         | Apple's radial spectrum   | 64 mirrored bars around Now Playing's art in a circle, turning slowly, the bass pulsing the ring                                             |
+| **Field** (OLED) | iTunes' Magnetosphere     | 40 soft glowing points in each of five bands, a colour each, flowing round the centre on rings each band's level swells and ripples          |
 
-Everything is anti-aliased vector drawing (AWTK's vgcanvas) within the 375x186 page: 16-pixel side
+Field shows only under OLED, where it is the style the page opens on until a tap picks another; it
+is drawn from glow sprites (`field_sprites`), the others are anti-aliased vector drawing (AWTK's
+vgcanvas), all within the 375x186 page: 16-pixel side
 margins (`NP_MARGIN`), labels in the stock grey `#AAAAAA`. It animates at `VIS_FPS` only while the
 page shows with the screen on, and comes to rest when playback pauses; at rest the track's title
 and artist show at the bottom, in the style name's place. Tunables are `VIS_*` in
 `patch/offsets.inc`; `VIS_LATENCY_MS` sets how far the picture runs behind the decoder, to match
 what you hear. See [internals.md](internals.md#visualizer-ipod).
+
+## Previous and Next
+
+The wheel's Previous and Next work as an iPod's, from any page where they control the music:
+
+- **Next**, pressed, plays the next track.
+- **Previous**, pressed, starts the track again from 3 seconds in, and before that goes back to the
+  track before. So one press restarts a song, and two in a row go back one. Apple's iPod classic
+  guide says only "press Previous/Rewind" to start a song over and "press twice" for the one
+  before; 3 s is Rockbox's figure (`DEFAULT_SKIP_THRESH`, 3000 ms, `apps/gui/wps.h`), which an iPod
+  recreation measured on the hardware also reports. Apple's iPod shuffle guides give 6 s for that
+  model. A track holding a place to resume still asks first ([Resume](internals.md#resume)).
+- **Held** (half a second), Next fast-forwards and Previous rewinds, and you hear the song as it
+  goes: half a second of it at its own speed and pitch, then a jump, then another half second.
+  Each jump is 2 s for the first 3 s of the hold (4 times the song's speed), 4 s until 6 s (8
+  times), 8 s until 10 s (16 times), then 16 s (32 times). The bar and times follow. Letting go
+  plays on from there. Fast-forward stops a second before the end, plays out into the next track
+  and goes on scanning that; rewind stops at the start and plays from there. Paused, the track
+  stays silent and paused: the bar moves, and Play starts from where you let go. A held button
+  does not skip.
+
+Apple's guides say only "press and hold" to fast-forward or rewind; the half-second stretches and
+the speeds are this firmware's, in the spirit of the iPod's audible scan. Streams (Spotify, radio,
+Tidal's online queues), games, the playlist editor and the time and sleep-timer fields keep the
+buttons as they were, and a held press there does what it did. Values are `SEEK_*` and
+`seek_steps` in `patch/seek.c`; see [internals.md](internals.md#scan).
 
 ## Pop-ups
 
@@ -732,6 +774,12 @@ still finds both by name and binds its callbacks; the initial Cancel is stock's.
 still gives the discs (`confirm_ok`, `confirm_cancel`) `CONFIRM_SURFACE` (`#2B2B2B`) under every
 accent should stock draw them. Tidal's own confirm pop-up (cyan, black glyphs) keeps its look and
 its tiles, framed in white when selected (Minimal's card only; Classic's band has its own top line and edge, as an iPod's).
+Under **OLED** the confirm is a page of its own (`patch/feedback.c`, [oled-design](oled-design.md#dialogs-and-toasts)):
+the status row asks the question in sentence case ("Shut down?", "Delete playlist “a”?"), and the two
+rows from y 58 are **Cancel** and the action's verb ("Shut Down", "Reset", "Delete"), 32 pixels each at
+the text column; Delete Song's "Also delete source file" is a third row with a switch, which Centre
+turns. Its toasts are a pill near the screen's foot over the page, which keeps its status row and
+selection.
 
 | Dialog                        | Buttons                                         |
 | ----------------------------- | ----------------------------------------------- |
@@ -802,11 +850,15 @@ NPCENTRED`, off; `playset_covermode`): `ringnav_ui_load`, hooked on every window
   with the albums', which builds again), a "Fast Navigation" switch (`Q2POD BIGLIBRARY`, off;
   `playset_covermode`): letters held until the lift and years on a fast spin, and the half copies
   they read, a "Scan Song Durations" switch (`Q2POD SCANDURATIONS`, off; `playset_covermode`;
-  durations.c), and a "Position Bar" switch (`Q2POD CFPOSITION`, off; `playset_covermode`;
-  coverflow_position.c).
+  durations.c), a "Position Bar" switch (`Q2POD CFPOSITION`, off; `playset_covermode`;
+  coverflow_position.c), and "Library: Local Only" or "Library: Local + Server" (`Q2POD
+  LIBRARYSOURCE`, Local Only by default; `playset_covermode`): with Local + Server, the songs and
+  playlists of a music server that a card app such as the Subsonic app lists join the Library,
+  greyed while they can't play ([Server library](internals.md#server-library)).
 - Controls: Wheel Sensitivity, which opens its slider page; "Hold Return: Recent"
-  (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); a "Single Press Scrub" switch (`IPOD SCRUBSINGLE`, off; `np_key`): on Now Playing a single
-  centre press starts the scrub and a double press turns the screen off (Scrub, above); "Key Tone"; "Click With Headphones" (`IPOD KEYTONEHP`), shown while Key Tone is on ([Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; "Wake: Single Press"; and "Volume Guard".
+  (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); a "Single Press Scrub" switch (`IPOD SCRUBSINGLE`, on; `np_key`, `np_centre`): on Now Playing
+  Centre cycles scrubber, shuffle, repeat and rating and a short hold turns the screen off (Scrub, above); off,
+  a single press turns the screen off and a double press scrubs; "Clicker: Both", Key Tone's row, cycling Speaker, Headphones, Both and Off (`IPOD CLICKER`, Off being Key Tone off; [Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; "Wake: Single Press"; and "Volume Guard".
 
 All are among the [settings icons](#settings-icons) the build pre-sizes. A value row has its value
 in the label (260 pixels wide, to where the chevron ends) and no chevron, since Centre or a tap
@@ -944,7 +996,7 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
   scrolling keeps its ellipsis.
 - **Now Playing.** On the grid as the mock-up shows ([Now Playing](#now-playing)).
 - **Icons.** Phosphor's (MIT, [oled-design.md](oled-design.md#icons)): the caret on each row that opens a page,
-  the play state.
+  the play state, and Now Playing's shuffle, repeat, heart and More.
 - **Home.** Full by default. In Split the menu's rows are 204 px wide, so the selection bar ends at x 188 and the
   chevrons stand at 176, and the playing album's art fills the rest from x 196 and y 52 (6 px up into the status
   row) to the right and bottom edges, still, cut from the middle of the cover, the glass rounding its corner
@@ -980,8 +1032,12 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
   move along, stopping at either end. Centre presses the lit key as a tap does, so a letter key typed twice in quick
   succession gives its second letter, as on a phone, and the page keys (ABC, 123, sym) change the page with the light
   kept in its place. Return is the box's own: it closes the keyboard, or the box with it.
-- **Appearance's rows.** Theme, Status Bar, Light Mode, Accent, Home, Shortcut, Battery (Icon or Percent), Song Artist
-  and Song Length.
+- **Track Time.** Now Playing's right-hand time shows what is left of the track ("-3:29", the default) or its
+  length ("4:12"). A tap on the time switches it and the choice is kept across tracks and restarts (`IPOD NPTIME`,
+  an own option; `np_time_tap`, outside the bar's target, so it never seeks); Appearance's Track Time row is the
+  wheel's way to it.
+- **Appearance's rows.** Theme, Status Bar, Light Mode, Accent, Home, Shortcut, Battery (Icon or Percent), Song Artist,
+  Song Length and Track Time.
 
 <a id="oled-type"></a>Inter 4.1 Regular and Medium (`assets/fonts`, SIL OFL 1.1) ship as `fonts/inter.ttf` and
 `fonts/inter-medium.ttf`, subset as the other faces are; where Inter lacks a character, stock's face stands in.

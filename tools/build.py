@@ -234,6 +234,7 @@ HELPER_LIBS = ['lib/libc-2.28.so', 'lib/libpthread-2.28.so', 'usr/lib/libasound.
 # ends the loop, so the watchdog reboots as stock's would. Wi-Fi is off while Rockbox runs (WIFI_OFF).
 BOOT = 'usr/bin/q2boot'
 REMOTE = 'usr/bin/q2remote'
+PLAYER_STOCK_DIR = b'usr/lib/hciplayer-stock'  # --new-player: hciplayer.xz's place, player/main.c's STOCK_XZ
 S90PLAY = 'etc/init.d/S90play'
 ROCKBOX_FLAG = '/tmp/q2pod-rockbox'
 # Rockbox can't use Wi-Fi and the radio costs battery, so rockbox() below stops it. Nothing is saved or restored
@@ -493,6 +494,10 @@ HOME_KEYUP = (0x534c28, 0x0320f809, 0)
 # the guard after Standby), whose flags only that function clears. So the handler's test for Centre never matches (its
 # bne is a b), and Centre is one more key it knows nothing of, as until V1.34.
 NP_CENTRE = (0x53dbac, 0x1443000d, 0x1000000d)
+# Previous restarts the track from 3 s in, as an iPod's does (docs/ipod.md#previous-and-next), and goes back a track
+# before that: player_seek_start's test of player_playtime against 11 (slti $2, $2, 11) is against 3.
+# patch/playback.c ringnav_seek_start asks the same question for the restart guard.
+PREV_RESTART = (0x51f0ec, 0x2842000b, 0x28420003)
 # V1.36's on_wm_keyup_before_fun applies Buttons lock on the lit lock window too (beqz g_lockscreen_pageflag past the lock).
 # Buttons lock stays the dark screen's (navigation.c lock_names), as V1.32's: the branch is taken always.
 KEYLOCK_LIT = (0x4f2728, 0x10400010, 0x10000010)
@@ -652,6 +657,13 @@ BT_INPUT = ((0x639320, 0x3c1c0040, 0x03e00008), (0x639324, 0x279c17c0, 0x0000102
 # (jalr $25) becomes jal to its payload function (tidal.c), which parks the thread: Tidal's wakes once
 # per track URL asked for, Baidu's never.
 STREAM_POLL_CALLS = ((0x4805b8, 'ringnav_baidu_poll'), (0x4871a4, 'ringnav_tidal_poll'))
+# The Library's song rows and Play All ask access(path, R_OK) (lw $25,-0x4b0($gp), the word before each jalr)
+# before they play, and say File Not Found (msg_notfile) when it fails: a server row (patch/catalogue.c) has no
+# file. Each jalr becomes jal catalogue_access, which passes a server row on to ringnav_load's own check.
+# Songs, Songs' Play All, an album's song and Play All, an artist's song, Library's class rows, Search's track
+# result and Now Playing's jump list.
+CATALOGUE_ACCESS = (0x4aad8c, 0x4abfe0, 0x4a7d34, 0x4a9798, 0x4af6a0, 0x4b2130, 0x49d17c, 0x537e50)
+ACCESS_GOT_LOAD = 0x8f99fb50  # lw $25, -0x4b0($gp): access
 # get_onlineid3info's player_set_coverinfo(REC_COVER, REC_NAME, type) for a 0xf1 record: its jalr, the
 # REC_COVER load in its delay slot, and the stub that adds the record ($s1) for tidal.c app_coverinfo
 COVERINFO_CALL = (0x493708, 0x8e240028, 'app_coverinfo_call')
@@ -722,7 +734,8 @@ WHEEL_TS_READ = (0x638a4c, 0x0320f809)
 NET_TYPE_READS = ((0x5c1d6c, 0x8c4300d4), (0x5c1d70, 0x24020002), (0x5c2078, 0x8c4300d4), (0x5c207c, 0x24020002))
 # English labels renamed, as an iPod words them: Now Playing More's queue, which stock calls "Playlists"
 # (player_playlist, used nowhere else); the Library's plural categories; settings rows in title case
-# and plain words; the Lock screen help; and Baidu without its (BETA).
+# and plain words; the Lock screen help; Baidu without its (BETA); My Fav as Favorites, US spelling, the name of
+# the row that opens it; and toasts in sentence case.
 LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('msg_playlistfull', 'Playlist Is Full', 'Could not create playlist'),
     ('player_playlist', 'Playlists', 'Queue'), ('system_powermanager', 'Idle', 'Power'),
@@ -756,7 +769,16 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('system_prove', '技术证明', 'Certification'),  # About's regulatory row, Chinese in stock's English
     ('genre', 'Genres', 'Genre'), ('player_era', 'Era', 'Year'), ('batch_addplaylist', 'Add to playlist', 'Add to Playlist'),
     ('msg_importplaylist', 'Import Playlist?', 'Import Playlists?'),  # it imports the whole folder
-    ('scan_startscan', 'Scanning', 'Scan')))  # Scan specified folders' button; wifi_scan keeps its "Scanning"
+    ('fav', 'My Fav', 'Favorites'), ('local_fav', 'My Fav', 'Favorites'),  # the Favorites page's title, as Home's row names it
+    ('scan_startscan', 'Scanning', 'Scan'),  # Scan specified folders' button; wifi_scan keeps its "Scanning"
+    ('msg_addplaylistsuccess', 'Added To Playlist', 'Added to Playlist'),
+    ('msg_addfavsuccess', 'Added To Fav', 'Added to Favorites'), ('msg_favsuccess', 'Added To Fav', 'Added to Favorites'),
+    ('msg_namenull', "The name can't be empty", "Name can't be empty"),
+    ('scan_now', 'Scan music now', 'Scan Music Now'), ('scan_spec', 'Scan specified folders', 'Scan Specified Folders'),
+    # Screen Off Time's and Standby's choices: a number, a space, a unit (docs/oled-design.md Type)
+    *((f'{page}_{n}{u}', f'{n}{u}', f'{n} {u}') for page, choices in (
+        ('lighttime', ((15, 's'), (30, 's'), (1, 'min'), (2, 'min'), (5, 'min'), (30, 'min'))),
+        ('standbyoff', ((1, 'min'), (3, 'min'), (5, 'min'), (10, 'min')))) for n, u in choices)))
 
 # Wi-Fi transfer's web page (stock thttpd on :8888): in English, an Upload Folder button, and a folder,
 # picked or dropped, keeps its tree: each file's folders are made with stock's create (a plain mkdir) before
@@ -1239,15 +1261,18 @@ def faces_header(ranges):
 
 def relabel(data):
     """A strings/*.bin value replaced: after a u16 0 and a u16 pair count, a u32 offset to each key and
-    value, in file order; the offsets past each change move with it."""
+    value, in file order; the offsets past each change move with it. A key stock lists more than once
+    (scan_now, scan_spec: each pair twice) has every pair replaced, each holding the old value."""
     for key, old, new in LABELS:
-        at = data.find(b'\0' + key + b'\0' + old + b'\0')
-        check(at > 0 and data.count(b'\0' + key + b'\0') == 1, f'Unexpected {key.decode()} label')
-        at += len(key) + 2
-        n = 2 * struct.unpack_from('<H', data, 2)[0]
-        offsets = [o + len(new) - len(old) if o > at else o for o in struct.unpack_from(f'<{n}I', data, 4)]
-        data = bytearray(data[:at] + new + data[at + len(old):])
-        struct.pack_into(f'<{n}I', data, 4, *offsets)
+        pair = b'\0' + key + b'\0' + old + b'\0'  # back to back, two such pairs share a NUL
+        pairs = sum(data.startswith(pair, i) for i in range(len(data)) if data[i] == 0)
+        check(pairs > 0 and data.count(b'\0' + key + b'\0') == pairs, f'Unexpected {key.decode()} label')
+        for _ in range(pairs):
+            at = data.find(b'\0' + key + b'\0' + old + b'\0') + len(key) + 2
+            n = 2 * struct.unpack_from('<H', data, 2)[0]
+            offsets = [o + len(new) - len(old) if o > at else o for o in struct.unpack_from(f'<{n}I', data, 4)]
+            data = bytearray(data[:at] + new + data[at + len(old):])
+            struct.pack_into(f'<{n}I', data, 4, *offsets)
     return bytes(data)
 
 # demo's .pdr section (offset, size): MIPS procedure descriptors past every LOAD segment, which nothing
@@ -1264,7 +1289,8 @@ def source_sha256():
     manual = [ROOT/'docs/manual'/f for f in ('build.py', 'guide.html')]
     for path in sorted([*(p for p in ROOT.glob('assets/**/*') if p.is_file()), *(p for p in ROOT.glob('patch/**/*') if p.is_file()),
                         *ROOT.glob('tools/*.py'), *ROOT.glob('tools/*.c'),
-                        *ROOT.glob('tools/*.h'), *ROOT.glob('tools/*.S'), *manual]):
+                        *ROOT.glob('tools/*.h'), *ROOT.glob('tools/*.S'), *ROOT.glob('player/*.[ch]'),
+                        *ROOT.glob('player/Makefile'), *manual]):
         h.update(str(path.relative_to(ROOT)).encode() + b'\0')
         h.update(path.read_bytes())
     return h.hexdigest()
@@ -1543,6 +1569,7 @@ FUNCTIONS = {
  'hscroll_label_set_only_parent_focus': ('int', 'void *, int'),
  'hscroll_label_set_ellipses': ('int', 'void *, int'),
  'hscroll_label_set_xoffset': ('int', 'void *, int'),
+ 'hscroll_label_set_loop_interval_distance': ('int', 'void *, int'),  # Now Playing's lines' copy (np_marquee.c)
  'hscroll_label_start': ('int', 'void *'),
  'hscroll_label_stop': ('int', 'void *'),
  'widget_add_timer': ('unsigned', 'void *, int (*)(const void *), unsigned'),
@@ -1769,6 +1796,7 @@ GLOBALS = ['tidal_albuminfo_thread_run', 'tidal_collection_thread_run',  # 2: a 
            'isFav_playing',  # Now Playing's heart on a 0xf1 track: 1 a favourite (tidal.c app_fav)
            'g_time_zone','g_playspeed_mode', 'g_time24h_flag', 'g_backlight_status', 'g_lockscreen_pageflag', 'g_testmode_flag',
            'g_keylock_flag', 'g_keylock_mode',
+           'g_sort_changeflag',  # Songs reloads in its order on its return (song_sort.c, as stock's Sort picker)
            'g_bluetoothflag', 'bt_linkstatus', 'g_guideflag', 'g_poweroff_state', 'g_usblink_status', 'bt__recv_pageflag',
            'g_power_longkey', 'g_ingore_bootkey_flag', 'g_equalizer_flag', 'g_navbar_status', 'g_playcover_type',
            'g_keytone_flag', 'g_folder_layer', 'g_otg_status', 'g_delete_flag', 'g_volume', 'g_maxvolume',
@@ -1784,7 +1812,9 @@ GLOBALS = ['tidal_albuminfo_thread_run', 'tidal_collection_thread_run',  # 2: a 
            # toggling it (wifi_initstatus 0, wifi_connectstatus not 1, connecting), Network service's
            # AirPlay and DLNA, SyncLink (2: over Wi-Fi) and its session, Wi-Fi transfer and a pending time sync
            'g_wififlag', 'wifi_initstatus', 'wifi_connectstatus', 'g_airplayflag', 'g_dlnaflag',
-           'g_synclinkflag', 'g_syncLink_status', 'g_wifitransport_flag', 'g_syncnettime_flag']
+           'g_synclinkflag', 'g_syncLink_status', 'g_wifitransport_flag', 'g_syncnettime_flag',
+           'g_forcerefresh_flag',  # Now Playing's page update writes the title and artist again (catalogue.c np_done)
+           'wifi_searchtime']  # the Wi-Fi page's scan running: not 0 (wifimenu_rows_build; wifi_rows.c)
 # Audited stock browsing state, deque pointers, art locks, the status bar widget
 # (system_bar_init stores it), the playing cover's track path and the playing track's tags as
 # player_get_id3info parsed them; sizes are checked against the ELF.
@@ -1792,6 +1822,7 @@ CONTEXT_DATA = {'bt_showcoding': 4, 'g_memory_info': 3476, 'g_folder_path': 1024
                 'g_local_classinfo_save': 912, 'g_artist_type': 4, 'album_modetype': 4, 'g_sort_flag': 4,
                 'g_playlistsort_flag': 4,  # a playlist's Sort (PLAYLISTSORT): 0 by name, else Time added
                 'p_deque_playlist': 4, 'p_deque_showlist': 4, 'tools_pdeq_directory': 4, 'mcl_pdeqplaylist': 4,
+                'p_deque_searchshowlist': 4,  # Search's results (search_track_row_on_click reads its row's)
                 'parse_cover_mutex': 24, 'g_playcover_mutex': 24, 'system_bar': 4, 'g_lastcover_url': 1024,
                 'g_dacoff_time': 4, 'p_vector_select_record': 4,
                 'g_play_id3_info': 2716,
@@ -1806,7 +1837,8 @@ CONTEXT_DATA = {'bt_showcoding': 4, 'g_memory_info': 3476, 'g_folder_path': 1024
                 # the lock screen's picture (SYSSET SCREENSAVERPATH) and the picker's list
                 'g_screensaver_picture': 256, 'p_deque_screensaverlist': 4,
                 'bt_connectstatus': 4,  # a link thread runs (1), ended (2), checked (3)
-                'bt_initstatus': 4}  # Bluetooth's start-up status: -102 is stock's "Bluetooth abnormal" (system.c reboot_record)
+                'bt_initstatus': 4,  # Bluetooth's start-up status: -102 is stock's "Bluetooth abnormal" (system.c reboot_record)
+                'wifi_showlist': 4}  # the Wi-Fi page's scan records: name @0, flags @4 (wifi_rows.c)
 # Windows the payload creates at runtime (window_create), so no rootfs asset names them.
 PAYLOAD_WINDOWS = {'searchstrip_page', 'playlistedit_page', 'chapters_page', 'coverflow_page', 'photos_page', 'books_page', 'games_page', 'mostplayed_page', 'shuffle_page', 'upnext_page', 'ratings_page', 'era_page', 'era_albums_page', 'rated_page', 'longsongs_page', 'spotify_page',
                    'spotbrowse_page', 'radio_page', 'radionp_page', 'streamconf_page', 'tidal_downloads', 'apps_page',
@@ -1842,7 +1874,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
          '-fno-stack-protector','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
          '-Oz','-Wall','-Wextra','-Werror','-Wno-unused-parameter']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'search_strip.c', 'keyboard.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c']
 
 def compile_payload(out):  # pragma: no mutate block
     """Compile and link the payload."""
@@ -1861,7 +1893,7 @@ def compile_payload(out):  # pragma: no mutate block
     run('ld.lld','-m','elf32ltsmip','--gc-sections','-T',ROOT/'patch/link.ld','-e','ringnav',
         *[f'--undefined={name}' for _, name, _ in HOOKS.values()], f'--undefined={GRADIENT_LEAF[2]}', '--undefined=ringnav_lrc_open',
         f'--undefined={WM_PAINT_LEAF[2]}', f'--undefined={QUEUE_LEAF[2]}', '--undefined=ringnav_audio_extension', '--undefined=start_mute', '--undefined=start_sleep', '--undefined=ringnav_genre_copy', '--undefined=ringnav_lyric_save', '--undefined=ringnav_lyric_drop', '--undefined=ringnav_cover_copy','--undefined=ringnav_folder_rm','--undefined=ringnav_bootmode', '--undefined=lockscreen_access','--undefined=ringnav_ts_read',
-        '--undefined=ringnav_baidu_poll', '--undefined=ringnav_stock_tls', '--undefined=ringnav_tidal_poll', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
+        '--undefined=ringnav_baidu_poll', '--undefined=ringnav_stock_tls', '--undefined=ringnav_tidal_poll', '--undefined=catalogue_access', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
         '--undefined=coverflow_player_cover', '--undefined=coverflow_grid_cover', '--undefined=coverflow_album_cover', '--undefined=coverflow_folder_cover', '--undefined=headset_bt_init',
         '--undefined=headset_status_register', '--undefined=headset_bt_autolink',
         *nav,out/'trampoline.o',*extra,'-o',out/'patch.elf')
@@ -2021,7 +2053,7 @@ def signing_key(path, dev):
     check(path.is_file(), f'{path}: no release public key (docs/releasing.md#signing-a-release)')
     return public_key(path.read_bytes())
 
-def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, flac_experiments='sync,lpc,output', signing_pub=None):  # pragma: no mutate block
+def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, flac_experiments='sync,lpc,output', signing_pub=None, new_player=False):  # pragma: no mutate block
     from flac import selection
     flac_experiments = selection(flac_experiments)
     # Kernel-module experiments: no measured saving (docs/clock-gating.md, pwm-clock-gating.md,
@@ -2030,6 +2062,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(not rotator_lazy_clock or dev, '--rotator-lazy-clock requires --dev')
     check(not pwm_idle_clock or dev, '--pwm-idle-clock requires --dev')
     check(not mcu_idle_sleep or (dev and pwm_idle_clock), '--mcu-idle-sleep requires --dev --pwm-idle-clock')
+    # The new player (docs/player-plan.md): in a --dev build only until it replaces hciplayer
+    check(not new_player or dev, '--new-player requires --dev')
     check(dev or version_ok(VERSION, BETA), f'VERSION must be three single digits (x.y.z) and BETA 0-9: {VERSION}, {BETA}')
     version = TAG
     check(re.fullmatch(r'[A-Za-z0-9-]+/[A-Za-z0-9._-]+', repo), f'{repo}: not a GitHub owner/name')  # a C string
@@ -2177,6 +2211,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patch_word(patched, *HOME_KEYUP, 'Home binds no key-up of its own')
     patch_word(patched, *NP_CENTRE, "Now Playing leaves Centre to stock's power-key handling")
     patch_word(patched, *KEYLOCK_LIT, 'Buttons lock acts only with the screen off')
+    patch_word(patched, *PREV_RESTART, 'Previous restarts the track from 3 s in')
     patch_word(patched, *VOL_DARK, 'The volume dialog steps with the screen off')
     for site in MORE_ARTIST_CLOSE:
         patch_word(patched, *site, "Artist info closes the artist and album pages it found")
@@ -2248,6 +2283,10 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         patch_word(patched, address, old, new, "a headset's keys are read once, by the headset worker")
     for address, name in STREAM_POLL_CALLS:
         patch_word(patched, address, 0x0320f809, jal(ps[name]), 'stream threads park while idle')
+    for address in CATALOGUE_ACCESS:
+        check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, address - 4))[0] == ACCESS_GOT_LOAD,
+              f'{address:#x}: expected the access import before the call')
+        patch_word(patched, address, 0x0320f809, jal(ps['catalogue_access']), "a server row's play check")
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, COVERINFO_CALL[0] + 4))[0] == COVERINFO_CALL[1],
           "online id3: expected the REC_COVER load in the cover call's delay slot")
     patch_word(patched, COVERINFO_CALL[0], 0x0320f809, jal(ps[COVERINFO_CALL[2]]), "a card app's cover by URL")
@@ -2390,7 +2429,29 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     # Light Mode's splash: the default logo inverted. A custom --logo has no twin, so it shows either way.
     light = logo_data == (ROOT/'assets/boot-logo.jpg').read_bytes() and (ROOT/'assets/boot-logo-light.jpg').read_bytes()
     check(not light or jpeg_size(light) == (320, 375), 'Light logo must be 320x375 like the stock splash')
-    for path, src in ((b'release/bin/demo', out/'demo'), (b'usr/bin/hciplayer', out/'peq/hciplayer'),
+    q2player, player_added = None, []
+    if new_player:
+        # q2player at /usr/bin/hciplayer, and the patched hciplayer, which it runs while /mnt/data/q2player is
+        # absent, xz-compressed at STOCK_XZ (player/main.c), which unpacks it to /tmp/hciplayer-stock/hciplayer: a
+        # directory of its own, so its file and process name stay "hciplayer" for demo's killall. Compressed, it takes
+        # 1.27 MB less of the root filesystem, the room q2player and its TLS need (docs/player-plan.md#risks); the
+        # check is CRC32, which every xz decoder takes. q2player is linked against this image's own libasound.
+        import lzma
+        from player import build as build_player
+        stock_xz = out/'peq/hciplayer.xz'
+        stock_xz.write_bytes(lzma.compress((out/'peq/hciplayer').read_bytes(), format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC32,
+                                           preset=9 | lzma.PRESET_EXTREME))
+        alsa = out/'player-alsa/libasound.so.2.0.0'
+        alsa.parent.mkdir(exist_ok=True)
+        alsa.write_bytes(cat('usr/lib/libasound.so.2.0.0'))
+        q2player = build_player('mips', alsa=alsa)
+        stock_dir = need(re.search(rb'^usr/lib D (\d+) (\d+) (\d+) (\d+)$', p, re.M), 'Missing usr/lib pseudo inode')
+        hci = need(inode(p, b'usr/bin/hciplayer'), 'Missing usr/bin/hciplayer pseudo inode')
+        # p is the definitions alone (pseudo_data, after them, goes back on unchanged): these two follow them
+        p = (p + PLAYER_STOCK_DIR + b' D ' + b' '.join(stock_dir.groups()) + b'\n' + PLAYER_STOCK_DIR + b'/hciplayer.xz F ' +
+             b' '.join(hci.groups()) + b' cat ' + shlex.quote(str(stock_xz)).encode() + b'\n')
+        player_added = [[PLAYER_STOCK_DIR, b'D', *stock_dir.groups()], [PLAYER_STOCK_DIR + b'/hciplayer.xz', b'R', *hci.groups()]]
+    for path, src in ((b'release/bin/demo', out/'demo'), (b'usr/bin/hciplayer', q2player or out/'peq/hciplayer'),
                       (BLUEALSA.encode(), out/'bluealsa'), (WATCHDOG.encode(), out/'watchdog'),
                       (S90PLAY.encode(), out/'S90play'), (S11LOGO.encode(), out/'S11logo'),
                       (BLUEALSA2.encode(), out/'bluealsa2'), (DEFAULT_CONFIG.encode(), out/'config.ini'),
@@ -2453,7 +2514,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     icons['default_album_home.png'] = ('default_album_big.png', art)
     icons['default_album_flow.png'] = ('default_album_big.png', sized_art(art, 160))
     pages = {ui+PLAYING_STOCK: (ui+'playing_page.bin', english_ui(PLAYING_PAGE, playing_stock(cat(ui+'playing_page.bin')))), **set_pages}
-    added = []
+    added = list(player_added)
     changed_assets = {}
     from art import theme_images
     drawn = {xx+n+'.png': (xx+'list_tidal.png', d) for n, d in theme_images(builtin_themes()).items()}
@@ -2546,7 +2607,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
           'Repacked rootfs metadata differs from stock')
     blobs['recovery-update/rootfs.squashfs'] = newsq.read_bytes()
     # Stock image proves this size fits; do not enlarge beyond its padded size.
-    check(len(blobs['recovery-update/rootfs.squashfs']) <= sq.stat().st_size, 'Repacked rootfs exceeds stock size')
+    size, room = len(blobs['recovery-update/rootfs.squashfs']), sq.stat().st_size  # 50,688,000 bytes for V1.36
+    check(size <= room, f'Repacked rootfs is {size:,} bytes, {size - room:,} over the {room:,} the stock image holds'
+          + (' (--new-player adds q2player beside hciplayer: make room or build without it)' if new_player else ''))
     blobs['firmware_v20.info'] = (f'Shanling Q2\n{version}\n'+''.join(
         hashlib.md5(blobs[n]).hexdigest()+'  '+n+'\n' for n in [
             'recovery-update/xImage','recovery-update/rootfs.squashfs'])).encode()
@@ -2563,6 +2626,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         audio_extension_calls=[dict(address=hex(a), original='0x0320f809', replacement=hex(jal(ps['ringnav_audio_extension']))) for a in AUDIO_EXTENSION_CALLS],
         version=version, dev=dev, update_repo=repo, signing_key=key.hex(), peq=audio, bluealsa_sha256=sha(bluealsa), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
         **({'rotator_clock': rotator} if rotator else {}),
+        **({'q2player_sha256': sha(q2player.read_bytes()), 'rootfs_bytes': size} if q2player else {}),
         **({'pwm_clock': pwm} if pwm else {}),
         patch_symbols={n:hex(v) for n,v in ps.items() if n.startswith('stock_')},
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']} |
@@ -2590,10 +2654,12 @@ if __name__ == '__main__':
                     help='experimental: sleep the stopped PCM notifier until start or teardown (requires --dev)')
     ap.add_argument('--rotator-lazy-clock', action='store_true',
                     help='experimental: defer the rotator clock until its first conversion (requires --dev)')
+    ap.add_argument('--new-player', action='store_true',
+                    help='install q2player as /usr/bin/hciplayer, falling back to hciplayer unless /mnt/data/q2player exists (requires --dev)')
     ap.add_argument('--pwm-idle-clock', action='store_true',
                     help='experimental: cooperative Linux/MCU PWM clock gating (requires --dev)')
     a=ap.parse_args()
     try:
-        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.flac_experiments,a.signing_key)
+        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.flac_experiments,a.signing_key,a.new_player)
     except (OSError, ValueError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
         ap.error(str(exc))

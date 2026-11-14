@@ -777,6 +777,12 @@ static int pend_take(unsigned x) {
     for (--s.npend; k < s.npend; ++k) s.pend[k] = s.pend[k + 1];
     return 1;
 }
+/* A server row that can't play now (catalogue.c: offline with no copy), say one Add to Queue put
+ * in or the link went while it waited: skipped from then on. */
+static int unplayable(unsigned x) {
+    void *q = queue();
+    return q && x < deque_size(q) && catalogue_unavailable(deque_at(q, x));
+}
 /* The indices that play after this track, in order, ignoring the single-song rules. Peek has no
  * side effects, RNG or history writes. */
 static unsigned upcoming(unsigned *out, unsigned max) {
@@ -790,7 +796,8 @@ static unsigned upcoming(unsigned *out, unsigned max) {
     }
     for (unsigned i = s.cursor + 1; i < s.n && k < max; ++i) {
         unsigned x = s.order[i].index;
-        if (!s.seen[x] && pend_find(x) == s.npend && (!category || s.groups[x] == s.groups[at]))
+        if (!s.seen[x] && pend_find(x) == s.npend && (!category || s.groups[x] == s.groups[at]) &&
+            !unplayable(x))
             out[k++] = x;
     }
     if (s.repeat < 3) return k;
@@ -903,9 +910,13 @@ int ringnav_load(void *q, int at, int type) {
     close_preload();
     /* After Shuffle Songs, before stock loads; ringnav_mode's playback_clear ends its shuffle. */
     if (unshuffle && !s.restoring) config_playmode(playback_unshuffle(), 1);
-    void *own = no_videos(q, &at);
-    int result = stock_load_trampoline(own ? own : q, at, type);
+    /* Server rows (catalogue.c): handed to their app online, else card rows and offline copies */
+    void *served = 0;
+    if (!s.restoring && catalogue_load(q, &at, &served) == 2) return 0;
+    void *own = no_videos(served ? served : q, &at);
+    int result = stock_load_trampoline(own ? own : served ? served : q, at, type);
     if (own) deque_destroy(own);
+    if (served) deque_destroy(served);
     back_to = 0;
     if (s.restoring == 2)
         s.restoring = 0;
@@ -1104,11 +1115,13 @@ int ringnav_seek_time(int sec) {
     press_stamp();
     return stock_seek_time_trampoline(sec);
 }
-/* player_prev_music's first move, its only caller, on anything playing or paused: past 10 s stock seeks
- * to the track's start and returns 1, in any queue and mode, without reaching player_change_music. A
- * refusal returns 1 too, so it goes no further. Under 11 s stock returns 0 and Previous changes track. */
+/* player_prev_music's first move, its only caller, on anything playing or paused: from PREV_RESTART_S
+ * stock seeks to the track's start and returns 1, in any queue and mode, without reaching
+ * player_change_music (its test of 11 s is 3 s: tools/build.py PREV_RESTART). A refusal returns 1 too, so
+ * it goes no further. Before it stock returns 0 and Previous changes track. */
+#define PREV_RESTART_S 3
 int ringnav_seek_start(void) {
-    int restarts = player_playtime() > 10;
+    int restarts = player_playtime() >= PREV_RESTART_S;
     if (restart_refused(0, restarts && place_held())) return 1;
     if (restarts) press_stamp();
     return stock_seek_start_trampoline();

@@ -703,8 +703,9 @@ class Q2:
         return self.call('mclNextSong', 0) if forward else self.call('mclPrevSong')
 
     def seek_start(self, *_):
-        """player_seek_start: past 10 s back to the start, and 1; else 0, Previous changes track."""
-        if (self.elapsed() or 0) > 10:
+        """player_seek_start, as tools/build.py PREV_RESTART leaves it: from 3 s back to the start, and 1; else
+        0, Previous changes track."""
+        if (self.elapsed() or 0) >= 3:
             self.seek(0)
             return 1
         return 0
@@ -990,8 +991,8 @@ def test_a_pick_from_up_next_plays_it_and_previous_gives_back_what_it_jumped(q2)
     assert len(rows) == 6
     q.tap(rows[2][0])  # the third: two jumped
     assert title_of(q, q.opened[-1]) == rows[2][0] and page not in q.pages  # it plays, and Up Next closes
-    q.play_for(3)
-    q.previous_key()  # 3 s in: back to the track the pick left
+    q.play_for(2)
+    q.previous_key()  # 2 s in: back to the track the pick left
     assert q.opened[-1] == first
     q.play_for(SONG)  # on in the order from there: the jumped tracks come back
     assert title_of(q, q.opened[-1]) == rows[0][0]
@@ -1145,7 +1146,7 @@ def test_a_long_episode_paused_and_powered_off_comes_back_at_its_place(q2, resta
     q.play_for(3)
     # Location starts at the second the snapshot kept; Track at 0, and the episode's own place takes it there
     assert q.seeks == ([at] if memory_play == TRACK else []) and at < q.elapsed() <= at + 3
-    # Previous past 10 s: stock starts a track over, but on a place it only asks, and plays on
+    # Previous from 3 s in: stock starts a track over, but on a place it only asks, and plays on
     seeks, opened, toasts, sec = list(q.seeks), len(q.opened), len(q.toasts), q.elapsed()
     q.previous_key()
     q.play_for(4)
