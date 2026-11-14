@@ -2534,8 +2534,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     (out/'empty').mkdir(exist_ok=True)
     newsq = out/'rootfs.squashfs'
     epoch = struct.unpack_from('<I',sq.read_bytes(),8)[0]
+    # On every core: squashfs-tools 4.6.1 wrote the same image with 1, 2, 3, 5, 8 and 16 threads.
     run('mksquashfs',out/'empty',newsq,'-pf',pseudo,'-noappend','-comp','lzo',
-        '-b','131072','-Xcompression-level','9','-tailends','-mkfs-time',epoch,*rootargs,'-processors','1','-no-progress')
+        '-b','131072','-Xcompression-level','9','-tailends','-mkfs-time',epoch,*rootargs,'-no-progress')
     # All inodes, including demo and the logo, keep name/type/mtime/mode/uid/gid (sizes/offsets shift).
     def inodes(image):
         text = subprocess.check_output(['unsquashfs','-pf','-',str(image)]).split(b'\n# START OF DATA')[0]
