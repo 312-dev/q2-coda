@@ -3134,7 +3134,7 @@ static int play(void *ctx, void *event) {
     int i = (int)(long)ctx;
     void *t = deque_at(cf.tracks, (unsigned)i);
     /* a server row has no file: catalogue_load plays it, or says why it can't */
-    if (!t || (!catalogue_path(P(t, REC_PATH)) && access(P(t, REC_PATH), 0))) {
+    if (!t || catalogue_missing(P(t, REC_PATH))) {
         page_retitle(cf.page, cf.title, "Storage unavailable");
         return 0;
     }
@@ -3478,7 +3478,7 @@ static int play_all(const void *unused) {
         for (unsigned j = 0; j < deque_size(t); ++j) _deque_push_back(all, deque_at(t, j));
         deque_destroy(t);
     }
-    if (deque_size(all) && !access(P(deque_at(all, 0), REC_PATH), 0))
+    if (deque_size(all) && !catalogue_missing(P(deque_at(all, 0), REC_PATH)))
         play_folder(all, 0, 0xf001);
     else
         widget_set_text_utf8(cf.name, "Storage unavailable");

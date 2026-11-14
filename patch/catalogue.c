@@ -1119,6 +1119,10 @@ int catalogue_unavailable(void *r) { return path_unavailable(r ? P(r, REC_PATH) 
 int catalogue_access(const char *path, int mode) {
     return catalogue_path(path) ? -path_unavailable(path) : access(path, mode);
 }
+/* A list's check before it plays from path, its first or pressed song: whether path is a card
+ * file that isn't there (the card away). A server row has no file of its own and passes, so
+ * ringnav_load (catalogue_load) plays it, or says why it can't. */
+int catalogue_missing(const char *path) { return !catalogue_path(path) && access(path, 0); }
 /* A server row's seconds for durations.c, -1 for any other path. */
 int catalogue_seconds(const char *path) {
     const cat_ent *e = catalogue_path(path) ? cat_lookup(path) : 0;

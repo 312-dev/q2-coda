@@ -518,7 +518,7 @@ static int era_pick(void *ctx, void *event) {
             toast("Era unavailable"); /* as a decade's albums: not a card that's away */
             return 0;
         }
-        if (!deque_size(all) || access(P(deque_at(all, 0), REC_PATH), 0))
+        if (!deque_size(all) || catalogue_missing(P(deque_at(all, 0), REC_PATH)))
             toast("Storage unavailable");
         else if (i)
             shuffle_play(all);
