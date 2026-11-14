@@ -2175,8 +2175,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     pages = {ui+PLAYING_STOCK: (ui+'playing_page.bin', english_ui(PLAYING_PAGE, playing_stock(cat(ui+'playing_page.bin')))), **set_pages}
     added = []
     changed_assets = {}
-    from art import images as theme_images
-    drawn = {xx+n+'.png': (xx+'list_tidal.png', d) for t in builtin_themes() for n, d in theme_images(t).items()}
+    from art import theme_images
+    drawn = {xx+n+'.png': (xx+'list_tidal.png', d) for n, d in theme_images(builtin_themes()).items()}
     for path, (like, data) in {**{xx+n: (xx+l, d) for n, (l, d) in icons.items()}, **pages, **drawn,
                                'etc/init.d/S12usbcharge': ('etc/init.d/S20urandom', (ROOT/'patch/usb_charge.sh').read_bytes()),
                                HELPER: (HELPER_LIKE, compile_helper(out, cat, 'video', 'q2video', HELPER_LIBS)),

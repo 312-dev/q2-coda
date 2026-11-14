@@ -447,20 +447,21 @@ def client(q2):
 @in_fork
 def test_classic_asks_to_restart_and_boots_into_its_own_geometry(fw, library, tmp_path):
     q2 = Q2(fw, library, tmp_path)
-    themes = [t['name'] for t in host.tools_theme.builtins()]  # by index: IPOD THEME
+    builtins = host.tools_theme.builtins()  # by index: IPOD THEME
+    themes = [t['name'] for t in sorted(builtins, key=lambda t: t['order'])]  # the picker's rows
     names, values, sites = boot(q2)
     assert q2.protect == [] and written(q2, 0) == []  # Minimal is SET0, what stock's text holds
     minimal = client(q2)
     appearance(q2)
     q2.screen.click('Theme')
-    assert sorted(q2.screen.rows()) == sorted(themes)  # a row for each theme in assets/themes
+    assert q2.screen.rows() == themes  # a row for each theme in assets/themes, in their order
     q2.confirm = 0  # Cancel
     q2.screen.click('Classic')
     assert q2.dialogs == ['dialog/confirminfo_dialog'] and q2.flash.get('IPOD', 'THEME') is None
     assert not q2.fw.calls('stock_reboot_trampoline')
     q2.confirm = 10
     q2.screen.click('Classic')
-    assert q2.flash.get('IPOD', 'THEME') == str(themes.index('Classic'))
+    assert q2.flash.get('IPOD', 'THEME') == str(next(t['index'] for t in builtins if t['name'] == 'Classic'))
     assert len(q2.fw.calls('stock_reboot_trampoline')) == 1
     assert q2.flash.get('IPOD', 'LIGHT') == '1'  # with its presets: Classic is light (its theme.xml)
     appearance(q2)

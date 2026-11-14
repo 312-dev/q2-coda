@@ -22,6 +22,10 @@ assert manifest.get('compact_code')
 from ipod import INC, O  # patch/offsets.inc and its integer #defines
 from theme import MOTION_WIDGET, MOTION_WINDOW, SCHEME_MODE_OFF, THEME_GEOM_OFF, THEME_MOTION_OFF, builtins as theme_builtins, geometry_sets
 from theme import derive_gloss, turn, GLOSS_TOP  # tools/theme.py: the derived accents' bands
+PAST_THEMES=str(len(theme_builtins()))  # a stored THEME past the last theme: read as Minimal's 0
+PICKER=sorted(theme_builtins(),key=lambda t:t['order'])  # the Theme picker's rows (theme_rows)
+PICK_ROW={t['index']:i for i,t in enumerate(PICKER)}  # stored THEME -> its picker row
+def picker_marks(stored): return ['select' if t['index']==stored else 'unselect' for t in PICKER]  # the tick on the stored theme's row
 GEOMS=[g.name for g in geometry_sets(theme_builtins())]; GEOM_CLASSIC_LIGHT,GEOM_CLASSIC_LIGHT_TEXT=GEOMS.index('classic-light'),GEOMS.index('classic-light-text')
 DC=O['DOUBLE_CLICK_MS']  # centre double-press window
 # iPod accent presets: {gradient top, bottom, light tone, red tone, highlight} per Accent setting value.
@@ -11391,7 +11395,7 @@ M={'THEME':'2'}
 for config,preset in (({},0),({**C,K:'1'},1),({**C,K:'2'},2),({**C,K:'3','HOME':'1'},3),({**C,K:'7'},BLUE),({**C},BLUE),
                       ({**C,K:'12'},BLUE),({**C,K:'4'},4),({**C,K:'5'},5),({**C,K:'6'},6),({**C,K:'9'},BLUE),({'ACCENT':'1'},0),
                       ({'MINIMAL_ACCENT':'1'},1),({'MINIMAL_ACCENT':'6'},6),({'MINIMAL_ACCENT':'7'},0),({'MINIMAL_ACCENT':'8'},8),({**C,K:'8'},8),
-                      ({**C,'MINIMAL_ACCENT':'2'},BLUE),({**C,'ACCENT':'2'},BLUE),({'ACCENT':'2','THEME':'0'},0),({'MINIMAL_ACCENT':'2','THEME':'3'},2),  # 3: past the themes, Minimal
+                      ({**C,'MINIMAL_ACCENT':'2'},BLUE),({**C,'ACCENT':'2'},BLUE),({'ACCENT':'2','THEME':'0'},0),({'MINIMAL_ACCENT':'2','THEME':PAST_THEMES},2),  # past the themes: Minimal
                       ({**M,'ACCENT':'1'},1),({**M,'ACCENT':'2'},2),({**M,'ACCENT':'3','HOME':'1'},3),({**M,'ACCENT':'7'},0),({**M},0),
                       ({**M,'ACCENT':'12'},0),({**M,'ACCENT':'4'},4),({**M,'ACCENT':'8'},8),({**M,'MINIMAL_ACCENT':'2'},0),({**M,K:'2'},0)):
     m=Machine(); m.config=config
@@ -11472,7 +11476,7 @@ assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACC
 # tones; Modern's stored Ivory and an out-of-range ACCENT are Graphite's scheme; a missing MINIMAL_ACCENT is Graphite, a stored Ivory
 # the card (flags 1); Crimson is raw red (flags 2) in each.
 K,BLUE='CLASSIC_LIGHT_ACCENT',4  # Cobalt's row
-for config,name,want in (({},'Minimal',0),({'MINIMAL_ACCENT':'7'},'Minimal',7),({'THEME':'1'},'Classic',BLUE),({'THEME':'3','MINIMAL_ACCENT':'3'},'Minimal',3),
+for config,name,want in (({},'Minimal',0),({'MINIMAL_ACCENT':'7'},'Minimal',7),({'THEME':'1'},'Classic',BLUE),({'THEME':PAST_THEMES,'MINIMAL_ACCENT':'3'},'Minimal',3),
                          ({'THEME':'1',K:'7'},'Classic',BLUE),({'THEME':'1',K:'12'},'Classic',BLUE),
                          ({'THEME':'1',K:'1'},'Classic',1),({'MINIMAL_ACCENT':'1'},'Minimal',1),({'THEME':'1',K:'8'},'Classic',8),
                          ({'THEME':'2'},'Modern',0),({'THEME':'2','ACCENT':'7'},'Modern',0),({'THEME':'2','ACCENT':'12'},'Modern',0),
@@ -12710,13 +12714,13 @@ def check_row(m,item,slot):
 # theme's select draws the tick, the others' unselect nothing, and the picker opens on it. Any other leading image still hides.
 m,view=settings('display',default=32,sub=4,boot=classic_light_on); m.rockbox_mode=0; lay(m,view)
 marks=[m.nodes[m.nodes[r]['children'][0]]['children'][0] for r in m.nodes[view]['children']]
-assert [m.nodes[i]['image'] for i in marks]==['unselect','unselect','select'] and all(m.nodes[i]['visible'] for i in marks)  # Classic is last
+assert [m.nodes[i]['image'] for i in marks]==picker_marks(1) and all(m.nodes[i]['visible'] for i in marks)  # Classic's row ticked
 assert {geometry(m,i) for i in marks}=={(375-SET['EDGE']-50,0,50,32)},[geometry(m,i) for i in marks]
-assert m.paint(view)==0 and m.selected(view)==2,m.selected(view)
+assert m.paint(view)==0 and m.selected(view)==PICK_ROW[1],m.selected(view)
 # Opened by a tap, its first paint comes with the pointer still down, which keeps other lists from recalling: a picker arrives
 # on its option all the same, so a Centre there does not take the first row. Language's the same.
 m,view=settings('display',default=32,sub=4,boot=classic_light_on); lay(m,view); m.pressed=1
-assert m.paint(view)==0 and m.selected(view)==2,m.selected(view)
+assert m.paint(view)==0 and m.selected(view)==PICK_ROW[1],m.selected(view)
 m=classic_light_on(Machine()); m.pressed=1; w,es=m.page_list(4,name='language_page'); m.nodes[es[2]]['children']=[m.node('image',image='select')]
 m.paint(w); assert m.selected(w)==2,m.selected(w)
 m=classic_light_on(Machine()); m.pressed=1; w,es=m.page_list(4,name='display_page'); m.paint(w); assert m.selected(w)==0,m.selected(w)
@@ -12729,10 +12733,10 @@ passed()
 # would take Minimal, whose presets overwrite Light Mode, accent and corners.
 m,view=settings('display',sub=4,boot=lambda k:k.config.update(THEME='2')); lay(m,view)
 marks=[m.nodes[m.nodes[r]['children'][0]]['children'][0] for r in m.nodes[view]['children']]
-assert [m.nodes[i]['image'] for i in marks]==['unselect','select','unselect'] and geometry(m,marks[0])[0]==SET['ICON_X']  # Modern is second
-m.paint(view); assert m.selected(view)==1,m.selected(view)
+assert [m.nodes[i]['image'] for i in marks]==picker_marks(2) and geometry(m,marks[0])[0]==SET['ICON_X']  # Modern's row ticked
+m.paint(view); assert m.selected(view)==PICK_ROW[2],m.selected(view)
 m,view=settings('display',sub=4,boot=lambda k:k.config.update(THEME='2')); lay(m,view); m.pressed=1
-m.paint(view); assert m.selected(view)==1,m.selected(view); passed()
+m.paint(view); assert m.selected(view)==PICK_ROW[2],m.selected(view); passed()
 # A stock row with a second text line under its title (Bluetooth's Quality, 0x4c39e8: the title at y 12, the
 # detail at y 44 of its 70 px body), under a set whose row is too short for both (Classic's 32), takes two rows, so
 # nothing overlaps the next row. Its one-line neighbours keep the set's row, and a row at SET0's height stays.
@@ -12852,12 +12856,12 @@ assert CL_SEL(2) in [b[4] for b in m.bands]; passed()
 accent_row=m.nodes[view]['children'][3]; f,ctx=m.handler(m.nodes[accent_row]['children'][0],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
 m.paint(view); assert CL_SEL(3) in [b[4] for b in m.bands] and CL_SEL(2) not in [b[4] for b in m.bands]; passed()
 # Appearance is Theme, then the theme's options in order: Classic opened fresh with a stored Ivory shows Classic Blue, Modern
-# Graphite; THEME=3 is Minimal.
+# Graphite; a THEME past the themes is Minimal.
 m,view,rows=display({'THEME':'1','CLASSIC_LIGHT_ACCENT':'7'})
 assert [row_text(r) for r in m.nodes[view]['children']][:4]==['Theme: Classic','Status Bar: Theme','Light Mode: Off','Accent: Classic Blue']
 m,view,rows=display({'THEME':'2','ACCENT':'7'})
 assert [row_text(r) for r in m.nodes[view]['children']]==['Theme: Modern','Status Bar: Theme','Light Mode: Off','Accent: Graphite','Rounded Corners','Home: Split','Shortcut: Rockbox','Battery: Icon','Time in Title','Centred Now Playing']
-m,view,rows=display({'THEME':'3'})
+m,view,rows=display({'THEME':PAST_THEMES})
 assert [row_text(r) for r in m.nodes[view]['children']]==['Theme: Minimal','Status Bar: Theme','Light Mode: Off','Accent: Ivory','Rounded Corners','Home: Split','Shortcut: Rockbox','Battery: Icon','Time in Title','Centred Now Playing']
 passed()
 # Classic's stops painter: a 52 px selected row is the #94c7de top line, Classic Blue's six stops over the
@@ -13173,13 +13177,14 @@ m,view,rows=display({'THEME':'1'}); f,ctx=m.handler(m.nodes[rows[3]]['children']
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==('systemset/display_page',None)
 assert m.get(payload_syms['display_sub'])==0 and not [c for c in m.calls if c[0]=='write_int_config']
 m,view,_=display({},sub=4)
-assert [row_text(r) for r in m.nodes[view]['children']]==['Minimal','Modern','Classic'] and m.icons_set==['select','unselect','unselect']
-m,view,_=display({'THEME':'2'},sub=4); assert m.icons_set==['unselect','select','unselect']  # the tick by stored THEME
+assert [row_text(r) for r in m.nodes[view]['children']]==[t['name'] for t in PICKER] and m.icons_set==picker_marks(0)
+assert [t['name'] for t in PICKER]==['Minimal','Modern','Classic','OLED']  # as shipped
+m,view,_=display({'THEME':'2'},sub=4); assert m.icons_set==picker_marks(2)  # the tick by stored THEME
 # The current theme's own row does nothing; a live pick (Minimal to Modern, one set) applies at once and moves the check.
 m,view,rows=display({}); pview=display_page(m,4); m.calls=[]
 assert m.call(address=payload_syms['theme_pick'],args=(0,0,0,0),gap=0)==0 and not [c for c in m.calls if c[0]=='write_int_config']
 writes=pick_theme(2); assert [(w[0],m.text(w[2])) for w in writes][:1]==[(2,'THEME')] and row_text(rows[3])=='Theme: Modern'
-assert [m.nodes[m.nodes[m.nodes[r]['children'][0]]['children'][0]]['image'] for r in m.nodes[pview]['children']]==['unselect','select','unselect']  # Modern's row is the second
+assert [m.nodes[m.nodes[m.nodes[r]['children'][0]]['children'][0]]['image'] for r in m.nodes[pview]['children']]==picker_marks(2)  # Modern's row
 # Classic needs its own set: the confirm asks; Cancel writes nothing and stays Minimal; OK writes THEME and Classic's
 # presets in option order (Light Mode On unless Auto is stored; Classic Blue; Time in Title, Library on Home and Row Art
 # On where they were Off; the battery as stored), then restarts through device_reboot (the queue saved first); the
@@ -13227,12 +13232,12 @@ for i,key,label in ((8,'HOMELIB','Library on Home'),(9,'ROWPREVIEW','Row Preview
     assert [(c[1],m.text(c[3])) for c in m.calls if c[0]=='write_int_config']==[(0,key)],key
 passed()
 # The restart test applies the chosen theme's presets: from a booted Classic with Row Art Off (classic-light-text),
-# Classic with its preset (On) boots classic_light, another set; with Row Art On, the set running. Minimal and Modern:
-# always. From SET0, Classic restarts and Minimal and Modern don't.
+# Classic with its preset (On) boots classic_light, another set; with Row Art On, the set running. OLED, on Classic's
+# sets, as Classic. Minimal and Modern: always. From SET0, Classic and OLED restart and Minimal and Modern don't.
 for art,want in (('0',1),('1',0)):
     k=Machine(); k.config['ROWART']=art; classic_light_boot(k)
-    assert [k.call(address=payload_syms['theme_restart'],args=(t,0,0,0),gap=0) for t in (1,0,2)]==[want,1,1],art
-k=Machine(); assert [k.call(address=payload_syms['theme_restart'],args=(t,0,0,0),gap=0) for t in (0,1,2)]==[0,1,0]
+    assert [k.call(address=payload_syms['theme_restart'],args=(t,0,0,0),gap=0) for t in (1,0,2,3)]==[want,1,1,want],art
+k=Machine(); assert [k.call(address=payload_syms['theme_restart'],args=(t,0,0,0),gap=0) for t in (0,1,2,3)]==[0,1,0,1]
 passed()
 # Classic's rows take its font inline in every state, at its title size, once (a second layout writes
 # nothing); a title outside the font's characters falls back to bold.ttf (Cyrillic) or, when bold

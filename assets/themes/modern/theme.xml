@@ -1,8 +1,8 @@
 <!-- Theme: Modern (IPOD/THEME 2, docs/ipod.md#display-settings): the accent's bar over Minimal's layout. Its numbers (Home rows, the settings top, the progress bar, the scheme
      colours) come from patch/offsets.inc via tools/theme.py ROLE_MACROS. -->
-<theme format="1" id="modern" name="Modern" index="2" extends="minimal">
+<theme format="1" id="modern" name="Modern" index="2" order="1" extends="minimal">
   <colorSchemes accents="graphite crimson tidal champagne cobalt tangerine plum green"/>
-  <option key="STATUSBAR" label="Status Bar" default="Theme" preset="Theme"><value label="Theme"/><value label="Minimal"/><value label="Modern"/><value label="Classic"/></option>
+  <option key="STATUSBAR" label="Status Bar" default="Theme" preset="Theme"><value label="Theme"/><value themes="picker"/></option>
   <option setting="light" preset="on" keep="auto"/>
   <option setting="accent" key="ACCENT" default="graphite" preset="cobalt"/>
   <option setting="corners" preset="square"/>

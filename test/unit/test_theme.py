@@ -119,7 +119,8 @@ def opt(setting, default=-1, preset=-1, keep=-1, values=0):
 def own(key, label, names, sets, default=-1, preset=-1, keep=-1):  # a theme's own option, as resolve() keeps it
     return {**opt('SETTING_OWN', default, preset, keep), 'key': key, 'label': label, 'names': list(names), 'sets': sets and list(sets)}
 HOMELIB, ROWPREVIEW = (own(k, label, ('Off', 'On'), None, default=1, preset=1) for k, label in (('HOMELIB', 'Library on Home'), ('ROWPREVIEW', 'Row Preview')))
-STATUSBAR = own('STATUSBAR', 'Status Bar', ('Theme', 'Minimal', 'Modern', 'Classic'), None, default=0, preset=0)
+PICKER = sorted(theme.builtins(), key=lambda t: t['order'])  # the Theme picker's rows
+STATUSBAR = own('STATUSBAR', 'Status Bar', ('Theme', *(t['name'] for t in PICKER)), None, default=0, preset=0)
 
 
 CLASSIC_THUMB = dict(thumb=1, ticks_turn=36, ticks_album=7, fast_at=23, fast_full=90, top_speed=20, track=30, snap=25, spin=130, far_left=250,
@@ -146,7 +147,7 @@ MOTION_TODAY = {**{f'motion.{k}.{a}': 0 for k in ('page', 'playing', 'coverflow'
 MINIMAL = {
     **MOTION_TODAY,
     'page_row': 48, 'page_detail': 64, 'page_title_h': 48, 'page_x': 36, 'page_cap_y': 4, 'page_cap_h': 32, 'page_det_y': 36, 'page_det_h': 24,
-    'id': 'minimal', 'index': 0, 'name': 'Minimal', 'accents': 0x1ff, 'accent_key': 'MINIMAL_ACCENT',
+    'id': 'minimal', 'index': 0, 'order': 0, 'art_id': 'minimal', 'name': 'Minimal', 'accents': 0x1ff, 'accent_key': 'MINIMAL_ACCENT',
     'painter[PAINT_SELECTION]': 0, 'painter[PAINT_BAR]': 0, 'painter[PAINT_BATTERY]': 0, 'chevron_home': 0, 'chevron_sel': 0, 'caps_mark': 1, 'caps_home': 1, 'caps_np': 1,
     'icons_mono': 1, 'icons_badge_muted': 1, 'icons_addon_mono': 1, 'icons_badge_ink': 0, 'art_final': 0, 'font[ROLE_NP]': 0, 'font[ROLE_INFO]': 0, 'font_px[ROLE_INFO]': 0, 'np_info_value': 0, 'np_album_op': 0, 'np_state_op': 0,
     'home_top': 8, 'home_full_row': 375, 'home_text_x': 39, 'home_label_end[0]': 8, 'home_label_end[1]': 33,
@@ -158,7 +159,7 @@ MINIMAL = {
              opt('SETTING_BATTERY'), opt('SETTING_TIMETITLE', preset=1), opt('SETTING_NPCENTRED')], 'undeclared': [], **CF_TODAY}
 # Modern: the hand-written table's Classic, before Classic took Classic Light's look.
 MODERN = {
-    **MINIMAL, 'id': 'modern', 'index': 2, 'name': 'Modern', 'accents': 0x17f, 'accent_key': 'ACCENT',
+    **MINIMAL, 'id': 'modern', 'index': 2, 'order': 1, 'art_id': 'modern', 'name': 'Modern', 'accents': 0x17f, 'accent_key': 'ACCENT',
     'painter[PAINT_SELECTION]': 2, 'chevron_home': 1, 'caps_mark': 0, 'caps_home': 0, 'caps_np': 0,
     'icons_mono': 0, 'icons_badge_muted': 0, 'icons_addon_mono': 0, 'font[ROLE_NP]': 1, 'np_album_op': 255, 'np_state_op': 255,
     'home_top': 0, 'home_full_row': 369, 'home_text_x': 33, 'home_label_end[0]': 33, 'home_label_end[1]': 33,
@@ -179,6 +180,12 @@ def resolved(body, attrs='id="t" name="T" index="2" extends="minimal"'):
     return theme.resolve(root, {**by_id, root.attrs.get('id', ''): root})
 
 
+def three():
+    """Minimal, Classic and Modern (index 0..2): the tests that pin their own values. OLED (index 3) extends Classic
+    and changes nothing (test_oled_is_a_placeholder)."""
+    return theme.builtins()[:3]
+
+
 def set0_builtins():
     """Minimal and Modern: the engine's tests of two themes on the built-in set."""
     b = theme.builtins()
@@ -186,8 +193,8 @@ def set0_builtins():
 
 
 def set0_themes(tmp_path):
-    """Minimal and Modern in tmp_path, Modern at index 1 (no Classic between them)."""
-    shutil.copytree(THEMES, tmp_path, dirs_exist_ok=True, ignore=shutil.ignore_patterns('classic-light'))
+    """Minimal and Modern in tmp_path, Modern at index 1 (no Classic between them, and no OLED, which extends it)."""
+    shutil.copytree(THEMES, tmp_path, dirs_exist_ok=True, ignore=shutil.ignore_patterns('classic-light', 'oled'))
     p = tmp_path/'modern'/'theme.xml'
     p.write_text(p.read_text().replace('index="2"', 'index="1"'))
 
@@ -204,7 +211,10 @@ def test_frozen_table():
 
 
 def test_extends():
-    assert bare(resolved('', 'id="t" name="T" index="2" extends="modern"')) == {**MODERN, 'id': 't', 'name': 'T', 'index': 2}
+    # its own row in the picker, so Status Bar lists it too, last at order 9
+    statusbar = {**STATUSBAR, 'names': [*STATUSBAR['names'], 'T']}
+    assert bare(resolved('', 'id="t" name="T" index="2" order="9" extends="modern"')) == {
+        **MODERN, 'id': 't', 'name': 'T', 'index': 2, 'order': 9, 'art_id': 't', 'opts': [statusbar, *MODERN['opts'][1:]]}
     assert resolved('<option setting="accent" key="ACCENT"/>', 'id="t" name="T" index="2" extends="modern"')['opts'] == [opt('SETTING_ACCENT', values=0x17f)]
     t = resolved('<colorSchemes accents="cobalt green"/><option setting="accent" key="ACCENT" default="cobalt"/>',
                  'id="t" name="T" index="2" extends="modern"')
@@ -310,7 +320,7 @@ C = '<colorSchemes accents="cobalt"/><option setting="accent" key="ACCENT" defau
     (C.replace('"cobalt"/>', '"cobalt green"/>', 1) + '<colorScheme name="cobalt" sel.stops="#08a6e7 0, #0065d6 100"/>'
      '<view name="list"><element name="selection" painter="stops"/></view>', None, "selection: painter stops needs every offered scheme's sel.stops"),
     ('<view name="bar"><element name="battery" painter="classic-light"/></view>', None, 'battery: this painter needs stops'),
-    (C + '<view name="pages"><element name="own" art_final="1"/></view>', None, "pages.own: art_final is for classic-light's own images only"),
+    (C + '<view name="pages"><element name="own" art_final="1"/></view>', None, 'pages.own: art_final is for classic-light\'s own images only; a theme drawing them states art="classic-light"'),
 ])
 def test_validate_rejects(body, attrs, message):
     t = resolved(body, *([attrs] if attrs else []))
@@ -356,7 +366,7 @@ def test_builtins_rejects(tmp_path):
     put('b', 'id="c" name="B" index="1"')
     assert error(theme.builtins, tmp_path) == 'b/theme.xml:1: id c is not its folder name'
     put('b', 'id="b" name="B" index="0"')
-    assert error(theme.builtins, tmp_path) == 'b/theme.xml:1: index 0, expected 1'
+    assert error(theme.builtins, tmp_path) == "b/theme.xml:1: index 0 is a/theme.xml's too"
     (tmp_path/'b'/'theme.xml').write_text('<theme format="1" id="b" name="B" index="1"><option setting="accent"/></theme>')
     assert error(theme.builtins, tmp_path) == 'b/theme.xml:1: accent: no key'
 
@@ -390,6 +400,64 @@ def test_builtins_rejects_a_duplicate_id(tmp_path):
         (tmp_path/folder).mkdir()
         (tmp_path/folder/'theme.xml').write_text(f'<theme format="1" id="a" name="A" index="0"><option setting="accent" key="ACCENT"/>{CF_LO}</theme>')
     assert error(theme.builtins, tmp_path) == "b/theme.xml:1: id a is a/theme.xml's too"
+
+
+def test_builtins_rejects_a_duplicate_index(tmp_path):
+    """index is the stored THEME: two themes on one would share a unit's setting."""
+    shutil.copytree(THEMES, tmp_path, dirs_exist_ok=True)
+    p = tmp_path/'modern'/'theme.xml'
+    p.write_text(p.read_text().replace('index="2"', 'index="1"'))
+    assert error(theme.builtins, tmp_path) == "modern/theme.xml:3: index 1 is classic-light/theme.xml's too"
+
+
+def picker_themes(tmp_path, orders):
+    """The built-ins in tmp_path, each theme.xml's order replaced from orders (id -> attribute text, None: left out)."""
+    shutil.copytree(THEMES, tmp_path, dirs_exist_ok=True)
+    for tid, o in orders.items():
+        p = tmp_path/tid/'theme.xml'
+        text = re.sub(r' order="\d"', '' if o is None else f' order="{o}"', p.read_text(), count=1)
+        p.write_text(text)
+    return theme.builtins(tmp_path)
+
+
+def test_picker_order_is_the_theme_files(tmp_path):
+    """The picker lists each theme by its order, the stored THEME its index: Minimal, Modern, Classic, as shipped."""
+    ts = theme.builtins()
+    picked = sorted(ts, key=lambda t: t['order'])
+    assert [t['id'] for t in picked[:3]] == ['minimal', 'modern', 'classic-light']
+    assert [t['index'] for t in ts[:3]] == [0, 1, 2] and [t['id'] for t in ts[:3]] == ['minimal', 'classic-light', 'modern']
+    inc = boot_inc(tmp_path, ts)
+    assert f'const unsigned char theme_rows[THEME_N] = {{{", ".join(str(t["index"]) for t in picked)}}};' in inc
+    assert 'extern const unsigned char theme_rows[THEME_N];' in inc
+    # swapping two orders swaps their rows, with no other edit
+    (tmp_path/'x').mkdir()
+    swapped = picker_themes(tmp_path/'x', {'modern': 2, 'classic-light': 1})
+    assert boot_inc(tmp_path/'x', swapped).count('const unsigned char theme_rows[THEME_N] = {0, 1, 2') == 1
+    # and Status Bar follows the picker
+    assert next(o for o in swapped[0]['opts'] if o.get('key') == 'STATUSBAR')['names'][:4] == ['Theme', 'Minimal', 'Classic', 'Modern']
+
+
+def test_picker_order_defaults_to_the_index(tmp_path):
+    assert [t['order'] for t in picker_themes(tmp_path, {'minimal': None})][0] == 0
+
+
+@pytest.mark.parametrize('orders, message', [
+    ({'modern': 2}, "modern/theme.xml:3: order 2 is classic-light/theme.xml's too"),
+    ({'modern': 9}, 'classic-light/theme.xml:4: order 2, expected 1: the picker has no row 1'),
+    ({'modern': 'x'}, 'modern/theme.xml:3: order: expected a digit')])
+def test_builtins_rejects_a_duplicate_or_a_gap_in_the_order(tmp_path, orders, message):
+    assert error(picker_themes, tmp_path, orders) == message
+
+
+@pytest.mark.parametrize('body, message', [
+    ('<option key="STATUSBAR" label="Status Bar" default="Theme"><value label="Theme"/><value label="Minimal"/></option>',
+     'STATUSBAR: expected <value label="..."/><value themes="picker"/>: the theme\'s own, then every theme'),
+    ('<option key="STATUSBAR" label="Status Bar" default="Theme"><value label="Theme"/><value themes="all"/></option>',
+     'value.themes: unknown value all'),
+    ('<option key="HOMELIB" label="Library on Home" default="Off"><value label="Off"/><value themes="picker"/></option>',
+     'HOMELIB: themes is for STATUSBAR, which the payload maps by the picker')])
+def test_picker_values_reject(body, message):
+    assert error(resolved, body).endswith(message)
 
 
 def test_validate_rejects_unset_coverflow():
@@ -454,7 +522,14 @@ def test_home_rows_font_is_the_home_role():
 
 
 def test_resolve_takes_a_long_name():
-    assert resolved('', f'id="t" name="{"é" * 24}" index="2" extends="minimal"')['name'] == 'é' * 24
+    assert resolved('', f'id="t" name="{"é" * 24}" index="2"')['name'] == 'é' * 24
+
+
+def test_status_bar_takes_a_name_as_a_value():
+    """Status Bar's values name every theme, and a value's label holds 24 bytes."""
+    assert resolved('', f'id="t" name="{"é" * 12}" index="2" order="9" extends="minimal"')['opts'][0]['names'][-1] == 'é' * 12
+    assert error(resolved, '', f'id="t" name="{"é" * 13}" index="2" extends="minimal"') == (
+        f'minimal/theme.xml:10: STATUSBAR: theme name {"é" * 13} as a value label: expected 1..24 bytes')
 
 
 MINIMAL_FIELDS = [('name', '"Minimal"'), ('painter[PAINT_SELECTION]', 'SEL_CARD'), ('painter[PAINT_BAR]', 'BAR_FLAT'), ('painter[PAINT_BATTERY]', 'BATT_STOCK'), ('chevron_home', 0), ('chevron_sel', 0), ('art_x', 0), ('art_text_x', 0), ('art_text_end', 0), ('art_placeholder', 0), ('row_text_end', 0), ('sep', '{{0}, {0}}'), ('font[ROLE_TALL]', 'FONT_DEFAULT'), ('font_px[ROLE_TALL]', 0), ('chevron_x', 0), ('home_chevron_x', 0), ('letter_raw', 0), ('letter_px', 0), ('caps_mark', 1),
@@ -519,7 +594,7 @@ def test_emit_both(tmp_path):
 
 
 def test_playing_layout_builtins_ipod():
-    assert [t['np_layout'] for t in theme.builtins()] == [0, 0, 0]
+    assert [t['np_layout'] for t in theme.builtins()] == [0] * len(theme.builtins())
 
 
 def test_playing_layout_resolves_centred():
@@ -533,7 +608,7 @@ def test_playing_layout_rejects_unknown():
 
 def test_emit_np_layout(tmp_path):
     theme.emit(theme.builtins(), tmp_path)
-    assert (tmp_path/'themes.inc').read_text().count('.np_layout = NP_IPOD,') == 3
+    assert (tmp_path/'themes.inc').read_text().count('.np_layout = NP_IPOD,') == len(theme.builtins())
 
 
 def test_view_attr():
@@ -544,7 +619,7 @@ def test_view_attr():
 
 # Enum fields and value counts come out as C names, so a reordered or added value is a compile error.
 def test_emit_names_enums_and_counts(tmp_path):
-    inc = boot_inc(tmp_path, theme.builtins())
+    inc = boot_inc(tmp_path, three())
     assert [inc.count(f'.painter[PAINT_SELECTION] = {p},') for p in ('SEL_CARD', 'SEL_STOPS', 'SEL_BAR')] == [1, 1, 1]
     assert inc.count('.np_layout = NP_IPOD,') == 3 and '.np_layout = 0,' not in inc
     for name, (_, values) in theme.SETTINGS.items():
@@ -587,10 +662,10 @@ def test_coverflow_eye_turn_stays_in_range():
         theme.validate({**theme.builtins()[0], 'cf.eye': 1647, 'cf.eye_turn': 400}, 't.xml')
 
 
-def test_coverflow_thumb_is_every_themes():  # the page's numbers, all retunable: Classic's, in all three
+def test_coverflow_thumb_is_every_themes():  # the page's numbers, all retunable: Classic's, in every theme
     assert set(CLASSIC_THUMB) == set(theme.CF_THUMB)
     ts = theme.builtins()
-    assert sorted(t['id'] for t in ts) == ['classic-light', 'minimal', 'modern']
+    assert {'classic-light', 'minimal', 'modern'} <= {t['id'] for t in ts}
     for t in ts:
         assert {a: t[f'cf.{a}'] for a in CLASSIC_THUMB} == CLASSIC_THUMB, t['id']
 
@@ -676,10 +751,10 @@ def test_emit_cf(tmp_path):
 
 # page_list's rows, detail rows and in-page title: 48/64/48 unless a theme sets them (open class).
 def test_page_rows_defaults_and_classic_light():
-    assert [(t['page_row'], t['page_detail'], t['page_title_h']) for t in theme.builtins()] == [(48, 64, 48), (32, 52, 0), (48, 64, 48)]
-    assert [t['page_x'] for t in theme.builtins()] == [O['CF_EDGE'], 20, O['CF_EDGE']]
+    assert [(t['page_row'], t['page_detail'], t['page_title_h']) for t in three()] == [(48, 64, 48), (32, 52, 0), (48, 64, 48)]
+    assert [t['page_x'] for t in three()] == [O['CF_EDGE'], 20, O['CF_EDGE']]
     # a detail row's boxes; a box holds its font at Classic's sizes (a label draws nothing in a shorter one)
-    assert [(t['page_cap_y'], t['page_cap_h'], t['page_det_y'], t['page_det_h']) for t in theme.builtins()] == [(4, 32, 36, 24), (-1, 28, 28, 18), (4, 32, 36, 24)]
+    assert [(t['page_cap_y'], t['page_cap_h'], t['page_det_y'], t['page_det_h']) for t in three()] == [(4, 32, 36, 24), (-1, 28, 28, 18), (4, 32, 36, 24)]
     cl = theme.builtins()[1]
     assert cl['page_cap_h'] >= cl['font_px[ROLE_TALL]'] and cl['page_det_h'] >= cl['font_px[ROLE_META]'] and cl['page_row'] >= cl['font_px[ROLE_TITLE]']
     t = resolved('<view name="page"><element name="rows" height="30" detail_height="56" detail_y="30" detail_h="24"/><element name="title" height="0"/></view>')
@@ -703,7 +778,7 @@ def test_page_rows_reject(body, message):
 
 
 def test_emit_page_rows(tmp_path):
-    theme.emit(theme.builtins(), tmp_path)
+    theme.emit(three(), tmp_path)
     text = (tmp_path/'themes.inc').read_text()
     assert text.count('.page_row = 48,') == 2 and text.count('.page_detail = 52,') == 1 and text.count('.page_title_h = 0,') == 1 and text.count('.page_cap_y = -1,') == 1
 
@@ -719,7 +794,9 @@ def test_set(monkeypatch):
 def minimal_with(geometry):
     text = (theme.ROOT/'assets/themes/minimal/theme.xml').read_text()
     text = re.sub(r'(<theme\b[^>]*>)', r'\1' + geometry, text, count=1)
-    t = theme.resolve(theme.parse(text, 'minimal.xml'), {})
+    by_id = {n.attrs['id']: n for n in map(theme.load, sorted(THEMES.glob('*/theme.xml')))}
+    root = theme.parse(text, 'minimal.xml')
+    t = theme.resolve(root, {**by_id, 'minimal': root})  # the others: Status Bar lists them
     theme.validate(t, 'minimal.xml')
     return t
 
@@ -791,7 +868,7 @@ def test_stops_reject(stops, message):
 
 
 def test_emit_stops(tmp_path):
-    inc = boot_inc(tmp_path, theme.builtins())
+    inc = boot_inc(tmp_path, three())
     # no closing ' }': later roles (the mode, the label) follow sel_text on the line
     assert ('.sel = {6, {0, 17, 38, 58, 79, 100}, {0x08a6e7, 0x009ade, 0x008ade, 0x007dde, 0x006dd6, '
             '0x0065d6}}, .sel_top = 0x94c7de, .sel_edge = 0x004184, .sel_tall_edge = 0x004aa3, .sel_tall_line = 0x688db3, .sel_tall_top = 0x27ade5, .sel_text = 0xffffff') in inc
@@ -826,7 +903,7 @@ def test_theme_level_halves():
 def test_scheme_mode_paper_ink():
     t = resolved('<colorScheme mode="light" light.paper="#ffffff" light.ink="#000000"/>')
     assert {(s['mode'], s['paper'], s['ink']) for s in t['schemes']} == {(1, 0xffffff, 0)}
-    minimal, classic, modern = theme.builtins()
+    minimal, classic, modern = three()
     assert {(s['mode'], s['paper'], s['ink']) for s in minimal['schemes']} == {(0, 0xf4f4f4, 0x161616)}
     assert {(s['mode'], s['paper'], s['ink']) for s in classic['schemes'] if s['sel']} == {(0, 0xffffff, 0)}
     assert (minimal['undeclared'], set0_builtins()[1]['undeclared']) == ([], [])
@@ -988,12 +1065,12 @@ def test_emit_own_scheme(tmp_path):
 
 
 def test_own_option():
-    m, n, c = theme.builtins()
+    m, n, c = three()
     row_art = own('ROWART', 'Row Art', ('Off', 'On'), ('classic-light-text', 'classic-light'), default=1, preset=1)
     assert n['opts'][-1] == row_art and [o['key'] for o in m['opts'] + c['opts'] if o.get('key')] == ['STATUSBAR', 'STATUSBAR']
     assert theme.geometry(n) == CLASSIC_LIGHT and theme.geometry(n, {'ROWART': 'Off'}) == CLASSIC_LIGHT_TEXT
     assert theme.geometry(n, {'ROWART': 'On'}) == CLASSIC_LIGHT and theme.geometry(m, {'ROWART': 'Off'}) is SET0
-    assert theme.theme_keys([m, n]) == {'STATUSBAR': (4, 0, STATUSBAR), 'CLASSIC_LIGHT_ACCENT': (10, 9, None), 'HOMELIB': (2, 1, HOMELIB), 'ROWPREVIEW': (2, 1, ROWPREVIEW), 'ROWART': (2, 1, row_art)}
+    assert theme.theme_keys([m, n]) == {'STATUSBAR': (len(STATUSBAR['names']), 0, STATUSBAR), 'CLASSIC_LIGHT_ACCENT': (10, 9, None), 'HOMELIB': (2, 1, HOMELIB), 'ROWPREVIEW': (2, 1, ROWPREVIEW), 'ROWART': (2, 1, row_art)}
     assert {'ACCENT', 'MINIMAL_ACCENT', 'HOME', 'BATTERY', 'THEME', 'LIGHT', 'VIS'} <= theme.PAYLOAD_KEYS
     assert not {'ROWART', 'CLASSIC_LIGHT_ACCENT'} & theme.PAYLOAD_KEYS and set(theme.ACCENT_KEYS) == {'ACCENT', 'MINIMAL_ACCENT'}
     assert not hasattr(theme, 'ROW_ART_OFF')
@@ -1063,12 +1140,12 @@ def test_builtins_rejects_a_shared_own_key(tmp_path):
 
 
 def test_emit_own_options(tmp_path):
-    inc = boot_inc(tmp_path, theme.builtins())
+    inc = boot_inc(tmp_path, three())
     classic_light_opts = inc.split('static const option_t classic_light_opts[] = {\n')[1].split('};')[0].splitlines()
     assert classic_light_opts[-1] == '    { .setting = SETTING_OWN + 4, .def = 1, .preset = 1, .keep = -1, .values = 0x0 },'
     assert inc.count('.accent_slot = &st.own[1],') == 1 and 'classic_light_accent' not in inc
     assert ('const theme_key_t theme_keys[THEME_KEYS] = {\n'
-            '    { .key = "STATUSBAR", .label = "Status Bar", .names = (const char *const[]){"Theme", "Minimal", "Modern", "Classic"}, .sets = 0, .n = 4, .def = 0 },\n'
+            f'    {{ .key = "STATUSBAR", .label = "Status Bar", .names = (const char *const[]){{{", ".join(f'"{n}"' for n in STATUSBAR["names"])}}}, .sets = 0, .n = {len(STATUSBAR["names"])}, .def = 0 }},\n'
             '    { .key = "CLASSIC_LIGHT_ACCENT", .label = 0, .names = 0, .sets = 0, .n = 10, .def = 9 },\n'
             '    { .key = "HOMELIB", .label = "Library on Home", .names = (const char *const[]){"Off", "On"}, .sets = 0, .n = 2, .def = 1 },\n'
             '    { .key = "ROWPREVIEW", .label = "Row Preview", .names = (const char *const[]){"Off", "On"}, .sets = 0, .n = 2, .def = 1 },\n'
@@ -1081,7 +1158,7 @@ def test_emit_own_options(tmp_path):
 def test_classic_light_sets_from_its_theme_file():
     """Classic's sets are its theme.xml's: classic_light states every Geometry field (SET0's defaults never reach it),
     classic-light-text extends it. No tool names them."""
-    m, n, c = theme.builtins()
+    m, n, c = three()
     assert theme.sets(n) == {'ipod': SET0, 'classic-light': CLASSIC_LIGHT, 'classic-light-text': CLASSIC_LIGHT_TEXT} and theme.geometry(n) == CLASSIC_LIGHT
     assert theme.sets(m) == theme.sets(c) == {'ipod': SET0} and (m['geoms'], c['geoms']) == ({}, {})
     decl = {e.attrs['name']: e.attrs for e in theme.load(THEMES/'classic-light'/'theme.xml').children
@@ -1204,7 +1281,7 @@ def test_emit_refuses_a_set0_redirect(tmp_path):
 
 
 def test_classic_light_builtin():
-    m, n, c = theme.builtins()
+    m, n, c = three()
     assert (n['id'], n['name'], n['index'], n['geom_set'], n['accent_key'], n['accents']) == ('classic-light', 'Classic', 1, 'classic-light', 'CLASSIC_LIGHT_ACCENT', 0x37f)
     assert n['opts'] == [STATUSBAR, opt('SETTING_LIGHT', preset=1, keep=2), opt('SETTING_ACCENT', default=9, preset=9, values=0x37f),
                          opt('SETTING_HOME', preset=0), opt('SETTING_SHORTCUT'), opt('SETTING_BATTERY', default=3, values=0b1011), opt('SETTING_TIMETITLE', preset=1),
@@ -1213,7 +1290,7 @@ def test_classic_light_builtin():
 
 
 def test_emit_classic_light_sets(tmp_path):
-    inc = boot_inc(tmp_path, theme.builtins())
+    inc = boot_inc(tmp_path, three())
     assert 'enum { GEOM_IPOD, GEOM_CLASSIC_LIGHT, GEOM_CLASSIC_LIGHT_TEXT, GEOM_N };' in inc and '#define CLIENT_H_MAX 294' in inc
     assert 'const char *const geom_names[GEOM_N] = {"ipod", "classic-light", "classic-light-text"};' in inc
     assert re.findall(r'\.geom = (\d+)', inc) == ['0', '1', '0'] and '.accent_slot = &st.own[1],' in inc
@@ -1268,7 +1345,7 @@ def test_motion_classic_light(tmp_path):
     light = theme.builtins()[1]
     assert {k.field: light[k.field] for k in theme.SCHEMA.values() if k.cls == 'motion'} == MOTION_CLASSIC_LIGHT
     inc = boot_inc(tmp_path, theme.builtins())
-    assert inc.count('.motion[MOTION_PAGE].hint = 0,') == 3  # every theme's pages: the asset's own
+    assert inc.count('.motion[MOTION_PAGE].hint = 0,') == len(theme.builtins())  # every theme's pages: the asset's own
     assert '.hint = "' not in inc  # no window animates beyond stock's own slide: no push, no dialog fade
 
 
@@ -1328,3 +1405,23 @@ def test_scrollbar_at_the_glass_or_absent_passes():
     theme.validate(resolved('<view name="list"><element name="scrollbar" w="4" right="2" top="59" bottom="261" min="16" thumb="#8f98a8"/></view>'), 't.xml')
     theme.validate(resolved('<view name="list"><element name="scrollbar" w="4" right="2" top="59" bottom="261" min="16" light.thumb="#8f98a8"/></view>'), 't.xml')
     theme.validate(resolved('<view name="list"><element name="scrollbar" right="2" top="0" bottom="320"/></view>'), 't.xml')
+
+
+def test_oled_is_a_placeholder(tmp_path):
+    """OLED (index 3, picker row 3) extends Classic and draws its art, changing nothing else yet: its resolved values
+    are Classic's but for its own id, name, index and order, and it reaches every generated table."""
+    ts = theme.builtins()
+    classic, oled = ts[1], ts[3]
+    own = {'id': 'oled', 'name': 'OLED', 'index': 3, 'order': 3, 'line': oled['line']}
+    assert {k: v for k, v in oled.items() if k not in own} == {k: v for k, v in classic.items() if k not in own}
+    assert oled['art_id'] == 'classic-light' and theme.geometry(oled) == CLASSIC_LIGHT
+    inc = boot_inc(tmp_path, ts)
+    assert inc.count('#define OWN_') == len(theme.theme_keys(three()))  # no key of its own: it shares Classic's
+    assert '        .name = "OLED",' in inc and 'static const scheme_t oled_schemes[] = {' in inc
+    assert re.findall(r'\.geom = (\d+)', inc) == ['0', '1', '0', '1']
+    assert 'const unsigned char theme_rows[THEME_N] = {0, 2, 1, 3};' in inc
+    assert '.names = (const char *const[]){"Theme", "Minimal", "Modern", "Classic", "OLED"}, .sets = 0, .n = 5,' in inc
+
+
+def test_resolve_rejects_an_unknown_art():
+    assert error(resolved, '', 'id="t" name="T" index="2" extends="minimal" art="pico"') == 't.xml:1: art: unknown theme pico'

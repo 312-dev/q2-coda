@@ -422,3 +422,14 @@ def test_the_station_cover_fills_the_slanted_arts_square():
     assert (w, h) == (a, a) and at(0, 0)[3] == at(a - 1, a - 1)[3] == 255  # opaque: the slant's paper never shows
     assert at(a // 2, a - 1)[:3] != at(a // 2, 0)[:3]  # its gradient, top to bottom
     assert min(at(54, 87)[:3]) > 200  # the left wave's white, at its widest
+
+
+def test_a_theme_drawing_anothers_art_shares_its_images():
+    """A theme stating art="classic-light" draws Classic's images, by Classic's names and bytes, packaged once; a value
+    that would draw them otherwise stops the build, as the payload loads one image per name."""
+    light = {**theme.builtins()[1], 'pane_icon_x': 0}
+    other = {**light, 'id': 'other'}  # Classic's values under another id, as a theme extending it resolves
+    assert set(art.images({**other, 'art_id': 'other'})) == {n.replace('classic_light_', 'other_') for n in classic()} - {'other_note'}
+    assert art.theme_images([light, other]) == classic()  # its art_id, Classic's: the same names and bytes
+    with pytest.raises(ValueError, match="other: classic_light_bolt differs from classic-light's, whose art it draws by name"):
+        art.theme_images([light, {**other, 'bolt': 0x123456}])

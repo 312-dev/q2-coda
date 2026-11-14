@@ -8,7 +8,7 @@ import zlib
 from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
-from build import ROOT, need
+from build import ROOT, check, need
 from ipod import CLASSIC_LIGHT_FONT_SRC, STATE_W, inc
 
 SUB = 8  # sub-rows per pixel; columns are exact within a sub-row
@@ -805,9 +805,20 @@ def clock_shadow():
     return png(w, h, compose((0, 0, w, h), [(path(f'M0 {h / 2}A{w / 2} {h / 2} 0 1 1 {w} {h / 2}A{w / 2} {h / 2} 0 1 1 0 {h / 2}Z'), paint)]))
 
 
+def theme_images(themes):
+    """Every theme's images, {name: PNG bytes}, each name once. A theme that draws another's art (its art attribute)
+    makes that theme's names, so its values must draw the same bytes: the payload has one image per name."""
+    out = {}
+    for t in themes:
+        for n, d in images(t).items():
+            check(out.setdefault(n, d) == d, f"{t['id']}: {n} differs from {t['art_id']}'s, whose art it draws by name")
+    return out
+
+
 def images(t):
-    """Theme t's generated images, {name: PNG bytes}; those its values state."""
-    out, prefix = {}, t['id'].replace('-', '_')
+    """Theme t's generated images, {name: PNG bytes}; those its values state, named by the theme whose art it draws
+    (art_id: its own id, or the theme its art attribute names), as the payload loads them by name."""
+    out, prefix = {}, t['art_id'].replace('-', '_')
     if t['chevron_x']:  # white on the band in both halves, its point on the middle row
         out[f'{prefix}_sort_bars'] = png(*SORT_BOX[2:], compose(SORT_BOX, [(path(SORT), lambda x, y: (0xffffff, 1))]))
         out[f'{prefix}_chevron'] = png(*CHEVRON_BOX[2:], compose(CHEVRON_BOX, [
@@ -831,7 +842,7 @@ def images(t):
                     *[(stroke(shape, 2.6), lambda x, y, a=halo / 255: (0xffffff, a))][:halo > 0],  # none at alpha 0
                     (shape, lambda x, y: (fill(y), 1)),
                     (stroke(shape, 1), lambda x, y: (edge(y), 1))]))
-    drawing = ROOT/f'assets/themes/{t["id"]}/note.svg'
+    drawing = ROOT/f'assets/themes/{t["art_id"]}/note.svg'
     if drawing.exists():
         out[f'{prefix}_note'] = png(*NOTE_BOX[2:], note(drawing.read_text()))
     if t['pane_icon_x']:
