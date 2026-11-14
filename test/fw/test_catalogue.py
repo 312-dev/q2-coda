@@ -85,19 +85,18 @@ class Rig:
         fw.mock('toolsReadConfig', self.config)
         fw.mock('navigator_to_with_context', self.navigate)
         fw.mock('ringnav_statx', self.statx)
+        self.opened: dict[int, str] = {}
         self.length = C.CFUNCTYPE(C.c_int, C.c_void_p)(lambda p: self.card[self.opened[p]][1])
-        self.opened = {}
         fw.mock('taglib_file_new', self.taglib_open)
         fw.mock('taglib_file_audioproperties', lambda f, *_: f)
         self.rows = OwnRows(fw)
-        self.rows.fw_strdup = fw.fn('strdup', C.c_void_p, C.c_void_p)
 
 
     def navigate(self, name, info, *_):
         """A toast's dialog, or play_folder's Now Playing with its queue and start."""
         if C.string_at(name) == b'playing_page':
             q, at = C.c_void_p.from_address(info).value, C.c_int.from_address(info + 8).value
-            self.played.append(([C.string_at(C.c_void_p.from_address(r + O['REC_PATH']).value)
+            self.played.append(([C.string_at(C.c_void_p.from_address(r + O['REC_PATH']).value or 0)
                                  for r in self.rows[q]], at))
         else:
             self.toasts.append(C.string_at(info + 8))
@@ -220,6 +219,9 @@ class Rig:
 class OwnRows(Rows):
     """Rows whose copies own their path, as stock's copy does (0x5c65ac): the firmware may free and
     replace it."""
+    def __init__(self, fw):
+        super().__init__(fw)
+        self.fw_strdup = fw.fn('strdup', C.c_void_p, C.c_void_p)
     def push(self, q, v):
         super().push(q, v)
         if (q & 0xffffffff) in self.held:
@@ -391,7 +393,7 @@ def load(rig, q, at):
     own = C.c_void_p()
     kind = rig.fw.fn('catalogue_load', C.c_int, C.c_void_p, C.POINTER(C.c_int), C.POINTER(C.c_void_p))(
         q, C.byref(at_), C.byref(own))
-    paths = [C.string_at(C.c_void_p.from_address(r + O['REC_PATH']).value).decode()
+    paths = [C.string_at(C.c_void_p.from_address(r + O['REC_PATH']).value or 0).decode()
              for r in rig.rows[own.value]] if own.value else None
     return kind, at_.value, paths
 
