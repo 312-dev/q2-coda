@@ -56,7 +56,9 @@ void *ipc_thread(void *);
 /* source.c: one open file or stream, decoded to interleaved PCM in the format the output is opened with. */
 struct pcm_format { int rate, channels, bytes, is_float; /* S16_LE (2 bytes), S32_LE (4) or FLOAT_LE (4, is_float) */ };
 struct source;
-struct source *source_open(const struct song *song, int *error);
+/* cancel, when not NULL, is read during the open: once it is nonzero a blocking read gives up and the open fails. */
+struct source *source_open(const struct song *song, int *error, const int *cancel);
+void source_keep(struct source *); /* it no longer reads the cancel flag it was opened with, which may now be freed */
 void source_close(struct source *);
 const struct pcm_format *source_format(const struct source *);
 void source_info(const struct source *, struct info *);
@@ -74,6 +76,11 @@ void output_pause(struct output *, int on);
 void output_drop(struct output *);     /* forget what is buffered: a seek, a skip, a stop */
 void output_drain(struct output *);    /* play what is buffered to its end */
 void output_close(struct output *);
+/* the headphone DAC (output way 0; nothing on the others) */
+void dac_song(int outputway);              /* at each song's start: PCM mode */
+void dac_mute(int outputway);
+void dac_unmute(int outputway, int wait);  /* wait: hold sound back until the mute line has let go */
+int dac_stamp(int pressed);                /* a fresh press (1) or natural-start mark (0) from demo, each once */
 
 /* engine.c */
 void *engine_thread(void *);

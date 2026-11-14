@@ -16,7 +16,7 @@ Transcript lines are `seconds direction text`: `>` is demo to player, `<` player
 the 200 ms poll is written only when it changes; media-info's position is written as POS and
 sampled in the last line.
 """
-import argparse, os, pathlib, re, select, shutil, socket, subprocess, sys, time
+import argparse, os, pathlib, re, select, shutil, socket, subprocess, sys, threading, time
 
 POLL = ('{player-status\\request}', '{media-info\\get-music-info}')
 
@@ -31,6 +31,13 @@ def song(cmd, path, start=0, cache=512, cache_min=20, flag=0, hw=17):
 def gapless(path, start=0, flag=0):
     """set-gapless as demo's preload sender builds it (demo 0x5baff8): cache -1, 20 percent."""
     return '{set-gapless\\%s|ss=%d|-1|20|%d|90}' % (path.replace('}', '%0x7d'), start, flag)
+
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from music import FORMATS, PAIRS  # noqa: E402
+
+# formats-all's files, in the order they play
+ALL_FORMATS = ['a1.flac', 'f24.flac', 'b1.mp3', 'd.m4a', 'e.ogg', *(n for n, _ in FORMATS)]
 
 
 # A scenario is a list of (seconds from start, command or callable(session)). Paths are the player's.
@@ -68,11 +75,67 @@ def scenarios(m):
         'formats': boot + [(1.0, song('set-songurl', c96)), (4.0, song('set-nexturl', m4a)), (7.0, song('set-nexturl', ogg)), (10.0, '{mcl-stop\\null}'), (12.0, None)],
         # a whole 24-bit 96 kHz song
         'hires': boot + [(1.0, song('set-songurl', c96)), (19.0, None)],
+        # every format demo lists, one after another by set-nexturl: CODEC, BITS, LENGTH, BITRATE and the PCM opened
+        'formats-all': boot + [(1.0 + 2.5 * i, song('set-songurl' if i == 0 else 'set-nexturl', f'{m}/{f}')) for i, f in enumerate(ALL_FORMATS)]
+                       + [(1.0 + 2.5 * len(ALL_FORMATS), '{mcl-stop\\null}'), (3.0 + 2.5 * len(ALL_FORMATS), None)],
+        # a start offset (a resumed song): from 7 s to the end
+        'start': boot + [(1.0, song('set-songurl', a1, start=7)), (16.0, None)],
+        # a CUE sheet's three tracks of one file: demo starts each by ss= and cuts the one before with set-nexturl when
+        # the position reaches the next track's start (demo 0x5c126c)
+        'cue': boot + [(1.0, song('set-songurl', a1)), (6.0, song('set-nexturl', a1, start=5)), (11.0, song('set-nexturl', a1, start=10)), (24.0, None)],
+        # a seek, then to the end: the PCM after it is the reference from the second asked
+        'seek': boot + [(1.0, song('set-songurl', a1)), (3.0, '{mcl-seek\\9}'), (16.0, None)],
+        # a preload that is not audio: the song plays to its end, then the error
+        'badnext': boot + [(1.0, song('set-songurl', a1, flag=1)), (2.0, '{mcl-seek\\12}'), (4.0, gapless(f'{m}/junk.flac', flag=1)), (14.0, None)],
+        # a preload cancelled by a queue edit: the song ends with nothing after it, and demo starts the next itself
+        'cancel': boot + [(1.0, song('set-songurl', a1, flag=1)), (2.0, '{mcl-seek\\12}'), (4.0, gapless(a2, flag=1)), (5.0, '{mcl-closegapless\\null}'),
+                          (13.0, song('set-songurl', b1)), (16.0, '{mcl-stop\\null}'), (18.0, None)],
+        # a preload that opens and has no audio: two ends, which must reach demo at least 300 ms apart
+        'emptynext': boot + [(1.0, song('set-songurl', a1, flag=1)), (2.0, '{mcl-seek\\14}'), (4.0, gapless(f'{m}/empty.flac', flag=1)), (12.0, None)],
+        # an MP3 with 3 MB of junk after its frames, whole: the junk does not play
+        'tail-full': boot + [(1.0, song('set-songurl', f'{m}/tail.mp3')), (25.0, None)],
+        # a preload whose open blocks (a FIFO no one writes yet), cancelled while it blocks; the file then arrives and
+        # must not play. Host only: feed() writes the FIFO from this side.
+        'cancel-open': boot + [(1.0, song('set-songurl', a1, flag=1)), (2.0, '{mcl-seek\\12}'), (4.0, gapless(f'{m}/slow.flac', flag=1)),
+                               (5.0, '{mcl-closegapless\\null}'), (6.0, feed('a2.flac')), (13.0, song('set-songurl', b1)), (16.0, '{mcl-stop\\null}'), (18.0, None)],
+        # a preload the song outruns: its file arrives two seconds after the song's end, and plays then
+        'outrun': boot + [(1.0, song('set-songurl', a1, flag=1)), (2.0, '{mcl-seek\\12}'), (4.0, gapless(f'{m}/slow.flac', flag=1)),
+                          (12.0, feed('a2.flac')), (36.0, None)],
+        # a path with a } in it, which demo writes as %0x7d
+        'brace': boot + [(1.0, song('set-songurl', f'{m}/a}}1.flac')), (3.0, '{mcl-stop\\null}'), (5.0, None)],
+        # every lossless and every lossy format but MP3 and FLAC at 16 bits, whole, each preloaded half a second into
+        # the one before: the PCM is compared with the reference decodes
+        'chain-lossless': chain(m, [n for n, _ in FORMATS if n.rsplit('.', 1)[1] in ('wav', 'aiff', 'm4a', 'wv', 'flac')]),
+        'chain-lossy': chain(m, [n for n, _ in FORMATS if n.rsplit('.', 1)[1] in ('mp2', 'aac', 'opus', 'wma', 'ac3', 'dts')]),
+        **{f'pair-{n}': boot + [(1.0, song('set-songurl', f'{m}/{n}1.{e}', flag=1)), (16.0, gapless(f'{m}/{n}2.{e}', flag=1)), (44.0, None)]
+           for n, e in PAIRS.items()},
         # queries with nothing loaded
         'idle': boot + [(1.0, '{player-status\\request}'), (1.2, '{media-info\\get-music-info}'), (1.4, '{mcl-pcmstate\\null}'),
                         (1.6, '{get_cache_buffer\\null}'), (1.8, '{mcl-getuvmeter\\null}'), (2.0, '{mcl-getspectrum\\null}'), (2.2, '{mcl-pause\\null}'),
                         (2.4, '{mcl-play\\null}'), (2.6, '{mcl-seek\\5}'), (2.8, '{mcl-stop\\null}'), (4.0, None)],
     }
+
+
+def chain(m, names, length=6):
+    """names, each about `length` seconds, one after another: the second's set-gapless half a second into the first,
+    each later one's as the song before it starts (at the exit before), since a change of width drains the PCM first
+    and the songs drift from any fixed times."""
+    boot = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\0}'), (0.1, '{mcl-setvol\\60}')]
+    def queue(s): s.on_exit = [gapless(f'{m}/{n}', flag=1) for n in names[2:]]
+    steps = [(1.0, song('set-songurl', f'{m}/{names[0]}', flag=1)), (1.5, gapless(f'{m}/{names[1]}', flag=1)), (1.6, queue)]
+    return boot + steps + [(3.0 + (length + 1) * len(names), None)]
+
+
+def feed(name):
+    """A step: write the music directory's `name` into its FIFO slow.flac, on a thread, since the write waits for the
+    player to open the FIFO."""
+    def go(s):
+        def write():
+            try:
+                with open(pathlib.Path(s.music)/'slow.flac', 'wb') as f: f.write((pathlib.Path(s.music)/name).read_bytes())
+            except BrokenPipeError: pass  # the player gave up reading: a cancelled preload
+        threading.Thread(target=write, daemon=True).start()
+    return go
 
 
 def cpu_seconds(pid):
@@ -97,6 +160,8 @@ class Session:
         self.srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.srv.bind(str(self.tmp / 'sock_play')); self.srv.listen(1)
         self.lines, self.seen, self.t0, self.conn, self.playing, self.preload, self.speed = [], {}, None, None, False, False, 1
+        self.music = None  # the music directory on this machine, for steps that act on its files
+        self.on_exit = []  # set-gapless commands sent one at each {player-status\\exit}, as demo sends one per song
 
     def note(self, direction, text):
         self.lines.append(f'{self.now():8.3f} {direction} {text}')
@@ -137,6 +202,7 @@ class Session:
                 self.seen[name] = shown
                 # demo stops polling at an exit unless it had sent a preload: then mclNextSong(1) sends nothing and
                 # the player goes on with the preloaded file alone
+                if m == '{player-status\\exit}' and self.on_exit: self.send(self.on_exit.pop(0)); continue
                 if m == '{player-status\\exit}' and self.preload: self.preload = False
                 elif m in ('{player-status\\exit}', '{player-stopstatus\\exit}', '{player-status\\error}'): self.playing = False
 
@@ -151,6 +217,7 @@ class Session:
         for at, what in steps:
             self.pump(self.t0 + at / speed)
             if what is None: break
+            if callable(what): what(self); continue
             if what.startswith(('{set-songurl', '{set-nexturl')): self.playing, self.preload = True, False
             if what.startswith('{set-gapless'): self.preload = True
             if what.startswith('{mcl-closegapless'): self.preload = False
@@ -172,21 +239,32 @@ def launch_host(player, music, speed=1):
     return go
 
 
-def launch_emu(emu, binary, music, name='hciplayer', args=('-ao', 'alsa')):
-    """binary inside a bwrap sandbox of emu/rootfs under qemu, as run.sh starts demo; /tmp is the session's."""
+def launch_emu(emu, binary, music, name='hciplayer', args=('-ao', 'alsa'), stock=None, switch=False, killall=None):
+    """binary inside a bwrap sandbox of emu/rootfs under qemu, as run.sh starts demo; /tmp is the session's.
+    For q2player's fallback (player/main.c): stock is a player to put at /usr/lib/hciplayer-stock/hciplayer, switch
+    makes /mnt/data/q2player, and killall is when, in seconds, a shell in the sandbox runs demo's `killall -9
+    hciplayer`, after writing each process's name and command line to ps.txt."""
     emu = pathlib.Path(emu)
     def go(s):
         (s.out / 'pcm').mkdir(exist_ok=True)
         for f in (s.out / 'pcm').glob('*'): f.unlink()
+        data = s.out / 'data'
+        shutil.rmtree(data, ignore_errors=True); data.mkdir()
+        if switch: (data / 'q2player').touch()
+        extra = ['--bind', data, '/mnt/data'] + (['--ro-bind', stock, '/usr/lib/hciplayer-stock/hciplayer'] if stock else [])
+        run = [f'/usr/bin/{name}', *args]
+        if killall is not None:
+            run = ['/bin/sh', '-c', f'{" ".join(run)} & sleep {killall}; for p in /proc/[0-9]*; do echo "$(cat $p/comm): '
+                   f'$(tr "\\0" " " < $p/cmdline)"; done > /emu-log/ps.txt; killall -9 {name}; echo "killall $?" >> /emu-log/ps.txt; wait']
         cmd = ['bwrap', '--die-with-parent', '--unshare-pid', '--unshare-user', '--uid', '0', '--gid', '0',
                '--bind', emu / 'rootfs', '/', '--proc', '/proc', '--dev', '/dev', '--bind', s.tmp, '/tmp',
                '--ro-bind', music, '/mnt/mmc', '--bind', s.out, '/emu-log', '--ro-bind', emu / 'state', '/emu',
                '--ro-bind', emu / 'state/mtd_debug', '/usr/sbin/mtd_debug',
                '--ro-bind', emu / 'qemu-mipsel-static', '/usr/libexec/qemu-binfmt/mipsel-binfmt-P',
-               '--ro-bind', emu / 'shim/libq2emu.so', '/lib/libq2emu.so', '--ro-bind', binary, f'/usr/bin/{name}',
+               '--ro-bind', emu / 'shim/libq2emu.so', '/lib/libq2emu.so', '--ro-bind', binary, f'/usr/bin/{name}', *extra,
                '--setenv', 'PATH', '/usr/bin:/bin:/usr/sbin:/sbin', '--setenv', 'HOME', '/root',
                '--setenv', 'Q2EMU_LOG', '/emu-log/shim.log', '--setenv', 'Q2EMU_PCM', 'null', '--setenv', 'Q2EMU_PCMDIR', '/emu-log/pcm',
-               '--setenv', 'LD_PRELOAD', '/lib/libq2emu.so', '--chdir', '/tmp', f'/usr/bin/{name}', *args]
+               '--setenv', 'LD_PRELOAD', '/lib/libq2emu.so', '--chdir', '/tmp', *run]
         return subprocess.Popen([str(c) for c in cmd], stdout=open(s.out / 'player.log', 'w'), stderr=subprocess.STDOUT)
     return go
 
@@ -199,13 +277,18 @@ def main():
     ap.add_argument('--player', help='a player built for this machine')
     ap.add_argument('--emu', help='an emulator directory (rootfs/, state/, shim/, qemu-mipsel-static)')
     ap.add_argument('--hciplayer', help='with --emu: the MIPS player binary to run as /usr/bin/hciplayer')
+    ap.add_argument('--stock', help='with --emu: the player q2player falls back to, at /usr/lib/hciplayer-stock/hciplayer')
+    ap.add_argument('--switch', action='store_true', help='with --emu: make /mnt/data/q2player, which turns q2player on')
+    ap.add_argument('--killall', type=float, help="with --emu: run demo's killall -9 hciplayer this many seconds in")
     a = ap.parse_args()
     music = str(pathlib.Path(a.music).resolve())
     if a.emu:
-        launch, m = launch_emu(a.emu, pathlib.Path(a.hciplayer).resolve(), music), '/mnt/mmc'
+        launch, m = launch_emu(a.emu, pathlib.Path(a.hciplayer).resolve(), music, stock=a.stock and pathlib.Path(a.stock).resolve(),
+                               switch=a.switch, killall=a.killall), '/mnt/mmc'
     else:
         launch, m = launch_host(a.player, music), music
     s = Session(a.out)
+    s.music = pathlib.Path(a.music).resolve()
     s.run(scenarios(m)[a.scenario], launch)
     print((s.out / 'transcript.txt').read_text())
 

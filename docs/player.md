@@ -133,7 +133,15 @@ ao_alsa's init (`0x438248`) picks the device from the output way and the hardwar
 
 Parameters: interleaved read/write access, the file's rate (`set_rate_near`), its channels, a 500 ms buffer (`0x4382fc`) in 16 periods (`0x438264`). The format is the decoder's (captured, the shim's log of `snd_pcm_hw_params_set_format`): `S16_LE` for 16-bit FLAC and for MP3, `S32_LE` for 24-bit FLAC, and `FLOAT_LE` for AAC and Vorbis, whose decoders put out float; `default`'s `plug` turns that into what the DAC takes. Where the device refuses a format the init tries others (`0x439060`-`0x439110`, "Format %s is not supported by hardware, trying default"). The player keeps the PCM open across a preloaded change when rate, channels and format are what it last asked for (`0xafb164`-`0xafb16c`), and otherwise closes and reopens. Pause is `snd_pcm_pause`, a seek is `snd_pcm_drop` and `snd_pcm_prepare`.
 
-`/dev/shanling_dac` is opened by the player too: `0xc0044d1b` sets PCM or DSD mode per track, `0xc0044d1f` is `user_mute` in `codec_cs43131.ko` (the mute line follows 90-100 ms after an unmute), and init also sends `0xc0044d0a`. Mutes surround every pause, seek, start and reopen ([internals: Wired start](internals.md#wired-start), [Unpause](internals.md#unpause)).
+`/dev/shanling_dac` is opened by the player too: `0xc0044d1b` sets PCM or DSD mode per track, `0xc0044d1f` is `user_mute` in `codec_cs43131.ko` (the mute line follows 90-100 ms after an unmute), and init also sends `0xc0044d0a`. Mutes surround every pause, seek, start and reopen ([internals: Wired start](internals.md#wired-start), [Unpause](internals.md#unpause)). The order, from the shim's log of stock's player (each argument is a pointer to an `int`):
+
+- **Each song's start**, a preloaded one at the same format included: `0x1b` with 0 (PCM), `0x0a` with 0. The device is opened at the first and kept open.
+- **An open or a reopen** (a start, a skip, another format): mute (1), the old PCM drained and closed, the new one opened and prepared, unmute (0), then frames.
+- **Pause:** mute, `snd_pcm_pause(1)`. **Resume:** `snd_pcm_pause(0)`, unmute.
+- **Seek:** mute, the 150 ms wait, `snd_pcm_drop`, `snd_pcm_prepare`, unmute. Paused, the seek mutes and drops, and the resume unmutes.
+- **Stop:** mute, close. **A natural end with nothing after it:** drain, close, no mute.
+
+Q2 Pod's player adds the wait for the line after an unmute on a press, a seek and a resume, and its resume drops, prepares and rewrites what the ring held ([internals: Unpause](internals.md#unpause)); the shim shows its resume as drop, prepare, unmute.
 
 **DSD** (`.dsf`, `.dff`, SACD `.iso`): mode 0 converts to PCM (MPD's `pcm_dsd`), mode 1 packs DoP (`pcm_dsd_to_dop`: 24-bit PCM frames at the DSD rate over 16 carrying the bits and the `0x05`/`0xFA` markers), mode 2 writes native DSD. `ET3 not force dsd native` (`0x888abc`) and the hardware type gate which modes a given output takes. DSD skips every filter.
 
@@ -195,6 +203,22 @@ By demo's extension list (`0x782904` on, and the scan's table): `.mp3 .mp2 .flac
 | DSF, DFF, SACD ISO | vendor demuxers (`0x47b6fc`, `0x47a684`, `0x478990`) | `DSF`, `DSD`, `ISO` |
 | MQA | plays as the PCM it carries | by its container |
 
+What each reports and how the PCM is opened for it, captured from stock's and Q2 Pod's hciplayer (the two agree on every row) playing one file of each (`fixtures/pod-formats-all.txt`, `stock-formats-all.txt`; the files are `test/player/music.py`'s, 6 s at 44.1 kHz stereo unless named):
+
+| File | `CODEC` | `BITS` | `BITRATE` | ALSA format |
+| --- | --- | --- | --- | --- |
+| FLAC, 16 and 24 bits | `FLAC` | 16, 24 | file size over length | `S16_LE`, `S32_LE` |
+| MP3 (LAME), MP2 | `MP3`, `MP2` | 16 | file size over length | `S16_LE` |
+| WAV, 16, 24 and 32 bits, and float | `WAV` | 16, 24, 32, 32 | rate × channels × bits (1,411,200 at 16) | `S16_LE`, `S24_3LE`, `S32_LE`, `FLOAT_LE` |
+| AIFF, 16, 24 and 32 bits | `AIFF` | 16, 24, 32 | rate × channels × bits | `S16_BE`, `S24_3BE`, `S32_BE` |
+| ALAC, 16 and 24 bits | `ALAC` | 16, 24 | the stream's | `S16_LE`, `S32_LE` |
+| WavPack, 16, 24 and 32 bits | `WMA` (the table has no WavPack entry) | 16, 32, 32 | the stream's | `S16_LE`, `S32_LE`, `S32_LE` |
+| AAC in M4A, ADTS AAC, Vorbis, Opus (48 kHz), WMA 1 and 2 | `AAC`, `OGG`, `OPUS`, `WMA` | 32 | the stream's declared rate | `FLOAT_LE` |
+| AC-3 | `AC2` | 32 | the stream's | `FLOAT_LE` |
+| DTS from FFmpeg's own encoder | none: `{player-status\error}` | | | |
+
+A WMA file's `LENGTH` is its whole seconds (5 for 5.99 s), and its position starts about 3 s on, at the ASF preroll. An MP3 with 3 MB of junk after its frames (`tail.mp3`) reports `LENGTH` 20 from its Xing count and a `BITRATE` of 1,311,656, its whole size over that length; Q2 Pod's player plays its 20 s and stops. APE, TAK, WMA Lossless and WMA Pro were not captured: nothing on the capturing machine encodes them.
+
 ## What it writes
 
 `/tmp/ampsco.ini` (the unit record, at start), `/tmp/notfile` and `/tmp/notsupport` (through `system("touch …")`), and nothing else: no configuration, no state. Q2 Pod's patches add reads of `/mnt/data/peq-active` and `/tmp/q2xfade`, and the visualizer's shared tap.
@@ -229,6 +253,10 @@ Outside the player: `patch_bluealsa` and `tools/bt_silence.S` change bluealsa (A
 - `/dev/shanling_dac` opens as `/dev/null` and its ioctls answer 0;
 - `mtd_debug` hands out a unit record (as the q2-emu emulator's does);
 - `snd_pcm_open` opens ALSA's `null` device, whatever was asked for, and the shim logs the name, format, channels and rate; `snd_pcm_writei` copies what is written to a file per open and sleeps for its duration, so the player runs in real time. (`snd_pcm_hw_params_set_rate_near` must be found with `dlvsym(…, "ALSA_0.9.0rc4")`: the unversioned name is the 0.9 ABI, which takes the rate by value.)
+- every log line has the monotonic time in ms; the DAC's ioctls are logged with their argument, and `snd_pcm_pause`, `snd_pcm_drop`, `snd_pcm_drain` and `snd_pcm_prepare` with their order among them;
+- `readdir` and `scandir` are rebuilt on `readdir64`: under qemu-user the host hands out 64-bit directory offsets, which the guest's 32-bit `readdir` cannot hold, so on ext4 every directory read as empty after its first entry (demo's Folder page, its library scan, ALSA's `alsa.conf.d`); and a stand-in `nice` runs demo's `nice -n -5 hciplayer` at the priority the sandbox has.
+
+`fakedemo.py --emu` also tries the fallback ([player-plan.md](player-plan.md#architecture)): `--stock` puts a player at `/usr/lib/hciplayer-stock/hciplayer`, `--switch` makes `/mnt/data/q2player`, and `--killall N` has a shell in the sandbox list each process's name and command line in `ps.txt` and run demo's `killall -9 hciplayer` N seconds in.
 
 ```sh
 python3 test/player/music.py MUSIC
@@ -237,7 +265,7 @@ python3 test/player/fakedemo.py --emu EMULATOR --hciplayer STOCKFS/usr/bin/hcipl
 
 `EMULATOR` holds `rootfs/` (a build's unpacked root filesystem), `qemu-mipsel-static`, `shim/libq2emu.so` and `state/` with the unit record. The same command with `--hciplayer player/build/mips/q2player` runs the new player in the same sandbox, against the same ALSA library.
 
-demo itself was run under the emulator with the shim logging both programs' `send` and `recv`: at boot it sends `{mcl-dsdmode\0}` and `{mcl-replaygain\0}`, two `send`s the player reads in one `recv`. Playing a song from its screens was not achieved there (the Folder page stays empty and the library scan stops the UI in the sandbox), so the sequences demo sends during play are read from its code above, and the transcripts are from `fakedemo.py` sending what that code sends.
+demo itself was run under the emulator with the shim logging both programs' `send` and `recv`: at boot it sends `{mcl-dsdmode\0}` and `{mcl-replaygain\0}`, two `send`s the player reads in one `recv`. Once the shim rebuilt `readdir` (above), Folder lists the card and demo plays from it: with a `--dev --new-player` build and `/mnt/data/q2player`, a Folder pick sends `set-songurl` (cache -1 from that queue), Gapless sends `set-gapless` about 5 s before the end, Next sends `set-nexturl`, and Play pauses with demo's own `mclSetMute(2)` and then `mcl-pause` ([player-plan.md: Phase 2 results](player-plan.md#phase-2-results)). The transcripts in `test/player/fixtures/` are still from `fakedemo.py`, sending what demo's code sends, since they need fixed times.
 
 ## Open questions
 

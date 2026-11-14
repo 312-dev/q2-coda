@@ -4,9 +4,11 @@
  * written as fast as it would play, or Q2PLAYER_SPEED times as fast (a test's clock runs that much faster too). */
 #include "q2player.h"
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <time.h>
 #include <unistd.h>
 #ifdef HAVE_ALSA
@@ -78,6 +80,57 @@ static int alsa_open(struct output *o, int outputway, int hw) {
     return 0;
 }
 #endif
+
+/* ---- the headphone DAC's controls, /dev/shanling_dac (codec_cs43131.ko), called as stock's player calls them
+ * (docs/player.md#output; the order is the emulator shim's log of stock's): each song sets PCM mode and sends the
+ * init request, both with 0; the line is muted before the PCM opens, closes, pauses or drops for a seek, and unmuted
+ * after. Only on output way 0. The unmute lets the line go 90-100 ms later and the volume ramps back, so where a
+ * person is waiting for sound (a press, a seek, a resume) the first frame follows DAC_RELEASE_MS after it, as in
+ * Q2 Pod's player (docs/internals.md#wired-start). */
+enum { DAC_MODE = 0xc0044d1b, DAC_INIT = 0xc0044d0a, DAC_MUTE = 0xc0044d1f };
+enum { DAC_RELEASE_MS = 130, DAC_PRESS_MS = 5000 };
+static int dac_fd = -2, dac_muted;
+
+static void dac_ioctl(unsigned long request, int value) {
+    if (dac_fd == -2) dac_fd = open("/dev/shanling_dac", O_RDWR | O_CLOEXEC); /* kept open, as stock's is */
+    if (dac_fd >= 0) ioctl(dac_fd, request, &value);
+}
+
+void dac_song(int outputway) {
+    if (outputway) return;
+    dac_ioctl(DAC_MODE, 0); /* PCM; DSD's modes are phase 4's */
+    dac_ioctl(DAC_INIT, 0);
+}
+
+void dac_mute(int outputway) {
+    if (outputway) return;
+    dac_ioctl(DAC_MUTE, 1);
+    dac_muted = 1;
+}
+
+/* Unmutes what dac_mute muted, once; with wait, sound is held back until the line is open. */
+void dac_unmute(int outputway, int wait) {
+    if (outputway || !dac_muted) return;
+    dac_ioctl(DAC_MUTE, 0);
+    dac_muted = 0;
+    if (wait) usleep(DAC_RELEASE_MS * 1000);
+}
+
+/* demo's word in /tmp/q2press (patch/playback.c's press_stamp): CLOCK_MONOTONIC in ms, odd for a person's press, even
+ * for a natural start demo did not mute for. It counts when younger than DAC_PRESS_MS, and each word once. */
+int dac_stamp(int pressed) {
+    static int seen;
+    int at = 0, fd = open("/tmp/q2press", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    if (read(fd, &at, sizeof at) != sizeof at) at = 0;
+    close(fd);
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    unsigned now = (unsigned)(t.tv_sec * 1000ULL + t.tv_nsec / 1000000);
+    if (!at || (at & 1) != pressed || at == seen || now - (unsigned)at >= DAC_PRESS_MS) return 0;
+    seen = at;
+    return 1;
+}
 
 struct output *output_open(const struct pcm_format *f, int outputway, int hw) {
     static int opens;

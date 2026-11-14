@@ -91,11 +91,11 @@ Every file in `patch/` and `tools/`, and `test/` by group: what it is for, where
 
 | File         | For                                                                                          | Doc                                             |
 | ------------ | -------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `main.c`     | Start: connect to demo's socket, start the playback thread                                    | [player.md: Start](player.md#start)             |
+| `main.c`     | Start: run the patched hciplayer unless `/mnt/data/q2player` exists, else connect to demo's socket and start the playback thread | [player.md: Start](player.md#start), [player-plan: the fallback](player-plan.md#architecture) |
 | `ipc.c`      | The command thread: parse `{name\arg}`, answer queries, pass requests on                     | [player.md: The socket](player.md#the-socket)   |
-| `engine.c`   | The playback thread: one song after another, the events that end each, the preloaded change  | [player.md: Events](player.md#events)           |
-| `source.c`   | One file through FFmpeg to interleaved PCM, seeks, `media-info`'s facts                      | [player.md: Formats](player.md#formats)         |
-| `output.c`   | ALSA as stock opens it, or a file for the tests                                              | [player.md: Output](player.md#output)           |
+| `engine.c`   | The playback thread: one song after another, the events that end each, the preload on its own thread, the DAC's mutes around each change | [player.md: Events](player.md#events)           |
+| `source.c`   | One file through FFmpeg to interleaved PCM, seeks, `media-info`'s facts, an MP3's frame count and an M4A's last packet | [player.md: Formats](player.md#formats)         |
+| `output.c`   | ALSA as stock opens it, or a file for the tests; `/dev/shanling_dac`'s mode and mute, demo's press stamp | [player.md: Output](player.md#output)           |
 | `alsa_min.h` | The alsa-lib calls `output.c` makes, declared (the root filesystem has no headers)           |                                                 |
 | `q2player.h` | What the files share: `struct ctl`, the song and format records                              | [player-plan.md](player-plan.md#architecture)   |
 | `Makefile`   | Compile and link for `host` or `mips`; run through `tools/player.py`                         |                                                 |
@@ -141,7 +141,7 @@ Commands and what each needs are in [building.md](building.md#tests). `BUILD` is
 
 | Group                                    | Files                                                                                                                                                                                                                                           | Needs                           |
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| The new player | `player/run.py` (exactness against reference decodes, the protocol against `player/fixtures/`), `player/fakedemo.py` (demo's side of the socket, for either player), `player/music.py` (the test songs) | [player-plan: Testing](player-plan.md#testing) |
+| The new player | `player/run.py` (exactness per format and per gapless pair against reference decodes, seeks, starts, CUE, preloads cancelled, outrun and bad; the protocol against `player/fixtures/`), `player/fakedemo.py` (demo's side of the socket, for either player, on this machine or in the emulator with the fallback), `player/music.py` (the test songs) | [player-plan: Testing](player-plan.md#testing) |
 | The payload's C on this machine          | `fw/test_*.py` (42 files, one per source file or per part of `navigation.c`: `test_nav_*.py`, and `test_e2e_*.py` across files), built by `fw/host.py` and `fw/video_host.py`, loaded by `fw/conftest.py`; `fw/messy_playlists.py` is a fixture | a position-independent Python   |
 | The build tools                          | `unit/test_*.py`, one per tool; `unit/test_xiph.py` runs `patch/xiph.c`; `unit/conftest.py` fences processes and sockets                                                                                                                        | nothing                         |
 | Mutation testing                         | `unit/targets.py`, `unit/report.py` (mutmut, Python); `cmut/` (C, in a container)                                                                                                                                                               | Docker for `cmut/`              |
