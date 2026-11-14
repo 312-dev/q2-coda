@@ -946,7 +946,7 @@ photo pages' own drawing) keeps Minimal's layout under this theme's colours and 
 Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as the `oled` geometry set.
 
 - **The status row.** No bar band: the page's title, small and grey, on the list's left column (the clock instead
-  on Home and Now Playing), and the play state and a slim battery ending on the list's right column, centred
+  on Home, Now Playing and Cover Flow's covers, an artist's titled by the artist), and the play state and a slim battery ending on the list's right column, centred
   on y 37, clear of the glass's corners.
 - **The grid.** 32 px rows from y 58 with their text at x 24, seven to a screen: the list ends at y 282, above
   the bottom corners, and the strip below it stays black (`list_fit`). Chevrons and values share one column 28 px

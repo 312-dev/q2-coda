@@ -144,8 +144,9 @@ All lists share one grid.
 ### Status row
 
 - No band: the bar is the page's black, 58 px, with no rule under it. Its glyphs centre on y 37.
-- Left, on the 24 px text column: the page's title in Inter Medium 15 px, Text Secondary. Home
-  and Now Playing have no title, so the clock takes that place in the same face, size and colour.
+- Left, on the 24 px text column: the page's title in Inter Medium 15 px, Text Secondary. Home,
+  Now Playing and Cover Flow's covers (but an artist's, titled by the artist) have no title, so the
+  clock takes that place in the same face, size and colour.
 - Right: the play state (Phosphor `play`/`pause`, fill, 13 px, Text Primary, nothing when
   stopped), then the battery, its nub's end on the 28 px right column, the play state's centre
   12 px left of the battery's body.
@@ -333,7 +334,7 @@ pattern.
 | Artists, Genres, Composers          | List row                    |                                                                                                            |
 | Songs, a playlist's songs           | Song rows                   | The artist inline                                                                                          |
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
-| Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; an artist's covers titled by the artist |
+| Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; an artist's covers titled by the artist, other covers with the clock in the status row as Home |
 | Playlists                           | Two-line row with icon      |                                                                                                            |
 | Hold menu                           | Dialog                      |                                                                                                            |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
