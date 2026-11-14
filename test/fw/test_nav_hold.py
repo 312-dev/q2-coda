@@ -1340,6 +1340,16 @@ def test_a_fresh_classic_list_starts_on_its_first_playlist(classic, ui, fw):
     assert first(m, 0) == 2 and first(m, 3) == 3  # below New and Edit; a playlist stays
 
 
+def test_a_playlist_just_made_is_where_the_list_lands_once(classic, ui, fw):
+    """After New Playlist the reloaded list opens on the new one (an iPod's lands on what was added), then as before."""
+    p = classic()
+    p.ring(p.win)
+    m = menu(fw, [ui.kids(item)[0] for item in ui.kids(p.view) if ui.nodes[item].visible])
+    first = fw.fn('pl_first', C.c_int, C.POINTER(Menu), C.c_int)
+    fw.var('playlists__pl_made', C.c_char * 64).value = b'Road Trip'
+    assert first(m, 0) == 3 and first(m, 0) == 2  # Gym, Road Trip, Sleep below New and Edit
+
+
 def test_a_list_with_no_actions_first_starts_where_it_is(fw, ui):
     m = menu(fw, [ui.child(ui.child(0, 'list_item'), 'button') for _ in range(2)])
     assert fw.fn('pl_first', C.c_int, C.POINTER(Menu), C.c_int)(m, 0) == 0

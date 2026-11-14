@@ -1217,9 +1217,11 @@ static int reconcile(menu_t *m, int settle) {
         }
     }
     cur = best >= 0 ? best : partial;
-    if (!had && cur >= 0) cur = pl_first(m, cur);
+    int to = !had && cur >= 0 ? pl_first(m, cur) : cur, moved = to != cur;
+    cur = to;
     st.reveal_surface = (void *)0;
     select(m, cur >= 0 ? m->id[cur] : -1);
+    if (moved) reveal(m, m->id[cur], 1); /* a playlist just made may be below the view */
     return cur;
 }
 

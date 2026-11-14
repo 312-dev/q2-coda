@@ -2395,6 +2395,15 @@ def test_a_new_playlist_takes_the_first_free_id(fw):
     assert any(b"insert into playlist values (2,'Mine'" in s for s in sql.log)
 
 
+def test_a_new_playlist_is_kept_for_the_list_to_land_on(fw):
+    made = fw.var('playlists__pl_made', C.c_char * 64)
+    made.value = b''
+    create(fw, b'Mine', exists=1)  # a name taken: nothing made, nothing to land on
+    assert made.value == b''
+    create(fw, b'Mine')
+    assert made.value == b'Mine'
+
+
 def test_a_playlist_name_is_quoted(fw):
     _, sql = create(fw, b"Rock 'n' Roll")
     assert any(b"filename='Rock ''n'' Roll'" in s for s in sql.log) and any(b"(0,'Rock ''n'' Roll'" in s for s in sql.log)
