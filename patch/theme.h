@@ -153,9 +153,10 @@ typedef struct {
     unsigned char geom; /* second: THEME_GEOM_OFF (4) never moves */
     /* a list left by Return forgets its row, so choosing it again opens it at the top
      * (navigation.c forget_left); Songs' action row reads Shuffle with the theme's own glyph and
-     * the wheel selects it above the first song (navigation.c shuffle_key). In the padding before
-     * motion, so sizeof(theme_t) stays 1624 */
-    unsigned char reopen_top, shuffle_row;
+     * the wheel selects it above the first song (navigation.c shuffle_key); in Split, the lists
+     * Home's rows open (Settings, Library, Streaming) take the whole width with the art hidden, as
+     * a page (coverflow.c sub_full). In the padding before motion, so sizeof(theme_t) stays 1624 */
+    unsigned char reopen_top, shuffle_row, home_lists_full;
     motion_t motion[MOTION_N];
     unsigned short recall_ms; /* a remembered row's glide; 0: shown at once */
     unsigned char bump_px;    /* the wheel's bump at a list's end */
@@ -268,8 +269,9 @@ int bar_geom_val(int v);          /* geom_val for what bar_theme() paints: V_BAT
 int client_h(void); /* the window under the bar of the set theme_boot wrote (theme_engine.c) */
 /* Home's Split under the same set (its split_* fields, tools/ipod.py Geometry): SPLIT_ROW the
  * menu's width, SPLIT_ART the art pane's left edge, SPLIT_ART_UP the pane's rows above the window,
- * SPLIT_STILL 1 for a still, centred cover (coverflow.c) */
-enum { SPLIT_ROW, SPLIT_ART, SPLIT_ART_UP, SPLIT_STILL };
+ * SPLIT_INSET the percent of the zoomed cover the pan keeps clear at each edge (coverflow.c
+ * drift_axis) */
+enum { SPLIT_ROW, SPLIT_ART, SPLIT_ART_UP, SPLIT_INSET };
 int split_geom(int k);
 void paint_stops(void *canvas, int x, int y, int w, int h, const stops_t *s); /* navigation.c */
 /* The rows painter: the track across w, the played part over its first fill_w px; final colours

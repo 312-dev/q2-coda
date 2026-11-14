@@ -149,9 +149,11 @@ The player writes every track's cover to the same `/tmp` file, so before Split l
 
 In Split a cover pans slowly, as an iPod classic's menu art did: `home_tex` box filters it once
 (at most 4 × 4 samples a texel) to its fit zoomed `DRIFT_ZOOM_PCT` (110), and each axis runs its
-own linear ping-pong across that margin alone, from the old crop (`DRIFT_X_MS` 20 s, `DRIFT_Y_MS`
-26 s): about 1.5 pixels a second on a square cover, as iPod.js's recreation moves, and the cover's
-edges never show. The art widget then spans the panel with an empty image, and `home_paint` (from
+own ping-pong across that margin alone, from the old crop (`DRIFT_X_MS` 20 s, `DRIFT_Y_MS`
+26 s): about 1.5 pixels a second on average on a square cover, as iPod.js's recreation moves, and the cover's
+edges never show. Each leg is eased (`drift_at`, smoothstep): it slows to a stop at each end and
+turns there with no jolt, its speed peaking at 1.5 times the average halfway, so the two axes
+together trace a smooth curve with no corner. The art widget then spans the panel with an empty image, and `home_paint` (from
 `coverflow_home_clip`, inside the panel's clip) draws one 188 × 290 frame `home_render` filters from
 the cover at the pan's position in 1/256 px, a cubic B-spline over 4 × 4 texels (each cover row
 across once, then down). Whole-pixel steps at that speed read as a jerk every two thirds of a
@@ -179,9 +181,14 @@ a transparent cover follows only the next cover change. The timer trusts `home.w
 identity, as the art's paint always has: Home is only replaced through `coverflow_home`, which
 stops the timer first.
 
-A set with `split_still` (OLED's) keeps the cover still instead: the same 110 % zoom, cut from its
-middle, so a cover's own frame (many have a thin white border) never shows at the pane's edges, and
-no timer runs. A set with `split_art_up` starts the pane that many rows above Home's window: the
+A set with `split_inset` (OLED's 2) keeps that percent of the zoomed cover clear at each edge
+(`drift_axis`), so a cover's own frame (many have a thin white border) never shows at the pane's
+edges even at the pan's ends: on OLED's 179 × 268 pane a square cover pans 26 pixels across and 16
+down. An inset the zoom's margin cannot hold leaves the cover still in the zoom's middle, and no
+timer runs. A theme with `home.lists.full` (OLED's) opens the lists Home's rows open in Split
+(Settings, and Library and Streaming where a set keeps them on Home) as pages: the list takes the
+screen's width in Full's rows (`sub_full`), the art is hidden while it shows and no pan runs, and
+Return brings the main list back beside the art, whose last frame shows at once. A set with `split_art_up` starts the pane that many rows above Home's window: the
 frame is that much taller, Home's window draws its rows from the window's top down, and the bar
 draws the rest over its own black (`coverflow_home_bar`, from the bar's background paint, with Home
 on top and no window sliding, as Home's paint draws nothing outside its window). With nothing
@@ -944,7 +951,7 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
 - **Home.** Full by default. In Split the menu's rows are 204 px wide, so the selection bar ends at x 188 and the
   chevrons stand at 176, and the playing album's art fills the rest from x 196 and y 52 (6 px up into the status
   row) to the right and bottom edges, still, cut from the middle of the cover, the glass rounding its corner
-  (`split_row`, `split_art`, `split_art_up`, `split_still`; [Home](#home)).
+  (`split_row`, `split_art`, `split_art_up`, `split_inset`; [Home](#home)).
 - **Song rows.** One line each, no chevron. In Songs and the other lists stock shows on Songs' page (a genre's
   songs among them) the artist follows the title two spaces on, in 15 px Text Tertiary, both ending in an ellipsis
   where they run out of room and the artist dropped when under 40 px would be left; an artist's own songs show

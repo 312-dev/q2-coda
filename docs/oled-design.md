@@ -323,7 +323,7 @@ pattern.
 | Q2 Pod screen                       | Pattern                     | Notes                                                                                                      |
 | ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock |
-| Home (Split)                        | List row beside art         | Rows to x 204 (bar 16 to 188, chevrons 176); the art from x 196, y 52 to the edges, still, centre-cropped  |
+| Home (Split)                        | List row beside art         | Rows to x 204 (bar 16 to 188, chevrons 176); the art from x 196, y 52 to the edges, panning slowly        |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Library                             | List row                    |                                                                                                            |
 | Albums                              | Two-line row with art       |                                                                                                            |
@@ -380,8 +380,10 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - Now Playing on the set's grid (`np_art`, `np_bar_y`), its art's corners (`playing.art.radius`), its
   artist and album in Inter (`playing.artist.font`), shuffle and repeat as the theme's own glyphs
   (`playing.modes.icons`), and the marquee fades (`list.marquee.fade`).
-- Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_still` (the art from
-  x 196 and y 52 to the edges, still and centre-cropped, its top rows painted by the bar).
+- Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_inset` (the art from
+  x 196 and y 52 to the edges, its top rows painted by the bar, panning slowly across its 110 % zoom with an
+  eased turn at each end and 2 % of the zoom kept clear of the pane at each edge, so a cover's own border never
+  shows), and the lists Home's rows open as full-width pages with the art hidden (`home.lists.full`).
 
 Still to build:
 

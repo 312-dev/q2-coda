@@ -105,7 +105,7 @@ int geom_val(int v) { return geom_vals[st.geom][v]; }
 int client_h(void) { return 320 - geom_val(V_BAR); }
 _Static_assert(V_SPLIT_ART == V_SPLIT_ROW + SPLIT_ART &&
                    V_SPLIT_ART_UP == V_SPLIT_ROW + SPLIT_ART_UP &&
-                   V_SPLIT_STILL == V_SPLIT_ROW + SPLIT_STILL,
+                   V_SPLIT_INSET == V_SPLIT_ROW + SPLIT_INSET,
                "tools/ipod.py GEOM_VALS keeps split_* in SPLIT_* order");
 int split_geom(int k) { return geom_val(V_SPLIT_ROW + k); }
 /* The Display rows' settings, by ringnav_display's index: 0 Accent, 1 Home (0 Split, 1 Full,
