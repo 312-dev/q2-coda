@@ -1828,7 +1828,7 @@ STOCK_PAGES = [f'release/assets/default/raw/ui/{n}_page.bin' for n in ('coverflo
      *(f'spectrum_point{i}' for i in range(12)), 'vu_back', 'vu_dot', 'vu_left', 'vu_right']]
 # Superseded library versions (the unversioned and soname links already resolve to the newer ones)
 # and on-device debugging and network tools; no script, program or library in the rootfs, and nothing
-# in patch/, names them as a command (libcurl's telnet and tftp protocols are its own code). The
+# in patch/, names them as a command (the rootfs's libcurl speaks only http, https and file). The
 # links are busybox applets: busybox keeps the code, the command goes.
 DEBUG_TOOLS = [*(f'usr/bin/{n}' for n in ('strace', 'strace-log-merge', 'sqlite3', 'hcidump', 'memtester')),
                'usr/sbin/nandtest']

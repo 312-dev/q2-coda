@@ -15,6 +15,7 @@ def test_a_check_stock_turned_off_is_on_against_the_bundle(fw, option):
     assert fw.fn('ringnav_stock_tls', C.c_int, C.c_void_p, C.c_int, C.c_long)(0x1234, option, 0) == 0
     assert C.string_at(opts[CURLOPT_CAINFO]) == b'/etc/ssl/certs/ca-certificates.crt'
     assert opts[CURLOPT_SSL_VERIFYPEER] == 1 and opts[CURLOPT_SSL_VERIFYHOST] == 2
-    assert opts[CURLOPT_SSL_CTX_FUNCTION]  # tls_untimed: the clock may be wrong before network time
-    assert set(opts) == {CURLOPT_CAINFO, CURLOPT_SSL_VERIFYPEER, CURLOPT_SSL_VERIFYHOST, CURLOPT_SSL_CTX_FUNCTION}
+    # no SSL_CTX_FUNCTION: libcurl's mbedTLS checks no dates, so a clock not yet set from the network still connects
+    assert set(opts) == {CURLOPT_CAINFO, CURLOPT_SSL_VERIFYPEER, CURLOPT_SSL_VERIFYHOST}
+    assert CURLOPT_SSL_CTX_FUNCTION not in opts
     assert handles == {0x1234}  # all on stock's handle

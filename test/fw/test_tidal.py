@@ -220,7 +220,8 @@ def test_a_streamed_track_is_kept_on_the_card_and_plays_from_it_next_time(fw):
     assert opts[CURLOPT_LOW_SPEED_LIMIT] > 0 and opts[CURLOPT_LOW_SPEED_TIME] > 0
     # the CDN's certificate is checked against the bundled roots, not taken on trust
     assert C.string_at(opts[CURLOPT_CAINFO]) == b'/etc/scrobble-ca.pem'
-    assert opts[CURLOPT_SSL_VERIFYPEER] == 1 and opts[CURLOPT_SSL_VERIFYHOST] == 2 and opts[CURLOPT_SSL_CTX_FUNCTION]
+    assert opts[CURLOPT_SSL_VERIFYPEER] == 1 and opts[CURLOPT_SSL_VERIFYHOST] == 2
+    assert CURLOPT_SSL_CTX_FUNCTION not in opts  # libcurl's mbedTLS checks no dates (docs/internals.md#2038)
     t.play(URL, '123')
     assert t.played == [URL, cached('123-0.flac')] and len(t.threads) == 1 and cdn.fetched == [URL]
 
