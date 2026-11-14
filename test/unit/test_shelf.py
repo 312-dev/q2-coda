@@ -2,6 +2,8 @@
 test (the release key's private half is never here). No network: pin's lookups and downloads are stand-ins."""
 import base64
 import hashlib
+import io
+import json
 import subprocess
 
 import pytest
@@ -186,3 +188,147 @@ def test_verify_refuses_a_signed_list_a_q2_would_not_take(tmp_path, key):
     body = b'serial 1\nme/q2-foo Foo\n'
     lst.write_bytes(body + b'signature ' + signing.sign(signing.list_message(body), key).hex().encode() + b'\n')
     assert not shelf.verify(lst)
+
+
+def test_sign_refuses_a_list_a_q2_would_not_take(tmp_path, key):
+    lst = tmp_path/'sources.list'
+    lst.write_text('serial 1\nme/q2-foo Foo\n')
+    with pytest.raises(ValueError, match='not pinned'):
+        shelf.sign(lst, key=key)
+    assert lst.read_text() == 'serial 1\nme/q2-foo Foo\n'
+
+
+class Response(io.BytesIO):
+    """urlopen's answer: its bytes, read in the chunks asked for."""
+    def __init__(self, data):
+        super().__init__(data)
+        self.reads = []
+
+    def read(self, n=-1):
+        self.reads.append(n)
+        return super().read(n)
+
+
+def test_get_asks_github_as_the_shelf_with_a_timeout(monkeypatch):
+    asked = []
+    monkeypatch.setattr(shelf.urllib.request, 'urlopen', lambda request, timeout: asked.append((request, timeout)) or 'r')
+    assert shelf.get('https://h/x') == 'r' and shelf.get('https://h/y', 'application/octet-stream') == 'r'
+    (one, t1), (two, t2) = asked
+    assert (one.full_url, one.get_header('User-agent'), one.get_header('Accept'), t1) == (
+        'https://h/x', 'q2-coda-shelf', 'application/vnd.github+json', 60)
+    assert (two.full_url, two.get_header('Accept'), t2) == ('https://h/y', 'application/octet-stream', 60)
+
+
+def test_latest_takes_the_first_zip(monkeypatch):
+    urls = []
+    assets: list[dict] = [
+        {'name': 'notes.txt', 'size': 1, 'browser_download_url': 'u0'},
+        {'name': 'a.zip', 'size': 7, 'browser_download_url': 'u1', 'digest': 'sha256:' + SHA},
+        {'name': 'b.zip', 'size': 8, 'browser_download_url': 'u2'}]
+    release = {'tag_name': 'v2', 'assets': assets}
+    monkeypatch.setattr(shelf, 'get', lambda url: urls.append(url) or Response(json.dumps(release).encode()))
+    assert shelf.latest('me/q2-foo') == ('v2', dict(name='a.zip', size=7, url='u1', digest='sha256:' + SHA))
+    assert urls == ['https://api.github.com/repos/me/q2-foo/releases/latest']
+    del assets[1]
+    assert shelf.latest('me/q2-foo') == ('v2', dict(name='b.zip', size=8, url='u2', digest=None))  # GitHub gave no digest
+
+
+@pytest.mark.parametrize('assets', [[], [{'name': 'a.tar', 'size': 1, 'browser_download_url': 'u'}], None])
+def test_latest_refuses_a_release_with_no_zip(monkeypatch, assets):
+    release = {'tag_name': 'v3'} if assets is None else {'tag_name': 'v3', 'assets': assets}
+    monkeypatch.setattr(shelf, 'get', lambda url: Response(json.dumps(release).encode()))
+    with pytest.raises(ValueError, match=r'^me/q2-foo: its latest release, v3, has no \.zip$'):
+        shelf.latest('me/q2-foo')
+
+
+def test_fetch_sha256_hashes_and_counts_in_chunks(monkeypatch):
+    data = bytes(range(256)) * 9000  # past one chunk
+    answers = []
+    def get(url, accept):
+        answers.append((url, accept, Response(data)))
+        return answers[-1][2]
+    monkeypatch.setattr(shelf, 'get', get)
+    assert shelf.fetch_sha256('https://h/a.zip', len(data)) == (hashlib.sha256(data).hexdigest(), len(data))
+    (url, accept, r), = answers
+    assert (url, accept) == ('https://h/a.zip', 'application/octet-stream') and set(r.reads) == {1 << 20}
+    assert r.closed
+
+
+def test_fetch_sha256_refuses_a_size_the_release_did_not_say(monkeypatch):
+    monkeypatch.setattr(shelf, 'get', lambda url, accept: Response(b'four'))
+    with pytest.raises(ValueError, match=r'^https://h/a.zip: 4 bytes, the release says 5$'):
+        shelf.fetch_sha256('https://h/a.zip', 5)
+    assert shelf.fetch_sha256('https://h/a.zip', 4) == (hashlib.sha256(b'four').hexdigest(), 4)
+
+
+def test_fetch_sha256_stops_past_the_cap(monkeypatch):
+    monkeypatch.setattr(shelf, 'CAP', 3)
+    monkeypatch.setattr(shelf, 'get', lambda url, accept: Response(b'four'))
+    with pytest.raises(ValueError, match=r'^https://h/a.zip: over 3 bytes$'):
+        shelf.fetch_sha256('https://h/a.zip', 4)
+    monkeypatch.setattr(shelf, 'CAP', 4)  # the cap itself is allowed
+    assert shelf.fetch_sha256('https://h/a.zip', 4)[1] == 4
+
+
+def test_main_pin_prints_each_new_pin(tmp_path, monkeypatch, capsys):
+    lst = tmp_path/'sources.list'
+    asked = []
+    new = shelf.App('me/q2-foo', 'Foo', False, '2.0', 'foo.zip', 3, SHA)
+    monkeypatch.setattr(shelf, 'pin', lambda path, repos: asked.append((path, repos)) or [new])
+    assert shelf.main(['--list', str(lst), 'pin', 'me/q2-foo', 'you/q2-bar']) == 0
+    assert asked == [(lst, ['me/q2-foo', 'you/q2-bar'])]
+    assert capsys.readouterr().out == f'me/q2-foo: 2.0 foo.zip 3 {SHA}\n'
+    assert shelf.main(['--list', str(lst), 'pin']) == 0 and asked[-1] == (lst, [])
+
+
+def test_main_digest_sign_verify(tmp_path, key, monkeypatch, capsys):
+    lst = tmp_path/'sources.list'
+    lst.write_text(f'serial 1\n{PINNED}\n')
+    assert shelf.main(['--list', str(lst), 'verify']) == 1
+    assert capsys.readouterr().out == f'{lst}: NOT signed by the release key\n'
+    assert shelf.main(['--list', str(lst), 'digest', '--env', 'MY_PEM']) == 0
+    out = capsys.readouterr()
+    assert out.out == signing.broker_command(signing.list_message(lst.read_bytes()), 'MY_PEM') + '\n' and not out.err
+    monkeypatch.delenv(signing.ENV, raising=False)
+    with pytest.raises(SystemExit) as exit:
+        shelf.main(['--list', str(lst), 'sign'])
+    assert exit.value.code == 2 and f'--signature, or the private key in ${signing.ENV}' in capsys.readouterr().err
+    monkeypatch.setenv(signing.ENV, key)
+    assert shelf.main(['--list', str(lst), 'sign']) == 0 and capsys.readouterr().out == f'{lst}: signed\n'
+    assert shelf.main(['--list', str(lst), 'verify']) == 0
+    assert capsys.readouterr().out == f'{lst}: signed by the release key\n'
+    assert shelf.main(['--list', str(lst), 'digest']) == 0
+    out = capsys.readouterr()
+    assert out.err == f'{lst}: signed already\n' and not out.out
+
+
+def test_main_sign_with_the_brokers_signature(tmp_path, key, monkeypatch, capsys):
+    lst = tmp_path/'sources.list'
+    lst.write_text(f'serial 1\n{PINNED}\n')
+    monkeypatch.delenv(signing.ENV, raising=False)
+    sig = signing.sign(signing.list_message(lst.read_bytes()), key)
+    assert shelf.main(['--list', str(lst), 'sign', '--signature', base64.b64encode(sig).decode()]) == 0
+    assert shelf.verify(lst) and capsys.readouterr().out == f'{lst}: signed\n'
+
+
+@pytest.mark.parametrize('command', [['verify'], ['digest'], ['sign', '--signature', 'AAAA'], ['pin']])
+def test_main_says_what_failed_and_exits_2(tmp_path, command, capsys):
+    lst = tmp_path/'missing.list'
+    with pytest.raises(SystemExit) as exit:
+        shelf.main(['--list', str(lst), *command])
+    assert exit.value.code == 2 and 'missing.list' in capsys.readouterr().err.splitlines()[-1]
+
+
+def test_main_turns_a_value_error_into_a_usage_error(tmp_path, capsys):
+    lst = tmp_path/'sources.list'
+    lst.write_text('serial 1\nme/q2-foo Foo\n')
+    with pytest.raises(SystemExit) as exit:
+        shelf.main(['--list', str(lst), 'digest'])
+    assert exit.value.code == 2 and capsys.readouterr().err.splitlines()[-1].endswith(
+        'error: me/q2-foo: not pinned (tools/shelf.py pin me/q2-foo)')
+
+
+def test_main_needs_a_command(capsys):
+    with pytest.raises(SystemExit) as exit:
+        shelf.main([])
+    assert exit.value.code == 2
