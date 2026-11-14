@@ -84,7 +84,9 @@ def tool(name):
             info = tf.getmember(member)
             if not info.isfile():
                 sys.exit(f'{name}: {member} in {asset} is not a regular file')
-            exe.write_bytes(tf.extractfile(info).read())
+            body = tf.extractfile(info)
+            assert body is not None  # a regular file's member, checked above
+            exe.write_bytes(body.read())
         tmp.unlink()
     exe.chmod(0o755)
     return str(exe)
