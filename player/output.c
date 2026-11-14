@@ -4,6 +4,7 @@
  * written as fast as it would play, or Q2PLAYER_SPEED times as fast (a test's clock runs that much faster too). */
 #include "q2player.h"
 #include <errno.h>
+#include <math.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +23,12 @@ struct output {
 #ifdef HAVE_ALSA
     snd_pcm_t *pcm;
 #endif
+    /* what was written last, for a click mixed in by rewinding (output_click): a ring of hist_cap frames, its
+     * newest frame before hist_at, hist_n of it valid; and the click playing, as frames still to mix */
+    uint8_t *hist, *tmp;
+    int hist_cap, hist_at, hist_n, tmp_cap;
+    const float *clk, *duck;
+    int clk_len, clk_at;
     FILE *file;
     int paused;
     double speed;         /* file sink: how many seconds of sound pass in one */
@@ -132,6 +139,26 @@ int dac_stamp(int pressed) {
     return 1;
 }
 
+static int frame_bytes(const struct output *o) { return o->f.channels * o->f.bytes; }
+
+/* The history is the buffer's length: the most a click can rewind. With no memory for it, clicks come late. */
+static struct output *history(struct output *o) {
+    o->hist_cap = (int)((int64_t)o->f.rate * BUFFER_US / 1000000);
+    if (!(o->hist = malloc((size_t)o->hist_cap * frame_bytes(o)))) o->hist_cap = 0;
+    return o;
+}
+
+static void remember(struct output *o, const uint8_t *data, int frames) {
+    int fb = frame_bytes(o);
+    if (!o->hist_cap) return;
+    if (frames > o->hist_cap) data += (size_t)(frames - o->hist_cap) * fb, frames = o->hist_cap;
+    int m = frames < o->hist_cap - o->hist_at ? frames : o->hist_cap - o->hist_at;
+    memcpy(o->hist + (size_t)o->hist_at * fb, data, (size_t)m * fb);
+    memcpy(o->hist, data + (size_t)m * fb, (size_t)(frames - m) * fb);
+    o->hist_at = (o->hist_at + frames) % o->hist_cap;
+    o->hist_n = o->hist_n + frames < o->hist_cap ? o->hist_n + frames : o->hist_cap;
+}
+
 struct output *output_open(const struct pcm_format *f, int outputway, int hw) {
     static int opens;
     struct output *o = calloc(1, sizeof *o);
@@ -145,10 +172,10 @@ struct output *output_open(const struct pcm_format *f, int outputway, int hw) {
         snprintf(path, sizeof path, "%s/%04d_%d_%d_%s.raw", dir, opens++, f->rate, f->channels, f->is_float ? "f32" : f->bytes == 2 ? "s16" : "s32");
         if (!(o->file = fopen(path, "wb"))) { perror(path); free(o); return NULL; }
         clock_gettime(CLOCK_MONOTONIC, &o->t0);
-        return o;
+        return history(o);
     }
 #ifdef HAVE_ALSA
-    if (alsa_open(o, outputway, hw) == 0) return o;
+    if (alsa_open(o, outputway, hw) == 0) return history(o);
 #else
     (void)outputway, (void)hw;
     fprintf(stderr, "q2player: built without ALSA; set Q2PLAYER_PCM\n");
@@ -168,7 +195,7 @@ int64_t output_delay(struct output *o) {
     return o->written > played ? o->written - played : 0;
 }
 
-int output_write(struct output *o, const uint8_t *data, int frames) {
+static int sink(struct output *o, const uint8_t *data, int frames) {
 #ifdef HAVE_ALSA
     if (o->pcm) {
         while (frames > 0) {
@@ -195,6 +222,119 @@ int output_write(struct output *o, const uint8_t *data, int frames) {
     return 0;
 }
 
+/* ---- the Clicker's click in the headphones (docs/internals.md#key-tone): the payload sends {mcl-click\KIND} while
+ * a song plays, and the click is mixed into what is about to be heard. The PCM holds up to half a second, so the
+ * output rewinds to CLICK_LEAD_MS past what is playing, mixes the click into its own copy of those frames and writes
+ * them again; where nothing can be rewound (no backlog, a device that cannot rewind) the click starts with the next
+ * frames written. The mix makes room for the click: y = x * (1 - e) + e * s, with e the click's envelope (at most
+ * its level) and |s| <= 1, so a sample within full scale stays within it and the conversion never clips. The level
+ * is the PCM's, so the DAC's volume, the headphones' own, scales it with the music. */
+#define CLICK_LEAD_MS 20 /* past the PCM's place, for the rewind and rewrite to land before it gets there */
+#define CLICK_DB (-20.0) /* the click's peak, dB of full scale: tune by ear */
+#define CLICK_ATTACK_MS 0.25 /* the envelope's rise and fall, so the music's dip under it has no step either */
+#define CLICK_TAPER_MS 0.5
+/* Rockbox's iPod piezo (firmware/target/arm/ipod/piezo.c, Hz = 91225 / period): a wheel click about 1,000 Hz for
+ * 4 ms, a button's about 1,820 Hz for 3 ms, an alert's about 2,280 Hz for 200 ms. Each is a pulse exciting a small
+ * resonator, a ringing piezo: a sine at its pitch dying away with time constant decay_ms. */
+static const struct { double hz, ms, decay_ms; } SOUNDS[] = {
+    [CLICK_WHEEL] = {1000, 4, 1.2}, [CLICK_BUTTON] = {1820, 3, 0.9}, [CLICK_BEEP] = {2280, 200, 60}};
+
+/* The sound kind at rate, as samples (clk) and its envelope (duck), made at the first use of each. */
+static int click_table(int kind, int rate, const float **clk, const float **duck) {
+    static struct { int rate, len; float *s, *e; } made[3];
+    if (kind < CLICK_WHEEL || kind > CLICK_BEEP) return 0;
+    __typeof__(made[0]) *m = &made[kind - CLICK_WHEEL];
+    if (m->rate != rate) {
+        int len = (int)(SOUNDS[kind].ms * rate / 1000);
+        float *s = realloc(m->s, (size_t)len * sizeof *s), *e = realloc(m->e, (size_t)len * sizeof *e);
+        if (s) m->s = s;
+        if (e) m->e = e;
+        if (!s || !e || len <= 0) return m->rate = 0, 0;
+        double level = pow(10, CLICK_DB / 20), rise = CLICK_ATTACK_MS * rate / 1000, fall = CLICK_TAPER_MS * rate / 1000;
+        for (int i = 0; i < len; ++i) {
+            double t = (double)i / rate, env = level * exp(-t * 1000 / SOUNDS[kind].decay_ms);
+            if (i < rise) env *= 0.5 - 0.5 * cos(M_PI * i / rise);
+            if (len - i < fall) env *= 0.5 - 0.5 * cos(M_PI * (len - i) / fall);
+            e[i] = (float)env, s[i] = (float)(env * sin(2 * M_PI * SOUNDS[kind].hz * t));
+        }
+        m->rate = rate, m->len = len;
+    }
+    *clk = m->s, *duck = m->e;
+    return m->len;
+}
+
+/* The click, from where it is, into frames of data in place, in the output's format. */
+static void click_mix(struct output *o, uint8_t *data, int frames) {
+    int ch = o->f.channels;
+    for (int i = 0; i < frames && o->clk_at < o->clk_len; ++i, ++o->clk_at) {
+        float g = 1 - o->duck[o->clk_at], c = o->clk[o->clk_at];
+        for (int k = 0; k < ch; ++k) {
+            int j = i * ch + k;
+            if (o->f.is_float) ((float *)data)[j] = ((float *)data)[j] * g + c;
+            else if (o->f.bytes == 2) {
+                float v = (((int16_t *)data)[j] * (1.0f / 32768) * g + c) * 32768;
+                ((int16_t *)data)[j] = v >= 32767 ? 32767 : v <= -32768 ? -32768 : (int16_t)lrintf(v);
+            } else {
+                double v = (((int32_t *)data)[j] * (1.0 / 2147483648.0) * g + c) * 2147483648.0;
+                ((int32_t *)data)[j] = v >= 2147483647.0 ? 2147483647 : v <= -2147483648.0 ? INT32_MIN : (int32_t)llrint(v);
+            }
+        }
+    }
+}
+
+static uint8_t *scratch(struct output *o, int frames) {
+    if (frames > o->tmp_cap) {
+        uint8_t *t = realloc(o->tmp, (size_t)frames * frame_bytes(o));
+        if (!t) return NULL;
+        o->tmp = t, o->tmp_cap = frames;
+    }
+    return o->tmp;
+}
+
+int output_write(struct output *o, const uint8_t *data, int frames) {
+    uint8_t *t;
+    if (o->clk_at < o->clk_len && (t = scratch(o, frames))) { /* a click still sounding goes on in these frames */
+        memcpy(t, data, (size_t)frames * frame_bytes(o));
+        click_mix(o, t, frames);
+        data = t;
+    }
+    remember(o, data, frames);
+    return sink(o, data, frames);
+}
+
+/* Frames back from the newest that can be written again, at most want. */
+static int rewind_by(struct output *o, int want) {
+#ifdef HAVE_ALSA
+    if (o->pcm) {
+        snd_pcm_sframes_t can = snd_pcm_rewindable(o->pcm);
+        if (can < want) want = can > 0 ? (int)can : 0;
+        snd_pcm_sframes_t got = want ? snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)want) : 0;
+        return got > 0 ? (int)got : 0;
+    }
+#endif
+    fflush(o->file);
+    if (fseeko(o->file, -(off_t)want * frame_bytes(o), SEEK_END)) return 0;
+    o->written -= want;
+    return want;
+}
+
+int output_click(struct output *o, int kind) {
+    if (!o || !(o->clk_len = click_table(kind, o->f.rate, &o->clk, &o->duck))) return -1;
+    o->clk_at = 0;
+    int want = (int)(output_delay(o) - (int64_t)o->f.rate * CLICK_LEAD_MS / 1000), fb = frame_bytes(o);
+    if (want > o->hist_n) want = o->hist_n;
+    if (want <= 0 || !scratch(o, want)) return 0; /* the click starts with the next frames written */
+    int back = rewind_by(o, want);
+    if (!back) return 0;
+    int from = (o->hist_at - back + o->hist_cap) % o->hist_cap, m = back < o->hist_cap - from ? back : o->hist_cap - from;
+    memcpy(o->tmp, o->hist + (size_t)from * fb, (size_t)m * fb);
+    memcpy(o->tmp + (size_t)m * fb, o->hist, (size_t)(back - m) * fb);
+    click_mix(o, o->tmp, back);
+    o->hist_at = from, o->hist_n -= back; /* written again, so remembered again */
+    remember(o, o->tmp, back);
+    return sink(o, o->tmp, back);
+}
+
 void output_pause(struct output *o, int on) {
     if (o->paused == on) return;
     o->paused = on;
@@ -215,6 +355,7 @@ void output_pause(struct output *o, int on) {
 }
 
 void output_drop(struct output *o) {
+    o->hist_n = 0, o->clk_at = o->clk_len; /* what was written is gone, and a click with it */
 #ifdef HAVE_ALSA
     if (o->pcm) {
         snd_pcm_drop(o->pcm);
@@ -243,5 +384,7 @@ void output_close(struct output *o) {
     if (o->pcm) snd_pcm_close(o->pcm);
 #endif
     if (o->file) fclose(o->file);
+    free(o->hist);
+    free(o->tmp);
     free(o);
 }

@@ -12,7 +12,7 @@ files in place of ALSA.
 - protocol: for each transcript in fixtures/ (stock's and Q2 Pod's hciplayer under qemu, captured by
   fakedemo.py), the same commands get the same events and answers from q2player.
 """
-import array, concurrent.futures, pathlib, re, subprocess, sys, tempfile
+import array, concurrent.futures, math, pathlib, re, struct, subprocess, sys, tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -299,6 +299,185 @@ def test_formats_open_as_stock(player, songs, tmp):
     return ' '.join(names)
 
 
+# ---- the DSP (phase 3)
+
+def tool(tmp, name, *defines):
+    """test/player/NAME.c with player/dsp.c and patch/peq.c as the player builds them, for this machine."""
+    out = tmp/name
+    if not out.exists():
+        subprocess.run(['cc', '-std=c11', '-D_GNU_SOURCE', '-DPEQ_HOST', *defines, '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
+                        '-I', ROOT/'player', '-I', ROOT/'patch', HERE/f'{name}.c', ROOT/'player/dsp.c', ROOT/'patch/peq.c',
+                        '-Wl,--wrap=clock_gettime' if name == 'dsp_test' else '-lm', '-lm', '-o', out], check=True)
+    return out
+
+
+def test_dsp_chain(player, songs, tmp):
+    """test/player/dsp_test.c: test/peq.py's checks of hciplayer's filter, made of the player's chain."""
+    root = tmp/'dsp'
+    root.mkdir()
+    exe = tool(tmp, 'dsp_test', f'-DPEQ_ROOT="{root}"')
+    return subprocess.run([exe], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def eq_reference(tmp, songs, name, state, out, at=None, state2=None):
+    """songs/name's reference decode (S16 stereo, 44.1 kHz) through the EQ state, as peq_ref filter runs it."""
+    src = tmp/f'{name}.s16'
+    if not src.exists(): src.write_bytes(reference(songs/name))
+    subprocess.run([tool(tmp, 'peq_ref', '-DPEQ_ROOT=""'), 'filter', state, '44100', src, out, *([str(at), state2] if at is not None else [])], check=True)
+    return out.read_bytes()
+
+
+def test_eq_plays(player, songs, tmp):
+    """A PEQ in /mnt/data/peq-active before a song: what plays is the reference through patch/peq.c, every sample."""
+    d = tmp/'eq'; d.mkdir()
+    subprocess.run([tool(tmp, 'peq_ref', '-DPEQ_ROOT=""'), 'save', d/'eq.state', '6', '-3'], check=True)
+    s, pcm, names = play(player, songs, 'eq', d, speed=8)
+    want = eq_reference(tmp, songs, 'a1.flac', d/'eq.state', d/'want.s16')
+    assert names == ['0000_44100_2_s16.raw'], names
+    assert want != reference(songs/'a1.flac'), 'the EQ changes nothing'
+    at = first_difference(pcm[0], want)
+    assert at is None, f'{len(pcm[0]) // 4} frames, reference {len(want) // 4}; first difference at frame {(at or 0) // 4}'
+    return f'{len(want) // 4} frames equal to the reference through the EQ'
+
+
+def test_eq_swap(player, songs, tmp):
+    """Another EQ state written while a song plays, then mcl-seteq (an EQ change, or EQ per Output's swap): from one
+    block on, the song is the reference through the first EQ ramping into the second, as patch/peq.c's update."""
+    d = tmp/'eq-swap'; d.mkdir()
+    subprocess.run([tool(tmp, 'peq_ref', '-DPEQ_ROOT=""'), 'save', d/'eq.state', '6', '-3'], check=True)
+    subprocess.run([tool(tmp, 'peq_ref', '-DPEQ_ROOT=""'), 'save', d/'eq2.state', '-6', '0'], check=True)
+    s, pcm, names = play(player, songs, 'eq-swap', d, speed=8)
+    first = eq_reference(tmp, songs, 'a1.flac', d/'eq.state', d/'first.s16')
+    at = first_difference(pcm[0], first)
+    assert at is not None and 6 * 44100 < at // 4 < 9 * 44100, f'the second EQ came in at frame {(at or 0) // 4}'
+    block = int(subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'a', '-show_entries', 'packet=duration', '-of', 'csv=p=0',
+                                songs/'a1.flac'], check=True, capture_output=True, text=True).stdout.split()[0])
+    for f in range(at // 4 // block * block, at // 4 - 2 * block, -block):  # the block the reread came before
+        want = eq_reference(tmp, songs, 'a1.flac', d/'eq.state', d/'want.s16', f, d/'eq2.state')
+        if first_difference(pcm[0], want) is None: return f'the second EQ from frame {f}, through the ramp, equal to the reference'
+    assert False, f'no block boundary before frame {at // 4} gives the output'
+
+
+def test_crossfade(player, songs, tmp):
+    """/tmp/q2xfade at 2000 ms, two 20 s FLACs, the second preloaded: the first plays exactly up to its last 2 s, which
+    are mixed under the second's first 2 s at equal power, then the second plays exactly (demo's fade is 0 by then, its
+    next being the queue's end); one PCM open."""
+    s, pcm, names = play(player, songs, 'xfade', tmp/'xfade', speed=8)
+    assert names == ['0000_44100_2_s16.raw'], names
+    a, b, got = (array.array('h', x) for x in (reference(songs/'a1.flac'), reference(songs/'a2.flac'), pcm[0]))
+    n, h = len(a) // 2, 2 * 44100
+    assert len(got) == len(a) + len(b) - 2 * h, f'{len(got) // 2} frames, expected {(len(a) + len(b)) // 2 - h}'
+    assert got[:2 * (n - h)] == a[:2 * (n - h)], 'the first song before its tail'
+    worst = 0
+    for k in range(h):
+        p = (k + 0.5) / h * math.pi / 2
+        for c in (0, 1):
+            want = b[2 * k + c] * math.sin(p) + a[2 * (n - h + k) + c] * math.cos(p)
+            worst = max(worst, abs(got[2 * (n - h + k) + c] - want))
+    assert worst <= 2, f'the mix is {worst} from equal power'
+    assert got[2 * n:] == b[2 * h:], 'the second song after the mix'
+    exits = [l.split()[-1] for l in s.lines if 'exit}' in l]
+    assert exits == ['{player-status\\exit}'] * 2, exits
+    return f'{len(got) // 2} frames: {n - h} exact, {h} mixed within {worst:.2f} of equal power, {len(b) // 2 - h} exact'
+
+
+# mcl-replaygain's scale for each file of music.REPLAYGAIN and b1.mp3, by mode: hciplayer's rule (player/source.c
+# source_replaygain): the gain, never above 1 / peak, a missing peak counting as 1; a missing track gain falls back to
+# the album's in mode 1; rglame.mp3's only gain is its LAME header's, which is not read.
+def _rg(db, peak=1.0): return min(10 ** (db / 20), 1 / peak)
+RG_SCALE = {'track': {'rg.flac': _rg(-6, .5), 'rg.ogg': _rg(-6, .5), 'rg23.mp3': _rg(-6, .5), 'rg24.mp3': _rg(-6, .5), 'rg.m4a': _rg(-6, .5),
+                      'rgpeak.flac': _rg(6, .8), 'rgnopeak.flac': _rg(6), 'rgalbum.flac': _rg(-9, .5), 'rglame.mp3': 1},
+            'album': {'rg.flac': _rg(-3.5, .6), 'rg.ogg': _rg(-3.5, .6), 'rg23.mp3': _rg(-3.5, .6), 'rg24.mp3': _rg(-3.5, .6), 'rg.m4a': _rg(-3.5, .6),
+                      'rgpeak.flac': 1, 'rgnopeak.flac': 1, 'rgalbum.flac': _rg(-9, .5), 'rglame.mp3': 1}}
+
+
+def check_replaygain(player, songs, tmp, mode):
+    s, pcm, names = play(player, songs, f'rg-{mode}', tmp/f'rg-{mode}', speed=8)
+    stream, out, worst = b''.join(pcm), [], {}
+    at = 0
+    for f, scale in RG_SCALE[mode].items():
+        fmt = 'f32le' if f.endswith('.ogg') else 's16le'
+        ref = reference(songs/f, fmt)
+        part = stream[at:at + len(ref)]
+        at += len(ref)
+        x, y = (array.array('f' if fmt == 'f32le' else 'h', v) for v in (ref, part))
+        assert len(x) == len(y), f'{f}: {len(y)} samples, reference {len(x)}'
+        if fmt == 'f32le': err = max(abs(v - max(-1.0, min(1.0, u * scale))) for u, v in zip(x, y)) * 32768
+        else: err = max(abs(v - max(-32768, min(32767, u * scale))) for u, v in zip(x, y))
+        worst[f] = err
+        assert err <= 1, f'{mode} {f}: {err:.2f} from {scale:.4f} times the reference'
+        if scale == 1: assert x == y, f'{mode} {f}: changed, where there is no gain'
+    assert at == len(stream), f'{len(stream) - at} bytes more than the files'
+    return f'{len(worst)} files, each its scale times the reference within {max(worst.values()):.2f} of a 16-bit step'
+
+
+def test_replaygain_track(player, songs, tmp): return check_replaygain(player, songs, tmp, 'track')
+def test_replaygain_album(player, songs, tmp): return check_replaygain(player, songs, tmp, 'album')
+
+
+# The Clicker's sounds as player/output.c makes them (click_table), in float as it does.
+CLICKS = {'wheel': (1000, 4, 1.2), 'button': (1820, 3, 0.9), 'beep': (2280, 200, 60)}
+def click_sound(kind, rate=44100):
+    f32 = lambda v: struct.unpack('f', struct.pack('f', v))[0]
+    hz, ms, decay = CLICKS[kind]
+    n, level, rise, fall = int(ms * rate / 1000), 10 ** (-20 / 20), 0.25 * rate / 1000, 0.5 * rate / 1000
+    out = []
+    for i in range(n):
+        t = i / rate
+        env = level * math.exp(-t * 1000 / decay)
+        if i < rise: env *= 0.5 - 0.5 * math.cos(math.pi * i / rise)
+        if n - i < fall: env *= 0.5 - 0.5 * math.cos(math.pi * (n - i) / fall)
+        out.append((f32(env), f32(env * math.sin(2 * math.pi * hz * t))))
+    return out
+
+
+def runs(x):
+    """The stretches of x (an S16 stereo array) that are not silent, as (first frame, frames)."""
+    out, start = [], None
+    for i in range(0, len(x), 2):
+        if (x[i] or x[i + 1]) and start is None: start = i // 2
+        if not (x[i] or x[i + 1]) and start is not None:
+            if out and start - (out[-1][0] + out[-1][1]) < 8: out[-1] = (out[-1][0], i // 2 - out[-1][0])  # a zero crossing inside one
+            else: out.append((start, i // 2 - start))
+            start = None
+    return out
+
+
+def test_click(player, songs, tmp):
+    """mcl-click while silence plays: each sound once, both channels, at its length and level, at about 20 ms past
+    what was playing; nothing while paused or after the stop. Into a full-scale square, the click makes room: the
+    mix stays inside 16 bits, as y = x (1 - e) + s."""
+    s, pcm, names = play(player, songs, 'click', tmp/'click')
+    x = array.array('h', b''.join(pcm))
+    found = runs(x)
+    sent = [t for t, d, name, arg in parse('\n'.join(s.lines))[0] if d == '>' and name == 'mcl-click'][:3]
+    start = [t for t, d, name, arg in parse('\n'.join(s.lines))[0] if d == '>' and name == 'set-songurl'][0]
+    assert len(found) == 3, f'{len(found)} sounds: {found}'
+    for (first, n), kind, t in zip(found, CLICKS, sent):
+        sound = click_sound(kind)
+        assert abs(n - len(sound)) <= 2, f'{kind}: {n} frames, {len(sound)} made'
+        # the sound's first audible frame may come a frame or two into it, where it is still under half a step
+        lead = next(i for i, (e, c) in enumerate(sound) if abs(round(c * 32768)) >= 1)
+        err = max(abs(x[2 * (first - lead + i) + c] - c2 * 32768) for i, (e, c2) in enumerate(sound) for c in (0, 1))
+        assert err <= 1, f'{kind}: {err:.2f} from the sound made'
+        when = (first - lead) / 44100 - (t - start)
+        assert -0.05 < when < 0.15, f'{kind}: {when * 1000:.0f} ms after its command, counted from the song\'s start'
+    s, pcm, names = play(player, songs, 'click-full', tmp/'click-full')
+    y, ref = array.array('h', b''.join(pcm)), array.array('h', reference(songs/'full.wav'))
+    moved = [i // 2 for i in range(len(y)) if y[i] != ref[i]]
+    assert moved and moved[-1] - moved[0] < len(click_sound('wheel')), f'{len(moved)} samples changed, frames {moved[:1]}..{moved[-1:]}'
+    lead = next(i for i, (e, c) in enumerate(click_sound('wheel')) if e > 0)
+    worst = 0
+    for i, (e, c) in enumerate(click_sound('wheel')):
+        k = moved[0] - lead + i
+        for ch in (0, 1):
+            v = (ref[2 * k + ch] / 32768 * (1 - e) + c) * 32768
+            assert -32768 <= v <= 32767.5, f'the mix leaves 16 bits at frame {k}: {v}'
+            worst = max(worst, abs(y[2 * k + ch] - v))
+    assert worst <= 1, f'the mix is {worst:.2f} from y = x (1 - e) + s'
+    return f'{len(found)} sounds at their length and level; into full scale, within {worst:.2f} of the mix, inside 16 bits'
+
+
 # ---- protocol
 
 def parse(text):
@@ -313,14 +492,17 @@ def parse(text):
     return lines, positions
 
 
-def skeleton(lines):
+def skeleton(lines, levels=True):
     """What demo acts on, in order: each command, each event that ends a song, and each answer to a one-off query. The
-    200 ms poll's answers are compared apart (answers), since when "ready" turns to "playing" is not exact."""
+    200 ms poll's answers are compared apart (answers), since when "ready" turns to "playing" is not exact. The level
+    meter's answers are compared with levels, but for a song whose peak moves within the meter's few ms (the
+    controls scenario's tone under a sweep beats), where which block it measured decides; the spectrum's twelve
+    zeros are q2player's, a deviation."""
     out = []
     for t, d, name, arg in lines:
         if d == '>': out.append(f'> {name}')
         elif name in ('player-status', 'media-info') and arg in ('ready', 'playing', 'no-playing-status') or name == 'media-info': continue
-        elif name in ('mcl-getuvmeter', 'mcl-getspectrum'): out.append(f'< {name}')  # the meters' scale is phase 3's
+        elif name == 'mcl-getspectrum' or name == 'mcl-getuvmeter' and not levels: out.append(f'< {name}')
         else: out.append(f'< {name}\\{arg}')
     return out
 
@@ -388,7 +570,7 @@ def check_protocol(player, songs, tmp, fixture):
     s, _, _ = play(player, songs, scenario, tmp/f'p-{name}')
     got, got_pos = parse((tmp/f'p-{name}/transcript.txt').read_text())
     norm = lambda sk: [x.replace(str(songs), '/mnt/mmc') for x in sk]
-    a, b = norm(skeleton(got)), norm(skeleton(want))
+    a, b = norm(skeleton(got, scenario != 'controls')), norm(skeleton(want, scenario != 'controls'))
     assert a == b, f'{name}: events differ\n  q2player: {a}\n  fixture:  {b}'
     ia, ib = answers(got), answers(want)
     assert [x[1:] for x in ia] == [x[1:] for x in ib], f'{name}: media-info differs\n  q2player: {ia}\n  fixture:  {ib}'

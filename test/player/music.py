@@ -9,11 +9,15 @@ The same cut makes a pair for each lossy encoder whose delay and padding a playe
 (PAIRS): FFmpeg's AAC in M4A (an edit list), iTunes' shape of M4A (whole frames, no edit list, the
 iTunSMPB tag), MP3 from FFmpeg's LAME, Ogg Vorbis, and Opus (from a 48 kHz copy, Opus's own rate).
 FORMATS is one short file of each other format demo lists, at each width a format has.
+
+REPLAYGAIN is a 6 s file for each form a ReplayGain tag takes (Vorbis comments in FLAC and Ogg, ID3v2.3 and 2.4
+TXXX frames in MP3, an iTunes freeform atom in M4A) and for each rule of the gain (the peak's limit, no peak, an
+album gain alone), and rglame.mp3, whose only gain is the one LAME puts in its header. silence.wav and full.wav are 6 s of digital silence and of a full-scale square, for the click, and with tone20.wav, a 1 kHz sine at -20 dBFS, for the level meter.
 """
-import os, pathlib, struct, subprocess, sys
+import os, pathlib, struct, subprocess, sys, wave
 
 # Bumped when a file is added or changed, so a directory made by an older recipe is made again.
-RECIPE = '2'
+RECIPE = '7'
 
 # (name, ffmpeg output arguments): 6 s of the noise source, in each format and width. APE, TAK and WMA Lossless
 # have no encoder in ffmpeg or on this machine, so none is made.
@@ -28,6 +32,21 @@ FORMATS = [
     ('o.opus', ['-c:a', 'libopus', '-b:a', '96k']), ('x2.wma', ['-c:a', 'wmav2', '-b:a', '128k']),
     ('x1.wma', ['-c:a', 'wmav1', '-b:a', '128k']), ('z.ac3', ['-c:a', 'ac3', '-b:a', '192k']),
     ('z.dts', ['-strict', '-2', '-c:a', 'dca', '-b:a', '768k']),
+]
+
+# (name, codec arguments, tags): the ReplayGain files, from 6 s of pink noise at 16 bits. rg23.mp3 and rg24.mp3 are
+# MP3 with the gains in TXXX frames, Latin-1 under ID3v2.3 and UTF-8 under 2.4, as FFmpeg writes each.
+RG = {'REPLAYGAIN_TRACK_GAIN': '-6.00 dB', 'REPLAYGAIN_TRACK_PEAK': '0.500000', 'REPLAYGAIN_ALBUM_GAIN': '-3.50 dB',
+      'REPLAYGAIN_ALBUM_PEAK': '0.600000'}
+REPLAYGAIN = [
+    ('rg.flac', ['-c:a', 'flac'], RG),
+    ('rg.ogg', ['-c:a', 'libvorbis'], RG),
+    ('rg23.mp3', ['-c:a', 'libmp3lame', '-q:a', '2', '-id3v2_version', '3'], RG),
+    ('rg24.mp3', ['-c:a', 'libmp3lame', '-q:a', '2', '-id3v2_version', '4'], RG),
+    ('rg.m4a', ['-c:a', 'alac', '-sample_fmt', 's16p'], {}),  # its tags are freeform atoms, added by freeform()
+    ('rgpeak.flac', ['-c:a', 'flac'], {'REPLAYGAIN_TRACK_GAIN': '+6.00 dB', 'REPLAYGAIN_TRACK_PEAK': '0.800000'}),
+    ('rgnopeak.flac', ['-c:a', 'flac'], {'REPLAYGAIN_TRACK_GAIN': '+6.00 dB'}),
+    ('rgalbum.flac', ['-c:a', 'flac'], {'REPLAYGAIN_ALBUM_GAIN': '-9.00 dB', 'REPLAYGAIN_ALBUM_PEAK': '0.500000'}),
 ]
 
 # The lossy pairs, each two files cut from whole.wav (whole48.wav for Opus) at 20 s.
@@ -67,6 +86,26 @@ def itunes(path, frames):
     pathlib.Path(path).write_bytes(b)
 
 
+def freeform(path, tags):
+    """tags as iTunes and foobar2000 write them into an M4A: a ---- atom each (mean com.apple.iTunes, name the
+    tag's), under moov/udta/meta/ilst, which FFmpeg wrote for the title."""
+    b = bytearray(pathlib.Path(path).read_bytes())
+    moov = b.index(b'moov') - 4
+    atoms = b''.join(_box(b'----', _box(b'mean', bytes(4) + b'com.apple.iTunes') + _box(b'name', bytes(4) + k.lower().encode())
+                          + _box(b'data', struct.pack('>II', 1, 0) + v.encode())) for k, v in tags.items())
+    boxes, start, end = [], moov, moov + struct.unpack_from('>I', b, moov)[0]
+    for name, head in (b'udta', 8), (b'meta', 8), (b'ilst', 12):
+        boxes.append(start)
+        p = start + head
+        while b[p + 4:p + 8] != name:
+            p += struct.unpack_from('>I', b, p)[0]
+            assert p < end, f'{path}: no {name.decode()}'
+        start, end = p, p + struct.unpack_from('>I', b, p)[0]
+    b[end:end] = atoms
+    for q in boxes + [start]: struct.pack_into('>I', b, q, struct.unpack_from('>I', b, q)[0] + len(atoms))
+    pathlib.Path(path).write_bytes(b)
+
+
 def make(d):
     d = pathlib.Path(d); d.mkdir(parents=True, exist_ok=True)
     if not (d/'slow.flac').exists(): os.mkfifo(d/'slow.flac')  # a preload's open that blocks until a test writes it
@@ -102,6 +141,21 @@ def make(d):
     ff('-f', 'lavfi', '-i', 'anoisesrc=d=6:c=pink:r=44100:a=0.4:seed=3', '-ac', '2', '-c:a', 'pcm_f32le', src)
     for name, args in FORMATS:
         ff('-i', src, *args, *tags(name, 'Formats', 1), d/name)
+    # ReplayGain's tag forms; the moov is after mdat in FFmpeg's M4A, so the atoms move no chunk offset
+    pink = d/'pink.wav'
+    ff('-f', 'lavfi', '-i', 'anoisesrc=d=6:c=pink:r=44100:a=0.25:seed=5', '-ac', '2', '-c:a', 'pcm_s16le', pink)
+    for name, args, rg in REPLAYGAIN:
+        ff('-i', pink, *args, *tags(name, 'ReplayGain', 1), *[x for k, v in rg.items() for x in ('-metadata', f'{k}={v}')], d/name)
+    freeform(d/'rg.m4a', RG)
+    # a gain in its LAME header alone: white noise at full scale, so the gain LAME works out is a cut, -8.9 dB (a boost
+    # would read 1 anyway, as LAME's peak is 0)
+    ff('-f', 'lavfi', '-i', 'anoisesrc=d=6:c=white:r=44100:a=1.0:seed=5', '-ac', '2', '-c:a', 'pcm_s16le', d/'loud.wav')
+    subprocess.run(['lame', '--quiet', '-V2', d/'loud.wav', d/'rglame.mp3'], check=True)
+    ff('-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo:d=6', '-c:a', 'pcm_s16le', d/'silence.wav')
+    ff('-f', 'lavfi', '-i', 'sine=f=1000:r=44100:d=6', '-af', 'volume=0.8,aformat=channel_layouts=stereo', '-c:a', 'pcm_s16le', d/'tone20.wav')
+    with wave.open(str(d/'full.wav'), 'wb') as f:  # a 100 Hz square at the very edges of 16 bits, both channels
+        f.setnchannels(2), f.setsampwidth(2), f.setframerate(44100)
+        f.writeframes(b''.join(struct.pack('<hh', v, v) for v in (32767 if i % 441 < 220 else -32768 for i in range(6 * 44100))))
     # the lossy pairs
     ff('-i', w, '-ar', '48000', '-c:a', 'pcm_s16le', d/'whole48.wav')
     for name, ext in PAIRS.items():

@@ -127,9 +127,16 @@ static void command(const char *name, const char *arg) {
     } else if (!strcmp(name, "mcl-mqadecodemode")) {
         c->mqa = atoi(arg);
     } else if (!strcmp(name, "mcl-seteq")) {
+        /* stock's ten gains and flag; Q2 Pod's payload sends it after each change to the EQ state on disk
+         * (patch/peq_ui.c peq_stock_eq), which is what plays (docs/player-plan.md#deviations) */
         const char *p = arg;
         for (int i = 0; i < 10 && p; i++, p = strchr(p, '|') ? strchr(p, '|') + 1 : NULL) c->eq[i] = strtof(p, NULL);
         c->eq_on = p ? atoi(p) : 0;
+        c->eq_changed = 1;
+    } else if (!strcmp(name, "mcl-click")) {
+        /* the Clicker's click in the headphones (patch/clicker.c); a song must be playing, as nothing else is open */
+        int kind = !strcmp(arg, "wheel") ? CLICK_WHEEL : !strcmp(arg, "button") ? CLICK_BUTTON : !strcmp(arg, "beep") ? CLICK_BEEP : 0;
+        if (kind && c->state == PLAYING && !c->paused) c->click = kind, wake = 1;
     }
     if (wake) pthread_cond_broadcast(&c->wake);
     pthread_mutex_unlock(&c->mu);

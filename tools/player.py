@@ -134,14 +134,15 @@ def build(target, alsa=None):  # pragma: no mutate block
     out = ROOT/'player/build'/(target + ('-tls' if tls else ''))
     cc = ['cc'] if target == 'host' else [f'{toolchain()}/{TRIPLE}-gcc', *ARCH]
     strip = 'strip' if target == 'host' else f'{toolchain()}/{TRIPLE}-strip'
-    extra = []
+    # patch/peq.h's files (the EQ state, the fade, the taps) under the directory a host test starts the player in
+    extra = ['PEQ_ROOT=""' if target == 'mips' else 'PEQ_ROOT="."']
     if target == 'mips':
         # stock's own libasound.so.2, from an unpacked root filesystem (Q2_STOCKFS; tools/thirdparty.py keeps one)
         fs = pathlib.Path(os.environ.get('Q2_STOCKFS') or THIRDPARTY/'stockfs')
         alsa = pathlib.Path(alsa or fs/'usr/lib/libasound.so.2.0.0')
         if not alsa.exists():
             sys.exit(f'player: no {alsa}; set Q2_STOCKFS to an unpacked stock root filesystem')
-        extra = [f'ALSA={alsa}']
+        extra.append(f'ALSA={alsa}')
         if tls:
             extra.append(f'TLS=-L{tls}/lib -lmbedtls -lmbedx509 -lmbedcrypto')
     run('make', '-C', ROOT/'player', f'OUT={out}', 'CC=' + ' '.join(map(str, cc)), f'STRIP={strip}', f'FFMPEG={ff}',

@@ -34,11 +34,14 @@ def gapless(path, start=0, flag=0):
 
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from music import FORMATS, PAIRS  # noqa: E402
+from music import FORMATS, PAIRS, REPLAYGAIN  # noqa: E402
 
 # formats-all's files, in the order they play
 ALL_FORMATS = ['a1.flac', 'f24.flac', 'b1.mp3', 'd.m4a', 'e.ogg', *(n for n, _ in FORMATS)]
 
+
+# patch/peq_ui.c peq_stock_eq's call of stock's set_equalizer_value(1): its ten gains and the flag 1
+SETEQ = '{mcl-seteq\\' + '|'.join(['0.000000'] * 10) + '|1}'
 
 # A scenario is a list of (seconds from start, command or callable(session)). Paths are the player's.
 def scenarios(m):
@@ -109,6 +112,31 @@ def scenarios(m):
         'chain-lossy': chain(m, [n for n, _ in FORMATS if n.rsplit('.', 1)[1] in ('mp2', 'aac', 'opus', 'wma', 'ac3', 'dts')]),
         **{f'pair-{n}': boot + [(1.0, song('set-songurl', f'{m}/{n}1.{e}', flag=1)), (16.0, gapless(f'{m}/{n}2.{e}', flag=1)), (44.0, None)]
            for n, e in PAIRS.items()},
+        # the DSP (docs/player-plan.md, phase 3). put() steps write the files the payload writes: the EQ state in
+        # /mnt/data, the fade's length in /tmp, under the session's directories (the player's /mnt/data and /tmp).
+        # Each sends the mcl-seteq that puts Q2 Pod's filter in hciplayer's chain: demo's at boot with the EQ on,
+        # or patch/crossfade.c's peq_chain while a fade is set.
+        # Crossfade: a 2 s fade asked before the first song, the second preloaded as Gapless would
+        'xfade': boot + [(0.2, put('tmp/q2xfade', (2000).to_bytes(4, 'little'))), (0.3, SETEQ), (1.0, song('set-songurl', a1, flag=1)),
+                         (10.0, gapless(a2, flag=1)), (24.0, put('tmp/q2xfade', bytes(4), in_place=True)), (44.0, None)],
+        # the EQ: the state written before the song (eq.state, made by the test), then another and mcl-seteq, as the
+        # payload's peq_stock_eq sends it after each change, and the EQ per Output swap does
+        'eq': boot + [(0.2, put('mnt/data/peq-active', 'eq.state')), (0.3, SETEQ), (1.0, song('set-songurl', a1)), (23.0, None)],
+        'eq-swap': boot + [(0.2, put('mnt/data/peq-active', 'eq.state')), (0.3, SETEQ), (1.0, song('set-songurl', a1)),
+                           (8.0, put('mnt/data/peq-active', 'eq2.state')), (8.1, SETEQ), (23.0, None)],
+        # ReplayGain, track and album, every tag form, then an MP3 whose only gain is its LAME header's
+        **{f'rg-{mode}': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\%d}' % n), (0.1, '{mcl-setoutputway\\0}')]
+           + chain(m, [f for f, _, _ in REPLAYGAIN] + ['rglame.mp3'])[4:] for mode, n in (('track', 1), ('album', 2))},
+        # the Clicker's click: one of each into silence, a wheel's into a full-scale square; none while paused or idle
+        'click': boot + [(1.0, song('set-songurl', f'{m}/silence.wav')), (2.0, '{mcl-click\\wheel}'), (3.0, '{mcl-click\\button}'),
+                         (4.0, '{mcl-click\\beep}'), (4.5, '{mcl-pause\\null}'), (5.0, '{mcl-click\\wheel}'), (5.5, '{mcl-play\\null}'),
+                         (7.5, '{mcl-stop\\null}'), (8.0, '{mcl-click\\wheel}'), (8.5, None)],
+        'click-full': boot + [(1.0, song('set-songurl', f'{m}/full.wav')), (2.0, '{mcl-click\\wheel}'), (4.0, '{mcl-stop\\null}'), (4.5, None)],
+        # the level meter (mcl-setexplayinfo 1): a full-scale square, silence, a 1 kHz sine at -20 dBFS, asked twice each
+        'meter': boot + [(0.5, '{mcl-setexplayinfo\\1}'), (1.0, song('set-songurl', f'{m}/full.wav')), (2.5, '{mcl-getuvmeter\\null}'),
+                         (3.0, '{mcl-getuvmeter\\null}'), (3.5, song('set-nexturl', f'{m}/silence.wav')), (5.0, '{mcl-getuvmeter\\null}'),
+                         (5.5, '{mcl-getuvmeter\\null}'), (6.0, song('set-nexturl', f'{m}/tone20.wav')), (7.5, '{mcl-getuvmeter\\null}'),
+                         (8.0, '{mcl-getuvmeter\\null}'), (8.5, '{mcl-stop\\null}'), (9.5, '{mcl-getuvmeter\\null}'), (10.0, None)],
         # queries with nothing loaded
         'idle': boot + [(1.0, '{player-status\\request}'), (1.2, '{media-info\\get-music-info}'), (1.4, '{mcl-pcmstate\\null}'),
                         (1.6, '{get_cache_buffer\\null}'), (1.8, '{mcl-getuvmeter\\null}'), (2.0, '{mcl-getspectrum\\null}'), (2.2, '{mcl-pause\\null}'),
@@ -124,6 +152,23 @@ def chain(m, names, length=6):
     def queue(s): s.on_exit = [gapless(f'{m}/{n}', flag=1) for n in names[2:]]
     steps = [(1.0, song('set-songurl', f'{m}/{names[0]}', flag=1)), (1.5, gapless(f'{m}/{names[1]}', flag=1)), (1.6, queue)]
     return boot + steps + [(3.0 + (length + 1) * len(names), None)]
+
+
+def put(path, data, in_place=False):
+    """A step: write data (bytes, or the name of a file in the session's directory) to path under the session's
+    directory, as the payload does: whole, under a temporary name and renamed; or in_place, into the file the player
+    has mapped, as demo changes /tmp/q2xfade once made."""
+    def go(s):
+        out = s.out / path
+        out.parent.mkdir(parents=True, exist_ok=True)
+        body = data if isinstance(data, bytes) else (s.out / data).read_bytes()
+        if in_place:
+            with open(out, 'r+b') as f: f.write(body)
+            return
+        tmp = out.with_name(out.name + '.tmp')
+        tmp.write_bytes(body)
+        tmp.replace(out)
+    return go
 
 
 def feed(name):
@@ -234,22 +279,25 @@ def launch_host(player, music, speed=1):
     def go(s):
         (s.out / 'pcm').mkdir(exist_ok=True)
         for f in (s.out / 'pcm').glob('*'): f.unlink()
+        shutil.rmtree(s.out / 'mnt/data', ignore_errors=True); (s.out / 'mnt/data').mkdir(parents=True)
         env = dict(os.environ, Q2PLAYER_SOCK=str(s.tmp / 'sock_play'), Q2PLAYER_PCM=str(s.out / 'pcm'), Q2PLAYER_SPEED=str(speed))
-        return subprocess.Popen([player], stdout=open(s.out / 'player.log', 'w'), stderr=subprocess.STDOUT, env=env)
+        # the host build reads patch/peq.h's files (/mnt/data/peq-active, /tmp/q2xfade, ...) under its directory
+        return subprocess.Popen([player], stdout=open(s.out / 'player.log', 'w'), stderr=subprocess.STDOUT, env=env, cwd=s.out)
     return go
 
 
-def launch_emu(emu, binary, music, name='hciplayer', args=('-ao', 'alsa'), stock=None, switch=False, killall=None):
+def launch_emu(emu, binary, music, name='hciplayer', args=('-ao', 'alsa'), stock=None, switch=False, killall=None, buffer_ms=None):
     """binary inside a bwrap sandbox of emu/rootfs under qemu, as run.sh starts demo; /tmp is the session's.
     For q2player's fallback (player/main.c): stock is a player to put at /usr/lib/hciplayer-stock/hciplayer, switch
     makes /mnt/data/q2player, and killall is when, in seconds, a shell in the sandbox runs demo's `killall -9
-    hciplayer`, after writing each process's name and command line to ps.txt."""
+    hciplayer`, after writing each process's name and command line to ps.txt. buffer_ms has the shim play the
+    capture as a card with that much buffer (Q2EMU_PCM_BUFFER_MS: a delay, and a rewind that takes frames back)."""
     emu = pathlib.Path(emu)
     def go(s):
         (s.out / 'pcm').mkdir(exist_ok=True)
         for f in (s.out / 'pcm').glob('*'): f.unlink()
-        data = s.out / 'data'
-        shutil.rmtree(data, ignore_errors=True); data.mkdir()
+        data = s.out / 'mnt/data'
+        shutil.rmtree(data, ignore_errors=True); data.mkdir(parents=True)
         if switch: (data / 'q2player').touch()
         extra = ['--bind', data, '/mnt/data'] + (['--ro-bind', stock, '/usr/lib/hciplayer-stock/hciplayer'] if stock else [])
         run = [f'/usr/bin/{name}', *args]
@@ -264,6 +312,7 @@ def launch_emu(emu, binary, music, name='hciplayer', args=('-ao', 'alsa'), stock
                '--ro-bind', emu / 'shim/libq2emu.so', '/lib/libq2emu.so', '--ro-bind', binary, f'/usr/bin/{name}', *extra,
                '--setenv', 'PATH', '/usr/bin:/bin:/usr/sbin:/sbin', '--setenv', 'HOME', '/root',
                '--setenv', 'Q2EMU_LOG', '/emu-log/shim.log', '--setenv', 'Q2EMU_PCM', 'null', '--setenv', 'Q2EMU_PCMDIR', '/emu-log/pcm',
+               *(['--setenv', 'Q2EMU_PCM_BUFFER_MS', str(buffer_ms)] if buffer_ms else []),
                '--setenv', 'LD_PRELOAD', '/lib/libq2emu.so', '--chdir', '/tmp', *run]
         return subprocess.Popen([str(c) for c in cmd], stdout=open(s.out / 'player.log', 'w'), stderr=subprocess.STDOUT)
     return go
@@ -280,11 +329,12 @@ def main():
     ap.add_argument('--stock', help='with --emu: the player q2player falls back to, at /usr/lib/hciplayer-stock/hciplayer')
     ap.add_argument('--switch', action='store_true', help='with --emu: make /mnt/data/q2player, which turns q2player on')
     ap.add_argument('--killall', type=float, help="with --emu: run demo's killall -9 hciplayer this many seconds in")
+    ap.add_argument('--buffer-ms', type=int, help='with --emu: the capture plays as a card with this much buffer')
     a = ap.parse_args()
     music = str(pathlib.Path(a.music).resolve())
     if a.emu:
         launch, m = launch_emu(a.emu, pathlib.Path(a.hciplayer).resolve(), music, stock=a.stock and pathlib.Path(a.stock).resolve(),
-                               switch=a.switch, killall=a.killall), '/mnt/mmc'
+                               switch=a.switch, killall=a.killall, buffer_ms=a.buffer_ms), '/mnt/mmc'
     else:
         launch, m = launch_host(a.player, music), music
     s = Session(a.out)

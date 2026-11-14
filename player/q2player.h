@@ -38,9 +38,11 @@ struct ctl {
     struct song play_song, preload_song;
     int seek_to;
     int paused;
-    /* settings demo pushes; most only take effect in later phases */
+    /* settings demo pushes; volume, softvol and dsdmode take effect in phase 4, speed and mqa never (as stock) */
     int outputway, volume, softvol, dsdmode, replaygain, speed, explay, mqa, eq_on;
     float eq[10];
+    int eq_changed; /* an mcl-seteq since the playback thread last looked: the EQ state on disk is new */
+    int click;      /* an mcl-click to mix in, CLICK_*, while a song plays */
     /* status */
     int state, has_info, position;
     struct info info;
@@ -65,6 +67,7 @@ void source_info(const struct source *, struct info *);
 /* The next block: frames and where they are, 0 at the end, below 0 on a decode error that ends the file. */
 int source_read(struct source *, const uint8_t **data);
 int source_seek(struct source *, int seconds);
+float source_replaygain(const struct source *, int mode); /* mcl-replaygain's scale for this file, 1 for none */
 int64_t source_frames(const struct source *); /* frames handed out since the start or the last seek, plus its target */
 
 /* output.c */
@@ -76,11 +79,24 @@ void output_pause(struct output *, int on);
 void output_drop(struct output *);     /* forget what is buffered: a seek, a skip, a stop */
 void output_drain(struct output *);    /* play what is buffered to its end */
 void output_close(struct output *);
+enum { CLICK_WHEEL = 1, CLICK_BUTTON, CLICK_BEEP }; /* mcl-click's wheel, button and beep */
+int output_click(struct output *, int kind); /* mixed into what is about to be heard */
 /* the headphone DAC (output way 0; nothing on the others) */
 void dac_song(int outputway);              /* at each song's start: PCM mode */
 void dac_mute(int outputway);
 void dac_unmute(int outputway, int wait);  /* wait: hold sound back until the mute line has let go */
 int dac_stamp(int pressed);                /* a fresh press (1) or natural-start mark (0) from demo, each once */
+
+/* dsp.c: one song's chain (ReplayGain, the EQs, Mono Audio, Swap L/R, crossfade, the taps). untouched: DSD, which
+ * passes as it is. */
+struct dsp;
+struct dsp *dsp_open(const struct pcm_format *, int untouched, float replaygain, int length);
+/* frames of data through it; returns the frames to write, at *out (fewer while crossfade holds a tail back). pts:
+ * the song's seconds handed out up to the end of this block */
+int dsp_run(struct dsp *, const uint8_t *data, int frames, double pts, const uint8_t **out);
+void dsp_eq_changed(struct dsp *);
+void dsp_close(struct dsp *, int ended); /* ended: the song played to its end, nobody cut it */
+void dsp_meter(const struct pcm_format *, int untouched, const uint8_t *data, int frames, int uv[2]);
 
 /* engine.c */
 void *engine_thread(void *);

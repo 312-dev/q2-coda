@@ -11,7 +11,6 @@
  * stop or a skip cancelled is closed by its thread when its open returns, and never played. */
 #include "q2player.h"
 #include <fcntl.h>
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -118,33 +117,28 @@ static void close_output(int drain) {
     out = NULL;
 }
 
-/* A level for each of the first two channels, for mcl-getuvmeter: the block's root mean square in dB below full
- * scale. ponytail: stock's scale is not known (it read -21 for one tone and -24 for a louder mix); phase 3
- * reads its meter's code and a Q2 confirms. */
-static void meter(const uint8_t *data, int frames, const struct pcm_format *f, int uv[2]) {
-    for (int c = 0; c < 2; c++) {
-        double sum = 0;
-        int ch = c < f->channels ? c : 0;
-        for (int i = 0; i < frames; i++) {
-            double v = f->is_float ? ((const float *)data)[i * f->channels + ch]
-                     : f->bytes == 2 ? ((const int16_t *)data)[i * f->channels + ch] / 32768.0
-                                     : ((const int32_t *)data)[i * f->channels + ch] / 2147483648.0;
-            sum += v * v;
-        }
-        uv[c] = sum > 0 ? (int)(10 * log10(sum / frames)) : 0;
-    }
-}
-
-/* Plays s to its end or to the request that cuts it short. The PCM stays open on return. */
+/* Plays s to its end or to the request that cuts it short, through its DSP chain (dsp.c). The PCM stays open on
+ * return. */
+static int play_through(struct source *s, const struct song *song, struct dsp *d, int untouched);
 static int play(struct source *s, const struct song *song) {
     struct ctl *c = &ctl;
-    const struct pcm_format *f = source_format(s);
     struct info info;
     source_info(s, &info);
     pthread_mutex_lock(&c->mu);
     /* until the song is heard its position reads 0, a start offset's too, as stock's does (fixtures/pod-start.txt) */
     c->info = info, c->has_info = 1, c->position = 0, c->state = OPENING;
+    int rg = c->replaygain; /* taken at each file, as stock's */
     pthread_mutex_unlock(&c->mu);
+    int untouched = !strcmp(info.codec, "DSF") || !strcmp(info.codec, "DSD"); /* DSD skips every filter, as stock */
+    struct dsp *d = dsp_open(source_format(s), untouched, untouched ? 1 : source_replaygain(s, rg), info.length);
+    int why = play_through(s, song, d, untouched);
+    dsp_close(d, why == ENDED);
+    return why;
+}
+
+static int play_through(struct source *s, const struct song *song, struct dsp *d, int untouched) {
+    struct ctl *c = &ctl;
+    const struct pcm_format *f = source_format(s);
 
     pthread_mutex_lock(&c->mu);
     int way = c->outputway;
@@ -178,8 +172,9 @@ static int play(struct source *s, const struct song *song) {
         if (c->play && c->next) { pthread_mutex_unlock(&c->mu); return NEXT; }
         if (c->stop) { c->stop = 0; pthread_mutex_unlock(&c->mu); return STOPPED; }
         int seek = c->seek, to = c->seek_to, want = c->preload, unwant = c->close_preload, metering = c->explay == 1;
+        int eq = c->eq_changed, click = c->click;
         struct song ps = c->preload_song;
-        c->seek = c->preload = c->close_preload = 0;
+        c->seek = c->preload = c->close_preload = c->eq_changed = c->click = 0;
         int paused = c->paused;
         pthread_mutex_unlock(&c->mu);
 
@@ -196,12 +191,15 @@ static int play(struct source *s, const struct song *song) {
         }
         if (paused) continue; /* a preload or a seek taken while paused: back to waiting */
         if (pausing) dac_unmute(way, 1), output_pause(out, 0), pausing = 0; /* a resume is always a person's */
+        if (eq) dsp_eq_changed(d);
+        if (click) output_click(out, click);
 
         const uint8_t *data;
         int n = source_read(s, &data);
         if (n <= 0) return ENDED;
+        n = dsp_run(d, data, n, (double)source_frames(s) / f->rate, &data);
         int uv[2] = {0, 0};
-        if (metering) meter(data, n, f, uv);
+        if (metering) dsp_meter(f, untouched, data, n, uv);
         if (output_write(out, data, n) < 0) return FAILED;
 
         /* What is still in the PCM is this song's newest frames, and under a gapless change the tail of the song
@@ -211,7 +209,7 @@ static int play(struct source *s, const struct song *song) {
         pthread_mutex_lock(&c->mu);
         if (played > 0) c->position = (int)((offset + played) / f->rate);
         if (heard) c->state = PLAYING;
-        c->uv[0] = uv[0], c->uv[1] = uv[1];
+        if (metering) c->uv[0] = uv[0], c->uv[1] = uv[1]; /* the last levels stand otherwise, as stock's */
         pthread_mutex_unlock(&c->mu);
     }
 }

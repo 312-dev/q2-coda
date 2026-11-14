@@ -25,6 +25,8 @@ int snd_pcm_hw_params(snd_pcm_t *, snd_pcm_hw_params_t *);
 int snd_pcm_prepare(snd_pcm_t *);
 snd_pcm_sframes_t snd_pcm_writei(snd_pcm_t *, const void *, snd_pcm_uframes_t);
 int snd_pcm_delay(snd_pcm_t *, snd_pcm_sframes_t *);
+snd_pcm_sframes_t snd_pcm_rewindable(snd_pcm_t *);
+snd_pcm_sframes_t snd_pcm_rewind(snd_pcm_t *, snd_pcm_uframes_t);
 int snd_pcm_pause(snd_pcm_t *, int);
 int snd_pcm_drop(snd_pcm_t *);
 int snd_pcm_drain(snd_pcm_t *);

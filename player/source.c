@@ -12,6 +12,8 @@
 #include <string.h>
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/replaygain.h>
+#include <math.h>
 
 enum { AAC_FRAME = 1024 }; /* AAC LC's samples a packet; padding is less */
 
@@ -202,6 +204,27 @@ void source_info(const struct source *s, struct info *i) {
     i->length = s->limit >= 0 ? (int)(s->limit / s->out.rate) : s->fmt->duration > 0 ? (int)(s->fmt->duration / AV_TIME_BASE) : 0;
     i->bits = s->out.bytes == 2 ? 16 : !s->out.is_float && s->dec->bits_per_raw_sample > 0 ? s->dec->bits_per_raw_sample : 32;
     snprintf(i->codec, sizeof i->codec, "%s", codec_name(s));
+}
+
+/* mcl-replaygain's scale for this file, as hciplayer's replaygain filter sets it up at each file (0x4282c0): mode 1
+ * the track's gain, or the album's when there is no track gain; mode 2 the album's; any other mode none. The gain
+ * in dB becomes a factor that is never above 1 / peak, a peak of 0 (none given) counting as 1, so without a peak a
+ * gain only ever cuts; and a gain of exactly 1 dB is ignored, as stock compares it with 100000 (a quirk kept for
+ * parity). The gains are FFmpeg's, from the REPLAYGAIN_* tags it reads (docs/internals.md#mp3-replaygain): only
+ * when a tag is there, since FFmpeg also exports an MP3's LAME header gain, which stock never read. */
+float source_replaygain(const struct source *s, int mode) {
+    const AVStream *st = s->fmt->streams[s->stream];
+    const AVPacketSideData *sd = av_packet_side_data_get(st->codecpar->coded_side_data, st->codecpar->nb_coded_side_data, AV_PKT_DATA_REPLAYGAIN);
+    int tagged = 0;
+    for (const char *const *k = (const char *const[]){"REPLAYGAIN_TRACK_GAIN", "REPLAYGAIN_ALBUM_GAIN", NULL}; *k; k++)
+        tagged |= av_dict_get(s->fmt->metadata, *k, NULL, 0) || av_dict_get(st->metadata, *k, NULL, 0);
+    if ((mode != 1 && mode != 2) || !sd || sd->size < sizeof(AVReplayGain) || !tagged) return 1;
+    const AVReplayGain *rg = (const AVReplayGain *)sd->data;
+    int32_t gain = mode == 1 && rg->track_gain != INT32_MIN ? rg->track_gain : rg->album_gain;
+    uint32_t peak = mode == 1 && rg->track_gain != INT32_MIN ? rg->track_peak : rg->album_peak;
+    if (gain == INT32_MIN || gain == 100000) return 1;
+    double scale = exp(gain * 1e-5 * 0.05 * 2.302585092994046), most = 1 / ((peak ? peak : 100000) * 1e-5);
+    return (float)(scale < most ? scale : most);
 }
 
 /* frame, from sample `skip` on, into buf, interleaved. */

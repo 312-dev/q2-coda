@@ -12,18 +12,23 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
 
 #define SWITCH_FILE "/mnt/data/q2player" /* `touch` it over q2remote and restart the player to turn q2player on */
 #define STOCK_PLAYER "/usr/lib/hciplayer-stock/hciplayer"
+/* There while q2player is the player: the payload's Clicker (patch/clicker.c) sends it clicks to mix in. */
+#define CLICKS_FILE "/tmp/q2clicks"
 
 int main(int argc, char **argv) {
     const char *path = getenv("Q2PLAYER_SOCK");
     pthread_t engine;
     (void)argc;
     if (access(SWITCH_FILE, F_OK) != 0 && access(STOCK_PLAYER, X_OK) == 0) {
+        unlink(CLICKS_FILE);
         execv(STOCK_PLAYER, argv);
         fprintf(stderr, "q2player: %s: %s; playing with q2player\n", STOCK_PLAYER, strerror(errno));
     }
+    close(open(CLICKS_FILE, O_WRONLY | O_CREAT | O_CLOEXEC, 0644));
     signal(SIGPIPE, SIG_IGN);
     setvbuf(stderr, NULL, _IOLBF, 0);
     /* demo listens before it starts the player, but a player restarted by hand may be early */
