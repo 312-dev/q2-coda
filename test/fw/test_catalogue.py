@@ -589,6 +589,8 @@ def test_search_finds_server_songs_with_local_and_server(rig, fw):
     search = "select * from songtable where (name like '%wild%') or (name==\"\" and filename like '%wild%')"
     loads.query(b'db', search.encode(), None, 0)
     assert sorted(r[6] for r in rig.query(loads.ran[-1])) == ['Wild Honey', 'Wild Horses']
+    # its row names it by filename, as a card file's: a server row's is its title, no suffix
+    assert sorted(r[1] for r in rig.query(loads.ran[-1])) == ['Wild Horses', 'a.flac']
     loads.query(b'db', b"select * from songtable where album like 'Sticky'", None, 0)  # not a search: as it is
     assert 'servertable' not in loads.ran[-1]
     fw.var('catalogue_source', C.c_int).value = 0

@@ -587,7 +587,9 @@ static void imp_song(imp_t *im, char **f, int n) {
         *o++ = ',', *im->mo++ = ',';
     char url[512], name[600];
     tk_snprintf(url, sizeof url, "/mnt/mmc/.%s/cat/%s/%s.%s", im->id, f[6], f[1], f[12]);
-    tk_snprintf(name, sizeof name, "%s.%s", *f[2] ? f[2] : f[1], f[12]);
+    /* filename: the title, which stock's Search lists a song by (a card file's name; a server row
+     * has no file, and "<title>.<suffix>" read as one) */
+    tk_snprintf(name, sizeof name, "%s", *f[2] ? f[2] : f[1]);
     const char *local = n > 13 && card_path(f[13]) ? f[13] : "";
     unsigned id = im->next++;
     PUT(o, end, "(%u,", id);
