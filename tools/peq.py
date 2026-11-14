@@ -97,6 +97,14 @@ FLAC_META_EOF = ((0x490920, 0x06000163, 0x06000028),  # bltz $s0, 0x490eb0 -> 0x
 # get-music-info runs on the command thread and reads mpctx->sh_audio, NULL while a song is starting: stock's NULL branch went
 # on to read through it and killed the player (docs/internals.md#music-info-between-songs). Now it answers as with no stream.
 # ponytail: NULL only, a stream freed after the checks is still read.
+# ffmpeg's tls protocol options in hciplayer (TLS_COMMON_OPTIONS: 48-byte AVOptions, ca_file first, then its alias
+# cafile, tls_verify, cert_file, key_file, listen, verifyhost). Stock's defaults leave ca_file unset and tls_verify 0,
+# so the player's HTTPS streams (Tidal, card apps' URLs) checked no certificate: ca_file and cafile default to the
+# firmware's Mozilla bundle (peq_player.c player_ca_file) and tls_verify to 1. ffmpeg 4.2's OpenSSL backend (a static
+# OpenSSL 1.0.1 here) then verifies the chain, not the host name. See docs/internals.md#stock-https.
+TLS_OPTIONS = 0x8c6190
+TLS_OPTION_NAMES = (b'ca_file', b'cafile', b'tls_verify')
+TLS_DEFAULTS = ((TLS_OPTIONS + 16, 'player_ca_file'), (TLS_OPTIONS + 48 + 16, 'player_ca_file'), (TLS_OPTIONS + 96 + 16, 1))
 MEDIA_INFO_NULL = ((0x42c0c8, 0x10600008, 0x106000fc),  # beqz $v1, 0x42c0ec -> 0x42c4bc, the no-playing-status reply
                    (0x42c5e8, 0x8fa21b20, 0x1060ffb4))  # lw $v0 (dead: 0x42c0d0 overwrites it) -> beqz $v1, 0x42c4bc: the same check on the length call's path; not shown it can fire there
 LIBC = {
@@ -184,7 +192,7 @@ LIBC = {
 }
 
 # The payload's C beside navigation.c (build.py compile_payload), in link order; test/fw builds the same set.
-UI_SOURCES = ['peq.c', 'peq_ui.c', 'coverflow.c', 'coverflow_thumb.c', 'coverflow_letters.c', 'coverflow_loader.c', 'playlist_art.c', 'library_scope.c', 'scrobble.c', 'photos.c', 'books.c', 'games.c', 'visualizer.c', 'playback.c', 'upnext.c', 'spotify.c', 'addon.c', 'addon_library.c', 'radio.c', 'tidal.c', 'netupdate.c', 'onlinematch.c', 'crossfade.c', 'nightshift.c', 'headset.c', 'lockscreen.c', 'chapters.c', 'lyrics.c', 'xiph.c', 'airplay.c']
+UI_SOURCES = ['peq.c', 'peq_ui.c', 'coverflow.c', 'coverflow_thumb.c', 'coverflow_letters.c', 'coverflow_loader.c', 'playlist_art.c', 'library_scope.c', 'scrobble.c', 'photos.c', 'books.c', 'games.c', 'visualizer.c', 'playback.c', 'upnext.c', 'spotify.c', 'addon.c', 'addon_library.c', 'radio.c', 'tidal.c', 'netupdate.c', 'onlinematch.c', 'crossfade.c', 'nightshift.c', 'headset.c', 'lockscreen.c', 'chapters.c', 'lyrics.c', 'xiph.c', 'airplay.c', 'stock_tls.c']
 
 def function_macros(address):
     """Each stock function in address (name -> its C address) as a macro calling it there."""
@@ -276,7 +284,7 @@ def patch_player(raw, out, flac_experiments=()):  # pragma: no mutate block
                       '*(.MIPS.abiflags) *(.reginfo) } }')
     run('ld.lld', '-m', 'elf32ltsmip', '--gc-sections', '-T', script, '-e', 'peq_open', '--undefined=mp3_seek', '--undefined=id3_gain',
         '--undefined=mp3_private_alloc', '--undefined=mp3_filter_entry', '--undefined=mp3_close', '--undefined=mp3_read', '--undefined=mp3_fill',
-        '--undefined=hci_idle_wait',
+        '--undefined=hci_idle_wait', '--undefined=player_ca_file',
         '--undefined=hci_pause_wait', '--undefined=hci_command', '--undefined=rs_open', '--undefined=ao_init', '--undefined=ao_uninit',
         *(f'--undefined={name}' for _, _, name in (*DAC_RELEASE, *PROBE_STOP, *STOP_SITES, STOP_FILL, *PRELOAD_CLOSE, FORCED_EOF, EXIT_HOLD, PRELOAD_PUBLISH, PRELOAD_FAILED, COLD_CLEAR, FLAC_GATE, SEEK_NOSYNC)),
         *(f'--undefined={symbol}' for n in flac_experiments for symbol in EXPORTS[n]),
@@ -332,6 +340,10 @@ def patch_player(raw, out, flac_experiments=()):  # pragma: no mutate block
     patch_word(data, MP3_FILL, DEMUX_FILL, ps['mp3_fill'], 'MP3 tail tags')
     for address in ID3_CALLS:
         patch_word(data, address, jal(STOCK_ID3), jal(ps['id3_gain']), 'MP3 ReplayGain')
+    for k, name in enumerate(TLS_OPTION_NAMES):
+        check(cstr(struct.unpack_from('<I', raw, fileoff(raw, TLS_OPTIONS + 48 * k))[0]) == name, 'Unexpected tls options')
+    for address, value in TLS_DEFAULTS:
+        patch_word(data, address, 0, ps[value] if isinstance(value, str) else value, 'tls verifies against the CA bundle')
     patch_word(data, *LAVF_PRIV, 'lavf gapless window')
     patch_word(data, *MOV_EDITS, 'M4A edit list kept')
     for address, stock, patched in patch_words(flac_experiments, ps):

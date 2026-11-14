@@ -2,6 +2,15 @@
 
 - **Unreleased (q2-coda)**:
   - Display: **Theme** lists **OLED** after **Classic**. It is a placeholder: it looks as **Theme: Classic** does until its own design arrives.
+  - Privacy: Now Playing's cover search (⋯ menu) offers covers from MusicBrainz's Cover Art Archive and Apple's iTunes only. It no longer sends the song's title and artist to Kugou, NetEase or Baidu, which it asked over an unencrypted connection, so a song neither service knows offers only the cover it already has.
+  - Privacy: a Baidu Netdisk sign-in left from Shanling's firmware is deleted at start-up. Q2 Pod has no Baidu Netdisk, and Shanling's code sent that sign-in unencrypted.
+  - Security: Tidal Downloads checks Tidal's certificate before it saves a track, so a hostile Wi-Fi network can't swap in a file of its own. If the check fails, the track still plays, but isn't saved to the card.
+  - Security: TIDAL's sign-in, browsing and favourites, and covers downloaded from the internet now check they're talking to the real server, so someone on the same Wi-Fi can't read your Tidal login or change what you get. Tidal's subscription check, stream links and album lists, which went unencrypted with your Tidal session, are encrypted too. A server with its own private certificate (a card app's home server, say) is refused.
+  - Security: TIDAL streams, and card apps' streams over HTTPS, check the server's certificate before they play. If the Q2's clock is years out, they won't play until it's set from the internet.
+  - Security: the Q2 has no root password, and the circuit board's serial connector no longer offers a login. Every Q2 shipped with the same root password.
+  - Security: Bluetooth stays discoverable for 3 minutes after it turns on, instead of for as long as it's on. Headphones and devices already paired connect as before; to pair a new phone with the Q2 as a Bluetooth receiver after that, turn Bluetooth off and on.
+  - Security: the firmware leaves out debugging and network tools nothing uses (strace, sqlite3, hcidump, memtester, nandtest, telnet, tftp and inetd among them).
+  - Time: setting the clock from the internet asks the worldwide NTP pool instead of China's.
 - **1.8.2**:
   - Games: in Solitaire, Centre on a pile that can't take the cards you hold now picks that pile up instead. Before, nothing happened and the cards stayed held until you put them back or pressed Return, which looked like the game had stuck.
   - Themes: Chinese, Japanese and other text the theme's own face lacks is now drawn bold wherever **Classic** or **Modern** draws its text bold: Classic's lists, bar, info rows, Cover Flow, album panel and hold menu; Modern's bar title; and Now Playing's title in both. It used the regular system font.

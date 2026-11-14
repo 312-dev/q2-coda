@@ -134,8 +134,11 @@ HOOKS = {
     'systemset_manualtime_page_init': (0x4cc83c, 'ringnav_manualtime', 'manualtime'),
     # any Tidal track asked for, from a queue or Now Playing, wakes its stream thread (tidal.c)
     'get_tidal_trackurl': (0x483f28, 'ringnav_tidal_track', 'tidaltrack'),
-    # its cover match: MusicBrainz/Cover Art Archive and iTunes candidates, then stock's Kugou search
-    'kugou_obtaincover': (0x51bf74, 'ringnav_cover_search', 'kugoucover'),
+    # its cover match: MusicBrainz/Cover Art Archive and iTunes candidates in place of stock's Kugou search,
+    # and none from NetEase's or Baidu's, online_coverthd's other two sources (onlinematch.c)
+    'kugou_obtaincover': (0x51bf74, 'ringnav_cover_search', None),
+    'com163_obtaincover': (0x51c46c, 'ringnav_cover_none', None),
+    'baidu_obtaincover': (0x51bbdc, 'ringnav_cover_none', None),
     'mclPrevSong': (0x5c0518, 'ringnav_prev', 'prev'),
     'mclSetPlayMode': (0x5bd94c, 'ringnav_mode', 'mode'),
     'mclSetPlaySpeed': (0x5bd9dc, 'ringnav_speed', 'speed'),
@@ -258,6 +261,8 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             rm -f $m
         }}
         rm -f /mnt/data/q2-cf-trace /mnt/data/q2-stall
+        # Baidu Netdisk's sign-in, which stock sends over plain HTTP: Q2 Pod has no Baidu row to use it from
+        rm -f /mnt/data/baidu_token.conf
         [ -f $c ] && (
             i=0
             while [ $i -lt 60 ] && ! grep -q ' /mnt/mmc ' /proc/mounts; do usleep 500000; i=$((i+1)); done
@@ -361,6 +366,34 @@ BLUEALSA = 'usr/bin/bluealsa'
 BLUEALSA2 = 'usr/bin/bluealsa2'
 BT_KEEPALIVE = (b'bluealsa -c LDAC', b'bluealsa --keep-alive=5 -c LDAC')
 SCROBBLE_CA = 'etc/scrobble-ca.pem'
+# BlueZ's settings. demo sets Discoverable each time it starts Bluetooth (openBluetooth), and stock's 0 kept the Q2
+# discoverable for as long as Bluetooth stayed on; 180 s gives a phone three minutes from then to find it.
+BT_MAIN = 'etc/bluetooth/main.conf'
+BT_DISCOVERABLE = (b'\nDiscoverableTimeout = 0\n', b'\nDiscoverableTimeout = 180\n')
+# Every V1.36 unit has the same root password hash, and init runs a login on the board's serial pad (ttyS3).
+# Nothing on the Q2 logs in (q2remote, --dev only, runs /bin/sh itself), so root is locked and the getty goes;
+# the kernel's and init's messages still reach the console.
+SHADOW = 'etc/shadow'
+INITTAB = 'etc/inittab'
+SERIAL_GETTY = (b'# Put a getty on the serial port\nconsole::respawn:/sbin/getty -L ttyS3 115200 vt100 # GENERIC_SERIAL\n\n', b'')
+def mozilla_ca():
+    """assets/mozilla-ca.pem, refused unless it is the pinned curl release (STOCK_CA_SHA)."""
+    data = (ROOT/'assets/mozilla-ca.pem').read_bytes()
+    check(sha(data) == STOCK_CA_SHA, 'Unexpected assets/mozilla-ca.pem')
+    return data
+def lock_root(shadow):
+    """shadow with root's password field '*', which no password matches."""
+    lines = shadow.split(b'\n')
+    rows = [i for i, l in enumerate(lines) if l.startswith(b'root:')]
+    check(len(rows) == 1, 'Unexpected /etc/shadow')
+    fields = lines[rows[0]].split(b':')
+    fields[1] = b'*'
+    lines[rows[0]] = b':'.join(fields)
+    return b'\n'.join(lines)
+def password_logins(shadow):
+    """The accounts in shadow a password logs in to: an empty field or a hash, not one starting * or !."""
+    return [l.split(b':')[0].decode() for l in shadow.split(b'\n')
+            if l.strip() and not l.split(b':')[1].startswith((b'*', b'!'))]
 AAC_44K1 = 0x317b8
 # DROP is acknowledged before the encoder handles its signal. Flush in the control
 # thread instead, so a delayed signal cannot discard the next track's first PCM.
@@ -395,6 +428,9 @@ def default_config(config):
     return config
 # toolsSetRtcTime's command, with its padding; -u keeps the RTC in UTC. See docs/internals.md#clock.
 RTC_WRITE = (b'hwclock -w\0\0', b'hwclock -wu\0')
+# networktime_adjust_thd's time servers (0x7836bc, after time.apple.com, before time.windows.com): stock's
+# China pool becomes the worldwide one, NUL-padded to its length. See docs/internals.md#clock.
+NTP_POOL = (b'\0cn.pool.ntp.org\0time.', b'\x000.pool.ntp.org\0\0time.')
 # network_checkstatus's command once Wi-Fi connects (its digit at file offset 0x3852bd): stock turns
 # the radio's power save (LPS) off for the whole connection; 2 restores the driver's own default,
 # PS_MODE_MAX. See docs/internals.md#battery.
@@ -630,6 +666,39 @@ DARK_POLLS = ((0x5bbc3c, 'ringnav_dark_usleep'), (0x4f8300, 'ringnav_dark_cover_
 # system(); that jalr snprintf becomes jal ringnav_lyric_save (onlinematch.c), which writes the lyrics beside
 # the song instead. The word before it, addiu $a2,$a2,0x67f0 (the format at 0x7867f0), is pinned.
 LYRIC_SAVE_CALL, LYRIC_SAVE_FMT = 0x536488, (0x536484, 0x24c667f0)
+# Stock's HTTPS helpers turn certificate checks off (curl_easy_setopt(c, SSL_VERIFYPEER or SSL_VERIFYHOST, 0)) and set
+# no CA file, so Tidal's sign-in and API, covers by URL and Baidu's calls could be intercepted. Each of those calls
+# (a jalr through curl_easy_setopt's GOT slot, $5 0x40 or 0x51 just before) becomes jal ringnav_stock_tls
+# (patch/stock_tls.c), which verifies against STOCK_CA. See docs/internals.md#stock-https.
+STOCK_TLS_CALLS = (
+    (0x481ad8, 0x40), (0x481af4, 0x51),  # baidu_curl_download_file
+    (0x4845a8, 0x40), (0x4845c0, 0x51),  # 0x484514: Tidal's favourites added and removed
+    (0x48485c, 0x40), (0x484874, 0x51),  # 0x4847c8: a Tidal playlist's tracks added and removed
+    (0x484d00, 0x40), (0x484d18, 0x51),  # httpRequest: Tidal's sign-in, browsing and favourites
+    (0x506254, 0x40), (0x50626c, 0x51))  # curl_http_request: covers by URL, Baidu, the update check
+SETOPT_GOT = 0x8f99f620  # lw $25, -0x9e0($gp): curl_easy_setopt
+def stock_tls_site(data, address, option):
+    """1 if the word at address is a jalr $25 to curl_easy_setopt with $5 = option, set in the four words before."""
+    off = fileoff(data, address)
+    before = struct.unpack_from('<4I', data, off - 16)
+    return struct.unpack_from('<I', data, off)[0] == 0x0320f809 and SETOPT_GOT in before and 0x24050000 | option in before
+# Three of stock's Tidal API URLs are plain HTTP, though they carry the session's access token: the subscription check,
+# a track's stream URL (playbackinfopostpaywall) and an album's tracks. Each becomes https://, taking one of the NULs
+# that pad it to its word; only its start is referenced (docs/internals.md#stock-https).
+TIDAL_HTTP = (b'/v1/users/%u/subscription',
+              b'/v1/tracks/%lld/playbackinfopostpaywall?playbackmode=STREAM&assetpresentation=FULL&audioquality=%s',
+              b'/v1/albums/%u/tracks?offset=%d&limit=%d&countryCode=%s')
+def tidal_https(data):
+    """data with each TIDAL_HTTP URL made https://, in place; each must be whole and once, with a spare NUL after it."""
+    for path in TIDAL_HTTP:
+        old, new = b'\0http://api.tidal.com' + path + b'\0\0', b'\0https://api.tidal.com' + path + b'\0'
+        check(data.count(old) == 1, f'Unexpected Tidal URL {path.decode()}')
+        data = data.replace(old, new)
+    return data
+# Mozilla's CA bundle as curl publishes it, whole, for stock's HTTPS (above) and the player's (tools/peq.py TLS_OPTIONS),
+# whose hosts no list of ours could cover; /etc/scrobble-ca.pem stays the few roots Q2 Pod's own code needs.
+STOCK_CA = 'etc/ssl/certs/ca-certificates.crt'
+STOCK_CA_SHA = '796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe'  # https://curl.se/ca/cacert-2026-10-20.pem
 # The same function's other command, no lyrics chosen: rm -rf "/mnt/mmc/.downpic/<name>" for the same system().
 # Its jalr snprintf becomes jal ringnav_lyric_drop (onlinematch.c), which unlinks the copy itself. The call's delay
 # slot, addiu $a2,$a2,0x6814 (the format at 0x786814), is pinned.
@@ -1653,10 +1722,15 @@ STOCK_PAGES = [f'release/assets/default/raw/ui/{n}_page.bin' for n in ('coverflo
     ['default_album_coverflow', 'play_spectrum', 'play_spectrumdown', 'play_vu', 'play_vudown', 'spectrum_back', 'spectrum_bar',
      *(f'spectrum_point{i}' for i in range(12)), 'vu_back', 'vu_dot', 'vu_left', 'vu_right']]
 # Superseded library versions (the unversioned and soname links already resolve to the newer ones)
-# and on-device debugging tools; nothing in the rootfs names them.
+# and on-device debugging and network tools; no script, program or library in the rootfs, and nothing
+# in patch/, names them as a command (libcurl's telnet and tftp protocols are its own code). The
+# links are busybox applets: busybox keeps the code, the command goes.
+DEBUG_TOOLS = [*(f'usr/bin/{n}' for n in ('strace', 'strace-log-merge', 'sqlite3', 'hcidump', 'memtester')),
+               'usr/sbin/nandtest']
+DEBUG_LINKS = [*(f'usr/bin/{n}' for n in ('telnet', 'tftp')),
+               *(f'usr/sbin/{n}' for n in ('inetd', 'dnsd', 'dhcprelay'))]
 OBSOLETE = ['usr/lib/libdbus-1.so.3.19.8', *(f'usr/lib/lib{n}-2.0.so.0.5400.3' for n in
-            ('gio', 'glib', 'gmodule', 'gobject', 'gthread')),
-            *(f'usr/bin/{n}' for n in ('strace', 'strace-log-merge', 'sqlite3', 'hcidump'))]
+            ('gio', 'glib', 'gmodule', 'gobject', 'gthread')), *DEBUG_TOOLS, *DEBUG_LINKS]
 
 FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
          '-mno-abicalls','-fno-pic','-G0','-ffreestanding','-fno-builtin',
@@ -1682,7 +1756,7 @@ def compile_payload(out):  # pragma: no mutate block
     run('ld.lld','-m','elf32ltsmip','--gc-sections','-T',ROOT/'patch/link.ld','-e','ringnav',
         *[f'--undefined={name}' for _, name, _ in HOOKS.values()], f'--undefined={GRADIENT_LEAF[2]}', '--undefined=ringnav_lrc_open',
         f'--undefined={WM_PAINT_LEAF[2]}', f'--undefined={QUEUE_LEAF[2]}', '--undefined=ringnav_audio_extension', '--undefined=start_mute', '--undefined=start_sleep', '--undefined=ringnav_genre_copy', '--undefined=ringnav_lyric_save', '--undefined=ringnav_lyric_drop', '--undefined=ringnav_cover_copy','--undefined=ringnav_folder_rm','--undefined=ringnav_bootmode', '--undefined=lockscreen_access','--undefined=ringnav_ts_read',
-        '--undefined=ringnav_baidu_poll', '--undefined=ringnav_tidal_poll', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
+        '--undefined=ringnav_baidu_poll', '--undefined=ringnav_stock_tls', '--undefined=ringnav_tidal_poll', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
         '--undefined=coverflow_player_cover', '--undefined=coverflow_grid_cover', '--undefined=coverflow_album_cover', '--undefined=coverflow_folder_cover', '--undefined=headset_bt_init',
         '--undefined=headset_status_register', '--undefined=headset_bt_autolink',
         *nav,out/'trampoline.o',*extra,'-o',out/'patch.elf')
@@ -1968,6 +2042,16 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     bluealsa = patch_bluealsa(cat(BLUEALSA))
     (out/'bluealsa').write_bytes(bluealsa)
     (out/'watchdog').write_bytes(cat(WATCHDOG).replace(*WATCHDOG_SLEEP))
+    shadow = lock_root(cat(SHADOW))
+    check(not password_logins(shadow), 'A password still logs in')
+    (out/'shadow').write_bytes(shadow)
+    inittab = cat(INITTAB)
+    inittab, gettys = inittab.replace(*SERIAL_GETTY), inittab.count(SERIAL_GETTY[0])
+    check(gettys == 1 and b'getty' not in inittab, 'Unexpected inittab')
+    (out/'inittab').write_bytes(inittab)
+    bt_main = cat(BT_MAIN)
+    check(bt_main.count(BT_DISCOVERABLE[0]) == 1, 'Unexpected Bluetooth main.conf')
+    (out/'main.conf').write_bytes(bt_main.replace(*BT_DISCOVERABLE))
     for address, old, new in ARTIST_ALBUMS:
         patch_word(patched, address, old, new, 'artist detail opens on Albums')
     patch_word(patched, *SHUFFLE_CALL, jal(ps['ringnav_shuffle']),
@@ -2060,6 +2144,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(struct.unpack_from('<I', patched, fileoff(patched, LYRIC_SAVE_FMT[0]))[0] == LYRIC_SAVE_FMT[1],
           'Unexpected Download Cover & Lyrics save')
     patch_word(patched, LYRIC_SAVE_CALL, 0x0320f809, jal(ps['ringnav_lyric_save']), 'lyrics saved beside the song')
+    for address, option in STOCK_TLS_CALLS:
+        check(stock_tls_site(patched, address, option), f'{address:#x}: not a TLS check setopt')
+        patch_word(patched, address, 0x0320f809, jal(ps['ringnav_stock_tls']), 'stock HTTPS verifies its peer')
     check(struct.unpack_from('<I', patched, fileoff(patched, LYRIC_DROP_FMT[0]))[0] == LYRIC_DROP_FMT[1],
           'Unexpected Download Cover & Lyrics removal')
     patch_word(patched, LYRIC_DROP_CALL, 0x0320f809, jal(ps['ringnav_lyric_drop']), "no lyrics removes .downpic's copy")
@@ -2141,6 +2228,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(patched.count(b'V1.36\0') == 1, 'Version literal is not unique')
     patched = patched.replace(b'V1.36\0', version.encode()+b'\0')
     patched = patched.replace(*RTC_WRITE)
+    patched = tidal_https(patched)
+    check(patched.count(NTP_POOL[0]) == 1, 'Unexpected NTP servers')
+    patched = patched.replace(*NTP_POOL)
     check(patched.count(WIFI_LPS[0]) == 1, 'Unexpected Wi-Fi power save command')
     patched = patched.replace(*WIFI_LPS)
     check(patched.count(LOCK_CLOCK_12H[0]) == 1, 'Unexpected lock clock formats')
@@ -2190,6 +2280,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                       (BLUEALSA2.encode(), out/'bluealsa2'), (DEFAULT_CONFIG.encode(), out/'config.ini'),
                       (LOGO.encode(), logo)):
         p = swap_inode(p, path, src)
+    p = swap_inode(p, SHADOW.encode(), out/'shadow')
+    p = swap_inode(p, INITTAB.encode(), out/'inittab')
+    p = swap_inode(p, BT_MAIN.encode(), out/'main.conf')
     aic_notifier = None
     if aic_idle_wait:
         from aic import MODULE_PATH, PATCH_POLICY, STOCK_SHA256, patch_module
@@ -2252,6 +2345,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                'etc/init.d/S12usbcharge': ('etc/init.d/S20urandom', (ROOT/'patch/usb_charge.sh').read_bytes()),
                                HELPER: (HELPER_LIKE, compile_helper(out, cat, 'video', 'q2video', HELPER_LIBS)),
                                SCROBBLE_CA: ('etc/hosts', (ROOT/'assets/scrobble-ca.pem').read_bytes()),
+                               STOCK_CA: ('etc/hosts', mozilla_ca()),
                                BOOT: (HELPER_LIKE, compile_helper(out, cat, 'boot', 'q2boot', HELPER_LIBS[:1])),
                                **({LOGO_LIGHT: (xx+'list_tidal.png', light)} if light else {}),  # the swapped logo.jpg has no stock inode left
                                **{path: (FONT, data) for path, (data, _) in fonts.items()},
@@ -2271,7 +2365,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         added.append([path, b'R', *stock.groups()])
     removed = []
     for path in STOCK_EQ + STOCK_PAGES + OBSOLETE:
-        line = need(re.search(rb'^'+re.escape(path.encode())+rb' R .+\n', p, re.M), f'Missing stock inode {path}')
+        line = need(re.search(rb'^'+re.escape(path.encode())+rb' [RS] .+\n', p, re.M), f'Missing stock inode {path}')
         removed.append(line.group().split()[:6])
         p = p[:line.start()]+p[line.end():]
     for path, fix, name in ((TAG_C, patch_m4b_cover, 'libtag_c.so.2.0.1'), (FONT, font_quotes, 'default.ttf'),

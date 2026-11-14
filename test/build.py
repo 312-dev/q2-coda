@@ -316,6 +316,19 @@ def validate_assets(directory):
     assert demo[PDR[0]:PDR[0]+PDR[1]] == bytes(PDR[1]) and any(stock[PDR[0]:PDR[0]+PDR[1]])
     # The RTC is written in UTC: the one hwclock -w literal gains -u in its own padding.
     assert demo.index(RTC_WRITE[1]) == stock.index(RTC_WRITE[0])
+    # Stock's HTTPS verifies (docs/internals.md#stock-https): each setopt that turned a check off calls ringnav_stock_tls,
+    # and the Tidal API URLs that were plain HTTP are https://, in place.
+    from build import STOCK_TLS_CALLS, stock_tls_site, TIDAL_HTTP
+    stock_tls = jal(symbols(directory/'patch.elf')['ringnav_stock_tls'])
+    for address, option in STOCK_TLS_CALLS:
+        assert stock_tls_site(stock, address, option)
+        assert struct.unpack_from('<I', demo, fileoff(stock, address))[0] == stock_tls, hex(address)
+    for path in TIDAL_HTTP:
+        assert demo.index(b'\0https://api.tidal.com' + path + b'\0') == stock.index(b'\0http://api.tidal.com' + path + b'\0')
+    assert b'http://api.tidal.com' not in demo
+    # Network time asks the worldwide NTP pool, not China's: one server name, the same length, in place.
+    from build import NTP_POOL
+    assert demo.index(NTP_POOL[1]) == stock.index(NTP_POOL[0]) == fileoff(stock, 0x7836bc) - 1 and b'cn.pool.ntp.org' not in demo
     # Wi-Fi keeps its power save: network_checkstatus's lps=0 becomes lps=2, the one byte at file
     # offset 0x3852bd, and networkGetWifiSignal jumps to the payload, which reads rx_signal instead.
     assert demo.index(WIFI_LPS[1]) == stock.index(WIFI_LPS[0]) == 0x3852bd - 25 and WIFI_LPS[0] not in demo
@@ -457,6 +470,26 @@ def validate_assets(directory):
     assert read('rootfs.squashfs', S90PLAY) == expected_start
     assert read('rootfs.squashfs', S11LOGO) == read('stock.squashfs', S11LOGO).replace(*LOGO_HOOK)  # the card's logo, if saved
     assert read('rootfs.squashfs', BLUEALSA2) == read('stock.squashfs', BLUEALSA2).replace(*BT_KEEPALIVE)  # keep-alive 5 s
+    # No password logs in and no getty runs on the serial pad (docs/building.md#what-the-rootfs-drops).
+    from build import SHADOW, INITTAB, SERIAL_GETTY, lock_root, password_logins
+    shadow = read('rootfs.squashfs', SHADOW)
+    assert password_logins(read('stock.squashfs', SHADOW)) == ['root'] and password_logins(shadow) == []
+    assert shadow == lock_root(read('stock.squashfs', SHADOW))
+    inittab = read('rootfs.squashfs', INITTAB)
+    assert b'getty' not in inittab and inittab == read('stock.squashfs', INITTAB).replace(*SERIAL_GETTY)
+    # The debugging and network tools stock ships are gone.
+    from build import DEBUG_TOOLS, DEBUG_LINKS
+    def paths(image): return {l.removeprefix('squashfs-root/') for l in run('unsquashfs', '-l', directory/image).splitlines()}
+    listing, stock_listing = paths('rootfs.squashfs'), paths('stock.squashfs')
+    for path in DEBUG_TOOLS + DEBUG_LINKS:
+        assert path in stock_listing and path not in listing, path
+    print('Removed from the rootfs:', ' '.join(DEBUG_TOOLS + DEBUG_LINKS))
+    # Bluetooth is discoverable for 180 s, not for as long as it is on.
+    from build import BT_MAIN, BT_DISCOVERABLE
+    assert read('rootfs.squashfs', BT_MAIN) == read('stock.squashfs', BT_MAIN).replace(*BT_DISCOVERABLE)
+    assert b'\nDiscoverableTimeout = 180\n' in read('rootfs.squashfs', BT_MAIN)
+    # The boot deletes Baidu Netdisk's saved sign-in.
+    assert expected_start.count(b'\n        rm -f /mnt/data/baidu_token.conf\n') == 1
     # bluealsa: AAC capability, the two DROP jumps, the silence sites, and one appended LOAD payload.
     from build import BT_DROP, BT_DROP_HANDLER, BT_DROP_PAYLOAD, BT_SILENCE_SITES, patch_bluealsa, segments
     old, new = read('stock.squashfs', BLUEALSA), read('rootfs.squashfs', BLUEALSA)
@@ -473,6 +506,17 @@ def validate_assets(directory):
     check_bluetooth_drop(directory)
     from build import SCROBBLE_CA
     assert read('rootfs.squashfs', SCROBBLE_CA) == (ROOT/'assets/scrobble-ca.pem').read_bytes()
+    # The whole Mozilla bundle, for stock's HTTPS and the player's; ffmpeg's tls options in hciplayer default to it.
+    from build import STOCK_CA, STOCK_CA_SHA
+    assert sha(read('rootfs.squashfs', STOCK_CA)) == STOCK_CA_SHA
+    from peq import TLS_OPTIONS, TLS_DEFAULTS
+    player, stock_player, pps = read('rootfs.squashfs', 'usr/bin/hciplayer'), read('stock.squashfs', 'usr/bin/hciplayer'), symbols(directory/'peq'/'peq.elf')
+    for address, value in TLS_DEFAULTS:
+        off = fileoff(stock_player, address)
+        assert struct.unpack_from('<I', stock_player, off)[0] == 0
+        assert struct.unpack_from('<I', player, off)[0] == (pps[value] if isinstance(value, str) else value)
+    ca = fileoff(player, pps['player_ca_file'])
+    assert player[ca:player.index(b'\0', ca)] == b'/' + STOCK_CA.encode()
     # each subset face ships, cut to what its <NAME>_RANGES lists, with its licence files
     from build import CLASSIC_LIGHT_NOTICE, FACES, FONT_DIR, FONT_NOTICES, face_font, subset_font
     for face in FACES.values():

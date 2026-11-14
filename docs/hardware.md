@@ -55,7 +55,7 @@ Read off a Q2 running stock V1.36's kernel (`/proc`, `/sys`, the device tree) an
 | Clock             | The X2000's RTC (`rtc-ingenic`), with a wake alarm                                                                                  |                                |
 | Other             | Watchdog (`soc_watchdog`), SAR ADC (`soc_adc`, four aux channels), PWM, rotator (`soc_rotator`)                                     |                                |
 
-- **Serial console:** `ttyS3`, 115200 8N1, booted `quiet`.
+- **Serial console:** `ttyS3`, 115200 8N1, booted `quiet`. Stock runs a login there; Q2 Pod removes it and locks root ([building](building.md#what-the-rootfs-drops)), so the port shows boot messages only.
 - **Boot:** the kernel reaches `/linuxrc` 0.57 s in, the UI drivers (screen, touch, DAC, radio) are up by 2.2 s, and the DAC's first stream opens at 44.1 kHz by 5.6 s. The RTC keeps the time across a reboot. UARTs `ttyS0`-`ttyS4` and `ttyS9` exist.
 - **Wheel:** stock reads the slider with tslib, position 1-200 a turn plus pressure; Q2 Pod makes a tick every 28 units by default ([internals.md](internals.md)).
 - **Jacks:** headphone detect on GPIO `PA07` (3.5 mm) and `PA08` (4.4 mm). The buzzer stays quiet while either is in ([Key Tone](internals.md#key-tone)).

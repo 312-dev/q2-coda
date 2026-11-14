@@ -1199,3 +1199,92 @@ def test_build_refuses_a_version_not_of_three_single_digits(tmp_path, monkeypatc
                                              ('17.6', 0, False), ('1.8.0', 10, False)])
 def test_version_ok(version, beta, ok):
     assert build.version_ok(version, beta) == ok
+
+
+# The rootfs's hardening (docs/building.md#what-the-rootfs-drops), on stand-in files shaped as stock's.
+STOCK_SHADOW = b'root:$5$salt$hash:::::::\ndaemon:*:::::::\nnobody:*:::::::\n'
+
+
+def test_lock_root_leaves_no_password_login():
+    assert build.password_logins(STOCK_SHADOW) == ['root']
+    locked = build.lock_root(STOCK_SHADOW)
+    assert locked == b'root:*:::::::\ndaemon:*:::::::\nnobody:*:::::::\n' and build.password_logins(locked) == []
+
+
+@pytest.mark.parametrize('field, logs_in', [(b'$5$s$h', True), (b'', True), (b'*', False), (b'!', False), (b'!$5$s$h', False)])
+def test_password_logins_counts_an_empty_field_or_a_hash(field, logs_in):
+    assert build.password_logins(b'daemon:*:::::::\nuser:' + field + b':::::::\n') == (['user'] if logs_in else [])
+
+
+@pytest.mark.parametrize('shadow', [b'daemon:*:::::::\n', STOCK_SHADOW + b'root:x:::::::\n'])
+def test_lock_root_wants_one_root(shadow):
+    with pytest.raises(ValueError, match='Unexpected /etc/shadow'):
+        build.lock_root(shadow)
+
+
+def test_the_serial_getty_goes():
+    inittab = (b'::sysinit:/etc/init.d/rcS\n\n# Put a getty on the serial port\n'
+               b'console::respawn:/sbin/getty -L ttyS3 115200 vt100 # GENERIC_SERIAL\n\n# Stuff to do\n')
+    assert inittab.replace(*build.SERIAL_GETTY) == b'::sysinit:/etc/init.d/rcS\n\n# Stuff to do\n'
+
+
+def test_the_debugging_tools_are_dropped():
+    removed = set(build.OBSOLETE)
+    for tool in ('strace', 'sqlite3', 'hcidump', 'memtester', 'telnet', 'tftp'):
+        assert f'usr/bin/{tool}' in removed, tool
+    assert {'usr/sbin/nandtest', 'usr/sbin/inetd'} <= removed
+    assert 'usr/lib/libsqlite3.so.0.8.6' not in removed  # the library demo uses stays
+
+
+def test_bluetooth_discovery_times_out():
+    main = b'# 0 = disable timer\n#DiscoverableTimeout = 0\nDiscoverableTimeout = 0\n'
+    assert main.count(build.BT_DISCOVERABLE[0]) == 1
+    assert main.replace(*build.BT_DISCOVERABLE) == b'# 0 = disable timer\n#DiscoverableTimeout = 0\nDiscoverableTimeout = 180\n'
+
+
+def test_network_time_asks_the_worldwide_pool_in_place():
+    servers = b'time.apple.com\0\0cn.pool.ntp.org\0time.windows.com\0'
+    assert len(build.NTP_POOL[0]) == len(build.NTP_POOL[1])
+    assert servers.replace(*build.NTP_POOL) == b'time.apple.com\0\x000.pool.ntp.org\0\0time.windows.com\0'
+
+
+# Stock's HTTPS (docs/internals.md#stock-https): the setopt sites patched, the bundle pinned, the plain-HTTP Tidal URLs.
+def setopt_site(*words):
+    """A 0x400000-based image holding words from 0x400100, and its address of the last one."""
+    data = image(0x1000)
+    for k, w in enumerate(words):
+        struct.pack_into('<I', data, 0x1100 + 4 * k, w)
+    return data, 0x400100 + 4 * (len(words) - 1)
+
+
+@pytest.mark.parametrize('option', [0x40, 0x51])
+def test_stock_tls_site_is_a_setopt_of_that_option(option):
+    data, at = setopt_site(build.SETOPT_GOT, 0x00003025, 0x24050000 | option, 0x8fbc0010, 0x0320f809)
+    assert build.stock_tls_site(data, at, option)
+    assert not build.stock_tls_site(data, at, 0x51 if option == 0x40 else 0x40)  # another option
+    data, at = setopt_site(0x8f99f600, 0x00003025, 0x24050000 | option, 0x8fbc0010, 0x0320f809)
+    assert not build.stock_tls_site(data, at, option)  # another function's GOT slot
+    data, at = setopt_site(build.SETOPT_GOT, 0x00003025, 0x24050000 | option, 0x8fbc0010, 0x0c000000)
+    assert not build.stock_tls_site(data, at, option)  # not a jalr $25
+
+
+def test_the_stock_tls_sites_are_ten_checks_turned_off():
+    assert len(set(build.STOCK_TLS_CALLS)) == 10 and {o for _, o in build.STOCK_TLS_CALLS} == {0x40, 0x51}
+
+
+def test_the_mozilla_bundle_is_the_pinned_one(monkeypatch, tmp_path):
+    assert hashlib.sha256(build.mozilla_ca()).hexdigest() == build.STOCK_CA_SHA
+    (tmp_path/'assets').mkdir()
+    (tmp_path/'assets/mozilla-ca.pem').write_bytes(build.mozilla_ca() + b'\n')
+    monkeypatch.setattr(build, 'ROOT', tmp_path)
+    with pytest.raises(ValueError, match='Unexpected assets/mozilla-ca.pem'):
+        build.mozilla_ca()
+
+
+def test_tidal_https_takes_a_padding_nul():
+    urls = b''.join(b'\0http://api.tidal.com' + p + b'\0\0\0' for p in build.TIDAL_HTTP)
+    made = build.tidal_https(urls)
+    assert len(made) == len(urls) and b'http://' not in made
+    assert made == b''.join(b'\0https://api.tidal.com' + p + b'\0\0' for p in build.TIDAL_HTTP)
+    with pytest.raises(ValueError, match='Unexpected Tidal URL'):
+        build.tidal_https(urls.replace(build.TIDAL_HTTP[0] + b'\0\0', build.TIDAL_HTTP[0] + b'\0X'))  # no spare NUL after it

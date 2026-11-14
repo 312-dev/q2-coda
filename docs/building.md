@@ -31,6 +31,18 @@ Rebuilt firmware uses `assets/boot-logo.jpg` as the boot splash. Pass another 32
 
 The build replaces the stock equalizer page with a 30-band PEQ editor (bands, shelves, preamp, on/off, presets, stock's built-in genre presets, `/EQ` import) and patch `hciplayer`'s equalizer filter with the matching DSP. Both also clear the 44.1 kHz AAC capability bit in `bluealsa` (see [internals.md](internals.md#bluetooth-aac)).
 
+### What the rootfs drops
+
+Every build, release and `--dev`, hardens stock's root filesystem (`tools/build.py`):
+
+- **No password login.** Stock's `/etc/shadow` gives root the same password hash on every unit. `lock_root` sets the field to `*`, and the build stops if `password_logins` finds any account a password, or an empty field, would log in to. `/etc/inittab` loses its `getty` on `ttyS3` (`SERIAL_GETTY`), so the board's serial pad shows the boot messages and offers no login. Nothing on the Q2 logs in: `q2remote` runs `/bin/sh` itself.
+- **Debugging and network tools** (`DEBUG_TOOLS`, `DEBUG_LINKS` in `OBSOLETE`): `strace`, `strace-log-merge`, `sqlite3` (the program; demo's `libsqlite3` stays), `hcidump`, `memtester` and `nandtest`, and busybox's `telnet`, `tftp`, `inetd`, `dnsd` and `dhcprelay` links. No script, program or library in the rootfs, and nothing in `patch/`, names them as a command; `libcurl`'s telnet and TFTP protocol code is its own.
+- **Bluetooth** is discoverable for 180 s after demo turns it on (`BT_DISCOVERABLE` in `/etc/bluetooth/main.conf`), not for as long as it is on.
+- **Network time** asks `0.pool.ntp.org` in place of `cn.pool.ntp.org` (`NTP_POOL`, [Clock](internals.md#clock)).
+- **Baidu Netdisk's saved sign-in**, `/mnt/data/baidu_token.conf`, is deleted at boot (`BOOT_HOOK`).
+
+`test/build.py --build DIR` checks each against the stock image.
+
 ### Stopped-audio notifier wait
 
 Off by default, `--dev --aic-idle-wait` (on by default from 1.5.0 to 1.6.1). The audited audio driver's stopped-state 10 ms polling is replaced by an

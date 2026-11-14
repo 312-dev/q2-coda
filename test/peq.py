@@ -3165,6 +3165,7 @@ typedef unsigned (*sink_t)(const void *, unsigned, unsigned, void *);
 typedef int (*prog_t)(void *, long long, long long, long long, long long);
 static struct { sink_t sink; void *data; prog_t prog; void *pdata; const char *url; } h;
 static void *curl_easy_init(void) { return &h; }
+static int tls_untimed(void *curl, void *ctx, void *unused) { return 0; }
 static int curl_easy_setopt(void *c, int o, ...) {
     va_list ap; va_start(ap, o);
     if (o == 10002) h.url = va_arg(ap, const char *);
