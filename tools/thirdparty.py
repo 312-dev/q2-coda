@@ -37,6 +37,10 @@ SOURCES = {
                 'cf3098950cb4d853ad95c0841f1f9c6d3dc102dccfcacd521d93925208b76ac8'),
     'zlib': ('1.4', 'https://zlib.net/zlib-1.4.tar.gz',
              '02dd159783677a749c04adbdd02b55b8a2bcc7e054f51b76b549199a916ad584'),
+    'curl': ('8.23.0', 'https://curl.se/download/curl-8.23.0.tar.xz',
+             '8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5'),
+    'mbedtls': ('3.6.7', 'https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2',
+                'a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6'),
     'sqlite': ('3.54.1', 'https://www.sqlite.org/2026/sqlite-autoconf-3540100.tar.gz',
                '926ef8d3eab93fbf6e06011901273eec076b25594a4e1cdadd50c987f4f6d64e'),
     'libpng': ('1.2.59', 'https://download.sourceforge.net/libpng/libpng-1.2.59.tar.xz',
@@ -177,6 +181,63 @@ def autotools(src, stage, env, log, *options, make=()):
     run('make', 'install', f'DESTDIR={stage}', cwd=src, env=env.vars, log=log)
 
 
+# mbedTLS features libcurl's TLS client does not use: the server side, DTLS, ciphers and modes no
+# TLS 1.2 or 1.3 suite needs, certificate writing, self tests. Fewer bytes, less to attack.
+MBEDTLS_UNSET = '''
+    MBEDTLS_HAVE_TIME_DATE MBEDTLS_SSL_SRV_C MBEDTLS_SSL_PROTO_DTLS MBEDTLS_SSL_DTLS_ANTI_REPLAY
+    MBEDTLS_SSL_DTLS_HELLO_VERIFY MBEDTLS_SSL_DTLS_CLIENT_PORT_REUSE MBEDTLS_SSL_DTLS_CONNECTION_ID
+    MBEDTLS_SSL_DTLS_SRTP MBEDTLS_SSL_COOKIE_C MBEDTLS_SSL_TICKET_C MBEDTLS_SSL_CACHE_C
+    MBEDTLS_CAMELLIA_C MBEDTLS_ARIA_C MBEDTLS_DES_C MBEDTLS_ECJPAKE_C MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED
+    MBEDTLS_NIST_KW_C MBEDTLS_CMAC_C MBEDTLS_RIPEMD160_C MBEDTLS_LMS_C MBEDTLS_PKCS7_C
+    MBEDTLS_CIPHER_MODE_CFB MBEDTLS_CIPHER_MODE_OFB MBEDTLS_CIPHER_MODE_XTS
+    MBEDTLS_X509_CRT_WRITE_C MBEDTLS_X509_CSR_WRITE_C MBEDTLS_X509_CREATE_C MBEDTLS_X509_CSR_PARSE_C
+    MBEDTLS_PEM_WRITE_C MBEDTLS_SELF_TEST MBEDTLS_VERSION_FEATURES
+    MBEDTLS_PSA_CRYPTO_STORAGE_C MBEDTLS_PSA_ITS_FILE_C MBEDTLS_TIMING_C MBEDTLS_NET_C
+    MBEDTLS_ECP_DP_SECP192R1_ENABLED MBEDTLS_ECP_DP_SECP224R1_ENABLED MBEDTLS_ECP_DP_SECP192K1_ENABLED
+    MBEDTLS_ECP_DP_SECP224K1_ENABLED MBEDTLS_ECP_DP_SECP256K1_ENABLED MBEDTLS_ECP_DP_BP256R1_ENABLED
+    MBEDTLS_ECP_DP_BP384R1_ENABLED MBEDTLS_ECP_DP_BP512R1_ENABLED MBEDTLS_ECP_DP_CURVE448_ENABLED
+    MBEDTLS_CCM_C MBEDTLS_SHA3_C MBEDTLS_PKCS5_C MBEDTLS_PKCS12_C MBEDTLS_PK_RSA_ALT_SUPPORT
+    MBEDTLS_KEY_EXCHANGE_PSK_ENABLED MBEDTLS_KEY_EXCHANGE_DHE_PSK_ENABLED MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED
+    MBEDTLS_KEY_EXCHANGE_RSA_PSK_ENABLED MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA_ENABLED MBEDTLS_KEY_EXCHANGE_ECDH_RSA_ENABLED
+    MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ENABLED MBEDTLS_SSL_RENEGOTIATION
+'''.split()
+
+
+def build_mbedtls(src, stage, env, log):
+    # A static, position-independent library linked into libcurl only (docs/third-party.md#curl).
+    # Without MBEDTLS_HAVE_TIME_DATE no certificate's dates are checked: the Q2's clock may be unset
+    # or years off, and past 2038 its 32-bit time wraps.
+    for option in MBEDTLS_UNSET:
+        run('python3', 'scripts/config.py', 'unset', option, cwd=src, log=log)
+    run('make', f'-j{JOBS}', '-C', 'library', 'static', cwd=src,
+        env=dict(env.vars, CFLAGS='-O2 -fPIC -ffunction-sections -fdata-sections'), log=log)
+    for d in ('include', 'lib'):
+        (stage/'usr'/d).mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src/'include', stage/'usr/include', dirs_exist_ok=True)
+    for a in ('libmbedtls.a', 'libmbedx509.a', 'libmbedcrypto.a'):
+        shutil.copy(src/'library'/a, stage/'usr/lib'/a)
+
+
+def build_curl(src, stage, env, log):
+    # Stock's libcurl 7.73.0 was built with OpenSSL 1.1.1, which curl 8.18 and later do not support,
+    # so TLS is mbedTLS, linked in statically and kept out of libcurl's exports (gc-sections drops
+    # what curl does not call). Symbols stay versioned CURL_OPENSSL_4, the version demo imports.
+    # Protocols: http, https and file, the schemes demo and the payload use (stock built 18 more);
+    # no NTLM, Kerberos or SPNEGO; no DNS over HTTPS, Alt-Svc, MIME posts or .netrc, none of which demo
+    # sets (it imports the easy and slist calls alone). CA paths come from the caller (CURLOPT_CAINFO), as stock's.
+    env.vars['CFLAGS'] += ' -ffunction-sections -fdata-sections'
+    env.vars['LDFLAGS'] += ' -Wl,--gc-sections'
+    autotools(src, stage, env, log, f'--with-mbedtls={env.deps["mbedtls"]}/usr', f'--with-zlib={env.deps["zlib"]}/usr',
+              '--enable-versioned-symbols=OPENSSL_', '--enable-threaded-resolver', '--enable-ipv6',
+              *(f'--disable-{p}' for p in ('dict', 'ftp', 'gopher', 'imap', 'pop3', 'rtsp', 'smb', 'smtp', 'telnet',
+                                           'tftp', 'mqtt', 'ipfs', 'websockets', 'ldap', 'ldaps', 'ntlm',
+                                           'kerberos-auth', 'negotiate-auth', 'aws', 'docs', 'doh', 'alt-svc',
+                                           'mime', 'form-api', 'netrc')),
+              '--without-libpsl', '--without-brotli', '--without-zstd', '--without-nghttp2', '--without-libidn2',
+              '--without-libssh2', '--without-librtmp', '--without-ca-bundle', '--without-ca-path',
+              '--without-ca-fallback')
+
+
 def build_sqlite(src, stage, env, log):
     # Stock's options (sqlite3_compileoption_get): FTS3, R*Tree, synchronous FULL, the system malloc.
     # Nothing in the rootfs uses JSON, the math functions or extensions, which 3.19.3 did not build in.
@@ -190,6 +251,7 @@ def build_libpng(src, stage, env, log):
 
 RECIPES = {'openssl': (build_openssl, []),
            'zlib': (build_zlib, []),
+           'mbedtls': (build_mbedtls, []), 'curl': (build_curl, ['mbedtls', 'zlib']),
            'sqlite': (build_sqlite, []),
            'libpng': (build_libpng, ['zlib'])}
 
@@ -361,6 +423,7 @@ INSTALL = {
     'openssl': {'usr/lib/libssl.so.1.1': 'usr/lib/libssl.so.1.1', 'usr/lib/libcrypto.so.1.1': 'usr/lib/libcrypto.so.1.1',
                 **{f'usr/lib/engines-1.1/{e}.so': f'usr/lib/engines-1.1/{e}.so' for e in ('afalg', 'capi', 'padlock')}},
     'zlib': {'usr/lib/libz.so.1.2.11': 'usr/lib/libz.so.1.4'},
+    'curl': {'usr/lib/libcurl.so.4.7.0': 'usr/lib/libcurl.so.4.8.0'},
     'sqlite': {'usr/lib/libsqlite3.so.0.8.6': 'usr/lib/libsqlite3.so.3.54.1'},
     'libpng': {'usr/lib/libpng12.so.0.37.0': 'usr/lib/libpng12.so.0.59.0'},
 }

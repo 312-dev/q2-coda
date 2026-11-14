@@ -576,16 +576,5 @@ static inline long long wall_time(void) {
 }
 /* A wall time before this (2020-09-13) is a clock never set: scrobbling's test, Battery History's. */
 #define CLOCK_SET 1600000000u
-/* CURLOPT_SSL_CTX_FUNCTION: sets X509_V_FLAG_NO_CHECK_TIME on the SSL_CTX's X509_VERIFY_PARAM, so
- * chains still verify against the pinned roots after they expire (2035 on) and after the 32-bit
- * clock wraps. The rootfs's OpenSSL 1.1.1f exports these but demo does not import them, so this
- * writes its fields: SSL_CTX->param at 0x100, ->flags at 0xc, which tools/build.py audits.
- * ponytail: an expired server certificate is accepted too; the firmware has no revocation anyway.
- */
-static inline int tls_untimed(void *curl, void *ctx, void *unused) {
-    (void)curl, (void)unused;
-    (*(unsigned **)((char *)ctx + 0x100))[3] |= 0x200000;
-    return 0; /* CURLE_OK */
-}
 
 #endif

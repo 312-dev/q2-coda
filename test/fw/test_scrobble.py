@@ -347,11 +347,7 @@ def test_requests_carry_credentials_only_over_verified_tls(fw):
     for _, _, _, opts in net.requests:
         assert (opts[64], opts[81], opts[10065]) == (1, 2, CA) and opts[99] == 1  # verify peer and host; no signals
         assert opts[78] > 0 and opts[13] >= opts[78]  # a connect timeout within the whole one
-    flags = (C.c_uint * 4)()
-    ctx = (C.c_void_p * 33)()
-    ctx[0x100 // 8] = C.addressof(flags)
-    assert C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p, C.c_void_p)(net.requests[0][3][20108])(0x9000, C.addressof(ctx), None) == 0
-    assert flags[3] == 0x200000  # X509_V_FLAG_NO_CHECK_TIME: past 2038 the chain still verifies
+        assert 20108 not in opts  # no SSL_CTX_FUNCTION: libcurl's mbedTLS checks no dates, so past 2038 the chain still verifies
 
 
 def test_json_escapes_quotes_backslashes_and_control_bytes(fw):
