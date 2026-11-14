@@ -925,11 +925,13 @@ static void *cat_worker(void *unused) {
 /* ---- The UI thread ---- */
 
 /* Stock's shared connection (opened again after any error) and each other one stock_db_open
- * opens: cat attached while Local + Server is on and the file is there. */
+ * opens: cat attached while Local + Server is on and the file is there. stock_db_open runs on
+ * stock's scan thread too, so this reads the setting as the UI thread loaded it (pod_settings),
+ * never the config file: before that load nothing is attached, and cat_live attaches later. */
 void catalogue_attach(void **slot) {
     if ((unsigned long)slot >= 0x400000 && (unsigned long)slot < 0xc00000) cat.stock_slot = slot;
     if (slot == cat.stock_slot) cat.attached = 0;
-    if (!catalogue_on() || access(CAT_DB, 0) || !*slot) return;
+    if (catalogue_source != 1 || access(CAT_DB, 0) || !*slot) return;
     if (!sqlite3_exec(*slot, "attach '" CAT_DB "' as cat", 0, 0, 0) && slot == cat.stock_slot)
         cat.attached = *slot;
 }
