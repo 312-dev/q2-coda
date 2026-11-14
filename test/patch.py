@@ -382,6 +382,7 @@ class Machine:
             result=(re.sub(r'%\.\*s','%s',fmt) % tuple(params)).encode(); self.u.mem_write(a,result[:b-1]+b'\0'); ret=len(result)
         elif name=='atoi@GLIBC_2.0': ret=int(re.match(r'[+-]?\d+',self.text(a))[0]) if re.match(r'[+-]?\d+',self.text(a)) else 0
         elif name=='access@GLIBC_2.0': ret=0 if self.text(a) in self.present else -1
+        elif name=='send@GLIBC_2.0': ret=c  # a mocked send takes it all
         elif name=='open@GLIBC_2.0': ret=0xffffffff  # no /dev/jz_watchdog here: the watchdog stays off
         elif name=='calloc@GLIBC_2.0':
             ret=0 if getattr(self,'fail_calloc',False) else self.alloc(a*b)
@@ -11582,7 +11583,7 @@ passed()
 
 m=Machine(); style_color(m,red)
 # config_value passes its default in decimal: SHORTCUT's SETTING_N_SHORTCUT (12) is out of range, so no shortcut
-assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY','THEME')]+[('/mnt/data/config.ini','IPOD','SHORTCUT','12'),('/mnt/data/config.ini','IPOD','MINIMAL_ACCENT','0'),('/mnt/data/config.ini','IPOD','ROUNDED','1'),('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','0'),('/mnt/data/config.ini','IPOD','NPCENTRED','0'),('/mnt/data/config.ini','IPOD','KEYTONEHP','0'),('/mnt/data/config.ini','IPOD','SCRUBSINGLE','0'),('/mnt/data/config.ini','IPOD','TIMETITLE','1')]+[('/mnt/data/config.ini','IPOD',key,v) for key,v in (('STATUSBAR','0'),('CLASSIC_LIGHT_ACCENT','9'),('HOMELIB','1'),('ROWPREVIEW','1'),('ROWART','1'))]; passed()
+assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY','THEME')]+[('/mnt/data/config.ini','IPOD','SHORTCUT','12'),('/mnt/data/config.ini','IPOD','MINIMAL_ACCENT','0'),('/mnt/data/config.ini','IPOD','ROUNDED','1'),('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','0'),('/mnt/data/config.ini','IPOD','NPCENTRED','0'),('/mnt/data/config.ini','IPOD','CLICKER','0'),('/mnt/data/config.ini','IPOD','SCRUBSINGLE','0'),('/mnt/data/config.ini','IPOD','TIMETITLE','1')]+[('/mnt/data/config.ini','IPOD',key,v) for key,v in (('STATUSBAR','0'),('CLASSIC_LIGHT_ACCENT','9'),('HOMELIB','1'),('ROWPREVIEW','1'),('ROWART','1'))]; passed()
 # theme()/scheme(): the active built-in and its scheme, settings read on first use. THEME out of
 # range is Minimal; Classic's stored Ivory and an out-of-range CLASSIC_LIGHT_ACCENT are Classic Blue, on Cobalt's
 # tones; Modern's stored Ivory and an out-of-range ACCENT are Graphite's scheme; a missing MINIMAL_ACCENT is Graphite, a stored Ivory
@@ -11979,7 +11980,7 @@ assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==('sys
 # row: the wheel, the buttons and what they do.
 cfv=display_page(m,2); cf,cf_pl,cf_sort,cf_refresh,cf_big,cf_durations,cf_position=m.nodes[cfv]['children']
 assert m.icons_set==['playset_covermode']*3+['system_update','playset_covermode','switch_off','playset_covermode','switch_off','playset_covermode','switch_off'],m.icons_set
-ctl=display_page(m,3); wheel,hold,scrub_one,tone,hp,lock,wake,guard=m.nodes[ctl]['children']
+ctl=display_page(m,3); wheel,hold,scrub_one,tone,lock,wake,guard=m.nodes[ctl]['children']  # tone: the Clicker
 assert [row_text(r) for r in (hold,scrub_one)]==['Hold Return: Recent','Single Press Scrub']; passed()
 view=display_page(m,1); rows=setting_rows(m,view)
 kids=m.nodes[view]['children']; status_row,light,corners,shortcut,time_title,centred=kids[1],kids[2],kids[4],kids[6],kids[8],kids[9]
@@ -13504,8 +13505,9 @@ NEXT,PREV,CENTER,RETURN=O['KEY_NEXT'],O['KEY_PREV'],O['KEY_CENTER'],O['KEY_RETUR
 TONE=syms['g_keytone_flag']; SOUND_LATCH=0xa4bc00; KEY_LATCH=0xa4bbf8  # stock: one click a press; wheel lockout
 def audible(m,tone=1):
     """Key Tone as on the device: the real stock buzzeer_switch runs, and only the system() command it
-    hands the MCU, the hardware boundary, is mocked."""
-    m.handlers.pop(syms['buzzeer_switch'],None); m.mock('system@GLIBC_2.0'); m.byte(TONE,tone)
+    hands the MCU, the hardware boundary, is mocked, and the clock the Clicker reads when it looks for
+    q2player (patch/clicker.c; no /tmp/q2clicks here unless a test adds it to m.present)."""
+    m.handlers.pop(syms['buzzeer_switch'],None); m.mock('system@GLIBC_2.0','clock_gettime@GLIBC_2.2'); m.byte(TONE,tone)
     m.handlers[syms['pthread_create@GLIBC_2.2']]='thread:run'  # the click's worker, run at once
     return m
 def buzzes(m): return sum(c[0]=='system@GLIBC_2.0' and m.text(c[1])=='cmd_mcu write_str buzzer' for c in m.calls)
@@ -13533,19 +13535,33 @@ def routed(m,status=3,way=0,po=0,bal=0):
     for n in ('mclGetPlayStatus','mclGetOutputWay'): m.handlers.pop(syms[n],None)
     m.word(PLAY_STATUS,status); m.word(OUTPUT_WAY,way); m.byte(syms['g_po_status'],po); m.byte(syms['g_bal_status'],bal)
     return m
-# Every Key Tone click (stock's three and ringnav()'s) goes through buzzeer_switch: with nothing plugged
-# in, the buzzer as stock, playing or not; with either jack plugged in or a Bluetooth (1) or USB (2)
-# output, none; Key Tone off, none.
+# Every Key Tone click (stock's three and ringnav()'s) goes through buzzeer_switch, the Clicker's route
+# (patch/clicker.c). Speaker (IPOD CLICKER 1): with nothing plugged in, the buzzer as stock, playing or not;
+# with either jack plugged in or a Bluetooth (1) or USB (2) output, none; Key Tone off, none.
+def clicker(value=None,tone=1,**kw):
+    m=Machine()
+    if value is not None: m.config['CLICKER']=value
+    m.mock('send@GLIBC_2.0')
+    return routed(audible(m,tone=tone),**kw)
+def sent(m): return [m.text(c[2]) for c in m.calls if c[0]=='send@GLIBC_2.0']
 for kw,want in (({'status':1},1),({},1),({'status':2},1),({'po':1},0),({'bal':1},0),({'way':1},0),
                 ({'way':2},0),({'status':2,'po':1},0)):
-    m=routed(audible(Machine()),**kw); m.call(address=syms['buzzeer_switch'],args=(1,0,0,0))
-    assert buzzes(m)==want,kw
-m=routed(audible(Machine(),tone=0)); m.call(address=syms['buzzeer_switch'],args=(1,0,0,0)); assert not buzzes(m); passed()
-# Click With Headphones (IPOD KEYTONEHP=1): the buzzer clicks with either jack or BT/USB too, as stock; Key
-# Tone off is still silent.
-for kw,tone,want in (({'po':1},1,1),({'bal':1},1,1),({'way':1},1,1),({'way':2},1,1),({'po':1},0,0),({},0,0)):
-    m=Machine(); m.config['KEYTONEHP']='1'; m=routed(audible(m,tone=tone),**kw)
-    m.call(address=syms['buzzeer_switch'],args=(1,0,0,0)); assert buzzes(m)==want,(kw,tone)
+    m=clicker('1',**kw); m.call(address=syms['buzzeer_switch'],args=(1,0,0,0))
+    assert buzzes(m)==want and not sent(m),kw
+m=clicker('1',tone=0); m.call(address=syms['buzzeer_switch'],args=(1,0,0,0)); assert not buzzes(m); passed()
+# Both, the default (no CLICKER, whatever an old KEYTONEHP holds): the buzzer with either jack or BT/USB too,
+# as Click With Headphones did; Key Tone off is still silent. Headphones (2) with no q2player (no
+# /tmp/q2clicks): as Speaker. With q2player playing (status 2) Headphones sends it the click and the buzzer is
+# quiet; paused (3), the buzzer as Speaker; Both sends it and buzzes.
+for value,kw,tone,want in ((None,{'po':1},1,1),(None,{'bal':1},1,1),(None,{'way':1},1,1),(None,{'way':2},1,1),(None,{'po':1},0,0),
+                           (None,{},0,0),('2',{},1,1),('2',{'po':1},1,0)):
+    m=clicker(value,tone=tone,**kw)
+    if value is None: m.config['KEYTONEHP']='0'
+    m.call(address=syms['buzzeer_switch'],args=(1,0,0,0)); assert buzzes(m)==want and not sent(m),(value,kw,tone)
+for value,status,buzz,mixed in (('2',2,0,1),('2',3,1,0),('0',2,1,1)):
+    m=clicker(value,status=status); m.present.add('/tmp/q2clicks')
+    m.call(address=syms['buzzeer_switch'],args=(1,0,0,0))
+    assert buzzes(m)==buzz and sent(m)==['{mcl-click\\wheel}'][:mixed],(value,status)
 passed()
 # A reboot keeps the place (playback.c ringnav_reboot): Restart (device_reboot) and the firmware update's
 # dialog, which stops the player before it flashes, save as power-off does (save_memoryplay_info, which
@@ -13701,11 +13717,15 @@ assert [tick(m,gap=100) for _ in range(3)]==[1,1,1] and m.get(w+O['TABLE_TOP'])=
 keys=(CENTER,RETURN,O['KEY_PLAY'],222,223)
 m,w,es=long_list(8,audible(Machine()))
 assert [tick(m,key) for key in keys]==stock(keys)==[1]*5 and m.selected(w)==0; passed()
-# Either jack or Bluetooth in: the buttons and a row change are silent.
+# Either jack or Bluetooth in: under Speaker (IPOD CLICKER 1) the buttons and a row change are silent; under
+# Both, the default, the buzzer clicks them as before.
 for kw in ({'po':1},{'bal':1},{'way':1}):
-    m,w,es=long_list(8,routed(audible(Machine()),**kw))
-    assert tick(m)==0 and m.selected(w)==1 and [tick(m,key) for key in keys]==[0]*5
-    assert m.u.mem_read(TONE,1)==b'\x01'
+    for value,want in (('1',0),(None,1)):
+        mm=Machine()
+        if value: mm.config['CLICKER']=value
+        m,w,es=long_list(8,routed(audible(mm),**kw))
+        assert tick(m)==want and m.selected(w)==1 and [tick(m,key) for key in keys]==[want]*5,(kw,value)
+        assert m.u.mem_read(TONE,1)==b'\x01'
 passed()
 # Music playing with nothing plugged in: the speaker still clicks.
 m,w,es=long_list(8,routed(audible(Machine()),status=2))
@@ -18877,11 +18897,11 @@ passed()
 # Volume guard (#46; its wheel engine in test/playback.py): off by default, the dark wheel as stock;
 # the row saves VOLGUARD and sets wheel_guard, which the encoder thread reads.
 m,rows,texts,icons,click=settings_page('display','scroll_view_display',stock_rows=3,sub=3)
-assert texts()==['Wheel Sensitivity: 50%','Hold Return: Recent','Single Press Scrub','system_keytone','Click With Headphones','system_keylock','Wake: Single Press','Volume Guard']  # stock's two by key, for their translations
-assert icons==['system_display','playset_folderjump','playset_covermode','system_keytone','system_keytone','system_keylock','system_keylock','system_keylock']
+assert texts()==['Wheel Sensitivity: 50%','Hold Return: Recent','Single Press Scrub','Clicker: Off','system_keylock','Wake: Single Press','Volume Guard']  # stock's by key, for its translation
+assert icons==['system_display','playset_folderjump','playset_covermode','system_keytone','system_keylock','system_keylock','system_keylock']
 guard=lambda: m.get(payload_syms['wheel_guard'])
-assert guard()==0 and click(7)==[(1,'Q2POD','VOLGUARD')] and texts()[7]=='Volume Guard' and guard()==1
-assert click(7)==[(0,'Q2POD','VOLGUARD')] and texts()[7]=='Volume Guard' and guard()==0; passed()
+assert guard()==0 and click(6)==[(1,'Q2POD','VOLGUARD')] and texts()[6]=='Volume Guard' and guard()==1
+assert click(6)==[(0,'Q2POD','VOLGUARD')] and texts()[6]=='Volume Guard' and guard()==0; passed()
 # Fast Navigation (Display, Cover Flow's page, its last row): off by default; the row saves BIGLIBRARY, and Cover
 # Flow reads it at once (ringnav_big_library: letters, years and half copies); a stored value other than 1 is off.
 bm,brows,btexts,bicons,bclick=settings_page('display','scroll_view_display',stock_rows=3,sub=2)
@@ -18910,12 +18930,12 @@ for v,on in (('1',1),('2',0),('0',0)):
     assert position_on(pm)==on,v
 passed()
 # Buttons Lock opens stock's page, as its row on System did. Key Tone, System's stock row before
-# (0x4cc49c): its byte and key; Click With Headphones shows while it is on, and saves IPOD KEYTONEHP.
-assert click(5)==[] and m.opened[-1]==('systemset/keylock_page',None)
-hp=rows[4]; assert m.nodes[hp]['visible']==0
-for on in (1,0):
-    assert click(3)==[(on,'SYSSET','KEYTONE')] and m.u.mem_read(syms['g_keytone_flag'],1)==bytes([on]) and m.nodes[hp]['visible']==on
-assert click(4)==[(1,'IPOD','KEYTONEHP')]; passed()
+# (0x4cc49c), is the Clicker: Off is its byte and key at 0, the others its byte at 1 and IPOD CLICKER.
+assert click(4)==[] and m.opened[-1]==('systemset/keylock_page',None)
+for want,saved,on in (('Speaker',[(1,'SYSSET','KEYTONE'),(1,'IPOD','CLICKER')],1),('Headphones',[(2,'IPOD','CLICKER')],1),
+                      ('Both',[(0,'IPOD','CLICKER')],1),('Off',[(0,'SYSSET','KEYTONE')],0)):
+    assert click(3)==saved and texts()[3]=='Clicker: '+want and m.u.mem_read(syms['g_keytone_flag'],1)==bytes([on]),want
+passed()
 # Wake (docs/internals.md#wake): screen off, a lone centre press and its release never reach the UI;
 # a second press within WAKE_MS passes, press and release. Other keys, the screen on, or the
 # setting off pass untouched, except one more centre press within WAKE_MS of the waking one (#45).
@@ -19008,7 +19028,7 @@ def eaten():  # blind presses and their repeats stay dropped with the release
 assert eaten() and wake(DOWN,gap=O['WAKE_MS']) and wake(UP)  # a blind double press only wakes
 m.byte(syms['g_backlight_status'],1); assert not wake(DOWN,gap=100) and not wake(UP,gap=50); m.byte(syms['g_backlight_status'],0)
 assert wake(DOWN,gap=1000) and wake(UP)  # a new press does not inherit the dropped press's flag
-assert click(6)==[(1,'Q2POD','WAKEDOUBLE')] and texts()[6]=='Wake: Double Press' and back_dark()
+assert click(5)==[(1,'Q2POD','WAKEDOUBLE')] and texts()[5]=='Wake: Double Press' and back_dark()
 assert not wake(DOWN,gap=1000) and not wake(UP,gap=50)  # a pocket bump
 assert wake(DOWN,gap=100) and wake(UP,gap=50) and eaten()  # the double press; a third only wakes
 assert not wake(DOWN,gap=O['WAKE_MS']) and not wake(UP) and not wake(DOWN,gap=O['WAKE_MS']) and not wake(UP)  # too slow
@@ -19072,7 +19092,7 @@ assert struct.unpack_from('<I',demo,fileoff(demo,STANDBY_WAKE[0]))[0]==STANDBY_W
 m.byte(syms['g_backlight_status'],0)
 m.byte(O['BOOT_KEY_GUARD'],1); assert not wake(DOWN,gap=1000) and not wake(UP,gap=50) and m.u.mem_read(O['BOOT_KEY_GUARD'],1)==b'\0'
 assert wake(DOWN,gap=100) and m.u.mem_read(O['BOOT_KEY_GUARD'],1)==b'\0' and wake(UP,gap=50)
-assert click(6)==[(0,'Q2POD','WAKEDOUBLE')]; passed()
+assert click(5)==[(0,'Q2POD','WAKEDOUBLE')]; passed()
 # Stock V1.36's Show Navigation Bar and Wheel Function stay where Q2 Pod's themes and wheel need them (build.py
 # NAV_SHOWN, WHEEL_MODE): config_init's own code, from its NAVHIDE read to past its WHEELMODE store, leaves the bar
 # shown and Volume Mode whatever the keys hold, missing included (stock reads a missing WHEELMODE as 0). Neither is written.
@@ -19248,7 +19268,7 @@ passed()
 m,rows,texts,*_=settings_page('power','scroll_view_powermanager',{'CHARGELIMIT':'1','WAKEDOUBLE':'1','VOLGUARD':'1','STANDBYLIMIT':'2'})
 assert texts()==[limits[1],f"Charge Limit ({O['CHARGE_STOP']}%)",'USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox']
 m,rows,texts,*_=settings_page('display','scroll_view_display',{'WAKEDOUBLE':'1','VOLGUARD':'1'},stock_rows=3,sub=3)
-assert texts()[6:]==['Wake: Double Press','Volume Guard']
+assert texts()[5:]==['Wake: Double Press','Volume Guard']
 assert m.get(payload_syms['wheel_guard'])==1; passed()
 m,rows,texts,*_=settings_page('power','scroll_view_powermanager',{'STANDBYLIMIT':'4'})
 assert texts()[0]=='Standby Limit: Off'; passed()  # out of range: Off

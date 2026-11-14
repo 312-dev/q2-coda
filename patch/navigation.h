@@ -272,7 +272,7 @@ typedef struct {
         shortcut, rounded, light, light_day, /* light_day: Auto's answer for now (LIGHT=2) */
         keep_lit,                            /* Smart Awake (#57, keep_lit_poll) */
         np_centred,                          /* Centred Now Playing (ringnav_ui_load) */
-        keytone_hp,                          /* Click With Headphones (ringnav_buzzer) */
+        clicker,                             /* the Clicker's output (clicker.c), IPOD CLICKER */
         scrub_single,                        /* Single Press Scrub (np_key) */
         theme_booted,                        /* theme_boot ran (ringnav_ui_load) */
         raw_ink,                             /* a final colour's draw: ui_ink leaves it alone */
@@ -472,7 +472,8 @@ enum {
     SETTING_LIGHT,
     SETTING_KEEPLIT,
     SETTING_NPCENTRED,
-    SETTING_KEYTONEHP,
+    SETTING_CLICKER, /* the Clicker's output: stored here, its row Controls' Key Tone row
+                        (clicker.c) */
     SETTING_SCRUBSINGLE,
     SETTING_TIMETITLE,
     SETTING_OWN
@@ -617,4 +618,12 @@ int ple_listing(void);
 int pl_first(menu_t *m, int cur);
 void pl_fit(void *button);
 
+/* clicker.c: the Clicker (docs/internals.md#key-tone), the Key Tone row's value and click, and a
+ * click's route */
+enum { CLICK_KIND_WHEEL = 1, CLICK_KIND_BUTTON, CLICK_KIND_BEEP }; /* q2player's mcl-click sounds */
+enum { ROUTE_BUZZER = 1, ROUTE_MIXED = 2 };
+extern int clicker_kind; /* CLICK_KIND_*, 0 the wheel's (zero at start, as .scratch is) */
+const char *clicker_text(void);
+void clicker_step(void);
+int clicker_route(int listening);
 #endif
