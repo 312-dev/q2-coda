@@ -75,7 +75,9 @@
     <element name="scrollbar" painter="wheel" w="4" right="5" top="134" bottom="206" min="8"
              dark.thumb="#e5e5e5" light.thumb="#1a1a1a" dark.track="#3a3a3a" light.track="#c5c5c5"/>
   </view>
-  <view name="settings"><element name="rows" top="0"/><element name="values" text="1" dark.ink="#ababab" light.ink="#5c5c5c"/></view>
+  <!-- Settings rows: a value in Text Secondary on the right column; an on/off setting a 34x20 switch there in place of
+       "On" or "Off" (oled-design.md List row, list_marks.c switch_mark) -->
+  <view name="settings"><element name="rows" top="0"/><element name="values" text="1" switch="1" dark.ink="#ababab" light.ink="#5c5c5c"/></view>
   <view name="home">
     <element name="rows" top="0" text_x="24" full_row="375" label_end_split="44" font="inter" font_px="24" caps="0"/>
     <element name="chevron" visible="1"/>

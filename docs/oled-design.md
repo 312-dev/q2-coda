@@ -115,6 +115,8 @@ Rules:
 - **Sentence case** for everything the theme writes (status, captions, values). Menu items and
   page names stay as the firmware names them, which is Title Case ("Sound Check"). Never all
   capitals.
+- **A number, a space, its unit:** "15 s", "1 min", "4000 K"; a percentage takes no space
+  ("50%").
 - **Size steps are 15, 16, 18, 20, 22** (56 for the confirmation's glyph). Nothing else.
 - **Row pitch is about 1.6 times the row size** (32 px for 20 px type), as the concept's is
   about twice its cap height.
@@ -174,8 +176,15 @@ All lists share one grid.
   Chevron grey, On Accent on the selection.
 - **Key/value row:** value in Text Secondary, right-aligned on the right column, no chevron.
   On the selection bar the value is On Accent.
-- **Switch row:** a 34x20 switch on the right column: Track when off, Accent Blue when on,
-  white knob. No "On"/"Off" text beside it.
+- **Switch row:** every on/off setting, a 34x20 fully round switch ending on the right column, its
+  16 px white knob 2 px in: Track when off, Accent Blue when on. On the selection bar: on is a white
+  track with an Accent Blue knob, off a 1.5 px white outline round the white knob. No "On"/"Off"
+  text beside it. A setting with two or three named choices (Gain's High and Low, Charge Limit's
+  Off and 80%) is a key/value row that Centre cycles; the value is never part of the label.
+- **Disabled row** (Set Time Manually while the time is set automatically): label, value and
+  chevron in Text Tertiary, and the wheel passes over it.
+- **Picker:** the current choice carries Phosphor's `check` (bold, 12 px) on the right column, Accent
+  Blue, white on the selection.
 
 ### Scroll indicator
 
@@ -270,8 +279,16 @@ has no place for keeps a place of its own:
 
 - **Progress:** 6 px, round ends, Track and Accent Blue. Used for playback, scans and
   downloads.
-- **Vertical slider (EQ):** 4 px Track line, Accent Blue fill from 0 dB to the value, a 14 px
-  white knob. Band labels under it in Text Tertiary 15 px.
+- **Slider page** (Max Volume, Default Volume, Channel Balance, Brightness, Crossfade, Resume Songs,
+  Night Shift, Wheel Sensitivity): the status row names it; a feature with a switch has it as the
+  first row, selected; the value in Inter Medium 22 centred on y 150; a 6 px track from the text
+  column to the right column with its top at y 186, Track behind and Accent Blue filled to a 14 px
+  white knob (Channel Balance fills from the centre); the range's ends in 15 px Text Tertiary
+  centred on y 214, at the two columns. The wheel moves it; there are no +/- buttons.
+- **Vertical slider (EQ):** 4 px Track line, Accent Blue fill from 0 dB to the value (Text Tertiary
+  while the EQ is off), a 14 px white knob, ringed 2 px in Accent Blue while the wheel is on it.
+  The band's name and gain under it in 15 px Text Tertiary, Text Primary on the band the wheel is
+  on. Above the three, the EQ's switch, Presets and Reset are rows.
 - **Storage bar:** 12 px, round ends, segments in Accent Blue, Text Secondary and Track, with a
   legend of 8 px dots and 15 px labels. Segments never use more than three colours.
 
@@ -337,7 +354,9 @@ pattern.
 | Hold menu                           | Dialog                      |                                                                                                            |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
-| Equalizer (Simple)                  | Vertical slider             |                                                                                                            |
+| Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
+| Equalizer (Simple)                  | Vertical slider             | Its tabs, then rows: the switch, Presets, Reset                                                            |
+| Wi-Fi                               | Switch row, then a section  | "Networks" header after 12 px, "Searching..." on its line; signal, lock, check on the right                |
 | Bluetooth                           | Two-line row                | Second line "Connected" with the Positive dot                                                              |
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
@@ -373,7 +392,9 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   chevron (`list.chevron.painter="icon"`) and the play state; the slim battery
   (`bar.battery.painter="slim"`); the wheel's scroll indicator (`list.scrollbar.painter="wheel"`);
   1 px dividers on the text and right columns (`list.divider.ink`); row art's 4 px corners
-  (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column; song rows
+  (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column; the
+  switch, Gain's value, the pickers' check, disabled rows, the slider page, EQ's Simple tab and the Wi-Fi
+  page as above (`settings.values.switch`); song rows
   (`list.songs.painter="inline"`) and the Song Artist and Song Length options; Songs' action row
   as the Shuffle row (`list.shuffle.row`); a list left by Return opening at its top when chosen
   again (`list.reopen.top`, which Minimal sets for every theme).
@@ -388,4 +409,4 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 Still to build:
 
 - A confirmation screen for Shuffle and Repeat, and the toast and dialog forms.
-- Switch rows, the pickers' check, the EQ slider and the storage bar drawn as above.
+- The storage bar drawn as above.

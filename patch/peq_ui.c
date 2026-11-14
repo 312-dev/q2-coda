@@ -73,7 +73,8 @@ static const int steps[] = {1, 10, 100, 1000};
 static const struct { double first, step; int rows; } picks[] = {{-12, 0.5, 49}, {12.5, -0.5, 74}, {24, -0.5, 97}};
 /* Simple, 3EQ (docs/internals.md#3eq): Low, Mid and High, -6 to +6 dB in 0.5 dB steps, on a view
  * that e3_paint draws: the switch, Presets and Reset (R) under the tabs, then a slider per band over
- * a 0 dB line. The wheel moves between the tabs and the six; Centre flips the switch, opens
+ * a 0 dB line (under a set_switch theme the three are rows and the sliders the standard's,
+ * slider_page.c eq_rows_paint). The wheel moves between the tabs and the six; Centre flips the switch, opens
  * Advanced's Presets screen, resets, or takes a slider, whose gain the wheel then turns until
  * Centre or Return. A touch on a slider drags it. Edits are saved at most every E3_SAVE_MS, and at
  * once when an adjustment ends; the player hears them only while 3EQ is on, which turns PEQ off.
@@ -1090,8 +1091,8 @@ int peq_page_init(void *page, void *context) {
 
 /* The sliders' travel, under their names and over their values, which stay clear of the iPod
  * glass's lower corners. */
-static int e3_top(void) { return E3_SLIDERS + 34; }
-static int e3_bottom(void) { return e3.h - 60; }
+static int e3_top(void) { return eq_rows() ? EQ_SLIDERS_TOP : E3_SLIDERS + 34; }
+static int e3_bottom(void) { return eq_rows() ? EQ_SLIDERS_BOTTOM : e3.h - 60; }
 static int e3_y(double gain) {
     return (e3_top() + e3_bottom()) / 2 - (int)(gain * (e3_bottom() - e3_top()) / (2 * E3_MAX));
 }
@@ -1236,16 +1237,22 @@ int eq_key(void *top, unsigned key) {
     return 1;
 }
 
-/* A touch: a button on the press; a slider's gain follows the finger, in 0.5 dB steps,
- * until it lifts. */
+/* A touch: a button (a set_switch theme's row) on the press; a slider's gain follows the finger,
+ * in 0.5 dB steps, until it lifts. */
 static int e3_touch(void *ctx, void *event) {
     int type = I(event, EVENT_TYPE), xy[2] = { I(event, EVENT_X), I(event, EVENT_Y) };
     if (!e3.view || (type != EVT_POINTER_DOWN && !e3.dragging)) return 0;
     widget_to_local(e3.view, xy);
     if (type == EVT_POINTER_DOWN) {
-        if (xy[1] < E3_BUTTONS) return 0;
+        int rows = eq_rows(); /* a set_switch theme's rows (slider_page.c eq_rows_paint) */
+        if (xy[1] < (rows ? EQ_ROWS_Y : E3_BUTTONS)) return 0;
         e3.status = 0;
-        if (xy[1] < E3_SLIDERS) {
+        if (rows && xy[1] < EQ_ROWS_Y + 3 * EQ_ROW) {
+            e3.focus = E3_SWITCH + (xy[1] - EQ_ROWS_Y) / EQ_ROW;
+            e3_activate();
+            return 0;
+        }
+        if (!rows && xy[1] < E3_SLIDERS) {
             e3.focus = xy[0] < e3_button[1][0] - 4 ? E3_SWITCH : xy[0] < e3_button[2][0] - 4 ? E3_PRESETS : E3_RESET;
             e3_activate();
             return 0;
@@ -1268,7 +1275,8 @@ static void e3_box(void *canvas, int x, int y, int w, int h, unsigned rgb) {
     canvas_fill_rect(canvas, x, y, w, h);
 }
 
-/* The switch's bar and the gains' bars in the accent's light tone (white in Minimal), grey
+/* A set_switch theme's (OLED's) Simple tab is slider_page.c's eq_rows_paint, on the EQ_* rows.
+ * Otherwise: the switch's bar and the gains' bars in the accent's light tone (white in Minimal), grey
  * while 3EQ is off; the selected control on a lighter card; the slider being adjusted with a white
  * handle and value, the others grey. While PEQ plays the switch shows it on, under the applied
  * preset's name (Advanced unnamed), and the sliders are dimmed: one takes over as 3EQ. */
@@ -1283,6 +1291,12 @@ static void e3_paint(void *canvas) {
         n = 12;
         while (n && (preset[n] & 0xc0) == 0x80) --n; /* preset[12] continues a character: drop it */
         preset[n] = 0;
+    }
+    if (eq_rows()) { /* slider_page.c: rows and the standard's vertical sliders */
+        eq_rows_t e = { peq ? preset : "Enabled", e3.on || peq, e3.focus - E3_TABS, e3.adjusting,
+                        { e3.gain[0], e3.gain[1], e3.gain[2] }, E3_MAX };
+        eq_rows_paint(e3.view, canvas, &e);
+        return;
     }
     const char *const names[] = { peq ? preset : e3.on ? "Enabled: On" : "Enabled: Off", "Presets", "R" };
     for (int i = 0; i < 3; ++i) {
@@ -1307,10 +1321,15 @@ static void e3_paint(void *canvas) {
 }
 
 /* The tab bar, unless a message has it: the open tab white over an accent line, the other grey,
- * and while the wheel is on the bar, the other on the lighter card Centre would open. */
+ * and while the wheel is on the bar, the other on the lighter card Centre would open
+ * (slider_page.c eq_tabs_paint's under a set_switch theme). */
 static void tabs_paint(void *canvas) {
     int simple = ui.tab == SIMPLE, focus = simple ? e3.focus == E3_TABS : ui.tabs;
     if (simple ? e3.status != 0 : ui.status[0] != 0) return;
+    if (eq_rows()) {
+        eq_tabs_paint(ui.bar, canvas, simple, focus);
+        return;
+    }
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     for (int i = 0; i < 2; ++i) {
         int x = i ? 191 : 8, shown = i == !simple;

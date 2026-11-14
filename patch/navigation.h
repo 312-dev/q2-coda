@@ -456,6 +456,20 @@ void coverflow_position_reset(void);
 /* list_marks.c */
 const char *theme_art(const char *name);
 void chevron_icon(void *w, void *canvas, int right, int y, int selected);
+void chevron_muted(void *w, void *canvas, int right, int y);
+
+/* slider_page.c: a set_switch theme's slider page, laid out as stock's window loads and painted
+ * after its children */
+void slider_page_open(void *win, void *s, unsigned kind);
+void slider_page_paint(void *w, void *canvas);
+void slider_page_dirty(void *page); /* its switch row, after a change of the hidden switch */
+
+/* wifi_rows.c: a set_switch theme's Wi-Fi page, from ipod_list_layout and paint_into */
+int wifi_list(void *list);
+int wifi_sig(const char *image); /* stock's signal image's level, 1-4, else 0 */
+void wifi_rows_pre(void *view);
+void wifi_rows_post(void *view);
+void wifi_mark(void *w, void *canvas, int level, int selected);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
 void marquee_fade(void *w, void *canvas);
@@ -464,6 +478,9 @@ void np_modes(void *win, void *canvas);
 void wheel_sb_arm(void *list);
 unsigned wheel_sb_alpha(void *list);
 void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key);
+/* list_marks.c: an on/off setting's switch, ending on canvas column right, centred on y
+ * (settings.values.switch) */
+void switch_mark(void *canvas, int right, int y, int on, int selected);
 
 /* song_rows.c: SONGS_INLINE's rows. Song Artist's and Song Length's values (theme_engine.c
  * song_artist, song_length), a list's kind (song_list) and where an artist stands (song_fit). */

@@ -1,0 +1,323 @@
+/* A set_switch theme's slider page (docs/oled-design.md Progress and sliders): stock's four slider
+ * windows (Brightness, Max Volume, Channel Balance, Default Volume, whose window crossfade.c also
+ * dresses as Crossfade, Wheel Sensitivity, Resume Songs and Night Shift) in one form. Under the
+ * status row, which names the page: the feature's switch as a selected row when the page has one
+ * (Default Volume's, Crossfade's, Night Shift's img_bootswitch, its toolbar hidden); the value
+ * centred in Inter Medium; a 6 px round track on the text and right columns, Track behind and the
+ * accent's fill to a white knob; the range's ends in Text Tertiary under it. Stock's -/+ discs go
+ * (the wheel and edit_key still click them) and its value label stays, unseen, so its writes keep
+ * repainting where the value is drawn. Everything is laid out as the window loads, before stock's
+ * init, and painted by slider_page_paint after the window's children. EQ's Simple tab draws its
+ * rows and vertical sliders here too (eq_rows_paint, at the end). */
+#include "navigation.h"
+
+/* Screen rows (docs/oled-design.md), less the window's top at the set's bar */
+#define SP_VALUE_Y 150 /* the value's centre */
+#define SP_TRACK_Y 186 /* the track's top */
+#define SP_ENDS_Y 214  /* the range ends' centre */
+#define SP_TRACK_H 6
+#define SP_KNOB 14
+#define SP_ROW 32 /* the switch row, from the window's top */
+#define SP_BAR_INSET 16
+#define SP_BAR_R 8
+#define SP_VALUE_PX 27 /* Inter Medium 22, AWTK's size (oled-design.md Type) */
+#define SP_ENDS_PX 18  /* 15 */
+#define SP_LINE 32     /* a text's box, centred on its row */
+#define SP_TRACK_DARK 0x333333
+#define SP_TRACK_LIGHT 0xd9d9d9
+
+static struct {
+    void *win, *slider, *value, *nav, *sw;
+    unsigned char kind; /* SLIDER_* */
+} sp __attribute__((section(".scratch")));
+
+static int sp_gone(void *win, void *event) {
+    (void)event;
+    if (win == sp.win) sp.win = sp.slider = sp.value = sp.nav = sp.sw = (void *)0;
+    return 0;
+}
+
+/* The row's tap: stock's or crossfade.c's switch handler, through the hidden switch. */
+static int sp_row_hit(void *win, void *event) {
+    (void)event;
+    void *sw = widget_lookup(win, "img_bootswitch", 1);
+    char click[0x30];
+    if (!sw || !widget_get_visible(sw)) return 0;
+    stock_dispatch_trampoline(sw, pointer_event_init(click, EVT_CLICK, sw, 0, 0));
+    widget_invalidate_force(win, (void *)0); /* stock may have hidden the slider's view */
+    return 0;
+}
+
+/* navigation.c slider_open, as stock's window win loads: s its slider, kind its SLIDER_*. */
+void slider_page_open(void *win, void *s, unsigned kind) {
+    static const char *const values[] = { "label_backlight", "label_vol", "label_balance" },
+                             *const discs[] = { "img_dec", "img_add" },
+                             *const states[] = { "normal", "pressed", "over", "disable",
+                                                 "focused" };
+    char key[STYLE_KEY];
+    int top = geom_val(V_BAR), view_y = kind == SLIDER_BOOT ? SP_ROW : 0;
+    void *view = P(s, W_PARENT), *c;
+    sp.win = win, sp.slider = s, sp.kind = (unsigned char)kind, sp.value = sp.sw = (void *)0;
+    widget_on(win, EVT_DESTROY, sp_gone, win);
+    widget_move_resize(view, 0, view_y, 375, client_h() - view_y);
+    /* the slider's box on the track, a knob's height either side for a finger; stock's own bar
+     * drawn in nothing, as slider_page_paint draws it */
+    widget_move_resize(s, geom_val(V_TEXT_X), SP_TRACK_Y + SP_TRACK_H / 2 - top - view_y - SP_KNOB,
+                       375 - geom_val(V_RIGHT_X) - geom_val(V_TEXT_X), 2 * SP_KNOB);
+    for (unsigned i = 0; i < sizeof states / sizeof *states; ++i) {
+        widget_set_prop_int(s, style_key(key, states[i], "bg_color"), 0);
+        widget_set_prop_int(s, style_key(key, states[i], "fg_color"), 0);
+        widget_set_prop_int(s, style_key(key, states[i], "border_color"), 0);
+    }
+    for (unsigned i = 0; i < sizeof discs / sizeof *discs; ++i)
+        if ((c = widget_lookup(win, discs[i], 1))) widget_set_visible(c, 0, 0);
+    for (unsigned i = 0; !sp.value && i < sizeof values / sizeof *values; ++i)
+        sp.value = widget_lookup(win, values[i], 1);
+    if (sp.value) { /* where the value is drawn, so its writes repaint it; its own text clear */
+        widget_move_resize(sp.value, 0, SP_VALUE_Y - top - view_y - SP_LINE / 2, 375, SP_LINE);
+        text_ink(sp.value, 0, INK_LABEL);
+    }
+    if (kind != SLIDER_BOOT) return;
+    /* the toolbar's title and switch read as a row (stock's init fills the toolbar after this) */
+    if ((sp.nav = widget_lookup(win, "view_navbar", 1))) {
+        widget_set_visible(sp.nav, 0, 0);
+        widget_set_enable(sp.nav, 0);
+    }
+    c = image_create(win, 0, 0, 375, SP_ROW);
+    widget_set_name(c, "switch_hit");
+    widget_set_prop_str(c, "clickable", "true");
+    widget_on(c, EVT_CLICK, sp_row_hit, win);
+}
+
+/* The switch row of page, when it is this page: its hidden switch's image change repaints
+ * nothing (navigation.c slider_tray_dirty, for crossfade.c's switch). */
+void slider_page_dirty(void *page) {
+    rect_t row = { 0, 0, 375, SP_ROW };
+    if (page && page == sp.win) widget_invalidate_force(page, &row);
+}
+
+/* A pill (a rounded rectangle whose radius is half its height) on vg. */
+static void pill(void *vg, float x, float y, float w, float h) {
+    float r = h / 2;
+    vgcanvas_begin_path(vg);
+    vgcanvas_arc(vg, x + r, y + r, r, 1.5707963f, 4.7123890f, 0);
+    vgcanvas_line_to(vg, x + w - r, y);
+    vgcanvas_arc(vg, x + w - r, y + r, r, -1.5707963f, 1.5707963f, 0);
+    vgcanvas_close_path(vg);
+}
+
+/* s, n characters, centred on row y in the columns x to x + w, aligned (1 centre, 2 left, 3 right)
+ * in face at px, in color (0xAARRGGBB: ui_ink's unless raw). */
+static void sp_text(void *canvas, const unsigned *s, unsigned n, int x, int w, int y, int align,
+                    const char *face, int px, unsigned color) {
+    rect_t r = { x, y - SP_LINE / 2, w, SP_LINE };
+    int align_v = I(canvas, CANVAS_ALIGN_V), align_h = I(canvas, CANVAS_ALIGN_H);
+    canvas_set_font(canvas, face, (unsigned)px);
+    canvas_set_text_color(canvas, color);
+    I(canvas, CANVAS_ALIGN_V) = 1;
+    I(canvas, CANVAS_ALIGN_H) = align;
+    canvas_draw_text_in_rect(canvas, s, n, &r);
+    I(canvas, CANVAS_ALIGN_V) = align_v;
+    I(canvas, CANVAS_ALIGN_H) = align_h;
+}
+static unsigned wide(unsigned *out, unsigned n, const char *s) {
+    unsigned k = 0;
+    while (k < n && s[k]) out[k] = (unsigned char)s[k], ++k;
+    return k;
+}
+
+/* ringnav_paint, after the window's children: the switch row, the value, the track and the range
+ * ends, in the window's coordinates. */
+void slider_page_paint(void *w, void *canvas) {
+    if (!w || w != sp.win || !P(canvas, CANVAS_LCD)) return;
+    static const char *const faces[] = FONT_NAMES;
+    const scheme_t *S = scheme();
+    void *lcd = P(canvas, CANVAS_LCD), *vg = canvas_get_vgcanvas(canvas);
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), text = (unsigned)I(lcd, LCD_TEXT_COLOR),
+             raw = st.raw_ink, buf[48];
+    int top = geom_val(V_BAR), x0 = geom_val(V_TEXT_X), x1 = 375 - geom_val(V_RIGHT_X), px;
+    unsigned accent = S->tones[0] & 0xffffffu;
+    void *sw = sp.kind == SLIDER_BOOT ? widget_lookup(w, "img_bootswitch", 1) : (void *)0;
+    if (sw && widget_get_visible(sw)) { /* the selected row: its title is the toolbar's */
+        rect_t bar = { SP_BAR_INSET, 0, 375 - 2 * SP_BAR_INSET, SP_ROW };
+        void *title = sp.nav && widget_count_children(sp.nav) ? widget_get_child(sp.nav, 0) : 0;
+        const unsigned *s = title ? widget_get_text(title) : (void *)0;
+        st.raw_ink = 1; /* final: white on the accent in either half */
+        fill_box(canvas, &bar, RGBA(accent), SP_BAR_R);
+        if (s && *s) {
+            px = theme()->font_px[ROLE_TITLE];
+            const char *face = theme_face(s, -1, &px);
+            sp_text(canvas, s, wide_len(s), x0, x1 - x0 - 48, SP_ROW / 2, 2, face ? face : faces[0],
+                    px, RGBA(0xffffff));
+        }
+        switch_mark(canvas, x1, SP_ROW / 2,
+                    !tk_strcmp(widget_get_prop_str(sw, "image", ""), "switch_on"), 1);
+        st.raw_ink = raw;
+    }
+    void *view = P(sp.slider, W_PARENT);
+    if (!widget_get_visible(view)) { /* stock hides it while Default Volume's switch is off */
+        stock_canvas_set_fill_color(canvas, fill);
+        stock_canvas_set_text_color(canvas, text);
+        return;
+    }
+    /* the value: the label's text after any "Name: " stock writes before it (Max Volume's) */
+    const unsigned *v = sp.value ? widget_get_text(sp.value) : (void *)0;
+    if (v) {
+        const unsigned *p = v;
+        while (*p && *p != ':') ++p;
+        if (*p) v = p + 1 + (p[1] == ' ');
+        sp_text(canvas, v, wide_len(v), 0, 375, SP_VALUE_Y - top, 1, faces[FONT_INTER_MEDIUM],
+                SP_VALUE_PX, RGBA(0xffffff));
+    }
+    /* the track, its fill to the knob's centre, and the knob, final in each half */
+    int part = slider_part(sp.slider, x1 - x0 - SP_KNOB), y = SP_TRACK_Y - top;
+    float kx = (float)(x0 + SP_KNOB / 2 + part);
+    if (vg) {
+        st.raw_ink = 1;
+        vgcanvas_save(vg);
+        vgcanvas_translate(vg, (float)I(canvas, CANVAS_X), (float)I(canvas, CANVAS_Y));
+        pill(vg, (float)x0, (float)y, (float)(x1 - x0), SP_TRACK_H);
+        vgcanvas_set_fill_color(vg, RGBA(ipod_light() ? SP_TRACK_LIGHT : SP_TRACK_DARK));
+        vgcanvas_fill(vg);
+        /* Channel Balance's fill runs from the centre, where neither side is turned down */
+        float from = sp.kind == SLIDER_BALANCE ? (float)(x0 + x1) / 2 : (float)x0,
+              a = from < kx ? from : kx, b = from < kx ? kx : from;
+        if (b - a >= 1) {
+            pill(vg, a, (float)y, b - a, SP_TRACK_H);
+            vgcanvas_set_fill_color(vg, RGBA(accent));
+            vgcanvas_fill(vg);
+        }
+        vgcanvas_begin_path(vg);
+        vgcanvas_arc(vg, kx, (float)y + SP_TRACK_H / 2.0f, SP_KNOB / 2.0f, 0, 6.2831853f, 0);
+        vgcanvas_set_fill_color(vg, RGBA(0xffffff));
+        vgcanvas_fill(vg);
+        vgcanvas_restore(vg);
+        st.raw_ink = raw;
+    }
+    /* the ends: the slider's own range as the page writes its value */
+    char lo[16], hi[16];
+    int min = widget_get_prop_int(sp.slider, "min", 0),
+        max = widget_get_prop_int(sp.slider, "max", 100);
+    if (xfade_page(w))
+        xfade_ends(lo, hi, sizeof lo);
+    else if (sp.kind == SLIDER_BALANCE)
+        tk_snprintf(lo, sizeof lo, "L"), tk_snprintf(hi, sizeof hi, "R");
+    else if (sp.kind == SLIDER_LIGHT)
+        tk_snprintf(lo, sizeof lo, "%d%%", min), tk_snprintf(hi, sizeof hi, "%d%%", max);
+    else
+        tk_snprintf(lo, sizeof lo, "%d", min), tk_snprintf(hi, sizeof hi, "%d", max);
+    px = SP_ENDS_PX;
+    const char *face = faces[theme()->font[ROLE_META]];
+    sp_text(canvas, buf, wide(buf, sizeof buf / sizeof *buf, lo), x0, x1 - x0, SP_ENDS_Y - top, 2,
+            face, px, RGBA(S->muted));
+    sp_text(canvas, buf, wide(buf, sizeof buf / sizeof *buf, hi), x0, x1 - x0, SP_ENDS_Y - top, 3,
+            face, px, RGBA(S->muted));
+    stock_canvas_set_fill_color(canvas, fill);
+    stock_canvas_set_text_color(canvas, text);
+}
+
+/* EQ's Simple tab under a set_switch theme (eq_rows, peq_ui.c e3_paint and tabs_paint), in the
+ * page's coordinates: under the tabs, the switch, Presets and Reset as rows, then Low, Mid and
+ * High as the standard's vertical sliders (docs/oled-design.md Progress and sliders): a 4 px
+ * Track line, the fill from 0 dB to the gain in the accent (Text Tertiary while 3EQ is off), a
+ * 14 px white knob ringed in the accent while the wheel is on it, and the band's name and gain
+ * under it in 15 px, Text Tertiary, Text Primary on the focused band. */
+#define EQ_KNOB_RING 2
+#define EQ_LINE 4
+int eq_rows(void) { return theme()->set_switch; }
+
+static void eq_ink_text(void *canvas, const char *s, int x, int w, int y, int align, int px,
+                        unsigned rgb) {
+    static const char *const faces[] = FONT_NAMES;
+    unsigned buf[48], n = wide(buf, sizeof buf / sizeof *buf, s);
+    int fpx = px;
+    const char *face = theme_face(buf, (int)n, &fpx);
+    sp_text(canvas, buf, n, x, w, y, align, face ? face : faces[0], fpx, RGBA(rgb));
+}
+
+static unsigned eq_primary(void) { return ipod_light() ? 0x000000 : 0xffffff; }
+
+void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) {
+    void *lcd = P(canvas, CANVAS_LCD), *vg = canvas_get_vgcanvas(canvas);
+    if (!lcd) return;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), text = (unsigned)I(lcd, LCD_TEXT_COLOR),
+             raw = st.raw_ink, accent = scheme()->tones[0] & 0xffffffu;
+    int x0 = geom_val(V_TEXT_X), x1 = 375 - geom_val(V_RIGHT_X),
+        row_px = theme()->font_px[ROLE_TITLE];
+    st.raw_ink = 1; /* final colours, each half's */
+    static const char *const rows[] = { 0, "Presets", "Reset" };
+    for (int i = 0; i < 3; ++i) {
+        int y = EQ_ROWS_Y + i * EQ_ROW, cy = y + EQ_ROW / 2, sel = e->focus == 1 + i;
+        if (sel) {
+            rect_t bar = { SP_BAR_INSET, y, 375 - 2 * SP_BAR_INSET, EQ_ROW };
+            fill_box(canvas, &bar, RGBA(accent), SP_BAR_R);
+        }
+        eq_ink_text(canvas, i ? rows[i] : e->label, x0, x1 - x0 - 48, cy, 2, row_px,
+                    sel ? 0xffffff : eq_primary());
+        if (!i) switch_mark(canvas, x1, cy, e->on, sel);
+        if (i == 1) chevron_icon(w, canvas, x1, cy, sel);
+    }
+    for (int i = 0; vg && i < 3; ++i) { /* the columns stock's touch reads (peq_ui.c e3_touch) */
+        static const char *const names[] = { "Low", "Mid", "High" };
+        int x = 62 + 125 * i, focus = e->focus == 4 + i;
+        float zero = (float)(EQ_SLIDERS_TOP + EQ_SLIDERS_BOTTOM) / 2,
+              y = zero - (float)(e->gain[i] * (EQ_SLIDERS_BOTTOM - EQ_SLIDERS_TOP) / (2 * e->max)),
+              a = y < zero ? y : zero, b = y < zero ? zero : y;
+        stock_canvas_set_fill_color(canvas, RGBA(ipod_light() ? SP_TRACK_LIGHT : SP_TRACK_DARK));
+        canvas_fill_rect(canvas, x - EQ_LINE / 2, EQ_SLIDERS_TOP, EQ_LINE,
+                         EQ_SLIDERS_BOTTOM - EQ_SLIDERS_TOP);
+        if (b - a >= 1) {
+            stock_canvas_set_fill_color(canvas, RGBA(e->on ? accent : scheme()->muted));
+            canvas_fill_rect(canvas, x - EQ_LINE / 2, (int)a, EQ_LINE, (int)(b - a + 0.5f));
+        }
+        vgcanvas_save(vg);
+        vgcanvas_translate(vg, (float)I(canvas, CANVAS_X), (float)I(canvas, CANVAS_Y));
+        if (focus) { /* the accent's ring round the knob */
+            vgcanvas_begin_path(vg);
+            vgcanvas_arc(vg, (float)x, y, SP_KNOB / 2.0f + EQ_KNOB_RING, 0, 6.2831853f, 0);
+            vgcanvas_set_fill_color(vg, RGBA(accent));
+            vgcanvas_fill(vg);
+        }
+        vgcanvas_begin_path(vg);
+        vgcanvas_arc(vg, (float)x, y, SP_KNOB / 2.0f, 0, 6.2831853f, 0);
+        vgcanvas_set_fill_color(vg, RGBA(0xffffff));
+        vgcanvas_fill(vg);
+        vgcanvas_restore(vg);
+        char gain[16];
+        tk_snprintf(gain, sizeof gain, e->gain[i] ? "%+.1f dB" : "0 dB", e->gain[i]);
+        unsigned ink = focus ? eq_primary() : scheme()->muted;
+        eq_ink_text(canvas, names[i], x - 56, 112, EQ_NAME_Y, 1, SP_ENDS_PX, ink);
+        eq_ink_text(canvas, gain, x - 56, 112, EQ_GAIN_Y, 1, SP_ENDS_PX,
+                    focus && e->adjusting ? eq_primary() : scheme()->muted);
+    }
+    st.raw_ink = raw;
+    stock_canvas_set_fill_color(canvas, fill);
+    stock_canvas_set_text_color(canvas, text);
+}
+
+/* ... and its tabs, Simple and Advanced, each half of the bar's EQ_TABS_H: the open one in Text
+ * Primary, the other in Text Tertiary; while the wheel is on the bar, the other (what Centre
+ * opens) on the accent's bar, white. */
+void eq_tabs_paint(void *w, void *canvas, int simple, int focus) {
+    (void)w;
+    void *lcd = P(canvas, CANVAS_LCD);
+    if (!lcd) return;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), text = (unsigned)I(lcd, LCD_TEXT_COLOR),
+             raw = st.raw_ink;
+    int row_px = theme()->font_px[ROLE_TITLE];
+    st.raw_ink = 1;
+    for (int i = 0; i < 2; ++i) {
+        int shown = i == !simple, x = i ? 375 / 2 : SP_BAR_INSET, half = 375 / 2 - SP_BAR_INSET;
+        if (focus && !shown) {
+            rect_t bar = { x, (EQ_TABS_H - EQ_ROW) / 2, half, EQ_ROW };
+            fill_box(canvas, &bar, RGBA(scheme()->tones[0] & 0xffffffu), SP_BAR_R);
+        }
+        eq_ink_text(canvas, i ? "Advanced" : "Simple", x, half, EQ_TABS_H / 2, 1, row_px,
+                    focus && !shown ? 0xffffff
+                    : shown         ? eq_primary()
+                                    : scheme()->muted);
+    }
+    st.raw_ink = raw;
+    stock_canvas_set_fill_color(canvas, fill);
+    stock_canvas_set_text_color(canvas, text);
+}

@@ -439,18 +439,25 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     """OLED's own images: the caret in Chevron grey (each half's) and white for the selection, the play state in each
     half's ink, Now Playing's shuffle and repeat in Text Secondary (each half's) and Accent Blue when on, the Shuffle row's
     glyph (regular) in Accent Blue and white for the selection, Folder view's folder (regular) in Text Secondary (each
-    half's) and white for the selection, all from the vendored Phosphor SVGs."""
+    half's) and white for the selection, a disabled row's caret in Text Tertiary (each half's), the pickers' check
+    (bold) in Accent Blue and white for the selection, and the Wi-Fi page's signal and lock (regular) in Text Primary
+    (each half's), all from the vendored Phosphor SVGs."""
     t = theme.builtins()[3]
     got = art.images(t)
     modes = [f'mode_{n}_{k}' for n in ('shuffle', 'repeat') for k in ('d', 'l', 'on')] + ['mode_repeat1_on']
-    assert set(got) == {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'play_d', 'play_l', 'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w',
-                                                       'folder_d', 'folder_l', 'folder_w', *modes)}
+    wifi = [f'{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'lock') for k in ('d', 'l')]
+    assert set(got) == {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
+                                              'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
+                                              'check_a', 'check_w', *modes, *wifi)}
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
                           ('play_d', art.STATE_PX, 0xffffff), ('play_l', art.STATE_PX, 0),
                           ('shuffle_a', art.ROW_ICON_PX, blue), ('shuffle_w', art.ROW_ICON_PX, 0xffffff),
                           ('folder_d', art.ROW_ICON_PX, 0xababab), ('folder_l', art.ROW_ICON_PX, 0x5c5c5c),
                           ('folder_w', art.ROW_ICON_PX, 0xffffff),
+                          ('chevron_td', art.CARET_PX, 0x858585), ('chevron_tl', art.CARET_PX, 0x6e6e6e),
+                          ('check_a', art.CHECK_PX, blue), ('check_w', art.CHECK_PX, 0xffffff),
+                          *((n, art.ROW_ICON_PX, 0 if n.endswith('_l') else 0xffffff) for n in wifi),
                           *((n, 22, {'d': 0xababab, 'l': 0x5c5c5c, 'on': blue}[n.rsplit('_', 1)[1]]) for n in modes)):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
