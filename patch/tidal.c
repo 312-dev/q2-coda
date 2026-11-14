@@ -40,6 +40,7 @@ extern int stock_tidal_trampoline(const char *url);
 #define TIDAL_STOP_MS 3000 /* stopped this long, the player was stopped, not between tracks */
 #define TIDAL_FFMPEG "/usr/bin/ffmpeg"
 #define TIDAL_COVER "/tmp/.tidal_cover.jpg" /* the running download's cover, the worker's alone */
+#define TIDAL_CA "/etc/scrobble-ca.pem"     /* scrobble.c's: Tidal's media hosts' roots */
 #define TIDAL_TAG 200                       /* a tag's bytes, with "artist=" and its NUL */
 
 static struct {
@@ -160,10 +161,10 @@ static void *download(void *unused) {
             curl_easy_setopt(c, 20219, progress);    /* XFERINFOFUNCTION */
             curl_easy_setopt(c, 10057, &stopped_at); /* XFERINFODATA */
             curl_easy_setopt(c, 43, 0L);             /* NOPROGRESS off, for it */
-            /* Tidal's CDN roots are not in the firmware's bundle; hciplayer streams the same URL
-             * unverified (ffmpeg's tls_verify=0), so the copy is trusted exactly as the stream is. */
-            curl_easy_setopt(c, 64, 0L); /* SSL_VERIFYPEER */
-            curl_easy_setopt(c, 81, 0L); /* SSL_VERIFYHOST */
+            /* verified against the bundle's GlobalSign R3 and Amazon roots (Tidal's media hosts) */
+            curl_easy_setopt(c, 10065, TIDAL_CA);    /* CAINFO */
+            curl_easy_setopt(c, 64, 1L);             /* SSL_VERIFYPEER */
+            curl_easy_setopt(c, 81, 2L);             /* SSL_VERIFYHOST */
             ok = !curl_easy_perform(c) && !curl_easy_getinfo(c, 0x200002, &code) && code == 200; /* RESPONSE_CODE */
             curl_easy_cleanup(c);
         }

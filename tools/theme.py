@@ -739,7 +739,9 @@ def own_option(c, known, themes=()):
             err(v, f'unknown geometry set "{v.attrs["set"]}"')
         names.append(x)
         sets.append(v.attrs.get('set'))
-    if not 2 <= len(names) <= 10:  # config_value reads one digit
+    # Ten is this format's own bound, not a reader's: config_value reads up to three digits and write_int_config
+    # writes any. Past 32, setting_click's value mask (32 bits) could not reach a value.
+    if not 2 <= len(names) <= 10:
         err(c, f'{key}: 2 to 10 values expected')
     if not sets[0] and key not in PLAIN_KEYS:
         err(c, f'{key}: a plain choice the payload does not read (PLAIN_KEYS)')
@@ -981,7 +983,9 @@ def validate(t, name):
         err(f"{t['accent_key']} declared twice")
     if not t['accents']:
         err('colorSchemes is empty')
-    if len(t['schemes']) > 10:  # config_value reads one digit
+    # Ten is this format's own bound, not a reader's: config_value reads up to three digits and write_int_config
+    # writes any. Past 32, the accents mask (option_t.values, 32 bits) could not hold a scheme.
+    if len(t['schemes']) > 10:
         err(f"{len(t['schemes'])} accents, at most 10")
     # an enum holds its CHOICES index (value()); paint_stops draws nothing from no stops; a half that states
     # none takes the other's (half())
@@ -1148,9 +1152,9 @@ def builtins(root=ROOT/'assets/themes'):
         if t['accent_key'] == u['accent_key'] and (t['accents'], accent_default(t)) != (u['accents'], accent_default(u)):
             fail(n.file, n.line, f'accent key {u["accent_key"]} is {t["id"]}\'s, with other colorSchemes or default')
     # Themes on one set switch live (theme_select), relabelling the booted one's Appearance rows: the same rows.
-    def rows(t): return [o['key'] if o['setting'] == 'SETTING_OWN' else o['setting'] for o in t['opts']]
+    def opt_rows(t): return [o['key'] if o['setting'] == 'SETTING_OWN' else o['setting'] for o in t['opts']]
     for (_, _, t), (_, n, u) in itertools.combinations(found, 2):
-        if t['geom_set'] == u['geom_set'] and rows(t) != rows(u):
+        if t['geom_set'] == u['geom_set'] and opt_rows(t) != opt_rows(u):
             fail(n.file, n.line, f"{u['id']} runs on {t['id']}'s set, with other options")
     # An own key is one stored value too: its values and default alike; its preset is each theme's (as LIGHT's).
     def shape(e): return e[:2] + ({k: v for k, v in e[2].items() if k not in ('preset', 'keep')} if e[2] else None,)

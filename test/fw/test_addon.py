@@ -1388,7 +1388,7 @@ def test_the_app_store_forgets_a_running_app_only_once_its_job_replaced_it(fw, j
     # an update that fails or is cancelled leaves the app running: still tracked, its hold still honoured
     world, a = running(fw, b'hold=1\n')
     table = C.addressof(C.c_char.in_dll(fw.lib, 'shelf_apps'))
-    fw.var('shelf_n', C.c_int).value = fw.fn('shelf_sources', C.c_int, C.c_char_p, C.c_void_p, C.c_int)(b'me/foo', table, 1)
+    fw.var('shelf_n', C.c_int).value = fw.fn('shelf_sources', C.c_int, C.c_char_p, C.c_void_p, C.c_int)(b'me/foo 1.0 foo.zip 5 ' + b'ab' * 32, table, 1)  # pinned, as sources.list's lines are
     fw.mock('fw_pthread_create', lambda *_: 0)  # the worker not run: its end set below
     fw.mock('timer_add', lambda *_: 1)
     fw.fn('netupdate__sh_start', None, C.c_int, C.c_int)(job, 0)
@@ -1584,7 +1584,7 @@ def test_a_game_off_the_card_says_so(fw):
 def test_a_game_the_app_store_is_replacing_waits_for_it(fw):
     g = CardGame(fw)
     table = C.addressof(C.c_char.in_dll(fw.lib, 'shelf_apps'))
-    fw.var('shelf_n', C.c_int).value = fw.fn('shelf_sources', C.c_int, C.c_char_p, C.c_void_p, C.c_int)(b'me/snake', table, 1)
+    fw.var('shelf_n', C.c_int).value = fw.fn('shelf_sources', C.c_int, C.c_char_p, C.c_void_p, C.c_int)(b'me/snake 1.0 snake.zip 5 ' + b'ab' * 32, table, 1)  # pinned, as sources.list's lines are
     sh = fw.var('netupdate__sh', Sh)
     sh.running, sh.job, sh.app = 1, JOB_INSTALL, 0  # installing app 0, snake
     assert g.start() == 0 and g.toasts == [b'Wait until the App Store finishes'] and not fw.calls('fw_fork')
@@ -3468,7 +3468,7 @@ def test_a_page_the_app_store_is_replacing_waits_for_it(fw, job, stage, running,
     p = Page(fw, opens=False)
     ap(fw).a[0].launched = int(running)
     table = C.addressof(C.c_char.in_dll(fw.lib, 'shelf_apps'))
-    fw.var('shelf_n', C.c_int).value = fw.fn('shelf_sources', C.c_int, C.c_char_p, C.c_void_p, C.c_int)(b'me/foo', table, 1)
+    fw.var('shelf_n', C.c_int).value = fw.fn('shelf_sources', C.c_int, C.c_char_p, C.c_void_p, C.c_int)(b'me/foo 1.0 foo.zip 5 ' + b'ab' * 32, table, 1)  # pinned, as sources.list's lines are
     sh = fw.var('netupdate__sh', Sh)
     sh.running, sh.job, sh.app, sh.stage = 1, job, 0, stage
     fw.fn('addon_open', C.c_int, C.c_void_p, C.c_void_p)(0, None)
@@ -3578,7 +3578,7 @@ def test_go_to_during_the_apps_remove_waits_and_stock_s_go_to_doesnt_run(fw):
     # Go to on a song of an app the App Store is removing toasts and returns 1, so stock's own Go to doesn't run
     p = Page(fw, b'name=Foo\ngoto=1\n', opens=False)
     table = C.addressof(C.c_char.in_dll(fw.lib, 'shelf_apps'))
-    fw.var('shelf_n', C.c_int).value = fw.fn('shelf_sources', C.c_int, C.c_char_p, C.c_void_p, C.c_int)(b'me/foo', table, 1)
+    fw.var('shelf_n', C.c_int).value = fw.fn('shelf_sources', C.c_int, C.c_char_p, C.c_void_p, C.c_int)(b'me/foo 1.0 foo.zip 5 ' + b'ab' * 32, table, 1)  # pinned, as sources.list's lines are
     sh = fw.var('netupdate__sh', Sh)
     sh.running, sh.job, sh.app, sh.stage = 1, JOB_REMOVE, 0, 4
     assert goto(fw, b'/mnt/mmc/.foo/a.flac') == 1

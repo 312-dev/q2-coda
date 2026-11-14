@@ -500,4 +500,5 @@ void power_poll(void) {
     wdt_poll();
     state_poll();
     smart_poll();
+    wifi_transfer_poll();
 }

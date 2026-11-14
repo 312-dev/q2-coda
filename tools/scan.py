@@ -55,7 +55,7 @@ PROBES = (
     ('wpa_supplicant', 'w1.fi:wpa_supplicant', ('usr/sbin/wpa_supplicant',), r'wpa_supplicant v(\d+\.\d+(?:\.\d+)?)'),
     ('thttpd', 'acme:thttpd', ('usr/bin/thttpd',), r'thttpd/(\d+\.\d+[a-z]?)'),
     ('sqlite', 'sqlite:sqlite', ('usr/lib/libsqlite3.so.0',), r'^(3\.\d+\.\d+)$'),
-    ('zlib', 'zlib:zlib', ('usr/lib/libz.so.1', 'lib/libz.so.1'), r'deflate (\d+\.\d+\.\d+) Copyright'),
+    ('zlib', 'zlib:zlib', ('usr/lib/libz.so.1', 'lib/libz.so.1'), r'deflate (\d+\.\d+(?:\.\d+)*) Copyright'),
     ('libpng', 'libpng:libpng', ('usr/lib/libpng12.so.0',), r'^(1\.2\.\d+)$'),
     ('glibc', 'gnu:glibc', ('lib/libc.so.6',), r'release version (\d+\.\d+)\.'),
     ('dbus', 'freedesktop:dbus', ('usr/lib/libdbus-1.so.3',), r'\bdbus (\d+\.\d+\.\d+)'),
@@ -84,7 +84,9 @@ def tool(name):
             info = tf.getmember(member)
             if not info.isfile():
                 sys.exit(f'{name}: {member} in {asset} is not a regular file')
-            exe.write_bytes(tf.extractfile(info).read())
+            body = tf.extractfile(info)
+            assert body is not None  # a regular file's member, checked above
+            exe.write_bytes(body.read())
         tmp.unlink()
     exe.chmod(0o755)
     return str(exe)

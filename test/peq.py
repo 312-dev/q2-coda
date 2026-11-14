@@ -2339,7 +2339,7 @@ int toolsReadConfig(const char *path, const char *section, const char *key, char
 /* libcurl: every request is dumped as url, headers, verify, body; replies are scripted. */
 typedef unsigned (*writer)(const char *, unsigned, unsigned, void *);
 typedef struct node { const char *s; struct node *next; } node;
-static struct { const char *url, *body; node *h; writer w; void *ctx; long verify, code; int untimed; } easy;
+static struct { const char *url, *body; node *h; writer w; void *ctx; long verify, code; } easy;
 static int requests, fail_at = -1, no_key, append_at = -1;
 static FILE *dump;
 void *curl_easy_init(void) { memset(&easy, 0, sizeof easy); return &easy; }
@@ -2364,18 +2364,11 @@ int curl_easy_setopt(void *c, int opt, ...) {
     else if (opt == 64) { easy.verify = va_arg(a, long); assert(easy.verify == 1); }
     else if (opt == 81) assert(va_arg(a, long) == 2);
     else if (opt == 10065) assert(strstr(va_arg(a, const char *), "/etc/scrobble-ca.pem"));
-    else if (opt == 20108) { /* SSL_CTX_FUNCTION: X509_V_FLAG_NO_CHECK_TIME into SSL_CTX->param->flags */
-        unsigned flags[4] = {0, 0, 0, 1};
-        void *ctx[0x100 / sizeof(void *) + 1];
-        ctx[0x100 / sizeof(void *)] = flags;
-        assert(!va_arg(a, int (*)(void *, void *, void *))(c, ctx, 0) && flags[3] == 0x200001);
-        easy.untimed = 1;
-    } else assert(opt == 99 || opt == 13 || opt == 78 || opt == 81);
+    else assert(opt == 99 || opt == 13 || opt == 78 || opt == 81); /* no SSL_CTX_FUNCTION: libcurl checks no dates */
     va_end(a);
     return 0;
 }
 int curl_easy_perform(void *c) {
-    assert(easy.untimed);
     int i = requests++;
     if (i == append_at) scrobble_append("New\tB\tListen\t\t100\tL\t1700009999\t\n", 33); /* a listen meanwhile */
     fprintf(dump, "%s\t", easy.url);
@@ -3249,32 +3242,17 @@ def netupdate_check(tmp):
     tag = lib.netupdate_tag
     assert tag(b'https://github.com/DiamondBond/q2-pod/releases/tag/1.3.5') == b'1.3.5'
     for bad in (None, b'', b'https://github.com/DiamondBond/q2-pod/releases', b'https://github.com/login',
-                b'https://github.com/DiamondBond/q2-pod/releases/tag/'):
+                b'https://github.com/DiamondBond/q2-pod/releases/tag/', b'https://github.com/o/r/releases/tag/1.0%20x',
+                b'https://github.com/o/r/releases/tag/' + b'9' * 32):
         assert tag(bad) is None, bad
     return lib
 
 
 def shelf_check(tmp, lib):
-    """Q2 Shelf (netupdate.c): GitHub's release JSON, the unzip listing's checks, and an install and
+    """Q2 Shelf (netupdate.c): sources.list's pinned lines, the unzip listing's checks, and an install and
     remove of Rockbox, its themes, Spotify and the card apps on a scratch card, host unzip (Info-ZIP)
     for busybox's."""
     import shutil, zipfile
-    def release(json):
-        tag, url, size = C.create_string_buffer(32), C.create_string_buffer(256), C.c_uint()
-        ok = lib.shelf_release(json, tag, 32, url, 256, C.byref(size))
-        return (tag.value.decode(), url.value.decode(), size.value) if ok else None
-    gh = 'https://github.com/DiamondBond/'
-    assert release((ROOT/'test/shelf/q2-rockbox.json').read_bytes()) == ('v3.2', gh + 'q2-rockbox/releases/download/v3.2/rockbox.zip', 13018581)
-    assert release((ROOT/'test/shelf/q2-rockbox-themes.json').read_bytes()) == \
-        ('v1.3', gh + 'q2-rockbox-themes/releases/download/v1.3/q2-rockbox-themes-1.3.zip', 44591509)
-    spot = (ROOT/'test/shelf/q2-librespot.json').read_bytes()
-    assert release(spot) == ('q2-v1.9', gh + 'q2-librespot/releases/download/q2-v1.9/q2-librespot-v1.9-2ea4406.zip', 7108981)
-    pretty = b'{"tag_name" : "1.0", "assets" : [ {"name": "SHA256SUMS", "size": 9, "browser_download_url": "x"},\n' \
-             b'  {"name": "a.zip", "size": 5, "browser_download_url": "https://h/a.zip"} ] }'
-    assert release(pretty) == ('1.0', 'https://h/a.zip', 5)
-    for bad in (b'', b'{}', spot.replace(b'.zip"', b'.tar"'), spot.replace(b'"tag_name"', b'"tag"'),
-                pretty.replace(b'"size": 5', b'"size": 0'), b'{"tag_name":"a\\"b","assets":[]}'):
-        assert release(bad) is None, bad[:40]
     def unpacked(text, cap=1 << 30):
         total = C.c_uint(); n = lib.shelf_unpacked(text.encode(), cap, C.byref(total))
         return (n, total.value) if n >= 0 else None
@@ -3307,10 +3285,13 @@ def shelf_check(tmp, lib):
     # sources.list's lines into the apps: the id less "q2-", Q2 Pod's own by their repo's name.
     class App(C.Structure):
         _fields_ = [('name', C.c_char * 32), ('id', C.c_char * 16), ('repo', C.c_char * 80), ('dir', C.c_char * 17),
-                    ('bin', C.c_char * 40), ('latest', C.c_char * 32), ('keep', C.c_char_p)]
+                    ('bin', C.c_char * 40), ('latest', C.c_char * 32), ('dropped', C.c_char), ('keep', C.c_char_p),
+                    ('asset', C.c_char * 64), ('sha256', C.c_ubyte * 32), ('size', C.c_uint)]
     apps = (App * 16).in_dll(lib, 'shelf_apps')
-    def sources(text, into=apps):
-        n = lib.shelf_sources(text.encode(), into, 16)
+    def pinned(text):  # each app's line pinned after its repo, as tools/shelf.py writes them
+        return re.sub(r'(?m)^(\s*[^\s#]\S*)', lambda m: m[1] + ' 1.0 a.zip 5 ' + 'ab' * 32, text)
+    def sources(text, into=apps, pin=True):
+        n = lib.shelf_sources((pinned(text) if pin else text).encode(), into, 16)
         return [(a.repo.decode(), a.name.decode(), a.id.decode(), a.dir.decode(), a.bin.decode(), a.keep.decode()) for a in into[:n]]
     scratch = (App * 16)()
     assert sources('# a comment\n\n  me/q2-foo  Foo Bar \r\nme/plain\nx/q2-librespot\nx/q2-rockbox-themes Themes\n', scratch) == [
@@ -3326,7 +3307,9 @@ def shelf_check(tmp, lib):
     own = {m for f in (ROOT/'patch').glob('*.[ch]')
            for m in re.findall(r'(?:mmc/|CARD "/)\.([a-z0-9-]+)["/]', f.read_text())} - {'rockbox', 'spotify', 'groovebox'}  # card apps the firmware knows by path
     assert own and not [x for x in own if sources(f'a/q2-{x}\n', scratch)], own  # every card folder of the firmware's
-    C.c_int.in_dll(lib, 'shelf_n').value = len(sources((ROOT/'sources.list').read_text()))
+    unpinned = sources('me/q2-foo Foo\n', scratch, pin=False)
+    assert unpinned == [] and sources('-me/q2-foo Foo\n', scratch, pin=False)[0][2] == 'foo'  # only a dropped app needs no pin
+    C.c_int.in_dll(lib, 'shelf_n').value = len(sources((ROOT/'sources.list').read_text(), pin=False))
     ids = [a.id.decode() for a in apps[:6]]
     assert ids == ['rockbox', 'themes', 'spotify', 'deezer', 'soulseek', 'filebrowser'], ids
     def install(i, zip_path):
@@ -3390,7 +3373,7 @@ def shelf_check(tmp, lib):
         lib.shelf_remove(i)
         assert not (card/d).exists() and not (card/f'.q2/apps/{ids[i]}.tag').exists(), i
         assert (card/'Music/a.flac').exists() and (card/f'{d}2/x').exists(), i
-    print("Q2 Shelf: release JSON, unzip listing checks, install, update, failed move, remove and card apps passed.")
+    print("Q2 Shelf: pinned sources, unzip listing checks, install, update, failed move, remove and card apps passed.")
 
 
 def online_check(tmp):

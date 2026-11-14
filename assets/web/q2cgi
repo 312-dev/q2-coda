@@ -1,7 +1,15 @@
 #!/bin/sh
 # Q2 Pod — safe replacement for the stock Wi-Fi transfer file-manager CGIs (create/delete/
-# list/download/upload). One script installed over all five cgi-bin/*.cgi inodes; it dispatches on
-# SCRIPT_NAME, so it answers both /name and /cgi-bin/name.cgi — no bypass route.
+# list/download/upload), and the PIN check in front of them (auth). One script installed over all
+# five cgi-bin/*.cgi inodes and as cgi-bin/auth.cgi; it dispatches on SCRIPT_NAME, so it answers both
+# /name and /cgi-bin/name.cgi — no bypass route.
+#
+# Who may ask: demo's wifi_transfer.c writes a fresh six-digit PIN and a 128-bit session token, both
+# from /dev/urandom, to $AUTH (in RAM) before it starts thttpd, shows the PIN on the Q2's screen and
+# removes them when transfer stops. auth takes the PIN once and answers with the token as an HttpOnly,
+# SameSite=Strict cookie; every other route refuses a request without that cookie (401) before it
+# reads anything else of it. Five wrong PINs lock auth until transfer is turned off and on again
+# (docs/internals.md#wi-fi-transfer-pin).
 #
 # Why this is safe: every filesystem operation is done with argv (mkdir/rm/cat and head
 # redirection), never by building a /bin/sh command string from request data. The stock CGIs' bug
@@ -149,7 +157,65 @@ form_body() {
   head -c "$n"
 }
 
+# The PIN check (docs/internals.md#wi-fi-transfer-pin). $AUTH is a folder only root can open, made by
+# demo when transfer starts and removed when it stops: pin (six digits), token (32 hex digits), seen
+# (touched by each admitted request, which demo's idle timer reads), busy.<pid> (a request still
+# running, so a long upload or download is not idle) and try.1 to try.5 (the PIN tries spent).
+AUTH=/tmp/q2wifi
+MAXTRIES=5
+# Secrets are compared as SHA-256 digests, so how long the comparison takes depends on the digests,
+# not on how much of the secret a guess has right.
+digest() { printf '%s' "$1" | sha256sum | awk '{print $1}'; }
+same_secret() { [ -n "$1" ] && [ -n "$2" ] && [ "$(digest "$1")" = "$(digest "$2")" ]; }
+secret() { [ -f "$AUTH/$1" ] && head -c 64 "$AUTH/$1"; }    # no secret (transfer stopped) is never a match
+# The session cookie's values: every q2s=, as a browser may send more than one; each must be 32 hex
+# digits to be looked at.
+cookies() { printf '%s' "${HTTP_COOKIE:-}" | tr ';' '\n' | sed -n 's/^ *q2s=\([0-9a-f]\{32\}\) *$/\1/p' | head -4; }
+signed_in() {
+  tok=$(secret token) || return 1
+  [ "${#tok}" = 32 ] || return 1
+  for c in $(cookies); do same_secret "$c" "$tok" && return 0; done
+  return 1
+}
+# A PIN try: one of MAXTRIES folders, claimed with mkdir (atomic, so requests sent at once can't
+# share a try) before the PIN is looked at. A right PIN gives its try back; a wrong one keeps it.
+claim_try() {
+  i=1
+  while [ "$i" -le "$MAXTRIES" ]; do
+    mkdir "$AUTH/try.$i" 2>/dev/null && { try=$AUTH/try.$i; return 0; }
+    i=$((i + 1))
+  done
+  return 1
+}
+tries_left() { n=0; for t in "$AUTH"/try.*; do [ -d "$t" ] && n=$((n + 1)); done; echo $((MAXTRIES - n)); }
+deny() { emit "Status: $1 $2"; emit 'Content-type: application/json; charset=utf-8'; emit 'Cache-Control: no-store'; crlf; printf '%s' "$3"; exit 0; }
+
 name=${SCRIPT_NAME##*/}; name=${name%.cgi}
+
+[ -d "$AUTH" ] || deny 403 Forbidden '{"error":"off"}'
+if [ "$name" = auth ]; then
+  [ "${REQUEST_METHOD:-}" = POST ] || deny 405 Method '{}'
+  claim_try || deny 429 Locked '{"error":"locked","left":0}'
+  BODY=$(form_body)
+  given=$(printf '%s' "$BODY" | tr '&' '\n' | sed -n 's/^pin=\([0-9]\{6\}\)$/\1/p' | head -1)
+  pin=$(secret pin) || deny 403 Forbidden '{"error":"off"}'
+  [ "${#pin}" = 6 ] || deny 403 Forbidden '{"error":"off"}'
+  tok=$(secret token) || deny 403 Forbidden '{"error":"off"}'
+  if [ -n "$given" ] && same_secret "$given" "$pin" && [ "${#tok}" = 32 ]; then
+    rmdir "$try" 2>/dev/null
+    emit "Set-Cookie: q2s=$tok; Path=/; HttpOnly; SameSite=Strict"
+    emit 'Content-type: application/json; charset=utf-8'; emit 'Cache-Control: no-store'; crlf; printf '{}'
+    exit 0
+  fi
+  deny 403 Forbidden "{\"error\":\"pin\",\"left\":$(tries_left)}"
+fi
+signed_in || deny 401 Unauthorized '{"error":"pin"}'
+# Admitted: the idle timer's mark, and this request's busy mark for as long as it runs.
+touch "$AUTH/seen" 2>/dev/null
+busy=$AUTH/busy.$$
+: > "$busy" 2>/dev/null
+cleanup() { rm -f "$busy" ${out:+"$out"} 2>/dev/null; }
+trap cleanup EXIT
 
 case $name in
   list)
@@ -270,8 +336,7 @@ case $name in
       pid=${leftover##*.}
       [ -d "/proc/$pid" ] || rm -f "$leftover"
     done
-    out=$up/out.$$
-    trap 'rm -f "$out" 2>/dev/null' EXIT
+    out=$up/out.$$                                     # cleanup (the EXIT trap) removes it
     # The one write. The closing boundary goes to the card with the file and is held against what it
     # must be (CR, LF and NUL made visible, as $() drops trailing LFs); a short or wrong ending is a
     # refused upload, never a file with bytes missing or added. dd with no count, from /dev/null,

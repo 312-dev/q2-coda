@@ -794,7 +794,7 @@ calls it: `(path, section, key, out, default)`. It reads the file line by line
 (`strcasecmp` on the section and the key), copies the trimmed value to `out` and returns 1; a
 missing key copies the default and returns -1. The default must not be null (stock reads its
 first byte). The payload passes `"0"`, so a missing or unreadable entry, or any value that is not
-one valid digit, is Split, Icon and Minimal (a stored `THEME=4` or past reads as Minimal); a missing `MINIMAL_ACCENT` is Ivory (7), a missing `CLASSIC_LIGHT_ACCENT` Classic Blue (9), a missing `ACCENT` Graphite (0), and a missing `ROUNDED` Square. A
+a valid one (up to three digits, below the key's count), is Split, Icon and Minimal (a stored `THEME=4` or past reads as Minimal); a missing `MINIMAL_ACCENT` is Graphite (0), a missing `CLASSIC_LIGHT_ACCENT` Classic Blue (9), a missing `ACCENT` Graphite (0), and a missing `ROUNDED` the live theme's Corners preset (Minimal's Round, Modern's Square), Square in a theme that states none. A
 card from 1.0.1 or earlier, which has no `THEME`, keeps 1.0.1's look, and a Minimal card from before
 1.4.6 keeps its off-white look whatever `ACCENT` holds.
 
@@ -836,7 +836,7 @@ Choosing Classic or OLED from Minimal or Modern, or the other way, asks "Restart
 from Classic's geometry sets ([internals.md](internals.md#themes)): Cancel changes nothing; OK
 saves the theme and its preset ([Display settings](#display-settings)) and restarts the Q2.
 
-Corners is Minimal's and Modern's setting, Square until chosen; Classic's covers are always square. Every theme insets an album grid's cover inside the tile (`album_children`), so the selection card frames it; Classic's and Modern's card is in the accent's colour, Classic's square.
+Corners is Minimal's and Modern's setting, each theme's preset until chosen (Minimal's Round, Modern's Square); Classic's covers are always square. Every theme insets an album grid's cover inside the tile (`album_children`), so the selection card frames it; Classic's and Modern's card is in the accent's colour, Classic's square.
 
 Each theme keeps its own accent, and the Accent row follows Theme in each. Minimal's
 (`MINIMAL_ACCENT`) cycles Ivory, Graphite, Crimson, Tidal, Champagne, Cobalt, Tangerine, Plum, Green;
@@ -929,6 +929,18 @@ photos, wallpapers and videos are never changed.
 
 ponytail: a non-square or transparent cover in Cover Flow keeps black bars and a black background
 inside its square (`cf_decode`).
+
+## Wi-Fi File Transfer
+
+**System settings → Network → Wi-Fi File Transfer** keeps stock's page, with the address to open in
+a browser on the same Wi-Fi network (`http://<address>:8888`) at the bottom. In place of its picture
+is a line, **PIN for the web page**, and under it a new six-digit PIN each time the page opens, in
+56 px type as two groups of three. The
+web page asks for the PIN once; without it nothing on the card can be listed, downloaded, uploaded
+or deleted. Five wrong PINs show **Locked** in the PIN's place: Return and open the page again for a
+new PIN. Leaving the page turns transfer off, as in stock, and so do 10 minutes with no request,
+with a toast saying so. How the PIN and the timer work:
+[internals.md](internals.md#wi-fi-transfer-pin).
 
 ## Games
 

@@ -114,7 +114,7 @@ Support: **yes** the Q2 can do it as it is, **partial** with a limit named, **no
 
 **Effort and value.** S. Medium: people who rate songs get something back for it.
 
-**Risks.** A pick on the UI thread must stay cheap: read hearts from the in-memory table, never the card ([inefficiencies.md entry 13](inefficiencies.md#13-ratings-compare-every-song-with-every-rated-one) says how the ratings lookup scales).
+**Risks.** A pick on the UI thread must stay cheap: read hearts from the in-memory table, never the card ([inefficiencies.md entry 13](inefficiencies.md#13-ratings-compare-every-song-with-every-rated-one-resolved) says how the ratings lookup scales).
 
 ### 4. Smart Playlists
 

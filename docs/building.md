@@ -14,6 +14,7 @@
 - squashfs-tools 4.6 or later (tested with 4.6.1 and 4.7.5)
 - ImageMagick 6 or 7 for the iPod UI's settings icons (`convert` or `magick`; tested with 6.9.12)
 - The test dependencies: `pip install -r requirements.txt`
+- For the rebuilt third-party libraries ([third-party.md](third-party.md)): network access on the first build, which fetches the Codescape MIPS toolchain (2.3 GB) and the pinned sources into `~/.cache/q2-thirdparty`, and about an hour to compile them once; bwrap and qemu-mipsel for `test/thirdparty.py`
 - The original stock ZIP. Its SHA-256 is:
 
 ```text
@@ -30,6 +31,18 @@ python3 tools/build.py 'Q2 Firmware V1.36.zip' --out /tmp/q2-dev --dev          
 Rebuilt firmware uses `assets/boot-logo.jpg` as the boot splash. Pass another 320x375 JPEG with `--logo` to use your own; see [boot.md](boot.md#custom-boot-logo).
 
 The build replaces the stock equalizer page with a 30-band PEQ editor (bands, shelves, preamp, on/off, presets, stock's built-in genre presets, `/EQ` import) and patch `hciplayer`'s equalizer filter with the matching DSP. Both also clear the 44.1 kHz AAC capability bit in `bluealsa` (see [internals.md](internals.md#bluetooth-aac)).
+
+### What the rootfs drops
+
+Every build, release and `--dev`, hardens stock's root filesystem (`tools/build.py`):
+
+- **No password login.** Stock's `/etc/shadow` gives root the same password hash on every unit. `lock_root` sets the field to `*`, and the build stops if `password_logins` finds any account a password, or an empty field, would log in to. `/etc/inittab` loses its `getty` on `ttyS3` (`SERIAL_GETTY`), so the board's serial pad shows the boot messages and offers no login. Nothing on the Q2 logs in: `q2remote` runs `/bin/sh` itself.
+- **Debugging and network tools** (`DEBUG_TOOLS`, `DEBUG_LINKS` in `OBSOLETE`): `strace`, `strace-log-merge`, `sqlite3` (the program; demo's `libsqlite3` stays), `hcidump`, `memtester` and `nandtest`, and busybox's `telnet`, `tftp`, `inetd`, `dnsd` and `dhcprelay` links. No script, program or library in the rootfs, and nothing in `patch/`, names them as a command; the rootfs's `libcurl` speaks only HTTP, HTTPS and `file` ([third-party](third-party.md#curl-and-mbedtls)).
+- **Bluetooth** is discoverable for 180 s after demo turns it on (`BT_DISCOVERABLE` in `/etc/bluetooth/main.conf`), not for as long as it is on.
+- **Network time** asks `0.pool.ntp.org` in place of `cn.pool.ntp.org` (`NTP_POOL`, [Clock](internals.md#clock)).
+- **Baidu Netdisk's saved sign-in**, `/mnt/data/baidu_token.conf`, is deleted at boot (`BOOT_HOOK`).
+
+`test/build.py --build DIR` checks each against the stock image.
 
 ### Stopped-audio notifier wait
 
@@ -54,7 +67,9 @@ About's **FW. Version** row reads the same literal, so it shows the stock firmwa
 
 `--dev` numbers each test build one past the untracked `.build-number` and the `build-number` in the git directory that every worktree of the checkout shares, and tags it `V` plus that number in three base-36 digits, then `i` (`V001i`, `V002i` … `VZZZi`). No two test builds from one repository's worktrees share a tag (a separate clone counts on its own), and none equals a release's, so the updater installs each test build over the last and the release over any of them. `--dev` applies to that build only: the release procedure never passes it, and the manifest records the build number as `dev` (`false` otherwise).
 
-`--update-repo OWNER/NAME` points **Network Update** at another GitHub repo's latest release, so a fork's test builds update from the fork's own releases. It defaults to `DiamondBond/q2-pod`, so a build without it is unchanged. The manifest records it as `update_repo`, and `tools/release.py` refuses a build that points anywhere else.
+`--update-repo OWNER/NAME` points **Network Update** at another GitHub repo's latest release, and the App Store at that repo's `main` `sources.list`, so a fork's test builds update from the fork's own releases. It defaults to `312-dev/q2-coda`, q2-coda's own; both must be signed by the build's release key (below), so pointing it at upstream's `DiamondBond/q2-pod`, whose releases carry no signature, installs nothing. The manifest records it as `update_repo`, and `tools/release.py` refuses a build that points anywhere else.
+
+Network Update and the App Store take only what the q2-coda release key signed ([Release signatures](internals.md#release-signatures)). Every build compiles in that key's public half from `assets/signing/q2-coda-release.pub` and stops without it. `--signing-key PUB.PEM` compiles in another Ed25519 public key instead, for a test build that should take updates and app lists signed by a key whose private half you hold (`openssl genpkey -algorithm ed25519 -out /tmp/dev.pem`, then `openssl pkey -in /tmp/dev.pem -pubout -out /tmp/dev.pub`; keep both out of the repository). It requires `--dev`. The manifest records the key as `signing_key`, and `tools/release.py` refuses a build with any other.
 
 Development builds also start `q2remote`, a key-gated root shell with screenshots and input over Wi-Fi, for developers and agents; see [remote.md](remote.md).
 
@@ -85,7 +100,7 @@ python3 test/build.py --build BUILD         # a finished build's payloads and pa
 python3 test/aic.py STOCKFS               # stopped audio notifier: actual MIPS hooks and modeled wait races
 python3 test/aic_build.py STOCKFS BUILD    # notifier development guard, ABI, default/experimental packaging
 python3 test/remote.py                     # q2remote protocol, auth, event and framebuffer checks
-bash test/wifi_transfer_cgi.sh             # Wi-Fi transfer's file manager (assets/web/q2cgi) under the host's busybox ash (the Q2's is 1.31.1): no ZIP or build; on a tmpfs at /mnt/mmc (one already there, or its own as root); --fat for a FAT32 image and its short-name cases (root). GitHub runs it on every pull request
+bash test/wifi_transfer_cgi.sh             # Wi-Fi transfer's file manager (assets/web/q2cgi) under the host's busybox ash (the Q2's is 1.38.0, [third-party.md](third-party.md#busybox)): no ZIP or build; on a tmpfs at /mnt/mmc (one already there, or its own as root); --fat for a FAT32 image and its short-name cases (root). GitHub runs it on every pull request
 python3 test/rotator.py STOCK_MODULE        # actual MIPS rotator clock ownership and failure paths
 python3 test/rotator_build.py [BUILD...]    # dev-only guard (no build needed); given builds, packed/default module isolation
 python3 test/playback.py /tmp/q2-build     # grouped traversal, snapshots and the wheel's ticks (cc)
@@ -105,6 +120,7 @@ python3 test/ldac.py /tmp/q2-build         # shipped LDAC intermediate rates and
 python3 test/headset_io.py /tmp/q2-build   # real MIPS headset worker with simulated kernel I/O (cc)
 python3 test/bluealsa.py /tmp/q2-build     # the patched bluealsa's DROP paths against stock's, delayed encoder signal
 python3 test/alsa.py BUILD QEMU_MIPSEL     # ALSA startup lock regression (see internals.md)
+python3 test/thirdparty.py BUILD QEMU_MIPSEL  # the rebuilt OpenSSL, curl, zlib, SQLite, libpng, BusyBox, wpa_supplicant and FFmpeg in a bwrap chroot of BUILD's rootfs: versions, links, TLS (network; --offline skips it) (third-party.md)
 python3 test/ui_preview.py BEFORE AFTER OUT_DIR  # not a test: side-by-side iPod layout review sheets of two builds (or one build's two themes; --themes, ImageMagick)
 python3 -m pytest test/unit                # tools/: no stock ZIP, no build, no Q2 (pip install -r test/unit/requirements.txt); GitHub runs it on every pull request
 python3 -m pytest test/fw --basetemp ~/.cache/q2-pytest/fw  # the firmware's C on this machine: no stock ZIP, no build, no Q2 (see Firmware tests)
@@ -128,7 +144,7 @@ python3 tools/scan.py --only code,secrets   # a subset: code, secrets, deps, fir
 python3 tools/scan.py --build /tmp/q2-build # another build's rootfs
 ```
 
-`tools/scan.py` runs Semgrep over `patch/` and `tools/` (the project's rules in `.semgrep/q2pod.yml` and Semgrep's C and Python packs), gitleaks over the git history, osv-scanner over the requirements files, and syft and grype over a build's root filesystem. syft names few of the rootfs's components, as buildroot keeps no package database, so `PROBES` in the script finds the rest (OpenSSL, curl, BlueZ, wpa_supplicant and others) by their version strings and grype checks them by CPE. It writes `scan-out/SUMMARY.md` and each tool's JSON, and exits 1 when a scan reaches its failing level: a Semgrep error, any secret, any dependency vulnerability, a critical firmware vulnerability. Most firmware findings are in Shanling's own libraries, which a build carries unchanged. The scanners are pinned releases, fetched into `~/.cache/q2-scan` on first use and checked against the SHA-256 in the script before they run; Semgrep runs through `uvx`. Reviewed gitleaks findings (documentation placeholders, file hashes) are fingerprinted in `.gitleaksignore`, so a new one still fails.
+`tools/scan.py` runs Semgrep over `patch/` and `tools/` (the project's rules in `.semgrep/q2pod.yml` and Semgrep's C and Python packs), gitleaks over the git history, osv-scanner over the requirements files, and syft and grype over a build's root filesystem. syft names few of the rootfs's components, as buildroot keeps no package database, so `PROBES` in the script finds the rest (OpenSSL, curl, BlueZ, wpa_supplicant and others) by their version strings and grype checks them by CPE. It writes `scan-out/SUMMARY.md` and each tool's JSON, and exits 1 when a scan reaches its failing level: a Semgrep error, any secret, any dependency vulnerability, a critical firmware vulnerability. Most firmware findings are in components Shanling built, a build replaces the worst of them ([third-party.md](third-party.md)), and those left (glibc, BlueZ, the kernel) are listed there with why. The scanners are pinned releases, fetched into `~/.cache/q2-scan` on first use and checked against the SHA-256 in the script before they run; Semgrep runs through `uvx`. Reviewed gitleaks findings (documentation placeholders, file hashes) are fingerprinted in `.gitleaksignore`, so a new one still fails.
 
 ## Firmware tests
 
@@ -153,6 +169,16 @@ Q2_FW_STRICT=1 python3 -m pytest test/fw    # fail a test that reaches a stub to
 - **Song durations:** `python3 -m pytest test/fw/test_durations.py test/fw/test_nav_library_pages.py -k 'durations or long_songs or lengths or cue'` covers the shared cache, Long Songs and Update Local Music's pass; Classic's turned panel and the MIPS worker are `test/patch.py`'s.
 - **A known bug** stays as `@pytest.mark.xfail(strict=True, reason='BUG: ...')`: the test fails the job as soon as the bug is fixed, until the mark goes.
 - **Limits:** the code runs 64-bit, so `long` and pointers are wider than on the Q2, and stock widgets' layouts don't hold. Code that depends on those stays with `test/patch.py`. `peq_player.c`, `mp3_gapless.c` and the FLAC paths are the player's, tested by `test/peq.py`, `test/mp3_gapless.py` and the `test/flac_*.py` scripts.
+
+## Formatting
+
+```sh
+./tools/format.sh          # clang-format 18 over the payload's C, prettier over the Markdown
+./tools/format.sh --check  # the same files: changes nothing, exits non-zero on drift
+CLANG_FORMAT='uvx --quiet --from clang-format==18.1.8 clang-format' PRETTIER='npx --yes prettier@3' ./tools/format.sh --check
+```
+
+The C is `NAVIGATION` (`tools/build.py`) and `UI_SOURCES` (`tools/peq.py`), but the files `UNFORMATTED` beside it names, and the headers `tools/format.sh` lists. `UNFORMATTED` holds upstream's files that were written before the formatter and are kept as upstream writes them, so merges of them stay clean, and the vendored `patch/monocypher/`; a new file is formatted unless it is added there. `CLANG_FORMAT` and `PRETTIER` name the commands where neither is installed. No workflow runs it.
 
 ## Type check
 

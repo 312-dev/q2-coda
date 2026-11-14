@@ -1,5 +1,7 @@
 # Our names for the stock functions Q2 Pod touches that Shanling leaves unnamed, at stock V1.36's addresses. docs/rebasing.md
 binary	address	size	name	what
+demo	0x484514	0x180	tidal_favourite_request	Tidal's favourites added and removed (addFavouriteTrack, removeFavourite*): a curl request with stock's TLS checks off, which tools/build.py STOCK_TLS_CALLS turns on
+demo	0x4847c8	0x17c	tidal_playlist_track_request	A Tidal playlist's tracks added and removed (addTrackToPlaylist, removeTrackFromPlaylist): a curl request with stock's TLS checks off, which tools/build.py STOCK_TLS_CALLS turns on
 demo	0x48713c	0xa54	tidal_stream_url_thread	Tidal stream-URL thread: waits for the track flag, fetches playbackinfo for the song id, decodes the manifest, starts the player
 demo	0x499548	0x4c	checkfw_update_from_mmc	Starts the firmware update from /mnt/mmc/update.tar and stores its result in the check-firmware state.
 demo	0x499b9c	0xcc	confirminfo_dialog_on_keyup	Key-up handler of the confirm dialog, which dialog_confirminfo_dialog_init binds: with the backlight on, Return quits the dialog with code 4, the wheel keys stop there, and Centre clicks the focused widget and stops.

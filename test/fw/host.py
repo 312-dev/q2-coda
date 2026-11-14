@@ -23,6 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT/'tools'))
 import build as tools_build  # noqa: E402
 import peq as tools_peq  # noqa: E402
+import signing as tools_signing  # noqa: E402
 import theme as tools_theme  # noqa: E402
 
 PURE = set('memset memcpy memcmp memmove strcmp strncmp strlen strcasecmp strncasecmp strrchr strstr strcasestr strdup '
@@ -61,11 +62,23 @@ def platform_header():
     return '\n'.join(lines) + '\n'
 
 
-def stock_header(themes):
+def stock_header(themes, key):
     lines = [f'extern unsigned char fw_ctx_{name}[{size}];' for name, size in CONTEXT.items()]
     ranges = [tools_build.face_font(f)[1] for f in tools_build.FACES.values() if f.source]
     context = {name: f'fw_ctx_{name}' for name in tools_build.CONTEXT_DATA}
-    return '\n'.join(lines) + '\n' + tools_build.stock_header(context, ranges, themes, repo='owner/repo')
+    return '\n'.join(lines) + '\n' + tools_build.stock_header(context, ranges, themes, repo='owner/repo', key=key)
+
+
+SIGNING_KEY = 'signing.pem'  # beside fw.so: the private half of the build's release key, made for this build alone
+
+
+def signing_key(out):
+    """A fresh Ed25519 key for this build in out/SIGNING_KEY, so the tests can sign what the firmware checks; its
+    public bytes, which the build compiles in as the release key. Never the real key, whose private half no test has."""
+    pem = out/SIGNING_KEY
+    subprocess.run(['openssl', 'genpkey', '-algorithm', 'ed25519', '-out', str(pem)], check=True, capture_output=True)
+    pub = subprocess.run(['openssl', 'pkey', '-in', str(pem), '-pubout'], check=True, capture_output=True).stdout
+    return tools_signing.public_key(pub)
 
 
 def nm(path, *flags):
@@ -122,7 +135,7 @@ def build(out, extra=()):
     out.mkdir(parents=True, exist_ok=True)
     themes = tools_theme.builtins()
     (out/'peq_platform.h').write_text(platform_header())
-    (out/'stock.h').write_text(stock_header(themes))
+    (out/'stock.h').write_text(stock_header(themes, signing_key(out)))
     tools_theme.emit(themes, out)
     with concurrent.futures.ThreadPoolExecutor(8) as pool:
         objects = list(pool.map(lambda s: compile_one(s, out, extra), SOURCES))

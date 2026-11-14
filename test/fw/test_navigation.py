@@ -8,7 +8,7 @@ import struct
 import pytest
 
 import host
-from conftest import text, Game, c_enum
+from conftest import text, Game, c_enum, libc
 from conftest import FNV_PRIME, O, Deques, Files, claim, fnv1a, in_fork  # noqa: F401
 
 STOCK_RED = O['STOCK_RED']
@@ -422,6 +422,41 @@ def test_artists_default_to_album_artist(fw):
 def test_display_settings(fw, clock, st, values, theme, home, light):
     Config(fw, **values)
     assert (fw.fn('ipod_home', C.c_int)(), fw.fn('ipod_light', C.c_int)(), st('theme').value) == (home, light, theme)
+
+
+THEMES = host.tools_theme.builtins()
+SETTING_ROUNDED = c_enum('SETTING_ACCENT')['SETTING_ROUNDED']
+
+
+def theme_index(id_):
+    return next(t['index'] for t in THEMES if t['id'] == id_)
+
+
+@pytest.mark.parametrize('id_, rounded', [('minimal', 1), ('modern', 0), ('classic-light', 0), ('oled', 0)])
+def test_a_missing_rounded_reads_the_theme_s_corners(fw, clock, st, id_, rounded):
+    Config(fw, THEME=str(theme_index(id_)).encode())
+    fw.fn('accent', C.c_int)()
+    assert st('rounded').value == rounded
+
+
+@pytest.mark.parametrize('id_, stored', [('minimal', b'0'), ('modern', b'1')])
+def test_a_stored_rounded_wins_over_the_preset(fw, clock, st, id_, stored):
+    Config(fw, THEME=str(theme_index(id_)).encode(), ROUNDED=stored)
+    fw.fn('accent', C.c_int)()
+    assert st('rounded').value == int(stored)
+
+
+def test_a_missing_rounded_follows_the_live_theme_s_preset_not_its_place(fw, clock, st, library):
+    """Modern's Corners row made Round in this test's load of the table: a missing key reads Round."""
+    Config(fw, THEME=str(theme_index('modern')).encode())
+    row = fw.fn('option_of', C.c_void_p, C.c_void_p, C.c_int)(fw.fn('theme', C.c_void_p)(), SETTING_ROUNDED)
+    assert row
+    at = row + host.offsets(library.parent/'theme_engine.o', 'option_t')['preset']
+    assert not libc.mprotect(at & ~0xfff, 0x2000, 3)  # PROT_READ | PROT_WRITE
+    C.c_byte.from_address(at).value = 1
+    st('settings_read').value = 0  # read the keys again
+    fw.fn('accent', C.c_int)()
+    assert st('rounded').value == 1
 
 
 @pytest.mark.parametrize('value, rockbox, name', [

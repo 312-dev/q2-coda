@@ -10,7 +10,7 @@ ZIP_SHA = '4e298cab6c12d86cfc55565645f7e3ae11d3fb44677a93ca13991e7184ecec4e'
 DEMO_SHA = 'e65d638d6e70332b4c3193af8ac2044941ec0157d20e41e40233aac5b0c2c59f'
 VERSION = '1.8.2'  # major.minor.patch, single digits, shown as is (About and release tag)
 BETA = 0  # a pre-release's beta number (1-9), 0 for the release itself
-REPO = 'DiamondBond/q2-pod'  # whose releases Network Update fetches (--update-repo) and release.py publishes
+REPO = '312-dev/q2-coda'  # whose releases Network Update fetches (--update-repo) and release.py publishes
 # The updater's identity (firmware_v20.info and demo's version literal) must be 5 characters and
 # differ from the installed one, so it packs the digits and the beta number: 1.8.0 beta 2 is V1802,
 # 1.8.0 itself V1800, so each installs over the betas before it. Releases up to 1.8.0 BETA ended in I
@@ -51,6 +51,9 @@ HOOKS = {
     'select_timezone': (0x503b40, 'ringnav_timezone', 'timezone'),
     'timezone_row': (0x4c1aac, 'ringnav_timezone_row', 'timezone_row'),  # autotime_page's row i (0: the switch)
     'home_page_init': (0x534b6c, 'coverflow_home', 'home'),
+    # Wi-Fi transfer's PIN (wifi_transfer.c): the server's switch, and the page that shows the PIN
+    'switch_wifitransport': (0x519b30, 'ringnav_wifi_transfer', 'wifi_transfer'),
+    'systemset_wifitransport_page_init': (0x4d797c, 'ringnav_wifi_transfer_page', 'wifi_transfer_page'),
     'localmusic_page_init': (0x535334, 'ringnav_localmusic', 'localmusic'),
     # Library lists: an Unknown row with no songs is dropped
     'load_localclass_list': (0x51357c, 'ringnav_localclass', 'localclass'),
@@ -134,8 +137,11 @@ HOOKS = {
     'systemset_manualtime_page_init': (0x4cc83c, 'ringnav_manualtime', 'manualtime'),
     # any Tidal track asked for, from a queue or Now Playing, wakes its stream thread (tidal.c)
     'get_tidal_trackurl': (0x483f28, 'ringnav_tidal_track', 'tidaltrack'),
-    # its cover match: MusicBrainz/Cover Art Archive and iTunes candidates, then stock's Kugou search
-    'kugou_obtaincover': (0x51bf74, 'ringnav_cover_search', 'kugoucover'),
+    # its cover match: MusicBrainz/Cover Art Archive and iTunes candidates in place of stock's Kugou search,
+    # and none from NetEase's or Baidu's, online_coverthd's other two sources (onlinematch.c)
+    'kugou_obtaincover': (0x51bf74, 'ringnav_cover_search', None),
+    'com163_obtaincover': (0x51c46c, 'ringnav_cover_none', None),
+    'baidu_obtaincover': (0x51bbdc, 'ringnav_cover_none', None),
     'mclPrevSong': (0x5c0518, 'ringnav_prev', 'prev'),
     'mclSetPlayMode': (0x5bd94c, 'ringnav_mode', 'mode'),
     'mclSetPlaySpeed': (0x5bd9dc, 'ringnav_speed', 'speed'),
@@ -259,6 +265,8 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             rm -f $m
         }}
         rm -f /mnt/data/q2-cf-trace /mnt/data/q2-stall
+        # Baidu Netdisk's sign-in, which stock sends over plain HTTP: Q2 Pod has no Baidu row to use it from
+        rm -f /mnt/data/baidu_token.conf
         [ -f $c ] && (
             i=0
             while [ $i -lt 60 ] && ! grep -q ' /mnt/mmc ' /proc/mounts; do usleep 500000; i=$((i+1)); done
@@ -362,6 +370,34 @@ BLUEALSA = 'usr/bin/bluealsa'
 BLUEALSA2 = 'usr/bin/bluealsa2'
 BT_KEEPALIVE = (b'bluealsa -c LDAC', b'bluealsa --keep-alive=5 -c LDAC')
 SCROBBLE_CA = 'etc/scrobble-ca.pem'
+# BlueZ's settings. demo sets Discoverable each time it starts Bluetooth (openBluetooth), and stock's 0 kept the Q2
+# discoverable for as long as Bluetooth stayed on; 180 s gives a phone three minutes from then to find it.
+BT_MAIN = 'etc/bluetooth/main.conf'
+BT_DISCOVERABLE = (b'\nDiscoverableTimeout = 0\n', b'\nDiscoverableTimeout = 180\n')
+# Every V1.36 unit has the same root password hash, and init runs a login on the board's serial pad (ttyS3).
+# Nothing on the Q2 logs in (q2remote, --dev only, runs /bin/sh itself), so root is locked and the getty goes;
+# the kernel's and init's messages still reach the console.
+SHADOW = 'etc/shadow'
+INITTAB = 'etc/inittab'
+SERIAL_GETTY = (b'# Put a getty on the serial port\nconsole::respawn:/sbin/getty -L ttyS3 115200 vt100 # GENERIC_SERIAL\n\n', b'')
+def mozilla_ca():
+    """assets/mozilla-ca.pem, refused unless it is the pinned curl release (STOCK_CA_SHA)."""
+    data = (ROOT/'assets/mozilla-ca.pem').read_bytes()
+    check(sha(data) == STOCK_CA_SHA, 'Unexpected assets/mozilla-ca.pem')
+    return data
+def lock_root(shadow):
+    """shadow with root's password field '*', which no password matches."""
+    lines = shadow.split(b'\n')
+    rows = [i for i, l in enumerate(lines) if l.startswith(b'root:')]
+    check(len(rows) == 1, 'Unexpected /etc/shadow')
+    fields = lines[rows[0]].split(b':')
+    fields[1] = b'*'
+    lines[rows[0]] = b':'.join(fields)
+    return b'\n'.join(lines)
+def password_logins(shadow):
+    """The accounts in shadow a password logs in to: an empty field or a hash, not one starting * or !."""
+    return [l.split(b':')[0].decode() for l in shadow.split(b'\n')
+            if l.strip() and not l.split(b':')[1].startswith((b'*', b'!'))]
 AAC_44K1 = 0x317b8
 # DROP is acknowledged before the encoder handles its signal. Flush in the control
 # thread instead, so a delayed signal cannot discard the next track's first PCM.
@@ -396,6 +432,9 @@ def default_config(config):
     return config
 # toolsSetRtcTime's command, with its padding; -u keeps the RTC in UTC. See docs/internals.md#clock.
 RTC_WRITE = (b'hwclock -w\0\0', b'hwclock -wu\0')
+# networktime_adjust_thd's time servers (0x7836bc, after time.apple.com, before time.windows.com): stock's
+# China pool becomes the worldwide one, NUL-padded to its length. See docs/internals.md#clock.
+NTP_POOL = (b'\0cn.pool.ntp.org\0time.', b'\x000.pool.ntp.org\0\0time.')
 # network_checkstatus's command once Wi-Fi connects (its digit at file offset 0x3852bd): stock turns
 # the radio's power save (LPS) off for the whole connection; 2 restores the driver's own default,
 # PS_MODE_MAX. See docs/internals.md#battery.
@@ -631,6 +670,39 @@ DARK_POLLS = ((0x5bbc3c, 'ringnav_dark_usleep'), (0x4f8300, 'ringnav_dark_cover_
 # system(); that jalr snprintf becomes jal ringnav_lyric_save (onlinematch.c), which writes the lyrics beside
 # the song instead. The word before it, addiu $a2,$a2,0x67f0 (the format at 0x7867f0), is pinned.
 LYRIC_SAVE_CALL, LYRIC_SAVE_FMT = 0x536488, (0x536484, 0x24c667f0)
+# Stock's HTTPS helpers turn certificate checks off (curl_easy_setopt(c, SSL_VERIFYPEER or SSL_VERIFYHOST, 0)) and set
+# no CA file, so Tidal's sign-in and API, covers by URL and Baidu's calls could be intercepted. Each of those calls
+# (a jalr through curl_easy_setopt's GOT slot, $5 0x40 or 0x51 just before) becomes jal ringnav_stock_tls
+# (patch/stock_tls.c), which verifies against STOCK_CA. See docs/internals.md#stock-https.
+STOCK_TLS_CALLS = (
+    (0x481ad8, 0x40), (0x481af4, 0x51),  # baidu_curl_download_file
+    (0x4845a8, 0x40), (0x4845c0, 0x51),  # 0x484514: Tidal's favourites added and removed
+    (0x48485c, 0x40), (0x484874, 0x51),  # 0x4847c8: a Tidal playlist's tracks added and removed
+    (0x484d00, 0x40), (0x484d18, 0x51),  # httpRequest: Tidal's sign-in, browsing and favourites
+    (0x506254, 0x40), (0x50626c, 0x51))  # curl_http_request: covers by URL, Baidu, the update check
+SETOPT_GOT = 0x8f99f620  # lw $25, -0x9e0($gp): curl_easy_setopt
+def stock_tls_site(data, address, option):
+    """1 if the word at address is a jalr $25 to curl_easy_setopt with $5 = option, set in the four words before."""
+    off = fileoff(data, address)
+    before = struct.unpack_from('<4I', data, off - 16)
+    return struct.unpack_from('<I', data, off)[0] == 0x0320f809 and SETOPT_GOT in before and 0x24050000 | option in before
+# Three of stock's Tidal API URLs are plain HTTP, though they carry the session's access token: the subscription check,
+# a track's stream URL (playbackinfopostpaywall) and an album's tracks. Each becomes https://, taking one of the NULs
+# that pad it to its word; only its start is referenced (docs/internals.md#stock-https).
+TIDAL_HTTP = (b'/v1/users/%u/subscription',
+              b'/v1/tracks/%lld/playbackinfopostpaywall?playbackmode=STREAM&assetpresentation=FULL&audioquality=%s',
+              b'/v1/albums/%u/tracks?offset=%d&limit=%d&countryCode=%s')
+def tidal_https(data):
+    """data with each TIDAL_HTTP URL made https://, in place; each must be whole and once, with a spare NUL after it."""
+    for path in TIDAL_HTTP:
+        old, new = b'\0http://api.tidal.com' + path + b'\0\0', b'\0https://api.tidal.com' + path + b'\0'
+        check(data.count(old) == 1, f'Unexpected Tidal URL {path.decode()}')
+        data = data.replace(old, new)
+    return data
+# Mozilla's CA bundle as curl publishes it, whole, for stock's HTTPS (above) and the player's (tools/peq.py TLS_OPTIONS),
+# whose hosts no list of ours could cover; /etc/scrobble-ca.pem stays the few roots Q2 Pod's own code needs.
+STOCK_CA = 'etc/ssl/certs/ca-certificates.crt'
+STOCK_CA_SHA = '796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe'  # https://curl.se/ca/cacert-2026-10-20.pem
 # The same function's other command, no lyrics chosen: rm -rf "/mnt/mmc/.downpic/<name>" for the same system().
 # Its jalr snprintf becomes jal ringnav_lyric_drop (onlinematch.c), which unlinks the copy itself. The call's delay
 # slot, addiu $a2,$a2,0x6814 (the format at 0x786814), is pinned.
@@ -690,10 +762,8 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
 # Wi-Fi transfer's web page (stock thttpd on :8888): in English, an Upload Folder button, and a folder,
 # picked or dropped, keeps its tree: each file's folders are made with stock's create (a plain mkdir) before
 # it goes, as stock's upload only moves a file into an existing folder. The formats Q2 Pod's pages read are allowed too.
-MKDIR_JS = r'''// Each folder of a folder upload is made once per batch, parents first; stock's create is a plain mkdir,
-// so a folder that exists fails harmlessly and a real failure shows as its files' upload error.
-// ponytail: the stock CGIs run mkdir and mv through system() in double quotes, so a name with " ` or $
-// can't be uploaded (plain files too); replacing the CGIs would lift it.
+MKDIR_JS = r'''// Each folder of a folder upload is made once per batch, parents first; one that exists is no
+// error, and a folder that really couldn't be made shows as its files' upload errors.
 var _made = {};
 function _mkdir(path, base) {
   if (path == base)
@@ -710,6 +780,73 @@ function _mkdir(path, base) {
 }
 
 function _showError('''
+# The breadcrumb is built as HTML: _esc puts each folder's name into it as text, as a folder named like
+# markup would otherwise run as script in the page (docs/internals.md#wi-fi-transfer).
+ESC_JS = r'''// A file or folder name as HTML text, quotes included, for markup built from strings.
+function _esc(s) {
+  return $("<div>").text(s).html().replace(/"/g, "&quot;");
+}
+
+function _reload(path) {'''
+# Wi-Fi transfer's PIN (docs/internals.md#wi-fi-transfer-pin): every CGI answers 401 until the page has
+# sent the PIN the Q2 shows to cgi-bin/auth.cgi, which sets the session cookie; the browser then sends it
+# with each request. Any 401 opens the PIN box, so a page left open across a restart of transfer asks for
+# the new PIN.
+PIN_JS = r'''// The PIN the Q2 shows on its Wi-Fi File Transfer screen, asked for once; the server answers it
+// with a session cookie the browser sends with every request after.
+var _pinFor = null;
+function _askPin(path) {
+  _pinFor = path;
+  if ($("#pin-modal").hasClass("in"))
+    return;
+  $("#pin-error").text("");
+  $("#pin-input").val("");
+  $("#pin-modal").modal("show");
+}
+function _sendPin() {
+  var pin = $("#pin-input").val().replace(/\s/g, "");
+  if (!/^[0-9]{6}$/.test(pin)) {
+    $("#pin-error").text("The PIN is six digits.");
+    return false;
+  }
+  $.ajax({url: 'cgi-bin/auth.cgi', type: 'POST', data: {pin: pin}, dataType: 'json'})
+    .done(function() {
+      $("#pin-modal").modal("hide");
+      _reload(_pinFor || _home);
+    })
+    .fail(function(jqXHR) {
+      var r = {};
+      try { r = $.parseJSON(jqXHR.responseText) || {}; } catch (e) {}
+      $("#pin-error").text(r.error == "locked" ? "Too many wrong PINs. On the Q2, go back, then open Wi-Fi File Transfer again for a new PIN."
+        : r.error == "off" ? "Wi-Fi transfer is off on the Q2."
+        : "Wrong PIN" + (r.left != null ? " (" + r.left + (r.left == 1 ? " try" : " tries") + " left)." : "."));
+      $("#pin-input").val("").focus();
+    });
+  return false;
+}
+
+// A file or folder name as HTML text, quotes included, for markup built from strings.'''
+PIN_HTML = '''<div class="modal fade" id="pin-modal" tabindex="-1" data-backdrop="static" data-keyboard="false">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h4 class="modal-title">Enter the PIN</h4>
+          </div>
+          <div class="modal-body">
+            <p>The Q2 shows a six-digit PIN on its Wi-Fi File Transfer screen, above the address.</p>
+            <form id="pin-form">
+              <input type="text" class="form-control" id="pin-input" inputmode="numeric" autocomplete="one-time-code" maxlength="7">
+            </form>
+            <p class="text-danger" id="pin-error"></p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-primary" id="pin-ok">OK</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="create-modal" tabindex="-1">'''
 WEB = {
   'usr/share/web/index.html': [
     ('山灵音乐', 'Shanling Q2'),
@@ -725,11 +862,48 @@ WEB = {
           <span class="glyphicon glyphicon-folder-open"></span> Upload Folder
           <input id="folderupload" type="file" name="files[]" multiple webkitdirectory>
         </button>'''),
+    ('<div class="modal fade" id="create-modal" tabindex="-1">', PIN_HTML),
     ('创建文件夹', 'New Folder'), ('返回上一级', 'Up'), ('正在进行文件上传', 'Uploading'), ('新建文件夹', 'New Folder'),
     ('请输入要创建的文件夹的名称:', 'Folder name:'), ('取消', 'Cancel'), ('移动项目', 'Move'), ('请输入此项的新位置:', 'New location:')],
   'usr/share/web/js/index.js': [
     ('"LRC","BIN"];', '"LRC","BIN","M4B","MP4","M4V","MKV","AVI","MOV","MPG","TXT","EPUB"];'),
     ('function _showError(', MKDIR_JS),
+    ('function _reload(path) {', ESC_JS),
+    ('// A file or folder name as HTML text, quotes included, for markup built from strings.', PIN_JS),
+    ('''    url: 'list',
+    type: 'GET',
+    data: {path: path},
+    dataType: 'json'
+  }).fail(function(jqXHR, textStatus, errorThrown) {
+''', '''    url: 'list',
+    type: 'GET',
+    data: {path: path},
+    dataType: 'json'
+  }).fail(function(jqXHR, textStatus, errorThrown) {
+    if (jqXHR.status == 401)
+      return;  // the PIN box (_askPin) takes it
+'''),
+    ('''          $("#path").append('<li data-path="' + subpath + '"><a style="cursor:pointer">' + components[i] + '</a></li>');''',
+     '''          $("#path").append('<li data-path="' + _esc(subpath) + '"><a style="cursor:pointer">' + _esc(components[i]) + '</a></li>');'''),
+    ('''        $("#path").append('<li class="active">' + components[components.length - 1] + '</li>');''',
+     '''        $("#path").append('<li class="active">' + _esc(components[components.length - 1]) + '</li>');'''),
+    ('''
+  _reload(_home);
+
+});''', '''
+  $("#pin-ok").click(_sendPin);
+  $("#pin-form").submit(_sendPin);
+  $("#pin-modal").on("shown.bs.modal", function() {
+    $("#pin-input").focus();
+  });
+  $(document).ajaxError(function(event, jqXHR) {
+    if (jqXHR.status == 401)
+      _askPin(_path || _home);
+  });
+
+  _reload(_home);
+
+});'''),
     ('''  $("#upload-file").click(function(event) {
     $("#fileupload").click();
   });
@@ -1089,7 +1263,7 @@ def source_sha256():
     """Hash every build input, so a test run cannot silently use a stale output directory."""
     h = hashlib.sha256()
     manual = [ROOT/'docs/manual'/f for f in ('build.py', 'guide.html')]
-    for path in sorted([*(p for p in ROOT.glob('assets/**/*') if p.is_file()), *ROOT.glob('patch/*'),
+    for path in sorted([*(p for p in ROOT.glob('assets/**/*') if p.is_file()), *(p for p in ROOT.glob('patch/**/*') if p.is_file()),
                         *ROOT.glob('tools/*.py'), *ROOT.glob('tools/*.c'),
                         *ROOT.glob('tools/*.h'), *ROOT.glob('tools/*.S'), *ROOT.glob('player/*.[ch]'),
                         *ROOT.glob('player/Makefile'), *manual]):
@@ -1655,17 +1829,22 @@ STOCK_PAGES = [f'release/assets/default/raw/ui/{n}_page.bin' for n in ('coverflo
     ['default_album_coverflow', 'play_spectrum', 'play_spectrumdown', 'play_vu', 'play_vudown', 'spectrum_back', 'spectrum_bar',
      *(f'spectrum_point{i}' for i in range(12)), 'vu_back', 'vu_dot', 'vu_left', 'vu_right']]
 # Superseded library versions (the unversioned and soname links already resolve to the newer ones)
-# and on-device debugging tools; nothing in the rootfs names them.
+# and on-device debugging and network tools; no script, program or library in the rootfs, and nothing
+# in patch/, names them as a command (the rootfs's libcurl speaks only http, https and file). The
+# links are busybox applets: busybox keeps the code, the command goes.
+DEBUG_TOOLS = [*(f'usr/bin/{n}' for n in ('strace', 'strace-log-merge', 'sqlite3', 'hcidump', 'memtester')),
+               'usr/sbin/nandtest']
+DEBUG_LINKS = [*(f'usr/bin/{n}' for n in ('telnet', 'tftp')),
+               *(f'usr/sbin/{n}' for n in ('inetd', 'dnsd', 'dhcprelay'))]
 OBSOLETE = ['usr/lib/libdbus-1.so.3.19.8', *(f'usr/lib/lib{n}-2.0.so.0.5400.3' for n in
-            ('gio', 'glib', 'gmodule', 'gobject', 'gthread')),
-            *(f'usr/bin/{n}' for n in ('strace', 'strace-log-merge', 'sqlite3', 'hcidump'))]
+            ('gio', 'glib', 'gmodule', 'gobject', 'gthread')), *DEBUG_TOOLS, *DEBUG_LINKS]
 
 FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
          '-mno-abicalls','-fno-pic','-G0','-ffreestanding','-fno-builtin',
          '-fno-stack-protector','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
          '-Oz','-Wall','-Wextra','-Werror','-Wno-unused-parameter']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c']
 
 def compile_payload(out):  # pragma: no mutate block
     """Compile and link the payload."""
@@ -1684,7 +1863,7 @@ def compile_payload(out):  # pragma: no mutate block
     run('ld.lld','-m','elf32ltsmip','--gc-sections','-T',ROOT/'patch/link.ld','-e','ringnav',
         *[f'--undefined={name}' for _, name, _ in HOOKS.values()], f'--undefined={GRADIENT_LEAF[2]}', '--undefined=ringnav_lrc_open',
         f'--undefined={WM_PAINT_LEAF[2]}', f'--undefined={QUEUE_LEAF[2]}', '--undefined=ringnav_audio_extension', '--undefined=start_mute', '--undefined=start_sleep', '--undefined=ringnav_genre_copy', '--undefined=ringnav_lyric_save', '--undefined=ringnav_lyric_drop', '--undefined=ringnav_cover_copy','--undefined=ringnav_folder_rm','--undefined=ringnav_bootmode', '--undefined=lockscreen_access','--undefined=ringnav_ts_read',
-        '--undefined=ringnav_baidu_poll', '--undefined=ringnav_tidal_poll', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
+        '--undefined=ringnav_baidu_poll', '--undefined=ringnav_stock_tls', '--undefined=ringnav_tidal_poll', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
         '--undefined=coverflow_player_cover', '--undefined=coverflow_grid_cover', '--undefined=coverflow_album_cover', '--undefined=coverflow_folder_cover', '--undefined=headset_bt_init',
         '--undefined=headset_status_register', '--undefined=headset_bt_autolink',
         *nav,out/'trampoline.o',*extra,'-o',out/'patch.elf')
@@ -1804,10 +1983,11 @@ def patch_bluealsa(raw):
 
 STOCK_VERSION = 'V1.36'
 
-def stock_header(context, ranges, themes, dev=0, repo=REPO):
+def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
     """stock.h, which the payload's C includes: context maps each CONTEXT_DATA name to the C address of
     its data (demo's symbol on the Q2; test/fw/host.py's own array), ranges are the subset faces' range macros
-    (subset_font, in FACES' order: faces_header) and themes theme.builtins()'s."""
+    (subset_font, in FACES' order: faces_header), themes theme.builtins()'s and key the release key's 32 public
+    bytes (signing_key's; the tracked key's when None)."""
     from ipod import SETTINGS_ICONS
     from theme import theme_keys
     header = [f'#define RING_STEP {RING_STEP}', *faces_header(ranges)]
@@ -1824,7 +2004,8 @@ def stock_header(context, ranges, themes, dev=0, repo=REPO):
                f'#define Q2POD_TAG "{"" if dev else VERSION}"',  # netupdate.c: the release tag, none when --dev
                f'#define Q2POD_DEV {1 if dev else 0}',  # navigation.c stale_note
                f'#define Q2POD_REPO "{repo}"',  # netupdate.c: the repo whose latest release it fetches
-               f'#define Q2POD_UA "Q2Pod/{VERSION} (https://github.com/DiamondBond/q2-pod)"']  # onlinematch.c, as MusicBrainz asks
+               '#define Q2POD_SIGN_KEY {' + ','.join(f'0x{b:02x}' for b in key or signing_key(None, False)) + '}',  # release_sig.c
+               f'#define Q2POD_UA "Q2Pod/{VERSION} (https://github.com/{REPO})"']  # onlinematch.c, as MusicBrainz asks: the project's contact, not --update-repo's
     header.append(f'#define THEME_N {len(themes)}')  # theme_engine.c setting_counts[]
     header.append(f'#define THEME_KEYS {len(theme_keys(themes))}')  # navigation.c st.own[], themes.inc theme_keys[]
     from art import corner_table, qs_lit
@@ -1832,7 +2013,17 @@ def stock_header(context, ranges, themes, dev=0, repo=REPO):
     header.append(f'#define QS_LIT "{qs_lit()}"')  # navigation.c quick_page: Classic's buttons that are on
     return '\n'.join(header)+'\n'
 
-def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, flac_experiments='sync,lpc,output', new_player=False):  # pragma: no mutate block
+def signing_key(path, dev):
+    """The release key's 32 public bytes that Network Update and the App Store check signatures with
+    (docs/internals.md#release-signatures): assets/signing/q2-coda-release.pub, which a release build must have;
+    a --dev build may take another (path), such as a test key whose private half is at hand."""
+    from signing import PUBLIC_KEY, public_key
+    check(path is None or dev, '--signing-key requires --dev: a release is checked against assets/signing/q2-coda-release.pub')
+    path = path or PUBLIC_KEY
+    check(path.is_file(), f'{path}: no release public key (docs/releasing.md#signing-a-release)')
+    return public_key(path.read_bytes())
+
+def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, flac_experiments='sync,lpc,output', signing_pub=None, new_player=False):  # pragma: no mutate block
     from flac import selection
     flac_experiments = selection(flac_experiments)
     # Kernel-module experiments: no measured saving (docs/clock-gating.md, pwm-clock-gating.md,
@@ -1846,6 +2037,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(dev or version_ok(VERSION, BETA), f'VERSION must be three single digits (x.y.z) and BETA 0-9: {VERSION}, {BETA}')
     version = TAG
     check(re.fullmatch(r'[A-Za-z0-9-]+/[A-Za-z0-9._-]+', repo), f'{repo}: not a GitHub owner/name')  # a C string
+    key = signing_key(signing_pub, dev)
     out.mkdir(parents=True, exist_ok=True)
     check(not (out/'update.tar').exists(), 'Output already exists; use a fresh --out directory')
     if dev:
@@ -1866,14 +2058,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     sq = out/'stock.squashfs'; sq.write_bytes(blobs['recovery-update/rootfs.squashfs'])
     def cat(path): return subprocess.check_output(['unsquashfs', '-cat', str(sq), path])
     raw_demo = cat('release/bin/demo')
+    check(sha(raw_demo) == DEMO_SHA, 'Unsupported demo: SHA-256 differs from the audited original')
     (out/'libc-2.28.so').write_bytes(cat('lib/libc-2.28.so'))
-    # peq.h tls_untimed writes OpenSSL 1.1.1f's SSL_CTX->param (0x100) and its ->flags (0xc) itself,
-    # as demo imports neither accessor: their first instructions must still read those fields.
-    for lib, fn, at, word in (('libssl.so.1.1', 'SSL_CTX_get0_param', 4, 0x8c820100),         # lw v0, 0x100(a0)
-                              ('libcrypto.so.1.1', 'X509_VERIFY_PARAM_set_flags', 0, 0x8c86000c)):  # lw a2, 0xc(a0)
-        data = cat('usr/lib/'+lib); (out/lib).write_bytes(data)
-        address = symbols(out/lib)[fn+'@@OPENSSL_1_1_0']  # its text LOAD maps file offset 0 at 0
-        check(struct.unpack_from('<I', data, address + at)[0] == word, f'{lib}: {fn} layout changed')
     # Every allowlisted context must be a window name. The runtime name is the root "name"
     # property of the UI asset, not the asset path, so check the stock rootfs assets directly:
     # a prefix-trimmed typo cannot silently disable a screen this way.
@@ -1916,7 +2102,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     from theme import builtins, emit, geometry_sets
     themes = builtins()
     (out/'stock.h').write_text(stock_header({name: f'0x{syms[name]:x}u' for name in CONTEXT_DATA},
-                                            [r for _, r in fonts.values()], themes, dev, repo))
+                                            [r for _, r in fonts.values()], themes, dev, repo, key))
     set_pages, redirects = {}, {}
     ui = 'release/assets/default/raw/ui/'
     for i, g in enumerate(geometry_sets(themes)[1:], 1):
@@ -1972,6 +2158,16 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     bluealsa = patch_bluealsa(cat(BLUEALSA))
     (out/'bluealsa').write_bytes(bluealsa)
     (out/'watchdog').write_bytes(cat(WATCHDOG).replace(*WATCHDOG_SLEEP))
+    shadow = lock_root(cat(SHADOW))
+    check(not password_logins(shadow), 'A password still logs in')
+    (out/'shadow').write_bytes(shadow)
+    inittab = cat(INITTAB)
+    inittab, gettys = inittab.replace(*SERIAL_GETTY), inittab.count(SERIAL_GETTY[0])
+    check(gettys == 1 and b'getty' not in inittab, 'Unexpected inittab')
+    (out/'inittab').write_bytes(inittab)
+    bt_main = cat(BT_MAIN)
+    check(bt_main.count(BT_DISCOVERABLE[0]) == 1, 'Unexpected Bluetooth main.conf')
+    (out/'main.conf').write_bytes(bt_main.replace(*BT_DISCOVERABLE))
     for address, old, new in ARTIST_ALBUMS:
         patch_word(patched, address, old, new, 'artist detail opens on Albums')
     patch_word(patched, *SHUFFLE_CALL, jal(ps['ringnav_shuffle']),
@@ -2064,6 +2260,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(struct.unpack_from('<I', patched, fileoff(patched, LYRIC_SAVE_FMT[0]))[0] == LYRIC_SAVE_FMT[1],
           'Unexpected Download Cover & Lyrics save')
     patch_word(patched, LYRIC_SAVE_CALL, 0x0320f809, jal(ps['ringnav_lyric_save']), 'lyrics saved beside the song')
+    for address, option in STOCK_TLS_CALLS:
+        check(stock_tls_site(patched, address, option), f'{address:#x}: not a TLS check setopt')
+        patch_word(patched, address, 0x0320f809, jal(ps['ringnav_stock_tls']), 'stock HTTPS verifies its peer')
     check(struct.unpack_from('<I', patched, fileoff(patched, LYRIC_DROP_FMT[0]))[0] == LYRIC_DROP_FMT[1],
           'Unexpected Download Cover & Lyrics removal')
     patch_word(patched, LYRIC_DROP_CALL, 0x0320f809, jal(ps['ringnav_lyric_drop']), "no lyrics removes .downpic's copy")
@@ -2145,6 +2344,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(patched.count(b'V1.36\0') == 1, 'Version literal is not unique')
     patched = patched.replace(b'V1.36\0', version.encode()+b'\0')
     patched = patched.replace(*RTC_WRITE)
+    patched = tidal_https(patched)
+    check(patched.count(NTP_POOL[0]) == 1, 'Unexpected NTP servers')
+    patched = patched.replace(*NTP_POOL)
     check(patched.count(WIFI_LPS[0]) == 1, 'Unexpected Wi-Fi power save command')
     patched = patched.replace(*WIFI_LPS)
     check(patched.count(LOCK_CLOCK_12H[0]) == 1, 'Unexpected lock clock formats')
@@ -2158,6 +2360,10 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     pseudo = out/'root.pseudo'
     run('unsquashfs','-pf',pseudo,sq)
     p = pseudo.read_bytes()
+    # Two parts: p, the inode definitions (about 270 KB) every search and edit below works on, and
+    # pseudo_data, from the data marker on (about 108 MB of embedded file contents), written back unchanged.
+    at = p.index(b'# START OF DATA')
+    p, pseudo_data = p[:at], p[at:]
     # mksquashfs takes "/" from the source dir, not the pseudo file; carry stock values over.
     root = need(re.search(rb'^/ D (\d+) (\d+) (\d+) (\d+)$',p,re.M), 'Missing root pseudo inode')
     t,mode,uid,gid = (x.decode() for x in root.groups())
@@ -2210,6 +2416,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                       (BLUEALSA2.encode(), out/'bluealsa2'), (DEFAULT_CONFIG.encode(), out/'config.ini'),
                       (LOGO.encode(), logo)):
         p = swap_inode(p, path, src)
+    p = swap_inode(p, SHADOW.encode(), out/'shadow')
+    p = swap_inode(p, INITTAB.encode(), out/'inittab')
+    p = swap_inode(p, BT_MAIN.encode(), out/'main.conf')
     aic_notifier = None
     if aic_idle_wait:
         from aic import MODULE_PATH, PATCH_POLICY, STOCK_SHA256, patch_module
@@ -2272,6 +2481,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                'etc/init.d/S12usbcharge': ('etc/init.d/S20urandom', (ROOT/'patch/usb_charge.sh').read_bytes()),
                                HELPER: (HELPER_LIKE, compile_helper(out, cat, 'video', 'q2video', HELPER_LIBS)),
                                SCROBBLE_CA: ('etc/hosts', (ROOT/'assets/scrobble-ca.pem').read_bytes()),
+                               STOCK_CA: ('etc/hosts', mozilla_ca()),
+                               # Wi-Fi transfer's PIN check (q2cgi auth), a CGI stock has no inode for
+                               'usr/share/web/cgi-bin/auth.cgi': ('usr/share/web/cgi-bin/list.cgi', (ROOT/'assets/web/q2cgi').read_bytes()),
                                BOOT: (HELPER_LIKE, compile_helper(out, cat, 'boot', 'q2boot', HELPER_LIBS[:1])),
                                **({LOGO_LIGHT: (xx+'list_tidal.png', light)} if light else {}),  # the swapped logo.jpg has no stock inode left
                                **{path: (FONT, data) for path, (data, _) in fonts.items()},
@@ -2286,12 +2498,11 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
             continue
         path = path.encode()
         entry = path+b' F '+b' '.join(stock.groups())+b' cat '+shlex.quote(str(out/name)).encode()+b'\n'
-        at = p.index(b'# START OF DATA')  # definitions precede the embedded data
-        p = p[:at]+entry+p[at:]
+        p += entry  # the definitions' end, before the embedded data
         added.append([path, b'R', *stock.groups()])
     removed = []
     for path in STOCK_EQ + STOCK_PAGES + OBSOLETE:
-        line = need(re.search(rb'^'+re.escape(path.encode())+rb' R .+\n', p, re.M), f'Missing stock inode {path}')
+        line = need(re.search(rb'^'+re.escape(path.encode())+rb' [RS] .+\n', p, re.M), f'Missing stock inode {path}')
         removed.append(line.group().split()[:6])
         p = p[:line.start()]+p[line.end():]
     for path, fix, name in ((TAG_C, patch_m4b_cover, 'libtag_c.so.2.0.1'), (FONT, font_quotes, 'default.ttf'),
@@ -2306,7 +2517,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     # path/filename straight to system(), so a name with $(...) or a backtick runs as root, and they
     # read paths outside the card. q2cgi replaces all five, doing each operation with argv (never a
     # shell command built from input) and validating every path stays under /mnt/mmc. One script over
-    # every cgi-bin/*.cgi inode, so both /name and /cgi-bin/name.cgi resolve to it with no bypass.
+    # every cgi-bin/*.cgi inode, so both /name and /cgi-bin/name.cgi resolve to it with no bypass; it
+    # is also cgi-bin/auth.cgi (added above), the PIN check every other route requires.
     q2cgi = (ROOT/'assets/web/q2cgi').read_bytes()
     (out/'q2cgi').write_bytes(q2cgi)
     for n in ('create', 'delete', 'list', 'download', 'upload'):
@@ -2336,12 +2548,16 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         target.write_bytes(data)
         p = swap_inode(p, path.encode(), target)
         changed_assets[path] = dict(original_sha256=sha(original), sha256=sha(data))
-    pseudo.write_bytes(p)
+    # Shanling's outdated OpenSSL, curl, zlib and the rest, rebuilt from upstream (docs/third-party.md)
+    from thirdparty import install as install_thirdparty
+    p, thirdparty = install_thirdparty(p, out, cat, swap_inode, sq)
+    pseudo.write_bytes(p + pseudo_data)
     (out/'empty').mkdir(exist_ok=True)
     newsq = out/'rootfs.squashfs'
     epoch = struct.unpack_from('<I',sq.read_bytes(),8)[0]
+    # On every core: squashfs-tools 4.6.1 wrote the same image with 1, 2, 3, 5, 8 and 16 threads.
     run('mksquashfs',out/'empty',newsq,'-pf',pseudo,'-noappend','-comp','lzo',
-        '-b','131072','-Xcompression-level','9','-tailends','-mkfs-time',epoch,*rootargs,'-processors','1','-no-progress')
+        '-b','131072','-Xcompression-level','9','-tailends','-mkfs-time',epoch,*rootargs,'-no-progress')
     # All inodes, including demo and the logo, keep name/type/mtime/mode/uid/gid (sizes/offsets shift).
     def inodes(image):
         text = subprocess.check_output(['unsquashfs','-pf','-',str(image)]).split(b'\n# START OF DATA')[0]
@@ -2367,7 +2583,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         **({'aic_notifier': aic_notifier} if aic_notifier else {}),
         patch_bytes=len(payload), ring_step_pixels=RING_STEP,
         audio_extension_calls=[dict(address=hex(a), original='0x0320f809', replacement=hex(jal(ps['ringnav_audio_extension']))) for a in AUDIO_EXTENSION_CALLS],
-        version=version, dev=dev, update_repo=repo, peq=audio, bluealsa_sha256=sha(bluealsa), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, logo_sha256=sha(logo_data),
+        version=version, dev=dev, update_repo=repo, signing_key=key.hex(), peq=audio, bluealsa_sha256=sha(bluealsa), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
         **({'rotator_clock': rotator} if rotator else {}),
         **({'q2player_sha256': sha(q2player.read_bytes()), 'rootfs_bytes': size} if q2player else {}),
         **({'pwm_clock': pwm} if pwm else {}),
@@ -2391,6 +2607,8 @@ if __name__ == '__main__':
                     help='FLAC fast paths (comma-separated subset; empty for stock FLAC)')
     ap.add_argument('--update-repo', default=REPO, metavar='OWNER/NAME',
                     help="GitHub repo whose latest release Network Update fetches (default: %(default)s), for a fork's test builds")
+    ap.add_argument('--signing-key', type=pathlib.Path, metavar='PUB.PEM',
+                    help='Ed25519 public key that updates and the app list must be signed with, in place of assets/signing/q2-coda-release.pub (requires --dev)')
     ap.add_argument('--aic-idle-wait', action='store_true',
                     help='experimental: sleep the stopped PCM notifier until start or teardown (requires --dev)')
     ap.add_argument('--rotator-lazy-clock', action='store_true',
@@ -2401,6 +2619,6 @@ if __name__ == '__main__':
                     help='experimental: cooperative Linux/MCU PWM clock gating (requires --dev)')
     a=ap.parse_args()
     try:
-        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.flac_experiments,a.new_player)
+        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.flac_experiments,a.signing_key,a.new_player)
     except (OSError, ValueError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
         ap.error(str(exc))

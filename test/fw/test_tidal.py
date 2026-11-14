@@ -20,6 +20,7 @@ MB = 1 << 20
 CURLOPT_URL, CURLOPT_WRITEDATA, CURLOPT_WRITEFUNCTION = 10002, 10001, 20011
 CURLOPT_NOSIGNAL, CURLOPT_FOLLOWLOCATION, CURLOPT_LOW_SPEED_LIMIT, CURLOPT_LOW_SPEED_TIME = 99, 52, 19, 20
 CURLOPT_XFERINFOFUNCTION, CURLOPT_XFERINFODATA, CURLOPT_NOPROGRESS = 20219, 10057, 43
+CURLOPT_CAINFO, CURLOPT_SSL_VERIFYPEER, CURLOPT_SSL_VERIFYHOST, CURLOPT_SSL_CTX_FUNCTION = 10065, 64, 81, 20108
 CURLE_OK, CURLE_WRITE_ERROR, CURLE_ABORTED_BY_CALLBACK = 0, 23, 42
 STOPPED, PLAYING = 1, 2
 EINTR, EAGAIN = 4, 11
@@ -217,6 +218,10 @@ def test_a_streamed_track_is_kept_on_the_card_and_plays_from_it_next_time(fw):
     opts = cdn.opts
     assert opts[CURLOPT_FOLLOWLOCATION] == 1 and opts[CURLOPT_NOSIGNAL] == 1 and opts[CURLOPT_NOPROGRESS] == 0
     assert opts[CURLOPT_LOW_SPEED_LIMIT] > 0 and opts[CURLOPT_LOW_SPEED_TIME] > 0
+    # the CDN's certificate is checked against the bundled roots, not taken on trust
+    assert C.string_at(opts[CURLOPT_CAINFO]) == b'/etc/scrobble-ca.pem'
+    assert opts[CURLOPT_SSL_VERIFYPEER] == 1 and opts[CURLOPT_SSL_VERIFYHOST] == 2
+    assert CURLOPT_SSL_CTX_FUNCTION not in opts  # libcurl's mbedTLS checks no dates (docs/internals.md#2038)
     t.play(URL, '123')
     assert t.played == [URL, cached('123-0.flac')] and len(t.threads) == 1 and cdn.fetched == [URL]
 
