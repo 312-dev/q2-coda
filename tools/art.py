@@ -158,7 +158,8 @@ def coverage_nonzero(polys, box):
 
 
 # Phosphor Icons (MIT, assets/icons/phosphor/LICENSE), @phosphor-icons/core 2.1.1: each file a 256 unit viewBox of
-# filled paths. A theme's icons are these, drawn at its sizes; no other set.
+# filled paths. A theme's icons are these, drawn at its sizes, and q2-coda's own few in Phosphor's regular style
+# (assets/icons/q2coda, the same 256 unit filled paths, under the repo's licence), named here by that folder.
 PHOSPHOR = ROOT/'assets/icons/phosphor'
 
 
@@ -180,8 +181,9 @@ def spinner(f):
 
 
 def phosphor(name, px, rgb):
-    """Phosphor's icon name (its file's stem, the weight in it) as a px square PNG in rgb, its paths filled nonzero."""
-    svg = (PHOSPHOR/f'{name}.svg').read_text()
+    """Phosphor's icon name (its file's stem, the weight in it; 'q2coda/<stem>' for one of ours) as a px square PNG in
+    rgb, its paths filled nonzero."""
+    svg = (PHOSPHOR.parent/f'{name}.svg' if name.startswith('q2coda/') else PHOSPHOR/f'{name}.svg').read_text()
     check('viewBox="0 0 256 256"' in svg, f'{name}: expected a 256 unit viewBox')
     polys = [[(x * px / 256, y * px / 256) for x, y in poly] for d in re.findall(r'\sd="([^"]+)"', svg) for poly in path(d)]
     return png(px, px, laid(px, px, [(coverage_nonzero(polys, (0, 0, px, px)), lambda x, y: (rgb, 1))]))
@@ -217,10 +219,12 @@ CONFIRM_GLYPH_PX = 56
 # folder's inks (Text Secondary in each half, white on the bar)
 RATE_PX = 14
 # Streaming's service marks (home.c stream_marks): monochrome at 20 px, no disc, in the folder's inks; Phosphor's
-# regular glyphs, and TIDAL's own mark (Phosphor has none) drawn here as its four diamonds, three across and one under
-# the middle, each corner to corner with the next
+# regular glyphs, TIDAL's own mark (Phosphor has none) drawn here as its four diamonds, three across and one under
+# the middle, each corner to corner with the next, and the q2-subsonic card app's (home.c stream_apps) our own
+# submarine with its sonar, its strokes outlined
 STREAM_PX = 20
-STREAM_MARKS = {'spotify': 'spotify-logo', 'app': 'app-window', 'radio': 'radio', 'airplay': 'airplay', 'config': 'sliders-horizontal'}
+STREAM_MARKS = {'spotify': 'spotify-logo', 'app': 'app-window', 'radio': 'radio', 'airplay': 'airplay', 'config': 'sliders-horizontal',
+                'subsonic': 'q2coda/subsonic'}
 TIDAL = ''.join(f'M{x - 3.3} {y}L{x} {y - 3.3}L{x + 3.3} {y}L{x} {y + 3.3}Z' for x, y in ((3.4, 6.7), (10, 6.7), (16.6, 6.7), (10, 13.3)))
 # The inset modal's symbols (menu_modal.c, a set with modal): regular weight at MENU_ICON_PX in FOLDER_INKS, and the
 # picker's check in the accent off the bar

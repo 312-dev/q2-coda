@@ -3,6 +3,7 @@
 - **Unreleased (q2-coda)**:
   - Settings: after a reset, the first settings q2-coda saved could be lost, so the next start turned USB DAC Charging back On if you had turned it Off. Settings are now saved where they are read back, and a settings file already affected is put right the next time a setting is saved.
   - Lists: a title cut short just after a word puts its dots right after the word, as "Wicked Garden (2017...", with no space before them that read as a gap.
+  - Streaming (OLED): the Subsonic app's row has its own mark, a small submarine sending out sonar, and any other card app with its own icon shows it again, small and grey beside its name, as the other services' marks are (it showed no icon at all). A card app without an icon shows the app-window mark.
   - EQ (OLED): with the wheel on the **Simple** and **Advanced** tabs, only the tabs show it; the first row of Advanced's list no longer lights up as well.
   - EQ (OLED): in Light Mode the Simple tab's slider knobs, and the knob on slider pages like Resume Songs, have a thin grey edge, so they no longer vanish white on white.
   - EQ (OLED): after picking a preset on Simple, the switch row still reads **Enabled**, and the preset's name shows on the right of the **Presets** row, as a setting's value does.

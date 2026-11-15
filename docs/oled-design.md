@@ -301,8 +301,11 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   Long Songs, Ratings) keep their own rows.
 - Streaming's rows are one line, 32 px, each service's mark (20 px, monochrome, no disc) centred on x 34 in Text
   Secondary, white on the selection, its name from x 52: Phosphor's `spotify-logo`, `app-window` (a card app without
-  its own icon), `radio`, `airplay` and `sliders-horizontal` (Configuration), and TIDAL's own four diamonds, drawn in
-  `tools/art.py` (Phosphor has none); TIDAL and Tidal Downloads share it.
+  its own icon), `radio`, `airplay` and `sliders-horizontal` (Configuration), TIDAL's own four diamonds, drawn in
+  `tools/art.py` (Phosphor has none), TIDAL and Tidal Downloads sharing it, and for the Subsonic card app (id
+  `subsonic`, with or without its own icon files) q2-coda's submarine with two sonar arcs. Any other card app with its
+  own icon shows that icon scaled into the same 20 px box, greyed as every card app icon is under this theme
+  (`icons.addon_mono`) rather than inked: a tint would turn an icon drawn on a filled tile into a solid square.
 - Ratings' lists show a song's hearts as five Phosphor glyphs at 14 px at the start of its second line, `heart-fill`
   for its hearts and `heart` for the rest, in Text Secondary (white on the selection), then "· Artist".
 
@@ -498,6 +501,9 @@ the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where
 - One set: [Phosphor Icons](https://phosphoricons.com) (MIT), `@phosphor-icons/core` 2.1.1. The
   SVGs the theme uses are vendored in `assets/icons/phosphor/` with their licence, and
   `tools/art.py` draws the theme's bitmaps from them at build time, in final colours per half.
+  A mark Phosphor lacks is drawn for q2-coda in Phosphor's regular style (16 unit strokes, round
+  caps and joins, on the 256 unit grid), outlined to filled paths, and kept apart in
+  `assets/icons/q2coda/` under the repository's licence: the Subsonic card app's `subsonic.svg`.
 - Weights by role: `fill` for the play state and a favourite's heart, `bold` for chevrons and Now
   Playing's and the confirmation's shuffle and repeat, `regular` for row symbols and Now Playing's
   heart and More. Sizes are the design's: 13 px play state, 15 px chevron, 20 px row symbols,
