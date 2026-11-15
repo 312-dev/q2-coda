@@ -6571,8 +6571,9 @@ void bar_title_sync(void *win) {
     /* a page under the top window that writes its caption would flip the bar with each paint */
     if (feedback_toast(win)) win = feedback_under(win); /* OLED's toast leaves the page in sight */
     if (!st.bar_title || !win || win != feedback_top()) return;
-    /* an inset modal has no title: the page under it keeps its own, and its Songs action row */
-    if (modal_win(win)) return;
+    /* an inset modal has no title: the bar names the page under it, which a dialog over the
+     * modal may have written over (Delete Playlist's confirm, feedback_confirm) */
+    if (modal_win(win) && !(win = feedback_under(win))) return;
     static const unsigned none = 0;
     char s[256], now[256]; /* stock writes nothing unless all of it fits */
     /* Home names the list it shows; a status row names none of Home's own, and shows the clock */
