@@ -10,8 +10,9 @@ emulator shares this machine's network, so the daemon is on 127.0.0.1. The pairi
 shows it from, the daemon's /tmp/coda-rc.pair, through /proc/PID/root of the process listening on the port.
 
 Checks, in order: pairing (a fresh key, the Dialog's screenshot) and a second session on the kept key; browse
-from the root to an album; Play of the album from its first song, then the State push that follows with that
-song, and the queue at it; Pause and Play as pushes; Next to another of the album's songs; Previous back; the album's
+from the root to an album, its rows numbered apart from their titles, no number on search or Tracks rows, and
+NOT_FOUND for ids that name nothing; Play of the album from its first song, then the State push that follows with
+that song, and the queue at it; Pause, Play and Play/Pause, each played by the time its Ack comes; Next to another of the album's songs; Previous back; the album's
 cover as an image. Each step prints one line; the exit status is the number of failures."""
 import argparse
 import pathlib
@@ -124,6 +125,20 @@ def main(argv=None):
     songs = s.browse(album['id'])
     tracks = [i for i in songs['items'] if i['playable']]
     check('an album lists its songs', len(tracks) >= 2, f"{album['title']}: {len(tracks)} songs")
+    check('album rows: the title alone, the track number apart',
+          all(t.get('number', 0) > 0 and not re.match(r'\d+ \u2022 ', t['title']) for t in tracks),
+          f"{tracks[0].get('number')} / {tracks[0]['title']}")
+    hits = [i for g in s.search(tracks[0]['title'].split()[0]) for i in g['items']]
+    flat = s.browse('tracks', limit=20)['items']
+    check('no number outside an album', hits != [] and not any(i.get('number') for i in hits + flat),
+          f"{len(hits)} search rows, {len(flat)} Tracks rows")
+    for node in ('album:no-such-album', 'artist:rnope', 'genre:gnope', 'year:1066', 'dir:no/such', 'pl:99',
+                 'albums|name|ZZZ'):
+        try:
+            got = f"{len(s.browse(node)['items'])} rows"
+        except client.RemoteError as e:
+            got = e.name
+        check(f'{node} names nothing', got == 'NOT_FOUND', got)
 
     s.subscribe(True)
     s.play(album['id'], start=tracks[0]['id'])
@@ -135,10 +150,15 @@ def main(argv=None):
     p = until(s, lambda p: p.get('position', {}).get('position_ms', 0) > 0, 10)
     check('the position moves', p is not None, f"{p and p['position']['position_ms']} ms")
 
+    s.transport('pause')  # its Ack comes once the player has paused
+    check('Pause', playing(s).get('play_state') == 2)
     s.transport('pause')
-    check('Pause', until(s, lambda p: p.get('now_playing', {}).get('play_state') == 2) is not None)
+    check('Pause when paused', playing(s).get('play_state') == 2)
     s.transport('play')
-    check('Play again', until(s, lambda p: p.get('now_playing', {}).get('play_state') == 1) is not None)
+    check('Play again', playing(s).get('play_state') == 1)
+    s.transport('toggle')
+    check('Play/Pause', playing(s).get('play_state') == 2)
+    s.transport('toggle')
     # Next and Previous as the wheel's buttons: with Shuffle on, Next is another of the album's songs, not the second
     ids = {t['id']: t['title'] for t in tracks}
     s.transport('next')
