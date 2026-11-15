@@ -3960,6 +3960,10 @@ extern int ipod_home(void), ipod_home_rockbox(void), home_shortcut_open(void *, 
     home_lib_on(void), row_preview_on(void), library_search(void);
 extern void library_rows(void *list), stream_rows(void *list);
 extern void home_pane_read(int *services, int *games, int *free_tenths);
+/* home.c: Home's overflow */
+extern void home_overflow(void *list, int bottom), home_in_place(void *list), home_pad(void *view),
+    home_fades(void *canvas, void *list, int list_y, int cols, int split);
+extern int shuffle_songs(void *ctx, void *event), library_search_open(void *ctx, void *event);
 extern int library_count(const char *sql), msg_counting(void);
 extern const char *ipod_home_shortcut(void);
 /* Split's menu width; the art fills the rest. */
@@ -4599,6 +4603,8 @@ void coverflow_home_row(void *surface, void *row, int id, int painting) {
             if (names[i] && !tk_strcmp(name, names[i])) kind = (int)i;
         /* a set without home_lib: stock's name */
         if (!tk_strcmp(name, "img_stream")) kind = PANE_STREAM;
+        /* Shuffle Songs the Library's Shuffle's note; Search, as the Library's, the Library's */
+        if (!tk_strcmp(name, "img_shuffle_songs")) kind = PANE_SHUFFLE;
         if (kind == PANE_ROCKBOX) { /* the Shortcut row: the Games icon, its count only for Games;
                                      * the Podcasts and Audiobooks folders, Folder's icon */
             const char *s = ipod_home_shortcut();
@@ -4920,24 +4926,49 @@ void coverflow_home_bar(void *canvas, void *top) {
     canvas_draw_image(canvas, home.frame, src, dst);
 }
 
+/* Home's main list and its scroll view d px taller upward, their rows where they were: the row
+ * above the list's top paints in coverflow_home_strip, and a paint later, d's negative undoes it.
+ * Only the fields: nothing lays out between. */
+static void list_reach(void *l, int d) {
+    void *view = widget_get_child(l, 0);
+    I(l, W_Y) -= d;
+    I(l, W_H) += d;
+    I(view, W_H) += d;
+    I(view, SCROLL_Y) -= d;
+}
+/* The rows coverflow_home_strip paints, top and h on the screen: from the list's top to the
+ * window's; under OLED's pages from the screen's top, for the row above a scrolled list and its fade
+ * (home.c home_fades). */
+static int strip_rows(void *l, int *h) {
+    int wy = I(home.win, W_Y), top = oled_pages() ? 0 : wy + I(l, W_Y);
+    *h = wy - top;
+    return top;
+}
+
 /* The bar's background, after coverflow_home_bar: Home's main menu where Split raises it above
  * the window (home_width, HOME_SPLIT_TOP), the rows between its top and the window's that Home's
- * own paint clips away. The list paints into the bar's canvas at its place on the screen, left of the
- * pane; taps there reach the bar. Under a window's slide Home is a snapshot: none. The caller
- * puts navigation.c's paint_w back after. */
+ * own paint clips away, and under OLED's pages the row above it once it has scrolled, faded. The
+ * list paints into the bar's canvas at its place on the screen, left of the pane; taps there reach
+ * the bar. Under a window's slide Home is a snapshot: none. The caller puts navigation.c's paint_w
+ * back after. */
 void coverflow_home_strip(void *canvas, void *top) {
     void *l = home.list;
-    int old[4], clip[4], wx = l ? I(home.win, W_X) : 0, wy = l ? I(home.win, W_Y) : 0;
+    int old[4], clip[4], h, wx = l ? I(home.win, W_X) : 0, wy = l ? I(home.win, W_Y) : 0;
     if (!l || top != home.win || I(l, W_Y) >= 0 || !widget_get_visible(l) ||
-        window_manager_is_animating(window_manager()) ||
-        !clip_within(canvas, old, clip, 0, wy + I(l, W_Y), pane_x(), -I(l, W_Y)))
+        !widget_count_children(l) || window_manager_is_animating(window_manager()))
         return;
+    int from = strip_rows(l, &h);
+    if (!clip_within(canvas, old, clip, 0, from, pane_x(), h)) return;
+    int y = wy + I(l, W_Y), reach = oled_pages() && I(widget_get_child(l, 0), SCROLL_Y) > 0 ? y : 0;
     canvas_set_clip_rect(canvas, clip);
     canvas_translate(canvas, wx, wy);
     home.stripping = 1;
+    if (reach) list_reach(l, reach);
     widget_paint(l, canvas);
+    if (reach) list_reach(l, -reach);
     home.stripping = 0;
     canvas_translate(canvas, -wx, -wy);
+    home_fades(canvas, l, y, pane_x(), 1);
     canvas_set_clip_rect(canvas, old);
 }
 /* After a paint of the raised list in its window (a new selection, a slide's frame), its rows in
@@ -4947,7 +4978,8 @@ static int strip_due(const void *unused) {
     void *bar = *(void *const *)system_bar, *l = home.list;
     home.strip_timer = 0;
     if (bar && l && I(l, W_Y) < 0) {
-        int rows[4] = { 0, I(home.win, W_Y) + I(l, W_Y), pane_x(), -I(l, W_Y) };
+        int rows[4] = { 0, 0, pane_x(), 0 };
+        rows[1] = strip_rows(l, &rows[3]);
         widget_invalidate_force(bar, rows);
     }
     return 0; /* RET_REMOVE */
@@ -4993,10 +5025,15 @@ void coverflow_home_clip(void *w, void *canvas, int begin) {
             pane_shadow(canvas, pane_x() - I(w, W_X), -I(w, W_Y), client_h());
             stock_canvas_set_fill_color(canvas, fill);
         }
+        if (w == home.list && !home.stripping) {
+            int split = widget_get_visible(home.art);
+            home_fades(canvas, w, I(canvas, CANVAS_Y), split ? pane_x() : 375, split);
+        }
         if (home.clipped) canvas_set_clip_rect(canvas, home.clip);
         home.clipped = 0;
         return;
     }
+    if (w == home.list && widget_count_children(w)) home_pad(widget_get_child(w, 0));
     if (w == home.list && !home.stripping && I(w, W_Y) < 0) rearm(&home.strip_timer, strip_due, 0);
     int clip[4], art = w == home.art, x = pane_x(), pane = widget_get_visible(home.art) ? x : 375;
     clip_within(canvas, home.clip, clip, I(canvas, CANVAS_X) - I(w, W_X) + (art ? x : 0),
@@ -5019,6 +5056,12 @@ static void *home_open(void) {
            : home.stream && widget_get_visible(home.stream) ? home.stream
            : home.sets && widget_get_visible(home.sets)     ? home.sets
                                                             : (void *)0;
+}
+
+/* Home's main list's scroll view (home.c home_rest), 0 before Home is made. */
+void *coverflow_home_view(void) {
+    return home.list && widget_count_children(home.list) ? widget_get_child(home.list, 0)
+                                                         : (void *)0;
 }
 
 /* Split under a home_lists_full theme (OLED's): the lists Home's rows open take the whole width,
@@ -5078,7 +5121,8 @@ void coverflow_home_layout(void) {
     void *rockbox = widget_lookup(home.win, "btn_rockbox", 1);
     if (rockbox) {
         int shown = ipod_home_rockbox();
-        widget_restack(rockbox, shown ? 4 : 6); /* after Folder, else last */
+        /* after Folder, else last */
+        widget_restack(rockbox, shown ? 4 : widget_count_children(P(rockbox, W_PARENT)) - 1);
         home_show(rockbox, shown); /* hidden, it would still take Streaming's taps */
         widget_set_text_utf8(widget_lookup(home.win, "label_rockbox", 1), ipod_home_shortcut());
         /* ponytail: the Shortcut card stays when the row hides (Shortcut: Rockbox, no Rockbox on
@@ -5092,6 +5136,8 @@ void coverflow_home_layout(void) {
         inner = !full ? split : T->home_full_row, x = T->home_text_x,
         end = T->home_label_end[full];
     home_width(home.list, outer, inner, x, end, 0);
+    home_overflow(home.list, client_h());
+    home_in_place(home.list);
     if (home.sets)
         home_width(home.sets, sub_full() ? 375 : outer, sub_full() ? T->home_full_row : inner, x,
                    T->home_label_end[full || sub_full()], 0);
@@ -5257,6 +5303,8 @@ int coverflow_home(void *win, void *ctx) {
     widget_on(widget_lookup(win, "img_cover_flow", 1), EVT_CLICK, coverflow_open, 0);
     widget_on(widget_lookup(win, "img_rockbox", 1), EVT_CLICK, home_shortcut_open, 0);
     widget_on(widget_lookup(win, "img_settings", 1), EVT_CLICK, home_settings, 0);
+    widget_on(widget_lookup(win, "img_shuffle_songs", 1), EVT_CLICK, shuffle_songs, 0);
+    widget_on(widget_lookup(win, "img_home_search", 1), EVT_CLICK, library_search_open, 0);
     home.win = win;
     void *art = widget_lookup(win, "img_homeart", 1);
     home.art = art;

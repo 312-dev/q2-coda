@@ -5890,7 +5890,7 @@ assert m.names(m.get(syms['p_deque_showlist']))==['Row 0'] and ('stock_localclas
 # the tracks query and handoff. The art thread itself runs on the host (test/coverflow.py).
 from ipod import HOME_TEXT_X, HOME_LIST_W, HOME_OURS, HOME_PAGE, HOME_ROW, HOME_ROWS, HOME_TOP, decode
 cards=[c[2]['name'] for c in decode((B/'ui'/HOME_PAGE).read_bytes())[3][1][3][0][3]]  # list_view_home's scroll_view's rows
-assert len(cards)==7 and cards[2]=='btn_coverflow', cards
+assert len(cards)==len(HOME_ROWS)==9 and cards[2]=='btn_coverflow', cards
 home_hook=HOOKS['home_page_init']
 assert struct.unpack_from('<I',demo,fileoff(demo,home_hook[0]))[0]==j(payload_syms['coverflow_home'])
 passed()
@@ -5950,19 +5950,20 @@ m,w,es=walk(10,5); w2,es2=m.page_list(10,extent=1000); m.nodes[m.top]['anim_hint
 assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==204
 assert [c[0] for c in m.moved()]==['scroll_view_set_offset']; passed()
 
-# Home is an ordinary list: the wheel walks the seven rows one by one, bumps at both ends and
-# wraps after a pause, Return selects Now Playing, the bar spans the list's width and centre
-# clicks the image.
+# Home is an ordinary list: the wheel walks the nine rows one by one, the seven its box shows and then
+# the two it scrolls in, so the last rests where the seventh did; it bumps at both ends and wraps after a
+# pause, Return selects Now Playing, the bar spans the list's width and centre clicks the image.
 m=Machine(); view,imgs=home_list(m); click_target(m,imgs[2])
 m.paint(view)
 assert m.selected(view)==0
-for i in range(1,7): assert m.call()==11 and m.selected(view)==i and m.get(view+O['SCROLL_Y'])==0
+for i in range(1,9): assert m.call()==11 and m.selected(view)==i
+assert m.get(view+O['SCROLL_Y'])==2*HOME_ROW
 m.paint(view); assert m.rounded[0]['rect']==(25,6*HOME_ROW+HOME_ROW//2-3,6,6)
-assert m.call(gap=50)==11 and m.selected(view)==6   # bumped
-assert m.call(gap=O['EDGE_PAUSE_MS'])==11 and m.selected(view)==0
+assert m.call(gap=50)==11 and m.selected(view)==8   # bumped
+assert m.call(gap=O['EDGE_PAUSE_MS'])==11 and m.selected(view)==0 and m.get(view+O['SCROLL_Y'])==0
 assert m.call(O['KEY_PREV'],gap=50)==11 and m.selected(view)==0   # bumped
-assert m.call(O['KEY_PREV'],gap=O['EDGE_PAUSE_MS'])==11 and m.selected(view)==6
-for i in range(5,2,-1): assert m.call(O['KEY_PREV'])==11 and m.selected(view)==i
+assert m.call(O['KEY_PREV'],gap=O['EDGE_PAUSE_MS'])==11 and m.selected(view)==8
+for i in range(7,2,-1): assert m.call(O['KEY_PREV'])==11 and m.selected(view)==i
 assert m.call(O['KEY_RETURN'])==11 and m.selected(view)==0 and not destinations(m)
 for i in (1,2): assert m.call(gap=1000)==11 and m.selected(view)==i
 assert not m.slides and m.confirm()==11 and m.dispatched()[0][1]==imgs[2]; passed()
@@ -13498,7 +13499,7 @@ for config,listw,roww,shown in (({'HOME':'1'},375,O['HOME_FULL_ROW'],0),({},O['H
                                 ({'HOME':'1','THEME':'2'},375,O['HOME_MODERN_ROW'],0),({'THEME':'2'},O['HOME_SPLIT_W'],O['HOME_SPLIT_W'],1)):
     CONFIG.clear(); CONFIG.update(config); m=CoverflowMachine(); m.open()
     rowsw=[m.get(w+O['W_W']) for w in [m.list,*m.imgs]]
-    assert rowsw==[listw]+[roww]*7 and m.nodes[m.art].get('visible',1)==shown,(config,rowsw); passed()
+    assert rowsw==[listw]+[roww]*len(HOME_ROWS) and m.nodes[m.art].get('visible',1)==shown,(config,rowsw); passed()
 # A page list on the half's paper: page_list writes black inline, the colour hook answers the half's paper for it and the page.
 for light,paper in (('1',0xffffffff),('0',0xff000000)):
     SETUP[:]=[lambda k:(k.config.update(LIGHT=light),classic_light(k))]; pp=CoverflowMachine(); SETUP.clear(); classic_light_on(pp); pp.top=pp.node('window','era_page')
@@ -13605,9 +13606,9 @@ for table in (False,True):
             passed()
 # Home as built: the same, its ends bump then wrap after a pause, and Centre opens the row that is highlighted.
 m=Machine(); view,imgs=home_list(m); click_target(m,imgs[2]); m.paint(view)
-assert turn(m,view,(1000,100,100,1000,100,100,100,400))==[1,2,3,4,5,6,6,0]
-assert m.get(view+O['SCROLL_Y'])==0 and turn(m,view,(1000,400,100,100),PREV)==[0,6,5,4]
-assert m.confirm()==11 and m.dispatched()[0][1]==imgs[4]; passed()
+assert turn(m,view,(1000,100,100,1000,100,100,100,100,100,400))==[1,2,3,4,5,6,7,8,8,0]
+assert m.get(view+O['SCROLL_Y'])==0 and turn(m,view,(1000,400,100,100),PREV)==[0,8,7,6]
+assert m.confirm()==11 and m.dispatched()[0][1]==imgs[6]; passed()
 # A BUTTONS dialog: the same between its buttons, and nothing scrolls.
 m=Machine(); d=m.node('dialog','confirminfo_dialog'); m.word(d+O['W_PARENT'],m.wm); m.top=d
 buttons=[m.entry(d,220) for _ in range(3)]; m.nodes[d]['children']=buttons
@@ -13656,7 +13657,7 @@ assert got==[(1,1),(1,2),(1,3),(1,4)],got; passed()
 # Slow ticks click on every row; Home's end bumps silently, then the wrap after a pause clicks;
 # a repaint and a long wait add nothing.
 m,view=home_machine()
-assert [tick(m) for _ in range(6)]==[1]*6 and m.selected(view)==6
+assert [tick(m) for _ in range(8)]==[1]*8 and m.selected(view)==8
 assert [tick(m,gap=gap) for gap in (1000,50,400,100)]==[0,0,1,1] and m.selected(view)==1
 m.paint(view); assert not buzzes(m)
 m.advance(10000); assert not buzzes(m); passed()
@@ -13936,7 +13937,7 @@ def home_settings(full,modern=0):
         CONFIG['THEME']=str(2*modern); CONFIG['SHORTCUT']='0'; CONFIG['HOME']=str(full); m=ShuffleMachine(); del CONFIG['THEME']; del CONFIG['SHORTCUT']; del CONFIG['HOME']; m.rockbox_mode=0; view,imgs=home_list(m)
         assert m.call(address=home_hook[0],args=(m.top,0,0,0),gap=0)==0
         btn=named(m,m.top,'btn_rockbox'); order=lambda: [m.nodes[r]['name'][4:] for r in m.nodes[view]['children']]
-        assert order()==['playing','localmusic','coverflow','folder','stream','settings','rockbox'] and not m.nodes[btn]['visible']
+        assert order()==['playing','localmusic','coverflow','folder','shuffle_songs','stream','home_search','settings','rockbox'] and not m.nodes[btn]['visible']
         assert m.nodes[btn]['sensitive']==0  # hidden rows keep their taps: Streaming's would launch Rockbox
         m.rockbox_mode=0o100755; m.call(address=payload_syms['coverflow_home_layout'],args=(0,0,0,0),gap=0)
         assert order()==HOME_ROWS and m.nodes[btn]['visible'] and m.nodes[btn]['sensitive']==1; passed()
@@ -14073,7 +14074,8 @@ def pane_home(**config):
     for name in HOME_ROWS_PANE: click_target(m,named(m,m.top,name))
     assert m.call(address=HOOKS['home_page_init'][0],args=(m.top,0,0,0),gap=0)==0
     return m
-HOME_ROWS_PANE=('img_playing','img_library','img_folder','img_rockbox','img_services','img_settings','img_cover_flow')
+HOME_ROWS_PANE=('img_playing','img_library','img_folder','img_rockbox','img_shuffle_songs','img_services','img_home_search','img_settings',
+                'img_cover_flow')
 def pane_shows(m):
     art=named(m,m.top,'img_homeart'); m.letters=[]; m.calls=[]; m.image_draws=[]
     m.call(address=payload_syms['coverflow_home_clip'],args=(art,m.canvas,0,0),gap=0)
@@ -14084,7 +14086,7 @@ def pane_cases():
     # Row Preview off (ROWPREVIEW 0): every row shows Now Playing's pane, and nothing is counted or read from the card.
     m=pane_home(ROWPREVIEW='0'); view=named(m,m.top,'scroll_view_home'); pane_nocover(m); m.advance(1500); m.paint(view)
     assert not m.closed_db and pane_shows(m)==(['classic_light_note'],['3 Songs'])
-    for row in range(1,7):
+    for row in range(1,9):
         m.call(); assert pane_shows(m)==(['classic_light_note'],['3 Songs']),row
     passed()
     m=pane_home(); view=named(m,m.top,'scroll_view_home'); m.call(address=payload_syms['coverflow_home_art'],args=(m.top,0,0,0),gap=0)
@@ -14093,9 +14095,10 @@ def pane_cases():
     m=pane_home(SHORTCUT='6'); view=named(m,m.top,'scroll_view_home'); pane_nocover(m)
     m.advance(1500); assert m.closed_db
     m.paint(view); want=[(['classic_light_note'],['3 Songs']),(['classic_light_note'],['7 Songs']),(['classic_light_icon_stack'],['6 Albums']),(['classic_light_icon_folder'],[]),
-                         (['classic_light_icon_game'],['4 Games']),(['classic_light_icon_wave'],['5 Services']),(['classic_light_icon_gear'],['4.0 GB Free'])]
+                         (['classic_light_icon_game'],['4 Games']),(['classic_light_icon_note'],['7 Songs']),(['classic_light_icon_wave'],['5 Services']),
+                         (['classic_light_note'],['7 Songs']),(['classic_light_icon_gear'],['4.0 GB Free'])]  # Shuffle Songs: Shuffle's; Search: the Library's
     assert pane_shows(m)==want[0],pane_shows(m)
-    for row in range(1,7):
+    for row in range(1,9):
         m.calls=[]; assert m.call()==11
         assert not [c[0] for c in m.calls if c[0] in ('sqlite3_open','sqlite3_exec','statfs','opendir@GLIBC_2.0','fopen@GLIBC_2.2','toolsReadConfig')],row  # the wheel's path reads nothing
         assert ('widget_invalidate_force',P_ART:=m.get(named(m,m.top,'img_homeart')+O['W_PARENT'])) in [c[:2] for c in m.calls],row  # the pane joins the row's frame
@@ -14108,8 +14111,8 @@ def pane_cases():
         m=pane_home(SHORTCUT='6',HOMELIB=homelib); view=named(m,m.top,'scroll_view_home'); pane_nocover(m)
         if stock_name: m.nodes[named(m,m.top,'img_services')]['name']='img_stream'
         m.advance(1500); m.paint(view)
-        for _ in range(5): m.call()
-        assert pane_shows(m)==want[5],(homelib,pane_shows(m))
+        for _ in range(6): m.call()
+        assert pane_shows(m)==want[6],(homelib,pane_shows(m))
     passed()
     m=pane_home(); m.db.execute("delete from songtable where id>1"); m.advance(1500); view=named(m,m.top,'scroll_view_home'); pane_nocover(m); m.paint(view)
     for _ in range(2): m.call()

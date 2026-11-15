@@ -108,9 +108,14 @@ instead: the gloss band and the white chevron on the selected row (below, and [T
 **Theme: Modern** does the same with its accent bar, from the top of the screen, its text at
 `HOME_MODERN_TEXT_X` and Full's rows `HOME_MODERN_ROW` wide, with the chevron on the bar.
 
-The seven destinations remain Now Playing, Library, Cover Flow, Folder, Rockbox, Streaming and
-Settings. Rockbox is visible only when its binary is on the card, unless Display → Appearance's **Shortcut**
-(`IPOD/SHORTCUT` 0-11, read as a decimal by `config_value`) turns that row into Artists, Albums, Favorites, Rated Albums, Shuffle, Games, Playlists, Podcasts, Audiobooks or Groovebox (`home_shortcut_open`; Groovebox (10, `SHORTCUT_GROOVEBOX`) is the App Store's Groovebox card game, started by id through `addon_game_open` as its Games row would start it (the tap toasts when no card game has the id), shown as a row only while `/mnt/mmc/.groovebox/q2-groovebox` is a regular file (`groovebox_available`, cached as `st.home_groovebox`; `bar_sync` relays out Home when that changes, as for Rockbox), and offered by the Centre cycle only then, while Rockbox is always offered; Rated Albums is Ratings → Albums, `rated_albums`; Shuffle is the Library's Shuffle page, `shuffle_menu`; Playlists is the Library's list, opened as stock's Home opens it; Podcasts and Audiobooks are the card's folders, opened as their Local Music rows open them, `media_click`, which toasts "No Podcasts folder on the card" without one; Split's pane shows Folder's icon for them); None (11, `SHORTCUT_NONE`) takes the row off Home's list, as a missing Rockbox does (`ipod_home_rockbox` returns 0), in Split, Full and every theme; the list's count changes, so its selection starts over, and it wraps over the rows left; with no key, or a value this build does not know (12 and up, and 11 on a build before 1.8.2, which reads it as no choice and shows the row), it is Rockbox when the card has it, else Favorites. Centre cycles Rockbox, Favorites, Shuffle, Rated Albums, Playlists, Artists, Albums, Games, Podcasts, Audiobooks, Groovebox (when installed), None. Settings opens Playback and
+The nine rows are Now Playing, Library, Cover Flow, Folder, Rockbox, Shuffle Songs, Streaming,
+Search and Settings. **Shuffle Songs** shuffles the whole library and starts playing, as the Library's
+Shuffle → Shuffle Songs does (`shuffle_songs`), and opens Now Playing. It acts rather than opening a
+list, so it has no chevron (`paint_chevrons`; under OLED its label takes the chevron's room,
+`home_in_place`, and Minimal's capitals close up to fit, `paint_caps`); with no song it says "Update
+Local Music first". **Search** opens the Library's search (`library_search_open`: the
+letter strip under OLED, stock's search elsewhere). Rockbox is visible only when its binary is on the card, unless Display → Appearance's **Shortcut**
+(`IPOD/SHORTCUT` 0-11, read as a decimal by `config_value`) turns that row into Artists, Albums, Favorites, Rated Albums, Shuffle, Games, Playlists, Podcasts, Audiobooks or Groovebox (`home_shortcut_open`; Groovebox (10, `SHORTCUT_GROOVEBOX`) is the App Store's Groovebox card game, started by id through `addon_game_open` as its Games row would start it (the tap toasts when no card game has the id), shown as a row only while `/mnt/mmc/.groovebox/q2-groovebox` is a regular file (`groovebox_available`, cached as `st.home_groovebox`; `bar_sync` relays out Home when that changes, as for Rockbox), and offered by the Centre cycle only then, while Rockbox is always offered; Rated Albums is Ratings → Albums, `rated_albums`; Shuffle is the Library's Shuffle page, `shuffle_menu`; Playlists is the Library's list, opened as stock's Home opens it; Podcasts and Audiobooks are the card's folders, opened as their Local Music rows open them, `media_click`, which toasts "No Podcasts folder on the card" without one; Split's pane shows Folder's icon for them); None (11, `SHORTCUT_NONE`) takes the row off Home's list, as a missing Rockbox does (`ipod_home_rockbox` returns 0), in Split, Full and every theme; the list's count changes, so its selection starts over, and it wraps over the rows left; with no key, or a value this build does not know (12 and up, and 11 on a build before 1.8.2, which reads it as no choice and shows the row), it is Rockbox when the card has it, else Favorites. Centre cycles Rockbox, Favorites, Shuffle, Rated Albums, Playlists, Artists, Albums, Games, Podcasts, Audiobooks, Groovebox (when installed), None. Carousel's cards are stock's and have none for Shuffle Songs or Search. Settings opens Playback and
 System; Return restores the menu's previous selection, and a short Return on the main menu selects
 Now Playing; a short Return with Now Playing selected opens it without changing playback. Return there goes back to Home. The wheel bumps at either end of both lists and wraps after a pause, as ring lists do ([internals.md](internals.md#wheel-movement)).
 Folder opens directly at the SD root when a card is in and no OTG drive is connected; Back at that root returns
@@ -119,7 +124,17 @@ Library’s Podcasts/Audiobooks shortcuts keep their usual Back navigation.
 The native stock handlers, translation keys, full-row tap targets and submenu animation remain intact.
 
 Minimal's rows are `HOME_ROW=39` high from `HOME_TOP=8`; Classic's are its set's `home_row` (32),
-both Home menus directly below the status bar, matching Library. Minimal's 6-pixel dot sits at x 25, clear of the
+both Home menus directly below the status bar, matching Library. The main menu rests on `HOME_REST`
+(7) rows, as many as every set's window fits, and scrolls the others as a list does: scrolled to its
+end, its last row sits where the seventh's does (`patch/home.c` `home_overflow`, `home_rest`; a
+hidden Shortcut row, restacked last, is not scrolled to). In Minimal, Classic and Modern the menu's
+box is those seven rows. Under OLED it runs on to the screen's bottom, and the rows below the
+seventh show through a fade into the black: in Full a straight one from 16 px above the seventh's
+foot (y 266) to y 316, and once the menu has scrolled another over its first row's top 14 px; in
+Split both follow the glass's rounded edge, 34 px from its top edge and 56 px from its bottom one,
+and the row above y 40, in the status row, shows through the top one (`home_fades`, from the
+list's paint and `coverflow_home_strip`'s). A fade is drawn only while rows lie past it, and never
+over the selected row. Minimal's 6-pixel dot sits at x 25, clear of the
 bottom row's corner, and its labels start 8 pixels after it (x 39) and end 33 pixels before the row's
 edge. Both menus are 375 pixels wide in the asset; the payload lays them out (below). Long
 translated labels ellipsize and scroll, in the stock font under Minimal.

@@ -450,6 +450,36 @@ def oled_geom(fw):
     return next(i for i, s in enumerate(sets) if s[names.index('list_fit')])
 
 
+def home_page(ui, fw, st, rows=9, hidden=()):
+    """Home's window under OLED: its main list's scroll view runs on to the window's foot, the rest's seven rows
+    and two more; coverflow.c's home.list is its list."""
+    theme(fw, 3)
+    st('geom').value = oled_geom(fw)
+    win = ui.widget('window', ui.wm, (0, 58, 375, 262), name='home_page')
+    lst = ui.widget('list_view', win, (0, 0, 375, 262))
+    view = scroll_list(ui, lst, titles(rows), (0, 0, 375, 262))
+    for i in hidden:
+        view.children[i].visible = False
+    ui.top = win
+    fw.var('coverflow__home', Home).list = lst.at
+    return view
+
+
+@pytest.mark.parametrize('hidden, end', (((), 2 * ROW_H), ((8,), ROW_H)))
+def test_home_s_list_rests_on_seven_rows_and_scrolls_the_rest(fw, ui, st, hidden, end):
+    """sel_height is the rest's 7 rows, not the box's; the end is the shown rows' foot less them (home.c home_rest),
+    whatever stock's layout keeps for a hidden row."""
+    view = home_page(ui, fw, st, hidden=hidden)
+    fw.fn('navigation__paint_selection', None, C.c_void_p, C.c_void_p)(view.at, C.create_string_buffer(0x100))
+    seen = []
+    for _ in range(9 - len(hidden) - 1):
+        key(fw, ui, KEY_NEXT, ui.now + SLOW)
+        seen.append((view.props.get(SEL), view.int(SCROLL_Y)))
+    assert [o for _, o in seen] == [0] * 6 + [ROW_H, 2 * ROW_H][:len(seen) - 6]
+    assert seen[-1] == (8 - len(hidden), end)
+    assert all(0 <= ROW_H * s - o and ROW_H * (s + 1) - o <= 7 * ROW_H for s, o in seen)  # inside the rest
+
+
 @pytest.mark.parametrize('cls, ring', [(O['CLASS_ALBUMS'], True), (0xff10, False)])
 def test_album_page_wraps_only_as_the_albums_list(fw, ui, cls, ring):
     fw.var('fw_ctx_g_class_type', C.c_int).value = cls

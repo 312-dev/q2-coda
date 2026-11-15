@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Home: two new rows, **Shuffle Songs**, which shuffles your whole library and starts playing it, and **Search**, which opens the Library's search. Home now has nine rows and shows seven at a time, in every theme: turn past the seventh and the menu scrolls, and at its end the last row sits where the seventh did. Under **Theme: OLED** the rows beyond the seventh, and once you have scrolled the row above the first, show faintly, fading into the black, instead of being cut off.
   - Lists: under **Theme: OLED**, scrolling to the end of a list with a gap in it, such as System settings → Power or Now Playing's ⋯ menu, no longer leaves its top row cut off.
   - Security: **SyncLink** (Shanling's phone remote, System settings → Wireless → SyncLink) is off unless you turn it on, as it lets any nearby phone control the Q2 and read its Wi-Fi password without asking for one. If you had it on, this update turns it off once; choose Bluetooth or Wi-Fi on its page to use it again. Its row says what it allows.
   - Volume: turning the wheel slowly still moves the volume one step at a time, but a fast spin now covers the range quickly, up to 10 steps a click, picking up speed as you keep turning, as Rockbox does on an iPod. The volume bar slides to each new level instead of jumping. Wheel Sensitivity still sets how far a click is.

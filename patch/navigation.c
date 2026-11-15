@@ -1040,7 +1040,9 @@ static int view_top(menu_t *m) {
  * client under the bar (W_Y summed up to the window), where the rows below draw on to the glass but
  * a selected one's text would not show. */
 static int sel_height(menu_t *m) {
-    int y = 0, end = geom_val(V_LIST_END);
+    int y = 0, end = geom_val(V_LIST_END), rest = home_rest(m->w, (int *)0);
+    /* Home's main list rests on its rows' height, whatever runs on below (home.c home_rest) */
+    if (rest) return rest < m->height ? rest : m->height;
     /* an inset modal's rows end in its panel, clear of the glass (menu_modal.c) */
     if (!end || m->kind == 3 || m->kind == 4 || modal_rows_of(m->w)) return m->height;
     void *wm = window_manager();
@@ -1050,7 +1052,9 @@ static int sel_height(menu_t *m) {
 
 /* Largest viewport top that still shows content; the clamp bound for every glide. */
 static int scroll_end(menu_t *m, int height) {
+    int foot;
     if (m->kind == 2) return m->rows * m->row - height;
+    if (m->kind == 1 && home_rest(m->w, &foot)) return foot - height; /* its shown rows' */
     return m->kind == 1 ? I(m->w, VIEW_CONTENT_H) - height : 0;
 }
 static int max_top(menu_t *m) { return scroll_end(m, sel_height(m)); }
@@ -1756,7 +1760,11 @@ static void paint_chevrons(void *w, void *canvas) {
             (!sel_only || (lit && i == st.sel_row)) &&
             (drill(g_menu.at[i]) ||
              (T->chevron_sel && (page_into(g_menu.at[i]) || folder_into(&g_menu, i))))) {
-            /* the theme's own, on the right column; Home's Shuffle Songs plays in place */
+            /* Home's Shuffle Songs acts rather than opening a list: no chevron */
+            if (home &&
+                !tk_strcmp(widget_get_prop_str(g_menu.at[i], "name", ""), "img_shuffle_songs"))
+                continue;
+            /* the theme's own, on the right column; none on the Shortcut row as Shuffle */
             if (icon) {
                 if (!home || shortcut() != SHORTCUT_SHUFFLE ||
                     tk_strcmp(widget_get_prop_str(g_menu.at[i], "name", ""), "img_rockbox"))
@@ -2024,10 +2032,10 @@ static void paint_cover(void *w, void *canvas) {
 }
 
 /* Minimal's small capitals (Sudo's): s from x, y (the text's top) in the default font at px,
- * upper-cased (ASCII and Latin-1), SUDO_TRACK px apart, cut off at x + max; returns the whole
- * text's width, a trailing SUDO_TRACK included. The text color is restored, the font is not. */
+ * upper-cased (ASCII and Latin-1), track px apart (SUDO_TRACK), cut off at x + max; returns the
+ * whole text's width, a trailing track included. The text color is restored, the font is not. */
 static int draw_spaced(void *canvas, const unsigned *s, int x, int y, unsigned px, unsigned color,
-                       int max) {
+                       int max, int track) {
     unsigned text = (unsigned)I(P(canvas, CANVAS_LCD), LCD_TEXT_COLOR);
     canvas_set_font(canvas, (void *)0, px);
     canvas_set_text_color(canvas, color);
@@ -2040,7 +2048,7 @@ static int draw_spaced(void *canvas, const unsigned *s, int x, int y, unsigned p
             max = -1; /* cut off: the rest is only measured */
         else
             canvas_draw_text(canvas, &c, 1, x + at, y);
-        at += cw + SUDO_TRACK;
+        at += cw + track;
     }
     stock_canvas_set_text_color(canvas, text);
     return at;
@@ -2076,7 +2084,7 @@ static void paint_caps(void *w, void *canvas) {
     if (w == st.bar_idle) {
         if (T->caps_mark)
             draw_spaced(canvas, widget_get_text(w), 0, (I(w, W_H) - MARK_PX) / 2, MARK_PX,
-                        RGBA(0xaaaaaa), 375);
+                        RGBA(0xaaaaaa), 375, SUDO_TRACK);
         return;
     }
     if (st.np_album && w == P(st.np_album, W_PARENT)) {
@@ -2088,11 +2096,11 @@ static void paint_caps(void *w, void *canvas) {
             return;
         canvas_set_clip_rect(canvas, clip);
         int room = I(a, W_W) - NP_CAPS_INSET;
-        st.np_over =
-            draw_spaced(canvas, widget_get_text(a), I(a, W_X) + NP_CAPS_INSET - st.np_off,
-                        I(a, W_Y) + (I(a, W_H) - NP_CAPS_PX) / 2, NP_CAPS_PX,
-                        RGBA(np_tap_lit(a) ? np_tap_ink() : NP_ALBUM_RGB), room + st.np_off) -
-            SUDO_TRACK - room;
+        st.np_over = draw_spaced(canvas, widget_get_text(a), I(a, W_X) + NP_CAPS_INSET - st.np_off,
+                                 I(a, W_Y) + (I(a, W_H) - NP_CAPS_PX) / 2, NP_CAPS_PX,
+                                 RGBA(np_tap_lit(a) ? np_tap_ink() : NP_ALBUM_RGB),
+                                 room + st.np_off, SUDO_TRACK) -
+                     SUDO_TRACK - room;
         canvas_set_clip_rect(canvas, old);
         if (st.np_over > 0 && !st.np_marquee)
             st.np_marquee = timer_add(np_marquee, (void *)0, MARQUEE_HOLD_MS);
@@ -2103,8 +2111,18 @@ static void paint_caps(void *w, void *canvas) {
     unsigned color = RGBA(SUDO_MUTED);
     for (void *p = w; p; p = P(p, W_PARENT))
         if (p == st.sel_widget) color = 0xffffffff;
-    draw_spaced(canvas, widget_get_text(w), 0, (I(w, W_H) - HOME_CAPS_PX) / 2, HOME_CAPS_PX, color,
-                I(w, W_W));
+    /* a label too long at SUDO_TRACK (Split's Shuffle Songs) closes its letters up to fit */
+    const unsigned *s = widget_get_text(w);
+    int n = 0, track = SUDO_TRACK, glyphs;
+    while (s && s[n]) ++n;
+    if (n > 1 && draw_spaced(canvas, s, 0, 0, HOME_CAPS_PX, color, -1, SUDO_TRACK) - SUDO_TRACK >
+                     I(w, W_W)) {
+        glyphs = draw_spaced(canvas, s, 0, 0, HOME_CAPS_PX, color, -1, 0);
+        track = (I(w, W_W) - glyphs) / (n - 1);
+        track = track < 0 ? 0 : track;
+    }
+    draw_spaced(canvas, s, 0, (I(w, W_H) - HOME_CAPS_PX) / 2, HOME_CAPS_PX, color, I(w, W_W),
+                track);
 }
 
 /* The selected row's long title scrolls, as an iPod's does, MARQUEE_PASSES times as soon as the

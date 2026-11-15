@@ -691,7 +691,7 @@ int durations_start(void *songs), durations_busy(int *done, int *total);
 void durations_cancel(void), durations_poll(void), durations_shutdown(int bounded);
 void mp_counted(void *r, unsigned key, unsigned evicted);
 int most_played(void *ctx, void *event);
-int shuffle_menu(void *ctx, void *event);
+int shuffle_menu(void *ctx, void *event), shuffle_songs(void *ctx, void *event);
 int shuffle_play(void *all);
 int tidal_downloads(void *ctx, void *event);
 
@@ -700,6 +700,10 @@ const char *hearts_text(char *s, int n);
 void rate_hearts_paint(void *w, void *canvas); /* ratings.c: OLED's Ratings rows' hearts */
 void stream_mark_paint(void *w, void *canvas); /* home.c: OLED's Streaming rows' marks */
 extern void *stream_mark_views[2];             /* home.c: the lists whose rows it marks */
+/* home.c: Home's main list's rest height and its rows' foot (0: another view); coverflow.c: its
+ * scroll view */
+int home_rest(void *view, int *foot);
+void *coverflow_home_view(void);
 int rate_keep(int album, unsigned key, int n);
 int rate_kept(int album, unsigned key);
 int rate_key(void *top, unsigned key);

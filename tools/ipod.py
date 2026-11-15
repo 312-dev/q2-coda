@@ -156,7 +156,7 @@ STATUS_PAD = 2
 STATUS_MARGIN = corner_x(7, 16) + STATUS_PAD
 CLOCK_MIN = 105
 CLOCK_TEXT = 70
-# Seven full-width Home rows share one left edge clear of the rounded glass. The payload lays them out
+# Home's full-width rows share one left edge clear of the rounded glass. The payload lays them out
 # at runtime (coverflow_home_layout): Split narrows the list to the set's split_row, the art from split_art.
 
 
@@ -166,6 +166,7 @@ CLOCK_TEXT = 70
 SLIDE = f'htranslate(duration={inc("PAGE_SLIDE_MS")})'
 HOME_TOP = inc('HOME_TOP')
 HOME_ROW = SET0.home_row
+HOME_REST = inc('HOME_REST')
 HOME_TEXT_X = inc('HOME_DOT_X') + inc('HOME_DOT') + inc('HOME_DOT_GAP')  # labels after the selection dot
 HOME_LABEL_END = inc('HOME_LABEL_END')  # mirror the text inset, clear of the lower-right glass
 HOME_LIST_W = 375
@@ -366,15 +367,18 @@ def home_card(menu, at, row, text):
 
 
 # Home becomes a list of the stock cards' names, in stock order with Coverflow third,
-# Rockbox before Streaming and one Settings row for Playback and System settings.
+# Rockbox before Streaming and one Settings row for Playback and System settings, with two rows of
+# the payload's: Shuffle Songs after Rockbox and Search after Streaming.
 # home_page_init (0x534b6c) looks up no widget: its widget_foreach visitor (0x534750) binds img_*
 # clicks and translates label_* by name, and only img_left/img_right reach the slide_menu. Each row's transparent image covers the row, on top of its label, so it takes the
 # tap and is the row's click target for the wheel. The payload binds Coverflow, Rockbox (shown
-# only while the card has it) and Settings, which slides list_view_homeset, hidden until then and
+# only while the card has it), Shuffle Songs, Search and Settings, which slides list_view_homeset, hidden until then and
 # holding stock's own Playback and System setting rows (labelled Playback and System), into the list's place.
-HOME_ROWS = ['playing', 'localmusic', 'coverflow', 'folder', 'rockbox', 'stream', 'settings']
+# Shuffle Songs' and Search's names are none stock's visitor knows (stock's search pages have an img_search).
+HOME_ROWS = ['playing', 'localmusic', 'coverflow', 'folder', 'rockbox', 'shuffle_songs', 'stream', 'home_search', 'settings']
 HOME_SETS = ['playset', 'sysset']
-HOME_LITERAL = {'coverflow': 'Cover Flow', 'rockbox': 'Rockbox', 'settings': 'Settings'}
+HOME_LITERAL = {'coverflow': 'Cover Flow', 'rockbox': 'Rockbox', 'shuffle_songs': 'Shuffle Songs', 'home_search': 'Search',
+                'settings': 'Settings'}
 # Stock's visitor translates label_localmusic, label_playset and label_sysset by name; renamed, they keep
 # these shorter literals.
 HOME_RENAMED = {'localmusic': LIBRARY, 'playset': {'name': 'label_playback', 'text': 'Playback'},
@@ -408,7 +412,8 @@ def home_list(name, rows, g, extra=None, view_name=None):
     # The list_view's layout (0x5fd234) makes its scroll view vertical only for a mobile scroll bar,
     # which Home has none of, and scroll_view_create leaves it off; the payload navigates only
     # vertical scroll views.
-    h = g.home_row * len(views) or 320 - g.bar
+    # Home's main list shows HOME_REST rows and scrolls the rest (coverflow.c home_overflow).
+    h = g.home_row * min(len(views), HOME_REST) or 320 - g.bar
     view = ['scroll_view', [0, 0, HOME_LIST_W, h],
             {'name': 'scroll_view_' + (view_name or name), 'self_layout': 'default(x=0,y=0,w=100%,h=100%)', 'yslidable': 'true'}, views]
     return ['list_view', [0, HOME_TOP, HOME_LIST_W, h],
