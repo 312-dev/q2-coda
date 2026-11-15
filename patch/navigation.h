@@ -821,4 +821,15 @@ void coda_rc_poll(void);
 int coda_rc_enabled(void);
 int carremote_open(void *ctx, void *event);
 
+/* az_index.c: the A-Z index on a long Library list in name order (docs/oled-design.md#a-z-index) */
+void az_wheel(void *w, int id), az_paint(void *w, void *canvas);
+int az_touch(void *w, void *event), az_held(void *event), az_on(void *w), az_right(void *w),
+    az_bar_in(void *w);
+int az_initial(const char *s), az_target(const int *first, int letter), az_letter_at(int y),
+    az_column(signed char *out);
+/* navigation.c */
+void ringnav_jump(void *w, int id); /* table w's row id selected, at the list's top */
+int own_order(const char *page);    /* a page whose list is not in name order */
+void ringnav_sort_key(char *s);     /* a name's sort key: trimmed, its article dropped */
+
 #endif

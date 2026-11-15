@@ -319,10 +319,11 @@ void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected, 
                 : how == SONG_ARTIST_INLINE || nlen ? SONG_INLINE
                                                     : SONG_RIGHT;
     int tpx = T->font_px[ROLE_TITLE], spx = T->font_px[ROLE_META];
-    /* the right column, or SONG_COL_GAP short of a greyed row's offline mark: the length, a
-     * right-hand artist and the title's room all end there */
+    /* the right column (in while the A-Z index shows, az_index.c), or SONG_COL_GAP short of a
+     * greyed row's offline mark: the length, a right-hand artist and the title's room all end
+     * there */
     int left = ctx == SONGS_ALBUM ? SONG_NUM_TITLE : geom_val(V_TEXT_X),
-        column = I(w, W_W) - 1 - geom_val(V_RIGHT_X) - HSCROLL_MARGIN,
+        column = I(w, W_W) - 1 - az_right(w) - HSCROLL_MARGIN,
         len_w = measure(canvas, wlen, nlen, spx);
     if (edge && edge - SONG_COL_GAP < column) column = edge - SONG_COL_GAP;
     int end = nlen ? column - len_w - SONG_COL_GAP : column;

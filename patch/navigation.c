@@ -1205,6 +1205,16 @@ void reveal(menu_t *m, int id, int immediate) {
         scroll_view_scroll_delta_to(m->w, 0, want - top, T->recall_ms);
 }
 
+/* The A-Z index's jump (az_index.c): table w's row id selected and at the top of the list, as far
+ * as the list's end allows, with the bar showing. */
+void ringnav_jump(void *w, int id) {
+    if (!load(&g_menu, w, 0) || g_menu.kind != 2 || id < 0 || id >= g_menu.rows) return;
+    st.touch_mode = 0;
+    select(&g_menu, id);
+    wheel_offset(&g_menu, clamp_step(id * g_menu.row, max_top(&g_menu), 0));
+    widget_invalidate_force(w, (void *)0);
+}
+
 /* A payload page's own row: establish its scope and viewport before paint can recall another. */
 void ringnav_select(void *w, int id, int rows) {
     /* A list under another window (a card app's pages still arriving) keeps the props alone: its
@@ -1775,7 +1785,7 @@ static void paint_chevrons(void *w, void *canvas) {
             if (icon) {
                 if (!home || shortcut() != SHORTCUT_SHUFFLE ||
                     tk_strcmp(widget_get_prop_str(g_menu.at[i], "name", ""), "img_rockbox"))
-                    chevron_icon(w, canvas, I(w, W_W) - geom_val(V_RIGHT_X), r.y + r.h / 2,
+                    chevron_icon(w, canvas, I(w, W_W) - az_right(w), r.y + r.h / 2,
                                  st.sel_w == w && i == st.sel_row);
                 continue;
             }
@@ -1934,7 +1944,7 @@ static void draw_letter(void *canvas, const unsigned *c, unsigned n, rect_t *box
  * and Recently Added (0xf007-0xf009), Songs under Time added (getAllMusic 3 and 4) and a playlist's
  * songs (0xff13) under its Sort's Time added (g_playlistsort_flag not 0, getMusicByPlayList
  * 0x50b6c8) are in their own order. */
-static int own_order(const char *page) {
+int own_order(const char *page) {
     if (!tk_strcmp(page, "allmusic_page")) {
         int cls = I(g_class_type, 0), sort = I(g_sort_flag, 0);
         return (cls >= 0xf007 && cls <= 0xf009) || (cls == 0xff13 && I(g_playlistsort_flag, 0)) ||
@@ -1952,7 +1962,7 @@ static int own_order(const char *page) {
 static void paint_letter(void *w, void *canvas) {
     rect_t old;
     if (!st.letter_timer || w != st.wheel_surface || st.wheel_run <= LIST_FIRST_MS ||
-        st.touch_mode || !P(canvas, CANVAS_LCD) || !load_rows(&g_menu, w) ||
+        st.touch_mode || az_on(w) || !P(canvas, CANVAS_LCD) || !load_rows(&g_menu, w) ||
         (g_menu.ctx >= 0 && contexts[g_menu.ctx].kind == CTX_FIXED) || /* menus: not alphabetical */
         /* nor Library's categories beside Home's pane */
         !tk_strcmp(widget_get_prop_str(w, "name", ""), "scroll_view_localmusic") ||
@@ -2703,7 +2713,7 @@ static void paint_selection(void *w, void *canvas) {
             int pill = !tile && (corners || T->sel_fixed), in = pill ? T->sel_inset : 0;
             int radius = pill ? pill_radius(g_menu.at[i], r.h, in) : 0;
             if (radius > T->sel_radius) radius = T->sel_radius;
-            bar.x += in, bar.w -= 2 * in;
+            bar.x += in, bar.w -= 2 * in + (tile ? 0 : az_bar_in(g_menu.w)); /* az_index.c */
             gradient(canvas, bar, S->tones[0], S->tones[1], S->tones[4], radius);
         }
     } else if (band && theme()->set_switch && !tk_strcmp(widget_get_type(g_menu.at[i]), "image")) {
@@ -3134,6 +3144,7 @@ int ringnav_paint(void *w, void *canvas) {
         (P(w, W_PARENT) == stream_mark_views[0] || P(w, W_PARENT) == stream_mark_views[1]))
         stream_mark_paint(w, canvas);
     paint_letter(w, canvas);
+    az_paint(w, canvas);
     paint_cover(w, canvas);
     paint_scrubber(w, canvas);
     slider_scrub(w, canvas);
@@ -7919,6 +7930,8 @@ static void hide_outline(void) {
 }
 
 int ringnav_touch(void *ctx, void *event) {
+    /* a finger on the A-Z index: its moves are az_index.c's (az_event), the rows' bar stays */
+    if (az_held(event)) return stock_touch_trampoline(ctx, event);
     /* T9's chevron goes back, as Return, before the press blurs the box: that blur searches. */
     if (st.t9_back && event && I(event, EVENT_TYPE) == EVT_POINTER_DOWN) {
         int xy[2] = { I(event, EVENT_X), I(event, EVENT_Y) };
@@ -7949,6 +7962,11 @@ int ringnav_touch(void *ctx, void *event) {
      * a new pull; the page's native before-children callbacks observe subsequent motion. */
     if (!event || I(event, EVENT_TYPE) == EVT_POINTER_DOWN) pull_begin(event);
     void *w = surface((void *)0, (void *)0);
+    /* a press on an indexed list's right edge is the A-Z index's (az_index.c) */
+    if (!result && w && event && I(event, EVENT_TYPE) == EVT_POINTER_DOWN && az_touch(w, event)) {
+        st.touch_mode = 0;
+        return result;
+    }
     /* Pointer-down must not recall/rebind the row that native touch is about to hit. */
     if (!result && w && load_rows(&g_menu, w)) {
         stop_scroll(&g_menu);
@@ -12520,6 +12538,7 @@ int ringnav(void *ctx, void *event) {
         select(&g_menu, next);
         /* Stop momentum even when the selected row already fits the viewport. */
         reveal(&g_menu, next, 1);
+        az_wheel(w, next); /* a fast spin's A-Z index (az_index.c) */
         /* Home's pane repaints in this frame, with the row. */
         if (home_menu(top) && index_of(&g_menu, next) >= 0)
             coverflow_home_row(w, g_menu.at[index_of(&g_menu, next)], next, 0);

@@ -202,7 +202,36 @@ Wear OS's position indicator, on the Q2's straight right edge:
   a fixed 72 px long, centred on the list's middle (y 134 to 206). Track `#3A3A3A`, thumb
   `#E5E5E5` inside it, the thumb's position and length the visible rows over the total.
 - Hidden at rest: it shows while the wheel turns and fades out a second after the last tick
-  (the last 200 ms of it).
+  (the last 200 ms of it). It stays hidden while the [A-Z index](#a-z-index) shows.
+
+### A-Z index
+
+An iOS section index that is not there at rest (the user's option B from `mock_az_index.py`,
+2026-11-15), on Library lists in name order with more than 50 rows: Songs under Title (and the
+other song lists its page shows in name order: Favorites, Hi-Res, a playlist sorted by name),
+Artists, Albums, Composers and Genres. Lists in any other order (Recently Added, Songs by artist
+or album, an album's tracks, a playlist by time added, an artist's or a genre's songs) and
+settings have none.
+
+- **Shown by** a finger on the list's right edge (its last 28 px), or the wheel spun fast (300
+  degrees a second or more, the speed at which Rockbox's list acceleration first moves two rows a
+  click, as the volume's does). It fades out a second after the finger lifts or the last fast
+  tick (the last 200 ms of it).
+- **The column:** centred 13 px from the right edge (x 362), from y 80 to y 240, the straight
+  part of the glass. Letters `#`, A to Z in Inter Medium 11 px, white (black in Light Mode), never
+  the accent. 27 letters do not fit 11 px slots in 160 px, so the column folds as iOS's does:
+  seven letters spaced evenly, a dot between each two (`# • D • I • M • Q • V • Z`).
+- **The lit letter:** a white 16 px disc with the letter in black, at that letter's place on the
+  column. The finger maps evenly over all 27 letters whether or not the column is folded.
+- **The bubble:** while a finger drags and while the wheel spins fast, a `#2C2C2E` box 52x48,
+  12 px corners, ending 18 px left of the column with a 7 px pointer towards it, the letter in
+  Inter Medium 30 px white, beside the lit letter.
+- **Dragging** jumps the list so the first row under the letter is at the top and selected; a
+  letter with no rows goes to the next one that has some. `#` is digits and symbols. A row files
+  under its name's first letter past "The", "A" or "An", as the sort puts it.
+- **While it shows**, the rows' right column moves in to x 343 (W - 32) and the selection bar
+  ends at x 351, so lengths and chevrons stay clear of it; the fast-scroll letter and the scroll
+  indicator stay hidden.
 
 ### Tabs
 
@@ -489,9 +518,9 @@ pattern.
 | Albums                              | Two-line row with art       |                                                                                                            |
 | Album tracks                        | Song rows                   | Track number, title, length                                                                                |
 | Folder view                         | Song rows                   | Songs as album tracks; folders with the folder glyph and a chevron                                         |
-| Artists, Genres, Composers          | List row                    |                                                                                                            |
+| Artists, Genres, Composers          | List row                    | The [A-Z index](#a-z-index) past 50 rows, as Albums                                                        |
 | A card app's artist                 | [Artist page](#artist-page) | Header, Shuffle and Radio, then Top Songs, Albums, Singles & EPs, Similar Artists and All Songs            |
-| Songs, a playlist's songs           | Song rows                   | The artist inline                                                                                          |
+| Songs, a playlist's songs           | Song rows                   | The artist inline; the [A-Z index](#a-z-index) past 50 rows in name order                                  |
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
 | Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; an artist's covers titled by the artist, other covers with the clock in the status row as Home |
 | Playlists                           | Two-line row with icon      | New Playlist... and the other action rows take the same 52 px pitch once there is a playlist, the picker's too |

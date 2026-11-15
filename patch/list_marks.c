@@ -103,7 +103,8 @@ void wheel_sb_arm(void *list) {
 unsigned wheel_sb_alpha(void *list) {
     unsigned gone = time_now_ms() - sb_at;
     /* the wheel moves a list's scroll view; its bar is the list view's */
-    if ((list != sb_list && list != sb_owner) || gone >= WHEEL_SB_MS) return 0;
+    /* the A-Z index takes the edge while it shows (az_index.c) */
+    if ((list != sb_list && list != sb_owner) || gone >= WHEEL_SB_MS || az_on(list)) return 0;
     if (gone <= WHEEL_SB_MS - WHEEL_SB_FADE_MS) return 255;
     return 255u * (WHEEL_SB_MS - gone) / WHEEL_SB_FADE_MS;
 }
