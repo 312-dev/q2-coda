@@ -295,6 +295,9 @@ for server rows and for synced card files alike, whenever the Q2 can reach the s
   other way round, a song starred on the server puts the row in My Fav, so Now Playing fills the
   copy's heart by the row (stock draws it from the copy's own path), the picker opens on five, and
   taking the heart away takes the row out (stock's toggle would put the copy in instead).
+- **From the queue menu:** Add to and Remove from Favourites on a song send a line as Now Playing's
+  heart does (five hearts, or none) and clear its 1 to 4, for a Library row and for the playing
+  copy alike; Remove on a copy takes its row out of My Fav too.
 - **Out:** each change on the Q2 is appended to `/mnt/mmc/.<id>/ratings.out`
   (`<listen_key>\t<sid or empty>\t<hearts>\t<unix time>`); the app sends it when the server answers
   and removes the lines it sent. Offline changes wait there, as plays and stars already do.

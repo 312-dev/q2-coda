@@ -3306,3 +3306,41 @@ def test_song_order_takes_the_sort_pickers_order_on_the_title_order(fw, st, recs
     use_set(st, MINIMAL)
     order(q)
     assert titles() == 'DBAC'
+
+
+@pytest.mark.parametrize('row, hearts', [('Add to Favourites', 5), ('Remove from Favourites', 0)])
+@pytest.mark.parametrize('where', ['library', 'playing'])
+def test_a_favourite_from_the_menu_on_a_server_song_goes_to_its_server(fw, ui, st, recs, mcl, tmp_path, row, hearts,
+                                                                       where):
+    """Add to and Remove from Favourites on a server song, its Library row or its Stream Cache copy on Now Playing,
+    write the song's ratings.out line as Now Playing's heart does: the row's key and sid, five hearts or none, and
+    its kept 1-4 cleared. Remove on the copy takes the row out of My Fav too, where a star from the server put it."""
+    from test_catalogue import APP, Rig, listen_key, myfav, song_row, url
+    copy = '/mnt/mmc/.subsonic/stream/acct/orig/o/One [s1].flac'
+    rig = Rig(fw, tmp_path)
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, local=copy)])
+    rig.poll()
+    key = listen_key(url('s1'))
+    if hearts == 0:  # starred on the server: the row in My Fav
+        rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = f'{key:08x}\ts1\t5\t1600000000\n'.encode()
+        rig.poll(3)
+        assert myfav(rig) == [url('s1')]
+    use_set(st, MINIMAL)
+    hold = Hold(fw, ui, st, recs, mcl)  # after the import: its deques and card files from here on
+    hold.card.files[f'/mnt/mmc/.{APP}/q2app'] = rig.files.files[f'/mnt/mmc/.{APP}/q2app']
+    fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)(0, key, 3)
+    # stock's My Fav by the record's own path, on the test's database
+    fw.mock('checkFavExist', lambda r, *_: cstr(C.c_void_p.from_address(r + REC_PATH).value) in myfav(rig))
+    fw.mock('deleteMusicFromFav', lambda *_: 1)
+    songs = [recs(path=(url('s1') if where == 'library' else copy), title='One'), song(recs, 1)]
+    if where == 'library':
+        hold.songs_page('allmusic_page', songs, sel=0)
+    else:
+        hold.now_playing(songs, at=0)
+    hold.hold()
+    assert row in hold.menu()
+    hold.pick(row)
+    assert hold.card.files[f'/mnt/mmc/.{APP}/ratings.out'] == f'{key:08x}\ts1\t{hearts}\t1700000000\n'.encode()
+    assert fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, key) == 0
+    if hearts == 0:  # the copy's row: out of My Fav with it (the Library row's own path is stock's to delete)
+        assert myfav(rig) == ([] if where == 'playing' else [url('s1')])
