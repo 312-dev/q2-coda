@@ -54,7 +54,7 @@ class Home(C.Structure):
                 ('count_thread', C.c_ulong), *((k, C.c_uint) for k in 'asked pane_read count_timer pane_timer'.split()),
                 ('ring', (C.c_uint * HOME_PW) * 4), ('clip', C.c_int * 4), ('clipped', C.c_int),
                 ('ink_bar', C.c_void_p), ('ground', C.c_uint), ('held', C.c_ubyte * HOME_PW),
-                ('strip_timer', C.c_uint), ('stripping', C.c_int)]
+                ('strip_timer', C.c_uint), ('stripping', C.c_int), ('strip_need', C.c_int * 2), ('strip_done', C.c_int * 2)]
 
 
 class Row(C.Structure):
@@ -821,20 +821,52 @@ def test_the_bar_paints_the_rows_split_raises_above_home_s_window(fw, library):
     canvas = C.create_string_buffer(0x100)
     paint = fw.fn('coverflow_home_clip', None, C.c_void_p, C.c_void_p, C.c_int)
 
+    painted_frame = fw.fn('coverflow_home_painted', None)
+    painted_frame()  # the end of the frame the bar's paints above were in
+    assert not ui.timer(address(fw, 'coverflow__strip_due'))  # the bar painted the band whole: nothing due
+    screen = [0, 0, 375, 320]
+    fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(slice(0, 4), screen))
+
     def clip(w):  # the list's paint begins
         paint(w, C.addressof(canvas), 1)
     clip(home.list)
+    assert not ui.timer(address(fw, 'coverflow__strip_due'))  # once the frame is over
+    painted_frame()
     i, ms = ui.timer(address(fw, 'coverflow__strip_due'))
     assert ms == 0 and not ui.dirty
     ui.fire(i)
     assert ui.dirty == [(bar, (0, 40, 196, 18))]
     home.stripping = 1  # the bar's own paint of it: no repaint after
     clip(home.list)
+    painted_frame()
     assert not ui.timer(address(fw, 'coverflow__strip_due'))
     home.stripping = 0
+    # strip_due's frame: AWTK widens the band to 0, 36, 201, 27, so the list paints its top rows in the window too,
+    # and the bar paints the band whole: nothing more is due, or each strip would ask for the next
+    screen[:] = [0, 36, 201, 27]
+    clip(home.list)
+    strip(0x40, win)
+    painted_frame()
+    assert not ui.timer(address(fw, 'coverflow__strip_due'))
+    # a pan step's frame, the pane's column: the bar paints the band's columns the list painted, no more is due
+    screen[:] = [192, 0, 183, 320]
+    clip(home.list)
+    strip(0x40, win)
+    painted_frame()
+    assert not ui.timer(address(fw, 'coverflow__strip_due'))
+    # the bar's band only in part (its rows cut short): the list's columns are due again
+    screen[:] = [0, 50, 196, 100]
+    clip(home.list)
+    strip(0x40, win)
+    painted_frame()
+    assert ui.timer(address(fw, 'coverflow__strip_due'))
+    ui.fire(ui.timer(address(fw, 'coverflow__strip_due'))[0])
+    screen[:] = [0, 0, 375, 320]
+    painted.clear()
     C.c_int.from_address(home.list + 4).value = 0  # a list in its window: nothing above it
     strip(0x40, win)
     clip(home.list)
+    painted_frame()
     assert not painted and not ui.timer(address(fw, 'coverflow__strip_due'))
 
 

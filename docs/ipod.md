@@ -228,8 +228,12 @@ stand over it. The main menu rises too: with the clock at the row's right, its l
 so the list starts at y 40 (`HOME_SPLIT_TOP`), 18 rows above Home's window, and the bar's background
 paints those rows of it after the art (`coverflow_home_strip`: the list painted at its place on the
 screen, clipped to them and left of the pane); a tap there reaches the bar. AWTK keeps a
-widget's invalidate inside its window, so each paint of the list in the window (a new selection, a
-slide's frame) repaints those rows of the bar after the frame (`strip_due`). Settings and the other
+widget's invalidate inside its window, so a paint of the list in the window (a new selection, a
+slide's frame) repaints those rows of the bar after the frame (`strip_due`), unless the bar painted
+those columns of them in the same frame (`coverflow_home_painted`, after each frame). AWTK widens
+every invalidate by a few pixels, so the bar's repaint of the rows paints the list's top rows in the
+window too; without that test each repaint asked for the next, and Home repainted about 15 times a
+second while it showed, its pan's steps the whole screen. Settings and the other
 lists Home opens are full pages under OLED, and stay in the window. Each glyph is drawn in one ink, white or black, whichever has the higher WCAG contrast
 against the art under it, as Scrolly's feed-end line does: the art's relative luminance (from a
 256-entry linear table) averaged over the glyph, each pixel weighted by the glyph's coverage

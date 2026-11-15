@@ -3970,9 +3970,11 @@ static struct {
     void *ink_bar;
     unsigned ground;
     unsigned char held[HOME_PW];
-    /* coverflow_home_strip's repaint after the list's own, and whether it is painting */
+    /* coverflow_home_strip's repaint after the list's own, and whether it is painting; this
+     * frame's columns of the bar's band (x, end) the list painted in its window (strip_need) and
+     * the bar painted whole (strip_done), end 0: none */
     unsigned strip_timer;
-    int stripping;
+    int stripping, strip_need[2], strip_done[2];
 } home __attribute__((section(".scratch")));
 extern int ipod_home(void), ipod_home_rockbox(void), home_shortcut_open(void *, void *),
     home_lib_on(void), row_preview_on(void), library_search(void);
@@ -5143,6 +5145,7 @@ void coverflow_home_strip(void *canvas, void *top) {
     home.stripping = 0;
     canvas_translate(canvas, -wx, -wy);
     canvas_set_clip_rect(canvas, old);
+    if (clip[3] == -I(l, W_Y)) home.strip_done[0] = clip[0], home.strip_done[1] = clip[0] + clip[2];
 }
 /* After a paint of the raised list in its window (a new selection, a slide's frame), its rows in
  * the bar again: AWTK keeps a widget's invalidate inside its window, so the bar's rows would keep
@@ -5155,6 +5158,16 @@ static int strip_due(const void *unused) {
         widget_invalidate_force(bar, rows);
     }
     return 0; /* RET_REMOVE */
+}
+/* A frame painted (navigation.c ringnav_wm_paint): strip_due once the list painted columns of the
+ * band that the bar's paint of it did not cover. AWTK widens each invalidate by a few pixels, so
+ * strip_due's own frame paints the list's top rows in the window too, but the bar paints the
+ * band whole in that frame: without that test each strip would ask for the next, every frame. */
+void coverflow_home_painted(void) {
+    int *need = home.strip_need, *done = home.strip_done;
+    if (need[1] && (!done[1] || need[0] < done[0] || need[1] > done[1]))
+        rearm(&home.strip_timer, strip_due, 0);
+    need[0] = need[1] = done[0] = done[1] = 0;
 }
 
 /* The bar's border paint, its glyphs drawn: the art into the rows coverflow_home_bar left, the
@@ -5201,8 +5214,13 @@ void coverflow_home_clip(void *w, void *canvas, int begin) {
         home.clipped = 0;
         return;
     }
-    if (w == home.list && !home.stripping && I(w, W_Y) < 0) rearm(&home.strip_timer, strip_due, 0);
     int clip[4], art = w == home.art, x = pane_x(), pane = widget_get_visible(home.art) ? x : 375;
+    if (w == home.list && !home.stripping && I(w, W_Y) < 0 &&
+        clip_within(canvas, home.clip, clip, 0, 0, x, 320)) { /* the band's columns it paints */
+        int *need = home.strip_need, end = clip[0] + clip[2];
+        need[0] = need[1] && need[0] < clip[0] ? need[0] : clip[0];
+        need[1] = need[1] > end ? need[1] : end;
+    }
     clip_within(canvas, home.clip, clip, I(canvas, CANVAS_X) - I(w, W_X) + (art ? x : 0),
                 I(canvas, CANVAS_Y) - I(w, W_Y) + (art ? 0 : I(w, W_Y)), art ? 375 - x : pane,
                 art ? client_h() : I(w, W_H));
