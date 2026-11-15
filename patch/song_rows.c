@@ -322,7 +322,7 @@ void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected) 
                                                     : SONG_RIGHT;
     int tpx = T->font_px[ROLE_TITLE], spx = T->font_px[ROLE_META];
     int left = ctx == SONGS_ALBUM ? SONG_NUM_TITLE : geom_val(V_TEXT_X),
-        column = I(w, W_W) - 1 - geom_val(V_RIGHT_X) - HSCROLL_MARGIN,
+        column = I(w, W_W) - 1 - az_right(w) - HSCROLL_MARGIN, /* in while the A-Z index shows */
         len_w = measure(canvas, wlen, nlen, spx),
         end = nlen ? column - len_w - SONG_COL_GAP : column;
     static const unsigned spaces[] = { ' ', ' ', 0 };
