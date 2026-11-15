@@ -1923,7 +1923,7 @@ def test_a_preamp_pick_sticks_to_a_long_named_preset(fw):
     assert b'\nPreamp: -9 dB\n' in card.files[path]
 
 
-HOME, BAND, PRESETS, SAVES, CONFIRM, DELETES, PICK, ADJUST, STOCKS, RENAMES, NAMING = range(11)
+HOME, BAND, PRESETS, SAVES, CONFIRM, DELETES, PICK, ADJUST, STOCKS, RENAMES, NAMING, TYPES = range(12)
 ACT_BACK, ACT_APPLY, ACT_RESET, ACT_BYPASS, ACT_PER_OUTPUT, ACT_MENU, ACT_SAVE, ACT_ENABLE, ACT_TYPE, ACT_RAISE, ACT_LOWER, \
     ACT_TYPED, ACT_CHANNEL, ACT_STEP, ACT_YES, ACT_CANCEL, ACT_DELETE, ACT_BALANCE, ACT_PREAMP, ACT_GAIN, ACT_FREQUENCY, ACT_QUALITY, \
     ACT_KEYBOARD, ACT_STOCK, ACT_FILE_PREV, ACT_FILE_NEXT, ACT_RENAME, ACT_NAMED = range(1000, 1028)
@@ -1942,13 +1942,18 @@ def band_page(fw, automatic=1):
     return u, u.draft.bands[0]
 
 
-def test_a_band_s_type_and_channel_cycle(fw):
+def test_a_band_s_type_is_picked_and_its_channel_cycles(fw):
     u, b = band_page(fw)
     seen = []
-    for _ in range(3):
+    for i in (7, 6, 1, 0):  # all pass, notch, low shelf, peaking
         act(fw, ACT_TYPE)
+        assert u.screen == TYPES
+        act(fw, i)
         seen.append(b.type)
-    assert seen == [1, 2, 0]
+        assert u.screen == BAND
+    assert seen == [7, 6, 1, 0]
+    act(fw, ACT_TYPE, ACT_BACK)
+    assert u.screen == BAND and b.type == 0
     seen = []
     for _ in range(3):
         act(fw, ACT_CHANNEL)
@@ -1994,6 +1999,11 @@ def test_q_steps_a_twentieth_within_its_range(fw):
     b.q = 9.99
     act(fw, ACT_RAISE)
     assert b.q == 10
+    b.type, b.q = 6, 29.99  # a notch's goes to 30
+    act(fw, ACT_RAISE, ACT_RAISE)
+    assert b.q == 30
+    act(fw, ACT_TYPE, 0)  # and comes down to a peak's 10
+    assert (b.type, b.q) == (0, 10)
 
 
 @pytest.mark.parametrize('typed, want', ((500, 500), (5, 20), (99999, 20000)))

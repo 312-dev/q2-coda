@@ -97,9 +97,15 @@ static inline int ink_vgcanvas_set_fill_linear_gradient(void *vg, float sx, floa
 #define PEQ_FOLDER PEQ_ROOT "/mnt/mmc/EQ"         /* the presets, Equalizer APO text (peq_export) */
 #define EQ_OUTPUTS PEQ_ROOT "/mnt/data/peq-outputs" /* EQ per Output: an eq_state per output, and owner */
 #define EQ_DEVICES 32 /* Bluetooth devices remembered at once */
+/* A band's type (docs/internals.md#parametric-eq): the RBJ Audio EQ Cookbook's biquads, in the
+ * order peq_compile designs them and peq_export names them. Only the first three use a gain. */
+enum { PEQ_PK, PEQ_LS, PEQ_HS, PEQ_LP, PEQ_HP, PEQ_BP, PEQ_NO, PEQ_AP, PEQ_TYPES };
+#define PEQ_GAINED(type) ((type) <= PEQ_HS)
+#define PEQ_Q_MAX(type) ((type) == PEQ_NO ? 30 : 10) /* APO's notch without a Q is Q 30 */
 
 /* Versioned disk representation: fixed-width fields, no pointers or implicit padding.
  * enabled: 0 off, 1 both channels, 2 left only, 3 right only (v1 files hold 0 or 1).
+ * type: PEQ_* (firmware before the pass, notch, band-pass and all-pass types reads only 0 to 2).
  * balance: dB, above 0 turns the left channel down, below 0 the right (v2 only).
  * automatic: the preamp is 1 Auto (preamp holds the loudest cut over the standard PCM rates, kept so
  * by demo: peq_ui.c headroom), 2 picked (an import's own preamp too), 0 never picked (saved before
@@ -306,6 +312,7 @@ void artist_paint(void *w, void *canvas);
 int geom_val(int v) __attribute__((pure));
 int modal_set(void); /* menu_modal.c */
 int modal_actions(const char *const *names, const char *const *icons, int n, void (*pick)(int i));
+int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
 void list_toggle(void *label, const char *title, int on); /* navigation.c: a row's switch */
 /* navigation.c: Classic's value */
 void list_value(void *label, const char *title, const char *value);
