@@ -1120,7 +1120,10 @@ class Card:
         return 0
 
 
-PAGE, LATCH = 0x7000, 0xa4bbfa
+# The page's window is zeroed memory, not a bare handle: under OLED's feedback painter bar_title_sync reads
+# the top window's parent (feedback.c top_named) as page_list opens the page.
+_PAGE_MEM = C.create_string_buffer(0x400)
+PAGE, LATCH = C.addressof(_PAGE_MEM), 0xa4bbfa
 
 
 class Page:
@@ -2183,6 +2186,17 @@ def test_sudoku_paint_clues_on_grey_entries_in_the_tone_and_the_cursor_s_digit_d
     assert not any(c.marks for c in b.cells)
     assert bounds(b.after[:4]) == cell_rect(b, 40) and {o.color for o in b.after[:4]} == {tone(fw, 3)}
     assert b.after[4:] == []  # no banner
+
+
+def test_sudoku_paint_under_oled_fits_the_grid_in_the_content_area(fw):
+    """OLED (THEME 3): 24 px cells, the 216 px grid centred across and in the window's first 224 rows (y 58 to 282 on
+    screen, under the 58 px status row), digits at 19 (the other themes' 30 px cells: the tests above)."""
+    p = themed(fw, b'3')
+    p.go(SUDOKU)
+    grid(p, {0: 16 | 5, 40: 7}, cur=40)
+    b = sudoku(paint(p))
+    assert b.board == ((375 - 216) // 2, (224 - 216) // 2, 216, 216) and b.pitch == 24
+    assert b.cells[0].digit[0] == '5' and b.cells[40].digit[0] == '7'
 
 
 def test_sudoku_paint_a_repeated_digit_is_red_and_underlined(fw):

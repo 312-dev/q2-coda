@@ -37,8 +37,8 @@ CHOICES = {'list.selection.painter': {'card': 'SEL_CARD', 'stops': 'SEL_STOPS', 
            'list.songs.painter': {'stock': 'SONGS_STOCK', 'inline': 'SONGS_INLINE'},
            'playing.scrubber.painter': {'stock': 'SCRUB_STOCK', 'rows': 'SCRUB_ROWS'},
            'volume.panel.painter': {'stock': 'VOL_STOCK', 'classic-light': 'VOL_CLASSIC_LIGHT'},
-           'dialog.confirm.painter': {'stock': 'CONFIRM_STOCK', 'classic-light': 'CONFIRM_CLASSIC_LIGHT'},
-           'pages.own.painter': {'stock': 'PAGES_STOCK', 'classic-light': 'PAGES_CLASSIC_LIGHT'},
+           'dialog.confirm.painter': {'stock': 'CONFIRM_STOCK', 'classic-light': 'CONFIRM_CLASSIC_LIGHT', 'oled': 'CONFIRM_OLED'},
+           'pages.own.painter': {'stock': 'PAGES_STOCK', 'classic-light': 'PAGES_CLASSIC_LIGHT', 'oled': 'PAGES_OLED'},
            **dict.fromkeys(('playing.title.font', 'playing.info.font', 'home.rows.font', 'list.row.font', 'list.row.meta_font', 'list.row.tall_font', 'bar.title.font', 'playing.artist.font'), FONTS),
            'playing.layout': {'ipod': 'NP_IPOD', 'centred': 'NP_CENTRED'},
            'scheme.mode': {'derive': 'SCHEME_DERIVE', 'light': 'SCHEME_LIGHT', 'dark': 'SCHEME_DARK'}}
@@ -94,8 +94,9 @@ SCHEMA = {k.path: k for k in (
     key('list.reopen.top', 'reopen_top', 'bool'),  # a list left by Return opens at its top when chosen again (navigation.c forget_left)
     key('list.shuffle.row', 'shuffle_row', 'bool'),  # Songs' action row reads Shuffle and takes the wheel's selection (navigation.c shuffle_key)
     key('home.lists.full', 'home_lists_full', 'bool'),  # Split's Settings, Library and Streaming lists take the whole width, the art hidden (coverflow.c sub_full)
+    key('list.entry.ipod', 'entry_ipod', 'bool'),  # text entry the iPod's way: Search's letter strip (search_strip.c), the keyboard walked by the wheel (keyboard.c)
     key('playing.art.radius', 'np_art_radius', 'int', 75),  # Now Playing's art corners in px; 0: NP_ART_RADIUS's share of its size
-    key('playing.modes.icons', 'np_modes', 'bool'),  # shuffle and repeat as the theme's own pair (np_bar.c np_modes)
+    key('playing.modes.icons', 'np_modes', 'bool'),  # shuffle and repeat as the theme's own pair (np_bar.c np_modes), heart and More its own glyphs (np_glyphs)
     key('bar.fill.painter', 'painter[PAINT_BAR]', 'enum'),
     key('bar.battery.painter', 'painter[PAINT_BATTERY]', 'enum'),
     key('home.chevron.visible', 'chevron_home', 'bool'),
@@ -154,11 +155,12 @@ SCHEMA = {k.path: k for k in (
     key('home.pane.svc_px', 'pane_svc_px', 'int', 188),
     key('settings.rows.top', 'set_top', 'int', 375),
     key('settings.values.text', 'set_text', 'bool'),
+    key('settings.values.switch', 'set_switch', 'bool'),  # an on/off row's switch, drawn (list_marks.c switch_mark) where set_text would write On or Off
     key('settings.values.ink', 'set_value_ink', 'color', final=True),  # a set_text row's value, right-aligned; 0: the label style's white
     key('playing.scrubber.painter', 'painter[PAINT_SCRUB]', 'enum'),
     key('volume.panel.painter', 'painter[PAINT_VOLUME]', 'enum'),
     key('dialog.confirm.painter', 'painter[PAINT_CONFIRM]', 'enum'),
-    key('pages.own.painter', 'painter[PAINT_PAGES]', 'enum'),  # the theme's own pages (theme.h classic_pages)
+    key('pages.own.painter', 'painter[PAINT_PAGES]', 'enum'),  # the theme's own pages (theme.h classic_pages, oled_pages)
     key('pages.own.art_final', 'art_final', 'bool'),  # Classic Light's own art (art.py's classic_light_ images) is final
     # the rows painter's pixel rows, top to bottom (final colours): the track, the played part over it; the volume
     # panel away from Now Playing and a card app's progress (paint_rows_bar)
@@ -388,6 +390,7 @@ GEOM_RANGES = {
     'split_art': (O['HOME_SPLIT_W'], 260),
     'split_art_up': (0, lambda g: g.bar),
     'split_inset': (0, 4),  # percent of the zoomed cover; past about 4.5 the 110 % zoom leaves no pan
+    'modal': (0, 1),  # the More pages as dialogs, drawn with the hold menus as the inset modal (ipod.modal_page)
 }
 THEME_GEOM_OFF = 4  # offsetof(theme_t, geom), right after name so no field moves it; asserted in navigation.c; test/patch.py pokes it
 THEME_MOTION_OFF = 8  # offsetof(theme_t, motion), right after geom; asserted in navigation.c; test/patch.py pokes it
@@ -712,7 +715,7 @@ def offered(c, o, names, what):
     return sum(1 << names.index(n) for n in set(listed))
 
 
-PLAIN_KEYS = {'HOMELIB', 'ROWPREVIEW', 'STATUSBAR', 'SONGARTIST', 'SONGLENGTH'}  # the plain own keys the payload reads (theme_engine.c home_lib_on, row_preview_on, bar_theme, song_artist, song_length)
+PLAIN_KEYS = {'HOMELIB', 'ROWPREVIEW', 'STATUSBAR', 'SONGARTIST', 'SONGLENGTH', 'NPTIME'}  # the plain own keys the payload reads (theme_engine.c home_lib_on, row_preview_on, bar_theme, song_artist, song_length, np_time_total)
 
 
 def order(attrs):

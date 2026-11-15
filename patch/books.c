@@ -886,17 +886,17 @@ void video_poll(void) {
 
 /* Return quits, Play/Pause pauses, the side buttons seek. The wheel is the volume, as on Now
  * Playing; Centre toggles it to seeking, which ends SCRUB_MS after the last tick (video_poll). The
- * volume steps as stock's volume_dialog keys (0x4a3694): 1 a tick, up to 100 and g_maxvolume,
- * through device_set_volume (the DAC's, or hciplayer's for Bluetooth and a soft USB volume) and
+ * volume steps as the volume dialog's ticks (volume.c vol_next): 1 a tick turned slowly, more at
+ * speed, up to 100 and g_maxvolume, through device_set_volume (the DAC's, or hciplayer's for Bluetooth and a soft USB volume) and
  * saved; the helper gets it for that soft gain and its bar. */
 void video_key(unsigned key) {
     vid.paused_at = 0; /* a key restarts a pause's VIDEO_PAUSE_QUIT_MS */
     if (key == KEY_PLAY || key == KEY_FWD_BTN || key == KEY_BACK_BTN || key == KEY_RETURN)
         headset_manual();
-    int wheel = key == KEY_NEXT || key == KEY_PREV, v = g_volume + (key == KEY_NEXT ? 1 : -1);
+    int wheel = key == KEY_NEXT || key == KEY_PREV, v;
     if (key == KEY_CENTER) vid.seek = !vid.seek;
     if (key == KEY_CENTER || (wheel && vid.seek)) vid.seek_at = time_now_ms();
-    if (wheel && !vid.seek && v >= 0 && (key == KEY_PREV || (v <= 100 && v <= g_maxvolume))) {
+    if (wheel && !vid.seek && (v = vol_next(key)) != g_volume) {
         g_volume = (unsigned char)v;
         device_set_volume(v, 1);
         write_int_config(v, "PLAYSET", "VOLUME");

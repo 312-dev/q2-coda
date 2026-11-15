@@ -1,0 +1,13 @@
+   0.000 > {mcl-dsdmode\2}
+   0.000 > {mcl-replaygain\0}
+   0.100 > {mcl-setoutputway\2}
+   0.100 > {mcl-setvol\25700}
+   1.000 > {set-songurl\/mnt/mmc/d64.dsf|ss=0|4096|50|0|17|90}
+   1.001 < {player-status\ready}
+   1.001 < {media-info\no-playing-status}
+   3.500 > {set-nexturl\/mnt/mmc/d64.dff|ss=0|4096|50|0|17|90}
+   6.000 > {set-nexturl\/mnt/mmc/d128.dsf|ss=0|4096|50|0|17|90}
+   6.088 < {player-nextstatus\exit}
+   8.500 > {mcl-stop\null}
+# positions (every fifth poll, time:seconds) 
+# cpu 0.10 s

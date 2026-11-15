@@ -16,18 +16,32 @@ int peq_stock_eq(int mode) {
     return result;
 }
 
-/* Off's comparison preamp belongs to the open page, which cannot survive a restart. */
-void peq_boot(void) {
-    eq_state s;
-    if (eq_load(&s) && s.hold) {
-        s.hold = 0;
-        if (eq_save(&s) && peq_chained) peq_stock_eq(1);
-    }
+static double headroom(const peq_preset *p);
+/* PEQ's Auto (or never picked) preamp as the cut for every rate, which the player plays as saved
+ * (docs/internals.md#parametric-eq). 1 if that changed it. */
+static int auto_level(eq_state *s) {
+    if (s->peq.automatic == 2) return 0;
+    double cut = headroom(&s->peq);
+    int changed = s->peq.automatic != 1 || s->peq.preamp != cut;
+    s->peq.automatic = 1, s->peq.preamp = cut;
+    return changed;
 }
 
-/* Every EQ change goes through here: s saved, the stock switch's config key (boot instantiates
- * the filter only when it is set) written when on/off changes, and the player told. */
+/* Off's comparison preamp belongs to the open page, which cannot survive a restart; and an Auto saved
+ * by another version (its 48 kHz cut) becomes the cut for every rate before anything plays. */
+void peq_boot(void) {
+    eq_state s;
+    if (!eq_load(&s)) return;
+    int changed = auto_level(&s);
+    if (s.hold) s.hold = 0, changed = 1;
+    if (changed && eq_save(&s) && peq_chained) peq_stock_eq(1);
+}
+
+/* Every EQ change goes through here: s saved, PEQ's Auto as the cut for every rate, the stock switch's
+ * config key (boot instantiates the filter only when it is set) written when on/off changes, and the
+ * player told. */
 static int eq_commit(eq_state *s) {
+    auto_level(s);
     if (!eq_save(s)) return 0;
     int on = s->mode != EQ_OFF;
     if (on != g_equalizer_flag) write_int_config(on, "PLAYSET", "EQFLAG");
@@ -43,8 +57,8 @@ void peq_attach(void) {
     if (s.mode == EQ_OFF || (s.mode = EQ_OFF, s.hold = 0, eq_save(&s))) peq_stock_eq(1);
 }
 
-enum { HOME, BAND, PRESETS, IMPORTS, SAVES, CONFIRM, DELETES, PICK, ADJUST, STOCKS, RENAMES, NAMING };
-enum { BACK = 1000, APPLY, RESET, BYPASS, PER_OUTPUT, MENU, IMPORT, SAVE, ENABLE, TYPE, RAISE, LOWER, TYPED, CHANNEL, STEP,
+enum { HOME, BAND, PRESETS, SAVES, CONFIRM, DELETES, PICK, ADJUST, STOCKS, RENAMES, NAMING };
+enum { BACK = 1000, APPLY, RESET, BYPASS, PER_OUTPUT, MENU, SAVE, ENABLE, TYPE, RAISE, LOWER, TYPED, CHANNEL, STEP,
        YES, CANCEL, DELETE, BALANCE, PREAMP, GAIN, /* these three open the picker, in picks[] order */
        FREQUENCY, QUALITY, /* and these two the value menu */ KEYBOARD, STOCK, FILE_PREV, FILE_NEXT, RENAME, NAMED };
 #define FILE_PAGE 128
@@ -73,7 +87,8 @@ static const int steps[] = {1, 10, 100, 1000};
 static const struct { double first, step; int rows; } picks[] = {{-12, 0.5, 49}, {12.5, -0.5, 74}, {24, -0.5, 97}};
 /* Simple, 3EQ (docs/internals.md#3eq): Low, Mid and High, -6 to +6 dB in 0.5 dB steps, on a view
  * that e3_paint draws: the switch, Presets and Reset (R) under the tabs, then a slider per band over
- * a 0 dB line. The wheel moves between the tabs and the six; Centre flips the switch, opens
+ * a 0 dB line (under a set_switch theme the three are rows and the sliders the standard's,
+ * slider_page.c eq_rows_paint). The wheel moves between the tabs and the six; Centre flips the switch, opens
  * Advanced's Presets screen, resets, or takes a slider, whose gain the wheel then turns until
  * Centre or Return. A touch on a slider drags it. Edits are saved at most every E3_SAVE_MS, and at
  * once when an adjustment ends; the player hears them only while 3EQ is on, which turns PEQ off.
@@ -273,40 +288,28 @@ static void curve(void) {
     }
 }
 
-/* 3EQ's preamp is a saved number (its player keeps it), so it covers the standard PCM rates' Auto
- * instead of the current track's. shortcut: no bound for nonstandard rates. */
+/* Auto, PEQ's and 3EQ's: one saved cut that covers every standard PCM rate's peak, so tracks at
+ * different rates play at one level and the player works nothing out at a track's start. Kept until
+ * a band changes, as preamp, balance and the switch move none. ponytail: no bound for nonstandard
+ * rates (37.8 kHz and the like), whose peak can sit between two of these. */
 static double headroom(const peq_preset *p) {
     static const int rates[] = {8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100,
                                48000, 64000, 88200, 96000, 176400, 192000, 352800, 384000};
     static peq_preset cached;
     static int have_cache;
     static double gain;
-    if (!peq_valid(p)) return p->preamp;
-    if (have_cache && !memcmp(p, &cached, sizeof(*p))) return gain;
+    peq_preset key = *p;
+    key.preamp = key.balance = 0, key.bypass = key.automatic = key.spare = 0;
+    if (!peq_valid(&key)) return p->preamp;
+    if (have_cache && !memcmp(&key, &cached, sizeof(key))) return gain;
     gain = 0;
     for (unsigned i = 0; i < sizeof(rates) / sizeof(*rates); ++i) {
-        double g = peq_auto(p, rates[i]);
+        double g = peq_auto(&key, rates[i]);
         if (g < gain) gain = g;
     }
-    cached = *p;
+    cached = key;
     have_cache = 1;
     return gain;
-}
-
-/* PEQ's Auto at 44.1 and 48 kHz, for the Preamp row and its picker: the player's cut at those rates
- * (any other rate plays its own). Kept until a band changes, as preamp, balance and the switch move
- * none. */
-static const double *autos(void) {
-    static peq_preset key;
-    static double cut[2];
-    static int have;
-    peq_preset p = ui.draft;
-    p.preamp = p.balance = 0, p.bypass = p.automatic = 0;
-    if (!have || memcmp(&p, &key, sizeof(p))) {
-        cut[0] = peq_auto(&p, 44100), cut[1] = peq_auto(&p, 48000);
-        key = p, have = 1;
-    }
-    return cut;
 }
 
 static double *picked(void) {
@@ -353,26 +356,29 @@ static int focused(void *ctx, void *event) {
 /* Auto unless the preamp was picked (2): imports and presets or states from before 1.3.6 take it. */
 static int on_auto(void) { return ui.draft.automatic != 2; }
 
-/* A draft on Auto saves its 48 kHz cut, a fallback: the player works out its own for each rate. */
+/* A draft on Auto takes the cut for every rate, which plays as saved. */
 static void follow_auto(void) {
-    if (on_auto()) ui.draft.automatic = 1, ui.draft.preamp = autos()[1];
+    if (on_auto()) ui.draft.automatic = 1, ui.draft.preamp = headroom(&ui.draft);
 }
 
 /* The Preamp row's and the picker's Auto. */
 static void auto_text(char *s, unsigned n) {
-    snprintf(s, n, "Auto (44.1: %.1f / 48: %.1f)", autos()[0], autos()[1]);
+    snprintf(s, n, "Auto (%.1f dB)", headroom(&ui.draft));
 }
 
-/* A Preamp pick sticks to the saved preset it was loaded from (its copy in PEQ_SAVED, never the
- * card's .txt); its bands stay as saved until Save. ponytail: keyed on ui.name, so a stock preset
- * named like a saved one ("Rock") writes to that file; keep the loaded path if that matters. */
+/* A Preamp pick sticks to the preset on the card it was loaded from, written out again (peq_export);
+ * its bands stay as saved until Save. A file with lines the parser left out stays as it is: written
+ * out, it would lose them for Equalizer APO, so its pick lasts until another load. ponytail: the
+ * file's own comments go, and keyed on ui.name, a stock preset named like a saved one ("Rock")
+ * writes to that file; keep the loaded path if that matters. */
 static void remember_preamp(void) {
     char path[600];
     peq_preset p;
-    snprintf(path, sizeof(path), PEQ_SAVED "/%s.peq", ui.name);
-    if (!ui.name[0] || !peq_load(path, &p)) return; /* a stock preset, Reset or none */
+    peq_error e;
+    snprintf(path, sizeof(path), PEQ_FOLDER "/%s.txt", ui.name);
+    if (!ui.name[0] || !peq_import_file(path, &p, &e) || e.skipped) return; /* a stock preset, Reset or none */
     p.automatic = ui.draft.automatic, p.preamp = ui.draft.preamp;
-    peq_save(path, &p, 1);
+    peq_export_file(path, &p, 1);
 }
 
 static int compare_names(const void *a, const void *b) { return strcmp(a, b); }
@@ -386,7 +392,7 @@ static void list_files(const char *folder, const char *extension) {
         const char *name = entry->d_name;
         unsigned n = strlen(name), e = strlen(extension);
         if (entry->d_type != 8 && entry->d_type != 0) continue;
-        if (n <= e || n >= 256 || strcmp(name + n - e, extension)) continue;
+        if (n <= e || n >= 256 || strcasecmp(name + n - e, extension)) continue;
         if (ui.count == ui.capacity) {
             int capacity = ui.capacity ? ui.capacity * 2 : FILE_PAGE;
             void *names = calloc(capacity, 256);
@@ -407,8 +413,35 @@ static void list_files(const char *folder, const char *extension) {
     if (!ui.count && !ui.status[0]) snprintf(ui.status, sizeof(ui.status), "No presets found");
 }
 
-/* File name in ui.destination: sizeof skips PEQ_SAVED and its "/". */
-static const char *deleting(void) { return ui.destination + sizeof(PEQ_SAVED); }
+/* File name in ui.destination: sizeof skips PEQ_FOLDER and its "/". */
+static const char *deleting(void) { return ui.destination + sizeof(PEQ_FOLDER); }
+
+/* Earlier firmware's binary presets (PEQ_SAVED), written out to the card's folder once and kept
+ * there for a downgrade. A text preset of the same name stays, unless it reads whole and differs: the
+ * binary is then that file's import with a Preamp picked since, as remember_preamp keeps it. */
+static void write_out(void) {
+    char from[600], to[600];
+    struct dirent *entry;
+    void *dir;
+    int ok = 1;
+    if (!access(PEQ_SAVED "/.written", 0) || !card_mounted() || !(dir = opendir(PEQ_SAVED))) return;
+    mkdir(PEQ_FOLDER, 0700);
+    while ((entry = readdir(dir))) {
+        unsigned n = strlen(entry->d_name);
+        peq_preset p, text;
+        peq_error e;
+        if (n <= 4 || n >= 256 || strcmp(entry->d_name + n - 4, ".peq")) continue;
+        snprintf(from, sizeof from, PEQ_SAVED "/%s", entry->d_name);
+        snprintf(to, sizeof to, PEQ_FOLDER "/%.*s.txt", (int)n - 4, entry->d_name);
+        if (!peq_load(from, &p)) continue;
+        p.bypass = 0;
+        if (p.automatic != 2) p.automatic = 1; /* never picked is Auto, as the editor takes it */
+        if (!access(to, 0) && (!peq_import_file(to, &text, &e) || e.skipped || !memcmp(&text, &p, sizeof p))) continue;
+        ok &= peq_export_file(to, &p, 1);
+    }
+    closedir(dir);
+    if (ok) peq_save_file(PEQ_SAVED "/.written", 0, "", 0);
+}
 
 /* ui.destination (a saved preset's path) renamed to the edit's text, kept if that starts with a
  * dot, holds a character the card's FAT cannot, names another preset or is too long to read back
@@ -434,7 +467,7 @@ checked:
     else if (!*t || *t == '.' || *c)
         snprintf(ui.status, sizeof(ui.status), "Name not allowed; preset kept");
     else if (!strcmp(t, old)) return;
-    else if (snprintf(to, sizeof to, PEQ_SAVED "/%s.peq", t), strcasecmp(t, old) && !access(to, 0))
+    else if (snprintf(to, sizeof to, PEQ_FOLDER "/%s.txt", t), strcasecmp(t, old) && !access(to, 0))
         snprintf(ui.status, sizeof(ui.status), "Name taken; preset kept");
     else if (rename(ui.destination, to))
         snprintf(ui.status, sizeof(ui.status), "Rename failed; preset kept");
@@ -488,8 +521,8 @@ void *edit_create(void *item, const char *input_type, int y, int h) {
 }
 
 static void save_candidate(int replace) {
-    mkdir(PEQ_SAVED, 0700);
-    int result = peq_save(ui.destination, &ui.candidate, replace);
+    mkdir(PEQ_FOLDER, 0700);
+    int result = peq_export_file(ui.destination, &ui.candidate, replace);
     if (result == 2) { ui.previous = ui.screen; ui.screen = CONFIRM; }
     else snprintf(ui.status, sizeof(ui.status), result ? "Preset saved; active EQ unchanged" : "Save failed; settings unchanged");
 }
@@ -539,7 +572,6 @@ static int action(void *ctx, void *event) {
         else if (ui.screen == NAMING) ui.screen = RENAMES;
         else ui.screen = ui.from_simple || ui.screen == BAND || ui.screen == PRESETS ? HOME : PRESETS;
     } else if (id == MENU) ui.screen = PRESETS;
-    else if (id == IMPORT) ui.screen = IMPORTS;
     else if (id == FILE_PREV || id == FILE_NEXT) {
         ui.file_page += id == FILE_NEXT ? 1 : -1;
         ui.rendered = -1;
@@ -595,7 +627,7 @@ static int action(void *ctx, void *event) {
         else if (ui.screen == PICK && id < picks[ui.pick - BALANCE].rows) {
             /* Preamp's Auto row: the band-edit cut, which later band edits then keep up to date. */
             *picked() = ui.pick == PREAMP && !id
-                            ? autos()[1]
+                            ? headroom(&ui.draft)
                             : picks[ui.pick - BALANCE].first + picks[ui.pick - BALANCE].step * id;
             if (ui.pick == PREAMP) ui.draft.automatic = id ? 2 : 1, remember_preamp();
             if (ui.pick == GAIN && !b->enabled) b->enabled = 1; /* picking a gain is using the band */
@@ -610,33 +642,31 @@ static int action(void *ctx, void *event) {
             load_draft(&p, stock_names[id], sizeof(stock_names[id]));
         }
         else if (ui.screen == SAVES && id < 10) {
-            snprintf(ui.destination, sizeof(ui.destination), PEQ_SAVED "/Manual %02d.peq", id + 1);
+            snprintf(ui.destination, sizeof(ui.destination), PEQ_FOLDER "/Manual %02d.txt", id + 1);
             ui.candidate = ui.draft;
             save_candidate(0);
-        } else if (file < ui.count && ui.screen == IMPORTS) {
-            char path[600];
-            peq_error error;
-            snprintf(path, sizeof(path), PEQ_IMPORT "/%s", ui.names[file]);
-            if (!peq_import_file(path, &ui.candidate, &error))
-                snprintf(ui.status, sizeof(ui.status), "Line %u: %s", error.line, error.reason);
-            else {
-                unsigned n = strlen(ui.names[file]) - 4;
-                snprintf(ui.destination, sizeof(ui.destination), PEQ_SAVED "/%.*s.peq", (int)n, ui.names[file]);
-                save_candidate(0);
-            }
         } else if (file < ui.count && ui.screen == RENAMES) {
-            snprintf(ui.destination, sizeof(ui.destination), PEQ_SAVED "/%s", ui.names[file]);
+            snprintf(ui.destination, sizeof(ui.destination), PEQ_FOLDER "/%s", ui.names[file]);
             ui.screen = NAMING;
         } else if (file < ui.count && ui.screen == DELETES) {
-            snprintf(ui.destination, sizeof(ui.destination), PEQ_SAVED "/%s", ui.names[file]);
+            snprintf(ui.destination, sizeof(ui.destination), PEQ_FOLDER "/%s", ui.names[file]);
             ui.previous = DELETES;
             ui.screen = CONFIRM;
         } else if (file < ui.count && ui.screen == PRESETS) {
             char path[600];
-            snprintf(path, sizeof(path), PEQ_SAVED "/%s", ui.names[file]);
             peq_preset p;
-            if (peq_load(path, &p)) load_draft(&p, ui.names[file], (int)strlen(ui.names[file]) - 4);
-            else snprintf(ui.status, sizeof(ui.status), "Cannot read preset; settings unchanged");
+            peq_error error;
+            snprintf(path, sizeof(path), PEQ_FOLDER "/%s", ui.names[file]);
+            /* Each message fits OLED's toast, 43 characters or so (docs/oled-design.md#dialogs-and-toasts). */
+            if (!peq_import_file(path, &p, &error)) /* line 0: the whole file's (GraphicEQ) */
+                snprintf(ui.status, sizeof(ui.status), error.line ? "Line %u: %s" : "%.0u%s", error.line, error.reason);
+            else {
+                load_draft(&p, ui.names[file], (int)strlen(ui.names[file]) - 4);
+                /* What it left out, by the first: "Loaded; skipped HP filter, 2 more" */
+                if (error.skipped == 1) snprintf(ui.status, sizeof(ui.status), "Loaded; skipped %.17s", error.what);
+                else if (error.skipped)
+                    snprintf(ui.status, sizeof(ui.status), "Loaded; skipped %.17s, %u more", error.what, error.skipped - 1);
+            }
         }
     }
     if (edit) { /* ENABLE, TYPE, RAISE, LOWER, TYPED, CHANNEL and a picked gain */
@@ -657,6 +687,14 @@ static int action(void *ctx, void *event) {
     }
     if (screen != ui.screen) ui.file_page = 0;
     if (!ui.timer) ui.timer = timer_add(render, 0, 1);
+    /* Under OLED what an action did is a toast over the page, which keeps its title
+     * (docs/oled-design.md#dialogs-and-toasts); the render runs under it. */
+    if (feedback_oled() && ui.status[0]) {
+        char said[sizeof ui.status];
+        memcpy(said, ui.status, sizeof said);
+        ui.status[0] = 0;
+        toast(said);
+    }
     return 0;
 }
 
@@ -686,8 +724,9 @@ static int render(const void *unused) {
     int selection = 0, offset = 0;
     int height = widget_get_prop_int(ui.page, "h", 320), graph = ui.screen == HOME || ui.screen == BAND;
     int head = graph * graph_head(), rh = page_h(48);
-    /* Whole rows only, so the last row is never clipped. */
-    int rows = (height - 48) / rh * rh;
+    /* Whole rows only, so the last row is never clipped; a set_switch theme's end above the bottom
+     * corners' glass, as its other lists do (list_end) */
+    int rows = ((eq_rows() ? eq_list_end() : height) - 48) / rh * rh;
     if (ui.view && ui.rendered == ui.screen) {
         selection = widget_get_prop_int(ui.view, "_ringnav_index", 0);
         offset = widget_get_prop_int(ui.view, "yoffset", 0);
@@ -735,11 +774,7 @@ static int render(const void *unused) {
             auto_text(value, sizeof(value));
         else
             snprintf(value, sizeof(value), "%.1f dB", ui.draft.preamp);
-        void *shown = row_dim(view, n++, "Preamp", value, PREAMP, INTO);
-        /* At 20px two double-digit cuts overrun the iPod's 280px column beside the caption and
-         * chevron; at 16 the longest, -60.0 at both, leaves 6px (the stock font's widths), and a
-         * theme's row font, its caption wider, 4 at 15. */
-        if (on_auto()) widget_set_prop_int(shown, "style:normal:font_size", rh == 48 ? 16 : 15);
+        row_dim(view, n++, "Preamp", value, PREAMP, INTO);
         /* the draft's preset */
         row_dim(view, n++, "Presets", ui.name[0] ? ui.name : 0, MENU, INTO | LONG);
         /* 16px band captions leave room for the gain and chevron, even at 20000 Hz on one channel. */
@@ -800,12 +835,12 @@ static int render(const void *unused) {
     } else {
         if (ui.screen == PRESETS) {
             row_dim(view, n++, "Stock presets", 0, STOCK, INTO);
-            row_dim(view, n++, "Import from SD /EQ", 0, IMPORT, INTO);
             row_dim(view, n++, "Save editor preset", 0, SAVE, INTO);
             row_dim(view, n++, "Rename a preset", 0, RENAME, INTO);
             row_dim(view, n++, "Delete a preset", 0, DELETE, INTO);
         }
-        list_files(ui.screen == IMPORTS ? PEQ_IMPORT : PEQ_SAVED, ui.screen == IMPORTS ? ".txt" : ".peq");
+        write_out();
+        list_files(PEQ_FOLDER, ".txt");
         int last = ui.count ? (ui.count - 1) / FILE_PAGE : 0;
         if (ui.file_page < 0) ui.file_page = 0;
         if (ui.file_page > last) { ui.file_page = last; selection = offset = 0; }
@@ -834,7 +869,7 @@ static int render(const void *unused) {
     else if (ui.screen == PICK && ui.pick == GAIN) snprintf(text, sizeof(text), "Band %d Gain", ui.band + 1);
     else if (ui.screen == PICK)
         snprintf(text, sizeof(text), ui.pick == PREAMP ? "Preamp" : "Balance");
-    else if ((ui.screen == IMPORTS || ui.screen == PRESETS || ui.screen == DELETES || ui.screen == RENAMES) &&
+    else if ((ui.screen == PRESETS || ui.screen == DELETES || ui.screen == RENAMES) &&
              ui.count > FILE_PAGE)
         snprintf(text, sizeof(text), "Presets %d/%d", ui.file_page + 1, (ui.count - 1) / FILE_PAGE + 1);
     else if (ui.screen != HOME && ui.screen != ADJUST && ui.screen != NAMING)
@@ -1049,8 +1084,7 @@ static void page_load(void) {
     const char *output = eq_output_caption();
     eq_load(&s);
     ui.draft = s.peq;
-    /* Auto's saved number may be older (another version's); the player never plays it, so nothing
-     * to apply. */
+    /* Auto's number follows the bands, as peq_boot saved it, so this finds nothing to apply. */
     follow_auto();
     load(&s);
     ui.named.bypass = ui.draft.bypass;
@@ -1090,8 +1124,8 @@ int peq_page_init(void *page, void *context) {
 
 /* The sliders' travel, under their names and over their values, which stay clear of the iPod
  * glass's lower corners. */
-static int e3_top(void) { return E3_SLIDERS + 34; }
-static int e3_bottom(void) { return e3.h - 60; }
+static int e3_top(void) { return eq_rows() ? EQ_SLIDERS_TOP : E3_SLIDERS + 34; }
+static int e3_bottom(void) { return eq_rows() ? EQ_SLIDERS_BOTTOM : e3.h - 60; }
 static int e3_y(double gain) {
     return (e3_top() + e3_bottom()) / 2 - (int)(gain * (e3_bottom() - e3_top()) / (2 * E3_MAX));
 }
@@ -1236,16 +1270,22 @@ int eq_key(void *top, unsigned key) {
     return 1;
 }
 
-/* A touch: a button on the press; a slider's gain follows the finger, in 0.5 dB steps,
- * until it lifts. */
+/* A touch: a button (a set_switch theme's row) on the press; a slider's gain follows the finger,
+ * in 0.5 dB steps, until it lifts. */
 static int e3_touch(void *ctx, void *event) {
     int type = I(event, EVENT_TYPE), xy[2] = { I(event, EVENT_X), I(event, EVENT_Y) };
     if (!e3.view || (type != EVT_POINTER_DOWN && !e3.dragging)) return 0;
     widget_to_local(e3.view, xy);
     if (type == EVT_POINTER_DOWN) {
-        if (xy[1] < E3_BUTTONS) return 0;
+        int rows = eq_rows(); /* a set_switch theme's rows (slider_page.c eq_rows_paint) */
+        if (xy[1] < (rows ? EQ_ROWS_Y : E3_BUTTONS)) return 0;
         e3.status = 0;
-        if (xy[1] < E3_SLIDERS) {
+        if (rows && xy[1] < EQ_ROWS_Y + 3 * EQ_ROW) {
+            e3.focus = E3_SWITCH + (xy[1] - EQ_ROWS_Y) / EQ_ROW;
+            e3_activate();
+            return 0;
+        }
+        if (!rows && xy[1] < E3_SLIDERS) {
             e3.focus = xy[0] < e3_button[1][0] - 4 ? E3_SWITCH : xy[0] < e3_button[2][0] - 4 ? E3_PRESETS : E3_RESET;
             e3_activate();
             return 0;
@@ -1268,7 +1308,8 @@ static void e3_box(void *canvas, int x, int y, int w, int h, unsigned rgb) {
     canvas_fill_rect(canvas, x, y, w, h);
 }
 
-/* The switch's bar and the gains' bars in the accent's light tone (white in Minimal), grey
+/* A set_switch theme's (OLED's) Simple tab is slider_page.c's eq_rows_paint, on the EQ_* rows.
+ * Otherwise: the switch's bar and the gains' bars in the accent's light tone (white in Minimal), grey
  * while 3EQ is off; the selected control on a lighter card; the slider being adjusted with a white
  * handle and value, the others grey. While PEQ plays the switch shows it on, under the applied
  * preset's name (Advanced unnamed), and the sliders are dimmed: one takes over as 3EQ. */
@@ -1283,6 +1324,12 @@ static void e3_paint(void *canvas) {
         n = 12;
         while (n && (preset[n] & 0xc0) == 0x80) --n; /* preset[12] continues a character: drop it */
         preset[n] = 0;
+    }
+    if (eq_rows()) { /* slider_page.c: rows and the standard's vertical sliders */
+        eq_rows_t e = { peq ? preset : "Enabled", e3.on || peq, e3.focus - E3_TABS, e3.adjusting,
+                        { e3.gain[0], e3.gain[1], e3.gain[2] }, E3_MAX };
+        eq_rows_paint(e3.view, canvas, &e);
+        return;
     }
     const char *const names[] = { peq ? preset : e3.on ? "Enabled: On" : "Enabled: Off", "Presets", "R" };
     for (int i = 0; i < 3; ++i) {
@@ -1307,10 +1354,15 @@ static void e3_paint(void *canvas) {
 }
 
 /* The tab bar, unless a message has it: the open tab white over an accent line, the other grey,
- * and while the wheel is on the bar, the other on the lighter card Centre would open. */
+ * and while the wheel is on the bar, the other on the lighter card Centre would open
+ * (slider_page.c eq_tabs_paint's under a set_switch theme). */
 static void tabs_paint(void *canvas) {
     int simple = ui.tab == SIMPLE, focus = simple ? e3.focus == E3_TABS : ui.tabs;
     if (simple ? e3.status != 0 : ui.status[0] != 0) return;
+    if (eq_rows()) {
+        eq_tabs_paint(ui.bar, canvas, simple, focus);
+        return;
+    }
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     for (int i = 0; i < 2; ++i) {
         int x = i ? 191 : 8, shown = i == !simple;

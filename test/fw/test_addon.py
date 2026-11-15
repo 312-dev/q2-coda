@@ -402,7 +402,7 @@ def test_more_apps_than_slots(fw):
 def test_the_features_are_published_at_every_scan(fw):
     world = card(fw)
     scan(fw)
-    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now\n'
+    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings\n'
     assert world.of('rename') == [(b'/tmp/q2-addon.caps.tmp', b'/tmp/q2-addon.caps')]
 
 
@@ -3583,6 +3583,15 @@ def test_go_to_during_the_apps_remove_waits_and_stock_s_go_to_doesnt_run(fw):
     sh.running, sh.job, sh.app, sh.stage = 1, JOB_REMOVE, 0, 4
     assert goto(fw, b'/mnt/mmc/.foo/a.flac') == 1
     assert not p.pg.page and p.toasts == [b'Wait until the App Store finishes']
+
+
+def test_go_to_on_a_server_row_is_the_librarys_not_the_apps(fw):
+    """A server row's path (catalogue.c) is in its app's folder, but its album and artist are the Library's:
+    Go to shows on it and opens stock's page, never the app's, which knows only its own streams."""
+    p = Page(fw, b'name=Foo\ngoto=1\n', opens=False)
+    row = b'/mnt/mmc/.foo/cat/al1/s1.flac'
+    assert goes(fw, row) == 1 and goto(fw, row) == 0 and not p.pg.page
+    assert goto(fw, b'/mnt/mmc/.foo/stream/s1.flac') == 1  # a song it streamed: the app's page
 
 
 def test_go_to_artist_with_no_title_is_titled_by_the_app(fw):

@@ -74,6 +74,7 @@ int duration_seconds(void *song) {
     if (end > start) return end - start;
     const char *path = P(song, REC_PATH);
     if (!path) return -1;
+    if (catalogue_path(path)) return catalogue_seconds(path); /* a server row: no file to measure */
     duration_read();
     rec_t *entry = duration_find(duration_key(path));
     /* ponytail: two paths sharing a 64-bit key (~1e-10 at 47k songs) share the first's length */

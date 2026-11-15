@@ -278,6 +278,43 @@ int ringnav_queue_event(void *loop, const unsigned *r) {
     return r[0] ? post(loop, r) : 0;
 }
 
+/* The wheel's speed, as Rockbox's iPod driver measures it (firmware/target/arm/ipod/
+ * button-clickwheel.c): per click of WHEEL_SPEED_CLICK degrees (its 4 of 96 positions), that
+ * click's travel over its time, averaged as (15 v + new) / 16, and back to 0 on a reversal, a new
+ * touch or WHEEL_SPEED_IDLE_MS without travel. A click is timed from the sample that ended the last
+ * by the kernel's stamps on the samples (ts_sample's tv), not by when this thread reads them, which
+ * a busy UI bunches: timed on reading, a stall of 50 ms read as a spin of several times the real
+ * speed (measured in the emulator). Travel past a click carries its share into the average, so it
+ * is the same whatever the sample rate. wh_speed is in 1/256 degrees a second; wheel_speed is it,
+ * in degrees, as the last tick was posted, which the volume reads (volume.c vol_accel) when the UI
+ * loop takes the tick, a pass or a lift later. */
+volatile int wheel_speed __attribute__((section(".scratch")));
+static int wh_speed __attribute__((section(".scratch"))), wh_dir __attribute__((section(".scratch")));
+static int wh_moved __attribute__((section(".scratch"))); /* travel not yet timed, 1/16 units */
+static unsigned wh_moved_at __attribute__((section(".scratch")));
+/* d: this sample's travel in 1/16 units, at ms. Travel after a rest is timed from its sample on, as
+ * the rest's length says nothing of its speed. */
+static void wheel_speed_sample(int d, unsigned ms) {
+    if (ms - wh_moved_at >= WHEEL_SPEED_IDLE_MS || (d && wh_dir && (d ^ wh_dir) < 0)) {
+        wh_speed = wh_moved = 0;
+        wh_dir = d;
+        if (d) wh_moved_at = ms;
+        return;
+    }
+    if (!d) return;
+    wh_dir = d;
+    wh_moved += d < 0 ? -d : d;
+    if (wh_moved > 100 * WHEEL_FINE) wh_moved = 100 * WHEEL_FINE; /* half a turn, as d can be */
+    /* 200 units a turn: a 1/16 unit is 0.1125 degrees, so the speed is wh_moved * 112.5 / dt, here
+     * in 1/256 degrees a second and at most WHEEL_SPEED_TOP, so the products fit 32 bits */
+    int click = WHEEL_SPEED_CLICK * WHEEL_FINE * 200 / 360, dt = (int)(ms - wh_moved_at);
+    if (wh_moved < click || dt <= 0) return;
+    int v = wh_moved * 225 * 128 / dt;
+    if (v > WHEEL_SPEED_TOP << 8) v = WHEEL_SPEED_TOP << 8;
+    wh_speed += (v - wh_speed) * wh_moved / (15 * click + wh_moved);
+    wh_moved = 0;
+    wh_moved_at = ms;
+}
 volatile int wheel_raw __attribute__((section(".scratch")));
 static int wh_raw __attribute__((section(".scratch")));
 volatile int wheel_travel __attribute__((section(".scratch")));
@@ -298,12 +335,16 @@ void wheel_sample(int *s, int ret, char *info) {
         return;
     }
     unsigned now = (unsigned)time_now_ms();
+    /* the sample's own time, its kernel stamp (tv) in ms, for the speed; else now */
+    unsigned at = s[3] || s[4] ? (unsigned)s[3] * 1000 + (unsigned)s[4] / 1000 : now;
     if (now - wheel_frame_at >= WHEEL_FRESH_MS) wheel_mute = wh_armed = 0;
     wheel_frame_at = now;
     if (!wh_anchor) {
         wh_anchor = wh_last = s[0];
         wh_acc = 0;
         wh_raw = 0;
+        wh_speed = wh_moved = wh_dir = 0; /* a new touch starts from rest */
+        wh_moved_at = at;
         wheel_held = 1;
         return;
     }
@@ -311,6 +352,7 @@ void wheel_sample(int *s, int ret, char *info) {
     d = d < -100 ? d + 200 : d > 100 ? d - 200 : d;
     d *= WHEEL_FINE;
     wh_last = s[0];
+    wheel_speed_sample(d, at);
     if (wheel_raw) { /* games.c's Vortex reads the travel itself; nothing is queued for a menu */
         __sync_fetch_and_add(&wheel_travel, d / WHEEL_FINE);
         wh_acc = 0;
@@ -338,6 +380,7 @@ void wheel_sample(int *s, int ret, char *info) {
         wh_tick_at = now;
         wh_since++;
         wl_note_tick(now, before);
+        wheel_speed = wh_speed >> 8;
         if (!wheel_mute) wheel_post(info, dir > 0 ? KEY_PREV : KEY_NEXT); /* x rising is back, as stock */
     }
     s[0] = wh_anchor;
@@ -777,6 +820,12 @@ static int pend_take(unsigned x) {
     for (--s.npend; k < s.npend; ++k) s.pend[k] = s.pend[k + 1];
     return 1;
 }
+/* A server row that can't play now (catalogue.c: offline with no copy), say one Add to Queue put
+ * in or the link went while it waited: skipped from then on. */
+static int unplayable(unsigned x) {
+    void *q = queue();
+    return q && x < deque_size(q) && catalogue_unavailable(deque_at(q, x));
+}
 /* The indices that play after this track, in order, ignoring the single-song rules. Peek has no
  * side effects, RNG or history writes. */
 static unsigned upcoming(unsigned *out, unsigned max) {
@@ -790,7 +839,8 @@ static unsigned upcoming(unsigned *out, unsigned max) {
     }
     for (unsigned i = s.cursor + 1; i < s.n && k < max; ++i) {
         unsigned x = s.order[i].index;
-        if (!s.seen[x] && pend_find(x) == s.npend && (!category || s.groups[x] == s.groups[at]))
+        if (!s.seen[x] && pend_find(x) == s.npend && (!category || s.groups[x] == s.groups[at]) &&
+            !unplayable(x))
             out[k++] = x;
     }
     if (s.repeat < 3) return k;
@@ -903,9 +953,13 @@ int ringnav_load(void *q, int at, int type) {
     close_preload();
     /* After Shuffle Songs, before stock loads; ringnav_mode's playback_clear ends its shuffle. */
     if (unshuffle && !s.restoring) config_playmode(playback_unshuffle(), 1);
-    void *own = no_videos(q, &at);
-    int result = stock_load_trampoline(own ? own : q, at, type);
+    /* Server rows (catalogue.c): handed to their app online, else card rows and offline copies */
+    void *served = 0;
+    if (!s.restoring && catalogue_load(q, &at, &served) == 2) return 0;
+    void *own = no_videos(served ? served : q, &at);
+    int result = stock_load_trampoline(own ? own : served ? served : q, at, type);
     if (own) deque_destroy(own);
+    if (served) deque_destroy(served);
     back_to = 0;
     if (s.restoring == 2)
         s.restoring = 0;
@@ -1104,11 +1158,13 @@ int ringnav_seek_time(int sec) {
     press_stamp();
     return stock_seek_time_trampoline(sec);
 }
-/* player_prev_music's first move, its only caller, on anything playing or paused: past 10 s stock seeks
- * to the track's start and returns 1, in any queue and mode, without reaching player_change_music. A
- * refusal returns 1 too, so it goes no further. Under 11 s stock returns 0 and Previous changes track. */
+/* player_prev_music's first move, its only caller, on anything playing or paused: from PREV_RESTART_S
+ * stock seeks to the track's start and returns 1, in any queue and mode, without reaching
+ * player_change_music (its test of 11 s is 3 s: tools/build.py PREV_RESTART). A refusal returns 1 too, so
+ * it goes no further. Before it stock returns 0 and Previous changes track. */
+#define PREV_RESTART_S 3
 int ringnav_seek_start(void) {
-    int restarts = player_playtime() > 10;
+    int restarts = player_playtime() >= PREV_RESTART_S;
     if (restart_refused(0, restarts && place_held())) return 1;
     if (restarts) press_stamp();
     return stock_seek_start_trampoline();

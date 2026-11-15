@@ -14,7 +14,7 @@
 #include "navigation.h"
 
 #define SONG_ARTIST_MIN 40 /* an inline artist with less room than this is dropped */
-#define SONG_NUM_W 14      /* an album's track number, right-aligned this wide after the inset */
+#define SONG_NUM_W 17      /* an album's track number, right-aligned this wide after the inset */
 #define SONG_NUM_TITLE 50  /* ... and the title's first column on screen */
 #define SONG_COL_GAP 12    /* a title's ink and the text on the right column */
 #define SONG_SMALL_DY 2 /* the small text's box below the row's, so its baseline is the title's */

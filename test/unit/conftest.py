@@ -4,6 +4,7 @@ every test away from real processes, sockets and devices.
 mutmut only switches on a mutant whose module is tools.<name>, and tools/ imports `build`, not
 tools.build. The alias makes both one module, so a test can `import build` as test/*.py do. This
 folder has its own rootdir entry on sys.path, so test/build.py can't shadow tools/build.py here."""
+import ctypes
 import importlib
 import os
 import pathlib
@@ -22,13 +23,16 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # mutmut sets MUTANT_UNDER_TEST before any test session; elsewhere ASan's shadow memory is over 4 GB already.
 # A thread reserves its stack in that 4 GB, RLIMIT_STACK's 8 MB: q2remote.find's 64 probe threads took
 # 512 MB, past the cap in mutmut's stats run on CI ("can't start new thread"); at 1 MB they take 64.
+# Each of those threads also gets its own glibc malloc arena, 64 MB of address space, up to eight per core:
+# on 16 cores they took the stats run from 1.4 GB to the cap. Four arenas are shared between them.
 if 'MUTANT_UNDER_TEST' in os.environ:
     _, HARD = resource.getrlimit(resource.RLIMIT_AS)
     resource.setrlimit(resource.RLIMIT_AS, (4 << 30 if HARD == resource.RLIM_INFINITY else min(4 << 30, HARD), HARD))
     threading.stack_size(1 << 20)
+    ctypes.CDLL(None).mallopt(-8, 4)  # M_ARENA_MAX
 sys.path.insert(0, str(ROOT))
 # build first: the others import it, or each other in this order, while they load.
-for name in ('build', 'signing', 'shelf', 'module_elf', 'rotator', 'ipod', 'theme', 'art', 'peq', 'aic', 'flac', 'mcu_park', 'pwm', 'q2remote', 'release', 'rebase', 'lastfm_key'):
+for name in ('build', 'signing', 'shelf', 'module_elf', 'rotator', 'ipod', 'theme', 'art', 'peq', 'aic', 'flac', 'mcu_park', 'pwm', 'q2remote', 'release', 'rebase', 'lastfm_key', 'player', 'scan', 'thirdparty'):
     sys.modules[name] = importlib.import_module('tools.' + name)
 
 # The compilers a test may run, and openssl, which tools/signing.py signs and checks with in files

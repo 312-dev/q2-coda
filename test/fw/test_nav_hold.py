@@ -1340,6 +1340,16 @@ def test_a_fresh_classic_list_starts_on_its_first_playlist(classic, ui, fw):
     assert first(m, 0) == 2 and first(m, 3) == 3  # below New and Edit; a playlist stays
 
 
+def test_a_playlist_just_made_is_where_the_list_lands_once(classic, ui, fw):
+    """After New Playlist the reloaded list opens on the new one (an iPod's lands on what was added), then as before."""
+    p = classic()
+    p.ring(p.win)
+    m = menu(fw, [ui.kids(item)[0] for item in ui.kids(p.view) if ui.nodes[item].visible])
+    first = fw.fn('pl_first', C.c_int, C.POINTER(Menu), C.c_int)
+    fw.var('playlists__pl_made', C.c_char * 64).value = b'Road Trip'
+    assert first(m, 0) == 3 and first(m, 0) == 2  # Gym, Road Trip, Sleep below New and Edit
+
+
 def test_a_list_with_no_actions_first_starts_where_it_is(fw, ui):
     m = menu(fw, [ui.child(ui.child(0, 'list_item'), 'button') for _ in range(2)])
     assert fw.fn('pl_first', C.c_int, C.POINTER(Menu), C.c_int)(m, 0) == 0
@@ -1637,6 +1647,31 @@ def test_play_next_puts_the_song_after_the_playing_one(hold, recs, ui):
     assert [field(r, REC_PATH) for r in hold.deques[hold.queue]] == [field(r, REC_PATH) for r in want]
 
 
+@pytest.mark.parametrize('row, said', [('Add to Queue', 'Added to Queue'), ('Play Next', 'Playing Next')])
+def test_oled_says_what_an_in_place_action_did(hold, recs, ui, st, row, said):
+    """OLED's feedback (docs/oled-design.md#dialogs-and-toasts): every in-place action gets a toast."""
+    use_set(st, 'oled')
+    songs = [song(recs, i) for i in range(3)]
+    hold.now_playing(songs, at=0, held=True)
+    hold.hold()
+    hold.menu()
+    hold.pick(row)
+    assert ui.toasts == [said] and len(hold.deques[hold.queue]) == 4
+
+
+# OLED's inset modal names the rows in US English, as its toasts do
+@pytest.mark.parametrize('row, said', [('Add to Favorites', 'Added to Favorites'),
+                                       ('Remove from Favorites', 'Removed from Favorites')])
+def test_oled_says_a_favourite_was_kept(hold, recs, ui, fw, st, row, said):
+    use_set(st, 'oled')
+    hold.now_playing([song(recs, i) for i in range(3)])
+    fw.mock('checkFavExist', lambda *_: row.startswith('Remove'))
+    hold.hold()
+    hold.menu()
+    hold.pick(row)
+    assert ui.toasts == [said]
+
+
 def test_a_queue_changed_under_the_menu_is_left_alone(hold, recs, ui):
     songs = [song(recs, i) for i in range(3)]
     hold.now_playing(songs)
@@ -1677,6 +1712,123 @@ def test_go_to_album_from_the_menu(hold, recs, ui):
     assert C.string_at(C.addressof(classinfo(hold.fw)) + 0xd) == b'Abbey Road'
 
 
+# Now Playing's art, artist and album as links (np_taps.c np_tap, on the window): the art and album go to the album,
+# the artist to the artist, as the menu's Go to rows, when the touch lifts within TAP_PX of where it came down.
+class Taps:
+    """Now Playing's art page at rest in its slide_view (the iPod layout's boxes, on screen at the art 16,42 166x166,
+    the artist 194,92 165x22 and the album 194,120 165x22), playing the second of three songs."""
+    def __init__(self, hold, recs, ui, st, fw):
+        self.ui, self.st, self.fw = ui, st, fw
+        hold.now_playing([song(recs, i) for i in range(3)])
+        self.page = hold.page
+        self.slide = ui.child(self.page, 'slide_view', 0, 40, 375, 186)
+        art_page = ui.child(self.slide, 'view', 0, 0, 375, 186)
+        self.cover = ui.child(art_page, 'image', 16, 2, 166, 166)
+        self.artist = ui.child(art_page, 'hscroll_label', 194, 52, 165, 22)
+        self.album = ui.child(art_page, 'label', 194, 80, 165, 22)
+        for name, w in (('np_win', self.page), ('np_slide', self.slide), ('np_cover', self.cover),
+                        ('np_artist', self.artist), ('np_album', self.album)):
+            st(name, C.c_void_p).value = w
+        ui.routes['playerjumpinfo_page'] = lambda ctx: ui.window('playerjumpinfo_page')
+        ui.routes['localmusic/artistinfo_page'] = lambda ctx: ui.window('artistinfo_page')
+        self.np_tap = fw.fn('np_tap', C.c_int, C.c_void_p, C.c_void_p)
+
+    def touch(self, kind, x, y):
+        event = C.create_string_buffer(0x40)
+        self.ui.pointer_event(C.addressof(event), kind, self.page, x, y)
+        return self.np_tap(None, C.addressof(event))
+
+    def tap(self, x, y, to=None, moves=()):
+        """A touch down at (x, y), through moves, lifted at to (else where it came down); the pass after. The answers
+        of each event, which must all be 0 so the touch goes on to the child that has it."""
+        answers = [self.touch(O['EVT_POINTER_DOWN'], x, y)]
+        answers += [self.touch(O['EVT_POINTER_MOVE_BEFORE'], *m) for m in moves]
+        answers.append(self.touch(EVT_POINTER_UP_BEFORE, *(to or (x, y))))
+        self.ui.due()
+        return answers
+
+    def lit(self, w):
+        return self.fw.fn('np_tap_lit', C.c_int, C.c_void_p)(w)
+
+
+@pytest.fixture
+def taps(hold, recs, ui, st, fw):
+    return Taps(hold, recs, ui, st, fw)
+
+
+def test_a_tap_on_the_artist_opens_the_artist(taps, ui, st):
+    assert taps.tap(250, 100) == [0, 0]
+    assert ui.went == ['localmusic/artistinfo_page'] and C.c_int.from_address(ui.contexts[-1][1]).value == 0xf001
+    assert ui.handlers(ui.top(), EVT_WINDOW_CLOSE) == [ui.fn('qm_restore')]  # as the menu's Go to Artist
+
+
+@pytest.mark.parametrize('x, y', [(250, 128), (100, 120)], ids=['album', 'art'])
+def test_a_tap_on_the_album_or_the_art_opens_the_album(taps, ui, hold, x, y):
+    taps.tap(x, y)
+    assert ui.went == ['playerjumpinfo_page']
+    assert C.string_at(C.addressof(classinfo(hold.fw)) + 0xd) == b'Abbey Road'
+
+
+def test_the_link_is_lit_while_held_and_only_there(taps, ui):
+    taps.touch(O['EVT_POINTER_DOWN'], 250, 100)
+    assert taps.lit(taps.artist) and not taps.lit(taps.album) and not taps.lit(taps.cover)
+    taps.touch(O['EVT_POINTER_MOVE_BEFORE'], 255, 104)  # a finger's wobble keeps it
+    assert taps.lit(taps.artist)
+    taps.touch(O['EVT_POINTER_MOVE_BEFORE'], 290, 100)  # a swipe starting: no longer
+    assert not taps.lit(taps.artist)
+    taps.touch(O['EVT_POINTER_DOWN'], 250, 128)
+    taps.touch(EVT_POINTER_ABORT, 250, 128)  # the slide_view took it
+    assert not taps.lit(taps.album) and not ui.pending()
+
+
+def test_classics_slanted_art_fades_while_held_rather_than_take_a_box_of_shade(taps, ui, fw):
+    ui.place(taps.cover, 16, 2, 166, 206)  # taller than wide: the reflection's room
+    taps.touch(O['EVT_POINTER_DOWN'], 100, 120)
+    taps.touch(EVT_POINTER_UP_BEFORE, 300, 120)
+    assert [a[:2] for _, a in fw.calls('widget_set_opacity')] == [(taps.cover, 217), (taps.cover, 255)]
+
+
+@pytest.mark.parametrize('to, moves', [((300, 120), ()), ((100, 120), ((200, 120),)), ((111, 120), ())],
+                         ids=['swipe-off', 'swipe-back', 'past-slop'])
+def test_a_swipe_or_a_drag_goes_nowhere(taps, ui, to, moves):
+    assert taps.tap(100, 120, to, moves) == [0] * (2 + len(moves))
+    assert not ui.went and not ui.pending()
+
+
+def test_off_the_art_page_or_with_lyrics_full_screen_nothing_is_a_link(taps, ui, st):
+    ui.nodes[taps.slide].props['value'] = 1  # the lyrics page in front
+    taps.tap(250, 100)
+    ui.nodes[taps.slide].props['value'] = 0
+    st('np_full').value = 1
+    taps.tap(100, 120)
+    st('np_full').value = 0
+    taps.tap(250, 160)  # under the album: the heart's row
+    taps.tap(200, 253)  # the bar
+    assert not ui.went
+
+
+def test_a_stream_or_a_go_to_already_open_goes_nowhere_and_lights_nothing(taps, ui, hold):
+    hold.mcl.type = 0x2  # not a Library or folder queue: a stream's
+    taps.touch(O['EVT_POINTER_DOWN'], 250, 100)
+    assert not taps.lit(taps.artist)
+    taps.tap(250, 100)
+    hold.mcl.type = 1
+    ui.window('artistinfo_page')  # Go to Artist's page is open, under this one
+    ui.stack.append(ui.stack.pop(-2))
+    taps.tap(250, 100)
+    assert not ui.went
+
+
+def test_the_arts_click_is_never_stocks_enlarged_art_and_the_hearts_still_is(taps, ui, fw):
+    dispatch = fw.fn('ringnav_dispatch', C.c_int, C.c_void_p, C.c_void_p)
+    heart = ui.child(taps.page, 'image', 300, 150, 50, 50)
+    for w in (taps.cover, heart):
+        event = C.create_string_buffer(0x40)
+        ui.pointer_event(C.addressof(event), EVT_CLICK, w, 10, 10)
+        dispatch(w, C.addressof(event))
+    assert ui.dispatched == [(heart, EVT_CLICK)]
+
+
 def test_more_clicks_now_playings_own_more(hold, recs, ui, st):
     hold.now_playing([song(recs, i) for i in range(3)])
     st('np_win', C.c_void_p).value = hold.page
@@ -1713,6 +1865,64 @@ def test_now_playings_rate_opens_the_picker_over_it(hold, recs, ui, st, rates):
     hold.menu()
     hold.pick('Rate')
     assert st('rate_on', C.c_void_p).value == hold.page and rates('rate_album', C.c_uint).value == 0
+
+
+def test_oled_rates_in_the_inset_modal(hold, recs, ui, st, rates, fw):
+    """A modal set's rating picker (Now Playing's Centre cycle, its menu's Rate) is the inset modal's picker: a row for
+    each rating, no hearts to five, the current one checked and selected; Centre on a row keeps that rating and closes
+    the picker, Return closes it with the rating as it was."""
+    use_set(st, 'oled')
+    songs = [song(recs, i) for i in range(3)]
+    hold.now_playing(songs)
+    st('rate_win', C.c_void_p).value = hold.page
+    key = fw.fn('listen_key', C.c_uint, C.c_void_p)(songs[1])
+    kept = lambda: fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, key)
+    fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)(0, key, 2)
+    assert fw.fn('rate_open', C.c_int)() == 1 and not st('rate_on', C.c_void_p).value
+    view = hold.view()
+    assert ui.rows(view) == ['Unrated', '1 Heart', '2 Hearts', '3 Hearts', '4 Hearts', '5 Hearts']
+    assert [ui.nodes[item].props.get('_mm_icon') for item in ui.kids(view)] == ['', '', 'check', '', '', '']
+    assert ui.prop(view, '_ringnav_index', -1) == 2
+    ui.click(ui.find(view, '4 Hearts'))
+    ui.due('pick_run')
+    assert kept() == 4 and hold.dialog not in ui.stack
+    fw.fn('rate_open', C.c_int)()
+    assert ui.key(hold.dialog, KEY_RETURN) == STOP and hold.dialog not in ui.stack and kept() == 4
+
+
+class Rect(C.Structure):
+    _fields_ = [('x', C.c_int), ('y', C.c_int), ('w', C.c_int), ('h', C.c_int)]
+
+
+@pytest.mark.parametrize('image, selected, strokes, fills', [('switch_on', 0, 0, 2), ('switch_off', 1, 1, 1)])
+def test_oled_more_shows_ab_repeat_as_the_themes_switch(fw, ui, st, image, selected, strokes, fills):
+    """Now Playing's More under a modal set: A-B Repeat's stock switch hides and its row paints the theme's switch
+    (list_marks.c switch_mark, rule 7) by the hidden image's state, its label ending short of it: a track and a knob,
+    or on the selection when off, an outline round the knob."""
+    use_set(st, 'oled')
+    win = ui.window('playermore_page', 'dialog')
+    lv = ui.child(win, 'list_view', 0, 44, 375, 270)
+    ui.nodes[lv].name = 'list_view_more'
+    view = ui.child(lv, 'scroll_view', 0, 0, 375, 270)
+    ui.nodes[view].name = 'scroll_view_more'
+    button = ui.child(ui.child(view, 'list_item', 0, 0, 375, 70), 'button', 0, 0, 375, 70)
+    label = ui.child(button, 'hscroll_label', 20, 0, 280, 70)
+    ui.nodes[label].text = 'AB Repeat'
+    sw = ui.child(button, 'image', 300, 10, 50, 50)
+    ui.nodes[sw].image = image
+    fw.fn('modal_more', None, C.c_void_p)(win)
+    inset = THEMES[st('theme').value]['sel_inset']
+    right = 259 + (inset - 8) - 16  # the row's right column, in the row
+    x, _, w, _ = ui.nodes[label].rect()
+    assert not ui.nodes[sw].visible and x + w <= right - 34
+    assert ui.fn('switch_flipped') in ui.handlers(button, EVT_CLICK)  # stock flips the hidden image: the row repaints
+    lcd = C.create_string_buffer(0x400)
+    canvas = C.create_string_buffer(0x400)
+    struct.pack_into('<Q', canvas, O['CANVAS_LCD'], C.addressof(lcd))
+    fw.mock('canvas_get_vgcanvas', lambda *_: 1)
+    paint = fw.fn('modal_row_paint', None, C.c_void_p, C.c_void_p, C.c_void_p, Rect, C.c_int)
+    paint(view, C.addressof(canvas), button, Rect(0, 0, 259 + 2 * (inset - 8), 32), selected)
+    assert len(fw.calls('vgcanvas_stroke')) == strokes and len(fw.calls('vgcanvas_fill')) == fills
 
 
 def advanced(fw, kind, value):
@@ -1824,6 +2034,40 @@ def test_classic_draws_a_choice_as_the_panel_too(fw, ui, st, recs, mcl):
     hold.pick('Group by: Album')
     lv = ui.lookup(hold.dialog, 'list_view', 1)
     assert ui.nodes[lv].rect()[3] == 2 * THEMES[st('theme').value]['page_row']
+
+
+def test_oled_draws_the_menu_as_the_inset_modal(fw, ui, st, recs, mcl):
+    """A modal set's hold menu (menu_modal.c): no title bar, its rows the panel's (259 px from x 58, 8 px padding, so
+    the rows' boxes reach the selection inset past it), 32 px each from y 66, six in view; the settings read as
+    settings, US English, and the menu opens on its first row."""
+    use_set(st, 'oled')
+    hold = Hold(fw, ui, st, recs, mcl).now_playing([song(recs, i) for i in range(3)])
+    hold.hold()
+    rows = hold.menu()
+    inset = THEMES[st('theme').value]['sel_inset']
+    lv = ui.lookup(hold.dialog, 'list_view', 1)
+    assert tuple(ui.nodes[lv].rect()) == (58 + 8 - inset, 66, 259 + 2 * (inset - 8), 6 * 32)
+    assert not ui.nodes[ui.lookup(hold.dialog, 'view_navbar', 1)].visible
+    assert all(tuple(ui.nodes[item].rect()[2:]) == (259 + 2 * (inset - 8), 32) for item in ui.kids(hold.view()))
+    assert rows[:4] == ['Play Next', 'Add to Queue', 'View Queue', 'Add to Favorites'] and 'Group by' in rows
+    assert ui.prop(hold.view(), '_ringnav_index', -1) == 0
+
+
+def test_oled_menu_on_songs_starts_with_sorting_a_gap_above_the_actions(fw, ui, st, recs, mcl):
+    """Songs (0xf001), whose action row holds stock's Sort: Sorting first, then a 12 px gap that is no row, then the
+    actions; the menu opens on Play Next, one tick under Sorting."""
+    use_set(st, 'oled')
+    hold = Hold(fw, ui, st, recs, mcl).songs_page('allmusic_page', [song(recs, i) for i in range(3)])
+    bar = ui.child(hold.page, 'view', 0, 0, 375, 32)
+    for _ in range(3):  # its label, Play All's image, Sort's bars
+        ui.child(bar, 'image')
+    st('action_view', C.c_void_p).value = bar
+    hold.hold()
+    rows = hold.menu()
+    kids = ui.kids(hold.view())
+    assert rows[0] == 'Sorting' and rows[1] is None and rows[2] == 'Play Next'
+    assert ui.nodes[kids[1]].rect()[3] == 12 and ui.nodes[kids[2]].rect()[1] == 32 + 12
+    assert ui.prop(hold.view(), '_ringnav_index', -1) == 1
 
 
 def test_add_to_playlist_opens_the_picker_guarded_by_the_menus_record(hold, recs, ui, st, fw):
@@ -2124,6 +2368,38 @@ def test_a_hold_in_quick_settings_switches_the_wheel(fw, ui, st):
     assert keylong(None, event) == STOP and keylong(None, event) == STOP
     assert [(a[0], cstr(a[1]), cstr(a[2])) for _, a in fw.calls('write_int_config')] == [(1, 'Q2POD', 'QSVOLUME'), (0, 'Q2POD', 'QSVOLUME')]
     assert not fw.calls('stock_keylong_trampoline')
+
+
+def test_oled_s_quick_settings_keeps_the_wheel_on_its_rows_through_a_hold(fw, ui):
+    """OLED's wheel walks its rows (navigation.c quick_walk): a held Play/Pause there is stock's, as on any page."""
+    def config(path, section, key, out, default, *_):
+        value = b'3' if C.string_at(key) == b'THEME' else C.string_at(default)  # IPOD THEME 3, OLED
+        C.memmove(out, value + b'\0', len(value) + 1)
+    fw.mock('toolsReadConfig', config)
+    ui.window('statusbar_dialog')
+    event = C.create_string_buffer(0x40)
+    struct.pack_into('<i', event, EVENT_KEY, KEY_PLAY)
+    fw.fn('ringnav_keylong', C.c_int, C.c_void_p, C.c_void_p)(None, event)
+    assert not fw.calls('write_int_config') and fw.calls('stock_keylong_trampoline')
+
+
+@pytest.mark.parametrize('name, unlocks', [('saverscreen_page', 1), ('home_page', 0)])
+def test_a_held_centre_on_oled_s_lock_window_unlocks_and_its_release_is_the_hold_s(fw, ui, name, unlocks):
+    """lockscreen.c lockscreen_hold closes OLED's lock window, and the release goes as a held power key's
+    (g_power_longkey, which stock's keyup clears); on another page the hold is stock's (the Shut Down? prompt)."""
+    def config(path, section, key, out, default, *_):
+        value = b'3' if C.string_at(key) == b'THEME' else C.string_at(default)  # IPOD THEME 3, OLED
+        C.memmove(out, value + b'\0', len(value) + 1)
+    fw.mock('toolsReadConfig', config)
+    fw.var('g_lockscreen_pageflag', C.c_ubyte).value = 1
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    top = ui.window(name)
+    event = C.create_string_buffer(0x40)
+    struct.pack_into('<i', event, EVENT_KEY, O['KEY_CENTER'])
+    answer = fw.fn('ringnav_keylong', C.c_int, C.c_void_p, C.c_void_p)(None, event)
+    assert (answer == STOP, fw.var('g_power_longkey', C.c_ubyte).value) == (bool(unlocks), unlocks)
+    assert [a[0] for _, a in fw.calls('window_close')] == [top] * unlocks
+    assert bool(fw.calls('stock_keylong_trampoline')) != bool(unlocks)
 
 
 def test_a_hold_in_quick_settings_names_the_wheel_in_a_toast(fw, ui):
@@ -2927,3 +3203,44 @@ def test_the_rtcs_seconds(fw, ui, data, now):
 def test_no_rtc_reads_zero(fw, ui):
     Card(fw)
     assert fw.fn('system__rtc_now', C.c_uint)() == 0
+
+
+def test_song_order_takes_the_sort_pickers_order_on_the_title_order(fw, st, recs):
+    """song_sort.c over a list loaded in stock's title order: Artist stably (the titles stay in order within an
+    artist), an untagged artist last either way; Album with its discs and tracks in their own order even descending;
+    Title descending reversed; nothing for Recently Added, which stock's query orders (g_sort_flag 3), or under a set
+    without the inset modal."""
+    use_set(st, 'oled')
+    saved = {}
+    fw.mock('write_int_config', lambda v, s, k, *_: saved.__setitem__(cstr(k), C.c_int(v).value))
+    flag = fw.var('fw_ctx_g_sort_flag', C.c_int)
+    rows = Rows(fw)
+    songs = [recs(title='A', artist='Beta', album='Two', track=2), recs(title='B', artist='', album='One', track=1),
+             recs(title='C', artist='alpha', album='Two', track=1), recs(title='D', artist='Beta', album='One', track=2)]
+    q = rows.rows(songs)
+    sort_set = fw.fn('song_sort_set', None, C.c_int, C.c_int)
+    order = fw.fn('song_order', None, C.c_void_p)
+
+    def titles():
+        return ''.join(field(r, REC_TITLE) for r in rows[q])
+    sort_set(1, 0)  # Artist, A to Z
+    order(q)
+    assert titles() == 'CADB' and flag.value == 0 and saved == {'SORTSELECT': 0, 'SONGSORT': 1, 'SONGDOWN': 0}
+    sort_set(1, 1)  # Z to A, the untagged one still last
+    order(q)
+    assert titles() == 'ADCB'
+    sort_set(2, 1)  # Album, Z to A: Two (tracks 1, 2), then One (tracks 1, 2)
+    order(q)
+    assert titles() == 'CABD'
+    sort_set(0, 1)  # Title, Z to A: the list reversed
+    order(q)
+    assert titles() == 'DBAC'
+    sort_set(3, 1)  # Recently Added, newest first: stock's flag 3, its query's order
+    assert flag.value == 3 and saved['SORTSELECT'] == 3
+    order(q)
+    assert titles() == 'DBAC'
+    flag.value = 0
+    sort_set(1, 0)
+    use_set(st, MINIMAL)
+    order(q)
+    assert titles() == 'DBAC'

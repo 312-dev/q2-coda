@@ -36,6 +36,14 @@ void chevron_icon(void *w, void *canvas, int right, int y, int selected) {
         canvas_draw_icon(canvas, bitmap, right - CHEV_SHIFT, y);
 }
 
+/* ... and a disabled row's (stock's list_intodown, docs/oled-design.md Chevrons and disabled rows),
+ * in the half's Text Tertiary, selected or not: the wheel never selects such a row. */
+void chevron_muted(void *w, void *canvas, int right, int y) {
+    unsigned bitmap[64]; /* bitmap_t */
+    if (!widget_load_image(w, theme_art(ipod_light() ? "chevron_tl" : "chevron_td"), bitmap))
+        canvas_draw_icon(canvas, bitmap, right - CHEV_SHIFT, y);
+}
+
 /* A scrolling text's ends (list.marquee.fade, docs/oled-design.md#motion): over an hscroll_label
  * whose text is wider than its column, once stock has painted it, MARQUEE_FADE_PX columns at the
  * right end while the text goes on past it, and at the left while it is scrolled off its start,
@@ -48,14 +56,16 @@ void chevron_icon(void *w, void *canvas, int right, int y, int selected) {
 void marquee_fade(void *w, void *canvas) {
     void *lcd = w && canvas ? P(canvas, CANVAS_LCD) : (void *)0;
     if (!lcd || tk_strcmp(widget_get_type(w), "hscroll_label")) return;
+    int loop = np_marq_owns(w); /* Now Playing's lines: their copy follows, so the right fades on */
+    if (loop) np_marq_kick(w);
     void *style = P(w, W_ASTYLE);
     int x0 = style_get_int(style, "margin_left", 2),
         x1 = I(w, W_W) - style_get_int(style, "margin_right", 2), h = I(w, W_H),
         off = I(w, HSCROLL_XOFFSET), over = I(w, HSCROLL_TEXT_W) - (x1 - x0);
-    if (over <= 0 || (B(w, HSCROLL_ELLIPSES) && !I(w, HSCROLL_TIMER))) return;
+    if (over <= 0 || (!loop && B(w, HSCROLL_ELLIPSES) && !I(w, HSCROLL_TIMER))) return;
     unsigned saved = (unsigned)I(lcd, LCD_FILL_COLOR),
              behind = (w == st.marq_label ? RGBA(scheme()->tones[0]) : ui_ink(RGBA(0))) & 0xffffffu;
-    int left = off > 0, right = off < over;
+    int left = off > 0, right = loop || off < over;
     for (int i = 0; i < MARQUEE_FADE_PX && (left || right); ++i) {
         unsigned a = 255u * (unsigned)(MARQUEE_FADE_PX - i) / MARQUEE_FADE_PX;
         stock_canvas_set_fill_color(canvas, behind | a << 24);
@@ -149,6 +159,52 @@ void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key) {
     round_path(vg, (float)(x + bw + 1), (float)y + ((float)bh - BATT_SLIM_NUB_H) / 2,
                BATT_SLIM_NUB_W, BATT_SLIM_NUB_H, BATT_SLIM_NUB_R);
     vgcanvas_set_fill_color(vg, RGBA(BATT_SLIM_DIM));
+    vgcanvas_fill(vg);
+    vgcanvas_restore(vg);
+    st.raw_ink = raw;
+}
+
+/* settings.values.switch: an on/off setting's switch (docs/oled-design.md List row), SWITCH_W x
+ * SWITCH_H, fully round, ending on screen column right (canvas columns) and centred on row y, its
+ * SWITCH_KNOB px knob SWITCH_KNOB_IN px in. Off the selection: the accent's track when on, Track
+ * (each half's) when off, a white knob. On the selection, whose bar is the accent: a white track
+ * with an accent knob when on, a SWITCH_RING px white outline round a white knob when off. Final
+ * colours. */
+#define SWITCH_W 34.0f
+#define SWITCH_H 20.0f
+#define SWITCH_KNOB 16.0f
+#define SWITCH_KNOB_IN 2.0f
+#define SWITCH_RING 1.5f
+#define SWITCH_TRACK_DARK 0x333333
+#define SWITCH_TRACK_LIGHT 0xd9d9d9
+void switch_mark(void *canvas, int right, int y, int on, int selected) {
+    void *vg = canvas ? canvas_get_vgcanvas(canvas) : (void *)0;
+    if (!vg) return;
+    unsigned accent = scheme()->tones[0] & 0xffffffu,
+             track = selected       ? 0xffffff
+                     : on           ? accent
+                     : ipod_light() ? SWITCH_TRACK_LIGHT
+                                    : SWITCH_TRACK_DARK,
+             knob = selected && on ? accent : 0xffffff;
+    float x = (float)right - SWITCH_W, top = (float)y - SWITCH_H / 2,
+          kx = on ? x + SWITCH_W - SWITCH_KNOB_IN - SWITCH_KNOB : x + SWITCH_KNOB_IN;
+    unsigned raw = st.raw_ink;
+    st.raw_ink = 1; /* final: Light Mode's flip leaves them */
+    vgcanvas_save(vg);
+    vgcanvas_translate(vg, (float)I(canvas, CANVAS_X), (float)I(canvas, CANVAS_Y));
+    if (selected && !on) { /* the outline's centre line SWITCH_RING / 2 inside the track's edge */
+        round_path(vg, x + SWITCH_RING / 2, top + SWITCH_RING / 2, SWITCH_W - SWITCH_RING,
+                   SWITCH_H - SWITCH_RING, (SWITCH_H - SWITCH_RING) / 2);
+        vgcanvas_set_line_width(vg, SWITCH_RING);
+        vgcanvas_set_stroke_color(vg, RGBA(track));
+        vgcanvas_stroke(vg);
+    } else {
+        round_path(vg, x, top, SWITCH_W, SWITCH_H, SWITCH_H / 2);
+        vgcanvas_set_fill_color(vg, RGBA(track));
+        vgcanvas_fill(vg);
+    }
+    round_path(vg, kx, top + SWITCH_KNOB_IN, SWITCH_KNOB, SWITCH_KNOB, SWITCH_KNOB / 2);
+    vgcanvas_set_fill_color(vg, RGBA(knob));
     vgcanvas_fill(vg);
     vgcanvas_restore(vg);
     st.raw_ink = raw;

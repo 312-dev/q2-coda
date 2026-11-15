@@ -88,7 +88,7 @@
 #define CAPS_FILE "/tmp/q2-addon.caps"
 /* This firmware's card-app features, space-separated; a feature adds its word. */
 #define ADDON_CAPS                                                                                 \
-    "playlist progress pages library goto sleep game audio sections art window urls sort field more fav now"
+    "playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings"
 #define ADDON_SECTIONS 8  /* sections an app's first page may have */
 #define SWIPE_CLAIM_PX 24 /* a sideways move this far, twice as far as up or down, is a swipe's */
 #define SWIPE_PX 60       /* and this far at the lift, more than up or down, changes section */
@@ -220,6 +220,31 @@ static void launch(app_t *a) {
     a->launched = 1;
     a->launch_at = time_now_ms();
     system(a->run); /* exits at once when the app runs already */
+}
+
+/* The server library's play hand-off (catalogue.c catalogue_load, docs/server-library.md): app id
+ * started in the background when it isn't running, as its Streaming row starts it, so a .catplay
+ * pressed on the Library is answered without the app opened since boot, or after its own idle
+ * exit. The capability line is written first (addon_scan, as Streaming's page does, once the
+ * app is found): the app reads it once, at its start. 0: it runs, and reads a catplay now; 1: started, and reads one once
+ * its socket is there (addon_ready: it reads the catplay file at its start, as one answered, and
+ * makes its socket after that); -1: it can't start (not on the card, or the Apps page replacing
+ * its files). A socket a killed app left is removed first, so it is not taken for the new one's. */
+int addon_wake(const char *id) {
+    app_t *a = valid_id(id) ? slot(id) : 0;
+    if (a && !a->present) addon_scan();
+    if (!a || !a->present) return -1;
+    if (!access(a->pid, 0)) {
+        if (!a->launched) a->launched = 1, a->launch_at = time_now_ms(); /* its .play polled */
+        return 0;
+    }
+    unlink(a->browse);
+    launch(a);
+    return a->launched ? 1 : -1;
+}
+int addon_ready(const char *id) {
+    app_t *a = valid_id(id) ? slot(id) : 0;
+    return a && !access(a->browse, 0);
 }
 
 /* Stream mode (q2-deezer's stream.go): an app's /tmp/q2-<id>.play holds "<seq> <folder>", a hidden
@@ -963,6 +988,7 @@ void addon_poll(void) {
     sleep_check();
     now_poll();
     library_poll();
+    catalogue_poll(); /* the server library's apps (catalogue.c), running or not */
 }
 
 /* An app asked to end through its loop, not its socket, so a frozen one stops too; restart: started
@@ -996,6 +1022,7 @@ void addon_stop(void) {
 void addon_card_away(void) {
     char cmd[96];
     int left = 0;
+    catalogue_card_away(); /* the server library's file, attached to stock's connection */
     for (int i = 0; i < ap.n; ++i) {
         app_t *a = &ap.a[i];
         int running = a->launched || a->restart || !access(a->pid, 0);
@@ -2139,7 +2166,7 @@ static int card_id(const char *path, char *id) {
 /* The app whose folder holds path, when its q2app says goto=1; 0 for any other. */
 static app_t *goto_app(const char *path) {
     char id[APP_ID], raw[512], file[64];
-    if (!card_id(path, id)) return 0;
+    if (catalogue_path(path) || !card_id(path, id)) return 0; /* a server row is the Library's */
     tk_snprintf(file, sizeof file, CARD "/.%s/q2app", id);
     if (!state_read(file, raw, sizeof raw) || number(raw, "goto") != 1) return 0;
     app_t *a = slot(id);
@@ -2147,10 +2174,12 @@ static app_t *goto_app(const char *path) {
     return a && a->present ? a : 0;
 }
 /* The hold menu's: whether Go to on path opens a page, its app's (goto=1) or, outside an app's
- * folder, stock's. An app's folder is hidden, so the Library never holds its songs. */
+ * folder, stock's. An app's folder is hidden, so the Library never holds its songs, but for a
+ * server row (catalogue.c), whose path is in its app's folder and whose album and artist are the
+ * Library's: stock's pages. */
 int addon_goes(const char *path) {
     char id[APP_ID];
-    return !card_id(path, id) || goto_app(path);
+    return catalogue_path(path) || !card_id(path, id) || goto_app(path);
 }
 /* Whether a listen of path goes in the scrobble log (navigation.c scrobble): not when it is in an
  * app's folder and its q2app says scrobble=0, a line a Windows editor may end in \r. Compared as

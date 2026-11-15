@@ -104,6 +104,7 @@ void rate_album_favs(void *album, int on) {
         void *r = deque_at(t, i);
         int was = on || checkFavExist(r) != 0;
         if (!on) deleteMusicFromFav(r);
+        if (was) catalogue_rated(r, on ? 5 : 0);
         if (was && told) told = fav_told(r, on);
     }
     deque_destroy(t);
@@ -139,7 +140,10 @@ static void rate_badge(void) {
     if (!ra.rate_badge) return;
     void *r = rate_track();
     int n = r ? rate_kept(0, listen_key(r)) : 0;
-    if (n && !tk_strcmp(widget_get_prop_str(ra.rate_fav, "image", ""), "play_fav")) n = 0;
+    /* play_fav, or the theme's own full heart (np_bar.c np_glyphs: "<art>np_fav") */
+    const char *image = widget_get_prop_str(ra.rate_fav, "image", "");
+    unsigned k = (unsigned)strlen(image);
+    if (n && k >= 4 && !tk_strcmp(image + k - 4, "_fav")) n = 0;
     /* each set repaints the badge, and this runs every 500 ms: only a change (AWTK's "text" is
      * a wide string widget_get_prop_str doesn't read) */
     if (ra.rate_shown == n + 1) return;
@@ -244,9 +248,8 @@ static void rate_outside(void *win, int on) {
     widget_set_sensitive(out, on);
 }
 
-/* Closes the picker, and with save rates rate_pick: an album (rate_album) if still Coverflow's
- * centre card, else the playing track, My Fav in or out through the heart's own click and the
- * rest kept here. */
+static void rate_save(void *win);
+/* Closes the picker, and with save keeps rate_pick (rate_save). */
 static void rate_close(int save) {
     void *win = st.rate_on;
     if (!win) return;
@@ -255,8 +258,15 @@ static void rate_close(int save) {
     widget_set_visible(panel, 0, 0);
     widget_set_sensitive(panel, 0); /* stock's hit test skips only the insensitive, hidden or not */
     rate_outside(win, 0);
+    if (save) rate_save(win);
+}
+
+/* Keeps rate_pick for the picker that was over win: an album (rate_album) if still Coverflow's
+ * centre card, else the playing track, My Fav in or out through the heart's own click and the
+ * rest kept here. */
+static void rate_save(void *win) {
     int n = ra.rate_pick;
-    if (save && ra.rate_album) { /* the menu's album, still on its page */
+    if (ra.rate_album) { /* the menu's album, still on its page */
         void *a = window_manager_get_top_window(window_manager()) == win ? qm_record() : (void *)0;
         if (!a || qm_album_id(a) != ra.rate_album) {
             toast("Album changed");
@@ -266,10 +276,11 @@ static void rate_close(int save) {
             rate_album_favs(a, n == 5);
         return;
     }
-    void *r = save ? rate_track() : (void *)0;
+    void *r = rate_track();
     if (!r) return;
     int fav = checkFavExist(r) != 0;
     if (!rate_saved(rate_keep(0, listen_key(r), n))) return;
+    catalogue_rated(r, n); /* to the server too (docs/server-library.md#ratings-and-favourites) */
     if ((n == 5) != fav) FAV_CLICK(ra.rate_ctx, (void *)0), ratings_copy_due(), fav_told(r, n == 5);
     rate_badge();
 }
@@ -303,11 +314,29 @@ static int rate_out(void *ctx, void *event) {
     return STOP;
 }
 
+/* A modal set's picker (docs/oled-design.md#menus): the inset modal's, a row for each rating, the
+ * current one checked; a pick keeps its row's rating, as Centre on the hearts does, and Return
+ * leaves the rating as it was. */
+static const char *const rate_rows[] = { "Unrated",  "1 Heart",  "2 Hearts",
+                                         "3 Hearts", "4 Hearts", "5 Hearts" };
+static void *rate_page __attribute__((section(".scratch")));
+static void rate_picked(int n) {
+    ra.rate_pick = n;
+    rate_save(rate_page);
+}
+static int rate_modal(void *win, int pick, unsigned album) {
+    ra.rate_pick = ra.rate_was = pick;
+    ra.rate_album = album;
+    rate_page = win;
+    return modal_pick((void *)0, rate_rows, 6, pick, rate_picked);
+}
+
 /* The picker over win on pick hearts, for the queue menu's album album or, with 0, the playing
  * track: the wheel moves the rating, Centre saves it and Return leaves it as it was; a tap on a
  * heart saves that many, or none on the one it opened on. */
 int rate_show(void *win, int pick, unsigned album) {
     if (!win || st.rate_on) return 0;
+    if (modal_set()) return rate_modal(win, pick, album);
     st.rate_on = win;
     ra.rate_pick = ra.rate_was = pick;
     ra.rate_album = album;
@@ -374,7 +403,11 @@ static int rate_fav_click(void *ctx, void *event) {
     FAV_CLICK(ctx, event);
     ratings_copy_due();
     void *r = rate_track();
-    if (r) rate_keep(0, listen_key(r), 0), fav_told(r, checkFavExist(r) != 0);
+    if (r) {
+        int fav = checkFavExist(r) != 0;
+        rate_keep(0, listen_key(r), 0), fav_told(r, fav);
+        catalogue_rated(r, fav ? 5 : 0);
+    }
     rate_badge();
     return 0;
 }
@@ -479,8 +512,37 @@ static void rate_all(void *songs, unsigned char *h) {
     deque_destroy(favs);
 }
 
+/* OLED's Ratings rows (feedback_oled): the hearts on the second line are Phosphor glyphs, filled
+ * for the song's and outlined for the rest, in Text Secondary or white on the selection
+ * (tools/art.py RATE_PX, oled_rate_on_* and oled_rate_off_*), drawn with the row from its
+ * RATE_HEARTS; the line's words start after them. */
+#define RATE_PX 14
+#define RATE_GAP 2
+#define RATE_ROOM (5 * RATE_PX + 4 * RATE_GAP + 6) /* the hearts and a space */
+#define RATE_HEARTS "_hearts"
+static void rate_row(void *item, int n) {
+    void *label = widget_get_child(item, 1);
+    if (!label) return;
+    widget_set_prop_int(item, RATE_HEARTS, n);
+    widget_move_resize(label, I(label, W_X) + RATE_ROOM, I(label, W_Y), I(label, W_W) - RATE_ROOM,
+                       I(label, W_H));
+}
+void rate_hearts_paint(void *w, void *canvas) {
+    if (!w || !feedback_oled()) return; /* ringnav_paint calls it while st.rt_page is open */
+    int n = widget_get_prop_int(w, RATE_HEARTS, 0);
+    void *label = n ? widget_get_child(w, 1) : (void *)0;
+    if (!label) return;
+    const char *ink = st.sel_accent && painting_in(st.sel_accent) ? "w" : ipod_light() ? "l" : "d";
+    int x = I(label, W_X) - RATE_ROOM, y = I(label, W_Y) + (I(label, W_H) - RATE_PX) / 2;
+    char name[16];
+    for (int i = 0; i < 5; i++, x += RATE_PX + RATE_GAP) {
+        tk_snprintf(name, sizeof name, "rate_%s_%s", i < n ? "on" : "off", ink);
+        paint_art(w, canvas, theme_art(name), x, y);
+    }
+}
+
 /* Top Rated (4-5 hearts), Loved (5), All Rated (1-5) and Disliked (1): most hearts first, then
- * the library's title order, each row's hearts under its title. */
+ * the library's title order, each row's hearts under its title (OLED's as glyphs, rate_row). */
 static const char *const rt_names[] = { "Top Rated", "Loved", "All Rated", "Disliked" };
 #define RT_ALBUMS 2 /* the Ratings menu's Albums row, after Loved */
 static int rated_open(void *ctx, void *event) {
@@ -503,13 +565,20 @@ static int rated_open(void *ctx, void *event) {
     deque_destroy(songs);
     int count = (int)deque_size(list);
     void *view = page_list(st.rt_page, st.rt_page, 0, rt_names[k], count ? count : 1, 64);
+    page_fit(view);
     char name[512], detail[300], hs[16];
+    int glyphs = feedback_oled();
     for (int i = 0; i < count; i++) {
         void *t = deque_at(list, (unsigned)i);
         const char *artist = P(t, REC_ARTIST);
-        tk_snprintf(detail, sizeof detail, artist && *artist ? "%s · %s" : "%s%s",
-                    hearts_text(hs, of[i]), artist && *artist ? artist : "");
-        page_row_detail(view, i, track_name(name, sizeof name, t), detail, rt_play);
+        if (glyphs) /* a space for no artist: an empty detail would centre the title alone */
+            tk_snprintf(detail, sizeof detail, artist && *artist ? "· %s" : " ",
+                        artist && *artist ? artist : "");
+        else
+            tk_snprintf(detail, sizeof detail, artist && *artist ? "%s · %s" : "%s%s",
+                        hearts_text(hs, of[i]), artist && *artist ? artist : "");
+        void *row = page_row_detail(view, i, track_name(name, sizeof name, t), detail, rt_play);
+        if (glyphs) rate_row(row, of[i]);
     }
     if (!count)
         page_row_detail(view, 0, "No songs yet", "Hold the heart on Now Playing to rate", 0);

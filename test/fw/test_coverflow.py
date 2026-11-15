@@ -29,7 +29,7 @@ r = C.byref
 class Cf(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'page body covers slide name artist title albums tracks stock'.split()),
                 *((k, C.c_int) for k in 'sort sort_read year_old artists on_sort resort'.split()),
-                ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint), ('titled', C.c_int),
+                ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint), ('titled', C.c_int), ('offline', C.c_int),
                 ('saved_album', C.c_uint), ('albums_gen', C.c_uint),
                 *((k, C.c_int) for k in 'screen album running text_albums done total cancel scoped all_sort'.split()),
                 *((k, C.c_void_p) for k in 'all_albums all_stock hearts'.split())]

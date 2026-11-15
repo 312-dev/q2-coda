@@ -10,6 +10,7 @@ import pytest
 import host
 import art as tools_art  # tools/, on the path host.py set: the art's own sizes
 from conftest import NAVIGATION_SOURCE, O, Deques, Externpic, ask_cover, in_fork, libc, ui_name
+from test_nav_loop import DOWN, UP, key_event
 
 THEMES = host.tools_theme.builtins()
 SETS = host.tools_theme.geometry_sets(THEMES)
@@ -352,7 +353,9 @@ class Canvas:
 
 
 def theme(fw, st, t=MINIMAL, light=0, **keys):
-    """The theme t on its own geometry set (theme_boot's), light or dark."""
+    """The theme t on its own geometry set (theme_boot's), light or dark. Single Press Scrub is off unless keys
+    say, the presses the scrub tests were written for (it is on unless chosen off)."""
+    keys.setdefault('SCRUBSINGLE', 0)
     Config(fw, THEME=t['index'], LIGHT=light, **keys)
     st.settings_read = 0
     fw.fn('accent', C.c_int)()
@@ -1233,7 +1236,9 @@ class Now:
         return self.ui.ints[self.slider, b'value']
 
     def seeks(self):
-        return [a[0] for _, a in self.fw.calls('player_seek_time')] + [('paused', a[0]) for _, a in self.fw.calls('mclSetSeek')]
+        """player_seek_time's track seconds, then each mclSetSeek's file seconds as ('set', s): a playing scrub's
+        (seek.c seek_scrub) and a paused one's commit."""
+        return [a[0] for _, a in self.fw.calls('player_seek_time')] + [('set', a[0]) for _, a in self.fw.calls('mclSetSeek')]
 
     def fill(self):
         return self.ui.prop(self.slider, b'style:normal:fg_color') & 0xffffffff
@@ -1390,21 +1395,59 @@ def test_a_double_press_starts_a_scrub_white_on_the_held_bar(fw, ui, now, st):
     assert ui.due('np_single') == []  # the first press's single was called off
 
 
-def test_the_wheel_previews_the_target_in_steps_and_one_press_seeks_there(fw, ui, now, st):
+def test_the_wheel_moves_the_target_in_steps_the_track_follows_and_one_press_ends_there(fw, ui, now, st):
     scrub(now)
     step = O['SCRUB_STEP']
     for _ in range(3):
-        ui.now += 300  # slow ticks: a step each
+        ui.now += 300  # slow ticks: a step each, each heard (SCRUB_SEEK_MS apart and more)
         assert now.key(KEY_NEXT) == STOP
     to = now.sec + 3 * step
     assert now.value() == to and ui.text(now.elapsed) == clock(to) and ui.text(now.remain) == '-' + clock(now.total - to)
-    assert now.seeks() == []  # only a preview
+    assert now.seeks() == [('set', now.sec + step), ('set', now.sec + 2 * step), ('set', to)]
     ui.now += 300
     now.key(KEY_PREV)
     assert now.value() == to - step
     press(now, ui.now + 1000)
-    assert now.seeks() == [to - step] and st.scrub == 0 and now.fill() != 0xffffffff
+    assert now.seeks()[-1] == ('set', to - step) and len(now.seeks()) == 4  # the player is there: no seek at the end
+    assert st.scrub == 0 and now.fill() != 0xffffffff
     assert len(ui.due('settle_poll')) == 1  # the bar holds the target until the player gets there
+
+
+SCRUB_SEEK_MS = 200  # seek.c
+
+
+def test_a_fast_spin_is_heard_at_most_every_scrub_seek_ms_and_lands_on_the_target(fw, ui, mcl, st):
+    theme(fw, st, CLASSIC)
+    now = Now(fw, ui, mcl, st, sec=0, total=3000)
+    scrub(now)
+    sent = []  # (when, file second)
+    fw.mock('mclSetSeek', lambda s, *_: sent.append((ui.now, s)))
+    armed = {}  # timer: when it was added
+    for _ in range(25):
+        ui.now += 40
+        for t in ui.due('scrub_due'):
+            if ui.now >= armed.setdefault(t, ui.now - 40) + ui.timers[t][2]:
+                ui.run(t)
+        now.key(KEY_NEXT)
+        for t in ui.due('scrub_due'):
+            armed.setdefault(t, ui.now)
+    gaps = [b[0] - a[0] for a, b in zip(sent, sent[1:])]
+    assert sent and len(sent) <= 25 * 40 // SCRUB_SEEK_MS + 1 and min(gaps) >= SCRUB_SEEK_MS - 40, sent
+    assert sent[0] == (ui.now - 24 * 40, O['SCRUB_STEP'])  # the first tick at once
+    press(now, ui.now + 50)
+    assert sent[-1][1] == now.value() and st.scrub == 0  # the end goes to the last target if the player isn't there
+
+
+def test_a_paused_scrub_is_silent_until_it_ends(fw, ui, mcl, st):
+    theme(fw, st, CLASSIC)
+    now = Now(fw, ui, mcl, st, status=3)
+    scrub(now)
+    for _ in range(3):
+        ui.now += 300
+        now.key(KEY_NEXT)
+    assert now.seeks() == [] and ui.due('scrub_due') == []
+    press(now, ui.now + 1000)
+    assert now.seeks() == [('set', now.sec + 3 * O['SCRUB_STEP'])]
 
 
 def test_a_fast_spin_steps_further_than_slow_ticks(fw, ui, mcl, st):
@@ -1446,7 +1489,7 @@ def test_a_scrub_ends_by_itself_after_its_time_and_seeks(fw, ui, now, st):
     now.key(KEY_NEXT)
     expire, = ui.due('scrub_expire')
     ui.run(expire)
-    assert st.scrub == 0 and now.seeks() == [now.sec + O['SCRUB_STEP']]
+    assert st.scrub == 0 and now.seeks() == [('set', now.sec + O['SCRUB_STEP'])]  # heard at the tick, not again
 
 
 def test_another_track_drops_the_scrub_without_a_seek(fw, ui, mcl, now, st):
@@ -1455,7 +1498,7 @@ def test_another_track_drops_the_scrub_without_a_seek(fw, ui, mcl, now, st):
     now.key(KEY_NEXT)
     mcl.pos = 5
     assert now.key(KEY_NEXT) == STOP
-    assert st.scrub == 0 and now.seeks() == []
+    assert st.scrub == 0 and now.seeks() == [('set', now.sec + O['SCRUB_STEP'])]  # the tick's own, before it changed
 
 
 def test_a_paused_scrub_seeks_on_play_and_the_bar_holds_its_target(fw, ui, mcl, st):
@@ -1468,7 +1511,7 @@ def test_a_paused_scrub_seeks_on_play_and_the_bar_holds_its_target(fw, ui, mcl, 
     now.key(KEY_NEXT)
     press(now, ui.now + 1000)
     to = now.sec + O['SCRUB_STEP']
-    assert now.seeks() == [('paused', cue + to)] and st.held_sec == now.sec + 1  # the player's second then, +1
+    assert now.seeks() == [('set', cue + to)] and st.held_sec == now.sec + 1  # the player's second then, +1
     settle, = ui.due('settle_poll')
     for _ in range(20):
         assert ui.run(settle) == RET_REPEAT  # paused: the player's second stands still
@@ -1519,27 +1562,101 @@ def test_a_single_press_turns_the_screen_off_as_stocks_release(fw, ui, now):
     assert releases == [KEY_CENTER]  # dark: nothing to turn off
 
 
-def test_single_press_scrub_swaps_the_presses(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC, SCRUBSINGLE=1)
+# Single Press Scrub (on unless chosen off): Centre cycles the controls the wheel sets, as an iPod classic's: scrubber,
+# shuffle, repeat, rating, rest. A short hold turns the screen off.
+NP_HOLD_MS, NP_STAGE_MS = (int(re.findall(rf'#define {n} (\w+)', NAVIGATION_SOURCE)[0].replace('SCRUB_MS', str(O['SCRUB_MS'])))
+                           for n in ('NP_HOLD_MS', 'NP_STAGE_MS'))
+REST, SHUFFLE, REPEAT = range(3)
+
+
+def cpress(now, at, held=60):
+    """Centre down at - held, up at at"""
+    now.st.center_down_at = at - held
+    return press(now, at)
+
+
+def test_centre_cycles_scrubber_shuffle_repeat_and_rating(fw, ui, mcl, st):
+    theme(fw, st, OLED, SCRUBSINGLE=1)
+    releases, modes = [], []
+    fw.mock('on_wm_keyup_fun', lambda w, event, *_: releases.append(1))
+    fw.mock('config_playmode', lambda m, notify, *_: modes.append(m) or setattr(mcl, 'mode', m) or 0)
+    now = Now(fw, ui, mcl, st)
+    mcl.mode = 0
+    assert cpress(now, 200000) == STOP and st.scrub == 1 and not ui.due('np_single')  # at once: no double-press wait
+    cpress(now, 200500)  # the scrub ends, shuffle's turn
+    assert st.scrub == 0 and st.np_stage == SHUFFLE
+    assert now.key(KEY_NEXT) == STOP and modes == [2]  # the wheel turns shuffle on
+    cpress(now, 201000)
+    assert st.np_stage == REPEAT
+    now.key(KEY_NEXT)  # repeat All under shuffle: the mode stays Shuffle
+    now.key(KEY_NEXT)  # Repeat One
+    assert modes == [2, 1]
+    now.key(KEY_PREV)  # back to All
+    assert modes == [2, 1, 2]
+    cpress(now, 201500)  # the rating picker's turn: the cycle rests behind it
+    assert st.np_stage == REST and releases == []
+
+
+def test_a_stage_ends_by_itself_and_return_ends_it(fw, ui, mcl, st):
+    theme(fw, st, OLED, SCRUBSINGLE=1)
+    now = Now(fw, ui, mcl, st)
+    cpress(now, 200000)
+    cpress(now, 200500)
+    assert st.np_stage == SHUFFLE
+    (t,) = ui.due('np_stage_end')
+    assert ui.timers[t][2] == NP_STAGE_MS
+    ui.run(t)
+    assert st.np_stage == REST
+    cpress(now, 210000)
+    cpress(now, 210500)
+    fw.fn('navigation__np_cancel', None)()  # Return, a touch, another window
+    assert st.np_stage == REST and not ui.due('np_stage_end')
+
+
+def test_a_short_hold_turns_the_screen_off(fw, ui, mcl, st):
+    theme(fw, st, OLED, SCRUBSINGLE=1)
     releases = []
     fw.mock('on_wm_keyup_fun', lambda w, event, *_: releases.append(1))
     now = Now(fw, ui, mcl, st)
-    press(now, 200000)
-    ui.run(ui.due('np_scrub')[0])
-    assert st.scrub == 1 and releases == []
-    press(now, 200500)  # one press ends it
-    assert st.scrub == 0
-    press(now, 201000)
-    press(now, 201100)  # a double press: the screen off
-    assert releases == [1] and st.scrub == 0
+    assert cpress(now, 200000, held=NP_HOLD_MS) == STOP and releases == [1] and st.scrub == 0
+    cpress(now, 201000, held=NP_HOLD_MS - 50)  # shorter: a press
+    assert st.scrub == 1 and releases == [1]
+    cpress(now, 201500, held=NP_HOLD_MS)  # held while scrubbing: the scrub ends, the screen stays on
+    assert st.scrub == 0 and releases == [1]
 
 
-def test_single_press_scrubs_overdue_press_starts_and_ends_one(fw, ui, mcl, st):
+def test_a_short_hold_is_timed_from_the_press_not_its_repeats(fw, ui, mcl, st):
+    """A Q2's held Centre repeats its key-down every 50 ms after about 258 ms; each passes chord_gate and
+    ringnav_keydown, and the hold is still the press's."""
+    theme(fw, st, OLED, SCRUBSINGLE=1)
+    releases = []
+    fw.mock('on_wm_keyup_fun', lambda w, event, *_: releases.append(1))
+    fw.mock('stock_keydown_trampoline', lambda *_: 0)
+    now = Now(fw, ui, mcl, st)
+    gate = fw.fn('navigation__chord_gate', C.c_int, C.c_void_p)
+    keydown = fw.fn('ringnav_keydown', C.c_int, C.c_void_p, C.c_void_p)
+
+    def down(at):
+        ui.now = at
+        e = key_event(KEY_CENTER, DOWN)
+        gate(e)
+        keydown(None, e)
+
+    for at in [200000] + list(range(200258, 200800, 50)):
+        down(at)
+    gate(key_event(KEY_CENTER, UP))
+    assert press(now, 200800) == STOP and releases == [1] and st.scrub == 0
+    down(202000)  # the next press is timed afresh: a tap
+    gate(key_event(KEY_CENTER, UP))
+    assert press(now, 202080) == STOP and releases == [1] and st.scrub == 1
+
+
+def test_a_theme_without_the_pair_skips_shuffle_and_repeat(fw, ui, mcl, st):
     theme(fw, st, CLASSIC, SCRUBSINGLE=1)
     now = Now(fw, ui, mcl, st)
-    press(now, 200000)
-    assert press(now, 200400) == STOP  # its timer not yet run: the single now, and this press ends it
-    assert st.scrub == 0 and now.seeks() == [] and len(fw.calls('playing_timer_clear')) == 1
+    cpress(now, 200000)
+    cpress(now, 200500)
+    assert st.scrub == 0 and st.np_stage == REST
 
 
 def test_a_scrub_closes_the_volume_band_over_the_page_first(fw, ui, now, st):
@@ -1568,7 +1685,7 @@ def test_the_page_going_mid_scrub_seeks_nowhere_and_forgets_it(fw, ui, now, st):
     assert st.np_win == now.win
     ui.emit(now.win, O['EVT_DESTROY'], 0)
     assert (st.np_win, st.np_slider, st.np_lrc, st.scrub, st.np_marquee) == (0, 0, 0, 0, 0)
-    assert now.seeks() == [] and ui.due('scrub_expire') == []
+    assert now.seeks() == [('set', now.sec + O['SCRUB_STEP'])] and ui.due('scrub_expire') == []  # the tick's own only
 
 
 def test_closing_mid_wait_restarts_stocks_timer(fw, ui, mcl, st):
@@ -1717,6 +1834,82 @@ def test_a_scrubs_cue_is_a_diamond_at_the_fills_end_kept_in_the_bar(fw, ui, now,
     assert [(r[1], r[2]) for r in ink] == [(cy + j, 2 * (mark - abs(j)) + 1) for j in range(-mark, mark + 1)]
     fill_end = w * value // ui.ints[now.slider, b'max']
     assert {r[0] + r[2] // 2 for r in ink} == {min(max(fill_end, mark), w - 1 - mark)}  # its widest row whole in the bar
+
+
+# The glide between the player's whole seconds (np_bar.c paint_scrubber): the fill runs on from the value by the time
+# since it changed, at most a second, while playing; a timer repaints it a pixel at a time.
+def played(canvas, w):
+    """Classic's played part: its first row's width."""
+    return [r for r in canvas.rects if r[3] == 1 and r[0] == 0][0][2]
+
+
+@pytest.mark.parametrize('status, later, ms', [(2, 500, 500), (2, 1700, 1000), (3, 500, 0)])
+def test_the_fill_glides_on_from_the_value_while_playing_up_to_a_second(fw, ui, now, st, status, later, ms):
+    now.status = status
+    w = ui.box(now.slider)[2]
+    scrubber(fw, now.slider, Canvas(fw))  # the value 50 of 200 seen at ui.now
+    ui.now += later
+    canvas = Canvas(fw)
+    scrubber(fw, now.slider, canvas)
+    assert played(canvas, w) == (w * 50 + w * ms // 1000) // 200
+
+
+def test_a_new_value_starts_the_glide_again_and_never_goes_back(fw, ui, now, st):
+    w = ui.box(now.slider)[2]
+    scrubber(fw, now.slider, Canvas(fw))
+    ui.now += 900
+    canvas = Canvas(fw)
+    scrubber(fw, now.slider, canvas)
+    before = played(canvas, w)
+    ui.ints[now.slider, b'value'] = 51  # stock's next second
+    canvas = Canvas(fw)
+    scrubber(fw, now.slider, canvas)
+    assert played(canvas, w) == w * 51 // 200 >= before
+
+
+def test_the_glide_repaints_the_slider_a_pixel_at_a_time(fw, ui, now, st):
+    w = ui.box(now.slider)[2]
+    scrubber(fw, now.slider, Canvas(fw))
+    (t,) = ui.due('bar_glide')
+    assert ui.timers[t][2] == max(33, min(1000, -(-200 * 1000 // w)))  # a 200 s track: ms per pixel, rounded up
+    scrubber(fw, now.slider, Canvas(fw))
+    assert len(ui.due('bar_glide')) == 1  # one at a time
+    now.status = 3
+    ui.run(t)
+    scrubber(fw, now.slider, Canvas(fw))
+    assert not ui.due('bar_glide')  # paused: nothing moves
+
+
+def test_stock_sliders_fill_is_drawn_again_to_the_glide(fw, ui, mcl, st):
+    theme(fw, st, OLED)
+    now = Now(fw, ui, mcl, st)
+    boxes = []
+    fw.mock('canvas_fill_rounded_rect', lambda c, r, sr, color, radius, *_: boxes.append(
+        (struct.unpack_from('<4i', (C.c_char * 16).from_address(r)), C.c_uint.from_address(color).value, radius)) or 0)
+    ui.ints[now.slider, b'bar_size'] = 6
+    w, h = ui.box(now.slider)[2], ui.box(now.slider)[3]
+    scrubber(fw, now.slider, Canvas(fw))
+    assert boxes == []  # no further than stock's own fill
+    ui.now += 800
+    scrubber(fw, now.slider, Canvas(fw))
+    tone = fw.fn('accent_tone', C.c_uint, C.c_int)(2)  # navigation.h TONE_LIGHT
+    rgba = 0xff000000 | (tone & 255) << 16 | tone & 0xff00 | tone >> 16 & 255  # RGBA: the canvas's byte order
+    assert boxes == [((0, (h - 6) // 2, (w * 50 + w * 800 // 1000) // 200, 6), rgba, 3)]
+
+
+def test_oleds_scrub_keeps_the_accent_and_marks_the_playhead_with_a_knob(fw, ui, mcl, st):
+    """A status row's set (OLED's): the scrub keeps the accent's fill and puts a 14 px white knob on its end (audit N3)."""
+    theme(fw, st, OLED)
+    now = Now(fw, ui, mcl, st)
+    boxes = []
+    fw.mock('canvas_fill_rounded_rect', lambda c, r, sr, color, radius, *_: boxes.append(
+        (struct.unpack_from('<4i', (C.c_char * 16).from_address(r)), C.c_uint.from_address(color).value, radius)) or 0)
+    w, h = ui.box(now.slider)[2], ui.box(now.slider)[3]
+    fw.fn('navigation__scrub_start', None)()
+    assert now.fill() != 0xffffffff  # the accent's, not white
+    scrubber(fw, now.slider, Canvas(fw))
+    x = w * 50 // 200
+    assert boxes == [((x - 7, (h - 14) // 2, 14, 14), 0xffffffff, 7)]
 
 
 def test_the_radios_bar_paints_always_full(fw, ui, now, st):
@@ -2978,3 +3171,131 @@ def test_song_fit_keeps_the_title_and_drops_a_squeezed_artist(fw, place, room, t
     got = fw.fn('song_fit', C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.POINTER(C.c_int))(
         place, room, title, 11, artist, C.byref(shown))
     assert (got, shown.value) == fit
+
+
+# Now Playing's lines as one marquee (np_marquee.c): hold, then every overflowing line slides its text and the gap
+# in the same time, a frame a pixel, and lands back at rest.
+NPM_GAP, NPM_HOLD, NPM_PX_S = (int(re.findall(rf'#define {n} (\d+)', NAVIGATION_SOURCE)[0])
+                               for n in ('NPM_GAP', 'NPM_HOLD_MS', 'NPM_PX_S'))
+
+
+class Marquee:
+    """OLED's Now Playing with a title text_w px wide and an album album_w, each 160 px of column."""
+    def __init__(self, fw, ui, mcl, st, text_w=300, album_w=200):
+        theme(fw, st, OLED)
+        self.now = Now(fw, ui, mcl, st)
+        self.fw, self.ui = fw, ui
+        fw.mock('style_get_int', lambda s, name, d, *_: 0)
+        fw.mock('hscroll_label_set_xoffset', lambda w, x, *_: struct.pack_into('<i', (C.c_char * 4).from_address(w + O['HSCROLL_XOFFSET']), 0, x))
+        for w, tw in ((self.now.title, text_w), (self.now.album, album_w)):
+            struct.pack_into('<i', (C.c_char * 4).from_address(w + O['HSCROLL_TEXT_W']), 0, tw)
+        self.pass_ms = (text_w + NPM_GAP) * 1000 // NPM_PX_S if text_w > 160 else (album_w + NPM_GAP) * 1000 // NPM_PX_S
+
+    def off(self, w):
+        return C.c_int.from_address(w + O['HSCROLL_XOFFSET']).value
+
+    def kick(self):
+        self.fw.fn('np_marq_kick', None, C.c_void_p)(self.now.title)
+
+    def step(self, ms):
+        """ms on, then the marquee's due timer"""
+        self.ui.now += ms
+        (t,) = self.ui.due('npm_tick')
+        self.ui.run(t)
+
+
+def test_the_lines_hold_then_slide_together_and_land_back_at_rest(fw, ui, mcl, st):
+    m = Marquee(fw, ui, mcl, st)
+    m.kick()
+    (t,) = ui.due('npm_tick')
+    assert ui.timers[t][2] == NPM_HOLD and m.off(m.now.title) == m.off(m.now.album) == 0  # at rest first
+    m.step(NPM_HOLD + m.pass_ms // 2)
+    half = m.pass_ms // 2
+    assert m.off(m.now.title) == (300 + NPM_GAP) * half // m.pass_ms  # each its own span in the same time
+    assert m.off(m.now.album) == (200 + NPM_GAP) * half // m.pass_ms
+    (t,) = ui.due('npm_tick')
+    assert ui.timers[t][2] <= 1000 // NPM_PX_S + 1  # the longest line's next pixel
+    m.step(m.pass_ms - half)  # landed: at rest together, the next hold
+    assert m.off(m.now.title) == m.off(m.now.album) == 0
+    (t,) = ui.due('npm_tick')
+    assert ui.timers[t][2] == NPM_HOLD
+
+
+def test_every_frame_moves_the_longest_line_one_pixel(fw, ui, mcl, st):
+    m = Marquee(fw, ui, mcl, st)
+    m.kick()
+    m.step(NPM_HOLD)
+    seen = [m.off(m.now.title)]
+    for _ in range(40):
+        (t,) = ui.due('npm_tick')
+        m.step(ui.timers[t][2])
+        seen.append(m.off(m.now.title))
+    assert [b - a for a, b in zip(seen, seen[1:])] == [1] * 40
+
+
+def test_the_page_opening_stops_stocks_own_timer_on_the_lines(fw, ui, mcl, st):
+    # stock's page init starts the title's own timer before the lines are bound: left running, it moved the
+    # title through the hold and between the marquee's frames
+    m = Marquee(fw, ui, mcl, st)
+    stopped = []
+    fw.mock('hscroll_label_stop', lambda w, *_: stopped.append(w) or C.c_int.from_address(w + O['HSCROLL_TIMER']).__setattr__('value', 0))
+    C.c_int.from_address(m.now.title + O['HSCROLL_TIMER']).value = 23
+    fw.fn('np_marq_reset', None)()
+    assert stopped == [m.now.title] and C.c_int.from_address(m.now.title + O['HSCROLL_TIMER']).value == 0
+
+
+def test_lines_that_fit_never_move_and_nothing_runs(fw, ui, mcl, st):
+    m = Marquee(fw, ui, mcl, st, text_w=100, album_w=150)
+    m.kick()
+    assert not ui.due('npm_tick') and m.off(m.now.title) == 0
+
+
+def test_a_covered_page_rests_its_lines_and_a_new_text_starts_from_rest(fw, ui, mcl, st):
+    m = Marquee(fw, ui, mcl, st)
+    m.kick()
+    m.step(NPM_HOLD + 2000)
+    assert m.off(m.now.title) > 0
+    ui.top = None  # another window on top
+    m.step(50)
+    assert m.off(m.now.title) == 0 and not ui.due('npm_tick')
+    ui.top = m.now.win
+    m.kick()
+    m.step(NPM_HOLD // 2)
+    assert m.off(m.now.title) == 0  # back on top: the hold first
+    # a new title: stock's start comes to ringnav_hscroll_start, which leaves it to the marquee, from rest
+    assert fw.fn('ringnav_hscroll_start', C.c_int, C.c_void_p)(m.now.title) == 0
+    assert not ui.due('npm_tick') and not fw.calls('stock_hscroll_start_trampoline')
+
+
+# OLED's Track Time (NPTIME): the right-hand time is what is left or the track's length, and a tap on it switches. The
+# page takes the touch (np_time_tap on the window) and hit-tests the label.
+def time_tap(ui, now, x=330, y=250, up=None):
+    tap(ui, now.win, O['EVT_POINTER_DOWN'], x, y)
+    tap(ui, now.win, O['EVT_POINTER_UP_BEFORE'], *(up or (x, y)))
+
+
+def test_a_tap_on_the_right_hand_time_shows_the_tracks_length_and_saves_it(fw, ui, mcl, st):
+    theme(fw, st, OLED)
+    now = Now(fw, ui, mcl, st, sec=50, total=200)
+    assert ui.text(now.remain) == '-2:30'
+    time_tap(ui, now)
+    assert ui.text(now.remain) == '3:20'  # the length, with no minus
+    writes = [(C.string_at(a[2]).decode(), C.c_int(a[0]).value) for _, a in fw.calls('write_int_config')]
+    assert writes[-1] == ('NPTIME', 1)
+    ui.ints[now.slider, b'value'] = 60
+    fw.fn('np_sync', C.c_int, C.c_void_p)(now.win)
+    assert ui.text(now.remain) == '3:20' and now.value() == 60  # the length stays as the track plays; no seek
+    time_tap(ui, now)
+    assert ui.text(now.remain) == '-2:20'
+
+
+def test_a_touch_off_the_time_or_under_another_theme_changes_nothing(fw, ui, mcl, st):
+    theme(fw, st, OLED)
+    now = Now(fw, ui, mcl, st, sec=50, total=200)
+    tap(ui, now.win, O['EVT_POINTER_UP_BEFORE'], 330, 250)  # a touch that came down elsewhere
+    time_tap(ui, now, up=(200, 250))  # down on the time, lifted off it
+    time_tap(ui, now, x=200)  # the elapsed side of the row
+    assert ui.text(now.remain) == '-2:30' and not fw.calls('write_int_config')
+    theme(fw, st, CLASSIC)
+    time_tap(ui, now)
+    assert ui.text(now.remain) == '-2:30' and not fw.calls('write_int_config')

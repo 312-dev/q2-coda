@@ -14,6 +14,7 @@
 #include <math.h>
 #include <unistd.h>
 #define child_exit _exit
+int card_mounted(void); /* the host checks' shim */
 static inline void child_oom_first(void) {
     int fd = open("/proc/self/oom_score_adj", O_WRONLY);
     if (fd >= 0) write(fd, "1000", 4), close(fd);
@@ -92,17 +93,18 @@ static inline int ink_vgcanvas_set_fill_linear_gradient(void *vg, float sx, floa
 #define PEQ_FILE_LIMIT 16384
 #define PEQ_LINE_LIMIT 512
 #define PEQ_ACTIVE PEQ_ROOT "/mnt/data/peq-active"
-#define PEQ_SAVED PEQ_ROOT "/mnt/data/peq-presets"
-#define PEQ_IMPORT PEQ_ROOT "/mnt/mmc/EQ"
+#define PEQ_SAVED PEQ_ROOT "/mnt/data/peq-presets" /* earlier firmware's binary presets: written out to PEQ_FOLDER once, kept */
+#define PEQ_FOLDER PEQ_ROOT "/mnt/mmc/EQ"         /* the presets, Equalizer APO text (peq_export) */
 #define EQ_OUTPUTS PEQ_ROOT "/mnt/data/peq-outputs" /* EQ per Output: an eq_state per output, and owner */
 #define EQ_DEVICES 32 /* Bluetooth devices remembered at once */
 
 /* Versioned disk representation: fixed-width fields, no pointers or implicit padding.
  * enabled: 0 off, 1 both channels, 2 left only, 3 right only (v1 files hold 0 or 1).
  * balance: dB, above 0 turns the left channel down, below 0 the right (v2 only).
- * automatic: the preamp is 1 Auto (the player cuts each rate's own peak; preamp holds the 48 kHz
- * cut), 2 picked (an import's own preamp too), 0 never picked (saved before 1.3.6: PEQ_PRESET_V2
- * bytes, or imported before 1.4.4), which the UI and PEQ playback also take as Auto. */
+ * automatic: the preamp is 1 Auto (preamp holds the loudest cut over the standard PCM rates, kept so
+ * by demo: peq_ui.c headroom), 2 picked (an import's own preamp too), 0 never picked (saved before
+ * 1.3.6: PEQ_PRESET_V2 bytes, or imported before 1.4.4), which the UI takes as Auto. Every preamp
+ * plays as saved. */
 typedef struct { int enabled, type; double frequency, gain, q; } peq_band;
 typedef struct {
     int count, bypass;
@@ -112,7 +114,9 @@ typedef struct {
     int automatic, spare;
 } peq_preset;
 #define PEQ_PRESET_V2 __builtin_offsetof(peq_preset, automatic)
-typedef struct { unsigned line; const char *reason; } peq_error;
+/* Why peq_parse failed, at line; or, when it loads, what it left out: skipped lines, the first at
+ * line, reason as a failure would give it, and what a word or two naming it for a message. */
+typedef struct { unsigned line; const char *reason; unsigned skipped; char what[24]; } peq_error;
 typedef struct { double b0, b1, b2, a1, a2; } peq_coeff;
 typedef struct {
     peq_coeff c[PEQ_BANDS];
@@ -137,6 +141,10 @@ int peq_import_file(const char *path, peq_preset *out, peq_error *error);
 int peq_load(const char *path, peq_preset *out);
 int peq_load_active(peq_preset *p); /* the effective preset (eq_effective); 0 if none was read */
 int peq_save(const char *path, const peq_preset *p, int replace);
+/* p as Equalizer APO text that peq_parse reads back as p, its Auto in a "# q2:" comment: the
+ * length, or 0 if p is invalid or out holds less. peq_export_file is peq_save's, as text. */
+unsigned peq_export(const peq_preset *p, char *out, unsigned size);
+int peq_export_file(const char *path, const peq_preset *p, int replace);
 void eq3_bands(peq_preset *p, const double gain[3]);
 int eq_load(eq_state *s); /* 0: no readable state, s holds the defaults */
 int eq_save(const eq_state *s);
@@ -255,6 +263,11 @@ typedef struct {
 
 /* The payload's shared helpers: coverflow.c's pages, hashes and worker, photos.c's, navigation.c's. */
 void *text(void *parent, int x, int y, int w, int h);
+/* feedback.c: OLED's empty and offline note (docs/oled-design.md#empty-and-offline); 0 elsewhere */
+int feedback_empty(void *parent, int free, const char *message, const char *hint);
+int feedback_note(void *line, void *hint, int free);
+int feedback_below(void *w); /* the screen y under w */
+void page_fit(void *view);   /* a page_list's rows ending above the glass on a list_fit set */
 /* coverflow.c's flip panel, which navigation.c's hold menu wears under Classic */
 #define PANEL_X 40 /* the panel's first column: Cover Flow's axis less half of it */
 #define BACK_W 294 /* its width and its rows' */
@@ -374,6 +387,9 @@ int card_path(const char *path); /* on the card, no ".." segment: what an app or
 int addon_is_icon(const char *name); /* a card app's Streaming icon, by its file:// name */
 void addon_poll(void), addon_stop(void), addon_paint(void *w, void *canvas), addon_card_away(void);
 void addon_forget(const char *dir), addon_quit(const char *dir);
+/* addon.c: a catalogue app started for a catplay (0 running, 1 started, -1 can't), and whether a
+ * started one reads it yet */
+int addon_wake(const char *id), addon_ready(const char *id);
 /* addon.c's card games (q2app game=1), Games' rows after its own: how many (a scan), one's name,
  * its start over the screen (1 when it runs), whether one runs, and ringnav_input's events for it */
 int addon_games(void), addon_game_start(int k), addon_game_on(void);
@@ -409,6 +425,37 @@ int airplay_on(void), airplay_lyrics(int *ms);
  * 0 when the card didn't take it. */
 int addon_fav(const char *id, const char *kind, const char *key, int on);
 int addon_fav_path(const char *path, int on);
+/* catalogue.c: the server library (docs/internals.md#server-library). catalogue_on: Local + Server;
+ * catalogue_path: a server row's path; catalogue_unavailable: a record that can't play now;
+ * catalogue_album_unavailable: an album list's record none of whose songs can play now;
+ * catalogue_union: a Library query reading servertable too (0: as it is; the caller frees it);
+ * catalogue_load: ringnav_load's queue (0 as it is, 1 *own instead, 2 nothing loaded). */
+extern int catalogue_source;
+int catalogue_on(void), catalogue_path(const char *path), catalogue_unavailable(void *r);
+int catalogue_album_unavailable(void *r);
+int catalogue_seconds(const char *path), catalogue_load(void *q, int *at, void **own);
+int catalogue_access(const char *path, int mode); /* stock's play check, tools/build.py */
+int catalogue_missing(const char *path); /* the payload's own lists' check before a play */
+unsigned catalogue_play_key(void *r, unsigned key); /* a listen's key: a copy's is its row's */
+char *catalogue_union(const char *sql), *catalogue_search(const char *sql);
+const char *catalogue_rows(void); /* library_query's union, "" without one */
+void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);
+void catalogue_changed(void), catalogue_card_away(void), catalogue_rated(void *r, int hearts);
+void catalogue_bind(void *row, unsigned index), catalogue_mark(void *row, void *r, int tab);
+void catalogue_forget(void *row), catalogue_grey(void *w, int on);
+int catalogue_greyed(void *w, unsigned *color), catalogue_row_ink(void *row, unsigned *ink);
+int catalogue_greys(void);
+void catalogue_mark_paint(void *canvas, int x, int y, unsigned ink);
+void catalogue_fit(void *entry, void *surface, int limit);
+int catalogue_np_info(const char *path, char *genre, int *year);
+int catalogue_cover(const char *path, char *out, unsigned size);
+/* Now Playing while a pressed server song loads: the record it shows, its title and artist, its art */
+void *catalogue_np_now(unsigned *at, unsigned *n);
+void catalogue_np_text(void *win);
+const char *catalogue_np_cover(void);
+extern unsigned id3_parses; /* tags.c: the player's fresh parses (ringnav_id3_path) */
+int ringnav_row_selected(void *row); /* navigation.c: row holds the painted selection */
+void *ringnav_search_rows(void *win, int *tab); /* navigation.c: Search's results, while shown */
 extern unsigned auto_nexts; /* playback.c ringnav_next: tracks that ended by themselves */
 int stream_cache(int spotify); /* navigation.c: Streaming's Configuration, a cap of 512 << it MB */
 void album_memory(void *r);
@@ -433,11 +480,13 @@ typedef struct {
  * into the page's (whether it is on, as lyrics_on asks), and lyrics_fit lays them out again at
  * lrc's new width; lyrics_now is the playing position in ms,
  * lyrics_sec its whole second (off the page), lyrics_line the playing line there (-1 before the
- * first), repainting it while page shows; lyrics_paint draws a row's line. */
+ * first), repainting it while page shows; lyrics_paint draws a row's line, lyrics_fade OLED's
+ * faded edges over the view. */
 void lyrics_publish(const lrc_line *l, unsigned n, const lrc_mark *m);
 int lyrics_rows(void *lrc), lyrics_fit(void *lrc), lyrics_on(void *lrc), lyrics_now(void),
     lyrics_sec(void), lyrics_line(void *lrc, int ms, int page);
-void lyrics_paint(void *row, void *canvas), lyrics_gone(void);
+void lyrics_paint(void *row, void *canvas), lyrics_fade(void *lrc, void *canvas),
+    lyrics_gone(void);
 unsigned accent_tone(int tone); /* iPod: the Accent's ACCENTS column (Minimal's own: MINIMAL_FILL) */
 unsigned rgba(unsigned rgb, unsigned alpha);
 /* const and pure below: each one's result rests on its arguments (and pure's, memory) alone, so
@@ -459,6 +508,7 @@ int hex(char c); /* a hex digit's value, -1 for any other character; headset.c's
 void *label(void *parent, int x, int y, int w, int h, const char *style, int px, unsigned color);
 void spot_yield(void), spot_stop(void), radio_stop(void);
 void headset_volume_reset(void);
+int vol_next(unsigned key); /* volume.c: the volume a wheel tick moves to, at the wheel's speed */
 void headset_poll(void), headset_eq_poll(void), headset_manual(void);
 int media_owner(void), media_playing(void), media_focused(void);
 void media_set_playing(int playing), media_key(unsigned key);
@@ -528,6 +578,26 @@ void stock_more_speed(void *win);
 void stock_more_into(void *win);
 void info_poll(void);      /* lockscreen.c: the info screen's timer, with the screen lit */
 int xfade_page(void *top); /* crossfade.c */
+void xfade_ends(char *lo, char *hi, unsigned n); /* crossfade.c: its page's range ends */
+/* slider_page.c: EQ's Simple tab as a set_switch theme draws it (docs/oled-design.md Progress and
+ * sliders): rows under the tabs, then the bands' vertical sliders, in the page's coordinates */
+#define EQ_TABS_H 48 /* the tab bar (peq_ui.c bar) */
+#define EQ_ROWS_Y EQ_TABS_H
+#define EQ_ROW 32 /* the switch, Presets and Reset */
+#define EQ_SLIDERS_TOP 150 /* a band's travel, +max dB to -max */
+#define EQ_SLIDERS_BOTTOM 186
+#define EQ_NAME_Y 200 /* the band's name's and gain's centres */
+#define EQ_GAIN_Y 216
+typedef struct {
+    const char *label; /* the switch row's: "Enabled", or the PEQ preset playing */
+    int on, focus, adjusting; /* focus: 0 the tabs, 1 the switch, 2 Presets, 3 Reset, 4.. bands */
+    double gain[3], max;
+} eq_rows_t;
+void lock_grid(void *view); /* settings_pages.c: Lock Screen's pictures on a set_switch theme */
+int eq_rows(void);
+int eq_list_end(void); /* the page's rows end here (the set's list_end) */
+void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e);
+void eq_tabs_paint(void *w, void *canvas, int simple, int focus);
 int ipod_battery(void);    /* theme_engine.c: IPOD BATTERY, 0 Icon, else a percentage */
 int title_gone(void *w, void *event); /* ... and looks for its source again at the next sync */
 int bar_title_fits(void *label);      /* label's text fits the bar's title box */
@@ -537,6 +607,7 @@ int ipod_square_art(void); /* navigation.c: Classic, and Modern under Square */
 #define SPOT_GREY 0xffaaaaaau
 void radio_search(void);       /* radio.c */
 void toast(const char *text); /* navigation.c */
+int feedback_oled(void);      /* feedback.c: OLED's toasts and dialogs */
 /* smart_wifi.c: its radio woken, 1 while its link comes up; its radio off; an action
  * held for that link (fn(ctx, 0) once it is up, if page, or any page when 0, is still in use) */
 int smart_wifi_wait(void), smart_wifi_off(void);

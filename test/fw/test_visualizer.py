@@ -27,7 +27,8 @@ class Vz(C.Structure):
                 ('held', C.c_uint * BARS), ('lit', C.c_uint * 2), ('bin_rate', C.c_uint), ('w', C.c_int), ('h', C.c_int), ('bin', C.c_int * 65),
                 *((k, C.c_void_p) for k in 'win slide page art cover tap'.split()),
                 *((k, C.c_uint) for k in 'timer last named heard retry'.split()),
-                *((k, C.c_int) for k in 'ox oy page_x style quiet'.split())]
+                *((k, C.c_int) for k in 'ox oy page_x style'.split()), ('flow', C.c_float), ('glow', (C.c_void_p * 4) * 5),
+                ('chrome', C.c_int), ('chrome_at', C.c_uint), ('lift', C.c_uint), ('in_bar', C.c_int), ('quiet', C.c_int)]
 
 
 def vz(fw):
@@ -1811,3 +1812,175 @@ def test_the_window_s_end_stops_a_pending_look(fw):
     look = now.v.retry
     now.handler(now.win, EVT_DESTROY)()
     assert look and now.v.retry == 0 and look in [a[0] for _, a in fw.calls('timer_remove')]
+
+
+FIELD = 4  # OLED's fifth style
+
+
+def oled_now(fw, vis=None):
+    """Now under OLED (THEME 3, the theme with pages.own.painter="oled"), IPOD VIS as given or unset."""
+    def config(path, section, key, out, default, *_):
+        k = C.string_at(key)
+        value = b'3' if k == b'THEME' else vis.encode() if k == b'VIS' and vis is not None else C.string_at(default)
+        C.memmove(out, value + b'\0', len(value) + 1)
+    fw.mock('toolsReadConfig', config)
+    return Now(fw)
+
+
+def test_oled_opens_on_field_until_a_style_is_saved(fw):
+    assert oled_now(fw).v.style == FIELD
+
+
+def test_oled_keeps_a_saved_style(fw):
+    assert oled_now(fw, '3').v.style == HALO_STYLE
+
+
+def test_under_oled_a_tap_goes_from_halo_to_field_then_spectrum(fw):
+    now = oled_now(fw, '3')
+    tap = now.handler(now.v.page, EVT_CLICK)
+    fw.mock('write_int_config', lambda *_: 0)
+    styles = []
+    for _ in range(2):
+        tap()
+        styles.append(now.v.style)
+    assert styles == [FIELD, SPECTRUM]
+
+
+def test_another_theme_never_shows_field(fw):
+    assert Now(fw, style='4').v.style == SPECTRUM
+
+
+def test_field_draws_five_bands_of_glow_sprites_inside_the_screen(fw):
+    """Each band's FIELD_DOTS sprites, 32 px, drawn whole at their size (no scaling), all round the page's centre;
+    the sprites are made once, four strengths a band, and a sprite's corners are clear."""
+    now = oled_now(fw)
+    bufs, made, drawn = [], [], []
+
+    def create(w, h, line, fmt, *_):
+        bufs.append(C.create_string_buffer(w * h * 4))
+        made.append((w, h, fmt))
+        return len(bufs)
+    fw.mock('bitmap_create_ex', create)
+    fw.mock('bitmap_lock_buffer_for_write', lambda bm, *_: C.addressof(bufs[bm - 1]))
+    fw.mock('bitmap_get_line_length', lambda bm, *_: 32 * 4)
+    fw.mock('bitmap_unlock_buffer', lambda *_: 0)
+    fw.mock('canvas_draw_image', lambda c, bm, src, dst, *_: drawn.append(
+        (bm, tuple((C.c_int * 4).from_address(src)), tuple((C.c_int * 4).from_address(dst)))) or 0)
+    for _ in range(2):
+        paint(fw, now.win, Canvas(fw))
+    assert made == [(32, 32, 1)] * 20 and len(drawn) == 2 * 5 * 40
+    assert all(src == (0, 0, 32, 32) and dst[2:] == (32, 32) for _, src, dst in drawn)
+    cx, cy = 375 / 2, 320 / 2  # the screen's: OLED's Field fills it (full_paint)
+    assert all(abs(x + 16 - cx) <= 375 / 2 and abs(y + 16 - cy) <= 320 / 2 for _, _, (x, y, _, _) in drawn)
+    corner = struct.unpack_from('<I', bufs[0], 0)[0]
+    centre = struct.unpack_from('<I', bufs[0], (16 * 32 + 16) * 4)[0]
+    assert corner >> 24 == 0 and centre >> 24 > 0x80
+
+
+# OLED's Field over the whole screen: the page's other parts only while a thumb rests on the wheel.
+class Full:
+    """oled_now with the parts full_paint paints again by name, the system bar, the sprites and every widget_paint,
+    canvas_fill_rect and global alpha as called."""
+    PARTS = ('slider_play', 'label_playtime', 'label_ipod_remain', 'slide_indicator1')
+
+    def __init__(self, fw):
+        self.fw, self.now = fw, oled_now(fw)
+        self.parts = {n: self.now.widget(0, 0, 10, 10, self.now.win) for n in self.PARTS}
+        self.bar = self.now.widget(0, 0, 375, 58)
+        fw.var('fw_ctx_system_bar', C.c_void_p).value = self.bar
+        found = {'slide_view': self.now.slide, 'img_cover': self.now.cover, **self.parts}
+        fw.mock('widget_lookup', lambda w, name, deep, *_: found.get(C.string_at(name).decode(), 0) if deep else 0)
+        self.painted, self.alpha, self.fills, self.dots = [], [], [], []
+        fw.mock('widget_paint', lambda w, c, *_: self.painted.append(w) or 0)
+        fw.mock('canvas_set_global_alpha', lambda c, a, *_: self.alpha.append(a) or 0)
+        fw.mock('canvas_fill_rect', lambda c, x, y, w, h, *_: self.fills.append((x, y, w, h)) or 0)
+        fw.mock('canvas_draw_image', lambda c, bm, src, dst, *_: self.dots.append(tuple((C.c_int * 4).from_address(dst))) or 0)
+        bufs = []
+        fw.mock('bitmap_create_ex', lambda w, h, line, fmt, *_: bufs.append(C.create_string_buffer(w * h * 4)) or len(bufs))
+        fw.mock('bitmap_lock_buffer_for_write', lambda bm, *_: C.addressof(bufs[bm - 1]))
+        fw.mock('bitmap_get_line_length', lambda bm, *_: 32 * 4)
+        fw.mock('bitmap_unlock_buffer', lambda *_: 0)
+        self.bufs = bufs
+        self.held = fw.var('wheel_held', C.c_int)
+
+    def frame(self, at, held=None):
+        """A paint at now + at ms, with the thumb resting or not."""
+        if held is not None:
+            self.held.value = held
+        self.now.now = 100000 + at
+        self.painted.clear(), self.alpha.clear(), self.fills.clear(), self.dots.clear()
+        paint(self.fw, self.now.win, Canvas(self.fw, 0, 58))
+        return self.now.v.chrome
+
+
+def test_oled_s_field_fills_the_screen_round_its_centre(fw):
+    """The window starts under the status row (y 58): Field draws from the screen's top, black first, its sprites round
+    the screen's centre and reaching past the slide's foot."""
+    full = Full(fw)
+    full.frame(0, held=0)
+    assert full.fills == [(0, 0, 375, 320)]
+    ys = [y + 16 for _, y, _, _ in full.dots]
+    xs = [x + 16 for x, _, _, _ in full.dots]
+    assert len(full.dots) == 200 and max(ys) > 260 and min(ys) < 60 and max(xs) - min(xs) > 260
+    assert abs(sum(ys) / len(ys) - 160) < 12 and abs(sum(xs) / len(xs) - 187.5) < 12
+
+
+def test_oled_s_field_hides_the_rest_of_the_page_until_a_thumb_rests(fw):
+    """No status row, bar, times, dots or song line with the thumb off the wheel; resting, they fade in over 150 ms
+    and are painted again over Field at that alpha."""
+    full = Full(fw)
+    assert full.frame(0, held=0) == 0 and full.painted == [] and full.alpha == []
+    assert 0 < full.frame(75, held=1) < 255 and full.alpha[0] == full.now.v.chrome
+    assert full.frame(160) == 255
+    assert full.painted == [full.parts[n] for n in Full.PARTS] and full.alpha == [255, 255]
+
+
+def test_oled_s_page_stays_1_5_s_after_the_thumb_lifts_then_fades(fw):
+    full = Full(fw)
+    full.frame(0, held=1)
+    full.frame(200)
+    assert full.frame(250, held=0) == 255  # lifted at 200 (the last frame that saw it)
+    assert full.frame(1650) == 255
+    assert 0 < full.frame(1750) < 255
+    assert full.frame(1900) == 0 and full.painted == []
+
+
+def test_another_style_under_oled_keeps_the_slide_area(fw):
+    """Only Field fills the screen: Halo still draws in the slide area with the page's parts as they are."""
+    full = Full(fw)
+    full.now.v.style = HALO_STYLE
+    full.frame(0, held=0)
+    assert full.fills == [] and full.painted == []
+
+
+def test_oled_s_field_runs_on_over_the_status_row_which_shows_only_with_the_rest(fw):
+    """The status row is painted before Now Playing, outside its window: after the row's own paint, black and Field's
+    part there, then the row again at the page's alpha (its own paint inside that one is stock's)."""
+    full = Full(fw)
+    bar = lambda: paint(fw, full.bar, Canvas(fw))
+    full.frame(0, held=0)
+    full.fills.clear(), full.dots.clear()
+    bar()
+    assert full.fills == [(0, 0, 375, 58)] and len(full.dots) == 200  # the clip keeps the bar's part
+    assert full.painted == []
+    full.frame(200, held=1)
+    full.painted.clear(), full.alpha.clear()
+    bar()
+    assert full.painted == [full.bar] and full.alpha == [255, 255] and full.now.v.in_bar == 0
+
+
+@pytest.mark.parametrize('name, drawn', [(b'volume_dialog', True), (b'msginfo_dialog', False)])
+def test_oled_s_field_goes_on_under_the_wheel_s_volume(fw, name, drawn):
+    """A turn on the page opens the volume's band over Now Playing (volume.c): Field goes on under it; any other
+    window over the page pauses it, as before."""
+    full = Full(fw)
+    WM = 0x7000
+    dialog = full.now.widget(0, 0, 375, 320)
+    full.now.top = dialog
+    label = C.create_string_buffer(name)
+    fw.mock('window_manager', lambda *_: WM)
+    fw.mock('widget_count_children', lambda w, *_: 2 if w == WM else full.now.pages if w == full.now.slide else 0)
+    fw.mock('widget_get_child', lambda w, i, *_: (full.now.win, dialog)[i] if w == WM else 0)
+    fw.mock('widget_get_prop_str', lambda w, key, default, *_: C.addressof(label) if w == dialog else default)
+    full.frame(0, held=1)
+    assert bool(full.dots) == drawn

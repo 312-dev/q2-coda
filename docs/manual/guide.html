@@ -177,7 +177,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
     <li class="chap"><span class="n">{{p:c4}}</span><a href="#c4">Chapter 4: EQ</a></li>
     <li><span class="n">{{p:eq3}}</span><a href="#eq3">Simple</a></li>
     <li><span class="n">{{p:eq}}</span><a href="#eq">Advanced: the parametric EQ</a></li>
-    <li><span class="n">{{p:eqimport}}</span><a href="#eqimport">Importing a preset</a></li>
+    <li><span class="n">{{p:eqimport}}</span><a href="#eqimport">Presets on the card</a></li>
 
     <li class="chap"><span class="n">{{p:c5}}</span><a href="#c5">Chapter 5: Streaming</a></li>
     <li><span class="n">{{p:spotify}}</span><a href="#spotify">Spotify</a></li>
@@ -244,7 +244,8 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
       <tr><td>Sleep (screen off)</td><td>Double-press Centre on any page except Now Playing and video. The Q2 keeps playing. On Now Playing a single press turns the screen off instead (a double press with <b>Single Press Scrub</b> on).</td></tr>
       <tr><td>Go back</td><td>Return goes back one level. A hold of Return jumps to Now Playing (<a href="#controls">more shortcuts</a>).</td></tr>
       <tr><td>Play or pause</td><td>Press Play/Pause, on any page.</td></tr>
-      <tr><td>Skip</td><td>Next or Previous key: next or previous track.</td></tr>
+      <tr><td>Skip</td><td>Next: next track. Previous: the start of the track, or the track before within its first 3 seconds (so twice goes back one).</td></tr>
+      <tr><td>Fast-forward, rewind</td><td>Hold Next or Previous. You hear the song as it goes, faster the longer you hold; let go to play on from there.</td></tr>
       <tr><td>Volume</td><td>Turn the wheel outside menus.</td></tr>
     </tbody>
   </table>
@@ -307,7 +308,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
       <tr><td>See options for a playlist</td><td>Hold Play/Pause on it in Library → Playlists, or on its cover with <b>Playlist View</b> set to Cover Flow: queue or shuffle its songs, or <b>More…</b> for its More menu. On a cover it also offers <b>New Playlist</b> and, in Classic, <b>Select Playlists…</b>.</td></tr>
       <tr><td>Open the EQ</td><td>In quick settings, hold <b>Playback</b>.</td></tr>
       <tr><td>Show lyrics full screen</td><td>Tap the lyrics. Tap again or press Return to go back.</td></tr>
-      <tr><td>Skip to a point in a song</td><td>On Now Playing, double-press Centre (press once with <b>Single Press Scrub</b> on), then turn: 5 s per tick. Double-press, Return, touch or wait 3 s to jump.</td></tr>
+      <tr><td>Skip to a point in a song</td><td>On Now Playing, double-press Centre (press once with <b>Single Press Scrub</b> on), then turn: 5 s per tick, and the song follows as you turn. Double-press, Return, touch or wait 3 s to finish.</td></tr>
       <tr><td>Search your songs</td><td>At the top of Library (Local Songs), pull down until “Release to search” appears. In <b>Theme: Classic</b>, choose <b>Search</b>, the first row.</td></tr>
       <tr><td>Move quickly through Cover Flow</td><td>Keep turning fast: covers speed up to 20 albums a second, and after a moment Album and Artist sorts go by initials, each letter shown big. Slow down to go album by album again. With <b>Fast Navigation</b> on (<b>System settings → Display → Cover Flow</b>), Year goes by years too, and the letters last until you lift your thumb. It keeps a small copy of each cover on the card; it stops making them when the card is nearly full, and they stay until <b>Refresh Cover Flow</b>. Sort and Refresh remain individual stops.</td></tr>
       <tr><td>Open quick settings</td><td>Pull down from the top edge of the screen. In the pull-down, the wheel sets the brightness; hold Play/Pause to switch it to the volume, and again to switch back. It keeps that choice. Tap Wi-Fi or Bluetooth to toggle it; hold its icon to open its settings.</td></tr>
@@ -319,7 +320,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
     <li><b>List ends:</b> Library lists, Playback and System settings stop at the end; pause, then turn again to wrap around.</li>
     <li><b>Position memory:</b> recent folders, albums, searches and menus reopen where you were, until power-off.</li>
     <li><b>Wheel-adjusted settings:</b> brightness, volume limits, balance, date and time and the sleep timer take the wheel: turn to change, press Centre to go back or move to the next field, and then OK. Next and Previous also move between the fields. The date and time's OK goes back to the Time settings.</li>
-    <li><b>Key Tone:</b> the Q2’s speaker clicks, playing or not, whenever no headphones (3.5/4.4 mm), Bluetooth or USB DAC are connected; once per row, not per tick. <b>System settings → Controls → Click With Headphones</b>, under Key Tone and shown while Key Tone is on, keeps it clicking with them connected too (the speaker, not the headphones).</li>
+    <li><b>Clicker:</b> a click once per row, not per tick, and once per button press. <b>System settings → Controls → Clicker</b> says where: <b>Speaker</b>, the Q2’s own speaker, playing or not, whenever no headphones (3.5/4.4 mm), Bluetooth or USB DAC are connected; <b>Headphones</b>, in the music you are listening to (with the new player, still in testing; otherwise, and while nothing plays, the speaker as Speaker); <b>Both</b> (the default), the speaker whatever is connected and the click in the music too; <b>Off</b>.</li>
   </ul>
 
   </div>
@@ -373,7 +374,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
     <li>On the Q2, choose <b>Library → Update Local Music</b>.</li>
   </ol>
   <p><b>Over Wi-Fi:</b> with the Q2 on your Wi-Fi network, open <b>System settings → Network → Wi-Fi File Transfer</b>. It shows an address and a six-digit PIN. Open the address in a browser on a computer on the same network and type the PIN when the page asks for it; then you can upload, download and delete files on the card. Each time you open Wi-Fi File Transfer it makes a new PIN. Five wrong PINs lock the page out: go back on the Q2 and open Wi-Fi File Transfer again for a new one. It turns itself off after 10 minutes with nothing uploaded, downloaded or listed, and when you go back.</p>
-  <p>These folders at the card’s root each add their own <b>Library</b> entry: <code>Podcasts/</code>, <code>Audiobooks/</code>, <code>Photos/</code>, <code>Books/</code> and <code>Videos/</code>; <code>EQ/</code> holds EQ presets to import. Other folder names, such as <code>Images/</code>, aren’t picked up. See <a href="#card">What goes on the microSD card</a> for supported formats.</p>
+  <p>These folders at the card’s root each add their own <b>Library</b> entry: <code>Podcasts/</code>, <code>Audiobooks/</code>, <code>Photos/</code>, <code>Books/</code> and <code>Videos/</code>; <code>EQ/</code> holds EQ presets. Other folder names, such as <code>Images/</code>, aren’t picked up. See <a href="#card">What goes on the microSD card</a> for supported formats.</p>
   <p>Update Local Music no longer stops at 20,000 songs, so with a larger library run it again after updating. Shanling rates the Q2 for 20,000 songs: a much larger library takes longer to scan and browse, and isn’t guaranteed to work.</p>
   <p><b>What the Library lists:</b> every song a scan finds, loose files beside your album folders included. On a very large card, <b>Songs</b>, <b>Albums</b> and <b>Artists</b> may not list everything; <b>Folder</b> view still plays every file. To list only part of a card, scan just those folders with <b>Scan Folders</b>, below.</p>
   <p><b>A large library:</b> Update Local Music goes through every folder on the card before it starts counting songs, so with tens of thousands of songs or a slow card it can stay at <b>No.0</b> for a long time. Leave it running; Return stops it. To add new music later without going through the whole card again, choose <b>System settings → Update Library → Scan Folders</b>, tick the folders you copied to, and press <b>Scan</b>. Open a folder, such as <code>Music</code>, to tick the artist or album folders inside it; tapping a folder that has no folders inside ticks it. Ticking the whole folder reads every song in it again, which takes about as long as a full update.</p>
@@ -404,7 +405,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
       <tr><td><code>Photos/</code></td><td><code>.jpg</code>, <code>.jpeg</code>, <code>.png</code> (JPEG up to 6 MB, PNG 1 MB); subfolders are albums</td><td>You</td></tr>
       <tr><td><code>Books/</code></td><td><code>.txt</code>, <code>.epub</code> (no DRM); one level of subfolders</td><td>You</td></tr>
       <tr><td><code>Videos/</code></td><td><code>.mp4</code>, <code>.m4v</code>, <code>.mkv</code>, <code>.avi</code>, <code>.mov</code>, <code>.mpg</code>; one level of subfolders</td><td>You</td></tr>
-      <tr><td><code>EQ/</code></td><td>AutoEQ / Equalizer APO presets to import</td><td>You</td></tr>
+      <tr><td><code>EQ/</code></td><td>EQ presets, as AutoEQ / Equalizer APO <code>.txt</code> files</td><td>Both</td></tr>
       <tr><td><code>Radio/</code></td><td>Internet Radio favourites, <code>.m3u</code> and <code>.pls</code></td><td>Both</td></tr>
       <tr><td><code>lockscreenimage/</code></td><td>Up to 5 lock screen images</td><td>You</td></tr>
       <tr><td><code>_explaylist_data/</code></td><td>M3U playlists to import, and a playlist’s own picture, <code>name.jpg</code> or <code>name.png</code> (<a href="#playlists">Playlists</a>)</td><td>Both</td></tr>
@@ -600,7 +601,7 @@ AUTO=1</pre>
   <ul>
     <li><b>Options:</b> hold <b>Play/Pause</b> for the queue, favourites, playlists, shuffle and repeat. During Shuffle Albums or Folders it also has <b>Next Album / Previous Album</b>.</li>
     <li><b>Rate:</b> hold the heart, turn to 0–5 hearts, and press Centre to save.</li>
-    <li><b>Scrub:</b> double-press Centre, then turn: 5 s per tick. Double-press, Return, touch or wait 3 s to jump. Paused, it stays paused and plays from there. With <b>System settings → Controls → Single Press Scrub</b> on, a single press starts it and a double press turns the screen off, as on other pages.</li>
+    <li><b>Scrub:</b> double-press Centre, then turn: 5 s per tick, and you hear the song jump as you turn. Double-press, Return, touch or wait 3 s to finish. Paused, it stays silent and paused, and plays from there. With <b>System settings → Controls → Single Press Scrub</b> on, a single press starts it and a double press turns the screen off, as on other pages.</li>
     <li><b>Lyrics:</b> on the lyrics page, turn to scroll them. They stay where you leave them, even if you swipe to another page and back; they follow the song again when you leave Now Playing or the next song starts. Tap the lyrics to fill the screen with them; tap again or press Return to go back. To keep the screen on while you read along, turn on <b>Smart Awake</b> (<a href="#display">Display</a>).</li>
     <li><b>Screen off:</b> a single Centre press turns the screen off.</li>
     <li><b>Back where you were:</b> if you got here by holding Return, hold it again to go back.</li>
@@ -687,19 +688,21 @@ AUTO=1</pre>
       <tr><td>Reset to defaults</td><td>Puts the ten default bands, preamp and balance back to flat, and clears the loaded preset’s name. Enabled’s On/Off stays as it is; choose <b>Apply changes</b> to activate. Saved presets are untouched.</td></tr>
       <tr><td>Enabled: On/Off</td><td>Applies at once and persists; On turns Simple off. The status-bar <b>EQ</b> icon follows it.</td></tr>
       <tr><td>EQ per Output</td><td>Lets each output keep its own EQ: see <b>A different EQ for each output</b> above. It applies to Simple and Advanced.</td></tr>
-      <tr><td>Preamp</td><td><b>Auto</b> cuts just enough for the boosts at the sample rate that is playing, so a track at another rate can play a little louder or quieter. The row shows the cut for 44.1 and 48 kHz music, e.g. <b>Auto (44.1: -9.2 / 48: -8.8)</b> in dB; 32, 96 kHz and other rates get their own. It is not a limiter: transients can still need more cut. Or pick +12 to −24 dB, which plays as set at every rate, so loud boosts can clip at output.</td></tr>
+      <tr><td>Preamp</td><td><b>Auto</b> cuts just enough for the boosts at any sample rate, one cut for all of them, so tracks at 44.1, 48 or 96 kHz play at the same level. The row shows it, e.g. <b>Auto (-12.3 dB)</b>. It is not a limiter: transients can still need more cut. Or pick +12 to −24 dB, which plays as set at every rate, so loud boosts can clip at output.</td></tr>
     </tbody>
   </table>
 
   </div>
   <div class="sec">
-  <h2 id="eqimport">Importing a preset</h2>
-  <p class="task">Import an AutoEQ or Equalizer APO preset:</p>
+  <h2 id="eqimport">Presets on the card</h2>
+  <p>Presets are Equalizer APO text files in <code>/EQ/</code> on the card: the ones you save on the Q2 and the ones you copy there, such as AutoEQ’s <code>ParametricEQ.txt</code> for your headphones. A preset saved on the Q2 works in Equalizer APO or Peace on a computer too.</p>
+  <p class="task">Use an AutoEQ or Equalizer APO preset:</p>
   <ol class="steps">
-    <li>Copy an AutoEQ / Equalizer APO <code>.txt</code> file to <code>/EQ/</code> on the card. <code>Channel: L</code>, <code>R</code> and <code>all</code> sections work.</li>
-    <li>Choose <b>Presets → Import from SD /EQ</b>, then pick the file. Large collections are alphabetical; use <b>Next page</b> and <b>Previous page</b> to browse them.</li>
-    <li>Select the saved preset, then <b>Apply changes</b> (and <b>Enabled: On</b>).</li>
+    <li>Copy the <code>.txt</code> file to <code>/EQ/</code> on the card. <code>Channel: L</code>, <code>R</code> and <code>all</code> sections work. Lines the Q2 can’t play, such as <code>Device:</code> or a high-pass filter, are left out, and the Q2 says what it skipped. Use AutoEQ’s ParametricEQ file, not its GraphicEQ one.</li>
+    <li>Choose <b>Presets</b>, then pick the file. Large collections are alphabetical; use <b>Next page</b> and <b>Previous page</b> to browse them.</li>
+    <li>Choose <b>Apply changes</b> (and <b>Enabled: On</b>).</li>
   </ol>
+  <p><b>Save editor preset</b> writes <code>Manual 01.txt</code> to <code>Manual 10.txt</code>; rename them to keep them apart. Choosing Auto or a value for <b>Preamp</b> with a preset loaded writes it into that preset’s file. Presets saved by earlier firmware are copied to <code>/EQ/</code> the first time you open <b>Presets</b> with the card in.</p>
   </div>
 </section>
 
@@ -908,8 +911,7 @@ http://stream.radioparadise.com/mp3-128</pre>
       <tr><td>Wheel Sensitivity</td><td>10–200% in 10% steps, 50% by default (a seventh of a turn per tick). Higher needs less turning per step: 100% half as much, 200% a quarter. Lower needs more: 20% a third of a turn, 10% most of a turn. Turn the wheel or drag the slider; Centre goes back. If the wheel keeps moving after you lift, press Return twice quickly.</td></tr>
       <tr><td>Hold Return</td><td>Recent (default): a hold opens Now Playing and another goes back where you were. Home: a hold goes Home from any page; on Home it still opens Now Playing.</td></tr>
       <tr><td>Single Press Scrub</td><td>Off (default): on Now Playing, a single Centre press turns the screen off and a double press starts seeking. On: the two swap, so a single press starts seeking and a double press turns the screen off, as on every other page.</td></tr>
-      <tr><td>Key Tone</td><td>The Q2’s speaker clicks as you move along a list.</td></tr>
-      <tr><td>Click With Headphones</td><td>Shown while Key Tone is on. On: it keeps clicking with headphones, Bluetooth or a USB DAC connected (the speaker, not the headphones).</td></tr>
+      <tr><td>Clicker</td><td>Where the click is heard as you move along a list or press a button. <b>Speaker</b>: the Q2’s own speaker, quiet while headphones, Bluetooth or a USB DAC are connected. <b>Headphones</b>: mixed into the music, at its volume (with the new player, still in testing; otherwise, and while nothing plays, the speaker as Speaker). <b>Both</b> (default): the speaker whatever is connected, and the click in the music too. <b>Off</b>: no click.</td></tr>
       <tr><td>Buttons Lock</td><td>Locks the controls while the screen is off: <b>Everything</b> locks the wheel’s volume and the playback buttons; <b>Buttons only</b> locks the playback buttons and leaves the volume; <b>Volume only</b> locks the volume and leaves skip and Play/Pause. The lock tile in quick settings cycles through the same choices, Off included.</td></tr>
       <tr><td>Wake</td><td>Press Centre once with the screen off (the default, <b>Wake: Single Press</b>). Play/Pause and the volume wheel work with the screen off without waking it. To keep pocket bumps from waking the screen, choose <b>Wake: Double Press</b> (<a href="#settings-controls">Controls</a>): then a single press stays dark and two presses wake it.</td></tr>
       <tr><td>Volume Guard</td><td><b>On:</b> with the screen off, the wheel ignores the first two thirds of a turn in one direction, so a brush in a pocket or hand doesn’t change the volume. Keep turning and the volume moves as usual, back and forth and across several strokes, until the wheel rests for a second and a half; then the next change needs the same again. Turning back or lifting your finger before then starts it again. The screen-on wheel is unchanged. Off by default.</td></tr>
@@ -1124,7 +1126,7 @@ http://stream.radioparadise.com/mp3-128</pre>
     <li><b>Cover Flow order:</b> <b>System settings → Display → Cover Flow → Cover Flow Sort</b> switches to Artist, Year, Recently Added, Most Played or Random. The default, Album, goes by album title, so one artist’s albums are spread across the alphabet; Artist keeps them together.</li>
     <li><b>Screen waking in your pocket?</b> <b>System settings → Controls → Wake: Double Press</b>.</li>
     <li><b>Want stock’s EQ presets?</b> <b>EQ → Advanced → Presets → Stock presets</b> has Pop, Rock, Jazz and the rest; the ten default bands work as a 10-band graphic EQ.</li>
-    <li><b>Wheel click gone?</b> Key Tone is the Q2’s own speaker, so it stays quiet while headphones, Bluetooth or a USB DAC are connected, unless <b>System settings → Controls → Click With Headphones</b> (under Key Tone) is on.</li>
+    <li><b>Wheel click gone?</b> With <b>System settings → Controls → Clicker: Speaker</b> the click is the Q2’s own speaker, which stays quiet while headphones, Bluetooth or a USB DAC are connected; choose <b>Both</b> to keep it clicking.</li>
     <li><b>Lock screen look:</b> six built-in wallpapers and a large clock: see Chapter 6.</li>
     <li><b>Importing an M3U playlist?</b> It has to be in <code>_explaylist_data/</code>, and a <code>#</code> line without <code>#EXT</code> shows as a broken song: see Chapter 2.</li>
     <li><b>Added a few albums?</b> <b>System settings → Update Library → Scan Folders</b> scans just their folders.</li>
