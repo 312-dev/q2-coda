@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Settings: **System settings → Storage** shows what fills the card: a bar and the sizes of **Your Music**, **Downloads**, **Stream Cache** and **Free**. **Downloads** lists what the Subsonic app synced for you, each with its size, and a **Limit**: with one set, a Sync that would go past it doesn't start. Hold Play/Pause on an item to take it out of Sync. Your own files are only measured, never changed. Needs the Subsonic app's matching update.
+  - Library (OLED): with **Local + Server**, song lists mark where each song lives: a down arrow for one the Subsonic app downloaded, a cloud for one that streams from the server, nothing for your own files.
   - Settings: after a reset, the first settings q2-coda saved could be lost, so the next start turned USB DAC Charging back On if you had turned it Off. Settings are now saved where they are read back, and a settings file already affected is put right the next time a setting is saved.
   - Lists: a title cut short just after a word puts its dots right after the word, as "Wicked Garden (2017...", with no space before them that read as a gap.
   - Streaming (OLED): the Subsonic app's row has its own mark, a small submarine sending out sonar, and any other card app with its own icon shows it again, small and grey beside its name, as the other services' marks are (it showed no icon at all). A card app without an icon shows the app-window mark.

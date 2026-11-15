@@ -69,7 +69,7 @@ All colours are opaque. Alpha is not used for text: greys are stated as greys.
 | Text Tertiary  | `#858585` | Second lines ("1,234 Songs", "Connected"), section headers, captions         | `#7D` to `#8C` by ratio (est)                              |
 | Chevron        | `#999999` | List chevrons on black                                                       | `#8C8C8C` read on a 1 px stroke, so lighter in truth (est) |
 | Divider        | `#222222` | 1 px rules between two-line rows only                                        | `#222222`                                                  |
-| Track          | `#333333` | Unfilled progress, slider and storage tracks; switch off                     | `#313131`                                                  |
+| Track          | `#333333` | Unfilled progress and slider tracks; switch off (the storage bar's is its own) | `#313131`                                                  |
 | Accent Blue    | `#2160D8` | Selection bar, progress fill, switch on, slider knob ring, big status glyphs | Bar `#1544B2` to `#225BCB`, progress `#2368D9`             |
 | On Accent      | `#FFFFFF` | Text and chevrons on the selection bar                                       |                                                            |
 | Positive       | `#30D158` | "Connected" dots only                                                        | Green dot on Bluetooth                                     |
@@ -307,6 +307,13 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   `subsonic`, with or without its own icon files) q2-coda's submarine with two sonar arcs. Any other card app with its
   own icon shows that icon scaled into the same 20 px box, greyed as every card app icon is under this theme
   (`icons.addon_mono`) rather than inked: a tint would turn an icon drawn on a filled tile into a solid square.
+- **Where a song lives** (with Library: Local + Server): a song row's right column says where the song is, as the
+  user approved from `mock_radio.py`'s storage sheet on 2026-11-15: nothing for the user's own file, Phosphor
+  `arrow-circle-down` for one a card app downloaded (its `q2app`'s `downloads=` folder, q2-subsonic's `Subsonic/`),
+  `cloud` for a server song that streams; regular, 18 px, Text Tertiary, white on the selection, centred where the
+  offline mark goes. A server song that can't play now keeps the greyed row and `cloud-slash`
+  ([server-library.md](server-library.md#greyed-rows)). The length and the title end 12 px short of a mark, as they
+  do of the offline mark.
 - Ratings' lists show a song's hearts as five Phosphor glyphs at 14 px at the start of its second line, `heart-fill`
   for its hearts and `heart` for the rest, in Text Secondary (white on the selection), then "· Artist".
 
@@ -373,8 +380,14 @@ has no place for keeps a place of its own:
   in 15 px Text Tertiary, Text Primary on the band the wheel is on. Above the three, the EQ's
   switch (Enabled), Presets and Reset are rows; while an Advanced preset plays, its name is
   Presets' value, as a settings row's, and the switch keeps its title.
-- **Storage bar:** 12 px, round ends, segments in Accent Blue, Text Secondary and Track, with a
-  legend of 8 px dots and 15 px labels. Segments never use more than three colours.
+- **Storage bar** (Settings > Storage, approved from `mock_radio.py`'s storage sheet on 2026-11-15): "33.9 GB of 60
+  GB used" in 15 px Text Secondary centred on y 62 at the text column, then a 10 px bar with round ends from the
+  text column to the right column, its top at y 76: the track `#2C2C2E`, then from the left Your Music in white,
+  Downloads in Accent Blue and Stream Cache in `#6E6E73`, square where they meet with 1 px of track between them.
+  The rows from y 100 are its legend: a 10 px dot in the segment's colour on the text column (Free's in the track's),
+  the label at x 44 and the size as the row's value, Downloads and Stream Cache with a chevron. Two footers follow.
+- **Footer:** a grouped list's caption under its last row, as iOS's: 13 px Text Tertiary (`#858585`) on the text
+  column, its first line centred 10 px below the rows, the next 16 px lower. Storage and Downloads use them.
 
 ### Confirmation
 
@@ -618,6 +631,8 @@ pattern.
 | About                               | Key/value table             | Inert: no selection; values in Text Secondary                                                              |
 | Lock Screen settings                | List row, then pictures     | Three a row from the text column to the right column; the check marks the chosen one; the wheel's picture is framed 3 px in Accent Blue, its selection bar |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
+| Storage                             | Storage bar                 | [Progress and sliders](#progress-and-sliders): the bar, its legend rows (Downloads and Stream Cache open pages) and two footers |
+| Storage > Downloads                 | Key/value rows              | Limit (its picker the inset modal's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centred on x 33, its name at x 52, size and chevron; two footers |
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             | Its [tabs](#tabs), then rows: the switch, Presets, Reset                                                   |
 | Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right                      |
@@ -629,8 +644,8 @@ pattern.
 | Keyboard                            | Own                         | Stock's keys as `#1C1C1E` boxes on black, the wheel's key in the accent ([ipod](ipod.md#keyboard))          |
 | Lock screen                         | Own                         | Clock 56 px Inter Medium centred, date 16 px Secondary, the song in two lines; black or the picture at 50% |
 
-The concept's Apple Music, Apple TV, CD sync and storage pages have no Q2 Pod equivalent and are
-out of scope. Spotify's pages follow the list patterns.
+The concept's Apple Music, Apple TV and CD sync pages have no Q2 Pod equivalent and are out of scope; its storage
+page became Settings > Storage. Spotify's pages follow the list patterns.
 
 ## Do and don't
 
@@ -683,10 +698,12 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   and on a track change (docs/ipod.md#home, `slideshow.c`)), the main menu from y 40, its top rows painted by the bar (`coverflow_home_strip`, approved from
   `mock_overflow.py` on 2026-11-15), and the lists Home's rows open as full-width pages with the art hidden
   (`home.lists.full`).
+- Settings > Storage and its Downloads (`patch/storage.c` `storage_paint`): the storage bar and its legend, the
+  items' marks, the values beside their chevrons and the footers; and the song rows' marks for where a song lives
+  (`catalogue.c` `catalogue_row_mark`).
 - The toast, the confirm as a dialog page and the empty note (`dialog.confirm.painter="oled"`,
   `patch/feedback.c`), and the confirmation after a shuffle.
 
 Still to build:
 
 - The confirmation for Repeat and Now Playing's mode changes.
-- The storage bar drawn as above.
