@@ -340,9 +340,9 @@ def test_formats_open_as_stock(player, songs, tmp):
 def tool(tmp, name, *defines):
     """test/player/NAME.c with player/dsp.c and patch/peq.c as the player builds them, for this machine."""
     out = tmp/name
-    if not out.exists() and name == 'volume_test':  # output.c's law alone, with FFmpeg's headers for its includes
+    if not out.exists() and name in ('volume_test', 'alsa_test'):  # output.c alone, with FFmpeg's headers for its includes
         ff = pathlib.Path(subprocess.run([sys.executable, ROOT/'tools/player.py', 'ffmpeg', 'host'], check=True, capture_output=True, text=True).stdout.strip())
-        subprocess.run(['cc', '-std=c11', '-D_GNU_SOURCE', '-O2', '-Wall', '-Werror', '-I', ROOT/'player', '-I', ff/'include', HERE/'volume_test.c',
+        subprocess.run(['cc', '-std=c11', '-D_GNU_SOURCE', '-O2', '-Wall', '-Werror', *defines, '-I', ROOT/'player', '-I', ff/'include', HERE/f'{name}.c',
                         ROOT/'player/output.c', '-L', ff/'lib', '-lswresample', '-lavutil', '-lm', '-lpthread', '-o', out], check=True)
     if not out.exists():
         subprocess.run(['cc', '-std=c11', '-D_GNU_SOURCE', '-DPEQ_HOST', *defines, '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
@@ -667,6 +667,23 @@ def test_volume_law(player, songs, tmp):
     bad = [f'{k}: {have.get(k)} want {v}' for k, v in want.items() if not have.get(k) or any(abs(a - b) > 1e-6 for a, b in zip(have[k], v))]
     assert not bad, bad
     return f'{len(want)} levels'
+
+
+def test_alsa_sw_params(player, songs, tmp):
+    """output.c against alsa_test.c's libasound: every way sets stock's software parameters (ao_alsa's init,
+    0x438d64-0x438dc4: start at a period, stop_threshold and silence_size at the boundary), and off Bluetooth a write to
+    a PCM that ran dry first moves appl_ptr to a period past hw_ptr (snd_pcm_forward by the deficit plus a period)."""
+    got = subprocess.run([tool(tmp, 'alsa_test', '-DHAVE_ALSA')], check=True, capture_output=True, text=True).stdout.split('\n')
+    lines = {' '.join(l.split()[:3] if l.startswith('open') else l.split()[:1]): l for l in got if l}
+    for way in range(3):
+        assert lines[f'open way {way}'].endswith(f'calls 1 start 1378 stop {0x56220000} silence {0x56220000} boundary {0x56220000}'), lines[f'open way {way}']
+    want = {'full': 'r 0 forward -1 avail_reads 1 writes 1', 'ring': 'r 0 forward -1 avail_reads 1 writes 1',
+            'dry': 'r 0 forward 6378 avail_reads 1 writes 1', 'dry-usb': 'r 0 forward 45478 avail_reads 1 writes 1'}
+    for k, v in want.items():
+        assert lines[k] == f'{k} {v}', lines[k]
+    bt = lines['dry-bt'].split()
+    assert bt[1:7] == ['r', '0', 'forward', '-1', 'avail_reads', '0'], lines['dry-bt']
+    return 'start 1378, stop and silence at the boundary on ways 0-2; a dry PCM forwarded by deficit + period, not on Bluetooth'
 
 
 def test_usb_formats(player, songs, tmp):

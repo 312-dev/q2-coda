@@ -108,7 +108,7 @@ Verified: [Phase 4 results](#phase-4-results), with what is left in the checklis
 
 - **Goal:** USB DAC, Bluetooth, and DSD in D2P, DoP and Native.
 - **Work:** `hw:2,0` with the 500 ms buffer and software volume; `plug:bluealsa` with rate conversion to the transport's rate through `libswresample`, its state kept across a gapless change; the PCM kept open across a change on both; an output-way change while playing; DSF and DFF demuxed by FFmpeg, D2P through FFmpeg's DSD decoders, DoP packed in the player, Native written in ALSA's DSD formats; DSD's `RATE` in `media-info`.
-- **Files:** `player/output.c`, `player/dsd.c`, `player/source.c`, `player/engine.c`, `test/player/` (`ffref.c`, `volume_test.c`, the DSD files in `music.py`).
+- **Files:** `player/output.c`, `player/dsd.c`, `player/source.c`, `player/engine.c`, `test/player/` (`ffref.c`, `volume_test.c`, `alsa_test.c`, the DSD files in `music.py`).
 
 What the plan above said and stock does otherwise, found in the captures: a USB DAC is `hw:1,0` on a Q2, not `hw:2,0`; an output-way change waits for the next song; DoP is `S24_3LE`; and on a Q2 the DAC always gets DoP and Bluetooth PCM, whatever `mcl-dsdmode` says ([player.md: Output](player.md#output)).
 - **Host tests:** DoP frames carry the file's DSD bits exactly (unpack and compare); a tone split across two files resampled 44.1 to 48 and 96 to 48 kHz equals one file resampled (`test/bt_resample.py`'s check); volume scaling.
@@ -133,7 +133,7 @@ What the plan above said and the work found otherwise: the CA bundle is the one 
 ### 6. On a Q2
 
 - **Goal:** the answers the emulator cannot give, and the timing behaviours.
-- **Work:** every row of [player.md: Open questions](player.md#open-questions); CPU and resident memory against hciplayer at 44.1, 96, 192 and 384 kHz and for each lossy codec; the wired start (no cut first fraction of a second after a press, a seek, a resume), the unpause (nothing skipped), a reopen's drain, the mute line's timing, all by recording the headphone output; a day of ordinary use on the switch.
+- **Work:** every row of [player.md: Open questions](player.md#open-questions); CPU and resident memory against hciplayer at 44.1, 96, 192 and 384 kHz and for each lossy codec; the wired start (no cut first fraction of a second after a press, a seek, a resume), the unpause (nothing skipped), a reopen's drain, the mute line's timing, an underrun on the jack and a USB DAC (row 71: the stream plays on through silence, as stock's software parameters have it, and the song resumes where it stopped), all by recording the headphone output; a day of ordinary use on the switch.
 - **Needs a device:** all of it. Brief the tester with `tools/q2remote.py` commands; the agent reads logs and recordings.
 - **Exit:** rows 57-64, and no checklist row above still marked "device".
 
@@ -353,6 +353,8 @@ One row per behaviour. "How" is the test that proves it; "device" means it canno
 | 67 | The click mixed into what plays: its sound, level, length and place; nothing while paused or stopped; a full-scale song not clipped | host; emulator | done: `test_click`; in the emulator the MIPS build's click is in the PCM, by rewinding a card with a 500 ms buffer and, with none, in the next write |
 | 68 | Stock's hciplayer, and Q2 Pod's, ignore `mcl-click` | emulator | done: both play on, the silence untouched |
 | 69 | The click on a Q2: `snd_pcm_rewind` through `default`, how soon it is heard, its sound tuned by ear | device | 6 |
+| 70 | ALSA's software parameters as stock's: start at a period, `stop_threshold` and `silence_size` at the boundary, on every way; a write to a PCM that ran dry first forwarded to a period past `hw_ptr`, off Bluetooth | host: `test_alsa_sw_params` (`test/player/alsa_test.c`'s libasound); emulator: the calls, through alsa-lib 1.1.6, logged against stock's | done |
+| 71 | An underrun on the jack and on a USB DAC (a stalled stream, a next song later than the buffer): a short gap, then the song where it stopped; no stream restart, no pop, no USB headphones muting while their stream starts again | device: recording, with a stream cut for a few seconds over Wi-Fi | 6 |
 
 ## Deviations
 
