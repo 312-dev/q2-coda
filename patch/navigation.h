@@ -486,6 +486,9 @@ void coverflow_position_reset(void);
 const char *theme_art(const char *name);
 void chevron_icon(void *w, void *canvas, int right, int y, int selected);
 void chevron_muted(void *w, void *canvas, int right, int y);
+void spinner_icon(void *w, void *canvas, int right, int y, int frame);
+void spinner_dirty(void *win), spinner_done(void);
+int coverflow_spinner(void), coverflow_wait_input(void *e);
 
 /* slider_page.c: a set_switch theme's slider page, laid out as stock's window loads and painted
  * after its children */

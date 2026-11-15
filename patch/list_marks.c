@@ -7,6 +7,7 @@
 /* CHEV_ICON: the image's centre this far left of the right column, as the design places the
  * caret's 15 px box (tools/art.py draws the caret-right glyph in it) */
 #define CHEV_SHIFT 5
+#define SPIN_BOX 16 /* the spinner's 15 px frame (tools/art.py spinner), whole */
 
 /* SB_WHEEL: shown while the wheel turns and for WHEEL_SB_MS after its last tick, fading over the
  * last WHEEL_SB_FADE_MS, one repaint a WHEEL_SB_STEP_MS. */
@@ -35,6 +36,27 @@ void chevron_icon(void *w, void *canvas, int right, int y, int selected) {
     if (!widget_load_image(w, name, bitmap))
         canvas_draw_icon(canvas, bitmap, right - CHEV_SHIFT, y);
 }
+
+/* ... or, on the selected row while Cover Flow opens, the spinner's frame (1-8, coverflow.c
+ * coverflow_spinner) in its place, white (tools/art.py spinner). */
+static struct {
+    void *w;  /* the list it was last painted on, 0 once it is done */
+    int x, y; /* its centre there */
+} spin __attribute__((section(".scratch")));
+void spinner_icon(void *w, void *canvas, int right, int y, int frame) {
+    unsigned bitmap[64]; /* bitmap_t */
+    char name[8];
+    tk_snprintf(name, sizeof name, "spin_%d", frame - 1);
+    spin.w = w, spin.x = right - CHEV_SHIFT, spin.y = y;
+    if (!widget_load_image(w, theme_art(name), bitmap))
+        canvas_draw_icon(canvas, bitmap, spin.x, spin.y);
+}
+/* The spinner's next frame: its box on its list repainted, or win's whole until it has painted. */
+void spinner_dirty(void *win) {
+    rect_t r = { spin.x - SPIN_BOX / 2, spin.y - SPIN_BOX / 2, SPIN_BOX, SPIN_BOX };
+    widget_invalidate_force(spin.w ? spin.w : win, spin.w ? &r : (void *)0);
+}
+void spinner_done(void) { spin.w = 0; }
 
 /* ... and a disabled row's (stock's list_intodown, docs/oled-design.md Chevrons and disabled rows),
  * in the half's Text Tertiary, selected or not: the wheel never selects such a row. */

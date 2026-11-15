@@ -462,7 +462,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     assert set(got) == {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair,
-                                              'search_pop', 'search_pop_letters', 'search_pop_echoes')}
+                                              'search_pop', 'search_pop_letters', 'search_pop_echoes',
+                                              *(f'spin_{f}' for f in range(art.SPIN_SPOKES)))}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
@@ -484,6 +485,24 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
         assert (w, h) == (px, px) and inked == {tuple(rgb >> s & 255 for s in (16, 8, 0))}
         assert max(at(x, y)[3] for y in range(h) for x in range(w)) > 200
+
+
+def test_oleds_spinner_turns_its_bright_spoke_clockwise_a_frame_at_a_time():
+    """Cover Flow's opening spinner (list_marks.c spinner_icon): eight frames, the caret's 15 px box, white alone;
+    frame f's brightest spoke f eighths of a turn clockwise from 12 o'clock, the spoke after it (the one it left,
+    anticlockwise) a step dimmer, the spoke ahead of it the dimmest."""
+    got = art.images(theme.builtins()[3])
+    for f in range(art.SPIN_SPOKES):
+        w, h, at = pixels(got[f'oled_spin_{f}'])
+        assert (w, h) == (art.CARET_PX, art.CARET_PX)
+        assert {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]} == {(255, 255, 255)}
+        def spoke(k):  # the alpha at spoke k's middle
+            a = 2 * math.pi * k / art.SPIN_SPOKES - math.pi / 2
+            r = sum(art.SPIN_R) / 2
+            return at(int(w / 2 + r * math.cos(a)), int(h / 2 + r * math.sin(a)))[3]
+        alphas = [spoke((f - d) % art.SPIN_SPOKES) for d in range(art.SPIN_SPOKES)]
+        assert alphas == sorted(alphas, reverse=True) and alphas[0] > 240 and alphas[-1] < alphas[0] * 0.5
+        assert at(w // 2, h // 2)[3] == 0  # the hub is clear
 
 
 def test_phosphor_fills_nonzero_so_an_inner_contour_is_a_hole():

@@ -1203,9 +1203,14 @@ static void *cf_staged(int (*query)(void *), void *arg, int *count) {
 /* list's albums with music, in a new deque (list goes), using a music track for their art even when
  * tags are shared with an audiobook. The card's files stay untouched. Out of memory,
  * audiobooks stay. */
+static void *music_of(void *list, void *rows);
 static void *music_albums(void *list) {
     int n;
-    void *rows = cf_staged(rank_query, MUSIC_ALBUM_SQL, &n), *out;
+    return music_of(list, cf_staged(rank_query, MUSIC_ALBUM_SQL, &n));
+}
+/* music_albums with MUSIC_ALBUM_SQL's rows, which go too. */
+static void *music_of(void *list, void *rows) {
+    void *out;
     unsigned m;
     row_t *v = album_rows(rows, &m, by_album, 0);
     if (!v) return deque_destroy(rows), list;
@@ -1227,12 +1232,20 @@ static void *music_albums(void *list) {
  * name's ALBUM_SQL rows, one per album_cmp album (the SQL keeps disc folders apart), in its place;
  * a row the query missed stays. Out of memory, the rows stay unsplit. ponytail: a scan of the
  * name's albums so far per row, its albums squared; fine unless one name has thousands. */
+static void *split_by(void *stock, void *rows);
 static void *split(void *stock) {
     int n;
-    void *rows = cf_staged(rank_query, ALBUM_SQL, &n), *out;
+    void *rows = cf_staged(rank_query, ALBUM_SQL, &n), *out = split_by(stock, rows);
+    deque_destroy(rows);
+    return out;
+}
+/* split with the grouping's rows, which stay the caller's. Their Unknown rows (MUSIC_ALBUM_SQL's,
+ * REC_ID -1) are no name's: stock's Unknown row stays as it is. */
+static void *split_by(void *stock, void *rows) {
+    void *out;
     unsigned m;
-    row_t *v = album_rows(rows, &m, by_name, 1);
-    if (!v) return deque_destroy(rows), stock;
+    row_t *v = album_rows(rows, &m, by_name, 0);
+    if (!v) return stock;
     out = _create_deque("stSongInfo");
     deque_init(out);
     for (unsigned i = 0; i < deque_size(stock); ++i) {
@@ -1246,7 +1259,6 @@ static void *split(void *stock) {
         if (from == deque_size(out)) _deque_push_back(out, r);
     }
     free(v);
-    deque_destroy(rows);
     deque_destroy(stock);
     return out;
 }
@@ -3034,6 +3046,7 @@ static void cf_cold(unsigned t0) {
     cf_trace(t0, "start albums=", cf.stock ? deque_size(cf.stock) : 0, 0);
 }
 
+
 /* On open: the albums, then art for the ones with no cache file (PictureFlow's first-launch build;
  * later opens resume). The albums are queried again only after the library changed (or Refresh
  * Coverflow): stock's sort converts both names to pinyin on every comparison. */
@@ -3043,6 +3056,45 @@ static void load(void) {
     cf_traced = 0;
     load_albums(t0);
     if (cf_traced) unlink(CF_TRACE);
+}
+/* The albums' query in steps, so that an open waiting on it shows it is busy between them
+ * (open_step): 0 getAllAlbum, 1 MUSIC_ALBUM_SQL's grouping, 2 split and music_albums on its rows;
+ * each returns 1 once cf.stock is the list. One grouping serves both: a name's ALBUM_SQL rows are its music
+ * rows and more (the WHERE drops songs, not groups), and music_albums drops the more; a name with
+ * no music keeps its stock row, which music_albums drops too. library_gen is taken before the
+ * first step, so a scan meanwhile has the next open query again. */
+static struct {
+    void *stock, *rows;
+    int n;
+    unsigned gen;
+} cq __attribute__((section(".scratch")));
+static void query_drop(void) {
+    if (cq.stock) deque_destroy(cq.stock);
+    if (cq.rows) deque_destroy(cq.rows);
+    cq.stock = cq.rows = 0;
+}
+static int query_step(int k, unsigned t0) {
+    if (k == 0) {
+        cf_cold(t0);
+        cq.gen = library_gen;
+        cq.stock = cf_staged(albums, 0, &cq.n);
+        cf_trace(t0, "staged albums=", cq.n, 0);
+        return 0;
+    }
+    if (k == 1 && cq.n > 0) {
+        cq.rows = cf_staged(rank_query, MUSIC_ALBUM_SQL, &cq.n);
+        return 0;
+    }
+    if (cq.rows) {
+        cq.stock = music_of(split_by(cq.stock, cq.rows), cq.rows);
+        cq.rows = 0;
+        cf_trace(t0, "music_split albums=", deque_size(cq.stock), 0);
+    }
+    cf.stock = cq.stock, cq.stock = 0;
+    cf.albums_gen = cq.gen;
+    drop_unknown();
+    cf_trace(t0, "drop_unknown albums=", deque_size(cf.stock), 0);
+    return 1;
 }
 void *queue_now(unsigned *pos, unsigned *n);
 static void load_albums(unsigned t0) {
@@ -3069,18 +3121,7 @@ static void load_albums(unsigned t0) {
     else if (cf.stock)
         n = (int)deque_size(cf.stock);
     else if (!library_scanning()) {
-        cf_cold(t0);
-        cf.stock = cf_staged(albums, 0, &n);
-        cf_trace(t0, "staged albums=", n, 0);
-        if (n > 0) {
-            void *v = split(cf.stock);
-            cf_trace(t0, "split albums=", deque_size(v), 0);
-            cf.stock = music_albums(v);
-            cf_trace(t0, "music_albums albums=", deque_size(cf.stock), 0);
-        }
-        cf.albums_gen = gen;
-        drop_unknown();
-        cf_trace(t0, "drop_unknown albums=", deque_size(cf.stock), 0);
+        for (int k = 0; !query_step(k, t0); ++k) {}
         n = (int)deque_size(cf.stock);
     }
     if (cf.albums && !cf.scoped && (cf.sort == SORT_YEAR || cf.sort == SORT_ARTIST) &&
@@ -3715,10 +3756,69 @@ static void *open_page(void) {
     return page;
 }
 
-static int coverflow_open(void *ctx, void *event) {
-    if (cf.page || !(cf.page = open_page())) return 0;
-    load();
+/* An open that has to query the albums first (query_step) runs the query with Home up. Once its
+ * steps so far have taken OPEN_SPIN_MS / 2, the rest (another grouping of the library, measured at
+ * no less than half getAllAlbum's time, docs/internals.md#coverflow) will take the open past
+ * OPEN_SPIN_MS, so each later step waits a main-loop pass, in which Home paints its Cover Flow row with a spinner for its chevron
+ * (coverflow_spinner) and input is taken, until the page opens. A warm open, or a cold one of a
+ * small library, opens as it is pressed and never shows it. Meanwhile the keys, the wheel and
+ * touches go nowhere (coverflow_wait_input), and Return gives the open up. ponytail: the spinner
+ * turns between steps, not within one: getAllAlbum's and the grouping's queries each hold the UI
+ * thread (stock's library calls are the UI thread's), and demo imports no sqlite3_progress_handler
+ * to paint from inside them; a frame from it would turn it smoothly. */
+#define OPEN_SPIN_MS 150
+#define SPIN_FRAME_MS 100 /* a spoke on, eight a turn */
+extern void spinner_dirty(void *win), spinner_done(void); /* list_marks.c */
+static struct {
+    unsigned at, timer;
+    void *home; /* the window it opens over: gone, the open is given up */
+    int waiting, step, spin;
+} op __attribute__((section(".scratch")));
+static void open_end(void) {
+    if (op.timer) timer_remove(op.timer);
+    query_drop();
+    if (cf_traced) unlink(CF_TRACE), cf_traced = 0;
+    if (op.spin) spinner_done(), widget_invalidate_force(op.home, 0);
+    op.waiting = op.timer = op.spin = 0;
+}
+static int open_step(const void *unused) {
+    op.timer = 0;
+    if (window_manager_get_top_window(window_manager()) != op.home) return open_end(), 0;
+    while (!query_step(op.step++, op.at))
+        if (op.spin || (unsigned)time_now_ms() - op.at >= OPEN_SPIN_MS / 2) {
+            if (!op.spin) op.spin = 1;
+            spinner_dirty(op.home);
+            op.timer = timer_add(open_step, 0, 0); /* Home's input and paint, then the next */
+            return 0;
+        }
+    open_end();
+    if ((cf.page = open_page())) load();
     return 0;
+}
+/* The spinner's frame, 1-8, while an open waits on its query, else 0 (navigation.c
+ * paint_chevrons). */
+int coverflow_spinner(void) {
+    return op.spin ? (int)(((unsigned)time_now_ms() - op.at) / SPIN_FRAME_MS % 8) + 1 : 0;
+}
+/* ringnav_input: whether e goes nowhere while an open waits. Return's release gives it up. */
+int coverflow_wait_input(void *e) {
+    if (!op.waiting) return 0;
+    unsigned type = (unsigned)I(e, EVENT_TYPE);
+    if (type == EVT_KEY_UP && (unsigned)I(e, EVENT_KEY) == KEY_RETURN) open_end();
+    return type == EVT_KEY_DOWN || type == EVT_KEY_UP || type == EVT_KEY_LONG ||
+           type == EVT_POINTER_DOWN;
+}
+static int coverflow_open(void *ctx, void *event) {
+    if (cf.page || op.waiting) return 0;
+    if (cf.albums_gen != library_gen) drop_albums();
+    if (cf.stock || library_scanning()) { /* nothing to wait for */
+        if ((cf.page = open_page())) load();
+        return 0;
+    }
+    op.at = (unsigned)time_now_ms(), op.waiting = 1;
+    op.home = window_manager_get_top_window(window_manager());
+    op.step = 0;
+    return open_step(0);
 }
 
 /* A scoped page: a Coverflow already open (played from, under Now Playing's Go to Artist, issue

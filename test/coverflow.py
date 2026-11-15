@@ -374,6 +374,9 @@ int canvas_offline_destroy(void *c) { return 0; }
 unsigned unflip(unsigned v) { return v; }
 unsigned mix(unsigned a, unsigned b, int j, int n) { return a; }
 void bar_title_sync(void *win) {}
+static int spun_dirty, spun_done; /* list_marks.c's spinner calls, for slow_open */
+void spinner_dirty(void *win) { ++spun_dirty; }
+void spinner_done(void) { ++spun_done; }
 void forget_rows(void *list) { (void)list; }
 int title_gone(void *w, void *event) { (void)w, (void)event; return 0; }
 int bar_title_fits(void *label) { return 1; }
@@ -625,9 +628,12 @@ static void album(const char *name, const char *art) {
 static int unknown_row, unknown_songs;
 static char unknown_record[0x60], untagged_song[0x60], untagged_more[0x60];
 static int untagged_two; /* getMusicByAlbum(NULL) finds untagged_more too */
+static unsigned all_ms; /* what each getAllAlbum takes on the fake clock (slow_open) */
+static int all_queries;
 int getAllAlbum(void) {
     deque *d = shim_dir;
-    ++queries;
+    ++queries, ++all_queries;
+    clock_ms += all_ms;
     d->n = 0;
     for (int i = 0, j; i < albums; ++i) {
         for (j = 0; j < i && strcasecmp(names[j], names[i]); ++j) {}
@@ -2065,6 +2071,55 @@ static void unknown_card(void) {
     assert(loads == unloads);
     unknown_row = unknown_songs = 0;
     rescan();
+}
+
+/* A cold open that takes a while (docs/internals.md#coverflow): once getAllAlbum has taken half of
+   150 ms, Home stays up with the spinner, a step a timer pass, the keys, the wheel and a second
+   press go nowhere, and the page opens after the last step; Return gives the open up, and the next
+   open queries again. A quick one opens as it is pressed, the spinner never asked for. */
+static void slow_open(void) {
+    extern int coverflow_spinner(void), coverflow_wait_input(void *);
+    int down[16] = {0}, back[16] = {0}, touch[16] = {0};
+    down[EVENT_TYPE / 4] = EVT_KEY_DOWN, down[EVENT_KEY / 4] = KEY_CENTER;
+    back[EVENT_TYPE / 4] = EVT_KEY_UP, back[EVENT_KEY / 4] = KEY_RETURN;
+    touch[EVENT_TYPE / 4] = EVT_POINTER_DOWN;
+    widget home;
+    memset(&home, 0, sizeof(home));
+    coverflow_home(&home, 0);
+    int dirty = spun_dirty, done = spun_done, q = all_queries;
+    rescan();
+    all_ms = 70; /* under half: the open does not wait */
+    open_page();
+    assert(all_queries == q + 1 && slide() && spun_dirty == dirty && !coverflow_spinner());
+    close_page();
+    rescan();
+    all_ms = 80;
+    page = &w[nw + 1];
+    unsigned at = clock_ms;
+    home.click(home.ctx, 0); /* getAllAlbum alone, then a pass */
+    assert(all_queries == q + 2 && timer_fn && !slide() && spun_dirty == dirty + 1);
+    assert(coverflow_spinner() == 1); /* 80 ms in: the first frame */
+    clock_ms = at + 250;
+    assert(coverflow_spinner() == 3); /* a frame each 100 ms */
+    assert(coverflow_wait_input(down) && coverflow_wait_input(touch)); /* taken */
+    home.click(home.ctx, 0); /* a second press opens nothing more */
+    assert(all_queries == q + 2);
+    run();
+    assert(slide() && !coverflow_spinner() && spun_done == done + 1 && !coverflow_wait_input(down));
+    assert(slide()->nkids == albums);
+    close_page();
+    rescan();
+    page = &w[nw + 1];
+    home.click(home.ctx, 0);
+    assert(timer_fn && coverflow_spinner());
+    assert(coverflow_wait_input(back)); /* Return's release gives it up */
+    assert(!timer_fn && !coverflow_spinner() && spun_done == done + 2);
+    run();
+    assert(!slide());
+    all_ms = 0, dirty = spun_dirty;
+    open_page(); /* the given-up query is not kept: this one queries again, in no time: no spinner */
+    assert(all_queries == q + 4 && slide() && slide()->nkids == albums && spun_dirty == dirty);
+    close_page();
 }
 
 /* Baroness' and Stone Temple Pilots' "Purple": getAllAlbum's one row for the name becomes two cards,
@@ -7502,6 +7557,7 @@ int main(void) {
     artist_only();
     unknown_card();
     same_name();
+    slow_open();
     disc_folders();
     audiobooks();
     ffmpeg_art();

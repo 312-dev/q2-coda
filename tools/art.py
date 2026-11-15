@@ -168,6 +168,17 @@ def tidal_mark(px, rgb):
     return png(px, px, laid(px, px, [(coverage_nonzero(polys, (0, 0, px, px)), lambda x, y: (rgb, 1))]))
 
 
+def spinner(f):
+    """The spinner's frame f, a CARET_PX square PNG (SPIN_* above)."""
+    c, layers = CARET_PX / 2, []
+    for k in range(SPIN_SPOKES):
+        a = 2 * math.pi * k / SPIN_SPOKES - math.pi / 2
+        ends = [(c + r * math.cos(a), c + r * math.sin(a)) for r in SPIN_R]
+        alpha = 1 - SPIN_FADE * ((f - k) % SPIN_SPOKES)
+        layers.append((stroke([ends], SPIN_STROKE, closed=False), lambda x, y, alpha=alpha: (0xffffff, alpha)))
+    return png(CARET_PX, CARET_PX, compose((0, 0, CARET_PX, CARET_PX), layers))
+
+
 def phosphor(name, px, rgb):
     """Phosphor's icon name (its file's stem, the weight in it) as a px square PNG in rgb, its paths filled nonzero."""
     svg = (PHOSPHOR/f'{name}.svg').read_text()
@@ -182,6 +193,13 @@ CARET_PX = 15
 STATE_PX = 13
 CHEVRON_INKS = {'d': 0x999999, 'l': 0x8a8a8a, 'w': 0xffffff}
 CHEVRON_MUTED_INKS = {'td': 0x858585, 'tl': 0x6e6e6e}  # a disabled row's (list_intodown, list_marks.c chevron_muted): Text Tertiary per half
+# The activity spinner in the selected row's chevron place while Cover Flow opens (coverflow.c coverflow_spinner,
+# list_marks.c spinner_icon): iOS's eight spokes, white on the selection, frame f's head at f eighths of a turn
+# clockwise from 12 o'clock, each spoke behind it SPIN_FADE dimmer.
+SPIN_SPOKES = 8
+SPIN_R = (3.4, 6.4)  # a spoke's ends' distances from the centre, round capped
+SPIN_STROKE = 1.9
+SPIN_FADE = 0.1
 STATE_INKS = {'d': 0xffffff, 'l': 0x000000}
 # Now Playing's shuffle and repeat (playing.modes.icons, np_bar.c np_modes): bold, MODE_PX, off in Text Secondary per
 # half, on in the theme's own accent's top tone in both; repeat-once is repeat's on glyph for Repeat One.
@@ -969,6 +987,7 @@ def images(t):
             (stroke(path(CHEVRON), CHEVRON_STROKE, closed=False), lambda x, y: (0xffffff, 1))]))
     if t['painter[PAINT_CHEVRON]']:  # CHEV_ICON
         out |= {f'{prefix}_chevron_{k}': phosphor('caret-right-bold', CARET_PX, c) for k, c in (CHEVRON_INKS | CHEVRON_MUTED_INKS).items()}
+        out |= {f'{prefix}_spin_{f}': spinner(f) for f in range(SPIN_SPOKES)}
     if t['painter[PAINT_BATTERY]'] == list(CHOICES['bar.battery.painter']).index('slim'):  # its play state is the theme's too
         out |= {f'{prefix}_{n}_{k}': phosphor(f'{n}-fill', STATE_PX, c) for n in ('play', 'pause') for k, c in STATE_INKS.items()}
     if t['np_modes']:
