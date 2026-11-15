@@ -1,9 +1,11 @@
 /* An artist's page under a set with the inset modal (OLED's; docs/oled-design.md#artist-page): a
  * header (hero_open) of a monogram, the name, a line of counts and one of genre, then an action
  * pair (pair_open), two accent panels side by side, Shuffle and Radio, then drill-down rows (Top
- * Songs, Albums) with a count and a chevron, and the cover rows of the pages they open
- * (cover_row). addon.c builds the page from a card app's reply (its artist_view); the header and
- * the pair take plain strings, so an album's page can use them too.
+ * Songs, Albums, Singles & EPs, Similar Artists, All Songs) with a count and a chevron, and the
+ * cover rows of the pages they open (cover_row; a song's album after its title, cover_after; an
+ * artist's monogram in the cover's place, cover_mono). addon.c builds the page from a card app's
+ * reply (its artist_view); the header and the pair take plain strings, so an album's page can use
+ * them too.
  *
  * The header stands from screen y HERO_Y, which is above the window (the status row is V_BAR
  * high): its monogram's top is drawn again in the status bar's background paint (artist_cap),
@@ -29,16 +31,18 @@
 #define AR_LIST_Y 168  /* the drill-down rows' first, on screen */
 #define AR_COUNT_DX 44 /* a drill-down row's count, right-aligned this far from the right edge */
 #define AR_THUMB_R 4
-#define AR_FILL 0x1c1c1e   /* a pair's panel at rest */
-#define AR_MONO 0x2c2c2e   /* the monogram's disc, and a cover's placeholder */
-#define AR_SECOND 0xababab /* Text Secondary */
-#define AR_THIRD 0x858585  /* Text Tertiary */
+#define AR_FILL 0x1c1c1e    /* a pair's panel at rest */
+#define AR_MONO 0x2c2c2e    /* the monogram's disc, and a cover's placeholder */
+#define AR_MONO_ON 0x3a3a3c /* an artist row's disc on the selection */
+#define AR_SECOND 0xababab  /* Text Secondary */
+#define AR_THIRD 0x858585   /* Text Tertiary */
 /* AWTK's sizes for the design's px (Inter's line is 1.21 em: assets/themes/oled/theme.xml) */
 #define PX_30 36
 #define PX_20 24
 #define PX_18 22
 #define PX_17 21
 #define PX_15 18
+#define PX_14 17
 #define PX_13 16
 
 #define AR_NAME "_ar_name" /* the header's strings, kept on it */
@@ -50,6 +54,10 @@
 #define AR_RIGHT "_ar_right" /* a cover row's text at the right (a year, a length) */
 #define AR_THUMB "_ar_thumb" /* its cover's size, its file in AR_COVER, "" for a placeholder */
 #define AR_COVER "_ar_cover"
+#define AR_AFTER "_ar_after" /* a song row's album, after its title */
+#define AR_TITLE "_ar_title" /* a cover row's title, for its monogram and the album's place */
+#define AR_PX "_ar_px"       /* a cover row's title's AWTK size */
+#define AR_DISC "_ar_disc"   /* an artist row: its name's monogram in the cover's place */
 
 static struct {
     void *head, *list, *panel[2];
@@ -145,12 +153,12 @@ static void ar_disc(void *canvas, int x, int y, int d, unsigned rgb) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
-/* The monogram's disc and letter, its top dy px down the canvas from the header's top on screen. */
-static void hero_mono(void *canvas, const char *name, int dy) {
-    rect_t disc = { geom_val(V_TEXT_X), dy, HERO_MONO, HERO_MONO };
+/* A monogram: a disc d px across from (x, y) in rgb (final once flipped for Light Mode) and the
+ * name's first letter centred on it in Inter Medium at AWTK size px, white. */
+static void mono(void *canvas, const char *name, int x, int y, int d, int px, unsigned rgb) {
     unsigned c[2];
     char letter[8] = "";
-    ar_disc(canvas, disc.x, disc.y, HERO_MONO, flip_if(ipod_light(), AR_MONO));
+    ar_disc(canvas, x, y, d, flip_if(ipod_light(), rgb));
     if (ar_wide(name, c, 2)) { /* the name's first character, upper case when ASCII */
         unsigned k = 0, ch = c[0] >= 'a' && c[0] <= 'z' ? c[0] - 32 : c[0];
         const unsigned char *p = (const unsigned char *)name;
@@ -161,14 +169,18 @@ static void hero_mono(void *canvas, const char *name, int dy) {
             while (k < 4 && (*p & 0xc0) == 0x80);
         letter[k] = 0;
     }
-    int px = PX_30;
+    int fpx = px;
     unsigned buf[4];
     unsigned n = ar_wide(letter, buf, 4);
-    const char *face = theme_face(buf, (int)n, &px);
+    const char *face = theme_face(buf, (int)n, &fpx);
     if (face && !tk_strcmp(face, "inter")) face = "inter-medium";
-    int w = n ? ar_measure(canvas, face, px, buf, n) : 0;
-    ar_text(canvas, letter, 1, PX_30, 0xffffff, 0, disc.x + (HERO_MONO - w) / 2, dy + HERO_MONO / 2,
-            HERO_MONO, 2);
+    int w = n ? ar_measure(canvas, face, fpx, buf, n) : 0;
+    ar_text(canvas, letter, 1, px, 0xffffff, 0, x + (d - w) / 2, y + d / 2, d, 2);
+}
+
+/* The header's monogram, its top dy px down the canvas from the header's top on screen. */
+static void hero_mono(void *canvas, const char *name, int dy) {
+    mono(canvas, name, geom_val(V_TEXT_X), dy, HERO_MONO, PX_30, AR_MONO);
 }
 
 /* The header in body (the page's window, which starts V_BAR down the screen): the monogram of
@@ -322,6 +334,8 @@ void *cover_row(void *view, int index, int h, int thumb, int px, const char *tit
     if (right && *right) end -= 50;
     widget_move_resize(label, tx - 2, 0, end - tx + 2, h);
     if (px) widget_set_prop_int(label, "style:normal:font_size", px);
+    widget_set_prop_int(item, AR_PX, px ? px : PX_20);
+    widget_set_prop_str(item, AR_TITLE, title);
     widget_set_prop_str(item, AR_RIGHT, right ? right : "");
     widget_set_prop_int(item, AR_THUMB, thumb);
     widget_set_prop_int(item, "_ar_row", ctx); /* addon.c addon_hold's */
@@ -334,6 +348,18 @@ void *cover_row(void *view, int index, int h, int thumb, int px, const char *tit
     return item;
 }
 
+/* A song's cover row's album (none when empty), drawn after its title in Inter Regular 14, Text
+ * Tertiary, where the title leaves 30 px or more of its column. */
+void cover_after(void *item, const char *album) {
+    if (album && *album) widget_set_prop_str(item, AR_AFTER, album);
+}
+
+/* An artist's cover row: a monogram of its title in the cover's place, and the chevron. */
+void cover_mono(void *item) {
+    widget_set_prop_int(item, AR_DISC, 1);
+    row_into(item, I(item, W_H));
+}
+
 /* A cover row: the placeholder under no cover, the cover's corners rounded into what is behind
  * them (the selection's accent or the page's black), and its right-hand text. */
 static void cover_paint(void *item, void *canvas) {
@@ -342,7 +368,11 @@ static void cover_paint(void *item, void *canvas) {
                *cover = widget_get_prop_str(item, AR_COVER, "");
     rect_t r = { geom_val(V_TEXT_X), (h - thumb) / 2, thumb, thumb };
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-    if (!cover || !*cover) {
+    const char *after = widget_get_prop_str(item, AR_AFTER, "");
+    if (widget_get_prop_int(item, AR_DISC, 0)) {
+        mono(canvas, widget_get_prop_str(item, AR_TITLE, ""), r.x, r.y, thumb, PX_15,
+             on ? AR_MONO_ON : AR_MONO);
+    } else if (!cover || !*cover) {
         ar_box(canvas, &r, AR_THUMB_R, flip_if(ipod_light(), AR_MONO));
     } else { /* the four corners outside the arcs, in the colour behind */
         unsigned behind = on ? ar_accent() : flip_if(ipod_light(), 0);
@@ -359,6 +389,18 @@ static void cover_paint(void *item, void *canvas) {
     if (right && *right)
         ar_text(canvas, right, 0, PX_15, on ? 0xffffff : AR_THIRD, 0, 375 - geom_val(V_RIGHT_X),
                 h / 2, 60, 3);
+    if (after && *after) { /* the title's ink and two spaces, then what is left of its column */
+        char title[160];
+        unsigned buf[96], n;
+        int x = r.x + thumb + 10, w = 375 - geom_val(V_RIGHT_X) - (right && *right ? 50 : 0) - x,
+            px = widget_get_prop_int(item, AR_PX, PX_20);
+        tk_snprintf(title, sizeof title, "%s  ", widget_get_prop_str(item, AR_TITLE, ""));
+        n = ar_wide(title, buf, sizeof buf / sizeof *buf);
+        const char *face = theme_face(buf, (int)n, &px);
+        int tw = n ? ar_measure(canvas, face, px, buf, n) : 0;
+        if (tw < w - 30)
+            ar_text(canvas, after, 0, PX_14, on ? 0xffffff : AR_THIRD, 0, x + tw, h / 2, w - tw, 2);
+    }
 }
 
 /* ringnav_paint's, after stock painted w (addon.c addon_paint, while its page shows one of these

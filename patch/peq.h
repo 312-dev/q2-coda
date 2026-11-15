@@ -301,6 +301,8 @@ void drill_count(void *item, const char *count);
 void *window_of(void *w); /* navigation.c */
 void *cover_row(void *view, int index, int h, int thumb, int px, const char *title,
                 const char *right, const char *cover, int (*click)(void *, void *), int ctx);
+void cover_after(void *item, const char *album);
+void cover_mono(void *item);
 void artist_paint(void *w, void *canvas);
 #define AR_SONG_PX 22 /* cover_row's px for a song: the design's 18 px in AWTK's size */
 int geom_val(int v) __attribute__((pure));

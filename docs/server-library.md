@@ -92,8 +92,8 @@ i	<pid>	<sid>	<card path or empty>
   copy, and uses it where it would use a card album's cover: the Library's album rows and grids
   (`grid_cover`, through stock's thumbnailer), Cover Flow's carousel (its art cache, built from
   it), Now Playing (`coverflow_player_cover`, after the file's own art and folder images), and
-  under OLED the app's own artist page's Albums ([oled-design.md](oled-design.md#artist-page)), by the album id in
-  the row's `album:` context.
+  under OLED the app's own artist page's Albums, Singles & EPs, Top Songs and All Songs
+  ([oled-design.md](oled-design.md#artist-page)), by the album id in the row's `album:` context.
   Until it is there the placeholder shows; nothing waits for it. The app keeps the folder within its own budget and deletes an album's cover when the album
   leaves the catalogue ([The app's side](#the-apps-side)).
 
