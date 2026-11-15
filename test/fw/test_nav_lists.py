@@ -1632,6 +1632,54 @@ def test_a_damaged_or_foreign_order_file_is_never_used(fw, library, damage):
     assert s.load() == SORTED and s.listed() == s.order()
 
 
+def test_a_full_sort_runs_on_its_own_thread_under_the_spinner(fw):
+    """The sort on a thread of its own; from SPIN_AFTER_MS the UI thread draws on the shown framebuffer page, and
+    puts back what it covered once the sort is done."""
+    s = Sorts(fw, NO_MIN)
+    page = 320 * 375 * 4
+    fb = (C.c_ubyte * (2 * page))(*bytes(range(256)) * (2 * page // 256))
+    before = bytes(fb)
+    seen, ticks, thread = {}, [], {}
+
+    def ioctl(fd, request, out, *_):
+        if request == 0x4600:  # var: 320 x 375, 32 bpp, the second page shown
+            C.memmove(out, struct.pack('<7I', 320, 375, 320, 750, 0, 375, 32), 28)
+        else:  # fix: smem_len at word 5, line_length at word 11
+            fix = [0] * 17
+            fix[5], fix[11] = 2 * page, 1280
+            C.memmove(out, struct.pack('<17I', *fix), 68)
+        return 0
+
+    def usleep(us, *_):
+        ticks.append(us)
+        if len(ticks) == 20:  # 400 ms in: the spinner up, the sort not done yet
+            seen['during'] = bytes(fb)
+            C.CFUNCTYPE(C.c_void_p, C.c_void_p)(thread['run'])(None)
+        return 0
+
+    def create(out, attr, run, arg, *_):
+        C.c_ulong.from_address(out).value, thread['run'] = 99, run
+        return 0
+    fw.mock('fw_open', lambda *_: 5)
+    fw.mock('fw_ioctl', ioctl)
+    fw.mock('fw_mmap', lambda *_: C.addressof(fb))
+    fw.mock('fw_usleep', usleep)
+    fw.mock('fw_pthread_create', create)
+    assert s.load() == SORTED and s.listed() == s.order()
+    assert set(ticks) == {20000} and len(ticks) == 20
+    changed = [i for i in range(2 * page) if seen['during'][i] != before[i]]
+    rows = {i // 1280 for i in changed}
+    assert min(rows) >= 375 + 187 - 32 and max(rows) < 375 + 187 + 32  # on the shown page, at its centre
+    assert {i % 1280 // 4 for i in changed} <= set(range(128, 192))
+    assert bytes(fb) == before and fw.calls('fw_munmap') and fw.calls('fw_pthread_join')
+
+
+def test_no_framebuffer_no_spinner_and_no_thread_sorts_in_place(fw):
+    s = Sorts(fw, NO_MIN)
+    fw.mock('fw_open', lambda *_: -1)  # pthread_create's stub starts nothing: sorted in place
+    assert s.load() == SORTED and not fw.calls('fw_usleep') and not fw.calls('fw_mmap')
+
+
 # What is painted over a list.
 @pytest.fixture(scope='module')
 def scratch(library):
