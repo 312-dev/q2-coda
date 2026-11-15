@@ -420,6 +420,10 @@ int crc_feed(crc_session *s, const uint8_t *p, size_t n) {
         s->rx_n += take;
         p += take;
         n -= take;
+        if (s->rx_n == 2) {  /* a length out of range closes at once, not when its body would have come */
+            size_t len = s->rx[0] << 8 | s->rx[1];
+            if (len < 4 || 2 + len > CRC_MAX_FRAME) return -1;
+        }
         if (s->rx_n >= 2 && s->rx_n == 2u + (s->rx[0] << 8 | s->rx[1])) {
             size_t len = s->rx_n;
             s->rx_n = 0;
