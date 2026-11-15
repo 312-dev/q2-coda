@@ -110,10 +110,12 @@
        at the text inset; the status row names the page, so no title row -->
   <!-- Cover Flow in the 262 px window under the status row (oled-design.md Screens: covers on black, no reflection
        floor): the reflection's top at 0 of its cover's brightness, so it is the page's own colour and none shows,
-       and the caption right under the covers, ending above y 282 on screen with the lists, the album in the Song
-       title role (22, 27 here) and the artist in the Artist role (18, 22 here) -->
+       and the caption right under the covers, the album in the Song title role (22, 27 here) and the artist in the
+       Artist role (18, 22 here). The artist's box 27 px under the album's puts its baseline 24 px under the album's
+       (about 1.1 times the 22 px title, as iOS spaces a title and its subtitle) and leaves 5 px between a g's tail
+       and the artist's capitals; at 22 they touched -->
   <view name="coverflow"><element name="shelf" reflect_top="0"/>
-    <element name="caption" name_px="27" artist_px="22" text_y="178" artist_y="22"/></view>
+    <element name="caption" name_px="27" artist_px="22" text_y="178" artist_y="27"/></view>
   <view name="page">
     <element name="rows" height="32" detail_height="52" text_x="24" title_y="4" title_h="24" detail_y="31" detail_h="20"/>
     <element name="title" height="0"/>

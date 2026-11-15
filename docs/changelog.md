@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Cover Flow (OLED): the artist sits a little lower under the album name, so a title's g or y no longer touches the artist's letters, in Light and Dark Mode.
   - EQ (OLED): with the wheel on the **Simple** and **Advanced** tabs, only the tabs show it; the first row of Advanced's list no longer lights up as well.
   - EQ (OLED): in Light Mode the Simple tab's slider knobs, and the knob on slider pages like Resume Songs, have a thin grey edge, so they no longer vanish white on white.
   - EQ (OLED): after picking a preset on Simple, the switch row still reads **Enabled**, and the preset's name shows on the right of the **Presets** row, as a setting's value does.
