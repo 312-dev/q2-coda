@@ -672,8 +672,11 @@ which changes the page and goes nowhere. Every theme uses its own layout's boxes
 ([internals](internals.md#now-playing-links), `np_taps.c`). The wheel's way to the same places is
 the hold menu or ⋯.
 
-Stock's tap on the art opened its full-screen art (`bigcover_page`; any tap closes it); the art is a
-link instead, so the full-screen art opens only by Enlarged Album Art's idle countdown. Stock fits the
+A hold on the art, half a second without moving, opens stock's full-screen art (`bigcover_page`;
+any tap or Return closes it), whatever Enlarged Album Art is set to, and while the player is not
+stopped, as stock's tap opened it; the art is dimmed while held, and letting go after it opens
+does not also open the album. A stream's art holds to full screen too, though its tap goes
+nowhere. Enlarged Album Art's idle countdown still opens it as well. Stock fits the
 cover to the whole screen, 320 pixels high, so the glass hid its corners; iPod centres it on black as
 the largest box of the cover's own shape whose corners clear the glass by `GLASS_SLACK` (`bc_fit`; a
 square cover is `BC_ART` in `tools/ipod.py`, 292 pixels with the defaults: 41 from the sides, 14 from

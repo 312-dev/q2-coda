@@ -5965,8 +5965,8 @@ void *ringnav_ui_load(const char *name, void *parent) {
     return root;
 }
 
-/* bigcover_page_init: stock's full-screen art (Enlarged Album Art's countdown opens it, any tap
- * closes it; stock's tap on Now Playing's art is np_taps.c's link to the album instead)
+/* bigcover_page_init: stock's full-screen art (a hold on Now Playing's art opens it, np_taps.c, as
+ * does Enlarged Album Art's countdown; any tap closes it)
  * shows the song name BC_MS, then bc_fade fades it out. Stock's own timer writes the next song's
  * name; ringnav_sleep shows it again when the track changes. Off the art page (lyrics, info,
  * visualizer) there is no art to enlarge, so ringnav_sleep holds the countdown full there (#57).
@@ -7861,6 +7861,7 @@ static void shuffle_page(void) {
 /* Observe actual clicks BEFORE app callbacks can navigate or destroy/rebind their widgets.
  * Do not turn pointer-down into selection: a swipe is not a tap. */
 int ringnav_dispatch(void *target, void *event) {
+    if (np_tap_lift(target, event)) return STOP; /* a hold's lift under the art it opened */
     if (event && target != window_manager() &&
         ((I(event, EVENT_TYPE) >= EVT_KEY_DOWN && I(event, EVENT_TYPE) <= EVT_KEY_UP_BEFORE) ||
          I(event, EVENT_TYPE) == EVT_KEY_LONG) &&
@@ -7957,7 +7958,7 @@ int ringnav_dispatch(void *target, void *event) {
         }
         /* Now Playing's ⋯: an app's page instead of stock's while the app's queue plays */
         if (np_mode_click(target, event)) return STOP; /* shuffle or repeat, one of the two */
-        /* the art's tap is np_tap's (its album), never stock's Enlarged Art */
+        /* the art's tap is np_tap's (its album; a hold its full screen), never stock's own */
         if (target == st.np_cover) return STOP;
         return target == np_more() && addon_more() ? STOP : time_click(target, event);
     }

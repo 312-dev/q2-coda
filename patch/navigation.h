@@ -544,6 +544,7 @@ int np_tap_lit(void *w);
 unsigned np_tap_ink(void);
 void np_tap_dim(void *w, void *canvas);
 void np_tap_reset(void);
+int np_tap_lift(void *target, void *event);
 int np_goto(int album, int go);
 /* np_bar.c: Now Playing's shuffle and repeat as two controls */
 void np_mode_set(int on, int rep), np_mode_step(int repeat, int dir);
