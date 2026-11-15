@@ -1115,7 +1115,9 @@ def test_a_heart_tapped_on_a_stream_copy_is_the_server_rows_favourite(rig, fw, u
     the copy's My Fav as the row's."""
     from test_nav_library_pages import rate_all
     heart = heart_on_copy(rig, fw, ui, song, mcl)
-    copy = C.string_at(C.c_void_p.from_address(heart.track + O['REC_PATH']).value).decode()
+    path = C.c_void_p.from_address(heart.track + O['REC_PATH']).value
+    assert path
+    copy = C.string_at(path).decode()
     event = C.create_string_buffer(0x40)
     heart.fav = True  # stock's toggle has run when the click reads it back
     ui.handler(heart.heart, EVT_CLICK)(C.addressof(event))
