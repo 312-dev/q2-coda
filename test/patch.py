@@ -19335,18 +19335,19 @@ assert texts()[0]=='Standby Limit: Off'; passed()  # out of range: Off
 # Folder skip, Library & Folders'), then ours; stock's Max Volume and Default Volume pages open from their rows, and
 # Enlarged Album Art flips stock's own byte and key.
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13)
-assert len(rows)==8 and icons==['playset_gapless','playset_memplay','playset_balance','playset_balance','playset_folderjump','playset_maxvol','playset_bootvol','playset_covermode']
-assert texts()==['Crossfade: Off','Resume Songs: 30 min','Mono Audio','Swap L/R','Library & Folders','playset_maxvol','playset_bootvol','playset_covermode']
-assert len(m.nodes[m.settings_view]['children'])==19 and not set(m.entries[11:])&set(m.nodes[m.settings_view]['children'])
+assert len(rows)==9 and icons==['playset_gapless','playset_memplay','playset_balance','playset_balance','playset_folderjump','playset_maxvol','playset_bootvol','playset_covermode','playset_folderjump']
+assert texts()==['Crossfade: Off','Resume Songs: 30 min','Mono Audio','Swap L/R','Library & Folders','playset_maxvol','playset_bootvol','playset_covermode','On-The-Go']
+assert len(m.nodes[m.settings_view]['children'])==20 and not set(m.entries[11:])&set(m.nodes[m.settings_view]['children'])
 assert [click(5),m.opened[-1],click(6),m.opened[-1]]==[[],('playset/maxvol_page',None),[],('playset/bootvol_page',None)]
 m.byte(syms['g_bigcovermode'],0); assert click(7)==[(1,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\1' and switch_image(m,rows[7])=='switch_on'
 assert click(7)==[(0,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\0' and switch_image(m,rows[7])=='switch_off'
+assert click(8)==[(0,'Q2POD','OTG')] and click(8)==[(1,'Q2POD','OTG')]  # On-The-Go, on unless chosen
 # Library & Folders: its row opens stock's page again as the sub-page, stock's Folder skip kept, ours built.
 assert click(4)==[] and m.opened[-1]==('playset/playset_page',None) and m.get(payload_syms['playset_sub'])==0
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,sub=1)
-assert len(rows)==5 and icons==['playset_covermode','playset_folderjump','playset_covermode','playset_folderjump','playset_foldercover']
-assert texts()==['Year Order: Newest First','Artists: Artist','Artist Album Order: Year','Folder Root: Card','playset_foldercover']
-assert [(m.entries+rows).index(c) for c in m.nodes[m.settings_view]['children']]==[14,15,13,16,12,17]
+assert len(rows)==7 and icons==['playset_covermode','playset_folderjump','playset_covermode','playset_folderjump','playset_foldercover','playset_folderjump','playset_folderjump']
+assert texts()==['Year Order: Newest First','Artists: Artist','Artist Album Order: Year','Folder Root: Card','playset_foldercover','Import Playlists','Export Playlists']
+assert [(m.entries+rows).index(c) for c in m.nodes[m.settings_view]['children']]==[14,15,13,16,12,17,18,19]
 m.byte(syms['g_foldercover_flag'],0); assert click(4)==[(1,'PLAYSET','FOLDERCOVER')] and m.u.mem_read(syms['g_foldercover_flag'],1)==b'\1' and switch_image(m,rows[4])=='switch_on'
 assert click(4)==[(0,'PLAYSET','FOLDERCOVER')] and switch_image(m,rows[4])=='switch_off'
 assert click(2)==[(1,'Q2POD','ARTISTAZ')] and texts()[2]=='Artist Album Order: A–Z'
@@ -19574,7 +19575,7 @@ m.call(address=payload_syms['mono_sync'],args=(0,0,0,0),gap=0)
 assert 'mono:peq_attach' not in [c[0] for c in m.calls]; passed()
 # Playback Setting restacks by use (navigation.c playset_order): stock's rows by id, then ours.
 def stacked(m,view_name): return [(m.entries+rows).index(c) for c in m.nodes[named(m,m.top,view_name)]['children'] if c in m.entries+rows]
-assert stacked(m,'scroll_view_playset')==[3,2,7,13,6,14,8,0,9,18,19,10,15,16,20,1,4,5,17]; passed()
+assert stacked(m,'scroll_view_playset')==[3,2,7,13,6,14,8,0,9,18,19,10,15,16,20,1,4,5,21,17]; passed()
 assert all(r in m.entries+rows for r in m.nodes[m.settings_view]['children'])  # no headings
 for i in (0,1,4,5,6):
     button=m.nodes[rows[i]]['children'][0]
