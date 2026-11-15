@@ -44,8 +44,9 @@ The concept puts the clock in the top-left corner and the battery in the top-rig
 those spots are under the glass. So:
 
 - The status row sits low enough that the glass hides at most 18 px at its glyphs' top edge
-  (y 31), so its ends can sit on the list's own columns: the title (or the clock) at the 24 px
-  text column, the battery ending on the 28 px right column.
+  (y 31), so its ends can sit on the list's own columns: the title at the 24 px text column, the
+  battery ending on the 28 px right column, the clock beside its play state (or centred, on a page
+  with no title).
 - No text or control may start inside `corner_x(y, h)` for its row. In the middle of the
   screen, from y 80 to y 240, the inset is 0.
 - A list ends at the last whole row above the bottom corners: the 32 px slots from y 58 are
@@ -99,7 +100,7 @@ San Francisco, which cannot ship. See `assets/fonts/` for the files and licence.
 
 | Role                                  | Face          | Size  | Colour         | Example        |
 | ------------------------------------- | ------------- | ----- | -------------- | -------------- |
-| Status row (page title, or the clock) | Inter Medium  | 15 px | Text Secondary | Playback, 9:41 |
+| Status row (page title, the clock)    | Inter Medium  | 15 px | Text Secondary | Playback, 9:41 |
 | Row                                   | Inter Regular | 20 px | Text Primary   | Playlists      |
 | Row value                             | Inter Regular | 20 px | Text Secondary | Off            |
 | Row second line                       | Inter Regular | 15 px | Text Tertiary  | 1,234 Songs    |
@@ -146,9 +147,13 @@ All lists share one grid.
 ### Status row
 
 - No band: the bar is the page's black, 58 px, with no rule under it. Its glyphs centre on y 37.
-- Left, on the 24 px text column: the page's title in Inter Medium 15 px, Text Secondary. Home,
-  Now Playing and Cover Flow's covers (but an artist's, titled by the artist) have no title, so the
-  clock takes that place in the same face, size and colour.
+- Left, on the 24 px text column: the page's title in Inter Medium 15 px, Text Secondary, ending
+  with an ellipsis 12 px short of the clock's widest ("00:00").
+- The clock, in the same face, size and colour, right-aligned 24 px left of the battery's body,
+  beside the play state. Home, Now Playing and Cover Flow's covers (but an artist's, titled by the
+  artist) have no title, and there the clock is centred across the row (x 187.5) instead; Home in
+  Split keeps it at the right, over the art, inked white or black as one glyph with the play state
+  and battery (approved from `mock_clock_center.py` and `mock_clock_right.py` on 2026-11-15).
 - Right: the play state (Phosphor `play`/`pause`, fill, 13 px, Text Primary, nothing when
   stopped), then the battery, its nub's end on the 28 px right column, the play state's centre
   12 px left of the battery's body.
@@ -253,7 +258,7 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
 ### Now Playing
 
 The most-seen screen. Art left, words right, time across the bottom; the status row shows the
-clock.
+clock, centred.
 
 | Element        | Position (x, y) and size       | Notes                                                                                      |
 | -------------- | ------------------------------ | ------------------------------------------------------------------------------------------ |
@@ -413,8 +418,8 @@ pattern.
 
 | Q2 Pod screen                       | Pattern                     | Notes                                                                                                      |
 | ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock |
-| Home (Split)                        | List row beside art         | Rows to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges, panning slowly; the status row's play state and battery over it, each glyph white or black by contrast |
+| Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock, centred |
+| Home (Split)                        | List row beside art         | Rows from y 40 (into the status row's empty left, the clock at its right) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges, panning slowly; the status row's clock, play state and battery over it at the right, each glyph white or black by contrast |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Library                             | List row                    |                                                                                                            |
 | Albums                              | Two-line row with art       |                                                                                                            |
@@ -463,8 +468,8 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - Font faces as a table, with Inter Regular and Medium and tabular digits.
 - A theme's own accent tones, and the selection bar's radius, inset and `fixed` (every row,
   whatever Corners says).
-- A status row in place of a bar band (`status_y`), its title or clock on the text column and its
-  battery on the right column (`right_x`); list boxes that end on a whole row by `list_end`
+- A status row in place of a bar band (`status_y`), its title on the text column, its battery on the
+  right column (`right_x`) and its clock beside the play state, or centred where there is no title; list boxes that end on a whole row by `list_end`
   (`list_fit`).
 - A theme's own art from Phosphor (`tools/art.py`), loaded by its own prefix (`theme_art`): the
   chevron (`list.chevron.painter="icon"`) and the play state; the slim battery
@@ -483,13 +488,15 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - Menus as the inset modal over the page ([Menus](#menus)): the set's `modal`, `patch/menu_modal.c`, the
   Phosphor symbols as the theme's own art.
 - Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_inset` (the art from
-  x 196 and the top edge to the edges, its top 58 rows painted by the bar with the status row's play state and
-  battery over them, each glyph in one ink, white or black, whichever has the higher WCAG contrast against the
+  x 196 and the top edge to the edges, its top 58 rows painted by the bar with the status row's clock, play state
+  and battery over them, each glyph in one ink, white or black, whichever has the higher WCAG contrast against the
   art's mean luminance under it, weighted by the glyph's coverage and held 0.03 past the bound against flicker; the
   charging green and low red keep their colours (`home_ink`, approved from `mock_split_top.py` on 2026-11-14, one
   ink a glyph from the same day, as each pixel's own pick speckled over lettering), panning slowly across its 110 % zoom with an
   eased turn at each end and 2 % of the zoom kept clear of the pane at each edge, so a cover's own border never
-  shows), and the lists Home's rows open as full-width pages with the art hidden (`home.lists.full`).
+  shows), the main menu from y 40, its top rows painted by the bar (`coverflow_home_strip`, approved from
+  `mock_overflow.py` on 2026-11-15), and the lists Home's rows open as full-width pages with the art hidden
+  (`home.lists.full`).
 - The toast, the confirm as a dialog page and the empty note (`dialog.confirm.painter="oled"`,
   `patch/feedback.c`), and the confirmation after a shuffle.
 

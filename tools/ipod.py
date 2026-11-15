@@ -95,8 +95,8 @@ class Geometry:
     search_meta_h: int = 16
     toolbar: int = 1  # 0: the toolbars of TOOLBAR_SWITCHES and STOCK_ROWS hide and the bar holds the title, as on NAVBAR_ONLY pages
     list_fit: int = 0  # 1: list boxes end by list_end on a whole row (fit_rows), so nothing draws below it (0: they reach the window's bottom)
-    # A status row in place of a bar band (OLED's): its glyphs centred on screen row status_y, the page's title (or the
-    # clock, where there is none) at text_x in the bar's face and px (bar_px), the play state and battery ending
+    # A status row in place of a bar band (OLED's): its glyphs centred on screen row status_y, the page's title at text_x
+    # in the bar's face and px (bar_px), the clock beside the play state or centred (navigation.c clock_place), the play state and battery ending
     # right_x from the screen's right edge; the bar is drawn black, so the row reads as part of the page. 0: the bar's own layout.
     status_y: int = 0
     right_x: int = 0  # the right column, from the screen's right edge: the status row's battery, and a row's chevron and value (0: stock's)
@@ -611,13 +611,13 @@ def status_bar(root, g=SET0):
 
 STATUS_ROW_RIGHT = ['img_state', *STATUS_RIGHT[2:]]  # a status row's right group: the play state, then the battery
 STATUS_ROW_ICON = 16  # stock's status icon canvases (bar_play, bar_pause), their glyph centred
-STATUS_ROW_TITLE_W = 240  # the title's box from text_x: it ends well clear of the play state
+STATUS_ROW_TITLE_W = 240  # the title's and clock's box from text_x, until the payload's first paint moves both (clock_place)
 
 
 def status_row(root, g, widgets, left, right, eq):
     """A set's status row (g.status_y): no band, the bar black, its glyphs centred on row status_y. The title and the
-    clock share one box at the list's text column, in the bar's face at bar_px in Text Secondary; the payload empties
-    the clock while the page has a title (np_bar.c bar_title), so the row names the page or tells the time. The right
+    clock start in one box at the list's text column, in the bar's face at bar_px in Text Secondary; the payload moves
+    the clock beside the play state, or centres it where the page has no title (navigation.c clock_place). The right
     group is the play state, then the battery, its nub's last column right_x from the screen's edge. Bluetooth,
     Wi-Fi, EQ and the rest stay, off-screen, for stock to update."""
     box_y = g.status_y - STATUS_ROW_ICON // 2

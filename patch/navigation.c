@@ -208,7 +208,8 @@ extern void coverflow_slant(void *w, void *canvas, unsigned paper), coverflow_sl
 extern int coverflow_home_back(void *top), coverflow_home_owns(void *w);
 extern void coverflow_home_top(void);
 extern const char *coverflow_home_title(void);
-extern int coverflow_home_sub(void);
+extern int coverflow_home_sub(void), coverflow_home_split(void *top);
+extern void coverflow_home_strip(void *canvas, void *top);
 extern void coverflow_home_row(void *surface, void *row, int id, int painting);
 extern void lockscreen_paint(void *w, void *canvas);
 extern int lockscreen_hold(void *top);
@@ -4175,7 +4176,7 @@ static void clock_show(void) {
                             (unsigned)!!st.bar_title << 12 /* it changes the 12-hour form below */
                       : ~0u;                               /* 0 before the first */
     void *bar = *(void *const *)system_bar;
-    void *label = key == st.clock_key || !bar || st.bar_titled
+    void *label = key == st.clock_key || !bar || (st.bar_titled && !geom_val(V_STATUS_Y))
                       ? (void *)0
                       : widget_lookup(bar, "label_clock", 1);
     if (!label) return;
@@ -4321,6 +4322,53 @@ void bar_place(void *w, int x, int y, int ww, int h) {
     if (I(w, W_X) != x || I(w, W_Y) != y || I(w, W_W) != ww || I(w, W_H) != h)
         widget_move_resize(w, x, y, ww, h);
 }
+/* A status row's clock (tools/ipod.py status_row; docs/ipod.md#status-bar-and-clock): on a page
+ * with no title, centred on the screen (x 187.5); else (a title on the left, or Home's Split with
+ * its art beside the list) at the right, its text ending CLOCK_BESIDE left of the battery's body,
+ * beside the play state. Over Split's art it is in Text Primary, so the art's ink (coverflow.c
+ * home_ink) covers it whole as one glyph. The title's box ends CLOCK_CLEAR short of the widest
+ * clock, "00:00", so its ellipsis does. The box is sized to the text as measured in the bar's
+ * face, with hscroll_label's 2 px margins, so the label's own alignment plays no part. Runs in
+ * the bar's background paint, before the clock draws; a move repaints the bar after. */
+#define CLOCK_BESIDE 24
+#define CLOCK_CLEAR 12
+static int clock_width(void *canvas, const unsigned *s) {
+    int n = (int)wide_len(s), px = theme()->font_px[ROLE_BAR];
+    canvas_set_font(canvas, theme_face(s, n, &px), px);
+    return (int)(canvas_measure_text(canvas, s, (unsigned)n) + 0.5f);
+}
+static void clock_place(void *bar, void *top) {
+    static const unsigned zeros[] = { '0', '0', ':', '0', '0', 0 };
+    static void *clock;
+    static int ink, widest, set_color; /* set_color: the colour written last, compared in place of
+                                         * a read-back of the style's current state */
+    void *canvas = st.bar_title ? widget_get_canvas(st.bar_title) : (void *)0;
+    if (!geom_val(V_STATUS_Y) || !st.bar_slot || !canvas) return;
+    if (!clock) {
+        if (!(clock = widget_lookup(bar, "label_clock", 1))) return;
+        ink = style_get_int(P(clock, W_ASTYLE), "text_color", (int)RGBA(0xababab));
+    }
+    if (!widest) widest = clock_width(canvas, zeros); /* the face holds until a restart */
+    const unsigned *text = widget_get_text(clock);
+    int split = coverflow_home_split(top), right = !!st.bar_titled || split,
+        edge = I(P(st.bar_slot, W_PARENT), W_X) + I(st.bar_slot, W_X) - CLOCK_BESIDE,
+        w = (text && *text ? clock_width(canvas, text) : widest) + 4,
+        x = right ? edge + 2 - w : (375 - w + 1) / 2,
+        color = split == 2 ? (int)RGBA(0xffffff) : ink,
+        title_w = edge - widest - CLOCK_CLEAR + 2 - I(st.bar_title, W_X);
+    if (I(st.bar_title, W_W) != title_w)
+        widget_resize(st.bar_title, title_w, I(st.bar_title, W_H));
+    else if (I(clock, W_X) == x && I(clock, W_W) == w && (set_color ? set_color : ink) == color)
+        return;
+    widget_move_resize(clock, x, I(clock, W_Y), w, I(clock, W_H));
+    /* each state status_row styles: the label paints in whichever it is in */
+    widget_set_prop_int(clock, "style:normal:text_color", color);
+    widget_set_prop_int(clock, "style:focused:text_color", color);
+    widget_set_prop_int(clock, "style:disable:text_color", color);
+    set_color = color;
+    if (!st.bar_timer) st.bar_timer = timer_add(bar_repaint, (void *)0, 0);
+}
+
 /* w left of the screen, where a relayout finds it. */
 static void bar_off(void *w) {
     if (I(w, W_X) != -400) widget_move_resize(w, -400, I(w, W_Y), I(w, W_W), I(w, W_H));
@@ -6690,6 +6738,9 @@ int ringnav_paint_bg(void *w, void *canvas) {
         }
         stock_canvas_set_fill_color(canvas, fill);
         coverflow_home_bar(canvas, window_manager_get_top_window(wm)); /* OLED's art in the bar */
+        coverflow_home_strip(canvas, window_manager_get_top_window(wm)); /* and Split's list */
+        st.paint_w = w;
+        stock_canvas_set_fill_color(canvas, fill);
     }
     void *top = window_manager_get_top_window(wm);
     /* Any painted window, not only the top one: Home slides back in from a snapshot. */
@@ -6703,6 +6754,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         bar_sync(bar);
         bar_title_sync(top);
         bar_title(bar, top);
+        clock_place(bar, top);
         if (st.action_view) action_row(st.action_view);
         feedback_songs(top, st.action_view); /* OLED: an empty list's note, no Shuffle row */
         if (np_sync(top) && np_beside()) rearm(&st.np_remain_timer, remain_due, 0); /* mid-paint */
