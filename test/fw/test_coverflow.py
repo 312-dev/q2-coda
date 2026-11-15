@@ -824,7 +824,7 @@ def test_the_bar_paints_the_rows_split_raises_above_home_s_window(fw, library):
     painted_frame = fw.fn('coverflow_home_painted', None)
     painted_frame()  # the end of the frame the bar's paints above were in
     assert not ui.timer(address(fw, 'coverflow__strip_due'))  # the bar painted the band whole: nothing due
-    screen = [0, 0, 375, 320]
+    screen: list[C.c_int | int] = [0, 0, 375, 320]  # the canvas clip canvas_get_clip_rect reads
     fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(slice(0, 4), screen))
 
     def clip(w):  # the list's paint begins
