@@ -142,7 +142,7 @@ class Ui:
     def __init__(self, fw):
         self.fw, self.keep, self.next_timer, self.now, self.top = fw, [], 0, 100000, 0
         self.kids, self.names, self.ints, self.strs, self.texts, self.shown, self.types = {}, {}, {}, {}, {}, {}, {}
-        self.timers, self.handlers, self.int_log, self.dirty = {}, [], [], []
+        self.timers, self.handlers, self.int_log, self.dirty, self.text_log = {}, [], [], [], []
         self.wm = self.widget(None, 'window_manager', 0, 0, 375, 320)
         m = fw.mock
         m('widget_lookup', lambda w, name, deep, *_: self.lookup(w, C.string_at(name).decode(), deep))
@@ -234,6 +234,7 @@ class Ui:
 
     def set_text(self, w, s):
         self.texts[w] = wide(s)
+        self.text_log.append((w, s))  # each text as set: the C's buffer may be its stack's (clock_text)
 
     def text(self, w):
         return read_wide(C.addressof(self.texts[w])) if w in self.texts else None
@@ -1263,7 +1264,7 @@ def now(fw, ui, mcl, st):
 
 def test_the_page_shows_its_album_and_time_left_and_no_place_in_the_queue(fw, ui, now):
     assert (ui.text(now.album), ui.text(now.remain)) == ('Blue Train', '-2:30')
-    assert not [t for _, (w, t, *_) in fw.calls('widget_set_text_utf8') if b' of ' in C.string_at(t)]  # no "3 of 12"
+    assert not [t for _, t in ui.text_log if ' of ' in t]  # no "3 of 12"
     sets = [(w, key) for w, key, _ in ui.int_log if w == now.slider]
     assert sets.index((now.slider, b'max')) < sets.index((now.slider, b'value'))  # the max first, or it clamps
     assert now.value() == 50 and ui.ints[now.slider, b'max'] == 200
