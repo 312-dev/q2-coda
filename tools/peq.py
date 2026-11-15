@@ -1,7 +1,7 @@
 """Checked Q2 V1.36 PEQ hooks and target ABI imports; no vendor code is distributed."""
 import re
 import struct
-from build import ROOT, FLAGS, GP, FUNCTIONS, GLOBALS, PRIVATE_FUNCTIONS, append_payload, check, fileoff, run, sha, symbols, jal, j
+from build import ROOT, FLAGS, FILL, GP, FUNCTIONS, GLOBALS, PRIVATE_FUNCTIONS, append_payload, check, fileoff, run, sha, symbols, jal, j
 from ipod import patch_word
 
 PLAYER_SHA = 'f02ccc4579f0447ee5472dbfa13aab1929704ab154b4e6192e26a7082c780a3e'
@@ -262,7 +262,7 @@ def compile_common(out, binary, player=False, flac_experiments=()):  # pragma: n
     (out/'peq_platform.h').write_text('\n'.join(header)+'\n')
     (out/'peq_imports.S').write_text('\n'.join(asm)+'\n')
     flags = [*FLAGS, '-fno-math-errno', '-ffunction-sections', '-fdata-sections']
-    if player: flags += ['-mnan=2008']
+    flags += ['-mnan=2008'] if player else FILL
     objects = []
     for name in (['peq.c', 'peq_player.c', 'mp3_gapless.c', 'lavf_gapless.c'] + [f'flac_{n}.c' for n in flac_experiments]) if player else UI_SOURCES:
         obj = out/(name.replace('/', '_')+'.o')

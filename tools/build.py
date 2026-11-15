@@ -1887,6 +1887,11 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
          '-mno-abicalls','-fno-pic','-G0','-ffreestanding','-fno-builtin',
          '-fno-stack-protector','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
          '-Oz','-Wall','-Wextra','-Werror','-Wno-unused-parameter']
+# demo's payload only: LLVM's delay-slot filler also takes an instruction from the branch's likelier
+# successor block, or from after the branch, which it does not by default. It moves only one that is
+# safe on every path (a register live into the other successor is not written; a load only from the
+# stack or a constant), so the code does the same with fewer nops: 20,160 bytes and 6,633 nops fewer.
+FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
 NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'power_rows.c', 'np_taps.c', 'synclink.c']
 
@@ -1896,7 +1901,7 @@ def compile_payload(out):  # pragma: no mutate block
     extra = compile_common(out, out/'stock-demo')  # also writes the libc/libcstl imports navigation.c uses
     nav = [out/f'{name[:-2]}.o' for name in NAVIGATION]
     for name, o in zip(NAVIGATION, nav):
-        run('clang',*FLAGS,'-I',out,'-c',ROOT/'patch'/name,'-o',o)
+        run('clang',*FLAGS,*FILL,'-I',out,'-c',ROOT/'patch'/name,'-o',o)
     asm = ['.set noreorder', '.text']
     resume = {x: address for address, _, x in HOOKS.values() if x}
     for x, address in resume.items():
@@ -1904,7 +1909,8 @@ def compile_payload(out):  # pragma: no mutate block
                 f'ori $gp, $gp, {GP & 65535}', f'j 0x{address + 12:x}', 'nop']
     (out/'trampoline.S').write_text('\n'.join(asm)+'\n')
     run('clang',*FLAGS,'-c',out/'trampoline.S','-o',out/'trampoline.o')
-    run('ld.lld','-m','elf32ltsmip','--gc-sections','-T',ROOT/'patch/link.ld','-e','ringnav',
+    # -O2: lld merges a string constant that ends another into its tail, which -O1 does not (3,328 bytes)
+    run('ld.lld','-m','elf32ltsmip','-O2','--gc-sections','-T',ROOT/'patch/link.ld','-e','ringnav',
         *[f'--undefined={name}' for _, name, _ in HOOKS.values()], f'--undefined={GRADIENT_LEAF[2]}', '--undefined=ringnav_lrc_open',
         f'--undefined={WM_PAINT_LEAF[2]}', f'--undefined={QUEUE_LEAF[2]}', '--undefined=ringnav_audio_extension', '--undefined=start_mute', '--undefined=start_sleep', '--undefined=ringnav_genre_copy', '--undefined=ringnav_lyric_save', '--undefined=ringnav_lyric_drop', '--undefined=ringnav_cover_copy','--undefined=ringnav_folder_rm','--undefined=ringnav_bootmode', '--undefined=lockscreen_access','--undefined=ringnav_ts_read',
         '--undefined=ringnav_baidu_poll', '--undefined=ringnav_stock_tls', '--undefined=ringnav_tidal_poll', '--undefined=catalogue_access', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
