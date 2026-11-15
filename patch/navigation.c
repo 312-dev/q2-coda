@@ -2558,8 +2558,13 @@ static void paint_selection(void *w, void *canvas) {
     if (home && i >= 0) coverflow_home_row(w, g_menu.at[i], g_menu.id[i], 1);
     if (i < 0 || (!shown && !home && g_menu.kind != 4)) return;
     if (st.shuffle_on && st.shuffle_on == st.action_view && st.shuffle_list == w)
-        return;                /* the selection is on the Shuffle row above (shuffle_paint) */
-    if (pair_holds(w)) return; /* ... or on an artist's Shuffle or Radio (artist_page.c) */
+        return;          /* the selection is on the Shuffle row above (shuffle_paint) */
+    if (pair_holds(w)) { /* ... or on an artist's or album's pair (artist_page.c) */
+        /* the row a fast spin passed through keeps no marquee: its timer finds no row */
+        marq_stop();
+        st.marq_row = (void *)0;
+        return;
+    }
     rect_t r = bounds(&g_menu, i), old;
     /* A boundary detent nudges the selection against the end until it springs back. */
     if (fx_live(w) && st.bump_dir) r.y -= st.bump_dir * theme()->bump_px;
