@@ -464,6 +464,8 @@ void reveal(menu_t *m, int id, int immediate);
 void row_meta(void *w);
 void *staged_music(int (*query)(void *), void *arg, int *count);
 int usable(void);
+#define LIBRARY_MUSIC 1 /* all_songs' music: spoken tracks left out, the server's songs beside */
+#define LIBRARY_ALL 2   /* every card song, and the server's */
 int all_songs(void *music);
 long clock_back(long long wall);
 void text_inks(void *w);

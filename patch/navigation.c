@@ -92,6 +92,9 @@ void ringnav_timezone_row(void *item, int i) {
         widget_set_text_utf8(label, s);
     }
 }
+/* A load's songtable reads (library_query): 0 stock's own; 1 music (LIBRARY_MUSIC): spoken
+ * tracks and the Library's scope left out, the server's songs beside the card's; 2 (LIBRARY_ALL):
+ * every card song and, with Local + Server, the server's, as the Ratings lists read them. */
 static int library_music __attribute__((section(".scratch")));
 static int library_first __attribute__((section(".scratch")));
 
@@ -135,13 +138,16 @@ static int library_query(int content, const char *db, const char *sql, void *row
             return -1;
         sql = aa;
     }
-    const char *from = library_music && sql ? strstr(sql, " from songtable") : 0;
+    const char *server = library_music ? catalogue_rows() : "";
+    const char *from = sql && (library_music == LIBRARY_MUSIC || (library_music && *server))
+                           ? strstr(sql, " from songtable")
+                           : 0;
     if (from) { /* library_first: the Unknown row's check, which one song answers */
         /* Local + Server: the server's songs beside them (catalogue.c) */
         int n = tk_snprintf(filtered, sizeof filtered,
                             "%.*s from (select * from songtable where %s%s)%s%s", (int)(from - sql),
-                            sql, MUSIC_WHERE, catalogue_rows(), from + 15,
-                            library_first ? " limit 1" : "");
+                            sql, library_music == LIBRARY_MUSIC ? MUSIC_WHERE : "1", server,
+                            from + 15, library_first ? " limit 1" : "");
         if (n < 0 || (unsigned)n >= sizeof filtered) return -1;
         sql = filtered;
     }
@@ -9289,9 +9295,11 @@ void toast(const char *text) {
     --st.toasts;
 }
 
+/* Every song in stock's title order: music (LIBRARY_MUSIC) or every card song (0) or, beside them,
+ * the server's (LIBRARY_ALL), as library_music says. */
 int all_songs(void *music) {
     int saved = library_music;
-    library_music = music != 0;
+    library_music = (int)(long)music;
     int n = getAllMusic(0);
     library_music = saved;
     return n;

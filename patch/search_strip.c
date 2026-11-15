@@ -433,7 +433,7 @@ int library_search_open(void *ctx, void *event) {
     if (!theme()->entry_ipod) return stock_search(ctx, event);
     if (ss.page || !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup))) return 0;
     int n;
-    ss.songs = staged_music(all_songs, (void *)1, &n);
+    ss.songs = staged_music(all_songs, (void *)LIBRARY_MUSIC, &n);
     n = ss.songs ? (int)deque_size(ss.songs) : 0;
     ss.match = n ? calloc((unsigned)n + 2 * SS_GROUP, sizeof *ss.match) : (void *)0;
     ss.kind = ss.match ? calloc((unsigned)n + 2 * SS_GROUP, 1) : (void *)0;

@@ -181,7 +181,7 @@ playlists.
 | Now Playing's info page for a server song, which plays from its Stream Cache copy (a file no `songtable` row describes): Genre and Year are the catalogue's, Location reads `Server` | `navigation.c` (`ringnav_np_info`, three lines), `catalogue.c` (`catalogue_np_info`) | yes |
 | Long Songs for a server row | | not built: Long Songs reads `songtable` alone, so server songs are not in it |
 | Setting: `[Q2POD] LIBRARYSOURCE`, 0 Local Only (default) or 1 Local + Server, a row on Display > Cover Flow | `navigation.c` (`pod_keys` and the rows' tables beside it) | yes |
-| Ratings: `ratings.out` appended for every app with `ratings=1`; `ratings.in` renamed to `ratings.in.taking`, applied, then deleted. Hearts given on Now Playing while a server song plays from its Stream Cache copy are its server row's (kept under the row's key, the line with the row's sid, the copy's My Fav counted as the row's) | `catalogue.c` (`catalogue_rated`, `catalogue_song_key`), `ratings.c` (`rate_song_key`, `rate_all`) | yes |
+| Ratings: `ratings.out` appended for every app with `ratings=1`; `ratings.in` renamed to `ratings.in.taking`, applied, then deleted. Hearts given on Now Playing while a server song plays from its Stream Cache copy are its server row's (kept under the row's key, the line with the row's sid, the copy's My Fav counted as the row's), and the Ratings lists read the server's songs beside every card song (`all_songs`'s `LIBRARY_ALL`) | `catalogue.c` (`catalogue_rated`, `catalogue_song_key`), `ratings.c` (`rate_song_key`, `rate_all`, `rated_open`), `navigation.c` (`library_query`) | yes |
 
 The server library adds 43,600 bytes to the payload: `patch_bytes` is 864,504 of the 1 MB in this branch's `--dev` build against 820,904 at the commit it branched from, `catalogue.o` being 39,870 bytes of text and 1,236 of data (`llvm-size`). All catalogue data lives on the heap or the card.
 
@@ -291,7 +291,7 @@ for server rows and for synced card files alike, whenever the Q2 can reach the s
   server song playing from its Stream Cache copy (a file no Library row has, at a path that changes
   with the stream's quality) is its server row: Now Playing's hearts are kept under the row's
   `listen_key` and its line carries the row's sid; five hearts are stock's My Fav of the copy,
-  which the Ratings lists count as the row's.
+  which the Ratings lists count as the row's, so they show the server song with its hearts.
 - **Out:** each change on the Q2 is appended to `/mnt/mmc/.<id>/ratings.out`
   (`<listen_key>\t<sid or empty>\t<hearts>\t<unix time>`); the app sends it when the server answers
   and removes the lines it sent. Offline changes wait there, as plays and stars already do.

@@ -213,7 +213,7 @@ static int ple_run(const void *unused) {
         if (!action) {
             int n;
             if (ple.picker) deque_destroy(ple.picker);
-            ple.picker = staged_music(all_songs, (void *)1, &n);
+            ple.picker = staged_music(all_songs, (void *)LIBRARY_MUSIC, &n);
             ple_filter();
             ple.mode = 1;
         } else {

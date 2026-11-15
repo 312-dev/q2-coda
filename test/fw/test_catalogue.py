@@ -1116,3 +1116,42 @@ def test_a_heart_tapped_on_a_stream_copy_is_the_server_rows_favourite(rig, fw, u
     assert heart.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == (f'{row:08x}\ts1\t5\t1700000000\n'
                                                                   f'{row:08x}\ts1\t0\t1700000000\n').encode()
     assert rate_all(fw, ui, [rig.record(url('s1')), rig.record(url('s2'))], favs=[rig.record(copy)]) == [5, 0]
+
+
+def test_the_ratings_lists_have_rated_server_songs_with_local_and_server(rig, fw, ui, song):
+    """A Ratings list reads every card song (spoken ones too: getAllMusic(0)'s SQL, no music filter) and, with
+    Local + Server, the server's songs beside them, so a server song rated here or on the server is listed with
+    its hearts; with Local only it is not."""
+    from test_nav_library_pages import RATINGS, Library, call, ratings
+    rig.card_song('/mnt/mmc/audiobooks/b.m4b', 'Book', 'Reader', 'Tales', 1, 900, 1)
+    rig.write(1, [song_row('s1', 'Streamed', 'Server Band', 'Server Only', 1, 100, 1),
+                  song_row('s2', 'Unrated', 'Server Band', 'Server Only', 2, 100, 2)])
+    rig.poll()
+    slot = C.c_void_p.from_address(STOCK_SLOT)
+    rig.lib.sqlite3_open(str(rig.tmp/'database.db').encode(), C.byref(slot))
+    fw.fn('catalogue_attach', None, C.c_void_p)(STOCK_SLOT)
+    library = Library(fw, ui)
+    query = fw.fn('ringnav_library_query', C.c_int, C.c_char_p, C.c_char_p, C.c_void_p, C.c_int)
+    ran = []
+
+    def stock_query(db, sql, *_):  # stock's toolsQueryDbTable: the rows into the load's deque
+        sql = C.string_at(sql).decode()
+        ran.append(sql)
+        for path, title in rig.query(sql.replace('select *', 'select fileurl, name', 1)):
+            library.deques[library.directory()].append(song(path.encode(), title.encode()))
+        return 0
+    fw.mock('stock_dbquery_trampoline', stock_query)
+    fw.mock('getAllMusic', lambda sort, *_: query(b'db', b'select * from songtable order by name', None, sort))
+    fw.mock('getAllFav', lambda *_: 0)
+    from conftest import Files as F
+    F(fw, {RATINGS: ratings((listen_key('/mnt/mmc/audiobooks/b.m4b'), 2), (listen_key(url('s1')), 4))})
+    call(fw, 'rated_open', 3)  # All Rated
+    assert [t for t, _ in ui.rows(ui.top())] == ['Streamed', 'Book']
+    assert 'servertable' in ran[-1]
+    ui.close(ui.top())
+    fw.var('catalogue_source', C.c_int).value = 0  # Local only
+    fw.fn('catalogue_changed', None)()
+    call(fw, 'rated_open', 3)
+    assert [t for t, _ in ui.rows(ui.top())] == ['Book']
+    rig.lib.sqlite3_close(slot)
+    slot.value = 0
