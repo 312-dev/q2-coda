@@ -384,10 +384,11 @@ GEOM_RANGES = {
     'np_art': (0, lambda g: 0 if g.np_ipod else 200),  # Now Playing on the grid, never as well as Classic's
     'np_bar_y': (0, lambda g: 320 - 56 if g.np_art else 0),  # its bar, with the times and the state row under it, on screen
     # Split: Home's rows never wider than the screen's half and the pane's overlap; the pane no wider than
-    # HOME_SPLIT_W leaves (home.ring, DRIFT_TEXELS), and no taller than CLIENT_H_MAX's 294
+    # HOME_SPLIT_W leaves (home.ring, DRIFT_TEXELS), and no taller than the screen: up to the bar's whole height, the
+    # status row's glyphs then over the art, inked by contrast (coverflow.c home_ink)
     'split_row': (120, lambda g: g.split_art + 16),
     'split_art': (O['HOME_SPLIT_W'], 260),
-    'split_art_up': (0, lambda g: g.bar - 26),
+    'split_art_up': (0, lambda g: g.bar),
     'split_inset': (0, 4),  # percent of the zoomed cover; past about 4.5 the 110 % zoom leaves no pan
     'modal': (0, 1),  # the More pages as dialogs, drawn with the hold menus as the inset modal (ipod.modal_page)
 }

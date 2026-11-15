@@ -1547,6 +1547,23 @@ def test_a_row_actions_question_is_the_tray_its_cell_the_verb(fw, st):
     assert ui.text(after.enter) == 'OK' and after.lines[0].visible
 
 
+@pytest.mark.parametrize('prompt, verb', [('Restart?', 'Restart'), ('Shut Down?', 'Shut Down')])
+def test_oleds_power_confirms_say_their_verb(fw, st, prompt, verb):
+    """Power's Restart and Shut Down rows (power_rows.c) as OLED's dialog page: Cancel, then the verb, never OK."""
+    theme(fw, OLED)
+    ui = Ui(fw)
+    confirm = Confirm(fw, ui, [prompt])
+
+    def utf8(w, out, size, *_):  # the prompt's words, as feedback_confirm_dress reads them
+        words = ui.text(ui.nodes[w]).encode()[:size - 1] + b'\0'
+        C.memmove(out, words, len(words))
+        return 0
+    fw.mock('widget_get_text_utf8', utf8)
+    confirm.paint()
+    assert (confirm.ui.text(confirm.cancel), confirm.ui.text(confirm.enter)) == ('Cancel', verb)
+    assert not confirm.lines[0].visible  # the question is the status row's title
+
+
 def test_minimal_leaves_stocks_confirm(fw, st):
     theme(fw, MINIMAL)
     confirm = Confirm(fw, Ui(fw))
@@ -2014,8 +2031,11 @@ def test_power_adds_standby_charge_and_in_vehicle_rows_after_stocks(fw):
     ui, win, view, settings, build = settings_page(fw, MINIMAL, 'powermanager_page', 'scroll_view_powermanager', 2)
     fw.mock('stock_power_trampoline', build)
     assert fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None) == 3
-    stock, ours = view.children[:2], view.children[2:]
+    stock, ours, power = view.children[:2], view.children[2:8], view.children[8:]
     assert [s.name for s in stock] == ['s0', 's1'] and len(ours) == 6
+    gap, restart, off = power  # Restart and Shut Down last, after a 12 px gap (power_rows.c)
+    assert gap.kind == 'label' and gap.box[3] == 12
+    assert [ui.text(label_of(r)) for r in (restart, off)] == ['Restart', 'Shut Down']
     icons = [next(c.props['image'] for c in r.walk() if c.kind == 'image') for r in ours]
     # Standby, Charge, USB DAC Charging, Smart Wi-Fi, In-Vehicle, Battery History
     assert icons == ['system_powermanager', 'usb_chargeswitch', 'usb_chargeswitch', 'wifiset_wifi', 'system_carmode',
@@ -2115,7 +2135,7 @@ def test_in_vehicle_mode_is_stocks_byte_and_key(fw):
     ui, win, view, settings, build = settings_page(fw, MINIMAL, 'powermanager_page', 'scroll_view_powermanager')
     fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     g(fw, 'g_carmode_state', 4)
-    standby, charge, dac, smart, car, history = view.children
+    standby, charge, dac, smart, car, history = view.children[:6]  # then the gap, Restart and Shut Down
     click(ui, car)
     assert (g(fw, 'g_carmode'), g(fw, 'g_carmode_state')) == (1, 0) and settings.written == [('CARMODE', 1)]
     assert switch(car) == 'switch_on'
@@ -2125,7 +2145,7 @@ def test_smart_wifi_switches_and_saves_its_own_key(fw, st):
     ui, win, view, settings, build = settings_page(fw, MINIMAL, 'powermanager_page', 'scroll_view_powermanager')
     fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     car_mode = g(fw, 'g_carmode')
-    standby, charge, dac, smart, car, history = view.children
+    standby, charge, dac, smart, car, history = view.children[:6]  # then the gap, Restart and Shut Down
     click(ui, smart)
     assert switch(smart) == 'switch_on' and settings.written == [('SMARTWIFI', 1)] and st('smart_wifi').value == 1
     assert switch(charge) == switch(car) == 'switch_off' and g(fw, 'g_carmode') == car_mode  # the other rows as they were
@@ -2136,7 +2156,7 @@ def test_smart_wifi_switches_and_saves_its_own_key(fw, st):
 def test_classic_shows_a_switch_as_its_value(fw, st):
     ui, win, view, settings, build = settings_page(fw, CLASSIC, 'powermanager_page', 'scroll_view_powermanager', CHARGELIMIT=b'1')
     fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
-    standby, charge, dac, smart, car, history = view.children
+    standby, charge, dac, smart, car, history = view.children[:6]  # then the gap, Restart and Shut Down
     assert value(ui, charge) == 'On' and value(ui, smart) == value(ui, car) == 'Off' and switch(charge) is None
     assert f'{O["CHARGE_STOP"]}%' in ui.text(label_of(charge))
     v = next(c for c in charge.walk() if c.name == '_setting_value')
@@ -2441,7 +2461,8 @@ class Quick:
         self.ui.add('label', self.menu, (0, 0, 80, 20), 'label_lock')
         for n in ('image0', 'image1'):
             self.ui.add('image', self.win, (0, 0, 10, 10), n)
-        self.slider = self.ui.add('slider', self.ui.add('view', self.win, (0, 250, 375, 60)), (20, 10, 335, 30), 'slider_backlight')
+        self.slider = self.ui.add('slider', self.ui.add('view', self.win, (0, 250, 375, 60), 'view_backlight'), (20, 10, 335, 30),
+                                  'slider_backlight')
         self.timers: list = []
         fw.mock('timer_add', lambda fn, ctx, ms, *_: self.timers.append((fn, i32(ms))) or len(self.timers))
         fw.mock('pointer_event_init', lambda out, kind, *_: C.memmove(out, struct.pack('<i', i32(kind)), 4) or out)
@@ -2561,6 +2582,18 @@ def test_classics_pressed_icon_repaints_under_the_finger_and_after(fw, st):
     assert [c[1][0] for c in fw.calls('widget_invalidate_force')][1:] == [quick.icons['img_gain'].addr, quick.icons['img_po'].addr]
     quick.dispatch('img_po', O['EVT_POINTER_UP_BEFORE'])
     assert [c[1][0] for c in fw.calls('widget_invalidate_force')][-1] == quick.icons['img_po'].addr
+
+
+def test_oled_s_quick_settings_lays_its_buttons_over_whole_rows(fw, st):
+    """OLED's page (quick_rows_open): Wi-Fi, Bluetooth, the lock, Gain, Output and USB each over a 32 px row from y 90
+    at opacity 0, so a tap there is stock's; Playback and System gone; the slider inline on the first row's right
+    column, its knob's 14 px reaching the track's ends."""
+    quick = Quick(fw, st, OLED)
+    rows = ['img_wifiswitch', 'img_btswitch', 'img_lock', 'img_gain', 'img_po', 'img_usbmode']
+    assert [quick.icons[n].box for n in rows] == [(0, 90 + 32 * i, 375, 32) for i in range(6)]
+    assert [quick.icons[n].visible for n in Quick.ICONS] == [1, 1, 1, 1, 1, 1, 0, 0]
+    assert sorted(c[1][0] for c in fw.calls('widget_set_opacity')) == sorted(quick.icons[n].addr for n in rows)
+    assert quick.slider.box == (183, 0, 171, 32) and quick.slider.parent.box == (0, 58, 375, 32)
 
 
 def test_closing_quick_settings_forgets_the_press(fw, st):

@@ -96,6 +96,7 @@ static const struct {
     const char *prompt, *title, *verb;
 } asks[] = {
     { "Shut Down?", "Shut down?", "Shut Down" },
+    { "Restart?", "Restart?", "Restart" }, /* Power's Restart (power_rows.c) */
     { "Reset Settings Only", "Reset settings only?", "Reset" },
     { "Reset Database", "Reset the database?", "Reset" },
     { "Full Factory Reset", "Full factory reset?", "Reset" },

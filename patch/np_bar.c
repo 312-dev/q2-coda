@@ -109,8 +109,8 @@ int np_sync(void *top) {
     return 1;
 }
 
-/* 1 when the screen's (x, y) is inside w */
-static int np_hit(void *w, int x, int y) {
+/* 1 when the screen's (x, y) is inside w (np_taps.c's hit test too) */
+int np_hit(void *w, int x, int y) {
     for (void *p = w; p && p != window_manager(); p = P(p, W_PARENT))
         x -= I(p, W_X), y -= I(p, W_Y);
     return (unsigned)x < (unsigned)I(w, W_W) && (unsigned)y < (unsigned)I(w, W_H);

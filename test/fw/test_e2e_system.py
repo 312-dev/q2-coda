@@ -1070,6 +1070,70 @@ def test_without_a_limit_a_clock_or_an_alarm_standby_is_stocks(q2, limit, rtc, a
     assert q2.fw.calls('stock_standby_trampoline')
 
 
+# Power's Restart and Shut Down (power_rows.c): last on the page after a gap, each behind its confirm.
+
+def power_page(q2, answer):
+    """System settings → Power, its confirms answered answer (10 the verb); each prompt as (page, kind, ms, text)."""
+    q2.open('systemset/powermanager_page')
+    asked = []
+
+    def prompt(name, ctx, *_):
+        kind, ms = struct.unpack('<ii', C.string_at(ctx, 8))
+        asked.append((C.string_at(name).decode(), kind, ms, C.string_at(ctx + 8).decode()))
+        return answer
+
+    def words(key, out, size, *_):  # stock's English msg_poweroff, as tools/build.py renames it
+        if C.string_at(key) == b'msg_poweroff':
+            C.memmove(out, b'Shut Down?\0', 11)
+        return 0
+    q2.fw.mock('navigator_to_with_context', prompt)
+    q2.fw.mock('getFormatString', words)
+    return asked
+
+
+def test_power_ends_with_restart_and_shut_down_after_a_gap(q2):
+    power_page(q2, 0)
+    assert q2.screen.rows()[-2:] == ['Restart', 'Shut Down']
+    s = q2.screen
+    gap, *rows = s.kids[s.lookup(s.top, 'scroll_view_powermanager')][-3:]
+    assert s.types[gap] == 'label' and s.at(gap)[3] == 12  # space, never a row
+    tapped = {w for w, *_ in s.handlers}
+    assert not ({gap} | set(s.subtree(gap))) & tapped  # nothing the wheel stops on
+    for row in rows:  # no chevron: Centre opens a confirm
+        assert s.types[row] == 'list_item' and set(s.subtree(row)) & tapped
+        assert all(s.props.get(w, {}).get('image') != 'list_into' for w in s.subtree(row))
+
+
+@pytest.mark.parametrize('row, question', [('Restart', 'Restart?'), ('Shut Down', 'Shut Down?')])
+def test_a_cancelled_power_row_leaves_the_page_as_it_was(q2, row, question):
+    asked = power_page(q2, 0)  # Cancel, or Return out of the prompt
+    q2.status = PLAYING
+    top, rows = q2.screen.top, q2.screen.rows()
+    q2.screen.click(row)
+    assert asked == [('dialog/confirminfo_dialog', 1, 0, question)]
+    assert not q2.fw.calls('stock_reboot_trampoline') and not q2.fw.calls('save_memoryplay_info')
+    assert q2.pages == ['systemset/powermanager_page'] and (q2.screen.top, q2.screen.rows()) == (top, rows)
+
+
+def test_restart_reboots_as_a_theme_change_does(q2):
+    asked = power_page(q2, 10)
+    q2.status = PLAYING
+    q2.screen.click('Restart')
+    assert asked == [('dialog/confirminfo_dialog', 1, 0, 'Restart?')]
+    # ringnav_reboot, restart_confirm's: the queue saved, then stock's device_reboot
+    assert len(q2.fw.calls('save_memoryplay_info')) == 1 and len(q2.fw.calls('stock_reboot_trampoline')) == 1
+    assert 'poweroff_page' not in q2.pages
+
+
+def test_shut_down_powers_off_as_the_power_keys_prompt_does(q2):
+    asked = power_page(q2, 10)
+    q2.screen.click('Shut Down')
+    assert asked == [('dialog/confirminfo_dialog', 1, 0, 'Shut Down?')]  # stock's own msg_poweroff
+    # stock's power-off page, which saves the queue and powers off (into_poweroff), as on_wm_keylong_fun opens it
+    assert q2.pages == ['systemset/powermanager_page', 'poweroff_page']
+    assert not q2.fw.calls('stock_reboot_trampoline')
+
+
 # Power: the charge limit, the watchdog and the state record (docs/internals.md#charge-limit, #watchdog).
 
 def test_a_charge_limit_chosen_on_power_holds_charging_between_its_resume_and_stop_levels_after_a_restart(q2):

@@ -122,3 +122,12 @@ def test_stock_s_fills_are_cleared_once_per_keyboard(fw, ui):
     key = k.keys[0][1]
     assert ui.props[(key, 'style:normal:bg_color')] == 0 and ui.props[(k.kb, 'style:normal:bg_color')] == 0
     assert ui.props[(key, 'style:pressed:bg_color')] == 0
+
+
+def test_a_key_the_keyboard_takes_frees_stock_s_click_latch(fw, ui):
+    """As the strip's (test_search_strip.py): stock's key-up, which clears the latch, never runs for these."""
+    k = Keyboard(fw, ui)
+    latch = C.c_byte.from_address(O['KEY_TONE_LATCH'])
+    for key in (KEY_NEXT, KEY_NEXT, KEY_CENTER, KEY_PREV):
+        latch.value = 1
+        assert k.key(key) == [1] and latch.value == 0

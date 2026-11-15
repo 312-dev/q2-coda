@@ -211,6 +211,7 @@ extern const char *coverflow_home_title(void);
 extern int coverflow_home_sub(void);
 extern void coverflow_home_row(void *surface, void *row, int id, int painting);
 extern void lockscreen_paint(void *w, void *canvas);
+extern int lockscreen_hold(void *top);
 extern void coverflow_paint(void *w, void *canvas), photos_paint(void *w, void *canvas),
     photos_open(const char *root), books_paint(void *w, void *canvas), books_open(const char *root),
     video_poll(void);
@@ -227,6 +228,7 @@ extern int xfade_open(void *ctx, void *event), xfade_key(void *top, unsigned key
 extern int eq_key(void *top, unsigned key); /* peq_ui.c */
 extern const char *radio_hold(void *top);
 extern void visualizer_paint(void *w, void *canvas), visualizer_attach(void *win);
+extern int visualizer_full(void); /* OLED's full-screen Field draws the modes itself */
 extern int visualizer_live(void), games_live(void);
 extern unsigned char now_cover(void *r, const char **file);
 extern unsigned now_cover_written(const char *file);
@@ -1975,6 +1977,7 @@ static void paint_cover(void *w, void *canvas) {
         coverflow_slant(w, canvas, scheme()->paper & 255);
         return;
     }
+    if (w == st.np_cover) np_tap_dim(w, canvas); /* held: under the corners */
     if (ipod_square_art()) return;
     int x = 0, y0 = 0;
     if (w == st.bc[2]) {
@@ -2064,10 +2067,11 @@ static void paint_caps(void *w, void *canvas) {
             return;
         canvas_set_clip_rect(canvas, clip);
         int room = I(a, W_W) - NP_CAPS_INSET;
-        st.np_over = draw_spaced(canvas, widget_get_text(a), I(a, W_X) + NP_CAPS_INSET - st.np_off,
-                                 I(a, W_Y) + (I(a, W_H) - NP_CAPS_PX) / 2, NP_CAPS_PX,
-                                 RGBA(NP_ALBUM_RGB), room + st.np_off) -
-                     SUDO_TRACK - room;
+        st.np_over =
+            draw_spaced(canvas, widget_get_text(a), I(a, W_X) + NP_CAPS_INSET - st.np_off,
+                        I(a, W_Y) + (I(a, W_H) - NP_CAPS_PX) / 2, NP_CAPS_PX,
+                        RGBA(np_tap_lit(a) ? np_tap_ink() : NP_ALBUM_RGB), room + st.np_off) -
+            SUDO_TRACK - room;
         canvas_set_clip_rect(canvas, old);
         if (st.np_over > 0 && !st.np_marquee)
             st.np_marquee = timer_add(np_marquee, (void *)0, MARQUEE_HOLD_MS);
@@ -3070,7 +3074,7 @@ int ringnav_paint(void *w, void *canvas) {
     paint_caps(w, canvas);
     if (theme()->marquee_fade) marquee_fade(w, canvas);
     if (w && w == slider_page_win) slider_page_paint(w, canvas);
-    if (w && w == st.np_win) np_modes(w, canvas);
+    if (w && w == st.np_win && !visualizer_full()) np_modes(w, canvas); /* else the page's own */
     hold_paint(w, canvas, 1);
     coverflow_home_clip(w, canvas, 0);
     st.paint_w = w ? P(w, W_PARENT) : (void *)0;
@@ -3354,6 +3358,7 @@ static void quick_lock_text(void *win) {
 int ringnav_quick_lock(void *win, void *event) {
     lock_set((lock_choice() + 1) % 4);
     quick_lock_text(win);
+    widget_invalidate_force(win, (void *)0); /* OLED's row paints the value: its label is hidden */
     return 0;
 }
 #define QUICK_HOLD "_quick_hold"
@@ -3437,6 +3442,50 @@ static void quick_open(void *win) {
         widget_on(c, EVT_VALUE_CHANGED, quick_moved, P(c, W_PARENT));
     }
 }
+/* OLED's page (quick_rows, quick_rows_key): seven QS_ROW_H rows from QS_ROW_TOP under the status
+ * row, Brightness first with its slider inline on the right column, then a row for each of six of
+ * stock's buttons, its icon at opacity 0 over the whole row, so a tap there and Wi-Fi's and
+ * Bluetooth's holds stay stock's. Playback's and System's buttons go. */
+#define QS_ROW_TOP 58
+#define QS_ROW_H 32
+#define QS_ROWS 7
+#define QS_TRACK_X 190 /* the inline slider's track, to the right column */
+#define QS_TRACK_END 347
+#define QS_ROW_AT "_qs_row"    /* the selected row, 0 Brightness */
+#define QS_ADJUST "_qs_adjust" /* 1 while the wheel moves the brightness */
+static const char *const qs_row_icons[QS_ROWS] = { "slider_backlight", "img_wifiswitch",
+                                                   "img_btswitch",     "img_lock",
+                                                   "img_gain",         "img_po",
+                                                   "img_usbmode" },
+                         *const qs_row_names[QS_ROWS] = { "Brightness",   "Wi-Fi", "Bluetooth",
+                                                          "Buttons Lock", "Gain",  "Output",
+                                                          "USB Mode" };
+static void quick_rows_open(void *win) {
+    void *c = widget_lookup(win, "view_menu", 1);
+    if (c) widget_move_resize(c, 0, 0, 375, QS_ROW_TOP + QS_ROWS * QS_ROW_H);
+    for (unsigned i = 0; i < sizeof quick_icons / sizeof *quick_icons; ++i) {
+        if ((c = widget_lookup(win, quick_labels[i], 1))) widget_set_visible(c, 0, 0);
+        if ((c = widget_lookup(win, quick_icons[i], 1))) widget_set_visible(c, 0, 0);
+    }
+    for (int r = 1; r < QS_ROWS; ++r) {
+        if (!(c = widget_lookup(win, qs_row_icons[r], 1))) continue;
+        widget_move_resize(c, 0, QS_ROW_TOP + r * QS_ROW_H, 375, QS_ROW_H);
+        widget_set_opacity(c, 0);
+        widget_set_visible(c, 1, 0);
+    }
+    if ((c = widget_lookup(win, "view_backlight", 1)))
+        widget_move_resize(c, 0, QS_ROW_TOP, 375, QS_ROW_H);
+    if ((c = widget_lookup(win, "image0", 1))) widget_set_visible(c, 0, 0);
+    if ((c = widget_lookup(win, "image1", 1))) widget_set_visible(c, 0, 0);
+    if ((c = widget_lookup(win, "slider_backlight", 1))) {
+        /* the touch's span: the knob's 14 px centred on the track's ends */
+        widget_set_self_layout_params(c, "183", "0", "171", "32");
+        widget_move_resize(c, QS_TRACK_X - 7, 0, QS_TRACK_END - QS_TRACK_X + 14, QS_ROW_H);
+        widget_set_prop_int(c, "dragger_size", 14);
+        widget_on(c, EVT_VALUE_CHANGING, quick_moved, P(c, W_PARENT));
+        widget_on(c, EVT_VALUE_CHANGED, quick_moved, P(c, W_PARENT));
+    }
+}
 int ringnav_quick_settings(void *win, void *ctx) {
     int result = stock_quicksettings_trampoline(win, ctx);
     if (win) {
@@ -3450,6 +3499,7 @@ int ringnav_quick_settings(void *win, void *ctx) {
             widget_on(icon, EVT_POINTER_DOWN, quick_down, icon);
         }
         if (classic_pages()) quick_open(win);
+        if (oled_pages()) quick_rows_open(win);
         widget_on(win, EVT_DESTROY, quick_cancel, win);
         widget_on(win, EVT_WINDOW_CLOSE, quick_cancel, win);
         widget_on(win, EVT_WINDOW_BACKGROUND, quick_cancel, win);
@@ -3748,6 +3798,7 @@ int ringnav_powermanager(void *win, void *ctx) {
         widget_set_text_utf8(list_row_into(view, "system_powermanager", battery_history, 0),
                              "Battery History");
     boot_row(view);
+    power_rows(view); /* Restart and Shut Down, last */
     return result;
 }
 /* The Bluetooth page's list (stock's local builder, btmenu_rows), rebuilt whole on every search and
@@ -5204,6 +5255,7 @@ static int np_gone(void *win, void *event) {
             st.np_slide = st.np_lrc = st.np_title = st.np_artist = (void *)0;
         st.scrub_moved = 0; /* the page is going: no seek */
         st.np_off = st.np_full = st.lyric_held = 0;
+        np_tap_reset();
         stop_timer(&st.np_marquee);
         stop_timer(&st.np_remain_timer);
         stop_timer(&st.np_fit_timer);
@@ -5311,7 +5363,6 @@ int stream_ipod(void *art, void *const text[4], void *elapsed, void *remain, voi
  * (np_full), once there are lyrics to show. The slide_view or scroll_lrc taking the touch (its
  * abort) ends full screen at once, so the pages slide in their column. Returns 0: a STOP would
  * keep the slide_view's grab (rate_fav_click). */
-#define TAP_PX 10 /* AWTK's drag threshold */
 static int np_lyric_touch(void *ctx, void *event) {
     int type = I(event, EVENT_TYPE), x = I(event, EVENT_X), y = I(event, EVENT_Y);
     int tap = (unsigned)(x - st.np_tap_x + TAP_PX) <= 2 * TAP_PX &&
@@ -5364,6 +5415,11 @@ int ringnav_playing(void *win, void *ctx) {
         widget_on(lyric, touch[i], np_lyric_touch, (void *)0);
     for (unsigned i = 0; i < sizeof touch / sizeof *touch; ++i)
         widget_on(win, touch[i], np_time_tap, (void *)0); /* Track Time */
+    static const unsigned taps[] = { EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE,
+                                     EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
+    for (unsigned i = 0; i < sizeof taps / sizeof *taps; ++i)
+        widget_on(win, taps[i], np_tap, (void *)0); /* the art, artist and album (np_taps.c) */
+    np_tap_reset();
     st.np_time_down = 0;
     st.np_hash = 0;
     const char *file;
@@ -5909,11 +5965,12 @@ void *ringnav_ui_load(const char *name, void *parent) {
     return root;
 }
 
-/* bigcover_page_init: stock's full-screen art (a tap on Now Playing's opens it, any tap closes it)
+/* bigcover_page_init: stock's full-screen art (Enlarged Album Art's countdown opens it, any tap
+ * closes it; stock's tap on Now Playing's art is np_taps.c's link to the album instead)
  * shows the song name BC_MS, then bc_fade fades it out. Stock's own timer writes the next song's
- * name; ringnav_sleep shows it again when the track changes. Enlarged Album Art's countdown opens
- * it too; off the art page (lyrics, info, visualizer) there is no art to enlarge, so ringnav_sleep
- * holds the countdown full there (#57). Closing it after the open flashed it every 10 s (#153). */
+ * name; ringnav_sleep shows it again when the track changes. Off the art page (lyrics, info,
+ * visualizer) there is no art to enlarge, so ringnav_sleep holds the countdown full there (#57).
+ * Closing it after the open flashed it every 10 s (#153). */
 int ringnav_bigcover(void *win, void *ctx) {
     int result = stock_bigcover_trampoline(win, ctx);
     if (!win) return result;
@@ -5985,8 +6042,8 @@ static int quick_slider(void *w) {
 }
 static void quick_fill(void *w) {
     if (!quick_slider(w)) return;
-    /* Classic's bar is quick_scrub's: stock's goes clear, and 1 says it went */
-    int clear = classic_pages();
+    /* Classic's bar is quick_scrub's, OLED's quick_rows': stock's goes clear, and 1 says it went */
+    int clear = classic_pages() || oled_pages();
     int color = clear ? 1 : (int)RGBA(accent_tone(TONE_LIGHT));
     if (widget_get_prop_int(w, QFILL, 0) == color) return;
     widget_set_prop_int(w, QFILL, color);
@@ -6106,6 +6163,99 @@ static void quick_scrub(void *w, void *canvas) {
     }
     if (part >= 12) paint_round_rows(canvas, &r, &lit, 6); /* under that the knob covers it */
     paint_art(w, canvas, "classic_light_drop_knob", r.x + part - 11 - 3, 269 - 3 + oy);
+    stock_canvas_set_fill_color(canvas, fill);
+}
+/* One of OLED's Quick Settings texts in its row at y: Inter 20 (24 in AWTK's size), from x across
+ * w, align AWTK's 2 left or 3 right. */
+static void quick_text(void *canvas, const unsigned *s, unsigned n, int x, int y, int w,
+                       unsigned rgb, int align) {
+    int align_h = I(canvas, CANVAS_ALIGN_H), align_v = I(canvas, CANVAS_ALIGN_V), px = 24;
+    const char *face = theme_face(s, (int)n, &px);
+    canvas_set_font(canvas, face, (unsigned)px);
+    canvas_set_text_color(canvas, RGBA(rgb));
+    I(canvas, CANVAS_ALIGN_V) = 1, I(canvas, CANVAS_ALIGN_H) = align;
+    canvas_draw_text_in_rect(canvas, s, n, &(rect_t){ x, y, w, QS_ROW_H });
+    I(canvas, CANVAS_ALIGN_V) = align_v, I(canvas, CANVAS_ALIGN_H) = align_h;
+}
+/* Row r's state: its switch, 0 or 1 (-1 for none), else its value's text in out (24 characters
+ * with the NUL); returns 1 for a disabled row (Gain under Line Out). Stock's own words: the lock's
+ * mode, Gain's label, USB's less its "USB " ("USB AUDIO" as Audio); Output by its image. */
+static int quick_state(void *win, int r, unsigned *out, int *on) {
+    void *icon = widget_lookup(win, qs_row_icons[r], 1);
+    const char *image = icon ? widget_get_prop_str(icon, "image", "") : "", *s = (const char *)0;
+    const unsigned *w = (const unsigned *)0;
+    unsigned n = 0, len = (unsigned)strlen(image);
+    *on = r == 1 || r == 2 ? named_in(QS_LIT, image) : -1;
+    if (r == 3) s = lock_names[lock_choice()];
+    if (r == 5)
+        s = !tk_strcmp(image, "drop_po")   ? "Phones"
+            : !tk_strcmp(image, "drop_lo") ? "Line Out"
+                                           : image + 5;
+    if (r == 4 || r == 6)
+        w = widget_get_text(widget_lookup(win, r == 4 ? "label_gain" : "label_usbmode", 1));
+    if (w && r == 6 && w[0] == 'U' && w[1] == 'S' && w[2] == 'B' && w[3] == ' ') w += 4;
+    for (; s && s[n] && n < 23; ++n)
+        out[n] = (unsigned char)(r == 5 && s == image + 5 ? s[n] & ~32 : s[n]);
+    for (; w && w[n] && n < 23; ++n) /* "AUDIO": all capitals past its first letter go small */
+        out[n] = n && w[n] >= 'A' && w[n] <= 'Z' && w[1] >= 'A' && w[1] <= 'Z' && w[3] ? w[n] | 32
+                                                                                       : w[n];
+    out[n] = 0;
+    return r == 4 && len > 7 && !tk_strcmp(image + len - 7, "disable");
+}
+/* OLED's Quick Settings page (quick_rows_open), under the window's children, in its coordinates:
+ * the selection bar, each row's name, then on the right column Brightness's track (6 px, its fill
+ * to the value; white with the accent's light fill on the bar), a 34x20 switch (RULES 7: on the bar
+ * a white track with an Accent knob when on, a white outline when off) or the value in Text
+ * Secondary; a disabled row's words in Text Tertiary. Adjusting, the 14 px white knob stands at the
+ * fill's end inside a white focus ring. Then the status row, which the dialog covers. */
+static void quick_rows(void *win, void *canvas) {
+    void *bar = *(void *const *)system_bar;
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), text[24],
+             accent = scheme()->tones[0];
+    int sel = widget_get_prop_int(win, QS_ROW_AT, 0);
+    for (int r = 0; r < QS_ROWS; ++r) {
+        int y = QS_ROW_TOP + r * QS_ROW_H, cy = y + QS_ROW_H / 2, lit = r == sel, on, n = 0;
+        int off = quick_state(win, r, text, &on);
+        unsigned ink = lit ? 0xffffff : off ? 0x858585 : 0xffffff, name[16];
+        if (lit) fill_box(canvas, &(rect_t){ 16, y, 343, QS_ROW_H }, RGBA(accent), 8);
+        for (; qs_row_names[r][n]; ++n) name[n] = (unsigned char)qs_row_names[r][n];
+        quick_text(canvas, name, (unsigned)n, 24, y, QS_TRACK_X - 32, ink, 2);
+        if (!r) {
+            void *s = widget_lookup(win, "slider_backlight", 1);
+            int min = s ? widget_get_prop_int(s, "min", 0) : 0,
+                max = s ? widget_get_prop_int(s, "max", 100) : 100;
+            rect_t t = { QS_TRACK_X, cy - 3, QS_TRACK_END - QS_TRACK_X, 6 }, part = t;
+            part.w = max > min && s
+                         ? t.w *
+                               clamp_step(0, max - min, widget_get_prop_int(s, "value", 0) - min) /
+                               (max - min)
+                         : 0;
+            fill_box(canvas, &t, RGBA(lit ? 0xffffff : theme()->np_track_rgb), 3);
+            if (part.w >= 6)
+                fill_box(canvas, &part, RGBA(lit ? mix(accent, 0xffffff, 11, 20) : accent), 3);
+            if (lit && widget_get_prop_int(win, QS_ADJUST, 0)) {
+                int x = t.x + part.w;
+                fill_box(canvas, &(rect_t){ x - 11, cy - 11, 22, 22 }, RGBA(0xffffff), 11);
+                fill_box(canvas, &(rect_t){ x - 9, cy - 9, 18, 18 }, RGBA(accent), 9);
+                fill_box(canvas, &(rect_t){ x - 7, cy - 7, 14, 14 }, RGBA(0xffffff), 7);
+            }
+        } else if (on >= 0) {
+            rect_t t = { QS_TRACK_END - 34, cy - 10, 34, 20 };
+            fill_box(canvas, &t, RGBA(lit ? 0xffffff : on ? accent : theme()->np_track_rgb), 10);
+            if (lit && !on)
+                fill_box(canvas, &(rect_t){ t.x + 1, t.y + 1, 32, 18 }, RGBA(accent), 9);
+            fill_box(canvas, &(rect_t){ t.x + (on ? 16 : 2), cy - 8, 16, 16 },
+                     RGBA(lit && on ? accent : 0xffffff), 8);
+        } else
+            quick_text(canvas, text, wide_len(text), QS_TRACK_X - 40, y,
+                       QS_TRACK_END - QS_TRACK_X + 40,
+                       lit   ? 0xffffff
+                       : off ? 0x858585
+                             : 0xababab,
+                       3);
+    }
+    if (bar) widget_paint(bar, canvas);
+    st.paint_w = win;
     stock_canvas_set_fill_color(canvas, fill);
 }
 /* The confirm pop-up's prompt (stock's own child, "Shut Down?"): CONFIRM_PROMPT_PX, centred in the
@@ -6232,6 +6382,7 @@ static const char *bar_title_of(void *win, void **label) {
     if (!tk_strcmp(name, "radionp_page")) return "Internet Radio";
     if (!tk_strcmp(name, "usbmode_page")) return "Q2 Pod";
     if (!tk_strcmp(name, "search_dialog")) return "Search"; /* stock's toolbar has no label */
+    if (!tk_strcmp(name, "statusbar_dialog")) return "Quick Settings";
     void *nav = widget_lookup(win, "view_navbar", 1);
     if (nav) {
         for (int i = 0, k = widget_count_children(nav); i < k && !*label; ++i) {
@@ -6364,7 +6515,10 @@ void bar_title_sync(void *win) {
         title_gone(0, 0);
         st.title_win = win;
         widget_on(win, EVT_DESTROY, title_gone, win);
-        if (tk_strcmp(widget_get_type(win), "window") && win != st.search_win) return;
+        /* OLED's Quick Settings is a page (quick_rows) with the bar's title */
+        if (tk_strcmp(widget_get_type(win), "window") && win != st.search_win &&
+            (!oled_pages() || tk_strcmp(widget_get_prop_str(win, "name", ""), "statusbar_dialog")))
+            return;
         t = bar_title_of(win, &st.title_lbl);
         /* a page may have Songs' action bar: only a set with action_row looks */
         if (geom_val(V_ACTION_ROW)) st.action_view = widget_lookup(win, "view_navbar_allplay", 0);
@@ -6492,6 +6646,9 @@ int ringnav_paint_bg(void *w, void *canvas) {
     if (classic_pages() && P(canvas, CANVAS_LCD) &&
         !tk_strcmp(widget_get_prop_str(w, "name", ""), "statusbar_dialog"))
         quick_page(w, canvas);
+    else if (oled_pages() && P(canvas, CANVAS_LCD) &&
+             !tk_strcmp(widget_get_prop_str(w, "name", ""), "statusbar_dialog"))
+        quick_rows(w, canvas);
     if (w == st.msg_win || w == st.usb_win) msg_paint(w, canvas);
     if (w == st.search_win) search_paint(w, canvas);
     if (w && w == st.pl_box) pl_box_paint(w, canvas);
@@ -6587,8 +6744,11 @@ static unsigned *style_color(unsigned *color, void *style, const char *name, uns
 /* A row that can't play now (catalogue.c) takes its text colour last, over the theme's. */
 unsigned *ringnav_style_color(unsigned *color, void *style, const char *name, unsigned fallback) {
     style_color(color, style, name, fallback);
-    if (!st.style_depth && st.paint_w && name && tk_str_end_with(name, "text_color"))
+    if (!st.style_depth && st.paint_w && name && tk_str_end_with(name, "text_color")) {
         catalogue_greyed(st.paint_w, color);
+        if (np_tap_lit(st.paint_w)) /* Now Playing's artist or album held (np_taps.c) */
+            *color = (*color & 0xff000000u) | (RGBA(np_tap_ink()) & 0xffffff);
+    }
     return color;
 }
 static unsigned *style_color(unsigned *color, void *style, const char *name, unsigned fallback) {
@@ -7797,6 +7957,8 @@ int ringnav_dispatch(void *target, void *event) {
         }
         /* Now Playing's ⋯: an app's page instead of stock's while the app's queue plays */
         if (np_mode_click(target, event)) return STOP; /* shuffle or repeat, one of the two */
+        /* the art's tap is np_tap's (its album), never stock's Enlarged Art */
+        if (target == st.np_cover) return STOP;
         return target == np_more() && addon_more() ? STOP : time_click(target, event);
     }
     return stock_dispatch_trampoline(target, event);
@@ -9603,14 +9765,16 @@ static int qm_restore(void *page, void *event) {
 /* Now Playing's More rows, for this record: Album info (0x5397cc) fills the album query and opens
  * playerjumpinfo_page; Artist info opens artistinfo_page with {class, record}. A song played in
  * Coverflow, or with Artist albums: Coverflow, goes to the album's tracks in Coverflow instead, as
- * Go to Artist reaches its covers. A card app's song goes to the app's page when it offers one
- * (addon.c addon_goto). */
+ * Go to Artist reaches its covers; album QM_LOOKUP_ALBUM (Now Playing's album and art taps,
+ * np_goto) keeps to playerjumpinfo_page, as the ⋯ page's Look up Album does. A card app's song goes
+ * to the app's page when it offers one (addon.c addon_goto). */
+#define QM_LOOKUP_ALBUM 2
 static void qm_goto(void *r, int album) {
     unsigned char *info = (unsigned char *)g_local_classinfo_save;
     void *wm = window_manager(), *page = window_manager_get_top_window(wm);
     /* a card app's song (Qobuz's): the app's own page for its album or artist, when it says so */
     if (addon_goto(P(r, REC_PATH), P(r, album ? REC_ALBUM : REC_ARTIST), album)) return;
-    if (album && (navigator_window_is_exist("coverflow_page") || ringnav_artist_view()) &&
+    if (album == 1 && (navigator_window_is_exist("coverflow_page") || ringnav_artist_view()) &&
         coverflow_goto_album(r))
         return;
     memcpy(st.qm_classinfo, info, sizeof st.qm_classinfo);
@@ -9630,6 +9794,36 @@ static void qm_goto(void *r, int album) {
     }
     void *top = window_manager_get_top_window(wm);
     if (top != page) widget_on(top, EVT_WINDOW_CLOSE, qm_restore, top);
+}
+
+/* Go to Album (album) or Go to Artist has somewhere to go for r: it names one, and its
+ * single-instance page is not open already (nor Cover Flow showing that album alone). */
+static int qm_goes(void *r, int album) {
+    const char *name = P(r, album ? REC_ALBUM : REC_ARTIST);
+    if (!name || !*name) return 0;
+    return album ? !navigator_window_is_exist("playerjumpinfo_page") && !coverflow_shows_album(r)
+                 : !navigator_window_is_exist("artistinfo_page");
+}
+
+/* Now Playing's taps on its album or art (album) and artist (np_taps.c): the playing song's album
+ * as the ⋯ page's Look up Album opens it (QM_LOOKUP_ALBUM), or Go to Artist (its Cover Flow under
+ * Artist View, as Look up Artist), where the hold menu would offer that row (qm_hold's and
+ * qm_open's gates: a local or Library queue, not AirPlay, a card app's song only to its app's
+ * page), so a stream goes nowhere. With go 0, only whether it would; 1 when it went or would. This
+ * is the hold menu's code: its record checks and qm_goto live here. */
+int np_goto(int album, int go) {
+    void *wm = window_manager();
+    unsigned at, n, type = (unsigned)MCL(MCL_TYPE);
+    if (!st.np_win || window_manager_get_top_window(wm) != st.np_win || st.qm_dialog ||
+        st.qm_timer || !usable() || window_manager_is_animating(wm) || airplayGetFlag() == 2 ||
+        g_navbar_status || (type != 1 && (type & 0xf000) != 0xf000))
+        return 0;
+    void *r = queue_now(&at, &n);
+    if (!r || !addon_goes(P(r, REC_PATH)) || !qm_goes(r, album)) return 0;
+    if (!go) return 1;
+    st.qm_cls = 0xf001; /* Go to Artist's class, as the hold's on Now Playing */
+    qm_goto(r, album ? QM_LOOKUP_ALBUM : 0);
+    return 1;
 }
 
 /* Deferred so the dialog is never closed under its own click dispatch. */
@@ -9923,7 +10117,7 @@ static int qm_open(const void *unused) {
     }
     unsigned cls = st.qm_cls;
     int song = st.qm_kind == QM_SONG || st.qm_kind == QM_COVERFLOW || st.qm_kind == QM_PLAYING;
-    const char *album = P(r, REC_ALBUM), *artist = P(r, REC_ARTIST);
+    const char *album = P(r, REC_ALBUM);
     /* a song by its title: the player's parse names a folder play's untagged record */
     char name[512];
     const char *tag = song ? now_tag(r, REC_TITLE) : (void *)0;
@@ -9961,13 +10155,10 @@ static int qm_open(const void *unused) {
     if (st.qm_kind < QM_COVERFLOW || st.qm_kind == QM_PLAYING) acts[n++] = QA_PLAYLIST;
     /* a card app's song isn't in the Library: Go to only to the app's own page */
     int hidden = song && !addon_goes(P(r, REC_PATH));
-    if ((st.qm_kind == QM_SONG || st.qm_kind == QM_PLAYING) && album && *album && !hidden &&
-        (cls & 0xfff0) != 0xff10 && !navigator_window_is_exist("playerjumpinfo_page") &&
-        !coverflow_shows_album(r))
+    if ((st.qm_kind == QM_SONG || st.qm_kind == QM_PLAYING) && !hidden &&
+        (cls & 0xfff0) != 0xff10 && qm_goes(r, 1))
         acts[n++] = QA_ALBUM;
-    if ((song || cls == CLASS_ALBUMS) && artist && *artist && !hidden &&
-        !navigator_window_is_exist("artistinfo_page"))
-        acts[n++] = QA_ARTIST;
+    if ((song || cls == CLASS_ALBUMS) && !hidden && qm_goes(r, 0)) acts[n++] = QA_ARTIST;
     /* ponytail: hidden while a folder_page is open (as Go to's single-instance pages), so a folder
      * play's Now Playing has none; Back reaches that folder_page instead. */
     if (song && !navigator_window_is_exist("folder_page") && song_folder(r, st.go_folder))
@@ -10208,18 +10399,19 @@ static int qm_hold(void) {
     return 1;
 }
 
-/* Quick Settings' wheel: 0 its brightness slider, 1 stock's volume (Q2POD QSVOLUME). A held
- * Play/Pause there switches it (ringnav_keylong) and says so in the theme's own toast, over the
- * pull-down as stock's own messages are.
+/* Quick Settings' wheel: 0 its brightness slider, 1 stock's volume (Q2POD QSVOLUME); OLED's walks
+ * its rows instead (quick_walk). A held Play/Pause there switches it (ringnav_keylong) and says so
+ * in the theme's own toast, over the pull-down as stock's own messages are.
  * ponytail: the toast is modal, so it takes the wheel and Centre for its 2 s; a floating band kept
  * them live (until 1.8.2) but had no theme's look. */
 static int quick_volume(void) {
     if (!st.qs_wheel) st.qs_wheel = 1 + config_value("Q2POD", "QSVOLUME", 2, 0);
     return st.qs_wheel - 1;
 }
-/* The words for ringnav_keylong's toast; 0 when the hold is not Quick Settings'. */
+/* The words for ringnav_keylong's toast; 0 when the hold is not Quick Settings' or is OLED's. */
 static const char *quick_wheel_toggle(void *top) {
-    if (!usable() || !top || tk_strcmp(widget_get_prop_str(top, "name", ""), "statusbar_dialog"))
+    if (!usable() || !top || oled_pages() ||
+        tk_strcmp(widget_get_prop_str(top, "name", ""), "statusbar_dialog"))
         return 0;
     int volume = !quick_volume();
     st.qs_wheel = 1 + volume;
@@ -10321,11 +10513,19 @@ static int home_cf_hold(void *top) {
  * Home's Cover Flow row it opens Cover Flow's settings, on an
  * Internet Radio station it is the favourite toggle, on a Spotify track Add to Queue (its reply
  * toasts), on a card app's row its hold op (addon_hold: a Deezer list downloaded whole), in Quick
- * Settings the wheel's brightness/volume switch, on View Queue's shuffle list
- * Play Next (un_hold), the release latched as the queue menu's. */
+ * Settings (not OLED's) the wheel's brightness/volume switch, on View Queue's shuffle list
+ * Play Next (un_hold), the release latched as the queue menu's. A held Previous or Next that
+ * scans (seek_held) and Centre held on OLED's lock window (lockscreen_hold) stop first. */
 int ringnav_keylong(void *ctx, void *event) {
     if (event && ple_key((unsigned)I(event, EVENT_KEY), 3)) return STOP;
     if (event && seek_held((unsigned)I(event, EVENT_KEY))) return STOP;
+    /* OLED's lock window: Centre held unlocks (lockscreen.c lockscreen_hold); its release is the
+     * held power key's, which stock's keyup takes and clears, as after the Shut Down? hold */
+    if (event && I(event, EVENT_KEY) == KEY_CENTER &&
+        lockscreen_hold(window_manager_get_top_window(window_manager()))) {
+        g_power_longkey = 1;
+        return STOP;
+    }
     if (!event || I(event, EVENT_KEY) != KEY_PLAY) return stock_keylong_trampoline(ctx, event);
     void *top = window_manager_get_top_window(window_manager());
     const char *fav = radio_hold(top);
@@ -11057,13 +11257,10 @@ static int tick_gate(void *e) {
     if (Q2POD_DEV && !muted) wheel_gate_note();
     return 1;
 }
-/* A wheel tick's step of the volume, as stock's dialog makes it (volume_dialog_on_keyup): within 0
- * and the volume limit, set and saved. */
+/* A wheel tick's step of the volume, as stock's dialog makes it (volume_dialog_on_keyup, and
+ * vol_next's steps at the wheel's speed): within 0 and the volume limit, set and saved. */
 static void vol_step(unsigned key) {
-    int value = g_volume + (key == KEY_NEXT ? 1 : -1);
-    if (value < 0) value = 0;
-    if (value > g_maxvolume) value = g_maxvolume;
-    if (value > 100) value = 100;
+    int value = vol_next(key);
     if (value == g_volume) return;
     g_volume = value;
     device_set_volume(value, 1);
@@ -11618,6 +11815,34 @@ static int edit_single(const void *info) {
     return 0;
 }
 
+/* OLED's Quick Settings (quick_rows): the wheel walks the rows, past a disabled one, stopping at
+ * the ends. */
+static void quick_walk(void *win, int dir) {
+    unsigned text[24];
+    int on, r = widget_get_prop_int(win, QS_ROW_AT, 0), next = r + dir;
+    while (next > 0 && next < QS_ROWS && quick_state(win, next, text, &on)) next += dir;
+    if (next < 0 || next >= QS_ROWS || next == r) return;
+    widget_set_prop_int(win, QS_ROW_AT, next);
+    widget_invalidate_force(win, (void *)0);
+}
+/* Centre on Brightness takes the wheel to its slider and back; on another row it clicks the row's
+ * button, as a tap does: a switch flips, a value steps to its next. Return while adjusting goes
+ * back to the rows. 0 leaves the key to close the page. */
+static int quick_rows_key(void *win, unsigned key) {
+    int r = widget_get_prop_int(win, QS_ROW_AT, 0), adjust = widget_get_prop_int(win, QS_ADJUST, 0),
+        on;
+    unsigned text[24];
+    if (key == KEY_RETURN && !adjust) return 0;
+    if (key == KEY_RETURN || !r) {
+        widget_set_prop_int(win, QS_ADJUST, !adjust);
+    } else if (!quick_state(win, r, text, &on)) {
+        void *icon = widget_lookup(win, qs_row_icons[r], 1);
+        unsigned click[12];
+        if (icon) stock_dispatch_trampoline(icon, pointer_event_init(click, EVT_CLICK, icon, 0, 0));
+    }
+    widget_invalidate_force(win, (void *)0);
+    return 1;
+}
 static int edit_key(void *top, unsigned key) {
     static const unsigned release[EVENT_KEY / 4 + 1] = { [EVENT_KEY / 4] = KEY_CENTER };
     int quick = top && !tk_strcmp(widget_get_prop_str(top, "name", ""), "statusbar_dialog");
@@ -11637,11 +11862,13 @@ static int edit_key(void *top, unsigned key) {
     if (quick && ((unsigned)(I(g_dropdown_menu_state, 0) - 1) < 2 ||
                   widget_get_prop_int(top, "timer_idex", -1) != -1))
         return 1;
-    if (quick && quick_volume()) return 0; /* stock's wheel volume */
+    if (quick && !oled_pages() && quick_volume()) return 0; /* stock's wheel volume */
     void *wm = window_manager();
     if (window_manager_is_animating(wm) || pointer_down()) return 1;
     int dir = key == KEY_NEXT ? 1 : -1;
-    if (quick) {
+    if (quick && oled_pages() && !widget_get_prop_int(top, QS_ADJUST, 0)) {
+        quick_walk(top, dir);
+    } else if (quick) {
         void *slider = widget_lookup(top, "slider_backlight", 1);
         if (!slider || !widget_get_visible(slider)) return 1;
         int value = widget_get_prop_int(slider, "value", 0);
@@ -11841,15 +12068,17 @@ int ringnav(void *ctx, void *event) {
     /* Cover Flow's flip: a Centre during it does nothing. Its Return is the page's (coverflow.c
      * keyup), the wheel waits at the page's no surface (hold_wheel). */
     if (key == KEY_CENTER && coverflow_turning() && !g_power_longkey) return STOP;
-    /* Return or Centre closes quick settings, as its swipe up does (dialog_quit); stock leaves
-     * Return to its Home button and Centre to turning the screen off. A held Return's release
-     * goes to the stock filter, which consumes its latch (the hold closed it itself,
+    /* Return or Centre closes quick settings, as its swipe up does (dialog_quit), but on OLED's
+     * rows (quick_rows_key) Centre acts on the row and Return leaves Brightness's slider first;
+     * stock leaves Return to its Home button and Centre to turning the screen off. A held Return's
+     * release goes to the stock filter, which consumes its latch (the hold closed it itself,
      * compact_now_playing). */
     if ((key == KEY_CENTER ||
          (key == KEY_RETURN && !*(volatile unsigned char *)RETURN_RELEASE_LATCH)) &&
         usable()) {
         void *top = window_manager_get_top_window(window_manager());
         if (top && !tk_strcmp(widget_get_prop_str(top, "name", ""), "statusbar_dialog")) {
+            if (oled_pages() && quick_rows_key(top, key)) return STOP;
             dialog_quit(top, 0);
             return STOP;
         }
@@ -11865,10 +12094,11 @@ int ringnav(void *ctx, void *event) {
         }
         /* OLED's scan page (classic_pages.c oled_scan) has Cancel on the selection bar: Centre
          * presses it, as a tap does, and stops the scan */
-        void *cancel = key == KEY_CENTER && oled_pages() && top &&
-                               !tk_strcmp(widget_get_prop_str(top, "name", ""), "updatemusic_dialog")
-                           ? widget_lookup(top, "btn_no", 1)
-                           : (void *)0;
+        void *cancel =
+            key == KEY_CENTER && oled_pages() && top &&
+                    !tk_strcmp(widget_get_prop_str(top, "name", ""), "updatemusic_dialog")
+                ? widget_lookup(top, "btn_no", 1)
+                : (void *)0;
         if (cancel) {
             unsigned click[12];
             stock_dispatch_trampoline(cancel, pointer_event_init(click, EVT_CLICK, cancel, 0, 0));

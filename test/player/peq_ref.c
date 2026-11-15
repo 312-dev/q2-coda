@@ -1,6 +1,6 @@
 /* The EQ for test/player/run.py, from patch/peq.c as the player builds it:
  *   peq_ref save STATE GAIN [PREAMP]    an eq_state playing a PEQ of one 1 kHz band of GAIN dB, preamp PREAMP
- *                                        (a set one, so it plays as saved) or Auto
+ *                                        (a set one) or Auto, 0 dB here; either plays as saved
  *   peq_ref filter STATE RATE IN OUT [FRAME STATE2]
  *                                        IN (raw S16 stereo) through STATE's EQ as player/dsp.c runs it, float from
  *                                        x / 32768 and back by lrintf of x * 32768, saturated; from FRAME on through

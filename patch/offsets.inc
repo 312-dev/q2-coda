@@ -193,7 +193,17 @@ static inline int arc_out(int r, int y) {
     return 16 * r - s;
 }
 #define PLACEHOLDER "default_album_flow" /* Cover Flow's and Spotify's missing art */
-#define VOL_POLL_MS 50 /* how often the volume indicator checks for a change */
+#define VOL_POLL_MS 16 /* how often the volume indicator checks for a change, and eases its bar */
+/* The volume bar's ease (volume.c vol_ease): a first-order follow with this time constant, so 95%
+ * of a step in 3 x VOL_EASE_MS. A choice, not a measurement: no source times an iPod's bar. */
+#define VOL_EASE_MS 60
+/* The wheel's volume acceleration (volume.c vol_accel): (speed / VOL_ACCEL_START)^4 steps a tick,
+ * speed in degrees a second, Rockbox's iPod curve; at most VOL_ACCEL_MAX (reached from 475 deg/s),
+ * the speed taken as at most VOL_ACCEL_TOP so the power fits 32 bits. VOL_ACCEL_MAX is ours: a
+ * tick is 50 degrees at 50% Wheel Sensitivity, so a fast turn moves the volume about 70. */
+#define VOL_ACCEL_START 270
+#define VOL_ACCEL_MAX 10
+#define VOL_ACCEL_TOP 1000
 /* The volume panel off Now Playing (vol_paint): exactly over Quick Settings' brightness row
  * (tools/ipod.py checks it), its rounded corners clear of the 80px glass corners. */
 #define VOL_PANEL_X 26
@@ -282,7 +292,7 @@ static inline int arc_out(int r, int y) {
 #define DRIFT_Y_MS 26000
 #define DRIFT_TICK_MS 200
 #define DRIFT_MAX_STEP_MS 500 /* 2.5 ticks: a late tick keeps its time */
-#define DRIFT_TEXELS 221088 /* four panels: 4 x 188 x 294, the tallest set's client */
+#define DRIFT_TEXELS 240640 /* four panels: 4 x 188 x 320, a pane the screen's height */
 #define HOME_TOP 8 /* Minimal's decorative inset; Modern starts below the status bar. */
 #define HOME_CHEVRON_SHIFT 15
 #define HOME_FULL_CHEVRON_SHIFT 10
@@ -551,6 +561,12 @@ static inline int arc_out(int r, int y) {
  * a turn), 200 a turn, and stock's poster encoderknob_thread_run+0x150, which dispatches the
  * thread info's key event. */
 #define WHEEL_TICK_UNITS 28
+/* The wheel's speed (playback.c wheel_speed_sample), Rockbox's iPod driver's: timed a click of
+ * WHEEL_SPEED_CLICK degrees at a time (its 4 of 96 positions), averaged (15 v + new) / 16, reset by
+ * WHEEL_SPEED_IDLE_MS without travel (its WHEEL_FAST_OFF_TIMEOUT, 250 ms). */
+#define WHEEL_SPEED_CLICK 15
+#define WHEEL_SPEED_IDLE_MS 250
+#define WHEEL_SPEED_TOP 4000 /* degrees a second: faster samples count as this */
 #define WHEEL_POST 0x6386d0
 #define WHEEL_INFO_EVENT 0x20 /* event type: 0x110 key down, 0x114 key up */
 #define WHEEL_INFO_KEY 0x38   /* the event's key (EVENT_KEY) */
@@ -592,6 +608,10 @@ static inline int arc_out(int r, int y) {
 #define BOOT_KEY_GUARD 0xa4bbf9 /* no symbol: set after a Standby resume, on_wm_keyup_fun drops the next centre release */
 #define NP_KEY_HELD 0xa4e880 /* Now Playing's long press of 222/223 sets it (0x53b4d0), its release clears it */
 #define NP_KEY_MODE 0xa4e881 /* 1 once a key-down stepped the slider with NP_KEY_HELD set (0x53e000) */
+/* stock: on_wm_keydown_before_fun clicks (buzzeer_switch) only while it is clear and sets it after;
+ * on_wm_keyup_before_fun (ringnav's hook) clears it. A key ringnav takes before stock's key-up body
+ * clears it itself, or every later press is silent (docs/internals.md#ipod-row-clicks). */
+#define KEY_TONE_LATCH 0xa4bc00
 #define RETURN_RELEASE_LATCH 0xa4bbfa /* stock long Return arms it; the key-up filter consumes it */
 
 /* slide_menu_scroll_to @0x606290 and completion @0x6064e4; animator

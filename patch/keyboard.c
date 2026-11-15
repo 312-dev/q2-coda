@@ -111,5 +111,7 @@ int kb_wheel_key(unsigned key) {
         kw.at = clamp_step(kw.at, n - 1, key == KEY_NEXT ? 1 : -1);
     kw.lit = keys[kw.at];
     widget_invalidate_force(kb, (void *)0);
+    /* stock's key-up clears the click latch, and ringnav skips it: the next press clicks */
+    *(volatile signed char *)KEY_TONE_LATCH = 0;
     return 1;
 }

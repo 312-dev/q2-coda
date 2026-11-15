@@ -52,7 +52,6 @@ demo	0x49f6fc	0x4	search_fill_genre_tab	`addiu $2, $zero, 0x46`, before the only
 demo	0x49f7a8	0x4	search_fill_genre_tab	the only call to widget_set_children_layout, after "label_genre_msg"; patch/ipod.json stock_row_layout_calls (stock's own table rows fit their title on a relayout under a set that re-pitches them)
 demo	0x4a1fd8	0x4	statusbar_dialog_slide_timer	1st of 2 calls to dialog_quit; tools/build.py FUNCTIONS
 demo	0x4a2de4	0x4	dialog_updatemusic_dialog_init	`sw $zero, -0x4f3c($2)`, the delay slot of the only call to toolsClearDbCount; patch/navigation.c ringnav
-demo	0x4a3694	0x4	volume_dialog_on_keyup	`addiu $sp, $sp, -0x28`; patch/books.c video_key
 demo	0x4a36b4	0x4	volume_dialog_on_keyup	`beqz $2, +70 words`; tools/build.py VOL_DARK
 demo	0x4a3930	0x4	localmusic_album_cover_pause	`sw $3, 0x0($2), forming albumcover_taskstate`; tools/build.py COVER_PAUSE
 demo	0x4a4514	0x4	localmusic_album_table_reload	the load of $25 for the only call to widget_move_resize, after "table_view"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
@@ -289,16 +288,16 @@ demo	0x51f6c0	0x4	player_get_id3info	`lw $4, 0x28($16)` (2nd of 4 such), before 
 demo	0x5264c4	0x4	startPlayFolderSong	`addiu $18, $zero, 0x1`, before 2nd of 2 calls to getFormatString, after "stSongInfo"; patch/playback.c ringnav_player_start
 demo	0x5266b4	0x4	startPlayClassSong	`addiu $18, $zero, 0x1`, before 2nd of 2 calls to getFormatString, after "stSongInfo"; patch/playback.c ringnav_player_start
 demo	0x531f60	0x4	folder_refresh	the load of $25 for the only call to widget_move_resize, after "tableview_folder"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
-demo	0x532000	0x4	folder_refresh	`addiu $5, $zero, 0x4e`, before the only call to table_client_set_row_height, after "tableclient_folder"; patch/ipod.json immediates art_pitch (row creation, reset or artwork offset divisor)
-demo	0x532308	0x4	folder_page_go_up	`addiu $3, $zero, 0x4e`, after "sync"; patch/ipod.json immediates art_pitch (row creation, reset or artwork offset divisor)
+demo	0x532000	0x4	folder_refresh	`addiu $5, $zero, 0x4e`, before the only call to table_client_set_row_height, after "tableclient_folder"; patch/ipod.json immediates folder_pitch (Folder view: row creation, reset and artwork offset divisors (art_pitch unless the set gives its own))
+demo	0x532308	0x4	folder_page_go_up	`addiu $3, $zero, 0x4e`, after "sync"; patch/ipod.json immediates folder_pitch (Folder view: row creation, reset and artwork offset divisors (art_pitch unless the set gives its own))
 demo	0x532cb0	0x4	folder_row_set_name	`addiu $5, $zero, 0x200`, before the only call to tk_snprintf, after "scrlabel_name"; tools/build.py FOLDER_NAME
 demo	0x532cbc	0x4	folder_row_set_name	the load of $25 for the only call to tk_snprintf, after "scrlabel_name"; tools/build.py FOLDER_NAME
 demo	0x532cc4	0x4	folder_row_set_name	`lw $6, 0x8($17)`, the delay slot of the only call to tk_snprintf, after "scrlabel_name"; tools/build.py FOLDER_NAME
-demo	0x532d18	0x4	folder_row_set_name	`addiu $6, $zero, 0x46`, after "s_scrlabel_red24l"; patch/ipod.json immediates art_body (row background, hit target and full-height children)
+demo	0x532d18	0x4	folder_row_set_name	`addiu $6, $zero, 0x46`, after "s_scrlabel_red24l"; patch/ipod.json immediates folder_body (Folder view: row background, hit target and full-height children (art_body unless the set gives its own))
 demo	0x532d3c	0x4	folder_row_set_name	the only call to widget_resize, after "s_scrlabel_red24l"; tools/ipod.py patch_code
-demo	0x533288	0x4	folder_table_scroll_covers	`addiu $16, $zero, 0x4e`, before the only call to widget_lookup; patch/ipod.json immediates art_pitch (row creation, reset or artwork offset divisor)
-demo	0x533c54	0x4	folder_row_pool_init	`addiu $2, $zero, 0x4e`, before the only call to table_row_create, after "img_choice"; patch/ipod.json immediates art_pitch (row creation, reset or artwork offset divisor)
-demo	0x533c8c	0x4	folder_row_pool_init	`addiu $17, $zero, 0x46`, the delay slot of 1st of 2 calls to widget_use_style, after "img_choice"; patch/ipod.json immediates art_body (row background, hit target and full-height children)
+demo	0x533288	0x4	folder_table_scroll_covers	`addiu $16, $zero, 0x4e`, before the only call to widget_lookup; patch/ipod.json immediates folder_pitch (Folder view: row creation, reset and artwork offset divisors (art_pitch unless the set gives its own))
+demo	0x533c54	0x4	folder_row_pool_init	`addiu $2, $zero, 0x4e`, before the only call to table_row_create, after "img_choice"; patch/ipod.json immediates folder_pitch (Folder view: row creation, reset and artwork offset divisors (art_pitch unless the set gives its own))
+demo	0x533c8c	0x4	folder_row_pool_init	`addiu $17, $zero, 0x46`, the delay slot of 1st of 2 calls to widget_use_style, after "img_choice"; patch/ipod.json immediates folder_body (Folder view: row background, hit target and full-height children (art_body unless the set gives its own))
 demo	0x533cfc	0x4	folder_row_pool_init	the only call to widget_set_children_layout, after "img_choice"; patch/ipod.json row_layout_calls (fit ordinary row titles and their containers on every native relayout)
 demo	0x533d64	0x4	folder_row_pool_init	`addiu $6, $zero, 0x9` (1st of 2 such), before 2nd of 3 calls to image_create, after "img_choice"; patch/ipod.json immediates art_inset (artwork and playing overlay at the 8px top/left inset)
 demo	0x533d6c	0x4	folder_row_pool_init	`addiu $5, $zero, 0x4` (1st of 2 such), before 2nd of 3 calls to image_create, after "img_choice"; patch/ipod.json immediates text pages' playing overlay at the 8px top inset (folder artwork on the row layout's 8px left margin)
@@ -414,6 +413,7 @@ demo	0x5fb888	0x4	hscroll_label_on_timer_tick	`lbu $2, 0x7b($16)` (4th of 6 such
 demo	0x5fb930	0x4	hscroll_label_on_timer_tick	`lw $2, 0x80($16)` (6th of 6 such), before 2nd of 2 calls to sub_5fb2c8; tools/build.py HSCROLL_ONCE
 demo	0x5fb954	0x4	hscroll_label_on_timer_tick	the load of $25 for the only call to widget_add_timer; tools/build.py HSCROLL_LULL, tools/build.py build
 demo	0x5fb958	0x4	hscroll_label_on_timer_tick	the only call to widget_add_timer; tools/build.py HSCROLL_LULL
+demo	0x5fbffc	0x4	hscroll_label_on_paint_self	`lbu $2, 0x7b($18)` (2nd of 3 such), before the only call to sub_5fba4c, after "focused"; patch/lockscreen.c oled_lock
 demo	0x5fd234	0x4	children_layouter_list_view_layout	`lw $25, GOT[scroll_view_set_yslidable]` (21st of 54 such), before the only call to scroll_view_set_yslidable, after "animate:animating_time"; tools/ipod.py home_list
 demo	0x5fd484	0x4	children_layouter_list_view_layout	`bgtz $21, +5 words`, before the only call to widget_resize, after "animate:animating_time"; patch/peq_ui.c render
 demo	0x6028ec	0x4	scroll_view_on_scroll	`lw $25, 0x100($4)`, before the only call to a pointer; patch/offsets.inc VIEW_ON_SCROLL

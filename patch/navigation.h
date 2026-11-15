@@ -362,6 +362,7 @@ extern int stock_keyup_trampoline(void *, void *), stock_touch_trampoline(void *
     stock_output_trampoline(int), stock_write_config_trampoline(int, const char *, const char *),
     stock_paint_trampoline(void *, void *), stock_dispatch_trampoline(void *, void *),
     stock_keylong_trampoline(void *, void *), stock_paint_bg_trampoline(void *, void *),
+    stock_vol_keyup_trampoline(void *, void *),
     stock_showface_trampoline(void *), stock_playing_trampoline(void *, void *),
     stock_display_trampoline(void *, void *), stock_bigcover_trampoline(void *, void *),
     stock_localmusic_trampoline(void *, void *), stock_keydown_trampoline(void *, void *),
@@ -531,6 +532,19 @@ int song_artist(void), song_length(void);
 /* theme_engine.c: Track Time's value, and its switch on a tap (np_bar.c np_time_tap) */
 int np_time_total(void), np_time_toggle(void);
 int np_time_tap(void *ctx, void *event);
+/* np_bar.c: 1 when the screen's (x, y) is inside w */
+int np_hit(void *w, int x, int y);
+/* A touch that lifts within TAP_PX of where it came down is a tap, not a swipe or a drag */
+#define TAP_PX 10 /* AWTK's drag threshold */
+/* np_taps.c: Now Playing's art, artist and album taps (np_tap on the window), the one held lit
+ * (np_tap_lit: its text in the accent, np_tap_dim: the art dimmed); navigation.c np_goto is where
+ * they go, with go 0 only whether they would */
+int np_tap(void *ctx, void *event);
+int np_tap_lit(void *w);
+unsigned np_tap_ink(void);
+void np_tap_dim(void *w, void *canvas);
+void np_tap_reset(void);
+int np_goto(int album, int go);
 /* np_bar.c: Now Playing's shuffle and repeat as two controls */
 void np_mode_set(int on, int rep), np_mode_step(int repeat, int dir);
 /* Now Playing's Centre cycle: at rest (the wheel is the volume's), the scrubber, shuffle, repeat
@@ -628,6 +642,7 @@ int upload_scrobbles(void *ctx, void *event);
 
 /* volume.c */
 void vol_paint(void *top, void *canvas);
+int vol_keyup(void *dialog, void *e); /* volume_dialog_on_keyup's hook: the wheel's steps */
 
 /* smart_wifi.c */
 void smart_wake(void); /* Smart Wi-Fi's radio back now, if it had it off */
@@ -648,6 +663,9 @@ void battery_paint(void *w, void *canvas);
 
 /* system.c */
 void power_poll(void);
+
+/* power_rows.c */
+void power_rows(void *view);
 
 /* usb_charge.c: wrappers for charging, configuration loading and USB gadget dispatch. */
 int ringnav_usb_charge(int on), usb_charge_held(void);

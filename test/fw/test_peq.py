@@ -42,7 +42,7 @@ class EqState(C.Structure):
 
 
 class Error(C.Structure):
-    _fields_ = [('line', C.c_uint), ('reason', C.c_char_p)]
+    _fields_ = [('line', C.c_uint), ('reason', C.c_char_p), ('skipped', C.c_uint), ('what', C.c_char * 24)]
 
 
 V2 = Preset.automatic.offset
@@ -63,7 +63,8 @@ def api(fw):
            'peq_response': (None, ptr, i, d, ptr, ptr), 'peq_auto': (d, ptr, i), 'peq_reset': (None, ptr, i, i, ptr),
            'peq_update': (i, ptr, ptr), 'peq_process': (None, ptr, ptr, C.c_uint), 'decibels': (d, d),
            'peq__level': (None, ptr, d, d), 'peq__peak': (d, ptr, ptr, i), 'peq__live': (i, ptr, ptr),
-           'peq__sample': (d, ptr, ptr, i, d, i), 'peq__prepare': (i, ptr, i, ptr)}
+           'peq__sample': (d, ptr, ptr, i, d, i),
+           'peq_export': (C.c_uint, ptr, ptr, C.c_uint), 'peq_export_file': (i, C.c_char_p, ptr, i)}
     return SimpleNamespace(**{k.replace('peq__', ''): fw.fn(k, v[0], *v[1:]) for k, v in fns.items()})
 
 
@@ -714,40 +715,17 @@ def test_a_band_with_no_memory_past_the_new_end_is_dropped(fw):
     assert d.next.used == 1
 
 
-# Auto in the player
+# Auto in the player: the saved number, which demo keeps as the cut for every rate (peq_ui.c headroom)
 
-def test_auto_takes_this_rate_s_cut_and_a_picked_preamp_stands(fw):
+@pytest.mark.parametrize('automatic', (0, 1, 2))
+def test_the_player_plays_the_saved_preamp_auto_s_too(fw, automatic):
     g = api(fw)
-    bands = (PK, 1000, 6, 1),
-    e = Engine()
-    assert g.prepare(r(preset(g, *bands, preamp=-1, automatic=1)), 48000, r(e))
-    assert e.gain[0] == pytest.approx(10 ** (-6 / 20))
-    assert g.prepare(r(preset(g, *bands, preamp=-1, automatic=2)), 48000, r(e))
-    assert e.gain[0] == pytest.approx(10 ** (-1 / 20))
-    assert g.prepare(r(preset(g, *bands, preamp=-1, automatic=0)), 48000, r(e))
-    assert e.gain[0] == pytest.approx(10 ** (-1 / 20))
-
-
-def test_auto_keeps_the_balance(fw):
-    g = api(fw)
-    e = Engine()
-    g.prepare(r(preset(g, (PK, 1000, 6, 1), balance=6, automatic=1)), 48000, r(e))
-    assert e.gain[0] == pytest.approx(10 ** (-12 / 20)) and e.gain[1] == pytest.approx(10 ** (-6 / 20))
-
-
-def test_auto_differs_by_rate_where_a_band_is_past_nyquist(fw):
-    g = api(fw)
-    p = preset(g, (PK, 15000, 12, 1), automatic=1)
-    e = Engine()
-    g.prepare(r(p), 96000, r(e))
-    assert e.gain[0] == pytest.approx(10 ** (-12 / 20))
-    g.prepare(r(p), 16000, r(e))  # the band can't play there: nothing to cut
-    assert e.gain[0] == 1
-
-
-def test_prepare_refuses_what_compile_refuses(fw):
-    g = api(fw)
-    assert not g.prepare(r(preset(g)), 100, r(Engine()))
+    p = preset(g, (PK, 1000, 6, 1), preamp=-1, balance=6, automatic=automatic)
+    for rate in (32000, 44100, 48000, 96000):
+        d = Dsp()
+        g.peq_reset(r(d), rate, 2, r(p))
+        assert d.current.gain[0] == pytest.approx(10 ** (-7 / 20)) and d.current.gain[1] == pytest.approx(10 ** (-1 / 20))
+        assert g.peq_update(r(d), r(p)) and d.pending.gain[0] == d.current.gain[0]
 
 
 # eq_effective, every case of its comment
@@ -813,6 +791,10 @@ def test_parse_no_preamp_is_auto(fw):
 def test_parse_an_empty_file_is_an_empty_preset(fw, text):
     p, _ = parse(api(fw), text)
     assert p.count == 0 and p.automatic == 1
+
+
+def test_parse_a_preamp_without_its_db(fw):
+    assert parse(api(fw), b'Preamp: -1.5\n')[0].preamp == -1.5
 
 
 def test_parse_takes_a_bom_crlf_and_no_last_newline(fw):
@@ -882,14 +864,6 @@ def test_parse_an_off_filter_outside_the_ranges_is_a_blank_slot(fw):
     assert p.count == 0
 
 
-def test_parse_exactly_30_bands_then_no_more(fw):
-    g = api(fw)
-    line = b'Filter: ON PK Fc 100 Hz Gain 1 dB Q 1\n'
-    assert parse(g, line * 30)[0].count == 30
-    p, err = parse(g, line * 31)
-    assert p is None and err.line == 31 and b'30' in err.reason
-
-
 def test_parse_limits_a_file_to_16384_bytes(fw):
     g = api(fw)
     assert parse(g, b'#' * 511 + b'\n' + (b'#' * 511 + b'\n') * 31)[0] is not None
@@ -908,30 +882,36 @@ def test_parse_limits_a_line_to_512_bytes(fw):
 def test_parse_16_tokens_then_no_more(fw):
     g = api(fw)
     assert parse(g, b'Channel: ' + b'L ' * 14)[0] is not None  # 16 tokens with the colon
-    assert parse(g, b'Channel: ' + b'L ' * 15)[1].line == 1
+    p, err = parse(g, b'Channel: ' + b'L ' * 15)
+    assert p is None and err.line == 1 and b'form' in err.reason
+    p, err = parse(g, PEAK + b'Channel: ' + b'L ' * 15)
+    assert p.count == 1 and (err.skipped, err.what) == (1, b'line 2')
 
 
+# A file with nothing usable fails on its first line left out, as a whole file used to on any.
 @pytest.mark.parametrize('text, line, word', (
     (b'Filter 1: ON XX Fc 100 Hz Gain 1 dB Q 1\n', 1, b'type'),
-    (b'\n\nnonsense\n', 3, b'command'),
+    (b'\n\nnonsense\n', 1, b'no Equalizer APO'),
+    (b'\n\nnonsense: yes\n', 3, b'command'),
     (b'Filter a: ON PK Fc 100 Hz Gain 1 dB Q 1\n', 1, b'label'),
-    (b'Filter 1 ON PK Fc 100 Hz Gain 1 dB Q 1\n', 1, b'Filter'),
+    (b'Filter 1 ON PK Fc 100 Hz Gain 1 dB Q 1\n', 1, b'no Equalizer APO'),
     (b'Filter 1: MAYBE PK Fc 100 Hz Gain 1 dB Q 1\n', 1, b'ON or OFF'),
-    (b'Filter 1: ON PK Fc 100 Hz Gain 1 dB\n', 1, b'requires Q'),
+    (b'Filter 1: ON PK Fc 100 Hz Gain 1 dB\n', 1, b"a peak's Q"),
     (b'Filter 1: ON PK Fc 100 Hz Gain 1 dB R 1\n', 1, b'Q'),
     (b'Filter 1: ON PK Fc 100 kHz Gain 1 dB Q 1\n', 1, b'Fc'),
-    (b'Filter 1: ON PK Fc 0x10 Hz Gain 1 dB Q 1\n', 1, b'number'),
+    (b'Filter 1: ON PK Fc 0x10 Hz Gain 1 dB Q 1\n', 1, b'Fc'),
     (b'Filter 1: ON PK Fc 19 Hz Gain 1 dB Q 1\n', 1, b'range'),
     (b'Filter 1: ON PK Fc 100 Hz Gain 25 dB Q 1\n', 1, b'range'),
     (b'Filter 1: ON PK Fc 100 Hz Gain 1 dB Q 11\n', 1, b'range'),
-    (b'Filter 1: ON PK\n', 1, b'form'),
-    (b'Preamp: 1\n', 1, b'Preamp'),
-    (b'Preamp: 25 dB\n', 1, b'preamp'),
-    (b'Preamp: nan dB\n', 1, b'preamp'),
-    (b'Channel\n', 1, b'Channel'),
+    (b'Filter 1: ON PK\n', 1, b'Fc'),
+    (b'Preamp: 1 Hz\n', 1, b'Preamp'),
+    (b'Preamp: 25 dB\n', 1, b'-60 to 24'),
+    (b'Preamp: nan dB\n', 1, b'-60 to 24'),
+    (b'Channel\n', 1, b'no Equalizer APO'),
+    (b'Channel:\n', 1, b'Channel'),
     (b'Channel: C\n', 1, b'channels'),
     (b'Preamp: -40 dB\nPreamp: -40 dB\n', 2, b'summed'),
-    (b'Channel: L\nPreamp: -13 dB\n', 2, b'differ'),
+    (b'Channel: L\nPreamp: -13 dB\n', 2, b'apart'),
 ))
 def test_parse_refuses_with_the_line_and_why(fw, text, line, word):
     p, err = parse(api(fw), text)
@@ -947,7 +927,7 @@ def test_parse_a_failure_writes_nothing(fw):
     g = api(fw)
     out = preset(g, preamp=-9)
     before = bytes(out)
-    text = b'Filter 1: ON PK Fc 100 Hz Gain 1 dB Q 1\nbad\n'
+    text = b'Filter 1: ON PK Fc 100 Hz Gain 1 dB Q 1\nChannel: L\nPreamp: -13 dB\n'
     with Exact(text + b'\0') as p:
         assert not g.peq_parse(p, len(text), r(out), None)  # and no error record to fill
     assert bytes(out) == before
@@ -1363,3 +1343,204 @@ def test_import_a_file_of_16385_bytes_is_too_long(fw):
 @pytest.mark.parametrize('power, want', ((1, 0), (10, 10), (100, 20), (.5, -3.0103)))
 def test_decibels_is_10_log10(fw, power, want):
     assert api(fw).decibels(power) == pytest.approx(want, abs=1e-4)
+
+
+# peq_export: presets on the card as Equalizer APO text (docs/internals.md#presets-on-the-card)
+
+def export(g, p, size=8192):
+    out = C.create_string_buffer(size)
+    n = g.peq_export(r(p), out, size)
+    return out.raw[:n] if n else None
+
+
+def same(p, q):
+    """p and q alike in every field, -0.0 as 0 as == has it."""
+    fields = lambda x: ([x.count, x.bypass, x.preamp, x.balance, x.automatic, x.spare] +
+                        [(b.enabled, b.type, b.frequency, b.gain, b.q) for b in x.bands])
+    return fields(p) == fields(q)
+
+
+def test_export_is_apo_text_with_auto_in_a_q2_comment(fw):
+    g = api(fw)
+    p = preset(g, (PK, 1000, -3.5, 1.41), (LS, 105, 5.5, .7, 2), (HS, 8000, 2, .7, 3), (PK, 200, 0, 1.41, 0),
+               preamp=-6.2, balance=1.5, automatic=1)
+    assert export(g, p) == (b'# Equalizer APO preset from q2-coda. "# q2:" lines are the Q2\'s own.\n'
+                            b'# q2: preamp auto\nPreamp: -6.2 dB\nChannel: L\nPreamp: -1.5 dB\nChannel: all\n'
+                            b'Filter 1: ON PK Fc 1000 Hz Gain -3.5 dB Q 1.41\nChannel: L\n'
+                            b'Filter 2: ON LSC Fc 105 Hz Gain 5.5 dB Q 0.7\nChannel: R\n'
+                            b'Filter 3: ON HSC Fc 8000 Hz Gain 2 dB Q 0.7\n'
+                            b'Filter 4: OFF PK Fc 200 Hz Gain 0 dB Q 1.41\n')
+
+
+def test_a_picked_preamp_is_plain_apo_and_a_right_cut_is_the_right_s_preamp(fw):
+    g = api(fw)
+    text = export(g, preset(g, preamp=-2, balance=-3, automatic=2))
+    assert b'q2:' not in text.split(b'\n', 1)[1] and b'Preamp: -2 dB\nChannel: R\nPreamp: -3 dB\nChannel: all\n' in text
+
+
+def test_parse_takes_the_q2_auto_comment_and_keeps_the_preamp(fw):
+    g = api(fw)
+    for text in (b'# q2: preamp auto\nPreamp: -3 dB\n', b'Preamp: -3 dB\n  #Q2:  Preamp Auto\n'):
+        p, _ = parse(g, text)
+        assert p.automatic == 1 and p.preamp == -3, text
+    p, _ = parse(g, b'# q2: something new\n# preamp auto\nPreamp: -3 dB\n')
+    assert p.automatic == 2
+
+
+def random_preset(g, rng):
+    def pick(lo, hi, *edges):
+        return rng.choice(edges) if rng.random() < .3 else rng.uniform(lo, hi)
+    p = Preset()
+    g.peq_default(r(p))
+    p.count, p.bypass, p.automatic = rng.randrange(31), 0, rng.choice((1, 2))
+    p.preamp = pick(-60, 24, -60, 24, 0, -6.5)
+    p.balance = pick(-12, 12, -12, 12, 0, 0, .5)
+    for i in range(p.count):
+        p.bands[i] = Band(rng.randrange(4), rng.randrange(3), min(20000, max(20, math.exp(pick(math.log(20), math.log(20000), math.log(20), math.log(20000))))),
+                          pick(-24, 24, -24, 24, 0, -0.0, 3), pick(.1, 10, .1, 10, .7071067811865476, 1.41))
+    assert g.peq_valid(r(p))
+    return p
+
+
+def test_export_round_trips_through_parse(fw):
+    g, rng = api(fw), random.Random(14)
+    for k in range(1500):
+        p = random_preset(g, rng)
+        q, err = parse(g, export(g, p))
+        assert q is not None and same(q, p), (k, err.line, err.reason, export(g, p))
+
+
+def test_a_preset_never_picked_round_trips_as_auto(fw):
+    g = api(fw)
+    p = preset(g, (PK, 1000, 6, 1), preamp=-6, automatic=0)
+    q, _ = parse(g, export(g, p))
+    p.automatic = 1
+    assert same(q, p)
+
+
+def test_export_refuses_an_invalid_preset_or_a_short_buffer(fw):
+    g = api(fw)
+    assert export(g, preset(g, (PK, 10, 6, 1))) is None
+    p = preset(g, *[(PK, 1000.0001, -0.12345678901234567, .12345678901234567, 3 - i % 2) for i in range(30)], preamp=-59.123456789, balance=-11.987654321)
+    text = export(g, p)
+    assert text and len(text) < 4096 and same(parse(g, text)[0], p)  # peq_export_file's buffer holds the longest
+    assert export(g, p, len(text)) is None and export(g, p, len(text) + 1) == text
+
+
+def test_export_file_asks_before_replacing_and_writes_plain_text(fw):
+    g = api(fw)
+    card = Card(fw, {'/x/a.txt': b'old'})
+    p = preset(g, (PK, 1000, 6, 1))
+    assert g.peq_export_file(b'/x/a.txt', r(p), 0) == 2 and card.files['/x/a.txt'] == b'old'
+    assert g.peq_export_file(b'/x/a.txt', r(p), 1) == 1 and card.files['/x/a.txt'] == export(g, p)
+    assert g.peq_export_file(b'/x/b.txt', r(preset(g, (PK, 1, 6, 1))), 1) == 0 and '/x/b.txt' not in card.files
+
+
+# Lenient import (docs/internals.md#lenient-import): what plays loads, what can't is counted and named
+
+PEAK = b'Filter 1: ON PK Fc 1000 Hz Gain -3 dB Q 1\n'
+
+
+@pytest.mark.parametrize('extra, what', (
+    (b'Device: Speakers Realtek(R) Audio; all\n', b'Device'),
+    (b'Filter 2: ON HP Fc 30 Hz\n', b'HP filter'),
+    (b'Filter 2: ON LPQ Fc 18000 Hz Q 0.7\n', b'LPQ filter'),
+    (b'Include: other.txt\n', b'Include'),
+    (b'Delay: 10 ms\n', b'Delay'),
+    (b'Channel: C\n', b'Channel C'),
+    (b'Filter 2: ON PK Fc 30000 Hz Gain 1 dB Q 1\n', b'band out of range'),
+    (b'Filter 2: ON PK Fc 100 Hz Gain 1 dB\n', b'line 2'),
+    (b'Filter 2: ON PK Fc 100 kHz Gain 1 dB Q 1\n', b'line 2'),
+    (b'Filter 2: MAYBE PK Fc 100 Hz Gain 1 dB Q 1\n', b'line 2'),
+    (b'Preamp: 25 dB\n', b'Preamp'),
+    (b'GraphicEQ: 20 -3; 40 -2\n', b'GraphicEQ'),
+))
+def test_parse_leaves_out_one_line_and_names_it(fw, extra, what):
+    p, err = parse(api(fw), PEAK + extra)
+    assert p is not None and p.count == 1 and p.bands[0].gain == -3
+    assert (err.skipped, err.line, err.what) == (1, 2, what)
+
+
+def test_parse_counts_what_it_left_out_and_names_the_first(fw):
+    p, err = parse(api(fw), b'Device: all\n' + PEAK + b'Filter: ON HP Fc 30 Hz\nCopy: L=R\n')
+    assert p.count == 1 and (err.skipped, err.line, err.what) == (3, 1, b'Device')
+    p, err = parse(api(fw), PEAK)
+    assert (err.skipped, err.line) == (0, 0)
+
+
+def test_parse_takes_lower_case_and_units_run_into_numbers(fw):
+    g = api(fw)
+    p, err = parse(g, b'preamp: -6dB\nfilter 1: on pk fc 1000hz gain -3,5db q 1.41\nFILTER2: ON LSC FC 100 HZ GAIN 2 DB Q 0.7\n'
+                      b'channel: l\nfilter: on peq fc 1e3Hz gain 1dB q 2\n')
+    assert err.skipped == 0 and p.preamp == -6 and p.count == 3
+    assert [(b.enabled, b.type, b.frequency, b.gain, b.q) for b in p.bands[:3]] == [
+        (1, PK, 1000, -3.5, 1.41), (1, LS, 100, 2, .7), (2, PK, 1000, 1, 2)]
+
+
+def test_text_without_a_colon_is_no_command(fw):
+    p, err = parse(api(fw), b'Filter Settings file\n\nRoom EQ V5.20\n' + PEAK)  # REW's header
+    assert p.count == 1 and err.skipped == 0
+
+
+@pytest.mark.parametrize('bw', (0.5, 1.0, 2.0, 1/3))
+@pytest.mark.parametrize('f', (100.0, 1000.0, 10000.0, 18000.0))
+def test_bw_oct_is_apo_s_bandwidth_at_48_khz(fw, bw, f):
+    g = api(fw)
+    p, err = parse(g, b'Filter: ON PK Fc %r Hz Gain 6 dB BW Oct %r\n' % (f, bw))
+    assert err.skipped == 0
+    w = math.tau * f / 48000
+    alpha = math.sin(w) * math.sinh(math.log(2) / 2 * bw * w / math.sin(w))  # Equalizer APO's BiQuad.cpp
+    assert math.sin(w) / (2 * p.bands[0].q) == pytest.approx(alpha, rel=1e-12)
+
+
+def test_a_shelf_ignores_bw_and_takes_apo_s_default_slope(fw):
+    g = api(fw)
+    a, _ = parse(g, b'Filter: ON LSC Fc 100 Hz Gain 6 dB BW Oct 2\n')
+    b, _ = parse(g, b'Filter: ON LSC Fc 100 Hz Gain 6 dB\n')
+    assert (a.bands[0].frequency, a.bands[0].q) == (b.bands[0].frequency, b.bands[0].q)
+
+
+@pytest.mark.parametrize('name, down', ((b'LS', False), (b'HS', True)))
+@pytest.mark.parametrize('slope', (6.0, 12.0))
+def test_a_shelf_s_slope_in_db_is_apo_s_s(fw, name, down, slope):
+    g = api(fw)
+    p, err = parse(g, b'Filter: ON ' + name + b' %gdB Fc 1000 Hz Gain 6 dB\n' % slope)
+    s, a = slope / 12, 10 ** (6 / 40)
+    assert err.skipped == 0
+    assert p.bands[0].q == pytest.approx(1 / math.sqrt((a + 1 / a) * (1 / s - 1) + 2))
+    f = 10 ** (6 / 80 / s)  # APO's corner to centre (BiQuadFilter.cpp)
+    assert p.bands[0].frequency == pytest.approx(1000 / f if down else 1000 * f)
+    c, _ = parse(g, b'Filter: ON ' + name + b'C %g dB Fc 1000 Hz Gain 6 dB\n' % slope)
+    assert c.bands[0].frequency == 1000 and c.bands[0].q == p.bands[0].q
+
+
+def test_filters_for_another_channel_are_left_out_with_their_channel_line(fw):
+    p, err = parse(api(fw), b'Channel: C LFE\nFilter: ON PK Fc 100 Hz Gain 1 dB Q 1\nChannel: L C\n' + PEAK)
+    assert p.count == 1 and p.bands[0].enabled == 2 and (err.skipped, err.what) == (2, b'Channel C')
+
+
+def test_channels_by_number(fw):
+    p, _ = parse(api(fw), b'Channel: 2\n' + PEAK)
+    assert p.bands[0].enabled == 3
+
+
+def test_the_31st_band_is_left_out(fw):
+    p, err = parse(api(fw), b'Filter: ON PK Fc 100 Hz Gain 1 dB Q 1\n' * 31)
+    assert p.count == 30 and (err.skipped, err.line, err.what) == (1, 31, b'bands past 30')
+
+
+def test_graphic_eq_alone_says_to_use_the_parametric_file(fw):
+    p, err = parse(api(fw), b'Preamp: -6 dB\n' * 0 + b'GraphicEQ: 20 -3; 40 -2\n')
+    assert p is None and err.line == 0 and err.reason == b'Use the ParametricEQ file, not GraphicEQ'  # the whole file's
+
+
+def test_nothing_usable_fails_on_the_first_line_left_out(fw):
+    p, err = parse(api(fw), b'\nDevice: all\nFilter: ON HP Fc 30 Hz\n')
+    assert p is None and err.line == 2 and err.reason == b'unsupported command'
+    p, err = parse(api(fw), b'a shopping list\nmilk\n')
+    assert p is None and err.line == 1 and err.reason == b'no Equalizer APO lines'
+
+
+def test_an_off_filter_of_an_unsupported_type_is_left_alone(fw):
+    p, err = parse(api(fw), PEAK + b'Filter: OFF HP Fc 30 Hz\nFilter: ON None\n')
+    assert p.count == 1 and err.skipped == 0
