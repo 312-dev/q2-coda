@@ -18916,12 +18916,12 @@ assert icons==['system_display','playset_folderjump','playset_covermode','system
 guard=lambda: m.get(payload_syms['wheel_guard'])
 assert guard()==0 and click(6)==[(1,'Q2POD','VOLGUARD')] and texts()[6]=='Volume Guard' and guard()==1
 assert click(6)==[(0,'Q2POD','VOLGUARD')] and texts()[6]=='Volume Guard' and guard()==0; passed()
-# Fast Navigation (Display, Cover Flow's page, its last row): off by default; the row saves BIGLIBRARY, and Cover
+# Fast Navigation (Display, Cover Flow's page, fourth from the end, before Scan Song Durations, Position Bar and Library): off by default; the row saves BIGLIBRARY, and Cover
 # Flow reads it at once (ringnav_big_library: letters, years and half copies); a stored value other than 1 is off.
 bm,brows,btexts,bicons,bclick=settings_page('display','scroll_view_display',stock_rows=3,sub=2)
-assert btexts()[-3]=='Fast Navigation' and bicons[-3]=='playset_covermode',(btexts(),bicons)
+assert btexts()[-4]=='Fast Navigation' and bicons[-4]=='playset_covermode' and btexts()[-1]=='Library: Local Only',(btexts(),bicons)
 big=lambda bm: bm.call(address=payload_syms['ringnav_big_library'],args=(0,0,0,0),gap=0)
-k=len(brows)-3
+k=len(brows)-4
 assert big(bm)==0 and bclick(k)==[(1,'Q2POD','BIGLIBRARY')] and btexts()[k]=='Fast Navigation' and big(bm)==1
 assert bclick(k)==[(0,'Q2POD','BIGLIBRARY')] and btexts()[k]=='Fast Navigation' and big(bm)==0; passed()
 for v,on in (('1',1),('2',0),('0',0)):
@@ -18930,15 +18930,15 @@ for v,on in (('1',1),('2',0),('0',0)):
 passed()
 # The independent duration switch is off, persists on/off, and cancels on off.
 dm,drows,dtexts,dicons,dclick=settings_page('display','scroll_view_display',stock_rows=3,sub=2)
-assert dtexts()[-2]=='Scan Song Durations'
-assert dclick(len(drows)-2)==[(1,'Q2POD','SCANDURATIONS')]
-assert dclick(len(drows)-2)==[(0,'Q2POD','SCANDURATIONS')]; passed()
+assert dtexts()[-3]=='Scan Song Durations'
+assert dclick(len(drows)-3)==[(1,'Q2POD','SCANDURATIONS')]
+assert dclick(len(drows)-3)==[(0,'Q2POD','SCANDURATIONS')]; passed()
 # The browsing-position indicator is optional, off by default, and persists independently.
 pm,prows,ptexts,picons,pclick=settings_page('display','scroll_view_display',stock_rows=3,sub=2)
-assert ptexts()[-1]=='Position Bar'
+assert ptexts()[-2]=='Position Bar'
 position_on=lambda pm: pm.call(address=payload_syms['coverflow_position_enabled'],args=(0,0,0,0),gap=0)
-assert position_on(pm)==0 and pclick(len(prows)-1)==[(1,'Q2POD','CFPOSITION')] and position_on(pm)==1
-assert pclick(len(prows)-1)==[(0,'Q2POD','CFPOSITION')] and position_on(pm)==0
+assert position_on(pm)==0 and pclick(len(prows)-2)==[(1,'Q2POD','CFPOSITION')] and position_on(pm)==1
+assert pclick(len(prows)-2)==[(0,'Q2POD','CFPOSITION')] and position_on(pm)==0
 for v,on in (('1',1),('2',0),('0',0)):
     pm,*_=settings_page('display','scroll_view_display',{'CFPOSITION':v},stock_rows=3,sub=2)
     assert position_on(pm)==on,v
