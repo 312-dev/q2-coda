@@ -1342,7 +1342,7 @@ static void native_scrollbar(menu_t *m) {
 #define PULL_SUPPRESS "_pull_suppress"
 #define PULL_PROMPT "_pull_prompt"
 
-static void pull_cancel(void) {
+void pull_cancel(void) {
     void *page = st.pull_page;
     st.pull_page = st.pull_surface = (void *)0;
     st.pull_claimed = 0;
@@ -3027,7 +3027,7 @@ static void paint_into(void *w, void *canvas) {
                         st.sel_accent && painting_in(st.sel_accent));
         else if (gain >= 0 && widget_get_visible(w))
             paint_gain(w, canvas, gain, st.sel_accent && painting_in(st.sel_accent));
-        else if (!tk_strcmp(image, "list_into"))
+        else if (!tk_strcmp(image, "list_into") && !lr_edit_row(w)) /* Edit Library: its grip */
             chevron_icon(w, canvas, 375 - geom_val(V_RIGHT_X) - I(canvas, CANVAS_X), I(w, W_H) / 2,
                          st.sel_accent && painting_in(st.sel_accent));
         else if (!tk_strcmp(image, "list_intodown"))
@@ -3176,6 +3176,7 @@ int ringnav_paint(void *w, void *canvas) {
     az_paint(w, canvas);
     pl_tile_paint(w, canvas);
     pv_paint(w, canvas);
+    lr_edit_paint(w, canvas); /* OLED's Edit Library over the Library page (library_edit.c) */
     paint_cover(w, canvas);
     paint_scrubber(w, canvas);
     slider_scrub(w, canvas);
@@ -6518,7 +6519,8 @@ static const char *bar_title_of(void *win, void **label) {
     /* a status row names the Library and its whole Songs list as Home does, not by stock's "Local
      * Songs" in both: allmusic_page's other lists (an album, a playlist, Recently Added) keep their
      * own (0xf001: all songs, own_order's class) */
-    if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "localmusic_page")) return "Library";
+    if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "localmusic_page"))
+        return lr_editing(win) ? "Edit Library" : "Library";
     if (album_local_on(win)) return ""; /* the design's album page: its header names it */
     if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "allmusic_page") && I(g_class_type, 0) == 0xf001)
         return "Songs";
@@ -7942,6 +7944,8 @@ static void hide_outline(void) {
 int ringnav_touch(void *ctx, void *event) {
     /* a finger on the A-Z index: its moves are az_index.c's (az_event), the rows' bar stays */
     if (az_held(event)) return stock_touch_trampoline(ctx, event);
+    /* a finger dragging a Library row: its moves are library_edit.c's (lr_event) */
+    if (lr_edit_dragging()) return stock_touch_trampoline(ctx, event);
     /* T9's chevron goes back, as Return, before the press blurs the box: that blur searches. */
     if (st.t9_back && event && I(event, EVENT_TYPE) == EVT_POINTER_DOWN) {
         int xy[2] = { I(event, EVENT_X), I(event, EVENT_Y) };
@@ -7977,6 +7981,9 @@ int ringnav_touch(void *ctx, void *event) {
         st.touch_mode = 0;
         return result;
     }
+    /* a press on a Library row (OLED): its hold, in Edit Library its grip (library_edit.c) */
+    if (!result && event && I(event, EVENT_TYPE) == EVT_POINTER_DOWN && lr_edit_touch(event))
+        return result;
     /* Pointer-down must not recall/rebind the row that native touch is about to hit. */
     if (!result && w && load_rows(&g_menu, w)) {
         stop_scroll(&g_menu);
@@ -8106,6 +8113,7 @@ int ringnav_dispatch(void *target, void *event) {
         pull_cancel();
     }
     if (target && event && I(event, EVENT_TYPE) == EVT_CLICK) {
+        if (lr_edit_click(target)) return STOP; /* Edit Library: a tap selects, opens nothing */
         hide_outline();
         cancel_center(); /* A native activation supersedes confirmation, even without touch. */
         drop_spin();
@@ -11626,6 +11634,7 @@ int ringnav_keydown(void *ctx, void *event) {
      * chord_gate's centre_at, which ringnav_input set before this */
     if (key == KEY_CENTER)
         st.center_down_at = st.centre_at ? st.centre_at : (unsigned)time_now_ms() | 1;
+    lr_edit_keydown(key); /* Centre held on the Library: Edit Library (library_edit.c) */
     unsigned char tone = g_keytone_flag;
     void *row = (void *)0;
     entries_t s = { &row, 0, 1, 4096 };
@@ -12304,6 +12313,8 @@ int ringnav(void *ctx, void *event) {
     if (usable() && rate_key(window_manager_get_top_window(window_manager()), key)) return STOP;
     /* A game's keys, before stock's lock filter, media keys and screen-off double Centre */
     if (usable() && games_key(window_manager_get_top_window(window_manager()), key)) return STOP;
+    /* Edit Library's keys, and the release of the Centre hold that entered or left it */
+    if (lr_edit_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
     if (usable() && search_strip_key(window_manager_get_top_window(window_manager()), key))
         return STOP;
     if (usable() && add_songs_key(window_manager_get_top_window(window_manager()), key))

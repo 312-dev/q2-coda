@@ -119,7 +119,7 @@ Rules:
   capitals.
 - **A number, a space, its unit:** "15 s", "1 min", "4000 K"; a percentage takes no space
   ("50%").
-- **Size steps are 15, 16, 18, 20, 22** (56 for the confirmation's glyph, 17 for the [tabs](#tabs)' labels). Nothing else.
+- **Size steps are 15, 16, 18, 20, 22** (56 for the confirmation's glyph, 17 for the [tabs](#tabs)' labels, 13 for [Edit Library](#edit-library)'s hint). Nothing else.
 - **Row pitch is about 1.6 times the row size** (32 px for 20 px type), as the concept's is
   about twice its cap height.
 - **Sizes are the em.** AWTK sizes a face by its line (ascent less descent), which for Inter is
@@ -239,6 +239,31 @@ settings have none.
 - **While it shows**, the rows' right column moves in to x 343 (W - 32) and the selection bar
   ends at x 351, so lengths and chevrons stay clear of it; the fast-scroll letter and the scroll
   indicator stay hidden.
+
+### Edit Library
+
+The Library's rows in the user's own order, from the approved mock-up `library-reorder.html`
+(2026-11-15). There is no Done button: the wheel's keys and a finger do it all.
+
+- **Entered by** Centre held about half a second (550 ms) on the Library, or a finger held as long
+  on a row, which then drags that row. Centre held again, or Return when no row is lifted, saves
+  and leaves.
+- **In it** the status row reads "Edit Library", each row's chevron gives way to a grip (three
+  18x2 px bars 5 px apart, centred where the chevron was) in Text Tertiary, On Accent on the
+  selection, and a hint, "Drag ≡ to move · Centre picks up", Inter Regular 13 px in Text Tertiary,
+  is centred 14 px above the screen's foot (its middle at y 298), the grip drawn as its glyph.
+- **The wheel:** Centre lifts the selected row: it grows 8% about its middle (the bar's box, so
+  x 2 to 372 and 34 px tall), its words in Inter Medium 22 px, white, with a white grip, on a raised
+  `#2C2C2E` card with 9 px corners, a 1 px `#141414` ring and a soft black shadow 6 px down. The
+  wheel moves it a row a click, stopping at either end; Centre puts it down and saves. Return
+  while it is lifted puts it back exactly where it was, still in Edit Library.
+- **A finger** on a row's grip (the last 64 px) drags it at once; held on a row it drags it after
+  the hold. The row follows the finger on its card; the rows it passes slide aside over 150 ms
+  (cubic out); within 16 px of the list's top or bottom the list scrolls on. The lift puts it in
+  its place and saves. A tap selects a row and opens nothing.
+- **The order** is kept through a restart and a power cut. A row hidden by the Library (My Fav,
+  Frequent, a media row without its folder) keeps its place; a row a later update adds appears at
+  its default place without disturbing the rest.
 
 ### Tabs
 
@@ -674,7 +699,7 @@ pattern.
 | Home (Split)                        | List row beside art         | Rows from y 40 (into the status row's empty left, the clock at its right) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges: the playing cover panning slowly while a song plays, else the library's covers in turn, each zooming and drifting and cross-fading into the next; the status row's clock, play state and battery over it at the right, each glyph white or black by contrast. Nine rows, seven at rest (the last's foot at y 264, scrolled to the end too); the rows past them fade into black within 56 px of the glass's bottom edge and, once scrolled, the row above y 40 within 34 px of its top edge, both following its rounded corners |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Now Playing's About                 | [Track details](#track-details) | Header, quality line, then a grid of name over value                                                   |
-| Library                             | List row                    |                                                                                                            |
+| Library                             | List row                    | Rows in the user's order: [Edit Library](#edit-library)                                                    |
 | Albums                              | Two-line row with art       |                                                                                                            |
 | Album tracks                        | Song rows                   | Track number, title, length                                                                                |
 | Folder view                         | Song rows                   | Songs as album tracks; folders with the folder glyph and a chevron                                         |
