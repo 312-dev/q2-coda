@@ -1846,7 +1846,7 @@ static unsigned hex32(const char *s) {
 typedef struct {
     unsigned key;
     int hearts;
-    char *path;
+    char *path, *copy; /* copy: a server row's Stream Cache copy, or 0 */
 } in_t;
 typedef struct {
     in_t *l;
@@ -1872,12 +1872,14 @@ static int key_row(void *ctx, int n, char **v, char **c) {
 }
 extern int rate_keep(int album, unsigned key, int n);
 extern int stock_db_open(const char *path, void **db); /* playlists.c */
-/* My Fav: the song's row in or out, as stock keeps it. */
-static void fav_set(const char *path, int on) {
+/* My Fav: the song's row in or out, as stock keeps it, and copy's own row (a server row's Stream
+ * Cache copy, which stock's heart puts in by its path, or 0) out either way. */
+static void fav_set(const char *path, int on, const char *copy) {
     void *db = 0;
-    char sql[1400], *o = sql, *end = sql + sizeof sql - CAT_SLACK;
+    char sql[1700], *o = sql, *end = sql + sizeof sql - CAT_SLACK;
     PUT(o, end, "delete from myfav where fileurl=");
     o = sq(o, end, path);
+    if (copy) PUT(o, end, " or fileurl="), o = sq(o, end, copy);
     if (on) {
         PUT(o, end,
             ";insert into myfav(filename,fileurl,album,songer,style,name,composer,albumsonger,year,"
@@ -1894,6 +1896,9 @@ static void fav_set(const char *path, int on) {
 }
 /* My Fav's contents may have changed: catalogue_row_fav reads the table again. */
 void catalogue_fav_changed(void) { ++cat.fav_gen; }
+/* Moves with each catalogue_fav_changed: Now Playing reads a copy's own My Fav again (ratings.c
+ * rate_row_heart). */
+unsigned catalogue_fav_gen(void) { return cat.fav_gen; }
 static int fav_found(void *ctx, int n, char **v, char **c) {
     *(int *)ctx = 1;
     return 0;
@@ -1925,12 +1930,14 @@ int catalogue_row_fav(void *r) {
 /* Takes r's server row out of My Fav (r a Stream Cache copy; any other record, nothing). */
 void catalogue_row_unfav(void *r) {
     const cat_ent *e = cat_row_of(r);
-    if (e) fav_set(ix_str(&cat.ix, e->path), 0), catalogue_fav_changed();
+    if (e) fav_set(ix_str(&cat.ix, e->path), 0, 0), catalogue_fav_changed();
 }
 
 /* ratings.in's lines applied as a rating made here (rate_keep by the key, My Fav for five by the
- * path), unless the Q2's own change to that song, still in ratings.out, is newer. The file is
- * renamed before it is read, so lines the app writes meanwhile go to a new ratings.in, not lost. */
+ * path; a server row's Stream Cache copy out of My Fav whatever the hearts, so a heart given to the
+ * copy here follows the server's), unless the Q2's own change to that song, still in ratings.out,
+ * is newer. The file is renamed before it is read, so lines the app writes meanwhile go to a new
+ * ratings.in, not lost. */
 static void ratings_in(int slot) {
     char in[64], taking[72], outp[64];
     if (!cat.app[slot].ratings) return;
@@ -1955,6 +1962,8 @@ static void ratings_in(int slot) {
         t->key = key, t->hearts = hearts;
         const cat_ent *x = *f[1] ? ix_sid(&cat.ix, slot, f[1]) : 0;
         if (x) t->path = strdup(ix_str(&cat.ix, x->path));
+        if (x && !x->dup && x->local)
+            t->copy = strdup(ix_str(&cat.ix, x->local)); /* cat_row_of's */
     }
     qsort(k.l, k.n, sizeof *k.l, in_cmp);
     unsigned unknown = 0;
@@ -1966,8 +1975,9 @@ static void ratings_in(int slot) {
     }
     for (unsigned i = 0; i < k.n; ++i) {
         rate_keep(0, k.l[i].key, k.l[i].hearts);
-        if (k.l[i].path) fav_set(k.l[i].path, k.l[i].hearts == 5), catalogue_fav_changed();
-        free(k.l[i].path);
+        if (k.l[i].path)
+            fav_set(k.l[i].path, k.l[i].hearts == 5, k.l[i].copy), catalogue_fav_changed();
+        free(k.l[i].path), free(k.l[i].copy);
     }
     free(k.l), free(raw), free(out);
     unlink(taking);

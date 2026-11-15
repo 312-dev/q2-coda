@@ -313,7 +313,10 @@ for server rows and for synced card files alike, whenever the Q2 can reach the s
   (temp and rename), in `ratings.out`'s columns: `<listen_key>\t<sid>\t<hearts>\t<unix time>`. The
   firmware applies each line through the same path as a rating made on the device (the hearts by
   `listen_key`; My Fav, for five, by the song's path: a server row's or a linked file's from its
-  sid, any other card file's found by its key in songtable), skipping a song whose own
+  sid, any other card file's found by its key in songtable), a server row's Stream Cache copy taken
+  out of My Fav whatever the hearts (a heart given to the copy on Now Playing is the copy's own
+  path, so a 4 or an unstar from the server would otherwise leave it full; five puts the row in
+  its place), skipping a song whose own
   `ratings.out` line is newer, then deletes the file. It waits while an import runs or the app's
   catalogue on the card is not yet imported (a boot's first poll), so a server row's path is in the
   index when its line is read.

@@ -1222,3 +1222,55 @@ def test_fewer_hearts_picked_on_a_server_favourite_take_the_row_out(rig, fw, ui,
     row = listen_key(url('s1'))
     assert list(log) == [0, 0, 0] and myfav(rig) == [] and ui.image[heart.heart] == 'play_unfav'
     assert fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, row) == 3 and heart.badge() == '3'
+
+
+@in_fork
+@pytest.mark.parametrize('hearts', [4, 0])
+def test_a_server_rating_under_five_takes_the_copy_out_of_my_fav_too(rig, fw, ui, song, mcl, hearts):
+    """A copy hearted here (stock's toggle puts the copy's own path in myfav) and then rated 4, or unstarred, on
+    the server: ratings_in takes the copy's path out with the row's, the tick empties the heart stock drew from
+    the copy, and the badge shows the server's 4."""
+    copy = '/mnt/mmc/.subsonic/stream/acct/orig/o/One [s1].flac'
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, local=copy)])
+    rig.poll()
+    db = sqlite3.connect(rig.tmp/'database.db')
+    db.execute('insert into myfav(fileurl) values (?)', (copy,))
+    db.commit()
+    db.close()
+    from test_nav_library_pages import Heart
+    heart = Heart(fw, ui, song, mcl, fav=True, path=copy.encode())
+    rig.files.files.update(heart.files.files)
+    heart.files.files = rig.files.files  # one card: the rig's access and rename, the heart's reads and writes
+    fw.mock('checkFavExist', lambda *_: copy in myfav(rig))  # stock's, by the copy's own path
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    ui.fire('rate_tick')
+    assert ui.image[heart.heart] == 'play_fav' and heart.badge() is None
+    row = listen_key(url('s1'))
+    rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = f'{row:08x}\ts1\t{hearts}\t1700000000\n'.encode()
+    rig.poll(3)
+    assert myfav(rig) == []
+    ui.fire('rate_tick')
+    assert ui.image[heart.heart] == 'play_unfav'
+    assert heart.badge() == (str(hearts) if hearts else None)
+
+
+@in_fork
+def test_five_hearts_from_the_server_put_the_row_in_my_fav_in_place_of_its_copy(rig, fw, ui, song, mcl):
+    """A copy already in myfav by its own path and starred on the server: the row goes in and the copy comes out,
+    so the Favorites list has the song once, and the heart stays full."""
+    copy = '/mnt/mmc/.subsonic/stream/acct/orig/o/One [s1].flac'
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, local=copy)])
+    rig.poll()
+    db = sqlite3.connect(rig.tmp/'database.db')
+    db.execute('insert into myfav(fileurl) values (?)', (copy,))
+    db.commit()
+    db.close()
+    rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = f'{listen_key(url("s1")):08x}\ts1\t5\t1700000000\n'.encode()
+    rig.poll(3)
+    assert myfav(rig) == [url('s1')]
+    from test_nav_library_pages import Heart
+    heart = Heart(fw, ui, song, mcl, path=copy.encode())  # stock drew it from the copy's own path: empty
+    fw.mock('checkFavExist', lambda *_: copy in myfav(rig))
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    ui.fire('rate_tick')
+    assert ui.image[heart.heart] == 'play_fav' and heart.badge() is None

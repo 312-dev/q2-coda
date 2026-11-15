@@ -11,6 +11,7 @@ static struct {
     void *rate_fav, *rate_ctx, *rate_badge;
     int rate_shown;                     /* the badge's hearts plus 1, 0 for a new badge */
     unsigned rate_row;                  /* the copy's row key whose heart rate_row_heart filled */
+    unsigned rate_gen;                  /* catalogue_fav_gen when rate_row_heart last read My Fav */
     int rate_pick, rate_was, rate_held; /* the hearts picked, those the picker opened on */
     int rate_armed;                     /* a press came down on the picker: its release is a tap */
     unsigned rate_at;                   /* when a hold opened the picker (never 0), else 0 */
@@ -156,16 +157,21 @@ static void heart_set(const char *image) {
 }
 /* Stock draws the heart from the playing file's own My Fav as a track starts. A server song's
  * Stream Cache copy is a favourite by its row instead (rate_fav), so its empty heart (stock's
- * play_unfav or the theme's np_unfav_*) is filled here, and emptied again once the row is out of
- * My Fav (a change from the server); ra.rate_row says which copy's heart this filled. */
+ * play_unfav or the theme's np_unfav_*) is filled here, and emptied again once neither the row nor
+ * the copy's own path is in My Fav (a change from the server: ratings_in takes both out);
+ * ra.rate_row says which copy's heart this filled. A full heart stock drew from the copy's own path
+ * is checked again (checkFavExist) only when My Fav has changed since the last tick
+ * (catalogue_fav_gen), not twice a second. */
 static void rate_row_heart(void *r) {
     int row = r ? catalogue_row_fav(r) : -1;
-    unsigned key = row >= 0 ? rate_song_key(r) : 0;
+    unsigned key = row >= 0 ? rate_song_key(r) : 0, gen = catalogue_fav_gen();
+    int changed = ra.rate_gen != gen;
     const char *image = widget_get_prop_str(ra.rate_fav, "image", "");
+    ra.rate_gen = gen;
     if (ra.rate_row != key) ra.rate_row = 0; /* another track: stock's heart */
     if (row > 0 && !heart_full(image) && strstr(image, "unfav"))
         heart_set("play_fav"), ra.rate_row = key;
-    else if (!row && ra.rate_row && heart_full(image))
+    else if (!row && heart_full(image) && (ra.rate_row || (changed && !checkFavExist(r))))
         heart_set("play_unfav"), ra.rate_row = 0;
 }
 /* The badge on an empty heart: the playing track's 1-4 hearts, hidden for none and on a full heart
