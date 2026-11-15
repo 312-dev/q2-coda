@@ -232,6 +232,9 @@ enum TransportCmd {
 // each a node; a bucket with more than 500 splits again by two, then three letters. Year orders bucket
 // by decade. A list's first order is its default; its others are offered in `sorts`, and a client
 // shows each as its own level ("By Artist") rather than as a setting.
+// An id that names nothing answers NOT_FOUND, never an empty list: an album, artist, genre, year,
+// folder or bucket the library no longer has. Only "tracks" and the other top lists, a playlist and
+// the top folder ("dir:") can be empty.
 
 // type 0x30
 message Browse {
@@ -255,7 +258,7 @@ message BrowseResp {
 
 message Item {
   string id = 1;        // a node id when browsable, "song:<id>" when a track
-  string title = 2;
+  string title = 2;     // as the library has it: never numbered (a client shows `number` itself)
   string subtitle = 3;  // an artist, or "4:31" in an album
   string art_id = 4;    // for GetCover; empty when none
   ItemIcon icon = 5;    // for rows without art
@@ -263,7 +266,8 @@ message Item {
   bool playable = 7;
   string group = 8;     // a heading to group under ("Tracks" in search results)
   uint32 duration_ms = 9;
-  uint32 number = 10;   // the track number in an album, else 0
+  uint32 number = 10;   // the track number, on an album's rows only; 0 in every other list, search
+                        // results and the queue
 }
 
 enum ItemIcon {

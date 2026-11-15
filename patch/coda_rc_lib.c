@@ -297,16 +297,16 @@ static void put_item(pbw *w, unsigned field, const item_t *it) {
     pb_end(w, m);
 }
 
-/* A query's rows as items. Its columns: id, title, subtitle, art, icon, browsable, secs, number, numbered
- * (1: an album's row, "N • Title" over its length). */
+/* A query's rows as items. Its columns: id, title, subtitle, art, icon, browsable, secs, number (an album's
+ * rows only, coda-rc.proto Item.number), timed (1: the subtitle is the row's length, as an album's in track
+ * order). Titles go out as the library has them; a client shows the number itself. */
 static int put_rows(pbw *w, unsigned field, sqlite3_stmt *st, const char *group) {
     int n = 0, rc;
     while ((rc = sqlite3_step(st)) == SQLITE_ROW) {
-        char title[300], clock[16];
+        char clock[16];
         const char *t = (const char *)sqlite3_column_text(st, 1), *sub = (const char *)sqlite3_column_text(st, 2);
         int br = sqlite3_column_int(st, 5), secs = sqlite3_column_int(st, 6), num = sqlite3_column_int(st, 7);
         if (sqlite3_column_int(st, 8)) {
-            if (num) snprintf(title, sizeof title, "%d \xe2\x80\xa2 %s", num, t ? t : ""), t = title;
             clock_of(clock, sizeof clock, secs);
             sub = clock;
         }
@@ -332,7 +332,8 @@ static const sort_t PL_SORTS[] = {{"order", "Playlist order"}, {"title", "Title"
                                   {"album", "Album"}, {0, 0}};
 static const sort_t PLS_SORTS[] = {{"order", "Q2 order"}, {"name", "Name"}, {0, 0}};
 
-#define TRACK_ITEM "'song:'||sid c0, title c1, artist c2, ak c3, 0 c4, 0 c5, secs c6, num c7, 0 c8"
+/* a song's row outside an album: no number (Item.number is the track number in an album) */
+#define TRACK_ITEM "'song:'||sid c0, title c1, artist c2, ak c3, 0 c4, 0 c5, secs c6, 0 c7, 0 c8"
 #define ALBUM_ITEM                                                                                                 \
     "'album:'||ak c0, case when title = '' then '[Unknown album]' else title end c1, artist c2, ak c3, 0 c4, 1 c5, " \
     "0 c6, 0 c7, 0 c8"
@@ -598,6 +599,19 @@ static int browse(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
         crc_log("lib: %s", sqlite3_errmsg(db));
         lib_close();
         return crc_error(s, req_id, E_INTERNAL, "query");
+    }
+    /* An empty list under an id names nothing: albums, artists, genres, years, folders and buckets are made
+     * from their songs, so only a playlist (when it exists) and the card's top folder can be empty. */
+    if (!total && (bucket || (colon && strcmp(base, "dir:")))) {
+        int none = 1;
+        if (!bucket && !strcmp(kind, "pl")) {
+            snprintf(sql, sizeof sql, "select count(*) from main.playlist where id = %d", atoi(colon + 1));
+            none = count_of(sql) <= 0;
+        }
+        if (none) {
+            lib_close();
+            return crc_error(s, req_id, E_NOT_FOUND, "node");
+        }
     }
     if (!bucket) split = l.bucketed && total > SPLIT;
     else split = l.bucketed && total > CAP && !l.years && strcmp(bucket, NO_LETTER) && !strchr(bucket, ' ') && strlen(bucket) < 3;
