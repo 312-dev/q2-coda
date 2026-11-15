@@ -158,6 +158,7 @@ class Session:
         self.req = 0
         self.pushes = []
         self.sid = None
+        self.info = {}  # connect's: the Hello answer of the session it returns
 
     # -- frames
 
