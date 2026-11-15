@@ -36,8 +36,7 @@ def x25519(scalar, point):
         da, cb = d * a % P, c * b % P
         x3, z3 = (da + cb) ** 2 % P, u * (da - cb) ** 2 % P
         x2, z2 = aa * bb % P, e * (aa + 121665 * e) % P
-    if swap:
-        x2, z2 = x3, z3
+    # RFC 7748 ends with one more conditional swap on the last bit, bit 0, which clamping clears: never a swap
     return (x2 * pow(z2, P - 2, P) % P).to_bytes(32, "little")
 
 
