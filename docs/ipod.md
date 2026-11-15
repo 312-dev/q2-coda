@@ -174,7 +174,7 @@ one it replaces. One `DRIFT_TICK_MS` (200 ms, about 0.3 px a step; a late tick s
 runs it, armed from Home's paint only while Home is the top window and not sliding, the screen is
 lit and the lock screen is off; its next step after any of those changes removes it, and
 `coverflow_home_layout` (Home, Theme, a new Home window) removes it at once. A step is capped at
-`DRIFT_MAX_STEP_MS`, so a stalled loop never jumps. A step invalidates only the panel, and a paint
+`DRIFT_MAX_STEP_MS`, so a stalled loop never jumps. A step invalidates only the panel (with a `split_art_up`, the bar's rows over it too), and a paint
 renders the frame again only once the pan or a fade has moved (`frame_stamp`). Light Mode's paper
 behind a transparent cover follows only the next cover change. The timer trusts `home.win` as Home's
 identity, as the art's paint always has: Home is only replaced through `coverflow_home`, which
@@ -253,7 +253,9 @@ when it draws straight onto the screen; the glyphs paint on that, and the bar's 
 share and writes the art with the ink over it, only within the paint's clip. A glyph at an edge
 where the clip, not the pane, ends (a repaint of part of the battery) keeps the ink it has, as its
 part alone would average differently. A pan step invalidates those rows of the bar with the
-window's, so the ink follows the art. The clock is drawn in Text Primary there (`clock_place`), so it
+window's, so the ink follows the art. Inking them costs about 0.84 million instructions a step
+(`test/patch.py`, 188 × 58 with a pause and a battery), a sixth of the frame's render: a pixel left
+the ground's colour (the bare art, most of them) takes one compare, not the share's three channels. The clock is drawn in Text Primary there (`clock_place`), so it
 is inked as one glyph like the others.
 The battery's charging green and low red keep their own colours over the art, each pixel's share
 read against the glyph's most saturated pixel, and only its grey part (the dim outline as a

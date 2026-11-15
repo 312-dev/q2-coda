@@ -5010,6 +5010,10 @@ static const unsigned short srgb_lin[256] = {
 #define INK_CUT_RIGHT 2
 #define INK_CUT_ROWS 4
 
+/* Whether p is not the ground's colour: its share (ink_share) is 0 just where it is. One compare,
+ * not the share's three channels, for most of the bar's rows, the bare art (test/patch.py's ink
+ * count). */
+#define INKED(p, ground) ((((p) ^ (ground)) & 0xffffffu) != 0)
 /* p's greatest channel's distance from ground, and its spread. */
 static unsigned ink_share(unsigned p, unsigned ground, unsigned *spread) {
     unsigned c = 0, hi = 0, lo = 255;
@@ -5039,12 +5043,11 @@ void home_ink(unsigned *fb, int pitch, const unsigned *art, int apitch, int w, i
     unsigned sp;
     for (int x = 0; x < w;) {
         int lit = 0, b = x, gap = 0;
-        for (int y = 0; y < h && !lit; ++y) lit = ink_share(fb[y * pitch + x], ground, &sp) != 0;
+        for (int y = 0; y < h && !lit; ++y) lit = INKED(fb[y * pitch + x], ground);
         if (lit) /* the glyph: on to INK_GAP empty columns */
             for (b = x + 1; b < w && gap < INK_GAP; ++b) {
                 int on = 0;
-                for (int y = 0; y < h && !on; ++y)
-                    on = ink_share(fb[y * pitch + b], ground, &sp) != 0;
+                for (int y = 0; y < h && !on; ++y) on = INKED(fb[y * pitch + b], ground);
                 gap = on ? 0 : gap + 1;
             }
         b = lit ? b - gap : x + 1;
@@ -5061,6 +5064,7 @@ void home_ink(unsigned *fb, int pitch, const unsigned *art, int apitch, int w, i
         unsigned weight = 0; /* at most 255 a pixel */
         for (int y = 0; lit && y < h; ++y)
             for (int i = x; i < b; ++i) {
+                if (!INKED(fb[y * pitch + i], ground)) continue; /* no share: adds nothing */
                 unsigned c = ink_share(fb[y * pitch + i], ground, &sp), a = art[y * apitch + i];
                 if (hue_s) {
                     unsigned k = sp >= hue_s ? 256 : (sp << 8) / hue_s, t = hue_c * k >> 8;
@@ -5087,7 +5091,7 @@ void home_ink(unsigned *fb, int pitch, const unsigned *art, int apitch, int w, i
         for (int y = 0; y < h; ++y)
             for (int i = x; i < b; ++i) {
                 unsigned *p = fb + y * pitch + i, a = bgra(art[y * apitch + i]),
-                         c = lit ? ink_share(*p, ground, &sp) : 0;
+                         c = lit && INKED(*p, ground) ? ink_share(*p, ground, &sp) : 0;
                 if (c && hue_s) {
                     unsigned k = sp >= hue_s ? 256 : (sp << 8) / hue_s, t = hue_c * k >> 8;
                     a = lerp(a, hue, k);
