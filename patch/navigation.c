@@ -1133,6 +1133,26 @@ void forget_rows(void *list) {
     if (load_rows(&m, view)) wheel_offset(&m, 0);
 }
 
+/* A list_fit set's list holds whole rows, so a view stops with a row's top at its own: want, or
+ * where want would cut a row, the first row's top past it. A row of another pitch (Power's 12 px
+ * gap before Restart) can put the end, the content less the view, inside a row, which would show
+ * cut at the top; there the content grows to that row's top plus the view, as lyric_pad's does, so
+ * stock's own clamp (a drag's end, a relayout's) keeps it until a relayout puts the height back. */
+static int fit_top(menu_t *m, int want) {
+    int top = view_top(m), best = -1, cut = 0;
+    if (m->kind != 1 || !geom_val(V_LIST_FIT)) return want;
+    for (int i = 0; i < m->n; ++i) {
+        rect_t r = bounds(m, i);
+        int y = r.y + top;
+        cut |= y < want && want < y + r.h;
+        if (y >= want && (best < 0 || y < best)) best = y;
+    }
+    if (!cut || best < 0) return want; /* a header above the rows stays */
+    if (I(m->w, VIEW_CONTENT_H) < best + I(m->w, W_H))
+        I(m->w, VIEW_CONTENT_H) = best + I(m->w, W_H);
+    return best;
+}
+
 /* Least viewport move that reveals logical row id with a small reading margin.
  * Remembered-position restoration keeps its glide; wheel steps are immediate. */
 void reveal(menu_t *m, int id, int immediate) {
@@ -1159,7 +1179,7 @@ void reveal(menu_t *m, int id, int immediate) {
     /* The first row brings in whatever heads the list above it (the EQ page's graph) when both
      * fit, rather than stopping a margin into it. Kind 1's ids are its row order. */
     if (m->kind == 1 && id == 0 && y + h + margin <= height) want = 0;
-    want = clamp_step(want, max_top(m), 0);
+    want = fit_top(m, clamp_step(want, max_top(m), 0));
     const theme_t *T = theme();
     if (immediate || !T->recall_ms) {
         wheel_offset(m, want);
