@@ -3,9 +3,10 @@
  * list (Songs, a genre's songs: anything stock opens on Songs' page) shows the artist after the
  * title; a list reached through an artist (artistinfo_page, their songs) shows none (its page
  * drawn as the design's, library_artist.c, has no song list); an album
- * (albuminfo_page, and an album's tracks in Cover Flow) shows each track's number in a column
- * before the title and its length on the right column; Folder view (folder_page) reads as an album
- * too (folder_row). Song Artist and Song Length, the theme's own options, change that.
+ * (albuminfo_page, playerjumpinfo_page, and an album's tracks in Cover Flow) shows each track's
+ * number in a column before the title and its length on the right column; Folder view
+ * (folder_page) reads as an album too (folder_row). Song Artist and Song Length, the theme's own
+ * options, change that.
  *
  * navigation.c's background hook calls song_row for each row of such a list before the rows
  * paint: the title's box is fitted to what stands beside it, and the rest is drawn here, under
@@ -31,9 +32,11 @@ int song_list(void *w) {
     return !tk_strcmp(name, "allmusic_page")     ? SONGS_MIXED
            : !tk_strcmp(name, "artistinfo_page") ? (artist_local_on(win) ? 0 : SONGS_ARTIST)
            : !tk_strcmp(name, "albuminfo_page")  ? SONGS_ALBUM
-           : !tk_strcmp(name, "folder_page")     ? SONGS_FOLDER
-           : coverflow_tracks(win)               ? SONGS_ALBUM
-                                                 : 0;
+           /* Look up Album's and Go to Album's (navigation.c qm_goto) */
+           : !tk_strcmp(name, "playerjumpinfo_page") ? SONGS_ALBUM
+           : !tk_strcmp(name, "folder_page")         ? SONGS_FOLDER
+           : coverflow_tracks(win)                   ? SONGS_ALBUM
+                                                     : 0;
 }
 
 /* The title's width, a title whose text is title px wide in room px, with an artist artist px

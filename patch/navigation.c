@@ -2658,8 +2658,13 @@ static void paint_selection(void *w, void *canvas) {
     if (home && i >= 0) coverflow_home_row(w, g_menu.at[i], g_menu.id[i], 1);
     if (i < 0 || (!shown && !home && g_menu.kind != 4)) return;
     if (st.shuffle_on && st.shuffle_on == st.action_view && st.shuffle_list == w)
-        return;                /* the selection is on the Shuffle row above (shuffle_paint) */
-    if (pair_holds(w)) return; /* ... or on an artist's Shuffle or Radio (artist_page.c) */
+        return;          /* the selection is on the Shuffle row above (shuffle_paint) */
+    if (pair_holds(w)) { /* ... or on an artist's or album's pair (artist_page.c) */
+        /* the row a fast spin passed through keeps no marquee: its timer finds no row */
+        marq_stop();
+        st.marq_row = (void *)0;
+        return;
+    }
     rect_t r = bounds(&g_menu, i), old;
     /* A boundary detent nudges the selection against the end until it springs back. */
     if (fx_live(w) && st.bump_dir) r.y -= st.bump_dir * theme()->bump_px;
@@ -3168,6 +3173,7 @@ int ringnav_paint(void *w, void *canvas) {
     np_about_paint(w, canvas);
     peq_paint(w, canvas);
     battery_paint(w, canvas);
+    album_local_paint(w, canvas);
     if (NP_VISUALIZER) visualizer_paint(w, canvas);
     games_paint(w, canvas);
     search_strip_paint(w, canvas);
@@ -6138,6 +6144,7 @@ void *ringnav_ui_load(const char *name, void *parent) {
         msg_open(root); /* OLED's scan page (classic_pages.c oled_scan); USB's page stays stock's */
     if (root && g_usbmode != 1 && !tk_strcmp(widget_get_prop_str(root, "name", ""), "usbmode_page"))
         st.usb_lun = 0, widget_add_timer(root, usb_poll, 500);
+    if (root) album_local_load(root); /* OLED's album page on stock's (library_album.c) */
     if (root) motion_load(root, np);
     return root;
 }
@@ -6547,6 +6554,7 @@ static const char *bar_title_of(void *win, void **label) {
      * Songs" in both: allmusic_page's other lists (an album, a playlist, Recently Added) keep their
      * own (0xf001: all songs, own_order's class) */
     if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "localmusic_page")) return "Library";
+    if (album_local_on(win)) return ""; /* the design's album page: its header names it */
     if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "allmusic_page") && I(g_class_type, 0) == 0xf001)
         return "Songs";
     if (!tk_strcmp(name, "coverflow_page")) { /* its screen's own, else its caption row's */

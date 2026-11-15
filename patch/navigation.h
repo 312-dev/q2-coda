@@ -817,6 +817,11 @@ void modal_row_paint(void *w, void *canvas, void *row, rect_t r, int selected);
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
 void modal_more(void *win);
 void modal_playlist_more(void *win);
+/* library_album.c: a Library album's page under the inset modal's set (albuminfo_page,
+ * playerjumpinfo_page) */
+void album_local_load(void *win);
+int album_local_on(void *win);
+void album_local_paint(void *w, void *canvas);
 /* artist_page.c: an artist's page's pair of stops and its monogram over the status bar; its
  * text painter, which Now Playing's About (np_about.c) paints with too */
 int pair_key(void *top, void *w, int dir);

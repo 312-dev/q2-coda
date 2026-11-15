@@ -68,7 +68,7 @@ class Lv(C.Structure):
                 *((n, C.c_uint) for n in ('since', 'base', 'id', 'hash')),
                 ('title', C.c_char * 128), ('note', C.c_char * 128), ('op', C.c_char * 16), ('args', C.c_char * 400),
                 ('lay', C.c_byte), ('stop', C.c_byte)]
-LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR = range(5)
+LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM = range(6)
 AR_ALBUMS = 1 << 20  # addon.c's Albums row's click context
 
 
@@ -405,7 +405,7 @@ def test_more_apps_than_slots(fw):
 def test_the_features_are_published_at_every_scan(fw):
     world = card(fw)
     scan(fw)
-    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings artist\n'
+    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings artist album\n'
     assert world.of('rename') == [(b'/tmp/q2-addon.caps.tmp', b'/tmp/q2-addon.caps')]
 
 
@@ -5319,3 +5319,73 @@ def test_a_songs_album_and_length_come_from_its_subtitle(fw, nav_st):
     assert p.drawn == 7
     assert [v for k, v in sets if k == b'_ar_right'] == [b'4:15', b'3:57', b'1:02:03', b'', b'', b'', b'']
     assert [v for k, v in sets if k == b'_ar_after'] == [b'Settle', b'Caracal', b'A' + dot + b'B', b'No Length', b'1989']
+
+
+# An album's page (addon.c album_view, artist_page.c) from the rows an app that sees "album" in the caps sends
+# (q2-subsonic's device_album.go).
+DOT = b' \xc2\xb7 '
+
+
+def album_rows(sync=b'Add to Sync', shuffle=True, about=True):
+    rows = [(b'action', b'toggle', sync, b'', b'album:al2', b''), (b'action', b'play', b'Play', b'', b'album:al2 0', b'')]
+    if shuffle:
+        rows.append((b'action', b'shuffle', b'Shuffle', b'', b'album:al2', b''))
+    if about:
+        rows.append((b'info', b'about', b'Disclosure', b'2015' + DOT + b'3 songs' + DOT + b'14 min', b'', b''))
+    return rows + [(b'action', b'play', t, b'Disclosure' + DOT + n + DOT + b'On Q2' * (i == 1),
+                    b'song:s%d album:al2 %d' % (i, i), b'toggle')
+                   for i, (t, n) in enumerate(((b'Nocturnal', b'6:44'), (b'Omen', b'3:57'), (b'Holding On', b'')))]
+
+
+def test_an_albums_reply_under_the_inset_modal_is_its_page(fw, nav_st):
+    """Play, Shuffle and the about row on an album: the header (the level's title, the artist, the facts, the cover's
+    square), the pair lit on Play, and the songs as tracks numbered in order with their lengths; Add to Sync, Play,
+    Shuffle and the about row are no rows of their own."""
+    p = oled_page(fw, nav_st)
+    sets, ints = [], []
+    fw.mock('widget_set_prop_str', lambda w, k, v, *_: sets.append((C.string_at(k), C.string_at(v))))
+    p.answer(rows=album_rows())
+    assert p.top.lay == LAY_ALBUM and p.top.stop == 1 and p.drawn == 3
+    assert (b'_ar_name', b'Foo') in sets and (b'_ar_sub', b'Disclosure') in sets
+    assert (b'_ar_meta', b'2015' + DOT + b'3 songs' + DOT + b'14 min') in sets
+    assert [v for k, v in sets if k == b'_ar_num'] == [b'1', b'2', b'3']
+    assert [v for k, v in sets if k == b'_ar_right'] == [b'6:44', b'3:57', b'']
+    assert props_set(fw, b'_ar_square') == [1] and props_set(fw, b'_ar_row') == [4, 5, 6]
+
+
+@pytest.mark.parametrize('shuffle,about', ((False, True), (True, False)))
+def test_an_older_apps_album_keeps_the_plain_rows(fw, nav_st, shuffle, about):
+    """An app without "album" sends neither Shuffle nor the about row: the reply is drawn as it came."""
+    p = oled_page(fw, nav_st)
+    rows = album_rows(shuffle=shuffle, about=about)
+    p.answer(rows=rows)
+    assert p.top.lay == LAY_PLAIN and p.drawn == len(rows) == 6
+
+
+def test_the_albums_pair_is_play_then_shuffle(fw, nav_st):
+    """pair_key on an album: Play, Shuffle, then the first track; Centre presses the lit one; a track's Centre plays
+    its own row."""
+    p = oled_page(fw, nav_st)
+    p.answer(rows=album_rows())
+    key = fw.fn('pair_key', C.c_int, C.c_void_p, C.c_void_p, C.c_int)
+    top = fw.fn('window_of', C.c_void_p, C.c_void_p)(p.made[-3])  # the header's
+    assert key(top, p.view, 0) == 1 and p.pg.next == 0 and p.pg.arg == 1  # G_ROW, Play's row
+    assert key(top, p.view, 1) == 1 and p.top.stop == 2
+    assert key(top, p.view, 0) == 1 and p.pg.arg == 2  # Shuffle's row
+    assert key(top, p.view, 1) == 1 and p.top.stop == 0
+    assert key(top, p.view, 1) == 0  # the tracks' own
+    p.click(5)
+    assert p.pg.arg == 5  # Omen's row: the album from it
+
+
+def test_the_hold_menu_holds_the_albums_sync_rows(fw, nav_st):
+    p = oled_page(fw, nav_st)
+    rows = album_rows(sync=b'Remove from Sync')
+    rows[1:1] = [(b'action', b'quality', b'Quality: Original', b'', b'album:al2', b'')]
+    p.answer(rows=[(b'list', b'sync', b'Sync Now', b'2 waiting', b'', b'')] + rows)
+    assert p.top.lay == LAY_ALBUM
+    fw.fn('addon_hold', C.c_int, C.c_void_p)(p.page)
+    held = fw.var('addon__ar_hold_row', C.c_int * 4)
+    assert list(held[:3]) == [0, 1, 2]
+    fw.fn('addon__artist_pick', None, C.c_int)(1)
+    assert p.pg.next == 0 and p.pg.arg == 1  # G_ROW, Remove from Sync's row

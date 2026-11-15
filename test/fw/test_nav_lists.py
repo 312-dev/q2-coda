@@ -1967,6 +1967,21 @@ def test_a_destroyed_marquee_label_is_not_stopped(fw, ui, st):
     assert not fw.calls('hscroll_label_stop')
 
 
+def test_a_pair_over_the_list_leaves_its_rows_no_marquee(fw, ui, st):
+    """An artist's or album's pair holding the selection (artist_page.c pair_holds): the list paints no bar, and the
+    marquee a fast spin armed on the row it passed through finds no row, so that title never scrolls lit."""
+    marquee = Marquee(fw, ui, st, 400)
+    marquee.moved(None)  # running on row 3
+    stop = C.c_byte(1)  # the pair's first stop lit
+    ar = fw.var('artist_page__ar', C.c_void_p * 6)
+    ar[1], ar[5] = marquee.page.view.at, C.addressof(stop)  # its list, its stop (head, list, panels, ctx, stop)
+    paint(fw, marquee.page)
+    assert [a[0] for _, a in fw.calls('hscroll_label_stop')] == [marquee.label.at]
+    assert st('marq_row', C.c_void_p).value is None
+    marquee.moved(None)
+    assert len(fw.calls('hscroll_label_start')) == 1  # the first run's alone
+
+
 @pytest.mark.parametrize('speed, paced', [(0.0, True), (0.2, True), (0.02, False)])
 def test_every_scrolling_label_holds_then_runs_at_most_the_pace(fw, speed, paced):
     label = C.create_string_buffer(0x100)

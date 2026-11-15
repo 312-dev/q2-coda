@@ -5,7 +5,11 @@
  * cover rows of the pages they open (cover_row; a song's album after its title, cover_after; an
  * artist's monogram in the cover's place, cover_mono). addon.c builds the page from a card app's
  * reply (its artist_view), library_artist.c from the Library's songs on stock's artistinfo_page;
- * the header and the pair take plain strings, so an album's page can use them too.
+ * the header and the pair take plain strings, so an album's page uses them too
+ * (docs/oled-design.md#album-page): its header shows the album's cover (hero_cover) in the
+ * monogram's place, its pair is Play and Shuffle, and its rows are the album's tracks
+ * (track_row), from a card app's reply (addon.c album_view) or on stock's album pages
+ * (library_album.c).
  *
  * The header stands from screen y HERO_Y, which is above the window (the status row is V_BAR
  * high): its monogram's top is drawn again in the status bar's background paint (artist_cap),
@@ -18,7 +22,8 @@
 #include "navigation.h"
 
 #define HERO_Y 52    /* the header's top on screen: the monogram's */
-#define HERO_MONO 64 /* the monogram's diameter, at the text column */
+#define HERO_MONO 64 /* the monogram's diameter, at the text column; an album's cover's side */
+#define HERO_ART_R 6 /* an album's cover's corners */
 #define HERO_TEXT 102
 #define HERO_NAME_Y 66 /* each line's centre on screen */
 #define HERO_SUB_Y 88
@@ -32,6 +37,8 @@
 #define AR_LIST_Y 168  /* the drill-down rows' first, on screen */
 #define AR_COUNT_DX 44 /* a drill-down row's count, right-aligned this far from the right edge */
 #define AR_THUMB_R 4
+#define TRACK_NUM_X 38      /* a track's number, right-aligned to this on screen */
+#define TRACK_TITLE_X 50    /* and its title's first column */
 #define AR_FILL 0x1c1c1e    /* a pair's panel at rest */
 #define AR_MONO 0x2c2c2e    /* the monogram's disc, and a cover's placeholder */
 #define AR_MONO_ON 0x3a3a3c /* an artist row's disc on the selection */
@@ -55,10 +62,12 @@
 #define AR_RIGHT "_ar_right" /* a cover row's text at the right (a year, a length) */
 #define AR_THUMB "_ar_thumb" /* its cover's size, its file in AR_COVER, "" for a placeholder */
 #define AR_COVER "_ar_cover"
-#define AR_AFTER "_ar_after" /* a song row's album, after its title */
-#define AR_TITLE "_ar_title" /* a cover row's title, for its monogram and the album's place */
-#define AR_PX "_ar_px"       /* a cover row's title's AWTK size */
-#define AR_DISC "_ar_disc"   /* an artist row: its name's monogram in the cover's place */
+#define AR_AFTER "_ar_after"   /* a song row's album, after its title */
+#define AR_TITLE "_ar_title"   /* a cover row's title, for its monogram and the album's place */
+#define AR_PX "_ar_px"         /* a cover row's title's AWTK size */
+#define AR_DISC "_ar_disc"     /* an artist row: its name's monogram in the cover's place */
+#define AR_SQUARE "_ar_square" /* the header's art is an album's cover: its file in AR_COVER */
+#define AR_NUM "_ar_num"       /* a track row's number, "" for none */
 
 static struct {
     void *head, *list, *panel[2];
@@ -70,7 +79,10 @@ static struct {
 
 static int ar_gone(void *w, void *event) {
     (void)event;
-    if (w == ar.head) memset(&ar, 0, sizeof ar);
+    if (w != ar.head) return 0;
+    const char *cover = widget_get_prop_str(w, AR_COVER, "");
+    if (cover && *cover) image_manager_unload_bitmap_by_name(image_manager(), cover);
+    memset(&ar, 0, sizeof ar);
     return 0;
 }
 
@@ -129,6 +141,19 @@ static void ar_box(void *canvas, const rect_t *r, int R, unsigned rgb) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
+/* A square image's corners over r rounded to R: the pixels outside each arc in behind, the final
+ * 0xRRGGBB of what stands behind it. */
+static void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind) {
+    for (int i = 0; i < R; ++i) {
+        int n = round_inset(R, i, r->h);
+        for (int b = 0; b < 2 && n; ++b) {
+            int y = r->y + (b ? r->h - 1 - i : i);
+            scrub_row(canvas, 0xff000000u | behind, r->x, y, n);
+            scrub_row(canvas, 0xff000000u | behind, r->x + r->w - n, y, n);
+        }
+    }
+}
+
 static unsigned ar_accent(void) { return scheme()->tones[0] & 0xffffffu; }
 
 /* The square root of x > 0 (the payload links no libm): Newton's steps from above. */
@@ -180,14 +205,32 @@ static void mono(void *canvas, const char *name, int x, int y, int d, int px, un
     ar_text(canvas, letter, 1, px, 0xffffff, 0, x + (d - w) / 2, y + d / 2, d, 2);
 }
 
-/* The header's monogram, its top dy px down the canvas from the header's top on screen. */
-static void hero_mono(void *canvas, const char *name, int dy) {
-    mono(canvas, name, geom_val(V_TEXT_X), dy, HERO_MONO, PX_30, AR_MONO);
+/* The header's art, its top dy px down the canvas from the header's top on screen: the name's
+ * monogram, or an album's cover (hero_cover) cropped square to HERO_MONO px with HERO_ART_R
+ * corners, the #2C2C2E placeholder while it has none. */
+static void hero_art(void *canvas, void *head, int dy) {
+    unsigned bitmap[64]; /* bitmap_t: width @0, height @4 */
+    rect_t r = { geom_val(V_TEXT_X), dy, HERO_MONO, HERO_MONO };
+    const char *cover = widget_get_prop_str(head, AR_COVER, "");
+    if (!widget_get_prop_int(head, AR_SQUARE, 0)) {
+        mono(canvas, widget_get_prop_str(head, AR_NAME, ""), r.x, dy, HERO_MONO, PX_30, AR_MONO);
+    } else if (!cover || !*cover || widget_load_image(head, cover, bitmap) || !bitmap[0] ||
+               !bitmap[1]) {
+        ar_box(canvas, &r, HERO_ART_R, flip_if(ipod_light(), AR_MONO));
+    } else { /* the middle square of a cover that isn't one */
+        int w = (int)bitmap[0], h = (int)bitmap[1], side = w < h ? w : h;
+        rect_t src = { (w - side) / 2, (h - side) / 2, side, side };
+        unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+        canvas_draw_image(canvas, bitmap, &src, &r);
+        ar_corners(canvas, &r, HERO_ART_R, flip_if(ipod_light(), 0));
+        stock_canvas_set_fill_color(canvas, fill);
+    }
 }
 
 /* The header in body (the page's window, which starts V_BAR down the screen): the monogram of
  * name, name, sub under it and meta (none when empty) under that, kept as its props; its view
- * reaches down to the drill-down rows, so the pair's panels are its children. */
+ * reaches down to the drill-down rows, so the pair's panels are its children. hero_cover makes it
+ * an album's, hero_text writes its lines again. */
 void *hero_open(void *body, const char *name, const char *sub, const char *meta) {
     int bar = geom_val(V_BAR);
     void *head =
@@ -204,16 +247,37 @@ void *hero_open(void *body, const char *name, const char *sub, const char *meta)
 /* The header artist_paint draws, 0 when none: the last hero_open's while it stands. */
 void *hero_now(void) { return ar.head; }
 
-/* The status bar's background (navigation.c ringnav_paint_bg): the monogram's top, which stands
- * above the window, while the header's page is on top (or under an inset modal, which dims the bar
- * with it) and still: a sliding page leaves the bar as it is. */
+/* The header head shows an album's cover, url (a file:// URL; 0 or "" the placeholder), in the
+ * monogram's place. */
+void hero_cover(void *head, const char *url) {
+    widget_set_prop_int(head, AR_SQUARE, 1);
+    widget_set_prop_str(head, AR_COVER, url ? url : "");
+    widget_invalidate_force(head, (void *)0);
+}
+
+/* The header head's lines, name (0 keeps its own), sub and meta, written again when one changed. */
+void hero_text(void *head, const char *name, const char *sub, const char *meta) {
+    if (!name) name = widget_get_prop_str(head, AR_NAME, "");
+    if (!tk_strcmp(widget_get_prop_str(head, AR_NAME, ""), name) &&
+        !tk_strcmp(widget_get_prop_str(head, AR_SUB, ""), sub) &&
+        !tk_strcmp(widget_get_prop_str(head, AR_META, ""), meta))
+        return;
+    widget_set_prop_str(head, AR_NAME, name);
+    widget_set_prop_str(head, AR_SUB, sub);
+    widget_set_prop_str(head, AR_META, meta);
+    widget_invalidate_force(head, (void *)0);
+}
+
+/* The status bar's background (navigation.c ringnav_paint_bg): the monogram's (or cover's) top,
+ * which stands above the window, while the header's page is on top (or under an inset modal, which
+ * dims the bar with it) and still: a sliding page leaves the bar as it is. */
 void artist_cap(void *bar, void *canvas) {
     void *wm = window_manager(), *win = ar.head ? window_of(ar.head) : (void *)0,
          *top = window_manager_get_top_window(wm);
     if (!win || !P(canvas, CANVAS_LCD) || (win != top && !modal_win(top)) ||
         window_manager_is_animating(wm))
         return;
-    hero_mono(canvas, widget_get_prop_str(ar.head, AR_NAME, ""), HERO_Y - I(bar, W_Y));
+    hero_art(canvas, ar.head, HERO_Y - I(bar, W_Y));
 }
 /* The bar painted again once the page has come to rest: nothing else repaints it then. Asked from
  * the header's first paint, where an invalidate would be lost, so from the next pass on, until the
@@ -298,11 +362,12 @@ static void pair_paint(void *p, void *canvas) {
             r.w, 2);
 }
 
-/* The header: the monogram (its top above the window is artist_cap's) and the three lines. */
+/* The header: the monogram or cover (its top above the window is artist_cap's) and the three
+ * lines. */
 static void hero_paint(void *head, void *canvas) {
     int bar = geom_val(V_BAR), right = 375 - geom_val(V_RIGHT_X), w = right - HERO_TEXT;
     const char *meta = widget_get_prop_str(head, AR_META, "");
-    hero_mono(canvas, widget_get_prop_str(head, AR_NAME, ""), HERO_Y - bar);
+    hero_art(canvas, head, HERO_Y - bar);
     ar_text(canvas, widget_get_prop_str(head, AR_NAME, ""), 1, PX_20, 0xffffff, 0, HERO_TEXT,
             HERO_NAME_Y - bar, w, 2);
     ar_text(canvas, widget_get_prop_str(head, AR_SUB, ""), 0, PX_15, AR_SECOND, 0, HERO_TEXT,
@@ -390,15 +455,7 @@ static void cover_paint(void *item, void *canvas) {
     } else if (!cover || !*cover) {
         ar_box(canvas, &r, AR_THUMB_R, flip_if(ipod_light(), AR_MONO));
     } else { /* the four corners outside the arcs, in the colour behind */
-        unsigned behind = on ? ar_accent() : flip_if(ipod_light(), 0);
-        for (int i = 0; i < AR_THUMB_R; ++i) {
-            int n = round_inset(AR_THUMB_R, i, thumb);
-            for (int b = 0; b < 2 && n; ++b) {
-                int y = r.y + (b ? thumb - 1 - i : i);
-                scrub_row(canvas, 0xff000000u | behind, r.x, y, n);
-                scrub_row(canvas, 0xff000000u | behind, r.x + thumb - n, y, n);
-            }
-        }
+        ar_corners(canvas, &r, AR_THUMB_R, on ? ar_accent() : flip_if(ipod_light(), 0));
     }
     stock_canvas_set_fill_color(canvas, fill);
     if (right && *right)
@@ -418,8 +475,31 @@ static void cover_paint(void *item, void *canvas) {
     }
 }
 
+/* An album's track at index of view (a page_list's, its rows the theme's page_h(48), 32 px under
+ * OLED): its number num (none when 0) right-aligned on TRACK_NUM_X in Inter Regular 15 Text
+ * Tertiary, title in the theme's row face from TRACK_TITLE_X, resting on its ellipsis, and len
+ * (none when empty) right-aligned on the right column as a cover row's. click gets ctx. */
+void *track_row(void *view, int index, int num, const char *title, const char *len,
+                int (*click)(void *, void *), int ctx) {
+    int h = page_h(48), end = 375 - geom_val(V_RIGHT_X) - (len && *len ? 50 : 0);
+    char n[12] = "";
+    void *item = page_row_detail(view, ctx, title, 0, click);
+    void *label = widget_get_child(item, 0);
+    widget_move_resize(item, 0, index * h, 375, h);
+    widget_move_resize(label, TRACK_TITLE_X - 2, 0, end - TRACK_TITLE_X + 2, h);
+    widget_set_prop_int(label, "loop", 0); /* it scrolls on the selection alone */
+    hscroll_label_set_only_focus(label, 1);
+    hscroll_label_set_ellipses(label, 1);
+    if (num > 0) tk_snprintf(n, sizeof n, "%d", num);
+    widget_set_prop_str(item, AR_NUM, n);
+    widget_set_prop_str(item, AR_RIGHT, len ? len : "");
+    widget_set_prop_int(item, "_ar_row", ctx); /* addon.c addon_hold's */
+    return item;
+}
+
 /* ringnav_paint's, after stock painted w (addon.c addon_paint, while its page shows one of these
- * layouts): the header, its pair, a drill-down row's count and a cover row's cover and text. */
+ * layouts, and library_album.c on stock's album pages): the header, its pair, a drill-down row's
+ * count, a track's number and length and a cover row's cover and text. */
 void artist_paint(void *w, void *canvas) {
     if (!w || !P(canvas, CANVAS_LCD)) return;
     if (ar.head && w == ar.head) {
@@ -428,6 +508,15 @@ void artist_paint(void *w, void *canvas) {
     }
     if (ar.head && (w == ar.panel[0] || w == ar.panel[1])) {
         pair_paint(w, canvas);
+        return;
+    }
+    const char *num = widget_get_prop_str(w, AR_NUM, (const char *)0);
+    if (num) { /* a track: its number, and its length on the right column */
+        const char *len = widget_get_prop_str(w, AR_RIGHT, "");
+        unsigned ink = ar_lit(w) ? 0xffffff : AR_THIRD;
+        if (*num) ar_text(canvas, num, 0, PX_15, ink, 0, TRACK_NUM_X, I(w, W_H) / 2, 40, 3);
+        if (len && *len)
+            ar_text(canvas, len, 0, PX_15, ink, 0, 375 - geom_val(V_RIGHT_X), I(w, W_H) / 2, 60, 3);
         return;
     }
     const char *count = widget_get_prop_str(w, AR_COUNT, (const char *)0);
