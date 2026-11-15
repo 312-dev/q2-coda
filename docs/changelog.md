@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - EQ (OLED): with the wheel on the **Simple** and **Advanced** tabs, only the tabs show it; the first row of Advanced's list no longer lights up as well.
   - EQ (OLED): **Simple** and **Advanced** are an iOS-style segmented control: the open tab is a raised grey segment, which turns blue only while the wheel is on the tabs, so you can always tell which tab is open.
   - Playlists (OLED): after **Cancel** on Delete Playlist, the top of the screen names Playlists again instead of still asking the question.
   - EQ: after picking a value (Balance, Preamp, a band's Gain) or coming back from a band or Presets, the list is where you left it, on the row you opened, rather than back at the top.

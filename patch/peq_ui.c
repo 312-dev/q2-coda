@@ -1246,6 +1246,13 @@ static int e3_single(const void *unused) {
     return 7;
 }
 
+/* navigation.c paint_selection: Advanced's list while its tab bar holds the wheel, whose row is
+ * -1 then; ringnav would settle that on the first row in view (reconcile) and light it beside
+ * the bar's segment. */
+int eq_tabs_hold(void *view) {
+    return view && view == ui.view && ui.tab == ADVANCED && ui.screen == HOME && ui.tabs;
+}
+
 /* ringnav(), the page on top: Simple's wheel and Centre, and Advanced's tab bar, which the wheel
  * reaches past the list's first row. */
 int eq_key(void *top, unsigned key) {

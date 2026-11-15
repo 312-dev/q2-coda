@@ -226,7 +226,7 @@ extern void xfade_row(void *label), wheel_row(void *label), resume_row(void *lab
     mono_row(void *label), swap_row(void *label), night_row(void *label);
 extern int mono_click(void *ctx, void *event), swap_click(void *ctx, void *event);
 extern int xfade_open(void *ctx, void *event), xfade_key(void *top, unsigned key), resume_min(void);
-extern int eq_key(void *top, unsigned key); /* peq_ui.c */
+extern int eq_key(void *top, unsigned key), eq_tabs_hold(void *view); /* peq_ui.c */
 extern const char *radio_hold(void *top);
 extern void visualizer_paint(void *w, void *canvas), visualizer_attach(void *win);
 extern int visualizer_full(void); /* OLED's full-screen Field draws the modes itself */
@@ -2550,6 +2550,7 @@ static void paint_selection(void *w, void *canvas) {
         }
         if (st.center_timer && !pending_matches(top, &g_menu)) cancel_center();
         if (g_menu.kind == 3) return; /* Home shows its selected card. */
+        if (eq_tabs_hold(w)) return;  /* the wheel is on EQ's tabs, above the list: no row */
         i = reconcile(&g_menu, !moving(&g_menu) && !pointer_down());
     }
     /* Touch hides the selection until the wheel or a button, except on Home (iPod's list) and a
