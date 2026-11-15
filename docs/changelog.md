@@ -39,6 +39,7 @@
   - Security: Bluetooth stays discoverable for 3 minutes after it turns on, instead of for as long as it's on. Headphones and devices already paired connect as before; to pair a new phone with the Q2 as a Bluetooth receiver after that, turn Bluetooth off and on.
   - Security: the firmware leaves out debugging and network tools nothing uses (strace, sqlite3, hcidump, memtester, nandtest, telnet, tftp and inetd among them).
   - Time: setting the clock from the internet asks the worldwide NTP pool instead of China's.
+  - Security: Wi-Fi transfer's web server no longer runs with full control of the Q2. Only the part that reads and writes the card does, and it takes nothing from the network but the request itself. Nothing changes in how you use it.
   - Wi-Fi transfer: the web page asks for a PIN. **Wi-Fi File Transfer** shows a new six-digit PIN above the address each time you open it, and nothing on the card can be listed, downloaded, uploaded or deleted without it. Before, anyone on the same Wi-Fi network could reach the whole card while the page was open. Five wrong PINs lock the page out until you open Wi-Fi File Transfer again.
   - Wi-Fi transfer: it turns itself off after 10 minutes with no uploads, downloads or browsing, so a Q2 left on that screen doesn't keep the card open to the network.
   - Lock screen: under **Theme: OLED** the lock screen shows a large centred clock with the date under it in grey and the playing song in two lines, over the wallpaper dimmed by half (or black), without the card, battery or arrows.

@@ -376,6 +376,15 @@ SCROBBLE_CA = 'etc/scrobble-ca.pem'
 # discoverable for as long as Bluetooth stayed on; 180 s gives a phone three minutes from then to find it.
 BT_MAIN = 'etc/bluetooth/main.conf'
 BT_DISCOVERABLE = (b'\nDiscoverableTimeout = 0\n', b'\nDiscoverableTimeout = 180\n')
+# Wi-Fi transfer's server (docs/internals.md#wi-fi-transfer-root). thttpd drops to www-data once it has bound :8888, so its
+# own request parsing, which runs before the PIN check, is not root's; stock's conf kept it root. Only root may write
+# the card, so each of the six CGIs is patch/cgi_root.c, set-uid root (CGI_MODE), which runs Q2CGI as root.
+THTTPD_CONF = 'etc/thttpd.conf'
+THTTPD_USER = (b'\nuser=root\n', b'\nuser=www-data\n')
+WWW_DATA = b'\nwww-data:x:33:33:'  # stock's /etc/passwd line: cgi_root.c WWW_UID
+Q2CGI = 'usr/bin/q2cgi'
+CGIS = ('create', 'delete', 'list', 'download', 'upload', 'auth')  # cgi-bin/<name>.cgi; auth is Q2 Pod's own
+CGI_MODE = (b'775', b'4755')  # stock's mode for a CGI, then set-uid root and no group write
 # Every V1.36 unit has the same root password hash, and init runs a login on the board's serial pad (ttyS3).
 # Nothing on the Q2 logs in (q2remote, --dev only, runs /bin/sh itself), so root is locked and the getty goes;
 # the kernel's and init's messages still reach the console.
@@ -2203,6 +2212,11 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     bt_main = cat(BT_MAIN)
     check(bt_main.count(BT_DISCOVERABLE[0]) == 1, 'Unexpected Bluetooth main.conf')
     (out/'main.conf').write_bytes(bt_main.replace(*BT_DISCOVERABLE))
+    thttpd_conf = cat(THTTPD_CONF)
+    check(thttpd_conf.count(THTTPD_USER[0]) == 1 and b'user=' not in thttpd_conf.replace(THTTPD_USER[0], b''),
+          'Unexpected thttpd.conf')
+    check(WWW_DATA in b'\n' + cat('etc/passwd'), 'No www-data:33 in /etc/passwd')
+    (out/'thttpd.conf').write_bytes(thttpd_conf.replace(*THTTPD_USER))
     for address, old, new in ARTIST_ALBUMS:
         patch_word(patched, address, old, new, 'artist detail opens on Albums')
     patch_word(patched, *SHUFFLE_CALL, jal(ps['ringnav_shuffle']),
@@ -2465,6 +2479,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     p = swap_inode(p, SHADOW.encode(), out/'shadow')
     p = swap_inode(p, INITTAB.encode(), out/'inittab')
     p = swap_inode(p, BT_MAIN.encode(), out/'main.conf')
+    p = swap_inode(p, THTTPD_CONF.encode(), out/'thttpd.conf')
     aic_notifier = None
     if aic_idle_wait:
         from aic import MODULE_PATH, PATCH_POLICY, STOCK_SHA256, patch_module
@@ -2518,8 +2533,10 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     icons['classic_light_list_tidal.png'] = ('list_tidal.png', pane_icon(cat(xx+'list_tidal.png'), pane))
     icons['default_album_home.png'] = ('default_album_big.png', art)
     icons['default_album_flow.png'] = ('default_album_big.png', sized_art(art, 160))
+    cgi_root = compile_helper(out, cat, 'cgi_root', 'q2cgi-root', HELPER_LIBS[:1])
     pages = {ui+PLAYING_STOCK: (ui+'playing_page.bin', english_ui(PLAYING_PAGE, playing_stock(cat(ui+'playing_page.bin')))), **set_pages}
     added = list(player_added)
+    removed = []
     changed_assets = {}
     from art import theme_images
     drawn = {xx+n+'.png': (xx+'list_tidal.png', d) for n, d in theme_images(builtin_themes()).items()}
@@ -2528,8 +2545,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                HELPER: (HELPER_LIKE, compile_helper(out, cat, 'video', 'q2video', HELPER_LIBS)),
                                SCROBBLE_CA: ('etc/hosts', (ROOT/'assets/scrobble-ca.pem').read_bytes()),
                                STOCK_CA: ('etc/hosts', mozilla_ca()),
-                               # Wi-Fi transfer's PIN check (q2cgi auth), a CGI stock has no inode for
-                               'usr/share/web/cgi-bin/auth.cgi': ('usr/share/web/cgi-bin/list.cgi', (ROOT/'assets/web/q2cgi').read_bytes()),
+                               # Wi-Fi transfer's PIN check (q2cgi auth), a CGI stock has no inode for; CGI_MODE below
+                               'usr/share/web/cgi-bin/auth.cgi': ('usr/share/web/cgi-bin/list.cgi', cgi_root),
+                               Q2CGI: (HELPER_LIKE, (ROOT/'assets/web/q2cgi').read_bytes()),
                                BOOT: (HELPER_LIKE, compile_helper(out, cat, 'boot', 'q2boot', HELPER_LIBS[:1])),
                                **({LOGO_LIGHT: (xx+'list_tidal.png', light)} if light else {}),  # the swapped logo.jpg has no stock inode left
                                **{path: (FONT, data) for path, (data, _) in fonts.items()},
@@ -2546,7 +2564,6 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         entry = path+b' F '+b' '.join(stock.groups())+b' cat '+shlex.quote(str(out/name)).encode()+b'\n'
         p += entry  # the definitions' end, before the embedded data
         added.append([path, b'R', *stock.groups()])
-    removed = []
     for path in STOCK_EQ + STOCK_PAGES + OBSOLETE:
         line = need(re.search(rb'^'+re.escape(path.encode())+rb' [RS] .+\n', p, re.M), f'Missing stock inode {path}')
         removed.append(line.group().split()[:6])
@@ -2561,16 +2578,23 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     # Wi-Fi transfer file manager (docs/internals.md#wi-fi-transfer): the stock CGIs are CGIC programs
     # that build shell commands from the request (mkdir "%s", rm -rf "%s", mv "%s" "%s") and pass the
     # path/filename straight to system(), so a name with $(...) or a backtick runs as root, and they
-    # read paths outside the card. q2cgi replaces all five, doing each operation with argv (never a
-    # shell command built from input) and validating every path stays under /mnt/mmc. One script over
-    # every cgi-bin/*.cgi inode, so both /name and /cgi-bin/name.cgi resolve to it with no bypass; it
-    # is also cgi-bin/auth.cgi (added above), the PIN check every other route requires.
-    q2cgi = (ROOT/'assets/web/q2cgi').read_bytes()
-    (out/'q2cgi').write_bytes(q2cgi)
-    for n in ('create', 'delete', 'list', 'download', 'upload'):
+    # read paths outside the card. q2cgi (Q2CGI, added above) replaces all five, doing each operation
+    # with argv (never a shell command built from input) and validating every path stays under
+    # /mnt/mmc. Every cgi-bin/*.cgi inode is cgi_root, which runs it as root for thttpd's www-data, so
+    # both /name and /cgi-bin/name.cgi reach it with no bypass; so is cgi-bin/auth.cgi (added above),
+    # the PIN check every other route requires.
+    for n in CGIS[:-1]:
         path = 'usr/share/web/cgi-bin/%s.cgi' % n
-        changed_assets[path] = dict(original_sha256=sha(cat(path)), sha256=sha(q2cgi))
-        p = swap_inode(p, path.encode(), out/'q2cgi')
+        changed_assets[path] = dict(original_sha256=sha(cat(path)), sha256=sha(cgi_root))
+        p = swap_inode(p, path.encode(), out/'q2cgi-root')
+    for n in CGIS:
+        path = b'usr/share/web/cgi-bin/%s.cgi' % n.encode()
+        line = need(re.search(rb'^' + re.escape(path) + rb' F (\d+) ' + CGI_MODE[0] + rb' 0 0 ', p, re.M), f'Unexpected {path.decode()} mode')
+        p = p[:line.start()] + path + b' F ' + line[1] + b' ' + CGI_MODE[1] + b' 0 0 ' + p[line.end():]
+        stock = [path, b'R', line[1], CGI_MODE[0], b'0', b'0']  # auth.cgi's is in added, the others in stock's image
+        if stock in added: added.remove(stock)
+        else: removed.append(stock)
+        added.append([path, b'R', line[1], CGI_MODE[1], b'0', b'0'])
     patched_ui = list(UI_ASSETS)
     check(chinese, 'No Chinese UI text found')
     assets = ['ui/'+rel for rel in patched_ui + sorted(chinese - set(patched_ui))] + ['strings/en_US.bin']
