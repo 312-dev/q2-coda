@@ -72,9 +72,11 @@ int ringnav_play_pause(void) {
     return stock_pause_trampoline();
 }
 int media_owner(void) { return video_status() ? 4 : radio_status() ? 3 : spot_status() ? 2 : 1; }
-int media_playing(void) {
-    return (video_status() ?: radio_status() ?: spot_status() ?: mclGetPlayStatus()) == 2;
+/* What owns playback says, as mclGetPlayStatus does: 2 playing, 3 paused, else stopped or none. */
+int media_status(void) {
+    return video_status() ?: radio_status() ?: spot_status() ?: mclGetPlayStatus();
 }
+int media_playing(void) { return media_status() == 2; }
 static unsigned media_session(void) {
     int owner = media_owner();
     if (owner == 4) return video_session();

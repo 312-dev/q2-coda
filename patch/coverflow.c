@@ -4097,6 +4097,10 @@ static struct {
      * the bar painted whole (strip_done), end 0: none */
     unsigned strip_timer;
     int stripping, strip_need[2], strip_done[2];
+    /* np: Now Playing's row shows (np_loaded); np_stop: when play was first seen stopped, | 1, 0
+     * while something is loaded; np_timer: np_due's */
+    int np;
+    unsigned np_stop, np_timer;
 } home __attribute__((section(".scratch")));
 extern int ipod_home(void), ipod_home_rockbox(void), home_shortcut_open(void *, void *),
     home_lib_on(void), row_preview_on(void), library_search(void);
@@ -4270,7 +4274,9 @@ static int home_drift(const void *unused) {
         home.fade += step;
         if (home.fade >= SLIDE_FADE_MS) fade_end();
     }
-    if (home.show == SHOW_LIB && !home.fade) slide_next();
+    /* the slideshow's next cover, or at once over a playing cover still fading in (the wheel
+     * back on a library row) */
+    if (home.show == SHOW_LIB && (!home.fade || !home.sl[1].lib)) slide_next();
     drift_place();
     unsigned tick = home.fade ? SLIDE_TICK_MS : DRIFT_TICK_MS;
     if (tick == home.tick) return 8; /* RET_REPEAT */
@@ -4845,12 +4851,15 @@ static int pane_after(const void *unused) {
  * row's frame; a paint catches every other way a row changes (Return's first row, a tap, a list
  * sliding in). Names are compared only when the row changes. */
 void coverflow_home_row(void *surface, void *row, int id, int painting) {
-    if (row == home.row || !home.art || !theme()->pane_icon_x || ipod_home()) return;
+    if (row == home.row || !home.art || ipod_home()) return;
     home.row = row;
     void *list = P(surface, W_PARENT);
     const char *name = widget_get_prop_str(row, "name", "");
     int kind = PANE_LIBRARY;
-    if (!row_preview_on()) kind = PANE_NOW; /* Row Preview off: Now Playing's on every row */
+    /* a set with no row icons (OLED): Now Playing's row the playing cover, every other row the
+     * slideshow, as an iPod classic's menu shows the library's art on Music */
+    if (!theme()->pane_icon_x) kind = tk_strcmp(name, "img_playing") ? PANE_LIBRARY : PANE_NOW;
+    else if (!row_preview_on()) kind = PANE_NOW; /* Row Preview off: Now Playing's on every row */
     else if (list == home.sets) kind = PANE_SETTINGS;
     else if (list == home.lib) kind = id == library_search() ? PANE_SHUFFLE : PANE_LIBRARY;
     else if (list == home.stream) {
@@ -4982,10 +4991,11 @@ static int frame_hold(void) {
  * else, or with cut (the same cover again after a layout, on its new paper), it shows at once. A
  * playing cover that comes while another fades in takes that one's place in the fade (the player's
  * own after the Coverflow thumbnail that stood in for it, or a quick skip's next), so nothing
- * jumps; one that comes while a library cover fades in (play starting mid-fade) fades in over the
- * frame as it stands (frame_hold), the two covers there still from then on; any other ends the
- * fade first. The playing cover takes the one showing's phase when that was the playing cover
- * too, so a new track's pan goes on where it was. */
+ * jumps. Any other cover that comes mid-fade, the playing one while a library cover fades in (play
+ * starting, or the wheel onto Now Playing) or a library one while the playing cover fades in (the
+ * wheel back off it), fades in over the frame as it stands (frame_hold), the two covers there still
+ * from then on; a cut ends the fade first. The playing cover takes the one showing's phase when
+ * that was the playing cover too, so a new track's pan goes on where it was. */
 static int slide_show(const char *url, int lib, int cut) {
     if (home.fade && !cut && !lib && !home.sl[1].lib) {
         int moves = slide_load(&home.sl[1], url, 0, home.sl[1].ms);
@@ -4993,7 +5003,7 @@ static int slide_show(const char *url, int lib, int cut) {
         home.drawn = 0;
         return moves;
     }
-    if (home.fade && (cut || lib || !frame_hold())) fade_end();
+    if (home.fade && (cut || !frame_hold())) fade_end();
     int over = !cut && home.sl[0].tw && !home.pane;
     unsigned ms = !lib && !home.sl[0].lib ? home.sl[0].ms : 0;
     int moves = slide_load(&home.sl[over], url, lib, ms);
@@ -5007,11 +5017,11 @@ static int slide_show(const char *url, int lib, int cut) {
 }
 extern int slide_pick(char *url, int take); /* slideshow.c */
 /* The slideshow's next cover, once the one showing is due to fade out (at once if it is not a
- * library cover), fetched SLIDE_AHEAD_MS before. */
+ * library cover, or the playing cover fades in over it), fetched SLIDE_AHEAD_MS before. */
 static void slide_next(void) {
     const slide_t *s = &home.sl[0];
     unsigned end = SLIDE_FADE_MS + SLIDE_HOLD_MS;
-    int due = !s->tw || home.pane || !s->lib || s->ms >= end;
+    int due = !s->tw || home.pane || !s->lib || s->ms >= end || (home.fade && !home.sl[1].lib);
     char url[600];
     if ((due || s->ms + SLIDE_AHEAD_MS >= end) && slide_pick(url, due)) {
         if (!strcmp(url + 7, PEQ_ROOT "/tmp/q2-slide.jpg"))
@@ -5021,12 +5031,13 @@ static void slide_next(void) {
 }
 
 /* What the pane shows (docs/ipod.md#home), as an iPod classic's main menu: the playing cover on a
- * Now Playing row, the library's covers in turn on the Library's. Where the pane does not follow
- * the row (OLED, or Row Preview off) the playing cover while a song plays, else, once play has
- * stopped or paused for SLIDE_IDLE_MS, the library's. */
+ * Now Playing row, playing or paused, the library's covers in turn on the Library's (under OLED,
+ * every other row's). Where the pane does not follow the row (Classic with Row Preview off) the
+ * playing cover while a song plays, else, once play has stopped or paused for SLIDE_IDLE_MS, the
+ * library's. */
 static int art_source(void) {
     if (home.kind == PANE_LIBRARY) return SHOW_LIB;
-    if (home.kind != PANE_NOW || (theme()->pane_icon_x && row_preview_on())) return SHOW_NOW;
+    if (home.kind != PANE_NOW || !theme()->pane_icon_x || row_preview_on()) return SHOW_NOW;
     unsigned now = time_now_ms();
     if (mclGetPlayStatus() == 2) return (int)(home.idle = 0); /* SHOW_NOW */
     if (!home.idle) home.idle = now | 1;
@@ -5476,22 +5487,57 @@ static void home_show(void *w, int on) {
     widget_set_sensitive(w, on);
 }
 
+/* Home's Now Playing row (docs/ipod.md#home), as an iPod's main menu has it: there while
+ * something is loaded, playing or paused, and gone once play has stopped for NP_GONE_MS, so the
+ * moment between two tracks keeps it. Once stopped with the row shown, np_due looks again when
+ * that time is up, as nothing may paint then. */
+#define NP_GONE_MS 3000
+void coverflow_home_np(void), coverflow_home_layout(void), home_np_keep(int d);
+static int np_due(const void *unused) {
+    home.np_timer = 0;
+    coverflow_home_np();
+    return 0; /* RET_REMOVE */
+}
+static int np_loaded(void) {
+    int s = media_status();
+    if (s == 2 || s == 3) return (int)(home.np_stop = 0) + 1;
+    unsigned now = time_now_ms();
+    if (!home.np_stop) home.np_stop = now | 1;
+    int left = NP_GONE_MS - (int)(now - home.np_stop); /* np_stop may be now + 1 */
+    if (home.np && left > 0 && !home.np_timer)
+        home.np_timer = timer_add(np_due, (void *)0, (unsigned)left);
+    return home.np && left > 0;
+}
+/* Every bar paint (navigation.c bar_sync): Home laid out again once the row is to come or go. */
+void coverflow_home_np(void) {
+    if (home.list && np_loaded() != home.np) coverflow_home_layout();
+}
 /* Stored HOME=0/1/2 is Split/Full/Carousel in every theme: Split halves the screen, the art in the
  * right panel; Full hides the art and widens the list, its rows to the theme's home_full_row;
  * Carousel hides the art and shows stock's cards (tools/ipod.py ipod_home) in the
- * lists' place, and leaving it, the main list. Hidden Rockbox is restacked last because the native
- * layout includes hidden rows, and made insensitive, as hidden rows keep their taps. */
+ * lists' place, and leaving it, the main list. Hidden rows (Now Playing with nothing loaded, the
+ * Shortcut) are restacked last because the native layout includes hidden rows, and made
+ * insensitive, as hidden rows keep their taps. Carousel keeps its Now Playing card, as stock's. */
 void coverflow_home_layout(void) {
     int mode = ipod_home(), full = mode == 1, carousel = mode == 2;
     const theme_t *T = theme();
     /* The art goes back to the panel; Split's next paint resumes the pan. */
     stop_timer(&home.drift);
     if (!home.list) return;
+    void *playing = widget_lookup(home.list, "btn_playing", 1);
+    int np = np_loaded();
+    if (playing) {
+        if (np != widget_get_visible(playing)) home_np_keep(np ? 1 : -1);
+        widget_restack(playing, np ? 0 : widget_count_children(P(playing, W_PARENT)) - 1);
+        home_show(playing, np);
+    }
+    home.np = np;
     void *rockbox = widget_lookup(home.win, "btn_rockbox", 1);
     if (rockbox) {
         int shown = ipod_home_rockbox();
         /* after Folder, else last */
-        widget_restack(rockbox, shown ? 4 : widget_count_children(P(rockbox, W_PARENT)) - 1);
+        int last = widget_count_children(P(rockbox, W_PARENT)) - 1;
+        widget_restack(rockbox, shown ? 3 + (!playing || np) : last);
         home_show(rockbox, shown); /* hidden, it would still take Streaming's taps */
         widget_set_text_utf8(widget_lookup(home.win, "label_rockbox", 1), ipod_home_shortcut());
         /* ponytail: the Shortcut card stays when the row hides (Shortcut: Rockbox, no Rockbox on

@@ -109,7 +109,13 @@ instead: the gloss band and the white chevron on the selected row (below, and [T
 `HOME_MODERN_TEXT_X` and Full's rows `HOME_MODERN_ROW` wide, with the chevron on the bar.
 
 The nine rows are Now Playing, Library, Cover Flow, Folder, Rockbox, Shuffle Songs, Streaming,
-Search and Settings. **Shuffle Songs** shuffles the whole library and starts playing, as the Library's
+Search and Settings. **Now Playing** is there only while something is loaded, playing or paused, as
+on an iPod: with nothing loaded, or once play has stopped for `NP_GONE_MS` (3 s, so the moment
+between two tracks keeps it), the row goes, in Split, Full and every theme, and it comes back as play
+starts (`np_loaded`, checked on each bar paint and by `np_due` when the 3 s are up;
+`coverflow_home_layout` restacks the hidden row last, as the Shortcut's). Coming or going it keeps
+the selection on the same row and the same rows in view (`home_np_keep`); on Now Playing as it
+goes, the selection moves to Library. Carousel keeps its Now Playing card. **Shuffle Songs** shuffles the whole library and starts playing, as the Library's
 Shuffle → Shuffle Songs does (`shuffle_songs`), and opens Now Playing. It acts rather than opening a
 list, so it has no chevron (`paint_chevrons`; under OLED its label takes the chevron's room,
 `home_in_place`, and Minimal's capitals close up to fit, `paint_caps`); with no song it says "Update
@@ -117,7 +123,8 @@ Local Music first". **Search** opens the Library's search (`library_search_open`
 letter strip under OLED, stock's search elsewhere). Rockbox is visible only when its binary is on the card, unless Display → Appearance's **Shortcut**
 (`IPOD/SHORTCUT` 0-11, read as a decimal by `config_value`) turns that row into Artists, Albums, Favorites, Rated Albums, Shuffle, Games, Playlists, Podcasts, Audiobooks or Groovebox (`home_shortcut_open`; Groovebox (10, `SHORTCUT_GROOVEBOX`) is the App Store's Groovebox card game, started by id through `addon_game_open` as its Games row would start it (the tap toasts when no card game has the id), shown as a row only while `/mnt/mmc/.groovebox/q2-groovebox` is a regular file (`groovebox_available`, cached as `st.home_groovebox`; `bar_sync` relays out Home when that changes, as for Rockbox), and offered by the Centre cycle only then, while Rockbox is always offered; Rated Albums is Ratings → Albums, `rated_albums`; Shuffle is the Library's Shuffle page, `shuffle_menu`; Playlists is the Library's list, opened as stock's Home opens it; Podcasts and Audiobooks are the card's folders, opened as their Local Music rows open them, `media_click`, which toasts "No Podcasts folder on the card" without one; Split's pane shows Folder's icon for them); None (11, `SHORTCUT_NONE`) takes the row off Home's list, as a missing Rockbox does (`ipod_home_rockbox` returns 0), in Split, Full and every theme; the list's count changes, so its selection starts over, and it wraps over the rows left; with no key, or a value this build does not know (12 and up, and 11 on a build before 1.8.2, which reads it as no choice and shows the row), it is Rockbox when the card has it, else Favorites. Centre cycles Rockbox, Favorites, Shuffle, Rated Albums, Playlists, Artists, Albums, Games, Podcasts, Audiobooks, Groovebox (when installed), None. Carousel's cards are stock's and have none for Shuffle Songs or Search. Settings opens Playback and
 System; Return restores the menu's previous selection, and a short Return on the main menu selects
-Now Playing; a short Return with Now Playing selected opens it without changing playback. Return there goes back to Home. The wheel bumps at either end of both lists and wraps after a pause, as ring lists do ([internals.md](internals.md#wheel-movement)).
+its first row, Now Playing while it shows; a short Return with Now Playing selected opens it without
+changing playback. Return there goes back to Home. The wheel bumps at either end of both lists and wraps after a pause, as ring lists do ([internals.md](internals.md#wheel-movement)).
 Folder opens directly at the SD root when a card is in and no OTG drive is connected; Back at that root returns
 to Home. With OTG connected or no card in on entry, Folder keeps the storage selector. Nested folders and
 Library’s Podcasts/Audiobooks shortcuts keep their usual Back navigation.
@@ -198,13 +205,17 @@ stops the timer first.
 **The slideshow.** An iPod classic's main menu shows the art for the highlighted row: on Music,
 a slideshow of the library's album covers, each drifting and zooming slowly (the Ken Burns look)
 and cross-fading into the next; on Now Playing, which is there only while something is loaded,
-the playing album's cover. Split does the same (`art_source`). Where the pane follows the row
-(Classic with Row Preview) the Library row shows the slideshow and Now Playing's row the playing
-cover, as before. Where it does not (OLED, or Row Preview off) one pane serves every row, so it
-shows the playing cover while a song plays and the slideshow once play has stopped or paused for
-`SLIDE_IDLE_MS` (3 s, so the moment between two tracks starts nothing), back to the playing cover as
-soon as play resumes: the cover beside the menu is what plays, as on Now Playing's row, and the
-library otherwise. Each library cover holds `SLIDE_HOLD_MS` (6 s) between `SLIDE_FADE_MS` (1.5 s)
+the playing album's cover. Split does the same (`art_source`), the pane following the highlighted
+row (`coverflow_home_row`). Under OLED (a set with no row icons, `pane_icon_x` 0) Now Playing's row
+shows the playing cover, playing or paused, and every other row (Library, Cover Flow, Shuffle Songs,
+Search, Settings and the rest) the slideshow, as the iPod shows the library's art on Music; moving
+the wheel between Now Playing and another row cross-fades from the frame as it stands, so it never
+cuts, even mid-fade (`frame_hold`). OLED has no Row Preview setting: its pane always follows the row.
+Classic with Row Preview shows the slideshow on the Library row, the playing cover on Now Playing's
+and its icons and counts elsewhere ([Theme](#theme)). Classic with Row Preview off has one pane for
+every row, so it shows the playing cover while a song plays and the slideshow once play has stopped
+or paused for `SLIDE_IDLE_MS` (3 s, so the moment between two tracks starts nothing), back to the
+playing cover as soon as play resumes. Each library cover holds `SLIDE_HOLD_MS` (6 s) between `SLIDE_FADE_MS` (1.5 s)
 cross-fades; over its whole life (9 s) its window moves once at an even pace from one end to the
 other (`slide_at`, `kb_ends`): a focus picked at random in the middle 40 % of the zoomed cover, a
 drift of up to `KB_DRIFT` (24 px) each way about it, and a zoom between the pan's scale and
@@ -212,9 +223,11 @@ drift of up to `KB_DRIFT` (24 px) each way about it, and a zoom between the pan'
 `split_inset`. `home_render` takes the window's scale, each column with its own B-spline weights
 (at the playing cover's scale 1 they are one set, as before), and lays the incoming cover over the
 outgoing one by the fade's share while one runs, both moving. A new track's cover cross-fades the
-same way, as does the change between the playing cover and the slideshow; when play starts while a
-library cover is still fading in, the playing cover fades in over the frame as it stood, those two
-covers held still under it (`frame_hold`), so nothing jumps; a cover that cannot
+same way, as does the change between the playing cover and the slideshow; when play starts or the
+wheel reaches Now Playing while a library cover is still fading in, the playing cover fades in over
+the frame as it stood, those two covers held still under it (`frame_hold`), and the wheel leaving
+Now Playing while its cover fades in brings the next library cover in over the frame the same way,
+so nothing jumps; a cover that cannot
 move (a 16-bit decode, a cover too long for `DRIFT_TEXELS`, none) still cuts. The timer steps every
 `SLIDE_TICK_MS` (100 ms) while a fade runs, so it steps in 15 shades, and every `DRIFT_TICK_MS`
 otherwise. The covers come from `slideshow.c`, off the UI thread (`slide_pick`): a song at a random
@@ -1094,7 +1107,7 @@ photo pages' own drawing) keeps Minimal's layout under this theme's colours and 
 - **Row Art.** It decides album covers only, in 52 px rows, and they are square: the Library is always 32 px text. A change restarts the Q2.
 - **Now Playing.** An iPod classic's: the art, 178 px, up beside More and turned in perspective over its reflection, with no play/pause glyph on it; a line's room under the album, which Internet Radio's page fills; the title in Classic's face and the album line as a label; and a 20-pixel bar, the accent's gloss over a near-white track with a faint reflection, the elapsed and remaining times beside it in Classic's face at 21 px, in boxes sized to the track's length, so the bar is as wide as the times allow, opening at its widest and narrowing only for a long track: 35 px boxes under ten minutes (the bar 66 to 309, 243 px), 43 px under an hour (74 to 301, 227 px) and 56 px from an hour, which hold "-1:02:03" (87 to 288, 201 px), the outer edges and the 8 px gap the same in each; Internet Radio's running time takes the under-an-hour boxes until it has played an hour; while you scrub, a diamond in the ink marks the point on the bar ([Now Playing](#now-playing), [internals.md](internals.md#slanted-art)). Turning the volume shows it on that bar, a speaker in each time's place and no number ([internals.md](internals.md#now-playing-ipod), Volume).
 - **Appearance's rows.** Theme, Light Mode, Accent, Home, Shortcut, Battery, Time in Title, Library on Home, Row Preview and Row Art. Corners and Centred Now Playing are Minimal's only, and their stored values stay for it. Light Mode Off is Classic's dark half; choosing Classic turns Light Mode on unless it is on Auto.
-- **Home.** 32 px rows in Classic's face, the gloss band and the white chevron on the selected row. In Split, with **Library on Home** on, Library is a list on Home's left with the pane beside it (off, Library opens its page). With **Row Preview** on, the pane shows the highlighted row (off, it shows Now Playing's art on every row, and Home reads no counts). Both are Classic's own switches (`IPOD HOMELIB`, `IPOD ROWPREVIEW`, on unless chosen), saved at once with no restart, and choosing Classic turns them on. With both on: Now Playing and the Library's rows the current cover, Shuffle the note and the song count, Cover Flow the album count, Folder its icon, Games the game count, Streaming the services, Settings the card's free space.
+- **Home.** 32 px rows in Classic's face, the gloss band and the white chevron on the selected row. In Split, with **Library on Home** on, Library is a list on Home's left with the pane beside it (off, Library opens its page). With **Row Preview** on, the pane shows the highlighted row (off, it shows Now Playing's art on every row, and Home reads no counts). Both are Classic's own switches (`IPOD HOMELIB`, `IPOD ROWPREVIEW`, on unless chosen), saved at once with no restart, and choosing Classic turns them on. With both on: Now Playing the current cover, the Library the slideshow, Shuffle the note and the song count, Cover Flow the album count, Folder its icon, Games the game count, Streaming the services, Settings the card's free space.
 - **Library's Search row.** The Library, its page and Home's list, leads with **Search** (`library_search`, a set without Library icons), the pull-down's stock search: Home's list hides the pull. Its pane is the Library's, and Shuffle's note moves to the row after it.
 - **Update Local Music and USB mode.** A round icon on the page, not stock's screens. While the library updates the line reads "312 of 704 songs" over a progress bar, against the songs it had before, with Cancel by touch; a first scan or a folder's shows stock's text and no bar. Connected says to eject before disconnecting under USB Storage; USB Audio and DAC have no line. Once the computer ejects the card, USB Storage's page says OK to Disconnect, in every theme. See [internals.md](internals.md#themes).
 - **Streaming's Now Playing.** Spotify and Internet Radio take local Now Playing's places: the 178 px art at x 16, y 22, turned over its reflection; the title, artist and album at x 206 from y 38 (34 and 62 under it); the 20-pixel bar from x 66 to 309 at y 245 with the 21 px times beside it, narrowed as local Now Playing's for a long track. Spotify's bar shows its position and the scrub's diamond; the page's name and play state are in the title bar. Internet Radio plays as an album: a generated station cover, the station, artist and song, the stream on a fourth line under them, the heart at x 300, y 165, and a bar that is always full with the running time on its left; the wheel stays the volume.

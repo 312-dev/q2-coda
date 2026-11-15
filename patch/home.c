@@ -1,5 +1,6 @@
 /* Home's Library and Streaming: their pages and the lists Home's Split shows; and its main list's
- * overflow, the rows past the seven it rests on. */
+ * overflow, the rows past the seven it rests on, and its selection as Now Playing's row comes and
+ * goes. */
 #include "navigation.h"
 
 /* A Library row titled text; into: one that opens another list, with stock's own list_into
@@ -352,6 +353,23 @@ void home_overflow(void *list, int bottom) {
     if (I(view, W_H) != h) widget_move_resize(view, I(view, W_X), I(view, W_Y), I(view, W_W), h);
     home_pad(view);
     if (y > foot - rest) y = foot - rest;
+    scroll_view_set_offset(view, I(view, SCROLL_X), y < 0 ? 0 : y);
+}
+
+/* coverflow.c coverflow_home_layout, as Now Playing's row comes (d 1) or goes (-1) at the main
+ * list's top, before the list is laid out again: the same row stays selected, so load sees no
+ * change of count (which would start the selection over), and the rows in view stay, but for the
+ * selected one's coming in sight as the row comes above it. On Now Playing as it goes, the row
+ * after it, the Library. */
+void home_np_keep(int d) {
+    void *view = coverflow_home_view();
+    int rest = home_rest(view, (int *)0);
+    if (!rest) return;
+    int sel = widget_get_prop_int(view, SEL, -1), count = widget_get_prop_int(view, COUNT, -1);
+    if (count >= 0) prop(view, COUNT, count + d);
+    if (sel > 0 || (sel == 0 && d > 0)) prop(view, SEL, sel += d);
+    int row = I(widget_get_child(view, 0), W_H), y = I(view, SCROLL_Y);
+    if (y > 0 || (d > 0 && (sel + 1) * row > rest)) y += d * row;
     scroll_view_set_offset(view, I(view, SCROLL_X), y < 0 ? 0 : y);
 }
 

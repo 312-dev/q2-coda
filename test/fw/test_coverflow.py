@@ -54,7 +54,8 @@ class Home(C.Structure):
                 ('count_thread', C.c_ulong), *((k, C.c_uint) for k in 'asked pane_read count_timer pane_timer'.split()),
                 ('ring', (C.c_uint * HOME_PW) * 4), ('clip', C.c_int * 4), ('clipped', C.c_int),
                 ('ink_bar', C.c_void_p), ('ground', C.c_uint), ('held', C.c_ubyte * HOME_PW),
-                ('strip_timer', C.c_uint), ('stripping', C.c_int), ('strip_need', C.c_int * 2), ('strip_done', C.c_int * 2)]
+                ('strip_timer', C.c_uint), ('stripping', C.c_int), ('strip_need', C.c_int * 2), ('strip_done', C.c_int * 2),
+                ('np', C.c_int), ('np_stop', C.c_uint), ('np_timer', C.c_uint)]
 
 
 class Row(C.Structure):
@@ -3150,6 +3151,93 @@ def test_the_shortcut_row_sits_after_folder_unless_rockbox_is_missing_or_none(fw
     assert ui[ui.named('label_rockbox')].text == label and ui[ui.lookup(h.carousel[0], 'label_rockbox')].text == label
 
 
+def np_home(fw, theme=OLED, status=1, home='0'):
+    """Home with its Now Playing row named as the asset names it, play's state status[0] and the clock now[0]."""
+    themed(fw, theme, HOME=home)
+    ui = Ui(fw)
+    h = Homes(ui, carousel=True, rockbox=True)
+    playing = h.rows['img_playing']
+    ui[playing].name = 'btn_playing'
+    state, now = [status], [1000]
+    fw.mock('mclGetPlayStatus', lambda *_: state[0])
+    fw.mock('time_now_ms', lambda *_: now[0])
+    h.open(fw)
+    return ui, h, playing, state, now
+
+
+def shown_rows(ui, h):
+    return [ui[r].name for r in ui[h.view].kids if ui[r].visible]
+
+
+@pytest.mark.parametrize('theme, home', ((OLED, '0'), (OLED, '1'), (CLASSIC, '0'), (MINIMAL, '1')))
+@pytest.mark.parametrize('status, shown', ((1, False), (0, False), (2, True), (3, True)))
+def test_now_playing_s_row_shows_only_while_something_is_loaded(fw, theme, home, status, shown):
+    """An iPod's main menu: Now Playing only while a song plays or is paused, in Split, Full and every theme; hidden, it
+    is restacked last and takes no taps, and the Shortcut stays after Folder."""
+    ui, h, playing, _, _ = np_home(fw, theme, status, home)
+    rows = ui[h.view].kids
+    assert ui[playing].visible == shown and ui[playing].sensitive == shown
+    assert rows.index(playing) == (0 if shown else len(rows) - 1)
+    assert rows.index(h.rows['img_rockbox']) == rows.index(h.rows['img_folder']) + 1
+    assert fw.var('coverflow__home', Home).np == shown
+
+
+def test_now_playing_s_row_comes_as_play_starts_keeping_the_selected_row(fw):
+    ui, h, playing, state, _ = np_home(fw)
+    view = h.view
+    ui[view].props.update({'_ringnav_index': 2, '_ringnav_count': 8})  # Folder
+    np_sync = fw.fn('coverflow_home_np', None)
+    np_sync()
+    assert not ui[playing].visible  # still nothing loaded: no layout
+    state[0] = 2
+    np_sync()
+    assert ui[playing].visible and ui[view].kids.index(playing) == 0
+    assert ui[view].props['_ringnav_index'] == 3 and ui[view].props['_ringnav_count'] == 9  # still Folder, no reset
+
+
+@pytest.mark.parametrize('sel, after', ((0, 0), (3, 2), (-1, -1)))
+def test_now_playing_s_row_goes_once_play_has_stopped_a_while(fw, sel, after):
+    """Stopped: the row stays NP_GONE_MS, as for the moment between two tracks, and a timer takes it then, as nothing may
+    paint; on Now Playing the selection lands on Library, else on the same row."""
+    ui, h, playing, state, now = np_home(fw, status=2)
+    view = h.view
+    ui[view].props.update({'_ringnav_index': sel, '_ringnav_count': 9})
+    np_sync = fw.fn('coverflow_home_np', None)
+    state[0] = 1
+    np_sync()
+    assert ui[playing].visible
+    due = ui.timer(address(fw, 'coverflow__np_due'))
+    assert due and due[1] in (3000, 3001)  # from the stop, seen at now | 1
+    now[0] += 2999
+    np_sync()
+    assert ui[playing].visible
+    state[0] = 2  # the next track starts: kept
+    now[0] += 5000
+    np_sync()
+    assert ui[playing].visible
+    state[0] = 1
+    np_sync()  # stopped again, from now
+    now[0] += 3000
+    ui.fire(ui.timer(address(fw, 'coverflow__np_due'))[0])
+    assert not ui[playing].visible and ui[view].kids[-1] == playing
+    assert ui[view].props['_ringnav_index'] == after and ui[view].props['_ringnav_count'] == 8
+    assert shown_rows(ui, h)[0] == 'img_library'
+
+
+@pytest.mark.parametrize('sel, y, want', ((6, 0, 70), (2, 0, 0), (7, 70, 140)))
+def test_now_playing_s_row_coming_keeps_the_selected_row_in_sight(fw, sel, y, want):
+    """The row comes above the list: scrolled, the same rows stay in view; at the top, the view moves a row only when
+    the selected one would pass the seven the list rests on."""
+    ui, h, playing, state, _ = np_home(fw)
+    ui[h.view].props.update({'_ringnav_index': sel, '_ringnav_count': 8})
+    C.c_int.from_address(h.view + O['SCROLL_Y']).value = y
+    state[0] = 3
+    before = len(fw.calls('scroll_view_set_offset'))
+    fw.fn('coverflow_home_np', None)()
+    offsets = [a[2] for _, a in fw.calls('scroll_view_set_offset')][before:]
+    assert offsets and offsets[0] == want
+
+
 @pytest.mark.parametrize('mode', (1, 2))
 def test_full_and_carousel_close_an_open_list_and_carousel_shows_its_cards(fw, mode):
     themed(fw, CLASSIC, HOME=str(mode))
@@ -3239,15 +3327,17 @@ def test_the_pane_finds_a_service_row_s_icon_and_name(fw):
     assert (home.row, home.row_image, home.row_label) == (row, icon, label)
 
 
-@pytest.mark.parametrize('theme, keys, follows', ((CLASSIC, {'ROWPREVIEW': '0'}, True), (MINIMAL, {}, False),
-                                                  (CLASSIC, {'HOME': '1'}, False), (CLASSIC, {'ART': ''}, False)))
+@pytest.mark.parametrize('theme, keys, follows', ((CLASSIC, {'ROWPREVIEW': '0'}, PANE_NOW), (MINIMAL, {}, PANE_LIBRARY),
+                                                  (CLASSIC, {'HOME': '1'}, None), (CLASSIC, {'ART': ''}, None)))
 def test_without_row_preview_the_pane_is_now_playing_s_and_without_the_pane_rows_change_nothing(fw, theme, keys, follows):
+    """Classic's Row Preview off: Now Playing's pane on every row; a set with no row icons: the show on Settings; Carousel
+    or no art: nothing."""
     _, ui, h, home = home_open(fw, theme, **{k: v for k, v in keys.items() if k != 'ART'})
     if 'ART' in keys:
         home.art = 0
     home.kind = PANE_GAMES
     kind = home_row(fw, h.view, h.rows['img_settings'])
-    assert (kind, home.row) == ((PANE_NOW, h.rows['img_settings']) if follows else (PANE_GAMES, None))
+    assert (kind, home.row) == ((follows, h.rows['img_settings']) if follows is not None else (PANE_GAMES, None))
 
 
 @pytest.mark.parametrize('kind, counts, want', (
@@ -3573,8 +3663,11 @@ SHOW_NOW, SHOW_LIB = 0, 1
 
 
 def test_where_the_pane_does_not_follow_the_row_the_show_starts_once_play_has_stopped_a_while(fw):
-    """OLED's pane shows the playing cover while a song plays; stopped or paused for SLIDE_IDLE_MS, the library's."""
-    _, ui, h, home = home_open(fw, OLED, HOME='0')
+    """Classic with Row Preview off: one pane for every row, the playing cover while a song plays; stopped or paused for
+    SLIDE_IDLE_MS, the library's."""
+    _, ui, h, home = home_open(fw, CLASSIC, HOME='0', ROWPREVIEW='0')
+    home_row(fw, h.view, h.rows['img_settings'])
+    assert home.kind == PANE_NOW
     status, now = [2], [1000]
     fw.mock('mclGetPlayStatus', lambda *_: status[0])
     fw.mock('time_now_ms', lambda *_: now[0])
@@ -3588,6 +3681,45 @@ def test_where_the_pane_does_not_follow_the_row_the_show_starts_once_play_has_st
     assert source(fw) == SHOW_LIB
     status[0] = 2
     assert source(fw) == SHOW_NOW and home.idle == 0  # play again: the playing cover at once
+
+
+@pytest.mark.parametrize('name, kind', (('img_playing', PANE_NOW), ('img_library', PANE_LIBRARY), ('img_cover_flow', PANE_LIBRARY),
+                                        ('img_shuffle_songs', PANE_LIBRARY), ('img_home_search', PANE_LIBRARY),
+                                        ('img_settings', PANE_LIBRARY), ('img_rockbox', PANE_LIBRARY)))
+def test_under_oled_the_pane_follows_the_row_between_the_playing_cover_and_the_show(fw, name, kind):
+    """OLED, an iPod classic's menu: Now Playing's row the playing cover, playing or paused however long; every other
+    row the library's covers."""
+    _, ui, h, home = home_open(fw, OLED, HOME='0')
+    fw.mock('mclGetPlayStatus', lambda *_: 3)
+    now = [1000]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    ui.dirty.clear()
+    assert home_row(fw, h.view, h.rows[name]) == kind
+    assert source(fw) == (SHOW_NOW if kind == PANE_NOW else SHOW_LIB)
+    now[0] += 10 * O['SLIDE_IDLE_MS']
+    assert source(fw) == (SHOW_NOW if kind == PANE_NOW else SHOW_LIB)
+
+
+def test_under_oled_the_wheel_off_now_playing_mid_fade_fades_the_show_in_over_the_frame(fw):
+    """The wheel leaves Now Playing while its cover fades in: the next library cover fades in over the frame as it
+    stands, with no jump, rather than once the playing cover's fade ends."""
+    covers = {u: (300, 300, rgba(300, 300, lambda x, y, c=c: c)) for u, c in
+              (('a', (200, 0, 0, 255)), ('d', (0, 0, 200, 255)), ('e', (0, 200, 0, 255)))}
+    b = Bitmaps(fw, covers)
+    home = fw.var('coverflow__home', Home)
+    show = fw.fn('coverflow__slide_show', C.c_int, C.c_char_p, C.c_int, C.c_int)
+    frame = fw.fn('coverflow__home_frame', C.c_int)
+    assert show(b'd', 1, 0) == 1 and show(b'e', 0, 0) == 1 and home.fade == 1 and home.sl[1].lib == 0
+    home.fade = 600  # the playing cover 600 ms into its fade
+    assert frame()
+    before = pixels_of(b, home.frame)
+    assert show(b'a', 1, 0) == 1 and home.fade == 1 and home.sl[1].lib == 1 and home.sl[0].lib == 2  # SLIDE_STILL
+    assert frame()
+    after = pixels_of(b, home.frame)
+    for y in range(len(before)):
+        for x in range(HOME_PW):
+            p, q = before[y][x], after[y][x]
+            assert all(abs((p >> s & 255) - (q >> s & 255)) <= 1 for s in (0, 8, 16)), (x, y, hex(p), hex(q))
 
 
 @pytest.mark.parametrize('kind, want', ((PANE_NOW, SHOW_NOW), (PANE_LIBRARY, SHOW_LIB)))
@@ -3608,7 +3740,7 @@ def test_the_show_goes_on_over_a_track_change(fw, mcl):
     library_slide(home.sl[0])
     fw.mock('mclGetPlayStatus', lambda *_: 1)
     fw.mock('time_now_ms', lambda *_: 100000)
-    home.idle, home.show, home.key = 1, SHOW_LIB, 12345
+    home.idle, home.show, home.key, home.kind = 1, SHOW_LIB, 12345, PANE_LIBRARY
     fw.fn('coverflow_home_art', None, C.c_void_p)(h.win)
     assert home.key != 12345 and not fw.calls('widget_load_image') and home.sl[0].lib == 1
 
