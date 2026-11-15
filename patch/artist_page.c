@@ -334,6 +334,10 @@ void *cover_row(void *view, int index, int h, int thumb, int px, const char *tit
     if (right && *right) end -= 50;
     widget_move_resize(label, tx - 2, 0, end - tx + 2, h);
     if (px) widget_set_prop_int(label, "style:normal:font_size", px);
+    /* a long title rests on its ellipsis and scrolls only on the selection, as an album's tracks */
+    widget_set_prop_int(label, "loop", 0);
+    hscroll_label_set_only_focus(label, 1);
+    hscroll_label_set_ellipses(label, 1);
     widget_set_prop_int(item, AR_PX, px ? px : PX_20);
     widget_set_prop_str(item, AR_TITLE, title);
     widget_set_prop_str(item, AR_RIGHT, right ? right : "");
