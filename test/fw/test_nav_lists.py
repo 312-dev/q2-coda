@@ -2646,3 +2646,69 @@ def test_without_the_shuffle_row_a_tick_up_from_the_first_song_stays_on_the_list
     paint(fw, page)
     key(fw, ui, KEY_PREV, ui.now + SLOW)
     assert C.c_void_p.from_address(base + st_at['shuffle_on']).value is None and page.selected == 0
+
+
+# An album's rows (song_rows.c song_row): the track number and the length are each small_text in the row's box, so
+# they share one vertical place, which SONG_SMALL_DY sets so their baseline is the title's.
+SONG_SMALL_DY = int(re.search(r'#define SONG_SMALL_DY (\d+)', NAVIGATION_SOURCE).group(1))
+
+
+def test_a_track_number_stands_where_its_length_does_on_the_titles_baseline(fw):
+    canvas = Canvas(fw)
+    small_text = fw.fn('song_rows__small_text', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_void_p)
+    row = (C.c_int * 4)(0, 154, 375, 32)  # an OLED row: 32 px, its title centred in it
+    for text, x, w in (('12', 0, 40), ('5:10', 300, 40)):
+        small_text(canvas.at, (C.c_uint * (len(text) + 1))(*map(ord, text), 0), x, w, 1, row)
+    (number, number_box, _), (length, length_box, _) = canvas.boxes
+    assert (number, length) == ('12', '5:10')
+    assert number_box[0] + number_box[2] - 1 == 40 and length_box[0] + length_box[2] - 1 == 340  # each right-aligned
+    assert number_box[1::2] == length_box[1::2] == (154 + SONG_SMALL_DY, 32)  # one place: the row's, its baseline down
+    assert SONG_SMALL_DY == 2  # 15 px Inter centred in the row, 2 px down, sits on the 20 px title's baseline
+
+
+# A label at rest on its ellipsis (ringnav_ellipsis_text, for stock's widget_draw_text_in_rect): the cut before
+# stock's "..." never ends on a space.
+def stock_cut(text, width, widths):
+    """What stock's canvas_draw_text_bidi_in_rect keeps of text before "..." in a box width px wide: each character
+    measured alone, while dots + kept + the next is under the width."""
+    dots, ink = 3 * widths('.'), 0
+    for i, c in enumerate(text):
+        if width <= dots + ink + widths(c):
+            return text[:i]
+        ink += widths(c)
+    return text
+
+
+def ellipsis(fw, text, width, ellipses=1):
+    widths = lambda c: 4.0 if c in ' .' else 9.0  # a space and a dot narrow, the rest 9 px
+    fw.mock('canvas_measure_text', lambda c, s, n, *_: sum(widths(chr(v)) for v in (C.c_uint * n).from_address(s)))
+    drawn = []
+    fw.mock('widget_draw_text_in_rect', lambda w, c, s, n, r, e, *_: drawn.append(((C.c_int * 4).from_address(r)[2], e)))
+    s = (C.c_uint * len(text))(*map(ord, text))
+    box = (C.c_int * 4)(10, 0, width, 32)
+    fw.fn('ringnav_ellipsis_text', C.c_int, C.c_void_p, C.c_void_p, C.c_void_p, C.c_uint, C.c_void_p, C.c_int)(
+        None, None, s, len(text), box, ellipses)
+    (w, e), = drawn
+    assert e == ellipses and box[2] == width  # the label's own box untouched
+    return stock_cut(text, w, widths), w
+
+
+@pytest.mark.parametrize('width, kept', [
+    (90, 'Sex Type'),    # stock's cut, "Sex Type ", fell after a word: it ends on "Type"
+    (92, 'Sex Type'),    # ... up to the px where "T" would fit
+    (93, 'Sex Type T'),  # a cut inside a word stays as stock makes it
+    (44, 'Sex'),         # "Sex "
+    (40, 'Sex'),         # "Sex", no space to trim
+    (20, ''),            # nothing but the dots fits: nothing to trim
+])
+def test_an_ellipsis_never_follows_a_space(fw, width, kept):
+    text = 'Sex Type Thing (2017 Remaster)'
+    got, w = ellipsis(fw, text, width)
+    assert got == kept and not got.endswith(' ')
+    if got == stock_cut(text, width, lambda c: 4.0 if c in ' .' else 9.0):
+        assert w == width  # no space at the cut: the box goes on as it was
+
+
+@pytest.mark.parametrize('text, ellipses', [('Short', 1), ('Sex Type Thing (2017 Remaster)', 0)])
+def test_a_text_that_fits_or_has_no_ellipsis_keeps_its_box(fw, text, ellipses):
+    assert ellipsis(fw, text, 120, ellipses)[1] == 120

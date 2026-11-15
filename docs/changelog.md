@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Lists: a title cut short just after a word puts its dots right after the word, as "Wicked Garden (2017...", with no space before them that read as a gap.
   - EQ (OLED): with the wheel on the **Simple** and **Advanced** tabs, only the tabs show it; the first row of Advanced's list no longer lights up as well.
   - EQ (OLED): in Light Mode the Simple tab's slider knobs, and the knob on slider pages like Resume Songs, have a thin grey edge, so they no longer vanish white on white.
   - EQ (OLED): after picking a preset on Simple, the switch row still reads **Enabled**, and the preset's name shows on the right of the **Presets** row, as a setting's value does.

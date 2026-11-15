@@ -2258,6 +2258,34 @@ unsigned ringnav_hscroll_lull(void *w, int (*lulled)(const void *), unsigned ms)
                             B(w, HSCROLL_YOYO) && B(w, HSCROLL_LOOP) ? 0 : MARQUEE_HOLD_MS);
 }
 
+/* A label at rest on its ellipsis (tools/build.py HSCROLL_ELLIPSIS: hscroll_label's paint calls
+ * this for stock's widget_draw_text_in_rect, here with the other hscroll_label hooks). Stock keeps
+ * the characters that fit before its "...", each measured alone, while dots + kept + the next is
+ * under the box's width, so on its own a cut just after a word reads "(2017 ...", a gap before the
+ * dots. The box handed on is narrowed to end the cut on the last character that isn't a space: one
+ * px past dots + those, so they still fit and the space after them (wider than a px) does not. */
+int ringnav_ellipsis_text(void *w, void *canvas, const unsigned *s, unsigned n, const rect_t *r,
+                          int ellipses) {
+    static const unsigned dots[] = { '.', '.', '.' };
+    rect_t cut;
+    if (ellipses && s && r && n && canvas_measure_text(canvas, s, n) > (float)r->w) {
+        float dw = canvas_measure_text(canvas, dots, 3), kept = 0, ink = 0;
+        unsigned i = 0, end = 0;
+        for (; i < n; ++i) {
+            float cw = canvas_measure_text(canvas, s + i, 1);
+            if ((float)r->w <= dw + ink + cw) break;
+            ink += cw;
+            if (s[i] != ' ') end = i + 1, kept = ink;
+        }
+        if (end && end < i) {
+            cut = *r;
+            cut.w = (int)(dw + kept) + 1;
+            r = &cut;
+        }
+    }
+    return widget_draw_text_in_rect(w, canvas, s, n, r, ellipses);
+}
+
 /* Classic's dialogs (CONFIRM_CLASSIC_LIGHT), in screen pixels and final colours. A dialog
  * is full-screen (0, 0, 375, 320) and its background clear, so the bar and the page show through.
  */

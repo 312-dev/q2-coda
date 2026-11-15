@@ -571,6 +571,10 @@ HSCROLL_LULL = (0x5fb958, 0x0320f809)
 # stock paints its start with the ellipsis the moment it reaches its end. The branch goes to the lull for
 # every label (b 0x5fb930): ringnav_hscroll_lull holds the end, and its end stops a single pass there.
 HSCROLL_ONCE = (0x5fb870, 0x1440002f, 0x1000002f)
+# A stopped label with ellipses set paints through widget_draw_text_in_rect(..., ellipses 1) (jalr at 0x5fc074,
+# lw $t9 at 0x5fc060, the 1st of hscroll_label_on_paint_self's 2 calls; the 2nd draws without): jal
+# ringnav_ellipsis_text, which narrows the box so the cut before stock's "..." never ends on a space.
+HSCROLL_ELLIPSIS = (0x5fc074, 0x0320f809)
 # Since V1.36 set_hscroll_label_attribute gives a label a loop_interval_distance of its own width (widget_set_prop_int,
 # its jalr): the text runs off the label and comes back in after that gap, without an end to hold. Q2 Pod's labels hold
 # at the start and the end and snap back (ringnav_hscroll_start, ringnav_hscroll_lull), so the call goes and the
@@ -1544,6 +1548,7 @@ FUNCTIONS = {
  'canvas_set_font': ('int', 'void *, const char *, unsigned'),
  'canvas_set_text_color': ('int', 'void *, unsigned'),
  'canvas_draw_text_in_rect': ('int', 'void *, const unsigned *, unsigned, const void *'),
+ 'widget_draw_text_in_rect': ('int', 'void *, void *, const unsigned *, unsigned, const void *, int'),  # ringnav_ellipsis_text
  'canvas_draw_text': ('int', 'void *, const unsigned *, unsigned, int, int'),  # Books (books.c)
  'canvas_measure_text': ('float', 'void *, const unsigned *, unsigned'),
  'canvas_fill_rounded_rect': ('int', 'void *, const void *, const void *, const void *, unsigned'),
@@ -2274,6 +2279,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
           'hscroll lull: expected widget_add_timer import')
     patch_word(patched, *HSCROLL_LULL, jal(ps['ringnav_hscroll_lull']), 'a scrolling label holds at its start')
     patch_word(patched, *HSCROLL_ONCE, 'a single pass holds its end')
+    check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, 0x5fc060))[0] == 0x8f99ccd0,
+          'hscroll ellipsis: expected widget_draw_text_in_rect import')
+    patch_word(patched, *HSCROLL_ELLIPSIS, jal(ps['ringnav_ellipsis_text']), 'an ellipsis never follows a space')
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, HSCROLL_GAP[0] - 4))[0] == 0x8f99aebc,
           'hscroll gap: expected widget_set_prop_int')
     patch_word(patched, *HSCROLL_GAP, 'a scrolling label ends its pass at its end')

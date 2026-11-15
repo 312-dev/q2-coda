@@ -414,6 +414,8 @@ demo	0x5fb930	0x4	hscroll_label_on_timer_tick	`lw $2, 0x80($16)` (6th of 6 such)
 demo	0x5fb954	0x4	hscroll_label_on_timer_tick	the load of $25 for the only call to widget_add_timer; tools/build.py HSCROLL_LULL, tools/build.py build
 demo	0x5fb958	0x4	hscroll_label_on_timer_tick	the only call to widget_add_timer; tools/build.py HSCROLL_LULL
 demo	0x5fbffc	0x4	hscroll_label_on_paint_self	`lbu $2, 0x7b($18)` (2nd of 3 such), before the only call to sub_5fba4c, after "focused"; patch/lockscreen.c oled_lock
+demo	0x5fc060	0x4	hscroll_label_on_paint_self	the load of $25 for 1st of 2 calls to widget_draw_text_in_rect, after "focused"; tools/build.py HSCROLL_ELLIPSIS, tools/build.py build
+demo	0x5fc074	0x4	hscroll_label_on_paint_self	1st of 2 calls to widget_draw_text_in_rect, after "focused"; tools/build.py HSCROLL_ELLIPSIS
 demo	0x5fd234	0x4	children_layouter_list_view_layout	`lw $25, GOT[scroll_view_set_yslidable]` (21st of 54 such), before the only call to scroll_view_set_yslidable, after "animate:animating_time"; tools/ipod.py home_list
 demo	0x5fd484	0x4	children_layouter_list_view_layout	`bgtz $21, +5 words`, before the only call to widget_resize, after "animate:animating_time"; patch/peq_ui.c render
 demo	0x6028ec	0x4	scroll_view_on_scroll	`lw $25, 0x100($4)`, before the only call to a pointer; patch/offsets.inc VIEW_ON_SCROLL
