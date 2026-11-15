@@ -10323,7 +10323,7 @@ static int qm_open(const void *unused) {
         void *label = hscroll_label_create(item, 30, 0, 266, pitch);
         widget_use_style(label, "s_scrlabel_white24l");
         if (acts[i] == QA_RATE) {
-            int h = aid ? album_hearts : checkFavExist(r) ? 5 : rate_kept(0, listen_key(r));
+            int h = aid ? album_hearts : checkFavExist(r) ? 5 : rate_kept(0, rate_song_key(r));
             const char *row = aid ? "Rate Album" : "Rate";
             char hs[16];
             tk_snprintf(rated, sizeof rated, h ? "%s  %s" : "%s", row, hearts_text(hs, h));
@@ -10695,7 +10695,7 @@ static void spot_keep(unsigned key, int sec, int total) {
 /* Counts key's play and moves it first, so among equal counts the least recently played is the
  * one replaced when no slot is free. */
 static void play_count(void *r, unsigned key) {
-    key = catalogue_play_key(r, key); /* a server song's offline copy counts as its row */
+    key = catalogue_song_key(r, key); /* a server song's offline copy counts as its row */
     plays_load();
     int i = 0;
     for (int j = 0; j < PLAYS_SLOTS && st.plays[i].key != key; j++)

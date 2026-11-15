@@ -436,7 +436,7 @@ int catalogue_album_unavailable(void *r);
 int catalogue_seconds(const char *path), catalogue_load(void *q, int *at, void **own);
 int catalogue_access(const char *path, int mode); /* stock's play check, tools/build.py */
 int catalogue_missing(const char *path); /* the payload's own lists' check before a play */
-unsigned catalogue_play_key(void *r, unsigned key); /* a listen's key: a copy's is its row's */
+unsigned catalogue_song_key(void *r, unsigned key); /* plays and hearts: a copy is its row */
 char *catalogue_union(const char *sql), *catalogue_search(const char *sql);
 const char *catalogue_rows(void); /* library_query's union, "" without one */
 void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);

@@ -704,6 +704,7 @@ void stream_mark_paint(void *w, void *canvas); /* home.c: OLED's Streaming rows'
 extern void *stream_mark_views[2];             /* home.c: the lists whose rows it marks */
 int rate_keep(int album, unsigned key, int n);
 int rate_kept(int album, unsigned key);
+unsigned rate_song_key(void *r); /* a server song's offline copy: its row's */
 int rate_key(void *top, unsigned key);
 int rate_open(void);
 int rate_saved(int k);

@@ -111,6 +111,11 @@ void rate_album_favs(void *album, int on) {
     ratings_copy_due();
 }
 
+/* The key r's 1 to 4 hearts are kept under: its listen_key, or a server song's offline copy's
+ * row's (catalogue_song_key), so hearts given while the copy plays are the song's on the server
+ * and in the Library (docs/server-library.md#ratings-and-favourites). */
+unsigned rate_song_key(void *r) { return catalogue_song_key(r, listen_key(r)); }
+
 /* The playing local track (the queue menu's types), or 0. */
 static void *rate_track(void) {
     unsigned at, n, type = (unsigned)MCL(MCL_TYPE);
@@ -139,7 +144,7 @@ static void np_image(void *w, const char *glyph) {
 static void rate_badge(void) {
     if (!ra.rate_badge) return;
     void *r = rate_track();
-    int n = r ? rate_kept(0, listen_key(r)) : 0;
+    int n = r ? rate_kept(0, rate_song_key(r)) : 0;
     /* play_fav, or the theme's own full heart (np_bar.c np_glyphs: "<art>np_fav") */
     const char *image = widget_get_prop_str(ra.rate_fav, "image", "");
     unsigned k = (unsigned)strlen(image);
@@ -279,7 +284,7 @@ static void rate_save(void *win) {
     void *r = rate_track();
     if (!r) return;
     int fav = checkFavExist(r) != 0;
-    if (!rate_saved(rate_keep(0, listen_key(r), n))) return;
+    if (!rate_saved(rate_keep(0, rate_song_key(r), n))) return;
     catalogue_rated(r, n); /* to the server too (docs/server-library.md#ratings-and-favourites) */
     if ((n == 5) != fav) FAV_CLICK(ra.rate_ctx, (void *)0), ratings_copy_due(), fav_told(r, n == 5);
     rate_badge();
@@ -351,7 +356,7 @@ int rate_show(void *win, int pick, unsigned album) {
 /* Now Playing's, on the playing track's rating. */
 int rate_open(void) {
     void *r = rate_track();
-    return r && rate_show(st.rate_win, checkFavExist(r) ? 5 : rate_kept(0, listen_key(r)), 0);
+    return r && rate_show(st.rate_win, checkFavExist(r) ? 5 : rate_kept(0, rate_song_key(r)), 0);
 }
 
 /* The wheel, Centre and Return while the picker is up. */
@@ -405,7 +410,7 @@ static int rate_fav_click(void *ctx, void *event) {
     void *r = rate_track();
     if (r) {
         int fav = checkFavExist(r) != 0;
-        rate_keep(0, listen_key(r), 0), fav_told(r, fav);
+        rate_keep(0, rate_song_key(r), 0), fav_told(r, fav);
         catalogue_rated(r, fav ? 5 : 0);
     }
     rate_badge();
@@ -481,16 +486,18 @@ static int rated_order(const void *a, const void *b) {
     return x->at < y->at ? -1 : x->at > y->at;
 }
 
-/* Each of songs' hearts into h: 5 for My Fav's, else the kept 1-4. The rated keys are sorted once
- * by key, then by place; a song's own run is found by binary search and read in place order, each
- * entry setting the hearts until they reach 5 (a damaged table's later slot of a key wins). */
+/* Each of songs' hearts into h: 5 for My Fav's (a server song's Stream Cache copy, which stock's
+ * heart on Now Playing puts there, counting as its server row), else the kept 1-4. The rated keys
+ * are sorted once by key, then by place; a song's own run is found by binary search and read in
+ * place order, each entry setting the hearts until they reach 5 (a damaged table's later slot of a
+ * key wins). */
 static void rate_all(void *songs, unsigned char *h) {
     int nf, kept = 0;
     void *favs = staged(fav_songs, 0, &nf);
     unsigned nfav = deque_size(favs), n = deque_size(songs), *t = rates(0);
     rated_t *keys = calloc(nfav + RATE_SLOTS + 1, sizeof *keys);
     for (unsigned i = 0; keys && i < nfav; i++)
-        keys[i] = (rated_t){ listen_key(deque_at(favs, i)) | 7, i };
+        keys[i] = (rated_t){ rate_song_key(deque_at(favs, i)) | 7, i }; /* a copy: its row */
     for (int i = 0; keys && t && i < RATE_SLOTS; i++)
         if (t[i]) keys[nfav + kept] = (rated_t){ t[i], nfav + kept }, kept++;
     unsigned m = nfav + (unsigned)kept;

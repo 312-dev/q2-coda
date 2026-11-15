@@ -9,7 +9,8 @@ import struct
 
 import pytest
 
-from conftest import FNV_SEED, O, Files, Rows
+from conftest import FNV_SEED, O, Files, Rows, in_fork
+from test_nav_library_pages import EVT_CLICK, song, ui  # noqa: F401  the Now Playing heart's fixtures
 from test_nav_painters import scratch, st  # noqa: F401  navigation.c's st by field
 
 APP = 'subsonic'
@@ -1066,3 +1067,52 @@ def test_now_playing_takes_the_apps_cover_for_a_stream_cache_copy_without_art(ri
     ff.clear()
     player(b'/mnt/mmc/Music/a.flac', b'/tmp/externpic.jpg', 300, 300)  # a card file: the probe alone
     assert len(ff) == 1
+
+
+def heart_on_copy(rig, fw, ui, song, mcl, **kw):
+    """Now Playing on a server song's Stream Cache copy (the app's .play plays the copy, a file no Library row
+    has), with the heart bound and stock's My Fav toggle stubbed."""
+    from test_nav_library_pages import FAV_CLICK, Heart, stock_stub
+    copy = '/mnt/mmc/.subsonic/stream/acct/orig/o/One [s1].flac'
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, local=copy)])
+    rig.poll()
+    heart = Heart(fw, ui, song, mcl, path=copy.encode(), **kw)
+    stock_stub(FAV_CLICK, 0, (C.c_long * 3)())
+    return heart
+
+
+@in_fork
+def test_hearts_picked_on_a_stream_copy_are_the_server_rows_and_go_to_the_server(rig, fw, ui, song, mcl):
+    """Three hearts picked on Now Playing while the copy plays are kept under the server row's key (its
+    fileurl's listen_key, as play counts are), and its ratings.out line names the row's sid, so the app sends
+    them and the Library's row has them; the copy's own path keys nothing."""
+    from test_nav_library_pages import KEY_CENTER, KEY_NEXT
+    heart = heart_on_copy(rig, fw, ui, song, mcl)
+    heart.hold()
+    for _ in range(3):
+        heart.key(KEY_NEXT)
+    heart.key(KEY_CENTER)
+    kept = fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)
+    row = listen_key(url('s1'))
+    assert kept(0, row) == 3 and kept(0, listen_key('/mnt/mmc/.subsonic/stream/acct/orig/o/One [s1].flac')) == 0
+    assert heart.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == f'{row:08x}\ts1\t3\t1700000000\n'.encode()
+    assert heart.badge() == '3'
+
+
+@in_fork
+def test_a_heart_tapped_on_a_stream_copy_is_the_server_rows_favourite(rig, fw, ui, song, mcl):
+    """A tap is stock's My Fav toggle, which puts the copy's path in myfav (the Favorites list shows the song
+    once, as before): its line carries the row's sid, five hearts and then none, and the Ratings lists count
+    the copy's My Fav as the row's."""
+    from test_nav_library_pages import rate_all
+    heart = heart_on_copy(rig, fw, ui, song, mcl)
+    copy = C.string_at(C.c_void_p.from_address(heart.track + O['REC_PATH']).value).decode()
+    event = C.create_string_buffer(0x40)
+    heart.fav = True  # stock's toggle has run when the click reads it back
+    ui.handler(heart.heart, EVT_CLICK)(C.addressof(event))
+    heart.fav = False
+    ui.handler(heart.heart, EVT_CLICK)(C.addressof(event))
+    row = listen_key(url('s1'))
+    assert heart.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == (f'{row:08x}\ts1\t5\t1700000000\n'
+                                                                  f'{row:08x}\ts1\t0\t1700000000\n').encode()
+    assert rate_all(fw, ui, [rig.record(url('s1')), rig.record(url('s2'))], favs=[rig.record(copy)]) == [5, 0]

@@ -175,13 +175,13 @@ playlists.
 | Covers: a server row's album cover is the app's `covers/<album id>.jpg` (the album id from the row's path, or from its offline copy's row), in the Library's album rows and grids, Cover Flow's carousel and Now Playing | `catalogue.c` (`catalogue_cover`), `coverflow.c` (`grid_cover`, `build_art`, `coverflow_player_cover`) | yes |
 | Cover Flow: with Local + Server its album queries read the union (`cf_staged`), so the carousel has the server's albums; a server album's art is built from its app's cover once that is fetched (no job until then, so no "no art" marker); the centred album's captions are greyed with the offline mark while none of its songs can play | `coverflow.c` (`cf_staged`, `build_art`, `load_albums`, `caption_offline`, `caption_mark`) | yes |
 | Guards where code assumes a file exists: durations use the catalogue's seconds | `durations.c` | yes |
-| Play counts: a server song plays from its offline copy (the app's `.play`, or the firmware's offline queue), a Stream Cache file no Library row has, so a listen of a copy counts under its server row's `fileurl`; Most Played, a song's play count and Cover Flow's Most Played order follow the song | `navigation.c` (`play_count`, one line), `catalogue.c` (`catalogue_play_key`), `library_lists.c` (`mp_counted`) | yes |
+| Play counts: a server song plays from its offline copy (the app's `.play`, or the firmware's offline queue), a Stream Cache file no Library row has, so a listen of a copy counts under its server row's `fileurl`; Most Played, a song's play count and Cover Flow's Most Played order follow the song | `navigation.c` (`play_count`, one line), `catalogue.c` (`catalogue_song_key`), `library_lists.c` (`mp_counted`) | yes |
 | Delete Song | | not needed: a server row never plays under its own `fileurl` (the app's `.play` and the offline queue both hold card files), so Now Playing's Delete only ever sees a card file, a Stream Cache copy included |
 | Go to Album and Go to Artist on a server row (the queue menu): the Library's own pages for the row's album and artist, never the app's (`goto_app` leaves a server row out, `addon_goes` offers Go to on it), so they work offline and list the album's card and server songs | `addon.c` (`goto_app`, `addon_goes`) | yes |
 | Now Playing's info page for a server song, which plays from its Stream Cache copy (a file no `songtable` row describes): Genre and Year are the catalogue's, Location reads `Server` | `navigation.c` (`ringnav_np_info`, three lines), `catalogue.c` (`catalogue_np_info`) | yes |
 | Long Songs for a server row | | not built: Long Songs reads `songtable` alone, so server songs are not in it |
 | Setting: `[Q2POD] LIBRARYSOURCE`, 0 Local Only (default) or 1 Local + Server, a row on Display > Cover Flow | `navigation.c` (`pod_keys` and the rows' tables beside it) | yes |
-| Ratings: `ratings.out` appended for every app with `ratings=1`; `ratings.in` renamed to `ratings.in.taking`, applied, then deleted | `catalogue.c`, `ratings.c` (three calls) | yes |
+| Ratings: `ratings.out` appended for every app with `ratings=1`; `ratings.in` renamed to `ratings.in.taking`, applied, then deleted. Hearts given on Now Playing while a server song plays from its Stream Cache copy are its server row's (kept under the row's key, the line with the row's sid, the copy's My Fav counted as the row's) | `catalogue.c` (`catalogue_rated`, `catalogue_song_key`), `ratings.c` (`rate_song_key`, `rate_all`) | yes |
 
 The server library adds 43,600 bytes to the payload: `patch_bytes` is 864,504 of the 1 MB in this branch's `--dev` build against 820,904 at the commit it branched from, `catalogue.o` being 39,870 bytes of text and 1,236 of data (`llvm-size`). All catalogue data lives on the heap or the card.
 
@@ -287,7 +287,11 @@ for server rows and for synced card files alike, whenever the Q2 can reach the s
   taking the fifth heart away unstars it. A song starred on the server with no rating arrives as five
   hearts.
 - **Which songs:** server rows by their sid; a synced card file by the sid the Subsonic app recorded
-  when it downloaded it, so the app owns the path-to-sid table and the firmware never needs one.
+  when it downloaded it, so the app owns the path-to-sid table and the firmware never needs one. A
+  server song playing from its Stream Cache copy (a file no Library row has, at a path that changes
+  with the stream's quality) is its server row: Now Playing's hearts are kept under the row's
+  `listen_key` and its line carries the row's sid; five hearts are stock's My Fav of the copy,
+  which the Ratings lists count as the row's.
 - **Out:** each change on the Q2 is appended to `/mnt/mmc/.<id>/ratings.out`
   (`<listen_key>\t<sid or empty>\t<hearts>\t<unix time>`); the app sends it when the server answers
   and removes the lines it sent. Offline changes wait there, as plays and stars already do.
