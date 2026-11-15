@@ -61,35 +61,32 @@ static void library_look(void *view) {
 int library_search(void) { return !geom_val(V_LIB_ART); }
 
 /* The Library: Search (library_search), one Shuffle row opening its menu, browsing, the user's own
- * lists, listening history, the card's other media, then upkeep. The added rows' buttons have no
- * name, so stock's row click (atoi of the name, 0x53510c) never sees them. */
+ * lists, listening history, the card's other media, then upkeep, each row tagged with its letter
+ * and put in the saved order (library_edit.c lr_default holds the default one). The added rows'
+ * buttons have no name, so stock's row click (atoi of the name, 0x53510c) never sees them. */
 int ringnav_localmusic(void *win, void *ctx) {
     int result = stock_localmusic_trampoline(win, ctx);
     void *view = win ? widget_lookup(win, "scroll_view_localmusic", 1) : (void *)0;
     if (!view || widget_count_children(view) != L_STOCK) return result;
-    void *stock[L_STOCK];
+    void *stock[L_STOCK], *rows[LR_ROWS] = { 0 };
     for (int i = 0; i < L_STOCK; i++) stock[i] = widget_get_child(view, i);
-    unsigned n = 0; /* each row moves to n as it comes, so Update Local Music, left, ends last */
     if (library_search())
-        widget_restack(library_row(view, (void *)0, library_search_open, 0, "Search", 1), n++);
-    widget_restack(library_row(view, "local_shuffle", shuffle_menu, 0, "Shuffle", 1), n++);
-    static const unsigned char middle[] = { L_ARTISTS,   L_ALBUMS, L_SONGS, L_GENRES,
-                                            L_PLAYLISTS, L_FAV,    L_ADDED, L_RECENT };
-    for (unsigned i = 0; i < sizeof middle; i++)
-        if (middle[i] == L_GENRES) { /* browsing by a tag, as Genre */
-            widget_restack(stock[L_GENRES], n++);
-            widget_restack(library_row(view, "local_era", era_menu, 0, "Era", 1), n++);
-        } else if (middle[i] == L_FAV) { /* My Fav is Ratings' Loved, its row kept hidden */
-            widget_restack(library_row(view, "local_fav", ratings_menu, 0, "Ratings", 1), n++);
-            widget_set_visible(stock[L_FAV], 0, 0);
-            widget_restack(stock[L_FAV], n++);
-        } else
-            widget_restack(stock[middle[i]], n++);
-    widget_restack(library_row(view, "local_frequentplay", most_played, 0, "Most Played", 1), n++);
+        lr_put(rows, 'S', library_row(view, (void *)0, library_search_open, 0, "Search", 1));
+    lr_put(rows, 'h', library_row(view, "local_shuffle", shuffle_menu, 0, "Shuffle", 1));
+    /* stock's rows: each one's letter, then its index */
+    static const char stocks[] = { 'a', L_ARTISTS,   'l', L_ALBUMS, 's', L_SONGS,   'g', L_GENRES,
+                                   'p', L_PLAYLISTS, 'n', L_ADDED,  'c', L_RECENT,  'i', L_HIRES,
+                                   'u', L_UPDATE,    'f', L_FAV,    'q', L_FREQUENT };
+    for (unsigned i = 0; i < sizeof stocks; i += 2)
+        lr_put(rows, stocks[i], stock[(int)stocks[i + 1]]);
+    /* Era: browsing by a tag, as Genre */
+    lr_put(rows, 'e', library_row(view, "local_era", era_menu, 0, "Era", 1));
+    /* My Fav is Ratings' Loved, its row kept hidden */
+    lr_put(rows, 'r', library_row(view, "local_fav", ratings_menu, 0, "Ratings", 1));
+    widget_set_visible(stock[L_FAV], 0, 0);
+    lr_put(rows, 'm', library_row(view, "local_frequentplay", most_played, 0, "Most Played", 1));
     widget_set_visible(stock[L_FREQUENT], 0, 0); /* Most Played is its list, from every listen */
-    widget_restack(stock[L_FREQUENT], n++);
-    widget_restack(stock[L_HIRES], n++);
-    widget_restack(library_row(view, "local_longsongs", long_songs, 0, "Long Songs", 1), n++);
+    lr_put(rows, 'L', library_row(view, "local_longsongs", long_songs, 0, "Long Songs", 1));
     /* Podcasts, Audiobooks, Photos, Books and Videos, each only with its folder; then iPod's Games.
      */
     static const char *const icons[] = { "local_podcasts", "local_audiobooks", "local_photos",
@@ -97,12 +94,13 @@ int ringnav_localmusic(void *win, void *ctx) {
     char path[sizeof st.media_root];
     for (int k = 0; k < VIDEOS; k++)
         if (media_find(k + 1, path))
-            widget_restack(
-                library_row(view, icons[k], media_click, (void *)(long)(k + 1), MEDIA[k], 1), n++);
-    widget_restack(library_row(view, "local_games", games_open, 0, "Games", 1), n++);
+            lr_put(rows, "PAoBv"[k],
+                   library_row(view, icons[k], media_click, (void *)(long)(k + 1), MEDIA[k], 1));
+    lr_put(rows, 'G', library_row(view, "local_games", games_open, 0, "Games", 1));
     if (scrobble_ready())
-        widget_restack(
-            library_row(view, "local_scrobble", upload_scrobbles, 0, "Upload Scrobbles", 0), n++);
+        lr_put(rows, 'U',
+               library_row(view, "local_scrobble", upload_scrobbles, 0, "Upload Scrobbles", 0));
+    lr_apply(rows);
     library_look(view);
     return result;
 }

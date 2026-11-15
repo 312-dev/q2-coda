@@ -833,7 +833,19 @@ int az_touch(void *w, void *event), az_held(void *event), az_on(void *w), az_rig
     az_bar_in(void *w);
 int az_initial(const char *s), az_target(const int *first, int letter), az_letter_at(int y),
     az_column(signed char *out);
+/* library_edit.c: the Library's row order and OLED's Edit Library
+ * (docs/oled-design.md#edit-library) */
+#define LR_ROWS 32 /* the Library's rows at most, shown or hidden: lr_default's letters */
+extern const char lr_default[];
+int lr_at(int c), lr_resolve(const char *saved, char *out);
+void lr_merge(char *full, const char *shown), lr_put(void **rows, int c, void *row),
+    lr_apply(void **rows);
+void lr_edit_keydown(unsigned key), lr_edit_paint(void *w, void *canvas);
+int lr_edit_key(void *top, unsigned key, int owned), lr_edit_touch(void *event),
+    lr_edit_dragging(void), lr_edit_click(void *target), lr_edit_row(void *w),
+    lr_editing(void *page);
 /* navigation.c */
+void pull_cancel(void); /* a pull to search let go: Edit Library's drag takes the touch */
 void ringnav_jump(void *w, int id); /* table w's row id selected, at the list's top */
 int own_order(const char *page);    /* a page whose list is not in name order */
 void ringnav_sort_key(char *s);     /* a name's sort key: trimmed, its article dropped */
