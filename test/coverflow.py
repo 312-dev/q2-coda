@@ -346,6 +346,8 @@ void home_in_place(void *list) {}
 void home_fades(void *canvas, void *list, int list_y, int cols, int split) {}
 int shuffle_songs(void *ctx, void *event) { return 0; }
 int library_search_open(void *ctx, void *event) { return 0; }
+/* library_artist.c's own artist page: never up in these tests, so the page under is closed as before */
+int artist_local_on(void *win) { return 0; }
 extern volatile unsigned library_gen;
 static int count_calls, count_answer = 704;
 static pthread_t count_thread_seen;
