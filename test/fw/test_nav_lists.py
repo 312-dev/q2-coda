@@ -1456,7 +1456,7 @@ def test_a_music_load_too_long_to_filter_runs_nothing(fw):
     assert loads.query(b'db', sql.encode(), None, 0) == 0 and loads.ran == [sql]  # outside a load it runs as it is
 
 
-NO_MIN = int(re.search(r'#define NO_MIN (\d+)', (host.ROOT/'patch/name_order.c').read_text())[1])
+NO_MIN = int(re.findall(r'#define NO_MIN (\d+)', (host.ROOT/'patch/name_order.c').read_text())[0])
 CMP = {name: address for name, (_, address) in host.tools_build.NAME_COMPARATORS.items()}
 
 
