@@ -782,4 +782,9 @@ int song_sort_commit(void);
 int song_sort_own(void);
 void song_order(void *list);
 
+/* coda_rc_shim.c: Car Remote (docs/internals.md#car-remote) */
+void coda_rc_poll(void);
+int coda_rc_enabled(void);
+int carremote_open(void *ctx, void *event);
+
 #endif

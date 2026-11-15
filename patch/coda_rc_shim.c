@@ -1,0 +1,417 @@
+/* Car Remote's side in demo (docs/internals.md#car-remote): the little the coda-rc daemon (patch/coda_rc.c)
+ * cannot do from outside. Every UI pass (ringnav_sleep), paced to CR_POLL_MS, while Settings > Car Remote
+ * is on, it:
+ * - starts the daemon (at boot and when the switch goes on; again if it dies) and stops it when the switch
+ *   goes off: nothing listens while it is off;
+ * - writes Now Playing for it to /tmp/coda-rc.now, and the queue's song ids to /tmp/coda-rc.queue;
+ * - takes its commands from /tmp/coda-rc.cmd: play a list of song ids from one of them, or shuffled (ids in
+ *   /tmp/coda-rc.list), seek, set the volume; and answers each in /tmp/coda-rc.ack;
+ * - shows the pairing code while /tmp/coda-rc.pair exists, and writes /tmp/coda-rc.pair-cancel when the
+ *   user closes it.
+ * Settings > Car Remote is this file's page too: the switch, the paired phones, Forget.
+ * Everything the protocol needs is in the daemon; here only a few words of state. */
+#include "navigation.h"
+
+#define CR_POLL_MS 500
+#define CR_RESTART_MS 30000 /* a daemon that died is started again at most this often */
+#define CR_DAEMON "/usr/bin/coda-rc"
+#define CR_PID "/tmp/coda-rc.pid"
+#define CR_NOW "/tmp/coda-rc.now"
+#define CR_QUEUE "/tmp/coda-rc.queue"
+#define CR_CMD "/tmp/coda-rc.cmd"
+#define CR_LIST "/tmp/coda-rc.list"
+#define CR_ACK "/tmp/coda-rc.ack"
+#define CR_PAIR "/tmp/coda-rc.pair"
+#define CR_PAIR_END "/tmp/coda-rc.pair-end"
+#define CR_PAIR_CANCEL "/tmp/coda-rc.pair-cancel"
+#define CR_PEERS "/mnt/data/coda-rc/peers"
+#define CR_PEER_REC 76 /* coda_rc.c crc_peers_save: id[8] ltk[32] name[32] created[4] */
+#define CR_PEERS_MAX 8
+#define CR_QUEUE_MAX 5000 /* ponytail: a longer queue lists its first 5000 to the phone */
+#define CR_LIST_MAX 20000 /* coda_rc_lib.c PLAY_MAX */
+
+static struct {
+    int checked, on;
+    unsigned at, started_at, seq, now_hash, now_n, q_hash, q_gen;
+    unsigned play_timer, toast_timer;
+    void *pair_page, *page; /* the code's Dialog; Settings > Car Remote */
+    int forget; /* the phone row Forget asks about, + 1 */
+    int toast_what;
+} cr __attribute__((section(".scratch")));
+
+int coda_rc_enabled(void) {
+    if (!cr.checked) cr.checked = 1, cr.on = config_value("Q2POD", "CARREMOTE", 2, 0);
+    return cr.on;
+}
+
+/* ---- the daemon ---- */
+
+static int cr_running(void) {
+    char raw[24], proc[24];
+    if (!state_read(CR_PID, raw, sizeof raw)) return 0;
+    snprintf(proc, sizeof proc, "/proc/%d", atoi(raw + 1));
+    return atoi(raw + 1) > 1 && !access(proc, 0);
+}
+
+static void cr_start(void) {
+    cr.started_at = time_now_ms() | 1;
+    if (!cr_running()) system("( " CR_DAEMON " >/dev/null 2>&1 & )");
+}
+
+static void cr_stop(void) {
+    system("kill $(cat " CR_PID " 2>/dev/null) 2>/dev/null");
+    unlink(CR_NOW);
+    unlink(CR_QUEUE);
+    unlink(CR_CMD);
+    unlink(CR_PAIR);
+    if (cr.pair_page) window_close(cr.pair_page);
+}
+
+/* ---- Now Playing out ---- */
+
+static void put(char *b, unsigned cap, unsigned *n, const char *key, const char *v) {
+    for (const char *s = key; *s && *n + 1 < cap; ++s) b[(*n)++] = *s;
+    if (*n + 1 < cap) b[(*n)++] = '=';
+    for (const char *s = v ? v : ""; *s && *n + 1 < cap; ++s) b[(*n)++] = *s == '\n' || *s == '\r' ? ' ' : *s;
+    if (*n < cap) b[(*n)++] = '\n';
+}
+
+static void put_int(char *b, unsigned cap, unsigned *n, const char *key, int v) {
+    char s[12];
+    snprintf(s, sizeof s, "%d", v);
+    put(b, cap, n, key, s);
+}
+
+/* The playing queue as song ids, when it changes: "gen pos total" then an id a line. */
+static void cr_queue(void *q, unsigned pos) {
+    unsigned n = q ? deque_size(q) : 0, h = hash_bytes(FNV_SEED, (const unsigned char *)&q, sizeof q);
+    h = hash_bytes(h, (const unsigned char *)&n, sizeof n);
+    h = hash_bytes(h, (const unsigned char *)&playback_loads, sizeof playback_loads);
+    if (h == cr.q_hash) return;
+    unsigned listed = n < CR_QUEUE_MAX ? n : CR_QUEUE_MAX, len = 0, cap = 40 + listed * 12;
+    char *b = calloc(1, cap);
+    if (!b) return;
+    cr.q_hash = h;
+    ++cr.q_gen;
+    len = (unsigned)snprintf(b, cap, "%u %u %u\n", cr.q_gen, pos, n);
+    for (unsigned i = 0; i < listed; ++i)
+        len += (unsigned)snprintf(b + len, cap - len, "%d\n", I(deque_at(q, i), REC_ID));
+    blob_io(CR_QUEUE, CR_QUEUE ".tmp", b, len, 1);
+    free(b);
+}
+
+static void cr_now(void) {
+    void *q = P(mcl_pdeqplaylist, 0), *r = 0;
+    unsigned pos = (unsigned)I(MCL_POS, 0);
+    if (q && pos < deque_size(q)) r = deque_at(q, pos);
+    cr_queue(q, pos);
+    int status = mclGetPlayStatus(), sec = -1, total = 0;
+    player_playtime_and_length(&sec, &total);
+    int repeat = playback_option(1);
+    char b[1400];
+    unsigned n = 0;
+    const char *title = r ? P(r, REC_TITLE) : 0;
+    if (r && (!title || !*title)) title = P(r, REC_NAME);
+    put_int(b, sizeof b, &n, "state", status == 2 ? 1 : status == 3 ? 2 : 0);
+    put_int(b, sizeof b, &n, "pos", sec > 0 ? sec * 1000 : 0);
+    put_int(b, sizeof b, &n, "len", total > 0 ? total : 0);
+    put_int(b, sizeof b, &n, "id", r ? I(r, REC_ID) : 0);
+    put_int(b, sizeof b, &n, "shuffle", playback_option(0) != 0);
+    /* playback.c: 3 repeats the song, 4 and 5 wrap the queue (4 within an album or folder) */
+    put_int(b, sizeof b, &n, "repeat", repeat == 3 ? 1 : repeat >= 4 ? 2 : 0);
+    put_int(b, sizeof b, &n, "volume", g_volume);
+    put_int(b, sizeof b, &n, "qpos", (int)pos);
+    put_int(b, sizeof b, &n, "qlen", q ? (int)deque_size(q) : 0);
+    put_int(b, sizeof b, &n, "qgen", (int)cr.q_gen);
+    put(b, sizeof b, &n, "path", r ? P(r, REC_PATH) : "");
+    put(b, sizeof b, &n, "title", title);
+    put(b, sizeof b, &n, "artist", r ? P(r, REC_ARTIST) : "");
+    put(b, sizeof b, &n, "album", r ? P(r, REC_ALBUM) : "");
+    unsigned h = hash_bytes(FNV_SEED, (const unsigned char *)b, n);
+    if (h == cr.now_hash) return;
+    char seq[16];
+    unsigned k = (unsigned)snprintf(seq, sizeof seq, "seq=%u\n", ++cr.now_n);
+    if (k + n > sizeof b) n = sizeof b - k;
+    memmove(b + k, b, n);
+    memcpy(b, seq, k);
+    if (blob_io(CR_NOW, CR_NOW ".tmp", b, n + k, 1)) cr.now_hash = h;
+}
+
+/* ---- commands in ---- */
+
+static void cr_ack(unsigned seq, int code) {
+    char b[24];
+    int n = snprintf(b, sizeof b, "%u %d\n", seq, code);
+    blob_io(CR_ACK, CR_ACK ".tmp", b, (unsigned)n, 1);
+}
+
+typedef struct {
+    int id;
+    unsigned at;
+} cr_ix;
+
+static int ix_order(const void *a, const void *b) {
+    int x = ((const cr_ix *)a)->id, y = ((const cr_ix *)b)->id;
+    return x < y ? -1 : x > y;
+}
+
+/* The listed ids as the library's records, in the list's order: the whole library's (with server songs
+ * when Local + Server is on) sorted by id once, then each id looked up. */
+static void *cr_songs(int want, int *at) {
+    int n = 0;
+    void *all = staged(songs_unsorted, (void *)1, &n), *out = _create_deque("stSongInfo");
+    deque_init(out);
+    unsigned m = all ? deque_size(all) : 0;
+    char *raw = calloc(1, CR_LIST_MAX * 11 + 3);
+    cr_ix *ix = calloc(m + 1, sizeof *ix);
+    if (raw && ix && state_read(CR_LIST, raw, CR_LIST_MAX * 11 + 3)) {
+        for (unsigned i = 0; i < m; ++i) ix[i].id = I(deque_at(all, i), REC_ID), ix[i].at = i;
+        qsort(ix, m, sizeof *ix, ix_order);
+        int line = 0;
+        for (char *c = raw + 1; *c && line < CR_LIST_MAX; ++line) {
+            int id = atoi(c);
+            unsigned lo = 0, hi = m;
+            while (lo < hi) {
+                unsigned mid = lo + (hi - lo) / 2;
+                if (ix[mid].id < id) lo = mid + 1;
+                else hi = mid;
+            }
+            if (lo < m && ix[lo].id == id) {
+                if (line == want) *at = (int)deque_size(out);
+                _deque_push_back(out, deque_at(all, ix[lo].at));
+            }
+            char *nl = strstr(c, "\n");
+            if (!nl) break;
+            c = nl + 1;
+        }
+    }
+    free(raw);
+    free(ix);
+    if (all) deque_destroy(all);
+    return out;
+}
+
+/* Play's work, from a timer: play_folder opens Now Playing, a window, which a poll may not do. */
+static int cr_play(const void *unused) {
+    char raw[64];
+    cr.play_timer = 0;
+    if (!state_read(CR_CMD, raw, sizeof raw)) return 0;
+    unsigned seq = (unsigned)atoi(raw + 1);
+    int at = 0, shuffle = 0, count = 0, from = 0;
+    char *verb = strstr(raw + 1, " ");
+    if (!verb || __isoc99_sscanf(verb, " play %d %d %d", &at, &shuffle, &count) != 3) return 0;
+    unlink(CR_CMD);
+    if (library_scanning() || addon_game_audio() || navigator_window_is_exist("usbmode_page")) {
+        cr_ack(seq, 2); /* busy: the daemon answers UNAVAILABLE */
+        return 0;
+    }
+    void *dq = cr_songs(at, &from);
+    int size = (int)deque_size(dq);
+    if (size) {
+        press_natural = 0; /* the phone's pick is the user's: the same row resumes, as a tap does */
+        if (shuffle)
+            shuffle_play(dq);
+        else
+            play_folder(dq, from, 0xf001);
+    }
+    deque_destroy(dq);
+    cr_ack(seq, size ? 0 : 1);
+    return 0;
+}
+
+static void cr_command(void) {
+    char raw[64];
+    if (cr.play_timer || !state_read(CR_CMD, raw, sizeof raw)) return;
+    unsigned seq = (unsigned)atoi(raw + 1);
+    char *verb = strstr(raw + 1, " ");
+    int v = 0;
+    if (verb && !strncmp(verb, " play ", 6)) {
+        cr.play_timer = timer_add(cr_play, 0, 0);
+        return;
+    }
+    unlink(CR_CMD);
+    if (verb && __isoc99_sscanf(verb, " seek %d", &v) == 1 && v >= 0) {
+        player_seek_time(v);
+        cr_ack(seq, 0);
+    } else if (verb && __isoc99_sscanf(verb, " volume %d", &v) == 1 && v >= 0 && v <= 100) {
+        /* as the AirPlay app sets it (airplay.c): up to Volume Limit, saved for the output in use */
+        if (v > g_maxvolume) v = g_maxvolume;
+        g_volume = (unsigned char)v;
+        device_set_volume(v, 1);
+        write_int_config(v, "PLAYSET", mclGetOutputWay() == 1 ? "BT_VOLUME" : "VOLUME");
+        cr_ack(seq, 0);
+    } else {
+        cr_ack(seq, 1);
+    }
+}
+
+/* ---- the pairing code ---- */
+
+static int cr_toast(const void *unused) {
+    cr.toast_timer = 0;
+    if (cr.toast_what) toast(cr.toast_what > 0 ? "Phone paired" : "Pairing failed");
+    cr.toast_what = 0;
+    return 0;
+}
+
+static int pair_closed(void *ctx, void *event) {
+    cr.pair_page = 0;
+    return 0;
+}
+
+/* Cancel, Centre on it, or Return: the daemon is told, and ends the pairing */
+static int pair_cancel(void *ctx, void *event) {
+    blob_io(CR_PAIR_CANCEL, CR_PAIR_CANCEL ".tmp", "1\n", 2, 1);
+    unlink(CR_PAIR);
+    if (cr.pair_page) window_close(cr.pair_page);
+    return 0;
+}
+
+static int pair_keyup(void *ctx, void *event) {
+    if (I(event, EVENT_KEY) != KEY_RETURN) return page_keyup(ctx, event);
+    pair_cancel(ctx, event);
+    return STOP;
+}
+
+/* The Dialog: the question as its title, the code in two groups of three as Wi-Fi transfer's PIN, a hint,
+ * and Cancel (docs/remote-protocol.md#pairing-on-the-q2). */
+static void pair_show(const char *code, const char *name) {
+    char title[64], digits[8];
+    snprintf(title, sizeof title, "Pair with \"%s\"?", name);
+    snprintf(digits, sizeof digits, "%.3s %.3s", code, code + 3);
+    reset_poweroptions_timer(1, 1, 1); /* the screen on and kept on, as a key press would */
+    if (!(cr.pair_page = page_open("carpair_page", pair_closed, pair_keyup))) return;
+    void *view = page_list(cr.pair_page, cr.pair_page, 0, title, 1, 48);
+    page_row_detail(view, 0, "Cancel", 0, pair_cancel);
+    ringnav_select(view, 0, 1);
+    const scheme_t *c = scheme();
+    widget_set_text_utf8(label(cr.pair_page, 0, 120, 375, 64, "s_scrlabel_white20c", 56, 0xff000000u | c->ink), digits);
+    widget_set_text_utf8(label(cr.pair_page, 0, 196, 375, 24, "s_scrlabel_white20c", 16, 0xff000000u | c->muted),
+                         "Enter this code on your phone");
+}
+
+static void cr_pairing(void) {
+    char raw[80];
+    if (state_read(CR_PAIR, raw, sizeof raw) >= 7) {
+        if (cr.pair_page) return;
+        char *code = raw + 1, *name = strstr(code, "\n");
+        if (!name || name - code != 6) return;
+        *name++ = 0;
+        char *end = strstr(name, "\n");
+        if (end) *end = 0;
+        pair_show(code, *name ? name : "Phone");
+        return;
+    }
+    if (cr.pair_page) window_close(cr.pair_page); /* paired, failed or given up: the daemon removed it */
+    if (state_read(CR_PAIR_END, raw, sizeof raw)) {
+        unlink(CR_PAIR_END);
+        int outcome = atoi(raw + 1);
+        if (outcome >= 0) {
+            cr.toast_what = outcome ? 1 : -1;
+            if (!cr.toast_timer) cr.toast_timer = timer_add(cr_toast, 0, 0);
+        }
+    }
+}
+
+/* Every UI pass (ringnav_sleep). */
+void coda_rc_poll(void) {
+    unsigned now = time_now_ms();
+    if (cr.at && now - cr.at < CR_POLL_MS) return;
+    cr.at = now | !now;
+    if (!coda_rc_enabled()) return;
+    if (!cr.started_at || (now - cr.started_at >= CR_RESTART_MS && !cr_running())) cr_start();
+    cr_now();
+    cr_command();
+    cr_pairing();
+}
+
+/* ---- Settings > Car Remote ---- */
+
+static int cr_page_show(const void *unused);
+
+/* The paired phones' names, from the daemon's file; their count */
+static int cr_peers(char names[CR_PEERS_MAX][32]) {
+    unsigned char b[CR_PEERS_MAX * CR_PEER_REC + 2];
+    unsigned n = state_read(CR_PEERS, (char *)b, sizeof b) / CR_PEER_REC;
+    for (unsigned i = 0; i < n && i < CR_PEERS_MAX; ++i) {
+        memcpy(names[i], b + 1 + i * CR_PEER_REC + 40, 32);
+        names[i][31] = 0;
+    }
+    memset(b, 0, sizeof b); /* the keys were in it */
+    return n > CR_PEERS_MAX ? CR_PEERS_MAX : (int)n;
+}
+
+/* Forget: the phone's record out of the file (written whole, then renamed); the daemon closes its
+ * sessions within a second (coda_rc.c peers_poll) */
+static void cr_forget(int i) {
+    unsigned char b[CR_PEERS_MAX * CR_PEER_REC + 2];
+    unsigned n = state_read(CR_PEERS, (char *)b, sizeof b) / CR_PEER_REC;
+    if (i < 0 || (unsigned)i >= n) return;
+    memmove(b + 1 + i * CR_PEER_REC, b + 1 + (i + 1) * CR_PEER_REC, (n - i - 1) * CR_PEER_REC);
+    if (!blob_io(CR_PEERS, CR_PEERS ".new", b + 1, (n - 1) * CR_PEER_REC, 1)) toast("Could not forget the phone");
+    memset(b, 0, sizeof b);
+}
+
+static int cr_click(void *ctx, void *event) {
+    int i = (int)(long)ctx;
+    if (cr.forget) { /* the Dialog: 0 Cancel, 1 Forget */
+        if (i == 1) cr_forget(cr.forget - 1);
+        cr.forget = 0;
+    } else if (i == 0) {
+        cr.on = !coda_rc_enabled();
+        write_int_config(cr.on, "Q2POD", "CARREMOTE");
+        if (cr.on)
+            cr_start();
+        else
+            cr_stop();
+    } else if (i >= 2) {
+        cr.forget = i - 1;
+    }
+    stop_timer(&cr.toast_timer);
+    timer_add(cr_page_show, 0, 0); /* a row's click may not rebuild its own list */
+    return 0;
+}
+
+static int cr_page_show(const void *unused) {
+    if (!cr.page) return 0;
+    char names[CR_PEERS_MAX][32];
+    int n = cr_peers(names);
+    if (cr.forget) {
+        char q[64];
+        snprintf(q, sizeof q, "Forget \"%s\"?", cr.forget <= n ? names[cr.forget - 1] : "phone");
+        void *view = page_list(cr.page, cr.page, 0, q, 2, 48);
+        page_row_detail(view, 0, "Cancel", 0, cr_click);
+        page_row_detail(view, 1, "Forget", 0, cr_click);
+        ringnav_select(view, 0, 2);
+        return 0;
+    }
+    void *view = page_list(cr.page, cr.page, 0, "Car Remote", 2 + (n ? n : 1), 48);
+    list_toggle(widget_get_child(page_row_detail(view, 0, "", 0, cr_click), 0), "Car Remote", coda_rc_enabled());
+    int rh = page_h(48); /* a gap before the phones, clear as the rows */
+    widget_use_style(list_item_create(view, 0, rh, 375, rh), "s_listitem_black");
+    for (int i = 0; i < n; ++i) page_row_detail(view, 2 + i, names[i], "Paired", cr_click);
+    if (!n) widget_set_enable(page_row_detail(view, 2, "No paired phones", 0, 0), 0);
+    ringnav_select(view, 0, 2 + (n ? n : 1));
+    return 0;
+}
+
+static int cr_page_closed(void *ctx, void *event) {
+    cr.page = 0;
+    cr.forget = 0;
+    return 0;
+}
+
+/* Return on the Forget Dialog is its Cancel */
+static int cr_page_keyup(void *ctx, void *event) {
+    if (!cr.forget || I(event, EVENT_KEY) != KEY_RETURN) return page_keyup(ctx, event);
+    cr.forget = 0;
+    timer_add(cr_page_show, 0, 0);
+    return STOP;
+}
+
+/* System Settings' Car Remote row (navigation.c ringnav_systemset) */
+int carremote_open(void *ctx, void *event) {
+    if (cr.page || !(cr.page = page_open("carremote_page", cr_page_closed, cr_page_keyup))) return 0;
+    cr_page_show(0);
+    return 0;
+}

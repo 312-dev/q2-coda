@@ -310,11 +310,17 @@ is no `CHOICE` context, opens on its mark under a `set_text` theme as a `CHOICE`
 under such a theme every picker does so when a tap opened it too. Another list whose `default_item_height` equals the set's
 `set_row` carries an explicit `item_height`, so only the settings pages are told apart by it.
 
-System Settings puts Wireless and Network first, then Display, Controls and Power, then Date & Time and device
+System Settings puts Wireless and Network first, then Car Remote, then Display, Controls and Power, then Date & Time and device
 maintenance, with About last; neither list has headings. Play Mode, EQ, Gapless and Crossfade come first; specialist output controls come next, and Library & Folders last, one reverse detent from the top on Playback's ring. Added binary settings
 use Shanling's `switch_on` / `switch_off` images with the whole row as the tap target. Settings
 that cycle between named choices retain their value labels. Crossfade, Resume Songs, Wheel
 Sensitivity and App Store show a chevron, as do the added Library browsing rows.
+
+**Car Remote** (`Q2POD CARREMOTE`, off by default) opens its own page: the switch first, then the
+paired phones by name. On, demo starts the `coda-rc` daemon, which lets a paired phone browse and play
+the library from the car ([remote-protocol](remote-protocol.md), [internals](internals.md#car-remote));
+off, it stops, and nothing listens. Centre on a phone asks `Forget "name"?` with Cancel first, then
+Forget; Return is Cancel. With none paired the page says "No paired phones".
 
 Every row is built natively, about 60 builders in all, one pattern throughout: a
 `list_item_create(view, 0, 0, 0, 0)` (some pass 78 as the height) holding a `button_create(item,
