@@ -155,7 +155,7 @@ Entries 7 to 17 are costs the code marks itself.
 
 ### 12. A stock database write on the UI thread waits for a count
 
-- **Where:** `patch/coverflow.c:4416` (`count_worker`); [internals.md](internals.md#playlist-art) (the paragraph on the wait).
+- **Where:** `patch/coverflow.c:4857` (`count_worker`); [internals.md](internals.md#playlist-art) (the paragraph on the wait).
 - **Evidence:** the doc: a write on the UI thread "that meets Home's or the update dialog's count ... a read of the whole `songtable` on their own connections, seconds on a big library" holds the UI.
 - **Decision:** left as is. The fix proposed, a count once a scan, is what `home_counts` does: it starts a count only when `library_gen` differs from the generation it last asked at. What remains is a stock write that waits at most 500 ms a statement (`PRAGMA busy_timeout=500`, `stock_db_open` in `patch/playlists.c`) when it meets a running count.
 
@@ -235,7 +235,7 @@ Entries 7 to 17 are costs the code marks itself.
 
 ### 3. No test resolves the doc anchors the sources cite (resolved)
 
-- **Where:** comments such as `patch/onlinematch.c:1` (`docs/internals.md#lyrics-search`), `patch/coverflow.c:2560` (`#coverflow-touch`), `patch/lyrics.c:2` (`docs/ipod.md#lyrics`).
+- **Where:** comments such as `patch/onlinematch.c:1` (`docs/internals.md#lyrics-search`), `patch/coverflow.c:2623` (`#coverflow-touch`), `patch/lyrics.c:2` (`docs/ipod.md#lyrics`).
 - **Evidence:** a script over `git ls-files patch tools test` found 12 citations of anchors that no heading or `<a id>` defined, in 6 files. The anchors were added to the docs beside this report; nothing stops the next rename from breaking them.
 - **State:** `test/unit/test_docs.py` resolves every `docs/<name>.md#<anchor>` in `patch/`, `tools/` and `test/` (279) and every relative Markdown link with an anchor in `docs/*.md`, `AGENTS.md`, `CONTRIBUTING.md` and `README.md` (772 in all) against each file's GitHub heading anchors and `<a id>`s, and lists each broken one as `file:line: target#anchor`. It found three: `#curl` (the heading is curl and mbedTLS), `#cover-search` (an `<a id>` added) and `#safe-file-manager` split over two comment lines. It also refuses a `file:LINE` in [architecture.md](architecture.md), which names each symbol by its file, and checks each symbol it pairs with a file is in that file.
 

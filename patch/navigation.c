@@ -1743,11 +1743,19 @@ static int folder_into(const menu_t *m, int i) {
            I(deque_at(list, (unsigned)m->id[i]), REC_TYPE) != 8;
 }
 
+/* Home's Cover Flow row: the image its click opens Cover Flow from, or the row holding it. */
+static int cover_flow_row(void *row) {
+    return !tk_strcmp(widget_get_prop_str(row, "name", ""), "img_cover_flow") ||
+           widget_lookup(row, "img_cover_flow", 1);
+}
+
 /* The iPod `>` of each drill row, where stock rows place img_into, as stock hides its own
  * list_into: not in multi-select, and not on grid tiles. Home has none but a chevron_home theme's:
  * Modern's rides its selection bar alone, nudge included, Classic's sits at home_chevron_x. A
  * chevron_sel theme (Classic) draws only the selected row's, white; a CHEV_ICON theme draws its own
- * on each row, on the set's right column (list_marks.c). The image manager caches the bitmap. */
+ * on each row, on the set's right column (list_marks.c), and on Home's Cover Flow row, selected,
+ * the spinner while Cover Flow opens (coverflow.c coverflow_spinner). The image manager caches the
+ * bitmap. */
 static void paint_chevrons(void *w, void *canvas) {
     unsigned bitmap[64], white[64]; /* bitmap_t */
     rect_t old;
@@ -1783,10 +1791,13 @@ static void paint_chevrons(void *w, void *canvas) {
                 continue;
             /* the theme's own, on the right column; none on the Shortcut row as Shuffle */
             if (icon) {
-                if (!home || shortcut() != SHORTCUT_SHUFFLE ||
-                    tk_strcmp(widget_get_prop_str(g_menu.at[i], "name", ""), "img_rockbox"))
-                    chevron_icon(w, canvas, I(w, W_W) - az_right(w), r.y + r.h / 2,
-                                 st.sel_w == w && i == st.sel_row);
+                int sel = st.sel_w == w && i == st.sel_row,
+                    spin = home && sel && cover_flow_row(g_menu.at[i]) ? coverflow_spinner() : 0;
+                if (spin)
+                    spinner_icon(w, canvas, I(w, W_W) - az_right(w), r.y + r.h / 2, spin);
+                else if (!home || shortcut() != SHORTCUT_SHUFFLE ||
+                         tk_strcmp(widget_get_prop_str(g_menu.at[i], "name", ""), "img_rockbox"))
+                    chevron_icon(w, canvas, I(w, W_W) - az_right(w), r.y + r.h / 2, sel);
                 continue;
             }
             canvas_draw_icon(
@@ -10707,9 +10718,7 @@ static int home_cf_hold(void *top) {
     if (!w || !load(&g_menu, w, 1)) return 0;
     int cur = reconcile(&g_menu, !moving(&g_menu));
     void *row = cur >= 0 ? g_menu.at[cur] : 0;
-    if (!row || (tk_strcmp(widget_get_prop_str(row, "name", ""), "img_cover_flow") &&
-                 !widget_lookup(row, "img_cover_flow", 1)))
-        return 0;
+    if (!row || !cover_flow_row(row)) return 0;
     display_open((void *)DISPLAY_COVERFLOW, 0);
     return 1;
 }
@@ -11477,6 +11486,7 @@ static void vol_step(unsigned key) {
 int ringnav_input(void *wm, void *e) {
     if (e && tick_gate(e)) return 0;
     if (e && (chord_gate(e) || wake_gate(e))) return 0;
+    if (e && coverflow_wait_input(e)) return 0; /* Cover Flow opening: Return gives it up */
     st.last_input = time_now_ms();
     unsigned type = e ? (unsigned)I(e, EVENT_TYPE) : 0;
     unsigned key = e ? (unsigned)I(e, EVENT_KEY) : 0;

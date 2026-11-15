@@ -182,6 +182,13 @@ All lists share one grid.
   another page, nothing at the right when it acts in place (Home's Shuffle Songs, a song).
 - **Chevron:** Phosphor `caret-right`, bold, 15 px, centred 5 px left of the right column:
   Chevron grey, On Accent on the selection.
+- **Opening:** a row whose page has to load first (Home's Cover Flow, on its first open after a
+  restart or a library change) keeps the selection and turns its chevron into an activity
+  spinner: eight spokes in the chevron's 15 px box, On Accent, the leading spoke solid and each
+  one behind it 10% fainter, a spoke on every 100 ms (redrawn between the open's steps, so it can
+  pause on a long one), until the page opens. It shows only once the
+  open has taken 75 ms, as one that has will pass 150 ms, so a quick open never flickers;
+  meanwhile the wheel and buttons do nothing but Return, which stays on Home.
 - **Key/value row:** value in Text Secondary, right-aligned on the right column, no chevron.
   On the selection bar the value is On Accent.
 - **Switch row:** every on/off setting, a 34x20 fully round switch ending on the right column, its
