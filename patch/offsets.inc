@@ -828,18 +828,15 @@ static inline int arc_out(int r, int y) {
  * page shows the audio VIS_LATENCY_MS behind what hciplayer last handed the filter: its ao_alsa asks
  * for a 500 ms buffer in 16 periods (0x4382ec: buffer_time 500000 us) and refills it a period at a
  * time, so a block waits about 500 ms less half a period to a period; Bluetooth adds its own, so this
- * stays the knob for sync. VIS_FPS frames a second; spectrum bars
- * fall VIS_DECAY of full scale a second, their caps hold VIS_HOLD_MS then fall at VIS_GRAVITY full
- * scale a second squared. Levels span VIS_FLOOR_DB below full scale; the VU meters read 0 VU at
- * VIS_VU_REF_DB dBFS RMS and light their peak LED from VIS_LED_DB dBFS for VIS_HOLD_MS. A paint that
- * found the page unsettled (under a closing window, mid-slide) looks again VIS_RETRY_MS later. */
+ * stays the knob for sync. VIS_FPS frames a second; a band's level falls VIS_DECAY of full scale a
+ * second, and levels span VIS_FLOOR_DB below full scale. A paint that found the page unsettled
+ * (under a closing window, mid-slide) looks again VIS_RETRY_MS later. */
+/* NP_VISUALIZER: the page is in Now Playing's swipe (1) or not (0, for the battery: Field cost demo a
+ * third of a host core in the emulator). At 0 navigation.c never calls visualizer.c, so the linker's
+ * --gc-sections drops its code and scratch from the payload; test/fw still builds and tests it. */
+#define NP_VISUALIZER 0
 #define VIS_LATENCY_MS 480
 #define VIS_RETRY_MS 250
 #define VIS_FPS 25
-#define VIS_BARS 32
 #define VIS_DECAY 1.6f
-#define VIS_HOLD_MS 400
-#define VIS_GRAVITY 3.0f
 #define VIS_FLOOR_DB 60
-#define VIS_VU_REF_DB -14
-#define VIS_LED_DB -1

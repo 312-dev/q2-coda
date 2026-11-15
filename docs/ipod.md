@@ -93,7 +93,7 @@ remains visible. Under **Rounded Corners** on a pressed list row (`s_btn_listite
 selection's inset pill instead (`pressed_pill`), and a pressed tile under half its row's width (the album
 grid's, the playlist page's pair) is the tile's selection card, `TILE_INSET` inside it with `SEL_RADIUS`
 corners (square under Square); other pressed widgets keep stock's box. The same hooks cover settings, streaming, dialogs, PEQ rows and media browser
-chrome. Photos, video, book content, EQ plots and visualizers keep their own drawing.
+chrome. Photos, video, book content, EQ plots and the visualizer keep their own drawing.
 
 A list left with Return opens at its top when it is chosen again, in every theme (`list.reopen.top`,
 set by Minimal, which the others extend), as an iPod's menus and stock's own pages do; Return
@@ -891,7 +891,7 @@ NPCENTRED`, off; `playset_covermode`): `ringnav_ui_load`, hooked on every window
   so those stay unbound. Its art starts 8 px under the status bar, the play mode mirrors the heart
   (its box flipped to the right edge, centred), and its progress bar is the iPod page's (`np_slider`:
   plain track, the accent's fill and the Theme's height) where stock's images drew theirs. Its pages are stock's 225 px column: the lyrics wrap at their rows' width and the
-  visualizer draws at its slide's (`lyrics.c` `ly.w`, `visualizer.c` `PAGE_W`). A tap on the lyrics, while there are
+  visualizer, when built in, draws at its slide's (`lyrics.c` `ly.w`, `visualizer.c` `PAGE_W`). A tap on the lyrics, while there are
   lyrics, shows them full screen, as on the iPod page: the column goes black over the rest of the page at the window's width, the lyrics
   down to the page dots, wrapped again at that width (`np_full`, `lyrics_fit`) and back on the playing line; a tap or
   Return brings the column back, as do a swipe, another page and leaving the page; a window over the page leaves it
@@ -993,7 +993,7 @@ Corners is Minimal's and Modern's setting, each theme's preset until chosen (Min
 Each theme keeps its own accent, and the Accent row follows Theme in each. Minimal's
 (`MINIMAL_ACCENT`) cycles Ivory, Graphite, Crimson, Tidal, Champagne, Cobalt, Tangerine, Plum, Green;
 its default is Graphite, as its preset, and Rounded Corners is on until chosen off; Ivory draws Graphite's greys with its own fills (the progress bars, Spotify's, the
-PEQ curve and the visualizer) in `MINIMAL_FILL`, white on the dark track; a scrub's fill is pure
+PEQ curve) in `MINIMAL_FILL`, white on the dark track; a scrub's fill is pure
 white. Another accent colours the selection card, those fills and every mapped red, as in Classic,
 and the card keeps the rows' own ink and stock's `#AAAAAA` metadata. Minimal's grey icons and
 codec badges stay grey, but `list_into`, the Bluetooth marks and `list_delete` stay white, as

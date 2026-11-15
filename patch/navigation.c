@@ -3043,7 +3043,7 @@ int ringnav_paint(void *w, void *canvas) {
     addon_paint(w, canvas);
     peq_paint(w, canvas);
     battery_paint(w, canvas);
-    visualizer_paint(w, canvas);
+    if (NP_VISUALIZER) visualizer_paint(w, canvas);
     games_paint(w, canvas);
     search_strip_paint(w, canvas);
     /* Even a page with no navigable pane must end pending input when it is painted. */
@@ -3075,7 +3075,8 @@ int ringnav_paint(void *w, void *canvas) {
     paint_caps(w, canvas);
     if (theme()->marquee_fade) marquee_fade(w, canvas);
     if (w && w == slider_page_win) slider_page_paint(w, canvas);
-    if (w && w == st.np_win && !visualizer_full()) np_modes(w, canvas); /* else the page's own */
+    if (w && w == st.np_win && !(NP_VISUALIZER && visualizer_full()))
+        np_modes(w, canvas); /* else the page's own */
     hold_paint(w, canvas, 1);
     coverflow_home_clip(w, canvas, 0);
     st.paint_w = w ? P(w, W_PARENT) : (void *)0;
@@ -5502,7 +5503,7 @@ int ringnav_playing(void *win, void *ctx) {
      * once after the open. Fit from the file's own length at open if that shows. */
     np_fit_due((void *)0);
     np_sync(win);
-    visualizer_attach(win);
+    if (NP_VISUALIZER) visualizer_attach(win); /* off: Now Playing has no visualizer page */
     return result;
 }
 
@@ -10891,7 +10892,7 @@ static int now_playing(void) {
  * input to stamp, nor does a card game's, whose travel goes once a pass. */
 static int np_animating(void) {
     return games_live() || addon_game_on() ||
-           (now_playing() && (visualizer_live() || st.lyric_glide ||
+           (now_playing() && ((NP_VISUALIZER && visualizer_live()) || st.lyric_glide ||
                               (st.np_marquee && st.np_off > 0 && st.np_off < st.np_over)));
 }
 
