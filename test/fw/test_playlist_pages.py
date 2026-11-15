@@ -8,7 +8,7 @@ import re
 import pytest
 
 from conftest import O, Files
-from test_nav_hold import Editor, Table, recs, ui  # noqa: F401  (fixtures)
+from test_nav_hold import TITLES, Editor, Table, recs, ui  # noqa: F401  (fixtures)
 
 OTG = 100
 
@@ -58,7 +58,9 @@ class Lists(Table):
             n = int(m.group(1))
             rows = [[a.encode(), p.encode()] for a, p in [self.servers[n]]] if n in self.servers else []
         elif text.startswith('select ifnull((select sid from cat.servermeta'):
-            dest = int(re.search(r'p.cd_num=(\d+)', text).group(1))
+            found = re.search(r'p.cd_num=(\d+)', text)
+            assert found
+            dest = int(found.group(1))
             rows = [[self.sids.get(p, '').encode() or None] for i, (c, p) in sorted(self.rows.items()) if c == dest]
         else:
             return super().exec(db, sql, callback, ctx)
@@ -74,10 +76,11 @@ class Lists(Table):
 def pages(fw, ui, recs):  # noqa: F811
     """Road Trip (playlist 3: One, Two, Three) and an On-The-Go of Five."""
     e = Editor(fw, ui, recs)
-    e.table.__class__ = Lists
-    e.table.headers, e.table.servers, e.table.sids = {1: 'Gym', 3: 'Road Trip'}, {}, {}
-    fw.mock('sqlite3_exec', e.table.exec)
-    e.table.put(OTG, '/mnt/mmc/e.flac')
+    lists = Lists(fw, recs, e.deques, TITLES)  # in the editor's table's place, its mocks over the table's
+    lists.headers = {1: 'Gym', 3: 'Road Trip'}
+    lists.put(3, '/mnt/mmc/a.flac', '/mnt/mmc/b.flac', '/mnt/mmc/c.flac')
+    lists.put(OTG, '/mnt/mmc/e.flac')
+    e.table = lists
     return e
 
 
