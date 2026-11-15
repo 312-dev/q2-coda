@@ -2977,16 +2977,16 @@ def test_selected_ink_is_the_selected_widgets(fw, st):
 
 def test_artist_songs_by_the_artist_setting(fw):
     fw.var('fw_ctx_artist_type', C.c_int).value = 1
-    assert fw.fn('navigation__artist_songs', C.c_int, C.c_void_p)(None) == 0
+    assert fw.fn('artist_songs', C.c_int, C.c_void_p)(None) == 0
     assert fw.calls('getMusicByAlbumArtist')[0][1][0] == C.addressof(fw.var('fw_ctx_g_local_classinfo_save', C.c_char)) + 0x10d
     fw.var('fw_ctx_artist_type', C.c_int).value = 0
-    fw.fn('navigation__artist_songs', C.c_int, C.c_void_p)(None)
+    fw.fn('artist_songs', C.c_int, C.c_void_p)(None)
     assert len(fw.calls('getMusicBySonger')) == 1
 
 
 def test_artist_songs_of_the_unknown_artist(fw):
     fw.var('fw_ctx_g_local_classinfo_save', C.c_char * host.tools_build.CONTEXT_DATA['g_local_classinfo_save'])[0xa] = b'\1'
-    fw.fn('navigation__artist_songs', C.c_int, C.c_void_p)(None)
+    fw.fn('artist_songs', C.c_int, C.c_void_p)(None)
     assert fw.calls('getMusicBySonger')[0][1][0] == 0
 
 

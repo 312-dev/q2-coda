@@ -294,6 +294,7 @@ void page_row_into(void *view, int index, const char *caption, int (*click)(void
 void row_into(void *item, int h);
 /* artist_page.c: an artist's page under the inset modal's set (docs/oled-design.md#artist-page) */
 void *hero_open(void *body, const char *name, const char *sub, const char *meta);
+void *hero_now(void);
 void pair_open(void *head, void *list, const char *const label[2], const char *const icon[2],
                const int ctx[2], int (*press)(void *, void *), signed char *stop);
 int drill_list(void *view, int n);

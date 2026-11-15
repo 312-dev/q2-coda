@@ -4,14 +4,15 @@
  * Songs, Albums, Singles & EPs, Similar Artists, All Songs) with a count and a chevron, and the
  * cover rows of the pages they open (cover_row; a song's album after its title, cover_after; an
  * artist's monogram in the cover's place, cover_mono). addon.c builds the page from a card app's
- * reply (its artist_view); the header and the pair take plain strings, so an album's page can use
- * them too.
+ * reply (its artist_view), library_artist.c from the Library's songs on stock's artistinfo_page;
+ * the header and the pair take plain strings, so an album's page can use them too.
  *
  * The header stands from screen y HERO_Y, which is above the window (the status row is V_BAR
  * high): its monogram's top is drawn again in the status bar's background paint (artist_cap),
  * clipped to the bar. The pair is a pair of stops above the list (pair_key), as Songs' Shuffle
  * row is (navigation.c shuffle_key): the page opens on Shuffle, a tick moves to Radio, the next
- * to the first row; a tick up from the first row comes back to Radio. While a stop is lit the
+ * to the first row; a tick up from the first row comes back to Radio. A page with Shuffle alone
+ * (a library artist's, library_artist.c) has one stop, the pair's width. While a stop is lit the
  * list's own bar is hidden (pair_holds). Centre or a tap on a panel presses its action. Each draws
  * in final colours, Light Mode's flip applied by ui_ink as for any payload text. */
 #include "navigation.h"
@@ -199,6 +200,9 @@ void *hero_open(void *body, const char *name, const char *sub, const char *meta)
     return head;
 }
 
+/* The header artist_paint draws, 0 when none: the last hero_open's while it stands. */
+void *hero_now(void) { return ar.head; }
+
 /* The status bar's background (navigation.c ringnav_paint_bg): the monogram's top, which stands
  * above the window, while the header's page is on top (or under an inset modal, which dims the bar
  * with it) and still: a sliding page leaves the bar as it is. */
@@ -224,11 +228,13 @@ static int cap_due(const void *info) {
 
 /* The action pair under the header: label[k] after the theme's pair_<icon[k]> art, each panel a
  * tap target whose press (the page's row click) gets ctx[k]; stop is the level's lit stop, kept
- * by the page across its rebuilds. list: the rows under it, whose bar hides while a stop is lit. */
+ * by the page across its rebuilds. list: the rows under it, whose bar hides while a stop is lit.
+ * With label[1] 0 the first is the only panel, the pair's whole width. */
 void pair_open(void *head, void *list, const char *const label[2], const char *const icon[2],
                const int ctx[2], int (*press)(void *, void *), signed char *stop) {
-    int x = geom_val(V_TEXT_X), w = (375 - 2 * x - PAIR_GAP) / 2, y = PAIR_Y - geom_val(V_BAR);
-    for (int k = 0; k < 2; ++k) {
+    int x = geom_val(V_TEXT_X), n = label[1] ? 2 : 1, w = (375 - 2 * x - (n - 1) * PAIR_GAP) / n,
+        y = PAIR_Y - geom_val(V_BAR);
+    for (int k = 0; k < n; ++k) {
         void *p = button_create(head, x + k * (w + PAIR_GAP), y, w, PAIR_H + 4);
         widget_use_style(p, "s_btn_listitem"); /* a tap's click; pair_paint draws it */
         widget_set_prop_str(p, AR_LEFT, label[k]);
@@ -244,11 +250,15 @@ void pair_open(void *head, void *list, const char *const label[2], const char *c
 int pair_key(void *top, void *w, int dir) {
     if (!ar.stop || !ar.list || w != ar.list || window_of(ar.head) != top) return 0;
     signed char *s = ar.stop;
+    int last = ar.panel[1] ? 2 : 1;
     if (!*s) {
         if (dir >= 0 || widget_get_prop_int(w, SEL, -1) > 0) return 0;
-        *s = 2; /* up from the first row: Radio */
+        *s = (signed char)last; /* up from the first row: Radio, or a lone Shuffle */
     } else if (dir > 0) {
-        *s = *s == 1 ? 2 : 0;
+        *s = *s < last ? *s + 1 : 0;
+        /* down off the pair: the first row, whatever the list kept (a stock page's position
+         * memory restores one under the pair) */
+        if (!*s) ringnav_select(w, 0, widget_get_prop_int(w, COUNT, 0));
     } else if (dir < 0) {
         if (*s == 1) return 1; /* the first stop: nothing above */
         *s = 1;

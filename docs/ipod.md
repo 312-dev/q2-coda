@@ -296,7 +296,8 @@ navbar's bottom edge), `fwdownload_page` (no navbar), the PEQ page (it replaces
 all children) and every Tidal page, whose navbars hold the search and sort
 buttons. A page with a visible navbar keeps its own title. The artist page shows its stock
 navbar (multi-select, the Album Artist switch) again at run time when Artist View is Grid, its
-tabs 50 pixels lower ([internals.md](internals.md#artist-albums-in-coverflow)).
+tabs 50 pixels lower ([internals.md](internals.md#artist-albums-in-coverflow)); under OLED the page is the
+design's artist page instead, with no tabs or navbar ([internals.md](internals.md#library-artist-page)).
 
 ## Settings
 

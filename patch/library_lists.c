@@ -112,6 +112,18 @@ static int mp_rank(void *songs, int *idx, unsigned *score) {
     return top;
 }
 
+/* songs' PLAYS_TOP most played as mp_rank orders them, in a new deque: an artist's Top Songs
+ * (library_artist.c). Empty when none of them is counted. */
+void *plays_ranked(void *songs) {
+    int idx[PLAYS_TOP];
+    unsigned score[PLAYS_TOP];
+    int top = mp_rank(songs, idx, score);
+    void *out = _create_deque("stSongInfo");
+    deque_init(out);
+    for (int i = 0; i < top; i++) _deque_push_back(out, deque_at(songs, (unsigned)idx[i]));
+    return out;
+}
+
 /* Coverflow's Most Played order: every counted song's listens added to sum[album_of(song)], the
  * album's index in Coverflow's list (-1 none). One pass over the library. */
 void album_plays(int (*album_of)(void *), unsigned *sum) {

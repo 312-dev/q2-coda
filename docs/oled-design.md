@@ -244,7 +244,7 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   selection) centred on x 34, its name at x 52 and the chevron on the right column; the card's root
   too.
 - Which list is which comes from its page: Songs' page (`allmusic_page`, which also holds a genre's songs
-  and the other lists stock opens there) is mixed, the artist page's songs are an artist's, the album page is an
+  and the other lists stock opens there) is mixed, the artist page's songs (under other themes: OLED draws that page as the [artist page](#artist-page)) are an artist's, the album page is an
   album, Folder view (`folder_page`) a folder, and an album's tracks opened from Cover Flow are an album too (their
   status row names the album, with no row of its own above the tracks). Lists Q2 Pod draws itself (Most Played,
   Long Songs, Ratings) keep their own rows.
@@ -422,6 +422,18 @@ the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where
 - **Hold menu:** Play/Pause held on the page opens the inset modal of its sync rows, Add to Sync
   (or Remove from Sync), Quality and Sync Now, each with its symbol. Play is gone: Shuffle plays
   the artist.
+- **A Library artist** (card songs and, with Local + Server, server-library songs; from Library >
+  Artists, Go to Artist, Search or Now Playing's artist tap: stock's artist page) is the same page,
+  built by `patch/library_artist.c` from the Library's songs ([internals](internals.md#library-artist-page)):
+  the counts read "8 albums · 96 songs" and the genre is the artist's songs' commonest. **Shuffle**
+  stands alone across the pair's width: there is no Radio, as nothing on the card or in the server
+  library gives similar songs. The rows are **Top Songs** (the artist's songs Most Played has
+  counted, most played first; left out until one is), **Albums** and **All Songs** with their
+  counts; Singles & EPs and Similar Artists are left out (no release types or similar artists in
+  the library). Albums opens Cover Flow on the artist's albums when Artist View is Cover Flow or
+  List, as before, and the Albums page above under Grid, its covers Cover Flow's cached ones (the
+  server library's for a server album), placeholders until Cover Flow has made them (and for an album with no art). Top Songs
+  and All Songs are the songs page above with their album, length and cover.
 
 ### Icons
 
@@ -469,6 +481,7 @@ pattern.
 | Folder view                         | Song rows                   | Songs as album tracks; folders with the folder glyph and a chevron                                         |
 | Artists, Genres, Composers          | List row                    |                                                                                                            |
 | A card app's artist                 | [Artist page](#artist-page) | Header, Shuffle and Radio, then Top Songs, Albums, Singles & EPs, Similar Artists and All Songs            |
+| A Library artist                    | [Artist page](#artist-page) | Header, Shuffle alone, then Top Songs (once played), Albums and All Songs                                  |
 | Songs, a playlist's songs           | Song rows                   | The artist inline                                                                                          |
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
 | Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; an artist's covers titled by the artist, other covers with the clock in the status row as Home |

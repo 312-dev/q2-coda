@@ -1358,9 +1358,10 @@ static void *sorted(void) {
     return out;
 }
 extern int ringnav_artist_az(void);
-/* albums (split's rows) in place by year, as year_sql, or by name (Playback's Artist album order
- * A-Z): the query's order, then the albums it missed, then the Unknown album. navigation.c's artist pages. Out of memory they keep their order. */
-void coverflow_by_year(void *albums) {
+/* albums (split's rows, or songs standing for their albums) in place in sql's order (an
+ * ALBUM_SQL), each with its year in REC_YEAR when sql is a YEAR_SQL (years): the query's order,
+ * then the albums it missed, then the Unknown album. Out of memory they keep their order. */
+static void album_order(void *albums, const char *sql, int years) {
     unsigned n = deque_size(albums), m;
     char *taken = calloc(n + 1, 1);
     row_t *v = taken ? album_rows(albums, &m, by_album, 0) : 0;
@@ -1369,21 +1370,35 @@ void coverflow_by_year(void *albums) {
         free(taken);
         return;
     }
-    void *rows = cf_staged(rank_query, (void *)(ringnav_artist_az() ? SORT_SQL "album COLLATE NOCASE" : year_sql()), &found), *out = _create_deque("stSongInfo");
+    void *rows = cf_staged(rank_query, (void *)sql, &found), *out = _create_deque("stSongInfo");
     deque_init(out);
     for (unsigned j = 0; j < deque_size(rows); ++j) {
         int i = album_in(v, m, deque_at(rows, j));
-        if (i >= 0 && !taken[i]) taken[i] = 1, _deque_push_back(out, deque_at(albums, (unsigned)i));
+        if (i < 0 || taken[i]) continue;
+        taken[i] = 1;
+        if (years) I(deque_at(albums, (unsigned)i), REC_YEAR) = I(deque_at(rows, j), REC_YEAR);
+        _deque_push_back(out, deque_at(albums, (unsigned)i));
     }
     deque_destroy(rows);
     for (int unknown = 0; unknown < 2; ++unknown)
         for (unsigned i = 0; i < n; ++i)
-            if (!taken[i] && (I(deque_at(albums, i), REC_ID) == -1) == unknown)
+            if (!taken[i] && (I(deque_at(albums, i), REC_ID) == -1) == unknown) {
+                if (years) I(deque_at(albums, i), REC_YEAR) = 0; /* undated */
                 _deque_push_back(out, deque_at(albums, i));
+            }
     free(taken), free(v);
     deque_clear(albums);
     deque_assign(albums, out);
     deque_destroy(out);
+}
+/* navigation.c's artist pages: by year, as year_sql, or by name (Playback's Artist album order
+ * A-Z). */
+void coverflow_by_year(void *albums) {
+    album_order(albums, ringnav_artist_az() ? SORT_SQL "album COLLATE NOCASE" : year_sql(), 0);
+}
+/* library_artist.c's Albums: newest first, undated last, each with its year (REC_YEAR). */
+void coverflow_newest(void *albums) {
+    album_order(albums, YEAR_SQL " desc,album COLLATE NOCASE", 1);
 }
 
 void *text(void *parent, int x, int y, int w, int h) { /* shared with photos.c */
@@ -3632,14 +3647,18 @@ static int pick(void *ctx, void *event) {
 }
 
 /* The page right under an artist's covers or the playlists', the artist's or Playlists, which they
- * close with them (keyup, coverflow_artist, coverflow_playlists), or 0. */
+ * close with them (keyup, coverflow_artist, coverflow_playlists), or 0. An artist's page drawn as
+ * the design (library_artist.c) is not: the covers are its Albums row's, and Return comes back to
+ * it. */
+extern int artist_local_on(void *win);
 static void *page_under(void) {
     void *wm = window_manager(), *under = 0;
     int mine = cf.scoped == ARTIST_ALBUMS || cf.scoped == PLAYLISTS;
     for (unsigned i = 1, n = mine ? widget_count_children(wm) : 0; i < n; ++i)
         if (widget_get_child(wm, i) == cf.page) under = widget_get_child(wm, i - 1);
-    if (under && tk_strcmp(widget_get_prop_str(under, "name", ""),
-                           cf.scoped == PLAYLISTS ? "playlist_page" : "artistinfo_page"))
+    if (under && (tk_strcmp(widget_get_prop_str(under, "name", ""),
+                            cf.scoped == PLAYLISTS ? "playlist_page" : "artistinfo_page") ||
+                  artist_local_on(under)))
         under = 0;
     return under;
 }
