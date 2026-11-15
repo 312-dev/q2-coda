@@ -1,5 +1,6 @@
 /* Where PCM goes. On the Q2 that is ALSA, opened as stock opens it (docs/player.md#output): the device by output
- * way and hardware type, the file's own rate and width with ALSA's resampling off, a 500 ms buffer in 16 periods.
+ * way and hardware type, the file's own rate and width with ALSA's resampling off, a 500 ms buffer in 16 periods,
+ * and stock's software parameters (alsa_sw: a dry PCM plays on through silence, and sink moves past what it missed).
  * Bluetooth is asked for 48 kHz, as stock asks it, and plays at the rate bluealsa gives (its transport's), the song
  * resampled to it here; a device that refuses the song's width is given another (stock's fallback, and S24_3LE);
  * Bluetooth's and, when demo says so, a USB DAC's volume is done here in software, by stock's law. With
@@ -33,6 +34,7 @@ struct output {
     int way;
 #ifdef HAVE_ALSA
     snd_pcm_t *pcm;
+    snd_pcm_uframes_t ring, period; /* the buffer and a period, in frames, as hw_params set them */
 #endif
     /* software volume (output_volume), and Bluetooth's resampler from the song's rate to the device's */
     float gain[2];
@@ -115,6 +117,26 @@ static int alsa_format(const struct pcm_format *f) {
     return f->is_float ? SND_PCM_FORMAT_FLOAT_LE : f->bytes == 2 ? SND_PCM_FORMAT_S16_LE : f->bytes == 3 ? SND_PCM_FORMAT_S24_3LE : SND_PCM_FORMAT_S32_LE;
 }
 
+/* Stock's software parameters (ao_alsa's init, 0x438d64-0x438dc4, the same on every output way): the stream starts
+ * once a period is written, and stop_threshold and silence_size are the boundary, so a PCM that runs dry is never
+ * stopped: the hardware plays the silence ALSA fills the ring with and waits, where at ALSA's defaults (start at the
+ * first frame, stop at a buffer's worth of underrun) it would stop and start the stream again (docs/player.md#output).
+ * What is written after such an underrun lands behind hw_ptr, so sink() moves past it first. avail_min (a period)
+ * and silence_threshold (0) are ALSA's defaults, which stock leaves too. */
+static int alsa_sw(struct output *o) {
+    snd_pcm_sw_params_t *s = NULL;
+    snd_pcm_uframes_t boundary = 0;
+    int r;
+    if ((r = snd_pcm_get_params(o->pcm, &o->ring, &o->period)) < 0 || (r = snd_pcm_sw_params_malloc(&s)) < 0) return r;
+    if ((r = snd_pcm_sw_params_current(o->pcm, s)) >= 0 && (r = snd_pcm_sw_params_get_boundary(s, &boundary)) >= 0 &&
+        (r = snd_pcm_sw_params_set_start_threshold(o->pcm, s, o->period)) >= 0 &&
+        (r = snd_pcm_sw_params_set_stop_threshold(o->pcm, s, boundary)) >= 0 &&
+        (r = snd_pcm_sw_params_set_silence_size(o->pcm, s, boundary)) >= 0)
+        r = snd_pcm_sw_params(o->pcm, s);
+    snd_pcm_sw_params_free(s);
+    return r;
+}
+
 static int alsa_open(struct output *o, int outputway, int hw) {
     snd_pcm_hw_params_t *p = NULL;
     unsigned want = outputway == 1 ? BT_ASK : (unsigned)o->f.rate, rate = want, buffer = BUFFER_US, periods = PERIODS;
@@ -138,7 +160,7 @@ static int alsa_open(struct output *o, int outputway, int hw) {
         (r = snd_pcm_hw_params_set_rate_near(o->pcm, p, &rate, NULL)) < 0 ||
         (r = snd_pcm_hw_params_set_buffer_time_near(o->pcm, p, &buffer, NULL)) < 0 ||
         (r = snd_pcm_hw_params_set_periods_near(o->pcm, p, &periods, NULL)) < 0 ||
-        (r = snd_pcm_hw_params(o->pcm, p)) < 0 || (r = snd_pcm_prepare(o->pcm)) < 0)
+        (r = snd_pcm_hw_params(o->pcm, p)) < 0 || (r = alsa_sw(o)) < 0 || (r = snd_pcm_prepare(o->pcm)) < 0)
         ;
 done:
     if (r < 0) fprintf(stderr, "q2player: %s %d Hz %d ch %d bytes: %s\n", name, o->f.rate, o->f.channels, o->f.bytes, snd_strerror(r));
@@ -434,6 +456,16 @@ static int convert(struct output *o, const uint8_t *data, int frames, const uint
 static int sink(struct output *o, const uint8_t *data, int frames) {
 #ifdef HAVE_ALSA
     if (o->pcm) {
+        /* Off Bluetooth a PCM that ran dry plays on (alsa_sw): hw_ptr is past appl_ptr, and frames written there would
+         * be lost until appl_ptr caught up, heard as the song jumping ahead. So appl_ptr moves to a period past hw_ptr,
+         * over the silence ALSA left there: a gap, and the song carries on where it stopped (as Q2 Pod's player does,
+         * patch/peq_player.c ao_write). What the history holds leads up to the gap, so a click no longer rewinds into
+         * it. Bluetooth's plugin stops at its own underrun (docs/internals.md#bluetooth-resampler): EPIPE below. */
+        snd_pcm_sframes_t avail = o->way != 1 ? snd_pcm_avail(o->pcm) : 0;
+        if (avail > (snd_pcm_sframes_t)o->ring) {
+            snd_pcm_forward(o->pcm, (snd_pcm_uframes_t)avail - o->ring + o->period);
+            o->hist_n = 0;
+        }
         while (frames > 0) {
             snd_pcm_sframes_t n = snd_pcm_writei(o->pcm, data, frames);
             if (n == -EINTR || n == -EAGAIN) continue;
