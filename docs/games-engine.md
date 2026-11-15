@@ -151,7 +151,7 @@ To see it: a `--dev` build, `ENGINEDEMO=1` under `[Q2POD]` in `/mnt/data/config.
 
 | Game (see [Games](#games)) | Payload bytes | Heap (`size`) | A frame, worst (instructions) | Whole sheet |
 | -------------------------- | ------------- | ------------- | ----------------------------- | ----------- |
-| Brick breaker              | 9 KB          | 2 KB          | 600,000                       | 2,000,000   |
+| Brick breaker (Bricks)     | 9 KB          | 2 KB          | 600,000                       | 2,000,000   |
 | Turret shooter             | 9 KB          | 4 KB          | 600,000                       | 2,000,000   |
 | Music quiz                 | 8 KB          | 8 KB          | 600,000                       | 2,000,000   |
 | Klondike solitaire         | 12 KB         | 2 KB          | 600,000                       | 2,000,000   |
@@ -166,9 +166,37 @@ To see it: a `--dev` build, `ENGINEDEMO=1` under `[Q2POD]` in `/mnt/data/config.
 
 ## Games
 
-Each game built on the engine gets a subsection here: its file, rules in a paragraph, its save, and its measured frame figures. The briefs they are built from are in the emulator project's `design/games/BRIEFS.md`. None is merged yet.
+Each game built on the engine gets a subsection here: its file, rules in a paragraph, its save, and its measured frame figures. The briefs they are built from are in the emulator project's `design/games/BRIEFS.md`.
 
 Every one is an original game in its genre. None reproduces an Apple iPod game's name, screens, art, sounds or level layouts; the briefs say what makes each its own.
+
+### Bricks
+
+`patch/game_bricks.c` (`eng_bricks`, `ENG_RAW`), Games' first engine row in every build. A paddle along the bottom, a ball, and above them a lattice of hexagon-packed discs: seven offset rows of 16 and 15 cells of radius 8 at a 20 px pitch across and 17 down, so a rebound comes off a curved face and the ball's heading keeps changing. A white cell takes one hit; a grey (`#ABABAB`) takes two and turns white at the first; the level's one Accent Blue keystone, broken, takes its six neighbours with it (`around`, either row parity). A cell broken scores the level's number, so the score is cells broken times the level. Clearing the lattice is the next level; a miss costs one of three lives, and the last ends the game. The score line is the sheet's top row: the score in Inter 15 px at the left, the lives as three small discs at the right, both drawn in from the glass's corner (`eng_inset`).
+
+**Levels** are made, not drawn: `build` takes the game's seed (`rand_below` at a new game) and the level number alone, picks one of four masks mirrored about the middle column (a diamond, solid or hollow; a ring; twin columns; chevrons) in turn from the seed, draws its sizes from an xorshift of the two, makes greys more often as the levels go (one cell in 8 at level 1, one in 2 from level 7), and puts the keystone on the middle column where that has a cell. A mask that leaves under 12 cells is drawn again; the eighth try fills the lattice, so no level is empty. The ball's speed is 2.5 px a step at level 1 and 0.15 more a level, to 5.
+
+**The ball** is 16.16 fixed point, its heading 1024 a turn and its speed a scalar, so a rebound never changes its speed. `travel` sweeps its path for the step against the cells within two rows and two columns of its place on the lattice (at most 25), the walls and the paddle's top, in 1/64 px with the quadratic solved in 64-bit products and 32-bit divisions: the first contact stops it there, turns it (a cell's face mirrors it about the normal, `eng_atan2`), and the rest of the step goes on, four contacts a step at most. A ball at 5 px a step meets a cell 13 px out from its centre, so it cannot pass one between steps. No heading is shallower than 15 degrees from the horizontal (`steep`). The paddle sets the way out by where it was hit: straight up in the middle, 60 degrees from vertical at its ends.
+
+**Controls.** The raw wheel moves the paddle 2 px a position, no acceleration; Previous and Next held, 4 px a step; a finger, to its x. Centre launches from Ready (the ball rides the paddle a third of its width out, alternating sides) and plays again after the end. Play/Pause does nothing.
+
+**Screens.** Ready shows "Level N" and "Centre to launch" (Text Tertiary) under the lattice. Clearing the lattice fades the next one in over 20 frames: each row takes 4 of them, the rows starting in turn, so a frame repaints two rows at most, their discs drawn in their colours scaled toward black (`dim`). The brief asked for the fade by `eng_blend` over the drawn rows; that measured 634,287 instructions for its dearest frame, over the 600,000 a frame may, so the colours are scaled before drawing instead, which looks the same and skips a pass over the rows' pixels. The end shows the score, the best (or "New best") and "Centre: play again". Pausing is the engine's.
+
+**Sound** is the Clicker's three as rhythm: a tick off the paddle and for a grey's first hit, a tap for a cell broken, two taps six frames apart for the keystone, three ticks for a level cleared, the alert for a miss.
+
+**Save:** `/mnt/data/game-bricks`, `BRK1`: the best score and the best level, written at the game's end when either was beaten (and tried again at a pause if that write failed), never during play. A save with a best over 99,999,999 or a level over 99 reads as none. An unfinished game is not kept.
+
+**Frames.** A frame of play marks one rect for the ball's old and new place and one for the paddle's when it moved, a broken cell one more, the score line one; the keystone's seven are one joined rect. Measured on build `--dev --new-player`:
+
+| What                                                       | Instructions (MIPS, payload) | Bound in `test/patch.py` |
+| ---------------------------------------------------------- | ---------------------------- | ------------------------ |
+| A frame's step, the dearest of a scripted second of play   | 2,093                        | 2,500                    |
+| That second's dearest frame with its changed rects painted | 116,530                      | 135,000                  |
+| The keystone taking its six neighbours, painted            | 173,215                      | 200,000                  |
+| The dearest frame of the next level's fade, painted        | 233,009                      | 270,000                  |
+| The whole sheet with a full lattice                        | 1,245,213                    | 1,450,000                |
+
+In the emulator, 10 s of play (`design/games/bricks/bricks-play.mp4`, a finger following the ball, `bricks/autopilot.py`): 58.2 flips a second, median gap 17.03 ms, longest 24.1 ms, none over 25 ms, with the host's load average near 8. Ready and the end paint nothing while nothing moves, so a capture that waits there shows a long gap between flips that is the game at rest, not a slow frame. The payload grows by 7,344 bytes over the engine's build (989,736 against 982,392), of the brief's 9 KB; the state is 208 bytes of the brief's 2 KB; no `.scratch`.
 
 ## Libraries
 
