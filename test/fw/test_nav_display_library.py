@@ -734,8 +734,9 @@ def test_system_settings_adds_its_rows_and_hides_five(fw):
     ui = Ui(fw)
     Config(fw)
     page = Settings(fw, ui)
-    assert titles(page.view) == ['stock_1', 'stock_2', 'stock_3', 'Controls', 'stock_4', 'system_time', 'stock_0', 'App Store',
-                                 'system_update', 'system_reset', 'stock_5', 'stock_6', 'stock_7', 'stock_8', 'system_about']
+    assert titles(page.view) == ['stock_1', 'stock_2', 'Car Remote', 'stock_3', 'Controls', 'stock_4', 'system_time',
+                                 'stock_0', 'App Store', 'system_update', 'system_reset', 'stock_5', 'stock_6', 'stock_7',
+                                 'stock_8', 'system_about']
     # stock's Language (English only for now), Wheel Function, In-Vehicle, General and System
     assert [item.name for item in page.view.children if not item.visible] == ['stock_0', 'stock_5', 'stock_6', 'stock_7', 'stock_8']
     # the rows stock moved to its System page open stock's pages from here
