@@ -433,7 +433,7 @@ pattern.
 | Hold menu, More                     | [Menus](#menus)             | The inset modal over the page                                                                              |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
 | About                               | Key/value table             | Inert: no selection; values in Text Secondary                                                              |
-| Lock Screen settings                | List row, then pictures     | Three a row from the text column to the right column; the check is the one accent                          |
+| Lock Screen settings                | List row, then pictures     | Three a row from the text column to the right column; the check marks the chosen one; the wheel's picture is framed 3 px in Accent Blue, its selection bar |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             | Its tabs, then rows: the switch, Presets, Reset                                                            |

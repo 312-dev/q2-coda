@@ -2525,7 +2525,7 @@ static void toast_paint(void *w, void *canvas) {
 /* Load and settle the painted surface's selection, then draw it behind the rows: Minimal's card
  * (a dot on Home), Modern's full-width accent bar (SEL_BAR) or Classic's stops band (SEL_STOPS). */
 static void paint_selection(void *w, void *canvas) {
-    if (kind(w)) st.sel_w = st.sel_widget = st.sel_accent = (void *)0;
+    if (kind(w)) st.sel_w = st.sel_widget = st.sel_accent = st.sel_frame = (void *)0;
     if (!w || !canvas || !kind(w)) return;
     void *top = window_manager_get_top_window(window_manager());
     int i, shown = !st.touch_mode;
@@ -2655,6 +2655,8 @@ static void paint_selection(void *w, void *canvas) {
             bar.x += in, bar.w -= 2 * in;
             gradient(canvas, bar, S->tones[0], S->tones[1], S->tones[4], radius);
         }
+    } else if (band && theme()->set_switch && !tk_strcmp(widget_get_type(g_menu.at[i]), "image")) {
+        st.sel_frame = g_menu.at[i]; /* a picture tile covers a card behind it: framed over it */
     } else if (home) {
         rect_t dot = { HOME_DOT_X, r.y + (r.h - HOME_DOT) / 2, HOME_DOT, HOME_DOT };
         fill_box(canvas, &dot, 0xffffffff, HOME_DOT / 2);
@@ -3015,6 +3017,25 @@ static void paint_scrollbar(void *canvas, void *bar, int table) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
+/* A set_switch theme's selected picture tile (Lock Screen's grid, settings_pages.c lock_grid):
+ * the bar's Accent Blue as a SEL_FRAME px frame inside its edge, over the picture and its check
+ * (docs/oled-design.md Screens: Lock Screen settings). paint_selection names the tile each frame;
+ * the page is checked here, so a recycled widget at that address after the page went is passed. */
+#define SEL_FRAME 3
+static void sel_frame_paint(void *w, void *canvas) {
+    void *lcd = P(canvas, CANVAS_LCD);
+    if (!lcd || tk_strcmp(widget_get_prop_str(window_of(w), "name", ""), "screensaver_page"))
+        return;
+    int fw = I(w, W_W), fh = I(w, W_H);
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
+    stock_canvas_set_fill_color(canvas, RGBA(scheme()->tones[0]));
+    canvas_fill_rect(canvas, 0, 0, fw, SEL_FRAME);
+    canvas_fill_rect(canvas, 0, fh - SEL_FRAME, fw, SEL_FRAME);
+    canvas_fill_rect(canvas, 0, SEL_FRAME, SEL_FRAME, fh - 2 * SEL_FRAME);
+    canvas_fill_rect(canvas, fw - SEL_FRAME, SEL_FRAME, SEL_FRAME, fh - 2 * SEL_FRAME);
+    stock_canvas_set_fill_color(canvas, fill);
+}
+
 /* Stock paints children first and calls this with the surface's canvas origin restored. */
 static void quick_scrub(void *w, void *canvas);
 int ringnav_paint(void *w, void *canvas) {
@@ -3024,6 +3045,7 @@ int ringnav_paint(void *w, void *canvas) {
     font_weight_paint(w, canvas);
     coverflow_paint(w, canvas);
     lockscreen_paint(w, canvas);
+    if (w && w == st.sel_frame) sel_frame_paint(w, canvas); /* over lockscreen_paint's picture */
     if (w == st.cf_letter_surface && st.cf_letter &&
         (st.cf_letter_held || (unsigned)time_now_ms() - st.cf_letter_at < LETTER_MS) &&
         P(canvas, CANVAS_LCD)) {

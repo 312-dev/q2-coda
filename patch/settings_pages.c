@@ -59,7 +59,7 @@ void about_rows(void *view) {
  * (image_0, image_1, ...) three to a row from the text column to the right column, LOCK_GAP apart
  * and the screen's shape, their row as tall as they need; each keeps its check badge (img_choice,
  * the accent's), and stock's blue default-picture corner (scrsaver_defaulticon) goes, so the check
- * is the grid's one accent. */
+ * is the grid's one accent besides the wheel's frame (navigation.c sel_frame_paint). */
 #define LOCK_COLS 3
 #define LOCK_GAP 8
 void lock_grid(void *view) {
