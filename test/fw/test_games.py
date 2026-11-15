@@ -2028,7 +2028,7 @@ class Canvas:
     """The sheet's canvas and its LCD (whose fill colour stock's setter writes). rounds=False: it declines to round,
     as stock does without a vgcanvas; vg=0: no vgcanvas at all."""
     def __init__(self, fw, vg=0x7a00, rounds=True, fill=0xff123456):
-        self.raw, self.lcd = C.create_string_buffer(0x100), C.create_string_buffer(0x200)
+        self.fw, self.raw, self.lcd = fw, C.create_string_buffer(0x100), C.create_string_buffer(0x200)
         C.c_void_p.from_buffer(self.raw, CANVAS_LCD).value = C.addressof(self.lcd)
         self.p, self.ops, self.fill, self.ink, self.px, self.stroke, self.paint = C.addressof(self.raw), [], fill, 0, 0, 0, 0
         declined = 0 if rounds else 1

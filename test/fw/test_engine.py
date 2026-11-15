@@ -379,7 +379,6 @@ def screen(canvas, w=375, h=320, fmt=None, clip=(0, 0, 375, 320), origin=(0, 30)
 def test_paint_hands_draw_the_screens_buffer_clipped_to_this_pass(fw):
     r = Rig(fw)
     canvas = Canvas(fw)
-    canvas.fw = fw
     r.e['eng_paint'](canvas.p)  # no buffer behind the canvas
     assert r.drawn is None
     buf = screen(canvas, clip=(100, 20, 50, 40))
@@ -401,8 +400,14 @@ def test_paint_hands_draw_the_screens_buffer_clipped_to_this_pass(fw):
 
 # The demo scene, through Games' page.
 
+class DemoPage(Page):
+    e: dict
+    rects: list
+    d: Demo
+
+
 def demo(fw, files=None):
-    p = Page(fw, files)
+    p = DemoPage(fw, files)
     p.e = api(fw)
     p.rects = []
     fw.mock('widget_invalidate_force', lambda w, r, *_: p.rects.append(tuple((C.c_int * 4).from_address(r)) if r else None))
@@ -505,7 +510,6 @@ def test_the_demo_serves_again_after_a_miss_and_saves_a_best_at_a_pause(fw):
 def test_the_demo_pauses_under_games_popup_and_leaves_by_its_menu_or_its_own_quit(fw):
     p = demo(fw)
     canvas = Canvas(fw)
-    canvas.fw = fw
     buf = screen(canvas, origin=(0, 30))
     ops = paint(p, canvas)
     assert [t.lower() for t in texts(ops)[:2]] == ['bounces 0', 'best 0'] and buf[(30 + 246) * 375 + 187] == 0xffffffff
