@@ -15,13 +15,15 @@ writes its raw JSON there and SUMMARY.md collects the counts and the findings wo
 a Critical firmware vulnerability), else 0.
 
 The scanners are fetched on first use into ~/.cache/q2-scan, each a pinned release whose SHA-256 is checked
-against the value below before it runs, so a changed upstream file stops the scan instead of running. Semgrep
+against the value below, and the executable taken from it is checked against its own pinned SHA-256 then and on
+every later use, so a changed upstream file or a changed cached one stops the scan instead of running. Semgrep
 runs through uvx at a pinned version. The tools and their databases need the network; nothing else does.
 """
 import argparse
 import re
 import collections
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -34,17 +36,25 @@ import urllib.request
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CACHE = pathlib.Path(os.environ.get('Q2_SCAN_CACHE', pathlib.Path.home() / '.cache/q2-scan'))
 SEMGREP = 'semgrep==1.183.0'
-# name: (GitHub repo, tag, release asset, its SHA-256, the executable inside a .tar.gz or None for a bare binary)
+# name: (GitHub repo, tag, release asset, its SHA-256, the executable inside a .tar.gz or None for a bare binary,
+#        the executable's own SHA-256, checked on every use; a bare binary's is the asset's)
 TOOLS = {
     'gitleaks': ('gitleaks/gitleaks', 'v8.30.1', 'gitleaks_8.30.1_linux_x64.tar.gz',
-                 '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb', 'gitleaks'),
+                 '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb', 'gitleaks',
+                 '88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509'),
     'osv-scanner': ('google/osv-scanner', 'v2.7.0', 'osv-scanner_linux_amd64',
-                    '160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b', None),
+                    '160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b', None,
+                    '160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b'),
     'syft': ('anchore/syft', 'v1.55.0', 'syft_1.55.0_linux_amd64.tar.gz',
-             'bb65249542db5fedeeb4d3f9b018b75e7264dbfbbb10486f044581a92f90490d', 'syft'),
+             'bb65249542db5fedeeb4d3f9b018b75e7264dbfbbb10486f044581a92f90490d', 'syft',
+             '64c9631c3560336c55c549df0de08cd577d02399c9de807ac390960a4ed5c351'),
     'grype': ('anchore/grype', 'v0.121.0', 'grype_0.121.0_linux_amd64.tar.gz',
-              '64e07133d3486115de647a66581461dccf5c732748a0a3119077395565f15519', 'grype'),
+              '64e07133d3486115de647a66581461dccf5c732748a0a3119077395565f15519', 'grype',
+              'bd511334178bc3002eb9eb58880f89e01e35f7fed7cfbe671171127a8afa3596'),
 }
+# Trees under ROOT that are generated, not the project's: their requirements files are copies or outputs
+# (mutmut's mutants/, this script's scan-out/, a virtualenv, a build).
+GENERATED = {'.venv', 'mutants', 'scan-out', 'build', 'work', 'stock', 'dist', 'graphify-out'}
 SCANS = ('code', 'secrets', 'deps', 'firmware')
 # Components syft cannot name from a buildroot rootfs (no package database): each is found by a version string in
 # its files and handed to grype by CPE. (name, CPE vendor:product, files, regex whose group 1 is the version)
@@ -63,33 +73,40 @@ PROBES = (
 
 
 def tool(name):
-    """The pinned executable, downloaded and checked on first use."""
-    repo, tag, asset, sha, member = TOOLS[name]
+    """The pinned executable, downloaded on first use and checked against its pinned SHA-256 on every use."""
+    repo, tag, asset, sha, member, exe_sha = TOOLS[name]
     exe = CACHE / f'{name}-{tag}' / name
-    if exe.exists():
-        return str(exe)
-    exe.parent.mkdir(parents=True, exist_ok=True)
+    if not exe.exists():
+        fetch(name, repo, tag, asset, sha, member, exe_sha, exe)
+    got = hashlib.sha256(exe.read_bytes()).hexdigest()
+    if got != exe_sha:
+        sys.exit(f'{name}: the cached {exe} has SHA-256 {got}, expected {exe_sha}; not running it '
+                 f'(delete it to fetch {tag} again)')
+    return str(exe)
+
+
+def fetch(name, repo, tag, asset, sha, member, exe_sha, exe):
+    """Download the release asset, check it, and write its executable to `exe` once that checks too."""
     url = f'https://github.com/{repo}/releases/download/{tag}/{asset}'
     print(f'fetching {name} {tag}', file=sys.stderr)
     data = urllib.request.urlopen(url, timeout=120).read()
     got = hashlib.sha256(data).hexdigest()
     if got != sha:
         sys.exit(f'{name}: {asset} has SHA-256 {got}, expected {sha}; not running it')
-    if member is None:
-        exe.write_bytes(data)
-    else:
-        tmp = exe.parent / asset
-        tmp.write_bytes(data)
-        with tarfile.open(tmp) as tf:
+    if member is not None:
+        with tarfile.open(fileobj=io.BytesIO(data)) as tf:
             info = tf.getmember(member)
             if not info.isfile():
                 sys.exit(f'{name}: {member} in {asset} is not a regular file')
             body = tf.extractfile(info)
             assert body is not None  # a regular file's member, checked above
-            exe.write_bytes(body.read())
-        tmp.unlink()
+            data = body.read()
+        got = hashlib.sha256(data).hexdigest()
+        if got != exe_sha:
+            sys.exit(f'{name}: {member} in {asset} has SHA-256 {got}, expected {exe_sha}; not running it')
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    exe.write_bytes(data)
     exe.chmod(0o755)
-    return str(exe)
 
 
 def run(cmd, ok=(0,), **kw):
@@ -130,7 +147,8 @@ def scan_secrets(out):
 
 def scan_deps(out):
     report = out / 'osv.json'
-    reqs = [str(p.relative_to(ROOT)) for p in sorted(ROOT.glob('**/requirements*.txt')) if '.venv' not in p.parts]
+    reqs = [str(p.relative_to(ROOT)) for p in sorted(ROOT.glob('**/requirements*.txt'))
+            if not GENERATED & set(p.relative_to(ROOT).parts) and not p.is_relative_to(out)]
     cmd = [tool('osv-scanner'), 'scan', 'source', '--format', 'json', '--output', str(report)]
     for r in reqs:
         cmd += ['-L', r]

@@ -298,27 +298,52 @@ void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) {
     stock_canvas_set_text_color(canvas, text);
 }
 
-/* ... and its tabs, Simple and Advanced, each half of the bar's EQ_TABS_H: the open one in Text
- * Primary, the other in Text Tertiary; while the wheel is on the bar, the other (what Centre
- * opens) on the accent's bar, white. */
+/* ... and its tabs, Simple and Advanced, as an iOS segmented control (docs/oled-design.md#tabs):
+ * a SEG_H track rounded SEG_TRACK_R across the bar from SEG_X, centred in EQ_TABS_H, and the open
+ * tab a segment SEG_IN inside it rounded SEG_R, raised in SEG_RAISED (white in Light Mode), the
+ * accent only while the wheel is on the bar, so the open tab reads apart from the wheel's place.
+ * The labels in Inter Medium 17 px: the open one white on the accent and Text Primary on the
+ * raised segment, the other SEG_INK. */
+#define SEG_X 20
+#define SEG_H 34
+#define SEG_IN 2
+#define SEG_TRACK_R 9
+#define SEG_R 8
+#define SEG_PX 21 /* Inter Medium 17, AWTK's size (oled-design.md Type) */
+#define SEG_TRACK 0x1c1c1e
+#define SEG_RAISED 0x3a3a3c
+#define SEG_INK 0xababab
+#define SEG_TRACK_LIGHT 0xe5e5ea /* iOS's light track and secondary label */
+#define SEG_INK_LIGHT 0x8a8a8e
 void eq_tabs_paint(void *w, void *canvas, int simple, int focus) {
     (void)w;
+    static const char *const faces[] = FONT_NAMES;
+    static const char *const names[] = { "Simple", "Advanced" };
     void *lcd = P(canvas, CANVAS_LCD);
     if (!lcd) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), text = (unsigned)I(lcd, LCD_TEXT_COLOR),
              raw = st.raw_ink;
-    int row_px = theme()->font_px[ROLE_TITLE];
+    int light = ipod_light(), y = (EQ_TABS_H - SEG_H) / 2, inner = 375 - 2 * (SEG_X + SEG_IN);
     st.raw_ink = 1;
+    rect_t track = { SEG_X, y, 375 - 2 * SEG_X, SEG_H };
+    fill_box(canvas, &track, RGBA(light ? SEG_TRACK_LIGHT : SEG_TRACK), SEG_TRACK_R);
     for (int i = 0; i < 2; ++i) {
-        int shown = i == !simple, x = i ? 375 / 2 : SP_BAR_INSET, half = 375 / 2 - SP_BAR_INSET;
-        if (focus && !shown) {
-            rect_t bar = { x, (EQ_TABS_H - EQ_ROW) / 2, half, EQ_ROW };
-            fill_box(canvas, &bar, RGBA(scheme()->tones[0] & 0xffffffu), SP_BAR_R);
+        int x = SEG_X + SEG_IN + i * inner / 2, half = (i + 1) * inner / 2 - i * inner / 2,
+            shown = i == !simple;
+        if (shown) {
+            rect_t seg = { x, y + SEG_IN, half, SEG_H - 2 * SEG_IN };
+            fill_box(canvas, &seg,
+                     RGBA(focus   ? scheme()->tones[0] & 0xffffffu
+                          : light ? 0xffffff
+                                  : SEG_RAISED),
+                     SEG_R);
         }
-        eq_ink_text(canvas, i ? "Advanced" : "Simple", x, half, EQ_TABS_H / 2, 1, row_px,
-                    focus && !shown ? 0xffffff
-                    : shown         ? eq_primary()
-                                    : scheme()->muted);
+        unsigned buf[16], n = wide(buf, sizeof buf / sizeof *buf, names[i]);
+        sp_text(canvas, buf, n, x, half, y + SEG_H / 2, 1, faces[FONT_INTER_MEDIUM], SEG_PX,
+                RGBA(shown && focus ? 0xffffff
+                     : shown        ? eq_primary()
+                     : light        ? SEG_INK_LIGHT
+                                    : SEG_INK));
     }
     st.raw_ink = raw;
     stock_canvas_set_fill_color(canvas, fill);

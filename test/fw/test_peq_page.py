@@ -45,7 +45,7 @@ class EqState(C.Structure):
 class Ui(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'page view edit graph bar'.split()), ('timer', C.c_uint), ('keyboard_timer', C.c_uint),
                 *((k, C.c_int) for k in 'screen band step count previous rendered dirty pick adjust tries capacity file_page tab tabs from_simple'.split()),
-                ('typed', C.c_double), ('draft', Preset), ('candidate', Preset), ('named', Preset), ('names', C.c_void_p),
+                ('kept', (C.c_int * 2) * 2), ('typed', C.c_double), ('draft', Preset), ('candidate', Preset), ('named', Preset), ('names', C.c_void_p),
                 ('destination', C.c_char * 600), ('status', C.c_char * 160), ('name', C.c_char * 256), ('applied', C.c_char * 256),
                 ('curve', (C.c_float * GRAPH_W) * 2)]
 
@@ -832,6 +832,49 @@ def test_a_kept_screen_keeps_its_selection_and_scroll(fw):
     assert p.title() == 'Reset; choose Apply to activate'
 
 
+def test_coming_back_from_a_picker_lands_on_the_row_that_opened_it(fw):
+    p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()
+    view = p.ui.view
+    p.props[(view, '_ringnav_index')], p.props[(view, 'yoffset')] = 4, 48
+    p.click('Balance')
+    assert p.ui.screen == PICK and p.props[(p.ui.view, '_ringnav_index')] == 24
+    p.click('R 0.5 dB')  # a pick, which changes the draft and goes back
+    assert p.ui.screen == HOME and p.captions()[0] == 'Apply changes'
+    assert p.props[(p.ui.view, '_ringnav_index')] == 4 and p.props[(p.ui.view, 'offset')] == 48
+    assert p.props[(p.ui.view, '_ringnav_count')] == len(p.rows())  # so ringnav keeps that row (navigation.c load)
+    p.click('Preamp')
+    p.ret()  # Return comes back the same way
+    assert p.ui.screen == HOME and p.props[(p.ui.view, '_ringnav_index')] == 4
+
+
+def test_a_band_s_rows_are_kept_under_its_pickers_and_the_next_band_opens_at_its_top(fw):
+    p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()
+    p.props[(p.ui.view, '_ringnav_index')] = 7
+    p.click('1  ')
+    assert p.ui.screen == BAND and p.props[(p.ui.view, '_ringnav_index')] == 0
+    p.props[(p.ui.view, '_ringnav_index')] = 4
+    p.click('Gain')
+    p.ret()
+    assert p.ui.screen == BAND and p.props[(p.ui.view, '_ringnav_index')] == 4
+    p.ret()
+    assert p.ui.screen == HOME and p.props[(p.ui.view, '_ringnav_index')] == 7
+    p.click('2  ')
+    assert p.ui.screen == BAND and p.props[(p.ui.view, '_ringnav_index')] == 0
+
+
+def test_a_tab_switch_forgets_the_kept_row(fw):
+    p = page(fw).advanced()
+    p.props[(p.ui.view, '_ringnav_index')] = 3
+    p.click('Presets')
+    assert p.ui.screen == PRESETS and p.ui.kept[0][0] == 4
+    p.ret()
+    assert p.props[(p.ui.view, '_ringnav_index')] == 3 and p.ui.kept[0][0] == 0  # taken once
+    p.ui.kept[0][0] = 4
+    p.tab(100)
+    p.tab(300)
+    assert p.ui.kept[0][0] == 0 and p.props[(p.ui.view, '_ringnav_index')] == -1  # the wheel on the tabs
+
+
 # The presets' screens.
 
 def test_the_presets_screen_lists_saved_presets_sorted(fw):
@@ -1289,6 +1332,42 @@ def test_the_tabs_paint_the_open_one_and_the_wheel_s(fw):
     paint(fw, p.ui.bar, c)
     assert not c.texts  # the message has the bar
 
+
+
+def test_oled_s_tabs_are_a_segmented_control_whose_open_tab_turns_accent_only_with_the_wheel(fw):
+    """docs/oled-design.md#tabs: a #1C1C1E track, the open tab a raised #3A3A3C segment, the accent while the wheel is on
+    the bar; the open label white in Inter Medium 17 (21 as AWTK sizes it), the other #ABABAB."""
+    oled(fw)
+    assert fw.fn('eq_rows', C.c_int)()  # the theme read now: the page's card answers config reads after
+    rounded = []
+    def fill(c, r, _, color, radius, *__):
+        rounded.append((tuple((C.c_int * 4).from_address(r)), rgb(C.c_uint.from_address(color).value), radius))
+        return 0
+    fw.mock('canvas_fill_rounded_rect', fill)
+    p = page(fw).open()
+
+    def bar():
+        del rounded[:]
+        c = Canvas(fw)
+        paint(fw, p.ui.bar, c)
+        return rounded[:], {t[0]: (rgb(t[2]), t[1]) for t in c.texts}
+
+    track = ((20, 7, 335, 34), 0x1c1c1e, 9)
+    shapes, labels = bar()  # Simple open, the wheel on its sliders
+    assert p.e3.focus != E3_TABS and shapes == [track, ((22, 9, 165, 30), 0x3a3a3c, 8)]
+    assert labels == {'Simple': (0xffffff, 21), 'Advanced': (0xababab, 21)}
+    for _ in range(E3_LOW - E3_TABS):
+        p.key(KEY_PREV)
+    shapes, labels = bar()  # the wheel on the bar: the open tab's segment in the accent
+    (_, accent, _), = shapes[1:]
+    assert shapes == [track, ((22, 9, 165, 30), accent, 8)] and not grey(accent)
+    assert labels == {'Simple': (0xffffff, 21), 'Advanced': (0xababab, 21)}
+    p.tab(300)  # Advanced, the wheel still on the bar
+    assert bar()[0] == [track, ((187, 9, 166, 30), accent, 8)]
+    p.key(KEY_NEXT)  # down to its first row
+    shapes, labels = bar()
+    assert p.ui.tabs == 0 and shapes == [track, ((187, 9, 166, 30), 0x3a3a3c, 8)]
+    assert labels == {'Simple': (0xababab, 21), 'Advanced': (0xffffff, 21)}
 
 # EQ per Output.
 

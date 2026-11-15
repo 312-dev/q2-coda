@@ -1542,6 +1542,30 @@ def navbar_page(world, text='Albums', kind='hscroll_label'):
     return win, world.add(nav, 'label_title', kind, text=text)
 
 
+def test_an_inset_modal_back_on_top_names_the_page_under_it_again(fw, world, st):
+    """A playlist's More (an inset modal) over Playlists, then Delete Playlist's confirm over it, which writes its
+    question into the bar (feedback.c): after Cancel the modal is on top again, and the bar names Playlists, not the
+    question, while it stays open."""
+    label = bar_title(fw, world, st, OLED)
+    win, _ = navbar_page(world, 'Playlists')
+    sync(fw, win)
+    assert world[label].text == 'Playlists'
+    more = world.window('playlistsmore_page', 'dialog')
+    fw.fn('modal_frame', None, C.c_void_p, C.c_void_p)(more, None)
+    sync(fw, more)
+    assert world[label].text == 'Playlists'
+    confirm = world.window('confirminfo_dialog', 'dialog')
+    sync(fw, confirm)
+    world.set_text(label, 'Delete playlist \u201ca\u201d?')  # feedback_confirm's question
+    for target, evt, fn, ctx in list(world.handlers):  # Cancel: the confirm goes (title_gone)
+        if target == confirm and evt == EVT_DESTROY:
+            C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, 0)
+    world.nodes[world.wm].children.remove(confirm)
+    world.top = more
+    sync(fw, more)
+    assert world[label].text == 'Playlists'
+
+
 @pytest.mark.parametrize('kind', ['hscroll_label', 'label'])
 def test_a_stock_page_s_navbar_title_titles_the_bar_and_is_followed(fw, world, st, kind):
     label = bar_title(fw, world, st)

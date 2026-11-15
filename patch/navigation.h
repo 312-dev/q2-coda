@@ -179,6 +179,7 @@ typedef struct {
     void *sel_w; /* the surface whose selection was last drawn */
     int sel_row, sel_y;
     void *paint_w, *sel_widget; /* paint-local color mapping, never stored on recycled widgets */
+    void *sel_frame; /* a set_switch theme's selected picture tile, framed over (sel_frame_paint) */
     int sel_home;
     unsigned clock_key;   /* minute + 1 and format bits; 0 before the first, ~0 for --:-- */
     unsigned clock_timer; /* clock_due, at the next minute; 0 until the bar first paints */

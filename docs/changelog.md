@@ -1,6 +1,11 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - EQ (OLED): **Simple** and **Advanced** are an iOS-style segmented control: the open tab is a raised grey segment, which turns blue only while the wheel is on the tabs, so you can always tell which tab is open.
+  - Playlists (OLED): after **Cancel** on Delete Playlist, the top of the screen names Playlists again instead of still asking the question.
+  - EQ: after picking a value (Balance, Preamp, a band's Gain) or coming back from a band or Presets, the list is where you left it, on the row you opened, rather than back at the top.
+  - Display (OLED): in **Lock Screen** settings the wheel lights the picture it is on with a blue frame, as it lights a row, so you can see which one Centre will choose.
+  - Display (OLED): **About** shows its values in full where they fit: a value takes the row up to its name, so the Wi-Fi MAC and the version no longer end in … early, and in Light Mode the names on the left show in black (they were white on white).
   - Security: **SyncLink** (Shanling's phone remote, System settings → Wireless → SyncLink) is off unless you turn it on, as it lets any nearby phone control the Q2 and read its Wi-Fi password without asking for one. If you had it on, this update turns it off once; choose Bluetooth or Wi-Fi on its page to use it again. Its row says what it allows.
   - Volume: turning the wheel slowly still moves the volume one step at a time, but a fast spin now covers the range quickly, up to 10 steps a click, picking up speed as you keep turning, as Rockbox does on an iPod. The volume bar slides to each new level instead of jumping. Wheel Sensitivity still sets how far a click is.
   - Settings: **System settings → Power** ends with **Restart** and **Shut Down**. Each asks first; Cancel or Return leaves you on the row. Restart saves your place in the queue and restarts the Q2, as a theme change does, and Shut Down powers off as holding the power key and choosing Shut Down does.
