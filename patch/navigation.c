@@ -216,6 +216,7 @@ extern void coverflow_home_top(void);
 extern const char *coverflow_home_title(void);
 extern int coverflow_home_sub(void), coverflow_home_split(void *top);
 extern void coverflow_home_strip(void *canvas, void *top);
+extern void coverflow_home_painted(void);
 extern void coverflow_home_row(void *surface, void *row, int id, int painting);
 extern void lockscreen_paint(void *w, void *canvas);
 extern int lockscreen_hold(void *top);
@@ -11427,13 +11428,17 @@ int ringnav_input(void *wm, void *e) {
 /* window_manager_paint, a leaf (tools/build.py WM_PAINT_LEAF): the window manager's own paint
  * (vtable +0xc), except while q2video or a card game has the framebuffer (each poll repaints after
  * it) and while the screen is off, unless a window animates (AWTK steps it from the paint); the
- * first lit pass repaints the whole screen (ringnav_sleep; docs/internals.md Battery). */
+ * first lit pass repaints the whole screen (ringnav_sleep; docs/internals.md Battery). After each
+ * paint, coverflow_home_painted. */
 int ringnav_wm_paint(void *wm) {
     if (wm && !g_backlight_status && !window_manager_is_animating(wm)) return 0; /* RET_OK */
     int away = video_on() || addon_game_on();
     void *vt = wm && !away ? P(wm, 0x94) : (void *)0;
     int (*paint)(void *) = vt ? (int (*)(void *))P(vt, 0xc) : (int (*)(void *))0;
-    return paint ? paint(wm) : away ? 0 : 0x10; /* RET_BAD_PARAMS, as stock */
+    if (!paint) return away ? 0 : 0x10; /* RET_BAD_PARAMS, as stock */
+    int ret = paint(wm);
+    coverflow_home_painted(); /* Split's raised list: its rows in the bar again if due */
+    return ret;
 }
 
 /* buzzeer_switch (0x4fe3f8), every Key Tone click, stock's and ringnav()'s: the Clicker's route

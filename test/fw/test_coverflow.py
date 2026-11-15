@@ -54,7 +54,7 @@ class Home(C.Structure):
                 ('count_thread', C.c_ulong), *((k, C.c_uint) for k in 'asked pane_read count_timer pane_timer'.split()),
                 ('ring', (C.c_uint * HOME_PW) * 4), ('clip', C.c_int * 4), ('clipped', C.c_int),
                 ('ink_bar', C.c_void_p), ('ground', C.c_uint), ('held', C.c_ubyte * HOME_PW),
-                ('strip_timer', C.c_uint), ('stripping', C.c_int)]
+                ('strip_timer', C.c_uint), ('stripping', C.c_int), ('strip_need', C.c_int * 2), ('strip_done', C.c_int * 2)]
 
 
 class Row(C.Structure):
@@ -821,20 +821,52 @@ def test_the_bar_paints_the_rows_split_raises_above_home_s_window(fw, library):
     canvas = C.create_string_buffer(0x100)
     paint = fw.fn('coverflow_home_clip', None, C.c_void_p, C.c_void_p, C.c_int)
 
+    painted_frame = fw.fn('coverflow_home_painted', None)
+    painted_frame()  # the end of the frame the bar's paints above were in
+    assert not ui.timer(address(fw, 'coverflow__strip_due'))  # the bar painted the band whole: nothing due
+    screen: list[C.c_int | int] = [0, 0, 375, 320]  # the canvas clip canvas_get_clip_rect reads
+    fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(slice(0, 4), screen))
+
     def clip(w):  # the list's paint begins
         paint(w, C.addressof(canvas), 1)
     clip(home.list)
+    assert not ui.timer(address(fw, 'coverflow__strip_due'))  # once the frame is over
+    painted_frame()
     i, ms = ui.timer(address(fw, 'coverflow__strip_due'))
     assert ms == 0 and not ui.dirty
     ui.fire(i)
     assert ui.dirty == [(bar, (0, 40, 196, 18))]
     home.stripping = 1  # the bar's own paint of it: no repaint after
     clip(home.list)
+    painted_frame()
     assert not ui.timer(address(fw, 'coverflow__strip_due'))
     home.stripping = 0
+    # strip_due's frame: AWTK widens the band to 0, 36, 201, 27, so the list paints its top rows in the window too,
+    # and the bar paints the band whole: nothing more is due, or each strip would ask for the next
+    screen[:] = [0, 36, 201, 27]
+    clip(home.list)
+    strip(0x40, win)
+    painted_frame()
+    assert not ui.timer(address(fw, 'coverflow__strip_due'))
+    # a pan step's frame, the pane's column: the bar paints the band's columns the list painted, no more is due
+    screen[:] = [192, 0, 183, 320]
+    clip(home.list)
+    strip(0x40, win)
+    painted_frame()
+    assert not ui.timer(address(fw, 'coverflow__strip_due'))
+    # the bar's band only in part (its rows cut short): the list's columns are due again
+    screen[:] = [0, 50, 196, 100]
+    clip(home.list)
+    strip(0x40, win)
+    painted_frame()
+    assert ui.timer(address(fw, 'coverflow__strip_due'))
+    ui.fire(ui.timer(address(fw, 'coverflow__strip_due'))[0])
+    screen[:] = [0, 0, 375, 320]
+    painted.clear()
     C.c_int.from_address(home.list + 4).value = 0  # a list in its window: nothing above it
     strip(0x40, win)
     clip(home.list)
+    painted_frame()
     assert not painted and not ui.timer(address(fw, 'coverflow__strip_due'))
 
 
@@ -3492,6 +3524,32 @@ def test_a_playing_cover_that_comes_mid_fade_takes_the_incoming_ones_place(fw):
     bitmap(fw, 300, 300, rgba(300, 300, lambda x, y: (1, 2, 3, 255)), loads=False)
     home.fade, home.sl[1].lib = 500, 0
     assert show(b'e', 0, 0) == -1 and home.fade == 0 and not home.sl[1].tw  # none to fade in: the one showing stays
+
+
+def test_play_starting_mid_library_fade_fades_from_the_frame_as_it_stands(fw):
+    """Play starts while a library cover fades in: the playing cover fades in over the frame as it was, the two blended
+    covers, with no jump at the switch, and once in it shows alone."""
+    covers = {u: (300, 300, rgba(300, 300, lambda x, y, c=c: c)) for u, c in
+              (('a', (200, 0, 0, 255)), ('d', (0, 0, 200, 255)), ('e', (0, 200, 0, 255)))}
+    b = Bitmaps(fw, covers)
+    home = fw.var('coverflow__home', Home)
+    show = fw.fn('coverflow__slide_show', C.c_int, C.c_char_p, C.c_int, C.c_int)
+    frame = fw.fn('coverflow__home_frame', C.c_int)
+    assert show(b'a', 0, 0) == 1 and show(b'd', 1, 0) == 1 and home.fade == 1 and home.sl[1].lib == 1
+    home.fade = 600  # the library cover 600 ms into its fade
+    assert frame()
+    before = pixels_of(b, home.frame)
+    assert show(b'e', 0, 0) == 1 and home.fade == 1 and home.sl[1].lib == 0  # play: the playing cover fades in
+    assert frame()
+    after = pixels_of(b, home.frame)
+    for y in range(len(before)):
+        for x in range(HOME_PW):
+            p, q = before[y][x], after[y][x]
+            assert all(abs((p >> s & 255) - (q >> s & 255)) <= 1 for s in (0, 8, 16)), (x, y, hex(p), hex(q))
+    home.fade = O['SLIDE_FADE_MS'] - 1
+    assert frame()
+    p = pixels_of(b, home.frame)[10][10]
+    assert p & 255 <= 1 and 198 <= p >> 8 & 255 <= 200 and p >> 16 & 255 <= 1  # all but a 256th the green
 
 
 def test_a_fade_keeps_the_pan_live_with_a_still_cover_under_it(fw):

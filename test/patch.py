@@ -11440,6 +11440,16 @@ m.calls.clear(); m.advance(TICK); assert set(invalidated())=={(m.home,(SPLIT,0,P
 assert drawn()==framed(c,TICK)!=framed(c,0)  # a tick moves it by a fraction of a pixel
 m.advance(1000-TICK); assert drawn()==framed(c,1000) and len(drifts())==1; passed()
 m.advance(TICK); instructions[0]=0; assert drawn()==framed(c,1000+TICK); frame_cost=instructions[0]
+# The bar's rows over the pane (home_ink), as a step leaves them: the ground, and on it a pause's two bars and a
+# battery in white, IH rows (OLED's split_art_up). Each glyph comes out in one ink over the art (white over this dark art), every other pixel the art.
+IH=58; ground=0xff000000; glyph={(x,y) for y in range(20,38) for x in (*range(100,104),*range(108,112),*range(140,170))}
+ink_fb,ink_art,ink_held=m.alloc(PW*IH*4),m.alloc(PW*IH*4),m.alloc(PW)
+art_px=[0xff000000|(x*7+y*3)%48*0x010101 for y in range(IH) for x in range(PW)]
+m.u.mem_write(ink_fb,struct.pack(f'<{PW*IH}I',*(0xffffffff if (x,y) in glyph else ground for y in range(IH) for x in range(PW))))
+m.u.mem_write(ink_art,struct.pack(f'<{PW*IH}I',*art_px)); m.u.mem_write(ink_held,bytes(PW))
+instructions[0]=0; m.call(address=payload_syms['home_ink'],args=(ink_fb,PW,ink_art,PW),stack=(PW,IH,ground,ink_held,0),gap=0); ink_cost=instructions[0]
+bgra=lambda p:p&0xff00ff00|(p&255)<<16|p>>16&255
+assert struct.unpack(f'<{PW*IH}I',bytes(m.u.mem_read(ink_fb,PW*IH*4)))==tuple(0xffffffff if (x,y) in glyph else bgra(art_px[y*PW+x]) for y in range(IH) for x in range(PW)); passed()
 # A stalled loop steps at most DRIFT_MAX_STEP_MS.
 tid=next(t for t,v in m.timers.items() if v[1]==payload_syms['home_drift']); m.timers[tid]=(m.now+5000,*m.timers[tid][1:])
 m.advance(5000); t=1000+TICK+O['DRIFT_MAX_STEP_MS']; assert drawn()==framed(c,t); passed()
@@ -11484,7 +11494,7 @@ instructions[0]=0; paint_home(); big_cost=instructions[0]; m.u.hook_del(pan_coun
 # could pan; neither arms the timer.
 m.art_sizes={'externpic.jpg':(4000,100)}; m.byte(syms['g_playcover_type'],2); m.advance(TICK); paint_home(); m.advance(TICK); paint_home()
 assert not drifts() and m.nodes[m.art]['image'].endswith('externpic.jpg') and m.get(m.art+O['W_W'])==290*40; passed()
-print(f'Home pan on MIPS: {frame_cost} instructions a frame (every DRIFT_TICK_MS), {fade_cost[0]} a cross-fade frame (every SLIDE_TICK_MS), {filter_cost} and {big_cost} to filter a 638 and a 1914 px cover once (payload only)')
+print(f'Home pan on MIPS: {frame_cost} instructions a frame (every DRIFT_TICK_MS), {ink_cost} to ink the bar\'s {PW} x {IH} rows over the pane, {fade_cost[0]} a cross-fade frame (every SLIDE_TICK_MS), {filter_cost} and {big_cost} to filter a 638 and a 1914 px cover once (payload only)')
 
 # Accent (docs/internals.md#accent). The mapping: stock red blended with a neutral becomes the same
 # blend of the preset's red tone, alpha kept; greys, other hues and every Crimson color stay.

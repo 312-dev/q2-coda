@@ -3921,14 +3921,16 @@ static int pane_h(void) { return client_h() + pane_up(); }
  * tw x th texels, the border's not counted (tw 0: none); lib 0 the playing track's, which pans
  * from the old crop u0 v0 across ranges rx ry, an eased ping-pong (drift_at) for as long as it
  * shows; lib 1 a library cover of the slideshow, whose window moves once over its life from
- * kb[0] to kb[1] (its top left in 1/256 texel and its scale in 1/65536 texel a pixel); ms the
- * time it has shown, the pan's phase. */
+ * kb[0] to kb[1] (its top left in 1/256 texel and its scale in 1/65536 texel a pixel); lib
+ * SLIDE_STILL the frame as it stood when play started mid-fade (frame_hold), tex its pixels as
+ * they are, tw x th, no border; ms the time it has shown, the pan's phase. */
 typedef struct {
     unsigned *tex;
     int tw, th, u0, v0, rx, ry, lib;
     int kb[2][3];
     unsigned ms;
 } slide_t;
+enum { SLIDE_STILL = 2 };
 enum { SHOW_NOW, SHOW_LIB }; /* what the pane shows (art_source): the playing cover, the library's */
 /* iPod Home (docs/ipod.md): the playing track's art, or the library's in turn, beside the list. */
 static struct {
@@ -3971,9 +3973,11 @@ static struct {
     void *ink_bar;
     unsigned ground;
     unsigned char held[HOME_PW];
-    /* coverflow_home_strip's repaint after the list's own, and whether it is painting */
+    /* coverflow_home_strip's repaint after the list's own, and whether it is painting; this
+     * frame's columns of the bar's band (x, end) the list painted in its window (strip_need) and
+     * the bar painted whole (strip_done), end 0: none */
     unsigned strip_timer;
-    int stripping;
+    int stripping, strip_need[2], strip_done[2];
 } home __attribute__((section(".scratch")));
 extern int ipod_home(void), ipod_home_rockbox(void), home_shortcut_open(void *, void *),
     home_lib_on(void), row_preview_on(void), library_search(void);
@@ -4037,9 +4041,10 @@ static int drift_at(int range, unsigned period, unsigned ms) {
 /* Where s's window is now: its top left in the zoomed cover in 1/256 texel (u v) and its scale in
  * 1/65536 texel a pixel (k). The playing cover: the old crop, then the pan, a texel a pixel. A
  * library cover: kb[0] to kb[1] at an even pace over SLIDE_LIFE_MS, then still (the Ken Burns
- * look: one slow zoom and drift a cover); ms is at most SLIDE_LIFE_MS here, so p fits 32 bits. */
+ * look: one slow zoom and drift a cover); ms is at most SLIDE_LIFE_MS here, so p fits 32 bits. A
+ * still never moves. */
 static void slide_at(const slide_t *s, int *u, int *v, int *k) {
-    if (!s->lib) {
+    if (!s->lib || s->lib == SLIDE_STILL) {
         *u = s->u0 * 256 + drift_at(s->rx, DRIFT_X_MS, s->ms);
         *v = s->v0 * 256 + drift_at(s->ry, DRIFT_Y_MS, s->ms);
         *k = 65536;
@@ -4341,9 +4346,15 @@ HOT unsigned lerp(unsigned a, unsigned b, unsigned k) {
  * home.ring (by its row, tag), and each frame row down from the four it falls among. At scale 1
  * (the playing cover) every column takes the same weights, as one row of texels a pixel; a
  * library cover's zoom gives each column its own. blend 0 writes the frame; else the slide is laid
- * over what d holds at blend/256 (a cross-fade's incoming cover). */
+ * over what d holds at blend/256 (a cross-fade's incoming cover). A still (only ever the one
+ * showing, so blend 0) is copied as it is. */
 static void home_render(unsigned *d, int pitch, const slide_t *s, int u, int v, int k,
                         unsigned blend) {
+    if (s->lib == SLIDE_STILL) {
+        for (int y = 0; y < s->th; ++y, d += pitch)
+            memcpy(d, s->tex + y * s->tw, (unsigned)s->tw * 4);
+        return;
+    }
     unsigned wx[HOME_PW][4], wy[4];
     int ix[HOME_PW], tag[4] = { -1, -1, -1, -1 }, ts = s->tw + 3, pw = pane_w(), one = k == 65536;
     for (int x = 0; x < (one ? 1 : pw); ++x) {
@@ -4828,14 +4839,28 @@ static void slides_drop(void) {
     memset(home.sl, 0, sizeof home.sl);
     home.fade = 0, home.drawn = 0;
 }
+/* The frame as it stands, both slides blended, as the one showing: a still (SLIDE_STILL) the next
+ * cover fades in over, both slides freed. 0, the slides as they were, with no memory for it. */
+static int frame_hold(void) {
+    int pw = pane_w(), h = pane_h();
+    unsigned *t = home_frame() ? calloc((unsigned)(pw * h), 4) : 0;
+    const unsigned *f = t ? (const unsigned *)bitmap_lock_buffer_for_read(home.frame) : 0;
+    if (!f) return free(t), 0;
+    int pitch = (int)(bitmap_get_line_length(home.frame) / 4);
+    for (int y = 0; y < h; ++y) memcpy(t + y * pw, f + y * pitch, (unsigned)pw * 4);
+    bitmap_unlock_buffer(home.frame);
+    slides_drop();
+    home.sl[0].tex = t, home.sl[0].tw = pw, home.sl[0].th = h, home.sl[0].lib = SLIDE_STILL;
+    return 1;
+}
 /* The cover at url as the next slide (slide_load's answer): with one showing it fades in over it,
  * else, or with cut (the same cover again after a layout, on its new paper), it shows at once. A
  * playing cover that comes while another fades in takes that one's place in the fade (the player's
  * own after the Coverflow thumbnail that stood in for it, or a quick skip's next), so nothing
- * jumps; any other ends the fade first. The playing cover takes the one showing's phase when that
- * was the playing cover too, so a new track's pan goes on where it was.
- * ponytail: play starting while a library cover fades in ends that fade at once, a jump by what
- * was left of it; three slides blended would lift it. */
+ * jumps; one that comes while a library cover fades in (play starting mid-fade) fades in over the
+ * frame as it stands (frame_hold), the two covers there still from then on; any other ends the
+ * fade first. The playing cover takes the one showing's phase when that was the playing cover
+ * too, so a new track's pan goes on where it was. */
 static int slide_show(const char *url, int lib, int cut) {
     if (home.fade && !cut && !lib && !home.sl[1].lib) {
         int moves = slide_load(&home.sl[1], url, 0, home.sl[1].ms);
@@ -4843,7 +4868,7 @@ static int slide_show(const char *url, int lib, int cut) {
         home.drawn = 0;
         return moves;
     }
-    if (home.fade) fade_end();
+    if (home.fade && (cut || lib || !frame_hold())) fade_end();
     int over = !cut && home.sl[0].tw && !home.pane;
     unsigned ms = !lib && !home.sl[0].lib ? home.sl[0].ms : 0;
     int moves = slide_load(&home.sl[over], url, lib, ms);
@@ -4986,6 +5011,10 @@ static const unsigned short srgb_lin[256] = {
 #define INK_CUT_RIGHT 2
 #define INK_CUT_ROWS 4
 
+/* Whether p is not the ground's colour: its share (ink_share) is 0 just where it is. One compare,
+ * not the share's three channels, for most of the bar's rows, the bare art (test/patch.py's ink
+ * count). */
+#define INKED(p, ground) ((((p) ^ (ground)) & 0xffffffu) != 0)
 /* p's greatest channel's distance from ground, and its spread. */
 static unsigned ink_share(unsigned p, unsigned ground, unsigned *spread) {
     unsigned c = 0, hi = 0, lo = 255;
@@ -5015,12 +5044,11 @@ void home_ink(unsigned *fb, int pitch, const unsigned *art, int apitch, int w, i
     unsigned sp;
     for (int x = 0; x < w;) {
         int lit = 0, b = x, gap = 0;
-        for (int y = 0; y < h && !lit; ++y) lit = ink_share(fb[y * pitch + x], ground, &sp) != 0;
+        for (int y = 0; y < h && !lit; ++y) lit = INKED(fb[y * pitch + x], ground);
         if (lit) /* the glyph: on to INK_GAP empty columns */
             for (b = x + 1; b < w && gap < INK_GAP; ++b) {
                 int on = 0;
-                for (int y = 0; y < h && !on; ++y)
-                    on = ink_share(fb[y * pitch + b], ground, &sp) != 0;
+                for (int y = 0; y < h && !on; ++y) on = INKED(fb[y * pitch + b], ground);
                 gap = on ? 0 : gap + 1;
             }
         b = lit ? b - gap : x + 1;
@@ -5037,6 +5065,7 @@ void home_ink(unsigned *fb, int pitch, const unsigned *art, int apitch, int w, i
         unsigned weight = 0; /* at most 255 a pixel */
         for (int y = 0; lit && y < h; ++y)
             for (int i = x; i < b; ++i) {
+                if (!INKED(fb[y * pitch + i], ground)) continue; /* no share: adds nothing */
                 unsigned c = ink_share(fb[y * pitch + i], ground, &sp), a = art[y * apitch + i];
                 if (hue_s) {
                     unsigned k = sp >= hue_s ? 256 : (sp << 8) / hue_s, t = hue_c * k >> 8;
@@ -5063,7 +5092,7 @@ void home_ink(unsigned *fb, int pitch, const unsigned *art, int apitch, int w, i
         for (int y = 0; y < h; ++y)
             for (int i = x; i < b; ++i) {
                 unsigned *p = fb + y * pitch + i, a = bgra(art[y * apitch + i]),
-                         c = lit ? ink_share(*p, ground, &sp) : 0;
+                         c = lit && INKED(*p, ground) ? ink_share(*p, ground, &sp) : 0;
                 if (c && hue_s) {
                     unsigned k = sp >= hue_s ? 256 : (sp << 8) / hue_s, t = hue_c * k >> 8;
                     a = lerp(a, hue, k);
@@ -5144,6 +5173,7 @@ void coverflow_home_strip(void *canvas, void *top) {
     home.stripping = 0;
     canvas_translate(canvas, -wx, -wy);
     canvas_set_clip_rect(canvas, old);
+    if (clip[3] == -I(l, W_Y)) home.strip_done[0] = clip[0], home.strip_done[1] = clip[0] + clip[2];
 }
 /* After a paint of the raised list in its window (a new selection, a slide's frame), its rows in
  * the bar again: AWTK keeps a widget's invalidate inside its window, so the bar's rows would keep
@@ -5156,6 +5186,16 @@ static int strip_due(const void *unused) {
         widget_invalidate_force(bar, rows);
     }
     return 0; /* RET_REMOVE */
+}
+/* A frame painted (navigation.c ringnav_wm_paint): strip_due once the list painted columns of the
+ * band that the bar's paint of it did not cover. AWTK widens each invalidate by a few pixels, so
+ * strip_due's own frame paints the list's top rows in the window too, but the bar paints the
+ * band whole in that frame: without that test each strip would ask for the next, every frame. */
+void coverflow_home_painted(void) {
+    int *need = home.strip_need, *done = home.strip_done;
+    if (need[1] && (!done[1] || need[0] < done[0] || need[1] > done[1]))
+        rearm(&home.strip_timer, strip_due, 0);
+    need[0] = need[1] = done[0] = done[1] = 0;
 }
 
 /* The bar's border paint, its glyphs drawn: the art into the rows coverflow_home_bar left, the
@@ -5202,8 +5242,13 @@ void coverflow_home_clip(void *w, void *canvas, int begin) {
         home.clipped = 0;
         return;
     }
-    if (w == home.list && !home.stripping && I(w, W_Y) < 0) rearm(&home.strip_timer, strip_due, 0);
     int clip[4], art = w == home.art, x = pane_x(), pane = widget_get_visible(home.art) ? x : 375;
+    if (w == home.list && !home.stripping && I(w, W_Y) < 0 &&
+        clip_within(canvas, home.clip, clip, 0, 0, x, 320)) { /* the band's columns it paints */
+        int *need = home.strip_need, end = clip[0] + clip[2];
+        need[0] = need[1] && need[0] < clip[0] ? need[0] : clip[0];
+        need[1] = need[1] > end ? need[1] : end;
+    }
     clip_within(canvas, home.clip, clip, I(canvas, CANVAS_X) - I(w, W_X) + (art ? x : 0),
                 I(canvas, CANVAS_Y) - I(w, W_Y) + (art ? 0 : I(w, W_Y)), art ? 375 - x : pane,
                 art ? client_h() : I(w, W_H));

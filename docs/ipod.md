@@ -174,7 +174,7 @@ one it replaces. One `DRIFT_TICK_MS` (200 ms, about 0.3 px a step; a late tick s
 runs it, armed from Home's paint only while Home is the top window and not sliding, the screen is
 lit and the lock screen is off; its next step after any of those changes removes it, and
 `coverflow_home_layout` (Home, Theme, a new Home window) removes it at once. A step is capped at
-`DRIFT_MAX_STEP_MS`, so a stalled loop never jumps. A step invalidates only the panel, and a paint
+`DRIFT_MAX_STEP_MS`, so a stalled loop never jumps. A step invalidates only the panel (with a `split_art_up`, the bar's rows over it too), and a paint
 renders the frame again only once the pan or a fade has moved (`frame_stamp`). Light Mode's paper
 behind a transparent cover follows only the next cover change. The timer trusts `home.win` as Home's
 identity, as the art's paint always has: Home is only replaced through `coverflow_home`, which
@@ -197,7 +197,9 @@ drift of up to `KB_DRIFT` (24 px) each way about it, and a zoom between the pan'
 `split_inset`. `home_render` takes the window's scale, each column with its own B-spline weights
 (at the playing cover's scale 1 they are one set, as before), and lays the incoming cover over the
 outgoing one by the fade's share while one runs, both moving. A new track's cover cross-fades the
-same way, as does the change between the playing cover and the slideshow; a cover that cannot
+same way, as does the change between the playing cover and the slideshow; when play starts while a
+library cover is still fading in, the playing cover fades in over the frame as it stood, those two
+covers held still under it (`frame_hold`), so nothing jumps; a cover that cannot
 move (a 16-bit decode, a cover too long for `DRIFT_TEXELS`, none) still cuts. The timer steps every
 `SLIDE_TICK_MS` (100 ms) while a fade runs, so it steps in 15 shades, and every `DRIFT_TICK_MS`
 otherwise. The covers come from `slideshow.c`, off the UI thread (`slide_pick`): a song at a random
@@ -228,8 +230,12 @@ stand over it. The main menu rises too: with the clock at the row's right, its l
 so the list starts at y 40 (`HOME_SPLIT_TOP`), 18 rows above Home's window, and the bar's background
 paints those rows of it after the art (`coverflow_home_strip`: the list painted at its place on the
 screen, clipped to them and left of the pane); a tap there reaches the bar. AWTK keeps a
-widget's invalidate inside its window, so each paint of the list in the window (a new selection, a
-slide's frame) repaints those rows of the bar after the frame (`strip_due`). Settings and the other
+widget's invalidate inside its window, so a paint of the list in the window (a new selection, a
+slide's frame) repaints those rows of the bar after the frame (`strip_due`), unless the bar painted
+those columns of them in the same frame (`coverflow_home_painted`, after each frame). AWTK widens
+every invalidate by a few pixels, so the bar's repaint of the rows paints the list's top rows in the
+window too; without that test each repaint asked for the next, and Home repainted about 15 times a
+second while it showed, its pan's steps the whole screen. Settings and the other
 lists Home opens are full pages under OLED, and stay in the window. Each glyph is drawn in one ink, white or black, whichever has the higher WCAG contrast
 against the art under it, as Scrolly's feed-end line does: the art's relative luminance (from a
 256-entry linear table) averaged over the glyph, each pixel weighted by the glyph's coverage
@@ -247,7 +253,9 @@ when it draws straight onto the screen; the glyphs paint on that, and the bar's 
 share and writes the art with the ink over it, only within the paint's clip. A glyph at an edge
 where the clip, not the pane, ends (a repaint of part of the battery) keeps the ink it has, as its
 part alone would average differently. A pan step invalidates those rows of the bar with the
-window's, so the ink follows the art. The clock is drawn in Text Primary there (`clock_place`), so it
+window's, so the ink follows the art. Inking them costs about 0.84 million instructions a step
+(`test/patch.py`, 188 × 58 with a pause and a battery), a sixth of the frame's render: a pixel left
+the ground's colour (the bare art, most of them) takes one compare, not the share's three channels. The clock is drawn in Text Primary there (`clock_place`), so it
 is inked as one glyph like the others.
 The battery's charging green and low red keep their own colours over the art, each pixel's share
 read against the glyph's most saturated pixel, and only its grey part (the dim outline as a
