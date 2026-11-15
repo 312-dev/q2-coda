@@ -27,7 +27,7 @@ def album_page(fw, st, name='albuminfo_page', theme='oled'):
     if theme:
         use_set(st, theme)
     info = (C.c_char * 912).in_dll(fw.lib, 'fw_ctx_g_local_classinfo_save')
-    info[0xd:0xd + 9] = b'Caracal\0\0'
+    C.memmove(C.addressof(info) + 0xd, b'Caracal\0\0', 9)
     return ui, win, nav, row, lv, rows
 
 
