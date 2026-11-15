@@ -9,6 +9,7 @@
 #define BUILDING ART_DIR "/building" /* the key and track of the album the worker is on */
 #define CRASH_LOG PEQ_ROOT "/mnt/mmc/q2-crash.log"
 #define MIN_FREE_MB 16 /* no new cache files below this much free space on the card */
+#define DATA_ROOM_MB 8 /* /mnt/data free for library_scan's three larger indexes */
 #define ART_NEAR 3 /* real art only this many covers either side, like PictureFlow's cache */
 /* Home's without a theme's pane (home_pane_paint), at 290px (stock's: 110) */
 #define HOME_PLACEHOLDER "default_album_home"
@@ -43,8 +44,8 @@ static int library_write(int (*stock)(void *, void *), void *a, void *b) {
  * an index keeps equal keys in rowid order, as stock's sort did,
  * so songs of one second (a CUE image's tracks) keep their order newest first (Recently Added,
  * getAllMusic(3)); oldest first (getAllMusic(4)) library_query adds id for it. ponytail: the album groupings
- * (getAllAlbum, ALBUM_SQL, an artist's albums) walk songtable_album too, a row lookup each in
- * album order: over twice a scan's page reads (docs/internals.md).
+ * (getAllAlbum, an artist's albums; ALBUM_SQL on songtable_group) walk their index too, a row
+ * lookup each in album order: over twice a scan's page reads (docs/internals.md).
  * A full scan (drops): toolsInitDatabase drops songtable and creates it again on the connection
  * the tools* functions share, which waits only 500 ms for a reader (stock_db_open). A count
  * still reading songtable on its own connection made the drop fail, then the create, and stock
@@ -58,6 +59,19 @@ static int library_scan(int (*stock)(void *, void *), void *a, void *b, int drop
     }
     library_scope_scan();
     int result = library_write(stock, a, b);
+    /* ALBUM_GROUP's three terms (as its text: SQLite matches an index's expression to the query's),
+     * and the Unknown rows' album="" and album-artist="" checks (docs/internals.md#coverflow, Indexes): 1.7 MB
+     * at 20,000 songs, so only with DATA_ROOM_MB free, and only once a full scan has dropped the
+     * table. SQLite takes the newest of two indexes that serve a query equally, so songtable_group,
+     * made before songtable_album, leaves getAllAlbum and the other album groupings on
+     * songtable_album, each group's row as before. */
+    if (drops && card_room("/mnt/data", DATA_ROOM_MB, 0))
+        toolsUpdateDbTable("/mnt/data/database.db",
+                           "create index if not exists songtable_group on songtable(album collate nocase,"
+                           "ifnull(albumsonger,'') collate nocase,case ifnull(albumsonger,'') when '' then "
+                           "rtrim(fileurl,replace(fileurl,'/','')) end);"
+                           "create index if not exists songtable_album_exact on songtable(album);"
+                           "create index if not exists songtable_artist on songtable(ifnull(nullif(albumsonger,''),songer))");
     toolsUpdateDbTable("/mnt/data/database.db",
                        "create index if not exists songtable_album on songtable(album collate nocase);"
                        "create index if not exists songtable_filename on songtable(filename);"
