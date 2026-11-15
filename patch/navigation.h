@@ -214,8 +214,8 @@ typedef struct {
     int np_full, np_tap_x, np_tap_y;
     int np_time_down; /* np_time_tap: a touch came down on the right-hand time */
     /* np_bar.c's shuffle and repeat: shuffle kept under Repeat One, repeat Off chosen under shuffle
-     */
-    unsigned char np_shuf_one, np_rep_off;
+     * (saved as NPSHUFONE and NPREPOFF), and whether np_modes_read has read them */
+    unsigned char np_shuf_one, np_rep_off, np_modes_read;
     int np_was[9]; /* the column before full screen (np_full) */
     /* The full-screen art's song name, its shade and its window, the fade's step and timer
      * (ringnav_bigcover) */

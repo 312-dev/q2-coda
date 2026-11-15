@@ -301,6 +301,25 @@ static inline int arc_out(int r, int y) {
 #define DRIFT_TICK_MS 200
 #define DRIFT_MAX_STEP_MS 500 /* 2.5 ticks: a late tick keeps its time */
 #define DRIFT_TEXELS 240640 /* four panels: 4 x 188 x 320, a pane the screen's height */
+/* Split's slideshow of library covers (coverflow.c home_drift, slideshow.c): a cover holds
+ * SLIDE_HOLD_MS between SLIDE_FADE_MS cross-fades, drawn every SLIDE_TICK_MS while one fades; the
+ * next is picked SLIDE_AHEAD_MS before it is due. Each slide drifts at most KB_DRIFT px of its
+ * zoomed cover while it zooms between 1 and KB_NEAR (1/65536: 0.9, the window 0.9 of the panel's
+ * texels) over its whole life, in or out. A pick reads SLIDE_ART_PX square art (the tallest pane, 320,
+ * zoomed DRIFT_ZOOM_PCT); SLIDE_TRIES songs a pick, SLIDE_RECENT albums passed over, SLIDE_RETRY_MS
+ * after a pick that found none. Off play (not playing) for SLIDE_IDLE_MS before the show starts,
+ * so a track change's moment stopped does not start it. */
+#define SLIDE_HOLD_MS 6000
+#define SLIDE_FADE_MS 1500
+#define SLIDE_TICK_MS 100
+#define SLIDE_AHEAD_MS 3000
+#define SLIDE_IDLE_MS 3000
+#define SLIDE_ART_PX 352
+#define SLIDE_TRIES 8
+#define SLIDE_RECENT 6
+#define SLIDE_RETRY_MS 30000
+#define KB_NEAR 58982
+#define KB_DRIFT 24
 #define HOME_TOP 8 /* Minimal's decorative inset; Modern starts below the status bar. */
 #define HOME_CHEVRON_SHIFT 15
 #define HOME_FULL_CHEVRON_SHIFT 10

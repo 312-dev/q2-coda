@@ -147,7 +147,7 @@ stock-owned. Now Playing and Spotify's page keep their black background behind t
 
 The player writes every track's cover to the same `/tmp` file, so before Split loads it `coverflow_home_art` drops AWTK's cached bitmap of that name, as the full-screen art does; otherwise the image manager hands back the last track's cover.
 
-In Split a cover pans slowly, as an iPod classic's menu art did: `home_tex` box filters it once
+In Split a cover pans slowly, as an iPod classic's menu art did: `slide_load` box filters it once
 (at most 4 × 4 samples a texel) to its fit zoomed `DRIFT_ZOOM_PCT` (110), and each axis runs its
 own ping-pong across that margin alone, from the old crop (`DRIFT_X_MS` 20 s, `DRIFT_Y_MS`
 26 s): about 1.5 pixels a second on average on a square cover, as iPod.js's recreation moves, and the cover's
@@ -160,7 +160,7 @@ across once, then down). Whole-pixel steps at that speed read as a jerk every tw
 second, one axis at a time; the filter moves it by fractions of a pixel, as the iPod's own
 rendering does. Bilinear would keep a whole-pixel frame's texels but mix a half-pixel one's 50/50,
 so the cover's sharpness would pulse with the pan's phase, most visibly in lettering. The
-B-spline blurs every phase about alike but is soft, so `home_tex` sharpens the filtered cover
+B-spline blurs every phase about alike but is soft, so `slide_load` sharpens the filtered cover
 once, `[-1,6,-1]/4` across and down (`home_sharpen`), and keeps it inside a border of its edges (a
 texel left and above, two right and below) for the filter's reads past the panel. The art is about
 twice as sharp as a `[1,2,1]/4` softening with bilinear, and its sharpness changes with the phase by
@@ -169,17 +169,48 @@ about a tenth on a photo and a fifth on lettering. A frame costs about 4.8 milli
 once a cover. A cover whose zoomed fit passes `DRIFT_TEXELS` (four panels: wider
 than about 2:1, or taller than about 5.5:1), a decode that is not 32-bit, the placeholder and Full stay still and unzoomed,
 drawn by the stock fill. Nothing is stored: the pan's phase counts only time shown, so leaving
-Home, a new cover or a Theme change resumes it where it was. One `DRIFT_TICK_MS` (200 ms, about 0.3 px a step; a late tick steps at most `DRIFT_MAX_STEP_MS`, 500 ms) timer
+Home or a Theme change resumes it where it was, and a new track's cover takes up the phase of the
+one it replaces. One `DRIFT_TICK_MS` (200 ms, about 0.3 px a step; a late tick steps at most `DRIFT_MAX_STEP_MS`, 500 ms) timer
 runs it, armed from Home's paint only while Home is the top window and not sliding, the screen is
 lit and the lock screen is off; its next step after any of those changes removes it, and
 `coverflow_home_layout` (Home, Theme, a new Home window) removes it at once. A step is capped at
 `DRIFT_MAX_STEP_MS`, so a stalled loop never jumps. A step invalidates only the panel, and a paint
-renders the frame again only once the pan has moved. It pans while paused too. Not done: the
-iPod's random slideshow of library covers and its crossfades (the library's thumbnails are too
-small for a 290 px panel, so each change would decode a full cover), and Light Mode's paper behind
-a transparent cover follows only the next cover change. The timer trusts `home.win` as Home's
+renders the frame again only once the pan or a fade has moved (`frame_stamp`). Light Mode's paper
+behind a transparent cover follows only the next cover change. The timer trusts `home.win` as Home's
 identity, as the art's paint always has: Home is only replaced through `coverflow_home`, which
 stops the timer first.
+
+**The slideshow.** An iPod classic's main menu shows the art for the highlighted row: on Music,
+a slideshow of the library's album covers, each drifting and zooming slowly (the Ken Burns look)
+and cross-fading into the next; on Now Playing, which is there only while something is loaded,
+the playing album's cover. Split does the same (`art_source`). Where the pane follows the row
+(Classic with Row Preview) the Library row shows the slideshow and Now Playing's row the playing
+cover, as before. Where it does not (OLED, or Row Preview off) one pane serves every row, so it
+shows the playing cover while a song plays and the slideshow once play has stopped or paused for
+`SLIDE_IDLE_MS` (3 s, so the moment between two tracks starts nothing), back to the playing cover as
+soon as play resumes: the cover beside the menu is what plays, as on Now Playing's row, and the
+library otherwise. Each library cover holds `SLIDE_HOLD_MS` (6 s) between `SLIDE_FADE_MS` (1.5 s)
+cross-fades; over its whole life (9 s) its window moves once at an even pace from one end to the
+other (`slide_at`, `kb_ends`): a focus picked at random in the middle 40 % of the zoomed cover, a
+drift of up to `KB_DRIFT` (24 px) each way about it, and a zoom between the pan's scale and
+`KB_NEAR` (0.9 of its texels, so up to about 11 % closer), in or out at random, both ends inside
+`split_inset`. `home_render` takes the window's scale, each column with its own B-spline weights
+(at the playing cover's scale 1 they are one set, as before), and lays the incoming cover over the
+outgoing one by the fade's share while one runs, both moving. A new track's cover cross-fades the
+same way, as does the change between the playing cover and the slideshow; a cover that cannot
+move (a 16-bit decode, a cover too long for `DRIFT_TEXELS`, none) still cuts. The timer steps every
+`SLIDE_TICK_MS` (100 ms) while a fade runs, so it steps in 15 shades, and every `DRIFT_TICK_MS`
+otherwise. The covers come from `slideshow.c`, off the UI thread (`slide_pick`): a song at a random
+rowid of the card's library (no sort of the table, `MUSIC_WHERE`'s scope kept), its album's
+embedded art, else its folder image, each read by stock's own readers under both art locks at
+`SLIDE_ART_PX` (352, the tallest pane zoomed 110 %) square into `/tmp/q2-slide.jpg`, else the album's
+Cover Flow thumbnail (160 px, softer); up to `SLIDE_TRIES` (8) songs a pick, the last
+`SLIDE_RECENT` (6) albums passed over but for the last two tries, so a small library still turns.
+The pick starts `SLIDE_AHEAD_MS` (3 s) before its cover is due, the decode and filtering then run
+on the UI thread once a cover (as a track change's always have), and a pick that found nothing, a
+library scan or a refused thread waits `SLIDE_RETRY_MS` (30 s) for the next. A library with no art
+at all keeps the playing cover, or the theme's pane. The two slides' textures (about 0.5 MB each at
+352 square) are on the heap only while they show.
 
 A set with `split_inset` (OLED's 2) keeps that percent of the zoomed cover clear at each edge
 (`drift_axis`), so a cover's own frame (many have a thin white border) never shows at the pane's

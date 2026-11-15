@@ -12,7 +12,8 @@
        rows are one 32 px line; Albums and Search are two lines at 52 px, four to a page (a list box holds whole rows): 40 px
        art at x 24, the text at 72 (list.art below). Text y puts each line where the design's baselines are. Home in
        Split: the menu's rows 204 px wide, so the bar ends at 188 and the chevrons stand at 176 (the right column from
-       the row's edge); the playing album's art from x 196 and the top edge to the screen's right and bottom edges,
+       the row's edge); the playing album's art (stopped or paused, the library's covers in turn, cross-fading: coverflow.c art_source)
+       from x 196 and the top edge to the screen's right and bottom edges,
        under the status row's play state and battery (each of their pixels inked white or black, whichever stands
        out more against the art under it: coverflow.c home_ink), the glass rounding its corners, panning slowly across its 110 % zoom with 2 % of the zoom kept clear at each edge, so a
        cover's own border never shows (coverflow.c drift_axis). -->

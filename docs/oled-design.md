@@ -435,7 +435,7 @@ pattern.
 | Q2 Pod screen                       | Pattern                     | Notes                                                                                                      |
 | ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock, centred |
-| Home (Split)                        | List row beside art         | Rows from y 40 (into the status row's empty left, the clock at its right) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges, panning slowly; the status row's clock, play state and battery over it at the right, each glyph white or black by contrast |
+| Home (Split)                        | List row beside art         | Rows from y 40 (into the status row's empty left, the clock at its right) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges: the playing cover panning slowly while a song plays, else the library's covers in turn, each zooming and drifting and cross-fading into the next; the status row's clock, play state and battery over it at the right, each glyph white or black by contrast |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Library                             | List row                    |                                                                                                            |
 | Albums                              | Two-line row with art       |                                                                                                            |
@@ -508,9 +508,11 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   and battery over them, each glyph in one ink, white or black, whichever has the higher WCAG contrast against the
   art's mean luminance under it, weighted by the glyph's coverage and held 0.03 past the bound against flicker; the
   charging green and low red keep their colours (`home_ink`, approved from `mock_split_top.py` on 2026-11-14, one
-  ink a glyph from the same day, as each pixel's own pick speckled over lettering), panning slowly across its 110 % zoom with an
-  eased turn at each end and 2 % of the zoom kept clear of the pane at each edge, so a cover's own border never
-  shows), the main menu from y 40, its top rows painted by the bar (`coverflow_home_strip`, approved from
+  ink a glyph from the same day, as each pixel's own pick speckled over lettering), the playing cover panning slowly
+  across its 110 % zoom with an eased turn at each end and 2 % of the zoom kept clear of the pane at each edge, so a
+  cover's own border never shows; stopped or paused 3 s, the library's covers in turn as an iPod classic's menu shows
+  them, each zooming between 1 and 0.9 of the cover and drifting once over its 9 s, 1.5 s cross-fades between covers
+  and on a track change (docs/ipod.md#home, `slideshow.c`)), the main menu from y 40, its top rows painted by the bar (`coverflow_home_strip`, approved from
   `mock_overflow.py` on 2026-11-15), and the lists Home's rows open as full-width pages with the art hidden
   (`home.lists.full`).
 - The toast, the confirm as a dialog page and the empty note (`dialog.confirm.painter="oled"`,

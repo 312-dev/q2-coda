@@ -800,7 +800,7 @@ class Modes:
     def __init__(self, fw, st, mcl, mode):
         self.fw, self.mcl = fw, mcl
         ui = Ui(fw)
-        theme(fw, OLED)
+        self.settings = theme(fw, OLED)
         mcl.mode = mode
         self.win = ui.window('playing_page')
         self.button = ui.add('image', self.win, (143, 252, 88, 44), 'img_playmode')
@@ -839,6 +839,44 @@ def test_each_control_finds_the_other_as_it_was(fw, st, mcl):
     assert m.sent == [2, 3, 1] and mcl.mode == 1
     m.tap('repeat')  # Off: shuffle comes back
     assert m.sent == [2, 3, 1, 2]
+
+
+@pytest.mark.parametrize('mode, taps, names', [
+    (0, ['shuffle'], ['oled_mode_shuffle_on', 'oled_mode_repeat_d']),  # repeat Off chosen under shuffle
+    (2, ['repeat'], ['oled_mode_shuffle_on', 'oled_mode_repeat1_on'])])  # shuffle kept under Repeat One
+def test_what_stocks_mode_cant_say_outlives_a_restart(fw, st, mcl, library, tmp_path, mode, taps, names):
+    """np_bar.c np_modes_read: what MCL_MODE can't hold is saved as [IPOD] NPREPOFF and NPSHUFONE, and a fresh load
+    reads it back, so the pair draws after a restart as it did before. Stock keeps MCL_MODE itself (PLAYMODE)."""
+    m = Modes(fw, st, mcl, mode)
+    for side in taps:
+        m.tap(side)
+    saved = {k: str(v).encode() for k, v in m.settings.written}
+    (tmp_path/'restart').mkdir()
+    again = host.Fw(library, tmp_path/'restart')  # scratch zeroed, as at power-on; mcl's globals stay
+    try:
+        theme(again, OLED, **saved)
+        win = Ui(again).window('playing_page')
+        button = Ui(again).add('image', win, (143, 196, 88, 44), 'img_playmode')
+        again.mock('widget_lookup', lambda w, name, deep, *_: button.addr if C.string_at(name) == b'img_playmode' else 0)
+        loads: list = []
+        again.mock('widget_load_image', lambda w, name, bitmap, *_: loads.append(C.string_at(name).decode()) or 0)
+        lcd, raw = C.create_string_buffer(0x200), C.create_string_buffer(0x100)
+        struct.pack_into('<Q', raw, CANVAS_LCD, C.addressof(lcd))
+        again.fn('np_modes', None, C.c_void_p, C.c_void_p)(win.addr, C.addressof(raw))
+        assert loads == names
+    finally:
+        again.close()
+
+
+def test_a_tap_that_keeps_what_was_saved_writes_nothing(fw, st, mcl):
+    m = Modes(fw, st, mcl, 2)  # shuffle, repeat All: nothing kept yet
+    m.tap('repeat')  # Repeat One with shuffle on: NPSHUFONE alone moves
+    assert m.settings.written == [('NPSHUFONE', 1)]
+    m.tap('repeat')  # Off: shuffle still on, so only NPREPOFF moves
+    assert m.settings.written == [('NPSHUFONE', 1), ('NPREPOFF', 1)]
+    m.tap('repeat')  # All
+    m.tap('repeat')  # One again: both as saved
+    assert m.settings.written == [('NPSHUFONE', 1), ('NPREPOFF', 1), ('NPREPOFF', 0)]
 
 
 def test_other_themes_keep_stocks_play_mode_tap(fw, st, mcl):
@@ -3311,7 +3349,7 @@ def test_home_split_s_clock_goes_right_and_over_the_art_in_text_primary(fw, st):
     clock = row.place()
     assert clock.box[0] + clock.box[2] - 2 == 322 - 24
     assert clock.props['style:normal:text_color'] == i32(INK_ROW)  # no cover under the bar: the row's grey
-    home.tw = 128  # a cover that fills the pane, up under the status row: inked over it, whole
+    home.sl[0].tw = 128  # a cover that fills the pane, up under the status row: inked over it, whole
     clock = row.place()
     assert clock.props['style:normal:text_color'] == i32(0xffffffff)
     moves = len(fw.calls('widget_move_resize'))

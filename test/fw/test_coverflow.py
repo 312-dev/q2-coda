@@ -39,10 +39,16 @@ class Touch(C.Structure):
     _fields_ = [*((k, C.c_int) for k in 'down drag caught x y from_ n'.split()), ('sx', C.c_int * 8), ('st', C.c_uint * 8)]
 
 
+class Slide(C.Structure):
+    _fields_ = [('tex', C.c_void_p), *((k, C.c_int) for k in 'tw th u0 v0 rx ry lib'.split()), ('kb', (C.c_int * 3) * 2),
+                ('ms', C.c_uint)]
+
+
 class Home(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'win art list sets lib stream'.split()), ('carousel', C.c_void_p * 3),
-                *((k, C.c_uint) for k in 'key repaint drift drift_ms drift_last'.split()),
-                ('tex', C.c_void_p), ('frame', C.c_void_p), *((k, C.c_int) for k in 'tw rx ry u0 v0 du dv pane'.split()),
+                *((k, C.c_uint) for k in 'key repaint drift drift_last tick'.split()), ('sl', Slide * 2),
+                ('frame', C.c_void_p), *((k, C.c_uint) for k in 'fade drawn'.split()), *((k, C.c_int) for k in 'pane show'.split()),
+                *((k, C.c_uint) for k in 'idle seed'.split()),
                 *((k, C.c_void_p) for k in 'row row_image row_label svc'.split()), ('svc_name', C.c_char * 72),
                 *((k, C.c_int) for k in 'kind songs albums services games free_tenths counted counting got_songs got_albums'.split()),
                 ('count_thread', C.c_ulong), *((k, C.c_uint) for k in 'asked pane_read count_timer pane_timer'.split()),
@@ -70,8 +76,8 @@ class Dirent(C.Structure):
 def api(fw):
     ptr, i, u = C.c_void_p, C.c_int, C.c_uint
     fns = {'coverflow__bspline_w': (None, u, ptr), 'home_sharpen': (None, ptr, i, i), 'coverflow__home_fit': (None, u, u, i, ptr, ptr),
-           'coverflow__home_render': (None, ptr, i, i, i), 'coverflow__drift_at': (i, i, u), 'coverflow__pan_u': (i,),
-           'coverflow__pan_v': (i,), 'coverflow__velocity': (i, u), 'coverflow__sample': (None, i, u),
+           'coverflow__home_render': (None, ptr, i, ptr, i, i, i, u), 'coverflow__drift_at': (i, i, u, u),
+           'coverflow__slide_at': (None, ptr, ptr, ptr, ptr), 'coverflow__velocity': (i, u), 'coverflow__sample': (None, i, u),
            'coverflow__round_stride': (i, i, i), 'coverflow__floor_div': (i, i, i), 'covers_live': (i,),
            'coverflow_hit': (i, i, i, i), 'coverflow_render': (None, ptr, i, i, ptr), 'pose': (None, i, ptr),
            'project': (i, ptr, i), 'unproject': (i, ptr, i, ptr, ptr), 'coverflow__slot': (i, i, i, i),
@@ -250,24 +256,30 @@ def test_sharpen_walks_a_column_by_its_step(fw):
         assert i % step == 0 or v == data[i]
 
 
-def home_tex(fw, tw, th, value):
-    """home.tex at tw x th inside its border, each texel value(memory column, memory row), in an exact allocation."""
+def slide_tex(fw, tw, th, value):
+    """home.sl[0].tex at tw x th inside its border, each texel value(memory column, memory row), in an exact allocation."""
     home = fw.var('coverflow__home', Home)
     ts = tw + 3
     tex = exact(C.c_uint, ts * (th + 3))
     for y in range(th + 3):
         for x in range(ts):
             tex[y * ts + x] = value(x, y)
-    home.tex, home.tw = C.addressof(tex), tw
+    home.sl[0].tex, home.sl[0].tw, home.sl[0].th = C.addressof(tex), tw, th
     return tex
+
+
+def render(fw, d, pitch, u, v, k=65536, blend=0, slide=0):
+    """home_render of home.sl[slide] at u, v and scale k into d."""
+    home = fw.var('coverflow__home', Home)
+    api(fw).home_render(d, pitch, C.addressof(home.sl[slide]), u, v, k, blend)
 
 
 def test_a_flat_cover_renders_flat_at_any_phase(fw):
     g = api(fw)
-    tex = home_tex(fw, 206, 319, lambda x, y: 0xff123456)
+    tex = slide_tex(fw, 206, 319, lambda x, y: 0xff123456)
     d = exact(C.c_uint, HOME_PW * HOME_H)
     for u, v in ((0, 0), (128, 128), (257, 3), (1111, 2222), (18 * 256, 29 * 256)):
-        g.home_render(d, HOME_PW, u, v)
+        render(fw, d, HOME_PW, u, v)
         assert all(x == 0xff123456 for x in d), (u, v)
     libc.free(C.addressof(d))
     libc.free(C.addressof(tex))
@@ -276,10 +288,10 @@ def test_a_flat_cover_renders_flat_at_any_phase(fw):
 def test_a_ramp_comes_out_at_the_sub_pixel_position(fw):
     """A cubic B-spline reproduces straight lines: the output of a ramp reads the position sampled."""
     g = api(fw)
-    tex = home_tex(fw, 206, 200 + 90, lambda x, y: 0xff400000 | x | min(y, 255) << 8)
+    tex = slide_tex(fw, 206, 200 + 90, lambda x, y: 0xff400000 | x | min(y, 255) << 8)
     d = exact(C.c_uint, HOME_PW * HOME_H)
     for u, v in ((0, 0), (64, 0), (128, 128), (1000, 192), (16 * 256 + 37, 0)):
-        g.home_render(d, HOME_PW, u, v)
+        render(fw, d, HOME_PW, u, v)
         for py, px in ((0, 0), (100, 50), (150, 187), (163, 100)):
             c = d[py * HOME_PW + px]
             assert abs((c & 255) - (u / 256 + px + 1)) <= 1, (u, v, px)
@@ -292,9 +304,9 @@ def test_a_ramp_comes_out_at_the_sub_pixel_position(fw):
 def test_render_at_the_pan_s_far_corner_stays_inside_the_border(fw):
     g = api(fw)
     tw, th = 206, 319
-    tex = home_tex(fw, tw, th, lambda x, y: 0xff000000)
+    tex = slide_tex(fw, tw, th, lambda x, y: 0xff000000)
     d = exact(C.c_uint, HOME_PW * HOME_H)
-    g.home_render(d, HOME_PW, (tw - HOME_PW) * 256, (th - HOME_H) * 256)  # an overrun is the sanitizer's
+    render(fw, d, HOME_PW, (tw - HOME_PW) * 256, (th - HOME_H) * 256)  # an overrun is the sanitizer's
     assert d[-1] == 0xff000000
     libc.free(C.addressof(d))
     libc.free(C.addressof(tex))
@@ -302,10 +314,10 @@ def test_render_at_the_pan_s_far_corner_stays_inside_the_border(fw):
 
 def test_render_honours_the_bitmap_s_pitch(fw):
     g = api(fw)
-    tex = home_tex(fw, 206, 319, lambda x, y: 0xffffffff)
+    tex = slide_tex(fw, 206, 319, lambda x, y: 0xffffffff)
     pitch = HOME_PW + 12
     d = exact(C.c_uint, pitch * HOME_H)
-    g.home_render(d, pitch, 300, 300)
+    render(fw, d, pitch, 300, 300)
     assert all(d[y * pitch + HOME_PW - 1] == 0xffffffff and d[y * pitch + HOME_PW] == 0 for y in range(0, HOME_H, 7))
     libc.free(C.addressof(d))
     libc.free(C.addressof(tex))
@@ -354,8 +366,7 @@ def eased(range_, period, ms):
 @pytest.mark.parametrize('period', (20000, 26000))
 def test_drift_is_an_eased_ping_pong_of_its_period(fw, period):
     g = api(fw)
-    home = fw.var('coverflow__home', Home)
-    at = lambda ms: (setattr(home, 'drift_ms', ms), g.drift_at(30, period))[1]
+    at = lambda ms: g.drift_at(30, period, ms)
     assert at(0) == 0
     assert at(period) == 30 * 256  # the far end
     assert abs(at(period // 2) - 15 * 256) <= 1  # halfway at half the time
@@ -371,26 +382,29 @@ def test_drift_is_an_eased_ping_pong_of_its_period(fw, period):
     assert middle <= 30 * 256 * 200 * 3 // (2 * period) + 2  # at most 1.5 times the average speed
 
 
+def slide_at(fw, i):
+    """home.sl[i]'s window now: u, v in 1/256 texel and its scale in 1/65536."""
+    u, v, k = C.c_int(), C.c_int(), C.c_int()
+    api(fw).slide_at(C.addressof(fw.var('coverflow__home', Home).sl[i]), r(u), r(v), r(k))
+    return u.value, v.value, k.value
+
+
 def test_drift_range_zero_never_moves(fw):
     g = api(fw)
-    fw.var('coverflow__home', Home).drift_ms = 7777
-    assert g.drift_at(0, 20000) == 0
+    assert g.drift_at(0, 20000, 7777) == 0
 
 
 def test_drift_holds_its_largest_range_in_32_bits(fw):
     g = api(fw)
-    fw.var('coverflow__home', Home).drift_ms = 26000
-    assert g.drift_at(99, 26000) == 99 * 256
+    assert g.drift_at(99, 26000, 26000) == 99 * 256
 
 
 def test_the_pan_starts_at_the_old_crop_and_moves_each_axis_by_its_own_period(fw):
-    g = api(fw)
-    home = fw.var('coverflow__home', Home)
-    home.u0, home.v0, home.rx, home.ry = 10, 20, 18, 29
-    assert (g.pan_u(), g.pan_v()) == (10 * 256, 20 * 256)
-    home.drift_ms = 20000
-    assert g.pan_u() == (10 + 18) * 256  # X's far end
-    assert g.pan_v() == 20 * 256 + eased(29, 26000, 20000)
+    s = fw.var('coverflow__home', Home).sl[0]
+    s.u0, s.v0, s.rx, s.ry = 10, 20, 18, 29
+    assert slide_at(fw, 0) == (10 * 256, 20 * 256, 65536)  # a texel a pixel
+    s.ms = 20000
+    assert slide_at(fw, 0) == ((10 + 18) * 256, 20 * 256 + eased(29, 26000, 20000), 65536)  # X's far end
 
 
 # The shelf's geometry
@@ -725,15 +739,18 @@ def tex_rig(fw, w, h, pixels, **kw):
     bitmap(fw, w, h, pixels, **kw)
     frame = C.create_string_buffer(0x40)
     fw.mock('bitmap_create_ex', lambda *_: C.addressof(frame))
-    return fw.fn('coverflow__home_tex', C.c_int, C.c_char_p), fw.var('coverflow__home', Home), frame
+    home = fw.var('coverflow__home', Home)
+    load = fw.fn('coverflow__slide_load', C.c_int, C.c_void_p, C.c_char_p, C.c_int, C.c_uint)
+    return lambda url, lib=0, ms=0: load(C.addressof(home.sl[0]), url, lib, ms), home, frame
 
 
-def test_home_tex_zooms_a_cover_by_a_tenth_with_its_pan_s_margin(fw):
+def test_slide_load_zooms_a_cover_by_a_tenth_with_its_pan_s_margin(fw):
     pixels = rgba(300, 300, lambda x, y: (10, 20, 30, 255))
     tex, home, frame = tex_rig(fw, 300, 300, pixels)
     assert tex(b'x') == 1
-    assert (home.tw, home.rx, home.ry) == (319, 29, 29)  # the fit, 290 square, plus 10%
-    assert (home.u0, home.v0, home.du) == ((290 - 188) // 2, 0, -1)  # the old crop, the frame not drawn yet
+    s = home.sl[0]
+    assert (s.tw, s.th, s.rx, s.ry, s.lib) == (319, 319, 29, 29, 0)  # the fit, 290 square, plus 10%
+    assert (s.u0, s.v0) == ((290 - 188) // 2, 0)  # the old crop
     assert struct.unpack_from('<H', frame, 0xc)[0] & 1  # opaque
 
 
@@ -829,40 +846,41 @@ def test_a_split_inset_keeps_the_pan_off_the_cover_s_edges(fw, library):
     assert tex(b'x') == 1
     t = ph * 110 // 100  # a square cover fits the pane's height
     ins = t * 2 // 100
-    assert home.tw == t
-    assert (home.v0, home.v0 + home.ry) == (ins, t - ph - ins)  # inside the inset at both ends
-    assert (home.u0, home.u0 + home.rx) == ((ph - pw) // 2, (ph - pw) // 2 + t - ph)  # the zoom's margin, far from both edges
-    assert home.rx > 0 and home.ry > 0  # it pans both ways
+    s = home.sl[0]
+    assert s.tw == t
+    assert (s.v0, s.v0 + s.ry) == (ins, t - ph - ins)  # inside the inset at both ends
+    assert (s.u0, s.u0 + s.rx) == ((ph - pw) // 2, (ph - pw) // 2 + t - ph)  # the zoom's margin, far from both edges
+    assert s.rx > 0 and s.ry > 0  # it pans both ways
 
 
-def test_home_tex_a_flat_cover_stays_flat_out_to_its_border(fw):
+def test_slide_load_a_flat_cover_stays_flat_out_to_its_border(fw):
     pixels = rgba(300, 300, lambda x, y: (10, 20, 30, 255))
     tex, home, _ = tex_rig(fw, 300, 300, pixels)
     tex(b'x')
-    ts = home.tw + 3
-    data = (C.c_uint * (ts * (319 + 3))).from_address(home.tex)
+    ts = home.sl[0].tw + 3
+    data = (C.c_uint * (ts * (319 + 3))).from_address(home.sl[0].tex)
     assert all(v == 0xff1e140a for v in data)
 
 
-def test_home_tex_blends_over_the_black_page(fw):
+def test_slide_load_blends_over_the_black_page(fw):
     pixels = rgba(300, 300, lambda x, y: (200, 200, 200, 128))
     tex, home, _ = tex_rig(fw, 300, 300, pixels)
     tex(b'x')
     want = 200 * 128 * 255 // (255 * 255)
-    assert (C.c_uint * 8).from_address(home.tex)[5] & 255 == want
+    assert (C.c_uint * 8).from_address(home.sl[0].tex)[5] & 255 == want
 
 
-def test_home_tex_a_load_that_fails_says_so(fw):
+def test_slide_load_a_load_that_fails_says_so(fw):
     pixels = (C.c_ubyte * 4)()
     tex, _, _ = tex_rig(fw, 300, 300, pixels, loads=False)
     assert tex(b'x') == -1
 
 
 @pytest.mark.parametrize('w, h, format', ((8192, 1, 1), (1, 8192, 1), (300, 300, 5), (300, 300, 0), (8193, 300, 1), (0, 300, 1)))
-def test_home_tex_a_cover_it_won_t_pan_stays_still(fw, w, h, format):
+def test_slide_load_a_cover_it_won_t_pan_stays_still(fw, w, h, format):
     pixels = (C.c_ubyte * 4)()
     tex, home, _ = tex_rig(fw, w, h, pixels, format=format)
-    assert tex(b'x') == 0 and home.tw == 0 and fw.calls('widget_unload_image')
+    assert tex(b'x') == 0 and home.sl[0].tw == 0 and not home.sl[0].tex and fw.calls('widget_unload_image')
 
 
 # The status row over Split's art: each glyph in one ink, white or black by WCAG contrast over its mean
@@ -3262,8 +3280,9 @@ def test_home_s_foreground_asks_the_counts_again_sooner_than_boot_and_reads_the_
 
 def drifting(fw, light=1):
     home = fw.var('coverflow__home', Home)
-    home.tw, home.rx, home.ry, home.u0, home.v0 = 300, 18, 29, 10, 0
-    home.du, home.dv = 10 * 256, 0
+    s = home.sl[0]
+    s.tw, s.th, s.rx, s.ry, s.u0, s.v0 = 300, 300, 18, 29, 10, 0
+    home.drawn = fw.fn('coverflow__frame_stamp', C.c_uint)()
     fw.var('g_backlight_status', C.c_ubyte).value = light
     return home
 
@@ -3275,16 +3294,16 @@ def test_the_pan_steps_while_it_shows_capped_after_a_stall(fw):
     fw.mock('time_now_ms', lambda *_: now[0])
     drift = fw.fn('coverflow__home_drift', C.c_int, C.c_void_p)
     tick, cap = O['DRIFT_TICK_MS'], O['DRIFT_MAX_STEP_MS']
-    home.drift, home.drift_last, home.drift_ms = 3, 1000 - tick, 0
+    home.drift, home.drift_last, home.tick, home.sl[0].ms = 3, 1000 - tick, tick, 0
     ui.dirty.clear()
-    assert drift(None) == 8 and home.drift_ms == tick and home.drift_last == 1000  # a tick on time keeps its time
+    assert drift(None) == 8 and home.sl[0].ms == tick and home.drift_last == 1000  # a tick on time keeps its time
     assert ui.dirty == [pane_rect(fw, h)]  # the pan moved: the panel repaints
     now[0] = 61000
-    assert drift(None) == 8 and home.drift_ms == tick + cap  # a stalled loop never jumps
-    home.drift_ms = 2 * O['DRIFT_X_MS'] * O['DRIFT_Y_MS'] - 1
+    assert drift(None) == 8 and home.sl[0].ms == tick + cap  # a stalled loop never jumps
+    home.sl[0].ms = 2 * O['DRIFT_X_MS'] * O['DRIFT_Y_MS'] - 1
     now[0] += tick
     drift(None)
-    assert home.drift_ms == tick - 1  # whole cycles of both axes: no wrap mid-cycle
+    assert home.sl[0].ms == tick - 1  # whole cycles of both axes: no wrap mid-cycle
 
 
 def test_a_pan_that_has_not_moved_repaints_nothing(fw):
@@ -3292,7 +3311,7 @@ def test_a_pan_that_has_not_moved_repaints_nothing(fw):
     home = drifting(fw)
     fw.mock('time_now_ms', lambda *_: 1100)
     home.drift_last = 1100  # no time shown since the last step: the pan is where the frame was drawn
-    home.du, home.dv = fw.fn('coverflow__pan_u', C.c_int)(), fw.fn('coverflow__pan_v', C.c_int)()
+    home.tick = O['DRIFT_TICK_MS']
     ui.dirty.clear()
     assert fw.fn('coverflow__home_drift', C.c_int, C.c_void_p)(None) == 8 and not ui.dirty
 
@@ -3310,9 +3329,9 @@ def test_the_pan_stops_once_it_no_longer_shows(fw, change):
     elif change == 'sliding':
         ui.animating = 1
     elif change == 'still':
-        home.tw = 0
+        home.sl[0].tw = 0
     elif change == 'margin':  # no margin left to pan across (a split_inset as wide as the zoom's)
-        home.rx = home.ry = 0
+        home.sl[0].rx = home.sl[0].ry = 0
     elif change == 'pane':
         home.pane = 1
     else:
@@ -3329,9 +3348,207 @@ def test_a_home_paint_arms_the_pan_once_while_it_shows(fw, mcl):
     fw.fn('coverflow_home_art', None, C.c_void_p)(h.win)
     i, ms = ui.timer(address(fw, 'coverflow__home_drift'))
     assert ms == O['DRIFT_TICK_MS'] and home.drift == i and home.drift_last == 4321
-    home.tw = 300
+    home.sl[0].tw = 300
     fw.fn('coverflow_home_art', None, C.c_void_p)(h.win)
     assert len([t for t in ui.timers.values() if t[0] == address(fw, 'coverflow__home_drift')]) == 1
+
+
+# The slideshow (docs/ipod.md#home): library covers in turn, each zooming and drifting once, cross-faded
+
+LIFE = O['SLIDE_HOLD_MS'] + 2 * O['SLIDE_FADE_MS']
+
+
+def library_slide(s, ends=((1000, 2000, 65536), (3000, 1000, O['KB_NEAR']))):
+    s.lib, s.kb[0][:], s.kb[1][:] = 1, ends[0], ends[1]
+
+
+def test_a_library_slide_zooms_and_drifts_once_at_an_even_pace_over_its_life(fw):
+    s = fw.var('coverflow__home', Home).sl[0]
+    library_slide(s)
+    assert slide_at(fw, 0) == (1000, 2000, 65536)
+    s.ms = LIFE // 2
+    assert slide_at(fw, 0) == (2000, 1500, (65536 + O['KB_NEAR']) // 2)
+    for ms in (LIFE, LIFE + 1, 10 * LIFE):  # then still, at the far end
+        s.ms = ms
+        assert slide_at(fw, 0) == (3000, 1000, O['KB_NEAR'])
+    s.ms = 0
+    last = slide_at(fw, 0)
+    for ms in range(0, LIFE, 100):  # one way, never back
+        s.ms = ms
+        now = slide_at(fw, 0)
+        assert now[0] >= last[0] and now[1] <= last[1] and now[2] <= last[2]
+        last = now
+
+
+def test_a_library_slides_ends_stay_inside_the_inset_one_zoomed_in_one_not(fw, library):
+    row, client = split_inset_set(fw, library, 2)  # OLED's
+    pw, ph = 375 - row['split_art'], client + row['split_art_up']
+    for w, h in ((300, 300), (400, 300), (300, 600)):
+        tex, home, _ = tex_rig(fw, w, h, rgba(w, h, lambda x, y: (10, 20, 30, 255)))
+        for seed in range(1, 40):
+            home.seed = seed * 7919
+            assert tex(b'x', 1) == 1
+            s = home.sl[0]
+            assert s.lib == 1 and sorted((s.kb[0][2], s.kb[1][2])) == [O['KB_NEAR'], 65536]
+            for e in range(2):
+                u, v, k = s.kb[e]
+                ww, hh = pw * (k >> 8), ph * (k >> 8)
+                assert s.tw * 2 // 100 * 256 <= u <= s.tw * 256 - s.tw * 2 // 100 * 256 - ww, (w, h, seed, e)
+                assert s.th * 2 // 100 * 256 <= v <= s.th * 256 - s.th * 2 // 100 * 256 - hh, (w, h, seed, e)
+            centre = [(s.kb[e][0] + pw * (s.kb[e][2] >> 8) // 2, s.kb[e][1] + ph * (s.kb[e][2] >> 8) // 2) for e in range(2)]
+            assert all(abs(a - b) <= O['KB_DRIFT'] * 256 + 256 for a, b in zip(*centre))  # a slow drift, clamps aside
+
+
+def test_a_zoomed_window_samples_the_cover_at_its_scale(fw):
+    """A ramp through the zoom: each pixel reads the texel at u + x k, v + y k."""
+    tex = slide_tex(fw, 206, 290 + 90, lambda x, y: 0xff400000 | x | min(y, 255) << 8)
+    d = exact(C.c_uint, HOME_PW * HOME_H)
+    k = O['KB_NEAR']
+    for u, v in ((0, 0), (3 * 256 + 77, 5 * 256 + 3)):
+        render(fw, d, HOME_PW, u, v, k)
+        for py, px in ((0, 0), (100, 50), (150, 187), (200, 100)):
+            c = d[py * HOME_PW + px]
+            assert abs((c & 255) - (u / 256 + px * k / 65536 + 1)) <= 1, (u, px)
+            assert abs((c >> 8 & 255) - (v / 256 + py * k / 65536 + 1)) <= 1, (v, py)
+    libc.free(C.addressof(d))
+    libc.free(C.addressof(tex))
+
+
+def test_a_zoomed_out_window_at_the_far_corner_stays_inside_the_border(fw):
+    tw, th = 206, 319
+    tex = slide_tex(fw, tw, th, lambda x, y: 0xff000000)
+    d = exact(C.c_uint, HOME_PW * HOME_H)
+    k = 65536 * 109 // 100  # wider than any slide's window
+    render(fw, d, HOME_PW, tw * 256 - HOME_PW * k // 256, th * 256 - HOME_H * k // 256, k)  # an overrun is the sanitizer's
+    assert d[-1] == 0xff000000
+    libc.free(C.addressof(d))
+    libc.free(C.addressof(tex))
+
+
+def test_the_incoming_slide_is_laid_over_the_frame_by_its_share(fw):
+    home = fw.var('coverflow__home', Home)
+    first = slide_tex(fw, 206, 319, lambda x, y: 0xff000000)
+    second = exact(C.c_uint, 209 * 322)
+    for i in range(209 * 322):
+        second[i] = 0xffc8641e
+    home.sl[1].tex, home.sl[1].tw, home.sl[1].th = C.addressof(second), 206, 319
+    d = exact(C.c_uint, HOME_PW * HOME_H)
+    render(fw, d, HOME_PW, 0, 0)
+    render(fw, d, HOME_PW, 0, 0, blend=64, slide=1)
+    assert set(d) == {0xff000000 | (0xc8 * 64 + 128) >> 8 << 16 | (0x64 * 64 + 128) >> 8 << 8 | (0x1e * 64 + 128) >> 8}
+    for b in (first, second, d):
+        libc.free(C.addressof(b))
+
+
+def fading(fw, ui, h):
+    """The playing cover showing and a library cover fading in over it, the pan's timer at its own period."""
+    home = drifting(fw)
+    s = home.sl[1]
+    s.tw, s.th = 300, 300
+    library_slide(s)
+    home.fade, home.tick, home.drift_last = 1, O['DRIFT_TICK_MS'], 1000
+    return home
+
+
+def test_a_fade_steps_both_slides_on_the_faster_tick_then_the_new_one_shows(fw):
+    _, ui, h, _ = home_open(fw)
+    home = fading(fw, ui, h)
+    now = [1000]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    drift = fw.fn('coverflow__home_drift', C.c_int, C.c_void_p)
+    home.sl[0].tex, home.sl[1].tex = libc.calloc(4, 1), libc.calloc(4, 1)
+    second = home.sl[1].tex
+    now[0] += 100
+    assert drift(None) == 0 and home.tick == O['SLIDE_TICK_MS']  # a new timer takes over at the fade's period
+    i, ms = ui.timer(address(fw, 'coverflow__home_drift'))
+    assert (i, ms) == (home.drift, O['SLIDE_TICK_MS'])
+    assert (home.fade, home.sl[0].ms, home.sl[1].ms) == (101, 100, 100)
+    k = fw.fn('coverflow__fade_k', C.c_uint)
+    assert k() == 101 * 256 // O['SLIDE_FADE_MS']
+    ui.dirty.clear()
+    now[0] += 100
+    assert drift(None) == 8 and ui.dirty == [pane_rect(fw, h)]  # each step repaints: the fade moved
+    while home.fade:  # tick by tick, as a step is capped
+        now[0] += O['SLIDE_TICK_MS']
+        drift(None)
+    assert now[0] - 1000 == 100 * -(-O['SLIDE_FADE_MS'] // 100)
+    assert home.fade == 0 and home.sl[0].tex == second and home.sl[0].lib == 1 and not home.sl[1].tex and not home.sl[1].tw
+    assert home.tick == O['DRIFT_TICK_MS']  # back to the pan's period, the old cover's texture freed (the sanitizer's)
+    libc.free(second)
+
+
+def test_a_playing_cover_that_comes_mid_fade_takes_the_incoming_ones_place(fw):
+    """A track change fades in the album's Coverflow thumbnail until the player's own cover is parsed: that one, or a
+    quick skip's next, replaces the incoming cover where the fade has got to, with its phase, so nothing jumps."""
+    tex, home, _ = tex_rig(fw, 300, 300, rgba(300, 300, lambda x, y: (10, 20, 30, 255)))
+    show = fw.fn('coverflow__slide_show', C.c_int, C.c_char_p, C.c_int, C.c_int)
+    assert show(b'a', 0, 0) == 1 and home.sl[0].tw and not home.fade  # nothing showed: at once
+    showing = home.sl[0].tex
+    home.sl[0].ms = 700
+    assert show(b'b', 0, 0) == 1 and home.fade == 1 and home.sl[1].ms == 700  # over it, at its phase
+    home.fade, home.sl[1].ms = 600, 1300
+    assert show(b'c', 0, 0) == 1 and home.fade == 600 and home.sl[0].tex == showing and home.sl[1].ms == 1300
+    assert show(b'd', 1, 0) == 1 and home.fade == 1 and home.sl[0].tex != showing  # a library cover ends it first
+    bitmap(fw, 300, 300, rgba(300, 300, lambda x, y: (1, 2, 3, 255)), loads=False)
+    home.fade, home.sl[1].lib = 500, 0
+    assert show(b'e', 0, 0) == -1 and home.fade == 0 and not home.sl[1].tw  # none to fade in: the one showing stays
+
+
+def test_a_fade_keeps_the_pan_live_with_a_still_cover_under_it(fw):
+    _, ui, h, _ = home_open(fw)
+    home = fading(fw, ui, h)
+    home.sl[0].rx = home.sl[0].ry = 0
+    assert fw.fn('coverflow__drift_live', C.c_int)() == 1
+    home.fade = 0
+    assert fw.fn('coverflow__drift_live', C.c_int)() == 0
+
+
+def source(fw):
+    return fw.fn('coverflow__art_source', C.c_int)()
+
+
+SHOW_NOW, SHOW_LIB = 0, 1
+
+
+def test_where_the_pane_does_not_follow_the_row_the_show_starts_once_play_has_stopped_a_while(fw):
+    """OLED's pane shows the playing cover while a song plays; stopped or paused for SLIDE_IDLE_MS, the library's."""
+    _, ui, h, home = home_open(fw, OLED, HOME='0')
+    status, now = [2], [1000]
+    fw.mock('mclGetPlayStatus', lambda *_: status[0])
+    fw.mock('time_now_ms', lambda *_: now[0])
+    assert source(fw) == SHOW_NOW and home.idle == 0
+    status[0] = 3  # paused
+    assert source(fw) == SHOW_NOW
+    assert home.idle == 1001  # the time play was first seen stopped, | 1
+    now[0] = 1001 + O['SLIDE_IDLE_MS'] - 1
+    assert source(fw) == SHOW_NOW  # a track change's moment stopped starts nothing
+    now[0] += 1
+    assert source(fw) == SHOW_LIB
+    status[0] = 2
+    assert source(fw) == SHOW_NOW and home.idle == 0  # play again: the playing cover at once
+
+
+@pytest.mark.parametrize('kind, want', ((PANE_NOW, SHOW_NOW), (PANE_LIBRARY, SHOW_LIB)))
+def test_where_the_pane_follows_the_row_the_library_row_shows_the_library(fw, kind, want):
+    """Classic with Row Preview, an iPod classic's menu: Now Playing's row the playing cover, whatever plays; the
+    Library's the slideshow."""
+    _, ui, h, home = home_open(fw, CLASSIC, ROWPREVIEW='1')
+    fw.mock('mclGetPlayStatus', lambda *_: 1)
+    fw.mock('time_now_ms', lambda *_: 100000)
+    home.kind = kind
+    home.idle = 1
+    assert source(fw) == want
+
+
+def test_the_show_goes_on_over_a_track_change(fw, mcl):
+    _, ui, h, _ = home_open(fw, OLED, HOME='0')
+    home = drifting(fw)
+    library_slide(home.sl[0])
+    fw.mock('mclGetPlayStatus', lambda *_: 1)
+    fw.mock('time_now_ms', lambda *_: 100000)
+    home.idle, home.show, home.key = 1, SHOW_LIB, 12345
+    fw.fn('coverflow_home_art', None, C.c_void_p)(h.win)
+    assert home.key != 12345 and not fw.calls('widget_load_image') and home.sl[0].lib == 1
 
 
 # A card app's URL queue: its songs have no path and a cover by URL leaves g_lastcover_url "", so a paint between the

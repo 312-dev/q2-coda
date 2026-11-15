@@ -417,10 +417,22 @@ void np_theme(void) {
  * track has played), so Repeat One plays as 1 whatever shuffle says, and shuffle with repeat Off
  * or All both play as 2. What a mode can't say is kept here: shuffle under Repeat One
  * (np_shuf_one) and Off chosen under shuffle (np_rep_off; All otherwise), so a control turned
- * back finds the other as it was. NP_REPEAT_* are repeat's values. */
+ * back finds the other as it was. Both are saved as [IPOD] NPSHUFONE and NPREPOFF, as stock saves
+ * its mode (PLAYMODE), so a restart draws the pair as it was; np_modes_read reads them back on
+ * first use. NP_REPEAT_* are repeat's values. */
 enum { NP_REPEAT_OFF, NP_REPEAT_ALL, NP_REPEAT_ONE };
-static int np_shuffle_on(int m) { return m == 2 || (m == 1 && st.np_shuf_one); }
+static void np_modes_read(void) {
+    if (st.np_modes_read) return;
+    st.np_modes_read = 1;
+    st.np_shuf_one = (unsigned char)config_value("IPOD", "NPSHUFONE", 2, 0);
+    st.np_rep_off = (unsigned char)config_value("IPOD", "NPREPOFF", 2, 0);
+}
+static int np_shuffle_on(int m) {
+    np_modes_read();
+    return m == 2 || (m == 1 && st.np_shuf_one);
+}
 static int np_repeat_of(int m) {
+    np_modes_read();
     return m == 1                                 ? NP_REPEAT_ONE
            : m == 3 || (m == 2 && !st.np_rep_off) ? NP_REPEAT_ALL
                                                   : NP_REPEAT_OFF;
@@ -428,10 +440,17 @@ static int np_repeat_of(int m) {
 /* Shuffle (on) and repeat (rep) set: the mode they play as, through config_playmode as stock's
  * own play mode setting saves it, and so ringnav_mode's rules (Shuffle Albums or Folders kept
  * under stock Shuffle, other advanced play ended). Unchanged, nothing is sent: repeat between
- * Off and All under shuffle keeps whatever plays. */
+ * Off and All under shuffle keeps whatever plays. A kept value is written only when it moves. */
 void np_mode_set(int on, int rep) {
-    if (rep != NP_REPEAT_ONE) st.np_rep_off = rep == NP_REPEAT_OFF;
-    st.np_shuf_one = on;
+    np_modes_read();
+    if (rep != NP_REPEAT_ONE && st.np_rep_off != (rep == NP_REPEAT_OFF)) {
+        st.np_rep_off = rep == NP_REPEAT_OFF;
+        write_int_config(st.np_rep_off, "IPOD", "NPREPOFF");
+    }
+    if (st.np_shuf_one != !!on) {
+        st.np_shuf_one = !!on;
+        write_int_config(st.np_shuf_one, "IPOD", "NPSHUFONE");
+    }
     int to = rep == NP_REPEAT_ONE ? 1 : on ? 2 : rep == NP_REPEAT_ALL ? 3 : 0;
     if (to != *(volatile int *)MCL_MODE) config_playmode(to, 1);
     void *mode = st.np_win ? widget_lookup(st.np_win, "img_playmode", 1) : (void *)0;
