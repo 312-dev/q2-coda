@@ -12003,10 +12003,11 @@ keep_lit=kids[2]
 assert m.icons_set==['system_display','switch_off','display_backlight','list_into','system_display','list_into','playset_covermode','list_into']
 f,ctx=m.handler(m.nodes[kids[5]]['children'][0],O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==('systemset/display_page',None) and m.get(payload_syms['display_sub'])==0; passed()
-# Cover Flow: Artist View, Playlist View, Cover Flow Sort, Refresh Cover Flow, Fast Navigation; Controls, System's
-# row: the wheel, the buttons and what they do.
-cfv=display_page(m,2); cf,cf_pl,cf_sort,cf_refresh,cf_big,cf_durations,cf_position=m.nodes[cfv]['children']
-assert m.icons_set==['playset_covermode']*3+['system_update','playset_covermode','switch_off','playset_covermode','switch_off','playset_covermode','switch_off'],m.icons_set
+# Cover Flow: Artist View, Playlist View, Cover Flow Sort, Refresh Cover Flow, Fast Navigation, Song Durations, Cover
+# Flow Position, Library (Local Only or Local + Server); Controls, System's row: the wheel, the buttons and what they do.
+cfv=display_page(m,2); cf,cf_pl,cf_sort,cf_refresh,cf_big,cf_durations,cf_position,cf_library=m.nodes[cfv]['children']
+assert m.icons_set==['playset_covermode']*3+['system_update']+['playset_covermode','switch_off']*3+['playset_covermode'],m.icons_set
+assert row_text(cf_library)=='Library: Local Only'  # a named choice, no switch, as Playlist View; LIBRARYSOURCE unset: the card's own songs
 ctl=display_page(m,3); wheel,hold,scrub_one,tone,lock,wake,guard=m.nodes[ctl]['children']  # tone: the Clicker
 assert [row_text(r) for r in (hold,scrub_one)]==['Hold Return: Recent','Single Press Scrub']; passed()
 view=display_page(m,1); rows=setting_rows(m,view)
@@ -13940,13 +13941,16 @@ fk,ck=m.handler(page,O['EVT_KEY_UP'])
 ev=m.alloc(0x40); m.word(ev,O['EVT_KEY_UP']); m.word(ev+O['EVENT_KEY'],O['KEY_RETURN'])
 assert m.call(address=fk,args=(ck,ev,0,0),gap=0)==11 and [c[0] for c in m.calls].count('navigator_back')==1
 m.close(); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.top!=page and m.nodes[m.top]['name']=='shuffle_page'; passed()
-# Classic (no Library icons): Search first, iconless, its press the pull-down's stock search.
+# Classic (no Library icons): Search first, iconless, its press library_search_open, which under a theme without
+# list.entry.ipod (Classic's) hands the press to the pull-down's stock search and opens no strip.
 cm=classic_light_on(classic_light_new(ShuffleMachine))  # its own names: the cases below go on with m's Library
 cview=cm.node('scroll_view','scroll_view_localmusic',[cm.node('list_item') for _ in range(11)]); cm.top=cm.node('window','localmusic_page',[cview])
 assert cm.call(address=HOOKS['localmusic_page_init'][0],args=(cm.top,5,0,0),gap=0)==0
 ckids=cm.nodes[cview]['children']; cbutton=cm.nodes[ckids[0]]['children'][0]; clabel=cm.nodes[cbutton]['children'][0]
 assert len(ckids)==18 and cm.nodes[clabel]['text']=='Search' and cm.nodes[cm.nodes[cm.nodes[ckids[1]]['children'][0]]['children'][1]]['text']=='Shuffle'
-assert cm.handler(cbutton,O['EVT_CLICK'])==(syms['stock_search'],0); passed()
+cf_,cctx=cm.handler(cbutton,O['EVT_CLICK']); assert (cf_,cctx)==(payload_syms['library_search_open'],0)
+cm.calls=[]; ctop=cm.top; cm.call(address=cf_,args=(cctx,cm.event,0,0),gap=0)
+assert [c[0] for c in cm.calls].count('stock_search')==1 and cm.top==ctop; passed()
 def home_settings(full,modern=0):
         # Home's Rockbox row shows only while the card has Rockbox: hidden, it moves after Settings, so the
         # list's layout leaves no gap; it comes back after Folder once the card has it.
@@ -14758,7 +14762,7 @@ m.nodes[m.top]['children']=[view]; m.call(address=HOOKS['localmusic_page_init'][
 f,ctx=m.handler(m.nodes[m.nodes[view]['children'][14]]['children'][0],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.page=m.top
 cancel=m.nodes[m.find('scroll_view')]['children'][0]; g,c=m.handler(cancel,O['EVT_CLICK']); m.call(address=g,args=(c,m.event,0,0),gap=0)
 worker,arg=m.threads[0]; m.call(address=worker,args=(arg,0,0,0),gap=0); assert m.probed==[]  # cancelled before the first
-m.advance(250); assert m.texts()==['Long Songs','No songs over 10 minutes'] and m.joins==[77]; passed()
+m.advance(250); assert m.texts()==['No songs over 10 minutes'] and m.joins==[77]; passed()  # page_list_or: the message, no title row
 # Two CUE tracks to the end of one file probe it once and keep one cache entry.
 m=RateMachine(); m.found=[m.song('A'),m.song('A')]; m.lengths={'/p/A':1300}; m.word(m.found[1]+O['REC_CUE_START'],600)
 m.top=m.node('window','localmusic_page'); view=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)])
@@ -16816,7 +16820,7 @@ passed()
 CAPS='/tmp/q2-addon.caps'
 m=AppMachine(); stream_rows(m); caps=bytes(m.files[CAPS])
 assert caps.endswith(b'\n') and caps.count(b'\n')==1,caps
-assert set(caps.split())=={b'playlist',b'progress',b'pages',b'library',b'goto',b'sleep',b'game',b'audio',b'sections',b'art',b'window',b'urls',b'sort',b'field',b'more',b'fav',b'now'},caps
+assert set(caps.split())=={b'playlist',b'progress',b'pages',b'library',b'goto',b'sleep',b'game',b'audio',b'sections',b'art',b'window',b'urls',b'sort',b'field',b'more',b'fav',b'now',b'catalogue',b'ratings'},caps
 m.files[CAPS]=bytearray(b'stale\n'); stream_rows(m); assert m.files[CAPS]==caps; passed()
 # Classic, Home's Split: the Streaming row slides Streaming's rows in, as the Library's: the page's own constructor fills the
 # list, what it sets on a window goes again, every row (stock's 70 px Tidal row and the added ones) takes Home's width and height,
@@ -18929,12 +18933,12 @@ assert icons==['system_display','playset_folderjump','playset_covermode','system
 guard=lambda: m.get(payload_syms['wheel_guard'])
 assert guard()==0 and click(6)==[(1,'Q2POD','VOLGUARD')] and texts()[6]=='Volume Guard' and guard()==1
 assert click(6)==[(0,'Q2POD','VOLGUARD')] and texts()[6]=='Volume Guard' and guard()==0; passed()
-# Fast Navigation (Display, Cover Flow's page, its last row): off by default; the row saves BIGLIBRARY, and Cover
+# Fast Navigation (Display, Cover Flow's page, fourth from the end, before Scan Song Durations, Position Bar and Library): off by default; the row saves BIGLIBRARY, and Cover
 # Flow reads it at once (ringnav_big_library: letters, years and half copies); a stored value other than 1 is off.
 bm,brows,btexts,bicons,bclick=settings_page('display','scroll_view_display',stock_rows=3,sub=2)
-assert btexts()[-3]=='Fast Navigation' and bicons[-3]=='playset_covermode',(btexts(),bicons)
+assert btexts()[-4]=='Fast Navigation' and bicons[-4]=='playset_covermode' and btexts()[-1]=='Library: Local Only',(btexts(),bicons)
 big=lambda bm: bm.call(address=payload_syms['ringnav_big_library'],args=(0,0,0,0),gap=0)
-k=len(brows)-3
+k=len(brows)-4
 assert big(bm)==0 and bclick(k)==[(1,'Q2POD','BIGLIBRARY')] and btexts()[k]=='Fast Navigation' and big(bm)==1
 assert bclick(k)==[(0,'Q2POD','BIGLIBRARY')] and btexts()[k]=='Fast Navigation' and big(bm)==0; passed()
 for v,on in (('1',1),('2',0),('0',0)):
@@ -18943,15 +18947,15 @@ for v,on in (('1',1),('2',0),('0',0)):
 passed()
 # The independent duration switch is off, persists on/off, and cancels on off.
 dm,drows,dtexts,dicons,dclick=settings_page('display','scroll_view_display',stock_rows=3,sub=2)
-assert dtexts()[-2]=='Scan Song Durations'
-assert dclick(len(drows)-2)==[(1,'Q2POD','SCANDURATIONS')]
-assert dclick(len(drows)-2)==[(0,'Q2POD','SCANDURATIONS')]; passed()
+assert dtexts()[-3]=='Scan Song Durations'
+assert dclick(len(drows)-3)==[(1,'Q2POD','SCANDURATIONS')]
+assert dclick(len(drows)-3)==[(0,'Q2POD','SCANDURATIONS')]; passed()
 # The browsing-position indicator is optional, off by default, and persists independently.
 pm,prows,ptexts,picons,pclick=settings_page('display','scroll_view_display',stock_rows=3,sub=2)
-assert ptexts()[-1]=='Position Bar'
+assert ptexts()[-2]=='Position Bar'
 position_on=lambda pm: pm.call(address=payload_syms['coverflow_position_enabled'],args=(0,0,0,0),gap=0)
-assert position_on(pm)==0 and pclick(len(prows)-1)==[(1,'Q2POD','CFPOSITION')] and position_on(pm)==1
-assert pclick(len(prows)-1)==[(0,'Q2POD','CFPOSITION')] and position_on(pm)==0
+assert position_on(pm)==0 and pclick(len(prows)-2)==[(1,'Q2POD','CFPOSITION')] and position_on(pm)==1
+assert pclick(len(prows)-2)==[(0,'Q2POD','CFPOSITION')] and position_on(pm)==0
 for v,on in (('1',1),('2',0),('0',0)):
     pm,*_=settings_page('display','scroll_view_display',{'CFPOSITION':v},stock_rows=3,sub=2)
     assert position_on(pm)==on,v
@@ -19668,8 +19672,8 @@ assert press(m.dec)==X(0,2)  # a drag whose release sent nothing: the next step 
 passed()
 # Night Shift (nightshift.c): the main Display page's last row, after Appearance,
 # Coverflow and Controls; Q2POD NIGHTSHIFT and NIGHTK, 3400K unless a hundred in 2000-5000.
-for config,text in (({},'Off'),({'NIGHTSHIFT':'1'},'3400K'),({'NIGHTSHIFT':'1','NIGHTK':'2700'},'2700K'),({'NIGHTSHIFT':'1','NIGHTK':'5000'},'5000K'),
-                    ({'NIGHTSHIFT':'1','NIGHTK':'2750'},'3400K'),({'NIGHTSHIFT':'1','NIGHTK':'6500'},'3400K'),({'NIGHTK':'2000'},'Off')):
+for config,text in (({},'Off'),({'NIGHTSHIFT':'1'},'3400 K'),({'NIGHTSHIFT':'1','NIGHTK':'2700'},'2700 K'),({'NIGHTSHIFT':'1','NIGHTK':'5000'},'5000 K'),
+                    ({'NIGHTSHIFT':'1','NIGHTK':'2750'},'3400 K'),({'NIGHTSHIFT':'1','NIGHTK':'6500'},'3400 K'),({'NIGHTK':'2000'},'Off')):
     m,rows,texts,icons,click=settings_page('display','scroll_view_display',config,stock_rows=3)
     label=m.nodes[m.nodes[rows[1]]['children'][0]]['children'][1]
     assert texts()[1]=='Night Shift: '+text and icons[1]=='display_backlight' and m.nodes[label]['name']=='label_night',config
@@ -19684,23 +19688,23 @@ assert click(1)==[] and m.nodes[m.top]['name']=='bootvol_page' and m.nodes[m.tit
 assert m.nodes[m.switch]['visible']!=0 and m.nodes[m.vol]['text']=='Off'
 N,K=('Q2POD','NIGHTSHIFT'),('Q2POD','NIGHTK')
 def repaints(): return [c[1:3] for c in m.calls if c[0]=='widget_invalidate_force']==[(m.wm,0)]
-assert press(m.switch)==[(1,*N)] and repaints() and m.nodes[m.vol]['text']=='3400K' and texts()[1]=='Night Shift: 3400K'
+assert press(m.switch)==[(1,*N)] and repaints() and m.nodes[m.vol]['text']=='3400 K' and texts()[1]=='Night Shift: 3400 K'
 assert m.nodes[m.switch]['image']=='switch_on'
-assert turn()==[(3300,*K)] and repaints() and m.nodes[m.vol]['text']=='3300K'
+assert turn()==[(3300,*K)] and repaints() and m.nodes[m.vol]['text']=='3300 K'
 assert turn(O['KEY_PREV'])==[(3400,*K)] and press(m.add)==[(3300,*K)] and press(m.dec)==[(3400,*K)]
 m.nodes[m.slider]['value']=30; assert press(m.slider,O['EVT_VALUE_CHANGED'])==[(2000,*K)] and turn()==[] and press(m.add)==[]
-m.nodes[m.slider]['value']=10; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and repaints() and texts()[1]=='Night Shift: 4000K'
-m.nodes[m.slider]['value']=0; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and repaints() and texts()[1]=='Night Shift: 5000K'
+m.nodes[m.slider]['value']=10; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and repaints() and texts()[1]=='Night Shift: 4000 K'
+m.nodes[m.slider]['value']=0; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and repaints() and texts()[1]=='Night Shift: 5000 K'
 assert press(m.slider,O['EVT_VALUE_CHANGED'])==[(5000,*K)] and turn(O['KEY_PREV'])==[]  # the release saves, once
 # The switch cycles Off, On and Auto; a move in Auto keeps Auto.
-assert texts()[1]=='Night Shift: 5000K' and press(m.switch)==[(2,*N)] and repaints() and m.nodes[m.vol]['text']=='Auto'
+assert texts()[1]=='Night Shift: 5000 K' and press(m.switch)==[(2,*N)] and repaints() and m.nodes[m.vol]['text']=='Auto'
 assert texts()[1]=='Night Shift: Auto' and m.nodes[m.switch]['image']=='switch_on'
 assert turn()==[(4900,*K)] and texts()[1]=='Night Shift: Auto' and turn(O['KEY_PREV'])==[(5000,*K)]
 assert press(m.switch)==[(0,*N)] and repaints() and m.nodes[m.vol]['text']=='Off'
 assert texts()[1]=='Night Shift: Off' and m.nodes[m.switch]['image']=='switch_off'
-assert turn(O['KEY_PREV'])==[(1,*N)] and texts()[1]=='Night Shift: 5000K'  # at an end too
+assert turn(O['KEY_PREV'])==[(1,*N)] and texts()[1]=='Night Shift: 5000 K'  # at an end too
 assert press(m.switch)==[(2,*N)] and press(m.switch)==[(0,*N)]
-assert turn()==[(1,*N),(4900,*K)] and texts()[1]=='Night Shift: 4900K'; passed()  # a move turns it on
+assert turn()==[(1,*N),(4900,*K)] and texts()[1]=='Night Shift: 4900 K'; passed()  # a move turns it on
 # The tint (nightshift.c night_end, stock lcd_end_frame calling it): on, as boot read it, the first
 # normal frame's paint gives the screen's lcd night_end, reading no setting. Each frame warms the
 # pixels drawn in its rect (alpha not 0xf7): red kept, green and blue scaled, alpha 0xf7; one
@@ -21173,9 +21177,10 @@ assert 'rm -rf /mnt/mmc/.spotify/cache /mnt/mmc/.spotify/.cache-size /mnt/mmc/.s
 assert m.toasts[-1][3]=="Spotify's login and cache erased" and KILL in m.systems[-1]
 assert m.labels()[2:4]==['Spotify Cache: 2 GB','Erase Spotify Data']; passed()
 # The wheel drives only allowlisted windows (patch/contexts.inc), so every runtime list page needs an
-# entry; the two streaming Now Playing pages and a card app's QR code page (no list) handle their own keys.
+# entry; the two streaming Now Playing pages, a card app's QR code page and OLED's offline note (feedback_offline),
+# none with a list, handle their own keys.
 pages=set(re.findall(r'page_open\("(\w+)"',''.join(p.read_text() for p in (ROOT/'patch').glob('*.c'))))
-assert pages-set(re.findall(r'"(\w+)"',(ROOT/'patch/contexts.inc').read_text()))=={'radionp_page','spotify_page','qrcode_page'}; passed()
+assert pages-set(re.findall(r'"(\w+)"',(ROOT/'patch/contexts.inc').read_text()))=={'radionp_page','spotify_page','qrcode_page','offline_page'}; passed()
 m=BooksMachine({},{}); vid=payload_syms['vid']; m.word(vid+12,4242); m.word(vid+16,7)
 for playing,command in ((0,'a'),(1,'r')):
     m.sent=[]; endpoint(m,'video_set_playing',playing); endpoint(m,'video_set_playing',playing)
