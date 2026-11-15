@@ -60,6 +60,9 @@
 #include "stock.h"
 
 #define ADDON_POLL_MS 500
+/* A level's drawing (artist_view): the rows as the app sent them, or an artist's page and the
+ * pages its rows open, under a set with the inset modal */
+enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP };
 #define ADDON_START_MS 10000 /* no socket this long after the start: it isn't running */
 #define ADDON_LIVE_MS 2000   /* a level whose reply says "refresh" is asked again this often */
 #define ADDON_WAIT_MS 15000  /* a request's deadline, as Spotify's */
@@ -1195,6 +1198,8 @@ typedef struct {
     unsigned base;     /* args' bytes before a More…'s cursor: the list's own */
     unsigned id, hash; /* id: the fetch whose reply this level takes; hash: its rows' bytes */
     char title[128], note[128], op[16], args[400]; /* args: "\t" and escaped each */
+    signed char lay;  /* LAY_*: how show() draws its rows (artist_view) */
+    signed char stop; /* LAY_ARTIST's lit pair stop (artist_page.c pair_key), 0: its rows' */
 } lv_t;
 
 static struct {
@@ -1343,9 +1348,12 @@ static void art_forget(void) {
  * pg.f still names their rows, whether or not the files are still there. The rows painted since
  * the last tick count too. */
 static void art_window(void);
+static void album_covers_drop(void);
+static void keep_sel(void);
 static void drop(void) {
     art_window();
     art_forget();
+    if (pg.depth && top()->lay == LAY_ALBUMS) album_covers_drop(); /* the Albums page's covers */
     while (pg.pages) free(pg.buf[--pg.pages]);
     pg.paging = 0;
 }
@@ -1525,6 +1533,11 @@ static void find_icon(int sort) {
  * a ringnav call that grows a list in place would keep them while pages arrive. */
 static void append(lv_t *l, int from) {
     if (!pg.view) return; /* the search box over it: show() draws them all when it closes */
+    if (l->lay) { /* an artist's page and its pages count and order the rows anew */
+        keep_sel();
+        show();
+        return;
+    }
     int cur = widget_get_prop_int(pg.view, "_ringnav_index", 0), n = l->n + (pg.f[3][0] != 0);
     if (cur == from && l->sel > from) cur = l->sel;
     if (n && cur >= n) cur = n - 1; /* past an empty last page: its last row */
@@ -1595,12 +1608,160 @@ static void relabel(const lv_t *l) {
 static void busy_row(int on) {
     lv_t *l = top();
     int i = pg.arow;
-    if (on == pg.busy || !pg.view || l->state != K_READY || i >= l->n) return;
+    if (on == pg.busy || !pg.view || l->state != K_READY || i >= l->n || l->lay) return;
     int k = 2 + !!cell(i, 3)[0];
     void *item = widget_get_child(pg.view, (unsigned)i);
     retext(item, widget_get_child(item, (unsigned)k - 2), (unsigned)k,
            on ? "Working…" : cell(i, k));
     pg.busy = on;
+}
+
+/* An artist's page (docs/oled-design.md#artist-page) from the app's reply, under a set with the
+ * inset modal (OLED's); other sets keep the plain rows. A reply is an artist's when it has Shuffle
+ * and Radio actions on an "artist:" context, as q2-subsonic's artist page does (Go to Artist's,
+ * and its Artists rows'). Its other rows go where the design puts them: the album rows (list,
+ * album) under an Albums row, Top Songs (list, top) as a row of its own, Add to Sync, Quality and
+ * Sync Now in the Play/Pause hold menu (artist_hold), Play nowhere. The pages Top Songs and Albums
+ * open are levels of their own drawn as cover rows (LAY_TOP, LAY_ALBUMS): Albums asks the artist's
+ * page again and keeps its album rows, newest first. What the app does not send is left out: the
+ * header's song count, genre and a release type (Singles & EPs) need fields the reply does not
+ * carry, and a song's album, length and cover too.
+ * ponytail: counted and listed from this reply's rows: an artist whose rows run past one reply
+ * (about 45 albums) counts and lists those of the pages that arrived (pages: page_next) or of its
+ * first window only (window: its Previous and Next page rows are not drawn); the app sending the
+ * counts, and the Albums page keeping page rows, would lift it. */
+#define AR_ALBUMS (1 << 20) /* the Albums row's click context: no reply row's index */
+#define AR_HOLD 4           /* the hold menu's rows at most */
+static int ar_hold_row[AR_HOLD] __attribute__((section(".scratch")));
+static void later(int next, int arg);
+
+static int is_album(int i) {
+    return !strcmp(cell(i, 0), "list") && (!strcmp(cell(i, 1), "album") || !strcmp(cell(i, 1), "albumart"));
+}
+static int is_artist_act(int i, const char *op) {
+    return !strcmp(cell(i, 0), "action") && !strcmp(cell(i, 1), op) &&
+           !strncmp(cell(i, 4), "artist:", 7);
+}
+/* An album row's year: its subtitle's first four digits, else 0 */
+static int album_year(int i, char *out) {
+    const char *s = cell(i, 3);
+    int y = 0;
+    for (int k = 0; k < 4; ++k)
+        if (s[k] < '0' || s[k] > '9') return out[0] = 0, 0;
+    y = (s[0] - '0') * 1000 + (s[1] - '0') * 100 + (s[2] - '0') * 10 + (s[3] - '0');
+    if (s[4] && s[4] != ' ') return out[0] = 0, 0;
+    memcpy(out, s, 4), out[4] = 0;
+    return y;
+}
+/* Album row i's cover: the app's catalogue cover for its album id (docs/server-library.md#covers),
+ * when the file is there; 0 otherwise. */
+static int album_cover(int i, char *url, unsigned size) {
+    const char *c = cell(i, 4);
+    if (strncmp(c, "album:", 6) || !c[6]) return 0;
+    for (const char *k = c + 6; *k; ++k)
+        if (*k == '/') return 0; /* a name, never a path */
+    tk_snprintf(url, size, "file:///mnt/mmc/.%s/covers/%s.jpg", app()->id, c + 6);
+    return !access(url + 7, 0);
+}
+static void album_covers_drop(void) {
+    char url[96];
+    for (int i = 0; i < top()->n; ++i)
+        if (is_album(i) && album_cover(i, url, sizeof url))
+            image_manager_unload_bitmap_by_name(image_manager(), url);
+}
+
+/* The level's rows as an artist's page, its Albums page or its Top Songs page; how many rows its
+ * list has, 0 when the reply is not one (the level is then drawn plain from now on). */
+static int artist_view(lv_t *l) {
+    int n = 0;
+    char url[96], year[8];
+    if (!modal_set()) return l->lay = LAY_PLAIN, 0;
+    if (l->lay == LAY_ALBUMS) {
+        int k = 0, *order = calloc((unsigned)l->n + 1, sizeof *order);
+        for (int i = 0; order && i < l->n; ++i)
+            if (is_album(i)) { /* newest first, the undated after, each in the app's order */
+                int y = album_year(i, year), j = k++;
+                while (j && album_year(order[j - 1], url) < y) order[j] = order[j - 1], --j;
+                order[j] = i;
+            }
+        if (!k) return free(order), l->lay = LAY_PLAIN, 0;
+        pg.view = page_list(pg.page, pg.page, 0, l->title, k, 40);
+        for (int j = 0; j < k; ++j) {
+            int i = order[j];
+            album_year(i, year);
+            cover_row(pg.view, j, 40, 32, 0, cell(i, 2), year,
+                      album_cover(i, url, sizeof url) ? url : (const char *)0, clicked, i);
+        }
+        free(order);
+        return k;
+    }
+    if (l->lay == LAY_TOP) {
+        for (int i = 0; i < l->n; ++i)
+            if (strcmp(cell(i, 0), "action") || strcmp(cell(i, 1), "play")) return l->lay = LAY_PLAIN, 0;
+        if (!l->n) return l->lay = LAY_PLAIN, 0;
+        pg.view = page_list(pg.page, pg.page, 0, l->title, l->n, 36);
+        for (int i = 0; i < l->n; ++i)
+            cover_row(pg.view, i, 36, 28, AR_SONG_PX, cell(i, 2), "", (const char *)0, clicked, i);
+        return l->n;
+    }
+    int shuffle = -1, radio = -1, tops = -1, albums = 0;
+    for (int i = 0; i < l->n; ++i) {
+        if (is_artist_act(i, "shuffle")) shuffle = i;
+        if (is_artist_act(i, "radio")) radio = i;
+        if (!strcmp(cell(i, 0), "list") && !strcmp(cell(i, 1), "top")) tops = i;
+        albums += is_album(i);
+    }
+    if (shuffle < 0 || radio < 0) return l->lay = LAY_PLAIN, 0;
+    if (l->lay != LAY_ARTIST) l->lay = LAY_ARTIST, l->stop = 1; /* opens on Shuffle */
+    n = (tops >= 0) + !!albums;
+    pg.view = page_list(pg.page, pg.page, 0, "", n, 48);
+    int h = drill_list(pg.view, n), k = 0;
+    if (tops >= 0)
+        widget_move_resize(page_row_detail_into(pg.view, tops, "Top Songs", 0, clicked), 0, k++ * h,
+                           375, h);
+    if (albums) {
+        void *item = page_row_detail_into(pg.view, AR_ALBUMS, "Albums", 0, clicked);
+        widget_move_resize(item, 0, k++ * h, 375, h);
+        tk_snprintf(year, sizeof year, "%d", albums);
+        drill_count(item, year);
+    }
+    char sub[24];
+    tk_snprintf(sub, sizeof sub, albums == 1 ? "1 album" : "%d albums", albums);
+    static const char *const labels[2] = { "Shuffle", "Radio" }, *const icons[2] = { "shuffle", "radio" };
+    int ctx[2] = { shuffle, radio };
+    pair_open(hero_open(pg.page, l->title, albums ? sub : "", ""), pg.view, labels, icons, ctx, clicked,
+              &l->stop);
+    return n;
+}
+
+/* Play/Pause held on an artist's page: the inset modal of its sync rows (Add to Sync or Remove
+ * from Sync, Quality, Sync Now), each doing what its row did. */
+static void artist_pick(int k) {
+    lv_t *l = top();
+    int i = k >= 0 && k < AR_HOLD ? ar_hold_row[k] : -1;
+    if (!pg.page || l->lay != LAY_ARTIST || l->state != K_READY || i < 0 || i >= l->n) return;
+    later(G_ROW, i);
+}
+static int artist_hold(lv_t *l) {
+    const char *names[AR_HOLD], *icons[AR_HOLD];
+    int n = 0;
+    for (int i = 0; i < l->n && n < AR_HOLD; ++i) {
+        const char *kind = cell(i, 0), *uri = cell(i, 1);
+        if (!strcmp(kind, "action") && !strcmp(uri, "toggle") && !strncmp(cell(i, 4), "artist:", 7))
+            icons[n] = !strncmp(cell(i, 2), "Remove", 6) ? "trash" : "cloud-arrow-down";
+        else if (!strcmp(kind, "action") && !strcmp(uri, "quality"))
+            icons[n] = "sliders-horizontal";
+        else if (!strcmp(kind, "list") && !strcmp(uri, "sync"))
+            icons[n] = "download-simple";
+        else
+            continue;
+        names[n] = cell(i, 2);
+        ar_hold_row[n++] = i;
+    }
+    if (n) return modal_actions(names, icons, n, artist_pick);
+    for (int i = 0; i < l->n; ++i) /* Included via Entire Library: nothing to press */
+        if (!strcmp(cell(i, 0), "info") && i < 2) return toast(cell(i, 2)), 1;
+    return 0;
 }
 
 /* The top level: its rows, or what it waits for. */
@@ -1638,11 +1799,15 @@ static void show(void) {
          * choice and Back or an action reloads from the first page; a list rebuilt whole with all
          * its pages there (a short first page, the search box closing) counts them */
         art_forget(); /* the rows are built anew: nothing of theirs decoded yet */
-        l->art = art_rows(l->n);
-        pg.view = page_list(pg.page, pg.page, 0, l->title, n = l->n + (pg.f[3][0] != 0),
-                            l->art ? ART_ROW_H : 64);
-        for (int i = 0; i < n; ++i) row(l, i);
-        if (l->find) find_icon(l->sort);
+        if ((n = artist_view(l))) {
+            l->art = 0;
+        } else {
+            l->art = art_rows(l->n);
+            pg.view = page_list(pg.page, pg.page, 0, l->title, n = l->n + (pg.f[3][0] != 0),
+                                l->art ? ART_ROW_H : 64);
+            for (int i = 0; i < n; ++i) row(l, i);
+            if (l->find) find_icon(l->sort);
+        }
         page_push(pg.view, pg.moved), pg.moved = 0;
     }
     if (n) ringnav_select(pg.view, l->state == K_ERROR ? 0 : l->sel < n ? l->sel : n - 1, n);
@@ -1814,8 +1979,8 @@ static void got(void) {
         pg.again = now + ADDON_LIVE_MS;
         if (l->state != K_READY || hash != l->hash) {
             int find = take_find(g, &n), sort = find && take_sort(g, &n);
-            int same = l->state == K_READY && l->live && find == l->find && sort == l->sort &&
-                       same_rows(l, g, n);
+            int same = l->state == K_READY && l->live && !l->lay && find == l->find &&
+                       sort == l->sort && same_rows(l, g, n);
             keep_sel();
             if (same)
                 free(pg.buf[0]); /* same_rows: its one page, and the covers stay drawn */
@@ -2019,10 +2184,16 @@ static int go(const void *unused) {
     } else if (i == l->n) { /* More…, as a level of its own; Loading… does nothing */
         if (!pg.paging && cursor_args(l, a, sizeof a, pg.f[3]))
             push(l->op, a, l->base, pg.depth == 1 && pg.nsec ? pg.sec[pg.cur].title : l->title);
+    } else if (i == AR_ALBUMS && l->lay == LAY_ARTIST) { /* the artist's page again, its albums */
+        push(l->op, l->args, l->base, "Albums");
+        top()->lay = LAY_ALBUMS;
+    } else if (i < 0 || i >= l->n) {
     } else {
         const char *kind = cell(i, 0), *uri = cell(i, 1), *ctx = cell(i, 4);
+        int tops = l->lay == LAY_ARTIST && !strcmp(kind, "list") && !strcmp(uri, "top");
         if (!strcmp(kind, "list") || !strcmp(kind, "sort")) /* with remote and a folder: opens() */
             open_list(uri, ctx, cell(i, 2));
+        if (tops && top() != l) top()->lay = LAY_TOP;
         else if (!strcmp(kind, "page"))
             page_to(l, ctx, strcmp(uri, "prev") ? 1 : -1);
         else if (!strcmp(kind, "action") && !pg.act) /* one in flight: this press does nothing */
@@ -2278,6 +2449,9 @@ int addon_hold(void *w) {
     lv_t *l = pg.page && w == pg.page ? top() : 0;
     int i = l && l->state == K_READY && pg.view ? widget_get_prop_int(pg.view, "_ringnav_index", -1)
                                                 : -1;
+    if (i >= 0 && l->lay == LAY_ARTIST) return artist_hold(l);
+    if (i >= 0 && l->lay) /* a cover row: its reply row is its click's (cover_row) */
+        i = widget_get_prop_int(widget_get_child(pg.view, (unsigned)i), "_ar_row", -1);
     if (i < 0 || i >= l->n || !cell(i, 5)[0] || !strcmp(cell(i, 0), "progress")) return 0;
     action(i, cell(i, 5), cell(i, 4));
     return 1;
@@ -2462,6 +2636,7 @@ static void plate(void *canvas, int x, int y, int w, int h, unsigned color, unsi
  * dark modules on the white plate, a row's run of them one rectangle, inside a quiet zone of two
  * modules. */
 void addon_paint(void *w, void *canvas) {
+    if (pg.page && pg.depth && top()->lay && window_of(w) == pg.page) artist_paint(w, canvas);
     /* the height first: no prop lookup for the page's other widgets */
     int pml = pg.page && I(w, W_H) == progress_h() && P(canvas, CANVAS_LCD)
                   ? widget_get_prop_int(w, "_pml", -1)

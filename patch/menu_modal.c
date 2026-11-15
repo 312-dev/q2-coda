@@ -313,7 +313,8 @@ static int pick_gone(void *dialog, void *event) {
     return 0;
 }
 
-int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i)) {
+static int modal_list(void *under, const char *const *names, const char *const *icons, int n,
+                      int current, void (*pick)(int i)) {
     void *wm = window_manager(), *page = window_manager_get_top_window(wm);
     if (pk.dialog || n <= 0) return 0;
     navigator_to("dialog/sortselect_dialog");
@@ -337,8 +338,11 @@ int modal_pick(void *under, const char *const *names, int n, int current, void (
         void *label = hscroll_label_create(item, 0, 0, 0, MODAL_ROW);
         widget_use_style(label, "s_scrlabel_white24l");
         widget_set_text_utf8(label, names[i]);
-        modal_row(item, label, i == current ? "check" : (const char *)0, (const char *)0,
-                  MM_CHOICE);
+        if (icons)
+            modal_row(item, label, icons[i], (const char *)0, MM_ACTION);
+        else
+            modal_row(item, label, i == current ? "check" : (const char *)0, (const char *)0,
+                      MM_CHOICE);
         widget_on(item, EVT_CLICK, pick_click, (void *)(long)i);
     }
     pk.dialog = dialog, pk.pick = pick;
@@ -347,6 +351,15 @@ int modal_pick(void *under, const char *const *names, int n, int current, void (
     modal_frame(dialog, widget_lookup(dialog, "list_view", 1));
     ringnav_select(view, current >= 0 && current < n ? current : 0, n);
     return 1;
+}
+int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i)) {
+    return modal_list(under, names, (const char *const *)0, n, current, pick);
+}
+/* A menu of n actions in the panel, each its symbol (tools/art.py MENU_ICONS) at the right, as the
+ * hold menus' are (an artist's page, addon.c artist_hold); pick gets the chosen one's index. It
+ * opens on the first. */
+int modal_actions(const char *const *names, const char *const *icons, int n, void (*pick)(int i)) {
+    return modal_list((void *)0, names, icons, n, 0, pick);
 }
 
 /* Now Playing's More (onlinematch.c ringnav_playermore): a dialog under a modal set

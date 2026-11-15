@@ -781,6 +781,10 @@ void modal_row_paint(void *w, void *canvas, void *row, rect_t r, int selected);
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
 void modal_more(void *win);
 void modal_playlist_more(void *win);
+/* artist_page.c: an artist's page's pair of stops and its monogram over the status bar */
+int pair_key(void *top, void *w, int dir);
+int pair_holds(void *w);
+void artist_cap(void *bar, void *canvas);
 /* song_sort.c: Songs' order under the inset modal's Sort picker */
 enum { SORT_TITLE, SORT_ARTIST, SORT_ALBUM, SORT_ADDED, SORT_N };
 int song_sort(void);
