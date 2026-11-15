@@ -1545,7 +1545,11 @@ void catalogue_poll(void) {
         cat.app[i].down = tk_str_start_with(v, "down");
         up |= !cat.app[i].down;
         cat_avail(i);
-        ratings_in(i);
+        /* a server row's line finds its path in the index: not while a job builds a new one, nor
+         * before the app's catalogue is imported (a boot's first poll starts that job) */
+        char seq[24];
+        if (!cat.running && !(cat_seq(cat.app[i].id, seq) && strcmp(seq, cat.app[i].seq)))
+            ratings_in(i);
     }
     cat.online = up && networkGetConnectStatus() > 0;
     catplay_poll();

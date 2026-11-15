@@ -308,7 +308,9 @@ for server rows and for synced card files alike, whenever the Q2 can reach the s
   firmware applies each line through the same path as a rating made on the device (the hearts by
   `listen_key`; My Fav, for five, by the song's path: a server row's or a linked file's from its
   sid, any other card file's found by its key in songtable), skipping a song whose own
-  `ratings.out` line is newer, then deletes the file.
+  `ratings.out` line is newer, then deletes the file. It waits while an import runs or the app's
+  catalogue on the card is not yet imported (a boot's first poll), so a server row's path is in the
+  index when its line is read.
 - **Conflicts:** the newer change wins, by the time the Q2 recorded it against the server's
   `starred` date where one exists; a rating has no server date, so a pending local change is sent
   before the server's value is read back.

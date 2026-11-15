@@ -1155,3 +1155,19 @@ def test_the_ratings_lists_have_rated_server_songs_with_local_and_server(rig, fw
     assert [t for t, _ in ui.rows(ui.top())] == ['Book']
     rig.lib.sqlite3_close(slot)
     slot.value = 0
+
+
+@pytest.mark.parametrize('first', [False, True])
+def test_a_server_songs_five_hearts_from_the_server_are_its_my_fav(rig, fw, first):
+    """ratings.in's five hearts for a server row put the row in My Fav, by its path from the index: whether the
+    line comes after the catalogue's import or with it, at the first poll after a boot (the index is built by
+    that poll's job, so the line waits for it)."""
+    rig.write(1, [song_row('s1', 'Server', 'B', 'A', 1, 100, 1)])
+    if not first:
+        rig.poll()
+    ks = listen_key(url('s1'))
+    rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = f'{ks:08x}\ts1\t5\t1700000000\n'.encode()
+    rig.poll(3)
+    assert f'/mnt/mmc/.{APP}/ratings.in' not in rig.files.files
+    db = sqlite3.connect(rig.tmp/'database.db')
+    assert db.execute('select fileurl from myfav').fetchall() == [(url('s1'),)]
