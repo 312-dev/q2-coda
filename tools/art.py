@@ -211,7 +211,7 @@ MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart
               'vinyl-record', 'microphone-stage', 'folder', 'heart-half', 'clock-counter-clockwise', 'list-numbers',
               'bookmark-simple', 'dots-three', 'plus', 'list-checks', 'skip-forward', 'skip-back', 'repeat', 'stack',
               'airplay', 'download-simple', 'cloud-arrow-down', 'trash', 'speedometer', 'pencil-simple',
-              'caret-up', 'caret-down', 'check', 'sliders-horizontal')
+              'caret-up', 'caret-down', 'check', 'sliders-horizontal', 'info')
 PAIR_ICON_PX = 16  # an artist's page's action pair (artist_page.c PAIR_ICON)
 PAIR_ICONS = ('shuffle', 'radio')
 

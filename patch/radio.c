@@ -470,7 +470,7 @@ static int np_heart(void *ctx, void *event) {
 /* Spotify's Now Playing layout, the radio's icon for the art, and local Now Playing's heart. The
  * wheel and Centre stay stock's: the volume, and the screen. Under Classic the local page's
  * (stream_ipod), as an album: the build's station cover slanted, the station, artist and song in
- * the title's, artist's and album's rows, the stream in "3 of 12"'s, the running time left of a bar
+ * the title's, artist's and album's rows, the stream in the fourth under them, the running time left of a bar
  * that is always full, the heart. */
 static void np_open(void) {
     if (np.page || !(np.page = page_open("radionp_page", np_closed, np_keyup))) return;

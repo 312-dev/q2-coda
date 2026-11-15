@@ -320,9 +320,8 @@ def test_playing_page_top_row(page):
     assert n['img_more'][2] == {'name': 'img_more', 'image': 'more', 'draw_type': 'center'}
     assert n['img_playmode'][2] == {'name': 'img_playmode'}
     assert n['img_fav'][2] == {'name': 'img_fav', 'image': 'fav', 'keep': 'yes', 'draw_type': 'center'}
-    assert [c[2]['name'] for c in buttons[3]] == ['img_return', 'img_more', 'label_ipod_pos']
-    assert n['label_ipod_pos'][:3] == ['label', [ipod.NP_POS_X, 0, x - ipod.NP_POS_X, ipod.NP_TOP], {
-        'name': 'label_ipod_pos', 'style:normal:font_size': '16', 'style:normal:text_color': ipod.NP_GREY, 'style:normal:text_align_h': 'left'}]
+    assert [c[2]['name'] for c in buttons[3]] == ['img_return', 'img_more']  # no queue place ("3 of 12")
+    assert 'label_ipod_pos' not in n
 
 
 def test_playing_page_moves_controls_beside_the_art(page):
@@ -433,10 +432,11 @@ def test_playing_page_classic_ipod():
     assert root[3][-1] is n['img_more'] and n['img_more'][1] == b['img_more'][1]
     after = [c[2].get('name') for c in root[3]][root[3].index(n['slide_view_view']) + 1:][:2]
     assert after == ['label_playtime', 'label_ipod_remain']  # over the art's reflection
-    title, album, pos = n['scrlabel_title'][1], n['label_ipod_album'][1], n['label_ipod_pos'][1]
-    assert n['label_ipod_pos'] in n['view_album'][3] and pos[0] - 2 == album[0] == title[0] == cover[0] + cover[2] + 12  # its text under theirs
-    assert view[1] + title[1] >= n['img_more'][1][3] - 2 and pos[1] == album[1] + 28
-    assert pos[1] + pos[3] < n['img_fav'][1][1] + (ipod.NP_ICON - 28) // 2
+    title, album = n['scrlabel_title'][1], n['label_ipod_album'][1]
+    assert 'label_ipod_pos' not in n and album[0] == title[0] == cover[0] + cover[2] + 12
+    assert view[1] + title[1] >= n['img_more'][1][3] - 2
+    # a fourth line's room under the album, which Internet Radio's page fills (stream_ipod), clear of the heart
+    assert album[1] + 28 + 20 < n['img_fav'][1][1] + (ipod.NP_ICON - 28) // 2
     play, remain, bar = n['label_playtime'], n['label_ipod_remain'], ipod.inc('NP_BAR_IPOD')
     assert play[1][0] == ipod.corner_x(g.bar + play[1][1], play[1][3]) and x + w_ == 375 - x and w_ >= 170  # the times' rows clear the glass
     assert play[1][3] == ipod.NP_IPOD_TIME_H and play[1][2] == remain[1][2] == ipod.NP_IPOD_TIME_WS[0]
@@ -449,7 +449,7 @@ def test_playing_page_classic_ipod():
 def test_playing_page_oled_grid():
     """OLED's set (np_art): the art at the text column on the window's top, the words 18 px right of it on the
     design's line tops, their boxes ending on the right column (the margins stock's hscroll_label keeps inside
-    them), "1 of 10" on the art's bottom row with More and the heart at its end on the art's page; the bar from the
+    them), More and the heart at the right end of the art's bottom row on the art's page; the bar from the
     text column to the right column at np_bar_y on screen, the times under its ends, the play mode's target centred
     under them, the window's last child, the dots under it, and the slide stopping short of the bar."""
     g = theme.geometry(theme.builtins()[3])
@@ -466,14 +466,12 @@ def test_playing_page_oled_grid():
         assert box == [tx - 2, top, right - tx + 4, h] and g.bar + top in (64, 96, 120), name  # the design's line tops
         assert {v for k, v in n[name][2].items() if k.endswith(':font_size')} == {str(h)}, name
     assert n['scrlabel_artist'][2]['style:normal:text_color'] == ipod.NP_GRID_SECONDARY == n['label_ipod_album'][2]['style:normal:text_color']
-    pos = n['label_ipod_pos']
-    assert pos[1][0] == tx and pos[1][1] + ipod.NP_GRID_POS_ASCENT == 150 and pos[2]['style:normal:font_name'] == 'inter'
     page = n['view_album'][3]
-    assert pos in page and n['img_more'] in page and n['img_fav'] in page and n['img_playmode'] not in page
+    assert 'label_ipod_pos' not in n and n['img_more'] in page and n['img_fav'] in page and n['img_playmode'] not in page
     more, fav = n['img_more'][1], n['img_fav'][1]
     assert more[0] + more[2] // 2 == right - ipod.NP_GRID_MORE_INSET and fav[0] + fav[2] == more[0] and fav[1] == more[1]
-    assert fav[0] >= tx + 60 and more[1] + more[3] <= n["slider_play"][1][1]  # clear of "1 of 10" and the bar's target
-    assert pos[1][0] + pos[1][2] <= fav[0]  # added after the heart, "1 of 10"'s box would take the heart's taps
+    assert more[1] + more[3] // 2 == 150 - ipod.NP_GRID_ROW_ASCENT + ipod.NP_GRID_ROW_PX // 2  # on the art's bottom row
+    assert fav[0] >= tx + 60 and more[1] + more[3] <= n["slider_play"][1][1]  # clear of the bar's target
     bar_y = g.np_bar_y - g.bar
     slider = n['slider_play']
     assert slider[1] == [24, bar_y + 3 - ipod.NP_GRID_TOUCH // 2, right - 24, ipod.NP_GRID_TOUCH] and slider[2]['bar_size'] == '6'
@@ -521,8 +519,18 @@ def test_playing_page_oled_info_table():
 
 def test_playing_page_final_order(page):
     root, _ = page
-    assert [c[2].get('name') for c in root[3]] == ['view_buttons', 'label_playtime', 'label_playlen', 'label_ipod_remain',
+    assert [c[2].get('name') for c in root[3]] == ['view_info', 'view_buttons', 'label_playtime', 'label_playlen', 'label_ipod_remain',
                                                    'slide_view_view', 'slider_play', 'img_repeata', 'img_repeatb', 'image_wait']
+
+
+def test_playing_page_takes_the_details_out_of_the_swipe(page):
+    """⋯'s About shows the info page (np_about.c): it leaves the slide_view for the window, first, hidden, at the
+    slide's place in the window, its own layout gone, so the slide_view holds the art and lyrics pages alone."""
+    root, n = page
+    info, box, slide = n['view_info'], n['slide_view_view'][1], n['slide_view'][1]
+    assert root[3][0] is info and info[2]['visible'] == 'false' and 'self_layout' not in info[2]
+    assert info[1] == [box[0] + slide[0], box[1] + slide[1], slide[2], slide[3]]
+    assert [c[2]['name'] for c in n['slide_view'][3]] == ['view_album', 'view_lrc', 'label_lyricmsg']
 
 
 def test_playing_page_wants_the_stock_children():
@@ -573,6 +581,7 @@ def stock_page():
     root = w('playing_page',
              w('slide_view_view', w('slide_view', w('view_lrc', self_layout='default(x=0,y=0,w=100%,h=178)'),
                                     w('label_lyricmsg', at=[0, 73, 225, 28]), w('scroll_lrc', self_layout='default(x=0,y=0,w=-10,h=-20)'),
+                                    w('view_info', w('label_album', at=[0, 22, 225, 22]), self_layout='default(x=0,y=0,w=100%,h=100%)'),
                                     at=[0, 0, 225, 198])),
              w('scrlabel_title'), w('scrlabel_artist'),
              w('img_cover', at=[18, 0, 188, 188]), w('img_playstate', at=[52, 34, 120, 120]),
@@ -610,6 +619,11 @@ def test_playing_stock(audited):
         'slide_view_view': [80, 0, 225, 290], 'img_repeata': [50, 250, 3, 10], 'img_repeatb': [50, 250, 3, 10], 'image_wait': [165, 70, 54, 54]}
     assert n['slider_play'][1] == [50, 208 + 41 + 6 - ipod.NP_TOUCH // 2, 290, ipod.NP_TOUCH]
     assert n['slider_play'][2]['bar_size'] == str(ipod.NP_BAR[3])
+    # the details out of the swipe, hidden at the slide's place, first under the rest (⋯'s About shows them)
+    root = ipod.decode(ipod.playing_stock(audited(stock_page())))
+    assert root[3][0] is not None and root[3][0][2]['name'] == 'view_info' and 'view_info' not in [c[2].get('name') for c in n['slide_view'][3]]
+    assert root[3][0][1] == [80, 0, 225, 198] and root[3][0][2] == {'name': 'view_info', 'visible': 'false'}
+    assert root[3][0][3][0][1] == [0, 22, 225, 22]  # its rows where they were in it
 
 
 def test_playing_stock_is_audited(audited):
@@ -826,7 +840,7 @@ def test_sized_art(monkeypatch):
                      (('png:-', '-filter', 'Lanczos', '-resize', '100x100!', '-background', 'black', '-gravity', 'center', '-extent', '140x100', *ipod.PNG_OUT), b'in')]
 
 
-SET0_VALUES = dict(BOTTOM=290, PITCH=72, BODY=68, ART=52, ART_INSET=8, NP_POS_X=22, NP_ICONS_END=353,
+SET0_VALUES = dict(BOTTOM=290, PITCH=72, BODY=68, ART=52, ART_INSET=8, NP_ICONS_END=353,
                    NP_BAR_X=21, NP_BAR=[21, 253, 333, 4], NP_TIME_X=46)
 
 
@@ -978,7 +992,7 @@ def test_classic_light_status_bar_battery_must_fit():
 
 def test_playing_page_follows_the_bar():
     root = playing(); ipod.playing_page(root, g=T26); n = named(root)
-    assert n['img_more'][1] == [300, 0, 50, 40] and n['label_ipod_pos'][1] == [22, 0, 278, 40]
+    assert n['img_more'][1] == [300, 0, 50, 40] and 'label_ipod_pos' not in n
     assert n['slider_play'][1][0::2] == [18, 339] and n['img_repeata'][1][0] == 18
     assert n['label_playtime'][1] == [39, 265, 80, 16] and n['label_ipod_remain'][1] == [256, 265, 80, 16]
 

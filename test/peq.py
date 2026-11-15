@@ -2283,49 +2283,27 @@ def visualizer_check(tmp):
     harness.write_text(r"""
 #include <assert.h>
 #include "visualizer.c"
-void check_styles(void) {
-    for (int style = 0; style < STYLES; ++style) {
-        memset(&vz, 0, sizeof vz);
-        for (int i = 0; i < VIS_N; ++i) {
-            vz.pcm[i][0] = sinf(TAU * 12 * i / VIS_N);
-            vz.pcm[i][1] = 0;
-        }
-        vz.re[0] = 123; /* FFT scratch stays untouched by time-domain styles. */
-        vis_analyze(style, 44100, 0.04f, 100);
-        if (style == SCOPE || style == METERS) {
-            assert(vz.re[0] == 123 && vz.bin_rate == 0);
-            for (int i = 0; i < VIS_HALO; ++i) assert(vz.level[i] == 0);
-        } else {
-            assert(vz.bin_rate == 44100 && vz.re[0] != 123);
-            float max = 0;
-            for (int i = 0; i < VIS_HALO; ++i) if (vz.level[i] > max) max = vz.level[i];
-            assert(max > 0.5f);
-        }
-        if (style == SCOPE) assert(vz.wave[0][10] != 0 && vz.wave[1][10] == 0);
-        else for (int ch = 0; ch < 2; ++ch)
-            for (int i = 0; i < VIS_W; ++i) assert(vz.wave[ch][i] == 0);
-        if (style == METERS) assert(vz.vu[0] > 0 && vz.vu[1] == 0 && vz.lit[0] == 500);
-        else assert(vz.vu[0] == 0 && vz.vu[1] == 0);
-        if (style != SPECTRUM)
-            for (int i = 0; i < VIS_BARS; ++i) assert(vz.peak[i] == 0);
-        vis_reset();
-        for (int i = 0; i < VIS_HALO; ++i) assert(vz.level[i] == 0);
-        for (int i = 0; i < VIS_BARS; ++i) assert(vz.peak[i] == 0);
-        assert(vz.vu[0] == 0 && vz.lit[0] == 0 && vz.bass == 0 && vz.wave[0][10] == 0);
-        vis_analyze(style, 44100, 0.04f, 100);
-        for (unsigned now = 140; now <= 1600; now += 40) vis_analyze(style, 0, 0.04f, now);
-        for (int i = 0; i < VIS_HALO; ++i) assert(vz.level[i] == 0);
-        for (int i = 0; i < VIS_BARS; ++i) assert(vz.peak[i] == 0);
-        for (int ch = 0; ch < 2; ++ch) {
-            assert(vz.vu[ch] < 0.0001f);
-            for (int i = 0; i < VIS_W; ++i) assert(fabsf(vz.wave[ch][i]) < 0.0003f);
-        }
+void check_levels(void) {
+    memset(&vz, 0, sizeof vz);
+    for (int i = 0; i < VIS_N; ++i) {
+        vz.pcm[i][0] = sinf(TAU * 12 * i / VIS_N);
+        vz.pcm[i][1] = 0;
     }
+    vis_analyze(44100, 0.04f);
+    assert(vz.bin_rate == 44100);
+    float max = 0;
+    for (int i = 0; i < VIS_BANDS; ++i) if (vz.level[i] > max) max = vz.level[i];
+    assert(max > 0.5f);
+    vis_reset();
+    for (int i = 0; i < VIS_BANDS; ++i) assert(vz.level[i] == 0);
+    vis_analyze(44100, 0.04f);
+    for (int k = 0; k < 40; ++k) vis_analyze(0, 0.04f); /* 1.6 s of silence: at rest */
+    for (int i = 0; i < VIS_BANDS; ++i) assert(vz.level[i] == 0);
 }
 """)
     checked = compile_host(tmp, 'visualizer_checks.so', harness, ROOT/'patch/peq.c', '-I', ROOT/'patch')
-    checked.check_styles()
-    print('Visualizer: FFT bands, selected-style work, stereo scope/VU and pause decay passed.')
+    checked.check_levels()
+    print('Visualizer: FFT bands, the levels\' rise and pause decay passed.')
 
 SCROBBLE = r"""
 #include <assert.h>

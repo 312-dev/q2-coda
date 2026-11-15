@@ -65,7 +65,7 @@ All colours are opaque. Alpha is not used for text: greys are stated as greys.
 | -------------- | --------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | Canvas         | `#000000` | Every background                                                             | `#000000` on all grid screens                              |
 | Text Primary   | `#FFFFFF` | Row titles, page titles, song title, times                                   | `#FCFCFC` to `#FFFFFF`                                     |
-| Text Secondary | `#ABABAB` | Artist, album, "1 of 10", values in key/value rows ("Off", "Flat")           | `#AAAAAA` to `#B2B2B2`                                     |
+| Text Secondary | `#ABABAB` | Artist, album, values in key/value rows ("Off", "Flat")                      | `#AAAAAA` to `#B2B2B2`                                     |
 | Text Tertiary  | `#858585` | Second lines ("1,234 Songs", "Connected"), section headers, captions         | `#7D` to `#8C` by ratio (est)                              |
 | Chevron        | `#999999` | List chevrons on black                                                       | `#8C8C8C` read on a 1 px stroke, so lighter in truth (est) |
 | Divider        | `#222222` | 1 px rules between two-line rows only                                        | `#222222`                                                  |
@@ -109,7 +109,6 @@ San Francisco, which cannot ship. See `assets/fonts/` for the files and licence.
 | Section header                        | Inter Regular | 15 px | Text Tertiary  | Devices        |
 | Song title                            | Inter Medium  | 22 px | Text Primary   | Time           |
 | Artist, album                         | Inter Regular | 18 px | Text Secondary | Pink Floyd     |
-| Track position                        | Inter Regular | 15 px | Text Secondary | 1 of 10        |
 | Times                                 | Inter Regular | 16 px | Text Primary   | 3:47 and -3:22 |
 | Confirmation label                    | Inter Medium  | 22 px | Text Primary   | Shuffled Songs |
 
@@ -282,7 +281,6 @@ clock, centred.
 | Song title     | 192, top 64                    | Inter Medium 22 px, Text Primary, one line, scrolls when long                              |
 | Artist         | 192, top 96                    | Inter Regular 18 px, Text Secondary                                                        |
 | Album          | 192, top 120                   | Inter Regular 18 px, Text Secondary, up to two lines                                       |
-| Track position | 192, baseline 208              | "1 of 10", 15 px, Text Secondary, baseline level with the art's bottom                     |
 | Progress bar   | 24 to 347, y 228, 6 px         | Track `#333333`, fill Accent Blue, round ends                                              |
 | Elapsed        | left on 24, centred on y 250   | 16 px, Text Primary, tabular                                                               |
 | Remaining      | right on 347, centred on y 250 | 16 px, Text Primary, with a leading minus; a tap shows the length instead (Track Time)     |
@@ -295,12 +293,17 @@ Built as the `oled` set's `np_art` and `np_bar_y` (`tools/ipod.py` `np_grid`) wi
 The album is one line that scrolls, as the title and artist do, rather than two. What the design
 has no place for keeps a place of its own:
 
-- **More and the heart** stand at the right end of "1 of 10"'s line, on the art's page, so a swipe
-  takes them away with it: Phosphor `dots-three` and `heart` (regular, 20 px, Text Primary;
+- **More and the heart** stand at the right end of the art's bottom line (baseline 208), on the
+  art's page, so a swipe takes them away with it: Phosphor `dots-three` and `heart` (regular, 20 px, Text Primary;
   More pressed in Text Secondary), the dots' ink ending on the right column, the heart `fill` in
   Accent Blue while the song is a favourite.
-- **The page dots** sit under shuffle and repeat, centred on y 302; the lyrics, the track's details
-  and the visualizer are still the swipe's other pages, each ending 5 px above the bar.
+- **The page dots** sit under shuffle and repeat, centred on y 302; the lyrics are the swipe's other
+  page, ending 5 px above the bar. The visualizer (Field), the design's third page, is off for the
+  battery: `NP_VISUALIZER` in `patch/offsets.inc` is 0, which leaves its code out of the payload;
+  at 1 it is the last page again, over the whole screen. Now Playing shows no place in the
+  queue ("1 of 10").
+- **The track's details** are not a page of the swipe: ⋯'s **About** row, last before Delete Song,
+  opens them as a page titled About, the same table in the same place, and Return goes back to ⋯.
 - **Shuffle and repeat** are two controls on stock's play mode button: a tap on shuffle turns it
   on or off, a tap on repeat steps Off, All, One (repeat-once's glyph for One), and each keeps the
   other as it was. Stock's Shuffle never ends, so shuffle with repeat Off plays on as with All.

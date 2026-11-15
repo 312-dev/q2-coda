@@ -93,7 +93,7 @@ remains visible. Under **Rounded Corners** on a pressed list row (`s_btn_listite
 selection's inset pill instead (`pressed_pill`), and a pressed tile under half its row's width (the album
 grid's, the playlist page's pair) is the tile's selection card, `TILE_INSET` inside it with `SEL_RADIUS`
 corners (square under Square); other pressed widgets keep stock's box. The same hooks cover settings, streaming, dialogs, PEQ rows and media browser
-chrome. Photos, video, book content, EQ plots and visualizers keep their own drawing.
+chrome. Photos, video, book content, EQ plots and the visualizer keep their own drawing.
 
 A list left with Return opens at its top when it is chosen again, in every theme (`list.reopen.top`,
 set by Minimal, which the others extend), as an iPod's menus and stock's own pages do; Return
@@ -479,7 +479,7 @@ to stock's 50-pixel status bar margins. `corner_inset(y)` gives the width hidden
 screen row `y`, and `corner_x` adds `CORNER_SLACK` (4). The status bar groups, the Home labels
 and Now Playing's top and bottom rows take their insets from it; settings notes moved under the
 hidden navbar end their text clear of the top-right corner. With the defaults: status bar 52
-pixels plus `STATUS_PAD` (2), the clock at least 57, Home dot 25 and text 39, "3 of 12" 16, Now Playing icons
+pixels plus `STATUS_PAD` (2), the clock at least 57, Home dot 25 and text 39, Now Playing icons
 ending at 353, the bar 21 and the times 46 pixels from the edges. The runtime layouts' values
 (`SET_*`, `CF_*`, `CLOCK_EDGE`, `HOME_FULL_ROW` in `patch/offsets.inc`) are checked against the
 same calibration by the tests.
@@ -615,7 +615,7 @@ album, and a four-pixel progress line:
 
 ```
   0 +---------------------------------------------------------+
-    | 3 of 12 (16,0 287x40)                          more 303 |  icon 50x40
+    |                                                more 303 |  icon 50x40
  40 +---------------------------------------------------------+
     |  .-----------.                                          |  slide_view 0,40 375x186
     |  |    art    |  Title   (194,58 165x28, white 22)       |
@@ -629,10 +629,9 @@ album, and a four-pixel progress line:
 ```
 
 The art and the metadata keep 16 pixels from the sides (`NP_MARGIN`) and 12 from each other; the
-art is 166 pixels, as large as that leaves while the text column keeps its 165 pixels, and
-"3 of 12" starts in line with it. Each band has its own space: the top row, then the art 2
-pixels below it, so it has 14 pixels to "3 of 12"'s text above and to the page dots below
-(`NP_ART_Y`), the bar with the stock A-B markers
+art is 166 pixels, as large as that leaves while the text column keeps its 165 pixels. Each band
+has its own space: the top row, then the art 2 pixels below it, 14 pixels under the foot of a
+16-pixel line centred in the top row and as far above the page dots (`NP_ART_Y`), the bar with the stock A-B markers
 (y 250 to 260) and the quiet time labels at y 265. The page dots keep their place while a swipe
 moves the pages: they are anchored on their own row, at the slide_view's centre.
 
@@ -644,7 +643,8 @@ Cover Flow and list thumbnails, and the disc placeholders shown there, squared o
 over the scaled image in the page's black, with an anti-aliased
 edge pixel, so opposite corners share the same pixel grid. The title is 22 pixels
 white (`NP_TITLE_PX`) over the 18-pixel (`NP_META_PX`) artist, `#CCCCCC` (`NP_ARTIST_RGB`), and
-album, `#BBBBBB` (`NP_ALBUM_RGB`); "3 of 12" and both times remain `#AAAAAA`. Spotify uses the same hierarchy. Long lines scroll, as stock.
+album, `#BBBBBB` (`NP_ALBUM_RGB`); both times remain `#AAAAAA`. The page shows no place in
+the queue ("3 of 12"): the top row holds More alone. Spotify uses the same hierarchy. Long lines scroll, as stock.
 
 The art follows the player's cover on both Now Playing pages (`np_art_poll`, each lit UI pass).
 Stock's 250 ms timer reloads `img_cover` only when it finds one of three one-shot flags set: a
@@ -672,8 +672,8 @@ Modern show the label, and Modern's title is bold. There is no on-screen transpo
 **Theme: OLED** lays the page out on its own grid ([oled-design.md](oled-design.md#now-playing)): the
 150-pixel art at the 24-pixel text column under the status row, which shows the clock, its corners
 6 pixels; the title, artist and album 18 pixels right of it, ending on the 28-pixel right column,
-the artist and album in Inter's 18 in Text Secondary; "1 of 10" level with the art's foot, More and
-the heart at the end of its line; a 6-pixel bar from the text column to the right column at y 228,
+the artist and album in Inter's 18 in Text Secondary; More and the heart at the right end of the
+art's foot, on an 18-pixel line whose baseline is the art's bottom row; a 6-pixel bar from the text column to the right column at y 228,
 the times under its ends in Inter's tabular digits, and shuffle and repeat centred under them in the
 accent when on, grey when off, over the play mode button: a tap on shuffle turns it on or off and
 a tap on repeat steps Off, All, One, each keeping the other. The page dots
@@ -681,10 +681,16 @@ sit under those, and the swipe's other pages stop above the bar. Each line that 
 the end it runs past (Display's [Theme](#theme)).
 
 The art, title, artist and album are the slide_view's first page, so a swipe replaces all of them
-with the lyrics or info page. The info page keeps its stock 225-pixel column, centred; the lyrics
-page spans the screen (**Lyrics** below). The info page's lines read `Label: value`, with spaced units
+with the lyrics page; two page dots (three with the visualizer built in, below). The track's details are not a page of
+the swipe: ⋯'s last row, **About** (under OLED last before Delete Song), opens them as a page of their own, titled
+About, and Return goes back to ⋯ (under OLED its panel, over Now Playing), as from ⋯'s other
+rows' pages. The build takes stock's info page out of the slide_view and leaves it hidden in Now
+Playing's window, where stock fills it; About moves it into its own page while open, at the same
+place on screen (under About's title where that is a row of the page, as for Centred Now Playing), so each theme's details look as they did on the swipe (`tools/ipod.py`
+`np_info_out`, `patch/np_about.c`). The details keep their stock 225-pixel column, centred; the lyrics
+page spans the screen (**Lyrics** below). The details' lines read `Label: value`, with spaced units
 (`35.92 MB`, `16-bit`, `950 kbps`, `44.1 kHz`), **Genre** and **Year** for stock's Genres and Era,
-`Unknown` for a missing value and `Location:` before the folder (`ringnav_np_info`). Under OLED the info page is a table instead (`tools/ipod.py` `np_info_table`): a fact a row, 20 pixels apart in the slide above the bar, Album, Genre, Year, Format, Sample Rate, Bit Rate, File Size and Location; the name on the text column in Text Secondary, the value right-aligned on the right column in white, both ending in an ellipsis when long; a 1-pixel `#1F1F1F` rule between rows; the bit depth joins Format (`FLAC, 16-bit`). A Genre line too long for the column scrolls at the album marquee's pace while the page shows (`genre_step`). The play/pause overlay has zero opacity, retaining its original gesture target without
+`Unknown` for a missing value and `Location:` before the folder (`ringnav_np_info`). Under OLED the details are a table instead (`tools/ipod.py` `np_info_table`): a fact a row, 20 pixels apart in the slide above the bar, Album, Genre, Year, Format, Sample Rate, Bit Rate, File Size and Location; the name on the text column in Text Secondary, the value right-aligned on the right column in white, both ending in an ellipsis when long; a 1-pixel `#1F1F1F` rule between rows; the bit depth joins Format (`FLAC, 16-bit`). A Genre line too long for the column scrolls at the album marquee's pace while About shows (`genre_step`). The play/pause overlay has zero opacity, retaining its original gesture target without
 a transport glyph; stock may update its visibility without making it appear. The loading
 spinner stays centred on the artwork. The on-screen Return icon moves off-screen, as on the pages whose navbars are
 hidden; the hardware Return does the same. More keeps its place at the top row's right. The play
@@ -792,28 +798,21 @@ page back. See [internals.md](internals.md#scrub-ipod) and [Word-timed lyrics](i
 
 ### Visualizer
 
-The slide_view gains a fourth page, after the art, lyrics and info pages, and the page dots a fourth
-dot. It shows the music as heard, EQ included, in one of four styles (five under OLED) on black,
-tinted with the accent's light tone (Field has its own five colours); a tap moves to the next, saved as `IPOD/VIS` in `config.ini`, and its name shows
-at the bottom for a second and a half:
-
-| Style            | After                     | Drawing                                                                                                                                      |
-| ---------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Spectrum**     | Rockbox FFT, log bars     | 32 capsule bars, from a dark shade of the accent to a bright tint with height, a cap on each peak that holds, then falls; a faint reflection |
-| **Oscilloscope** | Rockbox Oscilloscope      | The left channel in the accent with a glow, the right a faint accent line; it starts on a rising zero crossing, so the wave stands still     |
-| **VU Meters**    | Rockbox VU Meter (analog) | Left and right needles over an arc from -20 to +3 VU, heavier and brighter past 0, with 300 ms ballistics and a peak LED                     |
-| **Halo**         | Apple's radial spectrum   | 64 mirrored bars around Now Playing's art in a circle, turning slowly, the bass pulsing the ring                                             |
-| **Field** (OLED) | iTunes' Magnetosphere     | 40 soft glowing points in each of five bands, a colour each, flowing round the centre on rings each band's level swells and ripples          |
-
-Field shows only under OLED, where it is the style the page opens on until a tap picks another; it
-is drawn from glow sprites (`field_sprites`) over the whole screen, with the status row, the progress bar, the song's
-line and the page dots shown over it only while a thumb rests on the wheel
-([internals](internals.md#visualizer-ipod)); the others are anti-aliased vector drawing (AWTK's
-vgcanvas), all within the 375x186 page: 16-pixel side
-margins (`NP_MARGIN`), labels in the stock grey `#AAAAAA`. It animates at `VIS_FPS` only while the
-page shows with the screen on, and comes to rest when playback pauses; at rest the track's title
-and artist show at the bottom, in the style name's place. Tunables are `VIS_*` in
-`patch/offsets.inc`; `VIS_LATENCY_MS` sets how far the picture runs behind the decoder, to match
+Off for now, for the battery: `NP_VISUALIZER` in `patch/offsets.inc` is 0, so Now Playing has no
+visualizer page and the payload no visualizer code (navigation.c calls none of `patch/visualizer.c`,
+and the link's `--gc-sections` drops it; `test/fw` still builds and tests it). Field cost demo about
+a third of a host core in the emulator against 9% on the art page ([internals](internals.md#visualizer-ipod)).
+Built with it at 1, the slide_view gains a last page, after the art and lyrics pages, and the page dots a third dot.
+It shows the music as heard, EQ included, as **Field**, after iTunes' Magnetosphere: 40 soft
+glowing points in each of five bands of the spectrum, a colour each, flowing round the centre on
+rings each band's level swells and ripples. It is drawn from glow sprites (`field_sprites`). Under
+OLED it fills the whole screen, with the status row, the progress bar, the song's line and the page
+dots shown over it only while a thumb rests on the wheel
+([internals](internals.md#visualizer-ipod)); under the other themes it keeps the 375x186 page, its
+song line inside 16-pixel side margins (`NP_MARGIN`), in the stock grey `#AAAAAA`. A tap on it does
+nothing. It animates at `VIS_FPS` only while the page shows with the screen on, and comes to rest
+when playback pauses; at rest the track's title and artist show at the bottom. Tunables are `VIS_*`
+in `patch/offsets.inc`; `VIS_LATENCY_MS` sets how far the picture runs behind the decoder, to match
 what you hear. See [internals.md](internals.md#visualizer-ipod).
 
 ## Previous and Next
@@ -918,19 +917,19 @@ drops the stock rows, takes the sub-page's title and builds only its own rows:
 NPCENTRED`, off; `playset_covermode`): `ringnav_ui_load`, hooked on every window's asset load
   (`ui_loader_load_widget_with_parent`), builds the next Now Playing from stock's own page
   (`tools/ipod.py` `PLAYING_STOCK`, `playing_page_stock.bin`, still named `playing_page`), which
-  `ringnav_playing` binds by the same widget names; it has no "3 of 12", album line or remaining time,
+  `ringnav_playing` binds by the same widget names; it has no album line or remaining time,
   so those stay unbound. Its art starts 8 px under the status bar, the play mode mirrors the heart
   (its box flipped to the right edge, centred), and its progress bar is the iPod page's (`np_slider`:
   plain track, the accent's fill and the Theme's height) where stock's images drew theirs. Its pages are stock's 225 px column: the lyrics wrap at their rows' width and the
-  visualizer draws at its slide's (`lyrics.c` `ly.w`, `visualizer.c` `PAGE_W`). A tap on the lyrics, while there are
+  visualizer, when built in, draws at its slide's (`lyrics.c` `ly.w`, `visualizer.c` `PAGE_W`). A tap on the lyrics, while there are
   lyrics, shows them full screen, as on the iPod page: the column goes black over the rest of the page at the window's width, the lyrics
   down to the page dots, wrapped again at that width (`np_full`, `lyrics_fit`) and back on the playing line; a tap or
   Return brings the column back, as do a swipe, another page and leaving the page; a window over the page leaves it
   full screen
   ([Word-timed lyrics](internals.md#word-timed-lyrics)). Choosing a Theme loads its preset (`theme_preset`), before the restart where there is one: Minimal sets Light Mode Off, Graphite (`MINIMAL_ACCENT` 0), rounded corners, Split and Time in Title on; Classic sets Light Mode On, Classic Blue (`CLASSIC_LIGHT_ACCENT` 9), Split, and Time in Title, Library on Home, Row Preview and Row Art on; Modern sets Light Mode On, Cobalt (`ACCENT` 4), Square, Split and Time in Title off; OLED sets Light Mode Off, its Blue (`OLED_ACCENT` 9) and Full; Light Mode's Auto, Battery, Shortcut and Centred Now Playing are kept, and only changed values are saved.
 - Display's main page: a "Smart Awake" switch (`IPOD KEEPLIT`, off;
-  `keep_lit_poll`): with Now Playing lit in front on its lyrics, info or visualizer page, or its
-  full-screen art (`bigcover_page`) in front, and a song playing, it calls
+  `keep_lit_poll`): with Now Playing lit in front on its lyrics page (or the visualizer's, when built in), or its
+  full-screen art (`bigcover_page`) or ⋯'s About in front, and a song playing, it calls
   `reset_poweroptions_timer(1, 1, 1)` once a second, so the screen stays on there (with Enlarged Album
   Art on, the art page too, once its countdown opens the full-screen art);
   paused, it times out as usual. A card game in Games is held open and lit while it is on, playing
@@ -1024,7 +1023,7 @@ Corners is Minimal's and Modern's setting, each theme's preset until chosen (Min
 Each theme keeps its own accent, and the Accent row follows Theme in each. Minimal's
 (`MINIMAL_ACCENT`) cycles Ivory, Graphite, Crimson, Tidal, Champagne, Cobalt, Tangerine, Plum, Green;
 its default is Graphite, as its preset, and Rounded Corners is on until chosen off; Ivory draws Graphite's greys with its own fills (the progress bars, Spotify's, the
-PEQ curve and the visualizer) in `MINIMAL_FILL`, white on the dark track; a scrub's fill is pure
+PEQ curve) in `MINIMAL_FILL`, white on the dark track; a scrub's fill is pure
 white. Another accent colours the selection card, those fills and every mapped red, as in Classic,
 and the card keeps the rows' own ink and stock's `#AAAAAA` metadata. Minimal's grey icons and
 codec badges stay grey, but `list_into`, the Bluetooth marks and `list_delete` stay white, as
@@ -1061,12 +1060,12 @@ photo pages' own drawing) keeps Minimal's layout under this theme's colours and 
 - **The bar.** A gloss bar (the dark half's flat `#1c1c1c` over a hairline) with the page's title on the left, the clock centred, and Bluetooth, Wi-Fi, the play state and the battery on the right (no EQ mark), on every page, Home's own list included. The title and clock are 21 px, three quarters of a row's caps. Under this bar **Time in Title** decides the clock alone (on unless chosen, and choosing Classic turns it on): off, the clock makes way while the page has a title, so the bar names the page once, and the title takes the clock's room. The play state is a blue gloss triangle or pair of bars with a dark edge and no halo, as an iPod's. The battery has five states: low (a red sliver), part full, full, charging (a bolt) and full on power (a plug). **Battery** is Icon, Percent or Percent Inside (Icon by default); a stored Icon + Percent reads as Percent Inside.
 - **Lists.** 32 px rows, eight to a screen, the values on the right, the white chevron on the selected row only, no settings or Library icons; other icons keep their colours. The selection is the accent's gloss band, square and full width, over the whole row on a taller one; its light 1 px top line is the light half's, and on black the band starts on its first stop. Stock's grey placeholder tiles, Folder view's folders and songs (`list_folder`, `list_song`; Album info's rows use `list_song` too, so theirs is 38 px as well), are drawn 38 px in the middle of their 52 px row (`list.art.placeholder`, by the image hook), so they have room above and below; a real cover keeps the row's size. A long title on the selected row scrolls, as in Minimal. Songs are two lines at 52 px, title and artist; Play All and Sort are a plain row at the top of Songs, reached by touch, not the wheel.
 - **Row Art.** It decides album covers only, in 52 px rows, and they are square: the Library is always 32 px text. A change restarts the Q2.
-- **Now Playing.** An iPod classic's: the art, 178 px, up beside More and turned in perspective over its reflection, with no play/pause glyph on it; "3 of 12" under the album, 2 px in from the scrolling labels' boxes as their own text is; the title in Classic's face and the album line as a label; and a 20-pixel bar, the accent's gloss over a near-white track with a faint reflection, the elapsed and remaining times beside it in Classic's face at 21 px, in boxes sized to the track's length, so the bar is as wide as the times allow, opening at its widest and narrowing only for a long track: 35 px boxes under ten minutes (the bar 66 to 309, 243 px), 43 px under an hour (74 to 301, 227 px) and 56 px from an hour, which hold "-1:02:03" (87 to 288, 201 px), the outer edges and the 8 px gap the same in each; Internet Radio's running time takes the under-an-hour boxes until it has played an hour; while you scrub, a diamond in the ink marks the point on the bar ([Now Playing](#now-playing), [internals.md](internals.md#slanted-art)). Turning the volume shows it on that bar, a speaker in each time's place and no number ([internals.md](internals.md#now-playing-ipod), Volume).
+- **Now Playing.** An iPod classic's: the art, 178 px, up beside More and turned in perspective over its reflection, with no play/pause glyph on it; a line's room under the album, which Internet Radio's page fills; the title in Classic's face and the album line as a label; and a 20-pixel bar, the accent's gloss over a near-white track with a faint reflection, the elapsed and remaining times beside it in Classic's face at 21 px, in boxes sized to the track's length, so the bar is as wide as the times allow, opening at its widest and narrowing only for a long track: 35 px boxes under ten minutes (the bar 66 to 309, 243 px), 43 px under an hour (74 to 301, 227 px) and 56 px from an hour, which hold "-1:02:03" (87 to 288, 201 px), the outer edges and the 8 px gap the same in each; Internet Radio's running time takes the under-an-hour boxes until it has played an hour; while you scrub, a diamond in the ink marks the point on the bar ([Now Playing](#now-playing), [internals.md](internals.md#slanted-art)). Turning the volume shows it on that bar, a speaker in each time's place and no number ([internals.md](internals.md#now-playing-ipod), Volume).
 - **Appearance's rows.** Theme, Light Mode, Accent, Home, Shortcut, Battery, Time in Title, Library on Home, Row Preview and Row Art. Corners and Centred Now Playing are Minimal's only, and their stored values stay for it. Light Mode Off is Classic's dark half; choosing Classic turns Light Mode on unless it is on Auto.
 - **Home.** 32 px rows in Classic's face, the gloss band and the white chevron on the selected row. In Split, with **Library on Home** on, Library is a list on Home's left with the pane beside it (off, Library opens its page). With **Row Preview** on, the pane shows the highlighted row (off, it shows Now Playing's art on every row, and Home reads no counts). Both are Classic's own switches (`IPOD HOMELIB`, `IPOD ROWPREVIEW`, on unless chosen), saved at once with no restart, and choosing Classic turns them on. With both on: Now Playing and the Library's rows the current cover, Shuffle the note and the song count, Cover Flow the album count, Folder its icon, Games the game count, Streaming the services, Settings the card's free space.
 - **Library's Search row.** The Library, its page and Home's list, leads with **Search** (`library_search`, a set without Library icons), the pull-down's stock search: Home's list hides the pull. Its pane is the Library's, and Shuffle's note moves to the row after it.
 - **Update Local Music and USB mode.** A round icon on the page, not stock's screens. While the library updates the line reads "312 of 704 songs" over a progress bar, against the songs it had before, with Cancel by touch; a first scan or a folder's shows stock's text and no bar. Connected says to eject before disconnecting under USB Storage; USB Audio and DAC have no line. Once the computer ejects the card, USB Storage's page says OK to Disconnect, in every theme. See [internals.md](internals.md#themes).
-- **Streaming's Now Playing.** Spotify and Internet Radio take local Now Playing's places: the 178 px art at x 16, y 22, turned over its reflection; the title, artist and album at x 206 from y 38 (34 and 62 under it); the 20-pixel bar from x 66 to 309 at y 245 with the 21 px times beside it, narrowed as local Now Playing's for a long track. Spotify's bar shows its position and the scrub's diamond; the page's name and play state are in the title bar. Internet Radio plays as an album: a generated station cover, the station, artist and song, the stream where "3 of 12" sits, the heart at x 300, y 165, and a bar that is always full with the running time on its left; the wheel stays the volume.
+- **Streaming's Now Playing.** Spotify and Internet Radio take local Now Playing's places: the 178 px art at x 16, y 22, turned over its reflection; the title, artist and album at x 206 from y 38 (34 and 62 under it); the 20-pixel bar from x 66 to 309 at y 245 with the 21 px times beside it, narrowed as local Now Playing's for a long track. Spotify's bar shows its position and the scrub's diamond; the page's name and play state are in the title bar. Internet Radio plays as an album: a generated station cover, the station, artist and song, the stream on a fourth line under them, the heart at x 300, y 165, and a bar that is always full with the running time on its left; the wheel stays the volume.
 - **Info.** Now Playing's third page is a list of nine rows in Classic's face, each name on the left and its value on the right in grey, a long value ending in an ellipsis: 20 px rows from under the top row to the page dots, names 100 px wide from x 20, values to x 355.
 - **Its font.** The face is a subset of TeX Gyre Heros Bold (`assets/fonts`, GUST Font License), a play mark added at U+25B6 (View Queue's, [Queue menu](internals.md#queue-menu)), renamed and shipped as `fonts/classic-light.ttf`; `assets/fonts/README-classic-light.txt` says what changed and where the original is. Where it lacks a character, `fonts/bold.ttf` stands in ([Home](#home)).
 

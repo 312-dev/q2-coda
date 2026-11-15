@@ -1180,7 +1180,7 @@ def test_own_option():
     assert theme.geometry(n) == CLASSIC_LIGHT and theme.geometry(n, {'ROWART': 'Off'}) == CLASSIC_LIGHT_TEXT
     assert theme.geometry(n, {'ROWART': 'On'}) == CLASSIC_LIGHT and theme.geometry(m, {'ROWART': 'Off'}) is SET0
     assert theme.theme_keys([m, n]) == {'STATUSBAR': (len(STATUSBAR['names']), 0, STATUSBAR), 'CLASSIC_LIGHT_ACCENT': (10, 9, None), 'HOMELIB': (2, 1, HOMELIB), 'ROWPREVIEW': (2, 1, ROWPREVIEW), 'ROWART': (2, 1, row_art)}
-    assert {'ACCENT', 'MINIMAL_ACCENT', 'HOME', 'BATTERY', 'THEME', 'LIGHT', 'VIS'} <= theme.PAYLOAD_KEYS
+    assert {'ACCENT', 'MINIMAL_ACCENT', 'HOME', 'BATTERY', 'THEME', 'LIGHT'} <= theme.PAYLOAD_KEYS and 'VIS' not in theme.PAYLOAD_KEYS
     assert not {'ROWART', 'CLASSIC_LIGHT_ACCENT'} & theme.PAYLOAD_KEYS and set(theme.ACCENT_KEYS) == {'ACCENT', 'MINIMAL_ACCENT'}
     assert not hasattr(theme, 'ROW_ART_OFF')
 

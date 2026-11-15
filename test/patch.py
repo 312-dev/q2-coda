@@ -6982,8 +6982,9 @@ for _ in range(3): m.call(address=HOOKS['widget_on_paint_background'][0],args=(m
 assert not [t for t in m.timers.values() if t[1]==payload_syms['home_drift']] and not m.nodes[m.art]['visible']
 assert [signed(m.get(m.art+O[k])) for k in ('W_X','W_Y','W_W','W_H')]==[SPLIT,0,PW,290]; passed()
 
-# Now Playing: stock init runs first, then "n of m", the album and "-remaining" (slider max less
-# value, in seconds) fill in; later paints rewrite a label only when its source changed.
+# Now Playing: stock init runs first, then the album and "-remaining" (slider max less value, in
+# seconds) fill in, and no place in the queue ("2 of 3"): a label of that name stays as it was; later
+# paints rewrite a label only when its source changed.
 playing=HOOKS['playing_page_init'][0]
 assert struct.unpack_from('<I',demo,fileoff(demo,playing))[0]==j(payload_syms['ringnav_playing'])
 m=QueueMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'
@@ -6998,10 +6999,10 @@ def shown(): return [m.nodes[w].get('text') for w in (pos,album,remain)]
 def written(): return [m.nodes[c[1]]['name'] for c in m.calls if c[0]=='widget_set_text_utf8']
 def repaint(w=win): m.call(address=HOOKS['widget_on_paint_background'][0],args=(w,m.canvas,0,0)); return written()
 assert m.call(address=playing,args=(win,7,0,0),gap=0)==0 and m.calls[0][:3]==('stock_playing',win,7)
-assert shown()==['2 of 3','Album 1','-2:05']; passed()
+assert shown()==[None,'Album 1','-2:05']; passed()
 assert repaint()==[] and repaint(bar)==[]; passed()
 m.nodes[slider]['value']=101; assert repaint()==['label_ipod_remain'] and shown()[2]=='-2:04'; passed()
-m.word(O['MCL_POS'],2); assert repaint(bar)==['label_ipod_pos','label_ipod_album'] and shown()[:2]==['3 of 3','Album 2']; passed()
+m.word(O['MCL_POS'],2); assert repaint(bar)==['label_ipod_album'] and shown()[:2]==[None,'Album 2']; passed()
 # A rebuilt queue can reuse the same string address with new text; the text itself is hashed.
 m.u.mem_write(m.get(m.items(m.get(syms['mcl_pdeqplaylist']))[2]+O['REC_ALBUM']),b'Other\0')
 assert 'label_ipod_album' in repaint() and shown()[1]=='Other'; passed()
@@ -7009,19 +7010,19 @@ assert 'label_ipod_album' in repaint() and shown()[1]=='Other'; passed()
 # the label shows the album it parsed, which a next folder's untagged records lack.
 id3=syms['g_play_id3_info']; m.u.mem_write(id3+O['ID3_ALBUM'],b'Parsed\0')
 m.u.mem_write(id3,b'/p/other\0'); assert repaint()==[] and shown()[1]=='Other'
-m.u.mem_write(id3,b'/p/C\0'); assert repaint()==['label_ipod_pos','label_ipod_album'] and shown()[1]=='Parsed'
-m.u.mem_write(id3,b'\0'); assert repaint()==['label_ipod_pos','label_ipod_album'] and shown()[1]=='Other'; passed()
+m.u.mem_write(id3,b'/p/C\0'); assert repaint()==['label_ipod_album'] and shown()[1]=='Parsed'
+m.u.mem_write(id3,b'\0'); assert repaint()==['label_ipod_album'] and shown()[1]=='Other'; passed()
 for mx,v,want in ((3725,0,'-1:02:05'),(3600,0,'-1:00:00'),(3599,0,'-59:59'),(90,90,'-0:00'),(90,95,'-0:00')):
     m.nodes[slider].update(max=mx,value=v); repaint(); assert shown()[2]==want,(mx,v)
 passed()
 queue=m.deqs[m.get(syms['mcl_pdeqplaylist'])][1]
-del queue[1:]; m.word(O['MCL_POS'],0); repaint(); assert shown()[:2]==['1 of 1','Album 0']
-queue.clear(); repaint(); assert shown()[:2]==['','']; passed()
+del queue[1:]; m.word(O['MCL_POS'],0); repaint(); assert shown()[:2]==[None,'Album 0']
+queue.clear(); repaint(); assert shown()[:2]==[None,'']; passed()
 # Another top window, or the page once destroyed, leaves the labels alone.
 queue.append(m.copy('stSongInfo',m.song('X'))); m.top=m.node('window','home_page'); m.word(m.top+O['W_PARENT'],m.wm)
 assert repaint(m.top)==[] and repaint(bar)==[]; m.top=win
 f,ctx=m.handler(win,O['EVT_DESTROY']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
-assert repaint()==[] and shown()[0]==''; passed()
+assert repaint()==[] and shown()[1]==''; passed()
 # Now Playing's art follows the player's cover each lit pass (np_art_poll), whatever stock's
 # one-shot flags did: the playing track's file once g_lastcover_url is its path, its cached
 # bitmap dropped first, or stock's placeholder for a track with none; nothing for the cover init
@@ -7082,26 +7083,34 @@ for theme in ('0','1'): minimal_np(theme)
 # The visualizer page: a paint while not settled (a window still over Now Playing, closing) looks
 # again VIS_RETRY_MS later and repaints the page once settled; at rest (nothing heard for 1.5 s, not
 # playing) the track's title and artist show at the bottom.
-m=QueueMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'
-title,artist=m.node('hscroll_label','scrlabel_title',text='Charge'),m.node('hscroll_label','scrlabel_artist',text='Elbow')
-vslide=m.node('slide_view','slide_view',value=0); m.word(vslide+O['W_H'],186); m.word(vslide+O['W_W'],375)
-box=m.node('view','slide_view_view',[vslide]); m.word(box+O['W_Y'],40)
-win=m.node('window','playing_page',[box,title,artist])
-for w,parent in ((vslide,box),(box,win),(title,win),(artist,win),(win,m.wm)): m.word(w+O['W_PARENT'],parent)
-m.top=win; m.call(address=playing,args=(win,7,0,0),gap=0); vis=m.nodes[vslide]['children'][-1]
-def vis_paint(): m.letters=[]; [m.call(address=HOOKS['widget_on_paint_border'][0],args=(w,m.canvas,0,0),gap=0) for w in (vis,win)]; return [l['text'] for l in m.letters]
-m.timers.clear(); m.top=m.node('window','saverscreen_page'); vis_paint(); assert len(m.timers)==1
-m.advance(O['VIS_RETRY_MS']); assert len(m.timers)==1
-m.top=win; m.advance(O['VIS_RETRY_MS']-1); assert ('widget_invalidate_force',vslide) not in [c[:2] for c in m.calls]
-m.advance(1,clear=False); assert ('widget_invalidate_force',vslide) in [c[:2] for c in m.calls] and not m.timers; passed()
-# The tick (-mfp64 doubles: not emulated) sets vz.quiet, the struct's last word, at rest.
-from build import run
-quiet=[int(l.split()[1],16)+int(l.split()[2])-4 for l in run('readelf','-Ws',str(B/'patch.elf')).splitlines() if l.split()[-1:]==['vz']][0]
-m.now+=1000; assert vis_paint()==[] and len(m.timers)==1
-m.word(quiet,1); assert vis_paint()==['Charge \xb7 Elbow']; passed()
-# VIS_W (343 px; 10 px a letter mocked): too long, the artist goes, then the title ends in an ellipsis.
-m.nodes[title]['text']='T'*30; assert vis_paint()==['T'*30]
-m.nodes[title]['text']='T'*40; assert vis_paint()==['T'*33+'\u2026']; passed()
+# NP_VISUALIZER (offsets.inc) 0: Now Playing has no visualizer page, and the payload no visualizer.c
+if O['NP_VISUALIZER']:
+    m=QueueMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'
+    title,artist=m.node('hscroll_label','scrlabel_title',text='Charge'),m.node('hscroll_label','scrlabel_artist',text='Elbow')
+    vslide=m.node('slide_view','slide_view',value=0); m.word(vslide+O['W_H'],186); m.word(vslide+O['W_W'],375)
+    box=m.node('view','slide_view_view',[vslide]); m.word(box+O['W_Y'],40)
+    win=m.node('window','playing_page',[box,title,artist])
+    for w,parent in ((vslide,box),(box,win),(title,win),(artist,win),(win,m.wm)): m.word(w+O['W_PARENT'],parent)
+    m.top=win; m.call(address=playing,args=(win,7,0,0),gap=0); vis=m.nodes[vslide]['children'][-1]
+    def vis_paint(): m.letters=[]; [m.call(address=HOOKS['widget_on_paint_border'][0],args=(w,m.canvas,0,0),gap=0) for w in (vis,win)]; return [l['text'] for l in m.letters]
+    m.timers.clear(); m.top=m.node('window','saverscreen_page'); vis_paint(); assert len(m.timers)==1
+    m.advance(O['VIS_RETRY_MS']); assert len(m.timers)==1
+    m.top=win; m.advance(O['VIS_RETRY_MS']-1); assert ('widget_invalidate_force',vslide) not in [c[:2] for c in m.calls]
+    m.advance(1,clear=False); assert ('widget_invalidate_force',vslide) in [c[:2] for c in m.calls] and not m.timers; passed()
+    # The tick (-mfp64 doubles: not emulated) sets vz.quiet, the struct's last word, at rest.
+    from build import run
+    quiet=[int(l.split()[1],16)+int(l.split()[2])-4 for l in run('readelf','-Ws',str(B/'patch.elf')).splitlines() if l.split()[-1:]==['vz']][0]
+    m.now+=1000; assert vis_paint()==[] and len(m.timers)==1
+    m.word(quiet,1); assert vis_paint()==['Charge \xb7 Elbow']; passed()
+    # VIS_W (343 px; 10 px a letter mocked): too long, the artist goes, then the title ends in an ellipsis.
+    m.nodes[title]['text']='T'*30; assert vis_paint()==['T'*30]
+    m.nodes[title]['text']='T'*40; assert vis_paint()==['T'*33+'\u2026']; passed()
+else:
+    m=QueueMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'
+    vslide=m.node('slide_view','slide_view',value=0); win=m.node('window','playing_page',[vslide])
+    for w,parent in ((vslide,win),(win,m.wm)): m.word(w+O['W_PARENT'],parent)
+    m.top=win; m.call(address=playing,args=(win,7,0,0),gap=0)
+    assert m.nodes[vslide]['children']==[] and not {'vz','visualizer_paint','visualizer_attach'} & set(payload_syms); passed()
 
 # The full-screen art: stock init runs first; the song name and its shade show BC_MS, then fade
 # out together over BC_STEPS steps. Closing it mid-fade stops the fade.
@@ -8976,7 +8985,7 @@ class CentredMachine(KaraokeMachine):
         return (self.nodes[self.win]['children'].index(self.col),self.get(self.col+O['W_X']),self.get(self.col+O['W_W']),
                 self.get(self.slide+O['W_W']),self.get(self.slide+O['W_H']),self.nodes[self.col].get('style:normal:bg_color'),
                 {self.get(r+O['W_W']) for r in self.nodes[self.lrc]['children']})
-COLUMN,FULL=(1,80,225,225,198,'#00000000',{225}),(3,0,375,375,270,'#000000',{375})  # last: past the visualizer's Halo art too
+COLUMN,FULL=(1,80,225,225,198,'#00000000',{225}),(2,0,375,375,270,'#000000',{375})  # last: the window's last child
 def centred(lines=((5,'x'*15),(9,'Two two'),(12,'Three')),playtime=9,**kw):
     m=CentredMachine(**kw); m.lines=list(lines); m.show(playtime); return m
 def centre_of(m,i,view):  # the offset that centres line i's row in a view that high (C's division)
@@ -9015,7 +9024,7 @@ def ipod_full():
 def where(m,view): return (m.full()[:6],[m.get(m.col+O[k]) for k in ('W_Y','W_H')],m.nodes[m.dots].get('self_layout'),m.nodes[view].get('self_layout'))
 for end in ('tap','return'):
     m,view=ipod_full(); m.tap()
-    assert where(m,view)==((3,0,375,375,270,'#000000'),[0,290],('0','270','100%','10'),('0','0','100%','-20')),where(m,view)
+    assert where(m,view)==((2,0,375,375,270,'#000000'),[0,290],('0','270','100%','10'),('0','0','100%','-20')),where(m,view)
     if end=='tap': m.tap()
     else: assert m.call(O['KEY_RETURN'],gap=50)==11
     assert where(m,view)==((1,0,375,375,186,'#00000000'),[40,192],('0','182','100%','10'),('0','0','100%','178')),where(m,view); passed()
@@ -9058,7 +9067,8 @@ m.tap(); assert m.full()[:6]==COLUMN[:5]+(None,),m.full(); passed()
 # card with an album. A press asks for Wi-Fi first, copies the album's tracks off stock's records (a CUE
 # track left out) and starts the worker; the row shows its progress, a press while it runs cancels, the
 # page's end leaves it running, and the timer joins it and toasts the summary. USB storage stops it quietly.
-# The job's own steps are test/peq.py's album_check. AirPlay's row (airplay.c) goes over stock's, for any song.
+# The job's own steps are test/peq.py's album_check. AirPlay's row (airplay.c) goes over stock's, and About's
+# (np_about.c) under them all, for any song.
 assert [m.get(O['PLAYMORE_ROWS']+4*i) for i in range(O['PLAYMORE_COUNT'])]==[2,3,4,5,6,7,0,1]  # Download Cover & Lyrics third
 class AlbumLyricsMachine(CoverflowMachine):
     def __init__(self,**queue):
@@ -9078,19 +9088,21 @@ class AlbumLyricsMachine(CoverflowMachine):
         assert self.calls[0][:2]==('stock_playermore',self.top)
         return self.nodes[view]['children']
 m=AlbumLyricsMachine(); kids=m.more(); row=kids[4]
-assert len(kids)==10 and [k for k in kids if k not in (row,kids[0])]==m.stock and m.nodes[row]['style']=='s_listitem_black'
+assert len(kids)==11 and [k for k in kids if k not in (row,kids[0],kids[-1])]==m.stock and m.nodes[row]['style']=='s_listitem_black'
 air=m.nodes[m.nodes[kids[0]]['children'][0]]['children']
 assert m.nodes[air[0]]['image']=='airplay' and m.nodes[air[1]]['text']=='AirPlay'
+about=m.nodes[m.nodes[kids[-1]]['children'][0]]['children']
+assert m.nodes[about[0]]['image']=='system_about' and m.nodes[about[1]]['text']=='About'
 button=m.nodes[row]['children'][0]; icon,label=m.nodes[button]['children']
 assert m.nodes[button]['style']=='s_btn_listitem' and not m.nodes[button].get('name')
 assert [m.get(button+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[20,0,335,70]
 assert m.nodes[icon]['image']=='player_onlinesearch' and [m.get(icon+O[k]) for k in ('W_X','W_W','W_H')]==[10,52,70]
 assert m.nodes[label]['style']=='s_scrlabel_white24l' and m.nodes[label]['text']=='Download Album Lyrics'
 assert [m.get(label+O[k]) for k in ('W_X','W_W','W_H')]==[72,253,70]; passed()
-m=AlbumLyricsMachine(cls=0xf1); assert len(m.more())==9; passed()  # an online queue: AirPlay's row alone
+m=AlbumLyricsMachine(cls=0xf1); assert len(m.more())==10; passed()  # an online queue: AirPlay's and About's rows alone
 for off,v in (('REC_TYPE',4),('REC_ALBUM',0),('REC_PATH',0)):  # a folder, no album tag, no path
-    m=AlbumLyricsMachine(); m.word(m.playing()+O[off],v); assert len(m.more())==9,off; passed()
-m=AlbumLyricsMachine(); m.word(m.playing()+O['REC_PATH'],m.string('http://x/y')); assert len(m.more())==9; passed()
+    m=AlbumLyricsMachine(); m.word(m.playing()+O[off],v); assert len(m.more())==10,off; passed()
+m=AlbumLyricsMachine(); m.word(m.playing()+O['REC_PATH'],m.string('http://x/y')); assert len(m.more())==10; passed()
 m=AlbumLyricsMachine(); assert len(m.more(7))==7; passed()  # not stock's rows: left as they are
 def album_lyrics_page(**queue):
     m=AlbumLyricsMachine(**queue); button=m.nodes[m.more()[4]]['children'][0]; label=m.nodes[button]['children'][1]
@@ -10285,8 +10297,8 @@ for sizes in ((2,2,1,1),(1,1,1,1)):
         assert m.nodes[m.cover]['image']==(want if m.files[path][1] else 'play_defaultcover'),(path,m.nodes[m.cover])
         assert m.nodes[m.songlabel]['text']==path.rsplit('/',1)[1]
         assert m.nodes[m.art]['image']==want
-        assert m.nodes[m.poslabel]['text']==f"{m.mcl('MCL_POS')+1} of {len(m.names())}"
         queue=m.items(m.get(syms['mcl_pdeqplaylist']))
+        assert 'text' not in m.nodes[m.poslabel] and m.text(m.get(queue[m.mcl('MCL_POS')]+O['REC_PATH']))==path  # no "n of m"
         assert all(not m.get(r+O['REC_ALBUM']) for r in queue) # tags came from parsing, not library rows
         assert ('tags',path) in m.trace and ('decoder_start',path) in m.trace
         passed()
@@ -20335,14 +20347,16 @@ m.call(address=inp,args=(m.wm,m.event,0,0),event_type=O['EVT_KEY_DOWN'],gap=0,cl
 m.word(payload_syms['wheel_frame_at'],m.now); m.call(address=inp,args=(m.wm,m.event,0,0),event_type=O['EVT_KEY_DOWN'],gap=0,clear=False)
 assert m.pass_(0)[1]==[] and m.pass_(O['DARK_TURN_MS']-1)[1]==[] and m.pass_(1)[1]==[O['SCREEN_OFF_SLEEP_MS']]; passed()
 # Now Playing keeps stock's pace only while its visualizer repaints; idle, it idles like any page.
-class Live(PowerMachine):
-    def hook(self,u,address,size,unused):
-        if self.handlers.get(address)=='v:live':
-            self.returns(self.live); return
-        return super().hook(u,address,size,unused)
-m=Live(); m.handlers[payload_syms['visualizer_live']]='v:live'; m.live=1
-m.top=m.node('window','playing_page'); m.pass_(1)
-assert m.pass_(O['IDLE_MS'])[1]==[]; m.live=0; assert m.pass_(1)[1]==[O['IDLE_SLEEP_MS']]; passed()
+if O['NP_VISUALIZER']:
+    class Live(PowerMachine):
+        def hook(self,u,address,size,unused):
+            if self.handlers.get(address)=='v:live':
+                self.returns(self.live); return
+            return super().hook(u,address,size,unused)
+    m=Live(); m.handlers[payload_syms['visualizer_live']]='v:live'; m.live=1
+    m.top=m.node('window','playing_page'); m.pass_(1)
+    assert m.pass_(O['IDLE_MS'])[1]==[]; m.live=0; assert m.pass_(1)[1]==[O['IDLE_SLEEP_MS']]; passed()
+else: assert 'visualizer_live' not in payload_syms; passed()
 # Standby limit (docs/internals.md#standby-limit): with a limit, toolsIntoStandby's suspend runs
 # between the RTC wake alarm's set (the limit past since_epoch) and its clear. A resume at or past the
 # alarm powers off on the next pass (poweroff_page), once, unless a cable is in or the music plays; a

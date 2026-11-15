@@ -3066,7 +3066,7 @@ int ringnav_paint(void *w, void *canvas) {
     addon_paint(w, canvas);
     peq_paint(w, canvas);
     battery_paint(w, canvas);
-    visualizer_paint(w, canvas);
+    if (NP_VISUALIZER) visualizer_paint(w, canvas);
     games_paint(w, canvas);
     search_strip_paint(w, canvas);
     /* Even a page with no navigable pane must end pending input when it is painted. */
@@ -3098,7 +3098,8 @@ int ringnav_paint(void *w, void *canvas) {
     paint_caps(w, canvas);
     if (theme()->marquee_fade) marquee_fade(w, canvas);
     if (w && w == slider_page_win) slider_page_paint(w, canvas);
-    if (w && w == st.np_win && !visualizer_full()) np_modes(w, canvas); /* else the page's own */
+    if (w && w == st.np_win && !(NP_VISUALIZER && visualizer_full()))
+        np_modes(w, canvas); /* else the page's own */
     hold_paint(w, canvas, 1);
     coverflow_home_clip(w, canvas, 0);
     st.paint_w = w ? P(w, W_PARENT) : (void *)0;
@@ -4966,9 +4967,9 @@ static void lyric_follow(void *lrc, int ms, int front, int shown) {
     }
 }
 
-/* Smart Awake (#57): Now Playing lit in front, a song playing, on its lyrics, info or
- * visualizer page, or its full-screen art in front, holds the screen on as the lyrics wheel does;
- * paused, it times out as usual. */
+/* Smart Awake (#57): Now Playing lit in front, a song playing, on its lyrics or visualizer page,
+ * or its full-screen art or ⋯'s About (np_about.c) in front, holds the screen on as the lyrics
+ * wheel does; paused, it times out as usual. */
 static void keep_lit_poll(void) {
     unsigned now = (unsigned)time_now_ms();
     if (!st.np_slide || now - st.keep_lit_at < 1000) return;
@@ -4977,7 +4978,7 @@ static void keep_lit_poll(void) {
     void *top = window_manager_get_top_window(window_manager());
     if (st.keep_lit && g_backlight_status && mclGetPlayStatus() == 2 &&
         ((top == st.np_win && widget_get_prop_int(st.np_slide, "value", 0)) ||
-         (top && top == st.bc[2])))
+         (top && (top == st.bc[2] || top == np_about_page()))))
         reset_poweroptions_timer(1, 1, 1);
 }
 
@@ -5320,10 +5321,11 @@ static int np_key(void *top, unsigned key) {
 
 static int np_gone(void *win, void *event) {
     if (win == st.np_win) {
+        np_about_np_gone(win);
         st.np_win = (void *)0;
         st.np_hash = 0;
-        st.np_pos = st.np_album = st.np_remain = st.np_slider = st.np_elapsed = st.np_cover =
-            st.np_slide = st.np_lrc = st.np_title = st.np_artist = (void *)0;
+        st.np_album = st.np_remain = st.np_slider = st.np_elapsed = st.np_cover = st.np_slide =
+            st.np_lrc = st.np_title = st.np_artist = (void *)0;
         st.scrub_moved = 0; /* the page is going: no seek */
         st.np_off = st.np_full = st.lyric_held = 0;
         np_tap_reset();
@@ -5387,12 +5389,12 @@ static int stream_gone(void *ctx, void *event) {
 /* Classic's Spotify and Internet Radio Now Playing (spotify.c, radio.c) take the local page's
  * places (NP_IPOD_*): the art, its box taller than wide, so paint_cover slants the image it shows
  * over its reflection (coverflow_slant, whose one frame is keyed by the image's url and pixels, so
- * the local page and this one never show each other's); the title's, artist's, album's and "3 of
- * 12"'s rows (text, any 0 left out); the times in "-9:59"'s boxes beside the bar, in Classic's
- * face, until the page fits them to its track (ipod_times); the bar, which the page paints with
- * ipod_bar, or with none a bar of its own, last so over the art's box, that paint_scrubber paints
- * always full and that takes no touch; the heart. 0 under the other themes, whose pages keep their
- * own layout. */
+ * the local page and this one never show each other's); the title's, artist's and album's rows
+ * and a fourth under them in the room the local page leaves there (text, any 0 left out); the times
+ * in "-9:59"'s boxes beside the bar, in Classic's face, until the page fits them to its track
+ * (ipod_times); the bar, which the page paints with ipod_bar, or with none a bar of its own, last
+ * so over the art's box, that paint_scrubber paints always full and that takes no touch; the heart.
+ * 0 under the other themes, whose pages keep their own layout. */
 int stream_ipod(void *art, void *const text[4], void *elapsed, void *remain, void *bar,
                 void *heart) {
     static const unsigned char dy[] = { 0, 34, 62, 90 }, h[] = { 28, 22, 22, 20 };
@@ -5405,7 +5407,8 @@ int stream_ipod(void *art, void *const text[4], void *elapsed, void *remain, voi
         if (text[i])
             widget_move_resize(text[i], NP_IPOD_TEXT_X, NP_IPOD_TEXT_Y + dy[i],
                                375 - SPOT_ART_X - NP_IPOD_TEXT_X, h[i]);
-    if (text[3]) widget_set_prop_int(text[3], "style:normal:font_size", 16); /* "3 of 12"'s */
+    if (text[3])
+        widget_set_prop_int(text[3], "style:normal:font_size", 16); /* the fourth's 16 px */
     void *times[] = { elapsed, remain };
     for (unsigned i = 0; i < 2; ++i) {
         if (!times[i]) continue;
@@ -5466,7 +5469,6 @@ int ringnav_playing(void *win, void *ctx) {
     stop_timer(&st.genre_timer);
     st.genre_label = (void *)0;
     st.np_win = win;
-    st.np_pos = widget_lookup(win, "label_ipod_pos", 1);
     st.np_album = widget_lookup(win, "label_ipod_album", 1);
     st.np_slider = widget_lookup(win, "slider_play", 1);
     st.np_remain = widget_lookup(win, "label_ipod_remain", 1);
@@ -5525,7 +5527,7 @@ int ringnav_playing(void *win, void *ctx) {
      * once after the open. Fit from the file's own length at open if that shows. */
     np_fit_due((void *)0);
     np_sync(win);
-    visualizer_attach(win);
+    if (NP_VISUALIZER) visualizer_attach(win); /* off: Now Playing has no visualizer page */
     return result;
 }
 
@@ -7489,9 +7491,9 @@ static int setting_click(void *ctx, void *event) {
  * loop's fast pace while it moves. */
 #define GENRE_SCROLL "ringnav_genre_scroll"
 static int genre_over(void) {
-    void *s = st.genre_label;
-    if (!s || !g_backlight_status || window_manager_get_top_window(window_manager()) != st.np_win ||
-        widget_get_prop_int(st.np_slide, "value", 0) != 2) /* view_info */
+    void *s = st.genre_label, *about = np_about_page();
+    if (!s || !about || !g_backlight_status ||
+        window_manager_get_top_window(window_manager()) != about)
         return 0;
     return I(s, HSCROLL_TEXT_W) + 4 - I(s, W_W); /* stock's two 2 px margins, as marq_moved */
 }
@@ -7525,7 +7527,7 @@ static void genre_fill(void *win, void *label, const char *text) {
         st.genre_off = 0;
         hscroll_label_set_xoffset(s, 0);
     }
-    if (win != st.np_win) return;
+    if (win != np_about_page()) return;
     st.genre_label = s;
     if (!same) stop_timer(&st.genre_timer); /* the new text holds at its start */
     if (!st.genre_timer && genre_over() > 0)
@@ -7599,6 +7601,8 @@ int ringnav_np_info(void *win) {
                              *const units[] = {
                                  "", "", " MB", "", "", "-bit", " kbps", " kHz", ""
                              };
+    if (win && win == st.np_win && np_about_page())
+        win = np_about_page(); /* About holds the labels */
     int result = np_info(win), rows = win && widget_lookup(win, "label_album_value", 1);
     /* OLED's table (tools/ipod.py np_info_table): the bit depth joins Format ("FLAC, 16-bit") */
     char depth[32] = "", where[64] = "";
@@ -10918,7 +10922,7 @@ static int now_playing(void) {
  * input to stamp, nor does a card game's, whose travel goes once a pass. */
 static int np_animating(void) {
     return games_live() || addon_game_on() ||
-           (now_playing() && (visualizer_live() || st.lyric_glide ||
+           (now_playing() && ((NP_VISUALIZER && visualizer_live()) || st.lyric_glide ||
                               (st.np_marquee && st.np_off > 0 && st.np_off < st.np_over)));
 }
 
@@ -11127,7 +11131,8 @@ int ringnav_sleep(void *loop) {
     info_poll();
     np_art_poll();
     if ((st.np_slide && widget_get_prop_int(st.np_slide, "value", 0)) || /* off the art page */
-        (st.rate_on && classic_pages()))                                 /* over the picker */
+        np_about_page() ||               /* the details over it (np_about.c) */
+        (st.rate_on && classic_pages())) /* over the picker */
         *(volatile signed char *)BC_IDLE = BC_IDLE_FULL;
     if (st.bc[0] && np_track() != st.bc_track) bc_show();
     if (!g_backlight_status) {
