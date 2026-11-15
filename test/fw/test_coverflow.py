@@ -47,7 +47,8 @@ class Home(C.Structure):
                 *((k, C.c_int) for k in 'kind songs albums services games free_tenths counted counting got_songs got_albums'.split()),
                 ('count_thread', C.c_ulong), *((k, C.c_uint) for k in 'asked pane_read count_timer pane_timer'.split()),
                 ('ring', (C.c_uint * HOME_PW) * 4), ('clip', C.c_int * 4), ('clipped', C.c_int),
-                ('ink_bar', C.c_void_p), ('ground', C.c_uint), ('held', C.c_ubyte * HOME_PW)]
+                ('ink_bar', C.c_void_p), ('ground', C.c_uint), ('held', C.c_ubyte * HOME_PW),
+                ('strip_timer', C.c_uint), ('stripping', C.c_int)]
 
 
 class Row(C.Structure):
@@ -746,6 +747,78 @@ def split_inset_set(fw, library, inset):
     C.c_int.from_address(C.addressof(fw.var('st', C.c_char)) + st).value = g
     row = dict(zip(names, sets[g]))
     return row, 320 - row['bar']
+
+
+def test_split_raises_home_s_list_to_y_40_where_the_art_runs_under_the_status_row(fw, library):
+    """Under OLED's set (split_art_up) Split's main menu starts at y 40, 18 rows above Home's window; Full's, a set
+    with no art up and the other lists stay at the theme's home.rows.top, in the window."""
+    ui = Ui(fw)
+    lst = ui.make(0, 'list_view', 0, 0, 375, 224)
+    fw.var('coverflow__home', Home).list = lst  # the main menu; its Settings and other lists are full pages here
+    width = fw.fn('coverflow__home_width', None, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int)
+    row, client = split_inset_set(fw, library, 2)  # OLED's
+    width(lst, 196, 196, 24, 44, 0)
+    assert rect(lst)[:2] == (0, 40 - (320 - client)) and 320 - client == 58
+    fw.fn('ipod_home', C.c_int)()  # the settings read once
+    home_mode = C.c_int.from_address(C.addressof(fw.var('st', C.c_char)) + host.offsets(library.parent/'navigation.o', 'scratch_t')['home'])
+    home_mode.value = 1  # Full
+    width(lst, 375, 375, 24, 44, 0)
+    full_top = rect(lst)[1]
+    home_mode.value = 0
+    split_inset_set(fw, library, 0)  # a set whose art starts under the bar
+    width(lst, 187, 187, 24, 44, 0)
+    assert rect(lst)[1] == full_top >= 0  # both the theme's home.rows.top, inside the window
+    split_inset_set(fw, library, 2)
+    other = ui.make(0, 'list_view', 0, 0, 375, 64)
+    width(other, 375, 375, 24, 44, 0)
+    assert rect(other)[1] == full_top
+
+
+def test_the_bar_paints_the_rows_split_raises_above_home_s_window(fw, library):
+    """coverflow_home_strip, from the bar's background: the list painted at its place on the screen (the canvas moved
+    to Home's window and back), clipped to its rows above the window and left of the pane, the clip put back."""
+    ui = Ui(fw)
+    split_inset_set(fw, library, 2)
+    home = fw.var('coverflow__home', Home)
+    win = ui.make(ui.wm, 'window', 0, 58, 375, 262)
+    home.win, home.list = win, ui.make(win, 'list_view', 0, -18, 196, 280)
+    home.art = ui.make(win, 'image', 196, 0, 179, 262)
+    ui.top = win
+    clips, moves, painted = [], [], []
+    fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(slice(0, 4), [0, 0, 375, 320]))
+    fw.mock('canvas_set_clip_rect', lambda c, r, *_: clips.append(tuple((C.c_int * 4).from_address(r))))
+    fw.mock('canvas_translate', lambda c, x, y, *_: moves.append((C.c_int(x).value, C.c_int(y).value)))
+    fw.mock('widget_paint', lambda w, c, *_: painted.append(w))
+    strip = fw.fn('coverflow_home_strip', None, C.c_void_p, C.c_void_p)
+    strip(0x40, win)
+    assert painted == [home.list] and moves == [(0, 58), (0, -58)]
+    assert clips == [(0, 40, 196, 18), (0, 0, 375, 320)]
+    painted.clear()
+    ui.animating = 1  # Home is a snapshot while a window slides
+    strip(0x40, win)
+    ui.animating = 0
+    assert not painted
+    # the list's own paint in the window (a new selection): its rows in the bar again, after the frame
+    bar = ui.make(ui.wm, 'window', 0, 0, 375, 58)
+    fw.var('fw_ctx_system_bar', C.c_void_p).value = bar
+    canvas = C.create_string_buffer(0x100)
+    paint = fw.fn('coverflow_home_clip', None, C.c_void_p, C.c_void_p, C.c_int)
+
+    def clip(w):  # the list's paint begins
+        paint(w, C.addressof(canvas), 1)
+    clip(home.list)
+    i, ms = ui.timer(address(fw, 'coverflow__strip_due'))
+    assert ms == 0 and not ui.dirty
+    ui.fire(i)
+    assert ui.dirty == [(bar, (0, 40, 196, 18))]
+    home.stripping = 1  # the bar's own paint of it: no repaint after
+    clip(home.list)
+    assert not ui.timer(address(fw, 'coverflow__strip_due'))
+    home.stripping = 0
+    C.c_int.from_address(home.list + 4).value = 0  # a list in its window: nothing above it
+    strip(0x40, win)
+    clip(home.list)
+    assert not painted and not ui.timer(address(fw, 'coverflow__strip_due'))
 
 
 def test_a_split_inset_keeps_the_pan_off_the_cover_s_edges(fw, library):

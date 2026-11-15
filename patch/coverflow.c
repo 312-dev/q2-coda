@@ -3952,6 +3952,9 @@ static struct {
     void *ink_bar;
     unsigned ground;
     unsigned char held[HOME_PW];
+    /* coverflow_home_strip's repaint after the list's own, and whether it is painting */
+    unsigned strip_timer;
+    int stripping;
 } home __attribute__((section(".scratch")));
 extern int ipod_home(void), ipod_home_rockbox(void), home_shortcut_open(void *, void *),
     home_lib_on(void), row_preview_on(void), library_search(void);
@@ -4917,6 +4920,39 @@ void coverflow_home_bar(void *canvas, void *top) {
     canvas_draw_image(canvas, home.frame, src, dst);
 }
 
+/* The bar's background, after coverflow_home_bar: Home's main menu where Split raises it above
+ * the window (home_width, HOME_SPLIT_TOP), the rows between its top and the window's that Home's
+ * own paint clips away. The list paints into the bar's canvas at its place on the screen, left of the
+ * pane; taps there reach the bar. Under a window's slide Home is a snapshot: none. The caller
+ * puts navigation.c's paint_w back after. */
+void coverflow_home_strip(void *canvas, void *top) {
+    void *l = home.list;
+    int old[4], clip[4], wx = l ? I(home.win, W_X) : 0, wy = l ? I(home.win, W_Y) : 0;
+    if (!l || top != home.win || I(l, W_Y) >= 0 || !widget_get_visible(l) ||
+        window_manager_is_animating(window_manager()) ||
+        !clip_within(canvas, old, clip, 0, wy + I(l, W_Y), pane_x(), -I(l, W_Y)))
+        return;
+    canvas_set_clip_rect(canvas, clip);
+    canvas_translate(canvas, wx, wy);
+    home.stripping = 1;
+    widget_paint(l, canvas);
+    home.stripping = 0;
+    canvas_translate(canvas, -wx, -wy);
+    canvas_set_clip_rect(canvas, old);
+}
+/* After a paint of the raised list in its window (a new selection, a slide's frame), its rows in
+ * the bar again: AWTK keeps a widget's invalidate inside its window, so the bar's rows would keep
+ * the old ones, and an invalidate made mid-paint is lost. */
+static int strip_due(const void *unused) {
+    void *bar = *(void *const *)system_bar, *l = home.list;
+    home.strip_timer = 0;
+    if (bar && l && I(l, W_Y) < 0) {
+        int rows[4] = { 0, I(home.win, W_Y) + I(l, W_Y), pane_x(), -I(l, W_Y) };
+        widget_invalidate_force(bar, rows);
+    }
+    return 0; /* RET_REMOVE */
+}
+
 /* The bar's border paint, its glyphs drawn: the art into the rows coverflow_home_bar left, the
  * glyphs over it inked by contrast. Only the pixels inside the clip, at most the pane's rows. */
 static void home_ink_bar(void *canvas) {
@@ -4961,6 +4997,7 @@ void coverflow_home_clip(void *w, void *canvas, int begin) {
         home.clipped = 0;
         return;
     }
+    if (w == home.list && !home.stripping && I(w, W_Y) < 0) rearm(&home.strip_timer, strip_due, 0);
     int clip[4], art = w == home.art, x = pane_x(), pane = widget_get_visible(home.art) ? x : 375;
     clip_within(canvas, home.clip, clip, I(canvas, CANVAS_X) - I(w, W_X) + (art ? x : 0),
                 I(canvas, CANVAS_Y) - I(w, W_Y) + (art ? 0 : I(w, W_Y)), art ? 375 - x : pane,
@@ -4996,8 +5033,18 @@ static void art_beside(void *shown) {
 
 /* Both menus' lists span outer, their rows and tap targets inner; labels start at x and end end
  * before the row's edge (Classic: before the chevron). */
+/* Split's list top on the screen where the art runs up under the status row (a split_art_up):
+ * the status row's left side holds nothing there (navigation.c clock_place puts the clock at the
+ * right), so the list rises into it, above Home's window; the bar paints those rows
+ * (coverflow_home_strip). */
+#define HOME_SPLIT_TOP 40
+/* w, one of Home's lists, and its rows: outer wide, the rows inner, their labels from x to end
+ * short of the row; the list at home.rows.top in its window, Split's main menu at HOME_SPLIT_TOP
+ * on the screen. */
 static void home_width(void *w, int outer, int inner, int x, int end, int depth) {
-    widget_move_resize(w, I(w, W_X), depth ? I(w, W_Y) : theme()->home_top,
+    int top = w == home.list && pane_up() && !ipod_home() ? HOME_SPLIT_TOP - (320 - client_h())
+                                                         : theme()->home_top;
+    widget_move_resize(w, I(w, W_X), depth ? I(w, W_Y) : top,
                        depth < 2 ? outer : inner, I(w, W_H));
     for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) {
         void *child = widget_get_child(w, i);

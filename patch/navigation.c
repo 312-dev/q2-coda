@@ -209,6 +209,7 @@ extern int coverflow_home_back(void *top), coverflow_home_owns(void *w);
 extern void coverflow_home_top(void);
 extern const char *coverflow_home_title(void);
 extern int coverflow_home_sub(void), coverflow_home_split(void *top);
+extern void coverflow_home_strip(void *canvas, void *top);
 extern void coverflow_home_row(void *surface, void *row, int id, int painting);
 extern void lockscreen_paint(void *w, void *canvas);
 extern int lockscreen_hold(void *top);
@@ -6737,6 +6738,9 @@ int ringnav_paint_bg(void *w, void *canvas) {
         }
         stock_canvas_set_fill_color(canvas, fill);
         coverflow_home_bar(canvas, window_manager_get_top_window(wm)); /* OLED's art in the bar */
+        coverflow_home_strip(canvas, window_manager_get_top_window(wm)); /* and Split's list */
+        st.paint_w = w;
+        stock_canvas_set_fill_color(canvas, fill);
     }
     void *top = window_manager_get_top_window(wm);
     /* Any painted window, not only the top one: Home slides back in from a snapshot. */

@@ -416,7 +416,7 @@ pattern.
 | Q2 Pod screen                       | Pattern                     | Notes                                                                                                      |
 | ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock, centred |
-| Home (Split)                        | List row beside art         | Rows to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges, panning slowly; the status row's clock, play state and battery over it at the right, each glyph white or black by contrast |
+| Home (Split)                        | List row beside art         | Rows from y 40 (into the status row's empty left, the clock at its right) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges, panning slowly; the status row's clock, play state and battery over it at the right, each glyph white or black by contrast |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Library                             | List row                    |                                                                                                            |
 | Albums                              | Two-line row with art       |                                                                                                            |
@@ -491,7 +491,9 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   charging green and low red keep their colours (`home_ink`, approved from `mock_split_top.py` on 2026-11-14, one
   ink a glyph from the same day, as each pixel's own pick speckled over lettering), panning slowly across its 110 % zoom with an
   eased turn at each end and 2 % of the zoom kept clear of the pane at each edge, so a cover's own border never
-  shows), and the lists Home's rows open as full-width pages with the art hidden (`home.lists.full`).
+  shows), the main menu from y 40, its top rows painted by the bar (`coverflow_home_strip`, approved from
+  `mock_overflow.py` on 2026-11-15), and the lists Home's rows open as full-width pages with the art hidden
+  (`home.lists.full`).
 - The toast, the confirm as a dialog page and the empty note (`dialog.confirm.painter="oled"`,
   `patch/feedback.c`), and the confirmation after a shuffle.
 

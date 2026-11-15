@@ -193,7 +193,13 @@ frame is that much taller, Home's window draws its rows from the window's top do
 draws the rest (`coverflow_home_bar`, from the bar's background paint, with Home on top and no
 window sliding, as Home's paint draws nothing outside its window). OLED's `split_art_up` is the
 bar's whole 58, so the art reaches the top edge and the status row's clock, play state and battery
-stand over it. Each glyph is drawn in one ink, white or black, whichever has the higher WCAG contrast
+stand over it. The main menu rises too: with the clock at the row's right, its left side is empty,
+so the list starts at y 40 (`HOME_SPLIT_TOP`), 18 rows above Home's window, and the bar's background
+paints those rows of it after the art (`coverflow_home_strip`: the list painted at its place on the
+screen, clipped to them and left of the pane); a tap there reaches the bar. AWTK keeps a
+widget's invalidate inside its window, so each paint of the list in the window (a new selection, a
+slide's frame) repaints those rows of the bar after the frame (`strip_due`). Settings and the other
+lists Home opens are full pages under OLED, and stay in the window. Each glyph is drawn in one ink, white or black, whichever has the higher WCAG contrast
 against the art under it, as Scrolly's feed-end line does: the art's relative luminance (from a
 256-entry linear table) averaged over the glyph, each pixel weighted by the glyph's coverage
 there, white while that is at most 0.179. The glyph keeps its shape, and an antialiased edge blends
