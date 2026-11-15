@@ -3526,6 +3526,32 @@ def test_a_playing_cover_that_comes_mid_fade_takes_the_incoming_ones_place(fw):
     assert show(b'e', 0, 0) == -1 and home.fade == 0 and not home.sl[1].tw  # none to fade in: the one showing stays
 
 
+def test_play_starting_mid_library_fade_fades_from_the_frame_as_it_stands(fw):
+    """Play starts while a library cover fades in: the playing cover fades in over the frame as it was, the two blended
+    covers, with no jump at the switch, and once in it shows alone."""
+    covers = {u: (300, 300, rgba(300, 300, lambda x, y, c=c: c)) for u, c in
+              (('a', (200, 0, 0, 255)), ('d', (0, 0, 200, 255)), ('e', (0, 200, 0, 255)))}
+    b = Bitmaps(fw, covers)
+    home = fw.var('coverflow__home', Home)
+    show = fw.fn('coverflow__slide_show', C.c_int, C.c_char_p, C.c_int, C.c_int)
+    frame = fw.fn('coverflow__home_frame', C.c_int)
+    assert show(b'a', 0, 0) == 1 and show(b'd', 1, 0) == 1 and home.fade == 1 and home.sl[1].lib == 1
+    home.fade = 600  # the library cover 600 ms into its fade
+    assert frame()
+    before = pixels_of(b, home.frame)
+    assert show(b'e', 0, 0) == 1 and home.fade == 1 and home.sl[1].lib == 0  # play: the playing cover fades in
+    assert frame()
+    after = pixels_of(b, home.frame)
+    for y in range(len(before)):
+        for x in range(HOME_PW):
+            p, q = before[y][x], after[y][x]
+            assert all(abs((p >> s & 255) - (q >> s & 255)) <= 1 for s in (0, 8, 16)), (x, y, hex(p), hex(q))
+    home.fade = O['SLIDE_FADE_MS'] - 1
+    assert frame()
+    p = pixels_of(b, home.frame)[10][10]
+    assert p & 255 <= 1 and 198 <= p >> 8 & 255 <= 200 and p >> 16 & 255 <= 1  # all but a 256th the green
+
+
 def test_a_fade_keeps_the_pan_live_with_a_still_cover_under_it(fw):
     _, ui, h, _ = home_open(fw)
     home = fading(fw, ui, h)

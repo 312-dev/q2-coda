@@ -3920,14 +3920,16 @@ static int pane_h(void) { return client_h() + pane_up(); }
  * tw x th texels, the border's not counted (tw 0: none); lib 0 the playing track's, which pans
  * from the old crop u0 v0 across ranges rx ry, an eased ping-pong (drift_at) for as long as it
  * shows; lib 1 a library cover of the slideshow, whose window moves once over its life from
- * kb[0] to kb[1] (its top left in 1/256 texel and its scale in 1/65536 texel a pixel); ms the
- * time it has shown, the pan's phase. */
+ * kb[0] to kb[1] (its top left in 1/256 texel and its scale in 1/65536 texel a pixel); lib
+ * SLIDE_STILL the frame as it stood when play started mid-fade (frame_hold), tex its pixels as
+ * they are, tw x th, no border; ms the time it has shown, the pan's phase. */
 typedef struct {
     unsigned *tex;
     int tw, th, u0, v0, rx, ry, lib;
     int kb[2][3];
     unsigned ms;
 } slide_t;
+enum { SLIDE_STILL = 2 };
 enum { SHOW_NOW, SHOW_LIB }; /* what the pane shows (art_source): the playing cover, the library's */
 /* iPod Home (docs/ipod.md): the playing track's art, or the library's in turn, beside the list. */
 static struct {
@@ -4038,9 +4040,10 @@ static int drift_at(int range, unsigned period, unsigned ms) {
 /* Where s's window is now: its top left in the zoomed cover in 1/256 texel (u v) and its scale in
  * 1/65536 texel a pixel (k). The playing cover: the old crop, then the pan, a texel a pixel. A
  * library cover: kb[0] to kb[1] at an even pace over SLIDE_LIFE_MS, then still (the Ken Burns
- * look: one slow zoom and drift a cover); ms is at most SLIDE_LIFE_MS here, so p fits 32 bits. */
+ * look: one slow zoom and drift a cover); ms is at most SLIDE_LIFE_MS here, so p fits 32 bits. A
+ * still never moves. */
 static void slide_at(const slide_t *s, int *u, int *v, int *k) {
-    if (!s->lib) {
+    if (!s->lib || s->lib == SLIDE_STILL) {
         *u = s->u0 * 256 + drift_at(s->rx, DRIFT_X_MS, s->ms);
         *v = s->v0 * 256 + drift_at(s->ry, DRIFT_Y_MS, s->ms);
         *k = 65536;
@@ -4342,9 +4345,15 @@ HOT unsigned lerp(unsigned a, unsigned b, unsigned k) {
  * home.ring (by its row, tag), and each frame row down from the four it falls among. At scale 1
  * (the playing cover) every column takes the same weights, as one row of texels a pixel; a
  * library cover's zoom gives each column its own. blend 0 writes the frame; else the slide is laid
- * over what d holds at blend/256 (a cross-fade's incoming cover). */
+ * over what d holds at blend/256 (a cross-fade's incoming cover). A still (only ever the one
+ * showing, so blend 0) is copied as it is. */
 static void home_render(unsigned *d, int pitch, const slide_t *s, int u, int v, int k,
                         unsigned blend) {
+    if (s->lib == SLIDE_STILL) {
+        for (int y = 0; y < s->th; ++y, d += pitch)
+            memcpy(d, s->tex + y * s->tw, (unsigned)s->tw * 4);
+        return;
+    }
     unsigned wx[HOME_PW][4], wy[4];
     int ix[HOME_PW], tag[4] = { -1, -1, -1, -1 }, ts = s->tw + 3, pw = pane_w(), one = k == 65536;
     for (int x = 0; x < (one ? 1 : pw); ++x) {
@@ -4829,14 +4838,28 @@ static void slides_drop(void) {
     memset(home.sl, 0, sizeof home.sl);
     home.fade = 0, home.drawn = 0;
 }
+/* The frame as it stands, both slides blended, as the one showing: a still (SLIDE_STILL) the next
+ * cover fades in over, both slides freed. 0, the slides as they were, with no memory for it. */
+static int frame_hold(void) {
+    int pw = pane_w(), h = pane_h();
+    unsigned *t = home_frame() ? calloc((unsigned)(pw * h), 4) : 0;
+    const unsigned *f = t ? (const unsigned *)bitmap_lock_buffer_for_read(home.frame) : 0;
+    if (!f) return free(t), 0;
+    int pitch = (int)(bitmap_get_line_length(home.frame) / 4);
+    for (int y = 0; y < h; ++y) memcpy(t + y * pw, f + y * pitch, (unsigned)pw * 4);
+    bitmap_unlock_buffer(home.frame);
+    slides_drop();
+    home.sl[0].tex = t, home.sl[0].tw = pw, home.sl[0].th = h, home.sl[0].lib = SLIDE_STILL;
+    return 1;
+}
 /* The cover at url as the next slide (slide_load's answer): with one showing it fades in over it,
  * else, or with cut (the same cover again after a layout, on its new paper), it shows at once. A
  * playing cover that comes while another fades in takes that one's place in the fade (the player's
  * own after the Coverflow thumbnail that stood in for it, or a quick skip's next), so nothing
- * jumps; any other ends the fade first. The playing cover takes the one showing's phase when that
- * was the playing cover too, so a new track's pan goes on where it was.
- * ponytail: play starting while a library cover fades in ends that fade at once, a jump by what
- * was left of it; three slides blended would lift it. */
+ * jumps; one that comes while a library cover fades in (play starting mid-fade) fades in over the
+ * frame as it stands (frame_hold), the two covers there still from then on; any other ends the
+ * fade first. The playing cover takes the one showing's phase when that was the playing cover
+ * too, so a new track's pan goes on where it was. */
 static int slide_show(const char *url, int lib, int cut) {
     if (home.fade && !cut && !lib && !home.sl[1].lib) {
         int moves = slide_load(&home.sl[1], url, 0, home.sl[1].ms);
@@ -4844,7 +4867,7 @@ static int slide_show(const char *url, int lib, int cut) {
         home.drawn = 0;
         return moves;
     }
-    if (home.fade) fade_end();
+    if (home.fade && (cut || lib || !frame_hold())) fade_end();
     int over = !cut && home.sl[0].tw && !home.pane;
     unsigned ms = !lib && !home.sl[0].lib ? home.sl[0].ms : 0;
     int moves = slide_load(&home.sl[over], url, lib, ms);

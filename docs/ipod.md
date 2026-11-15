@@ -197,7 +197,9 @@ drift of up to `KB_DRIFT` (24 px) each way about it, and a zoom between the pan'
 `split_inset`. `home_render` takes the window's scale, each column with its own B-spline weights
 (at the playing cover's scale 1 they are one set, as before), and lays the incoming cover over the
 outgoing one by the fade's share while one runs, both moving. A new track's cover cross-fades the
-same way, as does the change between the playing cover and the slideshow; a cover that cannot
+same way, as does the change between the playing cover and the slideshow; when play starts while a
+library cover is still fading in, the playing cover fades in over the frame as it stood, those two
+covers held still under it (`frame_hold`), so nothing jumps; a cover that cannot
 move (a 16-bit decode, a cover too long for `DRIFT_TEXELS`, none) still cuts. The timer steps every
 `SLIDE_TICK_MS` (100 ms) while a fade runs, so it steps in 15 shades, and every `DRIFT_TICK_MS`
 otherwise. The covers come from `slideshow.c`, off the UI thread (`slide_pick`): a song at a random
