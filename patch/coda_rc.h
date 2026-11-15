@@ -1,0 +1,137 @@
+/* coda-rc, Q2 Pod's own remote-control protocol (docs/remote-protocol.md, remote/coda-rc.proto).
+ * The daemon is patch/coda_rc*.c, built as /usr/bin/coda-rc by tools/build.py (CODA_RC_SOURCES); it is not
+ * part of demo's payload. coda_rc_core.c is the transport-agnostic part: frames, the protobuf subset, pairing,
+ * authentication and sealing. coda_rc.c owns the transports and the data, coda_rc_ble.c the BLE GATT one.
+ * CODA_HOST builds the same files against the host's libc for test/unit/test_coda_rc.py. */
+#ifndef CODA_RC_H
+#define CODA_RC_H
+#include <stddef.h>
+#include <stdint.h>
+
+#define CRC_PROTO_VERSION 1
+#define CRC_TCP_PORT 7720
+#define CRC_HDR 6             /* u16 len | u8 type | u8 flags | u16 req_id, big-endian */
+#define CRC_MAX_PAYLOAD 8192  /* the largest plaintext payload either side sends or accepts */
+#define CRC_TAG 16
+#define CRC_MAX_FRAME (CRC_HDR + CRC_MAX_PAYLOAD + CRC_TAG)
+#define CRC_FLAG_SEALED 1
+
+/* Frame types (remote/coda-rc.proto, "Frame types"). Never renumbered. */
+enum {
+    T_HELLO = 0x01, T_HELLO_RESP, T_PAIR_START, T_PAIR_CHALLENGE, T_PAIR_FINISH, T_PAIR_RESULT, T_AUTH, T_AUTH_RESP,
+    T_ERROR = 0x0f,
+    T_SUBSCRIBE = 0x10, T_STATE, T_GET_STATE,
+    T_TRANSPORT = 0x20, T_ACK,
+    T_BROWSE = 0x30, T_BROWSE_RESP, T_SEARCH, T_SEARCH_RESP,
+    T_PLAY = 0x40, T_GET_QUEUE = 0x42, T_QUEUE_RESP,
+    T_GET_COVER = 0x50, T_COVER,
+    T_PING = 0x7e, T_PONG,
+};
+
+/* Error.code (remote/coda-rc.proto ErrorCode) */
+enum {
+    E_UNSUPPORTED = 1, E_UNAUTHORIZED, E_BAD_REQUEST, E_NOT_FOUND, E_BUSY, E_PAIRING_FAILED, E_PAIRING_LOCKED,
+    E_TOO_LARGE, E_INTERNAL, E_VERSION, E_UNAVAILABLE, E_PAIRING_CANCELLED, E_PAIRING_FULL,
+};
+
+/* HelloResp.caps bits */
+#define CAP_BROWSE 1u
+#define CAP_SEARCH 2u
+#define CAP_PLAY 4u
+#define CAP_QUEUE 8u
+#define CAP_COVERS 16u
+#define CAP_SEEK 32u
+#define CAP_SERVER 64u
+
+/* ---- the protobuf subset: varints (wire type 0) and length-delimited fields (wire type 2) ---- */
+typedef struct { uint8_t *p; size_t n, cap; int over; } pbw;
+void pb_varint(pbw *w, unsigned field, uint64_t v);
+void pb_bytes(pbw *w, unsigned field, const void *s, size_t n);
+void pb_str(pbw *w, unsigned field, const char *s);
+size_t pb_begin(pbw *w, unsigned field);  /* a nested message: pb_end patches its length */
+void pb_end(pbw *w, size_t mark);
+
+typedef struct { const uint8_t *p, *end; } pbr;
+typedef struct { unsigned field, wire; uint64_t v; const uint8_t *s; size_t n; } pbf;
+int pb_next(pbr *r, pbf *f);  /* 1 a field, 0 the end, -1 malformed */
+/* the field's bytes as a NUL-terminated string in buf (truncated at cap - 1) */
+void pb_cstr(const pbf *f, char *buf, size_t cap);
+
+/* ---- sessions ---- */
+#define CRC_PEER_ID 8
+#define CRC_KEY 32
+#define CRC_NAME 32
+#define CRC_MAX_PEERS 8
+
+typedef struct {
+    uint8_t id[CRC_PEER_ID], ltk[CRC_KEY];
+    char name[CRC_NAME];
+    uint32_t created;
+} crc_peer;
+
+enum { S_NEW, S_HELLO, S_PAIRING, S_PAIRED, S_AUTHED, S_CLOSED };
+
+typedef struct crc_session {
+    int state, transport;  /* transport: platform's own tag */
+    uint8_t sid[32];       /* client nonce then device nonce */
+    uint8_t peer[CRC_PEER_ID], ltk[CRC_KEY], kc[CRC_KEY], kd[CRC_KEY];
+    uint64_t rx_ctr, tx_ctr;
+    uint8_t scalar[32], dpoint[32], gen[32];  /* the pairing in flight (S_PAIRING) */
+    char client_name[CRC_NAME];
+    int subscribed;
+    uint8_t rx[CRC_MAX_FRAME];
+    size_t rx_n;
+    void *io;  /* the platform's connection */
+} crc_session;
+
+/* ---- what the platform provides (coda_rc.c; the host test's fakes) ---- */
+void crc_random(void *buf, size_t n);
+uint32_t crc_now_ms(void);
+uint32_t crc_now_s(void);  /* wall clock, for crc_peer.created */
+int crc_write(crc_session *s, const uint8_t *buf, size_t n);  /* the whole frame, or -1 */
+int crc_peers_load(crc_peer *peers, int cap);                  /* how many */
+int crc_peers_save(const crc_peer *peers, int n);
+void crc_pair_show(const char *code, const char *client_name); /* the Q2's pairing dialog */
+void crc_pair_hide(int outcome);                               /* 1 paired, 0 failed, -1 timed out or cancelled */
+int crc_pair_cancelled(void);                                  /* the user dismissed the dialog */
+/* an authenticated request: answer with crc_send/crc_error; anything but 0 closes the session */
+int crc_app(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t n);
+extern uint8_t crc_device_id[8];
+
+/* ---- the core (coda_rc_core.c) ---- */
+void crc_open(crc_session *s, void *io, int transport);
+/* bytes from the transport, in order; -1 when the session must close */
+int crc_feed(crc_session *s, const uint8_t *p, size_t n);
+int crc_send(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t n);
+int crc_error(crc_session *s, unsigned req_id, int code, const char *message);
+void crc_close(crc_session *s);
+void crc_tick(void);  /* about once a second: expires a pairing code that was not used */
+uint32_t crc_caps(void);
+/* ---- the daemon's own parts (coda_rc.c, coda_rc_lib.c, coda_rc_ble.c) ---- */
+const char *crc_path(char *buf, size_t cap, const char *path); /* path under --root */
+int crc_write_file(const char *path, const void *buf, size_t n, unsigned mode);
+void crc_log(const char *fmt, ...);
+int crc_shim_alive(void);
+int crc_shim_command(crc_session *s, unsigned req_id, const char *verb);
+/* Browse, Search, GetQueue, GetCover and Play (coda_rc_lib.c); qgen and qpos: Now Playing's queue version and
+ * place, newer than the queue file's */
+int lib_request(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t n, int qgen, int qpos);
+void lib_art_of(const char *path, char *art, size_t cap); /* a song path's album art id */
+int lib_has_server(void);
+/* BLE (coda_rc_ble.c): ble_start's fd joins the poll with ble_events(); -1 when BlueZ is not there */
+int ble_start(void);
+int ble_events(void);
+void ble_handle(void);
+int ble_write(const uint8_t *p, size_t n);
+void ble_disconnect(void);
+void ble_stop(void);
+int ble_retry_due(uint32_t now_ms);
+void crc_ble_connected(void);
+void crc_ble_bytes(const uint8_t *p, size_t n);
+void crc_ble_gone(void);
+
+#define CRC_PAIR_TIMEOUT_MS 120000
+#define CRC_PAIR_FAILS 3              /* wrong codes before pairing locks */
+#define CRC_PAIR_LOCK_MS 300000
+
+#endif

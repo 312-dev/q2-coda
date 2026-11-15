@@ -833,7 +833,7 @@ def test_compile_helper(tmp_path, monkeypatch):
     assert commands[:2] == [(*flags, build.ROOT/'patch/tool.c', '-o', objs[0]), (*flags, build.ROOT/'patch/start.c', '-o', objs[1])]
     assert commands[2] == ('ld.lld', '-m', 'elf32ltsmip', '-e', '__start', '--dynamic-linker', '/lib/ld-linux-mipsn8.so.1',
                            '--image-base=0x400000', '-z', 'noexecstack', '--gc-sections', '-s', '--hash-style=sysv', '--build-id=none',
-                           *objs, tmp_path/'libc.so', tmp_path/'libz.so', '-o', tmp_path/'helper')
+                           *objs, f'-L{tmp_path}', '-l:libc.so', '-l:libz.so', '-o', tmp_path/'helper')
 
 
 def test_bt_silence_commands(monkeypatch):

@@ -3893,6 +3893,7 @@ static const unsigned char library_order[] = {
 static const unsigned char sysset_order[] = {
     1 /* Wireless */,
     2 /* Network */,
+    15 /* Car Remote */,
     3 /* Display */,
     10 /* Controls */,
     4 /* Power */,
@@ -7838,6 +7839,8 @@ int ringnav_systemset(void *win, void *ctx) {
         for (unsigned i = 0; i < 4; ++i)
             widget_set_tr_text(list_row_into(view, moved[i][0], to_page, (void *)moved[i][1]),
                                moved[i][0]);
+        /* Car Remote (coda_rc_shim.c): its page, whose switch starts the coda-rc daemon */
+        widget_set_text_utf8(list_row_into(view, "system_carmode", carremote_open, 0), "Car Remote");
         for (unsigned i = 5; i <= 8; ++i) widget_set_visible(widget_get_child(view, i), 0, 0);
         /* Language: Q2 Pod's pages and labels are English only, so stock's other languages read
          * half-blank; hidden until they are translated (docs/internals.md, English). */
@@ -11120,6 +11123,7 @@ int ringnav_sleep(void *loop) {
     spot_poll();
     radio_poll();
     addon_poll();
+    coda_rc_poll();
     airplay_poll();
     playback_poll();
     resume_poll();

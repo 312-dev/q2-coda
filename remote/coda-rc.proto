@@ -1,0 +1,358 @@
+// coda-rc: Q2 Pod's own remote-control protocol, version 1.
+//
+// The wire format, transports, pairing and error handling are in docs/remote-protocol.md; this file is
+// the message set. Every frame's payload is one of these messages in protobuf's binary encoding, chosen by
+// the frame's type byte (the "type" comment on each message). The daemon (patch/coda_rc*.c) encodes and
+// decodes the subset it uses by hand (varints and length-delimited fields only), so:
+//
+// - fields are only int32/uint32/uint64/bool/enum (varint), string, bytes and nested messages;
+// - no field is ever renumbered or reused; a removed field's number is reserved;
+// - a reader skips fields it does not know, of any wire type, so fields and messages are only added.
+//
+// Deliberately absent, and never to be added: network credentials (Wi-Fi SSIDs or passwords), device
+// settings writes, file access by path, firmware updates, serial numbers or MAC addresses. The device
+// is reachable from a car park; what it answers must be what a passenger could see on its screen.
+
+syntax = "proto3";
+package coda;
+option java_package = "net.q2coda.autoremote.proto";
+option java_multiple_files = true;
+
+// ---------------------------------------------------------------------------------------------------
+// Frame types (the u8 after the length). Requests are client -> device; the device answers each with
+// the response named, or with Error, carrying the request's req_id. Pushes (req_id 0) are device -> client.
+//
+//   0x01 Hello            -> 0x02 HelloResp            (plain)
+//   0x03 PairStart        -> 0x04 PairChallenge        (plain)
+//   0x05 PairFinish       -> 0x06 PairResult           (plain)
+//   0x07 Auth             -> 0x08 AuthResp             (plain; every later frame is sealed)
+//   0x0f Error               (either way; req_id 0 when it ends a pairing or the session unasked)
+//   0x10 Subscribe        -> 0x21 Ack
+//   0x11 State               (push, and the answer to GetState)
+//   0x12 GetState         -> 0x11 State
+//   0x20 Transport        -> 0x21 Ack
+//   0x30 Browse           -> 0x31 BrowseResp
+//   0x32 Search           -> 0x33 SearchResp
+//   0x40 Play             -> 0x21 Ack
+//   0x42 GetQueue         -> 0x43 QueueResp
+//   0x50 GetCover         -> 0x51 Cover
+//   0x7e Ping             -> 0x7f Pong                 (any payload, echoed; plain before Auth)
+//
+// Before AuthResp only Hello, PairStart, PairFinish, Auth and Ping are answered; anything else gets
+// Error{UNAUTHORIZED}; after it, an unknown type gets Error{UNSUPPORTED} and the session goes on.
+// ---------------------------------------------------------------------------------------------------
+
+// ---- session --------------------------------------------------------------------------------------
+
+// type 0x01. The first frame of every session.
+message Hello {
+  uint32 proto_version = 1;  // the highest the client speaks; 1
+  string client_name = 2;    // shown on the Q2 while pairing and in Settings > Car remote; at most 31 bytes kept
+  bytes client_nonce = 3;    // 16 random bytes, fresh per session
+  bytes peer_id = 4;         // 8 bytes from an earlier PairResult; absent before the first pairing
+}
+
+// type 0x02
+message HelloResp {
+  uint32 proto_version = 1;  // the version this session speaks: min(client's, device's)
+  uint32 min_version = 2;    // the oldest version the device still speaks
+  bytes device_nonce = 3;    // 16 random bytes; session id = client_nonce || device_nonce
+  bool paired = 4;           // peer_id is known here: go to Auth. Otherwise PairStart.
+  uint32 caps = 5;           // Capability bits
+  string model = 6;          // "Shanling Q2"
+  bytes device_id = 7;       // 8 random bytes made on first start: tells two Q2s apart, identifies nothing else
+}
+
+enum Capability {
+  CAP_NONE = 0;
+  CAP_BROWSE = 1;
+  CAP_SEARCH = 2;
+  CAP_PLAY = 4;     // Play works (demo's play shim answered)
+  CAP_QUEUE = 8;
+  CAP_COVERS = 16;
+  CAP_SEEK = 32;    // Transport SEEK works
+  CAP_SERVER = 64;  // the library includes server songs (docs/server-library.md)
+}
+
+// type 0x03. Asks the Q2 to show a 6-digit code. Refused with BUSY while another phone pairs,
+// PAIRING_LOCKED after 3 wrong codes (for 5 minutes), PAIRING_FULL when 8 phones are paired.
+message PairStart {
+  string client_name = 1;
+}
+
+// type 0x04
+message PairChallenge {
+  bytes device_point = 1;  // 32 bytes: X25519(device scalar, G); G from the code (docs: Pairing)
+}
+
+// type 0x05. Sent once the user has typed the code. One try per code: a wrong one ends the pairing
+// (Error{PAIRING_FAILED}) and the next PairStart shows a new code.
+message PairFinish {
+  bytes client_point = 1;    // 32 bytes: X25519(client scalar, G)
+  bytes client_confirm = 2;  // 32 bytes
+}
+
+// type 0x06. The client checks device_confirm before keeping the key.
+message PairResult {
+  bytes peer_id = 1;         // 8 bytes: send it in every later Hello
+  bytes device_confirm = 2;  // 32 bytes
+}
+
+// type 0x07. Allowed after HelloResp{paired} or PairResult in the same session.
+message Auth {
+  bytes client_proof = 1;  // 32 bytes
+}
+
+// type 0x08. The client checks device_proof; after this frame both directions are sealed.
+message AuthResp {
+  bytes device_proof = 1;  // 32 bytes
+}
+
+// type 0x0f
+message Error {
+  ErrorCode code = 1;
+  string message = 2;  // English, for logs; clients show their own words
+}
+
+enum ErrorCode {
+  ERROR_NONE = 0;
+  UNSUPPORTED = 1;         // an unknown frame type, or a known one this device cannot serve
+  UNAUTHORIZED = 2;        // not authenticated yet, or the key is wrong (the session then closes)
+  BAD_REQUEST = 3;         // a malformed payload, or a field out of range
+  NOT_FOUND = 4;           // a node, track or art id that names nothing (the library may have changed)
+  BUSY = 5;                // another phone is pairing
+  PAIRING_FAILED = 6;      // wrong code, or the code expired (120 s)
+  PAIRING_LOCKED = 7;      // too many wrong codes; wait 5 minutes
+  TOO_LARGE = 8;           // a limit or answer would exceed the frame size
+  INTERNAL = 9;
+  VERSION = 10;            // no protocol version in common
+  UNAVAILABLE = 11;        // the Q2's UI did not take the command (Play while demo is busy or not running)
+  PAIRING_CANCELLED = 12;  // the user closed the code on the Q2
+  PAIRING_FULL = 13;       // 8 phones are paired: forget one on the Q2 first
+}
+
+// type 0x21: a command was taken
+message Ack {}
+
+// ---- state ----------------------------------------------------------------------------------------
+
+// type 0x10. After it the device pushes State whenever any part changes, and Position about once a
+// second while playing. Unsubscribing is closing the session.
+message Subscribe {
+  bool position = 1;  // also push position once a second while playing (default: only on change of play state)
+}
+
+// type 0x12
+message GetState {}
+
+// type 0x11. A push carries only the parts that changed; GetState's answer carries all of them.
+message State {
+  NowPlaying now_playing = 1;
+  Position position = 2;
+  QueueState queue = 3;
+}
+
+message NowPlaying {
+  string track_id = 1;   // a Browse item id ("song:..."), or empty when the song is not in the library
+  string title = 2;
+  string artist = 3;
+  string album = 4;
+  uint32 duration_ms = 5;
+  string art_id = 6;     // for GetCover; empty when none
+  PlayState play_state = 7;
+  Shuffle shuffle = 8;
+  Repeat repeat = 9;
+  uint32 volume = 10;    // 0..100 (the Q2's own 0..100 steps)
+}
+
+enum PlayState {
+  STOPPED = 0;
+  PLAYING = 1;
+  PAUSED = 2;
+}
+
+enum Shuffle {
+  SHUFFLE_OFF = 0;
+  SHUFFLE_SONGS = 1;
+}
+
+enum Repeat {
+  REPEAT_OFF = 0;
+  REPEAT_ONE = 1;
+  REPEAT_ALL = 2;
+}
+
+message Position {
+  uint32 position_ms = 1;
+  uint32 at_ms = 2;  // the device's monotonic clock when sampled: the client extrapolates while PLAYING
+}
+
+message QueueState {
+  uint32 version = 1;  // changes whenever the queue's contents change; GetQueue again then
+  uint32 index = 2;    // the playing song's place, from 0
+  uint32 total = 3;
+}
+
+// ---- commands -------------------------------------------------------------------------------------
+
+// type 0x20. Answered with Ack once the Q2 has done it: PLAY and PAUSE once the player plays or is
+// paused (already so: at once), the others once demo has taken them. UNAVAILABLE when it did not
+// (the player stayed as it was for 3 s, or demo did not answer in 4 s).
+message Transport {
+  TransportCmd cmd = 1;
+  uint32 seek_ms = 2;  // SEEK only, needs CAP_SEEK
+  uint32 volume = 3;   // SET_VOLUME only, 0..100
+}
+
+enum TransportCmd {
+  CMD_NONE = 0;
+  PLAY = 1;
+  PAUSE = 2;
+  TOGGLE = 3;
+  NEXT = 4;
+  PREVIOUS = 5;
+  SEEK = 6;
+  VOLUME_UP = 7;
+  VOLUME_DOWN = 8;
+  SET_VOLUME = 9;
+}
+
+// ---- browse ---------------------------------------------------------------------------------------
+//
+// The tree is the q2-auto-remote app's (LibraryTree.java, tools/q2bridge.py there), one level per
+// screen as Android Auto's back stack needs:
+//
+//   root > library > tracks | playlists | artists | albums | genres | years | dir:   (Folders)
+//   artists > artist:<k> > artist-tracks:<k> (All tracks) | album:<k>
+//   genres > genre:<k> > genre-tracks:<k> | album:<k>;   years > year:<y> > album:<k>
+//   playlists > pl:<n>;   dir:<path> > dir:<sub> | song:<id>;   album:<k> > song:<id>
+//
+// Ids are opaque to the client except "root": always ask for an id the device gave. A list with more
+// than 120 entries in a lettered order is answered with letter buckets ("A", "B", ... "123") instead,
+// each a node; a bucket with more than 500 splits again by two, then three letters. Year orders bucket
+// by decade. A list's first order is its default; its others are offered in `sorts`, and a client
+// shows each as its own level ("By Artist") rather than as a setting.
+// An id that names nothing answers NOT_FOUND, never an empty list: an album, artist, genre, year,
+// folder or bucket the library no longer has. Only "tracks" and the other top lists, a playlist and
+// the top folder ("dir:") can be empty.
+
+// type 0x30
+message Browse {
+  string node = 1;    // "root" to start
+  string sort = 2;    // a SortChoice.key from this node's `sorts`; empty for the default
+  uint32 offset = 3;  // paging over items
+  uint32 limit = 4;   // 1..100; 0 means 50
+}
+
+// type 0x31
+message BrowseResp {
+  string node = 1;
+  string title = 2;
+  uint32 total = 3;               // items in the whole list (or buckets, when bucketed)
+  uint32 offset = 4;
+  repeated Item items = 5;
+  string sort = 6;                // the order applied
+  repeated SortChoice sorts = 7;  // every order this list offers, the default first; empty in a bucket
+  repeated Action actions = 8;    // action rows the client puts above the items
+}
+
+message Item {
+  string id = 1;        // a node id when browsable, "song:<id>" when a track
+  string title = 2;     // as the library has it: never numbered (a client shows `number` itself)
+  string subtitle = 3;  // an artist, or "4:31" in an album
+  string art_id = 4;    // for GetCover; empty when none
+  ItemIcon icon = 5;    // for rows without art
+  bool browsable = 6;
+  bool playable = 7;
+  string group = 8;     // a heading to group under ("Tracks" in search results)
+  uint32 duration_ms = 9;
+  uint32 number = 10;   // the track number, on an album's rows only; 0 in every other list, search
+                        // results and the queue
+}
+
+enum ItemIcon {
+  ICON_NONE = 0;
+  ICON_TRACKS = 1;
+  ICON_PLAYLISTS = 2;
+  ICON_ARTISTS = 3;
+  ICON_ALBUMS = 4;
+  ICON_GENRES = 5;
+  ICON_YEARS = 6;
+  ICON_FOLDERS = 7;
+}
+
+message SortChoice {
+  string key = 1;    // "title", "artist", "album", "added", "year", "name", "track", "order"
+  string label = 2;  // "Title", "Recently added", ...
+}
+
+enum Action {
+  ACTION_NONE = 0;
+  ACTION_PLAY = 1;
+  ACTION_SHUFFLE = 2;
+}
+
+// type 0x32. Matches anywhere in titles, artist names and album names, case-insensitively.
+message Search {
+  string query = 1;
+  uint32 limit = 2;  // per group, 1..50; 0 means 20
+}
+
+// type 0x33. Groups in this order: Tracks, Albums, Artists; empty groups left out.
+message SearchResp {
+  repeated SearchGroup groups = 1;
+}
+
+message SearchGroup {
+  string title = 1;  // "Tracks", "Albums", "Artists"
+  repeated Item items = 2;
+  uint32 total = 3;  // matches before the limit
+}
+
+// type 0x40. Plays the list `node` (any playable list: a node from Browse, or a "song:" id alone),
+// in its order `sort`, from `start_id` (a song in it; empty for the first), or the whole list
+// shuffled. The new queue is pushed as State.
+message Play {
+  string node = 1;
+  string sort = 2;
+  string start_id = 3;
+  bool shuffle = 4;
+}
+
+// type 0x42
+message GetQueue {
+  uint32 offset = 1;
+  uint32 limit = 2;  // 1..100; 0 means 50
+}
+
+// type 0x43
+message QueueResp {
+  uint32 version = 1;
+  uint32 index = 2;
+  uint32 total = 3;
+  uint32 offset = 4;
+  repeated Item items = 5;
+}
+
+// ---- covers ---------------------------------------------------------------------------------------
+
+// type 0x50. A cover is fetched in pieces so that no frame is large: ask for offset 0, then for each
+// next offset until offset + len(data) == total. Every piece of one cover carries the same `etag`;
+// if it changes mid-fetch, start again.
+message GetCover {
+  string art_id = 1;
+  uint32 offset = 2;
+  uint32 limit = 3;   // 1..4096; 0 means 4096
+  uint32 max_px = 4;  // the size the client will draw; the device sends the smallest it has at or above
+}
+
+// type 0x51
+message Cover {
+  uint32 total = 1;
+  uint32 offset = 2;
+  bytes data = 3;
+  string mime = 4;   // "image/jpeg" or "image/png"
+  uint32 etag = 5;
+  uint32 width = 6;  // 0 when unknown
+  uint32 height = 7;
+}
