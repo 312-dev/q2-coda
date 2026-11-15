@@ -529,7 +529,7 @@ void spot_yield(void), spot_stop(void), radio_stop(void);
 void headset_volume_reset(void);
 int vol_next(unsigned key); /* volume.c: the volume a wheel tick moves to, at the wheel's speed */
 void headset_poll(void), headset_eq_poll(void), headset_manual(void);
-int media_owner(void), media_playing(void), media_focused(void);
+int media_owner(void), media_status(void), media_playing(void), media_focused(void);
 void media_set_playing(int playing), media_key(unsigned key);
 void video_key(unsigned key);
 int radio_media(unsigned key), spot_media(unsigned key);

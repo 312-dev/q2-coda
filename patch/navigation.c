@@ -206,6 +206,7 @@ extern int coverflow_turning(void);
 extern int coverflow_goto_album(void *r), coverflow_shows_album(void *r);
 extern unsigned coverflow_scope(void *page);
 extern void coverflow_home_art(void *top);
+extern void coverflow_home_np(void);
 extern void coverflow_home_layout(void);
 extern int ringnav_reboot(void);
 extern void coverflow_home_clip(void *w, void *canvas, int begin);
@@ -4514,6 +4515,7 @@ static void bar_sync(void *bar) {
     if (st.home_rockbox != rockbox_available() ||
         (shortcut() == SHORTCUT_GROOVEBOX && st.home_groovebox != groovebox_available()))
         coverflow_home_layout();
+    coverflow_home_np(); /* Now Playing's row, there while something is loaded */
     /* Classic's battery: the set's body, which Percent Inside keeps */
     const theme_t *T = theme(), *B = bar_theme();
     /* The look's rows off the row layout's, y 0 in every set's row. A relayout puts them back
@@ -12300,8 +12302,9 @@ int ringnav(void *ctx, void *event) {
     /* Home's Settings list goes back to Home's list (coverflow_home_back). */
     if (key == KEY_RETURN && coverflow_home_back(window_manager_get_top_window(window_manager())))
         return STOP;
-    /* Return on Home's main list selects Now Playing (its first row); on that row it opens Now
-     * Playing with the current queue untouched. The carousel keeps stock's Return. */
+    /* Return on Home's main list selects its first row, Now Playing while something is loaded
+     * (coverflow.c np_loaded); on Now Playing's row it opens Now Playing with the current queue
+     * untouched. The carousel keeps stock's Return. */
     if (key == KEY_RETURN && usable()) {
         void *wm = window_manager(), *top = window_manager_get_top_window(wm);
         void *w = home_menu(top) && !window_manager_is_animating(wm)
@@ -12313,7 +12316,7 @@ int ringnav(void *ctx, void *event) {
                 select(&g_menu, 0);
                 reveal(&g_menu, 0, 1);
                 widget_invalidate_force(w, (void *)0);
-            } else
+            } else if (!tk_strcmp(widget_get_prop_str(g_menu.at[0], "name", ""), "img_playing"))
                 compact_now_playing();
             return STOP;
         }

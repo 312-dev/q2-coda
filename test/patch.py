@@ -5920,7 +5920,9 @@ def click_target(m,w):
     em=m.alloc(4); it=m.alloc(0x28); m.word(w+O['W_EMITTER'],em); m.word(em,it); m.word(it+O['EMIT_TYPE'],O['EVT_CLICK'])
 def home_list(m):
     """iPod Home as built (ui/home_page.bin) on top: its scroll view and the rows' tap images. Stock
-    binds every image but Coverflow's, which the payload binds."""
+    binds every image but Coverflow's, which the payload binds. A song is paused (mclGetPlayStatus 3),
+    so Now Playing's row shows (coverflow.c np_loaded) and the rows keep HOME_ROWS' order."""
+    m.handlers.pop(syms['mclGetPlayStatus'],None); m.word(0xa50084,3)
     m.top=asset_tree(m,HOME_PAGE)
     imgs=[named(m,m.top,'img_'+HOME_OURS.get(r,r)) for r in HOME_ROWS]
     for img in imgs[:2]+imgs[3:]: click_target(m,img)
@@ -14114,6 +14116,7 @@ class PaneMachine(EraMachine):
 def pane_home(**config):
     CONFIG.update(HOME='0',**config); m=classic_light_new(PaneMachine); [CONFIG.pop(k) for k in ('HOME',*config)]; classic_light_on(m)
     m.top=asset_tree(m,'../classic-light_'+HOME_PAGE); m.rockbox_mode=0o100755
+    m.handlers.pop(syms['mclGetPlayStatus'],None); m.word(0xa50084,2)  # the queue plays, so Now Playing's row shows (np_loaded)
     for name in HOME_ROWS_PANE: click_target(m,named(m,m.top,name))
     assert m.call(address=HOOKS['home_page_init'][0],args=(m.top,0,0,0),gap=0)==0
     return m

@@ -3069,13 +3069,18 @@ def test_a_failed_songtable_check_ends_the_pass_unwritten(fw, st):
 
 
 # More of the key release: Home's main list, the media keys, the restart toast, a carousel page.
-def test_return_on_homes_list_selects_now_playing_then_opens_it(fw, keys):
+@pytest.mark.parametrize('loaded', (True, False))
+def test_return_on_homes_list_selects_now_playing_then_opens_it(fw, keys, loaded):
+    """docs/ipod.md#home: Return selects the first row, and on Now Playing's opens it; with nothing loaded the first row
+    is the Library's, and a second Return opens nothing."""
     ui = Ui(fw)
     sv = list_page(ui, 'home_page', rows=6)
+    sv.children[0].name = b'img_playing' if loaded else b'img_library'
     select(fw, sv, 3)
     assert keys(KEY_RETURN) == STOP and sv.ints[SEL] == 0 and not fw.calls('navigator_switch_to_with_context')
     assert keys(KEY_RETURN, 300) == STOP
-    assert [C.string_at(c[1][0]) for c in fw.calls('navigator_switch_to_with_context')] == [b'playing_page']
+    want = [b'playing_page'] if loaded else []
+    assert [C.string_at(c[1][0]) for c in fw.calls('navigator_switch_to_with_context')] == want
 
 
 def test_homes_list_bumps_and_wraps_as_a_ring_list(fw, keys):
