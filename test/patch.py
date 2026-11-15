@@ -11986,10 +11986,11 @@ keep_lit=kids[2]
 assert m.icons_set==['system_display','switch_off','display_backlight','list_into','system_display','list_into','playset_covermode','list_into']
 f,ctx=m.handler(m.nodes[kids[5]]['children'][0],O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==('systemset/display_page',None) and m.get(payload_syms['display_sub'])==0; passed()
-# Cover Flow: Artist View, Playlist View, Cover Flow Sort, Refresh Cover Flow, Fast Navigation; Controls, System's
-# row: the wheel, the buttons and what they do.
-cfv=display_page(m,2); cf,cf_pl,cf_sort,cf_refresh,cf_big,cf_durations,cf_position=m.nodes[cfv]['children']
-assert m.icons_set==['playset_covermode']*3+['system_update','playset_covermode','switch_off','playset_covermode','switch_off','playset_covermode','switch_off'],m.icons_set
+# Cover Flow: Artist View, Playlist View, Cover Flow Sort, Refresh Cover Flow, Fast Navigation, Song Durations, Cover
+# Flow Position, Library (Local Only or Local + Server); Controls, System's row: the wheel, the buttons and what they do.
+cfv=display_page(m,2); cf,cf_pl,cf_sort,cf_refresh,cf_big,cf_durations,cf_position,cf_library=m.nodes[cfv]['children']
+assert m.icons_set==['playset_covermode']*3+['system_update']+['playset_covermode','switch_off']*3+['playset_covermode'],m.icons_set
+assert row_text(cf_library)=='Library: Local Only'  # a named choice, no switch, as Playlist View; LIBRARYSOURCE unset: the card's own songs
 ctl=display_page(m,3); wheel,hold,scrub_one,tone,lock,wake,guard=m.nodes[ctl]['children']  # tone: the Clicker
 assert [row_text(r) for r in (hold,scrub_one)]==['Hold Return: Recent','Single Press Scrub']; passed()
 view=display_page(m,1); rows=setting_rows(m,view)
