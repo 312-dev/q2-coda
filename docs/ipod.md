@@ -785,9 +785,12 @@ The wheel's Previous and Next work as an iPod's, from any page where they contro
   goes, faster the longer you hold. With the new player (`q2player`), the song plays at 2 times
   its speed for the first 2 s of the hold, then 4 times, then 8 times, at its own pitch, like a
   tape on fast-forward that does not squeak; from 6 s it jumps ahead 8 s each half second, still
-  heard at 4 times (16 times overall), and from 10 s 16 s each half second (32 times). Rewind does
-  the same with the song running backward, its pitch kept. Letting go plays on at normal speed
-  from exactly what you were hearing. With the stock player, or for a song the new player cannot
+  heard at 4 times (16 times overall), and from 10 s 16 s each half second (32 times). Rewind
+  steps back as a CD player does: half a second of the song heard forward at twice its speed,
+  then a step back, the steps growing so the scan goes back at 2, 4, 8, 16 and then 32 times the
+  song's speed over the same times. Letting go plays on at normal speed: after fast-forward from
+  exactly what you were hearing, after rewind from the second you were hearing.
+  With the stock player, or for a song the new player cannot
   speed up (DSD, or above 192 kHz), you hear half a second of the song at its own speed, then a
   jump, then another half second: each jump is 2 s for the first 3 s of the hold (4 times the
   song's speed), 4 s until 6 s (8 times), 8 s until 10 s (16 times), then 16 s (32 times). The
