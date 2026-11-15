@@ -413,23 +413,34 @@ the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where
 - **Status row:** no title, the clock centred.
 - **Header** from y 52: a 64 px `#2C2C2E` disc at the text column with the name's first letter in
   Inter Medium 30, white; beside it from x 102 the name in Inter Medium 20 (ellipsis), the counts
-  ("4 albums") in Inter Regular 15 Text Secondary, and the genre in Inter Regular 13 Text Tertiary,
-  a line left out when unknown. The disc's top stands over the status row's bottom 6 px.
+  ("4 albums · 3 singles · 62 songs" as the app sends them, else "4 albums" counted from its album
+  rows) in Inter Regular 15 Text Secondary, and the genre in Inter Regular 13 Text Tertiary, a line
+  left out when unknown. The disc's top stands over the status row's bottom 6 px.
 - **Action pair** at y 128: Shuffle and Radio side by side, each a `#1C1C1E` panel 28 px high with
   8 px corners, its Phosphor symbol (16 px) and label (Inter Medium 17) centred together in the
   accent. The lit one fills with the accent, its content white. The page opens on Shuffle; the
   wheel steps Shuffle, Radio, then the rows, and back.
 - **Drill-down rows** from y 168, 32 px, as many whole rows as end by y 282, scrolling: Top Songs,
-  then Albums with its count right-aligned 44 px from the edge in Inter Regular 15 Text Tertiary
-  (white on the selection), each with the chevron. A row whose data the app does not send is left
-  out: Singles & EPs (no release types), Similar Artists (no artist info), All Songs (no song
-  list).
-- **Top Songs** (titled so): 36 px rows from y 58, a 28 px thumbnail with 4 px corners at the
-  text column, the title in Inter Regular 18 at x 62; Centre plays the list from that song.
+  Albums, Singles & EPs, Similar Artists, All Songs; Albums, Singles & EPs and All Songs with their
+  count right-aligned 44 px from the edge in Inter Regular 15 Text Tertiary (white on the
+  selection), each with the chevron. A row the app does not send, or sends nothing for, is left
+  out: the app adds Singles & EPs, Similar Artists and All Songs only with the `artist` caps word
+  ([librespot.md](librespot.md#artist-rows)), and only when the server gives release types, similar artists or songs;
+  it leaves Top Songs out when the server has none.
+- **Top Songs** and **All Songs** (titled so): 36 px rows from y 58, a 28 px cover with 4 px
+  corners at the text column (the song's album's server library cover, else the placeholder), the
+  title in Inter Regular 18 at x 62, then its album in Inter Regular 14 Text Tertiary where the
+  title leaves 30 px, and its length right-aligned on the right column in Inter Regular 15 Text
+  Tertiary (white on the selection); Centre plays the list from that song. An app without
+  `artist` sends neither album nor length: the title alone.
 - **Albums** (titled so): 40 px rows from y 58, newest first, the undated last: a 32 px cover with
   4 px corners at the text column (the server library's cover when the app has fetched it, else a
   `#2C2C2E` placeholder), the title in Inter Regular 20 at x 66, the year right-aligned on the
   right column in Inter Regular 15 Text Tertiary (white on the selection). Centre opens the album.
+  **Singles & EPs** is the same page of the artist's singles and EPs.
+- **Similar Artists** (titled so): 40 px rows from y 58, a 32 px `#2C2C2E` disc (`#3A3A3C` on the
+  selection) at the text column with the name's first letter in Inter Medium 15, white, the name
+  in Inter Regular 20 at x 66, and the chevron. Centre opens that artist's page.
 - **Hold menu:** Play/Pause held on the page opens the inset modal of its sync rows, Add to Sync
   (or Remove from Sync), Quality and Sync Now, each with its symbol. Play is gone: Shuffle plays
   the artist.
@@ -479,7 +490,7 @@ pattern.
 | Album tracks                        | Song rows                   | Track number, title, length                                                                                |
 | Folder view                         | Song rows                   | Songs as album tracks; folders with the folder glyph and a chevron                                         |
 | Artists, Genres, Composers          | List row                    |                                                                                                            |
-| A card app's artist                 | [Artist page](#artist-page) | Header, Shuffle and Radio, then Top Songs and Albums                                                       |
+| A card app's artist                 | [Artist page](#artist-page) | Header, Shuffle and Radio, then Top Songs, Albums, Singles & EPs, Similar Artists and All Songs            |
 | Songs, a playlist's songs           | Song rows                   | The artist inline                                                                                          |
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
 | Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; an artist's covers titled by the artist, other covers with the clock in the status row as Home |

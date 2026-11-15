@@ -68,7 +68,7 @@ class Lv(C.Structure):
                 *((n, C.c_uint) for n in ('since', 'base', 'id', 'hash')),
                 ('title', C.c_char * 128), ('note', C.c_char * 128), ('op', C.c_char * 16), ('args', C.c_char * 400),
                 ('lay', C.c_byte), ('stop', C.c_byte)]
-LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP = range(4)
+LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR = range(5)
 AR_ALBUMS = 1 << 20  # addon.c's Albums row's click context
 
 
@@ -405,7 +405,7 @@ def test_more_apps_than_slots(fw):
 def test_the_features_are_published_at_every_scan(fw):
     world = card(fw)
     scan(fw)
-    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings\n'
+    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings artist\n'
     assert world.of('rename') == [(b'/tmp/q2-addon.caps.tmp', b'/tmp/q2-addon.caps')]
 
 
@@ -5260,3 +5260,62 @@ def test_the_pair_takes_the_wheel_above_the_rows(fw, nav_st):
     assert key(top, p.view, -1) == 1 and p.top.stop == 1
     assert key(top, p.view, -1) == 1 and p.top.stop == 1  # nothing above Shuffle
     assert key(top, p.view, 0) == 1 and p.pg.arg == 2  # Shuffle's row pressed
+
+
+# The rows an app that sees "artist" in the caps adds (addon.c artist_view; q2-subsonic's device_artist.go).
+def explore_rows():
+    rows = artist_rows()
+    rows[4:4] = [(b'info', b'about', b'3 albums \xc2\xb7 2 singles \xc2\xb7 62 songs', b'Electronic', b'', b'')]
+    rows[6:6] = [(b'list', b'singles', b'Singles & EPs', b'2 releases', b'artist:ar1', b''),
+                 (b'list', b'similar', b'Similar Artists', b'4 artists', b'artist:ar1', b''),
+                 (b'list', b'songs', b'All Songs', b'62 songs', b'artist:ar1', b'')]
+    return rows
+
+
+def test_the_apps_artist_rows_fill_the_header_and_the_drill_rows(fw, nav_st):
+    p = oled_page(fw, nav_st)
+    sets = []
+    fw.mock('widget_set_prop_str', lambda w, k, v, *_: sets.append((C.string_at(k), C.string_at(v))))
+    p.answer(rows=explore_rows())
+    assert p.top.lay == LAY_ARTIST and p.drawn == 5
+    assert (b'_ar_sub', b'3 albums \xc2\xb7 2 singles \xc2\xb7 62 songs') in sets and (b'_ar_meta', b'Electronic') in sets
+    assert [v for k, v in sets if k == b'_ar_count'] == [b'4', b'2', b'62']  # Albums, Singles & EPs, All Songs
+
+
+@pytest.mark.parametrize('row,op,lay', ((6, b'singles', LAY_ALBUMS), (7, b'similar', LAY_SIMILAR), (8, b'songs', LAY_TOP)))
+def test_the_artist_rows_open_their_pages(fw, nav_st, row, op, lay):
+    """Singles & EPs opens as Albums does, Similar Artists as artist rows with a monogram and a chevron, each opening
+    that artist's page, All Songs as Top Songs does."""
+    p = oled_page(fw, nav_st)
+    p.answer(rows=explore_rows())
+    p.click(row)
+    assert p.pg.depth == 2 and p.top.op == op and p.top.lay == lay and p.top.args == b'\tartist:ar1'
+    if op != b'similar':
+        return
+    p.answer(rows=[(b'list', b'artist', b'Duke Dumont', b'3 albums', b'artist:ar2', b'toggle'),
+                   (b'list', b'artist', b'Kaytranada', b'1 album', b'artist:ar3', b'toggle')])
+    assert p.drawn == 2 and props_set(fw, b'_ar_disc')[-2:] == [1, 1]
+    p.click(1)
+    assert p.pg.depth == 3 and p.top.op == b'artist' and p.top.args == b'\tartist:ar3' and p.top.title == b'Kaytranada'
+    p.answer(rows=explore_rows())
+    assert p.top.lay == LAY_ARTIST
+
+
+def song_row(i, sub, ctx_album=b' album:al1'):
+    return (b'action', b'play', b'Song %d' % i, sub, b'song:t%d songs:ar1 %d%s' % (i, i, ctx_album), b'toggle')
+
+
+def test_a_songs_album_and_length_come_from_its_subtitle(fw, nav_st):
+    p = oled_page(fw, nav_st)
+    p.answer(rows=explore_rows())
+    p.click(8)
+    sets = []
+    fw.mock('widget_set_prop_str', lambda w, k, v, *_: sets.append((C.string_at(k), C.string_at(v))))
+    dot = b' \xc2\xb7 '
+    p.answer(rows=[song_row(0, b'Settle' + dot + b'4:15' + dot + b'On Q2'), song_row(1, b'Caracal' + dot + b'3:57'),
+                   song_row(2, b'A' + dot + b'B' + dot + b'1:02:03'), song_row(3, b'No Length' + dot + b'On Q2'),
+                   song_row(4, b'Disclosure' + dot + b'4:15', b''), song_row(5, b''),
+                   song_row(6, b'1989' + dot + b'On Q2')])
+    assert p.drawn == 7
+    assert [v for k, v in sets if k == b'_ar_right'] == [b'4:15', b'3:57', b'1:02:03', b'', b'', b'', b'']
+    assert [v for k, v in sets if k == b'_ar_after'] == [b'Settle', b'Caracal', b'A' + dot + b'B', b'No Length', b'1989']
