@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - EQ: after picking a value (Balance, Preamp, a band's Gain) or coming back from a band or Presets, the list is where you left it, on the row you opened, rather than back at the top.
   - Display (OLED): in **Lock Screen** settings the wheel lights the picture it is on with a blue frame, as it lights a row, so you can see which one Centre will choose.
   - Display (OLED): **About** shows its values in full where they fit: a value takes the row up to its name, so the Wi-Fi MAC and the version no longer end in … early, and in Light Mode the names on the left show in black (they were white on white).
   - Security: **SyncLink** (Shanling's phone remote, System settings → Wireless → SyncLink) is off unless you turn it on, as it lets any nearby phone control the Q2 and read its Wi-Fi password without asking for one. If you had it on, this update turns it off once; choose Bluetooth or Wi-Fi on its page to use it again. Its row says what it allows.

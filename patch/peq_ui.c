@@ -74,6 +74,9 @@ static struct {
     int capacity, file_page;
     int tab, tabs; /* tabs: the wheel is on the tab bar, over Advanced's list */
     int from_simple; /* Advanced's Stock presets screen, opened from Simple's Presets */
+    /* HOME's and BAND's row + 1 (0 none) and scroll, kept while a screen one of them opened shows,
+     * so coming back lands on the row it was left at (docs/oled-design.md#selection-bar) */
+    int kept[2][2];
     double typed;
     peq_preset draft, candidate, named; /* named: the preset applied under applied's name */
     char (*names)[256];
@@ -721,15 +724,25 @@ static int render(const void *unused) {
         return 7;
     }
     e3.view = 0;
-    int selection = 0, offset = 0;
+    int selection = 0, offset = 0, kept = 0;
     int height = widget_get_prop_int(ui.page, "h", 320), graph = ui.screen == HOME || ui.screen == BAND;
     int head = graph * graph_head(), rh = page_h(48);
     /* Whole rows only, so the last row is never clipped; a set_switch theme's end above the bottom
      * corners' glass, as its other lists do (list_end) */
     int rows = ((eq_rows() ? eq_list_end() : height) - 48) / rh * rh;
+    if (ui.view && ui.rendered != ui.screen && (ui.rendered == HOME || ui.rendered == BAND)) {
+        ui.kept[ui.rendered][0] = widget_get_prop_int(ui.view, "_ringnav_index", 0) + 1;
+        ui.kept[ui.rendered][1] = widget_get_prop_int(ui.view, "yoffset", 0);
+    }
+    if (ui.screen == HOME) ui.kept[BAND][0] = 0; /* the next band opens at its top */
     if (ui.view && ui.rendered == ui.screen) {
         selection = widget_get_prop_int(ui.view, "_ringnav_index", 0);
         offset = widget_get_prop_int(ui.view, "yoffset", 0);
+    } else if ((ui.screen == HOME || ui.screen == BAND) && ui.kept[ui.screen][0] > 0) {
+        selection = ui.kept[ui.screen][0] - 1;
+        offset = ui.kept[ui.screen][1];
+        ui.kept[ui.screen][0] = 0;
+        kept = 1;
     } else if (ui.screen == PICK) { /* opens on the nearest row to the current value (Auto if on it), centred */
         int last = picks[ui.pick - BALANCE].rows - 1;
         double r = (*picked() - picks[ui.pick - BALANCE].first) / picks[ui.pick - BALANCE].step + 0.5;
@@ -850,8 +863,9 @@ static int render(const void *unused) {
             row(view, n++, ui.names[start + i], i);
     }
     widget_set_prop_int(view, "virtual_h", head + n * rh);
-    /* ringnav keeps the selection above on a view whose row count it already knows. */
-    if (ui.screen == PICK) widget_set_prop_int(view, "_ringnav_count", n);
+    /* ringnav keeps the selection above on a view whose row count it already knows; on any other
+     * new view it takes its own remembered row (navigation.c load) */
+    if (ui.screen == PICK || kept) widget_set_prop_int(view, "_ringnav_count", n);
     if (head + n * rh <
         rows) { /* short lists: shrink so the list's white background never shows below the rows */
         widget_resize(list, 375, head + n * rh);
@@ -1053,6 +1067,7 @@ static void tab_to(int tab) {
     ui.tab = tab;
     ui.tabs = 1;
     ui.screen = HOME;
+    ui.kept[HOME][0] = 0;
     ui.status[0] = 0;
     e3.focus = E3_TABS;
     e3.status = 0;
@@ -1108,6 +1123,7 @@ int peq_page_init(void *page, void *context) {
     ui.page = page;
     ui.view = 0;
     ui.screen = HOME;
+    ui.kept[HOME][0] = 0;
     ui.status[0] = 0;
     ui.tabs = 0;
     ui.dirty = 0;
