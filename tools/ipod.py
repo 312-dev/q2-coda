@@ -63,6 +63,7 @@ class Geometry:
     song_body: int = 68
     song_title24_y: int = 13
     song_meta_y: int = 39
+    playlist_pitch: int = 0  # a set without toolbars: Playlists' rows (playlists.c pl_row, page_detail high) and their list's pitch (0: song_pitch's)
     set_row: int = inc('SET_ROW')
     set_top: int = inc('SET_TOP')
     set_rows: int = inc('SET_ROWS')
@@ -1162,7 +1163,9 @@ def page_rows(g, kind):
             'song': (g.song_pitch, g.song_body, g.text_art_inset),
             'folder': (folder_pitch(g), folder_body(g), g.art_inset),
             # a set without toolbars gives Playlists two-line rows; playlists.c's pl_dress sizes them
-            'playlist': (g.pitch, g.body, g.text_art_inset) if g.toolbar else (g.song_pitch, g.song_body, g.text_art_inset)
+            'playlist': (g.pitch, g.body, g.text_art_inset) if g.toolbar else
+                        (g.playlist_pitch, g.playlist_pitch, g.text_art_inset) if g.playlist_pitch else
+                        (g.song_pitch, g.song_body, g.text_art_inset)
             }.get(kind, (g.pitch, g.body, g.text_art_inset))
 
 
