@@ -198,9 +198,12 @@ it reads on any background:
   never grey on the bar, so it keeps the contrast the theme chose for the bar.
 - **The offline mark**, Phosphor's `cloud-slash` (bold, 20 px wide, 16 high), sits at the row's
   right in the same colour as its text: in the chevron's column, or just left of the chevron on
-  a row that shows one (a drill row's, or the selected album row's). The row's labels end 14 px
-  short of the mark's centre while it is greyed, so a long title ellipsizes or scrolls clear of
-  it, and take their width back when the row plays again.
+  a row that shows one (a drill row's, or the selected album row's). It reserves its width and
+  the 12 px a length keeps from the text: while the row is greyed its labels' text ends 12 px
+  short of the mark's ink, so a long title ellipsizes or scrolls clear of it, and they take their
+  width back when the row plays again. On OLED's one-line song rows the mark takes the right
+  column's place: the length stands 12 px left of it, and the title and inline artist end 12 px
+  short of whichever is leftmost.
 
 ### Now Playing while it loads
 

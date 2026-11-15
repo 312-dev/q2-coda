@@ -1347,6 +1347,8 @@ int catalogue_greyed(void *w, unsigned *color) {
 }
 /* How many rows are greyed now: none, and nothing needs a mark. */
 int catalogue_greys(void) { return (int)cat.ngrey; }
+/* Whether row (as catalogue_row_ink takes it) is a greyed row's, so carries the offline mark. */
+int catalogue_row_greyed(void *row) { return grey_of(row, 4) >= 0; }
 /* Whether row (a list's entry, or a widget a few levels inside its row) is a greyed row's, and that
  * row's text colour as last painted, for its mark. */
 int catalogue_row_ink(void *row, unsigned *ink) {
@@ -1377,7 +1379,8 @@ static void fit_labels(void *w, int x, int limit, int greyed, int depth) {
 }
 /* entry, a row of surface's list (navigation.c grey_rows), before it paints: a greyed row's labels
  * end at limit, clear of its mark; another row's take back the width they had. The row whose
- * labels these are: the greyed one entry is in, else entry's parent (a list item). */
+ * labels these are: the greyed one entry is in, else entry's parent (a list item). Four levels
+ * reach an album row's artist, inside its text's view_artist. */
 void catalogue_fit(void *entry, void *surface, int limit) {
     int i = grey_of(entry, 4);
     void *row = i >= 0 ? cat.grey[i] : P(entry, W_PARENT);
@@ -1385,7 +1388,7 @@ void catalogue_fit(void *entry, void *surface, int limit) {
     int x = 0;
     for (void *p = row; p && p != surface; p = P(p, W_PARENT)) x += I(p, W_X);
     if (i >= 0) cat.fitted = 1;
-    fit_labels(row, x, limit, i >= 0, 3);
+    fit_labels(row, x, limit, i >= 0, 4);
 }
 
 /* The offline mark: Phosphor's cloud-slash, bold (phosphoricons.com, @phosphor-icons/core 2.1.1;
@@ -1400,7 +1403,7 @@ static const char MARK[16][21] = {
 /* The mark centred on (x, y), in ink (a final colour) with each pixel's coverage on its alpha: a
  * run of equal coverage is one rect. */
 void catalogue_mark_paint(void *canvas, int x, int y, unsigned ink) {
-    x -= 10, y -= 8;
+    x -= CAT_MARK_W / 2, y -= 8;
     for (int r = 0; r < 16; ++r)
         for (int c = 0, n; c < 20; c += n) {
             char k = MARK[r][c];

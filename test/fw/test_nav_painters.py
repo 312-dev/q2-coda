@@ -3419,8 +3419,9 @@ def test_a_greyed_row_keeps_its_contrast_on_the_selection_and_carries_the_offlin
     fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
     for i in (1, 2):  # Local Only: a server row can't play
         fw.fn('catalogue_mark', None, C.c_void_p, C.c_void_p, C.c_int)(page.rows[i].parent.addr, C.addressof(record), 0)
-    page.paint()  # before the rows: the greyed rows' titles end clear of the mark's column (322 +- 10)
-    assert [label.box[2] for label in labels] == [320, 278, 278, 320]
+    page.paint()  # before the rows: the greyed rows' titles end 12 px clear of the mark's ink (322 +- 10), their
+    # text 2 px inside the box
+    assert [label.box[2] for label in labels] == [320, 272, 272, 320]
     assert text_ink(fw, st, labels[0]) == normal  # an ordinary row: as it was
     assert text_ink(fw, st, labels[2]) == 0xff666666
     dim = text_ink(fw, st, labels[1])
@@ -3439,7 +3440,76 @@ def test_a_greyed_row_keeps_its_contrast_on_the_selection_and_carries_the_offlin
     # a row bound to a song that plays again takes its width back
     fw.fn('catalogue_forget', None, C.c_void_p)(page.rows[2].parent.addr)
     page.paint()
-    assert [label.box[2] for label in labels] == [320, 278, 320, 320]
+    assert [label.box[2] for label in labels] == [320, 272, 320, 320]
+
+
+def test_oleds_song_rows_end_their_title_and_inline_artist_clear_of_the_offline_mark(fw, st):
+    """OLED's one-line song rows (song_rows.c) on Songs' page: a greyed row's title and inline artist end
+    SONG_COL_GAP (12 px) short of the offline mark's ink, not on the right column under it; a title with no room
+    left for an artist drops it and stops there too. A row that can play keeps the right column. The box
+    song_row gives a title is the last word: catalogue_fit, which runs first, never widens it again, so the rows
+    settle instead of resizing on every paint."""
+    page = Page(fw, OLED, rows=3, pitch=32, sel=None, name='allmusic_page')
+    st('geom').value = OLED_SET
+    songs = [('Ten Thousand Weight', 'The Head and the Heart'),  # the shot's row: the artist ran under the mark
+             ('A Title That Runs All The Way Across', 'Some Artist'),
+             ('Ten Thousand Weight', 'The Head and the Heart')]  # the same, playable
+    for row, (title, artist) in zip(page.rows, songs):
+        row.children[0].move(10, 0, 320, 32)  # stock's box, past the mark: catalogue_fit narrows it first
+        page.ui.set_text(row.children[0], title)
+        page.ui.set_text(page.ui.add('hscroll_label', row, (10, 0, 260, 32)), artist)  # stock's second line
+    url = C.create_string_buffer(b'/mnt/mmc/.subsonic/cat/al1/s1.flac')
+    record = C.create_string_buffer(O['REC_SIZE'] + 8)
+    struct.pack_into('<Q', record, O['REC_PATH'], C.addressof(url))
+    struct.pack_into('<i', record, O['REC_TYPE'], 8)
+    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    for i in (0, 1):  # Local Only: a server row can't play
+        fw.fn('catalogue_mark', None, C.c_void_p, C.c_void_p, C.c_int)(page.rows[i].parent.addr, C.addressof(record), 0)
+    for paint in range(3):  # a box changed under a paint is final on the next, and stays
+        moved = len(fw.calls('widget_move_resize')) + len(fw.calls('widget_resize'))
+        page.canvas.texts.clear()
+        page.paint()
+    assert len(fw.calls('widget_move_resize')) + len(fw.calls('widget_resize')) == moved  # none on the last
+    artists = {y // 32: (x, x + w - 1) for text, (x, y, w, h), _ in page.canvas.texts if text[0] in 'TS…'}
+    for row in page.rows:  # each row's text painted, which the mark takes its ink from
+        text_ink(fw, st, row.children[0])
+    page.canvas.px.clear()
+    fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(page.view.addr, page.canvas.addr)
+    marks = {}
+    for (x, y), c in page.canvas.px.items():
+        if x >= 280:
+            marks[y // 32] = min(x, marks.get(y // 32, x))
+    assert sorted(marks) == [0, 1]
+    title_end = [r.box[0] + r.children[0].box[0] + r.children[0].box[2] for r in page.rows]  # screen x
+    # the greyed row: its artist (ellipsized) and title end 12 px clear of the mark's ink
+    assert 0 in artists and artists[0][1] + 12 <= marks[0]
+    assert title_end[0] - 2 + 12 <= marks[0]  # hscroll_label's own margin after its text
+    # the long title: no room for an artist, and its box ends where the artist's would have
+    assert 1 not in artists and title_end[1] - 2 + 12 == marks[1]
+    # the playable row runs on to the right column, past where the mark would stand
+    assert artists[2][1] > marks[0]
+
+
+def test_a_greyed_album_rows_second_line_ends_clear_of_the_offline_mark_too(fw, st):
+    """An album list's two-line row nests its artist a level deeper than its title (the text's view, then
+    view_artist, as stock builds it): a greyed row's artist ends where its title does, 12 px clear of the mark,
+    not on stock's box running up to it."""
+    page = Page(fw, MODERN)
+    artists = []
+    for b in page.rows:
+        b.children[0].move(10, 0, 320, 24)
+        artist = page.ui.add('hscroll_label', page.ui.add('view', page.ui.add('view', b, (10, 24, 320, 24)),
+                                                          (0, 0, 320, 24), 'view_artist'), (0, 0, 320, 24))
+        artists.append(artist)
+    url = C.create_string_buffer(b'/mnt/mmc/.subsonic/cat/al1/s1.flac')
+    record = C.create_string_buffer(O['REC_SIZE'] + 8)
+    struct.pack_into('<Q', record, O['REC_PATH'], C.addressof(url))
+    struct.pack_into('<i', record, O['REC_TYPE'], 8)
+    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    fw.fn('catalogue_mark', None, C.c_void_p, C.c_void_p, C.c_int)(page.rows[2].parent.addr, C.addressof(record), 0)
+    page.paint()
+    assert [a.box[2] for a in artists] == [320, 320, 272, 320]  # as the title: 30 + 272 = 322 - 10 - 12 + 2
+    assert page.rows[2].children[0].box[2] == 272
 
 
 @pytest.mark.parametrize('name, tab, greyed', [('albuminfo_page', None, True), ('playerjumpinfo_page', None, True),

@@ -1792,8 +1792,9 @@ static void paint_chevrons(void *w, void *canvas) {
 }
 
 /* A song list's rows under SONGS_INLINE, from the list's background, so before the rows paint:
- * song_rows.c fits each title's box and draws what stands beside it. Here, as the rows and their
- * bounds are this file's. */
+ * song_rows.c fits each title's box and draws what stands beside it, a greyed row's clear of its
+ * offline mark. Here, as the rows and their bounds are this file's. */
+static int offline_x(void *w, int i, const rect_t *r);
 static void paint_songs(void *w, void *canvas) {
     if (theme()->painter[PAINT_SONGS] != SONGS_INLINE || !w || !kind(w) || !P(canvas, CANVAS_LCD) ||
         !song_list(w) || !load_rows(&g_menu, w))
@@ -1801,7 +1802,8 @@ static void paint_songs(void *w, void *canvas) {
     for (int i = 0; i < g_menu.n; ++i) {
         rect_t r = bounds(&g_menu, i);
         if (r.y + r.h > 0 && r.y < I(w, W_H))
-            song_row(w, canvas, g_menu.at[i], g_menu.id[i], r, st.sel_w == w && i == st.sel_row);
+            song_row(w, canvas, g_menu.at[i], g_menu.id[i], r, st.sel_w == w && i == st.sel_row,
+                     catalogue_row_greyed(g_menu.at[i]) ? offline_x(w, i, &r) - CAT_MARK_W / 2 : 0);
     }
 }
 
@@ -1832,8 +1834,9 @@ static int offline_x(void *w, int i, const rect_t *r) {
  * Played's and the Ratings lists' songs (page_tracks) and Search's results are a scroll_view's
  * rows, one per record in order (the showlist, the page's tracks or Search's results), not a
  * table's, so each that can't play now is greyed here, as ringnav_table_load greys a table's.
- * Then every greyed row's labels end short of its mark (catalogue_fit), and any it narrowed before
- * take their width back. */
+ * Then every greyed row's labels end short of its mark (catalogue_fit), their text SONG_COL_GAP
+ * clear of its ink as a length is (song_rows.c), and any it narrowed before take their width
+ * back. */
 /* Search's results while they show: p_deque_searchshowlist, which each of its tab_button_group's
  * tabs (Songs, Artists, Albums, Genres) fills with its rows, the Songs tab's the list
  * search_track_row_on_click plays from; *tab the lit one's index. 0 for none (its history). */
@@ -1864,7 +1867,8 @@ static void grey_rows(void *w) {
         rect_t r = bounds(&g_menu, i);
         if (2 * r.w >= I(w, W_W))
             catalogue_fit(g_menu.at[i], w,
-                          offline_x(w, i, &r) - 14 + (g_menu.kind == 1 ? I(w, SCROLL_X) : 0));
+                          offline_x(w, i, &r) - CAT_MARK_W / 2 - SONG_COL_GAP + HSCROLL_MARGIN +
+                              (g_menu.kind == 1 ? I(w, SCROLL_X) : 0));
     }
 }
 
@@ -6734,8 +6738,8 @@ int ringnav_paint_bg(void *w, void *canvas) {
     modal_paint(w, canvas);
     if (w && w == st.search_tabs) search_tabs_paint(w, canvas);
     paint_selection(w, canvas);
+    grey_rows(w); /* first: paint_songs reserves the marks of the rows it greys */
     paint_songs(w, canvas);
-    grey_rows(w);
     paint_modal_rows(w, canvas);
     if (form) confirm_labels(w, canvas);
     feedback_confirm_switch(w, canvas);
