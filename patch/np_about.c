@@ -14,8 +14,9 @@
  * names over white values, two a row, in AB_CELLS' order, a cell whose value is unknown left out
  * and the rest closing up, then Location across the row. The header's top stands above the window,
  * under the status row: np_about_cap draws it again in the status bar's background, as an artist's
- * monogram is (artist_page.c artist_cap). A read-only page has no selection: the wheel scrolls it,
- * a row at a time, when it is taller than the screen (np_about_key). */
+ * monogram is (artist_page.c artist_cap). A read-only page has no selection: when it is taller
+ * than the screen the wheel scrolls it a row at a time (np_about_key), and a finger dragged up or
+ * down moves it with the finger, between the same two ends (ab_touch). */
 #include "navigation.h"
 
 #define AB_HEAD_Y 46 /* screen rows: the cover's top */
@@ -62,6 +63,7 @@ static struct {
     void *body;               /* OLED's grid: the page's painted view */
     int off, end, n, badge;   /* the scroll, the content's last row on screen, cells shown */
     int wide;                 /* the last cell is Location, across the row */
+    int touch, ty, toff;      /* a finger on the grid: where it went down, the scroll then */
     unsigned key, cap;        /* what was painted (hashed); the bar asked to repaint */
     struct {                  /* hashed whole: zeroed before each fill */
         char title[160], artist[160], len[12], spec[64], art[128];
@@ -90,7 +92,7 @@ static int ab_closed(void *page, void *event) {
     if (ab.page != page) return 0;
     ab_return();
     ab.page = ab.body = (void *)0;
-    ab.off = ab.end = ab.n = ab.badge = ab.wide = 0;
+    ab.off = ab.end = ab.n = ab.badge = ab.wide = ab.touch = 0;
     ab.key = 0;
     return 0;
 }
@@ -107,6 +109,8 @@ void np_about_np_gone(void *win) {
     if (ab.home == win) ab.home = (void *)0;
 }
 
+static int ab_touch(void *ctx, void *event);
+
 /* ⋯'s About row (onlinematch.c more_rows). */
 int np_about_open(void *ctx, void *event) {
     void *home = st.np_win, *info = home ? widget_lookup(home, "view_info", 1) : (void *)0;
@@ -117,6 +121,10 @@ int np_about_open(void *ctx, void *event) {
     if (oled_pages()) { /* the grid, over the window; the details stay hidden, its source */
         ab.body = widget_factory_create_widget(widget_factory(), "view", ab.page, 0, 0, 375,
                                                320 - geom_val(V_BAR));
+        widget_on(ab.body, EVT_POINTER_DOWN, ab_touch, 0);
+        widget_on(ab.page, EVT_POINTER_MOVE_BEFORE, ab_touch, 0); /* peq_ui.c e3_touch's way */
+        widget_on(ab.page, EVT_POINTER_UP_BEFORE, ab_touch, 0);
+        widget_on(ab.page, EVT_POINTER_ABORT, ab_touch, 0);
     } else {
         /* under the title where the theme shows it as the page's first row: Centred Now
          * Playing's details start at the window's top, where its Return and More stood */
@@ -158,20 +166,44 @@ static int ab_room(void) {
     return over > 0 ? over : 0;
 }
 
-/* A key on the page (navigation.c ringnav, as Spotify's page takes its own): a tick of the wheel
- * scrolls a row, as far as the last row, and the page takes every tick (stock's volume never
- * sees one). 1 when the page took it. */
-int np_about_key(void *top, unsigned key) {
-    int dir = key == KEY_NEXT ? 1 : key == KEY_PREV ? -1 : 0;
-    if (!ab.body || top != ab.page || !dir) return 0;
-    int off = ab.off + dir * AB_ROW, room = ab_room();
+/* The grid scrolled to off, held between its top and ab_room: the wheel's ends and a drag's. */
+static void ab_scroll(int off) {
+    int room = ab_room();
     off = off < 0 ? 0 : off > room ? room : off;
     if (off != ab.off) {
         ab.off = off;
         widget_invalidate_force(ab.body, (void *)0);
         cap_ask(); /* the header's top in the bar shows only at the page's top */
     }
+}
+
+/* A key on the page (navigation.c ringnav, as Spotify's page takes its own): a tick of the wheel
+ * scrolls a row, as far as the last row, and the page takes every tick (stock's volume never
+ * sees one). 1 when the page took it. */
+int np_about_key(void *top, unsigned key) {
+    int dir = key == KEY_NEXT ? 1 : key == KEY_PREV ? -1 : 0;
+    if (!ab.body || top != ab.page || !dir) return 0;
+    ab_scroll(ab.off + dir * AB_ROW);
     return 1;
+}
+
+/* A finger on the grid: the page follows it up and down, pixel for pixel, between ab_scroll's
+ * ends. It stops where the finger lifts, so a flick never carries it past either end: the page is
+ * at most a few rows taller than the screen, which a drag covers without momentum. */
+static int ab_touch(void *ctx, void *event) {
+    int type = I(event, EVENT_TYPE), y = I(event, EVENT_Y);
+    (void)ctx;
+    if (!ab.body) return 0;
+    if (type == EVT_POINTER_DOWN) {
+        ab.touch = 1, ab.ty = y, ab.toff = ab.off;
+        return 0;
+    }
+    if (!ab.touch) return 0;
+    if (type == EVT_POINTER_MOVE_BEFORE)
+        ab_scroll(ab.toff + ab.ty - y);
+    else
+        ab.touch = 0; /* lifted or aborted */
+    return 0;
 }
 
 /* label's text into out (n bytes): 1 when it says something known, not empty and not the
