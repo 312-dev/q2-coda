@@ -14,7 +14,8 @@ int about_list(void *list) {
 }
 
 void about_rows(void *view) {
-    unsigned value = theme()->set_value_ink[ipod_light()];
+    unsigned value = theme()->set_value_ink[ipod_light()],
+             primary = flip_if(ipod_light(), 0xffffff); /* Text Primary: black in Light Mode */
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *item = widget_get_child(view, i),
              *b = widget_count_children(item) ? widget_get_child(item, 0) : (void *)0;
@@ -23,7 +24,7 @@ void about_rows(void *view) {
             void *c = widget_get_child(b, j);
             if (tk_strcmp(widget_get_type(c), "hscroll_label")) continue;
             /* a key on the text column, its value on the row's right side (set_child) */
-            text_ink(c, 0xff000000u | (I(c, W_X) >= SET_RIGHT_SIDE && value ? value : 0xffffff),
+            text_ink(c, 0xff000000u | (I(c, W_X) >= SET_RIGHT_SIDE && value ? value : primary),
                      ABOUT_INK_STATES);
         }
     }
