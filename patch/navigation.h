@@ -698,6 +698,11 @@ int ringnav_usb_config(void), ringnav_usb_detect(void), ringnav_usb_status(void)
 int stock_usb_config_trampoline(void), stock_usb_detect_trampoline(void);
 int stock_usb_status_trampoline(void);
 
+/* config_ini.c: toolsWriteConfig's hook */
+int ringnav_ini_write(const char *path, const char *section, const char *key, const char *value),
+    stock_ini_write_trampoline(const char *path, const char *section, const char *key,
+                               const char *value);
+
 /* library_lists.c */
 int era_menu(void *ctx, void *event);
 int era_sql(const char *sql, int (*row)(void *, int, char **, char **), void *ctx);
