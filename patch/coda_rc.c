@@ -1,8 +1,8 @@
 /* coda-rc, the car remote daemon (docs/remote-protocol.md, docs/internals.md#car-remote): the platform under
  * coda_rc_core.c. It listens on TCP 7720 and, through BlueZ, as a BLE GATT peripheral (coda_rc_ble.c), serves
  * the library from SQLite (coda_rc_lib.c), and talks to demo only through files in /tmp that the payload's
- * shim (patch/coda_rc_shim.c) polls: Now Playing out, play commands and the pairing code in. Transport keys go
- * in as the Q2's own buttons, through md-gpio-keys' event device.
+ * shim (patch/coda_rc_shim.c) polls: Now Playing out; play, transport, seek and volume commands and the
+ * pairing code in.
  *
  * demo starts it when Settings > Car Remote is on and kills it when that goes off; nothing else starts it.
  * It runs at nice 19. --root DIR prefixes every path (the host tests); --no-ble and --port N are for them too. */
@@ -20,7 +20,7 @@
 enum { TR_TCP, TR_BLE };
 
 static char root[160];
-static int port = CRC_TCP_PORT, use_ble = 1, quit, rnd = -1, keys = -1;
+static int port = CRC_TCP_PORT, use_ble = 1, quit, rnd = -1;
 uint8_t crc_device_id[8];
 
 typedef struct {
@@ -331,11 +331,13 @@ static struct {
     crc_session *s;
     unsigned req_id, seq;
     uint32_t at;
+    char verb[24];
 } pend;
 static unsigned cmd_seq;
 
 static void pend_answer(int ok) {
     if (!pend.s) return;
+    crc_log("demo: %s %s", pend.verb, ok ? "done" : "not done");
     if (pend.s->state == S_AUTHED) {
         if (ok) crc_send(pend.s, T_ACK, pend.req_id, 0, 0);
         else crc_error(pend.s, pend.req_id, E_UNAVAILABLE, "the Q2 did not take it");
@@ -355,6 +357,7 @@ int crc_shim_command(crc_session *s, unsigned req_id, const char *verb) {
     pend.req_id = req_id;
     pend.seq = seq;
     pend.at = crc_now_ms();
+    snprintf(pend.verb, sizeof pend.verb, "%s", verb);
     return 0;
 }
 
@@ -374,42 +377,7 @@ static void ack_poll(void) {
     if (crc_now_ms() - pend.at > ACK_MS) pend_answer(0);
 }
 
-/* ---- transport keys: md-gpio-keys' event device, as a press of the Q2's own button ---- */
-
-static int keys_open(void) {
-    char p[256], name[64];
-    if (keys >= 0) return keys;
-    for (int i = 0; i < 10 && keys < 0; ++i) {
-        char dev[32];
-        snprintf(dev, sizeof dev, "/dev/input/event%d", i);
-        int fd = open(crc_path(p, sizeof p, dev), O_RDWR | O_NONBLOCK | O_CLOEXEC);
-        if (fd < 0) continue;
-        memset(name, 0, sizeof name);
-        if (ioctl(fd, CRC_EVIOCGNAME(sizeof name), name) > 0 && !strcmp(name, "md-gpio-keys")) keys = fd;
-        else close(fd);
-    }
-    return keys;
-}
-
-static int key_event(int fd, int type, int code, int value) {
-    struct { uint32_t sec, usec; uint16_t type, code; int32_t value; } e = {0, 0, (uint16_t)type, (uint16_t)code, value};
-    return write(fd, &e, sizeof e) == sizeof e ? 0 : -1;
-}
-
-static int key_press(int code) {
-    int fd = keys_open();
-    if (fd < 0) return -1;
-    struct timespec t = {0, 80000000};
-    int e = key_event(fd, 1, code, 1) | key_event(fd, 0, 0, 0);
-    nanosleep(&t, 0);
-    e |= key_event(fd, 1, code, 0) | key_event(fd, 0, 0, 0);
-    if (e) { close(fd); keys = -1; }
-    return e;
-}
-
-#define KEY_PLAY 108 /* md-gpio-keys: Play/Pause is KEY_DOWN, Next 163, Previous 165 (docs/remote.md) */
-#define KEY_NEXT 163
-#define KEY_PREV 165
+/* ---- transport ---- */
 
 static int transport(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
     pbr r = {p, p + n};
@@ -423,25 +391,24 @@ static int transport(crc_session *s, unsigned req_id, const uint8_t *p, size_t n
         if (f.field == 3) vol = (unsigned)f.v;
     }
     if (k < 0) return crc_error(s, req_id, E_BAD_REQUEST, "Transport");
+    /* Play/Pause, Next and Previous go to the shim as a headset's buttons would (coda_rc_shim.c cr_command),
+     * which answers Pause and Play once the player shows them, so the ack is the player's, not a hope */
+    static const char *const verbs[] = {0, "resume", "pause", "toggle", "next", "previous"};
     char verb[48];
-    int key = 0;
     switch (cmd) {
-    case 1: if (np.state != 1) key = KEY_PLAY; break;  /* PLAY, PAUSE: the button toggles, so only when it must */
-    case 2: if (np.state == 1) key = KEY_PLAY; break;
-    case 3: key = KEY_PLAY; break;
-    case 4: key = KEY_NEXT; break;
-    case 5: key = KEY_PREV; break;
-    case 6: snprintf(verb, sizeof verb, "seek %u", seek / 1000); return crc_shim_command(s, req_id, verb);
+    case 1: case 2: case 3: case 4: case 5: snprintf(verb, sizeof verb, "%s", verbs[cmd]); break;
+    case 6: snprintf(verb, sizeof verb, "seek %u", seek / 1000); break;
     case 7: case 8: case 9: {
         int v = cmd == 9 ? (int)vol : np.volume + (cmd == 7 ? 5 : -5);
         if (cmd == 9 && vol > 100) return crc_error(s, req_id, E_BAD_REQUEST, "volume 0..100");
         snprintf(verb, sizeof verb, "volume %d", v < 0 ? 0 : v > 100 ? 100 : v);
-        return crc_shim_command(s, req_id, verb);
+        break;
     }
     default: return crc_error(s, req_id, E_BAD_REQUEST, "unknown command");
     }
-    if (key && key_press(key)) return crc_error(s, req_id, E_UNAVAILABLE, "no key device");
-    return crc_send(s, T_ACK, req_id, 0, 0);
+    /* one line a command: what was asked, and the state the phone last saw (and how old it is) */
+    crc_log("transport %s: state %d seq %d %ums old", verb, np.state, np.seq, crc_now_ms() - np_at);
+    return crc_shim_command(s, req_id, verb);
 }
 
 /* ---- authenticated requests ---- */

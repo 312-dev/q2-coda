@@ -195,7 +195,9 @@ message QueueState {
 
 // ---- commands -------------------------------------------------------------------------------------
 
-// type 0x20
+// type 0x20. Answered with Ack once the Q2 has done it: PLAY and PAUSE once the player plays or is
+// paused (already so: at once), the others once demo has taken them. UNAVAILABLE when it did not
+// (the player stayed as it was for 3 s, or demo did not answer in 4 s).
 message Transport {
   TransportCmd cmd = 1;
   uint32 seek_ms = 2;  // SEEK only, needs CAP_SEEK

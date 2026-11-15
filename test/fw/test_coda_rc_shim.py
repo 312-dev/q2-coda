@@ -1,6 +1,6 @@
 """Car Remote's side in demo, patch/coda_rc_shim.c (docs/internals.md#car-remote): the daemon started only while
-the switch is on, Now Playing written for it, its play, seek and volume commands, the pairing code's Dialog and
-Settings > Car Remote with its phones and Forget. /tmp and /mnt/data are a dict (conftest.Files); AWTK is
+the switch is on, Now Playing written for it, its play, Play/Pause, Next and Previous, seek and volume commands,
+the pairing code's Dialog and Settings > Car Remote with its phones and Forget. /tmp and /mnt/data are a dict (conftest.Files); AWTK is
 test_nav_library_pages' fake, and the songs are test_nav_hold's Records, laid out as P() reads them."""
 import ctypes as C
 import pytest
@@ -181,3 +181,62 @@ def test_settings_switch_turns_it_on_and_off(fw, ui, mcl, recs):
     assert [a[:1] for _, a in fw.calls('write_int_config')][-1] == (1,) and q2.system[-1].startswith('( /usr/bin/coda-rc')
     ui.click(page, 0)
     assert [a[:1] for _, a in fw.calls('write_int_config')][-1] == (0,) and q2.system[-1].startswith('kill $(cat /tmp/coda-rc.pid')
+
+
+def test_pause_and_play_go_to_the_player_and_ack_once_it_shows_them(fw, ui, mcl, recs):
+    """Not a key press: the toast's msginfo_dialog_on_keyup swallows the Q2's own Play/Pause button."""
+    q2 = Q2(fw, ui, recs)
+    q2.queue()
+    q2.tick()
+    q2.files[CMD] = b'8 pause\n'
+    q2.tick()
+    assert len(fw.calls('player_play_pause')) == 1 and ACK not in q2.files  # the player has not paused yet
+    q2.status = 3
+    q2.tick()
+    assert q2.files.pop(ACK) == b'8 0\n'
+    q2.files[CMD] = b'9 pause\n'  # already paused: nothing pressed, answered at once
+    q2.tick()
+    assert len(fw.calls('player_play_pause')) == 1 and q2.files.pop(ACK) == b'9 0\n'
+    q2.files[CMD] = b'10 toggle\n'
+    q2.tick()
+    q2.status = 2
+    q2.tick()
+    assert len(fw.calls('player_play_pause')) == 2 and q2.files.pop(ACK) == b'10 0\n'
+
+
+def test_a_play_the_player_never_shows_is_refused(fw, ui, mcl, recs):
+    q2 = Q2(fw, ui, recs)
+    q2.status = 3
+    q2.tick()
+    q2.files[CMD] = b'11 resume\n'
+    q2.tick()
+    q2.tick(2000)
+    assert ACK not in q2.files
+    q2.tick(1100)
+    assert q2.files.pop(ACK) == b'11 1\n'
+    q2.tick(5000)
+    assert ACK not in q2.files
+
+
+def test_a_newer_command_drops_the_waiting_ones_ack(fw, ui, mcl, recs):
+    q2 = Q2(fw, ui, recs)
+    q2.tick()
+    q2.files[CMD] = b'12 pause\n'
+    q2.tick()
+    q2.files[CMD] = b'13 seek 5\n'
+    q2.tick()
+    assert q2.files.pop(ACK) == b'13 0\n'
+    q2.status = 3
+    q2.tick(4000)
+    assert ACK not in q2.files
+
+
+def test_next_and_previous_go_to_the_player(fw, ui, mcl, recs):
+    q2 = Q2(fw, ui, recs)
+    q2.tick()
+    q2.files[CMD] = b'14 next\n'
+    q2.tick()
+    assert len(fw.calls('player_next_music')) == 1 and q2.files.pop(ACK) == b'14 0\n'
+    q2.files[CMD] = b'15 previous\n'
+    q2.tick()
+    assert len(fw.calls('player_prev_music')) == 1 and q2.files.pop(ACK) == b'15 0\n'

@@ -5,7 +5,8 @@
  *   goes off: nothing listens while it is off;
  * - writes Now Playing for it to /tmp/coda-rc.now, and the queue's song ids to /tmp/coda-rc.queue;
  * - takes its commands from /tmp/coda-rc.cmd: play a list of song ids from one of them, or shuffled (ids in
- *   /tmp/coda-rc.list), seek, set the volume; and answers each in /tmp/coda-rc.ack;
+ *   /tmp/coda-rc.list), Play, Pause, Play/Pause, Next, Previous, seek, set the volume; and answers each in
+ *   /tmp/coda-rc.ack, a Pause or Play once the player shows it;
  * - shows the pairing code while /tmp/coda-rc.pair exists, and writes /tmp/coda-rc.pair-cancel when the
  *   user closes it.
  * Settings > Car Remote is this file's page too: the switch, the paired phones, Forget.
@@ -14,6 +15,7 @@
 
 #define CR_POLL_MS 500
 #define CR_RESTART_MS 30000 /* a daemon that died is started again at most this often */
+#define CR_SETTLE_MS 3000   /* a Pause or Play the player has not shown by then is refused (under coda_rc.c ACK_MS) */
 #define CR_DAEMON "/usr/bin/coda-rc"
 #define CR_PID "/tmp/coda-rc.pid"
 #define CR_NOW "/tmp/coda-rc.now"
@@ -34,6 +36,8 @@ static struct {
     int checked, on;
     unsigned at, started_at, seq, now_hash, now_n, q_hash, q_gen;
     unsigned play_timer, toast_timer;
+    int want; /* a Pause (1) or Play (2) waiting for the player; 0 none */
+    unsigned want_seq, want_at;
     void *pair_page, *page; /* the code's Dialog; Settings > Car Remote */
     int forget; /* the phone row Forget asks about, + 1 */
     int toast_what;
@@ -219,18 +223,48 @@ static int cr_play(const void *unused) {
     return 0;
 }
 
+/* A Pause or Play waiting for the player: ack 0 once it plays or is paused as asked, 1 (the phone gets
+ * UNAVAILABLE) if it is not within CR_SETTLE_MS, as when a card game's sound holds stock's player off. */
+static void cr_settle(void) {
+    if (!cr.want) return;
+    int ok = media_playing() == cr.want - 1;
+    if (!ok && time_now_ms() - cr.want_at < CR_SETTLE_MS) return;
+    cr_now(); /* Now Playing first, so a GetState after the ack sees what it acked */
+    cr_ack(cr.want_seq, !ok);
+    cr.want = 0;
+}
+
 static void cr_command(void) {
     char raw[64];
     if (cr.play_timer || !state_read(CR_CMD, raw, sizeof raw)) return;
     unsigned seq = (unsigned)atoi(raw + 1);
     char *verb = strstr(raw + 1, " ");
     int v = 0;
+    cr.want = 0; /* a newer command: the daemon has answered the one waiting, and its ack would be stale */
     if (verb && !strncmp(verb, " play ", 6)) {
         cr.play_timer = timer_add(cr_play, 0, 0);
         return;
     }
     unlink(CR_CMD);
-    if (verb && __isoc99_sscanf(verb, " seek %d", &v) == 1 && v >= 0) {
+    char word[12] = "";
+    if (verb) __isoc99_sscanf(verb, " %11s", word);
+    /* Play/Pause, Next and Previous as a headset's buttons (headset.c media_key): to whatever plays,
+     * past any window's keys. A press of the Q2's own button is swallowed while a toast is up
+     * (msginfo_dialog_on_keyup) or Shuffle's confirmation is (feedback.c conf_key); this is not. */
+    int want = !strcmp(word, "resume")   ? 1
+               : !strcmp(word, "pause")  ? 0
+               : !strcmp(word, "toggle") ? !media_playing()
+                                         : -1;
+    if (want >= 0) {
+        if (media_playing() != want) media_key(KEY_PLAY);
+        cr.want = want + 1; /* acked once the player shows it (cr_settle) */
+        cr.want_seq = seq;
+        cr.want_at = time_now_ms();
+        cr_settle();
+    } else if (!strcmp(word, "next") || !strcmp(word, "previous")) {
+        media_key(word[0] == 'n' ? KEY_FWD_BTN : KEY_BACK_BTN);
+        cr_ack(seq, 0);
+    } else if (verb && __isoc99_sscanf(verb, " seek %d", &v) == 1 && v >= 0) {
         player_seek_time(v);
         cr_ack(seq, 0);
     } else if (verb && __isoc99_sscanf(verb, " volume %d", &v) == 1 && v >= 0 && v <= 100) {
@@ -321,6 +355,7 @@ void coda_rc_poll(void) {
     if (!coda_rc_enabled()) return;
     if (!cr.started_at || (now - cr.started_at >= CR_RESTART_MS && !cr_running())) cr_start();
     cr_now();
+    cr_settle();
     cr_command();
     cr_pairing();
 }

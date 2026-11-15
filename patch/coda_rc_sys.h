@@ -18,14 +18,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
-#define CRC_EVIOCGNAME(n) (0x80004506u | (unsigned)(n) << 16)
 #else
 typedef long ssize_t;
 typedef int pid_t;
@@ -61,7 +59,6 @@ typedef unsigned socklen_t;
 #define CLOCK_MONOTONIC 1
 #define PRIO_PROCESS 0
 #define INADDR_ANY 0u
-#define CRC_EVIOCGNAME(n) (0x40004506u | (unsigned)(n) << 16) /* MIPS _IOC_READ is 2, at bit 29 */
 #define errno (*__errno_location())
 struct in_addr { uint32_t s_addr; };
 struct sockaddr_in { unsigned short sin_family, sin_port; struct in_addr sin_addr; char zero[8]; };
@@ -72,7 +69,7 @@ int *__errno_location(void);
 int open(const char *, int, ...), close(int), unlink(const char *), rename(const char *, const char *);
 int mkdir(const char *, unsigned), chmod(const char *, unsigned), fsync(int), access(const char *, int);
 ssize_t read(int, void *, size_t), write(int, const void *, size_t);
-int fcntl(int, int, ...), ioctl(int, unsigned long, ...), ftruncate(int, long), nanosleep(const void *, void *);
+int fcntl(int, int, ...), ftruncate(int, long);
 long lseek(int, long, int);
 int socket(int, int, int), setsockopt(int, int, int, const void *, socklen_t), bind(int, const void *, socklen_t);
 int listen(int, int), accept(int, void *, socklen_t *);
