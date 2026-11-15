@@ -15542,6 +15542,58 @@ key(O['KEY_RETURN']); m.advance(0); pick(0); key(O['KEY_RETURN']); m.advance(0);
 key(O['KEY_RETURN']); m.advance(0); pick(1); assert len(frames())==1
 m.close(); assert m.get(payload_syms['g'])==0 and not frames() and m.get(payload_syms['wheel_raw'])==0; passed()
 
+# The game engine (patch/engine.c, docs/games-engine.md): its demo scene, which a --dev build lists after Games' own four
+# with [Q2POD] ENGINEDEMO=1. A frame is one step and the rects it changed; the demo draws into the screen's own buffer,
+# only inside the rect being painted. What a frame costs is counted in the payload's instructions and bounded, a little
+# over what it measured, so a change cannot quietly make a frame dearer: the engine's budget for a whole frame is
+# 2,000,000 (docs/games-engine.md#budgets).
+CONFIG['ENGINEDEMO']='1'; m=BooksMachine({},{}); del CONFIG['ENGINEDEMO']
+sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
+if not manifest.get('dev'): assert labels(chooser)==['Games','Sudoku','Vortex','Solitaire','Snake']; m.close()
+else:
+    assert labels(chooser)==['Games','Sudoku','Vortex','Solitaire','Snake','Engine Demo']
+    eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
+    O_ENG_RECT,O_ENG_STEPS=80,208  # struct eng's rect and steps (patch/engine.c), on MIPS
+    ENG_STEP_BOUND,ENG_FRAME_BOUND,ENG_WHOLE_BOUND=600,70_000,780_000  # measured: 499, 61,511 and 703,036
+    pick(4); EN=m.get(payload_syms['en']); assert word(G_SCREEN)==5 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1
+    FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
+    for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)
+    n=[0]; counter=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
+    pixel=lambda x,y: m.get(FB+4*(y*375+x))
+    def eframe(ms=16):  # the frame timer's pass ms after the last: its return, the rects it invalidated, its instructions
+        m.now+=ms; m.calls=[]; n[0]=0; r=m.call(address=payload_syms['eng_frame'],args=(0,0,0,0),gap=0,clear=False)
+        made=[c for c in m.calls if c[0]=='widget_invalidate_force']; assert all(c[1]==sheet for c in made)
+        box=lambda k: [signed(m.get(EN+O_ENG_RECT+16*k+4*j)) for j in range(4)]  # x0 y0 x1 y1, as the step left them
+        return r,[(x0,y0,x1-x0,y1-y0) for x0,y0,x1,y1 in map(box,range(len(made)))],n[0]
+    def epaint(rect):  # stock paints one changed rect: the canvas clipped to it
+        m.clip=rect; n[0]=0; paint(); return n[0]
+    whole=epaint((0,0,375,320)); assert pixel(187,246)==0xffffffff and pixel(5,100)==0xff000000 and pixel(187,70)==0xff2160d8
+    assert pixel(187,300)==0  # the sheet ends at its height: nothing below it
+    r,rects,cost=eframe(); assert r==8 and rects==[(180,63,15,15),(182,65,15,15)],rects
+    before=bytes(m.u.mem_read(FB,375*320*4)); part=[epaint(x) for x in rects]; after=bytes(m.u.mem_read(FB,375*320*4))
+    changed={(k//4%375,k//4//375) for k in range(0,len(after),4) if after[k:k+4]!=before[k:k+4]}
+    assert changed and all(180<=x<197 and 63<=y<80 for x,y in changed)  # the ball moved; nothing outside its two rects
+    # A second of play, the wheel turning the paddle every frame: the dearest frame, its step and its rects' paints.
+    worst=step_worst=0; steps=m.get(EN+O_ENG_STEPS)
+    for k in range(60):
+        m.word(payload_syms['wheel_travel'],(-3 if k<30 else 3)&0xffffffff)
+        r,rects,cost=eframe(17 if k%3==0 else 16); assert r==8 and 2<=len(rects)<=5
+        total=cost+sum(epaint(x) for x in rects); worst=max(worst,total); step_worst=max(step_worst,cost)
+    assert m.get(EN+O_ENG_STEPS)==steps+60  # a step a frame, whatever the millisecond clock made of each
+    r,rects,late=eframe(50); assert m.get(EN+O_ENG_STEPS)==steps+63  # a late frame catches up
+    assert whole<ENG_WHOLE_BOUND and worst<ENG_FRAME_BOUND and step_worst<ENG_STEP_BOUND,(whole,worst,step_worst)
+    print(f'Game engine on MIPS: the demo scene {step_worst} instructions for a frame\'s step at most, {worst} with its changed rects painted, {whole} to paint the whole sheet (payload only; stock\'s text and flush mocked)')
+    m.u.hook_del(counter)
+    # Return pauses under Games' menu: no timer, the wheel ticks again; the screen going off pauses too; Quit frees it.
+    key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and not eframes() and m.get(payload_syms['wheel_raw'])==0; m.clip=(0,0,375,320); paint()
+    key(O['KEY_RETURN']); assert word(G_PAUSED)==0 and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1
+    m.byte(syms['g_backlight_status'],0); m.advance(20); m.byte(syms['g_backlight_status'],1)
+    assert word(G_PAUSED)==1 and not eframes() and m.get(payload_syms['wheel_raw'])==0
+    key(O['KEY_RETURN']); key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
+    assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0 and not eframes()
+    m.close(); assert m.get(payload_syms['g'])==0
+passed()
+
 # Videos (patch/books.c, docs/internals.md#videos): the card's Videos folder (case aside) lists its and
 # its subfolders' video files as Books does; a row stops the music and starts /usr/bin/q2video with
 # the headphone DAC's PCM and the path as plain argv, never through a shell.
