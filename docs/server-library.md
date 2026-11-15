@@ -238,6 +238,11 @@ it reads on any background:
   column's place: the length stands 12 px left of it, and the title and inline artist end 12 px
   short of whichever is leftmost.
 
+Under OLED a song row that can play says where it lives in the same place: Phosphor's `cloud` for a
+server row (it streams), `arrow-circle-down` for a card file in the app's downloads folder (its
+`q2app`'s `downloads=`, q2-subsonic's `Subsonic`), nothing for the user's own file
+([oled-design.md](oled-design.md#song-rows), [internals.md](internals.md#server-library)).
+
 ### Now Playing while it loads
 
 Online, a pressed server song is the app's to fetch, and nothing loads until its `.play` (or

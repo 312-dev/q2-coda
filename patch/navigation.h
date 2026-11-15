@@ -499,6 +499,9 @@ int coverflow_spinner(void), coverflow_wait_input(void *e);
 void slider_page_open(void *win, void *s, unsigned kind);
 void slider_page_paint(void *w, void *canvas);
 extern void *slider_page_win; /* the page slider_page_paint draws */
+/* ... its text, shared with storage.c */
+void sp_text(void *canvas, const unsigned *s, unsigned n, int x, int w, int y, int align,
+             const char *face, int px, unsigned color);
 void slider_page_dirty(void *page); /* its switch row, after a change of the hidden switch */
 
 /* wifi_rows.c: a set_switch theme's Wi-Fi page, from ipod_list_layout and paint_into */
@@ -882,6 +885,10 @@ void song_order(void *list);
 void coda_rc_poll(void);
 int coda_rc_enabled(void);
 int carremote_open(void *ctx, void *event);
+/* storage.c: Settings > Storage and its Downloads (docs/internals.md#storage) */
+int storage_open(void *ctx, void *event), storage_hold(void *top);
+void storage_paint(void *w, void *canvas);
+int tsv_split(char *line, char **f, int max); /* catalogue.c */
 
 /* az_index.c: the A-Z index on a long Library list in name order (docs/oled-design.md#a-z-index):
  * a list this long or shorter has none; a touch this near the list's right edge is the index's;

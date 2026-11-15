@@ -91,7 +91,8 @@ enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 #define CAPS_FILE "/tmp/q2-addon.caps"
 /* This firmware's card-app features, space-separated; a feature adds its word. */
 #define ADDON_CAPS                                                                                 \
-    "playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings artist album playlists"
+    "playlist progress pages library goto sleep game audio sections art window urls sort field "   \
+    "more fav now catalogue ratings artist album playlists storage"
 #define ADDON_SECTIONS 8  /* sections an app's first page may have */
 #define SWIPE_CLAIM_PX 24 /* a sideways move this far, twice as far as up or down, is a swipe's */
 #define SWIPE_PX 60       /* and this far at the lift, more than up or down, changes section */
@@ -2448,17 +2449,23 @@ int addon_open(void *ctx, void *event) {
 }
 
 /* The page of the app with this id, hidden or not, found on the card again first, over any app's
- * page left open under Now Playing, as addon_more's. */
-void addon_open_id(const char *id) {
+ * page left open under Now Playing, as addon_more's: at op with its one argument arg ("" for none),
+ * titled title (0: the app's name), its QR code shown at the first answer for "menu". Settings >
+ * Storage opens an app's Settings and a download's own page so (storage.c). 1 when it opened. */
+int addon_open_at(const char *id, const char *op, const char *arg, const char *title) {
+    char args[sizeof pg.lv->args] = "";
     addon_scan();
     for (int i = 0; i < ap.n; ++i)
         if (ap.a[i].present && !strcmp(ap.a[i].id, id)) {
+            if (*arg && !put(args, sizeof args, arg)) return 0;
             void *old = pg.page;
             if (old) closed(old, 0), window_manager_close_window_force(window_manager(), old);
-            page_at(i, "menu", "", ap.a[i].name, 1);
-            return;
+            return page_at(i, op, args, title && *title ? title : ap.a[i].name,
+                           !strcmp(op, "menu"));
         }
+    return 0;
 }
+void addon_open_id(const char *id) { addon_open_at(id, "menu", "", 0); }
 
 /* Whether path is in an app's folder, CARD/.<id>/, and id the app's. */
 static int card_id(const char *path, char *id) {

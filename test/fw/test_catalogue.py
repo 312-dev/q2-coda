@@ -666,6 +666,45 @@ def test_a_bound_row_is_greyed_while_its_server_song_cannot_play(rig, fw):
     assert colour() is None
 
 
+def test_under_oled_a_song_row_says_where_it_lives(rig, fw):
+    """Under OLED (docs/oled-design.md#song-rows) a bound song row carries a mark without being greyed: a server
+    row that can play the cloud, a card file in the app's downloads folder (q2app downloads=) the arrow, the
+    user's own file none; a server row that can't play is greyed with the offline mark as before."""
+    rig.files.files[f'/mnt/mmc/.{APP}/q2app'] = b'name=Subsonic\ncatalogue=1\ndownloads=Subsonic\n'
+    def config(path, section, key, out, default, *_):
+        name = C.string_at(key)
+        v = b'3' if name == b'THEME' else str(rig.source).encode() if name == b'LIBRARYSOURCE' else C.string_at(default)
+        C.memmove(out, v + b'\0', len(v) + 1)
+    fw.mock('toolsReadConfig', config)
+    rig.write(1, [song_row('s2', 'Streamed', 'B', 'A', 2, 100, 2)])
+    rig.online = True
+    rig.poll()
+    fw.var('fw_ctx_p_deque_showlist', C.c_uint).value = rig.rows.new(
+        [rig.record('/mnt/mmc/Music/a.flac'), rig.record('/mnt/mmc/Subsonic/B/A/b.flac'), rig.record(url('s2')),
+         rig.record('/mnt/mmc/Subsonicx/c.flac')])
+    row, label = (C.create_string_buffer(0x400) for _ in range(2))
+    struct.pack_into('<Q', label, O['W_PARENT'], C.addressof(row))
+    bind = fw.fn('catalogue_bind', None, C.c_void_p, C.c_uint)
+    greyed = fw.fn('catalogue_greyed', C.c_int, C.c_void_p, C.POINTER(C.c_uint))
+    loaded = []
+    fw.mock('widget_load_image', lambda w, name, bm, *_: loaded.append(C.string_at(name).decode()) or 1)
+    mark = fw.fn('catalogue_row_mark', None, C.c_void_p, C.c_void_p, C.c_void_p, C.c_int, C.c_int)
+
+    def seen(i):
+        bind(C.addressof(row), i)
+        loaded.clear()
+        mark(None, None, C.addressof(row), 300, 16)
+        c = C.c_uint(0xffffffff)
+        return loaded, greyed(C.addressof(label), C.byref(c))
+    assert seen(0) == ([], 0)
+    assert seen(1) == (['oled_mark_down_d'], 0)
+    assert seen(2) == (['oled_mark_cloud_d'], 0)
+    assert seen(3) == ([], 0)  # Subsonicx/ is not Subsonic/
+    rig.online = False
+    rig.poll()
+    assert seen(2) == ([], 1)  # greyed: the offline mark is the payload's own, no art
+
+
 def test_search_finds_server_songs_with_local_and_server(rig, fw):
     """Stock's Search runs SearchMusicByName's SQL through toolsQueryDbTable (library_query) outside a music
     load: with Local + Server it reads the union, so a server song is found; Local only, as stock's."""

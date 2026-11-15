@@ -386,7 +386,7 @@ under such a theme every picker does so when a tap opened it too. Another list w
 `set_row` carries an explicit `item_height`, so only the settings pages are told apart by it.
 
 System Settings puts Wireless and Network first, then Car Remote, then Display, Controls and Power, then Date & Time and device
-maintenance, with About last; neither list has headings. Play Mode, EQ, Gapless and Crossfade come first; specialist output controls come next, and Library & Folders last, one reverse detent from the top on Playback's ring. Added binary settings
+maintenance (App Store, Storage, Update, Reset), with About last; neither list has headings. Play Mode, EQ, Gapless and Crossfade come first; specialist output controls come next, and Library & Folders last, one reverse detent from the top on Playback's ring. Added binary settings
 use Shanling's `switch_on` / `switch_off` images with the whole row as the tap target. Settings
 that cycle between named choices retain their value labels. Crossfade, Resume Songs, Wheel
 Sensitivity and App Store show a chevron, as do the added Library browsing rows.

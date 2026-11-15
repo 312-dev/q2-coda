@@ -41,6 +41,7 @@
 #define CAT_DIM 0xb3           /* on the selection: its own ink at this alpha (70%) */
 #define CAT_GREY_ROWS 48       /* bound rows of stock's pooled tables, more than a screen holds */
 #define CAT_PLAYLISTS 100      /* stock's playlist headers are ids 0 to 99 */
+#define CAT_ART_PX 18          /* OLED's cloud and arrow (tools/art.py MARK_PX) */
 
 int catalogue_source __attribute__((section(".scratch"))); /* LIBRARYSOURCE: 1 Local + Server */
 
@@ -76,6 +77,7 @@ typedef struct {
 typedef struct {
     char id[16];
     int ratings;   /* q2app ratings=1 */
+    char dl[32];   /* q2app downloads=: the card folder it downloads songs to, "" for none */
     char seq[24];  /* the catalogue's seq taken last */
     long avail_at; /* catalogue.avail read this far */
     int down;      /* its state file's server=down */
@@ -108,6 +110,8 @@ static struct {
     void *grey[CAT_GREY_ROWS];
     unsigned
         grey_ink[CAT_GREY_ROWS]; /* each greyed row's text colour as last painted, for its mark */
+    unsigned char grey_mark[CAT_GREY_ROWS]; /* each row's MK_* */
+    unsigned noff;                          /* how many of them are MK_OFFLINE's */
     unsigned ngrey;
     int fitted; /* a greyed row's labels were narrowed (catalogue_fit) since the Q2 started */
     /* a catplay sent: its app, when, and the list to play offline if no answer comes; cp_wake:
@@ -583,8 +587,8 @@ static void unescape(char *s) {
             *o++ = *s;
     *o = 0;
 }
-/* line split at tabs into f (at most max), unescaped; how many */
-static int split(char *line, char **f, int max) {
+/* line split at tabs into f (at most max), unescaped; how many. Shared with storage.c. */
+int tsv_split(char *line, char **f, int max) {
     int n = 0;
     for (char *p = line; n < max;) {
         f[n++] = p;
@@ -780,7 +784,7 @@ static int import_file(int slot, const char *id, const char *seq, char *why, uns
             }
             if ((line[0] == 's' || line[0] == 'p' || line[0] == 'i') && line[1] == '\t') ++jb.rows;
             if (long_line) continue;
-            int n = split(line, f, 20);
+            int n = tsv_split(line, f, 20);
             if (!strcmp(f[0], "s"))
                 imp_song(&im, f, n);
             else if (!strcmp(f[0], "p") || !strcmp(f[0], "i"))
@@ -1235,39 +1239,62 @@ int catalogue_cover(const char *path, char *out, unsigned size) {
     return n > 0 && (unsigned)n < size && !access(out, 4);
 }
 
-/* ---- Greyed rows: stock's pooled table rows as they are bound (ringnav_table_load), the
- * payload's own lists' rows as they are made (catalogue_mark). ringnav_style_color asks
- * catalogue_greyed for each text colour. ---- */
+/* ---- Greyed and marked rows: stock's pooled table rows as they are bound (ringnav_table_load),
+ * the payload's own lists' rows as they are made (catalogue_mark). ringnav_style_color asks
+ * catalogue_greyed for each text colour. A row that can't play now is greyed with the offline
+ * mark; under OLED a song row that can says where it lives (docs/oled-design.md#song-rows): a
+ * server row that streams has the cloud, a card file in a catalogue app's downloads folder (q2app
+ * downloads=) the arrow, and the user's own file nothing. ---- */
+enum { MK_NONE, MK_OFFLINE, MK_CLOUD, MK_DOWN };
 
-static void grey_set(void *row, int on);
+static void grey_set(void *row, int mark);
 static int grey_gone(void *row, void *event) {
-    grey_set(row, 0);
+    grey_set(row, MK_NONE);
     return 0;
 }
-/* A row greyed is forgotten when it is destroyed (its page closed), so a widget made later at its
- * address is not greyed with it. */
-static void grey_set(void *row, int on) {
+/* A row marked is forgotten when it is destroyed (its page closed), so a widget made later at its
+ * address is not marked with it. */
+static void grey_set(void *row, int mark) {
     unsigned i = 0;
     while (i < cat.ngrey && cat.grey[i] != row) ++i;
-    if (on && i == cat.ngrey && cat.ngrey < CAT_GREY_ROWS) {
-        cat.grey_ink[cat.ngrey] = 0, cat.grey[cat.ngrey++] = row;
+    if (mark && i == cat.ngrey && cat.ngrey < CAT_GREY_ROWS) {
+        cat.grey_ink[cat.ngrey] = 0, cat.grey_mark[cat.ngrey] = MK_NONE,
+        cat.grey[cat.ngrey++] = row;
         if (!widget_get_prop_int(row, "_catgrey", 0) && widget_on(row, EVT_DESTROY, grey_gone, row))
             widget_set_prop_int(row, "_catgrey", 1);
     }
-    if (!on && i < cat.ngrey) {
+    if (i < cat.ngrey) cat.noff -= cat.grey_mark[i] == MK_OFFLINE;
+    if (mark && i < cat.ngrey)
+        cat.grey_mark[i] = (unsigned char)mark, cat.noff += mark == MK_OFFLINE;
+    if (!mark && i < cat.ngrey) {
         --cat.ngrey;
         cat.grey[i] = cat.grey[cat.ngrey], cat.grey_ink[i] = cat.grey_ink[cat.ngrey];
+        cat.grey_mark[i] = cat.grey_mark[cat.ngrey];
     }
+}
+/* A song record's mark: offline when it can't play now; else, under OLED, where it lives. */
+static int song_mark(void *r) {
+    const char *p = r ? P(r, REC_PATH) : 0;
+    if (path_unavailable(p)) return MK_OFFLINE;
+    if (!p || !feedback_oled()) return MK_NONE;
+    if (catalogue_path(p)) return MK_CLOUD;
+    for (int i = 0; i < cat.napps; ++i) {
+        unsigned k = strlen(cat.app[i].dl);
+        if (k && tk_str_start_with(p, "/mnt/mmc/") && !strncmp(p + 9, cat.app[i].dl, k) &&
+            p[9 + k] == '/')
+            return MK_DOWN;
+    }
+    return MK_NONE;
 }
 static int search_group_unavailable(void *r, int tab);
 /* A list's row as it paints (navigation.c grey_rows): its record a song's, or, tab 1 to 3, a row
  * of Search's Artists, Albums or Genres tab. */
 void catalogue_mark(void *row, void *r, int tab) {
-    grey_set(row, tab > 0 ? search_group_unavailable(r, tab) : catalogue_unavailable(r));
+    grey_set(row, tab > 0 ? search_group_unavailable(r, tab) : song_mark(r));
 }
-void catalogue_forget(void *row) { grey_set(row, 0); }
+void catalogue_forget(void *row) { grey_set(row, MK_NONE); }
 /* w's text greyed (on) as a row's that can't play, or not: Cover Flow's captions. */
-void catalogue_grey(void *w, int on) { grey_set(w, on); }
+void catalogue_grey(void *w, int on) { grey_set(w, on ? MK_OFFLINE : MK_NONE); }
 /* The server rows' names with an offline copy, by group, as they are now. */
 static void local_sets(void) {
     if (cat.local_built == cat.local_gen) return;
@@ -1322,9 +1349,10 @@ static int album_list(void *row) {
 void catalogue_bind(void *row, unsigned index) {
     void *list = P(p_deque_showlist, 0);
     void *r = list && index < deque_size(list) ? deque_at(list, index) : 0;
-    grey_set(row, r && (I(r, REC_TYPE) == 8
-                            ? catalogue_unavailable(r)
-                            : cat.ix.n && album_list(row) && catalogue_album_unavailable(r)));
+    grey_set(row, !r ? MK_NONE
+                  : I(r, REC_TYPE) == 8
+                      ? song_mark(r)
+                      : cat.ix.n && album_list(row) && catalogue_album_unavailable(r));
 }
 /* The greyed row w is in, or -1; up to depth levels above w. */
 static int grey_of(void *w, int depth) {
@@ -1337,23 +1365,23 @@ static int grey_of(void *w, int depth) {
  * selection that row's own ink at CAT_DIM, so it keeps its contrast with the bar or card
  * (docs/server-library.md#greyed-rows). Kept for the row's mark. */
 int catalogue_greyed(void *w, unsigned *color) {
-    int i = grey_of(w, 64);
-    if (i < 0) return 0;
+    int i = cat.noff ? grey_of(w, 64) : -1;
+    if (i < 0 || cat.grey_mark[i] != MK_OFFLINE) return 0;
     unsigned a = *color >> 24;
     *color = ringnav_row_selected(cat.grey[i]) ? (*color & 0xffffffu) | (a * CAT_DIM / 255) << 24
                                                : (*color & 0xff000000u) | CAT_GREY;
     cat.grey_ink[i] = *color;
     return 1;
 }
-/* How many rows are greyed now: none, and nothing needs a mark. */
+/* How many rows are greyed or marked now: none, and nothing needs a mark. */
 int catalogue_greys(void) { return (int)cat.ngrey; }
-/* Whether row (as catalogue_row_ink takes it) is a greyed row's, so carries the offline mark. */
+/* Whether row (as catalogue_row_ink takes it) is a greyed or marked row's, so carries a mark. */
 int catalogue_row_greyed(void *row) { return grey_of(row, 4) >= 0; }
 /* Whether row (a list's entry, or a widget a few levels inside its row) is a greyed row's, and that
  * row's text colour as last painted, for its mark. */
 int catalogue_row_ink(void *row, unsigned *ink) {
     int i = grey_of(row, 4);
-    if (i < 0 || !cat.grey_ink[i]) return 0;
+    if (i < 0 || cat.grey_mark[i] != MK_OFFLINE || !cat.grey_ink[i]) return 0;
     *ink = cat.grey_ink[i];
     return 1;
 }
@@ -1415,6 +1443,25 @@ void catalogue_mark_paint(void *canvas, int x, int y, unsigned ink) {
         }
 }
 
+/* row's mark centred on (x, y) of w's canvas (navigation.c paint_offline): the offline mark in
+ * its text's colour, or OLED's cloud or arrow (tools/art.py MARKS) in Text Tertiary, white on the
+ * selection. */
+void catalogue_row_mark(void *w, void *canvas, void *row, int x, int y) {
+    int i = grey_of(row, 4);
+    unsigned ink;
+    char name[16];
+    if (catalogue_row_ink(row, &ink)) {
+        catalogue_mark_paint(canvas, x, y, ink);
+    } else if (i >= 0 && cat.grey_mark[i] > MK_OFFLINE) {
+        tk_snprintf(name, sizeof name, "mark_%s_%s",
+                    cat.grey_mark[i] == MK_CLOUD ? "cloud" : "down",
+                    ringnav_row_selected(cat.grey[i]) ? "w"
+                    : ipod_light()                    ? "l"
+                                                      : "d");
+        paint_art(w, canvas, theme_art(name), x - CAT_ART_PX / 2, y - CAT_ART_PX / 2);
+    }
+}
+
 /* ---- Apps, their files, the poll ---- */
 
 static void cat_scan(void) {
@@ -1437,6 +1484,8 @@ static void cat_scan(void) {
             if (!strcmp(was[i].id, id)) *a = was[i];
         tk_snprintf(a->id, sizeof a->id, "%s", id);
         a->ratings = number(raw, "ratings") == 1;
+        field(raw, "downloads", a->dl, sizeof a->dl);
+        if (strstr(a->dl, "/") || a->dl[0] == '.') a->dl[0] = 0; /* one folder at the card's root */
     }
     if (d) closedir(d);
     cat.napps = n;
@@ -1523,7 +1572,7 @@ static void cat_avail(int slot) {
             line[k] = 0, k = 0;
             char *f2[2];
             int gone = line[0] == '-';
-            int n = split(line + gone, f2, 2);
+            int n = tsv_split(line + gone, f2, 2);
             cat_ent *e = ix_sid(&cat.ix, slot, f2[0]);
             if (!e || e->dup) continue;
             e->local = gone || n < 2 || !card_path(f2[1]) ? 0 : ix_put(&cat.ix, f2[1]);
@@ -2063,7 +2112,7 @@ static void ratings_in(int slot) {
     for (char *l = raw, *e; k.l && l && *l; l = e) {
         if ((e = strstr(l, "\n"))) *e++ = 0;
         char *f[4];
-        if (split(l, f, 4) < 4) continue;
+        if (tsv_split(l, f, 4) < 4) continue;
         unsigned key = hex32(f[0]);
         int hearts = atoi(f[2]);
         if (!key || hearts < 0 || hearts > 5) continue;

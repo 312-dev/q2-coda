@@ -237,6 +237,13 @@ MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart
               'caret-up', 'caret-down', 'check', 'sliders-horizontal', 'info', 'sneaker-move', 'play')
 PAIR_ICON_PX = 16  # an artist's or album's page's action pair (artist_page.c PAIR_ICON)
 PAIR_ICONS = ('shuffle', 'radio', 'play')
+# Where a song lives (catalogue.c catalogue_row_mark, a song row's right column): the cloud for a server song that
+# streams, the arrow for one a card app downloaded, regular, in Text Tertiary (each half's) and white on the bar; and
+# Storage > Downloads' items (storage.c storage_paint): the arrow for one the user picked in the accent's top tone,
+# the circling arrows for one the app keeps on its own in Text Secondary (each half's), both white on the bar
+MARK_PX = 18
+MARKS = {'cloud': 'cloud', 'down': 'arrow-circle-down'}
+MARK_INKS = {'d': 0x858585, 'l': 0x6e6e6e, 'w': 0xffffff}
 QUALITY_PX = 12  # Now Playing's About, its quality badge's glyph (np_about.c AB_GLYPH): Text Primary per half
 # Playlists (playlists.c pl_tile_paint, playlist_pages.c): a playlist's and On-The-Go's 36 px tile glyph in Text
 # Tertiary per half, white on the selection; the pages' action rows' glyphs in the accent, white on the selection; a
@@ -1051,6 +1058,10 @@ def images(t):
         for k, c in FOLDER_INKS.items():
             out |= {f'{prefix}_stream_{n}_{k}': phosphor(glyph, STREAM_PX, c) for n, glyph in STREAM_MARKS.items()}
             out[f'{prefix}_stream_tidal_{k}'] = tidal_mark(STREAM_PX, c)
+        out |= {f'{prefix}_mark_{n}_{k}': phosphor(glyph, MARK_PX, c) for n, glyph in MARKS.items() for k, c in MARK_INKS.items()}
+        on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
+        out |= {f'{prefix}_store_pick_{k}': phosphor('arrow-circle-down', MARK_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
+        out |= {f'{prefix}_store_auto_{k}': phosphor('arrows-clockwise', MARK_PX, c) for k, c in FOLDER_INKS.items()}
     if t['station_stops']:  # Internet Radio's Now Playing art, as large as the slanted art (navigation.c stream_ipod)
         px = inc('NP_IPOD_ART')
         out[f'{prefix}_station'] = png(px, px, station(t['station_stops'], t['station_mast'], t['station_band_a'], t['station_shadow_a'], px))

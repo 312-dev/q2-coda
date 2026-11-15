@@ -16845,7 +16845,7 @@ passed()
 CAPS='/tmp/q2-addon.caps'
 m=AppMachine(); stream_rows(m); caps=bytes(m.files[CAPS])
 assert caps.endswith(b'\n') and caps.count(b'\n')==1,caps
-assert set(caps.split())=={b'playlist',b'progress',b'pages',b'library',b'goto',b'sleep',b'game',b'audio',b'sections',b'art',b'window',b'urls',b'sort',b'field',b'more',b'fav',b'now',b'catalogue',b'ratings',b'artist',b'album',b'playlists'},caps
+assert set(caps.split())=={b'playlist',b'progress',b'pages',b'library',b'goto',b'sleep',b'game',b'audio',b'sections',b'art',b'window',b'urls',b'sort',b'field',b'more',b'fav',b'now',b'catalogue',b'ratings',b'artist',b'album',b'playlists',b'storage'},caps
 m.files[CAPS]=bytearray(b'stale\n'); stream_rows(m); assert m.files[CAPS]==caps; passed()
 # Classic, Home's Split: the Streaming row slides Streaming's rows in, as the Library's: the page's own constructor fills the
 # list, what it sets on a window goes again, every row (stock's 70 px Tidal row and the added ones) takes Home's width and height,
@@ -20783,7 +20783,7 @@ m.paint(view)
 for _ in range(8): m.call()  # stock's two, our six, then Boot to
 assert m.confirm()==11 and m.dispatched()[0][1]==button; passed()
 # System settings: stock V1.36's nine rows, its Language (English only for now), Wheel Function, In-Vehicle, General and System hidden, which the wheel
-# skips; Car Remote, App Store and Controls added, and the four rows stock moved to its System page, opening stock's pages,
+# skips; Car Remote, App Store, Storage and Controls added, and the four rows stock moved to its System page, opening stock's pages,
 # so the list reads as it did. Boot to is Power's now.
 for mode in (0o100755,0):
     m=BootMachine({}); m.rockbox_mode=mode; m.restack=True
@@ -20792,12 +20792,13 @@ for mode in (0o100755,0):
     view=m.node('scroll_view','scroll_view_sysset',entries.copy())
     m.top=m.node('window','sysset_page',[m.node('list_view','list_view_sysset',[view])])
     assert m.call(address=HOOKS['systemset_sysset_page_init'][0],args=(m.top,5,0,0),gap=0)==0
-    kids=m.nodes[view]['children']; assert len(kids)==16
-    assert [kids.index(e) for e in entries]==[7,0,1,3,5,11,12,13,14]  # Language, hidden, after Date and Time; the hidden four before About
+    kids=m.nodes[view]['children']; assert len(kids)==17
+    assert [kids.index(e) for e in entries]==[7,0,1,3,5,12,13,14,15]  # Language, hidden, after Date and Time; the hidden four before About
     assert [m.nodes[e]['visible'] for e in entries]==[0,1,1,1,1,0,0,0,0]
-    car,controls,date,apps,update,reset,about=(m.nodes[kids[i]]['children'][0] for i in (2,4,6,8,9,10,15))
+    car,controls,date,apps,storage,update,reset,about=(m.nodes[kids[i]]['children'][0] for i in (2,4,6,8,9,10,11,16))
     assert m.nodes[m.nodes[car]['children'][1]]['text']=='Car Remote' and m.handler(car,O['EVT_CLICK'])[0]==payload_syms['carremote_open']
     assert m.nodes[m.nodes[apps]['children'][1]]['text']=='App Store' and m.handler(apps,O['EVT_CLICK'])[0]==payload_syms['shelf_open']
+    assert m.nodes[m.nodes[storage]['children'][1]]['text']=='Storage' and m.handler(storage,O['EVT_CLICK'])[0]==payload_syms['storage_open']
     assert m.nodes[m.nodes[controls]['children'][1]]['text']=='Controls'
     f,ctx=m.handler(controls,O['EVT_CLICK']); assert f==payload_syms['display_open'] and ctx==3
     for b,key,page in ((date,'system_time','systemset/datetime_page'),(update,'system_update','systemset/fwupdate_page'),(reset,'system_reset','systemset/reset_page'),(about,'system_about','systemset/about_page')):

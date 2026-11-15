@@ -446,6 +446,8 @@ int addon_goes(const char *path); /* addon.c: Go to on path opens a page */
 int addon_scrobbles(const char *path); /* addon.c: not when path's app says scrobble=0 */
 int addon_more(void); /* addon.c: Now Playing's ⋯ opens the playing queue's app's page */
 void addon_open_id(const char *id); /* a card app's page by its id, hidden or not */
+/* ... at op, its one argument arg ("" for none), titled title (0: the app's name) */
+int addon_open_at(const char *id, const char *op, const char *arg, const char *title);
 /* airplay.c: the q2-airplay app's side (docs/internals.md#airplay-sender) */
 void airplay_poll(void), airplay_more(void *view);
 int airplay_on(void), airplay_lyrics(int *ms);
@@ -484,6 +486,7 @@ int catalogue_greyed(void *w, unsigned *color), catalogue_row_ink(void *row, uns
 int catalogue_greys(void), catalogue_row_greyed(void *row);
 #define CAT_MARK_W 20 /* the offline mark's ink, catalogue_mark_paint centres it on its x */
 void catalogue_mark_paint(void *canvas, int x, int y, unsigned ink);
+void catalogue_row_mark(void *w, void *canvas, void *row, int x, int y);
 void catalogue_fit(void *entry, void *surface, int limit);
 int catalogue_np_info(const char *path, char *genre, int *year);
 int catalogue_cover(const char *path, char *out, unsigned size);
