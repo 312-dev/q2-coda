@@ -335,6 +335,8 @@ const char *theme_face(const unsigned *s, int n, int *px) { return 0; }
 void font_weight_mark(void *w, int bold) {}
 int coverflow_position_enabled(void) { return 0; }
 void home_pane_read(int *services, int *games, int *free_tenths) { *services = 5; *games = 4; *free_tenths = 412; }
+/* library_artist.c's own artist page: never up in these tests, so the page under is closed as before */
+int artist_local_on(void *win) { return 0; }
 extern volatile unsigned library_gen;
 static int count_calls, count_answer = 704;
 static pthread_t count_thread_seen;
