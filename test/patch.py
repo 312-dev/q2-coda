@@ -14138,7 +14138,7 @@ def pane_cases():
     m=pane_home(SHORTCUT='6'); view=named(m,m.top,'scroll_view_home'); pane_nocover(m)
     m.advance(1500); assert m.closed_db
     m.paint(view); want=[(['classic_light_note'],['3 Songs']),(['classic_light_note'],['7 Songs']),(['classic_light_icon_stack'],['6 Albums']),(['classic_light_icon_folder'],[]),
-                         (['classic_light_icon_game'],['4 Games']),(['classic_light_icon_note'],['7 Songs']),(['classic_light_icon_wave'],['5 Services']),
+                         (['classic_light_icon_game'],['5 Games']),(['classic_light_icon_note'],['7 Songs']),(['classic_light_icon_wave'],['5 Services']),
                          (['classic_light_note'],['7 Songs']),(['classic_light_icon_gear'],['4.0 GB Free'])]  # Shuffle Songs: Shuffle's; Search: the Library's
     assert pane_shows(m)==want[0],pane_shows(m)
     for row in range(1,9):
@@ -15420,17 +15420,17 @@ assert m.call(address=payload_syms['home_shortcut_open'],args=(0,m.event,0,0),ga
 m.page=m.top; assert m.nodes[m.page]['name']=='games_page'
 m.close()
 sheet,chooser=games_open(); G=m.get(payload_syms['g'])
-assert labels(chooser)==['Games','Sudoku','Vortex','Solitaire','Snake'] and not m.nodes[sheet]['visible']
+assert labels(chooser)==['Games','Sudoku','Vortex','Solitaire','Snake','Bricks'] and not m.nodes[sheet]['visible']
 rows=m.nodes[m.find('scroll_view',chooser)]['children']
 # The wheel carries over at both ends of the real chooser: a bump, then after a pause the other end.
 w=m.find('scroll_view',chooser); m.paint(w,gap=0)
-for _ in range(5):
-    if m.selected(w)!=3: assert m.call(gap=1000)==11; m.paint(w,gap=0)
-assert m.selected(w)==3
-assert m.call(gap=100)==11 and m.selected(w)==3; m.paint(w,gap=0)
+for _ in range(6):
+    if m.selected(w)!=4: assert m.call(gap=1000)==11; m.paint(w,gap=0)
+assert m.selected(w)==4
+assert m.call(gap=100)==11 and m.selected(w)==4; m.paint(w,gap=0)
 assert m.call(gap=O['EDGE_PAUSE_MS'])==11 and m.selected(w)==0; m.paint(w,gap=0)
 assert m.call(PREV,gap=100)==11 and m.selected(w)==0; m.paint(w,gap=0)
-assert m.call(PREV,gap=O['EDGE_PAUSE_MS'])==11 and m.selected(w)==3; m.paint(w,gap=0); passed()
+assert m.call(PREV,gap=O['EDGE_PAUSE_MS'])==11 and m.selected(w)==4; m.paint(w,gap=0); passed()
 def pick(i):
     f,ctx=m.handler(rows[i],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.advance(0)
 def paint(): m.call(address=HOOKS['widget_on_paint_border'][0],args=(sheet,m.canvas,0,0),gap=0,clear=False,count=50_000_000)
@@ -15543,19 +15543,20 @@ key(O['KEY_RETURN']); m.advance(0); pick(1); assert len(frames())==1
 m.close(); assert m.get(payload_syms['g'])==0 and not frames() and m.get(payload_syms['wheel_raw'])==0; passed()
 
 # The game engine (patch/engine.c, docs/games-engine.md): its demo scene, which a --dev build lists after Games' own four
+# and the engine's games
 # with [Q2POD] ENGINEDEMO=1. A frame is one step and the rects it changed; the demo draws into the screen's own buffer,
 # only inside the rect being painted. What a frame costs is counted in the payload's instructions and bounded, a little
 # over what it measured, so a change cannot quietly make a frame dearer: the engine's budget for a whole frame is
 # 2,000,000 (docs/games-engine.md#budgets).
 CONFIG['ENGINEDEMO']='1'; m=BooksMachine({},{}); del CONFIG['ENGINEDEMO']
 sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
-if not manifest.get('dev'): assert labels(chooser)==['Games','Sudoku','Vortex','Solitaire','Snake']; m.close()
+if not manifest.get('dev'): assert labels(chooser)==['Games','Sudoku','Vortex','Solitaire','Snake','Bricks']; m.close()
 else:
-    assert labels(chooser)==['Games','Sudoku','Vortex','Solitaire','Snake','Engine Demo']
+    assert labels(chooser)==['Games','Sudoku','Vortex','Solitaire','Snake','Bricks','Engine Demo']
     eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
     O_ENG_RECT,O_ENG_STEPS=80,208  # struct eng's rect and steps (patch/engine.c), on MIPS
     ENG_STEP_BOUND,ENG_FRAME_BOUND,ENG_WHOLE_BOUND=600,70_000,780_000  # measured: 499, 61,511 and 703,036
-    pick(4); EN=m.get(payload_syms['en']); assert word(G_SCREEN)==5 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1
+    pick(5); EN=m.get(payload_syms['en']); assert word(G_SCREEN)==6 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1
     FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
     for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)
     n=[0]; counter=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
@@ -15592,6 +15593,67 @@ else:
     key(O['KEY_RETURN']); key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
     assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0 and not eframes()
     m.close(); assert m.get(payload_syms['g'])==0
+passed()
+
+# Bricks (patch/game_bricks.c, docs/games-engine.md#bricks), the engine's first game, in every build: a scripted second
+# of play, then the dearest frames it can have, each made on purpose: the keystone taking its six neighbours in one
+# frame, and each frame of the next level's fade. Bounded in the payload's instructions a little over what they
+# measured, under the brief's 600,000 a frame (docs/games-engine.md#budgets).
+m=BooksMachine({},{})
+sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
+eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
+O_ENG_RECT,O_ENG_STATE=80,216  # struct eng's rect and the game's state after it (patch/engine.c), on MIPS
+BR_X,BR_Y,BR_SPD,BR_ANG,BR_PAD,BR_TOP,BR_MODE,BR_T,BR_LEVEL,BR_LEFT,BR_SCORE,BR_CELL=0,4,8,12,16,24,32,36,40,52,68,76  # struct bricks
+BR_STEP_BOUND,BR_FRAME_BOUND,BR_KEY_BOUND,BR_FADE_BOUND,BR_WHOLE_BOUND=2_500,135_000,200_000,270_000,1_450_000  # measured: 2,093, 116,530, 173,215, 233,009 and 1,245,213
+pick(4); EN=m.get(payload_syms['en']); BR=EN+O_ENG_STATE
+assert word(G_SCREEN)==5 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1 and m.get(BR+BR_MODE)==0
+FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
+for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)
+n=[0]; counter=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
+pixel=lambda x,y: m.get(FB+4*(y*375+x))
+def eframe(ms=16):  # the frame timer's pass: the rects it invalidated, its instructions
+    m.now+=ms; m.calls=[]; n[0]=0; assert m.call(address=payload_syms['eng_frame'],args=(0,0,0,0),gap=0,clear=False)==8
+    made=[c for c in m.calls if c[0]=='widget_invalidate_force']; assert all(c[1]==sheet for c in made)
+    box=lambda k: [signed(m.get(EN+O_ENG_RECT+16*k+4*j)) for j in range(4)]
+    return [(x0,y0,x1-x0,y1-y0) for x0,y0,x1,y1 in map(box,range(len(made)))],n[0]
+def epaint(rect): m.clip=rect; n[0]=0; paint(); return n[0]
+def eplay(rects,cost): return cost+sum(epaint(x) for x in rects)
+cell_x=lambda r,c: 37.5+(r&1)*10+20*c
+cells=lambda: bytes(m.u.mem_read(BR+BR_CELL,112))
+lattice=[(r,c) for r in range(7) for c in range(16-(r&1))]
+whole=epaint((0,0,375,320)); top=m.get(BR+BR_TOP); pad=m.get(BR+BR_PAD)
+assert pixel(pad,top+4)==0xffffffff and pixel(5,120)==0xff000000
+key_at=next(r*16+c for r,c in lattice if cells()[r*16+c]==3); assert pixel(int(cell_x(key_at//16,key_at%16)),48+17*(key_at//16))==0xff2160d8
+eframe(); rects,cost=eframe(); assert rects==[]  # ready and still, once the first frame painted the start: nothing to paint
+key(O['KEY_CENTER']); eframe(); assert m.get(BR+BR_MODE)==1  # the press reaches the next step: launched
+# A second of play, the wheel turning the paddle every frame.
+worst=step_worst=0; broke=cells()
+for k in range(60):
+    m.word(payload_syms['wheel_travel'],(-3 if k<30 else 3)&0xffffffff)
+    rects,cost=eframe(17 if k%3==0 else 16); assert 1<=len(rects)<=4,rects
+    worst=max(worst,eplay(rects,cost)); step_worst=max(step_worst,cost)
+# The keystone with all six neighbours: the ball under it, rising at top speed.
+m.u.mem_write(BR+BR_CELL,bytes(1 if (i//16,i%16) in lattice else 0 for i in range(112)))
+m.u.mem_write(BR+BR_CELL+3*16+7,b'\3'); m.word(BR+BR_LEFT,109)
+for o,v in ((BR_X,int(187.5*65536)),(BR_Y,(48+51+15)*65536),(BR_ANG,768),(BR_SPD,5*65536),(BR_MODE,1)): m.word(BR+o,v)
+epaint((0,0,375,320)); rects,cost=eframe(); keystone=eplay(rects,cost)
+assert m.get(BR+BR_LEFT)==102 and sum(cells()[i]==0 for i,_ in enumerate(cells()) if (i//16,i%16) in lattice)==7 and len(rects)<=4,rects
+# The level's end: its last cell, then the next lattice's fade, every frame of it.
+m.u.mem_write(BR+BR_CELL,bytes(112)); m.u.mem_write(BR+BR_CELL+6*16+7,b'\1'); m.word(BR+BR_LEFT,1)
+for o,v in ((BR_X,int(177.5*65536)),(BR_Y,(48+102+14)*65536),(BR_ANG,768),(BR_SPD,2*65536),(BR_MODE,1)): m.word(BR+o,v)  # under it
+rects,cost=eframe(); fade=eplay(rects,cost); assert m.get(BR+BR_MODE)==2 and m.get(BR+BR_LEFT)>=12
+for k in range(20):
+    rects,cost=eframe(); assert len(rects)<=4; fade=max(fade,eplay(rects,cost))
+assert m.get(BR+BR_MODE)==0 and m.get(BR+BR_LEVEL)>=2
+whole=max(whole,epaint((0,0,375,320)))
+assert whole<BR_WHOLE_BOUND and worst<BR_FRAME_BOUND and step_worst<BR_STEP_BOUND and keystone<BR_KEY_BOUND and fade<BR_FADE_BOUND,(whole,worst,step_worst,keystone,fade)
+print(f'Bricks on MIPS: {step_worst} instructions for a frame\'s step at most, {worst} with its changed rects painted, {keystone} for the keystone\'s frame, {fade} for the dearest frame of a fade, {whole} to paint the whole sheet (payload only; stock\'s text and flush mocked)')
+m.u.hook_del(counter)
+# Return pauses under Games' menu; Quit frees it.
+key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and not eframes() and m.get(payload_syms['wheel_raw'])==0
+key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
+assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0 and not eframes()
+m.close(); assert m.get(payload_syms['g'])==0
 passed()
 
 # Videos (patch/books.c, docs/internals.md#videos): the card's Videos folder (case aside) lists its and

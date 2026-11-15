@@ -1840,7 +1840,7 @@ def test_leaving_a_game_saves_and_returns_to_its_row(fw):
     fw.mock('widget_set_prop_int', lambda w, k, v, *_: props.update({C.string_at(k): v}))
     p.go(CHOOSER)
     assert s.screen == CHOOSER and SOLITAIRE_FILE in p.card.files
-    assert props[b'_ringnav_index'] == SOLITAIRE - 1 and props[b'_ringnav_count'] == 4
+    assert props[b'_ringnav_index'] == SOLITAIRE - 1 and props[b'_ringnav_count'] == 5  # its four and Bricks
 
 
 def test_a_screen_left_with_keyup_in_the_chooser_goes_back(fw):
@@ -1895,18 +1895,18 @@ def test_the_chooser_lists_its_games_then_the_card_s_by_name_and_each_row_opens_
     texts = []
     fw.mock('widget_set_text_utf8', lambda w, s, *_: texts.append(C.string_at(s).decode()))
     p = Page(fw, files)
-    assert texts[-6:] == ['Sudoku', 'Vortex', 'Solitaire', 'Snake', 'Blocks', 'Zork']  # Tunes isn't a game
+    assert texts[-7:] == ['Sudoku', 'Vortex', 'Solitaire', 'Snake', 'Bricks', 'Blocks', 'Zork']  # Tunes isn't a game
     rows = handlers(fw, EVT_CLICK)
-    assert len(rows) == 6
+    assert len(rows) == 7  # its own four, the engine's Bricks, the card's two
     fw.mock('fw_fork', lambda *_: 4242)
     toasts, tried = heard(fw), []
     fw.mock('fw_access', lambda path, *_: tried.append(C.string_at(path)) or len(tried) == 1)  # Blocks' isn't there
-    press(rows[4])  # Blocks, the card's first by name
+    press(rows[5])  # Blocks, the card's first by name
     assert tried == [b'/mnt/mmc/.blocks/q2-blocks'] and not fw.fn('addon_game_on', C.c_int)() and len(toasts) == 1
-    press(rows[5])  # Zork, its second, over the whole screen
+    press(rows[6])  # Zork, its second, over the whole screen
     assert fw.fn('addon_game_on', C.c_int)() == 4242 and tried[-1] == b'/mnt/mmc/.zork/q2-zork'
     assert p.s.screen == CHOOSER and not p.timers
-    for row, game in zip(rows, (SUDOKU, VORTEX, SOLITAIRE, SNAKE)):
+    for row, game in zip(rows, (SUDOKU, VORTEX, SOLITAIRE, SNAKE, SNAKE + 1)):  # SNAKE + 1: the engine's first
         press(row)  # from the next loop pass
         assert p.s.screen == CHOOSER and p.s.target == game and p.timers[-1][1] == 0
     press(rows[1])
@@ -1931,7 +1931,7 @@ def test_a_game_on_screen_takes_no_tap_for_the_chooser_hidden_under_it(fw):
     assert not fw.fn('addon_game_on', C.c_int)()
     p.go(CHOOSER)
     assert sensitive == {chooser: 1}
-    press(rows[4])
+    press(rows[5])  # Zork, after the engine's Bricks
     assert fw.fn('addon_game_on', C.c_int)() == 4242
 
 

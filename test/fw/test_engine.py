@@ -12,6 +12,7 @@ CENTER, PREV, NEXT, PLAY, RETURN, BACK_BTN, FWD_BTN = 218, 172, 173, 171, 170, 2
 E_CENTRE, E_PLAY, E_PREV, E_NEXT, E_TOUCH = 1, 2, 4, 8, 16
 RAW, STILL = 1, 2
 ENGINE = 5  # games.c's screen of the engine's first game
+DEMO = ENGINE + 1  # the demo scene's: eng_games[] lists it last
 REPEAT = 8
 SHEET = 0x7300  # Page's first widget: the sheet
 
@@ -411,7 +412,7 @@ def demo(fw, files=None):
     p.e = api(fw)
     p.rects = []
     fw.mock('widget_invalidate_force', lambda w, r, *_: p.rects.append(tuple((C.c_int * 4).from_address(r)) if r else None))
-    p.go(ENGINE)
+    p.go(DEMO)
     p.d = Demo.from_address(fw.var('engine__en', C.c_void_p).value + C.sizeof(Eng) + (-C.sizeof(Eng)) % 8)
     return p
 
@@ -425,13 +426,13 @@ def tick(p, n=1, ms=16):
 def test_the_demo_is_listed_only_where_a_dev_build_asks(fw):
     e, p = api(fw), Page(fw)
     fw.mock('toolsReadConfig', lambda path, sec, key, out, d, *_: C.memmove(out, b'1\0', 2) and 0)
-    assert e['eng_count']() == 0 and p.s.engines == 0 and p.s.rows == 4  # test/fw builds as a release does
+    assert e['eng_count']() == 1 and p.s.engines == 1 and p.s.rows == 5  # test/fw builds as a release does: Bricks alone
 
 
 def test_the_demo_ball_moves_a_step_a_frame_and_bounces(fw):
     p = demo(fw)
     d = p.d
-    assert p.s.screen == ENGINE and p.e['eng_live']() and fw.var('wheel_raw', C.c_int).value == 1
+    assert p.s.screen == DEMO and p.e['eng_live']() and fw.var('wheel_raw', C.c_int).value == 1
     assert (d.h, d.pad, d.hits, d.vx, d.vy) == (290, 187, 0, int(2.25 * 65536), int(2.5 * 65536))
     x, y = d.x, d.y
     p.rects.clear()
@@ -532,13 +533,13 @@ def test_the_demo_pauses_under_games_popup_and_leaves_by_its_menu_or_its_own_qui
     p.key(CENTER)
     p.g.show(None)
     assert p.s.screen == 0 and not fw.var('engine__en', C.c_void_p).value
-    p.go(ENGINE)
+    p.go(DEMO)
     p.e['games_keydown'](PAGE, PLAY)  # the demo's own way out
     tick(p)
     p.g.show(None)
     assert p.s.screen == 0 and not fw.var('engine__en', C.c_void_p).value
     assert p.e['games_keydown'](PAGE, CENTER) == 0 and p.e['games_keydown'](PAGE + 8, CENTER) == 0  # the chooser's is stock's
-    p.go(ENGINE)
+    p.go(DEMO)
     p.close()  # the page closing frees the game with the rest
     assert not fw.var('engine__en', C.c_void_p).value and not fw.var('games__g', C.c_void_p).value
     assert p.e['games_keydown'](PAGE, CENTER) == 0

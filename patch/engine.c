@@ -21,7 +21,7 @@ static struct eng {
 
 /* The registry: Games' rows after its own, in this order. The demo scene is a --dev build's, and
  * only with [Q2POD] ENGINEDEMO=1 in config.ini. */
-static const struct eng_game *const eng_games[] = { &eng_demo };
+static const struct eng_game *const eng_games[] = { &eng_bricks, &eng_demo };
 int eng_count(void) {
     int n = (int)(sizeof eng_games / sizeof *eng_games);
     return Q2POD_DEV && config_value("Q2POD", "ENGINEDEMO", 2, 0) ? n : n - 1;

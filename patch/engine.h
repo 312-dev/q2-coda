@@ -22,6 +22,7 @@ static inline fx fx_div(fx a, fx b) { return (fx)(((a << 8) / b) << 8); }
 /* games.c's tables: an angle is 1024 a turn, a sine 65536 at one. */
 int eng_sin(int angle), eng_cos(int angle), eng_atan2(int y, int x);
 unsigned eng_sqrt(unsigned long long n);
+unsigned rand_below(unsigned n); /* playback.c's shared generator: 0 to n - 1 */
 
 /* The keys, as bits of held, pressed and released. ENG_MENU never reaches a game: it pauses. */
 enum {
@@ -111,6 +112,7 @@ void games_seal(void *b, unsigned n, unsigned magic);
 int games_text(void *canvas, const char *s, int x, int y, int h, unsigned px, unsigned color,
                int align);
 
-extern const struct eng_game eng_demo; /* engine_demo.c */
+extern const struct eng_game eng_bricks; /* game_bricks.c */
+extern const struct eng_game eng_demo;   /* engine_demo.c */
 
 #endif
