@@ -190,6 +190,7 @@ MODE_INKS = {'d': 0xababab, 'l': 0x5c5c5c}
 # A row's leading glyph (Songs' Shuffle row, list.shuffle.row) and Now Playing's heart and More, regular weight (the
 # full heart fill) at the 20 px row type's size
 ROW_ICON_PX = 20
+VOL_SPK_PX = 16  # Now Playing's volume speakers (patch/offsets.inc VOL_SPK_PX, the same)
 FOLDER_INKS = {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}  # Text Secondary in each half, white on the bar
 CHECK_PX = 12  # a picker's current choice (settings.values.switch, navigation.c paint_radio): the accent, white on the bar
 # The confirmation's glyph after a shuffle (feedback.c feedback_shuffled): bold, the accent's top tone in both halves
@@ -980,6 +981,9 @@ def images(t):
         for k, c in STATE_INKS.items():
             out |= {f'{prefix}_np_unfav_{k}': phosphor('heart', ROW_ICON_PX, c), f'{prefix}_np_more_{k}': phosphor('dots-three', ROW_ICON_PX, c),
                     f'{prefix}_np_moredown_{k}': phosphor('dots-three', ROW_ICON_PX, MODE_INKS[k])}
+        # the volume's speakers at the bar's ends (volume.c vol_paint, VOL_SPK_PX): Text Secondary per half
+        out |= {f'{prefix}_vol_{n}_{k}': phosphor(f'speaker-simple-{g}-fill', VOL_SPK_PX, c)
+                for n, g in (('lo', 'none'), ('hi', 'high')) for k, c in MODE_INKS.items()}
     if t['shuffle_row']:  # Songs' Shuffle row: the accent's top tone at rest, white on the selection, in both halves
         on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
         out |= {f'{prefix}_shuffle_{k}': phosphor('shuffle', ROW_ICON_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}

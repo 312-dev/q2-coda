@@ -144,8 +144,12 @@
 #define CONFIRM_TOP 208
 #define CONFIRM_PROMPT_PX 24
 #define NP_TIMES_PX 14 /* Now Playing's times, and the volume text in their place */
-#define VOL_NP_QUIET_PX 15          /* that text under a status row's set (OLED's) */
-#define VOL_NP_QUIET_RGB 0xababab /* its Text Secondary */
+/* Over a status row's set's (OLED's) Now Playing the volume has no text: the bar stays on the
+ * progress bar's rows, VOL_SPK_INSET in from each end, with a VOL_SPK_PX speaker (tools/art.py
+ * vol_lo_*, vol_hi_*) centred VOL_SPK_X in from each end of the progress bar, on its centre line. */
+#define VOL_SPK_INSET 24
+#define VOL_SPK_X 8
+#define VOL_SPK_PX 16
 #define VOL_PCT_PX 20 /* Classic's volume percentage, in the page dots' place */
 #define NP_ART_RADIUS 12 /* Now Playing's art corners (paint_cover), as stock's play_defaultcover scaled to the art */
 /* Classic's Now Playing, an iPod classic's (coverflow.c slant_render, np_bar.c paint_scrubber),
