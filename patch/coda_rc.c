@@ -463,7 +463,8 @@ int crc_app(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t 
     case T_GET_STATE: np_read(); return send_state(s, req_id, 7);
     case T_TRANSPORT: return transport(s, req_id, p, n);
     case T_BROWSE: case T_SEARCH: case T_GET_QUEUE: case T_GET_COVER: case T_PLAY:
-        return lib_request(s, type, req_id, p, n, np.qgen);
+        np_read();
+        return lib_request(s, type, req_id, p, n, np.qgen, np.qpos);
     }
     return crc_error(s, req_id, E_UNSUPPORTED, "unknown type");
 }

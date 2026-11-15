@@ -805,7 +805,7 @@ static int play(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
 
 /* ---- the queue: the shim's /tmp/coda-rc.queue, demo's queue as song ids (coda_rc_shim.c) ---- */
 
-static int queue(crc_session *s, unsigned req_id, const uint8_t *p, size_t n, int qgen) {
+static int queue(crc_session *s, unsigned req_id, const uint8_t *p, size_t n, int qgen, int qpos) {
     pbr r = {p, p + n};
     pbf f;
     unsigned offset = 0, limit = 50;
@@ -838,7 +838,8 @@ static int queue(crc_session *s, unsigned req_id, const uint8_t *p, size_t n, in
     }
     pbw w = {out, 0, sizeof out, 0};
     pb_varint(&w, 1, len ? gen : (unsigned)qgen);
-    pb_varint(&w, 2, pos);
+    /* the queue file keeps the place it had when written; Now Playing's is current while both name this queue */
+    pb_varint(&w, 2, len && gen == (unsigned)qgen ? (unsigned)qpos : pos);
     pb_varint(&w, 3, total);
     pb_varint(&w, 4, offset);
     if (line && offset < total && !lib_open()) {
@@ -1020,12 +1021,12 @@ static int cover(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
     return crc_send(s, T_COVER, req_id, out, w.n);
 }
 
-int lib_request(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t n, int qgen) {
+int lib_request(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t n, int qgen, int qpos) {
     switch (type) {
     case T_BROWSE: return browse(s, req_id, p, n);
     case T_SEARCH: return search(s, req_id, p, n);
     case T_PLAY: return play(s, req_id, p, n);
-    case T_GET_QUEUE: return queue(s, req_id, p, n, qgen);
+    case T_GET_QUEUE: return queue(s, req_id, p, n, qgen, qpos);
     case T_GET_COVER: return cover(s, req_id, p, n);
     }
     return crc_error(s, req_id, E_UNSUPPORTED, "unknown type");

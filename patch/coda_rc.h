@@ -113,8 +113,9 @@ int crc_write_file(const char *path, const void *buf, size_t n, unsigned mode);
 void crc_log(const char *fmt, ...);
 int crc_shim_alive(void);
 int crc_shim_command(crc_session *s, unsigned req_id, const char *verb);
-/* Browse, Search, GetQueue, GetCover and Play (coda_rc_lib.c); qgen is the shim's queue version */
-int lib_request(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t n, int qgen);
+/* Browse, Search, GetQueue, GetCover and Play (coda_rc_lib.c); qgen and qpos: Now Playing's queue version and
+ * place, newer than the queue file's */
+int lib_request(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t n, int qgen, int qpos);
 void lib_art_of(const char *path, char *art, size_t cap); /* a song path's album art id */
 int lib_has_server(void);
 /* BLE (coda_rc_ble.c): ble_start's fd joins the poll with ble_events(); -1 when BlueZ is not there */
