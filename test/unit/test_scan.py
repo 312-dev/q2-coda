@@ -80,18 +80,48 @@ def tar_gz(**members):
     return buf.getvalue()
 
 
-def pin(monkeypatch, name, data, member):
-    monkeypatch.setitem(scan.TOOLS, name, ('me/thing', 'v1.2', 'thing.bin', hashlib.sha256(data).hexdigest(), member))
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def pin(monkeypatch, name, data, member, exe=None):
+    """Pin `name` to the asset `data`; its executable is `exe`, or the asset itself when that is a bare binary."""
+    monkeypatch.setitem(scan.TOOLS, name, ('me/thing', 'v1.2', 'thing.bin', sha(data), member,
+                                           sha(data if exe is None else exe)))
 
 
 # tool()
 
-def test_a_cached_tool_is_not_fetched_again(cache, monkeypatch):
-    exe = cache/'gitleaks-v8.30.1'/'gitleaks'
+def test_a_cached_tool_is_checked_and_not_fetched_again(cache, monkeypatch):
+    pin(monkeypatch, 'thing', b'the tarball', 'thing', exe=b'\x7fELF inside')
+    exe = cache/'thing-v1.2'/'thing'
     exe.parent.mkdir(parents=True)
-    exe.write_bytes(b'x')
+    exe.write_bytes(b'\x7fELF inside')
     monkeypatch.setattr(scan.urllib.request, 'urlopen', None)
-    assert scan.tool('gitleaks') == str(exe)
+    assert scan.tool('thing') == str(exe)
+
+
+def test_a_changed_cached_tool_is_not_run(cache, monkeypatch):
+    pin(monkeypatch, 'thing', b'the tarball', 'thing', exe=b'\x7fELF inside')
+    exe = cache/'thing-v1.2'/'thing'
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b'#!/bin/sh\necho changed\n')
+    monkeypatch.setattr(scan.urllib.request, 'urlopen', None)
+    with pytest.raises(SystemExit) as e:
+        scan.tool('thing')
+    got, want = sha(b'#!/bin/sh\necho changed\n'), sha(b'\x7fELF inside')
+    assert e.value.code == (f'thing: the cached {exe} has SHA-256 {got}, expected {want}; not running it '
+                            '(delete it to fetch v1.2 again)')
+
+
+@pytest.mark.parametrize('name', ['gitleaks', 'osv-scanner', 'syft', 'grype'])
+def test_each_scanners_cached_executable_is_checked(cache, monkeypatch, name):
+    exe = cache/f'{name}-{scan.TOOLS[name][1]}'/name
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b'not the release')
+    monkeypatch.setattr(scan.urllib.request, 'urlopen', None)
+    with pytest.raises(SystemExit, match=f'expected {scan.TOOLS[name][5]}; not running it'):
+        scan.tool(name)
 
 
 def test_a_bare_binary_is_fetched_checked_and_made_executable(cache, fetch, monkeypatch, capsys):
@@ -107,7 +137,7 @@ def test_a_bare_binary_is_fetched_checked_and_made_executable(cache, fetch, monk
 
 def test_a_tarball_gives_its_member_alone(cache, fetch, monkeypatch):
     data = tar_gz(README=b'readme', thing=b'\x7fELF inside')
-    pin(monkeypatch, 'thing', data, 'thing')
+    pin(monkeypatch, 'thing', data, 'thing', exe=b'\x7fELF inside')
     fetch(data)
     exe = cache/'thing-v1.2'/'thing'
     assert scan.tool('thing') == str(exe)
@@ -134,6 +164,17 @@ def test_a_member_that_is_no_regular_file_is_refused(cache, fetch, monkeypatch):
         scan.tool('thing')
     assert e.value.code == 'thing: thing in thing.bin is not a regular file'
     assert not (cache/'thing-v1.2'/'thing').exists()
+
+
+def test_a_changed_member_in_a_checked_tarball_is_not_written(cache, fetch, monkeypatch):
+    data = tar_gz(thing=b'\x7fELF other')
+    pin(monkeypatch, 'thing', data, 'thing', exe=b'\x7fELF inside')
+    fetch(data)
+    with pytest.raises(SystemExit) as e:
+        scan.tool('thing')
+    got, want = sha(b'\x7fELF other'), sha(b'\x7fELF inside')
+    assert e.value.code == f'thing: thing in thing.bin has SHA-256 {got}, expected {want}; not running it'
+    assert not (cache/'thing-v1.2').exists()
 
 
 @pytest.mark.parametrize('name,url', [
@@ -257,14 +298,14 @@ def test_secrets_lists_the_first_50(tmp_path, run, tools):
 
 # scan_deps()
 
-def test_deps_scans_each_requirements_file_but_a_venvs(tmp_path, run, tools, monkeypatch):
+def test_deps_scans_each_requirements_file_but_generated_trees(tmp_path, run, tools, monkeypatch):
     monkeypatch.setattr(scan, 'ROOT', tmp_path)
     for f in ('requirements.txt', 'test/unit/requirements.txt', 'sub/requirements-dev.txt', '.venv/x/requirements.txt',
-              'notes.txt'):
+              'mutants/requirements.txt', 'mutants/test/unit/requirements.txt', 'scan-out/rootfs/x/requirements.txt',
+              'build/requirements.txt', 'out/rootfs/requirements.txt', 'notes.txt'):
         (tmp_path/f).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path/f).write_text('')
-    out = tmp_path/'out'
-    out.mkdir()
+    out = tmp_path/'out'  # --out somewhere other than scan-out/: its unpacked rootfs is skipped too
     fake = run({'osv.json': {'results': [
         {'source': {'path': '/r/requirements.txt'}, 'packages': [
             {'package': {'name': 'pillow', 'version': '9.0'}, 'vulnerabilities': [{'id': 'GHSA-1'}, {'id': 'PYSEC-2'}]},
