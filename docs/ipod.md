@@ -323,6 +323,11 @@ use Shanling's `switch_on` / `switch_off` images with the whole row as the tap t
 that cycle between named choices retain their value labels. Crossfade, Resume Songs, Wheel
 Sensitivity and App Store show a chevron, as do the added Library browsing rows.
 
+Wireless lists Wi-Fi, Bluetooth and SyncLink, as stock does. Under SyncLink's row a caption, "Lets nearby phones
+control this Q2 without a password", in the theme's muted ink (Text Tertiary under OLED) at 15 px, wraps over two
+lines from the row's text column; the wheel and touch pass it. SyncLink is off until the user chooses Bluetooth or
+Wi-Fi on its page ([internals](internals.md#synclink)).
+
 Every row is built natively, about 60 builders in all, one pattern throughout: a
 `list_item_create(view, 0, 0, 0, 0)` (some pass 78 as the height) holding a `button_create(item,
 20, 0, 335, 70)`, and in the button an optional 52-pixel icon at x 10, a 24-pixel `hscroll_label`
