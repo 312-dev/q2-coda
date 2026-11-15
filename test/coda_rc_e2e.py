@@ -13,7 +13,10 @@ Checks, in order: pairing (a fresh key, the Dialog's screenshot) and a second se
 from the root to an album, its rows numbered apart from their titles, no number on search or Tracks rows, and
 NOT_FOUND for ids that name nothing; Play of the album from its first song, then the State push that follows with
 that song, and the queue at it; Pause, Play and Play/Pause, each played by the time its Ack comes; Next to another of the album's songs; Previous back; the album's
-cover as an image. Each step prints one line; the exit status is the number of failures."""
+cover as an image; then SetMode (shuffle on and off, repeat one, all and off, each in the next State), Rate (three
+hearts, Favorites, none; another song's id NOT_FOUND), PlayQueueItem (the third song; a stale id NOT_FOUND), and Resume
+(the album again after another list, from the song it was left on; Resume while it plays carries on). Each step prints
+one line; the exit status is the number of failures."""
 import argparse
 import pathlib
 import re
@@ -175,6 +178,49 @@ def main(argv=None):
     (shots / 'cover').write_bytes(data)
     check('the cover', bool(data) and magic, f'{art}: {len(data)} bytes, {mime}')
     subprocess.run([str(q2emu), 'shot', str(shots / 'playing.png')], check=False, capture_output=True)
+
+    caps = s.info.get('caps', 0)
+    check('caps: modes, queue jump, rate, resume', caps & 0x780 == 0x780, f'{caps:#x}')
+
+    def np_is(want, wait=8):
+        return until(s, lambda p: 'now_playing' in p and want(p['now_playing']), wait) or {'now_playing': playing(s)}
+
+    for shuffle, repeat in ((1, None), (None, 1), (None, 2), (0, 0)):
+        s.set_mode(shuffle, repeat)
+        np = playing(s)  # the shim wrote Now Playing before its ack
+        ok = (shuffle is None or np['shuffle'] == shuffle) and (repeat is None or np['repeat'] == repeat)
+        check(f'SetMode shuffle {shuffle} repeat {repeat}', ok, f"shuffle {np['shuffle']}, repeat {np['repeat']}")
+    np = playing(s)
+    check('the playing song can be rated', np.get('rateable') is True, np['track_id'])
+    for hearts in (3, 5, 0):
+        s.rate(np['track_id'], hearts)
+        got = np_is(lambda n: n.get('hearts') == hearts)['now_playing'].get('hearts')
+        check(f'Rate {hearts}', got == hearts, f'hearts {got}')
+    other = next(t['id'] for t in tracks if t['id'] != np['track_id'])
+    try:
+        s.rate(other, 2)
+        got = 'Ack'
+    except client.RemoteError as e:
+        got = e.name
+    check("Rate another song's id", got == 'NOT_FOUND', got)
+    q = s.queue(limit=50)
+    s.jump(2, q['items'][2]['id'])
+    p = until(s, lambda p: p.get('now_playing', {}).get('track_id') == q['items'][2]['id'])
+    check('PlayQueueItem: the third song', p is not None, q['items'][2]['title'])
+    try:
+        s.jump(1, q['items'][3]['id'])
+        got = 'Ack'
+    except client.RemoteError as e:
+        got = e.name
+    check('PlayQueueItem with a stale id', got == 'NOT_FOUND', got)
+    left = playing(s)['track_id']
+    s.play(album['id'], resume=True)  # still the album's queue: it carries on
+    check('Resume while the list plays', playing(s)['track_id'] == left, left)
+    s.play('tracks', shuffle=True)
+    until(s, lambda p: p.get('now_playing', {}).get('track_id') not in (None, left), 8)
+    s.play(album['id'], resume=True)
+    p = until(s, lambda p: p.get('now_playing', {}).get('track_id') == left)
+    check('Resume after another list: the song it was left on', p is not None, ids.get(left, left))
     s.transport('pause')
     s.sock.close()
     forget_runs(a.emu)

@@ -348,6 +348,7 @@ static void pend_answer(int code) {
     if (!strncmp(pend.verb, "play ", 5)) {
         np_read(); /* the shim wrote the new queue's Now Playing before its ack */
         lib_played(!code, np.qgen);
+        lib_now(np.qgen, np.id); /* its first song now: another list may start before the next push */
     }
     if (pend.s->state == S_AUTHED) {
         if (!code) crc_send(pend.s, T_ACK, pend.req_id, 0, 0);
