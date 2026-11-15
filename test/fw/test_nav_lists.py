@@ -1456,7 +1456,8 @@ def test_a_music_load_too_long_to_filter_runs_nothing(fw):
     assert loads.query(b'db', sql.encode(), None, 0) == 0 and loads.ran == [sql]  # outside a load it runs as it is
 
 
-NO_MIN = int(re.search(r'#define NO_MIN (\d+)', (host.ROOT/'patch/name_order.c').read_text())[1])
+NO_MIN = int(host.tools_build.need(re.search(r'#define NO_MIN (\d+)', (host.ROOT/'patch/name_order.c').read_text()),
+                                   'no NO_MIN in name_order.c')[1])
 
 
 class Sorts:
