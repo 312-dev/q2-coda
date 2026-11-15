@@ -93,6 +93,40 @@ curl 8.18 and later do not build against OpenSSL 1.1.1, and the last that do (8.
 - **The Linux kernel (5.10.21).** It is Shanling's, with drivers for the X2000 SoC, its codec and its Wi-Fi and Bluetooth chips, and they publish no source. Out of reach.
 - **Others the scan does not name.** syft names few components, and `PROBES` in `tools/scan.py` covers the ones above. The rootfs also has, unchanged: thttpd 2.29 (the Wi-Fi transfer server, run as www-data; its CGIs are Q2 Pod's own, `assets/web/q2cgi`, [internals](internals.md#wi-fi-transfer-root)), shairport (AirPlay receiver), ntpdate 4.2.8p15, D-Bus 1.12, GLib 2.74, expat, libjpeg 7, ncurses, readline, ALSA, TagLib and Shanling's own libraries.
 
+### What reaches them
+
+Which of the unreplaced code someone else can reach depends on what is listening, and stock's `config.ini` starts with Wi-Fi, Bluetooth, SyncLink, DLNA and AirPlay off (`WIFI`, `BLUETOOTH`, `SYNCLINK`, `DLNA`, `AIRPLAY` all 0). Nothing listens at boot. Then:
+
+| Turned on                | Listening, and who can reach it                                                                                                                                           |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Wi-Fi                    | Clients only: wpa_supplicant 2.12 (rebuilt), busybox `udhcpc`, the kernel's network stack and the vendor Wi-Fi driver, to the access point and anyone on the same network |
+| Wi-Fi File Transfer page | thttpd 2.29 on :8888, as www-data, while the page is open, with q2cgi behind a PIN ([internals](internals.md#wi-fi-transfer-root))                                        |
+| Bluetooth                | bluetoothd (BlueZ 5.66) and the kernel's L2CAP, to anyone in radio range: connectable while on, discoverable for 180 s ([building](building.md#what-the-rootfs-drops))    |
+| SyncLink                 | TCP 1751, a UDP multicast responder, RFCOMM and a BLE GATT server, all in demo (assessed separately)                                                                      |
+| DLNA, AirPlay            | Shanling's UPnP renderer (`libdmr.so`) and `shairport`, on the network                                                                                                    |
+| Spotify (card app)       | librespot's Connect discovery, once its row is pressed                                                                                                                    |
+
+Checked against that: bluetoothd has no `input`, `hog` or `network` plugin built in (its plugins are `hostname`, `wiimote`, `autopair`, `policy`, `a2dp`, `avrcp`, `scanparam`, `deviceinfo` and `battery`), so the unauthenticated HID keystroke injection fixed in BlueZ 5.71 (`CVE-2023-45866`) and the PAN code have nothing to reach, and the rootfs has no obexd (the PBAP findings). glibc 2.28 predates the set-uid loader's `GLIBC_TUNABLES` overflow (`CVE-2023-4911`, from 2.34), which matters since `q2cgi-root` is set-uid. Of its other findings, the ones a network peer could reach go through the resolver or iconv; the device runs no nscd and no Sun RPC.
+
+What stays reachable and can't be fixed in place: the kernel's Bluetooth and Wi-Fi code (5.10.21 has the L2CAP bugs fixed in late 2022 releases, `CVE-2022-42895` and `CVE-2022-42896`, the second over LE, which only SyncLink's BLE server advertises for), BlueZ's AVRCP findings while a headset or phone is connected, and the local escalations a process running as another user could use (Dirty Pipe, `CVE-2022-0847`, fixed in 5.10.102). Bluetooth off when it isn't used is the one control for the first two.
+
+Considered and not done:
+
+- **LE off** (`ControllerMode = bredr` in `/etc/bluetooth/main.conf`): removes the LE radio path, and so `CVE-2022-42896` and bluetoothd's GATT, at the cost of SyncLink's BLE transport, which is being assessed separately. A one-line `BT_MAIN` change once SyncLink's future is settled; nothing else on the Q2 uses LE (A2DP, AVRCP and the Bluetooth receiver are BR/EDR).
+- **sysctls** (`kernel.kptr_restrict`, `kernel.dmesg_restrict`, `user.max_user_namespaces=0`; the kernel has all three, and no BPF or userfaultfd): they only slow a local unprivileged attacker, nearly every process is root anyway, and Dirty Pipe needs no namespace or kernel address. Not worth a boot-script change on their own.
+- **bluetoothd's other plugins** (`--noplugin=wiimote,scanparam,deviceinfo,battery`): each reads a connected device's records; dropping them needs a wrapper in front of demo's `bluetoothd &` that keeps the process name `killall` matches, for little less code reachable.
+
+Effort, if taken on:
+
+| Work                                                                                                                                                                                                                                                              | Estimate                                                |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| hciplayer's TLS host-name check: its ffmpeg's `SSL_CTX_set_verify` callback set to payload code that reads the certificate's DER (OpenSSL 1.0.1's `X509_STORE_CTX` and `X509_CINF` are public structs) and matches the URL's host; tested under `test/hci_emu.py` | 2 to 3 days                                             |
+| BlueZ: one AVRCP finding fixed by binary patch in Shanling's bluetoothd, with a fuzz case                                                                                                                                                                         | 2 to 4 days each                                        |
+| BlueZ: Shanling's changes forward-ported to a current release                                                                                                                                                                                                     | blocked on Shanling's source                            |
+| glibc: a newer one beside 2.28 for Q2 Pod's own programs only (`q2player`, the helpers)                                                                                                                                                                           | 1 to 2 weeks; leaves every stock program on 2.28        |
+| glibc: replaced for the whole rootfs                                                                                                                                                                                                                              | 4 to 6 weeks plus a device test of every stock program  |
+| Kernel: a 5.10 LTS with the vendor's X2000, codec, Wi-Fi and Bluetooth drivers                                                                                                                                                                                    | blocked on Shanling's GPL source; weeks once it arrives |
+
 ## Artwork
 
 Artwork that ships in the firmware, drawn from someone else's design. Fonts are in `assets/fonts`, each with its
