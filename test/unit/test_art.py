@@ -444,10 +444,10 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     (each half's), the shuffle confirmation's glyph (bold) in Accent Blue, Now Playing's heart and More (regular) in
     Text Primary (each half's), More pressed in Text Secondary and the full heart (fill) in Accent Blue, and the
     Ratings rows' filled and outlined hearts and Streaming's service marks in the folder's inks, all from the vendored
-    Phosphor SVGs but TIDAL's mark, drawn in art.py, and the inset modal's symbols (regular, 19 px) in Text Secondary
-    (each half's) and white for the selection and the picker's check in Accent Blue, the volume's two speakers (fill,
-    16 px) in Text Secondary (each half's), and an artist page's Shuffle and Radio (regular, 16 px) in Accent Blue and
-    white for the lit one."""
+    Phosphor SVGs but TIDAL's mark, drawn in art.py, and Subsonic's, q2-coda's own SVG, and the inset modal's symbols
+    (regular, 19 px) in Text Secondary (each half's) and white for the selection and the picker's check in Accent Blue,
+    the volume's two speakers (fill, 16 px) in Text Secondary (each half's), and an artist page's Shuffle and Radio
+    (regular, 16 px) in Accent Blue and white for the lit one."""
     t = theme.builtins()[3]
     got = art.images(t)
     modes = [f'mode_{n}_{k}' for n in ('shuffle', 'repeat') for k in ('d', 'l', 'on')] + ['mode_repeat1_on']
@@ -455,7 +455,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     glyphs = {'np_fav': 0, 'np_unfav_d': 0xffffff, 'np_unfav_l': 0, 'np_more_d': 0xffffff, 'np_more_l': 0,
               'np_moredown_d': 0xababab, 'np_moredown_l': 0x5c5c5c}
     rates = [f'rate_{on}_{k}' for on in ('on', 'off') for k in ('d', 'l', 'w')]
-    marks = [f'stream_{n}_{k}' for n in ('tidal', 'spotify', 'app', 'radio', 'airplay', 'config') for k in ('d', 'l', 'w')]
+    marks = [f'stream_{n}_{k}' for n in ('tidal', 'spotify', 'app', 'radio', 'airplay', 'config', 'subsonic') for k in ('d', 'l', 'w')]
     menus = [f'menu_{n}_{k}' for n in art.MENU_ICONS for k in ('d', 'l', 'w')] + ['menu_check_a']
     speakers = [f'vol_{n}_{k}' for n in ('lo', 'hi') for k in ('d', 'l')]  # the volume's ends on Now Playing (fill, 16 px)
     pair = [f'pair_{n}_{k}' for n in ('shuffle', 'radio') for k in ('a', 'w')]  # artist_page.c's action pair
@@ -532,3 +532,12 @@ def test_oleds_tidal_mark_is_four_diamonds_three_across_one_under():
     w, h, at = pixels(art.images(theme.builtins()[3])['oled_stream_tidal_d'])
     assert all(at(x, 6)[3] > 200 for x in (3, 10, 16)) and at(10, 13)[3] > 200
     assert at(3, 13)[3] == 0 and at(16, 13)[3] == 0 and at(10, 1)[3] == 0
+
+
+def test_oleds_subsonic_mark_is_q2_codas_submarine():
+    """The q2-subsonic card app's mark (assets/icons/q2coda/subsonic.svg): the hull's top and periscope inked, the sea
+    above the hull and inside it, between the portholes, clear."""
+    w, h, at = pixels(art.images(theme.builtins()[3])['oled_stream_subsonic_d'])
+    assert (w, h) == (art.STREAM_PX, art.STREAM_PX)
+    assert all(at(x, y)[3] > 200 for x, y in ((6, 8), (8, 4), (1, 11), (13, 11), (5, 11)))
+    assert all(at(x, y)[3] == 0 for x, y in ((2, 4), (16, 4), (10, 11), (10, 17)))

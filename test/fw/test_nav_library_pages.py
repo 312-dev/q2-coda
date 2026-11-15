@@ -2142,6 +2142,41 @@ def test_oled_marks_each_service_with_its_own_glyph(fw, ui, st):
     assert drawn[0] == 'oled_stream_tidal_w'
 
 
+@pytest.mark.parametrize('subsonic_icon', [True, False])
+def test_oled_marks_a_card_app_by_its_id_its_own_icon_or_app_window(fw, ui, st, subsonic_icon):
+    """OLED's settings layout hides every leading image on a Streaming row, a card app's own icon too, so the marks
+    stand for all of them: q2-subsonic (id subsonic) takes its own mark, icon files or none; another app with its own
+    icon has it drawn in the mark's 20 px box centred on x 34; one without takes app-window."""
+    from test_coverflow import png
+    from test_nav_hold import use_set
+    use_set(st, 'oled')
+    fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: struct.pack_into('<4i', ui.blocks[w], 0, *map(signed, (x, y, ww, h))))
+    fw.mock('tk_str_start_with', lambda s, prefix, *_: bool(s) and C.string_at(s).startswith(C.string_at(prefix)))
+    files = {**deezer(), '/mnt/mmc/.deez/icon-40.png': png(40, 40), '/mnt/mmc/.soul/q2app': b'name=Soulseek\n',
+             '/mnt/mmc/.soul/q2-soul': b'ELF', '/mnt/mmc/.subsonic/q2app': b'name=Subsonic\n',
+             '/mnt/mmc/.subsonic/q2-subsonic': b'ELF'}
+    if subsonic_icon:
+        files['/mnt/mmc/.subsonic/icon-40.png'] = png(40, 40)
+    win, view = streaming(fw, ui, files=files)
+    drawn: list = []  # image names, each followed by its box on screen
+    canvas = C.create_string_buffer(0x100)
+    fw.mock('widget_load_image', lambda w, name, bitmap, *_: drawn.append(C.string_at(name).decode())
+            or C.memmove(bitmap, struct.pack('<2I', 40, 40), 8) and 0)
+    fw.mock('canvas_draw_image', lambda canvas, bitmap, src, dst, *_: drawn.append(struct.unpack_from('<4i', C.string_at(dst, 16))) or 0)
+    paint = fw.fn('stream_mark_paint', None, C.c_void_p, C.c_void_p)
+    rows = dict(zip([c for c, _ in page_rows(ui, view)], ui.kids[view]))
+    got = {}
+    for name in ('Deezer', 'Soulseek', 'Subsonic'):
+        struct.pack_into('<i', ui.blocks[rows[name]], 12, 32)  # stream_row's pitch
+        drawn.clear()
+        paint(rows[name], C.addressof(canvas))
+        got[name] = list(drawn)
+    assert got == {'Deezer': ['file:///mnt/mmc/.deez/icon-40.png', (24, 6, 20, 20)],
+                   'Soulseek': ['oled_stream_app_d', (24, 6, 40, 40)], 'Subsonic': ['oled_stream_subsonic_d', (24, 6, 40, 40)]}
+    icons = [w for item in ui.kids[view] for w in ui.subtree(item) if ui.image.get(w, '').startswith('file://')]
+    assert len(icons) == 1 + subsonic_icon and all(w in ui.hidden for w in icons)
+
+
 def test_streaming_lists_the_card_s_apps_after_spotify(fw, ui):
     win, view = streaming(fw, ui, files=deezer())
     assert [c for c, _ in page_rows(ui, view)][2:5] == ['Spotify', 'Deezer', 'Tidal Downloads']

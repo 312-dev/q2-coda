@@ -161,12 +161,22 @@ static void svc_row(void *row, int i, char *hide) {
 /* OLED's Streaming marks (feedback_oled, docs/oled-design.md): a service row's logo on its disc
  * gives way to the theme's 20 px monochrome mark (tools/art.py STREAM_MARKS), drawn with the row
  * by stream_mark_paint in Text Secondary, white on the selection, centred on x 34 as Folder view's
- * glyph, the row's words from x 52. A card app with its own icon keeps it. */
+ * glyph, the row's words from x 52. A card app with a mark of its own (stream_apps, by its id)
+ * takes it; any other card app with its own icon (addon.c, a file:// image) shows that icon in the
+ * mark's 20 px box, as the image hook leaves it (OLED's icons.addon_mono greys it); one without
+ * shows stream_app's mark. The settings layout hides every leading image on OLED's rows (set_child:
+ * stream_row and set_row are both 32 px and set_icon is 0), so the row's own image never shows. */
 static const char *const stream_logos[][2] = {
     { "list_tidal", "tidal" },   { "stream_spotify", "spotify" }, { "stream_app", "app" },
     { "stream_radio", "radio" }, { "stream_airplay", "airplay" }, { "stream_config", "config" }
 };
+/* card apps by their id (addon_id), each with its mark (oled_stream_<mark>_*) */
+static const char *const stream_apps[][2] = { { "subsonic", "subsonic" } };
+#define SVC_LOGOS (int)(sizeof stream_logos / sizeof *stream_logos)
+#define SVC_APPS (int)(sizeof stream_apps / sizeof *stream_apps)
+#define SVC_MARK_OWN (SVC_LOGOS + SVC_APPS + 1) /* a card app's own icon */
 #define SVC_MARK_PROP "_stream_mark"
+#define SVC_APP_PROP "_stream_app" /* a card app's row: its addon_* index + 1 */
 #define SVC_MARK_PX 20
 #define SVC_MARK_X 24
 #define SVC_MARK_TEXT_X 52
@@ -179,37 +189,68 @@ static void stream_marks(void *view) {
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *row = widget_get_child(view, i),
              *button = widget_count_children(row) ? widget_get_child(row, 0) : (void *)0;
+        int app = widget_get_prop_int(row, SVC_APP_PROP, 0);
         for (unsigned j = 0, k = button ? widget_count_children(button) : 0; j < k; ++j) {
             void *c = widget_get_child(button, j);
-            for (unsigned m = 0; m < sizeof stream_logos / sizeof *stream_logos; ++m)
-                if (!tk_strcmp(widget_get_prop_str(c, "image", ""), stream_logos[m][0])) {
+            const char *image = widget_get_prop_str(c, "image", "");
+            for (int m = 0; m < SVC_LOGOS; ++m)
+                if (!tk_strcmp(image, stream_logos[m][0])) {
                     widget_set_visible(c, 0, 0);
-                    prop(row, SVC_MARK_PROP, (int)m + 1);
+                    prop(row, SVC_MARK_PROP, m + 1);
                 }
+            if (app && addon_is_icon(image)) {
+                widget_set_visible(c, 0, 0);
+                prop(row, SVC_MARK_PROP, SVC_MARK_OWN);
+            }
         }
+        const char *id = app ? addon_id(app - 1) : (const char *)0;
+        for (int m = 0; id && m < SVC_APPS; ++m)
+            if (!tk_strcmp(id, stream_apps[m][0])) prop(row, SVC_MARK_PROP, SVC_LOGOS + m + 1);
+    }
+}
+/* A card app's own icon (its row's hidden file:// image) in the mark's box at x, y: scaled to fit,
+ * centred. */
+static void stream_own_icon(void *w, void *button, void *canvas, int x, int y) {
+    for (unsigned j = 0, k = button ? widget_count_children(button) : 0; j < k; ++j) {
+        const char *image = widget_get_prop_str(widget_get_child(button, j), "image", "");
+        unsigned bitmap[64]; /* bitmap_t: width @0, height @4 */
+        if (!addon_is_icon(image) || widget_load_image(w, image, bitmap)) continue;
+        int bw = (int)bitmap[0], bh = (int)bitmap[1], big = bw > bh ? bw : bh;
+        if (big <= 0) return;
+        int dw = bw * SVC_MARK_PX / big, dh = bh * SVC_MARK_PX / big;
+        rect_t src = { 0, 0, bw, bh },
+               dst = { x + (SVC_MARK_PX - dw) / 2, y + (SVC_MARK_PX - dh) / 2, dw, dh };
+        canvas_draw_image(canvas, bitmap, &src, &dst);
+        return;
     }
 }
 void stream_mark_paint(void *w, void *canvas) {
     if (!w || !feedback_oled()) return;
     int m = widget_get_prop_int(w, SVC_MARK_PROP, 0);
-    if (m < 1 || m > (int)(sizeof stream_logos / sizeof *stream_logos)) return;
-    /* selected: the row, or (a settings row's) its button */
-    int sel = st.sel_accent && (painting_in(st.sel_accent) || P(st.sel_accent, W_PARENT) == w);
-    char name[24];
-    tk_snprintf(name, sizeof name, "stream_%s_%s", stream_logos[m - 1][1],
-                sel            ? "w"
-                : ipod_light() ? "l"
-                               : "d");
-    int cx = I(canvas, CANVAS_X); /* the row's x on screen */
-    paint_art(w, canvas, theme_art(name), SVC_MARK_X - cx, (I(w, W_H) - SVC_MARK_PX) / 2);
+    if (m < 1 || m > SVC_MARK_OWN) return;
+    void *button = widget_count_children(w) ? widget_get_child(w, 0) : (void *)0;
+    int cx = I(canvas, CANVAS_X), /* the row's x on screen */
+        x = SVC_MARK_X - cx, y = (I(w, W_H) - SVC_MARK_PX) / 2;
+    if (m == SVC_MARK_OWN)
+        stream_own_icon(w, button, canvas, x, y);
+    else {
+        /* selected: the row, or (a settings row's) its button */
+        int sel = st.sel_accent && (painting_in(st.sel_accent) || P(st.sel_accent, W_PARENT) == w);
+        char name[24];
+        tk_snprintf(name, sizeof name, "stream_%s_%s",
+                    m > SVC_LOGOS ? stream_apps[m - 1 - SVC_LOGOS][1] : stream_logos[m - 1][1],
+                    sel            ? "w"
+                    : ipod_light() ? "l"
+                                   : "d");
+        paint_art(w, canvas, theme_art(name), x, y);
+    }
     /* the words after the mark: here, as the settings layout (set_row) and Home's (library_look)
      * place them later than stream_marks; a move repaints once */
-    void *button = widget_count_children(w) ? widget_get_child(w, 0) : (void *)0;
     for (unsigned j = 0, k = button ? widget_count_children(button) : 0; j < k; ++j) {
         void *c = widget_get_child(button, j);
-        int x = SVC_MARK_TEXT_X - cx - I(button, W_X);
-        if (I(c, W_X) != x && !tk_strcmp(widget_get_type(c), "hscroll_label"))
-            widget_move_resize(c, x, I(c, W_Y), I(c, W_W) + I(c, W_X) - x, I(c, W_H));
+        int tx = SVC_MARK_TEXT_X - cx - I(button, W_X);
+        if (I(c, W_X) != tx && !tk_strcmp(widget_get_type(c), "hscroll_label"))
+            widget_move_resize(c, tx, I(c, W_Y), I(c, W_W) + I(c, W_X) - tx, I(c, W_H));
     }
 }
 
@@ -235,9 +276,12 @@ int ringnav_stream(void *win, void *ctx) {
             if (shows_image(widget_get_child(view, c), "list_tidal"))
                 svc_row(widget_get_child(view, c), 0, hide);
         svc_row(library_row(view, "stream_spotify", spot_open, 0, "Spotify", 1), i++, hide);
-        for (int k = 0; k < st.svc_n; ++k)
-            svc_row(library_row(view, addon_icon(k), addon_open, (void *)(long)k, addon_name(k), 1),
-                    i++, hide);
+        for (int k = 0; k < st.svc_n; ++k) {
+            void *row =
+                library_row(view, addon_icon(k), addon_open, (void *)(long)k, addon_name(k), 1);
+            prop(row, SVC_APP_PROP, k + 1); /* stream_marks: which app's */
+            svc_row(row, i++, hide);
+        }
         svc_row(library_row(view, "list_tidal", tidal_downloads, 0, "Tidal Downloads", 1), i++,
                 hide);
         svc_row(library_row(view, "stream_radio", radio_open, 0, "Internet Radio", 1), i++, hide);
