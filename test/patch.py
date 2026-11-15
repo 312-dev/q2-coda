@@ -8985,7 +8985,7 @@ class CentredMachine(KaraokeMachine):
         return (self.nodes[self.win]['children'].index(self.col),self.get(self.col+O['W_X']),self.get(self.col+O['W_W']),
                 self.get(self.slide+O['W_W']),self.get(self.slide+O['W_H']),self.nodes[self.col].get('style:normal:bg_color'),
                 {self.get(r+O['W_W']) for r in self.nodes[self.lrc]['children']})
-COLUMN,FULL=(1,80,225,225,198,'#00000000',{225}),(3,0,375,375,270,'#000000',{375})  # last: past the visualizer's Halo art too
+COLUMN,FULL=(1,80,225,225,198,'#00000000',{225}),(2,0,375,375,270,'#000000',{375})  # last: the window's last child
 def centred(lines=((5,'x'*15),(9,'Two two'),(12,'Three')),playtime=9,**kw):
     m=CentredMachine(**kw); m.lines=list(lines); m.show(playtime); return m
 def centre_of(m,i,view):  # the offset that centres line i's row in a view that high (C's division)
@@ -9024,7 +9024,7 @@ def ipod_full():
 def where(m,view): return (m.full()[:6],[m.get(m.col+O[k]) for k in ('W_Y','W_H')],m.nodes[m.dots].get('self_layout'),m.nodes[view].get('self_layout'))
 for end in ('tap','return'):
     m,view=ipod_full(); m.tap()
-    assert where(m,view)==((3,0,375,375,270,'#000000'),[0,290],('0','270','100%','10'),('0','0','100%','-20')),where(m,view)
+    assert where(m,view)==((2,0,375,375,270,'#000000'),[0,290],('0','270','100%','10'),('0','0','100%','-20')),where(m,view)
     if end=='tap': m.tap()
     else: assert m.call(O['KEY_RETURN'],gap=50)==11
     assert where(m,view)==((1,0,375,375,186,'#00000000'),[40,192],('0','182','100%','10'),('0','0','100%','178')),where(m,view); passed()
