@@ -294,5 +294,5 @@ Entries 7 to 17 are costs the code marks itself.
 ### 29. `lockscreen.c` says the rootfs has no room (resolved)
 
 - **Where:** `patch/lockscreen.c:1-2`: "drawn here since the rootfs has no room for image files".
-- **Evidence:** the stock image is 50,688,000 bytes and a 1.8.2 `--dev` build's rootfs 48,549,888 (`stat`; `tools/build.py:2263` compares the two): about 2.1 MB to spare.
+- **Evidence:** the stock image is 50,688,000 bytes and a `--dev --new-player` build's rootfs of 2026-11-15 50,393,088 (`rootfs_bytes` in its `manifest.json`; `tools/build.py:2639` compares the two): about 295 KB to spare.
 - **State:** the head comment says the wallpapers are drawn by `wall_render` and ship as no image files, as `docs/internals.md`'s Lock screen section does.
