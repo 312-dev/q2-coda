@@ -7258,7 +7258,7 @@ static int open_card(const char *name) { /* the card whose tracks list is titled
     }
     return 0;
 }
-static widget *track_row(int k) { /* the newest row under the page that plays track k */
+static widget *row_playing(int k) { /* the newest row under the page that plays track k */
     for (int i = nw; i > page - w; --i)
         if (!strcmp(w[i].type, "list_item") && under(&w[i], page) && w[i].click && w[i].ctx == (void *)(long)k) return &w[i];
     return 0;
@@ -7303,7 +7303,7 @@ static void unknown_resume(void) {
     deque *t = coverflow_tracks(page);
     assert(t->n == 2 && t->at[0] == untagged_song && t->at[1] == untagged_more);
     memset(shim_memory, 0, sizeof shim_memory);
-    widget *row = track_row(1);
+    widget *row = row_playing(1);
     assert(row);
     row->click(row->ctx, 0);
     assert(shim_memory[0x60d] == 1 && nav_ctx.cls == 0xff10 && nav_ctx.idx == 1);
