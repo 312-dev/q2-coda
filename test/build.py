@@ -1011,7 +1011,7 @@ def validate_assets(directory):
     # Every geometry set's built list windows take the row height of the page's pitch
     # immediates (art pages take art_pitch), and its rows fit.
     from theme import builtins, geometry_sets, SCHEMA
-    from ipod import CLASSIC_LIGHT_FONT_SRC, PAGE_KIND as page_kind, page_rows
+    from ipod import CLASSIC_LIGHT_FONT_SRC, PAGE_KIND as page_kind, page_rows, fit_rows
     built = set(run('unsquashfs', '-l', directory/'rootfs.squashfs').split())
     # Under a set without toolbars the Playlists rows (pl_row) are the theme's page_detail high in a list pitched at
     # the set's playlist pitch (page_rows): one height.
@@ -1069,16 +1069,17 @@ def validate_assets(directory):
             if 'squashfs-root/' + mine not in built: continue
             for n in walk(decode(read('rootfs.squashfs', mine))):
                 if n[0] != 'list_view' or n[2].get('default_item_height') != str(g.set_row): continue
-                if rel in NAVBAR_ONLY:  # settings lists: the set's rows from its top
-                    h = 320 - g.bar - g.set_top if g.list_end else g.set_rows*g.set_row
+                if rel in NAVBAR_ONLY:  # settings lists: the set's rows from its top, a list_fit set's whole rows by list_end
+                    h = ((fit_rows(g, g.set_top, g.set_row) if g.list_fit else 320 - g.bar - g.set_top) if g.list_end
+                         else g.set_rows*g.set_row)
                     assert n[1] == [0, g.set_top, 375, h] and 'item_height' not in n[2], (g.name, rel)
                 else:                   # any other list with that row height is not one (settings_list)
                     assert n[2].get('item_height') == str(g.set_row), (g.name, rel)
-        if g.text_x:  # text from text_x clears the glass at the first row and at list_end's last; the lists take the window
+        if g.text_x:  # text from text_x clears the glass at the first row and at list_end's last; the lists take the window (list_fit: to list_end)
             assert g.text_x >= corner_x(g.bar + 6, g.pitch - 12) and g.list_end % g.pitch == 0, g.name
             assert corner_x(g.bar + g.list_end - g.pitch + 6, g.pitch - 12) <= g.text_x < corner_x(g.bar + g.list_end + 6, g.pitch - 12), g.name
             ends = {}
-            for rel in UI_ASSETS:  # every list box the transform resizes ends at the window's end
+            for rel in UI_ASSETS:  # every list box the transform resizes ends at the window's end, a list_fit set's by list_end
                 folder, _, base = rel.rpartition('/')
                 mine = ui + (folder and folder + '/') + f'{g.name}_{base}'
                 if 'squashfs-root/' + mine not in built or rel in NAVBAR_ONLY: continue
@@ -1086,9 +1087,12 @@ def validate_assets(directory):
                 for n in decode(read('rootfs.squashfs', mine))[3]:
                     old = was.get(n[2].get('name'))
                     if n[0] in ('list_view', 'table_view') and old and old[1] in (50, 100) and n[1] != old:
-                        ends[rel] = n[1][1] + n[1][3]
-            assert ends and set(ends.values()) == {320 - g.bar}, (g.name, ends)
-        if g.bar_px:  # Classic's bar: one cap centre, the title clear of the glass, the clock centred, no idle mark
+                        ends[rel] = n[1][1] + n[1][3], n[1][3], page_rows(g, page_kind.get(rel, 'text'))[0]
+            if g.list_fit:  # a list_fit set's: whole rows of the page's pitch, the last ending by list_end
+                assert ends and all(h % pitch == 0 and end <= g.list_end < end + pitch for end, h, pitch in ends.values()), (g.name, ends)
+            else:
+                assert ends and {end for end, _, _ in ends.values()} == {320 - g.bar}, (g.name, ends)
+        if g.bar_px and not g.status_y:  # Classic's bar (a status row's is below): one cap centre, the title clear of the glass, the clock centred, no idle mark
             m = status_metrics(g, CLASSIC_LIGHT_FONT_SRC)
             bar = {n[2].get('name'): n for n in walk(decode(read('rootfs.squashfs', ui + f'{g.name}_system_bar.bin')))}
             assert bar['label_title'][1] == m['title'] and bar['label_title'][2]['ellipses'] == 'true' and bar['label_clock'][1] == m['clock'] and 'label_idle' not in bar, g.name
