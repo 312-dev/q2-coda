@@ -1,6 +1,6 @@
-/* Settings > Storage (docs/internals.md#storage, docs/oled-design.md#storage): how the card is
- * shared between the user's own files and what a card app downloads and caches for them, and the
- * app's Downloads with their limit.
+/* Settings > Storage (docs/internals.md#storage, docs/oled-design.md#progress-and-sliders): how the
+ * card is shared between the user's own files and what a card app downloads and caches for them,
+ * and the app's Downloads with their limit.
  *
  * A card app that keeps downloads declares storage=1 in its q2app (q2-subsonic) and writes
  * /mnt/mmc/.<id>/storage.tsv whole (temp and rename), UTF-8, tab-separated with the card-app
