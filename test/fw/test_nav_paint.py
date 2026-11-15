@@ -2878,6 +2878,7 @@ def whole(fw):
 
 def scan_dialog(fw, world, st, text='Scanned 0', create=0, look=CLASSIC):
     theme(fw, look)
+    st('geom').value = fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())  # theme_boot's set
     win = world.window('updatemusic_dialog', 'dialog')
     for name in ('img_animation', 'label_scanfolder'):
         world.add(win, name, 'image')
@@ -2991,7 +2992,8 @@ OLED = '3'
 
 
 def test_under_oled_the_scan_dialog_is_a_page_of_rows(fw, world, st, whole):
-    """OLED's scan page (oled_scan): the title in the status row's place, Songs and Folder rows from y 58, stock's
+    """OLED's scan page (oled_scan): the title in the status row's place (its text from STATUS_ROW_INSET, its line
+    centred on status_y), Songs and Folder rows from y 58, stock's
     Cancel as the row after them on the selection bar; the count against the library's songs on the Songs row
     ("312 of 704"), the name of stock's folder on the Folder row, and the 6 px bar at y 228 from the text column to the right
     column, its fill the count's share."""
@@ -3001,7 +3003,7 @@ def test_under_oled_the_scan_dialog_is_a_page_of_rows(fw, world, st, whole):
         assert world[named(world, win, name)].visible == 0
     world[named(world, win, 'label_scanfolder')].text = 'SD:/Music/Brent Faiyaz/'
     heading, line, button = (named(world, win, n) for n in ('msg_heading', 'msg_line', 'btn_no'))
-    assert world[heading].text == 'Update Library' and world.at(heading)[0] == 22
+    assert world[heading].text == 'Update Library' and world.at(heading)[:2] == (O['STATUS_ROW_INSET'] - 2, 23 - 16)
     assert world.at(button) == (16, 122, 343, 32) and world[button].props['style:normal:round_radius'] == 8
     before = msg_paint(fw, win)
     count(fw, threads, 704)

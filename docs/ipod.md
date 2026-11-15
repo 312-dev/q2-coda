@@ -1044,10 +1044,11 @@ photo pages' own drawing) keeps Minimal's layout under this theme's colours and 
 **Theme: OLED** is built to [oled-design.md](oled-design.md): black, white sentence-case Inter, one blue.
 Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as the `oled` geometry set.
 
-- **The status row.** No bar band: the page's title, small and grey, on the list's left column, and the play state
-  and a slim battery ending on the list's right column, centred on y 37, clear of the glass's corners. The clock, in
-  the title's face and grey, sits 24 px left of the battery's body, beside the play state, and the title ends with an
-  ellipsis 12 px short of the widest clock ("00:00"). A page with no title (Home, Now Playing, Cover Flow's covers;
+- **The status row.** No bar band: the page's title, small and grey, from x 62, and the play state and a slim
+  battery ending 62 px from the right edge (`STATUS_ROW_INSET`), centred on y 23, up in the glass's top curve and clear
+  of it. The clock, in the title's face and grey, sits 24 px left of the battery's body, beside the play state, and the
+  title ends with an ellipsis 12 px short of the widest clock ("00:00"), however long it is: under a status row a
+  page's caption never takes a row of its own (`bar_title_fits`), so the list keeps its top. A page with no title (Home, Now Playing, Cover Flow's covers;
   an artist's are titled by the artist) has the clock centred across the row instead, but Home in Split keeps it at
   the right, over the art, where it is inked white or black as one glyph with the others (`clock_place`).
 - **The grid.** 32 px rows from y 58 with their text at x 24, seven to a screen: the list ends at y 282, above

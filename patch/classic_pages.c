@@ -616,7 +616,7 @@ static void *msg_count(void *unused) {
 }
 int msg_counting(void) { return cp.msg_counting == 1; } /* coverflow.c's library_counting */
 /* OLED's scan page (docs/oled-design.md#screens): a page over stock's full-screen dialog, its title
- * in the status row's place and face (Inter Medium 15, Text Secondary, on the 24 px column; the
+ * in the status row's place and face (Inter Medium 15, Text Secondary, from STATUS_ROW_INSET; the
  * dialog covers the bar, so its play state and battery are not shown), then rows from y 58: Songs
  * with the count (or "312 of 704" against the library's songs before the scan), Folder with the
  * name of the folder stock is scanning, and Cancel, stock's btn_no as the page's one action row on
@@ -637,8 +637,9 @@ static void *scan_label(void *win, const char *s, int x, int y, int w, const cha
 static void oled_scan(void *win, void *src, void *btn) {
     static const char *const state[] = { "normal", "pressed", "over", "disable", "focused" };
     char key[STYLE_KEY];
-    void *c = scan_label(win, "Update Library", SCAN_X, 37 - SCAN_ROW / 2, 240, "inter-medium", 18,
-                         0xffababab, "left");
+    void *c =
+        scan_label(win, "Update Library", STATUS_ROW_INSET, geom_val(V_STATUS_Y) - SCAN_ROW / 2,
+                   240, "inter-medium", 18, 0xffababab, "left");
     if (c) widget_set_name(c, "msg_heading");
     scan_label(win, "Songs", SCAN_X, SCAN_TOP, SCAN_NAME_W, "inter", 24, 0xffffffff, "left");
     scan_label(win, "Folder", SCAN_X, SCAN_TOP + SCAN_ROW, SCAN_NAME_W, "inter", 24, 0xffffffff,

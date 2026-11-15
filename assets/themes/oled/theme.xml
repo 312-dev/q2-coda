@@ -4,8 +4,9 @@
      scales a face so that its ascent less its descent is the size: Inter's line is 1.21 em, so the design's 20 px
      type is 24 here, its 15 px 18, its 22 px 27. -->
 <theme format="1" id="oled" name="OLED" index="3" order="3" extends="minimal">
-  <!-- The grid (oled-design.md Corners and Spacing): a status row centred on y 37 in a 58 px bar drawn black, so
-       no band shows; the page's title at x 24, the play state and battery ending 28 px from the right edge. Then
+  <!-- The grid (oled-design.md Corners and Spacing): a status row centred on y 23 in a 58 px bar drawn black, so
+       no band shows; the page's title from x 62, the play state and battery ending 62 px from the right edge, inside
+       the glass's top curve (STATUS_ROW_INSET, patch/offsets.inc). Then
        32 px rows from y 58, the text at x 24, seven of them: list_end and list_fit end the list at y 282, the
        strip below stays black and the selection never lands there; a list scrolls a row at a time. Songs and Folder's
        rows are one 32 px line; Albums and Search are two lines at 52 px, four to a page (a list box holds whole rows): 40 px
@@ -21,7 +22,7 @@
             count_y="8" art_title24_y="6" art_meta_y="33" folder_pitch="32" folder_body="32" song_pitch="32" song_body="32" song_title24_y="4"
             song_meta_y="8" set_row="32" set_top="0" set_rows="7"
             set_icon="0" stream_row="32" bar_px="18" bar_title_w="0" bar_right="0" batt_w="25" batt_h="12"
-            text_x="24" list_end="224" list_fit="1" status_y="37" right_x="28"
+            text_x="24" list_end="224" list_fit="1" status_y="23" right_x="28"
             action_row="32" home_row="32" home_lib="0" np_ipod="0"
             stock_row="32" stock_body="32" stock_title_y="0" stock_title_h="32" toolbar="0"
             search_row="52" search_body="52" search_art="0" search_title_y="4" search_title24_y="4" search_title_h="28"

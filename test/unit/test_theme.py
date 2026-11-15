@@ -1528,7 +1528,7 @@ def test_oled_states_its_grid_type_and_colour(tmp_path):
     oled = ts[3]
     g = theme.geometry(oled)
     assert oled['art_id'] == 'oled' and g.name == 'oled' and theme.check_set(g) is None
-    assert (g.bar, g.status_y, g.pitch, g.set_row, g.home_row, g.text_x, g.right_x, g.list_end, g.list_fit) == (58, 37, 32, 32, 32, 24, 28, 224, 1)
+    assert (g.bar, g.status_y, g.pitch, g.set_row, g.home_row, g.text_x, g.right_x, g.list_end, g.list_fit) == (58, 23, 32, 32, 32, 24, 28, 224, 1)
     assert g.bar + g.list_end == 282 and g.list_end // g.pitch == 7 and ipod.fit_rows(g, 0, g.art_pitch) == 4 * 52
     assert ipod.corner_inset(g.bar + g.list_end) + ipod.CORNER_SLACK <= g.text_x
     fonts = {k: v for k, v in oled.items() if k.startswith('font')}

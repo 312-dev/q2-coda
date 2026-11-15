@@ -293,7 +293,8 @@ def validate_assets(directory):
                       QS_LABEL_W, QS_ROW_GAP, QS_PITCH, QS_BAR, QS_TOUCH, QS_EDGE, QS_SUN, HOME_LABEL_END, HOME_LIST_W, HOME_TEXT_X, HOME_TOP, PITCH, ARTIST_PAGE, HOME_OURS, HOME_PAGE, HOME_ROW, HOME_ROWS, NAVBAR_ONLY, PLAYING_PAGE, SET_ROW, SET_ROWS, SET_TOP, UI_ASSETS,
                       NP_BAR, NP_TOUCH, NP_MARGIN, NP_POS_X, NP_TOP, STATUS_BAR, STATUS_HIDDEN, STATUS_LEFT, STATUS_MARGIN, STATUS_RIGHT, CLOCK_MIN, CLOCK_TEXT, corner_inset, corner_x,
                       STATUS_ICONS, status_icon, QUIET_ICONS, quiet_icon, SET_ICON, SET_STOCK_ICON, SETTINGS_ICONS, SETTINGS_SLIDERS, decode, slider_plain, imagemagick, inc, png_header, settings_icon, walk,
-                      patch_asset, patch_code, patch_style, style_props, SLIDE, SET0, status_metrics, CLASSIC_LIGHT_FONT_SRC, NP_IPOD_TIME_WS)
+                      patch_asset, patch_code, patch_style, style_props, SLIDE, SET0, status_metrics, CLASSIC_LIGHT_FONT_SRC, NP_IPOD_TIME_WS,
+                      STATUS_ROW_GAP, STATUS_ROW_LINE)
     manifest = json.loads((directory/'manifest.json').read_text())
     stock = (directory/'stock-demo').read_bytes()
     demo = (directory/'demo').read_bytes()
@@ -1083,6 +1084,11 @@ def validate_assets(directory):
             assert xm >= corner_inset((g.bar - 2 - g.batt_h) // 2) and g.batt_h <= g.bar - 1 and bar['view_right'][2]['children_layout'].endswith(f'xm={xm},s={inc("STATUS_GAP")})'), g.name
             size = SCHEMA['bar.title.font_size'].field
             assert {t[size] for t in builtins() if g in geometry_sets([t])} == {g.bar_px}, g.name  # the theme's bar text is the set's
+        if g.status_y:  # a status row: its title's text and its battery's nub STATUS_ROW_INSET in, clear of the glass at its line's top
+            bar = {n[2].get('name'): n for n in walk(decode(read('rootfs.squashfs', ui + f'{g.name}_system_bar.bin')))}
+            inset, top = inc('STATUS_ROW_INSET'), g.status_y - STATUS_ROW_LINE // 2
+            assert inset >= corner_x(top, STATUS_ROW_LINE) and bar['label_title'][1][:2] == [inset - 2, top], g.name
+            assert bar['view_right'][2]['children_layout'].endswith(f'xm={inset},s={STATUS_ROW_GAP})'), g.name
         if g.np_ipod:  # Classic's Now Playing: its text fits, in status_metrics' model (stb scales ascent - descent to the size)
             from fontTools.ttLib import TTFont
             face = TTFont(CLASSIC_LIGHT_FONT_SRC, lazy=True)
