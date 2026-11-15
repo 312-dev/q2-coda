@@ -1206,6 +1206,161 @@ def test_no_genre_label_no_marquee(fw, st):
     assert info()['label_genre'] == 'Genre:Jazz' and info.genre() is None
 
 
+# OLED's About: the info grid (np_about.c), painted from the hidden details.
+OLED = next(t['index'] for t in THEMES if t['id'] == 'oled')
+GRID_INFO = {'label_album': 'Album:Caracal (Deluxe)', 'label_genre': 'Genre:Electronic', 'label_size': 'File Size:38.27MB',
+             'label_year': 'Year:2015', 'label_encode': 'Encoding:FLAC', 'label_bits': 'Bit Depth:16bit',
+             'label_kbps': 'Bitrate:1001kbps', 'label_sample': 'Sample Rate:44.1kHz',
+             'label_location': 'SD:/Music/Disclosure/Caracal (Deluxe)'}
+OMEN = '/mnt/mmc/Music/Disclosure/Caracal (Deluxe)/01 Omen.flac'
+
+
+class Grid(About):
+    """⋯'s About under OLED: the details with their <name>_value labels (tools/ipod.py np_info_values), Now Playing's
+    title, artist, slider (its max the length) and cover, the playing path, and a canvas the grid paints on."""
+    def __init__(self, fw, st, geometry, texts=GRID_INFO, path=OMEN, length=237, unknown=b'Unknown Artist'):
+        from test_nav_paint import Canvas
+        st('geom').value = geometry[0]['GEOM_OLED']  # OLED's set, as booted: its list ends at y 282
+        ui = Ui(fw)
+        Config(fw, THEME=str(OLED).encode(), LIGHT=b'0')
+        self.fw, self.ui, self.st = fw, ui, st
+        self.info = Info(fw, ui, dict(texts), rows=True)
+        self.np = self.info.win
+        self.details = self.np.find('view_info')
+        self.details.visible = 0  # as the build leaves it
+        st('np_win', C.c_void_p).value = self.np.addr
+        for field, name, text in (('np_title', 'scrlabel_title', 'Omen'), ('np_artist', 'scrlabel_artist', 'Disclosure')):
+            label = ui.add('label', self.np, (0, 0, 100, 20), name)
+            label.text = text
+            st(field, C.c_void_p).value = label.addr
+        st('np_slider', C.c_void_p).value = ui.add('slider', self.np, (0, 0, 300, 20), 'slider_play', max=length).addr
+        st('np_cover', C.c_void_p).value = ui.add('image', self.np, (0, 0, 166, 166), 'img_cover', image=b'file:///c.jpg').addr
+        info = fw.var('fw_ctx_g_play_id3_info', C.c_char * 2716)
+        C.memmove(info, path.encode() + b'\0', len(path) + 1)
+        words = {b'player_unknown': unknown, b'player_location': b'Location'}
+        fw.mock('getFormatString', lambda key, out, n, *_: C.memmove(out, words.get(C.string_at(key), b'') + b'\0',
+                                                                     len(words.get(C.string_at(key), b'')) + 1))
+        self.fills = []
+        fw.mock('np_info', lambda w, *_: self.fills.append(w) or 7)
+        fw.mock('window_create', lambda *_: ui.window('').addr)
+        fw.mock('widget_remove_child', self.remove)
+        fw.mock('widget_add_child', self.add)
+        fw.mock('navigator_back', self.back)
+        fw.mock('widget_factory_create_widget', lambda f, kind, parent, x, y, w, *_: ui.new(  # h: past the stub's args
+            C.string_at(kind).decode(), parent, x, y, w, 262))
+        self.invalidated = []
+        fw.mock('widget_invalidate_force', lambda w, r, *_: self.invalidated.append(w))
+        self.canvas = Canvas(fw)
+        fw.mock('canvas_measure_text', lambda c, s, n, *_: 6.0 * n)  # 6 px a character: the spec fits
+        self.open()
+
+    @property
+    def body(self):
+        return next(c for c in self.page.children if c.kind == 'view' and c.name != 'view_info')
+
+    def paint(self):
+        """The texts the grid paints: (text, its row's centre on screen)."""
+        self.canvas.texts.clear()
+        self.canvas.arts.clear()
+        self.fw.fn('np_about_paint', None, C.c_void_p, C.c_void_p)(self.body.addr, self.canvas.p)
+        page_y = self.page.box[1]
+        return [(t, page_y + self.body.box[1] + r[1] + r[3] // 2) for t, r, *_ in self.canvas.texts]
+
+
+def test_oled_about_keeps_the_details_hidden_and_paints_the_grid(fw, st, geometry):
+    """The header (title, artist, length), the quality line (badge, spec), then the cells two a row from y 138, 44 px
+    apart, each name over its value, Location across the last row: the values in plain words."""
+    g = Grid(fw, st, geometry)
+    assert g.details.parent is g.page and g.details.visible == 0
+    texts = g.paint()
+    bar = g.page.box[1]
+    assert [t for t, _ in texts] == [
+        'Omen', 'Disclosure', '3:57', 'Lossless', 'FLAC · 16-bit / 44.1 kHz',
+        'Album', 'Caracal (Deluxe)', 'Year', '2015', 'Genre', 'Electronic', 'Bit Rate', '1,001 kbps', 'Size', '38.3 MB',
+        'Location', 'SD Card · Music/Disclosure/Caracal (Deluxe)']
+    y = dict(texts)
+    assert (y['Omen'] - bar, y['Disclosure'] - bar, y['3:57'] - bar) == (56, 77, 95)
+    assert y['Lossless'] - bar == y['FLAC · 16-bit / 44.1 kHz'] - bar == 122
+    assert [y[k] - bar for k in ('Album', 'Caracal (Deluxe)', 'Genre', 'Size', 'Location')] == [146, 164, 190, 234, 278]
+    assert g.canvas.art('file:///c.jpg') == [(24, 46 - bar, 56, 56)]  # the cover, rounded by the page's black
+    assert g.canvas.art('oled_quality_d')
+
+
+def test_oled_about_names_its_cells_by_stock_s_names(fw, st, geometry):
+    g = Grid(fw, st, geometry)
+    texts = [t for t, _ in g.paint()]
+    assert texts[5::2][:5] == ['Album', 'Year', 'Genre', 'Bit Rate', 'Size']
+
+
+@pytest.mark.parametrize('encode, bits, sample, kbps, badge, spec', [
+    ('Encoding:FLAC', 'Bit Depth:24bit', 'Sample Rate:96kHz', 'Bitrate:1978kbps', 'Hi-Res Lossless', 'FLAC · 24-bit / 96 kHz'),
+    ('Encoding:FLAC', 'Bit Depth:16bit', 'Sample Rate:88.2kHz', 'Bitrate:1978kbps', 'Hi-Res Lossless', 'FLAC · 16-bit / 88.2 kHz'),
+    ('Encoding:WAV', 'Bit Depth:16bit', 'Sample Rate:48kHz', 'Bitrate:1536kbps', 'Lossless', 'WAV · 16-bit / 48 kHz'),
+    ('Encoding:MP3', 'Bit Depth:16bit', 'Sample Rate:44.1kHz', 'Bitrate:320kbps', None, 'MP3 · 320 kbps'),
+    ('Encoding:DSF', 'Bit Depth:1bit', 'Sample Rate:1411.2kHz', 'Bitrate:5644kbps', 'DSD', 'DSD64'),
+    ('Encoding:DSF', 'Bit Depth:1bit', 'Sample Rate:2822.4kHz', 'Bitrate:11289kbps', 'DSD', 'DSD128'),
+])
+def test_oled_about_s_quality_line(fw, st, geometry, encode, bits, sample, kbps, badge, spec):
+    g = Grid(fw, st, geometry, dict(GRID_INFO, label_encode=encode, label_bits=bits, label_sample=sample, label_kbps=kbps))
+    texts = [t for t, _ in g.paint()]
+    assert texts[3:5] == ([badge, spec] if badge else [spec, 'Album'])
+    assert bool(g.canvas.art('oled_quality_d')) == bool(badge)
+
+
+def test_oled_about_leaves_out_what_is_unknown_and_closes_up(fw, st, geometry):
+    """A missing genre, a year stock reads as unknown, an unknown bit rate: no cell, no "Unknown"; the rest close up."""
+    g = Grid(fw, st, geometry, dict(GRID_INFO, label_genre='Genre:Unknown Artist', label_year='Year:Unknown Artist',
+                          label_kbps='Bitrate:0kbps'))
+    texts = g.paint()
+    names = [t for t, _ in texts][5::2]
+    assert names == ['Album', 'Size', 'Location'] and not any('Unknown' in t for t, _ in texts)
+    y, bar = dict(texts), g.page.box[1]
+    assert (y['Album'] - bar, y['Size'] - bar, y['Location'] - bar) == (146, 146, 190)
+
+
+def test_oled_about_takes_a_year_0_for_none(fw, st, geometry):
+    g = Grid(fw, st, geometry, dict(GRID_INFO, label_year='Year:0'))
+    assert 'Year' not in [t for t, _ in g.paint()]
+
+
+@pytest.mark.parametrize('path, location', [
+    ('/mnt/mmc/.subsonic/stream/night swim [s1].flac', 'Server · Streaming'),
+    ('/mnt/mmc/.subsonic/stream/a1b2c3d4/raw/7/night swim [s2].flac', 'Server · Downloaded'),
+    ('/mnt/mmc/Subsonic/Fleet Avenue/Night Swim/01 Night Swim.flac', 'Server · Downloaded'),
+    ('/mnt/mmc/song.flac', 'SD Card'),
+])
+def test_oled_about_s_location_in_plain_words(fw, st, geometry, path, location):
+    g = Grid(fw, st, geometry, path=path)
+    texts = [t for t, _ in g.paint()]
+    assert texts[-2:] == ['Location', location] and not any('.subsonic' in t for t in texts)
+
+
+def test_oled_about_s_wheel_scrolls_a_row_to_its_end(fw, st, geometry):
+    """Taller than the screen (Location ends at 314, the list's end 282): a tick down scrolls 32 px, as far as there
+    is, a tick up back; the page takes every tick, Centre and Return go on."""
+    g = Grid(fw, st, geometry)
+    key = fw.fn('np_about_key', C.c_int, C.c_void_p, C.c_uint)
+    loc = dict(g.paint())['Location']
+    assert key(g.page.addr, O['KEY_NEXT']) == 1 and dict(g.paint())['Location'] == loc - 32
+    assert key(g.page.addr, O['KEY_NEXT']) == 1 and dict(g.paint())['Location'] == loc - 32  # the end
+    assert key(g.page.addr, O['KEY_PREV']) == 1 and dict(g.paint())['Location'] == loc
+    assert key(g.page.addr, O['KEY_CENTER']) == 0 and key(g.np.addr, O['KEY_NEXT']) == 0
+    g.back()  # closed: About opens once
+    short = Grid(fw, st, geometry, dict(GRID_INFO, label_genre='Genre:', label_year='Year:', label_kbps='Bitrate:', label_size='Size:'))
+    loc = dict(short.paint())['Location']
+    assert key(short.page.addr, O['KEY_NEXT']) == 1 and dict(short.paint())['Location'] == loc  # it fits: still
+
+
+def test_oled_about_repaints_only_on_a_change(fw, st, geometry):
+    g = Grid(fw, st, geometry)
+    g.invalidated.clear()
+    g.info.fill(g.np.addr)
+    assert g.body.addr not in g.invalidated
+    g.info.labels['label_year'].text = 'Year:2016'
+    g.info.fill(g.np.addr)
+    assert g.body.addr in g.invalidated and '2016' in [t for t, _ in g.paint()]
+
+
 # Touch and click dispatch.
 POINTER_DOWN, POINTER_MOVE, POINTER_UP = O['EVT_POINTER_DOWN'] - 1, O['EVT_POINTER_MOVE_BEFORE'] - 1, O['EVT_POINTER_UP_BEFORE'] - 1
 KEY_DOWN, KEY_DOWN_BEFORE = O['EVT_KEY_DOWN'], O['EVT_KEY_DOWN_BEFORE']

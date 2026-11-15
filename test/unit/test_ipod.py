@@ -494,30 +494,19 @@ def test_playing_page_oled_grid():
     assert named(base)['img_cover'][1] != n['img_cover'][1] and named(base)['img_playmode'] in named(base)['view_album'][3]
 
 
-def test_playing_page_oled_info_table():
-    """OLED's info page is a table in the slide above the bar: a fact a row, 20 px apart, Album, Genre, Year, Format,
-    Sample Rate, Bit Rate, File Size, Location; stock's label the name on the text column in Text Secondary, a
-    <name>_value hscroll_label the value right-aligned to the right column, both ellipsized; a 1 px #1F1F1F rule on the
-    text and right columns between rows; Bit Depth hidden (its value joins Format at run time)."""
+def test_playing_page_oled_info_values():
+    """OLED's info page is the hidden source of About's grid (np_about.c paints it): each of stock's labels gets a
+    hidden <name>_value hscroll_label beside it, which ringnav_np_info fills with the value as on Classic's rows."""
     g = theme.geometry(theme.builtins()[3])
     root = playing(STOCK_INFO)
     ipod.playing_page(root, g)
-    n, right, slide_h = named(root), 375 - g.right_x, g.np_bar_y - g.bar - ipod.NP_GRID_SLIDE_GAP
+    n = named(root)
     info = n['view_info'][3]
-    order = ['label_album', 'label_genre', 'label_year', 'label_encode', 'label_sample', 'label_kbps', 'label_size',
-             'label_location']
-    top = (slide_h - 20 * len(order)) // 2
-    assert top >= 0
-    for i, k in enumerate(order):
-        name, value, y = n[k], n[k + '_value'], top + 20 * i
-        assert name[0] == value[0] == 'hscroll_label' and name[1] == [22, y, ipod.NP_INFO_GRID_NAME_W, 20], k
-        assert name[2]['style:normal:text_color'] == ipod.NP_GRID_SECONDARY and name[2]['style:normal:text_align_h'] == 'left'
-        assert value[1] == [24 + ipod.NP_INFO_GRID_NAME_W - 2, y, right - 24 - ipod.NP_INFO_GRID_NAME_W + 4, 20], k
-        assert value[2]['style'] == 's_scrlabel_white20r' and name[2]['ellipses'] == value[2]['ellipses'] == 'true'
-    rules = [c[1] for c in info if c[0] == 'view' and 'name' not in c[2]]
-    assert rules == [[24, top + 20 * i, right - 24, 1] for i in range(1, len(order))]
-    assert all(c[2]['style:normal:bg_color'] == '#1F1F1F' for c in info if c[0] == 'view' and 'name' not in c[2])
-    assert n['label_bits'][2]['visible'] == 'false' and n['label_bits'][1][2:] == [0, 0]
+    assert {c[2]['name'] for c in info} == {k for k in ipod.NP_INFO_NAMES} | {k + '_value' for k in ipod.NP_INFO_NAMES}
+    for k in ipod.NP_INFO_NAMES:
+        value = n[k + '_value']
+        assert value[0] == 'hscroll_label' and value[2]['visible'] == 'false' and value in info, k
+    assert n['view_info'][2]['visible'] == 'false'
 
 
 def test_playing_page_final_order(page):

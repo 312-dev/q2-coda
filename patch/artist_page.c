@@ -95,9 +95,10 @@ static int ar_measure(void *canvas, const char *face, int px, const unsigned *s,
 
 /* s in Inter (medium: Inter Medium) at AWTK size px, in rgb (0xRRGGBB; final when raw), its row
  * centred on y, from x (align 2) or ending at x (align 3), at most w wide: an ellipsis ends a
- * longer one. A character Inter lacks takes the theme's fallback face. Returns its width. */
-static int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x,
-                   int y, int w, int align) {
+ * longer one. A character Inter lacks takes the theme's fallback face. Returns its width. Now
+ * Playing's About (np_about.c) paints its text with it too. */
+int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x, int y,
+            int w, int align) {
     unsigned buf[96], n = ar_wide(s, buf, sizeof buf / sizeof *buf);
     if (!n || w <= 0) return 0;
     int fpx = px;

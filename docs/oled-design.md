@@ -342,7 +342,7 @@ has no place for keeps a place of its own:
   at 1 it is the last page again, over the whole screen. Now Playing shows no place in the
   queue ("1 of 10").
 - **The track's details** are not a page of the swipe: ⋯'s **About** row, last before Delete Song,
-  opens them as a page titled About, the same table in the same place, and Return goes back to ⋯.
+  opens them as a page titled About, an [info grid](#track-details), and Return goes back to ⋯.
 - **Shuffle and repeat** are two controls on stock's play mode button: a tap on shuffle turns it
   on or off, a tap on repeat steps Off, All, One (repeat-once's glyph for One), and each keeps the
   other as it was. Stock's Shuffle never ends, so shuffle with repeat Off plays on as with All.
@@ -496,6 +496,38 @@ the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where
   server library's for a server album), placeholders until Cover Flow has made them (and for an album with no art). Top Songs
   and All Songs are the songs page above with their album, length and cover.
 
+### Track details
+
+Now Playing's ⋯ > About, the user's pick of three Apple-style treatments (`mock_about.py`, option
+C "Info grid", iOS Files' Info, with Apple Music's quality badge on its own line, `c_badge_spec`)
+on 2026-11-15. Built by `patch/np_about.c`, which paints it from the details stock fills
+(`tools/ipod.py` `np_info_values` keeps them, hidden, as its source).
+
+- **Status row** titled About.
+- **Header** from y 46: the cover, 56 px with 6 px corners, at the text column (a `#2C2C2E`
+  placeholder without one); beside it from x 92 the title in Inter Medium 20, white, the artist
+  in Inter Regular 15 Text Secondary and the length in Inter Regular 13 Text Tertiary, centred on
+  y 56, 77 and 95, each ending in an ellipsis when long. The cover's top stands over the status
+  row's bottom 12 px.
+- **Quality line** at y 112: a badge, 20 px high with 6 px corners and a 1 px Text Secondary
+  outline, Phosphor `waveform-bold` (12 px, Text Primary) centred 11 px in and its label in Inter
+  Medium 13 from 21 px in, 30 px wider than the label; then, 10 px on, the spec in Inter Regular 13
+  Text Tertiary. **Lossless** for FLAC, ALAC, WAV, AIFF, APE and WavPack up to 16-bit and up to
+  48 kHz, **Hi-Res Lossless** above either, spec "FLAC · 16-bit / 44.1 kHz"; **DSD** for a DSF or
+  DFF file, spec its rate as a multiple of 44.1 kHz ("DSD64", from the bit rate); a lossy file has
+  no badge, its spec alone at the text column, "MP3 · 320 kbps".
+- **Grid** from y 138, 44 px a row, two cells a row at x 24 and 192: the name in Inter Regular 13
+  Text Tertiary centred 8 px down, the value in Inter Regular 17 white 26 px down, ellipsized at
+  150 px. Album, Year, Genre, Bit Rate ("1,001 kbps"), Size ("38.3 MB", one decimal), then
+  Location on a row of its own across to the right column: "SD Card · Music/Disclosure" (the
+  song's folder) for a card file, "Server · Downloaded" for a server song the card keeps (synced
+  into `Subsonic/`, or in the app's Stream Cache), "Server · Streaming" for one the app fetched
+  only for this play (straight in its `stream/` folder). A cell whose value is unknown is left out
+  and the rest close up: no "Unknown".
+- **Scrolling:** inert, no selection, as an iOS info page. When the grid ends past the list's end
+  (y 282) the wheel scrolls it a row a tick, as far as its last row, and back; the window clips it
+  under the status row, where the header's top shows only at the page's top.
+
 ### Icons
 
 - One set: [Phosphor Icons](https://phosphoricons.com) (MIT), `@phosphor-icons/core` 2.1.1. The
@@ -504,10 +536,11 @@ the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where
   A mark Phosphor lacks is drawn for q2-coda in Phosphor's regular style (16 unit strokes, round
   caps and joins, on the 256 unit grid), outlined to filled paths, and kept apart in
   `assets/icons/q2coda/` under the repository's licence: the Subsonic card app's `subsonic.svg`.
-- Weights by role: `fill` for the play state and a favourite's heart, `bold` for chevrons and Now
-  Playing's and the confirmation's shuffle and repeat, `regular` for row symbols and Now Playing's
+- Weights by role: `fill` for the play state and a favourite's heart, `bold` for chevrons, Now
+  Playing's and the confirmation's shuffle and repeat and About's quality badge, `regular` for row symbols and Now Playing's
   heart and More. Sizes are the design's: 13 px play state, 15 px chevron, 20 px row symbols,
-  heart and More, 22 px state row, 56 px confirmation.
+  heart and More, 22 px state row, 56 px confirmation, 12 px for About's quality badge
+  (`waveform-bold`).
 - No coloured app tiles: the concept's tinted "For You" squares are for content the Q2 does
   not have.
 
@@ -539,6 +572,7 @@ pattern.
 | Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock, centred. Nine rows from y 58, seven at rest: the rows below fade into black from y 266 to 316, and once scrolled the top row's first 14 px fade too; scrolled to the end the last row's foot is at y 282 |
 | Home (Split)                        | List row beside art         | Rows from y 40 (into the status row's empty left, the clock at its right) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges: the playing cover panning slowly while a song plays, else the library's covers in turn, each zooming and drifting and cross-fading into the next; the status row's clock, play state and battery over it at the right, each glyph white or black by contrast. Nine rows, seven at rest (the last's foot at y 264, scrolled to the end too); the rows past them fade into black within 56 px of the glass's bottom edge and, once scrolled, the row above y 40 within 34 px of its top edge, both following its rounded corners |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
+| Now Playing's About                 | [Track details](#track-details) | Header, quality line, then a grid of name over value                                                   |
 | Library                             | List row                    |                                                                                                            |
 | Albums                              | Two-line row with art       |                                                                                                            |
 | Album tracks                        | Song rows                   | Track number, title, length                                                                                |
