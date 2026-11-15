@@ -4884,6 +4884,14 @@ static int bar_rows(void *canvas, int *r) {
     return clip_within(canvas, old, r, pane_x(), 320 - client_h() - up, pane_w(), up);
 }
 
+/* Whether top is Home in Split, its art beside the list (1), and 2 when the art runs up under the
+ * status row (a split_art_up and a cover that fills the pane), where the bar's glyphs are inked
+ * over it: navigation.c's clock_place puts the clock beside them. */
+int coverflow_home_split(void *top) {
+    if (!home.art || top != home.win || !widget_get_visible(home.art)) return 0;
+    return pane_up() && home.tw && pane_covers() ? 2 : 1;
+}
+
 /* The bar's background (ringnav_paint_bg), with Home on top and still: the pane's rows above Home's
  * window, the cover's top, as Home's own paint draws none outside its window. A set with no
  * split_art_up draws nothing. Under a window's slide Home is a snapshot, so the rows wait for
@@ -4891,11 +4899,12 @@ static int bar_rows(void *canvas, int *r) {
  * bar's glyphs paint on it, and its border paint (coverflow_home_clip) puts the art there with
  * them inked (home_ink). Elsewhere the art is drawn here, under the glyphs as they are. */
 void coverflow_home_bar(void *canvas, void *top) {
-    int up = pane_up(), r[4];
+    int r[4];
     home.ink_bar = 0;
-    if (!up || !home.art || top != home.win || !widget_get_visible(home.art) || !home.tw ||
-        !pane_covers() || window_manager_is_animating(window_manager()) || !home_frame())
+    if (coverflow_home_split(top) != 2 || window_manager_is_animating(window_manager()) ||
+        !home_frame())
         return;
+    int up = pane_up();
     unsigned *fb = screen_fb(canvas);
     if (fb) {
         if (bar_rows(canvas, r)) {

@@ -3251,6 +3251,74 @@ def test_the_clocks_timer_shows_the_minute_and_rearms(fw, st, titled, shown):
     assert not fw.calls('timer_remove')  # the firing timer is done: nothing else to stop
 
 
+# OLED's status row clock (navigation.c clock_place): centred on a full-width page with no title, else at the right
+# beside the play state, its text ending CLOCK_BESIDE (24) left of the battery's body, the title short of it. Its box
+# is its text's width (canvas_measure_text) and hscroll_label's two 2 px margins.
+
+OLED_SET = next(i for i, s in enumerate(SETS) if s.name == 'oled')
+CLOCK_W = 38  # canvas_measure_text's width of "00:00", the widest clock
+INK_ROW = 0xffababab
+
+
+class StatusRow(Bar):
+    def __init__(self, fw, st, title=''):
+        oled = next(i for i, t in enumerate(THEMES) if t['name'] == 'OLED')
+        theme(fw, oled)
+        st('geom').value = OLED_SET
+        super().__init__(fw, 2)
+        self.ui.window('home_page' if not title else 'albums_page')
+        self.w['view_battery'].move(322, 25, 30, 24)  # the slot's x on the bar: the battery's body starts there
+        self.w['label_title'].move(22, 25, 240, 24)
+        self.w['label_clock'].move(22, 25, 240, 24)
+        self.ui.set_text(self.w['label_title'], title)
+        fw.mock('style_get_int', lambda style, key, default, *_: i32(INK_ROW) if C.string_at(key) == b'text_color' else i32(default))
+        fw.mock('widget_get_canvas', lambda *_: 0x40)
+        fw.mock('canvas_measure_text', lambda *_: float(CLOCK_W))
+        fw.mock('timer_add', lambda *_: 5)
+        self.sync()  # stock's showface: finds the bar's widgets
+        st('bar_titled').value = int(bool(title))
+
+    def place(self):
+        self.fw.fn('navigation__clock_place', None, C.c_void_p, C.c_void_p)(self.bar.addr, self.ui.top.addr)
+        return self.w['label_clock']
+
+
+def test_an_untitled_page_s_clock_is_centred_across_the_status_row(fw, st):
+    row = StatusRow(fw, st)
+    row.ui.set_text(row.w['label_clock'], '9:41')
+    clock = row.place()
+    x, y, w, _ = clock.box
+    assert w == CLOCK_W + 4 and abs(x + w / 2 - 187.5) <= 0.5 and y == 25  # its text centred on the screen, its line as before
+    assert clock.props['style:normal:text_color'] == i32(INK_ROW)  # Text Secondary, as Home's was
+
+
+def test_a_titled_page_s_clock_sits_beside_the_play_state_and_the_title_ends_short_of_it(fw, st):
+    row = StatusRow(fw, st, 'A Long Album Name That Runs On Past The Clock')
+    clock = row.place()
+    edge = 322 - 24  # the clock's text ends here: hscroll_label's 2 px margin inside its box
+    assert clock.box[0] + clock.box[2] - 2 == edge and clock.box[2] == CLOCK_W + 4
+    title = row.w['label_title']
+    assert title.box[0] + title.box[2] - 2 == edge - CLOCK_W - 12  # its ellipsis 12 px clear of the widest clock
+    assert clock.props['style:normal:text_color'] == i32(INK_ROW)
+
+
+def test_home_split_s_clock_goes_right_and_over_the_art_in_text_primary(fw, st):
+    from test_coverflow import Home
+    row = StatusRow(fw, st)
+    home = fw.var('coverflow__home', Home)
+    art = row.ui.add('view', row.ui.top, (196, 0, 179, 262), 'art')
+    home.art, home.win = art.addr, row.ui.top.addr
+    clock = row.place()
+    assert clock.box[0] + clock.box[2] - 2 == 322 - 24
+    assert clock.props['style:normal:text_color'] == i32(INK_ROW)  # no cover under the bar: the row's grey
+    home.tw = 128  # a cover that fills the pane, up under the status row: inked over it, whole
+    clock = row.place()
+    assert clock.props['style:normal:text_color'] == i32(0xffffffff)
+    moves = len(fw.calls('widget_move_resize'))
+    row.place()  # the next paint: nothing to move, so no repaint after it (the style reads back its own colour)
+    assert len(fw.calls('widget_move_resize')) == moves
+
+
 # A tap's row takes the selection (ringnav_dispatch's click).
 def tap(fw, target):
     event = C.create_string_buffer(0x40)

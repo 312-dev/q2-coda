@@ -192,8 +192,8 @@ Return brings the main list back beside the art, whose last frame shows at once.
 frame is that much taller, Home's window draws its rows from the window's top down, and the bar
 draws the rest (`coverflow_home_bar`, from the bar's background paint, with Home on top and no
 window sliding, as Home's paint draws nothing outside its window). OLED's `split_art_up` is the
-bar's whole 58, so the art reaches the top edge and the status row's play state and battery stand
-over it. Each glyph is drawn in one ink, white or black, whichever has the higher WCAG contrast
+bar's whole 58, so the art reaches the top edge and the status row's clock, play state and battery
+stand over it. Each glyph is drawn in one ink, white or black, whichever has the higher WCAG contrast
 against the art under it, as Scrolly's feed-end line does: the art's relative luminance (from a
 256-entry linear table) averaged over the glyph, each pixel weighted by the glyph's coverage
 there, white while that is at most 0.179. The glyph keeps its shape, and an antialiased edge blends
@@ -210,7 +210,8 @@ when it draws straight onto the screen; the glyphs paint on that, and the bar's 
 share and writes the art with the ink over it, only within the paint's clip. A glyph at an edge
 where the clip, not the pane, ends (a repaint of part of the battery) keeps the ink it has, as its
 part alone would average differently. A pan step invalidates those rows of the bar with the
-window's, so the ink follows the art; the time stays left of the pane, grey on the list's ground.
+window's, so the ink follows the art. The clock is drawn in Text Primary there (`clock_place`), so it
+is inked as one glyph like the others.
 The battery's charging green and low red keep their own colours over the art, each pixel's share
 read against the glyph's most saturated pixel, and only its grey part (the dim outline as a
 lighter share, the nub) is inked (`INK_KEEP_STATUS_COLOURS`; 0 inks them with the rest). Where the bar
@@ -1026,9 +1027,12 @@ photo pages' own drawing) keeps Minimal's layout under this theme's colours and 
 **Theme: OLED** is built to [oled-design.md](oled-design.md): black, white sentence-case Inter, one blue.
 Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as the `oled` geometry set.
 
-- **The status row.** No bar band: the page's title, small and grey, on the list's left column (the clock instead
-  on Home, Now Playing and Cover Flow's covers, an artist's titled by the artist), and the play state and a slim battery ending on the list's right column, centred
-  on y 37, clear of the glass's corners.
+- **The status row.** No bar band: the page's title, small and grey, on the list's left column, and the play state
+  and a slim battery ending on the list's right column, centred on y 37, clear of the glass's corners. The clock, in
+  the title's face and grey, sits 24 px left of the battery's body, beside the play state, and the title ends with an
+  ellipsis 12 px short of the widest clock ("00:00"). A page with no title (Home, Now Playing, Cover Flow's covers;
+  an artist's are titled by the artist) has the clock centred across the row instead, but Home in Split keeps it at
+  the right, over the art, where it is inked white or black as one glyph with the others (`clock_place`).
 - **The grid.** 32 px rows from y 58 with their text at x 24, seven to a screen: the list ends at y 282, above
   the bottom corners, and the strip below it stays black (`list_fit`). Chevrons and values share one column 28 px
   from the right edge on every row. Settings, the Library, Home (Full and Split) and stock's own list pages all

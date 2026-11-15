@@ -1069,6 +1069,18 @@ def test_classics_own_title_takes_the_clocks_room_up_to_eq(fw, st, ui):
     assert ui.box(bar.title)[2] == 91 and len(ui.due('clock_due')) == 1
 
 
+def test_oled_s_status_row_keeps_the_clock_beside_a_title(fw, st, ui):
+    """OLED's status row shows the page's title and the clock at once (navigation.c clock_place places them); the title
+    keeps the box clock_place gives it."""
+    theme(fw, st, next(t for t in THEMES if t['name'] == 'OLED'))
+    bar = Bar(fw, ui, title=True)
+    st.bar_title = bar.title
+    ui.set_text(bar.title, 'Albums')
+    bar_title(fw, bar, 0)
+    assert st.bar_titled == 1 and ui.text(bar.clock) == '12:00' and len(ui.due('clock_due')) == 1
+    assert ui.box(bar.title)[2] == 91  # not widened to EQ's left edge
+
+
 # The theme's faces (theme_font, theme_face): its own face where it has the text's characters, else bold.ttf,
 # else stock's, which has CJK.
 LATIN, CYRILLIC, CJK = 'Albums', 'Альбом', '专辑'

@@ -148,14 +148,15 @@ void bar_title(void *bar, void *top) {
         cover_flow[] = { 'C', 'o', 'v', 'e', 'r', ' ', 'F', 'l', 'o', 'w', 0 }, none = 0;
     if (st.bar_title) { /* this bar names the page in its own label: off, the clock makes way */
         const unsigned *own = widget_get_text(st.bar_title);
-        /* a status row (tools/ipod.py status_row) holds one or the other in one place: the title
-         * where the page has one, else the clock */
+        /* a status row (tools/ipod.py status_row): the title where the page has one, the clock
+         * either way */
         int titled = (!st.time_title || geom_val(V_STATUS_Y)) && own && *own;
         void *clock = titled != st.bar_titled ? widget_lookup(bar, "label_clock", 1) : (void *)0;
         if (!clock) return;
         st.bar_titled = titled;
         st.clock_key = 0;
-        if (titled)
+        /* a status row keeps the clock beside a title (navigation.c clock_place places both) */
+        if (titled && !geom_val(V_STATUS_Y))
             widget_set_text(clock, &none);
         else
             rearm(&st.clock_timer, clock_due, 0); /* clock_show writes it again */
@@ -165,8 +166,9 @@ void bar_title(void *bar, void *top) {
         if (!title_w) title_w = I(st.bar_title, W_W);
         void *eq = st.bar_eq ? P(st.bar_eq, W_PARENT) : (void *)0;
         int wide = eq ? I(eq, W_X) + I(st.bar_eq, W_X) - I(st.bar_title, W_X) : title_w;
-        widget_resize(st.bar_title, titled && wide > title_w ? wide : title_w,
-                      I(st.bar_title, W_H));
+        if (!geom_val(V_STATUS_Y)) /* a status row's: clock_place */
+            widget_resize(st.bar_title, titled && wide > title_w ? wide : title_w,
+                          I(st.bar_title, W_H));
         if (!st.bar_timer) st.bar_timer = timer_add(bar_repaint, (void *)0, 0);
         return;
     }
