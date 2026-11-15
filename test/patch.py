@@ -21329,22 +21329,36 @@ assert {m.nodes[v]['style:normal:text_color'] for v in values.values()}=={signed
 CONFIG.clear()
 # Genre shows in a private scroller, stock's label hidden as its source and left alone; its text is set once,
 # so stock's next 250 ms fill resets nothing. Only a value wider than the label moves, on the album marquee's
-# chain, and only in front, lit, on the info page.
-class GenreMachine(InfoMachine,QueueMachine): pass
+# chain, and only in front and lit, on Now Playing's About (np_about.c), which holds the details while open.
+class GenreMachine(InfoMachine,QueueMachine):
+    about=0
+    def hook(self,u,address,size,unused):  # About's page_open, in front, and the details it takes and gives back
+        name=self.handlers.get(address,'')
+        if name not in ('window_create','widget_add_child','widget_remove_child'): return super().hook(u,address,size,unused)
+        a,b=u.reg_read(REGS[0]),u.reg_read(REGS[1])
+        if name=='window_create': self.about=self.top=self.node('window','npabout_page'); self.stack.append(self.top); self.returns(self.about); return
+        if name=='widget_remove_child': self.nodes[a]['children'].remove(b)
+        else: self.nodes[a]['children'].append(b); self.word(b+O['W_PARENT'],a)
+        self.returns(0)
 np_page=HOOKS['playing_page_init'][0]
-def genre_page(genre,text_w):
+def genre_page(genre,text_w,about=True):
     m=GenreMachine(queue=3,pos=1); m.handlers[syms['getFormatString']]='i:format'; m.handlers[np_page+12]='stock_playing'
+    for n in ('window_create','widget_add_child','widget_remove_child'): m.handlers[syms[n]]=n
     source=m.node('label','label_genre',text='Genre:'+genre); m.word(source+O['W_X'],75); m.word(source+O['W_W'],225)
     page=m.node('view','view_info',[source]); sv=m.node('slide_view','slide_view',value=2)
     win=m.node('window','playing_page',[sv,page,m.node('slider','slider_play',max=225,value=100)])
     for w,parent in ((source,page),(page,win),(sv,win),(win,m.wm)): m.word(w+O['W_PARENT'],parent)
     m.top=win; m.call(address=np_page,args=(win,7,0,0),gap=0); m.timers.clear()
+    if about:  # ⋯'s About row: the details move into its page, in front
+        m.call(address=payload_syms['np_about_open'],args=(0,0,0,0),gap=0)
+        assert m.about and m.top==m.about and m.nodes[page].get('visible')==1; m.timers.clear()
     def fill(): m.call(address=payload_syms['ringnav_np_info'],args=(win,0,0,0),gap=0)
     fill()  # stock measures on the first paint: nothing to scroll yet
     s=next(w for w,n in m.nodes.items() if n.get('name')=='ringnav_genre_scroll')
     assert not m.timers and m.get(s+O['HSCROLL_TEXT_W'])==0
     m.word(s+O['HSCROLL_TEXT_W'],text_w)
     return m,win,sv,source,s,fill
+m,win,sv,source,s,fill=genre_page('Rock',300,about=False); fill(); fill(); assert not m.timers; passed()  # About closed: still
 m,win,sv,source,s,fill=genre_page('流行',100); fill()
 assert m.nodes[source]['visible']==0 and m.nodes[source]['text']=='Genre:流行' and m.nodes[s]['text']=='Genre: 流行'
 assert m.nodes[s]['type']=='hscroll_label' and m.nodes[s]['style']=='s_scrlabel_white16c' and m.get(s+O['W_X'])==75 and m.get(s+O['W_W'])==225
@@ -21358,10 +21372,12 @@ m.advance(pause-1); assert shift()==0; m.advance(1); assert shift()==2; m.advanc
 m.advance(ms*37); assert shift()==78; m.advance(ms); assert shift()==79  # never past the end
 m.advance(pause-1); assert shift()==79; m.advance(1); assert shift()==0
 m.advance(pause-1); assert shift()==0; m.advance(1); assert shift()==2; passed()
-# Dark, covered or off the page: the chain ends where it is, a fill doesn't start it, and one in front does.
+# Dark, or covered (Now Playing back in front among them): the chain ends where it is, a fill doesn't start it,
+# and one in front does.
+front=m.top
 for off_front,on_front in ((lambda:m.byte(syms['g_backlight_status'],0),lambda:m.byte(syms['g_backlight_status'],1)),
-                           (lambda:setattr(m,'top',m.node('window','dialog')),lambda:setattr(m,'top',win)),
-                           (lambda:m.nodes[sv].update(value=0),lambda:m.nodes[sv].update(value=2))):
+                           (lambda:setattr(m,'top',m.node('window','dialog')),lambda:setattr(m,'top',front)),
+                           (lambda:setattr(m,'top',win),lambda:setattr(m,'top',front))):
     was=shift(); off_front(); m.advance(ms); assert not m.timers and shift()==was
     fill(); assert not m.timers
     on_front(); fill(); assert len(m.timers)==1; m.advance(pause); assert shift()==was+2; passed()
