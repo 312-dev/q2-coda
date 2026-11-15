@@ -338,6 +338,14 @@ const char *theme_face(const unsigned *s, int n, int *px) { return 0; }
 void font_weight_mark(void *w, int bold) {}
 int coverflow_position_enabled(void) { return 0; }
 void home_pane_read(int *services, int *games, int *free_tenths) { *services = 5; *games = 4; *free_tenths = 412; }
+/* home.c's list pitch and fades, and Home's Shuffle Songs and Search rows (library_lists.c,
+ * search_strip.c): none of these tests' */
+void home_pad(void *view) {}
+void home_overflow(void *list, int bottom) {}
+void home_in_place(void *list) {}
+void home_fades(void *canvas, void *list, int list_y, int cols, int split) {}
+int shuffle_songs(void *ctx, void *event) { return 0; }
+int library_search_open(void *ctx, void *event) { return 0; }
 extern volatile unsigned library_gen;
 static int count_calls, count_answer = 704;
 static pthread_t count_thread_seen;
