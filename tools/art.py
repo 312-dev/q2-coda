@@ -233,10 +233,21 @@ MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart
               'vinyl-record', 'microphone-stage', 'folder', 'heart-half', 'clock-counter-clockwise', 'list-numbers',
               'bookmark-simple', 'dots-three', 'plus', 'list-checks', 'skip-forward', 'skip-back', 'repeat', 'stack',
               'airplay', 'download-simple', 'cloud-arrow-down', 'trash', 'speedometer', 'pencil-simple',
-              'caret-up', 'caret-down', 'check', 'sliders-horizontal', 'info')
+              'caret-up', 'caret-down', 'check', 'sliders-horizontal', 'info', 'sneaker-move', 'play')
 PAIR_ICON_PX = 16  # an artist's or album's page's action pair (artist_page.c PAIR_ICON)
 PAIR_ICONS = ('shuffle', 'radio', 'play')
 QUALITY_PX = 12  # Now Playing's About, its quality badge's glyph (np_about.c AB_GLYPH): Text Primary per half
+# Playlists (playlists.c pl_tile_paint, playlist_pages.c): a playlist's and On-The-Go's 36 px tile glyph in Text
+# Tertiary per half, white on the selection; the pages' action rows' glyphs in the accent, white on the selection; a
+# song's mark against the playlist in Add Songs (already in, added now, taken out now: Text Secondary, green, red)
+TILE_PX = 20
+TILE_GLYPHS = {'playlist': 'playlist-fill', 'otg': 'sneaker-move-fill'}
+TILE_INKS = {'d': 0x858585, 'l': 0x6e6e6e, 'w': 0xffffff}
+PL_ACTION_PX = 18
+PL_ACTIONS = {'shuffle': 'shuffle', 'add': 'plus-circle', 'save': 'arrow-down', 'clear': 'x', 'search': 'magnifying-glass'}
+PL_MARK_PX = 20
+PL_MARKS = {'in': ('check-circle-fill', {'d': 0xababab, 'l': 0x5c5c5c}), 'add': ('plus-circle-fill', {'d': 0x4fb477, 'l': 0x4fb477}),
+            'out': ('minus-circle-fill', {'d': 0xff6b5e, 'l': 0xff6b5e})}
 
 
 def gradient(stops, y0, y1):
@@ -1026,6 +1037,12 @@ def images(t):
         # an artist's Shuffle and Radio panels and an album's Play (artist_page.c pair_paint): the accent's top tone at rest, white lit
         out |= {f'{prefix}_pair_{n}_{k}': phosphor(n, PAIR_ICON_PX, c) for n in PAIR_ICONS for k, c in {'a': on, 'w': 0xffffff}.items()}
         out |= {f'{prefix}_quality_{k}': phosphor('waveform-bold', QUALITY_PX, c) for k, c in STATE_INKS.items()}
+        # the playlist pages' tiles, action glyphs and Add Songs' marks
+        out |= {f'{prefix}_pltile_{n}_{k}': phosphor(g, TILE_PX, c) for n, g in TILE_GLYPHS.items() for k, c in TILE_INKS.items()}
+        out |= {f'{prefix}_plact_{n}_{k}': phosphor(g, PL_ACTION_PX, c) for n, g in PL_ACTIONS.items()
+                for k, c in {'a': on, 'w': 0xffffff}.items()}
+        out |= {f'{prefix}_plmark_{n}_{k}': phosphor(g, PL_MARK_PX, c) for n, (g, inks) in PL_MARKS.items()
+                for k, c in {**inks, 'w': 0xffffff}.items()}
     if t['entry_ipod']:  # Search's key pop (search_strip.c): the accent's top tone, as the lit key's
         out |= {f'{prefix}_{n}': d for n, d in pop_images(t['schemes'][t['accents'].bit_length() - 1]['tones'][0]).items()}
     if t['painter[PAINT_SONGS]']:  # Folder view's folder glyph (song_rows.c folder_row): Text Secondary, white on the selection

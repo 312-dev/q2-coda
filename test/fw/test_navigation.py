@@ -2444,7 +2444,7 @@ def test_no_list_is_refused(fw):
     assert fw.fn('ringnav_playlist_create', C.c_int, C.c_void_p, C.c_char_p)(None, b'x') == -1
 
 
-@pytest.mark.parametrize('dest, a, b', [(-1, 200, 0), (100, 200, 0), (1, 100, 0), (1, 200, 100), (1, 200, 200)])
+@pytest.mark.parametrize('dest, a, b', [(-1, 200, 0), (101, 200, 0), (1, 100, 0), (1, 200, 100), (1, 200, 200)])
 def test_ple_mutate_refuses_before_the_database(fw, dest, a, b):
     keep = []
     def rec(i):

@@ -21,7 +21,7 @@ class Ss(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'page sheet songs match kind'.split()),
                 *((k, C.c_int) for k in 'nmatch letter focus sel top songs_at'.split()),
                 *((k, C.c_short) for k in 'down_x down_y pressed'.split()), ('text', C.c_char * 49),
-                ('pop_timer', C.c_uint), ('pop_step_at', C.c_uint), ('pop', C.c_ubyte)]
+                ('pop_timer', C.c_uint), ('pop_step_at', C.c_uint), ('pop', C.c_ubyte), ('rename', C.c_int)]
 
 
 @pytest.fixture
@@ -316,3 +316,65 @@ def test_only_the_wheel_pops_and_closing_stops_its_timer(fw, ui, song):
     p.step(1000)
     ui.close(ui.top())
     assert not ui.pending('search_strip__ss_pop_due') and p.ss.pop == 0
+
+
+
+class Renames:
+    """sqlite3_exec as Rename runs it: the name lookup's count (taken, else 0), the rest logged; fail fails an
+    update."""
+    def __init__(self, fw, taken=0, fail=False):
+        self.log, self.taken, self.fail = [], taken, fail
+        fw.mock('sqlite3_exec', self.run)
+
+    def run(self, db, sql, callback, ctx, *_):
+        statement = C.string_at(sql)
+        self.log.append(statement)
+        if self.fail and statement.startswith(b'update'):
+            return 1
+        if statement.startswith(b'select count') and callback:
+            value = (C.c_char_p * 1)(b'%d' % self.taken)
+            C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_int, C.c_void_p, C.c_void_p)(callback)(ctx, 1, C.addressof(value), None)
+        return 0
+
+
+def renaming(fw, name):
+    Config(fw, THEME=OLED)
+    fw.fn('playlist_rename_open', None, C.c_int, C.c_char_p)(4, name)
+    return fw.var('search_strip__ss', Ss), fw.fn('search_strip_key', C.c_int, C.c_void_p, C.c_uint)
+
+
+def test_rename_opens_on_the_name_typing_a_word_s_first_letter_as_a_capital(fw, ui):
+    """A playlist's Rename (its OLED hold menu): the strip with its name, typed on at the end, a word's first
+    letter a capital; Return moves to Done, Centre there saves (name and filename, as stock's), toasts and goes
+    back."""
+    sql = Renames(fw)
+    ss, take = renaming(fw, b"Road")
+    assert ui.name[ui.top()] == 'searchstrip_page' and ss.text == b'Road' and ss.rename == 5 and ss.nmatch == 1
+    assert 'Rename' in ui.text.values()
+    for k in [KEY_FWD_BTN] + [KEY_NEXT] * 19 + [KEY_CENTER, KEY_NEXT, KEY_CENTER]:  # a space, T, then u
+        take(ui.top(), k)
+    assert ss.text == b'Road Tu'
+    take(ui.top(), KEY_RETURN)  # to Done
+    assert ss.focus == 1 and not sql.log
+    take(ui.top(), KEY_CENTER)
+    assert b"update playlist set name='Road Tu',filename='Road Tu' where id=4" in sql.log
+    assert ui.toasts[-1] == 'Renamed' and ui.backs == 1
+
+
+@pytest.mark.parametrize('taken, fail, said', [(1, False, 'A playlist has that name'), (0, True, 'Could not rename playlist')])
+def test_a_rename_refused_says_why_and_stays(fw, ui, taken, fail, said):
+    sql = Renames(fw, taken, fail)
+    _, take = renaming(fw, b"Rock 'n' Roll")
+    take(ui.top(), KEY_RETURN)
+    take(ui.top(), KEY_CENTER)
+    assert any(b"filename='Rock ''n'' Roll'" in st for st in sql.log)  # quoted
+    assert ui.toasts[-1] == said and ui.backs == 0
+
+
+def test_an_empty_name_is_not_saved(fw, ui):
+    sql = Renames(fw)
+    _, take = renaming(fw, b' ')
+    take(ui.top(), KEY_RETURN)
+    take(ui.top(), KEY_CENTER)
+    assert ui.toasts[-1] == "Name can't be empty" and not sql.log
+
