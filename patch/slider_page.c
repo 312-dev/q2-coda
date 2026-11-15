@@ -234,12 +234,15 @@ void slider_page_paint(void *w, void *canvas) {
 }
 
 /* EQ's Simple tab under a set_switch theme (eq_rows, peq_ui.c e3_paint and tabs_paint), in the
- * page's coordinates: under the tabs, the switch, Presets and Reset as rows, then Low, Mid and
- * High as the standard's vertical sliders (docs/oled-design.md Progress and sliders): a 4 px
- * Track line, the fill from 0 dB to the gain in the accent (Text Tertiary while 3EQ is off), a
- * 14 px white knob ringed in the accent while the wheel is on it (knob), and the band's name and gain
- * under it in 15 px, Text Tertiary, Text Primary on the focused band. */
+ * page's coordinates: under the tabs, the switch (Enabled), Presets and Reset as rows, Presets
+ * with the PEQ preset playing as its value, then Low, Mid and High as the standard's vertical
+ * sliders (docs/oled-design.md Progress and sliders): a 4 px Track line, the fill from 0 dB to the
+ * gain in the accent (Text Tertiary while 3EQ is off), a 14 px white knob ringed in the accent
+ * while the wheel is on it (knob), and the band's name and gain under it in 15 px, Text Tertiary,
+ * Text Primary on the focused band. */
 #define EQ_KNOB_RING 2
+#define EQ_VALUE 0xababab /* Text Secondary, and Light Mode's */
+#define EQ_VALUE_LIGHT 0x5c5c5c
 #define EQ_LINE 4
 int eq_rows(void) { return theme()->set_switch; }
 int eq_list_end(void) { return geom_val(V_LIST_END); }
@@ -263,16 +266,21 @@ void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) {
     int x0 = geom_val(V_TEXT_X), x1 = 375 - geom_val(V_RIGHT_X),
         row_px = theme()->font_px[ROLE_TITLE];
     st.raw_ink = 1; /* final colours, each half's */
-    static const char *const rows[] = { 0, "Presets", "Reset" };
+    static const char *const rows[] = { "Enabled", "Presets", "Reset" };
     for (int i = 0; i < 3; ++i) {
         int y = EQ_ROWS_Y + i * EQ_ROW, cy = y + EQ_ROW / 2, sel = e->focus == 1 + i;
         if (sel) {
             rect_t bar = { SP_BAR_INSET, y, 375 - 2 * SP_BAR_INSET, EQ_ROW };
             fill_box(canvas, &bar, RGBA(accent), SP_BAR_R);
         }
-        eq_ink_text(canvas, i ? rows[i] : e->label, x0, x1 - x0 - 48, cy, 2, row_px,
+        eq_ink_text(canvas, rows[i], x0, x1 - x0 - 48, cy, 2, row_px,
                     sel ? 0xffffff : eq_primary());
         if (!i) switch_mark(canvas, x1, cy, e->on, sel);
+        if (i == 1 && e->preset) /* the preset playing, as a settings row's value */
+            eq_ink_text(canvas, e->preset, x0, x1 - 1 - VALUE_CHEVRON_GAP - x0, cy, 3, row_px,
+                        sel            ? 0xffffff
+                        : ipod_light() ? EQ_VALUE_LIGHT
+                                       : EQ_VALUE);
         if (i == 1) chevron_icon(w, canvas, x1, cy, sel);
     }
     for (int i = 0; vg && i < 3; ++i) { /* the columns stock's touch reads (peq_ui.c e3_touch) */

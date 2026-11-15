@@ -1385,6 +1385,29 @@ def test_oled_s_knobs_are_white_and_edged_in_track_in_light_mode_alone(fw, light
     assert fills == [accent, 0xffffff, *bare, *bare]  # Low ringed in the accent; Mid and High
 
 
+@pytest.mark.parametrize('light', [False, True])
+def test_oled_s_switch_stays_enabled_and_presets_shows_the_preset_playing(fw, light):
+    """iOS's value row: under OLED the switch keeps its title while PEQ plays, and the preset's name is Presets'
+    value, right-aligned short of its chevron in Text Secondary (#ABABAB, #5C5C5C in Light Mode)."""
+    oled(fw, light)
+    assert fw.fn('eq_rows', C.c_int)()
+    p = page(fw, state(fw, EQ_PEQ, peq=peak(fw))).open()
+    p.ui.applied = b'Rock'
+    labels = [t[0] for t in e3_canvas(fw, p).texts]
+    assert labels[:4] == ['Enabled', 'Presets', 'Rock', 'Reset']
+    (_, px, color, (x, y, w, h)), = e3_canvas(fw, p).text('Rock')
+    (_, row_px, _, (tx, ty, _, _)), = e3_canvas(fw, p).text('Presets')
+    assert px == row_px and rgb(color) == (0x5c5c5c if light else 0xababab) and y == ty and x == tx
+    (_, (_, _, chevron, *_)), = fw.calls('canvas_draw_icon')[-1:]  # its centre CHEV_SHIFT (5) left of the right column
+    assert x + w == i32(chevron) + 5 - 1 - 21  # as a settings row's value: VALUE_CHEVRON_GAP short of the column
+    for _ in range(E3_LOW - E3_PRESETS):
+        p.key(KEY_PREV)
+    assert p.e3.focus == E3_PRESETS and rgb(e3_canvas(fw, p).text('Rock')[0][2]) == 0xffffff  # on the selection
+    p.ui.applied = b''  # unnamed: Advanced's
+    assert [t[0] for t in e3_canvas(fw, p).texts][:3] == ['Enabled', 'Presets', 'Advanced']
+    p.ui.draft.bypass = 1  # 3EQ or off: no preset plays, no value
+    assert [t[0] for t in e3_canvas(fw, p).texts][:3] == ['Enabled', 'Presets', 'Reset']
+
 
 # EQ per Output.
 

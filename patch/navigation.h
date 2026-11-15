@@ -485,6 +485,9 @@ void coverflow_position_reset(void);
 /* list_marks.c */
 const char *theme_art(const char *name);
 void chevron_icon(void *w, void *canvas, int right, int y, int selected);
+/* a value beside a chevron ends this short of the right column: the chevron's 15 px box and 6 px
+ * clear of it (navigation.c value_fit, slider_page.c eq_rows_paint) */
+#define VALUE_CHEVRON_GAP 21
 void chevron_muted(void *w, void *canvas, int right, int y);
 
 /* slider_page.c: a set_switch theme's slider page, laid out as stock's window loads and painted

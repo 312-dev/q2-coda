@@ -325,7 +325,8 @@ has no place for keeps a place of its own:
   while the EQ is off), a 14 px white knob, ringed 2 px in Accent Blue while the wheel is on it
   (1 px in Track otherwise in Light Mode, as the slider page's). The band's name and gain under it
   in 15 px Text Tertiary, Text Primary on the band the wheel is on. Above the three, the EQ's
-  switch, Presets and Reset are rows.
+  switch (Enabled), Presets and Reset are rows; while an Advanced preset plays, its name is
+  Presets' value, as a settings row's, and the switch keeps its title.
 - **Storage bar:** 12 px, round ends, segments in Accent Blue, Text Secondary and Track, with a
   legend of 8 px dots and 15 px labels. Segments never use more than three colours.
 

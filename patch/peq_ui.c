@@ -1335,7 +1335,8 @@ static void e3_box(void *canvas, int x, int y, int w, int h, unsigned rgb) {
  * Otherwise: the switch's bar and the gains' bars in the accent's light tone (white in Minimal), grey
  * while 3EQ is off; the selected control on a lighter card; the slider being adjusted with a white
  * handle and value, the others grey. While PEQ plays the switch shows it on, under the applied
- * preset's name (Advanced unnamed), and the sliders are dimmed: one takes over as 3EQ. */
+ * preset's name (Advanced unnamed; eq_rows_paint keeps the switch's Enabled and gives the name to
+ * Presets as its value), and the sliders are dimmed: one takes over as 3EQ. */
 static void e3_paint(void *canvas) {
     int peq = !ui.draft.bypass, zero = e3_y(0);
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), tone = e3.on ? TONE : peq ? 0x444444 : 0x666666;
@@ -1349,7 +1350,7 @@ static void e3_paint(void *canvas) {
         preset[n] = 0;
     }
     if (eq_rows()) { /* slider_page.c: rows and the standard's vertical sliders */
-        eq_rows_t e = { peq ? preset : "Enabled", e3.on || peq, e3.focus - E3_TABS, e3.adjusting,
+        eq_rows_t e = { peq ? preset : 0, e3.on || peq, e3.focus - E3_TABS, e3.adjusting,
                         { e3.gain[0], e3.gain[1], e3.gain[2] }, E3_MAX };
         eq_rows_paint(e3.view, canvas, &e);
         return;

@@ -589,7 +589,7 @@ void xfade_ends(char *lo, char *hi, unsigned n); /* crossfade.c: its page's rang
 #define EQ_NAME_Y 200 /* the band's name's and gain's centres */
 #define EQ_GAIN_Y 216
 typedef struct {
-    const char *label; /* the switch row's: "Enabled", or the PEQ preset playing */
+    const char *preset; /* Presets' value: the PEQ preset playing, else 0 */
     int on, focus, adjusting; /* focus: 0 the tabs, 1 the switch, 2 Presets, 3 Reset, 4.. bands */
     double gain[3], max;
 } eq_rows_t;

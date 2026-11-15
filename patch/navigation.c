@@ -3178,7 +3178,6 @@ void list_toggle(void *label, const char *title, int on) {
 /* On a set with a right column: the value's box ends on it, or VALUE_CHEVRON_GAP short of it on a
  * row that opens a page (its chevron is there), and the title takes the row up to the value's own
  * text, measured in its face; unmeasured (no canvas yet), the boxes stay as made. */
-#define VALUE_CHEVRON_GAP 21 /* the chevron's 15 px box and 6 px clear of it */
 #define VALUE_TITLE_GAP 12
 static void value_fit(void *label, void *text) {
     void *button = P(label, W_PARENT), *canvas = widget_get_canvas(button);
