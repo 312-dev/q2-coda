@@ -48,7 +48,8 @@ def returns():
 
 
 def platform_header():
-    lines = ['struct dirent { unsigned ino, off; unsigned short reclen; unsigned char d_type; char d_name[256]; };']
+    lines = ['struct dirent { unsigned ino, off; unsigned short reclen; unsigned char d_type; char d_name[256]; };',
+             tools_peq.CSTL_ITER]
     for name, (ret, args) in tools_peq.LIBC.items():
         if name not in PURE:
             lines.append(f'#define {name} fw_{name}')

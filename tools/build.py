@@ -605,6 +605,12 @@ SCAN_REFRESH = (0x5dc4d8, 0x0411fd8d)  # toolsLoadAllFile's existing-song check,
 AUDIO_EXTENSION_CALLS = (0x5d4cac, 0x5d69fc)  # toolsLoadDirectory and recursive scan
 M3U_DIR_CALL = 0x518768  # importPlayList's toolsGetDirectoryM3u8 listing (card apps' own imports)
 SORT_TRIMS = (0x5cc968, 0x5cc9d4, 0x5cd280, 0x5cd2ec)
+# The comparators toolsQueryDbTable (name sort) and toolsQueryDbTableAndSort (modes 1 and 2, else the name
+# sort) hand algo_sort_if, by the flag at 0xa5011d (set: the first of a pair), as stock.h defines for
+# name_order.c, which sorts with the same one: each the lw $v0, GOT / addiu $v0 pair that loads it there.
+NAME_COMPARATORS = {'NAME_CMP': (0x5dae48, 0x5cd188), 'NAME_CMP_PINYIN': (0x5daee8, 0x5cc870),
+                    'FILE_NAME_CMP': (0x5db080, 0x5ca690), 'FILE_NAME_CMP_PINYIN': (0x5db11c, 0x5c7c04),
+                    'PATH_CMP': (0x5db1a8, 0x5cda0c)}
 # Tag text as tagged (docs/internals.md#tag-text): toolsFixId3ErrorCode (0x5d8950), which toolsGetMusicInfo
 # runs on each of its six fields, took any field whose every character TagLib decoded below U+0100 ("Lo que
 # la música me enseñó") for GBK bytes when they went to UTF-8 and back unchanged, and showed it in Chinese
@@ -2062,6 +2068,7 @@ def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
     names = ''.join(n.removesuffix('.png') + '\\0' for n in SETTINGS_ICONS)
     header.append(f'#define SETTINGS_ICON_NAMES "{names}"')
     header.append(f'#define ROCKBOX_FLAG "{ROCKBOX_FLAG}"')  # Home's Rockbox row, for S90play
+    header += [f'#define {name} 0x{address:x}u' for name, (_, address) in NAME_COMPARATORS.items()]  # name_order.c
     # About: the stock firmware's version on its own row, and this build's on the CFW. Version row.
     header += [f'#define STOCK_VERSION "{STOCK_VERSION}"', f'#define Q2POD_VERSION "{VERSION} Pod{f" dev {dev}" if dev else f" beta {BETA}" if BETA else ""}"',
                f'#define Q2POD_TAG "{"" if dev else VERSION}"',  # netupdate.c: the release tag, none when --dev
@@ -2377,6 +2384,11 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, M3U_DIR_CALL-4))[0] == 0x8f99bb64,
           'playlist import: expected toolsGetDirectoryM3u8 call')  # lw t9, -0x452c(gp)
     patch_word(patched, M3U_DIR_CALL, 0x0320f809, jal(ps['addon_m3u_dir']), "card apps import only their own playlists")
+    for at, comparator in NAME_COMPARATORS.values():
+        lw, addiu = struct.unpack_from('<2I', raw_demo, fileoff(raw_demo, at))
+        page = struct.unpack_from('<I', raw_demo, fileoff(raw_demo, GP + (lw & 0xffff ^ 0x8000) - 0x8000))[0]
+        check(lw >> 16 == 0x8f82 and addiu >> 16 == 0x2442 and page + (addiu & 0xffff ^ 0x8000) - 0x8000 == comparator,
+              f'name sort: expected comparator 0x{comparator:x} at 0x{at:x}')
     for address in SORT_TRIMS:
         patch_word(patched, address, branch(0x04110000, address, syms['toolsTrimLeft']),
                    jal(ps['ringnav_sort_key']), 'sort without a leading article')

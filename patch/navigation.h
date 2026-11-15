@@ -822,10 +822,9 @@ int song_sort_commit(void);
 int song_sort_own(void);
 void song_order(void *list);
 void rec_permute(void *list, unsigned *at);
-/* name_order.c: a name-sorted query's order kept across loads (library_query) */
-void *name_order_find(const char *sql, int sort);
-int name_order_apply(void *kept, void *list);
-void name_order_keep(const char *sql, int sort, void *list);
+/* name_order.c: a sorted query's records in stock's order, kept across loads (library_query) */
+void name_order(const char *sql, int sort, void *list);
+void cstl_sort(void *list, void *cmp);
 extern unsigned long ui_thread; /* playback.c: the UI thread, from its first pass */
 
 /* coda_rc_shim.c: Car Remote (docs/internals.md#car-remote) */

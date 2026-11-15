@@ -331,7 +331,7 @@ demo	0x538e04	0x4	playerjumpinfo_table_on_prepare_row	1st of 2 calls to widget_s
 demo	0x538e0c	0x4	playerjumpinfo_table_on_prepare_row	`addiu $3, $zero, 0x46` (2nd of 2 such), before 1st of 2 calls to image_create, after "img_icon"; patch/ipod.json immediates stock_body (stock's own table rows: the button and its full-height children)
 demo	0x538eb4	0x4	playerjumpinfo_table_on_prepare_row	`addiu $2, $zero, 0x14`, before 1st of 2 calls to hscroll_label_create, after "view_info"; patch/ipod.json immediates stock_title_h (Go to's title box, which holds the row's font)
 demo	0x538ec0	0x4	playerjumpinfo_table_on_prepare_row	`addiu $6, $zero, 0xb`, before 1st of 2 calls to hscroll_label_create, after "view_info"; patch/ipod.json immediates stock_title_y (Go to's title y in its row)
-demo	0x5397cc	0x4	playermore_album_info_on_click	`sw $18, 0x428($sp)`; patch/navigation.c qm_goto
+demo	0x5397cc	0x4	playermore_album_info_on_click	`sw $18, 0x428($sp)`; patch/navigation.c QM_LOOKUP_ALBUM
 demo	0x5399d4	0x4	playermore_artist_info	`addiu $4, $17, -0x3308, forming "localmusic/artistinfo_page"`, the delay slot of 1st of 2 calls to navigator_close, after "artistinfo_page"; tools/build.py MORE_ARTIST_CLOSE
 demo	0x539a00	0x4	playermore_artist_info	`addiu $4, $4, -0x3324, forming "localmusic/albuminfo_page"`, the delay slot of 2nd of 2 calls to navigator_close, after "albuminfo_page"; tools/build.py MORE_ARTIST_CLOSE
 demo	0x53a01c	0x4	playermore_page_init	the load of $25 for the only call to widget_move_resize, after "list_view_more"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
@@ -400,6 +400,11 @@ demo	0x5d8cdc	0x4	toolsGetMusicInfo	`addiu $18, $sp, 0x20`, before 1st of 6 call
 demo	0x5d8f28	0x4	toolsGetMusicInfo	`addiu $4, $17, 0x200` (3rd of 5 such), before 4th of 6 calls to strcpy, after "genre"; tools/build.py GENRE_COPY
 demo	0x5d8f34	0x4	toolsGetMusicInfo	4th of 6 calls to strcpy, after "genre"; tools/build.py GENRE_COPY
 demo	0x5d9128	0x4	toolsGetMusicInfo	the load of $25 for the only call to taglib_tag_free_strings, after "albumartist"; patch/tags.c ogg_music_info
+demo	0x5dae48	0x4	toolsQueryDbTable	`lw $2, GOT[sub_5d0000]` (2nd of 3 such); tools/build.py NAME_COMPARATORS
+demo	0x5daee8	0x4	toolsQueryDbTable	`lw $2, GOT[sub_5d0000]` (3rd of 3 such); tools/build.py NAME_COMPARATORS
+demo	0x5db080	0x4	toolsQueryDbTableAndSort	`lw $2, GOT[sub_5d0000]` (2nd of 7 such); tools/build.py NAME_COMPARATORS
+demo	0x5db11c	0x4	toolsQueryDbTableAndSort	`lw $2, GOT[sub_5c0000]` (3rd of 7 such); tools/build.py NAME_COMPARATORS
+demo	0x5db1a8	0x4	toolsQueryDbTableAndSort	`lw $2, GOT[sub_5d0000]` (5th of 7 such); tools/build.py NAME_COMPARATORS
 demo	0x5dc4d8	0x4	toolsLoadAllFile	the only call to toolsCheckItemExist, after "%s/%s"; tools/build.py SCAN_REFRESH
 demo	0x5dcdac	0x4	table_client_load_rows	1st of 2 calls to a pointer; tools/build.py TABLE_LOAD_CALL
 demo	0x5de094	0x4	table_view_on_event	`addiu $2, $zero, 0x107`, before 1st of 2 calls to widget_dispatch_event_to_target_recursive, after "table_view"; patch/ipod.json event_abi_words
@@ -503,7 +508,7 @@ hciplayer	0x438028	0x4	ao_alsa_uninit	the only call to snd_pcm_drain; patch/peq_
 hciplayer	0x4380dc	0x4	ao_alsa_audio_resume	the only call to snd_pcm_pause; patch/peq_player.c dac_resume, tools/peq.py DAC_RELEASE
 hciplayer	0x438104	0x4	ao_alsa_audio_resume	`lw $4, 0x2514($3)` (1st of 2 such); patch/peq_player.c dac_resume
 hciplayer	0x438238	0x4	ao_alsa_audio_resume	the only call to ioctl; patch/peq_player.c dac_resume
-hciplayer	0x4382ec	0x4	ao_alsa_init	`lui $2, 0x7` (4th of 51 such), before 1st of 3 calls to memset, after "device"; patch/offsets.inc VIS_LATENCY_MS
+hciplayer	0x4382ec	0x4	ao_alsa_init	`lui $2, 0x7` (4th of 51 such), before 1st of 3 calls to memset, after "device"; patch/offsets.inc NP_VISUALIZER
 hciplayer	0x4382fc	0x4	ao_alsa_init	`sw $2, 0x17c($fp)`, the delay slot of 1st of 3 calls to memset, after "device"; tools/peq.py USB_BUFFER
 hciplayer	0x438580	0x4	ao_alsa_init	`beq $3, $17, +564 words`, after "default"; patch/peq_player.c PREV_FORMAT
 hciplayer	0x4385bc	0x4	ao_alsa_init	`beq $2, $3, +5 words` (2nd of 10 such), before the only call to snd_pcm_drain, after "default"; patch/peq_player.c NEXT_FLAG
