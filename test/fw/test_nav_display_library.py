@@ -735,7 +735,7 @@ def test_system_settings_adds_its_rows_and_hides_five(fw):
     Config(fw)
     page = Settings(fw, ui)
     assert titles(page.view) == ['stock_1', 'stock_2', 'Car Remote', 'stock_3', 'Controls', 'stock_4', 'system_time',
-                                 'stock_0', 'App Store', 'system_update', 'system_reset', 'stock_5', 'stock_6', 'stock_7',
+                                 'stock_0', 'App Store', 'Storage', 'system_update', 'system_reset', 'stock_5', 'stock_6', 'stock_7',
                                  'stock_8', 'system_about']
     # stock's Language (English only for now), Wheel Function, In-Vehicle, General and System
     assert [item.name for item in page.view.children if not item.visible] == ['stock_0', 'stock_5', 'stock_6', 'stock_7', 'stock_8']
@@ -745,6 +745,10 @@ def test_system_settings_adds_its_rows_and_hides_five(fw):
     for key in ('system_time', 'system_update', 'system_reset', 'system_about'):
         ui.click(button_of(page.view, key))
     assert opened == ['systemset/datetime_page', 'systemset/fwupdate_page', 'systemset/reset_page', 'systemset/about_page']
+    # Storage opens its own page (storage.c storage_open)
+    fw.mock('window_create', lambda *_: 0)
+    ui.click(button_of(page.view, 'Storage'))
+    assert fw.calls('window_create')
 
 
 @pytest.mark.parametrize('keytone', [0, 1])

@@ -1258,7 +1258,8 @@ static void grey_set(void *row, int mark) {
     unsigned i = 0;
     while (i < cat.ngrey && cat.grey[i] != row) ++i;
     if (mark && i == cat.ngrey && cat.ngrey < CAT_GREY_ROWS) {
-        cat.grey_ink[cat.ngrey] = 0, cat.grey[cat.ngrey++] = row;
+        cat.grey_ink[cat.ngrey] = 0, cat.grey_mark[cat.ngrey] = MK_NONE,
+        cat.grey[cat.ngrey++] = row;
         if (!widget_get_prop_int(row, "_catgrey", 0) && widget_on(row, EVT_DESTROY, grey_gone, row))
             widget_set_prop_int(row, "_catgrey", 1);
     }
