@@ -8,18 +8,16 @@
  *
  * navigation.c's background hook calls song_row for each row of such a list before the rows
  * paint: the title's box is fitted to what stands beside it, and the rest is drawn here, under
- * the rows' own text. The artist is the text stock bound to the row's second line, which a
- * one-line row hides; the number and length come from the row's record in p_deque_showlist, used
- * only when its title is the row's. */
+ * the rows' own text. A greyed row's offline mark (catalogue.c) takes the right column's place:
+ * the length, the artist and the title end SONG_COL_GAP short of it. The artist is the text stock
+ * bound to the row's second line, which a one-line row hides; the number and length come from the
+ * row's record in p_deque_showlist, used only when its title is the row's. */
 #include "navigation.h"
 
 #define SONG_ARTIST_MIN 40 /* an inline artist with less room than this is dropped */
 #define SONG_NUM_W 17      /* an album's track number, right-aligned this wide after the inset */
 #define SONG_NUM_TITLE 50  /* ... and the title's first column on screen */
-#define SONG_COL_GAP 12    /* a title's ink and the text on the right column */
 #define SONG_SMALL_DY 2 /* the small text's box below the row's, so its baseline is the title's */
-#define HSCROLL_MARGIN                                                                             \
-    2 /* hscroll_label's own, each side of its text (rows' boxes start on the inset) */
 
 extern void *coverflow_tracks(void *page);
 
@@ -288,7 +286,7 @@ static void folder_row(void *w, void *canvas, void *row, void *title, int id, re
     st.raw_ink = raw;
 }
 
-void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected) {
+void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected, int edge) {
     int ctx = song_list(w);
     void *title = (void *)0, *meta = (void *)0;
     song_labels(row, &title, &meta, 0);
@@ -321,10 +319,13 @@ void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected) 
                 : how == SONG_ARTIST_INLINE || nlen ? SONG_INLINE
                                                     : SONG_RIGHT;
     int tpx = T->font_px[ROLE_TITLE], spx = T->font_px[ROLE_META];
+    /* the right column, or SONG_COL_GAP short of a greyed row's offline mark: the length, a
+     * right-hand artist and the title's room all end there */
     int left = ctx == SONGS_ALBUM ? SONG_NUM_TITLE : geom_val(V_TEXT_X),
         column = I(w, W_W) - 1 - geom_val(V_RIGHT_X) - HSCROLL_MARGIN,
-        len_w = measure(canvas, wlen, nlen, spx),
-        end = nlen ? column - len_w - SONG_COL_GAP : column;
+        len_w = measure(canvas, wlen, nlen, spx);
+    if (edge && edge - SONG_COL_GAP < column) column = edge - SONG_COL_GAP;
+    int end = nlen ? column - len_w - SONG_COL_GAP : column;
     static const unsigned spaces[] = { ' ', ' ', 0 };
     int gap = measure(canvas, spaces, 2, tpx), shown = 0;
     int ink =
@@ -337,6 +338,8 @@ void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected) 
     int bx = left - x, bw = ink + 2 * HSCROLL_MARGIN;
     if (I(title, W_X) != bx || I(title, W_W) != bw)
         widget_move_resize(title, bx, I(title, W_Y), bw, I(title, W_H));
+    /* the box is this row's to size: catalogue_fit's width kept from an earlier fit is not */
+    if (widget_get_prop_int(title, "_catw", 0)) widget_set_prop_int(title, "_catw", 0);
     unsigned text = (unsigned)I(P(canvas, CANVAS_LCD), LCD_TEXT_COLOR), raw = st.raw_ink;
     /* the scheme's muted, which Light Mode's flip turns for paper; on the selection its text,
      * final in each half */

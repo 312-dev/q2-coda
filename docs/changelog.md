@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Library (OLED): a greyed server song's title, artist and length stop short of its crossed-out cloud instead of running underneath it, and an album's track length moves left of the cloud rather than being drawn over by it. A greyed album's artist line now stops short of the cloud as its name does, and both leave a little more room before it.
   - EQ (OLED): **Simple** and **Advanced** are an iOS-style segmented control: the open tab is a raised grey segment, which turns blue only while the wheel is on the tabs, so you can always tell which tab is open.
   - Playlists (OLED): after **Cancel** on Delete Playlist, the top of the screen names Playlists again instead of still asking the question.
   - EQ: after picking a value (Balance, Preamp, a band's Gain) or coming back from a band or Presets, the list is where you left it, on the row you opened, rather than back at the top.

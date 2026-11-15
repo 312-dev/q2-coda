@@ -562,7 +562,13 @@ enum { NP_STAGE_REST, NP_STAGE_SHUFFLE, NP_STAGE_REPEAT };
 int np_mode_click(void *target, void *event);
 int song_list(void *w);
 int song_fit(int place, int room, int title, int gap, int artist, int *shown);
-void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected);
+/* A row's text and what stands at its right (a length, the offline mark): this much clear of each
+ * other's ink; HSCROLL_MARGIN is hscroll_label's own, each side of its text (a row's text box
+ * starts on the inset) */
+#define SONG_COL_GAP 12
+#define HSCROLL_MARGIN 2
+/* edge: the left of the offline mark where the row carries it (navigation.c offline_x), else 0 */
+void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected, int edge);
 void paint_art(void *w, void *canvas, const char *name, int x, int y); /* navigation.c */
 
 /* np_bar.c */

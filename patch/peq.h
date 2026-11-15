@@ -458,7 +458,8 @@ void catalogue_changed(void), catalogue_card_away(void), catalogue_rated(void *r
 void catalogue_bind(void *row, unsigned index), catalogue_mark(void *row, void *r, int tab);
 void catalogue_forget(void *row), catalogue_grey(void *w, int on);
 int catalogue_greyed(void *w, unsigned *color), catalogue_row_ink(void *row, unsigned *ink);
-int catalogue_greys(void);
+int catalogue_greys(void), catalogue_row_greyed(void *row);
+#define CAT_MARK_W 20 /* the offline mark's ink, catalogue_mark_paint centres it on its x */
 void catalogue_mark_paint(void *canvas, int x, int y, unsigned ink);
 void catalogue_fit(void *entry, void *surface, int limit);
 int catalogue_np_info(const char *path, char *genre, int *year);
