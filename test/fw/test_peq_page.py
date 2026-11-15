@@ -1333,6 +1333,42 @@ def test_the_tabs_paint_the_open_one_and_the_wheel_s(fw):
     assert not c.texts  # the message has the bar
 
 
+
+def test_oled_s_tabs_are_a_segmented_control_whose_open_tab_turns_accent_only_with_the_wheel(fw):
+    """docs/oled-design.md#tabs: a #1C1C1E track, the open tab a raised #3A3A3C segment, the accent while the wheel is on
+    the bar; the open label white in Inter Medium 17 (21 as AWTK sizes it), the other #ABABAB."""
+    oled(fw)
+    assert fw.fn('eq_rows', C.c_int)()  # the theme read now: the page's card answers config reads after
+    rounded = []
+    def fill(c, r, _, color, radius, *__):
+        rounded.append((tuple((C.c_int * 4).from_address(r)), rgb(C.c_uint.from_address(color).value), radius))
+        return 0
+    fw.mock('canvas_fill_rounded_rect', fill)
+    p = page(fw).open()
+
+    def bar():
+        del rounded[:]
+        c = Canvas(fw)
+        paint(fw, p.ui.bar, c)
+        return rounded[:], {t[0]: (rgb(t[2]), t[1]) for t in c.texts}
+
+    track = ((20, 7, 335, 34), 0x1c1c1e, 9)
+    shapes, labels = bar()  # Simple open, the wheel on its sliders
+    assert p.e3.focus != E3_TABS and shapes == [track, ((22, 9, 165, 30), 0x3a3a3c, 8)]
+    assert labels == {'Simple': (0xffffff, 21), 'Advanced': (0xababab, 21)}
+    for _ in range(E3_LOW - E3_TABS):
+        p.key(KEY_PREV)
+    shapes, labels = bar()  # the wheel on the bar: the open tab's segment in the accent
+    (_, accent, _), = shapes[1:]
+    assert shapes == [track, ((22, 9, 165, 30), accent, 8)] and not grey(accent)
+    assert labels == {'Simple': (0xffffff, 21), 'Advanced': (0xababab, 21)}
+    p.tab(300)  # Advanced, the wheel still on the bar
+    assert bar()[0] == [track, ((187, 9, 166, 30), accent, 8)]
+    p.key(KEY_NEXT)  # down to its first row
+    shapes, labels = bar()
+    assert p.ui.tabs == 0 and shapes == [track, ((187, 9, 166, 30), 0x3a3a3c, 8)]
+    assert labels == {'Simple': (0xababab, 21), 'Advanced': (0xffffff, 21)}
+
 # EQ per Output.
 
 def owner(card):

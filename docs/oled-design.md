@@ -118,7 +118,7 @@ Rules:
   capitals.
 - **A number, a space, its unit:** "15 s", "1 min", "4000 K"; a percentage takes no space
   ("50%").
-- **Size steps are 15, 16, 18, 20, 22** (56 for the confirmation's glyph). Nothing else.
+- **Size steps are 15, 16, 18, 20, 22** (56 for the confirmation's glyph, 17 for the [tabs](#tabs)' labels). Nothing else.
 - **Row pitch is about 1.6 times the row size** (32 px for 20 px type), as the concept's is
   about twice its cap height.
 - **Sizes are the em.** AWTK sizes a face by its line (ascent less descent), which for Inter is
@@ -201,6 +201,19 @@ Wear OS's position indicator, on the Q2's straight right edge:
   `#E5E5E5` inside it, the thumb's position and length the visible rows over the total.
 - Hidden at rest: it shows while the wheel turns and fades out a second after the last tick
   (the last 200 ms of it).
+
+### Tabs
+
+An iOS segmented control, on EQ's Simple and Advanced (`slider_page.c` `eq_tabs_paint`), the theme's
+only tabs:
+
+- A `#1C1C1E` track rounded 9 px from x 20 to 355, 34 px tall, centred in the 48 px tab bar.
+- The open tab a segment 2 px inside the track, rounded 8 px: raised `#3A3A3C` while the wheel is
+  elsewhere, Accent Blue only while the wheel is on the tabs, so the open tab reads apart from the
+  wheel's place. In Light Mode the track is `#E5E5EA` and the raised segment white.
+- Labels in Inter Medium 17 px, centred in their halves: the open one white (Text Primary on Light
+  Mode's white segment), the other `#ABABAB` (`#8A8A8E` in Light Mode), at the size of iOS's
+  own control.
 
 ### Two-line row
 
@@ -436,7 +449,7 @@ pattern.
 | Lock Screen settings                | List row, then pictures     | Three a row from the text column to the right column; the check marks the chosen one; the wheel's picture is framed 3 px in Accent Blue, its selection bar |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
-| Equalizer (Simple)                  | Vertical slider             | Its tabs, then rows: the switch, Presets, Reset                                                            |
+| Equalizer (Simple)                  | Vertical slider             | Its [tabs](#tabs), then rows: the switch, Presets, Reset                                                   |
 | Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right                      |
 | Bluetooth                           | Two-line row                | Second line "Connected" with the Positive dot                                                              |
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |

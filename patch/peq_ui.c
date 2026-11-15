@@ -1370,8 +1370,8 @@ static void e3_paint(void *canvas) {
 }
 
 /* The tab bar, unless a message has it: the open tab white over an accent line, the other grey,
- * and while the wheel is on the bar, the other on the lighter card Centre would open
- * (slider_page.c eq_tabs_paint's under a set_switch theme). */
+ * and while the wheel is on the bar, the other on the lighter card Centre would open; a set_switch
+ * theme's is slider_page.c eq_tabs_paint's segmented control. */
 static void tabs_paint(void *canvas) {
     int simple = ui.tab == SIMPLE, focus = simple ? e3.focus == E3_TABS : ui.tabs;
     if (simple ? e3.status != 0 : ui.status[0] != 0) return;
