@@ -1369,6 +1369,46 @@ def test_oled_s_tabs_are_a_segmented_control_whose_open_tab_turns_accent_only_wi
     assert p.ui.tabs == 0 and shapes == [track, ((187, 9, 166, 30), 0x3a3a3c, 8)]
     assert labels == {'Simple': (0xababab, 21), 'Advanced': (0xffffff, 21)}
 
+@pytest.mark.parametrize('light', [False, True])
+def test_oled_s_knobs_are_white_and_edged_in_track_in_light_mode_alone(fw, light):
+    """docs/oled-design.md Progress and sliders: a 14 px white knob, ringed in the accent on the band the wheel is on.
+    White is Light Mode's canvas, so there a knob with no ring is edged in its Track, #D9D9D9."""
+    oled(fw, light)
+    assert fw.fn('eq_rows', C.c_int)() and fw.fn('ipod_light', C.c_int)() == light
+    p = page(fw, state(fw, EQ_3, gains=(1.5, 0, -3))).open()  # the wheel on Low
+    before = len(fw.calls('vgcanvas_set_fill_color'))
+    e3_canvas(fw, p)
+    fills = [rgb(a[1]) for _, a in fw.calls('vgcanvas_set_fill_color')[before + 2:]]  # after the on switch's two
+    accent = fills[0]
+    assert not grey(accent)
+    bare = [0xd9d9d9, 0xffffff] if light else [0xffffff]
+    assert fills == [accent, 0xffffff, *bare, *bare]  # Low ringed in the accent; Mid and High
+
+
+@pytest.mark.parametrize('light', [False, True])
+def test_oled_s_switch_stays_enabled_and_presets_shows_the_preset_playing(fw, light):
+    """iOS's value row: under OLED the switch keeps its title while PEQ plays, and the preset's name is Presets'
+    value, right-aligned short of its chevron in Text Secondary (#ABABAB, #5C5C5C in Light Mode)."""
+    oled(fw, light)
+    assert fw.fn('eq_rows', C.c_int)()
+    p = page(fw, state(fw, EQ_PEQ, peq=peak(fw))).open()
+    p.ui.applied = b'Rock'
+    labels = [t[0] for t in e3_canvas(fw, p).texts]
+    assert labels[:4] == ['Enabled', 'Presets', 'Rock', 'Reset']
+    (_, px, color, (x, y, w, h)), = e3_canvas(fw, p).text('Rock')
+    (_, row_px, _, (tx, ty, _, _)), = e3_canvas(fw, p).text('Presets')
+    assert px == row_px and rgb(color) == (0x5c5c5c if light else 0xababab) and y == ty and x == tx
+    (_, (_, _, chevron, *_)), = fw.calls('canvas_draw_icon')[-1:]  # its centre CHEV_SHIFT (5) left of the right column
+    assert x + w == i32(chevron) + 5 - 1 - 21  # as a settings row's value: VALUE_CHEVRON_GAP short of the column
+    for _ in range(E3_LOW - E3_PRESETS):
+        p.key(KEY_PREV)
+    assert p.e3.focus == E3_PRESETS and rgb(e3_canvas(fw, p).text('Rock')[0][2]) == 0xffffff  # on the selection
+    p.ui.applied = b''  # unnamed: Advanced's
+    assert [t[0] for t in e3_canvas(fw, p).texts][:3] == ['Enabled', 'Presets', 'Advanced']
+    p.ui.draft.bypass = 1  # 3EQ or off: no preset plays, no value
+    assert [t[0] for t in e3_canvas(fw, p).texts][:3] == ['Enabled', 'Presets', 'Reset']
+
+
 # EQ per Output.
 
 def owner(card):
@@ -1518,10 +1558,11 @@ def test_unsaved_gains_wait_for_the_next_pass(fw):
     assert owner(card) == '3.5mm' and p.e3.dirty
 
 
-def oled(fw):
-    """Theme: OLED (THEME 3), whose messages are toasts; the toasts' texts as they open."""
+def oled(fw, light=False):
+    """Theme: OLED (THEME 3), in Light Mode if light, whose messages are toasts; the toasts' texts as they open."""
     def config(path, section, key, out, default, *_):
-        value = b'3' if C.string_at(key) == b'THEME' else C.string_at(default)
+        name = C.string_at(key)
+        value = b'3' if name == b'THEME' else b'1' if light and name == b'LIGHT' else C.string_at(default)
         C.memmove(out, value + b'\0', len(value) + 1)
     fw.mock('toolsReadConfig', config)
     said = []

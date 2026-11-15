@@ -1,6 +1,9 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - EQ (OLED): with the wheel on the **Simple** and **Advanced** tabs, only the tabs show it; the first row of Advanced's list no longer lights up as well.
+  - EQ (OLED): in Light Mode the Simple tab's slider knobs, and the knob on slider pages like Resume Songs, have a thin grey edge, so they no longer vanish white on white.
+  - EQ (OLED): after picking a preset on Simple, the switch row still reads **Enabled**, and the preset's name shows on the right of the **Presets** row, as a setting's value does.
   - EQ (OLED): **Simple** and **Advanced** are an iOS-style segmented control: the open tab is a raised grey segment, which turns blue only while the wheel is on the tabs, so you can always tell which tab is open.
   - Playlists (OLED): the list ends on a whole playlist, so the bottom of the screen no longer shows a sliver of the next one (or, scrolled down, of the row above at the top).
   - Playlists (OLED): after **Cancel** on Delete Playlist, the top of the screen names Playlists again instead of still asking the question.

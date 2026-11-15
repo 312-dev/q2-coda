@@ -698,6 +698,21 @@ def test_a_sliding_page_arrives_on_its_row_without_a_glide(fw, ui):
     assert again.selected == 25 and again.shows(25) and not ui.glides
 
 
+def test_eq_s_list_lights_no_row_while_its_tabs_hold_the_wheel(fw, ui):
+    """docs/internals.md#3eq: Advanced's tab bar takes the wheel above the list, whose row is -1 then; settling must
+    leave it so, not light the first row in view beside the bar's segment (paint_selection, eq_tabs_hold)."""
+    from test_peq_page import ADVANCED, HOME as EQ_HOME, Ui as EqUi
+    page = Page(ui, titles(8), name='equalizer_page')
+    eq = fw.var('peq_ui__ui', EqUi)
+    eq.page, eq.view, eq.tab, eq.screen, eq.tabs = page.win.at, page.view.at, ADVANCED, EQ_HOME, 1
+    page.view.props.update({SEL: -1, COUNT: 8})
+    paint(fw, page)
+    assert page.selected == -1
+    eq.tabs = 0  # the wheel back on the list: ringnav settles a row as on any page
+    paint(fw, page)
+    assert page.selected == 0
+
+
 def test_classic_recalls_in_place(fw, ui):
     theme(fw, 1)  # Classic: recall ms 0
     chosen(fw, ui, Page(ui, titles(40)), 25)

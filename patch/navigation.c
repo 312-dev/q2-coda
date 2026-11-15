@@ -226,7 +226,7 @@ extern void xfade_row(void *label), wheel_row(void *label), resume_row(void *lab
     mono_row(void *label), swap_row(void *label), night_row(void *label);
 extern int mono_click(void *ctx, void *event), swap_click(void *ctx, void *event);
 extern int xfade_open(void *ctx, void *event), xfade_key(void *top, unsigned key), resume_min(void);
-extern int eq_key(void *top, unsigned key); /* peq_ui.c */
+extern int eq_key(void *top, unsigned key), eq_tabs_hold(void *view); /* peq_ui.c */
 extern const char *radio_hold(void *top);
 extern void visualizer_paint(void *w, void *canvas), visualizer_attach(void *win);
 extern int visualizer_full(void); /* OLED's full-screen Field draws the modes itself */
@@ -2550,6 +2550,7 @@ static void paint_selection(void *w, void *canvas) {
         }
         if (st.center_timer && !pending_matches(top, &g_menu)) cancel_center();
         if (g_menu.kind == 3) return; /* Home shows its selected card. */
+        if (eq_tabs_hold(w)) return;  /* the wheel is on EQ's tabs, above the list: no row */
         i = reconcile(&g_menu, !moving(&g_menu) && !pointer_down());
     }
     /* Touch hides the selection until the wheel or a button, except on Home (iPod's list) and a
@@ -3179,7 +3180,6 @@ void list_toggle(void *label, const char *title, int on) {
 /* On a set with a right column: the value's box ends on it, or VALUE_CHEVRON_GAP short of it on a
  * row that opens a page (its chevron is there), and the title takes the row up to the value's own
  * text, measured in its face; unmeasured (no canvas yet), the boxes stay as made. */
-#define VALUE_CHEVRON_GAP 21 /* the chevron's 15 px box and 6 px clear of it */
 #define VALUE_TITLE_GAP 12
 static void value_fit(void *label, void *text) {
     void *button = P(label, W_PARENT), *canvas = widget_get_canvas(button);
