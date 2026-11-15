@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Display: the lock screen is gone. Turning the screen back on shows the page you left, and **Lock Screen** is no longer in Display settings. If you had it on, it is turned off when you update.
+  - Buttons Lock (OLED): works like the iPod's Hold switch. While it is on, a small padlock sits at the top of the screen beside the play state, and a locked button pressed with the screen off lights the screen for a moment with **Buttons Locked** and how to get past it: press Centre to turn the screen on and use the buttons.
   - EQ (OLED): with the wheel on the **Simple** and **Advanced** tabs, only the tabs show it; the first row of Advanced's list no longer lights up as well.
   - EQ (OLED): in Light Mode the Simple tab's slider knobs, and the knob on slider pages like Resume Songs, have a thin grey edge, so they no longer vanish white on white.
   - EQ (OLED): after picking a preset on Simple, the switch row still reads **Enabled**, and the preset's name shows on the right of the **Presets** row, as a setting's value does.
@@ -11,7 +13,6 @@
   - Playlists (OLED): the list ends on a whole playlist, so the bottom of the screen no longer shows a sliver of the next one (or, scrolled down, of the row above at the top).
   - Playlists (OLED): after **Cancel** on Delete Playlist, the top of the screen names Playlists again instead of still asking the question.
   - EQ: after picking a value (Balance, Preamp, a band's Gain) or coming back from a band or Presets, the list is where you left it, on the row you opened, rather than back at the top.
-  - Display (OLED): in **Lock Screen** settings the wheel lights the picture it is on with a blue frame, as it lights a row, so you can see which one Centre will choose.
   - Display (OLED): **About** shows its values in full where they fit: a value takes the row up to its name, so the Wi-Fi MAC and the version no longer end in … early, and in Light Mode the names on the left show in black (they were white on white).
   - Now Playing: the track's details (album, genre, year, format, sample rate, bit rate, file size and folder) are no longer one of the pages you swipe through, so Now Playing has two page dots. Open ⋯ and choose **About** to see them on a page of their own; Return goes back to ⋯.
   - Now Playing: the song's place in the queue ("3 of 12") is gone from Now Playing in every theme.

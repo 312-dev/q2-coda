@@ -171,16 +171,16 @@ static const char *library_missing(char *why, unsigned size) {
  * the user's own Update Local Music, and a page this list doesn't know. */
 static int library_safe(void) {
     static const char *const safe[] = {
-        "home_page",      "stream_page",       "streamconf_page",    "addon_page",
-        "qrcode_page",    "playing_page",      "sysset_page",        "display_page",
-        "backlight_page", "lighttime_page",    "keylock_page",       "language_page",
-        "datetime_page",  "autotime_page",     "manualtime_page",    "screensaver_page",
-        "standby_page",   "powermanager_page", "sleepshutdown_page", "about_page",
-        "bluetooth_page", "btquality_page",    "btadjustvol_page",   "wifi_page",
-        "wifiset_page",   "netservice_page",   "playset_page",       "audiosetting_page",
-        "playmode_page",  "replaygain_page",   "filter_page",        "dsdoutput_page",
-        "memplay_page",   "usbvol_page",       "maxvol_page",        "bootvol_page",
-        "balance_page",   "equalizer_page"
+        "home_page",         "stream_page",        "streamconf_page",   "addon_page",
+        "qrcode_page",       "playing_page",       "sysset_page",       "display_page",
+        "backlight_page",    "lighttime_page",     "keylock_page",      "language_page",
+        "datetime_page",     "autotime_page",      "manualtime_page",   "standby_page",
+        "powermanager_page", "sleepshutdown_page", "about_page",        "bluetooth_page",
+        "btquality_page",    "btadjustvol_page",   "wifi_page",         "wifiset_page",
+        "netservice_page",   "playset_page",       "audiosetting_page", "playmode_page",
+        "replaygain_page",   "filter_page",        "dsdoutput_page",    "memplay_page",
+        "usbvol_page",       "maxvol_page",        "bootvol_page",      "balance_page",
+        "equalizer_page"
     };
     if (media_playing() || airplayGetFlag() == 2 || (signed char)bt__recv_pageflag == 2 ||
         library_scanning())

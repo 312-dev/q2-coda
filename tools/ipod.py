@@ -625,14 +625,16 @@ def status_row(root, g, widgets, left, right, eq):
     STATUS_ROW_INSET in from the screen's sides, inside the glass's top curve. The title and the clock start in one box
     whose text starts on that inset, in the bar's face at bar_px in Text Secondary; the payload moves the clock beside
     the play state, or centres it where the page has no title, and ends the title's box short of the clock
-    (navigation.c clock_place). The right group is the play state, then the battery, its nub's last column
-    STATUS_ROW_INSET from the screen's edge. Bluetooth, Wi-Fi, EQ and the rest stay, off-screen, for stock to update."""
+    (navigation.c clock_place). The right group is Buttons Lock's padlock (img_keylock, hidden until keylock.c shows
+    it), the play state, then the battery, its nub's last column STATUS_ROW_INSET from the screen's edge. Bluetooth,
+    Wi-Fi, EQ and the rest stay, off-screen, for stock to update."""
     inset = inc('STATUS_ROW_INSET')
     top = g.status_y - STATUS_ROW_LINE // 2
     check(inset >= corner_x(top, STATUS_ROW_LINE), f'Status row inset {inset} is under the glass at y {top}')
     box_y = g.status_y - STATUS_ROW_ICON // 2
     left[3] = []
-    right[3] = [widgets[n] for n in STATUS_ROW_RIGHT]
+    lock = ['image', [0, 0, STATUS_ROW_LOCK_W, 0], {**widgets['img_state'][2], 'name': 'img_keylock', 'image': '', 'visible': 'false'}, []]
+    right[3] = [lock, *(widgets[n] for n in STATUS_ROW_RIGHT)]
     layout = right[2]['children_layout']
     check('xm=50,s=5)' in layout, 'Unexpected status bar layout')
     right[2]['children_layout'] = layout.replace('xm=50,s=5', f'xm={inset},s={STATUS_ROW_GAP}')
@@ -656,6 +658,7 @@ def status_row(root, g, widgets, left, right, eq):
 
 
 STATUS_ROW_GAP = 3  # the play state's 16 px box this far left of the battery: its 10 px glyph 16 px left of the body
+STATUS_ROW_LOCK_W = inc('STATUS_ROW_LOCK_ROOM') - STATUS_ROW_GAP  # Buttons Lock's padlock: its 13 px glyph centred 18 px left of the play state's
 STATUS_ROW_LINE = 24  # the title's and clock's line box, centred on status_y
 STATUS_ROW_INK = '#ABABAB'  # Text Secondary (docs/oled-design.md): Light Mode's flip gives the paper's grey
 
@@ -1286,7 +1289,7 @@ GLYPH_CUT = 45  # percent of the way from the disc's colour to the glyph's at wh
 # The square ones keep the disc's transparent corners, so a selected row's bar shows through them; under
 # square art (ipod_square_art) navigation.c's square_disc fills them as they load.
 ART_PLACEHOLDERS = {'default_album_big.png': 110 - 2 * (inc('TILE_INSET') + inc('TILE_CLEARANCE')), 'default_album_small.png': 52,
-                    'play_defaultcover.png': NP_ART, 'scrsaver_playcover.png': 60,
+                    'play_defaultcover.png': NP_ART,
                     'default_smallcover.png': 140, 'default_bigcover.png': BC_ART}
 
 
@@ -1311,10 +1314,10 @@ QUIET_ICONS = AUDIT['quiet_icons']
 SETTINGS_SLIDERS = ('systemset/backlight_page.bin', 'playset/balance_page.bin',
                     'playset/maxvol_page.bin', 'playset/bootvol_page.bin')
 # Pages whose init puts an on/off switch in the toolbar (img_bootswitch, img_switch); they keep it.
-TOOLBAR_SWITCHES = ('systemset/sleepshutdown_page.bin', 'playset/bootvol_page.bin', 'systemset/screensaver_page.bin')
+TOOLBAR_SWITCHES = ('systemset/sleepshutdown_page.bin', 'playset/bootvol_page.bin')
 # Pages that keep their toolbar under any set: the slider page's is Crossfade's and its own; these two hold buttons or have no switch to move.
 KEEP_TOOLBAR = ('playset/bootvol_page.bin', 'playerjumpinfo_page.bin', 'specfolder_page.bin')
-SLEEP_TIMER, LOCK_SCREEN = 'systemset/sleepshutdown_page.bin', 'systemset/screensaver_page.bin'
+SLEEP_TIMER = 'systemset/sleepshutdown_page.bin'
 
 
 def slider_plain(path, root):
@@ -1405,7 +1408,7 @@ def patch_asset(path, data, g=SET0):  # pragma: no mutate block
         pitch, body = g.stock_row, g.stock_body
     plain = not g.toolbar and path not in KEEP_TOOLBAR  # the bar holds the title, a switch moves to a row (navigation.c switch_row)
     fits = g.stock_row == g.set_row  # at any other pitch stock's rows aren't settings rows: ipod_list_layout
-    settings = (path in NAVBAR_ONLY and (fits or not plain or path != LOCK_SCREEN)) or (stock and plain and fits and path != 'playerqueue_page.bin')
+    settings = path in NAVBAR_ONLY or (stock and plain and fits and path != 'playerqueue_page.bin')
     root = decode(data)
     check(encode(root) == data, f'{path}: UI round trip differs')
     if path == ARTIST_PAGE:

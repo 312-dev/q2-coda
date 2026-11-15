@@ -909,29 +909,12 @@ def test_the_dark_bar_moves_the_icons_off_and_paints_its_own_battery(fw, st, ui)
     assert state[0] + state[2] // 2 < sx + ox and abs(2 * state[1] + state[3] - (2 * (sy + oy) + oh)) <= 1  # left of it, on its rows
     # a full-screen page's dark bar puts the same battery in the same place
     full = Canvas(fw)
-    label = wide('10%')  # the label stock wrote, bar_charge still the icon
     fw.fn('paint_dark_bar', None, C.c_void_p, C.c_void_p, C.c_void_p, C.c_uint)(
-        ui.wm, full.p, None, fw.fn('dark_bar_key', C.c_uint, C.c_void_p)(C.addressof(label)))
+        ui.wm, full.p, None, 10 << 3 | 1 << 1)  # 10%, charging: battery_now's key, bar_charge still the icon
     assert sorted(r for r in full.rects if r[2] != 375) == sorted((x + sx, y + sy, w, h, c) for x, y, w, h, c in canvas.rects)
     ui.top = 0  # leaving: the title's box and the clock come back
     bar.sync()
     assert ui.shown[bar.clock] == 1 and ui.box(bar.title) == title
-
-
-def test_dark_bar_key_reads_the_label_and_the_charge_icon(fw, st, ui):
-    theme(fw, st, CLASSIC)
-    bar = Bar(fw, ui)
-    st.bar_icon = bar.icon
-    key = fw.fn('dark_bar_key', C.c_uint, C.c_void_p)
-    paint = fw.fn('paint_dark_bar', None, C.c_void_p, C.c_void_p, C.c_void_p, C.c_uint)
-    def level(text, icon=b'bar_battery'):
-        ui.set_str(bar.icon, b'image', icon)
-        label = wide(text) if text is not None else None
-        canvas = Canvas(fw)
-        paint(ui.wm, canvas.p, None, key(None if label is None else C.addressof(label)))
-        return dark_level(canvas.rects)
-    assert level('250%') == level('100%') > level('88%') > level('7%') > level(None) == 0  # past 100: full
-    assert level('7%', b'bar_charge') == level('100%') and level('7%', b'bar_lowcharge') == level('7%')
 
 
 @pytest.mark.parametrize('status, art', [(2, b'classic_light_play_w'), (3, b'classic_light_pause_w'), (0, None)])
@@ -2806,30 +2789,6 @@ def test_a_labels_final_ink_is_rewritten_when_the_half_changes(fw, st, ui):
     fw.fn('text_inks', None, C.c_void_p)(ui.wm)
     assert ui.ints[label, b'style:normal:text_color'] & 0xffffffff == 0xffffffff
     assert ui.ints[button, b'style:over:text_color'] & 0xffffffff == 0xccffffff
-
-
-def test_the_info_screens_tray_stays_in_its_ring_and_puts_the_fill_back(fw, st):
-    theme(fw, st, CLASSIC)
-    canvas = Canvas(fw)
-    tray = fw.fn('paint_tray', None, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int)
-    tray(canvas.p, 16, 44, 343, 116)
-    xs = [r[0] for r in canvas.rects] + [r[0] + r[2] for r in canvas.rects]
-    ys = [r[1] for r in canvas.rects]
-    assert (min(xs), max(xs), min(ys), max(ys)) == (15, 16 + 343 + 1, 43, 44 + 116 + 1) and canvas.fill == 0xff123456
-    canvas = Canvas(fw)
-    struct.pack_into('<Q', canvas.raw, CANVAS_LCD, 0)
-    tray(canvas.p, 16, 44, 343, 116)
-    assert canvas.rects == []
-
-
-@pytest.mark.parametrize('when, minutes', [((14, 35), 14 * 60 + 35), ((0, 0), 0), (None, -1)])
-def test_clock_minutes_is_minutes_since_midnight(fw, when, minutes):
-    def local(t, out, *_):
-        C.c_int.from_address(out + 4).value, C.c_int.from_address(out + 8).value = when[1], when[0]
-        return out
-    fw.mock('fw_time', lambda *_: -1 if when is None else 1700000000)
-    fw.mock('fw_localtime_r', local)
-    assert fw.fn('clock_minutes', C.c_int)() == minutes
 
 
 # Classic's T9 keyboard and Search's field.

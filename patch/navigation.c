@@ -218,8 +218,6 @@ extern int coverflow_home_sub(void), coverflow_home_split(void *top);
 extern void coverflow_home_strip(void *canvas, void *top);
 extern void coverflow_home_painted(void);
 extern void coverflow_home_row(void *surface, void *row, int id, int painting);
-extern void lockscreen_paint(void *w, void *canvas);
-extern int lockscreen_hold(void *top);
 extern void coverflow_paint(void *w, void *canvas), photos_paint(void *w, void *canvas),
     photos_open(const char *root), books_paint(void *w, void *canvas), books_open(const char *root),
     video_poll(void);
@@ -2584,7 +2582,7 @@ static void toast_paint(void *w, void *canvas) {
 /* Load and settle the painted surface's selection, then draw it behind the rows: Minimal's card
  * (a dot on Home), Modern's full-width accent bar (SEL_BAR) or Classic's stops band (SEL_STOPS). */
 static void paint_selection(void *w, void *canvas) {
-    if (kind(w)) st.sel_w = st.sel_widget = st.sel_accent = st.sel_frame = (void *)0;
+    if (kind(w)) st.sel_w = st.sel_widget = st.sel_accent = (void *)0;
     if (!w || !canvas || !kind(w)) return;
     void *top = window_manager_get_top_window(window_manager());
     int i, shown = !st.touch_mode;
@@ -2716,8 +2714,6 @@ static void paint_selection(void *w, void *canvas) {
             bar.x += in, bar.w -= 2 * in + (tile ? 0 : az_bar_in(g_menu.w)); /* az_index.c */
             gradient(canvas, bar, S->tones[0], S->tones[1], S->tones[4], radius);
         }
-    } else if (band && theme()->set_switch && !tk_strcmp(widget_get_type(g_menu.at[i]), "image")) {
-        st.sel_frame = g_menu.at[i]; /* a picture tile covers a card behind it: framed over it */
     } else if (home) {
         rect_t dot = { HOME_DOT_X, r.y + (r.h - HOME_DOT) / 2, HOME_DOT, HOME_DOT };
         fill_box(canvas, &dot, 0xffffffff, HOME_DOT / 2);
@@ -3078,25 +3074,6 @@ static void paint_scrollbar(void *canvas, void *bar, int table) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
-/* A set_switch theme's selected picture tile (Lock Screen's grid, settings_pages.c lock_grid):
- * the bar's Accent Blue as a SEL_FRAME px frame inside its edge, over the picture and its check
- * (docs/oled-design.md Screens: Lock Screen settings). paint_selection names the tile each frame;
- * the page is checked here, so a recycled widget at that address after the page went is passed. */
-#define SEL_FRAME 3
-static void sel_frame_paint(void *w, void *canvas) {
-    void *lcd = P(canvas, CANVAS_LCD);
-    if (!lcd || tk_strcmp(widget_get_prop_str(window_of(w), "name", ""), "screensaver_page"))
-        return;
-    int fw = I(w, W_W), fh = I(w, W_H);
-    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
-    stock_canvas_set_fill_color(canvas, RGBA(scheme()->tones[0]));
-    canvas_fill_rect(canvas, 0, 0, fw, SEL_FRAME);
-    canvas_fill_rect(canvas, 0, fh - SEL_FRAME, fw, SEL_FRAME);
-    canvas_fill_rect(canvas, 0, SEL_FRAME, SEL_FRAME, fh - 2 * SEL_FRAME);
-    canvas_fill_rect(canvas, fw - SEL_FRAME, SEL_FRAME, SEL_FRAME, fh - 2 * SEL_FRAME);
-    stock_canvas_set_fill_color(canvas, fill);
-}
-
 /* Stock paints children first and calls this with the surface's canvas origin restored. */
 static void quick_scrub(void *w, void *canvas);
 int ringnav_paint(void *w, void *canvas) {
@@ -3105,8 +3082,7 @@ int ringnav_paint(void *w, void *canvas) {
     night_paint(canvas);
     font_weight_paint(w, canvas);
     coverflow_paint(w, canvas);
-    lockscreen_paint(w, canvas);
-    if (w && w == st.sel_frame) sel_frame_paint(w, canvas); /* over lockscreen_paint's picture */
+    keylock_paint(w, canvas);
     if (w == st.cf_letter_surface && st.cf_letter &&
         (st.cf_letter_held || (unsigned)time_now_ms() - st.cf_letter_at < LETTER_MS) &&
         P(canvas, CANVAS_LCD)) {
@@ -3284,15 +3260,14 @@ void list_value(void *label, const char *title, const char *value) {
     if (geom_val(V_RIGHT_X)) value_fit(label, text);
 }
 
-/* Under a set without stock's toolbars (toolbar 0) a page's switch is a row: stock's img_switch
- * stays, hidden with its toolbar, for stock's callbacks to find by name, and the row's click is
- * its click. A click rebuilds Lock Screen's list, this row with it, so it waits for the next loop
- * pass. Under Lock Screen the row is first in the list; the Sleep Timer's list-less page has it
- * over its fields, tools/ipod.py moving them down. The row reads what the image shows. */
+/* Under a set without stock's toolbars (toolbar 0) the Sleep Timer's switch is a row: stock's
+ * img_switch stays, hidden with its toolbar, for stock's callbacks to find by name, and the row's
+ * click is its click, on the next loop pass. The page is list-less, so the row is over its fields,
+ * tools/ipod.py moving them down. The row reads what the image shows. */
 #define SWITCH_ROW "_switch_row"
 static void switch_text(void *win, void *label) {
     void *sw = widget_lookup(win, "img_switch", 1);
-    list_toggle(label, widget_lookup(win, "view_sleep", 1) ? "Sleep Timer" : "Lock Screen",
+    list_toggle(label, "Sleep Timer",
                 sw && !tk_strcmp(widget_get_prop_str(sw, "image", ""), "switch_on"));
 }
 static int switch_due(const void *info) {
@@ -3302,7 +3277,7 @@ static int switch_due(const void *info) {
     char click[0x30];
     if (!sw) return 0;
     stock_dispatch_trampoline(sw, pointer_event_init(click, EVT_CLICK, sw, 0, 0));
-    void *label = widget_lookup(win, SWITCH_ROW, 1); /* Lock Screen's is new, and right */
+    void *label = widget_lookup(win, SWITCH_ROW, 1);
     if (label) switch_text(win, label);
     return 0;
 }
@@ -3310,13 +3285,6 @@ static int switch_click(void *ctx, void *event) {
     (void)ctx, (void)event;
     timer_add(switch_due, (void *)0, 0);
     return 0;
-}
-void switch_row(void *win, void *view) {
-    if (geom_val(V_TOOLBAR)) return;
-    void *label = list_row(view, (const char *)0, switch_click, (void *)0);
-    widget_set_name(label, SWITCH_ROW);
-    switch_text(win, label);
-    widget_restack(P(P(label, W_PARENT), W_PARENT), 0);
 }
 extern int stock_sleeptimer_trampoline(void *win, void *ctx);
 int ringnav_sleeptimer(void *win, void *ctx) {
@@ -3598,15 +3566,15 @@ int ringnav_quick_settings(void *win, void *ctx) {
  * (ARTISTCF), Playback's Year order (YEAROLD, coverflow.c's year ranks) and Artists, which
  * is stock's own PLAYSET ARTISTTYPE (artist_type, the artist page's switch;
  * docs/internals.md#album-artists), and Bluetooth's Resume on connect (RESUME, so a missing key
- * holds playback; docs/internals.md#resume-on-connect), and the Lock screen's Clock (LOCKCLOCK,
- * lockscreen.c; docs/internals.md#lock-screen), and Playback's Artist album order (ARTISTAZ), and
- * Power's Volume guard (VOLGUARD, playback.c's wheel_guard; docs/internals.md#volume-guard), and
- * Display's Hold Return (HOLDRETURN, compact_now_playing; docs/ipod.md#hold-return), and Power's
- * Standby limit (STANDBYLIMIT, ringnav_standby; docs/internals.md#standby-limit), and Bluetooth's
- * Control Device Volume (BTVOLLINK, bt_audio_ready; docs/internals.md#headset-controls-and-volume),
- * and Power's Smart Wi-Fi (SMARTWIFI, smart_poll; docs/internals.md#smart-wi-fi), and Display's
- * Fast Navigation (BIGLIBRARY, Cover Flow's letters; docs/internals.md#coverflow-thumb) and
- * Playlist View (PLAYLISTCF).
+ * holds playback; docs/internals.md#resume-on-connect), and Playback's Artist album order
+ * (ARTISTAZ), and Power's Volume guard (VOLGUARD, playback.c's wheel_guard;
+ * docs/internals.md#volume-guard), and Display's Hold Return (HOLDRETURN, compact_now_playing;
+ * docs/ipod.md#hold-return), and Power's Standby limit (STANDBYLIMIT, ringnav_standby;
+ * docs/internals.md#standby-limit), and Bluetooth's Control Device Volume (BTVOLLINK,
+ * bt_audio_ready; docs/internals.md#headset-controls-and-volume), and Power's Smart Wi-Fi
+ * (SMARTWIFI, smart_poll; docs/internals.md#smart-wi-fi), and Display's Fast Navigation
+ * (BIGLIBRARY, Cover Flow's letters; docs/internals.md#coverflow-thumb) and Playlist View
+ * (PLAYLISTCF).
  */
 /* Bluetooth's Control Device Volume on: the Q2's volume is the device's own (bt_audio_ready). */
 static int bt_vol_link __attribute__((section(".scratch")));
@@ -3618,7 +3586,6 @@ static int *const pod_values[] = { &st.charge_limit,
                                    &st.year_old,
                                    0,
                                    &st.resume,
-                                   &st.lock_clock,
                                    &st.artist_az,
                                    &wheel_guard,
                                    &st.hold_home,
@@ -3637,7 +3604,6 @@ static int *const pod_values[] = { &st.charge_limit,
                                    &st.scan_durations,
                                    &st.cf_position,
                                    &catalogue_source };
-_Static_assert(POD_LOCKCLOCK == 6, "lockscreen.c passes pod_rows 6");
 _Static_assert(sizeof pod_values / sizeof *pod_values == POD_COUNT, "a pod_values per row");
 static const char *const pod_keys[] = { "CHARGELIMIT",
                                         "WAKEDOUBLE",
@@ -3645,7 +3611,6 @@ static const char *const pod_keys[] = { "CHARGELIMIT",
                                         "YEAROLD",
                                         0,
                                         "RESUME",
-                                        "LOCKCLOCK",
                                         "ARTISTAZ",
                                         "VOLGUARD",
                                         "HOLDRETURN",
@@ -3689,10 +3654,6 @@ int ringnav_artist_view(void) {
 int ringnav_playlist_coverflow(void) {
     pod_settings();
     return st.playlist_cf;
-}
-int ringnav_lock_clock(void) {
-    pod_settings();
-    return st.lock_clock;
 }
 /* Fast Navigation: Cover Flow's letters and their half copies (coverflow_thumb.c, lettered,
  * coverflow_halves); off unless the key is 1. */
@@ -3749,7 +3710,6 @@ static void pod_text(int i) {
         { "Year Order: Newest First", "Year Order: Oldest First" },
         { "Artists: Artist", "Artists: Album Artist" },
         { "Resume on Connect: Off", "Resume on Connect: On" },
-        { "Clock: Standard", "Clock: Large" },
         { "Artist Album Order: Year", "Artist Album Order: A–Z" },
         { "Volume Guard: Off", "Volume Guard: On" },
         { "Hold Return: Recent", "Hold Return: Home" },
@@ -4362,6 +4322,7 @@ static int bar_state_sync(void *bar) {
             }
         }
     }
+    changed |= keylock_bar(bar); /* keylock.c */
     if (st.bar_idle && st.bar_state && st.bar_eq)
         widget_set_visible(st.bar_idle,
                            !widget_get_visible(st.bar_state) && !widget_get_visible(st.bar_eq), 0);
@@ -4411,9 +4372,10 @@ void bar_place(void *w, int x, int y, int ww, int h) {
 /* A status row's clock (tools/ipod.py status_row; docs/ipod.md#status-bar-and-clock): on a page
  * with no title, centred on the screen (x 187.5); else (a title on the left, or Home's Split with
  * its art beside the list) at the right, its text ending CLOCK_BESIDE left of the battery's body,
- * beside the play state. Over Split's art it is in Text Primary, so the art's ink (coverflow.c
- * home_ink) covers it whole as one glyph. The title's box ends CLOCK_CLEAR short of the widest
- * clock, "00:00", so its ellipsis does. The box is sized to the text as measured in the bar's
+ * beside the play state, and further left by Buttons Lock's padlock while it shows (keylock_room).
+ * Over Split's art it is in Text Primary, so the art's ink (coverflow.c home_ink) covers it whole
+ * as one glyph. The title's box ends CLOCK_CLEAR short of the widest clock, "00:00", so its
+ * ellipsis does. The box is sized to the text as measured in the bar's
  * face, with hscroll_label's 2 px margins, so the label's own alignment plays no part. Runs in
  * the bar's background paint, before the clock draws; a move repaints the bar after. */
 #define CLOCK_BESIDE 24
@@ -4427,7 +4389,7 @@ static void clock_place(void *bar, void *top) {
     static const unsigned zeros[] = { '0', '0', ':', '0', '0', 0 };
     static void *clock;
     static int ink, widest, set_color; /* set_color: the colour written last, compared in place of
-                                         * a read-back of the style's current state */
+                                        * a read-back of the style's current state */
     void *canvas = st.bar_title ? widget_get_canvas(st.bar_title) : (void *)0;
     if (!geom_val(V_STATUS_Y) || !st.bar_slot || !canvas) return;
     if (!clock) {
@@ -4437,7 +4399,8 @@ static void clock_place(void *bar, void *top) {
     if (!widest) widest = clock_width(canvas, zeros); /* the face holds until a restart */
     const unsigned *text = widget_get_text(clock);
     int split = coverflow_home_split(top), right = !!st.bar_titled || split,
-        edge = I(P(st.bar_slot, W_PARENT), W_X) + I(st.bar_slot, W_X) - CLOCK_BESIDE,
+        edge =
+            I(P(st.bar_slot, W_PARENT), W_X) + I(st.bar_slot, W_X) - CLOCK_BESIDE - keylock_room(),
         w = (text && *text ? clock_width(canvas, text) : widest) + 4,
         x = right ? edge + 2 - w : (375 - w + 1) / 2,
         color = split == 2 ? (int)RGBA(0xffffff) : ink,
@@ -5972,12 +5935,6 @@ void final_text(void *canvas, const char *face, const unsigned *s, const void *r
                      (RGBA(color & 0xffffffu) & 0xffffffu) | (color & 0xff000000u));
     st.raw_ink = raw;
 }
-/* A key for paint_dark_bar: a battery label's "88%", charging as the status bar's icon says. */
-unsigned dark_bar_key(const unsigned *t) {
-    unsigned level = 0;
-    while (t && *t >= '0' && *t <= '9') level = level * 10 + (*t++ - '0');
-    return (level > 100 ? 100 : level) << 3 | (unsigned)bar_charging() << 1;
-}
 /* The dark bar's rows and its line, the last of h rows from y: the scheme's dark half in either
  * half, over the bar's own line, with no second one; a flat Status Bar's plain black. Final
  * colours. */
@@ -5992,7 +5949,7 @@ void dark_bar_rows(void *canvas, int y, int w, int h) {
     bar_rect(canvas, RGBA(S->bar_line), 0, y + h - 1, w, 1);
 }
 /* The dark bar on a full-screen window, which the system bar doesn't paint over: its rows and line,
- * a title if it has one, the play state and the battery by dark_bar_key's key. Final colours; the
+ * a title if it has one, the play state and the battery by battery_now's key. Final colours; the
  * fill is restored. */
 void paint_dark_bar(void *w, void *canvas, const unsigned *title, unsigned key) {
     void *lcd = P(canvas, CANVAS_LCD);
@@ -6011,27 +5968,6 @@ void paint_dark_bar(void *w, void *canvas, const unsigned *title, unsigned key) 
         paint_art(w, canvas, status == 2 ? "classic_light_play_w" : "classic_light_pause_w", 278,
                   7);
     stock_canvas_set_fill_color(canvas, fill);
-}
-/* The info screen's dark tray: its rows, top light, ring and the light row under the ring. */
-void paint_tray(void *canvas, int x, int y, int w, int h) {
-    static const stops_t rows = { 5,
-                                  { 0, 7, 49, 50, 100 },
-                                  { 0x474e58, 0x2b3038, 0x15181d, 0x090b0e, 0x14161b } };
-    void *lcd = P(canvas, CANVAS_LCD);
-    if (!lcd) return;
-    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
-    rect_t r = { x, y, w, h }, ring = { x - 1, y - 1, w + 2, h + 2 };
-    round_ring(canvas, &ring, 10, 0xa6000000u);
-    row_below(canvas, &ring, 10, 0x26ffffffu);
-    paint_round_rows(canvas, &r, &rows, 9);
-    round_row(canvas, &r, 9, 0, 0x47ffffffu);
-    stock_canvas_set_fill_color(canvas, fill);
-}
-/* Minutes since midnight now, or -1 when the clock can't be read. */
-int clock_minutes(void) {
-    int buf[11];
-    const int *tm = clock_now(buf);
-    return tm ? tm[2] * 60 + tm[1] : -1;
 }
 
 /* USB Storage's page, every theme: the computer's eject (SCSI START STOP UNIT, LoEj) closes the
@@ -7335,14 +7271,12 @@ int ringnav_image_add(void *manager, const char *name, void *bitmap) {
      * white glyph, an image the accent mapped is final, and switch_off keeps its white knob as
      * switch_on does. Quick Settings' inactive discs (DROPDOWN_IMAGE, unmapped) flip whole: a
      * light disc under a dark glyph, as the active ones stand out in the accent. Premultiplied
-     * pixels (bitmap_t flags @0xc) flip their straight colour. The lock screen's hint lies on a
-     * picture or a dark page in a theme's own light half, so it keeps its white there; so does
-     * Gain's switch, whose thumb stays white as the other switches' do. */
+     * pixels (bitmap_t flags @0xc) flip their straight colour. Gain's switch keeps its white in a
+     * theme's own light half, its thumb white as the other switches' are. */
     unsigned char *ink = paper && !mapped && format < 4 && s && !*s &&
                                  tk_strcmp(name, "switch_off") &&
                                  (T->light == T->schemes ||
-                                  (tk_strcmp(name, "scrsaver_slide") &&
-                                   tk_strcmp(name, "gain_low") && tk_strcmp(name, "gain_high")))
+                                  (tk_strcmp(name, "gain_low") && tk_strcmp(name, "gain_high")))
                              ? bitmap_lock_buffer_for_write(bitmap)
                              : (void *)0;
     if (ink) {
@@ -7773,14 +7707,15 @@ static void setting_row(void *view, int i) {
 /* systemset_display_page_init: stock builds its four rows (0x4c6b94: a s_listitem_black list_item
  * holding a 335x70 s_btn_listitem button with a 52px icon, a 24px label at x 72 and list_into).
  * Its fourth, Show Navigation Bar, goes: the themes own the bar and each list's box, so stock's
- * switch is held on (tools/build.py NAV_SHOWN). Smart Awake and Night Shift (the brightness icon,
- * opening its slider page, crossfade.c) join them, then Appearance and Coverflow, each opening
- * stock's page again (display_open) with its stock rows dropped and its own instead: Theme, Light
- * Mode, Accent, Corners, Home, Shortcut, Battery, Time in Title, Centred Now Playing; Artist View,
- * Coverflow Sort and Refresh Coverflow. Controls is System settings' row (ringnav_systemset) on the
- * same page: the wheel, the buttons and what the buttons do. The value rows show it in the label
- * and have no chevron, since they change in place. ponytail: stock's page opened over itself; its
- * own rows' state is never touched on a sub-page. */
+ * switch is held on (tools/build.py NAV_SHOWN). Its third, Lock Screen, goes too: Q2 Pod has no
+ * lock screen (docs/internals.md#screen-off-and-wake). Smart Awake and Night Shift (the brightness
+ * icon, opening its slider page, crossfade.c) follow Brightness and Screen Off Time, then
+ * Appearance and Coverflow, each opening stock's page again (display_open) with its stock rows
+ * dropped and its own instead: Theme, Light Mode, Accent, Corners, Home, Shortcut, Battery, Time in
+ * Title, Centred Now Playing; Artist View, Coverflow Sort and Refresh Coverflow. Controls is System
+ * settings' row (ringnav_systemset) on the same page: the wheel, the buttons and what the buttons
+ * do. The value rows show it in the label and have no chevron, since they change in place.
+ * ponytail: stock's page opened over itself; its own rows' state is never touched on a sub-page. */
 int ringnav_display(void *win, void *ctx) {
     static const char *const titles[] = { 0, "Appearance", "Cover Flow", "Controls", "Theme" },
                              *const sub_icons[] = { 0, "system_display", "playset_covermode",
@@ -7790,18 +7725,17 @@ int ringnav_display(void *win, void *ctx) {
     static const char *const hold_icon[] = { "playset_folderjump" },
                              *const tone_icon[] = { "system_keytone" },
                              *const lock_icon[] = { "system_keylock" };
-    static const unsigned char main_order[] = { 0, 1, 3, 4, 2, 5, 6 };
     int sub = display_sub, result = stock_display_trampoline(win, ctx);
     void *view = win ? widget_lookup(win, "scroll_view_display", 1) : (void *)0;
     if (!view) return result;
     if (!sub) {
         widget_destroy(widget_get_child(view, 3)); /* Show Navigation Bar */
+        widget_destroy(widget_get_child(view, 2)); /* Lock Screen */
         setting_row(view, 7);
         night_row(list_row_into(view, "display_backlight", xfade_open, (void *)3));
         for (int i = DISPLAY_APPEARANCE; i <= DISPLAY_COVERFLOW; ++i)
             widget_set_text_utf8(list_row_into(view, sub_icons[i], display_open, (void *)(long)i),
                                  titles[i]);
-        reorder(view, main_order, sizeof main_order);
         return result;
     }
     widget_destroy_children(view);
@@ -10692,17 +10626,10 @@ static int home_cf_hold(void *top) {
  * Settings (not OLED's) the wheel's brightness/volume switch, on View Queue's shuffle list
  * Play Next (un_hold), on a Library artist's page under OLED nothing (artist_local_on: its rows
  * are no showlist records), the release latched as the queue menu's. A held Previous or Next that
- * scans (seek_held) and Centre held on OLED's lock window (lockscreen_hold) stop first. */
+ * scans (seek_held) stops first. */
 int ringnav_keylong(void *ctx, void *event) {
     if (event && ple_key((unsigned)I(event, EVENT_KEY), 3)) return STOP;
     if (event && seek_held((unsigned)I(event, EVENT_KEY))) return STOP;
-    /* OLED's lock window: Centre held unlocks (lockscreen.c lockscreen_hold); its release is the
-     * held power key's, which stock's keyup takes and clears, as after the Shut Down? hold */
-    if (event && I(event, EVENT_KEY) == KEY_CENTER &&
-        lockscreen_hold(window_manager_get_top_window(window_manager()))) {
-        g_power_longkey = 1;
-        return STOP;
-    }
     if (!event || I(event, EVENT_KEY) != KEY_PLAY) return stock_keylong_trampoline(ctx, event);
     void *top = window_manager_get_top_window(window_manager());
     const char *fav = radio_hold(top);
@@ -11220,7 +11147,6 @@ int ringnav_sleep(void *loop) {
     thumb_poll();
     lyric_poll();
     keep_lit_poll();
-    info_poll();
     np_art_poll();
     if ((st.np_slide && widget_get_prop_int(st.np_slide, "value", 0)) || /* off the art page */
         np_about_page() ||               /* the details over it (np_about.c) */
@@ -11398,13 +11324,16 @@ int ringnav_post_key(void *loop, int pressed, int key) {
     posted[next].to = time_now_ms();
     return ret;
 }
-static int remote_key(void *e) {
+static int remote_match(void *e, int spend) {
     unsigned key = (unsigned)I(e, EVENT_KEY), t = (unsigned)I(e, EVENT_TIME);
     for (int i = 0; i < 4; i++)
-        if (posted[i].key == key && t - posted[i].from <= posted[i].to - posted[i].from)
-            return posted[i].key = 0, 1;
+        if (posted[i].key == key && t - posted[i].from <= posted[i].to - posted[i].from) {
+            if (spend) posted[i].key = 0;
+            return 1;
+        }
     return 0;
 }
+static int remote_key(void *e) { return remote_match(e, 1); }
 
 /* window_manager_dispatch_input_event: while q2video plays (books.c) no key or touch reaches the
  * UI; a key's release goes to the player instead. A card game (addon.c) takes every event but the
@@ -11449,6 +11378,7 @@ static void vol_step(unsigned key) {
 int ringnav_input(void *wm, void *e) {
     if (e && tick_gate(e)) return 0;
     if (e && (chord_gate(e) || wake_gate(e))) return 0;
+    if (e && keylock_gate(e, remote_match(e, 0))) return 0; /* keylock.c */
     st.last_input = time_now_ms();
     unsigned type = e ? (unsigned)I(e, EVENT_TYPE) : 0;
     unsigned key = e ? (unsigned)I(e, EVENT_KEY) : 0;

@@ -2682,19 +2682,6 @@ def test_a_set_with_toolbars_keeps_stocks_switch(fw, st):
     assert not any(c.name == '_switch_row' for c in win.walk())
 
 
-def test_lock_screens_switch_row_heads_its_list(fw, st):
-    theme(fw, MINIMAL)
-    st('geom').value = CLASSIC_SET
-    ui = Ui(fw)
-    win = ui.window('lockscreen_page')
-    ui.add('image', win, (300, 270, 50, 50), 'img_switch', image='switch_on')
-    view = ui.add('scroll_view', win, (0, 26, 375, 294), 'scroll_view_lock')
-    ui.add('list_item', view, name='first')
-    fw.fn('switch_row', None, C.c_void_p, C.c_void_p)(win.addr, view.addr)
-    head = view.children[0]
-    assert head.name != 'first' and ui.text(label_of(head)) == 'Lock Screen' and switch(head) == 'switch_on'
-
-
 # The library scan's refresh of a row it already holds.
 MAP = 0x100022  # MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE
 ROW_HIGHS = high_halves(2)  # song_row's

@@ -384,16 +384,6 @@ def test_english_ui_key_test_page():
     assert texts(build.english_ui('testmode/test_key.bin', ipod.encode(ui(label('中'))))) == ['Centre']
 
 
-def test_english_ui_about_page_keeps_polish():
-    data = ipod.encode(ui(label('a，b'), label('plain')))
-    assert texts(build.english_ui('systemset/screensaver_about.bin', data)) == ['a, b', 'plain']
-
-
-def test_english_ui_about_page_refuses_real_chinese():
-    with pytest.raises(ValueError, match=r'^Chinese left in systemset/screensaver_about.bin$'):
-        build.english_ui('systemset/screensaver_about.bin', ipod.encode(ui(label('文件夹'))))
-
-
 def test_english_ui_unknown_text_stops_the_build():
     with pytest.raises(KeyError):
         build.english_ui('home_page.bin', ipod.encode(ui(label('未知'))))

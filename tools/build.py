@@ -109,13 +109,6 @@ HOOKS = {
     # Power gains Charge limit; Playback gains Artists (Album Artist)
     'systemset_sysset_page_init': (0x4d3ba8, 'ringnav_systemset', 'systemset'),
     'systemset_display_page_init': (0x4c7168, 'ringnav_display', 'display'),
-    # Lock screen (patch/lockscreen.c): the built-in wallpapers in the picture list, the Lock screen
-    # page's Clock row and the built-ins' thumbnails, and the lock window's wallpaper and Large clock
-    'get_screensaver_image': (0x505698, 'lockscreen_images', 'saverlist'),
-    'screensaver_rows': (0x4cff00, 'lockscreen_rows', 'saverrows'),
-    'saverscreen_page_init': (0x53f450, 'lockscreen_init', 'saver'),
-    # The lock window's cover (unnamed, from its 20 ms timer): repainted once it changes
-    'saver_cover': (0x53f124, 'lockscreen_cover', 'savercover'),
     'save_memoryplay_info': (0x521058, 'ringnav_savequeue', 'savequeue'),
     # A reboot saves the queue first, as power-off does (playback.c ringnav_reboot): Restart and
     # the firmware update's dialog, which stops the player before it flashes and reboots
@@ -456,9 +449,6 @@ NTP_POOL = (b'\0cn.pool.ntp.org\0time.', b'\x000.pool.ntp.org\0\0time.')
 # the radio's power save (LPS) off for the whole connection; 2 restores the driver's own default,
 # PS_MODE_MAX. See docs/internals.md#battery.
 WIFI_LPS = (b'rtwpriv wlan0 pm_set lps=0\0', b'rtwpriv wlan0 pm_set lps=2\0')
-# The lock window's 12-hour clock format (after its 24-hour hh:mm, by clock_time): stock's HH:TT shows
-# "05:PM"; H:mm is the hour 1-12 unpadded and the minutes (tk_date_time_format_impl), "5:07".
-LOCK_CLOCK_12H = (b'hh:mm\0\0\0HH:TT\0', b'hh:mm\0\0\0H:mm\0\0')
 # Now Playing's info page: its one fill (0x53bc78), a bal, becomes jal ringnav_np_info, which tidies the lines.
 NP_INFO_CALL = 0x53d308
 # Now Playing's A-B markers (0x53baa4): its three calls of their x (0x53b9d8), each a bal, become jal ringnav_ab_x,
@@ -518,6 +508,9 @@ PREV_RESTART = (0x51f0ec, 0x2842000b, 0x28420003)
 # V1.36's on_wm_keyup_before_fun applies Buttons lock on the lit lock window too (beqz g_lockscreen_pageflag past the lock).
 # Buttons lock stays the dark screen's (navigation.c lock_names), as V1.32's: the branch is taken always.
 KEYLOCK_LIT = (0x4f2728, 0x10400010, 0x10000010)
+# config_init stores SYSSET SCREENSAVER's 0 or 1 in g_screensaver_mode (sb $2); it stores 0 (sb $zero) whatever
+# the file says, so stock's wake never opens its lock window (docs/internals.md#screen-off-and-wake).
+SAVER_OFF = (0x504c78, 0xa0620000, 0xa0600000)
 # V1.36's volume_dialog_on_keyup leaves at once with the screen off (beqz g_backlight_status), so a dark wheel tick over the
 # volume dialog falls through to on_wm_keyup_fun, which opens "dialog/volume_dialog" again: navigator_to looks an open window
 # up by that path, never its name "volume_dialog", so every tick stacked one more dialog and none changed the volume. Each
@@ -773,14 +766,7 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('system_carmode', 'In-Vehicle mode', 'In-Vehicle Mode'), ('system_reset', 'Reset settings', 'Reset Settings'),
     ('reset_initset', 'Reset only settings', 'Reset Settings Only'),
     ('reset_factory', 'Full factory reset', 'Full Factory Reset'),
-    ('display_lighttime', 'Screen off time', 'Screen Off Time'), ('display_screenlock', 'Lock screen', 'Lock Screen'),
-    ('screenlock_timeshow', 'Lockscreen Time Display', 'Show Time'),
-    ('screenlock_about', 'Custom lock screen', 'Custom Lock Screen'),
-    ('screenlock_info1', '1.Custom lock screen:Images must be stored in "lockscreenimage" folder,located in root folder of micro SD card;',
-     '1. Put the pictures in a folder named "lockscreenimage" at the top of the card.'),
-    ('screenlock_info2', '2.Supports PNG and JPG，resolution exactly 375 x 320，under 1MB;',
-     '2. PNG or JPG, exactly 375 x 320 pixels, under 1 MB each.'),
-    ('screenlock_info3', '3.Maximum of 5 images in folder.', '3. Up to 5 pictures.'),
+    ('display_lighttime', 'Screen off time', 'Screen Off Time'),
     ('about_sn', 'Serial number', 'Serial Number'), ('about_version', 'FW. Version', 'Version'),
     ('list_baidu', 'Baidu Netdisk(BETA)', 'Baidu Netdisk'), ('msg_poweroff', 'Confirm Shutdown?', 'Shut Down?'),
     ('system_prove', '技术证明', 'Certification'),  # About's regulatory row, Chinese in stock's English
@@ -1062,8 +1048,7 @@ ENGLISH = {
     '共0首': '0 songs',
 }
 ENGLISH_IN = {'testmode/test_key.bin': {'中': 'Centre'}, 'kb_default_t9.bin': {'中': 'abc', '《》': '«»'},
-              'dialog/search_dialog.bin': {'专辑': 'Albums', '风格': 'Genres'},
-              'systemset/screensaver_about.bin': {}}
+              'dialog/search_dialog.bin': {'专辑': 'Albums', '风格': 'Genres'}}
 
 def english_ui(rel, data):
     """rel's widgets' Chinese text in English, and the T9 keyboard's Chinese page out of reach."""
@@ -1080,10 +1065,7 @@ def english_ui(rel, data):
         text = props.get('text', '')
         if not CJK.search(text):
             continue
-        if rel == 'systemset/screensaver_about.bin':  # Polish, with a full-width comma
-            props['text'] = text.replace('，', ', ')
-        else:
-            props['text'] = ENGLISH_IN.get(rel, {}).get(text) or ENGLISH[text]
+        props['text'] = ENGLISH_IN.get(rel, {}).get(text) or ENGLISH[text]
     check(not any(CJK.search(n[2].get('text', '')) for n in walk(root)), f'Chinese left in {rel}')
     return encode(root)
 
@@ -1585,7 +1567,6 @@ FUNCTIONS = {
  'hscroll_label_set_only_focus': ('int', 'void *, int'),
  'hscroll_label_set_only_parent_focus': ('int', 'void *, int'),
  'hscroll_label_set_ellipses': ('int', 'void *, int'),
- 'hscroll_label_set_yoyo': ('int', 'void *, int'),
  'hscroll_label_set_xoffset': ('int', 'void *, int'),
  'hscroll_label_set_loop_interval_distance': ('int', 'void *, int'),  # Now Playing's lines' copy (np_marquee.c)
  'hscroll_label_start': ('int', 'void *'),
@@ -1702,7 +1683,6 @@ FUNCTIONS = {
  'canvas_offline_destroy': ('int', 'void *'),
  'canvas_translate': ('int', 'void *, int, int'),
  'widget_vtable_on_paint_self': ('int', 'void *, void *'),  # native foreground for fallback weight
- 'widget_on_paint_children': ('int', 'void *, void *'),  # a wallpaper thumbnail's check badge (lockscreen.c)
  'slide_menu_set_spacer': ('int', 'void *, int'),
  'playing_timer_start': ('int', 'void *'),
  'playing_timer_clear': ('int', 'void *'),
@@ -1746,6 +1726,8 @@ FUNCTIONS = {
  'save_memoryplay_info': ('int', 'void'),  # Memory playback's queue and position, as into_poweroff saves them
  'mclSetDacPwr': ('int', 'int'),
  'reset_poweroptions_timer': ('int', 'int, int, int'),
+ 'enable_fb': ('int', 'void'),  # FBIOBLANK unblank: the panel lights (keylock.c's card, as awake_screen)
+ 'screen_action': ('int', 'int'),  # 1: the backlight and stock's power timers; 0: the panel blanks (disable_fb)
  'btctl_transport_get_volume': ('int', 'void'),
  'btctl_transport_set_volume': ('int', 'int'),
  'device_set_volume': ('int', 'int, int'),  # volume, notify: the DAC's or hciplayer's, as the volume dialog
@@ -1802,9 +1784,7 @@ PRIVATE_FUNCTIONS = {
     "album_row": 0x506e94,  # getAllAlbum's sqlite3_exec callback: id, album, songer, fileurl to a record
     "folder_refresh": 0x531efc,  # folder_page's navbar and table from p_deque_showlist (its init, back)
     "class_icon": 0x4b2268,  # a category row's picture: the head for Artists, a genre icon, else .downpic
-    "screensaver_rows": HOOKS['screensaver_rows'][0],  # the Lock screen page's rows and picture grid
     "folder_click": HOOKS['folder_click'][0],  # folder_page's row click (folder_enter, then a file's queue)
-    "saver_cover": HOOKS['saver_cover'][0],  # the lock window's img_playcover from the playing track
     "np_info": 0x53bc78,  # Now Playing's info page labels, from the track (NP_INFO_CALL)
     "ab_x": 0x53b9d8,  # an A-B marker's x, on the boot set's np_bar_x and np_bar_w (AB_X_CALLS)
     "fwupdate_tf": 0x4c7eb4,  # systemset_fwupdate_page's row 0 click (0x4c84cc): stock's TF card update
@@ -1857,8 +1837,6 @@ CONTEXT_DATA = {'bt_showcoding': 4, 'g_memory_info': 3476, 'g_folder_path': 1024
                 'stTidalTracks': 16,  # a Tidal track list: total, limit, offset, its deque
                 'g_pressdown_y': 4,  # the touch's start, the window manager's pointer-down writes it
                 'g_dropdown_menu_state': 4,  # Quick Settings: 1, 2 while it slides or follows a swipe, 3 open
-                # the lock screen's picture (SYSSET SCREENSAVERPATH) and the picker's list
-                'g_screensaver_picture': 256, 'p_deque_screensaverlist': 4,
                 'bt_connectstatus': 4,  # a link thread runs (1), ended (2), checked (3)
                 'bt_initstatus': 4,  # Bluetooth's start-up status: -102 is stock's "Bluetooth abnormal" (system.c reboot_record)
                 'wifi_showlist': 4}  # the Wi-Fi page's scan records: name @0, flags @4 (wifi_rows.c)
@@ -1880,7 +1858,16 @@ STOCK_EQ = ['release/assets/default/raw/ui/playset/preseteq_page.bin'] + [
 STOCK_PAGES = [f'release/assets/default/raw/ui/{n}_page.bin' for n in ('coverflow', 'spectrum', 'vu')] + [
     f'release/assets/default/raw/images/xx/{n}.png' for n in
     ['default_album_coverflow', 'play_spectrum', 'play_spectrumdown', 'play_vu', 'play_vudown', 'spectrum_back', 'spectrum_bar',
-     *(f'spectrum_point{i}' for i in range(12)), 'vu_back', 'vu_dot', 'vu_left', 'vu_right']]
+     *(f'spectrum_point{i}' for i in range(12)), 'vu_back', 'vu_dot', 'vu_left', 'vu_right']] + [
+    # Stock's lock screen too (docs/internals.md#screen-off-and-wake): the lock window, its settings page and that
+    # page's About, and the images only they and Display's Lock Screen row show. Only on_wm_keyup_fun and
+    # device_standby open the lock window, and only with g_screensaver_mode set, which SAVER_OFF keeps clear; only
+    # Display's row opens the settings page, and ringnav_display destroys that row.
+    *(f'release/assets/default/raw/ui/{n}.bin' for n in
+      ('saverscreen_page', 'systemset/screensaver_page', 'systemset/screensaver_about')),
+    *(f'release/assets/default/raw/images/xx/{n}.png' for n in
+      ('display_screenlock', 'screensaver_default', 'scrsaver_battery', 'scrsaver_charing', 'scrsaver_defaulticon',
+       'scrsaver_lowbattery', 'scrsaver_playcover', 'scrsaver_slide'))]
 # Superseded library versions (the unversioned and soname links already resolve to the newer ones)
 # and on-device debugging and network tools; no script, program or library in the rootfs, and nothing
 # in patch/, names them as a command (the rootfs's libcurl speaks only http, https and file). The
@@ -1903,7 +1890,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'keylock.c']
 
 def compile_payload(out):  # pragma: no mutate block
     """Compile and link the payload."""
@@ -1922,7 +1909,7 @@ def compile_payload(out):  # pragma: no mutate block
     # -O2: lld merges a string constant that ends another into its tail, which -O1 does not (3,328 bytes)
     run('ld.lld','-m','elf32ltsmip','-O2','--gc-sections','-T',ROOT/'patch/link.ld','-e','ringnav',
         *[f'--undefined={name}' for _, name, _ in HOOKS.values()], f'--undefined={GRADIENT_LEAF[2]}', '--undefined=ringnav_lrc_open',
-        f'--undefined={WM_PAINT_LEAF[2]}', f'--undefined={QUEUE_LEAF[2]}', '--undefined=ringnav_audio_extension', '--undefined=start_mute', '--undefined=start_sleep', '--undefined=ringnav_genre_copy', '--undefined=ringnav_lyric_save', '--undefined=ringnav_lyric_drop', '--undefined=ringnav_cover_copy','--undefined=ringnav_folder_rm','--undefined=ringnav_bootmode', '--undefined=lockscreen_access','--undefined=ringnav_ts_read',
+        f'--undefined={WM_PAINT_LEAF[2]}', f'--undefined={QUEUE_LEAF[2]}', '--undefined=ringnav_audio_extension', '--undefined=start_mute', '--undefined=start_sleep', '--undefined=ringnav_genre_copy', '--undefined=ringnav_lyric_save', '--undefined=ringnav_lyric_drop', '--undefined=ringnav_cover_copy','--undefined=ringnav_folder_rm','--undefined=ringnav_bootmode', '--undefined=ringnav_ts_read',
         '--undefined=ringnav_baidu_poll', '--undefined=ringnav_stock_tls', '--undefined=ringnav_tidal_poll', '--undefined=catalogue_access', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
         '--undefined=coverflow_player_cover', '--undefined=coverflow_grid_cover', '--undefined=coverflow_album_cover', '--undefined=coverflow_folder_cover', '--undefined=headset_bt_init',
         '--undefined=headset_status_register', '--undefined=headset_bt_autolink',
@@ -2211,10 +2198,6 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
           'player_initconfig: unexpected mclSetPlayMode call')
     patch_word(patched, 0x504188, 0x0411e963, jal(ps['ringnav_bootmode']),
                'config_init preserves the saved queue when applying the boot play mode')
-    patch_word(patched, 0x504d24, 0x0320f809, jal(ps['lockscreen_access']),
-               'startup accepts built-in wallpapers')
-    patch_word(patched, 0x505724, 0x0320f809, jal(ps['lockscreen_access']),
-               'wallpaper list accepts built-in wallpapers')
     from peq import patch_player
     raw_player = cat('usr/bin/hciplayer')
     audio = patch_player(raw_player, out/'peq', flac_experiments)
@@ -2249,6 +2232,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patch_word(patched, *HOME_KEYUP, 'Home binds no key-up of its own')
     patch_word(patched, *NP_CENTRE, "Now Playing leaves Centre to stock's power-key handling")
     patch_word(patched, *KEYLOCK_LIT, 'Buttons lock acts only with the screen off')
+    patch_word(patched, *SAVER_OFF, "stock's lock screen stays off")
     patch_word(patched, *PREV_RESTART, 'Previous restarts the track from 3 s in')
     patch_word(patched, *VOL_DARK, 'The volume dialog steps with the screen off')
     for site in MORE_ARTIST_CLOSE:
@@ -2422,8 +2406,6 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patched = patched.replace(*NTP_POOL)
     check(patched.count(WIFI_LPS[0]) == 1, 'Unexpected Wi-Fi power save command')
     patched = patched.replace(*WIFI_LPS)
-    check(patched.count(LOCK_CLOCK_12H[0]) == 1, 'Unexpected lock clock formats')
-    patched = patched.replace(*LOCK_CLOCK_12H)
     check(re.search(r'\.pdr +PROGBITS +0+ +0*%x +0*%x ' % PDR, run('readelf', '-SW', demo)) and
           all(p[1]+p[4] <= PDR[0] for _,p in segments(patched) if p[0] == 1), '.pdr: not the audited section')
     patched[PDR[0]:PDR[0]+PDR[1]] = bytes(PDR[1])

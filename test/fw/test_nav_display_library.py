@@ -302,9 +302,9 @@ def test_display_adds_smart_awake_night_shift_and_its_two_pages_among_stocks_row
     ui = Ui(fw)
     page = display(fw, ui)
     view = page.view()
-    # stock's first two, then Smart Awake and Night Shift, stock's third, then Appearance and Cover Flow; its fourth, Show
-    # Navigation Bar, is not offered
-    assert titles(view) == ['stock_0', 'stock_1', 'Smart Awake', 'Night Shift', 'stock_2', 'Appearance', 'Cover Flow']
+    # stock's first two, then Smart Awake and Night Shift, then Appearance and Cover Flow; its third, Lock Screen, and
+    # its fourth, Show Navigation Bar, are not offered
+    assert titles(view) == ['stock_0', 'stock_1', 'Smart Awake', 'Night Shift', 'Appearance', 'Cover Flow']
     # Night Shift and the two pages open a page, so they carry the chevron; Smart Awake changes in place
     into = [any(c.props.get('image') == b'list_into' for c in item.children[0].children) for item in view.children if not item.name]
     assert into == [False, True, True, True]

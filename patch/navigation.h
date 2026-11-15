@@ -29,7 +29,6 @@ enum {
     POD_YEAR_OLD,
     POD_ARTISTS,
     POD_RESUME,
-    POD_LOCKCLOCK,
     POD_ARTIST_AZ,
     POD_VOL_GUARD,
     POD_HOLD_HOME,
@@ -148,8 +147,8 @@ typedef struct {
      * on. playlist_cf: Playlists open as Cover Flow. */
     int pod_read, charge_limit, wake_double, wake_pass, wake_eat,
         wake_down, /* 1: the held Centre press passes; 2: it is dropped */
-        charge_held, artist_cf, year_old, resume, lock_clock, artist_az, hold_home, standby_limit,
-        eq_output, smart_wifi, big_library, playlist_cf, scan_durations, cf_position;
+        charge_held, artist_cf, year_old, resume, artist_az, hold_home, standby_limit, eq_output,
+        smart_wifi, big_library, playlist_cf, scan_durations, cf_position;
     void *pod_label[POD_COUNT];
     void *art_cf_win, *art_cf_list; /* the artist page given its Coverflow, the albums pending */
     void *art_cf_veil;              /* the artist page unseen until they show, and its anim_hint */
@@ -179,7 +178,6 @@ typedef struct {
     void *sel_w; /* the surface whose selection was last drawn */
     int sel_row, sel_y;
     void *paint_w, *sel_widget; /* paint-local color mapping, never stored on recycled widgets */
-    void *sel_frame; /* a set_switch theme's selected picture tile, framed over (sel_frame_paint) */
     int sel_home;
     unsigned clock_key;   /* minute + 1 and format bits; 0 before the first, ~0 for --:-- */
     unsigned clock_timer; /* clock_due, at the next minute; 0 until the bar first paints */
@@ -606,6 +604,10 @@ void np_seek_bar(int phase, int to, int paused);
 void seek_scrub(int to);
 int seek_scrub_end(int to, int seek);
 int video_on(void);
+/* keylock.c: Buttons Lock's padlock and its card (docs/internals.md#buttons-lock) */
+int keylock_gate(void *e, int remote), keylock_bar(void *bar), keylock_room(void);
+void keylock_paint(void *w, void *canvas);
+int ringnav_wm_paint(void *wm); /* window_manager_paint's leaf */
 
 /* theme_engine.c */
 #define ACCENT_N SETTING_N_ACCENT /* the ACCENTS rows: theme_engine.c's accents[] has as many */

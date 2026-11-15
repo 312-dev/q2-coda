@@ -11732,11 +11732,8 @@ assert light_image({'LIGHT':'1'},'scover_wait0',False)==bytes([K,K,K,0xff])+byte
 assert light_image({'LIGHT':'1'},'scover_wait0',True)==bytes([0xff,0xff,0xff,0xff,0x44,0x44,0x44,0xff]); passed()
 assert light_image({},'scover_wait0',False)==bytes([0xff]*4)+bytes(4); passed()
 assert light_image({'LIGHT':'1'},'file:///tmp/coverpic.jpg',False)[:4]==bytes([0xff]*4); passed()
-# The lock screen's hint, stock's white marks, stays white over the wallpapers and the dark page in a theme's own
-# light half; any other mark takes its ink, and Minimal's Light Mode flips the hint as any mark.
-assert light_image({'LIGHT':'1'},'scrsaver_slide',False,classic_light)[:4]==bytes([0xff]*4)
-assert light_image({'LIGHT':'1'},'scover_wait0',False,classic_light)[:4]==bytes([0,0,0,0xff])
-assert light_image({'LIGHT':'1'},'scrsaver_slide',False)[:4]==bytes([K,K,K,0xff]); passed()
+# A mark in a theme's own light half takes its ink.
+assert light_image({'LIGHT':'1'},'scover_wait0',False,classic_light)[:4]==bytes([0,0,0,0xff]); passed()
 # Gain's switch keeps its white thumb in a theme's own light half, as switch_on and switch_off do; Minimal's Light Mode flips it, as before.
 for gain in ('gain_low','gain_high'):
     assert light_image({'LIGHT':'1'},gain,False,classic_light)[:4]==bytes([0xff]*4) and light_image({'LIGHT':'1'},gain,False)[:4]==bytes([K,K,K,0xff])
@@ -11999,7 +11996,7 @@ passed()
 # accent drops the image cache and repaints, a new Battery mode repaints the bar.
 def display_page(m,sub):
     m.word(payload_syms['display_sub'],sub)
-    view=m.node('scroll_view','scroll_view_display',[m.entry(0) for _ in range(3)])
+    view=m.node('scroll_view','scroll_view_display',[m.entry(0) for _ in range(4)])  # stock's four: Brightness, Screen Off, Lock Screen, Show Navigation Bar
     for e in m.nodes[view]['children']: m.word(e+O['W_PARENT'],view)
     m.top=m.node('window','display_page',[m.node('list_view','list_view_display',[view])])
     m.nodes[m.wm]={'type':'window_manager','children':[m.top]}
@@ -12021,10 +12018,10 @@ def row_text(r):  # a row's label; a Classic value row (list_value) reads "title
     return f'{t}: {v[0]}' if v else t
 m,main,_=display({},sub=0)
 kids=m.nodes[main]['children']
-assert len(kids)==7 and [row_text(r) for r in kids[2:4]+kids[5:]]==['Smart Awake','Night Shift: Off','Appearance','Cover Flow']
+assert len(kids)==6 and [row_text(r) for r in kids[2:]]==['Smart Awake','Night Shift: Off','Appearance','Cover Flow']  # no Lock Screen
 keep_lit=kids[2]
 assert m.icons_set==['system_display','switch_off','display_backlight','list_into','system_display','list_into','playset_covermode','list_into']
-f,ctx=m.handler(m.nodes[kids[5]]['children'][0],O['EVT_CLICK']); m.calls=[]
+f,ctx=m.handler(m.nodes[kids[4]]['children'][0],O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==('systemset/display_page',None) and m.get(payload_syms['display_sub'])==0; passed()
 # Cover Flow: Artist View, Playlist View, Cover Flow Sort, Refresh Cover Flow, Fast Navigation, Song Durations, Cover
 # Flow Position, Library (Local Only or Local + Server); Controls, System's row: the wheel, the buttons and what they do.
@@ -12726,11 +12723,11 @@ assert geometry(m,ab_button)==(0,0,375,32) and geometry(m,label)[3]==32 and m.no
 assert geometry(m,button)==(20,0,335,70) and [geometry(m,i) for i in images]==[(x,9,42,61) for x in (120,177,231,283)] and all(m.nodes[i]['visible'] for i in images)
 assert not m.nodes[icon]['visible'] and geometry(m,labels[0])==(0,8,118,28) and m.nodes[labels[0]]['style:normal:font_size']==17
 assert geometry(m,labels[1])==(0,43,253,18) and m.nodes[labels[1]]['style:normal:font_size']==17; passed()
-# The selection reaches each laid-out row at the row's height: More's, its speed row's whole 78 px, Update Library's and Lock Screen's.
+# The selection reaches each laid-out row at the row's height: More's, its speed row's whole 78 px, and Update Library's.
 m.paint(view); assert m.selected(view)==0 and m.sel()==(0,0,375,32),(m.selected(view),m.sel())
 m.call(); m.paint(view); assert m.selected(view)==1 and m.sel()==(0,32,375,32),(m.selected(view),m.sel())
 m.call(); m.paint(view); assert m.selected(view)==2 and m.sel()==(0,64,375,78),(m.selected(view),m.sel())
-for page in ('updatemusic_page','screensaver_page'):
+for page in ('updatemusic_page',):
     m,view=stock_list(classic_light_on,32); m.nodes[m.top]['name']=page
     for _ in range(3): stock_row(m,view,[box(m,'hscroll_label','hscroll_label',72,0,204,70)],78)
     lay(m,view); m.paint(view); assert m.selected(view)==0 and m.sel()==(0,0,375,32),(page,m.selected(view),m.sel())
@@ -18338,16 +18335,16 @@ m.open_pages.discard('updatemusic_dialog'); m.poll(); assert m.files[DONE]==b'50
 # The scan and the import run only while every open window (the window manager's children, the status bar aside)
 # is one known to hold no library records: Home, Streaming and its Configuration, a card app's page and its QR code,
 # Now Playing, and System and Playback settings' own pages, all together here. Any other holds the request until it
-# closes: a page this list doesn't know (a new one's), the lock screen, the App Store, the Library menu, an app's
+# closes: a page this list doesn't know (a new one's), the App Store, the Library menu, an app's
 # songs and Up Next among them.
 SAFE=['home_page','stream_page','streamconf_page','addon_page','qrcode_page','playing_page','sysset_page','display_page',
       'backlight_page','lighttime_page','keylock_page','language_page','datetime_page','autotime_page','manualtime_page',
-      'screensaver_page','standby_page','powermanager_page','sleepshutdown_page','about_page','bluetooth_page',
+      'standby_page','powermanager_page','sleepshutdown_page','about_page','bluetooth_page',
       'btquality_page','btadjustvol_page','wifi_page','wifiset_page','netservice_page','playset_page','audiosetting_page',
       'playmode_page','replaygain_page','filter_page','dsdoutput_page','memplay_page','usbvol_page','maxvol_page',
       'bootvol_page','balance_page','equalizer_page']
 m=lib_machine(); seq=600
-for page in ('mystery_page','saverscreen_page','apps_page','localmusic_page','app_songs','upnext_page'):
+for page in ('mystery_page','apps_page','localmusic_page','app_songs','upnext_page'):
     seq+=1; windows(m,page); k=len(m.imports); m.files[LIB]=bytearray(f'{seq}\nimport {EXP}/Mix.m3u\n'.encode()); m.poll(); m.poll()
     assert len(m.imports)==k and not m.files.get(DONE,b'').startswith(f'{seq} '.encode()),(page,m.files.get(DONE))
     windows(m); m.poll(); assert m.files[DONE]==f'{seq} ok\n'.encode() and len(m.imports)==k+1,(page,m.files[DONE])
@@ -19192,6 +19189,15 @@ def lock_applies(patched,lit,window,on=1):
     return c.u.reg_read(UC_MIPS_REG_PC)!=0x4f276c
 assert [lock_applies(True,*s) for s in ((0,0),(0,1),(1,0),(1,1))]==[True,True,False,False] and not lock_applies(True,0,0,on=0)
 assert [lock_applies(False,*s) for s in ((0,0),(0,1),(1,0),(1,1))]==[True,True,False,True]; passed()
+# Stock's lock screen never opens (build.py SAVER_OFF, docs/internals.md#screen-off-and-wake): config_init's store of
+# SYSSET SCREENSAVER's 0 or 1 into g_screensaver_mode, which its two wakes test, stores 0 whatever it read; stock's
+# stores what it read.
+def saver_mode(patched,read):
+    c=Machine(patched); c.byte(syms['g_screensaver_mode'],0xaa)
+    for r,v in ((UC_MIPS_REG_V0,read),(UC_MIPS_REG_V1,syms['g_screensaver_mode'])): c.u.reg_write(r,v)
+    c.u.emu_start(0x504c78,0x504c7c,count=1)
+    return c.u.mem_read(syms['g_screensaver_mode'],1)[0]
+assert [saver_mode(True,v) for v in (0,1)]==[0,0] and [saver_mode(False,v) for v in (0,1)]==[0,1]; passed()
 # The volume dialog steps the volume with the screen off, as on V1.32 (build.py VOL_DARK, #303): stock V1.36's
 # volume_dialog_on_keyup returns 0 dark, so the tick went on to on_wm_keyup_fun, which opened one more volume dialog over
 # the last and changed nothing. Stock's own handler, a wheel tick up at 10: patched it stores 11, sets and saves it and
@@ -19825,95 +19831,6 @@ assert [switch_image(m,r) for r in rows]==['switch_on','switch_on']; passed()
 m,rows,*_=settings_page('btrows','scroll_view_bluetooth',stock_rows=1,bt=0)  # just the switch
 assert rows==[]; passed()
 
-# Lock screen (docs/internals.md#lock-screen). The picture list gains the six built-ins between
-# stock's default and the card images, once however often it is rebuilt, and a picked built-in
-# survives stock's reset of a picture that is no file.
-WALLS=['q2pod:'+n for n in ('aurora','sunrise','graphite','tide','ember','black')]
-class LockMachine(QueueMachine):
-    reset=False
-    def hook(self,u,address,size,unused):
-        if address==syms['strcpy@GLIBC_2.0']:
-            a,b=[u.reg_read(r) for r in REGS[:2]]
-            self.u.mem_write(a,self.raw(b)+b'\0'); self.returns(a); return
-        if self.handlers.get(address)=='stock_saverlist' and self.reset:
-            self.u.mem_write(syms['g_screensaver_picture'],b'screensaver_default\0')
-        return super().hook(u,address,size,unused)
-def lock_machine(picture='screensaver_default',config={}):
-    m=LockMachine(); m.config.update(config); m.restack=True
-    for h in ('saverlist','saverrows','saver','savercover'): m.handlers[int(manifest['patch_symbols'][f'stock_{h}_trampoline'],16)]='stock_'+h
-    m.u.mem_write(syms['g_screensaver_picture'],picture.encode()+b'\0')
-    return m
-# Startup and list validation call the same narrow access wrapper, without repair writes.
-for picture in WALLS+['q2pod:invalid','/mnt/mmc/missing.jpg','/mnt/mmc/exists.jpg']:
-    m=lock_machine(picture); m.present.add('/mnt/mmc/exists.jpg')
-    result=m.call(address=payload_syms['lockscreen_access'],args=(m.string(picture),4,0,0),gap=0)
-    assert (result==0)==(picture in WALLS or picture.endswith('/exists.jpg'))
-    assert not any(c[0]=='toolsWriteConfig' for c in m.calls)
-passed()
-# Execute config_init's real validation/copy block, including the patched access call.
-for picture in WALLS+['screensaver_default','/mnt/mmc/missing.jpg','/mnt/mmc/exists.jpg']:
-    m=lock_machine(); m.present.add('/mnt/mmc/exists.jpg')
-    path=m.string(picture); stack=0x7000f000
-    for _ in range(2):
-        m.calls=[]; m.u.reg_write(UC_MIPS_REG_SP,stack); m.word(stack+24,0xa3aae0)
-        m.u.reg_write(UC_MIPS_REG_GP,0xa3aae0); m.u.reg_write(UC_MIPS_REG_S0,path)
-        m.u.emu_start(0x504d18,0x504d68,count=100000)
-        assert m.u.reg_read(UC_MIPS_REG_PC)==0x504d68
-        expected='screensaver_default' if picture.endswith('/missing.jpg') else picture
-        assert m.text(syms['g_screensaver_picture'])==expected
-        assert not any(c[0]=='toolsWriteConfig' for c in m.calls)
-passed()
-cards=['/mnt/mmc/lockscreenimage/a.jpg','/mnt/mmc/lockscreenimage/b.png']
-m=lock_machine('q2pod:tide'); m.reset=True
-m.word(syms['p_deque_screensaverlist'],m.deque([m.string(n) for n in ['screensaver_default',*cards]],'char*'))
-listed=lambda:[m.text(e) for e in m.items(m.get(syms['p_deque_screensaverlist']))]
-for _ in range(2):
-    m.calls=[]; assert m.call(address=HOOKS['get_screensaver_image'][0],args=(0,0,0,0),gap=0)==0
-    assert listed()==['screensaver_default',*WALLS,*cards] and m.text(syms['g_screensaver_picture'])=='q2pod:tide'
-    assert not [c for c in m.calls if c[0]=='toolsWriteConfig']
-m.u.mem_write(syms['g_screensaver_picture'],cards[0].encode()+b'\0'); m.reset=False; m.calls=[]
-assert m.call(address=HOOKS['get_screensaver_image'][0],args=(0,0,0,0),gap=0)==0
-assert listed()==['screensaver_default',*WALLS,*cards] and not [c for c in m.calls if c[0]=='toolsWriteConfig']; passed()
-# The Lock screen page's list: Clock right after Time show, iconless and 78 high as stock's rows,
-# Standard unless Q2POD LOCKCLOCK is 1; the built-ins' thumbnails lose their (file://) image.
-def lock_page(config={}):
-    m=lock_machine(config=config)
-    m.word(syms['p_deque_screensaverlist'],m.deque([m.string(n) for n in ['screensaver_default',*WALLS,cards[0]]],'char*'))
-    stock=[m.entry(0) for _ in range(2)]
-    thumbs=[m.node('image',f'image_{i}',image='file://x') for i in range(8)]
-    grid=[m.node('list_item','',thumbs[i:i+3]) for i in range(0,8,3)]
-    view=m.node('scroll_view','scroll_view',stock+grid)
-    for e in m.nodes[view]['children']: m.word(e+O['W_PARENT'],view)
-    m.top=m.node('window','screensaver_page',[m.node('list_view','list_view',[view])]); m.nodes[m.wm]={'children':[m.top]}
-    assert m.call(address=HOOKS['screensaver_rows'][0],args=(m.top,0,0,0),gap=0)==0 and m.calls[0][:2]==('stock_saverrows',m.top)
-    row=m.nodes[view]['children'][1]; button=m.nodes[row]['children'][0]; label=m.nodes[button]['children'][-1]
-    return m,row,button,label,thumbs
-m,row,button,label,thumbs=lock_page()
-assert len(m.nodes[named(m,m.top,'scroll_view')]['children'])==6 and m.get(row+O['W_H'])==78  # 2 stock rows, Clock, 3 grid rows
-assert len(m.nodes[button]['children'])==1 and m.get(label+O['W_X'])==10 and m.nodes[label]['text']=='Clock: Standard'
-assert [m.nodes[t]['image'] for t in thumbs]==['file://x']+['']*6+['file://x']
-def clock_click():
-    m.calls=[]; f,ctx=m.handler(button,O['EVT_CLICK']); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0
-    return [(c[1],m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='write_int_config']
-assert clock_click()==[(1,'Q2POD','LOCKCLOCK')] and m.nodes[label]['text']=='Clock: Large'
-assert clock_click()==[(0,'Q2POD','LOCKCLOCK')] and m.nodes[label]['text']=='Clock: Standard'; passed()
-m,_,_,label,_=lock_page({'LOCKCLOCK':'1'}); assert m.nodes[label]['text']=='Clock: Large'; passed()
-# Classic hides this page's toolbar: its switch is the list's first row, reading what stock's hidden img_switch shows; the row's click is
-# that image's, a loop pass later as stock rebuilds the list it's in. Stock's rows follow. Minimal keeps its toolbar and gets no row.
-def lock_switch(boot):
-    SETUP[:]=[classic_light] if boot is classic_light_on else []; m=lock_machine(); SETUP.clear(); boot(m); sw=m.node('image','img_switch',image='switch_off'); stock=[m.entry(0) for _ in range(2)]
-    view=m.node('scroll_view','scroll_view',stock); m.top=m.node('window','screensaver_page',[m.node('view','view_navbar',[sw],visible=0),m.node('list_view','list_view',[view])])
-    for e in stock: m.word(e+O['W_PARENT'],view)
-    m.nodes[m.wm]={'children':[m.top]}; m.handlers[syms['button_create']]='button_create'
-    assert m.call(address=HOOKS['screensaver_rows'][0],args=(m.top,0,0,0),gap=0)==0
-    return m,sw,view,stock
-m,sw,view,stock=lock_switch(classic_light_on)
-rows=m.nodes[view]['children']; assert len(rows)==4 and rows[1]==stock[0] and rows[3]==stock[1]  # the switch, Show Time, Clock, Custom
-button=m.nodes[rows[0]]['children'][0]; label,value=m.nodes[button]['children'][:2]
-assert m.nodes[label]['text']=='Lock Screen' and m.nodes[value]['text']=='Off'
-f,ctx=m.handler(button,O['EVT_CLICK']); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and not m.dispatched()
-m.nodes[sw]['image']='switch_on'; m.advance(0); assert [c[1] for c in m.dispatched()]==[sw] and m.nodes[value]['text']=='On'; passed()
-m,sw,view,stock=lock_switch(lambda _:None); assert m.nodes[view]['children'][0]==stock[0] and len(m.nodes[view]['children'])==3; passed()
 # The sleep timer has no list: the row sits over its fields, in the row's font. With the switch off only the row shows, and Centre is its click; on, Centre walks the fields as
 # stock's page has it. Minimal has no row, and its Centre walks the fields either way.
 def sleep_page(boot):
@@ -19932,122 +19849,23 @@ m,sw,fields_,ok=sleep_page(lambda _:None); assert len(m.nodes[m.top]['children']
 # The sleep timer under Classic stays its two fields, OK stop and outline.
 m,sw,fields_,ok=sleep_page(classic_light_on); m.nodes[fields_]['visible']=1; slide=m.nodes[fields_]['children'][0]; hour=m.nodes[slide]['children'][0]
 assert m.confirm()==11 and m.nodes[m.top]['_edit_field']==1 and m.confirm()==11 and m.nodes[m.top]['_edit_field']==2 and not m.clicks and m.confirm()==11 and m.clicks==[ok]; passed()
-# The lock window: a built-in drops stock's picture name (the wallpaper paints over it); Large lays
-# the date, battery and time out across the top; Standard and card pictures stay stock's.
-def lock_window(picture,config={}):
-    m=lock_machine(picture,config)
-    w={n:m.node(k,n) for k,n in (('image','img_screensaver'),('digit_clock','clock_time'),('digit_clock','clock_date'),
-                                   ('label','label_battery'),('image','img_battery'))}
-    m.nodes[w['img_screensaver']]['image']=picture
-    info=m.node('view','view_timeinfo',[w[n] for n in ('clock_time','label_battery','img_battery','clock_date')])
-    m.top=m.node('window','saverscreen_page',[m.node('gesture','app_gesture',[w['img_screensaver'],info])])
-    assert m.call(address=HOOKS['saverscreen_page_init'][0],args=(m.top,0,0,0),gap=0)==0
-    box=lambda n:tuple(signed(m.get(w[n]+O[k])) for k in ('W_X','W_Y','W_W','W_H'))
-    return m,w,info,box
-m,w,info,box=lock_window('q2pod:aurora',{'LOCKCLOCK':'1'})
-assert m.nodes[w['img_screensaver']]['image']=='' and box('clock_time')[::2]==(0,375) and box('clock_date')[:3]==(0,0,375)
-assert m.nodes[w['clock_time']]['style:normal:text_align_h']=='center' and m.nodes[w['clock_time']]['style:normal:font_size']>70
-assert signed(m.get(info+O['W_Y']))+box('clock_time')[1]+box('clock_time')[3]<=190 and not m.nodes[w['img_battery']]['visible']
-assert box('label_battery')[2]>=60 and box('label_battery')[0]+box('label_battery')[2]<=375; passed()
-# Battery: Icon keeps the percentage off the Large clock; every percentage mode shows it (iPod only).
-for mode in range(4):
-    CONFIG.update(BATTERY=str(mode)); m,w,_,_=lock_window('q2pod:aurora',{'LOCKCLOCK':'1'}); CONFIG.clear()
-    assert m.nodes[w['label_battery']]['visible']==(mode!=0) and not m.nodes[w['img_battery']]['visible']
-passed()
-m,w,info,box=lock_window(cards[0])
-assert m.nodes[w['img_screensaver']]['image']==cards[0] and 'style:normal:font_size' not in m.nodes[w['clock_time']]; passed()
-# A new cover: stock sets img_playcover by the same name and never invalidates it; the hook does.
-m=lock_machine(); cover=m.node('image','img_playcover'); m.top=m.node('window','saverscreen_page',[m.node('view','view_playinfo',[cover])])
-assert m.call(address=HOOKS['saver_cover'][0],args=(m.top,0,0,0),gap=0)==0
-assert [c[:2] for c in m.calls if c[0] in ('stock_savercover','widget_invalidate_force')]==[('stock_savercover',m.top),('widget_invalidate_force',cover)]; passed()
-# Classic's info screen: stock's window, its widgets in screen pixels, painted in the picture's border hook.
+# A widget's box (put), a fresh paint record (blank) and a widget's box on the screen (screen_box).
 def put(m,w,*g):
     for k,v in zip(('W_X','W_Y','W_W','W_H'),g): m.word(w+O[k],v)
 def blank(m): m.bands=[]; m.letters=[]; m.rounded=[]; m.image_draws=[]; m.calls=[]
-def lock_cl(large=0,light='1',picture='screensaver_default',battery='1',status=0,clock=(16,42),bar_y=None,theme='1'):
-    SETUP[:]=[lambda k:(k.config.update(THEME=theme,LIGHT=light,LOCKCLOCK=str(large),BATTERY=battery),k)]
-    try: m=lock_machine(picture)
-    finally: SETUP.clear()
-    w={n:m.node(k,n) for k,n in (('image','img_screensaver'),('view','view_shade'),('digit_clock','clock_time'),('digit_clock','clock_date'),('label','label_battery'),
-                                  ('progress_bar','pgbar_battery'),('image','img_playcover'),('hscroll_label','scrlabel_title'),('hscroll_label','scrlabel_artist'),('image','img_slide'))}
-    w['img_battery']=m.node('image','img_battery',[w['pgbar_battery']]); m.nodes[w['img_battery']]['image']='scrsaver_battery'
-    w['view_timeinfo']=m.node('view','view_timeinfo',[w[n] for n in ('clock_time','label_battery','img_battery','clock_date')])
-    w['view_playinfo']=m.node('view','view_playinfo',[w[n] for n in ('img_playcover','scrlabel_title','scrlabel_artist')])
-    m.nodes[w['img_screensaver']]['image']=picture; m.nodes[w['clock_date']]['format']='Y-MM-DD'; m.nodes[w['clock_date']]['text']='Nov 5, 2026'; m.nodes[w['label_battery']]['text']='82%'
-    put(m,w['img_screensaver'],0,0,375,320); put(m,w['clock_time'],72,0,151,50)
-    m.top=m.node('window','saverscreen_page',[m.node('gesture','app_gesture',[w['img_screensaver'],w['view_shade'],w['view_timeinfo'],w['view_playinfo'],w['img_slide']])]); parents(m,m.top)
-    m.handlers.pop(syms['mclGetPlayStatus'],None); m.word(0xa50084,status); m.clock=clock
-    if bar_y is not None:  # the bar's title found first, as on a lock that isn't right after boot
-        bar_t=m.node('hscroll_label','label_title'); m.word(bar_t+O['W_Y'],bar_y&0xffffffff); bg(m,classic_light_bar(m,bar_t))
-    assert m.call(address=HOOKS['saverscreen_page_init'][0],args=(m.top,0,0,0),gap=0)==0
-    m.image_size=(96,96); return m,w
-def lock_paint(m,w): blank(m); m.call(address=HOOKS['widget_on_paint_border'][0],args=(w['img_screensaver'],m.canvas,0,0),gap=0,count=400000); return m.image_draws
-def hand_tip(m,x,y): return [b for b in m.bands if b[3]==1 and b[4]&0xffffff==0xffffff and b[0]<=x+1 and b[0]+b[2]>=x-1 and abs(b[1]-y)<=1]
 def screen_box(m,w):
     x,y,ww,h=wbox(m,w)
     for p in iter(lambda p=[w]: p.__setitem__(0,m.get(p[0]+O['W_PARENT'])) or p[0],0):
         if p==m.top or p==m.wm: break
         x,y=x+signed(m.get(p+O['W_X'])),y+signed(m.get(p+O['W_Y']))
     return x,y,ww,h
-TRAY_ROWS=(0x474e58,0x14161b)
-# The info screen under Classic, Standard: the page, dark bar, face at 29,54, both trays; date's format "MMM D, Y"; no shade.
-lk,w=lock_cl(); box_=lambda n: screen_box(lk,w[n]); font_=lambda n:(lk.nodes[w[n]]['style:normal:font_name'],lk.nodes[w[n]]['style:normal:font_size'])
-assert lk.nodes[w['clock_date']]['format']=='MMM D, Y' and box_('clock_date')==(0,0,375,25) and lk.nodes[w['view_shade']]['visible']==0
-# ... the date sits on the real bar's title's row, wherever the set puts it; with no bar title yet, at 0.
-for bar_y in (-1,2): lkb,wb=lock_cl(bar_y=bar_y); assert screen_box(lkb,wb['clock_date'])==(0,bar_y,375,25),bar_y
-assert box_('clock_time')==(134,44,219,116) and font_('clock_time')==('classic-light',112) and lk.nodes[w['clock_time']]['style:normal:text_align_h']=='center'
-assert box_('label_battery')==(226,0,48,26) and font_('label_battery')==('default',13) and lk.nodes[w['label_battery']]['style:normal:text_align_h']=='right'
-assert box_('img_playcover')==(28,198,60,60) and box_('scrlabel_title')==(100,202,245,28) and font_('scrlabel_title')==('classic-light',27) and box_('scrlabel_artist')==(100,229,245,22) and font_('scrlabel_artist')==('classic-light',21)
-assert box_('img_slide')==(177,288,21,7) and lk.nodes[w['img_slide']]['draw_type']==O['IMAGE_DRAW_FILL'] and lk.get(w['img_slide']+0x34)&255==216 and lk.nodes[w['scrlabel_artist']]['style:normal:text_color']>>24&255==0xc8 and lk.nodes[w['view_playinfo']]['style:normal:bg_color']==0
-draws=lock_paint(lk,w); rows=[b for b in lk.bands if b[3]==1 and b[2]==375]
-assert [d[1][:2] for d in draws]==[(173,284),(29,54)] and (0,26,375,294,color_t(0x63717b)) in [b[:5] for b in lk.bands] and lk.nodes[w['img_screensaver']]['image']==''
-assert [lk.text(c[2]) for c in lk.calls if c[0]=='widget_load_image']==['classic_light_hint_shadow','classic_light_clock_dark']
-assert [b[1] for b in rows[:26]]==list(range(26)) and rows[0][4]==color_t(0x1c1c1c) and rows[25][4]==color_t(0x333333)
-trays=[b for b in lk.bands if b[0]>=16 and b[0]+b[2]<=359 and b[3]==1 and b[4]>>24==0xff and b[4] in (color_t(0x474e58),color_t(0x14161b))]
-tray_in=corner_in(9); assert [b[:4] for b in trays]==[(16+tray_in,y,343-2*tray_in,1) for y in (44,159,186,269)]  # each opaque between its corners' pixels
-assert not lk.letters and box_('clock_date')[2:]==(375,25) and font_('clock_date')==('classic-light',21) and lk.lcd_colors()==LCD_COLORS; passed()
-# ... each label takes the face its text has, as stock writes it after the window loads: bold for Cyrillic, the system font for CJK, at the fallback's size; a paint with nothing new restyles nothing.
-lk.nodes[w['scrlabel_title']]['text']='Песня'; lk.nodes[w['scrlabel_artist']]['text']='歌手'; lk.nodes[w['clock_date']]['text']='Ноя 5, 2026'; lock_paint(lk,w)
-assert font_('scrlabel_title')[0]=='bold' and font_('scrlabel_title')[1]<27 and font_('scrlabel_artist')[0]=='default' and font_('clock_date')==('bold',17)
-lk.calls=[]; lock_paint(lk,w); assert not [c for c in lk.calls if c[0]=='widget_set_prop_str']; passed()
-# Its lock screen hides stock's battery image: stock's timer writes the image back, never its visibility.
-lk,w=lock_cl(); assert lk.nodes[w['img_battery']]['visible']==0 and lk.nodes[w['pgbar_battery']]['visible']==0
-passed()
-# Its labels reach the screen white in either half, as the wallpapers want: the style hook turns what they store.
-for light in '01':
-    lc,lw=lock_cl(light=light)
-    for n in ('clock_time','clock_date','label_battery','scrlabel_title'):
-        begin(lc,lw[n]); out=lc.alloc(4); lc.word(out,lc.nodes[lw[n]]['style:normal:text_color']&0xffffffff); lc.handlers[int(manifest['patch_symbols']['stock_color_trampoline'],16)]='stock_color'
-        lc.call(address=HOOKS['style_get_color'][0],args=(out,0x1234,lc.string('text_color'),0),gap=0); assert lc.get(out)==0xffffffff,(light,n)
-    passed()
-# ... Large: clock_time at 166 px, in a box that holds it, its middle the tray's, no face, tray 128 high.
-lk,w=lock_cl(large=1); assert screen_box(lk,w['clock_time'])==(16,24,343,168) and wbox(lk,w['view_timeinfo'])[3]>=192 and lk.nodes[w['clock_time']]['style:normal:font_size']==166 and lk.nodes[w['clock_time']]['style:normal:font_name']=='classic-light'
-draws=lock_paint(lk,w); assert [d[1][:2] for d in draws]==[(173,284)] and color_t(0x14161b) in [b[4] for b in lk.bands if b[1]==171]; passed()
-# ... Large's clock box reaches y 192, over the card's top rows: AWTK looks through a widget's children last to first, stock's window has the card after the clock, so those taps are the card's.
-gesture=lk.nodes[lk.top]['children'][0]; kids=lk.nodes[gesture]['children']
-stock_kids=[c[2]['name'] for c in decode(subprocess.check_output(['unsquashfs','-cat',str(B/'rootfs.squashfs'),'release/assets/default/raw/ui/saverscreen_page.bin']))[3][0][3]]
-assert [lk.nodes[k]['name'] for k in kids]==stock_kids
-def tapped(x,y):
-    for k in reversed(kids):
-        bx,by,bw,bh=screen_box(lk,k)
-        if lk.nodes[k]['visible'] and bx<=x<bx+bw and by<=y<by+bh: return k
-assert all(tapped(x,y)==w['view_playinfo'] for x in (16,187,358) for y in range(185,192)) and tapped(187,184)==w['view_timeinfo']; passed()
-# OLED's lock screen (AWTK's sizes, the design's px times 1.21): the time 56 px Inter Medium centred with its digits on y 120 (Large 96), the date 16 px under it in
-# Text Secondary, the song two centred lines at rest on an ellipsis, with no card, cover, battery or hint; the picture
-# dimmed 50% toward black over the whole window, Black black. (Dark half: a label stores its final ink there.)
-lk,w=lock_cl(theme='3',light='0'); box_=lambda n: screen_box(lk,w[n]); font_=lambda n:(lk.nodes[w[n]]['style:normal:font_name'],lk.nodes[w[n]]['style:normal:font_size'])
-assert box_('clock_time')==(0,69,375,102) and font_('clock_time')==('inter-medium',68) and lk.nodes[w['clock_time']]['style:normal:text_align_h']=='center'
-assert box_('clock_date')==(0,157,375,24) and font_('clock_date')==('inter',19) and lk.nodes[w['clock_date']]['format']=='MMM D, Y'
-assert (lk.nodes[w['clock_date']]['style:normal:text_color']&0xffffffff)==color_t(0xababab)==(lk.nodes[w['scrlabel_artist']]['style:normal:text_color']&0xffffffff)
-assert all(lk.nodes[w[n]]['visible']==0 for n in ('label_battery','img_battery','pgbar_battery','view_shade','img_playcover','img_slide'))
-assert box_('scrlabel_title')==(24,200,327,30) and font_('scrlabel_title')[1]==24 and box_('scrlabel_artist')==(24,232,327,24) and font_('scrlabel_artist')[1]==18
-assert all(lk.nodes[w[n]].get('hscroll_label_set_ellipses')==1 and lk.nodes[w[n]].get('hscroll_label_set_only_focus')==1 for n in ('scrlabel_title','scrlabel_artist'))
-lock_paint(lk,w); assert (0,0,375,320,0x80000000) in [b[:5] for b in lk.bands] and lk.nodes[w['view_playinfo']]['style:normal:bg_color']==0; passed()
-lk,w=lock_cl(theme='3',large=1); assert screen_box(lk,w['clock_time'])==(0,33,375,174) and lk.nodes[w['clock_time']]['style:normal:font_size']==116
-lk,w=lock_cl(theme='3',picture='q2pod:black'); lock_paint(lk,w); assert (0,0,375,320,color_t(0)) in [b[:5] for b in lk.bands]; passed()
+def classic_canvas():  # a machine under Classic, Light on, to paint on
+    SETUP[:]=[lambda k:(k.config.update(THEME='1',LIGHT='1'),k)]
+    try: return QueueMachine()
+    finally: SETUP.clear()
 # A corner painter with no table for its radius takes a hard corner: a ring whose radius, or its radius less one, has none (and 0, its less-one off the table's front).
 def ring(R):
-    lk,_=lock_cl(); r=lk.alloc(16)
+    lk=classic_canvas(); r=lk.alloc(16)
     for i,v in enumerate((20,40,60,30)): lk.word(r+4*i,v)
     blank(lk); lk.call(address=payload_syms['round_ring'],args=(lk.canvas,r,R,0xff112233),gap=0); return lk
 for R in (14,5,0):  # 14 has no table; 5 has, 4 hasn't
@@ -20056,47 +19874,9 @@ for R in (14,5,0):  # 14 has no table; 5 has, 4 hasn't
     assert rows[55][0][0]==20 and rows[55][1][0]==79 and (R in (0,5) or rows[42][0][0]>20)  # 5's arc is in by row 2 less than a pixel
 passed()
 # The pale form's lit cell keeps its fade's 30 rows: a taller cell has no shade past them.
-lk,_=lock_cl(); r=lk.alloc(16)
+lk=classic_canvas(); r=lk.alloc(16)
 for i,v in enumerate((20,40,60,44)): lk.word(r+4*i,v)
 blank(lk); lk.call(address=payload_syms['pale_lit'],args=(lk.canvas,r,1,0),gap=0); assert all(fill_at(lk,80,y) for y in (42,46)) and not [b for b in lk.bands if b[0]>=80 and b[1]>=40+27]; passed()
-# ... a picture: no page image; a chosen picture the same; the trays and bar still paint.
-for pic in ('q2pod:aurora','/mnt/mmc/lockscreenimage/a.jpg'):
-    lk,w=lock_cl(picture=pic); draws=lock_paint(lk,w); assert [d[1][:2] for d in draws][-1]==(29,54) and not [b for b in lk.bands if b[:4]==(0,26,375,294)] and [lk.text(c[2]) for c in lk.calls if c[0]=='widget_load_image']==['classic_light_hint_shadow','classic_light_clock_dark']
-    assert [b for b in lk.bands if b[:2]==(0,0) and b[2]==375][0][4]==color_t(0x1c1c1c) and color_t(0x474e58) in [b[4] for b in lk.bands] and lk.nodes[w['img_screensaver']]['image']==('' if 'q2pod' in pic else pic)
-    passed()
-lk,w=lock_cl(picture='q2pod:black',light='1'); lock_paint(lk,w); assert (0,26,375,294,color_t(0)) in [b[:5] for b in lk.bands]; passed()  # Black keeps black, in the light half too
-# ... Auto Light Mode's turn with the screen up: date, time, title and artist, the artist keeping its alpha.
-lk,w=lock_cl(light='2'); lk.nodes[lk.wm]={'children':[lk.top]}; links=lambda: [lk.nodes[w[n]]['style:normal:text_color']&0xffffffff for n in ('clock_date','clock_time','scrlabel_title','scrlabel_artist')]
-lock_paint(lk,w); assert links()==[color_t(0)]*3+[color_t(0)&0xffffff|0xc8000000]; half_turn(lk,19); assert links()==[color_t(0xffffff)]*3+[color_t(0xffffff)&0xffffff|0xc8000000]; passed()
-# ... percent follows ipod_battery(): hidden on Icon, shown otherwise; battery painted, img_battery empty.
-for mode in range(4):
-    lk,w=lock_cl(battery=str(mode)); assert lk.nodes[w['label_battery']]['visible']==(mode!=0) and lk.nodes[w['img_battery']]['visible']==0 and lk.nodes[w['pgbar_battery']]['visible']==0
-    lock_paint(lk,w); assert (285+9,1+6,26,13,color_t(0xf5f5f5)) in [b[:5] for b in lk.bands] and [b[2] for b in lk.bands if b[0]==285+11 and b[1]==1+8][0]==22*82//100
-passed()
-# ... the play state's glyph on the bar, playing or paused; a hidden card has no tray.
-for status,glyph in ((2,'classic_light_play_w'),(3,'classic_light_pause_w')):
-    lk,w=lock_cl(status=status); draws=lock_paint(lk,w); assert glyph in [lk.text(c[2]) for c in lk.calls if c[0]=='widget_load_image'] and (278,7) in [d[1][:2] for d in draws]
-lk,w=lock_cl(); lk.nodes[w['view_playinfo']]['visible']=0; lock_paint(lk,w); assert not [b for b in lk.bands if b[1]==186 and b[2]>300]; passed()
-# ... charging, as the status bar's icon says, fills the battery.
-lk,w=lock_cl(); icon=lk.node('image','img_battery',image='bar_charge'); sbar=lk.node('system_bar','system_bar',[icon]); parents(lk,sbar); lk.word(sbar+O['W_PARENT'],lk.wm); lk.word(syms['system_bar'],sbar)
-bg(lk,sbar); lock_paint(lk,w); assert [b[2] for b in lk.bands if b[0]==285+11 and b[1]==1+8][0]==22; passed()
-# ... hands at 16:42 on the dark face; a minute later the timer repaints it; the timer goes with the page.
-lk,w=lock_cl(); lock_paint(lk,w); info_tick=payload_syms['info_tick']; ticks=lambda: [t for t in lk.timers.values() if t[1]==info_tick]
-assert hand_tip(lk,44,112) and hand_tip(lk,94,121) and not hand_tip(lk,110,102) and len(ticks())==1  # minute at 252 degrees, hour at 138
-lk.advance(1000); assert ('widget_invalidate_force',w['img_screensaver']) not in [c[:2] for c in lk.calls]
-lk.clock=(16,43); lk.advance(1000); assert ('widget_invalidate_force',w['img_screensaver']) in [c[:2] for c in lk.calls]
-lock_paint(lk,w); assert hand_tip(lk,44,109) and not hand_tip(lk,43,114); lk.calls=[]; lk.advance(1000); assert ('widget_invalidate_force',w['img_screensaver']) not in [c[:2] for c in lk.calls]
-lk.nodes[w['label_battery']]['text']='81%'; lk.advance(1000); assert ('widget_invalidate_force',w['img_screensaver']) in [c[:2] for c in lk.calls]  # the battery; the play state the same
-lk.word(0xa50084,2); lk.advance(1000); assert ('widget_invalidate_force',w['img_screensaver']) in [c[:2] for c in lk.calls]
-lk.clock=(16,44); lock_paint(lk,w); lk.advance(1000); assert ('widget_invalidate_force',w['img_screensaver']) in [c[:2] for c in lk.calls]  # a paint clipped to stock's clock, as its minute turns, doesn't hide the new minute from the tick
-# ... the screen off, the timer stops at its next look; the first loop pass with it lit starts it again and repaints the whole screen, so no stale hands show.
-lock_paint(lk,w); lk.advance(1000); lk.byte(syms['g_backlight_status'],0); lk.clock=(16,45); lk.calls=[]; lk.advance(1000); assert not ticks() and ('widget_invalidate_force',w['img_screensaver']) not in [c[:2] for c in lk.calls]; lk.advance(5000); assert not ticks()
-lk.handlers[HOOKS['main_loop_sleep_default'][0]+12]='stock_sleep'; loop=lambda: lk.call(address=HOOKS['main_loop_sleep_default'][0],args=(0x1234,0,0,0),gap=0)
-loop(); assert not ticks()  # dark: still nothing armed
-lk.byte(syms['g_backlight_status'],1); lk.calls=[]; loop(); assert len(ticks())==1 and ('widget_invalidate_force',lk.wm) in [c[:2] for c in lk.calls]
-lock_paint(lk,w); assert hand_tip(lk,42,102) and not hand_tip(lk,44,112); lk.calls=[]; lk.advance(1000); assert ('widget_invalidate_force',w['img_screensaver']) not in [c[:2] for c in lk.calls]; loop(); assert len(ticks())==1
-lk.clock=(16,46); lk.advance(1000); assert ('widget_invalidate_force',w['img_screensaver']) in [c[:2] for c in lk.calls]
-f,ctx=next((f,c) for t,f,c in lk.nodes[w['img_screensaver']]['handlers'] if t==O['EVT_DESTROY']); lk.call(address=f,args=(ctx,lk.event,0,0),gap=0); assert not ticks(); passed()
 # Classic's T9 keyboard: stock's window, each key painted under stock's text in the background hook.
 def kb_new(light='1',theme_='1'):
     k=LoadPlain(); k.config.update(THEME=theme_,LIGHT=light); keys={}
@@ -20266,24 +20046,16 @@ sr_w=sr_end(); sr_into=k.node('image','img_into',image='list_into'); k.nodes[but
 assert sr_w-sr_end()==40,(sr_w,sr_end()); passed()
 k=search_rows(lambda k: k.config.update(THEME='0')); button,=[n_ for n_,v in k.nodes.items() if v['type']=='button']; items=[n_ for n_,v in k.nodes.items() if v['type']=='list_item']
 assert [signed(k.get(i+O['W_H'])) for i in items]==[78] and signed(k.get(button+O['W_H']))==70; passed()
-# Boxes hold their fonts and nothing crosses the glass: every rect above, at y 280 for the hint.
-RECTS=[(226,0,48,26),(278,7,10,11),(294,7,26,13),(16,44,343,128),(16,186,343,84),(29,54,96,96),(134,44,219,116),(28,198,60,60),(100,202,245,28),(100,229,245,22),(172,281,30,16),
-       (42,18,13,24),(72,15,244,30),(5,104,68,50),(302,212,68,50),(55,266,68,50),(24,33,327,30),(24,71,327,30),(0,108,375,1)]
+# Boxes hold their fonts and nothing crosses the glass: every rect above.
+RECTS=[(42,18,13,24),(72,15,244,30),(5,104,68,50),(302,212,68,50),(55,266,68,50),(24,33,327,30),(24,71,327,30),(0,108,375,1)]
 def clear_glass(x,y,w,h):
     return x==0 and w==375 or (corner_inset(y)<=x and corner_inset(y+h-1)<=x and x+w<=375-max(corner_inset(y),corner_inset(y+h-1)))
 assert not [r for r in RECTS if not clear_glass(*r)],[r for r in RECTS if not clear_glass(*r)]
-for h,px in ((25,22),(26,13),(116,112),(168,166),(28,27),(22,21),(30,26),(28,27),(20,17),(30,21),(48,27),(48,24)): assert h>px
+for h,px in ((30,26),(28,27),(20,17),(30,21),(48,27),(48,24)): assert h>px
 cf=TTFont(CLASSIC_LIGHT_FONT_SRC,lazy=True); cs=lambda px: px/(cf['hhea'].ascent-cf['hhea'].descent); adv=lambda s: sum(cf['hmtx'][cf.getBestCmap()[ord(c)]][0] for c in s)
-assert adv('23:58')*cs(112)<=219 and adv('23:58')*cs(166)<=343 and adv('Genres')*cs(21)<=81; passed()
-# Minimal: stock's clock format, stock's layout (Large as today), the keyboard and Search as today, no images.
+assert adv('Genres')*cs(21)<=81; passed()
+# Minimal: the keyboard and Search as today, no images.
 for t_ in '0':
-    SETUP[:]=[lambda k,t_=t_:(k.config.update(THEME=t_,LOCKCLOCK='1'),k)]
-    try: lk=lock_machine()
-    finally: SETUP.clear()
-    d=lk.node('digit_clock','clock_date'); d_=lk.node('digit_clock','clock_time'); pc=lk.node('label','label_battery'); bt_=lk.node('image','img_battery'); inf=lk.node('view','view_timeinfo',[d_,pc,bt_,d]); im=lk.node('image','img_screensaver'); lk.nodes[d]['format']='Y-MM-DD'
-    lk.top=lk.node('window','saverscreen_page',[lk.node('gesture','app_gesture',[im,inf])]); parents(lk,lk.top); lk.call(address=HOOKS['saverscreen_page_init'][0],args=(lk.top,0,0,0),gap=0)
-    blank(lk); lk.call(address=HOOKS['widget_on_paint_border'][0],args=(im,lk.canvas,0,0),gap=0)
-    assert lk.nodes[d]['format']=='Y-MM-DD' and not lk.image_draws and not lk.bands and wbox(lk,d_)[2:]==(375,124) and lk.nodes[d_]['style:normal:font_size']==116 and not [t for t in lk.timers.values() if t[1]==payload_syms['info_tick']]
     k_,root,keys,cand=kb_new('1',t_); blank(k_); bg(k_,keys['opt:abc']); assert key_ink(k_)>>24==0xff; bg(k_,root); assert not k_.bands and 'style:normal:bg_color' not in k_.nodes[cand]
     q,win,n=search_new('1',t_); blank(q); bg(q,win); bg(q,n['tab_button_group'])
     assert not q.image_draws and not q.bands,(q.image_draws,q.bands)

@@ -76,8 +76,8 @@
     <td>Folders at the card's root add JPEG and PNG photo albums, <code>.txt</code> and <code>.epub</code> books, and videos.</td>
   </tr>
   <tr valign="top">
-    <td><b>Lock screen and boot logo</b></td>
-    <td>Six wallpapers, a large clock or your own images on the lock screen. Your own JPEG at power-on.</td>
+    <td><b>Hold and boot logo</b></td>
+    <td>Buttons Lock as the iPod's Hold switch: a padlock while it is on, and a press it holds says so. Your own JPEG at power-on.</td>
   </tr>
   <tr valign="top">
     <td><b>Bluetooth and AirPods</b></td>
@@ -189,10 +189,6 @@ Your settings, ratings and play counts are kept. The updater skips a version tha
   <tr valign="top">
     <td width="200"><b>Scrobbling</b></td>
     <td>Connect Last.fm or ListenBrainz.</td>
-  </tr>
-  <tr valign="top">
-    <td><b>Lock screen</b></td>
-    <td>Six built-in wallpapers, a large clock, or your own images.</td>
   </tr>
   <tr valign="top">
     <td><b>Boot logo</b></td>

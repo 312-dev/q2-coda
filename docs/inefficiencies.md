@@ -41,7 +41,7 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 | 29  | `lockscreen.c` says the rootfs has no room (resolved)                          | docs      | S      | resolved   |
 | 30  | A new theme's Corners default follows its index (resolved)                     | fragile   | S      | resolved   |
 | 31  | `test/patch.py` is one 21,462-line file                                        | test gap  | L      | deferred   |
-| 32  | C mutation testing reaches 8 files                                             | test gap  | L      | deferred   |
+| 32  | C mutation testing reaches 7 files                                             | test gap  | L      | deferred   |
 | 33  | The C coverage floors are 40% and 38%                                          | test gap  | M      | deferred   |
 | 34  | Boot reads `config.ini` once per key                                           | runtime   | M      | measured   |
 
@@ -59,7 +59,7 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 
 ### 20. `classic_light_*` art and the Classic face are named in C
 
-- **Where:** 70 lines with a string literal `"classic_light_..."` or `"classic-light"`, in `patch/navigation.c` (32), `patch/classic_pages.c` (18), `patch/lockscreen.c` (7), `patch/coverflow.c` (5), `patch/volume.c` (5), `patch/ratings.c` (2) and `patch/radio.c` (1) (`grep -c '"classic_light_\|"classic-light"' patch/*.c`, recounted at the hygiene pass). `validate` in `tools/theme.py` allows `art_final` only for a theme whose `art_id` is `classic-light`.
+- **Where:** 63 lines with a string literal `"classic_light_..."` or `"classic-light"`, in `patch/navigation.c` (32), `patch/classic_pages.c` (18), `patch/coverflow.c` (5), `patch/volume.c` (5), `patch/ratings.c` (2) and `patch/radio.c` (1) (`grep -c '"classic_light_\|"classic-light"' patch/*.c`, recounted at the hygiene pass). `validate` in `tools/theme.py` allows `art_final` only for a theme whose `art_id` is `classic-light`.
 - **Evidence:** the C loads Classic's names literally. A theme's `art` attribute (`art_id` in `tools/theme.py`) names the theme whose generated images it draws, and OLED (`art="classic-light"`) draws Classic's through it.
 - **Impact:** a theme cannot use the `classic-light` painters with art of its own.
 - **Decision:** deferred. What is left is a theme with its own art under Classic's painters, and none exists. Then the fix is a per-theme art prefix in `theme_t`, written by `emit`, and a helper that joins it (M).
@@ -191,7 +191,7 @@ Entries 7 to 17 are costs the code marks itself.
 ### 18. Every painted widget passes through about 25 painters
 
 - **Where:** `patch/navigation.c:2723-2772` (`ringnav_paint`, the hook on `widget_on_paint_border`).
-- **Evidence:** the function calls `night_paint`, `coverflow_paint`, `lockscreen_paint`, `edit_paint`, `photos_paint`, `books_paint`, `spot_paint`, `addon_paint`, `peq_paint`, `battery_paint`, `visualizer_paint`, `games_paint`, `paint_chevrons`, `paint_radio`, `paint_into`, `paint_letter`, `paint_cover`, `paint_scrubber`, `slider_scrub`, `quick_scrub`, `search_over`, `paint_caps`, `hold_paint` and `coverflow_home_clip` for every widget stock paints, and each decides for itself whether the widget is its own.
+- **Evidence:** the function calls `night_paint`, `coverflow_paint`, `keylock_paint`, `edit_paint`, `photos_paint`, `books_paint`, `spot_paint`, `addon_paint`, `peq_paint`, `battery_paint`, `visualizer_paint`, `games_paint`, `paint_chevrons`, `paint_radio`, `paint_into`, `paint_letter`, `paint_cover`, `paint_scrubber`, `slider_scrub`, `quick_scrub`, `search_over`, `paint_caps`, `hold_paint` and `coverflow_home_clip` for every widget stock paints, and each decides for itself whether the widget is its own.
 - **Measured:** payload instructions of one `ringnav_paint` call, counted with a `UC_HOOK_BLOCK` hook over `BASE` to `SCRATCH` in a scratch copy of `test/patch.py` (the real MIPS payload under Unicorn; stock's paint and the mocks count nothing), on a `--dev` build of `oled-theme` at `c056e7b4`. The page is `folder_page` with eight rows from stock's own row constructor (`0x4b39f4`), laid out, after one whole paint. Every row's label and images, and the window, are owned by no painter:
 
   |                    | row label | row image | window |
@@ -256,9 +256,9 @@ Entries 7 to 17 are costs the code marks itself.
 - **Effort:** L.
 - **Decision:** deferred: the same merge cost as 23, at L effort.
 
-### 32. C mutation testing reaches 8 files
+### 32. C mutation testing reaches 7 files
 
-- **Where:** [building.md](building.md#c)'s table: `library_scope.c`, `chapters.c`, `mp3_gapless.c`, `lockscreen.c`, `photos.c`, `headset.c`, `radio.c`, `visualizer.c`. `navigation.c`, `playback.c`, `coverflow.c` and the `peq*` files are listed there as still to do.
+- **Where:** [building.md](building.md#c)'s table: `library_scope.c`, `chapters.c`, `mp3_gapless.c`, `photos.c`, `headset.c`, `radio.c`, `visualizer.c`. `navigation.c`, `playback.c`, `coverflow.c` and the `peq*` files are listed there as still to do.
 - **Effort:** L.
 - **Decision:** deferred: L effort of test infrastructure with no defect behind it.
 
@@ -295,4 +295,4 @@ Entries 7 to 17 are costs the code marks itself.
 
 - **Where:** `patch/lockscreen.c:1-2`: "drawn here since the rootfs has no room for image files".
 - **Evidence:** the stock image is 50,688,000 bytes and a `--dev --new-player` build's rootfs of 2026-11-15 50,393,088 (`rootfs_bytes` in its `manifest.json`; `tools/build.py:2639` compares the two): about 295 KB to spare.
-- **State:** the head comment says the wallpapers are drawn by `wall_render` and ship as no image files, as `docs/internals.md`'s Lock screen section does.
+- **State:** the head comment said the wallpapers were drawn by `wall_render` and shipped as no image files. The lock screen and `lockscreen.c` are gone since ([internals](internals.md#screen-off-and-wake)).
