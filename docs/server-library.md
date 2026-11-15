@@ -91,7 +91,9 @@ i	<pid>	<sid>	<card path or empty>
   firmware finds it by the album id in a server row's path, or in the path of that row's offline
   copy, and uses it where it would use a card album's cover: the Library's album rows and grids
   (`grid_cover`, through stock's thumbnailer), Cover Flow's carousel (its art cache, built from
-  it) and Now Playing (`coverflow_player_cover`, after the file's own art and folder images).
+  it), Now Playing (`coverflow_player_cover`, after the file's own art and folder images), and
+  under OLED the app's own artist page's Albums ([oled-design.md](oled-design.md#artist-page)), by the album id in
+  the row's `album:` context.
   Until it is there the placeholder shows; nothing waits for it. The app keeps the folder within its own budget and deletes an album's cover when the album
   leaves the catalogue ([The app's side](#the-apps-side)).
 

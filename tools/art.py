@@ -211,7 +211,9 @@ MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart
               'vinyl-record', 'microphone-stage', 'folder', 'heart-half', 'clock-counter-clockwise', 'list-numbers',
               'bookmark-simple', 'dots-three', 'plus', 'list-checks', 'skip-forward', 'skip-back', 'repeat', 'stack',
               'airplay', 'download-simple', 'cloud-arrow-down', 'trash', 'speedometer', 'pencil-simple',
-              'caret-up', 'caret-down', 'check')
+              'caret-up', 'caret-down', 'check', 'sliders-horizontal')
+PAIR_ICON_PX = 16  # an artist's page's action pair (artist_page.c PAIR_ICON)
+PAIR_ICONS = ('shuffle', 'radio')
 
 
 def gradient(stops, y0, y1):
@@ -997,6 +999,8 @@ def images(t):
         on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
         out |= {f'{prefix}_menu_{n}_{k}': phosphor(n, MENU_ICON_PX, c) for n in MENU_ICONS for k, c in FOLDER_INKS.items()}
         out[f'{prefix}_menu_check_a'] = phosphor('check', MENU_ICON_PX, on)
+        # an artist's Shuffle and Radio panels (artist_page.c pair_paint): the accent's top tone at rest, white lit
+        out |= {f'{prefix}_pair_{n}_{k}': phosphor(n, PAIR_ICON_PX, c) for n in PAIR_ICONS for k, c in {'a': on, 'w': 0xffffff}.items()}
     if t['entry_ipod']:  # Search's key pop (search_strip.c): the accent's top tone, as the lit key's
         out |= {f'{prefix}_{n}': d for n, d in pop_images(t['schemes'][t['accents'].bit_length() - 1]['tones'][0]).items()}
     if t['painter[PAINT_SONGS]']:  # Folder view's folder glyph (song_rows.c folder_row): Text Secondary, white on the selection

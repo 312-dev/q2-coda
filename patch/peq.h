@@ -292,6 +292,20 @@ void *page_row_detail_into(void *view, int index, const char *caption, const cha
                            int (*click)(void *, void *));
 void page_row_into(void *view, int index, const char *caption, int (*click)(void *, void *));
 void row_into(void *item, int h);
+/* artist_page.c: an artist's page under the inset modal's set (docs/oled-design.md#artist-page) */
+void *hero_open(void *body, const char *name, const char *sub, const char *meta);
+void pair_open(void *head, void *list, const char *const label[2], const char *const icon[2],
+               const int ctx[2], int (*press)(void *, void *), signed char *stop);
+int drill_list(void *view, int n);
+void drill_count(void *item, const char *count);
+void *window_of(void *w); /* navigation.c */
+void *cover_row(void *view, int index, int h, int thumb, int px, const char *title,
+                const char *right, const char *cover, int (*click)(void *, void *), int ctx);
+void artist_paint(void *w, void *canvas);
+#define AR_SONG_PX 22 /* cover_row's px for a song: the design's 18 px in AWTK's size */
+int geom_val(int v) __attribute__((pure));
+int modal_set(void); /* menu_modal.c */
+int modal_actions(const char *const *names, const char *const *icons, int n, void (*pick)(int i));
 void list_toggle(void *label, const char *title, int on); /* navigation.c: a row's switch */
 /* navigation.c: Classic's value */
 void list_value(void *label, const char *title, const char *value);

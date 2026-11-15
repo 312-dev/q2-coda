@@ -66,7 +66,10 @@ class Req(C.Structure):
 class Lv(C.Structure):
     _fields_ = [*((n, C.c_int) for n in ('state', 'n', 'sel', 'live', 'retry', 'nosock', 'slow', 'art', 'find', 'sort')),
                 *((n, C.c_uint) for n in ('since', 'base', 'id', 'hash')),
-                ('title', C.c_char * 128), ('note', C.c_char * 128), ('op', C.c_char * 16), ('args', C.c_char * 400)]
+                ('title', C.c_char * 128), ('note', C.c_char * 128), ('op', C.c_char * 16), ('args', C.c_char * 400),
+                ('lay', C.c_byte), ('stop', C.c_byte)]
+LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP = range(4)
+AR_ALBUMS = 1 << 20  # addon.c's Albums row's click context
 
 
 class Pg(C.Structure):
@@ -1752,6 +1755,7 @@ class Page:
         self.fw, self.sel, self.y, self.timers, self.drawn, self.toasts, self.backs = fw, 0, 0, 0, 0, [], 0
         self.aborts: list = []  # sections()' swipe aborts
         self.tips: list = []  # field()'s box hints
+        self.made: list = []  # widgets the widget factory and button_create made (oled_page's mocks)
         self.world = card(fw, foo=manifest)
         self.world.files[b'/tmp/q2-foo'] = b'1'
         self.page, self.view = block(fw, size=4096), block(fw, size=4096)  # widgets' bytes, all zero
@@ -5139,3 +5143,120 @@ def test_a_card_apps_first_song_waits_while_a_game_has_the_sound(fw, audio, time
     fw.fn('addon__stream_poll', None, C.c_void_p)(app)
     s = sm(fw)
     assert s.state == S_WAIT and len(fw.calls('timer_add')) == timers and s.timer == (5 if timers else 0)
+
+
+# An artist's page (addon.c artist_view, artist_page.c) under the inset modal's set.
+def artist_rows(sync=b'Add to Sync', albums=((b'Settle', b'2013 \xc2\xb7 On Q2', b'al1'), (b'Alchemy', b'2023', b'al4'),
+                                              (b'Tondo', b'', b'al6'), (b'Energy', b'2020', b'al3')), radio=True):
+    rows = [(b'action', b'toggle', sync, b'', b'artist:ar1', b''), (b'action', b'play', b'Play', b'', b'artist:ar1 0', b''),
+            (b'action', b'shuffle', b'Shuffle', b'', b'artist:ar1', b'')]
+    if radio:
+        rows.append((b'action', b'radio', b'Radio', b'', b'artist:ar1', b''))
+    rows.append((b'list', b'top', b'Top Songs', b'', b'artist:ar1', b''))
+    return rows + [(b'list', b'album', t, y, b'album:' + i, b'toggle') for t, y, i in albums]
+
+
+@pytest.fixture
+def nav_st(fw, scratch):
+    base = C.addressof(fw.var('st', C.c_char))
+    return lambda name, ctype=C.c_int: ctype.from_address(base + scratch[name])
+
+
+def oled_page(fw, nav_st):
+    """A Page under OLED's set (the inset modal's): its list view has a list box above it, as a list_fit set fits
+    page_list's box to whole rows."""
+    from test_nav_hold import use_set
+    p = Page(fw)
+    C.c_void_p.from_address(p.view + O['W_PARENT']).value = block(fw, size=4096)
+    def made(*_):  # the header and its panels (artist_page.c), each its own widget
+        p.made.append(block(fw, size=4096))
+        return p.made[-1]
+    fw.mock('widget_factory_create_widget', made)
+    fw.mock('button_create', made)
+    use_set(nav_st, 'oled')
+    return p
+
+
+def props_set(fw, key):
+    """The values widget_set_prop_int wrote under key, in order."""
+    return [c.args[2] for c in fw.log() if c.name == b'widget_set_prop_int' and C.string_at(c.args[1]) == key]
+
+
+def test_an_artists_reply_under_the_inset_modal_is_its_page(fw, nav_st):
+    """Shuffle and Radio on an artist: the header, the pair lit on Shuffle, and two rows (Top Songs, then Albums with its
+    count); Add to Sync, Play and the album rows are no rows of its own."""
+    p = oled_page(fw, nav_st)
+    sets = []
+    fw.mock('widget_set_prop_str', lambda w, k, v, *_: sets.append((C.string_at(k), C.string_at(v))))
+    p.answer(rows=artist_rows())
+    assert p.top.lay == LAY_ARTIST and p.top.stop == 1 and p.drawn == 2
+    assert (b'_ar_name', b'Foo') in sets and (b'_ar_sub', b'4 albums') in sets and (b'_ar_count', b'4') in sets
+
+
+def test_other_sets_and_other_replies_keep_the_plain_rows(fw, nav_st):
+    p = Page(fw)
+    p.answer(rows=artist_rows())  # no modal set
+    assert p.top.lay == LAY_PLAIN and p.drawn == 9
+    from test_nav_hold import use_set
+    C.c_void_p.from_address(p.view + O['W_PARENT']).value = block(fw, size=4096)
+    use_set(nav_st, 'oled')
+    p.fw.fn('addon__fetch', None, C.POINTER(Lv))(p.pg.lv)
+    p.answer(rows=artist_rows(radio=False))  # no Radio: an album's page, say
+    assert p.top.lay == LAY_PLAIN and p.drawn == 8
+
+
+def test_albums_asks_the_artist_again_and_lists_its_albums_newest_first(fw, nav_st):
+    p = oled_page(fw, nav_st)
+    p.answer(rows=artist_rows())
+    p.click(AR_ALBUMS)
+    assert p.pg.depth == 2 and p.top.lay == LAY_ALBUMS and p.top.title == b'Albums'
+    assert p.request().endswith(b'\tmenu\n')  # the level's own op and arguments again
+    p.answer(rows=artist_rows())
+    assert p.drawn == 4 and props_set(fw, b'_ar_row')[-4:] == [6, 8, 5, 7]  # 2023, 2020, 2013, then the undated
+    p.click(8)
+    assert p.pg.depth == 3 and p.top.op == b'album' and p.top.args == b'\talbum:al3'
+
+
+def test_top_songs_opens_as_a_list_of_cover_rows(fw, nav_st):
+    p = oled_page(fw, nav_st)
+    p.answer(rows=artist_rows())
+    p.click(4)
+    assert p.pg.depth == 2 and p.top.op == b'top' and p.top.lay == LAY_TOP
+    p.answer(rows=[(b'action', b'play', b'Song %d' % i, b'Foo', b'song:t%d top:ar1 %d' % (i, i), b'toggle') for i in range(3)])
+    assert p.drawn == 3 and props_set(fw, b'_ar_row')[-3:] == [0, 1, 2]
+    p.back()
+    p.fw.fn('addon__fetch', None, C.POINTER(Lv))(p.pg.lv)
+    p.answer(rows=artist_rows())
+    p.click(4)
+    p.answer(rows=[(b'info', b'', b'Not on this server', b'', b'', b'')])  # no songs: the plain row
+    assert p.top.lay == LAY_PLAIN and p.drawn == 1
+
+
+def test_the_hold_menu_holds_the_artists_sync_rows(fw, nav_st):
+    """Play/Pause held on the page: Add to Sync (Remove from Sync and Quality once chosen) and Sync Now, each its
+    row's own press; Play and Shuffle are none of them."""
+    p = oled_page(fw, nav_st)
+    rows = artist_rows(sync=b'Remove from Sync')
+    rows[1:1] = [(b'action', b'quality', b'Quality: Original', b'', b'artist:ar1', b'')]
+    p.answer(rows=[(b'list', b'sync', b'Sync Now', b'2 waiting', b'', b'')] + rows)
+    fw.fn('addon_hold', C.c_int, C.c_void_p)(p.page)
+    held = fw.var('addon__ar_hold_row', C.c_int * 4)
+    assert list(held[:3]) == [0, 1, 2]
+    fw.fn('addon__artist_pick', None, C.c_int)(1)
+    assert p.pg.next == 0 and p.pg.arg == 1  # G_ROW, Remove from Sync's row
+
+
+def test_the_pair_takes_the_wheel_above_the_rows(fw, nav_st):
+    """artist_page.c pair_key: Shuffle, Radio, then the first row; up from the first row is Radio; Centre presses the
+    lit one."""
+    p = oled_page(fw, nav_st)
+    p.answer(rows=artist_rows())
+    key = fw.fn('pair_key', C.c_int, C.c_void_p, C.c_void_p, C.c_int)
+    top = fw.fn('window_of', C.c_void_p, C.c_void_p)(p.made[-3])  # the header's
+    assert key(top, p.view, 1) == 1 and p.top.stop == 2
+    assert key(top, p.view, 1) == 1 and p.top.stop == 0
+    assert key(top, p.view, 1) == 0  # the rows' own
+    assert key(top, p.view, -1) == 1 and p.top.stop == 2  # the first row selected (sel 0)
+    assert key(top, p.view, -1) == 1 and p.top.stop == 1
+    assert key(top, p.view, -1) == 1 and p.top.stop == 1  # nothing above Shuffle
+    assert key(top, p.view, 0) == 1 and p.pg.arg == 2  # Shuffle's row pressed

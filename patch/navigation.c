@@ -2558,7 +2558,8 @@ static void paint_selection(void *w, void *canvas) {
     if (home && i >= 0) coverflow_home_row(w, g_menu.at[i], g_menu.id[i], 1);
     if (i < 0 || (!shown && !home && g_menu.kind != 4)) return;
     if (st.shuffle_on && st.shuffle_on == st.action_view && st.shuffle_list == w)
-        return; /* the selection is on the Shuffle row above (shuffle_paint) */
+        return;                /* the selection is on the Shuffle row above (shuffle_paint) */
+    if (pair_holds(w)) return; /* ... or on an artist's Shuffle or Radio (artist_page.c) */
     rect_t r = bounds(&g_menu, i), old;
     /* A boundary detent nudges the selection against the end until it springs back. */
     if (fx_live(w) && st.bump_dir) r.y -= st.bump_dir * theme()->bump_px;
@@ -6764,6 +6765,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         stock_canvas_set_fill_color(canvas, fill);
         coverflow_home_bar(canvas, window_manager_get_top_window(wm)); /* OLED's art in the bar */
         coverflow_home_strip(canvas, window_manager_get_top_window(wm)); /* and Split's list */
+        artist_cap(w, canvas); /* an artist's monogram, its top over the bar */
         st.paint_w = w;
         stock_canvas_set_fill_color(canvas, fill);
     }
@@ -12348,6 +12350,7 @@ int ringnav(void *ctx, void *event) {
         return dir ? hold_wheel(ctx, event, dir) : result;
     }
     if (shuffle_key(top, w, dir)) return STOP; /* OLED's Shuffle row over the songs */
+    if (pair_key(top, w, dir)) return STOP;    /* an artist's Shuffle and Radio (artist_page.c) */
     if (st.center_timer && !pending_matches(top, &g_menu)) cancel_center();
     int touch = widget_get_prop_int(w, TOUCH, 0);
     if (touch) {
