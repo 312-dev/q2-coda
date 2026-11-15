@@ -1,12 +1,13 @@
 """playlist_pages.c and the On-The-Go and server-sync parts of playlists.c and catalogue.c: a playlist's own page
 under OLED (Shuffle, Add Songs, Save as Playlist and Clear for On-The-Go, then the songs), On-The-Go as entries with
-cd_num 100 and no header, Save as Playlist's "On-The-Go N", Rename and Delete (docs/internals.md#on-the-go)."""
+cd_num 100 and no header, Save as Playlist's "On-The-Go N", and the lines a server playlist's change writes to its
+app's playlists.out (docs/internals.md#on-the-go, docs/server-library.md#playlists-from-the-q2)."""
 import ctypes as C
 import re
 
 import pytest
 
-from conftest import O  # noqa: F401
+from conftest import O, Files
 from test_nav_hold import Editor, Table, recs, ui  # noqa: F401  (fixtures)
 
 OTG = 100
@@ -135,6 +136,40 @@ def test_remove_takes_the_held_song_out(fw, ui, pages):
     fw.fn('playlist_pages__pv_remove', None, C.c_int)(0)
     assert pages.table.songs(3) == ['One', 'Three'] and ui.toasts[-1] == 'Removed'
     assert ui.rows(pv.view) == ['Shuffle', 'Add Songs', 'One', 'Three']
+
+
+def server(fw, files, pages):
+    fw.fn('pod_settings', None)()  # read, so the source stays as set
+    fw.var('catalogue_source', C.c_int).value = 1
+    pages.table.servers[3] = ('subsonic', 'pl7')
+    pages.table.sids = {'/mnt/mmc/a.flac': 's1', '/mnt/mmc/c.flac': 's%3'}
+    return lambda: files.files.get('/mnt/mmc/.subsonic/playlists.out', b'')
+
+
+def test_a_server_playlist_s_songs_go_to_its_app_in_their_order(fw, ui, pages):
+    out = server(fw, Files(fw), pages)
+    pv = open_page(fw, 3, b'Road Trip')
+    ui.nodes[pv.view].props['_ringnav_index'] = 3
+    fw.var('playlist_pages__pv_held', C.c_void_p).value = pages.deques[pv.songs][1]
+    fw.fn('playlist_pages__pv_remove', None, C.c_int)(0)
+    assert out() == b'set\tpl7\ts1\ts%253\n'  # Two's gone; a song with no sid (none here) is left out
+
+
+def test_a_rename_and_a_delete_of_a_server_playlist_go_to_its_app(fw, ui, pages):
+    out = server(fw, Files(fw), pages)
+    assert fw.fn('playlist_rename', C.c_int, C.c_int, C.c_char_p)(3, b'Road\tTrip') == 1
+    assert fw.fn('playlist_delete', C.c_int, C.c_int)(3) == 1
+    assert out() == b'name\tpl7\tRoad%09Trip\ndelete\tpl7\n'
+
+
+def test_a_local_playlist_or_local_only_writes_nothing(fw, ui, pages):
+    files = Files(fw)
+    server(fw, files, pages)
+    fw.var('catalogue_source', C.c_int).value = 0
+    fw.fn('playlist_rename', C.c_int, C.c_int, C.c_char_p)(3, b'New')
+    fw.var('catalogue_source', C.c_int).value = 1
+    fw.fn('playlist_rename', C.c_int, C.c_int, C.c_char_p)(1, b'Gym 2')  # not a server playlist
+    assert not files.files
 
 
 def test_a_rename_to_a_taken_name_is_refused(fw, ui, pages):

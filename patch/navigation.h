@@ -800,6 +800,7 @@ void pl_tile_paint(void *w, void *canvas);
 #define ON_THE_GO 100
 int playlist_add(void *r, int dest);
 int playlist_remove(int dest, void *r);
+void playlist_synced(int dest);
 int playlist_rename(int id, const char *name);
 int playlist_delete(int id);
 int otg_clear(void);

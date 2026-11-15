@@ -161,6 +161,37 @@ file's. A playlist of the user's with that name and other songs keeps the name, 
 is left out. A catalogue playlist that leaves the catalogue is deleted. At most stock's 100
 playlists.
 
+#### Playlists from the Q2
+
+A server playlist changed on the Q2 (OLED's Add Songs, Add to Playlist…, Remove, Rename, Delete;
+docs/oled-design.md#playlists) goes back to the server through its app, when the app declares the
+caps word `playlists` (Q2 Pod writes it beside `catalogue`). The firmware appends a line to
+`/mnt/mmc/.<id>/playlists.out` for each change, in the card-app channel's escapes, as it appends
+to `ratings.out` (`catalogue_playlist_sync`, `patch/catalogue.c`):
+
+```text
+set	<pid>	<sid>	<sid>...    its songs now, in their order, after an add or a removal
+name	<pid>	<name>          renamed
+delete	<pid>               deleted
+```
+
+The playlist is the one `cat.serverlists` maps the stock playlist to; a song's sid is its
+`servermeta` row's (a server row, or a card file linked to one) or its `serveritem` row's (a
+synced song's card path). A song with neither, a card file the server doesn't have, is left out of
+`set`. A local playlist, or Local Only, writes nothing.
+
+The app takes the file by renaming it, as `ratings.out` (`playlists.out.sending` holds what is
+left to send), and, while the server answers, sends each line in order: a playlist's last `set`
+alone (`createPlaylist` with its `playlistId` and the first 200 song ids, which replaces its songs,
+then `updatePlaylist` adding the rest 200 at a time), `name` as `updatePlaylist`'s `name`, `delete`
+as `deletePlaylist`, and nothing else for a playlist the lines go on to delete. A playlist the
+server no longer has, or won't change, is dropped; a lost server keeps the rest for the next
+connection. Lines waiting run the connection's checks again at the next ping, so the server's
+playlists are read back and the catalogue written with them, and the Q2's import then agrees with
+what it already shows. ponytail: a change the Q2 makes before the app has sent the one before is
+sent in order, but a catalogue the app writes in between still has the server's older playlist
+until the next one.
+
 ### Core firmware changes
 
 | Change | Where | Built |

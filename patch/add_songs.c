@@ -81,6 +81,7 @@ void add_songs_toggle(void *r) {
     if (!now) {
         ok = playlist_add(r, as.dest) >= 0;
         if (ok && as.now && as.nnow < AS_MAX_KEYS) as.now[as.nnow++] = k;
+        if (ok) playlist_synced(as.dest);
     } else {
         void *songs = staged(as_query, (void *)(long)as.dest, &n);
         for (unsigned i = 0; songs && i < deque_size(songs) && !ok; ++i)
@@ -223,6 +224,7 @@ static void as_add_all(as_level *l) {
         ++added;
     }
     g_delete_flag = 1;
+    if (added) playlist_synced(as.dest);
     if (added) tk_snprintf(said, sizeof said, "Added %d song%s", added, added == 1 ? "" : "s");
     toast(added ? said : "Already added");
 }

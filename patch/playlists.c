@@ -249,7 +249,9 @@ static int ple_run(const void *unused) {
             if (!added)
                 toast("Already in playlist");
             else {
-                if (added > 0) ple_reload(), ple_tick(widget_get_child(ple.view, (unsigned)action));
+                if (added > 0)
+                    ple_reload(), ple_tick(widget_get_child(ple.view, (unsigned)action)),
+                        playlist_synced(ple.dest);
                 toast(added > 0 ? "Added to Playlist" : "Could not save playlist");
             }
             return 0; /* picker stays on its selected song */
@@ -455,7 +457,15 @@ static void pl_quote(char *out, unsigned size, const char *s) {
 }
 
 /* Song r out of playlist dest (0 to 99, or ON_THE_GO), by its entry's ID (ple_mutate's checks). */
-int playlist_remove(int dest, void *r) { return ple_mutate(dest, r, 0); }
+int playlist_remove(int dest, void *r) {
+    int ok = ple_mutate(dest, r, 0);
+    if (ok) playlist_synced(dest);
+    return ok;
+}
+/* Playlist dest's songs changed (an add, a removal): a server playlist's go to its app. */
+void playlist_synced(int dest) {
+    if (dest < ON_THE_GO) catalogue_playlist_sync(dest, PLS_SET, (const char *)0);
+}
 /* On-The-Go emptied; 1 when it committed. */
 int otg_clear(void) { return pl_exec("delete from playlist where id>100 and cd_num=100"); }
 /* On-The-Go saved as a playlist of its own, "On-The-Go N" (the first N free, from 1), its songs
@@ -488,7 +498,9 @@ int playlist_rename(int id, const char *name) {
     if (taken) return -2;
     tk_snprintf(sql, sizeof sql, "update playlist set name='%s',filename='%s' where id=%d", q, q,
                 id);
-    return id >= 0 && id < 100 && pl_exec(sql);
+    if (id < 0 || id >= 100 || !pl_exec(sql)) return 0;
+    catalogue_playlist_sync(id, PLS_NAME, name); /* a server playlist's name, to its app */
+    return 1;
 }
 /* Playlist id (its header there, exactly one) and its entries deleted in one transaction; 1 when
  * it committed. Music files and the queue stay. */
@@ -508,6 +520,7 @@ int playlist_delete(int id) {
         ok = 1;
 done:
     if (db) sqlite3_close(db);
+    if (ok) catalogue_playlist_sync(id, PLS_DELETE, (const char *)0); /* a server one's too */
     return ok;
 }
 
@@ -545,6 +558,7 @@ static void pick_done(int i) {
         tk_snprintf(name, sizeof name, "%s", P(h, REC_TITLE));
     }
     added = id >= 0 ? playlist_add(r, id) : -1;
+    if (added > 0) playlist_synced(id);
     g_delete_flag = 1; /* a Playlists page under it reads its rows again */
     tk_snprintf(said, sizeof said,
                 added > 0 ? "Added to %s"
