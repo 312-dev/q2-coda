@@ -463,8 +463,9 @@ on 2026-11-15. Built by `patch/np_about.c`, which paints it from the details sto
   only for this play (straight in its `stream/` folder). A cell whose value is unknown is left out
   and the rest close up: no "Unknown".
 - **Scrolling:** inert, no selection, as an iOS info page. When the grid ends past the list's end
-  (y 282) the wheel scrolls it a row a tick, as far as its last row, and back; the window clips it
-  under the status row, where the header's top shows only at the page's top.
+  (y 282) the wheel scrolls it a row a tick, as far as its last row, and back, and a finger dragged up
+  or down moves it with the finger between the same two ends, stopping where it lifts (no momentum,
+  so a flick never overshoots); the window clips it under the status row, where the header's top shows only at the page's top.
 
 ### Icons
 

@@ -1350,6 +1350,39 @@ def test_oled_about_s_wheel_scrolls_a_row_to_its_end(fw, st, geometry):
     assert key(short.page.addr, O['KEY_NEXT']) == 1 and dict(short.paint())['Location'] == loc  # it fits: still
 
 
+def test_oled_about_s_drag_scrolls_it_between_the_wheel_s_ends(fw, st, geometry):
+    """A finger dragged up moves the grid with it, pixel for pixel, no further than the wheel's end (32 px here) and
+    no higher than its top; a flick stops where it lifts, a move after the lift does nothing, and the wheel goes on
+    from where the drag left it."""
+    g = Grid(fw, st, geometry)
+
+    def touch(kind, y):
+        for w, evt, fn, ctx in list(g.ui.handlers):
+            if evt == kind and w in (g.body.addr, g.page.addr):
+                C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, event(kind, x=187, y=y))
+
+    loc = dict(g.paint())['Location']
+    down, move, up = O['EVT_POINTER_DOWN'], O['EVT_POINTER_MOVE_BEFORE'], O['EVT_POINTER_UP_BEFORE']
+    touch(down, 250)
+    touch(move, 240)
+    assert dict(g.paint())['Location'] == loc - 10
+    touch(move, 100)  # a flick far past the end
+    assert dict(g.paint())['Location'] == loc - 32
+    touch(move, 290)  # and back past the top
+    assert dict(g.paint())['Location'] == loc
+    touch(move, 230)
+    touch(up, 230)
+    assert dict(g.paint())['Location'] == loc - 20
+    touch(move, 100)  # lifted: no longer the drag's
+    assert dict(g.paint())['Location'] == loc - 20
+    key = fw.fn('np_about_key', C.c_int, C.c_void_p, C.c_uint)
+    assert key(g.page.addr, O['KEY_PREV']) == 1 and dict(g.paint())['Location'] == loc
+    touch(down, 200)
+    touch(O['EVT_POINTER_ABORT'], 200)
+    touch(move, 150)  # aborted: still
+    assert dict(g.paint())['Location'] == loc
+
+
 def test_oled_about_repaints_only_on_a_change(fw, st, geometry):
     g = Grid(fw, st, geometry)
     g.invalidated.clear()
