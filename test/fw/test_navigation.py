@@ -2479,6 +2479,7 @@ AA = b"ifnull(nullif(albumsonger,''),songer)"
     (b'select * from playlist where id <= 100', b'select * from playlist where id <= 100 order by name collate nocase, id'),
 ])
 def test_library_query_rewrites(fw, sql, want):
+    fw.mock('fw_pthread_self', lambda *_: 7)  # another thread's load: stock's own call, its sort passed on (name_order.c has the UI thread's)
     query = Query(fw)
     assert query.run(b'db', sql, None, 7) == 0 and query.seen == [(want, 7)]
 
@@ -2491,6 +2492,7 @@ def test_library_query_of_no_sql_passes(fw):
 
 @pytest.mark.parametrize('name, trampoline', [('ringnav_sorted_query', 'stock_sorted_query_trampoline')])
 def test_sorted_query_is_the_sorted_trampolines(fw, name, trampoline):
+    fw.mock('fw_pthread_self', lambda *_: 7)  # off the UI thread
     fw.fn(name, C.c_int, C.c_char_p, C.c_void_p, C.c_void_p, C.c_int)(b'db', b'select 1', None, 2)
     assert len(fw.calls(trampoline)) == 1 and not fw.calls('stock_dbquery_trampoline')
 
