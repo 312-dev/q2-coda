@@ -54,7 +54,7 @@ class Game(C.Structure):
                 *((k, C.c_int) for k in 'h screen target picking pick confirm paused choice carry dirty'.split()),
                 ('sud', Sudoku), ('vx', Vortex), ('best', Best), ('sol', Sol), ('save', C.c_uint), ('pop_at', C.c_uint),
                 ('pop_ring', C.c_int), ('pop_seg', C.c_int), ('trail', (C.c_int * 2) * 4), ('record', C.c_int),
-                ('sn_best', Best), ('sn', Snake)]
+                ('sn_best', Best), ('sn', Snake), ('rows', C.c_int), ('title', C.c_void_p), ('engines', C.c_int)]
 
 
 def test_structs_are_the_saves_sizes():
