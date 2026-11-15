@@ -999,10 +999,11 @@ def validate_assets(directory):
     from theme import builtins, geometry_sets, SCHEMA
     from ipod import CLASSIC_LIGHT_FONT_SRC, PAGE_KIND as page_kind, page_rows
     built = set(run('unsquashfs', '-l', directory/'rootfs.squashfs').split())
-    # Classic's Playlists rows (pl_row) are the theme's page_detail high in a list pitched at song_pitch: one height.
+    # Under a set without toolbars the Playlists rows (pl_row) are the theme's page_detail high in a list pitched at
+    # the set's playlist pitch (page_rows): one height.
     for t in builtins():
         for g in geometry_sets([t]):
-            if not g.toolbar: assert g.song_pitch == t['page_detail'], (t['name'], g.name)
+            if not g.toolbar: assert page_rows(g, 'playlist')[0] == t['page_detail'], (t['name'], g.name)
     for g in geometry_sets(builtins()):
         assert g.body <= g.pitch and g.art_body <= g.art_pitch and g.song_body <= g.song_pitch, g.name
         assert g.art + 2*g.art_inset <= g.art_body, g.name
@@ -1033,7 +1034,7 @@ def validate_assets(directory):
                 assert nav[2]['visible'] == 'false' and nav[2]['enable'] == 'false', short
                 if short == 'localmusic/playlist_page.bin':
                     surface = next(n for n in new[3] if n[0] == 'list_view')
-                    assert surface[1][1] == 0 and surface[2]['default_item_height'] == str(g.song_pitch) and 'item_height' not in surface[2]
+                    assert surface[1][1] == 0 and surface[2]['default_item_height'] == str(page_rows(g, 'playlist')[0]) and 'item_height' not in surface[2]
                 else:
                     assert [n[1][1] for n in new[3] if n[0] == 'list_item'] == [0, g.pitch]
         assert g.set_top + g.set_rows*g.set_row <= 320 - g.bar, g.name

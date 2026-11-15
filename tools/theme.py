@@ -349,6 +349,7 @@ GEOM_RANGES = {
     'song_body': (24, lambda g: g.song_pitch),
     'song_title24_y': (0, lambda g: g.song_body - 24),
     'song_meta_y': (0, lambda g: g.song_body - 16),
+    'playlist_pitch': (lambda g: 28 if g.playlist_pitch else 0, 78),  # Playlists' own rows; 0 takes song_pitch (ipod.page_rows)
     'set_row': (28, 78),
     'set_top': (0, 40),  # a short header at most under the bar
     'set_rows': (1, lambda g: (320 - g.bar - g.set_top) // g.set_row),  # the settings list fits the client

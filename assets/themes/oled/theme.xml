@@ -9,7 +9,7 @@
        the glass's top curve (STATUS_ROW_INSET, patch/offsets.inc). Then
        32 px rows from y 58, the text at x 24, seven of them: list_end and list_fit end the list at y 282, the
        strip below stays black and the selection never lands there; a list scrolls a row at a time. Songs and Folder's
-       rows are one 32 px line; Albums and Search are two lines at 52 px, four to a page (a list box holds whole rows): 40 px
+       rows are one 32 px line; Albums, Playlists and Search are two lines at 52 px, four to a page (a list box holds whole rows): 40 px
        art at x 24, the text at 72 (list.art below). Text y puts each line where the design's baselines are. Home in
        Split: the menu's rows 204 px wide, so the bar ends at 188 and the chevrons stand at 176 (the right column from
        the row's edge); the playing album's art from x 196 and the top edge to the screen's right and bottom edges,
@@ -20,7 +20,7 @@
             art_body="52" text_art="0" text_art_inset="0" lib_pitch="32" lib_body="32" lib_inset="0"
             lib_art="0" title24_y="4" title_y="6" meta_y="8"
             count_y="8" art_title24_y="6" art_meta_y="33" folder_pitch="32" folder_body="32" song_pitch="32" song_body="32" song_title24_y="4"
-            song_meta_y="8" set_row="32" set_top="0" set_rows="7"
+            song_meta_y="8" playlist_pitch="52" set_row="32" set_top="0" set_rows="7"
             set_icon="0" stream_row="32" bar_px="18" bar_title_w="0" bar_right="0" batt_w="25" batt_h="12"
             text_x="24" list_end="224" list_fit="1" status_y="23" right_x="28"
             action_row="32" home_row="32" home_lib="0" np_ipod="0"

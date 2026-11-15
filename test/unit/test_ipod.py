@@ -1283,6 +1283,24 @@ def test_lists_beside_settings_rows_take_item_height(monkeypatch):
     assert 'item_height' not in named(ipod.decode(ipod.patch_asset(path, data)))['list_view'][2]
 
 
+def test_oled_playlists_list_takes_its_two_line_rows(monkeypatch):
+    # OLED's Playlists rows are page_detail's 52 px (playlists.c pl_row): its list is pitched at playlist_pitch, holds
+    # whole rows of it, and takes no item_height, which would force them to 32. Its 32 px text lists still take one.
+    oled = next(theme.geometry(t) for t in theme.builtins() if t['id'] == 'oled')
+    t = next(t for t in theme.builtins() if t['id'] == 'oled')
+    assert ipod.page_rows(oled, 'playlist')[0] == t['page_detail'] == 52 != oled.song_pitch == oled.set_row
+    for path in ('localmusic/playlist_page.bin', 'localmusic/albuminfo_page.bin'):
+        data = ipod.encode(list_page(path)); monkeypatch.setitem(ipod.UI_ASSETS, path, ipod.sha(data))
+    data = ipod.encode(list_page('localmusic/playlist_page.bin'))
+    n = named(ipod.decode(ipod.patch_asset('localmusic/playlist_page.bin', data, g=oled)))
+    assert n['list_view'][1] == [0, 0, 375, 4 * 52] and n['list_view'][2]['default_item_height'] == '52'
+    assert 'item_height' not in n['list_view'][2] and n['row'][1][3] == 52
+    unset = dataclasses.replace(oled, playlist_pitch=0)  # song_pitch's rows, the settings rows' height: told apart
+    assert named(ipod.decode(ipod.patch_asset('localmusic/playlist_page.bin', data, g=unset)))['list_view'][2]['item_height'] == '32'
+    data = ipod.encode(list_page('localmusic/albuminfo_page.bin'))
+    assert named(ipod.decode(ipod.patch_asset('localmusic/albuminfo_page.bin', data, g=oled)))['list_view'][2]['item_height'] == '32'
+
+
 def elf(size):
     """A little MIPS ELF: one LOAD segment, at 0x400000 from file offset 0x1000."""
     data = bytearray(0x1000 + size)
