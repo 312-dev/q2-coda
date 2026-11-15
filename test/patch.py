@@ -21204,10 +21204,10 @@ assert 'rm -rf /mnt/mmc/.spotify/cache /mnt/mmc/.spotify/.cache-size /mnt/mmc/.s
 assert m.toasts[-1][3]=="Spotify's login and cache erased" and KILL in m.systems[-1]
 assert m.labels()[2:4]==['Spotify Cache: 2 GB','Erase Spotify Data']; passed()
 # The wheel drives only allowlisted windows (patch/contexts.inc), so every runtime list page needs an
-# entry; the two streaming Now Playing pages, a card app's QR code page and OLED's offline note (feedback_offline),
-# none with a list, handle their own keys.
+# entry; the two streaming Now Playing pages, a card app's QR code page, OLED's offline note (feedback_offline) and
+# Now Playing's About (np_about.c, its Return its own), none with a list, handle their own keys.
 pages=set(re.findall(r'page_open\("(\w+)"',''.join(p.read_text() for p in (ROOT/'patch').glob('*.c'))))
-assert pages-set(re.findall(r'"(\w+)"',(ROOT/'patch/contexts.inc').read_text()))=={'radionp_page','spotify_page','qrcode_page','offline_page'}; passed()
+assert pages-set(re.findall(r'"(\w+)"',(ROOT/'patch/contexts.inc').read_text()))=={'radionp_page','spotify_page','qrcode_page','offline_page','npabout_page'}; passed()
 m=BooksMachine({},{}); vid=payload_syms['vid']; m.word(vid+12,4242); m.word(vid+16,7)
 for playing,command in ((0,'a'),(1,'r')):
     m.sent=[]; endpoint(m,'video_set_playing',playing); endpoint(m,'video_set_playing',playing)

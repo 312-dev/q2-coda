@@ -1031,8 +1031,7 @@ def test_a_slide_off_oled_s_field_repaints_the_window_and_the_status_row_whole(f
     """Field covered the whole screen; the slide repaints the slide area alone, so without this the rows around it
     (shuffle and repeat's among them) kept Field's last frame (seen in the emulator). Another theme's Field stays in
     the slide area, which the slide repaints."""
-    full = Full(fw) if oled else None
-    now = full.now if oled else Now(fw)
+    now = Full(fw).now if oled else Now(fw)
     if not oled:
         fw.var('fw_ctx_system_bar', C.c_void_p).value = now.widget(0, 0, 375, 58)
     bar = C.c_void_p.in_dll(fw.lib, 'fw_ctx_system_bar').value
