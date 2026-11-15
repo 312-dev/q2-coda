@@ -362,6 +362,16 @@ def validate_assets(directory):
     STOCK_NAMED_ICONS = ('menu_coverflow.png', 'menu_coverflowdown.png')
     def read(image, rel):
         return subprocess.check_output(['unsquashfs', '-cat', str(directory/image), rel])
+    def patched_hciplayer():
+        """The patched stock hciplayer the image ships. A --new-player build puts q2player at usr/bin/hciplayer and
+        this one xz-compressed under PLAYER_STOCK_DIR (player/main.c's STOCK_XZ)."""
+        from build import PLAYER_STOCK_DIR
+        player = read('rootfs.squashfs', 'usr/bin/hciplayer')
+        if 'q2player_sha256' not in manifest:
+            return player
+        assert manifest['q2player_sha256'] == sha(player)
+        import lzma
+        return lzma.decompress(read('rootfs.squashfs', PLAYER_STOCK_DIR.decode() + '/hciplayer.xz'))
     # Every stock UI asset with Chinese text is given in English (english_ui), the edited ones after their edit.
     ui = 'release/assets/default/raw/ui/'
     chinese = {l.removeprefix('squashfs-root/'+ui) for l in run('unsquashfs', '-l', directory/'stock.squashfs').splitlines()
@@ -519,11 +529,12 @@ def validate_assets(directory):
     check_bluetooth_drop(directory)
     from build import SCROBBLE_CA
     assert read('rootfs.squashfs', SCROBBLE_CA) == (ROOT/'assets/scrobble-ca.pem').read_bytes()
-    # The whole Mozilla bundle, for stock's HTTPS and the player's; ffmpeg's tls options in hciplayer default to it.
+    # The whole Mozilla bundle, for stock's HTTPS and the player's; ffmpeg's tls options in the patched hciplayer
+    # default to it.
     from build import STOCK_CA, STOCK_CA_SHA
     assert sha(read('rootfs.squashfs', STOCK_CA)) == STOCK_CA_SHA
     from peq import TLS_OPTIONS, TLS_DEFAULTS
-    player, stock_player, pps = read('rootfs.squashfs', 'usr/bin/hciplayer'), read('stock.squashfs', 'usr/bin/hciplayer'), symbols(directory/'peq'/'peq.elf')
+    player, stock_player, pps = patched_hciplayer(), read('stock.squashfs', 'usr/bin/hciplayer'), symbols(directory/'peq'/'peq.elf')
     for address, value in TLS_DEFAULTS:
         off = fileoff(stock_player, address)
         assert struct.unpack_from('<I', stock_player, off)[0] == 0
@@ -587,7 +598,7 @@ def validate_assets(directory):
     # the stores of the stop on the thread's other paths, the close handlers, the preload's open;
     # the FLAC seek's gate exit, no-sync scan and near-the-end steps.
     from peq import VBR_SCAN, EQ_RATE_GATES, ID3_CALLS, PAUSE_WAIT, CMD_DONE, IDLE_WAIT, MP3_ALLOC, MP3_FILTER, MP3_CLOSE, MP3_READ, MP3_FILL, USB_BUFFER, DAC_RELEASE, PROBE_STOP, EXIT_HOLD, PRELOAD_PUBLISH, PRELOAD_FAILED, PRELOAD_FAIL_STORES, COLD_CLEAR, FORCED_EOF, STOP_SITES, STOP_NOPS, STOP_FILL, PRELOAD_CLOSE, FLAC_GATE, SEEK_NOSYNC, SEEK_WORDS, FLAC_META_EOF, MEDIA_INFO_NULL
-    old, new = read('stock.squashfs', 'usr/bin/hciplayer'), read('rootfs.squashfs', 'usr/bin/hciplayer')
+    old, new = read('stock.squashfs', 'usr/bin/hciplayer'), patched_hciplayer()
     off = fileoff(old, VBR_SCAN)
     words = (*EQ_RATE_GATES, *USB_BUFFER, *PRELOAD_FAIL_STORES, *STOP_NOPS, *SEEK_WORDS, *FLAC_META_EOF, *MEDIA_INFO_NULL)
     gates = [fileoff(old, a) for a in (*(a for a, _, _ in (*words, *DAC_RELEASE, *PROBE_STOP, *STOP_SITES, STOP_FILL, *PRELOAD_CLOSE, FORCED_EOF, EXIT_HOLD, PRELOAD_PUBLISH, PRELOAD_FAILED, COLD_CLEAR, FLAC_GATE, SEEK_NOSYNC)), *ID3_CALLS, MP3_ALLOC, MP3_FILTER, MP3_READ,
