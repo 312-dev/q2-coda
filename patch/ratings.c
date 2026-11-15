@@ -287,6 +287,7 @@ static void rate_outside(void *win, int on) {
 }
 
 static void rate_save(void *win);
+static int rate_song(int n);
 /* Closes the picker, and with save keeps rate_pick (rate_save). */
 static void rate_close(int save) {
     void *win = st.rate_on;
@@ -314,19 +315,46 @@ static void rate_save(void *win) {
             rate_album_favs(a, n == 5);
         return;
     }
+    rate_song(n);
+}
+
+/* n hearts for the playing track, My Fav in or out with them: through the heart's own click while
+ * Now Playing is open (ra.rate_ctx), so its heart follows, else as the queue menu's Favorites rows
+ * do (navigation.c qm_run). 1 when kept, 0 when nothing plays that can be rated or it was not saved. */
+static int rate_song(int n) {
     void *r = rate_track();
-    if (!r) return;
+    if (!r) return 0;
     int fav = checkFavExist(r) != 0, row = catalogue_row_fav(r) > 0;
-    if (!rate_saved(rate_keep(0, rate_song_key(r), n))) return;
+    if (!rate_saved(rate_keep(0, rate_song_key(r), n))) return 0;
     catalogue_rated(r, n); /* to the server too (docs/server-library.md#ratings-and-favourites) */
     ra.rate_row = 0;
     if (n != 5 && row) catalogue_row_unfav(r); /* a copy's row: stock's toggle would add the copy */
-    if (n == 5 ? !fav && !row : fav)
-        FAV_CLICK(ra.rate_ctx, (void *)0);
-    else if (n != 5 && row)
+    if (n == 5 ? !fav && !row : fav) {
+        if (ra.rate_ctx) {
+            FAV_CLICK(ra.rate_ctx, (void *)0);
+        } else if (n == 5) { /* batch-select's Add to My Fav on the queue's row, as the menu's */
+            unsigned at, size;
+            queue_now(&at, &size);
+            batch_init_selectrecord((int)size);
+            batch_set_selectitem((int)at);
+            batch_add_file(0xf001, 0xf00a, P(mcl_pdeqplaylist, 0), P(p_vector_select_record, 0), 0);
+        } else {
+            deleteMusicFromFav(r);
+        }
+    } else if (n != 5 && row && ra.rate_ctx) {
         heart_set("play_unfav");
+    }
     if ((n == 5) != (fav || row)) ratings_copy_due(), fav_told(r, n == 5);
     rate_badge();
+    return 1;
+}
+
+/* Car Remote (coda_rc_shim.c): Rate from the phone, and the playing track's hearts for its Now
+ * Playing, 5 for My Fav, -1 when nothing plays that can be rated (a stream, a radio). */
+int rate_car(int n) { return n >= 0 && n <= 5 && rate_song(n); }
+int rate_car_hearts(void) {
+    void *r = rate_track();
+    return !r ? -1 : rate_fav(r) ? 5 : rate_kept(0, rate_song_key(r));
 }
 
 /* A tap on the picker is a press that came down on it. The hold that opened it is still down

@@ -5,8 +5,9 @@
  *   goes off: nothing listens while it is off;
  * - writes Now Playing for it to /tmp/coda-rc.now, and the queue's song ids to /tmp/coda-rc.queue;
  * - takes its commands from /tmp/coda-rc.cmd: play a list of song ids from one of them, or shuffled (ids in
- *   /tmp/coda-rc.list), Play, Pause, Play/Pause, Next, Previous, seek, set the volume; and answers each in
- *   /tmp/coda-rc.ack, a Pause or Play once the player shows it;
+ *   /tmp/coda-rc.list), Play, Pause, Play/Pause, Next, Previous, seek, set the volume, set shuffle and
+ *   repeat, rate the playing song, play a song of the queue; and answers each in /tmp/coda-rc.ack, a
+ *   Pause or Play once the player shows it;
  * - shows the pairing code while /tmp/coda-rc.pair exists, and writes /tmp/coda-rc.pair-cancel when the
  *   user closes it.
  * Settings > Car Remote is this file's page too: the switch, the paired phones, Forget.
@@ -31,6 +32,7 @@
 #define CR_PEERS_MAX 8
 #define CR_QUEUE_MAX 5000 /* ponytail: a longer queue lists its first 5000 to the phone */
 #define CR_LIST_MAX 20000 /* coda_rc_lib.c PLAY_MAX */
+#define CR_HEARTS_MS 5000 /* the playing song's hearts read again at least this often */
 
 static struct {
     int checked, on;
@@ -41,6 +43,8 @@ static struct {
     void *pair_page, *page; /* the code's Dialog; Settings > Car Remote */
     int forget; /* the phone row Forget asks about, + 1 */
     int toast_what;
+    int hearts; /* the playing song's, as rate_car_hearts; read at hearts_at for hearts_id, hearts_gen */
+    unsigned hearts_at, hearts_id, hearts_gen;
 } cr __attribute__((section(".scratch")));
 
 int coda_rc_enabled(void) {
@@ -104,6 +108,15 @@ static void cr_queue(void *q, unsigned pos) {
     free(b);
 }
 
+/* The playing song's hearts: again on a new song, a My Fav change made here (catalogue_fav_gen) or
+ * every CR_HEARTS_MS, as stock's own lists change My Fav without telling. */
+static int cr_hearts(unsigned id) {
+    unsigned now = time_now_ms(), gen = catalogue_fav_gen();
+    if (!cr.hearts_at || id != cr.hearts_id || gen != cr.hearts_gen || now - cr.hearts_at >= CR_HEARTS_MS)
+        cr.hearts = rate_car_hearts(), cr.hearts_id = id, cr.hearts_gen = gen, cr.hearts_at = now | 1;
+    return cr.hearts;
+}
+
 static void cr_now(void) {
     void *q = P(mcl_pdeqplaylist, 0), *r = 0;
     unsigned pos = (unsigned)I(MCL_POS, 0);
@@ -124,6 +137,7 @@ static void cr_now(void) {
     /* playback.c: 3 repeats the song, 4 and 5 wrap the queue (4 within an album or folder) */
     put_int(b, sizeof b, &n, "repeat", repeat == 3 ? 1 : repeat >= 4 ? 2 : 0);
     put_int(b, sizeof b, &n, "volume", g_volume);
+    put_int(b, sizeof b, &n, "hearts", cr_hearts(r ? (unsigned)I(r, REC_ID) : 0));
     put_int(b, sizeof b, &n, "qpos", (int)pos);
     put_int(b, sizeof b, &n, "qlen", q ? (int)deque_size(q) : 0);
     put_int(b, sizeof b, &n, "qgen", (int)cr.q_gen);
@@ -219,6 +233,7 @@ static int cr_play(const void *unused) {
             play_folder(dq, from, 0xf001);
     }
     deque_destroy(dq);
+    cr_now(); /* the new queue's version before the ack: the daemon's resume notes it (coda_rc_lib.c) */
     cr_ack(seq, size ? 0 : 1);
     return 0;
 }
@@ -234,12 +249,38 @@ static void cr_settle(void) {
     cr.want = 0;
 }
 
+/* SetMode's shuffle (0 Off, 1 on) and repeat (0 Off, 1 One, 2 All; -1 leave either) as the hold menu's
+ * choices (navigation.c qm_run): on keeps a shuffle by album; Off keeps Play One Song or Album, else
+ * Play All; All keeps Repeat Album, else Repeat All. 1 when set. */
+static int cr_mode(int shuffle, int repeat) {
+    int s = playback_option(0), r = playback_option(1), ok = 1;
+    if (shuffle >= 0) ok = playback_set(0, !shuffle ? 0 : s ? s : 1);
+    if (ok && repeat >= 0) ok = playback_set(1, repeat == 1 ? 3 : repeat == 2 ? (r == 4 ? 4 : 5) : r < 3 ? r : 2);
+    return ok;
+}
+
+/* The queue's song at index, if it is still song id (else 3: the phone's queue is stale), as a View Queue
+ * row plays it (upnext.c un_play): the playing one plays on, another starts unless Headphones required
+ * forbids it (1). */
+static int cr_jump(unsigned at, int id) {
+    void *q = P(mcl_pdeqplaylist, 0);
+    if (!q || at >= deque_size(q) || I(deque_at(q, at), REC_ID) != id) return 3;
+    if (at == (unsigned)I(MCL_POS, 0) && playback_keeps(q, (int)at)) {
+        if (!media_playing()) media_key(KEY_PLAY);
+        return 0;
+    }
+    if (check_forbid_play_no_headset(0)) return 1;
+    press_stamp();
+    player_start_queue((int)at);
+    return 0;
+}
+
 static void cr_command(void) {
     char raw[64];
     if (cr.play_timer || !state_read(CR_CMD, raw, sizeof raw)) return;
     unsigned seq = (unsigned)atoi(raw + 1);
     char *verb = strstr(raw + 1, " ");
-    int v = 0;
+    int v = 0, w = 0;
     cr.want = 0; /* a newer command: the daemon has answered the one waiting, and its ack would be stale */
     if (verb && !strncmp(verb, " play ", 6)) {
         cr.play_timer = timer_add(cr_play, 0, 0);
@@ -267,6 +308,19 @@ static void cr_command(void) {
     } else if (verb && __isoc99_sscanf(verb, " seek %d", &v) == 1 && v >= 0) {
         player_seek_time(v);
         cr_ack(seq, 0);
+    } else if (verb && __isoc99_sscanf(verb, " mode %d %d", &v, &w) == 2) {
+        int ok = cr_mode(v, w);
+        cr_now(); /* the new mode before the ack, as cr_settle */
+        cr_ack(seq, !ok);
+    } else if (verb && __isoc99_sscanf(verb, " rate %d %d", &v, &w) == 2) {
+        unsigned at, n;
+        void *r = queue_now(&at, &n);
+        int ok = r && I(r, REC_ID) == w ? rate_car(v) : -1;
+        cr.hearts_at = 0; /* 1 to 4 hearts move no My Fav generation: read them now */
+        cr_now();
+        cr_ack(seq, ok < 0 ? 3 : !ok);
+    } else if (verb && __isoc99_sscanf(verb, " jump %d %d", &v, &w) == 2 && v >= 0) {
+        cr_ack(seq, cr_jump((unsigned)v, w));
     } else if (verb && __isoc99_sscanf(verb, " volume %d", &v) == 1 && v >= 0 && v <= 100) {
         /* as the AirPlay app sets it (airplay.c): up to Volume Limit, saved for the output in use */
         if (v > g_maxvolume) v = g_maxvolume;

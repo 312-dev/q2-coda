@@ -741,6 +741,8 @@ unsigned rate_song_key(void *r); /* a server song's offline copy: its row's */
 int rate_fav(void *r);           /* My Fav, a server song's offline copy by its row */
 int rate_key(void *top, unsigned key);
 int rate_open(void);
+int rate_car(int n);       /* Car Remote's Rate: n hearts for the playing track; 1 kept */
+int rate_car_hearts(void); /* the playing track's 0-5 hearts, -1 when it can't be rated */
 int rate_saved(int k);
 void rate_album_favs(void *album, int on);
 int fav_told(void *r, int on); /* ratings: a My Fav change told to the song's card app */

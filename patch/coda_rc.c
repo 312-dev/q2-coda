@@ -1,8 +1,8 @@
 /* coda-rc, the car remote daemon (docs/remote-protocol.md, docs/internals.md#car-remote): the platform under
  * coda_rc_core.c. It listens on TCP 7720 and, through BlueZ, as a BLE GATT peripheral (coda_rc_ble.c), serves
  * the library from SQLite (coda_rc_lib.c), and talks to demo only through files in /tmp that the payload's
- * shim (patch/coda_rc_shim.c) polls: Now Playing out; play, transport, seek and volume commands and the
- * pairing code in.
+ * shim (patch/coda_rc_shim.c) polls: Now Playing out; play, transport, seek, volume, mode, rate and queue
+ * commands and the pairing code in.
  *
  * demo starts it when Settings > Car Remote is on and kills it when that goes off; nothing else starts it.
  * It runs at nice 19. --root DIR prefixes every path (the host tests); --no-ble and --port N are for them too. */
@@ -25,6 +25,7 @@ uint8_t crc_device_id[8];
 
 typedef struct {
     int seq, state, pos_ms, len_s, id, shuffle, repeat, volume, qpos, qlen, qgen;
+    int hearts; /* 0-5, -1 when the song can't be rated */
     char path[512], title[160], artist[160], album[160];
 } np_t;
 
@@ -216,7 +217,7 @@ static void np_parse(const char *b, np_t *o) {
             if (0) {}
             NUM("state", state) NUM("pos", pos_ms) NUM("len", len_s) NUM("id", id) NUM("shuffle", shuffle)
             NUM("repeat", repeat) NUM("volume", volume) NUM("qpos", qpos) NUM("qlen", qlen) NUM("qgen", qgen)
-            NUM("seq", seq) STR("path", path) STR("title", title) STR("artist", artist) STR("album", album)
+            NUM("seq", seq) NUM("hearts", hearts) STR("path", path) STR("title", title) STR("artist", artist) STR("album", album)
             if (dst) {
                 if (vn > cap - 1) vn = cap - 1;
                 memcpy(dst, v, vn);
@@ -246,7 +247,8 @@ int crc_shim_alive(void) {
 }
 
 uint32_t crc_caps(void) {
-    return CAP_BROWSE | CAP_SEARCH | CAP_QUEUE | CAP_COVERS | (crc_shim_alive() ? CAP_PLAY | CAP_SEEK : 0) |
+    return CAP_BROWSE | CAP_SEARCH | CAP_QUEUE | CAP_COVERS |
+           (crc_shim_alive() ? CAP_PLAY | CAP_SEEK | CAP_MODES | CAP_QUEUE_JUMP | CAP_RATE | CAP_RESUME : 0) |
            (lib_has_server() ? CAP_SERVER : 0);
 }
 
@@ -272,6 +274,8 @@ static void put_now_playing(pbw *w) {
     pb_varint(w, 8, np.shuffle ? 1 : 0);
     pb_varint(w, 9, np.repeat);
     pb_varint(w, 10, np.volume);
+    pb_varint(w, 11, np.hearts > 0 ? np.hearts : 0);
+    pb_varint(w, 12, np.hearts >= 0 && np.id > 0);
     pb_end(w, m);
 }
 
@@ -313,7 +317,8 @@ static void np_poll(void) {
     if (!np_read() && !(np.state == 1 && crc_now_ms() - pos_pushed >= 1000)) return;
     int parts = 0;
     if (np.state != np_sent.state || np.id != np_sent.id || np.shuffle != np_sent.shuffle ||
-        np.repeat != np_sent.repeat || np.volume != np_sent.volume || strcmp(np.path, np_sent.path) ||
+        np.repeat != np_sent.repeat || np.volume != np_sent.volume || np.hearts != np_sent.hearts ||
+        strcmp(np.path, np_sent.path) ||
         strcmp(np.title, np_sent.title))
         parts |= 1 | 2;
     if (np.qgen != np_sent.qgen || np.qpos != np_sent.qpos || np.qlen != np_sent.qlen) parts |= 4;
@@ -321,6 +326,7 @@ static void np_poll(void) {
     if (np.state == 1 && crc_now_ms() - pos_pushed >= 1000) parts |= 2;
     np_sent = np;
     if (!parts) return;
+    lib_now(np.qgen, np.id);
     if (parts & 2) pos_pushed = crc_now_ms();
     each_session(push, parts);
 }
@@ -335,11 +341,17 @@ static struct {
 } pend;
 static unsigned cmd_seq;
 
-static void pend_answer(int ok) {
+/* the shim's answer: 0 done, 3 the song named is not there (NOT_FOUND), anything else not done */
+static void pend_answer(int code) {
     if (!pend.s) return;
-    crc_log("demo: %s %s", pend.verb, ok ? "done" : "not done");
+    crc_log("demo: %s %s", pend.verb, !code ? "done" : "not done");
+    if (!strncmp(pend.verb, "play ", 5)) {
+        np_read(); /* the shim wrote the new queue's Now Playing before its ack */
+        lib_played(!code, np.qgen);
+    }
     if (pend.s->state == S_AUTHED) {
-        if (ok) crc_send(pend.s, T_ACK, pend.req_id, 0, 0);
+        if (!code) crc_send(pend.s, T_ACK, pend.req_id, 0, 0);
+        else if (code == 3) crc_error(pend.s, pend.req_id, E_NOT_FOUND, "not the Q2's song now");
         else crc_error(pend.s, pend.req_id, E_UNAVAILABLE, "the Q2 did not take it");
     }
     pend.s = 0;
@@ -349,7 +361,7 @@ static void pend_answer(int ok) {
 int crc_shim_command(crc_session *s, unsigned req_id, const char *verb) {
     char b[96];
     if (!crc_shim_alive()) return crc_error(s, req_id, E_UNAVAILABLE, "demo is not answering");
-    pend_answer(0);  /* one in flight: a newer command supersedes it */
+    pend_answer(1);  /* one in flight: a newer command supersedes it */
     unsigned seq = ++cmd_seq ? cmd_seq : ++cmd_seq;
     int n = snprintf(b, sizeof b, "%u %s\n", seq, verb);
     if (crc_write_file("/tmp/coda-rc.cmd", b, n, 0600)) return crc_error(s, req_id, E_INTERNAL, "cmd");
@@ -370,11 +382,11 @@ static void ack_poll(void) {
         char *sp = strchr(b, ' ');
         if ((unsigned)strtoul(b, 0, 10) == pend.seq) {
             unlink_at("/tmp/coda-rc.ack");
-            pend_answer(sp && sp[1] == '0');
+            pend_answer(sp ? atoi(sp + 1) : 1);
             return;
         }
     }
-    if (crc_now_ms() - pend.at > ACK_MS) pend_answer(0);
+    if (crc_now_ms() - pend.at > ACK_MS) pend_answer(1);
 }
 
 /* ---- transport ---- */
@@ -411,6 +423,55 @@ static int transport(crc_session *s, unsigned req_id, const uint8_t *p, size_t n
     return crc_shim_command(s, req_id, verb);
 }
 
+/* ---- modes, rating and the queue: the shim's mode, rate and jump ---- */
+
+/* a message's varint fields 1..4 (the rest skipped); -1 when malformed */
+static int fields(const uint8_t *p, size_t n, unsigned v[5], char *str, size_t cap, unsigned str_field) {
+    pbr r = {p, p + n};
+    pbf f;
+    int k;
+    memset(v, 0, 5 * sizeof *v);
+    if (str) *str = 0;
+    while ((k = pb_next(&r, &f)) > 0) {
+        if (f.wire == 0 && f.field < 5) v[f.field] = f.v > 0xffff ? 0xffff : (unsigned)f.v;
+        if (f.wire == 2 && str && f.field == str_field) pb_cstr(&f, str, cap);
+    }
+    return k;
+}
+
+static int set_mode(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
+    unsigned v[5];
+    char verb[32];
+    /* SetMode: set_shuffle 1, shuffle 2, set_repeat 3, repeat 4 */
+    if (fields(p, n, v, 0, 0, 0) < 0 || v[2] > 1 || v[4] > 2 || (!v[1] && !v[3]))
+        return crc_error(s, req_id, E_BAD_REQUEST, "SetMode");
+    snprintf(verb, sizeof verb, "mode %d %d", v[1] ? (int)v[2] : -1, v[3] ? (int)v[4] : -1);
+    return crc_shim_command(s, req_id, verb);
+}
+
+static int rate(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
+    unsigned v[5];
+    char id[40], verb[32];
+    /* Rate: track_id 1, hearts 2 */
+    if (fields(p, n, v, id, sizeof id, 1) < 0 || v[2] > 5) return crc_error(s, req_id, E_BAD_REQUEST, "Rate");
+    int rid = lib_song_rid(id);
+    if (!rid || rid != np.id) return crc_error(s, req_id, E_NOT_FOUND, "not the playing song");
+    if (np.hearts < 0) return crc_error(s, req_id, E_UNAVAILABLE, "this song can't be rated");
+    snprintf(verb, sizeof verb, "rate %u %d", v[2], rid);
+    return crc_shim_command(s, req_id, verb);
+}
+
+static int queue_item(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
+    unsigned v[5];
+    char id[40], verb[32];
+    /* PlayQueueItem: index 1, track_id 2 */
+    if (fields(p, n, v, id, sizeof id, 2) < 0) return crc_error(s, req_id, E_BAD_REQUEST, "PlayQueueItem");
+    int rid = lib_song_rid(id);
+    if (!rid || v[1] >= (unsigned)np.qlen) return crc_error(s, req_id, E_NOT_FOUND, "not in the queue");
+    snprintf(verb, sizeof verb, "jump %u %d", v[1], rid);
+    return crc_shim_command(s, req_id, verb);
+}
+
 /* ---- authenticated requests ---- */
 
 int crc_app(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t n) {
@@ -429,6 +490,9 @@ int crc_app(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t 
     }
     case T_GET_STATE: np_read(); return send_state(s, req_id, 7);
     case T_TRANSPORT: return transport(s, req_id, p, n);
+    case T_SET_MODE: np_read(); return set_mode(s, req_id, p, n);
+    case T_RATE: np_read(); return rate(s, req_id, p, n);
+    case T_PLAY_QUEUE_ITEM: np_read(); return queue_item(s, req_id, p, n);
     case T_BROWSE: case T_SEARCH: case T_GET_QUEUE: case T_GET_COVER: case T_PLAY:
         np_read();
         return lib_request(s, type, req_id, p, n, np.qgen, np.qpos);

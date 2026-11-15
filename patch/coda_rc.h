@@ -21,9 +21,9 @@ enum {
     T_HELLO = 0x01, T_HELLO_RESP, T_PAIR_START, T_PAIR_CHALLENGE, T_PAIR_FINISH, T_PAIR_RESULT, T_AUTH, T_AUTH_RESP,
     T_ERROR = 0x0f,
     T_SUBSCRIBE = 0x10, T_STATE, T_GET_STATE,
-    T_TRANSPORT = 0x20, T_ACK,
+    T_TRANSPORT = 0x20, T_ACK, T_SET_MODE, T_RATE = 0x24,
     T_BROWSE = 0x30, T_BROWSE_RESP, T_SEARCH, T_SEARCH_RESP,
-    T_PLAY = 0x40, T_GET_QUEUE = 0x42, T_QUEUE_RESP,
+    T_PLAY = 0x40, T_GET_QUEUE = 0x42, T_QUEUE_RESP, T_PLAY_QUEUE_ITEM,
     T_GET_COVER = 0x50, T_COVER,
     T_PING = 0x7e, T_PONG,
 };
@@ -42,6 +42,10 @@ enum {
 #define CAP_COVERS 16u
 #define CAP_SEEK 32u
 #define CAP_SERVER 64u
+#define CAP_MODES 128u      /* SetMode */
+#define CAP_QUEUE_JUMP 256u /* PlayQueueItem */
+#define CAP_RATE 512u       /* Rate, NowPlaying.hearts and .rateable */
+#define CAP_RESUME 1024u    /* Play.resume, ACTION_RESUME */
 
 /* ---- the protobuf subset: varints (wire type 0) and length-delimited fields (wire type 2) ---- */
 typedef struct { uint8_t *p; size_t n, cap; int over; } pbw;
@@ -116,7 +120,12 @@ int crc_shim_command(crc_session *s, unsigned req_id, const char *verb);
 /* Browse, Search, GetQueue, GetCover and Play (coda_rc_lib.c); qgen and qpos: Now Playing's queue version and
  * place, newer than the queue file's */
 int lib_request(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t n, int qgen, int qpos);
+/* Play.resume's memory (coda_rc_lib.c): a list's Play was taken (ok) or not, its queue now qgen; Now Playing
+ * now plays song id in queue qgen */
+void lib_played(int ok, int qgen);
+void lib_now(int qgen, int id);
 void lib_art_of(const char *path, char *art, size_t cap); /* a song path's album art id */
+int lib_song_rid(const char *id); /* "song:t12" -> 12; 0 when not a song id */
 int lib_has_server(void);
 /* BLE (coda_rc_ble.c): ble_start's fd joins the poll with ble_events(); -1 when BlueZ is not there */
 int ble_start(void);

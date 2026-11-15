@@ -31,10 +31,13 @@ option java_multiple_files = true;
 //   0x11 State               (push, and the answer to GetState)
 //   0x12 GetState         -> 0x11 State
 //   0x20 Transport        -> 0x21 Ack
+//   0x22 SetMode          -> 0x21 Ack              (CAP_MODES)
+//   0x24 Rate             -> 0x21 Ack              (CAP_RATE)
 //   0x30 Browse           -> 0x31 BrowseResp
 //   0x32 Search           -> 0x33 SearchResp
 //   0x40 Play             -> 0x21 Ack
 //   0x42 GetQueue         -> 0x43 QueueResp
+//   0x44 PlayQueueItem    -> 0x21 Ack              (CAP_QUEUE_JUMP)
 //   0x50 GetCover         -> 0x51 Cover
 //   0x7e Ping             -> 0x7f Pong                 (any payload, echoed; plain before Auth)
 //
@@ -72,6 +75,12 @@ enum Capability {
   CAP_COVERS = 16;
   CAP_SEEK = 32;    // Transport SEEK works
   CAP_SERVER = 64;  // the library includes server songs (docs/server-library.md)
+  // Added within version 1: a Q2 without them answers their frames UNSUPPORTED, so a client
+  // offers each only when its bit is set.
+  CAP_MODES = 128;       // SetMode: shuffle and repeat
+  CAP_QUEUE_JUMP = 256;  // PlayQueueItem
+  CAP_RATE = 512;        // Rate, and NowPlaying.hearts / rateable
+  CAP_RESUME = 1024;     // Play.resume, and ACTION_RESUME on playlists
 }
 
 // type 0x03. Asks the Q2 to show a 6-digit code. Refused with BUSY while another phone pairs,
@@ -163,6 +172,8 @@ message NowPlaying {
   Shuffle shuffle = 8;
   Repeat repeat = 9;
   uint32 volume = 10;    // 0..100 (the Q2's own 0..100 steps)
+  uint32 hearts = 11;    // CAP_RATE: the song's rating, 0..5 hearts; 5 is the Q2's Favorites
+  bool rateable = 12;    // CAP_RATE: Rate works on this song (a card or server song, not a stream)
 }
 
 enum PlayState {
@@ -171,6 +182,8 @@ enum PlayState {
   PAUSED = 2;
 }
 
+// The Q2 has more modes than these (shuffle by album, repeat an album, play one album): each reads
+// as the nearest here. SetMode sets Off, All Songs, Play All, Repeat Song or Repeat All.
 enum Shuffle {
   SHUFFLE_OFF = 0;
   SHUFFLE_SONGS = 1;
@@ -215,6 +228,24 @@ enum TransportCmd {
   VOLUME_UP = 7;
   VOLUME_DOWN = 8;
   SET_VOLUME = 9;
+}
+
+// type 0x22, CAP_MODES. Sets the playing queue's shuffle or repeat as the Q2's Play/Pause hold menu
+// does; the State push that follows shows it. Each part is set only when its set_ flag is, since an
+// enum's zero cannot be told from absent. UNAVAILABLE when nothing is queued to apply it to.
+message SetMode {
+  bool set_shuffle = 1;
+  Shuffle shuffle = 2;
+  bool set_repeat = 3;
+  Repeat repeat = 4;
+}
+
+// type 0x24, CAP_RATE. Rates the playing song as Now Playing's heart and its picker do: 5 puts it in
+// Favorites, 1..4 keep that many hearts, 0 clears both. track_id must be NowPlaying.track_id (a
+// song changed meanwhile answers NOT_FOUND); UNAVAILABLE when the song is not rateable.
+message Rate {
+  string track_id = 1;
+  uint32 hearts = 2;  // 0..5
 }
 
 // ---- browse ---------------------------------------------------------------------------------------
@@ -290,6 +321,7 @@ enum Action {
   ACTION_NONE = 0;
   ACTION_PLAY = 1;
   ACTION_SHUFFLE = 2;
+  ACTION_RESUME = 3;  // CAP_RESUME: Play with resume set
 }
 
 // type 0x32. Matches anywhere in titles, artist names and album names, case-insensitively.
@@ -312,17 +344,29 @@ message SearchGroup {
 // type 0x40. Plays the list `node` (any playable list: a node from Browse, or a "song:" id alone),
 // in its order `sort`, from `start_id` (a song in it; empty for the first), or the whole list
 // shuffled. The new queue is pushed as State.
+// With resume (CAP_RESUME) it carries on where this list last played from a phone: playing on if
+// the Q2's queue is still that list's, else from the song it was on (the Q2's own Resume Songs
+// takes a long song back to its place), else from the start; start_id and shuffle are then ignored.
 message Play {
   string node = 1;
   string sort = 2;
   string start_id = 3;
   bool shuffle = 4;
+  bool resume = 5;
 }
 
 // type 0x42
 message GetQueue {
   uint32 offset = 1;
   uint32 limit = 2;  // 1..100; 0 means 50
+}
+
+// type 0x44, CAP_QUEUE_JUMP. Plays the queue's song at `index` (QueueResp's place, from 0), as a
+// row of the Q2's View Queue does. track_id is that row's Item.id: a queue changed since it was
+// fetched answers NOT_FOUND, and the client fetches it again.
+message PlayQueueItem {
+  uint32 index = 1;
+  string track_id = 2;
 }
 
 // type 0x43
