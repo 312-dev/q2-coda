@@ -2191,10 +2191,10 @@ static int go(const void *unused) {
     } else {
         const char *kind = cell(i, 0), *uri = cell(i, 1), *ctx = cell(i, 4);
         int tops = l->lay == LAY_ARTIST && !strcmp(kind, "list") && !strcmp(uri, "top");
-        if (!strcmp(kind, "list") || !strcmp(kind, "sort")) /* with remote and a folder: opens() */
-            open_list(uri, ctx, cell(i, 2));
-        if (tops && top() != l) top()->lay = LAY_TOP;
-        else if (!strcmp(kind, "page"))
+        if (!strcmp(kind, "list") || !strcmp(kind, "sort")) { /* with remote and a folder: opens() */
+            open_list(uri, ctx, cell(i, 2)); /* its push frees the reply kind points into */
+            if (tops && top() != l) top()->lay = LAY_TOP;
+        } else if (!strcmp(kind, "page"))
             page_to(l, ctx, strcmp(uri, "prev") ? 1 : -1);
         else if (!strcmp(kind, "action") && !pg.act) /* one in flight: this press does nothing */
             action(i, uri, ctx);
