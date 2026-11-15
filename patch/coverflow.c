@@ -1411,8 +1411,9 @@ void *page_open(const char *name, int (*closed)(void *, void *), int (*keyup)(vo
 
 /* A page's title row, the theme's height. 0: the bar holds the caption, and this hidden label is
  * what it reads, unless the page also needs it as a first line, a row high: with no rows (n 0),
- * when it's all the page says, or when it doesn't fit the bar's box (bar_title_fits). Shared with
- * photos.c. */
+ * when it's all the page says, or when it doesn't fit the bar's box (bar_title_fits; a status
+ * row's holds any, ending a long one in an ellipsis, so the rows keep their place under it).
+ * Shared with photos.c. */
 void *page_title(void *body, const char *caption, int n) {
     const theme_t *T = theme();
     int x = T->page_x, w = 375 - 2 * x;

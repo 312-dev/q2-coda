@@ -264,6 +264,10 @@ static inline int arc_out(int r, int y) {
 /* The screen glass's rounded corners and how far content keeps clear of them (tools/ipod.py). */
 #define GLASS_R 80
 #define GLASS_SLACK 4
+/* A status row's ends (a set's status_y, OLED's), this far in from each side of the screen: the
+ * title's text starts here and the battery's nub ends here, under the glass's top curve and clear
+ * of it (tools/ipod.py status_row checks), with the list's own columns further out below it. */
+#define STATUS_ROW_INSET 62
 #define BC_STEP_MS 50
 #define BC_STEPS 8
 /* iPod drill rows: the stock list_into image sits where stock rows put their own img_into, its left

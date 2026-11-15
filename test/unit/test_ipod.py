@@ -1795,22 +1795,30 @@ def test_patch_word_wants_the_stock_instruction():
     assert data == program(0x0320f809, 0x0411fc39) and changes == []
 
 
-def test_status_row_names_the_page_on_the_lists_columns():
-    """A set's status row (OLED's): the bar black and 58 px, its title and clock sharing one box on the text column
-    in Text Secondary at bar_px, centred on status_y; the play state then the battery, right_x from the edge;
-    Bluetooth, Wi-Fi and EQ off-screen, still there for stock."""
-    g = dataclasses.replace(ipod.SET0, bar=58, status_y=37, text_x=24, right_x=28, bar_px=18)
+def test_status_row_names_the_page_inside_the_glass_s_top_curve():
+    """A set's status row (OLED's): the bar black and 58 px, its title and clock sharing one box whose text starts
+    STATUS_ROW_INSET in, in Text Secondary at bar_px, centred on status_y; the play state then the battery, ending
+    STATUS_ROW_INSET from the edge, not on the list's columns; Bluetooth, Wi-Fi and EQ off-screen, still there for stock."""
+    g = dataclasses.replace(ipod.SET0, bar=58, status_y=23, text_x=24, right_x=28, bar_px=18)
     root = bar()
     ipod.status_bar(root, g)
     n = named(root)
     left, right = root[3][:2]
     assert left[3] == [] and [c[2]['name'] for c in right[3]] == ipod.STATUS_ROW_RIGHT
-    assert right[2]['children_layout'] == f'default(c=3,xm=28,s={ipod.STATUS_ROW_GAP})' and right[1][1::2] == [29, 16]
+    assert ipod.inc('STATUS_ROW_INSET') == 62
+    assert right[2]['children_layout'] == f'default(c=3,xm=62,s={ipod.STATUS_ROW_GAP})' and right[1][1::2] == [15, 16]
     for name in ('label_title', 'label_clock'):
-        assert n[name][1] == [22, 25, ipod.STATUS_ROW_TITLE_W, 24]
+        assert n[name][1] == [60, 11, ipod.STATUS_ROW_TITLE_W, 24]
         assert {n[name][2][f'style:{s}:{k}'] for s in STATES for k in ('font_size', 'text_color')} == {'18', '#ABABAB'}
     assert all(n[k][1][0] == -200 for k in ('img_bt', 'img_wifi', 'label_eq', 'label_idle', *ipod.STATUS_HIDDEN))
     assert root[1][3] == 58
+
+
+def test_status_row_refuses_an_inset_under_the_glass():
+    """Its ends clear the glass at the line box's top: a row so high that the curve reaches past the inset fails."""
+    g = dataclasses.replace(ipod.SET0, bar=58, status_y=8, text_x=24, right_x=28, bar_px=18)
+    with pytest.raises(Exception, match='Status row inset 62 is under the glass at y -4'):
+        ipod.status_bar(bar(), g)
 
 
 @pytest.mark.parametrize('pitch, rows', [(32, 7), (52, 4)])

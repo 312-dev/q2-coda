@@ -29,24 +29,26 @@ its rules. Where the concept contradicts itself, this file picks one answer and 
 | ------------- | ---------------------------- | --------------------------------------------------------------------------------------- |
 | Panel         | 375x320, upright             | The concept's screens are near square; the Q2 is wider, so layouts gain width, not rows |
 | Glass corners | 80 px radius (`GLASS_R`)     | Hides up to 46 px at each end of a row 8 px from an edge; see [Corners](#corners)       |
-| Status row    | glyphs centred on y 37       | No band and no rule: the bar is 58 px of the page's black                               |
+| Status row    | glyphs centred on y 23       | No band and no rule: the bar is 58 px of the page's black; ends 62 px in from each side |
 | Content area  | 375x262 from y 58            | Seven 32 px rows, y 58 to 282                                                           |
 | Panel type    | LCD (`lcd_h0209s`), not OLED | Black is a colour here, not "off": keep large areas black anyway, it is the look        |
 
 The geometry below (the status row, the 58 px list top, the 16 px selection inset, the 28 px right column and
 the scroll indicator) is what the user chose from mock-ups on 2026-11-13 (mock-up E and its six-screen
 follow-up), in place of a first draft that stepped the selection bar in at the corners and drew the scroll
-track along the glass.
+track along the glass. The status row's height and ends are the user's from `mock_status_up.py` on 2026-11-15
+("do 62 and '...' any title thats too long"): up from y 37 into the glass's top curve, the list's top unchanged.
 
 ### Corners
 
 The concept puts the clock in the top-left corner and the battery in the top-right. On the Q2
 those spots are under the glass. So:
 
-- The status row sits low enough that the glass hides at most 18 px at its glyphs' top edge
-  (y 31), so its ends can sit on the list's own columns: the title at the 24 px text column, the
-  battery ending on the 28 px right column, the clock beside its play state (or centred, on a page
-  with no title).
+- The status row sits up in the glass's top curve, centred on y 23, where the glass hides 32 px at
+  its glyphs' top edge (y 16), so its ends draw in to follow the curve: the title's text starts
+  62 px in (`STATUS_ROW_INSET`) and the battery ends 62 px from the right edge, the clock beside
+  its play state (or centred, on a page with no title). The list's own columns (24 and 28) stay
+  below it.
 - No text or control may start inside `corner_x(y, h)` for its row. In the middle of the
   screen, from y 80 to y 240, the inset is 0.
 - A list ends at the last whole row above the bottom corners: the 32 px slots from y 58 are
@@ -133,11 +135,11 @@ All lists share one grid.
 
 | Token              | Value                                        | Notes                                                                              |
 | ------------------ | -------------------------------------------- | ---------------------------------------------------------------------------------- |
-| List top           | y 58                                         | 14 px under the status row's glyphs                                                |
+| List top           | y 58                                         | 28 px under the status row's glyphs                                                |
 | Row pitch          | 32 px                                        | seven rows, y 58 to 282 (see [Corners](#corners))                                  |
 | Two-line row pitch | 52 px                                        | four rows, y 58 to 266                                                             |
-| Text inset (left)  | 24 px                                        | the status row's title, the rows and the art share this column                     |
-| Right column       | 28 px from the right edge                    | chevrons, values and the battery's end, on every row: they never move between rows |
+| Text inset (left)  | 24 px                                        | the rows and the art share this column; the status row's title starts at 62        |
+| Right column       | 28 px from the right edge                    | chevrons and values on every row: they never move between rows                     |
 | Leading art        | 40 px at x 24, 6 px down its row, text at 72 | 4 px corners, in two-line rows                                                     |
 | Bar inset          | 16 px each side, every row                   | no corner stepping: at the bottom row the corner hides 14.5 px                     |
 | Bar radius         | 8 px                                         |                                                                                    |
@@ -146,16 +148,17 @@ All lists share one grid.
 
 ### Status row
 
-- No band: the bar is the page's black, 58 px, with no rule under it. Its glyphs centre on y 37.
-- Left, on the 24 px text column: the page's title in Inter Medium 15 px, Text Secondary, ending
-  with an ellipsis 12 px short of the clock's widest ("00:00").
+- No band: the bar is the page's black, 58 px, with no rule under it. Its glyphs centre on y 23.
+- Left, from x 62: the page's title in Inter Medium 15 px, Text Secondary, ending with an
+  ellipsis 12 px short of the clock's widest ("00:00"), however long: a title never moves to a
+  row of its own, so the list keeps its place.
 - The clock, in the same face, size and colour, right-aligned 24 px left of the battery's body,
   beside the play state. Home, Now Playing and Cover Flow's covers (but an artist's, titled by the
   artist) have no title, and there the clock is centred across the row (x 187.5) instead; Home in
   Split keeps it at the right, over the art, inked white or black as one glyph with the play state
   and battery (approved from `mock_clock_center.py` and `mock_clock_right.py` on 2026-11-15).
 - Right: the play state (Phosphor `play`/`pause`, fill, 13 px, Text Primary, nothing when
-  stopped), then the battery, its nub's end on the 28 px right column, the play state's centre
+  stopped), then the battery, its nub's end 62 px from the right edge (x 313), the play state's centre
   12 px left of the battery's body.
 - Battery, in iOS's proportions: a 25x12 body with 4 px corners and a 1 px `#6E6E6E` outline,
   the charge a solid fill 2 px inside it with 2.2 px corners in Text Primary (under 20 %
@@ -468,8 +471,8 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - Font faces as a table, with Inter Regular and Medium and tabular digits.
 - A theme's own accent tones, and the selection bar's radius, inset and `fixed` (every row,
   whatever Corners says).
-- A status row in place of a bar band (`status_y`), its title on the text column, its battery on the
-  right column (`right_x`) and its clock beside the play state, or centred where there is no title; list boxes that end on a whole row by `list_end`
+- A status row in place of a bar band (`status_y`), its title and its battery's end `STATUS_ROW_INSET`
+  in from the sides and its clock beside the play state, or centred where there is no title; list boxes that end on a whole row by `list_end`
   (`list_fit`).
 - A theme's own art from Phosphor (`tools/art.py`), loaded by its own prefix (`theme_art`): the
   chevron (`list.chevron.painter="icon"`) and the play state; the slim battery

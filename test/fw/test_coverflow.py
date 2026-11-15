@@ -3607,6 +3607,22 @@ def test_classic_s_bar_holds_the_caption_unless_it_is_all_the_page_says_or_won_t
         assert (x, y, h) == (fw.fn('page_x', C.c_int)(), 0, t['page_row']) and x + w == 375 - x
 
 
+@pytest.mark.parametrize('rows, hidden', ((3, True), (0, False)))
+def test_a_status_row_ends_a_long_caption_in_an_ellipsis_and_keeps_the_rows_where_they_are(fw, scratch, rows, hidden):
+    """OLED's status row holds a caption too wide for its box too (its label ends it in an ellipsis), so a page's rows
+    start under the status row whatever the caption's length; a page with no rows still says it as its first line."""
+    t = themed(fw, OLED)
+    geom = C.c_int.from_address(C.addressof(fw.var('st', C.c_char)) + scratch['geom'])
+    geom.value = fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())  # theme_boot's set, OLED's
+    ui = Ui(fw)
+    bar_title(fw, ui, scratch, 40)  # 'Albums' measures 60 px: too wide
+    title = page_title(fw, ui.make(0, 'view'), b'Albums', rows)
+    assert ui[title].name == '_page_title' and ui[title].text == 'Albums'
+    assert ui[title].visible == (not hidden)
+    if hidden:
+        assert ui.at(title)[3] == t['page_title_h'] == 0  # the rows start at the page's top
+
+
 def page_list_or(fw, page, body, name, none, n, item_h=48):
     return fw.fn('page_list_or', C.c_void_p, C.c_void_p, C.c_void_p, C.c_char_p, C.c_char_p, C.c_int, C.c_int)(
         page, body, name, none, n, item_h)

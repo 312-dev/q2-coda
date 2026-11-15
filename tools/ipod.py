@@ -95,11 +95,11 @@ class Geometry:
     search_meta_h: int = 16
     toolbar: int = 1  # 0: the toolbars of TOOLBAR_SWITCHES and STOCK_ROWS hide and the bar holds the title, as on NAVBAR_ONLY pages
     list_fit: int = 0  # 1: list boxes end by list_end on a whole row (fit_rows), so nothing draws below it (0: they reach the window's bottom)
-    # A status row in place of a bar band (OLED's): its glyphs centred on screen row status_y, the page's title at text_x
-    # in the bar's face and px (bar_px), the clock beside the play state or centred (navigation.c clock_place), the play state and battery ending
-    # right_x from the screen's right edge; the bar is drawn black, so the row reads as part of the page. 0: the bar's own layout.
+    # A status row in place of a bar band (OLED's): its glyphs centred on screen row status_y, the page's title from
+    # STATUS_ROW_INSET in the bar's face and px (bar_px), the clock beside the play state or centred (navigation.c clock_place), the play state and
+    # battery ending STATUS_ROW_INSET from the screen's right edge; the bar is drawn black, so the row reads as part of the page. 0: the bar's own layout.
     status_y: int = 0
-    right_x: int = 0  # the right column, from the screen's right edge: the status row's battery, and a row's chevron and value (0: stock's)
+    right_x: int = 0  # the right column, from the screen's right edge: a row's chevron and value (0: stock's)
     # Now Playing on the set's grid (OLED's, oled-design.md Now Playing): the art np_art square at text_x on the window's
     # top, the words NP_GRID_GAP right of it to the right column, a 6 px bar from text_x to the right column with its top
     # np_bar_y on screen, the times under its ends, shuffle and repeat under them (playing_page np_grid). 0: the iPod layout.
@@ -611,21 +611,25 @@ def status_bar(root, g=SET0):
 
 STATUS_ROW_RIGHT = ['img_state', *STATUS_RIGHT[2:]]  # a status row's right group: the play state, then the battery
 STATUS_ROW_ICON = 16  # stock's status icon canvases (bar_play, bar_pause), their glyph centred
-STATUS_ROW_TITLE_W = 240  # the title's and clock's box from text_x, until the payload's first paint moves both (clock_place)
+STATUS_ROW_TITLE_W = 240  # the title's and clock's box from the row's inset, until the payload's first paint moves both (clock_place)
 
 
 def status_row(root, g, widgets, left, right, eq):
-    """A set's status row (g.status_y): no band, the bar black, its glyphs centred on row status_y. The title and the
-    clock start in one box at the list's text column, in the bar's face at bar_px in Text Secondary; the payload moves
-    the clock beside the play state, or centres it where the page has no title (navigation.c clock_place). The right
-    group is the play state, then the battery, its nub's last column right_x from the screen's edge. Bluetooth,
-    Wi-Fi, EQ and the rest stay, off-screen, for stock to update."""
+    """A set's status row (g.status_y): no band, the bar black, its glyphs centred on row status_y, both ends
+    STATUS_ROW_INSET in from the screen's sides, inside the glass's top curve. The title and the clock start in one box
+    whose text starts on that inset, in the bar's face at bar_px in Text Secondary; the payload moves the clock beside
+    the play state, or centres it where the page has no title, and ends the title's box short of the clock
+    (navigation.c clock_place). The right group is the play state, then the battery, its nub's last column
+    STATUS_ROW_INSET from the screen's edge. Bluetooth, Wi-Fi, EQ and the rest stay, off-screen, for stock to update."""
+    inset = inc('STATUS_ROW_INSET')
+    top = g.status_y - STATUS_ROW_LINE // 2
+    check(inset >= corner_x(top, STATUS_ROW_LINE), f'Status row inset {inset} is under the glass at y {top}')
     box_y = g.status_y - STATUS_ROW_ICON // 2
     left[3] = []
     right[3] = [widgets[n] for n in STATUS_ROW_RIGHT]
     layout = right[2]['children_layout']
     check('xm=50,s=5)' in layout, 'Unexpected status bar layout')
-    right[2]['children_layout'] = layout.replace('xm=50,s=5', f'xm={g.right_x},s={STATUS_ROW_GAP}')
+    right[2]['children_layout'] = layout.replace('xm=50,s=5', f'xm={inset},s={STATUS_ROW_GAP}')
     right[1][1], right[1][3] = box_y, STATUS_ROW_ICON
     widgets['img_state'][1][2] = STATUS_ROW_ICON
     for name in (*STATUS_HIDDEN, 'img_bt', 'img_wifi'):
@@ -637,11 +641,11 @@ def status_row(root, g, widgets, left, right, eq):
     root[3].append(eq)
     root[3].append(['label', [-200, 0, 28, g.bar], {
         'name': 'label_idle', 'text': 'Q2', 'visible': 'false', 'style:normal:font_size': '18'}, []])
-    # The title's and the clock's box: hscroll_label keeps 2 px each side, so its text starts on text_x
+    # The title's and the clock's box: hscroll_label keeps 2 px each side, so its text starts on the inset
     text = {f'style:{s}:{k}': v for s in ('normal', 'disable', 'focused')
             for k, v in (('font_size', str(g.bar_px)), ('text_color', STATUS_ROW_INK))}
     for name in ('title', 'clock'):
-        root[3].append(['hscroll_label', [g.text_x - 2, g.status_y - STATUS_ROW_LINE // 2, STATUS_ROW_TITLE_W, STATUS_ROW_LINE],
+        root[3].append(['hscroll_label', [inset - 2, top, STATUS_ROW_TITLE_W, STATUS_ROW_LINE],
                         {'name': 'label_' + name, 'style': 's_scrlabel_white20l', 'only_focus': 'true', 'ellipses': 'true', **text}, []])
 
 

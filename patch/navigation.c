@@ -6615,13 +6615,15 @@ void page_empty(void *body, const char *name) {
 }
 
 /* Whether label's text fits the bar's title box: measured on the bar's canvas in the face and size
- * the title would take, against the box less hscroll_label's two 2 px margins. A bar not found yet
- * fits nothing. */
+ * the title would take, against the box less hscroll_label's two 2 px margins. A status row's box
+ * fits any, as its label ends a long one in an ellipsis (docs/oled-design.md#status-row). A bar
+ * not found yet fits nothing. */
 int bar_title_fits(void *label) {
     void *canvas = st.bar_title ? widget_get_canvas(st.bar_title) : (void *)0;
     const unsigned *s = widget_get_text(label);
     unsigned n = wide_len(s);
     if (!canvas) return 0;
+    if (geom_val(V_STATUS_Y)) return 1;
     int px = theme()->font_px[ROLE_BAR];
     const char *face = theme_face(s, (int)n, &px);
     canvas_set_font(canvas, face, px);
@@ -8273,7 +8275,7 @@ void stock_more_into(void *win) {
  * switch's glyph fills its box), else SET_EDGE. */
 static int set_edge(void) { return geom_val(V_RIGHT_X) ? geom_val(V_RIGHT_X) : SET_EDGE; }
 /* ... and their text's box's left edge: on a set with a right column, the set's text column less
- * hscroll_label's 2 px margin, so the text starts on it as the status row's title does
+ * hscroll_label's 2 px margin, so the text starts on it as the list's rows do
  * (docs/oled-design.md Spacing), else SET_TEXT_X. */
 static int set_text_x(void) { return geom_val(V_RIGHT_X) ? geom_val(V_TEXT_X) - 2 : SET_TEXT_X; }
 static void set_child(void *c, int row_w, int row_h, int shift) {
