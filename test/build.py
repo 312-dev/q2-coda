@@ -895,7 +895,8 @@ def validate_assets(directory):
             named = {n[2].get('name'): n for n in walk(root)}
             # stock names kept, but the two buttons that open its spectrum and VU pages, which Q2 Pod does not offer
             assert {n[2].get('name') for n in walk(decode(original))} - set(named) == {'img_spectrum', 'img_vu'}
-            assert [n[2].get('name') for n in root[3]] == ['view_buttons', 'label_playtime', 'label_playlen', 'label_ipod_remain',
+            # the info page first and hidden: out of the swipe, for ⋯'s About (np_about.c)
+            assert [n[2].get('name') for n in root[3]] == ['view_info', 'view_buttons', 'label_playtime', 'label_playlen', 'label_ipod_remain',
                                                            'slide_view_view', 'slider_play', 'img_repeata', 'img_repeatb', 'image_wait']
             assert root[3][0][2]['visible'] == 'false' and 'label_ipod_pos' not in named
             assert [n[2]['name'] for n in named['slide_view'][3]] == ['view_album', 'view_lyric']
@@ -1111,7 +1112,7 @@ def validate_assets(directory):
             assert len(px) == 1, g.name
             px = px.pop()
             info = page['view_info'][3]
-            dy = g.bar + page['slide_view_view'][1][1]
+            dy = g.bar + page['view_info'][1][1]
             for key, n in zip((b'album', b'genre', b'player_filesize', b'player_era', b'player_encoding', b'player_bitdepth', b'player_bitrate', b'player_samplerate', b'player_location'), info):
                 value = page[n[2]['name'] + '_value']
                 assert n[1][3] == value[1][3] >= px and ink(table[key].decode(), px) <= n[1][2] and value[1][0] == n[1][0] + n[1][2], (g.name, table[key])

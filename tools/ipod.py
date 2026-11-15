@@ -184,7 +184,7 @@ NP_TEXT_W = 165
 NP_TITLE_PX = inc('NP_TITLE_PX')  # the title over the NP_META_PX artist and album, as Apple's hierarchy
 NP_META_PX = inc('NP_META_PX')
 NP_ART = 375 - 2 * NP_MARGIN - 12 - NP_TEXT_W
-NP_SLIDE_H = 186                 # the swipeable art, lyrics and info pages; the dots sit below
+NP_SLIDE_H = 186                 # the swipeable art, lyrics and visualizer pages; the dots sit below
 NP_DOTS_Y = NP_SLIDE_H - 4       # above the seek bar's NP_TOUCH target
 # The art's gap below to the dots matches its gap above to the foot of a 16px line centred in the top row.
 NP_ART_Y = (NP_DOTS_Y - NP_ART - (NP_TOP - 16) // 2) // 2
@@ -192,7 +192,7 @@ NP_TOUCH = 44
 NP_TIMES_Y = 265  # 14px text in a 16px label, clear of the 10px A-B markers
 NP_TEXT_X = NP_MARGIN + NP_ART + 12
 # Classic's Now Playing (Geometry.np_ipod), an iPod classic's: the art NP_IPOD_ART, up beside More in
-# the top row, its swipeable pages NP_IPOD_LIFT higher (the lyrics, info and visualizer keep their
+# the top row, its swipeable pages NP_IPOD_LIFT higher (the lyrics and visualizer keep their
 # place on screen, that much down them), its top down to the first row where its square top-left corner
 # clears the glass by CORNER_SLACK, as the full-screen art's do; a line's room under the album, where Internet
 # Radio's page (navigation.c stream_ipod) puts its fourth line; the art's box NP_REFLECT
@@ -652,7 +652,7 @@ STATUS_ROW_INK = '#ABABAB'  # Text Secondary (docs/oled-design.md): Light Mode's
 
 # Stock finds every Now Playing widget by name, recursively, so they can move: title, artist
 # and a new album label join the art on the slide_view's first page, so a swipe still swaps all of it for
-# the lyrics or info page. The info page keeps its stock 225px column, centred; the lyrics page is the
+# the lyrics page. The info page (⋯'s About, np_info_out) keeps its stock 225px column, centred; the lyrics page is the
 # payload's (patch/lyrics.c). The payload fills the label_ipod_* labels (ringnav_playing); label_playlen,
 # the total, hides.
 PLAYING_PAGE = 'playing_page.bin'
@@ -841,7 +841,21 @@ def playing_page(root, g=SET0):
               [inc('SPOT_ART_X'), *(inc('NP_IPOD_' + k) for k in 'ART_Y ART TEXT_X TEXT_Y FAV_X FAV_Y BAR_X BAR_Y'.split()), 34, 62],
               "NP_IPOD_* != Classic's Now Playing")
     if g.np_art:
-        np_grid(root, named, g, title, artist, album, pos, remain)
+        np_grid(root, named, g, title, artist, album, remain)
+    np_info_out(root, named)
+
+
+def np_info_out(root, named):
+    """The track's details leave the swipe for ⋯'s About (patch/np_about.c), which moves them into a page of their own
+    while it is open: view_info goes from the slide_view to the window, hidden, at the slide's place in it (stock's
+    np_info still finds and fills its labels there), so on About its rows stand where they stood on Now Playing."""
+    info, box, slide = named['view_info'], named['slide_view_view'], named['slide_view']
+    slide[3].remove(info)
+    info[1] = [box[1][0] + slide[1][0], box[1][1] + slide[1][1], slide[1][2], slide[1][3]]
+    info[2] = {k: v for k, v in info[2].items() if k != 'self_layout'} | {'visible': 'false'}
+    # first, under the rest: stock's AWTK hands a touch to a hidden widget too, and last it took every one on the page
+    # (the swipe, More, the bar: measured in the emulator); first, the slide_view_view over it takes them
+    root[3].insert(0, info)
 
 
 # Now Playing on a set's grid (Geometry.np_art, OLED's: docs/oled-design.md#now-playing), in window rows from the set's
@@ -921,7 +935,7 @@ def np_grid(root, named, g, title, artist, album, remain):
     np_info_table(named, g, slide_h)
 
 
-# The grid's info page as a table (oled-design.md Now Playing, SPEC-next 4's mock-info-table): a fact a row, NP_INFO_ROW
+# The grid's info page (⋯'s About, np_info_out) as a table (oled-design.md Now Playing, SPEC-next 4's mock-info-table): a fact a row, NP_INFO_ROW
 # apart in the slide's height, in NP_INFO_ORDER; the name left on the text column in Text Secondary, the value
 # right-aligned on the right column (the theme's playing.info.value), both in the info role's face and ellipsized (stock's
 # label holds the name, a <name>_value hscroll_label the value: navigation.c ringnav_np_info, which also folds the bit depth
@@ -1015,6 +1029,7 @@ def playing_stock(data):
     bar = named['slider_play']
     check(bar[2]['style:normal:y_offset'] == '6', 'Unexpected stock progress bar')
     np_slider(bar, 50, 208 + 82 // 2 + 6, 290, NP_BAR[3])
+    np_info_out(root, named)
     return encode(root)
 
 

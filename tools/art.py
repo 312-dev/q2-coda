@@ -211,7 +211,7 @@ MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart
               'vinyl-record', 'microphone-stage', 'folder', 'heart-half', 'clock-counter-clockwise', 'list-numbers',
               'bookmark-simple', 'dots-three', 'plus', 'list-checks', 'skip-forward', 'skip-back', 'repeat', 'stack',
               'airplay', 'download-simple', 'cloud-arrow-down', 'trash', 'speedometer', 'pencil-simple',
-              'caret-up', 'caret-down', 'check')
+              'caret-up', 'caret-down', 'check', 'info')
 
 
 def gradient(stops, y0, y1):

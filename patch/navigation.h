@@ -206,7 +206,7 @@ typedef struct {
     void *np_win, *np_album, *np_slider, *np_remain, *np_elapsed, *np_cover, *np_title, *np_artist;
     int np_meta[2];          /* face_font's answers for np_artist and np_album, -1 none yet */
     int np_bold;             /* the title's font: theme_font's face | px << 2, -1 not set yet */
-    void *np_slide, *np_lrc; /* the art/lyrics/info pages and the lyric lines' scroll_view */
+    void *np_slide, *np_lrc; /* the art/lyrics/visualizer pages and the lyric lines' scroll_view */
     /* Now Playing's full-screen lyrics (np_full) and where the last touch on them came down
      * (np_lyric_touch) */
     int np_full, np_tap_x, np_tap_y;
@@ -552,6 +552,11 @@ void np_tap_dim(void *w, void *canvas);
 void np_tap_reset(void);
 int np_tap_lift(void *target, void *event);
 int np_goto(int album, int go);
+/* np_about.c: ⋯'s About, the track's details as a page */
+int np_about_open(void *ctx, void *event);
+void *np_about_page(void);
+void np_about_np_gone(void *win);
+int ringnav_np_info(void *win); /* navigation.c: Now Playing's details, filled */
 /* np_bar.c: Now Playing's shuffle and repeat as two controls */
 void np_mode_set(int on, int rep), np_mode_step(int repeat, int dir);
 /* Now Playing's Centre cycle: at rest (the wheel is the volume's), the scrubber, shuffle, repeat

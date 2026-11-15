@@ -960,12 +960,11 @@ def test_classic_rows_take_a_value_without_a_value_label(fw):
 
 
 class Np:
-    """Now Playing open on its info page and lit."""
+    """Now Playing's details open in ⋯'s About (np_about.c), its page in front and lit: the page holds the labels."""
     def __init__(self, fw, ui, st, info):
+        self.about = fw.var('np_about__ab', C.c_void_p)  # the struct's first word: the open page
+        self.about.value = info.win.addr
         st('np_win', C.c_void_p).value = info.win.addr
-        self.slide = ui.add('view', info.win, name='slide_view')
-        self.slide.props['value'] = 2  # view_info
-        st('np_slide', C.c_void_p).value = self.slide.addr
         fw.var('g_backlight_status', C.c_ubyte).value = 1
         self.offsets = []
         fw.mock('hscroll_label_set_xoffset', lambda w, x, *_: self.offsets.append(x))
@@ -1008,18 +1007,18 @@ def test_a_long_genre_scrolls_to_its_end_holds_and_starts_over(fw, st):
     assert steps == moving + [(over, HOLD_MS), (0, HOLD_MS), (MARQUEE_PX, MARQUEE_MS)]
 
 
-def test_the_genre_stops_once_dark_or_off_its_page(fw, st):
+def test_the_genre_stops_once_dark_or_about_closes(fw, st):
     ui = Ui(fw)
     info = Info(fw, ui, {'label_genre': 'Genre:Progressive Electronic Dance'})
     np = Np(fw, ui, st, info)
     info()
     measured(info.genre(), 600)
     info()
-    np.slide.props['value'] = 1  # the lyrics
+    page, np.about.value = np.about.value, None  # About closed
     n = len(info.timers)
     run(info.timers[-1][0])
     assert len(info.timers) == n and st('genre_timer').value == 0
-    np.slide.props['value'] = 2
+    np.about.value = page
     fw.var('g_backlight_status', C.c_ubyte).value = 0
     info()  # np_info's next fill restarts it, lit only
     assert len(info.timers) == n
@@ -1033,7 +1032,7 @@ def test_the_genre_stops_under_another_window_and_starts_again_in_front(fw, st):
     measured(info.genre(), 600)
     info()
     n = len(info.timers)
-    over = ui.window('playmore_page')  # More, opened over Now Playing
+    over = ui.window('volume_dialog')  # a window over About
     run(info.timers[-1][0])
     assert len(info.timers) == n and st('genre_timer').value == 0
     info()  # a fill while still covered starts nothing
@@ -1061,15 +1060,141 @@ def test_a_new_genre_starts_again_from_its_start(fw, st):
     assert len(fw.calls('timer_remove')) == removed + 1 and info.timers[-1][1] == HOLD_MS
 
 
-def test_another_windows_genre_takes_no_marquee(fw, st):
+def test_without_about_open_the_genre_takes_no_marquee(fw, st):
+    """Now Playing's own fill, with About closed: its hidden details never scroll."""
     ui = Ui(fw)
     info = Info(fw, ui, {'label_genre': 'Genre:Progressive Electronic Dance'})
-    Np(fw, ui, st, info)
-    st('np_win', C.c_void_p).value = None
+    Np(fw, ui, st, info).about.value = None
     info()
     measured(info.genre(), 600)
     info()
     assert info.timers == [] and not st('genre_label', C.c_void_p).value
+
+
+class About:
+    """Now Playing with its details hidden in its window (tools/ipod.py np_info_out), first under the art's page, and
+    ⋯'s About as np_about.c runs it: window_create's page, AWTK's widget_remove_child and widget_add_child (appending),
+    navigator_back closing the top window and dispatching its destroy, as AWTK's does."""
+    def __init__(self, fw, ui, st, texts=None):
+        self.fw, self.ui, self.st = fw, ui, st
+        self.info = Info(fw, ui, texts or dict(STOCK_INFO, label_genre='Genre:Jazz'))
+        self.np = self.info.win
+        self.details = self.np.find('view_info')
+        self.np.children.remove(self.details)
+        self.np.children.insert(0, self.details)
+        self.art = ui.add('view', self.np, (0, 0, 375, 200), 'slide_view_view')
+        self.details.visible, self.details.box = 0, (0, 60, 375, 230)  # under a title row
+        st('np_win', C.c_void_p).value = self.np.addr
+        self.fills = []
+        fw.mock('np_info', lambda w, *_: self.fills.append(w) or 7)
+        fw.mock('window_create', lambda *_: ui.window('').addr)
+        fw.mock('widget_remove_child', self.remove)
+        fw.mock('widget_add_child', self.add)
+        fw.mock('navigator_back', self.back)
+
+    def remove(self, parent, child, *_):
+        self.ui.at[parent].children.remove(self.ui.at[child])
+        self.ui.at[child].parent = None
+        C.c_void_p.from_address(child + W_PARENT).value = None
+        return 0
+
+    def add(self, parent, child, *_):
+        w = self.ui.at[child]
+        w.parent = self.ui.at[parent]
+        w.parent.children.append(w)
+        C.c_void_p.from_address(child + W_PARENT).value = parent
+        return 0
+
+    def back(self, *_):
+        top = self.ui.wm.children[-1]
+        self.destroyed(top)
+        self.ui.wm.children.remove(top)
+        return 0
+
+    def destroyed(self, w):
+        for ww, evt, fn, ctx in list(self.ui.handlers):
+            if ww == w.addr and evt == O['EVT_DESTROY']:
+                C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, 0)
+
+    def open(self):
+        return self.fw.fn('np_about_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+
+    @property
+    def page(self):
+        return self.ui.at.get(self.fw.fn('np_about_page', C.c_void_p)() or 0)
+
+    def key(self, key):
+        (fn, ctx), = [(fn, ctx) for w, evt, fn, ctx in self.ui.handlers if w == self.page.addr and evt == O['EVT_KEY_UP']]
+        return C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, event(O['EVT_KEY_UP'], key))
+
+
+def test_about_moves_the_details_into_its_page_shown_and_filled(fw, st):
+    about = About(fw, Ui(fw), st)
+    assert about.open() == 0
+    page = about.page
+    assert page and page.name == 'npabout_page' and about.ui.wm.children[-1] is page
+    assert about.details.parent is page and about.details.visible == 1 and about.details not in about.np.children
+    assert about.details.box == (0, 60, 375, 230)  # its place in Now Playing's window, which the page's box is
+    assert about.fills == [page.addr]  # filled at once, on the page
+    assert about.np.find('label_album') is None and page.find('label_album').text == 'Album: Kind of Blue'
+
+
+@pytest.mark.parametrize('top', [0, 60])
+def test_about_s_details_start_under_a_title_row(fw, st, top):
+    """Centred Now Playing's details start at the window's top: under a theme whose page title is a row of the page
+    (page_title's label shown) they move down under it; details already under it stay where they are."""
+    about = About(fw, Ui(fw), st)
+    about.details.box = (75, top, 225, 198)
+    about.open()
+    title = next(c for c in about.page.children if c.text == 'About')
+    below = title.box[1] + title.box[3]
+    assert title.visible and 0 < below <= 60 and about.details.box == (75, max(top, below), 225, 198)
+
+
+def test_while_about_is_open_now_playing_s_fills_go_to_it(fw, st):
+    about = About(fw, Ui(fw), st)
+    about.open()
+    assert about.info.fill(about.np.addr) == 7 and about.fills[-1] == about.page.addr
+
+
+def test_about_opens_once_and_needs_the_details(fw, st):
+    ui = Ui(fw)
+    about = About(fw, ui, st)
+    about.open()
+    page = about.page
+    about.open()
+    assert about.page is page and len(ui.wm.children) == 2
+    other = About(fw, Ui(fw), st)
+    other.np.children.remove(other.details)  # no details: nothing opens
+    fw.var('np_about__ab', C.c_void_p).value = None
+    assert other.open() == 0 and other.page is None
+
+
+def test_return_gives_the_details_back_hidden_and_first_then_goes_back(fw, st):
+    about = About(fw, Ui(fw), st)
+    about.open()
+    assert about.key(O['KEY_CENTER']) == 0 and about.page  # only Return
+    assert about.key(O['KEY_RETURN']) == STOP
+    assert about.page is None and about.ui.wm.children[-1] is about.np
+    assert about.np.children[0] is about.details and about.details.visible == 0  # under the rest: it takes no touch
+    assert about.info.fill(about.np.addr) == 7 and about.fills[-1] == about.np.addr
+
+
+def test_a_close_without_return_gives_the_details_back_too(fw, st):
+    about = About(fw, Ui(fw), st)
+    about.open()
+    about.back()  # closed another way: the destroy event alone
+    assert about.page is None and about.np.children[0] is about.details and about.details.visible == 0
+
+
+def test_now_playing_going_first_leaves_the_details_to_the_page(fw, st):
+    about = About(fw, Ui(fw), st)
+    about.open()
+    page = about.page
+    fw.fn('np_about_np_gone', None, C.c_void_p)(about.np.addr)
+    fw.fn('np_about_np_gone', None, C.c_void_p)(0x1234)  # another window's: nothing
+    about.back()
+    assert about.page is None and about.details.parent is page and about.details not in about.np.children
 
 
 def test_no_genre_label_no_marquee(fw, st):

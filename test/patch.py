@@ -9067,7 +9067,8 @@ m.tap(); assert m.full()[:6]==COLUMN[:5]+(None,),m.full(); passed()
 # card with an album. A press asks for Wi-Fi first, copies the album's tracks off stock's records (a CUE
 # track left out) and starts the worker; the row shows its progress, a press while it runs cancels, the
 # page's end leaves it running, and the timer joins it and toasts the summary. USB storage stops it quietly.
-# The job's own steps are test/peq.py's album_check. AirPlay's row (airplay.c) goes over stock's, for any song.
+# The job's own steps are test/peq.py's album_check. AirPlay's row (airplay.c) goes over stock's, and About's
+# (np_about.c) under them all, for any song.
 assert [m.get(O['PLAYMORE_ROWS']+4*i) for i in range(O['PLAYMORE_COUNT'])]==[2,3,4,5,6,7,0,1]  # Download Cover & Lyrics third
 class AlbumLyricsMachine(CoverflowMachine):
     def __init__(self,**queue):
@@ -9087,19 +9088,21 @@ class AlbumLyricsMachine(CoverflowMachine):
         assert self.calls[0][:2]==('stock_playermore',self.top)
         return self.nodes[view]['children']
 m=AlbumLyricsMachine(); kids=m.more(); row=kids[4]
-assert len(kids)==10 and [k for k in kids if k not in (row,kids[0])]==m.stock and m.nodes[row]['style']=='s_listitem_black'
+assert len(kids)==11 and [k for k in kids if k not in (row,kids[0],kids[-1])]==m.stock and m.nodes[row]['style']=='s_listitem_black'
 air=m.nodes[m.nodes[kids[0]]['children'][0]]['children']
 assert m.nodes[air[0]]['image']=='airplay' and m.nodes[air[1]]['text']=='AirPlay'
+about=m.nodes[m.nodes[kids[-1]]['children'][0]]['children']
+assert m.nodes[about[0]]['image']=='system_about' and m.nodes[about[1]]['text']=='About'
 button=m.nodes[row]['children'][0]; icon,label=m.nodes[button]['children']
 assert m.nodes[button]['style']=='s_btn_listitem' and not m.nodes[button].get('name')
 assert [m.get(button+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[20,0,335,70]
 assert m.nodes[icon]['image']=='player_onlinesearch' and [m.get(icon+O[k]) for k in ('W_X','W_W','W_H')]==[10,52,70]
 assert m.nodes[label]['style']=='s_scrlabel_white24l' and m.nodes[label]['text']=='Download Album Lyrics'
 assert [m.get(label+O[k]) for k in ('W_X','W_W','W_H')]==[72,253,70]; passed()
-m=AlbumLyricsMachine(cls=0xf1); assert len(m.more())==9; passed()  # an online queue: AirPlay's row alone
+m=AlbumLyricsMachine(cls=0xf1); assert len(m.more())==10; passed()  # an online queue: AirPlay's and About's rows alone
 for off,v in (('REC_TYPE',4),('REC_ALBUM',0),('REC_PATH',0)):  # a folder, no album tag, no path
-    m=AlbumLyricsMachine(); m.word(m.playing()+O[off],v); assert len(m.more())==9,off; passed()
-m=AlbumLyricsMachine(); m.word(m.playing()+O['REC_PATH'],m.string('http://x/y')); assert len(m.more())==9; passed()
+    m=AlbumLyricsMachine(); m.word(m.playing()+O[off],v); assert len(m.more())==10,off; passed()
+m=AlbumLyricsMachine(); m.word(m.playing()+O['REC_PATH'],m.string('http://x/y')); assert len(m.more())==10; passed()
 m=AlbumLyricsMachine(); assert len(m.more(7))==7; passed()  # not stock's rows: left as they are
 def album_lyrics_page(**queue):
     m=AlbumLyricsMachine(**queue); button=m.nodes[m.more()[4]]['children'][0]; label=m.nodes[button]['children'][1]
@@ -10295,10 +10298,10 @@ for sizes in ((2,2,1,1),(1,1,1,1)):
         assert m.nodes[m.songlabel]['text']==path.rsplit('/',1)[1]
         assert m.nodes[m.art]['image']==want
         queue=m.items(m.get(syms['mcl_pdeqplaylist']))
+        assert 'text' not in m.nodes[m.poslabel] and m.text(m.get(queue[m.mcl('MCL_POS')]+O['REC_PATH']))==path  # no "n of m"
         assert all(not m.get(r+O['REC_ALBUM']) for r in queue) # tags came from parsing, not library rows
         assert ('tags',path) in m.trace and ('decoder_start',path) in m.trace
         passed()
-        assert 'text' not in m.nodes[m.poslabel] and m.text(m.get(queue[m.mcl('MCL_POS')]+O['REC_PATH']))==path  # no "n of m"
     assert [path for event,path in m.trace if event=='directory']==['/mnt/mmc','/mnt/mmc/1','/mnt/mmc','/mnt/mmc/2','/mnt/mmc','/mnt/mmc/3']
     events=[event for event,_ in m.trace]
     for event in ('on_player_autochange','toolsLoadNextDir','player_refresh_playqueue'): assert events.count(event)==3

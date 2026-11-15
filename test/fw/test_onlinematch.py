@@ -1066,9 +1066,10 @@ def widget(parent=None, h=0):
 
 class More:
     """Now Playing's ⋯ page as stock's init leaves it, scroll_view_more and its rows, and the item, button
-    and label list_row makes for ours: the label's text, the restack and each handler are kept."""
+    and label list_row makes for ours: the label's text, the restack and each handler are kept. About's row
+    (np_about.c), on every page with stock's rows, keeps its text in about, not texts, and its handlers among the rest."""
     def __init__(self, fw, rows=8, view=True):
-        self.fw, self.texts, self.on, self.restacked = fw, [], {}, []
+        self.fw, self.texts, self.about, self.on, self.restacked = fw, [], [], {}, []
         self.win, self.view = widget(), widget()
         self.item = widget(self.view)
         self.button = widget(self.item)
@@ -1081,19 +1082,21 @@ class More:
         fw.mock('list_item_create', lambda *_: a(self.item))
         fw.mock('button_create', lambda *_: a(self.button))
         fw.mock('hscroll_label_create', lambda *_: a(self.label))
-        fw.mock('widget_on', lambda w, event, fn, ctx, *_: self.on.__setitem__((w, event), (fn, ctx)))
-        fw.mock('widget_set_text_utf8', lambda w, s, *_: self.texts.append(C.string_at(s).decode()) if w == a(self.label) else 0)
+        fw.mock('widget_on', lambda w, event, fn, ctx, *_: self.on.setdefault((w, event), []).append((fn, ctx)))
+        fw.mock('widget_set_text_utf8', lambda w, s, *_: (self.about if C.string_at(s) == b'About' else self.texts).append(
+            C.string_at(s).decode()) if w == a(self.label) else 0)
         fw.mock('widget_restack', lambda w, at, *_: self.restacked.append((w, at)))
 
     def open(self, win=True):
         return self.fw.fn('ringnav_playermore', C.c_int, C.c_void_p, C.c_void_p)(C.addressof(self.win) if win else None, None)
 
-    def handler(self, w, event):
-        fn, ctx = self.on[(C.addressof(w), event)]
+    def handler(self, w, event, i=-1):
+        fn, ctx = self.on[(C.addressof(w), event)][i]
         return C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, None)
 
-    def click(self):
-        return self.handler(self.button, O['EVT_CLICK'])
+    def click(self, i=-1):
+        """The click on the i-th row list_row made (the last: Download Album Lyrics' when there is one)."""
+        return self.handler(self.button, O['EVT_CLICK'], i)
 
 
 class Run:
@@ -1333,6 +1336,6 @@ def test_the_row_only_for_a_playing_song_on_the_card_under_stocks_rows(fw, mcl, 
     more = More(fw, rows=7 if case == 'not stock rows' else 8, view=case != 'no view')
     assert more.open(win=case != 'no window') == 0x55
     if case in ('no window', 'no view', 'not stock rows'):
-        assert not fw.calls('list_item_create') and not more.texts and not more.on
-    else:  # AirPlay's row alone (airplay.c), for any song
-        assert len(fw.calls('list_item_create')) == 1 and more.texts == ['AirPlay']
+        assert not fw.calls('list_item_create') and not more.texts and not more.about and not more.on
+    else:  # AirPlay's row (airplay.c) and About's (np_about.c) alone, for any song
+        assert len(fw.calls('list_item_create')) == 2 and more.texts == ['AirPlay'] and more.about == ['About']

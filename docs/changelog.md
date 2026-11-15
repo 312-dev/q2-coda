@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Now Playing: the track's details (album, genre, year, format, sample rate, bit rate, file size and folder) are no longer one of the pages you swipe through, so Now Playing has two page dots. Open ⋯ and choose **About** to see them on a page of their own; Return goes back to ⋯.
+  - Now Playing: the song's place in the queue ("3 of 12") is gone from Now Playing in every theme.
   - Security: **SyncLink** (Shanling's phone remote, System settings → Wireless → SyncLink) is off unless you turn it on, as it lets any nearby phone control the Q2 and read its Wi-Fi password without asking for one. If you had it on, this update turns it off once; choose Bluetooth or Wi-Fi on its page to use it again. Its row says what it allows.
   - Volume: turning the wheel slowly still moves the volume one step at a time, but a fast spin now covers the range quickly, up to 10 steps a click, picking up speed as you keep turning, as Rockbox does on an iPod. The volume bar slides to each new level instead of jumping. Wheel Sensitivity still sets how far a click is.
   - Settings: **System settings → Power** ends with **Restart** and **Shut Down**. Each asks first; Cancel or Return leaves you on the row. Restart saves your place in the queue and restarts the Q2, as a theme change does, and Shut Down powers off as holding the power key and choosing Shut Down does.

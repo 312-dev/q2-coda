@@ -450,6 +450,7 @@ int ringnav_cover_copy(char *cmd, unsigned n, const char *fmt, const char *from,
  * Lyrics on Now Playing's ⋯ page saves LRCLIB's lyrics beside every song of the playing song's
  * album, found as that search finds them, on a thread of its own that outlives the page. */
 extern void *list_row(void *view, const char *icon, int (*click)(void *, void *), void *ctx);
+int np_about_open(void *ctx, void *event); /* np_about.c: ⋯'s About */
 static const char AL_TITLE[] = "Download Album Lyrics";
 static struct {
     lyr_job job;
@@ -582,7 +583,8 @@ static int al_gone(void *ctx, void *event) {
  * row click (an atoi of the name) never sees it. Only for a playing song on the card; a page
  * without stock's rows is left as it built it. Delete is hidden for a playlist's song played from
  * its cover (coverflow_playlist_queue): there it would delete from the library. AirPlay's row
- * (airplay.c) goes over them all, for any song. */
+ * (airplay.c) goes over them all, for any song, and About (np_about.c, the track's details) under
+ * them, with stock's System About icon. */
 extern int stock_playermore_trampoline(void *win, void *ctx);
 static void more_rows(void *win) {
     if (win) stock_more_speed(win), stock_more_into(win);
@@ -593,6 +595,9 @@ static void more_rows(void *win) {
         if (((const int *)PLAYMORE_ROWS)[i] == PLAYMORE_DELETE)
             widget_set_visible(widget_get_child(view, i), 0, 0);
     airplay_more(view); /* first, over stock's rows */
+    void *about = list_row(view, "system_about", np_about_open, 0);
+    widget_set_text_utf8(about, "About");
+    widget_resize(about, 253, I(about, W_H));
     if (!al_playing()) return;
     while (at < PLAYMORE_COUNT && ((const int *)PLAYMORE_ROWS)[at] != PLAYMORE_SEARCH) ++at;
     if (at == PLAYMORE_COUNT) return;

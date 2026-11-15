@@ -281,8 +281,13 @@ has no place for keeps a place of its own:
   art's page, so a swipe takes them away with it: Phosphor `dots-three` and `heart` (regular, 20 px, Text Primary;
   More pressed in Text Secondary), the dots' ink ending on the right column, the heart `fill` in
   Accent Blue while the song is a favourite.
-- **The page dots** sit under shuffle and repeat, centred on y 302; the lyrics, the track's details
-  and the visualizer are still the swipe's other pages, each ending 5 px above the bar.
+- **The page dots** sit under shuffle and repeat, centred on y 302; the lyrics are the swipe's other
+  page, ending 5 px above the bar. The visualizer (Field), the design's third page, is off for the
+  battery: `NP_VISUALIZER` in `patch/offsets.inc` is 0, which leaves its code out of the payload;
+  at 1 it is the last page again, over the whole screen. Now Playing shows no place in the
+  queue ("1 of 10").
+- **The track's details** are not a page of the swipe: ⋯'s **About** row, last before Delete Song,
+  opens them as a page titled About, the same table in the same place, and Return goes back to ⋯.
 - **Shuffle and repeat** are two controls on stock's play mode button: a tap on shuffle turns it
   on or off, a tap on repeat steps Off, All, One (repeat-once's glyph for One), and each keeps the
   other as it was. Stock's Shuffle never ends, so shuffle with repeat Off plays on as with All.

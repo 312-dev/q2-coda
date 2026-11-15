@@ -519,8 +519,18 @@ def test_playing_page_oled_info_table():
 
 def test_playing_page_final_order(page):
     root, _ = page
-    assert [c[2].get('name') for c in root[3]] == ['view_buttons', 'label_playtime', 'label_playlen', 'label_ipod_remain',
+    assert [c[2].get('name') for c in root[3]] == ['view_info', 'view_buttons', 'label_playtime', 'label_playlen', 'label_ipod_remain',
                                                    'slide_view_view', 'slider_play', 'img_repeata', 'img_repeatb', 'image_wait']
+
+
+def test_playing_page_takes_the_details_out_of_the_swipe(page):
+    """⋯'s About shows the info page (np_about.c): it leaves the slide_view for the window, first, hidden, at the
+    slide's place in the window, its own layout gone, so the slide_view holds the art and lyrics pages alone."""
+    root, n = page
+    info, box, slide = n['view_info'], n['slide_view_view'][1], n['slide_view'][1]
+    assert root[3][0] is info and info[2]['visible'] == 'false' and 'self_layout' not in info[2]
+    assert info[1] == [box[0] + slide[0], box[1] + slide[1], slide[2], slide[3]]
+    assert [c[2]['name'] for c in n['slide_view'][3]] == ['view_album', 'view_lrc', 'label_lyricmsg']
 
 
 def test_playing_page_wants_the_stock_children():
@@ -571,6 +581,7 @@ def stock_page():
     root = w('playing_page',
              w('slide_view_view', w('slide_view', w('view_lrc', self_layout='default(x=0,y=0,w=100%,h=178)'),
                                     w('label_lyricmsg', at=[0, 73, 225, 28]), w('scroll_lrc', self_layout='default(x=0,y=0,w=-10,h=-20)'),
+                                    w('view_info', w('label_album', at=[0, 22, 225, 22]), self_layout='default(x=0,y=0,w=100%,h=100%)'),
                                     at=[0, 0, 225, 198])),
              w('scrlabel_title'), w('scrlabel_artist'),
              w('img_cover', at=[18, 0, 188, 188]), w('img_playstate', at=[52, 34, 120, 120]),
@@ -608,6 +619,11 @@ def test_playing_stock(audited):
         'slide_view_view': [80, 0, 225, 290], 'img_repeata': [50, 250, 3, 10], 'img_repeatb': [50, 250, 3, 10], 'image_wait': [165, 70, 54, 54]}
     assert n['slider_play'][1] == [50, 208 + 41 + 6 - ipod.NP_TOUCH // 2, 290, ipod.NP_TOUCH]
     assert n['slider_play'][2]['bar_size'] == str(ipod.NP_BAR[3])
+    # the details out of the swipe, hidden at the slide's place, first under the rest (⋯'s About shows them)
+    root = ipod.decode(ipod.playing_stock(audited(stock_page())))
+    assert root[3][0] is not None and root[3][0][2]['name'] == 'view_info' and 'view_info' not in [c[2].get('name') for c in n['slide_view'][3]]
+    assert root[3][0][1] == [80, 0, 225, 198] and root[3][0][2] == {'name': 'view_info', 'visible': 'false'}
+    assert root[3][0][3][0][1] == [0, 22, 225, 22]  # its rows where they were in it
 
 
 def test_playing_stock_is_audited(audited):

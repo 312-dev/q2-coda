@@ -650,10 +650,16 @@ sit under those, and the swipe's other pages stop above the bar. Each line that 
 the end it runs past (Display's [Theme](#theme)).
 
 The art, title, artist and album are the slide_view's first page, so a swipe replaces all of them
-with the lyrics or info page. The info page keeps its stock 225-pixel column, centred; the lyrics
-page spans the screen (**Lyrics** below). The info page's lines read `Label: value`, with spaced units
+with the lyrics page; two page dots (three with the visualizer built in, below). The track's details are not a page of
+the swipe: ⋯'s last row, **About** (under OLED last before Delete Song), opens them as a page of their own, titled
+About, and Return goes back to ⋯ (under OLED its panel, over Now Playing), as from ⋯'s other
+rows' pages. The build takes stock's info page out of the slide_view and leaves it hidden in Now
+Playing's window, where stock fills it; About moves it into its own page while open, at the same
+place on screen (under About's title where that is a row of the page, as for Centred Now Playing), so each theme's details look as they did on the swipe (`tools/ipod.py`
+`np_info_out`, `patch/np_about.c`). The details keep their stock 225-pixel column, centred; the lyrics
+page spans the screen (**Lyrics** below). The details' lines read `Label: value`, with spaced units
 (`35.92 MB`, `16-bit`, `950 kbps`, `44.1 kHz`), **Genre** and **Year** for stock's Genres and Era,
-`Unknown` for a missing value and `Location:` before the folder (`ringnav_np_info`). Under OLED the info page is a table instead (`tools/ipod.py` `np_info_table`): a fact a row, 20 pixels apart in the slide above the bar, Album, Genre, Year, Format, Sample Rate, Bit Rate, File Size and Location; the name on the text column in Text Secondary, the value right-aligned on the right column in white, both ending in an ellipsis when long; a 1-pixel `#1F1F1F` rule between rows; the bit depth joins Format (`FLAC, 16-bit`). A Genre line too long for the column scrolls at the album marquee's pace while the page shows (`genre_step`). The play/pause overlay has zero opacity, retaining its original gesture target without
+`Unknown` for a missing value and `Location:` before the folder (`ringnav_np_info`). Under OLED the details are a table instead (`tools/ipod.py` `np_info_table`): a fact a row, 20 pixels apart in the slide above the bar, Album, Genre, Year, Format, Sample Rate, Bit Rate, File Size and Location; the name on the text column in Text Secondary, the value right-aligned on the right column in white, both ending in an ellipsis when long; a 1-pixel `#1F1F1F` rule between rows; the bit depth joins Format (`FLAC, 16-bit`). A Genre line too long for the column scrolls at the album marquee's pace while About shows (`genre_step`). The play/pause overlay has zero opacity, retaining its original gesture target without
 a transport glyph; stock may update its visibility without making it appear. The loading
 spinner stays centred on the artwork. The on-screen Return icon moves off-screen, as on the pages whose navbars are
 hidden; the hardware Return does the same. More keeps its place at the top row's right. The play
@@ -761,28 +767,21 @@ page back. See [internals.md](internals.md#scrub-ipod) and [Word-timed lyrics](i
 
 ### Visualizer
 
-The slide_view gains a fourth page, after the art, lyrics and info pages, and the page dots a fourth
-dot. It shows the music as heard, EQ included, in one of four styles (five under OLED) on black,
-tinted with the accent's light tone (Field has its own five colours); a tap moves to the next, saved as `IPOD/VIS` in `config.ini`, and its name shows
-at the bottom for a second and a half:
-
-| Style            | After                     | Drawing                                                                                                                                      |
-| ---------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Spectrum**     | Rockbox FFT, log bars     | 32 capsule bars, from a dark shade of the accent to a bright tint with height, a cap on each peak that holds, then falls; a faint reflection |
-| **Oscilloscope** | Rockbox Oscilloscope      | The left channel in the accent with a glow, the right a faint accent line; it starts on a rising zero crossing, so the wave stands still     |
-| **VU Meters**    | Rockbox VU Meter (analog) | Left and right needles over an arc from -20 to +3 VU, heavier and brighter past 0, with 300 ms ballistics and a peak LED                     |
-| **Halo**         | Apple's radial spectrum   | 64 mirrored bars around Now Playing's art in a circle, turning slowly, the bass pulsing the ring                                             |
-| **Field** (OLED) | iTunes' Magnetosphere     | 40 soft glowing points in each of five bands, a colour each, flowing round the centre on rings each band's level swells and ripples          |
-
-Field shows only under OLED, where it is the style the page opens on until a tap picks another; it
-is drawn from glow sprites (`field_sprites`) over the whole screen, with the status row, the progress bar, the song's
-line and the page dots shown over it only while a thumb rests on the wheel
-([internals](internals.md#visualizer-ipod)); the others are anti-aliased vector drawing (AWTK's
-vgcanvas), all within the 375x186 page: 16-pixel side
-margins (`NP_MARGIN`), labels in the stock grey `#AAAAAA`. It animates at `VIS_FPS` only while the
-page shows with the screen on, and comes to rest when playback pauses; at rest the track's title
-and artist show at the bottom, in the style name's place. Tunables are `VIS_*` in
-`patch/offsets.inc`; `VIS_LATENCY_MS` sets how far the picture runs behind the decoder, to match
+Off for now, for the battery: `NP_VISUALIZER` in `patch/offsets.inc` is 0, so Now Playing has no
+visualizer page and the payload no visualizer code (navigation.c calls none of `patch/visualizer.c`,
+and the link's `--gc-sections` drops it; `test/fw` still builds and tests it). Field cost demo about
+a third of a host core in the emulator against 9% on the art page ([internals](internals.md#visualizer-ipod)).
+Built with it at 1, the slide_view gains a last page, after the art and lyrics pages, and the page dots a third dot.
+It shows the music as heard, EQ included, as **Field**, after iTunes' Magnetosphere: 40 soft
+glowing points in each of five bands of the spectrum, a colour each, flowing round the centre on
+rings each band's level swells and ripples. It is drawn from glow sprites (`field_sprites`). Under
+OLED it fills the whole screen, with the status row, the progress bar, the song's line and the page
+dots shown over it only while a thumb rests on the wheel
+([internals](internals.md#visualizer-ipod)); under the other themes it keeps the 375x186 page, its
+song line inside 16-pixel side margins (`NP_MARGIN`), in the stock grey `#AAAAAA`. A tap on it does
+nothing. It animates at `VIS_FPS` only while the page shows with the screen on, and comes to rest
+when playback pauses; at rest the track's title and artist show at the bottom. Tunables are `VIS_*`
+in `patch/offsets.inc`; `VIS_LATENCY_MS` sets how far the picture runs behind the decoder, to match
 what you hear. See [internals.md](internals.md#visualizer-ipod).
 
 ## Previous and Next
@@ -898,8 +897,8 @@ NPCENTRED`, off; `playset_covermode`): `ringnav_ui_load`, hooked on every window
   full screen
   ([Word-timed lyrics](internals.md#word-timed-lyrics)). Choosing a Theme loads its preset (`theme_preset`), before the restart where there is one: Minimal sets Light Mode Off, Graphite (`MINIMAL_ACCENT` 0), rounded corners, Split and Time in Title on; Classic sets Light Mode On, Classic Blue (`CLASSIC_LIGHT_ACCENT` 9), Split, and Time in Title, Library on Home, Row Preview and Row Art on; Modern sets Light Mode On, Cobalt (`ACCENT` 4), Square, Split and Time in Title off; OLED sets Light Mode Off, its Blue (`OLED_ACCENT` 9) and Full; Light Mode's Auto, Battery, Shortcut and Centred Now Playing are kept, and only changed values are saved.
 - Display's main page: a "Smart Awake" switch (`IPOD KEEPLIT`, off;
-  `keep_lit_poll`): with Now Playing lit in front on its lyrics, info or visualizer page, or its
-  full-screen art (`bigcover_page`) in front, and a song playing, it calls
+  `keep_lit_poll`): with Now Playing lit in front on its lyrics page (or the visualizer's, when built in), or its
+  full-screen art (`bigcover_page`) or ⋯'s About in front, and a song playing, it calls
   `reset_poweroptions_timer(1, 1, 1)` once a second, so the screen stays on there (with Enlarged Album
   Art on, the art page too, once its countdown opens the full-screen art);
   paused, it times out as usual. A card game in Games is held open and lit while it is on, playing

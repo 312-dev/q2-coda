@@ -4944,9 +4944,9 @@ static void lyric_follow(void *lrc, int ms, int front, int shown) {
     }
 }
 
-/* Smart Awake (#57): Now Playing lit in front, a song playing, on its lyrics, info or
- * visualizer page, or its full-screen art in front, holds the screen on as the lyrics wheel does;
- * paused, it times out as usual. */
+/* Smart Awake (#57): Now Playing lit in front, a song playing, on its lyrics or visualizer page,
+ * or its full-screen art or ⋯'s About (np_about.c) in front, holds the screen on as the lyrics
+ * wheel does; paused, it times out as usual. */
 static void keep_lit_poll(void) {
     unsigned now = (unsigned)time_now_ms();
     if (!st.np_slide || now - st.keep_lit_at < 1000) return;
@@ -4955,7 +4955,7 @@ static void keep_lit_poll(void) {
     void *top = window_manager_get_top_window(window_manager());
     if (st.keep_lit && g_backlight_status && mclGetPlayStatus() == 2 &&
         ((top == st.np_win && widget_get_prop_int(st.np_slide, "value", 0)) ||
-         (top && top == st.bc[2])))
+         (top && (top == st.bc[2] || top == np_about_page()))))
         reset_poweroptions_timer(1, 1, 1);
 }
 
@@ -5298,6 +5298,7 @@ static int np_key(void *top, unsigned key) {
 
 static int np_gone(void *win, void *event) {
     if (win == st.np_win) {
+        np_about_np_gone(win);
         st.np_win = (void *)0;
         st.np_hash = 0;
         st.np_album = st.np_remain = st.np_slider = st.np_elapsed = st.np_cover = st.np_slide =
@@ -7463,9 +7464,9 @@ static int setting_click(void *ctx, void *event) {
  * loop's fast pace while it moves. */
 #define GENRE_SCROLL "ringnav_genre_scroll"
 static int genre_over(void) {
-    void *s = st.genre_label;
-    if (!s || !g_backlight_status || window_manager_get_top_window(window_manager()) != st.np_win ||
-        widget_get_prop_int(st.np_slide, "value", 0) != 2) /* view_info */
+    void *s = st.genre_label, *about = np_about_page();
+    if (!s || !about || !g_backlight_status ||
+        window_manager_get_top_window(window_manager()) != about)
         return 0;
     return I(s, HSCROLL_TEXT_W) + 4 - I(s, W_W); /* stock's two 2 px margins, as marq_moved */
 }
@@ -7499,7 +7500,7 @@ static void genre_fill(void *win, void *label, const char *text) {
         st.genre_off = 0;
         hscroll_label_set_xoffset(s, 0);
     }
-    if (win != st.np_win) return;
+    if (win != np_about_page()) return;
     st.genre_label = s;
     if (!same) stop_timer(&st.genre_timer); /* the new text holds at its start */
     if (!st.genre_timer && genre_over() > 0)
@@ -7573,6 +7574,8 @@ int ringnav_np_info(void *win) {
                              *const units[] = {
                                  "", "", " MB", "", "", "-bit", " kbps", " kHz", ""
                              };
+    if (win && win == st.np_win && np_about_page())
+        win = np_about_page(); /* About holds the labels */
     int result = np_info(win), rows = win && widget_lookup(win, "label_album_value", 1);
     /* OLED's table (tools/ipod.py np_info_table): the bit depth joins Format ("FLAC, 16-bit") */
     char depth[32] = "", where[64] = "";
@@ -11101,7 +11104,8 @@ int ringnav_sleep(void *loop) {
     info_poll();
     np_art_poll();
     if ((st.np_slide && widget_get_prop_int(st.np_slide, "value", 0)) || /* off the art page */
-        (st.rate_on && classic_pages()))                                 /* over the picker */
+        np_about_page() ||               /* the details over it (np_about.c) */
+        (st.rate_on && classic_pages())) /* over the picker */
         *(volatile signed char *)BC_IDLE = BC_IDLE_FULL;
     if (st.bc[0] && np_track() != st.bc_track) bc_show();
     if (!g_backlight_status) {

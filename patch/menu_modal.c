@@ -352,11 +352,11 @@ int modal_pick(void *under, const char *const *names, int n, int current, void (
 /* Now Playing's More (onlinematch.c ringnav_playermore): a dialog under a modal set
  * (tools/ipod.py modal_page), modeless, as the hold menu's, so navigator_to returns. Its rows as
  * the panel's, each with its symbol: stock's by their kind (PLAYMORE_ROWS, the button's name its
- * index), AirPlay's and Download Album Lyrics' by their images. Delete Song, which asks first, goes
- * last after a gap. A-B Repeat's stock switch hides, and the row paints the theme's (switch_mark)
- * on the right column by its image. Multiple Speed is a setting row, its value the speed, opening
- * a picker of the four (M3); a pick is a click on stock's own speed button for it, which the
- * hidden row keeps. The menu opens on its first row. */
+ * index), AirPlay's, Download Album Lyrics' and About's by their images. Delete Song, which asks
+ * first, goes last after a gap. A-B Repeat's stock switch hides, and the row paints the theme's
+ * (switch_mark) on the right column by its image. Multiple Speed is a setting row, its value the
+ * speed, opening a picker of the four (M3); a pick is a click on stock's own speed button for it,
+ * which the hidden row keeps. The menu opens on its first row. */
 static const char *const more_icons[] = { 0,
                                           "speedometer",
                                           "queue",
@@ -446,6 +446,7 @@ void modal_more(void *win) {
                 if (!image) image = "";
                 if (!tk_strcmp(image, "airplay")) icon = "airplay";
                 if (!tk_strcmp(image, "player_onlinesearch")) icon = "cloud-arrow-down";
+                if (!tk_strcmp(image, "system_about")) icon = "info";
                 if (!strncmp(image, "switch_", 7))
                     sw = c;
                 else
