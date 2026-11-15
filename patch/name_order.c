@@ -55,7 +55,8 @@ static unsigned long long list_hash(void *list, int sort) {
         void *r = deque_at(list, i);
         tk_snprintf(id, sizeof id, "%d/%d", I(r, REC_ID), I(r, REC_TYPE));
         h = fnv64(h, id);
-        h = sort == 0x102 ? fnv64(h, P(r, REC_PATH)) : fnv64(fnv64(h, P(r, REC_TITLE)), P(r, REC_NAME));
+        h = sort == 0x102 ? fnv64(h, P(r, REC_PATH))
+                          : fnv64(fnv64(h, P(r, REC_TITLE)), P(r, REC_NAME));
     }
     return h;
 }
@@ -65,7 +66,8 @@ static unsigned query_key(const char *sql, int sort) {
     while (*sql) h = (h ^ (unsigned char)*sql++) * 0x01000193u;
     return h;
 }
-/* library_query's sort: toolsQueryDbTable's argument, or 0x100 and toolsQueryDbTableAndSort's mode. */
+/* library_query's sort: toolsQueryDbTable's argument, or 0x100 and toolsQueryDbTableAndSort's mode.
+ */
 static void *comparator(int sort) {
     int set = B(NAME_SORT_FLAG, 0);
     return (void *)(sort == 0x101   ? set ? FILE_NAME_CMP : FILE_NAME_CMP_PINYIN
@@ -104,14 +106,16 @@ static no_slot *find(unsigned key, unsigned n, unsigned long long sum) {
         char s[32];
         no_head *h = &no.s[i].h;
         void *f = fopen(path(s, i), "rb");
-        if (f && (fread(h, sizeof *h, 1, f) != 1 || h->magic != NO_MAGIC || h->version != version()))
+        if (f &&
+            (fread(h, sizeof *h, 1, f) != 1 || h->magic != NO_MAGIC || h->version != version()))
             memset(h, 0, sizeof *h);
         if (f) fclose(f);
     }
     no.read = 1;
     for (int i = 0; i < NO_SLOTS; ++i) {
         no_slot *k = &no.s[i];
-        if (k->h.n == n && k->h.key == key && k->h.sum == sum && (k->file || (k->file = card_file(i))))
+        if (k->h.n == n && k->h.key == key && k->h.sum == sum &&
+            (k->file || (k->file = card_file(i))))
             return k;
     }
     return 0;
@@ -197,25 +201,30 @@ static int spin_open(void) {
     return 1;
 }
 /* A coverage 0-255 from a squared distance (half pixels) inside r2 - w and out by r2. */
-static int cover(int d2, int r2, int w) { return d2 >= r2 ? 0 : d2 <= r2 - w ? 255 : (r2 - d2) * 255 / w; }
+static int cover(int d2, int r2, int w) {
+    return d2 >= r2 ? 0 : d2 <= r2 - w ? 255 : (r2 - d2) * 255 / w;
+}
 /* Frame f: eight dots 15 px out, the lit one at dot f & 7 and each before it dimmer. */
 static void spin_paint(int f) {
-    static const signed char dots[8][2] = { { 0, -15 }, { 11, -11 }, { 15, 0 }, { 11, 11 },
+    static const signed char dots[8][2] = { { 0, -15 }, { 11, -11 }, { 15, 0 },  { 11, 11 },
                                             { 0, 15 },  { -11, 11 }, { -15, 0 }, { -11, -11 } };
     static const unsigned char lit[8] = { 255, 200, 160, 128, 100, 80, 64, 56 };
     for (int y = 0; y < SPIN_BOX; ++y)
         for (int x = 0; x < SPIN_BOX; ++x) {
-            int u = 2 * x + 1 - SPIN_BOX, v = 2 * y + 1 - SPIN_BOX; /* half pixels from the centre */
+            int u = 2 * x + 1 - SPIN_BOX,
+                v = 2 * y + 1 - SPIN_BOX; /* half pixels from the centre */
             int ex = (u < 0 ? -u : u) - 40, ey = (v < 0 ? -v : v) - 40, box, ink = 0, gray = 0;
             ex = ex < 0 ? 0 : ex, ey = ey < 0 ? 0 : ey;
             if (!(box = cover(ex * ex + ey * ey, 625, 96))) continue;
             for (int k = 0; k < 8; ++k) {
-                int du = u - 2 * dots[k][0], dv = v - 2 * dots[k][1], a = cover(du * du + dv * dv, 49, 24);
+                int du = u - 2 * dots[k][0], dv = v - 2 * dots[k][1],
+                    a = cover(du * du + dv * dv, 49, 24);
                 if (a > ink) ink = a, gray = lit[(f - k) & 7];
             }
             unsigned under = sp.under[y * SPIN_BOX + x], out = under & 0xff000000u;
             for (int c = 0; c < 24; c += 8) {
-                int bg = (c ? 0x1c : 0x1e) + (gray - (c ? 0x1c : 0x1e)) * ink / 255, was = under >> c & 255;
+                int bg = (c ? 0x1c : 0x1e) + (gray - (c ? 0x1c : 0x1e)) * ink / 255,
+                    was = under >> c & 255;
                 out |= (unsigned)(was + (bg - was) * box / 255) << c;
             }
             sp.at[y * sp.stride + x] = out;
