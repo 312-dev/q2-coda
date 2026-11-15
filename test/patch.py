@@ -13924,13 +13924,16 @@ fk,ck=m.handler(page,O['EVT_KEY_UP'])
 ev=m.alloc(0x40); m.word(ev,O['EVT_KEY_UP']); m.word(ev+O['EVENT_KEY'],O['KEY_RETURN'])
 assert m.call(address=fk,args=(ck,ev,0,0),gap=0)==11 and [c[0] for c in m.calls].count('navigator_back')==1
 m.close(); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.top!=page and m.nodes[m.top]['name']=='shuffle_page'; passed()
-# Classic (no Library icons): Search first, iconless, its press the pull-down's stock search.
+# Classic (no Library icons): Search first, iconless, its press library_search_open, which under a theme without
+# list.entry.ipod (Classic's) hands the press to the pull-down's stock search and opens no strip.
 cm=classic_light_on(classic_light_new(ShuffleMachine))  # its own names: the cases below go on with m's Library
 cview=cm.node('scroll_view','scroll_view_localmusic',[cm.node('list_item') for _ in range(11)]); cm.top=cm.node('window','localmusic_page',[cview])
 assert cm.call(address=HOOKS['localmusic_page_init'][0],args=(cm.top,5,0,0),gap=0)==0
 ckids=cm.nodes[cview]['children']; cbutton=cm.nodes[ckids[0]]['children'][0]; clabel=cm.nodes[cbutton]['children'][0]
 assert len(ckids)==18 and cm.nodes[clabel]['text']=='Search' and cm.nodes[cm.nodes[cm.nodes[ckids[1]]['children'][0]]['children'][1]]['text']=='Shuffle'
-assert cm.handler(cbutton,O['EVT_CLICK'])==(syms['stock_search'],0); passed()
+cf_,cctx=cm.handler(cbutton,O['EVT_CLICK']); assert (cf_,cctx)==(payload_syms['library_search_open'],0)
+cm.calls=[]; ctop=cm.top; cm.call(address=cf_,args=(cctx,cm.event,0,0),gap=0)
+assert [c[0] for c in cm.calls].count('stock_search')==1 and cm.top==ctop; passed()
 def home_settings(full,modern=0):
         # Home's Rockbox row shows only while the card has Rockbox: hidden, it moves after Settings, so the
         # list's layout leaves no gap; it comes back after Folder once the card has it.
