@@ -328,6 +328,7 @@ int row_preview_on(void) { return 1; }
 int library_search(void) { return 1; }
 int slide_pick(char *url, int take) { return 0; } /* slideshow.c: no library cover */
 int mclGetPlayStatus(void) { return 2; } /* playing: Split shows the playing cover */
+int media_status(void) { return 2; } /* playing too: Home lists Now Playing's row */
 void library_rows(void *list) {}
 void stream_rows(void *list) {}
 int tk_str_start_with(const char *s, const char *p) { return !strncmp(s, p, strlen(p)); }
@@ -341,6 +342,7 @@ void home_pane_read(int *services, int *games, int *free_tenths) { *services = 5
 /* home.c's list pitch and fades, and Home's Shuffle Songs and Search rows (library_lists.c,
  * search_strip.c): none of these tests' */
 void home_pad(void *view) {}
+void home_np_keep(int d) {} /* home.c's selection as Now Playing's row comes or goes */
 void home_overflow(void *list, int bottom) {}
 void home_in_place(void *list) {}
 void home_fades(void *canvas, void *list, int list_y, int cols, int split) {}
