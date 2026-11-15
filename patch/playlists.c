@@ -1216,9 +1216,11 @@ static void pl_art_row(void *button, int *asked) {
     if (!r) return;
     if (!*asked) playlist_art_refresh();
     *asked = 1;
-    int oled = feedback_oled(); /* OLED: its own picture, else pl_tile_paint's tile */
+    /* OLED: its own picture, else its server's cover, else pl_tile_paint's tile */
+    int oled = feedback_oled();
     image_base_set_image(art, playlist_art(I(r, REC_DISC), P(r, REC_TITLE),
-                                           oled ? 1 | PL_ART_OWN : 1, url, sizeof url)
+                                           oled ? 1 | PL_ART_OWN : 1, url, sizeof url) ||
+                                      (oled && catalogue_playlist_cover(I(r, REC_DISC), url))
                                   ? url
                               : oled
                                   ? ""
@@ -1241,6 +1243,7 @@ static int pl_arts(void *win) {
     int asked = 0;
     pl_art_page = win;
     playlist_art_ready = pl_art_ready;
+    if (feedback_oled()) catalogue_playlist_covers(); /* the server playlists', once */
     for (unsigned i = 0, n = view ? widget_count_children(view) : 0; i < n; ++i) {
         void *item = widget_get_child(view, i);
         if (widget_count_children(item)) pl_art_row(widget_get_child(item, 0), &asked);

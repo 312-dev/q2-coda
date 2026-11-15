@@ -565,7 +565,8 @@ page, On-The-Go) and `patch/add_songs.c`.
 - **The list** (Library > Playlists): **On-The-Go** first, then the playlists by name, each a two-line
   row 44 px tall: a 36 px square at the text column less 2 (x 22), 4 px corners, the name in Row type
   over "N songs" (or "Empty") in 13 px Text Tertiary from x 66, and the chevron. The square is the
-  playlist's own picture (`_explaylist_data/<name>.jpg`, as Cover Flow's) when it has one, else a
+  playlist's own picture (`_explaylist_data/<name>.jpg`, as Cover Flow's) when it has one, a server
+  playlist's cover from its server (the app's `covers/pl-<pid>.jpg`) when it has that, else a
   `#2C2C2E` tile with Phosphor's `playlist` (fill, 20 px, Text Tertiary); On-The-Go's tile holds
   `sneaker-move` (fill). On the selection the tile is the accent with an 18 % white veil and its
   glyph white. No dividers. No New Playlist, Select Playlists or Import and Export rows: a playlist

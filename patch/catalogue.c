@@ -1832,6 +1832,47 @@ static int pls_sid(void *f, int n, char **v, char **names) {
     return 0;
 }
 
+/* The server playlists' covers, read once per Playlists list built (catalogue_playlist_covers):
+ * each stock playlist's app and server id, at most 100. */
+static struct {
+    int n;
+    struct {
+        int list;
+        pls_t id;
+    } *at;
+} plc __attribute__((section(".scratch")));
+static int plc_row(void *ctx, int n, char **v, char **names) {
+    if (n != 3 || !v[0] || !v[1] || !v[2] || plc.n >= 100) return 0;
+    plc.at[plc.n].list = atoi(v[0]);
+    tk_snprintf(plc.at[plc.n].id.app, sizeof plc.at[0].id.app, "%s", v[1]);
+    tk_snprintf(plc.at[plc.n].id.pid, sizeof plc.at[0].id.pid, "%s", v[2]);
+    ++plc.n;
+    return 0;
+}
+/* The mapping read again (Local + Server on), for catalogue_playlist_cover's asks that follow. */
+void catalogue_playlist_covers(void) {
+    void *db = 0;
+    plc.n = 0;
+    if (!catalogue_on() || (!plc.at && !(plc.at = calloc(100, sizeof *plc.at))) ||
+        stock_db_open("/mnt/data/database.db", &db))
+        goto done;
+    sqlite3_exec(db, "select list,app,pid from cat.serverlists", plc_row, 0, 0);
+done:
+    if (db) sqlite3_close(db);
+}
+/* Server playlist list's cover, the app's covers/pl-<pid>.jpg (its server's coverArt,
+ * docs/server-library.md#covers), as a file:// url in url (600 bytes); 0 when it has none yet or
+ * is no server playlist. */
+int catalogue_playlist_cover(int list, char *url) {
+    for (int i = 0; i < plc.n; ++i) {
+        pls_t *p = &plc.at[i].id;
+        if (plc.at[i].list != list || strstr(p->app, "/") || strstr(p->pid, "/")) continue;
+        tk_snprintf(url, 600, "file:///mnt/mmc/.%s/covers/pl-%s.jpg", p->app, p->pid);
+        return file_size(url + 7) > 0;
+    }
+    return 0;
+}
+
 /* Playlist list (0 to 99) changed on the Q2 (playlists.c): when it is a server playlist, a line to
  * its app's playlists.out, which the app sends on to the server and then empties: "set PID SID..."
  * (its songs in their own order, after an add or a removal; a song with no server id, a card file

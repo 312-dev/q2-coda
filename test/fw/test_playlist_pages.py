@@ -52,6 +52,8 @@ class Lists(Table):
                     self.rows[i] = (int(m.group(1)), p)
         elif text == 'delete from playlist where id>100 and cd_num=100':
             self.rows = {i: (c, p) for i, (c, p) in self.rows.items() if c != OTG}
+        elif text == 'select list,app,pid from cat.serverlists':
+            rows = [[b'%d' % n, a.encode(), p.encode()] for n, (a, p) in self.servers.items()]
         elif m := re.fullmatch(r'select app,pid from cat.serverlists where list=(\d+)', text):
             n = int(m.group(1))
             rows = [[a.encode(), p.encode()] for a, p in [self.servers[n]]] if n in self.servers else []
@@ -170,6 +172,18 @@ def test_a_local_playlist_or_local_only_writes_nothing(fw, ui, pages):
     fw.var('catalogue_source', C.c_int).value = 1
     fw.fn('playlist_rename', C.c_int, C.c_int, C.c_char_p)(1, b'Gym 2')  # not a server playlist
     assert not files.files
+
+
+def test_a_server_playlist_s_cover_is_its_app_s_pl_file_once_it_is_there(fw, ui, pages):
+    files = Files(fw)
+    server(fw, files, pages)
+    cover = fw.fn('catalogue_playlist_cover', C.c_int, C.c_int, C.c_char_p)
+    url = C.create_string_buffer(600)
+    fw.fn('catalogue_playlist_covers', None)()
+    assert cover(3, url) == 0  # none yet
+    files.files['/mnt/mmc/.subsonic/covers/pl-pl7.jpg'] = b'\xff\xd8jpeg'
+    assert cover(3, url) == 1 and url.value == b'file:///mnt/mmc/.subsonic/covers/pl-pl7.jpg'
+    assert cover(1, url) == 0  # a local playlist
 
 
 def test_a_rename_to_a_taken_name_is_refused(fw, ui, pages):

@@ -94,7 +94,9 @@ i	<pid>	<sid>	<card path or empty>
   it), Now Playing (`coverflow_player_cover`, after the file's own art and folder images), and
   under OLED the app's own artist page's Albums, Singles & EPs, Top Songs and All Songs
   ([oled-design.md](oled-design.md#artist-page)), by the album id in the row's `album:` context.
-  Until it is there the placeholder shows; nothing waits for it. The app keeps the folder within its own budget and deletes an album's cover when the album
+  Until it is there the placeholder shows; nothing waits for it. A server playlist's cover (its
+  `coverArt`, at the same size) is `covers/pl-<pid>.jpg`, which OLED's Playlists rows show
+  ([oled-design.md](oled-design.md#playlists)). The app keeps the folder within its own budget and deletes an album's cover when the album
   leaves the catalogue ([The app's side](#the-apps-side)).
 
 ### Duplicates
