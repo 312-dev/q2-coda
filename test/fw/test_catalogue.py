@@ -9,7 +9,8 @@ import struct
 
 import pytest
 
-from conftest import FNV_SEED, O, Files, Rows
+from conftest import FNV_SEED, O, Files, Rows, in_fork
+from test_nav_library_pages import EVT_CLICK, song, ui  # noqa: F401  the Now Playing heart's fixtures
 from test_nav_painters import scratch, st  # noqa: F401  navigation.c's st by field
 
 APP = 'subsonic'
@@ -1066,3 +1067,107 @@ def test_now_playing_takes_the_apps_cover_for_a_stream_cache_copy_without_art(ri
     ff.clear()
     player(b'/mnt/mmc/Music/a.flac', b'/tmp/externpic.jpg', 300, 300)  # a card file: the probe alone
     assert len(ff) == 1
+
+
+def heart_on_copy(rig, fw, ui, song, mcl, **kw):
+    """Now Playing on a server song's Stream Cache copy (the app's .play plays the copy, a file no Library row
+    has), with the heart bound and stock's My Fav toggle stubbed."""
+    from test_nav_library_pages import FAV_CLICK, Heart, stock_stub
+    copy = '/mnt/mmc/.subsonic/stream/acct/orig/o/One [s1].flac'
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, local=copy)])
+    rig.poll()
+    heart = Heart(fw, ui, song, mcl, path=copy.encode(), **kw)
+    stock_stub(FAV_CLICK, 0, (C.c_long * 3)())
+    return heart
+
+
+@in_fork
+def test_hearts_picked_on_a_stream_copy_are_the_server_rows_and_go_to_the_server(rig, fw, ui, song, mcl):
+    """Three hearts picked on Now Playing while the copy plays are kept under the server row's key (its
+    fileurl's listen_key, as play counts are), and its ratings.out line names the row's sid, so the app sends
+    them and the Library's row has them; the copy's own path keys nothing."""
+    from test_nav_library_pages import KEY_CENTER, KEY_NEXT
+    heart = heart_on_copy(rig, fw, ui, song, mcl)
+    heart.hold()
+    for _ in range(3):
+        heart.key(KEY_NEXT)
+    heart.key(KEY_CENTER)
+    kept = fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)
+    row = listen_key(url('s1'))
+    assert kept(0, row) == 3 and kept(0, listen_key('/mnt/mmc/.subsonic/stream/acct/orig/o/One [s1].flac')) == 0
+    assert heart.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == f'{row:08x}\ts1\t3\t1700000000\n'.encode()
+    assert heart.badge() == '3'
+
+
+@in_fork
+def test_a_heart_tapped_on_a_stream_copy_is_the_server_rows_favourite(rig, fw, ui, song, mcl):
+    """A tap is stock's My Fav toggle, which puts the copy's path in myfav (the Favorites list shows the song
+    once, as before): its line carries the row's sid, five hearts and then none, and the Ratings lists count
+    the copy's My Fav as the row's."""
+    from test_nav_library_pages import rate_all
+    heart = heart_on_copy(rig, fw, ui, song, mcl)
+    copy = C.string_at(C.c_void_p.from_address(heart.track + O['REC_PATH']).value).decode()
+    event = C.create_string_buffer(0x40)
+    heart.fav = True  # stock's toggle has run when the click reads it back
+    ui.handler(heart.heart, EVT_CLICK)(C.addressof(event))
+    heart.fav = False
+    ui.handler(heart.heart, EVT_CLICK)(C.addressof(event))
+    row = listen_key(url('s1'))
+    assert heart.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == (f'{row:08x}\ts1\t5\t1700000000\n'
+                                                                  f'{row:08x}\ts1\t0\t1700000000\n').encode()
+    assert rate_all(fw, ui, [rig.record(url('s1')), rig.record(url('s2'))], favs=[rig.record(copy)]) == [5, 0]
+
+
+def test_the_ratings_lists_have_rated_server_songs_with_local_and_server(rig, fw, ui, song):
+    """A Ratings list reads every card song (spoken ones too: getAllMusic(0)'s SQL, no music filter) and, with
+    Local + Server, the server's songs beside them, so a server song rated here or on the server is listed with
+    its hearts; with Local only it is not."""
+    from test_nav_library_pages import RATINGS, Library, call, ratings
+    rig.card_song('/mnt/mmc/audiobooks/b.m4b', 'Book', 'Reader', 'Tales', 1, 900, 1)
+    rig.write(1, [song_row('s1', 'Streamed', 'Server Band', 'Server Only', 1, 100, 1),
+                  song_row('s2', 'Unrated', 'Server Band', 'Server Only', 2, 100, 2)])
+    rig.poll()
+    slot = C.c_void_p.from_address(STOCK_SLOT)
+    rig.lib.sqlite3_open(str(rig.tmp/'database.db').encode(), C.byref(slot))
+    fw.fn('catalogue_attach', None, C.c_void_p)(STOCK_SLOT)
+    library = Library(fw, ui)
+    query = fw.fn('ringnav_library_query', C.c_int, C.c_char_p, C.c_char_p, C.c_void_p, C.c_int)
+    ran = []
+
+    def stock_query(db, sql, *_):  # stock's toolsQueryDbTable: the rows into the load's deque
+        sql = C.string_at(sql).decode()
+        ran.append(sql)
+        for path, title in rig.query(sql.replace('select *', 'select fileurl, name', 1)):
+            library.deques[library.directory()].append(song(path.encode(), title.encode()))
+        return 0
+    fw.mock('stock_dbquery_trampoline', stock_query)
+    fw.mock('getAllMusic', lambda sort, *_: query(b'db', b'select * from songtable order by name', None, sort))
+    fw.mock('getAllFav', lambda *_: 0)
+    from conftest import Files as F
+    F(fw, {RATINGS: ratings((listen_key('/mnt/mmc/audiobooks/b.m4b'), 2), (listen_key(url('s1')), 4))})
+    call(fw, 'rated_open', 3)  # All Rated
+    assert [t for t, _ in ui.rows(ui.top())] == ['Streamed', 'Book']
+    assert 'servertable' in ran[-1]
+    ui.close(ui.top())
+    fw.var('catalogue_source', C.c_int).value = 0  # Local only
+    fw.fn('catalogue_changed', None)()
+    call(fw, 'rated_open', 3)
+    assert [t for t, _ in ui.rows(ui.top())] == ['Book']
+    rig.lib.sqlite3_close(slot)
+    slot.value = 0
+
+
+@pytest.mark.parametrize('first', [False, True])
+def test_a_server_songs_five_hearts_from_the_server_are_its_my_fav(rig, fw, first):
+    """ratings.in's five hearts for a server row put the row in My Fav, by its path from the index: whether the
+    line comes after the catalogue's import or with it, at the first poll after a boot (the index is built by
+    that poll's job, so the line waits for it)."""
+    rig.write(1, [song_row('s1', 'Server', 'B', 'A', 1, 100, 1)])
+    if not first:
+        rig.poll()
+    ks = listen_key(url('s1'))
+    rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = f'{ks:08x}\ts1\t5\t1700000000\n'.encode()
+    rig.poll(3)
+    assert f'/mnt/mmc/.{APP}/ratings.in' not in rig.files.files
+    db = sqlite3.connect(rig.tmp/'database.db')
+    assert db.execute('select fileurl from myfav').fetchall() == [(url('s1'),)]

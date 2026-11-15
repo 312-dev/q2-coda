@@ -123,6 +123,11 @@ static struct {
     unsigned np_at, np_n, np_parses, np_since;
     unsigned np_text[2];
     char np_cover[160]; /* its art: "file://" and the app's cover, or stock's placeholder */
+    /* cat_row_of's last answer, on the UI thread: the path's fnv64, local_gen plus 1 when it was
+     * found, and the entry's index plus 1 (0 for none). Now Playing's badge asks for the playing
+     * copy twice a second (ratings.c rate_badge). */
+    unsigned long long row_path;
+    unsigned row_gen, row_at;
 } cat __attribute__((section(".scratch")));
 
 static unsigned long long fnv64(const char *s) {
@@ -1140,16 +1145,34 @@ static const cat_ent *cat_copy_of(const char *path) {
             return &cat.ix.e[i];
     return 0;
 }
-/* navigation.c play_count's key for a listen of r (key, its listen_key): a server song played
- * from its offline copy, a Stream Cache file no Library row has, counts as its server row, so
- * Most Played and Cover Flow's album plays follow the song (docs/server-library.md: play counts
- * key on the row's fileurl). key for any other. */
-unsigned catalogue_play_key(void *r, unsigned key) {
-    const char *path = r ? P(r, REC_PATH) : 0;
-    const cat_ent *e = path && !catalogue_path(path) ? cat_copy_of(path) : 0;
-    if (!e || e->dup) return key;
+/* The server row r plays as: r's own path is a Stream Cache copy of it (not a linked card file's
+ * row, which plays from the card). 0 for any other record. On the UI thread only (stock's cover
+ * thread asks cat_copy_of itself): the answer is kept for the last path until an import or a
+ * catalogue.avail line moves local_gen. */
+static const cat_ent *cat_row_of(void *r) {
+    const char *path = r && cat.ix.n ? P(r, REC_PATH) : 0;
+    if (!path || catalogue_path(path)) return 0;
+    unsigned long long key = fnv64(path);
+    if (cat.row_gen != cat.local_gen + 1 || cat.row_path != key) {
+        const cat_ent *e = cat_copy_of(path);
+        cat.row_path = key, cat.row_gen = cat.local_gen + 1;
+        cat.row_at = e && !e->dup ? (unsigned)(e - cat.ix.e) + 1 : 0;
+    }
+    return cat.row_at ? &cat.ix.e[cat.row_at - 1] : 0;
+}
+/* listen_key's, for a server row's record: its fileurl's (a server row has no CUE start). */
+static unsigned row_key(const cat_ent *e) {
     unsigned row = fnv(FNV_SEED, (const unsigned char *)ix_str(&cat.ix, e->path));
-    return row | !row; /* listen_key's, for the row's record: a server row has no CUE start */
+    return row | !row;
+}
+/* The key a song's plays and hearts are kept under, for r (key, its listen_key): a server song
+ * playing from its offline copy, a Stream Cache file no Library row has, is its server row, so
+ * Most Played, Cover Flow's album plays and the Ratings lists follow the song, and its hearts
+ * reach the server (docs/server-library.md: play counts and ratings key on the row's fileurl).
+ * key for any other. */
+unsigned catalogue_song_key(void *r, unsigned key) {
+    const cat_ent *e = cat_row_of(r);
+    return e ? row_key(e) : key;
 }
 typedef struct {
     unsigned long long key; /* the path's fnv64 */
@@ -1522,7 +1545,11 @@ void catalogue_poll(void) {
         cat.app[i].down = tk_str_start_with(v, "down");
         up |= !cat.app[i].down;
         cat_avail(i);
-        ratings_in(i);
+        /* a server row's line finds its path in the index: not while a job builds a new one, nor
+         * before the app's catalogue is imported (a boot's first poll starts that job) */
+        char seq[24];
+        if (!cat.running && !(cat_seq(cat.app[i].id, seq) && strcmp(seq, cat.app[i].seq)))
+            ratings_in(i);
     }
     cat.online = up && networkGetConnectStatus() > 0;
     catplay_poll();
@@ -1768,16 +1795,18 @@ static void catplay_poll(void) {
 
 /* ---- Ratings (docs/server-library.md#ratings-and-favourites) ---- */
 
-/* A song's hearts changed on the Q2: a line to each app with ratings=1. */
+/* A song's hearts changed on the Q2: a line to each app with ratings=1. A server song playing
+ * from its offline copy is its server row (catalogue_song_key): the row's key and sid. */
 void catalogue_rated(void *r, int hearts) {
     const char *path = r ? P(r, REC_PATH) : 0;
     if (!path || !cat.napps) return;
-    const cat_ent *e = cat_lookup(path);
+    const cat_ent *row = cat_row_of(r), *e = row ? row : cat_lookup(path);
+    unsigned key = row ? row_key(row) : listen_key(r);
     char line[1200], file[64];
     for (int i = 0; i < cat.napps; ++i) {
         if (!cat.app[i].ratings) continue;
         const char *sid = e && e->app == i ? ix_str(&cat.ix, e->sid) : "";
-        int k = tk_snprintf(line, sizeof line, "%08x\t%s\t%d\t%u\n", listen_key(r), sid, hearts,
+        int k = tk_snprintf(line, sizeof line, "%08x\t%s\t%d\t%u\n", key, sid, hearts,
                             (unsigned)time(0));
         if (k <= 0 || (unsigned)k >= sizeof line) continue;
         tk_snprintf(file, sizeof file, "/mnt/mmc/.%s/ratings.out", cat.app[i].id);

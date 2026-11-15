@@ -177,13 +177,13 @@ playlists.
 | Covers: a server row's album cover is the app's `covers/<album id>.jpg` (the album id from the row's path, or from its offline copy's row), in the Library's album rows and grids, Cover Flow's carousel and Now Playing | `catalogue.c` (`catalogue_cover`), `coverflow.c` (`grid_cover`, `build_art`, `coverflow_player_cover`) | yes |
 | Cover Flow: with Local + Server its album queries read the union (`cf_staged`), so the carousel has the server's albums; a server album's art is built from its app's cover once that is fetched (no job until then, so no "no art" marker); the centred album's captions are greyed with the offline mark while none of its songs can play | `coverflow.c` (`cf_staged`, `build_art`, `load_albums`, `caption_offline`, `caption_mark`) | yes |
 | Guards where code assumes a file exists: durations use the catalogue's seconds | `durations.c` | yes |
-| Play counts: a server song plays from its offline copy (the app's `.play`, or the firmware's offline queue), a Stream Cache file no Library row has, so a listen of a copy counts under its server row's `fileurl`; Most Played, a song's play count and Cover Flow's Most Played order follow the song | `navigation.c` (`play_count`, one line), `catalogue.c` (`catalogue_play_key`), `library_lists.c` (`mp_counted`) | yes |
+| Play counts: a server song plays from its offline copy (the app's `.play`, or the firmware's offline queue), a Stream Cache file no Library row has, so a listen of a copy counts under its server row's `fileurl`; Most Played, a song's play count and Cover Flow's Most Played order follow the song | `navigation.c` (`play_count`, one line), `catalogue.c` (`catalogue_song_key`), `library_lists.c` (`mp_counted`) | yes |
 | Delete Song | | not needed: a server row never plays under its own `fileurl` (the app's `.play` and the offline queue both hold card files), so Now Playing's Delete only ever sees a card file, a Stream Cache copy included |
 | Go to Album and Go to Artist on a server row (the queue menu): the Library's own pages for the row's album and artist, never the app's (`goto_app` leaves a server row out, `addon_goes` offers Go to on it), so they work offline and list the album's card and server songs | `addon.c` (`goto_app`, `addon_goes`) | yes |
 | Now Playing's info page for a server song, which plays from its Stream Cache copy (a file no `songtable` row describes): Genre and Year are the catalogue's, Location reads `Server` | `navigation.c` (`ringnav_np_info`, three lines), `catalogue.c` (`catalogue_np_info`) | yes |
 | Long Songs for a server row | | not built: Long Songs reads `songtable` alone, so server songs are not in it |
 | Setting: `[Q2POD] LIBRARYSOURCE`, 0 Local Only (default) or 1 Local + Server, a row on Display > Cover Flow | `navigation.c` (`pod_keys` and the rows' tables beside it) | yes |
-| Ratings: `ratings.out` appended for every app with `ratings=1`; `ratings.in` renamed to `ratings.in.taking`, applied, then deleted | `catalogue.c`, `ratings.c` (three calls) | yes |
+| Ratings: `ratings.out` appended for every app with `ratings=1`; `ratings.in` renamed to `ratings.in.taking`, applied, then deleted. Hearts given on Now Playing while a server song plays from its Stream Cache copy are its server row's (kept under the row's key, the line with the row's sid, the copy's My Fav counted as the row's), and the Ratings lists read the server's songs beside every card song (`all_songs`'s `LIBRARY_ALL`) | `catalogue.c` (`catalogue_rated`, `catalogue_song_key`), `ratings.c` (`rate_song_key`, `rate_all`, `rated_open`), `navigation.c` (`library_query`) | yes |
 
 The server library adds 43,600 bytes to the payload: `patch_bytes` is 864,504 of the 1 MB in this branch's `--dev` build against 820,904 at the commit it branched from, `catalogue.o` being 39,870 bytes of text and 1,236 of data (`llvm-size`). All catalogue data lives on the heap or the card.
 
@@ -289,7 +289,11 @@ for server rows and for synced card files alike, whenever the Q2 can reach the s
   taking the fifth heart away unstars it. A song starred on the server with no rating arrives as five
   hearts.
 - **Which songs:** server rows by their sid; a synced card file by the sid the Subsonic app recorded
-  when it downloaded it, so the app owns the path-to-sid table and the firmware never needs one.
+  when it downloaded it, so the app owns the path-to-sid table and the firmware never needs one. A
+  server song playing from its Stream Cache copy (a file no Library row has, at a path that changes
+  with the stream's quality) is its server row: Now Playing's hearts are kept under the row's
+  `listen_key` and its line carries the row's sid; five hearts are stock's My Fav of the copy,
+  which the Ratings lists count as the row's, so they show the server song with its hearts.
 - **Out:** each change on the Q2 is appended to `/mnt/mmc/.<id>/ratings.out`
   (`<listen_key>\t<sid or empty>\t<hearts>\t<unix time>`); the app sends it when the server answers
   and removes the lines it sent. Offline changes wait there, as plays and stars already do.
@@ -306,7 +310,9 @@ for server rows and for synced card files alike, whenever the Q2 can reach the s
   firmware applies each line through the same path as a rating made on the device (the hearts by
   `listen_key`; My Fav, for five, by the song's path: a server row's or a linked file's from its
   sid, any other card file's found by its key in songtable), skipping a song whose own
-  `ratings.out` line is newer, then deletes the file.
+  `ratings.out` line is newer, then deletes the file. It waits while an import runs or the app's
+  catalogue on the card is not yet imported (a boot's first poll), so a server row's path is in the
+  index when its line is read.
 - **Conflicts:** the newer change wins, by the time the Q2 recorded it against the server's
   `starred` date where one exists; a rating has no server date, so a pending local change is sent
   before the server's value is read back.
@@ -351,4 +357,9 @@ Library; a Q2 has 128 MB, so this wants checking on a device. Every job copies t
    history.
 6. **Duplicates the match can't see**: a tagged card file is compared only with server songs of its
    normalised title, so a file whose title tag differs from the server's shows twice even at equal
-   size.
+   size. No wider rule is safe enough to add: the server reads its titles from the same tags, so a
+   byte-identical file rarely differs by title; equal size, suffix and length across titles could
+   merge two CBR MP3s of one length, whose sizes differ only by their tags; album, track and length
+   without the title would merge editions that order a disc differently (the tag layer has no disc
+   number); and the MusicBrainz id across titles means reading every card file's tags at each
+   match. A missed duplicate shows twice; a wrong merge hides a server song.

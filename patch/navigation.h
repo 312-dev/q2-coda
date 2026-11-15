@@ -463,6 +463,8 @@ void reveal(menu_t *m, int id, int immediate);
 void row_meta(void *w);
 void *staged_music(int (*query)(void *), void *arg, int *count);
 int usable(void);
+#define LIBRARY_MUSIC 1 /* all_songs' music: spoken tracks left out, the server's songs beside */
+#define LIBRARY_ALL 2   /* every card song, and the server's */
 int all_songs(void *music);
 long clock_back(long long wall);
 void text_inks(void *w);
@@ -711,6 +713,7 @@ void stream_mark_paint(void *w, void *canvas); /* home.c: OLED's Streaming rows'
 extern void *stream_mark_views[2];             /* home.c: the lists whose rows it marks */
 int rate_keep(int album, unsigned key, int n);
 int rate_kept(int album, unsigned key);
+unsigned rate_song_key(void *r); /* a server song's offline copy: its row's */
 int rate_key(void *top, unsigned key);
 int rate_open(void);
 int rate_saved(int k);
