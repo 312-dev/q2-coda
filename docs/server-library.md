@@ -355,4 +355,9 @@ Library; a Q2 has 128 MB, so this wants checking on a device. Every job copies t
    history.
 6. **Duplicates the match can't see**: a tagged card file is compared only with server songs of its
    normalised title, so a file whose title tag differs from the server's shows twice even at equal
-   size.
+   size. No wider rule is safe enough to add: the server reads its titles from the same tags, so a
+   byte-identical file rarely differs by title; equal size, suffix and length across titles could
+   merge two CBR MP3s of one length, whose sizes differ only by their tags; album, track and length
+   without the title would merge editions that order a disc differently (the tag layer has no disc
+   number); and the MusicBrainz id across titles means reading every card file's tags at each
+   match. A missed duplicate shows twice; a wrong merge hides a server song.
