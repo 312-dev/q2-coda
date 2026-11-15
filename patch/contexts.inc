@@ -34,6 +34,7 @@
 { "tidal_downloads", CTX_DYNAMIC, 0 }, /* runtime window (patch/library_lists.c) */
 { "app_songs", CTX_DYNAMIC, 0 },       /* runtime window (patch/library_lists.c) */
 { "addon_page", CTX_DYNAMIC, 0 },      /* runtime window (patch/addon.c) */
+{ "artistrows_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/library_artist.c) */
 { "battery_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/battery.c) */
 { "carremote_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/coda_rc_shim.c) */
 { "carpair_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/coda_rc_shim.c) */

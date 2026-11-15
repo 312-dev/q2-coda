@@ -3124,6 +3124,7 @@ int ringnav_paint(void *w, void *canvas) {
         if (bar) paint_scrollbar(canvas, bar, table);
     }
     addon_paint(w, canvas);
+    artist_local_paint(w, canvas);
     peq_paint(w, canvas);
     battery_paint(w, canvas);
     if (NP_VISUALIZER) visualizer_paint(w, canvas);
@@ -6517,6 +6518,7 @@ static const char *bar_title_of(void *win, void **label) {
     if (!tk_strcmp(name, "usbmode_page")) return "Q2 Pod";
     if (!tk_strcmp(name, "search_dialog")) return "Search"; /* stock's toolbar has no label */
     if (!tk_strcmp(name, "statusbar_dialog")) return "Quick Settings";
+    if (artist_local_on(win)) return ""; /* the design's artist page: the header names it */
     void *nav = widget_lookup(win, "view_navbar", 1);
     if (nav) {
         for (int i = 0, k = widget_count_children(nav); i < k && !*label; ++i) {
@@ -8930,7 +8932,9 @@ static int artist_album(void *all, void *r) {
 }
 extern int coverflow_artist(void *albums);
 extern void coverflow_by_year(void *albums);
-static int artist_songs(void *unused) {
+/* The artist page's songs, as its Songs tab lists them (staged_music: with Local + Server, the
+ * server library's too); also library_artist.c's. */
+int artist_songs(void *unused) {
     return (I(artist_type, 0) == 1 ? getMusicByAlbumArtist : getMusicBySonger)(
         g_local_classinfo_save[0xa] ? (const char *)0
                                     : (const char *)g_local_classinfo_save + 0x10d);
@@ -9031,6 +9035,10 @@ static int artist_list(int tab) {
      * Artist", as Songs' rows say, not glibc's "(null)" */
     if (!strcmp((const char *)ARTIST_TITLE, "(null)"))
         getFormatString("player_unknown", (char *)ARTIST_TITLE, 0x200);
+    if (artist_local()) { /* OLED's: the design's page in place of the tabs (library_artist.c) */
+        artist_keys_free();
+        return n;
+    }
     artist_bar();
     artist_keys_free();
     if (tab != 1 || n <= 0 || !(st.art_keys = calloc((unsigned)n, sizeof(char *)))) return n;
@@ -10682,7 +10690,8 @@ static int home_cf_hold(void *top) {
  * Internet Radio station it is the favourite toggle, on a Spotify track Add to Queue (its reply
  * toasts), on a card app's row its hold op (addon_hold: a Deezer list downloaded whole), in Quick
  * Settings (not OLED's) the wheel's brightness/volume switch, on View Queue's shuffle list
- * Play Next (un_hold), the release latched as the queue menu's. A held Previous or Next that
+ * Play Next (un_hold), on a Library artist's page under OLED nothing (artist_local_on: its rows
+ * are no showlist records), the release latched as the queue menu's. A held Previous or Next that
  * scans (seek_held) and Centre held on OLED's lock window (lockscreen_hold) stop first. */
 int ringnav_keylong(void *ctx, void *event) {
     if (event && ple_key((unsigned)I(event, EVENT_KEY), 3)) return STOP;
@@ -10698,7 +10707,8 @@ int ringnav_keylong(void *ctx, void *event) {
     void *top = window_manager_get_top_window(window_manager());
     const char *fav = radio_hold(top);
     if (!fav) fav = quick_wheel_toggle(top);
-    int taken = fav || spot_hold(top) || addon_hold(top) || un_hold(top) || home_cf_hold(top);
+    int taken = fav || spot_hold(top) || addon_hold(top) || un_hold(top) || home_cf_hold(top) ||
+                artist_local_on(top);
     if (!taken && qm_hold()) return STOP;
     /* Stock has no Play/Pause hold, so its release would play or pause: Classic's does nothing. */
     if (taken || (usable() && classic_pages())) {

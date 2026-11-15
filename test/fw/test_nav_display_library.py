@@ -3109,3 +3109,66 @@ def test_cover_flow_for_a_page_no_longer_on_top_drops_its_albums(fw, st, stand_i
     run(timers[0])
     assert [a[0] & 0xffffffff for _, a in fw.calls('fw_deque_destroy')[destroyed:]] == [pending]
     assert page.win.props['anim_hint'] == b'htranslate'
+
+
+def oled_artist(fw, st, stand_in, records, view=b'1'):
+    """An artist page under OLED's set: its page, the Ui and the artist's songs and albums tab as queen's."""
+    from test_nav_hold import use_set
+    ui = Ui(fw)
+    page = ArtistPage(fw, ui)
+    fw.mock('widget_factory_create_widget', lambda f, kind, parent, x, y, w, *_: ui.new(C.string_at(kind).decode(), parent, x, y, w, 0))
+    for kind in ('scroll_view', 'list_view', 'list_item', 'hscroll_label', 'image', 'button'):  # page_list's and the pair's
+        fw.mock(f'{kind}_create', lambda parent, x, y, w, h, *_, k=kind: ui.new(k, parent, x, y, w, h))
+    use_set(st, 'oled')
+    rows, songs = queen(records)
+    artist(fw, stand_in, records, rows, songs, view=view)
+    return ui, page
+
+
+def texts(w):
+    """Every widget under w: (its text or name, its props)."""
+    for c in w.children:
+        yield c
+        yield from texts(c)
+
+
+def test_under_oled_an_artists_page_is_drawn_as_the_design(fw, st, stand_in, records):
+    """The tabs go and the page holds the header (its counts from the artist's songs), Shuffle alone and the
+    Albums and All Songs rows with their counts; no Top Songs without a counted play, no Radio, and no Cover Flow
+    over it whatever Artist View says."""
+    ui, page = oled_artist(fw, st, stand_in, records)
+    assert fw.fn('ringnav_artist_list', C.c_int, C.c_int)(1) == 4
+    assert not page.tab.visible and not page.nav.visible
+    assert fw.fn('artist_local_on', C.c_int, C.c_void_p)(page.win.addr) == 1
+    made = list(texts(page.win))
+    head = [w for w in made if '_ar_name' in w.props]
+    assert [(w.props['_ar_name'], w.props['_ar_sub']) for w in head] == [(b'Queen', b'3 albums \xc2\xb7 4 songs')]
+    assert len([w for w in made if '_ar_left' in w.props]) == 1  # Shuffle alone
+    assert [(w.children[0].text, w.props.get('_ar_count')) for w in made if w.kind == 'list_item'] == \
+        [('Albums', b'3'), ('All Songs', b'4')]
+    assert not st('art_cf_veil', C.c_void_p).value and not fw.calls('widget_set_opacity')
+    fw.fn('ringnav_artist_list', C.c_int, C.c_int)(0)  # the songs tab's load: the page stays as drawn
+    assert list(texts(page.win)) == made
+
+
+def test_a_lone_shuffle_is_one_stop_above_the_rows(fw, st, stand_in, records):
+    ui, page = oled_artist(fw, st, stand_in, records)
+    fw.fn('ringnav_artist_list', C.c_int, C.c_int)(1)
+    rows = next(w for w in texts(page.win) if w.kind == 'scroll_view')
+    key = fw.fn('pair_key', C.c_int, C.c_void_p, C.c_void_p, C.c_int)
+    holds = fw.fn('pair_holds', C.c_int, C.c_void_p)
+    assert holds(rows.addr)  # the page opens on Shuffle
+    assert key(page.win.addr, rows.addr, -1) == 1 and holds(rows.addr)  # nothing above it
+    rows.props['_ringnav_index'] = 1  # a row the stock page's position memory put back
+    assert key(page.win.addr, rows.addr, 1) == 1 and not holds(rows.addr)
+    assert rows.props['_ringnav_index'] == 0  # down off Shuffle: the first row
+    assert key(page.win.addr, rows.addr, -1) == 1 and holds(rows.addr)  # and up from it: Shuffle again
+
+
+def test_other_sets_keep_the_artist_pages_tabs(fw, st, stand_in, records):
+    ui = Ui(fw)
+    page = ArtistPage(fw, ui)
+    rows, songs = queen(records)
+    artist(fw, stand_in, records, rows, songs, view=b'0')
+    fw.fn('ringnav_artist_list', C.c_int, C.c_int)(1)
+    assert page.tab.visible and not fw.fn('artist_local_on', C.c_int, C.c_void_p)(page.win.addr)

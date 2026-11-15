@@ -807,6 +807,12 @@ void modal_playlist_more(void *win);
 int pair_key(void *top, void *w, int dir);
 int pair_holds(void *w);
 void artist_cap(void *bar, void *canvas);
+/* library_artist.c: a Library artist's page under the inset modal's set (artistinfo_page) */
+int artist_local(void);
+int artist_local_on(void *win);
+void artist_local_paint(void *w, void *canvas);
+int artist_songs(void *unused);  /* navigation.c: the artist page's songs query */
+void *plays_ranked(void *songs); /* library_lists.c */
 /* song_sort.c: Songs' order under the inset modal's Sort picker */
 enum { SORT_TITLE, SORT_ARTIST, SORT_ALBUM, SORT_ADDED, SORT_N };
 int song_sort(void);

@@ -1,7 +1,8 @@
 /* A theme's one-line song rows (SONGS_INLINE, docs/oled-design.md#song-rows): a song plays in
  * place, so its row has no chevron, and what stands beside the title depends on the list. A mixed
  * list (Songs, a genre's songs: anything stock opens on Songs' page) shows the artist after the
- * title; a list reached through an artist (artistinfo_page, their songs) shows none; an album
+ * title; a list reached through an artist (artistinfo_page, their songs) shows none (its page
+ * drawn as the design's, library_artist.c, has no song list); an album
  * (albuminfo_page, and an album's tracks in Cover Flow) shows each track's number in a column
  * before the title and its length on the right column; Folder view (folder_page) reads as an album
  * too (folder_row). Song Artist and Song Length, the theme's own options, change that.
@@ -28,7 +29,7 @@ int song_list(void *w) {
     void *win = window_of(w);
     const char *name = win ? widget_get_prop_str(win, "name", "") : "";
     return !tk_strcmp(name, "allmusic_page")     ? SONGS_MIXED
-           : !tk_strcmp(name, "artistinfo_page") ? SONGS_ARTIST
+           : !tk_strcmp(name, "artistinfo_page") ? (artist_local_on(win) ? 0 : SONGS_ARTIST)
            : !tk_strcmp(name, "albuminfo_page")  ? SONGS_ALBUM
            : !tk_strcmp(name, "folder_page")     ? SONGS_FOLDER
            : coverflow_tracks(win)               ? SONGS_ALBUM
