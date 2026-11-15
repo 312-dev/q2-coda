@@ -10,6 +10,7 @@ static struct {
     unsigned *rates, *album_rates;
     void *rate_fav, *rate_ctx, *rate_badge;
     int rate_shown;                     /* the badge's hearts plus 1, 0 for a new badge */
+    unsigned rate_row;                  /* the copy's row key whose heart rate_row_heart filled */
     int rate_pick, rate_was, rate_held; /* the hearts picked, those the picker opened on */
     int rate_armed;                     /* a press came down on the picker: its release is a tap */
     unsigned rate_at;                   /* when a hold opened the picker (never 0), else 0 */
@@ -81,6 +82,7 @@ int rate_saved(int k) {
 /* r's My Fav changed to on: the card app whose favdir holds it is told (addon_fav_path), as for
  * Now Playing's heart and the queue menu's Favourites rows. 0 when it wasn't, said in a toast. */
 int fav_told(void *r, int on) {
+    catalogue_fav_changed();
     if (!r || addon_fav_path(P(r, REC_PATH), on)) return 1;
     toast("Favourite not sent to the app");
     return 0;
@@ -116,6 +118,10 @@ void rate_album_favs(void *album, int on) {
  * and in the Library (docs/server-library.md#ratings-and-favourites). */
 unsigned rate_song_key(void *r) { return catalogue_song_key(r, listen_key(r)); }
 
+/* r's My Fav: stock's, by its own path, or a server song's Stream Cache copy's by its server row
+ * (catalogue_row_fav), where five hearts from the server put it. */
+int rate_fav(void *r) { return checkFavExist(r) || catalogue_row_fav(r) > 0; }
+
 /* The playing local track (the queue menu's types), or 0. */
 static void *rate_track(void) {
     unsigned at, n, type = (unsigned)MCL(MCL_TYPE);
@@ -139,16 +145,37 @@ static void np_image(void *w, const char *glyph) {
         widget_invalidate_force(w, (void *)0);
     }
 }
+/* play_fav, or the theme's own full heart (np_bar.c np_glyphs: "<art>np_fav") */
+static int heart_full(const char *image) {
+    unsigned k = (unsigned)strlen(image);
+    return k >= 4 && !tk_strcmp(image + k - 4, "_fav");
+}
+static void heart_set(const char *image) {
+    image_base_set_image(ra.rate_fav, image);
+    widget_invalidate_force(ra.rate_fav, (void *)0);
+}
+/* Stock draws the heart from the playing file's own My Fav as a track starts. A server song's
+ * Stream Cache copy is a favourite by its row instead (rate_fav), so its empty heart (stock's
+ * play_unfav or the theme's np_unfav_*) is filled here, and emptied again once the row is out of
+ * My Fav (a change from the server); ra.rate_row says which copy's heart this filled. */
+static void rate_row_heart(void *r) {
+    int row = r ? catalogue_row_fav(r) : -1;
+    unsigned key = row >= 0 ? rate_song_key(r) : 0;
+    const char *image = widget_get_prop_str(ra.rate_fav, "image", "");
+    if (ra.rate_row != key) ra.rate_row = 0; /* another track: stock's heart */
+    if (row > 0 && !heart_full(image) && strstr(image, "unfav"))
+        heart_set("play_fav"), ra.rate_row = key;
+    else if (!row && ra.rate_row && heart_full(image))
+        heart_set("play_unfav"), ra.rate_row = 0;
+}
 /* The badge on an empty heart: the playing track's 1-4 hearts, hidden for none and on a full heart
  * (My Fav, whatever was kept before). */
 static void rate_badge(void) {
     if (!ra.rate_badge) return;
     void *r = rate_track();
+    rate_row_heart(r);
     int n = r ? rate_kept(0, rate_song_key(r)) : 0;
-    /* play_fav, or the theme's own full heart (np_bar.c np_glyphs: "<art>np_fav") */
-    const char *image = widget_get_prop_str(ra.rate_fav, "image", "");
-    unsigned k = (unsigned)strlen(image);
-    if (n && k >= 4 && !tk_strcmp(image + k - 4, "_fav")) n = 0;
+    if (n && heart_full(widget_get_prop_str(ra.rate_fav, "image", ""))) n = 0;
     /* each set repaints the badge, and this runs every 500 ms: only a change (AWTK's "text" is
      * a wide string widget_get_prop_str doesn't read) */
     if (ra.rate_shown == n + 1) return;
@@ -283,10 +310,16 @@ static void rate_save(void *win) {
     }
     void *r = rate_track();
     if (!r) return;
-    int fav = checkFavExist(r) != 0;
+    int fav = checkFavExist(r) != 0, row = catalogue_row_fav(r) > 0;
     if (!rate_saved(rate_keep(0, rate_song_key(r), n))) return;
     catalogue_rated(r, n); /* to the server too (docs/server-library.md#ratings-and-favourites) */
-    if ((n == 5) != fav) FAV_CLICK(ra.rate_ctx, (void *)0), ratings_copy_due(), fav_told(r, n == 5);
+    ra.rate_row = 0;
+    if (n != 5 && row) catalogue_row_unfav(r); /* a copy's row: stock's toggle would add the copy */
+    if (n == 5 ? !fav && !row : fav)
+        FAV_CLICK(ra.rate_ctx, (void *)0);
+    else if (n != 5 && row)
+        heart_set("play_unfav");
+    if ((n == 5) != (fav || row)) ratings_copy_due(), fav_told(r, n == 5);
     rate_badge();
 }
 
@@ -356,7 +389,7 @@ int rate_show(void *win, int pick, unsigned album) {
 /* Now Playing's, on the playing track's rating. */
 int rate_open(void) {
     void *r = rate_track();
-    return r && rate_show(st.rate_win, checkFavExist(r) ? 5 : rate_kept(0, rate_song_key(r)), 0);
+    return r && rate_show(st.rate_win, rate_fav(r) ? 5 : rate_kept(0, rate_song_key(r)), 0);
 }
 
 /* The wheel, Centre and Return while the picker is up. */
@@ -405,11 +438,19 @@ static int rate_fav_click(void *ctx, void *event) {
     if (app == -3)
         toast("This app has no favourites"); /* an app's song without an item: not Tidal's */
     if (app != -1) return 0;
-    FAV_CLICK(ctx, event);
-    ratings_copy_due();
+    /* A heart filled by a copy's server row (rate_row_heart) is emptied by taking the row out:
+     * stock's toggle would put the copy in instead. */
     void *r = rate_track();
+    int row = r && catalogue_row_fav(r) > 0;
+    ra.rate_row = 0;
+    if (row && !checkFavExist(r))
+        heart_set("play_unfav");
+    else
+        FAV_CLICK(ctx, event);
+    ratings_copy_due();
     if (r) {
         int fav = checkFavExist(r) != 0;
+        if (row && !fav) catalogue_row_unfav(r);
         rate_keep(0, rate_song_key(r), 0), fav_told(r, fav);
         catalogue_rated(r, fav ? 5 : 0);
     }
@@ -442,6 +483,8 @@ void rate_bind(void *win) {
     if (!ra.rate_ctx) return;
     st.rate_win = win;
     ra.rate_fav = fav;
+    ra.rate_row = 0;
+    catalogue_fav_changed(); /* My Fav read again: stock's lists may have changed it meanwhile */
     widget_off_by_func(fav, EVT_CLICK, (void *)FAV_CLICK, ra.rate_ctx);
     widget_on(fav, EVT_CLICK, rate_fav_click, ra.rate_ctx);
     widget_on(fav, EVT_POINTER_DOWN, rate_down, (void *)0);

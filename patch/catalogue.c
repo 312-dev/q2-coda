@@ -128,6 +128,11 @@ static struct {
      * copy twice a second (ratings.c rate_badge). */
     unsigned long long row_path;
     unsigned row_gen, row_at;
+    /* catalogue_row_fav's last answer: the row asked (row_at), local_gen plus 1 and fav_gen when
+     * it was read, and whether the row's path was in myfav. fav_gen moves with each My Fav change
+     * the Q2 makes and each Now Playing open (catalogue_fav_changed). */
+    unsigned fav_row, fav_local, fav_seen, fav_gen;
+    int fav_on;
 } cat __attribute__((section(".scratch")));
 
 static unsigned long long fnv64(const char *s) {
@@ -1887,6 +1892,42 @@ static void fav_set(const char *path, int on) {
     sqlite3_exec(db, sql, 0, 0, 0);
     sqlite3_close(db);
 }
+/* My Fav's contents may have changed: catalogue_row_fav reads the table again. */
+void catalogue_fav_changed(void) { ++cat.fav_gen; }
+static int fav_found(void *ctx, int n, char **v, char **c) {
+    *(int *)ctx = 1;
+    return 0;
+}
+/* Whether r, a server song's Stream Cache copy, is a favourite by its server row: the row's path
+ * in stock's myfav, where five hearts from the server (ratings_in) or the queue menu on the
+ * Library's row put it. Stock checks the copy's own path, which isn't there. -1 when r is
+ * no copy. Now Playing asks twice a second (ratings.c rate_badge): the answer is kept until the
+ * row, the index or My Fav changes. */
+int catalogue_row_fav(void *r) {
+    const cat_ent *e = cat_row_of(r);
+    if (!e) return -1;
+    unsigned row = (unsigned)(e - cat.ix.e) + 1;
+    if (cat.fav_row != row || cat.fav_local != cat.local_gen + 1 || cat.fav_seen != cat.fav_gen) {
+        void *db = 0;
+        char sql[640], *o = sql, *end = sql + sizeof sql - CAT_SLACK;
+        int on = 0;
+        PUT(o, end, "select 1 from myfav where fileurl=");
+        o = sq(o, end, ix_str(&cat.ix, e->path)), PUT(o, end, " limit 1");
+        if (o >= end || stock_db_open("/mnt/data/database.db", &db)) return 0; /* asked again */
+        *o = 0;
+        sqlite3_exec(db, sql, fav_found, &on, 0);
+        sqlite3_close(db);
+        cat.fav_row = row, cat.fav_local = cat.local_gen + 1, cat.fav_seen = cat.fav_gen;
+        cat.fav_on = on;
+    }
+    return cat.fav_on;
+}
+/* Takes r's server row out of My Fav (r a Stream Cache copy; any other record, nothing). */
+void catalogue_row_unfav(void *r) {
+    const cat_ent *e = cat_row_of(r);
+    if (e) fav_set(ix_str(&cat.ix, e->path), 0), catalogue_fav_changed();
+}
+
 /* ratings.in's lines applied as a rating made here (rate_keep by the key, My Fav for five by the
  * path), unless the Q2's own change to that song, still in ratings.out, is newer. The file is
  * renamed before it is read, so lines the app writes meanwhile go to a new ratings.in, not lost. */
@@ -1925,7 +1966,7 @@ static void ratings_in(int slot) {
     }
     for (unsigned i = 0; i < k.n; ++i) {
         rate_keep(0, k.l[i].key, k.l[i].hearts);
-        if (k.l[i].path) fav_set(k.l[i].path, k.l[i].hearts == 5);
+        if (k.l[i].path) fav_set(k.l[i].path, k.l[i].hearts == 5), catalogue_fav_changed();
         free(k.l[i].path);
     }
     free(k.l), free(raw), free(out);

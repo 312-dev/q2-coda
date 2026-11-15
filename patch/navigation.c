@@ -9977,6 +9977,14 @@ static int qm_edit_due(void *edit, void *event) {
     timer_add(qm_edit_run, edit, 0);
     return 0;
 }
+/* A song's My Fav changed from the menu, kept as Now Playing's heart keeps it (ratings.c
+ * rate_fav_click): its 1-4 hearts go, the card's copy of the ratings is due, and the server is told
+ * (catalogue_rated, by the row's key and sid for a server song's Stream Cache copy). */
+static void qm_rated(void *r, int hearts) {
+    rate_keep(0, rate_song_key(r), 0);
+    ratings_copy_due();
+    catalogue_rated(r, hearts);
+}
 
 static int qm_run(const void *unused) {
     st.qm_timer = 0;
@@ -10039,11 +10047,12 @@ static int qm_run(const void *unused) {
     } else if (r && a == QA_FAV) { /* tags a folder file as batch-select's Add to My Fav does */
         qm_select();
         batch_add_file(cls, 0xf00a, qm_list(), P(p_vector_select_record, 0), 0);
-        ratings_copy_due();
+        qm_rated(r, 5);
         if (fav_told(r, 1) && feedback_oled()) toast("Added to Favorites");
     } else if (r && a == QA_UNFAV) {
         deleteMusicFromFav(r);
-        ratings_copy_due();
+        catalogue_row_unfav(r); /* a server song's Stream Cache copy: its row's too (rate_fav) */
+        qm_rated(r, 0);
         if (fav_told(r, 0) && feedback_oled()) toast("Removed from Favorites");
         if (cls == 0xf00a)
             g_delete_flag = 1;          /* My Fav reloads, as Now Playing's heart (0x53cafc) */
@@ -10284,7 +10293,7 @@ static int qm_open(const void *unused) {
         acts[n++] = QA_QUEUE;
     }
     if (!song) acts[n++] = QA_SHUFFLE;
-    if (song) acts[n++] = checkFavExist(r) ? QA_UNFAV : QA_FAV;
+    if (song) acts[n++] = rate_fav(r) ? QA_UNFAV : QA_FAV;
     /* an album's own hearts, 5 its favourite */
     unsigned aid = song ? 0 : qm_album_id(r);
     int album_hearts = aid ? rate_kept(1, aid) : 0;
@@ -10379,7 +10388,7 @@ static int qm_open(const void *unused) {
         void *label = hscroll_label_create(item, 30, 0, 266, pitch);
         widget_use_style(label, "s_scrlabel_white24l");
         if (acts[i] == QA_RATE) {
-            int h = aid ? album_hearts : checkFavExist(r) ? 5 : rate_kept(0, rate_song_key(r));
+            int h = aid ? album_hearts : rate_fav(r) ? 5 : rate_kept(0, rate_song_key(r));
             const char *row = aid ? "Rate Album" : "Rate";
             char hs[16];
             tk_snprintf(rated, sizeof rated, h ? "%s  %s" : "%s", row, hearts_text(hs, h));
