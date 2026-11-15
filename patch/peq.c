@@ -20,8 +20,8 @@ void peq_default(peq_preset *p) {
 }
 
 static int valid_band(const peq_band *b) {
-    return b->enabled >= 0 && b->enabled <= 3 && b->type >= 0 && b->type <= 2 &&
-           between(b->frequency, 20, 20000) && between(b->gain, -24, 24) && between(b->q, 0.1, 10);
+    return b->enabled >= 0 && b->enabled <= 3 && b->type >= 0 && b->type < PEQ_TYPES &&
+           between(b->frequency, 20, 20000) && between(b->gain, -24, 24) && between(b->q, 0.1, PEQ_Q_MAX(b->type));
 }
 
 int peq_valid(const peq_preset *p) {
@@ -181,17 +181,23 @@ int peq_parse(const char *text, unsigned size, peq_preset *out, peq_error *error
         if (is(t[k], "ON")) b.enabled = scope;
         else if (!is(t[k], "OFF")) { skip(error, line, "expected ON or OFF", 0, 0); continue; }
         ++k;
+        /* APO's names (BiQuadFilterFactory.cpp): LP and LPQ, HP and HPQ are the same filter. */
+        static const char names[][6] = {"PK", "PEQ", "Modal", "LS", "LSC", "HS", "HSC", "LP", "LPQ", "HP", "HPQ", "BP", "NO", "AP"};
+        static const signed char kinds[] = {PEQ_PK, PEQ_PK, PEQ_PK, PEQ_LS, PEQ_LS, PEQ_HS, PEQ_HS,
+                                            PEQ_LP, PEQ_LP, PEQ_HP, PEQ_HP, PEQ_BP, PEQ_NO, PEQ_AP};
         const char *type = t[k++];
-        if (is(type, "PK") || is(type, "PEQ") || is(type, "Modal")) b.type = 0;
-        else if (is(type, "LS") || is(type, "LSC")) b.type = 1;
-        else if (is(type, "HS") || is(type, "HSC")) b.type = 2;
-        else {
+        b.type = -1;
+        for (unsigned j = 0; j < sizeof kinds; ++j) if (is(type, names[j])) b.type = kinds[j];
+        if (b.type < 0) {
             if (b.enabled && !is(type, "None")) skip(error, line, "unsupported filter type", type, " filter");
             continue;
         }
-        int corner = !type[2], bad = 0; /* APO: LS/HS take a corner frequency, LSC/HSC the centre */
+        int shelf = b.type == PEQ_LS || b.type == PEQ_HS, gained = PEQ_GAINED(b.type);
+        int corner = shelf && !type[2], bad = 0; /* APO: LS/HS take a corner frequency, LSC/HSC the centre */
+        /* APO's defaults without a Q: 0.7071 for the passes (b.q's start), 30 for a notch. */
+        if (b.type == PEQ_NO) b.q = 30;
         /* A shelf's slope, "LS 6dB" or "LSC 12 dB", comes first; then each named value. */
-        if (b.type && k + 1 < n && is(t[k+1], "dB") && peq_number(t[k], &slope)) k += 2;
+        if (shelf && k + 1 < n && is(t[k+1], "dB") && peq_number(t[k], &slope)) k += 2;
         while (k < n && !bad) {
             if (is(t[k], "Fc") && k + 2 < n && is(t[k+2], "Hz")) fc = peq_number(t[k+1], &b.frequency), bad = !fc, k += 3;
             else if (is(t[k], "Gain") && k + 2 < n && is(t[k+2], "dB")) has_gain = 1, bad = !peq_number(t[k+1], &gain), k += 3;
@@ -199,19 +205,20 @@ int peq_parse(const char *text, unsigned size, peq_preset *out, peq_error *error
             else if (is(t[k], "BW") && k + 2 < n && is(t[k+1], "Oct")) bad = !peq_number(t[k+2], &bw) || bw <= 0, k += 3;
             else bad = 1;
         }
-        b.gain = gain;
-        /* APO takes bandwidth over Q on a peak, at the rate playing; here at 48 kHz, as the
-         * graph and Auto's figure: Q = 1 / (2 sinh(ln 2 / 2 * BW * w / sin w)). A shelf ignores it. */
-        if (!bad && fc && has_gain && !b.type && bw && between(b.frequency, 20, 20000)) {
+        b.gain = gained ? gain : 0; /* APO ignores a pass's, notch's or all-pass's gain, and BP's plays none */
+        /* APO takes bandwidth over Q, at the rate playing; here at 48 kHz, as the graph and
+         * Auto's figure: Q = 1 / (2 sinh(ln 2 / 2 * BW * w / sin w)). A shelf ignores it. */
+        if (!bad && fc && !shelf && bw && between(b.frequency, 20, 20000)) {
             double w = 6.283185307179586 * b.frequency / 48000, x = bw / 2 * w / sin(w);
             b.q = 1 / (pow(2, x) - pow(2, -x));
             has_q = 1;
         }
-        if (bad || !fc || !has_gain || (!b.type && !has_q)) {
+        /* A gain on a peak and shelves; a Q (or BW) on a peak and an all-pass, as APO asks */
+        if (bad || !fc || (gained && !has_gain) || ((b.type == PEQ_PK || b.type == PEQ_AP) && !has_q)) {
             if (b.enabled) skip(error, line, "expected Fc, Gain and a peak's Q", 0, 0);
             continue;
         }
-        if (b.type && valid_band(&b)) {
+        if (shelf && valid_band(&b)) {
             /* Match Equalizer APO: a slope S (12 dB is 1), or 0.9 with neither it nor a Q, at Fc;
              * LS and HS with either shift a corner to the centre. inverse is 1/S. */
             double a = pow(10, b.gain / 40), ab = a + 1 / a, inverse = 1 / (slope ? slope / 12 : 0.9);
@@ -219,7 +226,7 @@ int peq_parse(const char *text, unsigned size, peq_preset *out, peq_error *error
             else b.q = 1 / __builtin_sqrt(ab * (inverse - 1) + 2);
             if (corner && (has_q || slope)) {
                 double f = pow(10, __builtin_fabs(b.gain) / 80 * inverse);
-                b.frequency = b.type == 1 ? b.frequency * f : b.frequency / f;
+                b.frequency = b.type == PEQ_LS ? b.frequency * f : b.frequency / f;
                 /* The shift can leave 20..20000 Hz; clamp instead of leaving the band out. */
                 if (b.frequency > 20000) b.frequency = 20000;
                 if (b.frequency < 20) b.frequency = 20;
@@ -310,11 +317,13 @@ static void decimal(char *s, double v) {
 
 /* Equalizer APO's own lines (docs/internals.md#presets-on-the-card): Preamp, a balance as one
  * side's Preamp, a Channel line where a band's side changes, and the bands as numbered Filter
- * lines, PK, LSC and HSC with Q, since a band's frequency is the centre. OFF bands stay, for
- * peq_parse; APO skips them. Only Auto has no APO form. */
+ * lines with Q: PK, LSC and HSC with their Gain, since a band's frequency is the centre, then LPQ,
+ * HPQ, BP, NO and AP without one. OFF bands stay, for peq_parse; APO skips them. Only Auto has no
+ * APO form. */
 unsigned peq_export(const peq_preset *p, char *out, unsigned size) {
-    static const char *const types[] = {"PK", "LSC", "HSC"}, *const sides[] = {"", "all", "L", "R"};
-    char a[32], b[32], c[32];
+    static const char *const types[] = {"PK", "LSC", "HSC", "LPQ", "HPQ", "BP", "NO", "AP"},
+                      *const sides[] = {"", "all", "L", "R"};
+    char a[32], b[32], c[32], g[48];
     unsigned n = 0;
     int scope = 1;
     if (!peq_valid(p)) return 0;
@@ -329,9 +338,11 @@ unsigned peq_export(const peq_preset *p, char *out, unsigned size) {
         if (d->enabled && d->enabled != scope)
             n += snprintf(out + n, size - n, "Channel: %s\n", sides[scope = d->enabled]);
         decimal(a, d->frequency), decimal(b, d->gain), decimal(c, d->q);
+        if (PEQ_GAINED(d->type)) snprintf(g, sizeof g, " Gain %s dB", b);
+        else g[0] = 0;
         if (n < size)
-            n += snprintf(out + n, size - n, "Filter %d: %s %s Fc %s Hz Gain %s dB Q %s\n", i + 1,
-                          d->enabled ? "ON" : "OFF", types[d->type], a, b, c);
+            n += snprintf(out + n, size - n, "Filter %d: %s %s Fc %s Hz%s Q %s\n", i + 1,
+                          d->enabled ? "ON" : "OFF", types[d->type], a, g, c);
     }
     return n < size ? n : 0;
 }
@@ -422,7 +433,9 @@ static void level(peq_engine *e, double gain, double balance) {
     if (balance < 0) e->gain[1] *= pow(10, balance / 20);
 }
 
-/* RBJ peaking and Q-form shelves. All design work is outside the PCM callback. */
+/* The RBJ Audio EQ Cookbook's peaking, Q-form shelves, low and high pass, band pass (0 dB peak),
+ * notch and all pass, as Equalizer APO's BiQuad.cpp designs them. All design work is outside the
+ * PCM callback; the per-sample work is the same biquad whatever the type. */
 int peq_compile(const peq_preset *p, int rate, peq_engine *out) {
     peq_engine e;
     memset(&e, 0, sizeof(e));
@@ -431,18 +444,27 @@ int peq_compile(const peq_preset *p, int rate, peq_engine *out) {
     e.bypass = p->bypass;
     for (int i = 0; i < PEQ_BANDS; ++i) {
         e.c[i].b0 = 1;
-        if (i >= p->count || !p->bands[i].enabled || !p->bands[i].gain) continue;
+        /* A peak or shelf of no gain is identity; the other types act at any gain */
+        if (i >= p->count || !p->bands[i].enabled || (PEQ_GAINED(p->bands[i].type) && !p->bands[i].gain)) continue;
         e.used = i + 1;
         if (p->bands[i].enabled > 1) e.only[i] = p->bands[i].enabled - 1;
         const peq_band *b = &p->bands[i];
-        if (b->frequency >= rate * 0.5) continue; /* not representable at this rate; skip only this band */
+        /* Not representable at this rate; skip only this band. ponytail: a high or band pass up
+         * there would silence the band's channels, and passes everything instead (rates under 40 kHz
+         * only, since Fc stops at 20 kHz). */
+        if (b->frequency >= rate * 0.5) continue;
         double a = pow(10, b->gain / 40), w = 6.283185307179586 * b->frequency / rate;
         double c = cos(w), alpha = sin(w) / (2 * b->q), r = 2 * __builtin_sqrt(a) * alpha;
-        double b0, b1, b2, a0, a1, a2;
-        if (!b->type) {
+        double b0, b1, b2, a0 = 1 + alpha, a1 = -2 * c, a2 = 1 - alpha; /* the gainless types' poles */
+        if (b->type == PEQ_LP) b0 = b2 = (1 - c) / 2, b1 = 1 - c;
+        else if (b->type == PEQ_HP) b0 = b2 = (1 + c) / 2, b1 = -(1 + c);
+        else if (b->type == PEQ_BP) b0 = alpha, b1 = 0, b2 = -alpha;
+        else if (b->type == PEQ_NO) b0 = b2 = 1, b1 = a1;
+        else if (b->type == PEQ_AP) b0 = a2, b1 = a1, b2 = a0;
+        else if (b->type == PEQ_PK) {
             b0 = 1 + alpha * a; b1 = -2 * c; b2 = 1 - alpha * a;
             a0 = 1 + alpha / a; a1 = -2 * c; a2 = 1 - alpha / a;
-        } else if (b->type == 1) {
+        } else if (b->type == PEQ_LS) {
             b0 = a * ((a+1) - (a-1)*c + r); b1 = 2*a*((a-1) - (a+1)*c);
             b2 = a*((a+1) - (a-1)*c - r); a0 = (a+1) + (a-1)*c + r;
             a1 = -2*((a-1) + (a+1)*c); a2 = (a+1) + (a-1)*c - r;

@@ -57,7 +57,7 @@ void peq_attach(void) {
     if (s.mode == EQ_OFF || (s.mode = EQ_OFF, s.hold = 0, eq_save(&s))) peq_stock_eq(1);
 }
 
-enum { HOME, BAND, PRESETS, SAVES, CONFIRM, DELETES, PICK, ADJUST, STOCKS, RENAMES, NAMING };
+enum { HOME, BAND, PRESETS, SAVES, CONFIRM, DELETES, PICK, ADJUST, STOCKS, RENAMES, NAMING, TYPES };
 enum { BACK = 1000, APPLY, RESET, BYPASS, PER_OUTPUT, MENU, SAVE, ENABLE, TYPE, RAISE, LOWER, TYPED, CHANNEL, STEP,
        YES, CANCEL, DELETE, BALANCE, PREAMP, GAIN, /* these three open the picker, in picks[] order */
        FREQUENCY, QUALITY, /* and these two the value menu */ KEYBOARD, STOCK, FILE_PREV, FILE_NEXT, RENAME, NAMED };
@@ -86,6 +86,9 @@ static struct {
 } ui __attribute__((section(".scratch")));
 
 static const int steps[] = {1, 10, 100, 1000};
+/* A band's types (PEQ_*), as its row and the Type picker name them */
+static const char *const types[PEQ_TYPES] = {"Peaking",   "Low shelf", "High shelf", "Low pass",
+                                             "High pass", "Band pass", "Notch",      "All pass"};
 /* Wheel pickers in 0.5 dB rows: row i is first + step * i. Preamp's row 0 is Auto (first is unused there). */
 static const struct { double first, step; int rows; } picks[] = {{-12, 0.5, 49}, {12.5, -0.5, 74}, {24, -0.5, 97}};
 /* Simple, 3EQ (docs/internals.md#3eq): Low, Mid and High, -6 to +6 dB in 0.5 dB steps, on a view
@@ -548,6 +551,20 @@ static int apply(int on) {
 
 static void load(eq_state *s);
 static void e3_show(void);
+static int action(void *ctx, void *event);
+
+/* The Type picker's choice, as a click on the TYPES screen's row of it. The band's list comes back
+ * as a kept one (render), its row count given: on a new view without it, ringnav takes the first
+ * row once the panel has closed, not the Type row the list was left on. */
+static void type_picked(int i) {
+    if (ui.view && ui.screen == BAND) {
+        ui.kept[BAND][0] = widget_get_prop_int(ui.view, "_ringnav_index", 0) + 1;
+        ui.kept[BAND][1] = widget_get_prop_int(ui.view, "yoffset", 0);
+        ui.rendered = -1;
+    }
+    ui.screen = TYPES;
+    action((void *)(long)i, 0);
+}
 
 static int action(void *ctx, void *event) {
     int id = (int)(long)ctx;
@@ -567,11 +584,12 @@ static int action(void *ctx, void *event) {
     ui.status[0] = 0;
     ui.tabs = 0;
     /* Band edits keep the preamp on Auto (just enough cut for the boosts) only if it was there. */
-    int edit = (id >= ENABLE && id < STEP) || (id < 256 && ui.screen == PICK && ui.pick == GAIN);
+    int edit = (id >= ENABLE && id < STEP && id != TYPE) ||
+               (id < 256 && (ui.screen == TYPES || (ui.screen == PICK && ui.pick == GAIN)));
     if (id == BACK) {
         if (ui.screen == HOME) { navigator_back(); return 0; }
         if (ui.screen == PICK) ui.screen = ui.pick == GAIN ? BAND : HOME;
-        else if (ui.screen == ADJUST) ui.screen = BAND;
+        else if (ui.screen == ADJUST || ui.screen == TYPES) ui.screen = BAND;
         else if (ui.screen == NAMING) ui.screen = RENAMES;
         else ui.screen = ui.from_simple || ui.screen == BAND || ui.screen == PRESETS ? HOME : PRESETS;
     } else if (id == MENU) ui.screen = PRESETS;
@@ -597,7 +615,13 @@ static int action(void *ctx, void *event) {
     }
     else if (id == PER_OUTPUT) ringnav_eq_output_toggle();
     else if (id == ENABLE) b->enabled = !b->enabled;
-    else if (id == TYPE) b->type = (b->type + 1) % 3;
+    /* The Type picker: the inset modal's under a modal set (docs/oled-design.md#menus), else a
+     * screen of the types; either opens on the band's own. Under the modal the band's list is
+     * left as it is, no render, so a pick or Return finds it on the Type row. */
+    else if (id == TYPE) {
+        if (modal_set() && modal_pick((void *)0, types, PEQ_TYPES, b->type, type_picked)) return 0;
+        ui.screen = TYPES;
+    }
     else if (id == CHANNEL && b->enabled) b->enabled = b->enabled % 3 + 1; /* both, left, right */
     else if (id == STEP) ui.step = (ui.step + 1) % 4;
     else if (id == RAISE || id == LOWER || id == TYPED) {
@@ -605,7 +629,7 @@ static int action(void *ctx, void *event) {
         double *value = k ? &b->q : &b->frequency, step = k ? 0.05 : steps[ui.step];
         *value = id == TYPED ? ui.typed : *value + (id == RAISE ? step : -step);
         if (*value < (k ? 0.1 : 20)) *value = k ? 0.1 : 20;
-        if (*value > (k ? 10 : 20000)) *value = k ? 10 : 20000;
+        if (*value > (k ? PEQ_Q_MAX(b->type) : 20000)) *value = k ? PEQ_Q_MAX(b->type) : 20000;
     } else if (id == APPLY) {
         snprintf(ui.status, sizeof(ui.status), apply(0) ? "Applied" : "Apply failed; active EQ unchanged");
     } else if (id == RESET) {
@@ -636,6 +660,11 @@ static int action(void *ctx, void *event) {
             if (ui.pick == GAIN && !b->enabled) b->enabled = 1; /* picking a gain is using the band */
             ui.dirty = 1;
             ui.screen = ui.pick == GAIN ? BAND : HOME;
+        }
+        else if (ui.screen == TYPES && id < PEQ_TYPES) {
+            b->type = id;
+            if (b->q > PEQ_Q_MAX(id)) b->q = PEQ_Q_MAX(id); /* a notch's Q past the others' */
+            ui.screen = BAND;
         }
         else if (ui.screen == STOCKS && id < STOCK_N) {
             peq_preset p;
@@ -672,7 +701,7 @@ static int action(void *ctx, void *event) {
             }
         }
     }
-    if (edit) { /* ENABLE, TYPE, RAISE, LOWER, TYPED, CHANNEL and a picked gain */
+    if (edit) { /* ENABLE, RAISE, LOWER, TYPED, CHANNEL, a picked type and a picked gain */
         ui.dirty = 1;
         follow_auto();
     }
@@ -743,6 +772,11 @@ static int render(const void *unused) {
         offset = ui.kept[ui.screen][1];
         ui.kept[ui.screen][0] = 0;
         kept = 1;
+    } else if (ui.screen == TYPES) { /* opens on the band's type, centred as a picker's value */
+        selection = ui.draft.bands[ui.band].type;
+        offset = selection * rh - (rows - rh) / 2;
+        offset = offset < 0 ? 0 : offset > PEQ_TYPES * rh - rows ? PEQ_TYPES * rh - rows : offset;
+        if (offset < 0) offset = 0; /* a list tall enough for all eight */
     } else if (ui.screen == PICK) { /* opens on the nearest row to the current value (Auto if on it), centred */
         int last = picks[ui.pick - BALANCE].rows - 1;
         double r = (*picked() - picks[ui.pick - BALANCE].first) / picks[ui.pick - BALANCE].step + 0.5;
@@ -772,7 +806,6 @@ static int render(const void *unused) {
     if (graph) curve();
     char text[160], value[32];
     int n = 0;
-    static const char *const types[] = {"Peaking", "Low shelf", "High shelf"};
     /* No Back row: Return steps back on every screen (keyup). */
     if (ui.screen == HOME) {
         row(view, n++, ui.dirty ? "Apply changes" : "Nothing to apply", ui.dirty ? APPLY : -1);
@@ -795,7 +828,7 @@ static int render(const void *unused) {
             peq_band *b = &ui.draft.bands[i];
             snprintf(text, sizeof(text), "%d  %s %.0f Hz%s", i + 1, types[b->type], b->frequency,
                      (const char *[]){"", "", " L", " R"}[b->enabled]);
-            snprintf(value, sizeof(value), b->enabled ? "%+.1f dB" : "Off", b->gain);
+            snprintf(value, sizeof(value), !b->enabled ? "Off" : PEQ_GAINED(b->type) ? "%+.1f dB" : "On", b->gain);
             fit(row_dim(view, n++, text, value, i, (b->enabled ? 0 : DIM) | INTO | SMALL));
         }
     } else if (ui.screen == BAND) {
@@ -804,9 +837,13 @@ static int render(const void *unused) {
         if (ui.draft.count <= ui.band) ui.draft.count = ui.band + 1;
         list_toggle(row(view, n++, "", ENABLE), "Band", b->enabled);
         if (b->enabled) row_dim(view, n++, "Channels", (const char *[]){0, "Both", "Left", "Right"}[b->enabled], CHANNEL, 0);
-        row_dim(view, n++, "Type", types[b->type], TYPE, 0);
+        row_dim(view, n++, "Type", types[b->type], TYPE, INTO);
         snprintf(value, sizeof(value), "%.0f Hz", b->frequency); row_dim(view, n++, "Frequency", value, FREQUENCY, INTO);
-        snprintf(value, sizeof(value), "%+.1f dB", b->gain); row_dim(view, n++, "Gain", value, GAIN, INTO);
+        /* a pass, notch or all-pass has no gain to set */
+        if (PEQ_GAINED(b->type)) {
+            snprintf(value, sizeof(value), "%+.1f dB", b->gain);
+            row_dim(view, n++, "Gain", value, GAIN, INTO);
+        }
         snprintf(value, sizeof(value), "%.2f", b->q); row_dim(view, n++, "Q", value, QUALITY, INTO);
     } else if (ui.screen == ADJUST) {
         /* Row 0 names the value; it and the centre button open the keyboard on the edit over the
@@ -830,6 +867,8 @@ static int render(const void *unused) {
             void *shown = row(view, n++, text, i);
             if (ui.pick == PREAMP && !i) fit(shown);
         }
+    } else if (ui.screen == TYPES) {
+        for (int i = 0; i < PEQ_TYPES; ++i) row(view, n++, types[i], i);
     } else if (ui.screen == NAMING) { /* the name in the edit over the title (below); the row is Done */
         row(view, n++, "Rename", NAMED);
     } else if (ui.screen == CONFIRM && ui.previous == DELETES) {
@@ -865,7 +904,7 @@ static int render(const void *unused) {
     widget_set_prop_int(view, "virtual_h", head + n * rh);
     /* ringnav keeps the selection above on a view whose row count it already knows; on any other
      * new view it takes its own remembered row (navigation.c load) */
-    if (ui.screen == PICK || kept) widget_set_prop_int(view, "_ringnav_count", n);
+    if (ui.screen == PICK || ui.screen == TYPES || kept) widget_set_prop_int(view, "_ringnav_count", n);
     if (head + n * rh <
         rows) { /* short lists: shrink so the list's white background never shows below the rows */
         widget_resize(list, 375, head + n * rh);
@@ -881,6 +920,7 @@ static int render(const void *unused) {
     else if (ui.screen == BAND)
         snprintf(text, sizeof(text), "Band %d", ui.band + 1);
     else if (ui.screen == PICK && ui.pick == GAIN) snprintf(text, sizeof(text), "Band %d Gain", ui.band + 1);
+    else if (ui.screen == TYPES) snprintf(text, sizeof(text), "Band %d Type", ui.band + 1);
     else if (ui.screen == PICK)
         snprintf(text, sizeof(text), ui.pick == PREAMP ? "Preamp" : "Balance");
     else if ((ui.screen == PRESETS || ui.screen == DELETES || ui.screen == RENAMES) &&

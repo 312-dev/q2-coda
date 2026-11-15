@@ -10,7 +10,12 @@ import pytest
 
 BANDS, CHANNELS = 30, 8
 EQ_OFF, EQ_3, EQ_PEQ = 0, 1, 2
-PK, LS, HS = 0, 1, 2
+PK, LS, HS, LP, HP, BP, NO, AP = range(8)
+TYPES = 8
+
+
+def q_max(type_):
+    return 30 if type_ == NO else 10
 r = C.byref
 
 
@@ -161,8 +166,8 @@ def test_a_flat_3eq_is_all_identity(fw):
 GOOD = (('count', 0), ('count', 30), ('bypass', 1), ('preamp', -60), ('preamp', 24), ('balance', -12), ('balance', 12), ('automatic', 2))
 BAD = (('count', -1), ('count', 31), ('bypass', 2), ('bypass', -1), ('preamp', -60.001), ('preamp', 24.001), ('preamp', math.nan),
        ('preamp', math.inf), ('balance', -12.001), ('balance', 12.001), ('balance', math.nan), ('automatic', 3), ('automatic', -1))
-BAND_GOOD = (('enabled', 0), ('enabled', 3), ('type', 2), ('frequency', 20), ('frequency', 20000), ('gain', -24), ('gain', 24), ('q', 0.1), ('q', 10))
-BAND_BAD = (('enabled', -1), ('enabled', 4), ('type', -1), ('type', 3), ('frequency', 19.99), ('frequency', 20000.1), ('frequency', math.nan),
+BAND_GOOD = (('enabled', 0), ('enabled', 3), ('type', AP), ('frequency', 20), ('frequency', 20000), ('gain', -24), ('gain', 24), ('q', 0.1), ('q', 10))
+BAND_BAD = (('enabled', -1), ('enabled', 4), ('type', -1), ('type', TYPES), ('frequency', 19.99), ('frequency', 20000.1), ('frequency', math.nan),
             ('gain', -24.01), ('gain', 24.01), ('gain', -math.inf), ('q', 0.099), ('q', 10.01), ('q', math.nan))
 
 
@@ -180,6 +185,15 @@ def test_peq_valid_each_band_field_s_limits_on_the_last_band(fw, field, value, o
     p = preset(g, *[(PK, 1000, 1, 1)] * BANDS)
     setattr(p.bands[29], field, value)
     assert g.peq_valid(r(p)) == ok
+
+
+@pytest.mark.parametrize('type_', range(TYPES))
+def test_only_a_notch_takes_a_q_up_to_30(fw, type_):
+    g = api(fw)
+    p = preset(g, (type_, 1000, 0, 30))
+    assert g.peq_valid(r(p)) == (type_ == NO)
+    p.bands[0].q = 30.001 if type_ == NO else 10
+    assert g.peq_valid(r(p)) == (type_ != NO)
 
 
 def test_peq_valid_a_band_past_count_does_not_count(fw):
@@ -202,8 +216,8 @@ def oracle_valid(p):
         return False
     if not 0 <= p.automatic <= 2:
         return False
-    return all(0 <= b.enabled <= 3 and 0 <= b.type <= 2 and within(b.frequency, 20, 20000) and within(b.gain, -24, 24) and
-               within(b.q, .1, 10) for b in p.bands[:p.count])
+    return all(0 <= b.enabled <= 3 and 0 <= b.type < TYPES and within(b.frequency, 20, 20000) and within(b.gain, -24, 24) and
+               within(b.q, .1, q_max(b.type)) for b in p.bands[:p.count])
 
 
 def weird(rng):
@@ -270,9 +284,77 @@ def test_every_design_is_stable(fw):
     for _ in range(300):
         rate = rng.choice((8000, 44100, 48000, 192000, 384000))
         f = rng.uniform(20, min(20000, rate * .49))
-        e = compiled(g, preset(g, (rng.randrange(3), f, rng.uniform(-24, 24), rng.uniform(.1, 10))), rate)
+        type_ = rng.randrange(TYPES)
+        e = compiled(g, preset(g, (type_, f, rng.uniform(-24, 24), rng.uniform(.1, q_max(type_)))), rate)
         c = e.c[0]
         assert abs(c.a2) < 1 and abs(c.a1) < 1 + c.a2  # the biquad's stability triangle
+
+
+# Every type's coefficients against an independent design: its analog prototype from the Cookbook, prewarped
+# to Fc and taken through scipy.signal.bilinear (scipy 1.18.1, numpy 2.5.4), normalised by a0. Made once with
+#   b, a = scipy.signal.bilinear(num, den, fs); b, a = b / a[0], a / a[0]
+# where num and den are the prototype's s^2, s and 1 terms over powers of W = 2 fs tan(pi Fc / fs):
+# PK (s^2 + A/Q s + 1)/(s^2 + s/(A Q) + 1), LS A(s^2 + sqrt(A)/Q s + A)/(A s^2 + sqrt(A)/Q s + 1), HS
+# A(A s^2 + sqrt(A)/Q s + 1)/(s^2 + sqrt(A)/Q s + A), and over s^2 + s/Q + 1: LP 1, HP s^2, BP s/Q, NO s^2 + 1,
+# AP s^2 - s/Q + 1; A = 10^(gain/40). The test holds the numbers, so it needs no scipy.
+REFERENCE = (  # type, Fc, gain, Q, rate, (b0, b1, b2, a1, a2)
+    (0, 1000, 6, 1.41, 48000, (1.0315779106167675, -1.9199761435975964, 0.9049656314387665, -1.9199761435975964, 0.9365435420555338)),
+    (0, 60, -9.5, 4, 44100, (0.9987744236298924, -1.996241304968423, 0.9975398239528029, -1.996241304968423, 0.9963142475826954)),
+    (1, 105, 6.5, 0.7, 48000, (1.0037008501297011, -1.9836464329177617, 0.980217999423094, -1.9837181940983644, 0.9838470883721924)),
+    (2, 8000, -4, 0.9, 96000, (0.679654687047686, -0.8680250484805466, 0.3608788196516757, -1.4261765016496202, 0.598684959868435)),
+    (3, 18000, 0, 0.7071067811865476, 44100, (0.6632098902175655, 1.326419780435131, 0.6632098902175655, 1.2095792765508853, 0.44326028431937625)),
+    (3, 200, 0, 2.5, 48000, (0.00017044516536474406, 0.0003408903307294881, 0.00017044516536474406, -1.9889019731231403, 0.9895837537845992)),
+    (3, 1000, 0, 0.7071067811865476, 384000, (6.616554353321433e-05, 0.00013233108706642866, 6.616554353321433e-05, -1.9768609995157975, 0.9771256616899305)),
+    (4, 30, 0, 0.7071067811865476, 48000, (0.9972270499044702, -1.9944540998089404, 0.9972270499044702, -1.994446410541927, 0.994461789075954)),
+    (4, 80, 0, 0.5, 44100, (0.9886985119193025, -1.977397023838605, 0.9886985119193025, -1.9773327985861129, 0.9774612490910973)),
+    (4, 2000, 0, 6, 96000, (0.9850083152951911, -1.9700166305903821, 0.9850083152951911, -1.961553546476181, 0.9784797147045831)),
+    (5, 1000, 0, 0.7071067811865476, 48000, (0.0844972053266212, 0.0, -0.0844972053266212, -1.815341082704568, 0.8310055893467576)),
+    (5, 300, 0, 4, 44100, (0.005312840910617407, 0.0, -0.005312840910617407, -1.9875573577943848, 0.9893743181787652)),
+    (6, 50, 0, 30, 48000, (0.9998909295981944, -1.9997390271968603, 0.9998909295981944, -1.9997390271968603, 0.9997818591963888)),
+    (6, 3150, 0, 2, 44100, (0.9021436364490893, -1.6256066616338154, 0.9021436364490893, -1.6256066616338154, 0.804287272898179)),
+    (6, 19000, 0, 10, 192000, (0.9717003120107138, -1.5796867540690935, 0.9717003120107138, -1.5796867540690935, 0.9434006240214274)),
+    (7, 100, 0, 0.7, 48000, (0.9814737924440636, -1.9813040347772233, 1.0, -1.9813040347772233, 0.9814737924440636)),
+    (7, 5000, 0, 3, 44100, (0.8035250931821892, -1.364923718532064, 1.0, -1.364923718532064, 0.8035250931821892)),
+)
+
+
+@pytest.mark.parametrize('type_, f, gain, q, rate, want', REFERENCE)
+def test_each_type_s_coefficients_are_the_bilinear_cookbook_design(fw, type_, f, gain, q, rate, want):
+    g = api(fw)
+    c = compiled(g, preset(g, (type_, f, gain, q)), rate).c[0]
+    assert (c.b0, c.b1, c.b2, c.a1, c.a2) == pytest.approx(want, rel=1e-9, abs=1e-15)
+
+
+@pytest.mark.parametrize('type_', (LP, HP, BP, NO, AP))
+@pytest.mark.parametrize('gain', (0, 6, -12))
+def test_a_gainless_type_acts_at_any_gain_and_ignores_it(fw, type_, gain):
+    g = api(fw)
+    e = compiled(g, preset(g, (type_, 1000, gain, 1)))
+    assert e.used == 1 and e.c[0].b0 != 1
+    assert (e.c[0].b0, e.c[0].a1) == (compiled(g, preset(g, (type_, 1000, 0, 1))).c[0].b0, compiled(g, preset(g, (type_, 1000, 0, 1))).c[0].a1)
+
+
+@pytest.mark.parametrize('rate', (44100, 96000))
+def test_the_gainless_types_at_their_defining_frequencies(fw, rate):
+    g = api(fw)
+    def at(type_, q, f, where):  # |H|^2
+        return response(g, compiled(g, preset(g, (type_, f, 0, q)), rate), rate, where)[0]
+    for f in (100, 1000, 10000):
+        assert db(at(LP, 1 / math.sqrt(2), f, f)) == pytest.approx(-3.0103, abs=1e-3)  # Butterworth's -3 dB corner
+        assert db(at(HP, 1 / math.sqrt(2), f, f)) == pytest.approx(-3.0103, abs=1e-3)
+        assert at(LP, 2, f, f) == pytest.approx(4, rel=1e-9)  # |H| = Q at the corner
+        assert at(BP, 3, f, f) == pytest.approx(1, rel=1e-9)  # the 0 dB peak
+        assert at(NO, 5, f, f) < 1e-20  # nothing at the notch
+        assert at(HP, .7, f, 0) < 1e-20 and at(BP, .7, f, 0) < 1e-20
+        assert at(LP, .7, f, 0) == pytest.approx(1) and at(NO, 5, f, 0) == pytest.approx(1)
+        for where in (20, f / 2, f, f * 1.5, rate / 2.2):
+            assert at(AP, 1.3, f, where) == pytest.approx(1, rel=1e-9)  # every frequency through at 0 dB
+
+
+def test_a_high_pass_resonance_takes_an_auto_cut(fw):
+    g = api(fw)
+    assert g.peq_auto(r(preset(g, (HP, 80, 0, 4))), 48000) == pytest.approx(-db(16 / (1 - 1 / 64)), abs=0.05)  # Q^4 / (Q^2 - 1/4)
+    assert g.peq_auto(r(preset(g, (HP, 80, 0, 1 / math.sqrt(2)))), 48000) == 0  # Butterworth never rises over 0 dB
 
 
 def test_peq_response_is_each_channel_s_product(fw):
@@ -828,10 +910,35 @@ def test_parse_a_filter_plays_on_its_channel(fw, line, enabled):
     assert p.bands[0].enabled == enabled
 
 
-@pytest.mark.parametrize('name, type_', ((b'PK', PK), (b'PEQ', PK), (b'LS', LS), (b'LSC', LS), (b'HS', HS), (b'HSC', HS)))
+@pytest.mark.parametrize('name, type_', ((b'PK', PK), (b'PEQ', PK), (b'LS', LS), (b'LSC', LS), (b'HS', HS), (b'HSC', HS),
+                                         (b'LP', LP), (b'LPQ', LP), (b'HP', HP), (b'HPQ', HP), (b'BP', BP), (b'NO', NO),
+                                         (b'AP', AP), (b'lpq', LP)))
 def test_parse_each_filter_type(fw, name, type_):
-    p, _ = parse(api(fw), b'Filter 1: ON ' + name + b' Fc 100 Hz Gain 1 dB Q 1\n')
-    assert p.bands[0].type == type_
+    p, err = parse(api(fw), b'Filter 1: ON ' + name + b' Fc 100 Hz Gain 1 dB Q 1\n')
+    assert err.skipped == 0 and p.bands[0].type == type_
+    assert p.bands[0].gain == (1 if type_ <= HS else 0)  # APO ignores the others' gain
+
+
+@pytest.mark.parametrize('line, type_, q', (
+    (b'LP Fc 18000 Hz', LP, math.sqrt(.5)), (b'HP Fc 30 Hz', HP, math.sqrt(.5)), (b'HPQ Fc 30 Hz Q 0.5', HP, .5),
+    (b'BP Fc 1000 Hz', BP, math.sqrt(.5)), (b'NO Fc 50 Hz', NO, 30), (b'NO Fc 50 Hz Q 4', NO, 4),
+    (b'AP Fc 100 Hz Q 0.7', AP, .7)))
+def test_parse_takes_apo_s_defaults_with_no_gain_or_q(fw, line, type_, q):
+    p, err = parse(api(fw), b'Filter 1: ON ' + line + b'\n')
+    assert err.skipped == 0 and (p.bands[0].type, p.bands[0].gain, p.bands[0].q) == (type_, 0, q)
+
+
+def test_parse_an_all_pass_needs_its_q_as_apo_does(fw):
+    p, err = parse(api(fw), PEAK + b'Filter 2: ON AP Fc 100 Hz\n')
+    assert p.count == 1 and (err.skipped, err.line) == (1, 2)
+
+
+@pytest.mark.parametrize('name', (b'LP', b'HP', b'BP', b'NO', b'AP'))
+def test_bw_oct_on_every_type_but_a_shelf(fw, name):
+    g = api(fw)
+    p, _ = parse(g, b'Filter: ON ' + name + b' Fc 1000 Hz BW Oct 1\n')
+    peak, _ = parse(g, b'Filter: ON PK Fc 1000 Hz Gain 3 dB BW Oct 1\n')
+    assert p.bands[0].q == peak.bands[0].q
 
 
 @pytest.mark.parametrize('gain', (6.0, -6.0, 0.0))
@@ -1372,6 +1479,13 @@ def test_export_is_apo_text_with_auto_in_a_q2_comment(fw):
                             b'Filter 4: OFF PK Fc 200 Hz Gain 0 dB Q 1.41\n')
 
 
+def test_export_writes_the_gainless_types_with_q_and_no_gain(fw):
+    g = api(fw)
+    p = preset(g, *((t, 1000, 0, 2) for t in (LP, HP, BP, NO, AP)))
+    assert export(g, p).split(b'\n')[2:7] == [b'Filter %d: ON %s Fc 1000 Hz Q 2' % (i + 1, name)
+                                              for i, name in enumerate((b'LPQ', b'HPQ', b'BP', b'NO', b'AP'))]
+
+
 def test_a_picked_preamp_is_plain_apo_and_a_right_cut_is_the_right_s_preamp(fw):
     g = api(fw)
     text = export(g, preset(g, preamp=-2, balance=-3, automatic=2))
@@ -1396,8 +1510,10 @@ def random_preset(g, rng):
     p.preamp = pick(-60, 24, -60, 24, 0, -6.5)
     p.balance = pick(-12, 12, -12, 12, 0, 0, .5)
     for i in range(p.count):
-        p.bands[i] = Band(rng.randrange(4), rng.randrange(3), min(20000, max(20, math.exp(pick(math.log(20), math.log(20000), math.log(20), math.log(20000))))),
-                          pick(-24, 24, -24, 24, 0, -0.0, 3), pick(.1, 10, .1, 10, .7071067811865476, 1.41))
+        type_ = rng.randrange(TYPES)  # a gainless type's gain is 0, as the parser reads one
+        p.bands[i] = Band(rng.randrange(4), type_, min(20000, max(20, math.exp(pick(math.log(20), math.log(20000), math.log(20), math.log(20000))))),
+                          pick(-24, 24, -24, 24, 0, -0.0, 3) if type_ <= HS else 0,
+                          pick(.1, q_max(type_), .1, q_max(type_), .7071067811865476, 1.41))
     assert g.peq_valid(r(p))
     return p
 
@@ -1443,8 +1559,8 @@ PEAK = b'Filter 1: ON PK Fc 1000 Hz Gain -3 dB Q 1\n'
 
 @pytest.mark.parametrize('extra, what', (
     (b'Device: Speakers Realtek(R) Audio; all\n', b'Device'),
-    (b'Filter 2: ON HP Fc 30 Hz\n', b'HP filter'),
-    (b'Filter 2: ON LPQ Fc 18000 Hz Q 0.7\n', b'LPQ filter'),
+    (b'Filter 2: ON IIR Order 2 Coefficients 1 0 0 1 0 0\n', b'IIR filter'),
+    (b'Filter 2: ON NO Fc 50 Hz Q 31\n', b'band out of range'),
     (b'Include: other.txt\n', b'Include'),
     (b'Delay: 10 ms\n', b'Delay'),
     (b'Channel: C\n', b'Channel C'),
@@ -1462,7 +1578,7 @@ def test_parse_leaves_out_one_line_and_names_it(fw, extra, what):
 
 
 def test_parse_counts_what_it_left_out_and_names_the_first(fw):
-    p, err = parse(api(fw), b'Device: all\n' + PEAK + b'Filter: ON HP Fc 30 Hz\nCopy: L=R\n')
+    p, err = parse(api(fw), b'Device: all\n' + PEAK + b'Filter: ON IIR Fc 30 Hz\nCopy: L=R\n')
     assert p.count == 1 and (err.skipped, err.line, err.what) == (3, 1, b'Device')
     p, err = parse(api(fw), PEAK)
     assert (err.skipped, err.line) == (0, 0)
@@ -1535,12 +1651,12 @@ def test_graphic_eq_alone_says_to_use_the_parametric_file(fw):
 
 
 def test_nothing_usable_fails_on_the_first_line_left_out(fw):
-    p, err = parse(api(fw), b'\nDevice: all\nFilter: ON HP Fc 30 Hz\n')
+    p, err = parse(api(fw), b'\nDevice: all\nFilter: ON IIR Fc 30 Hz\n')
     assert p is None and err.line == 2 and err.reason == b'unsupported command'
     p, err = parse(api(fw), b'a shopping list\nmilk\n')
     assert p is None and err.line == 1 and err.reason == b'no Equalizer APO lines'
 
 
 def test_an_off_filter_of_an_unsupported_type_is_left_alone(fw):
-    p, err = parse(api(fw), PEAK + b'Filter: OFF HP Fc 30 Hz\nFilter: ON None\n')
+    p, err = parse(api(fw), PEAK + b'Filter: OFF IIR Fc 30 Hz\nFilter: ON None\n')
     assert p.count == 1 and err.skipped == 0

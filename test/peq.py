@@ -123,7 +123,7 @@ def parser_check(lib, tmp):
         ('Channel: L\nPreamp: -13 dB', 2, 'apart'),
         ('Eval: x=1', 1, 'unsupported'), ('garbage', 1, 'no Equalizer APO'),
         (single.replace(' Q .7', ''), 1, "a peak's Q"),
-        (single.replace('PK', 'HP'), 1, 'type'),
+        (single.replace('PK', 'IIR'), 1, 'type'),
         (single.replace('1e3', '`1000`'), 1, 'expected Fc'),
         (single.replace('Filter:', 'Filter x:'), 1, 'label'),
         (b'\0', 1, 'NUL'), (b'#' * 513, 1, 'line'), (b'#' * 16385, 1, 'file'),
@@ -133,7 +133,7 @@ def parser_check(lib, tmp):
         failures += [(single.replace(old, value), 1, 'expected Fc' if value in ('nan', 'inf', '-inf', '1e999', '20junk', '0x100', 'NaN') else 'range') for value in values]
     for text, skipped, what in [(single * 30 + single.replace('ON', 'OFF'), 1, 'bands past 30'),
                                 (single + 'Filter: ON PK Fc 19 Hz Gain 0 dB Q 1', 1, 'band out of range'),
-                                ('Device: all\n' + single + 'Filter: ON HP Fc 20 Hz\n', 2, 'Device')]:
+                                ('Device: all\n' + single + 'Filter: ON IIR Fc 20 Hz\n', 2, 'Device')]:
         error, loaded, data = Error(), Preset(), text.encode()
         assert lib.peq_parse(data, len(data), C.byref(loaded), C.byref(error)) and (error.skipped, error.what.decode()) == (skipped, what), text
     loaded = parse(lib, single.replace('PK', 'LS 6dB') + single.replace('Q .7', 'BW Oct 1') + 'Preamp: -3')
@@ -448,6 +448,8 @@ int client_h(void) { return 290; }
 int shim_unmounted, shim_toasts;
 int card_mounted(void) { return !shim_unmounted; }
 int feedback_oled(void) { return 0; }
+int modal_set(void) { return 0; } /* the iPod themes' Type picker is the editor's own screen (menu_modal.c's under OLED) */
+int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i)) { (void)under, (void)names, (void)n, (void)current, (void)pick; return 0; }
 int eq_rows(void) { return 0; } /* the iPod themes': no set_switch (slider_page.c) */
 int eq_list_end(void) { return 290; }
 void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) { (void)w, (void)canvas, (void)e; }
@@ -947,7 +949,7 @@ def editor_check(lib, tmp):
     # Rows that open a screen or picker end in list_into; the switches and cyclers don't.
     got = [ui.shim_chevron(t) for t in (b'Balance', b'Preamp', b'Presets', b'1  ', b'Enabled', b'Reset')]; assert got == [1, 1, 1, 1, 0, 0], got
     click('1  ')
-    assert [ui.shim_chevron(t) for t in (b'Band', b'Type', b'Frequency', b'Gain', b'Q ')] == [0, 0, 1, 1, 1]
+    assert [ui.shim_chevron(t) for t in (b'Band', b'Type', b'Frequency', b'Gain', b'Q ')] == [0, 1, 1, 1, 1]
     click('Band On'); ui.shim_return(); click('2  '); click('Band On'); ui.shim_return(); click('Apply changes')
     assert math.copysign(1, read().preamp) == 1 and read().preamp == 0, read().preamp  # +0: shown as 0.0
     # Channels cycle on enabled bands; headroom takes the louder side, balance only turns one down.

@@ -671,7 +671,7 @@ AUTO=1</pre>
     <thead><tr><th>Feature</th><th>What it does</th></tr></thead>
     <tbody>
       <tr><td>Curve</td><td>The response is drawn at the top of the list as you edit, with a ring on each band. It scrolls away as you move down the list and comes back when you reach the first row.</td></tr>
-      <tr><td>Bands</td><td>Peaking, Low shelf or High shelf; frequency, gain, Q, on/off, and channel (both, <b>L</b> or <b>R</b>).</td></tr>
+      <tr><td>Bands</td><td>Frequency, gain, Q, on/off, and channel (both, <b>L</b> or <b>R</b>). <b>Type</b> picks Peaking, Low shelf, High shelf, Low pass, High pass, Band pass, Notch or All pass. The last five have no gain: a low or high pass cuts above or below its frequency, a notch takes out a narrow band (its Q goes up to 30), a band pass keeps only the band, and an all pass changes only the phase.</td></tr>
       <tr><td>Gain</td><td>−24 to +24 dB on the wheel. Picking a gain turns the band on, so the ten default bands (31 Hz to 16 kHz, Q 1.41) work as a graphic EQ.</td></tr>
       <tr><td>Frequency and Q</td><td>Tap the value (or press Centre) to type one, or step with <b>Raise</b> / <b>Lower</b>.</td></tr>
       <tr><td>Balance</td><td>L 12.0 dB to R 12.0 dB in 0.5 dB steps; <b>R 1.0 dB</b> plays the left 1 dB quieter.</td></tr>
@@ -693,7 +693,7 @@ AUTO=1</pre>
   <p>Presets are Equalizer APO text files in <code>/EQ/</code> on the card: the ones you save on the Q2 and the ones you copy there, such as AutoEQ’s <code>ParametricEQ.txt</code> for your headphones. A preset saved on the Q2 works in Equalizer APO or Peace on a computer too.</p>
   <p class="task">Use an AutoEQ or Equalizer APO preset:</p>
   <ol class="steps">
-    <li>Copy the <code>.txt</code> file to <code>/EQ/</code> on the card. <code>Channel: L</code>, <code>R</code> and <code>all</code> sections work. Lines the Q2 can’t play, such as <code>Device:</code> or a high-pass filter, are left out, and the Q2 says what it skipped. Use AutoEQ’s ParametricEQ file, not its GraphicEQ one.</li>
+    <li>Copy the <code>.txt</code> file to <code>/EQ/</code> on the card. <code>Channel: L</code>, <code>R</code> and <code>all</code> sections work. Every Equalizer APO filter type but <code>IIR</code> loads, high and low passes, notches, band and all passes included. Lines the Q2 can’t play, such as <code>Device:</code> or <code>Delay:</code>, are left out, and the Q2 says what it skipped. Use AutoEQ’s ParametricEQ file, not its GraphicEQ one.</li>
     <li>Choose <b>Presets</b>, then pick the file. Large collections are alphabetical; use <b>Next page</b> and <b>Previous page</b> to browse them.</li>
     <li>Choose <b>Apply changes</b> (and <b>Enabled: On</b>).</li>
   </ol>

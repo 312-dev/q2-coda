@@ -8,6 +8,7 @@ import struct
 
 import pytest
 
+import host
 from conftest import O
 
 KEY_CENTER, KEY_PREV, KEY_NEXT, KEY_RETURN = O['KEY_CENTER'], O['KEY_PREV'], O['KEY_NEXT'], O['KEY_RETURN']
@@ -20,7 +21,9 @@ EVENT_KEY, EVENT_X, EVENT_Y, W_PARENT, IM_WIDGET, IM_KEYBOARD = (
 RET_REMOVE, RET_REPEAT = 7, 8
 ACTIVE, SAVED, FOLDER, OUTPUTS = '/mnt/data/peq-active', '/mnt/data/peq-presets', '/mnt/mmc/EQ', '/mnt/data/peq-outputs'
 EQ_OFF, EQ_3, EQ_PEQ = range(3)
-HOME, BAND, PRESETS, SAVES, CONFIRM, DELETES, PICK, ADJUST, STOCKS, RENAMES, NAMING = range(11)
+HOME, BAND, PRESETS, SAVES, CONFIRM, DELETES, PICK, ADJUST, STOCKS, RENAMES, NAMING, TYPES = range(12)
+PK, LS, HS, LP, HP, BP, NO, AP = range(8)
+TYPE_NAMES = ['Peaking', 'Low shelf', 'High shelf', 'Low pass', 'High pass', 'Band pass', 'Notch', 'All pass']
 SIMPLE, ADVANCED = range(2)
 E3_TABS, E3_SWITCH, E3_PRESETS, E3_RESET, E3_LOW, E3_MID, E3_HIGH = range(7)
 GRAPH_X, GRAPH_W, PLOT_TOP, PLOT_BOTTOM, GRAPH_DB = 16, 343, 6, 78, 15
@@ -692,7 +695,9 @@ def test_a_band_s_screen(fw):
     assert p.title() == 'Band 1' and p.ui.graph and p.ui.bar is None
     p.click('Channels')
     p.click('Type')
-    assert 'Channels Left' in p.captions() and 'Type Low shelf' in p.captions()
+    assert p.ui.screen == TYPES and p.captions() == TYPE_NAMES and p.title() == 'Band 1 Type'
+    p.click('Low shelf')
+    assert p.ui.screen == BAND and 'Channels Left' in p.captions() and 'Type Low shelf' in p.captions()
     p.click('Band')
     assert p.captions()[:2] == ['Band Off', 'Type Low shelf']  # an off band has no channels
     p.ret()
@@ -974,8 +979,8 @@ def test_a_preset_with_nothing_usable_says_which_line(fw):
     assert p.title() == 'Use the ParametricEQ file, not GraphicEQ' and p.ui.screen == PRESETS and p.ui.draft.count == 10
 
 
-@pytest.mark.parametrize('extra, said', ((b'Filter: ON HP Fc 30 Hz\n', 'Loaded; skipped HP filter'),
-                                         (b'Device: all\nfilter: on hp fc 30hz\nCopy: L=R\n', 'Loaded; skipped Device, 2 more')))
+@pytest.mark.parametrize('extra, said', ((b'Filter: ON IIR Fc 30 Hz\n', 'Loaded; skipped IIR filter'),
+                                         (b'Device: all\nfilter: on iir fc 30hz\nCopy: L=R\n', 'Loaded; skipped Device, 2 more')))
 def test_a_preset_loads_what_plays_and_says_what_it_left_out(fw, extra, said):
     p = page(fw, files={f'{FOLDER}/x.txt': b'Preamp: -3 dB\nFilter: ON PK Fc 1000 Hz Gain 2 dB Q 1\n' + extra}).advanced()
     p.click('Presets')
@@ -1577,3 +1582,99 @@ def test_under_oled_a_message_is_a_toast_over_the_page_s_own_title(fw):
     p.click('Presets')
     p.click('x.txt')
     assert said == ['Use the ParametricEQ file, not GraphicEQ'] and p.title() == 'Presets'
+
+
+# The Type picker (docs/internals.md#parametric-eq): every type, a screen of them or the inset modal's.
+
+@pytest.fixture(scope='module')
+def scratch(library):
+    """navigation.c's scratch_t's field offsets as this build lays it out."""
+    return host.offsets(library.parent/'navigation.o', 'scratch_t')
+
+
+def test_the_type_picker_opens_on_the_band_s_type_and_return_leaves_it(fw):
+    p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()
+    p.click('1  ')
+    p.ui.draft.bands[0].type = NO
+    p.click('Type')
+    assert p.props[(p.ui.view, '_ringnav_index')] == NO and p.props[(p.ui.view, '_ringnav_count')] == 8
+    p.ret()
+    assert p.ui.screen == BAND and p.ui.draft.bands[0].type == NO and 'Type Notch' in p.captions()
+
+
+@pytest.mark.parametrize('type_', (LP, HP, BP, NO, AP))
+def test_a_gainless_type_has_no_gain_row_and_plays_at_its_frequency(fw, type_):
+    p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()
+    p.click('1  ')
+    p.click('Type')
+    p.click(TYPE_NAMES[type_])
+    assert p.captions() == ['Band On', 'Channels Both', 'Type ' + TYPE_NAMES[type_], 'Frequency 1000 Hz', 'Q 1.00']
+    assert p.ui.dirty == 1
+    p.ret()
+    assert f'1  {TYPE_NAMES[type_]} 1000 Hz On' in p.captions()
+    p.click('Apply changes')
+    assert p.card.state().peq.bands[0].type == type_
+
+
+def test_a_notch_s_q_goes_to_30_and_back_to_10_for_another_type(fw):
+    p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()
+    p.click('1  ')
+    p.click('Type')
+    p.click('Notch')
+    p.ui.draft.bands[0].q = 29.98
+    p.click('Q ')
+    p.click('Raise')
+    p.click('Raise')
+    assert p.ui.draft.bands[0].q == 30
+    p.ret()
+    p.click('Type')
+    p.click('Peaking')
+    assert p.ui.draft.bands[0].q == 10 and 'Gain +6.0 dB' in p.captions()  # the gain it had, kept
+
+
+def test_under_a_modal_set_type_opens_the_inset_modal_s_picker(fw, scratch):
+    oled(fw)
+    st = C.addressof(fw.var('st', C.c_char))
+    sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
+    C.c_int.from_address(st + scratch['geom']).value = [g.name for g in sets].index('oled')
+    assert fw.fn('modal_set', C.c_int)()
+    p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()
+    p.click('1  ')
+    p.click('Type')
+    # The stub's sortselect dialog never opens over the page, so the screen of types stands in.
+    assert [C.string_at(c[1][0]) for c in fw.calls('navigator_to')] == [b'dialog/sortselect_dialog']
+    assert p.ui.screen == TYPES
+
+
+
+def test_under_the_inset_modal_the_band_s_list_waits_and_a_pick_sets_the_type(fw, scratch):
+    """The panel opening over the page (menu_modal.c modal_list, its dialog stood in for): no render while it is up,
+    and a pick, run as its next pass, sets the type with the wheel still on Type."""
+    oled(fw)
+    st = C.addressof(fw.var('st', C.c_char))
+    sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
+    C.c_int.from_address(st + scratch['geom']).value = [g.name for g in sets].index('oled')
+    p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()
+    p.click('1  ')
+    p.props[(p.ui.view, '_ringnav_index')] = 2  # the wheel on Type
+    view, dialog = p.ui.view, p.new(0, 0, 0, 375, 320, 'dialog')
+    named = {}
+    for name in ('img_return', 'list_view', 'scroll_view'):
+        named[name] = p.new(dialog, 0, 0, 375, 40)
+        p.names[named[name]] = name
+    name = C.create_string_buffer(b'sortselect_dialog')
+    tops = iter([p.page, dialog])
+    fw.mock('window_manager_get_top_window', lambda *_: next(tops, dialog))
+    fw.mock('widget_get_prop_str', lambda w, k, d, *_: C.addressof(name) if w == dialog else d)
+    timers = len(p.timers)
+    p.click('Type')
+    assert p.ui.screen == BAND and p.ui.view == view and not p.pending('render')  # no render under the panel
+    picks = [w for w in p.children(named['scroll_view']) if p.handlers(w, EVT_CLICK)]
+    assert len(picks) == 8
+    p.handler(picks[NO], EVT_CLICK)()
+    fn, _ = p.timers[timers]  # the pick's pass, after the panel's close
+    C.CFUNCTYPE(C.c_int, C.c_void_p)(fn)(None)
+    p.settle()
+    assert p.ui.draft.bands[0].type == NO and p.ui.screen == BAND and 'Type Notch' in p.captions()
+    assert p.props[(p.ui.view, '_ringnav_index')] == 2 and p.ui.dirty == 1
+    assert p.props[(p.ui.view, '_ringnav_count')] == 5  # a count ringnav keeps the row by: no Gain row on a notch
