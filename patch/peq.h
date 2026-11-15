@@ -304,6 +304,11 @@ void *cover_row(void *view, int index, int h, int thumb, int px, const char *tit
 void cover_after(void *item, const char *album);
 void cover_mono(void *item);
 void artist_paint(void *w, void *canvas);
+/* and an album's page (docs/oled-design.md#album-page): its cover, lines and tracks */
+void hero_cover(void *head, const char *url);
+void hero_text(void *head, const char *name, const char *sub, const char *meta);
+void *track_row(void *view, int index, int num, const char *title, const char *len,
+                int (*click)(void *, void *), int ctx);
 #define AR_SONG_PX 22 /* cover_row's px for a song: the design's 18 px in AWTK's size */
 int geom_val(int v) __attribute__((pure));
 int modal_set(void); /* menu_modal.c */

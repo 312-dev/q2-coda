@@ -61,8 +61,8 @@
 
 #define ADDON_POLL_MS 500
 /* A level's drawing (artist_view): the rows as the app sent them, or an artist's page and the
- * pages its rows open, under a set with the inset modal */
-enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR };
+ * pages its rows open, or an album's page (album_view), under a set with the inset modal */
+enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 #define ADDON_START_MS 10000 /* no socket this long after the start: it isn't running */
 #define ADDON_LIVE_MS 2000   /* a level whose reply says "refresh" is asked again this often */
 #define ADDON_WAIT_MS 15000  /* a request's deadline, as Spotify's */
@@ -91,7 +91,7 @@ enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR };
 #define CAPS_FILE "/tmp/q2-addon.caps"
 /* This firmware's card-app features, space-separated; a feature adds its word. */
 #define ADDON_CAPS                                                                                 \
-    "playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings artist"
+    "playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings artist album"
 #define ADDON_SECTIONS 8  /* sections an app's first page may have */
 #define SWIPE_CLAIM_PX 24 /* a sideways move this far, twice as far as up or down, is a swipe's */
 #define SWIPE_PX 60       /* and this far at the lift, more than up or down, changes section */
@@ -1199,7 +1199,8 @@ typedef struct {
     unsigned id, hash; /* id: the fetch whose reply this level takes; hash: its rows' bytes */
     char title[128], note[128], op[16], args[400]; /* args: "\t" and escaped each */
     signed char lay;  /* LAY_*: how show() draws its rows (artist_view) */
-    signed char stop; /* LAY_ARTIST's lit pair stop (artist_page.c pair_key), 0: its rows' */
+    signed char stop; /* LAY_ARTIST's or LAY_ALBUM's lit pair stop (artist_page.c pair_key), 0: its
+                         rows' */
 } lv_t;
 
 static struct {
@@ -1685,15 +1686,13 @@ static void album_covers_drop(void) {
         if (album_cover(i, url, sizeof url))
             image_manager_unload_bitmap_by_name(image_manager(), url);
 }
-/* A song row's album and length (each "" when not sent) from its subtitle, as an app with
- * "artist" writes it, "<album> · <length> · <status>": the length is the first part of digits
- * and colons with a colon in it, the album all before it (or the first part, with none). A row
- * with no album id is an older app's, whose subtitle names the artist: neither is read. */
-static void song_parts(int i, char *album, unsigned an, char *len, unsigned ln) {
+/* A song row's subtitle's parts (each "" when not sent), as an app with "artist" or "album"
+ * writes it, "<album or artist> · <length> · <status>": the length is the first part of digits
+ * and colons with a colon in it, the album all before it (or the first part, with none). */
+static void sub_parts(int i, char *album, unsigned an, char *len, unsigned ln) {
     static const char dot[] = " \xc2\xb7 ";
     const char *s = cell(i, 3), *p = s, *e;
     album[0] = len[0] = 0;
-    if (!row_album(i)) return;
     for (;; p = e + sizeof dot - 1) {
         unsigned n = (e = strstr(p, dot)) ? (unsigned)(e - p) : strlen(p), k = 0, colon = 0;
         for (; k < n && ((p[k] >= '0' && p[k] <= '9') || p[k] == ':'); ++k) colon |= p[k] == ':';
@@ -1706,6 +1705,12 @@ static void song_parts(int i, char *album, unsigned an, char *len, unsigned ln) 
     }
     e = strstr(s, dot);
     tk_snprintf(album, an, "%.*s", e ? (int)(e - s) : (int)strlen(s), s);
+}
+/* A song row's album and length, as sub_parts reads them. A row with no album id is an older
+ * app's, whose subtitle names the artist: neither is read. */
+static void song_parts(int i, char *album, unsigned an, char *len, unsigned ln) {
+    album[0] = len[0] = 0;
+    if (row_album(i)) sub_parts(i, album, an, len, ln);
 }
 /* The number a row's subtitle starts with ("12 songs"), as text in out; "" when none. */
 static const char *lead_count(int i, char *out) {
@@ -1723,13 +1728,60 @@ static int drill_lay(const char *uri) {
                                                         : 0;
 }
 
+/* An album's page (docs/oled-design.md#album-page) from the app's reply, under a set with the
+ * inset modal: a reply is an album's when it has a Play action on "album:<id> 0", a Shuffle on
+ * "album:<id>" and an info row "about", as q2-subsonic's album page has with "album" in the caps
+ * (docs/librespot.md#album-rows). The header shows the level's title (the album), the about row's
+ * title (its artist) and subtitle ("2015 · 18 songs · 1 hr 12 min") and the album's catalogue
+ * cover (album_cover); Play and Shuffle are the pair, the page opening on Play as an artist's on
+ * Shuffle; then the song rows as its tracks, numbered in the reply's order, each with the length
+ * its subtitle carries ("<artist> · <length> · <status>"). Add to Sync, Quality and Sync Now are
+ * the hold menu's (artist_hold). How many rows its list has, 0 when the reply is not one.
+ * ponytail: tracks are numbered by place, so a second disc counts on from the first; the app
+ * sending each song's track number would lift it. */
+static int is_album_act(int i, const char *op) {
+    return !strcmp(cell(i, 0), "action") && !strcmp(cell(i, 1), op) &&
+           !strncmp(cell(i, 4), "album:", 6);
+}
+static int is_song(int i) {
+    return !strcmp(cell(i, 0), "action") && !strcmp(cell(i, 1), "play") &&
+           !strncmp(cell(i, 4), "song:", 5);
+}
+static int album_view(lv_t *l) {
+    int play = -1, shuffle = -1, about = -1, n = 0;
+    char url[96], artist[128], len[12];
+    for (int i = 0; i < l->n; ++i) {
+        if (is_album_act(i, "play")) play = i;
+        if (is_album_act(i, "shuffle")) shuffle = i;
+        if (!strcmp(cell(i, 0), "info") && !strcmp(cell(i, 1), "about")) about = i;
+        n += is_song(i);
+    }
+    if (play < 0 || shuffle < 0 || about < 0 || !n) return 0;
+    if (l->lay != LAY_ALBUM) l->lay = LAY_ALBUM, l->stop = 1; /* opens on Play */
+    pg.view = page_list(pg.page, pg.page, 0, "", n, 48);
+    drill_list(pg.view, n);
+    for (int i = 0, k = 0; i < l->n; ++i)
+        if (is_song(i)) {
+            sub_parts(i, artist, sizeof artist, len, sizeof len);
+            track_row(pg.view, k, k + 1, cell(i, 2), len, clicked, i), ++k;
+        }
+    static const char *const labels[2] = { "Play", "Shuffle" }, *const icons[2] = { "play",
+                                                                                    "shuffle" };
+    int ctx[2] = { play, shuffle };
+    void *head = hero_open(pg.page, l->title, cell(about, 2), cell(about, 3));
+    hero_cover(head, album_cover(shuffle, url, sizeof url) ? url : (const char *)0);
+    pair_open(head, pg.view, labels, icons, ctx, clicked, &l->stop);
+    return n;
+}
+
 /* The level's rows as an artist's page, its Albums (or Singles & EPs) page, a songs page (Top
- * Songs, All Songs) or Similar Artists; how many rows its list has, 0 when the reply is not one
- * (the level is then drawn plain from now on). */
+ * Songs, All Songs), Similar Artists or an album's page (album_view); how many rows its list has,
+ * 0 when the reply is not one (the level is then drawn plain from now on). */
 static int artist_view(lv_t *l) {
     int n = 0;
     char url[96], year[8];
     if (!modal_set()) return l->lay = LAY_PLAIN, 0;
+    if ((!l->lay || l->lay == LAY_ALBUM) && (n = album_view(l))) return n;
     if (l->lay == LAY_ALBUMS) {
         int k = 0, *order = calloc((unsigned)l->n + 1, sizeof *order);
         for (int i = 0; order && i < l->n; ++i)
@@ -1813,12 +1865,14 @@ static int artist_view(lv_t *l) {
     return n;
 }
 
-/* Play/Pause held on an artist's page: the inset modal of its sync rows (Add to Sync or Remove
- * from Sync, Quality, Sync Now), each doing what its row did. */
+/* Play/Pause held on an artist's or album's page: the inset modal of its sync rows (Add to Sync
+ * or Remove from Sync, Quality, Sync Now), each doing what its row did. */
 static void artist_pick(int k) {
     lv_t *l = top();
     int i = k >= 0 && k < AR_HOLD ? ar_hold_row[k] : -1;
-    if (!pg.page || l->lay != LAY_ARTIST || l->state != K_READY || i < 0 || i >= l->n) return;
+    if (!pg.page || (l->lay != LAY_ARTIST && l->lay != LAY_ALBUM) || l->state != K_READY || i < 0 ||
+        i >= l->n)
+        return;
     later(G_ROW, i);
 }
 static int artist_hold(lv_t *l) {
@@ -1826,7 +1880,8 @@ static int artist_hold(lv_t *l) {
     int n = 0;
     for (int i = 0; i < l->n && n < AR_HOLD; ++i) {
         const char *kind = cell(i, 0), *uri = cell(i, 1);
-        if (!strcmp(kind, "action") && !strcmp(uri, "toggle") && !strncmp(cell(i, 4), "artist:", 7))
+        if (!strcmp(kind, "action") && !strcmp(uri, "toggle") &&
+            (!strncmp(cell(i, 4), "artist:", 7) || !strncmp(cell(i, 4), "album:", 6)))
             icons[n] = !strncmp(cell(i, 2), "Remove", 6) ? "trash" : "cloud-arrow-down";
         else if (!strcmp(kind, "action") && !strcmp(uri, "quality"))
             icons[n] = "sliders-horizontal";
@@ -1839,7 +1894,8 @@ static int artist_hold(lv_t *l) {
     }
     if (n) return modal_actions(names, icons, n, artist_pick);
     for (int i = 0; i < l->n; ++i) /* Included via Entire Library: nothing to press */
-        if (!strcmp(cell(i, 0), "info") && i < 2) return toast(cell(i, 2)), 1;
+        if (!strcmp(cell(i, 0), "info") && strcmp(cell(i, 1), "about") && i < 2)
+            return toast(cell(i, 2)), 1;
     return 0;
 }
 
@@ -2528,7 +2584,7 @@ int addon_hold(void *w) {
     lv_t *l = pg.page && w == pg.page ? top() : 0;
     int i = l && l->state == K_READY && pg.view ? widget_get_prop_int(pg.view, "_ringnav_index", -1)
                                                 : -1;
-    if (i >= 0 && l->lay == LAY_ARTIST) return artist_hold(l);
+    if (i >= 0 && (l->lay == LAY_ARTIST || l->lay == LAY_ALBUM)) return artist_hold(l);
     if (i >= 0 && l->lay) /* a cover row: its reply row is its click's (cover_row) */
         i = widget_get_prop_int(widget_get_child(pg.view, (unsigned)i), "_ar_row", -1);
     if (i < 0 || i >= l->n || !cell(i, 5)[0] || !strcmp(cell(i, 0), "progress")) return 0;

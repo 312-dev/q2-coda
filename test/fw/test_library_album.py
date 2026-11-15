@@ -1,0 +1,121 @@
+"""library_album.c: stock's album pages (albuminfo_page, playerjumpinfo_page) dressed as OLED's album page."""
+import ctypes as C
+
+import pytest
+
+from conftest import O, Deques
+from test_nav_display_library import Ui, records, scratch, st  # noqa: F401 (fixtures)
+
+DOT = ' \xb7 '.encode('utf-8')
+
+
+def album_page(fw, st, name='albuminfo_page', theme='oled'):
+    """A stock album page as its UI loads, over Home, under theme's set: its navbar, Songs' action row and list."""
+    from test_nav_hold import use_set
+    ui = Ui(fw)
+    fw.mock('widget_factory_create_widget', lambda f, kind, parent, x, y, w, *_:
+            ui.new(C.string_at(kind).decode(), parent, x, y, w, 0))
+    fw.mock('button_create', lambda parent, x, y, w, h, *_: ui.new('button', parent, x, y, w, h))
+    ui.window('home_page')
+    win = ui.window(name)
+    jump = name == 'playerjumpinfo_page'
+    nav = ui.add('view', win, (0, 0, 375, 50), 'view_navbar')
+    row = None if jump else ui.add('view', win, (0, 0, 375, 32), 'view_navbar_allplay')
+    lv = ui.add('table_view' if jump else 'list_view', win, (0, 32, 375, 224), 'table_view' if jump else 'list_view')
+    rows = ui.add('table_client' if jump else 'scroll_view', lv, (0, 0, 365, 224),
+                  'music_table_client' if jump else 'scroll_view')
+    if theme:
+        use_set(st, theme)
+    info = (C.c_char * 912).in_dll(fw.lib, 'fw_ctx_g_local_classinfo_save')
+    info[0xd:0xd + 9] = b'Caracal\0\0'
+    return ui, win, nav, row, lv, rows
+
+
+def made(win):
+    for c in win.children:
+        yield c
+        yield from made(c)
+
+
+@pytest.mark.parametrize('name', ('albuminfo_page', 'playerjumpinfo_page'))
+def test_under_oled_an_album_page_is_dressed_as_it_loads(fw, st, name):
+    """The navbar and the Shuffle row go, the list moves under the pair at y 168 (three 32 px rows to y 282), and the
+    window holds the header (the album the page opened, its cover's square) and Play and Shuffle; the page has no
+    title and opens on Play."""
+    ui, win, nav, row, lv, rows = album_page(fw, st, name)
+    fw.fn('album_local_load', None, C.c_void_p)(win.addr)
+    assert not nav.visible and (row is None or not row.visible)
+    assert lv.box == (0, 168 - 58, 375, 96)
+    head = [w for w in made(win) if '_ar_name' in w.props]
+    assert [(w.props['_ar_name'], w.props.get('_ar_square')) for w in head] == [(b'Caracal', 1)]
+    assert [w.props['_ar_left'] for w in made(win) if '_ar_left' in w.props] == [b'Play', b'Shuffle']
+    assert fw.fn('album_local_on', C.c_int, C.c_void_p)(win.addr) == 1
+    assert fw.fn('pair_holds', C.c_int, C.c_void_p)(rows.addr) == 1  # Play lit
+    key = fw.fn('pair_key', C.c_int, C.c_void_p, C.c_void_p, C.c_int)
+    assert key(win.addr, rows.addr, 1) == 1 and key(win.addr, rows.addr, 1) == 1  # Shuffle, then the first track
+    assert fw.fn('pair_holds', C.c_int, C.c_void_p)(rows.addr) == 0
+
+
+@pytest.mark.parametrize('theme', (None, 'ipod'))
+def test_other_sets_keep_the_stock_page(fw, st, theme):
+    ui, win, nav, row, lv, rows = album_page(fw, st, theme=theme)
+    fw.fn('album_local_load', None, C.c_void_p)(win.addr)
+    assert row.visible and lv.box == (0, 32, 375, 224) and not any('_ar_name' in w.props for w in made(win))
+    assert fw.fn('album_local_on', C.c_int, C.c_void_p)(win.addr) == 0
+
+
+def test_another_page_is_left_alone(fw, st):
+    ui, win, nav, row, lv, rows = album_page(fw, st, 'allmusic_page')
+    fw.fn('album_local_load', None, C.c_void_p)(win.addr)
+    assert row.visible and fw.fn('album_local_on', C.c_int, C.c_void_p)(win.addr) == 0
+
+
+def test_the_header_reads_the_pages_songs(fw, st, records):
+    """At the header's paint with the page on top: the songs' album and album artist, their count and summed length
+    (the year needs the library's database, here none: left out), the cover's placeholder without a cached one;
+    read again only when the count changes."""
+    ui, win, nav, row, lv, rows = album_page(fw, st)
+    fw.fn('album_local_load', None, C.c_void_p)(win.addr)
+    d = Deques(fw)
+    songs = [records.song(album=b'Caracal (Deluxe)', artist=b'Disclosure', path=b'/m/D/C/%02d.flac' % i)
+             for i in range(3)]
+    for r, sec in zip(songs, (404, 237, 305)):  # CUE tracks' lengths: no file to measure
+        C.c_int.from_address(r + O['REC_CUE_END']).value = sec
+    fw.var('fw_ctx_p_deque_showlist', C.c_uint).value = d.new(songs)
+    (head,) = [w for w in made(win) if '_ar_name' in w.props]
+    paint = fw.fn('album_local_paint', None, C.c_void_p, C.c_void_p)
+    canvas = C.create_string_buffer(0x200)  # no LCD: artist_paint draws nothing
+    paint(head.addr, C.addressof(canvas))
+    assert (head.props['_ar_name'], head.props['_ar_sub'], head.props['_ar_meta']) == \
+        (b'Caracal (Deluxe)', b'Disclosure', b'3 songs' + DOT + b'16 min')
+    assert head.props['_ar_cover'] == b''
+    head.props['_ar_meta'] = b'kept'
+    paint(head.addr, C.addressof(canvas))
+    assert head.props['_ar_meta'] == b'kept'  # the same three songs: not read again
+
+
+def test_an_album_page_over_another_hands_the_design_back(fw, st, records):
+    """Look up Album over a Library album: the new page is drawn, and the first, back on top, is dressed again
+    (one header, its own) with the stop it had."""
+    ui, first, *_, rows = album_page(fw, st)
+    load = fw.fn('album_local_load', None, C.c_void_p)
+    load(first.addr)
+    key = fw.fn('pair_key', C.c_int, C.c_void_p, C.c_void_p, C.c_int)
+    assert key(first.addr, rows.addr, 1) == 1  # Shuffle lit
+    second = ui.window('playerjumpinfo_page')
+    lv = ui.add('table_view', second, (0, 50, 375, 210), 'table_view')
+    ui.add('table_client', lv, (0, 0, 365, 210), 'music_table_client')
+    load(second.addr)
+    on = fw.fn('album_local_on', C.c_int, C.c_void_p)
+    assert on(first.addr) and on(second.addr)
+    ui.wm.children.remove(second)  # closed: the first on top again
+    (front,) = [(fn, ctx) for w, evt, fn, ctx in ui.handlers if w == first.addr and evt == O['EVT_WINDOW_FOREGROUND']]
+    C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(front[0])(front[1], None)
+    assert len([c for c in first.children if '_ar_name' in c.props]) == 1
+    holds = fw.fn('pair_holds', C.c_int, C.c_void_p)
+    assert holds(rows.addr) and key(first.addr, rows.addr, -1) == 1 and holds(rows.addr)  # Shuffle, then Play
+    song = records.song(album=b'Caracal', artist=b'Disclosure', path=b'/m/D/C/01.flac')
+    fw.var('fw_ctx_p_deque_showlist', C.c_uint).value = Deques(fw).new([song])
+    fw.mock('navigator_to_with_context', lambda *_: 0)
+    assert key(first.addr, rows.addr, 0) == 1  # Play pressed: the first page's songs, from the first
+    assert [C.string_at(a[0]) for _, a in fw.calls('navigator_to_with_context')] == [b'playing_page']

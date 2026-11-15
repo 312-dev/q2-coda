@@ -3044,6 +3044,7 @@ int ringnav_paint(void *w, void *canvas) {
     addon_paint(w, canvas);
     peq_paint(w, canvas);
     battery_paint(w, canvas);
+    album_local_paint(w, canvas);
     visualizer_paint(w, canvas);
     games_paint(w, canvas);
     search_strip_paint(w, canvas);
@@ -6010,6 +6011,7 @@ void *ringnav_ui_load(const char *name, void *parent) {
         msg_open(root); /* OLED's scan page (classic_pages.c oled_scan); USB's page stays stock's */
     if (root && g_usbmode != 1 && !tk_strcmp(widget_get_prop_str(root, "name", ""), "usbmode_page"))
         st.usb_lun = 0, widget_add_timer(root, usb_poll, 500);
+    if (root) album_local_load(root); /* OLED's album page on stock's (library_album.c) */
     if (root) motion_load(root, np);
     return root;
 }
@@ -6419,6 +6421,7 @@ static const char *bar_title_of(void *win, void **label) {
      * Songs" in both: allmusic_page's other lists (an album, a playlist, Recently Added) keep their
      * own (0xf001: all songs, own_order's class) */
     if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "localmusic_page")) return "Library";
+    if (album_local_on(win)) return ""; /* the design's album page: its header names it */
     if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "allmusic_page") && I(g_class_type, 0) == 0xf001)
         return "Songs";
     if (!tk_strcmp(name, "coverflow_page")) { /* its screen's own, else its caption row's */

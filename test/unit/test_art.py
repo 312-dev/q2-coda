@@ -458,7 +458,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     marks = [f'stream_{n}_{k}' for n in ('tidal', 'spotify', 'app', 'radio', 'airplay', 'config') for k in ('d', 'l', 'w')]
     menus = [f'menu_{n}_{k}' for n in art.MENU_ICONS for k in ('d', 'l', 'w')] + ['menu_check_a']
     speakers = [f'vol_{n}_{k}' for n in ('lo', 'hi') for k in ('d', 'l')]  # the volume's ends on Now Playing (fill, 16 px)
-    pair = [f'pair_{n}_{k}' for n in ('shuffle', 'radio') for k in ('a', 'w')]  # artist_page.c's action pair
+    pair = [f'pair_{n}_{k}' for n in ('shuffle', 'radio', 'play') for k in ('a', 'w')]  # artist_page.c's action pairs
     assert set(got) == {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair,

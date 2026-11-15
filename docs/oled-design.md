@@ -230,12 +230,13 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   **Song Length** (Albums, All Lists, Off); a length takes the right column, so Right, and
   Selected Row on the selected row, fall back to Inline beside it.
 - The artist's baseline is the title's; on the right column it takes at most half the row.
-- **The Shuffle row** stands first on Songs, a playlist's songs and an album's tracks, in place of
+- **The Shuffle row** stands first on Songs and a playlist's songs, in place of
   Play All (a song already plays the rest of its list in order): Phosphor `shuffle` (regular, 20
   px) on the text column and "Shuffle" 28 px after it, both Accent Blue, white on the selection.
   The wheel reaches it from the first song; Centre shuffles the list, and Return from Now Playing
   lands on it again. Sort has no place on the row: it is the hold menu's Sorting row
-  ([Menus](#menus)).
+  ([Menus](#menus)). An album's page has Play and Shuffle above its tracks instead
+  ([Album page](#album-page)).
 - **Folder view** reads as an album: the same 32 px rows. A song file is a track, its number in the
   album's column, the title from the library's tags (found by the file's path) at x 50 and its
   length on the right column when known; a file the library doesn't know shows its file name
@@ -422,6 +423,34 @@ the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where
 - **Hold menu:** Play/Pause held on the page opens the inset modal of its sync rows, Add to Sync
   (or Remove from Sync), Quality and Sync Now, each with its symbol. Play is gone: Shuffle plays
   the artist.
+
+### Album page
+
+An album opened from Now Playing's art or album tap (Look up Album), Go to Album, Library > Albums,
+Search's albums or an artist page's Albums: the Library's (stock's album pages, dressed by
+`patch/library_album.c`) and a card app's (the Subsonic app's, `patch/addon.c` `album_view`), approved
+from `mock_album_artist.py` (option 2, header with cover) on 2026-11-15. It shares the artist page's
+header and pair (`patch/artist_page.c`).
+
+- **Status row:** no title, the clock centred.
+- **Header** from y 52: the album's cover, 64 px square with 6 px corners, at the text column (the
+  server library's cover for a server album, else Cover Flow's cached one, else a `#2C2C2E`
+  placeholder); its top stands over the status row's bottom 6 px, as the artist's disc does. Beside it
+  from x 102 the album in Inter Medium 20 (ellipsis), its artist in Inter Regular 15 Text Secondary,
+  and "2015 · 18 songs · 1 hr 12 min" in Inter Regular 13 Text Tertiary, a part left out when unknown.
+- **Action pair** at y 128: **Play** (Phosphor `play`) and **Shuffle**, as the artist page's pair. The
+  page opens on Play, as the artist page opens on Shuffle; the wheel steps Play, Shuffle, then the
+  tracks, and back. Play plays the album from its first track, Shuffle shuffles it.
+- **Tracks** from y 168, 32 px, as many whole rows as end by y 282, scrolling: the track number
+  right-aligned on x 38 in Inter Regular 15 Text Tertiary, the title in Inter Regular 20 from x 50
+  (ellipsis), the length right-aligned on the right column in Inter Regular 15 Text Tertiary (white
+  on the selection); Centre plays the album from that track. The Library's tracks are the album's
+  song rows ([Song rows](#song-rows), its track numbers the tags'); a card app's are numbered in the
+  order the app sends them.
+- **Hold menu:** on a card app's album, Play/Pause held opens its sync rows, Add to Sync (or Remove
+  from Sync), Quality and Sync Now, as on the artist page; on the Library's, the track's own hold
+  menu. A card app without the `album` caps word ([librespot.md](librespot.md#album-rows)) keeps its
+  plain rows.
 
 ### Icons
 
