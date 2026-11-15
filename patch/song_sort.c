@@ -72,14 +72,13 @@ static int rec_cmp(void *a, void *b, int sort, int down) {
 }
 
 /* list (stSongInfo records, as loaded) in the chosen order. Artist and Album: a stable merge sort
- * of indices, then the records moved into place a cycle at a time, whole (their strings go with
- * them, as playback.c's Play Next moves rows). */
+ * of indices, then the records moved into place (rec_permute), as playback.c's Play Next moves
+ * rows. */
 void song_order(void *list) {
     unsigned n = list ? deque_size(list) : 0;
     int sort = song_sort(), down = song_down();
     if (n < 2 || !modal_set() || I(g_sort_flag, 0) || (sort == SORT_TITLE && !down)) return;
     unsigned *at = calloc(2 * n, sizeof *at), *tmp;
-    unsigned char rec[REC_SIZE];
     if (!at) return;
     tmp = at + n;
     for (unsigned i = 0; i < n; ++i) at[i] = i;
@@ -99,7 +98,15 @@ void song_order(void *list) {
             }
             memcpy(at, tmp, n * sizeof *at);
         }
-    /* position i takes record at[i]: follow each cycle once, at[] marked done as it goes */
+    rec_permute(list, at);
+    free(at);
+}
+
+/* Place i of list takes record at[i] (at: a permutation of 0..n-1, n the list's size): each cycle
+ * followed once, at[] marked done (n) as it goes. Records move whole, their strings with them. */
+void rec_permute(void *list, unsigned *at) {
+    unsigned n = deque_size(list);
+    unsigned char rec[REC_SIZE];
     for (unsigned i = 0; i < n; ++i) {
         if (at[i] == i || at[i] == n) continue;
         memcpy(rec, deque_at(list, i), REC_SIZE);
@@ -113,5 +120,4 @@ void song_order(void *list) {
         memcpy(deque_at(list, j), rec, REC_SIZE);
         at[j] = n;
     }
-    free(at);
 }

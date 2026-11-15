@@ -1456,6 +1456,96 @@ def test_a_music_load_too_long_to_filter_runs_nothing(fw):
     assert loads.query(b'db', sql.encode(), None, 0) == 0 and loads.ran == [sql]  # outside a load it runs as it is
 
 
+NO_MIN = int(re.search(r'#define NO_MIN (\d+)', (host.ROOT/'patch/name_order.c').read_text())[1])
+
+
+class Sorts:
+    """toolsQueryDbTable and toolsQueryDbTableAndSort over n song records, as stock runs them: a fresh record per row
+    on the staging deque, in the input's order, then (a sort asked) in stock's sorted order, here by title with equal
+    titles in an order no stable sort gives. calls logs (trampoline, sort or mode)."""
+    def __init__(self, fw, n):
+        self.q, self.calls, self.keep = Deques(fw), [], []
+        self.staging = fw.var('fw_ctx_tools_pdeq_directory', C.c_void_p)
+        self.staging.value = self.q.new()
+        self.ids = list(range(1, n + 1))
+        self.titles = {i: f'T{i % 37:02d}' for i in self.ids}  # repeats: ties for the sort to settle
+        self.gen = fw.var('library_gen', C.c_uint)
+        for name, sorts in (('stock_sorted_query_trampoline', True), ('stock_dbquery_trampoline', False)):
+            fw.mock(name, lambda db, sql, row, sort, *_, name=name, sorts=sorts: self.run(name, sort, sorts or sort))
+        self.sorted = fw.fn('ringnav_sorted_query', C.c_int, C.c_char_p, C.c_char_p, C.c_void_p, C.c_int)
+        self.named = fw.fn('ringnav_library_query', C.c_int, C.c_char_p, C.c_char_p, C.c_void_p, C.c_int)
+
+    def order(self):
+        return sorted(self.ids, key=lambda i: (self.titles[i], -i if i % 2 else i))
+
+    def record(self, i):
+        r = C.create_string_buffer(O['REC_SIZE'] + 8)
+        title = C.create_string_buffer(self.titles[i].encode())
+        struct.pack_into('<i', r, O['REC_ID'], i)
+        struct.pack_into('<i', r, O['REC_TYPE'], 8)
+        struct.pack_into('<Q', r, O['REC_TITLE'], C.addressof(title))
+        self.keep += [r, title]
+        return C.addressof(r)
+
+    def run(self, name, sort, sorts):
+        self.calls.append((name.split('_')[1], sort))
+        self.q[self.staging.value][:] = [self.record(i) for i in (self.order() if sorts else self.ids)]
+        return len(self.ids)
+
+    def listed(self):
+        return [struct.unpack_from('<i', C.string_at(p, 4))[0] for p in self.q[self.staging.value]]
+
+    def load(self, sql=b'select * from songtable', mode=0):
+        self.calls.clear()
+        assert self.sorted(b'db', sql, None, mode) == len(self.ids)
+        return self.calls
+
+
+def test_a_sorted_load_takes_its_kept_order_until_the_library_changes(fw):
+    """name_order.c: the first load runs stock's sort; the next asks for the rows unsorted and puts them in the kept
+    order, ties as stock's sort left them; once library_gen moves, stock sorts again."""
+    s = Sorts(fw, NO_MIN + 88)
+    assert s.load() == [('sorted', 0)] and s.listed() == s.order()
+    assert s.load() == [('dbquery', 0)] and s.listed() == s.order()
+    assert s.load(mode=1) == [('sorted', 1)]  # another mode, another comparator: not that order
+    assert s.load(b'select * from songtable where 1') == [('sorted', 0)]  # another query
+    s.gen.value += 1
+    assert s.load() == [('sorted', 0)] and s.listed() == s.order()
+    assert s.load() == [('dbquery', 0)] and s.listed() == s.order()
+
+
+@pytest.mark.parametrize('change', ['title', 'gone', 'repeat'])
+def test_a_kept_order_is_used_only_for_the_same_records(fw, change):
+    """Another title or a record fewer: the unsorted rows are not the kept ones; an id twice: no one place for it.
+    Either way the load runs again with stock's sort, whatever library_gen says."""
+    s = Sorts(fw, NO_MIN + 3)
+    if change == 'repeat':  # in both loads: the same records, but no one place for that id
+        s.ids[9] = s.ids[8]
+    s.load()
+    if change == 'title':
+        s.titles[5] = 'T00'
+    elif change == 'gone':
+        s.ids.remove(9)
+    assert s.load() == [('dbquery', 0), ('sorted', 0)] and s.listed() == s.order()
+
+
+def test_the_name_sort_of_tools_query_db_table_is_kept_too(fw):
+    s = Sorts(fw, NO_MIN)
+    s.calls.clear()
+    assert s.named(b'db', b'select id,album from songtable', None, 1) == NO_MIN and s.calls == [('dbquery', 1)]
+    s.calls.clear()
+    assert s.named(b'db', b'select id,album from songtable', None, 1) == NO_MIN and s.calls == [('dbquery', 0)]
+    assert s.listed() == s.order()
+    s.calls.clear()
+    s.named(b'db', b'select id,album from songtable', None, 0)  # no sort asked: nothing to keep or apply
+    assert s.calls == [('dbquery', 0)] and s.listed() == s.ids
+
+
+def test_a_short_list_is_never_kept(fw):
+    s = Sorts(fw, NO_MIN - 1)
+    assert s.load() == [('sorted', 0)] and s.load() == [('sorted', 0)]
+
+
 # What is painted over a list.
 @pytest.fixture(scope='module')
 def scratch(library):

@@ -646,6 +646,7 @@ static inline int arc_out(int r, int y) {
  * clears it itself, or every later press is silent (docs/internals.md#ipod-row-clicks). */
 #define KEY_TONE_LATCH 0xa4bc00
 #define RETURN_RELEASE_LATCH 0xa4bbfa /* stock long Return arms it; the key-up filter consumes it */
+#define NAME_SORT_FLAG 0xa5011d /* no symbol: toolsQueryDbTable's name sort uses comparator 0x5cd188 when set, the pinyin 0x5cc870 when clear */
 
 /* slide_menu_scroll_to @0x606290 and completion @0x6064e4; animator
  * start @0x679060, time_elapse @0x679684, scroll_set_params @0x6956d4. */
