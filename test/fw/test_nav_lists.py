@@ -2650,7 +2650,7 @@ def test_without_the_shuffle_row_a_tick_up_from_the_first_song_stays_on_the_list
 
 # An album's rows (song_rows.c song_row): the track number and the length are each small_text in the row's box, so
 # they share one vertical place, which SONG_SMALL_DY sets so their baseline is the title's.
-SONG_SMALL_DY = int(re.search(r'#define SONG_SMALL_DY (\d+)', NAVIGATION_SOURCE).group(1))
+SONG_SMALL_DY = NAV['SONG_SMALL_DY']
 
 
 def test_a_track_number_stands_where_its_length_does_on_the_titles_baseline(fw):
