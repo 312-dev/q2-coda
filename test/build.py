@@ -400,14 +400,23 @@ def validate_assets(directory):
         old, new = read('stock.squashfs', path), read('rootfs.squashfs', path)
         assert new == patch_web(path, old)
         assert changed[path] == dict(original_sha256=sha(old), sha256=sha(new))
-    q2cgi = (ROOT/'assets/web/q2cgi').read_bytes()  # the safe file-manager CGI replaces all five stock CGIs
-    for n in ('create', 'delete', 'list', 'download', 'upload'):
+    # The safe file-manager CGI, q2cgi, replaces all five stock CGIs and is the PIN check, cgi-bin/auth.cgi, a CGI
+    # stock has none of (docs/internals.md#wi-fi-transfer-pin). thttpd runs as www-data, and every CGI is cgi_root,
+    # set-uid root, which runs q2cgi as root (docs/internals.md#wi-fi-transfer-root).
+    from build import THTTPD_CONF, THTTPD_USER, Q2CGI, CGIS, CGI_MODE
+    assert read('rootfs.squashfs', Q2CGI) == (ROOT/'assets/web/q2cgi').read_bytes()
+    cgi_root = read('rootfs.squashfs', 'usr/share/web/cgi-bin/auth.cgi')
+    assert cgi_root[:4] == b'\x7fELF' and b'/usr/bin/q2cgi\0' in cgi_root
+    for n in CGIS[:-1]:
         path = 'usr/share/web/cgi-bin/%s.cgi' % n
         old, new = read('stock.squashfs', path), read('rootfs.squashfs', path)
-        assert new == q2cgi
-        assert changed[path] == dict(original_sha256=sha(old), sha256=sha(q2cgi))
-    # and is the PIN check, cgi-bin/auth.cgi, a CGI stock has none of (docs/internals.md#wi-fi-transfer-pin)
-    assert read('rootfs.squashfs', 'usr/share/web/cgi-bin/auth.cgi') == q2cgi
+        assert new == cgi_root
+        assert changed[path] == dict(original_sha256=sha(old), sha256=sha(cgi_root))
+    modes = {l.split()[0]: l.split()[3:6] for l in subprocess.check_output(
+        ['unsquashfs', '-pf', '-', str(directory/'rootfs.squashfs')]).split(b'\n# START OF DATA')[0].splitlines() if l and l[:1] != b'#'}
+    for n in CGIS:
+        assert modes[b'usr/share/web/cgi-bin/%s.cgi' % n.encode()] == [CGI_MODE[1], b'0', b'0'], n
+    assert read('rootfs.squashfs', THTTPD_CONF) == read('stock.squashfs', THTTPD_CONF).replace(*THTTPD_USER)
     from build import segments
     tag_segment = segments(tag_new)[-1][1]
     assert tag_segment[0] == 1 and tag_segment[2] == 0x30000 and tag_segment[4:7] == (48, 48, 5)

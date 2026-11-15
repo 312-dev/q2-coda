@@ -1,7 +1,7 @@
 #!/bin/sh
 # Q2 Pod — safe replacement for the stock Wi-Fi transfer file-manager CGIs (create/delete/
-# list/download/upload), and the PIN check in front of them (auth). One script installed over all
-# five cgi-bin/*.cgi inodes and as cgi-bin/auth.cgi; it dispatches on SCRIPT_NAME, so it answers both
+# list/download/upload), and the PIN check in front of them (auth). One script behind all five
+# cgi-bin/*.cgi inodes and cgi-bin/auth.cgi; it dispatches on SCRIPT_NAME, so it answers both
 # /name and /cgi-bin/name.cgi — no bypass route.
 #
 # Who may ask: demo's wifi_transfer.c writes a fresh six-digit PIN and a 128-bit session token, both
@@ -18,7 +18,9 @@
 # rejects any dot-component (".." traversal, "." self, and hidden files such as .scrobble.ini);
 # confine() then resolves symlinks so a non-FAT card cannot redirect an op off the card or to a
 # hidden entry, and hidden() refuses a hidden entry asked for by its other name (a FAT 8.3 short
-# name). Runs under the stock busybox ash as root, like the stock CGIs.
+# name). Installed as /usr/bin/q2cgi; thttpd runs as www-data, and every cgi-bin/*.cgi is
+# patch/cgi_root.c, which runs this under the stock busybox ash as root (only root may write the
+# card) with only the variables read below (docs/internals.md#wi-fi-transfer-root).
 #
 # Shell: the busybox ash the Q2 ships (POSIX plus `local`). No bashisms. Tested with busybox ash.
 
