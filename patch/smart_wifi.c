@@ -87,21 +87,22 @@ static int net_page_open(void) {
     return 0;
 }
 
-/* Something needs the network: a USB cable in; AirPlay or DLNA on (Network service), SyncLink over
- * Wi-Fi or a SyncLink session, Wi-Fi transfer; a stock stream queue (Tidal's: the types
- * on_wm_timer_networkstatus stops once offline, whatever it is doing, as Play must fetch its URL at
- * once), Spotify's librespot running or waiting to start (it never retries a Connect login or mDNS
- * that failed), a station playing, a card app running, a scrobble upload, Network Update's download
- * or an Apps job, Download Album Lyrics, a Tidal download or an action held for the link
+/* Something needs the network: a USB cable in; AirPlay or DLNA on (Network service); Car Remote on
+ * (coda_rc_shim.c: its phone connects over Wi-Fi when the car starts, so the radio is up before);
+ * SyncLink over Wi-Fi or a SyncLink session, Wi-Fi transfer; a stock stream queue (Tidal's: the
+ * types on_wm_timer_networkstatus stops once offline, whatever it is doing, as Play must fetch its
+ * URL at once), Spotify's librespot running or waiting to start (it never retries a Connect login
+ * or mDNS that failed), a station playing, a card app running, a scrobble upload, Network Update's
+ * download or an Apps job, Download Album Lyrics, a Tidal download or an action held for the link
  * (smart_hold); a time sync pending on a link; or a page above. */
 static int smart_needed(void) {
     unsigned type = (unsigned)mclGetPlayType();
-    return g_usbdet_value || g_airplayflag || g_dlnaflag || g_synclinkflag == 2 ||
-           g_syncLink_status || g_wifitransport_flag || airplayGetFlag() == 2 || type - 2 < 2 ||
-           type - 0xf1 < 2 || spot_running() || radio_status() == 2 || addon_running() ||
-           scrobble_busy() || netupdate_busy() || album_lyrics_busy() || tidal_busy() ||
-           sw.hold_timer || (g_syncnettime_flag && networkGetConnectStatus() > 0) ||
-           net_page_open();
+    return g_usbdet_value || g_airplayflag || g_dlnaflag || coda_rc_enabled() ||
+           g_synclinkflag == 2 || g_syncLink_status || g_wifitransport_flag ||
+           airplayGetFlag() == 2 || type - 2 < 2 || type - 0xf1 < 2 || spot_running() ||
+           radio_status() == 2 || addon_running() || scrobble_busy() || netupdate_busy() ||
+           album_lyrics_busy() || tidal_busy() || sw.hold_timer ||
+           (g_syncnettime_flag && networkGetConnectStatus() > 0) || net_page_open();
 }
 
 /* power_poll, every SMART_POLL_MS. The row off, or the user's Wi-Fi off: stock's, and a radio Smart
