@@ -11374,11 +11374,12 @@ SPLIT=O['HOME_SPLIT_W']; PW=375-SPLIT; X,Y,TICK=O['DRIFT_X_MS'],O['DRIFT_Y_MS'],
 m=DepthMachine(); pan_counter=m.u.hook_add(UC_HOOK_BLOCK,count_block,begin=BASE,end=SCRATCH-1)  # before any code is cached
 m.budget=80_000_000  # filtering and sharpening a 1914 px cover passes 50 million
 m.open(); m.top=m.home; m.word(m.home+O['W_PARENT'],m.wm); np=m.node('window','playing_page')
+m.handlers.pop(syms['mclGetPlayStatus'],None); m.word(0xa50084,2)  # playing: the pane shows the playing cover (art_source)
 m.byte(syms['g_playcover_type'],1); m.u.mem_write(syms['g_lastcover_url'],b'/p/A\0')
 def paint_home(): m.call(address=HOOKS['widget_on_paint_background'][0],args=(m.home,m.canvas,0,0),gap=0)
 def drifts(): return [t for t in m.timers.values() if t[1]==payload_syms['home_drift']]
 def invalidated(): return [(c[1],c[2] and tuple(signed(m.get(c[2]+4*i)) for i in range(4))) for c in m.calls if c[0]=='widget_invalidate_force']
-def tex_of(w,h):  # the last cover loaded (opaque) as home_tex leaves it, and its zoomed size
+def tex_of(w,h):  # the last cover loaded (opaque) as slide_load leaves it, and its zoomed size
     url,=m.pixels; px=struct.unpack(f'<{w*h}I',bytes(m.u.mem_read(m.pixels[url],w*h*4)))
     fw,fh=(PW,-(-PW*h//w)) if PW*h>290*w else (-(-290*w//h),290); tw,th=fw*O['DRIFT_ZOOM_PCT']//100,fh*O['DRIFT_ZOOM_PCT']//100
     out=[]
@@ -11446,16 +11447,32 @@ passed()
 # and a large one is box filtered.
 m.call(address=payload_syms['coverflow_home_layout'],args=(0,0,0,0),gap=0); assert not drifts()
 paint_home(); assert drawn()==framed(c,t); paint_home(); assert len(drifts())==1
+# A new cover fades in over the last (SLIDE_FADE_MS), both panning on at the same phase, the incoming laid over the
+# outgoing by its share, the timer stepping every SLIDE_TICK_MS while it runs; then it shows alone, at DRIFT_TICK_MS.
+FADE,FTICK=O['SLIDE_FADE_MS'],O['SLIDE_TICK_MS']
+fade_cost=[]  # a fade frame's instructions, its two covers rendered
+def blended(a,b,k):  # lerp: tap4 of the two by 256 - k and k
+    a,b=struct.unpack(f'<{len(a)//4}I',a),struct.unpack(f'<{len(b)//4}I',b)
+    return struct.pack(f'<{len(a)}I',*(tap4(x,y,0,0,(256-k,k,0,0)) for x,y in zip(a,b)))
+def faded(old,new):
+    global t
+    assert drawn()==blended(framed(old,t),framed(new,t),1)  # a 256th in
+    m.advance(TICK); t+=TICK; f=1+TICK
+    instructions[0]=0; got=drawn(); fade_cost.append(instructions[0])
+    assert got==blended(framed(old,t),framed(new,t),f*256//FADE)
+    while f<FADE: m.advance(FTICK); t+=FTICK; f+=FTICK
+    assert drawn()==framed(new,t) and len(drifts())==1
+    assert next(v[3] for v in m.timers.values() if v[1]==payload_syms['home_drift'])==TICK  # the pan's period again
 m.art_size=(638,638); m.pixels.clear(); m.byte(syms['g_playcover_type'],2)
-instructions[0]=0; paint_home(); filter_cost=instructions[0]; c=tex_of(638,638)
-assert drawn()==framed(c,t) and len(drifts())==1
+instructions[0]=0; paint_home(); filter_cost=instructions[0]; old,c=c,tex_of(638,638)
+faded(old,c)
 m.art_size=(1914,1914); m.pixels.clear(); m.byte(syms['g_playcover_type'],1)
-instructions[0]=0; paint_home(); big_cost=instructions[0]; m.u.hook_del(pan_counter); c=tex_of(1914,1914); assert drawn()==framed(c,t); passed()
+instructions[0]=0; paint_home(); big_cost=instructions[0]; m.u.hook_del(pan_counter); old,c=c,tex_of(1914,1914); faded(old,c); passed()
 # A player cover too long for DRIFT_TEXELS stays still, even with a Coverflow thumbnail that
 # could pan; neither arms the timer.
 m.art_sizes={'externpic.jpg':(4000,100)}; m.byte(syms['g_playcover_type'],2); m.advance(TICK); paint_home(); m.advance(TICK); paint_home()
 assert not drifts() and m.nodes[m.art]['image'].endswith('externpic.jpg') and m.get(m.art+O['W_W'])==290*40; passed()
-print(f'Home pan on MIPS: {frame_cost} instructions a frame (every DRIFT_TICK_MS), {filter_cost} and {big_cost} to filter a 638 and a 1914 px cover once (payload only)')
+print(f'Home pan on MIPS: {frame_cost} instructions a frame (every DRIFT_TICK_MS), {fade_cost[0]} a cross-fade frame (every SLIDE_TICK_MS), {filter_cost} and {big_cost} to filter a 638 and a 1914 px cover once (payload only)')
 
 # Accent (docs/internals.md#accent). The mapping: stock red blended with a neutral becomes the same
 # blend of the preset's red tone, alpha kept; greys, other hues and every Crimson color stay.

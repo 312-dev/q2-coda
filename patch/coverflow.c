@@ -3916,21 +3916,39 @@ static int pane_x(void) { return split_geom(SPLIT_ART); }
 static int pane_w(void) { return 375 - pane_x(); }
 static int pane_up(void) { return split_geom(SPLIT_ART_UP); }
 static int pane_h(void) { return client_h() + pane_up(); }
-/* iPod Home (docs/ipod.md): the playing track's art beside the list. */
+/* One cover in Split's pane (docs/ipod.md#home): tex its zoomed copy inside a border (slide_load),
+ * tw x th texels, the border's not counted (tw 0: none); lib 0 the playing track's, which pans
+ * from the old crop u0 v0 across ranges rx ry, an eased ping-pong (drift_at) for as long as it
+ * shows; lib 1 a library cover of the slideshow, whose window moves once over its life from
+ * kb[0] to kb[1] (its top left in 1/256 texel and its scale in 1/65536 texel a pixel); ms the
+ * time it has shown, the pan's phase. */
+typedef struct {
+    unsigned *tex;
+    int tw, th, u0, v0, rx, ry, lib;
+    int kb[2][3];
+    unsigned ms;
+} slide_t;
+enum { SHOW_NOW, SHOW_LIB }; /* what the pane shows (art_source): the playing cover, the library's */
+/* iPod Home (docs/ipod.md): the playing track's art, or the library's in turn, beside the list. */
 static struct {
     void *win, *art, *list, *sets; /* sets: the Settings list, in the list's place while open */
     void *lib; /* the Library's rows the same way: only a set with home_lib has it */
     void *stream;      /* and Streaming's */
     void *carousel[3]; /* Home: Carousel's slide_menu and its img_left, img_right */
     unsigned key, repaint; /* repaint: the timer of home_repaint */
-    /* drift: home_drift's timer; drift_ms: the pan's phase, ms shown */
-    unsigned drift, drift_ms, drift_last;
-    /* home_tex's zoomed cover (tw 0: the still stock image, which never pans) and the panel's
-     * frame, drawn from it at du dv (1/256 px, -1 for none yet); ring: home_render's rows */
-    unsigned *tex;
+    /* drift: home_drift's timer, tick its period; drift_last: its last step */
+    unsigned drift, drift_last, tick;
+    /* sl[0] the cover showing (tw 0: the still stock image, which never moves), sl[1] the next
+     * one fading in over it for fade ms (0: none); the panel's frame, drawn from them as drawn
+     * says (frame_stamp, 0 for none yet); ring: home_render's rows */
+    slide_t sl[2];
     void *frame;
-    int tw, rx, ry, u0, v0, du, dv;
+    unsigned fade, drawn;
     int pane; /* no cover shows: coverflow_home_clip paints the theme's pane */
+    /* show: SHOW_*; idle: when play was first seen stopped or paused, | 1, 0 while it plays;
+     * seed: kb_rand's */
+    int show;
+    unsigned idle, seed;
     void *row; /* the highlighted row and what it shows in the pane (PANE_*) */
     void *row_image, *row_label; /* a Streaming row's image and name widgets, found once per row */
     void *svc;                   /* a card app's icon at the pane's size (pane_scaled), its name */
@@ -4003,19 +4021,48 @@ static int home_repaint(const void *unused) {
 }
 
 /* One axis of the pan (an iPod classic's menu art): 0 to range px and back over 2 x period ms, in
- * 1/256 px, eased in and out at each end (smoothstep, 3s^2 - 2s^3), so it slows to a stop and
- * turns with no jolt; its speed peaks at 1.5 times the average halfway. s is in 1/65536 and e,
- * unrounded so it never steps back, in 1/2^48 (64 bits); range is a tenth of a cover within
+ * 1/256 px, at ms shown, eased in and out at each end (smoothstep, 3s^2 - 2s^3), so it slows to a
+ * stop and turns with no jolt; its speed peaks at 1.5 times the average halfway. s is in 1/65536
+ * and e, unrounded so it never steps back, in 1/2^48 (64 bits); range is a tenth of a cover within
  * DRIFT_TEXELS (under 100 px), so the result fits 32. */
-static int drift_at(int range, unsigned period) {
-    unsigned t = home.drift_ms % (2 * period), s = ((t < period ? t : 2 * period - t) << 16) / period;
+static int drift_at(int range, unsigned period, unsigned ms) {
+    unsigned t = ms % (2 * period), s = ((t < period ? t : 2 * period - t) << 16) / period;
     unsigned long long e = (unsigned long long)s * s * (3 * 65536u - 2 * s);
     return (int)((unsigned long long)range * 256 * (e >> 24) >> 24);
 }
 
-/* Where the panel's top left is in the zoomed cover, in 1/256 px: the old crop, then the pan. */
-static int pan_u(void) { return home.u0 * 256 + drift_at(home.rx, DRIFT_X_MS); }
-static int pan_v(void) { return home.v0 * 256 + drift_at(home.ry, DRIFT_Y_MS); }
+/* A library cover's whole life on the pane: its fade in, its hold and its fade out. */
+#define SLIDE_LIFE_MS (SLIDE_HOLD_MS + 2 * SLIDE_FADE_MS)
+/* Where s's window is now: its top left in the zoomed cover in 1/256 texel (u v) and its scale in
+ * 1/65536 texel a pixel (k). The playing cover: the old crop, then the pan, a texel a pixel. A
+ * library cover: kb[0] to kb[1] at an even pace over SLIDE_LIFE_MS, then still (the Ken Burns
+ * look: one slow zoom and drift a cover); ms is at most SLIDE_LIFE_MS here, so p fits 32 bits. */
+static void slide_at(const slide_t *s, int *u, int *v, int *k) {
+    if (!s->lib) {
+        *u = s->u0 * 256 + drift_at(s->rx, DRIFT_X_MS, s->ms);
+        *v = s->v0 * 256 + drift_at(s->ry, DRIFT_Y_MS, s->ms);
+        *k = 65536;
+        return;
+    }
+    unsigned p = ((s->ms < SLIDE_LIFE_MS ? s->ms : SLIDE_LIFE_MS) << 16) / SLIDE_LIFE_MS;
+    int *at[3] = { u, v, k };
+    for (int i = 0; i < 3; ++i)
+        *at[i] = s->kb[0][i] + (int)((long long)(s->kb[1][i] - s->kb[0][i]) * p >> 16);
+}
+
+/* The incoming slide's share of the frame in 1/256, by the fade's time: 1 to 255. */
+static unsigned fade_k(void) {
+    unsigned k = home.fade * 256 / SLIDE_FADE_MS;
+    return k < 1 ? 1 : k > 255 ? 255 : k;
+}
+
+/* What the frame shows now, never 0: the slides' windows and the fade's share. */
+static unsigned frame_stamp(void) {
+    int at[7] = { 0 };
+    slide_at(&home.sl[0], &at[0], &at[1], &at[2]);
+    if (home.fade) slide_at(&home.sl[1], &at[3], &at[4], &at[5]), at[6] = (int)fade_k();
+    return hash_bytes(FNV_SEED, (const unsigned char *)at, sizeof at) | 1;
+}
 
 /* A step repaints only the panel, once the pan has moved; coverflow_home_clip draws it. */
 static void pane_invalidate(void) {
@@ -4027,8 +4074,7 @@ static void pane_invalidate(void) {
     if (up && bar) widget_invalidate_force(bar, rows);
 }
 static void drift_place(void) {
-    if (pan_u() == home.du && pan_v() == home.dv) return;
-    pane_invalidate();
+    if (frame_stamp() != home.drawn) pane_invalidate();
 }
 
 /* What a highlighted row shows in Split's pane (theme()->pane_icon_x): Now Playing's and the
@@ -4054,27 +4100,54 @@ static const char *const pane_icons[] = {
 static int pane_covers(void) { return home.kind <= PANE_LIBRARY && !home.pane; }
 
 /* The pan runs only while it shows: Home on top and not sliding (its snapshot would not move), the
- * screen lit, a cover that pans (the placeholder does not; Full never paints the art), on a row
- * that shows it. */
+ * screen lit, on a row that shows a cover (Full never paints the art), and either a cover that
+ * moves (the placeholder does not) or a fade, or the slideshow, which fetches the next cover. */
 static int drift_live(void) {
     void *wm = window_manager();
-    return home.tw && (home.rx || home.ry) && pane_covers() && widget_get_visible(home.art) &&
-           g_backlight_status &&
-           !g_lockscreen_pageflag &&
+    const slide_t *s = &home.sl[0];
+    int moves = s->tw && !home.pane && (s->lib || s->rx || s->ry || home.fade);
+    return (moves || home.show == SHOW_LIB) && home.kind <= PANE_LIBRARY &&
+           widget_get_visible(home.art) && g_backlight_status && !g_lockscreen_pageflag &&
            window_manager_get_top_window(wm) == home.win && !window_manager_is_animating(wm);
 }
 
+/* The faded-in slide is the one showing, the other's texture freed. */
+static void fade_end(void) {
+    free(home.sl[0].tex);
+    home.sl[0] = home.sl[1];
+    memset(&home.sl[1], 0, sizeof home.sl[1]);
+    home.fade = 0, home.drawn = 0;
+}
+/* A slide's time on: the playing cover's modulo a whole number of both axes' cycles, so it never
+ * wraps mid-cycle; a library cover's held at its life's end once past it. */
+static void slide_step(slide_t *s, unsigned step) {
+    s->ms = s->lib ? (s->ms + step < SLIDE_LIFE_MS ? s->ms + step : SLIDE_LIFE_MS)
+                   : (s->ms + step) % (2u * DRIFT_X_MS * DRIFT_Y_MS);
+}
+static void slide_next(void);
+
 /* The pan's step; once it no longer shows the timer goes, and the next Home paint arms it again
- * at the same phase. Steps are capped, so a stalled loop never jumps. */
+ * at the same phase. Steps are capped, so a stalled loop never jumps. A fade runs to its end, the
+ * slideshow asks for its next cover, and the timer's period is SLIDE_TICK_MS while a fade runs,
+ * else DRIFT_TICK_MS: a new timer takes over when it changes. */
 static int home_drift(const void *unused) {
     if (!drift_live()) return (int)(home.drift = 0); /* RET_REMOVE */
     unsigned now = time_now_ms(), step = now - home.drift_last;
     home.drift_last = now;
-    /* modulo a whole number of both axes' cycles, so it never wraps mid-cycle */
-    home.drift_ms = (home.drift_ms + (step < DRIFT_MAX_STEP_MS ? step : DRIFT_MAX_STEP_MS)) %
-                    (2u * DRIFT_X_MS * DRIFT_Y_MS);
+    step = step < DRIFT_MAX_STEP_MS ? step : DRIFT_MAX_STEP_MS;
+    slide_step(&home.sl[0], step);
+    if (home.fade) {
+        slide_step(&home.sl[1], step);
+        home.fade += step;
+        if (home.fade >= SLIDE_FADE_MS) fade_end();
+    }
+    if (home.show == SHOW_LIB && !home.fade) slide_next();
     drift_place();
-    return 8; /* RET_REPEAT */
+    unsigned tick = home.fade ? SLIDE_TICK_MS : DRIFT_TICK_MS;
+    if (tick == home.tick) return 8; /* RET_REPEAT */
+    home.tick = tick;
+    home.drift = timer_add(home_drift, (void *)0, tick);
+    return 0; /* RET_REMOVE: the new timer goes on */
 }
 
 /* A w x h image's size just covering the panel, ph high, at its proportions; unknown sizes fill
@@ -4153,18 +4226,49 @@ static void drift_axis(int f, int t, int p, int *c0, int *r) {
     *c0 = lo, *r = hi - lo;
 }
 
-/* The cover at url, box filtered once to its fit zoomed DRIFT_ZOOM_PCT (home.tex, tw x th) and
- * composited over the page as Coverflow's decode does, for the pan to draw from. It pans across
- * the zoom's margin only (rx ry), from the old crop (u0 v0), so its edges never show. 1 when it
- * pans, -1 when nothing loads, 0 for a 16-bit decode or a cover too long for DRIFT_TEXELS, which
- * the stock fill shows still. home.tex holds it inside a border of its edges, a texel left and
- * above and two right and below (tw + 3 texels a row): home_render reads that far past the panel.
- * ponytail: only the playing track's cover, no iPod slideshow of library covers or crossfades;
- * library thumbnails are too small for the panel, so each change would decode a full cover. Light
- * Mode's paper behind a transparent cover changes with the next cover. */
-static int home_tex(const char *url) {
+/* kb_ends' random numbers: xorshift32, seeded from the clock on first use. */
+static unsigned kb_rand(void) {
+    unsigned x = home.seed ? home.seed : time_now_ms() | 1;
+    x ^= x << 13, x ^= x >> 17, x ^= x << 5;
+    return home.seed = x;
+}
+/* x within lo..hi, else halfway between them (a window wider than the room: centred). */
+static int kb_clamp(int x, int lo, int hi) {
+    return hi < lo ? (lo + hi) / 2 : x < lo ? lo : x > hi ? hi : x;
+}
+/* A library cover's Ken Burns: a focus at random in the middle 40 % of the zoomed cover each way,
+ * and a drift of up to KB_DRIFT px each way about it; the window starts half the drift before the
+ * focus and ends half after, zooming in (scale 1 to KB_NEAR) or out, at random. Each end is kept
+ * within the cover less split_inset at each edge, as the pan is (drift_axis). */
+static void kb_ends(slide_t *s) {
+    int pw = pane_w(), ph = pane_h(), in = (int)(kb_rand() & 1), inset = split_geom(SPLIT_INSET);
+    int ix = s->tw * inset / 100 * 256, iy = s->th * inset / 100 * 256;
+    int fx = s->tw * 256 / 100 * (30 + (int)(kb_rand() % 41)),
+        fy = s->th * 256 / 100 * (30 + (int)(kb_rand() % 41)),
+        dx = (int)(kb_rand() % (2 * KB_DRIFT + 1)) - KB_DRIFT,
+        dy = (int)(kb_rand() % (2 * KB_DRIFT + 1)) - KB_DRIFT;
+    for (int e = 0; e < 2; ++e) {
+        int k = e == in ? 65536 : KB_NEAR, side = e ? 1 : -1, w = pw * (k >> 8), h = ph * (k >> 8);
+        s->kb[e][0] = kb_clamp(fx + side * dx * 128 - w / 2, ix, s->tw * 256 - ix - w);
+        s->kb[e][1] = kb_clamp(fy + side * dy * 128 - h / 2, iy, s->th * 256 - iy - h);
+        s->kb[e][2] = k;
+    }
+}
+
+/* The cover at url into s, box filtered once to its fit zoomed DRIFT_ZOOM_PCT (s->tex, tw x th)
+ * and composited over the page as Coverflow's decode does, for the pan to draw from: the playing
+ * cover's (lib 0, at phase ms) across the zoom's margin only (rx ry), from the old crop (u0 v0), so
+ * its edges never show; a library cover's (lib 1) as kb_ends moves it. 1 when it moves, -1 when
+ * nothing loads, 0 for a 16-bit decode or a cover too long for DRIFT_TEXELS, which the stock fill
+ * shows still; s is emptied first, and stays empty but for a 1. s->tex holds the cover inside a
+ * border of its edges, a texel left and above and two right and below (tw + 3 texels a row):
+ * home_render reads that far past the panel.
+ * ponytail: Light Mode's paper behind a transparent cover changes with the next cover. */
+static int slide_load(slide_t *s, const char *url, int lib, unsigned ms) {
     static const unsigned char at[4][4] = BITMAP_RGBA_AT;
     unsigned bitmap[64]; /* bitmap_t */
+    free(s->tex);
+    memset(s, 0, sizeof *s);
     if (widget_load_image(home.art, url, bitmap)) return -1;
     unsigned w = bitmap[0], h = bitmap[1], format = ((unsigned short *)bitmap)[7] - 1u;
     int fw, fh;
@@ -4173,15 +4277,14 @@ static int home_tex(const char *url) {
     const unsigned char *data = 0;
     if (!home.frame) home.frame = opaque_frame(pane_w(), pane_h(), 1);
     if (home.frame && format < 4 && w && h && w <= 8192 && h <= 8192 && tw <= DRIFT_TEXELS / th) {
-        free(home.tex);
-        home.tex = calloc((unsigned)(th + 3) * (unsigned)(tw + 3), 4);
-        data = home.tex ? bitmap_lock_buffer_for_read(bitmap) : 0;
+        s->tex = calloc((unsigned)(th + 3) * (unsigned)(tw + 3), 4);
+        data = s->tex ? bitmap_lock_buffer_for_read(bitmap) : 0;
     }
     if (data) {
         unsigned stride = bitmap_get_line_length(bitmap),
                  paper = ipod_light() ? scheme()->paper & 255 : 0;
-        int ts = tw + 3;                   /* home.tex's row, its border included */
-        unsigned *tex = home.tex + ts + 1; /* texel 0, 0 */
+        int ts = tw + 3;                /* s->tex's row, its border included */
+        unsigned *tex = s->tex + ts + 1; /* texel 0, 0 */
         box_filter(data, stride, at[format], w, h, tex, ts, tw, th, paper);
         bitmap_unlock_buffer(bitmap);
         for (int y = 0; y < th; ++y) home_sharpen(tex + y * ts, tw, 1);
@@ -4191,12 +4294,16 @@ static int home_tex(const char *url) {
             row[-1] = row[0], row[tw] = row[tw + 1] = row[tw - 1];
         }
         /* then rows -1, th and th + 1, from the edge rows and their border */
-        memcpy(home.tex, home.tex + ts, (unsigned)ts * 4);
+        memcpy(s->tex, s->tex + ts, (unsigned)ts * 4);
         for (int y = th + 1; y < th + 3; ++y)
-            memcpy(home.tex + y * ts, home.tex + th * ts, (unsigned)ts * 4);
-        home.tw = tw, home.du = -1;
-        drift_axis(fw, tw, pane_w(), &home.u0, &home.rx);
-        drift_axis(fh, th, pane_h(), &home.v0, &home.ry);
+            memcpy(s->tex + y * ts, s->tex + th * ts, (unsigned)ts * 4);
+        s->tw = tw, s->th = th, s->lib = lib, s->ms = ms;
+        drift_axis(fw, tw, pane_w(), &s->u0, &s->rx);
+        drift_axis(fh, th, pane_h(), &s->v0, &s->ry);
+        if (lib) kb_ends(s);
+    } else {
+        free(s->tex);
+        s->tex = 0;
     }
     widget_unload_image(home.art, bitmap);
     return data != 0;
@@ -4221,36 +4328,66 @@ HOT unsigned tap4(unsigned a, unsigned b, unsigned c, unsigned e, const unsigned
     return 0xff000000u | (rb >> 8 & 0xff00ffu) | (g >> 8 & 0xff00u);
 }
 
-/* The panel from the zoomed cover at u, v (1/256 px), so the pan moves by fractions of a pixel:
- * in whole pixels its 1.5 a second jerked. A separable cubic B-spline over 4 x 4 texels: each
- * cover row the panel needs is filtered across once into home.ring, and each frame row down from
- * the ring's last four. */
-static void home_render(unsigned *d, int pitch, int u, int v) {
-    unsigned wx[4], wy[4];
-    bspline_w((unsigned)u & 255, wx), bspline_w((unsigned)v & 255, wy);
-    int ts = home.tw + 3;
-    const unsigned *s = home.tex + (v >> 8) * ts + (u >> 8); /* texel -1, -1 from u, v */
-    int pw = pane_w();
-    for (int y = -3, h = pane_h(); y < h; ++y, s += ts) {
-        unsigned *o = home.ring[(y + 3) & 3];
-        for (int x = 0; x < pw; ++x) o[x] = tap4(s[x], s[x + 1], s[x + 2], s[x + 3], wx);
-        if (y < 0) continue;
-        const unsigned *r0 = home.ring[y & 3], *r1 = home.ring[(y + 1) & 3],
-                       *r2 = home.ring[(y + 2) & 3], *r3 = home.ring[(y + 3) & 3];
-        for (int x = 0; x < pw; ++x) d[x] = tap4(r0[x], r1[x], r2[x], r3[x], wy);
-        d += pitch;
+/* a to b by k of 256, per channel */
+HOT unsigned lerp(unsigned a, unsigned b, unsigned k) {
+    const unsigned w[4] = { 256 - k, k, 0, 0 };
+    return tap4(a, b, 0, 0, w);
+}
+
+/* Slide s's window at u, v (1/256 texel) and scale k (1/65536 texel a pixel) into the panel, so
+ * it moves by fractions of a pixel: in whole pixels its 1.5 a second jerked. A separable cubic
+ * B-spline over 4 x 4 texels: each cover row the panel needs is filtered across once into
+ * home.ring (by its row, tag), and each frame row down from the four it falls among. At scale 1
+ * (the playing cover) every column takes the same weights, as one row of texels a pixel; a
+ * library cover's zoom gives each column its own. blend 0 writes the frame; else the slide is laid
+ * over what d holds at blend/256 (a cross-fade's incoming cover). */
+static void home_render(unsigned *d, int pitch, const slide_t *s, int u, int v, int k,
+                        unsigned blend) {
+    unsigned wx[HOME_PW][4], wy[4];
+    int ix[HOME_PW], tag[4] = { -1, -1, -1, -1 }, ts = s->tw + 3, pw = pane_w(), one = k == 65536;
+    for (int x = 0; x < (one ? 1 : pw); ++x) {
+        unsigned at = ((unsigned)u << 8) + (unsigned)x * (unsigned)k; /* 1/65536 texel */
+        ix[x] = (int)(at >> 16), bspline_w(at >> 8 & 255, wx[x]); /* texel -1, bordered at 0 */
+    }
+    for (int y = 0, h = pane_h(); y < h; ++y, d += pitch) {
+        unsigned at = ((unsigned)v << 8) + (unsigned)y * (unsigned)k;
+        int r = (int)(at >> 16);
+        for (int j = r; j < r + 4; ++j) {
+            if (tag[j & 3] == j) continue;
+            unsigned *o = home.ring[j & 3];
+            const unsigned *t = s->tex + j * ts;
+            tag[j & 3] = j;
+            if (one)
+                for (int x = 0; x < pw; ++x, ++t) o[x] = tap4(t[*ix], t[*ix + 1], t[*ix + 2], t[*ix + 3], *wx);
+            else
+                for (int x = 0, i; x < pw; ++x)
+                    i = ix[x], o[x] = tap4(t[i], t[i + 1], t[i + 2], t[i + 3], wx[x]);
+        }
+        bspline_w(at >> 8 & 255, wy);
+        const unsigned *r0 = home.ring[r & 3], *r1 = home.ring[(r + 1) & 3],
+                       *r2 = home.ring[(r + 2) & 3], *r3 = home.ring[(r + 3) & 3];
+        for (int x = 0; x < pw; ++x) {
+            unsigned c = tap4(r0[x], r1[x], r2[x], r3[x], wy);
+            d[x] = blend ? lerp(d[x], c, blend) : c;
+        }
     }
 }
 
-/* The pan's frame, rendered again only once the pan moved: 0 when it cannot be. */
+/* The frame, rendered again only once the slides moved or the fade stepped: 0 when it cannot be. */
 static int home_frame(void) {
-    int u = pan_u(), v = pan_v();
-    if (u != home.du || v != home.dv) {
+    unsigned stamp = frame_stamp();
+    if (stamp != home.drawn) {
         unsigned *d = (unsigned *)bitmap_lock_buffer_for_write(home.frame);
         if (!d) return 0;
-        home_render(d, (int)(bitmap_get_line_length(home.frame) / 4), u, v);
+        int pitch = (int)(bitmap_get_line_length(home.frame) / 4), u, v, k;
+        slide_at(&home.sl[0], &u, &v, &k);
+        home_render(d, pitch, &home.sl[0], u, v, k, 0);
+        if (home.fade) {
+            slide_at(&home.sl[1], &u, &v, &k);
+            home_render(d, pitch, &home.sl[1], u, v, k, fade_k());
+        }
         bitmap_unlock_buffer(home.frame);
-        home.du = u, home.dv = v;
+        home.drawn = stamp;
     }
     return 1;
 }
@@ -4259,12 +4396,6 @@ static int home_frame(void) {
 static void home_paint(void *canvas) {
     int src[4] = { 0, pane_up(), pane_w(), client_h() }, dst[4] = { 0, 0, src[2], src[3] };
     if (home_frame()) canvas_draw_image(canvas, home.frame, src, dst);
-}
-
-/* a to b by k of 256, per channel */
-HOT unsigned lerp(unsigned a, unsigned b, unsigned k) {
-    const unsigned w[4] = { 256 - k, k, 0, 0 };
-    return tap4(a, b, 0, 0, w);
 }
 
 /* The t x t texture at u, v (texels from its top-left corner), bilinear, its edge texels held. */
@@ -4683,16 +4814,89 @@ static int home_foreground(void *ctx, void *event) {
     return 0;
 }
 
+/* The pane as the frame (its image empty, home_paint draws it), at the panel's size. */
+static void art_frame(void) {
+    image_base_set_image(home.art, "");
+    home.pane = 0;
+    widget_move_resize(home.art, pane_x(), 0, pane_w(), client_h());
+    rearm(&home.repaint, home_repaint, 0);
+}
+/* No slide: the still stock image or the theme's pane shows. */
+static void slides_drop(void) {
+    free(home.sl[0].tex), free(home.sl[1].tex);
+    memset(home.sl, 0, sizeof home.sl);
+    home.fade = 0, home.drawn = 0;
+}
+/* The cover at url as the next slide (slide_load's answer): with one showing it fades in over it,
+ * else, or with cut (the same cover again after a layout, on its new paper), it shows at once. A
+ * playing cover that comes while another fades in takes that one's place in the fade (the player's
+ * own after the Coverflow thumbnail that stood in for it, or a quick skip's next), so nothing
+ * jumps; any other ends the fade first. The playing cover takes the one showing's phase when that
+ * was the playing cover too, so a new track's pan goes on where it was.
+ * ponytail: play starting while a library cover fades in ends that fade at once, a jump by what
+ * was left of it; three slides blended would lift it. */
+static int slide_show(const char *url, int lib, int cut) {
+    if (home.fade && !cut && !lib && !home.sl[1].lib) {
+        int moves = slide_load(&home.sl[1], url, 0, home.sl[1].ms);
+        if (moves <= 0) home.fade = 0; /* none to fade in: the one showing stays */
+        home.drawn = 0;
+        return moves;
+    }
+    if (home.fade) fade_end();
+    int over = !cut && home.sl[0].tw && !home.pane;
+    unsigned ms = !lib && !home.sl[0].lib ? home.sl[0].ms : 0;
+    int moves = slide_load(&home.sl[over], url, lib, ms);
+    if (moves <= 0) return moves;
+    if (over)
+        home.fade = 1;
+    else
+        art_frame();
+    home.drawn = 0;
+    return 1;
+}
+extern int slide_pick(char *url, int take); /* slideshow.c */
+/* The slideshow's next cover, once the one showing is due to fade out (at once if it is not a
+ * library cover), fetched SLIDE_AHEAD_MS before. */
+static void slide_next(void) {
+    const slide_t *s = &home.sl[0];
+    unsigned end = SLIDE_FADE_MS + SLIDE_HOLD_MS;
+    int due = !s->tw || home.pane || !s->lib || s->ms >= end;
+    char url[600];
+    if ((due || s->ms + SLIDE_AHEAD_MS >= end) && slide_pick(url, due)) {
+        if (!strcmp(url + 7, PEQ_ROOT "/tmp/q2-slide.jpg"))
+            image_manager_unload_bitmap_by_name(image_manager(), url); /* the same file each time */
+        slide_show(url, 1, 0);
+    }
+}
+
+/* What the pane shows (docs/ipod.md#home), as an iPod classic's main menu: the playing cover on a
+ * Now Playing row, the library's covers in turn on the Library's. Where the pane does not follow
+ * the row (OLED, or Row Preview off) the playing cover while a song plays, else, once play has
+ * stopped or paused for SLIDE_IDLE_MS, the library's. */
+static int art_source(void) {
+    if (home.kind == PANE_LIBRARY) return SHOW_LIB;
+    if (home.kind != PANE_NOW || (theme()->pane_icon_x && row_preview_on())) return SHOW_NOW;
+    unsigned now = time_now_ms();
+    if (mclGetPlayStatus() == 2) return (int)(home.idle = 0); /* SHOW_NOW */
+    if (!home.idle) home.idle = now | 1;
+    return (int)(now - home.idle) >= SLIDE_IDLE_MS ? SHOW_LIB : SHOW_NOW; /* idle may be now + 1 */
+}
+
 /* The player's cover, else the Coverflow cache of the track's album (now_tag), else the theme's
- * pane or the placeholder. The player's files belong to the track whose path it copies to
- * g_lastcover_url after writing them, so right after a track change they count only once that is
- * this track. Runs whenever a window or the status bar paints (at least once a second), for Home
- * in Split, and reloads only when the track, the cover it can use or its parsed tags change;
- * home_repaint then shows the new art whole. */
+ * pane or the placeholder; or under the slideshow (SHOW_LIB) the library's covers, which
+ * home_drift brings in turn, that track's art showing until the first comes. The player's files
+ * belong to the track whose path it copies to g_lastcover_url after writing them, so right after
+ * a track change they count only once that is this track. Runs whenever a window or the status
+ * bar paints (at least once a second), for Home in Split, and reloads only when what shows, the
+ * track, the cover it can use or its parsed tags change: a new cover that moves fades in over the
+ * one showing, and a still one cuts; home_repaint then shows the new art whole. */
 void coverflow_home_art(void *top) {
     if (!home.art || top != home.win || !widget_get_visible(home.art)) return;
+    int show = art_source(), changed = show != home.show;
+    home.show = show;
     if (!home.drift && drift_live()) {
         home.drift_last = time_now_ms();
+        home.tick = DRIFT_TICK_MS;
         home.drift = timer_add(home_drift, (void *)0, DRIFT_TICK_MS);
     }
     unsigned pos, n;
@@ -4704,34 +4908,34 @@ void coverflow_home_art(void *top) {
     unsigned key = hash_bytes(hash_bytes(fnv(FNV_SEED, (const unsigned char *)path), &type, 1),
                               (const unsigned char *)&album, sizeof(album)) ^
                    now_cover_written(cover);
-    if (key == home.key) return;
+    if (key == home.key && !changed) return;
+    int cut = home.key == ~0u; /* coverflow_home_layout's: the same cover, laid out again */
     home.key = key;
-    home.pane = 0;
+    /* the show goes on over a track change, and takes over from any cover that moves */
+    if (show == SHOW_LIB && home.sl[0].tw && !home.pane) return;
     char url[600] = "file://";
     if (r) art_path(url + 7, album, "");
     unsigned size[2] = { 0, 0 };
     int ch = client_h(), fw = pane_w(), fh = ch;
-    home.tw = 0;
     const char *src = cover;
     /* the player writes every track's cover to the same file: drop AWTK's cached bitmap of the
      * last track's, or the new track shows it (Enlarged Art does the same) */
     if (cover) image_manager_unload_bitmap_by_name(image_manager(), cover);
-    int pans = cover ? home_tex(cover) : -1;
-    if (pans < 0 && r) pans = home_tex(url), src = url;
-    if (pans > 0) {
-        image_base_set_image(home.art, ""); /* home_paint draws it */
+    int moves = cover ? slide_show(cover, 0, cut) : -1;
+    if (moves < 0 && r) moves = slide_show(url, 0, cut), src = url;
+    if (moves > 0) return;
+    slides_drop();
+    home.pane = 0;
+    int shown = moves == 0 && image_show(home.art, src, size);
+    if (!shown && theme()->home_pane[ipod_light()].n) {
+        image_base_set_image(home.art, ""); /* home_pane_paint draws it, the whole panel */
+        home.pane = 1;
     } else {
-        int shown = pans == 0 && image_show(home.art, src, size);
-        if (!shown && theme()->home_pane[ipod_light()].n) {
-            image_base_set_image(home.art, ""); /* home_pane_paint draws it, the whole panel */
-            home.pane = 1;
-        } else {
-            /* still, sized to the image's fit and centred, so the native fill draws it whole and
-             * the clip crops it evenly */
-            if (!shown && !image_show(home.art, HOME_PLACEHOLDER, size))
-                image_base_set_image(home.art, HOME_PLACEHOLDER);
-            home_fit(size[0], size[1], ch, &fw, &fh);
-        }
+        /* still, sized to the image's fit and centred, so the native fill draws it whole and
+         * the clip crops it evenly */
+        if (!shown && !image_show(home.art, HOME_PLACEHOLDER, size))
+            image_base_set_image(home.art, HOME_PLACEHOLDER);
+        home_fit(size[0], size[1], ch, &fw, &fh);
     }
     widget_move_resize(home.art, pane_x() + (pane_w() - fw) / 2, (ch - fh) / 2, fw, fh);
     rearm(&home.repaint, home_repaint, 0);
@@ -4892,7 +5096,7 @@ static int bar_rows(void *canvas, int *r) {
  * over it: navigation.c's clock_place puts the clock beside them. */
 int coverflow_home_split(void *top) {
     if (!home.art || top != home.win || !widget_get_visible(home.art)) return 0;
-    return pane_up() && home.tw && pane_covers() ? 2 : 1;
+    return pane_up() && home.sl[0].tw && pane_covers() ? 2 : 1;
 }
 
 /* The bar's background (ringnav_paint_bg), with Home on top and still: the pane's rows above Home's
@@ -4983,7 +5187,7 @@ void coverflow_home_clip(void *w, void *canvas, int begin) {
         return;
     if (!begin) {
         int covers = pane_covers();
-        if (w == home.art && covers && home.tw) home_paint(canvas);
+        if (w == home.art && covers && home.sl[0].tw) home_paint(canvas);
         /* The art's box is the image's fit, so the panel's edge and rows are measured from it. */
         else if (w == home.art && !covers)
             home_pane_paint(canvas, pane_x() - I(w, W_X), -I(w, W_Y), pane_w(), client_h());

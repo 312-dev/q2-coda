@@ -3349,7 +3349,7 @@ def test_home_split_s_clock_goes_right_and_over_the_art_in_text_primary(fw, st):
     clock = row.place()
     assert clock.box[0] + clock.box[2] - 2 == 322 - 24
     assert clock.props['style:normal:text_color'] == i32(INK_ROW)  # no cover under the bar: the row's grey
-    home.tw = 128  # a cover that fills the pane, up under the status row: inked over it, whole
+    home.sl[0].tw = 128  # a cover that fills the pane, up under the status row: inked over it, whole
     clock = row.place()
     assert clock.props['style:normal:text_color'] == i32(0xffffffff)
     moves = len(fw.calls('widget_move_resize'))

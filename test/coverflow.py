@@ -33,6 +33,7 @@ extern char system_bar[];
 #include <sys/wait.h>
 typedef int (*handler)(void *, void *);
 extern pthread_mutex_t shim_parse, shim_play;
+int mclGetPlayStatus(void); /* a macro over stock's address on the Q2 */
 extern void *shim_dir;
 #define parse_cover_mutex ((const unsigned char *)&shim_parse)
 #define g_playcover_mutex ((const unsigned char *)&shim_play)
@@ -325,6 +326,8 @@ int ipod_home(void) { return home_mode; }
 int home_lib_on(void) { return 1; }
 int row_preview_on(void) { return 1; }
 int library_search(void) { return 1; }
+int slide_pick(char *url, int take) { return 0; } /* slideshow.c: no library cover */
+int mclGetPlayStatus(void) { return 2; } /* playing: Split shows the playing cover */
 void library_rows(void *list) {}
 void stream_rows(void *list) {}
 int tk_str_start_with(const char *s, const char *p) { return !strncmp(s, p, strlen(p)); }
@@ -7691,7 +7694,7 @@ int main(void) {
     for (int i = 0; i < 4; ++i) assert(*(int *)(all[i]->raw + W_W) == HOME_SPLIT_W);
     assert(*(int *)(label->raw + W_W) == HOME_SPLIT_W - dot_x - HOME_SPLIT_LABEL_END && W(home_art)->visible);
     coverflow_home_art(win);
-    assert(loads == before + 2 && !strcmp(art, player)); /* home_tex tries it, then the still fill */
+    assert(loads == before + 2 && !strcmp(art, player)); /* slide_load tries it, then the still fill */
     classic = 2; /* Modern halves the screen: the 160px cover fills 290px from 187 + (188 - 290) / 2 */
     coverflow_home_layout();
     for (int i = 0; i < 4; ++i) assert(*(int *)(all[i]->raw + W_W) == HOME_SPLIT_W);
