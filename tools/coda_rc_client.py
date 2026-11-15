@@ -295,7 +295,8 @@ class Session:
         while total is None or len(data) < total:
             m = decode(self.call(T["GET_COVER"], encode([(1, art), (2, len(data)), (3, 4096), (4, px)]), T["COVER"]))
             if etag is not None and one(m, 5) != etag:
-                data, total = b"", None  # changed mid-fetch: again from the start
+                data, etag, total = b"", None, None  # changed mid-fetch: again from the start
+                continue
             etag, total = one(m, 5), one(m, 1, 0)
             data += one(m, 3, b"")
         return data, text(m, 4)
@@ -385,7 +386,7 @@ def main(argv=None):
     s = connect(a.host, a.port, key_dir(a.keys), a.name, a.code, pair=a.cmd == "pair")
     out = None
     if a.cmd == "pair":
-        out = {"paired": True, **s.info}
+        out = {**s.info, "paired": True}  # info is the first Hello's, from before the pairing
     elif a.cmd == "state":
         out = s.get_state()
     elif a.cmd == "watch":
