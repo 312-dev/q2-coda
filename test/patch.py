@@ -21335,8 +21335,8 @@ for w in (*lines.values(),*values.values()):
     assert (m.nodes[w]['style:normal:font_name'],m.nodes[w]['style:normal:font_size'])==('classic-light',17),m.nodes[w]
 assert {m.nodes[v]['style:normal:text_color'] for v in values.values()}=={signed(color_t(0x8a8a8a))}
 assert not any(n.get('name')=='ringnav_genre_scroll' for n in m.nodes.values()); passed()
-# OLED's table (tools/ipod.py np_info_table) takes the same rows: the bit depth joins Format's value ("FLAC, 16-bit"),
-# stock's English "Encoding" and "Bitrate" read "Format" and "Bit Rate", the values white in the dark half.
+# OLED's hidden details (tools/ipod.py np_info_values, About's grid's source) take the same rows: stock's English
+# "Encoding", "Bitrate" and "File Size" read "Format", "Bit Rate" and "Size", the grid's names.
 CONFIG.clear(); CONFIG.update(THEME='3',LIGHT='0')
 m=InfoMachine(); m.handlers[syms['getFormatString']]='i:format'
 lines={k:m.node('label',k,text=v) for k,v in stock_lines.items()}
@@ -21344,8 +21344,8 @@ values={k:m.node('hscroll_label',k+'_value') for k in stock_lines}
 win=m.node('window','playing_page',[*lines.values(),*values.values()])
 for l in (*lines.values(),*values.values()): m.word(l+O['W_PARENT'],win)
 m.call(address=payload_syms['ringnav_np_info'],args=(win,0,0,0),gap=0)
-assert [m.nodes[l]['text'] for l in lines.values()]==['Album','Genre','File Size','Year','Format','Bit Depth','Bit Rate','Sample Rate','Location']
-assert [m.nodes[v]['text'] for v in values.values()]==['Kid A','Unknown','35.92 MB','2000','FLAC, 16-bit','16-bit','950 kbps','44.1 kHz','SD:/Music/Radiohead']
+assert [m.nodes[l]['text'] for l in lines.values()]==['Album','Genre','Size','Year','Format','Bit Depth','Bit Rate','Sample Rate','Location']
+assert [m.nodes[v]['text'] for v in values.values()]==['Kid A','Unknown','35.92 MB','2000','FLAC','16-bit','950 kbps','44.1 kHz','SD:/Music/Radiohead']
 assert {m.nodes[v]['style:normal:text_color'] for v in values.values()}=={signed(color_t(0xffffff))}; passed()
 CONFIG.clear()
 # Genre shows in a private scroller, stock's label hidden as its source and left alone; its text is set once,

@@ -937,44 +937,21 @@ def np_grid(root, named, g, title, artist, album, remain):
     mode[1] = [(375 - w) // 2, bar_y + NP_GRID_MODES_DY - h // 2, w, h]
     mode[2]['opacity'] = '0'  # its target stays, its halves np_bar.c np_mode_click's; np_modes draws the pair over it
     root[3].append(mode)
-    np_info_table(named, g, slide_h)
+    np_info_values(named)
 
 
-# The grid's info page (⋯'s About, np_info_out) as a table (oled-design.md Now Playing, SPEC-next 4's mock-info-table): a fact a row, NP_INFO_ROW
-# apart in the slide's height, in NP_INFO_ORDER; the name left on the text column in Text Secondary, the value
-# right-aligned on the right column (the theme's playing.info.value), both in the info role's face and ellipsized (stock's
-# label holds the name, a <name>_value hscroll_label the value: navigation.c ringnav_np_info, which also folds the bit depth
-# into Format); a 1 px NP_INFO_RULE line between rows, as an inert table may have (RULES.md). label_bits stays, hidden, as
-# stock's np_info writes it.
-NP_INFO_ROW = 20
-NP_INFO_ORDER = ('label_album', 'label_genre', 'label_year', 'label_encode', 'label_sample', 'label_kbps', 'label_size',
-                 'label_location')
-NP_INFO_GRID_NAME_W = 110  # "Sample Rate", the longest English name, is about 84 px in Inter at 18
-NP_INFO_RULE = '#1F1F1F'
+# The grid's info page (⋯'s About, np_info_out) as the source of About's info grid (oled-design.md#track-details), which
+# np_about.c paints itself: the details stay hidden, and each of stock's labels gets a <name>_value hscroll_label
+# beside it, so navigation.c ringnav_np_info splits name and value as on Classic's rows; np_about_fill reads them.
+NP_INFO_NAMES = ('label_album', 'label_genre', 'label_year', 'label_encode', 'label_bits', 'label_sample', 'label_kbps',
+                 'label_size', 'label_location')
 
 
-def np_info_table(named, g, slide_h):
+def np_info_values(named):
     info = named['view_info'][3]
-    check(sorted(n[2]['name'] for n in info) == sorted(NP_INFO_ORDER + ('label_bits',)), 'Unexpected info page')
-    by = {n[2]['name']: n for n in info}
-    right, top = 375 - g.right_x, (slide_h - NP_INFO_ROW * len(NP_INFO_ORDER)) // 2
-    check(top >= 0, 'The info table must fit the slide')
-    keep = ('name', 'text', 'tr_text')
-    for i, key in enumerate(NP_INFO_ORDER):
-        n, y = by[key], top + NP_INFO_ROW * i
-        n[0] = 'hscroll_label'
-        n[1] = [g.text_x - NP_GRID_MARGIN, y, NP_INFO_GRID_NAME_W, NP_INFO_ROW]
-        n[2] = {k: v for k, v in n[2].items() if k in keep}
-        n[2].update({'style': 's_scrlabel_white20l', 'style:normal:text_align_h': 'left', 'style:normal:text_color': NP_GRID_SECONDARY,
-                     'only_focus': 'true', 'ellipses': 'true'})
-        x = g.text_x + NP_INFO_GRID_NAME_W
-        info.append(['hscroll_label', [x - NP_GRID_MARGIN, y, right - x + 2 * NP_GRID_MARGIN, NP_INFO_ROW], {
-            'name': key + '_value', 'style': 's_scrlabel_white20r', 'only_focus': 'true', 'ellipses': 'true'}, []])
-        if i:
-            info.append(['view', [g.text_x, y, right - g.text_x, 1], {'style:normal:bg_color': NP_INFO_RULE}, []])
-    bits = by['label_bits']
-    bits[1] = [0, 0, 0, 0]
-    bits[2]['visible'] = 'false'
+    check(sorted(n[2]['name'] for n in info) == sorted(NP_INFO_NAMES), 'Unexpected info page')
+    for key in NP_INFO_NAMES:
+        info.append(['hscroll_label', [0, 0, 0, 0], {'name': key + '_value', 'style': 's_scrlabel_white20r', 'visible': 'false'}, []])
 
 
 # Display's Centred Now Playing (IPOD NPCENTRED) opens stock's own page, its art centred over the

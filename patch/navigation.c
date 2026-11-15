@@ -3065,6 +3065,7 @@ int ringnav_paint(void *w, void *canvas) {
         if (bar) paint_scrollbar(canvas, bar, table);
     }
     addon_paint(w, canvas);
+    np_about_paint(w, canvas);
     peq_paint(w, canvas);
     battery_paint(w, canvas);
     if (NP_VISUALIZER) visualizer_paint(w, canvas);
@@ -6765,9 +6766,10 @@ int ringnav_paint_bg(void *w, void *canvas) {
             canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
         }
         stock_canvas_set_fill_color(canvas, fill);
-        coverflow_home_bar(canvas, window_manager_get_top_window(wm)); /* OLED's art in the bar */
+        coverflow_home_bar(canvas, window_manager_get_top_window(wm));   /* OLED's art in the bar */
         coverflow_home_strip(canvas, window_manager_get_top_window(wm)); /* and Split's list */
-        artist_cap(w, canvas); /* an artist's monogram, its top over the bar */
+        artist_cap(w, canvas);   /* an artist's monogram, its top over the bar */
+        np_about_cap(w, canvas); /* About's header, its top over the bar */
         st.paint_w = w;
         stock_canvas_set_fill_color(canvas, fill);
     }
@@ -7592,8 +7594,9 @@ static int theme_pick(void *ctx, void *event) {
  * rows (tools/ipod.py np_ipod, #204's): stock's label keeps the name and its <name>_value the
  * value, in the info role's face, the value in the theme's grey (written through the flip, its own
  * inverse on the half's paper and ink), the genre with them, not genre_fill's marquee. OLED's
- * table has them too, with the bit depth in Format's value and its English names "Format" and
- * "Bit Rate" for stock's "Encoding" and "Bitrate". */
+ * hidden details have them too, the source of About's grid (np_about.c np_about_fill, which this
+ * fill ends with), their English names "Format", "Bit Rate" and "Size" for stock's "Encoding",
+ * "Bitrate" and "File Size". */
 int ringnav_np_info(void *win) {
     static const char *const names[] = { "label_album", "label_genre",  "label_size",
                                          "label_year",  "label_encode", "label_bits",
@@ -7604,21 +7607,11 @@ int ringnav_np_info(void *win) {
     if (win && win == st.np_win && np_about_page())
         win = np_about_page(); /* About holds the labels */
     int result = np_info(win), rows = win && widget_lookup(win, "label_album_value", 1);
-    /* OLED's table (tools/ipod.py np_info_table): the bit depth joins Format ("FLAC, 16-bit") */
-    char depth[32] = "", where[64] = "";
-    void *bits = rows && oled_pages() ? widget_lookup(win, "label_bits", 1) : (void *)0;
-    if (bits && !widget_get_text_utf8(bits, depth, sizeof depth)) {
-        const char *v = depth;
-        while (*v && *v != ':') ++v;
-        v += *v == ':';
-        while (*v == ' ') ++v;
-        int n = (int)strlen(v),
-            bare = n > 3 && v[n - 4] >= '0' && v[n - 4] <= '9' && !strcmp(v + n - 3, "bit");
-        char t[32];
-        tk_snprintf(t, sizeof t, "%.*s%s", bare ? n - 3 : n, v, bare ? "-bit" : "");
-        memcpy(depth, t, sizeof depth);
-    } else
-        *depth = 0;
+    /* OLED's details (tools/ipod.py np_info_values), named as About's grid names them */
+    static const char *const stock_names[] = { "File Size", "Encoding", "Bitrate" },
+                             *const oled_names[] = { "Size", "Format", "Bit Rate" };
+    int oled = rows && oled_pages();
+    char where[64] = "";
     getFormatString("player_location", where, sizeof where);
     const char *loc =
         *where && *where != '(' ? where : "Location"; /* a missing string reads "(key)" */
@@ -7653,13 +7646,13 @@ int ringnav_np_info(void *win) {
             tk_snprintf(key, sizeof key, "%s_value", names[i]);
             void *value = widget_lookup(win, key, 1);
             tk_snprintf(out, sizeof out, "%.*s", n, name);
-            if (bits && (i == 4 || i == 6) && !strcmp(out, i == 4 ? "Encoding" : "Bitrate"))
-                tk_snprintf(out, sizeof out, "%s", i == 4 ? "Format" : "Bit Rate");
+            int k = i == 2 ? 0 : i == 4 ? 1 : i == 6 ? 2 : -1;
+            if (oled && k >= 0 && !strcmp(out, stock_names[k]))
+                tk_snprintf(out, sizeof out, "%s", oled_names[k]);
             if (strcmp(out, s)) widget_set_text_utf8(label, out);
             theme_font(label, ROLE_INFO, FONT_ROW);
             if (!value) continue;
-            tk_snprintf(out, sizeof out, "%.*s%s%s%s", split ? len - u : len, v,
-                        split ? units[i] : "", i == 4 && *depth ? ", " : "", i == 4 ? depth : "");
+            tk_snprintf(out, sizeof out, "%.*s%s", split ? len - u : len, v, split ? units[i] : "");
             if (widget_get_text_utf8(value, s, sizeof s) || strcmp(s, out))
                 widget_set_text_utf8(value, out);
             theme_font(value, ROLE_INFO, FONT_ROW);
@@ -7678,6 +7671,7 @@ int ringnav_np_info(void *win) {
         }
         if (strcmp(out, s)) widget_set_text_utf8(label, out);
     }
+    np_about_fill(win);
     return result;
 }
 
@@ -12297,7 +12291,8 @@ int ringnav(void *ctx, void *event) {
         return result;
     }
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
-    if (spot_key(top, key)) return STOP; /* Spotify's page: Centre scrubs */
+    if (spot_key(top, key)) return STOP;     /* Spotify's page: Centre scrubs */
+    if (np_about_key(top, key)) return STOP; /* OLED's About: the wheel scrolls it */
     if (xfade_key(top, key))
         return STOP; /* Crossfade's page: Centre toggles, the wheel sets the length */
     if (eq_key(top, key))

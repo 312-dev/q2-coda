@@ -214,6 +214,7 @@ MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart
               'caret-up', 'caret-down', 'check', 'sliders-horizontal', 'info')
 PAIR_ICON_PX = 16  # an artist's page's action pair (artist_page.c PAIR_ICON)
 PAIR_ICONS = ('shuffle', 'radio')
+QUALITY_PX = 12  # Now Playing's About, its quality badge's glyph (np_about.c AB_GLYPH): Text Primary per half
 
 
 def gradient(stops, y0, y1):
@@ -1001,6 +1002,7 @@ def images(t):
         out[f'{prefix}_menu_check_a'] = phosphor('check', MENU_ICON_PX, on)
         # an artist's Shuffle and Radio panels (artist_page.c pair_paint): the accent's top tone at rest, white lit
         out |= {f'{prefix}_pair_{n}_{k}': phosphor(n, PAIR_ICON_PX, c) for n in PAIR_ICONS for k, c in {'a': on, 'w': 0xffffff}.items()}
+        out |= {f'{prefix}_quality_{k}': phosphor('waveform-bold', QUALITY_PX, c) for k, c in STATE_INKS.items()}
     if t['entry_ipod']:  # Search's key pop (search_strip.c): the accent's top tone, as the lit key's
         out |= {f'{prefix}_{n}': d for n, d in pop_images(t['schemes'][t['accents'].bit_length() - 1]['tones'][0]).items()}
     if t['painter[PAINT_SONGS]']:  # Folder view's folder glyph (song_rows.c folder_row): Text Secondary, white on the selection
