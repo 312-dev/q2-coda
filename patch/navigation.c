@@ -8355,6 +8355,8 @@ int ipod_list_layout(void *layout, void *view) {
     int wifi = settings && wifi_list(list);
     if (settings) settings_layout(list);
     if (wifi) wifi_rows_pre(view);
+    int synclink = settings && synclink_list(list);
+    if (synclink) synclink_hint_pre(view);
     unsigned n = row ? widget_count_children(view) : 0;
     for (unsigned i = 0; i < n; ++i) {
         void *item = widget_get_child(view, i);
@@ -8377,6 +8379,7 @@ int ipod_list_layout(void *layout, void *view) {
         if (widget_get_visible(item)) set_row(item);
     }
     if (wifi) wifi_rows_post(view);
+    if (synclink) synclink_hint_post(view);
     if (settings && about_list(list)) about_rows(view);
     return ret;
 }

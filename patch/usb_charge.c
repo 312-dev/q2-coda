@@ -54,6 +54,7 @@ int ringnav_usb_config(void) {
     pthread_mutex_unlock(usb_charge.mutex);
     int result = stock_usb_config_trampoline();
     dac_default();
+    synclink_default(); /* before platform_init starts Bluetooth, Wi-Fi and SyncLink (synclink.c) */
     int cable = stock_usb_detect_trampoline();
     pthread_mutex_lock(usb_charge.mutex);
     usb_charge.cable = cable;

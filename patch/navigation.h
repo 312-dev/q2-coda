@@ -500,6 +500,13 @@ void wifi_rows_pre(void *view);
 void wifi_rows_post(void *view);
 void wifi_mark(void *w, void *canvas, int level, int selected);
 
+/* synclink.c: SyncLink off unless the user turns it on (from ringnav_usb_config), and the Wireless
+ * page's caption under its row (from ipod_list_layout) */
+void synclink_default(void);
+int synclink_list(void *list);
+void synclink_hint_pre(void *view);
+void synclink_hint_post(void *view);
+
 /* settings_pages.c: a set_switch theme's About page as an inert table, from ipod_list_layout */
 int about_list(void *list);
 void about_rows(void *view);
