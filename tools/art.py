@@ -203,6 +203,7 @@ SPIN_R = (3.4, 6.4)  # a spoke's ends' distances from the centre, round capped
 SPIN_STROKE = 1.9
 SPIN_FADE = 0.1
 STATE_INKS = {'d': 0xffffff, 'l': 0x000000}
+KEYLOCK_CARD_PX = 56  # Buttons Lock's card's padlock (keylock.c CARD_GLYPH)
 # Now Playing's shuffle and repeat (playing.modes.icons, np_bar.c np_modes): bold, MODE_PX, off in Text Secondary per
 # half, on in the theme's own accent's top tone in both; repeat-once is repeat's on glyph for Repeat One.
 MODE_PX = 22
@@ -656,13 +657,6 @@ def qs_knob():
     ramp = gradient(((0, 0xffffff), (50, 0xd9dbde), (100, 0xb8bbc0)), 3, 26)
     top = compose((0, 0, w, w), [(path(circle(14.5, 14.5, 11.5)), lambda x, y: (ramp(y), 1))])
     return png(w, w, over(top, inked(w, w, [(outside(soft, disc), 0xcc, 0)])))
-# The lock screen's hint: the soft shadow (0 1px 2px #00000080) of stock's three marks, drawn at 21 x 7, HINT_PAD past them all round.
-HINT_MARK = 'M1.5 1.5L8.2 8L1.5 14.5'
-HINT_MARKS, HINT_PAD, HINT_DROP, HINT_SIGMA, HINT_A = (0, 10.5, 21), 4, 1, 1, 0x80
-def hint_shadow():
-    w, h = 21 + 2 * HINT_PAD, 7 + 2 * HINT_PAD
-    marks = [[((x + at) * 0.7 + HINT_PAD, y * 7 / 16 + HINT_PAD + HINT_DROP) for x, y in poly] for at in HINT_MARKS for poly in stroke(path(HINT_MARK), 2.6, closed=False)]
-    return png(w, h, inked(w, h, [(blurred([min(v, 1) for v in coverage(marks, (0, 0, w, h))], w, h, HINT_SIGMA), HINT_A, 0)]))
 
 
 # The confirm tray's soft shadow on the page (0, 2, blur 6, #00000077): the box where the payload draws it, the
@@ -705,56 +699,6 @@ def orb(side, usb):
                          (shape, lambda x, y: (fill(y), 1)),
                          (stroke(disc(0, 0, ORB_RING_R), ORB_RING_W * k), lambda x, y: (ORB_RING, ORB_RING_A)),
                          (ink, lambda x, y: (ORB_INK, 1))])
-# The info screen's dark face, on a -50..50 box at CLOCK_DARK_PX: its numerals in the theme's own outlines. The hands are the payload's (navigation.c paint_clock).
-CLOCK_DARK_PX = 96
-def outlines(text, size, cx, baseline):
-    """text's glyphs centred on cx, in the theme's face at size, as one even-odd polygon per glyph."""
-    from fontTools.pens.basePen import BasePen
-    font = classic_light_font()
-    glyphs, cmap, k = font.getGlyphSet(), font.getBestCmap(), size / font['head'].unitsPerEm
-    names = [cmap[ord(c)] for c in text]
-    x = cx - sum(glyphs[n].width for n in names) * k / 2
-
-    class Flat(BasePen):
-        def __init__(self):
-            super().__init__(glyphs)
-            self.parts = []
-
-        def _moveTo(self, p):
-            self.parts.append([p])
-
-        def _lineTo(self, p):
-            self.parts[-1].append(p)
-
-        def _curveToOne(self, a, b, c):
-            p0 = self.parts[-1][-1]
-            for i in range(1, 9):
-                t = i / 8
-                self.parts[-1].append(tuple((1 - t)**3 * p0[j] + 3 * (1 - t)**2 * t * a[j] + 3 * (1 - t) * t**2 * b[j] + t**3 * c[j] for j in (0, 1)))
-    out = []
-    for name in names:
-        pen = Flat()
-        glyphs[name].draw(pen)
-        placed = [[(x + px * k, baseline - py * k) for px, py in part] for part in pen.parts]
-        if placed:
-            out.append([q for part in placed for q in (*part, part[0], placed[0][0])])
-        x += glyphs[name].width * k
-    return out
-
-
-def clock_dark():
-    """The dark face's RGBA bytes: disc r 49, its stroke, numerals 1..12 at r 38."""
-    size = CLOCK_DARK_PX
-    k = size / 100
-    place = lambda polys: [[((x + 50) * k, (y + 50) * k) for x, y in poly] for poly in polys]
-    circle = [(49 * math.cos(a * math.pi / 60), 49 * math.sin(a * math.pi / 60)) for a in range(120)]
-    numerals = []
-    for i in range(1, 13):
-        a = i * math.pi / 6
-        numerals += outlines(str(i), 11, 38 * math.sin(a), 4 - 38 * math.cos(a))
-    return compose((0, 0, size, size), [(place([circle]), lambda x, y: (0x0c0f15, 1)),
-                                        (stroke(place([circle]), .8 * k), lambda x, y: (0xffffff, 0x66 / 255)),
-                                        (place(numerals), lambda x, y: (0xffffff, 1))])
 
 
 # The T9 keyboard's glyphs and the search field, each in its own box.
@@ -995,6 +939,10 @@ def images(t):
         out |= {f'{prefix}_spin_{f}': spinner(f) for f in range(SPIN_SPOKES)}
     if t['painter[PAINT_BATTERY]'] == list(CHOICES['bar.battery.painter']).index('slim'):  # its play state is the theme's too
         out |= {f'{prefix}_{n}_{k}': phosphor(f'{n}-fill', STATE_PX, c) for n in ('play', 'pause') for k, c in STATE_INKS.items()}
+        # and Buttons Lock's padlock beside it (keylock.c keylock_bar)
+        out |= {f'{prefix}_keylock_{k}': phosphor('lock-simple-fill', STATE_PX, c) for k, c in STATE_INKS.items()}
+    if t['painter[PAINT_PAGES]'] == list(CHOICES['pages.own.painter']).index('oled'):  # Buttons Lock's card (keylock.c keylock_paint)
+        out |= {f'{prefix}_keylock_card_{k}': phosphor('lock-simple-fill', KEYLOCK_CARD_PX, c) for k, c in STATE_INKS.items()}
     if t['np_modes']:
         on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
         for n in ('shuffle', 'repeat'):
@@ -1068,7 +1016,6 @@ def images(t):
         for name, (glyph, lit, opacity) in QS_BUTTONS.items():
             out |= {f'{prefix}_drop_{name}{k}': qs_mark(glyph, opacity, QS_INK[k]) for k in (['', '_l'] if lit else ['_l', '_d'])}
         out |= {f'{prefix}_drop_track': qs_track(), f'{prefix}_drop_knob': qs_knob()}
-        out[f'{prefix}_clock_dark'] = png(CLOCK_DARK_PX, CLOCK_DARK_PX, clock_dark())
         out |= {f'{prefix}_{name}': kb_glyph(name) for name in KB_GLYPHS}
         out[f'{prefix}_field'] = png(FIELD_W, FIELD_H, field())
         out[f'{prefix}_band_top'], out[f'{prefix}_band_foot'] = band_rim()
@@ -1077,7 +1024,7 @@ def images(t):
         out |= {f'{prefix}_tray_{w}': tray(w) for w in TRAY_WIDTHS}
         for w in CELL_WIDTHS:
             out |= {f'{prefix}_cell_{w}': cell(w, False), f'{prefix}_cell_lit_{w}': cell(w, True)}
-        out |= {f'{prefix}_tile': tile(), f'{prefix}_clock_chrome': clock_chrome(), f'{prefix}_clock_shadow': clock_shadow(), f'{prefix}_hint_shadow': hint_shadow()}
+        out |= {f'{prefix}_tile': tile(), f'{prefix}_clock_chrome': clock_chrome(), f'{prefix}_clock_shadow': clock_shadow()}
     if t['painter[PAINT_CONFIRM]'] == list(CHOICES['dialog.confirm.painter']).index('classic-light'):
         out[f'{prefix}_confirm_shadow'] = png(*TRAY_SHADOW_BOX[2:], tray_shadow())
     if t['painter[PAINT_CONFIRM]'] == list(CHOICES['dialog.confirm.painter']).index('oled'):  # feedback.c's confirmation

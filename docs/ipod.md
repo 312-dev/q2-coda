@@ -193,8 +193,8 @@ than about 2:1, or taller than about 5.5:1), a decode that is not 32-bit, the pl
 drawn by the stock fill. Nothing is stored: the pan's phase counts only time shown, so leaving
 Home or a Theme change resumes it where it was, and a new track's cover takes up the phase of the
 one it replaces. One `DRIFT_TICK_MS` (200 ms, about 0.3 px a step; a late tick steps at most `DRIFT_MAX_STEP_MS`, 500 ms) timer
-runs it, armed from Home's paint only while Home is the top window and not sliding, the screen is
-lit and the lock screen is off; its next step after any of those changes removes it, and
+runs it, armed from Home's paint only while Home is the top window and not sliding and the screen is
+lit; its next step after any of those changes removes it, and
 `coverflow_home_layout` (Home, Theme, a new Home window) removes it at once. A step is capped at
 `DRIFT_MAX_STEP_MS`, so a stalled loop never jumps. A step invalidates only the panel (with a `split_art_up`, the bar's rows over it too), and a paint
 renders the frame again only once the pan or a fade has moved (`frame_stamp`). Light Mode's paper
@@ -345,15 +345,15 @@ The navbar is hidden, as on the local pages, on the settings pages
 `navbar_only` in `ipod.json` with their pinned hashes. Their native
 inits destroy the navbar's children and create an unnamed title `hscroll_label`,
 back, Home and Now Playing buttons; none has a control the keys lack, except the on/off switches
-of the sleep timer, Startup volume (`img_bootswitch`, which `playset_bootvol_page_init` puts in
-the navbar; Crossfade reuses the page) and Lock screen (`img_switch`), whose fields hide while off:
-those three pages (`TOOLBAR_SWITCHES`) keep it. There the switch takes the toolbar's right-hand
+of the sleep timer (`img_switch`) and Startup volume (`img_bootswitch`, which `playset_bootvol_page_init` puts in
+the navbar; Crossfade reuses the page), whose fields hide while off:
+those two pages (`TOOLBAR_SWITCHES`) keep it. There the switch takes the toolbar's right-hand
 slot and the title runs up to it (225 pixels); the Home and Now Playing buttons are 0 wide, as the
 keys do what they did (`immediates` in `ipod.json`). A set with `toolbar` 0 (Classic) hides those toolbars
-too, Startup volume's aside: `navigation.c`'s `switch_row` makes the switch a row whose click is
+too, Startup volume's aside: `navigation.c`'s `ringnav_sleeptimer` makes the Sleep Timer's switch a row whose click is
 `img_switch`'s, hidden with its toolbar, a loop pass later. The set's `stock_row`, `stock_body`,
 `stock_title_y` and `stock_title_h` re-pitch stock's own pages (`stock_rows` in `ipod.json`), which
-other sets get back byte for byte: Lock Screen, Update Library and More as settings rows, Queue, Go to and
+other sets get back byte for byte: Update Library and More as settings rows, Queue, Go to and
 Special Folders through their row constructors' immediates. More's Speed row keeps 78 pixels: its
 four 42 x 61 buttons don't fit (`stock_more_speed`). Lists hold
 settings rows (see [Settings](#settings)); other panels move up 50 pixels and keep
@@ -950,8 +950,8 @@ builds three rows with `0x4c6b94`: a `list_item_create(view, 0, 0, 0, 0)` in `s_
 `s_btn_listitem` with a click handler, and in it a 52-pixel icon at x 10, a
 `s_scrlabel_white24l` `hscroll_label` at (72, 0, 210, 70) and `list_into` at x 282. The rows
 show no value; each opens a sub-page (iPod's [settings rows](#settings) then lay them out 68
-pixels high). The build then adds a "Smart Awake" switch and Night Shift, and, the same way with stock's `list_into` chevron, **Appearance**
-(`system_display`) and **Cover Flow** (Play settings' cover mode icon, `playset_covermode`), restacked as Brightness, Screen Off Time, Smart Awake, Night Shift, Lock Screen, Appearance, Cover Flow. System settings' **Controls** row (Play settings' folder jump icon, `playset_folderjump`) is the third sub-page. Each opens stock's
+pixels high). The build destroys stock's Lock Screen and Show Navigation Bar rows (Q2 Pod has no lock screen: [Screen off and wake](internals.md#screen-off-and-wake)), then adds a "Smart Awake" switch and Night Shift, and, the same way with stock's `list_into` chevron, **Appearance**
+(`system_display`) and **Cover Flow** (Play settings' cover mode icon, `playset_covermode`), in that order: Brightness, Screen Off Time, Smart Awake, Night Shift, Appearance, Cover Flow. System settings' **Controls** row (Play settings' folder jump icon, `playset_folderjump`) is the third sub-page. Each opens stock's
 Display page again (`display_open`, `display_sub` naming the sub-page while its init runs), which
 drops the stock rows, takes the sub-page's title and builds only its own rows:
 
@@ -1121,8 +1121,9 @@ Its `assets/themes/oled/theme.xml` extends Minimal and states its own grid as th
 
 - **The status row.** No bar band: the page's title, small and grey, from x 62, and the play state and a slim
   battery ending 62 px from the right edge (`STATUS_ROW_INSET`), centred on y 23, up in the glass's top curve and clear
-  of it. The clock, in the title's face and grey, sits 24 px left of the battery's body, beside the play state, and the
-  title ends with an ellipsis 12 px short of the widest clock ("00:00"), however long it is: under a status row a
+  of it. While Buttons Lock is on a 13 px padlock stands left of the play state, and a press it blocks with the screen
+  off shows a card saying so for 1.5 s, as the iPod's Hold switch did ([Buttons lock](internals.md#buttons-lock)). The clock, in the title's face and grey, sits 24 px left of the battery's body, beside the play state (and further left by the
+  padlock's room while it shows), and the title ends with an ellipsis 12 px short of the widest clock ("00:00"), however long it is: under a status row a
   page's caption never takes a row of its own (`bar_title_fits`), so the list keeps its top. A page with no title (Home, Now Playing, Cover Flow's covers;
   an artist's are titled by the artist) has the clock centred across the row instead, but Home in Split keeps it at
   the right, over the art, where it is inked white or black as one glyph with the others (`clock_place`).

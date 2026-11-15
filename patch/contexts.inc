@@ -72,7 +72,6 @@
 { "netservice_page", CTX_FIXED, 0 },
 { "powermanager_page", CTX_FIXED, 0 },
 { "reset_page", CTX_FIXED, 0 },
-{ "screensaver_page", CTX_FIXED, CHOICE },
 { "standby_page", CTX_FIXED, CHOICE },
 { "synclink_page", CTX_FIXED, 0 },
 { "sysset_page", CTX_FIXED, RING },

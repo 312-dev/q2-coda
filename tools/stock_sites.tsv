@@ -195,10 +195,6 @@ demo	0x4cbbac	0x4	systemset_lighttime_page_init	the load of $25 for the only cal
 demo	0x4cd8e4	0x4	systemset_netservice_page_init	the load of $25 for the only call to widget_move_resize, after "list_view_netservice"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
 demo	0x4ce2a4	0x4	systemset_powermanager_page_init	the load of $25 for the only call to widget_move_resize, after "list_view_powermanager"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
 demo	0x4ceee8	0x4	systemset_reset_page_init	the load of $25 for the only call to widget_move_resize, after "list_view_reset"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
-demo	0x4d04b8	0x4	systemset_screensaver_page_init	`addiu $7, $zero, 0x6e`, before the only call to hscroll_label_create, after "view_navbar"; patch/ipod.json immediates Search's rows: the second line's box, which holds the row's font (toolbar switch pages: the title spans to the switch)
-demo	0x4d0594	0x4	systemset_screensaver_page_init	`addiu $5, $zero, 0xbd`, before 2nd of 3 calls to image_create, after "s_img_return"; patch/ipod.json immediates toolbar switch pages: the title spans to the switch (toolbar switch pages: the switch takes the right-hand slot)
-demo	0x4d061c	0x4	systemset_screensaver_page_init	`addiu $7, $zero, 0x32` (2nd of 3 such), before 3rd of 3 calls to image_create, after "switch_on"; patch/ipod.json immediates toolbar switch pages: the switch takes the right-hand slot (toolbar switch pages: no Home or Now Playing button (the keys go there))
-demo	0x4d0688	0x4	systemset_screensaver_page_init	`addiu $7, $zero, 0x32` (3rd of 3 such), before the only call to gif_image_create, after "g_img_home"; patch/ipod.json immediates toolbar switch pages: the switch takes the right-hand slot (toolbar switch pages: no Home or Now Playing button (the keys go there))
 demo	0x4d1300	0x4	systemset_sleepshutdown_page_init	`addiu $7, $zero, 0x6e`, before the only call to hscroll_label_create, after "view_navbar"; patch/ipod.json immediates Search's rows: the second line's box, which holds the row's font (toolbar switch pages: the title spans to the switch)
 demo	0x4d13dc	0x4	systemset_sleepshutdown_page_init	`addiu $5, $zero, 0xbd`, before 2nd of 3 calls to image_create, after "s_img_return"; patch/ipod.json immediates toolbar switch pages: the title spans to the switch (toolbar switch pages: the switch takes the right-hand slot)
 demo	0x4d1468	0x4	systemset_sleepshutdown_page_init	`addiu $7, $zero, 0x32` (2nd of 3 such), before 3rd of 3 calls to image_create, after "switch_on"; patch/ipod.json immediates toolbar switch pages: the switch takes the right-hand slot (toolbar switch pages: no Home or Now Playing button (the keys go there))
@@ -263,9 +259,8 @@ demo	0x5030f8	0x4	check_otginfo	`addiu $5, $5, -0x1300, forming "V1.36"`, the de
 demo	0x504188	0x4	config_init	the only call to config_playmode, after "PLAYMODE"; tools/build.py build
 demo	0x504b5c	0x4	config_init	`sb $2, 0x0($3), forming g_navhide_flag`, the delay slot of 36th of 52 calls to memset, after "NAVHIDE"; tools/build.py NAV_SHOWN
 demo	0x504ba4	0x4	config_init	`movz $2, $zero, $3` (16th of 26 such), before 37th of 52 calls to memset, after "WHEELMODE"; tools/build.py WHEEL_MODE
-demo	0x504d24	0x4	config_init	4th of 5 calls to access, after "SCREENSAVERPATH"; tools/build.py build
+demo	0x504c78	0x4	config_init	`sb $2, 0x0($3), forming g_screensaver_mode`, the delay slot of 39th of 52 calls to memset, after "SCREENSAVER"; tools/build.py SAVER_OFF
 demo	0x504eec	0x4	config_init	`sltiu $3, $2, 0x1b`, before the only call to select_timezone, after "TIMEZONE"; tools/build.py patch_timezones
-demo	0x505724	0x4	get_screensaver_image	the only call to access, after "screensaver_default"; tools/build.py build
 demo	0x506254	0x4	curl_http_request	1st of 11 calls to curl_easy_setopt; tools/build.py STOCK_TLS_CALLS
 demo	0x50626c	0x4	curl_http_request	2nd of 11 calls to curl_easy_setopt; tools/build.py STOCK_TLS_CALLS
 demo	0x518768	0x4	importPlayList	the only call to toolsGetDirectoryM3u8, after "stSongInfo"; tools/build.py M3U_DIR_CALL
@@ -331,7 +326,7 @@ demo	0x538e04	0x4	playerjumpinfo_table_on_prepare_row	1st of 2 calls to widget_s
 demo	0x538e0c	0x4	playerjumpinfo_table_on_prepare_row	`addiu $3, $zero, 0x46` (2nd of 2 such), before 1st of 2 calls to image_create, after "img_icon"; patch/ipod.json immediates stock_body (stock's own table rows: the button and its full-height children)
 demo	0x538eb4	0x4	playerjumpinfo_table_on_prepare_row	`addiu $2, $zero, 0x14`, before 1st of 2 calls to hscroll_label_create, after "view_info"; patch/ipod.json immediates stock_title_h (Go to's title box, which holds the row's font)
 demo	0x538ec0	0x4	playerjumpinfo_table_on_prepare_row	`addiu $6, $zero, 0xb`, before 1st of 2 calls to hscroll_label_create, after "view_info"; patch/ipod.json immediates stock_title_y (Go to's title y in its row)
-demo	0x5397cc	0x4	playermore_album_info_on_click	`sw $18, 0x428($sp)`; patch/navigation.c qm_goto
+demo	0x5397cc	0x4	playermore_album_info_on_click	`sw $18, 0x428($sp)`; patch/navigation.c QM_LOOKUP_ALBUM
 demo	0x5399d4	0x4	playermore_artist_info	`addiu $4, $17, -0x3308, forming "localmusic/artistinfo_page"`, the delay slot of 1st of 2 calls to navigator_close, after "artistinfo_page"; tools/build.py MORE_ARTIST_CLOSE
 demo	0x539a00	0x4	playermore_artist_info	`addiu $4, $4, -0x3324, forming "localmusic/albuminfo_page"`, the delay slot of 2nd of 2 calls to navigator_close, after "albuminfo_page"; tools/build.py MORE_ARTIST_CLOSE
 demo	0x53a01c	0x4	playermore_page_init	the load of $25 for the only call to widget_move_resize, after "list_view_more"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
@@ -413,7 +408,6 @@ demo	0x5fb888	0x4	hscroll_label_on_timer_tick	`lbu $2, 0x7b($16)` (4th of 6 such
 demo	0x5fb930	0x4	hscroll_label_on_timer_tick	`lw $2, 0x80($16)` (6th of 6 such), before 2nd of 2 calls to sub_5fb2c8; tools/build.py HSCROLL_ONCE
 demo	0x5fb954	0x4	hscroll_label_on_timer_tick	the load of $25 for the only call to widget_add_timer; tools/build.py HSCROLL_LULL, tools/build.py build
 demo	0x5fb958	0x4	hscroll_label_on_timer_tick	the only call to widget_add_timer; tools/build.py HSCROLL_LULL
-demo	0x5fbffc	0x4	hscroll_label_on_paint_self	`lbu $2, 0x7b($18)` (2nd of 3 such), before the only call to sub_5fba4c, after "focused"; patch/lockscreen.c oled_lock
 demo	0x5fc060	0x4	hscroll_label_on_paint_self	the load of $25 for 1st of 2 calls to widget_draw_text_in_rect, after "focused"; tools/build.py HSCROLL_ELLIPSIS, tools/build.py build
 demo	0x5fc074	0x4	hscroll_label_on_paint_self	1st of 2 calls to widget_draw_text_in_rect, after "focused"; tools/build.py HSCROLL_ELLIPSIS
 demo	0x5fd234	0x4	children_layouter_list_view_layout	`lw $25, GOT[scroll_view_set_yslidable]` (21st of 54 such), before the only call to scroll_view_set_yslidable, after "animate:animating_time"; tools/ipod.py home_list
@@ -505,7 +499,7 @@ hciplayer	0x438028	0x4	ao_alsa_uninit	the only call to snd_pcm_drain; patch/peq_
 hciplayer	0x4380dc	0x4	ao_alsa_audio_resume	the only call to snd_pcm_pause; patch/peq_player.c dac_resume, tools/peq.py DAC_RELEASE
 hciplayer	0x438104	0x4	ao_alsa_audio_resume	`lw $4, 0x2514($3)` (1st of 2 such); patch/peq_player.c dac_resume
 hciplayer	0x438238	0x4	ao_alsa_audio_resume	the only call to ioctl; patch/peq_player.c dac_resume
-hciplayer	0x4382ec	0x4	ao_alsa_init	`lui $2, 0x7` (4th of 51 such), before 1st of 3 calls to memset, after "device"; patch/offsets.inc VIS_LATENCY_MS
+hciplayer	0x4382ec	0x4	ao_alsa_init	`lui $2, 0x7` (4th of 51 such), before 1st of 3 calls to memset, after "device"; patch/offsets.inc NP_VISUALIZER
 hciplayer	0x4382fc	0x4	ao_alsa_init	`sw $2, 0x17c($fp)`, the delay slot of 1st of 3 calls to memset, after "device"; tools/peq.py USB_BUFFER
 hciplayer	0x438580	0x4	ao_alsa_init	`beq $3, $17, +564 words`, after "default"; patch/peq_player.c PREV_FORMAT
 hciplayer	0x4385bc	0x4	ao_alsa_init	`beq $2, $3, +5 words` (2nd of 10 such), before the only call to snd_pcm_drain, after "default"; patch/peq_player.c NEXT_FLAG

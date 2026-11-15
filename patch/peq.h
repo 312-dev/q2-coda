@@ -579,7 +579,7 @@ int stream_ipod(void *art, void *const text[4], void *elapsed, void *remain, voi
  * they moved. Not in a paint. */
 int ipod_times(void *elapsed, void *remain, void *bar, int sec);
 int ipod_bar(void *canvas, int x, int y, int bw, int on, int mark);
-/* navigation.c's painters for Classic's info screen (lockscreen.c); colours are final. */
+/* navigation.c's painters for Classic's own pages; colours are final. */
 typedef struct {
     unsigned rgb;       /* 0xRRGGBB */
     short r;            /* a disc's radius in tenths of the -50..50 box; 0: pts */
@@ -593,23 +593,19 @@ void paint_page(void *w, void *canvas, int y);
 void paint_art(void *w, void *canvas, const char *name, int x, int y);
 void paint_dark_bar(void *w, void *canvas, const unsigned *title, unsigned key);
 int dark_title_y(void);
-void paint_tray(void *canvas, int x, int y, int w, int h);
 void text_shadow(void *canvas, const char *face, const unsigned *s, const void *r, unsigned px,
                  unsigned alpha);
 void final_text(void *canvas, const char *face, const unsigned *s, const void *r, unsigned px,
                 unsigned color);
-unsigned dark_bar_key(const unsigned *t);
-int clock_minutes(void), bar_status(void);
+int bar_status(void);
 void slider_label(void *w, int x, int y, int ww, int h, int px, const char *face);
 void text_ink(void *w, unsigned color, int n); /* a label's final 0xAARRGGBB, in either half */
 /* navigation.c: a feature settings row's "Title: value", on the set's right column where it has one */
 void row_value_text(void *label, const char *text);
 void slider_number(void *label), slider_tray_dirty(void *page),
     slider_centre_hint(void *page, int night);
-void switch_row(void *win, void *view); /* the toolbar's, as a row */
 void stock_more_speed(void *win);
 void stock_more_into(void *win);
-void info_poll(void);      /* lockscreen.c: the info screen's timer, with the screen lit */
 int xfade_page(void *top); /* crossfade.c */
 void xfade_ends(char *lo, char *hi, unsigned n); /* crossfade.c: its page's range ends */
 /* slider_page.c: EQ's Simple tab as a set_switch theme draws it (docs/oled-design.md Progress and
@@ -626,7 +622,6 @@ typedef struct {
     int on, focus, adjusting; /* focus: 0 the tabs, 1 the switch, 2 Presets, 3 Reset, 4.. bands */
     double gain[3], max;
 } eq_rows_t;
-void lock_grid(void *view); /* settings_pages.c: Lock Screen's pictures on a set_switch theme */
 int eq_rows(void);
 int eq_list_end(void); /* the page's rows end here (the set's list_end) */
 void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e);

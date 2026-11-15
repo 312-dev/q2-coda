@@ -383,7 +383,7 @@ def test_config_value_any_text(fw):
         assert value(b'S', b'K', n, default) == want
 
 
-@pytest.mark.parametrize('i, choices', [(0, 2), (1, 2), (2, 3), (3, 2), (4, 2), (10, 4), (11, 2), (12, 2), (15, 2), (POD['POD_BIG_LIB'], 2), (POD['POD_PL_CF'], 2)])
+@pytest.mark.parametrize('i, choices', [(0, 2), (1, 2), (2, 3), (3, 2), (4, 2), (POD['POD_STANDBY'], 4), (11, 2), (12, 2), (15, 2), (POD['POD_BIG_LIB'], 2), (POD['POD_PL_CF'], 2)])
 def test_pod_rows_choices(fw, i, choices):
     assert fw.fn('navigation__pod_choices', C.c_int, C.c_uint)(i) == choices
 
@@ -392,8 +392,8 @@ def test_pod_settings_defaults(fw):
     Config(fw)
     assert fw.fn('ringnav_artist_view', C.c_int)() == 1  # Artist albums defaults to Coverflow
     assert [fw.fn(name, C.c_int)() for name in ('ringnav_year_old', 'ringnav_artist_az',
-                                                'ringnav_lock_clock', 'ringnav_bt_resume',
-                                                'ringnav_big_library', 'ringnav_playlist_coverflow')] == [0] * 6  # Fast Navigation off
+                                                'ringnav_bt_resume',
+                                                'ringnav_big_library', 'ringnav_playlist_coverflow')] == [0] * 5  # Fast Navigation off
 
 
 def test_pod_settings_read_their_keys_once(fw):

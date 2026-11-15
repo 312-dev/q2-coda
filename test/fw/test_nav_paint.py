@@ -625,9 +625,9 @@ def test_light_mode_keeps_switch_off_s_white_knob(fw, bitmaps):
     assert bm.rows() == [[WHITE, CLEAR]]
 
 
-@pytest.mark.parametrize('name', [b'scrsaver_slide', b'gain_low', b'gain_high'])
+@pytest.mark.parametrize('name', [b'gain_low', b'gain_high'])
 @pytest.mark.parametrize('number, flips', [(CLASSIC, 0), (MODERN, 1)])
-def test_a_theme_s_own_light_half_keeps_the_lock_hint_and_gain_s_thumb_white(fw, bitmaps, name, number, flips):
+def test_a_theme_s_own_light_half_keeps_gain_s_thumb_white(fw, bitmaps, name, number, flips):
     theme(fw, number, ACCENT=str(TIDAL), LIGHT='1')
     bm = bitmaps(fw, [[WHITE, CLEAR]])
     image_add(fw, name, bm)

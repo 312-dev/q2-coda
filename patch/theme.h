@@ -264,11 +264,11 @@ typedef struct {
 } theme_t;
 const theme_t *theme(void); /* accent(); return &themes[st.theme]; */
 /* Classic's own pages: Quick Settings, sliders, rating, dialogs' pages, T9 and Search, Set Time,
- * message screens, the lock info screen, Cover Flow's flip */
+ * message screens, Cover Flow's flip */
 static inline int classic_pages(void) {
     return theme()->painter[PAINT_PAGES] == PAGES_CLASSIC_LIGHT;
 }
-/* OLED's own forms of stock's overlays (docs/oled-design.md#screens): the lock screen */
+/* OLED's own forms of stock's overlays (docs/oled-design.md#screens) */
 static inline int oled_pages(void) { return theme()->painter[PAINT_PAGES] == PAGES_OLED; }
 int theme_geom(const theme_t *T); /* navigation.c: the set T boots with its stored values */
 const scheme_t *scheme(void);     /* theme()'s scheme accent(), in the half Light Mode picks */

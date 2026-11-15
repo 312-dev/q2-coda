@@ -408,7 +408,7 @@ void visualizer_paint(void *w, void *canvas) {
     }
     if (w != vz.win || !P(canvas, CANVAS_LCD) || !on_page()) return;
     arm();
-    if (!settled()) { /* under a closing window (the lock screen), sliding or dragged: paused, nothing
+    if (!settled()) { /* under a closing window, sliding or dragged: paused, nothing
                        * else would paint it once that ends */
         if (!vz.retry) vz.retry = timer_add(look, 0, VIS_RETRY_MS);
         return;

@@ -5,6 +5,8 @@
   - Lists: a title cut short just after a word puts its dots right after the word, as "Wicked Garden (2017...", with no space before them that read as a gap.
   - Streaming (OLED): the Subsonic app's row has its own mark, a small submarine sending out sonar, and any other card app with its own icon shows it again, small and grey beside its name, as the other services' marks are (it showed no icon at all). A card app without an icon shows the app-window mark.
   - Cover Flow (OLED): the artist sits a little lower under the album name, so a title's g or y no longer touches the artist's letters, in Light and Dark Mode.
+  - Display: the lock screen is gone. Turning the screen back on shows the page you left, and **Lock Screen** is no longer in Display settings. If you had it on, it is turned off when you update.
+  - Buttons Lock (OLED): works like the iPod's Hold switch. While it is on, a small padlock sits at the top of the screen beside the play state, and a locked button pressed with the screen off lights the screen for a moment with **Buttons Locked** and how to get past it: press Centre to turn the screen on and use the buttons.
   - EQ (OLED): with the wheel on the **Simple** and **Advanced** tabs, only the tabs show it; the first row of Advanced's list no longer lights up as well.
   - EQ (OLED): in Light Mode the Simple tab's slider knobs, and the knob on slider pages like Resume Songs, have a thin grey edge, so they no longer vanish white on white.
   - EQ (OLED): after picking a preset on Simple, the switch row still reads **Enabled**, and the preset's name shows on the right of the **Presets** row, as a setting's value does.

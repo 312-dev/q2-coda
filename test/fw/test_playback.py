@@ -2480,6 +2480,20 @@ def test_boot_restores_with_its_mode_unsaved(fw, player):
     assert player.s.restoring == 0
 
 
+@pytest.mark.parametrize('saved, written', [(b'1', [(0, b'SYSSET', b'SCREENSAVER')]), (b'0', []), (None, [])])
+def test_boot_saves_a_lock_screen_saved_on_off_once(fw, player, saved, written):
+    """docs/internals.md#screen-off-and-wake: SYSSET SCREENSAVER 1, from stock or an earlier Q2 Pod, is saved 0 before
+    config_init reads it; 0 or no key writes nothing."""
+    def config(path, section, key, out, default, *_):
+        value = saved if (C.string_at(section), C.string_at(key)) == (b'SYSSET', b'SCREENSAVER') and saved else C.string_at(default)
+        C.memmove(out, value + b'\0', len(value) + 1)
+    fw.mock('toolsReadConfig', config)
+    fw.mock('config_playmode', lambda *_: 0)
+    fw.fn('ringnav_bootmode', C.c_int, C.c_int, C.c_int)(3, 0)
+    calls = [(a[0], C.string_at(a[1]), C.string_at(a[2])) for _, a in fw.calls('write_int_config')]
+    assert [c for c in calls if c[2] == b'SCREENSAVER'] == written
+
+
 def test_preload_in_advanced_play_opens_the_successor(fw, player, mcl):
     plan(player, [0, 1, 2], seen=(0,))
     fw.mock('mcl_open_preload', lambda *_: 4)

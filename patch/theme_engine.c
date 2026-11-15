@@ -321,7 +321,7 @@ int bar_geom_val(int v) {
 int ipod_battery(void) {
     accent();
     return st.battery;
-} /* lockscreen.c's Large clock */
+}
 /* 1 when Home shows its Shortcut row (coverflow_home_layout): any target but None, Rockbox and
  * Groovebox, and those while the card has them. */
 int ipod_home_rockbox(void) {

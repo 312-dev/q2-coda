@@ -189,7 +189,6 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
     <li class="chap"><span class="n">{{p:c6}}</span><a href="#c6">Chapter 6: Podcasts, Audiobooks, Photos, Books and Videos</a></li>
     <li><span class="n">{{p:pods}}</span><a href="#pods">Podcasts and audiobooks</a></li>
     <li><span class="n">{{p:pbv}}</span><a href="#pbv">Photos, books and videos</a></li>
-    <li><span class="n">{{p:lock}}</span><a href="#lock">Lock screen</a></li>
 
     <li class="chap"><span class="n">{{p:c7}}</span><a href="#c7">Chapter 7: Settings and Battery</a></li>
     <li><span class="n">{{p:display}}</span><a href="#display">Display</a></li>
@@ -408,7 +407,6 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
       <tr><td><code>Videos/</code></td><td><code>.mp4</code>, <code>.m4v</code>, <code>.mkv</code>, <code>.avi</code>, <code>.mov</code>, <code>.mpg</code>; one level of subfolders</td><td>You</td></tr>
       <tr><td><code>EQ/</code></td><td>EQ presets, as AutoEQ / Equalizer APO <code>.txt</code> files</td><td>Both</td></tr>
       <tr><td><code>Radio/</code></td><td>Internet Radio favourites, <code>.m3u</code> and <code>.pls</code></td><td>Both</td></tr>
-      <tr><td><code>lockscreenimage/</code></td><td>Up to 5 lock screen images</td><td>You</td></tr>
       <tr><td><code>_explaylist_data/</code></td><td>M3U playlists to import, and a playlist’s own picture, <code>name.jpg</code> or <code>name.png</code> (<a href="#playlists">Playlists</a>)</td><td>Both</td></tr>
       <tr><td><code>database.ignore</code>, <code>database.unignore</code></td><td>Empty marker files: hide a folder from the Library’s lists after Update Local Music, or let a subfolder back in (<a href="#addmusic">Adding music</a>)</td><td>You</td></tr>
       <tr><td><code>.scrobble.ini</code></td><td>Scrobble accounts; adds <b>Upload Scrobbles</b></td><td>You</td></tr>
@@ -857,11 +855,6 @@ http://stream.radioparadise.com/mp3-128</pre>
   <p>Sudoku clues are on grey; a digit that clashes with its row, column or box turns red and is underlined. Solitaire is Klondike, drawing one card at a time; picking up a column takes all its face-up cards, and dropping them moves the part that fits. Your Sudoku, your Solitaire and Vortex’s best score are kept when you leave or turn the Q2 off. Turning the screen off pauses Vortex.</p>
   <p>Games installed from the App Store (<a href="#apps">Apps</a>) come after Snake and fill the whole screen. Each one has its own controls; <b>Play/Pause</b> and <b>Previous/Next</b> still control the music, and holding <b>Return</b> closes the game at once. A game closes after two minutes without a touch, key or turn of the wheel, unless <b>Smart Awake</b> is on (<a href="#display">Display</a>): then it stays open and lit until you close it.</p>
   </div>
-  <div class="sec">
-  <h2 id="lock">Lock screen</h2>
-  <p><b>System settings → Display → Lock screen</b> picks what the lock screen shows. Turn it on with the switch at the top, then choose a picture from the grid: Shanling’s own, six built-in wallpapers (Aurora, Sunrise, Graphite, Tide, Ember and plain Black), and your images. For your own, put up to 5 PNG or JPG files (375 × 320 fits the screen) in a <code>lockscreenimage</code> folder at the card’s root.</p>
-  <p><b>Clock: Large</b>, just under <b>Time show</b>, sets the time in large type across the top of the lock screen, with the date above it and the battery percentage when <b>Battery</b> shows one; <b>Clock: Standard</b> is stock’s layout.</p>
-  </div>
 </section>
 
 <!-- ============ 7 SETTINGS ============ -->
@@ -871,7 +864,7 @@ http://stream.radioparadise.com/mp3-128</pre>
 
   <div class="sec">
   <h2 id="display">Display</h2>
-  <p>Open <b>System settings → Display</b>. Brightness, Screen Off Time, <b>Smart Awake</b>, <b>Night Shift</b> and Lock Screen are on the page itself. Two menus hold the rest: <b>Appearance</b> (Theme, Light Mode, Accent, Corners, Home, Shortcut, Battery, Time in Title, Centred Now Playing; in Classic, Library on Home, Row Preview and Row Art take the place of Corners and Centred Now Playing) and <b>Cover Flow</b> (Artist View, Playlist View, Cover Flow Sort, Refresh Cover Flow, Fast Navigation, Scan Song Durations, Position Bar).</p>
+  <p>Open <b>System settings → Display</b>. Brightness, Screen Off Time, <b>Smart Awake</b> and <b>Night Shift</b> are on the page itself. Two menus hold the rest: <b>Appearance</b> (Theme, Light Mode, Accent, Corners, Home, Shortcut, Battery, Time in Title, Centred Now Playing; in Classic, Library on Home, Row Preview and Row Art take the place of Corners and Centred Now Playing) and <b>Cover Flow</b> (Artist View, Playlist View, Cover Flow Sort, Refresh Cover Flow, Fast Navigation, Scan Song Durations, Position Bar).</p>
   <table>
     <thead><tr><th>Setting</th><th>Options</th></tr></thead>
     <tbody>
@@ -908,8 +901,8 @@ http://stream.radioparadise.com/mp3-128</pre>
       <tr><td>Hold Return</td><td>Recent (default): a hold opens Now Playing and another goes back where you were. Home: a hold goes Home from any page; on Home it still opens Now Playing.</td></tr>
       <tr><td>Single Press Scrub</td><td>Off (default): on Now Playing, a single Centre press turns the screen off and a double press starts seeking. On: the two swap, so a single press starts seeking and a double press turns the screen off, as on every other page.</td></tr>
       <tr><td>Clicker</td><td>Where the click is heard as you move along a list or press a button. <b>Speaker</b>: the Q2’s own speaker, quiet while headphones, Bluetooth or a USB DAC are connected. <b>Headphones</b>: mixed into the music, at its volume (with the new player, still in testing; otherwise, and while nothing plays, the speaker as Speaker). <b>Both</b> (default): the speaker whatever is connected, and the click in the music too. <b>Off</b>: no click.</td></tr>
-      <tr><td>Buttons Lock</td><td>Locks the controls while the screen is off: <b>Everything</b> locks the wheel’s volume and the playback buttons; <b>Buttons only</b> locks the playback buttons and leaves the volume; <b>Volume only</b> locks the volume and leaves skip and Play/Pause. The lock tile in quick settings cycles through the same choices, Off included.</td></tr>
-      <tr><td>Wake</td><td>Press Centre once with the screen off (the default, <b>Wake: Single Press</b>). Play/Pause and the volume wheel work with the screen off without waking it. To keep pocket bumps from waking the screen, choose <b>Wake: Double Press</b> (<a href="#settings-controls">Controls</a>): then a single press stays dark and two presses wake it.</td></tr>
+      <tr><td>Buttons Lock</td><td>Locks the controls while the screen is off: <b>Everything</b> locks the wheel’s volume and the playback buttons; <b>Buttons only</b> locks the playback buttons and leaves the volume; <b>Volume only</b> locks the volume and leaves skip and Play/Pause. The lock tile in quick settings cycles through the same choices, Off included. Under <b>Theme: OLED</b> a padlock in the top row shows the lock is on, and a locked button pressed with the screen off lights the screen for a moment with <b>Buttons Locked</b>; press Centre then to turn the screen on and use the buttons.</td></tr>
+      <tr><td>Wake</td><td>Press Centre once with the screen off (the default, <b>Wake: Single Press</b>); the screen comes back on the page you left. Play/Pause and the volume wheel work with the screen off without waking it. To keep pocket bumps from waking the screen, choose <b>Wake: Double Press</b> (<a href="#settings-controls">Controls</a>): then a single press stays dark and two presses wake it.</td></tr>
       <tr><td>Volume Guard</td><td><b>On:</b> with the screen off, the wheel ignores the first two thirds of a turn in one direction, so a brush in a pocket or hand doesn’t change the volume. Keep turning and the volume moves as usual, back and forth and across several strokes, until the wheel rests for a second and a half; then the next change needs the same again. Turning back or lifting your finger before then starts it again. The screen-on wheel is unchanged. Off by default.</td></tr>
     </tbody>
   </table>
@@ -1123,7 +1116,6 @@ http://stream.radioparadise.com/mp3-128</pre>
     <li><b>Screen waking in your pocket?</b> <b>System settings → Controls → Wake: Double Press</b>.</li>
     <li><b>Want stock’s EQ presets?</b> <b>EQ → Advanced → Presets → Stock presets</b> has Pop, Rock, Jazz and the rest; the ten default bands work as a 10-band graphic EQ.</li>
     <li><b>Wheel click gone?</b> With <b>System settings → Controls → Clicker: Speaker</b> the click is the Q2’s own speaker, which stays quiet while headphones, Bluetooth or a USB DAC are connected; choose <b>Both</b> to keep it clicking.</li>
-    <li><b>Lock screen look:</b> six built-in wallpapers and a large clock: see Chapter 6.</li>
     <li><b>Importing an M3U playlist?</b> It has to be in <code>_explaylist_data/</code>, and a <code>#</code> line without <code>#EXT</code> shows as a broken song: see Chapter 2.</li>
     <li><b>Added a few albums?</b> <b>System settings → Update Library → Scan Folders</b> scans just their folders.</li>
   </ul>

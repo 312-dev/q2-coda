@@ -268,6 +268,9 @@ static inline int arc_out(int r, int y) {
  * title's text starts here and the battery's nub ends here, under the glass's top curve and clear
  * of it (tools/ipod.py status_row checks), with the list's own columns further out below it. */
 #define STATUS_ROW_INSET 62
+/* Buttons Lock's padlock left of the play state (keylock.c): its 14 px box and the row's 3 px gap
+ * (tools/ipod.py STATUS_ROW_GAP), which the clock beside them keeps clear of (clock_place). */
+#define STATUS_ROW_LOCK_ROOM 17
 #define BC_STEP_MS 50
 #define BC_STEPS 8
 /* iPod drill rows: the stock list_into image sits where stock rows put their own img_into, its left

@@ -44,7 +44,7 @@ def test_classic_draws_its_images_and_the_others_none():
         assert set(art.images({**themes[0], **half})) == {'minimal_vol_lo', 'minimal_vol_hi'}
     full = art.images(themes[1])
     assert {k: v for k, v in full.items() if '_icon_' not in k} == classic()  # what the other tests draw
-    assert set(full) == {f'classic_light_{n}' for n in ('sort_bars', 'icon_note', 'icon_folder', 'icon_stack', 'icon_game', 'icon_wave', 'icon_gear', 'chevron', 'bolt', 'plug', 'note', 'play_l', 'play_d', 'pause_l', 'pause_d', 'vol_lo', 'vol_hi', *(f'spk_{v}_{h}' for v in ('quiet', 'loud') for h in 'ldw'), *(f'drop_{n}{k}' for n in QS_NAMES for k in QS_INKS(n)), 'drop_track', 'drop_knob', 'sun_small', 'sun_big', 'play_w', 'pause_w', 'orb_note', 'orb_usb', 'tray_108', 'tray_165', 'tray_164', 'cell_45', 'cell_60', 'cell_lit_45', 'cell_lit_60', 'tile', 'clock_chrome', 'clock_shadow', 'hint_shadow', 'clock_dark', 'kb_del', 'kb_shift', 'kb_back', 'field_glass', 'field', 'band_shadow', 'panel_shadow', 'rate_shadow', 'tray_shadow', 'confirm_shadow', 'track_inset', 'lit_edge', 'band_top', 'band_foot', 'heart_on_l', 'heart_on_d', 'heart_off_l', 'heart_off_d', 'station')}
+    assert set(full) == {f'classic_light_{n}' for n in ('sort_bars', 'icon_note', 'icon_folder', 'icon_stack', 'icon_game', 'icon_wave', 'icon_gear', 'chevron', 'bolt', 'plug', 'note', 'play_l', 'play_d', 'pause_l', 'pause_d', 'vol_lo', 'vol_hi', *(f'spk_{v}_{h}' for v in ('quiet', 'loud') for h in 'ldw'), *(f'drop_{n}{k}' for n in QS_NAMES for k in QS_INKS(n)), 'drop_track', 'drop_knob', 'sun_small', 'sun_big', 'play_w', 'pause_w', 'orb_note', 'orb_usb', 'tray_108', 'tray_165', 'tray_164', 'cell_45', 'cell_60', 'cell_lit_45', 'cell_lit_60', 'tile', 'clock_chrome', 'clock_shadow', 'kb_del', 'kb_shift', 'kb_back', 'field_glass', 'field', 'band_shadow', 'panel_shadow', 'rate_shadow', 'tray_shadow', 'confirm_shadow', 'track_inset', 'lit_edge', 'band_top', 'band_foot', 'heart_on_l', 'heart_on_d', 'heart_off_l', 'heart_off_d', 'station')}
 
 
 # The approved rendered rows, within 1 per channel: the fill down column 272 of the pause bars
@@ -215,16 +215,6 @@ def test_quick_settings_track_and_knob():
     assert abs(at(14, 14)[0] - 0xd9) <= 1 and at(14, 26)[:3] == (0, 0, 0) and at(14, 25)[0] < 0xc0  # the ramp's middle; the shadow's row below the disc
 
 
-def test_the_dark_clock_face():
-    w, h, at = pixels(classic()['classic_light_clock_dark'])
-    assert (w, h) == (96, 96) and at(0, 0)[3] == 0 and at(95, 95)[3] == 0 and at(48, 48) == (0x0c, 0x0f, 0x15, 255)
-    k = .96
-    ink = lambda x, y: at(int((x + 50) * k), int((y + 50) * k))
-    assert max(ink(x, y)[0] for x in range(-4, 5) for y in range(-38, -30)) > 200  # the 12
-    assert max(ink(x, y)[0] for x in range(30, 42) for y in range(-3, 5)) > 200  # the 3
-    assert at(48, 1)[3] > 0 and at(48, 1)[0] > 0x0c  # the rim's stroke over the disc
-
-
 def test_the_keyboard_glyphs_and_the_field():
     got = classic()
     for name, size in (('kb_del', (22, 18)), ('kb_shift', (22, 18)), ('kb_back', (13, 24)), ('field_glass', (16, 16)), ('field', (32, 31))):
@@ -259,9 +249,6 @@ def test_set_time_and_set_date_images():
     assert tile(0, 0)[3] == 0
     _, _, sh = pixels(got['classic_light_clock_shadow'])
     assert abs(sh(43, 13)[3] - 0x70) <= 4 and sh(0, 0)[3] == 0 and sh(0, 13)[3] < 10
-    w, h, hint = pixels(got['classic_light_hint_shadow'])  # stock's marks, a row down, blurred: 0 1px 2px #00000080
-    assert (w, h) == (29, 15) and hint(0, 0)[3] == 0 and hint(28, 14)[3] == 0 and hint(8, 8)[:3] == (0, 0, 0)
-    assert 0x20 < hint(8, 8)[3] <= 0x80 and hint(8, 1)[3] == 0
     _, _, lit = pixels(got['classic_light_cell_lit_45'])
     assert near(lit(26, 4), over(row(art.CELL_LIT, 0, 42), 0x66)) and near(lit(26, 45), row(art.CELL_LIT, 41, 42))
     assert lit(26, 46)[:3] == (0, 0, 0) and lit(26, 46)[3] > 0x40  # the row below: black, soft
@@ -362,17 +349,6 @@ def test_butt_stroke_joins_nothing_where_the_line_goes_straight_on_or_back(poly)
     assert art.coverage(parts, (0, 0, 10, 4)) == art.coverage([[(1, 1), (9, 1), (9, 3), (1, 3)]], (0, 0, 10, 4))
 
 
-def test_outlines_a_space_is_an_advance_with_no_polygon():
-    font = art.classic_light_font()
-    glyphs, cmap, k = font.getGlyphSet(), font.getBestCmap(), 20 / font['head'].unitsPerEm
-    one, space = (glyphs[cmap[ord(c)]].width * k for c in '1 ')
-    single, = art.outlines('1', 20, 0, 50)
-    first, second = art.outlines('1 1', 20, 0, 50)
-    # the line centred on x 0: each 1 half its own advance and the space's from the middle
-    for poly, dx in ((first, -(one + space) / 2), (second, (one + space) / 2)):
-        assert len(poly) == len(single) and all(math.dist(p, (x + dx, y)) < 1e-9 for p, (x, y) in zip(poly, single))
-
-
 def test_every_literal_corner_radius_is_in_the_table():
     source = ''.join(p.read_text() for p in sorted((pathlib.Path(__file__).parents[2] / 'patch').glob('*.c')))
     def literal(names):
@@ -460,10 +436,12 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     speakers = [f'vol_{n}_{k}' for n in ('lo', 'hi') for k in ('d', 'l')]  # the volume's ends on Now Playing (fill, 16 px)
     pair = [f'pair_{n}_{k}' for n in ('shuffle', 'radio', 'play') for k in ('a', 'w')]  # artist_page.c's action pairs
     quality = ['quality_d', 'quality_l']  # np_about.c's badge
+    keylock = [f'keylock_{k}' for k in ('d', 'l')]  # keylock.c: the status row's padlock and the card's
+    card = [f'keylock_card_{k}' for k in ('d', 'l')]
     assert set(got) == {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality,
-                                              'search_pop', 'search_pop_letters', 'search_pop_echoes',
+                                              *keylock, *card, 'search_pop', 'search_pop_letters', 'search_pop_echoes',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)))}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
@@ -482,7 +460,9 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.MENU_ICON_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff, 'a': blue}[n.rsplit('_', 1)[1]]) for n in menus),
                           *((n, 16, {'d': 0xababab, 'l': 0x5c5c5c}[n[-1]]) for n in speakers),
                           *((n, art.PAIR_ICON_PX, blue if n.endswith('_a') else 0xffffff) for n in pair),
-                          *((n, art.QUALITY_PX, 0xffffff if n.endswith('_d') else 0) for n in quality)):
+                          *((n, art.QUALITY_PX, 0xffffff if n.endswith('_d') else 0) for n in quality),
+                          *((n, art.STATE_PX, 0 if n.endswith('_l') else 0xffffff) for n in keylock),
+                          *((n, art.KEYLOCK_CARD_PX, 0 if n.endswith('_l') else 0xffffff) for n in card)):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
         assert (w, h) == (px, px) and inked == {tuple(rgb >> s & 255 for s in (16, 8, 0))}

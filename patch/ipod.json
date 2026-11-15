@@ -37,8 +37,6 @@
     "systemset/netservice_page.bin": "b71dbca2736744f41aedc19eadc99ee39c7ed397c6e7ecf6625fabfeff7209bf",
     "systemset/powermanager_page.bin": "b5b239337d4cfaedeb411acb2656f2763bb2aabbd33f3e76859c6535865cbf78",
     "systemset/reset_page.bin": "e75b83286fa12a31f3fb7888e0f2ce55703357a06342d0508339be910fb048f5",
-    "systemset/screensaver_about.bin": "6ebc67b6407a49ac8a7f50c207a99c46726ba873b6f3e2b05fe8c4f95233fb6e",
-    "systemset/screensaver_page.bin": "2beb2a2be18a510eb7df46ee8e71e291e37bac49fa9bbc66f01ab69837ba03d9",
     "systemset/sleepshutdown_page.bin": "513b512155bc76c3101e56691454d64e31a5511779ce6e3ae9dc4f7b920a973c",
     "systemset/standby_page.bin": "4b742684b54d4c3d7450f43ebe1a5c7f60aad18b95030c9c0a750f60f56fc78c",
     "systemset/synclink_page.bin": "43548f5bb3d0bb7588c75fd18f131e5a6800d16a859879bb0a8e629a9af8ec02",
@@ -408,8 +406,7 @@
       "purpose": "toolbar switch pages: the title spans to the switch",
       "sites": [
         ["0x4b7a44", "0x2407006e"],
-        ["0x4d1300", "0x2407006e"],
-        ["0x4d04b8", "0x2407006e"]
+        ["0x4d1300", "0x2407006e"]
       ]
     },
     {
@@ -417,8 +414,7 @@
       "purpose": "toolbar switch pages: the switch takes the right-hand slot",
       "sites": [
         ["0x4b7b28", "0x240500bd"],
-        ["0x4d13dc", "0x240500bd"],
-        ["0x4d0594", "0x240500bd"]
+        ["0x4d13dc", "0x240500bd"]
       ]
     },
     {
@@ -428,9 +424,7 @@
         ["0x4b7bb0", "0x24070032"],
         ["0x4b7c1c", "0x24070032"],
         ["0x4d1468", "0x24070032"],
-        ["0x4d14d4", "0x24070032"],
-        ["0x4d061c", "0x24070032"],
-        ["0x4d0688", "0x24070032"]
+        ["0x4d14d4", "0x24070032"]
       ]
     },
     {
@@ -578,7 +572,6 @@
     "bt_adjvol.png": "e10a70cf0d916f3512a1eb334e78b00b4524299b838a559fb3454f3d77253118",
     "display_backlight.png": "e404b9afa3ebe5ee355fbf84898e0a37baab5ceebeacea606a6ba02ce5fe48a2",
     "display_lighttime.png": "3fb7e1a497b3d25a7b4c965f1b10103bc87ff9f8796a12c4a2854b3e4cbbdf4e",
-    "display_screenlock.png": "e1aefd07bc42cd12cbe3cc59ac10378051134ed0f82d3b41a6c2c7e2cdeb4009",
     "netservice_airplay.png": "5f4a6020eef501c61a4ea216be748fd43a32acd4ed2f4d8b66bb1b3a3dc9a690",
     "netservice_dlna.png": "e64e462b2251cad08b92ccf26d63a7447d15b53479337db7aa0d809b908d108d",
     "netservice_wifitrans.png": "51c91d8e5aeb6e516d8340d84f1c0bbdb3133779feeff6c03aab68831366fb8a",

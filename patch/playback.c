@@ -980,8 +980,11 @@ int ringnav_load(void *q, int at, int type) {
 extern void ringnav_read_artistype(void);
 /* config_init applies the saved mode before the Home page can restore the queue; Artists is read
  * here too, as stock reads it only when a Library list or artist page opens, and Night Shift's
- * setting, so no paint reads one (nightshift.c night_paint). */
+ * setting, so no paint reads one (nightshift.c night_paint). A lock screen saved on (SYSSET
+ * SCREENSAVER 1, from stock or an earlier Q2 Pod) is saved off, once, before config_init reads it:
+ * Q2 Pod has no lock screen (docs/internals.md#screen-off-and-wake). */
 int ringnav_bootmode(int mode, int notify) {
+    if (config_value("SYSSET", "SCREENSAVER", 2, 0)) write_int_config(0, "SYSSET", "SCREENSAVER");
     peq_boot();
     ringnav_read_artistype();
     night_on();

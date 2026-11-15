@@ -1070,7 +1070,7 @@ SPLIT = ('pitch', 'body', 'title24_y', 'title_y', 'meta_y', 'count_y')
 
 def test_immediates_every_site_once():
     sites = [a for g in ipod.AUDIT['immediates'] for a, _ in g['sites']]
-    assert len(sites) == 104 and len(set(sites)) == 104
+    assert len(sites) == 100 and len(set(sites)) == 100
 
 
 def test_immediate_values_set0_are_the_baked_values():
@@ -1241,25 +1241,20 @@ def test_stock_tables_keep_their_toolbar_and_boxes(monkeypatch, path):
 
 
 def test_toolbar_switch_pages(monkeypatch):
-    # Lock Screen is a settings list, and the Sleep Timer's panel makes room for the row its switch becomes. Crossfade's page keeps its toolbar. SET0's keep theirs and their rows.
-    lock, sleep, boot = 'systemset/screensaver_page.bin', 'systemset/sleepshutdown_page.bin', 'playset/bootvol_page.bin'
-    pages = {lock: stock_list_page('screensaver_page'),
-             sleep: w('sleepshutdown_page', w('view_navbar', at=[0, 0, 375, 50]), w('view_sleep', at=[0, 50, 375, 240]), kind='window'),
+    # The Sleep Timer's panel makes room for the row its switch becomes. Crossfade's page keeps its toolbar. SET0's keep theirs.
+    sleep, boot = 'systemset/sleepshutdown_page.bin', 'playset/bootvol_page.bin'
+    pages = {sleep: w('sleepshutdown_page', w('view_navbar', at=[0, 0, 375, 50]), w('view_sleep', at=[0, 50, 375, 240]), kind='window'),
              boot: w('bootvol_page', w('view_navbar', at=[0, 0, 375, 50]), w('view_bootvol', at=[0, 50, 375, 240]),
                      w('slider', kind='slider', at=[50, 100, 275, 8]), w('a', kind='image', at=[0, 0, 50, 50], image='vol_left'), w('b', kind='image', at=[0, 0, 50, 50], image='vol_right'), kind='window')}
     for path, page in pages.items():
         monkeypatch.setitem(ipod.UI_ASSETS, path, ipod.sha(ipod.encode(page)))
     data = {path: ipod.encode(page) for path, page in pages.items()}
-    n = named(ipod.decode(ipod.patch_asset(lock, data[lock], g=CLASSIC_LIGHT)))
-    assert n['view_navbar'][2]['visible'] == 'false' and n['list_view'][1] == [0, 0, 375, 294] and n['list_view'][2]['default_item_height'] == '32'
-    assert named(ipod.decode(ipod.patch_asset(lock, data[lock], g=STOCK_ROW_REVERSED)))['list_view'][2]['default_item_height'] == '78'
     n = named(ipod.decode(ipod.patch_asset(sleep, data[sleep], g=CLASSIC_LIGHT)))
     assert n['view_navbar'][2]['visible'] == 'false' and n['view_sleep'][1] == [0, 32, 375, 240] and 28 + 240 <= 294
     assert 'visible' not in named(ipod.decode(ipod.patch_asset(boot, data[boot], g=CLASSIC_LIGHT)))['view_navbar'][2]
-    for path in (lock, sleep, boot):
+    for path in (sleep, boot):
         n = named(ipod.decode(ipod.patch_asset(path, data[path])))
-        assert 'visible' not in n['view_navbar'][2] and n[{lock: 'list_view', sleep: 'view_sleep', boot: 'view_bootvol'}[path]][1][1] == 50
-    assert named(ipod.decode(ipod.patch_asset(lock, data[lock])))['list_view'][2]['default_item_height'] == '78'
+        assert 'visible' not in n['view_navbar'][2] and n[{sleep: 'view_sleep', boot: 'view_bootvol'}[path]][1][1] == 50
 
 
 def test_search_rows_are_stocks_under_set0():
@@ -1823,13 +1818,15 @@ def test_patch_word_wants_the_stock_instruction():
 def test_status_row_names_the_page_inside_the_glass_s_top_curve():
     """A set's status row (OLED's): the bar black and 58 px, its title and clock sharing one box whose text starts
     STATUS_ROW_INSET in, in Text Secondary at bar_px, centred on status_y; the play state then the battery, ending
-    STATUS_ROW_INSET from the edge, not on the list's columns; Bluetooth, Wi-Fi and EQ off-screen, still there for stock."""
+    STATUS_ROW_INSET from the edge, not on the list's columns, Buttons Lock's padlock hidden before them; Bluetooth, Wi-Fi
+    and EQ off-screen, still there for stock."""
     g = dataclasses.replace(ipod.SET0, bar=58, status_y=23, text_x=24, right_x=28, bar_px=18)
     root = bar()
     ipod.status_bar(root, g)
     n = named(root)
     left, right = root[3][:2]
-    assert left[3] == [] and [c[2]['name'] for c in right[3]] == ipod.STATUS_ROW_RIGHT
+    assert left[3] == [] and [c[2]['name'] for c in right[3]] == ['img_keylock', *ipod.STATUS_ROW_RIGHT]
+    assert n['img_keylock'][1][2] + ipod.STATUS_ROW_GAP == ipod.inc('STATUS_ROW_LOCK_ROOM') == 17 and n['img_keylock'][2]['visible'] == 'false'
     assert ipod.inc('STATUS_ROW_INSET') == 62
     assert right[2]['children_layout'] == f'default(c=3,xm=62,s={ipod.STATUS_ROW_GAP})' and right[1][1::2] == [15, 16]
     for name in ('label_title', 'label_clock'):
