@@ -1,4 +1,4 @@
-"""coda-rc's primitives in pure Python (docs/remote-protocol.md#cryptography), so the client needs no packages.
+"""coda-rc's primitives in pure Python (docs/remote-protocol.md#pairing-and-authentication), so the client needs no packages.
 
 X25519 (RFC 7748), Elligator 2 as Monocypher 4's crypto_elligator_map computes it, ChaCha20-Poly1305 as RFC 8439
 specifies it, and the protocol's key schedule over HMAC-SHA-512. The daemon uses Monocypher for each of these;
