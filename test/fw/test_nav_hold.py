@@ -1781,6 +1781,68 @@ def test_the_link_is_lit_while_held_and_only_there(taps, ui):
     assert not taps.lit(taps.album) and not ui.pending()
 
 
+# A hold on the art (npt_hold, HOLD_MS after the touch came down) opens stock's full-screen art instead.
+def hold_art(taps, ui, moves=()):
+    taps.touch(O['EVT_POINTER_DOWN'], 100, 120)
+    for m in moves:
+        taps.touch(O['EVT_POINTER_MOVE_BEFORE'], *m)
+    ui.due('npt_hold')
+    taps.touch(EVT_POINTER_UP_BEFORE, *(moves[-1] if moves else (100, 120)))
+    ui.due()
+
+
+def test_a_hold_on_the_art_opens_it_full_screen_and_its_lift_is_no_tap(taps, ui, fw):
+    fw.mock('mclGetPlayStatus', lambda *_: 2)
+    taps.touch(O['EVT_POINTER_DOWN'], 100, 120)
+    assert [ms for fn, _, ms in ui.timers.values() if fn == ui.fn('npt_hold')] == [500]
+    taps.touch(O['EVT_POINTER_MOVE_BEFORE'], 104, 126)  # a finger's wobble keeps the hold
+    ui.due('npt_hold')
+    assert ui.went == ['bigcover_page']
+    taps.touch(EVT_POINTER_UP_BEFORE, 104, 126)
+    ui.due()
+    assert ui.went == ['bigcover_page']  # never the album too
+    taps.tap(100, 120)  # the next touch is a tap again
+    assert ui.went == ['bigcover_page', 'playerjumpinfo_page']
+
+
+def test_the_holds_lift_never_reaches_the_full_screen_art_it_opened_but_the_next_tap_does(taps, ui, fw):
+    fw.mock('mclGetPlayStatus', lambda *_: 2)
+    ui.routes['bigcover_page'] = lambda ctx: ui.window('bigcover_page')
+    taps.touch(O['EVT_POINTER_DOWN'], 100, 120)
+    ui.due('npt_hold')
+    big = ui.top()
+    dispatch = fw.fn('ringnav_dispatch', C.c_int, C.c_void_p, C.c_void_p)
+
+    def send(kind):
+        event = C.create_string_buffer(0x40)
+        ui.pointer_event(C.addressof(event), kind, big, 100, 120)
+        return dispatch(big, C.addressof(event))
+    assert [send(k) for k in (EVT_POINTER_UP_BEFORE, EVT_POINTER_UP_BEFORE - 1, EVT_CLICK)] == [STOP] * 3
+    assert not ui.dispatched  # stock's pointer-up, which closes the page, never ran
+    send(O['EVT_POINTER_DOWN'])
+    send(EVT_POINTER_UP_BEFORE - 1)  # a later tap closes it, as stock's does
+    assert ui.dispatched == [(big, O['EVT_POINTER_DOWN']), (big, EVT_POINTER_UP_BEFORE - 1)]
+
+
+def test_a_hold_that_moves_or_a_stopped_player_opens_no_full_screen(taps, ui, fw):
+    fw.mock('mclGetPlayStatus', lambda *_: 2)
+    hold_art(taps, ui, moves=((140, 120),))  # a swipe that stays down
+    fw.mock('mclGetPlayStatus', lambda *_: 1)
+    hold_art(taps, ui)
+    assert 'bigcover_page' not in ui.went
+
+
+def test_a_streams_art_holds_to_full_screen_though_its_tap_goes_nowhere(taps, ui, hold, fw):
+    fw.mock('mclGetPlayStatus', lambda *_: 2)
+    hold.mcl.type = 0x2
+    taps.tap(100, 120)
+    assert not ui.went
+    taps.touch(O['EVT_POINTER_DOWN'], 100, 120)
+    assert taps.fw.fn('np_tap_lit', C.c_int, C.c_void_p)(taps.cover) == 0  # the art is no text
+    ui.due('npt_hold')
+    assert ui.went == ['bigcover_page']
+
+
 def test_classics_slanted_art_fades_while_held_rather_than_take_a_box_of_shade(taps, ui, fw):
     ui.place(taps.cover, 16, 2, 166, 206)  # taller than wide: the reflection's room
     taps.touch(O['EVT_POINTER_DOWN'], 100, 120)
