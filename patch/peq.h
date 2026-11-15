@@ -437,6 +437,8 @@ int catalogue_seconds(const char *path), catalogue_load(void *q, int *at, void *
 int catalogue_access(const char *path, int mode); /* stock's play check, tools/build.py */
 int catalogue_missing(const char *path); /* the payload's own lists' check before a play */
 unsigned catalogue_song_key(void *r, unsigned key); /* plays and hearts: a copy is its row */
+int catalogue_row_fav(void *r);       /* a copy's My Fav by its row: 1, 0, -1 for no copy */
+void catalogue_row_unfav(void *r), catalogue_fav_changed(void);
 char *catalogue_union(const char *sql), *catalogue_search(const char *sql);
 const char *catalogue_rows(void); /* library_query's union, "" without one */
 void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);

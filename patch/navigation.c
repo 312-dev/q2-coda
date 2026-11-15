@@ -10236,7 +10236,7 @@ static int qm_open(const void *unused) {
         acts[n++] = QA_QUEUE;
     }
     if (!song) acts[n++] = QA_SHUFFLE;
-    if (song) acts[n++] = checkFavExist(r) ? QA_UNFAV : QA_FAV;
+    if (song) acts[n++] = rate_fav(r) ? QA_UNFAV : QA_FAV;
     /* an album's own hearts, 5 its favourite */
     unsigned aid = song ? 0 : qm_album_id(r);
     int album_hearts = aid ? rate_kept(1, aid) : 0;
@@ -10331,7 +10331,7 @@ static int qm_open(const void *unused) {
         void *label = hscroll_label_create(item, 30, 0, 266, pitch);
         widget_use_style(label, "s_scrlabel_white24l");
         if (acts[i] == QA_RATE) {
-            int h = aid ? album_hearts : checkFavExist(r) ? 5 : rate_kept(0, rate_song_key(r));
+            int h = aid ? album_hearts : rate_fav(r) ? 5 : rate_kept(0, rate_song_key(r));
             const char *row = aid ? "Rate Album" : "Rate";
             char hs[16];
             tk_snprintf(rated, sizeof rated, h ? "%s  %s" : "%s", row, hearts_text(hs, h));

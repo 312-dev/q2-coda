@@ -1069,13 +1069,21 @@ def test_now_playing_takes_the_apps_cover_for_a_stream_cache_copy_without_art(ri
     assert len(ff) == 1
 
 
-def heart_on_copy(rig, fw, ui, song, mcl, **kw):
+def myfav(rig):
+    return [u for u, in sqlite3.connect(rig.tmp/'database.db').execute('select fileurl from myfav order by id')]
+
+
+def heart_on_copy(rig, fw, ui, song, mcl, server_fav=False, **kw):
     """Now Playing on a server song's Stream Cache copy (the app's .play plays the copy, a file no Library row
     has), with the heart bound and stock's My Fav toggle stubbed."""
     from test_nav_library_pages import FAV_CLICK, Heart, stock_stub
     copy = '/mnt/mmc/.subsonic/stream/acct/orig/o/One [s1].flac'
     rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, local=copy)])
     rig.poll()
+    if server_fav:  # five hearts from the server: the row's path in myfav (ratings_in), not the copy's
+        rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = f'{listen_key(url("s1")):08x}\ts1\t5\t1700000000\n'.encode()
+        rig.poll(3)
+        assert myfav(rig) == [url('s1')]
     heart = Heart(fw, ui, song, mcl, path=copy.encode(), **kw)
     heart.log = (C.c_long * 3)()  # the stub writes its arguments there: it must outlive the stub
     stock_stub(FAV_CLICK, 0, heart.log)
@@ -1172,3 +1180,45 @@ def test_a_server_songs_five_hearts_from_the_server_are_its_my_fav(rig, fw, firs
     assert f'/mnt/mmc/.{APP}/ratings.in' not in rig.files.files
     db = sqlite3.connect(rig.tmp/'database.db')
     assert db.execute('select fileurl from myfav').fetchall() == [(url('s1'),)]
+
+
+@in_fork
+def test_a_server_favourite_fills_the_heart_while_its_copy_plays(rig, fw, ui, song, mcl):
+    """Five hearts from the server put the row's path in My Fav; stock draws Now Playing's heart from the copy's
+    own path, which isn't there, so the badge's tick fills it by the row (and hides the badge)."""
+    heart = heart_on_copy(rig, fw, ui, song, mcl, server_fav=True)
+    assert ui.image[heart.heart] == 'play_fav' and heart.badge() is None
+
+
+@in_fork
+def test_a_tap_on_a_server_favourite_s_heart_takes_the_row_out(rig, fw, ui, song, mcl):
+    """The heart filled by the row is emptied by a tap: the row leaves My Fav, the copy never goes in (stock's
+    toggle isn't run, so the Favorites list doesn't get the copy), and the server is told none."""
+    from test_nav_library_pages import FAV_CLICK, stock_stub
+    heart = heart_on_copy(rig, fw, ui, song, mcl, server_fav=True)
+    log = (C.c_long * 3)()
+    stock_stub(FAV_CLICK, 0, log)
+    ui.handler(heart.heart, EVT_CLICK)(C.addressof(C.create_string_buffer(0x40)))
+    assert list(log) == [0, 0, 0] and myfav(rig) == [] and ui.image[heart.heart] == 'play_unfav'
+    row = listen_key(url('s1'))
+    assert heart.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == f'{row:08x}\ts1\t0\t1700000000\n'.encode()
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    ui.fire('rate_tick')  # the row out: the tick leaves it empty
+    assert ui.image[heart.heart] == 'play_unfav'
+
+
+@in_fork
+def test_fewer_hearts_picked_on_a_server_favourite_take_the_row_out(rig, fw, ui, song, mcl):
+    """The picker opens on five for the row's favourite; three keep three under the row's key and take the row out
+    of My Fav without stock's toggle, which would put the copy in."""
+    from test_nav_library_pages import FAV_CLICK, KEY_CENTER, KEY_PREV, stock_stub
+    heart = heart_on_copy(rig, fw, ui, song, mcl, server_fav=True)
+    log = (C.c_long * 3)()
+    stock_stub(FAV_CLICK, 0, log)
+    heart.hold()
+    assert heart.picker()[0] in ('5 of 5', '5 Hearts')
+    heart.key(KEY_PREV), heart.key(KEY_PREV)
+    heart.key(KEY_CENTER)
+    row = listen_key(url('s1'))
+    assert list(log) == [0, 0, 0] and myfav(rig) == [] and ui.image[heart.heart] == 'play_unfav'
+    assert fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, row) == 3 and heart.badge() == '3'
