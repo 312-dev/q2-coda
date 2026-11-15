@@ -50,7 +50,7 @@ static playback s __attribute__((section(".scratch")));
 /* Each queue entry's identity (its path's hash and CUE start) as the last rebuild took the queue, so
  * follow_queue can tell which entries a stock edit took out; and playback_poll's thread, the UI's. */
 static unsigned *ids __attribute__((section(".scratch")));
-static unsigned long ui_thread __attribute__((section(".scratch")));
+unsigned long ui_thread __attribute__((section(".scratch")));
 /* Stock Shuffle's Previous plays the last track, but the track it left stays unplayed in the pool,
  * so stock's Next draws a random one instead: ringnav_shuffle returns to it (playback_back).
  * back_to is that index + 1, back_at where Previous landed. */

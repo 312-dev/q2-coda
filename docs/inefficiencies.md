@@ -44,6 +44,7 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 | 32  | C mutation testing reaches 8 files                                             | test gap  | L      | deferred   |
 | 33  | The C coverage floors are 40% and 38%                                          | test gap  | M      | deferred   |
 | 34  | Boot reads `config.ini` once per key                                           | runtime   | M      | measured   |
+| 35  | A large library's Songs, Albums and Artists load and sort on every open        | runtime   | M      | measured   |
 
 ## Fragile hard-coding
 
@@ -210,6 +211,27 @@ Entries 7 to 17 are costs the code marks itself.
 - **Where:** `patch/theme_engine.c:8-15` (`config_value` calls stock's `toolsReadConfig` with the file's path each time); 22 call sites in `patch/*.c`, most in the two loops at `patch/theme_engine.c:178-192` and `patch/navigation.c:3181-3187`.
 - **Measured:** one boot in the emulator with `Q2EMU_STRACE=1`, on a `--dev` build of `oled-theme` at `c056e7b4`, from the log's start to Home's first frame (the fifth flip): `config.ini` is opened 93 times (91 to read, one `O_RDWR` and one rewrite, stock's), all on demo's UI thread, 71 of them before stock prints `config_init end`. The file is 601 bytes, read whole with one 4,096-byte `read` per open. The span holds about 18,700 syscalls. The values are cached after the first read (`st.settings_read`, `st.pod_read`), so it is paid once a boot.
 - **Decision:** the rule: one open, read and parse of a small cached file is about 0.1 ms on the Q2 (an estimate), worth fixing at 100 ms a boot, 1,000 opens or more. 93 opens, stock's included, is about 9 ms: not worth fixing.
+
+### 35. A large library's Songs, Albums and Artists load and sort on every open
+
+- **Where:** `patch/navigation.c` (`ringnav_localclass`, `songs_load`, `library_query`), `patch/coverflow.c` (`coverflow_split`), stock's `toolsQueryDbTable` and `toolsQueryDbTableAndSort`.
+- **Measured:** the emulator on a `--dev` build with each phase timed in the payload (`clock_gettime` around each query, its row callback and the first `ringnav_sort_key` call; the first `widget_on_paint_background` after the load), a synthetic library of 20,103 songs, 2,011 albums and 202 artists, three opens of each list after a boot. Milliseconds, Local; the host's load moved whole runs by up to 2x, so each pair below was run back to back:
+
+  | Open    | Phase                                                                   |              Before |              After |
+  | ------- | ----------------------------------------------------------------------- | ------------------: | -----------------: |
+  | all     | Centre's release to the load (the double-press wait, `DOUBLE_CLICK_MS`) |             250-270 |            250-270 |
+  | Songs   | `getAllMusic(0)`: exec and row callback                                 |             220-530 |            225-270 |
+  | Songs   | its name sort                                                           |         1,250-2,740 |        0 once kept |
+  | Songs   | load end to first paint                                                 |              40-120 |              40-50 |
+  | Albums  | `getAllAlbum`: exec, then its name sort                                 |       55-90, 65-100 | 55-80, 0 once kept |
+  | Albums  | `coverflow_split`'s `ALBUM_SQL` grouping                                |             185-320 |          unchanged |
+  | Albums  | the Unknown Album check (`class_query`)                                 |               32-50 |          unchanged |
+  | Artists | the artists query, its sort; the Unknown check                          | 80-120, 8-13; 37-64 |          unchanged |
+
+  With 10,000 server songs beside them (Local + Server), Songs' sort was 1,860-1,970 ms of a 2.4-2.6 s load; kept, the load took 470-530 ms. Albums' grouping was 330-350 ms there.
+
+- **State:** the name sort's order is kept ([internals](internals.md#name-order)); the first open after a boot, a scan or a server import still sorts. Nothing repeats a query within one open.
+- **Decision:** the rest left as is. Three indexes (the album grouping's three terms, `album`, and the album-artist expression) cut the grouping to 120-180 ms and both Unknown checks to under 1 ms, but cost 0.8, 0.5 and 0.4 MB of `/mnt/data` (17.7 MB) at 20,000 songs, more with real paths, and time at the end of every scan; worth it if `/mnt/data` moves to the card. The double-press wait is Centre's (a second press turns the screen off). A spinner during the sort would need the sort to yield, and it runs to its end inside stock's `toolsQueryDbTable`: only a sort of the payload's own, calling stock's comparator for the same order, could stop between steps for a main-loop pass. Keeping the order on the card as well would leave the sort to the first open after a library change.
 
 ## Duplicated tables kept in step by hand
 

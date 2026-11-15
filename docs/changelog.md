@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Library: on a large library, Songs opens several times faster after its first open (20,000 songs: from 2 to 3 seconds to about half a second in the emulator), and Albums a little faster. The A to Z order is kept between visits instead of every song being sorted again each time, until the library changes.
   - EQ (OLED): with the wheel on the **Simple** and **Advanced** tabs, only the tabs show it; the first row of Advanced's list no longer lights up as well.
   - EQ (OLED): in Light Mode the Simple tab's slider knobs, and the knob on slider pages like Resume Songs, have a thin grey edge, so they no longer vanish white on white.
   - EQ (OLED): after picking a preset on Simple, the switch row still reads **Enabled**, and the preset's name shows on the right of the **Presets** row, as a setting's value does.
