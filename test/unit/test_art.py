@@ -445,7 +445,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     Text Primary (each half's), More pressed in Text Secondary and the full heart (fill) in Accent Blue, and the
     Ratings rows' filled and outlined hearts and Streaming's service marks in the folder's inks, all from the vendored
     Phosphor SVGs but TIDAL's mark, drawn in art.py, and the inset modal's symbols (regular, 19 px) in Text Secondary
-    (each half's) and white for the selection and the picker's check in Accent Blue."""
+    (each half's) and white for the selection and the picker's check in Accent Blue, and the volume's two speakers (fill,
+    16 px) in Text Secondary (each half's)."""
     t = theme.builtins()[3]
     got = art.images(t)
     modes = [f'mode_{n}_{k}' for n in ('shuffle', 'repeat') for k in ('d', 'l', 'on')] + ['mode_repeat1_on']
@@ -455,9 +456,10 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     rates = [f'rate_{on}_{k}' for on in ('on', 'off') for k in ('d', 'l', 'w')]
     marks = [f'stream_{n}_{k}' for n in ('tidal', 'spotify', 'app', 'radio', 'airplay', 'config') for k in ('d', 'l', 'w')]
     menus = [f'menu_{n}_{k}' for n in art.MENU_ICONS for k in ('d', 'l', 'w')] + ['menu_check_a']
+    speakers = [f'vol_{n}_{k}' for n in ('lo', 'hi') for k in ('d', 'l')]  # the volume's ends on Now Playing (fill, 16 px)
     assert set(got) == {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
-                                              'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus,
+                                              'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers,
                                               'search_pop', 'search_pop_letters', 'search_pop_echoes')}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
@@ -473,7 +475,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.ROW_ICON_PX, blue if n == 'np_fav' else rgb) for n, rgb in glyphs.items()),
                           *((n, art.RATE_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in rates),
                           *((n, art.STREAM_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in marks),
-                          *((n, art.MENU_ICON_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff, 'a': blue}[n.rsplit('_', 1)[1]]) for n in menus)):
+                          *((n, art.MENU_ICON_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff, 'a': blue}[n.rsplit('_', 1)[1]]) for n in menus),
+                          *((n, 16, {'d': 0xababab, 'l': 0x5c5c5c}[n[-1]]) for n in speakers)):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
         assert (w, h) == (px, px) and inked == {tuple(rgb >> s & 255 for s in (16, 8, 0))}

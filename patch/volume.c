@@ -110,7 +110,8 @@ static int vol_poll(const void *info) {
  * sets its slider_vol. Over Now Playing, as on an iPod classic, the band from the progress bar to
  * the times turns black with a white bar over the track and "Volume N"; with Classic's times beside
  * its bar, the bar shows the volume between the iPod's speakers in the times' place (vol_end) and
- * "N%" takes the page dots' place until vol_poll finds the dialog gone. Over any other window
+ * "N%" takes the page dots' place until vol_poll finds the dialog gone; under a status row's set
+ * (OLED's) the bar, inset, is white between two speakers with no text. Over any other window
  * (Quick Settings included) a VOL_PANEL_* rounded panel in the fast-scroll letter's style holds a
  * pill bar and the number alone; Classic's, VOL_CL_X in, the rows painter's gloss between two
  * speakers. slider_vol and label_vol are hidden, and slider_vol is moved onto the area drawn, so
@@ -126,12 +127,14 @@ void vol_paint(void *top, void *canvas) {
     const theme_t *T = theme();
     int gloss = !np && T->painter[PAINT_VOLUME] == VOL_CLASSIC_LIGHT;
     rect_t area, bar, text, lo, hi;
-    int beside = 0;
+    int beside = 0, ends = np && geom_val(V_STATUS_Y); /* OLED's: speakers at the bar's ends */
     if (np) {
         void *slider = st.np_slider, *times = st.np_elapsed;
         int dy = I(st.np_win, W_Y) - I(top, W_Y), y = dy + I(slider, W_Y),
             bh = widget_get_prop_int(slider, "bar_size", 8), ty = dy + I(times, W_Y);
         bar = (rect_t){ I(slider, W_X), y + (I(slider, W_H) - bh) / 2, I(slider, W_W), bh };
+        lo = bar; /* the progress bar's own ends, which the speakers keep */
+        if (ends) bar.x += VOL_SPK_INSET, bar.w -= 2 * VOL_SPK_INSET;
         text = (rect_t){ 0, ty, I(st.np_win, W_W), I(times, W_H) };
         area = (rect_t){ 0, y, text.w, ty + text.h - y };
         /* Classic's times share the bar's rows: their boxes, and the bar with its reflection */
@@ -194,10 +197,21 @@ void vol_paint(void *top, void *canvas) {
     if (!np || !ipod_bar(canvas, bar.x, bar.y, bar.w, w, 0)) {
         fill_box(canvas, &bar, RGBA(np ? theme()->np_track_rgb : VOL_PANEL_TRACK), bar.h / 2);
         rect_t on = { bar.x, bar.y, w < bar.h ? bar.h : w, bar.h };
-        /* Over Now Playing it is the progress bar's own: the accent's fill */
-        if (w) fill_box(canvas, &on, RGBA(np ? accent_tone(TONE_LIGHT) : 0xffffff), bar.h / 2);
+        /* Over Now Playing it is the progress bar's own: the accent's fill; white between
+         * speakers */
+        if (w)
+            fill_box(canvas, &on, RGBA(np && !ends ? accent_tone(TONE_LIGHT) : 0xffffff),
+                     bar.h / 2);
     }
     stock_canvas_set_fill_color(canvas, fill);
+    if (ends) { /* no number: a VOL_SPK_PX speaker VOL_SPK_X in from each end of the progress bar */
+        int cy = bar.y + bar.h / 2, L = ipod_light();
+        paint_art(top, canvas, theme_art(L ? "vol_lo_l" : "vol_lo_d"),
+                  lo.x + VOL_SPK_X - VOL_SPK_PX / 2, cy - VOL_SPK_PX / 2);
+        paint_art(top, canvas, theme_art(L ? "vol_hi_l" : "vol_hi_d"),
+                  lo.x + lo.w - VOL_SPK_X - VOL_SPK_PX / 2, cy - VOL_SPK_PX / 2);
+        return;
+    }
     if (beside) {
         vol_end(top, canvas, "classic_light_vol_lo", lo.x + lo.w, 1, &bar);
         vol_end(top, canvas, "classic_light_vol_hi", hi.x, 0, &bar);
@@ -226,11 +240,5 @@ void vol_paint(void *top, void *canvas) {
         return;
     }
     k += put_num(s + k, (unsigned)clamp_step(0, 999, level));
-    /* a status row's set (OLED's) sets it as a secondary label, 15 px Text Secondary */
-    int quiet = np && geom_val(V_STATUS_Y);
-    draw_centred(canvas, s, k, &text,
-                 quiet ? VOL_NP_QUIET_PX
-                 : np  ? NP_TIMES_PX
-                       : VOL_PANEL_PX,
-                 quiet ? RGBA(flip_if(ipod_light(), VOL_NP_QUIET_RGB)) : 0xffffffff);
+    draw_centred(canvas, s, k, &text, np ? NP_TIMES_PX : VOL_PANEL_PX, 0xffffffff);
 }

@@ -3316,12 +3316,25 @@ def test_the_first_reachable_list_is_repainted_once(fw, world, st):
     assert world.invalid.count((rows, None)) == 1
 
 
-def test_over_oleds_now_playing_the_volume_reads_as_a_secondary_label(fw, world, st):
-    """A status row's set (OLED's): "Volume N" in 15 px Text Secondary (audit N2), not the times' 14 px white."""
-    theme(fw, '3')  # OLED
+@pytest.mark.parametrize('light, ink', [('0', 'd'), ('1', 'l')])
+def test_over_oleds_now_playing_the_volume_is_its_bar_between_two_speakers(fw, world, st, theme_t, light, ink):
+    """A status row's set (OLED's): the bar keeps its rows, inset VOL_SPK_INSET at each end, white on the track; a
+    16 px speaker (Phosphor's speaker-simple-none, -high) centred VOL_SPK_X in from each end of the progress bar on
+    its centre line; no number (the "A: iPod speakers" mock-up)."""
+    theme(fw, '3', LIGHT=light)  # OLED
     st('geom').value = fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())
     dialog, *_ = volume(fw, world, st, 37, under='playing_page', np=True)
     canvas = Canvas(fw)
     vol_paint(fw, dialog, canvas)
-    (text, _, color, font), = canvas.texts
-    assert text == 'Volume 37' and font[1] == O['VOL_NP_QUIET_PX'] == 15 and color & 0xffffff == 0xababab
+    inset, spk = O['VOL_SPK_INSET'], O['VOL_SPK_X']
+    assert (inset, spk, O['VOL_SPK_PX']) == (24, 8, 16)  # tools/art.py draws them at VOL_SPK_PX too
+    bar = (66 + inset, 245 + (20 - 4) // 2, 243 - 2 * inset, 4)  # volume()'s slider_play: x 66, w 243, bar 4
+    assert [(r, radius) for r, _, radius in canvas.rounded] == [(bar, 2), ((bar[0], bar[1], bar[2] * 37 // 100, 4), 2)]
+    if light == '0':  # the track, and the fill white (ui_ink flips both for Light Mode's paper)
+        assert [c for _, c, _ in canvas.rounded] == [rgba(theme_t('np_track_rgb', C.c_uint)), 0xffffffff]
+        assert (0, 245, 375, 270 + 16 - 245, 0xff000000) in canvas.fills  # the times stay papered over
+    cy = bar[1] + 2
+    half = O['VOL_SPK_PX'] // 2  # placed as VOL_SPK_PX squares (the mock's images are 20 x 10)
+    assert canvas.art(f'oled_vol_lo_{ink}') == [(66 + spk - half, cy - half, 20, 10)]
+    assert canvas.art(f'oled_vol_hi_{ink}') == [(66 + 243 - spk - half, cy - half, 20, 10)]
+    assert canvas.texts == []

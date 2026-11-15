@@ -283,8 +283,11 @@ has no place for keeps a place of its own:
 - **Shuffle and repeat** are two controls on stock's play mode button: a tap on shuffle turns it
   on or off, a tap on repeat steps Off, All, One (repeat-once's glyph for One), and each keeps the
   other as it was. Stock's Shuffle never ends, so shuffle with repeat Off plays on as with All.
-- **The volume** and the scrub draw on the bar where it is: "Volume 66" under it in 15 px Text
-  Secondary, and the scrub as a 14 px white knob on the fill's end. The A-B markers follow the bar
+- **The volume** and the scrub draw on the bar where it is. The volume (the "A: iPod speakers"
+  mock-up) keeps the bar's rows, inset to x 48 to 323, white on the track, with Phosphor's
+  `speaker-simple-none` and `speaker-simple-high` (fill, 16 px, Text Secondary) centred at x 32
+  and 339 on its centre line, and no number; the times' row stays blank meanwhile. The scrub is
+  a 14 px white knob on the fill's end. The A-B markers follow the bar
   across but keep stock's row, y 308 on screen, under the page dots. ponytail: a marker within
   about 14 px of either end of the bar falls under the bottom corners' glass; moving them onto
   the bar needs the y that stock's placement (`0x53baa4`) writes made per set.
