@@ -14749,7 +14749,7 @@ for i,names in want.items():
     row=m.nodes[m.find('scroll_view',menu)]['children'][i+(i>=2)]; g,c=m.handler(row,O['EVT_CLICK'])  # Albums aside
     assert m.call(address=g,args=(c,m.event,0,0),gap=0,count=50_000_000)==0; m.page=m.top
     assert m.nodes[m.page]['name']=='rated_page'
-    assert [c for c in m.calls if c[0]=='getAllMusic'][-1][1:]==(0,0)
+    assert [c for c in m.calls if c[0]=='getAllMusic'][-1][1:]==(0,2)  # LIBRARY_ALL (navigation.h): every card song, and the server's
     assert m.texts()==[('Top Rated','Loved','All Rated','Disliked')[i]]+[x for n in names for x in (n,hearts[n]+' · Artist')],m.texts()
     if i==2:  # a row plays the list from there, as a library queue
         r=m.nodes[m.find('scroll_view')]['children'][1]; g,c=m.handler(r,O['EVT_CLICK'])

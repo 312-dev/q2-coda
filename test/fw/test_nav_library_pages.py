@@ -1061,6 +1061,7 @@ class Heart:
     """Now Playing's window with stock's heart (img_fav, its click stock's My Fav toggle) and a playing library
     track, rated or not; rate_bind as playing_page_init runs it."""
     CTX = 0x5eed
+    log: object = None  # a caller's stock_stub argument log, kept alive with the heart (test_catalogue.py)
 
     def __init__(self, fw, ui, song, mcl, kept=0, fav=False, bind=True, handler=FAV_CLICK, removing=0, table=None,
                  path=b'/m/now.flac', image=None):
