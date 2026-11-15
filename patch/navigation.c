@@ -5300,8 +5300,8 @@ static int np_gone(void *win, void *event) {
     if (win == st.np_win) {
         st.np_win = (void *)0;
         st.np_hash = 0;
-        st.np_pos = st.np_album = st.np_remain = st.np_slider = st.np_elapsed = st.np_cover =
-            st.np_slide = st.np_lrc = st.np_title = st.np_artist = (void *)0;
+        st.np_album = st.np_remain = st.np_slider = st.np_elapsed = st.np_cover = st.np_slide =
+            st.np_lrc = st.np_title = st.np_artist = (void *)0;
         st.scrub_moved = 0; /* the page is going: no seek */
         st.np_off = st.np_full = st.lyric_held = 0;
         np_tap_reset();
@@ -5365,12 +5365,12 @@ static int stream_gone(void *ctx, void *event) {
 /* Classic's Spotify and Internet Radio Now Playing (spotify.c, radio.c) take the local page's
  * places (NP_IPOD_*): the art, its box taller than wide, so paint_cover slants the image it shows
  * over its reflection (coverflow_slant, whose one frame is keyed by the image's url and pixels, so
- * the local page and this one never show each other's); the title's, artist's, album's and "3 of
- * 12"'s rows (text, any 0 left out); the times in "-9:59"'s boxes beside the bar, in Classic's
- * face, until the page fits them to its track (ipod_times); the bar, which the page paints with
- * ipod_bar, or with none a bar of its own, last so over the art's box, that paint_scrubber paints
- * always full and that takes no touch; the heart. 0 under the other themes, whose pages keep their
- * own layout. */
+ * the local page and this one never show each other's); the title's, artist's and album's rows
+ * and a fourth under them in the room the local page leaves there (text, any 0 left out); the times
+ * in "-9:59"'s boxes beside the bar, in Classic's face, until the page fits them to its track
+ * (ipod_times); the bar, which the page paints with ipod_bar, or with none a bar of its own, last
+ * so over the art's box, that paint_scrubber paints always full and that takes no touch; the heart.
+ * 0 under the other themes, whose pages keep their own layout. */
 int stream_ipod(void *art, void *const text[4], void *elapsed, void *remain, void *bar,
                 void *heart) {
     static const unsigned char dy[] = { 0, 34, 62, 90 }, h[] = { 28, 22, 22, 20 };
@@ -5383,7 +5383,8 @@ int stream_ipod(void *art, void *const text[4], void *elapsed, void *remain, voi
         if (text[i])
             widget_move_resize(text[i], NP_IPOD_TEXT_X, NP_IPOD_TEXT_Y + dy[i],
                                375 - SPOT_ART_X - NP_IPOD_TEXT_X, h[i]);
-    if (text[3]) widget_set_prop_int(text[3], "style:normal:font_size", 16); /* "3 of 12"'s */
+    if (text[3])
+        widget_set_prop_int(text[3], "style:normal:font_size", 16); /* the fourth's 16 px */
     void *times[] = { elapsed, remain };
     for (unsigned i = 0; i < 2; ++i) {
         if (!times[i]) continue;
@@ -5444,7 +5445,6 @@ int ringnav_playing(void *win, void *ctx) {
     stop_timer(&st.genre_timer);
     st.genre_label = (void *)0;
     st.np_win = win;
-    st.np_pos = widget_lookup(win, "label_ipod_pos", 1);
     st.np_album = widget_lookup(win, "label_ipod_album", 1);
     st.np_slider = widget_lookup(win, "slider_play", 1);
     st.np_remain = widget_lookup(win, "label_ipod_remain", 1);

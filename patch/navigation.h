@@ -203,8 +203,7 @@ typedef struct {
     int pct_digit, pct_sign; /* BATT_PX advances of '0' and '%', measured on the first paint */
     unsigned letter_timer;   /* the fast-scroll letter shows while this runs */
     /* Now Playing's window and payload-filled widgets, and the sources they last showed. */
-    void *np_win, *np_pos, *np_album, *np_slider, *np_remain, *np_elapsed, *np_cover, *np_title,
-        *np_artist;
+    void *np_win, *np_album, *np_slider, *np_remain, *np_elapsed, *np_cover, *np_title, *np_artist;
     int np_meta[2];          /* face_font's answers for np_artist and np_album, -1 none yet */
     int np_bold;             /* the title's font: theme_font's face | px << 2, -1 not set yet */
     void *np_slide, *np_lrc; /* the art/lyrics/info pages and the lyric lines' scroll_view */

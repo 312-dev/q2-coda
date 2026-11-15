@@ -177,7 +177,7 @@
 /* Classic's Spotify and Internet Radio Now Playing take the local page's np_ipod places, in the
  * window (navigation.c stream_ipod; tools/ipod.py playing_page checks them): the art NP_IPOD_ART
  * square at SPOT_ART_X, NP_IPOD_ART_Y, its box its reflection's room taller; the title's row at
- * NP_IPOD_TEXT_X, NP_IPOD_TEXT_Y, the artist's, album's and "3 of 12"'s 34, 62 and 90 under it; the
+ * NP_IPOD_TEXT_X, NP_IPOD_TEXT_Y, the artist's and album's 34 and 62 under it, and a fourth line's 90; the
  * heart at NP_IPOD_FAV_X, _Y; the bar from NP_IPOD_BAR_X to the mirrored edge (the "-9:59" boxes';
  * ipod_times fits them to the track), its rows from NP_IPOD_BAR_Y, the times' NP_IPOD_TIME_H boxes
  * beside it, centred on its rows. */
@@ -824,7 +824,7 @@ static inline int arc_out(int r, int y) {
 #define PEQ_GRAPH_DB 15
 #define PEQ_PLOT_TOP 6
 #define PEQ_PLOT_BOTTOM 78
-/* iPod visualizer (patch/visualizer.c, docs/ipod.md#visualizer), Now Playing's fourth page. The
+/* iPod visualizer (patch/visualizer.c, docs/ipod.md#visualizer), Now Playing's last page. The
  * page shows the audio VIS_LATENCY_MS behind what hciplayer last handed the filter: its ao_alsa asks
  * for a 500 ms buffer in 16 periods (0x4382ec: buffer_time 500000 us) and refills it a period at a
  * time, so a block waits about 500 ms less half a period to a period; Bluetooth adds its own, so this

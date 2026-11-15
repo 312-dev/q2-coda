@@ -101,7 +101,7 @@ def has(runs, text):
     return all(any(lo <= ord(c) <= hi for lo, hi in runs) for c in text)
 
 
-PTRS = set('''bar_bt bar_wifi bar_pct bar_slot bar_icon bar_idle bar_state bar_eq bar_title np_win np_pos
+PTRS = set('''bar_bt bar_wifi bar_pct bar_slot bar_icon bar_idle bar_state bar_eq bar_title np_win
     np_album np_slider np_remain np_elapsed np_cover np_title np_slide np_lrc slider_win slider_w slider_sw slider_hint
     t9_page t9_back kb_win search_win search_tabs pl_box stream_art stream_bar genre_label number_face'''.split())
 BYTES = {'title_align', 'slider_kind', 'bar_dark'}
@@ -1212,7 +1212,6 @@ class Now:
         self.win = win = ui.widget(ui.wm, 'playing_page', 0, 0, 375, 320, kind='window')
         ui.set_str(win, b'name', b'playing_page')
         self.title = ui.widget(win, 'scrlabel_title', 206, 38, 160, 28, text='Moment\'s Notice')
-        self.pos = ui.widget(win, 'label_ipod_pos', 206, 128, 160, 20)
         self.album = ui.widget(win, 'label_ipod_album', 206, 100, 160, 22)
         self.cover = ui.widget(win, 'img_cover', 16, 22, 178, 178)
         self.state = ui.widget(win, 'img_playstate', 0, 0, 40, 40)
@@ -1262,8 +1261,9 @@ def now(fw, ui, mcl, st):
     return Now(fw, ui, mcl, st)
 
 
-def test_the_page_shows_its_tracks_place_album_and_time_left(fw, ui, now):
-    assert (ui.text(now.pos), ui.text(now.album), ui.text(now.remain)) == ('3 of 12', 'Blue Train', '-2:30')
+def test_the_page_shows_its_album_and_time_left_and_no_place_in_the_queue(fw, ui, now):
+    assert (ui.text(now.album), ui.text(now.remain)) == ('Blue Train', '-2:30')
+    assert not [t for _, (w, t, *_) in fw.calls('widget_set_text_utf8') if b' of ' in C.string_at(t)]  # no "3 of 12"
     sets = [(w, key) for w, key, _ in ui.int_log if w == now.slider]
     assert sets.index((now.slider, b'max')) < sets.index((now.slider, b'value'))  # the max first, or it clamps
     assert now.value() == 50 and ui.ints[now.slider, b'max'] == 200
@@ -1277,15 +1277,15 @@ def test_the_labels_are_written_only_when_their_source_changes(fw, ui, mcl, now,
     assert sync(now.win) == 1 and ui.text(now.remain) == '-2:20'
     mcl.pos = 3
     sync(now.win)
-    assert ui.text(now.pos) == '4 of 12' and ui.text(now.album) == ''  # the parsed tags are another track's
+    assert ui.text(now.album) == ''  # the parsed tags are another track's
     assert sync(ui.wm) == 0
 
 
-def test_a_stopped_queue_shows_no_place_and_a_slider_past_its_end_no_negative_time(fw, ui, mcl, now):
+def test_a_slider_past_its_end_shows_no_negative_time(fw, ui, mcl, now):
     mcl.pos = 12
     ui.ints[now.slider, b'value'] = 260
     fw.fn('np_sync', C.c_int, C.c_void_p)(now.win)
-    assert (ui.text(now.pos), ui.text(now.remain)) == ('', '-0:00')
+    assert ui.text(now.remain) == '-0:00'
 
 
 @pytest.mark.parametrize('t', THEMES, ids=[t['name'] for t in THEMES])

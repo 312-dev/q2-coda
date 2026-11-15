@@ -291,7 +291,7 @@ def validate_assets(directory):
     from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, BOOT_HOOK, REMOTE, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, LOGO_LIGHT, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, LOCK_CLOCK_12H, WATCHDOG, WATCHDOG_SLEEP, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, WHEEL_TS_READ, PDR
     from ipod import (ART_PLACEHOLDERS, sized_art, AUDIT, TOOLBAR_SWITCHES, BOTTOM, CONFIRM, VOLUME, BIGCOVER, BC_ART, BC_TITLE_PAD, QUICK_SETTINGS, QS_TOP, QS_LABEL_GAP, QS_LABEL_H,
                       QS_LABEL_W, QS_ROW_GAP, QS_PITCH, QS_BAR, QS_TOUCH, QS_EDGE, QS_SUN, HOME_LABEL_END, HOME_LIST_W, HOME_TEXT_X, HOME_TOP, PITCH, ARTIST_PAGE, HOME_OURS, HOME_PAGE, HOME_ROW, HOME_ROWS, NAVBAR_ONLY, PLAYING_PAGE, SET_ROW, SET_ROWS, SET_TOP, UI_ASSETS,
-                      NP_BAR, NP_TOUCH, NP_MARGIN, NP_POS_X, NP_TOP, STATUS_BAR, STATUS_HIDDEN, STATUS_LEFT, STATUS_MARGIN, STATUS_RIGHT, CLOCK_MIN, CLOCK_TEXT, corner_inset, corner_x,
+                      NP_BAR, NP_TOUCH, NP_MARGIN, NP_TOP, STATUS_BAR, STATUS_HIDDEN, STATUS_LEFT, STATUS_MARGIN, STATUS_RIGHT, CLOCK_MIN, CLOCK_TEXT, corner_inset, corner_x,
                       STATUS_ICONS, status_icon, QUIET_ICONS, quiet_icon, SET_ICON, SET_STOCK_ICON, SETTINGS_ICONS, SETTINGS_SLIDERS, decode, slider_plain, imagemagick, inc, png_header, settings_icon, walk,
                       patch_asset, patch_code, patch_style, style_props, SLIDE, SET0, status_metrics, CLASSIC_LIGHT_FONT_SRC, NP_IPOD_TIME_WS)
     manifest = json.loads((directory/'manifest.json').read_text())
@@ -897,8 +897,9 @@ def validate_assets(directory):
             assert {n[2].get('name') for n in walk(decode(original))} - set(named) == {'img_spectrum', 'img_vu'}
             assert [n[2].get('name') for n in root[3]] == ['view_buttons', 'label_playtime', 'label_playlen', 'label_ipod_remain',
                                                            'slide_view_view', 'slider_play', 'img_repeata', 'img_repeatb', 'image_wait']
-            pos = named['label_ipod_pos'][1]
-            assert pos[0] + pos[2] == named['img_more'][1][0] and named['img_return'][1][0] < 0
+            assert root[3][0][2]['visible'] == 'false' and 'label_ipod_pos' not in named
+            assert [n[2]['name'] for n in named['slide_view'][3]] == ['view_album', 'view_lyric']
+            assert named['img_return'][1][0] < 0
             assert not {'img_fav', 'img_playmode'} & {n[2].get('name') for n in named['view_buttons'][3]}
             assert named['img_more'][1][1:] == [0, 50, 40]
             album = named['view_album'][3]
@@ -906,7 +907,7 @@ def validate_assets(directory):
                                                      'img_playmode', 'img_fav']
             # 16px outer margins, 12px from the art to the text, the text column 165px wide; the title larger.
             # Order and favourite glyphs level with the art's foot (frames NP_ICON_PAD lower); favourite centred below More. The art's gap to
-            # the dots below (y 182) matches its gap to "3 of 12"'s text above.
+            # the dots below (y 182) matches its gap to the foot of a 16px line centred in the top row.
             assert [n[1] for n in album] == [[16, 2, 166, 166], [39, 25, 120, 120], [194, 18, 165, 28], [194, 52, 165, 22], [194, 80, 165, 22],
                                              [247, 133, 50, 50], [303, 133, 50, 50]]
             assert album[-1][1][0] == named['img_more'][1][0] and album[-1][1][2] == named['img_more'][1][2] == 50
@@ -915,7 +916,7 @@ def validate_assets(directory):
             assert album[2][2]['style:normal:font_size'] == '22' and album[3][2]['style:normal:font_size'] == '18'
             for node, color in ((album[3], '#CCCCCC'), (album[4], '#BBBBBB')):
                 assert {v for k, v in node[2].items() if k.endswith(':text_color')} == {color}
-            assert pos[0] == NP_POS_X and album[0][1][0] == NP_MARGIN and 375 - 16 == album[2][1][0] + album[2][1][2]
+            assert album[0][1][0] == NP_MARGIN and 375 - 16 == album[2][1][0] + album[2][1][2]
             # Distinct bands: top row, art, page dots, bar (A-B markers y 250 to 260), then the times.
             dots = named['slide_indicator1'][1]
             assert NP_TOP + 10 + 166 < NP_TOP + dots[1] and NP_TOP + dots[1] + 10 < NP_BAR[1] - 1

@@ -371,13 +371,17 @@ class Q2:
         return C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, None)
 
     def now_playing(self):
-        """Now Playing's position and album labels, as each of its paints writes them (np_sync)."""
+        """The playing song's place in the queue, as "2 of 3" (queue_now, which Now Playing reads), and Now Playing's
+        album label, as each of its paints writes it (np_sync)."""
         if not self.np:
-            self.np = {name: self.widget(0) for name in ('np_win', 'np_title', 'np_pos', 'np_album', 'np_slider', 'np_remain')}
+            self.np = {name: self.widget(0) for name in ('np_win', 'np_title', 'np_album', 'np_slider', 'np_remain')}
             for name, w in self.np.items():
                 self.st(name, C.c_void_p).value = w
         self.fw.fn('np_sync', C.c_int, C.c_void_p)(self.np['np_win'])
-        return self.texts.get(self.np['np_pos']), self.texts.get(self.np['np_album'])
+        at, n = C.c_uint(), C.c_uint()
+        place = f'{at.value + 1} of {n.value}' if self.fw.fn('queue_now', C.c_void_p, C.c_void_p, C.c_void_p)(
+            C.byref(at), C.byref(n)) else None
+        return place, self.texts.get(self.np['np_album'])
 
     def back(self, *_):
         """navigator_back: the page on top closes, and a payload page's destroy handler runs, as AWTK's does."""

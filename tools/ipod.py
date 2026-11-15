@@ -175,7 +175,7 @@ HOME_LIST_W = 375
 # at screen y Geometry.bar; the top and bottom rows take their insets from the corners. The bar
 # is a capsule (round_radius half its height) and the payload rounds the art's corners (paint_cover).
 # The art and the metadata keep NP_MARGIN from the sides, 12px apart; the art is as large as that
-# leaves while the text column keeps NP_TEXT_W, and "3 of 12" starts in line with the art.
+# leaves while the text column keeps NP_TEXT_W.
 NP_TOP = 40
 NP_ICON = 50                     # the stock 50px control icons, centred in the top row
 NP_ICON_PAD = inc('NP_ICON_PAD')  # play_fav/play_order: 28px, centred, glyph ends 4px above
@@ -186,7 +186,7 @@ NP_META_PX = inc('NP_META_PX')
 NP_ART = 375 - 2 * NP_MARGIN - 12 - NP_TEXT_W
 NP_SLIDE_H = 186                 # the swipeable art, lyrics and info pages; the dots sit below
 NP_DOTS_Y = NP_SLIDE_H - 4       # above the seek bar's NP_TOUCH target
-# The art's gap below to the dots matches its gap above to "3 of 12"'s 16px text.
+# The art's gap below to the dots matches its gap above to the foot of a 16px line centred in the top row.
 NP_ART_Y = (NP_DOTS_Y - NP_ART - (NP_TOP - 16) // 2) // 2
 NP_TOUCH = 44
 NP_TIMES_Y = 265  # 14px text in a 16px label, clear of the 10px A-B markers
@@ -194,7 +194,8 @@ NP_TEXT_X = NP_MARGIN + NP_ART + 12
 # Classic's Now Playing (Geometry.np_ipod), an iPod classic's: the art NP_IPOD_ART, up beside More in
 # the top row, its swipeable pages NP_IPOD_LIFT higher (the lyrics, info and visualizer keep their
 # place on screen, that much down them), its top down to the first row where its square top-left corner
-# clears the glass by CORNER_SLACK, as the full-screen art's do; "3 of 12" under the album; the art's box NP_REFLECT
+# clears the glass by CORNER_SLACK, as the full-screen art's do; a line's room under the album, where Internet
+# Radio's page (navigation.c stream_ipod) puts its fourth line; the art's box NP_REFLECT
 # taller, the room its reflection takes under the near edge (coverflow.c slant_render); the times in the
 # Classic face, NP_IPOD_TIME_PX, beside the bar in NP_IPOD_TIME_W1 boxes ("-9:59" fits: stb scales
 # ascent - descent to the size, status_metrics' model) NP_IPOD_TIME_GAP from it, NP_IPOD_TIME_H high over its NP_BAR_IPOD rows
@@ -219,7 +220,6 @@ def with_geometry(g):
     bar_x = max(MARGIN, edge) + g.np_ipod * (NP_IPOD_TIME_WS[0] + NP_IPOD_TIME_GAP)
     return types.SimpleNamespace(
         BOTTOM=320 - g.bar, PITCH=g.pitch, BODY=g.body, ART=g.art, ART_INSET=g.art_inset,
-        NP_POS_X=max(NP_MARGIN, corner_x(g.bar + (NP_TOP - 16) // 2, 16)) + 6,  # "3 of 12", 16px text
         NP_ICONS_END=375 - corner_x(g.bar, NP_TOP),  # the 50px icon images fill the row's height
         NP_BAR_X=bar_x, NP_BAR=[bar_x, 253, 375 - 2 * bar_x, 4],
         NP_TIME_X=max(MARGIN, corner_x(g.bar + NP_TIMES_Y + 1, 14)))
@@ -247,8 +247,8 @@ def immediate_values(g=SET0):
 
 IPOD = with_geometry(SET0)
 BOTTOM, PITCH, BODY, ART, ART_INSET = IPOD.BOTTOM, IPOD.PITCH, IPOD.BODY, IPOD.ART, IPOD.ART_INSET
-NP_POS_X, NP_ICONS_END, NP_BAR_X, NP_BAR, NP_TIME_X = IPOD.NP_POS_X, IPOD.NP_ICONS_END, IPOD.NP_BAR_X, IPOD.NP_BAR, IPOD.NP_TIME_X
-check(set(vars(IPOD)) == {'BOTTOM', 'PITCH', 'BODY', 'ART', 'ART_INSET', 'NP_POS_X', 'NP_ICONS_END', 'NP_BAR_X', 'NP_BAR', 'NP_TIME_X'},
+NP_ICONS_END, NP_BAR_X, NP_BAR, NP_TIME_X = IPOD.NP_ICONS_END, IPOD.NP_BAR_X, IPOD.NP_BAR, IPOD.NP_TIME_X
+check(set(vars(IPOD)) == {'BOTTOM', 'PITCH', 'BODY', 'ART', 'ART_INSET', 'NP_ICONS_END', 'NP_BAR_X', 'NP_BAR', 'NP_TIME_X'},
       'a with_geometry field needs its module name above')
 check([NP_MARGIN, NP_ART, NP_TEXT_X, NP_TEXT_W, *NP_BAR[::2], NP_TIMES_Y, NP_TIME_X] ==  # Spotify's and Radio's
       [inc('SPOT_' + n) for n in 'ART_X ART_PX TEXT_X TEXT_W BAR_X BAR_W TIMES_Y TIME_X'.split()], 'SPOT_* != NP_*')
@@ -712,9 +712,6 @@ def playing_page(root, g=SET0):
         if 'image' in n[2]:
             n[2]['draw_type'] = 'center'
     named['img_more'][1] = [geo.NP_ICONS_END - NP_ICON, 0, NP_ICON, NP_TOP]
-    pos: list = ['label', [geo.NP_POS_X, 0, geo.NP_ICONS_END - NP_ICON - geo.NP_POS_X, NP_TOP], {
-        'name': 'label_ipod_pos', 'style:normal:font_size': '16', 'style:normal:text_color': NP_GREY,
-        'style:normal:text_align_h': 'left'}, []]
 
     lift = g.np_ipod * NP_IPOD_LIFT
     art_y, art = (NP_ART_Y, NP_ART)
@@ -730,12 +727,10 @@ def playing_page(root, g=SET0):
     for name, x in (('img_playmode', fav_x - NP_ICON - 6), ('img_fav', fav_x)):
         buttons[3].remove(named[name])
         named[name][1] = [x, icons_y, NP_ICON, NP_ICON]
+    # Classic's block keeps a fourth line's room under the album, which Internet Radio's page fills (stream_ipod)
     top = art_y + (icons_y - NP_ICON_PAD - art_y - (28 + 6 + 22 + 6 + 22 + g.np_ipod * (6 + 20))) // 2
-    if g.np_ipod:  # the text starts under More, "3 of 12" under the album
+    if g.np_ipod:  # the text starts under More
         top = max(top, lift - 2)
-        pos[1] = [text_x + 2, top + 90, text_w - 2, 20]  # a label, drawn from its edge: the hscroll_labels above keep 2 px
-    else:
-        buttons[3].append(pos)
     title[1] = [text_x, top, text_w, 28]
     # every state: the labels are disabled (enable false), so a lone normal size would not apply
     title[2].update({'style': 's_scrlabel_white20l', **{f'style:{s}:font_size': str(NP_TITLE_PX) for s in ('normal', 'disable', 'focused')}})
@@ -757,7 +752,7 @@ def playing_page(root, g=SET0):
     named['img_cover'][1] = [NP_MARGIN, art_y, art, art + g.np_ipod * NP_REFLECT]
     named['img_playstate'][1] = [NP_MARGIN + (art - 120) // 2, art_y + (art - 120) // 2, 120, 120]
     named['img_playstate'][2]['opacity'] = '0'  # retain stock gesture target without a transport glyph
-    named['view_album'][3] += [title, artist, album, named['img_playmode'], named['img_fav']] + [pos] * g.np_ipod
+    named['view_album'][3] += [title, artist, album, named['img_playmode'], named['img_fav']]
     column = (375 - 225) // 2
     named['label_lyricmsg'][1][0] += column
     named['label_lyricmsg'][1][1] += lift
@@ -842,8 +837,8 @@ def playing_page(root, g=SET0):
         # Spotify's and Internet Radio's pages take these places (navigation.c stream_ipod), in the window
         dy = NP_TOP - lift
         check([NP_MARGIN, dy + art_y, art, text_x, dy + title[1][1], fav_x, dy + icons_y, x, NP_IPOD_TIME_Y + (NP_IPOD_TIME_H - inc('NP_BAR_IPOD') + 1) // 2,
-               *(n[1][1] - title[1][1] for n in (artist, album, pos))] ==
-              [inc('SPOT_ART_X'), *(inc('NP_IPOD_' + k) for k in 'ART_Y ART TEXT_X TEXT_Y FAV_X FAV_Y BAR_X BAR_Y'.split()), 34, 62, 90],
+               *(n[1][1] - title[1][1] for n in (artist, album))] ==
+              [inc('SPOT_ART_X'), *(inc('NP_IPOD_' + k) for k in 'ART_Y ART TEXT_X TEXT_Y FAV_X FAV_Y BAR_X BAR_Y'.split()), 34, 62],
               "NP_IPOD_* != Classic's Now Playing")
     if g.np_art:
         np_grid(root, named, g, title, artist, album, pos, remain)
@@ -851,18 +846,20 @@ def playing_page(root, g=SET0):
 
 # Now Playing on a set's grid (Geometry.np_art, OLED's: docs/oled-design.md#now-playing), in window rows from the set's
 # bar: the art np_art square at text_x on the window's top, its corners the theme's playing.art.radius; NP_GRID_GAP
-# right of it the title, artist and album, their line tops NP_GRID_LINES down the art, "1 of 10" on the art's bottom
-# row, More and the heart at its right end (the design has no place for them: they stay on the art's page); the slide
+# right of it the title, artist and album, their line tops NP_GRID_LINES down the art, More and the heart at the right
+# end of the art's bottom row (the design has no place for them: they stay on the art's page); the slide
 # NP_GRID_SLIDE_GAP above the bar, which runs from text_x to the right column with its top at np_bar_y on screen; the
 # times NP_GRID_TIMES_DY under that, centred, on the same columns; shuffle and repeat (np_bar.c np_modes) centred
 # NP_GRID_MODES_DY under it, over the play mode's target; the page dots under them, NP_GRID_DOTS_DY. Sizes are AWTK's
-# (1.21 times the design's em): the artist and album 22, "1 of 10" 18, the times 19 in Inter, whose digits are tabular.
+# (1.21 times the design's em): the artist and album 22, the times 19 in Inter, whose digits are tabular.
 NP_GRID_GAP = 18
 NP_GRID_LINES = (6, 38, 62)
 NP_GRID_TITLE_PX = 27  # the title's line: OLED's playing.title.font_px, which theme_font sets at run time
 NP_GRID_META_PX = 22
-NP_GRID_POS_PX = 18
-NP_GRID_POS_ASCENT = 14  # Inter's ascent at 18: 0.969 of its 1.21 em line, so its baseline sits on the art's bottom row
+# More and the heart centre on an 18 px Inter line whose baseline sits on the art's bottom row (its ascent 0.969 of its
+# 1.21 em line), the line SPEC-next's "1 of 10" took
+NP_GRID_ROW_PX = 18
+NP_GRID_ROW_ASCENT = 14
 NP_GRID_TIME_PX = 19
 NP_GRID_SECONDARY = '#ABABAB'  # Text Secondary; Light Mode flips it as every grey
 NP_GRID_ICON = 34  # More's and the heart's targets, the theme's 20 px glyphs centred in them (np_bar.c np_glyphs)
@@ -877,7 +874,7 @@ NP_GRID_DOTS_DY = 70  # the page dots centred on y 302 on screen
 NP_GRID_MARGIN = 2  # hscroll_label's own margin each side of its text (stock's margin_left and margin_right)
 
 
-def np_grid(root, named, g, title, artist, album, pos, remain):
+def np_grid(root, named, g, title, artist, album, remain):
     """playing_page's boxes moved to g's grid (NP_GRID_* above); every name the payload binds keeps its widget."""
     a, tx, right = g.np_art, g.text_x + g.np_art + NP_GRID_GAP, 375 - g.right_x
     bar_y, page = g.np_bar_y - g.bar, named['view_album'][3]
@@ -890,19 +887,14 @@ def np_grid(root, named, g, title, artist, album, pos, remain):
         for key in n[2]:
             if key.endswith(':font_size'): n[2][key] = str(px)
             if n is not title and key.endswith(':text_color'): n[2][key] = NP_GRID_SECONDARY
-    for n in (named['img_more'], pos):
-        named['view_buttons'][3].remove(n)
-    cy = a - NP_GRID_POS_ASCENT + NP_GRID_POS_PX // 2
+    named['view_buttons'][3].remove(named['img_more'])
+    cy = a - NP_GRID_ROW_ASCENT + NP_GRID_ROW_PX // 2
     more_x = right - NP_GRID_MORE_INSET - NP_GRID_ICON // 2
     fav_x = more_x - NP_GRID_ICON
     named['img_more'][1] = [more_x, cy - NP_GRID_ICON // 2, NP_GRID_ICON, NP_GRID_ICON]
     named['img_fav'][1] = [fav_x, cy - NP_GRID_ICON // 2, NP_GRID_ICON, NP_GRID_ICON]
-    # "1 of 10" ends where the heart starts: added after it, a box over the heart would take its taps
-    pos[1] = [tx, a - NP_GRID_POS_ASCENT, fav_x - tx, NP_GRID_POS_PX]
-    pos[2].update({'style:normal:font_size': str(NP_GRID_POS_PX), 'style:normal:font_name': FACES['inter'].name,
-                   'style:normal:text_color': NP_GRID_SECONDARY})
     page.remove(named['img_playmode'])
-    page += [pos, named['img_more']]
+    page.append(named['img_more'])
     slide_h = bar_y - NP_GRID_SLIDE_GAP
     named['slide_view'][1] = [0, 0, 375, slide_h]
     named['view_lrc'][2]['self_layout'] = f'default(x=0,y=0,w=375,h={slide_h})'

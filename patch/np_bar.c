@@ -66,7 +66,7 @@ int np_fit_due(const void *info) {
     return 0;
 }
 
-/* Now Playing's "3 of 12", album and right-hand time: the remaining time (slider max less value,
+/* Now Playing's album and right-hand time: the remaining time (slider max less value,
  * stock's seconds, so a drag or scrub previews it), or the track's length under Track Time's Total
  * (np_time_total). Labels are written only when their source changes; 1 when the right-hand time
  * was. Classic's times beside the bar refit when the length's class changes: a
@@ -85,14 +85,11 @@ int np_sync(void *top) {
     void *pressed = catalogue_np_now(&at, &n), *r = pressed ? pressed : queue_now(&at, &n);
     const char *album = pressed ? P(pressed, REC_ALBUM) : now_tag(r, REC_ALBUM);
     if (pressed) catalogue_np_text(top);
-    char s[24] = "";
-    unsigned pos[2] = { at, n };
+    unsigned pos[2] = { at, n }; /* a new song of the same album restarts its marquee too */
     unsigned h = hash_bytes(fnv(FNV_SEED, (const unsigned char *)album), (const unsigned char *)pos,
                             sizeof pos);
     if (h != st.np_hash) {
         st.np_hash = h;
-        if (r) tk_snprintf(s, sizeof s, "%d of %d", at + 1, n);
-        widget_set_text_utf8(st.np_pos, s);
         widget_set_text_utf8(st.np_album, album ? album : "");
         st.np_off = 0;
         stop_timer(&st.np_marquee); /* the next paint restarts it if the album overflows */
