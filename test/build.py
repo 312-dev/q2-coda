@@ -380,8 +380,9 @@ def validate_assets(directory):
         assert png_header(new)[:2] == (size if isinstance(size, tuple) else (size, size)), name
         assert new == sized_art(master, size), name
         assert changed[xx+name] == dict(original_sha256=sha(old), sha256=sha(new))
-        if not isinstance(size, tuple):  # transparent corners, not black, over a selected row
-            assert imagemagick('png:-', '-format', '%[fx:p{0,0}.a]', 'info:', data=new) == b'0', name
+        if not isinstance(size, tuple):  # transparent corners, not black (alpha 255), over a selected row; Lanczos
+            # leaves a trace of the art's rounded edge in some sizes' corner pixel (60px: alpha 2 on ImageMagick 6.9.12)
+            assert float(imagemagick('png:-', '-format', '%[fx:p{0,0}.a]', 'info:', data=new)) < 0.05, name
     games = read('rootfs.squashfs', xx+'local_games.png')
     assert games == (ROOT/'assets/icons/local_games.png').read_bytes()
     assert png_header(games) == (52, 52, 8, 6)
