@@ -1,6 +1,7 @@
 /* Home's Library and Streaming: their pages and the lists Home's Split shows; and its main list's
  * overflow, the rows past the seven it rests on. */
 #include "navigation.h"
+#include "engine.h"
 
 /* A Library row titled text; into: one that opens another list, with stock's own list_into
  * trailing image as the stock Local Music categories place it. Returns the row's list_item. */
@@ -135,7 +136,7 @@ static int shows_image(void *w, const char *name) {
 /* Home pane's Streaming and Games captions, and the card's free space in tenths of a GB (0: no card
  * mounted, whose dir shares /mnt's device), read with home_counts, never on a wheel move: the
  * Streaming page's rows with the app scan it makes, less Configuration and those hidden; and the
- * Games page's built-ins and card games. */
+ * Games page's built-ins, the engine's games (engine.c) and card games. */
 void home_pane_read(int *services, int *games, int *free_tenths) {
     char hide[SVC_HIDE];
     unsigned card[36], mnt[36], fs[32];
@@ -144,7 +145,7 @@ void home_pane_read(int *services, int *games, int *free_tenths) {
     for (int i = 0; i < total; ++i)
         if (!svc_find(hide, i)) ++n;
     *services = n;
-    *games = GAMES_BUILTIN + addon_games_last();
+    *games = GAMES_BUILTIN + eng_count() + addon_games_last();
     /* statfs on MIPS o32: f_bsize word 1, f_bavail word 7 (netupdate.c). In binary GB, as About's
      * Remaining: 209715 blocks of 512 B to a tenth, so 32 bits hold a 2 TB card's. */
     *free_tenths = !__xstat(3, "/mnt/mmc", card) && !__xstat(3, "/mnt", mnt) && card[0] != mnt[0] &&
