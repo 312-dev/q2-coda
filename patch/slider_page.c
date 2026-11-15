@@ -128,8 +128,8 @@ static void pill(void *vg, float x, float y, float w, float h) {
 
 /* s, n characters, centred on row y in the columns x to x + w, aligned (1 centre, 2 left, 3 right)
  * in face at px, in color (0xAARRGGBB: ui_ink's unless raw). */
-static void sp_text(void *canvas, const unsigned *s, unsigned n, int x, int w, int y, int align,
-                    const char *face, int px, unsigned color) {
+void sp_text(void *canvas, const unsigned *s, unsigned n, int x, int w, int y, int align,
+             const char *face, int px, unsigned color) {
     rect_t r = { x, y - SP_LINE / 2, w, SP_LINE };
     int align_v = I(canvas, CANVAS_ALIGN_V), align_h = I(canvas, CANVAS_ALIGN_H);
     canvas_set_font(canvas, face, (unsigned)px);

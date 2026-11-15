@@ -447,7 +447,9 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     Phosphor SVGs but TIDAL's mark, drawn in art.py, and Subsonic's, q2-coda's own SVG, and the inset modal's symbols
     (regular, 19 px) in Text Secondary (each half's) and white for the selection and the picker's check in Accent Blue,
     the volume's two speakers (fill, 16 px) in Text Secondary (each half's), an artist page's Shuffle and Radio
-    (regular, 16 px) in Accent Blue and white for the lit one, and About's quality badge's waveform (bold, 12 px) in Text Primary (each half's)."""
+    (regular, 16 px) in Accent Blue and white for the lit one, About's quality badge's waveform (bold, 12 px) in Text Primary (each half's),
+    the song rows' cloud and arrow (regular, 18 px) in Text Tertiary (each half's) and white for the selection, and
+    Downloads' picked arrow in Accent Blue and white and its kept-by-the-app arrows in Text Secondary (each half's) and white."""
     t = theme.builtins()[3]
     got = art.images(t)
     modes = [f'mode_{n}_{k}' for n in ('shuffle', 'repeat') for k in ('d', 'l', 'on')] + ['mode_repeat1_on']
@@ -460,9 +462,11 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     speakers = [f'vol_{n}_{k}' for n in ('lo', 'hi') for k in ('d', 'l')]  # the volume's ends on Now Playing (fill, 16 px)
     pair = [f'pair_{n}_{k}' for n in ('shuffle', 'radio', 'play') for k in ('a', 'w')]  # artist_page.c's action pairs
     quality = ['quality_d', 'quality_l']  # np_about.c's badge
+    lives = [f'mark_{n}_{k}' for n in ('cloud', 'down') for k in ('d', 'l', 'w')]  # catalogue.c's song marks
+    store = ['store_pick_a', 'store_pick_w'] + [f'store_auto_{k}' for k in ('d', 'l', 'w')]  # storage.c's Downloads
     assert set(got) == {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
-                                              'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality,
+                                              'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality, *lives, *store,
                                               'search_pop', 'search_pop_letters', 'search_pop_echoes',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)))}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
@@ -482,7 +486,9 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.MENU_ICON_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff, 'a': blue}[n.rsplit('_', 1)[1]]) for n in menus),
                           *((n, 16, {'d': 0xababab, 'l': 0x5c5c5c}[n[-1]]) for n in speakers),
                           *((n, art.PAIR_ICON_PX, blue if n.endswith('_a') else 0xffffff) for n in pair),
-                          *((n, art.QUALITY_PX, 0xffffff if n.endswith('_d') else 0) for n in quality)):
+                          *((n, art.QUALITY_PX, 0xffffff if n.endswith('_d') else 0) for n in quality),
+                          *((n, art.MARK_PX, {'d': 0x858585, 'l': 0x6e6e6e, 'w': 0xffffff}[n[-1]]) for n in lives),
+                          *((n, art.MARK_PX, {'a': blue, 'd': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in store)):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
         assert (w, h) == (px, px) and inked == {tuple(rgb >> s & 255 for s in (16, 8, 0))}

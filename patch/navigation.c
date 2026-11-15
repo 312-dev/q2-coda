@@ -1885,8 +1885,12 @@ static void grey_rows(void *w) {
     if (!list && g_menu.kind == 1 && catalogue_source == 1) list = ringnav_search_rows(win, &tab);
     if (list && deque_size(list) != (unsigned)g_menu.rows) list = (void *)0;
     for (int i = 0; i < g_menu.n; ++i) {
-        if (list) catalogue_mark(g_menu.at[i], deque_at(list, (unsigned)g_menu.id[i]), tab);
         rect_t r = bounds(&g_menu, i);
+        /* the rows in sight only: a long list's would fill catalogue.c's CAT_GREY_ROWS */
+        if (list && r.y + r.h > 0 && r.y < g_menu.height)
+            catalogue_mark(g_menu.at[i], deque_at(list, (unsigned)g_menu.id[i]), tab);
+        else if (list)
+            catalogue_forget(g_menu.at[i]);
         if (2 * r.w >= I(w, W_W))
             catalogue_fit(g_menu.at[i], w,
                           offline_x(w, i, &r) - CAT_MARK_W / 2 - SONG_COL_GAP + HSCROLL_MARGIN +
@@ -1894,18 +1898,18 @@ static void grey_rows(void *w) {
     }
 }
 
-/* After the rows: each greyed row's mark, in its text's colour as last painted. */
+/* After the rows: each greyed row's mark, in its text's colour as last painted, and under OLED
+ * each marked song row's (catalogue.c catalogue_row_mark). */
 static void paint_offline(void *w, void *canvas) {
     rect_t old;
-    unsigned ink;
     if (!catalogue_greys() || !kind(w) || !P(canvas, CANVAS_LCD) || !load_rows(&g_menu, w) ||
         !clip_surface(canvas, &g_menu, &old))
         return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     for (int i = 0; i < g_menu.n; ++i) {
         rect_t r = bounds(&g_menu, i);
-        if (2 * r.w >= I(w, W_W) && catalogue_row_ink(g_menu.at[i], &ink))
-            catalogue_mark_paint(canvas, offline_x(w, i, &r), r.y + r.h / 2, ink);
+        if (2 * r.w >= I(w, W_W))
+            catalogue_row_mark(w, canvas, g_menu.at[i], offline_x(w, i, &r), r.y + r.h / 2);
     }
     stock_canvas_set_fill_color(canvas, fill);
     canvas_set_clip_rect(canvas, &old);
@@ -3207,6 +3211,7 @@ int ringnav_paint(void *w, void *canvas) {
     paint_caps(w, canvas);
     if (theme()->marquee_fade) marquee_fade(w, canvas);
     if (w && w == slider_page_win) slider_page_paint(w, canvas);
+    storage_paint(w, canvas);
     if (w && w == st.np_win && !(NP_VISUALIZER && visualizer_full()))
         np_modes(w, canvas); /* else the page's own */
     hold_paint(w, canvas, 1);
@@ -4008,6 +4013,7 @@ static const unsigned char sysset_order[] = {
     11 /* Date and time */,
     0 /* Language, hidden */,
     9 /* App Store */,
+    16 /* Storage */,
     12 /* Update */,
     13 /* Reset */,
     5 /* Wheel Function, hidden */,
@@ -7946,6 +7952,8 @@ int ringnav_systemset(void *win, void *ctx) {
                                moved[i][0]);
         /* Car Remote (coda_rc_shim.c): its page, whose switch starts the coda-rc daemon */
         widget_set_text_utf8(list_row_into(view, "system_carmode", carremote_open, 0), "Car Remote");
+        /* Storage (storage.c): the card's use and a card app's Downloads */
+        widget_set_text_utf8(list_row_into(view, "playset_folderjump", storage_open, 0), "Storage");
         for (unsigned i = 5; i <= 8; ++i) widget_set_visible(widget_get_child(view, i), 0, 0);
         /* Language: Q2 Pod's pages and labels are English only, so stock's other languages read
          * half-blank; hidden until they are translated (docs/internals.md, English). */
@@ -10748,8 +10756,8 @@ int ringnav_keylong(void *ctx, void *event) {
     void *top = window_manager_get_top_window(window_manager());
     const char *fav = radio_hold(top);
     if (!fav) fav = quick_wheel_toggle(top);
-    int taken = fav || spot_hold(top) || addon_hold(top) || un_hold(top) || home_cf_hold(top) ||
-                artist_local_on(top);
+    int taken = fav || spot_hold(top) || addon_hold(top) || storage_hold(top) || un_hold(top) ||
+                home_cf_hold(top) || artist_local_on(top);
     if (!taken && qm_hold()) return STOP;
     /* Stock has no Play/Pause hold, so its release would play or pause: Classic's does nothing. */
     if (taken || (usable() && classic_pages())) {
