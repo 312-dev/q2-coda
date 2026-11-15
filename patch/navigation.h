@@ -48,6 +48,7 @@ enum {
     POD_SCAN_DURATIONS,
     POD_CF_POSITION,
     POD_LIBRARY_SOURCE, /* Local Only or Local + Server (catalogue.c) */
+    POD_OTG,            /* Playback's On-The-Go (playlist_pages.c), on unless chosen */
     POD_COUNT
 };
 
@@ -447,6 +448,7 @@ int feedback_offline(const char *title);
 void feedback_switch_bar(void *w, void *canvas);
 void feedback_shuffled(const char *what, int songs);
 void cf_veil(void *win, int on);              /* win unseen (1) or seen again under Coverflow */
+int ringnav_otg(void);                        /* Playback's On-The-Go switch */
 int ringnav_playlist_coverflow(void);         /* Display's Playlist View is Cover Flow */
 int music_records(void *list, int discovery); /* list's songs less spoken (0) or hidden (1) ones */
 extern const stops_t confirm_dark;
@@ -785,6 +787,7 @@ void slider_scrub(void *w, void *canvas);
 #define PL_MARKING "_pl_marks"
 #define PL_NONE "_pl_none"
 #define PL_ART "_pl_art"
+#define PL_TILE "_pl_tile" /* OLED: the art image paints a tile until a picture (pl_tile_paint) */
 void qm_playlist_bind(void *w, int depth, int (*pick)(void *, void *));
 void qm_select(void);
 int qm_playlist_gone(void *ctx, void *event);
@@ -792,6 +795,35 @@ int qm_playlist_pick(void *ctx, void *event);
 int ple_key(unsigned key, int phase);
 int ple_listing(void);
 int pl_first(menu_t *m, int cur);
+void pl_tile_paint(void *w, void *canvas);
+/* On-The-Go's songs are playlist entries with this cd_num and no header (headers are 0 to 99):
+ * stock's adds, reads and Now Playing's Delete take it as any playlist's
+ * (docs/internals.md#on-the-go) */
+#define ON_THE_GO 100
+int playlist_add(void *r, int dest);
+int playlist_remove(int dest, void *r);
+void playlist_synced(int dest);
+int playlist_rename(int id, const char *name);
+int playlist_delete(int id);
+int otg_clear(void);
+int otg_save(char *name, unsigned size);
+int playlist_confirm(const char *question, const char *verb);
+void playlist_pick_open(void *r);
+void playlist_rename_open(int id, const char *name); /* search_strip.c: the letter strip */
+/* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
+void playlist_page_open(int dest, const char *name);
+/* add_songs.c: Add Songs (docs/oled-design.md#add-songs) */
+void add_songs(int dest, const char *name);
+int add_songs_open(void);
+int add_songs_key(void *top, unsigned key);
+void add_songs_paint(void *w, void *canvas);
+int add_songs_mark(void *r);
+void add_songs_toggle(void *r);
+void add_songs_search(void); /* search_strip.c: the strip over the library's songs, picking */
+int playlist_page_hold(void *top);
+int otg_count(void);
+void pv_paint(void *w, void *canvas);
+int playlists_transfer(void *ctx, void *event); /* Settings: Import (ctx 0) or Export Playlists */
 void pl_fit(void *button);
 
 /* clicker.c: the Clicker (docs/internals.md#key-tone), the Key Tone row's value and click, and a
@@ -851,7 +883,14 @@ void coda_rc_poll(void);
 int coda_rc_enabled(void);
 int carremote_open(void *ctx, void *event);
 
-/* az_index.c: the A-Z index on a long Library list in name order (docs/oled-design.md#a-z-index) */
+/* az_index.c: the A-Z index on a long Library list in name order (docs/oled-design.md#a-z-index):
+ * a list this long or shorter has none; a touch this near the list's right edge is the index's;
+ * a tick this fast (degrees a second, wheel_speed) shows it, the speed at which Rockbox's list
+ * acceleration, (speed / 270)^4, first moves 2 rows a click (az_index.c) */
+#define AZ_MIN_ROWS 50
+#define AZ_EDGE_PX 28
+#define AZ_SPIN_DPS 300
+void az_mark(void *w, int letter, int held, int bubble);
 void az_wheel(void *w, int id), az_paint(void *w, void *canvas);
 int az_touch(void *w, void *event), az_held(void *event), az_on(void *w), az_right(void *w),
     az_bar_in(void *w);

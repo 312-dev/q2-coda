@@ -2265,9 +2265,10 @@ def test_playback_orders_its_rows_and_ends_on_library_and_folders(fw):
     rows = view.children
     ids = [r.name for r in rows]
     # stock's Volume and Album Display is not offered; Folder skip is Library & Folders'
-    assert len(rows) == 19 and 's11' not in ids and 's12' not in ids
+    assert len(rows) == 20 and 's11' not in ids and 's12' not in ids
     at = {r.name or icon(r): k for k, r in enumerate(rows)}
     assert rows[-1] is row(ui, view, 'Library & Folders') and 'list_into' in [c.props.get('image') for c in rows[-1].walk()]
+    assert rows[-2] is row(ui, view, 'On-The-Go')  # its switch (playlist_pages.c), before Library & Folders
     assert (at['s3'], at['s2']) == (0, 1)  # Play Mode, then EQ
     assert at['playset_gapless'] == at['s7'] + 1 and at['playset_memplay'] == at['s6'] + 1  # Crossfade, Resume Songs
     assert at['s8'] == at['playset_memplay'] + 1  # Headphones required, after Resume Songs
@@ -2324,9 +2325,11 @@ def test_library_and_folders_is_stocks_page_again_with_the_library_rows(fw, st):
     click(ui, opener)
     assert sub['name'] == b'playset/playset_page' and sub['title'] == ui.text(label_of(opener))  # titled as its row
     ours = sub['rows'][:4]
-    skip, art = sub['rows'][4:]
-    # stock's Folder skip, then Folder Album Cover (a row of stock's Volume and Album Display), last
+    skip, art, imp, exp = sub['rows'][4:]
+    # stock's Folder skip, then Folder Album Cover (a row of stock's Volume and Album Display), then the
+    # Playlists page's Import and Export rows (playlists.c playlists_transfer)
     assert skip.name == 's12' and icon(art) == 'playset_foldercover' and ui.text(label_of(art)) == 'Folder Album Cover'
+    assert [ui.text(label_of(r)) for r in (imp, exp)] == ['Import Playlists', 'Export Playlists']
     assert C.string_at(fw.calls('widget_set_tr_text')[-1][1][1]) == b'playset_foldercover'  # stock's row, stock's translation
     was = g(fw, 'g_foldercover_flag')
     for r in ours + [art]:
@@ -2337,7 +2340,7 @@ def test_library_and_folders_is_stocks_page_again_with_the_library_rows(fw, st):
     again = ui.add('scroll_view', ui.window('playset_page'), (0, 26, 375, 294), 'scroll_view_playset')
     playset(fw, ui, again)
     audioset(ui.top.addr, None)
-    assert len(again.children) == 19  # the next open is the main page again
+    assert len(again.children) == 20  # the next open is the main page again
 
 
 def test_artists_toggles_stocks_artist_type(fw):

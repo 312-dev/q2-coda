@@ -72,6 +72,8 @@ static struct {
     char text[SS_TEXT_MAX + 1];
     unsigned pop_timer, pop_step_at; /* the pop's timer; the wheel's last step on the strip */
     unsigned char pop;               /* 1 shown, 2 a spin's, shown when it stops */
+    int rename; /* Rename's playlist + 1 (playlist_rename_open), 0 for Search */
+    int pick;   /* Add Songs' (add_songs_search): songs alone, Centre adds them */
 } ss __attribute__((section(".scratch")));
 
 /* The strip's entry e as text: a capital, a digit, or 0 for the space and delete (drawn). */
@@ -94,7 +96,7 @@ static void ss_filter(void) {
     ss.nmatch = ss.sel = ss.top = ss.songs_at = 0;
     if (!ss.text[0] || !ss.match) return;
     static const int group[] = { REC_ARTIST, REC_ALBUM };
-    for (int g = 0; g < 2; ++g)
+    for (int g = 0; g < 2 && !ss.pick; ++g)
         for (int i = 0, from = ss.nmatch; i < n && ss.nmatch - from < SS_GROUP; ++i) {
             void *r = deque_at(ss.songs, (unsigned)i);
             const char *name = P(r, group[g]);
@@ -109,7 +111,7 @@ static void ss_filter(void) {
         char name[512];
         const char *fields[] = { track_name(name, sizeof name, r), P(r, REC_ARTIST),
                                  P(r, REC_ALBUM) };
-        for (unsigned f = 0; f < sizeof fields / sizeof *fields; ++f)
+        for (unsigned f = 0; f < sizeof fields / sizeof *fields - ss.pick; ++f) /* title, artist */
             if (fields[f] && strcasestr(fields[f], ss.text)) {
                 ss.kind[ss.nmatch] = SS_SONG;
                 ss.match[ss.nmatch++] = r;
@@ -126,12 +128,14 @@ static void ss_type(int e) {
         if (!n) return;
         ss.text[n - 1] = 0;
     } else {
-        unsigned c = e == SS_SPACE ? ' ' : e < 26 ? 'a' + (unsigned)e : ss_char(e);
+        /* a name's word starts with a capital */
+        int cap = ss.rename && (!n || ss.text[n - 1] == ' ');
+        unsigned c = e == SS_SPACE ? ' ' : e < 26 ? (cap ? 'A' : 'a') + (unsigned)e : ss_char(e);
         if (n >= SS_TEXT_MAX || (c == ' ' && (!n || ss.text[n - 1] == ' '))) return;
         ss.text[n] = (char)c;
         ss.text[n + 1] = 0;
     }
-    ss_filter();
+    if (!ss.rename) ss_filter();
 }
 
 /* The result at sel: an artist opens stock's artist page, as Now Playing's Artist info does; an
@@ -140,8 +144,29 @@ static void ss_type(int e) {
  */
 extern int coverflow_goto_album(void *r);
 static void ss_play(void) {
+    if (ss.rename) { /* Done: the name, its edge spaces gone, saved */
+        char name[SS_TEXT_MAX + 1];
+        unsigned a = 0, b = strlen(ss.text);
+        while (ss.text[a] == ' ') ++a;
+        while (b > a && ss.text[b - 1] == ' ') --b;
+        tk_snprintf(name, sizeof name, "%.*s", (int)(b - a), ss.text + a);
+        int r = *name ? playlist_rename(ss.rename - 1, name) : 0;
+        toast(!*name    ? "Name can't be empty"
+              : r == -2 ? "A playlist has that name"
+              : r       ? "Renamed"
+                        : "Could not rename playlist");
+        if (r > 0) {
+            g_delete_flag = 1; /* Playlists reads its rows again */
+            navigator_back();
+        }
+        return;
+    }
     if (ss.sel >= ss.nmatch) return;
     void *r = ss.match[ss.sel], *dq;
+    if (ss.pick) { /* Add Songs: in or out of the playlist, its mark changed in place */
+        add_songs_toggle(r);
+        return;
+    }
     if (ss.kind[ss.sel] == SS_ARTIST) {
         struct {
             int cls;
@@ -303,7 +328,12 @@ void search_strip_paint(void *w, void *canvas) {
     int light = ipod_light();
     unsigned primary = light ? 0x000000 : 0xffffff, secondary = light ? 0x5c5c5c : 0xababab,
              tertiary = light ? 0x6e6e6e : 0x858585, accent = accent_tone(2);
-    for (int i = 0; i < SS_ROWS && ss.top + i < ss.nmatch; ++i) {
+    if (ss.rename) { /* Rename's one row: Done, the accent's, white when lit */
+        if (ss.focus) fill_box(canvas, &(rect_t){ 16, 0, 375 - 32, SS_PITCH }, RGBA(accent), 8);
+        ss_text(canvas, 0, "Done", 24, 0, SS_PITCH, SS_TITLE_W, SS_PX_ROW,
+                ss.focus ? 0xffffff : accent);
+    }
+    for (int i = 0; i < SS_ROWS && ss.top + i < ss.nmatch && !ss.rename; ++i) {
         void *r = ss.match[ss.top + i];
         int y = i * SS_PITCH, on = ss.focus && ss.top + i == ss.sel;
         char name[512];
@@ -325,9 +355,19 @@ void search_strip_paint(void *w, void *canvas) {
                         artist);
             artist = what;
         }
-        int ax = 24 + tw + 10;
-        if (artist && *artist && SS_RIGHT - ax >= SS_ARTIST_MIN)
-            ss_text(canvas, 0, artist, ax, y + 1, SS_PITCH, SS_RIGHT - ax, SS_PX_ARTIST,
+        int ax = 24 + tw + 10, right = SS_RIGHT, mark = ss.pick ? add_songs_mark(r) : 0;
+        if (mark) { /* Add Songs' mark on the right column (playlist_pages.c pv_paint's) */
+            static const char *const kinds[] = { "in", "add", "out" };
+            char art[32];
+            tk_snprintf(art, sizeof art, "plmark_%s_%s", kinds[mark - 1],
+                        on      ? "w"
+                        : light ? "l"
+                                : "d");
+            paint_art(ss.sheet, canvas, theme_art(art), SS_RIGHT - 21, y + (SS_PITCH - 20) / 2);
+            right -= 30;
+        }
+        if (artist && *artist && right - ax >= SS_ARTIST_MIN)
+            ss_text(canvas, 0, artist, ax, y + 1, SS_PITCH, right - ax, SS_PX_ARTIST,
                     on ? 0xffffff : tertiary);
     }
     if (ss.text[0] && !ss.nmatch) {
@@ -427,6 +467,40 @@ static int ss_closed(void *ctx, void *event) {
     return 0;
 }
 
+/* The page and its sheet, titled title on the status row. */
+static void ss_sheet(const char *caption) {
+    void *title = text(ss.page, 0, 0, 375, 28); /* what the status row reads */
+    widget_set_text_utf8(title, caption);
+    widget_set_name(title, PAGE_TITLE);
+    widget_set_visible(title, 0, 0);
+    ss.sheet = widget_factory_create_widget(widget_factory(), "view", ss.page, 0, 0, 375,
+                                            widget_get_prop_int(ss.page, "h", client_h()));
+    widget_on(ss.sheet, EVT_POINTER_DOWN, ss_touch, 0);
+    widget_on(ss.page, EVT_POINTER_UP_BEFORE, ss_touch, 0);
+}
+
+/* A playlist's Rename (its hold menu under OLED, docs/oled-design.md#playlists): the strip with
+ * the name in it, typed on at its end (a word's first letter a capital), and one row above, Done,
+ * which Return moves to as Search's results and Centre saves (playlists.c playlist_rename); Return
+ * on Done leaves the name as it was. */
+void playlist_rename_open(int id, const char *name) {
+    if (ss.page || id < 0 || id >= 100 ||
+        !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup)))
+        return;
+    ss.rename = id + 1;
+    ss.nmatch = 1; /* Done */
+    tk_snprintf(ss.text, sizeof ss.text, "%s", name ? name : "");
+    ss_sheet("Rename");
+}
+
+/* Add Songs' Search row (add_songs.c): the strip over the library's songs alone, each found by its
+ * title or artist, with its mark; Centre on a result adds it or takes it out, and the results
+ * stay. */
+void add_songs_search(void) {
+    library_search_open(0, 0);
+    ss.pick = ss.page != 0;
+}
+
 /* The Library's Search row and Local Songs' pull: the strip under a list.entry.ipod theme, stock's
  * search dialog under the others. */
 int library_search_open(void *ctx, void *event) {
@@ -438,13 +512,6 @@ int library_search_open(void *ctx, void *event) {
     ss.match = n ? calloc((unsigned)n + 2 * SS_GROUP, sizeof *ss.match) : (void *)0;
     ss.kind = ss.match ? calloc((unsigned)n + 2 * SS_GROUP, 1) : (void *)0;
     if (!ss.kind) free(ss.match), ss.match = (void *)0;
-    void *title = text(ss.page, 0, 0, 375, 28); /* what the status row reads */
-    widget_set_text_utf8(title, "Search");
-    widget_set_name(title, PAGE_TITLE);
-    widget_set_visible(title, 0, 0);
-    ss.sheet = widget_factory_create_widget(widget_factory(), "view", ss.page, 0, 0, 375,
-                                            widget_get_prop_int(ss.page, "h", client_h()));
-    widget_on(ss.sheet, EVT_POINTER_DOWN, ss_touch, 0);
-    widget_on(ss.page, EVT_POINTER_UP_BEFORE, ss_touch, 0);
+    ss_sheet("Search");
     return 0;
 }

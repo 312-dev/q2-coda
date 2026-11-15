@@ -473,6 +473,11 @@ char *catalogue_union(const char *sql), *catalogue_search(const char *sql);
 const char *catalogue_rows(void); /* library_query's union, "" without one */
 void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);
 void catalogue_changed(void), catalogue_card_away(void), catalogue_rated(void *r, int hearts);
+/* a server playlist changed on the Q2: its songs (PLS_SET), its name, or its deletion, to its app */
+enum { PLS_SET, PLS_NAME, PLS_DELETE };
+void catalogue_playlist_sync(int list, int what, const char *name);
+void catalogue_playlist_covers(void);                 /* read once per Playlists list built */
+int catalogue_playlist_cover(int list, char *url); /* a server playlist's cover, url 600 bytes */
 void catalogue_bind(void *row, unsigned index), catalogue_mark(void *row, void *r, int tab);
 void catalogue_forget(void *row), catalogue_grey(void *w, int on);
 int catalogue_greyed(void *w, unsigned *color), catalogue_row_ink(void *row, unsigned *ink);

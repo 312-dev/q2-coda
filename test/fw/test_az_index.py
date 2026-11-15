@@ -12,7 +12,8 @@ import host
 from conftest import O, Deques, ROOT
 from test_nav_lists import ROW_H, SLOW, STOP, Canvas, Pull, Table, key, theme, ui  # noqa: F401  (ui: fixture)
 
-SOURCE = (ROOT / 'patch' / 'az_index.c').read_text()
+# its own constants, and the three navigation.h shares with add_songs.c
+SOURCE = (ROOT / 'patch' / 'az_index.c').read_text() + (ROOT / 'patch' / 'navigation.h').read_text()
 AZ = {k: int(v) for k, v in re.findall(r'^#define (AZ_\w+) (\d+)\b', SOURCE, re.M)}
 OLED = next(i for i, t in enumerate(host.tools_theme.builtins()) if t['name'] == 'OLED')
 LETTERS = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'

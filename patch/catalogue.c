@@ -1801,6 +1801,113 @@ static void catplay_poll(void) {
     if (!cat.cp_at && !cat.cp_wake && cat.cp_list) deque_destroy(cat.cp_list), cat.cp_list = 0;
 }
 
+/* ---- Server playlists changed on the Q2 (docs/server-library.md#playlists-from-the-q2) ---- */
+
+extern int stock_db_open(const char *path, void **db); /* playlists.c */
+
+/* A playlist's server identity (cat.serverlists): its app's id and its playlist id. */
+typedef struct {
+    char app[16], pid[200];
+} pls_t;
+static int pls_one(void *ctx, int n, char **v, char **names) {
+    pls_t *p = ctx;
+    if (n == 2 && v[0] && v[1] && !p->app[0]) {
+        tk_snprintf(p->app, sizeof p->app, "%s", v[0]);
+        tk_snprintf(p->pid, sizeof p->pid, "%s", v[1]);
+    }
+    return 0;
+}
+/* s to f, after a tab, with the card-app channel's escapes (%, tab, newline, return as %XX). */
+static void pls_put(void *f, const char *s) {
+    fwrite("\t", 1, 1, f);
+    for (; s && *s; ++s) {
+        char e[4];
+        int esc = *s == '%' || *s == '\t' || *s == '\n' || *s == '\r';
+        if (esc) tk_snprintf(e, sizeof e, "%%%02X", (unsigned char)*s);
+        fwrite(esc ? e : s, 1, esc ? 3 : 1, f);
+    }
+}
+static int pls_sid(void *f, int n, char **v, char **names) {
+    if (n == 1 && v[0] && *v[0]) pls_put(f, v[0]);
+    return 0;
+}
+
+/* The server playlists' covers, read once per Playlists list built (catalogue_playlist_covers):
+ * each stock playlist's app and server id, at most 100. */
+static struct {
+    int n;
+    struct {
+        int list;
+        pls_t id;
+    } *at;
+} plc __attribute__((section(".scratch")));
+static int plc_row(void *ctx, int n, char **v, char **names) {
+    if (n != 3 || !v[0] || !v[1] || !v[2] || plc.n >= 100) return 0;
+    plc.at[plc.n].list = atoi(v[0]);
+    tk_snprintf(plc.at[plc.n].id.app, sizeof plc.at[0].id.app, "%s", v[1]);
+    tk_snprintf(plc.at[plc.n].id.pid, sizeof plc.at[0].id.pid, "%s", v[2]);
+    ++plc.n;
+    return 0;
+}
+/* The mapping read again (Local + Server on), for catalogue_playlist_cover's asks that follow. */
+void catalogue_playlist_covers(void) {
+    void *db = 0;
+    plc.n = 0;
+    if (!catalogue_on() || (!plc.at && !(plc.at = calloc(100, sizeof *plc.at))) ||
+        stock_db_open("/mnt/data/database.db", &db))
+        goto done;
+    sqlite3_exec(db, "select list,app,pid from cat.serverlists", plc_row, 0, 0);
+done:
+    if (db) sqlite3_close(db);
+}
+/* Server playlist list's cover, the app's covers/pl-<pid>.jpg (its server's coverArt,
+ * docs/server-library.md#covers), as a file:// url in url (600 bytes); 0 when it has none yet or
+ * is no server playlist. */
+int catalogue_playlist_cover(int list, char *url) {
+    for (int i = 0; i < plc.n; ++i) {
+        pls_t *p = &plc.at[i].id;
+        if (plc.at[i].list != list || strstr(p->app, "/") || strstr(p->pid, "/")) continue;
+        tk_snprintf(url, 600, "file:///mnt/mmc/.%s/covers/pl-%s.jpg", p->app, p->pid);
+        return file_size(url + 7) > 0;
+    }
+    return 0;
+}
+
+/* Playlist list (0 to 99) changed on the Q2 (playlists.c): when it is a server playlist, a line to
+ * its app's playlists.out, which the app sends on to the server and then empties: "set PID SID..."
+ * (its songs in their own order, after an add or a removal; a song with no server id, a card file
+ * the server doesn't have, is left out), "name PID NAME" after a Rename, "delete PID" after a
+ * Delete. A local playlist, or the server library off, writes nothing. On the UI thread: a lookup
+ * of the playlist and one read of its songs' ids through stock's connection, with cat attached. */
+void catalogue_playlist_sync(int list, int what, const char *name) {
+    void *db = 0, *f = 0;
+    pls_t p = { "", "" };
+    char sql[600], file[64];
+    if (!catalogue_on() || list < 0 || list >= 100 || stock_db_open("/mnt/data/database.db", &db))
+        goto done;
+    tk_snprintf(sql, sizeof sql, "select app,pid from cat.serverlists where list=%d", list);
+    if (sqlite3_exec(db, sql, pls_one, &p, 0) || !p.app[0] || strstr(p.app, "/")) goto done;
+    tk_snprintf(file, sizeof file, "/mnt/mmc/.%s/playlists.out", p.app);
+    if (!(f = fopen(file, "ab"))) goto done;
+    const char *op = what == PLS_SET ? "set" : what == PLS_NAME ? "name" : "delete";
+    fwrite(op, 1, strlen(op), f);
+    pls_put(f, p.pid);
+    if (what == PLS_NAME) pls_put(f, name);
+    if (what == PLS_SET) {
+        tk_snprintf(sql, sizeof sql,
+                    "select ifnull((select sid from cat.servermeta m where m.fileurl=p.fileurl or "
+                    "m.dup=p.fileurl limit 1),(select sid from cat.serveritem i where "
+                    "i.path=p.fileurl limit 1)) from main.playlist p where p.id>100 and "
+                    "p.cd_num=%d order by p.id",
+                    list);
+        sqlite3_exec(db, sql, pls_sid, f, 0);
+    }
+    fwrite("\n", 1, 1, f);
+done:
+    if (f) fclose(f);
+    if (db) sqlite3_close(db);
+}
+
 /* ---- Ratings (docs/server-library.md#ratings-and-favourites) ---- */
 
 /* A song's hearts changed on the Q2: a line to each app with ratings=1. A server song playing

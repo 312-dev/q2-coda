@@ -458,15 +458,18 @@ static void pl_queue(int cd_num, const char *name, unsigned asked) {
 }
 
 /* Its picture's file when that decoded, else the 2x2 of its songs as the last refresh read them
- * (none before the first read: the poll that brings it asks again); a marker (empty) is none. No
- * SQLite: the UI thread asks per row. */
+ * (none before the first read: the poll that brings it asks again), unless small has PL_ART_OWN
+ * (OLED's rows: the picture or nothing); a marker (empty) is none. No SQLite: the UI thread asks
+ * per row. */
 int playlist_art(int cd_num, const char *name, int small, char *url, int size) {
     char src[600], at[512], path[540];
     unsigned pic = picture(name, src), hash = FNV_SEED; /* no songs: the empty playlist's */
     long n = pic ? file_size(named(path, stem(at, "plc", cd_num, pic), ".jpg")) : 0;
     int i = pl_entry(cd_num);
     if (i < pl.lists.n) hash = pl.lists.at[i].hash;
-    if (!n && pl.lists.at) n = file_size(named(path, stem(at, "pl", cd_num, hash), ".jpg"));
+    if (!n && pl.lists.at && !(small & PL_ART_OWN))
+        n = file_size(named(path, stem(at, "pl", cd_num, hash), ".jpg"));
+    small &= 1;
     if (n > 0) {
         tk_snprintf(url, size, "file://%s", named(path, at, small ? "_s.jpg" : ".jpg"));
         return 1;

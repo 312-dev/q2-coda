@@ -557,6 +557,64 @@ header and pair (`patch/artist_page.c`).
   from Sync), Quality and Sync Now, as on the artist page; on the Library's, the track's own hold
   menu. A card app without the `album` caps word ([librespot.md](librespot.md#album-rows)) keeps its
   plain rows.
+### Playlists
+
+Approved from the clickable mockups `design/playlist-proposal` and `design/add-songs` (2026-11-15).
+Built by `patch/playlists.c` (the list, the menus' actions), `patch/playlist_pages.c` (a playlist's
+page, On-The-Go) and `patch/add_songs.c`.
+
+- **The list** (Library > Playlists): **On-The-Go** first, then the playlists by name, each a two-line
+  row 44 px tall: a 36 px square at the text column less 2 (x 22), 4 px corners, the name in Row type
+  over "N songs" (or "Empty") in 13 px Text Tertiary from x 66, and the chevron. The square is the
+  playlist's own picture (`_explaylist_data/<name>.jpg`, as Cover Flow's) when it has one, a server
+  playlist's cover from its server (the app's `covers/pl-<pid>.jpg`) when it has that, else a
+  `#2C2C2E` tile with Phosphor's `playlist` (fill, 20 px, Text Tertiary); On-The-Go's tile holds
+  `sneaker-move` (fill). On the selection the tile is the accent with an 18 % white veil and its
+  glyph white. No dividers. No New Playlist, Select Playlists or Import and Export rows: a playlist
+  is made from a song's hold menu, and Import and Export are Settings > Playback > Library & Folders
+  rows. An empty list says "No playlists", hint "Hold Play/Pause on a song to add it".
+- **A playlist's hold menu** ([Menus](#menus)): Play, Shuffle, Rename, then Delete after a gap,
+  which asks "Delete playlist “name”?" with Cancel first. Rename is the [Search](ipod.md#search) letter
+  strip with the name in it, typed on at its end (a word's first letter a capital) under one row,
+  Done: Return moves to Done as to Search's results, Centre there saves, Return on it leaves the
+  name as it was. No More menu, no Edit Playlist: reordering is the server's or the phone's.
+- **A playlist's page**: Shuffle (Songs' Shuffle row: the accent's glyph, 18 px, at x 26 and the
+  label at x 54), Add Songs (`plus-circle`) and its songs, each one line, the artist on the right
+  column in 15 px Text Tertiary; no Shuffle row over nothing. Centre plays the list from the song;
+  a hold offers **Remove from Playlist** alone. The songs are in the playlist's own order.
+- **On-The-Go** (Playback > On-The-Go, on by default; off hides its row and Add to On-The-Go):
+  Shuffle, Add Songs, Save as Playlist (`arrow-down`), Clear (`x`), then its songs. Save as Playlist
+  makes "On-The-Go N", the first number free, with its songs, empties On-The-Go and lands on the new
+  playlist in the list; Clear asks first, Cancel first. Empty, it is Add Songs alone with the note
+  "Or hold Play/Pause on any song", hint "and choose Add to On-The-Go.". A hold on a song offers
+  **Remove from On-The-Go**. It lasts across a restart.
+- **A song's hold menu**: Play Next, Add to On-The-Go (Add to Queue while On-The-Go is off), Add to
+  Playlist…, Favorite (Remove from Favorites when it is one), then Go to Album, Go to Artist and Go to
+  Folder. Add to Playlist… is a picker in the same panel: New Playlist (`plus`) first, which makes
+  "New Playlist N" with the song in it (renamed later from its own hold), then the playlists; a
+  pick adds at once and toasts "Added to name" ("Already in name").
+
+### Add Songs
+
+A playlist's or On-The-Go's Add Songs row opens a page titled "Add to name": Recently Played,
+Recently Added, Artists, Albums and Songs, each with the chevron.
+
+- **An artist** opens with **Add All** (the accent's `plus-circle`, the artist's song count on the
+  right column), then its albums newest first as 40 px rows (a 32 px cover, the year, the chevron),
+  then its songs, each with its artist on the right. **An album** is Add All, then its tracks: the number in 15 px
+  Text Tertiary right-aligned in an 18 px column, the title from x 50, the length on the right.
+  **Albums** are 40 px cover rows with the album's artist on the right. **Songs** has a **Search**
+  row on top (`magnifying-glass`), which opens the [Search](ipod.md#search) letter strip over the
+  library's songs alone, found by title or artist. Artists, Albums and Songs have the
+  [A-Z index](#a-z-index) past 50 rows.
+- **Marks:** each song shows where it stands against the playlist as it was when Add Songs
+  opened, on the right column, 20 px Phosphor fills: `check-circle` in Text Secondary already in,
+  `plus-circle` green `#4FB477` added now, `minus-circle` red `#FF6B5E` taken out now, white on the
+  selection; putting a removed song back returns it to the check. The right column keeps the
+  mark's 22 px only on a row that has one. Centre adds or takes out in place, the wheel stays where
+  it is, and a toast says which ("Added to name", "Removed", "Undone"); Add All adds every song not
+  already in ("Added N songs", "Already added").
+- Return goes back a level; from the chooser, back to the playlist, which reads its songs again.
 
 ### Icons
 
@@ -613,7 +671,9 @@ pattern.
 | Songs, a playlist's songs           | Song rows                   | The artist inline; the [A-Z index](#a-z-index) past 50 rows in name order                                  |
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
 | Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; an artist's covers titled by the artist, other covers with the clock in the status row as Home |
-| Playlists                           | Two-line row with icon      | New Playlist... and the other action rows take the same 52 px pitch once there is a playlist, the picker's too |
+| Playlists                           | [Playlists](#playlists)     | On-The-Go first; 44 px rows with a 36 px picture or tile                                                   |
+| A playlist's songs, On-The-Go       | [Playlists](#playlists)     | Action rows, then the songs with the artist on the right                                                   |
+| Add Songs                           | [Add Songs](#add-songs)     | The chooser, then artists, albums and songs with marks                                                     |
 | Hold menu, More                     | [Menus](#menus)             | The inset modal over the page                                                                              |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
 | About                               | Key/value table             | Inert: no selection; values in Text Secondary                                                              |

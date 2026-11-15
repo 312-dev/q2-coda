@@ -3,7 +3,8 @@
 /* playlist_art.c: a playlist's art, for its rows and its Cover Flow. All on the UI thread. */
 
 /* The file:// url of cd_num's ready art (small: the 52 px one) in url, and 1; else 0, its build
- * queued unless it is known to have none. */
+ * queued unless it is known to have none. small | PL_ART_OWN: its own picture only, no 2x2. */
+#define PL_ART_OWN 2
 int playlist_art(int cd_num, const char *name, int small, char *url, int size);
 /* Every playlist's songs read again, in one pass, for the asks that follow: once per Playlists
  * list built, and as its covers open or come back; a finished build notes the songs it read

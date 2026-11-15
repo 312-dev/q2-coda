@@ -423,9 +423,12 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     Phosphor SVGs but TIDAL's mark, drawn in art.py, and Subsonic's, q2-coda's own SVG, and the inset modal's symbols
     (regular, 19 px) in Text Secondary (each half's) and white for the selection and the picker's check in Accent Blue,
     the volume's two speakers (fill, 16 px) in Text Secondary (each half's), an artist page's Shuffle and Radio
-    (regular, 16 px) in Accent Blue and white for the lit one, and About's quality badge's waveform (bold, 12 px) in Text Primary (each half's)."""
+    (regular, 16 px) in Accent Blue and white for the lit one, and About's quality badge's waveform (bold, 12 px) in Text Primary (each half's), and the playlist pages'
+    tiles (fill, 20 px) in Text Tertiary (each half's) and white, their action glyphs (regular, 18 px) in Accent Blue
+    and white, and Add Songs' marks (fill, 20 px) in Text Secondary, green and red (each half's) and white."""
     t = theme.builtins()[3]
     got = art.images(t)
+    blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     modes = [f'mode_{n}_{k}' for n in ('shuffle', 'repeat') for k in ('d', 'l', 'on')] + ['mode_repeat1_on']
     wifi = [f'{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'lock') for k in ('d', 'l')]
     glyphs = {'np_fav': 0, 'np_unfav_d': 0xffffff, 'np_unfav_l': 0, 'np_more_d': 0xffffff, 'np_more_l': 0,
@@ -438,13 +441,17 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     quality = ['quality_d', 'quality_l']  # np_about.c's badge
     keylock = [f'keylock_{k}' for k in ('d', 'l')]  # keylock.c: the status row's padlock and the card's
     card = [f'keylock_card_{k}' for k in ('d', 'l')]
+    tiles = {f'pltile_{n}_{k}': c for n in ('playlist', 'otg') for k, c in (('d', 0x858585), ('l', 0x6e6e6e), ('w', 0xffffff))}
+    acts = {f'plact_{n}_{k}': c for n in ('shuffle', 'add', 'save', 'clear', 'search') for k, c in (('a', blue), ('w', 0xffffff))}
+    pmarks = {f'plmark_{n}_{k}': c for n, d, l in (('in', 0xababab, 0x5c5c5c), ('add', 0x4fb477, 0x4fb477), ('out', 0xff6b5e, 0xff6b5e))
+              for k, c in (('d', d), ('l', l), ('w', 0xffffff))}
     assert set(got) == {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality,
-                                              *keylock, *card, 'search_pop', 'search_pop_letters', 'search_pop_echoes',
+                                              *keylock, *card, *tiles, *acts, *pmarks,
+                                              'search_pop', 'search_pop_letters', 'search_pop_echoes',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)))}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
-    blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
                           ('play_d', art.STATE_PX, 0xffffff), ('play_l', art.STATE_PX, 0),
                           ('shuffle_a', art.ROW_ICON_PX, blue), ('shuffle_w', art.ROW_ICON_PX, 0xffffff),
@@ -462,7 +469,9 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.PAIR_ICON_PX, blue if n.endswith('_a') else 0xffffff) for n in pair),
                           *((n, art.QUALITY_PX, 0xffffff if n.endswith('_d') else 0) for n in quality),
                           *((n, art.STATE_PX, 0 if n.endswith('_l') else 0xffffff) for n in keylock),
-                          *((n, art.KEYLOCK_CARD_PX, 0 if n.endswith('_l') else 0xffffff) for n in card)):
+                          *((n, art.KEYLOCK_CARD_PX, 0 if n.endswith('_l') else 0xffffff) for n in card),
+                          *((n, art.TILE_PX, c) for n, c in tiles.items()), *((n, art.PL_ACTION_PX, c) for n, c in acts.items()),
+                          *((n, art.PL_MARK_PX, c) for n, c in pmarks.items())):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
         assert (w, h) == (px, px) and inked == {tuple(rgb >> s & 255 for s in (16, 8, 0))}
