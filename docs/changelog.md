@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Display (OLED): **About** shows its values in full where they fit: a value takes the row up to its name, so the Wi-Fi MAC and the version no longer end in … early, and in Light Mode the names on the left show in black (they were white on white).
   - Security: **SyncLink** (Shanling's phone remote, System settings → Wireless → SyncLink) is off unless you turn it on, as it lets any nearby phone control the Q2 and read its Wi-Fi password without asking for one. If you had it on, this update turns it off once; choose Bluetooth or Wi-Fi on its page to use it again. Its row says what it allows.
   - Volume: turning the wheel slowly still moves the volume one step at a time, but a fast spin now covers the range quickly, up to 10 steps a click, picking up speed as you keep turning, as Rockbox does on an iPod. The volume bar slides to each new level instead of jumping. Wheel Sensitivity still sets how far a click is.
   - Settings: **System settings → Power** ends with **Restart** and **Shut Down**. Each asks first; Cancel or Return leaves you on the row. Restart saves your place in the queue and restarts the Q2, as a theme change does, and Shut Down powers off as holding the power key and choosing Shut Down does.
