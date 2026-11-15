@@ -136,6 +136,10 @@ void smart_poll(void) {
 /* Smart Wi-Fi has the radio off (the user's switch is on). */
 int smart_wifi_off(void) { return sw.off; }
 
+/* Smart Wi-Fi has the radio off or is bringing it back: whatever asks (smart_wifi_wait) gets the
+ * link, so a server that was reachable still counts as one (catalogue.c). */
+int smart_wifi_back(void) { return sw.off || sw.woke_at; }
+
 /* Something that needs the link starting (Spotify's launch, a radio list or station, an automatic
  * scrobble upload): Smart Wi-Fi's radio woken now if it is off, and 1 while that wake's link is not
  * up yet, SMART_CONNECT_MS at most, so the caller waits for it; then, or with the radio as the user
