@@ -1077,7 +1077,8 @@ def heart_on_copy(rig, fw, ui, song, mcl, **kw):
     rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, local=copy)])
     rig.poll()
     heart = Heart(fw, ui, song, mcl, path=copy.encode(), **kw)
-    stock_stub(FAV_CLICK, 0, (C.c_long * 3)())
+    heart.log = (C.c_long * 3)()  # the stub writes its arguments there: it must outlive the stub
+    stock_stub(FAV_CLICK, 0, heart.log)
     return heart
 
 
