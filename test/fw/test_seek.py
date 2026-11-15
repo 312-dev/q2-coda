@@ -141,7 +141,7 @@ def test_without_q2player_nothing_is_sent(scan):
 
 
 @pytest.mark.parametrize('direction, paused, there, plan', [
-    (1, 0, True, 1), (-1, 0, True, 2),  # forward, backward
+    (1, 0, True, 1), (-1, 0, True, 3),  # forward heard at speed; back by snippets heard forward (SEEK_REWIND_SNIPPETS)
     (1, 1, True, 0), (-1, 1, True, 0), (1, 0, False, 0), (-1, 0, False, 0),  # paused, or not q2player: jumps
 ])
 def test_the_plan_is_heard_at_speed_only_on_q2player_while_playing(fw, direction, paused, there, plan):
@@ -175,12 +175,20 @@ def test_on_q2player_the_hold_is_heard_at_2_4_then_8_times_then_jumps_heard_at_4
     assert s.up(NEXT) == STOP and s.scans()[-1] == 0  # the release: its own speed again
 
 
-def test_on_q2player_previous_runs_backward_and_turns_at_the_start(scan):
+def test_on_q2player_previous_steps_back_by_snippets_heard_at_twice(scan):
+    s = scan(sec=200, total=3600, q2player=True)
+    s.hold(PREV, HOLD + 12000)
+    assert s.scans() == [200]  # each snippet heard forward at twice the speed
+    steps = [a - b for a, b in zip([200] + s.seeks(), s.seeks())]
+    assert set(steps) == {1, 2, 4, 8, 16} and steps == sorted(steps)  # back at 2, 4, 8, 16 then 32 times
+    assert s.up(PREV) == STOP and s.scans() == [200, 0]
+
+
+def test_on_q2player_previous_stops_at_the_start_and_plays_on_from_there(scan):
     s = scan(sec=5, q2player=True)
-    Moving(s)
-    s.hold(PREV, HOLD + 5000)
-    assert s.scans() == [-200, -400, 0] and s.seeks() == []  # at the start it plays on forward from there
-    assert s.up(PREV) == STOP and s.scans()[-1] == 0
+    s.hold(PREV, HOLD + 5 * CYCLE)
+    assert s.seeks() == [4, 3, 2, 1, 0] and s.scans() == [200, 0]  # then forward at its own speed
+    assert s.up(PREV) == STOP and s.scans() == [200, 0]
 
 
 def test_paused_on_q2player_nothing_is_heard(scan):

@@ -2,8 +2,9 @@
  * button stays down (docs/ipod.md#previous-and-next, docs/internals.md#scan). With q2player
  * playing a song it can stretch (its SCAN_FILE), the song is heard running at 2, then 4, then 8
  * times its speed at its own pitch ({mcl-scan\HUNDREDTHS}, player/stretch.c), and past that in
- * jumps of growing length, each played at 4 times; Previous runs it backward the same way, or
- * with SEEK_REWIND_SNIPPETS steps back by short stretches played forward, as a CD player does.
+ * jumps of growing length, each played at 4 times. Previous steps back as a CD player does,
+ * each stretch heard forward at twice the speed, the steps growing to the same speeds; with
+ * SEEK_REWIND_SNIPPETS 0 it runs the song backward instead, as Next runs it forward.
  * Otherwise (the stock player, a paused song, DSD) it scans as an iPod's click wheel does: a
  * jump, a short stretch at the song's own speed, another jump, the jumps growing. A press let go
  * before SEEK_HOLD_MS is a tap and stays stock's: Next changes track, Previous restarts the track
@@ -14,9 +15,9 @@
 #define SEEK_CYCLE_MS 500       /* one jump and the stretch heard after it */
 #define SEEK_LOST_MS 700        /* no repeat for this long: the release was lost */
 #define SCAN_FILE "/tmp/q2scan" /* player/q2player.h: there while q2player can scan the song */
-/* 1: Previous steps back by stretches played forward, not backward */
+/* 1: Previous steps back by stretches played forward; 0: it runs the song backward */
 #ifndef SEEK_REWIND_SNIPPETS
-#define SEEK_REWIND_SNIPPETS 0
+#define SEEK_REWIND_SNIPPETS 1
 #endif
 
 /* A scan's phases: from `after` ms held past SEEK_HOLD_MS, `times` the song's speed overall;
