@@ -20,16 +20,14 @@
  * row, and az_kind's few compares on each press. */
 #include "navigation.h"
 
-#define AZ_MIN_ROWS 50 /* a list this long or shorter has no index */
-#define AZ_LETTERS 27  /* "#", then A to Z */
-#define AZ_X 13        /* the column's centre, from the right edge */
+#define AZ_LETTERS 27 /* "#", then A to Z */
+#define AZ_X 13       /* the column's centre, from the right edge */
 #define AZ_TOP 80 /* the straight part of the glass, screen rows (docs/oled-design.md#corners) */
 #define AZ_BOTTOM 240
 #define AZ_SLOT 11 /* a letter's height: past AZ_SLOTS of them the column folds */
 #define AZ_SLOTS ((AZ_BOTTOM - AZ_TOP) / AZ_SLOT)
-#define AZ_PX 13      /* Inter Medium 11 px: AWTK sizes a face by its line, 1.21 em for Inter */
-#define AZ_DOT 8      /* the lit letter's white disc's radius */
-#define AZ_EDGE_PX 28 /* a touch this near the list's right edge is the index's */
+#define AZ_PX 13 /* Inter Medium 11 px: AWTK sizes a face by its line, 1.21 em for Inter */
+#define AZ_DOT 8 /* the lit letter's white disc's radius */
 /* the bubble: AZ_BUB_W x AZ_BUB_H, AZ_BUB_R corners, ending AZ_BUB_GAP left of the column's centre,
  * its pointer AZ_PTR_W long and 2 * AZ_PTR_H tall towards it; its letter Inter Medium 30 px */
 #define AZ_BUB_W 52
@@ -44,12 +42,12 @@
  */
 #define AZ_RIGHT_IN 4
 #define AZ_BAR_IN 8
-/* A tick at this speed or faster, degrees a second as the encoder thread measures it (wheel_speed,
- * averaged as Rockbox's iPod driver does), is a fast spin: the speed at which Rockbox's list
- * acceleration, (speed / 270)^4, first moves 2 rows a click, which is where the volume's goes from
- * 1 step a tick to 2 (volume.c vol_accel, docs/internals.md#wheel-volume). At 50% Wheel Sensitivity
- * that is 0.83 turns a second, about 6 ticks. */
-#define AZ_SPIN_DPS 300
+/* AZ_SPIN_DPS (navigation.h): a tick at that speed or faster, degrees a second as the encoder
+ * thread measures it (wheel_speed, averaged as Rockbox's iPod driver does), is a fast spin: the
+ * speed at which Rockbox's list acceleration, (speed / 270)^4, first moves 2 rows a click, which is
+ * where the volume's goes from 1 step a tick to 2 (volume.c vol_accel,
+ * docs/internals.md#wheel-volume). At 50% Wheel Sensitivity that is 0.83 turns a second, about 6
+ * ticks. AZ_MIN_ROWS and AZ_EDGE_PX are there too, shared with add_songs.c. */
 #define AZ_SHOW_MS 1000
 #define AZ_FADE_MS 200
 #define AZ_STEP_MS 40
@@ -197,6 +195,17 @@ void az_wheel(void *w, int id) {
     if (az.bubble) az_show(w);
     /* the window: the lit "#" reaches above Songs' table, under its Shuffle row */
     if (az.letter != was || az.bubble != had) widget_invalidate_force(window_of(w), (void *)0);
+}
+
+/* A list the payload paints itself (add_songs.c): the strip up on its surface w with letter lit,
+ * held while a finger is on it, the bubble beside it while bubble; let go, it fades as after a
+ * lift. */
+void az_mark(void *w, int letter, int held, int bubble) {
+    az.letter = (signed char)letter;
+    az.held = (unsigned char)held;
+    az.bubble = (unsigned char)bubble;
+    az_show(w);
+    widget_invalidate_force(window_of(w), (void *)0);
 }
 
 /* A finger at screen row y on the strip: its letter lit, and the list at that letter's rows. */

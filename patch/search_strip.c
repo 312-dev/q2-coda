@@ -73,6 +73,7 @@ static struct {
     unsigned pop_timer, pop_step_at; /* the pop's timer; the wheel's last step on the strip */
     unsigned char pop;               /* 1 shown, 2 a spin's, shown when it stops */
     int rename; /* Rename's playlist + 1 (playlist_rename_open), 0 for Search */
+    int pick;   /* Add Songs' (add_songs_search): songs alone, Centre adds them */
 } ss __attribute__((section(".scratch")));
 
 /* The strip's entry e as text: a capital, a digit, or 0 for the space and delete (drawn). */
@@ -95,7 +96,7 @@ static void ss_filter(void) {
     ss.nmatch = ss.sel = ss.top = ss.songs_at = 0;
     if (!ss.text[0] || !ss.match) return;
     static const int group[] = { REC_ARTIST, REC_ALBUM };
-    for (int g = 0; g < 2; ++g)
+    for (int g = 0; g < 2 && !ss.pick; ++g)
         for (int i = 0, from = ss.nmatch; i < n && ss.nmatch - from < SS_GROUP; ++i) {
             void *r = deque_at(ss.songs, (unsigned)i);
             const char *name = P(r, group[g]);
@@ -110,7 +111,7 @@ static void ss_filter(void) {
         char name[512];
         const char *fields[] = { track_name(name, sizeof name, r), P(r, REC_ARTIST),
                                  P(r, REC_ALBUM) };
-        for (unsigned f = 0; f < sizeof fields / sizeof *fields; ++f)
+        for (unsigned f = 0; f < sizeof fields / sizeof *fields - ss.pick; ++f) /* title, artist */
             if (fields[f] && strcasestr(fields[f], ss.text)) {
                 ss.kind[ss.nmatch] = SS_SONG;
                 ss.match[ss.nmatch++] = r;
@@ -162,6 +163,10 @@ static void ss_play(void) {
     }
     if (ss.sel >= ss.nmatch) return;
     void *r = ss.match[ss.sel], *dq;
+    if (ss.pick) { /* Add Songs: in or out of the playlist, its mark changed in place */
+        add_songs_toggle(r);
+        return;
+    }
     if (ss.kind[ss.sel] == SS_ARTIST) {
         struct {
             int cls;
@@ -350,9 +355,19 @@ void search_strip_paint(void *w, void *canvas) {
                         artist);
             artist = what;
         }
-        int ax = 24 + tw + 10;
-        if (artist && *artist && SS_RIGHT - ax >= SS_ARTIST_MIN)
-            ss_text(canvas, 0, artist, ax, y + 1, SS_PITCH, SS_RIGHT - ax, SS_PX_ARTIST,
+        int ax = 24 + tw + 10, right = SS_RIGHT, mark = ss.pick ? add_songs_mark(r) : 0;
+        if (mark) { /* Add Songs' mark on the right column (playlist_pages.c pv_paint's) */
+            static const char *const kinds[] = { "in", "add", "out" };
+            char art[32];
+            tk_snprintf(art, sizeof art, "plmark_%s_%s", kinds[mark - 1],
+                        on      ? "w"
+                        : light ? "l"
+                                : "d");
+            paint_art(ss.sheet, canvas, theme_art(art), SS_RIGHT - 21, y + (SS_PITCH - 20) / 2);
+            right -= 30;
+        }
+        if (artist && *artist && right - ax >= SS_ARTIST_MIN)
+            ss_text(canvas, 0, artist, ax, y + 1, SS_PITCH, right - ax, SS_PX_ARTIST,
                     on ? 0xffffff : tertiary);
     }
     if (ss.text[0] && !ss.nmatch) {
@@ -476,6 +491,14 @@ void playlist_rename_open(int id, const char *name) {
     ss.nmatch = 1; /* Done */
     tk_snprintf(ss.text, sizeof ss.text, "%s", name ? name : "");
     ss_sheet("Rename");
+}
+
+/* Add Songs' Search row (add_songs.c): the strip over the library's songs alone, each found by its
+ * title or artist, with its mark; Centre on a result adds it or takes it out, and the results
+ * stay. */
+void add_songs_search(void) {
+    library_search_open(0, 0);
+    ss.pick = ss.page != 0;
 }
 
 /* The Library's Search row and Local Songs' pull: the strip under a list.entry.ipod theme, stock's

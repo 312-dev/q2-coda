@@ -809,6 +809,14 @@ void playlist_pick_open(void *r);
 void playlist_rename_open(int id, const char *name); /* search_strip.c: the letter strip */
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);
+/* add_songs.c: Add Songs (docs/oled-design.md#add-songs) */
+void add_songs(int dest, const char *name);
+int add_songs_open(void);
+int add_songs_key(void *top, unsigned key);
+void add_songs_paint(void *w, void *canvas);
+int add_songs_mark(void *r);
+void add_songs_toggle(void *r);
+void add_songs_search(void); /* search_strip.c: the strip over the library's songs, picking */
 int playlist_page_hold(void *top);
 int otg_count(void);
 void pv_paint(void *w, void *canvas);
@@ -872,7 +880,14 @@ void coda_rc_poll(void);
 int coda_rc_enabled(void);
 int carremote_open(void *ctx, void *event);
 
-/* az_index.c: the A-Z index on a long Library list in name order (docs/oled-design.md#a-z-index) */
+/* az_index.c: the A-Z index on a long Library list in name order (docs/oled-design.md#a-z-index):
+ * a list this long or shorter has none; a touch this near the list's right edge is the index's;
+ * a tick this fast (degrees a second, wheel_speed) shows it, the speed at which Rockbox's list
+ * acceleration, (speed / 270)^4, first moves 2 rows a click (az_index.c) */
+#define AZ_MIN_ROWS 50
+#define AZ_EDGE_PX 28
+#define AZ_SPIN_DPS 300
+void az_mark(void *w, int letter, int held, int bubble);
 void az_wheel(void *w, int id), az_paint(void *w, void *canvas);
 int az_touch(void *w, void *event), az_held(void *event), az_on(void *w), az_right(void *w),
     az_bar_in(void *w);

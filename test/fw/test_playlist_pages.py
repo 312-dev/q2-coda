@@ -20,7 +20,7 @@ class Pv(C.Structure):
 
 class Lists(Table):
     """The playlist table with its headers too (id 0 to 99, name): New's and Save's lookups and inserts, On-The-Go's
-    move and Clear, Rename and Delete."""
+    move and Clear, and the server's mapping (cat.serverlists: list -> app, pid; servermeta: path -> sid)."""
     def __init__(self, fw, recs, deques, titles):
         super().__init__(fw, recs, deques, titles)
         self.headers, self.servers, self.sids = {}, {}, {}
@@ -83,19 +83,19 @@ def open_page(fw, dest, name):
     return fw.var('playlist_pages__pv', Pv)
 
 
-def test_a_playlist_s_page_is_shuffle_then_its_songs(fw, ui, pages):
+def test_a_playlist_s_page_is_shuffle_and_add_songs_then_its_songs(fw, ui, pages):
     pv = open_page(fw, 3, b'Road Trip')
     assert ui.nodes[ui.top()].name == 'playlistsongs_page' and pv.dest == 3
-    assert ui.rows(pv.view) == ['Shuffle', 'One', 'Two', 'Three']
+    assert ui.rows(pv.view) == ['Shuffle', 'Add Songs', 'One', 'Two', 'Three']
 
 
-def test_on_the_go_adds_save_and_clear_and_empty_it_has_no_rows(fw, ui, pages):
+def test_on_the_go_adds_save_and_clear_and_empty_it_offers_add_songs_alone(fw, ui, pages):
     pv = open_page(fw, OTG, b'On-The-Go')
-    assert ui.rows(pv.view) == ['Shuffle', 'Save as Playlist', 'Clear', 'Five']
+    assert ui.rows(pv.view) == ['Shuffle', 'Add Songs', 'Save as Playlist', 'Clear', 'Five']
     ui.close(ui.top())
     pages.table.rows.clear()
     pv = open_page(fw, OTG, b'On-The-Go')
-    assert ui.rows(pv.view) == []
+    assert ui.rows(pv.view) == ['Add Songs']
 
 
 def test_a_song_plays_its_list_as_stock_plays_a_playlist(fw, ui, pages):
@@ -130,12 +130,19 @@ def test_clear_asks_first(fw, ui, pages, answer, left):
 def test_remove_takes_the_held_song_out(fw, ui, pages):
     pv = open_page(fw, 3, b'Road Trip')
     view = pv.view
-    ui.nodes[view].props['_ringnav_index'] = 2  # Two, under Shuffle
+    ui.nodes[view].props['_ringnav_index'] = 3  # Two, under Shuffle and Add Songs
     fw.var('playlist_pages__pv_held', C.c_void_p).value = pages.deques[pv.songs][1]  # the hold's song
     fw.fn('playlist_pages__pv_remove', None, C.c_int)(0)
     assert pages.table.songs(3) == ['One', 'Three'] and ui.toasts[-1] == 'Removed'
-    assert ui.rows(pv.view) == ['Shuffle', 'One', 'Three']
+    assert ui.rows(pv.view) == ['Shuffle', 'Add Songs', 'One', 'Three']
 
 
 def test_a_rename_to_a_taken_name_is_refused(fw, ui, pages):
     assert fw.fn('playlist_rename', C.c_int, C.c_int, C.c_char_p)(3, b'Gym') == -2
+
+
+def test_add_songs_row_opens_add_songs_for_the_playlist(fw, ui, pages):
+    pv = open_page(fw, 3, b'Road Trip')
+    ui.click(ui.find(pv.view, 'Add Songs'))
+    ui.due('pv_run')
+    assert ui.nodes[ui.top()].name == 'addsongs_page' and 'Add to Road Trip' in [n.text for n in ui.nodes.values()]

@@ -3177,6 +3177,7 @@ int ringnav_paint(void *w, void *canvas) {
     if (NP_VISUALIZER) visualizer_paint(w, canvas);
     games_paint(w, canvas);
     search_strip_paint(w, canvas);
+    add_songs_paint(w, canvas);
     /* Even a page with no navigable pane must end pending input when it is painted. */
     if (st.center_timer || st.home_surface) {
         void *wm = window_manager(), *top = window_manager_get_top_window(wm);
@@ -12366,6 +12367,8 @@ int ringnav(void *ctx, void *event) {
     /* A game's keys, before stock's lock filter, media keys and screen-off double Centre */
     if (usable() && games_key(window_manager_get_top_window(window_manager()), key)) return STOP;
     if (usable() && search_strip_key(window_manager_get_top_window(window_manager()), key))
+        return STOP;
+    if (usable() && add_songs_key(window_manager_get_top_window(window_manager()), key))
         return STOP;
     if (usable() && kb_wheel_key(key)) return STOP;
     /* Cover Flow's flip: a Centre during it does nothing. Its Return is the page's (coverflow.c

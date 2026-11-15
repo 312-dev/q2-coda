@@ -21,7 +21,7 @@ class Ss(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'page sheet songs match kind'.split()),
                 *((k, C.c_int) for k in 'nmatch letter focus sel top songs_at'.split()),
                 *((k, C.c_short) for k in 'down_x down_y pressed'.split()), ('text', C.c_char * 49),
-                ('pop_timer', C.c_uint), ('pop_step_at', C.c_uint), ('pop', C.c_ubyte), ('rename', C.c_int)]
+                ('pop_timer', C.c_uint), ('pop_step_at', C.c_uint), ('pop', C.c_ubyte), ('rename', C.c_int), ('pick', C.c_int)]
 
 
 @pytest.fixture
@@ -378,3 +378,27 @@ def test_an_empty_name_is_not_saved(fw, ui):
     take(ui.top(), KEY_CENTER)
     assert ui.toasts[-1] == "Name can't be empty" and not sql.log
 
+
+def test_add_songs_search_lists_songs_by_title_or_artist_and_centre_adds_in_place(fw, ui, song):
+    """Add Songs' Search row: songs alone (no artist or album rows), found by title or artist, never by album;
+    Centre on one adds it to the playlist (stock's batch add, as Add to Playlist's) and the results stay."""
+    songs = library(song)
+    Config(fw, THEME=OLED)
+    Library(fw, ui, songs)
+    there, added = [], []
+    fw.mock('checkPlayListExist', lambda r, dest, *_: int(r in there))
+    fw.mock('_create_vector', lambda *_: 0x7e)  # Add Songs' own selection
+    fw.mock('batch_add_file', lambda cls, kind, one, sel, dest, *_: added.append(dest) or there.append(songs[1]) or 0)
+    fw.fn('add_songs_search', None)()
+    s = Strip.__new__(Strip)
+    s.fw, s.ui, s.stock = fw, ui, []
+    s.ss, s.take = fw.var('search_strip__ss', Ss), fw.fn('search_strip_key', C.c_int, C.c_void_p, C.c_uint)
+    assert s.ss.pick == 1
+    s.type('songs')
+    assert s.titles() == []  # Glove's album, Love Songs, isn't asked
+    s.key(*[KEY_BACK_BTN] * 5)
+    s.type('joy')
+    assert s.titles() == ['Love Will Tear Us Apart', 'Atmosphere']  # by artist, and no artist row
+    s.key(KEY_RETURN, KEY_CENTER)
+    assert added == [0] and ui.toasts[-1].startswith('Added to') and s.ss.nmatch == 2
+    assert ui.backs == 0 and not ui.played

@@ -21,6 +21,7 @@
 { "shuffle_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/library_lists.c) */
 { "playlistedit_page", CTX_DYNAMIC, 0 },
 { "playlistsongs_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/playlist_pages.c) */
+{ "addsongs_page", CTX_DYNAMIC, 0 },      /* runtime window (patch/add_songs.c) */
 { "chapters_page", CTX_DYNAMIC, 0 }, /* runtime chapter list */
 { "upnext_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/navigation.c) */
 { "ratings_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/ratings.c) */

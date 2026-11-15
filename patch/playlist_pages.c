@@ -1,6 +1,6 @@
 /* A playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists,
  * docs/internals.md#on-the-go): a page of its own, opened from a row of Playlists. Action rows
- * first (Shuffle and, for On-The-Go, Save as Playlist and Clear), each its accent glyph
+ * first (Shuffle, Add Songs and, for On-The-Go, Save as Playlist and Clear), each its accent glyph
  * before an accent label, then the songs, each a title with its artist on the right column in
  * Text Tertiary. Centre on a song plays the list from it, as stock plays a playlist's own list
  * (class 0xff13 with its cd_num, so Now Playing's Delete takes it out of this list, not the
@@ -13,7 +13,8 @@
  * the hold menu's Add to On-The-Go.
  *
  * Clicks run on the next loop pass (pv_run), as the queue menu's do, so a rebuild never happens
- * under its own click. The rows' glyphs and right-hand text are painted here (pv_paint). */
+ * under its own click. The rows' glyphs and right-hand text are painted here (pv_paint); Add Songs
+ * (add_songs.c) is a page of its own. */
 #include "navigation.h"
 
 #define PV_ICON "_pv_icon"   /* an action row's glyph: tools/art.py PL_ACTIONS' stem */
@@ -80,6 +81,7 @@ static void pv_show(void) {
     char title[512];
     pv.acts = 0;
     if (n) pv.act[pv.acts++] = PV_SHUFFLE;
+    pv.act[pv.acts++] = PV_ADD;
     if (otg && n) pv.act[pv.acts++] = PV_SAVE, pv.act[pv.acts++] = PV_CLEAR;
     int rows = pv.acts + n;
     pv.view = page_list(pv.page, pv.page, 0, pv.name, rows, 48);
@@ -109,6 +111,8 @@ static int pv_run(const void *unused) {
         void *all = staged(pv_query, (void *)(long)pv.dest, &n);
         shuffle_play(all);
         deque_destroy(all);
+    } else if (a == PV_ADD) {
+        add_songs(pv.dest, pv.name);
     } else if (a == PV_SAVE) {
         int id = otg_save(said + 9, sizeof said - 9);
         if (id < 0) {
