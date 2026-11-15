@@ -443,12 +443,13 @@ int addon_fav(const char *id, const char *kind, const char *key, int on);
 int addon_fav_path(const char *path, int on);
 /* catalogue.c: the server library (docs/internals.md#server-library). catalogue_on: Local + Server;
  * catalogue_path: a server row's path; catalogue_unavailable: a record that can't play now;
- * catalogue_album_unavailable: an album list's record none of whose songs can play now;
+ * catalogue_album_unavailable: an album list's record none of whose songs can play now, and
+ * catalogue_artist_unavailable an artist's;
  * catalogue_union: a Library query reading servertable too (0: as it is; the caller frees it);
  * catalogue_load: ringnav_load's queue (0 as it is, 1 *own instead, 2 nothing loaded). */
 extern int catalogue_source;
 int catalogue_on(void), catalogue_path(const char *path), catalogue_unavailable(void *r);
-int catalogue_album_unavailable(void *r);
+int catalogue_album_unavailable(void *r), catalogue_artist_unavailable(void *r);
 int catalogue_seconds(const char *path), catalogue_load(void *q, int *at, void **own);
 int catalogue_access(const char *path, int mode); /* stock's play check, tools/build.py */
 int catalogue_missing(const char *path); /* the payload's own lists' check before a play */
@@ -617,6 +618,9 @@ int eq_rows(void);
 int eq_list_end(void); /* the page's rows end here (the set's list_end) */
 void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e);
 void eq_tabs_paint(void *w, void *canvas, int simple, int focus);
+/* slider_page.c: an iOS segmented control of n segments, w by h from x, y; open is lit */
+void segments_paint(void *canvas, const char *const *names, int n, int open, int focus, int x,
+                    int y, int w, int h);
 int ipod_battery(void);    /* theme_engine.c: IPOD BATTERY, 0 Icon, else a percentage */
 int title_gone(void *w, void *event); /* ... and looks for its source again at the next sync */
 int bar_title_fits(void *label);      /* label's text fits the bar's title box */

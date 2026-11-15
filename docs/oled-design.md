@@ -206,14 +206,15 @@ Wear OS's position indicator, on the Q2's straight right edge:
 
 ### Tabs
 
-An iOS segmented control, on EQ's Simple and Advanced (`slider_page.c` `eq_tabs_paint`), the theme's
-only tabs:
+An iOS segmented control (`slider_page.c` `segments_paint`), on EQ's Simple and Advanced (`eq_tabs_paint`) and
+Search's All, Songs, Artists and Albums ([ipod](ipod.md#search)), the theme's only tabs:
 
-- A `#1C1C1E` track rounded 9 px from x 20 to 355, 34 px tall, centred in the 48 px tab bar.
+- A `#1C1C1E` track rounded 9 px: on EQ from x 20 to 355, 34 px tall, centred in the 48 px tab bar; on Search
+  from x 16 to 359, 30 px tall, in the results' first 32 px row.
 - The open tab a segment 2 px inside the track, rounded 8 px: raised `#3A3A3C` while the wheel is
   elsewhere, Accent Blue only while the wheel is on the tabs, so the open tab reads apart from the
   wheel's place. In Light Mode the track is `#E5E5EA` and the raised segment white.
-- Labels in Inter Medium 17 px, centred in their halves: the open one white (Text Primary on Light
+- Labels in Inter Medium 17 px, centred in their segments: the open one white (Text Primary on Light
   Mode's white segment), the other `#ABABAB` (`#8A8A8E` in Light Mode), at the size of iOS's
   own control.
 
@@ -507,7 +508,7 @@ pattern.
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
 | Quick Settings                      | Own                         | Seven rows under the status row, Brightness's slider inline: Centre on it gives it the wheel               |
-| Search                              | Own                         | An iPod classic's letter strip at y 216-254 under four single-line results ([ipod](ipod.md#search))         |
+| Search                              | Own                         | An iPod classic's letter strip, a pill at y 254-288, under six single-line results ([ipod](ipod.md#search)) |
 | Keyboard                            | Own                         | Stock's keys as `#1C1C1E` boxes on black, the wheel's key in the accent ([ipod](ipod.md#keyboard))          |
 | Lock screen                         | Own                         | Clock 56 px Inter Medium centred, date 16 px Secondary, the song in two lines; black or the picture at 50% |
 

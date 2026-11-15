@@ -1296,6 +1296,10 @@ static int group_unavailable(int kind, unsigned h) {
 int catalogue_album_unavailable(void *r) {
     return group_unavailable(G_ALBUM, r && I(r, REC_ID) >= 0 ? group_hash(P(r, REC_ALBUM)) : 0);
 }
+/* ... and an artist's (r a record with the artist's name, as the letter strip's artist rows). */
+int catalogue_artist_unavailable(void *r) {
+    return group_unavailable(G_ARTIST, r && I(r, REC_ID) >= 0 ? group_hash(P(r, REC_ARTIST)) : 0);
+}
 /* Whether a row of Search's Artists (tab 1), Albums (2) or Genres (3) tab can't play now: a
  * directory record its tab's callback (0x506904, 0x506e94, 0x506d60) fills with the name in
  * REC_ARTIST, REC_ALBUM or REC_STYLE. */
