@@ -365,7 +365,7 @@ GEOM_RANGES = {
     'list_end': (0, lambda g: 320 - g.bar),  # ... and list_end's, inside the window
     'home_lib': (0, 1),  # Home's Library row slides in a list of the Library's rows
     'np_ipod': (0, 1),  # Now Playing as an iPod classic's (tools/ipod.py playing_page)
-    'home_row': (28, lambda g: (320 - g.bar - O['HOME_TOP']) // 7),  # seven Home rows under HOME_TOP fit the client
+    'home_row': (28, lambda g: (320 - g.bar - O['HOME_TOP']) // O['HOME_REST']),  # the rows Home rests on under HOME_TOP fit the client
     'stock_row': (28, 78),
     'stock_body': (24, lambda g: g.stock_row),
     'stock_title_y': (0, lambda g: g.stock_body - 20),

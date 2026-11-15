@@ -1,4 +1,5 @@
-/* Home's Library and Streaming: their pages and the lists Home's Split shows. */
+/* Home's Library and Streaming: their pages and the lists Home's Split shows; and its main list's
+ * overflow, the rows past the seven it rests on. */
 #include "navigation.h"
 
 /* A Library row titled text; into: one that opens another list, with stock's own list_into
@@ -257,4 +258,151 @@ void stream_rows(void *list) {
     ((int (*)(void *, void *))STREAM_BG)(list, (void *)0);
     widget_off_by_ctx(list, list);
     library_look(widget_lookup(list, "scroll_view_streamsset", 1));
+}
+
+/* Home's overflow (docs/ipod.md#home): its main list holds more rows than it rests on, HOME_REST
+ * of them from its top, as many as fit every set's window; the rest scroll, and scrolled to its end
+ * the last row stops where the seventh's foot is. The list's box is those rows, which clips the
+ * rest; under OLED's pages it runs on to the screen's bottom instead, and the rows there and, in
+ * Split, the row above it (coverflow.c coverflow_home_strip) show through fades into the ground,
+ * measured as docs/oled-design.md's Home rows say. */
+
+/* The foot of view's last shown row: stock's list_view layout keeps a hidden row's slot
+ * (Rockbox's, restacked last), so its content can end a row past it. */
+static int shown_foot(void *view) {
+    int foot = 0;
+    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
+        void *row = widget_get_child(view, i);
+        if (widget_get_visible(row) && I(row, W_Y) + I(row, W_H) > foot)
+            foot = I(row, W_Y) + I(row, W_H);
+    }
+    return foot;
+}
+
+/* For Home's main list's scroll view: the height its rows rest on, and in *foot their content's
+ * end (shown_foot); 0 for any other view. navigation.c's sel_height and scroll_end take them. */
+int home_rest(void *view, int *foot) {
+    if (!view || view != coverflow_home_view() || !widget_count_children(view)) return 0;
+    if (foot) *foot = shown_foot(view);
+    return HOME_REST * I(widget_get_child(view, 0), W_H);
+}
+
+/* The scroll view's content as AWTK's touch scroll clamps it (to the content less the view): the
+ * shown rows, and under them the box's rows past the rest, so a drag stops where the wheel does. A
+ * relayout puts stock's back, so the list's paint sets it again (coverflow_home_clip). */
+void home_pad(void *view) {
+    int foot, rest = home_rest(view, &foot);
+    if (rest)
+        I(view, VIEW_CONTENT_H) = foot + I(view, W_H) - (rest < I(view, W_H) ? rest : I(view, W_H));
+}
+
+/* coverflow.c coverflow_home_layout, once list (Home's main list) is placed: its box, the rest's
+ * rows or, under OLED's pages, to bottom (the window's foot, in its parent), its scroll kept. */
+void home_overflow(void *list, int bottom) {
+    void *view = widget_count_children(list) ? widget_get_child(list, 0) : (void *)0;
+    int foot, rest = home_rest(view, &foot), y = view ? I(view, SCROLL_Y) : 0;
+    if (!rest) return;
+    int h = oled_pages() ? bottom - I(list, W_Y) : rest;
+    /* both by hand, as coverflow.c home_width sizes them: a resize lays out neither again */
+    if (I(list, W_H) != h) widget_move_resize(list, I(list, W_X), I(list, W_Y), I(list, W_W), h);
+    if (I(view, W_H) != h) widget_move_resize(view, I(view, W_X), I(view, W_Y), I(view, W_W), h);
+    home_pad(view);
+    if (y > foot - rest) y = foot - rest;
+    scroll_view_set_offset(view, I(view, SCROLL_X), y < 0 ? 0 : y);
+}
+
+/* Shuffle Songs acts rather than opening a list, so has no chevron (navigation.c paint_chevrons):
+ * under a theme that draws one on every row its label takes the chevron's room, to the right
+ * column, and the name fits Split's half. Minimal's capitals close up instead (paint_caps). */
+void home_in_place(void *list) {
+    void *label = widget_lookup(list, "label_shuffle_songs", 1);
+    if (!label || theme()->painter[PAINT_CHEVRON] != CHEV_ICON) return;
+    int w = I(P(label, W_PARENT), W_W) - geom_val(V_RIGHT_X) - I(label, W_X);
+    if (w > I(label, W_W))
+        widget_move_resize(label, I(label, W_X), I(label, W_Y), w, I(label, W_H));
+}
+
+/* smoothstep of num/den, clamped to 0..1, in 256ths. */
+static int smooth(int num, int den) {
+    int t = num <= 0 ? 0 : num >= den ? 256 : num * 256 / den;
+    return t * t * (768 - 2 * t) >> 16;
+}
+/* One screen row of the ground at the alpha of 256 - k (k from smooth), over the screen's columns
+ * x to x + w; canvas's origin is (ox, oy) on the screen. */
+static void fade_row(void *canvas, int ox, int oy, unsigned ground, int k, int x, int y, int w) {
+    if (k >= 256 || w <= 0) return;
+    int a = 256 - k;
+    stock_canvas_set_fill_color(canvas, ground | (unsigned)(a > 255 ? 255 : a) << 24);
+    canvas_fill_rect(canvas, x - ox, y - oy, w, 1);
+}
+/* How far the glass's rounded edge dips at screen column x of its left corners. */
+static int lip(int x) {
+    int d = GLASS_R - x, r = GLASS_R;
+    if (d <= 0) return 0;
+    while (r * r > GLASS_R * GLASS_R - d * d) --r;
+    return GLASS_R - r;
+}
+
+/* the corners' columns are faded this many at a time, at the middle one's dip */
+#define FADE_COL 8
+#define SPLIT_TOP_FADE 34  /* Split: the band from clear to the ground at the glass's top edge */
+#define SPLIT_FOOT_FADE 56 /* and at its bottom edge */
+#define FULL_TOP_CLEAR 14  /* Full: clear this far under the list's top, the ground 8 above it */
+#define FULL_TOP_GROUND 8
+#define FULL_FOOT_CLEAR 16 /* Full: clear this far above the rest's foot, the ground by y 316 */
+#define FULL_FOOT_GROUND 316
+
+/* OLED's fades over Home's main list, list's top at screen y list_y, its columns 0 to cols (Split's
+ * left of the art): at the top once it has scrolled, at the foot while rows lie past the rest. In
+ * Split they follow the glass's rounded edge, as far from it in a corner as on the straight part,
+ * so a row dissolves the same way in both; in Full they run straight across. The selected row is
+ * never faded. Each row of the band one fill per FADE_COL columns in a corner, inside the canvas's
+ * clip. */
+void home_fades(void *canvas, void *list, int list_y, int cols, int split) {
+    void *view = list && widget_count_children(list) ? widget_get_child(list, 0) : (void *)0;
+    int foot, rest = home_rest(view, &foot);
+    if (!rest || !oled_pages() || !P(canvas, CANVAS_LCD)) return;
+    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y); /* its origin on the screen */
+    int off = I(view, SCROLL_Y), above = off > 0, below = foot - off > rest;
+    if (!above && !below) return;
+    /* the selected row, on the screen: SEL counts the rows shown */
+    int sel = widget_get_prop_int(view, SEL, -1), s0 = 1, s1 = 0;
+    for (unsigned i = 0, n = widget_count_children(view); i < n && sel >= 0; ++i) {
+        void *row = widget_get_child(view, i);
+        if (widget_get_visible(row) && !sel--)
+            s0 = list_y + I(row, W_Y) - off, s1 = s0 + I(row, W_H);
+    }
+    int clip[4]; /* rect_t, on the screen */
+    canvas_get_clip_rect(canvas, clip);
+    int y0 = clip[1] > 0 ? clip[1] : 0, y1 = clip[1] + clip[3] < 320 ? clip[1] + clip[3] : 320;
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR),
+             ground = ui_ink(RGBA(0)) & 0xffffffu;
+    int dip[GLASS_R / FADE_COL + 1]; /* each run of columns' lip, then the straight part's 0 */
+    for (int i = 0; i <= GLASS_R / FADE_COL; ++i) dip[i] = lip(i * FADE_COL + FADE_COL / 2);
+    for (int y = y0; y < y1; ++y) {
+        /* not the selected row; in Full, only its window's rows */
+        if ((y >= s0 && y < s1) || (!split && y < list_y)) continue;
+        if (!split) {
+            int clear = list_y + FULL_TOP_CLEAR, end = list_y + rest - FULL_FOOT_CLEAR;
+            int k = above ? 256 - smooth(clear - y, FULL_TOP_CLEAR + FULL_TOP_GROUND) : 256;
+            if (below) {
+                int b = 256 - smooth(y - end, FULL_FOOT_GROUND - end);
+                if (b < k) k = b;
+            }
+            fade_row(canvas, ox, oy, ground, k, 0, y, cols);
+            continue;
+        }
+        for (int x = 0; x < cols; x += FADE_COL) {
+            int d = dip[x < GLASS_R ? x / FADE_COL : GLASS_R / FADE_COL],
+                w = x < GLASS_R ? FADE_COL : cols - x;
+            int k = above ? smooth(y - d, SPLIT_TOP_FADE) : 256;
+            if (below) {
+                int b = smooth(320 - y - d, SPLIT_FOOT_FADE);
+                if (b < k) k = b;
+            }
+            fade_row(canvas, ox, oy, ground, k, x, y, w < cols - x ? w : cols - x);
+            if (x >= GLASS_R) break;
+        }
+    }
+    stock_canvas_set_fill_color(canvas, fill);
 }

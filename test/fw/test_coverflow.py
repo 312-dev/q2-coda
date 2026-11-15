@@ -799,6 +799,7 @@ def test_the_bar_paints_the_rows_split_raises_above_home_s_window(fw, library):
     home = fw.var('coverflow__home', Home)
     win = ui.make(ui.wm, 'window', 0, 58, 375, 262)
     home.win, home.list = win, ui.make(win, 'list_view', 0, -18, 196, 280)
+    ui.make(home.list, 'scroll_view', 0, 0, 196, 280)
     home.art = ui.make(win, 'image', 196, 0, 179, 262)
     ui.top = win
     clips, moves, painted = [], [], []
@@ -2881,7 +2882,8 @@ class Ui:
 class Homes:
     """A Home window as the asset lays it out: the art, the main list's rows, the Settings, Library and Streaming lists
     (hidden, two rows each: a button with its label and icon), and Carousel's slide_menu and arrows."""
-    ROWS = ('img_playing', 'img_library', 'img_cover_flow', 'img_folder', 'img_rockbox', 'img_services', 'img_settings')
+    ROWS = ('img_playing', 'img_library', 'img_cover_flow', 'img_folder', 'img_rockbox', 'img_shuffle_songs', 'img_services',
+            'img_home_search', 'img_settings')
 
     def __init__(self, ui, carousel=False, rockbox=False):
         self.ui = ui
@@ -2938,7 +2940,8 @@ def test_home_binds_its_cards_and_lists_and_asks_the_pane_s_counts_after_boot(fw
     assert not any(ui[w].sensitive for w in (h.art, h.sets, h.lib, h.stream))  # taps find the shown list's rows
     want = {'img_cover_flow': ('coverflow__coverflow_open', 0), 'img_rockbox': ('home_shortcut_open', 0),
             'img_settings': ('coverflow__home_settings', 0), 'img_library': ('coverflow__home_library', h.win),
-            'img_services': ('coverflow__home_streaming', h.win)}
+            'img_services': ('coverflow__home_streaming', h.win), 'img_shuffle_songs': ('shuffle_songs', 0),
+            'img_home_search': ('library_search_open', 0)}
     for row, (fn, ctx) in want.items():
         assert ui.handlers(h.rows[row]) == [(address(fw, fn), ctx)], row
     on_card = [ui.handlers(ui.lookup(h.carousel[0], n)) for n in ('img_cover_flow', 'img_rockbox')]
@@ -3183,6 +3186,7 @@ def pane_rect(fw, h):
 
 @pytest.mark.parametrize('name, kind', (('img_library', PANE_LIBRARY), ('img_cover_flow', PANE_COVERFLOW), ('img_folder', PANE_FOLDER),
                                         ('img_services', PANE_STREAM), ('img_stream', PANE_STREAM), ('img_settings', PANE_SETTINGS),
+                                        ('img_shuffle_songs', PANE_SHUFFLE), ('img_home_search', PANE_LIBRARY),
                                         ('img_unknown', PANE_LIBRARY)))
 def test_the_pane_follows_the_highlighted_row(fw, name, kind):
     _, ui, h, _ = home_open(fw)
@@ -4142,3 +4146,133 @@ def test_a_panel_length_too_wide_for_its_reserve_keeps_it(fw):
 def test_a_panel_row_keeps_its_reserve_with_no_canvas(fw):
     _, resize, move, *_ = panel_row(fw, '4:01', canvas=0)
     assert not resize and not move
+
+
+# Home's overflow (home.c): nine rows resting on seven, OLED's fades
+
+def test_once_scrolled_the_bar_paints_the_row_above_oled_s_split_list_and_its_fade(fw, library):
+    """Under OLED's pages the strip runs from the screen's top: a scrolled list paints there 40 px taller upward, its
+    rows where they were, put back after, and the top's fade goes over it."""
+    ui, home, view = overflow_rig(fw, OLED)
+    split_inset_set(fw, library, 2)
+    fw.fn('home_overflow', None, C.c_void_p, C.c_int)(home.list, 262)
+    home.art = ui.make(home.win, 'image', 196, 0, 179, 262)
+    ui.top = home.win
+    canvas = Canvas(fw)
+    clips, seen = [], []
+    fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(
+        slice(0, 4), list(clips[-1]) if clips else [0, 0, 375, 320]))
+    fw.mock('canvas_set_clip_rect', lambda c, r, *_: clips.append(tuple((C.c_int * 4).from_address(r))))
+    fw.mock('canvas_translate', lambda *_: 0)
+    fw.mock('widget_paint', lambda w, c, *_: seen.append((rect(w), rect(view), offset(view))))
+    strip = fw.fn('coverflow_home_strip', None, C.c_void_p, C.c_void_p)
+    strip(canvas.p, home.win)
+    assert seen == [((0, -18, 204, 280), (0, 0, 204, 280), 0)] and clips[0] == (0, 0, 196, 58)
+    assert not canvas.rects  # at its top: no fade
+    seen.clear()
+    offset(view, 32)
+    strip(canvas.p, home.win)
+    assert seen == [((0, -58, 204, 320), (0, 0, 204, 320), -8)]  # the row above at y 8
+    assert rect(home.list) == (0, -18, 204, 280) and rect(view) == (0, 0, 204, 280) and offset(view) == 32
+    assert canvas.rects and all(r[2] < 58 for r in canvas.rects)  # the top's band, inside the strip's clip
+
+
+def overflow_rig(fw, theme, rows=9, top=-18, hidden=()):
+    """Home's main list as coverflow_home_layout leaves it before home.c sizes it: the rest's box, rows 32 px."""
+    themed(fw, theme)
+    ui = Ui(fw)
+    home = fw.var('coverflow__home', Home)
+    home.win = ui.make(ui.wm, 'window', 0, 58, 375, 262)
+    home.list = ui.make(home.win, 'list_view', 0, top, 204, 224)
+    view = ui.make(home.list, 'scroll_view', 0, 0, 204, 224)
+    for i in range(rows):
+        row = ui.make(view, 'view', 0, 32 * i, 204, 32)
+        ui[row].visible = i not in hidden
+    fw.mock('scroll_view_set_offset', lambda w, x, y, *_: offset(w, y))
+    return ui, home, view
+
+
+def content(w):
+    return C.c_int.from_address(w + O['VIEW_CONTENT_H']).value
+
+
+def offset(w, y=None):
+    if y is not None:
+        C.c_int.from_address(w + O['SCROLL_Y']).value = y
+    return C.c_int.from_address(w + O['SCROLL_Y']).value
+
+
+@pytest.mark.parametrize('theme, box', ((OLED, 280), (CLASSIC, 224), (MINIMAL, 224), (MODERN, 224)))
+def test_home_rests_on_seven_rows_and_scrolls_the_rest(fw, theme, box):
+    """home_overflow: the box the rest's rows, or under OLED's pages the screen's bottom; the content as a drag
+    clamps it, so it stops where the wheel does (the shown rows' foot less the rest); a kept scroll clamped."""
+    ui, home, view = overflow_rig(fw, theme)
+    rest = fw.fn('home_rest', C.c_int, C.c_void_p, C.c_void_p)
+    foot = C.c_int()
+    assert rest(view, C.byref(foot)) == 7 * 32 and foot.value == 9 * 32
+    assert rest(ui.make(0, 'scroll_view'), None) == 0  # another list
+    offset(view, 100)
+    fw.fn('home_overflow', None, C.c_void_p, C.c_int)(home.list, 262)
+    assert rect(home.list)[3] == rect(view)[3] == box  # both: a resize lays out neither
+    assert content(view) - box == 2 * 32 and offset(view) == 2 * 32
+
+
+def test_a_hidden_row_restacked_last_is_not_scrolled_to(fw):
+    ui, home, view = overflow_rig(fw, OLED, hidden=(8,))
+    foot = C.c_int()
+    fw.fn('home_rest', C.c_int, C.c_void_p, C.c_void_p)(view, C.byref(foot))
+    assert foot.value == 8 * 32
+    fw.fn('home_pad', None, C.c_void_p)(view)
+    assert content(view) == 8 * 32  # the box is the rest's: the content is the shown rows'
+
+
+@pytest.mark.parametrize('theme, end', ((OLED, 204 - 28), (CLASSIC, 150)))
+def test_shuffle_songs_label_takes_the_chevron_s_room_where_every_row_has_one(fw, library, theme, end):
+    ui, home, view = overflow_rig(fw, theme)
+    split_inset_set(fw, library, 2)  # OLED's set: its right column
+    row = ui[view].kids[5]
+    label = ui.make(row, 'hscroll_label', 24, 0, 126, 32, name='label_shuffle_songs')
+    fw.fn('home_in_place', None, C.c_void_p)(home.list)
+    assert rect(label) == (24, 0, end - 24, 32)
+
+
+def fades(fw, theme, scroll, sel=None, top=-18, split=1, list_y=40, cols=196, hidden=()):
+    """home_fades over the rig's list, on a canvas at the screen's origin: {screen row: [(x, w, alpha)]}. The theme
+    is read once a test."""
+    ui, home, view = overflow_rig(fw, theme, top=top, hidden=hidden)
+    fw.fn('home_overflow', None, C.c_void_p, C.c_int)(home.list, 262)
+    offset(view, scroll)
+    if sel is not None:
+        ui[view].props['_ringnav_index'] = sel
+    canvas = Canvas(fw)
+    fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(slice(0, 4), [0, 0, 375, 320]))
+    fw.fn('home_fades', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int)(canvas.p, home.list, list_y, cols, split)
+    rows = {}
+    for colour, x, y, w, h in canvas.rects:
+        assert h == 1 and colour & 0xffffff == 0  # one row of the black ground
+        rows.setdefault(y, []).append((x, w, colour >> 24))
+    return rows
+
+
+def test_full_fades_straight_across_from_the_rest_s_foot_and_under_the_top_once_scrolled(fw):
+    rows = fades(fw, OLED, 0, top=0, split=0, list_y=58, cols=375)
+    assert 58 + 224 - 16 < min(rows) < 58 + 224 - 12 and all(r == [(0, 375, r[0][2])] for r in rows.values())
+    alphas = [rows[y][0][2] for y in sorted(rows)]
+    assert alphas == sorted(alphas) and alphas[-1] == 255 and max(rows) == 319  # into the ground by y 316
+    rows = fades(fw, OLED, 32, top=0, split=0, list_y=58, cols=375, sel=8)
+    assert min(rows) == 58 and rows[58][0][2] > rows[70][0][2] > 0 and 72 not in rows  # the top's 14 rows
+    rows = fades(fw, OLED, 64, top=0, split=0, list_y=58, cols=375, sel=8)
+    assert max(rows) < 72  # scrolled to its end: nothing below to fade
+
+
+def test_split_fades_follow_the_glass_and_never_the_selected_row(fw):
+    rows = fades(fw, OLED, 0)
+    assert min(rows) > 40 and not [y for y in rows if y < 40 + 224 and rows[y][-1][0] >= 80]  # the straight part from y 264
+    assert rows[230][0] == (0, 8, rows[230][0][2]) and rows[230][0][2] > 0  # the corner's, higher up
+    assert all(x + w <= 196 for r in rows.values() for x, w, _ in r)  # left of the art
+    rows = fades(fw, OLED, 32, sel=6)  # row 6 on the screen from 40 + 192 - 32
+    assert not [y for y in rows if 200 <= y < 232] and rows[0][-1] == (80, 116, 255)  # the top: the ground at the edge
+
+
+def test_only_oled_s_pages_fade(fw):
+    assert fades(fw, CLASSIC, 32) == {}

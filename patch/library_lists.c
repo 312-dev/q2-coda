@@ -37,7 +37,8 @@ int shuffle_play(void *all) {
     return size;
 }
 
-static int shuffle_songs(void *ctx, void *event) {
+/* The Library's Shuffle Songs, and Home's row of that name (coverflow.c coverflow_home). */
+int shuffle_songs(void *ctx, void *event) {
     int n;
     void *all = staged(songs_unsorted, (void *)1, &n);
     if (!shuffle_play(all)) toast("Update Local Music first");

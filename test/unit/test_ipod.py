@@ -98,6 +98,9 @@ def test_ipod_home():
     assert root[3][2][2]['visible'] == 'false' and 'visible' not in root[3][1][2]
     rows = root[3][1][3][0][3]
     assert [r[2]['name'] for r in rows] == ['btn_' + r for r in ipod.HOME_ROWS]
+    assert [r[3][0][2].get('text') for r in rows] == [None, 'Library', 'Cover Flow', None, 'Rockbox', 'Shuffle Songs', None,
+                                                     'Search', 'Settings']
+    assert [r[3][1][2]['name'] for r in rows][5:8] == ['img_shuffle_songs', 'img_stream', 'img_home_search']
     assert [r[2]['name'] for r in root[3][2][3][0][3]] == ['btn_playset', 'btn_sysset']
     carousel = root[3][3]
     assert [c[2]['name'] for c in carousel[3]] == ['btn_playing', 'btn_localmusic', 'btn_coverflow', 'btn_folder', 'btn_rockbox',
@@ -872,7 +875,8 @@ def test_classic_light_home_rows_are_32():
     root = home(); ipod.ipod_home(root, g=CLASSIC_LIGHT); n = named(root)
     assert n['list_view_home'][1] == [0, ipod.HOME_TOP, 375, 7 * 32] and n['list_view_home'][2]['item_height'] == '32'
     rows = named(n['list_view_home'])  # the carousel's cards take the same names
-    assert [rows['btn_' + r][1] for r in ipod.HOME_ROWS] == [[0, 32 * i, 375, 32] for i in range(7)]
+    assert [rows['btn_' + r][1] for r in ipod.HOME_ROWS] == [[0, 32 * i, 375, 32] for i in range(9)]
+    assert named(n['list_view_home'])['scroll_view_home'][1] == [0, 0, 375, 7 * 32]  # the rest's box: two rows scroll
     assert n['list_view_homeset'][1] == [0, ipod.HOME_TOP, 375, 2 * 32] and n['list_view_homeset'][2]['item_height'] == '32'
     root = home(); ipod.ipod_home(root); assert named(root)['list_view_home'][2]['item_height'] == '39'
 

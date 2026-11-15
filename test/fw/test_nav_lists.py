@@ -415,6 +415,71 @@ def test_a_list_that_is_not_a_ring_stops_at_its_end(fw, ui):
     assert page.selected == 29 and not ui.due('fx_expire')
 
 
+def gapped(ui, n=10, at=8, gap=12, height=210):
+    """A Page of n rows, a gap above row at (Power's before Restart), its view seven rows high."""
+    page = Page(ui, titles(n), name='about_page', height=height)
+    for row in page.rows[at:]:
+        x, y, w, h = row.box
+        struct.pack_into('<4i', row.block, 0, x, y + gap, w, h)
+    page.view.int(O['VIEW_CONTENT_H'], ROW_H * n + gap)
+    return page
+
+
+@pytest.mark.parametrize('index, end, content', ((3, 4 * ROW_H, 4 * ROW_H + 210), (0, 10 * ROW_H + 12 - 210, 10 * ROW_H + 12)))
+def test_a_list_fit_list_with_a_gap_ends_on_a_whole_row(fw, ui, st, index, end, content):
+    """OLED's whole rows (list_fit): the view's end would cut a row at the top, so it stops on the next row's top
+    and the content grows to allow it. Minimal keeps the end (its lists run on under a margin)."""
+    theme(fw, index)
+    st('geom').value = oled_geom(fw) if index == 3 else 0  # as theme_boot puts the theme's set there
+    page = gapped(ui)
+    to_end(fw, ui, page)
+    assert page.offset == end and page.view.int(O['VIEW_CONTENT_H']) == content
+    y = page.rows[9].box[1] - page.offset
+    assert 0 <= y and y + ROW_H <= 210  # the last row whole
+    key(fw, ui, KEY_PREV, ui.now + SLOW)
+    key(fw, ui, KEY_PREV, ui.now + SLOW)  # Restart, then the row above the gap: still in view
+    assert page.offset == end
+
+
+def oled_geom(fw):
+    """The first geometry set with list_fit: OLED's."""
+    names = host.tools_theme.GEOM_VALS
+    size = fw.sizes['theme_engine__geom_vals'] // 2
+    table = fw.var('theme_engine__geom_vals', C.c_short * size)
+    sets = [table[i:i + len(names)] for i in range(0, size, len(names))]
+    return next(i for i, s in enumerate(sets) if s[names.index('list_fit')])
+
+
+def home_page(ui, fw, st, rows=9, hidden=()):
+    """Home's window under OLED: its main list's scroll view runs on to the window's foot, the rest's seven rows
+    and two more; coverflow.c's home.list is its list."""
+    theme(fw, 3)
+    st('geom').value = oled_geom(fw)
+    win = ui.widget('window', ui.wm, (0, 58, 375, 262), name='home_page')
+    lst = ui.widget('list_view', win, (0, 0, 375, 262))
+    view = scroll_list(ui, lst, titles(rows), (0, 0, 375, 262))
+    for i in hidden:
+        view.children[i].visible = False
+    ui.top = win
+    fw.var('coverflow__home', Home).list = lst.at
+    return view
+
+
+@pytest.mark.parametrize('hidden, end', (((), 2 * ROW_H), ((8,), ROW_H)))
+def test_home_s_list_rests_on_seven_rows_and_scrolls_the_rest(fw, ui, st, hidden, end):
+    """sel_height is the rest's 7 rows, not the box's; the end is the shown rows' foot less them (home.c home_rest),
+    whatever stock's layout keeps for a hidden row."""
+    view = home_page(ui, fw, st, hidden=hidden)
+    fw.fn('navigation__paint_selection', None, C.c_void_p, C.c_void_p)(view.at, C.create_string_buffer(0x100))
+    seen = []
+    for _ in range(9 - len(hidden) - 1):
+        key(fw, ui, KEY_NEXT, ui.now + SLOW)
+        seen.append((view.props.get(SEL), view.int(SCROLL_Y)))
+    assert [o for _, o in seen] == [0] * 6 + [ROW_H, 2 * ROW_H][:len(seen) - 6]
+    assert seen[-1] == (8 - len(hidden), end)
+    assert all(0 <= ROW_H * s - o and ROW_H * (s + 1) - o <= 7 * ROW_H for s, o in seen)  # inside the rest
+
+
 @pytest.mark.parametrize('cls, ring', [(O['CLASS_ALBUMS'], True), (0xff10, False)])
 def test_album_page_wraps_only_as_the_albums_list(fw, ui, cls, ring):
     fw.var('fw_ctx_g_class_type', C.c_int).value = cls

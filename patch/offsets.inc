@@ -321,6 +321,9 @@ static inline int arc_out(int r, int y) {
 #define KB_NEAR 58982
 #define KB_DRIFT 24
 #define HOME_TOP 8 /* Minimal's decorative inset; Modern starts below the status bar. */
+/* Home's main list rests on this many rows (coverflow.c home_overflow): more scroll, and the last
+ * stops where the seventh row's foot is. */
+#define HOME_REST 7
 #define HOME_CHEVRON_SHIFT 15
 #define HOME_FULL_CHEVRON_SHIFT 10
 /* Modern's Home: Full's rows end at HOME_MODERN_ROW, so the chevron's glyph (x 20 to 30 of list_into)
