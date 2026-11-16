@@ -71,11 +71,19 @@ void chevron_muted(void *w, void *canvas, int right, int y) {
  * whose text is wider than its column, once stock has painted it, MARQUEE_FADE_PX columns at the
  * right end while the text goes on past it, and at the left while it is scrolled off its start,
  * each from clear at the inside to the colour behind it at the end: the selection's on the
- * selected row's marquee (marq_label), else the page's paper. A label at rest on stock's ellipsis
- * (stopped, ellipses set) keeps it, so only a scrolling text pays: a fill a column at each end it
- * fades. The column is the one stock clips the text to: inside the label's margin_left and
+ * selected row's marquee (marq_label) and on any text that scrolls inside the selected row (a page
+ * whose labels scroll on their own focus), else the page's paper. A label at rest on stock's
+ * ellipsis (stopped, ellipses set) keeps it, so only a scrolling text pays: a fill a column at each
+ * end it fades. The column is the one stock clips the text to: inside the label's margin_left and
  * margin_right (2 px unless its style says, as a folder row's says past its icon). */
 #define MARQUEE_FADE_PX 12
+/* Whether w is on the selection's bar: inside the selected row (st.sel_accent), within a row's
+ * depth. */
+static int on_bar(void *w) {
+    for (int d = 0; st.sel_accent && w && d < 4; ++d, w = P(w, W_PARENT))
+        if (w == st.sel_accent) return 1;
+    return 0;
+}
 void marquee_fade(void *w, void *canvas) {
     void *lcd = w && canvas ? P(canvas, CANVAS_LCD) : (void *)0;
     if (!lcd || tk_strcmp(widget_get_type(w), "hscroll_label")) return;
@@ -87,7 +95,9 @@ void marquee_fade(void *w, void *canvas) {
         off = I(w, HSCROLL_XOFFSET), over = I(w, HSCROLL_TEXT_W) - (x1 - x0);
     if (over <= 0 || (!loop && B(w, HSCROLL_ELLIPSES) && !I(w, HSCROLL_TIMER))) return;
     unsigned saved = (unsigned)I(lcd, LCD_FILL_COLOR),
-             behind = (w == st.marq_label ? RGBA(scheme()->tones[0]) : ui_ink(RGBA(0))) & 0xffffffu;
+             behind =
+                 (w == st.marq_label || on_bar(w) ? RGBA(scheme()->tones[0]) : ui_ink(RGBA(0))) &
+                 0xffffffu;
     int left = off > 0, right = loop || off < over;
     for (int i = 0; i < MARQUEE_FADE_PX && (left || right); ++i) {
         unsigned a = 255u * (unsigned)(MARQUEE_FADE_PX - i) / MARQUEE_FADE_PX;

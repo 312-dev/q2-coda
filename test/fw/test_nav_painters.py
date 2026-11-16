@@ -899,6 +899,22 @@ def test_the_selected_rows_marquee_fades_into_the_selection_and_light_mode_into_
     assert paper > 0xe00000 and {f[4] & 0xffffff for f in fade.fills} == {rgba(paper) & 0xffffff}
 
 
+def test_a_text_scrolling_on_its_own_inside_the_selected_row_fades_into_the_selection(fw, st, layout):
+    """A label that scrolls by its own focus, not the house marquee (audit2 H1: a page's rows that scroll themselves),
+    fades to the bar's accent when it is inside the selected row, not to the page's black."""
+    fade = Fade(fw, st)
+    row = fade.ui.add('button', None, (0, 50, 375, 32), 'row')
+    fade.label.parent = row
+    struct.pack_into('<Q', fade.label.block, W_PARENT, row.addr)
+    tones = C.c_void_p.from_address(fw.fn('scheme', C.c_void_p)() + layout['tones']).value or 0
+    accent = rgba(C.c_uint.from_address(tones).value) & 0xffffff
+    fade.paint()
+    assert {f[4] & 0xffffff for f in fade.fills} == {0}  # no row selected: the page's black
+    st('sel_accent', C.c_void_p).value = row.addr
+    fade.paint()
+    assert {f[4] & 0xffffff for f in fade.fills} == {accent}
+
+
 def test_other_widgets_get_no_fade(fw, st):
     fade = Fade(fw, st)
     fade.paint()
