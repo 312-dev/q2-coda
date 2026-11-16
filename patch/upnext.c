@@ -40,7 +40,7 @@
 #define UN_PILL_REST RGB_RAISED_2
 #define UN_PILL_INK 0x7fa6f5
 #define UN_PILL_REST_L 0xe5e5ea /* Light Mode's: the tab track's grey, the accent's words */
-#define UN_BARS_MS 125     /* the level bars, about 8 frames a second */
+#define UN_BARS_MS 125          /* the level bars, about 8 frames a second */
 #define UN_POLL_MS 1000
 #define UN_HOLD_MS 550  /* Centre held this long on a queued row lifts it */
 #define UN_FRESH_MS 700 /* a bumped row's accent edge */

@@ -766,12 +766,10 @@ pickers in them) open as a frosted page sheet over the page (the user's C3, 2026
 - **Motion:** the sheet rises from the screen's foot over 260 ms, `cubic_out`, while the page
   behind recedes to 94% and dims and the frost fades in over it; Return lets it fall away over
   180 ms, ease-in, the page coming back as it goes, and no key acts until it has gone. A picker
-  over a sheet shows in its place, and a pick closes at once. Under Reduce Motion each is a 150 ms
-  cross-fade in place. The rise starts from the sheet's first whole paint, which keeps the page
-  (480 KB) until the sheet closes.
-- ponytail: Reduce Motion reads off in `menu_modal.c` `sheet_motion` until the shared motion helper
-  and its setting (`design/motion/MOTION.md`) land; it then calls them. The name ends in an ellipsis
-  where the design's marquee would scroll it.
+  over a sheet shows in its place, and a pick closes at once. Under Reduce Motion each is a
+  cross-fade in place, 150 ms in and 120 ms out ([Overlay motion](#overlay-motion)). The rise starts
+  from the sheet's first whole paint, which keeps the page (480 KB) until the sheet closes.
+- ponytail: the name ends in an ellipsis where the design's marquee would scroll it.
 
 Built by `patch/menu_modal.c` under a set with `modal` (OLED's); Up Next opens in it by
 `modal_sheet`. Now Playing's More and a
@@ -1111,7 +1109,8 @@ interruptible: a turn mid-run starts from where it is.
 - **Confirmation card:** the scrim and the card fade in together over 200 ms `cubic_out`; an answer fades them out
   over 120 ms, linear, and the answer runs once the card has gone. The approved scale from 1.06 is not drawn yet
   (a `ponytail:` in `feedback.c`). Stock's own confirm, which closes itself, appears and goes at once.
-- **Menu sheet** (approved, not built): rises 260 ms `cubic_out` with the scrim to 50%, falls 180 ms ease-in.
+- **Menu sheet, and Up Next in it:** rises 260 ms `cubic_out` while the page behind recedes to 94% and dims and
+  the frost fades in; falls 180 ms ease-in (quadratic), from where a rise left it (`menu_modal.c` `sheet_run`).
 - Under Reduce Motion each fades only: 150 ms in, 120 ms out, nothing moved or scaled.
 
 ### Gestures

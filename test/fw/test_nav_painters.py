@@ -3179,7 +3179,8 @@ def test_about_s_rows_take_the_selection_but_open_nothing(fw, st):
 # The menu sheet (menu_modal.c, docs/oled-design.md#menus): the page receding above it and the frosted material under
 # its rows, drawn straight into the screen's buffer once its first paint is whole.
 class Clock:
-    """time_now_ms, and the timers the sheet's motion adds (menu_modal.c sheet_tick), run by hand."""
+    """time_now_ms, and the timers the sheet's motion adds (menu_modal.c sheet_tick, and ui_kit.c's shared repaint
+    through ovm_t), run by hand."""
     def __init__(self, fw):
         self.now, self.timers = 10_000, []
         fw.mock('time_now_ms', lambda *_: self.now)
@@ -3191,16 +3192,17 @@ class Clock:
         return fw.fn('menu_modal__sheet_tick', C.c_int, C.c_void_p)(None)
 
 
-def sheet(fw, st, rows=10, risen=True):
+def sheet(fw, st, rows=10, risen=True, reduce=False):
     """A sortselect dialog framed as the sheet on OLED's set, with a header, and the screen's buffer behind a canvas:
     the page white above y 160 and blue below. Its first whole paint (the material, the rise from the page) is made at
     the clock's 10 s; risen, the rise is run to its end and the buffer the page again. Returns (ui, win, view, canvas,
-    buf); the clock is fw.sheet_clock."""
+    buf); the clock is fw.sheet_clock. reduce: under Reduce Motion (IPOD REDUCEMOTION)."""
     sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
     st('geom').value, st('settings_read').value = [g.name for g in sets].index('oled'), 1
     fw.mock('window_manager_is_animating', lambda *_: 0)
     ui = Ui(fw)
     theme(fw)
+    st('reduce_motion').value = reduce  # the keys count as read (settings_read): the flag as accent() leaves it
     win = ui.window('sortselect_dialog', kind='dialog')
     lv = ui.add('list_view', win, (0, 44, 375, 210), 'list_view')
     view = ui.add('scroll_view', lv, (0, 0, 375, 210), 'scroll_view')
@@ -3311,7 +3313,7 @@ def test_a_closed_sheet_leaves_nothing_on_the_screen(fw, st):
     assert all(v == 0xff000000 for v in buf) and timers
 
 
-# The sheet's motion (menu_modal.c sheet_motion, docs/oled-design.md#menus): it rises 260 ms (cubic_out) from the
+# The sheet's motion (menu_modal.c sheet_run through ui_kit.h's ovm_t, docs/oled-design.md#menus): it rises 260 ms (cubic_out) from the
 # screen's foot while the page recedes and dims and the frost fades in; Return lets it fall 180 ms (ease-in), keys
 # taken meanwhile, then it closes.
 def list_y(ui, view):
@@ -3328,7 +3330,7 @@ def test_a_menu_sheet_rises_from_the_page(fw, st):
     paint = fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)
     assert list_y(ui, view) == 50 + 280
     paint(win.addr, canvas.addr)
-    assert list(buf) == page and len(clock.timers) == 1
+    assert list(buf) == page and len(clock.timers) == 2  # the sheet's tick and ui_kit.c's shared repaint
     assert clock.at(fw, 130) == 8  # RET_REPEAT
     assert list_y(ui, view) == 50 + 35
     buf[:] = page
@@ -3350,6 +3352,27 @@ def test_return_lets_a_menu_sheet_fall_then_closes_it(fw, st):
     assert not fw.calls('window_close') and fw.fn('modal_closing', C.c_int)() == 1
     assert clock.at(fw, 1000 + 90) == 8 and list_y(ui, view) == 50 + 70
     assert clock.at(fw, 1000 + 180) == 0
+    assert [a[0] for _, a in fw.calls('window_close')] == [win.addr]
+
+
+def test_under_reduce_motion_a_menu_sheet_fades_in_and_out_in_place(fw, st):
+    """ovm_t under Reduce Motion (docs/oled-design.md#overlay-motion): the rows stand in their place throughout; the
+    rise is a 150 ms linear fade, the page above the rows half way back at 75 ms, and the fall a 120 ms one, the
+    window closed at its end."""
+    ui, win, view, canvas, buf = sheet(fw, st, risen=False, reduce=True)
+    page = list(buf)
+    clock = fw.sheet_clock
+    paint = fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)
+    assert list_y(ui, view) == 50
+    paint(win.addr, canvas.addr)
+    assert clock.at(fw, 75) == 8 and list_y(ui, view) == 50
+    buf[:] = page
+    paint(win.addr, canvas.addr)
+    assert all(180 <= c <= 200 for c in rgb(buf, 187, 20))  # white, half way to its dimmed half
+    assert clock.at(fw, 150) == 0 and list_y(ui, view) == 50
+    fw.fn('modal_close', None, C.c_void_p)(win.addr)
+    assert clock.at(fw, 150 + 60) == 8 and list_y(ui, view) == 50 and not fw.calls('window_close')
+    assert clock.at(fw, 150 + 120) == 0
     assert [a[0] for _, a in fw.calls('window_close')] == [win.addr]
 
 

@@ -2,7 +2,7 @@
 
 - **Unreleased (q2-coda)**:
   - Menus (OLED): the hold menus, Now Playing's ⋯ and a playlist's ⋯ now open as a frosted sheet over the page, which shrinks back and dims behind it. The sheet shows the song, album or playlist at the top with its cover, its rows run the full width of the screen and fade at the bottom, and Delete and Remove rows are red.
-  - Menus (OLED): the menu sheet rises from the bottom of the screen as the page behind shrinks back, and falls away when you press Return.
+  - Menus (OLED): the menu sheet rises from the bottom of the screen as the page behind shrinks back, and falls away when you press Return. With Reduce Motion on, it fades in and out instead.
   - Up Next (OLED): Up Next opens in the same sheet as the menus, from the queue button, a swipe up on the cover or the hold menu's View Queue. The playing song is at the top with its cover, moving level bars, artist and album; in Light Mode the **Clear** pill is light grey with blue words.
   - Menus (OLED): Now Playing's ⋯ reads **Get Cover & Lyrics** and **Get Album Lyrics**, no longer cut off.
   - Menus (OLED): in Now Playing's hold menu, Shuffle, Repeat and Group by show just their setting (**Songs**, **All**, **Album**), and Center on Group by switches between Album and Folder without opening a list.

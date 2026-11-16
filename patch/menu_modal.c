@@ -14,8 +14,9 @@
  *
  * The sheet rises from the screen's foot over SH_RISE_MS, cubic_out, while the page behind recedes
  * and dims and the frost fades in; Return lets it fall away over SH_CLOSE_MS, ease-in
- * (modal_close), its keys taken meanwhile (modal_closing). Under Reduce Motion both are an
- * SH_FADE_MS cross-fade in place (sheet_motion). */
+ * (modal_close), its keys taken meanwhile (modal_closing). Both run through ui_kit.h's ovm_t
+ * (docs/oled-design.md#overlay-motion), so under Reduce Motion each is a cross-fade in place,
+ * MO_FADE_MS in and MO_OUT_FADE_MS out (sheet_run). */
 #include "navigation.h"
 
 extern unsigned char now_cover(void *r, const char **file); /* coverflow.c */
@@ -102,35 +103,32 @@ static const unsigned char foot_alpha[SH_H - SH_FOOT] = {
     42,  38,  34,  31,  27,  24,  21,  18,  15,  13,  10,  8,   6,   4,   3,   1,   0,   0
 };
 
-/* The motion (the user's, design/menu-overlay NOTES.md "Up Next"): the sheet's rise, its fall,
- * and their cross-fade under Reduce Motion (design/motion/MOTION.md, "Toast, confirm, sheet"). */
+/* The motion (the user's, design/menu-overlay NOTES.md "Up Next"; design/motion/MOTION.md "Toast,
+ * confirm, sheet"): the sheet's rise and its fall. */
 #define SH_RISE_MS 260
 #define SH_CLOSE_MS 180
-#define SH_FADE_MS 150
 #define SH_FRAME_MS 16
 enum { MO_NONE, MO_WAIT, MO_RISE, MO_UP, MO_FALL };
 static struct {
     int phase;  /* MO_WAIT: opened, its first whole paint (sheet_build) starts the rise */
     int e, off; /* this frame's progress, 0 the page alone to 256 the sheet up; the sheet's drop */
-    unsigned start; /* the motion's start, ms */
+    ovm_t ov;   /* the rise and the fall (ui_kit.c), read once a frame by sheet_tick */
     unsigned timer;
     void *win;      /* falling: the window closed at its end */
     unsigned *page; /* the page under the sheet, whole, as its first whole paint found it */
 } mo __attribute__((section(".scratch")));
 
-/* The one place the sheet's timing and easing are taken: the progress at t ms into the rise
- * (fall 0) or the fall (1), 0 to 256; *done once it is over. A rise is cubic_out over
- * SH_RISE_MS, a fall an ease-in over SH_CLOSE_MS, each a straight SH_FADE_MS cross-fade under
- * Reduce Motion. ponytail: Reduce Motion reads off here until the shared motion helper
- * (design/motion/MOTION.md, components' anim_start and its flag) lands; this then calls it. */
-static int sheet_reduced(void) { return 0; }
-static unsigned isqrt(unsigned v);
-static int sheet_motion(unsigned t, int fall, int *done) {
-    int reduced = sheet_reduced(), ms = reduced ? SH_FADE_MS : fall ? SH_CLOSE_MS : SH_RISE_MS;
-    *done = t >= (unsigned)ms;
-    int p = *done ? 256 : (int)(t * 256 / (unsigned)ms), q = 256 - p;
-    if (reduced) return fall ? q : p;
-    return fall ? 256 - p * p / 256 : 256 - q * q / 256 * q / 256;
+/* The one place the sheet's timing and easing are given: the rise cubic_out over SH_RISE_MS, the
+ * fall ease-in (quadratic) over SH_CLOSE_MS, each from where the sheet is now. Under Reduce Motion
+ * ovm_t takes its own fade times and moves nothing, and the fade is linear. */
+static int sheet_tick(const void *unused);
+static void sheet_run(int fall) {
+    int reduced = motion_reduced();
+    if (fall)
+        ovm_exit(&mo.ov, SH_CLOSE_MS, reduced ? EASE_LINEAR : EASE_QUAD_IN);
+    else
+        ovm_enter(&mo.ov, SH_RISE_MS, reduced ? EASE_LINEAR : EASE_CUBIC_OUT);
+    if (!mo.timer) mo.timer = timer_add(sheet_tick, (void *)0, SH_FRAME_MS);
 }
 
 int modal_set(void) { return geom_val(V_MODAL); }
@@ -159,6 +157,7 @@ static int modal_gone(void *win, void *event) {
         stop_timer(&mo.timer);
         if (mo.page) free(mo.page);
         mo.page = (unsigned *)0, mo.win = (void *)0, mo.phase = MO_NONE, mo.e = 256, mo.off = 0;
+        mo.ov = (ovm_t){ 0 };
     }
     if (!open && fr.fb) {
         for (unsigned i = 0; i < SH_W * SH_H; ++i) fr.fb[i] = 0xff000000u;
@@ -200,7 +199,7 @@ int modal_sel_height(void *view, int h) {
 static int mo_e(void) {
     return mo.phase == MO_WAIT || mo.phase == MO_RISE || mo.phase == MO_FALL ? mo.e : 256;
 }
-static int mo_off(void) { return mo_e() < 256 && !sheet_reduced() ? mo.off : 0; }
+static int mo_off(void) { return mo_e() < 256 && !motion_reduced() ? mo.off : 0; }
 
 /* Modal k's rows off below their place: its list moved, or a dialog of rows alone's rows. */
 static void sheet_shift(int k, int off) {
@@ -224,9 +223,9 @@ static void sheet_shift(int k, int off) {
 /* Each frame of the motion: its progress from the clock, the rows moved with the sheet, the screen
  * painted again; at the rise's end the sheet stands, at the fall's the window closes. */
 static int sheet_tick(const void *unused) {
-    int done = 0, fall = mo.phase == MO_FALL;
+    int fall = mo.phase == MO_FALL, done = !ovm_running(&mo.ov);
     if (mo.phase != MO_RISE && !fall) return mo.timer = 0, 0;
-    mo.e = sheet_motion((unsigned)time_now_ms() - mo.start, fall, &done);
+    mo.e = ovm_level(&mo.ov) * 256 / 1000;
     mo.off = (SH_H - SH_TOP) * (256 - mo.e) / 256;
     if (done && !fall) mo.phase = MO_UP;
     for (int k = 0; k < MODAL_MAX; ++k)
@@ -260,11 +259,8 @@ void modal_close(void *win) {
         if (win) window_close(win);
         return;
     }
-    int e = mo_e(), reduced = sheet_reduced(), ms = reduced ? SH_FADE_MS : SH_CLOSE_MS,
-        p = reduced ? 256 - e : (int)isqrt((unsigned)(256 * (256 - e))); /* the fall's own place */
     mo.phase = MO_FALL, mo.win = win;
-    mo.start = (unsigned)time_now_ms() - (unsigned)(p * ms / 256);
-    if (!mo.timer) mo.timer = timer_add(sheet_tick, (void *)0, SH_FRAME_MS);
+    sheet_run(1);
 }
 
 /* A 12 px space in the rows, never a rule; it is no row (nothing to click), so the wheel steps
@@ -568,8 +564,8 @@ static void sheet_start(const unsigned *fb) {
     mo.page = fr.buf ? calloc(SH_W * SH_H, sizeof *mo.page) : (unsigned *)0;
     if (mo.page) {
         for (unsigned i = 0; i < SH_W * SH_H; ++i) mo.page[i] = fb[i];
-        mo.phase = MO_RISE, mo.e = 0, mo.start = (unsigned)time_now_ms();
-        if (!mo.timer) mo.timer = timer_add(sheet_tick, (void *)0, SH_FRAME_MS);
+        mo.phase = MO_RISE, mo.e = 0, mo.ov = (ovm_t){ 0 };
+        sheet_run(0);
         return;
     }
     mo.phase = MO_UP;
@@ -583,7 +579,7 @@ static void sheet_start(const unsigned *fb) {
  * above the rows' box (modal_after fades the box). */
 static void sheet_frame(unsigned *fb, const int c[4], int e, int off, int rows_top, int light) {
     const unsigned *mat = fr.buf + SH_STRIP * SH_W;
-    if (sheet_reduced()) {
+    if (motion_reduced()) {
         for (int y = c[1]; y < c[3] && y < rows_top; ++y)
             for (int x = c[0]; x < c[2]; ++x)
                 fb[y * SH_W + x] = sheet_mix(mo.page[y * SH_W + x], fb[y * SH_W + x], e);
@@ -633,7 +629,7 @@ void modal_paint(void *w, void *canvas) {
     int e = mo_e(), off = mo_off();
     if (fb && fr.buf && mo.page && (e < 256 || mo.phase == MO_FALL)) {
         int rows_top = modals[i].list ? screen_y(modals[i].view) : SH_TOP;
-        if (!sheet_reduced()) {
+        if (!motion_reduced()) {
             sheet_frame(fb, c, e, off, rows_top, light);
         } else {
             /* the sheet in its place, then faded in from the page above the rows */
@@ -755,7 +751,7 @@ void modal_after(void *w, void *canvas) {
         const unsigned *m = mat + (y - SH_TOP) * SH_W;
         for (int x = c[0]; x < c[2]; ++x) d[x] = sheet_mix(m[x], d[x], a < 0 ? 0 : a);
     }
-    if (sheet_reduced() && mo.page && (mo_e() < 256 || mo.phase == MO_FALL)) /* the cross-fade */
+    if (motion_reduced() && mo.page && (mo_e() < 256 || mo.phase == MO_FALL)) /* the cross-fade */
         for (int y = c[1]; y < c[3]; ++y)
             for (int x = c[0]; x < c[2]; ++x)
                 fb[y * SH_W + x] = sheet_mix(mo.page[y * SH_W + x], fb[y * SH_W + x], mo_e());
