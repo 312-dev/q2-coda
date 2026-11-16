@@ -839,7 +839,8 @@ draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keybo
   heart and More, 22 px state row, 56 px confirmation, 12 px for About's quality badge
   (`waveform-bold`).
 - **Missing art** is one placeholder everywhere stock shows its own (Now Playing, the album grids,
-  Home's art, Cover Flow): a `#2C2C2E` tile with Phosphor's `music-notes-simple` (regular) in Text
+  Home's art, Cover Flow): a `#2C2C2E` tile, its corners rounded and clear (24 px of its 290, so no
+  dark corner shows on a selected row), with Phosphor's `music-notes-simple` (regular) in Text
   Tertiary, a third of its width, centred (`assets/icons/default_album_home.png`, drawn from the
   vendored SVG; `tools/build.py` sizes it into stock's `ART_PLACEHOLDERS`), in place of stock's
   `#787878` disc (the user's, from audit2 I1).
