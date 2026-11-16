@@ -384,7 +384,7 @@ def validate_assets(directory):
         'release/assets/default/raw/styles/'+p for p in AUDIT['styles']} | {
         xx+n for n in SETTINGS_ICONS | QUIET_ICONS | STATUS_ICONS | ART_PLACEHOLDERS} | {'release/assets/default/raw/strings/en_US.bin', FONT, TAG_C, *WEB} | {
         'usr/share/web/cgi-bin/%s.cgi' % n for n in ('create', 'delete', 'list', 'download', 'upload')} | {
-        xx+n for n in STOCK_NAMED_ICONS}
+        xx+n for n in STOCK_NAMED_ICONS} | ({'usr/bin/' + n for n in USB_SCRIPTS} if manifest['dev'] else set())  # adb_wrapper
     master = (ROOT/'assets/icons/default_album_home.png').read_bytes()
     for name, size in ART_PLACEHOLDERS.items():
         old, new = read('stock.squashfs', xx+name), read('rootfs.squashfs', xx+name)
