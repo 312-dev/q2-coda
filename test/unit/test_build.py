@@ -1301,3 +1301,14 @@ def test_adbd_binary_is_thirdpartys_stripped(tmp_path, monkeypatch):
     assert build.adbd_binary(tmp_path) == b'\x7fELF adbd'
     assert build.adbd_record(tmp_path) == dict(version=thirdparty.SOURCES['adbd'][0],
                                                sha256=hashlib.sha256(b'\x7fELF adbd').hexdigest(), bytes=9)
+
+
+def test_a_rootfs_over_72_mib_is_refused_and_one_at_it_fits():
+    """The recovery writes mtd2 with no size check, so the build is the bound: 72 MiB, 24 of mtd2's 600 blocks spare."""
+    assert build.ROOTFS_ROOM == 75_497_472 == 576 * 128 * 1024
+    build.rootfs_fits(build.ROOTFS_ROOM)
+    build.rootfs_fits(50_688_001)  # past stock's own image, which was the limit before
+    with pytest.raises(ValueError, match=r'^Repacked rootfs is 75,497,473 bytes, 1 over the 75,497,472 mtd2 holds$'):
+        build.rootfs_fits(build.ROOTFS_ROOM + 1)
+    with pytest.raises(ValueError, match=r'--new-player adds q2player'):
+        build.rootfs_fits(80 << 20, new_player=True)

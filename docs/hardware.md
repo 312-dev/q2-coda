@@ -73,7 +73,7 @@ As `/proc/mtd` lists it: a second kernel and a smaller second rootfs sit beside 
 | --- | ---------- | -------- | ----------------------------------------------------------- |
 | 0   | `uboot`    | 1 MB     | Bootloader                                                  |
 | 1   | `kernel`   | 6 MB     | Kernel                                                      |
-| 2   | `rootfs`   | 75 MB    | Root filesystem, squashfs, read-only (46.4 MB used)         |
+| 2   | `rootfs`   | 75 MB    | Root filesystem, squashfs, read-only (46.4 MB used); the recovery erases it whole and `nandwrite`s the image with no size check, so builds stop at 72 MiB (`ROOTFS_ROOM`), 24 of its 600 blocks spare for bad ones |
 | 3   | `kernel2`  | 6 MB     | Second kernel                                               |
 | 4   | `rootfs2`  | 12 MB    | Second rootfs                                               |
 | 5   | `userid`   | 128 KB   |                                                             |

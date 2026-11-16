@@ -1392,6 +1392,17 @@ def symbols(p, table=None):
             except ValueError: pass
     return out
 
+# The recovery (mtd4 demo) erases mtd2 and nandwrites the file with no size check; mtd2 is 600 blocks of 128 KB,
+# keep 24 for bad ones (docs/hardware.md#flash-layout). Stock V1.36's own image is 50,688,000 bytes.
+ROOTFS_ROOM = 72 << 20  # 75,497,472 bytes
+
+
+def rootfs_fits(size, new_player=False):
+    """Refuse a repacked rootfs of size bytes that leaves mtd2 less than its bad-block spare."""
+    check(size <= ROOTFS_ROOM, f'Repacked rootfs is {size:,} bytes, {size - ROOTFS_ROOM:,} over the {ROOTFS_ROOM:,} mtd2 holds'
+          + (' (--new-player adds q2player beside hciplayer: make room or build without it)' if new_player else ''))
+
+
 def segments(b):
     phoff = struct.unpack_from('<I', b, 28)[0]
     size, num = struct.unpack_from('<HH', b, 42)
@@ -2727,10 +2738,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(inodes(newsq) == sorted([i for i in inodes(sq) if i not in removed]+added),
           'Repacked rootfs metadata differs from stock')
     blobs['recovery-update/rootfs.squashfs'] = newsq.read_bytes()
-    # Stock image proves this size fits; do not enlarge beyond its padded size.
-    size, room = len(blobs['recovery-update/rootfs.squashfs']), sq.stat().st_size  # 50,688,000 bytes for V1.36
-    check(size <= room, f'Repacked rootfs is {size:,} bytes, {size - room:,} over the {room:,} the stock image holds'
-          + (' (--new-player adds q2player beside hciplayer: make room or build without it)' if new_player else ''))
+    rootfs_fits(len(blobs['recovery-update/rootfs.squashfs']), new_player)
     blobs['firmware_v20.info'] = (f'Shanling Q2\n{version}\n'+''.join(
         hashlib.md5(blobs[n]).hexdigest()+'  '+n+'\n' for n in [
             'recovery-update/xImage','recovery-update/rootfs.squashfs'])).encode()

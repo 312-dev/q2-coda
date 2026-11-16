@@ -161,7 +161,7 @@ To see it: a `--dev` build, `ENGINEDEMO=1` under `[Q2POD]` in `/mnt/data/config.
 - **A frame's hard limit is 2,000,000 instructions** of the payload's own (about 4 ms by the estimate above) for the step and every rect's paint together; 600,000 is what a game is held to, so stock's own painting of the same rects, the flush's turn of them onto the framebuffer and the loop's polls keep the rest of the 16.67 ms.
 - **Heap** is one game's at a time, freed on leaving it. The device has little to spare next to the player; 8 KB is the most any game is given.
 - **Scratch** (131,072 bytes, about 31 KB free): the engine uses 4. A game uses none: its state is the heap's.
-- **The root filesystem** (50,688,000 bytes) is not used by the engine at all.
+- **The root filesystem** (at most 75,497,472 bytes, `ROOTFS_ROOM`) is not used by the engine at all.
 - The older four games are 27 KB of the payload (`games.c.o`). Retiring the Sudoku and Solitaire there once the engine's exist would give room back; that is a change of its own.
 
 ## Games
