@@ -8002,7 +8002,7 @@ m=CoverflowMachine(); m.open(); m.press(100)
 assert m.call(O['KEY_PLAY'],address=syms['on_wm_keylong_fun'],event_type=O['EVT_KEY_LONG'],gap=0)==11
 m.close(); m.advance(0); assert not any(p[0]=='dialog/sortselect_dialog' for p in m.opened); passed()
 
-# Hold Play/Pause on a playlist's cover (navigation.c qm_hold): under OLED's set (the inset modal, which the first
+# Hold Play/Pause on a playlist's cover (navigation.c qm_hold): under OLED's set (the menu sheet, which the first
 # system_bar load writes) the playlist's own menu, Play, Shuffle, Rename and Delete; before it, the list's menu
 # (playlist_hold) with More… and New Playlist (stock's toolbar page edits from its toolbar). The playlist is found in the
 # live list by its cd_num, as New, Rename and Delete read that list again under the covers after they copied it: More…

@@ -323,7 +323,7 @@ static int rate_tap(void *ctx, void *event) {
     return STOP;
 }
 
-/* A modal set's picker (docs/oled-design.md#menus): the inset modal's, a row for each rating, the
+/* A modal set's picker (docs/oled-design.md#menus): the menu sheet's, a row for each rating, the
  * current one checked; a pick keeps its row's rating, as Centre on the hearts does, and Return
  * leaves the rating as it was. */
 static const char *const rate_rows[] = { "Unrated",  "1 Heart",  "2 Hearts",

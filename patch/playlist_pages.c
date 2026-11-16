@@ -4,7 +4,7 @@
  * before an accent label, then the songs, each a title with its artist on the right column in
  * Text Tertiary. Centre on a song plays the list from it, as stock plays a playlist's own list
  * (class 0xff13 with its cd_num, so Now Playing's Delete takes it out of this list, not the
- * library); a hold on a song offers Remove from Playlist (or On-The-Go) in the inset modal.
+ * library); a hold on a song offers Remove from Playlist (or On-The-Go) in the menu sheet.
  *
  * On-The-Go's songs are playlist entries under cd_num ON_THE_GO with no header row, so stock's
  * own add (batch_add_file), read (getMusicByPlayList) and Now Playing's Delete take them as any
@@ -204,11 +204,12 @@ static void pv_remove(int i) {
 int playlist_page_hold(void *top) {
     if (!pv.page || top != pv.page) return 0;
     int at = widget_get_prop_int(pv.view, SEL, -1) - pv.acts;
-    if (at < 0 || at >= pv_size()) return 1;  /* an action row: nothing, its release dropped */
-    static const char *const icons[] = { 0 }; /* the words take the row */
+    if (at < 0 || at >= pv_size()) return 1; /* an action row: nothing, its release dropped */
+    static const char *const icons[] = { "trash" }; /* destructive: red (menu_modal.c) */
     const char *names[] = { pv.dest == ON_THE_GO ? "Remove from On-The-Go"
                                                  : "Remove from Playlist" };
     pv_held = deque_at(pv.songs, (unsigned)at);
+    modal_head(now_tag(pv_held, REC_TITLE), now_tag(pv_held, REC_ARTIST), pv_held);
     modal_actions(names, icons, 1, pv_remove);
     return 1;
 }

@@ -391,14 +391,18 @@ class Ui:
                 return found
         return None
 
+    def items(self, view):
+        """View's rows: its kids but a menu sheet's header space (menu_modal.c MM_HEAD)."""
+        return [k for k in self.kids(view) if self.nodes[k].name != '_mm_head']
+
     def rows(self, view):
-        return [self.label(item) for item in self.kids(view)]
+        return [self.label(item) for item in self.items(view)]
 
     def find(self, w, text):
         """The row of view w whose caption is text."""
         rows = self.rows(w)
         assert text in rows, rows
-        return self.kids(w)[rows.index(text)]
+        return self.items(w)[rows.index(text)]
 
     def press(self, key=KEY_PLAY, at=0x1234567890):
         """Stock's input device status: key held, pressed at at (the Play hold's latch reads it)."""
@@ -1823,8 +1827,7 @@ def test_oled_more_shows_ab_repeat_as_the_themes_switch(fw, ui, st, image, selec
     sw = ui.child(button, 'image', 300, 10, 50, 50)
     ui.nodes[sw].image = image
     fw.fn('modal_more', None, C.c_void_p)(win)
-    inset = THEMES[0]['sel_inset']
-    right = 259 + (inset - 8) - 16  # the row's right column, in the row
+    right = 375 - 28  # the house grid's right column (OLED's right_x), the row the screen's width
     x, _, w, _ = ui.nodes[label].rect()
     assert not ui.nodes[sw].visible and x + w <= right - 34
     assert ui.fn('switch_flipped') in ui.handlers(button, EVT_CLICK)  # stock flips the hidden image: the row repaints
@@ -1833,7 +1836,7 @@ def test_oled_more_shows_ab_repeat_as_the_themes_switch(fw, ui, st, image, selec
     struct.pack_into('<Q', canvas, O['CANVAS_LCD'], C.addressof(lcd))
     fw.mock('canvas_get_vgcanvas', lambda *_: 1)
     paint = fw.fn('modal_row_paint', None, C.c_void_p, C.c_void_p, C.c_void_p, Rect, C.c_int)
-    paint(view, C.addressof(canvas), button, Rect(0, 0, 259 + 2 * (inset - 8), 32), selected)
+    paint(view, C.addressof(canvas), button, Rect(0, 0, 375, 32), selected)
     assert len(fw.calls('vgcanvas_stroke')) == strokes and len(fw.calls('vgcanvas_fill')) == fills
 
 
@@ -1925,19 +1928,21 @@ def test_a_choice_picked_is_played_and_ticked_next_time(hold, recs, ui, fw):
     assert ticked_rows(ui, hold.view()) == ['Repeat All']
 
 
-def test_oled_draws_the_menu_as_the_inset_modal(fw, ui, st, recs, mcl):
-    """A modal set's hold menu (menu_modal.c): no title bar, its rows the panel's (259 px from x 58, 8 px padding, so
-    the rows' boxes reach the selection inset past it), 32 px each from y 66, six in view; the settings read as
-    settings, US English, and the menu opens on its first row."""
+def test_oled_draws_the_menu_as_the_sheet(fw, ui, st, recs, mcl):
+    """A modal set's hold menu (menu_modal.c): no title bar, a sheet whose list runs from y 50 to the screen's foot,
+    the header's 72 px heading its rows, which span the screen 32 px each, so the first is on the house grid at y 122;
+    the settings read as settings, US English, and the menu opens on its first row."""
     use_set(st, 'oled')
     hold = Hold(fw, ui, st, recs, mcl).now_playing([song(recs, i) for i in range(3)])
     hold.hold()
     rows = hold.menu()
-    inset = THEMES[0]['sel_inset']
     lv = ui.lookup(hold.dialog, 'list_view', 1)
-    assert tuple(ui.nodes[lv].rect()) == (58 + 8 - inset, 66, 259 + 2 * (inset - 8), 6 * 32)
+    assert tuple(ui.nodes[lv].rect()) == (0, 50, 375, 270)
     assert not ui.nodes[ui.lookup(hold.dialog, 'view_navbar', 1)].visible
-    assert all(tuple(ui.nodes[item].rect()[2:]) == (259 + 2 * (inset - 8), 32) for item in ui.kids(hold.view()))
+    head = ui.kids(hold.view())[0]
+    assert ui.nodes[head].name == '_mm_head' and tuple(ui.nodes[head].rect()) == (0, 0, 375, 72)
+    assert ui.nodes[ui.items(hold.view())[0]].rect()[1] == 72
+    assert all(tuple(ui.nodes[item].rect()[2:]) == (375, 32) for item in ui.items(hold.view()))
     assert rows[:4] == ['Play Next', 'Play Last', 'View Queue', 'Add to Favorites'] and 'Group by' in rows
     assert ui.prop(hold.view(), '_ringnav_index', -1) == 0
 

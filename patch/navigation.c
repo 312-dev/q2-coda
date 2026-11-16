@@ -990,8 +990,9 @@ static int sel_height(menu_t *m) {
     int y = 0, end = geom_val(V_LIST_END), rest = home_rest(m->w, (int *)0);
     /* Home's main list rests on its rows' height, whatever runs on below (home.c home_rest) */
     if (rest) return rest < m->height ? rest : m->height;
-    /* an inset modal's rows end in its panel, clear of the glass (menu_modal.c) */
-    if (!end || m->kind == 3 || m->kind == 4 || modal_rows_of(m->w)) return m->height;
+    /* a menu sheet's rows end on the list end, the screen's top theirs (menu_modal.c) */
+    if (modal_rows_of(m->w)) return modal_sel_height(m->w, m->height);
+    if (!end || m->kind == 3 || m->kind == 4) return m->height;
     void *wm = window_manager();
     for (void *p = m->w; p && P(p, W_PARENT) != wm; p = P(p, W_PARENT)) y += I(p, W_Y);
     return end - y < m->height ? end - y : m->height;
@@ -1093,7 +1094,9 @@ void forget_rows(void *list) {
  * stock's own clamp (a drag's end, a relayout's) keeps it until a relayout puts the height back. */
 static int fit_top(menu_t *m, int want) {
     int top = view_top(m), best = -1, cut = 0;
-    if (m->kind != 1 || !geom_val(V_LIST_FIT)) return want;
+    /* a menu sheet's rows pass under its top fade, so its last row ends on the list end
+     * (menu_modal.c) */
+    if (m->kind != 1 || !geom_val(V_LIST_FIT) || modal_rows_of(m->w)) return want;
     for (int i = 0; i < m->n; ++i) {
         rect_t r = bounds(m, i);
         int y = r.y + top;
@@ -1751,14 +1754,18 @@ static void paint_offline(void *w, void *canvas) {
     canvas_set_clip_rect(canvas, &old);
 }
 
-/* An open inset modal's rows' symbols and values (menu_modal.c), over its selection bar. */
+/* An open menu sheet's rows' symbols and values (menu_modal.c), over its selection bar. */
 static void paint_modal_rows(void *w, void *canvas) {
-    if (!modal_rows_of(w) || !P(canvas, CANVAS_LCD) || !load_rows(&g_menu, w)) return;
+    rect_t old;
+    if (!modal_rows_of(w) || !P(canvas, CANVAS_LCD) || !load_rows(&g_menu, w) ||
+        !clip_surface(canvas, &g_menu, &old)) /* a row half out of the rows' box: its part in it */
+        return;
     for (int i = 0; i < g_menu.n; ++i) {
         rect_t r = bounds(&g_menu, i);
         if (r.y + r.h > 0 && r.y < I(w, W_H))
             modal_row_paint(w, canvas, g_menu.at[i], r, st.sel_w == w && i == st.sel_row);
     }
+    canvas_set_clip_rect(canvas, &old);
 }
 
 /* Writes v (under 1000) in decimal to s; returns the digits written. */
@@ -2062,13 +2069,13 @@ static void paint_selection(void *w, void *canvas) {
     void *top = window_manager_get_top_window(window_manager());
     int i, shown = !st.touch_mode;
     void *own = window_of(w);
-    int under = own && own != top && modal_win(top); /* the row an inset modal acts on */
+    int under = own && own != top && modal_win(top); /* the row a menu sheet acts on */
     if (own && own != top && (slides(top) || feedback_toast(top) || under)) {
         /* The page under a sliding one, painted into the animator's snapshot, or under OLED's
          * toast, which leaves the page in sight: draw the row it holds. Loading, recall and
          * settling read the top page's state, so none of it runs. A pending untouch is a Return by
          * button, which shows the row of the page behind. Home's carousel shows its selected card,
-         * as below. Under an inset modal the row shows, dimmed with the page: it names what the
+         * as below. Under a menu sheet the row shows, dimmed with the page: it names what the
          * menu acts on. */
         if (!usable() || !load_rows(&g_menu, w) || g_menu.kind == 3) return;
         i = index_of(&g_menu, widget_get_prop_int(w, SEL, -1));
@@ -2108,7 +2115,7 @@ static void paint_selection(void *w, void *canvas) {
     if (!clip_surface(canvas, &g_menu, &old)) return;
     /* A list row gets the full surface width; a grid tile keeps its own rect. */
     int tile = 2 * r.w < I(g_menu.w, W_W);
-    if (!tile && !modal_rows_of(g_menu.w)) { /* an inset modal's rows keep the panel's */
+    if (!tile && !modal_rows_of(g_menu.w)) { /* a menu sheet's rows keep their own box */
         r.x = 0;
         r.w = I(g_menu.w, W_W);
         /* The Library's row is a button over the top BODY of its pitch: the bar takes the whole
@@ -2131,7 +2138,10 @@ static void paint_selection(void *w, void *canvas) {
         bar.x += in, bar.w -= 2 * in + (tile ? 0 : az_bar_in(g_menu.w)); /* az_index.c */
         int surface_clip[4], leaning = !tile && tilt_clip(canvas, surface_clip);
         if (!tile) tilt_bar(w, canvas, &bar, S->tones[0], radius); /* toward the next tick */
-        gradient(canvas, bar, S->tones[0], S->tones[1], S->tones[4], radius);
+        if (modal_is_red(g_menu.at[i])) /* a menu's destructive row (menu_modal.c modal_red) */
+            fill_box(canvas, &bar, RGBA(MODAL_RED), (unsigned)radius);
+        else
+            gradient(canvas, bar, S->tones[0], S->tones[1], S->tones[4], radius);
         if (!tile) tilt_gleam(canvas, &bar, radius);
         if (leaning) canvas_set_clip_rect(canvas, surface_clip); /* the rows' own clip again */
         if (!tile) caption_paint(w, P(g_menu.at[i], W_PARENT), canvas, &bar);
@@ -2153,7 +2163,7 @@ static void paint_selection(void *w, void *canvas) {
         st.marq_id = g_menu.id[i];
         rearm(&st.marq_timer, marq_moved, 0);
     }
-    /* a pop-up button's tile: framed white on any accent. An inset modal's row is no tile
+    /* a pop-up button's tile: framed white on any accent. A menu sheet's row is no tile
      * (menu_modal.c). */
     if (g_menu.kind == 4 && r.w < I(g_menu.w, W_W) && !modal_rows_of(g_menu.w))
         frame_box(canvas, &r, 0xffffffff, SEL_RADIUS);
@@ -2288,9 +2298,8 @@ static void paint_scrollbar(void *canvas, void *bar, int table) {
     if (!a || !lcd || max <= 0) return;
     value = value < 0 ? 0 : value > max ? max : value;
     while (max >> 22) max >>= 1, value >>= 1;
-    int at = track * value / max, len = track * h / max, right = modal_sb_right(list, T->sb_w);
+    int at = track * value / max, len = track * h / max, right = T->sb_right;
     if (len > track - at) len = track - at;
-    if (right < 0) right = T->sb_right; /* an inset modal's: in its panel */
     rect_t t = { I(list, W_W) - right - T->sb_w, T->sb_top - y0, T->sb_w, track },
            thumb = { t.x, t.y + at, t.w, len };
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), L = ipod_light();
@@ -2369,6 +2378,7 @@ int ringnav_paint(void *w, void *canvas) {
     if (w && w == st.np_win && !(NP_VISUALIZER && visualizer_full()))
         np_modes(w, canvas); /* else the page's own */
     coverflow_home_clip(w, canvas, 0);
+    modal_after(w, canvas); /* a menu sheet's header and fades (menu_modal.c) */
     list_fade(w, canvas);
     charge_paint(w, canvas); /* the plug-in screen (charging.c): last, over the page's own paints */
     st.paint_w = w ? P(w, W_PARENT) : (void *)0;
@@ -2382,7 +2392,8 @@ int ringnav_paint(void *w, void *canvas) {
  * so a drag stops there too, its content runs on by the box's rows past the end (LIST_PAD, set
  * again at each paint, as a relayout puts stock's height back; LIST_PADDED the padded height, so a
  * reset shows; LIST_TOP the scroll the paint saw, plus 1, which a reset's clamp gets back). Home
- * has its own (home_fades, home_pad), an inset modal's rows end in its panel. */
+ * has its own (home_fades, home_pad), a menu sheet's rows fade into its material (menu_modal.c
+ * modal_after). */
 #define LIST_PAD "_list_pad"
 #define LIST_PADDED "_list_padded"
 #define LIST_TOP "_list_top"
@@ -5026,7 +5037,7 @@ static void action_row(void *view) {
     widget_move_resize(play, 0, 0, 300, h);
     if (n < 3) return; /* Recently Added and the like have no Sort */
     void *sort = widget_get_child(view, 2);
-    /* the inset modal's set orders Songs from Playback > Library > Sorting (library_settings.c):
+    /* the menu sheet's set orders Songs from Playback > Library > Sorting (library_settings.c):
      * the bars stay, hidden */
     if (modal_set()) widget_set_visible(sort, 0, 0);
     widget_use_style(sort, "default");
@@ -5080,7 +5091,7 @@ void bar_title_sync(void *win) {
     /* a page under the top window that writes its caption would flip the bar with each paint */
     if (feedback_toast(win)) win = feedback_under(win); /* OLED's toast leaves the page in sight */
     if (!st.bar_title || !win || win != feedback_top()) return;
-    /* an inset modal has no title: the bar names the page under it, which a dialog over the
+    /* a menu sheet has no title: the bar names the page under it, which a dialog over the
      * modal may have written over (Delete Playlist's confirm, feedback_confirm) */
     if (modal_win(win) && !(win = feedback_under(win))) return;
     static const unsigned none = 0;
@@ -6814,7 +6825,7 @@ enum {
     QA_MORE,
     QA_NEW_PLAYLIST,
     QA_OTG,  /* Add to On-The-Go (playlist_pages.c) */
-    QA_PLAY, /* the inset modal's playlist: Play, Rename, Delete (playlists.c) */
+    QA_PLAY, /* the menu sheet's playlist: Play, Rename, Delete (playlists.c) */
     QA_RENAME,
     QA_DELETE
 };
@@ -8257,7 +8268,7 @@ static int qm_run(const void *unused) {
         if (cls == 0xf00a)
             g_delete_flag = 1; /* My Fav reloads, as Now Playing's heart (0x53cafc) */
     } else if (r && a == QA_PLAYLIST && modal_set() && st.qm_kind != QM_PLAYING) {
-        playlist_pick_open(r); /* the inset modal's picker (playlists.c) */
+        playlist_pick_open(r); /* the menu sheet's picker (playlists.c) */
     } else if (r && a == QA_PLAY) {
         void *add = qm_collect(r);
         if (add && deque_size(add)) { /* as its own list plays: Delete takes from the playlist */
@@ -8367,7 +8378,7 @@ static const char *qm_choice_name(int kind, int i) {
     return kind == 0 ? shuffle[folder][i] : kind == 1 ? repeat[folder][i] : groups[i];
 }
 
-#define MODAL_PITCH 32 /* the inset modal's rows (menu_modal.c) */
+#define MODAL_PITCH 32 /* the menu sheet's rows (menu_modal.c) */
 
 static int qm_open(const void *unused) {
     st.qm_timer = 0;
@@ -8393,7 +8404,9 @@ static int qm_open(const void *unused) {
     widget_on(dialog, EVT_DESTROY, qm_gone, dialog);
     if (st.qm_choice) {
         int kind = st.qm_choice - 1, count = qm_choices(kind), current = playback_option(kind);
-        qm_title(dialog, kind == 0 ? "Shuffle" : kind == 1 ? "Repeat" : "Group by");
+        const char *setting = kind == 0 ? "Shuffle" : kind == 1 ? "Repeat" : "Group by";
+        qm_title(dialog, setting);
+        if (modal_set()) modal_head(setting, now_tag(r, REC_TITLE), r);
         widget_destroy_children(view);
         int modal = modal_set(), row = modal ? MODAL_PITCH : QM_ROW,
             w = modal ? modal_row_w() : 375;
@@ -8441,7 +8454,7 @@ static int qm_open(const void *unused) {
     if (group_first && st.rate_win) acts[n++] = QA_RATE;
     int at, off; /* a spoken CUE book's saved place, from any of its tracks */
     if (st.qm_kind == QM_SONG && book_place(qm_list(), r, &at, &off)) acts[n++] = QA_RESUME;
-    /* the inset modal's song (OLED's, docs/oled-design.md#playlists): Play Next, Play Last, Add to
+    /* the menu sheet's song (OLED's, docs/oled-design.md#playlists): Play Next, Play Last, Add to
      * On-The-Go (while it is on), Add to Playlist…, Favorite, then the Go to rows; its playlist:
      * Play, Shuffle, Rename and, after a gap, Delete */
     int inset = modal_set(), list = inset && st.qm_kind == QM_PLAYLIST,
@@ -8506,7 +8519,7 @@ static int qm_open(const void *unused) {
                                         "Play",
                                         "Rename",
                                         "Delete" };
-    /* the inset modal's symbols (tools/art.py MENU_ICONS), by row */
+    /* the menu sheet's symbols (tools/art.py MENU_ICONS), by row */
     static const char *const icons[] = { "arrow-bend-down-right",
                                          "queue",
                                          "shuffle",
@@ -8532,7 +8545,7 @@ static int qm_open(const void *unused) {
                                          "pencil-simple",
                                          "trash" };
     char rated[32];
-    /* stock sortselect row styles; the inset modal's rows */
+    /* stock sortselect row styles; the menu sheet's rows */
     int modal = modal_set(), pitch = modal ? MODAL_PITCH : QM_ROW,
         width = modal ? modal_row_w() : 375;
     for (int i = 0; i < n; ++i) {
@@ -8554,7 +8567,7 @@ static int qm_open(const void *unused) {
                                  ? (playback_option(2) ? "Group by: Folder" : "Group by: Album")
                              : acts[i] == QA_NEXT_GROUP && playback_option(2) ? "Next Folder"
                              : acts[i] == QA_PREV_GROUP && playback_option(2) ? "Previous Folder"
-                             /* the inset modal's set writes US English (OLED's) */
+                             /* the menu sheet's set writes US English (OLED's) */
                              : acts[i] == QA_FAV && own      ? "Favorite"
                              : acts[i] == QA_PLAYLIST && own ? "Add to Playlist\xe2\x80\xa6"
                              : acts[i] == QA_FAV && modal    ? "Add to Favorites"
@@ -8566,11 +8579,23 @@ static int qm_open(const void *unused) {
             if (acts[i] == QA_DELETE) modal_gap(view); /* destructive, last after a gap */
             widget_restack(item, widget_count_children(view) - 1);
             modal_row(item, label, icons[acts[i] - 1], value, setting ? MM_SETTING : MM_ACTION);
+            if (acts[i] == QA_DELETE) modal_red(item);
         }
         widget_on(item, EVT_CLICK, qm_pick, (void *)(long)acts[i]);
     }
     widget_set_prop_int(view, "virtual_h", n * pitch);
-    if (modal) modal_frame(dialog, widget_lookup(dialog, "list_view", 1));
+    if (modal) { /* the sheet's header: the item, what it is, its cover */
+        char sub[96] = "";
+        const char *artist = song || aid ? now_tag(r, REC_ARTIST) : 0;
+        if (song && st.qm_kind != QM_PLAYING && artist && *artist && album && *album)
+            tk_snprintf(sub, sizeof sub, "%s \xc2\xb7 %s", artist, album);
+        else if (artist)
+            tk_snprintf(sub, sizeof sub, "%s", artist);
+        else if (st.qm_kind == QM_PLAYLIST)
+            tk_snprintf(sub, sizeof sub, "Playlist");
+        modal_head(title ? title : "", sub, song || aid ? r : (void *)0);
+        modal_frame(dialog, widget_lookup(dialog, "list_view", 1));
+    }
     st.qm_dialog = dialog;
     if (modal) ringnav_select(view, 0, n); /* the first action */
     return 0;

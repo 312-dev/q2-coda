@@ -5164,7 +5164,7 @@ def test_a_card_apps_first_song_waits_while_a_game_has_the_sound(fw, audio, time
     assert s.state == S_WAIT and len(fw.calls('timer_add')) == timers and s.timer == (5 if timers else 0)
 
 
-# An artist's page (addon.c artist_view, artist_page.c) under the inset modal's set.
+# An artist's page (addon.c artist_view, artist_page.c) under the menu sheet's set.
 def artist_rows(sync=b'Add to Sync', albums=((b'Settle', b'2013 \xc2\xb7 On Q2', b'al1'), (b'Alchemy', b'2023', b'al4'),
                                               (b'Tondo', b'', b'al6'), (b'Energy', b'2020', b'al3')), radio=True):
     rows = [(b'action', b'toggle', sync, b'', b'artist:ar1', b''), (b'action', b'play', b'Play', b'', b'artist:ar1 0', b''),
@@ -5182,7 +5182,7 @@ def nav_st(fw, scratch):
 
 
 def oled_page(fw, nav_st):
-    """A Page under OLED's set (the inset modal's): its list view has a list box above it, as a list_fit set fits
+    """A Page under OLED's set (the menu sheet's): its list view has a list box above it, as a list_fit set fits
     page_list's box to whole rows."""
     from test_nav_hold import use_set
     p = Page(fw)

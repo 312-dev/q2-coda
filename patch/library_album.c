@@ -1,4 +1,4 @@
-/* A Library album's page under a set with the inset modal (OLED's; docs/oled-design.md#album-page
+/* A Library album's page under a set with the menu sheet (OLED's; docs/oled-design.md#album-page
  * and docs/internals.md#library-album-page): stock's two album pages, albuminfo_page (Library >
  * Albums, Search's albums) and playerjumpinfo_page (Now Playing's album and art taps, Look up
  * Album, Go to Album), keep their window, their list of tracks (song_rows.c draws them: number,
@@ -151,7 +151,7 @@ static int lb_front(void *win, void *event) {
     return 0;
 }
 
-/* navigation.c ringnav_ui_load, as a window's UI loads: an album page under the inset modal's set
+/* navigation.c ringnav_ui_load, as a window's UI loads: an album page under the menu sheet's set
  * is dressed. One is drawn at a time, as artist_page.c keeps one header: a second album page
  * opened over the first takes it, and the first takes it back as it comes to the top again
  * (lb_front). */

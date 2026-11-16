@@ -113,7 +113,7 @@ class Geometry:
     split_art_up: int = 0
     split_inset: int = 0
     # 1: Now Playing's More and a playlist's More open as dialogs over the page under them (MODAL_PAGES, modal_page), which
-    # the payload draws as the inset modal (menu_modal.c), as it does the hold menus; 0: full pages, the hold menus stock's
+    # the payload draws as the menu sheet (menu_modal.c), as it does the hold menus; 0: full pages, the hold menus stock's
     modal: int = 0
 
 

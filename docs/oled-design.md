@@ -634,27 +634,44 @@ Settings, and a payload list's other messages (Internet Radio's "Loading…", Ba
 
 ### Menus
 
-Actions on the highlighted item (the hold menus, Now Playing's More and a playlist's More) open as
-an inset modal over the page, which stays on screen dimmed half way to black; nothing is blurred.
+Actions on the highlighted item (the hold menus, Now Playing's More, a playlist's More and the
+pickers in them) open as a frosted page sheet over the page (the user's C3, 2026-11-16,
+`design/menu-overlay` `mock_menu_final.py`).
 
-- **Panel:** opaque `#1C1C1E`, 259 px wide from x 58, top at y 58, 16 px corners, 8 px padding, no
-  title (the row behind says which item). Rows are 32 px, at most six in view, then they scroll
-  inside the panel; the wheel's scroll indicator stands in the panel's right padding, never past its edge.
-- **Rows:** Inter Regular 20 at the panel's 16 px inset; an action's Phosphor symbol (regular,
-  19 px) at the right in Text Secondary, white on the selection. The selection is the list's bar, 8
-  px in from the panel with 8 px ends.
-- **A setting** (Speed, Shuffle, Repeat, Group by) has its symbol before the label, the
-  label 26 px further in, and its value alone at the right in Text Secondary; Centre opens a picker
-  in the same panel, the current choice with the accent's check before its label.
-- **Rating** (Now Playing's Centre cycle, a menu's Rate) is a picker in the same panel: Unrated, 1 Heart
+- **The page behind** recedes: drawn at 94% of its size about the screen's centre and dimmed half
+  way to black (Light Mode: 35%). It shows above the sheet, status row included.
+- **Sheet:** from y 40 to the screen's foot, edge to edge, its top corners 40 px, a 36 x 5 grab bar
+  at y 46 (`#5A5A5E`; Light Mode `#A1A1A6`). Its material is the receding page blurred (about a
+  20 px gaussian), its colour raised 1.6 times, 28% of its brightness kept under a 6% white tint
+  (Light Mode: white at 75% over it), with a grain of +-3 levels. It is made once, when the sheet
+  first paints whole, never per frame.
+- **Header:** the item's cover (52 px, 6 px corners, at the text column from y 56; a `#2C2C2E` tile
+  when it has none), its name in Inter Medium 20 at x 88 and a line under it in 15, Text Secondary:
+  a song's artist and album (Now Playing's: the artist), an album's artist, "Playlist". A picker
+  over a sheet keeps that sheet's header; Shuffle's, Repeat's and Group by's choices are headed by
+  the setting over the song. A menu with no item (a picker opened alone) has no header and its rows
+  start where a page's do. The header scrolls away with the rows.
+- **Rows:** on the house list grid, the screen's width: 32 px, the first at y 122, Inter Regular 20
+  at x 24, an action's Phosphor symbol (regular, 19 px) on the right column in Text Secondary,
+  white on the selection, which is the list's bar 16 px in from each side with 8 px ends. Past the
+  list end the rows fade into the sheet, alpha 1 at y 266 to nothing at the screen's foot; once
+  scrolled, they fade under y 50 for 14 px. The lit row is never faded, and the wheel's last row
+  ends on y 282.
+- **A setting** (Speed, Shuffle, Repeat, Group by) has its symbol before the label, the label 26 px
+  further in, and its value alone at the right in Text Secondary; Centre opens a picker in the
+  sheet, the current choice with the accent's check before its label.
+- **Rating** (Now Playing's Centre cycle, a menu's Rate) is a picker in a sheet: Unrated, 1 Heart
   to 5 Hearts, the current one checked; Centre keeps a row's rating and closes, Return closes.
-- **Gaps:** a destructive row (Delete Song) comes last, 12 px below the actions, and asks before it
-  acts. Space, never a rule. A panel whose rows are more than six has no gaps, so it scrolls, and
-  ends, on whole rows (the user's, from audit2 E1: a gap cut the end of Now Playing's More); its
-  settings tell themselves apart by the symbol before the label. A list's hold menu has no Sorting
-  row: sort orders are Settings > Library > Sorting's.
+- **Destructive rows** (Delete Song, Delete, Delete Playlist, Remove from Playlist): red `#FF3B30`
+  at rest, white on a red bar when lit, as the confirm card's. Such a row comes last, 12 px below
+  the actions, and asks before it acts. Space, never a rule. A sheet whose rows are more than six
+  has no gaps, so it scrolls, and ends, on whole rows (the user's, from audit2 E1: a gap cut the end
+  of Now Playing's More); its settings tell themselves apart by the symbol before the label. A
+  list's hold menu has no Sorting row: sort orders are Settings > Library > Sorting's.
 - The menu opens on its first action, lit; the wheel moves, Centre picks, Return closes it back to
   the row it came from.
+- ponytail: the sheet appears at once; the design's rise from the foot (260 ms `cubic_out`, out
+  180 ms) is not built. The name ends in an ellipsis where the design's marquee would scroll it.
 
 Built by `patch/menu_modal.c` under a set with `modal` (OLED's). Now Playing's More and a
 playlist's More are stock pages, which such a set loads as dialogs (`tools/ipod.py` `modal_page`).
@@ -697,7 +714,7 @@ the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where
 - **Similar Artists** (titled so): 40 px rows from y 58, a 32 px `#2C2C2E` disc (`#3A3A3C` on the
   selection) at the text column with the name's first letter in Inter Medium 15, white, the name
   in Inter Regular 20 at x 66, and the chevron. Centre opens that artist's page.
-- **Hold menu:** Play/Pause held on the page opens the inset modal of its sync rows, Add to Sync
+- **Hold menu:** Play/Pause held on the page opens the menu sheet of its sync rows, Add to Sync
   (or Remove from Sync), Quality and Sync Now, each with its symbol. Play is gone: Shuffle plays
   the artist.
 - **A Library artist** (card songs and, with Local + Server, server-library songs; from Library >
@@ -1042,12 +1059,12 @@ pattern.
 | Playlists                           | [Playlists](#playlists)     | On-The-Go first; 44 px rows with a 36 px picture or tile                                                   |
 | A playlist's songs, On-The-Go       | [Playlists](#playlists)     | Action rows, then the songs with the artist on the right                                                   |
 | Add Songs                           | [Add Songs](#add-songs)     | The chooser, then artists, albums and songs with marks                                                     |
-| Hold menu, More                     | [Menus](#menus)             | The inset modal over the page                                                                              |
+| Hold menu, More                     | [Menus](#menus)             | The menu sheet over the page                                                                               |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
 | About                               | Key/value table             | The wheel walks the rows and nothing opens; values in Text Secondary, a cut-off one scrolling when selected |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
 | Storage                             | Storage bar                 | [Progress and sliders](#progress-and-sliders): the bar, its legend rows (Downloads and Stream Cache open pages) and two footers |
-| Storage > Downloads                 | Key/value rows              | Limit (its picker the inset modal's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centred on x 33, its name at x 52, size and chevron; two footers |
+| Storage > Downloads                 | Key/value rows              | Limit (its picker the menu sheet's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centred on x 33, its name at x 52, size and chevron; two footers |
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             | Its [tabs](#tabs), then rows: the switch, Presets, Reset                                                   |
 | Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right                      |
@@ -1104,7 +1121,7 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   artist and album in Inter (`playing.artist.font`), shuffle and repeat, the heart and More as the theme's
   own glyphs (`playing.modes.icons`), the marquee fades (`list.marquee.fade`), and Track Time (`NPTIME`), whose
   tap on the right-hand time shows the length or the time left.
-- Menus as the inset modal over the page ([Menus](#menus)): the set's `modal`, `patch/menu_modal.c`, the
+- Menus as the menu sheet over the page ([Menus](#menus)): the set's `modal`, `patch/menu_modal.c`, the
   Phosphor symbols as the theme's own art.
 - Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_inset` (the art from
   x 196 and the top edge to the edges, its top 58 rows painted by the bar with the status row's clock, glyphs
