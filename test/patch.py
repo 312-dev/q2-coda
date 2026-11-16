@@ -13806,7 +13806,7 @@ np=m.top; info,msg=m.nodes[np]['children']; requests=len(m.requests)
 m.advance(15250)
 assert texts(msg)==["Playback didn't start",'Go back and try again'] and len(m.requests)==requests
 m.state('playing',track='late'); m.poll(); m.advance(250); assert m.nodes[info]['visible']
-m.destroy(np); m.top=m.page; m.back(); m.row(8); m.answer(*ME); m.row(1); m.row(1); m.answer(*OK,[])
+m.destroy(np); m.top=m.page; m.back(); m.row(8); m.answer(*ME); m.row(1); card(m,'signout_answer',1); m.answer(*OK,[])  # Sign Out's card
 m.call(address=payload_syms['spot_np'],args=(0,0,0,0),gap=0,count=5_000_000)
 info,msg=m.nodes[m.top]['children']; assert texts(msg)==['Open Spotify on your phone','and choose Q2']
 passed()
