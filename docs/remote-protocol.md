@@ -2,7 +2,7 @@
 
 coda-rc lets a phone app (the q2-auto-remote Android Auto app) show and control what a Q2 plays, while the Q2 itself plays into the car over Bluetooth or AUX. The phone browses the Q2's library, starts songs and lists, sees Now Playing with its cover and position, and sends transport commands. It never carries audio.
 
-It replaces nothing: Shanling's SyncLink stays as stock has it. coda-rc exists because SyncLink has no authentication at all (any host that reaches TCP 1751 is "logged in" and can read the Wi-Fi password) and because its Bluetooth Classic mode diverts the AVRCP link the car depends on; the research is in `q2-emu/design/remote-protocol-research.md`.
+It replaces nothing: Shanling's SyncLink is still in demo, kept off ([internals](internals.md#synclink)). coda-rc exists because SyncLink has no authentication at all (any host that reaches TCP 1751 is "logged in" and can read the Wi-Fi password) and because its Bluetooth Classic mode diverts the AVRCP link the car depends on; the research is in `q2-emu/design/remote-protocol-research.md`.
 
 The message set is [`remote/coda-rc.proto`](../remote/coda-rc.proto). This page is everything else: the frame, the transports, pairing and authentication, versioning and errors. The daemon that serves it is `patch/coda_rc*.c` ([internals: Car remote](internals.md#car-remote)); a reference client is `tools/coda_rc_client.py`.
 

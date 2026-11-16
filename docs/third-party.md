@@ -108,7 +108,7 @@ Which of the unreplaced code someone else can reach depends on what is listening
 | Wi-Fi                    | Clients only: wpa_supplicant 2.12 (rebuilt), busybox `udhcpc`, the kernel's network stack and the vendor Wi-Fi driver, to the access point and anyone on the same network |
 | Wi-Fi File Transfer page | thttpd 2.29 on :8888, as www-data, while the page is open, with q2cgi behind a PIN ([internals](internals.md#wi-fi-transfer-root))                                        |
 | Bluetooth                | bluetoothd (BlueZ 5.66) and the kernel's L2CAP, to anyone in radio range: connectable while on, discoverable for 180 s ([building](building.md#what-the-rootfs-drops))    |
-| SyncLink                 | TCP 1751, a UDP multicast responder, RFCOMM and a BLE GATT server, all in demo (assessed separately)                                                                      |
+| SyncLink                 | TCP 1751, a UDP multicast responder, RFCOMM and a BLE GATT server, all in demo; kept off, with no Settings row to turn it on ([internals](internals.md#synclink))         |
 | DLNA, AirPlay            | Shanling's UPnP renderer (`libdmr.so`) and `shairport`, on the network                                                                                                    |
 | Spotify (card app)       | librespot's Connect discovery, once its row is pressed                                                                                                                    |
 
@@ -118,7 +118,7 @@ What stays reachable and can't be fixed in place: the kernel's Bluetooth and Wi-
 
 Considered and not done:
 
-- **LE off** (`ControllerMode = bredr` in `/etc/bluetooth/main.conf`): removes the LE radio path, and so `CVE-2022-42896` and bluetoothd's GATT, at the cost of SyncLink's BLE transport, which is being assessed separately. A one-line `BT_MAIN` change once SyncLink's future is settled; nothing else on the Q2 uses LE (A2DP, AVRCP and the Bluetooth receiver are BR/EDR).
+- **LE off** (`ControllerMode = bredr` in `/etc/bluetooth/main.conf`): removes the LE radio path, and so `CVE-2022-42896` and bluetoothd's GATT, at the cost of Car Remote's link, which is LE (`patch/coda_rc_ble.c`, [remote-protocol](remote-protocol.md#bluetooth-le-primary)), and SyncLink's BLE transport, which is kept off. A one-line `BT_MAIN` change, not made while Car Remote needs LE; A2DP, AVRCP and the Bluetooth receiver are BR/EDR.
 - **sysctls** (`kernel.kptr_restrict`, `kernel.dmesg_restrict`, `user.max_user_namespaces=0`; the kernel has all three, and no BPF or userfaultfd): they only slow a local unprivileged attacker, nearly every process is root anyway, and Dirty Pipe needs no namespace or kernel address. Not worth a boot-script change on their own.
 - **bluetoothd's other plugins** (`--noplugin=wiimote,scanparam,deviceinfo,battery`): each reads a connected device's records; dropping them needs a wrapper in front of demo's `bluetoothd &` that keeps the process name `killall` matches, for little less code reachable.
 
