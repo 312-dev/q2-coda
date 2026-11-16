@@ -1,19 +1,19 @@
 /* Audited top windows: the name is the navigation allowlist, the class decides whether and how
- * position memory restores, RING marks a row list that carries over at the ends, and DRILL (iPod)
- * one whose rows open another list but draw no stock chevron (list_into). BUTTONS (iPod) marks a
- * dialog or page with no list: its own buttons are the rows. CHOICE marks a picker, which opens on
- * its checked option.
+ * position memory restores, and DRILL (iPod) marks one whose rows open another list but draw no
+ * stock chevron (list_into). BUTTONS (iPod) marks a dialog or page with no list: its own buttons
+ * are the rows. CHOICE marks a picker, which opens on its checked option. Every list ends at its
+ * ends (navigation.c ringnav): none wraps round.
  * The builder rejects any name that is not a window name in the stock rootfs. CTX_DYNAMIC pages
  * never import another page's row; CTX_FIXED menus restore by window name alone; CTX_FOLDER and
  * CTX_LOCAL add a content fingerprint. */
 { "audiosetting_page", CTX_FIXED, 0 },
 { "netdiskdownload_page", CTX_DYNAMIC, 0 },
 { "netdiskfolder_page", CTX_DYNAMIC, 0 },
-{ "sortselect_dialog", CTX_DYNAMIC, CHOICE | RING }, /* also the hold menu */
-{ "folder_page", CTX_FOLDER, RING },
+{ "sortselect_dialog", CTX_DYNAMIC, CHOICE }, /* also the hold menu */
+{ "folder_page", CTX_FOLDER, 0 },
 { "home_page", CTX_DYNAMIC, DRILL },
 { "coverflow_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/coverflow.c) */
-{ "games_page", CTX_DYNAMIC, RING }, /* runtime window (patch/games.c) */
+{ "games_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/games.c) */
 { "searchstrip_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/search_strip.c) */
 { "mostplayed_page", CTX_FIXED, 0 }, /* runtime window (patch/library_lists.c); fixed: the hold menu */
 { "shuffle_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/library_lists.c) */
@@ -46,20 +46,20 @@
 { "swupdate_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/sw_update.c) */
 { "swconfirm_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/sw_update.c) */
 { "album_page", CTX_LOCAL, 0 },
-{ "albuminfo_page", CTX_LOCAL, RING },
-{ "allmusic_page", CTX_LOCAL, RING },
-{ "artistinfo_page", CTX_LOCAL, RING },
-{ "localclass_page", CTX_LOCAL, RING },
-{ "playlist_page", CTX_LOCAL, RING | DRILL },
-{ "localmusic_page", CTX_FIXED, RING },
+{ "albuminfo_page", CTX_LOCAL, 0 },
+{ "allmusic_page", CTX_LOCAL, 0 },
+{ "artistinfo_page", CTX_LOCAL, 0 },
+{ "localclass_page", CTX_LOCAL, 0 },
+{ "playlist_page", CTX_LOCAL, DRILL },
+{ "localmusic_page", CTX_FIXED, 0 },
 { "playerjumpinfo_page", CTX_DYNAMIC, 0 },
-{ "playermore_page", CTX_DYNAMIC, RING },
+{ "playermore_page", CTX_DYNAMIC, 0 },
 { "playerqueue_page", CTX_DYNAMIC, 0 },
 { "dsdoutput_page", CTX_FIXED, CHOICE },
 { "filter_page", CTX_FIXED, CHOICE },
 { "memplay_page", CTX_FIXED, CHOICE },
 { "playmode_page", CTX_FIXED, CHOICE },
-{ "playset_page", CTX_FIXED, RING },
+{ "playset_page", CTX_FIXED, 0 },
 { "equalizer_page", CTX_DYNAMIC, 0 }, /* PEQ list editor */
 { "replaygain_page", CTX_FIXED, CHOICE },
 { "usbvol_page", CTX_FIXED, CHOICE },
@@ -81,7 +81,7 @@
 { "reset_page", CTX_FIXED, 0 },
 { "standby_page", CTX_FIXED, CHOICE },
 { "synclink_page", CTX_FIXED, 0 },
-{ "sysset_page", CTX_FIXED, RING },
+{ "sysset_page", CTX_FIXED, 0 },
 { "wifi_page", CTX_DYNAMIC, 0 },
 { "wifiset_page", CTX_DYNAMIC, 0 },
 { "tidal_add_playlist_page", CTX_DYNAMIC, 0 },

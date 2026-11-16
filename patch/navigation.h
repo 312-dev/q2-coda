@@ -88,10 +88,6 @@ typedef struct {
     position_t pos[POS_MEM]; /* most recently selected first; keyed by context and scope */
     void *reveal_surface;    /* surface of the interrupted recall glide, 0 when none */
     int reveal_id;           /* logical row that glide was bringing into view */
-    /* Bump repaint and wrap arm; the widget token rejects recycled surfaces. */
-    void *fx_surface;
-    int fx_token, bump_dir, edge_dir, edge_id;
-    unsigned fx_timer, edge_time;
     /* Resume: the saved places, file seconds by path hash, most recent first; the track polled
      * (rs_key, listen_key's, 0 none) and whether it is long, its last seconds, the seconds last
      * saved and how many polls they stood still; rs_pending is the place to restore once it plays,
@@ -498,6 +494,7 @@ void tilt_poll(void);
 void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius);
 void tilt_gleam(void *canvas, const rect_t *bar, int radius);
 int tilt_clip(void *canvas, int *old);
+void tilt_end(void *w, int dir);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
 void marquee_fade(void *w, void *canvas);

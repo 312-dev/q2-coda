@@ -102,7 +102,6 @@ typedef struct {
     unsigned char reopen_top, shuffle_row, home_lists_full;
     motion_t motion[MOTION_N];
     unsigned short recall_ms; /* a remembered row's glide; 0: shown at once */
-    unsigned char bump_px;    /* the wheel's bump at a list's end */
     unsigned char chevron_home, set_text, icons_mono, icons_badge_muted, icons_addon_mono,
         art_final, np_album_op, np_state_op;     /* flags 0/1; *_op 0/255 */
     unsigned char font[ROLE_N], font_px[ROLE_N]; /* FONT_* (stock.h); px 0: the style's size */

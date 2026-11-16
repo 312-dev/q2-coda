@@ -8,10 +8,11 @@
  * springs back over TILT_SPRING_MS. The mock-up's tilt of 1 degree is under a pixel on a 32 px
  * row, so it is not drawn. Only the bar's own box is painted again (tilt.box): tilt_poll, from
  * each UI loop pass, invalidates it in its window while the bar moves and that window is on top,
- * and tilt_clip lets the bar paint all of that box, past its list's edges.
+ * and tilt_clip lets the bar paint all of that box, past its list's edges. At a list's end the
+ * lean holds full while the finger turns on (tilt_end, docs/internals.md#list-ends).
  * ponytail: a touch drag scrolls the list with the bar hidden, as every list does under touch
- * (navigation.c hide_outline), so only the wheel tilts it; a drag that stepped rows would be what
- * lifts that. */
+ * (navigation.c hide_outline), so only the wheel tilts it, at an end too, where a drag just stops;
+ * a drag that stepped rows would be what lifts that. */
 #include "navigation.h"
 #include "playback.h"
 
@@ -30,11 +31,25 @@ static struct {
     int p;          /* the lean shown, 256ths of a tick, + toward the next row */
     int from;       /* a spring's start */
     unsigned at;    /* ... and its time, time_now_ms; 0 with none */
+    void *end_w;    /* the list whose end a tick met with this finger down (tilt_end), */
+    int end;        /* ... and which: +1 its last row, -1 its first; 0 none */
 } tilt __attribute__((section(".scratch")));
 
-/* The lean to draw now: the wheel's while a finger holds it, else a spring back to 0. */
+/* A wheel tick that met an end of w's list, toward dir (+1 the last row): the selection stays, and
+ * the lean holds full against that end while the finger turns on that way (tilt_now). */
+void tilt_end(void *w, int dir) {
+    tilt.end_w = w;
+    tilt.end = dir;
+}
+
+/* The lean to draw now: the wheel's while a finger holds it, else a spring back to 0. At an end
+ * (tilt_end), turning on that way holds it full: each tick there moves nothing, so the leftover
+ * travel would drop it to nothing and build it again. Turning back leaves the end. */
 static int tilt_now(void) {
     int part = wheel_part();
+    if (!wheel_held || wheel_raw || tilt.end_w != tilt.w) tilt.end = 0;
+    if (tilt.end && part * tilt.end >= 0) return tilt.end * 256;
+    tilt.end = 0;
     if (part || wheel_held) return part;
     if (!tilt.at) return 0;
     unsigned t = (unsigned)time_now_ms() - tilt.at;
@@ -78,7 +93,7 @@ static int ease(int a) { return 256 - (256 - a) * (256 - a) / 256; }
 /* Before the bar paints (navigation.c paint_selection): bar moved and grown by the lean, and the
  * shadow under it. w's bar is the one tilt_poll watches from now. */
 void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius) {
-    if (w != tilt.w) tilt.w = w, tilt.p = 0, tilt.at = 0;
+    if (w != tilt.w) tilt.w = w, tilt.p = 0, tilt.at = 0, tilt.end = 0;
     tilt.win = window_of(w);
     int x = 0, y = 0; /* w's place in its window */
     for (void *q = w; q && q != tilt.win; q = P(q, W_PARENT)) x += I(q, W_X), y += I(q, W_Y);

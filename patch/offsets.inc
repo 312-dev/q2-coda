@@ -485,12 +485,8 @@ static inline int arc_out(int r, int y) {
 #define RATE_HOLD_MS 500
 /* Long Songs (docs/internals.md#long-songs): songs longer than this. */
 #define LONG_SONG_S 600
-/* End bump and wrap, audited row lists only (see ring_list in patch/navigation.c). A detent past an
- * end nudges the outline; further detents stop there while the wheel keeps turning, and the first
- * same-direction detent after a pause of EDGE_PAUSE_MS moves to the other end of the same list. */
+/* Following lyrics' nudge against the wheel (lyric_poll), in px. */
 #define BUMP_PX 6
-#define BUMP_MS 120
-#define EDGE_PAUSE_MS 300 /* well above WHEEL_RUN_MS, so a spin never counts as a pause */
 /* Following lyrics resist the wheel as a list's end does (lyric_poll): travel short of
  * LYRIC_PUSH_DETENTS within LYRIC_PUSH_MS of the last only nudges them BUMP_PX.
  * ponytail: fixed feel, tune these two if a stray touch still takes over or a deliberate one

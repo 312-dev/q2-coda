@@ -503,6 +503,10 @@ SONG_UNKNOWN_CALL = 0x4ab424
 # table_client's load loop: its on_load_data jalr becomes jal ringnav_table_load, which calls it and
 # then re-picks the row's faces for the text it bound (the load is lw t9, TABLE_LOAD_DATA(s4) at -0x14).
 TABLE_LOAD_CALL = 0x5dcdac
+# A virtual table's drag (its pointer move, at 0x5ddf04 in what tools/stock_sites.tsv names table_view_on_event) scrolls
+# by bal table_client_set_yoffset(client, yoffset_save - dy) with no bound, and its release springs back from past an
+# end: jal ringnav_table_drag, which holds the offset between the list's ends.
+TABLE_DRAG_CALL = (0x5ddf04, 0x0411fbf6)
 # Folder row names are text, not printf formats ("99% Invisible" crashes stock's formatter).
 # tk_strncpy writes its terminator at n, so reserve the last byte of the 512-byte buffer.
 FOLDER_NAME = ((0x532cb0, 0x24050200, 0x240601ff),  # a2 = 511
@@ -2407,6 +2411,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, TABLE_LOAD_CALL-0x14))[0] == 0x8e9900e4,
           "table load: expected on_load_data's callback")  # lw t9, 0xe4(s4)
     patch_word(patched, TABLE_LOAD_CALL, 0x0320f809, jal(ps['ringnav_table_load']), "a bound table row's faces")
+    patch_word(patched, *TABLE_DRAG_CALL, jal(ps['ringnav_table_drag']), 'a drag stops at a table\'s ends')
     for word in FOLDER_NAME:
         patch_word(patched, *word, 'folder names are literal text')
     # The GOT loads Q2 Pod writes (FOLDER_NAME's, and tools/ipod.py's two): no stock word beside one names its slot, and

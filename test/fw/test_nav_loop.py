@@ -1600,28 +1600,18 @@ def test_the_wheel_moves_the_selection_a_row_a_tick(fw, keys):
     assert keys(KEY_PREV, 200) == STOP and sv.ints[SEL] == 1
 
 
-def test_a_ring_list_bumps_at_its_end_then_carries_over_after_a_pause(fw, keys):
+@pytest.mark.parametrize('name', [None, 'about_page'])
+def test_a_list_stops_at_both_ends_however_long_the_pause(fw, keys, name):
     ui = Ui(fw)
-    sv = list_page(ui)
+    sv = list_page(ui, *([name] if name else []))
     select(fw, sv, 4)
-    keys(KEY_NEXT)
-    assert sv.ints[SEL] == 4 and ui.due('navigation__fx_expire')  # the bump repaints
-    keys(KEY_NEXT, 100)
-    assert sv.ints[SEL] == 4  # a spin hard-stops at the end
-    keys(KEY_NEXT, O['EDGE_PAUSE_MS'])
-    assert sv.ints[SEL] == 0
-    keys(KEY_PREV, 50)
-    keys(KEY_PREV, O['EDGE_PAUSE_MS'])
-    assert sv.ints[SEL] == 4  # and back round the top
-
-
-def test_a_list_that_isnt_a_ring_stops_at_its_end(fw, keys):
-    ui = Ui(fw)
-    sv = list_page(ui, 'about_page')
-    select(fw, sv, 4)
-    for _ in range(3):
-        keys(KEY_NEXT, 1000)
-    assert sv.ints[SEL] == 4
+    for gap in (0, 100, 300, 1000):
+        keys(KEY_NEXT, gap)
+        assert sv.ints[SEL] == 4  # never round to the top
+    select(fw, sv, 0)
+    for gap in (0, 100, 300, 1000):
+        keys(KEY_PREV, gap)
+        assert sv.ints[SEL] == 0  # nor to the foot
 
 
 TICK_MS = 40  # a brisk spin's ticks
@@ -2955,27 +2945,29 @@ def test_return_on_homes_list_selects_now_playing_then_opens_it(fw, keys, loaded
     assert [C.string_at(c[1][0]) for c in fw.calls('navigator_switch_to_with_context')] == want
 
 
-def test_homes_list_bumps_and_wraps_as_a_ring_list(fw, keys):
-    """docs/ipod.md#home: though contexts.inc doesn't mark home_page a ring."""
+def test_homes_list_stops_at_both_ends(fw, keys):
+    """docs/ipod.md#home: Home's list ends as every list does."""
     ui = Ui(fw)
     sv = list_page(ui, 'home_page', rows=6)
     select(fw, sv, 5)
-    keys(KEY_NEXT)
-    assert sv.ints[SEL] == 5
-    keys(KEY_NEXT, O['EDGE_PAUSE_MS'])
-    assert sv.ints[SEL] == 0
+    for gap in (0, 300, 1000):
+        keys(KEY_NEXT, gap)
+        assert sv.ints[SEL] == 5
+    select(fw, sv, 0)
+    for gap in (0, 300, 1000):
+        keys(KEY_PREV, gap)
+        assert sv.ints[SEL] == 0
 
 
-def test_homes_list_wraps_past_a_hidden_shortcut_row(fw, keys):
-    """Shortcut: None leaves Home's row hidden, last: the ring counts the shown rows."""
+def test_homes_list_ends_on_its_last_shown_row_over_a_hidden_shortcut_row(fw, keys):
+    """Shortcut: None leaves Home's row hidden, last: the end is the shown rows'."""
     ui = Ui(fw)
     sv = list_page(ui, 'home_page', rows=6)
-    select(fw, sv, 5)
+    select(fw, sv, 4)
     sv.add(W(ui, 'list_item', 'row_none', y=240, h=40, text='Shortcut', click=True)).visible = 0
-    keys(KEY_NEXT)
+    for gap in (0, 300, 1000):
+        keys(KEY_NEXT, gap)
     assert sv.ints[SEL] == 5
-    keys(KEY_NEXT, O['EDGE_PAUSE_MS'])
-    assert sv.ints[SEL] == 0
 
 
 def test_play_follows_a_playing_video(fw, keys):

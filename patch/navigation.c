@@ -256,13 +256,13 @@ scratch_t st __attribute__((section(".scratch")));
 /* Single shared view: no entry point keeps a menu live across a nested load(). */
 menu_t g_menu __attribute__((section(".scratch")));
 
-/* Audited top windows, each tagged with its content-identity class and whether its row list is
- * one of the audited local row lists that carry over at the ends. The index is remembered
- * instead of the name pointer: AWTK owns and frees the window's name string. */
+/* Audited top windows, each tagged with its content-identity class and its flags (contexts.inc).
+ * The index is remembered instead of the name pointer: AWTK owns and frees the window's name
+ * string. */
 enum { CTX_DYNAMIC, CTX_FIXED, CTX_FOLDER, CTX_LOCAL };
 /* a stock page opened again as a sub-page of its own: which, on its window (context_now) */
 #define SUB_PAGE "_sub_page"
-enum { RING = 1, DRILL = 2, BUTTONS = 4, CHOICE = 8 };
+enum { DRILL = 2, BUTTONS = 4, CHOICE = 8 };
 typedef struct {
     const char *name;
     unsigned char kind, flags;
@@ -276,19 +276,6 @@ static int context_id(const char *name) {
     for (unsigned i = 0; i < sizeof(contexts) / sizeof(*contexts); ++i)
         if (!tk_strcmp(name, contexts[i].name)) return (int)i;
     return -1;
-}
-
-/* The audited local row lists built from the compact assets: the file and music views. Grids
- * (album_page, but its Albums list below), other dynamic pages and the home carousel
- * keep hard ends; iPod Home's lists wrap at once (home_menu). */
-/* By the top window's name, not m->ctx: a dynamic page (the hold menu) has no memory context.
- * album_page also holds an album's songs (0xff10), which keep hard ends. */
-static int ring_list(const menu_t *m) {
-    void *top = window_manager_get_top_window(window_manager());
-    const char *name = top ? widget_get_prop_str(top, "name", (void *)0) : (void *)0;
-    int ctx = context_id(name), ring = ctx >= 0 && (contexts[ctx].flags & RING);
-    if (ctx >= 0 && !tk_strcmp(name, "album_page")) ring = I(g_class_type, 0) == CLASS_ALBUMS;
-    return m->w && ring && m->rows >= 2;
 }
 
 /* The view kinds load() actually navigates: a vertical scroll view, a table client, a slide
@@ -401,7 +388,6 @@ static void collect(void *w, entries_t *s, int depth) {
 /* Widget-owned properties die with the surface; never retain recycled row pointers. */
 #define TOUCH "_ringnav_touch"
 #define SCOPE "_ringnav_scope"
-#define FX "_ringnav_fx"
 
 /* UI timers, shared with coverflow.c; a failed add leaves the timer 0. */
 void stop_timer(unsigned *timer) {
@@ -474,8 +460,7 @@ static int carousel_page(void *top) {
 
 static int is_home(void *top, void *w) { return w && kind(w) == 3 && carousel_page(top); }
 
-/* iPod Home's lists (the main menu and its Settings list): their ends wrap at once, and Return
- * goes back to the first row. */
+/* iPod Home's lists (the main menu and its Settings list): Return goes back to the first row. */
 static int home_menu(void *top) {
     return top && !tk_strcmp(widget_get_prop_str(top, "name", ""), "home_page");
 }
@@ -723,41 +708,6 @@ void prop(void *w, const char *name, int value) {
     if (widget_get_prop_int(w, name, -1) != value) widget_set_prop_int(w, name, value);
 }
 
-/* The bump timer repaints at 120 ms; the second-detent arm survives independently. */
-static void fx_cancel(void) {
-    stop_timer(&st.fx_timer);
-    st.fx_surface = (void *)0;
-    st.bump_dir = 0;
-}
-
-static int fx_live(void *w) {
-    return w == st.fx_surface && widget_get_prop_int(w, FX, 0) == st.fx_token;
-}
-
-static int fx_expire(const void *info) {
-    st.fx_timer = 0;
-    void *w = surface((void *)0, (void *)0);
-    st.bump_dir = 0;
-    if (w && fx_live(w)) widget_invalidate_force(w, (void *)0);
-    return 0;
-}
-
-static void fx_arm(void *w, int dir) {
-    rearm(&st.fx_timer, fx_expire, BUMP_MS);
-    st.fx_token = st.fx_token == 0x7fffffff ? 1 : st.fx_token + 1;
-    st.fx_surface = w;
-    st.bump_dir = st.fx_timer ? dir : 0;
-    prop(w, FX, st.fx_token);
-}
-
-/* A boundary detent arms only while the selection stays on that row; leaving it or reversing
- * makes the next boundary detent bump again. Every stopped detent re-arms, so a continuing spin
- * hard-stops at the end; only a detent after a pause of EDGE_PAUSE_MS carries over. */
-static int edge_wraps(const menu_t *m, int id, int dir, unsigned now) {
-    return id >= 0 && fx_live(m->w) && st.edge_id == id && st.edge_dir == dir &&
-           now - st.edge_time >= EDGE_PAUSE_MS;
-}
-
 /* FNV-1a of the first two non-empty text properties in a small row subtree: the item's own name
  * and an optional subtitle, in pre-order. Each stays 0 while its text has not been seen. No stock
  * list row carries a stable id: emitter tags and pointer props are unused by the app rows (only
@@ -972,11 +922,13 @@ static int load(menu_t *m, void *w, int recall) {
         prop(w, SCOPE, (int)m->scope);
         if (st.reveal_surface == w) st.reveal_surface = (void *)0;
     }
-    if (st.fx_surface && (st.fx_surface != w || scope != m->scope || count != m->rows)) fx_cancel();
     if (count != m->rows) {
         if (st.wheel_surface == w) drop_wheel();
         prop(w, SEL, -1);
         prop(w, COUNT, m->rows);
+        /* A drag stops at the list's ends, as the wheel does: AWTK's default lets it run on past
+         * them by half the view and springs back on release (docs/internals.md#list-ends). */
+        if (m->kind == 1) widget_set_prop_int(w, "slide_limit_ratio", 0);
     }
     /* A recreated page has never seen this surface (COUNT unset) and lost its selection: put the
      * user back where they left off. A live page whose count changed resets the selection but
@@ -2149,8 +2101,6 @@ static void paint_selection(void *w, void *canvas) {
         return;
     }
     rect_t r = bounds(&g_menu, i), old;
-    /* A boundary detent nudges the selection against the end until it springs back. */
-    if (fx_live(w) && st.bump_dir) r.y -= st.bump_dir * theme()->bump_px;
     if (r.w < 5 || r.h < 5 || !P(canvas, CANVAS_LCD)) return;
     void *lcd = P(canvas, CANVAS_LCD);
     unsigned fill_color = (unsigned)I(lcd, LCD_FILL_COLOR);
@@ -3863,6 +3813,16 @@ int ringnav_table_load(void *ctx, unsigned index, void *row) {
     row_faces(row);
     catalogue_bind(row, index); /* greyed when it is a server row that can't play now */
     return ret;
+}
+
+/* A drag on a virtual table (TABLE_DRAG_CALL, table_client's pointer move): stock's
+ * table_client_set_yoffset with the finger's offset held from the first row's top to the end its
+ * release scrolls to (table_client_scroll_to's: the rows less the client's height), so a drag stops
+ * at the ends instead of running on and springing back (docs/internals.md#list-ends). */
+int ringnav_table_drag(void *w, int y) {
+    int end = I(w, TABLE_ROWS) * I(w, ROW_HEIGHT) - I(w, W_H);
+    if (y > end) y = end;
+    return table_client_set_yoffset(w, y < 0 ? 0 : y);
 }
 
 /* Canvas text in the theme's list title face where it has the characters, else in its fallbacks as
@@ -6175,7 +6135,6 @@ int ringnav_touch(void *ctx, void *event) {
     int result = stock_touch_trampoline(ctx, event);
     /* A tap is a fresh interaction: it cancels a pending screen-toggle pair and any spin. */
     drop_input();
-    fx_cancel();
     /* Stock move-before forwards to this down-before entry too. Only a real down starts
      * a new pull; the page's native before-children callbacks observe subsequent motion. */
     if (!event || I(event, EVENT_TYPE) == EVT_POINTER_DOWN) pull_begin(event);
@@ -6306,7 +6265,6 @@ int ringnav_dispatch(void *target, void *event) {
         hide_outline();
         cancel_center(); /* A native activation supersedes confirmation, even without touch. */
         drop_spin();
-        fx_cancel();
         keep_selected(
             target); /* a tap owns its live row: recall could scroll/rebind it before delivery */
         /* a tap on the Shuffle row: its action, not stock's Play All under it (shuffle_key); the
@@ -6754,7 +6712,6 @@ int compact_now_playing(void) {
     drop_input();
     void *wm = window_manager();
     void *top = window_manager_get_top_window(wm);
-    fx_cancel();
     if (usable() && top && !window_manager_is_animating(wm)) {
         const char *name = widget_get_prop_str(top, "name", "");
         if (!tk_strcmp(name, "statusbar_dialog")) {
@@ -10103,10 +10060,9 @@ int ringnav(void *ctx, void *event) {
         if (!st.untouch_timer) st.touch_mode = 0;
     }
     if (key != KEY_CENTER && key != KEY_PREV && key != KEY_NEXT) return result;
-    if (key == KEY_CENTER) {
+    if (key == KEY_CENTER)
         drop_spin();
-        fx_cancel();
-    } else
+    else
         cancel_center();
     if (st.center_timer && (unsigned)time_now_ms() - st.last_center >= DOUBLE_CLICK_MS) {
         unsigned timer = st.center_timer;
@@ -10272,28 +10228,13 @@ int ringnav(void *ctx, void *event) {
         int next = clamp_step(id < 0 ? (cur >= 0 ? g_menu.id[cur] : 0) : id, g_menu.rows - 1,
                               id < 0 ? 0 : dir * step);
         if (next == 0 || next == g_menu.rows - 1) drop_wheel();
-        if (next == id) {
-            int home = home_menu(top) && g_menu.rows >= 2;
-            if (!(home || ring_list(&g_menu)) || id < 0) {
-                stop_scroll(&g_menu);
-                widget_invalidate_force(w, (void *)0); /* a wheel wake still clears touch hiding */
-                return STOP;
-            }
-            if (!edge_wraps(&g_menu, id, dir, now)) {
-                st.edge_id = id;
-                st.edge_dir = dir;
-                st.edge_time = now;
-                fx_arm(w, dir);
-                stop_scroll(&g_menu);
-                widget_invalidate_force(w, (void *)0);
-                return STOP;
-            }
-            /* A detent after a pause at the bumped end: carry over to the other end of this list.
-             */
-            st.bump_dir = 0;
-            next = dir > 0 ? 0 : g_menu.rows - 1;
+        if (next == id) { /* a list ends at its ends: no wrap; the bar leans against the end
+                             (tilt.c) */
+            tilt_end(w, dir);
+            stop_scroll(&g_menu);
+            widget_invalidate_force(w, (void *)0); /* a wheel wake still clears touch hiding */
+            return STOP;
         }
-        st.edge_id = -1; /* left the end: the next boundary detent bumps again */
         select(&g_menu, next);
         /* Stop momentum even when the selected row already fits the viewport. */
         reveal(&g_menu, next, 1);

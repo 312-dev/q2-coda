@@ -127,7 +127,7 @@ MOTION_TODAY = {**{f'motion.{k}.{a}': 0 for k in ('page', 'playing', 'coverflow'
                 'motion.page.ms': 120, 'motion.page.easing': 5, 'motion.swap.ms': 120, 'motion.swap.easing': 8,
                 'motion.step.ms': 200, 'motion.step.easing': 8, 'motion.step_fast.ms': 120, 'motion.step_fast.easing': 8,
                 'motion.coverflow_step.ms': 200, 'motion.coverflow_step.easing': 8, 'motion.coverflow_step_fast.ms': 120, 'motion.coverflow_step_fast.easing': 8,
-                'recall_ms': 300, 'bump_px': 6}
+                'recall_ms': 300}
 
 
 # Each coverflow.* key at its low end, but the eye, which must clear a side cover's near edge: a theme with no base states them all.
@@ -1060,7 +1060,7 @@ def test_motion_today(tmp_path):  # OLED: the asset hint kept (0), offsets.inc's
     inc = boot_inc(tmp_path, theme.builtins())
     assert inc.count('.motion[MOTION_PAGE].hint = 0,') == 1 and ipod.SLIDE == 'htranslate(duration=120)'
     for f, v in (('motion[MOTION_SWAP].ms', 120), ('motion[MOTION_SWAP].easing', 8), ('motion[MOTION_STEP].ms', 200),
-                 ('motion[MOTION_STEP_FAST].ms', 120), ('motion[MOTION_STEP].easing', 8), ('recall_ms', 300), ('bump_px', 6)):
+                 ('motion[MOTION_STEP_FAST].ms', 120), ('motion[MOTION_STEP].easing', 8), ('recall_ms', 300)):
         assert inc.count(f'.{f} = {v},') == 1, f
     assert inc.count('.motion[MOTION_COVERFLOW].hint = 0,') == 1 and inc.count('.motion[MOTION_INPLACE].ms = 0,') == 1
     assert '.anim' not in inc
@@ -1083,13 +1083,13 @@ def test_motion_composes_hints(tmp_path):
                  '<element name="coverflow" anim="slide_left" ms="230" easing="cubic_out"/>'  # the animator's default: no easing=
                  '<element name="playing" anim="fade" easing="back_out" ms="0"/>'  # 0: the window as it is
                  '<element name="step" ms="250" easing="quadratic_out"/><element name="inplace" ms="300"/>'
-                 '<element name="recall" ms="0"/><element name="bump" px="0"/></view>')
+                 '<element name="recall" ms="0"/></view>')
     assert t['motion.playing.anim'] == 2 and t['motion.step.easing'] == 2
     inc = boot_inc(tmp_path, [*theme.builtins(), t])
     for line in ('.motion[MOTION_PAGE].hint = "htranslate(duration=300,easing=sin_inout)",',
                  '.motion[MOTION_COVERFLOW].hint = "slide_left(duration=230)",',
                  '.motion[MOTION_STEP].ms = 250,', '.motion[MOTION_STEP].easing = 2,',
-                 '.motion[MOTION_INPLACE].ms = 300,', '.recall_ms = 0,', '.bump_px = 0,'):
+                 '.motion[MOTION_INPLACE].ms = 300,', '.recall_ms = 0,'):
         assert inc.count(line) == 1, line
     assert inc.count('.motion[MOTION_PLAYING].hint = 0,') == 2
 
@@ -1099,6 +1099,7 @@ def test_motion_composes_hints(tmp_path):
     ('<element name="page" ms="2001"/>', r'motion\.page\.ms: 2001 outside'),
     ('<element name="coverflow" anim="spin"/>', r'motion\.coverflow\.anim: spin'),
     ('<element name="step" anim="fade"/>', r'motion\.step\.anim'),  # widget kinds take no animator
+    ('<element name="bump" px="6"/>', r'unknown element motion\.bump'),  # a list's end has no bump
 ])
 def test_motion_rejects(element, message):
     with pytest.raises(theme.ThemeError, match=message):
