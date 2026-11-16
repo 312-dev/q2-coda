@@ -2750,8 +2750,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
             src.write_bytes(data)
             p += path + b' F ' + b' '.join(like.groups()) + b' cat ' + shlex.quote(str(src)).encode() + b'\n'
             player_added.append([path, b'R', *like.groups()])
-        version, zip_name, _, digest = BUNDLED_APPS[app_id]
-        bundled[app_id] = dict(version=version, zip=zip_name, sha256=digest,
+        app_version, zip_name, _, digest = BUNDLED_APPS[app_id]
+        bundled[app_id] = dict(version=app_version, zip=zip_name, sha256=digest,
                                bytes=sum(len(d) for d, _ in files.values()))
     for path, src in ((b'release/bin/demo', out/'demo'), (b'usr/bin/hciplayer', q2player or out/'peq/hciplayer'),
                       (BLUEALSA.encode(), out/'bluealsa'), (BLUETOOTHD.encode(), out/'bluetoothd'), (WATCHDOG.encode(), out/'watchdog'),
