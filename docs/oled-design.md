@@ -513,13 +513,15 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   it and say what is missing ("No favorites", hint "Hold Play/Pause on a song to add it").
 - Folder over a level with nothing in it (an empty card) says "No folders", hint "Copy music to
   the SD card".
-- Cover Flow with no albums draws three faint album squares (64 px in `#3A3A3C`, two 54 px behind it in
-  `#101011`, 8 px corners) with a 30 px Phosphor glyph (fill, white at 90 %) centred on y 92, a title in Inter
-  Medium 20 on y 150 and a hint in 15 px Text Secondary on y 174, and, where one action fixes the cause, that
-  row selected at y 206: music on the card not scanned ("No Albums Yet", "Music on the card isn't scanned",
-  **Scan Music Now**), a signed-in streaming app with Streaming Songs off ("No Albums Here Yet", "Your Subsonic
-  albums can show here", **Show Streaming Songs**, cloud glyph), or nothing anywhere ("No Albums", "Copy music to
-  the SD card", no row).
+- **The empty state** (`patch/feedback.c` `empty_state`, the one form every empty page is moving onto): three
+  stacked tiles, a 58 px one in front (`#2C2C2E`, its edge `#48484C`) and two 48 px ones 30 px either side behind it
+  at about a quarter's strength, 9 px corners, with the page's 28 px Phosphor glyph (fill, white at 92 %) on the
+  front one; 18 px under them the title in Title Case, Inter Medium 20, Text Primary; under it the hint in 15 px
+  Text Secondary; and at most one action row, 24 px lower, already selected. The whole stack is centred between the
+  status row's foot (or the end of any rows above it) and the screen's. No app names. Cover Flow uses it
+  (`patch/cf_empty.c`, glyph `cards`): "No Albums Yet", "Music on the card isn't scanned", **Scan Music Now** when
+  the card's music isn't scanned; "No Albums", "Streaming albums can show here", **Turn on Streaming** (while
+  Streaming Songs is off) with a signed-in streaming app; else "No Albums", "Copy music to the SD card".
 - Songs over an empty library is one selected row, **Scan Music Now** (Center or a tap runs the
   scan), with "No songs", hint "Copy music to the SD card", under it; stock's picture and pill go.
 - Offline and missing things use the same form (Spotify's "Spotify isn't on the card", the App

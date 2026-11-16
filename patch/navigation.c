@@ -5190,7 +5190,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
     feedback_confirm_switch(w, canvas);
     feedback_switch_bar(w, canvas);
     feedback_scan_bar(w, canvas);
-    cf_empty_paint(w, canvas); /* Cover Flow with no albums (cf_empty.c) */
+    empty_state_paint(w, canvas); /* a page's empty state (feedback.c) */
     coverflow_home_clip(w, canvas, 1);
     if (w && w == st.bar_slot) paint_battery(w, canvas);
     if (w && w == st.action_view && P(canvas, CANVAS_LCD) && theme()->shuffle_row) {

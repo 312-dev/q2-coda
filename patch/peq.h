@@ -326,6 +326,7 @@ int page_h(int h);
 int page_x(void);
 void page_retitle(void *page, void *title, const char *caption);
 void *page_list(void *page, void *body, void **title, const char *caption, int n, int item_h);
+void *rows_view(void *parent, int y, int w, int h, int n, int item_h);
 void *page_list_or(void *page, void *body, const char *name, const char *none, int n, int item_h);
 int page_push(void *view, int dir);
 void *page_row_detail(void *view, int index, const char *caption, const char *detail,

@@ -3143,3 +3143,28 @@ def test_other_sets_keep_the_artist_pages_tabs(fw, st, stand_in, records):
     artist(fw, stand_in, records, rows, songs, view=b'0')
     fw.fn('ringnav_artist_list', C.c_int, C.c_int)(1)
     assert page.tab.visible and not fw.fn('artist_local_on', C.c_int, C.c_void_p)(page.win.addr)
+
+
+# The empty state (feedback.c empty_state): one view over the page holding the page's glyph, title and hint for its
+# painter, and at most one action row, the whole stack centred from the status row's foot (y 40) or free_top down.
+@pytest.mark.parametrize('row, free, top', [(None, 0, 40 + (280 - 120) // 2), ('Scan Music Now', 0, 40 + (280 - 176) // 2),
+                                            ('Scan Music Now', 90, 90 + (230 - 176) // 2)])
+def test_the_empty_state_centres_its_stack_and_its_one_row(fw, st, row, free, top):
+    ui = Ui(fw)
+    fw.mock('widget_factory_create_widget', lambda f, kind, parent, x, y, w, *_: ui.new(C.string_at(kind).decode(), parent, x, y, w, 0))
+    use_set(st, 'oled')
+    win = ui.window('coverflow_page')
+    body = ui.add('view', win, (0, 58, 375, 262), 'body')
+    keep = [C.create_string_buffer(s) for s in (b'cards', b'No Albums Yet', b"Music on the card isn't scanned",
+                                                row.encode() if row else b'')]
+    e = (C.c_char_p * 4)(*[C.addressof(k) for k in keep[:3]], C.addressof(keep[3]) if row else None)
+    clicked = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(lambda *_: 0)
+    assert fw.fn('empty_state', C.c_int, C.c_void_p, C.c_int, C.c_void_p, C.c_void_p)(body.addr, free, C.addressof(e), C.cast(clicked, C.c_void_p)) == 1
+    art = body.find('_empty_state')
+    assert art and art.props['_es_glyph'] == b'cards' and art.props['_es_title'] == b'No Albums Yet' and art.props['_es_top'] == top
+    lists = [c for c in body.children if c.kind == 'list_view']
+    if not row:
+        assert lists == []
+    else:
+        (lv,) = lists
+        assert lv.box[1] == top + 58 + 18 + 24 + 20 + 24 - 58 and lv.labels()[0].text == 'Scan Music Now'

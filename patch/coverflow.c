@@ -1286,8 +1286,9 @@ void *page_title(void *body, const char *caption, int n) {
     return title;
 }
 
-/* A list view in parent from y, w wide and at most h high, for n item_h rows; its scroll view. */
-static void *rows_view(void *parent, int y, int w, int h, int n, int item_h) {
+/* A list view in parent from y, w wide and at most h high, for n item_h rows; its scroll view.
+ * Shared with feedback.c's empty_state. */
+void *rows_view(void *parent, int y, int w, int h, int n, int item_h) {
     int rows = n * item_h < h ? n * item_h : h;
     void *lv = list_view_create(parent, 0, y, w, rows);
     widget_set_prop_int(lv, "item_height", item_h);

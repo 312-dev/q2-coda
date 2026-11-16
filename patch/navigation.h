@@ -403,6 +403,14 @@ void *feedback_top(void);
 void feedback_toast_paint(void *w, void *canvas);
 int feedback_confirm_dress(void *w);
 void feedback_confirm_foot(const char *foot);
+/* the empty state (docs/oled-design.md#empty-and-offline): stacked tiles with a glyph (tools/art.py
+ * EMPTY_GLYPHS), a title, a hint and at most one action row, centred in page from free_top (a
+ * screen y) down */
+typedef struct {
+    const char *glyph, *title, *hint, *row;
+} empty_t;
+int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *ctx, void *event));
+void empty_state_paint(void *w, void *canvas);
 void feedback_confirm_bar(void *w, void *canvas);
 void feedback_confirm_switch(void *w, void *canvas);
 void feedback_songs(void *top, void *row);
@@ -877,7 +885,6 @@ enum { LIB_LIBRARY = 1, LIB_SORTING, LIB_PLAYLISTS, LIB_FOLDERS };
 void library_page(void *win, void *view, int page);
 int picker_rows(void *win); /* a picker's rows on stock's Buttons Lock page */
 void cf_sort_open(void);
-void cf_empty_paint(void *w, void *canvas); /* cf_empty.c */
 int library_source_toggle(void);
 /* navigation.c */
 int library_open(void *ctx, void *event); /* Library's page ctx (LIB_*) */

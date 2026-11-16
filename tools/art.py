@@ -283,10 +283,10 @@ USB_ROWS = {'charge': 'lightning', 'files': 'folder-simple', 'audio': 'speaker-h
 USB_MODE_PX = 44
 USB_MODES = {'files': 'folder-simple-fill', 'audio': 'speaker-hifi-fill', 'debug': 'terminal-window-fill', 'ejected': 'check-bold'}
 USB_TOAST_PX = 15
-# Cover Flow with no albums (cf_empty.c): the page's glyph on the middle of its three faint album squares, fill, white
-# at 90 %, by cause: no music, or a streaming app's albums not shown
-CF_EMPTY_PX = 30
-CF_EMPTY = {'music': 'music-notes-fill', 'cloud': 'cloud-fill'}
+# The empty state (feedback.c empty_state): its glyph on the middle of its stacked tiles, fill, white at 92 %, by the
+# glyph a page names (empty_t.glyph); Cover Flow's (cf_empty.c) so far
+EMPTY_PX = 28
+EMPTY_GLYPHS = {'cards': 'cards-fill'}
 USB_TOASTS = {'unplugged': ('plug-fill', 0xababab), 'ejected': ('check-circle-fill', 0x34c759), 'audio': ('speaker-hifi-fill', 0xffffff)}
 PL_MARKS = {'in': ('check-circle-fill', {'d': 0xababab, 'l': 0x5c5c5c}), 'add': ('plus-circle-fill', {'d': 0x4fb477, 'l': 0x4fb477}),
             'out': ('minus-circle-fill', {'d': 0xff6b5e, 'l': 0xff6b5e})}
@@ -500,5 +500,5 @@ def images(t):
     out |= {f'{prefix}_usb_{n}_{k}': phosphor(g, USB_ROW_PX, c) for n, g in USB_ROWS.items() for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_usbmode_{n}': phosphor(g, USB_MODE_PX, 0xffffff) for n, g in USB_MODES.items()}
     out |= {f'{prefix}_usbtoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in USB_TOASTS.items()}
-    out |= {f'{prefix}_cfempty_{n}': phosphor(g, CF_EMPTY_PX, 0xe6e6e6) for n, g in CF_EMPTY.items()}
+    out |= {f'{prefix}_empty_{n}': phosphor(g, EMPTY_PX, 0xebebeb) for n, g in EMPTY_GLYPHS.items()}
     return out
