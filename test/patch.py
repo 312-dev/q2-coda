@@ -10971,13 +10971,13 @@ assert reads[at:at+4]==[('OLED_ACCENT',str(OLED_ACCENT))]+[(o['key'],str(o['def'
 # Battery takes Icon or Percent (theme.xml's values): the row cycles those two and writes the key as usual. A stored
 # value OLED does not offer (Icon + Percent, Percent Inside) reads as Icon, OLED's default, and stays stored until the
 # row moves it on; a key that is not stored reads as Icon.
-m,view,kids=appearance({}); row=kids[4]; f,ctx=m.handler(m.nodes[row]['children'][0],O['EVT_CLICK'])
+m,view,kids=appearance({}); row=kids[3]; f,ctx=m.handler(m.nodes[row]['children'][0],O['EVT_CLICK'])
 assert row_text(row)=='Battery: Icon'
 for value,name in ((1,'Percent'),(0,'Icon'),(1,'Percent')):
     m.calls=[]; assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0
     assert [(c[1],m.text(c[3])) for c in m.calls if c[0]=='write_int_config']==[(value,'BATTERY')] and row_text(row)=='Battery: '+name
 for stored in ('2','3'):
-    m,view,kids=appearance({'BATTERY':stored}); row=kids[4]; f,ctx=m.handler(m.nodes[row]['children'][0],O['EVT_CLICK'])
+    m,view,kids=appearance({'BATTERY':stored}); row=kids[3]; f,ctx=m.handler(m.nodes[row]['children'][0],O['EVT_CLICK'])
     assert row_text(row)=='Battery: Icon' and not [c for c in m.calls if c[0]=='write_int_config'] and m.config['BATTERY']==stored
     assert m.call(address=payload_syms['ipod_battery'],args=(0,0,0,0),gap=0)==0
     m.calls=[]; m.call(address=f,args=(ctx,m.event,0,0),gap=0)  # from what it reads as: on to Percent
