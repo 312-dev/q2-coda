@@ -7,6 +7,13 @@ static const unsigned ui_tokens[TOK_N][2] = UI_TOKENS;
 
 unsigned tok(int t) { return ui_tokens[t][ipod_light() ? 1 : 0]; }
 
+unsigned ui_fade_alpha(unsigned at) {
+    unsigned gone = (unsigned)time_now_ms() - at;
+    return gone >= UI_SHOW_MS                ? 0
+           : gone <= UI_SHOW_MS - UI_FADE_MS ? 255
+                                             : 255u * (UI_SHOW_MS - gone) / UI_FADE_MS;
+}
+
 #define UI_LINE 32 /* a line's box, centred on its row */
 /* s, n characters, centred on row y in the columns x to x + w, aligned (1 centre, 2 left, 3 right)
  * in face at px, in color (0xAARRGGBB: ui_ink's unless raw). */

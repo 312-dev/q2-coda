@@ -9,6 +9,13 @@ unsigned tok(int t) __attribute__((pure));
 /* The design's px as AWTK's size, Inter's line being 1.21 em, rounded (docs/oled-design.md#type):
  * 13 is 16, 15 is 18, 16 is 19, 17 is 21, 18 is 22, 20 is 24, 22 is 27, 30 is 36. */
 #define TYPE(px) (((px) * 121 + 50) / 100)
+/* Show-then-fade (the scroll indicator, the A-Z index): shown UI_SHOW_MS after its last arm,
+ * fading over the last UI_FADE_MS, one repaint a UI_FADE_STEP_MS. ui_fade_alpha: 255 until the
+ * fade, then down to 0 at UI_SHOW_MS after at (a time_now_ms). */
+#define UI_SHOW_MS 1000
+#define UI_FADE_MS 200
+#define UI_FADE_STEP_MS 40
+unsigned ui_fade_alpha(unsigned at);
 /* Text in a box: s (n characters, or UTF-8 for ui_line) centred on row y in the columns x to x + w,
  * aligned (1 centre, 2 left, 3 right), in face at px, in color (ui_line_w: 0xAARRGGBB; ui_line:
  * 0xRRGGBB), through ui_ink unless the draw is raw. ui_measure: UTF-8 s's width in face at px. */

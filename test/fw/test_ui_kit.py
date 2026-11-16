@@ -36,3 +36,10 @@ def test_the_flat_selection_bar_is_the_themes_inset_and_radius_in_the_accent(fw,
     accent = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     assert box == (t['sel_inset'], 40, 375 - 8 - 2 * t['sel_inset'], 32) and radius == t['sel_radius']
     assert ink == rgba(accent) and canvas.restored()
+
+
+@pytest.mark.parametrize('gone, alpha', [(0, 255), (800, 255), (900, 127), (999, 1), (1000, 0), (5000, 0)])
+def test_show_then_fade_holds_then_fades_over_its_last_200_ms(fw, gone, alpha):
+    """ui_kit.c ui_fade_alpha, the scroll indicator's and the A-Z index's: whole for 800 ms, then down to 0 at 1000."""
+    fw.mock('time_now_ms', lambda *_: 10000 + gone)
+    assert fw.fn('ui_fade_alpha', C.c_uint, C.c_uint)(10000) == alpha

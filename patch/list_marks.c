@@ -11,11 +11,8 @@
 #define CHEV_SHIFT 5
 #define SPIN_BOX 16 /* the spinner's 15 px frame (tools/art.py spinner), whole */
 
-/* SB_WHEEL: shown while the wheel turns and for WHEEL_SB_MS after its last tick, fading over the
- * last WHEEL_SB_FADE_MS, one repaint a WHEEL_SB_STEP_MS. */
-#define WHEEL_SB_MS 1000
-#define WHEEL_SB_FADE_MS 200
-#define WHEEL_SB_STEP_MS 40
+/* SB_WHEEL: shown while the wheel turns and for UI_SHOW_MS after its last tick (ui_kit.h's
+ * show-then-fade). */
 
 static unsigned sb_at __attribute__((section(".scratch")));    /* the last tick, time_now_ms */
 static void *sb_list __attribute__((section(".scratch")));     /* the list it moved */
@@ -177,7 +174,7 @@ static int sb_due(const void *info) {
         rect_t r = { 375 - T->sb_right - T->sb_w - 1, 0, T->sb_w + 2, I(top, W_H) };
         widget_invalidate_force(top, &r);
     }
-    if (gone < WHEEL_SB_MS) sb_timer = timer_add(sb_due, (void *)0, WHEEL_SB_STEP_MS);
+    if (gone < UI_SHOW_MS) sb_timer = timer_add(sb_due, (void *)0, UI_FADE_STEP_MS);
     return 0;
 }
 
@@ -186,17 +183,15 @@ void wheel_sb_arm(void *list) {
     sb_at = time_now_ms();
     sb_list = list;
     sb_owner = P(list, W_PARENT); /* read now: only compared later, never followed */
-    rearm(&sb_timer, sb_due, WHEEL_SB_MS - WHEEL_SB_FADE_MS);
+    rearm(&sb_timer, sb_due, UI_SHOW_MS - UI_FADE_MS);
 }
 
 /* The indicator's alpha on list now: 255 while the wheel turns, falling to 0 over the fade. */
 unsigned wheel_sb_alpha(void *list) {
-    unsigned gone = time_now_ms() - sb_at;
     /* the wheel moves a list's scroll view; its bar is the list view's */
     /* the A-Z index takes the edge while it shows (az_index.c) */
-    if ((list != sb_list && list != sb_owner) || gone >= WHEEL_SB_MS || az_on(list)) return 0;
-    if (gone <= WHEEL_SB_MS - WHEEL_SB_FADE_MS) return 255;
-    return 255u * (WHEEL_SB_MS - gone) / WHEEL_SB_FADE_MS;
+    if ((list != sb_list && list != sb_owner) || az_on(list)) return 0;
+    return ui_fade_alpha(sb_at);
 }
 
 /* A rounded rectangle's path on vg. */
