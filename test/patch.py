@@ -10811,7 +10811,7 @@ passed()
 # runs the migration too; here nothing boots, so no preset is applied and Home reads as stored, Split).
 for stored in (None,'0','1','2','3','9'):
     m,view,kids=appearance({} if stored is None else {'THEME':stored})
-    assert [row_text(r) for r in kids]==['Light Mode: Off','Accent: Blue','Home: Split','Shortcut: Rockbox','Battery: Icon','Song Artist: Inline','Song Length: Albums','Track Time: Remaining'],stored
+    assert [row_text(r) for r in kids]==['Light Mode: Off','Accent: Blue','Home: Split','Battery: Icon','Song Artist: Inline','Song Length: Albums','Track Time: Remaining'],stored
 passed()
 # Songs' action bar on OLED's set (its action_row; navigation.c action_row): what stock builds in it (it does again on a
 # refresh) takes the plain row's shape: the label reads Shuffle after the theme's glyph (list.shuffle, SHUFFLE_LABEL_DX
