@@ -3654,9 +3654,12 @@ static unsigned battery_now(void) {
     int held = cable && !charging, weak = charging && charge_weak();
     int full = cable && !weak && (I(g_power_chargestate, 0) == 2 || (held && st.charge_held));
     unsigned key = (unsigned)(level > 100 ? 100 : level) << 4;
-    if (weak) key |= BATT_KEY_WEAK;
-    else if (full) key |= BATT_KEY_PLUGGED;
-    else if (charging) key |= BATT_KEY_CHARGING;
+    if (weak)
+        key |= BATT_KEY_WEAK;
+    else if (full)
+        key |= BATT_KEY_PLUGGED;
+    else if (charging)
+        key |= BATT_KEY_CHARGING;
     return key | (unsigned)((icon && !tk_strcmp(icon, "bar_lowcharge")) || (held && level < 15));
 }
 static void bar_sync(void *bar) {
@@ -3756,7 +3759,8 @@ static void paint_battery(void *w, void *canvas) {
                           : key & (BATT_KEY_CHARGING | BATT_KEY_PLUGGED) ? BATT_CHARGE_RGB
                           : key & BATT_KEY_LOW                           ? BATT_LOW_RGB
                                                                          : 0xffffff);
-    if (!inside && !st.pct_digit) { /* whole pixels up, so the slot is never narrower than the ink */
+    /* whole pixels up, so the slot is never narrower than the ink */
+    if (!inside && !st.pct_digit) {
         unsigned c = '0';
         int px = BATT_PX;
         canvas_set_font(canvas, theme_face(&c, 1, &px), (unsigned)px);
@@ -9620,7 +9624,7 @@ int ringnav_input(void *wm, void *e) {
     if (e && tick_gate(e)) return 0;
     if (e && (chord_gate(e) || wake_gate(e))) return 0;
     if (e && keylock_gate(e, remote_match(e, 0))) return 0; /* keylock.c */
-    if (e && charge_gate(e)) return 0; /* the plug-in screen (charging.c) */
+    if (e && charge_gate(e)) return 0;                      /* the plug-in screen (charging.c) */
     if (e && coverflow_wait_input(e)) return 0; /* Cover Flow opening: Return gives it up */
     st.last_input = time_now_ms();
     unsigned type = e ? (unsigned)I(e, EVENT_TYPE) : 0;

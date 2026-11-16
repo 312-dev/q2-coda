@@ -199,7 +199,7 @@ typedef struct {
     void *confirm_win;
     int codec, codec_step, batt_mode;
     unsigned codec_timer, batt_key, bar_timer;
-    int pct_digit, pct_sign; /* BATT_PX advances of '0' and '%', up to a whole pixel, at the first paint */
+    int pct_digit, pct_sign; /* BATT_PX advances of '0' and '%', up a pixel, at the first paint */
     unsigned letter_timer;   /* the fast-scroll letter shows while this runs */
     /* Now Playing's window and payload-filled widgets, and the sources they last showed. */
     void *np_win, *np_album, *np_slider, *np_remain, *np_elapsed, *np_cover, *np_title, *np_artist;

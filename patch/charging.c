@@ -12,11 +12,12 @@
 int charge_weak(void) { return 0; }
 
 /* A charging toast waits for the next UI loop pass (charging_poll, from usb_ui_poll): those that
- * start inside stock's USB pass or an input's dispatch, whose own loop a toast's would run again. */
+ * start inside stock's USB pass or an input's dispatch, whose own loop a toast's would run again.
+ */
 static struct {
     char text[48];
     char glyph[32];
-    int down;      /* a touch went down on the battery */
+    int down; /* a touch went down on the battery */
     int down_x, down_y;
 } chg __attribute__((section(".scratch")));
 
@@ -35,8 +36,10 @@ static const char *charge_words(unsigned key, char *out, int size) {
         return "chargetoast_weak";
     }
     if (key & BATT_KEY_PLUGGED) {
-        if (st.charge_held) tk_snprintf(out, size, "Charge Limit Reached (%d%%)", CHARGE_STOP);
-        else tk_snprintf(out, size, "Fully charged");
+        if (st.charge_held)
+            tk_snprintf(out, size, "Charge Limit Reached (%d%%)", CHARGE_STOP);
+        else
+            tk_snprintf(out, size, "Fully charged");
         return "chargetoast_full";
     }
     if (key & BATT_KEY_CHARGING) {
@@ -59,7 +62,8 @@ static const char *charge_words(unsigned key, char *out, int size) {
 #define TAP_W 44
 #define TAP_H 40
 #define TAP_SLOP 12
-#define TOUCH_DOWN 0xff /* the raw pointer events ringnav_input sees (offsets.inc EVT_POINTER_FIRST) */
+#define TOUCH_DOWN                                                                                 \
+    0xff /* the raw pointer events ringnav_input sees (offsets.inc EVT_POINTER_FIRST) */
 #define TOUCH_UP 0x103
 static int on_battery(int x, int y) {
     void *slot = st.bar_slot, *bar = *(void *const *)system_bar;
@@ -108,10 +112,12 @@ static unsigned cable_key(void) {
 #define S1_MS 3000
 #define S1_FRAME_MS 50
 #define S1_LOOP_MS 2000
-#define S1_GROW_MS 1300 /* the sweep grows to the level (ease out), holds to S1_HOLD_MS, then fades */
+#define S1_GROW_MS                                                                                 \
+    1300 /* the sweep grows to the level (ease out), holds to S1_HOLD_MS, then fades */
 #define S1_HOLD_MS 1700
 #define S1_SWEEP 14
-#define S1_CX 187.5f /* the body: S1_W x S1_H round (S1_CX, S1_CY), S1_R corners, a S1_LINE outline */
+#define S1_CX                                                                                      \
+    187.5f /* the body: S1_W x S1_H round (S1_CX, S1_CY), S1_R corners, a S1_LINE outline */
 #define S1_CY 132.0f
 #define S1_W 170.0f
 #define S1_H 76.0f
@@ -120,13 +126,15 @@ static unsigned cable_key(void) {
 #define S1_BODY_RGB 0x3a3a3c
 #define S1_IN 8.0f /* the fill S1_IN inside the body, S1_FILL_R corners */
 #define S1_FILL_R 9.0f
-#define S1_NUB_GAP 5.0f /* the nub S1_NUB_GAP past the body, S1_NUB_W x S1_NUB_H, S1_NUB_R corners */
+#define S1_NUB_GAP                                                                                 \
+    5.0f /* the nub S1_NUB_GAP past the body, S1_NUB_W x S1_NUB_H, S1_NUB_R corners */
 #define S1_NUB_W 7.0f
 #define S1_NUB_H 28.0f
 #define S1_NUB_R 4.0f
 #define S1_GREEN 0x34c759
-#define S1_PCT_Y 212   /* the level's line, Inter Medium 30 (36 in AWTK's sizes), S1_PCT_DX right of */
-#define S1_PCT_PX 36   /* centre, the bolt (tools/art.py CHARGE_BOLT_PX) S1_BOLT_GAP left of it */
+#define S1_PCT_Y                                                                                   \
+    212 /* the level's line, Inter Medium 30 (36 in AWTK's sizes), S1_PCT_DX right of */
+#define S1_PCT_PX 36 /* centre, the bolt (tools/art.py CHARGE_BOLT_PX) S1_BOLT_GAP left of it */
 #define S1_PCT_DX 12
 #define S1_BOLT 26
 #define S1_BOLT_GAP 3
@@ -137,7 +145,7 @@ static unsigned cable_key(void) {
 
 static struct {
     int pending, shown, level, still; /* still: full or held, no sweep */
-    int eat; /* the key or touch that ended it: dropped to its release */
+    int eat;                          /* the key or touch that ended it: dropped to its release */
     unsigned at, timer;
     void *top; /* the window it lit over: another opening (the chooser) ends it */
     int weak_was;
@@ -199,7 +207,8 @@ static int s1_sweep(int base, int level, unsigned t, unsigned *alpha) {
         return base * 10 + (int)((float)(level - base) * 10 * (1 - u * u * u));
     }
     if (t >= S1_HOLD_MS)
-        *alpha = 255u * (S1_LOOP_MS - (t < S1_LOOP_MS ? t : S1_LOOP_MS)) / (S1_LOOP_MS - S1_HOLD_MS);
+        *alpha =
+            255u * (S1_LOOP_MS - (t < S1_LOOP_MS ? t : S1_LOOP_MS)) / (S1_LOOP_MS - S1_HOLD_MS);
     return level * 10;
 }
 
@@ -260,8 +269,8 @@ void charge_paint(void *w, void *canvas) {
               S1_PCT_Y - S1_BOLT / 2 - (int)dy);
     rect_t word = { 0, S1_WORD_Y - S1_LINE_H / 2 - (int)dy, I(w, W_W), S1_LINE_H };
     final_text(canvas, "inter",
-               s1.level >= 100 ? (const unsigned *)L"Charged" : (const unsigned *)L"Charging", &word,
-               S1_WORD_PX, 0xff000000u | S1_WORD_RGB);
+               s1.level >= 100 ? (const unsigned *)L"Charged" : (const unsigned *)L"Charging",
+               &word, S1_WORD_PX, 0xff000000u | S1_WORD_RGB);
     stock_canvas_set_fill_color(canvas, fill);
 }
 

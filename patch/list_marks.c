@@ -170,10 +170,10 @@ void round_path(void *vg, float x, float y, float w, float h, float r) {
 static unsigned battery_fill(unsigned key) { return BATT_KEY_LEVEL(key); }
 /* The fill's colour for key, ink being Text Primary's. */
 static unsigned battery_tone(unsigned key, unsigned ink) {
-    return key & BATT_KEY_WEAK                              ? BATT_WEAK_RGB
-           : key & (BATT_KEY_CHARGING | BATT_KEY_PLUGGED)   ? BATT_CHARGE_RGB
-           : BATT_KEY_LEVEL(key) < BATT_LOW_PCT        ? BATT_SLIM_LOW
-                                                            : ink;
+    return key & BATT_KEY_WEAK                            ? BATT_WEAK_RGB
+           : key & (BATT_KEY_CHARGING | BATT_KEY_PLUGGED) ? BATT_CHARGE_RGB
+           : BATT_KEY_LEVEL(key) < BATT_LOW_PCT           ? BATT_SLIM_LOW
+                                                          : ink;
 }
 /* The glyph inside the body for key, a theme image's name, or 0 for none. */
 static const char *battery_glyph(unsigned key) {
