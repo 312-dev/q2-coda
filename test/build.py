@@ -507,7 +507,8 @@ def validate_assets(directory):
     splash = read('rootfs.squashfs', SPLASH)
     assert sha(splash) == manifest['q2splash_sha256'] and splash[:4] == b'\x7fELF' and splash[36:40] == helper[36:40]
     # Guest Play's daemon and its sink daemon's D-Bus policy (docs/internals.md#guest-play)
-    from build import GUEST, GUEST_DBUS, BT_GUEST_SOURCE
+    from build import GUEST, GUEST_DBUS, GUEST_HOTSPOT, BT_GUEST_SOURCE
+    assert read('rootfs.squashfs', GUEST_HOTSPOT) == (ROOT/'patch/q2_hotspot.sh').read_bytes()
     guest = read('rootfs.squashfs', GUEST)
     assert sha(guest) == manifest['q2_guest_sha256'] and guest[:4] == b'\x7fELF' and guest[36:40] == helper[36:40]
     assert read('rootfs.squashfs', GUEST_DBUS) == (ROOT/'assets/dbus/bluealsa-sink.conf').read_bytes()

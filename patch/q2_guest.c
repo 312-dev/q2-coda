@@ -132,6 +132,13 @@ int dbus_message_iter_close_container(DBusMessageIter *, DBusMessageIter *);
 #define QG_OUT_WAIT_MS                                                                             \
     8000 /* the sink daemon waits this long for the car or headset to connect first */
 #endif
+#ifndef QG_HOTSPOT
+#define QG_HOTSPOT QG_BIN "q2-hotspot"
+#endif
+#define QG_HOTSPOT_IP "192.168.43.1" /* q2-hotspot's NET */
+#ifndef QG_HOTSPOT_CHECK_MS
+#define QG_HOTSPOT_CHECK_MS 10000
+#endif
 #define QG_RESEND_MS 1500  /* the guest's song again after the owner's player said it paused */
 #define QG_RESPAWN_MS 1000 /* a child that ended is started again no sooner */
 #define QG_TRUSTED_MAX 16
@@ -178,6 +185,9 @@ static struct {
     unsigned line_n;
     /* the settings */
     int enabled, trusted_only, stay;
+    int hotspot, hotspot_up, hotspot_clients; /* switched on; running; phones joined */
+    char hotspot_pass[64];
+    long hotspot_at; /* the last check */
     char name[QG_NAME];
     qg_trusted_t trusted[QG_TRUSTED_MAX];
     int n_trusted;
@@ -288,12 +298,16 @@ static void config_load(void) {
     qg.trusted_only = qg_field(raw, "allow", v, sizeof v) && !strcmp(v, "trusted");
     qg.stay = qg_field(raw, "leave", v, sizeof v) && !strcmp(v, "stay");
     qg_field(raw, "name", qg.name, sizeof qg.name);
+    qg.hotspot = qg_field(raw, "hotspot", v, sizeof v) && atoi(v) == 1;
+    qg_field(raw, "hotspot_pass", qg.hotspot_pass, sizeof qg.hotspot_pass);
 }
 
 static void config_save(void) {
-    char b[256];
-    int n = snprintf(b, sizeof b, "enabled=%d\nname=%s\nallow=%s\nleave=%s\n", qg.enabled, qg.name,
-                     qg.trusted_only ? "trusted" : "ask", qg.stay ? "stay" : "resume");
+    char b[320];
+    int n = snprintf(b, sizeof b,
+                     "enabled=%d\nname=%s\nallow=%s\nleave=%s\nhotspot=%d\nhotspot_pass=%s\n",
+                     qg.enabled, qg.name, qg.trusted_only ? "trusted" : "ask",
+                     qg.stay ? "stay" : "resume", qg.hotspot, qg.hotspot_pass);
     mkdir(QG_DATA, 0755);
     write_whole(QG_CONFIG, b, (unsigned)n, 1);
 }
@@ -491,7 +505,8 @@ void qg_codec_line(const char *codec, unsigned rate, const unsigned char *cfg, i
             len += (blocks * ch * pool + 7) / 8;
         else
             len += ((mode & 1 ? sb : 0) + blocks * pool + 7) / 8;
-        kbps = (unsigned)((8ull * len * rate / (sb * blocks) + 500) / 1000);
+        kbps = (8u * len * rate / (sb * blocks) + 500) /
+               1000; /* under 2^32: len < 600, rate <= 48000 */
     } else if (codec && !strcmp(codec, "AAC") && n >= 6)
         kbps = (((cfg[3] & 0x7fu) << 16 | cfg[4] << 8 | cfg[5]) + 500) / 1000;
     snprintf(out, size, "%s %u %u", codec && *codec ? codec : "?", rate, kbps);
@@ -571,6 +586,77 @@ static void reap(void) {
     }
 }
 
+/* ---- the hotspot (docs/internals.md#guest-play-hotspot): q2-hotspot does the work ---- */
+
+/* The hotspot's name: Guest Play's, or the Q2's default. */
+static void hotspot_ssid(char *out) { copy(out, *qg.name ? qg.name : "Q2", QG_NAME); }
+
+/* Wi-Fi's join QR code text: WIFI:T:WPA;S:name;P:password;; with \ ; , : and " escaped. Exposed for
+ * the tests. */
+void qg_wifi_qr(const char *ssid, const char *pass, char *out, unsigned n) {
+    unsigned k = 0;
+    const char *part[2] = { ssid, pass }, *head[2] = { "WIFI:T:WPA;S:", ";P:" };
+    for (int i = 0; i < 2; ++i) {
+        for (const char *h = head[i]; *h && k + 1 < n; ++h) out[k++] = *h;
+        for (const char *c = part[i]; *c && k + 2 < n; ++c) {
+            if (strchr("\\;,:\"", *c)) out[k++] = '\\';
+            out[k++] = *c;
+        }
+    }
+    for (const char *h = ";;"; *h && k + 1 < n; ++h) out[k++] = *h;
+    out[k] = 0;
+}
+
+static void hotspot_qr(const char *ssid, char *out, unsigned n) {
+    qg_wifi_qr(ssid, qg.hotspot_pass, out, n);
+}
+
+/* A WPA2 passphrase q2-hotspot can pass on as it is: 8 to 63 printable characters, no quote or
+ * backslash. Exposed for the tests. */
+int qg_pass_ok(const char *s) {
+    unsigned n = strlen(s);
+    for (const char *c = s; *c; ++c)
+        if (*c < 0x20 || *c > 0x7e || strchr("\"'\\`", *c)) return 0;
+    return n >= 8 && n <= 63;
+}
+
+/* The generated default: two short words and two digits, easy to read out (tulip-river-42). */
+static void hotspot_new_pass(void) {
+    static const char *const words[] = { "tulip",  "river",  "maple",  "comet", "otter",  "cedar",
+                                         "lemon",  "harbor", "pixel",  "amber", "willow", "ember",
+                                         "falcon", "meadow", "violet", "canyon" };
+    unsigned char r[4] = { 0 };
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd >= 0) read(fd, r, sizeof r), close(fd);
+    snprintf(qg.hotspot_pass, sizeof qg.hotspot_pass, "%s-%s-%02u", words[r[0] & 15],
+             words[r[1] & 15], r[2] % 100u);
+}
+
+static void hotspot_apply(void) {
+    char cmd[400], ssid[QG_NAME], hex[2 * QG_NAME + 1];
+    int want = qg.enabled && qg.hotspot && qg_pass_ok(qg.hotspot_pass);
+    if (!want) {
+        if (qg.hotspot_up) system(QG_HOTSPOT " stop");
+        qg.hotspot_up = qg.hotspot_clients = 0;
+        return;
+    }
+    hotspot_ssid(ssid);
+    for (unsigned i = 0; ssid[i]; ++i) snprintf(hex + 2 * i, 3, "%02x", (unsigned char)ssid[i]);
+    snprintf(cmd, sizeof cmd, QG_HOTSPOT " start %s '%s'", *ssid ? hex : "5132", qg.hotspot_pass);
+    qg.hotspot_up = system(cmd) == 0;
+    qg.hotspot_at = qg_ms();
+}
+
+/* Every QG_HOTSPOT_CHECK_MS while it runs: on wlan0's channel still, and how many phones have
+ * joined. */
+static void hotspot_check(void) {
+    char out[16] = "";
+    qg.hotspot_at = qg_ms();
+    system(QG_HOTSPOT " check > " QG_RUN ".hotspot 2>/dev/null");
+    read_whole(QG_RUN ".hotspot", out, sizeof out);
+    qg.hotspot_clients = atoi(out);
+}
+
 /* ---- the state file ---- */
 
 static int countdown(long end) {
@@ -619,6 +705,15 @@ static void state_write(void) {
                      qg.playing ? position() / 1000 * 1000 : 0, qg.playing ? qg.status : "",
                      qg.event, qg.event_seq, qg.event_name);
     if (n < 0 || n >= (int)sizeof b) n = (int)sizeof b - 1;
+    char ssid[QG_NAME], qr[2 * QG_NAME + 160];
+    hotspot_ssid(ssid);
+    hotspot_qr(ssid, qr, sizeof qr);
+    int h = snprintf(b + n, sizeof b - n,
+                     "hotspot=%d\nhotspot_up=%d\nhotspot_name=%s\nhotspot_pass=%s\nhotspot_ip=%s\n"
+                     "hotspot_clients=%d\nhotspot_qr=%s\n",
+                     qg.hotspot, qg.hotspot_up, ssid, qg.hotspot_pass,
+                     qg.hotspot_up ? QG_HOTSPOT_IP : "", qg.hotspot_clients, qr);
+    if (h > 0 && n + h < (int)sizeof b) n += h;
     if (!strcmp(b, qg.last)) return;
     memcpy(qg.last, b, (unsigned)n + 1);
     char out[4096 + 24];
@@ -686,7 +781,7 @@ static int status_byte(void) {
 }
 
 static void notify_car(int force) {
-    if (!qg.playing) return;
+    if (!qg.playing || !*qg.guest.path) return; /* nothing of the guest's before its stream */
     unsigned char rec[16 + 4 * (QG_FIELD + 4)];
     int n = qg_track_record(qg.track, qg.tracks, qg.duration, qg.title, qg.artist, qg.album,
                             qg.genre, rec, sizeof rec);
@@ -886,6 +981,7 @@ static void session_arrived(const qg_dev_t *d) {
     copy(qg.guest.codec, d->codec, sizeof qg.guest.codec);
     qg.guest.on_main = d->on_main;
     qg.arrive_by = 0;
+    qg.resend_at = qg_ms() + QG_RESEND_MS;
     if (!*qg.status) copy(qg.status, "playing", sizeof qg.status);
     if (!qg.aplay) aplay_start();
     player_find();
@@ -1057,6 +1153,7 @@ static void set_enabled(int on) {
     }
     copy(qg.reconnect, qg.out.mac, sizeof qg.reconnect);
     main_fix();
+    hotspot_apply();
 }
 
 /* ---- commands ---- */
@@ -1080,9 +1177,19 @@ static void command(char *line) {
         session_end("stopped", 1);
     else if (!strcmp(line, "key") && arg)
         player_key(arg);
-    else if (!strcmp(line, "name") && arg) {
+    else if (!strcmp(line, "hotspot") && arg) {
+        qg.hotspot = !strcmp(arg, "on");
+        config_save();
+        hotspot_apply();
+    } else if (!strcmp(line, "hotspot-pass") && arg) {
+        if (!qg_pass_ok(arg)) return;
+        copy(qg.hotspot_pass, arg, sizeof qg.hotspot_pass);
+        config_save();
+        if (qg.hotspot_up) hotspot_apply();
+    } else if (!strcmp(line, "name") && arg) {
         copy(qg.name, arg, sizeof qg.name);
         config_save();
+        if (qg.hotspot_up) hotspot_apply();
     } else if (!strcmp(line, "allow") && arg) {
         qg.trusted_only = !strcmp(arg, "trusted");
         config_save();
@@ -1270,6 +1377,7 @@ static void tick(void) {
         now - qg.sinkd_at >= QG_RESPAWN_MS &&
         (*qg.out.mac || now - qg.main_up_at >= QG_OUT_WAIT_MS))
         sinkd_start();
+    if (qg.hotspot_up && now - qg.hotspot_at >= QG_HOTSPOT_CHECK_MS) hotspot_check();
     if (qg.playing && qg.resend_at && now >= qg.resend_at) qg.resend_at = 0, notify_car(1);
     notify_car(0);
     state_write();
@@ -1298,6 +1406,7 @@ int main(void) {
     write_whole(QG_PID, pid, (unsigned)n, 0);
     config_load();
     trusted_load();
+    if (!qg_pass_ok(qg.hotspot_pass)) hotspot_new_pass(), config_save();
     unlink(QG_CMD);
     mkfifo(QG_CMD, 0600);
     qg.fifo = open(QG_CMD, O_RDONLY | O_NONBLOCK);
@@ -1327,6 +1436,7 @@ int main(void) {
     if (name_has_owner(SINK_SRV, qg.sink_owner, sizeof qg.sink_owner)) pcms_list(SINK_SRV);
     if (qg.main_up) pcms_list(MAIN_SRV);
     if (qg.enabled && qg.bluez_up) main_fix();
+    hotspot_apply();
     int bus_fd = -1;
     dbus_connection_get_unix_fd(qg.bus, &bus_fd);
     while (!qg.quit && dbus_connection_get_is_connected(qg.bus)) {
@@ -1343,6 +1453,7 @@ int main(void) {
     window_close();
     stop_child(&qg.sinkd);
     qg.enabled = 0;
+    hotspot_apply();
     unlink(QG_STATE);
     unlink(QG_PID);
     unlink(QG_CMD);

@@ -9,6 +9,7 @@ shanling.bluez (byte for byte as libbtctl builds it) and the car's keys to the g
 Needs cc, dbus-daemon, the host's libdbus-1.so.3, and dbus-python with PyGObject for /usr/bin/python3; no build,
 no stock ZIP."""
 import os
+import re
 import pathlib
 import struct
 import subprocess as S
@@ -67,12 +68,15 @@ class Rig:
         (d / 'bin/bluealsa-aplay').write_text(f'#!/bin/sh\necho "APLAY $*" >> {self.log}\n'
                                               f"trap 'echo APLAY-END >> {self.log}; exit 0' TERM\n"
                                               'while :; do sleep 0.1; done\n')
-        for n in ('bluealsa', 'bluealsa-aplay'):
+        (d / 'bin/q2-hotspot').write_text(f'#!/bin/sh\necho "HOTSPOT $*" >> {self.log}\n'
+                                          '[ "$1" = check ] && echo 2\nexit 0\n')
+        for n in ('bluealsa', 'bluealsa-aplay', 'q2-hotspot'):
             (d / 'bin' / n).chmod(0o755)
         self.helper = d / 'q2-guest'
         defs = {'QG_RUN': f'"{d}/run"', 'QG_DATA': f'"{d}/data"', 'QG_BIN': f'"{d}/bin/"', 'QG_ASK_S': '2',
                 'QG_GIVEUP_MS': '3000', 'QG_ARRIVE_MS': '3000', 'QG_OUT_WAIT_MS': '1500',
-                'QG_MAIN_SOURCE': f'"echo MAIN source >> {self.log}"', 'QG_MAIN_STOCK': f'"echo MAIN stock >> {self.log}"'}
+                'QG_MAIN_SOURCE': f'"echo MAIN source >> {self.log}"', 'QG_MAIN_STOCK': f'"echo MAIN stock >> {self.log}"',
+                'QG_HOTSPOT': f'"{d}/bin/q2-hotspot"', 'QG_HOTSPOT_CHECK_MS': '1000'}
         S.run(CC + ['-DCODA_HOST', *(f'-D{k}={v}' for k, v in defs.items()), '-o', str(self.helper),
                     str(ROOT / 'patch/q2_guest.c'), '-l:libdbus-1.so.3'], check=True)
         self.main = S.Popen(['/usr/bin/python3', str(fake), 'main', str(d / 'main.ctl'), str(self.log)], env=self.env)
@@ -87,6 +91,7 @@ class Rig:
             if got:
                 return got
             time.sleep(0.05)
+        print('\n'.join(self.lines()[-12:]) if self.log.exists() else '')  # what the stand-ins saw last
         fails(what + ' (timed out)')
 
     def lines(self):
@@ -161,7 +166,64 @@ def track_record(track, tracks, ms, title, artist='', album='', genre=''):
     return b.hex()
 
 
+def hotspot_script(d):
+    """patch/q2_hotspot.sh under the host's sh with stand-in wpa_cli, wpa_supplicant, ifconfig and udhcpd."""
+    b, hs, log = d / 'hsbin', d / 'hs', d / 'hs.log'
+    b.mkdir()
+    stand_ins = {
+        'wpa_cli': f'echo "wpa_cli $*" >> {log}\ncase "$*" in *wlan0*status*) [ -s {d}/freq ] && echo "freq=$(cat {d}/freq)"; '
+                   'echo wpa_state=COMPLETED;; *all_sta*) printf "aa:bb:cc:00:00:01\\nflags=x\\nde:ad:be:ef:00:02\\n";; esac',
+        # its "daemon" a sleep of its own, so stop's kill reaches nothing else on this machine
+        'wpa_supplicant': f'echo "wpa_supplicant $*" >> {log}\nsleep 30 & while [ $# -gt 0 ]; do [ "$1" = -P ] && echo $! > "$2"; '
+                          'shift; done',
+        'ifconfig': f'echo "ifconfig $*" >> {log}', 'udhcpd': f'echo "udhcpd $*" >> {log}'}
+    for n, body in stand_ins.items():
+        (b / n).write_text('#!/bin/sh\n' + body + '\n')
+        (b / n).chmod(0o755)
+    env = {'PATH': f'{b}:/usr/bin:/bin', 'Q2_HOTSPOT_DIR': str(hs)}
+    script = str(ROOT / 'patch/q2_hotspot.sh')
+
+    def run(*args):
+        return S.run(['sh', script, *args], env=env, capture_output=True, text=True)
+    (d / 'freq').write_text('5180\n')
+    ssid = 'Car Q2'.encode().hex()
+    check('start: exits 0', run('start', ssid, 'tulip-river-42').returncode == 0)
+    conf = (hs / 'ap.conf').read_text()
+    for want in (f'ssid={ssid}\n', 'mode=2\n', 'frequency=5180\n', 'key_mgmt=WPA-PSK\n', 'proto=RSN\n', 'pairwise=CCMP\n',
+                 'psk="tulip-river-42"\n'):
+        check(f'... the access point\'s settings hold {want.strip()} (wlan0\'s channel)', want in conf)
+    check('... readable by root alone (the password)', (hs / 'ap.conf').stat().st_mode & 0o077 == 0)
+    calls = log.read_text()
+    check('... wlan1 addressed and up', 'ifconfig wlan1 192.168.43.1 netmask 255.255.255.0 up' in calls)
+    check('... wpa_supplicant in the background on wlan1 over nl80211',
+          f'wpa_supplicant -B -i wlan1 -D nl80211 -c {hs}/ap.conf -P {hs}/ap.pid' in calls)
+    udhcpd = (hs / 'udhcpd.conf').read_text()
+    check('... udhcpd on wlan1, .20 to .50', f'udhcpd {hs}/udhcpd.conf' in calls and 'interface wlan1' in udhcpd
+          and 'start 192.168.43.20' in udhcpd and 'end 192.168.43.50' in udhcpd)
+    log.write_text('')
+    got = run('check')
+    check('check: two stations joined, counted', got.stdout.strip() == '2' and 'wpa_supplicant' not in log.read_text())
+    (d / 'freq').write_text('2412\n')
+    got = run('check')
+    check('... wlan0 moved channel: started again on it', 'frequency=2412\n' in (hs / 'ap.conf').read_text()
+          and f'ssid={ssid}\n' in (hs / 'ap.conf').read_text() and 'psk="tulip-river-42"' in (hs / 'ap.conf').read_text()
+          and 'wpa_supplicant -B' in log.read_text())
+    (d / 'freq').unlink()
+    run('start', ssid, 'tulip-river-42')
+    check('wlan0 not connected: channel 6', 'frequency=2437\n' in (hs / 'ap.conf').read_text())
+    log.write_text('')
+    ap = int((hs / 'ap.pid').read_text())
+    check('stop: exits 0', run('stop').returncode == 0)
+    time.sleep(0.2)
+    check('... the access point killed', not pathlib.Path(f'/proc/{ap}').exists()
+          or pathlib.Path(f'/proc/{ap}/stat').read_text().split()[2] == 'Z')
+    check('... wlan1 down, the pid files gone', 'ifconfig wlan1 down' in log.read_text() and not (hs / 'ap.pid').exists())
+    check('check with nothing running: 1', run('check').returncode == 1)
+
+
 def main():
+    with tempfile.TemporaryDirectory(prefix='q2-hotspot-') as tmp:
+        hotspot_script(pathlib.Path(tmp))
     with tempfile.TemporaryDirectory(prefix='q2-guest-') as tmp:
         d = pathlib.Path(tmp)
         rig = Rig.__new__(Rig)
@@ -178,6 +240,9 @@ def run(rig, d):
         rig.send('main', f'device {mac} {name}')
     rig.send('main', f'pcm {CAR} SBC 48000 {SBC_48K}')
     rig.start_helper()
+    rig.wait(lambda: 'hotspot_pass=' in (d / 'data/config').read_text() and
+             re.search(r'^hotspot_pass=[a-z]+-[a-z]+-\d\d$', (d / 'data/config').read_text(), re.M), 'a password made')
+    print('ok   no hotspot password saved: one is made (word-word-NN) and saved')
     s = rig.until('starts on, idle, the settings in the state', state='idle', enabled='1', name="Gray's Q2",
                   allow='ask', leave='resume')
     check('... names where it plays: the car, its codec line', s['out'] == 'BMW 6R81' and s['outmac'] == CAR and
@@ -321,7 +386,8 @@ def run(rig, d):
     rig.cmd('leave stay')
     rig.cmd('name Car Q2')
     rig.until('the settings', allow='trusted', leave='stay', name='Car Q2')
-    check('... saved', (d / 'data/config').read_text() == 'enabled=1\nname=Car Q2\nallow=trusted\nleave=stay\n')
+    check('... saved', (d / 'data/config').read_text() ==
+          f"enabled=1\nname=Car Q2\nallow=trusted\nleave=stay\nhotspot=0\nhotspot_pass={rig.state()['hotspot_pass']}\n")
     rig.mark()
     rig.send('sink', f'pcm {PHONE} SBC 48000 {SBC_48K}')
     rig.expect('DISCONNECT /org/bluez/hci0/dev_AA_BB_CC_DD_EE_01', 'Trusted Guests Only: an untrusted guest is refused')
@@ -351,6 +417,30 @@ def run(rig, d):
     rig.until('allowed', state='playing')
     rig.until('no stream in time: failed', state='idle', event='failed')
 
+    # the hotspot
+    pw = rig.state()['hotspot_pass']
+    check('the hotspot starts off', rig.state()['hotspot'] == '0' and not rig.seen('HOTSPOT start'))
+    rig.mark()
+    rig.cmd('hotspot on')
+    rig.expect(f"HOTSPOT start {'Car Q2'.encode().hex()} {pw}", 'hotspot on: q2-hotspot starts, the name as hex')
+    s = rig.until('... up, its address and join code in the state', hotspot='1', hotspot_up='1', hotspot_ip='192.168.43.1',
+                  hotspot_name='Car Q2')
+    check('... the QR text', s['hotspot_qr'] == f'WIFI:T:WPA;S:Car Q2;P:{pw};;')
+    rig.until('... checked every so often: the phones joined', hotspot_clients='2')
+    rig.mark()
+    rig.cmd('hotspot-pass too"bad"pw')
+    rig.cmd('hotspot-pass short')
+    rig.cmd("name Q2: Gray's")
+    rig.expect(f"HOTSPOT start {'Q2: Gray\'s'.encode().hex()} {pw}", 'a new name restarts it under that name')
+    s = rig.until('... its QR text escaped', hotspot_name="Q2: Gray's")
+    check('... : escaped in the QR text', s['hotspot_qr'] == f"WIFI:T:WPA;S:Q2\\: Gray's;P:{pw};;")
+    check('a password with a quote, or under 8 characters, is refused', rig.state()['hotspot_pass'] == pw)
+    rig.mark()
+    rig.cmd('hotspot-pass river-tulip-07')
+    rig.expect("HOTSPOT start", 'a new password restarts it')
+    rig.until('... saved', hotspot_pass='river-tulip-07')
+    check('... in the config', 'hotspot_pass=river-tulip-07\n' in (d / 'data/config').read_text())
+
     # forget, off
     rig.mark()
     rig.cmd(f'forget {SAM}')
@@ -361,6 +451,7 @@ def run(rig, d):
     rig.cmd('off')
     rig.until('off', state='off', enabled='0')
     rig.expect('MAIN stock', '... the main daemon back to stock\'s roles')
+    rig.expect('HOTSPOT stop', '... and the hotspot stopped')
     rig.wait(lambda: rig.q2.poll() is None and not S.run(['pgrep', '-f', f'fake_bluez.py sink {d}'],
                                                          capture_output=True).stdout, 'the sink daemon stopped')
     print('ok   ... the sink daemon stopped')

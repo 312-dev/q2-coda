@@ -108,7 +108,8 @@ say "Join \"$SSID\" (password $PASS) from a phone now: waiting up to $WAIT s."
 joined=
 i=0
 while [ $i -lt $WAIT ]; do
-    if [ -s /tmp/probe-udhcpd.leases ] || grep -q 'ASSOC\|associated' /tmp/probe-ap.out 2>/dev/null; then joined=1; break; fi
+    # a phone that joined: wpa_supplicant's AP-STA-CONNECTED, or a lease (its own startup prints CONNECTED lines too)
+    if [ -s /tmp/probe-udhcpd.leases ] || grep -q 'AP-STA-CONNECTED' /tmp/probe-ap.out 2>/dev/null; then joined=1; break; fi
     sleep 2; i=$((i + 2))
 done
 sleep 5
@@ -122,8 +123,8 @@ say "== listeners (mDNS is 5353: AirPlay, Spotify Connect and DLNA announce over
 run netstat -lnu
 run netstat -lnt
 say "Now check on the phone: does it show the Q2 under AirPlay (shairport) or Spotify Connect while on $SSID?"
-say "Press Enter here when done (or wait 60 s)."
-read -t 60 _ 2>/dev/null || sleep 0
+say "Waiting 60 s for that (stdin may be /dev/null under q2remote, so no prompt)."
+sleep 60
 say "== the access point's log (last 60 lines)"
 tail -60 /tmp/probe-ap.out >> $LOG
 say "RESULT: joined=${joined:-no} mode=$mode wlan0-freq=${FREQ:-none}"
