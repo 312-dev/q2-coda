@@ -1,0 +1,6 @@
+# docs/changelog.md is a list of one-line bullets that branches add to at the same spot (the top of
+# "Unreleased"): a union merge keeps both sides' lines instead of stopping on a conflict. A bullet two
+# branches both reworded comes out twice, once in each wording; read the section after a merge and keep one.
+# Tables (docs/source-map.md, AGENTS.md) are not merged this way: their rows are edited in place as often as
+# they are added, and a union would keep a stale copy of each edited row without a word.
+docs/changelog.md merge=union
