@@ -831,7 +831,7 @@ def test_a_picker_opens_centred_on_its_value(fw, pick, value, title, rows, row):
     offset = p.props[(p.ui.view, 'offset')]
     assert offset == max(0, min(row * rh - (height - rh) // 2, rows * rh - height))
     if pick == 'Balance':
-        assert p.captions()[0] == 'L 12.0 dB' and p.captions()[24] == 'Centre' and p.captions()[-1] == 'R 12.0 dB'
+        assert p.captions()[0] == 'L 12.0 dB' and p.captions()[24] == 'Center' and p.captions()[-1] == 'R 12.0 dB'
     else:
         assert p.captions()[0].startswith('Auto (') and p.captions()[1] == '+12.0 dB' and p.captions()[-1] == '-24.0 dB'
 

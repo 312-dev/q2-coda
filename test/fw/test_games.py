@@ -2228,7 +2228,7 @@ def test_sudoku_paint_asks_over_the_board_and_says_when_it_is_solved(fw):
     assert banner(paint(p)) == []
     p.key(PLAY)
     (ask, white), (keys, quiet) = banner(paint(p))
-    assert ask == 'New game?' and 'Centre' in keys and 'Return' in keys and light(white) and darker(quiet, white)
+    assert ask == 'New game?' and 'Center' in keys and 'Return' in keys and light(white) and darker(quiet, white)
     p.key(RETURN)
     assert banner(paint(p)) == []
     s.sud.cell[:] = SOLVED
@@ -2279,9 +2279,9 @@ def test_vortex_paint_waiting_to_launch_is_a_ball_and_the_lives_and_a_hint_to_pr
     ops = paint(p)
     ball, *lives = [o.color for o in ops if o.kind == 'dot']  # no trail
     assert light(ball) and len(lives) == 3 and len(set(lives)) == 1 and grey(lives[0]) and darker(lives[0], ball)
-    assert 'Centre' in texts(ops)
+    assert 'Center' in texts(ops)
     p.key(CENTER)
-    assert 'Centre' not in texts(paint(p))
+    assert 'Center' not in texts(paint(p))
 
 
 def test_vortex_paint_the_ball_trails_its_last_frames_in_the_tone_fading_behind_it(fw):
