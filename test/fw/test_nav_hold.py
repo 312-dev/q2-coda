@@ -1924,9 +1924,10 @@ def test_oled_draws_the_menu_as_the_inset_modal(fw, ui, st, recs, mcl):
     assert ui.prop(hold.view(), '_ringnav_index', -1) == 0
 
 
-def test_oled_menu_on_songs_starts_with_sorting_a_gap_above_the_actions(fw, ui, st, recs, mcl):
-    """Songs (0xf001), whose action row holds stock's Sort: Sorting first, then a 12 px gap that is no row, then the
-    actions; the menu opens on Play Next, one tick under Sorting."""
+def test_oled_menu_on_songs_starts_with_sorting_then_the_actions_on_whole_rows(fw, ui, st, recs, mcl):
+    """Songs (0xf001), whose action row holds stock's Sort: Sorting first, then the actions; its 12 px gap is no row,
+    and the panel's rows are more than six, so it scrolls, and the gap goes, so it scrolls on whole rows (audit2 E1:
+    Sorting tells itself apart by its symbol); the menu opens on Play Next, one tick under Sorting."""
     use_set(st, 'oled')
     hold = Hold(fw, ui, st, recs, mcl).songs_page('allmusic_page', [song(recs, i) for i in range(3)])
     bar = ui.child(hold.page, 'view', 0, 0, 375, 32)
@@ -1937,7 +1938,7 @@ def test_oled_menu_on_songs_starts_with_sorting_a_gap_above_the_actions(fw, ui, 
     rows = hold.menu()
     kids = ui.kids(hold.view())
     assert rows[0] == 'Sorting' and rows[1] is None and rows[2] == 'Play Next'
-    assert ui.nodes[kids[1]].rect()[3] == 12 and ui.nodes[kids[2]].rect()[1] == 32 + 12
+    assert len(rows) > 7 and not ui.nodes[kids[1]].visible and ui.nodes[kids[2]].rect()[1] == 32
     assert ui.prop(hold.view(), '_ringnav_index', -1) == 1
 
 

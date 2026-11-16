@@ -541,7 +541,10 @@ an inset modal over the page, which stays on screen dimmed half way to black; no
 - **Rating** (Now Playing's Centre cycle, a menu's Rate) is a picker in the same panel: Unrated, 1 Heart
   to 5 Hearts, the current one checked; Centre keeps a row's rating and closes, Return closes.
 - **Gaps:** a setting heading the menu stands 12 px above the actions; a destructive row (Delete
-  Song) comes last, 12 px below them, and asks before it acts. Space, never a rule.
+  Song) comes last, 12 px below them, and asks before it acts. Space, never a rule. A panel whose
+  rows are more than six has no gaps, so it scrolls, and ends, on whole rows (the user's, from
+  audit2 E1: a gap cut the end of Now Playing's More); its settings tell themselves apart by the
+  symbol before the label.
 - The menu opens on its first action, lit; the wheel moves, Centre picks, Return closes it back to
   the row it came from.
 

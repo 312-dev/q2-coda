@@ -111,8 +111,9 @@ void modal_row(void *row, void *label, const char *icon, const char *value, int 
 
 static int modal_lit(const void *unused);
 /* An open dialog as the modal: its title bar gone, its list the panel's rows, the page under it
- * dimmed by modal_paint. Rows are stacked as they stand, a gap's 12 px included, each row
- * MODAL_ROW high and the panel's width; at most MODAL_ROWS rows show. The list's forced row height
+ * dimmed by modal_paint. Rows are stacked as they stand, a gap's 12 px included (none when the
+ * rows are more than show, so the panel scrolls on whole rows), each row MODAL_ROW high and the
+ * panel's width; at most MODAL_ROWS rows show. The list's forced row height
  * and default go, so the gaps keep theirs (ipod_list_layout stacks each child by its own) and the
  * list never reads as a settings list (navigation.c settings_list), which would move it. A dialog
  * with no list (a playlist's More) has its list_items for rows, placed in it the same way. */
@@ -131,11 +132,20 @@ void modal_frame(void *win, void *list) {
         I(list, LIST_DEFAULT_ITEM_HEIGHT) = 0;
     }
     int w = modal_row_w(), x = list ? 0 : MODAL_X - row_out(), top = MODAL_TOP + MODAL_PAD,
-        y = list ? 0 : top, shown = 0, rows = 0;
+        y = list ? 0 : top, shown = 0, rows = 0, all = 0;
+    /* a panel that scrolls has no gaps, so it scrolls, and ends, on whole rows (the user's, audit2
+     * E1: a 12 px gap left the end of Now Playing's More cut) */
+    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
+        void *c = widget_get_child(view, i);
+        const char *type = widget_get_type(c);
+        all += widget_get_visible(c) && tk_strcmp(type, "label") &&
+               (list || !tk_strcmp(type, "list_item"));
+    }
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *c = widget_get_child(view, i);
         const char *type = widget_get_type(c);
         int gap = !tk_strcmp(type, "label"), h = gap ? MODAL_GAP : MODAL_ROW;
+        if (gap && all > MODAL_ROWS) widget_set_visible(c, 0, 0);
         if (!widget_get_visible(c) || (!list && !gap && tk_strcmp(type, "list_item"))) continue;
         widget_move_resize(c, x, y, w, h);
         y += h;

@@ -680,6 +680,23 @@ def test_an_inset_modals_scroll_indicator_stays_in_its_panel(fw, st):
     assert y0 >= -8 and y1 <= 6 * 32 + 8
 
 
+@pytest.mark.parametrize('rows, gap', [(5, 12), (8, 0)])
+def test_an_inset_modals_gap_stays_only_while_nothing_scrolls(fw, st, rows, gap):
+    """menu_modal.c modal_frame (audit2 E1): a destructive row's 12 px gap stands while every row shows; a panel that
+    scrolls drops it, so it scrolls and ends on whole 32 px rows, not cut by 12 px (Now Playing's More)."""
+    ui = Ui(fw)
+    theme(fw)
+    win = ui.window('sortselect_dialog', kind='dialog')
+    lv = ui.add('list_view', win, (0, 44, 375, 210), 'list_view')
+    view = ui.add('scroll_view', lv, (0, 0, 375, 210), 'scroll_view')
+    items = [ui.add('list_item', view, (0, 0, 375, 32)) for _ in range(rows)]
+    ui.add('label', view, (0, 0, 375, 12), 'gap')
+    last = ui.add('list_item', view, (0, 0, 375, 32))
+    fw.fn('modal_frame', None, C.c_void_p, C.c_void_p)(win.addr, lv.addr)
+    assert last.box[1] - items[-1].box[1] == 32 + gap
+    assert view.props.get('virtual_h') == 32 * (rows + 1) + gap
+
+
 # A scrolling text's faded ends (list.marquee.fade, OLED's; list_marks.c marquee_fade): its own column inside stock's
 # 2 px margins, 12 columns at an end, clear inside to opaque at the end, in the colour behind the text.
 FADE = 12
