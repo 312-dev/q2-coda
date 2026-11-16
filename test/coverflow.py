@@ -806,8 +806,10 @@ int toolsGetExternCover(const char *src, const char *dst, int ww, int h) {
     return extern_found ? write_art(dst, "extern") : 0;
 }
 static unsigned free_blocks = 1 << 20, card_blocks = 1 << 21, statfs_calls; /* 4 GB free of 8 GB */
+/* The art cache's room check, and a full scan's room check on /mnt/data before its indexes: both
+   see the same card here. */
 int shim_statfs(const char *p, void *out) {
-    assert(!strcmp(p, PEQ_ROOT "/mnt/mmc/.coverflow"));
+    assert(!strcmp(p, PEQ_ROOT "/mnt/mmc/.coverflow") || !strcmp(p, "/mnt/data"));
     ++statfs_calls;
     unsigned *s = out;
     s[1] = 4096, s[3] = card_blocks, s[7] = free_blocks; /* MIPS o32 statfs: f_bsize, f_blocks, f_bavail */
