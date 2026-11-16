@@ -1,0 +1,146 @@
+#!/bin/bash
+# q2-heavy CMD...: run a memory-heavy q2-pod job (test/fw, test/patch.py, a patch_shards.py shard, a
+# build) in one of Q2_HEAVY_SLOTS slots (default 4), so parallel agents share the machine without running
+# it out of memory or disk. Installed as ~/.local/bin/q2-heavy from tools/ci/q2-heavy; see
+# docs/building.md#fast-test-runs.
+#
+# A job starts only when all of these hold, else it waits and says why once a minute:
+#   - MemAvailable is at least Q2_HEAVY_RESERVE_GB (5 GB);
+#   - memory pressure (/proc/pressure/memory, some avg10) is under 10% and io pressure (full avg10) under 20%;
+#   - the Windows drive (/mnt/c, where WSL's disk and crash dumps live) has 25 GB free;
+#   - on battery (AC1 offline), fewer jobs run: one under 30% charge, none under 15%; plugging the
+#     charger back in restores every slot at the next admission (Q2_HEAVY_AC and Q2_HEAVY_BATTERY
+#     name other sysfs files, and Q2_HEAVY_PSI another /proc/pressure, for a test).
+# Under 10 GB free on /mnt/c it refuses outright (exit 75), and a running job is paused (SIGSTOP) until
+# 25 GB are free again (Q2_HEAVY_DISK_START_GB and Q2_HEAVY_DISK_STOP_GB move the two marks). Starts are
+# spaced Q2_HEAVY_RAMP seconds (15) apart, so the next job's check sees the last one's memory. Each job runs
+# in its own systemd scope with MemoryMax=Q2_HEAVY_MEM (3G; 8G under ASan), so a runaway is killed alone,
+# and with tools/ci/nodump.c preloaded, so a crash writes no core dump.
+# A q2-heavy inside a q2-heavy job runs its command at once (it already holds a slot).
+slots=${Q2_HEAVY_SLOTS:-4}
+# An ASan job (libasan in LD_PRELOAD) gets 8G: test/fw under ASan in one process peaks at 7.4 GB (measured).
+case "$LD_PRELOAD" in *libasan*) mem=${Q2_HEAVY_MEM:-8G} ;; *) mem=${Q2_HEAVY_MEM:-3G} ;; esac
+reserve=${Q2_HEAVY_RESERVE_GB:-5}
+ramp=${Q2_HEAVY_RAMP:-15}
+disk_start=${Q2_HEAVY_DISK_START_GB:-25}
+disk_stop=${Q2_HEAVY_DISK_STOP_GB:-10}
+ac=${Q2_HEAVY_AC:-/sys/class/power_supply/AC1/online}
+battery=${Q2_HEAVY_BATTERY:-/sys/class/power_supply/BAT1/capacity}
+dir=${Q2_HEAVY_LOCKDIR:-/home/gray/.cache}
+state=$dir/q2-heavy
+[ $# -gt 0 ] || { echo 'usage: q2-heavy CMD...' >&2; exit 2; }
+if [ -n "$Q2_HEAVY_JOB" ]; then exec "$@"; fi
+mkdir -p "$state"
+
+# The no-core-dump preload, built once from the repository's source next to this script's install.
+nodump=$state/nodump.so
+src=${Q2_HEAVY_NODUMP_SRC:-/home/gray/repos/q2-pod/tools/ci/nodump.c}
+if [ ! -s "$nodump" ]; then
+    for s in "$src" /home/gray/repos/q2-pod-wt/*/tools/ci/nodump.c; do
+        [ -f "$s" ] && cc -O2 -shared -fPIC "$s" -o "$nodump.$$" 2>/dev/null && mv "$nodump.$$" "$nodump" && break
+    done
+fi
+
+gb() { echo $(( ${1%G} )); }
+avail_gb() { awk '/^MemAvailable:/ {print int($2 / 1048576)}' /proc/meminfo; }
+disk_gb() { df --output=avail -BG /mnt/c 2>/dev/null | awk 'NR == 2 {print int($1)}'; }
+psi() { awk -v k="$2" '$1 == k {split($2, a, "="); print int(a[2])}' "${Q2_HEAVY_PSI:-/proc/pressure}/$1" 2>/dev/null; }
+
+# How many heavy jobs may run at once on this power: all slots on the charger (or with no battery to read),
+# one on battery under 30%, none under 15%.
+power_slots() {
+    local on cap
+    on=$(cat "$ac" 2>/dev/null); cap=$(cat "$battery" 2>/dev/null)
+    if [ "$on" != 0 ] || [ -z "$cap" ]; then echo "$slots"
+    elif [ "$cap" -lt 15 ]; then echo 0
+    elif [ "$cap" -lt 30 ]; then echo 1
+    else echo "$slots"; fi
+}
+busy() {  # slots held now
+    local i n=0 f
+    for i in $(seq 1 "$slots"); do
+        exec {f}>"$dir/q2-heavy.$i.lock"
+        flock -n "$f" || n=$((n + 1))
+        exec {f}>&-
+    done
+    echo $n
+}
+
+# Why a job may not start now: empty when it may.
+why_not() {
+    local d m pm pio
+    d=$(disk_gb); m=$(avail_gb); pm=$(psi memory some); pio=$(psi io full)
+    if [ -n "$d" ] && [ "$d" -lt "$disk_start" ]; then echo "only ${d} GB free on /mnt/c (needs $disk_start)"; return; fi
+    if [ "$m" -lt "$reserve" ]; then echo "${m} GB available (needs $reserve)"; return; fi
+    if [ "${pm:-0}" -ge 10 ]; then echo "memory pressure ${pm}%"; return; fi
+    if [ "${pio:-0}" -ge 20 ]; then echo "io pressure ${pio}%"; return; fi
+    allowed=$(power_slots)
+    if [ "$allowed" -lt "$slots" ] && [ "$(busy)" -ge "$allowed" ]; then
+        echo "on battery at $(cat "$battery")%: $allowed heavy job(s) at a time (none under 15%, one under 30%)"; return
+    fi
+}
+
+said=0
+while :; do
+    d=$(disk_gb)
+    if [ -n "$d" ] && [ "$d" -lt "$disk_stop" ]; then
+        echo "q2-heavy: refusing: only ${d} GB free on /mnt/c, the Windows drive WSL's disk lives on" >&2
+        exit 75
+    fi
+    exec {start}>"$dir/q2-heavy.start.lock"
+    flock "$start"
+    reason=$(why_not)
+    if [ -z "$reason" ]; then
+        for i in $(seq 1 "$slots"); do
+            exec {fd}>"$dir/q2-heavy.$i.lock"
+            if flock -n "$fd"; then
+                slot=$i
+                break
+            fi
+            exec {fd}>&-
+        done
+        [ -n "$slot" ] && break
+        reason="all $slots slots busy"
+    fi
+    exec {start}>&-
+    if [ $(( $(date +%s) - said )) -ge 60 ]; then
+        echo "q2-heavy: waiting: $reason" >&2
+        said=$(date +%s)
+    fi
+    sleep 5
+done
+
+export Q2_HEAVY_JOB=$slot
+[ -s "$nodump" ] && export LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}$nodump"
+ulimit -c 0
+if systemd-run --user --scope -q true 2>/dev/null; then
+    setsid systemd-run --user --scope -q --collect -p MemoryMax="$mem" -p MemorySwapMax=512M -- "$@" &
+else
+    setsid "$@" &
+fi
+job=$!
+trap 'kill -TERM -- -$job 2>/dev/null' INT TERM HUP
+# Hold the start lock through the ramp, so the next job's memory check counts this one.
+( sleep "$ramp"; ) &
+ramp_pid=$!
+paused=0
+while kill -0 "$job" 2>/dev/null; do
+    if [ -n "$ramp_pid" ] && ! kill -0 "$ramp_pid" 2>/dev/null; then
+        exec {start}>&-
+        ramp_pid=
+    fi
+    d=$(disk_gb)
+    if [ -n "$d" ]; then
+        if [ "$paused" = 0 ] && [ "$d" -lt "$disk_stop" ]; then
+            echo "q2-heavy: pausing job $job: only ${d} GB free on /mnt/c" >&2
+            kill -STOP -- -"$job" 2>/dev/null; paused=1
+        elif [ "$paused" = 1 ] && [ "$d" -ge "$disk_start" ]; then
+            echo "q2-heavy: resuming job $job: ${d} GB free on /mnt/c" >&2
+            kill -CONT -- -"$job" 2>/dev/null; paused=0
+        fi
+    fi
+    sleep 2 & wait $! 2>/dev/null
+done
+wait "$job"
+rc=$?
+exit $rc
