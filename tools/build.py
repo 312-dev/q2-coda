@@ -460,13 +460,18 @@ BT_SILENCE_SITES = ((0x41465c, 0x8e460030, 'j', 'timeout'), (0x414684, 0x0000282
 WATCHDOG = 'usr/bin/checkappprocess.sh'
 WATCHDOG_SLEEP = (b'\tsleep 2\n', b'\tsleep 10\n')
 # The config a reset copies to /mnt/data: Enlarged Album Art (10 s wait) and Standby start off. So does stock's Wheel Function: Q2 Pod runs stock in Volume Mode whatever the key holds (WHEEL_MODE), and a Q2 reset here and returned to stock gets Menu Mode, the default stock's changelog names and a missing key gives (the shipped file says 1).
+# It also names the language, English (2): stock's config_init (0x5047f8) sets g_guideflag when SYSSET LANGUAGE is
+# missing, and the first boot and every reset opened stock's language guide, where Q2 Pod's wheel and Centre are off.
+# Q2 Pod is English only (Settings has no Language row), so the guide is never shown (docs/internals.md#first-boot).
 DEFAULT_CONFIG = 'release/assets/default/raw/config.ini'
 DEFAULT_CONFIG_OFF = (b'COVERMODE', b'STANDBYMODE', b'WHEELMODE')
+DEFAULT_LANGUAGE = b'LANGUAGE=2\n'
 def default_config(config):
     for key in DEFAULT_CONFIG_OFF:
         check(config.count(b'\n%s=1\n' % key) == 1, 'Unexpected default config.ini')
         config = config.replace(b'\n%s=1\n' % key, b'\n%s=0\n' % key)
-    return config
+    check(config.count(b'[SYSSET]\n') == 1 and b'\nLANGUAGE=' not in config, 'Unexpected default config.ini')
+    return config.replace(b'[SYSSET]\n', b'[SYSSET]\n' + DEFAULT_LANGUAGE)
 # toolsSetRtcTime's command, with its padding; -u keeps the RTC in UTC. See docs/internals.md#clock.
 RTC_WRITE = (b'hwclock -w\0\0', b'hwclock -wu\0')
 # networktime_adjust_thd's time servers (0x7836bc, after time.apple.com, before time.windows.com): stock's
@@ -815,6 +820,9 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('msg_addfavsuccess', 'Added To Fav', 'Added to Favorites'), ('msg_favsuccess', 'Added To Fav', 'Added to Favorites'),
     ('msg_namenull', "The name can't be empty", "Name can't be empty"),
     ('scan_now', 'Scan music now', 'Scan Music Now'), ('scan_spec', 'Scan specified folders', 'Scan Specified Folders'),
+    # the card is an SD card in every label (docs/oled-design.md Copy): stock says TF
+    ('update_tf', 'TF card update', 'SD Card Update'), ('msg_nottf', 'No TF Card Found', 'No SD Card Found'),
+    ('msg_tfeject', 'TF Card Removed', 'SD Card Removed'), ('msg_tfinsert', 'TF Card Inserted', 'SD Card Inserted'),
     # Screen Off Time's and Standby's choices spelled out, as iOS's Auto-Lock words them (the menu review's,
     # 2026-11-15): "30 seconds", "1 minute"
     *((f'lighttime_{n}s', f'{n}s', f'{n} seconds') for n in (15, 30)),
@@ -1080,7 +1088,7 @@ ENGLISH = {
     '下': 'Down', '上': 'Up', '左滑': 'Swipe Left', '右滑': 'Swipe Right', '按键测试': 'Key Test',
     '耳机输出测试': 'Headphone Test', '请插单端耳机': 'Plug in single-ended headphones',
     '播放(男左女右)': 'Play (left male, right female)', '蓝牙接收测试': 'Bluetooth Receiver Test', '完成': 'Done',
-    '电池检测': 'Battery Test', '当前电量：': 'Battery:', '充电状态：': 'Charging:', 'TF测试': 'microSD Test',
+    '电池检测': 'Battery Test', '当前电量：': 'Battery:', '充电状态：': 'Charging:', 'TF测试': 'SD Card Test',
     '触摸测试': 'Touch Test', 'wifi测试': 'Wi-Fi Test', '太阳之子': 'Album', '周杰伦': 'Artist',
     '播放全部': 'Play All', '导入歌单': 'Import Playlists', '导出歌单': 'Export Playlists', '测试歌单': 'Playlist',
     '共0首': '0 songs',

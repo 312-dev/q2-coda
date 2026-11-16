@@ -1319,7 +1319,7 @@ def test_main_push(world, capsys):
 def test_main_install(world, capsys):
     assert q.main(['install', 'a']) == 0
     assert world.calls == [('install', ('a',), {})]
-    assert capsys.readouterr().out == 'update.tar is on the card: System settings → System Update → TF card update\n'
+    assert capsys.readouterr().out == 'update.tar is on the card: System settings → System Update → SD Card Update\n'
 
 
 def test_main_log_tail(world, capsys):

@@ -11,6 +11,11 @@
   - Menus: Home lists **Now Playing**, **Library**, **Streaming**, **Folders**, **Cover Flow**, **Search** and **Settings**; Shuffle Songs and the Shortcut row are gone from it (Carousel keeps its Shortcut card). **Settings** lists **Wi-Fi**, **Bluetooth**, **General**, **Playback**, **Car Remote**, **Display**, **Controls** and **Battery** (Power's new name); **General** holds About, System Update, Storage, Date & Time, App Store, Network and Reset Settings, then **Restart** and **Shut Down**. The Library's new order is Songs, Playlists, Artists, Albums, Search, Genres, **Years** (Era's new name), Ratings and the rest, with Shuffle, Hi-Res, Long Songs and Upload Scrobbles hidden; a Library order you set yourself is kept. Screen Off Time and Standby spell their times out ("30 seconds", "1 minute"), and a playlist cover's hold menu no longer offers Select Playlists….
   - Everywhere: US spelling on screen and in the manual: **Favorites**, **Center**, **Canceled**, color and gray.
   - Buttons Lock (OLED): the card a locked press shows reads **Press Center to unlock**.
+  - Library (OLED): the A-Z index works on a list you have scrolled down; touching the lower letters there did nothing.
+  - First start: a new Q2, or one after a reset, starts on Home in English instead of stock's language picker.
+  - Library: Songs with no music on the card is a single **Scan Music Now** row with **No songs** and **Copy music to the SD card** under it, in place of stock's picture, its second message and the blue button.
+  - Folders: the top of the screen says **Folders** at the SD card's root and the folder's own name inside it, instead of SD or a path.
+  - Wording: the card is called the SD card everywhere: **System Update → SD Card Update**, and the messages when it goes in or comes out (stock said TF card).
   - Settings: times with a one-letter unit sit against their number: **Crossfade** reads "5s", **Standby Limit** "8h", and an album's length on its page "1h12m"; "min" keeps its space ("Resume Songs: 30 min").
   - Library: on Songs with no music on the card, pressing Centre presses **Scan Music Now**, as tapping it does. It used to turn the screen off.
   - Folder: an SD card or folder with nothing to list says **No folders** and **Copy music to the SD card**, instead of showing a blank screen.

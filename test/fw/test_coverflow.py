@@ -3913,6 +3913,36 @@ def test_home_rests_on_seven_rows_and_scrolls_the_rest(fw):
     assert content(view) - box == 2 * 32 and offset(view) == 2 * 32
 
 
+def test_home_scrolled_to_its_end_keeps_its_scroll_through_stock_s_relayout(fw):
+    """Settings selected at Home's end, opened, then Return: Home's relayout puts stock's content back (the rows'
+    foot) and AWTK clamps the scroll to it, which sat the last row on the screen's foot with the padding gone. The
+    paint's home_pad sets the content again and puts back the scroll it last saw; a scroll of the user's own, with
+    no relayout, stays."""
+    ui, home, view = overflow_rig(fw)
+    pad = fw.fn('home_pad', None, C.c_void_p)
+    fw.fn('home_overflow', None, C.c_void_p, C.c_int)(home.list, 262)
+    offset(view, 2 * 32)  # the wheel at Settings: as far as the rest goes
+    pad(view)
+    C.c_int.from_address(view + O['VIEW_CONTENT_H']).value = 9 * 32  # Return: stock's relayout
+    offset(view, 9 * 32 - 280)  # and its clamp
+    pad(view)
+    assert content(view) - 280 == 2 * 32 and offset(view) == 2 * 32
+    offset(view, 32)  # a drag up
+    pad(view)
+    assert offset(view) == 32
+    offset(view, 2 * 32)
+    pad(view)
+    C.c_int.from_address(view + O['W_H']).value = 320  # the paint's other form of the view (Split's band)
+    offset(view, 2 * 32 - 40)
+    pad(view)
+    C.c_int.from_address(view + O['VIEW_CONTENT_H']).value = 9 * 32
+    offset(view, 9 * 32 - 320)
+    C.c_int.from_address(view + O['W_H']).value = 280  # and back: the relayout clamped it under its 280
+    offset(view, 9 * 32 - 280)
+    pad(view)
+    assert offset(view) == 2 * 32  # its foot where it was: the padding kept
+
+
 def test_a_hidden_row_restacked_last_is_not_scrolled_to(fw):
     ui, home, view = overflow_rig(fw, hidden=(8,))
     foot = C.c_int()

@@ -1148,10 +1148,17 @@ class Pull:
         return len(self.bound)
 
     def to_local(self, w, xy, *_):
+        """AWTK's: the point less the widget's screen origin, plus the scroll of a list on the way (widget_get_offset),
+        so a scrolled list's press is in its content's coordinates."""
         x, y = self.ui.by[w].origin()
         point = (C.c_int * 2).from_address(xy)
         point[0] -= x
         point[1] -= y
+        it = self.ui.by[w]
+        while it is not None and it.kind != b'window_manager':
+            if it.kind in (b'table_client', b'scroll_view'):
+                point[1] += it.int(O['TABLE_TOP'] if it.kind == b'table_client' else O['SCROLL_Y'])
+            it = it.parent
 
     def event(self, kind, x, y):
         e = C.create_string_buffer(0x40)

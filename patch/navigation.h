@@ -408,6 +408,7 @@ void feedback_songs(void *top, void *row);
 void feedback_folder(void *top);
 int feedback_offline(const char *title);
 void feedback_switch_bar(void *w, void *canvas);
+void feedback_scan_bar(void *w, void *canvas);
 void feedback_shuffled(const char *what, int songs);
 void cf_veil(void *win, int on);              /* win unseen (1) or seen again under Coverflow */
 int ringnav_otg(void);                        /* Playback's On-The-Go switch */

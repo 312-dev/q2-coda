@@ -1,6 +1,6 @@
 # Boot
 
-The Q2 splash shown on the screen at power-on is a JPEG inside the rootfs, and on Q2 Pod's default builds in Dark Mode a short animation played over it ([Boot animation](#boot-animation)). A JPEG on the microSD card replaces both without a firmware update; a build can also change the built-in one ([Custom boot logo](#custom-boot-logo)).
+The Q2 splash shown on the screen at power-on is a JPEG inside the rootfs, and on Q2 Pod's default builds in Dark Mode a short animation played over it ([Boot animation](#boot-animation)). A JPEG on the SD card replaces both without a firmware update; a build can also change the built-in one ([Custom boot logo](#custom-boot-logo)).
 
 | What       | Where                                                                                                                                                          |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -30,7 +30,7 @@ demo's `platform_init` starts `checkappprocess.sh &`, the watchdog: it checks wi
 
 ## Rockbox
 
-Q2 Pod can share the device with [Rockbox](https://github.com/DiamondBond/q2-rockbox/tree/shanlingq2), which runs from the microSD card. Rockbox is the initial power-on default when installed: **holding Play/Pause while powering on** starts Q2 Pod for that session instead, and Rockbox's **Boot stock OS** returns to Q2 Pod the same way. A final **System settings → Power → Boot to: Rockbox / Q2 Pod** row appears while `/mnt/mmc/.rockbox/rockbox` is a regular file. Tap or Centre toggles the next power-on choice. The choice is saved in `/mnt/data/boot-target` as `rockbox` or `q2pod`, through a synced temporary file and rename. A failed save reports an error and keeps the displayed choice. Missing or invalid preferences default to Rockbox, and missing Rockbox always falls back to Q2 Pod.
+Q2 Pod can share the device with [Rockbox](https://github.com/DiamondBond/q2-rockbox/tree/shanlingq2), which runs from the SD card. Rockbox is the initial power-on default when installed: **holding Play/Pause while powering on** starts Q2 Pod for that session instead, and Rockbox's **Boot stock OS** returns to Q2 Pod the same way. A final **System settings → Power → Boot to: Rockbox / Q2 Pod** row appears while `/mnt/mmc/.rockbox/rockbox` is a regular file. Tap or Centre toggles the next power-on choice. The choice is saved in `/mnt/data/boot-target` as `rockbox` or `q2pod`, through a synced temporary file and rename. A failed save reports an error and keeps the displayed choice. Missing or invalid preferences default to Rockbox, and missing Rockbox always falls back to Q2 Pod.
 
 | What       | Where                                                                                      |
 | ---------- | ------------------------------------------------------------------------------------------ |
@@ -92,7 +92,7 @@ python3 tools/splash.py /tmp/q2-frames assets/boot-anim.q2a
 
 ### From the card
 
-Put your logo on the microSD card as `/Q2Pod/boot/boot-logo.jpg`. While Q2 Pod is running, it checks the file on each card mount (including startup and leaving USB storage mode) and copies it to `/mnt/data/boot-logo.jpg`, through a synced temporary file and rename; the splash is drawn before the card is read, so the new logo shows from the next power-on after synchronization. Booting directly into Rockbox does not import a new card logo; start Q2 Pod once first.
+Put your logo on the SD card as `/Q2Pod/boot/boot-logo.jpg`. While Q2 Pod is running, it checks the file on each card mount (including startup and leaving USB storage mode) and copies it to `/mnt/data/boot-logo.jpg`, through a synced temporary file and rename; the splash is drawn before the card is read, so the new logo shows from the next power-on after synchronization. Booting directly into Rockbox does not import a new card logo; start Q2 Pod once first.
 
 - **Size: 320x375, stored turned 90° clockwise as the stock splash is, or upright at 375x320**, which Q2 Pod turns itself with the Q2's own `ffmpeg`.
 - **Format: 8-bit, three-component baseline JPEG, at most 512 KB** ([Making a logo that works](#making-a-logo-that-works)).
@@ -108,7 +108,7 @@ Every build replaces the built-in splash with `assets/boot-logo.jpg`, and plays 
 python3 tools/build.py 'Q2 Firmware V1.36.zip' --out /tmp/q2-logo --logo my-logo.jpg
 ```
 
-Flash `/tmp/q2-logo/update.tar` the normal way: copy it to the root of the microSD card, then **System settings → System Update → TF card update**. The update keeps the scroll-wheel patch, and **About** still shows the build on its **CFW. Version** row (`VERSION` in `tools/build.py`).
+Flash `/tmp/q2-logo/update.tar` the normal way: copy it to the root of the SD card, then **System settings → System Update → SD Card Update**. The update keeps the scroll-wheel patch, and **About** still shows the build on its **CFW. Version** row (`VERSION` in `tools/build.py`).
 
 ### Light Mode
 

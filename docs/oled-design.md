@@ -121,6 +121,8 @@ Rules:
 - **A number, a space, its unit:** "4000 K"; a percentage takes no space ("50%").
 - **Single-letter time units attach:** 3h, 30s, 1h20m. "min" and spelled-out words keep the
   space: 15 min, 30 seconds.
+- **The card is the SD card:** "SD Card" in row names and titles (SD Card Update, SD Card Test),
+  "SD card" in a sentence ("Copy music to the SD card"). Never TF or microSD, stock's words.
 - **Size steps are 15, 16, 18, 20, 22** (56 for the confirmation's glyph, 17 for the [tabs](#tabs)' labels, 13 for [Edit Library](#edit-library)'s hint). Nothing else.
 - **Row pitch is about 1.6 times the row size** (32 px for 20 px type), as the concept's is
   about twice its cap height.
@@ -468,6 +470,8 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   it and say what is missing ("No favorites", hint "Hold Play/Pause on a song to add it").
 - Folder over a level with nothing in it (an empty card) says "No folders", hint "Copy music to
   the SD card".
+- Songs over an empty library is one selected row, **Scan Music Now** (Center or a tap runs the
+  scan), with "No songs", hint "Copy music to the SD card", under it; stock's picture and pill go.
 - Offline and missing things use the same form (Spotify's "Spotify isn't on the card", the App
   Store's "No apps listed" under its Check for Updates row, one line in the list's pitch). TIDAL
   with no Wi-Fi opens a page of its own titled TIDAL: "Not connected", hint "Turn on Wi-Fi in
