@@ -179,3 +179,16 @@ def test_the_replace_card_keeps_the_guest_s_name_it_shows(g):
         g.fw.fn('guest_field', None, C.c_char_p, C.c_char_p, C.c_uint)(key.encode(), C.create_string_buffer(8), 8)
     gu = C.string_at(C.addressof(C.c_char.in_dll(g.fw.lib, 'guest_ui__gu')), g.fw.sizes['guest_ui__gu'])
     assert b"Keep Alex's Pixel" in gu and b"\x00Alex's Pixel\x00" in gu and b"Sam's iPhone wants to play music" in gu
+
+
+def test_a_guest_playing_on_its_now_playing_keeps_the_screen_lit(g):
+    """Smart Awake (navigation.c keep_lit_poll) counts the guest's Now Playing as the owner's: lit while the guest's
+    song plays with its page in front; paused, or another page in front, it times out as usual."""
+    lit = g.fw.fn('guest_ui_keeps_lit', C.c_int, C.c_void_p)
+    g.look(state='idle', enabled=1)
+    g.look(state='playing', enabled=1, guest="Alex's Pixel", title='Levitating')
+    page = g.page('guestnp_page')
+    assert lit(page) == 1
+    assert lit(g.ui.windows[0]) == 0  # the page under it
+    g.look(state='paused', enabled=1, guest="Alex's Pixel", title='Levitating')
+    assert g.page('guestnp_page') == page and lit(page) == 0

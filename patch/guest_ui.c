@@ -809,6 +809,10 @@ static void hot_paint(void *w, void *canvas) {
 /* ---- each look ---- */
 
 /* bt_ui.c's Bluetooth page: its Audio group's Guest Play row's value. */
+/* Smart Awake (navigation.c keep_lit_poll): the guest's Now Playing in front (top) while the
+ * guest's song plays holds the screen lit, as the owner's Now Playing does. */
+int guest_ui_keeps_lit(void *top) { return top && top == gu.np && guest_ui_state() == G_PLAYING; }
+
 const char *guest_ui_value(void) {
     return !guest_ui_on() ? "Off" : gv_is("allow", "trusted") ? "Trusted" : "Ask";
 }

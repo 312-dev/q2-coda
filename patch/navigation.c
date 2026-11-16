@@ -3974,16 +3974,20 @@ static void lyric_follow(void *lrc, int ms, int front, int shown) {
 
 /* Smart Awake (#57): Now Playing lit in front, a song playing, on its lyrics or visualizer page,
  * or its full-screen art or ⋯'s About (np_about.c) in front, holds the screen on as the lyrics
- * wheel does; paused, it times out as usual. */
+ * wheel does; paused, it times out as usual. A guest's Now Playing in front with the guest's song
+ * playing does too (guest_ui.c guest_ui_keeps_lit). */
 static void keep_lit_poll(void) {
     unsigned now = (unsigned)time_now_ms();
-    if (!st.np_slide || now - st.keep_lit_at < 1000) return;
+    if (now - st.keep_lit_at < 1000) return;
+    void *top = window_manager_get_top_window(window_manager());
+    int guest = guest_ui_keeps_lit(top);
+    if (!st.np_slide && !guest) return;
     st.keep_lit_at = now;
     accent(); /* reads the settings */
-    void *top = window_manager_get_top_window(window_manager());
-    if (st.keep_lit && g_backlight_status && mclGetPlayStatus() == 2 &&
-        ((top == st.np_win && widget_get_prop_int(st.np_slide, "value", 0)) ||
-         (top && (top == st.bc[2] || top == np_about_page()))))
+    if (st.keep_lit && g_backlight_status &&
+        (guest || (mclGetPlayStatus() == 2 &&
+                   ((top == st.np_win && widget_get_prop_int(st.np_slide, "value", 0)) ||
+                    (top && (top == st.bc[2] || top == np_about_page()))))))
         reset_poweroptions_timer(1, 1, 1);
 }
 

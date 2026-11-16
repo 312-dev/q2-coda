@@ -870,6 +870,7 @@ void guest_ui_poll(void), guest_ui_paint(void *w, void *canvas), guest_np_open(v
 int guest_ui_state(void), guest_ui_on(void), guest_settings_open(void *ctx, void *event),
     guest_home_click(void *ctx, void *event);
 const char *guest_ui_value(void), *guest_ui_title(const char *name);
+int guest_ui_keeps_lit(void *top);
 void guest_short(const char *name, char *out, unsigned n);
 void bt_ui_paint(void *w, void *canvas), bt_ui_poll(void);
 int ringnav_bt_resume(void); /* navigation.c: Resume on Connect */
