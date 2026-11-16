@@ -739,8 +739,14 @@ It has two forms, in the same place, width and corners:
   save". Next confirms only with the cursor at the name's end; elsewhere Previous and Next move the
   cursor, as on Search's text.
 
-On both, the wheel walks the letters and Centre types the lit one; a short Return erases and a held Return
-leaves. The Wi-Fi password, an EQ preset's name and stock's other text boxes keep the [keyboard](ipod.md#keyboard)
+On both, the wheel walks the letters and Centre types the lit one. A Return press erases the character
+before the cursor; held, Return goes back (the user's, from `mock_hold_back.py` on 2026-11-17): 200 ms into
+the hold the page dims under black at 55% and a `#1C1C1E` card with 22 px corners, centred on y 160 and sized
+to its line with 24 px sides and 20 px above and below, shows a 44 px ring (a 4 px `#3A3A3C` track the accent
+fills clockwise from the top) round Phosphor's `arrow-u-up-left` (bold, 20 px, white) and, 14 px under it,
+"Keep holding to go back" in Inter Medium 16 white; at 800 ms the page closes. Let go before that and nothing
+happens: a hold never erases. The dim covers the status row too, as Buttons Lock's card's does: both
+draw it the same way (`feedback.c` `overlay_scrim`). The Wi-Fi password, an EQ preset's name and stock's other text boxes keep the [keyboard](ipod.md#keyboard)
 until the password's form is chosen.
 
 ### Icons

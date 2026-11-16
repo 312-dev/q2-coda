@@ -27,7 +27,8 @@ class Ss(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'page sheet songs match kind'.split()),
                 *((k, C.c_int) for k in 'nmatch letter focus sel top nsongs tab any cur by rename pick create'.split()),
                 *((k, C.c_short) for k in 'down_x down_y pressed swiped'.split()), ('text', C.c_char * 49),
-                ('pop_timer', C.c_uint), ('pop_step_at', C.c_uint), ('pop', C.c_ubyte)]
+                ('pop_timer', C.c_uint), ('pop_step_at', C.c_uint), ('pop', C.c_ubyte),
+                ('hold_at', C.c_uint), ('hold_timer', C.c_uint), ('held', C.c_ubyte)]
 
 
 @pytest.fixture
@@ -686,3 +687,39 @@ def test_add_songs_search_lists_songs_by_title_or_artist_and_centre_adds_in_plac
     s.key(KEY_FWD_BTN, KEY_CENTER)
     assert added == [0] and ui.toasts[-1].startswith('Added to') and s.ss.nmatch == 2
     assert ui.backs == 0 and not ui.played
+
+
+# Return held on any letter-strip page (the user's, 2026-11-17, mock_hold_back.py): a press erases; held, a card shows
+# from SHOW_MS and the page closes at HOLD_MS; let go before, and nothing is erased.
+SHOW_MS, HOLD_MS = 200, 800
+
+
+def r_h(ui):
+    """The top window's height, which the scrim covers."""
+    return C.c_int.from_address(ui.top() + O['W_H']).value
+
+
+@pytest.mark.parametrize('held_ms, erased, closed, card', [(60, True, False, False), (400, False, False, True),
+                                                           (HOLD_MS, False, True, False)])
+def test_return_held_shows_its_card_and_leaves_and_a_press_erases(fw, ui, song, held_ms, erased, closed, card):
+    s = Popping(fw, ui, library(song))
+    s.type('ab')
+    down = fw.fn('search_strip_down', None, C.c_void_p, C.c_uint)
+    down(ui.top(), KEY_RETURN)
+    down(ui.top(), KEY_RETURN)  # a repeat while held changes nothing
+    assert len(ui.pending('search_strip__ss_hold_tick')) == 1
+    for at in range(0, held_ms, 33):
+        s.now[0] += min(33, held_ms - at)
+        if s.now[0] - 100000 >= SHOW_MS and ui.pending('search_strip__ss_hold_tick'):
+            ui.fire('search_strip__ss_hold_tick')
+    assert bool(s.ss.held) == card
+    if card:  # over the page, after stock painted it (ringnav_paint), the screen dimmed first
+        from test_nav_painters import Canvas
+        c = Canvas(fw)
+        fw.fn('search_strip_overlay', None, C.c_void_p, C.c_void_p)(ui.top(), c.addr)
+        assert [t for t, *_ in c.texts] == ['Keep holding to go back']
+        assert [(r, ink) for r, ink in c.rects if r[2] == 375][:1] == [((0, 0, 375, r_h(ui)), 0x8c000000)]
+    if not closed:
+        s.key(KEY_RETURN)  # the release
+    assert (s.ss.text == b'a') == erased and (s.ss.text == b'ab') == (not erased)
+    assert ui.backs == int(closed) and not s.ss.held and not s.ss.hold_at

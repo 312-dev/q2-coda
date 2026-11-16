@@ -331,7 +331,7 @@ extern int games_keydown(void *top, unsigned key);
 /* search_strip.c: Search, the strip under a list.entry.ipod theme, else stock's dialog */
 int library_search_open(void *ctx, void *event), search_strip_key(void *top, unsigned key),
     search_strip_hold(void *top);
-void search_strip_paint(void *w, void *canvas);
+void search_strip_paint(void *w, void *canvas), search_strip_down(void *top, unsigned key);
 /* keyboard.c: the keyboard's keys by the wheel under a list.entry.ipod theme */
 int kb_wheel_key(unsigned key), kb_wheel_bg(void *w, void *canvas);
 extern int stock_keyup_trampoline(void *, void *), stock_touch_trampoline(void *, void *),
@@ -588,6 +588,9 @@ int video_on(void);
 /* keylock.c: Buttons Lock's padlock and its card (docs/internals.md#buttons-lock) */
 int keylock_gate(void *e, int remote), keylock_bar(void *bar), keylock_room(void);
 void keylock_paint(void *w, void *canvas);
+/* feedback.c: an overlay card's scrim over the top window and the status bar; 1 on the window */
+int overlay_scrim(void *w, void *canvas, unsigned argb, int *dy);
+void search_strip_overlay(void *w, void *canvas); /* search_strip.c: Return held's card */
 int ringnav_wm_paint(void *wm); /* window_manager_paint's leaf */
 
 /* theme_engine.c */

@@ -1059,8 +1059,9 @@ painted it white, which drew the box at rest.
   faster than 8 letters a second shows none until the wheel stops, then one. The bubble may cover the last result
   rows while it shows. The wheel walks the strip (round from delete to A) and Centre enters the lit character at
   the cursor; Previous and Next move the cursor along the text, Return erases the character before it (at the
-  text's start it does nothing but click), and a held Return closes Search from anywhere on the page (the hold's
-  700 ms, as [Hold Return](#hold-return) times it, `search_strip_hold`). A space is never typed first or beside
+  text's start it does nothing but click), and a held Return closes Search from anywhere on the page: 200 ms into
+  the hold a card says "Keep holding to go back" over the dimmed page, its ring filling until 800 ms, when Search
+  closes; let go before and nothing is erased (`search_strip_down`, [oled-design](oled-design.md#text-entry)). A space is never typed first or beside
   another. A text longer than the box scrolls to keep the cursor in it. With nothing typed, the free area above
   the strip says what Search finds, as an empty list's note does: "Search your music" in 16 px Text Secondary and
   "Artists, albums and songs" in 15 px Text Tertiary 24 px under it, the pair centred on y 144 and 168 (Add Songs'
@@ -1098,7 +1099,8 @@ painted it white, which drew the box at rest.
   capital. Previous and Next move the cursor along the name; Next with the cursor at the name's end creates the
   playlist (`ringnav_playlist_create`, "Playlist created", and the list goes back to open on it) or saves the new name
   ("Renamed"), and the page closes; an empty name ("Name can't be empty") or one taken ("A playlist has that name")
-  says so and stays. Return erases the character before the cursor, and a held Return leaves without a change.
+  says so and stays. Return erases the character before the cursor, and a held Return leaves without a change, as
+  on Search.
 - <a id="keyboard"></a>**The keyboard.** The keyboard other text boxes open (the Wi-Fi password, an EQ preset's name)
   keeps stock's layout and labels on the page's black: each key a `#1C1C1E` box with 8 px corners, every one inside
   the glass's corners (`patch/keyboard.c`, the same `list.entry.ipod`). The wheel walks the keys of the page showing,

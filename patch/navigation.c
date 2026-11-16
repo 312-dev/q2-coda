@@ -2356,6 +2356,7 @@ int ringnav_paint(void *w, void *canvas) {
     night_paint(canvas);
     coverflow_paint(w, canvas);
     keylock_paint(w, canvas);
+    search_strip_overlay(w, canvas);
     if (w == st.cf_letter_surface && st.cf_letter &&
         (st.cf_letter_held || (unsigned)time_now_ms() - st.cf_letter_at < LETTER_MS) &&
         P(canvas, CANVAS_LCD)) {
@@ -9719,6 +9720,7 @@ int ringnav_keydown(void *ctx, void *event) {
     if (key == KEY_CENTER)
         st.center_down_at = st.centre_at ? st.centre_at : (unsigned)time_now_ms() | 1;
     lr_edit_keydown(key); /* Centre held on the Library: Edit Library (library_edit.c) */
+    search_strip_down(top, key); /* Return held on a letter strip: its card (search_strip.c) */
     un_keydown(key);      /* ... on a queued song in Up Next: it lifts (upnext.c) */
     unsigned char tone = g_keytone_flag;
     void *row = (void *)0;

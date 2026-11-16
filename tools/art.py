@@ -283,6 +283,7 @@ USB_ROWS = {'charge': 'lightning', 'files': 'folder-simple', 'audio': 'speaker-h
 USB_MODE_PX = 44
 USB_MODES = {'files': 'folder-simple-fill', 'audio': 'speaker-hifi-fill', 'debug': 'terminal-window-fill', 'ejected': 'check-bold'}
 USB_TOAST_PX = 15
+HOLD_BACK_PX = 20  # search_strip.c's Return-held card: Phosphor arrow-u-up-left, bold, white
 USB_TOASTS = {'unplugged': ('plug-fill', 0xababab), 'ejected': ('check-circle-fill', 0x34c759), 'audio': ('speaker-hifi-fill', 0xffffff)}
 PL_MARKS = {'in': ('check-circle-fill', {'d': 0xababab, 'l': 0x5c5c5c}), 'add': ('plus-circle-fill', {'d': 0x4fb477, 'l': 0x4fb477}),
             'out': ('minus-circle-fill', {'d': 0xff6b5e, 'l': 0xff6b5e})}
@@ -479,6 +480,7 @@ def images(t):
                 for k, c in {**inks, 'w': 0xffffff}.items()}
     if t['entry_ipod']:  # Search's key pop (search_strip.c): the accent's top tone, as the lit key's
         out |= {f'{prefix}_{n}': d for n, d in pop_images(on).items()}
+        out[f'{prefix}_holdback'] = phosphor('arrow-u-up-left-bold', HOLD_BACK_PX, 0xffffff)  # Return held's card
     # Folder view's folder glyph (song_rows.c folder_row): Text Secondary, white on the selection
     out |= {f'{prefix}_folder_{k}': phosphor('folder', ROW_ICON_PX, c) for k, c in FOLDER_INKS.items()}
     # feedback.c's confirmation after a shuffle, a Ratings row's hearts and Streaming's service marks

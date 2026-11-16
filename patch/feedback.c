@@ -223,6 +223,22 @@ void feedback_confirm_bar(void *w, void *canvas) {
     st.paint_w = w;
 }
 
+/* An overlay card's scrim (Buttons Lock's card, a letter strip's Return held): over the top window
+ * and the status bar, black at argb's alpha, so the whole screen dims. 1 on the top window, where
+ * the card goes, its y on the screen in *dy; 0 on the bar or any other widget. From ringnav_paint,
+ * after stock painted w. */
+int overlay_scrim(void *w, void *canvas, unsigned argb, int *dy) {
+    void *lcd = w && canvas ? P(canvas, CANVAS_LCD) : (void *)0, *bar = *(void *const *)system_bar,
+         *top = window_manager_get_top_window(window_manager());
+    if (!lcd || (w != bar && w != top)) return 0;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
+    stock_canvas_set_fill_color(canvas, argb);
+    canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
+    stock_canvas_set_fill_color(canvas, fill);
+    *dy = I(w, W_Y);
+    return w != bar;
+}
+
 /* An empty or offline page's note (docs/oled-design.md#empty-and-offline): one line of 16 px Text
  * Secondary centred in the free area, from free (a screen y: the end of any rows above it) to the
  * list's end at y 282, and an optional hint in 15 px Text Tertiary 24 px lower. Its two labels are

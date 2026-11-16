@@ -39,9 +39,13 @@
  * and Rename Playlist (playlist_rename_open, prefilled). Field OFF the letters run across the whole
  * pill, the same pill in the same place, and the name is written large in the middle of the
  * screen with its cursor over a hint, "Press Next to create" or "Press Next to save". Next with the
- * cursor at the name's end creates or saves it; elsewhere Previous and Next move the cursor. A
- * short Return erases, a held Return leaves without a change. Add Songs' Search row
- * (add_songs_search) is field ON over songs alone. */
+ * cursor at the name's end creates or saves it; elsewhere Previous and Next move the cursor. Add
+ * Songs' Search row (add_songs_search) is field ON over songs alone.
+ *
+ * Return on every form (the user's, 2026-11-17, mock_hold_back.py): a press erases a character;
+ * held past SS_HOLD_SHOW_MS, the page dims under a card, "Keep holding to go back", whose ring
+ * fills in the accent until SS_HOLD_MS, when the page closes; let go before that and nothing
+ * happens, nothing erased (search_strip_overlay). */
 #include "navigation.h"
 
 /* The sheet starts under the 58 px status row; on it, from the top: */
@@ -116,6 +120,11 @@
  * row a tick, 7 ticks a turn at the default Wheel Sensitivity, so the artists are under five turns
  * down; each artist and album is checked against those before it */
 #define SS_GROUP 32
+/* Return held (ss_hold_*): the card shows this long into the hold, the page closes at its end, and
+ * the ring steps this often between */
+#define SS_HOLD_SHOW_MS 200
+#define SS_HOLD_MS 800
+#define SS_HOLD_STEP_MS 33
 enum { SS_SONG, SS_ARTIST, SS_ALBUM };                                     /* a result's kind */
 enum { SS_TAB_ALL, SS_TAB_SONGS, SS_TAB_ARTISTS, SS_TAB_ALBUMS, SS_TABS }; /* tab, kind + 1 */
 enum { SS_ON_STRIP, SS_ON_LIST, SS_ON_TABS };                              /* what has the wheel */
@@ -134,6 +143,8 @@ static struct {
     char text[SS_TEXT_MAX + 1];
     unsigned pop_timer, pop_step_at; /* the pop's timer; the wheel's last step on the strip */
     unsigned char pop;               /* 1 shown, 2 a spin's, shown when it stops */
+    unsigned hold_at, hold_timer;    /* Return's press (time_now_ms, 0 none), its timer */
+    unsigned char held;              /* the hold's card shows */
 } ss __attribute__((section(".scratch")));
 
 /* The strip's entry e as text: a capital, a digit, or 0 for the space and delete (drawn). */
@@ -344,9 +355,49 @@ static void ss_pick(int tab) {
     ss_filter();
 }
 
+/* Return's hold: over, its card gone. */
+static void ss_hold_end(void) {
+    stop_timer(&ss.hold_timer);
+    ss.hold_at = 0;
+    if (ss.held && ss.page) widget_invalidate_force(ss.page, (void *)0);
+    ss.held = 0;
+}
+/* The hold's card from SS_HOLD_SHOW_MS, its ring repainted as it fills, and at SS_HOLD_MS the page
+ * closed. */
+static int ss_hold_tick(const void *unused) {
+    ss.hold_timer = 0;
+    if (!ss.page || !ss.hold_at) return 0;
+    if ((unsigned)time_now_ms() - ss.hold_at >= SS_HOLD_MS) {
+        ss_hold_end();
+        navigator_back();
+        return 0;
+    }
+    ss.held = 1;
+    widget_invalidate_force(ss.page, (void *)0); /* the card's ring, and the scrim's first frame */
+    ss.hold_timer = timer_add(ss_hold_tick, (void *)0, SS_HOLD_STEP_MS);
+    return 0;
+}
+/* ringnav_keydown: Return pressed on the page starts the hold's clock (a repeat while it is held
+ * changes nothing). */
+void search_strip_down(void *top, unsigned key) {
+    if (!ss.page || top != ss.page || key != KEY_RETURN || ss.hold_at) return;
+    unsigned now = (unsigned)time_now_ms();
+    ss.hold_at = now ? now : 1;
+    ss.held = 0;
+    rearm(&ss.hold_timer, ss_hold_tick, SS_HOLD_SHOW_MS);
+}
+
 /* ringnav: the page's keys before stock's (Play/Pause and a held Return's release go on). */
 int search_strip_key(void *top, unsigned key) {
     if (!ss.page || top != ss.page) return 0;
+    if (key == KEY_RETURN && ss.hold_at) { /* a hold let go early: nothing erased */
+        int held = ss.held;
+        ss_hold_end();
+        if (held && !*(volatile unsigned char *)RETURN_RELEASE_LATCH) {
+            *(volatile signed char *)KEY_TONE_LATCH = 0;
+            return 1;
+        }
+    }
     if (key == KEY_RETURN && *(volatile unsigned char *)RETURN_RELEASE_LATCH) return 0;
     int wheel = key == KEY_NEXT   ? 1
                 : key == KEY_PREV ? -1
@@ -398,11 +449,12 @@ int search_strip_key(void *top, unsigned key) {
     return 1;
 }
 
-/* Hold Return (compact_now_playing) on the page: Search closes, whatever has the wheel. The latch
- * stays armed for stock's filter to swallow the release, as on the hold's other ways. */
+/* Hold Return (compact_now_playing) on the page: the hold's own clock closes it (ss_hold_tick); a
+ * hold whose press it never saw closes it at once, whatever has the wheel. The latch stays armed
+ * for stock's filter to swallow the release, as on the hold's other ways. */
 int search_strip_hold(void *top) {
     if (!ss.page || top != ss.page) return 0;
-    navigator_back();
+    if (!ss.hold_at) navigator_back();
     return 1;
 }
 
@@ -514,6 +566,53 @@ static void ss_name_paint(void *canvas, unsigned primary, unsigned tertiary) {
     canvas_fill_rect(canvas, x + cx + 1, SS_NAME_Y - 13, 2, 26);
     ss_centred(canvas, 0, ss.create ? "Press Next to create" : "Press Next to save",
                SS_NAME_Y + SS_HINT_DY, SS_PX_HINT, tertiary);
+}
+
+/* ringnav_paint, after stock painted w: Return held, the screen dimmed by black at 55%
+ * (overlay_scrim, the status row too, as Buttons Lock's card dims it), and over the page, centred
+ * on screen y 160, a #1C1C1E card with 22 px corners, sized to its line with 24 px sides and 20 px
+ * above and below: a 44 px ring (a 4 px #3A3A3C track, the accent filling it clockwise from the top
+ * over the hold) round Phosphor's arrow-u-up-left (bold, 20 px, white), and 14 px under it "Keep
+ * holding to go back" in Inter Medium 16, white, in either half. */
+#define SS_HOLD_CARD_MID 160      /* on the screen */
+#define SS_HOLD_SCRIM 0x8c000000u /* black at 55%, Buttons Lock's (keylock.c KEYLOCK_DIM) */
+#define SS_HOLD_RING 22           /* the ring's radius to its line's middle */
+void search_strip_overlay(void *w, void *canvas) {
+    static const char *const faces[] = FONT_NAMES;
+    static const char line[] = "Keep holding to go back";
+    int dy;
+    if (!ss.held || !ss.page || !overlay_scrim(w, canvas, SS_HOLD_SCRIM, &dy)) return;
+    unsigned wide[32], n = ss_wide(line, wide, sizeof wide / sizeof *wide),
+                       fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+    int px = 19; /* Inter Medium 16 */
+    canvas_set_font(canvas, faces[FONT_INTER_MEDIUM], (unsigned)px);
+    int tw = (int)(canvas_measure_text(canvas, wide, n) + 0.5f), cw = tw + 48, ch = 122,
+        y0 = SS_HOLD_CARD_MID - dy - ch / 2;
+    fill_box(canvas, &(rect_t){ (375 - cw) / 2, y0, cw, ch }, RGBA(0x1c1c1e), 22);
+    float cx = 187.5f, cy = (float)(y0 + 44),
+          frac = (float)((unsigned)time_now_ms() - ss.hold_at - SS_HOLD_SHOW_MS) /
+                 (SS_HOLD_MS - SS_HOLD_SHOW_MS);
+    frac = frac < 0 ? 0 : frac > 1 ? 1 : frac;
+    void *vg = canvas_get_vgcanvas(canvas);
+    if (vg) {
+        vgcanvas_save(vg);
+        vgcanvas_translate(vg, (float)I(canvas, CANVAS_X), (float)I(canvas, CANVAS_Y));
+        vgcanvas_set_line_width(vg, 4);
+        vgcanvas_begin_path(vg);
+        vgcanvas_arc(vg, cx, cy, SS_HOLD_RING, 0, 6.2831853f, 0);
+        vgcanvas_set_stroke_color(vg, RGBA(0x3a3a3c));
+        vgcanvas_stroke(vg);
+        if (frac > 0) {
+            vgcanvas_begin_path(vg);
+            vgcanvas_arc(vg, cx, cy, SS_HOLD_RING, -1.5707963f, -1.5707963f + frac * 6.2831853f, 0);
+            vgcanvas_set_stroke_color(vg, RGBA(accent_tone(2)));
+            vgcanvas_stroke(vg);
+        }
+        vgcanvas_restore(vg);
+    }
+    paint_art(w, canvas, theme_art("holdback"), (int)cx - 10, (int)cy - 10);
+    ss_centred(canvas, faces[FONT_INTER_MEDIUM], line, y0 + 20 + 48 + 14 + 10, px, 0xffffff);
+    stock_canvas_set_fill_color(canvas, fill);
 }
 
 /* ringnav_paint: the results and the strip, on the sheet. Colours are the theme's tokens
@@ -723,6 +822,7 @@ static int ss_touch(void *ctx, void *event) {
 
 static int ss_closed(void *ctx, void *event) {
     stop_timer(&ss.pop_timer);
+    stop_timer(&ss.hold_timer);
     if (ss.songs) deque_destroy(ss.songs);
     free(ss.match);
     free(ss.kind);
