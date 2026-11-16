@@ -11143,15 +11143,15 @@ for kw,want in (({'status':1},1),({},1),({'status':2},1),({'po':1},0),({'bal':1}
     assert buzzes(m)==want and not sent(m),kw
 m=clicker('1',tone=0); m.call(address=syms['buzzeer_switch'],args=(1,0,0,0)); assert not buzzes(m); passed()
 # Both, the default (no CLICKER, whatever an old KEYTONEHP holds): the buzzer with either jack or BT/USB too,
-# as Click With Headphones did; Key Tone off is still silent. Headphones (2) with no q2player (no
-# /tmp/q2clicks): as Speaker. With q2player playing (status 2) Headphones sends it the click and the buzzer is
-# quiet; paused (3), the buzzer as Speaker; Both sends it and buzzes.
+# as Click With Headphones did; Key Tone off is still silent. Headphones (2) never sounds the buzzer: with no
+# q2player (no /tmp/q2clicks) or paused (3) there is no click; with q2player playing (status 2) it sends the click
+# to be mixed; Both sends it and buzzes.
 for value,kw,tone,want in ((None,{'po':1},1,1),(None,{'bal':1},1,1),(None,{'way':1},1,1),(None,{'way':2},1,1),(None,{'po':1},0,0),
-                           (None,{},0,0),('2',{},1,1),('2',{'po':1},1,0)):
+                           (None,{},0,0),('2',{},1,0),('2',{'po':1},1,0)):
     m=clicker(value,tone=tone,**kw)
     if value is None: m.config['KEYTONEHP']='0'
     m.call(address=syms['buzzeer_switch'],args=(1,0,0,0)); assert buzzes(m)==want and not sent(m),(value,kw,tone)
-for value,status,buzz,mixed in (('2',2,0,1),('2',3,1,0),('0',2,1,1)):
+for value,status,buzz,mixed in (('2',2,0,1),('2',3,0,0),('0',2,1,1)):
     m=clicker(value,status=status); m.present.add('/tmp/q2clicks')
     m.call(address=syms['buzzeer_switch'],args=(1,0,0,0))
     assert buzzes(m)==buzz and sent(m)==['{mcl-click\\wheel}'][:mixed],(value,status)
