@@ -635,6 +635,13 @@ as its callers move onto it.
   .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx })` (`patch/ui_kit.h`, so every payload file reaches it); `answer(ctx, row, toggle_on)` runs
   once after the card has closed. One card at a time: `confirm` answers 0 while one is up.
 
+### Button
+
+<a id="button"></a>The shared button (`patch/ui_kit.c` `ui_button`): a pill 38 px tall, its label in Inter Medium 20
+with 24 px each side. **Primary** (a screen's main action: Software Update's Download and Install) is the accent with
+white words; **secondary** (a lesser action: Stop, Export Log) is Raised 2 `#2C2C2E` with Text Primary words. In focus
+it wears the [focus ring](#focus-ring): 2 px of Text Primary 3 px outside it.
+
 ### Focus ring
 
 <a id="focus-ring"></a>The user's universal rule (2026-11-16), for every screen with one or two buttons (the empty
@@ -1039,20 +1046,36 @@ screen, only the toast and the status row. Black in both halves, over the whole 
 
 ### Software Update
 
-SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, approved from
-`design/mockups/mock_fwupdate.py` on 2026-11-16), the status row "Software Update" over mode pages as USB's:
+General's one **Software Update** row ([internals](internals.md#sd-card-update), `patch/sw_update.c`, approved from
+`design/mockups/mock_fwupdate.py` on 2026-11-16 and as 29 v3 the same day) checks online and the SD card at once,
+the status row "Software Update" over mode pages as USB's:
 
-- **Checking for an Update…**, "Looking on the SD card": no circle, a 48 px spinner of twelve round 4 px spokes in
+- **Checking for an Update…**, "Looking online and on the SD card" ("Looking on the SD card" with Wi-Fi off, when only
+  the card is checked): no circle, a 48 px spinner of twelve round 4 px spokes in
   Text Primary, the head turning a spoke every 80 ms and each spoke behind it dimmer, to a quarter.
-- **Install Update?** on the [confirmation card](#confirmation-card) over the check's page: "Install Q2 Pod 1.8.3 ·
+- **The two checks are independent.** The online one (the latest release's tag and its update.tar's size, about 10 s
+  at most) failing, from no Wi-Fi link, no DNS, no internet or a timeout, never fails or holds up the card's: the
+  card's result shows, with "Couldn't check online · Try Again" under it.
+- **The offer** (29 v3): a 60 px accent circle (its glyph white, 30 px: `download-simple` from the internet,
+  `file-arrow-down` from the card) centred on y 92, the update's name ("Q2 Muse 1.8.3", Inter Medium 22) on 142, "From
+  the internet · 55.6 MB" or "From the SD card · 55.6 MB" (15 px Text Secondary) on 168, "Installed: 1.8.2" (13 px
+  Text Tertiary) on 188, and the [button](#button), selected, centred on 225: **Download and Install** or
+  **Install**. When both have an update the internet's is offered and "Install from SD Card instead" sits under the
+  button on y 266 (15 px Accent Text); with Wi-Fi off the card's is offered with "Turn on Wi-Fi to check online"
+  (Settings > Wi-Fi) there. The wheel reaches the line after the button (an underline marks it); Centre acts on the
+  one in focus.
+- **Downloading the Update**, its percent ("Verifying…" while the signature is checked) and the restart's bar
+  filling in Accent Blue; Return leaves and cancels it. Then the card's check runs on what it fetched.
+- **Install Update?** on the [confirmation card](#confirmation-card) over the check's page: "Install Q2 Muse 1.8.3 ·
   V1830?", its body "SIZE MB, over TAG. Takes about 2 min;" over "your music and settings stay.", then Cancel
   (selected) and Install and Restart.
 - **Restarting to Install**, "Don't turn off the Q2": `arrow-clockwise` bold on Accent Blue, and a 180 x 6 bar with
   round ends under the stack (top + 172), Track `#333333` filled in Accent Blue with the unpacking (the user's, 2026-11-16: progress fills are the accent).
 - **Results**, each a fill glyph on its circle: You're Up to Date (check, bold, Positive green, "VERSION (TAG) is
   installed"), No Update Found and No SD Card (`file-arrow-down`, `#3A3A3C`), Charge to Update and Not Enough Space
-  (`battery-warning` and `warning`, `#FF9F0A`), Update Can't Be Used (`warning`, `#FF453A`). Return or Centre
-  leaves.
+  (`battery-warning` and `warning`, `#FF9F0A`), Update Can't Be Used (`warning`, `#FF453A`), each with the online
+  check's line under it when it has one (28 px under the page's own). Return leaves, and so does Centre unless the
+  wheel is on that line.
 
 ### Gestures
 

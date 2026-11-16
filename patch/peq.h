@@ -677,6 +677,16 @@ int need_link(int (*fn)(void *, void *), void *ctx); /* smart_hold, else "Connec
  * netupdate.c's and onlinematch.c's */
 int spot_running(void), scrobble_busy(void), tidal_busy(void), addon_running(void),
     netupdate_busy(void), album_lyrics_busy(void);
+/* netupdate.c: Software Update's online half (sw_update.c draws its page): the check's answers,
+ * the download's states (netupdate_poll's), and sw_update.c's page, General's Software Update row */
+enum { NET_NEWER = 1, NET_LATEST, NET_FAILED };
+enum { NU_IDLE, NU_RUNNING, NU_DONE, NU_LATEST, NU_NET, NU_MISSING, NU_CARD, NU_CANCELLED,
+       NU_UNSIGNED, NU_FORGED };
+int netupdate_check(char *tag, unsigned n, unsigned *kb);
+int netupdate_start(void), netupdate_poll(int *percent, int *verifying);
+void netupdate_cancel(void);
+const char *netupdate_said(int state);
+int sw_update_open(void *ctx, void *event);
 /* coverflow.c: Display > Cover Flow's Sort, its value and its picker's choices */
 const char *coverflow_sort_name(void), *coverflow_sort_at(int i);
 int coverflow_sort_count(void), coverflow_sort_now(void);

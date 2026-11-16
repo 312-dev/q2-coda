@@ -345,7 +345,7 @@ CC_ICONS = {'wifi': ('wifi-high-fill', 22, 0xffffff), 'bluetooth': ('bluetooth-f
 
 # Every mode page's glyph by role (feedback.c mode_page_paint, docs/oled-design.md#usb): fill, white on its solid
 # circle, MODE_GLYPH_PX: a card app's sign-in steps (addon.c qr_paint: phone, check, done, fail, error), USB's modes
-# (usb_ui.c: files, audio, debug; ejected is done), Bluetooth's receiver (bt_recv.c: receive) and SD Card Update's
+# (usb_ui.c: files, audio, debug; ejected is done), Bluetooth's receiver (bt_recv.c: receive) and Software Update's
 # results (sw_update.c: done for up to date, none, low, bad, restart). Each glyph is drawn once; the bold check is
 # done for all three that show it.
 MODE_GLYPH_PX = 44
@@ -366,6 +366,10 @@ SW_SPIN_PX = 48
 SW_SPIN_R = (13.2, 22)  # round capped: the outer cap reaches 24, the mock-up's radius
 SW_SPIN_STROKE = 4
 SW_SPIN_FADE = 0.75 / 11  # the spoke behind the head's head a quarter as bright
+# Software Update's offer (sw_update.c sw_offer_paint): its source's glyph, white on the accent's 60 px circle: the
+# internet's download tray, the card's file.
+SW_OFFER_PX = 30
+SW_OFFER = {'net': 'download-simple-fill', 'sd': 'file-arrow-down-fill'}
 HOLD_BACK_PX = 20  # search_strip.c's Return-held card: Phosphor arrow-u-up-left, bold, white
 # The empty state (feedback.c empty_state): its glyph on the middle of its stacked tiles, fill, white at 92 %, by the
 # glyph a page names (empty_t.glyph; docs/oled-design.md#empty-and-offline has the pages). Phosphor has no sd-card: the
@@ -635,6 +639,7 @@ def images(t):
     out |= {f'{prefix}_store_pick_{k}': phosphor('arrow-circle-down', MARK_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
     out |= {f'{prefix}_store_auto_{k}': phosphor('arrows-clockwise', MARK_PX, c) for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_modepage_{n}': phosphor(g, MODE_GLYPH_PX, 0xffffff) for n, g in MODE_GLYPHS.items()}
+    out |= {f'{prefix}_swoffer_{n}': phosphor(g, SW_OFFER_PX, 0xffffff) for n, g in SW_OFFER.items()}
     out |= {f'{prefix}_cc_{n}': phosphor(g, px, c) for n, (g, px, c) in CC_ICONS.items()}
     out |= {f'{prefix}_usb_{n}_{k}': phosphor(g, USB_ROW_PX, c) for n, g in USB_ROWS.items() for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_usbtoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in USB_TOASTS.items()}

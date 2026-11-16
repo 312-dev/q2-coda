@@ -1,23 +1,32 @@
-/* SD Card Update (docs/internals.md#sd-card-update, docs/oled-design.md#software-update): System
- * Update's first row, and Network Update once its download is on the card, run fwupdate_tf
- * (0x4c7eb4), hooked whole here. Stock asked first, then checked, then flashed; here the card's
- * update.tar is checked first, on a thread, while a page says so, and only an update stock's
- * updater would take is offered:
+/* Software Update (docs/internals.md#sd-card-update, docs/oled-design.md#software-update):
+ * General's Software Update row (sw_update_open) checks online and the SD card at once and offers
+ * what it finds, the internet's first; the card's alone (the online download done, or stock's own
+ * TF row) runs fwupdate_tf (0x4c7eb4), hooked whole here. Stock asked first, then checked, then
+ * flashed; here the card's update.tar is checked first, on a thread, while a page says so, and only
+ * an update stock's updater would take is offered:
  *
  * - stock's own checks first (check_updatefw_exist, on the UI thread as stock's): the battery
  * (under 16% with no cable in: Charge to Update), the card, the file, and room for its unpacking
- * (No SD Card, No Update Found, Not Enough Space), each a mode page at once;
+ * (No SD Card, No Update Found, Not Enough Space);
  * - then Checking for an Update... (the page's spinner) while sw_check reads the tar as
  * update_firmware (0x5028e0) will: firmware_v20.info first, "Shanling Q2" and a version holding a V
  * (else Update Can't Be Used), the version not this build's (else You're Up to Date: stock refuses
  * an equal one), and the MD5s its third and fourth lines give for recovery-update/xImage and
  * rootfs.squashfs, read from the tar as they stream by (else Can't Be Used);
- * - then the house dialog, Install Update?: the update's version, this build's tag and the file's
- * size, Cancel (selected) and Install and Restart, which runs stock's checkfw_dialog as stock's
- * fwupdate_tf did: its thread unpacks and checks the tar again, marks the next boot as the
- * recovery's and restarts, and the recovery flashes. That dialog is drawn as a mode page here
- * (Restarting to Install), with the unpacking's progress; should its own check fail after all, the
- * dialog's answer opens the page it means. */
+ * - beside it, with Wi-Fi on, the online check on a thread of its own (sw_net,
+ * netupdate.c netupdate_check): the latest release's tag and size. Either check failing never
+ * holds the other up; sw_offer weighs the two answers;
+ * - then the offer: the update's name, its source and size and what is installed, with Download and
+ * Install (online) or Install (the card), and under it at most one line the wheel reaches: Install
+ * from SD Card instead (both have one), Turn on Wi-Fi to check online, or Couldn't check online ·
+ * Try Again;
+ * - Download and Install fetches it to the card (netupdate.c) with its progress on the page, then
+ * checks the card's file as above; Install asks on the confirmation card, Install SW_PRODUCT 1.8.3?:
+ * the update's version, this build's tag and the file's size, Cancel (selected) and Install and
+ * Restart, which runs stock's checkfw_dialog as stock's fwupdate_tf did: its thread unpacks and
+ * checks the tar again, marks the next boot as the recovery's and restarts, and the recovery
+ * flashes. That dialog is drawn as a mode page here (Restarting to Install), with the unpacking's
+ * progress; should its own check fail after all, the dialog's answer opens the page it means. */
 #include "navigation.h"
 
 #define SW_CARD "/mnt/mmc"
@@ -39,8 +48,15 @@ enum {
     SW_BAD,
     SW_FULL,
     SW_CANCELLED,
-    SW_ASKING /* swu.state: OK taken, Install Update? asked on the card */
+    SW_ASKING,     /* swu.state: OK taken, Install Update? asked on the card */
+    SW_OFFER_NET,  /* swu.result: the online update offered */
+    SW_OFFER_SD,   /* ... the card's */
+    SW_DOWNLOADING /* ... the online one coming to the card */
 };
+/* swu.online: no online part (the card's alone), Wi-Fi off, checking, then netupdate_check's */
+enum { ON_NONE = -2, ON_OFF = -1, ON_CHECKING = 0 };
+/* swu.note: the line under the offer's button or a result */
+enum { NOTE_NONE, NOTE_SD, NOTE_WIFI, NOTE_RETRY };
 /* stock's answers: check_updatefw_exist's, and checkfw_dialog's dialog_quit codes (fwupdate_tf's
  * own tests) */
 enum { STOCK_FOUND = 1, STOCK_NOCARD = -2, STOCK_NOFILE = -11, STOCK_FULL = -12, STOCK_LOW = -15 };
@@ -51,6 +67,22 @@ enum { QUIT_NOFILE = 9, QUIT_LATEST = 13, QUIT_BAD = 18 };
 #define SW_BAR_W 180
 #define SW_BAR_H 6
 #define SW_STATUS_PX TYPE(15) /* the status row's title, Inter Medium 15 */
+/* The product's name in the update's (sw_update_name) */
+#define SW_PRODUCT "Q2 Muse"
+/* The offer (29 v3): a 60 px accent circle centred on y 92 with its 30 px glyph, the name (Inter
+ * Medium 22) on y 142, the source and size (15 px Text Secondary) on 168, the installed version
+ * (13 px Text Tertiary) on 188, the button centred on 225 and the line under it (15 px accent
+ * text) on 266, screen rows */
+#define SW_OFFER_R 30
+#define SW_OFFER_CY 92
+#define SW_OFFER_GLYPH 30
+#define SW_OFFER_NAME_Y 142
+#define SW_OFFER_FROM_Y 168
+#define SW_OFFER_HAVE_Y 188
+#define SW_OFFER_BTN_Y 225
+#define SW_OFFER_LINE_Y 266
+#define SW_LINK_H 32 /* the line's tap target */
+#define SW_NOTE_Y 176 /* a result's line, from its mode page's top: 28 px under its own line */
 
 static struct {
     unsigned long thread;
@@ -60,6 +92,14 @@ static struct {
     long long parts; /* xImage's and rootfs.squashfs's bytes, what stock's tar unpacks */
     void *page, *restart;
     char tag[24]; /* the update's version line */
+    /* the online half: its check's answer (ON_* or NET_*), its thread while it runs, the release's
+     * tag and size; the card's check's thread while it runs */
+    int online, net_up, sd_up;
+    unsigned long net_thread;
+    unsigned net_kb;
+    char net_tag[32];
+    int note, focus, percent, verifying; /* focus: the wheel's, 0 the button, 1 the line */
+    rect_t button, link;                 /* their tap targets as last painted, screen rows */
 } swu __attribute__((section(".scratch")));
 
 /* ---- the check, on its own thread (sw_check), or from test/fw ---- */
@@ -154,6 +194,26 @@ static void *sw_check(void *unused) {
     swu.state = sw_check_file(SW_FILE, Q2POD_FW_TAG);
     return 0;
 }
+static void *sw_net(void *unused) {
+    swu.online = netupdate_check(swu.net_tag, sizeof swu.net_tag, &swu.net_kb);
+    return 0;
+}
+
+/* What the page shows from the card's answer (sd, SW_*) and the online check's (net, ON_* or
+ * NET_*), and in *note the line under it. The two are weighed apart: an online check that failed
+ * or never ran leaves the card's answer whole, and says so under it. Low battery stops either
+ * install (stock's updater refuses it); the internet's update comes first, the card's then a line
+ * away; a card file that can't be used says why; else You're Up to Date. */
+int sw_offer(int sd, int net, int *note) {
+    *note = NOTE_NONE;
+    if (sd == SW_LOW) return SW_LOW;
+    if (net == NET_NEWER) {
+        if (sd == SW_OK) *note = NOTE_SD;
+        return SW_OFFER_NET;
+    }
+    *note = net == ON_OFF ? NOTE_WIFI : net == NET_FAILED ? NOTE_RETRY : NOTE_NONE;
+    return sd == SW_OK ? SW_OFFER_SD : sd == SW_BAD || sd == SW_FULL ? sd : SW_LATEST;
+}
 
 /* stock's own checks, check_updatefw_exist's answer as a page's: SW_CHECKING when they pass. */
 int sw_stock_answer(int code) {
@@ -176,26 +236,32 @@ void sw_update_name(char *out, unsigned n, const char *tag) {
     for (int i = 1; digits && i < 4; ++i) digits = tag[i] >= '0' && tag[i] <= '9';
     if (digits) v[0] = tag[1], v[1] = '.', v[2] = tag[2], v[3] = '.', v[4] = tag[3]; /* "1.8.2" */
     if (digits && tag[4] >= '1' && tag[4] <= '9')
-        tk_snprintf(out, n, "Q2 Pod %s beta %c · %s", v, tag[4], tag);
+        tk_snprintf(out, n, SW_PRODUCT " %s beta %c · %s", v, tag[4], tag);
     else if (digits && (tag[4] == '0' || tag[4] == 'I'))
-        tk_snprintf(out, n, "Q2 Pod %s · %s", v, tag);
+        tk_snprintf(out, n, SW_PRODUCT " %s · %s", v, tag);
     else if (strlen(tag) == 5 && tag[0] == 'V' && tag[4] == 'i')
-        tk_snprintf(out, n, "Q2 Pod Dev · %s", tag);
+        tk_snprintf(out, n, SW_PRODUCT " Dev · %s", tag);
     else
         tk_snprintf(out, n, "%s", tag);
 }
 
-/* This build as You're Up to Date says it: "1.8.2 Dev (V0JYi)", "1.8.2 beta 2 (V1822)", "1.8.2
- * (V1820)". */
-void sw_installed(char *out, unsigned n) {
+/* This build's version: "1.8.2 Dev", "1.8.2 beta 2", "1.8.2". */
+static void sw_version(char *out, unsigned n) {
     char v[sizeof Q2POD_VERSION];
     const char *pod = strstr(Q2POD_VERSION, " Pod");
     tk_snprintf(v, sizeof v, "%s", Q2POD_VERSION);
     if (pod) v[pod - Q2POD_VERSION] = 0; /* "1.8.2", then " Dev" or the beta's " beta 2" */
-    tk_snprintf(out, n, "%s%s (" Q2POD_FW_TAG ") is installed", v,
+    tk_snprintf(out, n, "%s%s", v,
                 Q2POD_DEV ? " Dev"
                 : pod     ? pod + 4
                           : "");
+}
+/* This build as You're Up to Date says it: "1.8.2 Dev (V0JYi)", "1.8.2 beta 2 (V1822)", "1.8.2
+ * (V1820)". */
+void sw_installed(char *out, unsigned n) {
+    char v[sizeof Q2POD_VERSION + 8];
+    sw_version(v, sizeof v);
+    tk_snprintf(out, n, "%s (" Q2POD_FW_TAG ") is installed", v);
 }
 
 /* ---- the pages ---- */
@@ -206,29 +272,41 @@ static void sw_close(void **page) {
     if (p) window_manager_close_window_force(window_manager(), p);
 }
 
+static int sw_tick(const void *unused);
+static int sw_dl_tick(const void *unused);
+static void sw_begin(void);
+static int sw_key_up(void *ctx, void *event), sw_touch(void *ctx, void *event);
+
 static int sw_gone(void *ctx, void *event) {
     if (ctx == swu.page) {
         swu.page = (void *)0;
         if (swu.state == SW_CHECKING)
             swu.cancel = 1; /* Return while it checks: the thread ends at its next read */
+        if (swu.result == SW_DOWNLOADING)
+            netupdate_cancel(); /* the card may be unmounted or shared over USB next */
     }
     return 0;
-}
-/* Return or Centre leaves a result; the check is left with Return. */
-static int sw_key(void *ctx, void *event) {
-    unsigned key = (unsigned)I(event, EVENT_KEY);
-    if (key != KEY_RETURN && (key != KEY_CENTER || swu.result == SW_CHECKING)) return 0;
-    sw_close(&swu.page);
-    return STOP;
 }
 
 static void sw_result(int result) {
     swu.result = result;
     if (!swu.page) {
-        if (!(swu.page = page_open("swupdate_page", sw_gone, sw_key))) return;
+        if (!(swu.page = page_open("swupdate_page", sw_gone, sw_key_up))) return;
+        widget_on(swu.page, EVT_POINTER_UP_BEFORE, sw_touch, 0);
         awake_screen();
     }
     widget_invalidate_force(swu.page, (void *)0);
+}
+
+/* The online check again, on its thread, the spinner over the page meanwhile. */
+static void sw_net_start(void) {
+    swu.online = ON_CHECKING;
+    if (pthread_create(&swu.net_thread, 0, sw_net, 0)) {
+        swu.online = NET_FAILED;
+        return;
+    }
+    swu.net_up = 1;
+    if (!swu.timer) swu.timer = timer_add(sw_tick, (void *)0, SW_SPIN_MS);
 }
 
 /* After Install and Restart: stock's dialog, which flashes and restarts; its answer when it can't.
@@ -250,6 +328,7 @@ static void sw_ask(void) {
     static const char *const rows[] = { "Cancel", "Install and Restart" };
     static char name[64], body[96];
     unsigned tenths = swu.size_kb * 128 / 12500; /* KB * 1024 / 100,000: tenths of a MB */
+    swu.state = SW_ASKING;
     sw_update_name(name, sizeof name, swu.tag);
     tk_snprintf(body, sizeof body,
                 "%u.%u MB, over %s. Takes about 2 min;\nyour music and settings stay.", tenths / 10,
@@ -265,41 +344,175 @@ static void sw_ask(void) {
         sw_close(&swu.page);
 }
 
-/* The check's spinner, then its answer once the thread has one: a result's page, or Install
- * Update? on the card over the check's. */
+/* The page's button: Download and Install, or Install. */
+static void sw_go(void) {
+    if (swu.result == SW_OFFER_SD) {
+        sw_ask();
+    } else if (swu.result == SW_OFFER_NET) {
+        if (!netupdate_start()) {
+            toast("Can't start the download");
+            return;
+        }
+        swu.percent = swu.verifying = 0;
+        sw_result(SW_DOWNLOADING);
+        timer_add(sw_dl_tick, (void *)0, 250);
+    }
+}
+/* The line under it. */
+static void sw_note(void) {
+    if (swu.note == NOTE_SD) {
+        swu.note = NOTE_NONE, swu.focus = 0;
+        sw_result(SW_OFFER_SD);
+    } else if (swu.note == NOTE_WIFI) {
+        sw_close(&swu.page);
+        navigator_to("systemset/wifi_page");
+    } else if (swu.note == NOTE_RETRY) {
+        swu.note = NOTE_NONE, swu.focus = 0;
+        sw_result(SW_CHECKING);
+        sw_net_start();
+        if (swu.online != ON_CHECKING) sw_result(sw_offer(swu.state, swu.online, &swu.note));
+    }
+}
+static int sw_actions(void) {
+    return (swu.result == SW_OFFER_NET || swu.result == SW_OFFER_SD) + (swu.note != NOTE_NONE);
+}
+
+/* navigation.c's keys on the page: the wheel moves the focus between the button and the line
+ * under it (docs/oled-design.md#focus-ring); Centre acts on the one in focus, the button with no
+ * ring, and leaves a result that has none; Return leaves, which ends a check or a download. */
+int sw_update_key(void *top, unsigned key) {
+    if (!swu.page || top != swu.page) return 0;
+    int n = sw_actions(), button = swu.result == SW_OFFER_NET || swu.result == SW_OFFER_SD;
+    if (key == KEY_NEXT || key == KEY_PREV) {
+        int focus = button ? clamp_step(swu.focus, n - 1, key == KEY_NEXT ? 1 : -1) : 1;
+        if (n && focus != swu.focus) swu.focus = focus;
+        widget_invalidate_force(swu.page, (void *)0);
+        return 1;
+    }
+    if (key != KEY_CENTER) return 0;
+    if (swu.result == SW_CHECKING || swu.result == SW_DOWNLOADING) return 1;
+    if (swu.note && (!button || (swu.focus == 1 && ui_focus_shown())))
+        sw_note();
+    else if (button)
+        sw_go();
+    else
+        sw_close(&swu.page);
+    return 1;
+}
+static int sw_key_up(void *ctx, void *event) {
+    if ((unsigned)I(event, EVENT_KEY) != KEY_RETURN) return 0;
+    sw_close(&swu.page);
+    return STOP;
+}
+/* A tap on the button or on the line under it. */
+static int sw_touch(void *ctx, void *event) {
+    int x = I(event, EVENT_X), y = I(event, EVENT_Y);
+    rect_t *b = &swu.button, *l = &swu.link;
+    if (b->w && x >= b->x && x < b->x + b->w && y >= b->y && y < b->y + b->h)
+        sw_go();
+    else if (l->w && x >= l->x && x < l->x + l->w && y >= l->y && y < l->y + l->h)
+        sw_note();
+    return 0;
+}
+
+/* The checks' spinner, then their answer once neither thread runs: with the online part, the
+ * offer or a result's page; the card's alone, Install Update? on the card over the check's page,
+ * or a result's page. */
 static int sw_tick(const void *unused) {
     /* and not while the check's page still slides in: a fast check (the emulator's took one
      * frame) shows the spinner before its answer replaces it */
-    if (swu.state == SW_CHECKING || (swu.page && window_manager_is_animating(window_manager()))) {
+    if (swu.state == SW_CHECKING || swu.online == ON_CHECKING ||
+        (swu.page && window_manager_is_animating(window_manager()))) {
         swu.frame = (swu.frame + 1) % 12;
         if (swu.page) widget_invalidate_force(swu.page, (void *)0);
         return 8;
     }
-    pthread_join(swu.thread, 0);
-    int state = swu.state;
-    if (state == SW_OK && swu.page) {
-        swu.state = SW_ASKING;
-        sw_ask();
-    } else if (state != SW_CANCELLED && swu.page)
-        sw_result(state);
+    if (swu.sd_up) pthread_join(swu.thread, 0);
+    if (swu.net_up) pthread_join(swu.net_thread, 0);
+    swu.sd_up = swu.net_up = 0;
     swu.timer = 0;
+    int state = swu.state;
+    if (!swu.page || state == SW_CANCELLED) return 7;
+    if (swu.online != ON_NONE) {
+        swu.focus = 0;
+        sw_result(sw_offer(state, swu.online, &swu.note));
+    } else if (state == SW_OK)
+        sw_ask();
+    else
+        sw_result(state);
     return 7;
 }
 
-/* fwupdate_tf: System Update's SD Card Update row, and Network Update's download done. */
-int ringnav_fwupdate_tf(void) {
-    if (swu.timer || swu.page || confirm_up()) return 0; /* one at a time */
+/* The download's progress on the page, then the card's check of what it fetched; a download that
+ * ends without one says why and offers it again. */
+static int sw_dl_tick(const void *unused) {
+    int state = netupdate_poll(&swu.percent, &swu.verifying);
+    if (state == NU_RUNNING) {
+        if (swu.page) widget_invalidate_force(swu.page, (void *)0);
+        return 8;
+    }
+    if (!swu.page) return 7;
+    if (state == NU_DONE) {
+        swu.online = ON_NONE;
+        sw_begin();
+    } else {
+        toast(netupdate_said(state));
+        sw_result(SW_OFFER_NET);
+    }
+    return 7;
+}
+
+/* The card's check (stock's first, then the tar's on a thread) under the page, beside the online
+ * one when it runs. */
+static void sw_begin(void) {
     swu.cancel = 0, swu.frame = 0;
     swu.level = I(g_power_capacity, 0);
     int answer = sw_stock_answer(check_updatefw_exist(SW_CARD, SW_FILE));
-    sw_result(answer);
-    if (answer != SW_CHECKING || !swu.page) return 0;
-    swu.state = SW_CHECKING;
-    if (pthread_create(&swu.thread, 0, sw_check, 0)) {
-        sw_result(SW_BAD);
-        return 0;
+    swu.state = answer;
+    sw_result(swu.online == ON_CHECKING ? SW_CHECKING : answer);
+    if (!swu.page) {
+        if (swu.net_up) pthread_join(swu.net_thread, 0);
+        swu.net_up = 0;
+        return;
     }
-    swu.timer = timer_add(sw_tick, (void *)0, SW_SPIN_MS);
+    if (answer == SW_CHECKING) {
+        if (pthread_create(&swu.thread, 0, sw_check, 0)) {
+            swu.state = SW_BAD;
+            if (swu.online == ON_NONE) {
+                sw_result(SW_BAD);
+                return;
+            }
+        } else
+            swu.sd_up = 1;
+    }
+    if (swu.state == SW_CHECKING || swu.online == ON_CHECKING)
+        swu.timer = timer_add(sw_tick, (void *)0, SW_SPIN_MS);
+    else if (swu.online != ON_NONE)
+        sw_result(sw_offer(swu.state, swu.online, &swu.note));
+}
+
+/* fwupdate_tf: the card's update alone, after the online download (sw_dl_tick) or from stock's TF
+ * row. */
+int ringnav_fwupdate_tf(void) {
+    if (swu.timer || swu.page || confirm_up()) return 0; /* one at a time */
+    swu.online = ON_NONE, swu.note = swu.focus = 0;
+    sw_begin();
+    return 0;
+}
+
+/* General's Software Update: both checks at once, the online one while Wi-Fi is on. */
+int sw_update_open(void *ctx, void *event) {
+    if (swu.timer || swu.page || confirm_up()) return 0; /* one at a time */
+    swu.note = swu.focus = 0;
+    swu.button.w = swu.link.w = 0;
+    swu.online = g_wififlag ? ON_CHECKING : ON_OFF;
+    if (swu.online == ON_CHECKING) {
+        if (pthread_create(&swu.net_thread, 0, sw_net, 0))
+            swu.online = NET_FAILED;
+        else
+            swu.net_up = 1;
+    }
+    sw_begin();
     return 0;
 }
 
@@ -336,6 +549,66 @@ static int sw_unpacked(int w) {
     return !whole ? 0 : got >= swu.parts ? w : (int)((unsigned)(got >> 10) * (unsigned)w / whole);
 }
 
+/* "1.8.3" or the card's "Q2 Muse 1.8.3 · V1830" as the offer's name: the product and version,
+ * without the tag. */
+static void sw_offer_name(char *out, unsigned n) {
+    if (swu.result == SW_OFFER_NET) {
+        tk_snprintf(out, n, SW_PRODUCT " %s", swu.net_tag);
+        return;
+    }
+    sw_update_name(out, n, swu.tag);
+    char *dot = strstr(out, " · ");
+    if (dot) *dot = 0;
+}
+
+/* The line under the offer's button or a result (accent text, the focus ring's underline when
+ * the wheel is on it), its tap target kept. */
+static void sw_note_paint(void *canvas, int y, int dy) {
+    static const char *const said[] = { "", "Install from SD Card instead", "Turn on Wi-Fi to check online",
+                                        "Couldn't check online · Try Again" };
+    int w;
+    swu.link.w = 0;
+    if (!swu.note) return;
+    w = ui_measure(canvas, said[swu.note], "inter", TYPE(15));
+    ui_line(canvas, said[swu.note], 0, 375, y, 1, "inter", TYPE(15), tok(TOK_ACCENT_TEXT));
+    if (swu.focus == 1 && ui_focus_shown()) {
+        rect_t u = { (375 - w) / 2, y + 10, w, 2 };
+        fill_box(canvas, &u, RGBA(tok(TOK_ACCENT_TEXT)), 1);
+    }
+    swu.link = (rect_t){ (375 - w) / 2 - 8, y - SW_LINK_H / 2 + dy, w + 16, SW_LINK_H };
+}
+
+/* The offer (29 v3): the source's glyph on the accent's circle, the update's name, where it is
+ * and its size, what is installed, the button and the line under it. */
+static void sw_offer_paint(void *w, void *canvas, int dy, unsigned accent) {
+    int top = -dy, net = swu.result == SW_OFFER_NET, cx = 375 / 2;
+    unsigned kb = net ? swu.net_kb : swu.size_kb, tenths = kb * 128 / 12500;
+    char s[64];
+    rect_t circle = { cx - SW_OFFER_R, top + SW_OFFER_CY - SW_OFFER_R, 2 * SW_OFFER_R,
+                      2 * SW_OFFER_R };
+    fill_box(canvas, &circle, RGBA(accent), SW_OFFER_R);
+    paint_art(w, canvas, theme_art(net ? "swoffer_net" : "swoffer_sd"), cx - SW_OFFER_GLYPH / 2,
+              top + SW_OFFER_CY - SW_OFFER_GLYPH / 2);
+    sw_offer_name(s, sizeof s);
+    ui_line(canvas, s, 0, 375, top + SW_OFFER_NAME_Y, 1, "inter-medium", TYPE(22),
+            tok(TOK_PRIMARY));
+    if (tenths)
+        tk_snprintf(s, sizeof s, "From the %s · %u.%u MB", net ? "internet" : "SD card",
+                    tenths / 10, tenths % 10);
+    else
+        tk_snprintf(s, sizeof s, "From the %s", net ? "internet" : "SD card");
+    ui_line(canvas, s, 0, 375, top + SW_OFFER_FROM_Y, 1, "inter", TYPE(15), tok(TOK_SECONDARY));
+    char v[sizeof Q2POD_VERSION + 8];
+    sw_version(v, sizeof v);
+    tk_snprintf(s, sizeof s, "Installed: %s", v);
+    ui_line(canvas, s, 0, 375, top + SW_OFFER_HAVE_Y, 1, "inter", TYPE(13), tok(TOK_TERTIARY));
+    const char *label = net ? "Download and Install" : "Install";
+    int bw = ui_button(canvas, cx, top + SW_OFFER_BTN_Y, label, 1,
+                       swu.focus == 0 && ui_focus_shown());
+    swu.button = (rect_t){ cx - bw / 2, top + SW_OFFER_BTN_Y - UI_BTN_H / 2 + dy, bw, UI_BTN_H };
+    sw_note_paint(canvas, top + SW_OFFER_LINE_Y, dy);
+}
+
 /* ringnav_paint, after w's children. */
 void sw_update_paint(void *w, void *canvas) {
     void *lcd = w ? P(canvas, CANVAS_LCD) : (void *)0;
@@ -346,7 +619,9 @@ void sw_update_paint(void *w, void *canvas) {
     unsigned accent = scheme()->tones[0] & 0xffffffu;
     char s[64], spin[24];
     st.raw_ink = 1;
-    if (w == swu.page) {
+    if (w == swu.page && (swu.result == SW_OFFER_NET || swu.result == SW_OFFER_SD)) {
+        sw_offer_paint(w, canvas, dy, accent);
+    } else if (w == swu.page) {
         mode_page_t m = { RGB_NEGATIVE,
                           "modepage_bad",
                           0,
@@ -360,7 +635,8 @@ void sw_update_paint(void *w, void *canvas) {
                                spin,
                                SW_SPIN_PX,
                                "Checking for an Update…",
-                               "Looking on the SD card",
+                               swu.online == ON_CHECKING ? "Looking online and on the SD card"
+                                                         : "Looking on the SD card",
                                (const char *)0 };
             break;
         case SW_LATEST:
@@ -393,8 +669,29 @@ void sw_update_paint(void *w, void *canvas) {
                 RGB_WARNING,    "modepage_bad", 0, "Not Enough Space", "Free 100 MB on the SD card",
                 (const char *)0
             };
+            break;
+        case SW_DOWNLOADING:
+            tk_snprintf(s, sizeof s, "%d%%", swu.percent);
+            m = (mode_page_t){ accent,
+                               "modepage_check",
+                               0,
+                               "Downloading the Update",
+                               swu.verifying ? "Verifying…" : swu.percent ? s : "Starting…",
+                               (const char *)0 };
         }
-        mode_page_paint(w, canvas, dy, &m);
+        int top = mode_page_paint(w, canvas, dy, &m);
+        swu.button.w = 0;
+        if (swu.result == SW_DOWNLOADING) { /* the restart's bar, filling as it comes */
+            rect_t track = { 375 / 2 - SW_BAR_W / 2, top + SW_BAR_Y, SW_BAR_W, SW_BAR_H },
+                   part = track;
+            part.w = SW_BAR_W * swu.percent / 100;
+            fill_box(canvas, &track, RGBA(tok(TOK_TRACK)), SW_BAR_H / 2);
+            if (part.w >= SW_BAR_H) fill_box(canvas, &part, RGBA(accent), SW_BAR_H / 2);
+        }
+        if (swu.result != SW_CHECKING && swu.result != SW_DOWNLOADING)
+            sw_note_paint(canvas, top + SW_NOTE_Y, dy);
+        else
+            swu.link.w = 0;
     } else {
         /* stock's dialog covers the status row: its title drawn in its place and face */
         ui_text(canvas, "Software Update", 1, SW_STATUS_PX, tok(TOK_SECONDARY), 1, STATUS_ROW_INSET,

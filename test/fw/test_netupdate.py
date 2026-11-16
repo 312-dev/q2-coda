@@ -40,6 +40,7 @@ SH_MAX = 16
 SH_CAP = 1 << 30
 SH_OK, SH_NET, SH_SPACE, SH_CARD, SH_MISSING, SH_BAD, SH_CANCELLED, SH_BUSY, SH_UNSIGNED, SH_FORGED = range(10)
 NU_IDLE, NU_RUNNING, NU_DONE, NU_LATEST, NU_NET, NU_MISSING, NU_CARD, NU_CANCELLED, NU_UNSIGNED, NU_FORGED = range(10)
+NET_NEWER, NET_LATEST, NET_FAILED = 1, 2, 3
 JOB_CHECK, JOB_INSTALL, JOB_REMOVE, JOB_ERASE = 1, 2, 3, 4
 ST_INSTALL, ST_UPDATE, ST_INSTALLED = range(3)
 ROW_CHECK = SH_MAX
@@ -75,7 +76,7 @@ class Sh(C.Structure):
 
 
 class Nu(C.Structure):
-    _fields_ = [('thread', C.c_ulong), ('state', C.c_int), ('cancel', C.c_int), ('percent', C.c_int), ('label', C.c_void_p),
+    _fields_ = [('thread', C.c_ulong), ('state', C.c_int), ('cancel', C.c_int), ('percent', C.c_int),
                 ('verifying', C.c_int)]
 
 
@@ -404,14 +405,6 @@ def test_progress_is_percent_of_kilobytes(fw):
     assert progress(x, 0, 0, 0, 0) == 1
 
 
-def test_leaving_the_page_cancels_its_own_download(fw):
-    gone = fw.fn('netupdate__label_gone', C.c_int, C.c_void_p, C.c_void_p)
-    nu = fw.var('netupdate__nu', Nu)
-    nu.label = 5
-    assert gone(6, None) == 0 and nu.label == 5 and nu.cancel == 0
-    assert gone(5, None) == 0 and not nu.label and nu.cancel == 1
-
-
 def test_an_app_by_id(fw):
     apps(fw, b'me/foo', b'me/bar')
     is_ = fw.fn('netupdate__is', C.c_int, C.c_int, C.c_char_p)
@@ -688,7 +681,7 @@ class Net:
     through the transfer's own write callback in CHUNKS pieces, its progress callback told after each and during(k)
     run then, as a UI timer might: a short write ends it as curl's CURLE_WRITE_ERROR (23), a progress callback's
     non-zero as CURLE_ABORTED_BY_CALLBACK (42). during(k) runs in update.tar.sig's transfer too only with sig_too."""
-    def __init__(self, fw, replies, during=None, sig_too=False):
+    def __init__(self, fw, replies, during=None, sig_too=False, length=-1.0):
         self.replies, self.urls, self.opts, self.during, self.sig_too = replies, [], {}, during, sig_too
         self.card_list = b''  # store_net's: the list a check leaves on the card
         self.location = None
@@ -705,6 +698,8 @@ class Net:
                 C.cast(out, C.POINTER(C.c_long))[0] = self.code
             elif what == 0x10001f:
                 C.cast(out, C.POINTER(C.c_void_p))[0] = C.addressof(self.location) if self.location else 0
+            elif what == 0x30000f:  # CONTENT_LENGTH_DOWNLOAD
+                C.cast(out, C.POINTER(C.c_double))[0] = length
         fw.mock('fw_curl_easy_init', lambda *_: self.opts.clear() or 1)
         fw.mock('fw_curl_easy_setopt', setopt)
         fw.mock('fw_curl_easy_perform', perform)
@@ -903,33 +898,68 @@ def test_a_cancel_while_the_card_takes_the_last_bytes_is_a_cancel(fw):
     assert state == NU_CANCELLED and card.files[TAR] == b'old' and PART not in card.files and not card.of('rename')
 
 
-def fetch(fw, url=b'https://x', tag_size=64, file=None):
-    tag, code = block(fw, size=tag_size), C.c_long(0)
-    xfer = (C.c_int * 2)()
-    fn = fw.fn('netupdate__fetch', C.c_int, C.c_char_p, C.c_void_p, C.c_void_p, C.c_uint, C.POINTER(C.c_long), C.c_void_p)
-    err = fn(url, file, tag if not file else None, tag_size, C.byref(code), xfer)
-    return err, C.string_at(tag), code.value
+def head(fw, url=b'https://x', tag_size=64, size=False, secs=5):
+    """netupdate.c's head: (its error, the tag, the code, the size in KB)."""
+    tag, code, kb = block(fw, size=tag_size), C.c_long(0), C.c_uint(77)
+    fn = fw.fn('netupdate__head', C.c_int, C.c_char_p, C.c_long, C.c_void_p, C.c_uint, C.c_void_p, C.POINTER(C.c_long))
+    err = fn(url, secs, None if size else tag, tag_size, C.addressof(kb) if size else None, C.byref(code))
+    return err, C.string_at(tag), code.value, kb.value
 
 
 def test_a_header_fetch_sends_no_body_and_keeps_the_tag(fw):
     net = Net(fw, {b'https': (0, 302, b'https://g/releases/tag/1.2.3')})
-    assert fetch(fw) == (0, b'1.2.3', 302)
-    assert net.opts[44] == 1 and 52 not in net.opts  # NOBODY, no FOLLOWLOCATION
+    assert head(fw)[:3] == (0, b'1.2.3', 302)
+    assert net.opts[44] == 1 and 52 not in net.opts and net.opts[13] == 5 and net.opts[78] == 5  # NOBODY, no
+    # FOLLOWLOCATION, the whole request and its connect in secs
+
+
+def test_a_size_follows_the_redirects_and_reads_the_length(fw):
+    net = Net(fw, {b'https': (0, 200, None)}, length=56_000_000.0)
+    assert head(fw, size=True) == (0, b'', 200, 56_000_000 // 1024) and net.opts[52] == 1
 
 
 def test_a_download_follows_redirects_to_its_file_and_verifies(fw):
     net = Net(fw, {b'https': (0, 200, None)})
-    assert fetch(fw, file=7)[0] == 0
+    code, xfer = C.c_long(0), (C.c_int * 2)()
+    fn = fw.fn('netupdate__fetch', C.c_int, C.c_char_p, C.c_void_p, C.POINTER(C.c_long), C.c_void_p)
+    assert fn(b'https://x', 7, C.byref(code), xfer) == 0
     assert net.opts[52] == 1 and net.opts[10001] == 7 and net.opts[64] == 1 and net.opts[81] == 2
 
 
 def test_no_curl_handle_is_an_error(fw):
-    assert fetch(fw)[0] == 1
+    assert head(fw)[0] == 1
 
 
 def test_a_redirect_with_no_location_clears_the_tag(fw):
     Net(fw, {b'https': (0, 302, None)})
-    assert fetch(fw)[:2] == (0, b'')
+    assert head(fw)[:2] == (0, b'')
+
+
+def online(fw, replies):
+    """netupdate_check over replies: its answer, the tag and the size in KB."""
+    Net(fw, replies, length=56_000_000.0)
+    tag, kb = C.create_string_buffer(32), C.c_uint(9)
+    r = fw.fn('netupdate_check', C.c_int, C.c_void_p, C.c_uint, C.POINTER(C.c_uint))(tag, 32, C.byref(kb))
+    return r, tag.value, kb.value
+
+
+def test_the_check_reads_a_newer_releases_tag_and_size(fw):
+    assert online(fw, rel()) == (NET_NEWER, NEWER, 56_000_000 // 1024)
+
+
+@pytest.mark.parametrize('replies', [
+    lambda: {LATEST: (6, 0, None)},  # no DNS
+    lambda: {LATEST: (28, 0, None)},  # timed out
+    lambda: {LATEST: (0, 200, None)},  # no redirect
+    lambda: rel((0, 404, None)),  # the release has no update.tar
+    lambda: rel((28, 0, None)),
+])
+def test_a_check_that_cant_answer_failed(fw, replies):
+    assert online(fw, replies())[0] == NET_FAILED
+
+
+def test_this_builds_own_release_or_an_older_is_the_latest(fw):
+    assert online(fw, {LATEST: (0, 302, TAG_URL + TAG)})[0] == NET_LATEST
 
 
 def sign_list(body):
@@ -1612,143 +1642,67 @@ class Disk(Card):
         return [e[1] for e in self.log if e[0] == 'system']
 
 
-class UpdateRow:
-    """System Update's page as stock lays it out (stand-in handles), hooked by ringnav_fwupdate: its second row's button
-    and label, what they show, the toasts, the wait timer, the worker and stock's card update."""
-    VIEW, ROW, BUTTON, LABEL = 0x7100, 0x7200, 0x7300, 0x7400
-
-    def __init__(self, fw, wifi=1, children=2, thread=0, win=0x7000):
-        self.fw, self.wifi, self.flashed = fw, wifi, 0
-        self.names, self.text, self.tr, self.handlers, self.toasts, self.timers, self.workers = {}, {}, {}, [], [], [], []
-        tree = {(self.VIEW, 1): self.ROW, (self.ROW, 0): self.BUTTON, (self.BUTTON, 0): self.LABEL}
-        fw.mock('stock_fwupdate_trampoline', lambda *_: 7)
-        fw.mock('widget_lookup', lambda w, name, *_: self.VIEW if C.string_at(name) == b'scroll_view_fwupdate' else 0)
-        fw.mock('widget_count_children', lambda w, *_: children if w == self.VIEW else 0)
-        fw.mock('widget_get_child', lambda w, i, *_: tree.get((w, i), 0))
-        fw.mock('widget_set_name', lambda w, s, *_: self.names.__setitem__(w, C.string_at(s)))
-        fw.mock('widget_on', lambda w, evt, fn, ctx, *_: self.handlers.append((w, evt, fn, ctx)))
-        fw.mock('widget_set_text_utf8', lambda w, s, *_: self.text.__setitem__(w, C.string_at(s).decode()))
-        fw.mock('widget_set_tr_text', lambda w, s, *_: self.tr.__setitem__(w, C.string_at(s).decode()))
-        fw.mock('navigator_to_with_context', lambda path, info, *_: self.toasts.append(C.string_at(info + 8).decode()))
-        fw.mock('get_wifisignal', lambda *_: self.wifi)
-        fw.mock('timer_add', lambda fn, ctx, ms, *_: self.timers.append(fn) or len(self.timers))
+class Download:
+    """Software Update's download (sw_update.c drives it) through netupdate_start, netupdate_poll and
+    netupdate_cancel: the worker run by hand, its endings in netupdate_said's words."""
+    def __init__(self, fw, thread=0):
+        self.fw, self.workers = fw, []
         fw.mock('fw_pthread_create', lambda t, a, fn, arg, *_: thread or self.workers.append(fn) or 0)
-        fw.mock('fwupdate_tf', lambda *_: setattr(self, 'flashed', self.flashed + 1))
         self.nu = fw.var('netupdate__nu', Nu)
-        self.result = fw.fn('ringnav_fwupdate', C.c_int, C.c_void_p, C.c_void_p)(win, 0x7001)
 
-    def on(self, w, event):
-        return [lambda f=fn, c=ctx: C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(f)(c, None)
-                for ww, evt, fn, ctx in self.handlers if ww == w and evt == event]
+    def start(self):
+        return self.fw.fn('netupdate_start', C.c_int)()
 
-    def press(self):
-        click, = self.on(self.BUTTON, EVT_CLICK)
-        assert click() == 0
+    def poll(self):
+        percent, verifying = C.c_int(-1), C.c_int(-1)
+        state = self.fw.fn('netupdate_poll', C.c_int, C.c_void_p, C.c_void_p)(C.byref(percent), C.byref(verifying))
+        return state, percent.value, verifying.value
 
-    def leave(self):
-        gone, = self.on(self.LABEL, EVT_DESTROY)
-        gone()
-
-    def wait(self):
-        """wait_done, as its timer runs it."""
-        return C.CFUNCTYPE(C.c_int, C.c_void_p)(self.timers[-1])(None)
+    def cancel(self):
+        self.fw.fn('netupdate_cancel', None)()
 
     def run(self):
         assert C.CFUNCTYPE(C.c_void_p, C.c_void_p)(self.workers.pop())(None) is None
 
-    def label(self):
-        return self.text.get(self.LABEL)
+    def said(self, state):
+        return C.string_at(self.fw.fn('netupdate_said', C.c_void_p, C.c_int)(state)).decode()
 
 
-def test_system_update_s_second_row_becomes_the_online_update(fw):
-    row = UpdateRow(fw)
-    assert row.result == 7 and row.names == {row.BUTTON: b'2'}  # a name stock's own click ignores
-    assert len(row.on(row.BUTTON, EVT_CLICK)) == 1 and len(row.on(row.LABEL, EVT_DESTROY)) == 1 and row.nu.label == row.LABEL
-    assert row.label() is None and not row.workers
-
-
-@pytest.mark.parametrize('children, win', [(1, 0x7000), (3, 0x7000), (2, 0)])
-def test_a_page_laid_out_otherwise_stays_stock_s(fw, children, win):
-    row = UpdateRow(fw, children=children, win=win)
-    assert row.result == 7 and row.names == {} and row.handlers == [] and not row.nu.label
-
-
-def test_a_press_downloads_a_newer_release_and_hands_it_to_stock_s_card_update(fw):
+def test_a_start_downloads_a_newer_release_onto_the_card(fw):
     card = Disk(fw, {TAR: b'old'})
-    row = UpdateRow(fw)
-    row.press()
-    assert row.nu.state == NU_RUNNING and row.label() == 'Checking…' and row.wait() == RET_REPEAT
+    dl = Download(fw)
+    assert dl.start() == 1 and dl.poll() == (NU_RUNNING, 0, 0)
     seen = []
-    Net(fw, rel((0, 200, None, BODY)), during=lambda k: seen.append((row.wait(), row.label())))
-    row.run()
-    assert seen == [(RET_REPEAT, f'Downloading {p}%') for p in (25, 50, 75, 100)]
+    Net(fw, rel((0, 200, None, BODY)), during=lambda k: seen.append(dl.poll()))
+    dl.run()
+    assert seen == [(NU_RUNNING, p, 0) for p in (25, 50, 75, 100)]
     assert {args[:3] for _, args in fw.calls('reset_poweroptions_timer')} == {(1, 1, 0)}  # standby held, not the screen
     assert card.files[TAR] == BODY and PART not in card.files
     # the part on the card before it replaces the old tar, then the rename's own entry before stock flashes it
     assert [e for e in card.log if e[0] in ('rename', 'fsync')] == [('fsync', PART), ('rename', PART, TAR), ('fsync', b'/mnt/mmc')]
-    assert row.wait() == 0 and row.flashed == 1 and row.toasts == [] and row.tr == {row.LABEL: 'update_online'}
-    assert row.nu.state == NU_IDLE
+    assert dl.poll()[0] == NU_DONE and len(fw.calls('fw_pthread_join')) == 1 and dl.poll()[0] == NU_IDLE
 
 
-def test_a_second_press_cancels_mid_download_and_keeps_the_old_tar(fw):
+@pytest.mark.parametrize('at', [1, CHUNKS - 1])  # mid-download, and after the last byte, with no progress call left
+def test_a_cancel_keeps_the_old_tar(fw, at):
     card = Disk(fw, {TAR: b'old'})
-    row = UpdateRow(fw)
-    row.press()
-    seen = []
-
-    def during(k):
-        if k == 1:
-            row.press()
-            seen.append((row.wait(), row.label()))  # the timer says so too, not the percentage
-    Net(fw, rel((0, 200, None, BODY)), during=during)
-    row.run()
-    assert seen == [(RET_REPEAT, 'Canceling…')] and len(card.written[PART]) < len(BODY)  # ended at the next progress call
-    assert row.wait() == 0 and row.toasts == ['Download canceled'] and not row.flashed
-    assert card.files[TAR] == b'old' and PART not in card.files
-
-
-def test_leaving_the_page_mid_download_cancels_it(fw):
-    card = Disk(fw, {TAR: b'old'})
-    row = UpdateRow(fw)
-    row.press()
-    Net(fw, rel((0, 200, None, BODY)), during=lambda k: k == 1 and row.leave())
-    row.run()
-    assert row.wait() == 0 and row.toasts == ['Download canceled'] and row.tr == {} and not row.flashed
-    assert card.files[TAR] == b'old' and PART not in card.files
-
-
-@pytest.mark.parametrize('how', ['press', 'leave'])
-def test_a_cancel_after_the_last_byte_still_keeps_the_old_tar(fw, how):
-    card = Disk(fw, {TAR: b'old'})
-    row = UpdateRow(fw)
-    row.press()
-    Net(fw, rel((0, 200, None, BODY)), during=lambda k: k == CHUNKS - 1 and getattr(row, how)())
-    row.run()
-    assert card.written[PART] == BODY  # no progress call left to end it: the transfer itself came whole
-    assert row.wait() == 0 and row.toasts == ['Download canceled'] and not row.flashed
+    dl = Download(fw)
+    dl.start()
+    Net(fw, rel((0, 200, None, BODY)), during=lambda k: k == at and dl.cancel())
+    dl.run()
+    assert dl.poll()[0] == NU_CANCELLED and dl.said(NU_CANCELLED) == 'Download canceled'
     assert card.files[TAR] == b'old' and PART not in card.files and not card.of('rename')
 
 
 def test_a_part_the_card_can_t_sync_never_replaces_the_tar(fw):
     card = Disk(fw, {TAR: b'old'})
     fw.mock('fw_fsync', lambda fd, *_: -1 if card.names[fd - 100] == PART else 0)
-    row = UpdateRow(fw)
-    row.press()
+    dl = Download(fw)
+    dl.start()
     Net(fw, rel((0, 200, None, BODY)))
-    row.run()
-    assert row.wait() == 0 and row.toasts == ["Can't write to the card"] and not row.flashed
+    dl.run()
+    assert dl.poll()[0] == NU_CARD and dl.said(NU_CARD) == "Can't write to the card"
     assert card.files[TAR] == b'old' and PART not in card.files and not card.of('rename')
-
-
-def test_a_download_finished_off_the_page_waits_for_the_card_update(fw):
-    card = Disk(fw)
-    row = UpdateRow(fw)
-    row.press()
-    Net(fw, rel((0, 200, None, BODY)))
-    row.run()
-    row.leave()
-    assert row.wait() == 0 and row.toasts == ['Update downloaded: use SD Card Update'] and not row.flashed
-    assert card.files[TAR] == BODY
 
 
 @pytest.mark.parametrize('replies, said', [
@@ -1762,11 +1716,11 @@ def test_a_download_finished_off_the_page_waits_for_the_card_update(fw):
 ])
 def test_each_ending_says_why_and_keeps_the_old_tar(fw, replies, said):
     card = Disk(fw, {TAR: b'old'})
-    row = UpdateRow(fw)
-    row.press()
+    dl = Download(fw)
+    dl.start()
     Net(fw, replies())
-    row.run()
-    assert row.wait() == 0 and row.toasts == [said] and not row.flashed and row.tr == {row.LABEL: 'update_online'}
+    dl.run()
+    assert dl.said(dl.poll()[0]) == said
     assert card.files[TAR] == b'old' and PART not in card.files
 
 
@@ -1780,59 +1734,61 @@ def test_a_full_card_fails_the_write_and_says_so(fw):
         return n
     fw.mock('fw_fwrite', fwrite)
     fw.mock('fw_ferror', lambda f, *_: card.names[f] == PART)
-    row = UpdateRow(fw)
-    row.press()
+    dl = Download(fw)
+    dl.start()
     net = Net(fw, rel((0, 200, None, BODY)))
-    row.run()
-    assert net.urls == [LATEST, SIG, ASSET] and row.wait() == 0 and row.toasts == ["Can't write to the card"]
+    dl.run()
+    assert net.urls == [LATEST, SIG, ASSET] and dl.poll()[0] == NU_CARD
     assert card.files[TAR] == b'old' and PART not in card.files
 
 
-def test_a_press_without_wifi_or_a_thread_starts_nothing(fw):
-    row = UpdateRow(fw, wifi=0)
-    row.press()
-    assert row.toasts == ['Connect to Wi-Fi first'] and not row.workers and row.nu.state == NU_IDLE
-    row = UpdateRow(fw, thread=11)
-    row.press()
-    assert row.toasts == ["Can't start the download"] and not row.timers and row.nu.state == NU_IDLE
-    row.press()  # idle again: a press tries again
-    assert row.toasts[-1] == "Can't start the download"
+def test_one_download_at_a_time_and_none_without_a_thread(fw):
+    dl = Download(fw)
+    assert dl.start() == 1 and dl.start() == 0 and len(dl.workers) == 1
+    dl = Download(fw, thread=11)
+    dl.nu.state = NU_IDLE
+    assert dl.start() == 0 and dl.nu.state == NU_IDLE
 
 
-def test_presses_between_the_end_and_the_join_do_nothing(fw):
-    Disk(fw)
-    row = UpdateRow(fw)
-    row.press()
-    Net(fw, {LATEST: (0, 302, TAG_URL + TAG)})
-    row.run()
-    row.press()
-    assert not row.workers and row.toasts == [] and row.nu.state == NU_LATEST and len(row.timers) == 1
-    assert row.wait() == 0 and row.toasts == ['Latest firmware installed']
+def test_a_new_start_forgets_the_last_download(fw):
+    dl = Download(fw)
+    dl.nu.verifying, dl.nu.percent, dl.nu.cancel = 1, 80, 1
+    dl.start()
+    assert (dl.nu.verifying, dl.nu.percent, dl.nu.cancel) == (0, 0, 0)
 
 
-def test_the_row_says_verifying_while_the_signature_is_checked(fw):
-    row = UpdateRow(fw)
-    row.nu.state, row.nu.percent, row.nu.verifying = NU_RUNNING, 100, 1
-    timers = len(row.timers)
-    row.fw.fn('netupdate__wait_done', C.c_int, C.c_void_p)(None)
-    assert row.label() == 'Verifying…' and len(row.timers) == timers
-    row.nu.cancel = 1
-    row.fw.fn('netupdate__wait_done', C.c_int, C.c_void_p)(None)
-    assert row.label() == 'Canceling…'
+def test_the_poll_says_verifying_while_the_signature_is_checked(fw):
+    dl = Download(fw)
+    dl.nu.state, dl.nu.percent, dl.nu.verifying = NU_RUNNING, 100, 1
+    assert dl.poll() == (NU_RUNNING, 100, 1) and not fw.calls('fw_pthread_join')
 
 
-def test_a_new_press_forgets_the_last_check(fw):
-    Disk(fw)
-    row = UpdateRow(fw)
-    row.nu.verifying = 1
-    row.press()
-    assert row.nu.verifying == 0 and row.label() == 'Checking…'
+def stock_page(fw, children=2, win=0x7000):
+    """Stock's System Update page as stock lays it out (stand-in handles), hooked by ringnav_fwupdate: the names and
+    click handlers it gave."""
+    VIEW, ROW, BUTTON = 0x7100, 0x7200, 0x7300
+    names, handlers = {}, []
+    tree = {(VIEW, 1): ROW, (ROW, 0): BUTTON}
+    fw.mock('stock_fwupdate_trampoline', lambda *_: 7)
+    fw.mock('widget_lookup', lambda w, name, *_: VIEW if C.string_at(name) == b'scroll_view_fwupdate' else 0)
+    fw.mock('widget_count_children', lambda w, *_: children if w == VIEW else 0)
+    fw.mock('widget_get_child', lambda w, i, *_: tree.get((w, i), 0))
+    fw.mock('widget_set_name', lambda w, s, *_: names.__setitem__(w, C.string_at(s)))
+    fw.mock('widget_on', lambda w, evt, fn, ctx, *_: handlers.append((w, evt, fn)))
+    result = fw.fn('ringnav_fwupdate', C.c_int, C.c_void_p, C.c_void_p)(win, 0x7001)
+    return result, names, handlers, BUTTON
 
 
-def test_system_update_opened_mid_download_says_so(fw):
-    fw.var('netupdate__nu', Nu).state = NU_RUNNING
-    row = UpdateRow(fw)
-    assert row.label() == 'Downloading…'
+def test_stock_s_second_row_opens_software_update(fw):
+    result, names, handlers, button = stock_page(fw)
+    opener = C.cast(fw.lib.sw_update_open, C.c_void_p).value
+    assert result == 7 and names == {button: b'2'} and handlers == [(button, EVT_CLICK, opener)]
+
+
+@pytest.mark.parametrize('children, win', [(1, 0x7000), (3, 0x7000), (2, 0)])
+def test_a_page_laid_out_otherwise_stays_stock_s(fw, children, win):
+    result, names, handlers, _ = stock_page(fw, children, win)
+    assert result == 7 and names == {} and handlers == []
 
 
 # The App Store.

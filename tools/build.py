@@ -10,7 +10,7 @@ ZIP_SHA = '4e298cab6c12d86cfc55565645f7e3ae11d3fb44677a93ca13991e7184ecec4e'
 DEMO_SHA = 'e65d638d6e70332b4c3193af8ac2044941ec0157d20e41e40233aac5b0c2c59f'
 VERSION = '1.8.2'  # major.minor.patch, single digits, shown as is (About and release tag)
 BETA = 0  # a pre-release's beta number (1-9), 0 for the release itself
-REPO = '312-dev/q2-coda'  # whose releases Network Update fetches (--update-repo) and release.py publishes
+REPO = '312-dev/q2-coda'  # whose releases Software Update fetches (--update-repo) and release.py publishes
 # The updater's identity (firmware_v20.info and demo's version literal) must be 5 characters and
 # differ from the installed one, so it packs the digits and the beta number: 1.8.0 beta 2 is V1802,
 # 1.8.0 itself V1800, so each installs over the betas before it. Releases up to 1.8.0 BETA ended in I
@@ -89,7 +89,7 @@ HOOKS = {
     'toolsWriteConfig': (0x5d0284, 'ringnav_ini_write', 'ini_write'),
     'main_loop_sleep_default': (0x65c470, 'ringnav_sleep', 'sleep'),
     'systemset_about_page_init': (0x4c1390, 'ringnav_about', 'about'),
-    # Network Update (patch/netupdate.c): the latest GitHub release to the card's update.tar
+    # stock's System Update page (patch/netupdate.c): its second row opens Software Update (sw_update.c)
     'systemset_fwupdate_page_init': (0x4c88d0, 'ringnav_fwupdate', 'fwupdate'),
     # Podcasts and Audiobooks: folder_page opened at their folder, and Back there leaving it
     'folder_page_init': (0x533ed0, 'ringnav_folder', 'folder'),
@@ -118,7 +118,7 @@ HOOKS = {
     # the firmware update's dialog, which stops the player before it flashes and reboots
     'device_reboot': (0x502004, 'ringnav_reboot', 'reboot'),
     'dialog_checkfw_dialog_init': (0x49982c, 'ringnav_checkfw', 'checkfw'),
-    # SD Card Update (patch/sw_update.c): the card's update.tar checked, then stock's checkfw_dialog flashes it
+    # Software Update's card half (patch/sw_update.c): the card's update.tar checked, then stock's checkfw_dialog flashes it
     'fwupdate_tf': (0x4c7eb4, 'ringnav_fwupdate_tf', None),
     'mclLoadPlayList': (0x5bcfc8, 'ringnav_load', 'load'),
     'mclNextSong': (0x5c063c, 'ringnav_next', 'next'),
@@ -1800,7 +1800,7 @@ FUNCTIONS = {
  'check_forbid_play_no_headset': ('int', 'int'),
  'on_wm_keyup_fun': ('int', 'void *, void *'),  # stock key-up: np_single replays a centre release
  'get_wifisignal': ('int', 'void'),  # the status bar's Wi-Fi bars, 1-4; -1 when not connected
- 'fwupdate_tf': ('int', 'void'),  # System Update's SD Card Update (sw_update.c ringnav_fwupdate_tf)
+ 'fwupdate_tf': ('int', 'void'),  # the card's update alone (sw_update.c ringnav_fwupdate_tf)
  # its stock checks: -15 battery under 16% with no cable, -2 no card, -11 no file, -12 under 0.1 GB free, else 1
  'check_updatefw_exist': ('int', 'const char *, const char *'),
  'widget_set_tr_text': ('int', 'void *, const char *'),
@@ -1900,7 +1900,7 @@ PRIVATE_FUNCTIONS = {
     "folder_click": HOOKS['folder_click'][0],  # folder_page's row click (folder_enter, then a file's queue)
     "np_info": 0x53bc78,  # Now Playing's info page labels, from the track (NP_INFO_CALL)
     "ab_x": 0x53b9d8,  # an A-B marker's x, on the boot set's np_bar_x and np_bar_w (AB_X_CALLS)
-    "fwupdate_tf": HOOKS['fwupdate_tf'][0],  # systemset_fwupdate_page's row 0 click (0x4c84cc): sw_update.c's SD Card Update
+    "fwupdate_tf": HOOKS['fwupdate_tf'][0],  # systemset_fwupdate_page's row 0 click (0x4c84cc): sw_update.c's card update
     # Smart Wi-Fi's held stock actions (smart_wifi.c smart_hold)
     "stream_row": HOOKS['stream_row'][0],  # Streaming's Tidal row: atoi of the button's name
     "netservice_row": HOOKS['netservice_row'][0],  # Network service's DLNA, AirPlay and Wi-Fi transfer
@@ -2236,7 +2236,7 @@ def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
     return '\n'.join(header)+'\n'
 
 def signing_key(path, dev):
-    """The release key's 32 public bytes that Network Update and the App Store check signatures with
+    """The release key's 32 public bytes that Software Update and the App Store check signatures with
     (docs/internals.md#release-signatures): assets/signing/q2-coda-release.pub, which a release build must have;
     a --dev build may take another (path), such as a test key whose private half is at hand."""
     from signing import PUBLIC_KEY, public_key
@@ -2866,7 +2866,7 @@ if __name__ == '__main__':
     ap.add_argument('--flac-experiments', default='sync,lpc,output', metavar='sync,lpc,output',
                     help='FLAC fast paths (comma-separated subset; empty for stock FLAC)')
     ap.add_argument('--update-repo', default=REPO, metavar='OWNER/NAME',
-                    help="GitHub repo whose latest release Network Update fetches (default: %(default)s), for a fork's test builds")
+                    help="GitHub repo whose latest release Software Update fetches (default: %(default)s), for a fork's test builds")
     ap.add_argument('--signing-key', type=pathlib.Path, metavar='PUB.PEM',
                     help='Ed25519 public key that updates and the app list must be signed with, in place of assets/signing/q2-coda-release.pub (requires --dev)')
     ap.add_argument('--aic-idle-wait', action='store_true',

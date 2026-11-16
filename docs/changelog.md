@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Settings > General: one **Software Update** row replaces SD Card Update and Network Update. It looks online and on the SD card at once and offers what it finds, the online update first (with **Install from SD Card instead** when the card has one too); with Wi-Fi off it checks the card and offers to turn Wi-Fi on, and an online check that fails never hides the card's update.
   - Spinning the wheel fast through the Wi-Fi network list (or Bluetooth's devices, the queue, Internet Radio and other lists not in A to Z order) no longer flashes a big letter in the middle of the screen; the letter and the A-Z index show only on the Library's alphabetical lists.
   - Settings > General > Reset Settings (OLED): the rows lose their arrows and say under the selected one what they erase, and each asks on the confirmation card with the truth: Reset Settings Only also forgets saved Wi-Fi networks, Bluetooth pairings and EQ presets; Reset Database erases playlists and Favorites, then restarts.
   - Playlists (OLED): holding Play/Pause on a song inside a playlist opens the full song menu (Play Next, Play Last, Add to Playlist, Go to Album, Go to Artist and the rest), with Remove from Playlist last in red; it asks before removing.
