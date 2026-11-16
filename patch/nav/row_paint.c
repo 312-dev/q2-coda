@@ -974,7 +974,8 @@ int ringnav_paint(void *w, void *canvas) {
     bt_recv_paint(w, canvas);   /* Bluetooth receiver mode (bt_recv.c) */
     sw_update_paint(w, canvas); /* SD Card Update's pages (sw_update.c) */
     if (w && w == st.np_win && !(NP_VISUALIZER && visualizer_full()))
-        np_modes(w, canvas); /* else the page's own */
+        np_modes(w, canvas);    /* else the page's own */
+    np_stream_paint(w, canvas); /* a server song loading: the times row's spinner (np_stream.c) */
     coverflow_home_clip(w, canvas, 0);
     list_fade(w, canvas);
     charge_paint(w, canvas); /* the plug-in screen (charging.c): last, over the page's own paints */

@@ -118,7 +118,7 @@ typedef struct {
     chapters *ch;
     unsigned ch_timer, ch_track, ch_key;
     int ch_cue, ch_end;        /* the Chapters track's CUE start and end, file seconds */
-    void *sc_page, *sc_row[4]; /* Streaming's Configuration page: its cache rows, Erase's, Download Ahead's */
+    void *sc_page, *sc_row[4]; /* Streaming's Configuration: caches, Erase, Download Ahead */
 /* Streaming's services (svc): five fixed, and at most APPS_MAX card apps. */
 #define SVC_FIXED 5
 #define SVC_MAX (SVC_FIXED + APPS_MAX)
@@ -521,6 +521,7 @@ unsigned np_marq_wait(unsigned max);
 unsigned np_glide_wait(unsigned max); /* np_bar.c: the progress bar's next pixel */
 /* np_bar.c: Now Playing's shuffle and repeat as the theme's own pair (playing.modes.icons) */
 void np_modes(void *win, void *canvas);
+void np_stream_paint(void *w, void *canvas); /* np_stream.c: a server song loading */
 /* np_bar.c: ... and its own heart and More over stock's (playing.modes.icons) */
 void np_glyphs_bind(void *win), np_glyphs(void *win);
 void wheel_sb_arm(void *list);

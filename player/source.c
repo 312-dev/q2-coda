@@ -43,6 +43,7 @@ struct source {
     struct dsd_pack pack;
     struct stream *io; /* a URL's or QQ Music's bytes (stream.c); NULL for a file libavformat opens itself */
     struct sacd *iso;  /* an SACD image's stereo area, as a DSDIFF file (sacd.c) */
+    struct grow *grow; /* a card app's song still arriving (grow.c) */
 };
 
 static int interrupted(void *opaque) {
@@ -151,6 +152,10 @@ struct source *source_open(const struct song *song, int *error, const int *cance
         if (!(s->io = stream_open(song, cancel, error))) goto fail;
         s->fmt->pb = stream_avio(s->io);
         s->fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+    } else if (grow_arriving(song->url)) {
+        if (!(s->grow = grow_open(song->url, error))) goto fail;
+        s->fmt->pb = grow_avio(s->grow);
+        s->fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
     } else if (sacd_is_image(song->url)) {
         if (!(s->iso = sacd_open(song->url, error))) goto fail;
         s->fmt->pb = sacd_avio(s->iso);
@@ -175,7 +180,8 @@ struct source *source_open(const struct song *song, int *error, const int *cance
     s->end_pts = AV_NOPTS_VALUE;
     if (s->dec->sample_rate <= 0 || s->dec->ch_layout.nb_channels <= 0) goto fail;
     s->aac_mp4 = codec->id == AV_CODEC_ID_AAC && !strncmp(s->fmt->iformat->name, "mov,", 4) && st->time_base.num == 1 && st->time_base.den == s->dec->sample_rate;
-    if (codec->id == AV_CODEC_ID_MP3 && !strcmp(s->fmt->iformat->name, "mp3") && (s->file = fopen(song->url, "rb"))) {
+    /* not an MP3 still arriving: its frames are counted from the whole file */
+    if (codec->id == AV_CODEC_ID_MP3 && !s->grow && !strcmp(s->fmt->iformat->name, "mp3") && (s->file = fopen(song->url, "rb"))) {
         s->limit = mp3_count(s->file);
         if (s->limit < 0) fclose(s->file), s->file = NULL;
     }
@@ -214,6 +220,7 @@ void source_close(struct source *s) {
     avformat_close_input(&s->fmt); /* a stream's AVIOContext is its own, closed with it */
     stream_close(s->io);
     sacd_close(s->iso);
+    grow_close(s->grow);
     if (s->file) fclose(s->file);
     free(s->buf);
     free(s->pack.buf);

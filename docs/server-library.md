@@ -287,7 +287,7 @@ on the developer's Navidrome: a 160 px baseline JPEG of 3 to 6 KB, 50 to 350 ms 
 
 ## Download Ahead and the streaming state
 
-Status: the app's half is built (q2-subsonic `feat/p32-prefetch`); the firmware's is not yet. A streamed song today is handed to the player only once it is
+Status: built (p32): the app's half in q2-subsonic `feat/p32-prefetch`; here `patch/stream_state.c`, `patch/np_stream.c` and q2player's `player/grow.c`. A streamed song today is handed to the player only once it is
 whole (`.part`, sync, rename; `m3u_songs` waits at a line until its file exists), the app fetches a
 fixed two songs ahead in list order (`streamWindow`), and nothing tells the firmware how far a
 download has got. Three files, all on tmpfs and written whole (temp and rename), and two
@@ -366,9 +366,11 @@ bytes there are, it waits (polling `.stream` every 100 ms) rather than end, and 
 them. While it waits it writes `/tmp/q2player.wait`, the path and a newline, and removes the file
 once it plays again. `done`, `fail`, a stale file or no line: the end of the bytes is the song's end.
 
-**What the firmware shows.** A server song (`catalogue_song_key`, or a path under an app's stream
-folder) is loading while it is the song Now Playing shows and either it has not started (the pressed
-song, `catalogue_np_now`, or a queued song not yet at `START`) or `/tmp/q2player.wait` names it.
+**What the firmware shows.** A server song is loading while it is the song Now Playing shows and
+either it has not started (the pressed song, `catalogue_np_now`: the app's first `.stream` line) or
+`/tmp/q2player.wait` names it (`np_stream.c`). ponytail: a queued song still short of `START` after
+the one before it ended shows the ended song, not a spinner; the pressed song reads whatever
+`.stream` holds, an older run's until the app's new run writes it.
 Then Now Playing's times row shows the spinner and `<bytes> of <total> MB` from its `.stream` line,
 and the car remote's NowPlaying says buffering (below). Read at Now Playing's 500 ms tick, and only
 while a stream's `.stream` exists.

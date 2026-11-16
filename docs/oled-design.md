@@ -497,6 +497,11 @@ has no place for keeps a place of its own:
   shuffle or repeat while off), the glyph and its on dot together while it shows, padded 6 px to the outline's
   inner edge (8 px to its outer) or 8 px to the square's edge on every side; an outline grows by the dot when its
   control turns on. The radio's pill is its own press.
+- **A server song loading** (approved as streaming-v3's variant D, `design/streaming-states/`): while the song waits
+  to start, or playback has caught up with its download, a 14 px 12-spoke spinner (Text Secondary, a turn a second,
+  turning under Reduce Motion too, as it reports progress) and "7.0 of 20 MB" (Inter 13 px, Text Secondary) sit
+  centred in the times row, 6 px apart, between the elapsed and the remaining, which both stay. Nothing dims, the bar
+  does not animate, no "Buffering…"; it goes once the song plays on (`np_stream.c`).
 - **The volume** and the scrub draw on the bar where it is. The volume (the "A: iPod speakers"
   mock-up) keeps the bar's rows, inset to x 48 to 323, white on the track, with Phosphor's
   `speaker-simple-none` and `speaker-simple-high` (fill, 16 px, Text Secondary) centered at x 32

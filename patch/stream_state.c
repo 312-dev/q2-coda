@@ -1,31 +1,32 @@
-/* Download Ahead and the streaming state (docs/server-library.md#download-ahead-and-the-streaming-state).
+/* Download Ahead and the streaming state
+ * (docs/server-library.md#download-ahead-and-the-streaming-state).
  *
  * Streaming > Configuration's Download Ahead (Q2POD AHEAD: 0 Off, 1-3 songs, 2 when missing) is
  * told to the card app whose m3u queue plays in /tmp/q2-<id>.ahead: the songs the queue holds after
  * the one playing, in play order (playback_upcoming), at most that many. The app answers in
  * /tmp/q2-<id>.stream how far each planned song has come:
  *   #Q2STREAM/1	seq=<the .play's seq>
- *   <wait|get|stall|done|fail>	<bytes on the card>	<total, 0 unknown>	<length ms, 0 unknown>	<card path>
- * rewritten every 500 ms while a song arrives, so one left with a get line for STALE_S has lost its
- * app and reads as fail. With "grow" in the caps (q2player is the player: its /tmp/q2clicks), the
- * app writes a song in place and m3u_songs queues it once START_MS of it is there
- * (stream_startable); q2player waits at the end of the bytes there are and names the song in
+ *   <wait|get|stall|done|fail>	<bytes on the card>	<total, 0 unknown>	<length ms, 0
+ * unknown>	<card path> rewritten every 500 ms while a song arrives, so one left with a get line
+ * for STALE_S has lost its app and reads as fail. With "grow" in the caps (q2player is the player:
+ * its /tmp/q2clicks), the app writes a song in place and m3u_songs queues it once START_MS of it is
+ * there (stream_startable); q2player waits at the end of the bytes there are and names the song in
  * /tmp/q2player.wait meanwhile. */
 #include "navigation.h"
 #include "playback.h"
 
 #define AHEAD_DEFAULT 2
 #define AHEAD_MAX 3
-#define START_MS 8000         /* a song arriving starts once this much of it is there */
-#define START_MIN (256u << 10) /* and at least this many bytes */
-#define STALE_S 3              /* a get line not rewritten this long: the app is gone */
-#define SS_MAX (8 << 10)       /* .stream read this far: a dozen lines */
+#define START_MS 8000               /* a song arriving starts once this much of it is there */
+#define START_MIN (256u << 10)      /* and at least this many bytes */
+#define STALE_S 3                   /* a get line not rewritten this long: the app is gone */
+#define SS_MAX (8 << 10)            /* .stream read this far: a dozen lines */
 #define CLICKS_FILE "/tmp/q2clicks" /* player/main.c: there while q2player is the player */
 #define WAIT_FILE "/tmp/q2player.wait"
 
 static struct {
-    int n, read; /* Download Ahead, and whether it was read from config.ini */
-    int grow;    /* "grow" in the caps written last */
+    int n, read;    /* Download Ahead, and whether it was read from config.ini */
+    int grow;       /* "grow" in the caps written last */
     unsigned ahead; /* the .ahead written last, hashed with its app's id */
 } ss __attribute__((section(".scratch")));
 
@@ -42,7 +43,8 @@ int ahead_step(void) {
     return n;
 }
 
-/* The caps words this file adds (addon.c's caps line), " ahead" and " grow" while q2player plays. */
+/* The caps words this file adds (addon.c's caps line), " ahead" and " grow" while q2player plays.
+ */
 const char *ahead_caps(void) {
     ss.grow = !access(CLICKS_FILE, 0);
     return ss.grow ? " ahead grow" : " ahead";
@@ -56,11 +58,11 @@ static unsigned ss_num(const char *s) {
     return (unsigned)v;
 }
 
-/* The app's .stream line for path: 1 and *l when there is one. A get or stall line in a file not
- * rewritten for STALE_S reads as fail. id "" or a path off the card: none. */
+/* The app's .stream line for path (0: its first, the song playing), 1 and *l when there is one. A
+ * get or stall line in a file not rewritten for STALE_S reads as fail. id "": none. */
 int stream_line(const char *id, const char *path, sline_t *l) {
     char file[48];
-    if (!id || !*id || !path) return 0;
+    if (!id || !*id) return 0;
     tk_snprintf(file, sizeof file, "/tmp/q2-%s.stream", id);
     unsigned st[36];
     if (__xstat(3, file, st)) return 0;
@@ -73,7 +75,8 @@ int stream_line(const char *id, const char *path, sline_t *l) {
         for (line = raw + 1; !found && line && *line; line = end) {
             if ((end = strstr(line, "\n"))) *end++ = 0;
             char *f[5];
-            if (line[0] == '#' || tsv_split(line, f, 5) != 5 || strcmp(f[4], path)) continue;
+            if (line[0] == '#' || tsv_split(line, f, 5) != 5 || (path && strcmp(f[4], path)))
+                continue;
             static const char *const names[] = { "wait", "get", "stall", "done", "fail" };
             l->state = SL_NONE;
             for (int k = 0; k < 5; ++k)
@@ -108,7 +111,8 @@ int stream_startable(const char *id, const char *path) {
     return 1;
 }
 
-/* The card app's id in a path under its folder (/mnt/mmc/.<id>/...), into id; 0 for another path. */
+/* The card app's id in a path under its folder (/mnt/mmc/.<id>/...), into id; 0 for another path.
+ */
 int stream_app_of(const char *path, char *id, unsigned size) {
     if (!path || !tk_str_start_with(path, "/mnt/mmc/.")) return 0;
     const char *s = path + 10, *slash = strstr(s, "/");

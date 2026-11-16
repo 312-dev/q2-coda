@@ -366,6 +366,12 @@ SW_SPIN_PX = 48
 SW_SPIN_R = (13.2, 22)  # round capped: the outer cap reaches 24, the mock-up's radius
 SW_SPIN_STROKE = 4
 SW_SPIN_FADE = 0.75 / 11  # the spoke behind the head's head a quarter as bright
+# Now Playing's loading spinner (np_stream.c, docs/server-library.md#download-ahead-and-the-streaming-state): the
+# software update's twelve spokes and fade at 14 px, Text Secondary per half, as streaming-v3's variant D draws it.
+NP_SPIN_PX = 14
+NP_SPIN_R = (3.25, 6.5)
+NP_SPIN_STROKE = 1.5
+NP_SPIN_INKS = inks('secondary', 'd', 'l')
 HOLD_BACK_PX = 20  # search_strip.c's Return-held card: Phosphor arrow-u-up-left, bold, white
 # The empty state (feedback.c empty_state): its glyph in outline, Phosphor's regular weight at EMPTY_PX, in Text
 # Secondary per half (_d, _l), by the glyph a page names (empty_t.glyph; docs/oled-design.md#empty-and-offline has the
@@ -647,6 +653,8 @@ def images(t):
     out[f'{prefix}_chargebolt'] = phosphor('lightning-fill', CHARGE_BOLT_PX, token('positive'))
     out |= {f'{prefix}_swspin_{k}_{f}': spinner(f, SW_SPIN_SPOKES, SW_SPIN_PX, SW_SPIN_R, SW_SPIN_STROKE, SW_SPIN_FADE, c)
             for k, c in STATE_INKS.items() for f in range(SW_SPIN_SPOKES)}
+    out |= {f'{prefix}_npspin_{k}_{f}': spinner(f, SW_SPIN_SPOKES, NP_SPIN_PX, NP_SPIN_R, NP_SPIN_STROKE, SW_SPIN_FADE, c)
+            for k, c in NP_SPIN_INKS.items() for f in range(SW_SPIN_SPOKES)}
     out |= {f'{prefix}_empty_{n}_{k}': phosphor(g, EMPTY_PX, c) for n, g in EMPTY_GLYPHS.items()
             for k, c in inks('secondary', 'd', 'l').items()}
     return out
