@@ -170,6 +170,21 @@ python3 tools/ci/emu_pool.py get "$B"              # borrow a shared emulator (s
 
 `python3 tools/ci/emu_pool.py get BUILD` leases one of four shared emulator copies, `~/q2-emu-pool1` to `~/q2-emu-pool4` (port 2401 up), boots BUILD on it and prints how to drive it (`~/q2-emu-pool2/q2emu shot out.png`, `key centre`, `wheel 3`, `tap X Y`). `put SLOT` gives it back; a lease lasts two hours unless renewed (`renew SLOT`), and an expired one is stopped for the next agent. Asking again for the same build under the same name reuses the running emulator. When all four are leased, `get` waits. The copies are made from `~/q2-emu-server`'s scripts and serial record; nothing there is changed. Use the pool instead of cloning a copy of your own: 14 emulators and builds at once took the machine down on 2026-11-16.
 
+### Live reload
+
+`python3 tools/ci/q2live.py` in a worktree: one build, a pooled emulator in fast boot, then on every save under `patch/` the screen at the printed URL shows the change on the page you were on. It rebuilds demo alone (`Q2_DEMO_ONLY` in `tools/build.py`: no fonts, art, rootfs or `update.tar`), with the base build's dev number pinned (`Q2_DEV_NUMBER`) so `stock.h` stays the same and ccache recompiles only what changed; copies it over the emulator's unpacked rootfs; restarts only the sandbox (the viewer, and the browser tab, keep running); and replays the route back to the page. Drive the emulator through `q2live.py do key centre`, `do wheel 3` and so on, and each step joins the route; `q2live.py route` shows it, `route 'wheel 4;key centre'` sets it, `route clear` empties it. A change under `assets/`, `tools/` or `player/` takes the whole build and a reboot. `q2live.py stop` gives the emulator back to the pool.
+
+Measured on release/p31 (2026-11-16), a one-line change to a title in `patch/crossfade.c`, six route steps deep:
+
+| Step | Before: build, reboot, navigate | `q2live.py` |
+| --- | --- | --- |
+| Build | 35.5 s (compile and link 10.9 s, demo patch 0.9 s, fonts, art and rootfs 14.1 s, mksquashfs 4.6 s, tar 1.7 s) | 2.0 s (demo alone, ccache warm; 14 s the first time) |
+| Unpack and boot to a still screen | 7.5 s fresh unpack, 10.3 s normal boot | 8.0 s fast boot from the unpacked rootfs |
+| Back to the page | by hand | 7.5 s replayed (6 steps) |
+| Save to screen | about 46 s plus finding the page again | 17.8 s, on the page |
+
+The boot is most of what is left: demo under QEMU takes about 7 s to draw Home. The route's replay starts with a wheel tick down and up, as demo's first wheel event after a boot moves nothing.
+
 ## Security scan
 
 ```sh
