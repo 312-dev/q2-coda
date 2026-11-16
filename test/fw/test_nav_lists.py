@@ -2090,16 +2090,6 @@ def test_every_scrolling_label_holds_then_runs_at_most_the_pace(fw, speed, paced
 # The Display settings the list engine reads.
 
 
-@pytest.mark.parametrize('shortcut, card, row', [(None, 1, 1), (None, 0, 1), (0, 1, 1), (0, 0, 0), (2, 0, 1), (11, 1, 0), (11, 0, 0), (12, 1, 1)])
-def test_home_shows_its_shortcut_row_unless_it_is_none_or_a_missing_rockbox(fw, shortcut, card, row):
-    theme(fw, **({} if shortcut is None else {'SHORTCUT': shortcut}))
-    def stat(version, path, info, *_):
-        C.c_uint.from_address(info + 20).value = 0o100755
-        return 0 if card else -1
-    fw.mock('fw___xstat', stat)
-    assert bool(fw.fn('ipod_home_rockbox', C.c_int)()) == bool(row)
-
-
 @pytest.mark.parametrize('shortcut, page, context', [
     (1, b'localmusic/localclass_page', 0xf004), (3, b'localmusic/allmusic_page', 0xf00a),
     (7, b'localmusic/playlist_page', 0), (11, b'localmusic/allmusic_page', 0xf00a),  # None: the carousel's card opens Favorites

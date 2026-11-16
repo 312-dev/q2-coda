@@ -445,7 +445,7 @@ def test_draw_shows_the_score_line_the_ready_hint_and_the_end(fw):
     buf = screen(canvas)
     g.e['eng_paint'](canvas.p)
     said = [(t.lower(), ink & 0xffffff) for t, ink, _ in words(canvas.ops)]  # this build's theme may write capitals
-    assert said == [('12,345', 0xababab), ('level 1', 0xababab), ('centre to launch', 0x858585)]
+    assert said == [('12,345', 0xababab), ('level 1', 0xababab), ('center to launch', 0x858585)]
     right = 375 - b.hud - 4
     assert buf[(30 + 12) * 375 + right] == 0xffababab and buf[(30 + 12) * 375 + right - 24] == 0xff333333  # two of three
     key = next((r, c) for r, c in g.live() if b.cell[r * COLS + c] == KEY)
@@ -454,7 +454,7 @@ def test_draw_shows_the_score_line_the_ready_hint_and_the_end(fw):
     b.mode, b.score, b.best = OVER, 900, 900
     canvas.ops.clear()
     g.e['eng_paint'](canvas.p)
-    assert [t.lower() for t in texts(canvas.ops)] == ['900', 'new best', 'centre: play again']
+    assert [t.lower() for t in texts(canvas.ops)] == ['900', 'new best', 'center: play again']
     b.best = 1500
     canvas.ops.clear()
     g.e['eng_paint'](canvas.p)
@@ -473,7 +473,7 @@ def test_bricks_is_games_first_engine_row_and_pauses_under_its_menu(fw):
     assert p.s.screen == ENGINE and api(fw)['eng_live']()
     canvas = Canvas(fw)
     buf = screen(canvas)  # held: the paint fills it
-    assert 'centre to launch' in [t.lower() for t in texts(paint(p, canvas))]
+    assert 'center to launch' in [t.lower() for t in texts(paint(p, canvas))]
     p.key(RETURN)
     assert p.s.paused == 2 and not api(fw)['eng_live']() and '/mnt/data/game-bricks' not in p.card.files
     p.key(RETURN)  # Continue

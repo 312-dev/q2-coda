@@ -1567,11 +1567,8 @@ def test_power_adds_standby_charge_and_in_vehicle_rows_after_stocks(fw):
     ui, win, view, settings, build = settings_page(fw, 'powermanager_page', 'scroll_view_powermanager', 2)
     fw.mock('stock_power_trampoline', build)
     assert fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None) == 3
-    stock, ours, power = view.children[:2], view.children[2:8], view.children[8:]
-    assert [s.name for s in stock] == ['s0', 's1'] and len(ours) == 6
-    gap, restart, off = power  # Restart and Shut Down last, after a 12 px gap (power_rows.c)
-    assert gap.kind == 'label' and gap.box[3] == 12
-    assert [ui.text(label_of(r)) for r in (restart, off)] == ['Restart', 'Shut Down']
+    stock, ours = view.children[:2], view.children[2:]
+    assert [s.name for s in stock] == ['s0', 's1'] and len(ours) == 6  # Restart and Shut Down are General's
     icons = [next(c.props['image'] for c in r.walk() if c.kind == 'image') for r in ours]
     # Standby, Charge, USB DAC Charging, Smart Wi-Fi, In-Vehicle, Battery History
     assert icons == ['system_powermanager', 'usb_chargeswitch', 'usb_chargeswitch', 'wifiset_wifi', 'system_carmode',

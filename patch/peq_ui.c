@@ -49,6 +49,16 @@ static int eq_commit(eq_state *s) {
     return 1;
 }
 
+/* Control Center's EQ tile (control_center.c): off, or on as the EQ page's Enabled switch turns it
+ * on (PEQ, 3EQ off); nothing if that cannot be saved. */
+void eq_toggle(void) {
+    eq_state s;
+    eq_load(&s);
+    s.mode = s.mode == EQ_OFF ? EQ_PEQ : EQ_OFF;
+    s.hold = 0;
+    eq_commit(&s);
+}
+
 /* EQ off but its filter in the chain, for the visualizer's tap (visualizer.c): the switch's Off, so a
  * mode saved on while the stock flag is clear stays silent; nothing if that cannot be saved. */
 void peq_attach(void) {
@@ -813,7 +823,7 @@ static int render(const void *unused) {
         list_toggle(row(view, n++, "", BYPASS), "Enabled", !ui.draft.bypass);
         list_toggle(row(view, n++, "", PER_OUTPUT), "EQ per Output", ringnav_eq_output());
         /* Balance turns one side down: R 1.0 dB is the left 1 dB quieter. */
-        snprintf(value, sizeof(value), __builtin_fabs(ui.draft.balance) >= 0.05 ? "%s %.1f dB" : "Centre",
+        snprintf(value, sizeof(value), __builtin_fabs(ui.draft.balance) >= 0.05 ? "%s %.1f dB" : "Center",
                  ui.draft.balance > 0 ? "R" : "L", __builtin_fabs(ui.draft.balance));
         row_dim(view, n++, "Balance", value, BALANCE, INTO);
         if (on_auto())
@@ -860,7 +870,7 @@ static int render(const void *unused) {
         for (int i = 0; i < picks[ui.pick - BALANCE].rows; ++i) {
             double v = picks[ui.pick - BALANCE].first + picks[ui.pick - BALANCE].step * i;
             if (ui.pick == BALANCE) /* L 12.0 dB to R 12.0 dB */
-                snprintf(text, sizeof(text), i == 24 ? "Centre" : "%s %.1f dB", v < 0 ? "L" : "R", __builtin_fabs(v));
+                snprintf(text, sizeof(text), i == 24 ? "Center" : "%s %.1f dB", v < 0 ? "L" : "R", __builtin_fabs(v));
             else if (ui.pick == PREAMP && !i)
                 auto_text(text, sizeof(text));
             else snprintf(text, sizeof(text), "%+.1f dB", v);

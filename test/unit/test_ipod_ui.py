@@ -56,4 +56,4 @@ def test_home_list_settings_rows():
     view = ipod.home_list('homeset', ['playset', 'sysset'], ipod.SET0)
     assert view[2] == {'name': 'list_view_homeset', 'item_height': str(ipod.HOME_ROW), **CLEAR}
     assert view[3][0][3] == [home_row(0, 'playset', {'name': 'label_playback', 'text': 'Playback'}),
-                             home_row(1, 'sysset', {'name': 'label_system', 'text': 'System'})]
+                             home_row(1, 'sysset', {'name': 'label_system', 'text': 'General'})]

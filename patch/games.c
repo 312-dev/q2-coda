@@ -998,7 +998,7 @@ static void paused_popup(void *canvas, int over) {
     if (g->paused == MENU)
         popup(canvas, "Paused", "Continue", "Quit", g->choice);
     else if (over)
-        popup(canvas, g->record ? "New best!" : "Game over", "Centre: play again", 0, 0);
+        popup(canvas, g->record ? "New best!" : "Game over", "Center: play again", 0, 0);
     else if (g->paused)
         popup(canvas, "Paused", "Play/Pause: resume", 0, 0);
 }
@@ -1039,7 +1039,7 @@ static void sudoku_paint(void *canvas, unsigned tone) {
     frame_rect(canvas, x0 + s->cur % 9 * cell, y0 + s->cur / 9 * cell, cell, cell,
                    g->picking ? 0xffffff : accent_tone(3), 0);
     if (g->confirm)
-        popup(canvas, "New game?", "Centre: yes   Return: no", 0, 0);
+        popup(canvas, "New game?", "Center: yes   Return: no", 0, 0);
     else if (sud_done(s))
         popup(canvas, "Solved!", "Play/Pause: new game", 0, 0);
 }
@@ -1095,7 +1095,7 @@ static void vortex_paint(void *canvas, unsigned tone) {
     hud(canvas, "Score", (unsigned)v->score, HUD_X, 6, 0, ink, dim);
     hud(canvas, "Best", g->best.score, 375 - HUD_X, 6, 1, ink, dim);
     hud(canvas, "Level", (unsigned)v->level + 1, HUD_X + 24, g->h - 30, 0, ink, dim); /* in from the glass */
-    if (!g->paused && v->state == AIM) text_at(canvas, "Centre", 187, (int)cy - 12, 24, 16, dim, MID);
+    if (!g->paused && v->state == AIM) text_at(canvas, "Center", 187, (int)cy - 12, 24, 16, dim, MID);
     ui_ink_raw(0);
     paused_popup(canvas, v->state == OVER);
 }
@@ -1163,7 +1163,7 @@ static void solitaire_paint(void *canvas, unsigned tone) {
     }
     ui_ink_raw(0);
     if (g->confirm)
-        popup(canvas, "New game?", "Centre: yes   Return: no", 0, 0);
+        popup(canvas, "New game?", "Center: yes   Return: no", 0, 0);
     else if (sol_won(s))
         popup(canvas, "You win!", "Play/Pause: new game", 0, 0);
 }

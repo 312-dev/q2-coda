@@ -750,7 +750,7 @@ static int import_file(int slot, const char *id, const char *seq, char *why, uns
     imp_t im = { slot, id, CAT_ID_BASE + (unsigned)slot * CAT_APP_SPAN, 0, 0, calloc(1, CAT_SQL),
                  0,    0 };
     int ok = in && im.meta, first = 1, skipping = 0, rows = -1, end = 0;
-    if (!ok) tk_snprintf(why, size, "Couldn't read the catalogue");
+    if (!ok) tk_snprintf(why, size, "Couldn't read the catalog");
     unsigned k = 0, got = 0;
     char buf[4096];
     while (ok && !end) {
@@ -793,7 +793,7 @@ static int import_file(int slot, const char *id, const char *seq, char *why, uns
                 tk_snprintf(why, size, "Too many songs");
                 ok = 0;
             }
-            if (jb.bad) tk_snprintf(why, size, "Couldn't write the catalogue"), ok = 0;
+            if (jb.bad) tk_snprintf(why, size, "Couldn't write the catalog"), ok = 0;
         }
     }
     if (ok && first) tk_snprintf(why, size, "Empty file"), ok = 0;
@@ -1024,7 +1024,7 @@ static void *cat_worker(void *unused) {
         if (slot >= 0 && !jb.bad) import_file(slot, cat.app[slot].id, cat.job_seq, why, sizeof why);
         if (!why[0]) cat_match();
         if (!jb.bad && job_exec("commit")) tk_snprintf(why, sizeof why, "Couldn't save");
-        if (!why[0] && jb.bad) tk_snprintf(why, sizeof why, "Couldn't write the catalogue");
+        if (!why[0] && jb.bad) tk_snprintf(why, sizeof why, "Couldn't write the catalog");
         sqlite3_exec(jb.db, "detach cat", 0, 0, 0);
         /* every app's: a match moves songs between server rows and card files */
         for (int i = 0; !why[0] && i < cat.napps; ++i) cat_playlists(cat.app[i].id);

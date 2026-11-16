@@ -356,9 +356,8 @@ def appearance(q2):
 
 
 def controls(q2):
-    """System settings → Controls."""
-    q2.open('systemset/systemset_page')
-    q2.screen.click('Controls')
+    """Settings → Controls, Home's Settings row (navigation.c set_open)."""
+    q2.fw.fn('navigation__set_open', C.c_int, C.c_void_p, C.c_void_p)(4, None)
 
 
 def dark(q2):
@@ -510,20 +509,6 @@ def test_home_takes_a_new_layout_at_once_and_boots_into_it(q2):
     q2.screen.click('Home')
     assert q2.screen.row('Home') == 'Home: Carousel'
     assert shown[w['slide_menu']] and not shown[w['list_view_home']] and not shown[w['img_homeart']]
-
-
-def test_the_shortcut_picked_names_homes_row_now_and_after_a_restart(q2):
-    w = home(q2)
-    before = q2.screen.texts[w['label_rockbox']]
-    appearance(q2)
-    assert q2.screen.row('Shortcut') == f'Shortcut: {before}'
-    q2.screen.click('Shortcut')
-    after = q2.screen.row('Shortcut').split(': ', 1)[1]
-    assert after != before and q2.screen.texts[w['label_rockbox']] == after
-    assert q2.flash.get('IPOD', 'SHORTCUT').isdigit()
-    q2.power_on()
-    w = home(q2)
-    assert q2.screen.texts[w['label_rockbox']] == after
 
 
 # Display settings saved and read back after a restart.
@@ -844,11 +829,11 @@ def test_without_a_limit_a_clock_or_an_alarm_standby_is_stocks(q2, limit, rtc, a
     assert q2.fw.calls('stock_standby_trampoline')
 
 
-# Power's Restart and Shut Down (power_rows.c): last on the page after a gap, each behind its confirm.
+# General's Restart and Shut Down (power_rows.c): last on the page after a gap, each behind its confirm.
 
 def power_page(q2, answer):
-    """System settings → Power, its confirms answered answer (10 the verb); each prompt as (page, kind, ms, text)."""
-    q2.open('systemset/powermanager_page')
+    """Settings → General, its confirms answered answer (10 the verb); each prompt as (page, kind, ms, text)."""
+    q2.open('systemset/systemset_page')
     asked = []
 
     def prompt(name, ctx, *_):
@@ -869,7 +854,7 @@ def test_power_ends_with_restart_and_shut_down_after_a_gap(q2):
     power_page(q2, 0)
     assert q2.screen.rows()[-2:] == ['Restart', 'Shut Down']
     s = q2.screen
-    gap, *rows = s.kids[s.lookup(s.top, 'scroll_view_powermanager')][-3:]
+    gap, *rows = s.kids[s.lookup(s.top, 'scroll_view_sysset')][-3:]
     assert s.types[gap] == 'label' and s.at(gap)[3] == 12  # space, never a row
     tapped = {w for w, *_ in s.handlers}
     assert not ({gap} | set(s.subtree(gap))) & tapped  # nothing the wheel stops on
@@ -886,7 +871,7 @@ def test_a_cancelled_power_row_leaves_the_page_as_it_was(q2, row, question):
     q2.screen.click(row)
     assert asked == [('dialog/confirminfo_dialog', 1, 0, question)]
     assert not q2.fw.calls('stock_reboot_trampoline') and not q2.fw.calls('save_memoryplay_info')
-    assert q2.pages == ['systemset/powermanager_page'] and (q2.screen.top, q2.screen.rows()) == (top, rows)
+    assert q2.pages == ['systemset/systemset_page'] and (q2.screen.top, q2.screen.rows()) == (top, rows)
 
 
 def test_restart_reboots_as_a_theme_change_does(q2):
@@ -904,7 +889,7 @@ def test_shut_down_powers_off_as_the_power_keys_prompt_does(q2):
     q2.screen.click('Shut Down')
     assert asked == [('dialog/confirminfo_dialog', 1, 0, 'Shut Down?')]  # stock's own msg_poweroff
     # stock's power-off page, which saves the queue and powers off (into_poweroff), as on_wm_keylong_fun opens it
-    assert q2.pages == ['systemset/powermanager_page', 'poweroff_page']
+    assert q2.pages == ['systemset/systemset_page', 'poweroff_page']
     assert not q2.fw.calls('stock_reboot_trampoline')
 
 

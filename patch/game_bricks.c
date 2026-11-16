@@ -384,7 +384,7 @@ static void draw(const void *state, struct eng_surface *s) {
     if (b->mode == READY && s->y1 > y && s->y0 < y + 44) {
         *number(word(text, "Level "), (unsigned)b->level) = 0;
         eng_text(s, text, ENG_W / 2, y, 22, 18, 0xababab, 1);
-        eng_text(s, "Centre to launch", ENG_W / 2, y + 22, 22, 15, 0x858585, 1);
+        eng_text(s, "Center to launch", ENG_W / 2, y + 22, 22, 15, 0x858585, 1);
     }
     if (b->mode == OVER) {
         y = b->h / 2 - 60;
@@ -395,7 +395,7 @@ static void draw(const void *state, struct eng_surface *s) {
         else
             number(word(text, "Best "), b->save.best);
         eng_text(s, text, ENG_W / 2, y + 32, 24, 18, 0xababab, 1);
-        eng_text(s, "Centre: play again", ENG_W / 2, y + 64, 22, 15, 0x858585, 1);
+        eng_text(s, "Center: play again", ENG_W / 2, y + 64, 22, 15, 0x858585, 1);
     }
 }
 

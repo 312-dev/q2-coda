@@ -462,20 +462,6 @@ def test_shortcut(fw, clock, value, rockbox, name):
     assert fw.fn('ipod_home_shortcut', C.c_char_p)() == name
 
 
-@pytest.mark.parametrize('value, rockbox, groovebox, shown', [
-    (b'10', 1, 0, 0), (b'10', 0, 1, 1), (b'0', 0, 1, 0), (b'0', 1, 0, 1), (b'3', 0, 0, 1),
-    (b'11', 1, 1, 0), (b'11', 0, 0, 0), (b'12', 1, 0, 1), (b'12', 0, 0, 1),  # None hides it, an unknown value is the default
-])
-def test_the_shortcut_row_hides_without_its_launcher(fw, clock, value, rockbox, groovebox, shown):
-    Config(fw, SHORTCUT=value)
-    there = {b'/mnt/mmc/.rockbox/rockbox': rockbox, b'/mnt/mmc/.groovebox/q2-groovebox': groovebox}
-    def stat(version, path, info, *_):
-        struct.pack_into('<I', (C.c_char * 144).from_address(info), 20, 0o100755)
-        return 0 if there.get(C.string_at(path)) else -1
-    fw.mock('fw___xstat', stat)
-    assert fw.fn('ipod_home_rockbox', C.c_int)() == shown
-
-
 @pytest.mark.parametrize('fn, path', [('rockbox_available', b'/mnt/mmc/.rockbox/rockbox'),
                                       ('groovebox_available', b'/mnt/mmc/.groovebox/q2-groovebox')])
 @pytest.mark.parametrize('result, mode, available', [(0, 0o100755, 1), (0, 0o040755, 0), (-1, 0o100755, 0)])

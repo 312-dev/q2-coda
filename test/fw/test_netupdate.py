@@ -895,7 +895,7 @@ def test_a_cancel_while_the_signature_is_checked_is_a_cancel(fw):
 
 def test_a_cancel_while_the_card_takes_the_last_bytes_is_a_cancel(fw):
     """The press lands during the fsync of the whole part, seconds on a slow card with the label at 100%: the part
-    goes and the old tar stays, as for any cancel, and the word is Download cancelled."""
+    goes and the old tar stays, as for any cancel, and the word is Download canceled."""
     card = Disk(fw, {TAR: b'old'})
     nu = fw.var('netupdate__nu', Nu)
     fw.mock('fw_fsync', lambda fd, *_: setattr(nu, 'cancel', 1) or 0)
@@ -1237,7 +1237,7 @@ def test_a_press_on_the_running_install_cancels_it_until_it_moves(fw):
     p.click(2)
     assert p.toasts == ['Wait for the one in progress'] and p.sh.cancel == 0
     p.click(1)
-    assert p.sh.cancel == 1 and p.label(1) == 'Cancelling…'
+    assert p.sh.cancel == 1 and p.label(1) == 'Canceling…'
     p.sh.cancel, p.sh.stage = 0, 3
     p.click(1)
     assert p.sh.cancel == 0
@@ -1698,8 +1698,8 @@ def test_a_second_press_cancels_mid_download_and_keeps_the_old_tar(fw):
             seen.append((row.wait(), row.label()))  # the timer says so too, not the percentage
     Net(fw, rel((0, 200, None, BODY)), during=during)
     row.run()
-    assert seen == [(RET_REPEAT, 'Cancelling…')] and len(card.written[PART]) < len(BODY)  # ended at the next progress call
-    assert row.wait() == 0 and row.toasts == ['Download cancelled'] and not row.flashed
+    assert seen == [(RET_REPEAT, 'Canceling…')] and len(card.written[PART]) < len(BODY)  # ended at the next progress call
+    assert row.wait() == 0 and row.toasts == ['Download canceled'] and not row.flashed
     assert card.files[TAR] == b'old' and PART not in card.files
 
 
@@ -1709,7 +1709,7 @@ def test_leaving_the_page_mid_download_cancels_it(fw):
     row.press()
     Net(fw, rel((0, 200, None, BODY)), during=lambda k: k == 1 and row.leave())
     row.run()
-    assert row.wait() == 0 and row.toasts == ['Download cancelled'] and row.tr == {} and not row.flashed
+    assert row.wait() == 0 and row.toasts == ['Download canceled'] and row.tr == {} and not row.flashed
     assert card.files[TAR] == b'old' and PART not in card.files
 
 
@@ -1721,7 +1721,7 @@ def test_a_cancel_after_the_last_byte_still_keeps_the_old_tar(fw, how):
     Net(fw, rel((0, 200, None, BODY)), during=lambda k: k == CHUNKS - 1 and getattr(row, how)())
     row.run()
     assert card.written[PART] == BODY  # no progress call left to end it: the transfer itself came whole
-    assert row.wait() == 0 and row.toasts == ['Download cancelled'] and not row.flashed
+    assert row.wait() == 0 and row.toasts == ['Download canceled'] and not row.flashed
     assert card.files[TAR] == b'old' and PART not in card.files and not card.of('rename')
 
 
@@ -1814,7 +1814,7 @@ def test_the_row_says_verifying_while_the_signature_is_checked(fw):
     assert row.label() == 'Verifying…' and len(row.timers) == timers
     row.nu.cancel = 1
     row.fw.fn('netupdate__wait_done', C.c_int, C.c_void_p)(None)
-    assert row.label() == 'Cancelling…'
+    assert row.label() == 'Canceling…'
 
 
 def test_a_new_press_forgets_the_last_check(fw):
@@ -2029,7 +2029,7 @@ def test_an_install_cancelled_while_it_asks_for_the_list_installs_nothing(fw):
     s.wifi = 1
     s.click()
     s.click()  # the same row again, before the list is in
-    assert s.sh.cancel == 1 and s.run() == 0 and s.toasts == ['Download cancelled']
+    assert s.sh.cancel == 1 and s.run() == 0 and s.toasts == ['Download canceled']
     assert net.urls == [LIST_URL] and FOO_APP not in card.files
 
 
@@ -2153,7 +2153,7 @@ def test_a_cancel_during_the_lists_fetch_downloads_nothing(fw):
     s.wifi = 1
     net.during = lambda k: net.urls[-1].startswith(b'https://raw') and k == CHUNKS - 1 and s.click()  # as it ends
     s.click()
-    assert s.run() == 0 and s.toasts == ['Download cancelled'] and s.labels() == ['Install']
+    assert s.run() == 0 and s.toasts == ['Download canceled'] and s.labels() == ['Install']
     assert not [u for u in net.urls if u.startswith(b'https://github.com/')] and sorted(card.files) == [SOURCES, MOUNTS]
 
 
@@ -2173,8 +2173,8 @@ def test_a_cancel_while_unpacking_installs_nothing(fw):
         return shell(cmd)
     card.system = system
     s.click()
-    assert s.run() == 0 and seen == [['Unpacking…'], ['Cancelling…']]
-    assert s.toasts == ['Download cancelled'] and s.labels() == ['Install']
+    assert s.run() == 0 and seen == [['Unpacking…'], ['Canceling…']]
+    assert s.toasts == ['Download canceled'] and s.labels() == ['Install']
     assert not card.moves(b'/mnt/mmc/.foo/') and sorted(card.files) == [SOURCES, MOUNTS]  # nothing placed, no staging left
 
 

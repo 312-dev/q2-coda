@@ -3492,13 +3492,13 @@ static struct {
     int np;
     unsigned np_stop, np_timer;
 } home __attribute__((section(".scratch")));
-extern int ipod_home(void), ipod_home_rockbox(void), home_shortcut_open(void *, void *),
-    library_search(void);
+extern int ipod_home(void), home_shortcut_open(void *, void *), library_search(void);
+extern void ipod_shortcut_seen(void), home_sets_bind(void *win); /* theme_engine.c, navigation.c */
 extern void library_rows(void *list), stream_rows(void *list);
 /* home.c: Home's overflow */
-extern void home_overflow(void *list, int bottom), home_in_place(void *list), home_pad(void *view),
+extern void home_overflow(void *list, int bottom), home_pad(void *view),
     home_fades(void *canvas, void *list, int list_y, int cols, int split);
-extern int shuffle_songs(void *ctx, void *event), library_search_open(void *ctx, void *event);
+extern int library_search_open(void *ctx, void *event);
 extern int library_count(const char *sql), msg_counting(void);
 extern const char *ipod_home_shortcut(void);
 /* Split's menu width; the art fills the rest. */
@@ -3841,14 +3841,41 @@ HOT unsigned lerp(unsigned a, unsigned b, unsigned k) {
     return tap4(a, b, 0, 0, w);
 }
 
+/* Split's vignette (docs/ipod.md#home, approved as V4 on 2026-11-15): the pane's top VIG_TOP and
+ * bottom VIG_BOT rows on the screen darkened toward 25% brightness, 0.25 + 0.75 t^1.6 of each row's
+ * pixels, t its distance from the edge over the fade's height; in 256ths, as tables. The status
+ * row's glyphs are inked from these darkened pixels (home_ink reads the frame), so a bright cover
+ * gets white ones where its own top would have asked for black. */
+#define VIG_TOP 50
+#define VIG_BOT 40
+static const unsigned char vig_top[VIG_TOP] = {
+    64,  64,  65,  66,  67,  69,  70,  72,  74,  76,  79,  81,  84,  86,  89,  92,  95,
+    98,  101, 105, 108, 112, 116, 119, 123, 127, 131, 136, 140, 144, 149, 153, 158, 163,
+    168, 173, 178, 183, 188, 193, 198, 204, 209, 215, 220, 226, 232, 238, 244, 250
+};
+static const unsigned char vig_bot[VIG_BOT] = { 64,  65,  66,  67,  69,  71,  73,  76,  79,  82,
+                                                85,  88,  92,  96,  100, 104, 108, 113, 118, 122,
+                                                127, 132, 138, 143, 149, 155, 160, 166, 173, 179,
+                                                185, 192, 198, 205, 212, 219, 226, 233, 241, 248 };
+/* The vignette's 256ths for the frame's row y (the screen's row y + 320 - pane_h()), 256 outside. */
+static unsigned vig_k(int y) {
+    y += 320 - pane_h();
+    return y < VIG_TOP ? vig_top[y < 0 ? 0 : y] : y >= 320 - VIG_BOT ? vig_bot[319 - y] : 256;
+}
+/* c (RGBA8888) at k 256ths of its brightness, its alpha kept. */
+static unsigned vig(unsigned c, unsigned k) {
+    return (c & 0xff000000u) | ((c & 0xff00ffu) * k >> 8 & 0xff00ffu) | ((c & 0xff00u) * k >> 8 & 0xff00u);
+}
+
 /* Slide s's window at u, v (1/256 texel) and scale k (1/65536 texel a pixel) into the panel, so
  * it moves by fractions of a pixel: in whole pixels its 1.5 a second jerked. A separable cubic
  * B-spline over 4 x 4 texels: each cover row the panel needs is filtered across once into
  * home.ring (by its row, tag), and each frame row down from the four it falls among. At scale 1
  * (the playing cover) every column takes the same weights, as one row of texels a pixel; a
  * library cover's zoom gives each column its own. blend 0 writes the frame; else the slide is laid
- * over what d holds at blend/256 (a cross-fade's incoming cover). A still (only ever the one
- * showing, so blend 0) is copied as it is. */
+ * over what d holds at blend/256 (a cross-fade's incoming cover), each under the vignette (vig_k).
+ * A still (only ever the one showing, so blend 0) is copied as it is: frame_hold made it from a
+ * frame the vignette had darkened already. */
 static void home_render(unsigned *d, int pitch, const slide_t *s, int u, int v, int k,
                         unsigned blend) {
     if (s->lib == SLIDE_STILL) {
@@ -3880,8 +3907,10 @@ static void home_render(unsigned *d, int pitch, const slide_t *s, int u, int v, 
         bspline_w(at >> 8 & 255, wy);
         const unsigned *r0 = home.ring[r & 3], *r1 = home.ring[(r + 1) & 3],
                        *r2 = home.ring[(r + 2) & 3], *r3 = home.ring[(r + 3) & 3];
+        unsigned dim = vig_k(y);
         for (int x = 0; x < pw; ++x) {
             unsigned c = tap4(r0[x], r1[x], r2[x], r3[x], wy);
+            if (dim < 256) c = vig(c, dim);
             d[x] = blend ? lerp(d[x], c, blend) : c;
         }
     }
@@ -4479,26 +4508,18 @@ void coverflow_home_layout(void) {
         home_show(playing, np);
     }
     home.np = np;
-    void *rockbox = widget_lookup(home.win, "btn_rockbox", 1);
-    if (rockbox) {
-        int shown = ipod_home_rockbox();
-        /* after Folder, else last */
-        int last = widget_count_children(P(rockbox, W_PARENT)) - 1;
-        widget_restack(rockbox, shown ? 3 + (!playing || np) : last);
-        home_show(rockbox, shown); /* hidden, it would still take Streaming's taps */
-        widget_set_text_utf8(widget_lookup(home.win, "label_rockbox", 1), ipod_home_shortcut());
-        /* ponytail: the Shortcut card stays when the row hides (Shortcut: Rockbox, no Rockbox on
-         * the card; its tap says so), as the slide_menu lays out hidden cards too; removing it
-         * would mean re-adding it once the card has Rockbox */
-        if (home.carousel[0])
-            widget_set_text_utf8(widget_lookup(home.carousel[0], "label_rockbox", 1),
-                                 ipod_home_shortcut());
-    }
+    /* ponytail: the Shortcut is the carousel's card alone (Home's list has none); the card stays
+     * when its target is gone (Shortcut: Rockbox, no Rockbox on the card; its tap says so), as the
+     * slide_menu lays out hidden cards too; removing it would mean re-adding it once the card has
+     * Rockbox */
+    ipod_shortcut_seen();
+    if (home.carousel[0])
+        widget_set_text_utf8(widget_lookup(home.carousel[0], "label_rockbox", 1),
+                             ipod_home_shortcut());
     int split = split_geom(SPLIT_ROW), outer = full ? 375 : split,
         inner = !full ? split : T->home_full_row, x = T->home_text_x, end = T->home_label_end[full];
     home_width(home.list, outer, inner, x, end, 0);
     home_overflow(home.list, client_h());
-    home_in_place(home.list);
     if (home.sets)
         home_width(home.sets, sub_full() ? 375 : outer, sub_full() ? T->home_full_row : inner, x,
                    T->home_label_end[full || sub_full()], 0);
@@ -4638,10 +4659,9 @@ const char *coverflow_home_title(void) {
 int coverflow_home(void *win, void *ctx) {
     int result = stock_home_trampoline(win, ctx);
     widget_on(widget_lookup(win, "img_cover_flow", 1), EVT_CLICK, coverflow_open, 0);
-    widget_on(widget_lookup(win, "img_rockbox", 1), EVT_CLICK, home_shortcut_open, 0);
     widget_on(widget_lookup(win, "img_settings", 1), EVT_CLICK, home_settings, 0);
-    widget_on(widget_lookup(win, "img_shuffle_songs", 1), EVT_CLICK, shuffle_songs, 0);
     widget_on(widget_lookup(win, "img_home_search", 1), EVT_CLICK, library_search_open, 0);
+    home_sets_bind(win);
     home.win = win;
     void *art = widget_lookup(win, "img_homeart", 1);
     home.art = art;

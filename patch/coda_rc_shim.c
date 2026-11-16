@@ -441,18 +441,24 @@ static void cr_forget(int i) {
     memset(b, 0, sizeof b);
 }
 
+/* Car Remote on or off, its daemon started or stopped: the page's switch, and Control Center's
+ * circle (control_center.c). */
+void coda_rc_toggle(void) {
+    cr.on = !coda_rc_enabled();
+    write_int_config(cr.on, "Q2POD", "CARREMOTE");
+    if (cr.on)
+        cr_start();
+    else
+        cr_stop();
+}
+
 static int cr_click(void *ctx, void *event) {
     int i = (int)(long)ctx;
     if (cr.forget) { /* the Dialog: 0 Cancel, 1 Forget */
         if (i == 1) cr_forget(cr.forget - 1);
         cr.forget = 0;
     } else if (i == 0) {
-        cr.on = !coda_rc_enabled();
-        write_int_config(cr.on, "Q2POD", "CARREMOTE");
-        if (cr.on)
-            cr_start();
-        else
-            cr_stop();
+        coda_rc_toggle();
     } else if (i >= 2) {
         cr.forget = i - 1;
     }

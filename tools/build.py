@@ -785,7 +785,7 @@ NET_TYPE_READS = ((0x5c1d6c, 0x8c4300d4), (0x5c1d70, 0x24020002), (0x5c2078, 0x8
 # the row that opens it; and toasts in sentence case.
 LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('msg_playlistfull', 'Playlist Is Full', 'Could not create playlist'),
-    ('player_playlist', 'Playlists', 'Queue'), ('system_powermanager', 'Idle', 'Power'),
+    ('player_playlist', 'Playlists', 'Queue'), ('system_powermanager', 'Idle', 'Battery'),
     ('powerm_deep_off', 'standby/shutdown', 'Standby'),
     ('local_songer', 'Artist', 'Artists'), ('local_album', 'Album', 'Albums'),
     ('local_allsongs', 'All Songs', 'Songs'), ('local_playlist', 'Playlist', 'Playlists'),
@@ -795,7 +795,7 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('playset_memplay', 'Memory playback', 'Memory Playback'),
     ('playset_noplay', 'Headphones required for playback', 'Headphones Required'),
     ('replaygain_track', 'Audio', 'Song'),
-    ('small_playset', 'Playback Setting', 'Playback'), ('small_sysset', 'System Setting', 'System'),
+    ('small_playset', 'Playback Setting', 'Playback'), ('small_sysset', 'System Setting', 'General'),
     ('system_wifiset', 'Wireless Setting', 'Wireless'), ('system_display', 'Display setting', 'Display'),
     ('system_netservice', 'Network Service', 'Network'), ('system_time', 'Date and time', 'Date & Time'),
     ('netservice_wifitrans', 'Wi-Fi file transfer', 'Wi-Fi File Transfer'),
@@ -815,9 +815,10 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('msg_addfavsuccess', 'Added To Fav', 'Added to Favorites'), ('msg_favsuccess', 'Added To Fav', 'Added to Favorites'),
     ('msg_namenull', "The name can't be empty", "Name can't be empty"),
     ('scan_now', 'Scan music now', 'Scan Music Now'), ('scan_spec', 'Scan specified folders', 'Scan Specified Folders'),
-    # Screen Off Time's and Standby's minute choices: "min" takes a space, as "s" does not, which stock's
-    # 15s and 30s already have (docs/oled-design.md Type)
-    *((f'{page}_{n}min', f'{n}min', f'{n} min') for page, choices in (
+    # Screen Off Time's and Standby's choices spelled out, as iOS's Auto-Lock words them (the menu review's,
+    # 2026-11-15): "30 seconds", "1 minute"
+    *((f'lighttime_{n}s', f'{n}s', f'{n} seconds') for n in (15, 30)),
+    *((f'{page}_{n}min', f'{n}min', f'{n} minute' + 's' * (n > 1)) for page, choices in (
         ('lighttime', (1, 2, 5, 30)), ('standbyoff', (1, 3, 5, 10))) for n in choices)))
 
 # Wi-Fi transfer's web page (stock thttpd on :8888): in English, an Upload Folder button, and a folder,
@@ -1084,7 +1085,7 @@ ENGLISH = {
     '播放全部': 'Play All', '导入歌单': 'Import Playlists', '导出歌单': 'Export Playlists', '测试歌单': 'Playlist',
     '共0首': '0 songs',
 }
-ENGLISH_IN = {'testmode/test_key.bin': {'中': 'Centre'}, 'kb_default_t9.bin': {'中': 'abc', '《》': '«»'},
+ENGLISH_IN = {'testmode/test_key.bin': {'中': 'Center'}, 'kb_default_t9.bin': {'中': 'abc', '《》': '«»'},
               'dialog/search_dialog.bin': {'专辑': 'Albums', '风格': 'Genres'}}
 
 def english_ui(rel, data):
@@ -1905,7 +1906,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c']
 
 def compile_payload(out):  # pragma: no mutate block
     """Compile and link the payload."""

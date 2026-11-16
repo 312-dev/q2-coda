@@ -381,7 +381,7 @@ def test_english_ui_per_asset_wins():
 
 
 def test_english_ui_key_test_page():
-    assert texts(build.english_ui('testmode/test_key.bin', ipod.encode(ui(label('中'))))) == ['Centre']
+    assert texts(build.english_ui('testmode/test_key.bin', ipod.encode(ui(label('中'))))) == ['Center']
 
 
 def test_english_ui_unknown_text_stops_the_build():

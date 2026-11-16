@@ -476,9 +476,21 @@ int synclink_list(void *list);
 void synclink_hint_pre(void *view);
 void synclink_hint_post(void *view);
 
-/* settings_pages.c: a set_switch theme's About page as an inert table, from ipod_list_layout */
+/* settings_pages.c: a set_switch theme's About page as an inert table, from ipod_list_layout; a
+ * settings row's caption, shown under it while it is selected (paint_selection) */
 int about_list(void *list);
 void about_rows(void *view);
+void caption_row(void *label, const unsigned *text);
+void caption_sel(void *view, void *item);
+void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
+/* control_center.c: Quick Settings drawn as Control Center (ringnav_quick_settings, its paint and
+ * keys) */
+void cc_open(void *win), cc_paint(void *win, void *canvas), cc_wheel(void *win, int dir);
+int cc_key(void *win, unsigned key);
+/* tilt.c: the selection bar leans toward the wheel's next tick (paint_selection, ringnav_sleep) */
+void tilt_poll(void);
+void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius);
+void tilt_gleam(void *canvas, const rect_t *bar, int radius);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
 void marquee_fade(void *w, void *canvas);

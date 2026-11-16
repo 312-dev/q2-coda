@@ -285,7 +285,7 @@ void crc_tick(void) {
     if (crc_pair_cancelled()) {
         crc_session *s = pair.owner;
         pair_end(-1);
-        crc_error(s, 0, E_PAIRING_CANCELLED, "cancelled on the Q2");
+        crc_error(s, 0, E_PAIRING_CANCELLED, "canceled on the Q2");
     } else if (crc_now_ms() - pair.since > CRC_PAIR_TIMEOUT_MS) {
         crc_session *s = pair.owner;
         pair_end(-1);

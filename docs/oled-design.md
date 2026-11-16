@@ -173,6 +173,13 @@ All lists share one grid.
 - Text and chevron on it are On Accent, the second line too. Nothing else on the row changes (no
   bold, no indent).
 - It moves one row per wheel tick, with no easing longer than the theme's list motion.
+- **Tug to tilt** (approved on 2026-11-15 from `design/mockups/tilt-menu.html`; `patch/tilt.c`): while a finger
+  turns the wheel short of its next tick, the bar leans toward the row it is heading for by the share of the
+  tick turned, eased 1 - (1 - a)^2: up to 3 px that way, up to 3.5% larger, an accent shadow under it, and a
+  white gleam (0.42 at its centre, from 0.15 to full strength over the lean) sliding the other way. The tick
+  is unchanged: past it the bar steps a row and the next tug starts from the leftover turn. Let go short of
+  it and the bar springs back over 220 ms. The mock-up's 1 degree tilt is under a pixel on a 32 px row and is
+  not drawn. A touch drag scrolls the list with the bar hidden, as touch always does, so it does not tilt.
 - A list left by Return opens at its top when it is chosen again; Return lands on the row the
   page behind was left at (`list.reopen.top`).
 - Exactly one per screen. A dialog over a list takes the selection; the list's bar is hidden
@@ -181,7 +188,7 @@ All lists share one grid.
 ### List row
 
 - 32 px pitch, title at the text inset, a chevron on the right column when the row opens
-  another page, nothing at the right when it acts in place (Home's Shuffle Songs, a song).
+  another page, nothing at the right when it acts in place (a song).
 - **Chevron:** Phosphor `caret-right`, bold, 15 px, centred 5 px left of the right column:
   Chevron grey, On Accent on the selection.
 - **Opening:** a row whose page has to load first (Home's Cover Flow, on its first open after a
@@ -198,6 +205,11 @@ All lists share one grid.
   track with an Accent Blue knob, off a 1.5 px white outline round the white knob. No "On"/"Off"
   text beside it. A setting with two or three named choices (Gain's High and Low, Charge Limit's
   Off and 80%) is a key/value row that Centre cycles; the value is never part of the label.
+- **Captioned row** (Smart Wi-Fi's; approved as S3 on 2026-11-15, `mock_radio.py` `caption_rows('reveal')`):
+  the caption shows only under the selected row. That row grows over 150 ms, its title and switch where
+  they were, to hold the caption under them inside the bar: Inter 13 px in `#D6E2FA`, 17 px lines from the
+  title's column, wrapped at words to the right column, 5 px under the last; every other captioned row is one
+  row high. The list scrolls by whole rows to keep the grown row's foot in sight (`patch/settings_pages.c`).
 - **Disabled row** (Set Time Manually while the time is set automatically): label, value and
   chevron in Text Tertiary, and the wheel passes over it.
 - **Picker:** the current choice carries Phosphor's `check` (bold, 12 px) on the right column, Accent
@@ -535,8 +547,8 @@ the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where
   library gives similar songs. The rows are **Top Songs** (the artist's songs Most Played has
   counted, most played first; left out until one is), **Albums** and **All Songs** with their
   counts; Singles & EPs and Similar Artists are left out (no release types or similar artists in
-  the library). Albums opens Cover Flow on the artist's albums when Artist View is Cover Flow or
-  List, as before, and the Albums page above under Grid, its covers Cover Flow's cached ones (the
+  the library). Albums opens the Albums page above whatever Artist View is, and an album there its
+  [album page](#album-page) (user, 2026-11-15), its covers Cover Flow's cached ones (the
   server library's for a server album), placeholders until Cover Flow has made them (and for an album with no art). Top Songs
   and All Songs are the songs page above with their album, length and cover.
 
@@ -700,8 +712,8 @@ pattern.
 
 | Q2 Pod screen                       | Pattern                     | Notes                                                                                                      |
 | ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock, centred. Nine rows from y 58, seven at rest: the rows below fade into black from y 266 to 316, and once scrolled the top row's first 14 px fade too; scrolled to the end the last row's foot is at y 282: every list's ending ([Corners](#corners)) |
-| Home (Split)                        | List row beside art         | Rows from y 40 (into the status row's empty left, the clock at its right) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges: the playing cover panning slowly while a song plays, else the library's covers in turn, each zooming and drifting and cross-fading into the next; the status row's clock, play state and battery over it at the right, each glyph white or black by contrast. Nine rows, seven at rest (the last's foot at y 264, scrolled to the end too); the rows past them fade into black within 56 px of the glass's bottom edge and, once scrolled, the row above y 40 within 34 px of its top edge, both following its rounded corners |
+| Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock, centred. Seven rows from y 58, all at rest; a list with more (Settings' eight) fades the rows below into black from y 266 to 316, and once scrolled the top row's first 14 px too; scrolled to the end the last row's foot is at y 282: every list's ending ([Corners](#corners)) |
+| Home (Split)                        | List row beside art         | Rows from y 40 (into the status row's empty left, the clock at its right) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges: the playing cover panning slowly while a song plays, else the library's covers in turn, each zooming and drifting and cross-fading into the next; the art's top 50 px and bottom 40 px darkened toward 25% brightness (a vignette, approved as V4 on 2026-11-15); the status row's clock, play state and battery over it at the right, each glyph white or black by contrast with the darkened art under it. Seven rows, all at rest (the last's foot at y 264); a list with more (Settings' eight) fades the rows past them into black within 56 px of the glass's bottom edge and, once scrolled, the row above y 40 within 34 px of its top edge, both following its rounded corners |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Now Playing's About                 | [Track details](#track-details) | Header, quality line, then a grid of name over value                                                   |
 | Library                             | List row                    | Rows in the user's order: [Edit Library](#edit-library)                                                    |

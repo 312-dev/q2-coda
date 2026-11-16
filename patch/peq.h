@@ -402,6 +402,7 @@ int mono_on(void);   /* crossfade.c: Mono Audio's setting */
 #define NS_STEP 100
 #define NS_DEFAULT 3400
 int night_on(void), night_kelvin(void); /* night_on: 0 Off, 1 On, 2 Auto */
+void eq_toggle(void); /* peq_ui.c: EQ off, or on as PEQ; Control Center's EQ tile */
 void night_set(int on, int kelvin), night_save(void), night_paint(void *canvas), night_clock(int dark);
 void splash_poll(void); /* splash_hold.c: the boot animation's hold, every UI loop pass */
 int clock_night(void); /* theme_engine.c: Night Shift's Auto hours now */
@@ -695,7 +696,6 @@ unsigned playlist_index(int cd_num);
 void playlists_edit(int edit);
 int rockbox_available(void);   /* theme_engine.c: a regular Rockbox binary on the card */
 int groovebox_available(void); /* theme_engine.c: the Groovebox card app's binary on the card */
-#define SHORTCUT_SHUFFLE 5     /* IPOD SHORTCUT's Shuffle Songs: it plays in place */
 #define SHORTCUT_GROOVEBOX 10  /* IPOD SHORTCUT's Groovebox, after the ten stock-era values */
 #define SHORTCUT_NONE 11       /* IPOD SHORTCUT's None: Home has no Shortcut row */
 int page_keyup(void *ctx, void *event); /* navigation.c: Return leaves a payload page */

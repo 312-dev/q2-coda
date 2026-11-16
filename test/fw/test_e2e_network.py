@@ -883,10 +883,10 @@ def test_a_second_press_cancels_the_download_and_a_third_before_it_ends_does_not
     releases(w, during=during)
     page.press()
     w.ui.work()
-    assert seen == ['Cancelling…'] and w.net.asked == [LATEST, asset() + '.sig', asset()]
+    assert seen == ['Canceling…'] and w.net.asked == [LATEST, asset() + '.sig', asset()]
     page.press()  # the thread has ended, not yet joined
     w.ui.run(500)
-    assert w.ui.started == 1 and w.ui.toasts == ['Download cancelled']
+    assert w.ui.started == 1 and w.ui.toasts == ['Download canceled']
     assert w.card.tree() == {'update.tar': b'the release before'} and page.text == 'tr:update_online'
 
 
@@ -896,7 +896,7 @@ def test_leaving_system_update_cancels_its_download(w):
     releases(w, during=lambda sent: sent == len(UPDATE_TAR) // 4 and w.ui.destroy(page.page))
     page.press()
     w.ui.run(500)
-    assert w.ui.toasts == ['Download cancelled'] and not w.card.tree()
+    assert w.ui.toasts == ['Download canceled'] and not w.card.tree()
     assert len(w.net.asked) == 3 and not w.calls('fwupdate_tf')
 
 
@@ -1203,7 +1203,7 @@ def test_a_second_press_cancels_an_install_and_another_app_waits(w):
     w.ui.run(500)
     store.press('Foo')
     w.ui.run(500)
-    assert seen == ['Cancelling…'] and w.ui.toasts == ['Wait for the one in progress', 'Download cancelled']
+    assert seen == ['Canceling…'] and w.ui.toasts == ['Wait for the one in progress', 'Download canceled']
     assert store.rows() == [('Foo', 'Install'), ('Bar', 'Install')]
     assert set(w.card.tree()) == {'.q2/sources.list'} and STAGING not in w.card.dirs
     assert not [u for u in w.net.asked if 'q2-bar.zip' in u]

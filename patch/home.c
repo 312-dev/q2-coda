@@ -74,21 +74,28 @@ int ringnav_localmusic(void *win, void *ctx) {
     for (int i = 0; i < L_STOCK; i++) stock[i] = widget_get_child(view, i);
     if (library_search())
         lr_put(rows, 'S', library_row(view, (void *)0, library_search_open, 0, "Search", 1));
-    lr_put(rows, 'h', library_row(view, "local_shuffle", shuffle_menu, 0, "Shuffle", 1));
+    /* Shuffle, Hi-Res, Long Songs and Upload Scrobbles are hidden (the menu review's, 2026-11-15),
+     * each kept in its place, as My Fav is, for Edit Library's merge */
+    void *shuffle = library_row(view, "local_shuffle", shuffle_menu, 0, "Shuffle", 1);
+    lr_put(rows, 'h', shuffle);
+    widget_set_visible(shuffle, 0, 0);
     /* stock's rows: each one's letter, then its index */
     static const char stocks[] = { 'a', L_ARTISTS,   'l', L_ALBUMS, 's', L_SONGS,   'g', L_GENRES,
                                    'p', L_PLAYLISTS, 'n', L_ADDED,  'c', L_RECENT,  'i', L_HIRES,
                                    'u', L_UPDATE,    'f', L_FAV,    'q', L_FREQUENT };
     for (unsigned i = 0; i < sizeof stocks; i += 2)
         lr_put(rows, stocks[i], stock[(int)stocks[i + 1]]);
-    /* Era: browsing by a tag, as Genre */
-    lr_put(rows, 'e', library_row(view, "local_era", era_menu, 0, "Era", 1));
+    widget_set_visible(stock[L_HIRES], 0, 0);
+    /* Years: browsing by a tag, as Genre */
+    lr_put(rows, 'e', library_row(view, "local_era", era_menu, 0, "Years", 1));
     /* My Fav is Ratings' Loved, its row kept hidden */
     lr_put(rows, 'r', library_row(view, "local_fav", ratings_menu, 0, "Ratings", 1));
     widget_set_visible(stock[L_FAV], 0, 0);
     lr_put(rows, 'm', library_row(view, "local_frequentplay", most_played, 0, "Most Played", 1));
     widget_set_visible(stock[L_FREQUENT], 0, 0); /* Most Played is its list, from every listen */
-    lr_put(rows, 'L', library_row(view, "local_longsongs", long_songs, 0, "Long Songs", 1));
+    void *longs = library_row(view, "local_longsongs", long_songs, 0, "Long Songs", 1);
+    lr_put(rows, 'L', longs);
+    widget_set_visible(longs, 0, 0);
     /* Podcasts, Audiobooks, Photos, Books and Videos, each only with its folder; then iPod's Games.
      */
     static const char *const icons[] = { "local_podcasts", "local_audiobooks", "local_photos",
@@ -99,9 +106,11 @@ int ringnav_localmusic(void *win, void *ctx) {
             lr_put(rows, "PAoBv"[k],
                    library_row(view, icons[k], media_click, (void *)(long)(k + 1), MEDIA[k], 1));
     lr_put(rows, 'G', library_row(view, "local_games", games_open, 0, "Games", 1));
-    if (scrobble_ready())
-        lr_put(rows, 'U',
-               library_row(view, "local_scrobble", upload_scrobbles, 0, "Upload Scrobbles", 0));
+    if (scrobble_ready()) {
+        void *up = library_row(view, "local_scrobble", upload_scrobbles, 0, "Upload Scrobbles", 0);
+        lr_put(rows, 'U', up);
+        widget_set_visible(up, 0, 0);
+    }
     lr_apply(rows);
     library_look(view);
     return result;
@@ -349,17 +358,6 @@ void home_np_keep(int d) {
     int row = I(widget_get_child(view, 0), W_H), y = I(view, SCROLL_Y);
     if (y > 0 || (d > 0 && (sel + 1) * row > rest)) y += d * row;
     scroll_view_set_offset(view, I(view, SCROLL_X), y < 0 ? 0 : y);
-}
-
-/* Shuffle Songs acts rather than opening a list, so has no chevron (navigation.c paint_chevrons):
- * as every other row draws one, its label takes the chevron's room, to the right column, and the
- * name fits Split's half. */
-void home_in_place(void *list) {
-    void *label = widget_lookup(list, "label_shuffle_songs", 1);
-    if (!label) return;
-    int w = I(P(label, W_PARENT), W_W) - geom_val(V_RIGHT_X) - I(label, W_X);
-    if (w > I(label, W_W))
-        widget_move_resize(label, I(label, W_X), I(label, W_Y), w, I(label, W_H));
 }
 
 /* smoothstep of num/den, clamped to 0..1, in 256ths. */

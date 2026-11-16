@@ -4,16 +4,15 @@
  * Return, but its tabs are hidden and the page is drawn as a card app's artist (artist_page.c):
  * the header (the name, "N albums · K songs", the songs' commonest genre), Shuffle alone (no
  * radio for card or server-library songs), then Top Songs (only when Most Played has counted one
- * of the artist's songs: their ranking), Albums and All Songs with their counts. Albums opens
- * Cover Flow when Artist View is Cover Flow or List, as the stock page did, else a page of cover
- * rows newest first; Top Songs and All Songs open cover rows of songs. Everything is read once,
+ * of the artist's songs: their ranking), Albums and All Songs with their counts. Albums opens a
+ * page of cover rows newest first, an album there its album page (library_album.c), whatever
+ * Artist View is; Top Songs and All Songs open cover rows of songs. Everything is read once,
  * at the page's first tab load (navigation.c artist_list), from the artist page's own songs query
  * (artist_songs), so with Local + Server a mixed artist counts both libraries' songs.
  * ponytail: read once per page, so a library change while it is open shows on its next open. */
 #include "navigation.h"
 
-extern int coverflow_goto_album(void *r), coverflow_artist(void *albums), ringnav_artist_view(void);
-extern void coverflow_newest(void *albums);
+extern void coverflow_newest(void *albums), album_page_open(void *r); /* navigation.c */
 extern unsigned album_key(void *r);
 extern char *art_path(char *out, unsigned key, const char *suffix);
 
@@ -56,7 +55,7 @@ static int la_pick(void *ctx, void *event) {
     int i = (int)(long)ctx;
     if (!la.list || i < 0 || (unsigned)i >= deque_size(la.list)) return 0;
     if (la.list == la.albums)
-        coverflow_goto_album(deque_at(la.albums, (unsigned)i));
+        album_page_open(deque_at(la.albums, (unsigned)i));
     else
         play_folder(la.list, i, 0xf001); /* a song list, as Most Played's */
     return 0;
@@ -101,15 +100,7 @@ static void la_rows(int kind) {
 }
 
 static int la_open(void *ctx, void *event) {
-    int kind = la.row[(int)(long)ctx & 3];
-    void *copy;
-    if (kind != LA_ALBUMS || !ringnav_artist_view()) {
-        la_rows(kind);
-        return 0;
-    }
-    copy = _create_deque("stSongInfo"); /* Artist View: Cover Flow (or its List), which owns it */
-    deque_init_copy(copy, la.albums);
-    if (!coverflow_artist(copy)) deque_destroy(copy);
+    la_rows(la.row[(int)(long)ctx & 3]);
     return 0;
 }
 

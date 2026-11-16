@@ -505,7 +505,7 @@ static int wait_done(const void *unused) {
     static const char *const said[] = {
         [NU_LATEST] = "Latest firmware installed", [NU_NET] = "Can't reach GitHub",
         [NU_MISSING] = "No update for this build", [NU_CARD] = "Can't write to the card",
-        [NU_CANCELLED] = "Download cancelled",
+        [NU_CANCELLED] = "Download canceled",
         [NU_UNSIGNED] = "Release not signed: not installed",
         [NU_FORGED] = "Signature check failed: not installed",
     };
@@ -513,7 +513,7 @@ static int wait_done(const void *unused) {
     if (nu.state == NU_RUNNING) {
         reset_poweroptions_timer(1, 1, 0); /* standby, auto power-off; not the screen's */
         tk_snprintf(s, sizeof s, "Downloading %d%%", nu.percent);
-        show(nu.cancel ? "Cancelling…" : nu.verifying ? "Verifying…" : nu.percent ? s : "Checking…");
+        show(nu.cancel ? "Canceling…" : nu.verifying ? "Verifying…" : nu.percent ? s : "Checking…");
         return 8; /* RET_REPEAT */
     }
     pthread_join(nu.thread, 0);
@@ -533,7 +533,7 @@ static int wait_done(const void *unused) {
 static int online_click(void *ctx, void *event) {
     if (nu.state == NU_RUNNING) {
         nu.cancel = 1;
-        show("Cancelling…");
+        show("Canceling…");
     } else if (nu.state != NU_IDLE) {
         /* ended, not yet joined by wait_done */
     } else if (!need_link(online_click, ctx)) {
@@ -834,7 +834,7 @@ static void sh_text(int r) {
             widget_move_resize(title, I(title, W_X), 0, I(title, W_W), I(sh.row[r], W_H));
     }
     else if (busy && sh.cancel)
-        t = "Cancelling…";
+        t = "Canceling…";
     else if (busy && sh.stage == 1 && sh.percent)
         snprintf(s, sizeof s, "Downloading %d%%", sh.percent);
     else if (busy)
@@ -872,7 +872,7 @@ static int sh_wait(const void *unused) {
     static const char *const said[] = {
         [SH_NET] = "Can't reach GitHub",           [SH_CARD] = "Can't write to the card",
         [SH_MISSING] = "No update for this build", [SH_BAD] = "The download is not a usable app",
-        [SH_CANCELLED] = "Download cancelled",     [SH_BUSY] = "GitHub is busy, try later",
+        [SH_CANCELLED] = "Download canceled",     [SH_BUSY] = "GitHub is busy, try later",
         [SH_UNSIGNED] = "App list not signed: not used",
         [SH_FORGED] = "Download doesn't match the list",
     };

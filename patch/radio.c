@@ -392,9 +392,9 @@ static const char *fav_toggle(const list_t *l, int i) {
     list_free(&favs);
     ++rd.serial;
     if (ok && ui.favs) later(R_FAVS, 0);
-    return !ok         ? "Could not save Favourites"
-           : found < 0 ? "Added to Favourites"
-                       : "Removed from Favourites";
+    return !ok         ? "Could not save Favorites"
+           : found < 0 ? "Added to Favorites"
+                       : "Removed from Favorites";
 }
 
 /* The Now Playing page from rd: the station, the StreamTitle as artist - title, the stream, and the
@@ -534,7 +534,7 @@ void radio_search(void) {
 
 /* The page shows level's list, its row last chosen selected. */
 static void show(int level) {
-    static const char *const menu[] = { "Now Playing", "Favourites", "Featured",
+    static const char *const menu[] = { "Now Playing", "Favorites", "Featured",
                                         "Top Stations", "By Country", "By Genre" };
     if (ui.view && !ui.note) ui.sel[ui.level] = widget_get_prop_int(ui.view, "_ringnav_index", 0);
     ui.level = level;
@@ -555,7 +555,7 @@ static void show(int level) {
         n = l->n;
         const char *caption = level == PICK ? ui.genre ? "Genres" : "Countries" : ui.caption;
         ui.view = page_list(ui.page, ui.page, 0, caption, n, 48);
-        if (!n && level == STATIONS) page_empty(ui.page, ui.favs ? "Favourites" : "Internet Radio");
+        if (!n && level == STATIONS) page_empty(ui.page, ui.favs ? "Favorites" : "Internet Radio");
         for (int i = 0; i < n; ++i)
             if (level == PICK)
                 page_row_into(ui.view, i, name_of(l, i), pick_click);
@@ -669,7 +669,7 @@ static int go(const void *unused) {
     if (ui.next == R_FAVS) {
         favs_read(&ui.list, 1);
         tk_snprintf(ui.caption, sizeof ui.caption,
-                    ui.list.n ? "Favourites" : "No favourites");
+                    ui.list.n ? "Favorites" : "No favorites");
         show(STATIONS);
     } else if (ui.next == R_FEATURED) {
         list_set(&ui.list, STARTERS, sizeof STARTERS - 1, 0, 0);

@@ -342,23 +342,25 @@ def home_card(menu, at, row, text):
     menu[3].insert(at, card)
 
 
-# Home becomes a list of the stock cards' names, in stock order with Coverflow third,
-# Rockbox before Streaming and one Settings row for Playback and System settings, with two rows of
-# the payload's: Shuffle Songs after Rockbox and Search after Streaming.
+# Home becomes a list of the stock cards' names in the user's order (menu review, 2026-11-15): Now Playing,
+# Library, Streaming, Folders, Cover Flow, then two rows of the payload's, Search and Settings.
 # home_page_init (0x534b6c) looks up no widget: its widget_foreach visitor (0x534750) binds img_*
 # clicks and translates label_* by name, and only img_left/img_right reach the slide_menu. Each row's transparent image covers the row, on top of its label, so it takes the
-# tap and is the row's click target for the wheel. The payload binds Coverflow, Rockbox (shown
-# only while the card has it), Shuffle Songs, Search and Settings, which slides list_view_homeset, hidden until then and
-# holding stock's own Playback and System setting rows (labelled Playback and System), into the list's place.
-# Shuffle Songs' and Search's names are none stock's visitor knows (stock's search pages have an img_search).
-HOME_ROWS = ['playing', 'localmusic', 'coverflow', 'folder', 'rockbox', 'shuffle_songs', 'stream', 'home_search', 'settings']
-HOME_SETS = ['playset', 'sysset']
-HOME_LITERAL = {'coverflow': 'Cover Flow', 'rockbox': 'Rockbox', 'shuffle_songs': 'Shuffle Songs', 'home_search': 'Search',
-                'settings': 'Settings'}
-# Stock's visitor translates label_localmusic, label_playset and label_sysset by name; renamed, they keep
-# these shorter literals.
-HOME_RENAMED = {'localmusic': LIBRARY, 'playset': {'name': 'label_playback', 'text': 'Playback'},
-                'sysset': {'name': 'label_system', 'text': 'System'}}
+# tap and is the row's click target for the wheel. The payload binds Cover Flow, Search and Settings, which slides
+# list_view_homeset, hidden until then, into the list's place: Wi-Fi, Bluetooth, General (stock's System setting
+# row), Playback (stock's Playback setting row), Car Remote, Display, Controls and Battery, the six that are not
+# stock's bound by the payload (coverflow.c home_sets). Search's name is none stock's visitor knows (stock's search
+# pages have an img_search).
+HOME_ROWS = ['playing', 'localmusic', 'stream', 'folder', 'coverflow', 'home_search', 'settings']
+HOME_SETS = ['set_wifi', 'set_bt', 'sysset', 'playset', 'set_car', 'set_display', 'set_controls', 'set_power']
+HOME_LITERAL = {'coverflow': 'Cover Flow', 'home_search': 'Search', 'settings': 'Settings', 'set_wifi': 'Wi-Fi',
+                'set_bt': 'Bluetooth', 'set_car': 'Car Remote', 'set_display': 'Display', 'set_controls': 'Controls',
+                'set_power': 'Battery'}
+# Stock's visitor translates label_localmusic, label_folder, label_playset and label_sysset by name; renamed, they
+# keep these literals.
+HOME_RENAMED = {'localmusic': LIBRARY, 'folder': {'name': 'label_folders', 'text': 'Folders'},
+                'playset': {'name': 'label_playback', 'text': 'Playback'},
+                'sysset': {'name': 'label_system', 'text': 'General'}}
 # Since stock V1.34 the visitor knows img_coverflow and label_coverflow too: its own Album Wall card's, which it
 # binds to that page and names so. Cover Flow's image and label are named apart, so stock binds and names neither.
 HOME_OURS = {'coverflow': 'cover_flow'}

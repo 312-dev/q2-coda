@@ -38,12 +38,12 @@
 #define LR_HINT_Y 298 /* its middle, 14 px above the screen's foot */
 #define LR_LIFT_PX 27 /* the lifted row's words: Inter Medium 22 px, 20 px grown 8% */
 
-/* The Library's rows in their default order, each its letter in LR_FILE: Search (Classic's set
- * only), Shuffle, Artists, Albums, Songs, Genres, Era, Playlists, Ratings, My Fav (hidden),
- * Recently Added, Recent, Most Played, Frequent (hidden), Hi-Res, Long Songs, Podcasts, Audiobooks,
- * Photos, Books, Videos, Games, Upload Scrobbles, Update Local Music. A letter is never reused: a
- * new row takes a new one, here where it goes by default. */
-const char lr_default[] = "ShalsgeprfncmqiLPAoBvGUu";
+/* The Library's rows in their default order (the menu review's, 2026-11-15), each its letter in
+ * LR_FILE: Shuffle (hidden), Songs, Playlists, Artists, Albums, Search, Genres, Years, Ratings, My
+ * Fav (hidden), Recently Added, Recent, Most Played, Frequent (hidden), Hi-Res (hidden), Long Songs
+ * (hidden), Podcasts, Audiobooks, Videos, Photos, Books, Games, Upload Scrobbles (hidden), Update
+ * Local Music. A letter is never reused: a new row takes a new one, here where it goes by default. */
+const char lr_default[] = "hspalSgerfncmqiLPAvoBGUu";
 _Static_assert(sizeof lr_default <= LR_ROWS, "a row per letter");
 
 static struct {

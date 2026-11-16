@@ -352,8 +352,8 @@ def test_oled_appearance_rows_read_title_and_value_in_its_order(fw):
     assert read['Accent'] == accent_name(t, host.tools_theme.accent_default(t))
     own = [o for o in t['opts'] if o['setting'] == 'SETTING_OWN']
     assert own and [read[o['label']] for o in own] == [o['names'][o['def']] for o in own]  # each at its default
-    # nothing stored: the payload's own defaults (dark, Split, Battery's Icon); no Rockbox: Favorites
-    assert (read['Light Mode'], read['Home'], read['Shortcut'], read['Battery']) == ('Off', 'Split', 'Favorites', 'Icon')
+    # nothing stored: the payload's own defaults (dark, Split, Battery's Icon); no Shortcut row
+    assert (read['Light Mode'], read['Home'], read['Battery']) == ('Off', 'Split', 'Icon') and 'Shortcut' not in read
 
 
 def clicks_of(fw, ui, page, title, n):
@@ -376,22 +376,6 @@ def test_oled_accent_offers_its_blue_alone(fw):
     assert o['values'] == 1 << v
     page = appearance(fw, ui, **{t['accent_key']: b'%d' % v})
     assert clicks_of(fw, ui, page, 'Accent', 2) == [(accent_name(t, v), [(t['accent_key'], v)])] * 2
-
-
-def test_shortcut_cycles_in_its_menu_order(fw):
-    ui = Ui(fw)
-    page = appearance(fw, ui, SHORTCUT=b'0')
-    seen = clicks_of(fw, ui, page, 'Shortcut', 11)
-    # Rockbox, Favorites, Shuffle, Rated Albums, Playlists, Artists, Albums, Games, Podcasts, Audiobooks, None, Rockbox
-    assert [v for v, _ in seen] == ['Favorites', 'Shuffle', 'Rated Albums', 'Playlists', 'Artists', 'Albums', 'Games',
-                                    'Podcasts', 'Audiobooks', 'None', 'Rockbox']
-    assert [w for _, w in seen] == [[('SHORTCUT', v)] for v in (3, 5, 4, 7, 1, 2, 6, 8, 9, 11, 0)]
-
-
-def test_shortcut_none_reads_as_none_and_goes_on_to_rockbox(fw):
-    ui = Ui(fw)
-    page = appearance(fw, ui, SHORTCUT=b'11')
-    assert [(v, w) for v, w in clicks_of(fw, ui, page, 'Shortcut', 1)] == [('Rockbox', [('SHORTCUT', 0)])]
 
 
 def test_home_cycles_split_full_carousel(fw):
@@ -489,15 +473,20 @@ class Settings:
         fw.fn('ringnav_systemset', C.c_int, C.c_void_p, C.c_void_p)(self.win.addr, None)
 
 
-def test_system_settings_adds_its_rows_and_hides_five(fw):
+def test_general_adds_its_rows_and_hides_stock_s_but_network(fw):
     ui = Ui(fw)
     Config(fw)
     page = Settings(fw, ui)
-    assert titles(page.view) == ['stock_1', 'stock_2', 'Car Remote', 'stock_3', 'Controls', 'stock_4', 'system_time',
-                                 'stock_0', 'App Store', 'Storage', 'system_update', 'system_reset', 'stock_5', 'stock_6', 'stock_7',
-                                 'stock_8', 'system_about']
-    # stock's Language (English only for now), Wheel Function, In-Vehicle, General and System
-    assert [item.name for item in page.view.children if not item.visible] == ['stock_0', 'stock_5', 'stock_6', 'stock_7', 'stock_8']
+    # Settings' General, iOS's: About, maintenance, Network and Reset, then Restart and Shut Down after a gap
+    rows = [item for item in page.view.children if item.name or item.labels()]  # Restart's gap is a bare label
+    assert [item.name or item.labels()[0].text for item in rows] == ['system_about', 'system_update', 'Storage',
+                                 'system_time', 'App Store', 'stock_2',
+                                 'system_reset', 'stock_0', 'stock_1', 'stock_3', 'stock_4', 'stock_5', 'stock_6',
+                                 'stock_7', 'stock_8', 'Restart', 'Shut Down']
+    # stock's Language (English only for now), Wireless, Display, Power (Settings has their rows), Wheel Function,
+    # In-Vehicle, General and System
+    assert [item.name for item in page.view.children if not item.visible] == [
+        'stock_0', 'stock_1', 'stock_3', 'stock_4', 'stock_5', 'stock_6', 'stock_7', 'stock_8']
     # the rows stock moved to its System page open stock's pages from here
     opened = []
     fw.mock('navigator_to', lambda name, *_: opened.append(C.string_at(name).decode()))
@@ -514,9 +503,9 @@ def test_system_settings_adds_its_rows_and_hides_five(fw):
 def test_controls_opens_display_as_its_own_page(fw, keytone):
     ui = Ui(fw)
     Config(fw)
-    settings = Settings(fw, ui, keytone)
+    Settings(fw, ui, keytone)
     page = Display(fw, ui)
-    ui.click(button_of(settings.view, 'Controls'))
+    fw.fn('navigation__set_open', C.c_int, C.c_void_p, C.c_void_p)(4, None)  # Settings' Controls row on Home
     assert page.title() == 'Controls'
     found = titles(page.view())
     assert found[:3] == ['Wheel Sensitivity', 'Hold Return', 'Clicker']

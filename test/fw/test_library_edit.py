@@ -20,8 +20,8 @@ EVT_MOVE, EVT_UP, EVT_DOWN = O['EVT_POINTER_MOVE_BEFORE'], O['EVT_POINTER_UP_BEF
 STOP, PITCH = 11, 32
 SEL = '_ringnav_index'
 # the Library's rows under OLED (Search leads: its set has no Library icons), as the page shows them
-SHOWN = ['Search', 'Shuffle', 'Artist', 'Album', 'All Songs', 'Genre', 'Era', 'Playlist', 'Ratings', 'Recently Added',
-         'Recent', 'Most Played', 'Hi-Res', 'Long Songs', 'Games', 'Update Local Music']
+SHOWN = ['All Songs', 'Playlist', 'Artist', 'Album', 'Search', 'Genre', 'Years', 'Ratings', 'Recently Added', 'Recent',
+         'Most Played', 'Games', 'Update Local Music']
 
 
 def resolve(fw, saved):
@@ -54,7 +54,7 @@ def test_a_row_the_saved_order_does_not_name_goes_in_after_the_row_before_it_by_
     # the first row by default has nothing before it: it goes first
     assert resolve(fw, DEFAULT[1:][::-1]) == DEFAULT[0] + DEFAULT[1:][::-1]
     # two new rows in a row keep their default order
-    assert resolve(fw, DEFAULT.replace('e', '').replace('p', '').replace('g', '') + 'g')[-3:] == 'gep'
+    assert resolve(fw, DEFAULT.replace('e', '').replace('r', '').replace('g', '') + 'g')[-3:] == 'ger'
 
 
 def test_hidden_rows_keep_their_places_when_the_shown_ones_move(fw):
@@ -150,9 +150,9 @@ class Library:
 def test_the_page_follows_a_saved_order(fw, ui, st):
     lib = Library(fw, ui, st)
     assert lib.shown == SHOWN
-    mine = DEFAULT.replace('h', '') + 'h'  # Shuffle last
+    mine = DEFAULT.replace('s', '') + 's'  # Songs last
     lib2 = Library(fw, ui, st, {FILE: mine.encode().ljust(LR['LR_MAX'], b'\0')})
-    assert lib2.shown == SHOWN[:1] + SHOWN[2:] + ['Shuffle']
+    assert lib2.shown == SHOWN[1:] + ['All Songs']
 
 
 def test_a_short_or_missing_file_is_the_default_order(fw, ui, st):
@@ -174,13 +174,13 @@ def test_centre_held_enters_edit_library_and_held_again_saves_and_leaves(fw, ui,
 def test_centre_lifts_the_wheel_carries_and_centre_drops_and_saves(fw, ui, st, keys):
     lib = Library(fw, ui, st)
     lib.hold_centre()
-    lib.select(1)  # Shuffle
+    lib.select(1)  # Playlist
     assert lib.key(KEY_CENTER)
     assert lib.key(KEY_NEXT) and lib.key(KEY_NEXT)
-    assert lib.shown[:4] == ['Search', 'Artist', 'Album', 'Shuffle'] and ui.props[(lib.view, SEL)] == 3
+    assert lib.shown[:4] == ['All Songs', 'Artist', 'Album', 'Playlist'] and ui.props[(lib.view, SEL)] == 3
     assert lib.saved() == ''  # not until it is dropped
     assert lib.key(KEY_CENTER)
-    assert lib.saved().startswith('Salh')
+    assert lib.saved().startswith('hsalp')  # the hidden Shuffle keeps its place
     assert lib.key(KEY_NEXT) == 0  # nothing carried: the wheel is the list's
 
 
@@ -196,11 +196,11 @@ def test_the_carried_row_stops_at_the_ends(fw, ui, st, keys):
 def test_return_while_carrying_puts_the_row_back_and_stays_in_edit_library(fw, ui, st, keys):
     lib = Library(fw, ui, st)
     lib.hold_centre()
-    lib.select(4)  # All Songs
+    lib.select(4)  # Search
     lib.key(KEY_CENTER)
     for _ in range(5):
         lib.key(KEY_PREV)
-    assert lib.shown[0] == 'All Songs'
+    assert lib.shown[0] == 'Search'
     assert lib.key(KEY_RETURN)
     assert lib.shown == SHOWN and lib.editing and ui.props[(lib.view, SEL)] == 4
     assert lib.saved() == ''
@@ -211,14 +211,14 @@ def test_return_while_carrying_puts_the_row_back_and_stays_in_edit_library(fw, u
 def test_the_order_survives_a_reboot_and_hidden_rows_keep_their_places(fw, ui, st, keys):
     lib = Library(fw, ui, st)
     lib.hold_centre()
-    lib.select(8)  # Ratings, just before the hidden My Fav
+    lib.select(7)  # Ratings, just before the hidden My Fav
     lib.key(KEY_CENTER)
     lib.key(KEY_NEXT)
     lib.key(KEY_CENTER)
     saved = lib.saved()
     assert saved.index('f') == DEFAULT.index('f') and saved.index('q') == DEFAULT.index('q')
     again = Library(fw, ui, st, dict(lib.disk.files))  # the page built afresh from the file
-    assert again.shown[8:10] == ['Recently Added', 'Ratings']
+    assert again.shown[7:9] == ['Recently Added', 'Ratings']
 
 
 def test_a_finger_held_on_a_row_enters_edit_library_and_drags_it(fw, ui, st, keys):
@@ -238,10 +238,10 @@ def test_a_finger_held_on_a_row_enters_edit_library_and_drags_it(fw, ui, st, key
         return handler(C.addressof(event))
 
     assert send(EVT_MOVE, 58 + PITCH * 4 + 10) == STOP  # two rows down: the list does not scroll
-    assert lib.shown[:5] == ['Search', 'Shuffle', 'Album', 'All Songs', 'Artist']
+    assert lib.shown[:5] == ['All Songs', 'Playlist', 'Album', 'Search', 'Artist']
     assert lib.saved() == ''
     assert send(EVT_UP, 58 + PITCH * 4 + 10) == STOP
-    assert lib.saved().startswith('Shls')
+    assert lib.saved().startswith('hsplSa')  # the hidden Shuffle keeps its place
 
 
 def test_a_tap_in_edit_library_selects_its_row_and_opens_nothing(fw, ui, st, keys):
@@ -260,7 +260,7 @@ def test_rows_slide_aside_over_the_slide_time(fw, ui, st, keys):
     lib.select(1)
     lib.key(KEY_CENTER)
     lib.key(KEY_NEXT)
-    assert lib.y('Shuffle') == 2 * PITCH  # the carried row goes at once
+    assert lib.y('Playlist') == 2 * PITCH  # the carried row goes at once
     assert lib.y('Artist') == 2 * PITCH  # Artist still where it showed
     (t, ms), = ui.pending('lr_slide_step')
     assert ms == LR['LR_STEP_MS']
@@ -273,4 +273,4 @@ def test_a_row_new_to_the_saved_order_shows_at_its_default_place_on_the_page(fw,
     """A saved order from before Era existed, Genres moved last: Era comes in after Genres, the rest as saved."""
     mine = DEFAULT.replace('e', '').replace('g', '') + 'g'
     lib = Library(fw, ui, st, {FILE: mine.encode().ljust(LR['LR_MAX'], b'\0')})
-    assert lib.shown[-3:] == ['Update Local Music', 'Genre', 'Era']
+    assert lib.shown[-3:] == ['Update Local Music', 'Genre', 'Years']
