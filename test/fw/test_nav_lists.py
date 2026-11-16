@@ -1,5 +1,5 @@
 """patch/navigation.c's list engine: the wheel's pane, its rows, position memory and reveal, Centre's
-confirm, the edge bump and wrap, the carousel's step, pull to search, the time zone rows, and what is
+confirm, the ends that stop it, the carousel's step, pull to search, the time zone rows, and what is
 painted over a list (the chevrons, the fast-scroll letter, the art's corners)."""
 import ctypes as C
 import json
@@ -377,43 +377,44 @@ def to_end(fw, ui, page):
         key(fw, ui, KEY_NEXT, ui.now + SLOW)
 
 
-def test_a_ring_list_bumps_at_its_end_and_wraps_after_a_pause(fw, ui):
-    page = Page(ui, titles(30))  # allmusic_page: a ring
+# Ticks past an end at every spacing: inside a spin, a run's gap, and pauses up to a second.
+PAST_END = (SLOW, 1, 300, 301, 1000, SLOW, 2000)
+
+
+@pytest.mark.parametrize('name', ['allmusic_page', 'sortselect_dialog', 'playset_page', 'about_page'])
+def test_every_list_stops_at_its_last_row_however_the_wheel_keeps_turning(fw, ui, name):
+    page = Page(ui, titles(30), name=name)  # a music list, the hold menu, a settings list, a plain one
     to_end(fw, ui, page)
-    key(fw, ui, KEY_NEXT, ui.now + SLOW)
-    assert page.selected == 29  # the first detent past the end bumps
-    (bump,) = ui.due('fx_expire')
-    assert ui.timers[bump][2] == O['BUMP_MS']
-    key(fw, ui, KEY_NEXT, ui.now + O['EDGE_PAUSE_MS'] - 1)
-    assert page.selected == 29  # a spin hard-stops at the end
-    key(fw, ui, KEY_NEXT, ui.now + O['EDGE_PAUSE_MS'])
-    assert page.selected == 0 and page.offset == 0  # a detent after a pause carries over
+    offset = page.offset
+    for gap in PAST_END:
+        key(fw, ui, KEY_NEXT, ui.now + gap)
+        assert page.selected == 29 and page.offset == offset  # no wrap, the view still
 
 
-def test_a_ring_list_wraps_from_its_top_to_its_last_row(fw, ui):
+def test_every_list_stops_at_its_first_row(fw, ui):
     page = Page(ui, titles(30))
     paint(fw, page)
+    key(fw, ui, KEY_NEXT, ui.now + SLOW)
     key(fw, ui, KEY_PREV, ui.now + SLOW)
-    key(fw, ui, KEY_PREV, ui.now + O['EDGE_PAUSE_MS'])
-    assert page.selected == 29 and page.shows(29)
+    for gap in PAST_END:
+        key(fw, ui, KEY_PREV, ui.now + gap)
+        assert page.selected == 0 and page.offset == 0
 
 
-def test_turning_back_from_the_end_makes_the_next_end_bump_again(fw, ui):
+def test_a_tick_at_the_end_repaints_the_list(fw, ui):  # a wheel wake still clears touch hiding
+    page = Page(ui, titles(30))
+    to_end(fw, ui, page)
+    ui.invalidated.clear()
+    key(fw, ui, KEY_NEXT, ui.now + 1000)
+    assert page.selected == 29 and ui.invalidated == [page.view.at]
+
+
+def test_turning_back_from_the_end_moves_at_once(fw, ui):
     page = Page(ui, titles(30))
     to_end(fw, ui, page)
     key(fw, ui, KEY_NEXT, ui.now + SLOW)
     key(fw, ui, KEY_PREV, ui.now + SLOW)
-    key(fw, ui, KEY_NEXT, ui.now + SLOW)
-    key(fw, ui, KEY_NEXT, ui.now + O['EDGE_PAUSE_MS'] + 1)
-    assert page.selected == 29  # bumped afresh, not wrapped
-
-
-def test_a_list_that_is_not_a_ring_stops_at_its_end(fw, ui):
-    page = Page(ui, titles(30), name='about_page')
-    to_end(fw, ui, page)
-    for _ in range(3):
-        key(fw, ui, KEY_NEXT, ui.now + O['EDGE_PAUSE_MS'] + 1)
-    assert page.selected == 29 and not ui.due('fx_expire')
+    assert page.selected == 28
 
 
 def gapped(ui, n=10, at=8, gap=12, height=210):
@@ -481,35 +482,14 @@ def test_home_s_list_rests_on_seven_rows_and_scrolls_the_rest(fw, ui, st, hidden
     assert all(0 <= ROW_H * s - o and ROW_H * (s + 1) - o <= 7 * ROW_H for s, o in seen)  # inside the rest
 
 
-@pytest.mark.parametrize('cls, ring', [(O['CLASS_ALBUMS'], True), (0xff10, False)])
-def test_album_page_wraps_only_as_the_albums_list(fw, ui, cls, ring):
+@pytest.mark.parametrize('cls', [O['CLASS_ALBUMS'], 0xff10])
+def test_album_page_stops_at_its_end_as_albums_or_songs(fw, ui, cls):
     fw.var('fw_ctx_g_class_type', C.c_int).value = cls
     page = Page(ui, titles(30), name='album_page')
     to_end(fw, ui, page)
-    key(fw, ui, KEY_NEXT, ui.now + SLOW)
-    key(fw, ui, KEY_NEXT, ui.now + O['EDGE_PAUSE_MS'] + 1)
-    assert page.selected == (0 if ring else 29)
-
-
-def test_the_bump_repaints_its_list_when_it_lapses(fw, ui):
-    page = Page(ui, titles(30))
-    to_end(fw, ui, page)
-    key(fw, ui, KEY_NEXT, ui.now + SLOW)
-    (bump,) = ui.due('fx_expire')
-    ui.invalidated.clear()
-    ui.fire(bump)
-    assert ui.invalidated == [page.view.at]
-
-
-def test_the_bump_of_a_page_gone_repaints_nothing(fw, ui):
-    page = Page(ui, titles(30))
-    to_end(fw, ui, page)
-    key(fw, ui, KEY_NEXT, ui.now + SLOW)
-    (bump,) = ui.due('fx_expire')
-    Page(ui, titles(30))  # a new page on top
-    ui.invalidated.clear()
-    ui.fire(bump)
-    assert not ui.invalidated
+    for gap in PAST_END:
+        key(fw, ui, KEY_NEXT, ui.now + gap)
+    assert page.selected == 29
 
 
 # Centre.

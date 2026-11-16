@@ -258,9 +258,9 @@ scratch_t st __attribute__((section(".scratch")));
 /* Single shared view: no entry point keeps a menu live across a nested load(). */
 menu_t g_menu __attribute__((section(".scratch")));
 
-/* Audited top windows, each tagged with its content-identity class and whether its row list is
- * one of the audited local row lists that carry over at the ends. The index is remembered
- * instead of the name pointer: AWTK owns and frees the window's name string. */
+/* Audited top windows, each tagged with its content-identity class and its flags (contexts.inc).
+ * The index is remembered instead of the name pointer: AWTK owns and frees the window's name
+ * string. */
 enum { CTX_DYNAMIC, CTX_FIXED, CTX_FOLDER, CTX_LOCAL };
 enum { DRILL = 2, BUTTONS = 4, CHOICE = 8 };
 typedef struct {

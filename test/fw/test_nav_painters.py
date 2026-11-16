@@ -1185,14 +1185,6 @@ def test_touch_hides_the_selection_until_the_wheel(fw, st):
     assert not page.paint().px and page.view.props['_ringnav_index'] == 1
 
 
-def test_a_boundary_bump_nudges_the_band_by_the_themes_detent(fw, st):
-    page = Page(fw)
-    st('fx_surface', C.c_void_p).value, st('fx_token').value, st('bump_dir').value = page.view.addr, 5, 1
-    page.view.props['_ringnav_fx'] = 5
-    band = page.band() if page.paint() else {}
-    assert min(band) == 48 - THEMES[OLED]['bump_px'] and len(band) == 48
-
-
 def test_the_band_takes_a_rows_whole_pitch_under_its_button(fw):
     """The Library's row is a button over its pitch's top: the bar fills the row."""
     page = Page(fw)
