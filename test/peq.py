@@ -468,6 +468,15 @@ static int edit_widget, edit_parent, edit_bottom, focused, keyboard_owner, selec
 static unsigned selected[2];
 static char at_focus[sizeof w->text]; /* the edit's text when it took focus */
 #include "offsets.inc"
+#include "ui_kit.h"
+/* The confirmation card (feedback.c confirm): its answer, run when the test answers it (shim_card_answer). */
+static confirm_t card;
+static int card_up;
+int confirm(const confirm_t *c) { if (card_up) return 0; card = *c, card_up = 1; return 1; }
+int confirm_up(void) { return card_up; }
+const char *shim_card_title(void) { return card_up ? card.title : ""; }
+const char *shim_card_name(void) { return card_up && card.name ? card.name : ""; }
+int shim_card_answer(int row) { if (!card_up) return 0; card_up = 0; card.answer(card.ctx, row, 0); return 1; }
 /* The input method's editing target (IM_WIDGET) and open keyboard (IM_KEYBOARD, stock's window 4000). */
 static unsigned char im[32];
 static char edit_name[16];
@@ -819,6 +828,9 @@ def editor_check(lib, tmp):
         p = Preset(); assert lib.peq_load_active(C.byref(p)); return p
     def click(text): assert ui.shim_click(text.encode(), 1), (text, ui.shim_title())
     title = lambda: ui.shim_title().decode()
+    ui.shim_card_title.restype = ui.shim_card_name.restype = C.c_char_p
+    def asked(t, n): assert (ui.shim_card_title().decode(), ui.shim_card_name().decode()) == (t, n), (ui.shim_card_title(), ui.shim_card_name())
+    def answer(row): assert ui.shim_card_answer(row); ui.shim_run()  # the card closes, its answer runs, then the page's timer
     ui.shim_told.restype = C.c_char_p
     told = lambda: ui.shim_told().decode()  # what an action did: a toast over the page, the title kept
     def auto(p):  # the Preamp row's and picker's Auto: the cut for every standard rate
@@ -926,9 +938,9 @@ def editor_check(lib, tmp):
     ui.shim_return(); assert named('HD650')
     # Deleting asks first, removes only the saved copy and leaves the active EQ alone.
     before = active.read_bytes()
-    click('Presets'); click('Delete a preset'); click('HD650.txt'); click('Cancel')
+    click('Presets'); click('Delete a preset'); click('HD650.txt'); asked('Delete "%s"?', 'HD650.txt'); answer(0)  # Cancel
     assert (eqdir/'HD650.txt').exists()
-    click('HD650.txt'); click('Delete HD650.txt? Confirm')
+    click('HD650.txt'); asked('Delete "%s"?', 'HD650.txt'); answer(1)  # Delete
     assert not (eqdir/'HD650.txt').exists() and active.read_bytes() == before
     assert told() == 'Deleted HD650.txt; active EQ unchanged' and not ui.shim_click(b'HD650.txt', 0)
     # Stock presets are built in: picking one loads stock's curve, writes nothing until Apply.
@@ -1107,7 +1119,7 @@ def editor_check(lib, tmp):
     ui.shim_return(); click('Presets')
     click('Next page'); click('Batch 0128.txt'); assert named('Batch 0128')
     click('Presets'); click('Delete a preset'); click('Next page'); click('Next page')
-    click('Batch 0256.txt'); click('Delete Batch 0256.txt? Confirm')
+    click('Batch 0256.txt'); asked('Delete "%s"?', 'Batch 0256.txt'); answer(1)
     assert not (eqdir/'Batch 0256.txt').exists() and active.read_bytes() == before
     ui.shim_return(); ui.shim_return()
     # Under a theme's 28 px rows: the rows step 28 on its text column, the curve's head is whole rows
