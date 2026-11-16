@@ -506,6 +506,11 @@ def validate_assets(directory):
     # The boot animation's player (docs/boot.md#boot-animation)
     splash = read('rootfs.squashfs', SPLASH)
     assert sha(splash) == manifest['q2splash_sha256'] and splash[:4] == b'\x7fELF' and splash[36:40] == helper[36:40]
+    # Guest Play's daemon and its sink daemon's D-Bus policy (docs/internals.md#guest-play)
+    from build import GUEST, GUEST_DBUS, BT_GUEST_SOURCE
+    guest = read('rootfs.squashfs', GUEST)
+    assert sha(guest) == manifest['q2_guest_sha256'] and guest[:4] == b'\x7fELF' and guest[36:40] == helper[36:40]
+    assert read('rootfs.squashfs', GUEST_DBUS) == (ROOT/'assets/dbus/bluealsa-sink.conf').read_bytes()
     expected_start = read('stock.squashfs', S90PLAY).replace(*BOOT_HOOK)
     if manifest['dev']:
         remote = read('rootfs.squashfs', REMOTE)
@@ -548,7 +553,8 @@ def validate_assets(directory):
             assert read('rootfs.squashfs', 'usr/bin/' + n) == read('stock.squashfs', 'usr/bin/' + n), f'release {n} is not stock\'s'
     assert read('rootfs.squashfs', S90PLAY) == expected_start
     assert read('rootfs.squashfs', S11LOGO) == read('stock.squashfs', S11LOGO).replace(*LOGO_HOOK)  # the card's logo, if saved
-    assert read('rootfs.squashfs', BLUEALSA2) == read('stock.squashfs', BLUEALSA2).replace(*BT_KEEPALIVE)  # keep-alive 5 s
+    # keep-alive 5 s, and the source role alone while Guest Play is on
+    assert read('rootfs.squashfs', BLUEALSA2) == read('stock.squashfs', BLUEALSA2).replace(*BT_KEEPALIVE).replace(*BT_GUEST_SOURCE)
     # No password logs in and no getty runs on the serial pad (docs/building.md#what-the-rootfs-drops).
     from build import SHADOW, INITTAB, SERIAL_GETTY, lock_root, password_logins
     shadow = read('rootfs.squashfs', SHADOW)
