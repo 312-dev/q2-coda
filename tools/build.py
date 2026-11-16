@@ -1549,7 +1549,7 @@ FUNCTIONS = {
  'canvas_set_text_color': ('int', 'void *, unsigned'),
  'canvas_draw_text_in_rect': ('int', 'void *, const unsigned *, unsigned, const void *'),
  'widget_draw_text_in_rect': ('int', 'void *, void *, const unsigned *, unsigned, const void *, int'),  # ringnav_ellipsis_text
- 'canvas_draw_text': ('int', 'void *, const unsigned *, unsigned, int, int'),  # Books (books.c)
+ 'canvas_draw_text': ('int', 'void *, const unsigned *, unsigned, int, int'),  # one line: Books, the status row's percentage
  'canvas_measure_text': ('float', 'void *, const unsigned *, unsigned'),
  'canvas_fill_rounded_rect': ('int', 'void *, const void *, const void *, const void *, unsigned'),
  'canvas_stroke_rounded_rect': ('int', 'void *, const void *, const void *, const void *, unsigned, unsigned'),

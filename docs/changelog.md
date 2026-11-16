@@ -3,6 +3,7 @@
 - **Unreleased (q2-coda)**:
   - Status bar: while it charges, the battery shows how full it really is. It used to fill to the end the moment the cable went in.
   - Status bar (OLED): a charging battery shows a small lightning bolt inside it, in green; full on the cable, or held at **Charge Limit**, it stays green with no bolt.
+  - Status bar: with **Battery** on Percent, the percentage stays on one line in the status bar; at 100% or while charging it could drop onto a second line.
   - Status bar (OLED): tap the battery to see its state in a toast: **Charging · 62%**, **Fully charged**, **Charge Limit Reached (80%)**, **Battery 62%** or, under 20%, **Low battery · 12%**.
   - Charging (OLED): plugging in with the screen off lights it for three seconds with a big battery filling up to its level, then it goes dark again. With the screen on, a toast says **Charging · 62%** instead. Charge Limit says **Charged to 80%** when it stops charging.
   - Charging: with the new player playing a song and **Clicker** on Headphones or Both, plugging in plays a short tick-and-chirp in your headphones, mixed into the music.

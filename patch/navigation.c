@@ -3505,8 +3505,8 @@ static int codec_fade(const void *info) {
     return 0;
 }
 
-/* The percentage's width at BATT_PX: digits are tabular; BATT_PCT_W until the first paint measures.
- */
+/* The percentage's width at BATT_PX: digits are tabular, each measured up to a whole pixel, so the
+ * slot holds the ink; BATT_PCT_W until the first paint measures. */
 static int pct_width(unsigned level) {
     if (!st.pct_digit) return BATT_PCT_W;
     return (level >= 100 ? 3 : level >= 10 ? 2 : 1) * st.pct_digit + st.pct_sign;
@@ -3745,16 +3745,23 @@ static void paint_battery(void *w, void *canvas) {
                           : key & (BATT_KEY_CHARGING | BATT_KEY_PLUGGED) ? BATT_CHARGE_RGB
                           : key & BATT_KEY_LOW                           ? BATT_LOW_RGB
                                                                          : 0xffffff);
-    if (!inside && !st.pct_digit) {
+    if (!inside && !st.pct_digit) { /* whole pixels up, so the slot is never narrower than the ink */
         unsigned c = '0';
-        canvas_set_font(canvas, theme_face(&c, 1, 0), BATT_PX); /* draw_centred's face */
-        st.pct_digit = (int)(canvas_measure_text(canvas, &c, 1) + 0.5f);
+        int px = BATT_PX;
+        canvas_set_font(canvas, theme_face(&c, 1, &px), (unsigned)px);
+        st.pct_digit = (int)canvas_measure_text(canvas, &c, 1) + 1;
         c = '%';
-        st.pct_sign = (int)(canvas_measure_text(canvas, &c, 1) + 0.5f);
+        st.pct_sign = (int)canvas_measure_text(canvas, &c, 1) + 1;
     }
-    if (st.batt_mode == 1) {
-        rect_t r = { 0, 0, I(w, W_W), I(w, W_H) };
-        draw_centred(canvas, s, n, &r, BATT_PX, color);
+    if (st.batt_mode == 1) { /* one line, never wrapped: centred in the slot, on the row's centre */
+        int px = BATT_PX;
+        const char *face = theme_face(s, (int)n, &px);
+        unsigned text = (unsigned)I(lcd, LCD_TEXT_COLOR);
+        canvas_set_font(canvas, face, (unsigned)px);
+        canvas_set_text_color(canvas, color);
+        int tw = (int)canvas_measure_text(canvas, s, n);
+        canvas_draw_text(canvas, s, n, (I(w, W_W) - tw) / 2, batt_top(w, px));
+        stock_canvas_set_text_color(canvas, text);
         return;
     }
     int bh = geom_val(V_BATT_H);

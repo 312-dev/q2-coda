@@ -545,18 +545,36 @@ class Paint:
         self.bar.level(text, icon)
         self.bar.sync()
         canvas = Canvas(self.fw, **self.kwargs)
+        # the percentage is one line (canvas_draw_text at its top-left), never a wrapping rect: as a rect at (x, y)
+        self.fw.mock('canvas_draw_text', lambda c, s, n, x, y, *_: canvas.texts.append(
+            (''.join(chr(v) for v in (C.c_uint * n).from_address(s)), (C.c_int(x).value, C.c_int(y).value, 0, 0),
+             canvas.font, canvas.text_color, canvas.clip)))
         self.fw.fn('navigation__paint_battery', None, C.c_void_p, C.c_void_p)(self.bar.slot, canvas.p)
         assert canvas.fill == 0xff123456  # put back
         return canvas
 
 
 def test_percent_alone_is_the_level_and_a_percent_sign_centred_in_the_slot(fw, st, ui):
+    """One line, never wrapped (a rect narrower than its text wrapped it onto a second line on a Q2): centred
+    across the slot, its top BATT_PX/2 above the row's centre, as the icon centres on the row."""
     theme(fw, st, BATTERY=1)
     bar = Bar(fw, ui)
     canvas = Paint(fw, ui, bar)()
-    (text, rect, (face, px), color, _), = canvas.texts
-    assert (text, rect, px, color) == ('88%', (0, 0, *ui.box(bar.slot)[2:]), O['BATT_PX'], 0xffffffff)
-    assert canvas.rects == []
+    (text, (x, y, _, _), (face, px), color, _), = canvas.texts
+    assert (text, px, color) == ('88%', O['BATT_PX'], 0xffffffff)
+    assert x == (ui.box(bar.slot)[2] - int(2 * 9.4 + 12.6)) // 2  # Canvas measures '0' 9.4 px, '%' 12.6 and y == (30 + 1 - O['BATT_PX']) // 2
+    assert canvas.rects == [] and not fw.calls('canvas_draw_text_in_rect')
+
+
+def test_the_slot_holds_the_percentage_whole(fw, st, ui):
+    """Each digit and the sign measured up to a whole pixel: the slot is never narrower than the ink, at 100% too."""
+    theme(fw, st, BATTERY=1)
+    bar = Bar(fw, ui)
+    paint = Paint(fw, ui, bar)
+    paint('100%', b'bar_charge')
+    canvas = paint('100%', b'bar_charge')
+    (text, (x, _, _, _), *_), = canvas.texts
+    assert text == '100%' and x >= 0 and slot_width(ui, bar) >= 3 * 9.4 + 12.6
 
 
 @pytest.mark.parametrize('icon, color', [(b'bar_battery', 0xffffff), (b'bar_charge', O['BATT_CHARGE_RGB']),
@@ -584,7 +602,7 @@ def test_the_first_paint_measures_the_digits_and_the_slot_fits_them(fw, st, ui):
     bar = Bar(fw, ui)
     paint = Paint(fw, ui, bar)
     paint('88%')
-    digit, sign = round(9.4), round(12.6)  # Canvas measures '0' 9.4 px and '%' 12.6
+    digit, sign = int(9.4) + 1, int(12.6) + 1  # Canvas measures '0' 9.4 px and '%' 12.6: each up a pixel
     widths = {}
     for text in ('5%', '88%', '100%'):
         paint(text)
