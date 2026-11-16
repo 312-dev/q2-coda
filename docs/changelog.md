@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Settings (OLED): Max Volume, Balance, Brightness, Crossfade's length and Default Volume's level change right in the list. Each row shows a small slider and its value; press Center and the row grows, turn the wheel to set it (heard or seen as you turn), and press Center or Back when done. Crossfade and Default Volume are switches, with their slider showing under them while they're on.
   - Now Playing (OLED): the progress bar's track and its played part have round ends, as the design has them; they were square.
   - The boot logo reads Q2 MUSE, and Light Mode boots with the same dark animation as Dark Mode.
   - Car Remote: Shuffle and Repeat now match between the car and the Q2 Muse. Changing them on the Q2 Muse's Now Playing shows in the car, and changing them in the car lights the Q2 Muse's buttons; before, neither side saw the other's.
