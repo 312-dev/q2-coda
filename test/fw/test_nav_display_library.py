@@ -303,14 +303,14 @@ def test_display_adds_smart_awake_night_shift_and_its_two_pages_among_stocks_row
     page = display(fw, ui)
     view = page.view()
     # stock's first two, then Smart Awake and Night Shift, then Appearance and Cover Flow, then Enlarged Album Art
-    # (stock's switch, by its translation key); its third, Lock Screen, and its fourth, Show Navigation Bar, are not
-    # offered
+    # (stock's switch, by its translation key), then Reduce Motion last; its third, Lock Screen, and its fourth, Show
+    # Navigation Bar, are not offered
     assert titles(view) == ['stock_0', 'stock_1', 'Smart Awake', 'Night Shift', 'Appearance', 'Cover Flow',
-                            'playset_covermode']
-    # Night Shift and the two pages open a page, so they carry the chevron; Smart Awake and Enlarged Album Art change
-    # in place
+                            'playset_covermode', 'Reduce Motion']
+    # Night Shift and the two pages open a page, so they carry the chevron; Smart Awake, Enlarged Album Art and Reduce
+    # Motion change in place
     into = [any(c.props.get('image') == b'list_into' for c in item.children[0].children) for item in view.children if not item.name]
-    assert into == [False, True, True, True, False]
+    assert into == [False, True, True, True, False, False]
 
 
 def titles(view):
@@ -440,6 +440,20 @@ def test_smart_awake_is_on_unless_chosen_off(fw, stored, shown):
     page = display(fw, ui, **({} if stored is None else {'KEEPLIT': stored}))
     assert row_of(button_of(page.view(), 'Smart Awake').labels()[0])[1] == shown
     assert fw.fn('ringnav_smart_awake', C.c_int)() == (shown == 'On')
+
+
+@pytest.mark.parametrize('stored, shown', [(None, 'Off'), (b'1', 'On')])
+def test_reduce_motion_is_displays_last_switch_off_unless_chosen_and_a_click_applies_it_at_once(fw, stored, shown):
+    """Settings > Display > Reduce Motion (docs/oled-design.md#motion): IPOD REDUCEMOTION, off when missing; a click
+    writes the key and the next animation reads the flag (ui_kit.c motion_reduced), no restart."""
+    ui = Ui(fw)
+    page = display(fw, ui, **({} if stored is None else {'REDUCEMOTION': stored}))
+    label = button_of(page.view(), 'Reduce Motion').labels()[0]
+    assert row_of(label)[1] == shown and fw.fn('motion_reduced', C.c_int)() == (shown == 'On')
+    ui.click(label.parent)
+    assert row_of(label)[1] == {'On': 'Off', 'Off': 'On'}[shown]
+    assert writes(fw) == [('REDUCEMOTION', int(shown == 'Off'))]
+    assert fw.fn('motion_reduced', C.c_int)() == (shown == 'Off')
 
 
 def test_accent_repaints_and_drops_the_cached_images(fw):
@@ -693,7 +707,8 @@ def test_display_s_rows_carry_their_captions(fw):
     ui = Ui(fw)
     page = display(fw, ui)
     assert captions(fw, page.view()) == {'Smart Awake': 'Keeps the screen on for lyrics and art while playing',
-                                         'playset_covermode': 'Shows the art full screen after 10s on Now Playing'}
+                                         'playset_covermode': 'Shows the art full screen after 10s on Now Playing',
+                                         'Reduce Motion': 'Fades in place of slides, zooms and bounces'}
     ui.click(button_of(page.view(), 'Cover Flow'))
     assert captions(fw, page.view()) == {
         'Fast Navigation': 'Year sort spins by year too; letters stay till you lift',

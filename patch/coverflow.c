@@ -4613,12 +4613,12 @@ static int push_x(void *w, int dx, const motion_t *m) {
  * 0, when the theme keeps levels still (push_x touches nothing), or when no animator could be made:
  * the list is at x 0. */
 int page_push(void *view, int dir) {
-    if (!theme()->motion[MOTION_INPLACE].ms) return 0;
+    if (!motion_row(MOTION_INPLACE)->ms) return 0;
     void *w = view ? P(view, W_PARENT) : (void *)0;
     if (!w || !dir) return 0;
     /* A kept level (a folder's table) still sliding goes to its rest first. */
     if (I(w, W_X)) widget_move_resize(w, 0, I(w, W_Y), I(w, W_W), I(w, W_H));
-    return push_x(w, dir * I(w, W_W), &theme()->motion[MOTION_INPLACE]);
+    return push_x(w, dir * I(w, W_W), motion_row(MOTION_INPLACE));
 }
 
 /* Home's Settings row, as an iPod's submenu: the Settings list (stock's Playback and System
@@ -4629,7 +4629,7 @@ static void home_swap(void *from, void *to, int dx) {
     home_show(from, 0); /* only the shown list takes taps */
     /* A list still sliding goes to its rest first: push_x's goal, and where no push leaves it. */
     if (I(to, W_X)) widget_move_resize(to, 0, I(to, W_Y), I(to, W_W), I(to, W_H));
-    push_x(to, dx, &theme()->motion[MOTION_SWAP]);
+    push_x(to, dx, motion_row(MOTION_SWAP));
     home_show(to, 1);
     art_beside(to);
     bar_title_sync(home.win); /* the bar's text follows the list at once, not at its next second */

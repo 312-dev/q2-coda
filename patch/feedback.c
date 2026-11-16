@@ -25,6 +25,29 @@ static int top_named(void *w, const char *name) {
 /* The next toast's glyph, a theme image's name, while toast_icon's toast is up. */
 static char pill_glyph[48] __attribute__((section(".scratch")));
 
+/* The toast's motion (docs/oled-design.md#overlay-motion), through ui_kit.h's ovm_t: it rises
+ * TOAST_RISE px and fades in over TOAST_IN_MS, cubic out (the dialog's opacity, its line moved
+ * with the pill); when its dialog goes, the pill stays painted over the page under it
+ * (feedback_toast_leave), sinking TOAST_SINK px and fading over TOAST_OUT_MS, cubic in. */
+#define TOAST_IN_MS 200
+#define TOAST_OUT_MS 150
+#define TOAST_RISE 10
+#define TOAST_SINK 4
+static struct {
+    ovm_t mo;
+    void *w;           /* the toast's dialog while it is up */
+    unsigned text[64]; /* its line, kept for the way out */
+    unsigned n;
+    int px;
+    const char *face;
+    char glyph[48];
+} tm __attribute__((section(".scratch")));
+static int toast_gone(void *w, void *event) {
+    (void)event;
+    if (tm.w == w) tm.w = (void *)0, ovm_exit(&tm.mo, TOAST_OUT_MS, EASE_CUBIC_IN);
+    return 0;
+}
+
 int feedback_toast(void *top) { return top_named(top, "msginfo_dialog"); }
 
 /* A toast with a glyph before its words (docs/oled-design.md#dialogs-and-toasts): glyph a theme image's
@@ -75,11 +98,16 @@ void *feedback_top(void) {
  */
 void feedback_toast_paint(void *w, void *canvas) {
     if (!feedback_toast(w) || !P(canvas, CANVAS_LCD)) return;
-    if (!widget_get_prop_int(w, "_pill", 0)) {
+    int first = !widget_get_prop_int(w, "_pill", 0);
+    if (first) {
         widget_set_prop_int(w, "_pill", 1);
         widget_set_prop_int(w, "style:normal:bg_color", 0);
         widget_set_prop_int(w, "style:normal:border_color", 0);
+        widget_on(w, EVT_DESTROY, toast_gone, w);
+        tm.w = w;
+        ovm_enter(&tm.mo, TOAST_IN_MS, EASE_CUBIC_OUT);
     }
+    widget_set_opacity(w, (unsigned)ovm_alpha(&tm.mo, 255)); /* from the next frame */
     void *line = (void *)0;
     for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) {
         void *c = widget_get_child(w, i);
@@ -92,6 +120,9 @@ void feedback_toast_paint(void *w, void *canvas) {
             line = c;
     }
     if (!line) return;
+    /* its first frame is the one painted before the opacity above applies: nothing shows */
+    widget_set_visible(line, !first, 0);
+    if (first) return;
     const unsigned *s = widget_get_text(line);
     int px = PILL_PX, n = (int)wide_len(s);
     const char *face = theme_face(s, n, &px);
@@ -99,8 +130,12 @@ void feedback_toast_paint(void *w, void *canvas) {
     int glyph = pill_glyph[0] ? PILL_GLYPH + PILL_GLYPH_GAP : 0;
     int pw = (int)(canvas_measure_text(canvas, s, n) + 0.5f) + 2 * PILL_PAD + glyph;
     if (pw > PILL_MAX) pw = PILL_MAX;
-    rect_t pill = { (375 - pw) / 2, PILL_Y, pw, PILL_H };
-    if (I(line, W_Y) != PILL_Y || I(line, W_W) != pw - glyph) {
+    rect_t pill = { (375 - pw) / 2, PILL_Y + ovm_shift(&tm.mo, TOAST_RISE), pw, PILL_H };
+    for (tm.n = 0; tm.n < (unsigned)n && tm.n < sizeof tm.text / sizeof *tm.text; ++tm.n)
+        tm.text[tm.n] = s[tm.n];
+    tm.px = px, tm.face = face;
+    tk_snprintf(tm.glyph, sizeof tm.glyph, "%s", glyph ? pill_glyph : "");
+    if (I(line, W_Y) != pill.y || I(line, W_W) != pw - glyph) {
         widget_move_resize(line, pill.x + glyph, pill.y, pill.w - glyph, pill.h);
         widget_set_prop_int(line, "line_wrap", 0);
         widget_set_prop_str(line, "style:normal:font_name", face ? face : "default");
@@ -111,7 +146,30 @@ void feedback_toast_paint(void *w, void *canvas) {
     }
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     fill_box(canvas, &pill, RGBA(flip_if(ipod_light(), PILL_RGB)), PILL_R);
-    if (glyph) paint_art(w, canvas, pill_glyph, pill.x + PILL_PAD, PILL_Y + (PILL_H - PILL_GLYPH) / 2);
+    if (glyph)
+        paint_art(w, canvas, pill_glyph, pill.x + PILL_PAD, pill.y + (PILL_H - PILL_GLYPH) / 2);
+    stock_canvas_set_fill_color(canvas, fill);
+}
+
+/* ringnav_paint, after stock painted w: the toast on its way out, once its dialog has gone, over
+ * the top window (the page it was over): its pill and line as feedback_toast_paint last drew them,
+ * sinking and fading. */
+void feedback_toast_leave(void *w, void *canvas) {
+    void *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
+    if (tm.w || !ovm_shown(&tm.mo) || !lcd || w != window_manager_get_top_window(window_manager()))
+        return;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), a = (unsigned)ovm_alpha(&tm.mo, 255);
+    int glyph = tm.glyph[0] ? PILL_GLYPH + PILL_GLYPH_GAP : 0, px = tm.px;
+    canvas_set_font(canvas, tm.face, (unsigned)px);
+    int pw = (int)(canvas_measure_text(canvas, tm.text, tm.n) + 0.5f) + 2 * PILL_PAD + glyph;
+    if (pw > PILL_MAX) pw = PILL_MAX;
+    rect_t pill = { (375 - pw) / 2, PILL_Y + ovm_shift(&tm.mo, TOAST_SINK) - I(w, W_Y), pw,
+                    PILL_H };
+    fill_box(canvas, &pill, a << 24 | (RGBA(flip_if(ipod_light(), PILL_RGB)) & 0xffffffu), PILL_R);
+    unsigned raw = ui_ink_raw(1);
+    ui_line_w(canvas, tm.text, tm.n, pill.x + glyph, pill.w - glyph, pill.y + PILL_H / 2, 1,
+              tm.face ? tm.face : "default", px, a << 24 | (ipod_light() ? 0 : 0xffffffu));
+    ui_ink_raw(raw);
     stock_canvas_set_fill_color(canvas, fill);
 }
 
@@ -605,6 +663,13 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
 #define CARD_SCRIM 0x80000000u /* black at 50% */
 #define CARD_TIMER_MS 100      /* the timeout's seconds and bar */
 #define CARD_COUNT_PX TYPE(15)
+/* The card's motion (docs/oled-design.md#overlay-motion), through ui_kit.h's ovm_t: in over
+ * CARD_IN_MS cubic out, the scrim and the card fading up together (the dialog's opacity); an
+ * answer fades it out over CARD_OUT_MS, linear, before the dialog closes and the answer runs.
+ * ponytail: the approved 1.06 to 1 scale on the way in is not drawn; the rows are stock list items
+ * the canvas cannot scale, so it would need the card painted once into a snapshot first. */
+#define CARD_IN_MS 200
+#define CARD_OUT_MS 120
 
 static struct {
     void *dialog, *view, *cell[2], *check; /* a dressed stock confirm's answers and its switch */
@@ -614,6 +679,7 @@ static struct {
     const char *rows[2];
     int lines, toggle_on, top, rows_y, h, chosen;
     unsigned timer, answer_timer, until;
+    ovm_t mo; /* the card's enter and exit (CARD_IN_MS, CARD_OUT_MS) */
 } cf __attribute__((section(".scratch")));
 
 int confirm_up(void) { return cf.dialog != (void *)0; }
@@ -655,11 +721,13 @@ static int card_answer(const void *unused) {
     if (c.answer) c.answer(c.ctx, row, on);
     return 0;
 }
-/* Answers row once, from the next pass: the dialog closes before the caller's answer runs. */
+/* Answers row once, once the card has faded out (at once for stock's, which closes itself): the
+ * dialog closes before the caller's answer runs. */
 static void card_choose(int row) {
     if (!cf.dialog || cf.answer_timer) return;
     cf.chosen = row;
-    cf.answer_timer = timer_add(card_answer, (void *)0, 0);
+    if (!cf.stock) ovm_exit(&cf.mo, CARD_OUT_MS, EASE_LINEAR);
+    cf.answer_timer = timer_add(card_answer, (void *)0, cf.stock ? 0 : cf.mo.a.ms);
 }
 static int card_back_row(void) { return cf.c.back >= 0 ? cf.c.back : 0; }
 
@@ -753,6 +821,8 @@ int confirm(const confirm_t *c) {
         widget_set_prop_str(view, "self_layout", "default(x=0,y=0,w=100%,h=100%)");
     }
     cf.dialog = dialog, cf.view = view;
+    widget_set_opacity(dialog, 0); /* confirm_paint fades it in */
+    ovm_enter(&cf.mo, CARD_IN_MS, EASE_CUBIC_OUT);
     int first = c->kind == CONFIRM_NEUTRAL ? c->n_rows - 1 : 0;
     st.touch_mode = 0;
     ringnav_select(view, first + !!c->toggle, card_items());
@@ -886,7 +956,8 @@ void confirm_bar_dim(void *w, void *canvas) {
     void *bar = *(void *const *)system_bar, *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
     if (!cf.dialog || w != bar || !lcd) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
-    stock_canvas_set_fill_color(canvas, CARD_SCRIM);
+    stock_canvas_set_fill_color(
+        canvas, cf.stock ? CARD_SCRIM : (unsigned)ovm_alpha(&cf.mo, CARD_SCRIM >> 24) << 24);
     canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
     stock_canvas_set_fill_color(canvas, fill);
 }
@@ -898,6 +969,7 @@ void confirm_paint(void *w, void *canvas) {
     if (!cf.dialog || w != cf.dialog || !lcd) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), raw = ui_ink_raw(1);
     int dy = I(w, W_Y), top = cf.top - dy, cx = CARD_X + CARD_W / 2, tw = CARD_W - 2 * CARD_IN;
+    if (!cf.stock) widget_set_opacity(w, (unsigned)ovm_alpha(&cf.mo, 255)); /* the next frame's */
     stock_canvas_set_fill_color(canvas, CARD_SCRIM);
     canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
     rect_t card = { CARD_X, top, CARD_W, cf.h };

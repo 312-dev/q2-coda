@@ -483,24 +483,24 @@ void *window_of(void *w) {
  * window_manager_is_animating is set; nothing else paints the page under it. */
 static int slides(void *win) {
     /* Now Playing with a hint holds it as close_anim_hint, which this doesn't read. */
-    if (win && win == st.np_win && theme()->motion[MOTION_PLAYING].hint) return 1;
+    if (win && win == st.np_win && motion_row(MOTION_PLAYING)->hint) return 1;
     const char *hint = win ? widget_get_prop_str(win, "anim_hint", (void *)0) : (void *)0;
     return hint && *hint;
 }
 
-/* win's anim_hint becomes the theme's for kind, at load or open only. A theme with no hint for kind
- * reads and writes nothing. Now Playing takes it as close_anim_hint, its open stays immediate. No
- * kind reaches a dialog: a clear one's snapshot would show black under its animation. */
+/* win's anim_hint becomes the theme's for kind (Reduce Motion's fade under that flag: ui_kit.c
+ * motion_row), at load or open only. A theme with no hint for kind reads and writes nothing. Now
+ * Playing takes it as close_anim_hint, its open stays immediate. No kind reaches a dialog: a clear
+ * one's snapshot would show black under its animation. */
 static void motion_hint(void *win, int kind) {
-    const char *hint = theme()->motion[kind].hint;
+    const char *hint = motion_row(kind)->hint;
     if (!hint) return;
     const char *prop = kind == MOTION_PLAYING ? "close_anim_hint" : "anim_hint";
     if (tk_strcmp(widget_get_prop_str(win, prop, ""), hint)) widget_set_prop_str(win, prop, hint);
 }
 /* A window as it loads. Themes with no window hints read nothing. */
 static void motion_load(void *root, int np) {
-    const motion_t *M = theme()->motion;
-    if (!M[MOTION_PAGE].hint && !M[MOTION_PLAYING].hint) return;
+    if (!motion_row(MOTION_PAGE)->hint && !motion_row(MOTION_PLAYING)->hint) return;
     if (np)
         motion_hint(root, MOTION_PLAYING);
     else if (slides(root))
@@ -628,11 +628,11 @@ static void home_step(void *w, int dir, unsigned now, int jump) {
     if (coverflow_bounded(w) && (to < 0 || to >= n)) {
         goal += dir * stride * steps;
         if (a && (goal - live) * dir < 0) return; /* still arriving at the end */
-        I(w, SLIDE_OFFSET) = live = goal - dir * stride / CF_BOUNCE;
+        I(w, SLIDE_OFFSET) = live = goal - (motion_reduced() ? 0 : dir * stride / CF_BOUNCE);
     }
     coverflow_letter(w, letter, now);
     const motion_t *glide =
-        &theme()->motion[(coverflow_slide(w) ? MOTION_COVERFLOW_STEP : MOTION_STEP) + fast];
+        motion_row((coverflow_slide(w) ? MOTION_COVERFLOW_STEP : MOTION_STEP) + fast);
     if (!carousel_glide(w, goal, glide->ms, glide->easing)) {
         st.home_surface = (void *)0;
         return;
@@ -1136,8 +1136,8 @@ void reveal(menu_t *m, int id, int immediate) {
      * fit, rather than stopping a margin into it. Kind 1's ids are its row order. */
     if (m->kind == 1 && id == 0 && y + h + margin <= height) want = 0;
     want = fit_top(m, clamp_step(want, max_top(m), 0));
-    const theme_t *T = theme();
-    if (immediate || !T->recall_ms) {
+    int glide = motion_ms(theme()->recall_ms, MO_SPATIAL);
+    if (immediate || !glide) {
         wheel_offset(m, want);
         return;
     }
@@ -1147,7 +1147,7 @@ void reveal(menu_t *m, int id, int immediate) {
     if (m->kind == 2) {
         table_client_scroll_to(m->w, want);
     } else
-        scroll_view_scroll_delta_to(m->w, 0, want - top, T->recall_ms);
+        scroll_view_scroll_delta_to(m->w, 0, want - top, glide);
 }
 
 /* The A-Z index's jump (az_index.c): table w's row id selected and at the top of the list, as far
@@ -2334,6 +2334,7 @@ int ringnav_paint(void *w, void *canvas) {
     night_paint(canvas);
     coverflow_paint(w, canvas);
     keylock_paint(w, canvas);
+    feedback_toast_leave(w, canvas);
     search_strip_overlay(w, canvas);
     confirm_bar_dim(w, canvas);
     if (w == st.cf_letter_surface && st.cf_letter &&
@@ -5712,7 +5713,7 @@ static void setting_text(int i) {
         return;
     }
     static const char *const toggles[] = { "Smart Awake", 0 /* 6: the Clicker's, no row */,
-                                           "Time in Title" };
+                                           "Time in Title", "Reduce Motion" };
     if (i >= SETTING_KEEPLIT) {
         list_toggle(st.setting_label[i], toggles[i - SETTING_KEEPLIT], *setting_values[i]);
         return;
@@ -5984,11 +5985,13 @@ static void setting_row(void *view, int i) {
     static const char *const icons[] = { "system_display",      "playset_covermode",
                                          "system_powermanager", "playset_covermode",
                                          "system_display",      "system_display",
-                                         "system_keytone",      "system_display" };
+                                         "system_keytone",      "system_display",
+                                         "system_display" };
     const char *icon = i < SETTING_OWN ? icons[i] : "system_display";
     st.setting_label[i] = list_row(view, icon, setting_click, (void *)(long)i);
     setting_text(i);
     if (i == SETTING_KEEPLIT) caption_row(st.setting_label[i], smart_awake_caption);
+    if (i == SETTING_REDUCEMOTION) caption_row(st.setting_label[i], reduce_motion_caption);
 }
 
 /* systemset_display_page_init: stock builds its four rows (0x4c6b94: a s_listitem_black list_item
@@ -6025,6 +6028,7 @@ int ringnav_display(void *win, void *ctx) {
             widget_set_text_utf8(list_row_into(view, sub_icons[i], display_open, (void *)(long)i),
                                  titles[i]);
         pod_rows(win, "scroll_view_display", POD_COVERMODE, 1, cf_icons); /* Now Playing's art */
+        setting_row(view, SETTING_REDUCEMOTION); /* last (docs/oled-design.md#motion) */
         return result;
     }
     widget_destroy_children(view);
@@ -8077,7 +8081,7 @@ void ringnav_folder_top(void) {
 
 /* A folder level's list, stock's table on the open page, pushes in as a page_list level does. */
 static void folder_push(int dir) {
-    if (!theme()->motion[MOTION_INPLACE].ms) return;
+    if (!motion_row(MOTION_INPLACE)->ms) return;
     void *table =
         widget_lookup(window_manager_get_top_window(window_manager()), "tableview_folder", 1);
     if (table) page_push(widget_get_child(table, 0), dir);

@@ -167,3 +167,13 @@ def test_the_bar_never_rises_past_its_windows_top(fw):
     bar.turn(-1 + 1 / UNITS)
     x, y, w, h = bar.paint(y=0)
     assert y == 0 and h > 32
+
+
+def test_under_reduce_motion_the_bar_steps_without_leaning(fw):
+    """A lean is MO_SPATIAL (ui_kit.h): with IPOD REDUCEMOTION on, a tug leaves the bar where it is."""
+    from test_nav_painters import theme
+    theme(fw, REDUCEMOTION=b'1')
+    bar = Bar(fw)
+    rest = bar.paint()
+    bar.turn(.5)
+    assert bar.state.p == 0 and bar.paint() == rest

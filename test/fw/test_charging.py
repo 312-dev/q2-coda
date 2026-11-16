@@ -102,8 +102,8 @@ def test_charging_toasts_the_level_too(fw, st, ui):
 class Plug:
     """A cable in through usb_ui_status as a charger, the screen dark or lit, with the screen's calls and toasts
     caught; the plug-in screen paints over the top window."""
-    def __init__(self, fw, st, ui, lit=0, level=62, state=1):
-        theme(fw, st, BATTERY=0)
+    def __init__(self, fw, st, ui, lit=0, level=62, state=1, **keys):
+        theme(fw, st, BATTERY=0, **keys)
         self.fw, self.ui, self.toasts, self.screen = fw, ui, [], []
         self.lit = fw.var('g_backlight_status', C.c_ubyte)
         self.lit.value = lit
@@ -189,6 +189,16 @@ def test_it_paints_the_battery_the_level_and_the_bolt(fw, st, ui):
     assert [name for name, *_ in canvas.images] == [b'oled_chargebolt']
     assert canvas.rects[0][:4] == (0, 0, 375, 320)  # black over the page
     assert len(fw.calls('vgcanvas_stroke')) == 1 and len(fw.calls('vgcanvas_fill')) == 3  # nub, sweep, fill
+
+
+@pytest.mark.parametrize('reduce, fills', [(0, 3), (1, 2)])
+def test_under_reduce_motion_the_fill_stands_at_the_level_with_no_sweep(fw, st, ui, reduce, fills):
+    """The sweep is MO_DECOR (ui_kit.h): with IPOD REDUCEMOTION on only the nub and the fill to the level are drawn."""
+    from test_nav_playing import Canvas
+    plug = Plug(fw, st, ui, REDUCEMOTION=reduce)
+    plug.poll()
+    fw.fn('charge_paint', None, C.c_void_p, C.c_void_p)(ui.top, Canvas(fw).p)
+    assert len(fw.calls('vgcanvas_fill')) == fills
 
 
 def test_charge_limit_toasts_charged_to_80_once_on_a_cable(fw, st, ui):

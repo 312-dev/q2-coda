@@ -1,5 +1,6 @@
 """patch/ui_kit.c: the design's shared components, starting with its colour tokens in each half."""
 import ctypes as C
+import json
 
 import pytest
 
@@ -120,3 +121,144 @@ def test_a_selected_button_is_ringed_only_under_the_focus_rule(fw, st, touch_mod
         c.addr, C.addressof(arr), 1, 100, 0, 0)
     beside = [r for r in c.rects if r[1] < 100 or r[1] >= 138]  # the ring's rows, above and below the capsule
     assert bool(beside) == ringed
+
+
+# ---- motion (ui_kit.h, docs/oled-design.md#motion) ----
+MO_SPATIAL, MO_DECOR, MO_FEEDBACK = range(3)
+EASE_LINEAR, EASE_QUAD_IN, EASE_QUAD_OUT, EASE_CUBIC_IN, EASE_CUBIC_OUT = 0, 1, 2, 4, 5
+
+
+def reduce_motion(fw, on):
+    """config.ini's IPOD REDUCEMOTION, read with the theme's keys as Settings > Display's switch writes it."""
+    from test_nav_painters import theme
+    return theme(fw, **({'REDUCEMOTION': b'1'} if on else {}))
+
+
+@pytest.mark.parametrize('on', [0, 1])
+def test_reduce_motion_is_ipod_reducemotion_and_off_unless_chosen(fw, on):
+    reduce_motion(fw, on)
+    assert fw.fn('motion_reduced', C.c_int)() == on
+
+
+@pytest.mark.parametrize('on', [0, 1])
+def test_each_kind_of_motion_runs_or_stops_as_reduce_motion_says(fw, on):
+    """MO_SPATIAL (slides, springs, leans) and MO_DECOR (loops that say nothing new) stop under Reduce Motion; MO_FEEDBACK
+    (a finger followed, a value, progress) always runs; a spatial motion's fade form is MO_FADE_MS."""
+    reduce_motion(fw, on)
+    ms = fw.fn('motion_ms', C.c_int, C.c_int, C.c_int)
+    assert [ms(220, k) for k in (MO_SPATIAL, MO_DECOR, MO_FEEDBACK)] == ([0, 0, 220] if on else [220, 220, 220])
+    assert fw.fn('motion_fade_ms', C.c_int, C.c_int)(220) == (150 if on else 220)
+
+
+class Motion(C.Structure):
+    _fields_ = [('hint', C.c_char_p), ('ms', C.c_ushort), ('easing', C.c_ubyte)]
+
+
+@pytest.mark.parametrize('on', [0, 1])
+def test_the_themes_motion_rows_take_their_reduced_form_under_the_flag(fw, on):
+    """motion_row: off, the theme's own rows; on, a window's slide (Page's, whose slide is its windows' asset hint) is
+    a 150 ms fade, a swap and an in-place slide are immediate, and the wheel's steps are the scroll itself, kept."""
+    reduce_motion(fw, on)
+    row = fw.fn('motion_row', C.POINTER(Motion), C.c_int)
+    oled, = host.tools_theme.builtins()
+    fields = dict(host.tools_theme.motion_fields(oled))
+    kinds = ['PAGE', 'PLAYING', 'COVERFLOW', 'INPLACE', 'SWAP', 'STEP', 'STEP_FAST', 'COVERFLOW_STEP',
+             'COVERFLOW_STEP_FAST']
+    got = [(row(k).contents.hint, row(k).contents.ms) for k in range(len(kinds))]
+    def own(k):
+        h = fields.get(f'motion[MOTION_{k}].hint')
+        return (json.loads(h).encode() if h else None, fields.get(f'motion[MOTION_{k}].ms', 0))
+    want = [own(k) for k in kinds]
+    if on:
+        want[0] = (b'fade(duration=150)', 0)
+        want[1:3] = [(b'fade(duration=150)', 0) if h else (h, m) for h, m in want[1:3]]
+        want[3:5] = [(None, 0), (None, 0)]
+    assert got == want and want[5][1]  # the steps glide in both
+
+
+@pytest.mark.parametrize('ease, t, at', [(EASE_LINEAR, 500, 500), (EASE_QUAD_IN, 500, 250), (EASE_QUAD_OUT, 500, 750),
+                                         (EASE_CUBIC_IN, 500, 125), (EASE_CUBIC_OUT, 500, 875),
+                                         (EASE_CUBIC_OUT, -5, 0), (EASE_CUBIC_OUT, 1200, 1000)])
+def test_the_curves_are_awtks_easings_in_thousandths(fw, ease, t, at):
+    assert fw.fn('motion_ease', C.c_int, C.c_int, C.c_int)(t, ease) == at
+
+
+class Anim(C.Structure):
+    _fields_ = [('at', C.c_uint), ('ms', C.c_ushort), ('ease', C.c_ubyte)]
+
+
+class Ovm(C.Structure):
+    _fields_ = [('a', Anim), ('from_', C.c_short), ('out', C.c_ubyte)]
+
+
+def clock(fw):
+    now = [5000]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    timers = []
+    fw.mock('timer_add', lambda fn, ctx, ms, *_: timers.append(ms) or len(timers))
+    return now, timers
+
+
+@pytest.mark.parametrize('on', [0, 1])
+def test_a_run_eases_to_its_end_on_one_shared_timer_that_stops_after_the_last(fw, on):
+    """anim_start: one 16 ms timer for every run at once, repainting the top window, gone 16 ms after the last run
+    ends; under Reduce Motion a spatial run is at its end at once and starts no timer."""
+    reduce_motion(fw, on)
+    now, timers = clock(fw)
+    invalidated = []
+    fw.mock('window_manager_get_top_window', lambda *_: 0x1234)
+    fw.mock('widget_invalidate_force', lambda w, r, *_: invalidated.append(w) or 0)
+    a, b = Anim(), Anim()
+    start = fw.fn('anim_start', None, C.c_void_p, C.c_int, C.c_int, C.c_int)
+    at = fw.fn('anim_at', C.c_int, C.c_void_p)
+    running = fw.fn('anim_running', C.c_int, C.c_void_p)
+    start(C.addressof(a), 200, EASE_CUBIC_OUT, MO_SPATIAL)
+    now[0] += 100
+    start(C.addressof(b), 200, EASE_LINEAR, MO_SPATIAL)
+    if on:
+        assert timers == [] and at(C.addressof(a)) == 1000 and not running(C.addressof(b))
+        return
+    assert timers == [16]  # one timer for both
+    assert at(C.addressof(a)) == 875 and at(C.addressof(b)) == 0 and running(C.addressof(a))
+    frame = fw.fn('ui_kit__mo_frame', C.c_int, C.c_void_p)
+    now[0] += 200  # a done; b at its end
+    assert at(C.addressof(a)) == 1000 and not running(C.addressof(a)) and frame(None) == 8  # RET_REPEAT
+    now[0] += 16
+    assert frame(None) == 7 and invalidated == [0x1234, 0x1234]  # RET_REMOVE: nothing runs
+    start(C.addressof(a), 200, EASE_CUBIC_OUT, MO_FEEDBACK)
+    assert timers == [16, 16]  # the next run starts it again
+
+
+@pytest.mark.parametrize('on', [0, 1])
+def test_a_switch_flipped_under_reduce_motion_is_there_at_once(fw, on):
+    reduce_motion(fw, on)
+    now, timers = clock(fw)
+    knob = fw.fn('list_marks__sw_knob', C.c_int, C.c_int, C.c_int, C.c_int)
+    assert knob(355, 100, 0) == 0
+    assert knob(355, 100, 1) == (1000 if on else 0) and timers == ([] if on else [16])
+
+
+@pytest.mark.parametrize('on', [0, 1])
+def test_an_overlay_rises_and_fades_in_then_leaves_from_where_it_is(fw, on):
+    """ovm_*: the toast's 200 ms cubic-out rise of 10 px, then an exit begun mid-way going down from that level; under
+    Reduce Motion it fades only, over MO_FADE_MS in and MO_OUT_FADE_MS out, nothing moved or scaled."""
+    reduce_motion(fw, on)
+    now, _ = clock(fw)
+    o = Ovm()
+    p = C.addressof(o)
+    level = fw.fn('ovm_level', C.c_int, C.c_void_p)
+    shift = fw.fn('ovm_shift', C.c_int, C.c_void_p, C.c_int)
+    scale = fw.fn('ovm_scale', C.c_int, C.c_void_p, C.c_int)
+    alpha = fw.fn('ovm_alpha', C.c_int, C.c_void_p, C.c_int)
+    shown = fw.fn('ovm_shown', C.c_int, C.c_void_p)
+    assert level(p) == 0 and not shown(p)
+    fw.fn('ovm_enter', None, C.c_void_p, C.c_int, C.c_int)(p, 200, EASE_CUBIC_OUT)
+    assert level(p) == 0 and shift(p, 10) == (0 if on else 10) and scale(p, 1060) == (1000 if on else 1060)
+    now[0] += 75 if on else 100
+    assert level(p) == 875 and alpha(p, 128) == 112 and shift(p, 10) == (0 if on else 1)
+    fw.fn('ovm_exit', None, C.c_void_p, C.c_int, C.c_int)(p, 150, EASE_LINEAR)
+    assert o.a.ms == (120 if on else 150) and level(p) == 875 and shown(p)
+    now[0] += o.a.ms // 2
+    assert level(p) == 438
+    now[0] += o.a.ms
+    assert level(p) == 0 and not shown(p)

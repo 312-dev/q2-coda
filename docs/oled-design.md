@@ -1100,12 +1100,27 @@ SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, a
   (`battery-warning` and `warning`, `#FF9F0A`), Update Can't Be Used (`warning`, `#FF453A`). Return or Centre
   leaves.
 
+### Overlay motion
+
+A toast, the [confirmation card](#confirmation-card), the menu sheet and Up Next in it share one enter and exit
+(`ovm_t` in `patch/ui_kit.h`: `ovm_enter`, `ovm_exit`, `ovm_level`, `ovm_alpha`, `ovm_shift`, `ovm_scale`), each
+interruptible: a turn mid-run starts from where it is.
+
+- **Toast:** rises 10 px and fades in over 200 ms `cubic_out`; when it closes it stays painted over the page,
+  sinking 4 px and fading over 150 ms `cubic_in` (`feedback.c` `feedback_toast_leave`).
+- **Confirmation card:** the scrim and the card fade in together over 200 ms `cubic_out`; an answer fades them out
+  over 120 ms, linear, and the answer runs once the card has gone. The approved scale from 1.06 is not drawn yet
+  (a `ponytail:` in `feedback.c`). Stock's own confirm, which closes itself, appears and goes at once.
+- **Menu sheet** (approved, not built): rises 260 ms `cubic_out` with the scrim to 50%, falls 180 ms ease-in.
+- Under Reduce Motion each fades only: 150 ms in, 120 ms out, nothing moved or scaled.
+
 ### Gestures
 
 - **Swipe back**, as iOS's: a finger that comes down within 24 px of the screen's left edge and
   drags right takes the page with it, the status row staying; what it uncovers is black. Let go
   past 40% of the width, or flicked right, and the page slides on off the right edge and Return
-  goes back; let go short and it springs back. Both take the page slide's 120 ms, `cubic_out`.
+  goes back; let go short and it springs back. Both take the page slide's 120 ms, `cubic_out`, Reduce Motion's
+  too: they finish what the finger did.
   Wherever Return leaves a page: a page over another, and on Home the list a row opened
   (Settings, Streaming). A drag up or down from the edge scrolls as anywhere; a sideways drag that
   starts mid-screen stays the screen's own (Now Playing's pages, Cover Flow, the letter strip,
@@ -1114,11 +1129,27 @@ SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, a
 
 ### Motion
 
-- Page push and pop: 220 ms horizontal slide, `cubic_out`.
+- Page push and pop: 120 ms horizontal slide, `cubic_out` (`PAGE_SLIDE_MS`, stock's window animator).
 - Selection bar: moves with the wheel, no animation of its own beyond the list's scroll.
-- Nothing pulses, glows or bounces, a list's end included, with one deliberate exception: Control Center's
+- Nothing pulses, glows or bounces, a list's end included, with two deliberate exceptions: Control Center's
   landing (an 8 px overshoot and one 2 px undershoot over 280 ms as it comes to rest open, [Control
-  Center](#control-center)).
+  Center](#control-center)), and Cover Flow's end, where a step past an artist's last album kicks the covers a
+  fifth of a stride on and back (`CF_BOUNCE`).
+- **One helper** (`patch/ui_kit.h`, Motion): every animation takes its duration, curve and frames from it. A
+  motion has a kind: *spatial* (a slide, a scale, a spring, a lean), *decor* (a loop that says nothing new: the
+  charging sweep, Up Next's level bars) or *feedback* (a finger followed, a value or progress: swipe back, the volume
+  bar's ease, the progress fill, the marquee, spinners). While any runs, one shared 16 ms timer repaints the top window,
+  and it stops itself after the last one ends.
+- **Reduce Motion** (Settings > Display, the last row: a switch captioned "Fades in place of slides, zooms and
+  bounces", `IPOD REDUCEMOTION`, off unless chosen; it applies from the next animation, no restart). On: a page's
+  push and pop is a 150 ms cross-fade (AWTK's `fade` window animator); Home's sub-list swap and a folder level in
+  place change at once; Control Center lands still; tug to tilt is off (the bar steps without leaning); Cover Flow
+  stops at its end with no bounce; the remembered-row recall, the captioned row's grow, Edit Library's slide-aside,
+  the radio pill's grow and the switches' knob are at their end at once; the charging sweep stands at the level and Up
+  Next's level bars stand still; a toast and the confirmation card fade only (150 ms in, 120 ms out). Kept: swipe
+  back's finger tracking and its finish, the selection bar, wheel scroll, Cover Flow's and the carousel's wheel step
+  (the scroll itself), the volume, brightness and progress bars, the marquee and its fades, the scroll indicator's and
+  A-Z index's fades, and spinners.
 - **Marquee fades.** A scrolling text (the selected row's title, the status row's title, Now
   Playing's title, artist and album) is clipped to its own column, inside the glass and before any
   value or chevron on its row. A 12 px fade covers its right end while the text goes on past it,
