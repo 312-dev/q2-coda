@@ -98,11 +98,12 @@
 #define SS_OPEN_RUN_R 329
 #define SS_OPEN_LIT_X 178
 #define SS_OPEN_SIDE 7
-#define SS_NAME_Y 82     /* screen y 140 */
-#define SS_HINT_DY 40    /* screen y 180 */
-#define SS_NAME_ROOM 327 /* the text column to the right column */
+#define SS_NAME_Y 82        /* screen y 140 */
+#define SS_HINT_DY 40       /* screen y 180 */
+#define SS_NAME_ROOM 327    /* the text column to the right column */
 #define SS_PX_NAME TYPE(22) /* Inter Medium 22, AWTK's size */
 #define SS_PX_HINT TYPE(15) /* 15 */
+#define SS_NOTE_DY 22       /* a text's note (search_strip_note) above its hint by this */
 /* A text box's form: the set chip a #2C2C2E pill from the strip's left to x 96, its name in Inter
  * Medium 16 white; the run after it, its lit cell at x 192; a password's "Password" over it in
  * 15 px Text Tertiary on screen y 84, the value on y 128 and the hint, 13 px, on y 176 */
@@ -115,9 +116,9 @@
 #define SS_SECRET_HINT_Y 118
 #define SS_PX_CHIP TYPE(16)  /* 16 */
 #define SS_PX_SMALL TYPE(13) /* 13 */
-#define SS_PEEK_MS 1000 /* a password's last character typed shows this long */
-#define SS_SHOW_MS 400  /* Play/Pause held this long shows a password in plain text */
-#define SS_NOTE_Y 86    /* the empty note's line (screen y 144), its hint 24 px under it */
+#define SS_PEEK_MS 1000      /* a password's last character typed shows this long */
+#define SS_SHOW_MS 400       /* Play/Pause held this long shows a password in plain text */
+#define SS_NOTE_Y 86         /* the empty note's line (screen y 144), its hint 24 px under it */
 /* The key pop (tools/art.py POP_*): the bubble's image is the head's width, its foot the key's,
  * the key 18 px wide from the lit cell's left and SS_BOX_IN below the strip's top, as the lit
  * cell's accent box is; the big letters and the echoes are strips of a cell per strip character,
@@ -158,9 +159,10 @@ static struct {
                 * itself for a text of the payload's own (search_strip_text) */
     const char *(*done)(const char *); /* ... the latter's, given the text at Next */
     int max;                           /* ... the latter's characters, at most */
-    int secret, set;                   /* the box is a password; its strip's set, SS_SET_* */
-    unsigned typed_at, show_timer;     /* the last character typed (shown a moment); Play's hold */
-    unsigned char shown, play_held;    /* the password in plain text; Play/Pause down */
+    const char *note; /* ... and who sees the text, over its hint (search_strip_note) */
+    int secret, set;  /* the box is a password; its strip's set, SS_SET_* */
+    unsigned typed_at, show_timer;  /* the last character typed (shown a moment); Play's hold */
+    unsigned char shown, play_held; /* the password in plain text; Play/Pause down */
     short down_x, down_y, pressed, swiped; /* a touch: where it went down, cells it moved */
     char text[SS_TEXT_MAX + 1];
     unsigned pop_timer, pop_step_at; /* the pop's timer; the wheel's last step on the strip */
@@ -687,11 +689,16 @@ static void ss_value_paint(void *canvas, const char *text, int cur_at, int y, un
 static void ss_name_paint(void *canvas, unsigned primary, unsigned tertiary) {
     if (!ss.secret) {
         ss_value_paint(canvas, ss.text, ss.cur, SS_NAME_Y, primary);
+        int dy = SS_HINT_DY;
+        if (ss.note) { /* who sees it, then the hint a line lower in the smaller size */
+            ss_centred(canvas, 0, ss.note, SS_NAME_Y + dy, SS_PX_HINT, tok(TOK_SECONDARY));
+            dy += SS_NOTE_DY;
+        }
         ss_centred(canvas, 0,
                    ss.create ? "Press Next to create"
                    : ss.box  ? "Press Next when done"
                              : "Press Next to save",
-                   SS_NAME_Y + SS_HINT_DY, SS_PX_HINT, tertiary);
+                   SS_NAME_Y + dy, ss.note ? SS_PX_SMALL : SS_PX_HINT, tertiary);
         return;
     }
     char shown[SS_TEXT_MAX * 3 + 1], *o = shown;
@@ -1071,11 +1078,17 @@ int search_strip_box(void *kb, void *edit, const char *title) {
  * its sets and chip, on a page of its own titled title, text prefilled and the cursor at its end;
  * Next at the end hands the text to done, which closes the page (0) or toasts why not, and a held
  * Return closes it with nothing changed. */
+/* The next search_strip_text's note: who sees the text (Bluetooth's "Phones and cars see this
+ * name"), in 15 px Text Secondary under it, the hint then in 13 px under that. */
+static const char *strip_note __attribute__((section(".scratch")));
+void search_strip_note(const char *note) { strip_note = note; }
 void search_strip_text(const char *title, const char *text, int max,
                        const char *(*done)(const char *)) {
+    const char *note = strip_note;
+    strip_note = 0;
     if (ss.page || !done || !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup)))
         return;
-    ss.box = ss.page, ss.done = done;
+    ss.box = ss.page, ss.done = done, ss.note = note;
     ss.max = max > 0 && max < SS_TEXT_MAX ? max : SS_TEXT_MAX;
     tk_snprintf(ss.text, (unsigned)ss.max + 1, "%s", text ? text : "");
     ss.cur = (int)strlen(ss.text);

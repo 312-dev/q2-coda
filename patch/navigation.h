@@ -864,6 +864,12 @@ void playlist_new_open(void); /* search_strip.c: New Playlist on the strip, its 
 const char *bt_name(char *out, unsigned n);
 int bt_name_valid(const char *s);
 void bt_name_apply(void), bt_name_row(void *view);
+/* bt_ui.c: Settings > Bluetooth's order, rows and marks (docs/oled-design.md#bluetooth) */
+void bt_page(void *view, int on), bt_rows_pre(void *view), bt_rows_post(void *view);
+int bt_list(void *list), bt_mac_ok(const char *s), bt_dev_find(const char *mac);
+void bt_ui_paint(void *w, void *canvas), bt_ui_poll(void);
+const char *bt_codec(void), *bt_kind(unsigned cls), *bt_dev_mac(int i), *bt_dev_name(int i);
+unsigned bt_class(const char *mac);
 /* search_strip.c: a text box on the strip, on its keyboard's window */
 int search_strip_box(void *kb, void *edit, const char *title);
 /* ... or on a page of its own, for a text the payload keeps itself: titled title, text prefilled,

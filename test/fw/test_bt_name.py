@@ -72,21 +72,22 @@ def name_row(ui, view):
 def test_stock_s_bluetooth_name_row_becomes_name_with_the_name_as_its_value(fw, ui):
     _, view = bt_page(fw, ui, BTNAME=b'Car Kit')
     names = [ui.name.get(r, '') for r in ui.kids[view]]
-    assert names[:4] == ['s0', '', 's2', 's3'] and names[6:] == ['s4']  # its place, stock's gone (Resume, Volume at 4, 5)
+    assert names[:2] == ['s0', ''] and 's1' not in names  # its place, stock's gone (bt_ui.c orders the rest)
     row, labels = name_row(ui, view)
     assert labels == ['Name', 'Car Kit']
     assert [a[2] for _, a in fw.calls('widget_resize') if a[0] == row] == [78]  # stock's row's height
 
 
-def test_bluetooth_off_has_no_name_row(fw, ui):
-    Config(fw)
+def test_bluetooth_off_keeps_the_name_row_after_the_switch(fw, ui):
+    Config(fw, BTNAME=b'Car Kit')
     win = ui.new('window_create', 0, 0, 0, 0, 0)
     view = ui.new('scroll_view_create', win, 0, 26, 375, 294)
     ui.name[view] = 'scroll_view_bluetooth'
     fw.mock('stock_btrows_trampoline', lambda *_: ui.new('list_item_create', view, 0, 0, 375, 78) and 0)
     fw.var('g_bluetoothflag', C.c_ubyte).value = 0
     fw.fn('ringnav_btrows', C.c_int, C.c_void_p, C.c_void_p)(win, None)
-    assert len(ui.kids[view]) == 1 and not [t for t in ui.text.values() if t == 'Name']
+    row, labels = name_row(ui, view)
+    assert labels == ['Name', 'Car Kit'] and [a[2] for _, a in fw.calls('widget_resize') if a[0] == row] == [78]
 
 
 class Rename:

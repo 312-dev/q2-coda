@@ -44,18 +44,6 @@ static int batt_connected(char *mac) {
     return 0;
 }
 
-/* Whether s is a MAC as stock lists it, AA:BB:CC:DD:EE:FF (it goes into a shell command). */
-static int batt_mac_ok(const char *s) {
-    for (int i = 0; i < 17; ++i) {
-        char c = s[i];
-        if (i % 3 == 2
-                ? c != ':'
-                : !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')))
-            return 0;
-    }
-    return !s[17];
-}
-
 /* The loop for mac, in the background. */
 static void batt_start(const char *mac) {
     char path[48], cmd[1024];
@@ -77,7 +65,7 @@ static void batt_start(const char *mac) {
 int bt_headset_battery(void) {
     char mac[24], raw[64];
     unsigned now = (unsigned)time_now_ms();
-    if (!g_bluetoothflag || !batt_connected(mac) || !batt_mac_ok(mac)) {
+    if (!g_bluetoothflag || !batt_connected(mac) || !bt_mac_ok(mac)) {
         bb.mac[0] = 0; /* gone: its next connection starts a loop of its own */
         return -1;
     }

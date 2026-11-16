@@ -268,7 +268,8 @@ STATUS_PX = 14
 STATUS_INK = 11.0
 STATUS_GLYPHS = {'play': ('play-fill', STATE_PX, 0), 'pause': ('pause-fill', STATE_PX, 0), 'keylock': ('lock-simple-fill', STATE_PX, 0),
                  'status_wifi_x': ('wifi-x-bold', STATUS_PX, STATUS_INK), 'status_bt': ('bluetooth-bold', STATUS_PX, STATUS_INK),
-                 'status_down': ('arrow-down-bold', 8, 0)}
+                 'status_down': ('arrow-down-bold', 8, 0), 'status_headphones': ('headphones-bold', STATUS_PX, STATUS_INK),
+                 'status_car': ('car-profile-bold', STATUS_PX, STATUS_INK)}
 STATUS_UNLIT = {'d': 0x3a3a3c, 'l': 0xc7c7cc}
 STATUS_SECONDARY = inks('secondary', 'd', 'l')
 STATUS_SPIN = 8
@@ -358,6 +359,15 @@ USB_MODES = {'files': 'folder-simple-fill', 'audio': 'speaker-hifi-fill', 'debug
 USB_TOAST_PX = 15
 # The Bluetooth receiver's mode page (bt_recv.c): its glyph, fill, white on the solid accent circle at the mode page's size.
 BT_MODES = {'receive': 'bluetooth-fill'}
+# Settings > Bluetooth (bt_ui.c, docs/oled-design.md#bluetooth): a device row's kind at the row symbols' size (regular,
+# Text Secondary per half, white on the selection), the scan's spinner beside Other Devices in Text Tertiary per half,
+# and the connection toasts' glyphs (fill, 15 px, white; the low headset battery's in the battery's red).
+BT_ROW_GLYPHS = {'bt': 'bluetooth', 'headphones': 'headphones', 'car': 'car-profile', 'speaker': 'speaker-hifi',
+                 'phone': 'device-mobile'}
+BT_SPIN_INKS = {'d': 0x858585, 'l': 0x6e6e6e}
+BT_TOASTS = {'headphones': ('headphones-fill', 0xffffff), 'car': ('car-profile-fill', 0xffffff),
+             'speaker': ('speaker-hifi-fill', 0xffffff), 'phone': ('device-mobile-fill', 0xffffff),
+             'bt': ('bluetooth-fill', 0xffffff), 'low': ('battery-warning-fill', 0xff453a)}
 # The software update's pages (sw_update.c, docs/oled-design.md Software Update): each result's glyph (fill, white on
 # its solid circle; the up-to-date check and the restart's arrow bold) at the mode page's size, and the check's
 # spinner, iOS's twelve spokes in the half's Text Primary (_d white, _l black) on no circle, 48 px across.
@@ -545,6 +555,8 @@ def status_images(prefix):
     out = {f'{prefix}_{n}_{k}': phosphor(g, px, c, ink) for n, (g, px, ink) in STATUS_GLYPHS.items() for k, c in STATE_INKS.items()}
     out |= {f'{prefix}_status_wifi_{n}_{k}': status_wifi(n, STATUS_PX, STATUS_INK, c, STATUS_UNLIT[k])
             for n in (1, 2, 3) for k, c in STATE_INKS.items()}
+    # the Bluetooth slot while a device connects: the rune in Text Tertiary per half (status_row.c headset_paint)
+    out |= {f'{prefix}_status_btdim_{k}': phosphor('bluetooth-bold', STATUS_PX, c, STATUS_INK) for k, c in BT_SPIN_INKS.items()}
     out |= {f'{prefix}_status_sync_{f}_{k}': status_turn('arrows-clockwise-bold', STATUS_PX, STATUS_INK, c, f / STATUS_SPIN / 2)
             for f in range(STATUS_SPIN) for k, c in STATUS_SECONDARY.items()}
     return out
@@ -641,6 +653,10 @@ def images(t):
     out |= {f'{prefix}_usb_{n}_{k}': phosphor(g, USB_ROW_PX, c) for n, g in USB_ROWS.items() for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_usbmode_{n}': phosphor(g, USB_MODE_PX, 0xffffff) for n, g in USB_MODES.items()}
     out |= {f'{prefix}_usbtoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in USB_TOASTS.items()}
+    out |= {f'{prefix}_btdev_{n}_{k}': phosphor(g, ROW_ICON_PX, c, ROW_INK) for n, g in BT_ROW_GLYPHS.items() for k, c in FOLDER_INKS.items()}
+    out |= {f'{prefix}_btspin_{k}_{f}': spinner(f, SPIN_SPOKES, CARET_PX, SPIN_R, SPIN_STROKE, SPIN_FADE, c)
+            for k, c in BT_SPIN_INKS.items() for f in range(SPIN_SPOKES)}
+    out |= {f'{prefix}_bttoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in BT_TOASTS.items()}
     out |= {f'{prefix}_btmode_{n}': phosphor(g, USB_MODE_PX, 0xffffff) for n, g in BT_MODES.items()}
     out |= {f'{prefix}_batt{n}_{k}': inset_glyph(g, *inks) for n, g in BATT_GLYPHS.items() for k, inks in BATT_GLYPH_INKS.items()}
     out |= {f'{prefix}_chargetoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in CHARGE_TOASTS.items()}

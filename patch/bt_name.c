@@ -91,14 +91,16 @@ static int bt_name_gone(void *ctx, void *event) {
     return 0;
 }
 
-/* ringnav_btrows: stock's second head row, its "Bluetooth Name" over what the radio reports (row
+/* bt_ui.c bt_page: stock's second head row, its "Bluetooth Name" over what the radio reports (row
  * 1, which stock's click ignores), becomes Name with the saved name as its value, opening the
- * strip. The row keeps stock's place and height. */
+ * strip; the row keeps stock's place and height. With Bluetooth off stock builds only the switch,
+ * and Name is made after it. */
 void bt_name_row(void *view) {
-    void *old = view && widget_count_children(view) > 1 ? widget_get_child(view, 1) : (void *)0;
-    if (!old) return;
-    int h = I(old, W_H);
-    widget_destroy(old);
+    unsigned n = view ? widget_count_children(view) : 0;
+    if (!n) return;
+    void *old = n > 1 ? widget_get_child(view, 1) : (void *)0;
+    int h = old ? I(old, W_H) : SET_STOCK_ROW;
+    if (old) widget_destroy(old);
     char name[BT_NAME_MAX + 1];
     bn.label = list_row_into(view, 0, bt_name_open, 0);
     void *row = P(P(bn.label, W_PARENT), W_PARENT);

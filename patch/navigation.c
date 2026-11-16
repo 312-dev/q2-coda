@@ -2366,6 +2366,7 @@ int ringnav_paint(void *w, void *canvas) {
     storage_paint(w, canvas);
     usb_ui_paint(w, canvas);
     bt_recv_paint(w, canvas);   /* Bluetooth receiver mode (bt_recv.c) */
+    bt_ui_paint(w, canvas);     /* Settings > Bluetooth's marks (bt_ui.c) */
     sw_update_paint(w, canvas); /* SD Card Update's pages (sw_update.c) */
     if (w && w == st.np_win && !(NP_VISUALIZER && visualizer_full()))
         np_modes(w, canvas); /* else the page's own */
@@ -2768,13 +2769,13 @@ int ringnav_quick_settings(void *win, void *ctx) {
  * holds playback; docs/internals.md#resume-on-connect), and Playback's Artist album order
  * (ARTISTAZ), and Display's Hold Return (HOLDRETURN, compact_now_playing;
  * docs/ipod.md#hold-return), and Power's Standby limit (STANDBYLIMIT, ringnav_standby;
- * docs/internals.md#standby-limit), and Bluetooth's Control Device Volume (BTVOLLINK,
+ * docs/internals.md#standby-limit), and Bluetooth's Link Volume (BTVOLLINK,
  * bt_audio_ready; docs/internals.md#headset-controls-and-volume), and Power's Smart Wi-Fi
  * (SMARTWIFI, smart_poll; docs/internals.md#smart-wi-fi), and Display's Fast Navigation
  * (BIGLIBRARY, Cover Flow's letters; docs/internals.md#coverflow-thumb) and Playlist View
  * (PLAYLISTCF).
  */
-/* Bluetooth's Control Device Volume on: the Q2's volume is the device's own (bt_audio_ready). */
+/* Bluetooth's Link Volume on: the Q2's volume is the device's own (bt_audio_ready). */
 static int bt_vol_link __attribute__((section(".scratch")));
 /* Playback > Library's On-The-Go (OTG, playlist_pages.c): the Playlists row and the hold menu's Add
  * to On-The-Go; on unless the key says 0. */
@@ -2920,7 +2921,7 @@ static void pod_text(int i) {
         { "Hold Return: Recent", "Hold Return: Home" },
         { "Standby Limit: Off", "Standby Limit: " STR(STANDBY_LIMIT_1) "h",
           "Standby Limit: " STR(STANDBY_LIMIT_2) "h", "Standby Limit: " STR(STANDBY_LIMIT_3) "h" },
-        { 0 }, /* Control Device Volume: a switch */
+        { 0 }, /* Link Volume: a switch */
         { 0 }, /* Coverflow Sort's from coverflow.c */
         { "Refresh Cover Flow" },
         { 0 }, /* EQ per Output: a switch */
@@ -2955,7 +2956,7 @@ static void pod_text(int i) {
     const char *toggle = i == POD_CHARGE && theme()->set_switch ? 0
                          : i == POD_CHARGE         ? "Charge Limit (" STR(CHARGE_STOP) "%)"
                          : i == POD_RESUME         ? "Resume on Connect"
-                         : i == POD_BT_LINK        ? "Control Device Volume"
+                         : i == POD_BT_LINK        ? "Link Volume"
                          : i == POD_CARMODE        ? "In-Vehicle Mode"
                          : i == POD_SMART_WIFI     ? "Smart Wi-Fi"
                          : i == POD_COVERMODE      ? "Enlarged Album Art"
@@ -3018,7 +3019,7 @@ static int pod_click(void *ctx, void *event) {
         if (i == POD_SCAN_DURATIONS && !*value) durations_cancel();
         if (i == POD_CF_POSITION) coverflow_position_reset();
         st.charge_at = 0;
-        /* Control Device Volume: off, stock's gain back at once; on, bt_volume_poll's next pass
+        /* Link Volume: off, stock's gain back at once; on, bt_volume_poll's next pass
          * sends the Q2's level to the device. */
         if (i == POD_BT_LINK && mclGetOutputWay() == 1)
             headset_volume_reset(), device_set_volume(g_volume, 0);
@@ -3063,25 +3064,17 @@ int ringnav_powermanager(void *win, void *ctx) {
     return result;
 }
 /* The Bluetooth page's list (stock's local builder, btmenu_rows), rebuilt whole on every search and
- * link change: its rows, five with Bluetooth on (one, the switch, off), then the device lists.
- * With Bluetooth on, Resume on connect and Control Device Volume follow the fourth, Bluetooth
- * Headset Volume Control (bt_adjvol), each time, iconless and 78 high as stock's rows, and the
- * second, stock's Bluetooth Name, is bt_name.c's Name row. */
+ * link change: Resume on Connect and Link Volume, pod_rows' switches, with Bluetooth on, then
+ * bt_ui.c's order and look (docs/oled-design.md#bluetooth). */
 int ringnav_btrows(void *win, void *ctx) {
     static const char *const icons[] = { 0 };
     int result = stock_btrows_trampoline(win, ctx);
-    if (!g_bluetoothflag) return result;
-    pod_rows(win, "scroll_view_bluetooth", POD_RESUME, 1, icons);
-    pod_rows(win, "scroll_view_bluetooth", POD_BT_LINK, 1, icons);
     void *view = win ? widget_lookup(win, "scroll_view_bluetooth", 1) : (void *)0;
-    unsigned n = view ? widget_count_children(view) : 0;
-    if (n < 2) return result;
-    for (unsigned k = 0; k < 2; ++k) {
-        void *row = widget_get_child(view, n - 2 + k);
-        widget_resize(row, I(row, W_W), 78);
-        widget_restack(row, 4 + k);
+    if (g_bluetoothflag) {
+        pod_rows(win, "scroll_view_bluetooth", POD_RESUME, 1, icons);
+        pod_rows(win, "scroll_view_bluetooth", POD_BT_LINK, 1, icons);
     }
-    bt_name_row(view);
+    if (view) bt_page(view, g_bluetoothflag);
     return result;
 }
 /* A settings list's rows, stock's (in its table's order, each button named by its place there,
@@ -6684,9 +6677,10 @@ int ipod_list_layout(void *layout, void *view) {
     void *list = view ? P(view, W_PARENT) : (void *)0;
     int settings = settings_list(list);
     int row = stream_list(view) ? geom_val(V_STREAM_ROW) : settings ? geom_val(V_SET_ROW) : 0;
-    int wifi = settings && wifi_list(list);
+    int wifi = settings && wifi_list(list), bt = settings && bt_list(list);
     if (settings) settings_layout(list);
     if (wifi) wifi_rows_pre(view);
+    if (bt) bt_rows_pre(view); /* bt_ui.c */
     unsigned n = row ? widget_count_children(view) : 0;
     for (unsigned i = 0; i < n; ++i) {
         void *item = widget_get_child(view, i);
@@ -6709,6 +6703,7 @@ int ipod_list_layout(void *layout, void *view) {
         if (widget_get_visible(item)) set_row(item);
     }
     if (wifi) wifi_rows_post(view);
+    if (bt) bt_rows_post(view);
     if (settings && about_list(list)) about_rows(view);
     return ret;
 }
@@ -9300,6 +9295,7 @@ int ringnav_sleep(void *loop) {
     stale_heal();
     quick_poll();
     headset_poll();
+    bt_ui_poll(); /* Settings > Bluetooth's scan, the connection toasts (bt_ui.c) */
     headset_eq_poll();
     bt_volume_poll();
     video_poll();
