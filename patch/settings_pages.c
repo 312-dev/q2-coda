@@ -8,8 +8,7 @@
  * A --dev build's Save Diagnostics row (diagnostics.c) keeps its own click. */
 #include "navigation.h"
 
-#define ABOUT_INK_STATES 4 /* text_ink's normal, pressed, over and disable */
-#define ABOUT_GAP 12       /* between a key's text and the widest its value may reach */
+#define ABOUT_INK_STATES 4                 /* text_ink's normal, pressed, over and disable */
 #define ABOUT_ROW_CLICK ((void *)0x4c12f8) /* systemset_about_row_on_click */
 
 /* A row's tap and Centre do nothing: About is to read. The click makes the row a wheel stop. */
@@ -29,7 +28,7 @@ static void about_inert(void *w) {
 }
 
 /* label's text's width in px, in the face and size its row draws it; -1 with no canvas yet */
-static int about_text_w(void *label) {
+int kv_text_w(void *label) {
     void *canvas = widget_get_canvas(label);
     const unsigned *s = widget_get_text(label);
     int px = theme()->font_px[ROLE_TITLE];
@@ -44,12 +43,24 @@ int about_list(void *list) {
            !tk_strcmp(widget_get_prop_str(window_of(list), "name", ""), "about_page");
 }
 
+/* A label/value row's two hscroll_labels laid out by kv_fit (docs/oled-design.md#labelvalue-rows):
+ * the key at its text's width kw, the value's box from KV_GAP after it to right, its text vw wide.
+ * Either one cut short scrolls when its row is selected and fades at its cut end at rest (the
+ * house marquee: ellipses off); one that fits keeps stock's ellipsis setting, unused. */
+void kv_row(void *key, void *val, int kw, int vw, int right) {
+    int x = I(key, W_X), box, lw = kv_fit(right - x - 4, kw, vw, &box); /* 2 px margins each */
+    widget_move_resize(key, x, I(key, W_Y), lw + 4, I(key, W_H));
+    widget_move_resize(val, right - box - 4, I(val, W_Y), box + 4, I(val, W_H));
+    if (!tk_strcmp(widget_get_type(key), "hscroll_label"))
+        hscroll_label_set_ellipses(key, lw >= kw);
+    hscroll_label_set_ellipses(val, box >= vw);
+}
+
 /* Each row's first hscroll_label is its key, the next its value (stock's order, and
  * ringnav_about's for CFW. Version). Stock's value box is 149 px from x 176, too narrow for a dev
- * build's version or a Wi-Fi MAC beside a short key: it takes the row from ABOUT_GAP after its
- * key's text to the right column, right-aligned, so it ends in an ellipsis only when it is wider
- * than that (docs/oled-design.md Type: truncate, never shrink). This runs on every layout, so the
- * value's right edge, which set_child put on the right column, is the one fixed point. */
+ * build's version or a Wi-Fi MAC beside a short key: kv_row splits the row. This runs on every
+ * layout, so the value's right edge, which set_child put on the right column, is the one fixed
+ * point. */
 void about_rows(void *view) {
     unsigned value = theme()->set_value_ink[ipod_light()],
              primary = flip_if(ipod_light(), 0xffffff); /* Text Primary: black in Light Mode */
@@ -67,10 +78,9 @@ void about_rows(void *view) {
         if (key) text_ink(key, 0xff000000u | primary, ABOUT_INK_STATES);
         if (!val) continue;
         text_ink(val, 0xff000000u | (value ? value : primary), ABOUT_INK_STATES);
-        int kw = key ? about_text_w(key) : -1, right = I(val, W_X) + I(val, W_W);
-        if (kw < 0) continue;
-        int left = I(key, W_X) + 2 + kw + ABOUT_GAP; /* after hscroll_label's 2 px margin */
-        if (left < right) widget_move_resize(val, left, I(val, W_Y), right - left, I(val, W_H));
+        int kw = key ? kv_text_w(key) : -1, vw = kv_text_w(val), right = I(val, W_X) + I(val, W_W);
+        if (kw < 0 || vw < 0) continue;
+        kv_row(key, val, kw, vw, right);
     }
 }
 

@@ -309,7 +309,11 @@ void *empty_list(void *page, void *body, const char *name, const empty_t *e,
     void *view = page_list(page, body, 0, name, 0, 48);
     widget_set_visible(widget_get_child(body, 0), 0, 0);
     empty_state(body, 0, e, on_row);
-    bar_title_sync(page); /* after: Cover Flow's title follows its empty state (coverflow_bar_title) */
+    /* after: Cover Flow's title follows its empty state (coverflow_bar_title). The bar looks for
+     * the page's title once (bar_title_sync, st.title_win); one already titled while its covers
+     * loaded would keep that, so it looks again. */
+    title_gone(0, 0);
+    bar_title_sync(page);
     return view;
 }
 /* No card in the slot (stock's mount marks it with /tmp/mmc_add): the Library's empty pages say
@@ -805,6 +809,8 @@ static const char *const verbs[] = {
 };
 /* the verbs that lose something: red, after the gap */
 static const char *const losing[] = { "Delete", "Reset", "Forget", "Unpair", "Remove", "Clear" };
+/* the verbs whose mistake costs least: the card opens on them (Return is still Cancel) */
+static const char *const mild[] = { "Scan", "Import", "Export", "Reconnect", "Turn On" };
 
 int feedback_confirm_dress(void *w) {
     if (!confirm_on(w)) return 0;
@@ -842,6 +848,8 @@ int feedback_confirm_dress(void *w) {
     cf.c.rows = cf.rows, cf.c.n_rows = 2, cf.c.kind = CONFIRM_CONSEQUENTIAL;
     for (unsigned k = 0; k < sizeof losing / sizeof *losing; ++k)
         if (!strncmp(verb, losing[k], strlen(losing[k]))) cf.c.kind = CONFIRM_DESTRUCTIVE;
+    for (unsigned k = 0; k < sizeof mild / sizeof *mild; ++k)
+        if (!tk_strcmp(verb, mild[k])) cf.c.kind = CONFIRM_NEUTRAL;
     card_body(body);
     cf.check = widget_lookup(w, "msg_delcheckbutton", 0);
     if (cf.check) { /* the switch row: its words painted (confirm_rows_paint), the check a stop */
@@ -863,6 +871,8 @@ int feedback_confirm_dress(void *w) {
         widget_set_text_utf8(cell[k], "");
         y += CARD_ROW;
     }
+    /* a neutral question opens on its verb, the rest on Cancel, stock's own first stop */
+    if (cf.c.kind == CONFIRM_NEUTRAL) ringnav_select(w, 1 + !!cf.check, 2 + !!cf.check);
     return 1;
 }
 
@@ -930,7 +940,7 @@ void confirm_rows_paint(void *w, void *canvas) {
         void *item = slot[i];
         int x = I(item, W_X), y = I(item, W_Y) + CARD_ROW / 2, cx = x + I(item, W_W) / 2,
             out = theme()->sel_inset - CARD_BAR_IN,
-            lit = ringnav_row_selected(item) && !st.touch_mode;
+            lit = ringnav_row_selected(item) && ui_focus_shown();
         if (k < 0) {
             ui_text(canvas, cf.c.toggle, 0, TYPE(20), lit ? 0xffffff : primary, 1,
                     x + out + CARD_IN, y, CARD_W - 2 * CARD_IN - 44, 2);

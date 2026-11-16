@@ -1127,6 +1127,29 @@ def test_a_title_too_long_or_stock_s_null_name(fw, world, st, text, title):
     assert world[label].text == title
 
 
+class EmptyT(C.Structure):
+    _fields_ = [(k, C.c_char_p) for k in ('glyph', 'title', 'hint', 'row')]
+
+
+def test_an_empty_state_retitles_the_bar_on_a_page_already_titled(fw, world, st):
+    """Cover Flow over no albums (cf_empty.c): its page is titled first while its covers load (a status row's covers
+    show no title, so ""), then the empty state comes; the bar must look again (empty_list), or it keeps "" and the
+    status row shows only the clock (seen in the emulator, 2026-11-16) where the design names the page."""
+    label = bar_title(fw, world, st)
+    boot_set(fw, st)
+    win = world.window('coverflow_page')
+    body = world.add(win, 'view_body', box=(0, 0, 375, 290))
+    from test_coverflow import COVERS, Cf
+    cf = fw.var('cf', Cf)
+    cf.screen, cf.scoped, cf.body = COVERS, 0, body
+    sync(fw, win)
+    assert not world[label].text  # no title: the clock
+    e = EmptyT(b'cards', b'No Albums', b'Copy music to the SD card', None)
+    fw.fn('empty_list', C.c_void_p, C.c_void_p, C.c_void_p, C.c_char_p, C.c_void_p, C.c_void_p)(
+        win, body, b'Cover Flow', C.addressof(e), None)
+    assert world[label].text == 'Cover Flow'
+
+
 def shown_empty(world, win):
     """win's empty state (feedback.c empty_state) as shown: (glyph, title, hint), else None. Its view is insensitive:
     a row beside it keeps its taps."""

@@ -481,6 +481,8 @@ int about_list(void *list);
 void about_rows(void *view);
 int reset_list(void *list);
 void reset_rows(void *view);     /* settings_pages.c: Reset Settings' rows */
+int kv_text_w(void *label); /* an hscroll_label's text width in its row's face; -1 unmeasured */
+void kv_row(void *key, void *val, int kw, int vw, int right); /* settings_pages.c: kv_fit's split */
 void diag_about_row(void *view); /* diagnostics.c, --dev builds' Save Diagnostics */
 int diag_row(void *item);
 void caption_row(void *label, const unsigned *text);

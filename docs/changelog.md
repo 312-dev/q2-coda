@@ -8,6 +8,9 @@
   - Settings > Storage: the notes under the rows no longer mention Radio or items that refill by themselves, which the Subsonic app doesn't do yet.
   - Manual: a new **Car Remote** section says how to pair a phone, what it can do from the car's screen, and how to forget a phone.
   - Now Playing's info page: a server song's genre and year could show as Unknown at random.
+  - Display (OLED): About's and the settings' label/value rows keep at least 16 px between a label and its value; a value too long for its room fades at its end and scrolls when selected, instead of crowding the label (About's Wi-Fi Address).
+  - Cover Flow (OLED): with no albums to show, the status row names the page, **Cover Flow**, as the design has it; it showed only the clock.
+  - Display (OLED): a question whose wrong answer costs nothing (Scan Music?, Import Playlists?, Export Playlists?, Reconnect Bluetooth?) opens on its verb, so Center twice does it; the rest still open on Cancel.
   - Up Next (OLED): while a row is lifted, the queue's grips stand where Edit Library's do, 4 px further right, with square ends.
   - Display (OLED): Car Remote's Forget, Tidal's Clear All Downloads and Spotify's Remove Downloads and Sign Out, a playlist's Remove from Playlist, the EQ's Delete and Replace of a preset, SD Card Update's Install, Streaming's Erase Spotify Data and (development builds) Allow USB Debugging ask on the confirmation card over their page instead of a page of their own.
   - Display (OLED): a Wi-Fi network's name too long for its row now scrolls when its row is selected, as every row's title does, instead of being cut off. Scrolling text fades out at its ends into whatever is behind it, so on the blue selection the fade is blue, not a black band.

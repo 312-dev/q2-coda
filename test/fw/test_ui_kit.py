@@ -60,3 +60,12 @@ def test_a_later_toast_waits_for_the_loop_pass_and_the_last_wins(fw, lit):
     poll()
     poll()
     assert toasts == (['Unplugged'] if lit else [])
+
+
+@pytest.mark.parametrize('touch_mode, shown', [(1, 0), (0, 1)])
+def test_the_focus_ring_shows_after_the_wheel_and_hides_after_a_tap(fw, st, touch_mode, shown):
+    """docs/oled-design.md#focus-ring: one record of the last input, navigation.c's st.touch_mode (a touch sets it,
+    the wheel clears it), so a screen reached by a tap opens with no ring and one reached by the wheel and Centre
+    opens with it."""
+    st('touch_mode').value = touch_mode
+    assert fw.fn('ui_focus_shown', C.c_int)() == shown

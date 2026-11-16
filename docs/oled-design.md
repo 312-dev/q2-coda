@@ -253,6 +253,13 @@ All lists share one grid.
   meanwhile the wheel and buttons do nothing but Return, which stays on Home.
 - **Key/value row:** value in Text Secondary, right-aligned on the right column, no chevron.
   On the selection bar the value is On Accent.
+- <a id="labelvalue-rows"></a>**Label/value rows** (About, a settings row's value; the user's, 2026-11-16,
+  from About's Wi-Fi Address): the label keeps its natural width and the value takes the rest of the
+  row, at least 16 px (`KV_GAP`) after the label's text. A value wider than its box is not squeezed
+  against the label or cut hard: it fades at its cut end at rest and scrolls when its row is selected
+  (the house [marquee](#motion)). A label so long the value would get less than 96 px (`KV_VALUE_MIN`,
+  or the value's own width when shorter) shrinks to leave it that, and scrolls the same way
+  (`patch/ui_kit.c` `kv_fit`, `patch/settings_pages.c` `kv_row`).
 - **Switch row:** every on/off setting, a 34x20 fully round switch ending on the right column, its
   16 px white knob 2 px in: Track when off, Accent Blue when on. On the selection bar: on is a white
   track with an Accent Blue knob, off a 1.5 px white outline round the white knob. No "On"/"Off"
@@ -570,8 +577,9 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   (`confirminfo_dialog`: Shut Down, Restart, the three Resets, Delete Song, Delete File, Unpair, the Wi-Fi
   network's Forget and Disconnect, Line Out and the rest) is drawn as the card with no change to its callers
   (`feedback.c` `feedback_confirm_dress`): its prompt named as the design writes it ("Forget This Network?" for
-  stock's "Delete Record?", "Use Line Out?" for its "Line Out sets max volume, continue?"), **Cancel** first and
-  selected when it opens, then the verb ("Shut Down", "Reset Settings", "Delete"), never "OK"; a verb that loses something
+  stock's "Delete Record?", "Use Line Out?" for its "Line Out sets max volume, continue?"), **Cancel** first, then the
+  verb; it opens on Cancel, or on the verb for a question whose mistake costs least (Scan, Import, Export, Reconnect,
+  Turn On). The verb says what it does ("Shut Down", "Reset Settings", "Delete"), never "OK"; a verb that loses something
   (Delete, Reset, Forget, Unpair, Remove, Clear) red after the gap. Delete Song's "Also delete source file" is the
   card's switch row. What the answer leaves alone, or why it asks (a caller's `feedback_confirm_foot`: Streaming
   Songs' "Show streaming songs?" and "Hide streaming songs?"), is the body.
@@ -624,6 +632,21 @@ as its callers move onto it.
 - **For code:** `confirm(&(confirm_t){ .title, .name, .body, .code, .rows, .n_rows, .kind, .back, .toggle,
   .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx })` (`patch/ui_kit.h`, so every payload file reaches it); `answer(ctx, row, toggle_on)` runs
   once after the card has closed. One card at a time: `confirm` answers 0 while one is up.
+
+### Focus ring
+
+<a id="focus-ring"></a>The user's universal rule (2026-11-16), for every screen with one or two buttons (the empty
+states' buttons, a card's answers) and any other mark that shows where the wheel is:
+
+- **Hidden by default.** It shows as soon as the wheel turns on the screen, and on arrival when the screen was
+  reached through the wheel (a turn, then Centre); reached by a tap, it opens hidden.
+- **The last input decides, everywhere at once:** a tap anywhere hides it again, a wheel turn shows it. There is one
+  record of that, `st.touch_mode` (`patch/navigation.c`: a touch sets it, the wheel clears it), read through
+  `ui_focus_shown()` (`patch/ui_kit.c`); nothing keeps a second.
+- **Centre with no ring** still does the screen's default: the primary button, a card's default answer.
+- **Not under this rule:** Control Center's ring keeps its own form (it wakes on the first wheel tick or Centre
+  without acting, and goes 5 s after the last, `control_center.c` `cc_ring_on`), and the lists' selection bar, which
+  boots shown.
 
 ### Empty and offline
 
@@ -1058,7 +1081,8 @@ SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, a
 - **A value cut off scrolls too** (the user's, 2026-11-16, from About's CFW. Version): on the selected
   row the marquee takes the first text cut off at its column, the title, else a key/value row's value,
   so any value too long for its row reads in full when its row is selected (`navigation.c`
-  `marq_moved`); every other row's keeps its ellipsis. That holds for stock's rows too, whose labels
+  `marq_moved`); every other row's keeps its ellipsis, except a [label/value row](#labelvalue-rows)'s,
+  which fades. That holds for stock's rows too, whose labels
   wait on their parent's focus (a Wi-Fi network's name, user 2026-11-16: they clipped).
 - **Now Playing's lines** move as one marquee: the title, artist and album that overflow hold at
   rest 2.75 s, slide left together at 35 px a second (the longest line's pace; the others take the
