@@ -7,7 +7,8 @@
  * steps a row and the next tug starts from the leftover travel. Let go short of it and the bar
  * springs back over TILT_SPRING_MS. The mock-up's tilt of 1 degree is under a pixel on a 32 px
  * row, so it is not drawn. Only the bar's own box is painted again (tilt.box): tilt_poll, from
- * each UI loop pass, invalidates it in its window while the bar moves and that window is on top.
+ * each UI loop pass, invalidates it in its window while the bar moves and that window is on top,
+ * and tilt_clip lets the bar paint all of that box, past its list's edge, down to the status row.
  * ponytail: a touch drag scrolls the list with the bar hidden, as every list does under touch
  * (navigation.c hide_outline), so only the wheel tilts it; a drag that stepped rows would be what
  * lifts that. */
@@ -54,6 +55,21 @@ void tilt_poll(void) {
     }
     tilt.p = p;
     widget_invalidate_force(tilt.win, &tilt.box);
+}
+
+/* While the bar leans, before it paints: the canvas's clip (saved in old) widened up and down to
+ * the lean's box (tilt.box, which tilt_poll repaints) but never above the status row, so the lift,
+ * growth and shadow of a list's first or last row are not cut at the list's edge. 0, the clip
+ * untouched, when nothing leans. */
+int tilt_clip(void *canvas, int *old) {
+    if (!tilt.p || !tilt.win) return 0;
+    canvas_get_clip_rect(canvas, old);
+    int wy = I(tilt.win, W_Y), top = wy + tilt.box.y, foot = top + tilt.box.h;
+    if (top < geom_val(V_BAR)) top = geom_val(V_BAR);
+    int y0 = old[1] < top ? old[1] : top, y1 = old[1] + old[3] > foot ? old[1] + old[3] : foot;
+    int clip[4] = { old[0], y0, old[2], y1 - y0 };
+    canvas_set_clip_rect(canvas, clip);
+    return 1;
 }
 
 /* a's ease, 1 - (1 - a)^2, both in 256ths */

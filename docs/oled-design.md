@@ -183,6 +183,8 @@ All lists share one grid.
   is unchanged: past it the bar steps a row and the next tug starts from the leftover turn. Let go short of
   it and the bar springs back over 220 ms. The mock-up's 1 degree tilt is under a pixel on a 32 px row and is
   not drawn. A touch drag scrolls the list with the bar hidden, as touch always does, so it does not tilt.
+  The lean is never cut at the list's edge: on the first or last row it reaches up into the gap under the
+  status row (never over it) and down into the fade.
 - A list left by Return opens at its top when it is chosen again; Return lands on the row the
   page behind was left at (`list.reopen.top`).
 - Exactly one per screen. A dialog over a list takes the selection; the list's bar is hidden
