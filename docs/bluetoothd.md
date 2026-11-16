@@ -157,9 +157,12 @@ server songs. The rebuilt bluetoothd hands SetBrowsedPlayer, GetFolderItems, Cha
 GetTotalNumberOfItems and Search (the browsing channel) and PlayItem (the control channel) to `coda-rc --avrcp`
 (`patch/coda_rc_avrcp.c`), a second instance of the car remote daemon that serves nothing else, over the UNIX
 socket `/tmp/coda-rc.avrcp` (mode 0600). bluetoothd starts it (`g_spawn_async`) at the first request it cannot
-deliver, then at most every 10 seconds, and waits at most 2 seconds for an answer, blocking its main loop
-meanwhile; with no answer GetFolderItems and GetTotalNumberOfItems fall back to upstream's (the registered
-players: none) and the others answer INTERNAL_ERROR.
+deliver, then at most every 10 seconds. Nothing waits for coda-rc: the handler sends the request and
+returns `AVCTP_DEFERRED`, so avctp answers nothing yet, and the reply goes out (`avctp_send_browsing_rsp`,
+`avctp_send_vendordep`) when the main loop reads coda-rc's answer; other AVRCP, A2DP and D-Bus work goes on
+meanwhile. A request unanswered after 1.5 seconds closes the connection and fails every request on it. With
+no answer GetFolderItems and GetTotalNumberOfItems fall back to upstream's (the registered players: none)
+and the others answer INTERNAL_ERROR.
 
 A frame is `{u16 length, request}` both ways, big-endian. A request is `{pdu, tag u32, room u16, the PDU's
 parameters}`: the tag is the session (the car) whose path the daemon keeps, and room the most the reply may
@@ -177,15 +180,19 @@ take, the browsing channel's MTU after the AVCTP and browsing headers; the reply
 - A song is a media element with its title, artist, album and length (read from the library: a Browse row's
   subtitle is the artist in one list and the length in another), as many as the room holds; an item that
   does not fit is left for the next request, and a room too small for one is INTERNAL_ERROR.
-- Search keeps the car's query; the Search scope lists Tracks, then Albums, then Artists, 50 of each at most.
+- Search keeps the car's query; the Search scope lists Tracks, then Albums, then Artists, 20 of each at most.
   Now Playing is the queue (`/tmp/coda-rc.queue`).
 - PlayItem plays a song from its place in its folder (its album, playlist or bucket), a playable folder from
   its start, a search's song alone, a Now Playing song by its place (`jump`), each through demo's shim
   (`patch/coda_rc_shim.c`), which serves the daemon's files while `/tmp/coda-rc-avrcp.pid` exists, Car Remote
   on or off. Demo not answering is MEDIA_IN_USE.
 
-Each request opens the library and makes coda-rc's views again, twice for a listing with songs (their
-tags); `ponytail:` one open per request would halve that, measured on a Q2 first. Covers (AVRCP 1.6's
+coda-rc --avrcp keeps the library open (`lib_keep_open`), with `s2` and `albums` made once as indexed
+tables, and opens it again only when the database's or catalogue's length or SQLite change counter,
+Long Songs' cache or the Library setting changes. Measured as MIPS under `qemu-mipsel` on a 20,000-song,
+2,000-album library: the first request 530 ms (the tables made), a 50-album page 4 to 5 ms, an album's songs
+2 ms, Search 71 ms, but a letter bucket of Tracks 300 to 700 ms (`coda_rc_lib.c`'s bucket queries over every
+song; `ponytail:` not yet measured on a Q2). Covers (AVRCP 1.6's
 image handles and the BIP responder) are not done yet.
 
 Tests: `test/unit/test_coda_rc_avrcp.py` (each PDU against a library in stock's schema, on this machine),

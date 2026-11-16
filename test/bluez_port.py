@@ -257,50 +257,111 @@ def browsing_session(b, room=1027):
     return b.alloc(bytes(0x60))
 
 
-def test_browsing_goes_to_coda_rc(b):
+DEFERRED = 0xffffffff  # avctp.h AVCTP_DEFERRED: the reply goes later
+
+
+def coda_rc(b):
+    """shanling_browse answered: each request kept (tag, pdu, parameters, room, callback, its data), none answered"""
     asked = []
-    def browse(tag, pdu, params, n, room, out, cap):
-        asked.append((tag, pdu, bytes(b.u.mem_read(params, n)), room, cap))
-        b.u.mem_write(out, b'\x04\x00\x00\x00\x00\x00\x07')
-        return 7
+    def browse(tag, pdu, params, n, room, cb, data):
+        asked.append((tag, pdu, bytes(b.u.mem_read(params, n)), room, cb, data))
+        return 0
     b.answer('shanling_browse', browse)
+    return asked
+
+
+def sent_later(b, name='avctp_send_browsing_rsp'):
+    """what avctp sends after the handler: (transaction, code (vendordep only), operands)"""
+    out = []
+    if name == 'avctp_send_browsing_rsp':
+        b.answer(name, lambda conn, tr, ops, n, *_: out.append((tr, bytes(b.u.mem_read(ops, n)))) or 0)
+    else:
+        b.answer(name, lambda conn, tr, code, sub, ops, n, *_: out.append((tr, code, bytes(b.u.mem_read(ops, n)))) or 0)
+    return out
+
+
+def reply(b, request, data):
+    """coda-rc's answer to request: its callback from the main loop, with data, or none (None)"""
+    b.call_at(request[4], b.alloc(data) if data is not None else 0, len(data) if data is not None else -1, request[5])
+
+
+def test_browsing_goes_to_coda_rc(b):
+    asked, sent = coda_rc(b), sent_later(b)
     s = browsing_session(b)
     req = bytes([1]) + struct.pack('>II', 0, 9) + b'\0'
     p = b.alloc(bytes([0x71]) + struct.pack('>H', len(req)) + req + bytes(1100))
-    b.call('shanling_browsing', s, p, 0)
+    n = b.call('handle_browsing_pdu', 0, 5, p, 3 + len(req), s)
     check('GetFolderItems goes to coda-rc with the car\'s tag, its parameters and the room after the header',
-          asked == [(s, 0x71, req, 1024, 1024)], asked)
-    check('... and coda-rc\'s reply is the answer', bytes(b.u.mem_read(p, 10)) == b'\x71\x00\x07\x04' + bytes(5) + b'\x07')
+          [a[:4] for a in asked] == [(s, 0x71, req, 1024)], asked)
+    check('... and nothing is answered yet: avctp sends nothing', n == DEFERRED and not sent, (n, sent))
+    reply(b, asked[0], b'\x04\x00\x00\x00\x00')
+    check('... until coda-rc\'s reply, sent as the answer on the request\'s transaction',
+          sent == [(5, b'\x71\x00\x05\x04\x00\x00\x00\x00')], sent)
     for pdu_id in (0x70, 0x72, 0x73, 0x75, 0x80):
         asked.clear()
         p = b.alloc(bytes([pdu_id, 0, 1, 1]) + bytes(1100))
-        b.call('handle_browsing_pdu', 0, 3, p, 4, s)
-        check(f'browsing PDU {pdu_id:#x} goes to coda-rc', [a[1] for a in asked] == [pdu_id], asked)
+        n = b.call('handle_browsing_pdu', 0, 3, p, 4, s)
+        check(f'browsing PDU {pdu_id:#x} goes to coda-rc, answered later', [a[1] for a in asked] == [pdu_id] and n == DEFERRED,
+              asked)
+
+
+def test_a_slow_library_holds_up_nothing_else(b):
+    """coda-rc slow to answer (3 s, past BROWSE_TIMEOUT_MS): the browse waits in the main loop, not in a handler, so the
+    same bluetoothd answers a GetElementAttributes and a GetPlayStatus at once in between"""
+    asked, sent = coda_rc(b), sent_later(b)
+    s = browsing_session(b)
+    b.word(s, b.alloc(bytes(0x20)))
+    b.word(s + AVRCP_TARGET, b.alloc(bytes(0x20)))
+    p = b.alloc(bytes([0x72, 0, 11]) + struct.pack('>HBQ', 0, 1, 4) + bytes(1100))
+    check('ChangePath sent to coda-rc, the handler returns at once', b.call('handle_browsing_pdu', 0, 6, p, 14, s) == DEFERRED)
+    blocking = [c for c in b.calls if c[0] in ('read', 'recv', 'poll', 'select', 'usleep', 'sleep', 'nanosleep')]
+    check('... without waiting on anything', not blocking, blocking)
+    b.word(b.objects['g_track_meta'], b.alloc(struct.pack('<3i4I', 1, 1, 1000, b.alloc(b'Lovely Day\0'), 0, 0, 0)))
+    ctype, params = element_attributes(b, (1,))
+    check('meanwhile GetElementAttributes is answered', ctype == CTYPE_STABLE and attrs_of(params) == {1: 'Lovely Day'})
+    sp = session(b)
+    p2 = b.alloc(pdu(0x30))
+    check('... and GetPlayStatus', b.call('avrcp_handle_get_play_status', sp, p2, 0) == CTYPE_STABLE)
+    check('... with ChangePath still out', not sent)
+    reply(b, asked[0], None)  # BROWSE_TIMEOUT_MS: no answer
+    check('the late ChangePath gets INTERNAL_ERROR, not silence', sent == [(6, b'\x72\x00\x01\x03')], sent)
 
 
 def test_browsing_without_coda_rc(b):
     b.answer('shanling_browse', lambda *_: -1)
+    sent = sent_later(b)
     s = browsing_session(b)
     b.word(s, b.alloc(bytes(0x20)))  # a server with no players
     b.word(s + AVRCP_TARGET, b.alloc(bytes(0x20)))  # and a target with none
     p = b.alloc(bytes([0x72, 0, 11]) + bytes(11) + bytes(1100))
-    b.call('shanling_browsing', s, p, 0)
-    check('no coda-rc: ChangePath is an internal error', bytes(b.u.mem_read(p, 4)) == b'\x72\x00\x01\x03')
+    n = b.call('handle_browsing_pdu', 0, 3, p, 14, s)
+    check('coda-rc not there: ChangePath is an internal error at once', n == 4 and bytes(b.u.mem_read(p, 4)) == b'\x72\x00\x01\x03')
     req = bytes([0]) + struct.pack('>II', 0, 9) + b'\0'
     p = b.alloc(bytes([0x71]) + struct.pack('>H', len(req)) + req + bytes(1100))
     b.call('shanling_browsing', s, p, 0)
     check('... and GetFolderItems is upstream\'s player list: none, out of bounds', bytes(b.u.mem_read(p, 4)) == b'\x71\x00\x01\x0b',
           bytes(b.u.mem_read(p, 8)).hex())
+    asked = coda_rc(b)
+    p = b.alloc(bytes([0x71]) + struct.pack('>H', len(req)) + req + bytes(1100))
+    b.call('handle_browsing_pdu', 0, 8, p, 3 + len(req), s)
+    reply(b, asked[0], None)
+    check('coda-rc failing after the request: upstream\'s player list then', sent == [(8, b'\x71\x00\x01\x0b')], sent)
 
 
 def test_play_item(b):
     for status, want in ((4, 0x09), (0x0d, CTYPE_REJECTED)):
-        b.answer('shanling_browse', lambda tag, pdu, params, n, room, out, cap, st=status:
-                 (b.byte(out, st), 1)[1] if pdu == 0x74 and n == 11 else -1)
+        asked, sent = coda_rc(b), sent_later(b, 'avctp_send_vendordep')
+        s = b.alloc(bytes(0x60))
+        b.word(s + AVRCP_CONN, 0x5150)
+        b.word(s + 0x18, b.sym['control_handlers'])  # session->control_handlers: the target's
         p = b.alloc(control_pdu(0x74, bytes([1]) + struct.pack('>QH', 3, 0)))
-        ctype = b.call('shanling_play_item', 0x77, p, 0)
-        check(f'PlayItem: coda-rc\'s status {status:#x} answered {"ACCEPTED" if want == 9 else "REJECTED"}',
-              ctype == want and bytes(b.u.mem_read(p + 5, 3)) == bytes([0, 1, status]), (ctype, bytes(b.u.mem_read(p, 8)).hex()))
+        code = b.alloc(b'\x00')  # CONTROL
+        n = b.call('handle_vendordep_pdu', 0, 0x0b, code, b.alloc(b'\x09'), p, 7 + 11, s)
+        check(f'PlayItem goes to coda-rc, answered later', n == DEFERRED and [a[1:3] for a in asked] == [
+            (0x74, bytes([1]) + struct.pack('>QH', 3, 0))] and not sent, (n, asked))
+        reply(b, asked[0], bytes([status]))
+        check(f'... coda-rc\'s status {status:#x} answered {"ACCEPTED" if want == 9 else "REJECTED"}',
+              sent == [(0x0b, want, b'\x00\x19\x58\x74\x00\x00\x01' + bytes([status]))], sent)
 
 
 def test_set_addressed_player(b):
@@ -314,32 +375,56 @@ def test_set_addressed_player(b):
 
 
 def test_browse_socket(b):
-    """shanling_browse's framing over coda-rc's socket, and a reply for another PDU dropped"""
-    sent, replies = [], []
+    """shanling_browse over coda-rc's socket: the frame, nothing read until the main loop says so, the reply to
+    the request's callback; a late request fails every one on the connection"""
+    sent, rx, timers, watch, got = [], [], [], [], []
     b.answers['socket'] = lambda *_: 5
     b.answers['connect'] = lambda *_: 0
     b.answers['send'] = lambda fd, buf, n, *_: sent.append(bytes(b.u.mem_read(buf, n))) or n
+    b.answers['g_io_add_watch'] = lambda io, cond, fn, data: watch.append(fn) or 77
+    b.answers['g_timeout_add'] = lambda ms, fn, data, *_: timers.append((ms, fn)) or 100 + len(timers)
+    b.answers['g_source_get_id'] = lambda *_: 101
     def read(fd, buf, n, *_):
-        chunk = replies[0][:n]
-        replies[0] = replies[0][n:]
+        chunk, rx[0] = rx[0][:n], rx[0][n:]
         b.u.mem_write(buf, chunk)
         return len(chunk)
     b.answers['read'] = read
-    out = b.alloc(bytes(64))
-    replies.append(b'\x00\x03\x75\x04\x01')
-    n = b.call('shanling_browse', 0x11223344, 0x75, b.alloc(b'\x01'), 1, 500, out, 64)
-    check('a request framed {length, pdu, tag, room, parameters}', sent == [b'\x00\x08\x75\x11\x22\x33\x44\x01\xf4\x01'], sent)
-    check('... the reply\'s parameters returned', n == 2 and bytes(b.u.mem_read(out, 2)) == b'\x04\x01', n)
-    replies[0] = b'\x00\x02\x71\x04'
-    n = b.call('shanling_browse', 1, 0x75, b.alloc(b'\x01'), 1, 500, out, 64)
-    check('... another PDU\'s reply is no answer', n == 0xffffffff, n)
+    b.answer('shanling_browsed', lambda r, n, data, *_: got.append((data, bytes(b.u.mem_read(r, n)) if r else None,
+                                                                    struct.unpack('<i', struct.pack('<I', n))[0])))
+    cb = b.sym['shanling_browsed']
+    n = b.call('shanling_browse', 0x11223344, 0x75, b.alloc(b'\x01'), 1, 500, cb, 0xaa)
+    check('a request framed {length, pdu, tag, room, parameters}, sent at once',
+          n == 0 and sent == [b'\x00\x08\x75\x11\x22\x33\x44\x01\xf4\x01'], (n, sent))
+    check('... read only from the main loop\'s watch, with a 1.5 s timer', 'read' not in [c[0] for c in b.calls] and
+          len(watch) == 1 and [t[0] for t in timers] == [1500], b.calls)
+    b.call('shanling_browse', 0x11223344, 0x71, b.alloc(b'\x01'), 1, 500, cb, 0xbb)
+    rx.append(b'\x00\x03\x75\x04\x01\x00\x02\x71')
+    b.call_at(watch[0], 0, 1, 0)
+    check('the main loop reads the first reply: its callback gets it', got == [(0xaa, b'\x04\x01', 2)], got)
+    rx[0] += b'\x04'
+    b.call_at(watch[0], 0, 1, 0)
+    check('... the second, split across reads, its own', got[1:] == [(0xbb, b'\x04', 1)], got)
+    got.clear()
+    b.call('shanling_browse', 1, 0x72, b.alloc(b'\x01'), 1, 500, cb, 0xcc)
+    b.call('shanling_browse', 1, 0x73, b.alloc(b'\x01'), 1, 500, cb, 0xdd)
+    b.call_at(timers[2][1], 0)
+    check('the first request late: both fail, with no reply', got == [(0xcc, None, -1), (0xdd, None, -1)], got)
+    check('... and the connection is closed', 'close' in [c[0] for c in b.calls])
+    got.clear()
+    b.call('shanling_browse', 1, 0x72, b.alloc(b'\x01'), 1, 500, cb, 0xee)
+    b.call('shanling_browse_forget', 1, 0)
+    rx.append(b'\x00\x02\x72\x04')
+    rx.pop(0)
+    b.call_at(watch[-1], 0, 1, 0)
+    check('a forgotten session\'s reply is read and dropped', got == [] and sent[-1] == b'\x00\x05\xff\x00\x00\x00\x01', (got, sent[-1]))
 
 
 def main():
     path = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else thirdparty.build('bluez') / 'usr/bin/bluetoothd'
     for test in (test_play_status, test_register_notification, test_hciplayer_event, test_init_sets_the_event_function, test_codec_priority,
                  test_receiver_track, test_receiver_stream, test_synclink_discover, test_disconnect_clears_session,
-                 test_element_attributes, test_browsing_goes_to_coda_rc, test_browsing_without_coda_rc, test_play_item,
+                 test_element_attributes, test_browsing_goes_to_coda_rc, test_a_slow_library_holds_up_nothing_else,
+                 test_browsing_without_coda_rc, test_play_item,
                  test_set_addressed_player, test_browse_socket):
         test(Bluetoothd(path))
     if FAILED:

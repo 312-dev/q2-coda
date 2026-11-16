@@ -597,7 +597,12 @@ void crc_ble_gone(void) {
 
 /* ---- the loop ---- */
 
-static void on_term(int sig) { quit = 1; }
+static int term_pipe[2] = {-1, -1}; /* --avrcp: written on a signal, so a poll with no timeout wakes */
+
+static void on_term(int sig) {
+    quit = 1;
+    if (term_pipe[1] >= 0) (void)!write(term_pipe[1], "", 1);
+}
 
 static void timeouts(conn *c) {
     if (!c->used) return;
@@ -675,7 +680,7 @@ static int avrcp_listen(void) {
 
 /* the frames a client has sent: {u16 length, request}; each answered {u16 length, reply} in turn */
 static int avrcp_serve(avrcp_client *c) {
-    static uint8_t rsp[2 + 1024];
+    static uint8_t rsp[2 + 4096]; /* the largest browsing MTU a car is likely to offer */
     ssize_t r = read(c->fd, c->in + c->n, sizeof c->in - c->n);
     if (r < 0 && (errno == EAGAIN || errno == EINTR)) return 0;
     if (r <= 0) return -1;
@@ -704,15 +709,18 @@ static int avrcp_main(void) {
     char b[16];
     crc_write_file(CRC_AVRCP_PID, b, snprintf(b, sizeof b, "%d\n", getpid()), 0644);
     cmd_seq = 0x40000000; /* apart from the Car Remote daemon's, should both write the shim a command */
+    lib_keep_open(1); /* a page of a list in milliseconds: no open and no views per request */
     int lfd = avrcp_listen();
     crc_log("avrcp: %s", lfd >= 0 ? "listening" : "no socket");
+    if (pipe(term_pipe)) term_pipe[0] = term_pipe[1] = -1;
     avrcp_client cl[AVRCP_CLIENTS];
     for (int i = 0; i < AVRCP_CLIENTS; ++i) cl[i].fd = -1;
     while (!quit && lfd >= 0) {
-        struct pollfd fds[AVRCP_CLIENTS + 1] = {{lfd, POLLIN, 0}};
+        struct pollfd fds[AVRCP_CLIENTS + 2] = {{lfd, POLLIN, 0}};
         for (int i = 0; i < AVRCP_CLIENTS; ++i) fds[i + 1] = (struct pollfd){cl[i].fd, POLLIN, 0};
-        /* asleep until a request, but for a command the shim has yet to ack */
-        if (poll(fds, AVRCP_CLIENTS + 1, pend.s ? POLL_MS : -1) < 0 && errno != EINTR) break;
+        fds[AVRCP_CLIENTS + 1] = (struct pollfd){term_pipe[0], POLLIN, 0};
+        /* asleep until a request or a signal, but for a command the shim has yet to ack */
+        if (poll(fds, AVRCP_CLIENTS + 2, pend.s ? POLL_MS : -1) < 0 && errno != EINTR) break;
         if (fds[0].revents & POLLIN) {
             int fd = accept(lfd, 0, 0), placed = 0;
             for (int i = 0; fd >= 0 && i < AVRCP_CLIENTS && !placed; ++i)

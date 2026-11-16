@@ -37,6 +37,7 @@ def lib(tmp_path_factory):
     L.avrcp_request.restype = ctypes.c_size_t
     L.avrcp_request.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t]
     L.avrcp_forget.argtypes = [ctypes.c_uint32]
+    L.lib_keep_open.argtypes = [ctypes.c_int]
     return L
 
 
@@ -63,6 +64,8 @@ def library(root):
 def q2(lib, tmp_path):
     library(tmp_path)
     (ctypes.c_char * 512).in_dll(lib, 'root').value = str(tmp_path).encode()
+    lib.lib_keep_open(0)  # each test's library afresh, then kept as coda-rc --avrcp keeps it
+    lib.lib_keep_open(1)
     for name in ('qgen', 'qpos', 'play_state'):
         ctypes.c_int.in_dll(lib, name).value = 0
     ctypes.c_int.in_dll(lib, 'shim_alive').value = 1
@@ -303,3 +306,25 @@ def test_bad_requests(q2):
     assert q2.status(0x7f) == INVALID_COMMAND
     assert q2.status(GET_FOLDER_ITEMS, bytes([9]) + struct.pack('>II', 0, 9) + b'\0') == INVALID_SCOPE
     assert q2.status(GET_FOLDER_ITEMS, bytes([VFS]) + struct.pack('>II', 0, 9) + b'\x02\0\0\0\x01') == INVALID_PARAM
+
+
+def test_the_kept_library_is_opened_again_when_it_changes(q2):
+    """a database written anew and renamed over the old one: the kept connection still reads the old file"""
+    q2.cd_to('Albums')
+    assert [a['name'] for a in q2.items()[1]] == ['Blue', 'Filler', 'Menagerie']
+    path = q2.root / 'mnt/data/database.db'
+    new = path.with_name('new.db')
+    new.write_bytes(path.read_bytes())
+    db = sqlite3.connect(new)
+    db.execute("update songtable set album = 'Blue (Remastered)' where album = 'Blue'")
+    db.commit()
+    db.close()
+    new.replace(path)
+    assert [a['name'] for a in q2.items()[1]] == ['Blue (Remastered)', 'Filler', 'Menagerie']
+
+
+def test_a_search_lists_20_of_each_kind(q2):
+    """50 of each could pass coda-rc's largest answer (CRC_MAX_PAYLOAD) on a big library, and then nothing is found"""
+    q = b'filler'
+    r = q2.ask(SEARCH, struct.pack('>HH', 0x6a, len(q)) + q)
+    assert r[0] == SUCCESS and struct.unpack('>I', r[3:])[0] == 21  # 20 of the 130 songs, and the album

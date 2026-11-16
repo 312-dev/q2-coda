@@ -229,7 +229,7 @@ index 47b5dd7..d0236a9 100644
  
  static struct queue *a2dp_select_eps(struct avdtp *session, uint8_t type,
 diff --git a/profiles/audio/avctp.c b/profiles/audio/avctp.c
-index 6f64f16..8bb2728 100644
+index 6f64f16..ac753a9 100644
 --- a/profiles/audio/avctp.c
 +++ b/profiles/audio/avctp.c
 @@ -36,6 +36,7 @@
@@ -240,10 +240,32 @@ index 6f64f16..8bb2728 100644
  #include "src/device.h"
  #include "src/log.h"
  #include "src/error.h"
-@@ -995,6 +996,14 @@ static void browsing_response(struct avctp_channel *browsing,
+@@ -995,6 +996,36 @@ static void browsing_response(struct avctp_channel *browsing,
  	}
  }
  
++/* Shanling: a browsing reply sent after its handler returned AVCTP_DEFERRED */
++int avctp_send_browsing_rsp(struct avctp *session, uint8_t transaction, uint8_t *operands, size_t operand_count)
++{
++	struct avctp_channel *browsing = session->browsing;
++	struct avctp_header avctp = {
++		.transaction = transaction,
++		.packet_type = AVCTP_PACKET_SINGLE,
++		.cr = AVCTP_RESPONSE,
++		.pid = htons(AV_REMOTE_SVCLASS_ID),
++	};
++	struct iovec iov[2] = { { &avctp, sizeof(avctp) }, { operands, operand_count } };
++	struct msghdr msg = { .msg_iov = iov, .msg_iovlen = 2 };
++
++	if (!browsing || !browsing->io)
++		return -ENOTCONN;
++	if (browsing->omtu < sizeof(avctp) + operand_count)
++		return -EOVERFLOW;
++	if (sendmsg(g_io_channel_unix_get_fd(browsing->io), &msg, 0) < 0)
++		return -errno;
++	return 0;
++}
++
 +/* Shanling: the most a browsing reply's AVRCP part may take, after AVCTP's header */
 +uint16_t avctp_browsing_room(struct avctp *session)
 +{
@@ -255,7 +277,53 @@ index 6f64f16..8bb2728 100644
  static gboolean session_browsing_cb(GIOChannel *chan, GIOCondition cond,
  				gpointer data)
  {
-@@ -1588,6 +1597,14 @@ static void avctp_confirm_cb(GIOChannel *chan, gpointer data)
+@@ -1005,6 +1036,7 @@ static gboolean session_browsing_cb(GIOChannel *chan, GIOCondition cond,
+ 	struct avctp_header *avctp;
+ 	int sock, ret, packet_size, operand_count;
+ 	struct avctp_browsing_pdu_handler *handler;
++	size_t n;
+ 
+ 	if (cond & (G_IO_ERR | G_IO_HUP | G_IO_NVAL))
+ 		goto failed;
+@@ -1039,9 +1071,11 @@ static gboolean session_browsing_cb(GIOChannel *chan, GIOCondition cond,
+ 		goto send;
+ 	}
+ 
+-	packet_size += handler->cb(session, avctp->transaction,
+-						operands, operand_count,
+-						handler->user_data);
++	n = handler->cb(session, avctp->transaction, operands, operand_count,
++							handler->user_data);
++	if (n == AVCTP_DEFERRED)	/* Shanling: answered later, avctp_send_browsing_rsp */
++		return TRUE;
++	packet_size += n;
+ 
+ send:
+ 	if (packet_size != 0) {
+@@ -1074,6 +1108,7 @@ static gboolean session_cb(GIOChannel *chan, GIOCondition cond, gpointer data)
+ 	struct avc_header *avc;
+ 	int ret, packet_size, operand_count, sock;
+ 	struct avctp_pdu_handler *handler;
++	size_t n;
+ 
+ 	if (cond & (G_IO_ERR | G_IO_HUP | G_IO_NVAL))
+ 		goto failed;
+@@ -1134,9 +1169,11 @@ static gboolean session_cb(GIOChannel *chan, GIOCondition cond, gpointer data)
+ 	code = avc->code;
+ 	subunit = avc->subunit_type;
+ 
+-	packet_size += handler->cb(session, avctp->transaction, &code,
+-					&subunit, operands, operand_count,
+-					handler->user_data);
++	n = handler->cb(session, avctp->transaction, &code, &subunit, operands, operand_count,
++							handler->user_data);
++	if (n == AVCTP_DEFERRED)	/* Shanling: answered later, avctp_send_vendordep */
++		return TRUE;
++	packet_size += n;
+ 
+ 	avc->code = code;
+ 	avc->subunit_type = subunit;
+@@ -1588,6 +1625,14 @@ static void avctp_confirm_cb(GIOChannel *chan, gpointer data)
  
  	DBG("AVCTP: incoming connect from %s", address);
  
@@ -271,14 +339,17 @@ index 6f64f16..8bb2728 100644
  								BDADDR_BREDR);
  	if (!device)
 diff --git a/profiles/audio/avctp.h b/profiles/audio/avctp.h
-index 02712bf..58c9fe1 100644
+index 02712bf..77e7888 100644
 --- a/profiles/audio/avctp.h
 +++ b/profiles/audio/avctp.h
-@@ -184,3 +184,4 @@ int avctp_send_browsing_req(struct avctp *session,
+@@ -184,3 +184,7 @@ int avctp_send_browsing_req(struct avctp *session,
  				uint8_t *operands, size_t operand_count,
  				avctp_browsing_rsp_cb func, void *user_data);
  bool avctp_supports_avc(uint8_t avc);
 +uint16_t avctp_browsing_room(struct avctp *session);
++/* Shanling: a handler's return for a reply it sends later (avctp_send_browsing_rsp, avctp_send_vendordep) */
++#define AVCTP_DEFERRED ((size_t) -1)
++int avctp_send_browsing_rsp(struct avctp *session, uint8_t transaction, uint8_t *operands, size_t operand_count);
 diff --git a/profiles/audio/avdtp.c b/profiles/audio/avdtp.c
 index 10ef380..4ebdbc6 100644
 --- a/profiles/audio/avdtp.c
@@ -380,7 +451,7 @@ index 102a260..4b83ce1 100644
  void avdtp_error_init(struct avdtp_error *err, uint8_t type, int id);
  const char *avdtp_strerror(struct avdtp_error *err);
 diff --git a/profiles/audio/avrcp.c b/profiles/audio/avrcp.c
-index 80f34c7..50458b9 100644
+index 80f34c7..1a32ca2 100644
 --- a/profiles/audio/avrcp.c
 +++ b/profiles/audio/avrcp.c
 @@ -38,6 +38,7 @@
@@ -391,7 +462,7 @@ index 80f34c7..50458b9 100644
  #include "src/adapter.h"
  #include "src/device.h"
  #include "src/profile.h"
-@@ -1213,6 +1214,131 @@ static GList *player_list_metadata(struct avrcp_player *player)
+@@ -1213,6 +1214,177 @@ static GList *player_list_metadata(struct avrcp_player *player)
  	return attrs;
  }
  
@@ -507,23 +578,69 @@ index 80f34c7..50458b9 100644
 +	return AVC_CTYPE_REJECTED;
 +}
 +
-+/* Shanling: PlayItem from the library (coda-rc, docs/bluetoothd.md "Browsing") */
++/*
++ * Shanling: a request handed to coda-rc (docs/bluetoothd.md "Browsing"), answered from the main loop when its
++ * reply comes (shanling_browse); the handler that sent it sets shanling_deferred, and the channel's PDU
++ * handler returns AVCTP_DEFERRED so avctp sends nothing yet.
++ */
++struct shanling_request {
++	struct avrcp *session;
++	uint8_t transaction;
++	uint8_t pdu_id;
++	uint16_t room;
++	uint16_t len;
++	uint8_t params[];
++};
++static bool shanling_deferred;
++
++static struct shanling_request *shanling_request(struct avrcp *session, uint8_t transaction, uint8_t pdu_id,
++						const uint8_t *params, uint16_t len, uint16_t room)
++{
++	struct shanling_request *r = g_malloc(sizeof(*r) + len);
++
++	r->session = session;
++	r->transaction = transaction;
++	r->pdu_id = pdu_id;
++	r->room = room;
++	r->len = len;
++	memcpy(r->params, params, len);
++	return r;
++}
++
++static void shanling_played(const uint8_t *reply, ssize_t len, void *user_data)
++{
++	struct shanling_request *r = user_data;
++	uint8_t pdu[AVRCP_HEADER_LENGTH + 1] = { 0x00, 0x19, 0x58, AVRCP_PLAY_ITEM, AVRCP_PACKET_TYPE_SINGLE, 0, 1 };
++	uint8_t status = len == 1 ? reply[0] : AVRCP_STATUS_INTERNAL_ERROR;
++
++	pdu[AVRCP_HEADER_LENGTH] = status;
++	avctp_send_vendordep(r->session->conn, r->transaction,
++				status == AVRCP_STATUS_SUCCESS ? AVC_CTYPE_ACCEPTED : AVC_CTYPE_REJECTED,
++				AVC_SUBUNIT_PANEL, pdu, sizeof(pdu));
++	g_free(r);
++}
++
++/* Shanling: PlayItem from the library, answered when coda-rc has taken it */
 +static uint8_t shanling_play_item(struct avrcp *session, struct avrcp_header *pdu, uint8_t transaction)
 +{
 +	uint16_t len = be16_to_cpu(pdu->params_len);
-+	uint8_t status;
-+	ssize_t n = shanling_browse(GPOINTER_TO_UINT(session), AVRCP_PLAY_ITEM, pdu->params, len, 1, &status, 1);
++	struct shanling_request *r = shanling_request(session, transaction, AVRCP_PLAY_ITEM, pdu->params, len, 1);
 +
++	if (!shanling_browse(GPOINTER_TO_UINT(session), AVRCP_PLAY_ITEM, pdu->params, len, 1, shanling_played, r)) {
++		shanling_deferred = true;
++		return AVC_CTYPE_ACCEPTED;
++	}
++	g_free(r);
 +	pdu->packet_type = AVRCP_PACKET_TYPE_SINGLE;
 +	pdu->params_len = cpu_to_be16(1);
-+	pdu->params[0] = n == 1 ? status : AVRCP_STATUS_INTERNAL_ERROR;
-+	return pdu->params[0] == AVRCP_STATUS_SUCCESS ? AVC_CTYPE_ACCEPTED : AVC_CTYPE_REJECTED;
++	pdu->params[0] = AVRCP_STATUS_INTERNAL_ERROR;
++	return AVC_CTYPE_REJECTED;
 +}
 +
  static uint8_t avrcp_handle_get_element_attributes(struct avrcp *session,
  						struct avrcp_header *pdu,
  						uint8_t transaction)
-@@ -1494,12 +1620,24 @@ static uint8_t avrcp_handle_get_play_status(struct avrcp *session,
+@@ -1494,12 +1666,24 @@ static uint8_t avrcp_handle_get_play_status(struct avrcp *session,
  		return AVC_CTYPE_REJECTED;
  	}
  
@@ -551,7 +668,7 @@ index 80f34c7..50458b9 100644
  
  	pdu->params_len = cpu_to_be16(9);
  
-@@ -1627,13 +1765,16 @@ static uint8_t avrcp_handle_register_notification(struct avrcp *session,
+@@ -1627,13 +1811,16 @@ static uint8_t avrcp_handle_register_notification(struct avrcp *session,
  
  	switch (pdu->params[0]) {
  	case AVRCP_EVENT_STATUS_CHANGED:
@@ -570,7 +687,7 @@ index 80f34c7..50458b9 100644
  		memcpy(&pdu->params[1], &uid, sizeof(uint64_t));
  
  		break;
-@@ -1834,6 +1975,13 @@ static uint8_t avrcp_handle_set_addressed_player(struct avrcp *session,
+@@ -1834,6 +2021,13 @@ static uint8_t avrcp_handle_set_addressed_player(struct avrcp *session,
  	player = find_tg_player(session, player_id);
  	pdu->packet_type = AVRCP_PACKET_TYPE_SINGLE;
  
@@ -584,7 +701,7 @@ index 80f34c7..50458b9 100644
  	if (player) {
  		player->addressed = true;
  		status = AVRCP_STATUS_SUCCESS;
-@@ -1866,7 +2014,9 @@ static const struct control_pdu_handler control_handlers[] = {
+@@ -1866,7 +2060,9 @@ static const struct control_pdu_handler control_handlers[] = {
  		{ AVRCP_LIST_PLAYER_VALUES, AVC_CTYPE_STATUS,
  					avrcp_handle_list_player_values },
  		{ AVRCP_GET_ELEMENT_ATTRIBUTES, AVC_CTYPE_STATUS,
@@ -595,7 +712,19 @@ index 80f34c7..50458b9 100644
  		{ AVRCP_GET_CURRENT_PLAYER_VALUE, AVC_CTYPE_STATUS,
  					avrcp_handle_get_current_player_value },
  		{ AVRCP_SET_PLAYER_VALUE, AVC_CTYPE_CONTROL,
-@@ -2118,14 +2268,21 @@ failed:
+@@ -1946,6 +2142,11 @@ static size_t handle_vendordep_pdu(struct avctp *conn, uint8_t transaction,
+ 
+ 	*code = handler->func(session, pdu, transaction);
+ 
++	if (shanling_deferred) {
++		shanling_deferred = false;
++		return AVCTP_DEFERRED;
++	}
++
+ 	if (*code != AVC_CTYPE_REJECTED &&
+ 				pdu->pdu_id != AVRCP_GET_ELEMENT_ATTRIBUTES &&
+ 				pdu->pdu_id != AVRCP_REQUEST_CONTINUING &&
+@@ -2118,14 +2319,21 @@ failed:
  	pdu->param_len = cpu_to_be16(1);
  }
  
@@ -620,40 +749,66 @@ index 80f34c7..50458b9 100644
  		{ },
  };
  
-@@ -2142,6 +2299,44 @@ size_t avrcp_browsing_general_reject(uint8_t *operands)
+@@ -2142,6 +2350,70 @@ size_t avrcp_browsing_general_reject(uint8_t *operands)
  	return AVRCP_BROWSING_HEADER_LENGTH + sizeof(status);
  }
  
 +/*
 + * Shanling: the browsing PDUs answered from the library by coda-rc (docs/bluetoothd.md "Browsing"), the
-+ * reply written over the request in avctp's buffer, which holds the most the channel sends. With no answer
-+ * from coda-rc, GetFolderItems and GetTotalNumberOfItems are upstream's (the player list) and the others
-+ * an internal error.
++ * reply sent when it comes. With no answer from coda-rc, GetFolderItems and GetTotalNumberOfItems are
++ * upstream's (the player list) and the others an internal error: at once when the request cannot be sent,
++ * else when coda-rc's answer fails or is late.
 + */
-+static void shanling_browsing(struct avrcp *session, struct avrcp_browsing_header *pdu, uint8_t transaction)
++static void shanling_browsing_fallback(struct avrcp *session, struct avrcp_browsing_header *pdu,
++								uint8_t transaction)
 +{
-+	static uint8_t req[1024];
-+	uint16_t len = be16_to_cpu(pdu->param_len);
-+	uint16_t room = avctp_browsing_room(session->conn);
-+	ssize_t n = -1;
-+
-+	if (len <= sizeof(req) && room > AVRCP_BROWSING_HEADER_LENGTH) {
-+		memcpy(req, pdu->params, len);
-+		room -= AVRCP_BROWSING_HEADER_LENGTH;
-+		n = shanling_browse(GPOINTER_TO_UINT(session), pdu->pdu_id, req, len, room, pdu->params, room);
-+	}
-+	if (n > 0) {
-+		pdu->param_len = cpu_to_be16(n);
-+		return;
-+	}
-+	if (len <= sizeof(req))
-+		memcpy(pdu->params, req, len);
 +	if (pdu->pdu_id == AVRCP_GET_FOLDER_ITEMS)
 +		avrcp_handle_get_folder_items(session, pdu, transaction);
 +	else if (pdu->pdu_id == AVRCP_GET_TOTAL_NUMBER_OF_ITEMS)
 +		avrcp_handle_get_total_number_of_items(session, pdu, transaction);
 +	else
 +		shanling_browsing_failed(pdu);
++}
++
++static void shanling_browsed(const uint8_t *reply, ssize_t len, void *user_data)
++{
++	struct shanling_request *r = user_data;
++	/* room enough for coda-rc's reply, the request again, or upstream's player list */
++	size_t size = AVRCP_BROWSING_HEADER_LENGTH + MAX(MAX(r->room, r->len), 1024);
++	struct avrcp_browsing_header *pdu = g_malloc0(size);
++
++	pdu->pdu_id = r->pdu_id;
++	if (len > 0 && len <= r->room) {
++		memcpy(pdu->params, reply, len);
++		pdu->param_len = cpu_to_be16(len);
++	} else {
++		memcpy(pdu->params, r->params, r->len);
++		pdu->param_len = cpu_to_be16(r->len);
++		shanling_browsing_fallback(r->session, pdu, r->transaction);
++	}
++	avctp_send_browsing_rsp(r->session->conn, r->transaction, (uint8_t *) pdu,
++				AVRCP_BROWSING_HEADER_LENGTH + be16_to_cpu(pdu->param_len));
++	g_free(pdu);
++	g_free(r);
++}
++
++static void shanling_browsing(struct avrcp *session, struct avrcp_browsing_header *pdu, uint8_t transaction)
++{
++	uint16_t len = be16_to_cpu(pdu->param_len);
++	uint16_t room = avctp_browsing_room(session->conn);
++	struct shanling_request *r;
++
++	if (room > AVRCP_BROWSING_HEADER_LENGTH) {
++		room -= AVRCP_BROWSING_HEADER_LENGTH;
++		r = shanling_request(session, transaction, pdu->pdu_id, pdu->params, len, room);
++		if (!shanling_browse(GPOINTER_TO_UINT(session), pdu->pdu_id, pdu->params, len, room,
++								shanling_browsed, r)) {
++			shanling_deferred = true;
++			return;
++		}
++		g_free(r);
++	}
++	shanling_browsing_fallback(session, pdu, transaction);
 +}
 +
 +static void shanling_browsing_failed(struct avrcp_browsing_header *pdu)
@@ -665,7 +820,18 @@ index 80f34c7..50458b9 100644
  static size_t handle_browsing_pdu(struct avctp *conn,
  					uint8_t transaction, uint8_t *operands,
  					size_t operand_count, void *user_data)
-@@ -2239,6 +2434,9 @@ static gboolean avrcp_get_play_status_rsp(struct avctp *conn, uint8_t code,
+@@ -2163,6 +2435,10 @@ static size_t handle_browsing_pdu(struct avctp *conn,
+ done:
+ 	session->transaction = transaction;
+ 	handler->func(session, pdu, transaction);
++	if (shanling_deferred) {
++		shanling_deferred = false;
++		return AVCTP_DEFERRED;
++	}
+ 	return AVRCP_BROWSING_HEADER_LENGTH + be16_to_cpu(pdu->param_len);
+ }
+ 
+@@ -2239,6 +2515,9 @@ static gboolean avrcp_get_play_status_rsp(struct avctp *conn, uint8_t code,
  	status = get_u8(pdu->params + 8);
  	media_player_set_status(mp, status_to_string(status));
  
@@ -675,7 +841,7 @@ index 80f34c7..50458b9 100644
  	return FALSE;
  }
  
-@@ -2395,11 +2593,72 @@ static void avrcp_list_player_attributes(struct avrcp *session)
+@@ -2395,11 +2674,72 @@ static void avrcp_list_player_attributes(struct avrcp *session)
  					session);
  }
  
@@ -748,7 +914,7 @@ index 80f34c7..50458b9 100644
  	int i;
  
  	media_player_clear_metadata(mp);
-@@ -2426,12 +2685,39 @@ static void avrcp_parse_attribute_list(struct avrcp_player *player,
+@@ -2426,12 +2766,39 @@ static void avrcp_parse_attribute_list(struct avrcp_player *player,
  				media_player_set_metadata(mp, item,
  							metadata_to_str(id),
  							&operands[i], len);
@@ -788,7 +954,7 @@ index 80f34c7..50458b9 100644
  }
  
  static gboolean avrcp_get_element_attributes_rsp(struct avctp *conn,
-@@ -3776,6 +4062,9 @@ static void avrcp_playback_pos_changed(struct avrcp *session,
+@@ -3776,6 +4143,9 @@ static void avrcp_playback_pos_changed(struct avrcp *session,
  
  	position = get_be32(&pdu->params[1]);
  	media_player_set_position(mp, position);
@@ -798,7 +964,7 @@ index 80f34c7..50458b9 100644
  }
  
  static void avrcp_setting_changed(struct avrcp *session,
-@@ -4144,19 +4433,15 @@ static void target_init(struct avrcp *session)
+@@ -4144,19 +4514,15 @@ static void target_init(struct avrcp *session)
  		media_transport_update_device_volume(session->dev, init_volume);
  	}
  
@@ -820,7 +986,7 @@ index 80f34c7..50458b9 100644
  
  	/* Only check capabilities if controller is not supported */
  	if (session->controller == NULL)
-@@ -4208,7 +4493,9 @@ static void controller_init(struct avrcp *session)
+@@ -4208,7 +4574,9 @@ static void controller_init(struct avrcp *session)
  
  static void session_init_control(struct avrcp *session)
  {
@@ -831,7 +997,7 @@ index 80f34c7..50458b9 100644
  							session->conn,
  							handle_passthrough,
  							session);
-@@ -4224,6 +4511,9 @@ static void session_init_control(struct avrcp *session)
+@@ -4224,6 +4592,9 @@ static void session_init_control(struct avrcp *session)
  
  	if (btd_device_get_service(session->dev, AVRCP_REMOTE_UUID) != NULL)
  		target_init(session);
@@ -841,16 +1007,16 @@ index 80f34c7..50458b9 100644
  }
  
  static void controller_destroy(struct avrcp *session)
-@@ -4255,6 +4545,8 @@ static void session_destroy(struct avrcp *session, int err)
+@@ -4255,6 +4626,8 @@ static void session_destroy(struct avrcp *session, int err)
  	struct avrcp_server *server = session->server;
  	struct btd_service *service;
  
-+	shanling_browse_forget(GPOINTER_TO_UINT(session)); /* the path it walked */
++	shanling_browse_forget(GPOINTER_TO_UINT(session), g_free); /* its path, its requests still out */
 +
  	server->sessions = g_slist_remove(server->sessions, session);
  
  	session_abort_pending_pdu(session);
-@@ -4802,8 +5094,71 @@ static struct btd_profile avrcp_controller_profile = {
+@@ -4802,8 +5175,71 @@ static struct btd_profile avrcp_controller_profile = {
  	.adapter_remove = avrcp_controller_server_remove,
  };
  
@@ -1105,10 +1271,10 @@ index 1d35716..e19ce0c 100644
  	mainloop_init();
 diff --git a/src/shanling.c b/src/shanling.c
 new file mode 100644
-index 0000000..d06d0a8
+index 0000000..0b848f6
 --- /dev/null
 +++ b/src/shanling.c
-@@ -0,0 +1,155 @@
+@@ -0,0 +1,212 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +/*
 + * Receiver mode's signals to demo (Q2 Pod's docs/bluetoothd.md, "Receiver mode"): stock's wrappers
@@ -1132,9 +1298,11 @@ index 0000000..d06d0a8
 +/*
 + * Browsing from the Q2's library (docs/bluetoothd.md, "Browsing"): each browsing PDU, and PlayItem, goes to
 + * coda-rc --avrcp over its UNIX socket as {u16 length, pdu, tag u32, room u16, parameters} and comes back as
-+ * {u16 length, pdu, the reply's parameters}. The call blocks bluetoothd for the library's answer, at most
-+ * BROWSE_TIMEOUT_S. coda-rc is started at the first request it does not answer, then at most every
-+ * BROWSE_RESPAWN_S; that request, and any in between, get no answer from it.
++ * {u16 length, pdu, the reply's parameters}, in order. Nothing waits: the request is written and the reply
++ * read when the main loop sees it, so a slow library holds up no other AVRCP, A2DP or D-Bus work. A request
++ * unanswered after BROWSE_TIMEOUT_MS ends the connection and fails every request on it (coda-rc answers in
++ * order, so the ones after it were late too); the next request connects again. coda-rc is started at the
++ * first request that finds no socket, then at most every BROWSE_RESPAWN_S; that request fails.
 + */
 +#include <errno.h>
 +#include <string.h>
@@ -1146,17 +1314,93 @@ index 0000000..d06d0a8
 +#include <glib.h>
 +
 +#define BROWSE_SOCKET "/tmp/coda-rc.avrcp"
-+#define BROWSE_TIMEOUT_S 2
++#define BROWSE_TIMEOUT_MS 1500
 +#define BROWSE_RESPAWN_S 10
++#define BROWSE_PENDING 8
++
++static struct {
++	uint32_t tag;
++	uint8_t pdu;
++	shanling_browse_cb cb;
++	void *user_data;
++	guint timer;
++} pending[BROWSE_PENDING];
++static unsigned int pending_n;	/* pending[0] is the oldest */
 +
 +static int browse_fd = -1;
++static guint browse_watch;
 +static time_t browse_spawned;
++static uint8_t rx[2 + 4096];
++static size_t rx_n;
++
++/* the oldest request out: its callback, unless a forget cancelled it, with reply (len bytes) or none (-1) */
++static void browse_pop(const uint8_t *reply, ssize_t len)
++{
++	shanling_browse_cb cb = pending[0].cb;
++	void *user_data = pending[0].user_data;
++
++	if (pending[0].timer)
++		g_source_remove(pending[0].timer);
++	memmove(pending, pending + 1, --pending_n * sizeof(pending[0]));
++	if (cb)
++		cb(reply, len, user_data);
++}
 +
 +static void browse_close(void)
 +{
++	if (browse_watch)
++		g_source_remove(browse_watch);
++	browse_watch = 0;
 +	if (browse_fd >= 0)
 +		close(browse_fd);
 +	browse_fd = -1;
++	rx_n = 0;
++	while (pending_n)
++		browse_pop(NULL, -1);
++}
++
++static gboolean browse_timeout(gpointer data)
++{
++	guint self = g_source_get_id(g_main_current_source());
++	unsigned int i;
++
++	for (i = 0; i < pending_n; i++)
++		if (pending[i].timer == self)
++			pending[i].timer = 0;	/* this one: removed by returning FALSE */
++	browse_close();
++	return FALSE;
++}
++
++static gboolean browse_readable(GIOChannel *io, GIOCondition cond, gpointer data)
++{
++	ssize_t r = read(browse_fd, rx + rx_n, sizeof(rx) - rx_n);
++
++	if (r < 0 && (errno == EAGAIN || errno == EINTR))
++		return TRUE;
++	if (r <= 0)
++		goto failed;
++	rx_n += r;
++	while (rx_n >= 2) {
++		size_t n = (size_t) rx[0] << 8 | rx[1];
++
++		if (n < 1 || n > sizeof(rx) - 2 || !pending_n)
++			goto failed;
++		if (rx_n < 2 + n)
++			break;
++		if (rx[2] != pending[0].pdu)
++			goto failed;
++		browse_pop(rx + 3, n - 1);
++		if (browse_fd < 0)	/* a callback's request failed and closed it */
++			return FALSE;
++		memmove(rx, rx + 2 + n, rx_n - 2 - n);
++		rx_n -= 2 + n;
++	}
++	return TRUE;
++
++failed:
++	browse_watch = 0;	/* removed by returning FALSE */
++	browse_close();
++	return FALSE;
 +}
 +
 +static void browse_spawn(void)
@@ -1175,62 +1419,34 @@ index 0000000..d06d0a8
 +static int browse_connect(void)
 +{
 +	struct sockaddr_un a = { .sun_family = AF_UNIX };
-+	struct timeval tv = { BROWSE_TIMEOUT_S, 0 };
++	GIOChannel *io;
 +
 +	if (browse_fd >= 0)
 +		return 0;
 +	strncpy(a.sun_path, BROWSE_SOCKET, sizeof(a.sun_path) - 1);
-+	browse_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
++	browse_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
 +	if (browse_fd < 0)
 +		return -1;
-+	setsockopt(browse_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-+	setsockopt(browse_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 +	if (connect(browse_fd, (struct sockaddr *) &a, sizeof(a)) < 0) {
-+		browse_close();
++		close(browse_fd);
++		browse_fd = -1;
 +		browse_spawn();
 +		return -1;
 +	}
++	io = g_io_channel_unix_new(browse_fd);
++	browse_watch = g_io_add_watch(io, G_IO_IN | G_IO_HUP | G_IO_ERR | G_IO_NVAL, browse_readable, NULL);
++	g_io_channel_unref(io);
 +	return 0;
 +}
 +
-+static int browse_io(uint8_t *buf, size_t n, int out)
-+{
-+	while (n) {
-+		ssize_t r = out ? send(browse_fd, buf, n, MSG_NOSIGNAL) : read(browse_fd, buf, n);
-+
-+		if (r < 0 && errno == EINTR)
-+			continue;
-+		if (r <= 0)
-+			return -1;
-+		buf += r;
-+		n -= r;
-+	}
-+	return 0;
-+}
-+
-+static int browse_send(const uint8_t *frame, size_t n)
-+{
-+	/* once again on a fresh connection: coda-rc may have restarted since the last */
-+	for (int tries = 0; tries < 2; tries++) {
-+		if (browse_connect() < 0)
-+			return -1;
-+		if (!browse_io((uint8_t *) frame, n, 1))
-+			return 0;
-+		browse_close();
-+	}
-+	return -1;
-+}
-+
-+ssize_t shanling_browse(uint32_t tag, uint8_t pdu, const uint8_t *params, uint16_t len, uint16_t room,
-+						uint8_t *out, size_t cap)
++int shanling_browse(uint32_t tag, uint8_t pdu, const uint8_t *params, uint16_t len, uint16_t room,
++					shanling_browse_cb cb, void *user_data)
 +{
 +	static uint8_t frame[2 + 7 + 1024];
-+	uint8_t head[3];
-+	size_t n;
++	size_t n = 7 + len;
 +
-+	if (len > sizeof(frame) - 9)
++	if (len > sizeof(frame) - 9 || pending_n == BROWSE_PENDING || browse_connect() < 0)
 +		return -1;
-+	n = 7 + len;
 +	frame[0] = n >> 8;
 +	frame[1] = n;
 +	frame[2] = pdu;
@@ -1241,35 +1457,42 @@ index 0000000..d06d0a8
 +	frame[7] = room >> 8;
 +	frame[8] = room;
 +	memcpy(frame + 9, params, len);
-+	if (browse_send(frame, 2 + n) < 0)
++	/* a frame is far smaller than the socket's buffer: all of it goes, or coda-rc is gone or stuck */
++	if (send(browse_fd, frame, 2 + n, MSG_NOSIGNAL | MSG_DONTWAIT) != (ssize_t) (2 + n)) {
++		browse_close();
 +		return -1;
-+	if (browse_io(head, 3, 0) < 0)
-+		goto failed;
-+	n = (size_t) head[0] << 8 | head[1];
-+	if (n < 1 || n - 1 > cap || head[2] != pdu)
-+		goto failed;
-+	if (browse_io(out, n - 1, 0) < 0)
-+		goto failed;
-+	return n - 1;
-+
-+failed:
-+	browse_close();
-+	return -1;
++	}
++	pending[pending_n].tag = tag;
++	pending[pending_n].pdu = pdu;
++	pending[pending_n].cb = cb;
++	pending[pending_n].user_data = user_data;
++	pending[pending_n].timer = g_timeout_add(BROWSE_TIMEOUT_MS, browse_timeout, NULL);
++	pending_n++;
++	return 0;
 +}
 +
-+void shanling_browse_forget(uint32_t tag)
++void shanling_browse_forget(uint32_t tag, void (*free_fn)(void *))
 +{
 +	uint8_t frame[2 + 5] = { 0, 5, 0xff, tag >> 24, tag >> 16, tag >> 8, tag };
++	unsigned int i;
 +
-+	if (browse_fd >= 0 && browse_io(frame, sizeof(frame), 1) < 0)
++	/* the session's requests still out: answered by nobody, their replies read and dropped */
++	for (i = 0; i < pending_n; i++)
++		if (pending[i].tag == tag && pending[i].cb) {
++			pending[i].cb = NULL;
++			if (free_fn)
++				free_fn(pending[i].user_data);
++		}
++	if (browse_fd >= 0 && send(browse_fd, frame, sizeof(frame), MSG_NOSIGNAL | MSG_DONTWAIT) !=
++								(ssize_t) sizeof(frame))
 +		browse_close();
 +}
 diff --git a/src/shanling.h b/src/shanling.h
 new file mode 100644
-index 0000000..80b4bf8
+index 0000000..e1598df
 --- /dev/null
 +++ b/src/shanling.h
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,55 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +/*
 + * Shanling's libbtctl.so, which stock's bluetoothd links (Q2 Pod's docs/bluetoothd.md): its D-Bus
@@ -1313,11 +1536,15 @@ index 0000000..80b4bf8
 +/* src/shanling.c */
 +void shanling_play_state(int duration, int position, int status);
 +
-+/* src/shanling.c: browsing from the library, through coda-rc --avrcp. The reply's parameters, their
-+ * length, or -1 with no answer. tag names the car (its session) for the path it has walked. */
++/* src/shanling.c: browsing from the library, through coda-rc --avrcp. shanling_browse sends a request and
++ * returns 0, and cb gets the reply's parameters (len bytes) from the main loop later, or reply NULL and len
++ * -1 when there is none; -1 when it could not be sent (cb is not called). tag names the car (its session)
++ * for the path it has walked; room is the most its reply may take. shanling_browse_forget drops the car's
++ * path and its requests still out: their callbacks are never called, free_fn gets their user_data. */
 +#include <stdint.h>
 +#include <sys/types.h>
-+ssize_t shanling_browse(uint32_t tag, uint8_t pdu, const uint8_t *params, uint16_t len, uint16_t room,
-+						uint8_t *out, size_t cap);
-+void shanling_browse_forget(uint32_t tag);
++typedef void (*shanling_browse_cb)(const uint8_t *reply, ssize_t len, void *user_data);
++int shanling_browse(uint32_t tag, uint8_t pdu, const uint8_t *params, uint16_t len, uint16_t room,
++					shanling_browse_cb cb, void *user_data);
++void shanling_browse_forget(uint32_t tag, void (*free_fn)(void *));
 +#define SHANLING_PLAYER_ID 1 /* coda-rc's player, the one GetFolderItems lists */

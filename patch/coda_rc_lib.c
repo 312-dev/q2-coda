@@ -227,16 +227,72 @@ int lib_has_server(void) {
 static sqlite3 *db;
 static char sql[6144];
 
-static void lib_close(void) {
+/* coda-rc --avrcp keeps the connection, and with it the views, from one request to the next
+ * (lib_keep_open); the Car Remote daemon opens per request */
+static int keep;
+static struct {
+    long len[3];
+    uint32_t counter[2];
+    int server;
+} kept;
+
+static void lib_drop(void) {
     if (db) sqlite3_close(db);
     db = 0;
 }
 
+static void lib_close(void) {
+    if (!keep) lib_drop();
+}
+
+void lib_keep_open(int on) {
+    keep = on;
+    if (!on) lib_drop();
+}
+
+/* What a kept connection is good for: the database's and the catalogue's lengths and SQLite file change
+ * counters (offset 24, written by every commit), Long Songs' cache's length and the Library setting. A scan
+ * that rewrites the database, a catalogue renamed over the old one or a new setting each changes it. */
+static void lib_key(void *out) {
+    static const char *const files[] = {DB, CAT, DURATIONS};
+    typeof(kept) *k = out;
+    memset(k, 0, sizeof *k);
+    for (int i = 0; i < 3; ++i) {
+        char p[256];
+        uint8_t h[28];
+        int fd = open(crc_path(p, sizeof p, files[i]), O_RDONLY | O_CLOEXEC);
+        if (fd < 0) continue;
+        k->len[i] = lseek(fd, 0, 2);
+        if (i < 2 && lseek(fd, 0, 0) == 0 && read(fd, h, sizeof h) == (ssize_t)sizeof h)
+            k->counter[i] = (uint32_t)h[24] << 24 | h[25] << 16 | h[26] << 8 | h[27];
+        close(fd);
+    }
+    k->server = lib_has_server();
+}
+
+/* sql's "create temp view NAME as" made "create temp table NAME as"; 0 when it has none */
+static int as_table(char *q, const char *name) {
+    char view[40];
+    snprintf(view, sizeof view, "create temp view %s as", name);
+    char *at = strstr(q, view);
+    if (!at || strlen(q) + 2 > sizeof sql) return 0;
+    memmove(at + 17, at + 16, strlen(at + 16) + 1); /* "view" to "table": one character longer */
+    memcpy(at + 12, "table", 5);
+    return 1;
+}
+
 static int lib_open(void) {
     char p[256];
+    if (keep) {
+        typeof(kept) now;
+        lib_key(&now);
+        if (db && !memcmp(&now, &kept, sizeof now)) return 0;
+        lib_drop();
+        kept = now;
+    }
     if (sqlite3_open_v2(crc_path(p, sizeof p, DB), &db, SQLITE_OPEN_READONLY, 0) != SQLITE_OK) {
         crc_log("lib: %s", db ? sqlite3_errmsg(db) : "no database");
-        lib_close();
+        lib_drop();
         return -1;
     }
     sqlite3_busy_timeout(db, 500);
@@ -264,9 +320,14 @@ static int lib_open(void) {
              "else filename end ord, case when srv then track else lead(filename) end num from songs;"
              "create temp view albums as select ak, max(album) title, max(aartist) artist, max(year) year, "
              "max(added) added, norm(max(album)) nt, norm(max(aartist)) naa from s2 group by ak;");
+    /* Kept open, s2 and albums are made once, as tables: their keys (norm, akey) are not worked out
+     * again for every row on every request, and an index finds a song or an album */
+    if (keep && as_table(sql, "s2") && as_table(sql, "albums"))
+        snprintf(sql + strlen(sql), sizeof sql - strlen(sql), "%s",
+                 "create index s2_sid on s2(sid);create index s2_ak on s2(ak);create index s2_naa on s2(naa);create index s2_nt on s2(nt);");
     if (sqlite3_exec(db, sql, 0, 0, 0) != SQLITE_OK) {
         crc_log("lib: views: %s", sqlite3_errmsg(db));
-        lib_close();
+        lib_drop();
         return -1;
     }
     return 0;
@@ -600,7 +661,7 @@ static int browse(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
     int total = count_of(sql), split = 0;
     if (total < 0) {
         crc_log("lib: %s", sqlite3_errmsg(db));
-        lib_close();
+        lib_drop(); /* an error: the next request opens afresh */
         return crc_error(s, req_id, E_INTERNAL, "query");
     }
     /* An empty list under an id names nothing: albums, artists, genres, years, folders and buckets are made
@@ -680,7 +741,7 @@ static int browse(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
 fail:
     crc_log("lib: browse %s: %s", node, sqlite3_errmsg(db));
     sqlite3_finalize(st);
-    lib_close();
+    lib_drop(); /* an error: the next request opens afresh */
     return crc_error(s, req_id, E_INTERNAL, "query");
 }
 
@@ -731,7 +792,7 @@ static int search(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
     return crc_send(s, T_SEARCH_RESP, req_id, out, w.n);
 fail:
     crc_log("lib: search: %s", sqlite3_errmsg(db));
-    lib_close();
+    lib_drop(); /* an error: the next request opens afresh */
     return crc_error(s, req_id, E_INTERNAL, "query");
 }
 
@@ -879,7 +940,7 @@ static int play(crc_session *s, unsigned req_id, const uint8_t *p, size_t n, int
         sqlite3_stmt *st;
         if (sqlite3_prepare_v2(db, sql, -1, &st, 0) != SQLITE_OK) {
             crc_log("lib: play %s: %s", node, sqlite3_errmsg(db));
-            lib_close();
+            lib_drop(); /* an error: the next request opens afresh */
             free(ids);
             return crc_error(s, req_id, E_INTERNAL, "query");
         }
@@ -975,7 +1036,7 @@ int lib_songs_meta(const char *const *ids, int n, lib_meta *out) {
     if (lib_open()) return -1;
     sqlite3_stmt *st;
     if (sqlite3_prepare_v2(db, "select artist, album, secs from s2 where sid = ?1", -1, &st, 0) != SQLITE_OK) {
-        lib_close();
+        lib_drop(); /* an error: the next request opens afresh */
         return -1;
     }
     for (int i = 0; i < n; ++i) {

@@ -18,6 +18,8 @@
 #define CHARSET_UTF8 0x6a
 #define DEPTH_MAX 12
 #define CARS 4
+#define SEARCH_MAX 20 /* results of each kind; 50 of each can pass coda-rc's largest answer */
+#define PAGE 50 /* items one GetFolderItems answers at most, as many as the car's room holds */
 #define ROOT "library"
 
 enum {
@@ -84,9 +86,9 @@ static void read_item(const pbf *outer, item_t *it) {
 /* the songs' tags: an item's subtitle is its artist in one list and its length in another (coda_rc_lib.c
  * put_rows), so they are read from the library */
 static void tag(item_t *items, int n) {
-    const char *ids[16];
-    static lib_meta meta[16];
-    if (n <= 0 || n > 16) return;
+    const char *ids[PAGE];
+    static lib_meta meta[PAGE];
+    if (n <= 0 || n > PAGE) return;
     for (int i = 0; i < n; ++i) ids[i] = items[i].id;
     if (lib_songs_meta(ids, n, meta)) return;
     for (int i = 0; i < n; ++i) {
@@ -117,12 +119,13 @@ static int browse(const char *node, unsigned offset, unsigned max, item_t *items
     return total;
 }
 
-/* The car's last search, flattened: Tracks, then Albums, then Artists, as coda_rc_lib.c groups them */
+/* The car's last search, flattened: Tracks, then Albums, then Artists, as coda_rc_lib.c groups them, up to
+ * SEARCH_MAX of each */
 static int search(const char *q, unsigned offset, unsigned max, item_t *items, int *n) {
     uint8_t b[160];
     pbw w = {b, 0, sizeof b, 0};
     pb_str(&w, 1, q);
-    pb_varint(&w, 2, 50);
+    pb_varint(&w, 2, SEARCH_MAX);
     *n = 0;
     if (!*q || ask(T_SEARCH, b, w.n) != T_SEARCH_RESP) return 0;
     pbr r = {got, got + got_n};
@@ -344,8 +347,8 @@ static size_t get_folder_items(car_t *c, const uint8_t *p, size_t n, out_t *o) {
         put_player(o, "Q2");
         count = 1;
     } else if (scope >= SCOPE_VFS && scope <= SCOPE_NOW_PLAYING) {
-        static item_t items[16];
-        unsigned max = end - start + 1 < 16 ? end - start + 1 : 16;
+        static item_t items[PAGE];
+        unsigned max = end - start + 1 < PAGE ? end - start + 1 : PAGE;
         int k = 0, total = scope == SCOPE_VFS      ? browse(here(c), start, max, items, &k)
                            : scope == SCOPE_SEARCH ? search(c->query, start, max, items, &k)
                                                    : queue(start, max, items, &k);

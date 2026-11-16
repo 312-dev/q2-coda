@@ -142,6 +142,7 @@ typedef struct {
     int secs, found;
 } lib_meta;
 int lib_songs_meta(const char *const *ids, int n, lib_meta *out); /* each song id's tags; -1 no library */
+void lib_keep_open(int on); /* 1: the library stays open between requests until its files change */
 int lib_has_server(void);
 /* BLE (coda_rc_ble.c): ble_start's fd joins the poll with ble_events(); -1 when BlueZ is not there */
 int ble_start(void);
