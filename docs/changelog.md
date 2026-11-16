@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Settings > Storage: the notes under the rows no longer mention Radio or items that refill by themselves, which the Subsonic app doesn't do yet.
   - Manual: a new **Car Remote** section says how to pair a phone, what it can do from the car's screen, and how to forget a phone.
   - Now Playing's info page: a server song's genre and year could show as Unknown at random.
   - Bluetooth: car stereos and smart speakers that show what's playing (an Echo, a BMW's iDrive and most headsets' apps) now get the song's title, artist, album, track number and length from the Q2. They showed nothing before.

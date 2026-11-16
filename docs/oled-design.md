@@ -1047,7 +1047,7 @@ pattern.
 | About                               | Key/value table             | The wheel walks the rows and nothing opens; values in Text Secondary, a cut-off one scrolling when selected |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
 | Storage                             | Storage bar                 | [Progress and sliders](#progress-and-sliders): the bar, its legend rows (Downloads and Stream Cache open pages) and two footers |
-| Storage > Downloads                 | Key/value rows              | Limit (its picker the inset modal's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centred on x 33, its name at x 52, size and chevron; two footers |
+| Storage > Downloads                 | Key/value rows              | Limit (its picker the inset modal's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centred on x 33, its name at x 52, size and chevron; a footer (the mock's second line, "Auto items refill on the next Sync.", waits for the app to keep items on its own) |
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             | Its [tabs](#tabs), then rows: the switch, Presets, Reset                                                   |
 | Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right                      |
@@ -1127,3 +1127,6 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 Still to build:
 
 - The confirmation for Repeat and Now Playing's mode changes.
+- The Songs legend, "Plain: yours · arrow: downloaded · cloud: streams" as a footer under a song list (`mock_radio.py`
+  `songs_marks`): a stock table's rows are pooled and its scroll end has no room for a footer; the manual explains the
+  marks meanwhile.
