@@ -83,13 +83,9 @@ int eng_save(const char *name, void *buf, unsigned size, unsigned magic);
 
 /* engine.c, for a game's draw. Colours are the screen's, 0xRRGGBB; Light Mode leaves them. */
 void eng_fill(struct eng_surface *s, int x, int y, int w, int h, unsigned rgb);
-void eng_blend(struct eng_surface *s, int x, int y, int w, int h, unsigned rgb, unsigned alpha);
 /* a disc with a smoothed edge, its centre and radius in 16.16 so it moves by parts of a pixel */
 void eng_disc(struct eng_surface *s, fx cx, fx cy, fx r, unsigned rgb);
 void eng_round(struct eng_surface *s, int x, int y, int w, int h, int r, unsigned rgb);
-/* an 8-bit mask in one colour (a glyph, a sprite's shape); stride is the mask's row */
-void eng_mask(struct eng_surface *s, int x, int y, int w, int h, const unsigned char *alpha,
-              int stride, unsigned rgb);
 /* ASCII in the theme's face at px, h rows from y: from x (0), centred on it (1) or ending at it
  * (2); returns its width */
 int eng_text(struct eng_surface *s, const char *text, int x, int y, int h, unsigned px,

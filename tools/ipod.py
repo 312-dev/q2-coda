@@ -113,7 +113,7 @@ class Geometry:
     split_art_up: int = 0
     split_inset: int = 0
     # 1: Now Playing's More and a playlist's More open as dialogs over the page under them (MODAL_PAGES, modal_page), which
-    # the payload draws as the inset modal (menu_modal.c), as it does the hold menus; 0: full pages, the hold menus stock's
+    # the payload draws as the menu sheet (menu_modal.c), as it does the hold menus; 0: full pages, the hold menus stock's
     modal: int = 0
 
 
@@ -183,7 +183,7 @@ NP_TEXT_W = 165
 NP_TITLE_PX = inc('NP_TITLE_PX')  # the title over the NP_META_PX artist and album, as Apple's hierarchy
 NP_META_PX = inc('NP_META_PX')
 NP_ART = 375 - 2 * NP_MARGIN - 12 - NP_TEXT_W
-NP_SLIDE_H = 186                 # the swipeable art, lyrics and visualizer pages; the dots sit below
+NP_SLIDE_H = 186                 # the swipeable art and lyrics pages; the dots sit below
 NP_DOTS_Y = NP_SLIDE_H - 4       # above the seek bar's NP_TOUCH target
 # The art's gap below to the dots matches its gap above to the foot of a 16px line centred in the top row.
 NP_ART_Y = (NP_DOTS_Y - NP_ART - (NP_TOP - 16) // 2) // 2
@@ -678,7 +678,7 @@ def playing_page(root, g=SET0):
     check(3 * inc('LYRIC_SLOT') <= 178, 'Three lyric lines must fit the page')
     lrc['self_layout'] = 'default(x=0,y=0,w=100%,h=100%)'
     lrc['children_layout'] = f'list_view(x=0,y={inc("LYRIC_SLOT")},s=0)'
-    # its y set as laid out too: visualizer.c places its page by it before the first layout
+    # its y set as laid out too, so a read before the first layout finds where the lyrics start
     named['view_lrc'][1][1] = 0
     named['view_lrc'][2]['self_layout'] = 'default(x=0,y=0,w=375,h=178)'
     for n in named['view_info'][3]:

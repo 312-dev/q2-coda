@@ -1,4 +1,4 @@
-/* An artist's page under a set with the inset modal (OLED's; docs/oled-design.md#artist-page): a
+/* An artist's page under a set with the menu sheet (OLED's; docs/oled-design.md#artist-page): a
  * header (hero_open) of a monogram, the name, a line of counts and one of genre, then an action
  * pair (pair_open), two accent panels side by side, Shuffle and Radio, then drill-down rows (Top
  * Songs, Albums, Singles & EPs, Similar Artists, All Songs) with a count and a chevron, and the
@@ -211,7 +211,7 @@ void hero_text(void *head, const char *name, const char *sub, const char *meta) 
 }
 
 /* The status bar's background (navigation.c ringnav_paint_bg): the monogram's (or cover's) top,
- * which stands above the window, while the header's page is on top (or under an inset modal, which
+ * which stands above the window, while the header's page is on top (or under a menu sheet, which
  * dims the bar with it) and still: a sliding page leaves the bar as it is. */
 void artist_cap(void *bar, void *canvas) {
     void *wm = window_manager(), *win = ar.head ? window_of(ar.head) : (void *)0,

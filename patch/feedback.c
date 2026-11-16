@@ -650,7 +650,7 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
 }
 
 /* The confirmation card (docs/oled-design.md#confirmation-card): stock's sortselect_dialog, as the
- * inset modal's pickers use it (menu_modal.c modal_list), its list the card's answers and the rest
+ * menu sheet's pickers use it (menu_modal.c modal_list), its list the card's answers and the rest
  * painted here. The scrim dims the page and the status row (confirm_bar_dim); the card is
  * CARD_W wide at CARD_X, its stack centred on CARD_CY and kept within CARD_TOP..CARD_FOOT: 18 px
  * of padding, the title (Inter Medium 20), the body (15 px Text Secondary, 19 px lines, 4 px under
@@ -675,7 +675,7 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
 #define CARD_ROW 32
 #define CARD_DEST_GAP 12
 #define CARD_BAR_IN 8
-#define CARD_SCRIM 0x80000000u /* the inset modal's dim */
+#define CARD_SCRIM 0x80000000u /* black at 50% */
 #define CARD_TIMER_MS 100      /* the timeout's seconds and bar */
 #define CARD_COUNT_PX TYPE(15)
 /* The card's motion (docs/oled-design.md#overlay-motion), through ui_kit.h's ovm_t: in over

@@ -303,7 +303,7 @@ STREAM_PX = 20
 STREAM_MARKS = {'spotify': 'spotify-logo', 'app': 'app-window', 'radio': 'radio', 'airplay': 'airplay', 'config': 'sliders-horizontal',
                 'subsonic': 'q2coda/subsonic'}
 TIDAL = ''.join(f'M{x - 3.3} {y}L{x} {y - 3.3}L{x + 3.3} {y}L{x} {y + 3.3}Z' for x, y in ((3.4, 6.7), (10, 6.7), (16.6, 6.7), (10, 13.3)))
-# The inset modal's symbols (menu_modal.c, a set with modal): regular weight at MENU_ICON_PX in FOLDER_INKS, and the
+# The menu sheet's symbols (menu_modal.c, a set with modal): regular weight at MENU_ICON_PX in FOLDER_INKS, and the
 # picker's check in the accent off the bar
 MENU_ICON_PX = 19
 MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart-break', 'list-plus', 'shuffle',
@@ -607,7 +607,7 @@ def images(t):
         for name, glyph in (('wifi_3', 'wifi-high'), ('wifi_2', 'wifi-medium'), ('wifi_1', 'wifi-low'), ('lock', 'lock-simple'),
                             ('trash', 'trash')):
             out |= {f'{prefix}_{name}_{k}': phosphor(glyph, ROW_ICON_PX, c, ROW_INK) for k, c in STATE_INKS.items()}
-    if any(g.modal for g in t['geoms'].values()):  # the inset modal's symbols (menu_modal.c)
+    if any(g.modal for g in t['geoms'].values()):  # the menu sheet's symbols (menu_modal.c)
         out |= {f'{prefix}_menu_{n}_{k}': phosphor(n, MENU_ICON_PX, c) for n in MENU_ICONS for k, c in FOLDER_INKS.items()}
         out[f'{prefix}_menu_check_a'] = phosphor('check', MENU_ICON_PX, on)
         # an artist's Shuffle and Radio panels and an album's Play (artist_page.c pair_paint): the accent's top tone at rest, white lit

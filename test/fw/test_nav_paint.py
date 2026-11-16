@@ -1121,7 +1121,7 @@ def navbar_page(world, text='Albums', kind='hscroll_label'):
 
 
 def test_an_inset_modal_back_on_top_names_the_page_under_it_again(fw, world, st):
-    """A playlist's More (an inset modal) over Playlists, then Delete Playlist's confirm over it, which writes its
+    """A playlist's More (a menu sheet) over Playlists, then Delete Playlist's confirm over it, which writes its
     question into the bar (feedback.c): after Cancel the modal is on top again, and the bar names Playlists, not the
     question, while it stays open."""
     label = bar_title(fw, world, st)

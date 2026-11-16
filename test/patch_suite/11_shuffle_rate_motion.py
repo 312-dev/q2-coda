@@ -523,14 +523,14 @@ m.close(); m.calls=[]; m.rescan(); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=50_000_000)==0 and called('getAllMusic')
 m.page=m.top; assert m.texts()==['Most Played']+[x for p in zip(ranked[:3],details[:3]) for x in p]; passed()
 
-# View Queue (Now Playing's hold menu) opens Up Next (upnext.c) over the queue; its rows, holds, lifts and Clear are
-# test/fw/test_upnext.py's.
+# View Queue (Now Playing's hold menu) opens Up Next (upnext.c) in the menu sheet over the queue, its header the playing
+# song; its rows, holds, lifts and Clear are test/fw/test_upnext.py's.
 m=CoverflowMachine(page='playing_page',pos=1); q=m.deque([m.song(c) for c in 'ABCDE'])
 m.word(syms['mcl_pdeqplaylist'],q); m.word(O['MCL_POOL'],m.deque(list(range(5)),'int'))
 assert m.call(address=payload_syms['playback_set'],args=(0,1,0,0),gap=0)==1
 m.press(10); assert m.hold()==11 and 'Up Next' not in m.labels(); m.release()
 m.pick(m.labels().index('View Queue')); m.advance(0); m.page=m.top
-assert m.nodes[m.page]['name']=='upnext_page' and m.texts()[0]=='Up Next'
+assert m.nodes[m.page]['name']=='upnext_page' and m.nodes[m.page]['type']=='dialog' and any(n.get('name')=='_mm_head' for n in m.nodes.values())
 m.close(); passed()
 
 # Ratings (ratings.c rate_*): 5 hearts are stock's My Fav, 1-4 kept in /mnt/data/ringnav-ratings by listen_key with

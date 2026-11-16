@@ -7,6 +7,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import affected  # noqa: E402
+import emu_pool  # noqa: E402
 import patch_shards  # noqa: E402
 
 ALL = affected.ALL
@@ -131,3 +132,32 @@ def test_a_suite_file_maps_its_lines_onto_the_joined_suite(tmp_path):
     p = affected.plan_for({'test/patch_suite/01_b.py': {2}}, root, patch_source=PATCH).as_dict()
     assert p['patch'] == sorted(affected.patch_tests_for({9}, PATCH)) and 'test/playback.py' in p['other']
     assert affected.plan_for({'test/patch.py': {1}}, root).as_dict()['patch'] == ALL
+
+
+# A pool copy's two scripts as q2-emu-server's are, after make_copy set its viewer port.
+Q2EMU = '#!/bin/bash\nE=$(dirname "$0")\nPORT=${Q2EMU_PORT:-2403}\nsetsid nohup "$E/run.sh" "$1" &\n'
+RUN = ('#!/bin/bash\nE=x\nS=$E/state\n# Q2EMU_CORE=1: qemu writes the guest\'s core\n'
+       'bwrap --die-with-parent \\\n    --setenv PATH /usr/bin \\\n    "${BOOT[@]}"\n')
+
+
+def test_a_pool_copy_runs_car_remote_on_its_own_port_once(tmp_path):
+    (tmp_path/'q2emu').write_text(Q2EMU)
+    (tmp_path/'run.sh').write_text(RUN)
+    emu_pool.fit(tmp_path, 3)
+    script, run = (tmp_path/'q2emu').read_text(), (tmp_path/'run.sh').read_text()
+    assert 'PORT=${Q2EMU_PORT:-2403}\nexport Q2EMU_CODA_PORT=${Q2EMU_CODA_PORT:-7703}\n' in script
+    assert run.index('CODA=()') < run.index('# Q2EMU_CORE=1') and run.endswith('    "${CODA[@]}" "${BOOT[@]}"\n')
+    assert 'exec /emu/coda-rc.real --port $Q2EMU_CODA_PORT' in run and '--ro-bind "$S/coda-rc" /usr/bin/coda-rc' in run
+    emu_pool.fit(tmp_path, 3)  # a second time changes nothing
+    assert (tmp_path/'q2emu').read_text() == script and (tmp_path/'run.sh').read_text() == run
+
+
+def test_a_changed_run_script_is_refused(tmp_path):
+    (tmp_path/'q2emu').write_text(Q2EMU)
+    (tmp_path/'run.sh').write_text(RUN.replace('"${BOOT[@]}"', 'demo'))
+    try:
+        emu_pool.fit(tmp_path, 3)
+    except AssertionError as e:
+        assert 'run.sh has changed' in str(e)
+    else:
+        raise AssertionError('fit took a run.sh it cannot place the stand-in in')

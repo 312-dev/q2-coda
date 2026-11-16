@@ -67,15 +67,15 @@ int ringnav_wifi_page(void *win, void *ctx) {
 
 /* A page that uses the network, open anywhere in the window stack: Streaming and its services'
  * pages (Spotify's, Internet Radio's, a card app's and its QR code, Tidal's but Tidal Downloads),
- * System settings' Apps, AirPlay's, Network service, SyncLink, the Wi-Fi page, Wi-Fi transfer and
+ * System settings' Apps, AirPlay's, Network service, the Wi-Fi page, Wi-Fi transfer and
  * their dialogs, and the online lyrics and cover search. */
 static int net_page_open(void) {
     static const char *const pages[] = {
-        "stream_page",         "spotify_page",    "spotbrowse_page",  "radio_page",
-        "radionp_page",        "addon_page",      "qrcode_page",      "apps_page",
-        "airplay_page",        "netservice_page", "synclink_page",    "wifi_page",
-        "wifitransport_page",  "editwifi_dialog", "kbwifiadd_dialog", "kbwifipass_dialog",
-        "onlinematching_page", "tidal_"
+        "stream_page",     "spotify_page",     "spotbrowse_page",   "radio_page",
+        "radionp_page",    "addon_page",       "qrcode_page",       "apps_page",
+        "airplay_page",    "netservice_page",  "wifi_page",         "wifitransport_page",
+        "editwifi_dialog", "kbwifiadd_dialog", "kbwifipass_dialog", "onlinematching_page",
+        "tidal_"
     };
     void *wm = window_manager();
     for (unsigned i = 0, n = widget_count_children(wm); i < n; ++i) {
@@ -93,7 +93,7 @@ static int net_page_open(void) {
  * types on_wm_timer_networkstatus stops once offline, whatever it is doing, as Play must fetch its
  * URL at once), Spotify's librespot running or waiting to start (it never retries a Connect login
  * or mDNS that failed), a station playing, a card app running, a scrobble upload, Network Update's
- * download or an Apps job, Download Album Lyrics, a Tidal download or an action held for the link
+ * download or an Apps job, Get Album Lyrics, a Tidal download or an action held for the link
  * (smart_hold); a time sync pending on a link; or a page above. */
 static int smart_needed(void) {
     unsigned type = (unsigned)mclGetPlayType();

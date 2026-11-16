@@ -55,9 +55,8 @@ def api(fw):
            'eng_dirty': (None, i, i, i, i), 'eng_inset': (i, i), 'eng_dirty_all': (None,), 'eng_quit': (None,), 'eng_awake': (None,), 'eng_sfx': (None, i),
            'eng_load': (i, C.c_char_p, p, u, u), 'eng_save': (i, C.c_char_p, p, u, u), 'eng_sin': (i, i), 'eng_cos': (i, i),
            'eng_atan2': (i, i, i), 'eng_sqrt': (u, C.c_ulonglong), 'engine__eng_frame': (i, p),
-           'eng_fill': (None, C.POINTER(Surface), i, i, i, i, u), 'eng_blend': (None, C.POINTER(Surface), i, i, i, i, u, u),
+           'eng_fill': (None, C.POINTER(Surface), i, i, i, i, u),
            'eng_disc': (None, C.POINTER(Surface), i, i, i, u), 'eng_round': (None, C.POINTER(Surface), i, i, i, i, i, u),
-           'eng_mask': (None, C.POINTER(Surface), i, i, i, i, C.c_char_p, i, u),
            'eng_text': (i, C.POINTER(Surface), C.c_char_p, i, i, i, u, u, i), 'games_keydown': (i, p, u)}
     return {k.replace('engine__eng_', ''): fw.fn(k, v[0], *v[1:]) for k, v in fns.items()}
 
@@ -294,23 +293,16 @@ def test_a_save_is_sealed_and_anything_else_reads_as_none(fw):
     assert r.e['eng_save'](b'rig', buf, 16, 0x31474952) == 0 and toasts == [b"Couldn't save"]
 
 
-def test_fill_blend_and_mask_stay_in_the_rows_and_columns_being_painted(fw):
+def test_fill_stays_in_the_rows_and_columns_being_painted(fw):
     e = api(fw)
     s, buf = surface(clip=(10, 5, 20, 15))
     e['eng_fill'](s, 0, 0, 40, 30, 0x123456)
     assert set(lit(buf, 40)) == {(x, y) for x in range(10, 20) for y in range(5, 15)} and buf[5 * 40 + 10] == 0xff123456
-    e['eng_fill'](s, 30, 0, 5, 5, 0xffffff), e['eng_blend'](s, 30, 0, 5, 5, 0xffffff, 255), e['eng_mask'](s, 30, 0, 1, 1, b'\xff', 1, 0xffffff)
+    e['eng_fill'](s, 30, 0, 5, 5, 0xffffff)
     assert len(lit(buf, 40)) == 100  # outside: nothing
     s, buf = surface(ox=3, oy=2)  # the sheet's origin on the screen
     e['eng_fill'](s, 0, 0, 1, 1, 0xff0000)
     assert lit(buf, 40) == {(3, 2): 0xffff0000}
-    s, buf = surface(back=0xff000000)
-    e['eng_blend'](s, 0, 0, 2, 1, 0xffffff, 255), e['eng_blend'](s, 2, 0, 1, 1, 0xff8040, 128), e['eng_blend'](s, 3, 0, 1, 1, 0xffffff, 0)
-    assert list(buf[:4]) == [0xffffffff, 0xffffffff, 0xff804020, 0xff000000]
-    s, buf = surface()
-    e['eng_mask'](s, 1, 1, 3, 2, bytes([0, 255, 128, 9, 9, 9, 9, 64]), 4, 0xffffff)  # the mask's rows are 4 wide
-    assert lit(buf, 40) == {(2, 1): 0xffffffff, (3, 1): 0xff808080, (1, 2): 0xff090909, (2, 2): 0xff090909, (3, 2): 0xff090909} or \
-        lit(buf, 40)[(3, 1)] == 0xff808080
 
 
 def area(buf):
@@ -431,7 +423,14 @@ def test_the_demo_is_listed_only_where_a_dev_build_asks(fw):
     assert e['eng_count']() == 1 and p.s.engines == 1 and p.s.rows == 5  # test/fw builds as a release does: Bricks alone
 
 
-def test_the_demo_ball_moves_a_step_a_frame_and_bounces(fw):
+@pytest.mark.parametrize('asked,count', [(b'1', 2), (b'0', 1)])
+def test_a_dev_build_lists_the_demo_last_when_asked(fw_dev, asked, count):
+    fw_dev.mock('toolsReadConfig', lambda path, sec, key, out, d, *_: C.memmove(out, asked + b'\0', 2) and 0)
+    assert api(fw_dev)['eng_count']() == count
+
+
+def test_the_demo_ball_moves_a_step_a_frame_and_bounces(fw_dev):  # a release build links no demo
+    fw = fw_dev
     p = demo(fw)
     d = p.d
     assert p.s.screen == DEMO and p.e['eng_live']() and fw.var('wheel_raw', C.c_int).value == 1
@@ -451,7 +450,8 @@ def test_the_demo_ball_moves_a_step_a_frame_and_bounces(fw):
     assert abs(d.vx) <= 4 * 65536
 
 
-def test_the_demo_paddle_follows_the_wheel_the_keys_and_a_finger(fw):
+def test_the_demo_paddle_follows_the_wheel_the_keys_and_a_finger(fw_dev):  # a release build links no demo
+    fw = fw_dev
     p = demo(fw)
     d = p.d
     fw.var('wheel_travel', C.c_int).value = -10
@@ -482,7 +482,8 @@ def test_the_demo_paddle_follows_the_wheel_the_keys_and_a_finger(fw):
     p.key(CENTER)
 
 
-def test_the_demo_serves_again_after_a_miss_and_saves_a_best_at_a_pause(fw):
+def test_the_demo_serves_again_after_a_miss_and_saves_a_best_at_a_pause(fw_dev):  # a release build links no demo
+    fw = fw_dev
     p = demo(fw)
     d = p.d
     kinds = []
@@ -510,7 +511,8 @@ def test_the_demo_serves_again_after_a_miss_and_saves_a_best_at_a_pause(fw):
     q.close()
 
 
-def test_the_demo_pauses_under_games_popup_and_leaves_by_its_menu_or_its_own_quit(fw):
+def test_the_demo_pauses_under_games_popup_and_leaves_by_its_menu_or_its_own_quit(fw_dev):  # a release build links no demo
+    fw = fw_dev
     p = demo(fw)
     canvas = Canvas(fw)
     buf = screen(canvas, origin=(0, 30))

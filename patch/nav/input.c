@@ -646,6 +646,7 @@ int ringnav(void *ctx, void *event) {
     /* the row editors' keys, and the release of the Center hold that entered or left one */
     if (lr_edit_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
     if (cc_key_release(key)) return STOP; /* the release of a Centre hold on Control Center */
+    if (modal_closing()) return STOP; /* a menu sheet falling away (menu_modal.c) */
     if (un_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
     if (usable() && search_strip_key(window_manager_get_top_window(window_manager()), key))
         return STOP;

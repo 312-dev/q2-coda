@@ -14,7 +14,7 @@ A lease asked for a build a copy already runs, by the same NAME, reuses it witho
 The copies are ~/q2-emu-pool1 .. ~/q2-emu-poolK (K = Q2_EMU_POOL, 4), made on first use from
 ~/q2-emu-server's scripts and serial record (state/mtd5.bin; never its rootfs/ or the rest of state/,
 and nothing there is changed), each with its
-own port, 2401 up. Each emulator is a QEMU user-mode demo of 200-400 MB; 14 of them and builds took the
+own port, 2401 up, and its Car Remote daemon its own, 7701 up (CODA_RC_BASE, fit). Each emulator is a QEMU user-mode demo of 200-400 MB; 14 of them and builds took the
 laptop down on 2026-11-16, so `get` waits when every copy is leased (--wait, default) or fails (--no-wait).
 Leases live in ~/.cache/q2-emu-pool/leases.json, changed under a lock. docs/building.md#emulator-pool.
 """
@@ -34,6 +34,9 @@ K = int(os.environ.get('Q2_EMU_POOL', '4'))
 STATE = HOME/'.cache/q2-emu-pool'
 LEASES = STATE/'leases.json'
 BASE_PORT = 2400
+# Car Remote's daemon in copy k listens on CODA_RC_BASE + k (7701 up), not the Q2's TCP 7720, so copies
+# running side by side never fight over one port (docs/building.md#emulator-pool).
+CODA_RC_BASE = 7700
 SKIP = {'rootfs', 'state'}  # Shanling's files and a copy's own state: never copied
 
 
@@ -43,6 +46,39 @@ def copy_dir(k):
 
 def port(k):
     return BASE_PORT + k
+
+
+def coda_port(k):
+    return CODA_RC_BASE + k
+
+
+# run.sh's stand-in for /usr/bin/coda-rc, which demo starts with no arguments (patch/coda_rc_shim.c): the build's
+# own daemon, copied beside the state, run with --port. Put before run.sh's bwrap, whose arguments gain CODA.
+CODA_BLOCK = '''# Car Remote (coda-rc) on this copy's own port, Q2EMU_CODA_PORT (tools/ci/emu_pool.py CODA_RC_BASE)
+CODA=()
+if [ -n "${Q2EMU_CODA_PORT:-}" ] && [ -e "$E/rootfs/usr/bin/coda-rc" ]; then
+    cp -f "$E/rootfs/usr/bin/coda-rc" "$S/coda-rc.real"
+    printf '%s\\n' '#!/bin/sh' "exec /emu/coda-rc.real --port $Q2EMU_CODA_PORT \\"\\$@\\"" > "$S/coda-rc"; chmod +x "$S/coda-rc"
+    CODA=(--ro-bind "$S/coda-rc" /usr/bin/coda-rc)
+fi
+'''
+RUN_BEFORE = '# Q2EMU_CORE=1: qemu writes'
+RUN_BWRAP = '    "${BOOT[@]}"'
+
+
+def fit(d, k):
+    """Copy k's scripts given its Car Remote port (CODA_RC_BASE + k): q2emu exports it, run.sh passes it on;
+    made once, on a copy made before this existed too."""
+    script = (d/'q2emu').read_text()
+    if 'Q2EMU_CODA_PORT' not in script:
+        line = f'PORT=${{Q2EMU_PORT:-{port(k)}}}\n'
+        assert line in script, 'q2emu has no PORT line to follow'
+        (d/'q2emu').write_text(script.replace(line, line + f'export Q2EMU_CODA_PORT=${{Q2EMU_CODA_PORT:-{coda_port(k)}}}\n', 1))
+    run = (d/'run.sh').read_text()
+    if 'Q2EMU_CODA_PORT' not in run:
+        assert run.count(RUN_BEFORE) == 1 and run.count(RUN_BWRAP) == 1, 'run.sh has changed: update CODA_BLOCK'
+        run = run.replace(RUN_BEFORE, CODA_BLOCK + RUN_BEFORE).replace(RUN_BWRAP, '    "${CODA[@]}" "${BOOT[@]}"')
+        (d/'run.sh').write_text(run)
 
 
 class Locked:
@@ -69,6 +105,7 @@ def make_copy(k):
     """The pool copy k: q2-emu's scripts, its default port set to the copy's own."""
     d = copy_dir(k)
     if (d/'q2emu').exists():
+        fit(d, k)
         return d
     tmp = d.with_name(d.name + '.new')
     if tmp.exists():
@@ -83,12 +120,13 @@ def make_copy(k):
         (tmp/'state').mkdir()
         shutil.copy2(record, tmp/'state/mtd5.bin')
     tmp.rename(d)
+    fit(d, k)
     return d
 
 
 def q2emu(k, *args):
     return subprocess.run([str(copy_dir(k)/'q2emu'), *args], capture_output=True, text=True,
-                          env={**os.environ, 'Q2EMU_PORT': str(port(k))})
+                          env={**os.environ, 'Q2EMU_PORT': str(port(k)), 'Q2EMU_CODA_PORT': str(coda_port(k))})
 
 
 def expired(lease):
@@ -124,7 +162,8 @@ def get(build, name, hours, wait):
             with Locked() as t:
                 t.leases.pop(str(k), None)
             raise SystemExit(f'pool emulator {k} did not start:\n{p.stdout}{p.stderr}')
-    print(f'slot {k}: {copy_dir(k)}, http://127.0.0.1:{port(k)}/, {build}, leased to {name} for {hours} h')
+    print(f'slot {k}: {copy_dir(k)}, http://127.0.0.1:{port(k)}/, {build}, leased to {name} for {hours} h; '
+          f'Car Remote on TCP {coda_port(k)}')
     print(f'  drive it: {copy_dir(k)}/q2emu shot out.png | key centre | wheel 3 | tap X Y')
     print(f'  give it back: python3 {pathlib.Path(__file__).resolve()} put {k}')
     return k

@@ -64,7 +64,7 @@
 
 #define ADDON_POLL_MS 500
 /* A level's drawing (artist_view): the rows as the app sent them, or an artist's page and the
- * pages its rows open, or an album's page (album_view), under a set with the inset modal */
+ * pages its rows open, or an album's page (album_view), under a set with the menu sheet */
 enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 #define ADDON_START_MS 10000 /* no socket this long after the start: it isn't running */
 #define ADDON_LIVE_MS 2000   /* a level whose reply says "refresh" is asked again this often */
@@ -1770,7 +1770,7 @@ static void busy_row(int on) {
 }
 
 /* An artist's page (docs/oled-design.md#artist-page) from the app's reply, under a set with the
- * inset modal (OLED's); other sets keep the plain rows. A reply is an artist's when it has Shuffle
+ * menu sheet (OLED's); other sets keep the plain rows. A reply is an artist's when it has Shuffle
  * and Radio actions on an "artist:" context, as q2-subsonic's artist page does (Go to Artist's,
  * and its Artists rows'). Its other rows go where the design puts them: the album rows (list,
  * album) under an Albums row, Top Songs (list, top) as a row of its own, Add to Sync, Quality and
@@ -1880,7 +1880,7 @@ static int drill_lay(const char *uri) {
 }
 
 /* An album's page (docs/oled-design.md#album-page) from the app's reply, under a set with the
- * inset modal: a reply is an album's when it has a Play action on "album:<id> 0", a Shuffle on
+ * menu sheet: a reply is an album's when it has a Play action on "album:<id> 0", a Shuffle on
  * "album:<id>" and an info row "about", as q2-subsonic's album page has with "album" in the caps
  * (docs/librespot.md#album-rows). The header shows the level's title (the album), the about row's
  * title (its artist) and subtitle ("2015 · 18 songs · 1 hr 12 min") and the album's catalogue
@@ -2016,7 +2016,7 @@ static int artist_view(lv_t *l) {
     return n;
 }
 
-/* Play/Pause held on an artist's or album's page: the inset modal of its sync rows (Add to Sync
+/* Play/Pause held on an artist's or album's page: the menu sheet of its sync rows (Add to Sync
  * or Remove from Sync, Quality, Sync Now), each doing what its row did. */
 static void artist_pick(int k) {
     lv_t *l = top();
@@ -2051,7 +2051,7 @@ static int artist_hold(lv_t *l) {
 }
 
 /* A reply with nothing in it (an empty artist or album: its info row, "No albums", and the sync
- * toggle over nothing) under the inset modal: no rows, the house empty note instead
+ * toggle over nothing) under the menu sheet: no rows, the house empty note instead
  * (docs/oled-design.md#empty-and-offline), the info row's title over its subtitle as the hint, and
  * the toggle left out, as an action over nothing (audit2 F1). 1 when it is one. */
 static int empty_view(lv_t *l) {

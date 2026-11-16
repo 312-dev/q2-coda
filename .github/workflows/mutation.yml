@@ -111,7 +111,6 @@ jobs:
           - {file: mp3_gapless, floor: 68}
           - {file: headset, floor: 92}
           - {file: radio, floor: 87}
-          - {file: visualizer, floor: 89}
     env:
       FILE: ${{ matrix.file }}
       FLOOR: ${{ matrix.floor }}

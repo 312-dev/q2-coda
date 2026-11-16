@@ -1,8 +1,8 @@
 /* The DSP chain (docs/player-plan.md#architecture): what Q2 Muse's filter in hciplayer does (patch/peq_player.c),
  * as stages on the playback thread. In order, each left out while its setting is off: ReplayGain, the PEQ or 3EQ
  * (patch/peq.c, Q2 Muse's engine, compiled in as it is into the payload), Mono Audio, Swap L/R, crossfade (the hold
- * and the equal-power mix), AirPlay's tap, the visualizer's tap. With every stage off a block goes to the output as
- * the decoder gave it, not a bit changed. With any on, the block is float from the first stage to one conversion
+ * and the equal-power mix), AirPlay's tap. With every stage off a block goes to the output as the decoder gave it,
+ * not a bit changed. With any on, the block is float from the first stage to one conversion
  * back at the end, which rounds and saturates as hciplayer's converters do.
  *
  * Each song gets its own state (one filter instance per file in hciplayer). The constants and the logic are
@@ -55,54 +55,6 @@ static void adopt(struct dsp *s) {
         memcpy(s->dsp.current.z, carry.z, sizeof carry.z);
 }
 
-/* ---- the visualizer's tap (peq.h vis_tap): what plays, after the chain, while the visualizer shows. The file
- * appears when it first opens; until then it is looked for once a second of audio. Counting frames, not time,
- * keeps an idle tap to a compare per block. tap_live says whether this block is copied, so a block that no stage
- * touched is turned into float only then. */
-static struct {
-    vis_tap *t;
-    unsigned wait, seen, idle;
-} vis = {0, ~0u, 0, 0};
-
-static vis_tap *tap_live(unsigned frames, int rate) {
-    if (!vis.t) {
-        if (vis.wait < (unsigned)rate) {
-            vis.wait += frames;
-            return NULL;
-        }
-        vis.wait = 0;
-        int fd = open(VIS_FILE, O_RDWR);
-        if (fd >= 0) {
-            void *p = mmap(0, sizeof(vis_tap), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-            close(fd);
-            if (p != MAP_FAILED) vis.t = p;
-        }
-    }
-    vis_tap *t = vis.t;
-    if (!t) return NULL;
-    if (t->want != vis.seen) { /* watched again after a pause: no stale audio half a second back */
-        if (vis.idle > (unsigned)rate) memset(t->ring, 0, sizeof t->ring);
-        vis.seen = t->want, vis.idle = 0;
-    } else if (vis.idle > (unsigned)rate || frames > (unsigned)rate - vis.idle) {
-        vis.idle = (unsigned)rate + 1;
-        return NULL;
-    } else
-        vis.idle += frames; /* nobody watching */
-    return t;
-}
-
-static void tap(vis_tap *t, const float *a, unsigned frames, int nch, int rate) {
-    long long now = now_ns();
-    unsigned step = rate > 48000 ? (unsigned)rate / 44100 : 1, seq = t->seq;
-    for (unsigned i = 0; i < frames; i += step, ++seq) {
-        t->ring[seq % VIS_RING][0] = a[i * nch];
-        t->ring[seq % VIS_RING][1] = a[i * nch + (nch > 1)];
-    }
-    t->rate = (unsigned)rate / step;
-    t->stamp = now;
-    __atomic_thread_fence(__ATOMIC_RELEASE); /* the frames before seq; the reader tolerates a torn one */
-    t->seq = seq;
-}
 
 /* ---- an int demo writes (XFADE_FILE, MONO_FILE, SWAP_FILE), mapped read-only, looked for once a second of audio
  * until the file appears; 0 till then, or below. */
@@ -495,13 +447,8 @@ static int chain(struct dsp *s, const uint8_t *data, int frames, double pts, con
     int eq = !s->dsp.current.bypass || s->dsp.ramp || s->dsp.waiting;
     int mono = nch == 2 && watch(&mono_file, MONO_FILE, rate, n), swap = nch == 2 && watch(&swap_file, SWAP_FILE, rate, n);
     int said = watch(&xfade_file, XFADE_FILE, rate, n), fade = xf.len || (said & XF_MS);
-    vis_tap *t = NULL;
-    if (!(s->rg != 1 || eq || mono || swap || fade || cast || mute || mute != cs.muted)) {
-        if (!(t = tap_live(n, rate)) || !grow(s, frames)) return frames; /* nothing to change: the block as it came */
-        to_float(s, data, frames);
-        tap(t, s->buf, n, nch, rate);
-        return frames;
-    }
+    if (!(s->rg != 1 || eq || mono || swap || fade || cast || mute || mute != cs.muted))
+        return frames; /* nothing to change: the block as it came */
     if (!grow(s, frames)) return frames;
     to_float(s, data, frames);
     float *a = s->buf;
@@ -523,7 +470,6 @@ static int chain(struct dsp *s, const uint8_t *data, int frames, double pts, con
         }
     n = crossfade(s, a, n, nch, rate, said);
     if (cast) cast_tap_block(cast, s, a, n, nch, rate);
-    if ((t = tap_live(n, rate))) tap(t, a, n, nch, rate);
     if (mute) memset(a, 0, (size_t)n * nch * 4);
     from_float(s, (int)n);
     *out = s->out;
