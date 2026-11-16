@@ -2408,6 +2408,7 @@ int ringnav_paint(void *w, void *canvas) {
         np_modes(w, canvas); /* else the page's own */
     coverflow_home_clip(w, canvas, 0);
     list_fade(w, canvas);
+    charge_paint(w, canvas); /* the plug-in screen (charging.c): last, over the page's own paints */
     st.paint_w = w ? P(w, W_PARENT) : (void *)0;
     return result;
 }
@@ -3510,8 +3511,8 @@ static int codec_fade(const void *info) {
     return 0;
 }
 
-/* The percentage's width at BATT_PX: digits are tabular; BATT_PCT_W until the first paint measures.
- */
+/* The percentage's width at BATT_PX: digits are tabular, each measured up to a whole pixel, so the
+ * slot holds the ink; BATT_PCT_W until the first paint measures. */
 static int pct_width(unsigned level) {
     if (!st.pct_digit) return BATT_PCT_W;
     return (level >= 100 ? 3 : level >= 10 ? 2 : 1) * st.pct_digit + st.pct_sign;
@@ -3635,17 +3636,26 @@ static int bar_charging(void) {
     const char *icon = st.bar_icon ? widget_get_prop_str(st.bar_icon, "image", "") : "";
     return icon && !tk_strcmp(icon, "bar_charge") && !usb_charge_held();
 }
-/* The battery view_battery shows: the level from label_battery's "88%" (stock zeroes
- * progress_battery while charging), then charging (bar_charging) and low (bar_lowcharge, or under
- * 15% on a cable that charges nothing), as stock picks the icon. Reads stock's widgets, no I/O. */
+/* The battery view_battery shows, as a BATT_KEY_* key: the level from label_battery's "88%" (stock
+ * zeroes progress_battery while charging), then what the cable does, as stock picks the icon
+ * (bar_charge whenever one is in): too weak to charge (charge_weak), full (g_power_chargestate 2)
+ * or held at Charge Limit, else charging (bar_charging); and low (bar_lowcharge, or under 15% on a
+ * cable that charges nothing). Reads stock's widgets and bytes, no I/O. */
 static unsigned battery_now(void) {
     const char *icon = widget_get_prop_str(st.bar_icon, "image", "");
     const unsigned *t = widget_get_text(st.bar_pct);
-    int level = 0, charging = bar_charging();
+    int level = 0, charging = bar_charging(), cable = icon && !tk_strcmp(icon, "bar_charge");
     while (t && *t >= '0' && *t <= '9') level = level * 10 + (int)(*t++ - '0');
-    int held = !charging && icon && !tk_strcmp(icon, "bar_charge");
-    return (unsigned)(level > 100 ? 100 : level) << 3 | (unsigned)charging << 1 |
-           (unsigned)((icon && !tk_strcmp(icon, "bar_lowcharge")) || (held && level < 15));
+    int held = cable && !charging, weak = charging && charge_weak();
+    int full = cable && !weak && (I(g_power_chargestate, 0) == 2 || (held && st.charge_held));
+    unsigned key = (unsigned)(level > 100 ? 100 : level) << 4;
+    if (weak)
+        key |= BATT_KEY_WEAK;
+    else if (full)
+        key |= BATT_KEY_PLUGGED;
+    else if (charging)
+        key |= BATT_KEY_CHARGING;
+    return key | (unsigned)((icon && !tk_strcmp(icon, "bar_lowcharge")) || (held && level < 15));
 }
 static void bar_sync(void *bar) {
     if (bar_state_sync(bar) && !st.bar_timer) st.bar_timer = timer_add(bar_repaint, (void *)0, 0);
@@ -3687,7 +3697,7 @@ static void bar_sync(void *bar) {
     widget_set_visible(st.bar_slot, 1, 0);
 
     unsigned key = battery_now();
-    int pct = pct_width(key >> 3);
+    int pct = pct_width(BATT_KEY_LEVEL(key));
     int width = mode == 1
                     ? pct
                     : (mode == 3 ? inside : body) + BATT_NUB_W + (mode == 2 ? BATT_GAP + pct : 0);
@@ -3737,24 +3747,35 @@ static void paint_battery(void *w, void *canvas) {
     void *lcd = P(canvas, CANVAS_LCD);
     if (!lcd) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
-    unsigned key = st.batt_key, level = key >> 3, s[4], n = put_num(s, level);
+    unsigned key = st.batt_key, level = BATT_KEY_LEVEL(key), s[4], n = put_num(s, level);
     int inside = st.batt_mode == 3;
     if (!inside) s[n++] = '%';
-    unsigned color = RGBA(key & 2 ? BATT_CHARGE_RGB : key & 1 ? BATT_LOW_RGB : 0xffffff);
+    unsigned color = RGBA(key & BATT_KEY_WEAK                            ? BATT_WEAK_RGB
+                          : key & (BATT_KEY_CHARGING | BATT_KEY_PLUGGED) ? BATT_CHARGE_RGB
+                          : level < BATT_LOW_PCT                         ? BATT_LOW_RGB
+                                                                         : 0xffffff);
+    /* whole pixels up, so the slot is never narrower than the ink */
     if (!inside && !st.pct_digit) {
         unsigned c = '0';
-        canvas_set_font(canvas, theme_face(&c, 1, 0), BATT_PX); /* draw_centred's face */
-        st.pct_digit = (int)(canvas_measure_text(canvas, &c, 1) + 0.5f);
+        int px = BATT_PX;
+        canvas_set_font(canvas, theme_face(&c, 1, &px), (unsigned)px);
+        st.pct_digit = (int)canvas_measure_text(canvas, &c, 1) + 1;
         c = '%';
-        st.pct_sign = (int)(canvas_measure_text(canvas, &c, 1) + 0.5f);
+        st.pct_sign = (int)canvas_measure_text(canvas, &c, 1) + 1;
     }
-    if (st.batt_mode == 1) {
-        rect_t r = { 0, 0, I(w, W_W), I(w, W_H) };
-        draw_centred(canvas, s, n, &r, BATT_PX, color);
+    if (st.batt_mode == 1) { /* one line, never wrapped: centred in the slot, on the row's centre */
+        int px = BATT_PX;
+        const char *face = theme_face(s, (int)n, &px);
+        unsigned text = (unsigned)I(lcd, LCD_TEXT_COLOR);
+        canvas_set_font(canvas, face, (unsigned)px);
+        canvas_set_text_color(canvas, color);
+        int tw = (int)canvas_measure_text(canvas, s, n);
+        canvas_draw_text(canvas, s, n, (I(w, W_W) - tw) / 2, batt_top(w, px));
+        stock_canvas_set_text_color(canvas, text);
         return;
     }
     int bh = geom_val(V_BATT_H);
-    battery_slim(canvas, 0, batt_top(w, bh), geom_val(V_BATT_W), bh, key);
+    battery_slim(w, canvas, 0, batt_top(w, bh), geom_val(V_BATT_W), bh, key);
     stock_canvas_set_fill_color(canvas, fill);
 }
 
@@ -9338,7 +9359,7 @@ static void thumb_poll(void) {
 
 int ringnav_sleep(void *loop) {
     splash_poll();
-    usb_ui_poll(); /* adbd's questions, --dev builds (usb_ui.c) */
+    usb_ui_poll(); /* USB and charging toasts, adbd's questions (usb_ui.c) */
     stale_heal();
     quick_poll();
     headset_poll();
@@ -9588,6 +9609,7 @@ int ringnav_input(void *wm, void *e) {
     if (e && tick_gate(e)) return 0;
     if (e && (chord_gate(e) || wake_gate(e))) return 0;
     if (e && keylock_gate(e, remote_match(e, 0))) return 0; /* keylock.c */
+    if (e && charge_gate(e)) return 0;                      /* the plug-in screen (charging.c) */
     if (e && coverflow_wait_input(e)) return 0; /* Cover Flow opening: Return gives it up */
     st.last_input = time_now_ms();
     unsigned type = e ? (unsigned)I(e, EVENT_TYPE) : 0;
@@ -9603,6 +9625,8 @@ int ringnav_input(void *wm, void *e) {
         st.touch_type = (int)type;
         st.touch_x = I(e, EVENT_X);
         st.touch_y = I(e, EVENT_Y);
+        /* a tap on the status battery (charging.c), upright: the panel's raw axes are portrait */
+        charge_touch(type, st.touch_y, 319 - st.touch_x);
     }
     if ((type == EVT_KEY_DOWN || type == EVT_KEY_UP || type == EVT_KEY_LONG) &&
         (key == KEY_PREV || key == KEY_NEXT || key == KEY_CENTER) && usb_prompt()) {

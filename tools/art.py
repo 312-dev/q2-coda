@@ -284,8 +284,43 @@ USB_MODE_PX = 44
 USB_MODES = {'files': 'folder-simple-fill', 'audio': 'speaker-hifi-fill', 'debug': 'terminal-window-fill', 'ejected': 'check-bold'}
 USB_TOAST_PX = 15
 USB_TOASTS = {'unplugged': ('plug-fill', 0xababab), 'ejected': ('check-circle-fill', 0x34c759), 'audio': ('speaker-hifi-fill', 0xffffff)}
+# The status row's battery (list_marks.c battery_slim): charging, Phosphor's lightning, too weak a charger its warning,
+# fill weight at BATT_GLYPH_PX in Text Primary, with a BATT_GLYPH_GAP px gap in the Canvas cut round it (iOS's way of
+# keeping it off the charge's fill; over the body's empty black it is not seen), per half. The image is BATT_GLYPH_BOX,
+# the glyph centred BATT_GLYPH_AT in from its corner, so it lands on the body's centre, a half pixel included.
+BATT_GLYPH_PX = 7
+BATT_GLYPH_GAP = 1
+BATT_GLYPH_BOX = (9, 10)
+BATT_GLYPH_AT = (4.5, 5.0)
+BATT_GLYPHS = {'bolt': 'lightning-fill', 'warn': 'warning-fill'}
+BATT_GLYPH_INKS = {'d': (0xffffff, 0x000000), 'l': (0x000000, 0xffffff)}  # (glyph, gap) per half
+# Charging's toasts (charging.c): their 15 px glyph beside the words, fill, each in its colour; the battery's own in
+# Text Primary per half.
+CHARGE_TOASTS = {'charging': ('lightning-fill', 0x34c759), 'weak': ('warning-fill', 0xff9f0a),
+                 'full': ('battery-full-fill', 0x34c759), 'low': ('battery-warning-fill', 0xff453a)}
+CHARGE_TOAST_BATTERY = {'d': 0xffffff, 'l': 0x000000}
+# The plug-in screen's bolt beside its percentage (charging.c S1_BOLT), fill, Positive green
+CHARGE_BOLT_PX = 26
 PL_MARKS = {'in': ('check-circle-fill', {'d': 0xababab, 'l': 0x5c5c5c}), 'add': ('plus-circle-fill', {'d': 0x4fb477, 'l': 0x4fb477}),
             'out': ('minus-circle-fill', {'d': 0xff6b5e, 'l': 0xff6b5e})}
+
+
+def inset_glyph(name, ink, gap):
+    """Phosphor's icon name at BATT_GLYPH_PX in ink, centred BATT_GLYPH_AT in a BATT_GLYPH_BOX PNG, over a gap in
+    gap round it, BATT_GLYPH_GAP px: the glyph's shape grown that far, measured on an 8x finer grid."""
+    k, (w, h), (cx, cy) = 8, BATT_GLYPH_BOX, BATT_GLYPH_AT
+    svg = (PHOSPHOR/f'{name}.svg').read_text()
+    scale, x0, y0 = BATT_GLYPH_PX * k / 256, (cx - BATT_GLYPH_PX / 2) * k, (cy - BATT_GLYPH_PX / 2) * k
+    polys = [[(x0 + x * scale, y0 + y * scale) for x, y in poly] for d in re.findall(r'\sd="([^"]+)"', svg) for poly in path(d)]
+    fine = coverage_nonzero(polys, (0, 0, w * k, h * k))
+    r = BATT_GLYPH_GAP * k
+    disc = [(dx, dy) for dx in range(-r, r + 1) for dy in range(-r, r + 1) if dx * dx + dy * dy <= r * r]
+    inside = {(i % (w * k), i // (w * k)) for i, c in enumerate(fine) if c >= 0.5}
+    grown = {(x + dx, y + dy) for x, y in inside for dx, dy in disc}
+    def down(on):
+        return [sum(on(x * k + i, y * k + j) for i in range(k) for j in range(k)) / (k * k) for y in range(h) for x in range(w)]
+    return png(w, h, laid(w, h, [(down(lambda x, y: (x, y) in grown), lambda x, y: (gap, 1)),
+                                 (down(lambda x, y: fine[y * w * k + x]), lambda x, y: (ink, 1))]))
 
 
 def gradient(stops, y0, y1):
@@ -496,4 +531,8 @@ def images(t):
     out |= {f'{prefix}_usb_{n}_{k}': phosphor(g, USB_ROW_PX, c) for n, g in USB_ROWS.items() for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_usbmode_{n}': phosphor(g, USB_MODE_PX, 0xffffff) for n, g in USB_MODES.items()}
     out |= {f'{prefix}_usbtoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in USB_TOASTS.items()}
+    out |= {f'{prefix}_batt{n}_{k}': inset_glyph(g, *inks) for n, g in BATT_GLYPHS.items() for k, inks in BATT_GLYPH_INKS.items()}
+    out |= {f'{prefix}_chargetoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in CHARGE_TOASTS.items()}
+    out |= {f'{prefix}_chargetoast_battery_{k}': phosphor('battery-high-fill', USB_TOAST_PX, c) for k, c in CHARGE_TOAST_BATTERY.items()}
+    out[f'{prefix}_chargebolt'] = phosphor('lightning-fill', CHARGE_BOLT_PX, 0x34c759)
     return out

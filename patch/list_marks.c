@@ -132,7 +132,7 @@ unsigned wheel_sb_alpha(void *list) {
 }
 
 /* A rounded rectangle's path on vg. */
-static void round_path(void *vg, float x, float y, float w, float h, float r) {
+void round_path(void *vg, float x, float y, float w, float h, float r) {
     vgcanvas_begin_path(vg);
     vgcanvas_move_to(vg, x + r, y);
     vgcanvas_line_to(vg, x + w - r, y);
@@ -147,9 +147,14 @@ static void round_path(void *vg, float x, float y, float w, float h, float r) {
 }
 
 /* BATT_SLIM: the body bw x bh at x, y, BATT_SLIM_R corners and a 1 px outline in BATT_SLIM_DIM,
- * the charge a solid fill BATT_SLIM_IN px inside it with BATT_SLIM_FILL_R corners in Text
- * Primary (charging's green, low's red), and the nub, BATT_SLIM_NUB_W x BATT_SLIM_NUB_H, a pixel
- * past the body in BATT_SLIM_DIM. Final colours; the caller restores the fill. */
+ * the charge a solid fill BATT_SLIM_IN px inside it with BATT_SLIM_FILL_R corners to the level, in
+ * Text Primary (red under BATT_LOW_PCT; green on a cable that charges it or holds it full, or
+ * at Charge Limit; orange on one too weak), and the nub, BATT_SLIM_NUB_W x BATT_SLIM_NUB_H, a pixel
+ * past the body in BATT_SLIM_DIM. Charging, Phosphor's lightning (fill, 7 px, Text Primary) sits on
+ * the body's centre with a 1 px Canvas gap cut round it where it crosses the fill; too weak, its
+ * warning in the same place (docs/oled-design.md#status-row, tools/art.py BATT_GLYPHS: the gap is
+ * the image's own, BATT_GLYPH_BOX px with the glyph's centre BATT_GLYPH_X, BATT_GLYPH_Y in from its
+ * corner). Final colours; the caller restores the fill. */
 #define BATT_SLIM_R 4.0f
 #define BATT_SLIM_IN 2.0f
 #define BATT_SLIM_FILL_R 2.2f
@@ -157,13 +162,29 @@ static void round_path(void *vg, float x, float y, float w, float h, float r) {
 #define BATT_SLIM_NUB_H 4.4f
 #define BATT_SLIM_NUB_R 0.8f
 #define BATT_SLIM_DIM 0x6e6e6e
-#define BATT_SLIM_LOW 0xff453a /* under 20 %, the only red on any screen (docs/oled-design.md) */
-#define BATT_SLIM_LOW_PCT 20
-void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key) {
+#define BATT_GLYPH_X 4.5f /* tools/art.py BATT_GLYPH_BOX (9 x 10) and the glyph's centre in it */
+#define BATT_GLYPH_Y 5.0f
+/* The charge fill's share of the body, in percent, for battery_now's key: the level, on the cable
+ * as off it. */
+static unsigned battery_fill(unsigned key) { return BATT_KEY_LEVEL(key); }
+/* The fill's colour for key, ink being Text Primary's. */
+static unsigned battery_tone(unsigned key, unsigned ink) {
+    return key & BATT_KEY_WEAK                            ? BATT_WEAK_RGB
+           : key & (BATT_KEY_CHARGING | BATT_KEY_PLUGGED) ? BATT_CHARGE_RGB
+           : BATT_KEY_LEVEL(key) < BATT_LOW_PCT           ? BATT_LOW_RGB
+                                                          : ink;
+}
+/* The glyph inside the body for key, a theme image's name, or 0 for none. */
+static const char *battery_glyph(unsigned key) {
+    int light = ipod_light();
+    if (key & BATT_KEY_WEAK) return theme_art(light ? "battwarn_l" : "battwarn_d");
+    if (key & BATT_KEY_CHARGING) return theme_art(light ? "battbolt_l" : "battbolt_d");
+    return (const char *)0;
+}
+void battery_slim(void *w, void *canvas, int x, int y, int bw, int bh, unsigned key) {
     void *vg = canvas_get_vgcanvas(canvas);
     if (!vg) return;
-    unsigned pct = key & 2 ? 100 : key >> 3, ink = ipod_light() ? 0x000000 : 0xffffff;
-    unsigned level = key & 2 ? BATT_CHARGE_RGB : pct < BATT_SLIM_LOW_PCT ? BATT_SLIM_LOW : ink;
+    unsigned pct = battery_fill(key), level = battery_tone(key, ipod_light() ? 0x000000 : 0xffffff);
     float fx = (float)x + BATT_SLIM_IN, fy = (float)y + BATT_SLIM_IN,
           fw = ((float)bw - 2 * BATT_SLIM_IN) * (float)pct / 100, fh = (float)bh - 2 * BATT_SLIM_IN;
     unsigned raw = st.raw_ink;
@@ -185,6 +206,10 @@ void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key) {
     vgcanvas_fill(vg);
     vgcanvas_restore(vg);
     st.raw_ink = raw;
+    const char *glyph = battery_glyph(key);
+    if (glyph && w) /* whole pixels: the image holds the glyph's half-pixel place */
+        paint_art(w, canvas, glyph, x + (int)((float)bw / 2 - BATT_GLYPH_X + 0.5f),
+                  y + (int)((float)bh / 2 - BATT_GLYPH_Y + 0.5f));
 }
 
 /* settings.values.switch: an on/off setting's switch (docs/oled-design.md List row), SWITCH_W x

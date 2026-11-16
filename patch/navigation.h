@@ -199,7 +199,7 @@ typedef struct {
     void *confirm_win;
     int codec, codec_step, batt_mode;
     unsigned codec_timer, batt_key, bar_timer;
-    int pct_digit, pct_sign; /* BATT_PX advances of '0' and '%', measured on the first paint */
+    int pct_digit, pct_sign; /* BATT_PX advances of '0' and '%', up a pixel, at the first paint */
     unsigned letter_timer;   /* the fast-scroll letter shows while this runs */
     /* Now Playing's window and payload-filled widgets, and the sources they last showed. */
     void *np_win, *np_album, *np_slider, *np_remain, *np_elapsed, *np_cover, *np_title, *np_artist;
@@ -503,7 +503,28 @@ void np_modes(void *win, void *canvas);
 void np_glyphs_bind(void *win), np_glyphs(void *win);
 void wheel_sb_arm(void *list);
 unsigned wheel_sb_alpha(void *list);
-void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key);
+/* The status battery's key (navigation.c battery_now): the level from bit 4, then what the cable
+ * does. CHARGING: green, the bolt inside; PLUGGED: on a cable, full or held at Charge Limit, green
+ * with no glyph; WEAK: the charger too weak (charging.c charge_weak), orange, the warning inside;
+ * LOW: stock's low icon (the painters' red is the level under BATT_LOW_PCT). */
+#define BATT_KEY_LOW 1u
+#define BATT_KEY_CHARGING 2u
+#define BATT_KEY_PLUGGED 4u
+#define BATT_KEY_WEAK 8u
+#define BATT_KEY_LEVEL(key) ((key) >> 4)
+#define BATT_LOW_PCT 20 /* under it the fill is red and a tap says Low battery */
+void round_path(void *vg, float x, float y, float w, float h, float r); /* list_marks.c */
+void battery_slim(void *w, void *canvas, int x, int y, int bw, int bh, unsigned key);
+/* charging.c: 1 while the charger cannot keep up (no signal for it yet: always 0); ringnav_input's
+ * touches, for a tap on the status row's battery; usb_ui_poll's toasts */
+int charge_weak(void);
+void charge_touch(unsigned type, int x, int y);
+void charging_poll(void);
+/* charging.c: the cable in (usb_ui_status), Charge Limit reached (system.c charge_poll), the
+ * plug-in screen's input gate (ringnav_input; 1 drops the event) and paint (ringnav_paint) */
+void charge_plugged(void), charge_limited(void), usb_charger_in(void);
+int charge_gate(void *e);
+void charge_paint(void *w, void *canvas);
 /* list_marks.c: an on/off setting's switch, ending on canvas column right, centred on y
  * (settings.values.switch) */
 void switch_mark(void *canvas, int right, int y, int on, int selected);
@@ -778,6 +799,7 @@ void pl_fit(void *button);
 /* clicker.c: the Clicker (docs/internals.md#key-tone), the Key Tone row's value and click, and a
  * click's route */
 enum { CLICK_KIND_WHEEL = 1, CLICK_KIND_BUTTON, CLICK_KIND_BEEP }; /* q2player's mcl-click sounds */
+int clicker_chirp(void); /* clicker.c: the plug-in chirp mixed into what plays; 1 if sent */
 enum { ROUTE_BUZZER = 1, ROUTE_MIXED = 2 };
 extern int clicker_kind; /* CLICK_KIND_*, 0 the wheel's (zero at start, as .scratch is) */
 const char *clicker_text(void);

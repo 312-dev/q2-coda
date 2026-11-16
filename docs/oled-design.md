@@ -124,7 +124,7 @@ Rules:
   space: 15 min, 30 seconds.
 - **The card is the SD card:** "SD Card" in row names and titles (SD Card Update, SD Card Test),
   "SD card" in a sentence ("Copy music to the SD card"). Never TF or microSD, stock's words.
-- **Size steps are 15, 16, 18, 20, 22** (56 for the confirmation's glyph, 17 for the [tabs](#tabs)' labels, 13 for [Edit Library](#edit-library)'s hint). Nothing else.
+- **Size steps are 15, 16, 18, 20, 22** (30 for the [plug-in screen](#plug-in-screen)'s level, 56 for the confirmation's glyph, 17 for the [tabs](#tabs)' labels, 13 for [Edit Library](#edit-library)'s hint). Nothing else.
 - **Row pitch is about 1.6 times the row size** (32 px for 20 px type), as the concept's is
   about twice its cap height.
 - **Sizes are the em.** AWTK sizes a face by its line (ascent less descent), which for Inter is
@@ -165,9 +165,21 @@ All lists share one grid.
   stopped), then the battery, its nub's end 62 px from the right edge (x 313), the play state's centre
   12 px left of the battery's body.
 - Battery, in iOS's proportions: a 25x12 body with 4 px corners and a 1 px `#6E6E6E` outline,
-  the charge a solid fill 2 px inside it with 2.2 px corners in Text Primary (under 20 %
-  `#FF453A`, the only red on any screen; green while charging), and a 1.5x4.4 nub with 0.8 px
-  corners in `#6E6E6E`.
+  the charge a solid fill 2 px inside it with 2.2 px corners to the level, charging or not, in
+  Text Primary (under 20 % `#FF453A`, the only red on any screen; `#34C759` green on a cable that
+  charges it, holds it full or holds it at Charge Limit; `#FF9F0A` orange on a charger too weak to
+  keep up), and a 1.5x4.4 nub with 0.8 px corners in `#6E6E6E`.
+- Charging, Phosphor's `lightning` (fill, 7 px, Text Primary) sits on the body's centre with a
+  1 px gap in the Canvas cut round it where it crosses the fill, and no outline; a weak charger's
+  `warning` (fill) takes its place the same way. Full or held at Charge Limit, the fill is green
+  with no glyph. Picked as I2 from `mock_batt_inside.py` on 2026-11-15.
+- With Battery on Percent, the level and "%" in BATT_PX type stand in the battery's place, in its
+  colours, on one line: nothing in the status row ever wraps. The slot is as wide as "100%" measures,
+  each digit and the sign rounded up to a whole pixel, and the row lays out from the right edge, so
+  the glyphs to its left move over for it.
+- A tap on the battery (a 44 x 40 px target round its body, or round the percentage on Percent, so
+  at least 40 px round it) toasts
+  its state; see [Dialogs and toasts](#dialogs-and-toasts).
 
 ### Selection bar
 
@@ -496,6 +508,14 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   glass curve. It is the only raised surface in the theme. The page stays in sight round it,
   with its status row and its selection; it lasts 1.5 s (stock's own toasts their own time).
   Words in sentence case ("Playing Last", "Name can't be empty").
+- A toast with an icon keeps the 16 px each side and puts a 15 px glyph (Phosphor, fill) after the
+  left one, then 8 px before the words: 16 + 15 + 8 + words + 16. Every icon toast is this one
+  (`feedback.c` `toast_icon`: USB's, charging's), approved from `mock_batt_toasts.py` on
+  2026-11-15.
+- A tap on the status row's battery toasts its state, the glyph in its colour: "Charging · 62%"
+  (lightning, green), "Charger too weak · 41%" (warning, orange), "Charge Limit Reached (80%)" and
+  "Fully charged" (battery-full, green), "Low battery · 12%" under 20 % (battery-warning, red) and
+  otherwise "Battery 62%" (battery-high, Text Primary). No time-left estimate.
 - Every in-place action says what it did in a toast: the hold menu's Play Next ("Playing Next"),
   Play Last ("Playing Last") and Add to and Remove from Favourites ("Added to Favorites",
   "Removed from Favorites").
@@ -760,7 +780,25 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
 - **Mode page** (Transfer Files, USB Audio, USB Debugging, Ejected): a solid circle with its glyph (fill, 44 px,
   white; the eject's a bold check on Positive green), the title, a line in Text Secondary and a Stop pill.
 - **Toasts** with a 15 px glyph beside the words: Unplugged (Text Secondary), OK to Disconnect (Positive green),
-  USB Audio Ready (white).
+  USB Audio Ready (white); and charging's: a charger in with the screen on, the battery's state as a tap on it
+  says ("Charging · 62%", lightning, green), Charged to 80% when Charge Limit stops it (battery-full, green), and
+  Charger too weak (warning, orange).
+
+### Plug-in screen
+
+A cable in while the screen is off lights it for 3 s and then turns it off again (S1, V1 from
+`design/mockups/mock_charge_anim.py`, approved 2026-11-15; `patch/charging.c`); with the screen on there is no
+screen, only the toast and the status row. Black in both halves, over the whole screen:
+
+- **Battery**: a 170 x 76 body round (187.5, 132), 16 px corners, a 3 px `#3A3A3C` outline; a 7 x 28 nub 5 px past
+  it with 4 px corners; the fill 8 px inside with 9 px corners, `#34C759`, to the level. Nothing over it.
+- **Sweep**: on a 2 s loop the fill's last 14 % grows up to the level (1.3 s, ease out), holds to 1.7 s and fades
+  out by 2 s. Full, or held at Charge Limit, the fill stands still.
+- **Level**: "62%" in Inter Medium 30 px, white, its centre 12 px right of the screen's on y 212, and Phosphor's
+  `lightning` (fill, 26 px, `#34C759`) 3 px left of it. No outlined bolt.
+- **Word**: "Charging" ("Charged" at 100 %) in Inter Regular 16 px, Text Secondary, centred on y 244.
+- A key or a touch ends it and leaves the screen on, doing nothing else; a page opening over it (a computer's
+  chooser) ends it the same way.
 
 ### Motion
 

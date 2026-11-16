@@ -66,6 +66,7 @@ static void charge_poll(void) {
                                      navigator_window_is_exist("airplay_page")
                                  ? g_usbdac_chargeflag
                                  : 1);
+    if (hold && !st.charge_held && g_usbdet_value == 1) charge_limited(); /* "Charged to 80%" */
     st.charge_held = hold;
     battery_tick(level, g_usbdet_value != 0); /* Battery History's rows (battery.c) */
 }

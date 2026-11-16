@@ -481,6 +481,52 @@ def test_the_icon_is_the_slim_battery(fw, st, ui):
     assert canvas.rects == [] and len(fw.calls('vgcanvas_stroke')) == 1 and len(fw.calls('vgcanvas_fill')) == 2
 
 
+KEY_LOW, KEY_CHARGING, KEY_PLUGGED, KEY_WEAK = 1, 2, 4, 8  # navigation.h BATT_KEY_*
+
+
+@pytest.mark.parametrize('level, bits', [(62, 0), (62, KEY_CHARGING), (5, KEY_CHARGING), (100, KEY_PLUGGED), (41, KEY_WEAK)])
+def test_the_slim_batterys_fill_is_the_level_charging_or_not(fw, level, bits):
+    """The fill shows the real level on the cable too: forced full while charging, it hid how much was left."""
+    fill = fw.fn('list_marks__battery_fill', C.c_uint, C.c_uint)
+    assert fill(level << 4 | bits) == level
+
+
+@pytest.mark.parametrize('level, bits, tone', [(62, 0, 0xffffff), (12, 0, O['BATT_LOW_RGB']), (12, KEY_CHARGING, O['BATT_CHARGE_RGB']),
+                                               (80, KEY_PLUGGED, O['BATT_CHARGE_RGB']), (41, KEY_WEAK, O['BATT_WEAK_RGB'])])
+def test_the_fill_is_white_red_green_or_orange(fw, level, bits, tone):
+    assert fw.fn('list_marks__battery_tone', C.c_uint, C.c_uint, C.c_uint)(level << 4 | bits, 0xffffff) == tone
+
+
+@pytest.mark.parametrize('bits, light, glyph', [(KEY_CHARGING, 0, b'battbolt_d'), (KEY_CHARGING, 1, b'battbolt_l'),
+                                                (KEY_WEAK, 0, b'battwarn_d'), (KEY_PLUGGED, 0, None), (0, 0, None)])
+def test_charging_puts_the_bolt_inside_and_a_weak_charger_the_warning(fw, st, ui, bits, light, glyph):
+    theme(fw, st, light=light)
+    name = fw.fn('list_marks__battery_glyph', C.c_char_p, C.c_uint)(50 << 4 | bits)
+    assert (name and name.split(b'_', 1)[1]) == glyph
+
+
+def bar_key(fw, st, ui, text, icon, state=0, held=0, dac=1):
+    """battery_now's key for stock's label and icon, g_power_chargestate and Charge Limit's hold."""
+    from test_usb_charge import Charging
+    theme(fw, st, BATTERY=0)
+    bar = Bar(fw, ui)
+    Charging(fw, pref=dac, mode=1, cable=1).config()
+    fw.var('fw_ctx_g_power_chargestate', C.c_int).value = state
+    st.charge_held = held
+    bar.level(text, icon)
+    bar.sync()
+    return fw.fn('navigation__battery_now', C.c_uint)()
+
+
+@pytest.mark.parametrize('text, icon, state, held, dac, key', [
+    ('62%', b'bar_charge', 1, 0, 1, 62 << 4 | KEY_CHARGING), ('100%', b'bar_charge', 2, 0, 1, 100 << 4 | KEY_PLUGGED),
+    ('62%', b'bar_battery', 0, 0, 1, 62 << 4), ('80%', b'bar_charge', 1, 1, 0, 80 << 4 | KEY_PLUGGED),
+    ('50%', b'bar_charge', 1, 0, 0, 50 << 4)])
+def test_the_key_says_charging_full_or_held(fw, st, ui, text, icon, state, held, dac, key):
+    """Charge Limit's hold is green with no glyph, USB DAC charging Off's is white: neither charges."""
+    assert bar_key(fw, st, ui, text, icon, state, held, dac) == key
+
+
 def test_with_a_bar_widget_missing_nothing_moves(fw, st, ui):
     theme(fw, st, BATTERY=1)
     bar = Bar(fw, ui)
@@ -499,26 +545,45 @@ class Paint:
         self.bar.level(text, icon)
         self.bar.sync()
         canvas = Canvas(self.fw, **self.kwargs)
+        # the percentage is one line (canvas_draw_text at its top-left), never a wrapping rect: as a rect at (x, y)
+        self.fw.mock('canvas_draw_text', lambda c, s, n, x, y, *_: canvas.texts.append(
+            (''.join(chr(v) for v in (C.c_uint * n).from_address(s)), (C.c_int(x).value, C.c_int(y).value, 0, 0),
+             canvas.font, canvas.text_color, canvas.clip)))
         self.fw.fn('navigation__paint_battery', None, C.c_void_p, C.c_void_p)(self.bar.slot, canvas.p)
         assert canvas.fill == 0xff123456  # put back
         return canvas
 
 
 def test_percent_alone_is_the_level_and_a_percent_sign_centred_in_the_slot(fw, st, ui):
+    """One line, never wrapped (a rect narrower than its text wrapped it onto a second line on a Q2): centred
+    across the slot, its top BATT_PX/2 above the row's centre, as the icon centres on the row."""
     theme(fw, st, BATTERY=1)
     bar = Bar(fw, ui)
     canvas = Paint(fw, ui, bar)()
-    (text, rect, (face, px), color, _), = canvas.texts
-    assert (text, rect, px, color) == ('88%', (0, 0, *ui.box(bar.slot)[2:]), O['BATT_PX'], 0xffffffff)
-    assert canvas.rects == []
+    (text, (x, y, _, _), (face, px), color, _), = canvas.texts
+    assert (text, px, color) == ('88%', O['BATT_PX'], 0xffffffff)
+    assert x == (ui.box(bar.slot)[2] - int(2 * 9.4 + 12.6)) // 2  # Canvas measures '0' 9.4 px, '%' 12.6 and y == (30 + 1 - O['BATT_PX']) // 2
+    assert canvas.rects == [] and not fw.calls('canvas_draw_text_in_rect')
 
 
-@pytest.mark.parametrize('icon, color', [(b'bar_battery', 0xffffff), (b'bar_charge', O['BATT_CHARGE_RGB']),
-                                         (b'bar_lowcharge', O['BATT_LOW_RGB'])])
-def test_the_percentage_says_charging_or_low_in_its_colour(fw, st, ui, icon, color):
+def test_the_slot_holds_the_percentage_whole(fw, st, ui):
+    """Each digit and the sign measured up to a whole pixel: the slot is never narrower than the ink, at 100% too."""
     theme(fw, st, BATTERY=1)
-    canvas = Paint(fw, ui, Bar(fw, ui))('15%', icon)
-    assert canvas.texts[0][3] == rgba(color)
+    bar = Bar(fw, ui)
+    paint = Paint(fw, ui, bar)
+    paint('100%', b'bar_charge')
+    canvas = paint('100%', b'bar_charge')
+    (text, (x, _, _, _), *_), = canvas.texts
+    assert text == '100%' and x >= 0 and slot_width(ui, bar) >= 3 * 9.4 + 12.6
+
+
+@pytest.mark.parametrize('text, icon, color', [('20%', b'bar_battery', 0xffffff), ('15%', b'bar_charge', O['BATT_CHARGE_RGB']),
+                                               ('19%', b'bar_battery', O['BATT_LOW_RGB']), ('15%', b'bar_lowcharge', O['BATT_LOW_RGB'])])
+def test_the_percentage_says_charging_or_low_in_its_colour(fw, st, ui, text, icon, color):
+    """Low is one threshold, under BATT_LOW_PCT (20%), as the slim battery's red fill."""
+    theme(fw, st, BATTERY=1)
+    canvas = Paint(fw, ui, Bar(fw, ui))(text, icon)
+    assert canvas.texts[0][3] == rgba(color) and O['BATT_LOW_RGB'] == 0xff453a
 
 
 def test_a_cable_in_with_charging_held_off_is_not_shown_charging(fw, st, ui):
@@ -538,7 +603,7 @@ def test_the_first_paint_measures_the_digits_and_the_slot_fits_them(fw, st, ui):
     bar = Bar(fw, ui)
     paint = Paint(fw, ui, bar)
     paint('88%')
-    digit, sign = round(9.4), round(12.6)  # Canvas measures '0' 9.4 px and '%' 12.6
+    digit, sign = int(9.4) + 1, int(12.6) + 1  # Canvas measures '0' 9.4 px and '%' 12.6: each up a pixel
     widths = {}
     for text in ('5%', '88%', '100%'):
         paint(text)

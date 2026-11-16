@@ -137,8 +137,10 @@ static void command(const char *name, const char *arg) {
         c->eq_on = p ? atoi(p) : 0;
         c->eq_changed = 1;
     } else if (!strcmp(name, "mcl-click")) {
-        /* the Clicker's click in the headphones (patch/clicker.c); a song must be playing, as nothing else is open */
-        int kind = !strcmp(arg, "wheel") ? CLICK_WHEEL : !strcmp(arg, "button") ? CLICK_BUTTON : !strcmp(arg, "beep") ? CLICK_BEEP : 0;
+        /* the Clicker's click in the headphones (patch/clicker.c), or the plug-in chirp (patch/charging.c); a song must
+         * be playing, as nothing else is open */
+        int kind = !strcmp(arg, "wheel") ? CLICK_WHEEL : !strcmp(arg, "button") ? CLICK_BUTTON : !strcmp(arg, "beep") ? CLICK_BEEP
+                   : !strcmp(arg, "charge") ? CLICK_CHARGE : 0;
         if (kind && c->state == PLAYING && !c->paused) c->click = kind, wake = 1;
     }
     if (wake) pthread_cond_broadcast(&c->wake);

@@ -8,7 +8,8 @@
  *   (a reader with no medium), only to learn whether a computer answers. One that configures it
  *   within USB_PROBE_MS gets the chooser, "Use USB For": Charge Only, Transfer Files, USB Audio and,
  *   in a --dev build, USB Debugging, and Always Do This. Nothing answering is a charger: the probe
- *   stops and usb_charger_in tells the charging toasts (batch 3's, a weak stub here).
+ *   stops and usb_charger_in (charging.c) toasts the charge. A cable in at all tells charging.c
+ *   (charge_plugged), whose plug-in screen lights a dark Q2.
  * - Transfer Files and USB Audio hand back to stock: the probe stops, g_usbmode is set for this
  *   cable (the tile's choice again once it is out, unless Always Do This saved it) and
  *   g_usblink_status 0 lets stock's next pass start its gadget and open usbmode_page, which is
@@ -75,6 +76,7 @@ enum { USB_ASK, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_CHOICES };
 static struct {
     int view_ready, auth_ready;
     const char *toast_glyph, *toast_text;
+    int det_known; /* a pass has read the cable: one in at boot is no plug-in */
     int det, probing, choice, mode_saved /* g_usbmode + 1 for this cable's, 0 none */, ejected, ejected_told, chosen, row_sel;
     unsigned probe_at;
     void *chooser, *view, *always, *debug, *mode;
@@ -84,9 +86,6 @@ static struct {
     void *auth, *auth_view, *auth_switch;
     char in[AUTH_KEY_MAX + 8], key[AUTH_KEY_MAX], fp[32];
 } u __attribute__((section(".scratch")));
-
-/* batch 3's charging toasts: a cable in that no computer answered. */
-__attribute__((weak)) void usb_charger_in(void) {}
 
 static int usb_host(void) {
     char s[16] = { 0 };
@@ -398,6 +397,8 @@ void usb_ui_paint(void *w, void *canvas) {
 /* Before stock's pass: a cable in or out, and the probe's answer. */
 void usb_ui_status(void) {
     int det = g_usbdet_value == 1;
+    if (det && !u.det && u.det_known) charge_plugged(); /* charging.c: a dark Q2 lights for it */
+    u.det_known = 1;
     if (det && !u.det && g_usblink_status == 0) {
         u.choice = USB_ASK, u.chosen = 0;
         int pick = usb_remembered();
@@ -558,12 +559,13 @@ static void usb_auth_paint(void *w, void *canvas) {}
 static void auth_poll(void) {}
 #endif
 
-/* ringnav_sleep: a toast usb_ui_status left, and adbd's questions. */
+/* ringnav_sleep: a toast usb_ui_status left, charging's, and adbd's questions. */
 void usb_ui_poll(void) {
     if (u.toast_text) {
         const char *glyph = u.toast_glyph, *text = u.toast_text;
         u.toast_glyph = u.toast_text = (const char *)0;
         if (g_backlight_status) toast_icon(theme_art(glyph), text);
     }
+    charging_poll(); /* charging.c's toasts */
     auth_poll();
 }

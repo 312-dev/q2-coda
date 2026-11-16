@@ -1,6 +1,13 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Status bar: while it charges, the battery shows how full it really is. It used to fill to the end the moment the cable went in.
+  - Status bar (OLED): a charging battery shows a small lightning bolt inside it, in green; full on the cable, or held at **Charge Limit**, it stays green with no bolt.
+  - Status bar: with **Battery** on Percent, the percentage stays on one line in the status bar; at 100% or while charging it could drop onto a second line.
+  - Status bar: the battery turns red under 20%, in the icon and the percentage alike (the percentage went red only under 15%, in a different red).
+  - Status bar (OLED): tap the battery to see its state in a toast: **Charging · 62%**, **Fully charged**, **Charge Limit Reached (80%)**, **Battery 62%** or, under 20%, **Low battery · 12%**.
+  - Charging (OLED): plugging in with the screen off lights it for three seconds with a big battery filling up to its level, then it goes dark again. With the screen on, a toast says **Charging · 62%** instead. Charge Limit says **Charged to 80%** when it stops charging.
+  - Charging: with the new player playing a song and **Clicker** on Headphones or Both, plugging in plays a short tick-and-chirp in your headphones, mixed into the music.
   - Controls: Clicker set to **Headphones** no longer clicks the Q2's own buzzer. The click is heard only in your headphones, mixed into what plays; while nothing plays there is no click.
   - Playlists: removed the unused code behind a playlist cover's hidden **Select Playlists…** hold row; nothing you can see changes.
   - Photos is gone: the Library has no **Photos** row, viewer or thumbnail grid. Home's Split slideshow of album covers is unchanged, a Library order you set yourself is kept without the row, and a `.photos` folder left on the card can be deleted.

@@ -507,23 +507,77 @@ static int sink(struct output *o, const uint8_t *data, int frames) {
 static const struct { double hz, ms, decay_ms; } SOUNDS[] = {
     [CLICK_WHEEL] = {1000, 4, 1.2}, [CLICK_BUTTON] = {1820, 3, 0.9}, [CLICK_BEEP] = {2280, 200, 60}};
 
+/* The plug-in chirp (patch/charging.c, design/mockups/charge_chimes2.py's "8-click-up-chirp"): a CHIRP_TICK_MS
+ * tick of one-pole low-passed noise (a seeded LCG's, so every chirp is the same), then CHIRP_LO_HZ and CHIRP_HI_HZ
+ * blips with a 2 ms rise, their second harmonic at 0.15, at CHIRP_LO_MS and CHIRP_HI_MS; its peak CHIRP_DB. */
+#define CHIRP_DB (-12.0)
+#define CHIRP_MS 340
+#define CHIRP_TICK_MS 3.0
+#define CHIRP_TICK_SMOOTH 0.7 /* the low-pass's share of each new noise sample: near 1 a crisp tick */
+#define CHIRP_TICK_AMP 0.7
+#define CHIRP_LO_HZ 880.0
+#define CHIRP_LO_MS 30.0
+#define CHIRP_LO_LEN_MS 180.0
+#define CHIRP_LO_DECAY_MS 50.0
+#define CHIRP_HI_HZ 1320.0
+#define CHIRP_HI_MS 90.0
+#define CHIRP_HI_LEN_MS 250.0
+#define CHIRP_HI_DECAY_MS 70.0
+#define CHIRP_BLIP_AMP 0.6
+#define CHIRP_RISE_MS 2.0
+
+/* The chirp's raw sample i at rate and the most it could be (its components' envelopes), before the level. tick is
+ * the tick's low-pass state, seed its noise's. */
+static double chirp_at(int i, int rate, double *tick, uint32_t *seed, double *bound) {
+    double t = (double)i / rate, y = 0, e = 0;
+    if (t < CHIRP_TICK_MS / 1000) {
+        *seed = *seed * 1664525u + 1013904223u; /* uniform noise in -1..1 */
+        double noise = (double)(*seed >> 8) / (1 << 23) - 1;
+        *tick = i ? CHIRP_TICK_SMOOTH * noise + (1 - CHIRP_TICK_SMOOTH) * *tick : 0;
+        double env = CHIRP_TICK_AMP * exp(-t * 4000 / CHIRP_TICK_MS);
+        y += env * *tick, e += env;
+    }
+    static const double blips[2][4] = {{CHIRP_LO_HZ, CHIRP_LO_MS, CHIRP_LO_LEN_MS, CHIRP_LO_DECAY_MS},
+                                       {CHIRP_HI_HZ, CHIRP_HI_MS, CHIRP_HI_LEN_MS, CHIRP_HI_DECAY_MS}};
+    for (int b = 0; b < 2; ++b) {
+        double u = t - blips[b][1] / 1000;
+        if (u < 0 || u >= blips[b][2] / 1000) continue;
+        double env = CHIRP_BLIP_AMP * fmin(u * 1000 / CHIRP_RISE_MS, 1) * exp(-u * 1000 / blips[b][3]),
+               ph = 2 * M_PI * blips[b][0] * u;
+        y += env * (sin(ph) + 0.15 * sin(2 * ph)), e += env * 1.15;
+    }
+    *bound = e;
+    return y;
+}
+
 /* The sound kind at rate, as samples (clk) and its envelope (duck), made at the first use of each. */
 static int click_table(int kind, int rate, const float **clk, const float **duck) {
-    static struct { int rate, len; float *s, *e; } made[3];
-    if (kind < CLICK_WHEEL || kind > CLICK_BEEP) return 0;
+    static struct { int rate, len; float *s, *e; } made[CLICK_CHARGE];
+    if (kind < CLICK_WHEEL || kind > CLICK_CHARGE) return 0;
     __typeof__(made[0]) *m = &made[kind - CLICK_WHEEL];
     if (m->rate != rate) {
-        int len = (int)(SOUNDS[kind].ms * rate / 1000);
+        int len = (int)((kind == CLICK_CHARGE ? CHIRP_MS : SOUNDS[kind].ms) * rate / 1000);
         float *s = realloc(m->s, (size_t)len * sizeof *s), *e = realloc(m->e, (size_t)len * sizeof *e);
         if (s) m->s = s;
         if (e) m->e = e;
         if (!s || !e || len <= 0) return m->rate = 0, 0;
-        double level = pow(10, CLICK_DB / 20), rise = CLICK_ATTACK_MS * rate / 1000, fall = CLICK_TAPER_MS * rate / 1000;
-        for (int i = 0; i < len; ++i) {
-            double t = (double)i / rate, env = level * exp(-t * 1000 / SOUNDS[kind].decay_ms);
-            if (i < rise) env *= 0.5 - 0.5 * cos(M_PI * i / rise);
-            if (len - i < fall) env *= 0.5 - 0.5 * cos(M_PI * (len - i) / fall);
-            e[i] = (float)env, s[i] = (float)(env * sin(2 * M_PI * SOUNDS[kind].hz * t));
+        if (kind == CLICK_CHARGE) { /* normalized to its peak: |s| <= e, so the mix's room holds */
+            double tick = 0, peak = 0, bound, level = pow(10, CHIRP_DB / 20);
+            uint32_t seed = 7;
+            for (int i = 0; i < len; ++i) {
+                double y = chirp_at(i, rate, &tick, &seed, &bound);
+                s[i] = (float)y, e[i] = (float)bound, peak = fmax(peak, fabs(y));
+            }
+            for (int i = 0; i < len; ++i)
+                s[i] = (float)(level * s[i] / peak), e[i] = (float)(level * fmin(e[i] / peak, 1));
+        } else {
+            double level = pow(10, CLICK_DB / 20), rise = CLICK_ATTACK_MS * rate / 1000, fall = CLICK_TAPER_MS * rate / 1000;
+            for (int i = 0; i < len; ++i) {
+                double t = (double)i / rate, env = level * exp(-t * 1000 / SOUNDS[kind].decay_ms);
+                if (i < rise) env *= 0.5 - 0.5 * cos(M_PI * i / rise);
+                if (len - i < fall) env *= 0.5 - 0.5 * cos(M_PI * (len - i) / fall);
+                e[i] = (float)env, s[i] = (float)(env * sin(2 * M_PI * SOUNDS[kind].hz * t));
+            }
         }
         m->rate = rate, m->len = len;
     }
