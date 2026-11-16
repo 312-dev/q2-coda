@@ -3629,17 +3629,23 @@ static int bar_charging(void) {
     const char *icon = st.bar_icon ? widget_get_prop_str(st.bar_icon, "image", "") : "";
     return icon && !tk_strcmp(icon, "bar_charge") && !usb_charge_held();
 }
-/* The battery view_battery shows: the level from label_battery's "88%" (stock zeroes
- * progress_battery while charging), then charging (bar_charging) and low (bar_lowcharge, or under
- * 15% on a cable that charges nothing), as stock picks the icon. Reads stock's widgets, no I/O. */
+/* The battery view_battery shows, as a BATT_KEY_* key: the level from label_battery's "88%" (stock
+ * zeroes progress_battery while charging), then what the cable does, as stock picks the icon
+ * (bar_charge whenever one is in): too weak to charge (charge_weak), full (g_power_chargestate 2)
+ * or held at Charge Limit, else charging (bar_charging); and low (bar_lowcharge, or under 15% on a
+ * cable that charges nothing). Reads stock's widgets and bytes, no I/O. */
 static unsigned battery_now(void) {
     const char *icon = widget_get_prop_str(st.bar_icon, "image", "");
     const unsigned *t = widget_get_text(st.bar_pct);
-    int level = 0, charging = bar_charging();
+    int level = 0, charging = bar_charging(), cable = icon && !tk_strcmp(icon, "bar_charge");
     while (t && *t >= '0' && *t <= '9') level = level * 10 + (int)(*t++ - '0');
-    int held = !charging && icon && !tk_strcmp(icon, "bar_charge");
-    return (unsigned)(level > 100 ? 100 : level) << 3 | (unsigned)charging << 1 |
-           (unsigned)((icon && !tk_strcmp(icon, "bar_lowcharge")) || (held && level < 15));
+    int held = cable && !charging, weak = charging && charge_weak();
+    int full = cable && !weak && (I(g_power_chargestate, 0) == 2 || (held && st.charge_held));
+    unsigned key = (unsigned)(level > 100 ? 100 : level) << 4;
+    if (weak) key |= BATT_KEY_WEAK;
+    else if (full) key |= BATT_KEY_PLUGGED;
+    else if (charging) key |= BATT_KEY_CHARGING;
+    return key | (unsigned)((icon && !tk_strcmp(icon, "bar_lowcharge")) || (held && level < 15));
 }
 static void bar_sync(void *bar) {
     if (bar_state_sync(bar) && !st.bar_timer) st.bar_timer = timer_add(bar_repaint, (void *)0, 0);
@@ -3681,7 +3687,7 @@ static void bar_sync(void *bar) {
     widget_set_visible(st.bar_slot, 1, 0);
 
     unsigned key = battery_now();
-    int pct = pct_width(key >> 3);
+    int pct = pct_width(BATT_KEY_LEVEL(key));
     int width = mode == 1
                     ? pct
                     : (mode == 3 ? inside : body) + BATT_NUB_W + (mode == 2 ? BATT_GAP + pct : 0);
@@ -3731,10 +3737,13 @@ static void paint_battery(void *w, void *canvas) {
     void *lcd = P(canvas, CANVAS_LCD);
     if (!lcd) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
-    unsigned key = st.batt_key, level = key >> 3, s[4], n = put_num(s, level);
+    unsigned key = st.batt_key, level = BATT_KEY_LEVEL(key), s[4], n = put_num(s, level);
     int inside = st.batt_mode == 3;
     if (!inside) s[n++] = '%';
-    unsigned color = RGBA(key & 2 ? BATT_CHARGE_RGB : key & 1 ? BATT_LOW_RGB : 0xffffff);
+    unsigned color = RGBA(key & BATT_KEY_WEAK                            ? BATT_WEAK_RGB
+                          : key & (BATT_KEY_CHARGING | BATT_KEY_PLUGGED) ? BATT_CHARGE_RGB
+                          : key & BATT_KEY_LOW                           ? BATT_LOW_RGB
+                                                                         : 0xffffff);
     if (!inside && !st.pct_digit) {
         unsigned c = '0';
         canvas_set_font(canvas, theme_face(&c, 1, 0), BATT_PX); /* draw_centred's face */
@@ -3748,7 +3757,7 @@ static void paint_battery(void *w, void *canvas) {
         return;
     }
     int bh = geom_val(V_BATT_H);
-    battery_slim(canvas, 0, batt_top(w, bh), geom_val(V_BATT_W), bh, key);
+    battery_slim(w, canvas, 0, batt_top(w, bh), geom_val(V_BATT_W), bh, key);
     stock_canvas_set_fill_color(canvas, fill);
 }
 

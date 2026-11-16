@@ -481,11 +481,50 @@ def test_the_icon_is_the_slim_battery(fw, st, ui):
     assert canvas.rects == [] and len(fw.calls('vgcanvas_stroke')) == 1 and len(fw.calls('vgcanvas_fill')) == 2
 
 
-@pytest.mark.parametrize('level, charging', [(62, 0), (62, 1), (5, 1), (100, 1)])
-def test_the_slim_batterys_fill_is_the_level_charging_or_not(fw, level, charging):
+KEY_LOW, KEY_CHARGING, KEY_PLUGGED, KEY_WEAK = 1, 2, 4, 8  # navigation.h BATT_KEY_*
+
+
+@pytest.mark.parametrize('level, bits', [(62, 0), (62, KEY_CHARGING), (5, KEY_CHARGING), (100, KEY_PLUGGED), (41, KEY_WEAK)])
+def test_the_slim_batterys_fill_is_the_level_charging_or_not(fw, level, bits):
     """The fill shows the real level on the cable too: forced full while charging, it hid how much was left."""
     fill = fw.fn('list_marks__battery_fill', C.c_uint, C.c_uint)
-    assert fill(level << 3 | charging << 1) == level
+    assert fill(level << 4 | bits) == level
+
+
+@pytest.mark.parametrize('level, bits, tone', [(62, 0, 0xffffff), (12, 0, 0xff453a), (12, KEY_CHARGING, O['BATT_CHARGE_RGB']),
+                                               (80, KEY_PLUGGED, O['BATT_CHARGE_RGB']), (41, KEY_WEAK, O['BATT_WEAK_RGB'])])
+def test_the_fill_is_white_red_green_or_orange(fw, level, bits, tone):
+    assert fw.fn('list_marks__battery_tone', C.c_uint, C.c_uint, C.c_uint)(level << 4 | bits, 0xffffff) == tone
+
+
+@pytest.mark.parametrize('bits, light, glyph', [(KEY_CHARGING, 0, b'battbolt_d'), (KEY_CHARGING, 1, b'battbolt_l'),
+                                                (KEY_WEAK, 0, b'battwarn_d'), (KEY_PLUGGED, 0, None), (0, 0, None)])
+def test_charging_puts_the_bolt_inside_and_a_weak_charger_the_warning(fw, st, ui, bits, light, glyph):
+    theme(fw, st, light=light)
+    name = fw.fn('list_marks__battery_glyph', C.c_char_p, C.c_uint)(50 << 4 | bits)
+    assert (name and name.split(b'_', 1)[1]) == glyph
+
+
+def bar_key(fw, st, ui, text, icon, state=0, held=0, dac=1):
+    """battery_now's key for stock's label and icon, g_power_chargestate and Charge Limit's hold."""
+    from test_usb_charge import Charging
+    theme(fw, st, BATTERY=0)
+    bar = Bar(fw, ui)
+    Charging(fw, pref=dac, mode=1, cable=1).config()
+    fw.var('fw_ctx_g_power_chargestate', C.c_int).value = state
+    st.charge_held = held
+    bar.level(text, icon)
+    bar.sync()
+    return fw.fn('navigation__battery_now', C.c_uint)()
+
+
+@pytest.mark.parametrize('text, icon, state, held, dac, key', [
+    ('62%', b'bar_charge', 1, 0, 1, 62 << 4 | KEY_CHARGING), ('100%', b'bar_charge', 2, 0, 1, 100 << 4 | KEY_PLUGGED),
+    ('62%', b'bar_battery', 0, 0, 1, 62 << 4), ('80%', b'bar_charge', 1, 1, 0, 80 << 4 | KEY_PLUGGED),
+    ('50%', b'bar_charge', 1, 0, 0, 50 << 4)])
+def test_the_key_says_charging_full_or_held(fw, st, ui, text, icon, state, held, dac, key):
+    """Charge Limit's hold is green with no glyph, USB DAC charging Off's is white: neither charges."""
+    assert bar_key(fw, st, ui, text, icon, state, held, dac) == key
 
 
 def test_with_a_bar_widget_missing_nothing_moves(fw, st, ui):

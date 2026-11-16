@@ -502,7 +502,18 @@ void np_modes(void *win, void *canvas);
 void np_glyphs_bind(void *win), np_glyphs(void *win);
 void wheel_sb_arm(void *list);
 unsigned wheel_sb_alpha(void *list);
-void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key);
+/* The status battery's key (navigation.c battery_now): the level from bit 4, then what the cable
+ * does. CHARGING: green, the bolt inside; PLUGGED: on a cable, full or held at Charge Limit, green
+ * with no glyph; WEAK: the charger too weak (charging.c charge_weak), orange, the warning inside;
+ * LOW: stock's low. */
+#define BATT_KEY_LOW 1u
+#define BATT_KEY_CHARGING 2u
+#define BATT_KEY_PLUGGED 4u
+#define BATT_KEY_WEAK 8u
+#define BATT_KEY_LEVEL(key) ((key) >> 4)
+void battery_slim(void *w, void *canvas, int x, int y, int bw, int bh, unsigned key);
+/* charging.c: 1 while the charger cannot keep up (no signal for it yet: always 0) */
+int charge_weak(void);
 /* list_marks.c: an on/off setting's switch, ending on canvas column right, centred on y
  * (settings.values.switch) */
 void switch_mark(void *canvas, int right, int y, int on, int selected);

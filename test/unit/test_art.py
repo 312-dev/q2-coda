@@ -115,7 +115,9 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     in Accent Blue and white and its kept-by-the-app arrows in Text Secondary (each half's) and white, and a card app's
     sign-in steps (fill, the done check bold, 44 px) in white for their solid circles, Control Center's glyphs (fill,
     white, its sliders' in the block's grey), the USB pages' rows, mode glyphs and toasts, and Up Next's bump arrow and
-    Now Playing's queue and radio glyphs."""
+    Now Playing's queue and radio glyphs, and charging's toasts (fill, 15 px, each in its colour, the battery's in each
+    half's Text Primary) and the plug-in screen's bolt (fill, 26 px, Positive green). The status battery's inset
+    glyphs have their own test."""
     t = theme.builtins()[0]
     got = art.images(t)
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
@@ -137,6 +139,9 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
            *(f'usbtoast_{n}' for n in art.USB_TOASTS)]  # usb_ui.c's chooser rows, mode pages and toasts
     upnext = [f'bump_{k}' for k in ('d', 'l', 'w')] + [f'mode_{n}' for n in ('queue_d', 'queue_l', 'radio_d', 'radio_l', 'radio_w',
                                                                               'shuffle_xd', 'shuffle_xl', 'repeat_xd', 'repeat_xl')]
+    charge = {**{f'chargetoast_{n}': c for n, (_, c) in art.CHARGE_TOASTS.items()},
+              'chargetoast_battery_d': 0xffffff, 'chargetoast_battery_l': 0}  # charging.c's toasts
+    inset = [f'batt{n}_{k}' for n in art.BATT_GLYPHS for k in ('d', 'l')]  # list_marks.c battery_slim
     keylock = [f'keylock_{k}' for k in ('d', 'l')]  # keylock.c: the status row's padlock and the card's
     card = [f'keylock_card_{k}' for k in ('d', 'l')]
     tiles = {f'pltile_{n}_{k}': c for n in ('playlist', 'otg') for k, c in (('d', 0x858585), ('l', 0x6e6e6e), ('w', 0xffffff))}
@@ -146,7 +151,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     assert set(got) == {'sort_bars'} | {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality,
-                                              *keylock, *card, *tiles, *acts, *pmarks, *lives, *store, *signin, *cc, *usb, *upnext,
+                                              *keylock, *card, *tiles, *acts, *pmarks, *lives, *store, *signin, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
                                               'search_pop', 'search_pop_letters', 'search_pop_echoes',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)))}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
@@ -173,11 +178,28 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.MARK_PX, {'d': 0x858585, 'l': 0x6e6e6e, 'w': 0xffffff}[n[-1]]) for n in lives),
                           *((n, art.MARK_PX, {'a': blue, 'd': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in store),
                           *((n, art.SIGNIN_PX, 0xffffff) for n in signin),
+                          *((n, art.USB_TOAST_PX, c) for n, c in charge.items()), ('chargebolt', art.CHARGE_BOLT_PX, 0x34c759),
                           *((f'cc_{n}', px, c) for n, (_, px, c) in art.CC_ICONS.items())):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
         assert (w, h) == (px, px) and inked == {tuple(rgb >> s & 255 for s in (16, 8, 0))}
         assert max(at(x, y)[3] for y in range(h) for x in range(w)) > 200
+
+
+@pytest.mark.parametrize('half, ink, gap', [('d', (255, 255, 255), (0, 0, 0)), ('l', (0, 0, 0), (255, 255, 255))])
+def test_the_status_batterys_glyph_is_inside_a_gap_in_the_canvas(half, ink, gap):
+    """list_marks.c battery_slim's bolt and warning: BATT_GLYPH_BOX, the glyph solid round its centre in Text Primary, a
+    ring of the Canvas round its edge (the gap), and the box's corners clear."""
+    got = art.images(theme.builtins()[0])
+    for n in art.BATT_GLYPHS:
+        w, h, at = pixels(got[f'oled_batt{n}_{half}'])
+        assert (w, h) == art.BATT_GLYPH_BOX
+        cx, cy = (int(v) for v in art.BATT_GLYPH_AT)
+        assert any(at(x, y) == (*ink, 255) for y in range(cy - 2, cy + 3) for x in range(cx - 2, cx + 3))
+        assert at(0, 0)[3] == at(w - 1, 0)[3] == at(0, h - 1)[3] == at(w - 1, h - 1)[3] == 0
+        ring = [(x, y) for y in range(h) for x in range(w) if at(x, y)[:3] == gap and at(x, y)[3] > 100]
+        assert ring and all(abs(x - cx) >= 2 or abs(y - cy) >= 2 for x, y in ring), f'{n}: no gap round the glyph'
+        assert all(at(x, 0)[3] < 128 for x in range(w))  # the 7 px glyph and its 1 px gap end inside the box
 
 
 def test_oleds_spinner_turns_its_bright_spoke_clockwise_a_frame_at_a_time():

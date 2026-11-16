@@ -164,9 +164,14 @@ All lists share one grid.
   stopped), then the battery, its nub's end 62 px from the right edge (x 313), the play state's centre
   12 px left of the battery's body.
 - Battery, in iOS's proportions: a 25x12 body with 4 px corners and a 1 px `#6E6E6E` outline,
-  the charge a solid fill 2 px inside it with 2.2 px corners in Text Primary (under 20 %
-  `#FF453A`, the only red on any screen; green while charging), and a 1.5x4.4 nub with 0.8 px
-  corners in `#6E6E6E`.
+  the charge a solid fill 2 px inside it with 2.2 px corners to the level, charging or not, in
+  Text Primary (under 20 % `#FF453A`, the only red on any screen; `#34C759` green on a cable that
+  charges it, holds it full or holds it at Charge Limit; `#FF9F0A` orange on a charger too weak to
+  keep up), and a 1.5x4.4 nub with 0.8 px corners in `#6E6E6E`.
+- Charging, Phosphor's `lightning` (fill, 7 px, Text Primary) sits on the body's centre with a
+  1 px gap in the Canvas cut round it where it crosses the fill, and no outline; a weak charger's
+  `warning` (fill) takes its place the same way. Full or held at Charge Limit, the fill is green
+  with no glyph. Picked as I2 from `mock_batt_inside.py` on 2026-11-15.
 
 ### Selection bar
 

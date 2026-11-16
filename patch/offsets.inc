@@ -198,6 +198,7 @@ static inline int arc_out(int r, int y) {
 #define BATT_PCT_DY 1
 #define BATT_CHARGE_RGB 0x34c759
 #define BATT_LOW_RGB 0xff1448
+#define BATT_WEAK_RGB 0xff9f0a /* a charger too weak to charge (charging.c charge_weak) */
 #define BATT_ROOM 94
 /* Plain Bluetooth ink and codec reaches from the right edge of their stock canvases. */
 #define BT_REACH 10
