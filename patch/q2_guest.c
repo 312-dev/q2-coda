@@ -805,6 +805,8 @@ static int status_byte(void) {
 
 static void notify_car(int force) {
     if (!qg.playing || !*qg.guest.path) return; /* nothing of the guest's before its stream */
+    if (!strcmp(qg.guest.source, "dlna"))
+        return; /* hciplayer plays it: demo sends its song itself */
     unsigned char rec[16 + 4 * (QG_FIELD + 4)];
     int n = qg_track_record(qg.track, qg.tracks, qg.duration, qg.title, qg.artist, qg.album,
                             qg.genre, rec, sizeof rec);
@@ -1058,6 +1060,8 @@ static void session_start(const qg_dev_t *d) {
     window_close();
     out_find();
     if (*d->path && !*d->source) aplay_start(), player_find();
+    if (!strcmp(d->source, "airplay"))
+        copy(qg.title, "AirPlay", sizeof qg.title); /* shairport tells none */
 }
 
 /* The guest's stream is here (its PCM): play it. */

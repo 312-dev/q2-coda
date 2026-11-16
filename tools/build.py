@@ -203,6 +203,12 @@ HOOKS = {
     'lcd_linux_fb_create': (0x63a57c, 'splash_lcd', 'lcd_create'),
     # A phone's A2DP stream events (stock's receiver page): dropped while Guest Play is on (guest.c guest_a2dp)
     'btrecvA2dpFunc': (0x4fc72c, 'guest_a2dp', 'btrecv'),
+    # Guest Play's receivers (guest.c, docs/internals.md#guest-play-receivers): AirPlay's take-over and the DLNA
+    # renderer's actions wait for the owner's answer while Guest Play is on
+    'airplay_mainscheduling': (0x519c28, 'guest_airplay', 'airplay_sched'),
+    'dmrActionSetPlayURI': (0x51005c, 'guest_dlna_uri', 'dlna_uri'),
+    'dmrActionPlay': (0x50fd50, 'guest_dlna_play', 'dlna_play'),
+    'dmrActionStop': (0x50fe4c, 'guest_dlna_stop', 'dlna_stop'),
 }
 # The payload's stock_<name>_trampoline, the hooks' third element, resumes each hook past its 3-word PIC
 # prologue.
@@ -1837,7 +1843,8 @@ FUNCTIONS = {
  'btrecvA2dpFunc': ('int', 'int, void *, void *'),
  'sendBtHeadsetPlayInfo': ('int', 'void'),  # the playing song to bluetoothd's AVRCP record (docs/internals.md#track-metadata)
  'sendBtHeadsetPlayStatus': ('int', 'void'),  # its play status, likewise
- 'player_save_stop': ('int', 'void'),  # stops the local or Tidal queue, its position kept for player_save_start
+ 'player_save_stop': ('int', 'void'),
+ 'airplaySendStop': ('int', 'void'),  # asks shairport, through its shared memory, to end the phone's session  # stops the local or Tidal queue, its position kept for player_save_start
  'mclGetCueFlag': ('int', 'void'),  # the playing record has a CUE start or end
  'mclGetPlayStatus': ('int', 'void'),  # 1 stopped, 2 playing, 3 paused (mclStop, mclSetResume, mclSetPause)
  'player_stop': ('int', 'void'),

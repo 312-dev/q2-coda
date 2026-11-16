@@ -8,8 +8,10 @@
  *   settings say, then sends the owner's song to the car again;
  * - hands the car's buttons to the guest's phone while one plays (guest_key, from headset_command);
  * - keeps stock's receiver page shut while Guest Play is on (guest_a2dp, hooked at btrecvA2dpFunc);
- * - holds a receiver's session (Spotify Connect) until the owner allows it, and stops it when
- * refused (guest_net, docs/internals.md#guest-play-receivers). */
+ * - holds a receiver's session (Spotify Connect, AirPlay, DLNA) until the owner allows it, and
+ * stops it when refused (guest_net, guest_airplay, guest_dlna_*:
+ * docs/internals.md#guest-play-receivers).
+ */
 #include "offsets.inc"
 #include "peq.h"
 #include "stock.h"
@@ -25,6 +27,11 @@
 #define GUEST_QUEUE 4       /* commands kept while the daemon starts */
 
 extern int stock_btrecv_trampoline(int event, void *data, void *user);
+extern int stock_airplay_sched_trampoline(void);
+extern int stock_dlna_uri_trampoline(void *uri, void *meta);
+extern int stock_dlna_play_trampoline(void);
+extern int stock_dlna_stop_trampoline(void);
+#define GUEST_NET_WAIT 140 /* a DLNA action waits this many GUEST_READ_MS for the owner (35 s) */
 
 static struct {
     char raw[2048];               /* the state file behind a '\n', as field() reads it */
@@ -113,6 +120,7 @@ static void net_follow(const char *state) {
     gp.netdeny_seq = seq;
     field(gp.raw, "netdeny", deny, sizeof deny);
     if (!strcmp(deny, "spotify")) spot_send_play(0);
+    if (!strcmp(deny, "airplay")) airplaySendStop(); /* shairport drops the phone's session */
     if (!strcmp(deny, gp.held)) gp.held[0] = 0;
 }
 
@@ -174,7 +182,10 @@ void guest_poll(void) {
 
 /* headset_command's codes while a guest plays: to the guest's phone. 1 when taken. */
 int guest_key(int code) {
-    if (!gp.active) return 0;
+    char source[12];
+    field(gp.raw, "source", source, sizeof source);
+    /* AirPlay's and DLNA's play through demo, whose own keys reach them */
+    if (!gp.active || !strcmp(source, "airplay") || !strcmp(source, "dlna")) return 0;
     const char *key = code == 163                                 ? "key next"
                       : code == 165                               ? "key prev"
                       : code == 164                               ? "key toggle"
@@ -191,4 +202,54 @@ int guest_key(int code) {
 int guest_a2dp(int event, void *data, void *user) {
     if (gp.on) return 0;
     return stock_btrecv_trampoline(event, data, user);
+}
+
+/* airplay_mainscheduling's hook (tools/build.py HOOKS), on the UI thread: stock takes the output
+ * for shairport once a phone plays (airplayGetFlag). With Guest Play on that waits for the owner:
+ * held, stock does nothing (no page, the player left alone); allowed, it goes on; refused,
+ * net_follow stops the session. Its end (the flag down) ends the guest's. */
+int guest_airplay(void) {
+    char state[12], source[12];
+    if (gp.on && airplayGetFlag() && guest_net("airplay", "client", "AirPlay")) return 0;
+    field(gp.raw, "state", state, sizeof state);
+    field(gp.raw, "source", source, sizeof source);
+    if (gp.on && !airplayGetFlag() && !strcmp(source, "airplay") && !strcmp(state, "playing"))
+        guest_write("net-end airplay");
+    return stock_airplay_sched_trampoline();
+}
+
+/* A DLNA action that would start playback, on the renderer's thread: 1 to carry it out. With Guest
+ * Play on it asks q2-guest once and waits on this thread for the answer (GUEST_NET_WAIT), reading
+ * the state file itself, as gp is the UI thread's: allowed or already the guest, 1; refused or no
+ * answer, 0. */
+static int dlna_gate(void) {
+    char raw[2048], state[12], source[12], deny[12];
+    unsigned denied = 0;
+    if (!gp.on) return 1;
+    for (int i = 0; i < GUEST_NET_WAIT; ++i) {
+        if (!state_read(GUEST_STATE, raw, sizeof raw))
+            return 1; /* the daemon gone: Guest Play off */
+        field(raw, "state", state, sizeof state);
+        field(raw, "source", source, sizeof source);
+        field(raw, "netdeny", deny, sizeof deny);
+        unsigned seq = (unsigned)number(raw, "netdeny_seq");
+        if (!i) denied = seq;
+        if (!strcmp(source, "dlna") && (!strcmp(state, "playing") || !strcmp(state, "paused")))
+            return 1;
+        if (seq != denied && !strcmp(deny, "dlna")) return 0;
+        if (!i && !(!strcmp(state, "asking") && !strcmp(source, "dlna")))
+            guest_write("net dlna renderer DLNA");
+        usleep(GUEST_READ_MS * 1000);
+    }
+    return 0;
+}
+
+/* dmrActionSetPlayURI's, dmrActionPlay's and dmrActionStop's hooks (tools/build.py HOOKS). */
+int guest_dlna_uri(void *uri, void *meta) {
+    return dlna_gate() ? stock_dlna_uri_trampoline(uri, meta) : 0;
+}
+int guest_dlna_play(void) { return dlna_gate() ? stock_dlna_play_trampoline() : 0; }
+int guest_dlna_stop(void) {
+    if (gp.on) guest_write("net-end dlna");
+    return stock_dlna_stop_trampoline();
 }

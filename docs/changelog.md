@@ -2,7 +2,7 @@
 
 - **Unreleased (q2-coda)**:
   - Bluetooth: **Guest Play** lets a friend's phone play through the Q2 to your car or headphones. You approve each new guest (Allow Once, Always Allow or Decline, declined by itself after 30 s), one guest plays at a time, Trusted Guests play without asking, and your own music stops while they play and comes back when they leave. The car shows the guest's song and its buttons control the guest's phone.
-  - Guest Play: with Guest Play on, a guest's Spotify Connect session asks you first, like a Bluetooth guest, and the car shows its song.
+  - Guest Play: with Guest Play on, a guest's Spotify Connect, AirPlay or DLNA session asks you first, like a Bluetooth guest, and stays silent if you decline; the car shows the song where the app sends one.
   - Guest Play's **Hotspot**: the Q2 makes its own Wi-Fi network (named after Guest Play, with a password and a QR code to join) alongside its usual Wi-Fi connection, so guests can reach it with no Wi-Fi of their own.
   - Bluetooth: car stereos and smart speakers that show what's playing (an Echo, a BMW's iDrive and most headsets' apps) now get the song's title, artist, album, track number and length from the Q2. They showed nothing before.
   - Confirmations: removing a song from a playlist, and deleting or replacing an EQ preset, now open on **Cancel**, so a stray Center press no longer removes or overwrites anything.
