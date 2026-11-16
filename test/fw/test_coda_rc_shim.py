@@ -367,3 +367,19 @@ def test_jump_plays_a_queue_entry_if_it_is_still_that_song(fw, ui, mcl, recs):
     q2.files[CMD] = b'43 jump 1 11\n'
     q2.tick()
     assert q2.files.pop(ACK) == b'43 1\n' and len(fw.calls('player_start_queue')) == 1
+
+
+def test_a_card_apps_streaming_song_can_be_rated(fw, ui, mcl, recs):
+    """A card app's song streamed from its download (no library record: id 0) plays as a card list (0xf001), so it
+    has hearts and the picker's rate_song rates it (ratings.c, through its catalogue row); coda-rc names it by its
+    server id and sends the record's id, 0, which is what the shim compares."""
+    q2 = Q2(fw, ui, recs, songs=0)
+    q2.songs = [recs(id_=0, path='/mnt/mmc/.subsonic/stream/9f2c/original/0/hello [VcF5].flac', name='hello [VcF5].flac',
+                     title='Hello', artist='Adele', album='Hello Album')]
+    q2.queue(at=0)
+    C.c_int.from_address(O['MCL_TYPE']).value = 0xf001
+    q2.tick()
+    assert q2.now()['id'] == '0' and q2.now()['hearts'] == '0'
+    q2.files[CMD] = b'40 rate 3 0\n'
+    q2.tick()
+    assert q2.files.pop(ACK) == b'40 0\n' and q2.now()['hearts'] == '3'

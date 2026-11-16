@@ -294,7 +294,7 @@ static void put_now_playing(pbw *w) {
     pb_varint(w, 9, np.repeat);
     pb_varint(w, 10, np.volume);
     pb_varint(w, 11, np.hearts > 0 ? np.hearts : 0);
-    pb_varint(w, 12, np.hearts >= 0 && np.id > 0);
+    pb_varint(w, 12, np.hearts >= 0 && rid > 0);
     pb_end(w, m);
 }
 
@@ -475,9 +475,10 @@ static int rate(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
     /* Rate: track_id 1, hearts 2 */
     if (fields(p, n, v, id, sizeof id, 1) < 0 || v[2] > 5) return crc_error(s, req_id, E_BAD_REQUEST, "Rate");
     int rid = lib_song_rid(id);
-    if (!rid || rid != np.id) return crc_error(s, req_id, E_NOT_FOUND, "not the playing song");
+    const lib_song_t *ls = np_stream(); /* a streaming song: its server song's id, its record's (0) to the shim */
+    if (!rid || rid != (ls ? ls->id : np.id)) return crc_error(s, req_id, E_NOT_FOUND, "not the playing song");
     if (np.hearts < 0) return crc_error(s, req_id, E_UNAVAILABLE, "this song can't be rated");
-    snprintf(verb, sizeof verb, "rate %u %d", v[2], rid);
+    snprintf(verb, sizeof verb, "rate %u %d", v[2], np.id);
     return crc_shim_command(s, req_id, verb);
 }
 
