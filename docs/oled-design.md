@@ -748,7 +748,10 @@ The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `de
   in from the blocks' ends and evenly apart, named under them as the toggles are.
 - **Grab bar**: 36 x 5, `#5A5A5E`, at y 304, where the swipe up that closes the page starts.
 - **The wheel** rings the stop it is on in white (2 px, 1 px out); a slider that has the wheel is ringed in
-  Accent Blue.
+  Accent Blue. The ring is not there when the
+  page is pulled down, and touch never brings it: the first wheel tick (or Center) shows it on the stop the wheel
+  is on, without moving or acting, and it goes 5 s after the last wheel tick or key; the next tick brings it back
+  on the same stop.
 
 ### USB
 

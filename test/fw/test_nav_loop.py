@@ -2143,14 +2143,19 @@ def test_a_pending_centre_does_nothing_while_the_page_slides(fw, keys):
     assert not fw.calls('navigator_back')
 
 
-def quick_window(ui, value=50, lo=10, hi=100, visible=1):
+def quick_window(ui, value=50, lo=10, hi=100, visible=1, ring=100000):
+    """Quick Settings open; ring: the time of the wheel's last tick there (Keys' clock starts at 100000), so its
+    ring shows; None for a page just pulled down."""
     top = ui.window('statusbar_dialog', 'dialog')
+    if ring is not None:
+        top.ints[b'_cc_seen'] = ring + 1
     slider = top.add(W(ui, 'slider', 'slider_backlight', value=value, min=lo, max=hi))
     slider.visible = visible
     return slider
 
 
-CC_BRIGHT, CC_VOLUME, CC_LOCK, CC_STOPS = 4, 5, 6, 11  # control_center.c's stops: four toggles, the sliders, five tiles
+# control_center.c's stops: four toggles, the sliders, five tiles
+CC_BRIGHT, CC_VOLUME, CC_LOCK, CC_SLEEP, CC_NIGHT, CC_EQ, CC_SMART, CC_STOPS = 4, 5, 6, 7, 8, 9, 10, 11
 
 
 @pytest.mark.parametrize('value, key, want', [(50, KEY_NEXT, 51), (50, KEY_PREV, 49), (100, KEY_NEXT, 100), (10, KEY_PREV, 10)])
@@ -2173,11 +2178,11 @@ def test_quick_settings_wheel_waits_while_it_slides(fw, keys, state, timer, visi
     assert keys(KEY_NEXT) == STOP and slider.ints[b'value'] == 50
 
 
-def cc_window(fw, ui):
+def cc_window(fw, ui, ring=100000):
     """Control Center open (control_center.c): its brightness slider and Wi-Fi's and Bluetooth's buttons."""
     Config(fw, QSVOLUME=b'1')  # the wheel's volume mode does not take Control Center's stops
     fw.var('fw_ctx_g_dropdown_menu_state', C.c_int).value = 3
-    slider = quick_window(ui)
+    slider = quick_window(ui, ring=ring)
     for name in ('img_wifiswitch', 'img_btswitch'):
         slider.parent.add(W(ui, 'image', name))
     return slider.parent, slider
@@ -2246,6 +2251,62 @@ def test_quick_settings_wheel_as_volume_is_stocks(fw, keys):
     slider = quick_window(ui)
     keys(KEY_NEXT)
     assert slider.ints[b'value'] == 50 and fw.calls('stock_keyup_trampoline')
+
+
+class WidgetTimers:
+    """widget_add_timer's timers, kept to run: (fn, the widget, ms) each."""
+    def __init__(self, fw):
+        self.added = []
+        fw.mock('widget_add_timer', lambda w, fn, ms, *_: self.added.append((fn, w, ms)) or len(self.added))
+
+    def fire(self, i):
+        """Timer i run as stock's timer manager does, its widget the context; its result (8 repeats)."""
+        fn, w, _ = self.added[i]
+        info = C.create_string_buffer(0x40)
+        struct.pack_into('<Q', info, O['TIMER_CTX'], w)
+        return TIMER(fn)(C.addressof(info))
+
+
+def test_control_center_opens_with_no_ring_and_the_first_tick_only_brings_it_up(fw, keys):
+    """Pulled down, the wheel's ring is not there: the first tick shows it on the stop the wheel is on without moving
+    it, and Centre then does not act; the next tick steps."""
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui, ring=None)
+    top.ints[b'_cc_focus'] = CC_LOCK
+    assert keys(KEY_NEXT) == STOP and top.ints[b'_cc_focus'] == CC_LOCK and top.ints[b'_cc_seen'] == 100001
+    assert keys(KEY_NEXT, 100) == STOP and top.ints[b'_cc_focus'] == CC_LOCK + 1
+
+
+def test_centre_with_no_ring_only_brings_it_up(fw, keys):
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui, ring=None)
+    flag = fw.var('g_keylock_flag', C.c_ubyte)
+    top.ints[b'_cc_focus'] = CC_LOCK
+    assert keys(KEY_CENTER) == STOP and flag.value == 0 and top.ints[b'_cc_seen'] == 100001
+    assert keys(KEY_CENTER, 600) == STOP and flag.value == 1  # with the ring up, Centre acts
+
+
+def test_the_ring_goes_5_s_after_the_last_input_and_comes_back_where_it_was(fw, keys):
+    """Each tick or key moves the ring's end on; its timer, once due, is added again for what is left, so the ring
+    goes CC_RING_MS after the last, not up to twice that; the next tick only brings it back, on the same stop."""
+    timers = WidgetTimers(fw)
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui, ring=None)
+    keys(KEY_NEXT)  # brings it up at 100000
+    assert [ms for _, _, ms in timers.added] == [5000]
+    keys(KEY_NEXT, 3000)  # moves it to stop 1 at 103000: no second timer
+    assert len(timers.added) == 1 and top.ints[b'_cc_focus'] == 1
+    keys.clock.now = 105000
+    ui.invalidated.clear()
+    assert timers.fire(0) == 7 and timers.added[1][2] == 3000 and not ui.invalidated  # 3 s left: added again
+    keys.clock.now = 107999
+    assert keys(KEY_NEXT, 0) == STOP and top.ints[b'_cc_focus'] == 2  # still up at 4999 ms
+    keys.clock.now = 108000
+    assert timers.fire(1) == 7 and timers.added[2][2] == 4999  # what is left of 107999's
+    keys.clock.now = 112999
+    ui.invalidated.clear()
+    assert timers.fire(2) == 7 and ui.invalidated == [top.p] and len(timers.added) == 3  # gone: drawn without it
+    assert keys(KEY_NEXT, 10) == STOP and top.ints[b'_cc_focus'] == 2  # back on stop 2, not moved
 
 
 def time_window(ui, name='manualtime_page', at=(4, 2, 4, 9, 5)):

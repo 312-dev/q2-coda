@@ -6,24 +6,26 @@
  * square tiles, Buttons Lock, Sleep Timer, Night Shift, EQ and Smart Wi-Fi, each named under it;
  * and a grab bar at the foot, where the swipe up that closes it starts.
  *
- * Stock's widgets stay for what stock does: its Wi-Fi and Bluetooth buttons, at opacity 0 over their
- * circles, take the taps and holds (navigation.c quick_down: held, their settings pages), and its
- * brightness slider, at opacity 0 over the Brightness slider, takes the drags; Centre on those
+ * Stock's widgets stay for what stock does: its Wi-Fi and Bluetooth buttons, at opacity 0 over
+ * their circles, take the taps and holds (navigation.c quick_down: held, their settings pages), and
+ * its brightness slider, at opacity 0 over the Brightness slider, takes the drags; Centre on those
  * clicks them as a tap would. Every other control is a clear button of this file's (cc_click).
  * The wheel walks CC_STOPS, the toggles, the two sliders and the tiles in reading order, a white
  * ring round the one it is on; Centre acts on it, and on a slider gives it the wheel (an accent
- * ring) until Centre or Return gives it back. Return on a stop closes the page.
- * ponytail: AirPlay and Sleep Timer open their settings pages (stock's receiver switch and timer
- * have no call this file can make without their page), so their circle and tile are lit only by
- * AirPlay's flag and never by a running timer; the Wi-Fi circle reads "Wi-Fi", not the network's
- * name, which only the Wi-Fi page reads. */
+ * ring) until Centre or Return gives it back. Return on a stop closes the page. The ring is not
+ * there when the page is pulled down, nor under touch: the first wheel tick or Centre brings it up
+ * on the stop the wheel is on, without stepping or acting, and it goes CC_RING_MS after the last
+ * (cc_ring_on). ponytail: AirPlay and Sleep Timer open their settings pages (stock's receiver
+ * switch and timer have no call this file can make without their page), so their circle and tile
+ * are lit only by AirPlay's flag and never by a running timer; the Wi-Fi circle reads "Wi-Fi", not
+ * the network's name, which only the Wi-Fi page reads. */
 #include "navigation.h"
 
 extern int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x,
                    int y, int w, int align);
 extern void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind); /* artist_page.c */
-extern void keylock_toggle(void), coda_rc_toggle(void);                       /* navigation.c, coda_rc_shim.c */
-extern unsigned char now_cover(void *r, const char **file);                   /* coverflow.c */
+extern void keylock_toggle(void), coda_rc_toggle(void);     /* navigation.c, coda_rc_shim.c */
+extern unsigned char now_cover(void *r, const char **file); /* coverflow.c */
 
 /* The layout, in the window's (the screen's) pixels, as mock_cc3.py draws it at 1x */
 #define CC_X0 20
@@ -52,18 +54,36 @@ extern unsigned char now_cover(void *r, const char **file);                   /*
 #define CC_GRAB 0x5a5a5e
 #define CC_FOCUS "_cc_focus"   /* the window's stop the wheel is on */
 #define CC_ADJUST "_cc_adjust" /* 1 while a slider has the wheel */
+#define CC_SEEN "_cc_seen"     /* the last wheel tick or key, time_now_ms + 1; 0 none yet */
+#define CC_RING_MS 5000        /* the ring stays this long after it */
 
-enum { CC_WIFI, CC_BT, CC_AIRPLAY, CC_CAR, CC_BRIGHT, CC_VOLUME, CC_LOCK, CC_SLEEP, CC_NIGHT,
-       CC_EQ, CC_SMART, CC_STOPS, CC_PREV = CC_STOPS, CC_PLAY, CC_NEXT, CC_BUTTONS };
-static const char *const cc_labels[CC_STOPS] = { "Wi-Fi", "Bluetooth",   "AirPlay",
-                                                 "Car",   0,             0,
-                                                 "Lock",  "Sleep",       "Night Shift",
-                                                 "EQ",    "Smart Wi-Fi" };
-/* Each stop's glyph (tools/art.py CC_ICONS): <art>cc_<name> */
-static const char *const cc_glyphs[CC_BUTTONS] = {
-    "wifi", "bluetooth", "airplay", "car", "sun", "speaker", "lock", "timer",
-    "moon", "eq",        "leaf",    "back", "pause", "forward"
+enum {
+    CC_WIFI,
+    CC_BT,
+    CC_AIRPLAY,
+    CC_CAR,
+    CC_BRIGHT,
+    CC_VOLUME,
+    CC_LOCK,
+    CC_SLEEP,
+    CC_NIGHT,
+    CC_EQ,
+    CC_SMART,
+    CC_STOPS,
+    CC_PREV = CC_STOPS,
+    CC_PLAY,
+    CC_NEXT,
+    CC_BUTTONS
 };
+static const char *const cc_labels[CC_STOPS] = {
+    "Wi-Fi", "Bluetooth",   "AirPlay", "Car",        0, 0, "Lock",
+    "Sleep", "Night Shift", "EQ",      "Smart Wi-Fi"
+};
+/* Each stop's glyph (tools/art.py CC_ICONS): <art>cc_<name> */
+static const char *const cc_glyphs[CC_BUTTONS] = { "wifi",  "bluetooth", "airplay", "car",
+                                                   "sun",   "speaker",   "lock",    "timer",
+                                                   "moon",  "eq",        "leaf",    "back",
+                                                   "pause", "forward" };
 
 /* Stop i's box on the window: a circle's square, a slider's track, a tile, a transport glyph's. */
 static rect_t cc_box(int i) {
@@ -85,15 +105,24 @@ static rect_t cc_box(int i) {
 
 static int cc_lit(int i) {
     switch (i) {
-    case CC_WIFI: return g_wififlag != 0;
-    case CC_BT: return g_bluetoothflag != 0;
-    case CC_AIRPLAY: return g_airplayflag != 0;
-    case CC_CAR: return coda_rc_enabled();
-    case CC_LOCK: return g_keylock_flag != 0;
-    case CC_NIGHT: return night_on() != 0;
-    case CC_EQ: return g_equalizer_flag != 0;
-    case CC_SMART: return st.smart_wifi != 0;
-    default: return 0;
+    case CC_WIFI:
+        return g_wififlag != 0;
+    case CC_BT:
+        return g_bluetoothflag != 0;
+    case CC_AIRPLAY:
+        return g_airplayflag != 0;
+    case CC_CAR:
+        return coda_rc_enabled();
+    case CC_LOCK:
+        return g_keylock_flag != 0;
+    case CC_NIGHT:
+        return night_on() != 0;
+    case CC_EQ:
+        return g_equalizer_flag != 0;
+    case CC_SMART:
+        return st.smart_wifi != 0;
+    default:
+        return 0;
     }
 }
 
@@ -112,7 +141,8 @@ static void cc_shape(void *canvas, rect_t r, int radius, unsigned rgb, int ring,
 static void cc_glyph(void *w, void *canvas, int i, int cx, int cy, int px) {
     char name[40];
     tk_snprintf(name, sizeof name, "%scc_%s", theme()->art, cc_glyphs[i]);
-    if (i == CC_PLAY && mclGetPlayStatus() != 2) tk_snprintf(name, sizeof name, "%scc_play", theme()->art);
+    if (i == CC_PLAY && mclGetPlayStatus() != 2)
+        tk_snprintf(name, sizeof name, "%scc_play", theme()->art);
     paint_art(w, canvas, name, cx - px / 2, cy - px / 2);
 }
 
@@ -120,8 +150,36 @@ static void cc_glyph(void *w, void *canvas, int i, int cx, int cy, int px) {
 static int cc_level(void *win, int i) {
     if (i == CC_VOLUME) return g_volume >= 100 ? 256 : g_volume * 256 / 100;
     void *s = widget_lookup(win, "slider_backlight", 1);
-    int min = s ? widget_get_prop_int(s, "min", 0) : 0, max = s ? widget_get_prop_int(s, "max", 100) : 100;
+    int min = s ? widget_get_prop_int(s, "min", 0) : 0,
+        max = s ? widget_get_prop_int(s, "max", 100) : 100;
     return s && max > min ? (widget_get_prop_int(s, "value", 0) - min) * 256 / (max - min) : 0;
+}
+
+/* Whether the wheel's ring shows: a wheel tick or key within CC_RING_MS. */
+static int cc_ring_on(void *win) {
+    unsigned seen = (unsigned)widget_get_prop_int(win, CC_SEEN, 0);
+    return seen && (unsigned)time_now_ms() - (seen - 1) < CC_RING_MS;
+}
+/* CC_RING_MS after the last input, the page drawn again without the ring; an input since moved
+ * the end on, so the timer is added again for what is left. */
+static int cc_ring_timer(const void *info) {
+    void *win = P(info, TIMER_CTX);
+    unsigned seen = (unsigned)widget_get_prop_int(win, CC_SEEN, 0),
+             left = CC_RING_MS - ((unsigned)time_now_ms() - (seen - 1));
+    if (cc_ring_on(win))
+        widget_add_timer(win, cc_ring_timer, left);
+    else
+        widget_invalidate_force(win, (void *)0);
+    return 7; /* RET_REMOVE */
+}
+/* A wheel tick or key on the page: 1 when the ring was not showing, which the input only brings
+ * up. */
+static int cc_ring_wake(void *win) {
+    int was = cc_ring_on(win);
+    if (!was) widget_add_timer(win, cc_ring_timer, CC_RING_MS);
+    widget_set_prop_int(win, CC_SEEN, (int)((unsigned)time_now_ms() + 1));
+    widget_invalidate_force(win, (void *)0);
+    return !was;
 }
 
 /* The page, under the window's children (navigation.c's paint of statusbar_dialog): the status row
@@ -129,15 +187,18 @@ static int cc_level(void *win, int i) {
 void cc_paint(void *win, void *canvas) {
     void *bar = *(void *const *)system_bar;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), accent = scheme()->tones[0];
-    int focus = widget_get_prop_int(win, CC_FOCUS, 0), adjust = widget_get_prop_int(win, CC_ADJUST, 0);
+    int focus = widget_get_prop_int(win, CC_FOCUS, 0),
+        adjust = widget_get_prop_int(win, CC_ADJUST, 0), shown = cc_ring_on(win);
     rect_t block = { CC_X0, CC_Y0, CC_BLOCK_W, CC_BLOCK_H },
-           np = { CC_X0 + CC_BLOCK_W + CC_GAP, CC_Y0, CC_X1 - CC_X0 - CC_BLOCK_W - CC_GAP, CC_BLOCK_H };
+           np = { CC_X0 + CC_BLOCK_W + CC_GAP, CC_Y0, CC_X1 - CC_X0 - CC_BLOCK_W - CC_GAP,
+                  CC_BLOCK_H };
     if (bar) widget_paint(bar, canvas);
     fill_box(canvas, &block, RGBA(CC_BLOCK), CC_BLOCK_R);
     fill_box(canvas, &np, RGBA(CC_BLOCK), CC_BLOCK_R);
     for (int i = 0; i < CC_STOPS; ++i) {
         rect_t r = cc_box(i);
-        int lit = cc_lit(i), ring = i == focus ? 1 + (adjust && (i == CC_BRIGHT || i == CC_VOLUME)) : 0;
+        int lit = cc_lit(i),
+            ring = i == focus && shown ? 1 + (adjust && (i == CC_BRIGHT || i == CC_VOLUME)) : 0;
         if (i == CC_BRIGHT || i == CC_VOLUME) {
             cc_shape(canvas, r, r.h / 2, CC_OFF, ring, 0);
             int k = cc_level(win, i), fw = r.w * k / 256;
@@ -149,8 +210,8 @@ void cc_paint(void *win, void *canvas) {
         cc_shape(canvas, r, i <= CC_CAR ? CC_CIRCLE_R : CC_TILE_R, lit ? accent : CC_OFF, ring,
                  i <= CC_CAR ? CC_BLOCK : 0);
         cc_glyph(win, canvas, i, r.x + r.w / 2, r.y + r.h / 2, CC_ICON);
-        ar_text(canvas, cc_labels[i], 1, CC_LABEL_PX, lit ? 0xffffff : CC_SECONDARY, 0, r.x + r.w / 2,
-                r.y + r.h + 9, 120, 1);
+        ar_text(canvas, cc_labels[i], 1, CC_LABEL_PX, lit ? 0xffffff : CC_SECONDARY, 0,
+                r.x + r.w / 2, r.y + r.h + 9, 120, 1);
     }
     /* Now Playing: the cover, the title and artist, and the transport */
     unsigned pos, n;
@@ -160,7 +221,8 @@ void cc_paint(void *win, void *canvas) {
     char url[600] = "file://";
     if (rec) now_cover(rec, &cover);
     unsigned bitmap[64]; /* bitmap_t: width @0, height @4 */
-    if (cover && *cover && strlen(cover) < sizeof url - 8) memcpy(url + 7, cover, strlen(cover) + 1);
+    if (cover && *cover && strlen(cover) < sizeof url - 8)
+        memcpy(url + 7, cover, strlen(cover) + 1);
     if (cover && *cover && !widget_load_image(win, url, bitmap) && bitmap[0] && bitmap[1]) {
         int bw = (int)bitmap[0], bh = (int)bitmap[1], side = bw < bh ? bw : bh;
         rect_t src = { (bw - side) / 2, (bh - side) / 2, side, side };
@@ -171,7 +233,8 @@ void cc_paint(void *win, void *canvas) {
     int tx = art.x + CC_ART + 8, tw = np.x + np.w - 12 - tx;
     ar_text(canvas, rec ? now_tag(rec, REC_TITLE) : "Not Playing", 1, 19, 0xffffff, 0, tx,
             CC_Y0 + 28, tw, 2);
-    if (rec) ar_text(canvas, now_tag(rec, REC_ARTIST), 0, 16, CC_SECONDARY, 0, tx, CC_Y0 + 48, tw, 2);
+    if (rec)
+        ar_text(canvas, now_tag(rec, REC_ARTIST), 0, 16, CC_SECONDARY, 0, tx, CC_Y0 + 48, tw, 2);
     for (int i = CC_PREV; i <= CC_NEXT; ++i) {
         rect_t r = cc_box(i);
         cc_glyph(win, canvas, i, r.x + r.w / 2, r.y + r.h / 2, i == CC_PLAY ? 30 : CC_ICON);
@@ -195,7 +258,11 @@ static void cc_volume(int v) {
 /* Stock's own widget under stop i, which its tap and its Centre click: Wi-Fi's, Bluetooth's, the
  * brightness slider. */
 static void *cc_stock(void *win, int i) {
-    return widget_lookup(win, i == CC_WIFI ? "img_wifiswitch" : i == CC_BT ? "img_btswitch" : "slider_backlight", 1);
+    return widget_lookup(win,
+                         i == CC_WIFI ? "img_wifiswitch"
+                         : i == CC_BT ? "img_btswitch"
+                                      : "slider_backlight",
+                         1);
 }
 
 /* Stop i acted on (a tap or Centre); 1 when the page goes, for a page that opens. */
@@ -211,22 +278,35 @@ static int cc_act(void *win, int i) {
     case CC_AIRPLAY:
     case CC_SLEEP:
         dialog_quit(win, 0);
-        navigator_to(i == CC_AIRPLAY ? "systemset/netservice_page" : "systemset/sleepshutdown_page");
+        navigator_to(i == CC_AIRPLAY ? "systemset/netservice_page"
+                                     : "systemset/sleepshutdown_page");
         return 1;
-    case CC_CAR: coda_rc_toggle(); break;
-    case CC_LOCK: keylock_toggle(); break;
+    case CC_CAR:
+        coda_rc_toggle();
+        break;
+    case CC_LOCK:
+        keylock_toggle();
+        break;
     case CC_NIGHT:
         night_set(night_on() ? 0 : 1, night_kelvin());
         night_save();
         break;
-    case CC_EQ: eq_toggle(); break;
+    case CC_EQ:
+        eq_toggle();
+        break;
     case CC_SMART: /* Battery's row's setting (navigation.c pod_click, smart_wifi.c) */
         st.smart_wifi = !st.smart_wifi;
         write_int_config(st.smart_wifi, "Q2POD", "SMARTWIFI");
         break;
-    case CC_PREV: prev_quick_click(); break;
-    case CC_PLAY: player_play_pause(); break;
-    case CC_NEXT: next_quick_click(); break;
+    case CC_PREV:
+        prev_quick_click();
+        break;
+    case CC_PLAY:
+        player_play_pause();
+        break;
+    case CC_NEXT:
+        next_quick_click();
+        break;
     }
     widget_invalidate_force(win, (void *)0);
     return 0;
@@ -252,11 +332,12 @@ static int cc_drag(void *track, void *event) {
  * hidden but Wi-Fi's and Bluetooth's, at opacity 0 over their circles, the brightness slider at
  * opacity 0 over its track, and clear buttons over the rest. */
 void cc_open(void *win) {
-    static const char *const hidden[] = { "img_lock", "img_gain", "img_usbmode", "img_po",
-                                          "img_playset", "img_sysset", "label_wifi", "label_bt",
-                                          "label_lock", "label_gain", "label_usbmode",
-                                          "label_outputway", "label_playset", "label_sysset",
-                                          "image0", "image1" };
+    static const char *const hidden[] = { "img_lock",      "img_gain",      "img_usbmode",
+                                          "img_po",        "img_playset",   "img_sysset",
+                                          "label_wifi",    "label_bt",      "label_lock",
+                                          "label_gain",    "label_usbmode", "label_outputway",
+                                          "label_playset", "label_sysset",  "image0",
+                                          "image1" };
     void *c = widget_lookup(win, "view_menu", 1);
     if (c) widget_move_resize(c, 0, 0, 375, 320);
     for (unsigned i = 0; i < sizeof hidden / sizeof *hidden; ++i)
@@ -287,8 +368,10 @@ void cc_open(void *win) {
     }
 }
 
-/* The wheel on the page: from stop to stop, ends kept, or a slider's level while it has it. */
+/* The wheel on the page: from stop to stop, ends kept, or a slider's level while it has it; a tick
+ * with no ring showing only brings it up. */
 void cc_wheel(void *win, int dir) {
+    if (cc_ring_wake(win)) return;
     int focus = widget_get_prop_int(win, CC_FOCUS, 0);
     if (widget_get_prop_int(win, CC_ADJUST, 0)) {
         if (focus == CC_VOLUME) {
@@ -297,7 +380,8 @@ void cc_wheel(void *win, int dir) {
             void *s = cc_stock(win, CC_BRIGHT);
             if (!s) return;
             int value = widget_get_prop_int(s, "value", 0), min = widget_get_prop_int(s, "min", 0),
-                max = widget_get_prop_int(s, "max", 100), next = min + clamp_step(value - min, max - min, dir);
+                max = widget_get_prop_int(s, "max", 100),
+                next = min + clamp_step(value - min, max - min, dir);
             if (next != value) widget_set_prop_int(s, "value", next);
         }
     } else {
@@ -311,8 +395,10 @@ void cc_wheel(void *win, int dir) {
 /* Centre and Return on the page: Centre acts on the stop, or gives a slider the wheel and takes it
  * back; Return takes it back from a slider. 0 leaves the key to close the page. */
 int cc_key(void *win, unsigned key) {
-    int focus = widget_get_prop_int(win, CC_FOCUS, 0), adjust = widget_get_prop_int(win, CC_ADJUST, 0);
+    int focus = widget_get_prop_int(win, CC_FOCUS, 0),
+        adjust = widget_get_prop_int(win, CC_ADJUST, 0);
     if (key == KEY_RETURN && !adjust) return 0;
+    if (cc_ring_wake(win) && key == KEY_CENTER) return 1; /* no ring: Centre only brings it up */
     if (key == KEY_RETURN || focus == CC_BRIGHT || focus == CC_VOLUME)
         widget_set_prop_int(win, CC_ADJUST, !adjust);
     else if (cc_act(win, focus))
