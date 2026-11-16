@@ -32,6 +32,17 @@ Rebuilt firmware uses `assets/boot-logo.jpg` as the boot splash, with the [boot 
 
 The build replaces the stock equalizer page with a 30-band PEQ editor (bands, shelves, preamp, on/off, presets, stock's built-in genre presets, `/EQ` import) and patch `hciplayer`'s equalizer filter with the matching DSP. Both also clear the 44.1 kHz AAC capability bit in `bluealsa` (see [internals.md](internals.md#bluetooth-aac)).
 
+### Bundled apps
+
+The build carries the Subsonic card app in the root filesystem ([internals](internals.md#bundled-apps)), from its release zip, pinned in `BUNDLED_APPS` (`tools/build.py`) by version, size and SHA-256. It reads the zip from `--apps DIR`, `~/.cache/q2-apps` by default, and stops when the file is missing or is not the pinned one. Make it from q2-subsonic's source at the pinned commit:
+
+```sh
+contrib/shanlingq2/build.sh /tmp/q2-subsonic                 # in q2-subsonic: Go 1.22 or later
+mkdir -p ~/.cache/q2-apps && mv /tmp/q2-subsonic/q2-subsonic-v0.9-43b537a.zip ~/.cache/q2-apps/
+```
+
+A new version is a new pin: build its zip, then set its version, name, size and SHA-256 in `BUNDLED_APPS`. The source hash covers the pin, so a build made with the old zip counts as stale. q2-subsonic v0.9 adds 3,190,784 bytes to the compressed root filesystem (53,456,896 of the 75,497,472 `rootfs_fits` allows, with `--new-player`).
+
 ### What the rootfs drops
 
 Every build, release and `--dev`, hardens stock's root filesystem (`tools/build.py`):
