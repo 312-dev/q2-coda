@@ -480,7 +480,7 @@ void synclink_default(void);
 int about_list(void *list);
 void about_rows(void *view);
 int reset_list(void *list);
-void reset_rows(void *view); /* settings_pages.c: Reset Settings' rows */
+void reset_rows(void *view);     /* settings_pages.c: Reset Settings' rows */
 void diag_about_row(void *view); /* diagnostics.c, --dev builds' Save Diagnostics */
 int diag_row(void *item);
 void caption_row(void *label, const unsigned *text);
