@@ -266,11 +266,11 @@ void lift_card_paint(void *canvas, const rect_t *card) {
     ui_ink_raw(raw);
 }
 
-/* A row's check circle (Edit Library's and Edit Home's show or hide, docs/oled-design.md#edit-
- * library), CIRCLE_D px across, its middle at canvas cx, cy: CIRCLE_ON the accent's disc with a
- * white check (tools/art.py circle_check), CIRCLE_OFF a 1.5 px ring in Text Tertiary, CIRCLE_LOCKED
- * a grey disc with a padlock in Text Secondary (circle_lock). On the selection (selected) the disc
- * is white and its check the accent's, the ring white. */
+/* A row's check circle (Edit Library's and Edit Home's show or hide,
+ * docs/oled-design.md#edit-library), CIRCLE_D px across, its middle at canvas cx, cy: CIRCLE_ON
+ * the accent's disc with a white check (tools/art.py circle_check), CIRCLE_OFF a 1.5 px ring in
+ * Text Tertiary, CIRCLE_LOCKED a gray disc with a padlock in Text Secondary (circle_lock). On the
+ * selection (selected) the disc is white and its check the accent's, the ring white. */
 #define CIRCLE_D 16.0f
 #define CIRCLE_RING 1.5f
 #define CIRCLE_LOCK_RGB 0x3a3a3c
