@@ -91,7 +91,7 @@ The session id `sid` is `nonce_c || nonce_d` (32 bytes). Both nonces are fresh r
 
 A 6-digit code has only a million values, so it must never be used where it can be guessed offline: anyone recording a pairing over TCP could try every code against a hash. coda-rc uses the code in a balanced PAKE in the style of CPace (draft-irtf-cfrg-cpace), on X25519, so that a recording reveals nothing about the code and an active attacker gets exactly one guess per code shown:
 
-1. On `PairStart` the device picks a code uniformly from 000000-999999 and shows it (Settings' style dialog, [Pairing on the Q2](#pairing-on-the-q2)).
+1. On `PairStart` the device picks a code uniformly from 000000-999999 and shows it (Settings' style dialog, [Pairing on the Q2](#pairing-on-the-q2)). A phone whose connection drops while its code is up gets the same code on its next `PairStart` (same client name, within the code's 120 s), so the user typing it is not sent back to a new one. The new session draws its own scalar, and the generator takes its own `sid`, so a session that sends no `PairFinish` learns nothing of the code; a wrong `client_confirm` still ends it (step 6).
 2. Both sides compute the generator `G = elligator2(SHA-512("coda-rc pake v1" || code || sid)[0:32])`, where `code` is the 6 ASCII digits and `elligator2` is Monocypher 4's `crypto_elligator_map` (the top two bits of the input are ignored).
 3. Each picks a random 32-byte scalar: the device sends `device_point = X25519(b, G)`, the client `client_point = X25519(a, G)`. X25519 clamps scalars, so both points lie in the prime-order subgroup.
 4. Both compute `K = X25519(own scalar, other's point)`. An all-zero `K` (a low-order point was sent) fails the pairing.
@@ -99,7 +99,7 @@ A 6-digit code has only a million values, so it must never be used where it can 
 6. `client_confirm = HMAC-SHA-512(prk, "client confirm")[0:32]`; the device checks it in constant time. If it is wrong, the pairing ends (`Error{PAIRING_FAILED}`), the code is wiped, and the next `PairStart` gets a new one.
 7. The device makes a random 8-byte `peer_id`, keeps `ltk = HMAC-SHA-512(prk, "long-term key")[0:32]` for it with the client's name, and answers `device_confirm = HMAC-SHA-512(prk, "device confirm" || peer_id)[0:32]`. The client keeps `peer_id` and `ltk` only if `device_confirm` matches.
 
-Limits, all on the device: one pairing at a time device-wide (`BUSY` to a second phone); a code lives 120 s; 3 wrong codes in a row lock pairing for 5 minutes (`PAIRING_LOCKED`); at most 8 paired phones (`PAIRING_FULL`); closing the dialog on the Q2 cancels (`Error{PAIRING_CANCELLED}`, pushed with `req_id` 0). A stranger can at worst make a code appear on a Q2 whose Car Remote is on, which the user can close.
+Limits, all on the device: one pairing at a time device-wide (`BUSY` to a second phone while the first is connected; once it has gone, a second phone's `PairStart` ends its code and gets a new one); a code lives 120 s from when it is first shown, across the phone's reconnections; 3 wrong codes in a row lock pairing for 5 minutes (`PAIRING_LOCKED`); at most 8 paired phones (`PAIRING_FULL`); closing the dialog on the Q2 cancels (`Error{PAIRING_CANCELLED}`, pushed with `req_id` 0). A stranger can at worst make a code appear on a Q2 whose Car Remote is on, which the user can close.
 
 The confirm keys are bound to the transcript (`sid` and both points), so a pairing cannot be spliced from two sessions.
 
@@ -152,7 +152,7 @@ Everything else (`NOT_FOUND`, `BAD_REQUEST` on a field, `UNAVAILABLE`, `BUSY`, t
 
 When a phone sends `PairStart`, the Q2 shows a Dialog over whatever is on screen: the title "Pair with "Pixel 8"?" (the phone's name), the code in 56 px digits as two groups of three, and the hint "Enter this code on your phone", with one row, Cancel. Return is Cancel. It closes by itself when the phone finishes, fails or gives up, with a toast: "Phone paired" or "Pairing failed".
 
-Settings > Car Remote: the first row is the switch (Off by default); under it, after a gap, each paired phone by name, marked Paired; Centre on one asks `Forget "Pixel 8"?` with Cancel first, then Forget. With no phones paired the page shows the empty state, "No Paired Phones", under the switch.
+Settings > Car Remote: the first row is the switch (Off by default); under it, after a gap, each paired phone by name, its value Connected while it has an authenticated session and Not connected otherwise; Centre on one asks `Forget "Pixel 8"?` with Cancel first, then Forget. With no phones paired the page shows the empty state, "No Paired Phones", under the switch. The page follows the daemon while it is open: a phone paired, forgotten, connecting or going shows within half a second, without leaving the page.
 
 ## Testing on a Q2
 

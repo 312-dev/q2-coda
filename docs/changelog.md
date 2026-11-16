@@ -2,6 +2,8 @@
 
 - **Unreleased (q2-coda)**:
   - Car Remote's empty state names the phone app: "Open Q2 Muse Remote on your phone".
+  - Car Remote: **Settings → Car Remote** updates while it is open: a phone shows up as soon as it pairs, goes when forgotten, and each phone's row says **Connected** or **Not connected**. It used to say "No Paired Phones" until you left the page and came back.
+  - Car Remote: pairing no longer refuses the code on the screen when Q2 Muse Remote reconnects while you type it. The Q2 Muse keeps the same code for its two minutes, and the screen always shows the code that will work.
   - Developer builds: Save Diagnostics also records both battery gauges (the CW2015 the Q2 uses and the power chip's unused one).
   - Card apps: a progress row with no subtitle (a finished download, say) no longer crashes the page.
   - Bluetooth: car stereos and smart speakers that show what's playing (an Echo, a BMW's iDrive and most headsets' apps) now get the song's title, artist, album, track number and length from the Q2. They showed nothing before.
