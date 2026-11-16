@@ -82,7 +82,7 @@ def keys():
 class Library:
     """The Library page under OLED on top, laid out as AWTK's list does (each shown row PITCH under the last)."""
     def __init__(self, fw, ui, st, files=None):
-        use_set(st, 'oled')
+        use_set(st)
         fw.var('g_backlight_status', C.c_ubyte).value = 1
         self.fw, self.ui = fw, ui
         self.disk = Disk(fw, files)

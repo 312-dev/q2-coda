@@ -28,9 +28,7 @@ CANVAS_X, CANVAS_Y, CANVAS_LCD = O['CANVAS_X'], O['CANVAS_Y'], O['CANVAS_LCD']
 LCD_FILL, LCD_STROKE = O['LCD_FILL_COLOR'], O['LCD_STROKE_COLOR']
 THEMES = host.tools_theme.builtins()
 OLED = next(i for i, t in enumerate(THEMES) if t['name'] == 'OLED')  # the one theme
-SETS = host.tools_theme.geometry_sets(THEMES)  # boot_values' rows: st.geom indexes them
-SET0 = SETS[0]  # the set st.geom 0 reads: theme_boot's before it writes one
-OLED_SET = next(i for i, s in enumerate(SETS) if s.name == 'oled')  # the set theme_boot writes
+GEOMETRY = host.tools_theme.built_geometry(THEMES)  # the one set the build bakes: OLED's
 
 
 def i32(v):
@@ -1493,9 +1491,8 @@ def test_oleds_reset_settings_confirm_says_what_it_takes(fw, st, prompt, title, 
 
 # No list has dividers (user, 2026-11-15): two-line rows, a card app's page_list's and a table's, stand on space alone.
 def oled(fw, st, **config):
-    """OLED on its own set, as theme_boot leaves it, on a lit, usable screen."""
+    """OLED on its own set on a lit, usable screen."""
     theme(fw, **config)
-    st('geom').value = OLED_SET
     for flag, value in (('g_backlight_status', 1), ('g_usblink_status', 0)):
         g(fw, flag, value)
     return Ui(fw)
@@ -1540,7 +1537,7 @@ def test_a_list_past_the_list_end_fades_as_home_s_does(fw, st, scroll):
     view, _, _ = detail_page(fw, st, rows=rows, scroll=scroll, touch=1)
     canvas = Canvas(fw)
     fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(view.addr, canvas.addr)
-    end = SETS[OLED_SET].bar + SETS[OLED_SET].list_end
+    end = GEOMETRY.bar + GEOMETRY.list_end
     bands = faded_rows(canvas)
     assert [y for y in bands if y >= 40] == list(range(end - 14, 320))  # the foot: from y 266, clear for its first rows
     assert [y for y in bands if y < 40] == (list(range(26, 26 + 14)) if scroll else [])  # the top, once scrolled
@@ -1587,7 +1584,7 @@ def table(fw, st):
     ui = oled(fw, st)
     win = ui.window('allmusic_page')
     client = ui.add('table_client', win, (0, 26, 375, 294))
-    row_h = SETS[OLED_SET].pitch + 20
+    row_h = GEOMETRY.pitch + 20
     client.int_at(O['ROW_HEIGHT']).value, client.int_at(O['TABLE_ROWS']).value = row_h, 4
     for i in range(4):
         row = ui.add('table_row', client, (0, i * row_h, 375, row_h)).clickable()
@@ -2204,7 +2201,7 @@ def test_a_long_title_is_cut_and_keeps_its_value(fw):
 
 
 def test_the_librarys_rows_take_its_constructors_live_words(fw):
-    """Under the Library's own list the row's body and icon x are the ipod.json words theme_boot wrote."""
+    """Under the Library's own list the row's body and icon x are the ipod.json words the build baked."""
     body, icon_x = O['LIBRARY_ROW_BODY'], O['LIBRARY_ROW_ICON_X']
     saved = C.c_ushort.from_address(body).value, C.c_ushort.from_address(icon_x).value
     try:
@@ -2351,9 +2348,8 @@ def test_control_center_lays_stock_s_buttons_over_its_circles_and_slider(fw, st)
 
 
 # A page's switch as a row, under a set without stock's toolbars.
-def sleep_page(fw, st, image='switch_off', geom=OLED_SET):
+def sleep_page(fw, st, image='switch_off'):
     theme(fw)
-    st('geom').value = geom
     ui = Ui(fw)
     win = ui.window('sleeptimer_page')
     toolbar = ui.add('view', win, (0, 270, 375, 50), 'view_toolbar')
@@ -2369,7 +2365,7 @@ def test_the_sleep_timers_switch_is_its_first_row_reading_the_switch(fw, st):
     ui, win, sw, timers = sleep_page(fw, st)
     label = win.child('_switch_row')
     button = label.parent
-    s = SETS[OLED_SET]
+    s = GEOMETRY
     assert button.box == (0, 0, 375, s.set_row) and button.props['style'] == 's_btn_listitem'
     assert label.box[0] == s.text_x and ui.text(label) == 'Sleep Timer' and switch(button) == 'switch_off'
 
@@ -2383,11 +2379,6 @@ def test_the_rows_click_is_the_switchs_on_the_next_pass(fw, st):
     C.CFUNCTYPE(C.c_int, C.c_void_p)(timers[-1])(None)
     assert [c[1][0] for c in fw.calls('stock_dispatch_trampoline')] == [sw.addr]
     assert switch(button) == 'switch_on'
-
-
-def test_a_set_with_toolbars_keeps_stocks_switch(fw, st):
-    ui, win, sw, timers = sleep_page(fw, st, geom=0)
-    assert not any(c.name == '_switch_row' for c in win.walk())
 
 
 # The library scan's refresh of a row it already holds.
@@ -2921,7 +2912,6 @@ INK_ROW = 0xffababab
 class StatusRow(Bar):
     def __init__(self, fw, st, title=''):
         theme(fw)
-        st('geom').value = OLED_SET
         super().__init__(fw, 2)
         self.ui.window('home_page' if not title else 'albums_page')
         self.w['view_battery'].move(322, 25, 30, 24)  # the slot's x on the bar: the battery's body starts there
@@ -3059,7 +3049,6 @@ def test_oleds_song_rows_end_their_title_and_inline_artist_clear_of_the_offline_
     song_row gives a title is the last word: catalogue_fit, which runs first, never widens it again, so the rows
     settle instead of resizing on every paint."""
     page = Page(fw, rows=3, pitch=32, sel=None, name='allmusic_page')
-    st('geom').value = OLED_SET
     songs = [('Ten Thousand Weight', 'The Head and the Heart'),  # the shot's row: the artist ran under the mark
              ('A Title That Runs All The Way Across', 'Some Artist'),
              ('Ten Thousand Weight', 'The Head and the Heart')]  # the same, playable
@@ -3197,8 +3186,7 @@ def sheet(fw, st, rows=10, risen=True, reduce=False):
     the page white above y 160 and blue below. Its first whole paint (the material, the rise from the page) is made at
     the clock's 10 s; risen, the rise is run to its end and the buffer the page again. Returns (ui, win, view, canvas,
     buf); the clock is fw.sheet_clock. reduce: under Reduce Motion (IPOD REDUCEMOTION)."""
-    sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
-    st('geom').value, st('settings_read').value = [g.name for g in sets].index('oled'), 1
+    st('settings_read').value = 1
     fw.mock('window_manager_is_animating', lambda *_: 0)
     ui = Ui(fw)
     theme(fw)

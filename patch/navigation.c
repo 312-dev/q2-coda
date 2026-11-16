@@ -86,14 +86,6 @@ static int library_first __attribute__((section(".scratch")));
 
 /* Failed exec in a forked child must not flush demo's copied stdio or run its exit handlers. */
 __asm__(".globl child_exit\nchild_exit:\nli $v0, 4001\nsyscall\n");
-/* Geometry sets (theme_boot): demo imports neither, so the o32 syscalls, as spot_shut. 0, errno */
-int theme_mprotect(void *addr, unsigned len, int prot);
-int theme_cacheflush(void *addr, int len, int cache);
-__asm__(".set push\n.set noreorder\n"
-        ".globl theme_mprotect\ntheme_mprotect:\nli $v0,4125\nsyscall\njr $ra\nnop\n"
-        ".globl theme_cacheflush\ntheme_cacheflush:\nli $v0,4147\nsyscall\njr $ra\nnop\n"
-        ".set pop\n");
-#define THEME_PAGE 4096u /* the Q2's kernel page: mprotect's rounding unit */
 /* Out of memory, the kernel kills the fattest process, which was demo (#169): every child demo
  * forks, whose one job can need tens of MB, makes itself the first to go, between fork and exec. */
 int open(const char *, int, ...);

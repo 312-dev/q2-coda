@@ -1,31 +1,3 @@
-/* Geometry sets: tools/ipod.py bakes SET0 into the stock row immediates (ipod.json). Another set
- * rewrites, once, only the low halfwords that differ. Stock text is R-X, so every page holding one
- * goes RWX first, lowest first; only if all did are they written, flushed and put back to R-X. A
- * failed mprotect puts back the pages already opened and writes nothing, so the code stays SET0's
- * and st.geom, the set the code holds, stays 0. SET0 makes no syscall and writes nothing. */
-static int boot_differs(int i, const volatile unsigned short *v) {
-    return (*(unsigned *)boot_sites[i].addr & 0xffff) != (unsigned)v[boot_sites[i].group];
-}
-static unsigned boot_page(const volatile unsigned short *v, unsigned from) { /* ~0u: none */
-    unsigned page = ~0u;
-    for (int i = 0; i < BOOT_SITES; ++i) {
-        unsigned p = boot_sites[i].addr & ~(THEME_PAGE - 1u);
-        if (p >= from && p < page && boot_differs(i, v)) page = p;
-    }
-    return page;
-}
-/* The set T boots with setting at v and every other option as stored. Its own option with sets
- * selects the set (tools/theme.py allows one); without one, T->geom. */
-static int geom_with(const theme_t *T, int setting, int v) {
-    for (int k = 0; k < T->n_opts; ++k) {
-        const option_t *o = &T->opts[k];
-        if (o->setting < SETTING_OWN || !theme_keys[o->setting - SETTING_OWN].sets) continue;
-        int s = o->setting - SETTING_OWN, w = o->setting == setting ? v : st.own[s];
-        return theme_keys[s].sets[w];
-    }
-    return T->geom;
-}
-int theme_geom(const theme_t *T) { return geom_with(T, -1, 0); }
 /* OLED is the one theme, stored as THEME 3, the fourth of the four there were (docs/ipod.md#theme).
  * A unit an older build left on another (0 Minimal, 1 Classic, 2 Modern, or no key: Minimal)
  * takes OLED's preset once, as choosing OLED did, and keeps 3 from then on. */
@@ -36,47 +8,13 @@ static void theme_boot(void) {
         theme_preset(theme());
         write_int_config(THEME_OLED, "IPOD", "THEME");
     }
-    unsigned g = theme_geom(theme()), p, q;
-    const volatile unsigned short *v = boot_values[g];
-    for (p = boot_page(v, 0); p != ~0u; p = boot_page(v, p + THEME_PAGE))
-        if (theme_mprotect((void *)p, THEME_PAGE, 7)) { /* RWX */
-            for (q = boot_page(v, 0); q != p; q = boot_page(v, q + THEME_PAGE))
-                theme_mprotect((void *)q, THEME_PAGE, 5);
-            /* ponytail: a set this boot can't write leaves the code SET0's (st.geom 0), which
-             * OLED then draws on until the next boot; a theme laid out for SET0 would be needed
-             * to look right there. */
-            return;
-        }
-    for (p = boot_page(v, 0); p != ~0u; p = boot_page(v, p + THEME_PAGE)) {
-        for (int i = 0; i < BOOT_SITES; ++i)
-            if ((boot_sites[i].addr & ~(THEME_PAGE - 1u)) == p && boot_differs(i, v)) {
-                unsigned *w = (unsigned *)boot_sites[i].addr;
-                *w = (*w & 0xffff0000) | v[boot_sites[i].group];
-            }
-        theme_cacheflush((void *)p, THEME_PAGE, 3); /* BCACHE */
-        theme_mprotect((void *)p, THEME_PAGE, 5);   /* PROT_READ|PROT_EXEC */
-    }
-    st.geom = g;
 }
 
-/* The set theme_boot wrote's own copy of a window, <set>_<name>.bin in name's folder
- * (tools/build.py), written into buf (the caller's 64 bytes), else name. */
-static const char *ui_redirect(const char *name, char *buf) {
-    unsigned g = st.geom;
-    for (const volatile ui_redirect_t *r = ui_redirects; r->name; ++r)
-        if (r->sets >> g & 1 && !tk_strcmp(r->name, name)) {
-            const char *slash = strrchr(name, '/'), *base = slash ? slash + 1 : name;
-            tk_snprintf(buf, 64, "%.*s%s_%s", (int)(base - name), name, geom_names[g], base);
-            return buf;
-        }
-    return name;
-}
-
-/* The value of group (G_PITCH, G_BODY, ...) in the set theme_boot wrote (st.geom). */
-int geom(int group) { return boot_values[st.geom][group]; }
+/* The value of group (G_PITCH, G_BODY, ...) that tools/ipod.py baked into stock's immediates. */
+int geom(int group) { return geom_words[group]; }
 
 /* An A-B marker's x for point t (stock 0x53b9d8, from its three calls in the markers' placement:
- * AB_X_CALLS in tools/build.py), on the boot set's bar (the np_bar_x and np_bar_w immediates):
+ * AB_X_CALLS in tools/build.py), on the baked bar (the np_bar_x and np_bar_w immediates):
  * a bar laid out elsewhere takes it along, at the same share of it. 0, no point to mark, stays. */
 int ringnav_ab_x(int t) {
     int x = ab_x(t), x0 = geom(G_NP_BAR_X), w0 = geom(G_NP_BAR_W);
@@ -84,8 +22,8 @@ int ringnav_ab_x(int t) {
     return I(st.np_slider, W_X) + (x - x0) * I(st.np_slider, W_W) / w0;
 }
 
-/* ui_loader_load_widget_with_parent, every window's asset (window_open's): the geometry set's own
- * copy of it (ui_redirect); any opener comes through here. */
+/* ui_loader_load_widget_with_parent, every window's asset (window_open's); any opener comes
+ * through here. */
 extern void *stock_ui_load_trampoline(const char *name, void *parent);
 /* key: STYLE_KEY bytes. */
 const char *style_key(char *key, const char *state, const char *name) {
@@ -183,7 +121,6 @@ static int usb_poll(const void *info) {
 }
 
 void *ringnav_ui_load(const char *name, void *parent) {
-    char path[64]; /* this call's own: a window stock loads inside this one keeps its name */
     /* application_init's first window; accent() makes theme() final */
     if (name && !st.theme_booted && !tk_strcmp(name, "system_bar")) {
         st.theme_booted = 1;
@@ -191,7 +128,7 @@ void *ringnav_ui_load(const char *name, void *parent) {
         theme_boot();
     }
     int np = name && !tk_strcmp(name, "playing_page");
-    void *root = stock_ui_load_trampoline(ui_redirect(name, path), parent);
+    void *root = stock_ui_load_trampoline(name, parent);
     if (root && slider_page(root)) slider_open(root); /* no knob; slider_page.c's form */
     if (root) msg_open(root); /* the scan page (scan_page.c oled_scan) */
     if (root) usb_ui_mode_load(root); /* USB's page as a mode page (usb_ui.c) */

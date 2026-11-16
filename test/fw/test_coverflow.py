@@ -785,20 +785,16 @@ def test_slide_load_zooms_a_cover_by_a_tenth_with_its_pan_s_margin(fw):
 
 
 def split_inset_set(fw, library, inset):
-    """st.geom on the first geometry set whose split_inset is inset; its client and pane as the C reads them."""
+    """The geometry set's values as the C reads them, its split_inset inset (OLED's 2), and its client."""
     names = host.tools_theme.GEOM_VALS
-    table = (C.c_short * (fw.sizes['theme_engine__geom_vals'] // 2)).in_dll(fw.lib, 'theme_engine__geom_vals')
-    sets = [table[g * len(names):(g + 1) * len(names)] for g in range(len(table) // len(names))]
-    g = next(i for i, row in enumerate(sets) if row[names.index('split_inset')] == inset)
-    st = host.offsets(library.parent/'navigation.o', 'scratch_t')['geom']
-    C.c_int.from_address(C.addressof(fw.var('st', C.c_char)) + st).value = g
-    row = dict(zip(names, sets[g]))
+    row = dict(zip(names, (C.c_short * len(names)).in_dll(fw.lib, 'theme_engine__geom_vals')))
+    assert row['split_inset'] == inset
     return row, 320 - row['bar']
 
 
 def test_split_raises_home_s_list_to_y_40_where_the_art_runs_under_the_status_row(fw, library):
-    """Under OLED's set (split_art_up) Split's main menu starts at y 40, 18 rows above Home's window; Full's, a set
-    with no art up and the other lists stay at the theme's home.rows.top, in the window."""
+    """Under OLED's set (split_art_up) Split's main menu starts at y 40, 18 rows above Home's window; Full's and the
+    other lists stay at the theme's home.rows.top, in the window."""
     ui = Ui(fw)
     lst = ui.make(0, 'list_view', 0, 0, 375, 224)
     fw.var('coverflow__home', Home).list = lst  # the main menu; its Settings and other lists are full pages here
@@ -812,10 +808,7 @@ def test_split_raises_home_s_list_to_y_40_where_the_art_runs_under_the_status_ro
     width(lst, 375, 375, 24, 44, 0)
     full_top = rect(lst)[1]
     home_mode.value = 0
-    split_inset_set(fw, library, 0)  # a set whose art starts under the bar
-    width(lst, 187, 187, 24, 44, 0)
-    assert rect(lst)[1] == full_top >= 0  # both the theme's home.rows.top, inside the window
-    split_inset_set(fw, library, 2)
+    assert full_top >= 0  # the theme's home.rows.top, inside the window
     other = ui.make(0, 'list_view', 0, 0, 375, 64)
     width(other, 375, 375, 24, 44, 0)
     assert rect(other)[1] == full_top
@@ -3721,8 +3714,6 @@ def test_a_status_row_ends_a_long_caption_in_an_ellipsis_and_keeps_the_rows_wher
     """OLED's status row holds a caption too wide for its box too (its label ends it in an ellipsis), so a page's rows
     start under the status row whatever the caption's length; a page with no rows still says it as its first line."""
     t = themed(fw)
-    geom = C.c_int.from_address(C.addressof(fw.var('st', C.c_char)) + scratch['geom'])
-    geom.value = fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())  # theme_boot's set, OLED's
     ui = Ui(fw)
     bar_title(fw, ui, scratch, 40)  # 'Albums' measures 60 px: too wide
     title = page_title(fw, ui.make(0, 'view'), b'Albums', rows)

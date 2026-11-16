@@ -15,18 +15,19 @@ STOP = 11
 THEMES = host.tools_theme.builtins()
 OLED_THEME = next(t for t in THEMES if t['id'] == 'oled')  # the one built-in theme
 OLED = 3  # config.ini's THEME for OLED, the value theme_boot keeps (navigation.c THEME_OLED)
+GEOMETRY = host.tools_theme.built_geometry(THEMES)  # the one set the build bakes: OLED's
 
 
 def tables(library):
-    """themes.h's enums (GEOM_*, G_*, V_*) by name and its two geometry tables, as this build has them."""
+    """themes.h's enums (G_*, V_*) by name and its two geometry tables, as this build has them."""
     inc = (library.parent/'themes.h').read_text() + (library.parent/'themes.inc').read_text()
     names = {}
     for body in re.findall(r'enum \{ ([^}]*) \};', inc):
         names |= {n.strip(): i for i, n in enumerate(body.split(','))}
     rows = {}
-    for table in ('boot_values', 'geom_vals'):
-        body = host.tools_build.need(re.search(table + r'\[\w+\]\[\w+\] = \{(.*)\};', inc), f'No {table}')[1]
-        rows[table] = [[int(v) for v in row.split(',')] for row in re.findall(r'\{([-\d, ]+)\}', body)]
+    for table in ('geom_words', 'geom_vals'):
+        body = host.tools_build.need(re.search(table + r'\[\w+\] = \{([-\d, ]+)\};', inc), f'No {table}')[1]
+        rows[table] = [int(v) for v in body.split(',')]
     return names, rows
 
 
@@ -42,18 +43,17 @@ def geometry(library):
 
 @pytest.fixture
 def st(fw, scratch):
-    """navigation.c's st by field: st('geom').value; st('setting_label', i=3) a pointer array's cell."""
+    """navigation.c's st by field: st('settings_read').value; st('setting_label', i=3) a pointer array's cell."""
     base = C.addressof(fw.var('st', C.c_char))
     def field(name, ctype=C.c_int, i=0):
         return ctype.from_address(base + scratch[name] + i * C.sizeof(ctype))
     return field
 
 
-def use_set(st, name):
-    """Geometry set name ('ipod', 'oled') as theme_boot leaves st.geom, the settings already read."""
-    sets = host.tools_theme.geometry_sets(THEMES)
-    st('geom').value, st('settings_read').value = [g.name for g in sets].index(name), 1
-    return sets[st('geom').value]
+def use_set(st):
+    """OLED's geometry set, the one the build bakes, with the settings already read."""
+    st('settings_read').value = 1
+    return GEOMETRY
 
 
 class Config:
@@ -1169,7 +1169,6 @@ class Grid(About):
     title, artist, slider (its max the length) and cover, the playing path, and a canvas the grid paints on."""
     def __init__(self, fw, st, geometry, texts=GRID_INFO, path=OMEN, length=237, unknown=b'Unknown Artist'):
         from test_nav_paint import Canvas
-        st('geom').value = geometry[0]['GEOM_OLED']  # OLED's set, as booted: its list ends at y 282
         ui = Ui(fw)
         Config(fw, THEME=str(OLED).encode(), LIGHT=b'0')
         self.fw, self.ui, self.st = fw, ui, st
@@ -1683,11 +1682,10 @@ def layout():
 
 class Rows:
     """A list's rows in a window, laid out by compact_row_layout."""
-    def __init__(self, fw, ui, st, geometry, window='localmusic_page', geom='GEOM_IPOD'):
+    def __init__(self, fw, ui, st, geometry, window='localmusic_page'):
         names, self.rows = geometry
         self.names = names
         Config(fw, THEME=b'%d' % OLED)
-        st('geom').value = names[geom]
         fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
         self.ui, self.fw = ui, fw
         self.view = ui.add('scroll_view', ui.window(window), (0, 30, 375, 290))
@@ -1745,9 +1743,9 @@ TWO_LINES = [('hscroll_label', (0, 0, 200, 16), 'title'), ('hscroll_label', (0, 
 
 def test_oleds_one_line_row_hides_its_art_and_second_line(fw, st, geometry, default_layout):
     ui = Ui(fw)
-    rows = Rows(fw, ui, st, geometry, geom='GEOM_OLED')
-    pitch = rows.rows['boot_values'][rows.names['GEOM_OLED']][rows.names['G_PITCH']]
-    text_x = rows.rows['geom_vals'][rows.names['GEOM_OLED']][rows.names['V_TEXT_X']]
+    rows = Rows(fw, ui, st, geometry)
+    pitch = rows.rows['geom_words'][rows.names['G_PITCH']]
+    text_x = rows.rows['geom_vals'][rows.names['V_TEXT_X']]
     item = rows.row(pitch, ICON, ('image', (66, 0, 20, 20), 'img_playing'), ('image', (90, 0, 26, 26), 'img_choice0'),
                     ('view', (MARGIN, 0, 200, pitch), 'view_info', TWO_LINES))
     text = item.children[3]
@@ -1764,8 +1762,8 @@ def test_oleds_one_line_row_hides_its_art_and_second_line(fw, st, geometry, defa
 def test_oleds_two_line_row_without_art_keeps_both_lines_and_a_chevrons_ends_at_the_art_column(fw, st, geometry,
                                                                                                default_layout):
     ui = Ui(fw)
-    rows = Rows(fw, ui, st, geometry, geom='GEOM_OLED')
-    text_x = rows.rows['geom_vals'][rows.names['GEOM_OLED']][rows.names['V_TEXT_X']]
+    rows = Rows(fw, ui, st, geometry)
+    text_x = rows.rows['geom_vals'][rows.names['V_TEXT_X']]
     item = rows.row(52, ('image', (MARGIN, 0, 0, 52), 'img_icon'), ('view', (MARGIN, 0, 300, 52), 'view_info', TWO_LINES))
     with_chevron = rows.row(52, ('image', (MARGIN, 0, 0, 52), 'img_icon'), ('view', (MARGIN, 0, 300, 52), 'view_info', TWO_LINES),
                             ('image', (300, 0, 58, 52), 'img_into'))
@@ -1784,7 +1782,7 @@ def test_oleds_two_line_row_without_art_keeps_both_lines_and_a_chevrons_ends_at_
 
 def test_oleds_art_row_puts_cover_and_text_on_the_themes_columns(fw, st, geometry, default_layout):
     ui = Ui(fw)
-    rows = Rows(fw, ui, st, geometry, geom='GEOM_OLED')
+    rows = Rows(fw, ui, st, geometry)
     item = rows.row(52, ('image', (MARGIN, 0, 52, 52), 'img_icon'), ('view', (66, 0, 300, 52), 'view_info',
                     [('hscroll_label', (0, 0, 200, 26), 'title'), ('view', (0, 26, 151, 26), 'meta')]))
     meta_label = ui.add('hscroll_label', item.children[1].children[1], (0, 0, 151, 26))
@@ -1802,7 +1800,7 @@ def test_oleds_art_row_puts_cover_and_text_on_the_themes_columns(fw, st, geometr
 
 def test_an_art_row_with_stocks_choice_box_keeps_stocks_places(fw, st, geometry, default_layout):
     ui = Ui(fw)
-    rows = Rows(fw, ui, st, geometry, geom='GEOM_OLED')
+    rows = Rows(fw, ui, st, geometry)
     item = rows.row(52, ('image', (MARGIN, 0, 26, 52), 'img_choice0'), ('image', (40, 0, 52, 52), 'img_icon'),
                     ('view', (100, 0, 200, 52), 'view_info', TWO_LINES))
     rows(item)
@@ -1824,7 +1822,7 @@ def test_a_rows_second_line_takes_the_meta_grey_once_where_the_theme_has_a_meta_
 
 def test_a_playlist_row_keeps_its_own_places(fw, st, geometry, default_layout):
     ui = Ui(fw)
-    rows = Rows(fw, ui, st, geometry, geom='GEOM_OLED')
+    rows = Rows(fw, ui, st, geometry)
     h = rows.theme['page_detail']  # pl_row's height: a name over its count
     def playlist(trailing, image):
         item = rows.row(h)
@@ -1854,14 +1852,14 @@ def test_a_playlist_row_keeps_its_own_places(fw, st, geometry, default_layout):
 
 def test_a_row_of_choice_boxes_alone_is_stocks(fw, st, geometry, default_layout):
     ui = Ui(fw)
-    rows = Rows(fw, ui, st, geometry, geom='GEOM_OLED')
+    rows = Rows(fw, ui, st, geometry)
     item = rows.row(52, ('image', (MARGIN, 0, 26, 52), 'img_choice0'), ('image', (40, 0, 26, 52), 'img_choice1'))
     assert rows(item) == 4 and [c.visible for c in item.children] == [1, 1] and [c.box[0] for c in item.children] == [MARGIN, 40]
 
 
 def test_a_row_with_no_title_is_stocks(fw, st, geometry, default_layout):
     ui = Ui(fw)
-    rows = Rows(fw, ui, st, geometry, geom='GEOM_OLED')
+    rows = Rows(fw, ui, st, geometry)
     item = rows.row(32, ICON, ('label', (66, 0, 200, 32), 'label'))
     assert rows(item) == 4 and [c.visible for c in item.children] == [1, 1] and item.children[1].box == (66, 0, 200, 32)
 
@@ -1896,21 +1894,16 @@ def test_a_row_stock_refused_a_layout_keeps_its_own(fw, default_layout):
     assert not C.c_void_p.from_buffer(lay, O['CHILDREN_LAYOUT_VTABLE']).value
 
 
-@pytest.mark.parametrize('geom, ours', [('GEOM_IPOD', 0), ('GEOM_OLED', 1)])
-def test_stocks_table_rows_take_ours_only_under_a_set_that_repitches_them(fw, st, geometry, default_layout, geom, ours):
-    names, _ = geometry
-    st('geom').value = names[geom]
+def test_stocks_table_rows_take_ours_under_a_set_that_repitches_them(fw, st, geometry, default_layout):
     ui = Ui(fw)
     row = ui.add('list_item', ui.window('localmusic_page'))
     lay = layout_of(fw, row)
     assert fw.fn('stock_set_row_layout', C.c_int, C.c_void_p, C.c_char_p)(row.addr, b'x') == 0
-    assert bool(C.c_void_p.from_buffer(lay, O['CHILDREN_LAYOUT_VTABLE']).value) == bool(ours)
+    assert C.c_void_p.from_buffer(lay, O['CHILDREN_LAYOUT_VTABLE']).value
 
 
-@pytest.mark.parametrize('geom', ['GEOM_IPOD', 'GEOM_OLED'])
-def test_queues_label_goes_to_the_sets_text_inset(fw, st, geometry, geom):
+def test_queues_label_goes_to_the_sets_text_inset(fw, st, geometry):
     names, rows_ = geometry
-    st('geom').value = names[geom]
     Config(fw, THEME=b'%d' % OLED)
     ui = Ui(fw)
     button = ui.add('button', ui.window('playlist_page'), (O['SET_STOCK_X'], 0, 335, 70))
@@ -1919,18 +1912,12 @@ def test_queues_label_goes_to_the_sets_text_inset(fw, st, geometry, geom):
     text = fw.fn('stock_row_text', C.c_int, C.c_void_p, C.c_char_p)
     assert text(label.addr, b'Queue') == 0 and text(other.addr, b'Song') == 0
     assert (label.text, other.text) == ('Queue', 'Song')
-    if geom == 'GEOM_IPOD':
-        assert label.box == (10, 0, 260, 70) and 'style:normal:font_name' not in label.props
-    else:
-        inset = rows_['geom_vals'][names[geom]][names['V_TEXT_X']]
-        assert button.box[0] + label.box[0] == inset and label.box[0] + label.box[2] == 10 + 260  # its right edge kept
-        assert other.box == (72, 0, 200, 70) and 'style:normal:font_name' in label.props
+    inset = rows_['geom_vals'][names['V_TEXT_X']]
+    assert button.box[0] + label.box[0] == inset and label.box[0] + label.box[2] == 10 + 260  # its right edge kept
+    assert other.box == (72, 0, 200, 70) and 'style:normal:font_name' in label.props
 
 
-@pytest.mark.parametrize('geom', ['GEOM_IPOD', 'GEOM_OLED'])
-def test_the_playing_rows_red_keeps_its_colour_under_a_repitched_set(fw, st, geometry, geom):
-    names, _ = geometry
-    st('geom').value = names[geom]
+def test_the_playing_rows_red_keeps_its_colour_under_a_repitched_set(fw, st, geometry):
     ui = Ui(fw)
     playing, other = (ui.add('hscroll_label', ui.window('playlist_page')) for _ in range(2))
     style = fw.fn('stock_row_style', C.c_int, C.c_void_p, C.c_char_p)
@@ -1939,9 +1926,6 @@ def test_the_playing_rows_red_keeps_its_colour_under_a_repitched_set(fw, st, geo
     style(other.addr, b's_scrlabel_white24l')
     assert (playing.props['style'], other.props['style']) == ('s_scrlabel_red24l', 's_scrlabel_white24l')
     assert (playing.text, other.text) == ('▶ Song', 'Other')
-    if geom == 'GEOM_IPOD':
-        assert 'style:normal:text_color' not in playing.props
-        return
     red = O['STOCK_RED']
     colour = 'style:normal:text_color'
     assert playing.props[colour] == C.c_int(0xff000000 | (red & 255) << 16 | red & 0xff00 | red >> 16).value
@@ -1951,10 +1935,8 @@ def test_the_playing_rows_red_keeps_its_colour_under_a_repitched_set(fw, st, geo
     assert playing.props[colour] == other.props[colour]
 
 
-@pytest.mark.parametrize('geom', ['GEOM_IPOD', 'GEOM_OLED'])
-def test_mores_speed_row_keeps_stocks_height_its_labels_before_the_buttons(fw, st, geometry, geom):
+def test_mores_speed_row_keeps_stocks_height_its_labels_before_the_buttons(fw, st, geometry):
     names, rows_ = geometry
-    st('geom').value = names[geom]
     Config(fw, THEME=b'%d' % OLED)
     ui = Ui(fw)
     win = ui.window('playmore_page')
@@ -1965,10 +1947,7 @@ def test_mores_speed_row_keeps_stocks_height_its_labels_before_the_buttons(fw, s
     value = ui.add('hscroll_label', button, (72, 40, 120, 20))
     first = ui.add('image', button, (160, 5, 42, 61), 'img_forward_0')
     fw.fn('stock_more_speed', None, C.c_void_p)(win.addr)
-    if geom == 'GEOM_IPOD':
-        assert row.box[3] == 32 and icon.visible and speed.box == (72, 5, 120, 30)
-        return
-    inset = rows_['geom_vals'][names[geom]][names['V_TEXT_X']]
+    inset = rows_['geom_vals'][names['V_TEXT_X']]
     assert row.box[3] == O['SET_STOCK_ROW'] and not icon.visible
     assert button.box[0] + speed.box[0] == inset and speed.box[0] + speed.box[2] == first.box[0] - 2
     assert value.box[0] == speed.box[0] and value.box[1] > speed.box[1] + speed.box[3] - 1
@@ -1983,12 +1962,11 @@ SET_EDGE, SET_TEXT_X, SET_ICON_X, SET_GAP = O['SET_EDGE'], O['SET_TEXT_X'], O['S
 class SettingsList:
     """A settings page's list_view (its asset's default_item_height the set's settings row) and scroll view, laid out
     by ipod_list_layout around a stand-in for stock's list layouter, which notes the list's item_height it saw."""
-    def __init__(self, fw, ui, st, geometry, stand_in, geom='GEOM_IPOD', theme=b'%d' % OLED, view='scroll_view_wireless',
+    def __init__(self, fw, ui, st, geometry, stand_in, theme=b'%d' % OLED, view='scroll_view_wireless',
                  item_height=None, row_height=0, window='wireless_page'):
         names, rows = geometry
         Config(fw, THEME=theme)
-        st('geom').value = names[geom]
-        self.g = {n: rows['geom_vals'][names[geom]][names[n]] for n in ('V_SET_ROW', 'V_SET_ICON', 'V_STREAM_ROW', 'V_TEXT_X',
+        self.g = {n: rows['geom_vals'][names[n]] for n in ('V_SET_ROW', 'V_SET_ICON', 'V_STREAM_ROW', 'V_TEXT_X',
                                                                           'V_RIGHT_X')}
         self.ui, self.fw = ui, fw
         self.win = ui.window(window)
@@ -2076,24 +2054,21 @@ def test_rows_another_builder_made_keep_their_own(fw, st, geometry, stand_in):
     assert tall.children[0].box == (0, 0, 375, 90)  # a stock button in a taller row: mapped at the row's own height
 
 
-@pytest.mark.parametrize('geom, doubles', [
-    ('GEOM_IPOD', False),  # SET_ROW's 68 px rows hold a title over a detail line
-    ('GEOM_OLED', True)])  # OLED's 32 px settings rows (theme.xml) don't
-def test_a_detail_line_doubles_a_short_row(fw, st, geometry, stand_in, geom, doubles):
+def test_a_detail_line_doubles_a_short_row(fw, st, geometry, stand_in):
     ui = Ui(fw)
-    lst = SettingsList(fw, ui, st, geometry, stand_in, geom=geom)
+    lst = SettingsList(fw, ui, st, geometry, stand_in)
     detail = lst.row(('hscroll_label', (72, 5, 260, 30), 'name'), ('hscroll_label', (72, STOCK_BODY // 2, 260, 30), 'quality'))
     single = lst.row(('hscroll_label', (72, 5, 260, 30), 'name'))
     lst()
     row = lst.g['V_SET_ROW']
     # a row too short for stock's detail line (Bluetooth's Quality) takes two rows' height, or it would run into
     # the next row; a row with no detail line keeps the set's
-    assert (detail.box[3], single.box[3]) == ((2 * row if doubles else row), row)
+    assert (detail.box[3], single.box[3]) == (2 * row, row)  # OLED's 32 px settings rows (theme.xml)
 
 
 def test_oleds_rows_drop_their_icons_and_keep_a_pickers_mark(fw, st, geometry, stand_in):
     ui = Ui(fw)
-    lst = SettingsList(fw, ui, st, geometry, stand_in, geom='GEOM_OLED')
+    lst = SettingsList(fw, ui, st, geometry, stand_in)
     assert lst.g['V_SET_ICON'] == 0
     plain = lst.row(STOCK_ICON, STOCK_LABEL, STOCK_INTO)
     device = lst.row(('image', (10, 10, 50, 50), 'device', b'bt_headset'), STOCK_LABEL)
@@ -2112,7 +2087,7 @@ def test_oleds_rows_drop_their_icons_and_keep_a_pickers_mark(fw, st, geometry, s
 
 def test_an_icon_sized_image_goes_wherever_it_sits_in_a_set_without_icons(fw, st, geometry, stand_in):
     ui = Ui(fw)
-    lst = SettingsList(fw, ui, st, geometry, stand_in, geom='GEOM_OLED')
+    lst = SettingsList(fw, ui, st, geometry, stand_in)
     item = lst.row(STOCK_LABEL, ('image', (200, 9, O['SET_STOCK_ICON'], 52), 'badge', b'bt_codec'))
     lst()
     label, badge = item.children[0].children
@@ -2257,16 +2232,12 @@ def test_the_boot_resume_starts_paused_without_opening_now_playing(fw, ctx, forb
     assert [a[:4] for _, a in fw.calls('player_start')] == ([start] if start else [])
 
 
-@pytest.mark.parametrize('geom, asks', [('GEOM_IPOD', 1), ('GEOM_OLED', 0)])
-def test_an_unknown_artist_reads_stocks_words_only_where_rows_keep_stocks_art(fw, st, geometry, geom, asks):
-    names, _ = geometry
-    st('geom').value = names[geom]
+def test_an_unknown_artist_reads_nothing_on_a_text_only_set(fw, st, geometry):
     fw.mock('getFormatString', lambda key, text, size, *_: C.memmove(text, b'Unknown Artist\0', 15) and 0)
     out = C.create_string_buffer(64)  # the row's second line, empty until written
     fw.fn('ringnav_song_unknown', None, C.c_char_p, C.c_char_p, C.c_int)(b'player_unknown', out, 64)
-    # stock's row reads the language's words; a text-only set's second line says only what the record says
-    assert out.value == (b'Unknown Artist' if asks else b'')
-    assert [(C.string_at(a[0]), a[2]) for _, a in fw.calls('getFormatString')] == ([(b'player_unknown', 64)] if asks else [])
+    # a text-only set's second line says only what the record says
+    assert out.value == b'' and fw.calls('getFormatString') == []
 
 
 # Records: stSongInfo as stock's library fills them.
@@ -2861,7 +2832,7 @@ EMPTY_CLASSES = {CLASS_ALBUMS: ('Albums', b'vinyl-record', b'No Albums', b'Copy 
 
 def empty_pages(fw, st, ui):
     """page_open's windows, each over the others; the empty state's view made by the widget factory."""
-    use_set(st, 'oled')
+    use_set(st)
     fw.mock('window_create', lambda *_: ui.add('window', ui.wm, (0, 0, 375, 320)).addr)
     fw.mock('widget_factory_create_widget', lambda f, kind, parent, x, y, w, *_: ui.new(C.string_at(kind).decode(), parent, x, y, w, 0))
     return lambda: [w for w in ui.wm.children if w.name == 'empty_page']
@@ -3015,10 +2986,8 @@ def test_an_untagged_song_with_no_path_reads_its_name_as_stored(fw, records):
     assert load.shown() == [b'01 Intro.flac', b'Tagged', None]  # a tag stays; a folder row is left as it is
 
 
-@pytest.mark.parametrize('cls, geom, shown', [(0xf004, 'GEOM_IPOD', 0), (0xf005, 'GEOM_IPOD', 1), (0xf005, 'GEOM_OLED', 0)])
-def test_a_class_rows_icon_shows_on_composers_and_genres_two_line_rows_only(fw, st, geometry, cls, geom, shown):
-    names, _ = geometry
-    st('geom').value = names[geom]
+def test_a_class_rows_icon_hides_on_oleds_one_line_rows(fw, st, geometry):
+    cls, shown = 0xf005, 0  # Composers', which a two-line row would show
     ui = Ui(fw)
     row = ui.add('list_item', ui.window('localclass_page'))
     icon = ui.add('image', row, name='img_icon')
@@ -3184,7 +3153,7 @@ def oled_artist(fw, st, stand_in, records, view=b'1'):
     fw.mock('widget_factory_create_widget', lambda f, kind, parent, x, y, w, *_: ui.new(C.string_at(kind).decode(), parent, x, y, w, 0))
     for kind in ('scroll_view', 'list_view', 'list_item', 'hscroll_label', 'image', 'button'):  # page_list's and the pair's
         fw.mock(f'{kind}_create', lambda parent, x, y, w, h, *_, k=kind: ui.new(k, parent, x, y, w, h))
-    use_set(st, 'oled')
+    use_set(st)
     rows, songs = queen(records)
     artist(fw, stand_in, records, rows, songs, view=view)
     return ui, page
@@ -3266,7 +3235,7 @@ def test_appearance_keeps_its_own_place_not_displays(fw):
 def test_the_empty_state_centres_its_stack_and_its_one_row(fw, st, row, free, top, glyph):
     ui = Ui(fw)
     fw.mock('widget_factory_create_widget', lambda f, kind, parent, x, y, w, *_: ui.new(C.string_at(kind).decode(), parent, x, y, w, 0))
-    use_set(st, 'oled')
+    use_set(st)
     win = ui.window('coverflow_page')
     body = ui.add('view', win, (0, 58, 375, 262), 'body')
     keep = [C.create_string_buffer(s) for s in (b'cards', b'No Albums Yet', b"Music on the card isn't scanned",

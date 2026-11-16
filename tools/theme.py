@@ -7,7 +7,7 @@ import math
 import re
 from typing import NoReturn
 from build import FACES, ROOT, check, need
-from ipod import AUDIT, GEOM_VALS, INC, O, SET0, SLIDE, VALUE_NAMES, Geometry, corner_inset, immediate_values
+from ipod import GEOM_VALS, INC, O, SET0, SLIDE, VALUE_NAMES, Geometry, corner_inset, immediate_values
 
 
 ACCENTS_BLOCK = need(re.search(r'#define ACCENTS (?:.*\\\n)*.*', INC), 'Missing ACCENTS')[0]
@@ -263,8 +263,7 @@ GEOM_RANGES = {
     'split_inset': (0, 4),  # percent of the zoomed cover; past about 4.5 the 110 % zoom leaves no pan
     'modal': (0, 1),  # the More pages as dialogs, drawn with the hold menus as the inset modal (ipod.modal_page)
 }
-THEME_GEOM_OFF = 0  # offsetof(theme_t, geom), first so no field moves it; asserted in theme_engine.c; test/patch.py pokes it
-THEME_MOTION_OFF = 4  # offsetof(theme_t, motion), right after geom and three flags; asserted in theme_engine.c; test/patch.py pokes it
+THEME_MOTION_OFF = 4  # offsetof(theme_t, motion), right after three flags; asserted in theme_engine.c; test/patch.py pokes it
 SCHEME_MODE_OFF = 4  # offsetof(scheme_t, mode) on MIPS, right after tones; asserted in theme_engine.c; test/patch.py pokes it
 
 
@@ -310,22 +309,19 @@ def declare(node, known):
     return g
 
 
-def geometry(t, values=None):
-    """The set t boots: its set-selecting own option's for values[key] (own key -> value label) when values
-    names it, else its <geometry set>."""
-    o = next((o for o in t['opts'] if o.get('sets') and o['key'] in (values or {})), None)
-    return sets(t)[o['sets'][o['names'].index(values[o['key']])] if o else t['geom_set']]
+def geometry(t):
+    """The set t names in its <geometry set>: the one tools/ipod.py bakes into the build."""
+    return sets(t)[t['geom_set']]
 
 
-def geometry_sets(themes):
-    """The distinct geometry sets of themes and their own options' values, SET0 first: boot_values[]' rows."""
-    found = list(dict.fromkeys([SET0, *map(geometry, themes),
-                                *(sets(t)[s] for t in themes for o in t['opts'] if o.get('sets') for s in o['sets'])]))
-    for g in found:
-        v = immediate_values(g)
-        for n, x in v.items():
-            check(0 <= x < 0x8000, f'{g.name}: {n} {x} does not fit an immediate')
-    return found
+def built_geometry(themes):
+    """The geometry set the build bakes into stock's immediates and pages: the themes' one set."""
+    found = {geometry(t) for t in themes}
+    check(len(found) == 1, f'{len(found)} geometry sets: the build bakes one')
+    g = found.pop()
+    for n, x in immediate_values(g).items():
+        check(0 <= x < 0x8000, f'{g.name}: {n} {x} does not fit an immediate')
+    return g
 
 
 class ThemeError(Exception):
@@ -604,39 +600,33 @@ def offered(c, o, names, what):
 PLAIN_KEYS = {'SONGARTIST', 'SONGLENGTH', 'NPTIME'}  # the plain own keys the payload reads (theme_engine.c song_artist, song_length, np_time_total)
 
 
-def own_option(c, known):
-    """A theme's own <option key label>: its values, each naming the geometry set it boots, one of known, or
-    none of them naming one: a plain choice the payload reads as st.own[OWN_<KEY>]."""
+def own_option(c):
+    """A theme's own <option key label>: a plain choice the payload reads as st.own[OWN_<KEY>]."""
     def err(node, message): fail(node.file, node.line, message)
     key = own_key(c, c.attrs['key'])
     if 'values' in c.attrs:
         err(c, f'{key}: its <value>s are its values')
     if not label_ok(c.attrs.get('label', '')):
         err(c, f'{key}: label expected 1..24 bytes, no control characters')
-    names, sets = [], []
+    names = []
     for v in c.children:
         for k in v.attrs:
-            if k not in ('label', 'set'):
+            if k != 'label':
                 err(v, f'unknown key value.{k}')
         x = v.attrs.get('label', '')
         if not label_ok(x):
             err(v, f'{key}: value label expected 1..24 bytes, no control characters')
         if x in names:
             err(v, f'{key}: duplicate value {x}')
-        if ('set' in v.attrs) != ('set' in c.children[0].attrs):
-            err(v, f'{key}: every value names a set, or none does')
-        if 'set' in v.attrs and v.attrs['set'] not in known:
-            err(v, f'unknown geometry set "{v.attrs["set"]}"')
         names.append(x)
-        sets.append(v.attrs.get('set'))
     # Ten is this format's own bound, not a reader's: config_value reads up to three digits and write_int_config
     # writes any. Past 32, setting_click's value mask (32 bits) could not reach a value.
     if not 2 <= len(names) <= 10:
         err(c, f'{key}: 2 to 10 values expected')
-    if not sets[0] and key not in PLAIN_KEYS:
+    if key not in PLAIN_KEYS:
         err(c, f'{key}: a plain choice the payload does not read (PLAIN_KEYS)')
-    # ponytail: set is the one selector; a value that selects a scheme or a font adds its attribute, and its payload reader, when a theme needs it
-    return presets(c, {'setting': 'SETTING_OWN', 'key': key, 'label': c.attrs['label'], 'names': names, 'sets': sets if sets[0] else None,
+    # ponytail: a value that selects a scheme or a font adds its attribute, and its payload reader, when a theme needs it
+    return presets(c, {'setting': 'SETTING_OWN', 'key': key, 'label': c.attrs['label'], 'names': names,
                        'def': -1, 'preset': -1, 'keep': -1, 'values': 0}, names, key)
 
 
@@ -754,7 +744,7 @@ def resolve(root, by_id, seen=()):
                 if k not in OPTION_ATTRS:
                     err(c, f'unknown key option.{k}')
             if 'key' in c.attrs and 'setting' not in c.attrs:
-                opts.append(own_option(c, sets(t)))
+                opts.append(own_option(c))
                 continue
             s = c.attrs.get('setting', '')
             if s not in SETTINGS:
@@ -857,10 +847,9 @@ def validate(t, name):
         err('the chevrons and song rows need the set\'s right_x')
     if not (t['sb_w'] and t['sb_bottom'] > t['sb_top']):
         err('list.scrollbar: the wheel\'s indicator needs w, top and bottom')
-    for n in sorted({t['geom_set'], *(s for o in t['opts'] for s in o.get('sets') or ())}):
-        g = sets(t)[n]  # the bar's own label is laid out at bar_px (tools/ipod.py status_row), its text drawn at font_size
-        if g.bar_px and t['font_px[ROLE_BAR]'] != g.bar_px:
-            err(f"bar.title.font_size {t['font_px[ROLE_BAR]']} is not set {n}'s bar_px {g.bar_px}")
+    g = geometry(t)  # the bar's own label is laid out at bar_px (tools/ipod.py status_row), its text drawn at font_size
+    if g.bar_px and t['font_px[ROLE_BAR]'] != g.bar_px:
+        err(f"bar.title.font_size {t['font_px[ROLE_BAR]']} is not set {g.name}'s bar_px {g.bar_px}")
     for o in t['opts']:
         if o.get('setting') != 'SETTING_ACCENT' and not o.get('key') and o['def'] >= 0 and not o.get('values'):
             err(f"{o['setting']}: default has no effect without values (settings_read holds a stock setting's default)")
@@ -939,16 +928,6 @@ def validate(t, name):
     for box, h, role in (('title_h', t['page_cap_h'], 'ROLE_TALL'), ('detail_h', t['page_det_h'], 'ROLE_META'), ('height', t['page_row'], 'ROLE_TITLE')):
         if h < t[f'font_px[{role}]']:
             err(f"page.rows.{box}: {h} is shorter than its {t[f'font_px[{role}]']} px font")
-    chooser = [o for o in t['opts'] if o.get('sets')]
-    if len(chooser) > 1:
-        err('one option per theme selects the geometry set')
-    for o in chooser:
-        d = max(o['def'], 0)
-        if o['sets'][d] != t['geom_set']:
-            err(f"{o['key']}: default {o['names'][d]} boots {o['sets'][d]}, the theme's geometry is {t['geom_set']}")
-        for s in o['sets']:  # theme_t has one bar; the caption check above then holds for every set
-            if sets(t)[s].bar != bar:
-                err(f"{o['key']}: set {s} has a {sets(t)[s].bar} px bar, the theme's is {bar}")
 
 
 def accent_default(t):
@@ -994,7 +973,7 @@ def builtins(root=ROOT/'assets/themes'):
             fail(n.file, n.line, f'id {t["id"]} is not its folder name')
         found.append((t['index'], n, t))
     found.sort(key=lambda f: f[0])
-    owners = {}  # a set name is one GEOM_* id and one <set>_<name>.bin prefix
+    owners = {}  # a set name names one set: the themes that declare it declare it alike
     for _, n, t in found:
         for name, g in t['geoms'].items():
             owner, first = owners.setdefault(name, (t['id'], g))
@@ -1031,14 +1010,12 @@ def motion_fields(t):
             ('recall_ms', t['recall_ms'])]
 
 
-def emit(themes, out, redirects={}):
-    """out/'themes.inc': the schemes, options and themes[] theme_engine.c includes, then the boot tables;
-    out/'themes.h': their enums and macros, which every file of tools/build.py's NAVIGATION reads.
-    redirects: ui name -> bitmask of the sets with their own <set>_<name>.bin."""
-    sets = geometry_sets(themes)
+def emit(themes, out):
+    """out/'themes.inc': the schemes, options and themes[] theme_engine.c includes, then the geometry set's values;
+    out/'themes.h': their enums and macros, which every file of tools/build.py's NAVIGATION reads."""
+    g = built_geometry(themes)
     keys = list(theme_keys(themes))
     def setting(o): return f'SETTING_OWN + {keys.index(o["key"])}' if o.get('key') else o['setting']
-    def gname(name): return f'GEOM_{name.upper().replace("-", "_")}'
     def c(k, v):
         return list(CHOICES[k.path].values())[v] if k.type == 'enum' else v
     lines = ['/* tools/theme.py wrote this from assets/themes/<id>/theme.xml; edit those. */']
@@ -1077,41 +1054,26 @@ def emit(themes, out, redirects={}):
                   ('opts', f'{c_name(t)}_opts'), ('n_opts', len(t['opts'])),
                   ('undeclared', ' | '.join(f'(1 << {m})' for m in t['undeclared']) or 0),
                   *((k.field, c(k, t[k.field])) for k in SCHEMA.values() if k.cls == 'open'),
-                  ('geom', sets.index(geometry(t))), *motion_fields(t),
+                  *motion_fields(t),
                   ('art', json.dumps(t['art_id'].replace('-', '_') + '_'))]  # theme_art's prefix (list_marks.c)
         lines += ['    {', *(f'        .{k} = {v},' for k, v in fields), '    },']
     lines.append('};')
-    for name, bits in redirects.items():
-        check(not bits & 1, f'{name}: SET0 never redirects')
-        check(len(name) + 1 + max(len(g.name) for g in sets) < 64, f'{name}: its set path exceeds ringnav_ui_load\'s 64 bytes')
-    sites = [(int(a, 16), g['value']) for g in AUDIT['immediates'] if isinstance(g['value'], str) for a, _ in g['sites']]
-    ui = [f'{{{json.dumps(n)}, {redirects[n]}}}' for n in sorted(redirects)] + ['{0, 0}']
-    check(len(sets) <= 8, f'{len(sets)} geometry sets: ui_redirect_t.sets holds 8')
-    lines += ['enum { ' + ', '.join(gname(g.name) for g in sets) + ', GEOM_N };',
-              'enum { ' + ', '.join(f'G_{n.upper()}' for n in VALUE_NAMES) + ', G_N };',
-              f'#define BOOT_SITES {len(sites)}', f'#define CLIENT_H_MAX {max(320 - g.bar for g in sets)}',
-              # volatile: -Oz can't fold the initialisers, which theme_boot and test/patch.py read
-              'const volatile unsigned short boot_values[GEOM_N][G_N] = {' + ', '.join(
-                  '{' + ', '.join(str(immediate_values(g)[n]) for n in VALUE_NAMES) + '}' for g in sets) + '};',
+    lines += ['enum { ' + ', '.join(f'G_{n.upper()}' for n in VALUE_NAMES) + ', G_N };',
+              # the words tools/ipod.py patch_code bakes into stock's immediates; volatile: -Oz can't fold the
+              # initialisers, which test/patch.py pokes
+              'const volatile unsigned short geom_words[G_N] = {' + ', '.join(
+                  str(immediate_values(g)[n]) for n in VALUE_NAMES) + '};',
               'enum { ' + ', '.join(f'V_{n.upper()}' for n in GEOM_VALS) + ', V_N };',
-              # volatile as boot_values: test/patch.py pokes it
-              'static const volatile short geom_vals[GEOM_N][V_N] = {' + ', '.join(
-                  '{' + ', '.join(str(getattr(g, n)) for n in GEOM_VALS) + '}' for g in sets) + '};',
-              f'#define THEME_GEOM_OFF {THEME_GEOM_OFF}',
+              # volatile as geom_words: test/patch.py pokes it
+              'static const volatile short geom_vals[V_N] = {' + ', '.join(str(getattr(g, n)) for n in GEOM_VALS) + '};',
               f'#define THEME_MOTION_OFF {THEME_MOTION_OFF}',
               f'#define SCHEME_MODE_OFF {SCHEME_MODE_OFF}',
-              'const boot_site_t boot_sites[BOOT_SITES] = {' + ', '.join(
-                  f'{{{a:#x}, G_{v.upper()}}}' for a, v in sites) + '};',
-              'const char *const geom_names[GEOM_N] = {' + ', '.join(json.dumps(g.name) for g in sets) + '};',
-              'const volatile ui_redirect_t ui_redirects[] = {' + ', '.join(ui) + '};',
               *(f'#define SETTING_N_{n.upper()} {len(v)}' for n, (_, v) in SETTINGS.items()),
               *(f'#define OWN_{k} {i}' for i, k in enumerate(theme_keys(themes))),
-              # last: its sets are GEOM_* names
               'const theme_key_t theme_keys[THEME_KEYS] = {', *(
-                  f'    {{ .key = {json.dumps(k)}, .label = 0, .names = 0, .sets = 0, .n = {n}, .def = {d} }},' if o is None else
+                  f'    {{ .key = {json.dumps(k)}, .label = 0, .names = 0, .n = {n}, .def = {d} }},' if o is None else
                   f'    {{ .key = {json.dumps(k)}, .label = {json.dumps(o["label"])}, '
-                  f'.names = (const char *const[]){{{", ".join(map(json.dumps, o["names"]))}}}, ' +
-                  (f'.sets = (const unsigned char[]){{{", ".join(map(gname, o["sets"]))}}}, ' if o['sets'] else '.sets = 0, ') + f'.n = {n}, .def = {d} }},'
+                  f'.names = (const char *const[]){{{", ".join(map(json.dumps, o["names"]))}}}, .n = {n}, .def = {d} }},'
                   for k, (n, d, o) in theme_keys(themes).items()), '};', '']
     names = [l for l in lines[1:] if l.startswith(('enum {', '#define '))]
     globals = ['extern ' + l.split(' = ')[0] + ';' for l in lines if l.startswith('const ')]  # theme_engine.c defines them

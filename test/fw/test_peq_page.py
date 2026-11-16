@@ -417,14 +417,6 @@ def scratch(library):
     return host.offsets(library.parent/'navigation.o', 'scratch_t')
 
 
-@pytest.fixture(autouse=True)
-def oled_set(fw, scratch):
-    """OLED's geometry set, as theme_boot leaves st.geom on the device (a zeroed st is SET0's, with no list_end)."""
-    st = C.addressof(fw.var('st', C.c_char))
-    sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
-    C.c_int.from_address(st + scratch['geom']).value = [g.name for g in sets].index('oled')
-
-
 def page(fw, s=None, files=None, values=None):
     card = Card(fw, {ACTIVE: saved(s if s is not None else state(fw)), **(files or {})})
     return Page(fw, card, values)

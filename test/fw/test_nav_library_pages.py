@@ -613,7 +613,7 @@ def test_oled_draws_a_ratings_rows_hearts_as_glyphs(fw, ui, song, st):
     """OLED's second line (docs/oled-design.md): Phosphor's filled hearts for the song's, outlined for the rest, in
     Text Secondary or white on the selection, the words after them."""
     from test_nav_hold import use_set
-    use_set(st, 'oled')
+    use_set(st)
     Rated(fw, ui, song)
     fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: struct.pack_into('<4i', ui.blocks[w], 0, *map(signed, (x, y, ww, h))))
     call(fw, 'rated_open', 3)
@@ -2107,7 +2107,7 @@ def test_oled_marks_each_service_with_its_own_glyph(fw, ui, st):
     """OLED (docs/oled-design.md): a service's logo on its disc gives way to the theme's 20 px mark centred on x 34,
     in Text Secondary or white on the selection, the words from x 52; a row without a known logo keeps its own."""
     from test_nav_hold import use_set
-    use_set(st, 'oled')
+    use_set(st)
     fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: struct.pack_into('<4i', ui.blocks[w], 0, *map(signed, (x, y, ww, h))))
     win, view = streaming(fw, ui)
     drawn: list = []  # image names, each followed by where it was drawn
@@ -2143,7 +2143,7 @@ def test_oled_marks_a_card_app_by_its_id_its_own_icon_or_app_window(fw, ui, st, 
     icon has it drawn in the mark's 20 px box centred on x 34; one without takes app-window."""
     from test_coverflow import png
     from test_nav_hold import use_set
-    use_set(st, 'oled')
+    use_set(st)
     fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: struct.pack_into('<4i', ui.blocks[w], 0, *map(signed, (x, y, ww, h))))
     fw.mock('tk_str_start_with', lambda s, prefix, *_: bool(s) and C.string_at(s).startswith(C.string_at(prefix)))
     files = {**deezer(), '/mnt/mmc/.deez/icon-40.png': png(40, 40), '/mnt/mmc/.soul/q2app': b'name=Soulseek\n',
@@ -2227,9 +2227,8 @@ def library(fw, ui, folders=(), token=b'', extra=0):
 
 
 def boot(fw, st):
-    """The geometry set theme_boot writes (st.geom): OLED's."""
+    """OLED's settings, on the geometry set the build bakes."""
     Config(fw)
-    st('geom').value = fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())
 
 
 def test_the_library_s_rows_in_their_order(fw, ui, st):

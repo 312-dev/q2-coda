@@ -432,7 +432,6 @@ def test_a_list_fit_list_with_a_gap_ends_on_a_whole_row(fw, ui, st):
     and the content grows to allow it."""
     end, content = 4 * ROW_H, 4 * ROW_H + 210
     theme(fw)
-    st('geom').value = oled_geom(fw)  # as theme_boot puts the theme's set there
     page = gapped(ui)
     to_end(fw, ui, page)
     assert page.offset == end and page.view.int(O['VIEW_CONTENT_H']) == content
@@ -449,7 +448,6 @@ def test_a_page_with_no_rows_just_past_the_list_end_scrolls_as_far_as_a_drag(fw,
     but not past its box, which runs on to the screen's foot: the wheel scrolls as far as a drag does, to the
     content's foot on the list end (the user's, 2026-11-16, About on b4: the wheel showed the bar and stayed)."""
     theme(fw)
-    st('geom').value = oled_geom(fw)
     bar, end = 58, 282  # OLED's status row and list end on screen
     win = ui.widget('window', ui.wm, (0, bar, 375, 320 - bar), name='about_page')  # the client, under the status row
     view = ui.widget('scroll_view', win, (0, 0, 375, 320 - bar))
@@ -465,20 +463,10 @@ def test_a_page_with_no_rows_just_past_the_list_end_scrolls_as_far_as_a_drag(fw,
     assert view.int(SCROLL_Y) == content + pad - (320 - bar) == over  # a drag's end: the content's foot on y 282
 
 
-def oled_geom(fw):
-    """The first geometry set with list_fit: OLED's."""
-    names = host.tools_theme.GEOM_VALS
-    size = fw.sizes['theme_engine__geom_vals'] // 2
-    table = fw.var('theme_engine__geom_vals', C.c_short * size)
-    sets = [table[i:i + len(names)] for i in range(0, size, len(names))]
-    return next(i for i, s in enumerate(sets) if s[names.index('list_fit')])
-
-
 def home_page(ui, fw, st, rows=9, hidden=()):
     """Home's window under OLED: its main list's scroll view runs on to the window's foot, the rest's seven rows
     and two more; coverflow.c's home.list is its list."""
     theme(fw)
-    st('geom').value = oled_geom(fw)
     win = ui.widget('window', ui.wm, (0, 58, 375, 262), name='home_page')
     lst = ui.widget('list_view', win, (0, 0, 375, 262))
     view = scroll_list(ui, lst, titles(rows), (0, 0, 375, 262))
@@ -2461,13 +2449,9 @@ def test_a_window_takes_its_themes_motion_as_it_loads(fw, ui):
 
 def test_a_set_with_a_list_end_keeps_the_selected_row_above_it(fw, ui, st):
     names = host.tools_theme.GEOM_VALS
-    size = fw.sizes['theme_engine__geom_vals'] // 2
-    table = fw.var('theme_engine__geom_vals', C.c_short * size)
-    sets = [table[i:i + len(names)] for i in range(0, size, len(names))]
-    found = [(i, s[names.index('list_end')]) for i, s in enumerate(sets) if s[names.index('list_end')] > 0]
-    assert found, 'no geometry set has a list end'
-    index, end = found[0]
-    st('geom').value = index
+    table = fw.var('theme_engine__geom_vals', C.c_short * len(names))
+    end = table[names.index('list_end')]
+    assert end > 0, 'the geometry set has no list end'
     page = Page(ui, titles(60), height=end + 3 * ROW_H)
     paint(fw, page)
     bottoms = []

@@ -673,7 +673,7 @@ int ringnav_playlistsmore(void *win, void *ctx) {
         void *del = widget_lookup(win, "label_del", 1);
         if (del) widget_set_tr_text(del, "Delete Playlist");
         /* A row like this page's stock Rename and Delete: a 375 px list_item, the set's pitch high
-         * (SET0 72), holding a 335 px s_btn_listitem, its body high (68), its 52px icon at x 10 and
+         * (G_PITCH), holding a 335 px s_btn_listitem, its body high (G_BODY), its 52px icon at x 10 and
          * its 20px label at x 72. Edit Playlist follows the Delete row at the same spacing. */
         int h = geom(G_PITCH), inner = geom(G_BODY);
         /* (tools/ipod.py: a set without toolbars has them from the top) */

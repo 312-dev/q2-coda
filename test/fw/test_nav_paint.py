@@ -36,7 +36,7 @@ OPAQUE, PREMULTI = 1, O['BITMAP_PREMULTI']
 _roles = re.search(r'enum \{ (ROLE_\w+(?:, ROLE_\w+)*) \}', (host.ROOT/'patch/theme.h').read_text())
 assert _roles
 ROLE_BAR = _roles[1].split(', ').index('ROLE_BAR')
-# OLED's own geometry set, which theme_boot writes into stock's rows
+# OLED's own geometry set, which the build bakes into stock's rows
 _set = re.search(r'<geometry name="oled" ([^>]*)/>', _OLED_XML)
 assert _set
 GEOMETRY = {k: int(v) for k, v in re.findall(r'(\w+)="(\d+)"', _set[1])}
@@ -79,15 +79,9 @@ def strings(fw):
 
 
 def theme(fw, **values):
-    """The settings the C reads at its first colour: OLED and the rest. st.geom stays 0, stock's own set, which OLED
-    draws on when its boot can't write its own (theme_boot); a test of OLED's set writes it (boot_set)."""
+    """The settings the C reads at its first colour: OLED and the rest."""
     strings(fw)
     Config(fw, THEME=OLED, **values)
-
-
-def boot_set(fw, st):
-    """The set OLED boots with, as theme_boot leaves it."""
-    st('geom').value = fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())
 
 
 @pytest.fixture(scope='module')
@@ -425,7 +419,6 @@ SLDP = b'file:///mnt/mmc/.sldp/1f3a.jpg'
 def test_stock_s_thumbnails_take_the_list_art_s_corners(fw, st, bitmaps, name):
     """list.art.radius (theme.xml) is on screen at the set's art size: at 166 px, that share of it."""
     theme(fw)
-    boot_set(fw, st)
     bm = bitmaps(fw, fill(166, 166, WHITE), flags=OPAQUE)
     image_add(fw, name, bm)
     alpha = [[p[3] for p in row] for row in bm.rows()]
@@ -1175,7 +1168,6 @@ def test_an_empty_state_retitles_the_bar_on_a_page_already_titled(fw, world, st)
     show no title, so ""), then the empty state comes; the bar must look again (empty_list), or it keeps "" and the
     status row shows only the clock (seen in the emulator, 2026-11-16) where the design names the page."""
     label = bar_title(fw, world, st)
-    boot_set(fw, st)
     win = world.window('coverflow_page')
     body = world.add(win, 'view_body', box=(0, 0, 375, 290))
     from test_coverflow import COVERS, Cf
@@ -1359,7 +1351,6 @@ def test_home_s_own_list_is_q2_pod(fw, world, st):
 
 def test_songs_action_bar_is_found_with_the_title(fw, world, st):
     bar_title(fw, world, st)
-    boot_set(fw, st)
     win, _ = navbar_page(world)
     action = world.add(win, 'view_navbar_allplay')
     sync(fw, win)
@@ -1386,7 +1377,6 @@ def test_songs_action_bar_is_the_shuffle_row(fw, world, st):
     the text column, where its glyph stands; Play All's image the row's left as its hit area, without its icon;
     Sort's bars centred in the SORT_PILL_W pill at the selection's inset from the right edge."""
     theme(fw)
-    boot_set(fw, st)
     fw.mock('image_set_draw_type', lambda w, t, *_: world.set(w, 'draw_type', t))
     view, (label, play, sort) = action_view(world, 3)
     fw.fn('navigation__action_row', None, C.c_void_p)(view)
@@ -1405,7 +1395,6 @@ def test_songs_action_bar_is_the_shuffle_row(fw, world, st):
 @pytest.mark.parametrize('n, moved', [(1, 0), (2, 2)])
 def test_an_action_bar_without_sort_or_play(fw, world, st, n, moved):
     theme(fw)
-    boot_set(fw, st)
     view, _ = action_view(world, n)
     fw.fn('navigation__action_row', None, C.c_void_p)(view)
     assert len(fw.calls('widget_move_resize')) == moved
@@ -1563,7 +1552,6 @@ def added(after, before):
 def test_over_now_playing_the_volume_s_track_is_the_theme_s(fw, world, st, theme_t, layout):
     """playing.scrubber.track: the volume over the progress bar draws the bar's own track."""
     theme(fw)
-    boot_set(fw, st)
     dialog, *_ = volume(fw, world, st, 37, under='playing_page', np=True)
     track = fw.fn('theme', C.c_void_p)() + layout['theme']['np_track_rgb']
     assert not libc.mprotect(track & ~0xfff, 0x2000, 3)  # this test's own load of the table, made writable
@@ -1747,7 +1735,6 @@ def test_a_new_volume_dialog_opens_on_its_value(fw, world, st, clock):
 def test_over_now_playing_its_bar_eases_too(fw, world, st, clock):
     """OLED's set: the white bar between the speakers, VOL_SPK_INSET in from each end of the progress bar."""
     theme(fw)
-    boot_set(fw, st)
     dialog, vol, _ = volume(fw, world, st, 20, under='playing_page', np=True)
     vol_paint(fw, dialog, Canvas(fw))
     volumes(fw, 20)
@@ -1839,7 +1826,6 @@ def whole(fw):
 
 def scan_dialog(fw, world, st, text='Scanned 0', create=0):
     theme(fw)
-    boot_set(fw, st)
     win = world.window('updatemusic_dialog', 'dialog')
     for name in ('img_animation', 'label_scanfolder'):
         world.add(win, name, 'image')
@@ -2213,24 +2199,11 @@ def boot(fw, world, st):
     return load
 
 
-def test_a_set_the_boot_can_t_write_leaves_stock_s(fw, world, st):
-    """The code keeps SET0's values (st.geom 0), which OLED draws on until the next boot (theme_boot)."""
-    theme(fw)
-    fw.mock('theme_mprotect', lambda *_: -1)
-    boot(fw, world, st)
-    assert st('theme_booted').value == 1 and st('geom').value == 0
-
-
-@in_fork
-def test_the_system_bar_s_load_boots_the_theme_s_set_once(fw, world, st):
-    """In a child: the boot writes the set's values into stock's code pages, which outlive a test here."""
+def test_the_system_bar_s_load_boots_the_theme(fw, world, st):
+    """theme_boot (a retired theme's migration) runs at the first system bar load; the load goes on to stock's."""
     theme(fw)
     load = boot(fw, world, st)
-    want = fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())
-    assert st('geom').value == want != 0
-    calls = len(fw.calls('theme_mprotect'))
-    assert calls and load(b'system_bar', 0)
-    assert len(fw.calls('theme_mprotect')) == calls  # once
+    assert st('theme_booted').value == 1 and load(b'system_bar', 0)
 
 
 # Boot may paint Home before the screen is usable: once the list is reachable, it is repainted.
@@ -2255,7 +2228,6 @@ def test_over_oleds_now_playing_the_volume_is_its_bar_between_two_speakers(fw, w
     16 px speaker (Phosphor's speaker-simple-none, -high) centred VOL_SPK_X in from each end of the progress bar on
     its centre line; no number (the "A: iPod speakers" mock-up)."""
     theme(fw, LIGHT=light)  # OLED
-    st('geom').value = fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())
     dialog, *_ = volume(fw, world, st, 37, under='playing_page', np=True)
     canvas = Canvas(fw)
     vol_paint(fw, dialog, canvas)

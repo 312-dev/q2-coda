@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - The OLED layout is built into the firmware rather than applied at startup, so the Q2 Muse no longer rewrites its own code when it starts. Nothing on screen changes.
   - Now Playing (OLED): the progress bar's track and its played part have round ends, as the design has them; they were square.
   - Menus (OLED): the hold menus, Now Playing's ⋯ and a playlist's ⋯ now open as a frosted sheet over the page, which shrinks back and dims behind it. The sheet shows the song, album or playlist at the top with its cover, its rows run the full width of the screen and fade at the bottom, and Delete and Remove rows are red.
   - Menus (OLED): the menu sheet rises from the bottom of the screen as the page behind shrinks back, and falls away when you press Return. With Reduce Motion on, it fades in and out instead.

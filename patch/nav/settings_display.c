@@ -71,11 +71,10 @@ static void theme_preset(const theme_t *T) {
     }
 }
 
-void restart_confirm(int setting, int value);
 static int setting_click(void *ctx, void *event) {
     int i = (int)(long)ctx;
     const theme_t *T = theme();
-    int *value = option_slot(T, i), was = *value;
+    int *value = option_slot(T, i);
     const char *key = option_key(T, i);
     /* Graphite, ..., Plum, Green, then Ivory (a theme's mask skips what it does not offer) */
     static const int accent_next[] = { 1, 2, 3, 4, 5, 6, 8, 0, MINIMAL_ACCENT };
@@ -95,12 +94,6 @@ static int setting_click(void *ctx, void *event) {
             if (!v && T->n_schemes > ACCENT_N && *value < ACCENT_N) v = ACCENT_N;
             *value = v < T->n_schemes ? v : 0;
         } while (!(mask >> *value & 1));
-    }
-    if (i >= SETTING_OWN && geom_with(T, i, *value) != st.geom) {
-        int v = *value; /* an own option's value that boots another set */
-        *value = was;
-        restart_confirm(i, v);
-        return 0;
     }
     write_int_config(*value, "IPOD", key);
     if (i == SETTING_LIGHT) { /* Auto applies from this click */
@@ -177,21 +170,6 @@ static void genre_fill(void *win, void *label, const char *text) {
     if (!st.genre_timer && genre_over() > 0)
         st.genre_timer = timer_add(genre_step, (void *)0, MARQUEE_HOLD_MS);
 }
-/* An own option's value that needs another geometry set: confirmed, the config takes it and the
- * Q2 restarts into it, ringnav_reboot saving the queue first; the running state stays the booted
- * set's until then, as theme_boot requires. Cancelled, nothing is written and nothing changes. */
-void restart_confirm(int setting, int value) {
-    struct {
-        int kind, ms;
-        char text[0x400];
-    } prompt = { 1, 0, "Restart to apply?" };
-    if (navigator_to_with_context("dialog/confirminfo_dialog", &prompt) != 10) return;
-    const theme_t *T = theme();
-    int was = *option_slot(T, setting);
-    setting_put(&was, value, option_key(T, setting));
-    ringnav_reboot();
-}
-
 /* Now Playing's info page: stock (0x53bc78, from its one call, NP_INFO_CALL in tools/build.py)
  * writes "Label:value" lines and the folder alone. Each line gets ": ", a number its unit's space
  * ("35.92 MB", "16-bit", "950 kbps", "44.1 kHz"), the folder its Location label, and an unknown

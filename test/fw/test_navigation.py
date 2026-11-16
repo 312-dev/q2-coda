@@ -412,12 +412,10 @@ def test_display_settings(fw, clock, values, home, light):
 
 
 def boot(fw):
-    """theme_boot as the system bar's load runs it (ringnav_ui_load: accent(), then theme_boot), its pages
-    left unwritten (theme_mprotect refuses: st.geom stays SET0's, which is not under test here). The keys
+    """theme_boot as the system bar's load runs it (ringnav_ui_load: accent(), then theme_boot). The keys
     write_int_config saved, by name, in order."""
     written = []
     fw.mock('write_int_config', lambda v, s, k, *_: written.append((C.string_at(k).decode(), C.c_int(v).value)))
-    fw.mock('theme_mprotect', lambda *_: -1)
     fw.fn('accent', C.c_int)()
     fw.fn('navigation__theme_boot', None)()
     return written

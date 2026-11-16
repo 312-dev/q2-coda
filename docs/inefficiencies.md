@@ -84,7 +84,7 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 
 ### 5. A build runs `unsquashfs -cat` once per file, hundreds of times
 
-- **Where:** `tools/build.py:1791` (`cat`), called in the window loop at `:1811-1815` and 24 more places (`grep -c 'cat(' tools/build.py` is 25), and per geometry set in `set_assets` (`tools/ipod.py:1289`).
+- **Where:** `tools/build.py:1791` (`cat`), called in the window loop at `:1811-1815` and 24 more places (`grep -c 'cat(' tools/build.py` is 25), and once more per UI page in `ui_pages` (`tools/ipod.py`).
 - **Evidence:** the stock rootfs has 127 `raw/ui/*.bin` files (`unsquashfs -l stock.squashfs`), each read by its own process from a 50 MB LZO image, before any asset is patched; a `--dev` build's output holds 325 files.
 - **Impact:** process start and a metadata walk per file, on a build that takes minutes.
 - **Measured:** about 18 ms a call. cProfile of release builds on a 16-core machine put 1.6 s in `cat`'s 443 calls on a 273 s build, 3.0 s on a 136 s one under load from other jobs, and 1.5 s on an 82 s one; one whole `unsquashfs -n -q -d DIR stock.squashfs` takes 0.15 s.

@@ -158,7 +158,7 @@ def test_a_held_song_opens_its_whole_menu_with_remove_last_on_the_card(fw, ui, s
     """The user's ruling (2026-11-16, 0plh): a song held in a playlist gets the menu a Library song gets (Play Next,
     Play Last, Add to Playlist…, Go to Album, Go to Artist and the rest), then Remove from Playlist last, after a gap
     and red, which asks on the confirmation card before it takes the song out."""
-    use_set(st, 'oled')
+    use_set(st)
     hold = Hold(fw, ui, st, recs, mcl)  # its deques first: the page's own take their place
     pages = road_trip(fw, ui, recs)
     pv = open_page(fw, 3, b'Road Trip')

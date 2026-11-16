@@ -1327,18 +1327,17 @@ def patch_asset(path, data, g=SET0):  # pragma: no mutate block
     return encode(root)
 
 
-def set_assets(cat, g):
-    """The UI windows g draws differently from SET0, as <g.name>_<name>.bin beside the stock one.
-    The prefix goes on the basename: stock opens subdirectory windows by path."""
+def ui_pages(cat, g):
+    """{rel: page} for the UI windows the build writes over stock's under geometry g: every UI_ASSETS page, and
+    each STOCK_ROWS page g changes."""
     ui, out = 'release/assets/default/raw/ui/', {}
-    for rel in UI_ASSETS | STOCK_ROWS:
+    for rel in sorted(UI_ASSETS | STOCK_ROWS):
         data = cat(ui + rel)
         mine = patch_asset(rel, data, g=g)
         cut = cut_lists(rel, mine, g)
         check(not cut, f'{rel}: {", ".join(cut)} end above list_end under {g.name}: run them on to the window foot (fit_rows)')
-        if mine != patch_asset(rel, data):
-            folder, _, base = rel.rpartition('/')
-            out[ui + (folder and folder + '/') + f'{g.name}_{base}'] = mine
+        if rel in UI_ASSETS or mine != data:
+            out[rel] = mine
     return out
 
 
@@ -1347,7 +1346,7 @@ def set_assets(cat, g):
 CLOSE_LOAD, DUMMY_LOAD = 0x8f99a914, 0x8f99ea00
 
 
-def patch_code(data, symbols):
+def patch_code(data, symbols, g):
     changes = []
     word = functools.partial(patch_word, data, changes=changes)
 
@@ -1358,7 +1357,7 @@ def patch_code(data, symbols):
         word(address + 4, 0x0320f809, 0x0320f809, 'lookup close call')
         word(address + 8, 0, 0x8fa40000 | name_slot, 'lookup close receives the top window name')
 
-    values = immediate_values(SET0)
+    values = immediate_values(g)  # the theme's set (tools/theme.py built_geometry)
     for group in AUDIT['immediates']:
         value = values[group['value']] if isinstance(group['value'], str) else group['value']
         for address, instruction in group['sites']:

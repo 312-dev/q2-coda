@@ -773,17 +773,17 @@ def test_cut_lists_skips_lists_it_cannot_see_end():
     assert ipod.cut_lists(ipod.MODAL_PAGES[0], ipod.encode(cut_page(100)), modal) == []  # an inset menu's panel
 
 
-def test_set_assets_refuses_a_list_fit_set_s_list_cut_above_the_list_end(monkeypatch):
+def test_ui_pages_refuses_a_list_fit_set_s_list_cut_above_the_list_end(monkeypatch):
     monkeypatch.setattr(ipod, 'UI_ASSETS', {'a_page.bin': ''})
     monkeypatch.setattr(ipod, 'STOCK_ROWS', {})
     monkeypatch.setattr(ipod, 'patch_asset', lambda rel, data, g=ipod.SET0: data)
     for h, ok in ((224, False), (262, True)):
         cat = lambda p, h=h: ipod.encode(cut_page(h))
         if ok:
-            assert ipod.set_assets(cat, OLED_SET) == {}
+            assert ipod.ui_pages(cat, OLED_SET) == {'a_page.bin': cat('')}
         else:
             with pytest.raises(Exception, match='a_page.bin: list_view end above list_end under oled'):
-                ipod.set_assets(cat, OLED_SET)
+                ipod.ui_pages(cat, OLED_SET)
 
 
 def test_status_bar_takes_the_bar_height():
@@ -938,18 +938,15 @@ UI = 'release/assets/default/raw/ui/'
 @pytest.fixture
 def fake_assets(monkeypatch):
     monkeypatch.setattr(ipod, 'UI_ASSETS', {'system_bar.bin': '', 'dialog/volume_dialog.bin': '', 'home_page.bin': ''})
-    monkeypatch.setattr(ipod, 'STOCK_ROWS', {})
-    monkeypatch.setattr(ipod, 'patch_asset', lambda rel, data, g=ipod.SET0: data + (b'!' if g.bar != 30 and rel != 'home_page.bin' else b''))
+    monkeypatch.setattr(ipod, 'STOCK_ROWS', {'list_page.bin': '', 'clock_page.bin': ''})  # a stock page the set leaves as it is is not written
+    monkeypatch.setattr(ipod, 'patch_asset', lambda rel, data, g=ipod.SET0: data + (b'!' if g.bar != 30 and rel not in ('home_page.bin', 'clock_page.bin') else b''))
 
 
-def test_set_assets_only_what_differs(fake_assets):
-    got = ipod.set_assets(lambda p: p.encode(), ipod.Geometry(name='test', bar=26))
-    assert got == {UI + 'test_system_bar.bin': (UI + 'system_bar.bin').encode() + b'!',
-                   UI + 'dialog/test_volume_dialog.bin': (UI + 'dialog/volume_dialog.bin').encode() + b'!'}
-
-
-def test_set_assets_set0_is_empty(fake_assets):
-    assert ipod.set_assets(lambda p: p.encode(), ipod.SET0) == {}
+def test_ui_pages_are_every_ui_asset_and_the_stock_rows_the_set_changes(fake_assets):
+    got = ipod.ui_pages(lambda p: p.encode(), ipod.Geometry(name='test', bar=26))
+    assert got == {'system_bar.bin': (UI + 'system_bar.bin').encode() + b'!',
+                   'dialog/volume_dialog.bin': (UI + 'dialog/volume_dialog.bin').encode() + b'!',
+                   'home_page.bin': (UI + 'home_page.bin').encode(), 'list_page.bin': (UI + 'list_page.bin').encode() + b'!'}
 
 
 
@@ -1154,7 +1151,7 @@ def test_patch_code():
     data = elf(0x540000)
     for at, old, _, _ in patches:
         struct.pack_into('<I', data, at - 0x3ff000, old)
-    assert ipod.patch_code(data, dict(SYMBOLS)) == [{'address': hex(at), 'original': hex(old), 'patched': hex(new), 'purpose': why}
+    assert ipod.patch_code(data, dict(SYMBOLS), ipod.SET0) == [{'address': hex(at), 'original': hex(old), 'patched': hex(new), 'purpose': why}
                                                      for at, old, new, why in patches]
     assert [struct.unpack_from('<I', data, at - 0x3ff000)[0] for at, *_ in patches] == [new for _, _, new, _ in patches]
 

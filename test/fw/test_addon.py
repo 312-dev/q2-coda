@@ -5268,7 +5268,7 @@ def oled_page(fw, nav_st):
         return p.made[-1]
     fw.mock('widget_factory_create_widget', made)
     fw.mock('button_create', made)
-    use_set(nav_st, 'oled')
+    use_set(nav_st)
     return p
 
 
@@ -5294,7 +5294,7 @@ def test_other_sets_and_other_replies_keep_the_plain_rows(fw, nav_st):
     assert p.top.lay == LAY_PLAIN and p.drawn == 9
     from test_nav_hold import use_set
     C.c_void_p.from_address(p.view + O['W_PARENT']).value = block(fw, size=4096)
-    use_set(nav_st, 'oled')
+    use_set(nav_st)
     p.fw.fn('addon__fetch', None, C.POINTER(Lv))(p.pg.lv)
     p.answer(rows=artist_rows(radio=False))  # no Radio: an album's page, say
     assert p.top.lay == LAY_PLAIN and p.drawn == 8

@@ -92,14 +92,13 @@ _Static_assert(sizeof st.setting_label / sizeof *st.setting_label == SETTING_OWN
 _Static_assert(DRIFT_TEXELS >= 4 * (375 - HOME_SPLIT_W) * 320, /* a pane to the top edge */
                "Home drift frame fits every set");
 #if __SIZEOF_POINTER__ == 4 /* the Q2's layout; test/fw's 64-bit build has its own */
-_Static_assert(__builtin_offsetof(theme_t, geom) == THEME_GEOM_OFF, "test/patch.py's set_geom");
 _Static_assert(__builtin_offsetof(theme_t, motion) == THEME_MOTION_OFF && sizeof(motion_t) == 8 &&
                    __builtin_offsetof(theme_t, recall_ms) == THEME_MOTION_OFF + MOTION_N * 8,
                "test/patch.py's set_motion and set_recall");
 _Static_assert(__builtin_offsetof(scheme_t, mode) == SCHEME_MODE_OFF, "test/patch.py patches it");
 #endif
-/* A value of the set theme_boot wrote (st.geom), never the live theme's: V_BAR, ... */
-int geom_val(int v) { return geom_vals[st.geom][v]; }
+/* A value of the theme's geometry set (tools/ipod.py Geometry) that is not an immediate: V_BAR, ... */
+int geom_val(int v) { return geom_vals[v]; }
 int client_h(void) { return 320 - geom_val(V_BAR); }
 _Static_assert(V_SPLIT_ART == V_SPLIT_ROW + SPLIT_ART &&
                    V_SPLIT_ART_UP == V_SPLIT_ROW + SPLIT_ART_UP &&

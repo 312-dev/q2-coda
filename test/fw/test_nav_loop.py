@@ -2735,15 +2735,8 @@ def test_a_side_button_onto_the_sleep_timers_ok_drops_a_pending_centre(fw, keys)
     assert ui.clicks == [(b'btn_enter', EVT_CLICK)]  # a Centre of its own does
 
 
-def no_toolbar(fw, st):
-    """theme_boot's geometry set as an iPod theme's: no stock toolbar (geom_vals' toolbar 0)."""
-    names = host.tools_theme.GEOM_VALS
-    table = (C.c_short * (fw.sizes['theme_engine__geom_vals'] // 2)).in_dll(fw.lib, 'theme_engine__geom_vals')
-    st('geom').value = next(g for g in range(len(table) // len(names)) if not table[g * len(names) + names.index('toolbar')])
-
-
 def test_the_sleep_timer_switched_off_has_its_row_to_switch(fw, keys, st):
-    no_toolbar(fw, st)
+    assert not host.tools_theme.built_geometry(host.tools_theme.builtins()).toolbar  # OLED's set: no stock toolbar
     ui = Ui(fw)
     top = time_window(ui, 'sleepshutdown_page')
     top.find(b'time').add(W(ui, 'view', 'view_sleep')).visible = 0  # only the switch's row shows

@@ -299,7 +299,7 @@ def validate_assets(directory):
                       QS_LABEL_W, QS_ROW_GAP, QS_PITCH, QS_BAR, QS_TOUCH, QS_EDGE, QS_SUN, HOME_LABEL_END, HOME_LIST_W, HOME_TEXT_X, HOME_TOP, PITCH, ARTIST_PAGE, HOME_OURS, HOME_PAGE, HOME_ROW, HOME_ROWS, HOME_SETS, NAVBAR_ONLY, PLAYING_PAGE, SET_ROW, SET_ROWS, SET_TOP, UI_ASSETS,
                       NP_BAR, NP_TOUCH, NP_MARGIN, NP_TOP, STATUS_BAR, STATUS_HIDDEN, STATUS_LEFT, STATUS_MARGIN, STATUS_RIGHT, CLOCK_MIN, CLOCK_TEXT, corner_inset, corner_x,
                       STATUS_ICONS, status_icon, QUIET_ICONS, quiet_icon, SET_ICON, SET_STOCK_ICON, SETTINGS_ICONS, SETTINGS_SLIDERS, decode, slider_plain, imagemagick, inc, png_header, settings_icon, walk,
-                      patch_asset, patch_code, patch_style, style_props, SLIDE, SET0,
+                      patch_asset, patch_code, patch_style, style_props, SLIDE, SET0, STOCK_ROWS,
                       STATUS_ROW_GAP, STATUS_ROW_LINE)
     manifest = json.loads((directory/'manifest.json').read_text())
     stock = (directory/'stock-demo').read_bytes()
@@ -386,7 +386,10 @@ def validate_assets(directory):
                if l.startswith('squashfs-root/'+ui) and l.endswith('.bin') and l.removeprefix('squashfs-root/') not in STOCK_EQ + STOCK_PAGES}
     chinese = {rel for rel in chinese if CJK.search(read('stock.squashfs', ui+rel).decode('utf-8', 'replace'))}
     assert chinese and {'testmode/test_key.bin', 'kb_default_t9.bin', 'dialog/search_dialog.bin'} <= chinese
-    patched_ui = set(UI_ASSETS)
+    from theme import builtins, built_geometry
+    GEOM = built_geometry(builtins())  # the set the build bakes: OLED's
+    # every UI asset, and the stock list pages OLED's set changes (tools/ipod.py ui_pages)
+    patched_ui = set(UI_ASSETS) | {p for p in STOCK_ROWS if patch_asset(p, stock_ui := read('stock.squashfs', ui+p), g=GEOM) != stock_ui}
     assert set(changed) == {ui+p for p in patched_ui | chinese} | {
         'release/assets/default/raw/styles/'+p for p in AUDIT['styles']} | {
         xx+n for n in SETTINGS_ICONS | QUIET_ICONS | STATUS_ICONS | ART_PLACEHOLDERS} | {'release/assets/default/raw/strings/en_US.bin', FONT, TAG_C, *WEB} | {
@@ -795,10 +798,15 @@ def validate_assets(directory):
             else: assert name in SETTINGS_ICONS and new==settings_icon(name,original)
             continue
         short = rel.split('/raw/ui/')[1]
-        edited = patch_asset(short, original) if short in patched_ui else original
+        edited = patch_asset(short, original, g=GEOM) if short in patched_ui else original
         assert new == (english_ui(short, edited) if short in chinese else edited), short
-        if short not in patched_ui:
+        if short not in UI_ASSETS:
             continue
+        # The checks below are of the transform on SET0, the defaults OLED's set extends; the set's own checks, of the
+        # pages as built, follow this loop.
+        new = patch_asset(short, original)
+        if short in chinese:
+            new = english_ui(short, new)
         if short in chinese:  # the checks below are of the edits: compare with stock given in English
             original = english_ui(short, original)
         if short == 'dialog/addplaylist_dialog.bin':
@@ -1049,17 +1057,16 @@ def validate_assets(directory):
         try: patch_asset(short, original[:-1]+b'x')
         except ValueError: pass
         else: raise AssertionError('Accepted a changed asset')
-    # Every geometry set's built list windows take the row height of the page's pitch
-    # immediates (art pages take art_pitch), and its rows fit.
-    from theme import builtins, geometry_sets
+    # The built list windows take the row height of the geometry set's pitch immediates (art pages take art_pitch),
+    # and its rows fit.
+    from theme import geometry
     from ipod import PAGE_KIND as page_kind, page_rows, fit_rows
-    built = set(run('unsquashfs', '-l', directory/'rootfs.squashfs').split())
     # Under a set without toolbars the Playlists rows (pl_row) are the theme's page_detail high in a list pitched at
     # the set's playlist pitch (page_rows): one height.
     for t in builtins():
-        for g in geometry_sets([t]):
-            if not g.toolbar: assert page_rows(g, 'playlist')[0] == t['page_detail'], (t['name'], g.name)
-    for g in geometry_sets(builtins()):
+        g = geometry(t)
+        if not g.toolbar: assert page_rows(g, 'playlist')[0] == t['page_detail'], (t['name'], g.name)
+    for g in [GEOM]:
         assert g.body <= g.pitch and g.art_body <= g.art_pitch and g.song_body <= g.song_pitch, g.name
         assert g.art + 2*g.art_inset <= g.art_body, g.name
         assert g.text_art + 2*g.text_art_inset <= g.body or not g.text_art, g.name   # text rows' artwork fits, or none
@@ -1069,9 +1076,7 @@ def validate_assets(directory):
             assert 0 <= y and y + h <= body, (g.name, y, h, body)                    # every stock row label inside its body
         checked = set()
         for short, kind in page_kind.items():
-            folder, _, base = short.rpartition('/')
-            mine = ui + (folder and folder + '/') + f'{g.name}_{base}'
-            new = decode(read('rootfs.squashfs', mine if 'squashfs-root/' + mine in built else ui + short))
+            new = decode(read('rootfs.squashfs', ui + short))
             old = {n[2].get('name'): n[2] for n in walk(decode(read('stock.squashfs', ui + short)))}
             for n in walk(new):
                 for prop in ('row_height', 'default_item_height'):
@@ -1083,8 +1088,7 @@ def validate_assets(directory):
         # bar's room with rows of their own heights (no item_height forces them); More's rows start at the top.
         if not g.toolbar:
             for short in ('localmusic/playlist_page.bin', 'localmusic/playlistsmore_page.bin'):
-                folder, _, base = short.rpartition('/')
-                new = decode(read('rootfs.squashfs', ui + f'{folder}/{g.name}_{base}'))
+                new = decode(read('rootfs.squashfs', ui + short))
                 nav = next(n for n in new[3] if n[2].get('name') == 'view_navbar')
                 assert nav[2]['visible'] == 'false' and nav[2]['enable'] == 'false', short
                 if short == 'localmusic/playlist_page.bin':
@@ -1094,14 +1098,10 @@ def validate_assets(directory):
                     assert [n[1][1] for n in new[3] if n[0] == 'list_item'] == [0, g.pitch]
         assert g.set_top + g.set_rows*g.set_row <= 320 - g.bar, g.name
         # Home's rows are the set's and fit.
-        mine = ui + f'{g.name}_{HOME_PAGE}'
-        listed = {n[2].get('name'): n for n in walk(decode(read('rootfs.squashfs', mine if 'squashfs-root/' + mine in built else ui + HOME_PAGE)))}['list_view_home']
+        listed = {n[2].get('name'): n for n in walk(decode(read('rootfs.squashfs', ui + HOME_PAGE)))}['list_view_home']
         assert listed[2]['item_height'] == str(g.home_row) and HOME_TOP + 7*g.home_row <= 320 - g.bar, g.name
         for rel in UI_ASSETS:
-            folder, _, base = rel.rpartition('/')
-            mine = ui + (folder and folder + '/') + f'{g.name}_{base}'
-            if 'squashfs-root/' + mine not in built: continue
-            for n in walk(decode(read('rootfs.squashfs', mine))):
+            for n in walk(decode(read('rootfs.squashfs', ui + rel))):
                 if n[0] != 'list_view' or n[2].get('default_item_height') != str(g.set_row): continue
                 if rel in NAVBAR_ONLY:  # settings lists: the set's rows from its top, a list_fit set's whole rows by list_end
                     h = ((fit_rows(g, g.set_top, g.set_row) if g.list_fit else 320 - g.bar - g.set_top) if g.list_end
@@ -1114,18 +1114,16 @@ def validate_assets(directory):
             assert corner_x(g.bar + g.list_end - g.pitch + 6, g.pitch - 12) <= g.text_x < corner_x(g.bar + g.list_end + 6, g.pitch - 12), g.name
             ends = {}
             for rel in UI_ASSETS:  # every list box the transform resizes ends at the window's end
-                folder, _, base = rel.rpartition('/')
-                mine = ui + (folder and folder + '/') + f'{g.name}_{base}'
-                if 'squashfs-root/' + mine not in built or rel in NAVBAR_ONLY: continue
+                if rel in NAVBAR_ONLY: continue
                 was = {n[2].get('name'): n[1] for n in decode(read('stock.squashfs', ui + rel))[3]}
-                for n in decode(read('rootfs.squashfs', mine))[3]:
+                for n in decode(read('rootfs.squashfs', ui + rel))[3]:
                     old = was.get(n[2].get('name'))
                     if n[0] in ('list_view', 'table_view') and old and old[1] in (50, 100) and n[1] != old:
                         ends[rel] = n[1][1] + n[1][3], n[1][3], page_rows(g, page_kind.get(rel, 'text'))[0]
             # on to the window's end, a list_fit set's too: its rows past list_end fade (navigation.c list_fade)
             assert ends and {end for end, _, _ in ends.values()} == {320 - g.bar}, (g.name, ends)
         if g.status_y:  # a status row: its title's text and its battery's nub STATUS_ROW_INSET in, clear of the glass at its line's top
-            bar = {n[2].get('name'): n for n in walk(decode(read('rootfs.squashfs', ui + f'{g.name}_system_bar.bin')))}
+            bar = {n[2].get('name'): n for n in walk(decode(read('rootfs.squashfs', ui + 'system_bar.bin')))}
             inset, top = inc('STATUS_ROW_INSET'), g.status_y - STATUS_ROW_LINE // 2
             assert inset >= corner_x(top, STATUS_ROW_LINE) and bar['label_title'][1][:2] == [inset - 2, top], g.name
             assert bar['view_right'][2]['children_layout'].endswith(f'xm={inset},s={STATUS_ROW_GAP})'), g.name
@@ -1134,7 +1132,7 @@ def validate_assets(directory):
                     hex(inc('LIST_VIEW_LAYOUT_SLOT'))]:
         damaged = bytearray(stock)
         damaged[fileoff(stock, int(address, 16))] ^= 1
-        try: patch_code(damaged, payload_symbols)
+        try: patch_code(damaged, payload_symbols, GEOM)
         except ValueError: pass
         else: raise AssertionError(f'Accepted a changed instruction at {address}')
     print('Asset geometry, exclusion parity and mismatch rejection passed.')

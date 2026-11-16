@@ -13,7 +13,7 @@ static void *list_button(void *view) {
  * label. */
 void *list_row_core(void *view, const char *icon, int (*click)(void *, void *), void *ctx, int w,
                     int into) {
-    /* The Library constructor's live words (tools/ipod.py, theme_boot): lib_body and lib_inset. */
+    /* The Library constructor's words tools/ipod.py baked: lib_body and lib_inset. */
     int compact = !tk_strcmp(widget_get_prop_str(view, "name", ""), "scroll_view_localmusic");
     int h = compact ? *(const volatile unsigned short *)LIBRARY_ROW_BODY : 70;
     void *button = list_button(view);

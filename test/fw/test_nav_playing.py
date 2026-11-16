@@ -13,8 +13,7 @@ from test_nav_loop import DOWN, UP, key_event
 
 THEMES = host.tools_theme.builtins()
 OLED, = THEMES
-SETS = host.tools_theme.geometry_sets(THEMES)
-GEOM = SETS.index(host.tools_theme.geometry(OLED))  # the set theme_boot writes: OLED's own
+GEOMETRY = host.tools_theme.built_geometry(THEMES)  # the one set the build bakes: OLED's own
 THEME_OLED = 3  # the THEME key's value from the four themes there were: OLED's (navigation.c theme_boot)
 RET_REPEAT, STOP = 8, 11
 FONT_ROW = -2
@@ -327,11 +326,10 @@ class Canvas:
 
 
 def theme(fw, st, light=0, **keys):
-    """OLED on its own geometry set (theme_boot's), light or dark, with the [IPOD] keys given."""
+    """OLED, light or dark, with the [IPOD] keys given."""
     Config(fw, THEME=THEME_OLED, LIGHT=light, **keys)
     st.settings_read = 0
     fw.fn('accent', C.c_int)()
-    st.geom = GEOM
 
 
 # The status bar's battery slot (bar_sync) and what view_battery paints in it (paint_battery).
@@ -371,7 +369,7 @@ def slot_width(ui, bar):
     return ui.box(bar.slot)[2]
 
 
-ICON_W = SETS[GEOM].batt_w + NUB_W  # the slim battery: the set's body and its nub (navigation.c bar_sync)
+ICON_W = GEOMETRY.batt_w + NUB_W  # the slim battery: the set's body and its nub (navigation.c bar_sync)
 
 
 # OLED's Battery is Icon or Percent (its battery option's values): a stored Icon + Percent (2) or Percent Inside (3)
@@ -381,7 +379,7 @@ def test_the_slot_is_its_modes_ink_wide_and_the_bars_height(fw, st, ui, mode, wi
     theme(fw, st, BATTERY=mode)
     bar = Bar(fw, ui)
     bar.sync()
-    assert ui.box(bar.slot)[2:] == (width, SETS[GEOM].bar) and st.batt_mode == (mode == 1)
+    assert ui.box(bar.slot)[2:] == (width, GEOMETRY.bar) and st.batt_mode == (mode == 1)
     assert (ui.shown[bar.icon], ui.shown[bar.pct], ui.shown[bar.slot]) == (0, 0, 1)  # the slot paints it all
 
 
@@ -1946,107 +1944,15 @@ def test_a_url_queues_next_cover_is_fitted_once_it_is_in(fw, ui, mcl, st):
     assert h > w and len(big.canvas.loaded) == 3
 
 
-# The geometry sets' boot (theme_boot): tools/ipod.py bakes SET0 into stock's row immediates; another set
-# rewrites the low halfwords that differ, every page RWX first, then written, flushed and back to R-X.
-SITES = [(int(a, 16), g['value']) for g in host.tools_theme.AUDIT['immediates'] if isinstance(g['value'], str)
-         for a, _ in g['sites']]
-PAGE = 4096
-RWX, RX = 7, 5
-
-
-def set_values(g):
-    return host.tools_theme.immediate_values(SETS[g])
-
-
-@pytest.fixture
-def code():
-    """stock's code words at the boot sites, which conftest's map keeps past a test: put back after."""
-    saved = [(a, C.c_uint.from_address(a).value) for a, _ in SITES]
-    yield {a: C.c_uint.from_address(a) for a, _ in SITES}
-    for a, v in saved:
-        C.c_uint.from_address(a).value = v
-
-
-def baked(code, g, high=0x5a5a0000):
-    """Every site as the build left it for set g: its value in the low half, an instruction's high half."""
-    values = set_values(g)
-    for a, name in SITES:
-        code[a].value = high | values[name]
-
-
-def boot(fw, fail_at=None):
-    calls = []
-    def mprotect(addr, size, prot, *_):
-        calls.append(('mprotect', addr, size, prot))
-        return -1 if (addr, prot) == (fail_at, RWX) else 0
-    fw.mock('theme_mprotect', mprotect)
-    fw.mock('theme_cacheflush', lambda addr, size, cache, *_: calls.append(('flush', addr, size, cache)))
-    fw.fn('navigation__theme_boot', None)()
-    return calls
-
-
-def test_oleds_set_rewrites_the_low_halves_page_by_page(fw, st, code):
-    baked(code, 0)
-    theme(fw, st)
-    st.geom = 0
-    g = GEOM
-    values = set_values(g)
-    differ = sorted({a & ~(PAGE - 1) for a, name in SITES if values[name] != set_values(0)[name]})
-    assert len(differ) > 1  # sites to rewrite on more than one page, or page by page proves nothing
-    calls = boot(fw)
-    assert calls == [('mprotect', p, PAGE, RWX) for p in differ] + \
-        [c for p in differ for c in (('flush', p, PAGE, 3), ('mprotect', p, PAGE, RX))]
-    assert all(code[a].value == 0x5a5a0000 | values[name] for a, name in SITES)
-    assert st.geom == g
-
-
-def test_a_refused_page_puts_back_those_opened_and_writes_nothing(fw, st, code):
-    baked(code, 0)
-    theme(fw, st)
-    st.geom = 0
-    values = set_values(GEOM)
-    differ = sorted({a & ~(PAGE - 1) for a, name in SITES if values[name] != set_values(0)[name]})
-    calls = boot(fw, fail_at=differ[-1])
-    assert calls == [('mprotect', p, PAGE, RWX) for p in differ] + [('mprotect', p, PAGE, RX) for p in differ[:-1]]
-    assert all(code[a].value == 0x5a5a0000 | set_values(0)[name] for a, name in SITES)
-    assert st.geom == 0  # SET0 is what the code holds: OLED draws on it until the next boot
-
-
-def test_the_set_the_code_holds_already_makes_no_syscall(fw, st, code):
-    baked(code, GEOM)
-    theme(fw, st)
-    st.geom = 0
-    assert boot(fw) == [] and st.geom == GEOM
-
-
-def test_only_the_pages_with_a_stale_site_open(fw, st, code):
-    g = GEOM
-    baked(code, g)
-    a, name = next((a, n) for a, n in SITES if set_values(g)[n] != set_values(0)[n])
-    code[a].value = 0x5a5a0000 | set_values(0)[name]
-    theme(fw, st)
-    calls = boot(fw)
-    page = a & ~(PAGE - 1)
-    assert calls == [('mprotect', page, PAGE, RWX), ('flush', page, PAGE, 3), ('mprotect', page, PAGE, RX)]
-    assert code[a].value == 0x5a5a0000 | set_values(g)[name]
-
-
-def test_a_theme_without_a_set_option_boots_its_own(fw, st):
-    theme(fw, st)
-    T = fw.fn('theme', C.c_void_p)()
-    assert fw.fn('theme_geom', C.c_int, C.c_void_p)(T) == GEOM == SETS.index(SETS[-1]) > 0  # OLED's, not SET0
-
-
 # A unit an older build left on another theme (THEME 0 Minimal, 1 Classic, 2 Modern, or no key) takes OLED's preset
 # once at boot and keeps THEME 3 from then on (theme_boot).
 @pytest.mark.parametrize('stored, migrates', [(None, True), (0, True), (1, True), (2, True), (THEME_OLED, False)])
-def test_a_unit_on_a_retired_theme_takes_oleds_preset_once(fw, st, code, stored, migrates):
-    baked(code, GEOM)
+def test_a_unit_on_a_retired_theme_takes_oleds_preset_once(fw, st, stored, migrates):
     keys = {} if stored is None else {'THEME': stored}
     Config(fw, LIGHT=1, HOME=1, **keys)  # Light Mode on and Home Full: OLED's preset is dark and Split (theme.xml)
     st.settings_read = 0
     fw.fn('accent', C.c_int)()
-    boot(fw)
+    fw.fn('navigation__theme_boot', None)()
     writes = [(C.string_at(a[2]).decode(), C.c_int(a[0]).value) for _, a in fw.calls('write_int_config')]
     assert (('THEME', THEME_OLED) in writes) == migrates and writes.count(('THEME', THEME_OLED)) == migrates
     dark, split = (host.tools_theme.SETTINGS[k][1].index(v) for k, v in (('light', 'off'), ('home', 'split')))
@@ -2057,7 +1963,7 @@ def test_a_unit_on_a_retired_theme_takes_oleds_preset_once(fw, st, code, stored,
 # A-B markers on a bar laid out off the immediates' place (ringnav_ab_x): the same share of it.
 def test_an_ab_marker_keeps_its_share_of_a_fitted_bar(fw, ui, mcl, st):
     theme(fw, st)
-    values = set_values(GEOM)
+    values = host.tools_theme.immediate_values(GEOMETRY)
     x0, w0 = values['np_bar_x'], values['np_bar_w']
     stock = {}
     fw.mock('ab_x', lambda t, *_: stock[t])

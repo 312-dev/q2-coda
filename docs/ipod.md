@@ -369,7 +369,7 @@ from its set (below). The `navbar_only` assets set their
 Constants are `SET_*` in `patch/offsets.inc`.
 Under a geometry set (OLED's: 32-pixel rows from the top, no icons) the row height, top, row
 count and icon size come from the set (`set_row`, `set_top`, `set_rows`, `set_icon`); the payload
-reads `set_row` and `set_icon` from the set `theme_boot` wrote, hides the icon at 0 and starts the
+reads `set_row` and `set_icon` from the set the build baked (`geom_vals`), hides the icon at 0 and starts the
 text where a row without an icon starts. Streaming's own row height is the set's `stream_row`, matched
 by the view's name (`scroll_view_streamsset`) at layout time; where it differs from `set_row` its rows keep their `SET_ICON` icons, on the art rows' columns. Under OLED (`stream_row` 32, its `set_row`) the logos give way to the theme's 20 px monochrome marks (`patch/home.c` `stream_marks`, [internals: Themes](internals.md#themes)), a card app's own icon to the same 20 px box and the Subsonic app's to its own mark. A payload picker's `select` or `unselect` (Key Lock)
 is not an icon: at 0 it stays, in the column of stock's own marks, and under a `set_text` theme

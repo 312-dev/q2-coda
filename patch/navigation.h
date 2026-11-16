@@ -264,8 +264,7 @@ typedef struct {
         reduce_motion,   /* Reduce Motion, IPOD REDUCEMOTION (ui_kit.c motion_reduced) */
         clicker,         /* the Clicker's output (clicker.c), IPOD CLICKER */
         theme_booted,    /* theme_boot ran (ringnav_ui_load) */
-        raw_ink,         /* a final colour's draw: ui_ink leaves it alone */
-        geom;            /* the geometry set theme_boot wrote; 0, SET0, until then */
+        raw_ink;         /* a final colour's draw: ui_ink leaves it alone */
     int own[THEME_KEYS]; /* the theme's own keys' values (theme_keys[], tools/theme.py), read after
                             the payload's */
     unsigned keep_lit_at;
