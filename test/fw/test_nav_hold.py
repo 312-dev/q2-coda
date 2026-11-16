@@ -674,19 +674,23 @@ def test_a_song_changed_under_the_editor_is_not_moved(editor, ui):
     assert ui.toasts == ['Could not save playlist'] and editor.table.log[-1] == 'rollback'
 
 
-def test_remove_asks_then_takes_the_song_out(editor, ui):
+def ple_answer(fw, row):
+    """Remove from Playlist's confirmation card answered (feedback.c runs it once the card has closed)."""
+    fw.fn('playlists__ple_remove_answer', None, C.c_void_p, C.c_int, C.c_int)(None, row, 0)
+
+
+def test_remove_asks_on_the_card_then_takes_the_song_out(editor, ui):
     editor.pick('Two')
     editor.pick('Remove from Playlist')
-    assert editor.rows() == ['Remove from Playlist', 'Cancel'] and editor.title() == 'Remove song?: Road Trip'
-    assert ui.nodes[editor.view()].props['_ringnav_index'] == 1  # opens on Cancel: a Centre on arrival removes nothing
-    editor.pick('Remove from Playlist')
+    assert ui.went[-1] == 'dialog/sortselect_dialog' and editor.table.songs(3) == ['One', 'Two', 'Three']
+    ple_answer(editor.fw, 1)  # Remove
     assert editor.table.songs(3) == ['One', 'Three'] and editor.rows() == ['Add Songs', 'Done', 'One', 'Three']
 
 
 def test_cancel_keeps_the_song(editor):
     editor.pick('Two')
     editor.pick('Remove from Playlist')
-    editor.pick('Cancel')
+    ple_answer(editor.fw, 0)
     assert editor.table.songs(3) == ['One', 'Two', 'Three'] and editor.rows()[0] == 'Add Songs' and not editor.table.log
 
 
@@ -696,7 +700,7 @@ def test_the_last_song_removed_leaves_the_selection_on_the_list(fw, ui, recs, st
     e.open(1, None)
     e.pick('One')
     e.pick('Remove from Playlist')
-    e.pick('Remove from Playlist')
+    ple_answer(fw, 1)
     assert e.rows() == ['Add Songs', 'Done'] and e.ple.selected == 0
 
 
@@ -704,7 +708,7 @@ def test_a_remove_that_cant_be_saved_says_so(editor, ui):
     editor.table.fail = ('delete',)
     editor.pick('One')
     editor.pick('Remove from Playlist')
-    editor.pick('Remove from Playlist')
+    ple_answer(editor.fw, 1)
     assert ui.toasts == ['Could not save playlist'] and editor.table.songs(3) == ['One', 'Two', 'Three']
 
 

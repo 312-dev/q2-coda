@@ -201,6 +201,19 @@ int ple_key(unsigned key, int phase) {
     if (phase == 2) ple.key &= ~bit;
     return 1;
 }
+/* Remove from Playlist's card (docs/oled-design.md#confirmation-card): Remove is row 1; either
+ * answer goes back to the songs. */
+static void ple_remove_answer(void *ctx, int row, int toggle_on) {
+    if (!ple.page) return;
+    if (row == 1 && (unsigned)ple.selected < deque_size(ple.songs)) {
+        if (ple_mutate(ple.dest, deque_at(ple.songs, (unsigned)ple.selected), 0))
+            ple_reload();
+        else
+            toast("Could not save playlist");
+    }
+    ple.mode = 0;
+    ple_show();
+}
 static int ple_run(const void *unused);
 static int ple_back(void *ctx, void *event) {
     if (I(event, EVENT_KEY) != KEY_RETURN) return 0;
@@ -262,20 +275,24 @@ static int ple_run(const void *unused) {
         ple.mode = 1;
         ple_filter();
     } else if (mode == 2) {
-        if (action == 2)
-            ple.mode = 3;
-        else {
-            ple.mode = 0;
-            ple_move(ple.selected, action ? 1 : -1);
-        }
-    } else {
-        if (!action && (unsigned)ple.selected < deque_size(ple.songs)) {
-            if (ple_mutate(ple.dest, deque_at(ple.songs, (unsigned)ple.selected), 0))
-                ple_reload();
-            else
-                toast("Could not save playlist");
+        if (action == 2) { /* Remove from Playlist: the card asks (ple_remove_answer) */
+            static const char *const rows[] = { "Cancel", "Remove" };
+            static char name[128];
+            unsigned at = (unsigned)ple.selected;
+            if (at >= deque_size(ple.songs)) return 0;
+            track_name(name, sizeof name, deque_at(ple.songs, at));
+            confirm(&(confirm_t){ .title = "Remove \"%s\"?",
+                                  .name = name,
+                                  .body = "It stays in your library.",
+                                  .rows = rows,
+                                  .n_rows = 2,
+                                  .kind = CONFIRM_DESTRUCTIVE,
+                                  .back = -1,
+                                  .answer = ple_remove_answer });
+            return 0;
         }
         ple.mode = 0;
+        ple_move(ple.selected, action ? 1 : -1);
     }
     ple_show();
     return 0;
@@ -315,14 +332,12 @@ static void ple_show(void) {
     ple.edit = 0;
     int n = mode == 0   ? (int)deque_size(ple.songs) + 2
             : mode == 1 ? (ple.nmatch ? ple.nmatch + 1 : 2)
-            : mode == 2 ? 3
-                        : 2;
+                        : 3;
     char title[180], name[512];
     tk_snprintf(title, sizeof title, "%s: %s",
                 mode == 0   ? "Editing"
                 : mode == 1 ? "Add Songs"
-                : mode == 2 ? "Song Actions"
-                            : "Remove song?",
+                            : "Song Actions",
                 ple.name);
     /* a bar that holds captions has room for the task's name alone, and no first line for it */
     ple.view = page_list(ple.page, ple.page, 0,
@@ -348,7 +363,6 @@ static void ple_show(void) {
             const char *caption =
                 mode == 0 && i < 2 ? (i ? "Done" : "Add Songs")
                 : mode == 2        ? actions[i]
-                : mode == 3        ? (i ? "Cancel" : "Remove from Playlist")
                                    : track_name(name, sizeof name,
                                                 deque_at(ple.songs, (unsigned)(i - (mode == 0 ? 2 : 0))));
             page_row_detail(ple.view, i, caption, 0, ple_pick);
@@ -356,13 +370,7 @@ static void ple_show(void) {
     /* only the selected row's long title moves, as Songs' */
     for (int i = 0; !geom_val(V_TOOLBAR) && i < (int)widget_count_children(ple.view); ++i)
         hscroll_label_set_only_focus(widget_get_child(widget_get_child(ple.view, i), 0), 1);
-    /* Remove song? opens on Cancel, so a Centre on arrival removes nothing */
-    if (n)
-        ringnav_select(ple.view,
-                       mode == 0   ? ple.selected + 2 < n ? ple.selected + 2 : 0
-                       : mode == 3 ? 1
-                                   : 0,
-                       n);
+    if (n) ringnav_select(ple.view, mode == 0 && ple.selected + 2 < n ? ple.selected + 2 : 0, n);
 }
 static int ple_open(void *ctx, void *event) {
     if (ple.page) return 0;
