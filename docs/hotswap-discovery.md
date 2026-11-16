@@ -49,7 +49,7 @@ The hook then calls `widget_invalidate_force(window_manager(), 0)`, so every pai
 
 ### What the layout pins
 
-A swap is safe when nothing that still holds an address into changed code reaches it. Measured on a booted `--dev` build (`ptrs`, `stacks`, `uistack` in `memswap.py`; `risk.py` was the spike's one-off check):
+A swap is safe when nothing that still holds an address into changed code reaches it. Measured on a booted `--dev` build (`ptrs`, `stacks`, `uistack` and `risk` in `memswap.py`):
 
 | Holder | Count | Effect of a move |
 | --- | --- | --- |
@@ -61,6 +61,8 @@ A swap is safe when nothing that still holds an address into changed code reache
 `.rodata` follows `.text` (`patch/link.ld`), so a change in size moves it unless an object's alignment padding absorbs the change: a 4-byte growth in `ringnav_paint_bg` moved 244 functions, every one after it in `navigation.c`, and nothing past `navigation.o`, whose 16-byte alignment took the slack; `.rodata` did not move.
 
 **The unsafe case, run:** swapping a build in which 244 `navigation.c` functions moved by 4 bytes (114,169 bytes in 303 runs, among them `set_open`, `tone_worker` and `ipod_list_layout`, held as pointers, and `ringnav_dark_usleep`, `ringnav_dark_cover_usleep` and `tone_worker`, on parked threads' stacks) ended with `qemu: uncaught target signal 10 (Bus error)` within 2 s. A move of only `switch_mark`, `grip_mark`, `lift_card_paint` and `check_circle` (8 bytes, reached only by direct calls the same swap rewrote) was fine, and the toggles they draw painted.
+
+`memswap.py risk COPY OLD NEW` is that check: it said safe for the battery change (10 functions changed, none held as a pointer or on a stack) and unsafe for the build that crashed (30 moved functions held as pointers, 33 with return addresses on stacks). Its stack half scans whole stacks, dead frames too, so it refuses more than it must: with `navigation.c`'s functions moving it flags `ringnav_wm_paint` and `bar_status`, which are stale slots, not frames (see the idle point below).
 
 So **a fixed jump table is needed** for anything other than edits that keep every function in place, and it is not enough on its own: the parked threads' frames and `.rodata` pointers also pin code.
 
@@ -91,7 +93,7 @@ A size-neutral painter change, `battery_slim`'s full-charge ink `0xffffff` to `0
 | screenshot | 0.10 s |
 | **save to screen** | **3.7 s** |
 
-The battery turned green on the same page, scroll and selection kept. The same flow with a 2-byte change (an `sltiu` immediate in `ringnav_paint_bg`) wrote one run. The first demo-only build in a fresh directory took 14.4 s (ccache cold for it).
+The battery turned green on the same page, scroll and selection kept. Two more cycles on a later boot, the change and then its revert, took 3.55 s and 3.34 s (build 3.18 and 3.03 s, swap 0.21 and 0.18 s); the battery's fill read `(48, 209, 88)`, `0x30d158`, in the first screenshot and white in the second. The same flow with a 2-byte change (an `sltiu` immediate in `ringnav_paint_bg`) wrote one run. The first demo-only build in a fresh directory took 14.4 s (ccache cold for it).
 
 ## Recommended design
 

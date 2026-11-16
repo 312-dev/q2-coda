@@ -8,6 +8,9 @@
     python3 tools/ci/memswap.py inval COPY BUILD WAY        # ask the hook to drop qemu's translations (1 or 2)
     python3 tools/ci/memswap.py swap COPY OLD NEW [WAY]     # write NEW's changed payload words, then inval
     python3 tools/ci/memswap.py stacks COPY BUILD           # return addresses into the payload on each stack
+    python3 tools/ci/memswap.py ptrs COPY BUILD             # payload code and rodata addresses held in memory
+    python3 tools/ci/memswap.py uistack COPY BUILD          # the UI thread's frames at the hook
+    python3 tools/ci/memswap.py risk COPY OLD NEW           # live references a swap from OLD to NEW strands
 
 COPY is an emulator copy (~/q2-emu-pool1); BUILD a build directory holding demo and patch.elf. The pid is
 found by walking up to COPY's own bwrap (demo_pid), never by command line alone: every copy's demo has the
@@ -236,6 +239,58 @@ def main():
         ptrs(pid, mem, build)
     elif cmd == 'uistack':
         uistack(pid, mem, build)
+    elif cmd == 'risk':
+        risk(pid, mem, build, rest[0])
+
+
+def risk(pid, mem, old_build, new_build):
+    """Live references a swap from old_build to new_build would strand: words in writable guest memory equal to
+    the entry of a function that moves, and stack words that are return addresses (after a jal or jalr) inside a
+    function that moves or changes. Stacks are scanned whole, so dead frames count too."""
+    import bisect
+
+    def funcs(b):
+        out = subprocess.run(['llvm-nm', '-S', '--defined-only', str(pathlib.Path(b)/'patch.elf')], capture_output=True, text=True).stdout
+        return {f[3]: (int(f[0], 16), int(f[1], 16)) for f in (l.split() for l in out.splitlines()) if len(f) == 4 and f[2] in 'Tt'}
+    fo, fn = funcs(old_build), funcs(new_build)
+    ob = open(pathlib.Path(old_build)/'demo', 'rb').read()
+    nb = open(pathlib.Path(new_build)/'demo', 'rb').read()
+    off, va, _ = payload_segment(pathlib.Path(old_build)/'demo')
+    noff, _, _ = payload_segment(pathlib.Path(new_build)/'demo')
+    bad = {}
+    for k, (a, n) in fo.items():
+        if k not in fn:
+            bad[k] = 'gone'
+        elif fn[k][0] != a:
+            bad[k] = f'moved {fn[k][0] - a:+d}'
+        elif ob[off + a - va:off + a - va + n] != nb[noff + a - va:noff + a - va + n]:
+            bad[k] = 'changed'
+    starts = sorted((a, k) for k, (a, n) in fo.items())
+    entries = {a: k for k, (a, n) in fo.items() if k in bad and bad[k] != 'changed'}
+    ptr, ra = {}, {}
+    with Stopped(pid):
+        for line in open(f'/proc/{pid}/maps'):
+            f = line.split()
+            lo, hi = (int(x, 16) for x in f[0].split('-'))
+            if not f[1].startswith('rw') or lo - mem.base >= 0x80000000 or (len(f) >= 6 and f[5].startswith('[')):
+                continue
+            try:
+                data = mem.read(lo - mem.base, hi - lo)
+            except OSError:
+                continue
+            for (v,) in struct.iter_unpack('<I', data[:len(data) & ~3]):
+                if v in entries:
+                    ptr[entries[v]] = ptr.get(entries[v], 0) + 1
+                elif BASE + 8 <= v < SCRATCH and v % 4 == 0 and off + v - 8 - va + 4 <= len(ob):
+                    ins, = struct.unpack_from('<I', ob, off + v - 8 - va)
+                    if ins >> 26 == 3 or (ins >> 26 == 0 and ins & 0x3f == 9):
+                        j = bisect.bisect_right(starts, (v, '\xff')) - 1
+                        k = starts[j][1] if j >= 0 else None
+                        if k in bad and v < fo[k][0] + fo[k][1]:
+                            ra[k] = ra.get(k, 0) + 1
+    print(f'{len(bad)} functions changed or moved; held as pointers: {ptr or "none"}')
+    print(f'return addresses into them (dead frames too): {ra or "none"}')
+    print('swap is', 'UNSAFE' if ptr or ra else 'safe by this check')
 
 
 def uistack(pid, mem, build):
