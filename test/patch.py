@@ -199,6 +199,8 @@ class Machine:
         self.handlers[syms['strcmp@GLIBC_2.0']]='tk_strcmp'
         self.handlers[syms['memcpy@GLIBC_2.0']]='memcpy'
         self.handlers[syms['memset@GLIBC_2.0']]='memset'
+        # the UI loop's pass asks adbd's socket for a question each second (usb_ui.c auth_poll): no adbd here
+        self.handlers[syms['socket@GLIBC_2.0']]='no_socket'
         self.mock('canvas_set_global_alpha')
         self.mock('sqrtf@GLIBC_2.0','sinf@GLIBC_2.0','acosf@GLIBC_2.0',prefix='float:')
         self.mock(*VG_MOCKS,prefix='vg:')
@@ -408,6 +410,7 @@ class Machine:
             ret=0 if self.text(a) in self.scope_files else -1
             if not ret: self.scope_files[self.text(b)]=self.scope_files.pop(self.text(a))
         elif name=='unlink@GLIBC_2.0': self.scope_files.pop(self.text(a),None); ret=0
+        elif name=='no_socket': ret=-1
         elif name=='rockbox_stat':
             assert a==3
             if self.text(b) in self.scope_markers: self.word(c+20,0o100644); ret=0

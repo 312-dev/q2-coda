@@ -1113,7 +1113,7 @@ def validate_assets(directory):
             assert g.text_x >= corner_x(g.bar + 6, g.pitch - 12) and g.list_end % g.pitch == 0, g.name
             assert corner_x(g.bar + g.list_end - g.pitch + 6, g.pitch - 12) <= g.text_x < corner_x(g.bar + g.list_end + 6, g.pitch - 12), g.name
             ends = {}
-            for rel in UI_ASSETS:  # every list box the transform resizes ends at the window's end, a list_fit set's by list_end
+            for rel in UI_ASSETS:  # every list box the transform resizes ends at the window's end
                 folder, _, base = rel.rpartition('/')
                 mine = ui + (folder and folder + '/') + f'{g.name}_{base}'
                 if 'squashfs-root/' + mine not in built or rel in NAVBAR_ONLY: continue
@@ -1122,10 +1122,8 @@ def validate_assets(directory):
                     old = was.get(n[2].get('name'))
                     if n[0] in ('list_view', 'table_view') and old and old[1] in (50, 100) and n[1] != old:
                         ends[rel] = n[1][1] + n[1][3], n[1][3], page_rows(g, page_kind.get(rel, 'text'))[0]
-            if g.list_fit:  # a list_fit set's: whole rows of the page's pitch, the last ending by list_end
-                assert ends and all(h % pitch == 0 and end <= g.list_end < end + pitch for end, h, pitch in ends.values()), (g.name, ends)
-            else:
-                assert ends and {end for end, _, _ in ends.values()} == {320 - g.bar}, (g.name, ends)
+            # on to the window's end, a list_fit set's too: its rows past list_end fade (navigation.c list_fade)
+            assert ends and {end for end, _, _ in ends.values()} == {320 - g.bar}, (g.name, ends)
         if g.status_y:  # a status row: its title's text and its battery's nub STATUS_ROW_INSET in, clear of the glass at its line's top
             bar = {n[2].get('name'): n for n in walk(decode(read('rootfs.squashfs', ui + f'{g.name}_system_bar.bin')))}
             inset, top = inc('STATUS_ROW_INSET'), g.status_y - STATUS_ROW_LINE // 2

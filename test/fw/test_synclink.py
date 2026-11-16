@@ -1,13 +1,9 @@
 """SyncLink off by default (patch/synclink.c, docs/internals.md#synclink): config_init's hook turns a SyncLink left on
-by older firmware off once, and the Wireless page's SyncLink row has a caption saying what it allows."""
+by older firmware off once; its page is no longer reached from Settings."""
 import ctypes as C
 
 import pytest
-from test_nav_display_library import (  # noqa: F401 (fixtures)
-    OLED, STOCK_BODY, SettingsList, Ui, geometry, scratch, st, stand_in)
 from test_usb_charge import Charging
-
-HINT = 'Lets nearby phones control this Q2 without a password'
 
 
 class Boot(Charging):
@@ -49,43 +45,3 @@ def test_synclink_turned_on_on_this_firmware_stays_on(fw, on):
     q.config()
     q.config()
     assert q.synclink.value == on and q.saved == []
-
-
-def wireless(fw, st, geometry, stand_in):
-    """Stock's Wireless list as systemset_wifiset_page_init builds it: Wi-Fi, Bluetooth and SyncLink rows."""
-    ui = Ui(fw)
-    lst = SettingsList(fw, ui, st, geometry, stand_in, geom='GEOM_OLED', theme=b'%d' % OLED, window='wifiset_page',
-                       view='scroll_view_wifiset')
-    lst.list.name = 'list_view_wifiset'
-    rows = [lst.row(('hscroll_label', (72, 0, 260, STOCK_BODY), 'label')) for _ in range(3)]
-    return lst, rows
-
-
-def test_the_synclink_row_has_a_caption_under_it(fw, st, geometry, stand_in):
-    lst, rows = wireless(fw, st, geometry, stand_in)
-    lst()
-    items = lst.view.children
-    assert items[:3] == rows and len(items) == 4
-    hint = items[3]
-    (label,) = hint.children
-    assert label.text == HINT and label.kind == 'label'
-    # wrapped at words on the rows' text column, in Text Tertiary, and the wheel passes it
-    assert label.props['line_wrap'] == 1 and label.props['word_wrap'] == 1
-    assert label.box[0] == rows[2].children[0].children[0].box[0] + 2  # hscroll_label's text starts 2 px in
-    assert label.props['_final'] & 0xffffff == 0x858585
-    assert hint.props['style'] == 's_listitem_black'
-    assert any(w == hint.addr and not on for w, on in (c[1][:2] for c in fw.calls('widget_set_enable')))
-
-
-def test_the_caption_is_made_once(fw, st, geometry, stand_in):
-    lst, rows = wireless(fw, st, geometry, stand_in)
-    lst()
-    lst()
-    assert len(lst.view.children) == 4
-
-
-def test_other_settings_lists_get_no_caption(fw, st, geometry, stand_in):
-    lst, rows = wireless(fw, st, geometry, stand_in)
-    lst.list.name = 'list_view_netservice'
-    lst()
-    assert lst.view.children == rows
