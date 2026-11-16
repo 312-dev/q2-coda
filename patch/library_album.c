@@ -4,7 +4,7 @@
  * Album, Go to Album), keep their window, their list of tracks (song_rows.c draws them: number,
  * title, length), the rows' clicks, Return and the hold menu; dressed as their UI loads
  * (navigation.c ringnav_ui_load), the list moves under artist_page.c's header (the album's cover,
- * its name, its artist and "2015 · 18 songs · 1 hr 12 min") and its pair, Play and Shuffle, which
+ * its name, its artist and "2015 · 18 songs · 1h12m") and its pair, Play and Shuffle, which
  * take the Shuffle row's place. The page opens on Play, as an artist's on Shuffle.
  * The header's lines are read from the page's songs (p_deque_showlist, which stock fills as the
  * page opens) at its first paint with the page on top, and again when their count changes: the
@@ -91,11 +91,11 @@ static void lb_fill(void) {
     }
     int year = lb_year(r), min = (int)(sec + 30) / 60, k = 0;
     part[0] = 0;
-    if (sec) /* q2-subsonic's span, as the app's album page says it */
+    if (sec) /* q2-subsonic's span in the house time style (docs/oled-design.md#type) */
         tk_snprintf(part, sizeof part,
                     min < 60        ? " · %d min"
-                    : min % 60 == 0 ? " · %d hr"
-                                    : " · %d hr %d min",
+                    : min % 60 == 0 ? " · %dh"
+                                    : " · %dh%dm",
                     min < 60 ? (min ? min : 1) : min / 60, min % 60);
     if (year) k = tk_snprintf(meta, sizeof meta, "%d · ", year);
     if (n == 1)

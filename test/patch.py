@@ -16033,7 +16033,7 @@ m.byte(syms['g_carmode_state'],1)
 assert click(4)==[(1,'SYSSET','CARMODE')] and m.u.mem_read(syms['g_carmode'],1)==b'\1' and m.u.mem_read(syms['g_carmode_state'],1)==b'\0' and switch_image(m,rows[4])=='switch_on'
 assert click(4)==[(0,'SYSSET','CARMODE')] and m.u.mem_read(syms['g_carmode'],1)==b'\0' and switch_image(m,rows[4])=='switch_off'; passed()
 # Standby limit (its alarm with the power poll's tests): each click steps to the next limit, then Off.
-limits=[f"Standby Limit: {O[f'STANDBY_LIMIT_{i}']} h" for i in (1,2,3)]
+limits=[f"Standby Limit: {O[f'STANDBY_LIMIT_{i}']}h" for i in (1,2,3)]
 for v,want in ((1,limits[0]),(2,limits[1]),(3,limits[2]),(0,'Standby Limit: Off')):
     assert click(0)==[(v,'Q2POD','STANDBYLIMIT')] and texts()[0]==want
 passed()
@@ -16695,7 +16695,7 @@ for _ in range(6):
 assert [v for v,_ in saved]==['Música ñ','Unknown','Zeta','','alpha','B'*200]
 assert [t for _,t in saved]==['Folder Root: '+(v or 'Card') for v,_ in saved]; passed()
 # Crossfade (crossfade.c): the row shows the saved length while on; an unreadable one is the default.
-for config,text in (({'XFADE':'1','XFADESEC':'7'},'Crossfade: 7 s'),({'XFADE':'1','XFADESEC':'15'},'Crossfade: 15 s'),({'XFADE':'1','XFADESEC':'16'},'Crossfade: 5 s'),({'XFADESEC':'7'},'Crossfade: Off')):
+for config,text in (({'XFADE':'1','XFADESEC':'7'},'Crossfade: 7s'),({'XFADE':'1','XFADESEC':'15'},'Crossfade: 15s'),({'XFADE':'1','XFADESEC':'16'},'Crossfade: 5s'),({'XFADESEC':'7'},'Crossfade: Off')):
     m,rows,texts,*_=settings_page('audioset','scroll_view_playset',config,stock_rows=13)
     assert texts()[0]==text and m.nodes[m.nodes[m.nodes[rows[0]]['children'][0]]['children'][1]].get('name')=='label_xfade'
 passed()
@@ -16786,9 +16786,9 @@ m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_ro
 m.stack=[m.top]; m.nodes[m.wm]=dict(type='window_manager',name='',children=m.stack,visible=1)
 assert click(0)==[] and m.nodes[m.title]['text']=='Crossfade' and m.nodes[m.vol]['text']=='Off'
 X=lambda on,sec: [(on,'Q2POD','XFADE'),(sec,'Q2POD','XFADESEC')]
-m.nodes[m.slider]['value']=7; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and m.nodes[m.vol]['text']=='7 s'
+m.nodes[m.slider]['value']=7; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and m.nodes[m.vol]['text']=='7s'
 m.nodes[m.slider]['value']=9; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and press(m.slider,O['EVT_VALUE_CHANGED'])==X(1,9)
-assert texts()[0]=='Crossfade: 9 s' and press(m.switch)==X(0,9) and m.nodes[m.vol]['text']=='Off'
+assert texts()[0]=='Crossfade: 9s' and press(m.switch)==X(0,9) and m.nodes[m.vol]['text']=='Off'
 assert press(m.add)==X(1,1) and turn()==X(1,2)  # up from Off is XF_MIN, 1 s
 m.nodes[m.slider]['value']=0; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and m.nodes[m.vol]['text']=='Off'
 assert press(m.dec)==X(0,2)  # a drag whose release sent nothing: the next step saves it, unchanged or not

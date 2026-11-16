@@ -117,8 +117,9 @@ Rules:
 - **Sentence case** for everything the theme writes (status, captions, values). Menu items and
   page names stay as the firmware names them, which is Title Case ("Sound Check"). Never all
   capitals.
-- **A number, a space, its unit:** "15 s", "1 min", "4000 K"; a percentage takes no space
-  ("50%").
+- **A number, a space, its unit:** "4000 K"; a percentage takes no space ("50%").
+- **Single-letter time units attach:** 3h, 30s, 1h20m. "min" and spelled-out words keep the
+  space: 15 min, 30 seconds.
 - **Size steps are 15, 16, 18, 20, 22** (56 for the confirmation's glyph, 17 for the [tabs](#tabs)' labels, 13 for [Edit Library](#edit-library)'s hint). Nothing else.
 - **Row pitch is about 1.6 times the row size** (32 px for 20 px type), as the concept's is
   about twice its cap height.
@@ -582,7 +583,7 @@ header and pair (`patch/artist_page.c`).
   server library's cover for a server album, else Cover Flow's cached one, else a `#2C2C2E`
   placeholder); its top stands over the status row's bottom 6 px, as the artist's disc does. Beside it
   from x 102 the album in Inter Medium 20 (ellipsis), its artist in Inter Regular 15 Text Secondary,
-  and "2015 · 18 songs · 1 hr 12 min" in Inter Regular 13 Text Tertiary, a part left out when unknown.
+  and "2015 · 18 songs · 1h12m" in Inter Regular 13 Text Tertiary, a part left out when unknown.
 - **Action pair** at y 128: **Play** (Phosphor `play`) and **Shuffle**, as the artist page's pair. The
   page opens on Play, as the artist page opens on Shuffle; the wheel steps Play, Shuffle, then the
   tracks, and back. Play plays the album from its first track, Shuffle shuffles it.
