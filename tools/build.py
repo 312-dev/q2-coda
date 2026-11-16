@@ -415,6 +415,19 @@ WHEEL_LOG_HOOK = (b'        rb=/mnt/mmc/.rockbox\n',
                   b'        rb=/mnt/mmc/.rockbox\n')
 # The byte in bluealsa's AAC capability holding the 44.1 kHz bit; see docs/internals.md.
 BLUEALSA = 'usr/bin/bluealsa'
+# Stock's bluetoothd (BlueZ 5.66 with Shanling's changes, docs/bluetoothd.md) answers the control channel's
+# GetElementAttributes from a registered BlueZ player it never has, so headsets and cars got empty song
+# information: tools/bt_meta.c, mapped at BT_META, answers it from libbtctl's g_track_meta instead
+# (docs/internals.md#track-metadata). BT_META_SLOT is GetElementAttributes's entry in its control handler
+# table (PDU 0x20, STATUS, then the handler), carrying an R_MIPS_REL32 the loader adds the load address to,
+# as bluetoothd is position independent; BT_META_GOT the GOT slots ($gp offsets) bt_meta.c reads.
+BLUETOOTHD = 'usr/bin/bluetoothd'
+BLUETOOTHD_SHA = '6e6d45d66f958a028a523786ae661110b1853bf49b8a50946dd70a0518b4f357'
+BT_META = 0x150000
+BT_META_SLOT = (0x12f698, 0x00000120, 0x00039454)  # (address, stock PDU and type word, stock handler)
+BT_META_GOT = {'TRACK_META': ('g_track_meta', -28700), 'NOTIFY_MUTEX': ('g_notify_mutex', -28244),
+               'LOCK': ('pthread_mutex_lock', -28204), 'UNLOCK': ('pthread_mutex_unlock', -27872)}
+BT_META_ROOM = 502  # an AVRCP PDU's parameters in one AVC frame (BlueZ's AVRCP_PDU_MTU)
 # Its launcher: keep the A2DP transport open 5 s after hciplayer closes the PCM (a stop, a skip, a cold start), so
 # a track change doesn't restart the stream (true-wireless buds started one ear first).
 BLUEALSA2 = 'usr/bin/bluealsa2'
@@ -2129,6 +2142,35 @@ def bt_silence():
         run('llvm-objcopy', '-O', 'binary', '-j', '.text', d/'s.elf', d/'s.bin')
         return (d/'s.bin').read_bytes(), symbols(d/'s.elf')
 
+def bt_meta():
+    """tools/bt_meta.c linked at BT_META: its bytes. Position independent by construction (bt_meta.c), so
+    the object may carry no relocation but its branches' own."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        d = pathlib.Path(d)
+        run('clang', '--target=mipsel-linux-gnu', '-march=mips32r2', '-mabicalls', '-fpic', '-Os', '-ffreestanding',
+            '-fno-builtin', '-fno-jump-tables', '-Wall', '-Wextra', '-Werror', f'-DBT_META_ROOM={BT_META_ROOM}',
+            *(f'-DBT_META_GOT_{k}={o}' for k, (_, o) in BT_META_GOT.items()), '-c', ROOT/'tools/bt_meta.c', '-o', d/'m.o')
+        relocs = run('readelf', '-rW', d/'m.o')
+        check(not re.search(r'R_MIPS_(?!PC16)\w+', relocs.split('.rel.pdr')[0]), 'bt_meta.c needs a relocation')
+        check(not re.search(r'\.(rodata|data|bss)\S*\s+PROGBITS\s+\S+\s+\S+\s+0*[1-9a-f]', run('readelf', '-SW', d/'m.o')),
+              'bt_meta.c has data')
+        run('ld.lld', '-m', 'elf32ltsmip', f'-Ttext={BT_META:#x}', '-e', 'bt_meta_get_element_attributes', d/'m.o', '-o', d/'m.elf')
+        run('llvm-objcopy', '-O', 'binary', '-j', '.text', d/'m.elf', d/'m.bin')
+        return (d/'m.bin').read_bytes(), symbols(d/'m.elf')
+
+def patch_bluetoothd(raw):  # pragma: no mutate block
+    """Point stock bluetoothd's control-channel GetElementAttributes at tools/bt_meta.c."""
+    check(sha(raw) == BLUETOOTHD_SHA, 'Unexpected bluetoothd')
+    image = bytearray(raw)
+    code, sym = bt_meta()
+    append_payload(image, code, BT_META, len(code), 'bluetoothd')
+    struct.pack_into('<I', image, segments(image)[-1][0] + 24, 5)  # code: read and execute only
+    site, pdu, handler = BT_META_SLOT
+    check(struct.unpack_from('<2I', raw, fileoff(raw, site)) == (pdu, handler), 'Unexpected bluetoothd handler table')
+    struct.pack_into('<I', image, fileoff(raw, site + 4), sym['bt_meta_get_element_attributes'])
+    return bytes(image)
+
 def patch_bluealsa(raw):
     """Offer AAC at 48 kHz only. A headset that opens the stream itself (AirPods out of the case)
     picks 44.1 kHz, and bluealsa, still fed 48 kHz, drops about 8% of the AAC frames."""
@@ -2348,6 +2390,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     audio = patch_player(raw_player, out/'peq', flac_experiments)
     bluealsa = patch_bluealsa(cat(BLUEALSA))
     (out/'bluealsa').write_bytes(bluealsa)
+    bluetoothd = patch_bluetoothd(cat(BLUETOOTHD))
+    (out/'bluetoothd').write_bytes(bluetoothd)
     (out/'watchdog').write_bytes(cat(WATCHDOG).replace(*WATCHDOG_SLEEP))
     shadow = lock_root(cat(SHADOW))
     check(not password_logins(shadow), 'A password still logs in')
@@ -2637,7 +2681,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
              b' '.join(hci.groups()) + b' cat ' + shlex.quote(str(stock_xz)).encode() + b'\n')
         player_added = [[PLAYER_STOCK_DIR, b'D', *stock_dir.groups()], [PLAYER_STOCK_DIR + b'/hciplayer.xz', b'R', *hci.groups()]]
     for path, src in ((b'release/bin/demo', out/'demo'), (b'usr/bin/hciplayer', q2player or out/'peq/hciplayer'),
-                      (BLUEALSA.encode(), out/'bluealsa'), (WATCHDOG.encode(), out/'watchdog'),
+                      (BLUEALSA.encode(), out/'bluealsa'), (BLUETOOTHD.encode(), out/'bluetoothd'), (WATCHDOG.encode(), out/'watchdog'),
                       (S90PLAY.encode(), out/'S90play'), (S11LOGO.encode(), out/'S11logo'),
                       (BLUEALSA2.encode(), out/'bluealsa2'), (DEFAULT_CONFIG.encode(), out/'config.ini'),
                       (LOGO.encode(), logo)):
@@ -2818,7 +2862,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         **({'aic_notifier': aic_notifier} if aic_notifier else {}),
         patch_bytes=len(payload), ring_step_pixels=RING_STEP,
         audio_extension_calls=[dict(address=hex(a), original='0x0320f809', replacement=hex(jal(ps['ringnav_audio_extension']))) for a in AUDIO_EXTENSION_CALLS],
-        version=version, dev=dev, update_repo=repo, signing_key=key.hex(), peq=audio, bluealsa_sha256=sha(bluealsa), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
+        version=version, dev=dev, update_repo=repo, signing_key=key.hex(), peq=audio, bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
         **({'rotator_clock': rotator} if rotator else {}),
         **({'adbd': adbd_record(out)} if dev else {}),
         **({'q2player_sha256': sha(q2player.read_bytes()), 'rootfs_bytes': size} if q2player else {}),
