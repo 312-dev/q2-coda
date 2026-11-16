@@ -4330,9 +4330,10 @@ class BtInitMachine(Machine):
         super().hook(u,addr,size,_)
 for result in (0,-7):
     bt_init=BtInitMachine(); bt_init.result=result; thread=bt_init.alloc(4)
+    bt_init.mock('system@GLIBC_2.0')  # bt_name.c's Alias at Bluetooth on (dbus-send), between the callbacks
     assert bt_init.call(address=payload_syms['headset_bt_init'],args=(thread,0,0,0),gap=0)==result
     assert bt_init.calls[0][0]=='initBluetoothParam'
-    assert [c[:3] for c in bt_init.calls[1:]]==[
+    assert [c[:3] for c in bt_init.calls[1:] if c[0].startswith('btctl')]==[
         ('btctl_set_prompt_callback',0x4f9d20,0),
         ('btctl_device_status_callback',payload_syms['headset_bt_status'],0),
         ('btctl_set_a2dp_callback',syms['btrecvA2dpFunc'],0x01020304),
@@ -4349,6 +4350,7 @@ class BtLinkMachine(Machine):
         super().__init__(); self.links=[list(x) for x in links]; self.paired=paired
         self.u.mem_write(0xa4c0d8,saved.encode()+b'\0')  # BTLINKMAC
         self.word(syms['bt_connectstatus'],connecting); self.handlers[0x4fc180]='device_status'
+        self.mock('system@GLIBC_2.0')  # bt_name.c's Alias as Bluetooth comes on (dbus-send)
     def hook(self,u,addr,size,_):
         name=self.handlers.get(addr)
         if name not in ('getBtLinkStatus','getBtLinkSize','getBtLinkItem','addBtLinkItem','updateBtLinkStatus','checkPairDev','device_status'):
@@ -4367,7 +4369,7 @@ class BtLinkMachine(Machine):
         self.returns(ret,clobber=True)
 a_mac,b_mac='AA:AA:AA:AA:AA:AA','BB:BB:BB:BB:BB:BB'
 link=BtLinkMachine([]); link.call(address=payload_syms['headset_status_register'],args=(0,0,0,0),gap=0)
-assert [c[:3] for c in link.calls]==[('btctl_device_status_callback',payload_syms['headset_bt_status'],0)]
+assert [c[:3] for c in link.calls if c[0].startswith('btctl')]==[('btctl_device_status_callback',payload_syms['headset_bt_status'],0)]
 link=BtLinkMachine([(a_mac,5)])  # 5 while the thread's Connect runs
 link.call(address=payload_syms['headset_bt_status'],args=(3,link.string(b_mac),0,0),gap=0)
 assert link.links==[[a_mac,4],[b_mac,3]] and 'device_status' not in [c[0] for c in link.calls]; passed()
@@ -4868,13 +4870,33 @@ assert m.call(address=HOOKS['load_localclass_list'][0],args=(0xf004,0,0,0),gap=0
 m.word(m.row(0)+O['REC_ID'],-1); m.run(1)
 assert m.read==[1,2],m.read; passed()
 # The empty state's titles shown (feedback.c empty_state: its view's _es_title), in the order made.
-def empty_titles(m): return [n.get('_es_title') for w,n in m.nodes.items() if n.get('name')=='_empty_state' and n.get('visible',1) and (not hasattr(m,'alive') or m.alive(w))]
+def empty_titles(m): return [n.get('_es_title') for w,n in m.nodes.items() if n.get('name')=='_empty_state' and n.get('visible',1) and (not callable(getattr(m,'alive',None)) or m.alive(w))]  # SpotMachine's alive is its socket's flag
 # An empty class list: its page, once the window manager marks it opened (stage 3, after the open
 # animation), is force-closed from the next loop pass, then the empty state's page (navigation.c empty_class,
 # feedback.c empty_open) says so. Until then it is polled (EMPTY_POLL_MS) until it opens or stops being on top, then
 # the empty state's page alone; a page already left, or another class's, keeps that page only.
+class EmptyClassMachine(ClassMachine):
+    """A class list whose empty state opens a page of its own (feedback.c empty_open): window_create and the widget
+    factories make nodes, as CoverflowMachine's do."""
+    MAKE=('window_create','widget_factory_create_widget','list_view_create','scroll_view_create')
+    def __init__(self,**kw):
+        super().__init__(**kw)
+        for n in self.MAKE: self.handlers[syms[n]]='c:'+n
+    def hook(self,u,address,size,unused):
+        name=self.handlers.get(address,'')[2:]
+        if name not in self.MAKE: return super().hook(u,address,size,unused)
+        a,b,c,d=[u.reg_read(r) for r in REGS]; sp=u.reg_read(UC_MIPS_REG_SP); self.calls.append((name,a,b,c))
+        kind,parent,h={'window_create':('window',0,0),'widget_factory_create_widget':(self.text(b),c,self.get(sp+24))}.get(
+            name,(name.removesuffix('_create'),a,self.get(sp+16)))
+        ret=self.node(kind)
+        if kind=='window': self.top=ret; self.stack.append(ret)
+        else: self.nodes[parent]['children'].append(ret); self.word(ret+O['W_PARENT'],parent); self.word(ret+O['W_H'],h)
+        if name=='widget_factory_create_widget':  # x in a3; y, w on the stack
+            for off,v in (('W_X',d),('W_Y',self.get(sp+16)),('W_W',self.get(sp+20))): self.word(ret+O[off],v)
+        if kind=='list_view': self.word(ret+O['W_W'],d)
+        self.returns(ret,clobber=True)
 def empty(cls,page,stage=O['WINDOW_STAGE_OPENED'],leave=False,shown=None):
-    m=ClassMachine(page=page,cls=cls,rows=0); m.found=[]; m.query=None
+    m=EmptyClassMachine(page=page,cls=cls,rows=0); m.found=[]; m.query=None
     assert m.call(address=HOOKS['load_localclass_list'][0],args=(cls,0,0,0),gap=0)==0 and len(m.timers)==1
     m.nodes[m.top]['stage']=stage
     if shown is not None: m.word(syms['g_class_type'],shown)
@@ -4883,7 +4905,7 @@ def empty(cls,page,stage=O['WINDOW_STAGE_OPENED'],leave=False,shown=None):
     return m
 closes=lambda m: [c[:3] for c in m.calls if c[0]=='window_manager_close_window_force']
 for cls,page in ((0xf003,'album_page'),(0xf003,'localclass_page'),(0xf004,'localclass_page'),(0xf005,'localclass_page'),(0xf006,'localclass_page')):
-    m=empty(cls,page); top=m.stack[-1]
+    m=empty(cls,page); top=next(w for w in m.stack if m.nodes[w]['name']==page)  # the class page, under the empty state's
     assert closes(m)==[('window_manager_close_window_force',m.wm,top)]
     assert not m.toasts and empty_titles(m)==[{0xf003:'No Albums',0xf004:'No Artists',0xf005:'No Composers',0xf006:'No Genres'}[cls]] and not m.timers
     passed()
@@ -4898,6 +4920,7 @@ assert not closes(m) and empty_titles(m) and not m.timers; passed()  # left befo
 m=empty(0xf003,'album_page',leave=True)
 assert not closes(m) and empty_titles(m) and not m.timers; passed()
 m=empty(0xf004,'localclass_page',shown=0xf006)  # Genres' page on top by now: not Artists' to close
+print('DBGA',empty_titles(m),closes(m),flush=True)
 assert not closes(m) and empty_titles(m)==['No Artists']; passed()
 # Library -> Songs reads straight into the showlist: stock's load holds its copy and the staging deque
 # together, the library twice. The staging pointer comes back, its deque cleared as stock leaves it.
@@ -5047,9 +5070,10 @@ for cls in (0xf00a,0xf008,0xf007):
     assert m.text(m.get(m.row(0)+O['REC_TITLE']))=='Song' and m.text(t)=='Row 1', hex(cls)
 passed()
 # An empty category list says so once its page is up, instead of a black page.
-m=ClassMachine(page='localclass_page',cls=0xf001,rows=0)
+m=EmptyClassMachine(page='localclass_page',cls=0xf001,rows=0)
 assert m.call(address=HOOKS['load_localclass_list'][0],args=(0xf006,0,0,0),gap=0)==0 and not empty_titles(m)
-m.advance(0); assert empty_titles(m)==['No Genres'] and not m.toasts; passed()
+m.advance(0); print('DBGG',empty_titles(m),m.toasts,flush=True)
+assert empty_titles(m)==['No Genres'] and not m.toasts; passed()
 # Albums: each stock row (a name) becomes that name's albums, told apart by album artist, else folder.
 m=ClassMachine(page='localclass_page',cls=0xf001,rows=2); m.word(m.row(1)+O['REC_ALBUM'],m.string('Other'))
 m.split=[m.song('Baroness'),m.song('STP')]; m.word(m.split[1]+O['REC_PATH'],m.string('/q/STP'))
@@ -18236,6 +18260,7 @@ SW_CHECKING,SW_OK,SW_LATEST,SW_NONE,SW_NOCARD,SW_LOW,SW_BAD,SW_FULL=range(8)
 class SwMachine(CoverflowMachine):
     def __init__(self,code=1,quit=0):
         super().__init__(); oled_set(self); self.code,self.quit,self.idles=code,quit,[]
+        self.handlers.pop(HOOKS['fwupdate_tf'][0],None)  # FUNCTIONS' stand-in: run the hooked entry (sw_update.c)
         for n in ('check_updatefw_exist','navigator_to','idle_add'): self.handlers[syms[n]]='sw:'+n
         self.word(syms['g_power_capacity'],12)
     def hook(self,u,address,size,unused):
@@ -18258,7 +18283,6 @@ for code,result,words,glyph in ((-15,SW_LOW,['Charge to Update','Needs 16% or a 
                                 (-12,SW_FULL,['Not Enough Space','Free 100 MB on the SD card'],'bad'),
                                 (-3,SW_BAD,["Update Can't Be Used",'The file is damaged or not for the Q2'],'bad')):
     m=sw_open(code); page=m.top
-    print('DBG',code,[c[0] for c in m.calls][:40],flush=True)
     assert m.nodes[page]['name']=='swupdate_page' and m.sw('result')==result and not m.threads and not m.timers,code
     texts,images=m.said(page); assert texts==words and images==[glyph],(code,texts,images)
     assert len(m.rounded)==1 and m.rounded[0]['rect']==(375//2-46,40+(320-40-158)//2-signed(m.get(page+O['W_Y'])),92,92),m.rounded
@@ -18277,10 +18301,10 @@ for state,want in ((SW_OK,'swconfirm_page'),(SW_LATEST,'swupdate_page'),(SW_BAD,
     if state!=SW_OK: assert m.top==page and m.sw('result')==state and not m.timers; passed(); continue
     confirm=m.top; assert not m.alive(page) and not m.timers  # Install Update? on top and still: the check's page closed under it
     view=m.find('scroll_view',confirm); assert m.selected(view)==0  # Cancel
-    rows=[k for k in m.nodes if m.nodes[k]['type']=='list_item' and m.alive(k)]
+    rows=m.nodes[view]['children']  # page_row_detail's list_items
     assert [m.nodes[m.nodes[r]['children'][0]].get('text') for r in rows]==['Cancel','Install and Restart']
-    texts,_=m.said(confirm)
-    assert texts[:2]==['Q2 Pod 1.8.3 \u00b7 V1830',f'Installed: {manifest["version"]} \u00b7 0.0 MB on the SD card'] and texts[2].startswith('Takes about 2 minutes'),texts
+    texts,_=m.said(confirm)  # this machine's fixed-pitch font cuts the longer lines with an ellipsis
+    assert texts[0]=='Q2 Pod 1.8.3 \u00b7 V1830' and texts[1].startswith(f'Installed: {manifest["version"]} \u00b7 0.0 MB') and texts[2].startswith('Takes about 2 minutes'),texts
     f,ctx=m.handler(rows[1],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
     assert len(m.idles)==1 and not m.alive(confirm); passed()
 # After the click, stock's dialog; its answer (no file 9, up to date 13, damaged 18) is a page, a success never comes back.
