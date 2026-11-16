@@ -1,14 +1,10 @@
 > **q2-coda** is a fork of [Q2 Pod](https://github.com/DiamondBond/q2-pod) by DiamondBond, maintained by
-> 312.dev LLC. It follows upstream and adds an OLED theme in progress ([design standard](docs/oled-design.md)),
+> 312.dev LLC. It follows upstream and replaces its themes with one, OLED ([design standard](docs/oled-design.md)),
 > developer documentation ([architecture](docs/architecture.md), [source map](docs/source-map.md)) and a local
 > [security scan](docs/building.md#security-scan). The rest of this README is upstream's, and its download links
 > point at upstream's releases. Not affiliated with Shanling or Apple.
 
 <h1 align="center">Q2 Pod</h1>
-
-<p align="center">
-  <img src="assets/screenshots/screens.svg" alt="Home, the menu beside the playing album's cover, and Now Playing, the cover beside the title, artist and album over the progress bar: the Minimal theme fading to Classic and back" width="86%">
-</p>
 
 <p align="center">
   <a href="https://github.com/DiamondBond/q2-pod/releases/latest"><img alt="Download the latest release" src="https://img.shields.io/badge/download-2F6FDE?style=flat-square" height="26"></a>
@@ -25,15 +21,15 @@
 <table>
   <tr valign="top">
     <td width="200"><b>Interface</b></td>
-    <td>Home in a Split, Full or Carousel layout. Menus, Now Playing (regular or Centred), Cover Flow you can swipe, and Games. Quick Settings with a swipe down from the top of the screen.</td>
+    <td>Home in a Split, Full or Carousel layout. Menus, Now Playing, Cover Flow you can swipe, and Games. Quick Settings with a swipe down from the top of the screen.</td>
   </tr>
   <tr valign="top">
     <td><b>Display</b></td>
-    <td>Minimal, Modern and Classic themes (and OLED, a placeholder that looks as Classic does until its own design lands), accent colours, Light Mode with an Auto schedule, Rounded Corners, Night Shift for the evening, and Smart Awake.</td>
+    <td>The OLED theme: white type on black, one blue accent. Light Mode with an Auto schedule, Night Shift for the evening, and Smart Awake.</td>
   </tr>
   <tr valign="top">
     <td><b>Wheel</b></td>
-    <td>Smooth scrolling that speeds up as you spin, with adjustable sensitivity. Menus remember your place. Hold Return for Now Playing or Home, and Single Press Scrub.</td>
+    <td>Smooth scrolling that speeds up as you spin, with adjustable sensitivity. Menus remember your place. Hold Return for Now Playing or Home, and a single press of Centre to scrub.</td>
   </tr>
   <tr valign="top">
     <td><b>Library</b></td>
@@ -237,7 +233,7 @@ Copy your music to the card over USB-C, then run **Library → Update Local Musi
 <details>
 <summary><h2>License</h2></summary>
 
-Q2 Pod's code, tools, tests, documentation and artwork are under the [GNU General Public License, version 3](LICENSE) (GPL-3.0-only). The kernel-side files in `tools/` (`pwm_clock.c`, `pwm_clock.h`, `mcu_pwm_clock.c`, `aic_idle_wait.c`) are GPL-2.0-or-later, so they stay compatible with the kernel they build against. The fonts in `assets/fonts` keep their own licences: Liberation Sans (OFL, shipped cut down, with a ▶ added, and renamed Q2 Pod Sans), TeX Gyre Heros (GUST Font License, shipped cut down, with a ▶ added, and renamed Q2 Pod Classic Light, see `assets/fonts/README-classic-light.txt`) and Inter (OFL, shipped cut down, with a ▶ added, its digits and colon set to its tabular figures, and renamed Q2 Pod OLED). The Shanling firmware included in release images remains Shanling's. Q2 Pod is an independent project and is not affiliated with Shanling.
+Q2 Pod's code, tools, tests, documentation and artwork are under the [GNU General Public License, version 3](LICENSE) (GPL-3.0-only). The kernel-side files in `tools/` (`pwm_clock.c`, `pwm_clock.h`, `mcu_pwm_clock.c`, `aic_idle_wait.c`) are GPL-2.0-or-later, so they stay compatible with the kernel they build against. The font in `assets/fonts` keeps its own licence: Inter (OFL, shipped cut down, with a ▶ added, its digits and colon set to its tabular figures, and renamed Q2 Pod OLED). The Shanling firmware included in release images remains Shanling's. Q2 Pod is an independent project and is not affiliated with Shanling.
 
 </details>
 

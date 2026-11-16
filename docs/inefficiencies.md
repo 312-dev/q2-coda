@@ -29,7 +29,7 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 | 17  | A whole-library read holds a second copy of the library                        | runtime   | L      | deferred   |
 | 18  | Every painted widget passes through about 25 painters                          | runtime   | M      | measured   |
 | 19  | Nothing that needs a build runs in CI                                          | test gap  | L      | deferred   |
-| 20  | `classic_light_*` art and the Classic face are named in C                      | fragile   | M      | deferred   |
+| 20  | `classic_light_*` art and the Classic face are named in C (resolved)           | fragile   | M      | resolved   |
 | 21  | Tests unpack the themes by count (resolved)                                    | fragile   | S      | resolved   |
 | 22  | Two source lists, a link list and a format list name the same files (resolved) | duplicate | S      | resolved   |
 | 23  | `internals.md` is 832 KB in 1,752 lines                                        | docs      | M      | deferred   |
@@ -55,19 +55,15 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 
 ### 4. The theme picker's order and Status Bar's values (resolved)
 
-- **State:** each `theme.xml` states its `order`; `tools/theme.py` generates `theme_rows[]` and expands the Status Bar option's `<value themes="picker"/>` into every built-in theme in picker order, and refuses a duplicate or missing order. A new theme is one file.
+- **State:** there is no picker: OLED is the one built-in theme (index 0, `THEME_N` 1), so no order is kept and Status Bar's values are OLED's own (`<option setting="battery">`).
 
-### 20. `classic_light_*` art and the Classic face are named in C
+### 20. `classic_light_*` art and the Classic face are named in C (resolved)
 
-- **Where:** 70 lines with a string literal `"classic_light_..."` or `"classic-light"`, in `patch/navigation.c` (32), `patch/classic_pages.c` (18), `patch/lockscreen.c` (7), `patch/coverflow.c` (5), `patch/volume.c` (5), `patch/ratings.c` (2) and `patch/radio.c` (1) (`grep -c '"classic_light_\|"classic-light"' patch/*.c`, recounted at the hygiene pass). `validate` in `tools/theme.py` allows `art_final` only for a theme whose `art_id` is `classic-light`.
-- **Evidence:** the C loads Classic's names literally. A theme's `art` attribute (`art_id` in `tools/theme.py`) names the theme whose generated images it draws, and OLED (`art="classic-light"`) draws Classic's through it.
-- **Impact:** a theme cannot use the `classic-light` painters with art of its own.
-- **Decision:** deferred. What is left is a theme with its own art under Classic's painters, and none exists. Then the fix is a per-theme art prefix in `theme_t`, written by `emit`, and a helper that joins it (M).
+- **State:** the Classic theme, its art and its face were removed with the other retired themes. The C loads a theme's art by its prefix (`theme_art`, `patch/list_marks.c`), which `tools/theme.py` writes from the theme's `art` attribute (`emit`).
 
 ### 21. Tests unpack the themes by count (resolved)
 
-- **Where:** `test/fw/test_nav_playing.py:16` (`MINIMAL, CLASSIC, MODERN = THEMES`), `:549-550` (`range(4)` Status Bar looks with four labels), `test/fw/test_coverflow.py:2362` (`range(3)`), `test/unit/test_theme.py:522` (`== [0, 0, 0]`), `:536` (`== 3`), `test/ui_preview.py:21-24` (three ids).
-- **State:** `test/fw/test_nav_playing.py` and `test/fw/test_coverflow.py` look each theme, or its `index`, up by id in `host.tools_theme.builtins()`, so a theme added or moved fails no test that is not about it. `test/ui_preview.py`'s three ids are a review tool's arguments and `three()` in `test/unit/test_theme.py` a stated fixture: both stay. Guard: `test_coverflow.py`'s 503 tests, which fail in dozens when two of its ids are swapped.
+- **State:** with one built-in theme there is no list of themes for a test to unpack by count.
 
 ### 26. The stock version is written in three places in `build.py` (resolved)
 
@@ -81,9 +77,7 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 
 ### 30. A new theme's Corners default follows its index (resolved)
 
-- **Where:** `settings_read` in `patch/theme_engine.c`.
-- **State:** a missing `ROUNDED` key reads the live theme's Corners `preset` (`option_of(&themes[st.theme], SETTING_ROUNDED)`), Square where the theme states none, so a new theme's preset holds before it is picked. The built-in themes read as before: Minimal Round; Modern, Classic and OLED Square.
-- **Guard:** `test_a_missing_rounded_follows_the_live_theme_s_preset_not_its_place` and `test_a_missing_rounded_reads_the_theme_s_corners` in `test/fw/test_navigation.py`.
+- **State:** the Corners setting (`ROUNDED`) was removed: the selection bar takes the theme's `list.selection.radius` and `inset` on every row.
 
 ## Build-time cost
 
@@ -191,8 +185,8 @@ Entries 7 to 17 are costs the code marks itself.
 ### 18. Every painted widget passes through about 25 painters
 
 - **Where:** `patch/navigation.c:2723-2772` (`ringnav_paint`, the hook on `widget_on_paint_border`).
-- **Evidence:** the function calls `night_paint`, `coverflow_paint`, `lockscreen_paint`, `edit_paint`, `photos_paint`, `books_paint`, `spot_paint`, `addon_paint`, `peq_paint`, `battery_paint`, `visualizer_paint`, `games_paint`, `paint_chevrons`, `paint_radio`, `paint_into`, `paint_letter`, `paint_cover`, `paint_scrubber`, `slider_scrub`, `quick_scrub`, `search_over`, `paint_caps`, `hold_paint` and `coverflow_home_clip` for every widget stock paints, and each decides for itself whether the widget is its own.
-- **Measured:** payload instructions of one `ringnav_paint` call, counted with a `UC_HOOK_BLOCK` hook over `BASE` to `SCRATCH` in a scratch copy of `test/patch.py` (the real MIPS payload under Unicorn; stock's paint and the mocks count nothing), on a `--dev` build of `oled-theme` at `c056e7b4`. The page is `folder_page` with eight rows from stock's own row constructor (`0x4b39f4`), laid out, after one whole paint. Every row's label and images, and the window, are owned by no painter:
+- **Evidence:** the function calls `night_paint`, `coverflow_paint`, `lockscreen_paint`, `edit_paint`, `photos_paint`, `books_paint`, `spot_paint`, `paint_scrollbar`, `addon_paint`, `artist_local_paint`, `np_about_paint`, `peq_paint`, `battery_paint`, `album_local_paint`, `visualizer_paint` (`NP_VISUALIZER` on), `games_paint`, `search_strip_paint`, `paint_chevrons`, `paint_offline`, `paint_radio`, `paint_into`, `paint_letter`, `az_paint`, `paint_cover`, `paint_scrubber`, `marquee_fade`, `np_modes` and `coverflow_home_clip` for every widget stock paints, and a few more behind a cheap test of their own widget (`sel_frame_paint`, `rate_hearts_paint`, `stream_mark_paint`, `lyrics_paint`, `slider_page_paint`); each decides for itself whether the widget is its own.
+- **Measured:** payload instructions of one `ringnav_paint` call, counted with a `UC_HOOK_BLOCK` hook over `BASE` to `SCRATCH` in a scratch copy of `test/patch.py` (the real MIPS payload under Unicorn; stock's paint and the mocks count nothing), on a `--dev` build of `oled-theme` at `c056e7b4`, under two themes since retired (Minimal and Classic). The page is `folder_page` with eight rows from stock's own row constructor (`0x4b39f4`), laid out, after one whole paint. Every row's label and images, and the window, are owned by no painter:
 
   |                    | row label | row image | window |
   | ------------------ | --------: | --------: | -----: |
@@ -201,7 +195,7 @@ Entries 7 to 17 are costs the code marks itself.
   | Classic, Light off |     1,586 |     1,586 |  1,648 |
   | Classic, Light on  |     1,586 |     1,586 |  1,648 |
 
-  Median and largest are the same in every cell, and a second call gives the same count as the first. A list with a scrollbar, which Classic's scrollbar painter owns, counts 3,150. The ten functions with the most instructions for one row label under Classic, Light on (1,586): `ringnav_paint` 298, `accent` 240, `theme` 135, `lockscreen_paint` 94, `kind` 57, `light_on` 54, `peq_paint` 45, `visualizer_paint` 45, `coverflow_paint` 44, `coverflow_home_clip` 44. A third of it is `accent`, `theme` and `light_on`, asked again by painter after painter.
+  Median and largest are the same in every cell, and a second call gives the same count as the first. A list with a scrollbar, which Classic's scrollbar painter owned, counted 3,150. The ten functions with the most instructions for one row label under Classic, Light on (1,586): `ringnav_paint` 298, `accent` 240, `theme` 135, `lockscreen_paint` 94, `kind` 57, `light_on` 54, `peq_paint` 45, `visualizer_paint` 45, `coverflow_paint` 44, `coverflow_home_clip` 44. A third of it is `accent`, `theme` and `light_on`, asked again by painter after painter.
 
 - **Decision:** the rule: a full repaint of about 100 widgets in a 60 Hz frame of 8,300,000 instructions (5 x 10^8 a second, generous for the X2000), worth fixing at 2% of it, 1,600 instructions or more per unowned widget. The largest list page paints fewer than 100: about 77 row widgets (seven Songs rows of up to eleven in the table's 294 pixels), the page's own four and the status bar's 16. 1,586 is under it, by 1%; not worth fixing. Any painter added to the chain, or a lookup added to one, crosses the line: then the fix is one owner check before the chain, or `theme()` and `accent()` read once per call and passed down.
 

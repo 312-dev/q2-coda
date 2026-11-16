@@ -194,7 +194,7 @@ only; an album none of whose songs can play) keeps its place in the list and say
 it reads on any background:
 
 - **Its text** is `#666666` off the selection. On the selection it is the selection's own ink
-  (white on Modern's Accent Blue bar, Classic's band ink, dark on Minimal's card) at 70% alpha,
+  (white on OLED's Accent Blue bar) at 70% alpha,
   never grey on the bar, so it keeps the contrast the theme chose for the bar.
 - **The offline mark**, Phosphor's `cloud-slash` (bold, 20 px wide, 16 high), sits at the row's
   right in the same colour as its text: in the chevron's column, or just left of the chevron on
