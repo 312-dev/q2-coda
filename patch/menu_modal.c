@@ -459,10 +459,14 @@ void modal_more(void *win) {
                 if (!tk_strcmp(image, "airplay")) icon = "airplay";
                 if (!tk_strcmp(image, "player_onlinesearch")) icon = "cloud-arrow-down";
                 if (!tk_strcmp(image, "system_about")) icon = "info";
-                if (!strncmp(image, "switch_", 7))
+                if (!strncmp(image, "switch_", 7)) {
                     sw = c;
-                else
-                    widget_set_visible(c, 0, 0); /* stock's icons; Speed's buttons */
+                } else {
+                    /* stock's icons; Speed's buttons, which a pick still clicks: stock's hit test
+                     * skips only the insensitive, so hidden they took a tap on the row (1x) */
+                    widget_set_visible(c, 0, 0);
+                    widget_set_sensitive(c, 0);
+                }
             }
         }
         if (widget_lookup(button, "img_forward_0", 1)) kind = 1; /* the speed row, unnamed */

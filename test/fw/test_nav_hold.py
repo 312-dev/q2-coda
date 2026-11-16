@@ -1837,6 +1837,28 @@ def test_oled_more_shows_ab_repeat_as_the_themes_switch(fw, ui, st, image, selec
     assert len(fw.calls('vgcanvas_stroke')) == strokes and len(fw.calls('vgcanvas_fill')) == fills
 
 
+def test_oled_more_speed_rows_hidden_buttons_take_no_taps(fw, ui, st):
+    """Now Playing's More under a modal set: Speed's four stock buttons hide, and stock's hit test skips only an
+    insensitive widget, hidden or not, so a tap on the row's left half set 1x behind the picker it opened. Each is
+    made insensitive; a pick still clicks the one it names (more_speed_pick dispatches to it)."""
+    use_set(st, 'oled')
+    win = ui.window('playermore_page', 'dialog')
+    lv = ui.child(win, 'list_view', 0, 44, 375, 270)
+    ui.nodes[lv].name = 'list_view_more'
+    view = ui.child(lv, 'scroll_view', 0, 0, 375, 270)
+    ui.nodes[view].name = 'scroll_view_more'
+    button = ui.child(ui.child(view, 'list_item', 0, 0, 375, 70), 'button', 0, 0, 375, 70)
+    label = ui.child(button, 'hscroll_label', 72, 12, 40, 20)
+    ui.nodes[label].text = 'Multiple Speed'
+    speeds = []
+    for i, x in enumerate((120, 177, 231, 283)):  # as stock places them (test/patch.py's More)
+        speeds.append(ui.child(button, 'image', x, 9, 42, 61))
+        ui.nodes[speeds[-1]].name = f'img_forward_{i}'
+    fw.fn('modal_more', None, C.c_void_p)(win)
+    insensitive = {a[0] for _, a in fw.calls('widget_set_sensitive') if not C.c_int(a[1]).value}
+    assert all(not ui.nodes[s].visible for s in speeds) and set(speeds) <= insensitive
+
+
 def advanced(fw, kind, value):
     """Playback's own Shuffle, Repeat or Group by, as its menu sets them."""
     return fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(kind, value)
