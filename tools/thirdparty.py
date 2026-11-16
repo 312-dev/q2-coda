@@ -507,9 +507,10 @@ STUBS = (BLUEZ_DIR/'stubs.tsv').read_text()
 SHANLING_PATCH = (BLUEZ_DIR/'shanling.patch').read_text()
 BLUEZ_STUBS = ['libbtctl.so', 'libncurses.so.6', 'libgio-2.0.so.0', 'libgmodule-2.0.so.0', 'libgobject-2.0.so.0',
                'libpcre2-8.so.0', 'libffi.so.8', 'libgthread-2.0.so.0']
-# Stock's plugins are hostname, wiimote, autopair, policy, a2dp, avrcp, scanparam, deviceinfo and battery
+# Position independent, as stock's is. Stock's plugins are hostname, wiimote, autopair, policy, a2dp, avrcp,
+# scanparam, deviceinfo and battery
 # (docs/third-party.md); no HID, HoG, network, LE audio, OBEX, mesh or tools
-BLUEZ_OPTIONS = ['--sysconfdir=/etc', '--localstatedir=/var', '--libexecdir=/usr/libexec', '--with-dbusconfdir=/etc',
+BLUEZ_OPTIONS = ['--enable-pie', '--sysconfdir=/etc', '--localstatedir=/var', '--libexecdir=/usr/libexec', '--with-dbusconfdir=/etc',
                  '--with-dbussystembusdir=/usr/share/dbus-1/system-services',
                  '--with-dbussessionbusdir=/usr/share/dbus-1/services', '--disable-network', '--disable-hid',
                  '--disable-hog', '--disable-bap', '--disable-mcp', '--disable-vcp', '--disable-tools',

@@ -83,7 +83,7 @@ In bluetoothd (`profiles/audio/avrcp.c`):
 
 `a2dp.c`'s `a2dp_find_eps` (`0x17bd0`) lists the remote endpoints in a fixed codec order in place of
 upstream's "last used first": the codec `g_high_priority_lcodec` names first (`0x13` LDAC, `0x12` aptX HD,
-`0x11` aptX, `2` AAC, anything else none), then LDAC (vendor `0x12d`), aptX HD (`0xd7`), aptX (`0x4f`),
+`0x11` aptX, `2` AAC, anything else SBC), then LDAC (vendor `0x12d`), aptX HD (`0xd7`), aptX (`0x4f`),
 AAC (`2`) and SBC (`0`), each once; endpoints of any other codec are left out. `codec_compare`
 (`0x180dc`) matches a standard codec by its id and a vendor codec (`0xff`) by the vendor id its local
 endpoint's capabilities carry. demo sets the byte through `btctl_set_codec_priority` from the Quality page.
@@ -123,3 +123,17 @@ channel; the record lets Shanling's phone app find it.
 Link `libbtctl.so` as stock does and put each change above back in the upstream source; SyncLink's
 matter only while the user has SyncLink on, the others always. Q2 Pod's own additions (the control
 channel answering from `g_track_meta`, the library browsable from a car, cover art) go on top.
+
+## The rebuild
+
+`tools/thirdparty.py` builds BlueZ 5.66 (`bluez`) with `tools/bluez/shanling.patch`, which puts back every change
+above, against GLib 2.74.4's and D-Bus 1.12's headers and soname stubs of stock's libraries (`stubs.tsv`, read from
+the stock rootfs), linking libbtctl and the GIO set as stock does, position independent as stock is. `check_abi`
+resolves its imports against the real libraries. Under `qemu-mipsel` with the real libbtctl it owns `shanling.bluez`
+and `org.bluez` and loads stock's plugins. `test/bluez_port.py` runs the hooks as MIPS under Unicorn
+(`test/bluez_emu.py`: the binary at a load address of its own, its GOT and relocations as ld.so leaves them, imports
+answered in Python): GetPlayStatus and RegisterNotification from `g_play_status`, `avrcp_hciplayer_event`'s CHANGED on
+`g_hci_session` and its clearing at a disconnection, `avrcp_init` setting `g_avrcp_event_fun`, the codec order for
+each priority, the phone's track and START or SUSPEND to demo, and SyncLink's DISCOVER rejection. It is not installed:
+stock's bluetoothd stays the shipped one until the rebuild is proven on a Q2.
+
