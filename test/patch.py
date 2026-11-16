@@ -4870,13 +4870,34 @@ assert m.call(address=HOOKS['load_localclass_list'][0],args=(0xf004,0,0,0),gap=0
 m.word(m.row(0)+O['REC_ID'],-1); m.run(1)
 assert m.read==[1,2],m.read; passed()
 # The empty state's titles shown (feedback.c empty_state: its view's _es_title), in the order made.
-def empty_titles(m): return [n.get('_es_title') for w,n in m.nodes.items() if n.get('name')=='_empty_state' and n.get('visible',1) and (not hasattr(m,'alive') or m.alive(w))]
+def empty_titles(m): return [n.get('_es_title') for w,n in m.nodes.items() if n.get('name')=='_empty_state' and n.get('visible',1) and (not callable(getattr(m,'alive',None)) or m.alive(w))]  # SpotMachine's alive is its socket's flag
 # An empty class list: its page, once the window manager marks it opened (stage 3, after the open
 # animation), is force-closed from the next loop pass, then the empty state's page (navigation.c empty_class,
 # feedback.c empty_open) says so. Until then it is polled (EMPTY_POLL_MS) until it opens or stops being on top, then
 # the empty state's page alone; a page already left, or another class's, keeps that page only.
+class EmptyClassMachine(ClassMachine):
+    """A class list whose empty state opens a page of its own (feedback.c empty_open): window_create and the widget
+    factories make nodes, as CoverflowMachine's do."""
+    MAKE=('window_create','widget_factory_create_widget','list_view_create','scroll_view_create')
+    def __init__(self,**kw):
+        super().__init__(**kw)
+        for n in self.MAKE: self.handlers[syms[n]]='c:'+n
+        self.present.add('/tmp/mmc_add')  # a card in: an empty list says why (feedback.c empty_card)
+    def hook(self,u,address,size,unused):
+        name=self.handlers.get(address,'')[2:]
+        if name not in self.MAKE: return super().hook(u,address,size,unused)
+        a,b,c,d=[u.reg_read(r) for r in REGS]; sp=u.reg_read(UC_MIPS_REG_SP); self.calls.append((name,a,b,c))
+        kind,parent,h={'window_create':('window',0,0),'widget_factory_create_widget':(self.text(b),c,self.get(sp+24))}.get(
+            name,(name.removesuffix('_create'),a,self.get(sp+16)))
+        ret=self.node(kind)
+        if kind=='window': self.top=ret; self.stack.append(ret)
+        else: self.nodes[parent]['children'].append(ret); self.word(ret+O['W_PARENT'],parent); self.word(ret+O['W_H'],h)
+        if name=='widget_factory_create_widget':  # x in a3; y, w on the stack
+            for off,v in (('W_X',d),('W_Y',self.get(sp+16)),('W_W',self.get(sp+20))): self.word(ret+O[off],v)
+        if kind=='list_view': self.word(ret+O['W_W'],d)
+        self.returns(ret,clobber=True)
 def empty(cls,page,stage=O['WINDOW_STAGE_OPENED'],leave=False,shown=None):
-    m=ClassMachine(page=page,cls=cls,rows=0); m.found=[]; m.query=None
+    m=EmptyClassMachine(page=page,cls=cls,rows=0); m.found=[]; m.query=None
     assert m.call(address=HOOKS['load_localclass_list'][0],args=(cls,0,0,0),gap=0)==0 and len(m.timers)==1
     m.nodes[m.top]['stage']=stage
     if shown is not None: m.word(syms['g_class_type'],shown)
@@ -4885,7 +4906,7 @@ def empty(cls,page,stage=O['WINDOW_STAGE_OPENED'],leave=False,shown=None):
     return m
 closes=lambda m: [c[:3] for c in m.calls if c[0]=='window_manager_close_window_force']
 for cls,page in ((0xf003,'album_page'),(0xf003,'localclass_page'),(0xf004,'localclass_page'),(0xf005,'localclass_page'),(0xf006,'localclass_page')):
-    m=empty(cls,page); top=m.stack[-1]
+    m=empty(cls,page); top=next(w for w in m.stack if m.nodes[w]['name']==page)  # the class page, under the empty state's
     assert closes(m)==[('window_manager_close_window_force',m.wm,top)]
     assert not m.toasts and empty_titles(m)==[{0xf003:'No Albums',0xf004:'No Artists',0xf005:'No Composers',0xf006:'No Genres'}[cls]] and not m.timers
     passed()
@@ -5049,7 +5070,7 @@ for cls in (0xf00a,0xf008,0xf007):
     assert m.text(m.get(m.row(0)+O['REC_TITLE']))=='Song' and m.text(t)=='Row 1', hex(cls)
 passed()
 # An empty category list says so once its page is up, instead of a black page.
-m=ClassMachine(page='localclass_page',cls=0xf001,rows=0)
+m=EmptyClassMachine(page='localclass_page',cls=0xf001,rows=0)
 assert m.call(address=HOOKS['load_localclass_list'][0],args=(0xf006,0,0,0),gap=0)==0 and not empty_titles(m)
 m.advance(0); assert empty_titles(m)==['No Genres'] and not m.toasts; passed()
 # Albums: each stock row (a name) becomes that name's albums, told apart by album artist, else folder.
