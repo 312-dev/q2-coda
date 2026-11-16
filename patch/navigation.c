@@ -9294,15 +9294,18 @@ static void thumb_poll(void) {
 #if Q2POD_DEV && !defined(PEQ_HOST)
 /* Hot swap spike (docs/hotswap-discovery.md): tools/ci/memswap.py writes new payload text into the
  * running demo from outside, then asks here, on the UI thread, for qemu to drop its translations of
- * the old: cell 0 is the request (the host bumps it), 1 the last one done, 2 the way (1 store to
- * each page, 2 mprotect read+exec then read+write+exec), 3 and 4 the range, 7 the way's result. Cells
- * 5 and 6 are probes the host reads: an immediate in this code and a word of a literal. */
+ * the old, and repaints: cell 0 is the request (the host bumps it), 1 the last one done, 2 the way (1
+ * store to each page, 2 mprotect read+exec then read+write+exec), 3 and 4 the range, 7 the way's result. Cells
+ * 5 and 6 are probes the host reads: an immediate in this code and a word of a literal; 8 is the UI
+ * thread's $sp here, below which no frame is live at this point. */
 extern int cf_syscall(int nr, int a, int b, int c);
-volatile unsigned hotswap_cell[8] __attribute__((section(".scratch")));
-static void hotswap_poll(void) {
+volatile unsigned hotswap_cell[9] __attribute__((section(".scratch")));
+__attribute__((noinline)) static void hotswap_poll(void) {
     unsigned v;
     __asm__ volatile("li %0, 0x1111" : "=r"(v));
     hotswap_cell[5] = v;
+    __asm__ volatile("move %0, $sp" : "=r"(v));
+    hotswap_cell[8] = v;
     hotswap_cell[6] = *(volatile const unsigned *)"HS01";
     unsigned req = hotswap_cell[0];
     if (req == hotswap_cell[1]) return;
@@ -9318,6 +9321,7 @@ static void hotswap_poll(void) {
         int r = cf_syscall(4125 /* mprotect */, (int)a, (int)(b - a), 5 /* read, exec */);
         hotswap_cell[7] = (unsigned)r | (unsigned)cf_syscall(4125, (int)a, (int)(b - a), 7);
     }
+    widget_invalidate_force(window_manager(), (void *)0); /* every painter runs again, the new code's */
     hotswap_cell[1] = req;
 }
 #else

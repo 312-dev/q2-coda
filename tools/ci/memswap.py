@@ -232,6 +232,75 @@ def main():
               f'invalidated (way {way}) in {ti * 1000:.1f} ms; total {(time.monotonic() - t0) * 1000:.1f} ms')
     elif cmd == 'stacks':
         stacks(pid, mem, build)
+    elif cmd == 'ptrs':
+        ptrs(pid, mem, build)
+    elif cmd == 'uistack':
+        uistack(pid, mem, build)
+
+
+def uistack(pid, mem, build):
+    """The UI thread's live stack at the idle hook: every word from the $sp hotswap_poll records (cell 8) to
+    the top of its mapping that is a return address (after a jal, jalr or bal), stock's or the payload's."""
+    import bisect
+    sym = symbols(build)
+    funcs = sorted((a, n) for n, a in sym.items() if BASE <= a < SCRATCH)
+    end = text_end(build)
+    with Stopped(pid):
+        sp = mem.u32(sym['hotswap_cell'] + 32)
+        top = next(int(l.split()[0].split('-')[1], 16) - mem.base for l in open(f'/proc/{pid}/maps')
+                   if int(l.split()[0].split('-')[0], 16) <= sp + mem.base < int(l.split()[0].split('-')[1], 16))
+        data = mem.read(sp, top - sp)
+        text = mem.read(0x400000, 0x526b70)
+        pay = mem.read(BASE, end - BASE)
+    print(f'sp {sp:#x}, stack top {top:#x}: {top - sp} bytes live')
+    for i in range(0, len(data) & ~3, 4):
+        v, = struct.unpack_from('<I', data, i)
+        if v % 4:
+            continue
+        if 0x400008 <= v < 0x400000 + len(text):
+            ins, = struct.unpack_from('<I', text, v - 8 - 0x400000)
+            where = 'stock'
+        elif BASE + 8 <= v < end:
+            ins, = struct.unpack_from('<I', pay, v - 8 - BASE)
+            k = bisect.bisect_right(funcs, (v, '\xff')) - 1
+            where = 'PAYLOAD ' + funcs[k][1]
+        else:
+            continue
+        op = ins >> 26
+        if op == 3 or (op == 0 and ins & 0x3f == 9) or (op == 1 and (ins >> 16) & 0x1f in (0x11, 0x13)):
+            print(f'   [sp+{i:#x}] {v:#x} {where}')
+
+
+def ptrs(pid, mem, build):
+    """Words in writable guest memory (heap, .scratch, stock's data, stacks) equal to a payload function's
+    entry, or pointing into payload .rodata: what moving a function or a literal would leave dangling."""
+    sym = symbols(build)
+    out = subprocess.run(['llvm-nm', '--defined-only', str(pathlib.Path(build)/'patch.elf')], capture_output=True, text=True).stdout
+    funcs = {int(f[0], 16): f[2] for f in (l.split() for l in out.splitlines()) if len(f) == 3 and f[1] in 'Tt'}
+    rel = subprocess.run(['llvm-readelf', '-SW', str(pathlib.Path(build)/'patch.elf')], capture_output=True, text=True).stdout
+    ro = [l.replace('[ ', '[').split() for l in rel.splitlines() if ' .rodata ' in l][0]
+    ro_lo, ro_hi = int(ro[3], 16), int(ro[3], 16) + int(ro[5], 16)
+    fn_hits, ro_hits, where = {}, 0, {}
+    with Stopped(pid):
+        for line in open(f'/proc/{pid}/maps'):
+            f = line.split()
+            lo, hi = (int(x, 16) for x in f[0].split('-'))
+            if not f[1].startswith('rw') or lo - mem.base >= 0x80000000 or (len(f) >= 6 and f[5].startswith('[')):
+                continue
+            try:
+                data = mem.read(lo - mem.base, hi - lo)
+            except OSError:
+                continue
+            for (v,) in struct.iter_unpack('<I', data[:len(data) & ~3]):
+                if v in funcs:
+                    fn_hits[funcs[v]] = fn_hits.get(funcs[v], 0) + 1
+                    where[f[5] if len(f) >= 6 else 'anon'] = where.get(f[5] if len(f) >= 6 else 'anon', 0) + 1
+                elif ro_lo <= v < ro_hi:
+                    ro_hits += 1
+    print(f'{sum(fn_hits.values())} words equal to a payload function entry ({len(fn_hits)} functions); '
+          f'{ro_hits} words pointing into payload .rodata; by mapping {where}')
+    for n, c in sorted(fn_hits.items(), key=lambda x: -x[1])[:40]:
+        print(f'   {c:4d} {n}')
 
 
 def stacks(pid, mem, build):
