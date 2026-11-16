@@ -197,3 +197,23 @@ def test_a_streamed_albums_cover_is_its_stream_files_picture(lib, tmp_path):
     assert t == T['COVER'] and client.one(m, 1) == len(image) and client.one(m, 3) == image[:4096]
     f.unlink()
     assert q2.ask(T['GET_COVER'], [(1, 'sthird'), (2, 0), (3, 4096), (4, 160)]) == 'NOT_FOUND'
+
+
+def test_an_artists_radio_is_one_of_its_songs(lib, tmp_path):
+    """StartRadio (CAP_RADIO) with an artist node: the shim gets a radio of one of the artist's songs, picked at random
+    (song_radio.c seeds by a song); a song id goes as it is, no seed is the playing song, and anything else is refused."""
+    q2 = Q2(lib, tmp_path)
+    shim_verb = ctypes.c_char.in_dll(lib, 'shim_verb')
+    artists = {i['title']: i['id'] for i in q2.browse('artists')['items']}
+    seen = set()
+    for _ in range(40):
+        assert q2.ask(T['START_RADIO'], [(1, artists['Bob'])])[0] == T['ACK']
+        seen.add(ctypes.string_at(ctypes.addressof(shim_verb)).decode())
+    assert seen == {'radio 3', 'radio 4'}  # Charlie and Delta, Bob's
+    for seed, verb in (('song:t2', 'radio 2'), (None, 'radio 0')):
+        assert q2.ask(T['START_RADIO'], [(1, seed)])[0] == T['ACK']
+        assert ctypes.string_at(ctypes.addressof(shim_verb)).decode() == verb
+    assert q2.ask(T['START_RADIO'], [(2, True)])[0] == T['ACK']
+    assert ctypes.string_at(ctypes.addressof(shim_verb)).decode() == 'radio stop'
+    assert q2.ask(T['START_RADIO'], [(1, 'album:x')]) == 'BAD_REQUEST'
+    assert q2.ask(T['START_RADIO'], [(1, 'artist:nobody')]) == 'NOT_FOUND'

@@ -1196,8 +1196,45 @@ static int cover(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
     return crc_send(s, T_COVER, req_id, out, w.n);
 }
 
+/* ---- StartRadio (CAP_RADIO): a song radio in demo (song_radio.c), through the shim ---- */
+
+/* seed_id 1: "" the playing song, a "song:" id, or an artist node ("artist:<k>"), whose radio is one of its
+ * songs' picked at random; stop 2. The shim answers 3 for a song it doesn't have (NOT_FOUND). */
+static int start_radio(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
+    pbr r = {p, p + n};
+    pbf f;
+    char seed[400] = "", verb[32];
+    int stop = 0, rid = 0, k;
+    while ((k = pb_next(&r, &f)) > 0) {
+        if (f.field == 1 && f.wire == 2) pb_cstr(&f, seed, sizeof seed);
+        if (f.field == 2 && f.wire == 0) stop = f.v != 0;
+    }
+    if (k < 0 || strchr(seed, '\n')) return crc_error(s, req_id, E_BAD_REQUEST, "StartRadio");
+    if (stop) return crc_shim_command(s, req_id, "radio stop");
+    if (*seed && !(rid = lib_song_rid(seed))) {
+        if (strncmp(seed, "artist:", 7) || strchr(seed, '|')) return crc_error(s, req_id, E_BAD_REQUEST, "seed_id");
+        char base[420];
+        snprintf(base, sizeof base, "artist-tracks:%s", seed + 7);
+        if (lib_open()) return crc_error(s, req_id, E_UNAVAILABLE, "no library");
+        list_t l;
+        memset(&l, 0, sizeof l);
+        sqlite3_stmt *st = 0;
+        if (list_of(base, "", &l)) {
+            snprintf(sql, sizeof sql, "select * from (%s) order by random() limit 1", l.src);
+            if (sqlite3_prepare_v2(db, sql, -1, &st, 0) == SQLITE_OK && sqlite3_step(st) == SQLITE_ROW)
+                rid = lib_song_rid((const char *)sqlite3_column_text(st, 0));
+            sqlite3_finalize(st);
+        }
+        lib_close();
+        if (!rid) return crc_error(s, req_id, E_NOT_FOUND, "artist");
+    }
+    snprintf(verb, sizeof verb, "radio %d", rid);
+    return crc_shim_command(s, req_id, verb);
+}
+
 int lib_request(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t n, int qgen, int qpos) {
     switch (type) {
+    case T_START_RADIO: return start_radio(s, req_id, p, n);
     case T_BROWSE: return browse(s, req_id, p, n);
     case T_SEARCH: return search(s, req_id, p, n);
     case T_PLAY: return play(s, req_id, p, n, qgen);
