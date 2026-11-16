@@ -2349,7 +2349,6 @@ int ringnav_paint(void *w, void *canvas) {
     night_paint(canvas);
     coverflow_paint(w, canvas);
     keylock_paint(w, canvas);
-    charge_paint(w, canvas); /* the plug-in screen (charging.c) */
     if (w == st.cf_letter_surface && st.cf_letter &&
         (st.cf_letter_held || (unsigned)time_now_ms() - st.cf_letter_at < LETTER_MS) &&
         P(canvas, CANVAS_LCD)) {
@@ -2412,6 +2411,7 @@ int ringnav_paint(void *w, void *canvas) {
         np_modes(w, canvas); /* else the page's own */
     coverflow_home_clip(w, canvas, 0);
     list_fade(w, canvas);
+    charge_paint(w, canvas); /* the plug-in screen (charging.c): last, over the page's own paints */
     st.paint_w = w ? P(w, W_PARENT) : (void *)0;
     return result;
 }
