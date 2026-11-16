@@ -8359,7 +8359,7 @@ m=ArtistMachine(page='artistinfo_page',cls=0xff01,rows=2); m.word(syms['g_local_
 m.split=[m.song('Baroness')]; m.word(m.split[0]+O['REC_ALBUM_ARTIST'],m.string('Baroness'))
 m.call(address=HOOKS['load_localartist_list'][0],args=(1,0,0,0),gap=0)
 assert menu(m)==('Album',[*COVER_ALBUM,'Add to Playlist']); passed()
-# Library > Era: a row per decade with dated music, oldest first, its albums counted (an album's year its tracks'
+# Library > Years (Era's page): a row per decade with dated music, oldest first, its albums counted (an album's year its tracks'
 # latest); undated albums, audiobooks, podcasts and M4B left out. A decade's page: Play All, Shuffle, then its
 # albums by year, each "Artist • year".
 class EraMachine(PlaylistEditMachine):
@@ -8405,7 +8405,7 @@ assert m.db.execute('PRAGMA cache_size').fetchone()==(64,)
 assert m.db.execute('PRAGMA temp_store').fetchone()==(1,); passed()
 for failure in ('open','PRAGMA','select'):
     m=EraMachine(SONGS); m.fail=failure; top=m.top; m.open_era()
-    assert m.top==top and m.toasts[-1][3]=='Era unavailable' and m.closed_db==1; passed()
+    assert m.top==top and m.toasts[-1][3]=='Years unavailable' and m.closed_db==1; passed()
 # The ratings' copy on the card (ratings.c rc_*): the tables' hashes named again from the library, a page a poll.
 RC_FILE='/mnt/mmc/.ratings.tsv'; RC_HEAD='#song\thearts\tpath\tcue_start\n#album\thearts\tname\talbum_artist\tfolder\n'
 class RatingsCopyMachine(FileMocks,EraMachine):
@@ -8646,7 +8646,7 @@ assert m.nodes[m.slide].get('sensitive')==0; passed()
 # window manager puts it: album over artist under the covers (the theme's coverflow caption: text_y, artist_y, name_px,
 # artist_px), the album white and the artist grey (CF_GREY), CF_EDGE from the sides and clear of the rounded glass. The
 # tracks are the theme's one-line song rows, page_x from the sides, the album named in the bar, not over them, the list
-# cut to the whole rows that end by the set's list end (fit_view: seven, y 58 to 282, docs/oled-design.md), the lowest
+# running on to the window's foot, its rows past the set's list end (y 282) fading (docs/oled-design.md), the seventh
 # clear of the glass too.
 from ipod import corner_inset
 def cf_geometry(m,w): return tuple(signed(m.get(w+O[k])) for k in ('W_X','W_Y','W_W','W_H'))
@@ -8669,7 +8669,7 @@ for w,px in ((name,OLED['cf.name_px']),(artist,OLED['cf.artist_px'])):
 view=m.tracks(); lv=m.get(view+O['W_PARENT']); title=next(w for w in m.nodes[m.get(lv+O['W_PARENT'])]['children'] if m.nodes[w]['type']=='hscroll_label')
 assert not m.nodes[title]['visible']
 X,ROW,px=OLED['page_x'],OLED['page_row'],OLED['font_px[ROLE_TITLE]']; fit=m.call(address=payload_syms['list_fit_end'],args=(0,0,0,0),gap=0)
-assert fit==282 and cf_geometry(m,lv)[1::2]==(0,(fit-BAR)//ROW*ROW)==(0,7*ROW)
+assert fit==282 and cf_geometry(m,lv)[1::2]==(0,320-BAR),cf_geometry(m,lv)  # on to the window's foot, its rows past fit fading (navigation.c list_fade)
 for i,item in enumerate(m.nodes[view]['children']):
     label=m.nodes[item]['children'][0]; assert cf_geometry(m,item)[1]==i*ROW and cf_geometry(m,label)==(X,0,375-2*X,ROW)
     assert m.nodes[label]['style:normal:font_size']==px
@@ -9696,8 +9696,15 @@ def framed(c,t):  # the panel at phase t, as home_render filters it: across each
     u,v=c['u0']*256+at(c['rx'],X,t),c['v0']*256+at(c['ry'],Y,t); ts,px=c['ts'],c['px']
     wx,wy=bspline(u&255),bspline(v&255); i=(v>>8)*ts+(u>>8)  # texel -1, -1 from u, v
     rows=[[tap4(*px[j+x:j+x+4],wx) for x in range(PW)] for j in range(i,i+293*ts,ts)]
-    out=[tap4(*k,wy) for y in range(290) for k in zip(*rows[y:y+4])]
+    out=[vig(tap4(*k,wy),VIG(y)) for y in range(290) for k in zip(*rows[y:y+4])]
     return struct.pack(f'<{len(out)}I',*out)
+# Split's vignette (coverflow.c vig_k, vig): the frame's rows darkened at its top and bottom edges, in 256ths, by the
+# tables the C holds (read from the source, which states how they were made); the frame's row y is the screen's y + 30.
+VIG_T={n:[int(v) for v in re.search(rf'{n}\[VIG_\w+\] = {{([^}}]*)}}',(ROOT/'patch/coverflow.c').read_text()).group(1).split(',')]
+       for n in ('vig_top','vig_bot')}
+def VIG(y):
+    y+=320-290; return VIG_T['vig_top'][max(y,0)] if y<len(VIG_T['vig_top']) else VIG_T['vig_bot'][319-y] if y>=320-len(VIG_T['vig_bot']) else 256
+def vig(c,k): return c if k>=256 else c&0xff000000|((c&0xff00ff)*k>>8&0xff00ff)|((c&0xff00)*k>>8&0xff00)
 def drawn():
     n=len(m.draws); m.call(address=HOOKS['widget_on_paint_border'][0],args=(m.art,m.canvas,0,0),gap=0)
     assert len(m.draws)==n+1 and m.draws[-1][3]==(0,0,PW,290) and m.draws[-1][4]&1,m.draws[n:]
@@ -10173,10 +10180,11 @@ assert row_text(cf_library)=='Library: Local Only'  # a named choice, no switch,
 ctl=display_page(m,3); wheel,hold,tone,lock,wake,guard=m.nodes[ctl]['children']  # tone: the Clicker
 assert [row_text(r) for r in (hold,tone)]==['Hold Return: Recent','Clicker: Off']; passed()
 view=display_page(m,1); rows=setting_rows(m,view)
-kids=m.nodes[view]['children']; light,shortcut,song_artist,song_length,np_time=kids[0],kids[3],kids[5],kids[6],kids[7]
-assert [row_text(r) for r in kids]==['Light Mode: Off','Accent: Blue','Home: Split','Shortcut: Rockbox','Battery: Icon','Song Artist: Inline','Song Length: Albums','Track Time: Remaining']
-assert kids==[light,rows[0],rows[1],shortcut,rows[2],song_artist,song_length,np_time] and m.nodes[rows[0]].get('visible',1)==1
-assert m.icons_set==['system_display','system_display','playset_covermode','playset_covermode','system_powermanager']+['system_display']*3 and all(m.nodes[r]['type']=='list_item' and m.nodes[r]['style']=='s_listitem_black' for r in rows)
+# the theme's options (assets/themes/oled/theme.xml), Home's Shortcut being the Carousel's card alone
+kids=m.nodes[view]['children']; light,song_artist,song_length,np_time=kids[0],kids[4],kids[5],kids[6]
+assert [row_text(r) for r in kids]==['Light Mode: Off','Accent: Blue','Home: Split','Battery: Icon','Song Artist: Inline','Song Length: Albums','Track Time: Remaining'],[row_text(r) for r in kids]
+assert kids==[light,*rows,song_artist,song_length,np_time] and m.nodes[rows[0]].get('visible',1)==1
+assert m.icons_set==['system_display','system_display','playset_covermode','system_powermanager']+['system_display']*3,m.icons_set and all(m.nodes[r]['type']=='list_item' and m.nodes[r]['style']=='s_listitem_black' for r in rows)
 assert not {'switch_on','switch_off'} & set(m.icons_set)  # values, not switches
 buttons=[m.nodes[r]['children'][0] for r in rows]; labels=[m.nodes[b]['children'][1] for b in buttons]
 for b,l in zip(buttons,labels):
@@ -11431,18 +11439,27 @@ m=ShuffleMachine(); stock=[m.node('list_item') for _ in range(11)]
 view=m.node('scroll_view','scroll_view_localmusic',stock); m.top=m.node('window','localmusic_page',[view])
 assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0)==0
 assert m.calls[0][:3]==('stock_localmusic',m.top,5)
-# Library order: Shuffle; Artist, Album, All Songs, Genre, Era, Playlist, Ratings (in My Fav's place, hidden);
-# Recently Added, Recent, Most Played, Frequent (hidden: Most Played is its list), Hi-Res, Long Songs; iPod's Games;
-# then Update Local Music, last (stock rows by get_localmusic_showinfo index).
-kids=m.nodes[view]['children']; row,era,rated,top,long=kids[0],kids[5],kids[7],kids[11],kids[14]
-assert [kids[i] for i in (*range(1,5),6,8,9,10,12,13,16)]==[stock[i] for i in (3,2,1,4,10,6,9,8,7,5,0)] and m.nodes[row]['style']=='s_listitem_black'
+# Library order: the rows in library_edit.c's lr_default order (its one table), each row known by its letter: stock's
+# by get_localmusic_showinfo index (home.c's stocks table), the added ones by their icon. No card media folders here
+# and no scrobbles, so no Search (OLED has lib_art 0, but this page's set does not lead with it), Podcasts and the rest.
+LR_DEFAULT=re.search(r'lr_default\[\] = "(\w+)"',(ROOT/'patch/library_edit.c').read_text()).group(1)
+STOCK_LETTER={'u':0,'s':1,'l':2,'a':3,'g':4,'i':5,'f':6,'q':7,'c':8,'n':9,'p':10}  # home.c L_* by letter
+ADDED_LETTER={'local_shuffle':'h','local_era':'e','local_fav':'r','local_frequentplay':'m','local_longsongs':'L','local_games':'G'}
+def letter_of(k):
+    if k in stock: return next(c for c,i in STOCK_LETTER.items() if stock[i]==k)
+    return ADDED_LETTER[m.nodes[m.nodes[m.nodes[k]['children'][0]]['children'][0]]['image']]
+kids=m.nodes[view]['children']; letters=''.join(letter_of(k) for k in kids)
+assert letters==''.join(c for c in LR_DEFAULT if c in letters) and len(set(letters))==len(kids)==17,letters
+by=dict(zip(letters,kids)); row,era,rated,top,long=by['h'],by['e'],by['r'],by['m'],by['L']
+assert m.nodes[row]['style']=='s_listitem_black'
 icon,label,into=m.nodes[m.nodes[era]['children'][0]]['children']
 assert m.nodes[icon]['image']=='local_era' and m.nodes[label]['text']=='Years' and m.nodes[into]['image']=='list_into'
-icon,label,into=m.nodes[m.nodes[kids[15]]['children'][0]]['children']
-assert m.nodes[icon]['image']=='local_games' and m.nodes[label]['text']=='Games' and len(kids)==17
+icon,label,into=m.nodes[m.nodes[by['G']]['children'][0]]['children']
+assert m.nodes[icon]['image']=='local_games' and m.nodes[label]['text']=='Games'
 icon,label,into=m.nodes[m.nodes[long]['children'][0]]['children']
 assert m.nodes[icon]['image']=='local_longsongs' and m.nodes[label]['text']=='Long Songs'
-assert [k for k in kids if not m.nodes[k].get('visible',1)]==[stock[6],stock[7]]  # My Fav and Frequent
+# hidden: My Fav (Ratings' Loved), Frequent (Most Played is its list), and the menu review's Shuffle, Hi-Res, Long Songs
+assert {k for k in kids if not m.nodes[k].get('visible',1)}=={stock[6],stock[7],row,stock[5],long}
 icon,label,into=m.nodes[m.nodes[top]['children'][0]]['children']
 assert m.nodes[icon]['image']=='local_frequentplay' and m.nodes[label]['text']=='Most Played'
 icon,label,into=m.nodes[m.nodes[rated]['children'][0]]['children']
