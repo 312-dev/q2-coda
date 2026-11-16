@@ -2200,7 +2200,7 @@ def quick_window(ui, value=50, lo=10, hi=100, visible=1, ring=100000):
 
 
 # control_center.c's stops: four toggles, the Now Playing block, the sliders, five tiles
-CC_NOW, CC_BRIGHT, CC_VOLUME, CC_LOCK, CC_SLEEP, CC_NIGHT, CC_EQ, CC_SMART, CC_STOPS = 4, 5, 6, 7, 8, 9, 10, 11, 12
+CC_NOW, CC_BRIGHT, CC_VOLUME, CC_LOCK, CC_SLEEP, CC_NIGHT, CC_EQ, CC_SMART, CC_GUEST, CC_STOPS = 4, 5, 6, 7, 8, 9, 10, 11, 12, 13
 
 
 @pytest.mark.parametrize('value, key, want', [(50, KEY_NEXT, 51), (50, KEY_PREV, 49), (100, KEY_NEXT, 100), (10, KEY_PREV, 10)])
@@ -2235,7 +2235,7 @@ def cc_window(fw, ui, ring=100000):
 
 @pytest.mark.parametrize('status', [0, 2, 3])
 def test_control_center_s_wheel_walks_its_stops_and_stops_at_the_ends(fw, keys, status):
-    """The toggles, Now Playing's block, the two sliders and the five tiles in reading order; the ends hold. With
+    """The toggles, Now Playing's block, the two sliders and the six tiles in reading order; the ends hold. With
     nothing loaded (status 0), as Home's Now Playing row goes, the block is passed by."""
     fw.mock('mclGetPlayStatus', lambda *_: status)
     ui = Ui(fw)

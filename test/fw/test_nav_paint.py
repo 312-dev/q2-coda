@@ -1927,17 +1927,17 @@ def control_center(fw, world, focus=0, adjust=0, ring=True):
 
 def test_control_center_is_v3a_s_blocks_toggles_sliders_and_tiles(fw, world):
     """The connectivity block and Now Playing's from y 38, the toggles' circles (Wi-Fi lit), the sliders under them,
-    the five tiles named under them (Lock lit), the grab bar at y 304, and the wheel's white ring on Wi-Fi."""
+    the six tiles named under them (Lock lit), the grab bar at y 304, and the wheel's white ring on Wi-Fi."""
     canvas = control_center(fw, world)
     accent, block, off = rgba(0x2160d8), rgba(0x1c1c1e), rgba(0x3a3a3c)
     boxes = [(r, c) for r, c, _ in canvas.rounded]
     assert ((20, 38, 138, 124), block) in boxes and ((166, 38, 189, 124), block) in boxes
     assert ((35, 46, 40, 40), accent) in boxes and ((103, 46, 40, 40), off) in boxes  # Wi-Fi on, Bluetooth off
     assert ((32, 43, 46, 46), rgba(0xffffff)) in boxes  # the wheel's ring round Wi-Fi
-    assert ((32, 216, 44, 44), accent) in boxes  # Lock, on
+    assert ((32, 218, 40, 40), accent) in boxes  # Lock, on (six 40 px tiles)
     assert ((375 // 2 - 18, 304, 36, 5), rgba(0x5a5a5e)) in boxes
     words = [t for t, *_ in canvas.texts]
-    for label in ('Wi-Fi', 'Bluetooth', 'AirPlay', 'Car', 'Lock', 'Sleep', 'Night Shift', 'EQ', 'Smart Wi-Fi'):
+    for label in ('Wi-Fi', 'Bluetooth', 'AirPlay', 'Car', 'Lock', 'Sleep', 'Night Shift', 'EQ', 'Smart Wi-Fi', 'Guest'):
         assert label in words, label
 
 
