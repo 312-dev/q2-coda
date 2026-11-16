@@ -526,10 +526,30 @@ def test_oled_shelf():  # its side covers' geometry from its keys; the frame hol
     assert t['cf.top'] + 160 + t['cf.reflect'] <= t['cf.view_h'] <= 320 - t['geoms'][t['geom_set']].bar
 
 
+def test_oled_caption_tails_end_on_the_list_end():
+    """Cover Flow's artist line (coverflow.c, under the album's) in Inter Regular at artist_px: stb scales the face's
+    ascent - descent to the px, the label centres that in its CF_ARTIST_H box and the baseline falls on a whole row, so a
+    tail (g, the deepest of p, y, g, q, j) ends by the set's list end, as every list's last row does."""
+    from fontTools.pens.boundsPen import BoundsPen
+    from fontTools.ttLib import TTFont
+    t = oled()
+    font = TTFont(ipod.ROOT/'assets/fonts/Inter-Regular.ttf', lazy=True)
+    glyphs, cmap = font.getGlyphSet(), font.getBestCmap()
+    def depth(ch):
+        pen = BoundsPen(glyphs)
+        glyphs[cmap[ord(ch)]].draw(pen)
+        return -pen.bounds[1]
+    scale = t['cf.artist_px'] / (font['hhea'].ascent - font['hhea'].descent)
+    top = t['cf.text_y'] + t['cf.artist_y'] + (O['CF_ARTIST_H'] - t['cf.artist_px']) // 2
+    baseline = math.floor(top + font['hhea'].ascent * scale)
+    tail = baseline + max(depth(ch) for ch in 'pygqj') * scale
+    assert tail <= t['geoms'][t['geom_set']].list_end  # window rows: the screen's y 282 under the 58 px status row
+
+
 def test_emit_cf(tmp_path):
     theme.emit(theme.builtins(), tmp_path)
     text = (tmp_path/'themes.inc').read_text()
-    assert text.count('.cf.eye = 256,') == 1 and text.count('.cf.text_y = 178,') == 1
+    assert text.count('.cf.eye = 256,') == 1 and text.count('.cf.text_y = 173,') == 1
 
 
 # page_list's rows, detail rows and in-page title: 48/64/48 unless a theme sets them (open class).

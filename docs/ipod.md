@@ -487,7 +487,7 @@ selected cover at its native 160 pixels, its neighbours a side turned edge-on to
 frame's edge, drawn whole from their first pixel, with no reflection floor under OLED (`reflect_top` 0: a
 reflection starts at none of its cover's brightness, so it is the page's own black), all in the top
 `coverflow.shelf.view_h` pixels of the page (`CF_VIEW_H`, 220). The album name sits under the covers
-(`coverflow.caption` `text_y`, OLED's 178) at the theme's Song title size (OLED's 27 here, the design's
+(`coverflow.caption` `text_y`, OLED's 173, so the artist's tails end on the lists' end, y 282) at the theme's Song title size (OLED's 27 here, the design's
 22), the artist under that at its Artist size (22, the design's 18) in stock's secondary text as the
 theme inks it, and both, like the
 track list's title and rows and the progress and empty messages, keep 36 pixels (`CF_EDGE`) from

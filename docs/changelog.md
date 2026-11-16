@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Cover Flow (OLED): the album and artist under the covers sit a few pixels higher, so an artist name with tails (p, y, g, q) no longer dips below the line every list ends on.
   - Controls: Clicker set to **Headphones** no longer clicks the Q2's own buzzer. The click is heard only in your headphones, mixed into what plays; while nothing plays there is no click.
   - Playlists: removed the unused code behind a playlist cover's hidden **Select Playlists…** hold row; nothing you can see changes.
   - Photos is gone: the Library has no **Photos** row, viewer or thumbnail grid. Home's Split slideshow of album covers is unchanged, a Library order you set yourself is kept without the row, and a `.photos` folder left on the card can be deleted.

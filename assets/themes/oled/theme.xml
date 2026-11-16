@@ -129,7 +129,7 @@
              row_shift="20" row_from="100" row_full="300" row_shrink="8" row_flat="200" row_out="33" row_edge="160"
              row_width="40" row_key="72" jump_ms="700" jump_ticks="5" jump_at="32" jump_pace="140"
              big_jump_at="75" big_jump_ms="240" enter_albums="8" slide_ms="160" fold_near="50" reflect_top="0"/>
-    <element name="caption" name_px="27" artist_px="22" text_y="178" artist_y="27"/></view>
+    <element name="caption" name_px="27" artist_px="22" text_y="173" artist_y="27"/></view>
   <view name="page">
     <element name="rows" height="32" detail_height="52" text_x="24" title_y="4" title_h="24" detail_y="31" detail_h="20"/>
     <element name="title" height="0"/>
