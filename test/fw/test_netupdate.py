@@ -24,6 +24,18 @@ _n = int(TAG.replace(b'.', b'')) + 1
 NEWER = b'%d.%d.%d' % (_n // 100, _n // 10 % 10, _n % 10)
 OLDER = b'0.9.9'
 
+# The App Store's window and another over it, each a zeroed widget (no parent, no name): OLED's title and toast
+# checks read the window on top
+_WINDOWS = C.create_string_buffer(0x400), C.create_string_buffer(0x400)
+WIN, OTHER = (C.addressof(w) for w in _WINDOWS)
+
+
+def rows(fw):
+    """list_item_create's rows: a zeroed widget each, alive for the test."""
+    made: list = []
+    fw.mock('list_item_create', lambda *_: made.append(C.create_string_buffer(0x400)) or C.addressof(made[-1]))
+    return made
+
 SH_MAX = 16
 SH_CAP = 1 << 30
 SH_OK, SH_NET, SH_SPACE, SH_CARD, SH_MISSING, SH_BAD, SH_CANCELLED, SH_BUSY, SH_UNSIGNED, SH_FORGED = range(10)
@@ -1153,16 +1165,18 @@ class Page:
         self.table = apps(fw, *lines)
         self.card = Card(fw)
         self.sh = fw.var('netupdate__sh', Sh)
-        self.wifi, self.top, self.now = 1, 77, 3600
+        self.wifi, self.top, self.now = 1, WIN, 3600
         fw.mock('get_wifisignal', lambda *_: self.wifi)
-        fw.mock('window_create', lambda *_: 77)
+        fw.mock('window_create', lambda *_: WIN)
         fw.mock('window_manager_get_top_window', lambda *_: self.top)
         fw.mock('fw_clock_gettime', lambda which, ts, *_: C.cast(ts, C.POINTER(C.c_long)).__setitem__(0, self.now))
         fw.mock('widget_get_child', lambda row, i, *_: row)
-        fw.mock('list_item_create', lambda view, x, y, *_: 1000 + y)
-        fw.mock('widget_set_text_utf8', lambda w, s, *_: self.text.__setitem__(w, C.string_at(s).decode()))
+        self.rows = rows(fw)
+        self.said: list[str] = []  # every text written, in order
+        fw.mock('widget_set_text_utf8', lambda w, s, *_: self.said.append(C.string_at(s).decode()) or
+                self.text.__setitem__(w, self.said[-1]))
         fw.mock('navigator_to_with_context', lambda path, info, *_: self.toasts.append(C.string_at(info + 8).decode()))
-        self.sh.page = 77
+        self.sh.page = WIN
         fw.fn('netupdate__sh_rows', None)()
 
     def label(self, r):
@@ -1239,7 +1253,9 @@ def test_download_progress_on_the_row(fw):
 
 def test_with_no_list_check_for_updates_loads_it(fw):
     p = Page(fw)
-    assert p.sh.rows == 1 and p.sh.map[0] == ROW_CHECK and p.label(0) == 'Connect to Wi-Fi to load the list'
+    # the row's detail blank: OLED's note under it says why (feedback_empty)
+    assert p.sh.rows == 1 and p.sh.map[0] == ROW_CHECK and p.label(0) == ''
+    assert {'No apps listed', 'Connect to Wi-Fi, then Check for Updates'} <= set(p.said)
     p.click(0)
     assert p.sh.job == JOB_CHECK and p.sh.app == 0 and p.sh.manual == 1 and p.label(0) == 'Checking…'
 
@@ -1306,9 +1322,9 @@ def test_a_failed_check_is_said_only_after_check_for_updates(fw):
 
 def test_no_toast_when_the_page_is_left_covered_or_the_check_stopped(fw):
     p = Page(fw, b'me/foo')
-    p.top = 99
+    p.top = OTHER
     assert p.checked(manual=1) == []
-    p.top, p.sh.cancel = 77, 1
+    p.top, p.sh.cancel = WIN, 1
     assert p.checked(manual=1) == []
     p.sh.cancel = 0
     p.fw.fn('netupdate__sh_closed', C.c_int, C.c_void_p, C.c_void_p)(None, None)
@@ -1467,7 +1483,7 @@ def test_a_full_list_keeps_the_cards_list_inside_its_buffer(fw):
 
 def test_the_page_opens_on_the_cards_last_list(fw):
     card = Card(fw, {b'/mnt/mmc/.q2/sources.list': b'serial 2\n' + pinned(b'me/foo Foo\n', tag=b'3.0')})
-    fw.mock('window_create', lambda *_: 77)
+    fw.mock('window_create', lambda *_: WIN)
     fw.mock('get_wifisignal', lambda *_: 0)
     fw.fn('shelf_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
     table = (App * SH_MAX).in_dll(fw.lib, 'shelf_apps')
@@ -1476,7 +1492,7 @@ def test_the_page_opens_on_the_cards_last_list(fw):
 
 def test_the_page_opens_with_wifi_and_checks(fw):
     Card(fw)
-    fw.mock('window_create', lambda *_: 77)
+    fw.mock('window_create', lambda *_: WIN)
     fw.mock('get_wifisignal', lambda *_: 1)
     fw.fn('shelf_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
     assert fw.var('netupdate__sh', Sh).job == JOB_CHECK
@@ -1487,7 +1503,7 @@ def test_a_hostile_list_on_the_card_opens_the_page_safely(fw):
         fw.var('shelf_n', C.c_int).value = 0
         fw.var('netupdate__sh', Sh).page = None
         Card(fw, {b'/mnt/mmc/.q2/sources.list': raw})
-        fw.mock('window_create', lambda *_: 77)
+        fw.mock('window_create', lambda *_: WIN)
         fw.mock('get_wifisignal', lambda *_: 0)
         fw.fn('shelf_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
 
@@ -1854,10 +1870,10 @@ class Store:
         self.fw, self.card, self.wifi, self.free, self.seconds = fw, card, wifi, free, 5000
         self.text, self.toasts, self.timers, self.workers, self.held = {}, [], [], [], []
         fw.mock('get_wifisignal', lambda *_: self.wifi)
-        fw.mock('window_create', lambda *_: 77)
-        fw.mock('window_manager_get_top_window', lambda *_: 77)
+        fw.mock('window_create', lambda *_: WIN)
+        fw.mock('window_manager_get_top_window', lambda *_: WIN)
         fw.mock('widget_get_child', lambda row, i, *_: row)
-        fw.mock('list_item_create', lambda view, x, y, *_: 1000 + y)
+        self.rows = rows(fw)
         fw.mock('widget_set_text_utf8', lambda w, s, *_: self.text.__setitem__(w, C.string_at(s).decode()))
         fw.mock('navigator_to_with_context', lambda path, info, *_: self.toasts.append(C.string_at(info + 8).decode()))
         fw.mock('timer_add', lambda fn, ctx, ms, *_: self.timers.append(fn) or len(self.timers))

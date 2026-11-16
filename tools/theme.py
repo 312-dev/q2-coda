@@ -2,7 +2,6 @@
 the payload's theme table (themes.inc)."""
 import colorsys
 import dataclasses
-import itertools
 import json
 import math
 import re
@@ -16,12 +15,11 @@ ACCENT_NAMES = [n.lower() for n in re.findall(r'\}\s*,?\s*/\* (\w+)', ACCENTS_BL
 ACCENT_TONES = [[int(x, 16) for x in re.findall(r'0x([0-9a-fA-F]{6})', row)] for row in re.findall(r'\{([^}]*)\}', ACCENTS_BLOCK)]
 ALL_ACCENTS = (1 << len(ACCENT_NAMES)) - 1
 SETTINGS = {'light': ('SETTING_LIGHT', ('off', 'on', 'auto')), 'accent': ('SETTING_ACCENT', ACCENT_NAMES),
-            'corners': ('SETTING_ROUNDED', ('square', 'round')), 'home': ('SETTING_HOME', ('split', 'full', 'carousel')),
+            'home': ('SETTING_HOME', ('split', 'full', 'carousel')),
             'battery': ('SETTING_BATTERY', ('icon', 'percent', 'both', 'inside')),
             'shortcut': ('SETTING_SHORTCUT', ('rockbox', 'artists', 'albums', 'favorites', 'rated_albums', 'shuffle', 'games', 'playlists', 'podcasts', 'audiobooks', 'groovebox', 'none')),
-            'time_title': ('SETTING_TIMETITLE', ('off', 'on')),
-            'np_layout': ('SETTING_NPCENTRED', ('ipod', 'centred'))}
-ACCENT_KEYS = {'ACCENT': '&st.accent', 'MINIMAL_ACCENT': '&st.minimal_accent'}
+            'time_title': ('SETTING_TIMETITLE', ('off', 'on'))}
+ACCENT_KEYS = {'ACCENT': '&st.accent'}
 # The IPOD keys the payload reads itself (theme_engine.c setting_keys[], every "IPOD", "<KEY>" literal): a
 # theme's own key is never one of them.
 PAYLOAD_KEYS = frozenset(
@@ -29,18 +27,7 @@ PAYLOAD_KEYS = frozenset(
     + [k for f in sorted((ROOT/'patch').glob('*.c')) for k in re.findall(r'"IPOD", "([A-Z0-9_]+)"', f.read_text())])
 # value name -> its C name (theme.h); the font keys take FONTS, build.py's faces (stock.h's FONT_*)
 FONTS = {k: f.c for k, f in FACES.items()}
-CHOICES = {'list.selection.painter': {'card': 'SEL_CARD', 'stops': 'SEL_STOPS', 'bar': 'SEL_BAR'},
-           'bar.fill.painter': {'flat': 'BAR_FLAT', 'gloss': 'BAR_GLOSS'},
-           'bar.battery.painter': {'stock': 'BATT_STOCK', 'classic-light': 'BATT_CLASSIC_LIGHT', 'slim': 'BATT_SLIM'},
-           'list.chevron.painter': {'image': 'CHEV_IMAGE', 'icon': 'CHEV_ICON'},
-           'list.scrollbar.painter': {'thumb': 'SB_THUMB', 'wheel': 'SB_WHEEL'},
-           'list.songs.painter': {'stock': 'SONGS_STOCK', 'inline': 'SONGS_INLINE'},
-           'playing.scrubber.painter': {'stock': 'SCRUB_STOCK', 'rows': 'SCRUB_ROWS'},
-           'volume.panel.painter': {'stock': 'VOL_STOCK', 'classic-light': 'VOL_CLASSIC_LIGHT'},
-           'dialog.confirm.painter': {'stock': 'CONFIRM_STOCK', 'classic-light': 'CONFIRM_CLASSIC_LIGHT', 'oled': 'CONFIRM_OLED'},
-           'pages.own.painter': {'stock': 'PAGES_STOCK', 'classic-light': 'PAGES_CLASSIC_LIGHT', 'oled': 'PAGES_OLED'},
-           **dict.fromkeys(('playing.title.font', 'playing.info.font', 'home.rows.font', 'list.row.font', 'list.row.meta_font', 'list.row.tall_font', 'bar.title.font', 'playing.artist.font'), FONTS),
-           'playing.layout': {'ipod': 'NP_IPOD', 'centred': 'NP_CENTRED'},
+CHOICES = {**dict.fromkeys(('playing.title.font', 'playing.info.font', 'home.rows.font', 'list.row.font', 'list.row.meta_font', 'list.row.tall_font', 'bar.title.font', 'playing.artist.font'), FONTS),
            'scheme.mode': {'derive': 'SCHEME_DERIVE', 'light': 'SCHEME_LIGHT', 'dark': 'SCHEME_DARK'}}
 # coverflow.shelf's thumb: each value's top (docs/internals.md#coverflow-thumb); fold_near past 50 would
 # let the fold start with the caption still on the album before the letter's; jump_at, jump_ms and jump_pace are only Fast Navigation off's
@@ -84,12 +71,10 @@ def key(path, field, type, hi=None, final=False):
 
 # theme_t declaration order; the scheme.* keys are scheme_t's.
 SCHEMA = {k.path: k for k in (
-    key('list.selection.painter', 'painter[PAINT_SELECTION]', 'enum'),
-    # the bar painter's list row under Corners: Round: its ends' radius, at most half the row (SEL_MAX_RADIUS: always
-    # the pill), and its inset from each side of the row
+    # the selection bar on a list row: its ends' radius, at most half the row (SEL_MAX_RADIUS: always the pill), and
+    # its inset from each side of the row
     Key('list.selection.radius', 'sel_radius', 'int', 0, O['SEL_MAX_RADIUS'], O['SEL_MAX_RADIUS'], 'live'),
     Key('list.selection.inset', 'sel_inset', 'int', 0, 64, O['SEL_INSET'], 'live'),
-    key('list.selection.fixed', 'sel_fixed', 'bool'),  # ... kept under Corners: Square too
     key('list.marquee.fade', 'marquee_fade', 'bool'),  # a scrolling label's ends fade into what is behind it (list_marks.c)
     key('list.reopen.top', 'reopen_top', 'bool'),  # a list left by Return opens at its top when chosen again (navigation.c forget_left)
     key('list.shuffle.row', 'shuffle_row', 'bool'),  # Songs' action row reads Shuffle and takes the wheel's selection (navigation.c shuffle_key)
@@ -97,33 +82,19 @@ SCHEMA = {k.path: k for k in (
     key('list.entry.ipod', 'entry_ipod', 'bool'),  # text entry the iPod's way: Search's letter strip (search_strip.c), the keyboard walked by the wheel (keyboard.c)
     key('playing.art.radius', 'np_art_radius', 'int', 75),  # Now Playing's art corners in px; 0: NP_ART_RADIUS's share of its size
     key('playing.modes.icons', 'np_modes', 'bool'),  # shuffle and repeat as the theme's own pair (np_bar.c np_modes), heart and More its own glyphs (np_glyphs)
-    key('bar.fill.painter', 'painter[PAINT_BAR]', 'enum'),
-    key('bar.battery.painter', 'painter[PAINT_BATTERY]', 'enum'),
     key('home.chevron.visible', 'chevron_home', 'bool'),
-    key('list.chevron.selected', 'chevron_sel', 'bool'),
     key('list.art.x', 'art_x', 'int', 375),  # a row with art, on screen: the cover, 0: stock's layout
     key('list.art.text_x', 'art_text_x', 'int', 375),  # ... its text's first and last columns
     key('list.art.text_end', 'art_text_end', 'int', 375),
     key('list.art.placeholder', 'art_placeholder', 'int', 51),
     key('list.art.radius', 'art_radius', 'int', 26),  # a row cover's corners on screen at the set's art size; 0: NP_ART_RADIUS's share  # stock's grey tiles (list_folder, list_song) this size, centred in their row; 0: stock's
-    key('list.row.text_end', 'row_text_end', 'int', 375),  # a two-line row without art (Songs'): its text's last column on screen
-    Key('list.separator.stops', 'sep', 'stops', 0, 0, (), 'live', True),  # ... its last rows, one stop a row, final
     key('list.divider.ink', 'div_ink', 'color', final=True),  # a 1 px divider under each row taller than the pitch, on the text and right columns
     key('list.row.tall_font', 'font[ROLE_TALL]', 'enum'),  # a two-line row's title
     key('list.row.tall_px', 'font_px[ROLE_TALL]', 'int', 64),
-    key('list.chevron.painter', 'painter[PAINT_CHEVRON]', 'enum'),  # icon: every drill row's `>`, the theme's own art, at the set's right_x
-    key('list.chevron.x', 'chevron_x', 'int', 375),  # the theme's own chevron's box on screen in a full-width list; 0: stock's
-    key('home.chevron.x', 'home_chevron_x', 'int', 375),  # ... and in Split's list
-    key('list.letter.raw', 'letter_raw', 'bool'),  # the fast-scroll letter's colours are final in both halves
     key('playing.artist.font', 'np_meta_font', 'enum'),  # Now Playing's artist and album, at the asset's size; 0: the style's
-    key('list.letter.px', 'letter_px', 'int', 64),  # ... and its size, 0: LETTER_PX
-    key('bar.title.caps', 'caps_mark', 'bool'),
-    key('home.rows.caps', 'caps_home', 'bool'),
-    key('playing.album.caps', 'caps_np', 'bool'),
     key('list.icons.mono', 'icons_mono', 'bool'),
     key('list.icons.badge_muted', 'icons_badge_muted', 'bool'),
     key('list.icons.addon_mono', 'icons_addon_mono', 'bool'),
-    key('list.icons.badge_ink', 'icons_badge_ink', 'bool'),  # the codec badges in the half's ink, final
     key('playing.title.font', 'font[ROLE_NP]', 'enum'),
     key('playing.title.font_px', 'font_px[ROLE_NP]', 'int', 64),
     key('playing.info.font', 'font[ROLE_INFO]', 'enum'),  # small text: the QR pages, the Time Zone caption, page notes
@@ -138,90 +109,31 @@ SCHEMA = {k.path: k for k in (
     key('home.rows.label_end_full', 'home_label_end[1]', 'int', 375),
     key('home.rows.font', 'font[ROLE_HOME]', 'enum'),
     key('home.rows.font_px', 'font_px[ROLE_HOME]', 'int', 64),
-    Key('home.pane.stops', 'home_pane', 'stops', 0, 0, (), 'live', True),  # Split with no cover, final; (): the placeholder image
-    key('home.pane.shadow', 'pane_shadow', 'color'),
-    key('home.pane.shadow_w', 'pane_shadow_w', 'int', 32),
-    Key('home.pane.shadow_a', 'pane_shadow_a', 'alphas', 0, 0, (), 'live'),  # its alpha per column
-    key('home.pane.light_a', 'pane_light_a', 'int', 255),  # white, this alpha at the left edge and 0 at the right
-    key('home.pane.icon_x', 'pane_icon_x', 'int', 375),  # a row's icon's top-left in the panel; 0: the pane doesn't follow the row
-    key('home.pane.icon_y', 'pane_icon_y', 'int', 320),
-    key('home.pane.note_x', 'pane_note_x', 'int', 375),
-    key('home.pane.note_y', 'pane_note_y', 'int', 320),
-    key('home.pane.count_y', 'pane_count_y', 'int', 320),
-    key('home.pane.count_w', 'pane_count_w', 'int', 375),
-    key('home.pane.count_px', 'pane_count_px', 'int', 64),
-    key('home.pane.svc_x', 'pane_svc_x', 'int', 375),  # Streaming's list: a service's icon, svc_px square
-    key('home.pane.svc_y', 'pane_svc_y', 'int', 320),
-    key('home.pane.svc_px', 'pane_svc_px', 'int', 188),
     key('settings.rows.top', 'set_top', 'int', 375),
     key('settings.values.text', 'set_text', 'bool'),
     key('settings.values.switch', 'set_switch', 'bool'),  # an on/off row's switch, drawn (list_marks.c switch_mark) where set_text would write On or Off
     key('settings.values.ink', 'set_value_ink', 'color', final=True),  # a set_text row's value, right-aligned; 0: the label style's white
-    key('playing.scrubber.painter', 'painter[PAINT_SCRUB]', 'enum'),
-    key('volume.panel.painter', 'painter[PAINT_VOLUME]', 'enum'),
-    key('dialog.confirm.painter', 'painter[PAINT_CONFIRM]', 'enum'),
-    key('pages.own.painter', 'painter[PAINT_PAGES]', 'enum'),  # the theme's own pages (theme.h classic_pages, oled_pages)
-    key('pages.own.art_final', 'art_final', 'bool'),  # Classic Light's own art (art.py's classic_light_ images) is final
-    # the rows painter's pixel rows, top to bottom (final colours): the track, the played part over it; the volume
-    # panel away from Now Playing and a card app's progress (paint_rows_bar)
-    Key('playing.scrubber.dark_track', 'np_rows[0]', 'rows', 0, 0, (), 'live'),
-    Key('playing.scrubber.dark_fill', 'np_rows[1]', 'rows', 0, 0, (), 'live'),
-    Key('playing.scrubber.light_track', 'np_rows[2]', 'rows', 0, 0, (), 'live'),
-    Key('playing.scrubber.light_fill', 'np_rows[3]', 'rows', 0, 0, (), 'live'),
+    key('pages.own.art_final', 'art_final', 'bool'),  # the theme's own art (art.py's <art>_ images) is final
     key('playing.scrubber.height', 'np_bar', 'int', 375),
     key('playing.scrubber.scrub_height', 'np_scrub', 'int', 375),
-    # the plain bar's track (np_theme), the volume's over it and Spotify's; Classic's bar is its stops
+    # the progress bar's track (np_theme), the volume's over it and Spotify's
     Key('playing.scrubber.track', 'np_track_rgb', 'color', 0, 0xffffff, O['TRACK_COLOR'], 'live'),
-    Key('playing.scrubber.stops', 'np_track', 'stops', 0, 0, (), 'live', True),  # Classic's track, final (paint_scrubber); (): stock's bar
-    Key('playing.scrubber.fill', 'np_fill', 'stops', 0, 0, (), 'live'),  # its played part under the theme's own scheme (ipod_bar); (): the scheme's band
-    key('playing.art.square', 'art_square', 'bool'),
     key('list.row.font', 'font[ROLE_TITLE]', 'enum'),
     key('list.row.meta_font', 'font[ROLE_META]', 'enum'),
     key('list.row.title_px', 'font_px[ROLE_TITLE]', 'int', 64),
     key('list.row.meta_px', 'font_px[ROLE_META]', 'int', 64),
     key('bar.title.font', 'font[ROLE_BAR]', 'enum'),
     key('bar.title.font_size', 'font_px[ROLE_BAR]', 'int', 64),
-    Key('bar.battery.stops', 'batt', 'stops', 0, 0, (), 'live'),
-    key('bar.battery.line', 'batt_line', 'color', final=True),  # a grey that must follow the paper
-    Key('bar.battery.empty', 'batt_empty', 'stops', 0, 0, (), 'live'),  # the section past the level, final
-    key('bar.battery.low', 'batt_low', 'color'),  # the level when low, batt_low_w columns
-    key('bar.battery.low_w', 'batt_low_w', 'int', 64),
-    key('bar.battery.edge', 'batt_edge', 'color'),  # its bottom row inside the outline
-    key('bar.battery.corner_a', 'batt_corner_a', 'int', 255),  # the outline's top corners, the nub's outer ones
-    key('bar.battery.foot_a', 'batt_foot_a', 'int', 255),  # its bottom corners
-    key('bar.battery.shade_a', 'batt_shade_a', 'int', 255),  # black over the level's last column
-    key('bar.battery.soft_a', 'batt_soft_a', 'int', 255),  # the light half's soft outer edge: left of the body, black
-    key('bar.battery.soft_top_a', 'batt_soft_top_a', 'int', 255),  # ... and above it
-    key('bar.battery.emboss_a', 'batt_emboss_a', 'int', 255),  # the light half's white row under the body
-    key('bar.battery.emboss_nub_a', 'batt_emboss_nub_a', 'int', 255),  # ... and under the nub
-    Key('bar.icons.bt_dy', 'bar_bt_dy', 'int', -4, 4, 0, 'live'),  # rows Bluetooth and Wi-Fi sit off the row layout's
-    Key('bar.icons.wifi_dy', 'bar_wifi_dy', 'int', -4, 4, 0, 'live'),
-    *(key(f'list.scrollbar.{a}', f'sb_{a}', 'int', 375) for a in ('w', 'right', 'top', 'bottom', 'min')),  # paint_scrollbar's thumb
+    *(key(f'list.scrollbar.{a}', f'sb_{a}', 'int', 375) for a in ('w', 'right', 'top', 'bottom', 'min')),  # list_marks.c's track and thumb, while the wheel turns
     key('list.scrollbar.thumb', 'sb_thumb', 'color', final=True),
-    key('list.scrollbar.painter', 'painter[PAINT_SCROLL]', 'enum'),  # wheel: track and thumb while the wheel turns
     key('list.scrollbar.track', 'sb_track', 'color', final=True),
-    key('list.songs.painter', 'painter[PAINT_SONGS]', 'enum'),  # inline: one-line song rows by Song Artist and Song Length (song_rows.c)
-    key('scheme.card', 'card', 'bool'),
-    key('scheme.raw_red', 'raw_red', 'bool'),
-    key('scheme.fill', 'fill', 'color'),
     key('scheme.chevron', 'chevron', 'color'),
     key('scheme.muted', 'muted', 'color'),
-    key('scheme.bar_light', 'bar_light', 'color'),
-    Key('scheme.sel.stops', 'sel', 'stops', 0, 0, (), 'live', True),
-    key('scheme.sel.top', 'sel_top', 'color', final=True),
-    key('scheme.sel.edge', 'sel_edge', 'color', final=True),
-    key('scheme.sel.tall_edge', 'sel_tall_edge', 'color', final=True),  # a row taller than the set's pitch ends on these two rows, 0: its edge
-    key('scheme.sel.tall_line', 'sel_tall_line', 'color', final=True),
-    key('scheme.sel.tall_top', 'sel_tall_top', 'color', final=True),  # ... and has this second row, 0 in both halves: the stops (a dark 0 takes the light half's: half())
     key('scheme.sel.text', 'sel_text', 'color', final=True),
-    Key('scheme.bar.stops', 'bar', 'stops', 0, 0, (), 'live', True),
-    key('scheme.bar.line', 'bar_line', 'color', final=True),
-    key('scheme.bar.line2', 'bar_line2', 'color'),  # the light half draws it, final, above bar.line; 0: none
     key('scheme.mode', 'mode', 'enum'),
     # the light half's flip ends; the dark half's are fixed, #000000 and #ffffff
     Key('scheme.paper', 'paper', 'color', 0, 0xffffff, O['LIGHT_PAPER'] * 0x010101, 'live'),
     Key('scheme.ink', 'ink', 'color', 0, 0xffffff, O['LIGHT_INK'] * 0x010101, 'live'),
-    Key('playing.layout', 'np_layout', 'enum', 0, 1, 0, 'open'),  # the 'open' fields: after n_opts
     *(Key(f'coverflow.{e}.{a}', f'cf.{a}', 'int', lo, hi, 0, 'open') for e, a, lo, hi in (
         ('shelf', 'top', 0, 50), ('shelf', 'x1', 0, 1023), ('shelf', 'xs', 0, 799), ('shelf', 'z1', 0, 799),
         ('shelf', 'zs', 0, 799), ('shelf', 'eye', 1, 2046), ('shelf', 'bright1', 1, 256), ('shelf', 'bright2', 1, 256),
@@ -230,7 +142,7 @@ SCHEMA = {k.path: k for k in (
         ('shelf', 'swing', 0, 2), ('shelf', 'lift', 0, 40), ('shelf', 'eye_turn', 0, 400), ('shelf', 'view_h', O['CF_VIEW_H'], 294),
         *(('shelf', a, 0, hi) for a, hi in CF_THUMB.items()), ('caption', 'name_px', 1, 32), ('caption', 'artist_px', 1, 28),
         ('caption', 'text_y', 170, 290), ('caption', 'artist_y', 20, 32))),
-    # % of the plane's own spacing of a cover's art, from even (0); 100, the plane's, is Minimal's
+    # % of the plane's own spacing of a cover's art, from even (0); 100, the plane's, the default
     Key('coverflow.shelf.art_persp', 'cf.art_persp', 'int', 0, 100, 100, 'open'),
     Key('page.rows.height', 'page_row', 'int', 20, 64, 48, 'open'),
     Key('page.rows.detail_height', 'page_detail', 'int', 20, 80, 64, 'open'),
@@ -241,17 +153,6 @@ SCHEMA = {k.path: k for k in (
     Key('page.rows.title_h', 'page_cap_h', 'int', 16, 48, 32, 'open'),
     Key('page.rows.detail_y', 'page_det_y', 'int', 16, 60, 36, 'open'),
     Key('page.rows.detail_h', 'page_det_h', 'int', 12, 40, 24, 'open'),
-    # no payload field: tools/art.py draws these into the theme's images
-    Key('bar.battery.bolt', 'bolt', 'color', 0, 0xffffff, 0, 'art'),
-    Key('bar.battery.bolt_halo_a', 'bolt_halo_a', 'int', 0, 255, 0, 'art'),
-    Key('bar.state.stops', 'state_stops', 'stops', 0, 0, (), 'art'),
-    Key('bar.state.edge', 'state_edge', 'stops', 0, 0, (), 'art'),
-    Key('bar.state.halo_light', 'state_halo_light', 'int', 0, 255, 0, 'art'),
-    Key('bar.state.halo_dark', 'state_halo_dark', 'int', 0, 255, 0, 'art'),
-    Key('playing.station.stops', 'station_stops', 'stops', 0, 0, (), 'art'),  # Internet Radio's cover (tools/art.py station)
-    Key('playing.station.mast', 'station_mast', 'stops', 0, 0, (), 'art'),
-    Key('playing.station.band_a', 'station_band_a', 'int', 0, 255, 0, 'art'),
-    Key('playing.station.shadow_a', 'station_shadow_a', 'int', 0, 255, 0, 'art'),
     Key('geometry.set', 'geom_set', 'set', 0, 0, 'ipod', 'boot'),
     *(Key(f'motion.{k}.{a}', f'motion.{k}.{a}', t, 0, hi, 0, 'motion')
       for k in (*MOTION_WINDOW, *MOTION_WIDGET) for a, t, hi in (('ms', 'int', 2000), ('easing', 'easing', len(EASINGS) - 1))),
@@ -262,8 +163,8 @@ FIELDS = {k.field: k for k in SCHEMA.values()}
 
 
 def view_attr(path):
-    """Whether a SCHEMA path is a view element's attribute (list.selection.painter), not a view's own
-    (playing.layout) or a scheme role (scheme.sel.stops)."""
+    """Whether a SCHEMA path is a view element's attribute (list.selection.radius), not a scheme role
+    (scheme.sel.text)."""
     return path.count('.') == 2 and not path.startswith('scheme.')
 
 
@@ -284,39 +185,13 @@ MOTION_ROLES = {'motion.page.ms': 'PAGE_SLIDE_MS', 'motion.page.easing': 'EASE_C
                 'motion.coverflow_step.ms': 'HOME_SLIDE_MS', 'motion.coverflow_step.easing': 'SLIDE_EASING',
                 'motion.coverflow_step_fast.ms': 'HOME_FAST_SLIDE_MS', 'motion.coverflow_step_fast.easing': 'SLIDE_EASING',
                 'recall_ms': 'GLIDE_MS', 'bump_px': 'BUMP_PX'}
+# OLED's macros cover the fields its theme.xml leaves to offsets.inc: the rest it states itself, and a macro, applied
+# after the file (resolve), would override it.
 ROLE_MACROS = {
-    'minimal': {'home_top': 'HOME_TOP', 'home_full_row': 'HOME_FULL_ROW', 'home_text_x': 'HOME_DOT_X + HOME_DOT + HOME_DOT_GAP',
-                'home_label_end[0]': 'HOME_SPLIT_LABEL_END', 'home_label_end[1]': 'HOME_LABEL_END', 'set_top': 'SET_TOP',
-                'np_bar': 'NP_BAR_MINIMAL', 'np_scrub': 'NP_BAR_CLASSIC',
-                'fill': 'MINIMAL_FILL', 'chevron': 'MINIMAL_CHEVRON', 'muted': 'SUDO_MUTED', 'bar_light': '0', **CF_ROLES, **MOTION_ROLES},
-    # Classic: what its theme.xml doesn't state itself (Now Playing's bar, the bars outside its gloss)
-    'classic-light': {'set_top': '0', 'np_bar': 'NP_BAR_IPOD', 'np_scrub': 'NP_BAR_IPOD', 'fill': '0', 'chevron': '0',
-                      'bar_light': 'LIGHT_BAR'},
-    'modern': {'home_top': '0', 'home_full_row': 'HOME_MODERN_ROW', 'home_text_x': 'HOME_MODERN_TEXT_X',
-               'home_label_end[0]': 'HOME_MODERN_LABEL_END', 'home_label_end[1]': 'HOME_MODERN_LABEL_END', 'set_top': '0',
-               'np_bar': 'NP_BAR_CLASSIC', 'fill': '0', 'chevron': '0', 'muted': '0',
-               'bar_light': 'LIGHT_BAR'},
+    'oled': {'home_label_end[1]': 'HOME_LABEL_END', 'chevron': 'MINIMAL_CHEVRON',
+             **{k: v for k, v in CF_ROLES.items() if k not in ('cf.reflect_top', 'cf.name_px', 'cf.artist_px', 'cf.text_y', 'cf.artist_y')},
+             **MOTION_ROLES},
 }
-
-# Classic Blue's selection band: its 1 px top line, the stops under it and its edge row:
-# derive="gloss"'s shape. assets/themes/classic-light/theme.xml states the same values (test_theme checks).
-GLOSS = ((0, 0x08a6e7), (17, 0x009ade), (38, 0x008ade), (58, 0x007dde), (79, 0x006dd6), (100, 0x0065d6))
-GLOSS_TOP, GLOSS_EDGE, GLOSS_TALL_EDGE, GLOSS_TALL_LINE, GLOSS_TALL_TOP = 0x94c7de, 0x004184, 0x004aa3, 0x688db3, 0x27ade5
-
-
-def turn(c, top):
-    """c, a colour of Classic Blue's band, in the accent whose top tone is top: its HSV hue turned by top's
-    less the band's 38 % stop's, saturation and value scaled by theirs, so that stop becomes top."""
-    def hsv(x): return colorsys.rgb_to_hsv(*((x >> s & 255) / 255 for s in (16, 8, 0)))
-    (h0, s0, v0), (h, s, v), (ch, cs, cv) = hsv(GLOSS[2][1]), hsv(top), hsv(c)
-    rgb = colorsys.hsv_to_rgb((ch + h - h0) % 1, min(1, cs * s / s0), min(1, cv * v / v0))
-    return '#' + ''.join(f'{round(255 * x):02x}' for x in rgb)
-
-
-def derive_gloss(tones):
-    """Classic Blue's stops in the accent of tones, an ACCENTS row: derive="gloss"."""
-    return [(p, turn(c, tones[0])) for p, c in GLOSS]
-
 
 GEOMETRIES = {SET0.name: SET0}  # the built-in set; a theme declares its others (t['geoms'])
 GEOM_NAME = re.compile('(?!n$)[a-z][a-z0-9-]{0,23}')  # GEOM_<NAME> stays one C name per set, never GEOM_N
@@ -356,15 +231,12 @@ GEOM_RANGES = {
     'set_icon': (0, lambda g: g.set_row),
     'stream_row': (28, 78),
     'bar_px': (0, lambda g: g.bar),  # the bar title's size inside the bar; 0: no title
-    'bar_title_w': (0, 188),  # its text's width: at most the bar's left half, a full-length title reaching the clock's box
-    'bar_right': (0, 80),
     'batt_w': (1, 40),
     'batt_h': (1, lambda g: g.bar - 2),  # inside the bar, clear of its line row
     'text_x': (0, 60),  # the glass rule stays test/build.py's
     'action_row': (0, 50),
     'list_end': (0, lambda g: 320 - g.bar),  # ... and list_end's, inside the window
     'home_lib': (0, 1),  # Home's Library row slides in a list of the Library's rows
-    'np_ipod': (0, 1),  # Now Playing as an iPod classic's (tools/ipod.py playing_page)
     'home_row': (28, lambda g: (320 - g.bar - O['HOME_TOP']) // O['HOME_REST']),  # the rows Home rests on under HOME_TOP fit the client
     'stock_row': (28, 78),
     'stock_body': (24, lambda g: g.stock_row),
@@ -382,7 +254,7 @@ GEOM_RANGES = {
     'list_fit': (0, lambda g: 1 if g.list_end else 0),  # a list box ends at list_end only where there is one
     'status_y': (0, lambda g: g.bar - 12),  # its glyphs (12 px) inside the bar
     'right_x': (0, 60),
-    'np_art': (0, lambda g: 0 if g.np_ipod else 200),  # Now Playing on the grid, never as well as Classic's
+    'np_art': (0, 200),  # Now Playing on the grid
     'np_bar_y': (0, lambda g: 320 - 56 if g.np_art else 0),  # its bar, with the times and the state row under it, on screen
     # Split: Home's rows never wider than the screen's half and the pane's overlap; the pane no wider than
     # HOME_SPLIT_W leaves (home.ring, DRIFT_TEXELS), and no taller than the screen: up to the bar's whole height, the
@@ -393,9 +265,9 @@ GEOM_RANGES = {
     'split_inset': (0, 4),  # percent of the zoomed cover; past about 4.5 the 110 % zoom leaves no pan
     'modal': (0, 1),  # the More pages as dialogs, drawn with the hold menus as the inset modal (ipod.modal_page)
 }
-THEME_GEOM_OFF = 4  # offsetof(theme_t, geom), right after name so no field moves it; asserted in navigation.c; test/patch.py pokes it
-THEME_MOTION_OFF = 8  # offsetof(theme_t, motion), right after geom; asserted in navigation.c; test/patch.py pokes it
-SCHEME_MODE_OFF = 5  # offsetof(scheme_t, mode) on MIPS, right after flags; asserted in navigation.c; test/patch.py pokes it
+THEME_GEOM_OFF = 0  # offsetof(theme_t, geom), first so no field moves it; asserted in theme_engine.c; test/patch.py pokes it
+THEME_MOTION_OFF = 4  # offsetof(theme_t, motion), right after geom and three flags; asserted in theme_engine.c; test/patch.py pokes it
+SCHEME_MODE_OFF = 4  # offsetof(scheme_t, mode) on MIPS, right after tones; asserted in theme_engine.c; test/patch.py pokes it
 
 
 def sets(t):
@@ -584,7 +456,7 @@ FINAL = [k for k in SCHEMA.values() if k.final]
 
 def half(d, light, paper, ink):
     """d's final fields in one half: the stated value, else the other half's flipped (light) or unflipped
-    (dark); unset stays unset; stops per stop, positions kept; 'light' dropped."""
+    (dark); unset stays unset; 'light' dropped."""
     out = {f: v for f, v in d.items() if f != 'light'}
     f_ = flip if light else unflip
     for k in FINAL:
@@ -593,7 +465,7 @@ def half(d, light, paper, ink):
         v = d['light'].get(k.field) if light else d[k.field] or None
         if v is None:  # unstated: the other half's, flipped; unset (0, ()) stays unset
             o = d[k.field] if light else d['light'].get(k.field, k.default)
-            v = tuple((p, f_(c, paper, ink)) for p, c in o) if k.type == 'stops' else o and f_(o, paper, ink)
+            v = o and f_(o, paper, ink)
         out[k.field] = v
     return out
 
@@ -650,25 +522,6 @@ def value(node, path, text, macros):
         if not re.fullmatch('#[0-9a-fA-F]{6}', text):
             err(f'{path}: expected #rrggbb')
         v = int(text[1:], 16)
-    elif k.type == 'alphas':  # "N N ...": 1 to 32 alphas of 255
-        if not re.fullmatch(r'[0-9]{1,3}( [0-9]{1,3}){0,31}', text) or any(int(a) > 255 for a in text.split()):
-            err(f'{path}: expected up to 32 alphas 0..255')
-        return tuple(map(int, text.split()))
-    elif k.type == 'rows':  # "#rrggbb[aa] ...": 1 to 31 pixel rows, each its colour, 0xAARRGGBB
-        rows = text.split()
-        if not 1 <= len(rows) <= 31 or not all(re.fullmatch('#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?', r) for r in rows):
-            err(f'{path}: expected up to 31 of #rrggbb or #rrggbbaa')
-        return tuple(int(r[1:], 16) << 8 >> 8 | 0xff000000 if len(r) == 7 else int(r[7:], 16) << 24 | int(r[1:7], 16) for r in rows)
-    elif k.type == 'stops':  # "#rrggbb N, ...": 2 to 13 stops (stops_t), N rising from 0 to 100
-        stops = [re.fullmatch(r'#([0-9a-fA-F]{6}) ([0-9]{1,3})', s.strip()) for s in text.split(',')]
-        if not all(stops):
-            err(f'{path}: expected "#rrggbb N, ..."')
-        v = tuple((int(m[2]), int(m[1], 16)) for m in stops if m)
-        if not 2 <= len(v) <= 13:
-            err(f'{path}: 2 to 13 stops')
-        if v[0][0] != 0 or v[-1][0] != 100 or any(a[0] >= b[0] for a, b in zip(v, v[1:])):
-            err(f'{path}: positions must rise from 0 to 100')
-        return v
     else:
         if not re.fullmatch('-?[0-9]+', text):
             err(f'{path}: expected an integer')
@@ -716,53 +569,20 @@ def offered(c, o, names, what):
     return sum(1 << names.index(n) for n in set(listed))
 
 
-PLAIN_KEYS = {'HOMELIB', 'ROWPREVIEW', 'STATUSBAR', 'SONGARTIST', 'SONGLENGTH', 'NPTIME'}  # the plain own keys the payload reads (theme_engine.c home_lib_on, row_preview_on, bar_theme, song_artist, song_length, np_time_total)
+PLAIN_KEYS = {'SONGARTIST', 'SONGLENGTH', 'NPTIME'}  # the plain own keys the payload reads (theme_engine.c song_artist, song_length, np_time_total)
 
 
-def order(attrs):
-    """A <theme>'s row in the Theme picker: its order, else its index; None when neither is a digit (resolve()
-    rejects it). builtins() checks the rows run 0..N-1, each once."""
-    o = attrs.get('order', attrs.get('index', ''))
-    return int(o) if re.fullmatch('[0-9]', o) else None
-
-
-def picker(by_id):
-    """The Theme picker's rows: the root nodes in by_id (id -> node), by order()."""
-    return sorted((n for n in by_id.values() if order(n.attrs) is not None), key=lambda n: order(n.attrs))
-
-
-# The own keys whose values after the first are the built-in themes in the picker's order, which the payload maps
-# through theme_rows[] (theme_engine.c bar_theme): <value themes="picker"/> stands for them.
-PICKER_KEYS = {'STATUSBAR'}
-
-
-def own_option(c, known, themes=()):
+def own_option(c, known):
     """A theme's own <option key label>: its values, each naming the geometry set it boots, one of known, or
-    none of them naming one: a plain choice the payload reads as st.own[OWN_<KEY>]. themes: the picker's theme
-    names, which a PICKER_KEYS option's <value themes="picker"/> expands to."""
+    none of them naming one: a plain choice the payload reads as st.own[OWN_<KEY>]."""
     def err(node, message): fail(node.file, node.line, message)
     key = own_key(c, c.attrs['key'])
     if 'values' in c.attrs:
         err(c, f'{key}: its <value>s are its values')
     if not label_ok(c.attrs.get('label', '')):
         err(c, f'{key}: label expected 1..24 bytes, no control characters')
-    if key in PICKER_KEYS and [sorted(v.attrs) for v in c.children] != [['label'], ['themes']]:
-        err(c, f'{key}: expected <value label="..."/><value themes="picker"/>: the theme\'s own, then every theme')
     names, sets = [], []
     for v in c.children:
-        if 'themes' in v.attrs:
-            if key not in PICKER_KEYS:
-                err(v, f'{key}: themes is for {", ".join(sorted(PICKER_KEYS))}, which the payload maps by the picker')
-            if v.attrs['themes'] != 'picker':
-                err(v, f'value.themes: unknown value {v.attrs["themes"]}')
-            for x in themes:
-                if not label_ok(x):
-                    err(v, f'{key}: theme name {x} as a value label: expected 1..24 bytes')
-                if x in names:
-                    err(v, f'{key}: duplicate value {x}')
-                names.append(x)
-                sets.append(None)
-            continue
         for k in v.attrs:
             if k not in ('label', 'set'):
                 err(v, f'unknown key value.{k}')
@@ -798,12 +618,12 @@ def resolve(root, by_id, seen=()):
     def err(node, message): fail(node.file, node.line, message)
     a = root.attrs
     for k in a:
-        if k not in ('format', 'id', 'name', 'index', 'order', 'extends', 'art'):
+        if k not in ('format', 'id', 'name', 'index', 'extends', 'art'):
             err(root, f'unknown key theme.{k}')
     tid = a.get('id', '')
     if not re.fullmatch('[a-z][a-z0-9_-]*', tid):
         err(root, 'id: expected [a-z][a-z0-9_-]*')
-    # the Theme row's "Theme: %s" holds 63 bytes; a control character would reach C (a C1 one as \u0080)
+    # a name is for people reading the file and the errors: short, no control characters
     if not 0 < len(a.get('name', '').encode()) <= 48 or re.search('[\x00-\x1f\x7f-\x9f]', a['name']):
         err(root, 'name: expected 1..48 bytes, no control characters')
     if not re.fullmatch('[0-9]', a.get('index', '')):
@@ -818,11 +638,7 @@ def resolve(root, by_id, seen=()):
     else:
         t = {'accents': ALL_ACCENTS, 'accent_key': None, 'schemes': [zero_scheme() for _ in ACCENT_NAMES], 'opts': [], 'geoms': {},
              **{k.field: k.default for k in SCHEMA.values() if not k.path.startswith('scheme.')}, 'light': {}}
-    if 'order' in a and not re.fullmatch('[0-9]', a['order']):
-        err(root, 'order: expected a digit')
-    rows = [n.attrs.get('name', '') for n in picker({**by_id, tid: root})]
-    # order is the theme's own, never its base's
-    t.update(id=tid, name=a['name'], index=int(a['index']), order=order(a), line=root.line)
+    t.update(id=tid, name=a['name'], index=int(a['index']), line=root.line)
     # art: the theme whose generated images (tools/art.py <art_id>_*) this one draws, as the payload loads them by name
     if a.get('art', tid) not in (*by_id, tid):
         err(root, f'art: unknown theme {a["art"]}')
@@ -833,14 +649,9 @@ def resolve(root, by_id, seen=()):
     for c in root.children:
         if c.tag == 'colorSchemes':
             t['accents'] = 0
-            t.pop('derive', None)
             for k in c.attrs:
-                if k not in ('accents', 'derive'):
+                if k != 'accents':
                     err(c, f'unknown key colorSchemes.{k}')
-            if c.attrs.get('derive', 'gloss') != 'gloss':
-                err(c, f'colorSchemes.derive: unknown value {c.attrs["derive"]}')
-            if 'derive' in c.attrs:
-                t['derive'] = 'gloss'
             names = scheme_names(t)
             for n in c.attrs.get('accents', '').split():
                 if n not in names:
@@ -911,7 +722,7 @@ def resolve(root, by_id, seen=()):
                 if k not in OPTION_ATTRS:
                     err(c, f'unknown key option.{k}')
             if 'key' in c.attrs and 'setting' not in c.attrs:
-                opts.append(own_option(c, sets(t), rows))
+                opts.append(own_option(c, sets(t)))
                 continue
             s = c.attrs.get('setting', '')
             if s not in SETTINGS:
@@ -931,7 +742,7 @@ def resolve(root, by_id, seen=()):
             if 'key' in c.attrs:
                 if s != 'accent':
                     err(c, f'{s}: unknown key {c.attrs["key"]}')
-                # ACCENT or MINIMAL_ACCENT, else a theme-owned key (theme_keys)
+                # ACCENT, else a theme-owned key (theme_keys)
                 t['accent_key'] = c.attrs['key'] if c.attrs['key'] in ACCENT_KEYS else own_key(c, c.attrs['key'])
             opts.append(o)
         else:  # view
@@ -968,22 +779,6 @@ def resolve(root, by_id, seen=()):
                 s[field] = v
         else:
             t[field] = v
-    if t.get('derive'):  # the gloss in each offered ACCENTS row that states none
-        for i, s in enumerate(t['schemes'][:len(ACCENT_NAMES)]):
-            if t['accents'] >> i & 1 and not s['sel'] and not s['light'].get('sel'):
-                top = ACCENT_TONES[i][0]
-                s['sel'] = tuple((p, int(h[1:], 16)) for p, h in derive_gloss(ACCENT_TONES[i]))
-                # the light rims are the light half's; on black the dark half's band starts on its first stop, its
-                # two top rows (a 0 would take the light half's: half()), and a tall row ends on its dark edge
-                for f, g in (('sel_top', GLOSS_TOP), ('sel_tall_top', GLOSS_TALL_TOP), ('sel_tall_line', GLOSS_TALL_LINE)):
-                    s['light'].setdefault(f, s[f] or int(turn(g, top)[1:], 16))
-                s['sel_top'] = s['sel_top'] or s['sel'][0][1]
-                s['sel_tall_top'] = s['sel_tall_top'] or s['sel'][0][1]
-                s['sel_edge'] = s['sel_edge'] or int(turn(GLOSS_EDGE, top)[1:], 16)
-                s['sel_tall_edge'] = s['sel_tall_edge'] or int(turn(GLOSS_TALL_EDGE, top)[1:], 16)
-                s['sel_tall_line'] = s['sel_tall_line'] or s['sel_tall_edge']
-                for f in ('sel', 'sel_top', 'sel_edge', 'sel_tall_edge', 'sel_tall_line', 'sel_tall_top'):  # the gloss is both halves' design (Graphite's grey band flipped would turn upside down)
-                    s['light'].setdefault(f, s[f])
     t['schemes'] = [s if i >= len(ACCENT_NAMES) or t['accents'] >> i & 1 else zero_scheme() for i, s in enumerate(t['schemes'])]
     for o in t['opts']:
         if o['setting'] == 'SETTING_ACCENT':
@@ -1024,32 +819,16 @@ def validate(t, name):
     # writes any. Past 32, the accents mask (option_t.values, 32 bits) could not hold a scheme.
     if len(t['schemes']) > 10:
         err(f"{len(t['schemes'])} accents, at most 10")
-    # an enum holds its CHOICES index (value()); paint_stops draws nothing from no stops; a half that states
-    # none takes the other's (half())
-    stops = list(CHOICES['list.selection.painter']).index('stops')
-    if t['painter[PAINT_SELECTION]'] == stops and not all(s['sel'] or s['light'].get('sel') for i, s in enumerate(t['schemes'])
-                                                          if t['accents'] >> i & 1):
-        err('selection: painter stops needs every offered scheme\'s sel.stops')
-    if t['painter[PAINT_SELECTION]'] != list(CHOICES['list.selection.painter']).index('bar'):
-        for f in ('sel_radius', 'sel_inset', 'sel_fixed'):
-            if t[f] != FIELDS[f].default:
-                err(f'{FIELDS[f].path}: only the bar painter reads it')
-    # the line chevron stands on the set's right column; the wheel's indicator draws sb_w wide between sb_top and sb_bottom
-    if t['painter[PAINT_CHEVRON]'] and not sets(t)[t['geom_set']].right_x:
-        err('list.chevron.painter: icon needs its set\'s right_x')
-    if t['painter[PAINT_SONGS]'] and not sets(t)[t['geom_set']].right_x:
-        err('list.songs.painter: inline needs its set\'s right_x')
-    if t['painter[PAINT_SCROLL]'] and not (t['sb_w'] and t['sb_bottom'] > t['sb_top']):
-        err('list.scrollbar.painter: wheel needs w, top and bottom')
-    if t['painter[PAINT_BATTERY]'] == list(CHOICES['bar.battery.painter']).index('classic-light') and not t['batt']:
-        err('battery: this painter needs stops')
+    # the chevrons and song rows' marks stand on the set's right column; the wheel's indicator draws sb_w wide between
+    # sb_top and sb_bottom
+    if not sets(t)[t['geom_set']].right_x:
+        err('the chevrons and song rows need the set\'s right_x')
+    if not (t['sb_w'] and t['sb_bottom'] > t['sb_top']):
+        err('list.scrollbar: the wheel\'s indicator needs w, top and bottom')
     for n in sorted({t['geom_set'], *(s for o in t['opts'] for s in o.get('sets') or ())}):
-        g = sets(t)[n]  # the bar's own label is laid out at bar_px (tools/ipod.py status_metrics), its text drawn at font_size
+        g = sets(t)[n]  # the bar's own label is laid out at bar_px (tools/ipod.py status_row), its text drawn at font_size
         if g.bar_px and t['font_px[ROLE_BAR]'] != g.bar_px:
             err(f"bar.title.font_size {t['font_px[ROLE_BAR]']} is not set {n}'s bar_px {g.bar_px}")
-        # the times beside the bar (np_bar.c np_beside) are drawn with the iPod bar and its speakers (tools/art.py)
-        if bool(g.np_ipod) != bool(t['np_track'] or t['light'].get('np_track')):
-            err(f"set {n}'s np_ipod needs playing.scrubber.stops, and they it")
     for o in t['opts']:
         if o.get('setting') != 'SETTING_ACCENT' and not o.get('key') and o['def'] >= 0 and not o.get('values'):
             err(f"{o['setting']}: default has no effect without values (settings_read holds a stock setting's default)")
@@ -1059,12 +838,10 @@ def validate(t, name):
     if accent['def'] < 0 and not t['accents'] & 1:
         err('accent: slot 0 is not offered, so a missing key needs a default')
     for k in SCHEMA.values():  # every value, those from a default or a base too (coverflow divides by some)
-        if k.type not in ('set', 'stops', 'alphas', 'rows'):
+        if k.type != 'set':
             for v in [s[k.field] for s in t['schemes']] if k.path.startswith('scheme.') else [t[k.field], t['light'].get(k.field, k.lo)]:
                 if not k.lo <= v <= k.hi:
                     err(f'{k.path}: {v} outside {k.lo}..{k.hi}')
-    if t['pane_shadow_w'] > len(t['pane_shadow_a']):
-        err(f"home.pane.shadow_w: {t['pane_shadow_w']} past its {len(t['pane_shadow_a'])} alphas")
     for s in t['schemes']:
         for f in ('paper', 'ink'):
             if len({s[f] >> 16, s[f] >> 8 & 255, s[f] & 255}) > 1:
@@ -1191,15 +968,6 @@ def builtins(root=ROOT/'assets/themes'):
             owner, first = owners.setdefault(name, (t['id'], g))
             if g != first:
                 fail(n.file, n.line, f"geometry set {name} is {owner}'s, with other values")
-    # An accent key is one stored value, which the boot fixup forces into every sharing theme's colours.
-    for (_, _, t), (_, n, u) in itertools.combinations(found, 2):
-        if t['accent_key'] == u['accent_key'] and (t['accents'], accent_default(t)) != (u['accents'], accent_default(u)):
-            fail(n.file, n.line, f'accent key {u["accent_key"]} is {t["id"]}\'s, with other colorSchemes or default')
-    # Themes on one set switch live (theme_select), relabelling the booted one's Appearance rows: the same rows.
-    def opt_rows(t): return [o['key'] if o['setting'] == 'SETTING_OWN' else o['setting'] for o in t['opts']]
-    for (_, _, t), (_, n, u) in itertools.combinations(found, 2):
-        if t['geom_set'] == u['geom_set'] and opt_rows(t) != opt_rows(u):
-            fail(n.file, n.line, f"{u['id']} runs on {t['id']}'s set, with other options")
     # An own key is one stored value too: its values and default alike; its preset is each theme's (as LIGHT's).
     def shape(e): return e[:2] + ({k: v for k, v in e[2].items() if k not in ('preset', 'keep')} if e[2] else None,)
     owners = {}
@@ -1211,26 +979,12 @@ def builtins(root=ROOT/'assets/themes'):
     for i, (index, n, _) in enumerate(found):
         if index != i:
             fail(n.file, n.line, f'index {index}, expected {i}')
-    # The picker's rows (emit's theme_rows[]): one theme each, 0..N-1, so every theme is listed once.
-    rows = {}
-    for _, n, t in found:
-        if t['order'] in rows:
-            fail(n.file, n.line, f"order {t['order']} is {rows[t['order']].file}'s too")
-        rows[t['order']] = n
-    for i, o in enumerate(sorted(rows)):
-        if o != i:
-            fail(rows[o].file, rows[o].line, f'order {o}, expected {i}: the picker has no row {i}')
     return [t for _, _, t in found]
 
 
 def own_tones(t):
     """The distinct tones rows t's own schemes state, in scheme order: <id>_tones[]."""
     return list(dict.fromkeys(s['tones'] for s in t['schemes'] if 'tones' in s))
-
-
-def stops_c(v):
-    """A stops value's stops_t initialiser."""
-    return '{0}' if not v else '{%d, {%s}, {%s}}' % (len(v), ', '.join(str(p) for p, _ in v), ', '.join(f'0x{c:06x}' for _, c in v))
 
 
 def motion_fields(t):
@@ -1254,24 +1008,13 @@ def emit(themes, out, redirects={}):
     def setting(o): return f'SETTING_OWN + {keys.index(o["key"])}' if o.get('key') else o['setting']
     def gname(name): return f'GEOM_{name.upper().replace("-", "_")}'
     def c(k, v):
-        if k.type == 'stops':
-            return stops_c(v)
-        if k.type == 'alphas':
-            return '{%s}' % (', '.join(map(str, v)) or '0')
-        if k.type == 'rows':
-            return '{%s}' % (', '.join(f'0x{c:08x}' for c in v) or '0')
         return list(CHOICES[k.path].values())[v] if k.type == 'enum' else v
     lines = ['/* tools/theme.py wrote this from assets/themes/<id>/theme.xml; edit those. */']
     def tones(t, v, s):  # an own scheme's own row, else its ACCENTS row (its base's)
         return f'{c_name(t)}_tones[{own_tones(t).index(s["tones"])}]' if 'tones' in s else f'accents[{s.get("base", v)}]'
     def rows(t, light):
-        return [f'    {{ .tones = {tones(t, v, s)}, .flags = {s["card"] | s["raw_red"] << 1}, .fill = 0x{s["fill"]:06x}, '
-                f'.chevron = 0x{s["chevron"]:06x}, .muted = 0x{s["muted"]:06x}, .bar_light = 0x{s["bar_light"]:06x}, '
-                f'.sel = {stops_c(s["sel"])}, .sel_top = 0x{s["sel_top"]:06x}, .sel_edge = 0x{s["sel_edge"]:06x}, '
-                f'.sel_tall_edge = 0x{s["sel_tall_edge"]:06x}, .sel_tall_line = 0x{s["sel_tall_line"]:06x}, .sel_tall_top = 0x{s["sel_tall_top"]:06x}, '
-                f'.sel_text = 0x{s["sel_text"]:06x}, .mode = {c(SCHEMA["scheme.mode"], s["mode"])}, '
-                f'.paper = 0x{s["paper"]:06x}, .ink = 0x{s["ink"]:06x}, '
-                f'.bar = {stops_c(s["bar"])}, .bar_line = 0x{s["bar_line"]:06x}, .bar_line2 = 0x{s["bar_line2"]:06x}'
+        return [f'    {{ .tones = {tones(t, v, s)}, .chevron = 0x{s["chevron"]:06x}, .muted = 0x{s["muted"]:06x}, .sel_text = 0x{s["sel_text"]:06x}, '
+                f'.mode = {c(SCHEMA["scheme.mode"], s["mode"])}, .paper = 0x{s["paper"]:06x}, .ink = 0x{s["ink"]:06x}'
                 + (f', .label = {json.dumps(s["label"])}' if 'label' in s else '') + ' },'
                 for v, s in enumerate(scheme_half(s, light) for s in t['schemes'])]
     for t in themes:
@@ -1295,8 +1038,7 @@ def emit(themes, out, redirects={}):
         halves = [half(t, light, d['paper'], d['ink']) for light in (False, True)]
         def field(k): return '{%s, %s}' % tuple(c(k, h[k.field]) for h in halves) if k.final else c(k, t[k.field])
         # theme_t order: the live element fields, the pointers and n_opts, then the 'open' fields.
-        fields = [('name', json.dumps(t['name'])),
-                  *((k.field, field(k)) for k in SCHEMA.values() if k.cls == 'live' and view_attr(k.path)),
+        fields = [*((k.field, field(k)) for k in SCHEMA.values() if k.cls == 'live' and view_attr(k.path)),
                   ('accent_slot', ACCENT_KEYS.get(t['accent_key']) or f'&st.own[{keys.index(t["accent_key"])}]'), ('accent_key', json.dumps(t['accent_key'])),
                   ('schemes', f'{c_name(t)}_schemes'), ('light', f'{c_name(t)}_schemes' if shared(t) else f'{c_name(t)}_light'),
                   ('n_schemes', len(t['schemes'])),
@@ -1330,9 +1072,6 @@ def emit(themes, out, redirects={}):
                   f'{{{a:#x}, G_{v.upper()}}}' for a, v in sites) + '};',
               'const char *const geom_names[GEOM_N] = {' + ', '.join(json.dumps(g.name) for g in sets) + '};',
               'const volatile ui_redirect_t ui_redirects[] = {' + ', '.join(ui) + '};',
-              # the Theme picker's rows, each a themes[] row, by the themes' order
-              'const unsigned char theme_rows[THEME_N] = {' + ', '.join(
-                  str(i) for i in sorted(range(len(themes)), key=lambda i: themes[i]['order'])) + '};',
               *(f'#define SETTING_N_{n.upper()} {len(v)}' for n, (_, v) in SETTINGS.items()),
               *(f'#define OWN_{k} {i}' for i, k in enumerate(theme_keys(themes))),
               # last: its sets are GEOM_* names

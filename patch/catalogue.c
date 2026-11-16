@@ -1272,11 +1272,11 @@ static void grey_set(void *row, int mark) {
         cat.grey_mark[i] = cat.grey_mark[cat.ngrey];
     }
 }
-/* A song record's mark: offline when it can't play now; else, under OLED, where it lives. */
+/* A song record's mark: offline when it can't play now; else where it lives. */
 static int song_mark(void *r) {
     const char *p = r ? P(r, REC_PATH) : 0;
     if (path_unavailable(p)) return MK_OFFLINE;
-    if (!p || !feedback_oled()) return MK_NONE;
+    if (!p) return MK_NONE;
     if (catalogue_path(p)) return MK_CLOUD;
     for (int i = 0; i < cat.napps; ++i) {
         unsigned k = strlen(cat.app[i].dl);

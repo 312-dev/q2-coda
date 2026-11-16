@@ -115,24 +115,16 @@ static int ab_touch(void *ctx, void *event);
 int np_about_open(void *ctx, void *event) {
     void *home = st.np_win, *info = home ? widget_lookup(home, "view_info", 1) : (void *)0;
     if (ab.page || !info || !(ab.page = page_open("npabout_page", ab_closed, ab_key))) return 0;
-    void *title = page_title(ab.page, "About", 1);
+    page_title(ab.page, "About", 1);
     widget_remove_child(P(info, W_PARENT), info);
     widget_add_child(ab.page, info);
-    if (oled_pages()) { /* the grid, over the window; the details stay hidden, its source */
-        ab.body = widget_factory_create_widget(widget_factory(), "view", ab.page, 0, 0, 375,
-                                               320 - geom_val(V_BAR));
-        widget_on(ab.body, EVT_POINTER_DOWN, ab_touch, 0);
-        widget_on(ab.page, EVT_POINTER_MOVE_BEFORE, ab_touch, 0); /* peq_ui.c e3_touch's way */
-        widget_on(ab.page, EVT_POINTER_UP_BEFORE, ab_touch, 0);
-        widget_on(ab.page, EVT_POINTER_ABORT, ab_touch, 0);
-    } else {
-        /* under the title where the theme shows it as the page's first row: Centred Now
-         * Playing's details start at the window's top, where its Return and More stood */
-        int below = title && widget_get_visible(title) ? I(title, W_Y) + I(title, W_H) : 0;
-        if (I(info, W_Y) < below)
-            widget_move_resize(info, I(info, W_X), below, I(info, W_W), I(info, W_H));
-        widget_set_visible(info, 1, 0);
-    }
+    /* the grid, over the window; the details stay hidden, its source */
+    ab.body = widget_factory_create_widget(widget_factory(), "view", ab.page, 0, 0, 375,
+                                           320 - geom_val(V_BAR));
+    widget_on(ab.body, EVT_POINTER_DOWN, ab_touch, 0);
+    widget_on(ab.page, EVT_POINTER_MOVE_BEFORE, ab_touch, 0); /* peq_ui.c e3_touch's way */
+    widget_on(ab.page, EVT_POINTER_UP_BEFORE, ab_touch, 0);
+    widget_on(ab.page, EVT_POINTER_ABORT, ab_touch, 0);
     ab.info = info, ab.home = home;
     ringnav_np_info(ab.page); /* filled at once, not at Now Playing's next tick */
     return 0;

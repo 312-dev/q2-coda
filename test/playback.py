@@ -1008,7 +1008,9 @@ m=EncoderMachine()
 for key in (O['KEY_RETURN'],O['KEY_CENTER'],O['KEY_PLAY'],O['KEY_BACK_BTN'],O['KEY_FWD_BTN']):
     assert m.input(DOWN_,key) and m.input(UP_,key),key
 w,_=m.page_list(); m.animating=1; m.call(N,gap=0); assert any(v[1]==ps['replay_wheel'] for v in m.timers.values())
-before=m.selected(w); m.animating=0; m.word(ps['wheel_frame_at'],0); m.advance(100); assert m.selected(w)!=before and not m.timers
+# the replay runs once; what stays is the tick's wheel indicator fade (list_marks.c wheel_sb_arm)
+before=m.selected(w); m.animating=0; m.word(ps['wheel_frame_at'],0); m.advance(100)
+assert m.selected(w)!=before and [v[1] for v in m.timers.values()]==[ps['sb_due']],m.timers
 checks+=1
 # A real finger, however long: ten minutes at 21 ticks a second one way (and a minute the other), every
 # frame's ticks through the gate: never a tick lost or a stop, and a --dev log writes once, past 30 s.

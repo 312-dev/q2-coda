@@ -1,5 +1,5 @@
-/* Playlists: the editor, New, Delete and More, the hold menu's Add to Playlist picker and Classic's
- * page. */
+/* Playlists: the editor, New, Delete and More, the hold menu's Add to Playlist picker and the page
+ * of rows. */
 #include "navigation.h"
 #include "playlist_art.h"
 
@@ -301,7 +301,7 @@ static void ple_search_show(void) {
     ple.view = 0;
     ple.edit = edit_create(ple.page, "text", 2, 26);
     widget_set_name(ple.edit, "search_edit");
-    t9_box(ple.page, ple.edit, "Search songs");
+    widget_set_prop_str(ple.edit, "tips", "Search songs");
     if (*ple.query) widget_set_text_utf8(ple.edit, ple.query);
     widget_on(ple.edit, EVT_IM_ACTION, ple_searched, 0);
     widget_set_focused(ple.edit, 1);
@@ -524,8 +524,7 @@ done:
     return ok;
 }
 
-/* A row action's confirm: under Classic its tray, the second cell saying verb. The prompt's
- * own text isn't read. */
+/* A row action's confirm, its button saying verb (feedback.c). The prompt's own text isn't read. */
 static int confirm_over(void *prompt, const char *verb) {
     st.confirm_verb = verb;
     int answer = navigator_to_with_context("dialog/confirminfo_dialog", prompt);
@@ -638,7 +637,7 @@ int ringnav_playlist_delete(void *win, void *event) {
         char text[0x400];
     } prompt = { 1, 0, "Delete Playlist?" };
     const char *name = P(deque_at(list, (unsigned)row), REC_TITLE);
-    if (feedback_oled() && name) /* OLED's dialog asks it in its status row, naming the playlist */
+    if (name) /* OLED's dialog asks it in its status row, naming the playlist */
         tk_snprintf(prompt.text, sizeof prompt.text, "Delete playlist \u201c%s\u201d?", name);
     if (confirm_over(&prompt, "Delete") != 10) return 0;
     ok = playlist_delete(id);
@@ -716,7 +715,7 @@ int qm_playlist_pick(void *ctx, void *event) {
         return 0; /* a STOP would leave the list's scroll_view holding its grab */
     }
     qm_select();
-    /* Classic's picker has no dots: a tap at their place picks */
+    /* a toolbar-less picker has no dots: a tap at their place picks */
     return PLAYLIST_PICK(
         ctx, geom_val(V_TOOLBAR) ? event : pointer_event_init(click, EVT_CLICK, ctx, 0, 0));
 }
@@ -748,7 +747,7 @@ void qm_playlist_bind(void *w, int depth, int (*pick)(void *, void *)) {
         qm_playlist_bind(widget_get_child(w, i), depth + 1, pick);
 }
 
-/* Classic's Playlists: under a set without toolbars (toolbar 0) the page is rows, as Songs'. Stock
+/* Playlists under a set without toolbars (toolbar 0, as OLED's): the page is rows, as Songs'. Stock
  * still builds everything: its toolbar, hidden (tools/ipod.py), and its Import and Export tile row,
  * hidden, stay as the click targets; the rows stock can't have are added after each rebuild and
  * click those hidden widgets, so its mode, marks, dialogs and reload stay its own. Stock's own
@@ -761,8 +760,9 @@ static const unsigned pl_stock[PL_N] = { 0x4b46a4, 0x4b45a4, 0x4b44d4, 0x4b5e18,
 
 /* A row's place on the list's two heights: name over second line in the page rows' boxes, which
  * hold their fonts; the dots or a mark at the right edge, centred on the picker's tick's column
- * (x 346), where the selected row's chevron (x 317) shows in their place. The text ends clear of
- * whichever shows. With Row Art its art leads, in an album row's column, the text after it. */
+ * (x 346), none on the selected row. The text ends clear of whichever shows. With row art (G_ART)
+ * its art leads, in an album row's column, the text after it.
+ */
 #define PL_MARK_X 333 /* the tick's column, the dots' hit */
 /* OLED's (docs/oled-design.md#playlists): PL_OLED_H high, a PL_OLED_ART square at the text column
  * less 2 (the playlist's own picture, else pl_tile_paint's tile), the name over "N songs" from
@@ -868,7 +868,7 @@ void pl_tile_paint(void *w, void *canvas) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
-/* Stock's row, as the list's other two-line rows: its art stays under Row Art (not in the
+/* Stock's row, as the list's other two-line rows: its art stays under row art (G_ART; not in the
  * picker), its count reads "N Songs". */
 static void *pl_art_image(void *button);
 static void pl_row(void *item) {
@@ -878,7 +878,7 @@ static void pl_row(void *item) {
     void *art = pl_art_image(button);
     int h = T->page_detail, add = widget_get_prop_int(window_of(item), PL_MODE, 0);
     if (!info || widget_count_children(info) < 2) return;
-    if (feedback_oled() && !add) {
+    if (!add) {
         const unsigned *s = widget_get_text(widget_get_child(info, 1));
         unsigned songs = 0;
         while (s && *s && (*s < '0' || *s > '9')) ++s;
@@ -950,7 +950,7 @@ static int pl_due(const void *info) {
      * would make each insert wait), and the rebuild that follows asks again */
     if (w && action == PL_IMPORT) playlist_art_stop();
     if (w) stock_dispatch_trampoline(w, pointer_event_init(click, EVT_CLICK, w, 0, 0));
-    /* a dialog's up, or gone: its close rebuilds the rows (Classic's: a toolbar's page has none) */
+    /* a dialog's up, or gone: its close rebuilds the rows (a toolbar's page has none) */
     if (window_manager_get_top_window(wm) == win && !geom_val(V_TOOLBAR)) pl_rows(win);
     return 0;
 }
@@ -962,10 +962,10 @@ static int pl_click(void *action, void *event) {
     return 0;
 }
 /* OLED keeps one pitch a list (oled-design.md Do and don't): its action rows as tall as the
- * playlists' rows, when there are any; else every theme's row pitch. */
+ * playlists' rows, when there are any; else the set's row pitch. */
 static int pl_pitch(void *view) {
-    if (feedback_oled() && !widget_get_prop_int(window_of(view), PL_MODE, 0)) return PL_OLED_H;
-    for (unsigned i = 0, n = widget_count_children(view); feedback_oled() && i < n; ++i) {
+    if (!widget_get_prop_int(window_of(view), PL_MODE, 0)) return PL_OLED_H;
+    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *item = widget_get_child(view, i);
         if (widget_get_prop_int(item, PL_ROW, 0)) return I(item, W_H);
     }
@@ -1048,9 +1048,9 @@ static void pl_rows(void *win) {
         widget_set_visible(item, show[action], 0);
         if (!show[action]) widget_move_resize(item, 0, 0, 375, geom(G_PITCH));
     }
-    /* PAGE_TALL's the separators': every row shown but the list's last, a playlist's or ours;
-     * OLED's playlists have none */
-    for (int i = count - 1, last = 1; i >= 0 && !(feedback_oled() && !add); --i) {
+    /* PAGE_TALL's the separators': every row shown but the picker's last, a playlist's or ours;
+     * the list itself has none */
+    for (int i = count - 1, last = 1; i >= 0 && add; --i) {
         void *item = widget_get_child(view, i);
         if (!widget_get_prop_int(item, PL_ACT, 0) && !widget_get_prop_int(item, PL_ROW, 0))
             continue;
@@ -1074,31 +1074,20 @@ static void pl_rows(void *win) {
                 marks);
     if (nav && widget_count_children(nav)) widget_set_text_utf8(widget_get_child(nav, 0), words);
     bar_title_sync(win);
-    void *none = widget_lookup(win, PL_NONE, 0);
-    void *wait = feedback_oled() ? widget_lookup(win, "image_wait", 1) : (void *)0;
-    if (wait) widget_resize(wait, 0, 0); /* OLED: no stock spinner (oled-design.md Empty) */
-    if (feedback_oled()) { /* OLED's note under the rows shown (feedback_empty), or none */
-        int shown = 0;
-        for (int i = 0; i < count; ++i) shown += widget_get_visible(widget_get_child(view, i));
-        feedback_empty(win, geom_val(V_BAR) + shown * pl_pitch(view), n ? 0 : "No playlists",
-                       add ? 0 : "Hold Play/Pause on a song to add it");
-    } else if (!none && !n) {
-        none = text(win, 0, 124, 375, 32);
-        widget_set_name(none, PL_NONE);
-        widget_set_text_utf8(none, "No Playlists");
-        theme_font(none, ROLE_TITLE, FONT_ROW);
-        widget_set_prop_int(none, "style:normal:text_color", (int)SPOT_GREY);
-    }
-    if (none) widget_set_visible(none, !n, 0);
+    void *wait = widget_lookup(win, "image_wait", 1);
+    if (wait) widget_resize(wait, 0, 0); /* no stock spinner (oled-design.md Empty) */
+    int shown = 0; /* the note under the rows shown (feedback_empty), or none */
+    for (int i = 0; i < count; ++i) shown += widget_get_visible(widget_get_child(view, i));
+    feedback_empty(win, geom_val(V_BAR) + shown * pl_pitch(view), n ? 0 : "No playlists",
+                   add ? 0 : "Hold Play/Pause on a song to add it");
     widget_set_prop_int(win, PL_MARKING, marking);
-    if (feedback_oled()) { /* the list lays its rows out at pl_pitch's one pitch */
-        void *lv = P(view, W_PARENT);
-        int pitch = pl_pitch(view), y = geom_val(V_BAR) + I(lv, W_Y), end = list_fit_end();
-        widget_set_prop_int(lv, "item_height", pitch);
-        /* the box the build cut to whole rows of the set's pitch, to whole rows of this one */
-        if (!add && end > y) widget_resize(lv, I(lv, W_W), (end - y) - (end - y) % pitch);
-        widget_layout(lv);
-    }
+    /* the list lays its rows out at pl_pitch's one pitch */
+    void *lv = P(view, W_PARENT);
+    int pitch = pl_pitch(view), y = geom_val(V_BAR) + I(lv, W_Y), end = list_fit_end();
+    widget_set_prop_int(lv, "item_height", pitch);
+    /* the box the build cut to whole rows of the set's pitch, to whole rows of this one */
+    if (!add && end > y) widget_resize(lv, I(lv, W_W), (end - y) - (end - y) % pitch);
+    widget_layout(lv);
     if (!marking && marking == was) return;
     /* Stock showed its marks or the dots: the rows go to their places, the list to its new height.
      */
@@ -1120,30 +1109,26 @@ static void pl_rows(void *win) {
     }
     widget_invalidate_force(win, (void *)0);
 }
-/* With nothing remembered (a first open, or a count changed) Classic's Playlists starts on its
- * first playlist, below New and Edit, as stock's and the iPod's lists of playlists alone do; an
- * empty list on New. Just after New Playlist made one (pl_made), on that one, as an iPod's list
- * lands on what was added; its rows are p_deque_playlist's records in order. */
+/* With nothing remembered (a first open, or a count changed) Playlists starts on its first row,
+ * On-The-Go, where it opens. Just after New Playlist made one (pl_made), on that one, as an iPod's
+ * list lands on what was added; its rows are p_deque_playlist's records in order. */
 int pl_first(menu_t *m, int cur) {
     void *lists = P(p_deque_playlist, 0);
-    int k = 0, first = -1, at = -1;
+    int k = 0, at = -1;
     for (int i = 0; i < m->n && at < 0; ++i) {
         if (!widget_get_prop_int(P(m->at[i], W_PARENT), PL_ROW, 0)) continue;
-        if (first < 0 && i >= cur) first = i;
         if (pl_made[0] && lists && (unsigned)k < deque_size(lists) &&
             !tk_strcmp(P(deque_at(lists, (unsigned)k), REC_TITLE), pl_made))
             at = i;
         ++k;
     }
     pl_made[0] = 0;
-    if (at >= 0) return at;
-    if (feedback_oled()) return cur; /* its first row, On-The-Go, is where it opens */
-    return first >= 0 && widget_get_prop_int(P(m->at[cur], W_PARENT), PL_ACT, 0) ? first : cur;
+    return at >= 0 ? at : cur;
 }
 /* Stock's row click opens More from x 286 outside select mode (0x4b48a8, 0x4b4988): a picker has
  * no More, so a tap anywhere picks; in the list the dots' column at the edge (PL_MARK_X on) stays
- * More, and a tap left of it, the chevron's column (from x 317) too, opens the playlist. The band's
- * row draws its chevron and no dots, so it opens to the edge; its More is the hold's. A pick or an
+ * More, and a tap left of it opens the playlist. The selected row has no dots, so it opens to the
+ * edge; its More is the hold's. A pick or an
  * open is a fresh click at x 0. */
 static void *pl_record(void *button);
 static int pl_pick(void *ctx, void *event) {
@@ -1158,8 +1143,8 @@ static int pl_pick(void *ctx, void *event) {
         pl_rows(win);
         return result;
     }
-    /* OLED: the row opens the playlist's own page (playlist_pages.c); its menu is the hold's */
-    void *r = list && feedback_oled() ? pl_record(ctx) : (void *)0;
+    /* the row opens the playlist's own page (playlist_pages.c); its menu is the hold's */
+    void *r = list ? pl_record(ctx) : (void *)0;
     if (r) {
         playlist_page_open(I(r, REC_DISC), P(r, REC_TITLE));
         return 0;
@@ -1216,15 +1201,13 @@ static void pl_art_row(void *button, int *asked) {
     if (!r) return;
     if (!*asked) playlist_art_refresh();
     *asked = 1;
-    /* OLED: its own picture, else its server's cover, else pl_tile_paint's tile */
-    int oled = feedback_oled();
-    image_base_set_image(art, playlist_art(I(r, REC_DISC), P(r, REC_TITLE),
-                                           oled ? 1 | PL_ART_OWN : 1, url, sizeof url) ||
-                                      (oled && catalogue_playlist_cover(I(r, REC_DISC), url))
-                                  ? url
-                              : oled
-                                  ? ""
-                                  : "playlist_default"); /* none, or not made yet: never the last */
+    /* its own picture, else its server's cover, else pl_tile_paint's tile (none, or not made
+     * yet: never the last) */
+    image_base_set_image(
+        art, playlist_art(I(r, REC_DISC), P(r, REC_TITLE), 1 | PL_ART_OWN, url, sizeof url) ||
+                     catalogue_playlist_cover(I(r, REC_DISC), url)
+                 ? url
+                 : "");
 }
 /* One playlist's art made: its rows alone ask again, as an ask may queue a failed one anew. */
 static void pl_art_ready(int cd_num) {
@@ -1243,7 +1226,7 @@ static int pl_arts(void *win) {
     int asked = 0;
     pl_art_page = win;
     playlist_art_ready = pl_art_ready;
-    if (feedback_oled()) catalogue_playlist_covers(); /* the server playlists', once */
+    catalogue_playlist_covers(); /* the server playlists', once */
     for (unsigned i = 0, n = view ? widget_count_children(view) : 0; i < n; ++i) {
         void *item = widget_get_child(view, i);
         if (widget_count_children(item)) pl_art_row(widget_get_child(item, 0), &asked);
@@ -1265,7 +1248,7 @@ static int pl_cf_open(const void *unused) {
     if (win) cf_veil(win, 0);
     return 0;
 }
-/* Cover Flow's Centre on playlist cd_num, under Minimal and Modern (and Classic's longer ones):
+/* Cover Flow's Centre on playlist cd_num:
  * its row's open, a tap at x 0, on this page under the covers, its list opening over them. Stock's
  * click reads its one add mode global, which an Add to Playlist picker over the covers leaves at 1
  * or 2 (it would add to the playlist, not open it): this page's own goes back first, as
@@ -1290,8 +1273,9 @@ void playlist_open(void *win, int cd_num) {
     coverflow_playlists_close();
 }
 
-/* A playlist cover's hold: New Playlist (edit 0) or Select Playlists… (Classic's alone: its select
- * mode) on this page, the covers closed over it. New is the toolbar's or Classic's row's target. */
+/* A playlist cover's hold: New Playlist (edit 0) or Select Playlists… (a toolbar-less
+ * page's select mode) on this page, the covers closed over it. New is the toolbar's or the row's
+ * target. */
 void playlists_edit(int edit) {
     if (coverflow_playlists_close()) pl_click((void *)(long)(edit ? PL_EDIT : PL_NEW), 0);
 }
@@ -1326,21 +1310,12 @@ static void pl_dress(void *win, int first) {
         }
         pl_row(item);
     }
-    /* New and Edit head the list, after the hidden tile row (a picker has none); Select All, select
-     * mode's first row, sits with them, as the two modes never show both */
-    if (add) {
+    /* a picker's New heads it, after the hidden tile row (a picker has none); the list has no
+     * select mode (Import and Export are Settings rows) and On-The-Go heads it */
+    if (add)
         pl_action(view, "New Playlist\xe2\x80\xa6", PL_NEW, 1, 0);
-    } else if (feedback_oled()) { /* OLED: no select mode; Import and Export are Settings rows */
-        if (ringnav_otg()) pl_otg_row(view);
-    } else {
-        pl_action(view, "Select All", PL_SELECT_ALL, 0, 1);
-        pl_action(view, "New Playlist\xe2\x80\xa6", PL_NEW, 1, 2);
-        pl_action(view, "Select Playlists\xe2\x80\xa6", PL_EDIT, 1, 3);
-        pl_action(view, "Import Playlists", PL_IMPORT, 0, -1);
-        pl_action(view, "Export", PL_EXPORT, 0, -1);
-        pl_action(view, "Delete", PL_DELETE, 0, -1);
-        pl_action(view, "Done", PL_DONE, 0, -1);
-    }
+    else if (ringnav_otg())
+        pl_otg_row(view);
     pl_rows(win);
     if (first && !add) { /* stock binds it with ctx win (0x4b6024) */
         widget_off_by_func(win, EVT_KEY_UP, (void *)PLAYLIST_KEYUP, win);
@@ -1349,10 +1324,10 @@ static void pl_dress(void *win, int first) {
     }
 }
 
-/* After stock rebuilds its rows: the guarded Now Playing picker's rebind, Classic's rows, under
- * Row Art (Classic's alone) the rows' art, not the Add to Playlist picker's, a list as it was, and
- * Playlist View's covers. Stock's add mode is one global, left by any picker that closes, which it
- * reads as this page comes back: each page keeps the one it opened with. */
+/* After stock rebuilds its rows: the guarded Now Playing picker's rebind, a toolbar-less
+ * set's rows, under a set with row art (G_ART) the rows' art, not the Add to Playlist picker's, a
+ * list as it was, and Playlist View's covers. Stock's add mode is one global, left by any picker
+ * that closes, which it reads as this page comes back: each page keeps the one it opened with. */
 int ringnav_playlist(void *win) {
     int mode = widget_get_prop_int(win, PL_MODE, -1), first = mode < 0;
     if (first)
@@ -1365,9 +1340,9 @@ int ringnav_playlist(void *win) {
     int list = !widget_get_prop_int(win, PL_MODE, 0), toolbar = geom_val(V_TOOLBAR), read = 0;
     /* Playlist View: Cover Flow, once, as the page opens (from Library, Home's list or its
      * shortcut): coming back to it shows the list; with no playlists the list, New Playlist its way
-     * on. The covers are the playlists' art, so they build it in every theme, Row Art or not. */
+     * on. The covers are the playlists' art, so they build it under any set, row art or not. */
     int covers = first && list && lists && deque_size(lists) && ringnav_playlist_coverflow();
-    if (toolbar && !covers) return result; /* Minimal, Modern: stock's rows, no art built */
+    if (toolbar && !covers) return result; /* a toolbar's set: stock's rows, no art built */
     if (toolbar) { /* the rows stay stock's; the covers' builds stop with the page */
         widget_on(win, EVT_DESTROY, pl_gone, win);
         pl_art_page = win, playlist_art_ready = 0;

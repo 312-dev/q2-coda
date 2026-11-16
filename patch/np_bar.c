@@ -1,76 +1,12 @@
-/* Now Playing's bar: Classic's times and bar fitted to the track, the bar's title, the theme's
- * progress bar and its fill. */
+/* Now Playing's bar: the bar's title, the theme's progress bar and its fill. */
 #include "navigation.h"
 
 static int bar_bold __attribute__((section(".scratch"))); /* the bar's title set bold (bar_title) */
 
-/* Classic's bar's left end for a track sec long: the times' boxes hold "-9:59" under 10:00,
- * "-59:59" under an hour, else "-9:59:59" (NP_IPOD_TIME_W*, tools/ipod.py measures them), their
- * outer edges and the gap kept; the bar takes the rest, mirrored. */
-static int ipod_bar_x(int sec) {
-    return NP_IPOD_BAR_X - NP_IPOD_TIME_W1 +
-           (sec < 600    ? NP_IPOD_TIME_W1
-            : sec < 3600 ? NP_IPOD_TIME_W2
-                         : NP_IPOD_TIME_W);
-}
-
-/* Classic's elapsed and remaining times and bar (with none, the radio's own) fitted to a track sec
- * long (ipod_bar_x); unknown (0 or less) leaves them, so the page keeps the build's "-9:59" boxes
- * and widest bar, or the last track's, whose times hold the 0:00 an unknown length shows. Each
- * keeps its y and height and repaints where it was and where it goes, so the caller is outside a
- * paint, which loses its invalidates (#116). 1 when any moved. */
-int ipod_times(void *elapsed, void *remain, void *bar, int sec) {
-    if (sec <= 0) return 0;
-    int x = ipod_bar_x(sec), tw = x - (NP_IPOD_BAR_X - NP_IPOD_TIME_W1), bw = 375 - 2 * x,
-        moved = 0;
-    void *w[] = { elapsed, remain, bar ? bar : st.stream_bar };
-    const int to[3][2] = { { x - NP_IPOD_TIME_GAP - tw, tw },
-                           { x + bw + NP_IPOD_TIME_GAP, tw },
-                           { x, bw } };
-    for (unsigned i = 0; i < 3; ++i) {
-        if (!w[i] || (I(w[i], W_X) == to[i][0] && I(w[i], W_W) == to[i][1])) continue;
-        widget_invalidate_force(w[i], (void *)0);
-        widget_move_resize(w[i], to[i][0], I(w[i], W_Y), to[i][1], I(w[i], W_H));
-        widget_invalidate_force(w[i], (void *)0);
-        moved = 1;
-    }
-    return moved;
-}
-
-/* The remaining time, once after a frame whose paint np_sync wrote it in: its invalidate there is
- * lost with the frame's dirty rects (#116). Minimal's and Modern's sit in the rect the slider's and
- * the elapsed time's repaint takes each second; only times beside the bar (np_beside) need it. */
-int remain_due(const void *info) {
-    (void)info;
-    st.np_remain_timer = 0;
-    if (st.np_remain) widget_invalidate_force(st.np_remain, (void *)0);
-    return 0;
-}
-
-/* 1 when Now Playing's times sit on its bar's rows, beside it (Classic's iPod page; its Centred
- * page and the other themes' put them under the bar): outside the slider's repaint. */
-int np_beside(void) {
-    if (!st.np_remain || !st.np_slider || !st.np_elapsed) return 0;
-    int bh = widget_get_prop_int(st.np_slider, "bar_size", 8);
-    return I(st.np_elapsed, W_Y) < I(st.np_slider, W_Y) + (I(st.np_slider, W_H) + bh) / 2;
-}
-
-/* Classic's times and bar fitted to the playing track's length (the slider's max), off the paint
- * whose np_sync found them stale. */
-int np_fit_due(const void *info) {
-    (void)info;
-    st.np_fit_timer = 0;
-    if (np_beside())
-        ipod_times(st.np_elapsed, st.np_remain, st.np_slider,
-                   widget_get_prop_int(st.np_slider, "max", 0));
-    return 0;
-}
-
 /* Now Playing's album and right-hand time: the remaining time (slider max less value,
  * stock's seconds, so a drag or scrub previews it), or the track's length under Track Time's Total
  * (np_time_total). Labels are written only when their source changes; 1 when the right-hand time
- * was. Classic's times beside the bar refit when the length's class changes: a
- * seek, a pause or a rate change keeps it. */
+ * was. */
 int np_sync(void *top) {
     if (!top || top != st.np_win) return 0;
     st.np_bold = theme_font(st.np_title, ROLE_NP, st.np_bold); /* the title, as it changes */
@@ -91,13 +27,9 @@ int np_sync(void *top) {
     if (h != st.np_hash) {
         st.np_hash = h;
         widget_set_text_utf8(st.np_album, album ? album : "");
-        st.np_off = 0;
-        stop_timer(&st.np_marquee); /* the next paint restarts it if the album overflows */
     }
     int max = widget_get_prop_int(st.np_slider, "max", 0),
         left = max - widget_get_prop_int(st.np_slider, "value", 0);
-    if (max > 0 && !st.np_fit_timer && np_beside() && I(st.np_slider, W_X) != ipod_bar_x(max))
-        st.np_fit_timer = timer_add(np_fit_due, (void *)0, 0); /* mid-paint */
     if (left < 0) left = 0;
     int total = np_time_total(), shown = total ? max : left, key = shown << 1 | total;
     if (key == st.np_left) return 0;
@@ -134,11 +66,11 @@ int np_time_tap(void *ctx, void *event) {
     return 0;
 }
 
-/* Time in Title off: the bar's centre names the page in front, as an iPod's, in Modern's bold:
- * Now Playing or Cover Flow, else stock's title in the page's hidden navbar (scrlabel_title, or a
- * settings page's unnamed first child). Home, a page showing its navbar and an untitled page keep
- * the clock; a pop-up or keyboard leaves the bar as it is. This runs in a paint, which drops the
- * label's invalidate, so bar_repaint follows; the clock waits for its timer. */
+/* Time in Title off: the bar's centre names the page in front, as an iPod's, in the bar role's
+ * face: Now Playing or Cover Flow, else stock's title in the page's hidden navbar (scrlabel_title,
+ * or a settings page's unnamed first child). Home, a page showing its navbar and an untitled page
+ * keep the clock; a pop-up or keyboard leaves the bar as it is. This runs in a paint, which drops
+ * the label's invalidate, so bar_repaint follows; the clock waits for its timer. */
 void bar_title(void *bar, void *top) {
     static const unsigned
         now_playing[] = { 'N', 'o', 'w', ' ', 'P', 'l', 'a', 'y', 'i', 'n', 'g', 0 },
@@ -195,8 +127,7 @@ void bar_title(void *bar, void *top) {
         if (!st.bar_titled) return;
         st.bar_titled = 0;
         st.clock_key = 0; /* clock_show writes it again */
-        if (bar_bold) label_font(label, 0);
-        font_weight_mark(label, 0); /* a CJK title's mark, under bar_bold 0 too */
+        if (bar_bold) label_font(label);
         bar_bold = 0;
         rearm(&st.clock_timer, clock_due, 0);
         return;
@@ -232,8 +163,8 @@ void slider_knobless(void *slider) {
  * timer stops, the slider and label_playtime show the target, a playing track follows it (seek.c
  * seek_scrub) and a paused one seeks there once on exit, in track seconds plus a CUE track's
  * start, and the timer restarts. */
-/* The accent's light tone (Minimal's own accent: MINIMAL_FILL) fills the progress bar in every
- * state a touch passes through; a white fill (Minimal: a thicker line) marks the scrub. */
+/* The accent's light tone fills the progress bar in every state a touch passes through; a white
+ * fill, or the theme's scrub_height line, marks the scrub. */
 void slider_fill(void *slider, unsigned color) {
     static const char *const fill[] = { "style:normal:fg_color", "style:pressed:fg_color",
                                         "style:over:fg_color", "style:focused:fg_color" };
@@ -247,60 +178,19 @@ void np_fill(int scrub) {
      */
     slider_fill(st.np_slider,
                 scrub && !geom_val(V_STATUS_Y) ? 0xffffffff : RGBA(accent_tone(TONE_LIGHT)));
-    /* Minimal's fill is near white already: its scrub thickens the line to Classic's. */
+    /* a theme whose fill is near white already marks the scrub with a thicker line */
     const theme_t *T = theme();
     if (T->np_scrub != T->np_bar)
         widget_set_prop_int(st.np_slider, "bar_size", scrub ? T->np_scrub : T->np_bar);
     widget_invalidate_force(st.np_slider, (void *)0);
 }
 
-/* One part of Classic's bar, w wide at x, y: the stops' rows h high, then mirrored under them from
- * SCRUB_REFLECT_A/256 to the paper over SCRUB_REFLECT_ROWS. */
-static void bar_part(void *canvas, const stops_t *s, int x, int y, int w, int h, unsigned paper) {
-    paint_stops(canvas, x, y, w, h, s);
-    for (int k = 0; k < SCRUB_REFLECT_ROWS; ++k) {
-        int a = SCRUB_REFLECT_A * (SCRUB_REFLECT_ROWS - k) / SCRUB_REFLECT_ROWS;
-        stock_canvas_set_fill_color(canvas, RGBA(mix(paper, stops_row(s, h - 1 - k, h), a, 256)));
-        canvas_fill_rect(canvas, x, y + h + k, w, 1);
-    }
-}
-
-/* Classic's bar (playing.scrubber.stops), an iPod classic's, bw wide and the theme's np_bar high at
- * x, y: the fill (the theme's own scheme's np_fill, another accent's band) over the first `on`
- * columns, the track's rows after them, a column at each end in the track's bottom line's colour
- * whatever the fill reaches, each mirrored under it. With mark, a scrub's cue on the gloss: a
- * diamond in the ink, NP_SCRUB_MARK each side of its middle row and column, at the fill's end, kept
- * inside the bar. 0 when the theme has none. The canvas's fill colour is left as it was. */
-int ipod_bar(void *canvas, int x, int y, int bw, int on, int mark) {
-    const theme_t *T = theme();
-    const stops_t *track = &T->np_track[ipod_light()];
-    if (track->n < 2) return 0;
-    unsigned saved = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), paper = scheme()->paper,
-             line = track->rgb[track->n - 1];
-    const stops_t side = { 2, { 0, 100 }, { line, line } };
-    bar_part(canvas, T->np_fill.n && T->schemes[accent()].label ? &T->np_fill : &scheme()->sel, x,
-             y, on, T->np_bar, paper);
-    bar_part(canvas, track, x + on, y, bw - on, T->np_bar, paper);
-    bar_part(canvas, &side, x, y, 1, T->np_bar, paper);
-    bar_part(canvas, &side, x + bw - 1, y, 1, T->np_bar, paper);
-    stock_canvas_set_fill_color(canvas, RGBA(scheme()->ink));
-    int end = bw - 1 - NP_SCRUB_MARK, cx = on < NP_SCRUB_MARK ? NP_SCRUB_MARK : on,
-        cy = y + (T->np_bar - 1) / 2;
-    if (cx > end) cx = end;
-    for (int j = -NP_SCRUB_MARK; mark && j <= NP_SCRUB_MARK; ++j) {
-        int half = NP_SCRUB_MARK - (j < 0 ? -j : j);
-        canvas_fill_rect(canvas, x + cx - half, cy + j, 2 * half + 1, 1);
-    }
-    stock_canvas_set_fill_color(canvas, saved);
-    return 1;
-}
-
 /* Now Playing's bar between the player's whole seconds (docs/internals.md#now-playing-ipod): stock
  * sets the slider's value once a second, so the fill stepped a second's width at a time. While
  * playing, outside a scrub, it runs on from the value by the time since that changed, at most a
  * second, so it never goes back; bar_glide repaints the slider each time that moves it a pixel.
- * Classic's bar is ipod_bar's, drawn at that fill; the others' is stock's slider, whose fill is
- * drawn again to it over stock's, in np_fill's colour, bar_size high with np_theme's round ends. */
+ * Stock's slider's fill is drawn again to it over stock's, in np_fill's colour, bar_size high with
+ * np_theme's round ends. */
 #define GLIDE_MIN_MS 33 /* the fastest repaint, about 30 a second */
 /* ms until the bar's next pixel, or max when it wants none that soon (ringnav_sleep) */
 unsigned np_glide_wait(unsigned max) {
@@ -324,13 +214,10 @@ static int glide_ms(int v, int playing) {
     return ms > 1000 ? 1000 : (int)ms;
 }
 
-/* Classic's progress bar over stock's plain one, centred in the slider as stock's, the scrub's cue
- * on it while a scrub runs; the times sit beside it (tools/ipod.py np_ipod). A status row's set
- * (OLED's) marks a scrub with a NP_KNOB px white knob on the fill's end instead of a white fill. */
+/* The progress bar's glide over stock's, as above. A status row's set (OLED's) marks a scrub with a
+ * NP_KNOB px white knob on the fill's end instead of a white fill. */
 #define NP_KNOB 14
 void paint_scrubber(void *w, void *canvas) {
-    if (w && w == st.stream_bar && P(canvas, CANVAS_LCD))
-        ipod_bar(canvas, 0, 0, I(w, W_W), I(w, W_W), 0);
     if (!w || w != st.np_slider || !P(canvas, CANVAS_LCD)) return;
     int bw = I(w, W_W), lo = widget_get_prop_int(w, "min", 0),
         n = widget_get_prop_int(w, "max", 100) - lo,
@@ -338,8 +225,7 @@ void paint_scrubber(void *w, void *canvas) {
     int playing = !st.scrub && n > 0 && v < n && mclGetPlayStatus() == 2,
         fill = n > 0 ? (bw * v + bw * glide_ms(v, playing) / 1000) / n : 0;
     if (fill > bw) fill = bw;
-    if (!ipod_bar(canvas, 0, (I(w, W_H) - theme()->np_bar) / 2, bw, fill, st.scrub) && n > 0 &&
-        fill > bw * v / n) {
+    if (n > 0 && fill > bw * v / n) {
         int h = widget_get_prop_int(w, "bar_size", theme()->np_bar);
         rect_t r = { 0, (I(w, W_H) - h) / 2, fill, h };
         unsigned saved = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
@@ -363,25 +249,8 @@ void paint_scrubber(void *w, void *canvas) {
     }
 }
 
-/* The rows painter's bar (the volume panel, a card app's progress): the track's rows, then the
- * fill's, the theme's own scheme's (Classic Blue) or another accent's band, as Now Playing's bar
- * (ipod_bar). */
-void paint_rows_bar(void *canvas, int x, int y, int w, int h, int fill_w) {
-    const theme_t *T = theme();
-    const unsigned(*rows)[NP_ROWS] = T->np_rows + 2 * ipod_light();
-    const stops_t *band = T->schemes[accent()].label ? (const stops_t *)0 : &scheme()->sel;
-    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-    for (int j = 0; j < h && j < NP_ROWS; ++j) {
-        scrub_row(canvas, rows[0][j], x, y + j, w);
-        if (fill_w > 0)
-            scrub_row(canvas, band ? 0xff000000u | stops_row(band, j, h) : rows[1][j], x, y + j,
-                      fill_w < w ? fill_w : w);
-    }
-    stock_canvas_set_fill_color(canvas, fill);
-}
-/* The Theme's progress bar over the asset's (Minimal's square 4px line): its np_bar, Modern's
- * NP_BAR_CLASSIC capsule or Classic's NP_BAR_IPOD (paint_scrubber draws it), and stock's play-state
- * glyph, which Minimal and Classic hide (playing.state.opacity). */
+/* The theme's progress bar over the asset's square 4px line: its np_bar (playing.scrubber.height),
+ * ends round, and stock's play-state glyph at the theme's playing.state.opacity. */
 void np_theme(void) {
     static const char *const radius[] = { "style:normal:round_radius", "style:pressed:round_radius",
                                           "style:over:round_radius", "style:disable:round_radius",
@@ -397,14 +266,14 @@ void np_theme(void) {
     static const char *const track[] = { "style:normal:bg_color", "style:pressed:bg_color",
                                          "style:over:bg_color", "style:disable:bg_color",
                                          "style:focused:bg_color" };
-    static unsigned written = TRACK_COLOR;
-    if (st.np_slider && (T->np_track_rgb != TRACK_COLOR || written != TRACK_COLOR)) {
+    static unsigned written
+        __attribute__((section(".scratch"))); /* the last written ^ TRACK_COLOR */
+    if (st.np_slider && (T->np_track_rgb != TRACK_COLOR || written)) {
         for (unsigned i = 0; i < sizeof track / sizeof *track; ++i)
             widget_set_prop_int(st.np_slider, track[i], (int)RGBA(T->np_track_rgb));
-        written = T->np_track_rgb;
+        written = T->np_track_rgb ^ TRACK_COLOR;
     }
     if (glyph) widget_set_opacity(glyph, T->np_state_op);
-    /* Minimal: the album is paint_caps' capitals. */
     if (st.np_album) widget_set_opacity(st.np_album, T->np_album_op);
 }
 

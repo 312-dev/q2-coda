@@ -24,7 +24,7 @@ static void position_reset(int redraw) {
 void coverflow_position_reset(void) { position_reset(1); }
 
 static int position_live(void) {
-    return cf.covers && cf.slide && covers_live() && !cf.text_albums && !fl.panel &&
+    return cf.covers && cf.slide && covers_live() && !cf.text_albums &&
            coverflow_position_enabled();
 }
 

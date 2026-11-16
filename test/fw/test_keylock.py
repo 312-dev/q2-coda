@@ -9,8 +9,7 @@ import pytest
 import host
 from conftest import O
 
-THEMES = host.tools_theme.builtins()
-OLED, MINIMAL = (next(t['index'] for t in THEMES if t['id'] == i) for i in ('oled', 'minimal'))
+OLED = next(t['index'] for t in host.tools_theme.builtins() if t['id'] == 'oled')
 DOWN, UP, LONG = O['EVT_KEY_DOWN'], O['EVT_KEY_UP'], O['EVT_KEY_LONG']
 KEY_CENTER, KEY_PLAY, KEY_RETURN, KEY_PREV, KEY_NEXT, KEY_BACK_BTN, KEY_FWD_BTN = (
     O[k] for k in ('KEY_CENTER', 'KEY_PLAY', 'KEY_RETURN', 'KEY_PREV', 'KEY_NEXT', 'KEY_BACK_BTN', 'KEY_FWD_BTN'))
@@ -26,10 +25,10 @@ def event(kind, key=0):
 
 
 class Hold:
-    """keylock_gate with the lock set, the screen dark and the theme chosen; the card's timer kept to run."""
-    def __init__(self, fw, theme=OLED, mode=3, flag=1, lit=0):
+    """keylock_gate with the lock set and the screen dark, under OLED; the card's timer kept to run."""
+    def __init__(self, fw, mode=3, flag=1, lit=0):
         def config(path, section, key, out, default, *_):
-            value = b'%d' % theme if C.string_at(key) == b'THEME' else C.string_at(default)
+            value = b'%d' % OLED if C.string_at(key) == b'THEME' else C.string_at(default)
             C.memmove(out, value + b'\0', len(value) + 1)
         fw.mock('toolsReadConfig', config)
         self.timers = {}
@@ -96,15 +95,15 @@ def test_a_touch_on_the_card_reaches_nothing(fw):
     assert h(POINTER_DOWN) == 1
 
 
-@pytest.mark.parametrize('case', ['minimal', 'unlocked', 'lit', 'remote'])
+@pytest.mark.parametrize('case', ['unlocked', 'lit', 'remote'])
 def test_the_gate_leaves_alone(fw, case):
-    """Another theme's held press stays stock's, dropped by its filter; no lock, a lit screen or SyncLink's post."""
-    h = Hold(fw, theme=MINIMAL if case == 'minimal' else OLED, flag=case != 'unlocked', lit=case == 'lit')
+    """No lock, a lit screen or SyncLink's post: the press stays stock's."""
+    h = Hold(fw, flag=case != 'unlocked', lit=case == 'lit')
     assert [h(k, KEY_PLAY, remote=case == 'remote') for k in (DOWN, LONG, UP)] == [0] * 3
     assert not fw.calls('screen_action') and h.lit.value == (case == 'lit')
 
 
-def test_the_padlock_follows_the_lock_in_the_bar_themes_ink(fw):
+def test_the_padlock_follows_the_lock_in_the_themes_ink(fw):
     Hold(fw, flag=1, lit=1)
     lock, shown, image, empty = C.create_string_buffer(0x100), [0], [], C.create_string_buffer(b'')
     fw.mock('widget_lookup', lambda w, name, *_: C.addressof(lock) if C.string_at(name) == b'img_keylock' else 0)

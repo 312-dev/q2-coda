@@ -447,14 +447,15 @@ int shim_chained(void) { return stock_eq_calls; }
 int client_h(void) { return 290; }
 int shim_unmounted, shim_toasts;
 int card_mounted(void) { return !shim_unmounted; }
-int feedback_oled(void) { return 0; }
-int modal_set(void) { return 0; } /* the iPod themes' Type picker is the editor's own screen (menu_modal.c's under OLED) */
+int modal_set(void) { return 0; } /* a geometry set without modal (the engine's default): the Type picker is the editor's own screen, not menu_modal.c's */
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i)) { (void)under, (void)names, (void)n, (void)current, (void)pick; return 0; }
-int eq_rows(void) { return 0; } /* the iPod themes': no set_switch (slider_page.c) */
+int eq_rows(void) { return 0; } /* a theme without settings.values.switch (the engine's default): peq_ui.c's own Simple tab, not slider_page.c's */
 int eq_list_end(void) { return 290; }
 void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) { (void)w, (void)canvas, (void)e; }
 void eq_tabs_paint(void *w, void *canvas, int simple, int focus) { (void)w, (void)canvas, (void)simple, (void)focus; }
-void toast(const char *text) { (void)text; ++shim_toasts; }
+static char shim_said[160]; /* the last toast's text, until shim_told reads it */
+void toast(const char *text) { snprintf(shim_said, sizeof shim_said, "%s", text); ++shim_toasts; }
+const char *shim_told(void) { static char said[160]; memcpy(said, shim_said, sizeof said); shim_said[0] = 0; return said; }
 static void *make(void *parent, int h) {
     ++count; w[count].parent = (int)(long)parent; w[count].h = h; w[count].x = w[count].y = w[count].px = 0;
     w[count].text[0] = 0; chevrons[count] = 0; w[count].click = w[count].change = w[count].focus = w[count].down = w[count].action = 0; w[count].bg = 0; return (void *)(long)count;
@@ -487,7 +488,7 @@ void *widget_factory_create_widget(void *f, const char *type, void *p, int x, in
     return e;
 }
 /* The curve's vgcanvas drawing (peq_paint) is checked on the device; here it only has to link. Filled
-   rectangles land in screen and captions in texts, for 3EQ's captures. */
+   rectangles land in screen and captions in texts, for 3EQ's checks. */
 static unsigned fill_color, screen[290 * 375];
 static struct { int r[4]; unsigned px, color; char s[32]; } texts[64];
 static int ntexts;
@@ -517,10 +518,8 @@ void draw_centred(void *canvas, const unsigned *s, unsigned n, const void *r, un
     for (unsigned i = 0; i < n && i < 31; ++i) texts[ntexts].s[i] = (char)s[i], texts[ntexts].s[i + 1] = 0;
     ++ntexts;
 }
-/* iPod builds' theme: Classic's Graphite light tone, or Minimal's fill. */
-static int shim_classic_on = 1;
-unsigned accent_tone(int tone) { return shim_classic_on ? 0x6e6e6e : 0xeeeeec; }
-void shim_classic(int on) { shim_classic_on = on; }
+/* OLED's tones (assets/themes/oled/theme.xml, its Blue scheme: one colour for all five). */
+unsigned accent_tone(int tone) { (void)tone; return 0x2160d8; }
 int widget_set_prop_str(void *x, const char *k, const char *v) {
     if ((long)x == edit_widget && !strcmp(k, "keyboard")) snprintf(keyboard, sizeof(keyboard), "%s", v);
     if ((long)x == edit_widget && !strcmp(k, "input_type")) snprintf(input_type, sizeof(input_type), "%s", v);
@@ -819,6 +818,8 @@ def editor_check(lib, tmp):
         p = Preset(); assert lib.peq_load_active(C.byref(p)); return p
     def click(text): assert ui.shim_click(text.encode(), 1), (text, ui.shim_title())
     title = lambda: ui.shim_title().decode()
+    ui.shim_told.restype = C.c_char_p
+    told = lambda: ui.shim_told().decode()  # what an action did: a toast over the page, the title kept
     def auto(p):  # the Preamp row's and picker's Auto: the cut for every standard rate
         return 'Auto (%.1f dB)' % ui.check_headroom(C.byref(p))
     def advanced():  # the EQ page opens on Simple; its tab bar's right half is Advanced
@@ -846,10 +847,10 @@ def editor_check(lib, tmp):
     click('Enabled On')
     assert read().bypass == 1 and read().bands[0].gain == 0 and ui.shim_flag() == 0
     click('Apply changes')
-    assert read().bands[0].gain == 1 and read().bypass == 1 and title() == 'Applied'
+    assert read().bands[0].gain == 1 and read().bypass == 1 and told() == 'Applied' and title() == ''
     # A band edit sets the preamp to minus the combined response's peak: here the one +1 dB band.
     assert abs(read().preamp + 1) < 0.01, read().preamp
-    # A message takes the title bar; the list keeps every row.
+    # The toast leaves the title bar to the tabs and the list keeps every row.
     assert ui.shim_list_height() == full == 240  # 5 rows, the curve's two among them at the top
     # The curve heads the list, in its scroll view with the rows under it and in its height, so it
     # scrolls off with them; a render on the same screen keeps the offset. A turn up from row 0 on
@@ -866,16 +867,16 @@ def editor_check(lib, tmp):
     before = active.read_bytes()
     click('Presets'); assert ui.shim_row0_y() == 0 and ui.shim_virtual_h() == ui.shim_rows_bottom()  # no curve
     click('HD650.txt')
-    assert active.read_bytes() == before and title() == 'Preset loaded; choose Apply to activate'
+    assert active.read_bytes() == before and told() == 'Preset loaded; choose Apply to activate'
     click('Enabled Off'); click('Enabled On')  # any action clears the message
     assert named('HD650') and read().bands[0].gain == 1  # the draft's name; still the applied preset
     # A failed apply or switch leaves the active preset untouched.
     before = active.read_bytes()
     (data/'peq-active.tmp').mkdir()
     click('Apply changes')
-    assert title() == 'Apply failed; active EQ unchanged' and active.read_bytes() == before
+    assert told() == 'Apply failed; active EQ unchanged' and active.read_bytes() == before
     click('Enabled Off')
-    assert title() == 'Switch failed; EQ unchanged' and active.read_bytes() == before
+    assert told() == 'Switch failed; EQ unchanged' and active.read_bytes() == before
     (data/'peq-active.tmp').rmdir()
     click('Apply changes'); assert read().bands[0].gain == -3
     # Closing cancels the pending render.
@@ -905,11 +906,11 @@ def editor_check(lib, tmp):
     # Done renames, a name past 3 bytes too (once read as empty, a cancel); so does a tap on the
     # Rename row, its blur first, the row's click then keeping the message. The editor's name follows.
     click('HD650.txt'); ui.shim_key(b' v2'); ui.shim_type(name().encode())
-    assert title() == 'Renamed to HD650 v2' and (eqdir/'HD650 v2.txt').exists() and not (eqdir/'HD650.txt').exists()
+    assert told() == 'Renamed to HD650 v2' and (eqdir/'HD650 v2.txt').exists() and not (eqdir/'HD650.txt').exists()
     click('Rename a preset'); click('HD650 v2.txt')
     for _ in range(3): ui.shim_key(b'\b')
     ui.shim_blur(); click('Rename')
-    assert title() == 'Renamed to HD650' and (eqdir/'HD650.txt').exists()
+    assert told() == 'Renamed to HD650' and (eqdir/'HD650.txt').exists()
     # A name of any length a list shows (to 255 bytes) opens whole, so Done keeps it; one too long
     # to read back is refused, not taken as a cancel.
     long = 'L' * 250
@@ -917,9 +918,9 @@ def editor_check(lib, tmp):
     click('Rename a preset'); click(long[:50]); assert name() == long
     ui.shim_type(name().encode()); assert title() == 'Presets' and (eqdir/f'{long}.txt').exists()
     click('Rename a preset'); click(long[:50]); ui.shim_type(b'M' * 300)
-    assert title() == 'Name not allowed; preset kept' and (eqdir/f'{long}.txt').exists()
+    assert told() == 'Name not allowed; preset kept' and (eqdir/f'{long}.txt').exists()
     click('Rename a preset'); click(long[:50]); ui.shim_type(b' . ')  # all trimmed away: typed, not a cancel
-    assert title() == 'Name not allowed; preset kept' and (eqdir/f'{long}.txt').exists()
+    assert told() == 'Name not allowed; preset kept' and (eqdir/f'{long}.txt').exists()
     (eqdir/f'{long}.txt').unlink()
     ui.shim_return(); assert named('HD650')
     # Deleting asks first, removes only the saved copy and leaves the active EQ alone.
@@ -928,11 +929,11 @@ def editor_check(lib, tmp):
     assert (eqdir/'HD650.txt').exists()
     click('HD650.txt'); click('Delete HD650.txt? Confirm')
     assert not (eqdir/'HD650.txt').exists() and active.read_bytes() == before
-    assert title() == 'Deleted HD650.txt; active EQ unchanged' and not ui.shim_click(b'HD650.txt', 0)
+    assert told() == 'Deleted HD650.txt; active EQ unchanged' and not ui.shim_click(b'HD650.txt', 0)
     # Stock presets are built in: picking one loads stock's curve, writes nothing until Apply.
     files, before = sorted(eqdir.iterdir()), active.read_bytes()
     ui.shim_return(); click('Stock presets'); click('Rock')
-    assert title() == 'Preset loaded; choose Apply to activate' and active.read_bytes() == before
+    assert told() == 'Preset loaded; choose Apply to activate' and active.read_bytes() == before
     assert sorted(eqdir.iterdir()) == files
     click('Apply changes'); p = read()
     assert [p.bands[k].gain for k in range(10)] == [-2, 0, 2, 4, -2, -2, 0, 0, 4, 4]
@@ -1014,7 +1015,7 @@ def editor_check(lib, tmp):
     # Apply changes; Advanced's On/Off is live state and stays as it was.
     before = active.read_bytes()
     click('Reset to defaults')
-    assert title() == 'Reset; choose Apply to activate' and active.read_bytes() == before
+    assert told() == 'Reset; choose Apply to activate' and active.read_bytes() == before
     assert ui.shim_click(b'Preamp Auto (0.0 dB)', 2) and ui.shim_click(b'Balance Centre', 2)
     assert not ui.shim_click(b'Presets ', 2)  # the draft is no longer a named preset
     click('Apply changes')
@@ -1309,48 +1310,6 @@ def eq3_check(lib, tmp):
     s.mode = 3; assert not lib.eq_save(C.byref(s)) and active.read_bytes() == good  # never an invalid record
     active.unlink()
     print('3EQ: filters, asymmetric Mid, identity, rates, smooth updates, state upgrade, effective preset, corrupt and failed writes passed.')
-
-def eq3_captures(tmp, out, font):
-    """EQ's Simple tab in the iPod build's two themes, as e3_paint and tabs_paint draw it (rectangles exact, captions set in the
-    stock font at their sizes, centred in their boxes): illustrations for review, not AWTK captures."""
-    from ipod import imagemagick
-    (tmp/'shim.h').write_text(SHIM_H)
-    (tmp/'shim.c').write_text('#include "peq.h"\n' + SHIM)
-    ui = compile_host(tmp, 'peq_ui_ipod.so', ROOT/'patch/peq_ui.c', ROOT/'patch/peq.c', tmp/'shim.c',
-                      '-I', ROOT/'patch', '-include', tmp/'shim.h')
-    ui.shim_e3_paint.restype = C.POINTER(C.c_uint32 * (290 * 375))
-    ui.shim_text.restype = C.c_char_p
-    (tmp/'root/mnt/data').mkdir(parents=True)
-    def shot(name):
-        rgba = bytes(ui.shim_e3_paint().contents)
-        args = ['-size', '375x290', '-depth', '8', 'rgba:-']
-        for i in range(ui.shim_texts()):
-            r, px, color = (C.c_int * 4)(), C.c_uint(), C.c_uint()
-            text, c = ui.shim_text(i, r, C.byref(px), C.byref(color)).decode(), color.value
-            args += ['(', '-size', f'{r[2]}x{r[3]}', 'xc:none', '-font', str(font), '-pointsize', str(px.value),
-                     '-fill', f'#{c & 255:02x}{c >> 8 & 255:02x}{c >> 16 & 255:02x}', '-gravity', 'center',
-                     '-annotate', '+0+0', text, ')', '-gravity', 'NorthWest', '-geometry', f'+{r[0]}+{r[1]}', '-composite']
-        (out/f'3eq-{name}.png').write_bytes(imagemagick(*args, '-alpha', 'off', 'png:-', data=rgba))
-    PREV, NEXT, CENTRE = range(3)
-    for classic, theme in ((1, 'classic'), (0, 'minimal')):
-        ui.shim_classic(classic)
-        (tmp/'root/mnt/data/peq-active').unlink(missing_ok=True)
-        ui.peq_attach()  # EQ off, the flag clear, 3EQ flat
-        ui.shim_e3_open()
-        keys = lambda *k: [ui.shim_e3_key(x) for x in k]
-        keys(CENTRE, *[NEXT] * 6, CENTRE, NEXT, CENTRE, *[PREV] * 4, CENTRE, NEXT, CENTRE, *[NEXT] * 8, CENTRE, PREV, PREV)
-        shot(f'{theme}-off')  # Low +3, Mid -2, High +4; Low selected; 3EQ off
-        keys(PREV, PREV, PREV, CENTRE, *[NEXT] * 4, CENTRE, PREV)
-        shot(f'{theme}-on-adjusting')  # 3EQ on, Mid being turned to -2.5 dB
-        keys(CENTRE, PREV, PREV)
-        shot(f'{theme}-on-reset-selected')
-        keys(PREV)
-        shot(f'{theme}-on-presets-selected')
-        keys(PREV, PREV)
-        shot(f'{theme}-tabs-selected')
-        keys(NEXT, NEXT, CENTRE); ui.shim_run(); assert ui.shim_click(b'Rock', 1)
-        shot(f'{theme}-preset')  # Rock picked from Presets: PEQ plays, the sliders dimmed
-        ui.shim_e3_close()
 
 def eq3_editor_check(lib, ui, tmp):
     """3EQ's page through its real keys, touch and timers, against the state PEQ shares."""
@@ -3583,11 +3542,6 @@ int main(void) {
     print('Tidal cache: stream file extensions, eviction at the chosen cap, failed deletion, Stop, re-fetch and skip downloads, Clear All under a download, Tidal lists paged to the end passed.')
 
 if __name__ == '__main__':
-    import argparse
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--captures', type=pathlib.Path, help="also draw 3EQ's page in both iPod themes as PNGs here")
-    ap.add_argument('--font', type=pathlib.Path, help='the stock font for the captures (a build directory\'s default.ttf)')
-    args = ap.parse_args()
     with tempfile.TemporaryDirectory(prefix='q2-peq-check-') as directory:
         tmp = pathlib.Path(directory); lib = library(tmp)
         parser_check(lib, tmp)
@@ -3608,7 +3562,3 @@ if __name__ == '__main__':
         shelf_check(tmp, netupdate_check(tmp))
         online_check(tmp)
         album_check(tmp)
-        if args.captures:
-            args.captures.mkdir(parents=True, exist_ok=True)
-            (tmp/'captures').mkdir()
-            eq3_captures(tmp/'captures', args.captures, args.font or 'DejaVu-Sans')

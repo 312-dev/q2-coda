@@ -77,7 +77,8 @@ void slider_page_open(void *win, void *s, unsigned kind) {
     char key[STYLE_KEY];
     int top = geom_val(V_BAR), view_y = kind == SLIDER_BOOT ? SP_ROW : 0;
     void *view = P(s, W_PARENT), *c;
-    slider_page_win = win, sp.slider = s, sp.kind = (unsigned char)kind, sp.value = sp.sw = (void *)0;
+    slider_page_win = win, sp.slider = s, sp.kind = (unsigned char)kind,
+    sp.value = sp.sw = (void *)0;
     widget_on(win, EVT_DESTROY, sp_gone, win);
     widget_move_resize(view, 0, view_y, 375, client_h() - view_y);
     /* the slider's box on the track, a knob's height either side for a finger; stock's own bar
@@ -110,7 +111,7 @@ void slider_page_open(void *win, void *s, unsigned kind) {
 }
 
 /* The switch row of page, when it is this page: its hidden switch's image change repaints
- * nothing (navigation.c slider_tray_dirty, for crossfade.c's switch). */
+ * nothing (crossfade.c's switch). */
 void slider_page_dirty(void *page) {
     rect_t row = { 0, 0, 375, SP_ROW };
     if (page && page == slider_page_win) widget_invalidate_force(page, &row);
@@ -140,11 +141,8 @@ void sp_text(void *canvas, const unsigned *s, unsigned n, int x, int w, int y, i
     I(canvas, CANVAS_ALIGN_V) = align_v;
     I(canvas, CANVAS_ALIGN_H) = align_h;
 }
-static unsigned wide(unsigned *out, unsigned n, const char *s) {
-    unsigned k = 0;
-    while (k < n && s[k]) out[k] = (unsigned char)s[k], ++k;
-    return k;
-}
+/* s's UTF-8 as characters in out, n - 1 of them at most and a 0 */
+static unsigned wide(unsigned *out, unsigned n, const char *s) { return ar_wide(s, out, n); }
 
 /* ringnav_paint, after the window's children: the switch row, the value, the track and the range
  * ends, in the window's coordinates. */

@@ -587,7 +587,7 @@ static int al_gone(void *ctx, void *event) {
  * them, with stock's System About icon. */
 extern int stock_playermore_trampoline(void *win, void *ctx);
 static void more_rows(void *win) {
-    if (win) stock_more_speed(win), stock_more_into(win);
+    if (win) stock_more_speed(win);
     void *view = win ? widget_lookup(win, "scroll_view_more", 1) : (void *)0;
     unsigned at = 0;
     if (!view || widget_count_children(view) != PLAYMORE_COUNT) return;

@@ -1,7 +1,6 @@
 """patch/navigation.c's UI loop and key path, with system.c's Standby limit and boot logo and ratings.c's card copy of
 the ratings: Rockbox's hand-over, Bluetooth's absolute volume, the loop's pacing, the input gates, Key Tone, the
-setting editors and Classic's Set Time, and the key release's list navigation (ringnav)."""
-import calendar
+setting editors, and the key release's list navigation (ringnav)."""
 import ctypes as C
 import random
 import re
@@ -1189,14 +1188,12 @@ def now_playing_top(fw, name=b'playing_page'):
     return page
 
 
-@pytest.mark.parametrize('top, glide, marquee, off, over, animating', [
-    (b'playing_page', 1, 0, 0, 0, 1), (b'home_page', 1, 0, 0, 0, 0), (b'playing_page', 0, 0, 0, 0, 0),
-    (b'playing_page', 0, 1, 5, 40, 1), (b'playing_page', 0, 1, 0, 40, 0), (b'playing_page', 0, 1, 40, 40, 0),
-    (b'playing_page', 0, 0, 5, 40, 0),
+@pytest.mark.parametrize('top, glide, animating', [
+    (b'playing_page', 1, 1), (b'home_page', 1, 0), (b'playing_page', 0, 0),
 ])
-def test_now_playing_animates_while_its_lyrics_glide_or_its_marquee_moves(fw, st, top, glide, marquee, off, over, animating):
+def test_now_playing_animates_while_its_lyrics_glide(fw, st, top, glide, animating):
     keep = now_playing_top(fw, top)
-    st('lyric_glide').value, st('np_marquee', C.c_uint).value, st('np_off').value, st('np_over').value = glide, marquee, off, over
+    st('lyric_glide').value = glide
     assert fw.fn('navigation__np_animating', C.c_int)() == animating
 
 
@@ -1883,11 +1880,11 @@ def test_no_event_drops_the_pending_press(fw, keys, st):
     assert not ui.due('navigation__confirm_center') and st('center_timer', C.c_uint).value == 0
 
 
-@pytest.mark.parametrize('key', [KEY_CENTER, KEY_RETURN])
-def test_centre_or_return_closes_quick_settings(fw, keys, key):
+def test_return_closes_quick_settings(fw, keys):
+    """Centre on its first row, Brightness, gives the wheel to the slider instead (OLED's rows)."""
     ui = Ui(fw)
     top = ui.window('statusbar_dialog', 'dialog')
-    assert keys(key) == STOP
+    assert keys(KEY_RETURN) == STOP
     assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p]
 
 
@@ -2149,6 +2146,7 @@ def test_quick_settings_wheel_sets_the_brightness_slider(fw, keys, value, key, w
     I = fw.var('fw_ctx_g_dropdown_menu_state', C.c_int)
     I.value = 3  # open
     slider = quick_window(ui, value)
+    assert keys(KEY_CENTER) == STOP  # Brightness, the first row: the wheel goes to its slider
     assert keys(key) == STOP and slider.ints[b'value'] == want
 
 
@@ -2163,7 +2161,7 @@ def test_quick_settings_wheel_waits_while_it_slides(fw, keys, state, timer, visi
 
 def oled_quick_window(fw, ui, gain='drop_highgain'):
     """OLED's Quick Settings open: its slider and a button for each row after Brightness."""
-    Config(fw, THEME=b'3', QSVOLUME=b'1')  # the wheel's volume mode is not OLED's
+    Config(fw, QSVOLUME=b'1')  # the wheel's volume mode does not take OLED's rows
     fw.var('fw_ctx_g_dropdown_menu_state', C.c_int).value = 3
     slider = quick_window(ui)
     for name, image in (('img_wifiswitch', 'drop_wifi'), ('img_btswitch', 'drop_bt'), ('img_lock', 'drop_keylock'),
@@ -2440,224 +2438,6 @@ def test_no_lcd_no_frame(fw, keys):
     assert canvas.drawn == []
 
 
-# Classic's Set Date and Set Time.
-@pytest.fixture
-def classic(fw):
-    Config(fw, THEME=b'1')  # IPOD THEME 1, Classic (assets/themes/classic-light)
-
-
-def open_time(fw, ui, twelve=True, at=(4, 2, 4, 21, 5)):
-    fw.var('g_time24h_flag', C.c_ubyte).value = not twelve
-    top = time_window(ui, at=at)
-    nav = top.add(W(ui, 'view', 'view_navbar'))
-    title = nav.add(W(ui, 'label', 'title'))
-    fw.fn('navigation__time_open', None, C.c_void_p)(top.p)
-    fw.fn('ringnav_manualtime', C.c_int, C.c_void_p, C.c_void_p)(top.p, None)
-    assert fw.fn('navigation__time_form', C.c_int, C.c_void_p)(top.p) == 1
-    return top, title
-
-
-DATE = {b'tselector_year': 2022, b'tselector_month': 1, b'tselector_day': 1}  # what each stock selector's option 0 means
-
-
-def held(top):
-    """The date the selectors hold: its month and its day and year."""
-    year, month, day = (top.find(n).int(SELECTOR_INDEX) + first for n, first in DATE.items())
-    return month, sorted([day, year])
-
-
-def named(title):
-    """The date a title names: its month, by name, and its numbers."""
-    text = title.utf8.decode()
-    months = [m for m in range(1, 13) if calendar.month_abbr[m] in text]
-    assert len(months) == 1, text
-    return months[0], sorted(int(n) for n in re.findall(r'\d+', text))
-
-
-def test_classic_titles_the_page_with_the_date_its_selectors_hold(fw, keys, classic):
-    ui = Ui(fw)
-    top, title = open_time(fw, ui)
-    month, numbers = named(title)
-    assert (month, numbers) == held(top)
-    top.ints[b'_edit_field'] = 1
-    keys(KEY_NEXT)
-    assert named(title) == held(top) == (month + 1, numbers)  # the month turned on, the day and year kept
-
-
-def test_classic_lays_its_selectors_over_its_painted_cells(fw, keys, classic):
-    ui = Ui(fw)
-    top, _ = open_time(fw, ui)
-    names = ['tselector_year', 'tselector_month', 'tselector_day', 'tselector_hour', 'tselector_min']
-    boxes = [top.find(n.encode()).box() for n in names]
-    assert all(top.find(n.encode()).opacity == 0 for n in names)  # still the truth, under the paint
-    assert len({b[1] for b in boxes}) == 1 and boxes[0][2] > boxes[1][2] == boxes[2][2]  # one row; the year wider
-    assert boxes[0][0] < boxes[1][0] < boxes[2][0] and boxes[3][0] < boxes[4][0]
-    assert not top.find(b'img_dot').visible and not top.find(b'slide_indicator').visible
-    assert top.find(b'btn_enter').opacity == 0  # painted too: its box is the touch
-
-
-def test_classic_twelve_hour_has_an_am_pm_cell_that_crosses_noon(fw, keys, classic):
-    ui = Ui(fw)
-    top, _ = open_time(fw, ui, at=(4, 2, 4, 9, 5))
-    ampm = [w for w in top.find(b'time').children if w.kind == b'image']
-    assert len(ampm) == 1
-    ui.emit(ampm[0], EVT_CLICK)
-    assert index(top, 'tselector_hour') == 21 and field(top) == 5
-    ui.emit(ampm[0], EVT_CLICK)
-    assert index(top, 'tselector_hour') == 9
-
-
-def test_classic_twenty_four_hour_has_no_am_pm(fw, keys, classic):
-    ui = Ui(fw)
-    top, _ = open_time(fw, ui, twelve=False)
-    assert not [w for w in top.find(b'time').children if w.kind == b'image']
-    assert fw.fn('navigation__fields', C.c_int, C.c_void_p)(top.p) == 5
-
-
-@pytest.mark.parametrize('start, key, want', [(23, KEY_NEXT, 12), (12, KEY_PREV, 23), (11, KEY_NEXT, 0), (0, KEY_PREV, 11), (15, KEY_NEXT, 16)])
-def test_classic_twelve_hour_wheel_keeps_the_hours_half(fw, keys, classic, start, key, want):
-    ui = Ui(fw)
-    top, _ = open_time(fw, ui, at=(4, 2, 4, start, 5))
-    top.ints[b'_edit_field'] = 3
-    top.find(b'slide_view').ints[b'value'] = 1
-    keys(key)
-    assert index(top, 'tselector_hour') == want
-
-
-def test_classic_twenty_four_hour_wheel_runs_the_whole_day(fw, keys, classic):
-    ui = Ui(fw)
-    top, _ = open_time(fw, ui, twelve=False, at=(4, 2, 4, 11, 5))
-    top.ints[b'_edit_field'] = 3
-    top.find(b'slide_view').ints[b'value'] = 1
-    keys(KEY_NEXT)
-    assert index(top, 'tselector_hour') == 12
-
-
-def test_classic_wheel_stops_at_a_fields_ends(fw, keys, classic):
-    ui = Ui(fw)
-    top, _ = open_time(fw, ui, at=(0, 11, 4, 9, 5))
-    top.ints[b'_edit_field'] = 1
-    keys(KEY_NEXT)
-    assert index(top, 'tselector_month') == 11 and not fw.calls('text_selector_set_selected_index')
-    top.ints[b'_edit_field'] = 0
-    keys(KEY_PREV, 10)
-    assert index(top, 'tselector_year') == 0
-
-
-@pytest.mark.parametrize('twelve, last', [(True, 5), (False, 4)])
-def test_classic_centre_saves_after_the_last_field(fw, keys, classic, twelve, last):
-    ui = Ui(fw)
-    top, _ = open_time(fw, ui, twelve=twelve)
-    seen = []
-    for _ in range(last):
-        centre(ui, keys)
-        seen.append(field(top))
-    assert seen == list(range(1, last + 1)) and ui.clicks == []
-    centre(ui, keys)
-    assert ui.clicks == [(b'btn_enter', EVT_CLICK)]  # no OK stop: Save
-
-
-def test_classic_side_buttons_stop_at_the_last_field(fw, keys, classic):
-    ui = Ui(fw)
-    top, _ = open_time(fw, ui)
-    for _ in range(8):
-        keys(KEY_FWD_BTN, 10)
-    assert field(top) == 5
-
-
-def test_a_drag_takes_the_selection_to_its_field(fw, keys, classic):
-    ui = Ui(fw)
-    top, title = open_time(fw, ui)
-    day = top.find(b'tselector_day')
-    day.int(SELECTOR_INDEX, day.int(SELECTOR_INDEX) + 5)
-    ui.emit(day, EVT_VALUE_CHANGED)
-    assert field(top) == 2 and named(title) == held(top)  # the title follows the drag
-
-
-def test_a_twelve_hour_drag_keeps_the_hours_half(fw, keys, classic):
-    ui = Ui(fw)
-    top, _ = open_time(fw, ui, at=(4, 2, 4, 21, 5))  # 9 PM
-    hour = top.find(b'tselector_hour')
-    hour.int(SELECTOR_INDEX, 8)  # the drag landed on 8, in the AM half
-    ui.emit(hour, EVT_VALUE_CHANGED)
-    assert index(top, 'tselector_hour') == 20 and field(top) == 3
-
-
-def test_a_swipe_alone_changes_no_field(fw, keys, classic):
-    ui = Ui(fw)
-    top, _ = open_time(fw, ui)
-    top.ints[b'_edit_field'] = 1
-    ui.emit(top.find(b'slide_view'), EVT_VALUE_CHANGED)
-    assert field(top) == 1
-
-
-def test_the_page_closing_forgets_it(fw, keys, classic, st):
-    ui = Ui(fw)
-    top, _ = open_time(fw, ui)
-    assert st('slider_win', C.c_void_p).value == top.p
-    ui.emit(top, EVT_DESTROY)
-    assert not st('slider_win', C.c_void_p).value
-
-
-def time_paint(fw, top, canvas):
-    fw.fn('navigation__time_paint', None, C.c_void_p, C.c_void_p)(top.p, canvas.p)
-
-
-def in_box(canvas, w):
-    """The text painted in w's box: a selector's cell (time_open put it there), or AM/PM's image."""
-    return [t for t, r in canvas.texts if r == w.box()]
-
-
-@pytest.mark.parametrize('edited', range(len(DATE)))
-def test_classic_paints_the_date_page(fw, keys, classic, edited):
-    ui = Ui(fw)
-    top, _ = open_time(fw, ui, at=(4, 2, 4, 21, 5))
-    top.ints[b'_edit_field'] = edited
-    canvas = Canvas(fw)
-    time_paint(fw, top, canvas)
-    cells = [top.find(n) for n in DATE]
-    assert [[int(t) for t in in_box(canvas, w)] for w in cells] == [[w.int(SELECTOR_INDEX) + first] for w, first in zip(cells, DATE.values())]
-    assert calendar.month_abbr[held(top)[0]] in [t for t, _ in canvas.texts]  # the tile's month
-    lit = [(art, x) for art, x, _ in canvas.placed if art and '_lit_' in art]
-    assert len(lit) == 1
-    art, x = lit[0]
-    assert min(cells, key=lambda w: abs(w.box()[0] - x)) is cells[edited]  # over the edited field
-    assert art.endswith('_%d' % cells[edited].box()[2])  # its art cut to the field's width
-    assert canvas.fill() == 0xff123456
-
-
-@pytest.mark.parametrize('twelve, hour, shown', [(True, 21, ['9', '05', 'PM']), (True, 0, ['12', '05', 'AM']), (True, 12, ['12', '05', 'PM']),
-                                                 (False, 21, ['21', '05'])])
-def test_classic_paints_the_time_page(fw, keys, classic, twelve, hour, shown):
-    ui = Ui(fw)
-    top, _ = open_time(fw, ui, twelve=twelve, at=(4, 2, 4, hour, 5))
-    top.find(b'slide_view').ints[b'value'] = 1
-    top.ints[b'_edit_field'] = 3
-    canvas = Canvas(fw)
-    time_paint(fw, top, canvas)
-    boxes = [top.find(b'tselector_hour'), top.find(b'tselector_min')] + [w for w in top.find(b'time').children if w.kind == b'image']
-    assert [t for w in boxes for t in in_box(canvas, w)] == shown
-    ok = top.find(b'btn_enter')
-    assert in_box(canvas, ok) == [ok.utf8.decode()]  # the hidden button's label, painted in its box
-    assert ':' in [t for t, _ in canvas.texts] and len([a for a in canvas.art if '_lit_' in a]) == 1
-
-
-def test_classic_paints_nothing_without_an_lcd(fw, keys, classic):
-    ui = Ui(fw)
-    top, _ = open_time(fw, ui)
-    canvas = Canvas(fw, lcd=False)
-    time_paint(fw, top, canvas)
-    assert canvas.texts == [] and canvas.art == []
-
-
-def test_classic_frames_no_field_itself(fw, keys, classic):
-    ui = Ui(fw)
-    top, _ = open_time(fw, ui)
-    canvas = Canvas(fw)
-    edit_paint(fw, top.find(b'tselector_year'), canvas)
-    assert canvas.drawn == []  # its cells are painted lit instead
-
-
 # The UI loop's pass (ringnav_sleep) and the input hook (ringnav_input).
 class Loop:
     """A UI loop pass over a page, the clock and stock's sleeps watched; stock's own pass returns 42."""
@@ -2828,14 +2608,9 @@ def test_a_lit_idle_pass_sleeps_once_input_has_been_still(fw, stock_bytes, st):
     assert loop(1) == [O['IDLE_SLEEP_MS']]
 
 
-@pytest.mark.parametrize('busy', ['animating', 'marquee'])
-def test_a_lit_pass_stays_awake_while_something_moves(fw, stock_bytes, st, busy):
+def test_a_lit_pass_stays_awake_while_something_moves(fw, stock_bytes, st):
     loop = Loop(fw, stock_bytes)
-    if busy == 'animating':
-        loop.ui.animating = 1
-    else:
-        loop.ui.window('playing_page')
-        st('np_marquee', C.c_uint).value, st('np_off').value, st('np_over').value = 9, 10, 60  # the album scrolling
+    loop.ui.animating = 1
     assert loop(O['IDLE_MS']) == []
 
 
@@ -3154,20 +2929,8 @@ def test_an_overdue_click_that_locks_the_screen_drops_the_next_centre(fw, keys):
     assert ui.clicks == [(b'row1', EVT_CLICK)] and not ui.due('navigation__confirm_center')
 
 
-def test_a_lone_centre_on_now_playing_turns_the_screen_off(fw, keys, st):
-    Config(fw, SCRUBSINGLE=b'0')  # Single Press Scrub chosen off
-    st('settings_read').value = 0
-    ui = Ui(fw)
-    top = ui.window('playing_page')
-    st('np_win', C.c_void_p).value = top.p
-    assert keys(KEY_CENTER) == STOP and not fw.calls('on_wm_keyup_fun')  # a second press may come: a scrub
-    assert [ui.timers[t][2] for t in ui.due('navigation__np_single')] == [O['DOUBLE_CLICK_MS']]
-    ui.fire('navigation__np_single')
-    assert [C.c_int.from_address(c[1][1] + EVENT_KEY).value for c in fw.calls('on_wm_keyup_fun')] == [KEY_CENTER]
-
-
-def test_a_lone_centre_on_now_playing_scrubs_unless_chosen_otherwise(fw, keys, st):
-    """Single Press Scrub is on unless chosen off: Centre on Now Playing starts a scrub, never sleeps."""
+def test_a_lone_centre_on_now_playing_scrubs(fw, keys, st):
+    """Centre on Now Playing starts a scrub, never sleeps."""
     Config(fw)
     st('settings_read').value = 0
     ui = Ui(fw)

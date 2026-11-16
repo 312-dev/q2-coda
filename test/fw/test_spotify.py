@@ -25,7 +25,7 @@ ALL_CAPS = [b'download', b'collections', b'collection', b'playcollection', b'dow
 class Ui(C.Structure):
     _fields_ = [*((n, C.c_void_p) for n in 'page info msg art bar glyph title artist album elapsed remain note sub'.split()),
                 *((n, C.c_uint) for n in 'timer leave scrub_at shown playing press press_at bar_drawn'.split()),
-                *((n, C.c_int) for n in ('scrub', 'scrub_ms', 'ipod')),
+                *((n, C.c_int) for n in ('scrub', 'scrub_ms')),
                 ('art_track', C.c_char * 64), ('art_tried', C.c_char * 64), ('art_tries', C.c_int)]
 
 
@@ -129,14 +129,6 @@ class Timers:
     def run(self, name):
         fn = [f for f, _ in self.added if f == self.fn(name)][-1]
         return C.CFUNCTYPE(C.c_int, C.c_void_p)(fn)(None)
-
-
-def classic(fw):
-    """Classic, theme 1, from the config; every other key its default."""
-    def read(path, section, key, out, default, *_):
-        v = b'1' if C.string_at(key) == b'THEME' else C.string_at(default)
-        C.memmove(out, v + b'\0', len(v) + 1)
-    fw.mock('toolsReadConfig', read)
 
 
 # spot_poll: the hold on the player and the timers.
@@ -693,30 +685,6 @@ def test_paint_draws_on_the_open_page_s_bar_and_glyph_only(fw):
     canvas = Canvas(fw)
     np.paint(bar, canvas)
     assert canvas.drawn == [] and canvas.colour is None
-
-
-def test_classic_s_page_takes_the_local_now_playing_s_places(fw):
-    classic(fw)
-    np = Np(fw, **TRACK)
-    name = np.w.kids[np.ui.info][0]  # the label over the art naming the page
-    assert np.w.text.get(name) and np.ui.ipod == 1 and np.w.shown[name] == 0 and np.w.shown[np.ui.glyph] == 0  # the title bar names it
-
-
-def test_classic_s_bar_carries_the_scrub_s_cue_at_the_played_end(fw):
-    classic(fw)
-    np = Np(fw, **TRACK | dict(position=100500, playing=0))
-    width(np.ui.bar, 300)
-    canvas = Canvas(fw)
-    np.paint(np.ui.bar, canvas)
-    plain = list(canvas.drawn)
-    np.ui.scrub, np.ui.scrub_ms = 1, 100500
-    canvas.drawn = []
-    np.paint(np.ui.bar, canvas)
-    mark = O['NP_SCRUB_MARK']
-    cue = [d for d in canvas.drawn if d not in plain]
-    widest = [d for d in cue if d[3] == 2 * mark + 1]
-    assert len(cue) == 2 * mark + 1 and len(widest) == 1 and widest[0][1] + mark == 100500 * 300 // 200000
-    assert not [d for d in plain if d[0] == 'round'] and canvas.colour == canvas.fill
 
 
 # Keys on the page.

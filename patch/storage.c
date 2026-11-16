@@ -358,7 +358,7 @@ static void st_foot(void *canvas, const char *a, const char *b) {
 }
 
 void storage_paint(void *w, void *canvas) {
-    if (!w || (!so.page && !so.dl) || !feedback_oled() || !P(canvas, CANVAS_LCD)) return;
+    if (!w || (!so.page && !so.dl) || !P(canvas, CANVAS_LCD)) return;
     void *lcd = P(canvas, CANVAS_LCD), *parent = P(w, W_PARENT);
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), text = (unsigned)I(lcd, LCD_TEXT_COLOR),
              raw = st.raw_ink;

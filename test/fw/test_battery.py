@@ -12,7 +12,11 @@ from test_peq_page import Canvas  # the EQ graph's canvas: the rectangles filled
 
 RECORD, LOG = '/mnt/data/q2-battery', '/mnt/mmc/battery-log.txt'
 MAGIC, ROWS = 0x31484251, 100
-PAGE, EVT_CLICK = 0x7000, O['EVT_CLICK']
+# Battery History's window and a toast's, each a zeroed widget (no parent, no name): OLED's toast and title checks read
+# the window on top
+_WINDOWS = C.create_string_buffer(0x400), C.create_string_buffer(0x400)
+PAGE, TOAST = (C.addressof(w) for w in _WINDOWS)
+EVT_CLICK = O['EVT_CLICK']
 SEL, COUNT = b'_ringnav_index', b'_ringnav_count'
 NOON = calendar.timegm((2026, 11, 11, 12, 0, 0))  # the clock in UTC, as localtime here reads it
 MOUNTS = b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n'
@@ -218,6 +222,7 @@ class Page:
         fw.mock('list_item_create', lambda *_: self.items.append(self.widget()) or self.items[-1])
         fw.mock('hscroll_label_create', self.label)
         fw.mock('widget_set_text_utf8', lambda w, s, *_: self.texts.__setitem__(w, C.string_at(s).decode()))
+        fw.mock('widget_get_text_utf8', self.get_text)  # an empty page's note reads its caption back (page_empty)
         self.props = {}
         fw.mock('widget_get_prop_int', self.prop)
         fw.mock('widget_set_prop_int', lambda w, key, v, *_: self.props.__setitem__((w, C.string_at(key)), C.c_int(v).value))
@@ -246,6 +251,11 @@ class Page:
         """The graph's view: its height is a seventh argument, which a stub doesn't pass on."""
         self.graph = self.widget(x, y)
         return self.graph
+
+    def get_text(self, w, out, n, *_):
+        data = self.texts.get(w, '').encode()[:n - 1] + b'\0'
+        C.memmove(out, data, len(data))
+        return 0
 
     def label(self, parent, *_):
         p = self.widget()
@@ -287,7 +297,9 @@ def test_the_page_lists_export_then_each_row_a_day_s_first_dated(fw, q2):
     graph = [a for _, a in fw.calls('widget_factory_create_widget')]
     assert len(graph) == 1 and graph[0][2] == PAGE  # over the list, which starts below it
     gy = graph[0][4]
-    (x, y, w, h), = [page.boxes[a[0]] for _, a in fw.calls('widget_move_resize') if a[0] in page.boxes]  # the list
+    lv = C.c_void_p.from_address(page.view + O['W_PARENT']).value  # the list, the scroll view's parent
+    assert [a[0] for _, a in fw.calls('widget_move_resize')].count(lv) == 1
+    x, y, w, h = page.boxes[lv]
     assert y > gy and y + h <= 290 and h >= 48  # under the graph, to the page's foot at most
 
 
@@ -466,7 +478,7 @@ def test_a_row_while_the_export_toast_is_up_waits_for_the_toast(fw, q2):
     builds = len(page.lists)
 
     def toast(*_):
-        page.top = 0x9000  # the toast's window
+        page.top = TOAST  # the toast's window
         q2.poll(98, minutes=10)  # a percent falls under it
         assert len(page.lists) == builds  # the rows stay
         page.top = PAGE

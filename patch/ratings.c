@@ -137,15 +137,6 @@ const char *hearts_text(char *s, int n) {
     return s;
 }
 
-/* A theme's glyph on w (tools/art.py): the half's image, set only on a change. */
-static void np_image(void *w, const char *glyph) {
-    char name[40];
-    tk_snprintf(name, sizeof name, "classic_light_%s_%s", glyph, ipod_light() ? "l" : "d");
-    if (w && tk_strcmp(widget_get_prop_str(w, "image", ""), name)) {
-        image_base_set_image(w, name);
-        widget_invalidate_force(w, (void *)0);
-    }
-}
 /* play_fav, or the theme's own full heart (np_bar.c np_glyphs: "<art>np_fav") */
 static int heart_full(const char *image) {
     unsigned k = (unsigned)strlen(image);
@@ -197,56 +188,25 @@ static int rate_tick(const void *unused) {
 }
 
 static int rate_tap(void *ctx, void *event);
-static int rate_out(void *ctx, void *event);
 static int rate_press(void *ctx, void *event);
 /* The picker goes down with its page or panel (Coverflow's load destroys the page's children). */
 static int rate_panel_gone(void *win, void *event) {
     if (win == st.rate_on) st.rate_on = (void *)0;
-    st.rate_box = (void *)0; /* rate_panel names it again */
     return 0;
 }
 /* The picker on win, made on first use: a dark rounded panel, its caption, then five of the
  * heart's own images. */
 static void *rate_panel(void *win) {
     void *panel = widget_lookup(win, "rate_panel", 0);
-    /* Classic's panel paints itself (ringnav_paint_bg) */
-    int gloss = classic_pages();
-    if (panel) {
-        if (gloss) st.rate_box = panel;
-        return panel;
-    }
+    if (panel) return panel;
     int h = 110, w = 5 * 56 + 24;
-    /* Classic's widget also holds the panel's ring and soft shadow, so they repaint with it
-     */
-    int mx = gloss ? PANEL_PAD : 0, my = gloss ? PANEL_PAD - PANEL_DROP : 0;
-    if (gloss) { /* under the panel, over the page: a tap outside leaves it as Return does */
-        void *out = image_create(win, 0, 0, I(win, W_W), I(win, W_H));
-        widget_set_name(out, "rate_out");
-        widget_set_prop_str(out, "clickable", "true");
-        widget_on(out, EVT_CLICK, rate_out, (void *)0);
-        widget_on(out, EVT_POINTER_DOWN, rate_press, (void *)0);
-    }
-    panel =
-        text(win, (I(win, W_W) - w) / 2 - mx, (I(win, W_H) - h) / 2 - my, w + 2 * mx, h + 2 * mx);
+    panel = text(win, (I(win, W_W) - w) / 2, (I(win, W_H) - h) / 2, w, h);
     widget_set_name(panel, "rate_panel");
-    if (gloss) {
-        st.rate_box = panel;
-        widget_set_prop_int(panel, "style:normal:bg_color", 0);
-    } else {
-        widget_set_prop_int(panel, "style:normal:bg_color",
-                            (int)(0xff000000u | FILL_RGB)); /* opaque */
-        widget_set_prop_int(panel, "style:normal:round_radius", LETTER_RADIUS);
-    }
-    void *caption = text(panel, mx, my + 8, w, 28);
-    if (gloss) { /* the ink, which Light Mode's style hook flips back */
-        widget_set_prop_int(caption, "style:normal:text_color",
-                            (int)RGBA(flip_if(ipod_light(), scheme()->ink)));
-        widget_set_prop_str(caption, "style:normal:font_name", "classic-light");
-        widget_set_prop_int(caption, "style:normal:font_size", 22);
-    }
+    widget_set_prop_int(panel, "style:normal:bg_color", (int)(0xff000000u | FILL_RGB)); /* opaque */
+    widget_set_prop_int(panel, "style:normal:round_radius", LETTER_RADIUS);
+    text(panel, 0, 8, w, 28);
     for (int i = 0; i < 5; i++) {
-        /* centred in it, Classic's 32 x 30 heart starts 58 down the panel */
-        void *heart = image_create(panel, mx + 12 + i * 56, my + 44 + gloss, 56, 56);
+        void *heart = image_create(panel, 12 + i * 56, 44, 56, 56);
         image_set_draw_type(heart, IMAGE_DRAW_CENTER);
         widget_set_prop_str(heart, "clickable", "true");
         widget_on(heart, EVT_CLICK, rate_tap, (void *)(long)(i + 1));
@@ -261,29 +221,11 @@ static void *rate_panel(void *win) {
 static void rate_paint(void) {
     void *panel = rate_panel(st.rate_on);
     char t[24] = "Unrated";
-    int gloss = classic_pages();
-    for (int i = 0; i < 5; i++) {
-        void *heart = widget_get_child(panel, (unsigned)i + 1);
-        if (gloss)
-            np_image(heart, i < ra.rate_pick ? "heart_on" : "heart_off");
-        else
-            image_base_set_image(heart, i < ra.rate_pick ? "play_fav" : "play_unfav");
-    }
-    if (ra.rate_pick)
-        tk_snprintf(t, sizeof t,
-                    !gloss              ? "%d of 5"
-                    : ra.rate_pick == 1 ? "1 Heart"
-                                        : "%d Hearts",
-                    ra.rate_pick);
+    for (int i = 0; i < 5; i++)
+        image_base_set_image(widget_get_child(panel, (unsigned)i + 1),
+                             i < ra.rate_pick ? "play_fav" : "play_unfav");
+    if (ra.rate_pick) tk_snprintf(t, sizeof t, "%d of 5", ra.rate_pick);
     widget_set_text_utf8(widget_get_child(panel, 0), t);
-}
-
-/* What's under the picker takes a touch again, or doesn't. */
-static void rate_outside(void *win, int on) {
-    void *out = widget_lookup(win, "rate_out", 0);
-    if (!out) return;
-    widget_set_visible(out, on, 0);
-    widget_set_sensitive(out, on);
 }
 
 static void rate_save(void *win);
@@ -295,7 +237,6 @@ static void rate_close(int save) {
     void *panel = rate_panel(win);
     widget_set_visible(panel, 0, 0);
     widget_set_sensitive(panel, 0); /* stock's hit test skips only the insensitive, hidden or not */
-    rate_outside(win, 0);
     if (save) rate_save(win);
 }
 
@@ -353,10 +294,6 @@ static int rate_tap(void *ctx, void *event) {
     rate_close(1);
     return STOP;
 }
-static int rate_out(void *ctx, void *event) {
-    if (rate_tapped()) rate_close(0);
-    return STOP;
-}
 
 /* A modal set's picker (docs/oled-design.md#menus): the inset modal's, a row for each rating, the
  * current one checked; a pick keeps its row's rating, as Centre on the hearts does, and Return
@@ -389,7 +326,6 @@ int rate_show(void *win, int pick, unsigned album) {
     void *panel = rate_panel(win);
     widget_set_visible(panel, 1, 0);
     widget_set_sensitive(panel, 1);
-    rate_outside(win, 1);
     return 1;
 }
 /* Now Playing's, on the playing track's rating. */
@@ -568,7 +504,7 @@ static void rate_all(void *songs, unsigned char *h) {
     deque_destroy(favs);
 }
 
-/* OLED's Ratings rows (feedback_oled): the hearts on the second line are Phosphor glyphs, filled
+/* OLED's Ratings rows: the hearts on the second line are Phosphor glyphs, filled
  * for the song's and outlined for the rest, in Text Secondary or white on the selection
  * (tools/art.py RATE_PX, oled_rate_on_* and oled_rate_off_*), drawn with the row from its
  * RATE_HEARTS; the line's words start after them. */
@@ -584,7 +520,7 @@ static void rate_row(void *item, int n) {
                        I(label, W_H));
 }
 void rate_hearts_paint(void *w, void *canvas) {
-    if (!w || !feedback_oled()) return; /* ringnav_paint calls it while st.rt_page is open */
+    if (!w) return; /* ringnav_paint calls it while st.rt_page is open */
     int n = widget_get_prop_int(w, RATE_HEARTS, 0);
     void *label = n ? widget_get_child(w, 1) : (void *)0;
     if (!label) return;
@@ -622,19 +558,15 @@ static int rated_open(void *ctx, void *event) {
     int count = (int)deque_size(list);
     void *view = page_list(st.rt_page, st.rt_page, 0, rt_names[k], count ? count : 1, 64);
     page_fit(view);
-    char name[512], detail[300], hs[16];
-    int glyphs = feedback_oled();
+    char name[512], detail[300];
     for (int i = 0; i < count; i++) {
         void *t = deque_at(list, (unsigned)i);
         const char *artist = P(t, REC_ARTIST);
-        if (glyphs) /* a space for no artist: an empty detail would centre the title alone */
-            tk_snprintf(detail, sizeof detail, artist && *artist ? "· %s" : " ",
-                        artist && *artist ? artist : "");
-        else
-            tk_snprintf(detail, sizeof detail, artist && *artist ? "%s · %s" : "%s%s",
-                        hearts_text(hs, of[i]), artist && *artist ? artist : "");
-        void *row = page_row_detail(view, i, track_name(name, sizeof name, t), detail, rt_play);
-        if (glyphs) rate_row(row, of[i]);
+        /* a space for no artist: an empty detail would centre the title alone */
+        tk_snprintf(detail, sizeof detail, artist && *artist ? "· %s" : " ",
+                    artist && *artist ? artist : "");
+        rate_row(page_row_detail(view, i, track_name(name, sizeof name, t), detail, rt_play),
+                 of[i]);
     }
     if (!count)
         page_row_detail(view, 0, "No songs yet", "Hold the heart on Now Playing to rate", 0);

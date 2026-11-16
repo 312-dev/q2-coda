@@ -170,10 +170,9 @@ static int lr_child(void *row) {
     return -1;
 }
 
-/* The Library page's rows' view when it is on top under OLED and takes input, else 0. */
+/* The Library page's rows' view when it is on top and takes input, else 0. */
 static void *lr_view_of(void *top) {
-    if (!top || !usable() || !oled_pages() ||
-        tk_strcmp(widget_get_prop_str(top, "name", ""), "localmusic_page"))
+    if (!top || !usable() || tk_strcmp(widget_get_prop_str(top, "name", ""), "localmusic_page"))
         return (void *)0;
     return widget_lookup(top, "scroll_view_localmusic", 1);
 }

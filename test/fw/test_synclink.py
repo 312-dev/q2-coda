@@ -4,10 +4,9 @@ import ctypes as C
 
 import pytest
 from test_nav_display_library import (  # noqa: F401 (fixtures)
-    STOCK_BODY, THEMES, SettingsList, Ui, geometry, scratch, st, stand_in)
+    OLED, STOCK_BODY, SettingsList, Ui, geometry, scratch, st, stand_in)
 from test_usb_charge import Charging
 
-OLED = next(t['index'] for t in THEMES if t['id'] == 'oled')
 HINT = 'Lets nearby phones control this Q2 without a password'
 
 

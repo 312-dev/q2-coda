@@ -415,70 +415,36 @@ def test_english_ui_refuses_a_file_it_cannot_rewrite():
         build.english_ui('x', bytes(data))
 
 
-def test_bold_font():
+def test_a_face_keeps_its_sources_dates_and_table_order():
     from fontTools.ttLib import TTFont
-    font_bytes, ranges = build.face_font(build.FACES['bold'])
-    font = TTFont(io.BytesIO(font_bytes))
-    source = TTFont(build.ROOT/'assets/fonts/LiberationSans-Bold.ttf')
-    have = sorted(u for u in source.getBestCmap() if 0x20 <= u < 0x530 or 0x2000 <= u < 0x2200) + [build.PLAY_MARK]
-    assert sorted(font.getBestCmap()) == have and 0x41 in have and 0x2013 in have and 0x4e2d not in have
-    for rec in font['name'].names:
-        if rec.nameID in (1, 3, 4, 6, 16, 17, 18, 21, 22):
-            assert 'Liberation' not in str(rec)
-    names = {rec.nameID: str(rec) for rec in font['name'].names}
-    assert names[1].startswith('Q2 Pod Sans') and names[6].startswith('Q2PodSans')
-    assert names[0] == str(source['name'].getName(0, 3, 1, 0x409))  # the copyright notice stays
+    font_bytes, ranges = build.face_font(build.FACES['inter'])
+    font, source = TTFont(io.BytesIO(font_bytes)), TTFont(build.ROOT/'assets/fonts/Inter-Regular.ttf')
     assert font['head'].created == source['head'].created and font['head'].modified == source['head'].modified
-    m = re.fullmatch(r'#define BOLD_RANGES \{([0-9a-fx,]+)\}', ranges)
-    assert m, ranges
-    bounds = [int(v, 16) for v in m[1].split(',')]
-    assert sorted(u for lo, hi in zip(bounds[::2], bounds[1::2]) for u in range(lo, hi + 1)) == have
-    assert bounds[:2] == [0x20, 0x7e]  # runs, not single characters
     assert [t for t in sorted(font.reader.tables, key=lambda t: font.reader.tables[t].offset)] == \
            [t for t in sorted(source.reader.tables, key=lambda t: source.reader.tables[t].offset) if t in font.reader.tables]
 
 
-def test_bold_font_refuses_the_reserved_name(tmp_path, monkeypatch):
+def test_a_face_refuses_its_reserved_name(tmp_path, monkeypatch):
+    """A name record the rename leaves holding the family's first word (its Reserved Font Name) stops the build."""
     from fontTools.ttLib import TTFont
-    font = TTFont(build.ROOT/'assets/fonts/LiberationSans-Bold.ttf')
+    font = TTFont(build.ROOT/'assets/fonts/Inter-Regular.ttf')
+    assert not font['name'].getDebugName(16)  # the rename takes ID 1's family
     for rec in font['name'].names:
-        if rec.nameID == 4:
-            rec.string = 'Liberation Mono'
+        if rec.nameID == 1:  # a family the other records don't spell: their Inter stays
+            rec.string = 'Inter Display'
     (tmp_path/'assets/fonts').mkdir(parents=True)
-    font.save(tmp_path/'assets/fonts/LiberationSans-Bold.ttf')
+    font.save(tmp_path/'assets/fonts/Inter-Regular.ttf')
     monkeypatch.setattr(build, 'ROOT', tmp_path)
-    with pytest.raises(ValueError, match='^Bold font name 4 keeps Liberation$'):
-        build.face_font(build.FACES['bold'])
+    with pytest.raises(ValueError, match='^Inter font name 3 keeps Inter$'):
+        build.face_font(build.FACES['inter'])
 
 
-def test_bold_font_must_keep_its_characters(monkeypatch):
+def test_a_face_must_keep_its_characters(monkeypatch):
     from fontTools import subset
     keep = subset.Subsetter.populate
     monkeypatch.setattr(subset.Subsetter, 'populate', lambda self, unicodes: keep(self, unicodes=unicodes[:-1]))
-    with pytest.raises(ValueError, match='^Bold font subset lost characters$'):
-        build.face_font(build.FACES['bold'])
-
-
-def test_classic_light_font():
-    from fontTools.ttLib import TTFont
-    font_bytes, ranges = build.face_font(build.FACES['classic-light'])
-    font, source = TTFont(io.BytesIO(font_bytes)), TTFont(build.ROOT/'assets/fonts/texgyreheros-bold.otf')
-    have = sorted(u for u in source.getBestCmap() if 0x20 <= u < 0x530 or 0x2000 <= u < 0x2200) + [build.PLAY_MARK]
-    assert sorted(font.getBestCmap()) == have and 0x41 in have and 0xe9 in have
-    names = {rec.nameID: str(rec) for rec in font['name'].names}
-    assert names[1].replace(' ', '').startswith('Q2PodClassicLight') and names[6].startswith('Q2PodClassicLight')  # the Windows record is TeXGyreHeros, unspaced
-    assert all(len(names[i]) <= 31 for i in (1, 4, 6))  # AWTK font names
-    for i in (1, 3, 4, 6, 16, 17, 18, 21, 22):
-        assert 'TeX Gyre' not in names.get(i, '') and 'TeXGyre' not in names.get(i, '')
-    assert names[0] == str(source['name'].getName(0, 3, 1, 0x409))
-    assert names[7] == str(source['name'].getName(7, 3, 1, 0x409))
-    assert 'Modified version of TeX Gyre Heros Bold' in names[10] and 'gust.org.pl' in names[10]  # LPPL 6(a), 6(b), 6(d)2
-    assert 'U+25B6' in names[10] and 'U+25B6' in (build.ROOT/'assets/fonts/README-classic-light.txt').read_text()  # 6(b): every change
-    assert (build.ROOT/'assets/fonts/README-classic-light.txt').exists() and (build.ROOT/'assets/fonts/GUST-FONT-LICENSE.txt').exists()
-    if 'CFF ' in font:
-        assert 'TeXGyre' not in str(font['CFF '].cff.fontNames) + font['CFF '].cff.topDictIndex[0].FullName + font['CFF '].cff.topDictIndex[0].FamilyName
-    assert re.fullmatch(r'#define CLASSIC_LIGHT_RANGES \{0x20,0x7e,[0-9a-fx,]+\}', ranges)
-    assert 'CFF ' in font and 'glyf' not in font  # the chosen outline form
+    with pytest.raises(ValueError, match='^Inter font subset lost characters$'):
+        build.face_font(build.FACES['inter'])
 
 
 @pytest.mark.parametrize('face', ['inter', 'inter-medium'])
@@ -510,21 +476,30 @@ def test_tabular_figures_must_be_in_the_font():
         build.subset_font(build.ROOT/'assets/fonts'/f.source, f.family, f.ranges_macro, tabular='.tnum')
 
 
+def test_a_face_without_tabular_figures_keeps_its_own():
+    """tabular is a face's choice: without it the figures stay the source's proportional ones."""
+    from fontTools.ttLib import TTFont
+    f = build.FACES['inter']
+    font = TTFont(io.BytesIO(build.subset_font(build.ROOT/'assets/fonts'/f.source, f.family, f.ranges_macro)[0]))
+    cmap, hmtx = font.getBestCmap(), font['hmtx']
+    assert len({hmtx[cmap[ord(c)]][0] for c in '0123456789'}) > 1
+
+
 def test_the_faces_header_lists_each_face_by_its_index():
     from theme import FONTS
     header = dict(line.split(' ', 2)[1:] for line in build.faces_header(RANGES))
-    assert [header[f.c] for f in build.FACES.values()] == ['0', '1', '2', '3', '4'] and header['FONT_N'] == '5'
+    assert [header[f.c] for f in build.FACES.values()] == ['0', '1', '2'] and header['FONT_N'] == '3'
     assert list(FONTS) == list(build.FACES) and list(FONTS.values()) == [f.c for f in build.FACES.values()]
-    assert header['FONT_NAMES'] == '{"default","bold","classic-light","inter","inter-medium"}'
-    assert header['FONT_FALLBACK'] == '{0,FONT_DEFAULT,FONT_BOLD,FONT_DEFAULT,FONT_DEFAULT}'
-    assert header['FONT_FALLBACK_PCT'] == '{100,100,83,98,98}'
-    assert header['FONT_RANGES'] == '{0x20,0x7e,0x20,0x7e,0x2013,0x2014,0x20,0x7e,0x25b6,0x25b6,0x30,0x3a}'
-    assert header['FONT_RANGE_AT'] == '{0,0,2,6,10,12}'  # stock's none: every character
+    assert header['FONT_NAMES'] == '{"default","inter","inter-medium"}'
+    assert header['FONT_FALLBACK'] == '{0,FONT_DEFAULT,FONT_DEFAULT}'
+    assert header['FONT_FALLBACK_PCT'] == '{100,98,98}'
+    assert header['FONT_RANGES'] == '{0x20,0x7e,0x25b6,0x25b6,0x30,0x3a}'
+    assert header['FONT_RANGE_AT'] == '{0,0,4,6}'  # stock's none: every character
     with pytest.raises(ValueError, match='^One ranges macro per subset face$'):
-        build.faces_header(RANGES[:2])
+        build.faces_header(RANGES[:1])
 
 
-@pytest.mark.parametrize('face', ['bold', 'classic-light'])
+@pytest.mark.parametrize('face', ['inter', 'inter-medium'])
 def test_both_faces_are_given_a_play_mark_on_the_middle_of_their_capitals(face):
     """View Queue's mark (navigation.c stock_row_style): neither source has U+25B6, and a title holding
     a character its face lacks leaves that face."""
@@ -542,12 +517,9 @@ def test_both_faces_are_given_a_play_mark_on_the_middle_of_their_capitals(face):
     assert xs[0] == xs[1] and ys[1] == (ys[0] + ys[2]) // 2  # an upright edge on the left, its point level with the middle
     assert abs(ys[0] + ys[2] - cap) <= 1  # on the capitals' middle
     assert abs((ys[2] - ys[0]) / cap - .78) < .005 and abs((xs[2] - xs[0]) / cap - .70) < .005
-    # at a Classic row's title px, bold standing in at classic-light's fallback_pct of it (navigation.c
-    # fallback_px), the upright edge lies on a pixel's, so it is drawn sharp
-    px = next(t for t in theme.builtins() if t['id'] == 'classic-light')['font_px[ROLE_TITLE]']
-    pct = build.FACES['classic-light'].fallback_pct
-    pixel = (font['hhea'].ascent - font['hhea'].descent) / (px if face == 'classic-light' else (px * pct + 50) // 100)
-    assert abs(xs[0] / pixel - 1) < .02
+    # at OLED's row title px (stb scales ascent - descent to the size), the upright edge is about a pixel in
+    px = theme.builtins()[0]['font_px[ROLE_TITLE]']
+    assert 1 <= xs[0] * px / (font['hhea'].ascent - font['hhea'].descent) < 1.1
     advance, bearing = font['hmtx'][name]
     assert bearing == xs[0] and advance == xs[2] + bearing  # as much room after it as before
     area = sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(points, points[1:] + points[:1]))
@@ -562,7 +534,7 @@ def test_both_faces_are_given_a_play_mark_on_the_middle_of_their_capitals(face):
 
 @pytest.mark.parametrize('face', [k for k, f in build.FACES.items() if f.source])
 def test_the_faces_keep_every_other_glyph_as_drawn(face):
-    """assets/fonts/README-classic-light.txt: no outline or metric of the original's is changed; the
+    """A subset changes no outline or metric of the original's (the licences' Modified Version); the
     mark is the one glyph added, at the end. A face with tabular figures draws TABULAR's characters
     with its own tabular glyphs."""
     from fontTools.pens.recordingPen import DecomposingRecordingPen
@@ -1084,8 +1056,7 @@ def test_patch_m4b_cover_names_itself_in_a_mapping_error(monkeypatch):
         build.patch_m4b_cover(bytes(raw))
 
 
-RANGES = ['#define BOLD_RANGES {0x20,0x7e}', '#define CLASSIC_LIGHT_RANGES {0x20,0x7e,0x2013,0x2014}',
-          '#define INTER_RANGES {0x20,0x7e,0x25b6,0x25b6}', '#define INTER_MEDIUM_RANGES {0x30,0x3a}']
+RANGES = ['#define INTER_RANGES {0x20,0x7e,0x25b6,0x25b6}', '#define INTER_MEDIUM_RANGES {0x30,0x3a}']
 
 
 def stock_h(dev=0, repo=build.REPO):
@@ -1103,7 +1074,7 @@ def test_stock_header_versions(dev, beta, repo, version, tag, flag, monkeypatch)
     lines = header.splitlines()
     assert header.endswith('\n') and all(line.startswith('#define ') for line in lines)
     macros = dict(line.split(' ', 2)[1:] for line in lines)
-    assert len(macros) == len(lines) and [f'#define {name} {macros[name]}' for name in ('BOLD_RANGES', 'CLASSIC_LIGHT_RANGES', 'INTER_RANGES', 'INTER_MEDIUM_RANGES')] == RANGES
+    assert len(macros) == len(lines) and [f'#define {name} {macros[name]}' for name in ('INTER_RANGES', 'INTER_MEDIUM_RANGES')] == RANGES
     assert macros['Q2POD_VERSION'] == f'"{version}"' and macros['Q2POD_DEV'] == flag
     assert macros['Q2POD_TAG'] == f'"{tag}"'  # a dev build has none, and takes any release
     assert macros['Q2POD_REPO'] == f'"{repo}"'
@@ -1130,13 +1101,13 @@ const char h_icons[] = SETTINGS_ICON_NAMES;
 const char h_lit[] = QS_LIT;
 const unsigned char *const h_context[] = {{{', '.join(build.CONTEXT_DATA)}}};
 const unsigned char *const h_round[] = ROUND_COVER;
-const unsigned short h_bold[] = BOLD_RANGES;
+const unsigned short h_medium[] = INTER_MEDIUM_RANGES;
 const char *const h_faces[FONT_N] = FONT_NAMES;
 const unsigned char h_fallback[FONT_N] = FONT_FALLBACK, h_pct[FONT_N] = FONT_FALLBACK_PCT;
 const unsigned short h_ranges[] = FONT_RANGES, h_at[FONT_N + 1] = FONT_RANGE_AT;
 const int h_inter[] = {{FONT_INTER, FONT_INTER_MEDIUM}};
 const unsigned long h_sizes[] = {{sizeof h_zones / sizeof *h_zones, sizeof h_cities / sizeof *h_cities,
-    sizeof h_order / sizeof *h_order, sizeof h_icons, sizeof h_lit, sizeof h_round / sizeof *h_round, sizeof h_bold / sizeof *h_bold}};
+    sizeof h_order / sizeof *h_order, sizeof h_icons, sizeof h_lit, sizeof h_round / sizeof *h_round, sizeof h_medium / sizeof *h_medium}};
 ''')
     subprocess.run(['clang', '-shared', '-fPIC', '-std=c11', '-Wall', '-Wextra', '-Werror', str(tmp_path/'h.c'), '-o', str(tmp_path/'h.so')],
                    check=True)
@@ -1144,7 +1115,7 @@ const unsigned long h_sizes[] = {{sizeof h_zones / sizeof *h_zones, sizeof h_cit
 
     def array(kind, name, n):
         return list((kind * n).in_dll(lib, name))
-    zones, cities, order, icons, lit, rounds, bold = array(ctypes.c_ulong, 'h_sizes', 7)
+    zones, cities, order, icons, lit, rounds, medium = array(ctypes.c_ulong, 'h_sizes', 7)
     assert array(ctypes.c_int, 'h_ints', 4) == [build.RING_STEP, len(themes), len(theme.theme_keys(themes)), 0]
     assert [s.decode() for s in array(ctypes.c_char_p, 'h_strings', 6)] == [
         build.ROCKBOX_FLAG, 'V1.36', f'{build.VERSION} Pod', build.VERSION, build.REPO, f'Q2Pod/{build.VERSION} (https://github.com/{build.REPO})']
@@ -1161,19 +1132,19 @@ const unsigned long h_sizes[] = {{sizeof h_zones / sizeof *h_zones, sizeof h_cit
     icons, lit = ((ctypes.c_char * n).in_dll(lib, name).raw for n, name in ((icons, 'h_icons'), (lit, 'h_lit')))
     assert icons.endswith(b'\0\0') and all(n.endswith('.png') for n in ipod.SETTINGS_ICONS)
     assert sorted(icons[:-2].split(b'\0')) == sorted(n.removesuffix('.png').encode() for n in ipod.SETTINGS_ICONS)
-    assert lit.endswith(b'\0\0') and lit[:-2].split(b'\0') == [f'drop_{n}'.encode() for n, (_, on, _) in art.QS_BUTTONS.items() if on]
+    assert lit.endswith(b'\0\0') and lit[:-2].split(b'\0') == [f'drop_{n}'.encode() for n in art.QS_ON]
     assert array(ctypes.c_void_p, 'h_context', len(build.CONTEXT_DATA)) == [0x700000 + 16 * i for i in range(len(build.CONTEXT_DATA))]
     # by radius: r rows of r pixels for each corner, NULL between
     assert rounds == max(art.CORNERS) + 1
     for r, p in enumerate(array(ctypes.c_void_p, 'h_round', rounds)):
         assert (ctypes.string_at(p, r * r) if p else None) == (bytes(art.corner_cover(r)) if r in art.CORNERS else None)
-    assert array(ctypes.c_ushort, 'h_bold', bold) == [0x20, 0x7e]
+    assert array(ctypes.c_ushort, 'h_medium', medium) == [0x30, 0x3a]
     # the faces' table (navigation.c face_has, theme_font), by FONT_*
     n = len(build.FACES)
     assert [s.decode() for s in array(ctypes.c_char_p, 'h_faces', n)] == [f.name for f in build.FACES.values()]
-    assert array(ctypes.c_ubyte, 'h_fallback', n) == [0, 0, 1, 0, 0] and array(ctypes.c_ubyte, 'h_pct', n) == [100, 100, 83, 98, 98]
-    assert array(ctypes.c_ushort, 'h_at', n + 1) == [0, 0, 2, 6, 10, 12] and array(ctypes.c_int, 'h_inter', 2) == [3, 4]
-    assert array(ctypes.c_ushort, 'h_ranges', 12)[6:] == [0x20, 0x7e, 0x25b6, 0x25b6, 0x30, 0x3a]
+    assert array(ctypes.c_ubyte, 'h_fallback', n) == [0, 0, 0] and array(ctypes.c_ubyte, 'h_pct', n) == [100, 98, 98]
+    assert array(ctypes.c_ushort, 'h_at', n + 1) == [0, 0, 4, 6] and array(ctypes.c_int, 'h_inter', 2) == [1, 2]
+    assert array(ctypes.c_ushort, 'h_ranges', 6) == [0x20, 0x7e, 0x25b6, 0x25b6, 0x30, 0x3a]
 
 
 def test_build_refuses_a_zip_that_is_not_the_audited_one(tmp_path):

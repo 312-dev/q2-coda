@@ -5,12 +5,12 @@
 #include "coverflow.h"
 #include "playlist_art.h"
 
-#define LAST_ALBUM ART_DIR "/album" /* the centre album's key, so a reboot opens on it */
+#define LAST_ALBUM ART_DIR "/album"  /* the centre album's key, so a reboot opens on it */
 #define BUILDING ART_DIR "/building" /* the key and track of the album the worker is on */
 #define CRASH_LOG PEQ_ROOT "/mnt/mmc/q2-crash.log"
 #define MIN_FREE_MB 16 /* no new cache files below this much free space on the card */
-#define ART_NEAR 3 /* real art only this many covers either side, like PictureFlow's cache */
-/* Home's without a theme's pane (home_pane_paint), at 290px (stock's: 110) */
+#define ART_NEAR 3     /* real art only this many covers either side, like PictureFlow's cache */
+/* Home's art with no cover, at 290px (stock's: 110) */
 #define HOME_PLACEHOLDER "default_album_home"
 
 extern int stock_home_trampoline(void *win, void *ctx), stock_scan_all_trampoline(void *, void *),
@@ -42,15 +42,14 @@ static int library_write(int (*stock)(void *, void *), void *a, void *b) {
  * connection waits since playlist art, stock_db_open), until the next scan. time_create is desc:
  * an index keeps equal keys in rowid order, as stock's sort did,
  * so songs of one second (a CUE image's tracks) keep their order newest first (Recently Added,
- * getAllMusic(3)); oldest first (getAllMusic(4)) library_query adds id for it. ponytail: the album groupings
- * (getAllAlbum, ALBUM_SQL, an artist's albums) walk songtable_album too, a row lookup each in
- * album order: over twice a scan's page reads (docs/internals.md).
- * A full scan (drops): toolsInitDatabase drops songtable and creates it again on the connection
- * the tools* functions share, which waits only 500 ms for a reader (stock_db_open). A count
- * still reading songtable on its own connection made the drop fail, then the create, and stock
- * skipped the update without a word.
- * So the scan's thread waits for the counts first (library_counting), outside SQLite; Back ends
- * the wait and the scan. */
+ * getAllMusic(3)); oldest first (getAllMusic(4)) library_query adds id for it. ponytail: the album
+ * groupings (getAllAlbum, ALBUM_SQL, an artist's albums) walk songtable_album too, a row lookup
+ * each in album order: over twice a scan's page reads (docs/internals.md). A full scan (drops):
+ * toolsInitDatabase drops songtable and creates it again on the connection the tools* functions
+ * share, which waits only 500 ms for a reader (stock_db_open). A count still reading songtable on
+ * its own connection made the drop fail, then the create, and stock skipped the update without a
+ * word. So the scan's thread waits for the counts first (library_counting), outside SQLite; Back
+ * ends the wait and the scan. */
 static int library_scan(int (*stock)(void *, void *), void *a, void *b, int drops) {
     if (drops) {
         while (library_counting() && !toolsGetUserStop()) usleep(100000);
@@ -58,15 +57,18 @@ static int library_scan(int (*stock)(void *, void *), void *a, void *b, int drop
     }
     library_scope_scan();
     int result = library_write(stock, a, b);
-    toolsUpdateDbTable("/mnt/data/database.db",
-                       "create index if not exists songtable_album on songtable(album collate nocase);"
-                       "create index if not exists songtable_filename on songtable(filename);"
-                       "create index if not exists songtable_time_create on songtable(time_create desc)");
+    toolsUpdateDbTable(
+        "/mnt/data/database.db",
+        "create index if not exists songtable_album on songtable(album collate nocase);"
+        "create index if not exists songtable_filename on songtable(filename);"
+        "create index if not exists songtable_time_create on songtable(time_create desc)");
     /* Scan Song Durations' pass after a whole scan: a stopped one leaves part of the library */
     if (!toolsGetUserStop()) durations_scanned();
     return result;
 }
-int coverflow_scan_all(void *a, void *b) { return library_scan(stock_scan_all_trampoline, a, b, 1); }
+int coverflow_scan_all(void *a, void *b) {
+    return library_scan(stock_scan_all_trampoline, a, b, 1);
+}
 /* toolsGetFileCreateTime (0x5d0954) dates a song (time_create, Recently Added's order) by stat's
  * st_ctime, on FAT32 the directory entry's creation time, but by st_atime on exFAT cards, where
  * stat has no creation time; every read moves that, so a full update dated the whole library to
@@ -83,8 +85,12 @@ int ringnav_file_created(const char *path) {
     return stock_file_created_trampoline(path);
 }
 #endif
-int coverflow_scan_folder(void *a, void *b) { return library_scan(stock_scan_folder_trampoline, a, b, 0); }
-int coverflow_delete_song(void *a, void *b) { return library_write(stock_delete_song_trampoline, a, b); }
+int coverflow_scan_folder(void *a, void *b) {
+    return library_scan(stock_scan_folder_trampoline, a, b, 0);
+}
+int coverflow_delete_song(void *a, void *b) {
+    return library_write(stock_delete_song_trampoline, a, b);
+}
 
 /* The queue menu resolves the live track list again after its dialog closes. */
 void *coverflow_tracks(void *page) {
@@ -143,7 +149,8 @@ char *art_path(char *out, unsigned key, const char *suffix) {
     return out;
 }
 /* Asks the image cache for a cover only once its file exists: a load made before the worker wrote
- * it stays a failure, and the placeholder would stay until a reboot. url is "file://" + the path. */
+ * it stays a failure, and the placeholder would stay until a reboot. url is "file://" + the path.
+ */
 static int art_exists(const char *url) { return !access(url + 7, 0); }
 
 /* path's size, -1 when it can't be opened */
@@ -187,8 +194,9 @@ static int ff_run(const char *src, const char *dst, int w, int h, int *exited) {
     int pid = fork();
     if (!pid) {
         child_oom_first(); /* its one picture can need tens of MB (#169) */
-        execl(ART_FFMPEG, ART_FFMPEG, "-nostdin", "-v", "quiet", "-xerror", "-i", src, "-frames:v", "1",
-              "-vf", vf, "-pix_fmt", "yuvj420p", "-q:v", "3", "-f", "mjpeg", "-y", tmp, (char *)0);
+        execl(ART_FFMPEG, ART_FFMPEG, "-nostdin", "-v", "quiet", "-xerror", "-i", src, "-frames:v",
+              "1", "-vf", vf, "-pix_fmt", "yuvj420p", "-q:v", "3", "-f", "mjpeg", "-y", tmp,
+              (char *)0);
         child_exit(127);
     }
     return ff_wait(pid, tmp, dst, exited);
@@ -306,8 +314,8 @@ static int beside_art(const char *track, const char *dst, int w, int h, int shar
     char src[1024];
     const char *slash = strrchr(track, '/');
     int folder = slash ? (int)(slash - track) : 0, ok = 0;
-    static const char *const names[] = { "cover.jpg",  "folder.jpg",  "cover.png",
-                                          "folder.png", "cover.webp", "folder.webp" };
+    static const char *const names[] = { "cover.jpg",  "folder.jpg", "cover.png",
+                                         "folder.png", "cover.webp", "folder.webp" };
     for (unsigned i = 0; i < sizeof(names) / sizeof(*names) && !ok && !shared; ++i) {
         if (snprintf(src, sizeof(src), "%.*s/%s", folder, track, names[i]) >= (int)sizeof src)
             continue; /* cut: a prefix of the name, another file's at best */
@@ -335,23 +343,25 @@ static int marked_empty(const char *track) {
  * if that matters. */
 int coverflow_player_cover(const char *track, const char *dst, int w, int h) {
     char cover[512]; /* a server song's offline copy (catalogue.c): its app's cover of the album */
-    return toolsGetExternCover(track, dst, w, h) == 1 || beside_art(track, dst, w, h, 0, ff_thumb) ||
+    return toolsGetExternCover(track, dst, w, h) == 1 ||
+           beside_art(track, dst, w, h, 0, ff_thumb) ||
            (catalogue_cover(track, cover, sizeof cover) && ff_thumb(cover, dst, w, h)) ||
            (!marked_empty(track) && ff_thumb(track, dst, w, h));
 }
 
-/* parse_albumcovertask_thd's embedded-art calls (Albums grids; Folder view's folder and track rows),
- * made on stock's one cover thread under parse_cover_mutex: stock reads no Ogg picture, so an .opus
- * or .ogg track's goes to ffmpeg. The lock is dropped for ffmpeg, as the UI thread takes it for
- * Library's online thumbnails and Spotify's art: the call's paths are the thread's own, and stock's
- * fallback after it runs with the lock held again. The Albums grid's call (album) reads the folder
- * image first, which stock would only after it, so an Ogg album whose art is a cover.jpg costs no
- * process; that also orders Ogg art as Coverflow does. Stock caches only a hit, so a track ffmpeg
- * found no picture in is remembered (not one gone with the card, nor a refused fork or a killed
- * ffmpeg). ponytail: 1024 misses until a
- * reboot, oldest overwritten; a picture since added to a track shows after a reboot. */
+/* parse_albumcovertask_thd's embedded-art calls (Albums grids; Folder view's folder and track
+ * rows), made on stock's one cover thread under parse_cover_mutex: stock reads no Ogg picture, so
+ * an .opus or .ogg track's goes to ffmpeg. The lock is dropped for ffmpeg, as the UI thread takes
+ * it for Library's online thumbnails and Spotify's art: the call's paths are the thread's own, and
+ * stock's fallback after it runs with the lock held again. The Albums grid's call (album) reads the
+ * folder image first, which stock would only after it, so an Ogg album whose art is a cover.jpg
+ * costs no process; that also orders Ogg art as Coverflow does. Stock caches only a hit, so a track
+ * ffmpeg found no picture in is remembered (not one gone with the card, nor a refused fork or a
+ * killed ffmpeg). ponytail: 1024 misses until a reboot, oldest overwritten; a picture since added
+ * to a track shows after a reboot. */
 static int grid_cover(const char *track, const char *dst, int w, int h, int album) {
-    static unsigned *miss __attribute__((section(".scratch"))), n __attribute__((section(".scratch")));
+    static unsigned *miss __attribute__((section(".scratch"))),
+        n __attribute__((section(".scratch")));
     const char *dot = strrchr(track, '.');
     char cover[512];
     /* a server row (catalogue.c): no file, its app's cover of the album, a small baseline JPEG */
@@ -411,7 +421,8 @@ int coverflow_folder_cover(const char *track, const char *dst, int w, int h) {
     const char *slash = strrchr(track, '/'), *ext = strrchr(track, '.');
     unsigned n = slash ? (unsigned)(slash - track) : 0;
     if (!f) f = calloc(1, sizeof *f); /* heap, as the scratch page is nearly full */
-    if (!f || !n || n >= sizeof f->dir || !ext || ext < slash) return grid_cover(track, dst, w, h, 0);
+    if (!f || !n || n >= sizeof f->dir || !ext || ext < slash)
+        return grid_cover(track, dst, w, h, 0);
     if (memcmp(f->dir, track, n) || f->dir[n]) {
         char low[256] = "";
         memcpy(f->dir, track, n), f->dir[n] = 0, f->first[0] = 0, f->bare = 0;
@@ -423,7 +434,8 @@ int coverflow_folder_cover(const char *track, const char *dst, int w, int h) {
                 tk_snprintf(low, sizeof low, "%s", e->d_name);
         }
         if (d) closedir(d);
-        if (low[0] && tk_snprintf(f->first, sizeof f->first, "%s/%s", f->dir, low) >= (int)sizeof f->first)
+        if (low[0] &&
+            tk_snprintf(f->first, sizeof f->first, "%s/%s", f->dir, low) >= (int)sizeof f->first)
             f->first[0] = 0; /* too long: stock's song alone */
     }
     if (f->first[0] && !f->bare && grid_cover(f->first, dst, w, h, 0)) return f->dir[0] = 0, 1;
@@ -521,7 +533,7 @@ void art_strike(const char *file) {
     struct {
         unsigned key;
         char track[512];
-    } note = {0};
+    } note = { 0 };
     char path[512], line[560];
     void *f = fopen(file, "rb");
     unsigned got = f ? fread(&note, 1, sizeof note - 1, f) : 0;
@@ -529,7 +541,8 @@ void art_strike(const char *file) {
     if (got >= sizeof note.key && access(art_path(path, note.key, ""), 0)) {
         if ((f = fopen(path, "w"))) fclose(f);
         int n = snprintf(line, sizeof line, "== cover flow skipped\n%s\n", note.track);
-        if ((f = fopen(CRASH_LOG, "a"))) fwrite(line, 1, n, f), fflush(f), fsync(fileno(f)), fclose(f);
+        if ((f = fopen(CRASH_LOG, "a")))
+            fwrite(line, 1, n, f), fflush(f), fsync(fileno(f)), fclose(f);
     }
     unlink(file);
 }
@@ -561,7 +574,8 @@ int card_room(const char *dir, unsigned mb, unsigned pct) {
     unsigned fs[32] = { 0 };
     if (statfs(dir, fs)) return 0;
     unsigned long long room = (unsigned long long)fs[7] * fs[1];
-    return room >= (unsigned long long)mb << 20 && room * 100 >= (unsigned long long)fs[3] * fs[1] * pct;
+    return room >= (unsigned long long)mb << 20 &&
+           room * 100 >= (unsigned long long)fs[3] * fs[1] * pct;
 }
 /* Whether dir's file system has MIN_FREE_MB free; shared with photos.c. */
 int card_space(const char *dir) { return card_room(dir, MIN_FREE_MB, 0); }
@@ -595,10 +609,10 @@ static void drop_albums(void) {
     free(years), years = 0, years_of = 0; /* they go with their list */
 }
 
-/* A stock library query run into the caller's deque, the staging pointer on it so it leaves no trace.
- * No copies: two of a 47,000-song library's rows got demo OOM-killed, with 128 MB and no swap. Stock
- * writes the pointer only at init and reads it afresh at each use; every caller is on the UI thread,
- * as an overlap could leave the pointer on a deque its owner destroyed. */
+/* A stock library query run into the caller's deque, the staging pointer on it so it leaves no
+ * trace. No copies: two of a 47,000-song library's rows got demo OOM-killed, with 128 MB and no
+ * swap. Stock writes the pointer only at init and reads it afresh at each use; every caller is on
+ * the UI thread, as an overlap could leave the pointer on a deque its owner destroyed. */
 int staged_into(void *into, int (*query)(void *), void *arg) {
     void *dir = P(tools_pdeq_directory, 0);
     P(tools_pdeq_directory, 0) = into;
@@ -638,14 +652,16 @@ unsigned album_dir(const char *p, int disc) {
     return n;
 }
 static int dir_cmp(void *a, void *b, int disc) {
-    const char *pa = P(a, REC_PATH) ? P(a, REC_PATH) : "", *pb = P(b, REC_PATH) ? P(b, REC_PATH) : "";
+    const char *pa = P(a, REC_PATH) ? P(a, REC_PATH) : "",
+               *pb = P(b, REC_PATH) ? P(b, REC_PATH) : "";
     unsigned na = album_dir(pa, disc), nb = album_dir(pb, disc);
     int d = memcmp(pa, pb, na < nb ? na : nb);
     return d ? d : na < nb ? -1 : na != nb;
 }
 /* Albums apart, as split groups them: the name, then the album artist, else the folder (disc
  * folders as one), ASCII case aside but the folder's, so a compilation stays one album; tagged
- * names first. Shuffle Folders' folder_cmp keeps disc folders apart. Both shared with playback.c. */
+ * names first. Shuffle Folders' folder_cmp keeps disc folders apart. Both shared with playback.c.
+ */
 int folder_cmp(void *a, void *b) { return dir_cmp(a, b, 0); }
 int album_cmp(void *a, void *b) {
     const char *x = P(a, REC_ALBUM), *y = P(b, REC_ALBUM);
@@ -697,10 +713,11 @@ static void drop_unknown(void) {
 /* Sort, Display settings' Coverflow Sort and the rated albums' card
  * (docs/internals.md#coverflow-sort): Album is the stock order;
  * Artist sorts by artist without a leading article, as every library list does (ringnav_sort_key),
- * then year, then album; Year in Playback settings' Year order (year_sql), undated last; Recently Added by the newest song's time_create; Most Played by the
- * album's listens (library_lists.c album_plays); Random by playback.c's rand_below, reshuffled whenever
- * the list is rebuilt. Ties keep the stock order, and the Unknown row stays last. Ranks come from ALBUM_SQL with another ORDER BY (toolsQueryDbTable without its name sort),
- * matched back to the rows by album_cmp. */
+ * then year, then album; Year in Playback settings' Year order (year_sql), undated last; Recently
+ * Added by the newest song's time_create; Most Played by the album's listens (library_lists.c
+ * album_plays); Random by playback.c's rand_below, reshuffled whenever the list is rebuilt. Ties
+ * keep the stock order, and the Unknown row stays last. Ranks come from ALBUM_SQL with another
+ * ORDER BY (toolsQueryDbTable without its name sort), matched back to the rows by album_cmp. */
 enum { SORT_ALBUM, SORT_ARTIST, SORT_ADDED, SORT_PLAYED, SORT_RANDOM, SORT_RATING, SORT_YEAR };
 #define SORT_FILE PEQ_ROOT "/mnt/data/ringnav-coversort"
 /* The rated albums' Sort: most hearts first, Album, Artist, Year, then Most Played. */
@@ -711,10 +728,10 @@ static const unsigned char rated_sorts[] = { SORT_RATING, SORT_ALBUM, SORT_ARTIS
 static const unsigned char all_sorts[] = { SORT_ALBUM, SORT_ARTIST, SORT_YEAR,
                                            SORT_ADDED, SORT_PLAYED, SORT_RANDOM };
 #define ALBUM_SQL "select id,album,songer," ALBUM_TRACK ",albumsonger from songtable" ALBUM_GROUP
-#define MUSIC_ALBUM_SQL "select case when ifnull(album,'')='' then -1 else id end," \
-    "case when ifnull(album,'')='' then 'Unknown Album' else album end," \
-    "songer," ALBUM_TRACK ",albumsonger from songtable where " \
-    MUSIC_WHERE ALBUM_GROUP
+#define MUSIC_ALBUM_SQL                                                                            \
+    "select case when ifnull(album,'')='' then -1 else id end,"                                    \
+    "case when ifnull(album,'')='' then 'Unknown Album' else album end,"                           \
+    "songer," ALBUM_TRACK ",albumsonger from songtable where " MUSIC_WHERE ALBUM_GROUP
 #define SORT_SQL ALBUM_SQL " order by "
 extern int ringnav_year_old(void);
 /* ALBUM_SQL with each album's year after (split_row's REC_YEAR), by year, undated last. */
@@ -727,8 +744,10 @@ static const char *year_sql(void) {
     return ringnav_year_old() ? YEAR_SQL ",album COLLATE NOCASE"
                               : YEAR_SQL " desc,album COLLATE NOCASE";
 }
-static const char *const sort_names[] = { "Sort: Album", "Sort: Artist", "Sort: Recently Added",
-                                          "Sort: Most Played", "Sort: Random", "Sort: Rating", "Sort: Year" };
+static const char *const sort_names[] = {
+    "Sort: Album",  "Sort: Artist", "Sort: Recently Added", "Sort: Most Played", "Sort: Random",
+    "Sort: Rating", "Sort: Year"
+};
 /* The order step after cf.sort (dir 1), or cf.sort itself (0), in the page's own orders; an
  * order not among them is the first (Album, or the rated albums' Rating). */
 static int sort_next(int dir) {
@@ -743,305 +762,81 @@ extern void ringnav_sort_key(char *s);
 
 /* Unicode 16.0.0 number, punctuation and separator ranges. */
 static const unsigned initial_misc[][2] = {
-    { 0xa0, 0xa1 },
-    { 0xa7, 0xa7 },
-    { 0xab, 0xab },
-    { 0xb2, 0xb3 },
-    { 0xb6, 0xb7 },
-    { 0xb9, 0xb9 },
-    { 0xbb, 0xbf },
-    { 0x37e, 0x37e },
-    { 0x387, 0x387 },
-    { 0x55a, 0x55f },
-    { 0x589, 0x58a },
-    { 0x5be, 0x5be },
-    { 0x5c0, 0x5c0 },
-    { 0x5c3, 0x5c3 },
-    { 0x5c6, 0x5c6 },
-    { 0x5f3, 0x5f4 },
-    { 0x609, 0x60a },
-    { 0x60c, 0x60d },
-    { 0x61b, 0x61b },
-    { 0x61d, 0x61f },
-    { 0x660, 0x66d },
-    { 0x6d4, 0x6d4 },
-    { 0x6f0, 0x6f9 },
-    { 0x700, 0x70d },
-    { 0x7c0, 0x7c9 },
-    { 0x7f7, 0x7f9 },
-    { 0x830, 0x83e },
-    { 0x85e, 0x85e },
-    { 0x964, 0x970 },
-    { 0x9e6, 0x9ef },
-    { 0x9f4, 0x9f9 },
-    { 0x9fd, 0x9fd },
-    { 0xa66, 0xa6f },
-    { 0xa76, 0xa76 },
-    { 0xae6, 0xaf0 },
-    { 0xb66, 0xb6f },
-    { 0xb72, 0xb77 },
-    { 0xbe6, 0xbf2 },
-    { 0xc66, 0xc6f },
-    { 0xc77, 0xc7e },
-    { 0xc84, 0xc84 },
-    { 0xce6, 0xcef },
-    { 0xd58, 0xd5e },
-    { 0xd66, 0xd78 },
-    { 0xde6, 0xdef },
-    { 0xdf4, 0xdf4 },
-    { 0xe4f, 0xe5b },
-    { 0xed0, 0xed9 },
-    { 0xf04, 0xf12 },
-    { 0xf14, 0xf14 },
-    { 0xf20, 0xf33 },
-    { 0xf3a, 0xf3d },
-    { 0xf85, 0xf85 },
-    { 0xfd0, 0xfd4 },
-    { 0xfd9, 0xfda },
-    { 0x1040, 0x104f },
-    { 0x1090, 0x1099 },
-    { 0x10fb, 0x10fb },
-    { 0x1360, 0x137c },
-    { 0x1400, 0x1400 },
-    { 0x166e, 0x166e },
-    { 0x1680, 0x1680 },
-    { 0x169b, 0x169c },
-    { 0x16eb, 0x16f0 },
-    { 0x1735, 0x1736 },
-    { 0x17d4, 0x17d6 },
-    { 0x17d8, 0x17da },
-    { 0x17e0, 0x17e9 },
-    { 0x17f0, 0x17f9 },
-    { 0x1800, 0x180a },
-    { 0x1810, 0x1819 },
-    { 0x1944, 0x194f },
-    { 0x19d0, 0x19da },
-    { 0x1a1e, 0x1a1f },
-    { 0x1a80, 0x1a89 },
-    { 0x1a90, 0x1a99 },
-    { 0x1aa0, 0x1aa6 },
-    { 0x1aa8, 0x1aad },
-    { 0x1b4e, 0x1b60 },
-    { 0x1b7d, 0x1b7f },
-    { 0x1bb0, 0x1bb9 },
-    { 0x1bfc, 0x1bff },
-    { 0x1c3b, 0x1c49 },
-    { 0x1c50, 0x1c59 },
-    { 0x1c7e, 0x1c7f },
-    { 0x1cc0, 0x1cc7 },
-    { 0x1cd3, 0x1cd3 },
-    { 0x2000, 0x200a },
-    { 0x2010, 0x2029 },
-    { 0x202f, 0x2043 },
-    { 0x2045, 0x2051 },
-    { 0x2053, 0x205f },
-    { 0x2070, 0x2070 },
-    { 0x2074, 0x2079 },
-    { 0x207d, 0x207e },
-    { 0x2080, 0x2089 },
-    { 0x208d, 0x208e },
-    { 0x2150, 0x2182 },
-    { 0x2185, 0x2189 },
-    { 0x2308, 0x230b },
-    { 0x2329, 0x232a },
-    { 0x2460, 0x249b },
-    { 0x24ea, 0x24ff },
-    { 0x2768, 0x2793 },
-    { 0x27c5, 0x27c6 },
-    { 0x27e6, 0x27ef },
-    { 0x2983, 0x2998 },
-    { 0x29d8, 0x29db },
-    { 0x29fc, 0x29fd },
-    { 0x2cf9, 0x2cff },
-    { 0x2d70, 0x2d70 },
-    { 0x2e00, 0x2e2e },
-    { 0x2e30, 0x2e4f },
-    { 0x2e52, 0x2e5d },
-    { 0x3000, 0x3003 },
-    { 0x3007, 0x3011 },
-    { 0x3014, 0x301f },
-    { 0x3021, 0x3029 },
-    { 0x3030, 0x3030 },
-    { 0x3038, 0x303a },
-    { 0x303d, 0x303d },
-    { 0x30a0, 0x30a0 },
-    { 0x30fb, 0x30fb },
-    { 0x3192, 0x3195 },
-    { 0x3220, 0x3229 },
-    { 0x3248, 0x324f },
-    { 0x3251, 0x325f },
-    { 0x3280, 0x3289 },
-    { 0x32b1, 0x32bf },
-    { 0xa4fe, 0xa4ff },
-    { 0xa60d, 0xa60f },
-    { 0xa620, 0xa629 },
-    { 0xa673, 0xa673 },
-    { 0xa67e, 0xa67e },
-    { 0xa6e6, 0xa6ef },
-    { 0xa6f2, 0xa6f7 },
-    { 0xa830, 0xa835 },
-    { 0xa874, 0xa877 },
-    { 0xa8ce, 0xa8d9 },
-    { 0xa8f8, 0xa8fa },
-    { 0xa8fc, 0xa8fc },
-    { 0xa900, 0xa909 },
-    { 0xa92e, 0xa92f },
-    { 0xa95f, 0xa95f },
-    { 0xa9c1, 0xa9cd },
-    { 0xa9d0, 0xa9d9 },
-    { 0xa9de, 0xa9df },
-    { 0xa9f0, 0xa9f9 },
-    { 0xaa50, 0xaa59 },
-    { 0xaa5c, 0xaa5f },
-    { 0xaade, 0xaadf },
-    { 0xaaf0, 0xaaf1 },
-    { 0xabeb, 0xabeb },
-    { 0xabf0, 0xabf9 },
-    { 0xfd3e, 0xfd3f },
-    { 0xfe10, 0xfe19 },
-    { 0xfe30, 0xfe52 },
-    { 0xfe54, 0xfe61 },
-    { 0xfe63, 0xfe63 },
-    { 0xfe68, 0xfe68 },
-    { 0xfe6a, 0xfe6b },
-    { 0xff01, 0xff03 },
-    { 0xff05, 0xff0a },
-    { 0xff0c, 0xff1b },
-    { 0xff1f, 0xff20 },
-    { 0xff3b, 0xff3d },
-    { 0xff3f, 0xff3f },
-    { 0xff5b, 0xff5b },
-    { 0xff5d, 0xff5d },
-    { 0xff5f, 0xff65 },
-    { 0x10100, 0x10102 },
-    { 0x10107, 0x10133 },
-    { 0x10140, 0x10178 },
-    { 0x1018a, 0x1018b },
-    { 0x102e1, 0x102fb },
-    { 0x10320, 0x10323 },
-    { 0x10341, 0x10341 },
-    { 0x1034a, 0x1034a },
-    { 0x1039f, 0x1039f },
-    { 0x103d0, 0x103d5 },
-    { 0x104a0, 0x104a9 },
-    { 0x1056f, 0x1056f },
-    { 0x10857, 0x1085f },
-    { 0x10879, 0x1087f },
-    { 0x108a7, 0x108af },
-    { 0x108fb, 0x108ff },
-    { 0x10916, 0x1091b },
-    { 0x1091f, 0x1091f },
-    { 0x1093f, 0x1093f },
-    { 0x109bc, 0x109bd },
-    { 0x109c0, 0x109cf },
-    { 0x109d2, 0x109ff },
-    { 0x10a40, 0x10a48 },
-    { 0x10a50, 0x10a58 },
-    { 0x10a7d, 0x10a7f },
-    { 0x10a9d, 0x10a9f },
-    { 0x10aeb, 0x10af6 },
-    { 0x10b39, 0x10b3f },
-    { 0x10b58, 0x10b5f },
-    { 0x10b78, 0x10b7f },
-    { 0x10b99, 0x10b9c },
-    { 0x10ba9, 0x10baf },
-    { 0x10cfa, 0x10cff },
-    { 0x10d30, 0x10d39 },
-    { 0x10d40, 0x10d49 },
-    { 0x10d6e, 0x10d6e },
-    { 0x10e60, 0x10e7e },
-    { 0x10ead, 0x10ead },
-    { 0x10f1d, 0x10f26 },
-    { 0x10f51, 0x10f59 },
-    { 0x10f86, 0x10f89 },
-    { 0x10fc5, 0x10fcb },
-    { 0x11047, 0x1104d },
-    { 0x11052, 0x1106f },
-    { 0x110bb, 0x110bc },
-    { 0x110be, 0x110c1 },
-    { 0x110f0, 0x110f9 },
-    { 0x11136, 0x11143 },
-    { 0x11174, 0x11175 },
-    { 0x111c5, 0x111c8 },
-    { 0x111cd, 0x111cd },
-    { 0x111d0, 0x111d9 },
-    { 0x111db, 0x111db },
-    { 0x111dd, 0x111df },
-    { 0x111e1, 0x111f4 },
-    { 0x11238, 0x1123d },
-    { 0x112a9, 0x112a9 },
-    { 0x112f0, 0x112f9 },
-    { 0x113d4, 0x113d5 },
-    { 0x113d7, 0x113d8 },
-    { 0x1144b, 0x1145b },
-    { 0x1145d, 0x1145d },
-    { 0x114c6, 0x114c6 },
-    { 0x114d0, 0x114d9 },
-    { 0x115c1, 0x115d7 },
-    { 0x11641, 0x11643 },
-    { 0x11650, 0x11659 },
-    { 0x11660, 0x1166c },
-    { 0x116b9, 0x116b9 },
-    { 0x116c0, 0x116c9 },
-    { 0x116d0, 0x116e3 },
-    { 0x11730, 0x1173e },
-    { 0x1183b, 0x1183b },
-    { 0x118e0, 0x118f2 },
-    { 0x11944, 0x11946 },
-    { 0x11950, 0x11959 },
-    { 0x119e2, 0x119e2 },
-    { 0x11a3f, 0x11a46 },
-    { 0x11a9a, 0x11a9c },
-    { 0x11a9e, 0x11aa2 },
-    { 0x11b00, 0x11b09 },
-    { 0x11be1, 0x11be1 },
-    { 0x11bf0, 0x11bf9 },
-    { 0x11c41, 0x11c45 },
-    { 0x11c50, 0x11c6c },
-    { 0x11c70, 0x11c71 },
-    { 0x11d50, 0x11d59 },
-    { 0x11da0, 0x11da9 },
-    { 0x11ef7, 0x11ef8 },
-    { 0x11f43, 0x11f59 },
-    { 0x11fc0, 0x11fd4 },
-    { 0x11fff, 0x11fff },
-    { 0x12400, 0x1246e },
-    { 0x12470, 0x12474 },
-    { 0x12ff1, 0x12ff2 },
-    { 0x16130, 0x16139 },
-    { 0x16a60, 0x16a69 },
-    { 0x16a6e, 0x16a6f },
-    { 0x16ac0, 0x16ac9 },
-    { 0x16af5, 0x16af5 },
-    { 0x16b37, 0x16b3b },
-    { 0x16b44, 0x16b44 },
-    { 0x16b50, 0x16b59 },
-    { 0x16b5b, 0x16b61 },
-    { 0x16d6d, 0x16d79 },
-    { 0x16e80, 0x16e9a },
-    { 0x16fe2, 0x16fe2 },
-    { 0x1bc9f, 0x1bc9f },
-    { 0x1ccf0, 0x1ccf9 },
-    { 0x1d2c0, 0x1d2d3 },
-    { 0x1d2e0, 0x1d2f3 },
-    { 0x1d360, 0x1d378 },
-    { 0x1d7ce, 0x1d7ff },
-    { 0x1da87, 0x1da8b },
-    { 0x1e140, 0x1e149 },
-    { 0x1e2f0, 0x1e2f9 },
-    { 0x1e4f0, 0x1e4f9 },
-    { 0x1e5f1, 0x1e5fa },
-    { 0x1e5ff, 0x1e5ff },
-    { 0x1e8c7, 0x1e8cf },
-    { 0x1e950, 0x1e959 },
-    { 0x1e95e, 0x1e95f },
-    { 0x1ec71, 0x1ecab },
-    { 0x1ecad, 0x1ecaf },
-    { 0x1ecb1, 0x1ecb4 },
-    { 0x1ed01, 0x1ed2d },
-    { 0x1ed2f, 0x1ed3d },
-    { 0x1f100, 0x1f10c },
-    { 0x1fbf0, 0x1fbf9 },
+    { 0xa0, 0xa1 },       { 0xa7, 0xa7 },       { 0xab, 0xab },       { 0xb2, 0xb3 },
+    { 0xb6, 0xb7 },       { 0xb9, 0xb9 },       { 0xbb, 0xbf },       { 0x37e, 0x37e },
+    { 0x387, 0x387 },     { 0x55a, 0x55f },     { 0x589, 0x58a },     { 0x5be, 0x5be },
+    { 0x5c0, 0x5c0 },     { 0x5c3, 0x5c3 },     { 0x5c6, 0x5c6 },     { 0x5f3, 0x5f4 },
+    { 0x609, 0x60a },     { 0x60c, 0x60d },     { 0x61b, 0x61b },     { 0x61d, 0x61f },
+    { 0x660, 0x66d },     { 0x6d4, 0x6d4 },     { 0x6f0, 0x6f9 },     { 0x700, 0x70d },
+    { 0x7c0, 0x7c9 },     { 0x7f7, 0x7f9 },     { 0x830, 0x83e },     { 0x85e, 0x85e },
+    { 0x964, 0x970 },     { 0x9e6, 0x9ef },     { 0x9f4, 0x9f9 },     { 0x9fd, 0x9fd },
+    { 0xa66, 0xa6f },     { 0xa76, 0xa76 },     { 0xae6, 0xaf0 },     { 0xb66, 0xb6f },
+    { 0xb72, 0xb77 },     { 0xbe6, 0xbf2 },     { 0xc66, 0xc6f },     { 0xc77, 0xc7e },
+    { 0xc84, 0xc84 },     { 0xce6, 0xcef },     { 0xd58, 0xd5e },     { 0xd66, 0xd78 },
+    { 0xde6, 0xdef },     { 0xdf4, 0xdf4 },     { 0xe4f, 0xe5b },     { 0xed0, 0xed9 },
+    { 0xf04, 0xf12 },     { 0xf14, 0xf14 },     { 0xf20, 0xf33 },     { 0xf3a, 0xf3d },
+    { 0xf85, 0xf85 },     { 0xfd0, 0xfd4 },     { 0xfd9, 0xfda },     { 0x1040, 0x104f },
+    { 0x1090, 0x1099 },   { 0x10fb, 0x10fb },   { 0x1360, 0x137c },   { 0x1400, 0x1400 },
+    { 0x166e, 0x166e },   { 0x1680, 0x1680 },   { 0x169b, 0x169c },   { 0x16eb, 0x16f0 },
+    { 0x1735, 0x1736 },   { 0x17d4, 0x17d6 },   { 0x17d8, 0x17da },   { 0x17e0, 0x17e9 },
+    { 0x17f0, 0x17f9 },   { 0x1800, 0x180a },   { 0x1810, 0x1819 },   { 0x1944, 0x194f },
+    { 0x19d0, 0x19da },   { 0x1a1e, 0x1a1f },   { 0x1a80, 0x1a89 },   { 0x1a90, 0x1a99 },
+    { 0x1aa0, 0x1aa6 },   { 0x1aa8, 0x1aad },   { 0x1b4e, 0x1b60 },   { 0x1b7d, 0x1b7f },
+    { 0x1bb0, 0x1bb9 },   { 0x1bfc, 0x1bff },   { 0x1c3b, 0x1c49 },   { 0x1c50, 0x1c59 },
+    { 0x1c7e, 0x1c7f },   { 0x1cc0, 0x1cc7 },   { 0x1cd3, 0x1cd3 },   { 0x2000, 0x200a },
+    { 0x2010, 0x2029 },   { 0x202f, 0x2043 },   { 0x2045, 0x2051 },   { 0x2053, 0x205f },
+    { 0x2070, 0x2070 },   { 0x2074, 0x2079 },   { 0x207d, 0x207e },   { 0x2080, 0x2089 },
+    { 0x208d, 0x208e },   { 0x2150, 0x2182 },   { 0x2185, 0x2189 },   { 0x2308, 0x230b },
+    { 0x2329, 0x232a },   { 0x2460, 0x249b },   { 0x24ea, 0x24ff },   { 0x2768, 0x2793 },
+    { 0x27c5, 0x27c6 },   { 0x27e6, 0x27ef },   { 0x2983, 0x2998 },   { 0x29d8, 0x29db },
+    { 0x29fc, 0x29fd },   { 0x2cf9, 0x2cff },   { 0x2d70, 0x2d70 },   { 0x2e00, 0x2e2e },
+    { 0x2e30, 0x2e4f },   { 0x2e52, 0x2e5d },   { 0x3000, 0x3003 },   { 0x3007, 0x3011 },
+    { 0x3014, 0x301f },   { 0x3021, 0x3029 },   { 0x3030, 0x3030 },   { 0x3038, 0x303a },
+    { 0x303d, 0x303d },   { 0x30a0, 0x30a0 },   { 0x30fb, 0x30fb },   { 0x3192, 0x3195 },
+    { 0x3220, 0x3229 },   { 0x3248, 0x324f },   { 0x3251, 0x325f },   { 0x3280, 0x3289 },
+    { 0x32b1, 0x32bf },   { 0xa4fe, 0xa4ff },   { 0xa60d, 0xa60f },   { 0xa620, 0xa629 },
+    { 0xa673, 0xa673 },   { 0xa67e, 0xa67e },   { 0xa6e6, 0xa6ef },   { 0xa6f2, 0xa6f7 },
+    { 0xa830, 0xa835 },   { 0xa874, 0xa877 },   { 0xa8ce, 0xa8d9 },   { 0xa8f8, 0xa8fa },
+    { 0xa8fc, 0xa8fc },   { 0xa900, 0xa909 },   { 0xa92e, 0xa92f },   { 0xa95f, 0xa95f },
+    { 0xa9c1, 0xa9cd },   { 0xa9d0, 0xa9d9 },   { 0xa9de, 0xa9df },   { 0xa9f0, 0xa9f9 },
+    { 0xaa50, 0xaa59 },   { 0xaa5c, 0xaa5f },   { 0xaade, 0xaadf },   { 0xaaf0, 0xaaf1 },
+    { 0xabeb, 0xabeb },   { 0xabf0, 0xabf9 },   { 0xfd3e, 0xfd3f },   { 0xfe10, 0xfe19 },
+    { 0xfe30, 0xfe52 },   { 0xfe54, 0xfe61 },   { 0xfe63, 0xfe63 },   { 0xfe68, 0xfe68 },
+    { 0xfe6a, 0xfe6b },   { 0xff01, 0xff03 },   { 0xff05, 0xff0a },   { 0xff0c, 0xff1b },
+    { 0xff1f, 0xff20 },   { 0xff3b, 0xff3d },   { 0xff3f, 0xff3f },   { 0xff5b, 0xff5b },
+    { 0xff5d, 0xff5d },   { 0xff5f, 0xff65 },   { 0x10100, 0x10102 }, { 0x10107, 0x10133 },
+    { 0x10140, 0x10178 }, { 0x1018a, 0x1018b }, { 0x102e1, 0x102fb }, { 0x10320, 0x10323 },
+    { 0x10341, 0x10341 }, { 0x1034a, 0x1034a }, { 0x1039f, 0x1039f }, { 0x103d0, 0x103d5 },
+    { 0x104a0, 0x104a9 }, { 0x1056f, 0x1056f }, { 0x10857, 0x1085f }, { 0x10879, 0x1087f },
+    { 0x108a7, 0x108af }, { 0x108fb, 0x108ff }, { 0x10916, 0x1091b }, { 0x1091f, 0x1091f },
+    { 0x1093f, 0x1093f }, { 0x109bc, 0x109bd }, { 0x109c0, 0x109cf }, { 0x109d2, 0x109ff },
+    { 0x10a40, 0x10a48 }, { 0x10a50, 0x10a58 }, { 0x10a7d, 0x10a7f }, { 0x10a9d, 0x10a9f },
+    { 0x10aeb, 0x10af6 }, { 0x10b39, 0x10b3f }, { 0x10b58, 0x10b5f }, { 0x10b78, 0x10b7f },
+    { 0x10b99, 0x10b9c }, { 0x10ba9, 0x10baf }, { 0x10cfa, 0x10cff }, { 0x10d30, 0x10d39 },
+    { 0x10d40, 0x10d49 }, { 0x10d6e, 0x10d6e }, { 0x10e60, 0x10e7e }, { 0x10ead, 0x10ead },
+    { 0x10f1d, 0x10f26 }, { 0x10f51, 0x10f59 }, { 0x10f86, 0x10f89 }, { 0x10fc5, 0x10fcb },
+    { 0x11047, 0x1104d }, { 0x11052, 0x1106f }, { 0x110bb, 0x110bc }, { 0x110be, 0x110c1 },
+    { 0x110f0, 0x110f9 }, { 0x11136, 0x11143 }, { 0x11174, 0x11175 }, { 0x111c5, 0x111c8 },
+    { 0x111cd, 0x111cd }, { 0x111d0, 0x111d9 }, { 0x111db, 0x111db }, { 0x111dd, 0x111df },
+    { 0x111e1, 0x111f4 }, { 0x11238, 0x1123d }, { 0x112a9, 0x112a9 }, { 0x112f0, 0x112f9 },
+    { 0x113d4, 0x113d5 }, { 0x113d7, 0x113d8 }, { 0x1144b, 0x1145b }, { 0x1145d, 0x1145d },
+    { 0x114c6, 0x114c6 }, { 0x114d0, 0x114d9 }, { 0x115c1, 0x115d7 }, { 0x11641, 0x11643 },
+    { 0x11650, 0x11659 }, { 0x11660, 0x1166c }, { 0x116b9, 0x116b9 }, { 0x116c0, 0x116c9 },
+    { 0x116d0, 0x116e3 }, { 0x11730, 0x1173e }, { 0x1183b, 0x1183b }, { 0x118e0, 0x118f2 },
+    { 0x11944, 0x11946 }, { 0x11950, 0x11959 }, { 0x119e2, 0x119e2 }, { 0x11a3f, 0x11a46 },
+    { 0x11a9a, 0x11a9c }, { 0x11a9e, 0x11aa2 }, { 0x11b00, 0x11b09 }, { 0x11be1, 0x11be1 },
+    { 0x11bf0, 0x11bf9 }, { 0x11c41, 0x11c45 }, { 0x11c50, 0x11c6c }, { 0x11c70, 0x11c71 },
+    { 0x11d50, 0x11d59 }, { 0x11da0, 0x11da9 }, { 0x11ef7, 0x11ef8 }, { 0x11f43, 0x11f59 },
+    { 0x11fc0, 0x11fd4 }, { 0x11fff, 0x11fff }, { 0x12400, 0x1246e }, { 0x12470, 0x12474 },
+    { 0x12ff1, 0x12ff2 }, { 0x16130, 0x16139 }, { 0x16a60, 0x16a69 }, { 0x16a6e, 0x16a6f },
+    { 0x16ac0, 0x16ac9 }, { 0x16af5, 0x16af5 }, { 0x16b37, 0x16b3b }, { 0x16b44, 0x16b44 },
+    { 0x16b50, 0x16b59 }, { 0x16b5b, 0x16b61 }, { 0x16d6d, 0x16d79 }, { 0x16e80, 0x16e9a },
+    { 0x16fe2, 0x16fe2 }, { 0x1bc9f, 0x1bc9f }, { 0x1ccf0, 0x1ccf9 }, { 0x1d2c0, 0x1d2d3 },
+    { 0x1d2e0, 0x1d2f3 }, { 0x1d360, 0x1d378 }, { 0x1d7ce, 0x1d7ff }, { 0x1da87, 0x1da8b },
+    { 0x1e140, 0x1e149 }, { 0x1e2f0, 0x1e2f9 }, { 0x1e4f0, 0x1e4f9 }, { 0x1e5f1, 0x1e5fa },
+    { 0x1e5ff, 0x1e5ff }, { 0x1e8c7, 0x1e8cf }, { 0x1e950, 0x1e959 }, { 0x1e95e, 0x1e95f },
+    { 0x1ec71, 0x1ecab }, { 0x1ecad, 0x1ecaf }, { 0x1ecb1, 0x1ecb4 }, { 0x1ed01, 0x1ed2d },
+    { 0x1ed2f, 0x1ed3d }, { 0x1f100, 0x1f10c }, { 0x1fbf0, 0x1fbf9 },
 };
 
 /* Initial of the active alphabetic key; UTF-8 is decoded without losing non-ASCII names. */
@@ -1157,8 +952,10 @@ static unsigned lower(row_t *v, unsigned n, void *r, int (*cmp)(void *, void *))
     unsigned lo = 0;
     while (n) {
         unsigned h = n / 2;
-        if (cmp(v[lo + h].a, r) < 0) lo += h + 1, n -= h + 1;
-        else n = h;
+        if (cmp(v[lo + h].a, r) < 0)
+            lo += h + 1, n -= h + 1;
+        else
+            n = h;
     }
     return lo;
 }
@@ -1192,7 +989,9 @@ static int split_row(void *a, int n, char **v, char **c) {
     if (n > 5) I(deque_at(dir, k), REC_YEAR) = v[5] ? atoi(v[5]) : 0;
     return 0;
 }
-static int rank_query(void *sql) { return toolsQueryDbTable("/mnt/data/database.db", sql, split_row, 0); }
+static int rank_query(void *sql) {
+    return toolsQueryDbTable("/mnt/data/database.db", sql, split_row, 0);
+}
 /* staged, with Local + Server reading the server library's songs too (catalogue.c): Cover Flow's
  * albums, their ranks and the rated albums, as the Library's Albums list reads them. */
 extern void *staged_music(int (*query)(void *), void *arg, int *count);
@@ -1219,8 +1018,10 @@ static void *music_of(void *list, void *rows) {
     for (unsigned i = 0; i < deque_size(list); ++i) {
         void *r = deque_at(list, i);
         int k = I(r, REC_ID) == -1 ? -1 : album_in(v, m, r);
-        if (k >= 0) _deque_push_back(out, deque_at(rows, (unsigned)k));
-        else if (I(r, REC_ID) == -1 && m < deque_size(rows)) _deque_push_back(out, r);
+        if (k >= 0)
+            _deque_push_back(out, deque_at(rows, (unsigned)k));
+        else if (I(r, REC_ID) == -1 && m < deque_size(rows))
+            _deque_push_back(out, r);
     }
     free(v);
     deque_destroy(rows);
@@ -1251,7 +1052,8 @@ static void *split_by(void *stock, void *rows) {
     for (unsigned i = 0; i < deque_size(stock); ++i) {
         void *r = deque_at(stock, i);
         unsigned from = deque_size(out), k;
-        for (unsigned j = I(r, REC_ID) == -1 ? m : lower(v, m, r, name_cmp); j < m && !name_cmp(v[j].a, r); ++j) {
+        for (unsigned j = I(r, REC_ID) == -1 ? m : lower(v, m, r, name_cmp);
+             j < m && !name_cmp(v[j].a, r); ++j) {
             void *a = v[j].a;
             for (k = from; k < deque_size(out) && album_cmp(deque_at(out, k), a); ++k) {}
             if (k == deque_size(out)) _deque_push_back(out, a);
@@ -1262,7 +1064,8 @@ static void *split_by(void *stock, void *rows) {
     deque_destroy(stock);
     return out;
 }
-/* navigation.c's Albums list (load_localclass_list 0xf003), split in place as Coverflow's: its size. */
+/* navigation.c's Albums list (load_localclass_list 0xf003), split in place as Coverflow's: its
+ * size. */
 int coverflow_split(void *list) {
     void *copy = _create_deque("stSongInfo"), *out;
     deque_init_copy(copy, list);
@@ -1276,7 +1079,8 @@ int coverflow_split(void *list) {
  * untagged r keeps every untagged song the card lists (spoken and scoped-out ones left out, as
  * MUSIC_WHERE, which stock's getMusicByAlbum(NULL) skips at resume), and r: the Unknown Album card
  * is one album, whatever its folders. navigation.c's album pages and playback.c's stock resume. */
-/* ponytail: keeps the list's (stock's) order, not the card's album_before order; sort here if Next/Previous after a restart shows it. */
+/* ponytail: keeps the list's (stock's) order, not the card's album_before order; sort here if
+ * Next/Previous after a restart shows it. */
 int album_only(void *list, void *r, int at) {
     void *out = _create_deque("stSongInfo");
     const char *name = P(r, REC_ALBUM);
@@ -1421,8 +1225,8 @@ void *text(void *parent, int x, int y, int w, int h) { /* shared with photos.c *
     return label;
 }
 
-/* A black page named name, with its destroy (given the page) and Return handlers; 0 when none. Shared with photos.c
- * and books.c. */
+/* A black page named name, with its destroy (given the page) and Return handlers; 0 when none.
+ * Shared with photos.c and books.c. */
 void *page_open(const char *name, int (*closed)(void *, void *), int (*keyup)(void *, void *)) {
     void *page = window_create(0, 0, 0, 0, 0);
     if (!page) return 0;
@@ -1532,27 +1336,21 @@ static void *list(const char *title, int n) {
     return page_list(cf.page, cf.body, &cf.title, title, n, 48);
 }
 
-/* One row of a page_list (48px, the theme's page_h) or, with a detail (library_lists.c's Most Played),
- * a taller one: the caption over the detail in 16px #AAAAAA, stock's s_scrlabel_gray24l grey, in
- * the theme's boxes and fonts. Under a theme's separators an empty detail centres the caption above
- * them, its label kept for whoever writes it. iPod left-aligns them, as every stock list. Returns
- * the row. Shared with photos.c. */
+/* One row of a page_list (48px, the theme's page_h) or, with a detail (library_lists.c's Most
+ * Played), a taller one: the caption over the detail in 16px #AAAAAA, stock's s_scrlabel_gray24l
+ * grey, in the theme's boxes and fonts. iPod left-aligns them, as every stock list. Returns the
+ * row. Shared with photos.c. */
 void *page_row_detail(void *view, int index, const char *caption, const char *detail,
                       int (*click)(void *, void *)) {
     const theme_t *T = theme();
-    int h = page_h(detail ? 64 : 48), x = T->page_x, w = 375 - 2 * x,
-        sep = detail && !*detail ? T->sep[0].n : 0;
+    int h = page_h(detail ? 64 : 48), x = T->page_x, w = 375 - 2 * x;
     void *item = list_item_create(view, 0, index * h, 375, h);
     widget_use_style(item, "s_listitem_black");
-    void *label = text(item, x, !detail || sep ? 0 : T->page_cap_y, w,
-                       !detail ? h
-                       : sep   ? h - sep
-                               : T->page_cap_h);
+    void *label = text(item, x, !detail ? 0 : T->page_cap_y, w, !detail ? h : T->page_cap_h);
     widget_use_style(label, "s_scrlabel_white20l");
     widget_set_text_utf8(label, caption);
     theme_font(label, detail ? ROLE_TALL : ROLE_TITLE, FONT_ROW);
     if (detail) {
-        if (T->sep[0].n) widget_set_name(item, PAGE_TALL);
         label = text(item, x, T->page_det_y, w, T->page_det_h);
         widget_use_style(label, "s_scrlabel_white20l");
         widget_set_prop_int(label, "style:normal:text_color", (int)0xffaaaaaau);
@@ -1573,7 +1371,6 @@ void row_into(void *item, int h) {
     }
     void *into = image_create(item, 302, 0, 50, h);
     image_base_set_image(into, "list_into");
-    if (theme()->chevron_sel) widget_set_visible(into, 0, 0); /* the selection's chevron instead */
 }
 
 /* A page_row_detail row that opens another page, with row_into's chevron. An empty detail centres
@@ -1584,8 +1381,7 @@ void *page_row_detail_into(void *view, int index, const char *caption, const cha
     const theme_t *T = theme();
     int h = page_h(detail ? 64 : 48);
     if (detail && !*detail)
-        widget_move_resize(widget_get_child(item, 0), T->page_x, 0, 375 - 2 * T->page_x,
-                           h - T->sep[0].n);
+        widget_move_resize(widget_get_child(item, 0), T->page_x, 0, 375 - 2 * T->page_x, h);
     row_into(item, h);
     return item;
 }
@@ -1847,7 +1643,8 @@ static void column(shelf_t *f, int col, const unsigned *tex, int h, int bright, 
         if (y < 0 || (y >= solid_top && y < solid_bottom)) continue;
         int mirrored = dist * step >> 8 >> 16; /* texel rows up from the bottom edge */
         int row = ART_SIZE - 1 - (mirrored >= ART_SIZE ? ART_SIZE - 1 : mirrored);
-        unsigned cov = (unsigned)(((y + 1) << 8) - from) * (256u - (unsigned)(dist * fade >> 16)) >> 8;
+        unsigned cov =
+            (unsigned)(((y + 1) << 8) - from) * (256u - (unsigned)(dist * fade >> 16)) >> 8;
         put(px, shade(tex[row * ART_SIZE], dim) + wash, cov);
     }
     /* The rows this body covers whole are opaque now: join them to the known span, or keep the
@@ -1878,7 +1675,8 @@ void cf_column(unsigned *d, int pitch, short *solid, int col, const unsigned *te
 #endif
 
 /* The cover t (16.16, signed) turns from the visual position, under what is drawn. */
-static unsigned short cf_inset[ART_SIZE] __attribute__((section(".scratch"))); /* 1/256 texel, symmetric */
+static unsigned short cf_inset[ART_SIZE]
+    __attribute__((section(".scratch"))); /* 1/256 texel, symmetric */
 
 /* Copy the theme's Cover Flow values to cfs. */
 void cf_restyle(void) {
@@ -1888,10 +1686,10 @@ void cf_restyle(void) {
     cf_s1 = rest.s, cf_rest16 = project(&rest, CF_HALF16);
     cf_top256 = 256 * cfs.top + 40960 * cfs.horizon / 100;
 }
-/* cf_inset follows the theme's radius, or none under square art. */
+/* cf_inset follows the theme's radius. */
 static void cf_corners(void) {
     static short filled __attribute__((section(".scratch")));
-    int radius = ipod_square_art() ? 0 : cfs.radius;
+    int radius = cfs.radius;
     if (radius == filled) return;
     filled = (short)radius;
     int r = ART_SIZE * radius / 166;
@@ -2026,7 +1824,8 @@ int coverflow_hit(int frac, int x, int y) {
             pose(t * side, &p);
             if (p.bright < 64 || !unproject(&p, (2 * v + 1 - 2 * CF_CX) * 8, &u, &h)) continue;
             int ins = h * cf_inset[(u + CF_HALF16) >> 4] / (ART_SIZE * 256), top = CF_TOP256(h);
-            if ((y << 8) + 128 >= top + ins && (y << 8) + 128 < top + h - ins) /* column()'s corners */
+            if ((y << 8) + 128 >= top + ins &&
+                (y << 8) + 128 < top + h - ins) /* column()'s corners */
                 return j - CF_REACH;
         }
     return CF_MISS;
@@ -2104,10 +1903,6 @@ static void *opaque_frame(int w, int h, int format) {
     void *b = bitmap_create_ex(w, h, w * 4, format);
     if (b) *(unsigned short *)((char *)b + 0xc) |= 1; /* BITMAP_FLAG_OPAQUE */
     return b;
-}
-
-HOT unsigned tilt_mix(unsigned a, unsigned b, unsigned w) { /* a to b, w of 256 */
-    return shade(a, 256 - w) + shade(b, w);
 }
 
 /* The frame and every texture at once, or neither: the flat covers then stand in. Under a thumb
@@ -2318,9 +2113,7 @@ int cf_fx_letters(void) {
 }
 #endif
 
-static int floor_div(int a, int b) { /* floor division, b > 0 */
-    return a / b - (a % b < 0);
-}
+static int floor_div(int a, int b) { /* floor division, b > 0 */ return a / b - (a % b < 0); }
 
 /* The visual position from the slide_menu's index and live offset (the wheel's animator): album c
  * (of n) at the centre and frac past it. Stock completion commits index - offset / stride. */
@@ -2353,188 +2146,6 @@ static void fx_ring(int c, int n, const unsigned **ring) {
     if (coverflow_bounded(cf.slide)) /* no wrap: only the artist's real neighbours, never repeats */
         for (int j = -fx_reach(); j <= fx_reach(); ++j)
             if ((unsigned)(c + j) >= (unsigned)n) ring[j + CF_REACH] = 0;
-}
-
-/* The flip (docs/ipod.md#cover-flow), under Classic's painter: Centre on a cover turns it
- * about the vertical axis on the centre line, right edge toward the viewer, and it grows into the
- * tracks panel on its back, the side covers parting; Return runs the same frames backwards. The
- * shelf's frame, rendered once without the centre cover, holds the side covers. fl.frame and
- * fl.back live only while a turn runs (about 776 KB): at rest the panel stands over the shelf's
- * frame, parted, drawn as it is. */
-#define FLIP_MS 270
-#define FLIP_TICK_MS 16
-#define FLIP_H 294     /* the frame's rows, the client area's */
-#define FLIP_EYE 700   /* px; the shelf's eye can be nearer than the panel's half width */
-#define FLIP_EYE_Y 147 /* the row the eye looks along, the frame's middle */
-#define FLIP_PART 24   /* px each way */
-#define BACK_H 285
-#define PANEL_Y 9
-#define PANEL_HEAD 57
-#define PANEL_MUTED 0xffaaaaaau /* stock's second line: the theme's muted, white when selected */
-#define PANEL_TWO 45 /* a playlist's rows, title over artist: five show, an album's seven */
-cf_flip_t fl __attribute__((section(".scratch")));
-
-int coverflow_turning(void) { return fl.dir != 0; }
-
-/* The time's share of the turn (16.16) at ms of FLIP_MS: ease-in-out, .42, 0, .58, 1, at each
- * sixteenth of the time. Its own mirror, so backwards it's the same frames. */
-int coverflow_flip_eased(int ms) {
-    static const int eased[17] = { 0,     497,   2039,  4686,  8465,  13339, 19187, 25776, 32768,
-                                   39760, 46349, 52197, 57071, 60850, 63497, 65039, 65536 };
-    if (ms <= 0) return 0;
-    if (ms >= FLIP_MS) return CF_ONE;
-    int at = ms * 65536 / FLIP_MS, i = at >> 12;
-    return eased[i] + ((eased[i + 1] - eased[i]) * (at & 4095) >> 12);
-}
-
-/* The frame at e (16.16, the cover's 0 to the panel's CF_ONE), BGRA8888 as the screen, from tex:
- * the side covers (CF_VIEW_W x view_h, the shelf's frame), the cover (a texture), the back. e sets
- * the turn (180 degrees), the parting and, linearly, the quad's size and place. A flat BACK_W wide
- * face seen from FLIP_EYE: the size shrinks x and y but not depth, so u (-1 to 1 across the face,
- * 12 bits) reaches 147 px towards the eye at any size. Each screen column is one texture column,
- * nearest, its slanted ends by row coverage. */
-void coverflow_flip_render(unsigned *d, int pitch, int e, const unsigned *const tex[3]) {
-    unsigned paper = bgra(ipod_light() ? scheme()->paper : 0);
-    int part = FLIP_PART * e >> 16, right = CF_CX + part;
-    for (int y = 0; y < FLIP_H; ++y) {
-        unsigned *o = d + y * pitch;
-        const unsigned *s = tex[0] + y * CF_VIEW_W;
-        int shelf = y < cfs.view_h, from = shelf ? CF_CX - part : 0, to = shelf ? right : CF_VIEW_W;
-        if (shelf) {
-            memcpy(o, s + part, (unsigned)from * 4);
-            memcpy(o + right, s + CF_CX, (unsigned)(CF_VIEW_W - right) * 4);
-        }
-        for (int x = from; x < to; ++x) o[x] = paper;
-    }
-    /* cos and sin of 180 e from the quarter's table, mirrored past 90 */
-    int a = e <= CF_ONE / 2 ? e : CF_ONE - e, pos = a * 32, i = pos >> 16, f = (pos & 65535) >> 4;
-    int c = cf_cos90[i] + (i < 16 ? (cf_cos90[i + 1] - cf_cos90[i]) * f >> 12 : 0);
-    int sn = cf_sin90[i] + (i < 16 ? (cf_sin90[i + 1] - cf_sin90[i]) * f >> 12 : 0);
-    int back = a != e, at = e >> 4; /* at: 12 bits */
-    const unsigned *t = tex[back ? 2 : 1];
-    if (!c || !t) return; /* edge on */
-    int tw = back ? BACK_W : ART_SIZE, th = back ? BACK_H : ART_SIZE;
-    int half = 1280 + (16 * (BACK_W / 2 - ART_SIZE / 2) * at >> 12);  /* half the width, 1/16 px */
-    int top = 256 * cfs.top + (256 * (PANEL_Y - cfs.top) * at >> 12); /* 1/256 px */
-    int bottom = top + 40960 + (256 * (BACK_H - ART_SIZE) * at >> 12), eye_y = 256 * FLIP_EYE_Y;
-    int depth = sn * (BACK_W / 2) / FLIP_EYE, cw = half * (back ? -c : c) >> 12;
-    for (int x = 0; x < CF_VIEW_W; ++x) {
-        int dx = (2 * x + 1 - 2 * CF_CX) * 8, den = cw + (dx * depth >> 12);
-        if (!den) continue;
-        int u = dx * 65536 / den;
-        if (u < -4096 || u >= 4096) continue;
-        int k = (1 << 28) / (65536 - (depth * u >> 12)); /* the eye's scale there, 12 bits */
-        int y0 = eye_y + ((top - eye_y) * k >> 12), y1 = eye_y + ((bottom - eye_y) * k >> 12);
-        int h = y1 - y0;
-        if (h < 16) continue;
-        int col = (back ? 4095 - u : u + 4096) * tw >> 13, step = (th << 20) / (h >> 4);
-        int ins = back ? 0 : h * cf_inset[col] / (ART_SIZE * 256), from = y0 + ins, to = y1 - ins;
-        int first = from >> 8, last = (to - 1) >> 8, y = first < 0 ? 0 : first;
-        unsigned *o = d + y * pitch + x;
-        for (; y <= last && y < FLIP_H; ++y, o += pitch) {
-            int v = (((y << 8) + 128 - y0) >> 4) * step >> 20; /* texel row */
-            unsigned px = t[(v < 0 ? 0 : v >= th ? th - 1 : v) * tw + col];
-            px = back ? px | 0xff000000u : bgra(px); /* the back is the screen's already */
-            if (y != first && y != last) {
-                *o = px;
-                continue;
-            }
-            int a0 = y << 8 > from ? y << 8 : from, a1 = (y + 1) << 8 < to ? (y + 1) << 8 : to;
-            *o = tilt_mix(*o, px, (unsigned)(a1 - a0)) | 0xff000000u;
-        }
-    }
-}
-
-/* The side covers round cf.album, in the shelf's frame, which is drawn afresh back on the shelf;
- * the cover is the ring's middle: the no-art cover when it has no texture. */
-static void flip_sides(void) {
-    const unsigned *wide[CF_WIDE], **ring = wide + CF_WIDE_REACH - CF_REACH;
-    fx_ring(cf.album, (int)widget_count_children(cf.slide), ring);
-    fl.front = ring[CF_REACH];
-    ring[CF_REACH] = 0;
-    unsigned *d = (unsigned *)bitmap_lock_buffer_for_write(fx.frame);
-    cf_still = 1; /* the flip turns a cover at rest */
-    if (d) {
-        coverflow_render(d, (int)(bitmap_get_line_length(fx.frame) / 4), 0, ring);
-        bitmap_unlock_buffer(fx.frame);
-    }
-    cf_still = 0;
-    fx.drawn = 0;
-    fl.light = ipod_light();
-}
-
-/* White on the header in either half: the grey Light Mode turns white. */
-static void panel_ink(void) {
-    unsigned white = unflip(255) * 0x010101u;
-    widget_set_prop_int(fl.title, "style:normal:text_color", (int)(0xff000000u | white));
-    widget_set_prop_int(fl.artist, "style:normal:text_color", (int)(0xc0000000u | white));
-}
-
-/* The panel BACK_W wide from (x, y), h rows, its header head: before its rows (over 0) its paper
- * and the header's fill, after them (over 1) the header's shadow over the rows and a 1 px border
- * just outside it, flat and opaque, so its four sides are one colour whatever lies under them
- * (a translucent ring took Cover Flow's sides under it). Shared with navigation.c's hold menu. */
-void coverflow_panel_paint(void *canvas, int x, int y, int head, int h, int over) {
-    if (!over) {
-        stock_canvas_set_fill_color(canvas, (ipod_light() ? scheme()->paper : 0) | 0xff000000u);
-        canvas_fill_rect(canvas, x, y, BACK_W, h);
-        for (int j = 0; j < head; ++j) {
-            unsigned rgb = RGBA(mix(0x6d8db2, 0x8bacd0, j, head - 1)) & 0xffffff;
-            stock_canvas_set_fill_color(canvas, rgb | 0xf0000000u);
-            canvas_fill_rect(canvas, x, y + j, BACK_W, 1);
-        }
-        return;
-    }
-    static const unsigned char shadow[8] = { 0, 28, 54, 50, 41, 27, 14, 0 };
-    for (int j = 0; j < 8; ++j) {
-        stock_canvas_set_fill_color(canvas, (unsigned)shadow[j] << 24);
-        canvas_fill_rect(canvas, x, y + head - 2 + j, BACK_W, 1);
-    }
-    stock_canvas_set_fill_color(canvas, RGBA(ipod_light() ? 0xb4b9c0 : 0x333333));
-    canvas_fill_rect(canvas, x - 1, y - 1, BACK_W + 2, 1);
-    canvas_fill_rect(canvas, x - 1, y + h, BACK_W + 2, 1);
-    canvas_fill_rect(canvas, x - 1, y, 1, h);
-    canvas_fill_rect(canvas, x + BACK_W, y, 1, h);
-}
-
-/* ringnav_paint over the panel's widgets; 1 when w was the frame's. */
-static int flip_paint(void *w, void *canvas) {
-    if (w == fl.sheet || w == fl.panel) /* the sheet first in the panel, the panel last */
-        coverflow_panel_paint(canvas, 0, 0, PANEL_HEAD, BACK_H, w == fl.panel);
-    if (w != cf.covers) return 0;
-    if (fl.light != ipod_light()) {
-        flip_sides();
-        panel_ink();
-        fl.drawn = -1;
-    }
-    if (!fl.frame) { /* at rest: the turn's last frame where the panel doesn't cover it */
-        unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-        int h = cfs.view_h, side = CF_VIEW_W - CF_CX - FLIP_PART;
-        int ls[4] = { FLIP_PART, 0, CF_CX - FLIP_PART, h }, ld[4] = { 0, 0, CF_CX - FLIP_PART, h };
-        int rs[4] = { CF_CX, 0, side, h }, rd[4] = { CF_CX + FLIP_PART, 0, side, h };
-        canvas_draw_image(canvas, fx.frame, ls, ld);
-        canvas_draw_image(canvas, fx.frame, rs, rd);
-        stock_canvas_set_fill_color(canvas, (ipod_light() ? scheme()->paper : 0) | 0xff000000u);
-        canvas_fill_rect(canvas, CF_CX - FLIP_PART, 0, 2 * FLIP_PART, h);
-        canvas_fill_rect(canvas, 0, h, CF_VIEW_W, FLIP_H - h);
-        stock_canvas_set_fill_color(canvas, fill);
-        return 1;
-    }
-    int ms = (int)((unsigned)time_now_ms() - fl.t0);
-    int e = !fl.dir ? CF_ONE : coverflow_flip_eased(fl.dir > 0 ? ms : FLIP_MS - ms);
-    if (e != fl.drawn) {
-        unsigned *d = (unsigned *)bitmap_lock_buffer_for_write(fl.frame);
-        const unsigned *tex[3] = { (const unsigned *)bitmap_lock_buffer_for_read(fx.frame),
-                                   fl.front, fl.back };
-        if (d && tex[0])
-            coverflow_flip_render(d, (int)(bitmap_get_line_length(fl.frame) / 4), e, tex);
-        if (tex[0]) bitmap_unlock_buffer(fx.frame);
-        if (d) bitmap_unlock_buffer(fl.frame);
-        fl.drawn = e;
-    }
-    int r[4] = { 0, 0, CF_VIEW_W, FLIP_H };
-    canvas_draw_image(canvas, fl.frame, r, r);
-    return 1;
 }
 
 #if Q2POD_DEV
@@ -2587,7 +2198,6 @@ void coverflow_paint(void *w, void *canvas) {
     coverflow_position_paint(w, canvas);
     caption_mark(w, canvas);
     int c, frac, n;
-    if (fl.panel && w && flip_paint(w, canvas)) return;
     if (!w || w != cf.slide || !fx.frame || cf.screen != COVERS ||
         !visual(w, n = (int)widget_count_children(w), &c, &frac))
         return;
@@ -2614,8 +2224,7 @@ void coverflow_paint(void *w, void *canvas) {
 #endif
     int still = !th.on && !P(w, SLIDE_ANIMATOR) && !touched();
     if (!fx.drawn || c != fx.c || frac != fx.frac || lead != fx.lead || arch != fx.arch ||
-        mode != fx.mode ||
-        still != fx_still || mode == FX_FOLD ||
+        mode != fx.mode || still != fx_still || mode == FX_FOLD ||
         mode == FX_ENTRY) { /* the fold: the clock, the entry: passes */
         unsigned *d = (unsigned *)bitmap_lock_buffer_for_write(fx.frame);
         if (!d) return;
@@ -2623,7 +2232,8 @@ void coverflow_paint(void *w, void *canvas) {
         coverflow_render(d, (int)(bitmap_get_line_length(fx.frame) / 4), frac, ring);
         cf_still = 0;
         bitmap_unlock_buffer(fx.frame);
-        fx.c = c, fx.frac = frac, fx.lead = lead, fx.arch = arch, fx.mode = mode, fx.drawn = 1, fx_still = still;
+        fx.c = c, fx.frac = frac, fx.lead = lead, fx.arch = arch, fx.mode = mode, fx.drawn = 1,
+        fx_still = still;
     }
 #if Q2POD_DEV
     gap_note(w, gap_t0, gap_t1, (unsigned)time_now_ms());
@@ -2694,7 +2304,9 @@ static struct {
 static int touched(void) { return tc.down; }
 
 int stride_of(void *s) { return slide_menu_item_width(s) + I(s, SLIDE_SPACER); }
-static int round_stride(int off, int stride) { return floor_div(2 * off + stride, 2 * stride) * stride; }
+static int round_stride(int off, int stride) {
+    return floor_div(2 * off + stride, 2 * stride) * stride;
+}
 
 /* An artist's albums give past an end as iOS's rubber band, x * 0.55 / (1 + x * 0.55 / D) with
  * D 2/5 of a stride, so the centre never reaches past half a cover (visual() would wrap there);
@@ -2702,7 +2314,8 @@ static int round_stride(int off, int stride) { return floor_div(2 * off + stride
 static int bound(int off, int stride, int rubber) {
     void *s = cf.slide;
     if (!coverflow_bounded(s)) return off;
-    int i = I(s, SLIDE_INDEX), hi = i * stride, lo = (i + 1 - (int)widget_count_children(s)) * stride;
+    int i = I(s, SLIDE_INDEX), hi = i * stride,
+        lo = (i + 1 - (int)widget_count_children(s)) * stride;
     int edge = off > hi ? hi : off < lo ? lo : off, x = off - edge, a = ABS(x), d = 2 * stride / 5;
     if (!x || !rubber) return edge;
     a = a * 11 * d / (a * 11 + 20 * d);
@@ -2714,7 +2327,8 @@ static int bound(int off, int stride, int rubber) {
 static int unbound(int off, int stride) {
     void *s = cf.slide;
     if (!coverflow_bounded(s)) return off;
-    int i = I(s, SLIDE_INDEX), hi = i * stride, lo = (i + 1 - (int)widget_count_children(s)) * stride;
+    int i = I(s, SLIDE_INDEX), hi = i * stride,
+        lo = (i + 1 - (int)widget_count_children(s)) * stride;
     int edge = off > hi ? hi : off < lo ? lo : off, x = off - edge, a = ABS(x), d = 2 * stride / 5;
     if (!x || a >= d) return off;
     a = 20 * d * a / (11 * (d - a));
@@ -2730,7 +2344,8 @@ static int velocity(unsigned now) {
         if (tc.st[last] - tc.st[j] > 100) break;
         first = j;
     }
-    int dt = (int)(tc.st[last] - tc.st[first]), v = dt ? (tc.sx[last] - tc.sx[first]) * 1000 / dt : 0;
+    int dt = (int)(tc.st[last] - tc.st[first]),
+        v = dt ? (tc.sx[last] - tc.sx[first]) * 1000 / dt : 0;
     return v > CF_VMAX ? CF_VMAX : v < -CF_VMAX ? -CF_VMAX : v; /* a burst of queued moves */
 }
 
@@ -2754,8 +2369,10 @@ static void release(int v) {
     if (stride <= 0) return;
     int vo = v * stride / CF_DRAG_PX, goal = round_stride(live + vo * CF_PROJECT_MS / 1000, stride);
     int flick = ABS(v) >= CF_FLICK;
-    if (flick && v > 0 && goal < -floor_div(-live, stride) * stride) goal = -floor_div(-live, stride) * stride;
-    if (flick && v < 0 && goal > floor_div(live, stride) * stride) goal = floor_div(live, stride) * stride;
+    if (flick && v > 0 && goal < -floor_div(-live, stride) * stride)
+        goal = -floor_div(-live, stride) * stride;
+    if (flick && v < 0 && goal > floor_div(live, stride) * stride)
+        goal = floor_div(live, stride) * stride;
     goal = bound(goal, stride, 0);
     if (goal == live && !live && !P(s, SLIDE_ANIMATOR)) { /* at rest already: the still frame */
         widget_invalidate_force(s, 0);
@@ -2763,7 +2380,10 @@ static void release(int v) {
     }
     int d = ABS(goal - live), a = ABS(vo), ahead = (goal > live && v > 0) || (goal < live && v < 0);
     unsigned ms = ahead ? (unsigned)(3000 * d / a) : CF_SETTLE_MS; /* cubic out: 3 d / v */
-    carousel_glide(s, goal, ms < CF_SETTLE_MS ? CF_SETTLE_MS : ms > CF_GLIDE_MAX ? CF_GLIDE_MAX : ms,
+    carousel_glide(s, goal,
+                   ms < CF_SETTLE_MS   ? CF_SETTLE_MS
+                   : ms > CF_GLIDE_MAX ? CF_GLIDE_MAX
+                                       : ms,
                    EASE_CUBIC_OUT);
 }
 
@@ -2782,7 +2402,8 @@ static void tap(int x, int y) {
     if (!j && !frac)
         pick((void *)(long)c, 0);
     else
-        carousel_glide(s, round_stride(I(s, SLIDE_OFFSET), stride) - j * stride, CF_TAP_MS, SLIDE_EASING);
+        carousel_glide(s, round_stride(I(s, SLIDE_OFFSET), stride) - j * stride, CF_TAP_MS,
+                       SLIDE_EASING);
 }
 
 int covers_live(void) { return cf.slide && cf.screen == COVERS && !cf.timer; }
@@ -2796,17 +2417,21 @@ static void lift(int aborted, unsigned now) {
     if (!cf.slide) return;
     if (tc.drag || tc.caught || !covers_live())
         release(tc.drag && !aborted && covers_live() ? velocity(now) : 0);
-    else if (!aborted) tap(tc.x, tc.y);
+    else if (!aborted)
+        tap(tc.x, tc.y);
 }
 
 static int touch(void *ctx, void *event) {
     int type = I(event, EVENT_TYPE), x = I(event, EVENT_X), y = I(event, EVENT_Y);
     if (type == EVT_POINTER_DOWN) {
-        lift(1, 0); /* a release the input queue dropped */
+        lift(1, 0);                            /* a release the input queue dropped */
         if (!covers_live() || th.on) return 0; /* the thumb's covers settle first */
         void *a = P(cf.slide, SLIDE_ANIMATOR);
         if (a) widget_animator_pause(a); /* caught where it is */
-        tc = (typeof(tc)){ .down = 1, .caught = a != 0, .x = x, .y = y,
+        tc = (typeof(tc)){ .down = 1,
+                           .caught = a != 0,
+                           .x = x,
+                           .y = y,
                            .from = unbound(I(cf.slide, SLIDE_OFFSET), stride_of(cf.slide)) };
         return 0;
     }
@@ -2836,7 +2461,6 @@ static int touch(void *ctx, void *event) {
  * and Centre act on the cover the covers settle on. */
 void coverflow_lost_touch(void) { lift(1, 0); }
 
-
 static void cover(void *img, unsigned i, int near) {
     char url[600] = "file://";
     near = near && art_url(url, i);
@@ -2844,9 +2468,6 @@ static void cover(void *img, unsigned i, int near) {
         (!near || !image_show(img, url, 0)))
         image_base_set_image(img, PLACEHOLDER);
 }
-
-/* Classic's caption: both lines in its face, Now Playing's title's. */
-static int caption_bold(void) { return theme()->font[ROLE_TITLE] == FONT_CLASSIC_LIGHT; }
 
 /* A playlist's count: "1 song", "N songs"; buf holds 24. */
 static const char *songs_text(char *buf, unsigned k) {
@@ -2898,10 +2519,6 @@ void titles(unsigned c) {
                                   : cf.scoped == ARTIST_ALBUMS ? "All albums"
                                                                : sort_names[cf.sort]);
     widget_set_text_utf8(cf.artist, by); /* NULL leaves the old one */
-    if (caption_bold()) {                /* by its text */
-        theme_font(cf.name, ROLE_NP, FONT_ROW);
-        theme_font(cf.artist, ROLE_NP, FONT_ROW);
-    }
     /* Stock draws even a centred caption at -xoffset: a long one's scroll would shift the next
      * left. */
     widget_set_prop_int(cf.name, "xoffset", 0);
@@ -2968,10 +2585,7 @@ static void covers(int dir) {
         cf.artist =
             text(cf.covers, CF_EDGE, cfs.text_y + cfs.artist_y, 375 - 2 * CF_EDGE, CF_ARTIST_H);
         widget_set_prop_int(cf.artist, "style:normal:font_size", cfs.artist_px);
-        widget_set_prop_int(cf.artist, "style:normal:text_color",
-                            !caption_bold() ? (int)CF_GREY
-                            : ipod_light()  ? (int)0xffffffffu /* the ink, as the album's */
-                                            : (int)CF_GREY_BOLD);
+        widget_set_prop_int(cf.artist, "style:normal:text_color", (int)CF_GREY);
         slide_menu_set_value(cf.slide, cf.album);
         widget_on(cf.slide, EVT_VALUE_CHANGED, changed, 0);
         tc.down = th.on = 0; /* a touch or thumb on the covers these replace */
@@ -2985,18 +2599,16 @@ static void covers(int dir) {
 
 static int playlists_again(const void *unused);
 static unsigned pl_again __attribute__((section(".scratch"))); /* playlists_again's own */
-/* A theme whose album tracks are one-line song rows (OLED's, list.songs.painter inline), its pages'
- * titles in the bar: to_tracks lists Cover Flow's tracks that way. */
-static int song_tracks(void) {
-    return theme()->painter[PAINT_SONGS] == SONGS_INLINE && !theme()->page_title_h;
-}
+/* Album tracks are one-line song rows (song_rows.c); with the pages' titles in the bar, to_tracks
+ * lists Cover Flow's tracks that way. */
+static int song_tracks(void) { return !theme()->page_title_h; }
 
 /* The bar's title on Cover Flow's page (navigation.c bar_title_of): 0 on song_tracks' tracks, whose
  * hidden caption names the album; under a status row (status, the set's status_y) an artist's
  * covers by the artist's name, as the artist page under them, and the other covers none, so the
  * row shows the clock as Home's does; else "Cover Flow". */
 const char *coverflow_bar_title(int status) {
-    if (cf.screen == TRACKS && !fl.panel && song_tracks()) return (const char *)0;
+    if (cf.screen == TRACKS && song_tracks()) return (const char *)0;
     if (status && cf.screen == COVERS)
         return cf.scoped == ARTIST_ALBUMS && cf.albums && deque_size(cf.albums)
                    ? cover_artist(deque_at(cf.albums, 0))
@@ -3061,7 +2673,6 @@ static void cf_cold(unsigned t0) {
     cf_trace(t0, "start albums=", cf.stock ? deque_size(cf.stock) : 0, 0);
 }
 
-
 /* On open: the albums, then art for the ones with no cache file (PictureFlow's first-launch build;
  * later opens resume). The albums are queried again only after the library changed (or Refresh
  * Coverflow): stock's sort converts both names to pinyin on every comparison. */
@@ -3074,10 +2685,10 @@ static void load(void) {
 }
 /* The albums' query in steps, so that an open waiting on it shows it is busy between them
  * (open_step): 0 getAllAlbum, 1 MUSIC_ALBUM_SQL's grouping, 2 split and music_albums on its rows;
- * each returns 1 once cf.stock is the list. One grouping serves both: a name's ALBUM_SQL rows are its music
- * rows and more (the WHERE drops songs, not groups), and music_albums drops the more; a name with
- * no music keeps its stock row, which music_albums drops too. library_gen is taken before the
- * first step, so a scan meanwhile has the next open query again. */
+ * each returns 1 once cf.stock is the list. One grouping serves both: a name's ALBUM_SQL rows are
+ * its music rows and more (the WHERE drops songs, not groups), and music_albums drops the more; a
+ * name with no music keeps its stock row, which music_albums drops too. library_gen is taken before
+ * the first step, so a scan meanwhile has the next open query again. */
 static struct {
     void *stock, *rows;
     int n;
@@ -3125,7 +2736,7 @@ static void load_albums(unsigned t0) {
     widget_destroy_children(cf.page);
     cf.covers = cf.slide = cf.name = cf.artist = 0; /* destroyed with the page's children */
     cf.offline = 0;
-    if (cf.scoped != PLAYLISTS) cf.album = 0;       /* the playlists' read again keep their place */
+    if (cf.scoped != PLAYLISTS) cf.album = 0; /* the playlists' read again keep their place */
     cf.body =
         widget_factory_create_widget(widget_factory(), "view", cf.page, 0, 0, 375, client_h());
     int n = 0;
@@ -3152,7 +2763,7 @@ static void load_albums(unsigned t0) {
         cf_trace(t0, "sorted albums=", deque_size(cf.albums), 0);
     }
     if (n <= 0) {
-        drop_albums(); /* only a real list is kept */
+        drop_albums();      /* only a real list is kept */
         cf.screen = COVERS; /* Return goes Home */
         list("Update Local Music first", 0);
         return;
@@ -3185,7 +2796,8 @@ static void load_albums(unsigned t0) {
         job_t *j = cf.jobs ? &cf.jobs[cf.total] : 0;
         /* a server album's art is its app's cover: none fetched yet, the placeholder, no job */
         if (j && P(r, REC_PATH) && access(art_path(path, key, ""), 0) &&
-            (!catalogue_path(P(r, REC_PATH)) || catalogue_cover(P(r, REC_PATH), path, sizeof path)) &&
+            (!catalogue_path(P(r, REC_PATH)) ||
+             catalogue_cover(P(r, REC_PATH), path, sizeof path)) &&
             (j->track = strdup(P(r, REC_PATH)))) {
             cf_cold(t0);
             j->key = key;
@@ -3209,7 +2821,8 @@ static void load_albums(unsigned t0) {
 
 /* Album queues use stock's album class (0xff10), never folder class 1: Folder Skip only acts on
  * class 1 and would load the next directory's untagged files. Stock resume rebuilds 0xff10 with
- * getMusicByAlbum from the resume record's album, which player_load_songlist fills for stock lists. */
+ * getMusicByAlbum from the resume record's album, which player_load_songlist fills for stock lists.
+ */
 void album_memory(void *r) {
     const char *album = P(r, REC_ALBUM);
     unsigned char *m = (unsigned char *)g_memory_info;
@@ -3265,7 +2878,8 @@ static void *in_order(void *tracks, void *album) {
     void **v = calloc(deque_size(tracks) + 1, sizeof *v);
     if (!v) return tracks;
     for (unsigned i = 0; i < deque_size(tracks); ++i)
-        if (I(album, REC_ID) == -1 || !album_cmp(deque_at(tracks, i), album)) v[n++] = deque_at(tracks, i);
+        if (I(album, REC_ID) == -1 || !album_cmp(deque_at(tracks, i), album))
+            v[n++] = deque_at(tracks, i);
     qsort(v, n, sizeof *v, album_before);
     void *out = _create_deque("stSongInfo");
     deque_init(out);
@@ -3300,211 +2914,7 @@ void *coverflow_album_tracks(void *r) {
     return in_order(staged_music(albums, r, &n), r);
 }
 
-/* A label's face at px, in every state the labels style: bold, the theme's (bold itself), by its
- * text as theme_font has it; else stock's regular, as the theme's rows' second lines. */
-void panel_font(void *label, int px, int bold) { /* shared with navigation.c */
-    static const char *const names[] = { "style:normal:font_name", "style:focused:font_name",
-                                         "style:disable:font_name" },
-                             *const sizes[] = { "style:normal:font_size", "style:focused:font_size",
-                                                "style:disable:font_size" };
-    const char *face = bold ? theme_face(widget_get_text(label), -1, &px) : (const char *)0;
-    font_weight_mark(label, bold && !face && caption_bold());
-    for (unsigned i = 0; i < sizeof names / sizeof *names; ++i) {
-        widget_set_prop_str(label, names[i], face ? face : "default");
-        widget_set_prop_int(label, sizes[i], px);
-    }
-}
-
-static void *panel_label(void *parent, int x, int y, int w, int h, const char *s, int px,
-                         int bold) {
-    void *label = text(parent, x, y, w, h);
-    widget_use_style(label, "s_scrlabel_white20l");
-    widget_set_text_utf8(label, s);
-    panel_font(label, px, bold);
-    return label;
-}
-
-/* A row's title runs to its length's own text, not to the box reserved for the widest length: the
- * length is cut to its measured width plus hscroll_label's two 2 px margins (it scrolls a text wider
- * than its width less those), at the right margin, and the title ends PANEL_TIME_GAP before it. No
- * canvas, or a text that doesn't measure or fit the reserve: the reserve stands. ponytail: measured
- * once at the build, in the default face at 20 px, which is the label's. */
-#define PANEL_TIME_GAP 8
-static void panel_fit(void *title, void *time, unsigned n) {
-    void *canvas = widget_get_canvas(time);
-    if (!canvas) return;
-    canvas_set_font(canvas, (const char *)0, 20);
-    int w = (int)(canvas_measure_text(canvas, widget_get_text(time), n) + 0.5f);
-    if (w <= 0 || w + 4 > I(time, W_W)) return;
-    w += 4;
-    widget_move_resize(time, BACK_W - 12 - w, 0, w, I(time, W_H));
-    widget_resize(title, BACK_W - 12 - w - PANEL_TIME_GAP - 12, I(title, W_H));
-}
-
-/* The panel as it stands into fl.back, hidden after: painted by stock on an offline canvas of the
- * screen's size and format, at its screen place, as stock's window snapshots are, so the paint
- * hooks' coordinates hold. The screen's lcd is BGRA8888, as the frame. No canvas, or a layout not
- * the screen's: the paper, so the turn still runs. */
-static void flip_capture(void) {
-    void *c = canvas_offline_create(CF_VIEW_W, 320, LCD_BGRA8888);
-    const unsigned *fb = 0;
-    if (c) {
-        canvas_offline_begin_draw(c);
-        int sy = I(cf.page, W_Y);
-        canvas_translate(c, I(cf.page, W_X), sy);
-        widget_set_visible(fl.panel, 1, 0);
-        widget_layout(fl.panel);
-        widget_paint(fl.panel, c);
-        canvas_offline_end_draw(c);
-        void *lcd = P(c, CANVAS_LCD);
-        if (I(lcd, LCD_W) == CF_VIEW_W && I(lcd, LCD_H) == 320 &&
-            I(lcd, LCD_LINE_LENGTH) == CF_VIEW_W * 4 && I(lcd, LCD_FORMAT) == LCD_BGRA8888 &&
-            sy + PANEL_Y + BACK_H <= 320)
-            fb = (const unsigned *)P(lcd, LCD_OFFLINE_FB);
-        if (fb) fb += (sy + PANEL_Y) * CF_VIEW_W + PANEL_X + I(cf.page, W_X);
-    }
-    unsigned *o = fl.back, paper = bgra(ipod_light() ? scheme()->paper : 0);
-    for (int y = 0; y < BACK_H; ++y)
-        for (int x = 0; x < BACK_W; ++x) *o++ = fb ? fb[y * CF_VIEW_W + x] | 0xff000000u : paper;
-    if (c) canvas_offline_destroy(c);
-    widget_set_visible(fl.panel, 0, 0);
-}
-
-static void flip_done(void);
-static int flip_tick(const void *unused);
-static void flip_start(int dir) {
-    fl.dir = dir, fl.drawn = -1;
-    fl.t0 = (unsigned)time_now_ms();
-    if (!(fl.timer = timer_add(flip_tick, 0, FLIP_TICK_MS))) flip_done();
-    widget_invalidate_force(cf.covers, 0);
-}
-
-static int flip_tick(const void *unused) {
-    if ((unsigned)time_now_ms() - fl.t0 < FLIP_MS) {
-        widget_invalidate_force(cf.covers, 0);
-        return 8; /* RET_REPEAT */
-    }
-    fl.timer = 0;
-    flip_done();
-    return 0;
-}
-
-/* The turn's buffers go, as each turn ends. */
-static void flip_drop(void) {
-    if (fl.frame) bitmap_destroy(fl.frame);
-    free(fl.back);
-    fl.frame = 0, fl.back = 0;
-}
-
-/* A turn's buffers, both or neither. */
-static int flip_alloc(void) {
-    fl.frame = opaque_frame(CF_VIEW_W, FLIP_H, LCD_BGRA8888);
-    fl.back = fl.frame ? calloc(BACK_W * BACK_H, 4) : 0;
-    if (!fl.back) flip_drop();
-    return fl.back != 0;
-}
-
-/* Everything goes; the widgets are the page's, or flip_done's. */
-static void flip_free(void) {
-    stop_timer(&fl.timer);
-    flip_drop();
-    memset(&fl, 0, sizeof fl);
-}
-
-/* Captions and the wheel's surface: off for the panel, on again for the shelf. */
-static void flip_shelf(int on) {
-    widget_set_visible(cf.slide, on, 0);
-    widget_set_visible(cf.name, on, 0);
-    widget_set_visible(cf.artist, on, 0);
-}
-
-/* The album's panel and its first turn, or 0: not this theme or page, or no room, so the text list.
- * Nothing starts until the panel is built and painted: a slow album waits at the cover. Stock's
- * hit test skips insensitive widgets, and the wheel a hidden slide_menu. A playlist's: its name
- * over its count, and each song's artist under its title, as a playlist mixes artists. */
-static int flip_open(void *r, int n) {
-    if (fl.panel) return 1; /* Centre before flip_close's timer: the panel stands */
-    if (!classic_pages() || !cf.covers || !fx.frame || !flip_alloc()) return 0;
-    void *f = widget_factory();
-    fl.panel = widget_factory_create_widget(f, "view", cf.page, PANEL_X, PANEL_Y, BACK_W, BACK_H);
-    fl.sheet = widget_factory_create_widget(f, "view", fl.panel, 0, 0, BACK_W, BACK_H);
-    /* Font sizes are AWTK's, a face's whole height: 1.43 of its em in the theme's face. */
-    int pl = cf.scoped == PLAYLISTS, row = pl ? PANEL_TWO : theme()->page_row;
-    void *view = rows_view(fl.panel, PANEL_HEAD, BACK_W, BACK_H - PANEL_HEAD, n, row);
-    char name[512];
-    for (int i = 0; i < n; ++i) {
-        void *t = deque_at(cf.tracks, (unsigned)i);
-        void *item = list_item_create(view, 0, i * row, BACK_W, row);
-        widget_use_style(item, "s_listitem_black");
-        char duration[24];
-        duration_text(duration, sizeof duration, t);
-        int time_w = strlen(duration) > 5 ? 88 : 66; /* h:mm:ss */
-        void *title = panel_label(item, 12, 0, *duration ? 260 - time_w : 270, pl ? 26 : row,
-                                  track_name(name, sizeof name, t), 25, 1);
-        if (*duration) {
-            void *label = panel_label(item, BACK_W - 12 - time_w, 0, time_w, pl ? 26 : row,
-                                     duration, 20, 0);
-            widget_set_prop_str(label, "style:normal:text_align_h", "right");
-            widget_set_prop_int(label, "style:normal:text_color", (int)PANEL_MUTED);
-            panel_fit(title, label, (unsigned)strlen(duration));
-        }
-        if (pl) {
-            const char *by = P(t, REC_ARTIST);
-            void *artist = panel_label(item, 12, 25, 270, 20, by ? by : "", 18, 0);
-            widget_set_prop_int(artist, "style:normal:text_color", (int)PANEL_MUTED);
-        }
-        widget_on(item, EVT_CLICK, play, (void *)(long)i);
-    }
-    /* cf.title: where a row's "Storage unavailable" goes */
-    char songs[24];
-    cf.title = fl.title =
-        panel_label(fl.panel, 12, 1, 270, 33, pl ? P(r, REC_TITLE) : album_name(r), 31, 1);
-    fl.artist = panel_label(fl.panel, 12, 30, 270, 20,
-                            pl ? songs_text(songs, (unsigned)n) : cover_artist(r), 18, 0);
-    panel_ink();
-    widget_set_sensitive(cf.covers, 0);
-    flip_shelf(0);
-    flip_sides();
-    flip_capture();
-    flip_start(1);
-    return 1;
-}
-
-/* Return on the panel, once a click's handling is over: its selection and scroll as they stand. */
-static int flip_close(const void *unused) {
-    cf.timer = 0;
-    if (!flip_alloc()) { /* no room to turn back: straight to the covers */
-        flip_done();
-        return 0;
-    }
-    flip_capture();
-    flip_start(-1);
-    return 0;
-}
-
-static void flip_done(void) {
-    int to_panel = fl.dir > 0;
-    fl.dir = 0;
-    if (to_panel) {
-        flip_drop();
-        widget_set_visible(fl.panel, 1, 0);
-        widget_invalidate_force(cf.page, 0);
-        return;
-    }
-    widget_destroy(fl.panel);
-    flip_free();
-    cf.title = 0;
-    flip_shelf(1);
-    to_covers(0);
-}
-
-static int playlist_query(void *r) { return getMusicByPlayList(I(r, REC_DISC)); }
-extern int music_records(void *list, int discovery); /* navigation.c: spoken tracks left out */
 static void *page_under(void);
-/* ponytail: Classic's panel builds every row at once (about 3 KB each), so a longer playlist opens
- * in stock's list; a recycled pool of rows would lift it. At most 512, navigation's MAX_ENTRIES,
- * for the wheel to reach every row. */
-#define PANEL_ROWS 200
 static int to_tracks(const void *unused) {
     cf.timer = 0;
     int n;
@@ -3512,31 +2922,21 @@ static int to_tracks(const void *unused) {
     void *r = deque_at(cf.albums, (unsigned)cf.album), *under;
     if (cf.tracks) deque_destroy(cf.tracks), cf.tracks = 0;
     if (cf.scoped == PLAYLISTS) {
-        /* Classic's turn: the songs as the playlist's own list shows them, spoken ones left out.
-         * Minimal's and Modern's Centre, or a longer playlist (by its count, or, not read yet, by
-         * the songs loaded), opens the playlist's own list over the covers, as its row on the
-         * Playlists page under them does: Return comes back to them, as from an album's */
-        if (classic_pages() && playlist_songs(I(r, REC_DISC)) <= PANEL_ROWS) {
-            cf.tracks = staged(playlist_query, r, &n);
-            n = music_records(cf.tracks, 0);
-        }
-        if (!cf.tracks || n > PANEL_ROWS) {
-            if (cf.tracks) deque_destroy(cf.tracks), cf.tracks = 0;
-            if ((under = page_under())) playlist_open(under, I(r, REC_DISC));
-            return 0;
-        }
-    } else {
-        if (!cf.scoped) {
-            cf.saved_album = album_key(r);
-            BLOB_IO(LAST_ALBUM, cf.saved_album, 1); /* a power-off on the tracks keeps it too */
-        }
-        cf.tracks = coverflow_album_tracks(r);
-        n = (int)deque_size(cf.tracks);
+        /* Centre opens the playlist's own list over the covers, as its row on the Playlists page
+         * under them does: Return comes back to them, as from an album's */
+        if ((under = page_under())) playlist_open(under, I(r, REC_DISC));
+        return 0;
     }
+    if (!cf.scoped) {
+        cf.saved_album = album_key(r);
+        BLOB_IO(LAST_ALBUM, cf.saved_album, 1); /* a power-off on the tracks keeps it too */
+    }
+    cf.tracks = coverflow_album_tracks(r);
+    n = (int)deque_size(cf.tracks);
     cf.screen = TRACKS;
-    if (flip_open(r, n)) return 0;
     if (cf.covers) { /* none in the text list; stock's hit test skips insensitive, not hidden,
-                      * widgets, and the covers' view over the list would take its taps and swipes */
+                      * widgets, and the covers' view over the list would take its taps and swipes
+                      */
         widget_set_visible(cf.covers, 0, 0);
         widget_set_sensitive(cf.covers, 0);
     }
@@ -3553,7 +2953,7 @@ static int to_tracks(const void *unused) {
          * whatever its length */
         void *view = page_list(cf.page, cf.body, 0, title, n, 48);
         cf.title = widget_get_child(cf.body, 0); /* page_title's label, for page_retitle */
-        if (widget_get_visible(cf.title)) { /* wider than the bar's box: hidden all the same */
+        if (widget_get_visible(cf.title)) {      /* wider than the bar's box: hidden all the same */
             void *lv = P(view, W_PARENT);
             int all = n * page_h(48), page = widget_get_prop_int(cf.page, "h", client_h()),
                 h = all < page ? all : page;
@@ -3665,8 +3065,10 @@ void coverflow_sort_step(void) {
 static int resort(const void *unused) {
     cf.timer = 0;
     cf.sort = sort_next(1);
-    if (cf.scoped) BLOB_IO(RATED_SORT_FILE, cf.sort, 1);
-    else BLOB_IO(SORT_FILE, cf.sort, 1);
+    if (cf.scoped)
+        BLOB_IO(RATED_SORT_FILE, cf.sort, 1);
+    else
+        BLOB_IO(SORT_FILE, cf.sort, 1);
     if (cf.albums != cf.stock) deque_destroy(cf.albums);
     cf.albums = 0;
     cf.on_sort = 1;
@@ -3709,10 +3111,6 @@ static void *page_under(void) {
  * covers or the message -> Home, or back out of a scoped page (one album's tracks too). */
 static int keyup(void *ctx, void *event) {
     if (I(event, EVENT_KEY) != KEY_RETURN) return 0;
-    if (fl.panel) { /* the panel's way back; during a turn, nothing */
-        if (!fl.dir) rearm(&cf.timer, flip_close, 0);
-        return 11; /* RET_STOP */
-    }
     if ((cf.screen == TRACKS && cf.scoped != ALBUM_TRACKS) || cf.screen == PREPARING)
         rearm(&cf.timer, to_covers, 0);
     else if (cf.scoped) {
@@ -3749,7 +3147,6 @@ static int closed(void *ctx, void *event) {
     th.on = 0; /* the poll kept the album named (the page may be part-destroyed here) */
     coverflow_letter(0, 0, 0); /* a held letter has no lift left to end it, and its surface goes */
     if (cf.saved_album) BLOB_IO(LAST_ALBUM, cf.saved_album, 1);
-    flip_free();
     drop();
     cf.page = cf.body = cf.covers = cf.slide = 0;
     if (cf.scoped == RATED_ALBUMS) {
@@ -3770,23 +3167,25 @@ static int closed(void *ctx, void *event) {
 static void *open_page(void) {
     cf_restyle();
     void *page = page_open("coverflow_page", closed, keyup);
-    static const unsigned short kinds[] = { EVT_POINTER_MOVE_BEFORE, EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
-    for (unsigned k = 0; page && k < sizeof kinds / sizeof *kinds; ++k) widget_on(page, kinds[k], touch, 0);
+    static const unsigned short kinds[] = { EVT_POINTER_MOVE_BEFORE, EVT_POINTER_UP_BEFORE,
+                                            EVT_POINTER_ABORT };
+    for (unsigned k = 0; page && k < sizeof kinds / sizeof *kinds; ++k)
+        widget_on(page, kinds[k], touch, 0);
     return page;
 }
 
 /* An open that has to query the albums first (query_step) runs the query with Home up. Once its
  * steps so far have taken OPEN_SPIN_MS / 2, the rest (another grouping of the library, measured at
  * no less than half getAllAlbum's time, docs/internals.md#coverflow) will take the open past
- * OPEN_SPIN_MS, so each later step waits a main-loop pass, in which Home paints its Cover Flow row with a spinner for its chevron
- * (coverflow_spinner) and input is taken, until the page opens. A warm open, or a cold one of a
- * small library, opens as it is pressed and never shows it. Meanwhile the keys, the wheel and
- * touches go nowhere (coverflow_wait_input), and Return gives the open up. ponytail: the spinner
- * turns between steps, not within one: getAllAlbum's and the grouping's queries each hold the UI
- * thread (stock's library calls are the UI thread's), and demo imports no sqlite3_progress_handler
- * to paint from inside them; a frame from it would turn it smoothly. */
+ * OPEN_SPIN_MS, so each later step waits a main-loop pass, in which Home paints its Cover Flow row
+ * with a spinner for its chevron (coverflow_spinner) and input is taken, until the page opens. A
+ * warm open, or a cold one of a small library, opens as it is pressed and never shows it. Meanwhile
+ * the keys, the wheel and touches go nowhere (coverflow_wait_input), and Return gives the open up.
+ * ponytail: the spinner turns between steps, not within one: getAllAlbum's and the grouping's
+ * queries each hold the UI thread (stock's library calls are the UI thread's), and demo imports no
+ * sqlite3_progress_handler to paint from inside them; a frame from it would turn it smoothly. */
 #define OPEN_SPIN_MS 150
-#define SPIN_FRAME_MS 100 /* a spoke on, eight a turn */
+#define SPIN_FRAME_MS 100                                 /* a spoke on, eight a turn */
 extern void spinner_dirty(void *win), spinner_done(void); /* list_marks.c */
 static struct {
     unsigned at, timer;
@@ -4016,15 +3415,16 @@ void *queue_now(unsigned *pos, unsigned *n) {
 }
 
 /* r's REC_ALBUM, REC_ARTIST, REC_ALBUM_ARTIST or REC_TITLE as the player parsed it from the file,
- * once it has parsed r's; else the record's own. Folder plays' records, and those of the next folder, which
- * stock queues when a folder play ends (on_player_autochange), carry no tags (issue #7). */
+ * once it has parsed r's; else the record's own. Folder plays' records, and those of the next
+ * folder, which stock queues when a folder play ends (on_player_autochange), carry no tags (issue
+ * #7). */
 const char *now_tag(void *r, int field) {
     if (!r) return (void *)0;
     if (!tk_strcmp((const char *)g_play_id3_info, P(r, REC_PATH)))
         return (const char *)g_play_id3_info + (field == REC_ALBUM          ? ID3_ALBUM
-                                                 : field == REC_TITLE        ? ID3_TITLE
-                                                 : field == REC_ALBUM_ARTIST ? ID3_ALBUM_ARTIST
-                                                                             : ID3_ARTIST);
+                                                : field == REC_TITLE        ? ID3_TITLE
+                                                : field == REC_ALBUM_ARTIST ? ID3_ALBUM_ARTIST
+                                                                            : ID3_ARTIST);
     return P(r, field);
 }
 
@@ -4050,13 +3450,16 @@ typedef struct {
     unsigned ms;
 } slide_t;
 enum { SLIDE_STILL = 2 };
-enum { SHOW_NOW, SHOW_LIB }; /* what the pane shows (art_source): the playing cover, the library's */
+enum {
+    SHOW_NOW,
+    SHOW_LIB
+}; /* what the pane shows (art_source): the playing cover, the library's */
 /* iPod Home (docs/ipod.md): the playing track's art, or the library's in turn, beside the list. */
 static struct {
     void *win, *art, *list, *sets; /* sets: the Settings list, in the list's place while open */
-    void *lib; /* the Library's rows the same way: only a set with home_lib has it */
-    void *stream;      /* and Streaming's */
-    void *carousel[3]; /* Home: Carousel's slide_menu and its img_left, img_right */
+    void *lib;             /* the Library's rows the same way: only a set with home_lib has it */
+    void *stream;          /* and Streaming's */
+    void *carousel[3];     /* Home: Carousel's slide_menu and its img_left, img_right */
     unsigned key, repaint; /* repaint: the timer of home_repaint */
     /* drift: home_drift's timer, tick its period; drift_last: its last step */
     unsigned drift, drift_last, tick;
@@ -4066,26 +3469,13 @@ static struct {
     slide_t sl[2];
     void *frame;
     unsigned fade, drawn;
-    int pane; /* no cover shows: coverflow_home_clip paints the theme's pane */
-    /* show: SHOW_*; idle: when play was first seen stopped or paused, | 1, 0 while it plays;
-     * seed: kb_rand's */
-    int show;
-    unsigned idle, seed;
-    void *row; /* the highlighted row and what it shows in the pane (PANE_*) */
-    void *row_image, *row_label; /* a Streaming row's image and name widgets, found once per row */
-    void *svc;                   /* a card app's icon at the pane's size (pane_scaled), its name */
-    char svc_name[72];
+    int show;      /* SHOW_* */
+    unsigned seed; /* kb_rand's */
+    void *row;     /* the highlighted row and what it shows in the pane (PANE_*) */
     int kind;
-    /* the pane's captions, read off the wheel's path (home_counts), 0 unknown; counted: songs and
-     * albums answer asked, the library_gen they were asked at; counting: 1 count_worker runs, 2 it
-     * has answered in got_*; pane_read: when home_pane_read last ran, | 1, 0 never */
-    int songs, albums, services, games, free_tenths, counted;
-    volatile int counting;
-    int got_songs, got_albums;
-    unsigned long count_thread;
-    unsigned asked, pane_read, count_timer, pane_timer;
+    unsigned pane_timer;
     unsigned ring[4][HOME_PW];
-    int clip[4];  /* the canvas clip while the art paints, restored after */
+    int clip[4]; /* the canvas clip while the art paints, restored after */
     int clipped;
     /* the bar whose border paint inks the pane's rows (coverflow_home_bar), 0: none due; ground:
      * the bar's background there (BGRA); held: each pane column's glyph's last ink (home_ink) */
@@ -4103,9 +3493,8 @@ static struct {
     unsigned np_stop, np_timer;
 } home __attribute__((section(".scratch")));
 extern int ipod_home(void), ipod_home_rockbox(void), home_shortcut_open(void *, void *),
-    home_lib_on(void), row_preview_on(void), library_search(void);
+    library_search(void);
 extern void library_rows(void *list), stream_rows(void *list);
-extern void home_pane_read(int *services, int *games, int *free_tenths);
 /* home.c: Home's overflow */
 extern void home_overflow(void *list, int bottom), home_in_place(void *list), home_pad(void *view),
     home_fades(void *canvas, void *list, int list_y, int cols, int split);
@@ -4139,7 +3528,8 @@ unsigned now_cover_written(const char *file) {
  * path), else 0, and *file that type's file, or 0. */
 unsigned char now_cover(void *r, const char **file) {
     const char *path = r ? P(r, REC_PATH) : (void *)0;
-    unsigned char type = path && !tk_strcmp((const char *)g_lastcover_url, path) ? g_playcover_type : 0;
+    unsigned char type =
+        path && !tk_strcmp((const char *)g_lastcover_url, path) ? g_playcover_type : 0;
     *file = type < sizeof(player_covers) / sizeof(*player_covers) ? player_covers[type] : 0;
     return type;
 }
@@ -4210,27 +3600,9 @@ static void drift_place(void) {
     if (frame_stamp() != home.drawn) pane_invalidate();
 }
 
-/* What a highlighted row shows in Split's pane (theme()->pane_icon_x): Now Playing's and the
- * Library's rows the cover, or with none the note and a count; the others their icon and
- * caption. */
-enum {
-    PANE_NOW,
-    PANE_LIBRARY,
-    PANE_SHUFFLE,
-    PANE_COVERFLOW,
-    PANE_FOLDER,
-    PANE_GAMES,
-    PANE_ROCKBOX,
-    PANE_STREAM,
-    PANE_SETTINGS,
-    PANE_SERVICE /* Streaming's list: home.row's icon and name */
-};
-static const char *const pane_icons[] = {
-    "classic_light_note", "classic_light_note", "classic_light_icon_note",
-    "classic_light_icon_stack", "classic_light_icon_folder", "classic_light_icon_game",
-    "classic_light_icon_game", "classic_light_icon_wave", "classic_light_icon_gear"
-};
-static int pane_covers(void) { return home.kind <= PANE_LIBRARY && !home.pane; }
+/* What a highlighted row shows in Split's pane: Now Playing's row the playing cover, every other
+ * row the library's (the slideshow). */
+enum { PANE_NOW, PANE_LIBRARY };
 
 /* The pan runs only while it shows: Home on top and not sliding (its snapshot would not move), the
  * screen lit, on a row that shows a cover (Full never paints the art), and either a cover that
@@ -4238,10 +3610,10 @@ static int pane_covers(void) { return home.kind <= PANE_LIBRARY && !home.pane; }
 static int drift_live(void) {
     void *wm = window_manager();
     const slide_t *s = &home.sl[0];
-    int moves = s->tw && !home.pane && (s->lib || s->rx || s->ry || home.fade);
-    return (moves || home.show == SHOW_LIB) && home.kind <= PANE_LIBRARY &&
-           widget_get_visible(home.art) && g_backlight_status && !g_lockscreen_pageflag &&
-           window_manager_get_top_window(wm) == home.win && !window_manager_is_animating(wm);
+    int moves = s->tw && (s->lib || s->rx || s->ry || home.fade);
+    return (moves || home.show == SHOW_LIB) && widget_get_visible(home.art) && g_backlight_status &&
+           !g_lockscreen_pageflag && window_manager_get_top_window(wm) == home.win &&
+           !window_manager_is_animating(wm);
 }
 
 /* The faded-in slide is the one showing, the other's texture freed. */
@@ -4418,7 +3790,7 @@ static int slide_load(slide_t *s, const char *url, int lib, unsigned ms) {
     if (data) {
         unsigned stride = bitmap_get_line_length(bitmap),
                  paper = ipod_light() ? scheme()->paper & 255 : 0;
-        int ts = tw + 3;                /* s->tex's row, its border included */
+        int ts = tw + 3;                 /* s->tex's row, its border included */
         unsigned *tex = s->tex + ts + 1; /* texel 0, 0 */
         box_filter(data, stride, at[format], w, h, tex, ts, tw, th, paper);
         bitmap_unlock_buffer(bitmap);
@@ -4488,7 +3860,7 @@ static void home_render(unsigned *d, int pitch, const slide_t *s, int u, int v, 
     int ix[HOME_PW], tag[4] = { -1, -1, -1, -1 }, ts = s->tw + 3, pw = pane_w(), one = k == 65536;
     for (int x = 0; x < (one ? 1 : pw); ++x) {
         unsigned at = ((unsigned)u << 8) + (unsigned)x * (unsigned)k; /* 1/65536 texel */
-        ix[x] = (int)(at >> 16), bspline_w(at >> 8 & 255, wx[x]); /* texel -1, bordered at 0 */
+        ix[x] = (int)(at >> 16), bspline_w(at >> 8 & 255, wx[x]);     /* texel -1, bordered at 0 */
     }
     for (int y = 0, h = pane_h(); y < h; ++y, d += pitch) {
         unsigned at = ((unsigned)v << 8) + (unsigned)y * (unsigned)k;
@@ -4499,7 +3871,8 @@ static void home_render(unsigned *d, int pitch, const slide_t *s, int u, int v, 
             const unsigned *t = s->tex + j * ts;
             tag[j & 3] = j;
             if (one)
-                for (int x = 0; x < pw; ++x, ++t) o[x] = tap4(t[*ix], t[*ix + 1], t[*ix + 2], t[*ix + 3], *wx);
+                for (int x = 0; x < pw; ++x, ++t)
+                    o[x] = tap4(t[*ix], t[*ix + 1], t[*ix + 2], t[*ix + 3], *wx);
             else
                 for (int x = 0, i; x < pw; ++x)
                     i = ix[x], o[x] = tap4(t[i], t[i + 1], t[i + 2], t[i + 3], wx[x]);
@@ -4539,306 +3912,6 @@ static void home_paint(void *canvas) {
     if (home_frame()) canvas_draw_image(canvas, home.frame, src, dst);
 }
 
-/* The t x t texture at u, v (texels from its top-left corner), bilinear, its edge texels held. */
-HOT unsigned bilerp(const unsigned *tex, int t, float u, float v) {
-    int x = (int)(u * 256) - 128, y = (int)(v * 256) - 128, end = (t - 1) * 256 - 1;
-    x = x < 0 ? 0 : x > end ? end : x, y = y < 0 ? 0 : y > end ? end : y;
-    unsigned fx = (unsigned)x & 255, fy = (unsigned)y & 255,
-             w[4] = { (256 - fx) * (256 - fy) >> 8, fx * (256 - fy) >> 8, (256 - fx) * fy >> 8, 0 };
-    w[3] = 256 - w[0] - w[1] - w[2];
-    const unsigned *p = tex + (y >> 8) * t + (x >> 8);
-    return tap4(p[0], p[1], p[t], p[t + 1], w);
-}
-
-/* Classic's Now Playing art (docs/internals.md#slanted-art), an iPod classic's: the cover turned in
- * perspective, its near (left) edge the art's side high, its far edge SLANT_FAR/256 of that,
- * centred; under it the reflection, each column mirrored about its own bottom edge, from
- * SLANT_REFLECT_A/256 fading to the paper over SLANT_REFLECT_PCT of the column's height. Into d
- * (pitch pixels a row), side wide and rows high, from tex, the cover box filtered to t x t, twice
- * the art: each pixel is two half columns of two bilinear taps, the slanted edges by coverage.
- * test/coverflow.py */
-void slant_render(unsigned *d, int pitch, int side, int rows, const unsigned *tex, int t,
-                  unsigned paper) {
-    unsigned bg = 0xff000000u | paper * 0x010101u;
-    float near = (float)side, far = side * SLANT_FAR / 256.f;
-    for (int x = 0; x < side; ++x)
-        for (int half = 0; half < 2; ++half) {
-            /* u: the texture is linear in depth, so in 1 / h */
-            float c = x + .25f + .5f * half, h = near - (near - far) * c / near,
-                  top = (near - h) / 2, bot = top + h, fade = h * SLANT_REFLECT_PCT / 100,
-                  u = t * (near - h) * far / (h * (near - far)), k = t / h;
-            for (int y = 0; y < rows; ++y) {
-                /* the pixel's shares of the cover, the reflection and the paper, of 256 */
-                unsigned cover = bg, mirror = bg, w[4] = { 0, 0, 256, 0 };
-                float a = y > top ? y : top, b = y + 1 < bot ? y + 1 : bot, q = (b - a) / 4;
-                if (b > a) {
-                    cover = lerp(bilerp(tex, t, u, (a + q - top) * k),
-                                 bilerp(tex, t, u, (b - q - top) * k), 128);
-                    w[0] = (unsigned)((b - a) * 256);
-                }
-                a = y > bot ? y : bot, b = y + 1 < bot + fade ? y + 1 : bot + fade, q = (b - a) / 4;
-                if (b > a) {
-                    unsigned s = lerp(bilerp(tex, t, u, t - (a + q - bot) * k),
-                                      bilerp(tex, t, u, t - (b - q - bot) * k), 128);
-                    mirror = lerp(bg, s, (unsigned)(SLANT_REFLECT_A * (1 - ((a + b) / 2 - bot) / fade)));
-                    w[1] = (unsigned)((b - a) * 256);
-                }
-                w[2] = 256 - w[0] - w[1];
-                unsigned out = tap4(cover, mirror, bg, bg, w), *px = d + y * pitch + x;
-                *px = half ? lerp(*px, out, 128) : out;
-            }
-        }
-}
-
-/* Classic's art over stock's flat cover, on the page's grey paper (a byte): slant.frame, rendered
- * again only when the cover (its url, size and 8 x 8 of its pixels: the player writes every track's
- * cover to the same file, so its name tells none apart) or the paper changes. The one frame serves
- * local Now Playing and Classic's Spotify and Internet Radio pages (navigation.c stream_ipod): the
- * key says whose cover it holds, so a page coming back redraws its own. Its layout (fixed
- * while the page is open) makes the art's widget taller
- * than wide (tools/ipod.py np_ipod), room for the reflection under it, so a repaint of the bar
- * below repaints it too.
- * ponytail: stock still draws its flat cover under the frame each paint, as it always did; a 16-bit
- * decode, or no memory for the frame or texture, leaves stock's, scale_auto in the taller box. */
-static struct {
-    void *frame;
-    unsigned key;
-} slant;
-
-void coverflow_slant_close(void) {
-    if (slant.frame) bitmap_destroy(slant.frame);
-    memset(&slant, 0, sizeof slant);
-}
-
-void coverflow_slant(void *w, void *canvas, unsigned paper) {
-    static const unsigned char at[4][4] = BITMAP_RGBA_AT;
-    unsigned bitmap[64]; /* bitmap_t */
-    const char *url = widget_get_prop_str(w, "image", (void *)0);
-    if (!url || !*url || widget_load_image(w, url, bitmap)) return; /* stock's copy: kept loaded */
-    unsigned bw = bitmap[0], bh = bitmap[1], format = ((unsigned short *)bitmap)[7] - 1u;
-    const unsigned char *data =
-        format < 4 && bw && bh && bw <= 8192 && bh <= 8192 ? bitmap_lock_buffer_for_read(bitmap) : 0;
-    if (!data) return;
-    int side = I(w, W_W), rows = I(w, W_H), t = 2 * side;
-    unsigned stride = bitmap_get_line_length(bitmap),
-             key = hash_bytes(fnv(FNV_SEED, (const unsigned char *)url),
-                              (const unsigned char *)bitmap, 8) ^
-                   paper;
-    for (unsigned j = 1; j < 16; j += 2)
-        for (unsigned i = 1; i < 16; i += 2)
-            key = hash_bytes(key, data + bh * j / 16 * stride + bw * i / 16 * 4, 4);
-    const unsigned *f = slant.frame; /* bitmap_t: width @0, height @4 */
-    if (f && (f[0] != (unsigned)side || f[1] != (unsigned)rows)) coverflow_slant_close();
-    if (!slant.frame) slant.frame = opaque_frame(side, rows, 1);
-    unsigned *tex = slant.frame && key != slant.key ? calloc((unsigned)(t * t), 4) : 0;
-    unsigned *d = tex ? (unsigned *)bitmap_lock_buffer_for_write(slant.frame) : 0;
-    if (d) { /* fitted whole and centred on the paper */
-        unsigned fit = bw > bh ? bw : bh;
-        int tw = (int)(t * bw / fit), th = (int)(t * bh / fit);
-        for (int i = 0; i < t * t; ++i) tex[i] = 0xff000000u | paper * 0x010101u;
-        box_filter(data, stride, at[format], bw, bh, tex + (t - th) / 2 * t + (t - tw) / 2, t, tw,
-                   th, paper);
-        slant_render(d, (int)(bitmap_get_line_length(slant.frame) / 4), side, rows, tex, t, paper);
-        bitmap_unlock_buffer(slant.frame);
-        slant.key = key;
-    }
-    free(tex);
-    bitmap_unlock_buffer(bitmap);
-    int r[4] = { 0, 0, side, rows };
-    if (slant.frame && slant.key == key) canvas_draw_image(canvas, slant.frame, r, r);
-}
-
-/* The theme's pane shadow down the panel's left edge at x, y. */
-static void pane_shadow(void *canvas, int x, int y, int h) {
-    const theme_t *T = theme();
-    int sw = T->pane_shadow_w;
-    for (int i = 0; i < sw; ++i) {
-        stock_canvas_set_fill_color(canvas, (RGBA(T->pane_shadow) & 0xffffff) |
-                                                (unsigned)T->pane_shadow_a[i] << 24);
-        canvas_fill_rect(canvas, x + i, y, 1, h);
-    }
-}
-
-/* n of what the caption counts, in t: "1 Song", "12 Songs"; 0: unknown, none. */
-static int pane_count(char *t, unsigned size, unsigned n, const char *one, const char *many) {
-    return !n ? 0 : tk_snprintf(t, size, n == 1 ? one : many, n);
-}
-
-/* The caption of the row's pane in t, its length. */
-static int pane_caption(char *t, unsigned size) {
-    unsigned at, n;
-    switch (home.kind) {
-    case PANE_NOW:
-        queue_now(&at, &n);
-        return pane_count(t, size, n, "1 Song", "%u Songs");
-    case PANE_LIBRARY:
-    case PANE_SHUFFLE:
-        return pane_count(t, size, (unsigned)home.songs, "1 Song", "%u Songs");
-    case PANE_COVERFLOW:
-        return pane_count(t, size, (unsigned)home.albums, "1 Album", "%u Albums");
-    case PANE_GAMES:
-        return pane_count(t, size, (unsigned)home.games, "1 Game", "%u Games");
-    case PANE_STREAM:
-        return pane_count(t, size, (unsigned)home.services, "1 Service", "%u Services");
-    case PANE_SETTINGS:
-        return home.free_tenths ? tk_snprintf(t, size, "%u.%u GB Free", home.free_tenths / 10,
-                                              home.free_tenths % 10)
-                                : 0;
-    }
-    return 0;
-}
-
-/* w's first child of type, or 0. */
-static void *child_of_type(void *w, const char *type) {
-    for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) {
-        void *c = widget_get_child(w, i);
-        if (!tk_strcmp(widget_get_type(c), type)) return c;
-    }
-    return (void *)0;
-}
-
-/* A Streaming row's image widget for the pane: a card app's own file, or the build's copy of a
- * fixed service's icon at the pane's size (tools/build.py), in t. */
-static const char *service_icon(void *image, char *t, unsigned size) {
-    const char *icon = image ? widget_get_prop_str(image, "image", "") : "";
-    if (tk_str_start_with(icon, "file://")) return icon;
-    tk_snprintf(t, size, "classic_light_%s", icon);
-    return t;
-}
-
-/* f, a bilinear blend's 1/256 step between two source pixels, steepened when n source pixels grow to
- * px: an edge then blends over one drawn pixel, not px/n of them. A card app's 52 px icon stretched
- * to 96 px plain bilinear was soft (#303). */
-static unsigned sharp(unsigned f, unsigned px, unsigned n) {
-    if (px <= n) return f;
-    int s = ((int)f - 128) * (int)px / (int)n + 128;
-    return s < 0 ? 0u : s > 256 ? 256u : (unsigned)s;
-}
-
-/* bitmap, the icon named name, sharp bilinear at the theme's px (sharp()), once for a name, so the paints
- * after it only draw it: alpha-weighted, as its edge's transparent pixels hold no colour. bitmap itself
- * when that can't be done.
- * ponytail: one icon's frame, kept once made; the row's next app scales again. */
-static void *pane_scaled(void *bitmap, const char *name, unsigned px) {
-    static const unsigned char at[4][4] = BITMAP_RGBA_AT;
-    unsigned *b = bitmap, w = b[0], h = b[1], format = ((unsigned short *)bitmap)[7] - 1u;
-    if (!tk_strcmp(home.svc_name, name)) return home.svc;
-    if (format >= 4 || !w || !h || w > 512 || h > 512) return bitmap;
-    if (!home.svc) home.svc = bitmap_create_ex(px, px, px * 4, 1 /* RGBA8888 */);
-    const unsigned char *data = home.svc ? bitmap_lock_buffer_for_read(bitmap) : 0;
-    unsigned *d = data ? (unsigned *)bitmap_lock_buffer_for_write(home.svc) : 0;
-    if (!d) {
-        if (data) bitmap_unlock_buffer(bitmap);
-        return bitmap;
-    }
-    const unsigned char *o = at[format];
-    unsigned stride = bitmap_get_line_length(bitmap), line = bitmap_get_line_length(home.svc) / 4;
-    for (unsigned y = 0; y < px; ++y) {
-        /* the pixels' centres, in 1/256 of a source pixel */
-        unsigned sy = (2 * y + 1) * h * 128 / px, y0 = sy < 128 ? 0 : (sy - 128) >> 8;
-        unsigned fy = sharp(sy < 128 ? 0 : (sy - 128) & 255, px, h), y1 = y0 + 1 < h ? y0 + 1 : y0;
-        for (unsigned x = 0; x < px; ++x) {
-            unsigned sx = (2 * x + 1) * w * 128 / px, x0 = sx < 128 ? 0 : (sx - 128) >> 8;
-            unsigned fx = sharp(sx < 128 ? 0 : (sx - 128) & 255, px, w), x1 = x0 + 1 < w ? x0 + 1 : x0;
-            const unsigned char *r0 = data + y0 * stride, *r1 = data + y1 * stride;
-            const unsigned char *s[4] = { r0 + x0 * 4, r0 + x1 * 4, r1 + x0 * 4, r1 + x1 * 4 };
-            unsigned k[4] = { (256 - fx) * (256 - fy), fx * (256 - fy), (256 - fx) * fy, fx * fy };
-            unsigned r = 0, g = 0, bl = 0, a = 0; /* each under 2^16 x 255 x 255 */
-            for (int i = 0; i < 4; ++i) {
-                unsigned v = k[i] * s[i][o[3]];
-                r += v * s[i][o[0]], g += v * s[i][o[1]], bl += v * s[i][o[2]], a += v;
-            }
-            d[y * line + x] = a ? (a >> 16) << 24 | bl / a << 16 | g / a << 8 | r / a : 0;
-        }
-    }
-    bitmap_unlock_buffer(home.svc);
-    bitmap_unlock_buffer(bitmap);
-    tk_snprintf(home.svc_name, sizeof home.svc_name, "%s", name);
-    return home.svc;
-}
-
-/* The pane on a Streaming row: its icon, a card app's scaled to the theme's size, else the card
- * apps' own, and its name in the count's place. A name too wide for the count's column shrinks to
- * three quarters of its size, then loses its end. A card app's file, up to 512 px square, leaves
- * the image cache once drawn or scaled: its scaled copy is what stays.
- * ponytail: a card app highlighted again after another decodes its file again; a scaled copy per
- * app if that shows on the wheel. */
-static void pane_service(void *canvas, int x, int y) {
-    const theme_t *T = theme();
-    unsigned bitmap[64], s[33], n = 0; /* bitmap_t */
-    char t[72];
-    if (!home.row) return;
-    const char *icon = service_icon(home.row_image, t, sizeof t);
-    int side = T->pane_svc_px, card = tk_str_start_with(icon, "file://");
-    int src[4] = { 0, 0, side, side },
-        dst[4] = { x + T->pane_svc_x, y + T->pane_svc_y, side, side };
-    if (card && home.svc && !tk_strcmp(home.svc_name, icon)) {
-        canvas_draw_image(canvas, home.svc, src, dst);
-    } else {
-        int own = !widget_load_image(home.art, icon, bitmap);
-        if (own || !widget_load_image(home.art, "classic_light_stream_app", bitmap)) {
-            void *art = own && (int)bitmap[0] != side && card
-                            ? pane_scaled(bitmap, icon, (unsigned)side)
-                            : bitmap;
-            if (art == bitmap) src[2] = (int)bitmap[0], src[3] = (int)bitmap[1];
-            canvas_draw_image(canvas, art, src, dst);
-        }
-        if (own && card) widget_unload_image(home.art, bitmap);
-    }
-    void *label = home.row_label;
-    const unsigned *name = label ? widget_get_text(label) : (const unsigned *)0;
-    while (name && name[n] && n < 32) s[n] = name[n], ++n;
-    if (!n) return;
-    int box[4] = { x, y + T->pane_count_y, T->pane_count_w, 24 }, px = T->pane_count_px, face = px;
-    canvas_set_font(canvas, theme_face(s, (int)n, &face), (unsigned)face);
-    float w = canvas_measure_text(canvas, s, n);
-    if (w > box[2]) {
-        int fit = (int)((float)px * box[2] / w), least = px * 3 / 4;
-        face = px = fit > least ? fit : least;
-        canvas_set_font(canvas, theme_face(s, (int)n, &face), (unsigned)face);
-        while (n > 1 && canvas_measure_text(canvas, s, n) > box[2]) s[--n - 1] = 0x2026;
-    }
-    draw_centred(canvas, s, n, box, (unsigned)px, RGBA(ipod_light() ? 0u : 0xffffffu));
-}
-
-/* Split's panel in the theme's home_pane, the half's: the stops, its light, a shadow down its left edge, the
- * row's image from the theme (tools/art.py) and its caption. Raw colours, but the caption's: ui_ink
- * flips black to the light half's white paper, and the dark half draws white as it is. */
-void home_pane_paint(void *canvas, int x, int y, int w, int h) {
-    const theme_t *T = theme();
-    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), bitmap[64]; /* bitmap_t */
-    paint_stops(canvas, x, y, w, h, &T->home_pane[ipod_light()]);
-    /* the light: a band per alpha, as eight bits can tell no finer */
-    for (int a = T->pane_light_a, n = a; a > 0; --a) {
-        int x0 = w * (n - a) / n;
-        stock_canvas_set_fill_color(canvas, 0xffffffu | (unsigned)a << 24);
-        canvas_fill_rect(canvas, x + x0, y, w * (n - a + 1) / n - x0, h);
-    }
-    pane_shadow(canvas, x, y, h);
-    if (home.kind == PANE_SERVICE) {
-        pane_service(canvas, x, y);
-        stock_canvas_set_fill_color(canvas, fill);
-        return;
-    }
-    if (!widget_load_image(home.art, pane_icons[home.kind], bitmap)) {
-        int note = home.kind <= PANE_SHUFFLE;
-        int src[4] = { 0, 0, (int)bitmap[0], (int)bitmap[1] },
-            dst[4] = { x + (note ? T->pane_note_x : T->pane_icon_x),
-                       y + (note ? T->pane_note_y : T->pane_icon_y), src[2], src[3] };
-        canvas_draw_image(canvas, bitmap, src, dst);
-    }
-    char t[20];
-    int len = pane_caption(t, sizeof t);
-    if (len > 0) {
-        unsigned s[20];
-        for (int i = 0; i < len; ++i) s[i] = (unsigned char)t[i];
-        int box[4] = { x, y + T->pane_count_y, T->pane_count_w, 24 }; /* rect_t */
-        draw_centred(canvas, s, (unsigned)len, box, T->pane_count_px,
-                     RGBA(ipod_light() ? 0u : 0xffffffu));
-    }
-    stock_canvas_set_fill_color(canvas, fill);
-}
-
 /* A paint can't invalidate (AWTK drops it with the frame), so the frame after. */
 static int pane_after(const void *unused) {
     home.pane_timer = 0;
@@ -4846,47 +3919,16 @@ static int pane_after(const void *unused) {
     return 0; /* RET_REMOVE */
 }
 
-/* The row now highlighted on Home's surface: the pane follows it. No I/O: its image is in the image
- * cache (home_counts) and its caption in home. On a wheel move (painting 0) the pane joins the
- * row's frame; a paint catches every other way a row changes (Return's first row, a tap, a list
- * sliding in). Names are compared only when the row changes. */
+/* The row now highlighted on Home's surface: the pane follows it. On a wheel move (painting 0) the
+ * pane joins the row's frame; a paint catches every other way a row changes (Return's first row, a
+ * tap, a list sliding in). Names are compared only when the row changes. */
 void coverflow_home_row(void *surface, void *row, int id, int painting) {
     if (row == home.row || !home.art || ipod_home()) return;
     home.row = row;
-    void *list = P(surface, W_PARENT);
     const char *name = widget_get_prop_str(row, "name", "");
-    int kind = PANE_LIBRARY;
-    /* a set with no row icons (OLED): Now Playing's row the playing cover, every other row the
-     * slideshow, as an iPod classic's menu shows the library's art on Music */
-    if (!theme()->pane_icon_x) kind = tk_strcmp(name, "img_playing") ? PANE_LIBRARY : PANE_NOW;
-    else if (!row_preview_on()) kind = PANE_NOW; /* Row Preview off: Now Playing's on every row */
-    else if (list == home.sets) kind = PANE_SETTINGS;
-    else if (list == home.lib) kind = id == library_search() ? PANE_SHUFFLE : PANE_LIBRARY;
-    else if (list == home.stream) {
-        kind = PANE_SERVICE;
-        home.row_image = child_of_type(row, "image");
-        home.row_label = child_of_type(row, "hscroll_label");
-    } else {
-        static const char *const names[] = { "img_playing",   "img_library",  0,
-                                             "img_cover_flow", "img_folder",   0,
-                                             "img_rockbox",   "img_services", "img_settings" };
-        for (unsigned i = 0; i < sizeof names / sizeof *names; ++i)
-            if (names[i] && !tk_strcmp(name, names[i])) kind = (int)i;
-        /* a set without home_lib: stock's name */
-        if (!tk_strcmp(name, "img_stream")) kind = PANE_STREAM;
-        /* Shuffle Songs the Library's Shuffle's note; Search, as the Library's, the Library's */
-        if (!tk_strcmp(name, "img_shuffle_songs")) kind = PANE_SHUFFLE;
-        if (kind == PANE_ROCKBOX) { /* the Shortcut row: the Games icon, its count only for Games;
-                                     * the Podcasts and Audiobooks folders, Folder's icon */
-            const char *s = ipod_home_shortcut();
-            kind = !tk_strcmp(s, "Games")                                 ? PANE_GAMES
-                   : !tk_strcmp(s, "Rockbox") || !tk_strcmp(s, "Groovebox") ? PANE_ROCKBOX
-                   : !tk_strcmp(s, "Shuffle") ? PANE_SHUFFLE
-                   : !tk_strcmp(s, "Podcasts") || !tk_strcmp(s, "Audiobooks") ? PANE_FOLDER
-                                              : PANE_LIBRARY;
-        }
-    }
-    if (kind == home.kind && kind != PANE_SERVICE) return;
+    /* as an iPod classic's menu shows the library's art on Music */
+    int kind = tk_strcmp(name, "img_playing") ? PANE_LIBRARY : PANE_NOW;
+    if (kind == home.kind) return;
     home.kind = kind;
     if (painting)
         rearm(&home.pane_timer, pane_after, 0);
@@ -4894,76 +3936,9 @@ void coverflow_home_row(void *surface, void *row, int id, int painting) {
         pane_invalidate();
 }
 
-#define PANE_COUNT_MS 400 /* once Home has slid back */
-#define PANE_BOOT_MS 1500 /* once boot's first paints are over */
-#define PANE_READ_MS 60000 /* the card's I/O, at most this often */
-/* The two counts, a whole library's grouping among them, take seconds on a large one: off the UI
- * thread, and home_counts publishes them. -1: no answer. */
-static void *count_worker(void *unused) {
-    home.got_songs = library_count("select count(*) from songtable where " MUSIC_WHERE);
-    /* Coverflow's rows: a row per album, and one for all the songs with no album */
-    if (home.got_albums < 0)
-        home.got_albums = library_count("select sum(e=0)+max(e) from (select ifnull(album,'')='' e "
-                                        "from songtable where " MUSIC_WHERE ALBUM_GROUP ")");
-    home.counting = 2;
-    return 0;
-}
-
-/* The pane's captions and images, once Home's window is back on top and after boot: not on a wheel
- * move, and at most one query per library change, or per Home after one that failed. A scan
- * running: the counts it will change are unknown, and this looks again until it ends. Home in Full
- * or Carousel, or Row Preview off, shows no count and asks nothing; the next foreground asks.
- * ponytail: home_pane_read's card I/O stays on the UI thread (addon_scan's table is the UI's) at
- * most once a PANE_READ_MS, so a fresh app or the free space can lag that long. */
-static int home_counts(const void *unused) {
-    int answered = home.counting == 2;
-    if (answered) {
-        pthread_join(home.count_thread, 0);
-        home.counting = 0;
-        home.counted = home.got_songs >= 0 && home.got_albums >= 0;
-        if (home.counted) home.songs = home.got_songs, home.albums = home.got_albums;
-        pane_invalidate();
-    }
-    if (home.counting) return 8; /* RET_REPEAT */
-    unsigned gen = library_gen;
-    if (library_scanning()) {
-        if (home.songs || home.albums) pane_invalidate();
-        home.songs = home.albums = home.counted = 0;
-        return 8;
-    }
-    int pane = !ipod_home() && row_preview_on(); /* the counts' only reader */
-    if (pane && (gen != home.asked || (!home.counted && !answered))) {
-        home.asked = gen;
-        /* Coverflow's own list when it has one */
-        home.got_albums = cf.stock && !cf.scoped && cf.albums_gen == gen ? (int)deque_size(cf.stock) : -1;
-        home.counting = 1;
-        if (!pthread_create(&home.count_thread, 0, count_worker, 0)) return 8;
-        home.counting = 0;
-    }
-    home.count_timer = 0;
-    if (!pane) return 0; /* RET_REMOVE */
-    unsigned now = time_now_ms();
-    if (!home.pane_read || now - home.pane_read >= PANE_READ_MS) {
-        home.pane_read = now | 1;
-        home_pane_read(&home.services, &home.games, &home.free_tenths);
-        unsigned bitmap[64]; /* bitmap_t: decoded once, so no row's first show reads it */
-        for (unsigned i = 0; i < sizeof pane_icons / sizeof *pane_icons; ++i)
-            widget_load_image(home.art, pane_icons[i], bitmap);
-        pane_invalidate();
-    }
-    return 0;
-}
-
-static int home_foreground(void *ctx, void *event) {
-    rearm(&home.count_timer, home_counts, PANE_COUNT_MS);
-    home.row = 0; /* the pane's kind again: Row Preview may have changed in Settings */
-    return 0;
-}
-
 /* The pane as the frame (its image empty, home_paint draws it), at the panel's size. */
 static void art_frame(void) {
     image_base_set_image(home.art, "");
-    home.pane = 0;
     widget_move_resize(home.art, pane_x(), 0, pane_w(), client_h());
     rearm(&home.repaint, home_repaint, 0);
 }
@@ -5004,7 +3979,7 @@ static int slide_show(const char *url, int lib, int cut) {
         return moves;
     }
     if (home.fade && (cut || !frame_hold())) fade_end();
-    int over = !cut && home.sl[0].tw && !home.pane;
+    int over = !cut && home.sl[0].tw;
     unsigned ms = !lib && !home.sl[0].lib ? home.sl[0].ms : 0;
     int moves = slide_load(&home.sl[over], url, lib, ms);
     if (moves <= 0) return moves;
@@ -5021,7 +3996,7 @@ extern int slide_pick(char *url, int take); /* slideshow.c */
 static void slide_next(void) {
     const slide_t *s = &home.sl[0];
     unsigned end = SLIDE_FADE_MS + SLIDE_HOLD_MS;
-    int due = !s->tw || home.pane || !s->lib || s->ms >= end || (home.fade && !home.sl[1].lib);
+    int due = !s->tw || !s->lib || s->ms >= end || (home.fade && !home.sl[1].lib);
     char url[600];
     if ((due || s->ms + SLIDE_AHEAD_MS >= end) && slide_pick(url, due)) {
         if (!strcmp(url + 7, PEQ_ROOT "/tmp/q2-slide.jpg"))
@@ -5031,18 +4006,8 @@ static void slide_next(void) {
 }
 
 /* What the pane shows (docs/ipod.md#home), as an iPod classic's main menu: the playing cover on a
- * Now Playing row, playing or paused, the library's covers in turn on the Library's (under OLED,
- * every other row's). Where the pane does not follow the row (Classic with Row Preview off) the
- * playing cover while a song plays, else, once play has stopped or paused for SLIDE_IDLE_MS, the
- * library's. */
-static int art_source(void) {
-    if (home.kind == PANE_LIBRARY) return SHOW_LIB;
-    if (home.kind != PANE_NOW || !theme()->pane_icon_x || row_preview_on()) return SHOW_NOW;
-    unsigned now = time_now_ms();
-    if (mclGetPlayStatus() == 2) return (int)(home.idle = 0); /* SHOW_NOW */
-    if (!home.idle) home.idle = now | 1;
-    return (int)(now - home.idle) >= SLIDE_IDLE_MS ? SHOW_LIB : SHOW_NOW; /* idle may be now + 1 */
-}
+ * Now Playing row, playing or paused, the library's covers in turn on every other row. */
+static int art_source(void) { return home.kind == PANE_LIBRARY ? SHOW_LIB : SHOW_NOW; }
 
 /* The player's cover, else the Coverflow cache of the track's album (now_tag), else the theme's
  * pane or the placeholder; or under the slideshow (SHOW_LIB) the library's covers, which
@@ -5074,7 +4039,7 @@ void coverflow_home_art(void *top) {
     int cut = home.key == ~0u; /* coverflow_home_layout's: the same cover, laid out again */
     home.key = key;
     /* the show goes on over a track change, and takes over from any cover that moves */
-    if (show == SHOW_LIB && home.sl[0].tw && !home.pane) return;
+    if (show == SHOW_LIB && home.sl[0].tw) return;
     char url[600] = "file://";
     if (r) art_path(url + 7, album, "");
     unsigned size[2] = { 0, 0 };
@@ -5087,18 +4052,12 @@ void coverflow_home_art(void *top) {
     if (moves < 0 && r) moves = slide_show(url, 0, cut), src = url;
     if (moves > 0) return;
     slides_drop();
-    home.pane = 0;
     int shown = moves == 0 && image_show(home.art, src, size);
-    if (!shown && theme()->home_pane[ipod_light()].n) {
-        image_base_set_image(home.art, ""); /* home_pane_paint draws it, the whole panel */
-        home.pane = 1;
-    } else {
-        /* still, sized to the image's fit and centred, so the native fill draws it whole and
-         * the clip crops it evenly */
-        if (!shown && !image_show(home.art, HOME_PLACEHOLDER, size))
-            image_base_set_image(home.art, HOME_PLACEHOLDER);
-        home_fit(size[0], size[1], ch, &fw, &fh);
-    }
+    /* still, sized to the image's fit and centred, so the native fill draws it whole and the clip
+     * crops it evenly */
+    if (!shown && !image_show(home.art, HOME_PLACEHOLDER, size))
+        image_base_set_image(home.art, HOME_PLACEHOLDER);
+    home_fit(size[0], size[1], ch, &fw, &fh);
     widget_move_resize(home.art, pane_x() + (pane_w() - fw) / 2, (ch - fh) / 2, fw, fh);
     rearm(&home.repaint, home_repaint, 0);
 }
@@ -5110,25 +4069,26 @@ void coverflow_home_art(void *top) {
  * is each sRGB byte's linear value in 1/65535; L is summed in 1/(10000 x 65535), so INK_WHITE_MAX
  * is that bound at the same scale. */
 static const unsigned short srgb_lin[256] = {
-    0, 20, 40, 60, 80, 99, 119, 139, 159, 179, 199, 219, 241, 264, 288, 313, 340, 367, 396, 427,
-    458, 491, 526, 562, 599, 637, 677, 718, 761, 805, 851, 898, 947, 997, 1048, 1101, 1156,
-    1212, 1270, 1330, 1391, 1453, 1517, 1583, 1651, 1720, 1790, 1863, 1937, 2013, 2090, 2170,
-    2250, 2333, 2418, 2504, 2592, 2681, 2773, 2866, 2961, 3058, 3157, 3258, 3360, 3464, 3570,
-    3678, 3788, 3900, 4014, 4129, 4247, 4366, 4488, 4611, 4736, 4864, 4993, 5124, 5257, 5392,
-    5530, 5669, 5810, 5953, 6099, 6246, 6395, 6547, 6700, 6856, 7014, 7174, 7335, 7500, 7666,
-    7834, 8004, 8177, 8352, 8528, 8708, 8889, 9072, 9258, 9445, 9635, 9828, 10022, 10219, 10417,
-    10619, 10822, 11028, 11235, 11446, 11658, 11873, 12090, 12309, 12530, 12754, 12980, 13209,
-    13440, 13673, 13909, 14146, 14387, 14629, 14874, 15122, 15371, 15623, 15878, 16135, 16394,
-    16656, 16920, 17187, 17456, 17727, 18001, 18277, 18556, 18837, 19121, 19407, 19696, 19987,
-    20281, 20577, 20876, 21177, 21481, 21787, 22096, 22407, 22721, 23038, 23357, 23678, 24002,
-    24329, 24658, 24990, 25325, 25662, 26001, 26344, 26688, 27036, 27386, 27739, 28094, 28452,
-    28813, 29176, 29542, 29911, 30282, 30656, 31033, 31412, 31794, 32179, 32567, 32957, 33350,
-    33745, 34143, 34544, 34948, 35355, 35764, 36176, 36591, 37008, 37429, 37852, 38278, 38706,
-    39138, 39572, 40009, 40449, 40891, 41337, 41785, 42236, 42690, 43147, 43606, 44069, 44534,
-    45002, 45473, 45947, 46423, 46903, 47385, 47871, 48359, 48850, 49344, 49841, 50341, 50844,
-    51349, 51858, 52369, 52884, 53401, 53921, 54445, 54971, 55500, 56032, 56567, 57105, 57646,
-    58190, 58737, 59287, 59840, 60396, 60955, 61517, 62082, 62650, 63221, 63795, 64372, 64952,
-    65535
+    0,     20,    40,    60,    80,    99,    119,   139,   159,   179,   199,   219,   241,
+    264,   288,   313,   340,   367,   396,   427,   458,   491,   526,   562,   599,   637,
+    677,   718,   761,   805,   851,   898,   947,   997,   1048,  1101,  1156,  1212,  1270,
+    1330,  1391,  1453,  1517,  1583,  1651,  1720,  1790,  1863,  1937,  2013,  2090,  2170,
+    2250,  2333,  2418,  2504,  2592,  2681,  2773,  2866,  2961,  3058,  3157,  3258,  3360,
+    3464,  3570,  3678,  3788,  3900,  4014,  4129,  4247,  4366,  4488,  4611,  4736,  4864,
+    4993,  5124,  5257,  5392,  5530,  5669,  5810,  5953,  6099,  6246,  6395,  6547,  6700,
+    6856,  7014,  7174,  7335,  7500,  7666,  7834,  8004,  8177,  8352,  8528,  8708,  8889,
+    9072,  9258,  9445,  9635,  9828,  10022, 10219, 10417, 10619, 10822, 11028, 11235, 11446,
+    11658, 11873, 12090, 12309, 12530, 12754, 12980, 13209, 13440, 13673, 13909, 14146, 14387,
+    14629, 14874, 15122, 15371, 15623, 15878, 16135, 16394, 16656, 16920, 17187, 17456, 17727,
+    18001, 18277, 18556, 18837, 19121, 19407, 19696, 19987, 20281, 20577, 20876, 21177, 21481,
+    21787, 22096, 22407, 22721, 23038, 23357, 23678, 24002, 24329, 24658, 24990, 25325, 25662,
+    26001, 26344, 26688, 27036, 27386, 27739, 28094, 28452, 28813, 29176, 29542, 29911, 30282,
+    30656, 31033, 31412, 31794, 32179, 32567, 32957, 33350, 33745, 34143, 34544, 34948, 35355,
+    35764, 36176, 36591, 37008, 37429, 37852, 38278, 38706, 39138, 39572, 40009, 40449, 40891,
+    41337, 41785, 42236, 42690, 43147, 43606, 44069, 44534, 45002, 45473, 45947, 46423, 46903,
+    47385, 47871, 48359, 48850, 49344, 49841, 50341, 50844, 51349, 51858, 52369, 52884, 53401,
+    53921, 54445, 54971, 55500, 56032, 56567, 57105, 57646, 58190, 58737, 59287, 59840, 60396,
+    60955, 61517, 62082, 62650, 63221, 63795, 64372, 64952, 65535
 };
 #define INK_WHITE_MAX 117392049u
 /* A glyph keeps its ink until the mean crosses the bound by 0.03 of L, so a pan easing over a
@@ -5207,9 +4167,9 @@ void home_ink(unsigned *fb, int pitch, const unsigned *art, int apitch, int w, i
                     unsigned k = sp >= hue_s ? 256 : (sp << 8) / hue_s, t = hue_c * k >> 8;
                     c = c > t ? c - t : 0;
                 }
-                sum += (unsigned long long)c * (722u * srgb_lin[a >> 16 & 255] +
-                                                7152u * srgb_lin[a >> 8 & 255] +
-                                                2126u * srgb_lin[a & 255]);
+                sum += (unsigned long long)c *
+                       (722u * srgb_lin[a >> 16 & 255] + 7152u * srgb_lin[a >> 8 & 255] +
+                        2126u * srgb_lin[a & 255]);
                 weight += c;
             }
         unsigned was = 0, ink = 0;
@@ -5262,7 +4222,7 @@ static int bar_rows(void *canvas, int *r) {
  * over it: navigation.c's clock_place puts the clock beside them. */
 int coverflow_home_split(void *top) {
     if (!home.art || top != home.win || !widget_get_visible(home.art)) return 0;
-    return pane_up() && home.sl[0].tw && pane_covers() ? 2 : 1;
+    return pane_up() && home.sl[0].tw ? 2 : 1;
 }
 
 /* The bar's background (ringnav_paint_bg), with Home on top and still: the pane's rows above Home's
@@ -5300,11 +4260,10 @@ static void list_reach(void *l, int d) {
     I(view, W_H) += d;
     I(view, SCROLL_Y) -= d;
 }
-/* The rows coverflow_home_strip paints, top and h on the screen: from the list's top to the
- * window's; under OLED's pages from the screen's top, for the row above a scrolled list and its fade
- * (home.c home_fades). */
+/* The rows coverflow_home_strip paints, top and h on the screen: from the screen's top, for the row
+ * above a scrolled list and its fade (home.c home_fades), to the window's. */
 static int strip_rows(void *l, int *h) {
-    int wy = I(home.win, W_Y), top = oled_pages() ? 0 : wy + I(l, W_Y);
+    int wy = I(home.win, W_Y), top = 0;
     *h = wy - top;
     return top;
 }
@@ -5323,7 +4282,7 @@ void coverflow_home_strip(void *canvas, void *top) {
         return;
     int from = strip_rows(l, &h);
     if (!clip_within(canvas, old, clip, 0, from, pane_x(), h)) return;
-    int y = wy + I(l, W_Y), reach = oled_pages() && I(widget_get_child(l, 0), SCROLL_Y) > 0 ? y : 0;
+    int y = wy + I(l, W_Y), reach = I(widget_get_child(l, 0), SCROLL_Y) > 0 ? y : 0;
     canvas_set_clip_rect(canvas, clip);
     canvas_translate(canvas, wx, wy);
     home.stripping = 1;
@@ -5334,7 +4293,8 @@ void coverflow_home_strip(void *canvas, void *top) {
     canvas_translate(canvas, -wx, -wy);
     home_fades(canvas, l, y, pane_x(), 1);
     canvas_set_clip_rect(canvas, old);
-    if (clip[3] == -I(l, W_Y)) home.strip_done[0] = clip[0], home.strip_done[1] = clip[0] + clip[2];
+    if (clip[1] == from && clip[3] == h) /* the band's rows whole: these columns need no repaint */
+        home.strip_done[0] = clip[0], home.strip_done[1] = clip[0] + clip[2];
 }
 /* After a paint of the raised list in its window (a new selection, a slide's frame), its rows in
  * the bar again: AWTK keeps a widget's invalidate inside its window, so the bar's rows would keep
@@ -5389,17 +4349,7 @@ void coverflow_home_clip(void *w, void *canvas, int begin) {
         (w != home.art && w != home.list && w != home.sets && w != home.lib && w != home.stream))
         return;
     if (!begin) {
-        int covers = pane_covers();
-        if (w == home.art && covers && home.sl[0].tw) home_paint(canvas);
-        /* The art's box is the image's fit, so the panel's edge and rows are measured from it. */
-        else if (w == home.art && !covers)
-            home_pane_paint(canvas, pane_x() - I(w, W_X), -I(w, W_Y), pane_w(), client_h());
-        /* a cover: the pane's own shadow over it, where the left column meets it */
-        if (w == home.art && covers && theme()->pane_shadow_w) {
-            unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-            pane_shadow(canvas, pane_x() - I(w, W_X), -I(w, W_Y), client_h());
-            stock_canvas_set_fill_color(canvas, fill);
-        }
+        if (w == home.art && home.sl[0].tw) home_paint(canvas);
         if (w == home.list && !home.stripping) {
             int split = widget_get_visible(home.art);
             home_fades(canvas, w, I(canvas, CANVAS_Y), split ? pane_x() : 375, split);
@@ -5423,7 +4373,7 @@ void coverflow_home_clip(void *w, void *canvas, int begin) {
     home.clipped = 1;
 }
 
-/* Whether w is in one of Home's menus (Minimal draws their labels, paint_caps). */
+/* Whether w is in one of Home's menus. */
 int coverflow_home_owns(void *w) {
     for (; w && home.list; w = P(w, W_PARENT))
         if (w == home.list || w == home.sets || w == home.lib || w == home.stream) return 1;
@@ -5445,8 +4395,8 @@ void *coverflow_home_view(void) {
 }
 
 /* Split under a home_lists_full theme (OLED's): the lists Home's rows open take the whole width,
- * as a page does, and the art is the main menu's alone. Other themes keep an iPod's submenu, the
- * list in the main menu's place beside the art. */
+ * as a page does, and the art is the main menu's alone. Without it, an iPod's submenu: the list
+ * in the main menu's place beside the art. */
 static int sub_full(void) { return theme()->home_lists_full && !ipod_home(); }
 
 /* The art beside shown, the list now on Home, under sub_full: there only beside the main list. */
@@ -5455,7 +4405,7 @@ static void art_beside(void *shown) {
 }
 
 /* Both menus' lists span outer, their rows and tap targets inner; labels start at x and end end
- * before the row's edge (Classic: before the chevron). */
+ * before the row's edge. */
 /* Split's list top on the screen where the art runs up under the status row (a split_art_up):
  * the status row's left side holds nothing there (navigation.c clock_place puts the clock at the
  * right), so the list rises into it, above Home's window; the bar paints those rows
@@ -5466,17 +4416,14 @@ static void art_beside(void *shown) {
  * on the screen. */
 static void home_width(void *w, int outer, int inner, int x, int end, int depth) {
     int top = w == home.list && pane_up() && !ipod_home() ? HOME_SPLIT_TOP - (320 - client_h())
-                                                         : theme()->home_top;
-    widget_move_resize(w, I(w, W_X), depth ? I(w, W_Y) : top,
-                       depth < 2 ? outer : inner, I(w, W_H));
+                                                          : theme()->home_top;
+    widget_move_resize(w, I(w, W_X), depth ? I(w, W_Y) : top, depth < 2 ? outer : inner, I(w, W_H));
     for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) {
         void *child = widget_get_child(w, i);
         if (!tk_strcmp(widget_get_type(child), "hscroll_label")) {
             widget_move_resize(child, x, I(child, W_Y), inner - x - end, I(child, W_H));
-            /* Classic's face; Minimal paints its own (paint_caps) */
             theme_font(child, ROLE_HOME, -1);
-        }
-        else
+        } else
             home_width(child, outer, inner, x, end, depth + 1);
     }
 }
@@ -5548,8 +4495,7 @@ void coverflow_home_layout(void) {
                                  ipod_home_shortcut());
     }
     int split = split_geom(SPLIT_ROW), outer = full ? 375 : split,
-        inner = !full ? split : T->home_full_row, x = T->home_text_x,
-        end = T->home_label_end[full];
+        inner = !full ? split : T->home_full_row, x = T->home_text_x, end = T->home_label_end[full];
     home_width(home.list, outer, inner, x, end, 0);
     home_overflow(home.list, client_h());
     home_in_place(home.list);
@@ -5589,11 +4535,11 @@ static int push_x(void *w, int dx, const motion_t *m) {
     return 1;
 }
 
-/* After page_list rebuilt a level: its list (view's list_view parent; the title is the bar's under
- * Classic) slides in from the right (dir 1, deeper) or the left (-1, back) over the theme's
- * inplace motion. No window animates, so keys and the wheel act on the new list at once. 0 for a
- * null view or dir 0, when the theme keeps levels still (push_x touches nothing), or when no
- * animator could be made: the list is at x 0. */
+/* After page_list rebuilt a level: its list (view's list_view parent; the title is the bar's)
+ * slides in from the right (dir 1, deeper) or the left (-1, back) over the theme's inplace motion.
+ * No window animates, so keys and the wheel act on the new list at once. 0 for a null view or dir
+ * 0, when the theme keeps levels still (push_x touches nothing), or when no animator could be made:
+ * the list is at x 0. */
 int page_push(void *view, int dir) {
     if (!theme()->motion[MOTION_INPLACE].ms) return 0;
     void *w = view ? P(view, W_PARENT) : (void *)0;
@@ -5618,7 +4564,8 @@ static void home_swap(void *from, void *to, int dx) {
 }
 
 static int home_settings(void *ctx, void *event) {
-    if (home.sets && !widget_get_visible(home.sets)) home_swap(home.list, home.sets, I(home.sets, W_W));
+    if (home.sets && !widget_get_visible(home.sets))
+        home_swap(home.list, home.sets, I(home.sets, W_W));
     return 0;
 }
 
@@ -5637,37 +4584,27 @@ static void home_fill(void *list, int service) {
         if (!b) continue;
         int h = service ? I(first, W_H) : I(b, W_H);
         widget_move_resize(b, 0, service ? 0 : I(b, W_Y), split, h);
-        if (service) {
-            void *label = child_of_type(b, "hscroll_label");
-            unsigned bitmap[64]; /* bitmap_t */
-            char t[72];
-            const char *icon = service_icon(child_of_type(b, "image"), t, sizeof t);
-            if (label) widget_move_resize(label, I(label, W_X), 0, I(label, W_W), I(b, W_H));
-            /* the build's icons; a card app's file waits for the pane (pane_service) */
-            if (!tk_str_start_with(icon, "file://")) widget_load_image(home.art, icon, bitmap);
-        }
     }
     widget_layout(list);
     home_swap(home.list, list, I(list, W_W));
 }
 
-/* Home's Library row in Split (a set with home_lib, Library on Home on): its rows slide in as Settings' do, each filled
+/* Home's Library row in Split (a set with home_lib): its rows slide in as Settings' do, each filled
  * by the page's own constructor (home.c library_rows) in Home's rows' shape, and open what
  * they open from the page. Full and Carousel keep the page. */
 static int home_library(void *ctx, void *event) {
-    if (ipod_home() || !home.lib || !home_lib_on()) return on_home_music_onclick(ctx, event);
+    if (ipod_home() || !home.lib) return on_home_music_onclick(ctx, event);
     if (widget_get_visible(home.lib)) return 0;
     library_rows(home.lib);
     home_fill(home.lib, 0);
     return 0;
 }
 
-/* Home's Streaming row, the same way (home.c stream_rows). The rebuild frees the rows, and
- * home.row is read only under PANE_SERVICE, so that goes first. */
+/* Home's Streaming row, the same way (home.c stream_rows). The rebuild frees the rows, so the
+ * highlighted row goes first. */
 static int home_streaming(void *ctx, void *event) {
     if (ipod_home() || !home.stream) return on_home_stream_onclick(ctx, event);
     if (widget_get_visible(home.stream)) return 0;
-    home.kind = PANE_STREAM;
     home.row = (void *)0;
     stream_rows(home.stream);
     home_fill(home.stream, 1);
@@ -5684,25 +4621,10 @@ int coverflow_home_back(void *top) {
     return 1;
 }
 
-/* A hold going Home (navigation.c compact_now_playing) from under a list open there: the main list,
- * with no slide, as the windows over it are about to close. Only while this Home is the bottom
- * window but the bar (application_init's first), so its lists are alive. */
-void coverflow_home_top(void) {
-    void *wm = window_manager();
-    unsigned n = widget_count_children(wm),
-             bottom = n && widget_get_child(wm, 0) == *(void *const *)system_bar;
-    if (!home.win || bottom >= n || widget_get_child(wm, bottom) != home.win) return;
-    void *open = home_open();
-    if (!open) return;
-    home_show(open, 0);
-    home_show(home.list, 1);
-    art_beside(home.list);
-}
-
 /* 1 while Home shows a list of its rows' (the Library's, Streaming's, Settings'), not its own. */
 int coverflow_home_sub(void) { return home_open() != (void *)0; }
 
-/* Classic's bar title on Home (navigation.c bar_title_sync). */
+/* The bar's title on Home (navigation.c bar_title_sync). */
 const char *coverflow_home_title(void) {
     void *open = home_open();
     return !open                 ? "Q2 Pod"
@@ -5736,7 +4658,6 @@ int coverflow_home(void *win, void *ctx) {
         widget_on(widget_lookup(win, "img_library", 1), EVT_CLICK, home_library, win);
     }
     home.stream = widget_lookup(win, "list_view_homestream", 1);
-    if (home.kind == PANE_SERVICE) home.kind = PANE_STREAM; /* the last Home's rows */
     if (home.stream) {
         widget_set_sensitive(home.stream, 0);
         widget_on(widget_lookup(win, "img_services", 1), EVT_CLICK, home_streaming, win);
@@ -5747,18 +4668,13 @@ int coverflow_home(void *win, void *ctx) {
     widget_on(widget_lookup(home.carousel[0], "img_cover_flow", 1), EVT_CLICK, coverflow_open, 0);
     widget_on(widget_lookup(home.carousel[0], "img_rockbox", 1), EVT_CLICK, home_shortcut_open, 0);
     coverflow_home_layout();
-    if (theme()->pane_icon_x) {
-        widget_on(win, EVT_WINDOW_FOREGROUND, home_foreground, 0);
-        rearm(&home.count_timer, home_counts, PANE_BOOT_MS);
-    }
     return result;
 }
 
 /* A library scan is running: its thread has started and not finished. Card apps (addon.c) wait for
  * it as Coverflow does, since the scan rewrites the records and directory lists they would read. */
 int library_scanning(void) { return *(volatile int *)SCAN_THREAD && !*(volatile int *)SCAN_DONE; }
-/* A song count reads songtable on its own connection: Home's count_worker or the scan dialog's
- * msg_count (classic_pages.c). Each flag is set on the UI thread before its thread starts: msg_count's
- * as the dialog loads, before stock's init starts the scan's thread, and Home starts no count while
- * a scan runs. So a scan that finds neither can drop the table. */
-int library_counting(void) { return home.counting == 1 || msg_counting(); }
+/* A song count reads songtable on its own connection: the scan dialog's msg_count (scan_page.c).
+ * Its flag is set on the UI thread before its thread starts, as the dialog loads, before stock's
+ * init starts the scan's thread. So a scan that finds none can drop the table. */
+int library_counting(void) { return msg_counting(); }

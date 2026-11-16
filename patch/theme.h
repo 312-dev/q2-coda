@@ -1,83 +1,26 @@
 #ifndef Q2_THEME_H
 #define Q2_THEME_H
-/* The built-in themes' shape (docs/internals.md#themes); the table is theme_engine.c's themes[]. */
+/* The built-in theme's shape (docs/internals.md#themes); the table is theme_engine.c's themes[],
+ * OLED's one row. */
 
-enum {
-    PAINT_SELECTION,
-    PAINT_BAR,
-    PAINT_BATTERY,
-    PAINT_SCRUB,
-    PAINT_VOLUME,
-    PAINT_CONFIRM,
-    PAINT_PAGES,
-    PAINT_CHEVRON,
-    PAINT_SCROLL,
-    PAINT_SONGS,
-    PAINTER_N
-}; /* theme_t.painter[] */
-enum { VOL_STOCK, VOL_CLASSIC_LIGHT }; /* painter[PAINT_VOLUME]: the volume */
-/* painter[PAINT_CONFIRM]: the confirm control, hold menu, toast and small dialogs; OLED's draws
- * only its toast and confirm (feedback.c) */
-enum { CONFIRM_STOCK, CONFIRM_CLASSIC_LIGHT, CONFIRM_OLED };
-/* painter[PAINT_PAGES]: the theme's own pages (classic_pages, oled_pages) */
-enum { PAGES_STOCK, PAGES_CLASSIC_LIGHT, PAGES_OLED };
-/* painter[PAINT_SCRUB]: SCRUB_ROWS, a gloss bar's rows (np_rows) for the volume panel and a card
- * app's progress */
-enum { SCRUB_STOCK, SCRUB_ROWS };
-enum { NP_ROWS = 31 }; /* theme_t.np_rows[][]: the rows painter's most rows */
-/* painter[PAINT_SELECTION]: Minimal's card, Classic's stops, Modern's bar */
-enum { SEL_CARD, SEL_STOPS, SEL_BAR };
-enum { BAR_FLAT, BAR_GLOSS }; /* painter[PAINT_BAR]: the status bar's fill (Classic gloss) */
-enum {
-    BATT_STOCK,
-    BATT_CLASSIC_LIGHT,
-    BATT_SLIM
-}; /* painter[PAINT_BATTERY]: the bar's battery and status marks (BATT_SLIM: list_marks.c) */
-/* painter[PAINT_CHEVRON]: a row's `>`, stock's list_into image, or CHEV_ICON's, the theme's own
- * <art>chevron_* images (tools/art.py) on every row that opens a page, at the set's right column */
-enum { CHEV_IMAGE, CHEV_ICON };
-/* painter[PAINT_SCROLL]: SB_THUMB a lasting thumb (paint_scrollbar), SB_WHEEL a track and thumb
- * shown while the wheel turns (list_marks.c) */
-enum { SB_THUMB, SB_WHEEL };
-/* painter[PAINT_SONGS]: a one-line song row as stock lays it out, or SONGS_INLINE's (song_rows.c):
- * the artist after the title, an album's track numbers and lengths, by Song Artist and Song Length
- */
-enum { SONGS_STOCK, SONGS_INLINE };
-enum { SCHEME_CARD = 1, SCHEME_RAW_RED = 2 };      /* scheme_t.flags (Ivory in Minimal; Crimson) */
 enum { SCHEME_DERIVE, SCHEME_LIGHT, SCHEME_DARK }; /* scheme_t.mode */
-enum { NP_IPOD, NP_CENTRED, NP_N };                /* theme_t.np_layout: np_pages[] index */
 /* theme_t.font[] index: list title, list second line, bar title, Now Playing title, a two-line
  * row's title, Home rows, small text (the QR pages, the Time Zone caption, page notes) */
 enum { ROLE_TITLE, ROLE_META, ROLE_BAR, ROLE_NP, ROLE_TALL, ROLE_HOME, ROLE_INFO, ROLE_N };
-/* an N-stop gradient, n stops (0: none), pos rising from 0 to 100 (% of the band), rgb 0xRRGGBB;
- * as many stops as the band has rows: each row its own, exactly (paint_stops) */
-typedef struct {
-    unsigned char n, pos[13];
-    unsigned rgb[13];
-} stops_t;
 typedef struct {
     const unsigned *tones; /* its ACCENTS row, accents[v], or an own scheme's tones=, <id>_tones[k]
                               (top, bottom, light, red, highlight) */
-    unsigned char flags;   /* SCHEME_* */
     unsigned char mode; /* SCHEME_DERIVE: Light Mode picks the half; LIGHT/DARK: that half always.
                            Both halves carry it; light_on() reads the dark row's */
-    /* 0xRRGGBB; 0: role unused (ponytail: no black role) */
-    unsigned fill, chevron, muted, bar_light;
-    stops_t sel;       /* the stops painter's band */
-    unsigned sel_top;  /* its first pixel row, a crisp line above the stops, 0 none */
-    unsigned sel_edge; /* its last pixel row, 0 none */
-    unsigned sel_tall_edge, sel_tall_line; /* a row taller than the set's pitch: its last two rows,
-                                              0 sel_edge alone */
-    unsigned sel_tall_top;                 /* ... and its second, 0 in both halves the stops */
-    unsigned sel_text;                     /* text on it, 0: the row's own */
-    stops_t bar;                           /* BAR_GLOSS: the status bar's rows above its line */
-    unsigned bar_line;                     /* BAR_GLOSS: the bar's last pixel row */
-    unsigned bar_line2;  /* BAR_GLOSS: the light half's row above it, final, 0 none */
+    /* 0xRRGGBB; 0: role unused (ponytail: no black role): the grey a mono theme's list icons take
+     * (ringnav_image_add), second lines' grey */
+    unsigned chevron, muted;
+    unsigned sel_text;   /* text on the selection, 0: the row's own */
     unsigned paper, ink; /* this half's, greys 0xRRGGBB: the light half's are the flip's ends
                             (LIGHT_PAPER and LIGHT_INK unless set), the dark half's 0x000000 and
                             0xffffff. A one-array theme's row holds the light half's: only
                             ipod_light()-gated code reads them there */
-    const char *label;   /* a theme's own scheme's name ("Classic Blue"); NULL: accent_names[v] */
+    const char *label;   /* a theme's own scheme's name ("Blue"); NULL: accent_names[v] */
 } scheme_t;
 typedef struct {
     unsigned char setting; /* SETTING_* (theme_engine.c): the bound row's click/text code, or
@@ -150,111 +93,67 @@ typedef struct {
     unsigned char easing; /* widget kinds: AWTK easing_type_t */
 } motion_t;
 typedef struct {
-    const char *name;   /* "Minimal": the Theme row's "Theme: %s" */
-    unsigned char geom; /* second: THEME_GEOM_OFF (4) never moves */
+    unsigned char geom; /* first: THEME_GEOM_OFF (0) never moves */
     /* a list left by Return forgets its row, so choosing it again opens it at the top
      * (navigation.c forget_left); Songs' action row reads Shuffle with the theme's own glyph and
      * the wheel selects it above the first song (navigation.c shuffle_key); in Split, the lists
      * Home's rows open (Settings, Library, Streaming) take the whole width with the art hidden, as
-     * a page (coverflow.c sub_full). In the padding before motion, so sizeof(theme_t) stays 1624 */
+     * a page (coverflow.c sub_full) */
     unsigned char reopen_top, shuffle_row, home_lists_full;
     motion_t motion[MOTION_N];
     unsigned short recall_ms; /* a remembered row's glide; 0: shown at once */
     unsigned char bump_px;    /* the wheel's bump at a list's end */
-    unsigned char painter[PAINTER_N];
-    unsigned char chevron_home, chevron_sel, set_text, caps_mark, caps_home, caps_np, icons_mono,
-        icons_badge_muted, icons_addon_mono, icons_badge_ink, art_final, np_album_op,
-        np_state_op;                             /* flags 0/1; *_op 0/255 */
+    unsigned char chevron_home, set_text, icons_mono, icons_badge_muted, icons_addon_mono,
+        art_final, np_album_op, np_state_op;     /* flags 0/1; *_op 0/255 */
     unsigned char font[ROLE_N], font_px[ROLE_N]; /* FONT_* (stock.h); px 0: the style's size */
-    stops_t batt;       /* BATT_CLASSIC_LIGHT: the level's stops, a hue in both halves */
-    stops_t batt_empty; /* BATT_CLASSIC_LIGHT: the rows past the level */
-    unsigned batt_low;  /* BATT_CLASSIC_LIGHT: the low level, batt_low_w columns */
-    short batt_low_w;
-    unsigned batt_line[2]; /* BATT_CLASSIC_LIGHT: the outline and nub, final: [0] dark, [1] light */
-    unsigned batt_edge;    /* BATT_CLASSIC_LIGHT: its bottom row inside the outline */
-    short batt_corner_a, batt_foot_a, batt_shade_a, batt_soft_a, batt_soft_top_a, batt_emboss_a,
-        batt_emboss_nub_a;        /* of 255 */
-    short bar_bt_dy, bar_wifi_dy; /* rows off the bar's row layout: Bluetooth, Wi-Fi */
-    /* A list's scrollbar, a thumb alone (paint_scrollbar): width (0: stock's fading bar) and its
-     * place from the list's right; the screen rows its ends stay in; its shortest length */
+    /* A list's scrollbar, a track and thumb shown while the wheel turns (list_marks.c): width (0:
+     * stock's fading bar) and its place from the list's right; the screen rows its ends stay in;
+     * the thumb's shortest length */
     short sb_w, sb_right, sb_top, sb_bottom, sb_min;
     unsigned sb_thumb[2]; /* final: [0] dark, [1] light */
-    unsigned sb_track[2]; /* SB_WHEEL's track, final: [0] dark, [1] light */
+    unsigned sb_track[2]; /* its track, final: [0] dark, [1] light */
     /* a row with art, on screen: the cover's x and its text's first and last columns; 0: stock's */
     short art_x, art_text_x, art_text_end;
     short art_radius; /* a row cover's corner radius on screen at the set's art; 0: NP_ART_RADIUS's
                          share of its size */
-    short row_text_end; /* a two-line row without art: its text's last column on screen */
-    stops_t sep[2];     /* its last rows, one stop a row, final: [0] dark, [1] light; 0: none */
     /* a 1 px divider under each row taller than the set's pitch, from its text column to the right
      * column, on neither edge of the selected row (paint_separators), final: [0] dark, [1] light;
      * 0: none */
     unsigned div_ink[2];
-    /* the theme's classic_light_chevron's box on screen: a full-width list's, Split's; 0: stock's
-     * list_into
-     */
-    short chevron_x, home_chevron_x, art_placeholder; /* stock's grey tiles (list_folder, list_song)
-                                                         this size, centred, 0: as stock */
-    unsigned char letter_raw;   /* the fast-scroll letter's colours are final in both halves */
+    short art_placeholder; /* stock's grey tiles (list_folder, list_song) this size, centred, 0:
+                              as stock */
     unsigned char np_meta_font; /* Now Playing's artist and album: FONT_* at the asset's size, by
                                    its text (np_bar.c np_sync); 0: the style's */
-    short letter_px;            /* ... and its size, 0: LETTER_PX */
     short home_top, home_full_row, home_text_x, home_label_end[2] /* [0] split, [1] full */,
         set_top, np_bar, np_scrub;
-    /* SEL_BAR on a list row under Rounded Corners: its ends' radius, at most pill_radius's (so
-     * SEL_MAX_RADIUS is always the pill), and its inset from each side of the row; Corners: Square
-     * keeps the bar full width and square */
+    /* the selection bar on a list row: its ends' radius, at most pill_radius's (so SEL_MAX_RADIUS
+     * is always the pill), and its inset from each side of the row */
     unsigned char sel_radius, sel_inset;
-    unsigned char sel_fixed; /* the bar keeps sel_inset and sel_radius under Corners: Square too */
     /* a scrolling hscroll_label's ends fade into what is behind it (list_marks.c marquee_fade);
      * Now Playing's art corners in px (paint_cover; 0: NP_ART_RADIUS's share of its size); its
      * shuffle and repeat drawn as the theme's own pair (np_bar.c np_modes; 0: stock's one icon),
-     * and its heart and More the theme's glyphs too (np_glyphs; 0: stock's).
-     * Three chars in the padding before set_value_ink, so sizeof(theme_t) stays 1624, which clang
-     * indexes by a multiply: at 1632 it takes a shift chain, and every theme() call pays for it
-     * (test/patch.py's Cover Flow paint budget) */
+     * and its heart and More the theme's glyphs too (np_glyphs; 0: stock's) */
     unsigned char marquee_fade, np_art_radius, np_modes;
     /* a set_text settings row's value (list_value), final: [0] dark, [1] light; 0: its style's
      * white */
     unsigned set_value_ink[2];
-    unsigned np_track_rgb; /* 0xRRGGBB: the plain progress bar's track, the volume's over it */
-    stops_t np_track[2];   /* Classic's progress bar's track (paint_scrubber), final: [0] dark, [1]
-                              light; n 0: stock's plain bar */
-    stops_t np_fill;       /* ... its played part under the theme's own scheme (Classic Blue), both
-                              halves; n 0: the scheme's band */
-    unsigned np_rows[4][NP_ROWS]; /* SCRUB_ROWS: 0xAARRGGBB; dark track, fill, light track, fill */
-    unsigned np_info_value[2];    /* the info page's values, final: [0] dark, [1] light */
-    /* Split's panel where no cover shows (home_pane_paint), final: [0] dark, [1] light; n 0:
-     * HOME_PLACEHOLDER. pane_shadow is
-     * 0xRRGGBB, the shadow down its left edge; _w in columns, _a each column's alpha. pane_light_a
-     * the white over the stops at the left edge, falling to 0 at the right. A row's icon's top-left
-     * (0: the pane stays the current cover or the note whatever the row), the note's and the
-     * count's line box in the panel, the count's px. */
-    stops_t home_pane[2];
-    unsigned pane_shadow;
-    unsigned char pane_shadow_a[32];
-    short pane_shadow_w, pane_light_a, pane_icon_x, pane_icon_y, pane_note_x, pane_note_y,
-        pane_count_y, pane_count_w, pane_count_px;
-    /* Streaming's list in the pane (coverflow.c pane_service): a service's icon's place and size */
-    short pane_svc_x, pane_svc_y, pane_svc_px;
+    unsigned np_track_rgb;     /* 0xRRGGBB: the progress bar's track, the volume's over it */
+    unsigned np_info_value[2]; /* the info page's values, final: [0] dark, [1] light */
     int *accent_slot;
-    const char *accent_key;  /* &st.accent,"ACCENT" | &st.minimal_accent,"MINIMAL_ACCENT" */
+    const char *accent_key;  /* &st.accent,"ACCENT" | &st.own[k], an own key's */
     const scheme_t *schemes; /* [n_schemes], indexed by accent value: each scheme's dark half */
     const scheme_t *light; /* [n_schemes] each scheme's light half; == schemes when the theme states
-                              no final value (Minimal, Classic) */
-    unsigned char n_schemes; /* ACCENT_N, then the theme's own (Classic: 10) */
-    const option_t *opts;    /* Appearance rows after Theme, in order */
+                              no final value */
+    unsigned char n_schemes; /* ACCENT_N, then the theme's own (OLED: 10) */
+    const option_t *opts;    /* the Appearance rows, in order */
     unsigned char n_opts;
     /* settings.values.switch: an on/off settings row shows a switch (list_marks.c switch_mark), on
-     * a set_text theme too, where it would read On or Off. In the padding before undeclared */
+     * a set_text theme too, where it would read On or Off */
     unsigned char set_switch;
-    unsigned undeclared;     /* SETTING_* bits of the theme options it does not declare */
-    unsigned char np_layout; /* NP_* */
+    unsigned undeclared; /* SETTING_* bits of the theme options it does not declare */
     cf_style_t cf;
-    unsigned char art_square; /* art takes Corners: Square */
     /* text entry the iPod's way: Search opens the letter strip (search_strip.c), the keyboard's
-     * keys are walked by the wheel (keyboard.c). In the padding after art_square, so
-     * sizeof(theme_t) stays 1624 */
+     * keys are walked by the wheel (keyboard.c) */
     unsigned char entry_ipod;
     /* page_list: a row, a row with a detail, the in-page title (0: the bar's) and the text's x; a
      * detail row's caption and detail boxes */
@@ -262,21 +161,9 @@ typedef struct {
         page_det_h;
     const char *art; /* its own images' prefix (tools/art.py, its art attribute's id): "oled_" */
 } theme_t;
-const theme_t *theme(void); /* accent(); return &themes[st.theme]; */
-/* Classic's own pages: Quick Settings, sliders, rating, dialogs' pages, T9 and Search, Set Time,
- * message screens, Cover Flow's flip */
-static inline int classic_pages(void) {
-    return theme()->painter[PAINT_PAGES] == PAGES_CLASSIC_LIGHT;
-}
-/* OLED's own forms of stock's overlays (docs/oled-design.md#screens) */
-static inline int oled_pages(void) { return theme()->painter[PAINT_PAGES] == PAGES_OLED; }
+const theme_t *theme(void);       /* accent(); return themes; (THEME_N is 1) */
 int theme_geom(const theme_t *T); /* navigation.c: the set T boots with its stored values */
 const scheme_t *scheme(void);     /* theme()'s scheme accent(), in the half Light Mode picks */
-/* the Theme picker's rows, each a stored THEME, by each theme.xml's order (themes.inc) */
-extern const unsigned char theme_rows[];
-const theme_t *bar_theme(void);   /* Status Bar's choice: the theme whose bar is painted */
-const scheme_t *bar_scheme(void); /* scheme() for bar_theme() */
-int bar_geom_val(int v);          /* geom_val for what bar_theme() paints: V_BATT_W, V_BATT_H */
 int client_h(void); /* the window under the bar of the set theme_boot wrote (theme_engine.c) */
 /* Home's Split under the same set (its split_* fields, tools/ipod.py Geometry): SPLIT_ROW the
  * menu's width, SPLIT_ART the art pane's left edge, SPLIT_ART_UP the pane's rows above the window,
@@ -285,10 +172,6 @@ int client_h(void); /* the window under the bar of the set theme_boot wrote (the
 enum { SPLIT_ROW, SPLIT_ART, SPLIT_ART_UP, SPLIT_INSET };
 int split_geom(int k);
 int list_fit_end(void); /* theme_engine.c: a list_fit set's lists' last screen row, 0: none */
-void paint_stops(void *canvas, int x, int y, int w, int h, const stops_t *s); /* navigation.c */
-/* The rows painter: the track across w, the played part over its first fill_w px; final colours
- * (the volume panel away from Now Playing, a card app's progress). */
-void paint_rows_bar(void *canvas, int x, int y, int w, int h, int fill_w);
 /* 0xRRGGBB to an opaque color_t, whose bytes are r, g, b, a. */
 static inline unsigned RGBA(unsigned c) {
     return 0xff000000u | (c & 255) << 16 | (c & 0xff00) | c >> 16;

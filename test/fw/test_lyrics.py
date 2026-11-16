@@ -2,17 +2,30 @@
 page's rows, wrap, clock, lit width and paint."""
 import ctypes as C
 import random
+import re
 import struct
 
 import pytest
 
-from conftest import O, Deques, Files, block, libc, text
+from conftest import O, ROOT, Deques, Files, block, libc, text
 
 FAR = 0x7fffffff
 TAG_MAX = 65536
 PRIME = 16777619
 SEED = 2166136261
-SLOT, X = O['LYRIC_SLOT'], O['LYRIC_X']
+SLOT = O['LYRIC_SLOT']
+# lyrics.c's own: the text column's left edge and the ink of what is not sung (unsung part and other lines)
+_LYRICS = {k: int(v, 0) for k, v in re.findall(r'^#define (LYRIC_\w+) +(0x[0-9a-f]+|\d+)\b', (ROOT/'patch/lyrics.c').read_text(), re.M)}
+X, REST, PX = _LYRICS['LYRIC_OLED_X'], _LYRICS['LYRIC_OLED_REST'], _LYRICS['LYRIC_OLED_PX']
+
+
+def pitch(px):
+    """lyrics.c LY_PITCH: a line's rows this far apart."""
+    return px + px // 8
+
+
+# a line of one row: its pitch at OLED's size and LYRIC_GAP, what LYRIC_SLOT leaves under a LYRIC_PX row
+ONE = pitch(PX) + SLOT - pitch(_LYRICS['LYRIC_PX'])
 BOM = b'\xef\xbb\xbf'
 
 
@@ -403,7 +416,7 @@ def test_cjk(fw, c, cjk):
     assert fw.fn('lyrics__ly_cjk', C.c_int, C.c_uint)(c) == cjk
 
 
-def wrap(fw, s, width=100, adv=10):
+def wrap(fw, s, width=90, adv=10):
     """ly_wrap's count and rows (start, length, width), at adv px a character (or a list of them)."""
     state(fw).w = width
     chars = [ord(c) for c in s]
@@ -413,7 +426,7 @@ def wrap(fw, s, width=100, adv=10):
     return k, [(line.start[r], line.len[r], line.w[r]) for r in range(min(k, 4))]
 
 
-# At width 100 and 10 px a character, with LYRIC_BOLD's 2 px: 9 characters fit a row.
+# At width 90 and 10 px a character: 9 characters fit a row.
 @pytest.mark.parametrize('s,rows', [
     ('', []), ('    ', []),
     ('a', [(0, 1, 10)]),
@@ -430,18 +443,19 @@ def wrap(fw, s, width=100, adv=10):
     ('aaaaaaa你你bbbb', [(0, 9, 90), (9, 4, 40)]),
     ('aaaaa你bbbbb', [(0, 6, 60), (6, 5, 50)]),               # before one when its word won't fit
 ])
-def test_wrap_at_100(fw, s, rows):
+def test_wrap_at_90(fw, s, rows):
     assert wrap(fw, s) == (len(rows), rows)
 
 
 def test_a_row_fits_to_the_pixel(fw):
-    assert wrap(fw, 'a' * 10, width=102)[1] == [(0, 10, 100)]
-    assert wrap(fw, 'a' * 10, width=101)[1] == [(0, 9, 90), (9, 1, 10)]
+    assert wrap(fw, 'a' * 10, width=100)[1] == [(0, 10, 100)]
+    assert wrap(fw, 'a' * 10, width=99)[1] == [(0, 9, 90), (9, 1, 10)]
 
 
 def test_the_page_width_before_rows_are_laid_out(fw):
-    assert wrap(fw, 'a' * 34, width=0)[0] == 1  # the screen's 375 less LYRIC_X a side
-    assert wrap(fw, 'a' * 35, width=0)[0] == 2
+    fit = (375 - 2 * X) // 10  # the screen's 375 less LYRIC_OLED_X a side
+    assert wrap(fw, 'a' * fit, width=0)[0] == 1
+    assert wrap(fw, 'a' * (fit + 1), width=0)[0] == 2
 
 
 def test_a_character_wider_than_the_row_still_goes_on_one(fw):
@@ -1270,7 +1284,7 @@ def test_unsynced_rows_never_play(fw):
     assert page.rows() == 1 and [line[0] for line in lines_of(state(fw).tab)] == [FAR, FAR]
     assert page.line(5000) == -1
     inks, _ = page.paint(0)
-    assert [ink[1] for ink in inks] == [rgba(O['LYRIC_REST'])]
+    assert [ink[1] for ink in inks] == [rgba(REST)]
 
 
 def test_no_rows_no_page(fw):
@@ -1285,12 +1299,12 @@ def test_rows_not_yet_taken_are_not_fit(fw):
 
 
 def test_each_row_is_as_high_as_its_lines_rows_four_at_most(fw):
-    # at 10 px a character, 34 to a row of the page's 375 less LYRIC_X a side: 1, 2, 3, 4 and 6 rows
+    # at 10 px a character, 32 to a row of the page's 375 less LYRIC_OLED_X a side: 1, 2, 3, 4 and 7 rows
     page = Page(fw, [(1, 'a' * k) for k in (10, 40, 70, 110, 200)])
     assert page.rows() == 1
     h = [field(page.label(i), 'W_H') for i in range(5)]
     px = {e[1] for e in page.events if e[0] == 'font'}
-    assert h[0] == SLOT and h[1] - h[0] == h[2] - h[1] == h[3] - h[2] >= max(px) and h[4] == h[3]
+    assert h[0] == ONE and h[1] - h[0] == h[2] - h[1] == h[3] - h[2] >= max(px) and h[4] == h[3]
     assert all(field(page.label(i), 'W_W') == 375 for i in range(5))
     assert all(not page.texts[page.label(i)][0] for i in range(5))  # blank rows: the paint draws the line
     assert page.layouts == [f'list_view(x=0,y={SLOT},s=0)']
@@ -1301,7 +1315,7 @@ def test_the_rows_wrap_again_only_when_the_width_changes(fw):
     page.rows()
     one, measured = field(page.label(0), 'W_H'), page.measured
     assert page.fit() == 1 and page.measured == measured
-    field(page.at, 'W_W', 225)  # the centred page's column
+    field(page.at, 'W_W', 225)  # a narrower column
     assert page.fit() == 1 and page.measured > measured
     assert field(page.label(0), 'W_H') > one == field(page.label(1), 'W_H') and field(page.label(0), 'W_W') == 225
 
@@ -1314,7 +1328,7 @@ def test_a_line_the_fit_had_no_canvas_for_is_laid_out_at_its_paint(fw):
     published(fw, b'[00:01.00]' + b'a' * 40 + b'\n')  # a fresh table for the same line, not laid out
     page = Page(fw, line, canvas=False)
     page.rows()
-    assert page.measured == 0 and field(page.label(0), 'W_H') == SLOT
+    assert page.measured == 0 and field(page.label(0), 'W_H') == ONE
     painted = [ink[2][0][0] for ink in page.paint(0)[0]]
     assert page.measured and painted == fitted and len(painted) > 1 and ''.join(painted) == 'a' * 40
 
@@ -1331,15 +1345,13 @@ def test_the_playing_line_is_lit_as_far_as_it_is_sung(fw):
     assert page.line(1500) == 0
     inks, restore = page.paint(0)
     by_colour = {colour: (clip, drawn) for clip, colour, drawn in inks}
-    assert len(inks) == 2 and set(by_colour) == {rgba(O['LYRIC_LIT']), rgba(O['LYRIC_DIM'])}
-    (lit, lit_drawn), (dim, dim_drawn) = by_colour[rgba(O['LYRIC_LIT'])], by_colour[rgba(O['LYRIC_DIM'])]
+    assert len(inks) == 2 and set(by_colour) == {rgba(O['LYRIC_LIT']), rgba(REST)}
+    (lit, lit_drawn), (dim, dim_drawn) = by_colour[rgba(O['LYRIC_LIT'])], by_colour[rgba(REST)]
     edge = X + 20  # halfway from "one" to "two", 4 characters on, halfway between their stamps
     assert lit[0] == 0 and lit[0] + lit[2] == edge == dim[0] and dim[0] + dim[2] == 375
     assert lit[1] == dim[1] == page.base[1] and lit[3] == dim[3] == page.base[3]
-    # both inks draw the line alike, so its halves meet: from X, each further pass a pixel right (its weight)
-    xs = [d[1] for d in lit_drawn]
-    assert lit_drawn == dim_drawn and {d[0] for d in lit_drawn} == {'one two'} and len({d[2] for d in lit_drawn}) == 1
-    assert xs[:1] == [X] and xs == list(range(X, X + len(xs)))
+    # both inks draw the line alike, once from X, so its halves meet
+    assert lit_drawn == dim_drawn and [d[:2] for d in lit_drawn] == [('one two', X)]
     assert restore == (page.base, TEXT)
 
 
@@ -1347,20 +1359,20 @@ def test_other_lines_are_at_rest(fw):
     page = lit_page(fw, b'[00:01.00]<00:01.00>one <00:02.00>two\n[00:04.00]three\n', [(1, 'one two'), (4, 'three')])
     page.line(1500)
     inks, _ = page.paint(1)
-    assert [(ink[0][0], ink[0][0] + ink[0][2], ink[1]) for ink in inks] == [(X, 375, rgba(O['LYRIC_REST']))]
+    assert [(ink[0][0], ink[0][0] + ink[0][2], ink[1]) for ink in inks] == [(X, 375, rgba(REST))]
 
 
 def test_the_inks_follow_the_canvas_and_stay_in_its_clip(fw):
     page = lit_page(fw, b'[00:01.00]<00:01.00>one <00:02.00>two\n', [(1, 'one two')])
-    struct.pack_into('<i', page.canvas, O['CANVAS_X'], 80)  # the row's canvas 80 px in, as the centred page's column
+    struct.pack_into('<i', page.canvas, O['CANVAS_X'], 80)  # the row's canvas 80 px in
     page.base = (80, 100, 375, SLOT)
     page.line(1500)
     inks, _ = page.paint(0)
     assert len(inks) == 2 and {ink[1]: (ink[0][0], ink[0][0] + ink[0][2]) for ink in inks} == {
-        rgba(O['LYRIC_LIT']): (80, 80 + X + 20), rgba(O['LYRIC_DIM']): (80 + X + 20, 80 + 375)}
+        rgba(O['LYRIC_LIT']): (80, 80 + X + 20), rgba(REST): (80 + X + 20, 80 + 375)}
     page.base = (80 + X + 30, 100, 10, SLOT)  # a repaint of a strip of its unsung part: the sung part's ink is clipped away
     inks, restore = page.paint(0)
-    assert [ink[:2] for ink in inks] == [(page.base, rgba(O['LYRIC_DIM']))] and restore == (page.base, TEXT)
+    assert [ink[:2] for ink in inks] == [(page.base, rgba(REST))] and restore == (page.base, TEXT)
 
 
 def test_a_line_without_word_stamps_lights_whole_and_lines_sharing_its_start_with_it(fw):
@@ -1370,7 +1382,7 @@ def test_a_line_without_word_stamps_lights_whole_and_lines_sharing_its_start_wit
         inks, _ = page.paint(i)
         assert [(ink[0][0], ink[0][2], ink[1]) for ink in inks] == [(0, 375, rgba(O['LYRIC_LIT']))]
     top = field(page.label(2), 'W_Y')  # scrolled to its top: in full view
-    assert [ink[1] for ink in page.paint(2, top)[0]] == [rgba(O['LYRIC_REST'])]
+    assert [ink[1] for ink in page.paint(2, top)[0]] == [rgba(REST)]
 
 
 def test_a_wrapped_line_lights_row_by_row(fw):
@@ -1380,36 +1392,33 @@ def test_a_wrapped_line_lights_row_by_row(fw):
     inks, _ = page.paint(0)
     assert sorted((ink[0][0], ink[0][0] + ink[0][2], ink[1], ink[2][0][0]) for ink in inks) == sorted([
         (0, 375, rgba(O['LYRIC_LIT']), 'a' * 30),                       # its first row, sung
-        (X + 300 * 1000 // 2700, 375, rgba(O['LYRIC_DIM']), 'b' * 30),  # 1 s into its second's 2.7 s
+        (X + 300 * 1000 // 2700, 375, rgba(REST), 'b' * 30),  # 1 s into its second's 2.7 s
         (0, X + 300 * 1000 // 2700, rgba(O['LYRIC_LIT']), 'b' * 30)])
     ys, px = sorted({d[2] for ink in inks for d in ink[2]}), max(e[1] for e in page.events if e[0] == 'font')
     h = field(page.label(0), 'W_H')
-    assert len(ys) == 2 and abs(ys[0] - (h - ys[1] - px)) <= 1  # its rows centred in the row
-
-
-FAINT = 8  # lyrics_paint draws no row fainter
+    # its rows centred in the row, as lyrics_paint places them (each half of the spare space rounded down)
+    assert px == PX and ys == [(h - 2 * pitch(px)) // 2 + (pitch(px) - px) // 2 + k * pitch(px) for k in (0, 1)]
 
 
 def faded(top, h, view):
-    """The alpha of a row h high, top px down the view (above it when less than 0): the square of its share in view."""
+    """The alpha of a row h high, top px down the view (above it when less than 0): full while any of it is in view
+    (lyrics_fade fades the view's edges instead), else none."""
     seen = min(top + h, view) - max(top, 0)
-    return 255 if seen >= h else 255 * seen * seen // (h * h) if seen > 0 else 0
+    return 255 if seen > 0 else 0
 
 
-CUT = next(s for s in range(1, SLOT + 1) if faded(0, SLOT, s) >= FAINT)  # the least of a row in view still drawn
-
-
-@pytest.mark.parametrize('seen,alpha', [(SLOT, 255), (30, faded(0, SLOT, 30)), (CUT, faded(0, SLOT, CUT)), (CUT - 1, None), (0, None)])
-def test_a_row_the_views_edge_cuts_fades_with_the_square_of_its_share_in_view(fw, seen, alpha):
+@pytest.mark.parametrize('seen,alpha', [(ONE, 255), (30, 255), (1, 255), (0, None)])
+def test_a_row_the_views_edge_cuts_is_drawn_whole_while_any_of_it_shows(fw, seen, alpha):
     page = lit_page(fw, b'[00:01.00]a\n[00:02.00]b\n', [(1, 'a'), (2, 'b')])
     page.line(0)
     view = field(page.at, 'W_H')
-    for scroll in (SLOT + SLOT - seen, SLOT - view + seen):  # its top cut, then its bottom
+    assert (field(page.label(0), 'W_Y'), field(page.label(0), 'W_H')) == (SLOT, ONE)
+    for scroll in (SLOT + ONE - seen, SLOT - view + seen):  # its top cut, then its bottom
         inks, restore = page.paint(0, scroll)
         if alpha is None:
             assert inks == [] and restore is None and not page.events
         else:
-            assert [ink[1] for ink in inks] == [rgba(O['LYRIC_REST'], alpha)]
+            assert [ink[1] for ink in inks] == [rgba(REST, alpha)]
 
 
 def test_only_the_pages_rows_are_painted(fw):
@@ -1446,8 +1455,8 @@ def test_hostile_lyrics_from_the_loader_to_the_paint(fw):
                 scroll = r.randrange(-100, 300)
                 alpha = faded(field(page.label(i), 'W_Y') - scroll, field(page.label(i), 'W_H'), view)
                 inks, restore = page.paint(i, scroll)
-                # a row in view enough draws its line, every ink at its alpha; one not, nothing
-                assert bool(inks) == (alpha >= FAINT) and all(color >> 24 == alpha for _, color, _ in inks)
+                # a row in view draws its line, every ink at its alpha; one not, nothing
+                assert bool(inks) == (alpha > 0) and all(color >> 24 == alpha for _, color, _ in inks)
                 for clip, color, drawn in inks:
                     assert 0 <= clip[0] and clip[0] + clip[2] <= page.base[2] and clip[2] > 0
                     assert all(len(d[0]) <= len(lines[i][1]) for d in drawn)

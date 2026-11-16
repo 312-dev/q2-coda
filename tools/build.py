@@ -126,12 +126,8 @@ HOOKS = {
     'kugou_obtainlyric': (0x51b3f4, 'ringnav_lyric_search', None),
     # its ⋯ page: Download Album Lyrics under stock's Download Cover & Lyrics (onlinematch.c)
     'playermore_page_init': (0x539f60, 'ringnav_playermore', 'playermore'),
-    # Classic's Search: its tabs' words, after stock's init writes them (navigation.c)
-    'dialog_search_dialog_init': (0x49ff6c, 'ringnav_search_init', 'search_init'),
     # The sleep timer's switch as a row, under a set that hides its toolbar (navigation.c)
     'systemset_sleepshutdown_page_init': (0x4d1224, 'ringnav_sleeptimer', 'sleeptimer'),
-    # Classic's Set Date and Set Time: the title and the selectors' changes, after stock's init (navigation.c)
-    'systemset_manualtime_page_init': (0x4cc83c, 'ringnav_manualtime', 'manualtime'),
     # any Tidal track asked for, from a queue or Now Playing, wakes its stream thread (tidal.c)
     'get_tidal_trackurl': (0x483f28, 'ringnav_tidal_track', 'tidaltrack'),
     # its cover match: MusicBrainz/Cover Art Archive and iTunes candidates in place of stock's Kugou search,
@@ -178,7 +174,7 @@ HOOKS = {
     'playlist_rebuild': (0x4b5444, 'ringnav_playlist', 'playlist'),
     'widget_on_paint_background': (0x66fcec, 'ringnav_paint_bg', 'paint_bg'),
     'bigcover_page_init': (0x52db48, 'ringnav_bigcover', 'bigcover'),
-    # Every window's asset (window_open's): Centred Now Playing's page (navigation.c ringnav_ui_load)
+    # Every window's asset (window_open's): the geometry set's own copy (navigation.c ringnav_ui_load)
     'ui_loader_load_widget_with_parent': (0x667304, 'ringnav_ui_load', 'ui_load'),
     # Status bar's 1 s tick: the payload's play state, before any paint (navigation.c bar_sync)
     'systembar_showface': (0x5417d0, 'ringnav_showface', 'showface'),
@@ -454,7 +450,7 @@ WIFI_LPS = (b'rtwpriv wlan0 pm_set lps=0\0', b'rtwpriv wlan0 pm_set lps=2\0')
 # Now Playing's info page: its one fill (0x53bc78), a bal, becomes jal ringnav_np_info, which tidies the lines.
 NP_INFO_CALL = 0x53d308
 # Now Playing's A-B markers (0x53baa4): its three calls of their x (0x53b9d8), each a bal, become jal ringnav_ab_x,
-# which puts them on Classic's bar as ipod_times fitted it to the track.
+# which keeps them on the slider wherever the page has moved it from the build's place.
 AB_X_CALLS = (0x53bb78, 0x53bbf4, 0x53bc04)
 # Songs' row bind (0x4ab208): a record with no artist gets stock's "Unknown Artist" through this getFormatString jalr,
 # which becomes jal ringnav_song_unknown.
@@ -1108,7 +1104,7 @@ PLAY_MARK = 0x25b6
 def play_mark(font):
     """U+25B6 drawn into font, a face without one: the mark before View Queue's playing title
     (navigation.c stock_row_style), which a row could otherwise only show in stock's face. A triangle on
-    the middle of the capitals, 78% of their height, its left edge a pixel in at a Classic row's size."""
+    the middle of the capitals, 78% of their height, its left edge a pixel in."""
     cap = font['OS/2'].sCapHeight
     x0, x1, y0, y1 = round(cap * .073), round(cap * .773), round(cap * .11), round(cap * .89)
     name, points = 'uni25B6', [(x0, y0), (x0, y1), (x1, (y0 + y1) // 2)]  # clockwise, as glyf's contours are
@@ -1117,28 +1113,18 @@ def play_mark(font):
         for point in points[1:]: pen.lineTo(point)
         pen.closePath()
         return pen
-    if 'CFF ' in font:
-        from fontTools.pens.t2CharStringPen import T2CharStringPen
-        cff = font['CFF '].cff
-        top = cff.topDictIndex[0]
-        pen = drawn(T2CharStringPen(x0 + x1 - top.Private.nominalWidthX, None), points[::-1])
-        top.CharStrings.charStringsIndex.append(pen.getCharString(top.Private, cff.GlobalSubrs))
-        top.CharStrings.charStrings[name] = len(top.CharStrings.charStringsIndex) - 1
-        top.charset.append(name)
-    else:
-        from fontTools.pens.ttGlyphPen import TTGlyphPen
-        font['glyf'][name] = drawn(TTGlyphPen(None), points).glyph()
+    from fontTools.pens.ttGlyphPen import TTGlyphPen  # every face cut is TrueType (glyf)
+    font['glyf'][name] = drawn(TTGlyphPen(None), points).glyph()
     font['hmtx'][name] = (x0 + x1, x0)
     for table in font['cmap'].tables:
         if table.isUnicode(): table.cmap[PLAY_MARK] = name
 
 TABULAR = '0123456789:'
 
-def subset_font(src, family, ranges_macro, notice=None, tabular=''):
+def subset_font(src, family, ranges_macro, tabular=''):
     """src given a play mark (play_mark), then cut to its Latin, Greek, Cyrillic, punctuation and that
     mark, renamed family (its own name is the font's reserved name under OFL and GUST alike): the font's
-    bytes and ranges_macro listing exactly what it keeps. notice, if any, goes in its description (name
-    ID 10). tabular, if any, is the suffix of the font's tabular figures' glyph names (Inter's .tf):
+    bytes and ranges_macro listing exactly what it keeps. tabular, if any, is the suffix of the font's tabular figures' glyph names (Inter's .tf):
     TABULAR's characters map to those glyphs, as font_quotes remaps stock's quotes, so a clock or a
     song's time keeps its width as it counts."""
     from fontTools import subset
@@ -1158,9 +1144,7 @@ def subset_font(src, family, ranges_macro, notice=None, tabular=''):
             if table.isUnicode(): table.cmap.update(figures)
     play_mark(font)
     have.append(PLAY_MARK)
-    options = subset.Options()
-    if notice: options.name_IDs.append(7)  # the trademark notice, as its licence asks
-    sub = subset.Subsetter(options)
+    sub = subset.Subsetter(subset.Options())
     sub.populate(unicodes=have)
     sub.subset(font)
     check(sorted(font.getBestCmap()) == have, f'{label} font subset lost characters')
@@ -1173,15 +1157,6 @@ def subset_font(src, family, ranges_macro, notice=None, tabular=''):
             else:
                 rec.string = str(rec).replace(old, family).replace(old.replace(' ', ''), family.replace(' ', ''))
             check(old.split()[0] not in str(rec), f'{label} font name {rec.nameID} keeps {old.split()[0]}')
-    if notice:
-        font['name'].setName(notice, 10, 3, 1, 0x409)
-    if 'CFF ' in font:  # the outlines' own names (PostScript FontName, FullName, FamilyName)
-        cff = font['CFF '].cff
-        top = cff.topDictIndex[0]
-        cff.fontNames = [n.replace(old, family).replace(old.replace(' ', ''), family.replace(' ', '')) for n in cff.fontNames]
-        for key in ('FullName', 'FamilyName'):
-            setattr(top, key, getattr(top, key).replace(old, family).replace(old.replace(' ', ''), family.replace(' ', '')))
-        check(old.split()[0] not in ''.join(cff.fontNames + [top.FullName, top.FamilyName]), f'{label} font CFF name keeps {old.split()[0]}')
     out = io.BytesIO()
     font.save(out, reorderTables=False)
     runs = []
@@ -1190,8 +1165,6 @@ def subset_font(src, family, ranges_macro, notice=None, tabular=''):
         else: runs.append([u, u])
     return out.getvalue(), f'#define {ranges_macro} {{' + ','.join(f'0x{u:x}' for r in runs for u in r) + '}'
 
-CLASSIC_LIGHT_NOTICE = ('Modified version of TeX Gyre Heros Bold 2.004: cut to part of its Latin and Greek and its punctuation, its layout features to frac, liga and locl, a play mark added at U+25B6, and renamed. '
-               'The original: https://www.gust.org.pl/projects/e-foundry/tex-gyre/heros')
 FONT_DIR = 'release/assets/default/raw/fonts/'
 
 @dataclasses.dataclass(frozen=True)
@@ -1202,7 +1175,6 @@ class Face:
     source: str = ''  # its original in assets/fonts, cut by subset_font; none: stock's own default.ttf, uncut
     family: str = ''  # the subset's name
     notices: tuple = ()  # assets/fonts' licence files, shipped beside it (FONT_NOTICES)
-    notice: str = ''  # its description (name ID 10), where its licence asks a modified font to say so
     fallback: str = ''  # the face (FACES key) a text takes when this one lacks one of its characters
     # the fallback's px, in % of this face's: the two faces' cap heights' ratio (stb sizes a font by its
     # ascent - descent; stock's default.ttf has a cap height of 183 of 299), so a stand-in's capitals
@@ -1225,13 +1197,7 @@ class Face:
 # has CJK.
 FACES = {
     'regular': Face('default'),
-    # Modern's Now Playing title, Classic's fallback: Liberation Sans Bold (OFL)
-    'bold': Face('bold', 'LiberationSans-Bold.ttf', 'Q2 Pod Sans', ('LiberationSans-OFL.txt',), fallback='regular'),
-    # Classic's: TeX Gyre Heros Bold (GUST Font License). The LPPL asks a modified font to say so
-    # itself, and where the original is: assets/fonts/README-classic-light.txt
-    'classic-light': Face('classic-light', 'texgyreheros-bold.otf', 'Q2 Pod Classic Light',
-                          ('GUST-FONT-LICENSE.txt', 'README-classic-light.txt'), CLASSIC_LIGHT_NOTICE, 'bold', 83),
-    # Inter 4.1 (OFL), Regular and Medium, with tabular figures: no theme takes them yet
+    # Inter 4.1 (OFL), Regular and Medium, with tabular figures: OLED's
     'inter': Face('inter', 'Inter-Regular.ttf', 'Q2 Pod OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98, tabular='.tf'),
     'inter-medium': Face('inter-medium', 'Inter-Medium.ttf', 'Q2 Pod OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98,
                          tabular='.tf'),
@@ -1241,7 +1207,7 @@ FONT_NOTICES = tuple(dict.fromkeys(n for f in FACES.values() for n in f.notices)
 
 def face_font(face):
     """The face's file and its ranges macro (subset_font)."""
-    return subset_font(ROOT/'assets/fonts'/face.source, face.family, face.ranges_macro, face.notice or None, face.tabular)
+    return subset_font(ROOT/'assets/fonts'/face.source, face.family, face.ranges_macro, face.tabular)
 
 def font_indices():
     """FONT_<NAME>, each face's index in FACES' order, and FONT_N: theme_t.font[]'s values."""
@@ -1477,7 +1443,6 @@ FUNCTIONS = {
  'widget_to_local': ('int', 'void *, void *'),
  'widget_dispatch_event_to_target_recursive': ('int', 'void *, void *'),
  'label_create': ('void *', 'void *, int, int, int, int'),
- 'label_resize_to_content': ('int', 'void *, unsigned, unsigned, unsigned, unsigned'),  # Classic's toast (navigation.c toast_paint)
  'stock_search': ('int', 'void *, void *'),
  'widget_set_children_layout': ('int', 'void *, const char *'),
  'widget_get_canvas': ('void *', 'void *'),  # the lyrics page measures its lines (lyrics.c)
@@ -1642,7 +1607,7 @@ FUNCTIONS = {
  'config_playmode': ('int', 'int, int'),
  'toolsRandnum': ('int', 'int'),
  'widget_restack': ('int', 'void *, unsigned'),
- 'widget_index_of': ('int', 'void *'),  # Centred Now Playing's column back in its place (navigation.c np_full)
+ 'widget_index_of': ('int', 'void *'),  # Now Playing's lyrics column back in its place (navigation.c np_full)
  # ⋯'s About moves Now Playing's details into its page and back (np_about.c)
  'widget_remove_child': ('int', 'void *, void *'),
  'widget_add_child': ('int', 'void *, void *'),
@@ -1682,7 +1647,7 @@ FUNCTIONS = {
  'bitmap_lock_buffer_for_read': ('const unsigned char *', 'void *'),
  'canvas_draw_image': ('int', 'void *, void *, const void *, const void *'),
  'canvas_set_global_alpha': ('int', 'void *, unsigned'),
- 'widget_paint': ('int', 'void *, void *'),  # the system bar, under a dialog that covers it (classic_pages.c search_paint)
+ 'widget_paint': ('int', 'void *, void *'),  # a widget painted into another's canvas (coverflow.c coverflow_home_strip)
  # Cover Flow's flip paints the tracks panel to a bitmap as stock's window snapshots do (coverflow.c flip_capture)
  'canvas_offline_create': ('void *', 'unsigned, unsigned, unsigned'),
  'canvas_offline_begin_draw': ('int', 'void *'),
@@ -1905,7 +1870,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'classic_pages.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'font_weight.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c']
 
 def compile_payload(out):  # pragma: no mutate block
     """Compile and link the payload."""
@@ -1929,6 +1894,8 @@ def compile_payload(out):  # pragma: no mutate block
         '--undefined=coverflow_player_cover', '--undefined=coverflow_grid_cover', '--undefined=coverflow_album_cover', '--undefined=coverflow_folder_cover', '--undefined=headset_bt_init',
         '--undefined=headset_status_register', '--undefined=headset_bt_autolink',
         *nav,out/'trampoline.o',*extra,'-o',out/'patch.elf')
+    # link.ld has no .data: an initialised static would land in the payload's read-only text
+    check(not re.search(r'\] \.s?data ', run('readelf', '-SW', out/'patch.elf')), 'Payload has .data: writable state goes in .scratch')
     run('llvm-objcopy','-O','binary',out/'patch.elf',out/'patch.bin')
     return symbols(out/'patch.elf')
 
@@ -2071,11 +2038,12 @@ def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
                f'#define Q2POD_REPO "{repo}"',  # netupdate.c: the repo whose latest release it fetches
                '#define Q2POD_SIGN_KEY {' + ','.join(f'0x{b:02x}' for b in key or signing_key(None, False)) + '}',  # release_sig.c
                f'#define Q2POD_UA "Q2Pod/{VERSION} (https://github.com/{REPO})"']  # onlinematch.c, as MusicBrainz asks: the project's contact, not --update-repo's
-    header.append(f'#define THEME_N {len(themes)}')  # theme_engine.c setting_counts[]
+    check(len(themes) == 1, f'{len(themes)} built-in themes: the payload has one (theme_engine.c theme())')
+    header.append(f'#define THEME_N {len(themes)}')  # theme_engine.c theme()
     header.append(f'#define THEME_KEYS {len(theme_keys(themes))}')  # navigation.c st.own[], themes.inc theme_keys[]
     from art import corner_table, qs_lit
     header.append(f'#define ROUND_COVER {corner_table()}')  # navigation.c paint_round_rows
-    header.append(f'#define QS_LIT "{qs_lit()}"')  # navigation.c quick_page: Classic's buttons that are on
+    header.append(f'#define QS_LIT "{qs_lit()}"')  # navigation.c quick_state: the buttons that are on
     return '\n'.join(header)+'\n'
 
 def signing_key(path, dev):
@@ -2130,7 +2098,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     # a prefix-trimmed typo cannot silently disable a screen this way.
     from ipod import (AUDIT, ARTIST_ALBUMS, SETTINGS_ICONS, inc, UI_ASSETS, patch_asset,
                       QUIET_ICONS, quiet_icon, imagemagick, patch_code, CLOSE_LOAD, DUMMY_LOAD, patch_style, patch_word, branch, settings_icon,
-                      STATUS_ICONS, status_icon, row_icon, pane_icon, ART_PLACEHOLDERS, sized_art, PLAYING_STOCK, PLAYING_PAGE, playing_stock,
+                      STATUS_ICONS, status_icon, row_icon, ART_PLACEHOLDERS, sized_art,
                       set_assets)
     contexts = re.findall(r'"([^"]+)"', (ROOT/'patch/contexts.inc').read_text())
     check(contexts, 'No navigation contexts audited')
@@ -2364,7 +2332,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                jal(ps['ringnav_np_info']), "Now Playing's info lines")
     for site in AB_X_CALLS:
         patch_word(patched, site, branch(0x04110000, site, PRIVATE_FUNCTIONS['ab_x']),
-                   jal(ps['ringnav_ab_x']), "A-B markers on Classic's fitted bar")
+                   jal(ps['ringnav_ab_x']), "A-B markers on the slider")
     for address, old, new in LDAC_HQ:
         patch_word(patched, address, old, new, 'LDAC HQ sends 990 kbps')
     patch_word(patched, WHEEL_TS_READ[0], WHEEL_TS_READ[1], jal(ps['ringnav_ts_read']), 'wheel ticks')
@@ -2536,30 +2504,24 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         audiobooks='playset_foldercover.png', photos='playset_covermode.png', books='system_language.png',
         videos='system_display.png', longsongs='system_time.png', era='local_genre.png').items()})
     icons['local_games.png'] = ('system_language.png', (ROOT/'assets/icons/local_games.png').read_bytes())
-    # Minimal's selected Wi-Fi and Bluetooth rows draw this grey copy over stock's white delete mark
-    icons['list_delete.png'] = ('navbar_delete.png', cat(xx+'navbar_delete.png'))
     for n in ('spotify', 'radio', 'app', 'config'):  # Streaming's Spotify, Internet Radio, card app and Configuration rows
         icons[f'stream_{n}.png'] = ('list_tidal.png', (ROOT/'assets/icons'/f'stream_{n}.png').read_bytes())
     icons['stream_airplay.png'] = ('list_tidal.png', cat(xx+'netservice_airplay.png'))  # iPod resizes stock's
     art = (ROOT/'assets/icons/default_album_home.png').read_bytes()
     # Streaming's rows draw them at SET_ICON; Home's placeholder at the art panel's 290px
     from theme import builtins as builtin_themes
-    pane = max(t['pane_svc_px'] for t in builtin_themes())  # Home's pane on Streaming's list, 1:1 (coverflow.c pane_service)
     for n in ('spotify', 'radio', 'app', 'airplay', 'config'):
         like, data = icons[f'stream_{n}.png']
-        icons[f'classic_light_stream_{n}.png'] = (like, pane_icon(data, pane))
         icons[f'stream_{n}.png'] = (like, row_icon(data, sharp=True))
-    icons['classic_light_list_tidal.png'] = ('list_tidal.png', pane_icon(cat(xx+'list_tidal.png'), pane))
     icons['default_album_home.png'] = ('default_album_big.png', art)
     icons['default_album_flow.png'] = ('default_album_big.png', sized_art(art, 160))
     cgi_root = compile_helper(out, cat, 'cgi_root', 'q2cgi-root', HELPER_LIBS[:1])
-    pages = {ui+PLAYING_STOCK: (ui+'playing_page.bin', english_ui(PLAYING_PAGE, playing_stock(cat(ui+'playing_page.bin')))), **set_pages}
     added = list(player_added)
     removed = []
     changed_assets = {}
     from art import theme_images
     drawn = {xx+n+'.png': (xx+'list_tidal.png', d) for n, d in theme_images(builtin_themes()).items()}
-    for path, (like, data) in {**{xx+n: (xx+l, d) for n, (l, d) in icons.items()}, **pages, **drawn,
+    for path, (like, data) in {**{xx+n: (xx+l, d) for n, (l, d) in icons.items()}, **set_pages, **drawn,
                                'etc/init.d/S12usbcharge': ('etc/init.d/S20urandom', (ROOT/'patch/usb_charge.sh').read_bytes()),
                                HELPER: (HELPER_LIKE, compile_helper(out, cat, 'video', 'q2video', HELPER_LIBS)),
                                SCROBBLE_CA: ('etc/hosts', (ROOT/'assets/scrobble-ca.pem').read_bytes()),

@@ -942,7 +942,7 @@ def test_play_next_and_add_to_queue_join_the_album_playing(q2):
     q.songs()  # Library → Songs, while Dawn plays
     q.hold('Rise', QA['NEXT'])
     q.hold('Gem', QA['ADD'])
-    assert q.toasts == [] and q.now_playing() == ('1 of 5', 'First')
+    assert q.toasts == ['Playing Next', 'Added to Queue'] and q.now_playing() == ('1 of 5', 'First')  # OLED says each
     q.play_for(SONG)
     assert q.opened[1:] == [BETA + 'Second/01 Rise.flac'] and q.now_playing() == ('2 of 5', 'Second')
     q.play_for(4 * SONG)

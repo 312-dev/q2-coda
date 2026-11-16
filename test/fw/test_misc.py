@@ -4,12 +4,13 @@ import ctypes as C
 import io
 import math
 import random
+import re
 import struct
 import subprocess
 import zipfile
 
 import pytest
-from conftest import block
+from conftest import ROOT, block
 from test_books import stored  # test_books.py keeps the stored-block maker
 
 CENTER, PREV, NEXT, PLAY, RETURN, BACK_BTN, FWD_BTN = 218, 172, 173, 171, 170, 222, 223
@@ -1929,6 +1930,15 @@ ACT_BACK, ACT_APPLY, ACT_RESET, ACT_BYPASS, ACT_PER_OUTPUT, ACT_MENU, ACT_SAVE, 
     ACT_KEYBOARD, ACT_STOCK, ACT_FILE_PREV, ACT_FILE_NEXT, ACT_RENAME, ACT_NAMED = range(1000, 1028)
 
 
+def toasts(fw):
+    """What action's toasts say, in order: its status, over the page (toast: stock's msginfo_dialog, the text 8 bytes
+    into its info)."""
+    said: list[bytes] = []
+    fw.mock('navigator_to_with_context', lambda page, info, *_:
+            said.append(C.string_at(info + 8)) if C.string_at(page) == b'dialog/msginfo_dialog' else None)
+    return said
+
+
 def act(fw, *ids):
     action = fw.fn('peq_ui__action', C.c_int, C.c_void_p, C.c_void_p)
     for id_ in ids:
@@ -2104,12 +2114,13 @@ def test_a_row_past_the_stock_presets_does_nothing(fw):
 
 def test_saving_takes_a_slot_and_asks_before_replacing_it(fw):
     card = Card(fw)
+    said = toasts(fw)
     u = ui(fw)
     u.draft = peak_preset(6)
     u.screen = SAVES
     act(fw, 0)
     path = f'{FOLDER}/Manual 01.txt'
-    assert card.files[path].startswith(b'# Equalizer APO preset') and b'saved' in u.status
+    assert card.files[path].startswith(b'# Equalizer APO preset') and len(said) == 1 and b'saved' in said[0]
     first = card.files[path]
     u.draft.bands[0].gain = 3
     act(fw, 0)
@@ -2123,10 +2134,11 @@ def test_saving_takes_a_slot_and_asks_before_replacing_it(fw):
 def test_a_preset_on_the_card_loads_or_says_which_line_failed(fw):
     files(fw, [b'good.txt', b'bad.txt'])(b'/mnt/mmc/EQ', b'.txt')
     card = Card(fw, {'/mnt/mmc/EQ/good.txt': b'Preamp: -3 dB\n', '/mnt/mmc/EQ/bad.txt': b'\nnonsense\n'})
+    said = toasts(fw)
     u = ui(fw)
     u.screen = PRESETS
     act(fw, 0)  # sorted: bad.txt
-    assert u.status == b'Line 1: no Equalizer APO lines' and u.screen == PRESETS
+    assert said == [b'Line 1: no Equalizer APO lines'] and u.screen == PRESETS
     act(fw, 1)
     assert u.screen == HOME and u.name == b'good' and u.draft.preamp == -3 and len(card.files) == 2  # nothing written
 
@@ -2134,22 +2146,24 @@ def test_a_preset_on_the_card_loads_or_says_which_line_failed(fw):
 def test_deleting_asks_first_and_leaves_what_plays(fw):
     files(fw, [b'a.txt'])(b'/d', b'.txt')
     card = Card(fw, {f'{FOLDER}/a.txt': b'p', ACTIVE: b'x'})
+    said = toasts(fw)
     u = ui(fw)
     u.screen = DELETES
     act(fw, 0)
     assert u.screen == CONFIRM and f'{FOLDER}/a.txt' in card.files
     act(fw, ACT_YES)
-    assert f'{FOLDER}/a.txt' not in card.files and card.files[ACTIVE] == b'x' and u.status == b'Deleted a.txt; active EQ unchanged'
+    assert f'{FOLDER}/a.txt' not in card.files and card.files[ACTIVE] == b'x' and said == [b'Deleted a.txt; active EQ unchanged']
 
 
 def test_a_saved_preset_it_can_t_read_changes_nothing(fw):
     files(fw, [b'a.txt'])(b'/d', b'.txt')
     Card(fw, {f'{FOLDER}/a.txt': b'junk'})
+    said = toasts(fw)
     u = ui(fw)
     u.draft = peak_preset(6)
     u.screen = PRESETS
     act(fw, 0)
-    assert u.draft.bands[0].gain == 6 and u.status == b'Line 1: no Equalizer APO lines'
+    assert u.draft.bands[0].gain == 6 and said == [b'Line 1: no Equalizer APO lines']
 
 
 def test_a_file_row_counts_through_its_page(fw):
@@ -2177,11 +2191,12 @@ def test_the_switch_turns_peq_on_over_3eq_and_off(fw):
 def test_a_failed_switch_says_so_and_stays(fw):
     config(fw)
     card = Card(fw, {ACTIVE: saved_state(fw, 0)})
+    said = toasts(fw)
     u = ui(fw)
     u.draft.bypass = 1
     fw.mock('fw_fopen', lambda path, mode, *_: card.fopen(path, mode) if C.string_at(mode)[:1] == b'r' else 0)
     act(fw, ACT_BYPASS)
-    assert u.draft.bypass == 1 and u.status == b'Switch failed; EQ unchanged'
+    assert u.draft.bypass == 1 and said == [b'Switch failed; EQ unchanged']
 
 
 def test_a_display_only_row_does_nothing(fw):
@@ -2197,6 +2212,13 @@ class E3(C.Structure):
 
 
 E3_TABS, E3_SWITCH, E3_PRESETS, E3_RESET, E3_LOW, E3_MID, E3_HIGH = range(7)
+# OLED's Simple tab (a set_switch theme's, peq.h): the switch, Presets and Reset as rows under the tabs, then the
+# sliders' travel, +6 dB at its top to -6 at its foot
+EQ = {k: int(v) for k, v in re.findall(r'^#define (EQ_TABS_H|EQ_ROW|EQ_SLIDERS_TOP|EQ_SLIDERS_BOTTOM) (\d+)\b',
+                                        (ROOT/'patch/peq.h').read_text(), re.M)}
+ROWS_Y, ROW, TOP, FOOT = EQ['EQ_TABS_H'], EQ['EQ_ROW'], EQ['EQ_SLIDERS_TOP'], EQ['EQ_SLIDERS_BOTTOM']
+ZERO = (TOP + FOOT) // 2
+assert ROWS_Y + 3 * ROW < TOP - 4  # a finger just above the travel is past the rows
 
 
 def simple(fw, state=None):
@@ -2228,7 +2250,7 @@ def test_the_same_gain_is_no_edit(fw):
     assert e.dirty == 0 and not fw.calls('timer_add')
 
 
-@pytest.mark.parametrize('gain, y', ((0, 184), (6, 138), (-6, 230), (3, 161)))
+@pytest.mark.parametrize('gain, y', ((0, ZERO), (6, TOP), (-6, FOOT), (3, ZERO - (FOOT - TOP) // 4)))
 def test_a_slider_s_knob_follows_its_gain(fw, gain, y):
     fw.var('peq_ui__e3', E3).h = 290
     assert fw.fn('peq_ui__e3_y', C.c_int, C.c_double)(gain) == y
@@ -2337,7 +2359,8 @@ def pointer(kind, x, y):
     return raw
 
 
-@pytest.mark.parametrize('x, y, band, gain', ((50, 184, 0, 0), (200, 138, 1, 6), (300, 230, 2, -6), (50, 110, 0, 6), (50, 400, 0, -6), (50, 180, 0, .5), (50, 188, 0, -.5)))
+@pytest.mark.parametrize('x, y, band, gain', ((50, ZERO, 0, 0), (200, TOP, 1, 6), (300, FOOT, 2, -6), (50, TOP - 4, 0, 6), (50, 400, 0, -6),
+                                              (50, ZERO - 1, 0, .5), (50, ZERO + 1, 0, -.5)))
 def test_a_slider_follows_the_finger_by_half_decibels(fw, x, y, band, gain):
     _, e, _ = simple(fw)
     if gain == 0:
@@ -2349,21 +2372,23 @@ def test_a_slider_follows_the_finger_by_half_decibels(fw, x, y, band, gain):
 def test_a_lift_ends_the_drag_and_saves(fw):
     _, e, card = simple(fw, saved_state(fw, 1))
     touch = fw.fn('peq_ui__e3_touch', C.c_int, C.c_void_p, C.c_void_p)
-    touch(None, pointer(0x100, 50, 138))
-    touch(None, pointer(0x104, 50, 138))
+    touch(None, pointer(0x100, 50, TOP))
+    touch(None, pointer(0x104, 50, TOP))
     assert (e.dragging, e.adjusting, e.dirty) == (0, 0, 0) and saved(card).eq3.bands[0].gain == 6
 
 
 def test_a_touch_on_the_tabs_is_not_simple_s(fw):
     _, e, _ = simple(fw)
-    fw.fn('peq_ui__e3_touch', C.c_int, C.c_void_p, C.c_void_p)(None, pointer(0x100, 50, 51))
-    assert not e.dragging
+    e.focus = E3_LOW
+    fw.fn('peq_ui__e3_touch', C.c_int, C.c_void_p, C.c_void_p)(None, pointer(0x100, 50, ROWS_Y - 1))
+    assert not e.dragging and e.focus == E3_LOW
 
 
-@pytest.mark.parametrize('x, focus', ((12, E3_SWITCH), (156, E3_SWITCH), (157, E3_PRESETS), (305, E3_PRESETS), (306, E3_RESET)))
-def test_a_touch_on_the_buttons_takes_the_nearest(fw, x, focus):
+@pytest.mark.parametrize('y, focus', ((ROWS_Y, E3_SWITCH), (ROWS_Y + ROW - 1, E3_SWITCH), (ROWS_Y + ROW, E3_PRESETS),
+                                      (ROWS_Y + 2 * ROW - 1, E3_PRESETS), (ROWS_Y + 2 * ROW, E3_RESET), (ROWS_Y + 3 * ROW - 1, E3_RESET)))
+def test_a_touch_on_the_rows_takes_its_row(fw, y, focus):
     _, e, _ = simple(fw)
-    fw.fn('peq_ui__e3_touch', C.c_int, C.c_void_p, C.c_void_p)(None, pointer(0x100, x, 60))
+    fw.fn('peq_ui__e3_touch', C.c_int, C.c_void_p, C.c_void_p)(None, pointer(0x100, 200, y))
     assert e.focus == focus
 
 

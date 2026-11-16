@@ -1,7 +1,6 @@
 """upnext.c on its device path: Up Next's rows over a shuffled queue as playback.c orders it, a row's tap, a
 Play/Pause hold's move, and a queue changed under the page."""
 import ctypes as C
-import itertools
 import mmap
 import struct
 
@@ -9,7 +8,9 @@ import pytest
 
 from conftest import O, Deques, libc
 
-PAGE = 0x7000
+# Up Next's window, a zeroed widget (no parent, no name): OLED's title and toast checks read the window on top
+_PAGE = C.create_string_buffer(0x400)
+PAGE = C.addressof(_PAGE)
 EVT_CLICK, EVT_DESTROY, SEL, COUNT = O['EVT_CLICK'], O['EVT_DESTROY'], b'_ringnav_index', b'_ringnav_count'
 MAP_32BIT = 0x40
 NAMES = [b'%02d Song.flac' % k for k in range(8)]
@@ -88,8 +89,9 @@ class Page:
         self.labels = []
         fw.mock('window_create', lambda *_: PAGE)
         fw.mock('scroll_view_create', lambda *_: self.items.clear() or C.addressof(self.view))
-        ids = itertools.count(0x7100)
-        fw.mock('list_item_create', lambda *_: self.items.append(next(ids)) or self.items[-1])
+        self.rows_made: list = []  # list_item_create's rows: a zeroed widget each, alive for the test
+        fw.mock('list_item_create', lambda *_: self.rows_made.append(C.create_string_buffer(0x400)) or
+                self.items.append(C.addressof(self.rows_made[-1])) or self.items[-1])
         fw.mock('hscroll_label_create', self.label)
         fw.mock('widget_set_text_utf8', lambda w, s, *_: self.texts.__setitem__(w, C.string_at(s).decode()))
         fw.mock('widget_get_text_utf8', self.get_text)

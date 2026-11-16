@@ -10,9 +10,8 @@
  * slide_view at rest on its first page, and not while the lyrics are full screen. A touch that
  * moves more than TAP_PX is a swipe or a drag: the slide_view's, never a link or a hold. While the
  * touch is held on a link that goes somewhere (the art: or opens full screen) it is lit: the
- * label's text in the accent (np_tap_ink; navigation.c ringnav_style_color, and paint_caps for
- * Minimal's album) or the art dimmed DIM_ALPHA (Classic's slanted art faded as much over its
- * paper). The move is deferred to the next pass, outside the touch's dispatch. */
+ * label's text in the accent (np_tap_ink; navigation.c ringnav_style_color) or the art dimmed
+ * DIM_ALPHA. The move is deferred to the next pass, outside the touch's dispatch. */
 #include "navigation.h"
 
 enum { NPT_NONE, NPT_ART, NPT_ARTIST, NPT_ALBUM };
@@ -54,18 +53,10 @@ static int npt_at(int x, int y) {
     return NPT_NONE;
 }
 
-/* 1 for Classic's slanted art, drawn with its reflection in a box taller than wide on the paper
- * (navigation.c paint_cover) */
-static int npt_slanted(void *w) { return w && I(w, W_H) > I(w, W_W); }
-
 static void npt_light(int k) {
     if (k == npt.lit) return;
     void *was = npt_widget(npt.lit), *now = npt_widget(k);
     npt.lit = k;
-    /* the slanted art can't take a box of shade (the paper round it would grey): it is drawn
-     * DIM_ALPHA less opaque instead, over the paper */
-    if (npt_slanted(st.np_cover) && (was == st.np_cover || now == st.np_cover))
-        widget_set_opacity(st.np_cover, k == NPT_ART ? 255 - DIM_ALPHA : 255);
     if (was) widget_invalidate_force(was, (void *)0);
     if (now) widget_invalidate_force(now, (void *)0);
 }
@@ -130,7 +121,7 @@ int np_tap(void *ctx, void *event) {
 }
 
 /* The held artist's or album's text, 0xRRGGBB: the accent's text tone, or Text Primary (white,
- * Light Mode's ink) for a grey accent (Minimal's Graphite), whose tone is the line's own grey */
+ * Light Mode's ink) for a grey accent (Graphite), whose tone is the line's own grey */
 unsigned np_tap_ink(void) {
     unsigned c = accent_tone(TONE_RED);
     return flip_if(ipod_light(), neutral(c) ? 0xffffff : c);
@@ -139,11 +130,9 @@ unsigned np_tap_ink(void) {
 /* 1 when w is the artist or album held lit */
 int np_tap_lit(void *w) { return w && npt.lit > NPT_ART && w == npt_widget(npt.lit); }
 
-/* The held art, dimmed (navigation.c paint_cover: over the image, under the rounded corners); the
- * slanted art is faded instead (npt_light) */
+/* The held art, dimmed (navigation.c paint_cover: over the image, under the rounded corners) */
 void np_tap_dim(void *w, void *canvas) {
-    if (!w || npt.lit != NPT_ART || w != st.np_cover || npt_slanted(w) || !P(canvas, CANVAS_LCD))
-        return;
+    if (!w || npt.lit != NPT_ART || w != st.np_cover || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     stock_canvas_set_fill_color(canvas, (RGBA(0) & 0xffffffu) | (unsigned)DIM_ALPHA << 24);
     canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));

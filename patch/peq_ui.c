@@ -238,7 +238,7 @@ static void *fit(void *label) {
 }
 /* LONG: a value of any length (a file's name), in stock's right-aligned ellipsis label (navigation.c's
  * list_value), grey beside the chevron. It stops short of the caption at x 130, past "Presets" in
- * the widest row font, Classic's 27 px (ends at x 118). Stock's label keeps 2 px each side; none on
+ * the widest row font at 27 px (ends at x 118). Stock's label keeps 2 px each side; none on
  * the right ends a name that fits where the row's other values do. Stock draws a cut one from the
  * label's left, so it can end up to a letter short of them, and scrolls it while the row is selected
  * (only_focus: the marquee's). ponytail: a fixed column, not the caption's measured width, so a theme
@@ -719,9 +719,9 @@ static int action(void *ctx, void *event) {
     }
     if (screen != ui.screen) ui.file_page = 0;
     if (!ui.timer) ui.timer = timer_add(render, 0, 1);
-    /* Under OLED what an action did is a toast over the page, which keeps its title
+    /* What an action did is a toast over the page, which keeps its title
      * (docs/oled-design.md#dialogs-and-toasts); the render runs under it. */
-    if (feedback_oled() && ui.status[0]) {
+    if (ui.status[0]) {
         char said[sizeof ui.status];
         memcpy(said, ui.status, sizeof said);
         ui.status[0] = 0;
@@ -1372,7 +1372,7 @@ static void e3_box(void *canvas, int x, int y, int w, int h, unsigned rgb) {
 }
 
 /* A set_switch theme's (OLED's) Simple tab is slider_page.c's eq_rows_paint, on the EQ_* rows.
- * Otherwise: the switch's bar and the gains' bars in the accent's light tone (white in Minimal), grey
+ * Otherwise: the switch's bar and the gains' bars in the accent's light tone, grey
  * while 3EQ is off; the selected control on a lighter card; the slider being adjusted with a white
  * handle and value, the others grey. While PEQ plays the switch shows it on, under the applied
  * preset's name (Advanced unnamed; eq_rows_paint keeps the switch's Enabled and gives the name to

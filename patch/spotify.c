@@ -113,7 +113,7 @@ static struct {
     void *page, *info, *msg, *art, *bar, *glyph, *title, *artist, *album, *elapsed, *remain, *note,
         *sub;
     unsigned timer, leave, scrub_at, shown, playing, press, press_at, bar_drawn; /* bar_drawn: its state + 1 */
-    int scrub, scrub_ms, ipod;         /* ipod: Classic's layout (stream_ipod) */
+    int scrub, scrub_ms;
     char art_track[64], art_tried[64]; /* art_tried: the track whose cover failed, tried art_tries times */
     int art_tries;
 } ui __attribute__((section(".scratch")));
@@ -437,14 +437,12 @@ static void spot_refresh(void) {
         if (text_differs(fields[i], values[i])) {
             widget_set_text_utf8(fields[i], values[i]);
             widget_set_prop_int(fields[i], "xoffset", 0);
-            if (ui.ipod && !i)
-                theme_font(fields[i], ROLE_NP, FONT_ROW); /* the local page's title */
         }
     /* ponytail: the cover is sized on the UI thread, one decode a track; a worker if it stutters */
     /* A cover that fails (written after its state line, or bad) is tried again on the next 3 ticks. */
     if (tk_strcmp(ui.art_tried, sp.track)) ui.art_tries = 0;
     if (sp.cover && tk_strcmp(ui.art_track, sp.track) && ui.art_tries < 4) {
-        int px = I(ui.art, W_W); /* Classic's slanted art is wider */
+        int px = I(ui.art, W_W);
         if (thumb(SPOT_COVER, SPOT_ART, px, px) && image_show(ui.art, "file://" SPOT_ART, 0))
             tk_snprintf(ui.art_track, sizeof ui.art_track, "%s", sp.track);
         else {
@@ -456,15 +454,12 @@ static void spot_refresh(void) {
         ui.art_track[0] = 0;
         image_base_set_image(ui.art, PLACEHOLDER);
     }
-    if (ui.ipod)
-        ipod_times(ui.elapsed, ui.remain, ui.bar, (int)(sp.duration / 1000)); /* a new length */
     unsigned ms = ui.scrub ? (unsigned)ui.scrub_ms : spot_position();
     if (ms / 1000 + 1 != ui.shown) {
         ui.shown = ms / 1000 + 1;
         times(ms);
     }
     /* only when the drawn width (spot_paint's) or the scrub's colour moves: this runs every tick */
-    /* Classic's fitted to the track (ipod_times), the others' SPOT_BAR_W */
     unsigned bw = (unsigned)I(ui.bar, W_W);
     unsigned bar = (unsigned)((ms >> 4) * bw / ((sp.duration >> 4) | 1)) << 1 | (ui.scrub != 0);
     if (bar + 1 != ui.bar_drawn) {
@@ -496,15 +491,10 @@ void spot_paint(void *w, void *canvas) {
     if (!ui.page || !w || !P(canvas, CANVAS_LCD) || (w != ui.bar && w != ui.glyph)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     unsigned tone = rgba(accent_tone(2), 255);
-    if (w == ui.bar && ui.ipod) { /* Classic's, as the local page's, its scrub's cue on it */
-        int bw = I(w, W_W);
-        unsigned ms = ui.scrub ? (unsigned)ui.scrub_ms : spot_position();
-        ipod_bar(canvas, 0, 0, bw, (int)((ms >> 4) * (unsigned)bw / ((sp.duration >> 4) | 1)),
-                 ui.scrub);
-    } else if (w == ui.bar) {
+    if (w == ui.bar) {
         unsigned ms = ui.scrub ? (unsigned)ui.scrub_ms : spot_position();
         int x = (int)((ms >> 4) * SPOT_BAR_W / ((sp.duration >> 4) | 1)); /* 32-bit to 57 h */
-        /* Minimal's 4 px line, Modern's 8 px capsule: the view's height at most */
+        /* the theme's bar, the view's height at most */
         int h = theme()->np_bar < SPOT_BAR_H ? theme()->np_bar : SPOT_BAR_H;
         box(canvas, 0, 0, SPOT_BAR_W, h, rgba(theme()->np_track_rgb, 255), h / 2);
         if (x) box(canvas, 0, 0, x < h ? h : x, h, ui.scrub ? 0xffffffffu : tone, h / 2);
@@ -584,10 +574,6 @@ static void spot_np(void) {
         label(ui.info, SPOT_TIME_X, SPOT_TIMES_Y, 80, 16, "s_scrlabel_white20l", 14, SPOT_GREY);
     ui.remain = label(ui.info, 375 - SPOT_TIME_X - 80, SPOT_TIMES_Y, 80, 16, "s_scrlabel_white20r",
                       14, SPOT_GREY);
-    /* Classic: the local page's places, its title bar naming the page and showing the play state */
-    void *rows[4] = { ui.title, ui.artist, ui.album, 0 };
-    ui.ipod = stream_ipod(ui.art, rows, ui.elapsed, ui.remain, ui.bar, 0);
-    if (ui.ipod) widget_set_visible(name, 0, 0), widget_set_visible(ui.glyph, 0, 0);
     ui.note =
         label(ui.msg, CF_EDGE, 100, 375 - 2 * CF_EDGE, 30, "s_scrlabel_white20c", 20, 0xffffffffu);
     ui.sub =
@@ -1049,7 +1035,7 @@ static int go(const void *unused) {
             l->sel = widget_get_prop_int(br.view, "_ringnav_index", 0);
             widget_destroy_children(br.page), br.view = 0; /* the box alone: the keyboard leaves no room for the rows */
             br.edit = edit_create(br.page, "text", 2, 26);
-            t9_box(br.page, br.edit, "Search Spotify");
+            widget_set_prop_str(br.edit, "tips", "Search Spotify");
             widget_on(br.edit, EVT_VALUE_CHANGED, searched, 0);
             widget_on(br.edit, EVT_IM_ACTION, searched, 0);
             widget_on(br.edit, EVT_BLUR, search_left, 0);

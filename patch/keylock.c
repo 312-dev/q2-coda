@@ -114,8 +114,7 @@ int keylock_gate(void *e, int remote) {
         rearm(&kl.timer, card_end, KEYLOCK_CARD_MS);
         return 1;
     }
-    if (g_backlight_status || !oled_pages() || !locked(key) || video_on() || addon_game_on())
-        return 0;
+    if (g_backlight_status || !locked(key) || video_on() || addon_game_on()) return 0;
     kl.eat |= bit;
     card_on();
     return 1;
@@ -160,7 +159,7 @@ int keylock_bar(void *bar) {
     if (changed) widget_set_visible(kl.lock, on, 0);
     if (on) {
         char icon[32];
-        tk_snprintf(icon, sizeof icon, "%skeylock_%c", bar_theme()->art, ipod_light() ? 'l' : 'd');
+        tk_snprintf(icon, sizeof icon, "%skeylock_%c", theme()->art, ipod_light() ? 'l' : 'd');
         if (tk_strcmp(widget_get_prop_str(kl.lock, "image", ""), icon)) {
             image_base_set_image(kl.lock, icon);
             changed = 1;

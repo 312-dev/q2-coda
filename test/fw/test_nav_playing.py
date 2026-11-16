@@ -1,6 +1,6 @@
-"""patch/navigation.c's status bar and Now Playing: the battery slot and its painters, the theme's faces, scrub, the
-lyrics' wheel and touch, the full-screen art, the geometry sets' boot and Classic's slider pages; np_bar.c's bar
-title and Classic's times and bar; classic_pages.c's keyboard, Search's field and the slider pages' paint."""
+"""patch/navigation.c's status bar and Now Playing under OLED, the one theme: the battery slot and its painter, the
+theme's faces, scrub and the Centre cycle, the lyrics' wheel and touch, the full-screen art and the geometry sets'
+boot; np_bar.c's bar title, track, fill glide and Track Time; np_marquee.c's lines; song_rows.c's song_fit."""
 import ctypes as C
 import re
 import struct
@@ -8,16 +8,14 @@ import struct
 import pytest
 
 import host
-import art as tools_art  # tools/, on the path host.py set: the art's own sizes
 from conftest import NAVIGATION_SOURCE, O, Deques, Externpic, ask_cover, in_fork, libc, ui_name
 from test_nav_loop import DOWN, UP, key_event
 
 THEMES = host.tools_theme.builtins()
+OLED, = THEMES
 SETS = host.tools_theme.geometry_sets(THEMES)
-MINIMAL, CLASSIC, MODERN = ({t['id']: t for t in THEMES}[i] for i in ('minimal', 'classic-light', 'modern'))
-PICKER = sorted(THEMES, key=lambda t: t['order'])  # the Theme picker's rows: Status Bar's looks 1..N
-LOOK = {t['id']: 1 + i for i, t in enumerate(PICKER)}
-GEOM = {t['name']: SETS.index(host.tools_theme.geometry(t)) for t in THEMES}
+GEOM = SETS.index(host.tools_theme.geometry(OLED))  # the set theme_boot writes: OLED's own
+THEME_OLED = 3  # the THEME key's value from the four themes there were: OLED's (navigation.c theme_boot)
 RET_REPEAT, STOP = 8, 11
 FONT_ROW = -2
 ROLE_TITLE = 0
@@ -25,10 +23,8 @@ W_PARENT = O['W_PARENT']
 CANVAS_LCD, LCD_FILL, LCD_TEXT = O['CANVAS_LCD'], O['LCD_FILL_COLOR'], O['LCD_TEXT_COLOR']
 SCROLL_X, SCROLL_Y, CONTENT_H = O['SCROLL_X'], O['SCROLL_Y'], O['VIEW_CONTENT_H']
 KEY_NEXT, KEY_PREV, KEY_CENTER = O['KEY_NEXT'], O['KEY_PREV'], O['KEY_CENTER']
-PCT_W, BODY_W, BODY_H, NUB_W, NUB_H, GAP = (O[k] for k in ('BATT_PCT_W', 'BATT_BODY_W', 'BATT_BODY_H', 'BATT_NUB_W',
-                                                           'BATT_NUB_H', 'BATT_GAP'))
-INSIDE_W, INSIDE_H, ROOM, STATUS_GAP, BT_REACH = (O[k] for k in ('BATT_INSIDE_W', 'BATT_INSIDE_H', 'BATT_ROOM',
-                                                                 'STATUS_GAP', 'BT_REACH'))
+PCT_W, NUB_W, ROOM, STATUS_GAP, BT_REACH = (O[k] for k in ('BATT_PCT_W', 'BATT_NUB_W', 'BATT_ROOM', 'STATUS_GAP',
+                                                           'BT_REACH'))
 CODECS = re.findall(r'"(\w+)"', host.ROOT.joinpath('patch/offsets.inc').read_text().split('#define BT_CODECS', 1)[1].split('\n')[0])
 CODEC_REACH = [int(v) for v in re.findall(r'\d+', host.ROOT.joinpath('patch/offsets.inc').read_text()
                                           .split('#define BT_CODEC_REACH', 1)[1].split('\n')[0])]
@@ -53,24 +49,6 @@ def read_wide(p):
     return ''.join(out)
 
 
-def lum(c):
-    """A colour's channels summed: which of two is lighter, in either byte order."""
-    return sum(c >> s & 255 for s in (0, 8, 16))
-
-
-def within(inner, outer, slack=0):
-    """Rect inner (x, y, w, h, ...) inside outer, slack px of it allowed past each side."""
-    x, y, w, h = inner[:4]
-    ox, oy, ow, oh = outer[:4]
-    return ox - slack <= x and x + w <= ox + ow + slack and oy - slack <= y and y + h <= oy + oh + slack
-
-
-def bbox(rects):
-    xs, ys = [r[0] for r in rects], [r[1] for r in rects]
-    x1, y1 = max(r[0] + r[2] for r in rects), max(r[1] + r[3] for r in rects)
-    return min(xs), min(ys), x1 - min(xs), y1 - min(ys)
-
-
 class Config:
     """config.ini's [IPOD] keys: a key's value, else the caller's default."""
     def __init__(self, fw, **values):
@@ -89,12 +67,12 @@ def scratch(library):
 
 @pytest.fixture(scope='module')
 def ranges(library):
-    """The two faces' cmaps as the build cut them (tools/build.py subset_font): BOLD_RANGES, CLASSIC_LIGHT_RANGES."""
+    """Inter's cmap as the build cut it (tools/build.py subset_font): INTER_RANGES."""
     header = (library.parent/'stock.h').read_text()
     def runs(name):
         values = [int(v, 16) for v in host.tools_build.need(re.search(rf'#define {name} \{{([^}}]*)\}}', header), name)[1].split(',')]
         return list(zip(values[::2], values[1::2]))
-    return {'bold': runs('BOLD_RANGES'), 'classic-light': runs('CLASSIC_LIGHT_RANGES')}
+    return {'inter': runs('INTER_RANGES')}
 
 
 def has(runs, text):
@@ -102,14 +80,10 @@ def has(runs, text):
 
 
 PTRS = set('''bar_bt bar_wifi bar_pct bar_slot bar_icon bar_idle bar_state bar_eq bar_title np_win
-    np_album np_slider np_remain np_elapsed np_cover np_title np_slide np_lrc slider_win slider_w slider_sw slider_hint
-    t9_page t9_back kb_win search_win search_tabs pl_box stream_art stream_bar genre_label number_face'''.split())
-BYTES = {'title_align', 'slider_kind', 'bar_dark'}
-SHORTS = {'title_x', 'title_y', 'title_w'}
-UNSIGNED = set('''codec_timer batt_key bar_timer np_hash np_art np_marquee np_remain_timer np_fit_timer np_press
-    np_press_at scrub_timer scrub_track settle_timer lyric_push_at lyric_at lyric_follow_at lyric_song lyric_rows_song
-    bc_timer bc_track bc_repaint bc_key bc_box bc_shape bc_url clock_key clock_timer keep_lit_at genre_timer
-    last_input'''.split())
+    np_album np_slider np_remain np_elapsed np_cover np_title np_slide np_lrc genre_label'''.split())
+UNSIGNED = set('''codec_timer batt_key bar_timer np_hash np_art scrub_timer scrub_track settle_timer lyric_push_at
+    lyric_at lyric_follow_at lyric_song lyric_rows_song bc_timer bc_track bc_repaint bc_key bc_box bc_shape bc_url
+    clock_key clock_timer keep_lit_at genre_timer last_input'''.split())
 
 
 class State:
@@ -119,8 +93,7 @@ class State:
         object.__setattr__(self, 'at', scratch)
 
     def ref(self, name, i=0):
-        kind = (C.c_void_p if name in PTRS or name == 'bc' else C.c_ubyte if name in BYTES else C.c_short if name in SHORTS
-                else C.c_uint if name in UNSIGNED else C.c_int)
+        kind = C.c_void_p if name in PTRS or name == 'bc' else C.c_uint if name in UNSIGNED else C.c_int
         return kind.from_address(self.base + self.at[name] + i * C.sizeof(kind))
 
     def __getattr__(self, name):
@@ -353,14 +326,12 @@ class Canvas:
         return out
 
 
-def theme(fw, st, t=MINIMAL, light=0, **keys):
-    """The theme t on its own geometry set (theme_boot's), light or dark. Single Press Scrub is off unless keys
-    say, the presses the scrub tests were written for (it is on unless chosen off)."""
-    keys.setdefault('SCRUBSINGLE', 0)
-    Config(fw, THEME=t['index'], LIGHT=light, **keys)
+def theme(fw, st, light=0, **keys):
+    """OLED on its own geometry set (theme_boot's), light or dark, with the [IPOD] keys given."""
+    Config(fw, THEME=THEME_OLED, LIGHT=light, **keys)
     st.settings_read = 0
     fw.fn('accent', C.c_int)()
-    st.geom = GEOM[t['name']]
+    st.geom = GEOM
 
 
 # The status bar's battery slot (bar_sync) and what view_battery paints in it (paint_battery).
@@ -400,18 +371,22 @@ def slot_width(ui, bar):
     return ui.box(bar.slot)[2]
 
 
-@pytest.mark.parametrize('mode, width', [(0, BODY_W + NUB_W), (1, PCT_W), (2, BODY_W + NUB_W + GAP + PCT_W),
-                                         (3, INSIDE_W + NUB_W)])
+ICON_W = SETS[GEOM].batt_w + NUB_W  # the slim battery: the set's body and its nub (navigation.c bar_sync)
+
+
+# OLED's Battery is Icon or Percent (its battery option's values): a stored Icon + Percent (2) or Percent Inside (3)
+# reads as its default, Icon (theme_engine.c settings_read).
+@pytest.mark.parametrize('mode, width', [(0, ICON_W), (1, PCT_W), (2, ICON_W), (3, ICON_W)])
 def test_the_slot_is_its_modes_ink_wide_and_the_bars_height(fw, st, ui, mode, width):
     theme(fw, st, BATTERY=mode)
     bar = Bar(fw, ui)
     bar.sync()
-    assert ui.box(bar.slot)[2:] == (width, SETS[0].bar)
+    assert ui.box(bar.slot)[2:] == (width, SETS[GEOM].bar) and st.batt_mode == (mode == 1)
     assert (ui.shown[bar.icon], ui.shown[bar.pct], ui.shown[bar.slot]) == (0, 0, 1)  # the slot paints it all
 
 
 def test_only_a_new_level_or_charge_repaints_the_bar_after_the_frame(fw, st, ui):
-    theme(fw, st, BATTERY=2)
+    theme(fw, st, BATTERY=1)
     bar = Bar(fw, ui)
     repaints = []
     def sync(*level):
@@ -430,9 +405,9 @@ def test_only_a_new_level_or_charge_repaints_the_bar_after_the_frame(fw, st, ui)
 
 # Stock's battery writes land on the hidden label_battery and img_battery, which repaint nothing: showface's tick
 # repaints the bar for a new level or charge, as the minute does for the clock, and only then.
-@pytest.mark.parametrize('t, mode', [(MODERN, 1), (CLASSIC, 2), (MINIMAL, 3)])
-def test_a_new_level_repaints_the_bar_with_nothing_else_painting(fw, st, ui, t, mode):
-    theme(fw, st, t, BATTERY=mode)
+@pytest.mark.parametrize('mode', [0, 1])
+def test_a_new_level_repaints_the_bar_with_nothing_else_painting(fw, st, ui, mode):
+    theme(fw, st, BATTERY=mode)
     bar = Bar(fw, ui)
     lit = fw.var('g_backlight_status', C.c_ubyte)
     lit.value = 1
@@ -451,7 +426,7 @@ def test_a_new_level_repaints_the_bar_with_nothing_else_painting(fw, st, ui, t, 
         ui.run_all('bar_repaint')
         return asked
     assert [tick(), tick('87%'), frame(), tick(), tick('87%', b'bar_charge'), frame(), tick()] == [0, 1, 0, 0, 1, 0, 0]
-    grows = st.batt_mode in (1, 2)  # the digits shown beside or alone; Inside's body keeps its width
+    grows = st.batt_mode == 1  # the digits shown; the icon keeps its width
     assert [tick('9%'), frame()] == [1, grows]  # a digit fewer
     width = slot_width(ui, bar)
     # a digit more: the slot widens and the row relays, after the frame
@@ -460,74 +435,27 @@ def test_a_new_level_repaints_the_bar_with_nothing_else_painting(fw, st, ui, t, 
     assert tick('86%') == 0  # dark: the wake paints it
 
 
-def test_a_dark_bar_gets_one_repaint_for_a_new_level_and_its_sync_asks_for_no_more(fw, st, ui):
+def test_a_codec_badge_takes_the_room_until_it_fades_to_the_glyph(fw, st, ui):
     theme(fw, st, BATTERY=1)
     bar = Bar(fw, ui)
-    fw.var('g_backlight_status', C.c_ubyte).value = 1
-    st.bar_dark = 1
-    bar.sync()
-    ui.run_all('bar_repaint')
-    bar.level('87%')
-    before = len(ui.invalidated(bar.bar))
-    fw.fn('ringnav_showface', C.c_int, C.c_void_p)(bar.bar)
-    assert len(ui.invalidated(bar.bar)) - before == 1
-    bar.sync()
-    assert not ui.due('bar_repaint')
-
-
-def test_classic_repaints_the_bar_when_only_the_cable_flips(fw, st, ui):
-    theme(fw, st, CLASSIC, BATTERY=2)
-    bar = Bar(fw, ui)
-    fw.var('g_backlight_status', C.c_ubyte).value = 1
-    fw.var('fw_ctx_g_power_chargestate', C.c_int).value = 2  # full
-    usb = fw.var('g_usbdet_value', C.c_ubyte)
-    usb.value = 0
-    st.pct_digit, st.pct_sign = 10, 10
-    bar.sync()
-    ui.run_all('bar_repaint')
-    def tick():
-        before = len(ui.invalidated(bar.bar))
-        fw.fn('ringnav_showface', C.c_int, C.c_void_p)(bar.bar)
-        return len(ui.invalidated(bar.bar)) - before
-    usb.value = 1  # full on power: Classic's plug, the label and the icon unchanged
-    assert [tick(), tick()] == [1, 0]
-
-
-def test_wifi_and_bluetooth_crowd_the_percentage_out_to_the_icon(fw, st, ui):
-    theme(fw, st, BATTERY=2)
-    bar = Bar(fw, ui)
-    both = BODY_W + NUB_W + GAP + PCT_W
-    assert both + STATUS_GAP + BT_REACH <= ROOM < both + STATUS_GAP + BT_REACH + 20 + STATUS_GAP
-    bar.sync()
-    assert slot_width(ui, bar) == both
     ui.shown[bar.wifi] = 1
-    bar.sync()
-    assert slot_width(ui, bar) == BODY_W + NUB_W
-    ui.shown[bar.wifi] = ui.shown[bar.bt] = 0
-    bar.sync()
-    assert slot_width(ui, bar) == both
-
-
-def test_a_codec_badge_takes_the_room_until_it_fades_to_the_glyph(fw, st, ui):
-    theme(fw, st, BATTERY=2)
-    bar = Bar(fw, ui)
-    both = BODY_W + NUB_W + GAP + PCT_W
+    group = PCT_W + ui.box(bar.wifi)[2] + 2 * STATUS_GAP  # the percentage, Wi-Fi and Bluetooth, a gap apart
     ldac = CODECS.index('bar_ldac')
-    assert both + STATUS_GAP + CODEC_REACH[ldac] > ROOM >= both + STATUS_GAP + BT_REACH
+    assert group + CODEC_REACH[ldac] > ROOM >= group + BT_REACH
     ui.set_str(bar.bt, b'image', b'bar_ldac')
     bar.sync()
-    assert slot_width(ui, bar) == BODY_W + NUB_W
+    assert slot_width(ui, bar) == ICON_W  # crowded out to the icon
     assert [ui.timers[t][2] for t in ui.due('codec_fade')] == [O['CODEC_MS']]
     ui.run_all('codec_fade')
     assert ui.prop(bar.bt, b'image') == BT_GLYPH
     ui.set_str(bar.bt, b'image', b'bar_ldac')  # stock writes the badge again each second
     bar.sync()
-    assert ui.prop(bar.bt, b'image') == BT_GLYPH and slot_width(ui, bar) == both
+    assert ui.prop(bar.bt, b'image') == BT_GLYPH and slot_width(ui, bar) == PCT_W
     assert ui.due('codec_fade') == []
 
 
 def test_a_new_codec_starts_over_and_the_glyph_alone_ends_the_badge(fw, st, ui):
-    theme(fw, st, BATTERY=2)
+    theme(fw, st, BATTERY=1)
     bar = Bar(fw, ui)
     opacity = []
     fw.mock('widget_set_opacity', lambda w, v, *_: opacity.append(v))
@@ -545,57 +473,16 @@ def test_a_new_codec_starts_over_and_the_glyph_alone_ends_the_badge(fw, st, ui):
     assert ui.due('codec_fade') == [] and opacity[-1] == 255
 
 
-def row_h(t):
-    """The height of t's icon row (tools/ipod.py status_bar): Classic's is shorter than its bar."""
-    g = SETS[GEOM[t['name']]]
-    return 2 * ((g.bar - 2 - g.batt_h) // 2 + g.batt_h // 2) if g.bar_px else g.bar
-
-
-# Status Bar's look on every theme's row: Bluetooth and Wi-Fi on the look's rows off the layout's, and its battery
-# centred on the row's height, where the icons are, so each look's group reads as it does under its own theme.
-@pytest.mark.parametrize('t, look', [(t, look) for t in THEMES for look in range(1 + len(PICKER))],
-                         ids=lambda v: v['name'] if isinstance(v, dict) else ('Theme', *(t['name'] for t in PICKER))[v])
-def test_a_look_keeps_its_icons_rows_and_its_battery_centred_on_any_row(fw, st, ui, t, look):
-    b = PICKER[look - 1] if look else t
-    theme(fw, st, t, BATTERY=0, STATUSBAR=look)
-    bar = Bar(fw, ui)
-    row = row_h(t)
-    ui.place(bar.row, 240, 0, 135, row)
-    bt, wifi = ui.box(bar.bt), ui.box(bar.wifi)
-    canvas = Paint(fw, ui, bar)()
-    assert ui.box(bar.bt) == (bt[0], b['bar_bt_dy'], *bt[2:]) and ui.box(bar.wifi) == (wifi[0], b['bar_wifi_dy'], *wifi[2:])
-    if b['painter[PAINT_BATTERY]'] == list(host.tools_theme.CHOICES['bar.battery.painter']).index('slim'):
-        # OLED's slim battery is vgcanvas paths, whose float coordinates the stubs can't see: its outline, the
-        # charge and the nub (the emulator's screenshots check where it lands)
-        assert canvas.rects == [] and len(fw.calls('vgcanvas_stroke')) == 1 and len(fw.calls('vgcanvas_fill')) == 2
-        return
-    top = min(r[1] for r in canvas.rects)  # the dark half: no ink above the body
-    assert top == (row + 1 - SETS[GEOM[b['name']]].batt_h) // 2
-
-
-@pytest.mark.parametrize('t, digits, status', [(MINIMAL, [], 0), (CLASSIC, ['88', '88'], 0), (CLASSIC, ['88', '88'], 2)])
-def test_a_crowded_row_turns_percent_inside_to_the_icon_but_classics_is_the_icons_own_width(fw, st, ui, t, digits, status):
-    theme(fw, st, t, BATTERY=3)
-    bar = Bar(fw, ui)
-    ui.place(bar.wifi, 30, 6, 60, 18)
-    ui.shown[bar.wifi] = ui.shown[bar.eq] = 1
-    fw.mock('mclGetPlayStatus', lambda *_: status)  # Classic's group: the play state while playing
-    canvas = Paint(fw, ui, bar)()
-    assert ui.shown[bar.state] == (status == 2) and ui.shown[bar.eq] == 1  # EQ is stock's to show
-    assert [x[0] for x in canvas.texts] == digits  # Classic's twice: dark on the level, white past it
-    g = SETS[GEOM[t['name']]]
-    assert slot_width(ui, bar) == (g.batt_w + 1 if t is CLASSIC else BODY_W) + NUB_W
-
-
-def test_classics_battery_reads_icon_and_percent_as_inside(fw, st, ui):
-    theme(fw, st, CLASSIC, BATTERY=2)  # Icon + Percent is no Classic value: its default, inside
-    bar = Bar(fw, ui)
-    assert [x[0] for x in Paint(fw, ui, bar)().texts] == ['88', '88']
-    assert slot_width(ui, bar) == SETS[GEOM['Classic']].batt_w + 1 + NUB_W
+def test_the_icon_is_the_slim_battery(fw, st, ui):
+    theme(fw, st, BATTERY=0)
+    canvas = Paint(fw, ui, Bar(fw, ui))()
+    # OLED's slim battery is vgcanvas paths, whose float coordinates the stubs can't see: its outline, the charge
+    # and the nub (the emulator's screenshots check where it lands)
+    assert canvas.rects == [] and len(fw.calls('vgcanvas_stroke')) == 1 and len(fw.calls('vgcanvas_fill')) == 2
 
 
 def test_with_a_bar_widget_missing_nothing_moves(fw, st, ui):
-    theme(fw, st, BATTERY=2)
+    theme(fw, st, BATTERY=1)
     bar = Bar(fw, ui)
     ui.names[bar.slot] = 'gone'
     before = ui.box(bar.slot)
@@ -659,57 +546,6 @@ def test_the_first_paint_measures_the_digits_and_the_slot_fits_them(fw, st, ui):
     assert widths == {'5%': digit + sign, '88%': 2 * digit + sign, '100%': 3 * digit + sign}
 
 
-def icon_parts(canvas, level_h):
-    """The stock icon's rects: its level (the one level_h high), its nub (rightmost) and its outline's box."""
-    level = [r for r in canvas.rects if r[3] == level_h]
-    nub = max(canvas.rects, key=lambda r: r[0])
-    return level, nub, bbox([r for r in canvas.rects if r not in level and r != nub])
-
-
-@pytest.mark.parametrize('mode', [0, 2])
-def test_the_stock_icons_level_fills_its_share_and_charging_fills_it(fw, st, ui, mode):
-    theme(fw, st, BATTERY=mode)
-    bar = Bar(fw, ui)
-    paint = Paint(fw, ui, bar)
-    inner = BODY_W - 4
-    def level(text, icon=b'bar_battery'):
-        (x, y, w, h, _), = icon_parts(paint(text, icon), BODY_H - 4)[0]
-        return w
-    assert level('100%') == inner and level('50%') == inner // 2 and level('0%') == 0
-    assert level('10%', b'bar_charge') == inner
-    c = paint('100%')
-    (lvl,), nub, (ox, oy, ow, oh) = icon_parts(c, BODY_H - 4)
-    assert within(lvl, (ox + 1, oy + 1, ow - 2, oh - 2))  # the outline round the level, a pixel clear
-    assert (ow, oh) == (BODY_W, BODY_H) and (nub[0], nub[2]) == (ox + ow, NUB_W)  # the nub on its right
-    assert abs(2 * nub[1] + nub[3] - (2 * oy + oh)) <= 1  # centred on it
-    h = ui.box(bar.slot)[3]
-    # icon alone, centred on the slot's rows; beside the percentage it rises BATT_PCT_DY to the digits' ink
-    assert abs(2 * (oy + O['BATT_PCT_DY'] * (mode == 2)) + oh - h) <= 1
-    assert [t[0] for t in c.texts] == (['100%'] if mode == 2 else [])
-    if mode == 2:  # past the nub by the gap, to the slot's end, on its rows
-        x = nub[0] + nub[2] + GAP
-        assert c.texts[0][1] == (x, 0, ui.box(bar.slot)[2] - x, h)
-
-
-def test_percent_inside_is_dark_digits_on_a_solid_body(fw, st, ui):
-    theme(fw, st, BATTERY=3)
-    bar = Bar(fw, ui)
-    rounded = []
-    fw.mock('canvas_fill_rounded_rect', lambda c, r, g, color, radius, *_: rounded.append(
-        (struct.unpack_from('<4i', (C.c_char * 16).from_address(r)), C.c_uint.from_address(color).value, radius)))
-    canvas = Paint(fw, ui, bar)('88%', b'bar_charge')
-    (body, color, radius), = rounded
-    x, y, w, h = body
-    assert (x, w, h) == (0, INSIDE_W, INSIDE_H) and abs(2 * y + h - ui.box(bar.slot)[3]) <= 1  # centred on the bar
-    assert color == rgba(O['BATT_CHARGE_RGB']) and radius > 0  # solid, rounded, in the charge's colour
-    (digits, rect, (_, px), ink, _), = canvas.texts
-    assert digits == '88' and x < rect[0] and rect[0] + rect[2] < x + w  # across the body, clear of its ends
-    assert rect[1] == y + O['BATT_INSIDE_TEXT_DY']  # lowered: digits have no descenders
-    assert px == O['BATT_INSIDE_PX'] and ink == rgba(0)  # dark digits, no percent sign
-    (nx, ny, nw, nh, nub_color), = canvas.rects
-    assert nx == x + w and abs(2 * ny + nh - (2 * y + h)) <= 1 and nub_color == color  # the nub on its right
-
-
 def test_no_lcd_paints_nothing(fw, st, ui):
     theme(fw, st, BATTERY=1)
     bar = Bar(fw, ui)
@@ -720,69 +556,9 @@ def test_no_lcd_paints_nothing(fw, st, ui):
     assert canvas.rects == canvas.texts == []
 
 
-# Classic's battery: the set's body with its outline and gloss, Icon or Percent Inside.
-def classic_battery(fw, st, ui, light=0, mode=0):
-    theme(fw, st, CLASSIC, light, BATTERY=mode)
-    bar = Bar(fw, ui)
-    ui.place(bar.row, 240, 0, 135, row_h(CLASSIC))  # its body's top is then the middle of the bar's rows above its two lines
-    return bar, Paint(fw, ui, bar)
-
-
-@pytest.mark.parametrize('t, look', [(CLASSIC, LOOK['minimal']), (CLASSIC, LOOK['modern'])])
-def test_a_flat_status_bar_under_classic_is_minimals_battery(fw, st, ui, t, look):
-    def drawn(**keys):
-        bar = Bar(fw, ui)
-        return Paint(fw, ui, bar)('88%').rects
-    theme(fw, st, MINIMAL, BATTERY=0)
-    minimal = drawn()
-    theme(fw, st, t, BATTERY=0, STATUSBAR=look)
-    assert drawn() == minimal
-
-
-def test_status_bar_classic_under_minimal_is_classics_battery_at_its_own_size(fw, st, ui):
-    theme(fw, st, MINIMAL, BATTERY=0, STATUSBAR=LOOK['classic-light'])
-    bar = Bar(fw, ui)
-    g, y = SETS[GEOM['Classic']], (row_h(MINIMAL) + 1 - SETS[GEOM['Classic']].batt_h) // 2
-    rows = level_rows(Paint(fw, ui, bar)('50%'), 2, y + 1, g.batt_h - 2)
-    assert sorted(rows) == list(range(y + 1, y + g.batt_h - 1))
-    assert all(runs[0][0] == g.batt_w - 2 for runs in rows.values())  # Classic's width, not Minimal's body
-    assert ui.box(bar.slot)[2] == g.batt_w + 1 + O['BATT_NUB_W']
-
-
-def test_status_bar_classic_keeps_the_digits_the_row_has_room_for(fw, st, ui):
-    theme(fw, st, MINIMAL, BATTERY=2, STATUSBAR=LOOK['classic-light'])
-    bar = Bar(fw, ui)
-    canvas = Paint(fw, ui, bar)('100%')
-    (text, _, (_, px), _, _), = canvas.texts
-    assert (text, px) == ('100%', O['BATT_PX'])  # the theme's size, which BATT_PCT_W reserves, not Classic's 21
-    # beside them the body rises to the digits' ink, as the flat icon does
-    assert min(r[1] for r in canvas.rects) == (row_h(MINIMAL) + 1 - SETS[GEOM['Classic']].batt_h) // 2 - O['BATT_PCT_DY']
-
-
-@pytest.mark.parametrize('t, look, image', [(CLASSIC, LOOK['minimal'], b'bar_play'), (CLASSIC, LOOK['modern'], b'bar_play'), (MINIMAL, LOOK['classic-light'], b'classic_light_play_d')])
-def test_status_bar_paints_its_look_s_play_state(fw, st, ui, t, look, image):
-    theme(fw, st, t, STATUSBAR=look)
-    bar = Bar(fw, ui)
-    fw.mock('mclGetPlayStatus', lambda *_: 2)
-    fw.fn('ringnav_showface', C.c_int, C.c_void_p)(bar.bar)
-    assert ui.prop(bar.state, b'image') == image
-
-
-@pytest.mark.parametrize('t, mode', [(CLASSIC, 0), (MODERN, 3)])
-def test_the_battery_s_room_counts_the_row_the_theme_laid_out(fw, st, ui, t, mode):
-    theme(fw, st, t, BATTERY=3, STATUSBAR=LOOK['minimal'])  # a flat look: only Classic's row has the play state on the right
-    bar = Bar(fw, ui)
-    C.c_int.from_address(bar.state + 8).value = 30
-    ui.shown[bar.bt], ui.shown[bar.wifi] = 1, 1
-    fw.mock('mclGetPlayStatus', lambda *_: 2)
-    bar.sync()
-    assert st.batt_mode == mode
-
-
-# EQ is stock's to show or hide: a bar without it keeps the label off-screen (tools/ipod.py), whatever the look.
-@pytest.mark.parametrize('t, look', [(CLASSIC, LOOK['minimal']), (MINIMAL, LOOK['classic-light'])])
-def test_the_payload_leaves_eq_as_stock_set_it_whatever_the_status_bar(fw, st, ui, t, look):
-    theme(fw, st, t, STATUSBAR=look)
+# EQ is stock's to show or hide: a bar without it keeps the label off-screen (tools/ipod.py).
+def test_the_payload_leaves_eq_as_stock_set_it(fw, st, ui):
+    theme(fw, st)
     bar = Bar(fw, ui)
     ui.shown[bar.eq] = 1
     fw.mock('mclGetPlayStatus', lambda *_: 2)
@@ -790,162 +566,8 @@ def test_the_payload_leaves_eq_as_stock_set_it_whatever_the_status_bar(fw, st, u
     assert ui.shown[bar.eq] == 1
 
 
-def level_rows(canvas, x, y, ih):
-    """The rows from x, y down ih: the widest run of each from x."""
-    rows = {}
-    for rx, ry, w, h, color in canvas.rects:
-        if rx == x and h == 1 and y <= ry < y + ih:
-            rows.setdefault(ry, []).append((w, color))
-    return rows
-
-
-def test_classics_level_is_its_share_of_the_body_over_the_empty_rows(fw, st, ui):
-    _, paint = classic_battery(fw, st, ui)
-    g = SETS[GEOM['Classic']]
-    iw, ih, y = g.batt_w - 2, g.batt_h - 2, (g.bar - 2 - g.batt_h) // 2
-    greens = {c for runs in level_rows(paint('100%'), 2, y + 1, ih).values() for _, c in runs[1:]}
-    for text, share in (('88%', 88), ('50%', 50), ('0%', 0)):
-        rows = level_rows(paint(text), 2, y + 1, ih)
-        assert sorted(rows) == list(range(y + 1, y + 1 + ih))
-        for (empty_w, empty), *level in rows.values():
-            assert empty_w == iw and empty not in greens  # the empty rows across the inside first
-            assert [w for w, _ in level] == [iw * share // 100] and {c for _, c in level} <= greens
-    assert len(greens) > 1  # a gloss, row by row
-
-
-def test_classic_low_is_a_red_sliver_and_charging_a_full_body(fw, st, ui):
-    _, paint = classic_battery(fw, st, ui)
-    g = SETS[GEOM['Classic']]
-    iw, ih, y = g.batt_w - 2, g.batt_h - 2, (g.bar - 2 - g.batt_h) // 2
-    low = paint('60%', b'bar_lowcharge')
-    assert (2, y + 1, CLASSIC['batt_low_w'], ih, rgba(CLASSIC['batt_low'])) in low.rects
-    full = level_rows(paint('10%', b'bar_charge'), 2, y + 1, ih)
-    assert all(iw in [w for w, _ in runs[1:]] for runs in full.values())
-
-
-@pytest.mark.parametrize('icon, power, art', [(b'bar_charge', 0, b'classic_light_bolt'), (b'bar_battery', 1, b'classic_light_plug'),
-                                              (b'bar_battery', 0, None)])
-def test_classic_shows_the_bolt_charging_and_the_plug_full_on_power(fw, st, ui, icon, power, art):
-    _, paint = classic_battery(fw, st, ui)
-    fw.var('fw_ctx_g_power_chargestate', C.c_int).value = 2 if power else 1
-    fw.var('g_usbdet_value', C.c_ubyte).value = power
-    canvas = paint('100%', icon)
-    y = (SETS[GEOM['Classic']].bar - 2 - SETS[GEOM['Classic']].batt_h) // 2
-    assert canvas.images == ([(art, (2, y + 1, 12, 12))] if art else [])
-
-
-def test_classic_inside_has_no_bolt_and_its_digits_change_ink_at_the_level(fw, st, ui):
-    _, paint = classic_battery(fw, st, ui, mode=3)
-    g = SETS[GEOM['Classic']]
-    canvas = paint('50%', b'bar_charge')
-    assert canvas.images == []
-    canvas = paint('50%')
-    f = (g.batt_w - 2) * 50 // 100
-    (on, _, _, dark, clip_on), (past, _, _, white, clip_past) = canvas.texts
-    assert on == past == '50' and (dark, white) == (rgba(0), rgba(0xffffff))
-    assert (clip_on[0], clip_on[2]) == (2, f) and (clip_past[0], clip_past[2]) == (2 + f, g.batt_w - 2 - f)
-
-
-def test_classic_inside_digits_read_the_same_in_the_light_half(fw, st, ui):
-    _, paint = classic_battery(fw, st, ui, light=1, mode=3)
-    canvas = paint('50%')
-    assert [t[3] for t in canvas.texts] == [rgba(0), rgba(0xffffff)]  # final inks: dark on the level, white past it
-
-
-def test_classics_light_half_adds_a_soft_edge_and_an_emboss_outside_the_body(fw, st, ui):
-    g = SETS[GEOM['Classic']]
-    _, paint = classic_battery(fw, st, ui, 0)
-    dark = bbox(paint('50%').rects)
-    assert dark[2:] == (g.batt_w + NUB_W, g.batt_h)  # the dark half: the body and its nub, nothing past them
-    theme(fw, st, CLASSIC, 1, BATTERY=0)
-    light = paint('50%').rects
-    past = [r for r in light if not within(r, dark)]
-    assert past and all(within(r, dark, slack=2) for r in past)  # ink just outside the body that the dark half lacks
-    assert {r[1] for r in past if r[1] >= dark[1] + dark[3]} and {r[0] for r in past if r[0] < dark[0]}  # under it and left
-
-
-# Classic's dark bar (USB mode's page, the slider pages, Set Time): its own battery, the icons off.
-def dark_parts(rects):
-    """The dark battery's rects, the bar's full-width rows left out: its outline (the largest box) and the
-    level's rows (1 high, within it)."""
-    battery = [r for r in rects if r[2] != 375]
-    outline = max(battery, key=lambda r: r[2] * r[3])
-    return outline, [r for r in battery if r[3] == 1]
-
-
-def dark_level(rects):
-    return max((r[2] for r in dark_parts(rects)[1]), default=0)
-
-
-def usb_page(ui):
-    page = ui.widget(ui.wm, 'usbmode_page', 0, 0, 375, 320, kind='window')
-    ui.set_str(page, b'name', b'usbmode_page')
-    return page
-
-
-def test_the_dark_bar_moves_the_icons_off_and_paints_its_own_battery(fw, st, ui):
-    theme(fw, st, CLASSIC, BATTERY=3)
-    bar = Bar(fw, ui, title=True)
-    bar.sync()  # the bar's first paint finds its widgets
-    title = ui.box(bar.title)
-    ui.top = usb_page(ui)
-    bar.sync()
-    for w in (bar.bt, bar.wifi):
-        x, _, ww, _ = ui.screen(w)
-        assert x + ww <= 0  # off the screen's left
-    g = SETS[GEOM['Classic']]
-    sx, sy, sw, sh = ui.screen(bar.slot)
-    assert 375 // 2 <= sx and sx + sw <= 375 and 0 <= sy and sy + sh <= g.bar  # the bar's right end, on its rows
-    assert ui.shown[bar.clock] == 0 and ui.box(bar.title)[::2] == (0, 375)  # the title across the screen
-    widths = {}
-    for text, icon in (('50%', b'bar_battery'), ('100%', b'bar_battery'), ('10%', b'bar_charge')):
-        canvas = Paint(fw, ui, bar)(text, icon)
-        outline, level = dark_parts(canvas.rects)
-        assert canvas.texts == [] and level and all(within(r, outline) for r in level)  # the level inside the body
-        widths[text] = dark_level(canvas.rects)
-    assert abs(2 * widths['50%'] - widths['100%']) <= 1 and widths['10%'] == widths['100%']  # charging: full
-    state = ui.screen(bar.state)
-    ox, oy, _, oh = outline[:4]
-    assert state[0] + state[2] // 2 < sx + ox and abs(2 * state[1] + state[3] - (2 * (sy + oy) + oh)) <= 1  # left of it, on its rows
-    # a full-screen page's dark bar puts the same battery in the same place
-    full = Canvas(fw)
-    fw.fn('paint_dark_bar', None, C.c_void_p, C.c_void_p, C.c_void_p, C.c_uint)(
-        ui.wm, full.p, None, 10 << 3 | 1 << 1)  # 10%, charging: battery_now's key, bar_charge still the icon
-    assert sorted(r for r in full.rects if r[2] != 375) == sorted((x + sx, y + sy, w, h, c) for x, y, w, h, c in canvas.rects)
-    ui.top = 0  # leaving: the title's box and the clock come back
-    bar.sync()
-    assert ui.shown[bar.clock] == 1 and ui.box(bar.title) == title
-
-
-@pytest.mark.parametrize('status, art', [(2, b'classic_light_play_w'), (3, b'classic_light_pause_w'), (0, None)])
-def test_a_full_screen_pages_dark_bar(fw, st, ui, status, art):
-    theme(fw, st, CLASSIC)
-    fw.mock('mclGetPlayStatus', lambda *_: status)
-    paint = fw.fn('paint_dark_bar', None, C.c_void_p, C.c_void_p, C.c_void_p, C.c_uint)
-    full = Canvas(fw)
-    paint(ui.wm, full.p, None, 100 << 3)
-    canvas = Canvas(fw)
-    title = wide('Backlight')
-    paint(ui.wm, canvas.p, C.addressof(title), 40 << 3)
-    assert canvas.fill == 0xff123456
-    (text, rect, _, ink, _), = canvas.texts
-    assert (text, rect[0], rect[2], ink) == ('Backlight', 0, 375, rgba(0xffffff))  # white, across the screen
-    outline, level = dark_parts(canvas.rects)
-    rows = {r[1] for r in canvas.rects if r[0] == 0 and r[2] == 375}
-    assert rows == set(range(max(rows) + 1)) and {y for r in canvas.rects for y in range(r[1], r[1] + r[3])} <= rows
-    assert dark_level(canvas.rects) == dark_level(full.rects) * 40 // 100 and all(within(r, outline) for r in level)
-    if art:
-        (name, (x, y, w, h)), = canvas.images
-        assert name == art and x + w <= outline[0] and outline[1] <= y + h // 2 < outline[1] + outline[3]  # left of it, on its rows
-    else:
-        assert canvas.images == []
-    canvas = Canvas(fw)
-    paint(ui.wm, canvas.p, None, 0)
-    assert canvas.texts == []
-
-
 # Stock's systembar_showface each second: the play state follows whichever player plays.
-@pytest.mark.parametrize('status, shown, image', [(2, 1, b'bar_play'), (3, 1, b'bar_pause'), (1, 0, None)])
+@pytest.mark.parametrize('status, shown, image', [(2, 1, b'oled_play_d'), (3, 1, b'oled_pause_d'), (1, 0, None)])
 def test_showface_shows_the_play_state_and_answers_as_stock(fw, st, ui, status, shown, image):
     theme(fw, st)
     bar = Bar(fw, ui)
@@ -956,12 +578,12 @@ def test_showface_shows_the_play_state_and_answers_as_stock(fw, st, ui, status, 
     assert ui.shown[bar.idle] == (not shown)  # neither state nor EQ: the idle label
 
 
-def test_classics_play_state_is_its_own_art(fw, st, ui):
-    theme(fw, st, CLASSIC, light=1)
+def test_the_play_state_is_the_themes_art_in_its_half(fw, st, ui):
+    theme(fw, st, light=1)
     bar = Bar(fw, ui)
     fw.mock('mclGetPlayStatus', lambda *_: 2)
     fw.fn('ringnav_showface', C.c_int, C.c_void_p)(bar.bar)
-    assert ui.prop(bar.state, b'image') == b'classic_light_play_l'
+    assert ui.prop(bar.state, b'image') == b'oled_play_l'
 
 
 # Time in Title off: the bar's centre names the page in front.
@@ -1011,24 +633,14 @@ def test_a_page_without_a_hidden_title_gives_the_clock_back(fw, st, ui, title, s
     assert st.bar_titled == 0 and st.clock_key == 0 and len(ui.due('clock_due')) == 1
 
 
-def test_modern_names_the_page_in_its_bold_and_the_clock_goes_back_to_stocks_face(fw, st, ui):
-    theme(fw, st, MODERN, TIMETITLE=0)
+def test_the_page_is_named_in_the_now_playing_face_and_the_clock_goes_back_to_stocks(fw, st, ui):
+    theme(fw, st, TIMETITLE=0)
     bar = Bar(fw, ui)
     st.np_win = top = window(ui, 'playing_page')
     bar_title(fw, bar, top)
-    assert ui.prop(bar.clock, b'style:normal:font_name') == b'bold'
+    assert ui.prop(bar.clock, b'style:normal:font_name') == FACES[OLED['font[ROLE_NP]']]  # Inter Medium
     bar_title(fw, bar, window(ui, 'home_page', 'Q2', navbar_shown=1))
     assert ui.prop(bar.clock, b'style:normal:font_name') == b'default' and len(ui.due('clock_due')) == 1
-
-
-def test_modern_clock_loses_a_cjk_titles_bold_mark_when_the_title_goes(fw, st, ui):
-    """A CJK page's name falls back to stock's face, kept bold by the mark; going Home the clock is plain."""
-    theme(fw, st, MODERN, TIMETITLE=0)
-    bar = Bar(fw, ui)
-    bar_title(fw, bar, window(ui, 'artist_page', '专辑'))
-    assert ui.prop(bar.clock, b'_q2_bold_fallback') == 1
-    bar_title(fw, bar, window(ui, 'home_page', 'Q2', navbar_shown=1))
-    assert ui.prop(bar.clock, b'_q2_bold_fallback') == 0
 
 
 def test_a_dialog_or_no_window_leaves_the_bar(fw, st, ui):
@@ -1041,22 +653,10 @@ def test_a_dialog_or_no_window_leaves_the_bar(fw, st, ui):
     assert ui.text(bar.clock) == '12:00'
 
 
-def test_classics_own_title_takes_the_clocks_room_up_to_eq(fw, st, ui):
-    theme(fw, st, CLASSIC, TIMETITLE=0)
-    bar = Bar(fw, ui, title=True, eq_x=10)
-    st.bar_title, st.bar_eq = bar.title, bar.eq
-    ui.set_text(bar.title, 'Albums')
-    bar_title(fw, bar, 0)
-    assert ui.text(bar.clock) == '' and ui.box(bar.title)[2] == 240 + 10 - 20  # to EQ's left edge
-    ui.set_text(bar.title, '')
-    bar_title(fw, bar, 0)
-    assert ui.box(bar.title)[2] == 91 and len(ui.due('clock_due')) == 1
-
-
 def test_oled_s_status_row_keeps_the_clock_beside_a_title(fw, st, ui):
     """OLED's status row shows the page's title and the clock at once (navigation.c clock_place places them); the title
     keeps the box clock_place gives it."""
-    theme(fw, st, next(t for t in THEMES if t['name'] == 'OLED'))
+    theme(fw, st)
     bar = Bar(fw, ui, title=True)
     st.bar_title = bar.title
     ui.set_text(bar.title, 'Albums')
@@ -1065,36 +665,37 @@ def test_oled_s_status_row_keeps_the_clock_beside_a_title(fw, st, ui):
     assert ui.box(bar.title)[2] == 91  # not widened to EQ's left edge
 
 
-# The theme's faces (theme_font, theme_face): its own face where it has the text's characters, else bold.ttf,
-# else stock's, which has CJK.
+# The theme's faces (theme_font, theme_face): its own face (Inter) where it has the text's characters, else its
+# fallback, stock's, which has CJK, at the fallback's share of the px.
 LATIN, CYRILLIC, CJK = 'Albums', 'Альбом', '专辑'
-TITLE_PX = CLASSIC['font_px[ROLE_TITLE]']
-FACES = [b'default', b'bold', b'classic-light']  # navigation.c's font_faces, by FONT_*
+TITLE_PX = OLED['font_px[ROLE_TITLE]']
+FACES = [f.name.encode() for f in host.tools_build.FACES.values()]  # navigation.c's font_faces, by FONT_*
+FALLBACK_PX = (TITLE_PX * host.tools_build.FACES['inter'].fallback_pct + 50) // 100  # navigation.c fallback_px
 
 
 def first_face(ranges, text):
-    """The face theme_font gives text, by the cmaps the build cut: Classic's own, else bold, else stock's."""
-    return b'classic-light' if has(ranges['classic-light'], text) else b'bold' if has(ranges['bold'], text) else b'default'
+    """The face theme_font gives text, by the cmaps the build cut: Inter, else stock's."""
+    return b'inter' if has(ranges['inter'], text) else b'default'
 
 
 def label_font(ui, w):
     return ui.prop(w, b'style:normal:font_name'), ui.prop(w, b'style:normal:font_size')
 
 
-@pytest.mark.parametrize('text, face', [(LATIN, b'classic-light'), (CYRILLIC, b'bold'), (CJK, b'default')])
-def test_classics_title_face_falls_back_by_the_text(fw, st, ui, ranges, text, face):
+@pytest.mark.parametrize('text, face', [(LATIN, b'inter'), (CYRILLIC, b'inter'), (CJK, b'default')])
+def test_the_title_face_falls_back_by_the_text(fw, st, ui, ranges, text, face):
     assert first_face(ranges, text) == face  # the text is where the cmaps say, or the test proves nothing
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     label = ui.widget(ui.wm, 'label', text=text)
     answer = fw.fn('theme_font', C.c_int, C.c_void_p, C.c_int, C.c_int)(label, ROLE_TITLE, -1)
     got, px = label_font(ui, label)
     assert got == face and answer == FACES.index(face) | px << 4
-    # bold's and stock's capitals stand taller: standing in for Classic's face either is smaller
-    assert px == TITLE_PX if face == b'classic-light' else px == round(TITLE_PX * .83)
+    assert OLED['font[ROLE_TITLE]'] == FACES.index(b'inter')  # the list title's face, or this tests another
+    assert px == (TITLE_PX if face == b'inter' else FALLBACK_PX)  # stock's standing in at its share
 
 
 def test_a_face_already_written_is_not_written_again(fw, st, ui):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     label = ui.widget(ui.wm, 'label', text=LATIN)
     font = fw.fn('theme_font', C.c_int, C.c_void_p, C.c_int, C.c_int)
     was = font(label, ROLE_TITLE, -1)
@@ -1104,7 +705,7 @@ def test_a_face_already_written_is_not_written_again(fw, st, ui):
 
 @pytest.mark.parametrize('text', [LATIN, CYRILLIC, CJK])
 def test_canvas_text_takes_the_face_and_size_a_label_would(fw, st, ui, ranges, text):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     label = ui.widget(ui.wm, 'label', text=text)
     fw.fn('theme_font', C.c_int, C.c_void_p, C.c_int, C.c_int)(label, ROLE_TITLE, -1)
     face, px = label_font(ui, label)
@@ -1114,21 +715,15 @@ def test_canvas_text_takes_the_face_and_size_a_label_would(fw, st, ui, ranges, t
     assert face == first_face(ranges, text) and (got or b'default', size.value) == (face, px)  # none: the system font
 
 
-def test_a_theme_without_a_face_draws_the_system_font(fw, st):
-    theme(fw, st, MODERN)
-    s = wide(LATIN)
-    assert fw.fn('theme_face', C.c_char_p, C.c_void_p, C.c_int, C.c_void_p)(C.addressof(s), -1, None) is None
-
-
 def test_a_pooled_rows_labels_find_their_face_again_for_the_text_stock_bound(fw, st, ui):
     """#217: a table reuses a row, stock's on_load_data writes the new text with no relayout."""
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     table = ui.widget(ui.wm, 'table')
     row = ui.widget(table, 'row')
     title = ui.widget(row, 'title', text=LATIN)
     plain = ui.widget(row, 'plain', text=LATIN)
     fw.fn('theme_font', C.c_int, C.c_void_p, C.c_int, C.c_int)(title, ROLE_TITLE, FONT_ROW)
-    assert label_font(ui, title)[0] == b'classic-light'
+    assert label_font(ui, title)[0] == b'inter'
     bound = []
     def load(ctx, index, w):
         bound.append((ctx, index, w))
@@ -1143,9 +738,9 @@ def test_a_pooled_rows_labels_find_their_face_again_for_the_text_stock_bound(fw,
 
 
 @pytest.mark.parametrize('text', [LATIN, CYRILLIC, CJK])
-def test_the_playing_rows_mark_keeps_its_titles_face_under_classic(fw, st, ui, ranges, text):
+def test_the_playing_rows_mark_keeps_its_titles_face(fw, st, ui, ranges, text):
     """View Queue's playing row, bound as stock's on_load_data binds it: title, style, then the faces again."""
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     table = ui.widget(ui.wm, 'table')
     row = ui.widget(table, 'row')
     title = ui.widget(row, 'title', text='')
@@ -1160,10 +755,10 @@ def test_the_playing_rows_mark_keeps_its_titles_face_under_classic(fw, st, ui, r
     fw.fn('theme_font', C.c_int, C.c_void_p, C.c_int, C.c_int)(plain, ROLE_TITLE, FONT_ROW)
     face, px = label_font(ui, title)
     assert ui.text(title).startswith('▶ ') and (face, px) == label_font(ui, plain)
-    assert face == first_face(ranges, text) and (px == TITLE_PX if face == b'classic-light' else px < TITLE_PX)
+    assert face == first_face(ranges, text) and px == (TITLE_PX if face == b'inter' else FALLBACK_PX)
 
 
-# Now Playing (ringnav_playing): the iPod labels bound, the bar and its fill, the times, scrub.
+# Now Playing (ringnav_playing): the iPod labels bound, the bar and its track, the times, scrub.
 def clock(sec):
     """Seconds as stock's toolsTimeItoa writes them: 1:05."""
     return f'{sec // 60}:{sec % 60:02}'
@@ -1241,7 +836,7 @@ class Now:
 
 @pytest.fixture
 def now(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     return Now(fw, ui, mcl, st)
 
 
@@ -1272,9 +867,9 @@ def test_a_slider_past_its_end_shows_no_negative_time(fw, ui, mcl, now):
     assert ui.text(now.remain) == '-0:00'
 
 
-@pytest.mark.parametrize('t', THEMES, ids=[t['name'] for t in THEMES])
-def test_the_bar_takes_its_themes_height_and_ends_and_the_glyph_and_album_their_opacity(fw, ui, mcl, st, t):
-    theme(fw, st, t)
+def test_the_bar_takes_its_themes_height_and_ends_and_the_glyph_and_album_their_opacity(fw, ui, mcl, st):
+    t = OLED
+    theme(fw, st)
     opacity = {}
     fw.mock('widget_set_opacity', lambda w, v, *_: opacity.__setitem__(w, v))
     now = Now(fw, ui, mcl, st)
@@ -1291,26 +886,17 @@ def rgba_int(c):
     return C.c_int(0xff000000 | (c & 255) << 16 | (c & 0xff00) | c >> 16).value
 
 
-ASSET_TRACK = [t for t in THEMES if t['name'] != 'OLED']  # OLED's is its own Track grey
-
-
-@pytest.mark.parametrize('t', ASSET_TRACK, ids=[t['name'] for t in ASSET_TRACK])
-def test_a_theme_on_the_asset_s_track_writes_none(fw, ui, mcl, st, t):
-    theme(fw, st, t)
-    now = Now(fw, ui, mcl, st)
-    assert t['np_track_rgb'] == O['TRACK_COLOR'] and not [k for k in TRACK_KEYS if (now.slider, k) in ui.ints]
-
-
 def test_oled_writes_its_own_track(fw, ui, mcl, st):
-    t = next(t for t in THEMES if t['name'] == 'OLED')
-    theme(fw, st, t)
+    theme(fw, st)
     now = Now(fw, ui, mcl, st)
+    assert OLED['np_track_rgb'] == 0x333333 != O['TRACK_COLOR']
     assert [ui.ints.get((now.slider, k)) for k in TRACK_KEYS] == [rgba_int(0x333333)] * 5
 
 
 def test_a_theme_s_own_track_is_written_and_the_asset_s_written_back_once(fw, ui, mcl, st, library):
-    """playing.scrubber.track, as an OLED theme's table states it; then a switch to a theme on TRACK_COLOR."""
-    theme(fw, st, MODERN)
+    """playing.scrubber.track, as a theme's table states it; then the table on TRACK_COLOR, the asset's (theme.xml
+    without a track), which is written back once and then not at all."""
+    theme(fw, st)
     track = fw.fn('theme', C.c_void_p)() + host.offsets(library.parent/'navigation.o', 'theme_t')['np_track_rgb']
     assert not libc.mprotect(track & ~0xfff, 0x2000, 3)  # this test's own load of the table, made writable
     C.c_uint.from_address(track).value = 0x262626
@@ -1325,7 +911,7 @@ def test_a_theme_s_own_track_is_written_and_the_asset_s_written_back_once(fw, ui
 
 
 def test_no_window_binds_nothing(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     Now(fw, ui, mcl, st, opened=False)
     assert fw.fn('ringnav_playing', C.c_int, C.c_void_p, C.c_void_p)(None, 0) == 41
     assert st.np_win == 0 and ui.handlers == []
@@ -1333,62 +919,28 @@ def test_no_window_binds_nothing(fw, ui, mcl, st):
 
 def test_a_page_stock_refused_binds_nothing(fw, ui, mcl, st):
     """Headphones required with none to play to: stock toasts, closes the window it was given and returns STOP (11)."""
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     now = Now(fw, ui, mcl, st, opened=False)
     fw.mock('stock_playing_trampoline', lambda w, ctx, *_: 11)
     assert now.open() == 11
     assert st.np_win == 0 and ui.handlers == []
 
 
-def test_classics_times_and_bar_fit_a_long_track_off_the_paint(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
-    now = Now(fw, ui, mcl, st, sec=10, total=4000)
-    assert ui.due('np_fit_due') == []  # the open fitted them at once
-    x, _, w, _ = ui.box(now.slider)
-    assert x > 66 and x + w == 375 - x  # narrower for the hours' wider times, still centred
-    ex, _, ew, _ = ui.box(now.elapsed)
-    rx, _, rw, _ = ui.box(now.remain)
-    gap = O['NP_IPOD_TIME_GAP']
-    assert ex + ew + gap == x and rx == x + w + gap and ew == rw
-    ui.ints[now.slider, b'max'] = 300  # the next track, short: found stale in a paint
-    fw.fn('np_sync', C.c_int, C.c_void_p)(now.win)
-    fit, = ui.due('np_fit_due')
-    ui.run(fit)
-    assert ui.box(now.slider)[0] == 66 and st.np_fit_timer == 0
-
-
-def test_times_under_the_bar_are_never_refitted(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
-    now = Now(fw, ui, mcl, st, sec=10, total=4000, layout='under')
-    assert ui.box(now.slider) == (66, 245, 243, 20)
-    ui.ints[now.slider, b'max'] = 300
-    fw.fn('np_sync', C.c_int, C.c_void_p)(now.win)
-    assert ui.due('np_fit_due') == []
-
-
-def test_the_remaining_time_repaints_once_after_the_frame(fw, ui, now, st):
-    st.np_remain_timer = 9
-    assert fw.fn('remain_due', C.c_int, C.c_void_p)(None) == 0
-    assert ui.invalidated(now.remain) == [now.remain] and st.np_remain_timer == 0
-
-
-# Scrub: a double Centre press, the wheel previews, one press commits.
+# Scrub: a Centre press starts it, the wheel previews, one press commits.
 def press(now, at):
     now.ui.now = at
     return now.key(KEY_CENTER)
 
 
 def scrub(now, at=200000):
-    assert press(now, at) == STOP and press(now, at + 100) == STOP
-    assert now.st.scrub == 1
+    assert press(now, at) == STOP and now.st.scrub == 1
 
 
-def test_a_double_press_starts_a_scrub_white_on_the_held_bar(fw, ui, now, st):
+def test_a_press_starts_a_scrub_on_the_held_bar_in_the_accent(fw, ui, now, st):
     accent = now.fill()
     scrub(now)
-    assert now.fill() == 0xffffffff != accent
+    assert now.fill() == accent  # a status row's set marks it with a knob (paint_scrubber), not a white fill
     assert len(fw.calls('playing_timer_clear')) == 1 and [ui.timers[t][2] for t in ui.due('scrub_expire')] == [O['SCRUB_MS']]
-    assert ui.due('np_single') == []  # the first press's single was called off
 
 
 def test_the_wheel_moves_the_target_in_steps_the_track_follows_and_one_press_ends_there(fw, ui, now, st):
@@ -1413,7 +965,7 @@ SCRUB_SEEK_MS = 200  # seek.c
 
 
 def test_a_fast_spin_is_heard_at_most_every_scrub_seek_ms_and_lands_on_the_target(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     now = Now(fw, ui, mcl, st, sec=0, total=3000)
     scrub(now)
     sent = []  # (when, file second)
@@ -1435,7 +987,7 @@ def test_a_fast_spin_is_heard_at_most_every_scrub_seek_ms_and_lands_on_the_targe
 
 
 def test_a_paused_scrub_is_silent_until_it_ends(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     now = Now(fw, ui, mcl, st, status=3)
     scrub(now)
     for _ in range(3):
@@ -1447,7 +999,7 @@ def test_a_paused_scrub_is_silent_until_it_ends(fw, ui, mcl, st):
 
 
 def test_a_fast_spin_steps_further_than_slow_ticks(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     now = Now(fw, ui, mcl, st, sec=0, total=3000)
     moved = []
     for gap in (200, 40):
@@ -1459,13 +1011,14 @@ def test_a_fast_spin_steps_further_than_slow_ticks(fw, ui, mcl, st):
             now.key(KEY_NEXT)
         moved.append(now.value() - start)
         press(now, ui.now + 1000)
+        fw.fn('navigation__np_cancel', None)()  # Return: out of the Centre cycle, so the next press scrubs
     slow, fast = moved
     assert slow == 12 * O['SCRUB_STEP'] < fast
 
 
 @pytest.mark.parametrize('key, start, end', [(KEY_NEXT, 199, 200), (KEY_PREV, 1, 0)])
 def test_the_target_stays_within_the_track(fw, ui, mcl, st, key, start, end):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     now = Now(fw, ui, mcl, st, sec=start, total=200)  # a second from either end: a step would pass it
     scrub(now)
     ui.now += 300
@@ -1498,7 +1051,7 @@ def test_another_track_drops_the_scrub_without_a_seek(fw, ui, mcl, now, st):
 
 
 def test_a_paused_scrub_seeks_on_play_and_the_bar_holds_its_target(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     now = Now(fw, ui, mcl, st, status=3)
     cue = 600
     struct.pack_into('<i', now.recs[2], O['REC_CUE_START'], cue)  # a CUE track: file seconds
@@ -1530,7 +1083,7 @@ def test_a_seek_the_player_never_reaches_gives_up_after_a_while_playing(fw, ui, 
 
 
 def test_reopening_the_page_mid_wait_shows_the_target_again(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     now = Now(fw, ui, mcl, st, status=3)
     scrub(now)
     ui.now += 300
@@ -1544,22 +1097,8 @@ def test_reopening_the_page_mid_wait_shows_the_target_again(fw, ui, mcl, st):
     assert third.value() == now.sec and st.held_sec == 0
 
 
-def test_a_single_press_turns_the_screen_off_as_stocks_release(fw, ui, now):
-    releases = []
-    fw.mock('on_wm_keyup_fun', lambda w, event, *_: releases.append(C.c_uint.from_address(event + O['EVENT_KEY']).value))
-    assert press(now, 200000) == STOP
-    single, = ui.due('np_single')
-    assert ui.timers[single][2] == O['DOUBLE_CLICK_MS']
-    ui.run(single)
-    assert releases == [KEY_CENTER]
-    fw.var('g_backlight_status', C.c_ubyte).value = 0
-    press(now, 300000)
-    ui.run(ui.due('np_single')[0])
-    assert releases == [KEY_CENTER]  # dark: nothing to turn off
-
-
-# Single Press Scrub (on unless chosen off): Centre cycles the controls the wheel sets, as an iPod classic's: scrubber,
-# shuffle, repeat, rating, rest. A short hold turns the screen off.
+# Centre cycles the controls the wheel sets, as an iPod classic's: scrubber, shuffle, repeat, rating, rest. A short
+# hold turns the screen off.
 NP_HOLD_MS, NP_STAGE_MS = (int(re.findall(rf'#define {n} (\w+)', NAVIGATION_SOURCE)[0].replace('SCRUB_MS', str(O['SCRUB_MS'])))
                            for n in ('NP_HOLD_MS', 'NP_STAGE_MS'))
 REST, SHUFFLE, REPEAT = range(3)
@@ -1572,13 +1111,13 @@ def cpress(now, at, held=60):
 
 
 def test_centre_cycles_scrubber_shuffle_repeat_and_rating(fw, ui, mcl, st):
-    theme(fw, st, OLED, SCRUBSINGLE=1)
+    theme(fw, st)
     releases, modes = [], []
     fw.mock('on_wm_keyup_fun', lambda w, event, *_: releases.append(1))
     fw.mock('config_playmode', lambda m, notify, *_: modes.append(m) or setattr(mcl, 'mode', m) or 0)
     now = Now(fw, ui, mcl, st)
     mcl.mode = 0
-    assert cpress(now, 200000) == STOP and st.scrub == 1 and not ui.due('np_single')  # at once: no double-press wait
+    assert cpress(now, 200000) == STOP and st.scrub == 1
     cpress(now, 200500)  # the scrub ends, shuffle's turn
     assert st.scrub == 0 and st.np_stage == SHUFFLE
     assert now.key(KEY_NEXT) == STOP and modes == [2]  # the wheel turns shuffle on
@@ -1594,7 +1133,7 @@ def test_centre_cycles_scrubber_shuffle_repeat_and_rating(fw, ui, mcl, st):
 
 
 def test_a_stage_ends_by_itself_and_return_ends_it(fw, ui, mcl, st):
-    theme(fw, st, OLED, SCRUBSINGLE=1)
+    theme(fw, st)
     now = Now(fw, ui, mcl, st)
     cpress(now, 200000)
     cpress(now, 200500)
@@ -1610,7 +1149,7 @@ def test_a_stage_ends_by_itself_and_return_ends_it(fw, ui, mcl, st):
 
 
 def test_a_short_hold_turns_the_screen_off(fw, ui, mcl, st):
-    theme(fw, st, OLED, SCRUBSINGLE=1)
+    theme(fw, st)
     releases = []
     fw.mock('on_wm_keyup_fun', lambda w, event, *_: releases.append(1))
     now = Now(fw, ui, mcl, st)
@@ -1624,7 +1163,7 @@ def test_a_short_hold_turns_the_screen_off(fw, ui, mcl, st):
 def test_a_short_hold_is_timed_from_the_press_not_its_repeats(fw, ui, mcl, st):
     """A Q2's held Centre repeats its key-down every 50 ms after about 258 ms; each passes chord_gate and
     ringnav_keydown, and the hold is still the press's."""
-    theme(fw, st, OLED, SCRUBSINGLE=1)
+    theme(fw, st)
     releases = []
     fw.mock('on_wm_keyup_fun', lambda w, event, *_: releases.append(1))
     fw.mock('stock_keydown_trampoline', lambda *_: 0)
@@ -1645,14 +1184,6 @@ def test_a_short_hold_is_timed_from_the_press_not_its_repeats(fw, ui, mcl, st):
     down(202000)  # the next press is timed afresh: a tap
     gate(key_event(KEY_CENTER, UP))
     assert press(now, 202080) == STOP and releases == [1] and st.scrub == 1
-
-
-def test_a_theme_without_the_pair_skips_shuffle_and_repeat(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC, SCRUBSINGLE=1)
-    now = Now(fw, ui, mcl, st)
-    cpress(now, 200000)
-    cpress(now, 200500)
-    assert st.scrub == 0 and st.np_stage == REST
 
 
 def test_a_scrub_closes_the_volume_band_over_the_page_first(fw, ui, now, st):
@@ -1676,16 +1207,15 @@ def test_the_page_going_mid_scrub_seeks_nowhere_and_forgets_it(fw, ui, now, st):
     scrub(now)
     ui.now += 300
     now.key(KEY_NEXT)
-    st.np_marquee = ui.timer_add(0, 0, 50)
     ui.emit(ui.wm, O['EVT_DESTROY'], 0)  # another window's destroy: nothing
     assert st.np_win == now.win
     ui.emit(now.win, O['EVT_DESTROY'], 0)
-    assert (st.np_win, st.np_slider, st.np_lrc, st.scrub, st.np_marquee) == (0, 0, 0, 0, 0)
+    assert (st.np_win, st.np_slider, st.np_lrc, st.scrub) == (0, 0, 0, 0)
     assert now.seeks() == [('set', now.sec + O['SCRUB_STEP'])] and ui.due('scrub_expire') == []  # the tick's own only
 
 
 def test_closing_mid_wait_restarts_stocks_timer(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     now = Now(fw, ui, mcl, st, status=3)
     scrub(now)
     ui.now += 300
@@ -1776,91 +1306,41 @@ def test_each_cover_a_url_queue_downloads_reloads_the_art_dark_or_lit(fw, ui, no
     assert unloads() == 7
 
 
-# Classic's progress bar (ipod_bar, paint_scrubber) and the rows painter (paint_rows_bar).
+# The progress bar's paint over stock's (np_bar.c paint_scrubber).
 def scrubber(fw, w, canvas):
     fw.fn('paint_scrubber', None, C.c_void_p, C.c_void_p)(w, canvas.p)
 
 
-def test_the_played_part_is_the_accents_band_and_the_rest_the_tracks(fw, ui, now, st):
-    canvas = Canvas(fw)
-    scrubber(fw, now.slider, canvas)
-    bar, w = CLASSIC['np_bar'], ui.box(now.slider)[2]
-    on = w * 50 // 200
-    y = (20 - bar) // 2
-    rows = [r for r in canvas.rects if r[3] == 1]
-    played = [r for r in rows if r[0] == 0 and r[2] == on]
-    track = [r for r in rows if r[0] == on and r[2] == w - on]
-    reflect = O['SCRUB_REFLECT_ROWS']
-    assert [r[1] for r in played] == [r[1] for r in track] == list(range(y, y + bar + reflect))
-    assert {r[4] for r in played[:bar]}.isdisjoint({r[4] for r in track[:bar]})
-    assert canvas.fill == 0xff123456 and not [r for r in rows if r[2] == 2 * O['NP_SCRUB_MARK'] + 1]  # no cue
-
-
-@pytest.mark.parametrize('lo, hi, value, share', [(10, 210, 60, (1, 4)), (0, 200, 250, (1, 1)), (0, 200, -5, (0, 1)),
-                                                  (50, 50, 50, (0, 1))])
-def test_the_fill_is_the_values_share_of_the_sliders_range(fw, ui, now, st, lo, hi, value, share):
-    ui.ints[now.slider, b'min'], ui.ints[now.slider, b'max'], ui.ints[now.slider, b'value'] = lo, hi, value
-    canvas = Canvas(fw)
-    scrubber(fw, now.slider, canvas)
-    w = ui.box(now.slider)[2]
-    first = [r for r in canvas.rects if r[3] == 1 and r[0] == 0][0]  # the played part's first row
-    assert first[2] == w * share[0] // share[1]
-
-
-def test_the_reflection_fades_from_its_row_to_the_paper(fw, ui, now, st):
-    canvas = Canvas(fw)
-    scrubber(fw, now.slider, canvas)
-    bar, reflect = CLASSIC['np_bar'], O['SCRUB_REFLECT_ROWS']
-    band = [r for r in canvas.rects if r[3] == 1 and r[0] == 0]
-    def dist(c):  # from the dark half's paper, black
-        return sum(c >> s & 255 for s in (0, 8, 16))
-    fades = [dist(r[4]) for r in band[bar:bar + reflect]]
-    assert fades == sorted(fades, reverse=True) and fades[0] < dist(band[bar - 1][4])
-
-
-@pytest.mark.parametrize('value', [0, 100, 200])
-def test_a_scrubs_cue_is_a_diamond_at_the_fills_end_kept_in_the_bar(fw, ui, now, st, value):
-    st.scrub = 1
-    ui.ints[now.slider, b'value'] = value
-    canvas = Canvas(fw)
-    scrubber(fw, now.slider, canvas)
-    mark, bar, w = O['NP_SCRUB_MARK'], CLASSIC['np_bar'], ui.box(now.slider)[2]
-    ink = [r for r in canvas.rects if r[4] == rgba(0xffffff)]  # the dark half's ink
-    cy = (20 - bar) // 2 + (bar - 1) // 2
-    assert [(r[1], r[2]) for r in ink] == [(cy + j, 2 * (mark - abs(j)) + 1) for j in range(-mark, mark + 1)]
-    fill_end = w * value // ui.ints[now.slider, b'max']
-    assert {r[0] + r[2] // 2 for r in ink} == {min(max(fill_end, mark), w - 1 - mark)}  # its widest row whole in the bar
-
-
 # The glide between the player's whole seconds (np_bar.c paint_scrubber): the fill runs on from the value by the time
 # since it changed, at most a second, while playing; a timer repaints it a pixel at a time.
-def played(canvas, w):
-    """Classic's played part: its first row's width."""
-    return [r for r in canvas.rects if r[3] == 1 and r[0] == 0][0][2]
+def played(fw, now):
+    """The glide's fill as one paint draws it over stock's: its width, or None where stock's own fill (the value's
+    share) is all there is."""
+    boxes = []
+    fw.mock('canvas_fill_rounded_rect', lambda c, r, sr, color, radius, *_: boxes.append(
+        struct.unpack_from('<4i', (C.c_char * 16).from_address(r))) or 0)
+    scrubber(fw, now.slider, Canvas(fw))
+    assert len(boxes) <= 1
+    return boxes[0][2] if boxes else None
 
 
 @pytest.mark.parametrize('status, later, ms', [(2, 500, 500), (2, 1700, 1000), (3, 500, 0)])
 def test_the_fill_glides_on_from_the_value_while_playing_up_to_a_second(fw, ui, now, st, status, later, ms):
     now.status = status
     w = ui.box(now.slider)[2]
-    scrubber(fw, now.slider, Canvas(fw))  # the value 50 of 200 seen at ui.now
+    assert played(fw, now) is None  # the value 50 of 200 seen at ui.now: stock's fill
     ui.now += later
-    canvas = Canvas(fw)
-    scrubber(fw, now.slider, canvas)
-    assert played(canvas, w) == (w * 50 + w * ms // 1000) // 200
+    assert played(fw, now) == ((w * 50 + w * ms // 1000) // 200 if ms else None)
 
 
 def test_a_new_value_starts_the_glide_again_and_never_goes_back(fw, ui, now, st):
     w = ui.box(now.slider)[2]
-    scrubber(fw, now.slider, Canvas(fw))
+    played(fw, now)
     ui.now += 900
-    canvas = Canvas(fw)
-    scrubber(fw, now.slider, canvas)
-    before = played(canvas, w)
+    before = played(fw, now)
+    assert before > w * 50 // 200
     ui.ints[now.slider, b'value'] = 51  # stock's next second
-    canvas = Canvas(fw)
-    scrubber(fw, now.slider, canvas)
-    assert played(canvas, w) == w * 51 // 200 >= before
+    assert played(fw, now) is None and w * 51 // 200 >= before  # stock's fill, from the new value
 
 
 def test_the_glide_repaints_the_slider_a_pixel_at_a_time(fw, ui, now, st):
@@ -1877,7 +1357,7 @@ def test_the_glide_repaints_the_slider_a_pixel_at_a_time(fw, ui, now, st):
 
 
 def test_stock_sliders_fill_is_drawn_again_to_the_glide(fw, ui, mcl, st):
-    theme(fw, st, OLED)
+    theme(fw, st)
     now = Now(fw, ui, mcl, st)
     boxes = []
     fw.mock('canvas_fill_rounded_rect', lambda c, r, sr, color, radius, *_: boxes.append(
@@ -1895,7 +1375,7 @@ def test_stock_sliders_fill_is_drawn_again_to_the_glide(fw, ui, mcl, st):
 
 def test_oleds_scrub_keeps_the_accent_and_marks_the_playhead_with_a_knob(fw, ui, mcl, st):
     """A status row's set (OLED's): the scrub keeps the accent's fill and puts a 14 px white knob on its end (audit N3)."""
-    theme(fw, st, OLED)
+    theme(fw, st)
     now = Now(fw, ui, mcl, st)
     boxes = []
     fw.mock('canvas_fill_rounded_rect', lambda c, r, sr, color, radius, *_: boxes.append(
@@ -1908,42 +1388,21 @@ def test_oleds_scrub_keeps_the_accent_and_marks_the_playhead_with_a_knob(fw, ui,
     assert boxes == [((x - 7, (h - 14) // 2, 14, 14), 0xffffffff, 7)]
 
 
-def test_the_radios_bar_paints_always_full(fw, ui, now, st):
-    bar = ui.widget(now.win, 'bar', 66, 245, 243, 26)
-    st.stream_bar = bar
-    canvas = Canvas(fw)
-    scrubber(fw, bar, canvas)
-    assert {r[2] for r in canvas.rects if r[3] == 1} == {243, 0, 1}  # the band across, none of the track, its end columns
-
-
-def test_a_theme_without_classics_track_paints_no_bar(fw, ui, mcl, st):
-    theme(fw, st, MINIMAL)
-    now = Now(fw, ui, mcl, st)
-    canvas = Canvas(fw)
-    scrubber(fw, now.slider, canvas)
-    assert fw.fn('ipod_bar', C.c_int, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int)(canvas.p, 0, 0, 100, 50, 0) == 0
-    assert canvas.rects == []
-
-
-@pytest.mark.parametrize('light', [0, 1])
-def test_the_rows_painter_draws_its_themes_rows_and_the_fill_over_them(fw, st, light):
-    theme(fw, st, CLASSIC, light)
-    canvas = Canvas(fw)
-    fw.fn('paint_rows_bar', None, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int)(canvas.p, 10, 5, 100, 40, 30)
-    track, fill = CLASSIC[f'np_rows[{2 * light}]'], CLASSIC[f'np_rows[{2 * light + 1}]']
-    def final(c):
-        return rgba(c & 0xffffff, c >> 24)
-    assert len(track) < 40  # the 40 rows asked for: the theme's rows, no more
-    assert canvas.rects == [r for j in range(len(track)) for r in ((10, 5 + j, 100, 1, final(track[j])),
-                                                                   (10, 5 + j, 30, 1, final(fill[j])))]
-    assert canvas.fill == 0xff123456
-
-
 # The lyrics page (lyric_poll, every UI pass): the follow glides on the page, the wheel's raw travel nudges or
-# takes them, a finger's drag holds them; a tap takes them full screen on every layout, Centred's within its
-# column, the iPod page's over the whole window.
+# takes them, a finger's drag holds them; a tap takes them full screen, over the whole window.
 LINES = [(f'Line {i}', 10 * i) for i in range(12)]
 SLOT = O['LYRIC_SLOT']
+LYRICS = {k: int(v) for k, v in re.findall(r'^#define (LYRIC_\w*PX) (\d+)', host.ROOT.joinpath('patch/lyrics.c').read_text(), re.M)}
+
+
+def pitch(px):
+    """lyrics.c LY_PITCH: a wrapped line's rows apart at px."""
+    return px + px // 8
+
+
+# A one-row line's row (lyrics.c lyrics_fit): its text at OLED's LYRIC_OLED_PX and the gap that makes a LYRIC_PX
+# line's LYRIC_SLOT
+ROW = pitch(LYRICS['LYRIC_OLED_PX']) + SLOT - pitch(LYRICS['LYRIC_PX'])
 
 
 class Lyrics(Now):
@@ -1999,8 +1458,14 @@ class Lyrics(Now):
 
 
 def centre(line):
-    """lyric_centre: row i's middle on the view's (178 px) middle, the rows SLOT apart after a blank SLOT."""
-    return SLOT + SLOT * line - (178 - SLOT) // 2
+    """lyric_centre: row i's middle on the view's (178 px) middle, the rows ROW apart after a blank SLOT (C's
+    division, toward zero)."""
+    return SLOT + ROW * line - (178 - ROW) // 2
+
+
+def snap(y):
+    """lyric_snap: the row top nearest y (0 the first candidate, an earlier one kept on a tie)."""
+    return min([0] + [SLOT + ROW * i for i in range(len(LINES))], key=lambda top: abs(top - y))
 
 
 @pytest.fixture
@@ -2012,7 +1477,7 @@ def wheel(fw):
 
 
 def test_the_lyrics_page_glides_its_playing_line_to_the_middle_easing_in(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     lyr = Lyrics(fw, ui, mcl, st, sec=35)
     offsets = lyr.poll(40)
     assert offsets[-1] == centre(3) and st.lyric_glide == 0
@@ -2024,7 +1489,7 @@ def test_the_lyrics_page_glides_its_playing_line_to_the_middle_easing_in(fw, ui,
 
 
 def test_off_the_page_the_follow_jumps_at_stocks_pace(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     lyr = Lyrics(fw, ui, mcl, st, sec=35, page=0)
     assert lyr.poll(1) == [centre(3)]  # at once, no glide
     lyr.sec = 55
@@ -2033,7 +1498,7 @@ def test_off_the_page_the_follow_jumps_at_stocks_pace(fw, ui, mcl, st):
 
 
 def test_a_turn_takes_the_lyrics_a_line_a_ticks_worth_and_holds_them(fw, ui, mcl, st, wheel):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     lyr = Lyrics(fw, ui, mcl, st, sec=35)
     lyr.settle()
     travel, held = wheel
@@ -2042,17 +1507,18 @@ def test_a_turn_takes_the_lyrics_a_line_a_ticks_worth_and_holds_them(fw, ui, mcl
     held.value = 1
     lyr.poll(1)
     held.value = 0
-    taken = centre(3) + detents * SLOT
+    taken = snap(centre(3) + detents * SLOT)  # a tick's worth is LYRIC_SLOT, then the nearest row top
+    assert taken - centre(3) > (detents - 1) * ROW  # past the line before: as far as the ticks take
     assert lyr.settle() == taken and st.lyric_held == 1
     lyr.sec = 95
     assert lyr.settle() == taken  # held: the follow leaves them
     travel.value = (detents + 1) * tick  # anticlockwise: back up, a line a tick
     lyr.poll(1)
-    assert lyr.settle() == taken - (detents + 1) * SLOT
+    assert lyr.settle() == snap(taken - (detents + 1) * SLOT) == taken - (detents + 1) * ROW  # rows' tops
 
 
 def test_a_small_turn_only_nudges_and_springs_back_still_following(fw, ui, mcl, st, wheel):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     lyr = Lyrics(fw, ui, mcl, st, sec=35)
     home = lyr.settle()
     travel, held = wheel
@@ -2069,7 +1535,7 @@ def test_a_small_turn_only_nudges_and_springs_back_still_following(fw, ui, mcl, 
 
 
 def test_the_stock_rows_scroll_a_stock_row_a_tick(fw, ui, mcl, st, wheel):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     lyr = Lyrics(fw, ui, mcl, st, sec=35)
     ui.widget(lyr.lrc, 'row12', 0, 0, 225, 20)  # stock rebuilt its rows: they are no longer the page's
     lyr.scroll(100)
@@ -2081,7 +1547,7 @@ def test_the_stock_rows_scroll_a_stock_row_a_tick(fw, ui, mcl, st, wheel):
 
 
 def test_a_drag_holds_the_lyrics_and_a_tap_holds_nothing(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     lyr = Lyrics(fw, ui, mcl, st, sec=35)
     at = lyr.settle()
     lyr.pressed = 1
@@ -2100,7 +1566,7 @@ def test_a_drag_holds_the_lyrics_and_a_tap_holds_nothing(fw, ui, mcl, st):
 
 
 def test_a_swipe_away_and_back_keeps_the_hold_and_a_new_song_starts_at_the_top(fw, ui, mcl, st, wheel):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     lyr = Lyrics(fw, ui, mcl, st, sec=35)
     lyr.settle()
     travel, _ = wheel
@@ -2121,7 +1587,7 @@ def test_a_swipe_away_and_back_keeps_the_hold_and_a_new_song_starts_at_the_top(f
 
 @pytest.mark.parametrize('end', ['gone', 'replaced'])
 def test_now_playing_going_or_replaced_drops_the_lyrics_hold(fw, ui, mcl, st, wheel, end):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     lyr = Lyrics(fw, ui, mcl, st, sec=35)
     lyr.settle()
     travel, _ = wheel
@@ -2136,7 +1602,7 @@ def test_now_playing_going_or_replaced_drops_the_lyrics_hold(fw, ui, mcl, st, wh
 
 
 def test_a_tick_before_the_wheel_goes_raw_glides_to_the_next_rows_top(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     lyr = Lyrics(fw, ui, mcl, st, sec=35)
     at = lyr.settle()
     lyrics = fw.fn('navigation__np_lyrics', C.c_int, C.c_uint)
@@ -2156,7 +1622,7 @@ def test_a_tick_before_the_wheel_goes_raw_glides_to_the_next_rows_top(fw, ui, mc
 
 
 def test_a_late_pass_glides_half_the_way_no_leap(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     lyr = Lyrics(fw, ui, mcl, st, sec=35)
     first = lyr.poll(1)[0]  # the glide starts: a pixel
     late = lyr.poll(1, ms=400)[0]
@@ -2179,34 +1645,18 @@ def tap_line(ui, lyr, y):
     return tap(ui, lyr.lyric, O['EVT_POINTER_UP_BEFORE'], 100, at)
 
 
-def test_centreds_tap_on_the_lyrics_takes_them_full_screen_and_back(fw, ui, mcl, st):
-    theme(fw, st, MINIMAL, NPCENTRED=1)  # Classic has no Centred layout
-    lyr = Lyrics(fw, ui, mcl, st, sec=35)
-    col, slide, at = ui.box(lyr.col), ui.box(lyr.slide), ui.kids[lyr.win].index(lyr.col)
-    tap(ui, lyr.lyric, O['EVT_POINTER_DOWN'], 100, 100)
-    assert tap(ui, lyr.lyric, O['EVT_POINTER_UP_BEFORE'], 108, 95) == [0]
-    assert ui.box(lyr.col) == (0, col[1], 375, col[3]) and ui.box(lyr.slide)[2:] == (375, ui.box(lyr.dots)[1])
-    assert ui.prop(lyr.col, b'style:normal:bg_color') == b'#000000' and st.np_full == 1
-    tap(ui, lyr.lyric, O['EVT_POINTER_DOWN'], 100, 100)
-    tap(ui, lyr.lyric, O['EVT_POINTER_UP_BEFORE'], 100, 100)  # any tap: the column back, nothing plays
-    assert lyr.seeks() == [] and ui.box(lyr.col) == col and ui.box(lyr.slide) == slide and st.np_full == 0
-    assert ui.prop(lyr.col, b'style:normal:bg_color') == b'#00000000'
-    restacks = [a[1] for _, a in fw.calls('widget_restack')]
-    assert restacks == [len(ui.kids[lyr.win]), at]  # over all, then its own place again, under the bar
-
-
 @pytest.mark.parametrize('end', ['far', 'drag', 'abort', 'page', 'reopen'])
 def test_full_screen_lyrics_end_with_a_swipe_or_off_their_page(fw, ui, mcl, st, end):
-    theme(fw, st, MINIMAL, NPCENTRED=1)  # Classic has no Centred layout
+    theme(fw, st)
     lyr = Lyrics(fw, ui, mcl, st, sec=35)
     tap(ui, lyr.lyric, O['EVT_POINTER_DOWN'], 100, 100)
     tap(ui, lyr.lyric, O['EVT_POINTER_UP_BEFORE'], 100, 100)
-    assert st.np_full == 1
+    assert st.np_full == 2  # over the whole window
     tap_px = NAV['TAP_PX']
     if end == 'far':  # a lift far off, with no move between, is no tap
         tap(ui, lyr.lyric, O['EVT_POINTER_DOWN'], 300, 100)
         tap(ui, lyr.lyric, O['EVT_POINTER_UP_BEFORE'], 100, 100)
-        assert st.np_full == 1 and lyr.seeks() == []
+        assert st.np_full == 2 and lyr.seeks() == []
         return
     if end == 'drag':  # scroll_lrc drags the lines: its STOP comes back as an abort, and any drag ends full screen
         tap(ui, lyr.lyric, O['EVT_POINTER_DOWN'], 100, 100)
@@ -2225,16 +1675,15 @@ def test_full_screen_lyrics_end_with_a_swipe_or_off_their_page(fw, ui, mcl, st, 
 
 
 def test_without_lyrics_a_tap_stays_in_the_column(fw, ui, mcl, st):
-    theme(fw, st, MINIMAL, NPCENTRED=1)  # Classic has no Centred layout
+    theme(fw, st)
     lyr = Lyrics(fw, ui, mcl, st, lyrics=())
     tap(ui, lyr.lyric, O['EVT_POINTER_DOWN'], 100, 100)
     tap(ui, lyr.lyric, O['EVT_POINTER_UP_BEFORE'], 100, 100)
     assert st.np_full == 0 and fw.calls('widget_restack') == []
 
 
-@pytest.mark.parametrize('t, centred, switch', [(CLASSIC, 1, 0), (MINIMAL, 0, 0), (MINIMAL, 0, 1)])
-def test_the_ipod_pages_tap_takes_the_lyrics_over_the_whole_window_and_back(fw, ui, mcl, st, t, centred, switch):
-    theme(fw, st, t, NPCENTRED=centred)  # Classic leaves the option undeclared: it reads 0
+def test_a_tap_takes_the_lyrics_over_the_whole_window_and_back(fw, ui, mcl, st):
+    theme(fw, st)
     lyr = Lyrics(fw, ui, mcl, st, sec=35)
     places = []  # widget_set_self_layout_params' x, y, w and h, as the C passes them
     fw.mock('widget_set_self_layout_params',
@@ -2242,11 +1691,9 @@ def test_the_ipod_pages_tap_takes_the_lyrics_over_the_whole_window_and_back(fw, 
     view, (_, _, win_w, win_h) = ui.parent(lyr.lrc), ui.box(lyr.win)
     col, slide, dots, lines = ui.box(lyr.col), ui.box(lyr.slide), ui.box(lyr.dots), ui.box(view)
     at = ui.kids[lyr.win].index(lyr.col)
-    layout = fw.fn('np_layout', C.c_int)
-    ipod = layout()
     tap(ui, lyr.lyric, O['EVT_POINTER_DOWN'], 100, 100)
     assert tap(ui, lyr.lyric, O['EVT_POINTER_UP_BEFORE'], 108, 95) == [0]
-    assert ui.box(lyr.col) == (0, 0, win_w, win_h) and st.np_full == 2  # 2: the iPod page's, which the way back keeps
+    assert ui.box(lyr.col) == (0, 0, win_w, win_h) and st.np_full == 2  # 2: over the whole window, which the way back keeps
     assert ui.prop(lyr.col, b'style:normal:bg_color') == b'#000000'
     foot = ui.box(lyr.slide)[3]  # the pages down to the dots
     gap = win_h - foot
@@ -2254,9 +1701,6 @@ def test_the_ipod_pages_tap_takes_the_lyrics_over_the_whole_window_and_back(fw, 
     # The dots at the pages' foot, their own height; the lines' view from the top, as high as its parent (the
     # pages) less the gap: the lines stop as far above the dots as the dots sit above the window's foot.
     assert places == [(lyr.dots, '0', str(foot), '100%', str(dots[3])), (view, '0', '0', '100%', str(-gap))]
-    if switch:  # Centred switched on while full screen: it changes only the next Now Playing's page
-        theme(fw, st, t, NPCENTRED=1)
-        assert layout() != ipod
     lyr.scroll(0)
     tap_line(ui, lyr, ui.box(lyr.rows[0])[1] // 2)  # the blank slot over the first line: the column back
     assert ui.box(lyr.col) == col and ui.box(lyr.slide) == slide and st.np_full == 0
@@ -2270,7 +1714,7 @@ def test_the_ipod_pages_tap_takes_the_lyrics_over_the_whole_window_and_back(fw, 
 @pytest.mark.parametrize('keep, page, status, top, lit', [(1, 1, 2, 'np', 1), (1, 0, 2, 'np', 0), (1, 0, 2, 'art', 1),
                                                           (1, 1, 3, 'np', 0), (0, 1, 2, 'np', 0), (1, 1, 2, 'other', 0)])
 def test_smart_awake_holds_the_screen_on_off_the_art_page_while_playing(fw, ui, mcl, st, keep, page, status, top, lit):
-    theme(fw, st, CLASSIC, KEEPLIT=keep)
+    theme(fw, st, KEEPLIT=keep)
     lyr = Lyrics(fw, ui, mcl, st, page=page, status=status)
     if top == 'art':
         ui.top = ui.widget(ui.wm, 'bigcover_page', kind='window')
@@ -2284,53 +1728,6 @@ def test_smart_awake_holds_the_screen_on_off_the_art_page_while_playing(fw, ui, 
     poll()  # once a second
     assert len(fw.calls('reset_poweroptions_timer')) == lit
     assert fw.fn('ringnav_smart_awake', C.c_int)() == keep and st.np_slide == lyr.slide
-
-
-# Classic's Spotify and Internet Radio Now Playing (stream_ipod): the local page's places, and the art's frame
-# goes with the page that set it.
-def stream(fw, ui, with_bar=True):
-    page = ui.widget(ui.wm, 'radionp_page', 0, 0, 375, 320, kind='window')
-    art = ui.widget(page, 'art', 0, 0, 166, 166)
-    texts = (C.c_void_p * 4)(*[ui.widget(page, f't{i}') for i in range(4)])
-    elapsed, remain = ui.widget(page, 'elapsed'), ui.widget(page, 'remain')
-    bar = ui.widget(page, 'bar') if with_bar else None
-    ipod = fw.fn('stream_ipod', C.c_int, C.c_void_p, C.c_void_p, C.c_void_p, C.c_void_p, C.c_void_p, C.c_void_p)
-    return ipod(art, C.addressof(texts), elapsed, remain, bar, None), art, texts, elapsed, remain, bar
-
-
-def test_classics_stream_page_takes_the_local_pages_places(fw, ui, st):
-    theme(fw, st, CLASSIC)
-    ok, art, texts, elapsed, remain, bar = stream(fw, ui, with_bar=False)
-    assert ok == 1 and st.stream_art == art and st.stream_bar
-    bar = st.stream_bar
-    bx, by, bw, bh = ui.box(bar)
-    assert bx + bw == 375 - bx and bh == O['NP_BAR_IPOD'] + O['SCRUB_REFLECT_ROWS']
-    ex, ey, ew, eh = ui.box(elapsed)
-    rx, ry, rw, rh = ui.box(remain)
-    gap = O['NP_IPOD_TIME_GAP']
-    assert ex + ew + gap == bx and rx == bx + bw + gap and ey == ry and ew == rw
-    assert [ui.box(t)[0] for t in texts] == [O['NP_IPOD_TEXT_X']] * 4
-    ys = [ui.box(t)[1] for t in texts]
-    assert ys == sorted(ys) and len(set(ys)) == 4
-    ax, ay, aw, ah = ui.box(art)
-    assert aw == O['NP_IPOD_ART'] < ah  # taller than wide: the reflection under it
-    assert ui.prop(elapsed, b'style:normal:font_name') == b'classic-light'
-
-
-def test_another_theme_keeps_the_stream_pages_own_layout(fw, ui, st):
-    theme(fw, st, MINIMAL)
-    ok, art, *_ = stream(fw, ui)
-    assert ok == 0 and ui.box(art) == (0, 0, 166, 166) and ui.handlers == []
-
-
-def test_the_stream_arts_frame_goes_with_its_own_page_only(fw, ui, st):
-    theme(fw, st, CLASSIC)
-    _, old, *_ = stream(fw, ui)
-    _, new, *_ = stream(fw, ui)
-    ui.emit(old, O['EVT_DESTROY'])
-    assert st.stream_art == new
-    ui.emit(new, O['EVT_DESTROY'])
-    assert st.stream_art == 0 and st.stream_bar == 0
 
 
 # The full-screen art (ringnav_bigcover): the song name and its shade fade out, the art takes its cover's shape.
@@ -2356,7 +1753,7 @@ class Big:
 
 
 def test_the_song_name_and_its_shade_show_then_fade_out_together(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     big = Big(fw, ui, mcl, st)
     first, = ui.due('bc_fade')
     assert ui.timers[first][2] == O['BC_MS']
@@ -2369,7 +1766,7 @@ def test_the_song_name_and_its_shade_show_then_fade_out_together(fw, ui, mcl, st
 
 
 def test_a_new_track_shows_the_name_again_and_the_page_going_stops_it(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     big = Big(fw, ui, mcl, st)
     ui.run_all('bc_fade')
     fw.fn('navigation__bc_show', None)()
@@ -2388,7 +1785,7 @@ def clears_glass(x, y, w, h):
 
 @pytest.mark.parametrize('size', [(400, 200), (200, 400), (500, 500), (300, 299)])
 def test_the_art_is_the_largest_box_of_its_covers_shape_that_clears_the_glass(fw, ui, mcl, st, size):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     big = Big(fw, ui, mcl, st, image=b'cover.jpg', sizes={b'cover.jpg': size})
     x, y, w, h = big.fit()
     assert x == (375 - w) // 2 and y == (320 - h) // 2 and clears_glass(x, y, w, h)
@@ -2410,14 +1807,14 @@ def test_the_art_is_the_largest_box_of_its_covers_shape_that_clears_the_glass(fw
 @pytest.mark.parametrize('image, sizes', [(b'default_bigcover', {}), (b'cover.jpg', {b'cover.jpg': (500, 100)}),
                                           (b'cover.jpg', {b'cover.jpg': None})])
 def test_a_placeholder_a_cover_past_4_to_1_or_one_that_wont_load_is_square(fw, ui, mcl, st, image, sizes):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     big = Big(fw, ui, mcl, st, image=image, sizes=sizes)
     x, y, w, h = big.fit()
     assert w == h and clears_glass(x, y, w, h)
 
 
 def test_the_box_is_fitted_once_until_the_track_or_image_changes(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     big = Big(fw, ui, mcl, st, image=b'cover.jpg', sizes={b'cover.jpg': (400, 200)})
     big.fit()
     loads, moves = len(big.canvas.loaded), len(fw.calls('widget_move_resize'))
@@ -2429,7 +1826,7 @@ def test_the_box_is_fitted_once_until_the_track_or_image_changes(fw, ui, mcl, st
 
 
 def test_the_players_file_waits_until_it_is_this_tracks_cover(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     big = Big(fw, ui, mcl, st, image=b'file:///tmp/coverpic.jpg', sizes={b'file:///tmp/coverpic.jpg': (400, 200)})
     x, y, w, h = big.fit()
     assert big.canvas.loaded == [] and w == h  # the last track's file: not decoded, the square
@@ -2443,7 +1840,7 @@ def test_the_players_file_waits_until_it_is_this_tracks_cover(fw, ui, mcl, st):
 # song's file, still in place; the next song's file, written after, is decoded once it is in.
 @in_fork
 def test_a_url_queues_next_cover_is_fitted_once_it_is_in(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     ext = b'file:///tmp/externpic.jpg'
     sizes = {ext: (400, 200)}
     big = Big(fw, ui, mcl, st, image=ext, sizes=sizes)
@@ -2506,11 +1903,11 @@ def boot(fw, fail_at=None):
     return calls
 
 
-def test_classics_set_rewrites_the_low_halves_page_by_page(fw, st, code):
+def test_oleds_set_rewrites_the_low_halves_page_by_page(fw, st, code):
     baked(code, 0)
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     st.geom = 0
-    g = GEOM['Classic']
+    g = GEOM
     values = set_values(g)
     differ = sorted({a & ~(PAGE - 1) for a, name in SITES if values[name] != set_values(0)[name]})
     assert len(differ) > 1  # sites to rewrite on more than one page, or page by page proves nothing
@@ -2518,209 +1915,78 @@ def test_classics_set_rewrites_the_low_halves_page_by_page(fw, st, code):
     assert calls == [('mprotect', p, PAGE, RWX) for p in differ] + \
         [c for p in differ for c in (('flush', p, PAGE, 3), ('mprotect', p, PAGE, RX))]
     assert all(code[a].value == 0x5a5a0000 | values[name] for a, name in SITES)
-    assert st.geom == g and st.theme == 1
+    assert st.geom == g
 
 
 def test_a_refused_page_puts_back_those_opened_and_writes_nothing(fw, st, code):
     baked(code, 0)
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     st.geom = 0
-    values = set_values(GEOM['Classic'])
+    values = set_values(GEOM)
     differ = sorted({a & ~(PAGE - 1) for a, name in SITES if values[name] != set_values(0)[name]})
     calls = boot(fw, fail_at=differ[-1])
     assert calls == [('mprotect', p, PAGE, RWX) for p in differ] + [('mprotect', p, PAGE, RX) for p in differ[:-1]]
     assert all(code[a].value == 0x5a5a0000 | set_values(0)[name] for a, name in SITES)
-    assert st.geom == 0 and st.theme == 0  # Minimal's set is what the code holds: Minimal until the next boot
+    assert st.geom == 0  # SET0 is what the code holds: OLED draws on it until the next boot
 
 
-@pytest.mark.parametrize('t', [MINIMAL, MODERN, CLASSIC], ids=['Minimal', 'Modern', 'Classic'])
-def test_the_set_the_code_holds_already_makes_no_syscall(fw, st, code, t):
-    baked(code, GEOM[t['name']])
-    theme(fw, st, t)
+def test_the_set_the_code_holds_already_makes_no_syscall(fw, st, code):
+    baked(code, GEOM)
+    theme(fw, st)
     st.geom = 0
-    assert boot(fw) == [] and st.geom == GEOM[t['name']]
+    assert boot(fw) == [] and st.geom == GEOM
 
 
 def test_only_the_pages_with_a_stale_site_open(fw, st, code):
-    g = GEOM['Classic']
+    g = GEOM
     baked(code, g)
     a, name = next((a, n) for a, n in SITES if set_values(g)[n] != set_values(0)[n])
     code[a].value = 0x5a5a0000 | set_values(0)[name]
-    theme(fw, st, CLASSIC)
+    theme(fw, st)
     calls = boot(fw)
     page = a & ~(PAGE - 1)
     assert calls == [('mprotect', page, PAGE, RWX), ('flush', page, PAGE, 3), ('mprotect', page, PAGE, RX)]
     assert code[a].value == 0x5a5a0000 | set_values(g)[name]
 
 
-@pytest.mark.parametrize('rowart, label', [(1, 'On'), (0, 'Off')])
-def test_row_art_picks_classics_set(fw, st, rowart, label):
-    theme(fw, st, CLASSIC, ROWART=rowart)
+def test_a_theme_without_a_set_option_boots_its_own(fw, st):
+    theme(fw, st)
     T = fw.fn('theme', C.c_void_p)()
-    want = SETS.index(host.tools_theme.geometry(CLASSIC, {'ROWART': label}))
-    assert fw.fn('theme_geom', C.c_int, C.c_void_p)(T) == want
-    geom_with = fw.fn('navigation__geom_with', C.c_int, C.c_void_p, C.c_int, C.c_int, C.c_int)
-    assert geom_with(T, -1, 0, 1) == SETS.index(host.tools_theme.geometry(CLASSIC, {'ROWART': 'On'}))  # a switch presets On
+    assert fw.fn('theme_geom', C.c_int, C.c_void_p)(T) == GEOM == SETS.index(SETS[-1]) > 0  # OLED's, not SET0
 
 
-@pytest.mark.parametrize('t', [MINIMAL, MODERN], ids=['Minimal', 'Modern'])
-def test_a_theme_without_a_set_option_boots_its_own(fw, st, t):
-    theme(fw, st, t, ROWART=0)
-    T = fw.fn('theme', C.c_void_p)()
-    assert fw.fn('theme_geom', C.c_int, C.c_void_p)(T) == GEOM[t['name']] == SETS.index(host.tools_theme.geometry(t))
+# A unit an older build left on another theme (THEME 0 Minimal, 1 Classic, 2 Modern, or no key) takes OLED's preset
+# once at boot and keeps THEME 3 from then on (theme_boot).
+@pytest.mark.parametrize('stored, migrates', [(None, True), (0, True), (1, True), (2, True), (THEME_OLED, False)])
+def test_a_unit_on_a_retired_theme_takes_oleds_preset_once(fw, st, code, stored, migrates):
+    baked(code, GEOM)
+    keys = {} if stored is None else {'THEME': stored}
+    Config(fw, LIGHT=1, HOME=0, **keys)  # Light Mode on and Home in Split: OLED's preset is dark and Full (theme.xml)
+    st.settings_read = 0
+    fw.fn('accent', C.c_int)()
+    boot(fw)
+    writes = [(C.string_at(a[2]).decode(), C.c_int(a[0]).value) for _, a in fw.calls('write_int_config')]
+    assert (('THEME', THEME_OLED) in writes) == migrates and writes.count(('THEME', THEME_OLED)) == migrates
+    dark, full = (host.tools_theme.SETTINGS[k][1].index(v) for k, v in (('light', 'off'), ('home', 'full')))
+    assert (writes.count(('LIGHT', dark)), writes.count(('HOME', full))) == (migrates, migrates)  # the preset, once
+    assert (st.light, st.home) == ((dark, full) if migrates else (1, 0))
 
 
-# A-B markers on Classic's bar fitted to the track (ringnav_ab_x): the same share of it.
+# A-B markers on a bar laid out off the immediates' place (ringnav_ab_x): the same share of it.
 def test_an_ab_marker_keeps_its_share_of_a_fitted_bar(fw, ui, mcl, st):
-    theme(fw, st, CLASSIC)
-    values = set_values(GEOM['Classic'])
+    theme(fw, st)
+    values = set_values(GEOM)
     x0, w0 = values['np_bar_x'], values['np_bar_w']
     stock = {}
     fw.mock('ab_x', lambda t, *_: stock[t])
     ab_x = fw.fn('ringnav_ab_x', C.c_int, C.c_int)
     stock.update({1: x0 + w0 // 2, 2: 0, 3: x0})
     assert ab_x(1) == x0 + w0 // 2  # no Now Playing: stock's
-    now = Now(fw, ui, mcl, st, sec=10, total=4000)  # a long track: the bar narrows
+    now = Now(fw, ui, mcl, st, sec=10, total=4000)
     x, _, w, _ = ui.box(now.slider)
+    assert (x, w) != (x0, w0)  # the bar elsewhere, or the share proves nothing
     assert ab_x(1) == x + (w0 // 2) * w // w0 and ab_x(3) == x
     assert ab_x(2) == 0  # no point to mark
-
-
-# Classic's own pages as stock's windows load (ringnav_ui_load): the slider pages, T9, New Playlist and Rename.
-def load(fw, ui, root):
-    fw.mock('stock_ui_load_trampoline', lambda name, parent, *_: root)
-    name = ui.prop(root, b'name')
-    assert fw.fn('ringnav_ui_load', C.c_void_p, C.c_char_p, C.c_void_p)(name, ui.wm) == root
-    return root
-
-
-SLIDERS = {'backlight_page': 'slider_backlight', 'maxvol_page': 'slider_maxvol', 'balance_page': 'slider_balance',
-           'bootvol_page': 'slider_bootvol'}
-STOCK_HIDDEN = ['img_dec', 'img_add', 'img_left', 'img_right', 'img_volleft', 'img_volright', 'label_backlight', 'label_vol']
-
-
-class SliderPage:
-    """One of stock's four slider windows: its slider in a view with the +/- and labels around it."""
-    def __init__(self, fw, ui, name):
-        self.win = window(ui, name)
-        self.view = ui.widget(self.win, 'view_slider', 20, 80, 335, 120)
-        self.slider = ui.widget(self.view, SLIDERS[name], 60, 30, 215, 40)
-        self.hidden = [ui.widget(self.view, n, 0, 0, 30, 30) for n in STOCK_HIDDEN]
-        if name == 'balance_page':
-            self.number = ui.widget(self.win, 'label_balance', 150, 60, 75, 30, text='0')
-        if name == 'bootvol_page':
-            self.navbar = ui.widget(self.win, 'view_navbar', 0, 0, 375, 60)
-            self.switch = ui.widget(self.navbar, 'img_bootswitch', 300, 10, 60, 40)
-        self.stock = ui.box(self.slider)
-        load(fw, ui, self.win)
-
-    def caption(self, ui):
-        return ui.lookup(self.win, 'caption', 1)
-
-    def hit(self, ui):
-        return ui.lookup(self.win, 'switch_hit', 1)
-
-
-def switch(fw, page, canvas):
-    fw.fn('slider_switch', None, C.c_void_p, C.c_void_p, C.c_void_p)(page.win, canvas.p, page.switch)
-
-
-@pytest.mark.parametrize('name', list(SLIDERS))
-def test_a_slider_page_takes_classics_shape_and_every_stock_name_still_finds_its_widget(fw, st, ui, name):
-    theme(fw, st, CLASSIC)
-    page = SliderPage(fw, ui, name)
-    assert all(ui.shown[w] == 0 for w in page.hidden) and ui.lookup(page.win, 'img_dec', 1) == page.hidden[0]
-    view = ui.box(page.view)
-    assert view == (0, 0, 375, 320 - SETS[GEOM['Classic']].bar)  # the whole page under the bar
-    slider, caption = ui.box(page.slider), page.caption(ui)
-    assert within(slider, view) and within(ui.box(caption), view)
-    assert slider[1] + slider[3] <= ui.box(caption)[1] and ui.box(caption)[::2] == (0, 375)  # under it, centred across
-    assert {ui.ints[page.slider, f'style:{s}:icon'.encode()] for s in ('normal', 'pressed', 'over', 'disable', 'focused')} == {0}
-    assert ui.text(caption) == read_wide(C.addressof(fw.var('navigation__slider_caption', C.c_uint)))
-    assert ui.prop(caption, b'style:normal:font_name') == b'classic-light'
-    assert (st.slider_win, st.slider_w, st.slider_kind) == (page.win, page.slider, list(SLIDERS).index(name))
-
-
-def test_off_classic_a_slider_page_stays_stocks(fw, st, ui):
-    theme(fw, st, MINIMAL)
-    page = SliderPage(fw, ui, 'backlight_page')
-    assert ui.box(page.slider) == page.stock and st.slider_win == 0 and page.caption(ui) == 0
-    assert all(ui.shown.get(w, 1) for w in page.hidden)
-
-
-def test_max_volumes_slider_sits_higher_and_its_triangle_repaints_past_it(fw, st, ui):
-    theme(fw, st, CLASSIC)
-    other = SliderPage(fw, ui, 'backlight_page')
-    assert ui.emit(other.slider, O['EVT_VALUE_CHANGING']) == []  # no triangle: the slider repaints itself
-    page = SliderPage(fw, ui, 'maxvol_page')
-    x, y, w, h = ui.box(page.slider)
-    ox, oy, ow, oh = ui.box(other.slider)
-    assert y < oy and (x, w, h) == (ox, ow, oh)  # the same slider, higher: its triangle under it
-    ui.dirty.clear()
-    for evt in (O['EVT_VALUE_CHANGING'], O['EVT_VALUE_CHANGED']):
-        assert ui.emit(page.slider, evt) == [0]
-    (w1, band), (w2, again) = ui.dirty_rects()
-    assert w1 == w2 == page.win and band == again
-    bx, by, bw, bh = band
-    assert bx < x and x + w < bx + bw and y <= by and by + bh <= y + h  # past the slider's ends, on its rows
-    assert within(band, ui.box(page.view))  # and still the page's
-
-
-def test_balance_shows_its_number_and_l_and_r(fw, st, ui):
-    theme(fw, st, CLASSIC)
-    page = SliderPage(fw, ui, 'balance_page')
-    nx, ny, nw, nh = ui.box(page.number)
-    sx, sy, sw, sh = ui.box(page.slider)
-    (lx, ly, lw, lh), (rx, ry, rw, rh) = [ui.box(w) for t in 'LR' for w in ui.kids[page.win] if ui.text(w) == t]
-    assert lx + lw <= sx and sx + sw <= rx  # either side of the slider
-    assert (ly, lw, lh) == (ry, rw, rh) and abs(2 * lx + lw + 2 * rx + rw - 2 * 375) <= 2  # mirrored about the middle
-    assert sy <= ly and ly + lh <= sy + sh  # on the slider's rows
-    assert (nx, nw) == (0, 375) and ny + nh <= ly  # centred across the screen, over the bar and its ends
-    assert ui.prop(page.number, b'style:normal:font_name') == b'classic-light'
-    ui.set_text(page.number, CJK)
-    fw.fn('slider_number', None, C.c_void_p)(page.number)
-    assert ui.prop(page.number, b'style:normal:font_name') == b'default'  # a face that has the text
-
-
-def test_default_volumes_tray_tap_reaches_stocks_switch(fw, st, ui):
-    theme(fw, st, CLASSIC)
-    dispatched = []
-    fw.mock('pointer_event_init', lambda e, kind, target, x, y, *_: struct.pack_into('<i', (C.c_char * 4).from_address(e), 0, kind) or e)
-    fw.mock('stock_dispatch_trampoline', lambda w, e, *_: dispatched.append((w, C.c_int.from_address(e).value)))
-    page = SliderPage(fw, ui, 'bootvol_page')
-    assert ui.shown[page.navbar] == 0
-    hit = page.hit(ui)
-    assert ui.prop(hit, b'clickable') == b'true'
-    canvas = Canvas(fw)
-    switch(fw, page, canvas)
-    painted = [r[:4] for r in canvas.rects] + [t[1] for t in canvas.texts]
-    assert painted and all(within(r, ui.box(hit)) for r in painted)  # the tap covers the tray as it paints
-    ui.emit(hit, O['EVT_CLICK'])
-    assert dispatched == [(page.switch, O['EVT_CLICK'])] and page.win in ui.invalidated()
-    ui.shown[page.switch] = 0  # Crossfade's page hides it
-    ui.emit(hit, O['EVT_CLICK'])
-    assert len(dispatched) == 1
-
-
-def test_the_tray_and_hint_are_the_slider_pages_own(fw, st, ui):
-    theme(fw, st, CLASSIC)
-    page = SliderPage(fw, ui, 'bootvol_page')
-    other = window(ui, 'crossfade_page')
-    dirty = fw.fn('slider_tray_dirty', None, C.c_void_p)
-    ui.dirty.clear()
-    dirty(other)
-    dirty(page.win)
-    assert ui.dirty_rects() == [(page.win, ui.box(page.hit(ui)))]  # where the tray is
-    opening = ui.text(page.caption(ui))
-    hint = fw.fn('slider_centre_hint', None, C.c_void_p, C.c_int)
-    hint(page.win, 1)
-    night = ui.text(page.caption(ui))
-    hint(page.win, 0)
-    day = ui.text(page.caption(ui))
-    assert night and day and len({opening, night, day}) == 3  # what Centre does there, Night Shift's and Crossfade's
-    ui.emit(page.win, O['EVT_DESTROY'], 0)
-    hint(page.win, 1)
-    assert st.slider_win == 0 and ui.text(page.caption(ui)) == day  # gone: the hint no longer its
 
 
 @pytest.mark.parametrize('value, part', [(0, 0), (50, 102), (100, 204), (25, 51)])
@@ -2732,43 +1998,13 @@ def test_the_sliders_part_is_its_share_of_the_width(fw, ui, value, part):
     assert fw.fn('slider_part', C.c_int, C.c_void_p, C.c_int)(s, 204) == 0  # no range
 
 
-@pytest.mark.parametrize('image, on', [(b'switch_on', True), (b'switch_off', False), (b'', False)])
-def test_the_switch_lights_its_value_s_cell(fw, st, ui, image, on):
-    theme(fw, st, CLASSIC)
-    page = SliderPage(fw, ui, 'bootvol_page')
-    ui.set_str(page.switch, b'image', image)
-    canvas = Canvas(fw)
-    switch(fw, page, canvas)
-    off_cell, on_cell = [t[1] for t in canvas.texts]  # Off's label, then On's, each centred in its cell
-    assert off_cell[0] + off_cell[2] <= on_cell[0] and off_cell[1] == on_cell[1]  # side by side, On on the right
-    assert within(off_cell, ui.box(page.hit(ui))) and within(on_cell, ui.box(page.hit(ui)))  # in the tray
-    def lit(cell):  # the selection's rows, the cell's own width across
-        x, y, w, h = cell
-        return any(r[0] == x and r[2] == w and r[3] == 1 and y <= r[1] < y + h for r in canvas.rects)
-    assert (lit(off_cell), lit(on_cell)) == (not on, on)
-    (_, (ex, _, _, _)), = [i for i in canvas.images if i[0] == b'classic_light_lit_edge']
-    assert abs(ex - (on_cell if on else off_cell)[0]) <= 1  # its lit edge with it
-    assert len({t[3] for t in canvas.texts}) == 1  # both labels in one ink
-
-
-@pytest.mark.parametrize('light', [0, 1])
-def test_a_page_is_flat_in_its_halfs_home_pane_colour(fw, st, light):
-    theme(fw, st, CLASSIC, light)
-    canvas = Canvas(fw)
-    bar = SETS[GEOM['Classic']].bar
-    fw.fn('paint_page', None, C.c_void_p, C.c_void_p, C.c_int)(0, canvas.p, bar)
-    (x, y, w, h, color), = canvas.rects
-    assert (x, y, w, y + h) == (0, bar, 375, 320)  # under the bar to the screen's foot
-    assert (color == rgba(CLASSIC['home_pane'][0][1])) == (not light)
-
-
 def test_final_text_is_never_flipped_and_leaves_the_ink_as_it_found_it(fw, st):
-    theme(fw, st, CLASSIC, 1)
+    theme(fw, st, 1)
     canvas = Canvas(fw)
     text = wide('Hi')
     rect = (C.c_int * 4)(0, 0, 100, 30)
     fw.fn('final_text', None, C.c_void_p, C.c_char_p, C.c_void_p, C.c_void_p, C.c_uint, C.c_uint)(
-        canvas.p, b'classic-light', C.addressof(text), rect, 20, 0x80000000)
+        canvas.p, b'inter', C.addressof(text), rect, 20, 0x80000000)
     assert [(t[0], t[3]) for t in canvas.texts] == [('Hi', 0x80000000)] and st.raw_ink == 0
     empty = wide('')
     fw.fn('final_text', None, C.c_void_p, C.c_char_p, C.c_void_p, C.c_void_p, C.c_uint, C.c_uint)(
@@ -2777,7 +2013,7 @@ def test_final_text_is_never_flipped_and_leaves_the_ink_as_it_found_it(fw, st):
 
 
 def test_a_labels_final_ink_is_rewritten_when_the_half_changes(fw, st, ui):
-    theme(fw, st, CLASSIC, 1)
+    theme(fw, st, 1)
     win = window(ui, 'page')
     label = ui.widget(win, 'label')
     button = ui.widget(win, 'button')
@@ -2785,322 +2021,21 @@ def test_a_labels_final_ink_is_rewritten_when_the_half_changes(fw, st, ui):
     fw.fn('text_ink', None, C.c_void_p, C.c_uint, C.c_int)(button, 0xccffffff, 5)
     assert ui.ints[label, b'style:normal:text_color'] & 0xffffffff == rgba(0)  # the light half's style hook flips it back
     assert (label, b'style:pressed:text_color') not in ui.ints and ui.ints[button, b'style:focused:text_color'] & 0xffffffff == 0xcc000000
-    theme(fw, st, CLASSIC, 0)
+    theme(fw, st, 0)
     fw.fn('text_inks', None, C.c_void_p)(ui.wm)
     assert ui.ints[label, b'style:normal:text_color'] & 0xffffffff == 0xffffffff
     assert ui.ints[button, b'style:over:text_color'] & 0xffffffff == 0xccffffff
 
 
-# Classic's T9 keyboard and Search's field.
-def keyboard(fw, ui):
-    kb = window(ui, 'kb_default_t9')
-    cand = ui.widget(kb, 'candidates', 0, 0, 375, 30)
-    pages = ui.widget(kb, 'pages', 0, 60, 375, 260)
-    page = ui.widget(pages, 'page', 0, 0, 375, 260)
-    row = ui.widget(page, 'row', 0, 0, 375, 60)
-    load(fw, ui, kb)
-    return kb, cand, row
-
-
-def search(fw, ui):
-    win = window(ui, 'search_dialog')
-    nav = ui.widget(win, 'view_navbar', 0, 0, 375, 60)
-    control = ui.widget(win, 'tab_control', 0, 100, 375, 220)
-    group = ui.widget(control, 'tab_button_group', 0, 0, 375, 30)
-    ui.widget(control, 'pages', 0, 30, 375, 190)
-    item = ui.widget(win, 'list_item_search', 0, 60, 375, 40)
-    edit = ui.widget(item, 'search_edit', 40, 0, 300, 40)
-    glass = ui.widget(item, 'img_search', 0, 0, 40, 40)
-    load(fw, ui, win)
-    return win, nav, item, edit, glass, group
-
-
-# The keyboard's art and the field's image at the sizes tools/art.py draws them.
-ART = {b'classic_light_' + name.encode(): size for name, (size, _) in tools_art.KB_GLYPHS.items()}
-ART[b'classic_light_field'] = (tools_art.FIELD_W, tools_art.FIELD_H)
-EMPTY_PX, TYPED_PX = b'style:empty:font_size', b'style:normal:font_size'
-
-
-def test_the_keyboard_coming_up_moves_searchs_field_over_it_and_back(fw, st, ui):
-    theme(fw, st, CLASSIC)
-    win, nav, item, edit, glass, group = search(fw, ui)
-    down, down_hint = ui.box(item), ui.ints[edit, EMPTY_PX]
-    x, _, w, h = down
-    assert x + w == 375 - x and ui.shown[nav] == 0  # centred in the strip, stock's toolbar hidden
-    assert ui.box(edit) == (0, 0, w, h) and ui.box(glass)[::3] == (0, h)  # the glass at the field's left end
-    assert ui.ints[edit, b'style:normal:margin_left'] >= ui.box(glass)[2]  # the text starts past it
-    kb, cand, row = keyboard(fw, ui)
-    assert {ui.ints[cand, f'style:{s}:bg_color'.encode()] for s in ('normal', 'disable', 'focused')} == {0}
-    up = ui.box(item)
-    assert up[2] < w and up[1] < down[1] and ui.shown[nav] == 1  # narrower and higher, over the keyboard
-    assert ui.box(edit) == (0, 0, up[2], up[3]) and ui.ints[edit, EMPTY_PX] < down_hint  # the hint smaller to fit
-    ui.emit(kb, O['EVT_DESTROY'], 0)
-    assert st.kb_win == 0 and ui.box(item) == down and ui.shown[nav] == 0 and ui.ints[edit, EMPTY_PX] == down_hint
-    ui.emit(win, O['EVT_DESTROY'], 0)
-    assert st.search_win == 0
-    keyboard(fw, ui)  # no Search under it: nothing to move
-    assert ui.box(item) == down
-
-
-def test_searchs_hint_size_follows_the_field_and_is_written_once(fw, st, ui):
-    theme(fw, st, CLASSIC)
-    win, nav, item, edit, glass, group = search(fw, ui)
-    hint = fw.fn('classic_pages__search_hint', None, C.c_void_p)
-    def writes():
-        return len([1 for w, key, _ in ui.int_log if w == edit and key == b'style:disable:font_size'])
-    opened, sizes = writes(), []
-    for text in ('', '', 'Coltrane'):
-        ui.set_text(edit, text)
-        hint(win)
-        sizes.append(ui.ints[edit, b'style:disable:font_size'])
-    # stock's edit is disabled, so it paints its hint and query in that state: the hint's size, then the query's
-    assert sizes == [ui.ints[edit, EMPTY_PX]] * 2 + [ui.ints[edit, TYPED_PX]] and sizes[0] < sizes[-1]
-    assert writes() == opened + 2  # a change each, the same size again none
-    keyboard(fw, ui)
-    ui.set_text(edit, '')
-    hint(win)
-    assert ui.ints[edit, b'style:disable:font_size'] == ui.ints[edit, EMPTY_PX] < sizes[0]  # the keyboard's smaller hint
-
-
-def test_a_keyboard_button_is_four_levels_under_its_window(fw, st, ui):
-    theme(fw, st, CLASSIC)
-    kb, cand, row = keyboard(fw, ui)
-    key = ui.widget(row, 'a')
-    is_key = fw.fn('kb_key', C.c_int, C.c_void_p)
-    assert (is_key(key), is_key(row), is_key(cand), is_key(None)) == (1, 0, 0, 0)
-    ui.emit(kb, O['EVT_DESTROY'], 0)
-    assert is_key(key) == 0
-
-
-def paint_key(fw, ui, row, name, text=None, w=60, h=50):
-    key = ui.widget(row, name, 0, 0, w, h, text=text)
-    canvas = Canvas(fw, sizes=ART)
-    fw.fn('kb_paint_key', None, C.c_void_p, C.c_void_p)(key, canvas.p)
-    assert canvas.fill == 0xff123456
-    return canvas
-
-
-def mid_row(canvas, w):
-    return [r[4] for r in canvas.rects if r[2] == w and r[3] == 1 and r[0] == 0 and r[1] == 25][-1]
-
-
-def channels(c):
-    return c & 255, c >> 8 & 255, c >> 16 & 255
-
-
-def label(canvas):
-    """A key's label as drawn twice, its shadow then its ink: (text, shadow's offset down, shadow lighter, px)."""
-    (text, shadow, _, under, _), (again, rect, (_, px), ink, _) = canvas.texts
-    assert text == again and shadow[::2] == rect[::2]
-    return text, shadow[1] - rect[1], lum(under) > lum(ink), px
-
-
-def test_the_keys_faces_and_labels(fw, st, ui):
-    theme(fw, st, CLASSIC)
-    kb, cand, row = keyboard(fw, ui)
-    plain, done, space, fn = (paint_key(fw, ui, row, n, t) for n, t in (('2', 'abc'), ('action', None), ('space', None),
-                                                                          ('page:123', '123')))
-    text, down, lighter, char_px = label(plain)
-    assert (text, down > 0, lighter) == ('abc', True, True)  # dark ink on a light shadow a row under it
-    for key in (done, fn):  # white ink, the shadow dark and a row over it, in a smaller size than a character's
-        text, down, lighter, px = label(key)
-        assert down < 0 and not lighter and px < char_px
-    assert label(fn)[0] == '123'
-    assert label(done)[0] and label(space)[0] and label(done)[0] != label(space)[0]  # their own words, no text of theirs
-    assert label(space)[1] > 0 and label(space)[2]  # space's ink is dark, as a character's
-    r, g, b = channels(mid_row(done, 60))
-    assert b > r + 60  # the enter key's blue
-    pr, pg, pb = channels(mid_row(plain, 60))
-    assert min(pr, pg, pb) > 200 and max(pr, pg, pb) - min(pr, pg, pb) < 8  # near white
-    fr, fg, fb = channels(mid_row(fn, 60))
-    assert max(fr, fg, fb) < min(pr, pg, pb) and fb >= fr  # a darker slate
-
-
-@pytest.mark.parametrize('w, h', [(60, 50), (61, 47)])
-@pytest.mark.parametrize('name, art', [('key:del', b'classic_light_kb_del'), ('opt:shift', b'classic_light_kb_shift')])
-def test_a_key_without_a_label_shows_its_glyph_centred(fw, st, ui, name, art, w, h):
-    theme(fw, st, CLASSIC)
-    kb, cand, row = keyboard(fw, ui)
-    canvas = paint_key(fw, ui, row, name, w=w, h=h)
-    (got, (x, y, gw, gh)), = canvas.images
-    assert canvas.texts == [] and got == art and (gw, gh) == ART[art]
-    assert abs(2 * x + gw - w) <= 1 and abs(2 * y + gh - h) <= 1
-
-
-def test_the_keyboards_ramp_darkens_down_the_screen(fw, st):
-    theme(fw, st, CLASSIC)
-    canvas = Canvas(fw)
-    fw.fn('paint_ramp', None, C.c_void_p, C.c_int, C.c_int, C.c_int)(canvas.p, 60, 320, 60)
-    assert [r[:4] for r in canvas.rects] == [(0, y - 60, 375, 1) for y in range(60, 320)]
-    light = [sum(channels(r[4])) for r in canvas.rects]
-    assert light == sorted(light, reverse=True) and light[0] > light[-1]
-
-
-def field_pieces(canvas):
-    """The field image's pieces as drawn, left to right."""
-    return sorted(dst for name, dst in canvas.images if name == b'classic_light_field')
-
-
-@pytest.mark.parametrize('loads', [True, False])
-def test_the_field_is_its_caps_round_a_stretched_middle_and_the_glass(fw, st, ui, loads):
-    theme(fw, st, CLASSIC)
-    canvas = Canvas(fw, sizes=ART | ({} if loads else {b'classic_light_field': None}))
-    x, y, w = 24, 33, 327
-    fw.fn('paint_field', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int)(ui.wm, canvas.p, x, y, w)
-    pieces = field_pieces(canvas)
-    if loads:
-        (lx, ly, lw, lh), (mx, my, mw, mh), (rx, ry, rw, rh) = pieces
-        assert lx == x and lx + lw == mx and mx + mw == rx and rx + rw == x + w  # across the field, no gap
-        assert ly == my == ry == y and lh == mh == rh == ART[b'classic_light_field'][1]  # its rows, unscaled
-        assert lw == rw < ART[b'classic_light_field'][0] // 2 < mw  # the image's two caps round a stretched middle
-    else:
-        assert pieces == []
-    (gx, gy, gw, gh), = [dst for name, dst in canvas.images if name == b'classic_light_field_glass']
-    assert x < gx and gx + gw < x + w // 2 and y < gy and gy + gh < y + ART[b'classic_light_field'][1]  # in its left end
-
-
-@pytest.mark.parametrize('up', [False, True])
-def test_searchs_field_paints_where_the_field_sits_the_glass_left_of_its_text(fw, st, ui, up):
-    theme(fw, st, CLASSIC)
-    win, nav, item, edit, glass, group = search(fw, ui)
-    if up:
-        keyboard(fw, ui)
-    canvas = Canvas(fw, sizes=ART)
-    fw.fn('search_paint', None, C.c_void_p, C.c_void_p)(win, canvas.p)
-    x, y, w, h = ui.box(item)  # the dialog is at 0, 0: the screen's
-    pieces = field_pieces(canvas)
-    assert pieces[0][:2] == (x, y) and pieces[-1][0] + pieces[-1][2] == x + w  # under the field as it moves
-    (gx, gy, gw, gh), = [dst for name, dst in canvas.images if name == b'classic_light_field_glass']
-    assert x < gx and gx + gw <= x + ui.ints[edit, b'style:normal:margin_left'] and y < gy and gy + gh < y + h
-    assert canvas.fill == 0xff123456
-
-
-def test_t9s_box_is_searchs_field_under_the_bar_with_its_hint(fw, st, ui):
-    theme(fw, st, CLASSIC)
-    win, nav, item, search_edit, glass, group = search(fw, ui)
-    keyboard(fw, ui)
-    page = window(ui, 'playlist_page')
-    edit = ui.widget(page, 'edit', 0, 100, 300, 40)
-    box = fw.fn('t9_box', None, C.c_void_p, C.c_void_p, C.c_char_p)
-    box(page, edit, b'Playlist Name')
-    x, y, w, h = ui.box(edit)
-    assert ui.prop(edit, b'tips') == b'Playlist Name' and (x, w) == ui.box(item)[::2]  # Search's field with T9 up
-    assert y + h <= 30  # its foot clears T9's top, page y 30: the keyboard doesn't move the page
-    title = ui.lookup(page, '_page_title', 1)
-    assert ui.text(title) == 'Search' and ui.shown[title] == 0 and st.t9_page == page and st.t9_back
-    for key in (b'style:normal:margin_left', TYPED_PX):
-        assert ui.ints[edit, key] == ui.ints[search_edit, key]  # Search's field's text
-    assert ui.ints[edit, EMPTY_PX] == ui.ints[edit, TYPED_PX]  # a short hint fits at the typed text's size
-    ui.emit(edit, O['EVT_DESTROY'], 0)
-    assert st.t9_page == st.t9_back == 0
-
-
-def test_off_classic_t9s_box_only_takes_its_hint(fw, st, ui):
-    theme(fw, st, MINIMAL)
-    page = window(ui, 'playlist_page')
-    edit = ui.widget(page, 'edit', 0, 100, 300, 40)
-    fw.fn('t9_box', None, C.c_void_p, C.c_void_p, C.c_char_p)(page, edit, b'Playlist Name')
-    assert ui.prop(edit, b'tips') == b'Playlist Name' and ui.box(edit) == (0, 100, 300, 40) and st.t9_page == 0
-
-
-def test_a_long_hint_takes_a_smaller_size_never_under_12(fw, st, ui):
-    theme(fw, st, CLASSIC)
-    box = fw.fn('t9_box', None, C.c_void_p, C.c_void_p, C.c_char_p)
-    sizes = []
-    for n in (1, 5, 10, 13, 20, 40, 80, 200):
-        page = window(ui, 'playlist_page')
-        edit = ui.widget(page, 'edit', 0, 100, 300, 40)
-        box(page, edit, b'x' * n)
-        empty = {ui.ints[edit, f'style:{s}:font_size'.encode()] for s in ('empty', 'empty_focus', 'empty_over')}
-        assert len(empty) == 1 and ui.prop(edit, b'tips') == b'x' * n  # one size in each empty state
-        sizes.append((empty.pop(), ui.ints[edit, TYPED_PX]))
-    hints = [hint for hint, _ in sizes]
-    assert hints == sorted(hints, reverse=True) and hints[0] == sizes[0][1]  # never larger for more: a short one fits as typed
-    assert all(hint <= typed for hint, typed in sizes) and any(12 < hint < typed for hint, typed in sizes)
-    assert min(hints) == hints[-1] == hints[-2] == 12  # the smallest worth reading, however long
-
-
-@pytest.fixture
-def rename_row():
-    """stock's PL_RENAME_ROW, which conftest's map keeps past a test."""
-    cell = C.c_int.from_address(O['PL_RENAME_ROW'])
-    saved = cell.value
-    yield cell
-    cell.value = saved
-
-
-def playlist_dialog(fw, ui, name, edit_name):
-    win = window(ui, name)
-    item = ui.widget(win, f'list_item_{edit_name}', 0, 100, 375, 40)
-    edit = ui.widget(item, edit_name, 0, 0, 300, 40)
-    back = ui.widget(win, 'img_return', 0, 0, 60, 60)
-    load(fw, ui, win)
-    return win, item, edit, back
-
-
-def test_new_playlist_is_the_keyboards_page_with_a_field_and_its_name_on_the_bar(fw, st, ui):
-    theme(fw, st, CLASSIC)
-    bar = Bar(fw, ui, title=True)
-    bar.sync()
-    _, _, _, search_edit, _, _ = search(fw, ui)
-    win, item, edit, back = playlist_dialog(fw, ui, 'addplaylist_dialog', 'ssedit')
-    x, y, w, h = ui.box(item)
-    bx, by, bw, bh = ui.box(back)
-    assert ui.box(edit) == (0, 0, w, h) and bx + bw <= x and by < y + h and y < by + bh  # the chevron beside the field
-    assert 0 < ui.ints[edit, b'style:normal:margin_left'] < ui.ints[search_edit, b'style:normal:margin_left']  # no glass
-    assert st.pl_box == win
-    canvas = Canvas(fw, sizes=ART)
-    fw.fn('pl_box_paint', None, C.c_void_p, C.c_void_p)(win, canvas.p)
-    pieces = field_pieces(canvas)
-    assert pieces[0][:2] == (x, y) and pieces[-1][0] + pieces[-1][2] == x + w  # its image under the field
-    due, = ui.due('pl_box_due')
-    ui.run(due)  # the next pass: stock's init has written its own hint
-    assert ui.prop(edit, b'tips') == b'Playlist Name' and ui.text(bar.title) == 'New Playlist'
-    hint, ink = (ui.ints[edit, key] & 0xffffffff for key in (b'style:empty:tips_text_color', b'style:normal:text_color'))
-    assert lum(hint) > lum(ink)  # a muted hint, lighter than the typed text on the white field
-    ui.emit(win, O['EVT_DESTROY'], 0)
-    assert st.pl_box == 0 and ui.run(ui.timer_add(ui.fn('classic_pages__pl_box_due'), 0, 0)) == 0
-
-
-@pytest.mark.parametrize('rows, at, tips', [(['Road Trip', 'Gym'], 1, b'Gym'), (['Road Trip'], 4, b'Rename'), ([None], 0, b'Rename')])
-def test_rename_hints_the_playlists_own_name(fw, st, ui, rename_row, rows, at, tips):
-    theme(fw, st, CLASSIC, 1)
-    deques = Deques(fw)
-    names = [C.create_string_buffer(n.encode()) if n else None for n in rows]
-    recs = [C.create_string_buffer(0x60) for _ in rows]
-    for rec, name in zip(recs, names):
-        if name:
-            struct.pack_into('<Q', rec, O['REC_TITLE'], C.addressof(name))
-    fw.var('fw_ctx_p_deque_playlist', C.c_uint).value = deques.new([C.addressof(r) for r in recs])
-    rename_row.value = at
-    win, item, edit, back = playlist_dialog(fw, ui, 'renameplaylist_dialog', 'edit')
-    ui.run(ui.due('pl_box_due')[0])
-    assert ui.prop(edit, b'tips') == tips
-    hint, ink = (ui.ints[edit, key] & 0xffffffff for key in (b'style:empty_focus:tips_text_color', b'style:normal:text_color'))
-    assert lum(hint) < lum(ink)  # stored flipped, as the typed text's ink: Light Mode's hook turns both back
-
-
-def test_a_playlist_dialog_missing_a_part_stays_stocks(fw, st, ui):
-    theme(fw, st, CLASSIC)
-    win = window(ui, 'addplaylist_dialog')
-    ui.widget(win, 'ssedit', 0, 0, 300, 40)
-    load(fw, ui, win)
-    assert st.pl_box == 0 and ui.due('pl_box_due') == []
-
-
-OLED = {t['id']: t for t in THEMES}['oled']
-
-
-@pytest.mark.parametrize('t, prefix', [(OLED, b'oled_'), (CLASSIC, b'classic_light_'), (MINIMAL, b'minimal_')])
-def test_theme_art_names_the_live_themes_own_image(fw, st, t, prefix):
-    """theme_art (list_marks.c): the theme's art prefix (tools/theme.py, its art attribute's id) before the name."""
-    theme(fw, st, t)
-    assert fw.fn('theme_art', C.c_char_p, C.c_char_p)(b'chevron_d') == prefix + b'chevron_d'
+def test_theme_art_names_the_themes_own_image(fw, st):
+    """theme_art (list_marks.c): the theme's art prefix (tools/theme.py, its id) before the name."""
+    theme(fw, st)
+    assert fw.fn('theme_art', C.c_char_p, C.c_char_p)(b'chevron_d') == b'oled_chevron_d'
 
 
 def test_the_wheels_scroll_indicator_shows_a_second_then_fades(fw, st, ui):
     """SB_WHEEL (OLED): a tick arms it on the list it moved and on that list's own view; full for 800 ms, fading
-    to nothing at a second; another list never shows it. Minimal's thumb painter arms nothing."""
+    to nothing at a second; another list never shows it."""
     now = [5000]
     fw.mock('time_now_ms', lambda *_: now[0])
     arm = fw.fn('wheel_sb_arm', None, C.c_void_p)
@@ -3108,10 +2043,8 @@ def test_the_wheels_scroll_indicator_shows_a_second_then_fades(fw, st, ui):
     owner = ui.widget(ui.wm, 'list_view', 0, 58, 375, 224)
     view = ui.widget(owner, 'scroll_view', 0, 0, 375, 224)
     other = ui.widget(ui.wm, 'list_view', 0, 58, 375, 224)
-    theme(fw, st, MINIMAL)
-    arm(view)
-    assert alpha(view) == 0
-    theme(fw, st, OLED)
+    theme(fw, st)
+    assert alpha(view) == 0  # nothing armed yet
     arm(view)
     assert (alpha(view), alpha(owner), alpha(other)) == (255, 255, 0)
     seen = []
@@ -3154,7 +2087,7 @@ NPM_GAP, NPM_HOLD, NPM_PX_S = (int(re.findall(rf'#define {n} (\d+)', NAVIGATION_
 class Marquee:
     """OLED's Now Playing with a title text_w px wide and an album album_w, each 160 px of column."""
     def __init__(self, fw, ui, mcl, st, text_w=300, album_w=200):
-        theme(fw, st, OLED)
+        theme(fw, st)
         self.now = Now(fw, ui, mcl, st)
         self.fw, self.ui = fw, ui
         fw.mock('style_get_int', lambda s, name, d, *_: 0)
@@ -3247,7 +2180,7 @@ def time_tap(ui, now, x=330, y=250, up=None):
 
 
 def test_a_tap_on_the_right_hand_time_shows_the_tracks_length_and_saves_it(fw, ui, mcl, st):
-    theme(fw, st, OLED)
+    theme(fw, st)
     now = Now(fw, ui, mcl, st, sec=50, total=200)
     assert ui.text(now.remain) == '-2:30'
     time_tap(ui, now)
@@ -3261,13 +2194,10 @@ def test_a_tap_on_the_right_hand_time_shows_the_tracks_length_and_saves_it(fw, u
     assert ui.text(now.remain) == '-2:20'
 
 
-def test_a_touch_off_the_time_or_under_another_theme_changes_nothing(fw, ui, mcl, st):
-    theme(fw, st, OLED)
+def test_a_touch_off_the_time_changes_nothing(fw, ui, mcl, st):
+    theme(fw, st)
     now = Now(fw, ui, mcl, st, sec=50, total=200)
     tap(ui, now.win, O['EVT_POINTER_UP_BEFORE'], 330, 250)  # a touch that came down elsewhere
     time_tap(ui, now, up=(200, 250))  # down on the time, lifted off it
     time_tap(ui, now, x=200)  # the elapsed side of the row
-    assert ui.text(now.remain) == '-2:30' and not fw.calls('write_int_config')
-    theme(fw, st, CLASSIC)
-    time_tap(ui, now)
     assert ui.text(now.remain) == '-2:30' and not fw.calls('write_int_config')

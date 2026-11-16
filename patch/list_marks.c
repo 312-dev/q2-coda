@@ -1,7 +1,8 @@
 /* A theme's own list marks and status glyphs (docs/oled-design.md): the chevron from its own art
- * on every row that opens a page (CHEV_ICON), the scroll indicator that shows while the wheel turns
- * (SB_WHEEL), the slim battery (BATT_SLIM) and a scrolling label's faded ends (marquee_fade). Each
- * draws in final colours, its own in each half. */
+ * on every row that opens a page (chevron_icon, spinner_icon), the scroll indicator that shows
+ * while the wheel turns (wheel_sb_alpha), the slim battery (battery_slim), a switch (switch_mark)
+ * and a scrolling label's faded ends (marquee_fade). Each draws in final colours, its own in each
+ * half. */
 #include "navigation.h"
 
 /* CHEV_ICON: the image's centre this far left of the right column, as the design places the
@@ -114,7 +115,6 @@ static int sb_due(const void *info) {
 
 /* A wheel tick moved list: the indicator shows on it, and its fade starts over. */
 void wheel_sb_arm(void *list) {
-    if (theme()->painter[PAINT_SCROLL] != SB_WHEEL) return;
     sb_at = time_now_ms();
     sb_list = list;
     sb_owner = P(list, W_PARENT); /* read now: only compared later, never followed */

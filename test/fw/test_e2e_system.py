@@ -160,7 +160,7 @@ class Screen:
                 yield w, self.texts[w] + (': ' + self.texts[value] if value and value in self.texts else '')
 
     def rows(self, root=None):
-        """Each row's text under root (the top window), in order: a label's, and the value beside it (Classic's)."""
+        """Each row's text under root (the top window), in order: a label's, and the value beside it."""
         return [text for _, text in self.labels(root or self.top)]
 
     def row(self, starts, root=None):
@@ -173,11 +173,6 @@ class Screen:
             if text == starts if exact else text.startswith(starts):
                 return self.parent(w)
         raise AssertionError(f'no row {starts!r} in {self.rows(root)}')
-
-    def icon(self, name):
-        """The icon of the row named name: its button's image."""
-        images = [c for c in self.kids[self.button(name, exact=True)] if self.types[c] == 'image']
-        return self.props.get(images[0], {}).get('image')
 
     def switch(self, starts):
         """The switch image beside the row whose text starts with starts (a list_toggle row)."""
@@ -392,8 +387,8 @@ def invalidated(q2):
     return [args[:2] for _, args in q2.fw.calls('widget_invalidate_force')]
 
 
-# The boot and the theme (docs/internals.md#themes): Classic boots on its own geometry sets, theme_boot writing them
-# into stock's text once, from the first window's load.
+# The boot and the theme (docs/internals.md#themes): OLED boots on its own geometry set, theme_boot writing it into
+# stock's text once, from the first window's load.
 
 class Site(C.Structure):
     _fields_ = [('addr', C.c_uint), ('group', C.c_ubyte)]
@@ -445,125 +440,45 @@ def client(q2):
 
 
 @in_fork
-def test_classic_asks_to_restart_and_boots_into_its_own_geometry(fw, library, tmp_path):
-    q2 = Q2(fw, library, tmp_path)
-    builtins = host.tools_theme.builtins()  # by index: IPOD THEME
-    themes = [t['name'] for t in sorted(builtins, key=lambda t: t['order'])]  # the picker's rows
+def test_a_unit_left_on_another_theme_boots_oleds_set_and_preset_once(fw, library, tmp_path):
+    """theme_boot's migration: THEME 1 (Classic, an older build's) takes OLED's preset and THEME 3, then boots."""
+    q2 = Q2(fw, library, tmp_path, Flash(IPOD_THEME='1', IPOD_LIGHT='1', IPOD_HOME='0'))
     names, values, sites = boot(q2)
-    assert q2.protect == [] and written(q2, 0) == []  # Minimal is SET0, what stock's text holds
-    minimal = client(q2)
+    assert written(q2, names.index('oled'))  # OLED's own set, not SET0
+    assert q2.flash.get('IPOD', 'THEME') == '3'
+    # OLED's preset (its theme.xml): Light Mode off, Home Full
+    assert q2.flash.get('IPOD', 'LIGHT') == '0' and q2.flash.get('IPOD', 'HOME') == '1'
     appearance(q2)
-    q2.screen.click('Theme')
-    assert q2.screen.rows() == themes  # a row for each theme in assets/themes, in their order
-    q2.confirm = 0  # Cancel
-    q2.screen.click('Classic')
-    assert q2.dialogs == ['dialog/confirminfo_dialog'] and q2.flash.get('IPOD', 'THEME') is None
-    assert not q2.fw.calls('stock_reboot_trampoline')
-    q2.confirm = 10
-    q2.screen.click('Classic')
-    assert q2.flash.get('IPOD', 'THEME') == str(next(t['index'] for t in builtins if t['name'] == 'Classic'))
-    assert len(q2.fw.calls('stock_reboot_trampoline')) == 1
-    assert q2.flash.get('IPOD', 'LIGHT') == '1'  # with its presets: Classic is light (its theme.xml)
-    appearance(q2)
-    assert q2.screen.row('Theme') == 'Theme: Minimal'  # until the restart, the booted theme runs
+    assert q2.screen.row('Light Mode') == 'Light Mode: Off' and q2.screen.row('Home') == 'Home: Full'
+    q2.screen.click('Light Mode')
+    assert q2.flash.get('IPOD', 'LIGHT') == '1'
     q2.power_on()
     boot(q2)
-    assert written(q2, names.index('classic-light'))  # Row Art on, Classic's preset
-    assert minimal != client(q2) < 320  # Classic's own bar over the window, not Minimal's
+    written(q2, names.index('oled'))
     appearance(q2)
-    assert q2.screen.row('Theme') == 'Theme: Classic' and q2.screen.row('Light Mode') == 'Light Mode: On'
+    assert q2.screen.row('Light Mode') == 'Light Mode: On'  # the preset was the migration's alone
+    assert q2.flash.get('IPOD', 'THEME') == '3'
     q2.close()
 
 
 @in_fork
-def test_row_art_off_restarts_into_classics_text_set(fw, library, tmp_path):
-    q2 = Q2(fw, library, tmp_path, Flash(IPOD_THEME='1'))
-    names, values, sites = boot(q2)
-    written(q2, names.index('classic-light'))
-    classic = client(q2)
-    appearance(q2)
-    assert q2.screen.row('Row Art') == 'Row Art: On'
-    q2.screen.click('Row Art')
-    assert q2.flash.get('IPOD', 'ROWART') == '0' and len(q2.fw.calls('stock_reboot_trampoline')) == 1
-    assert q2.screen.row('Row Art') == 'Row Art: On'  # the running set's, until the restart
-    q2.power_on()
-    boot(q2)
-    written(q2, names.index('classic-light-text'))
-    assert client(q2) == classic  # Row Art changes the rows, not Classic's bar
-    appearance(q2)
-    assert q2.screen.row('Row Art') == 'Row Art: Off'
-    q2.close()
-
-
-@in_fork
-def test_a_set_the_boot_cant_write_runs_minimal_until_the_next_boot(fw, library, tmp_path):
-    q2 = Q2(fw, library, tmp_path, Flash(IPOD_THEME='1'))
+def test_a_set_the_boot_cant_write_runs_set0_until_the_next_boot(fw, library, tmp_path):
+    q2 = Q2(fw, library, tmp_path, Flash(IPOD_THEME='3'))
     names, values, sites = geometry(q2.fw)
-    g = names.index('classic-light')
+    g = names.index('oled')
     assert len({s.addr & ~0xfff for s in sites if values[g][s.group] != values[0][s.group]}) > 1
-    minimal = client(q2)  # before any boot: SET0's, what stock's text holds
+    set0 = client(q2)  # before any boot: SET0's, what stock's text holds
     boot(q2, refuse=2)  # the second page refused
     opened = [a for a, _, p in q2.protect if p == 7]
     assert len(opened) == 2 and [a for a, _, p in q2.protect if p == 5] == opened[:1]  # the first put back
     assert all(C.c_uint.from_address(s.addr).value == HIGH << 16 | values[0][s.group] for s in sites)
-    assert client(q2) == minimal  # the pages fit stock's windows, which kept SET0
-    appearance(q2)
-    assert q2.screen.row('Theme') == 'Theme: Minimal' and q2.flash.get('IPOD', 'THEME') == '1'
+    assert client(q2) == set0  # the pages fit stock's windows, which kept SET0
+    assert q2.flash.get('IPOD', 'THEME') == '3'
     q2.power_on()
     boot(q2)
     written(q2, g)
-    assert client(q2) != minimal
-    appearance(q2)
-    assert q2.screen.row('Theme') == 'Theme: Classic'
+    assert client(q2) != set0
     q2.close()
-
-
-@pytest.mark.xfail(strict=True, reason='BUG: settings_read checks each option against the theme stored in THEME '
-                   'before theme_boot falls back to Minimal (st.theme = 0), so a stored Battery: Icon + Percent reads as '
-                   'Classic\'s default, Percent Inside, on a Minimal that takes Icon + Percent; the bar draws it and a press '
-                   'saves it over')
-@in_fork
-def test_a_boot_fallen_back_to_minimal_reads_the_settings_as_minimal_does(fw, library, tmp_path):
-    q2 = Q2(fw, library, tmp_path, Flash(IPOD_THEME='1', IPOD_BATTERY='2'))
-    boot(q2, refuse=1)
-    appearance(q2)
-    assert q2.screen.row('Theme') == 'Theme: Minimal'
-    assert q2.screen.row('Battery') == 'Battery: Icon + Percent'  # Minimal takes every style; Classic not this one
-    q2.close()
-
-
-def test_a_theme_on_the_same_set_switches_at_once_and_boots_as_it_was_left(q2):
-    appearance(q2)
-    q2.screen.click('Theme')
-    q2.screen.click('Modern')
-    assert q2.dialogs == [] and not q2.fw.calls('stock_reboot_trampoline')
-    assert q2.flash.get('IPOD', 'THEME') == '2'
-    assert q2.screen.icon('Modern') == 'select' and q2.screen.icon('Minimal') == 'unselect'
-    assert q2.fw.calls('image_manager_unload_all') and (q2.screen.wm, 0) in invalidated(q2)  # redrawn in it
-    appearance(q2)
-    live, tone, paper = q2.screen.rows(), red(q2), ink(q2)
-    assert q2.screen.row('Theme') == 'Theme: Modern'
-    q2.power_on()
-    appearance(q2)
-    assert q2.screen.rows() == live and red(q2) == tone and ink(q2) == paper
-
-
-def now_playing(q2):
-    """The asset stock's playing_page load reads: ringnav_ui_load's choice."""
-    q2.fw.fn('ringnav_ui_load', C.c_void_p, C.c_char_p, C.c_void_p)(b'playing_page', 0)
-    return C.string_at(q2.fw.calls('stock_ui_load_trampoline')[-1][1][0])
-
-
-def test_centred_now_playing_loads_its_page_from_the_next_open_and_after_a_restart(q2):
-    own = now_playing(q2)
-    appearance(q2)
-    assert q2.screen.switch('Centred Now Playing') == 'switch_off'
-    q2.screen.click('Centred Now Playing')
-    assert q2.screen.switch('Centred Now Playing') == 'switch_on' and q2.flash.get('IPOD', 'NPCENTRED') == '1'
-    centred = now_playing(q2)
-    assert centred != own
-    q2.power_on()
-    assert now_playing(q2) == centred
 
 
 # Home (docs/ipod.md#home): Split, Full or Carousel, and its Shortcut row.
@@ -612,21 +527,6 @@ def test_the_shortcut_picked_names_homes_row_now_and_after_a_restart(q2):
 
 
 # Display settings saved and read back after a restart.
-
-def test_the_accent_picked_is_saved_drawn_and_drawn_again_after_a_restart(q2):
-    appearance(q2)
-    seen, before = [q2.screen.row('Accent')], red(q2)
-    while red(q2) == before:  # the neutral accents (Ivory, Graphite) share a silver red
-        q2.screen.click('Accent')
-        assert q2.screen.row('Accent') not in seen  # each press a new accent
-        seen.append(q2.screen.row('Accent'))
-    after = red(q2)
-    saved = q2.flash.get('IPOD', 'MINIMAL_ACCENT')  # Minimal keeps its own accent (its theme.xml's key)
-    assert saved is not None and saved.isdigit()
-    q2.power_on()
-    appearance(q2)
-    assert q2.screen.row('Accent') == seen[-1] and red(q2) == after
-
 
 def grey(color):
     return color & 255 == color >> 8 & 255 == color >> 16 & 255
@@ -1017,9 +917,9 @@ def test_a_charge_limit_chosen_on_power_holds_charging_between_its_resume_and_st
     q2.fw.var('fw_ctx_g_power_chargestate', C.c_int).value = 1  # charging
     q2.loop()
     q2.open('systemset/powermanager_page')
-    assert q2.screen.switch('Charge Limit') == 'switch_off'
+    assert q2.screen.row('Charge Limit') == 'Charge Limit: Off'  # a key/value row, Off or its level (pod_text)
     q2.screen.click('Charge Limit')
-    assert q2.screen.switch('Charge Limit') == 'switch_on' and q2.flash.get('Q2POD', 'CHARGELIMIT') == '1'
+    assert q2.screen.row('Charge Limit') == f'Charge Limit: {stop}%' and q2.flash.get('Q2POD', 'CHARGELIMIT') == '1'
     q2.loop()
     assert enable() == [0]  # from the next pass, though the last poll was a moment ago
     q2.power_on()

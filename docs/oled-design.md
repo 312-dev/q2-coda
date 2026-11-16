@@ -167,12 +167,12 @@ All lists share one grid.
 ### Selection bar
 
 - Accent Blue, flat, the full row pitch tall, inset 16 px each side on every row, 8 px corners,
-  whatever the Corners setting says (`list.selection.fixed`).
+  (`list.selection.inset`, `list.selection.radius`).
 - Text and chevron on it are On Accent, the second line too. Nothing else on the row changes (no
   bold, no indent).
 - It moves one row per wheel tick, with no easing longer than the theme's list motion.
 - A list left by Return opens at its top when it is chosen again; Return lands on the row the
-  page behind was left at (`list.reopen.top`, every theme's, from Minimal).
+  page behind was left at (`list.reopen.top`).
 - Exactly one per screen. A dialog over a list takes the selection; the list's bar is hidden
   while the dialog is open.
 
@@ -321,7 +321,7 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   selection) centred on x 34, its name at x 52 and the chevron on the right column; the card's root
   too.
 - Which list is which comes from its page: Songs' page (`allmusic_page`, which also holds a genre's songs
-  and the other lists stock opens there) is mixed, the artist page's songs (under other themes: OLED draws that page as the [artist page](#artist-page)) are an artist's, the album page is an
+  and the other lists stock opens there) is mixed, the artist page's songs (OLED draws that page as the [artist page](#artist-page)) are an artist's, the album page is an
   album, Folder view (`folder_page`) a folder, and an album's tracks opened from Cover Flow are an album too (their
   status row names the album, with no row of its own above the tracks). Lists Q2 Pod draws itself (Most Played,
   Long Songs, Ratings) keep their own rows.
@@ -747,23 +747,24 @@ page became Settings > Storage. Spotify's pages follow the list patterns.
 
 Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)):
 
-- A fourth built-in theme (picker order and tests derived from `assets/themes/`).
+- OLED as the one built-in theme, standing alone: `assets/themes/oled/theme.xml`, index 0, extending
+  no other theme, its own `oled` geometry set. A unit left on another theme by an older build takes
+  OLED's preset once at boot ([ipod](ipod.md#theme)).
 - Font faces as a table, with Inter Regular and Medium and tabular digits.
-- A theme's own accent tones, and the selection bar's radius, inset and `fixed` (every row,
-  whatever Corners says).
+- A theme's own accent tones, and the selection bar's radius and inset on every row.
 - A status row in place of a bar band (`status_y`), its title and its battery's end `STATUS_ROW_INSET`
   in from the sides and its clock beside the play state, or centred where there is no title; list boxes that end on a whole row by `list_end`
   (`list_fit`).
 - A theme's own art from Phosphor (`tools/art.py`), loaded by its own prefix (`theme_art`): the
-  chevron (`list.chevron.painter="icon"`) and the play state; the slim battery
-  (`bar.battery.painter="slim"`); the wheel's scroll indicator (`list.scrollbar.painter="wheel"`);
+  chevron (`chevron_icon`, `patch/list_marks.c`) and the play state; the slim battery
+  (`battery_slim`); the wheel's scroll indicator (`list.scrollbar.*`, `wheel_sb_arm`);
   1 px dividers on the text and right columns (`list.divider.ink`); row art's 4 px corners
   (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column; the
   switch, Gain's value, the pickers' check, disabled rows, the slider page, EQ's Simple tab and the Wi-Fi
   page as above (`settings.values.switch`); song rows
-  (`list.songs.painter="inline"`) and the Song Artist and Song Length options; Songs' action row
+  (`patch/song_rows.c`) and the Song Artist and Song Length options; Songs' action row
   as the Shuffle row (`list.shuffle.row`); a list left by Return opening at its top when chosen
-  again (`list.reopen.top`, which Minimal sets for every theme).
+  again (`list.reopen.top`).
 - Now Playing on the set's grid (`np_art`, `np_bar_y`), its art's corners (`playing.art.radius`), its
   artist and album in Inter (`playing.artist.font`), shuffle and repeat, the heart and More as the theme's
   own glyphs (`playing.modes.icons`), the marquee fades (`list.marquee.fade`), and Track Time (`NPTIME`), whose
@@ -786,8 +787,7 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - Settings > Storage and its Downloads (`patch/storage.c` `storage_paint`): the storage bar and its legend, the
   items' marks, the values beside their chevrons and the footers; and the song rows' marks for where a song lives
   (`catalogue.c` `catalogue_row_mark`).
-- The toast, the confirm as a dialog page and the empty note (`dialog.confirm.painter="oled"`,
-  `patch/feedback.c`), and the confirmation after a shuffle.
+- The toast, the confirm as a dialog page and the empty note (`patch/feedback.c`), and the confirmation after a shuffle.
 
 Still to build:
 

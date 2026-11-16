@@ -814,7 +814,6 @@ static int sh_state(int i) {
     return ST_INSTALL;
 }
 
-int feedback_oled(void); /* feedback.c */
 static void sh_text(int r) {
     static const char *const stages[] = { "Checking…", "Downloading", "Unpacking…", "Installing…",
                                           "Removing…" };
@@ -826,11 +825,10 @@ static void sh_text(int r) {
     if (i == ROW_CHECK && sh.job == JOB_CHECK)
         t = "Checking…";
     else if (i == ROW_CHECK) { /* with no list yet, the press loads it; OLED says so under the row */
-        int noted = feedback_oled() &&
-                    feedback_empty(sh.page, feedback_below(sh.row[r]),
+        int noted = feedback_empty(sh.page, feedback_below(sh.row[r]),
                                    shelf_n ? (const char *)0 : "No apps listed",
                                    "Connect to Wi-Fi, then Check for Updates");
-        t = !shelf_n && !noted ? "Connect to Wi-Fi to load the list" : theme()->sep[0].n ? " " : "";
+        t = !shelf_n && !noted ? "Connect to Wi-Fi to load the list" : "";
         void *title = noted ? widget_get_child(sh.row[r], 0) : (void *)0;
         if (title) /* OLED: one line, centred in the list's pitch, as its other rows keep it */
             widget_move_resize(title, I(title, W_X), 0, I(title, W_W), I(sh.row[r], W_H));
@@ -984,10 +982,9 @@ static void sh_rows(void) {
         sh.rows = 0;
         void *view = page_list(sh.page, sh.page, 0, "App Store", n, 64);
         for (int r = 0; r < n; ++r)
-            /* sh_text writes the detail: a blank one, or a theme would centre the name over it */
+            /* sh_text writes the detail */
             sh.row[r] = page_row_detail(
-                view, r, map[r] == ROW_CHECK ? "Check for Updates" : apps[map[r]].name,
-                theme()->sep[0].n ? " " : "", sh_click);
+                view, r, map[r] == ROW_CHECK ? "Check for Updates" : apps[map[r]].name, "", sh_click);
         sh.rows = n;
     }
     sh_refresh();
