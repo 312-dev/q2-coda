@@ -181,7 +181,9 @@ static void un_fill(int sel) {
         widget_use_style(un.head, "s_listitem_black");
         widget_set_prop_int(un.head, "style:normal:bg_color", 0);  /* on the sheet */
         un.clear = list_item_create(un.head, 0, 0, 0, UN_PILL_H);  /* placed when painted */
-        widget_set_prop_int(un.clear, "style:normal:bg_color", 0); /* its corners the sheet's */
+        /* its corners the sheet's, and no frame: the row style's border shows without its fill */
+        widget_set_prop_int(un.clear, "style:normal:bg_color", 0);
+        widget_set_prop_int(un.clear, "style:normal:border_color", 0);
         widget_set_prop_int(un.clear, "_un_stop", stop++);
         widget_on(un.clear, EVT_CLICK, un_clear, (void *)0);
     }

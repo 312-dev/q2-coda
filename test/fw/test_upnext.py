@@ -360,6 +360,7 @@ def test_up_next_opens_in_the_menu_sheet_its_rows_at_their_own_heights(fw, plain
     clear = page.children[kids[1]][0]
     for w in [clear] + kids[1:]:  # no paint of their own: the sheet shows round Clear's pill and under each row
         assert page.props.get((w, b'style:normal:bg_color')) == 0, w
+    assert page.props.get((clear, b'style:normal:border_color')) == 0  # nor the row style's frame round the pill
 
 
 def page_block(page, w):
