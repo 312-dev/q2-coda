@@ -247,6 +247,7 @@ def analyse(source):
     lines = source.splitlines()
     seen = {}
     stmts = []
+    lambdas = {}  # name -> (reads, changes) of the lambda last assigned to it: paint_bar = lambda: m.call(...)
     for i, node in enumerate(tree.body):
         text = '\n'.join(lines[node.lineno - 1:node.end_lineno])
         digest = hashlib.sha256(text.encode()).hexdigest()[:16]
@@ -307,6 +308,23 @@ def analyse(source):
                 if isinstance(target, (ast.Attribute, ast.Subscript)) and _base(target) in imported and not (
                         isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in READS):
                     s.pinned = True  # sys.path.insert(...), os.environ[k] = v
+            # Calling a lambda the module named does what its body does: paint_bar() changes m.
+            for n, local in mine:
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in lambdas and n.func.id not in local:
+                    lr, lc = lambdas[n.func.id]
+                    s.loads |= lr
+                    s.mutates |= lc
+            if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Lambda) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)):
+                params = {a.arg for a in node.value.args.args + node.value.args.kwonlyargs + node.value.args.posonlyargs}
+                body = list(ast.walk(node.value.body))
+                lr = {n.id for n in body if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id not in params}
+                lc = _changes(body, lambda name: name not in params, modules)
+                er, ec = expand(lr & defined_at.keys(), i)
+                lambdas[node.targets[0].id] = (lr | er, lc | ec)
+            elif s.kills & lambdas.keys():
+                for name in s.kills & lambdas.keys():
+                    del lambdas[name]
             # A call may change what it is passed: lay(m, view) lays out m's rows. A builtin (enumerate,
             # len, zip...) does not, unless the module rebinds its name.
             s.mutates |= {a.id for n, local in mine if isinstance(n, ast.Call)

@@ -109,3 +109,9 @@ def test_plan_cuts_after_a_test():
     assert len(ranges) == 2 and ranges[0][0] == 0 and ranges[-1][1] == len(stmts)
     cut = ranges[1][0]
     assert patch_shards.ast.unparse(stmts[cut - 1].node) == 'passed()'
+
+
+def test_calling_a_named_lambda_counts_as_its_body():
+    source = 'm = []\npaint = lambda: m.append(1)\npaint()\nassert m == [1]\n'
+    stmts = patch_shards.analyse(source)
+    assert {stmts[i].line for i in patch_shards.slice_of(stmts, 3, 4)} == {1, 2, 3}
