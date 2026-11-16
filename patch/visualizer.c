@@ -1,37 +1,40 @@
 /* iPod Now Playing's last page (docs/ipod.md#visualizer): the music as heard, read from
  * hciplayer's tap (peq.h), as Field, after iTunes' Magnetosphere. Off for the battery while
  * NP_VISUALIZER (offsets.inc) is 0: navigation.c calls none of this, and the link drops it. */
-#include "peq.h"
 #include "offsets.inc"
+#include "peq.h"
 
-#define VIS_N 1024           /* frames each frame analyses */
-#define VIS_BANDS 64         /* log-spaced bands, 40 Hz to 16 kHz */
-#define VIS_X 16             /* tools/ipod.py NP_MARGIN */
-#define PAGE_W (vz.w - 2 * VIS_X) /* the song line's room: the slide's width, 375 or the centred page's 225 */
-#define VIS_SLIDE_H 186      /* tools/ipod.py NP_SLIDE_H, the page's height, from the lyrics' top */
-#define VIS_H (vz.h ? vz.h : VIS_SLIDE_H) /* ... or less where the slide ends sooner (OLED's np_grid) */
+#define VIS_N 1024                /* frames each frame analyses */
+#define VIS_BANDS 64              /* log-spaced bands, 40 Hz to 16 kHz */
+#define VIS_X 16                  /* tools/ipod.py NP_MARGIN */
+#define PAGE_W (vz.w - 2 * VIS_X) /* the song line's room: the slide's width */
+#define VIS_SLIDE_H 186 /* tools/ipod.py NP_SLIDE_H, the page's height, from the lyrics' top */
+#define VIS_H                                                                                      \
+    (vz.h ? vz.h : VIS_SLIDE_H) /* ... or less where the slide ends sooner (OLED's np_grid) */
 #define TAU 6.2831853f
 
 static struct {
     float re[VIS_N], im[VIS_N], pcm[VIS_N][2], hann[VIS_N]; /* hann[VIS_N / 2] is 0 until filled */
     float level[VIS_BANDS];
     unsigned bin_rate;
-    int w, h; /* the page's width and height (visualizer_attach; h 0: VIS_SLIDE_H) */
+    int w, h;               /* the page's width and height (visualizer_attach; h 0: VIS_SLIDE_H) */
     int bin[VIS_BANDS + 1]; /* each band's first FFT bin at bin_rate */
 #ifndef PEQ_HOST
     void *win, *slide, *page;
     vis_tap *tap;
     unsigned timer, last, heard; /* heard: the last tick with audio */
-    unsigned retry; /* a paint missed while not settled looks again (look) */
-    int ox, oy, page_x; /* the slide area in the window; the page's canvas x there as last painted */
-    float flow; /* Field's clock, seconds of music, moved on while it plays */
+    unsigned retry;              /* a paint missed while not settled looks again (look) */
+    int ox, oy,
+        page_x;       /* the slide area in the window; the page's canvas x there as last painted */
+    float flow;       /* Field's clock, seconds of music, moved on while it plays */
     void *glow[5][4]; /* Field's sprites (field_sprites), each band's at four strengths; kept for
                        * demo's life: 5 x 4 x 32 x 32 x 4 bytes, 80 KB */
-    int chrome;              /* OLED's full screen (full()): the page's other parts' alpha, 0-255 */
-    unsigned chrome_at, lift; /* chrome's last step, and the last time a thumb rested on the wheel */
-    int in_bar;               /* bar_paint is painting the status row again: its own paint is stock's */
-    int quiet; /* at rest (not playing, nothing heard) as last ticked: the track's name shows, and
-                * its change repaints; the last word (test/patch.py finds it so) */
+    int chrome;       /* OLED's full screen (full()): the page's other parts' alpha, 0-255 */
+    unsigned chrome_at,
+        lift;   /* chrome's last step, and the last time a thumb rested on the wheel */
+    int in_bar; /* bar_paint is painting the status row again: its own paint is stock's */
+    int quiet;  /* at rest (not playing, nothing heard) as last ticked: the track's name shows, and
+                 * its change repaints; the last word (test/patch.py finds it so) */
 #endif
 } vz __attribute__((section(".scratch")));
 
@@ -42,8 +45,12 @@ static void fft(float *re, float *im, int n) {
         for (; j & bit; bit >>= 1) j ^= bit;
         j ^= bit;
         if (i < j) {
-            float t = re[i]; re[i] = re[j]; re[j] = t;
-            t = im[i]; im[i] = im[j]; im[j] = t;
+            float t = re[i];
+            re[i] = re[j];
+            re[j] = t;
+            t = im[i];
+            im[i] = im[j];
+            im[j] = t;
         }
     }
     for (int len = 2; len <= n; len <<= 1) {
@@ -51,9 +58,12 @@ static void fft(float *re, float *im, int n) {
         for (int i = 0; i < n; i += len) {
             float cr = 1, ci = 0;
             for (int k = i; k < i + len / 2; ++k) {
-                float tr = re[k + len / 2] * cr - im[k + len / 2] * ci, ti = re[k + len / 2] * ci + im[k + len / 2] * cr;
-                re[k + len / 2] = re[k] - tr; im[k + len / 2] = im[k] - ti;
-                re[k] += tr; im[k] += ti;
+                float tr = re[k + len / 2] * cr - im[k + len / 2] * ci,
+                      ti = re[k + len / 2] * ci + im[k + len / 2] * cr;
+                re[k + len / 2] = re[k] - tr;
+                im[k + len / 2] = im[k] - ti;
+                re[k] += tr;
+                im[k] += ti;
                 float t = cr * wr - ci * wi;
                 ci = cr * wi + ci * wr;
                 cr = t;
@@ -62,13 +72,16 @@ static void fft(float *re, float *im, int n) {
     }
 }
 
-static int band_bin(int b, unsigned rate) { return (int)(40 * pow(400, (double)b / VIS_BANDS) * VIS_N / rate + 0.5); }
+static int band_bin(int b, unsigned rate) {
+    return (int)(40 * pow(400, (double)b / VIS_BANDS) * VIS_N / rate + 0.5);
+}
 
-/* level[VIS_BANDS]: each band's loudest bin of the Hann-windowed mono mix of VIS_N frames at rate, 0
- * at VIS_FLOOR_DB below a full-scale sine to 1 at it. */
+/* level[VIS_BANDS]: each band's loudest bin of the Hann-windowed mono mix of VIS_N frames at rate,
+ * 0 at VIS_FLOOR_DB below a full-scale sine to 1 at it. */
 void vis_bands(const float (*pcm)[2], unsigned rate, float *level) {
     if (!vz.hann[VIS_N / 2]) /* the window, once */
-        for (int i = 0; i < VIS_N; ++i) vz.hann[i] = 0.25f - 0.25f * cosf(TAU * i / (VIS_N - 1)); /* with the mono mix's 1/2 */
+        for (int i = 0; i < VIS_N; ++i)
+            vz.hann[i] = 0.25f - 0.25f * cosf(TAU * i / (VIS_N - 1)); /* with the mono mix's 1/2 */
     for (int i = 0; i < VIS_N; ++i) {
         vz.re[i] = (pcm[i][0] + pcm[i][1]) * vz.hann[i];
         vz.im[i] = 0;
@@ -103,18 +116,21 @@ void vis_analyze(unsigned rate, float dt) {
     if (rate) vis_bands(vz.pcm, rate, target);
     for (int b = 0; b < VIS_BANDS; ++b) {
         float fall = vz.level[b] - VIS_DECAY * dt;
-        vz.level[b] = target[b] > vz.level[b] ? vz.level[b] + (target[b] - vz.level[b]) * 0.6f : target[b] > fall ? target[b] : fall;
+        vz.level[b] = target[b] > vz.level[b] ? vz.level[b] + (target[b] - vz.level[b]) * 0.6f
+                      : target[b] > fall      ? target[b]
+                                              : fall;
     }
 }
 
 #ifndef PEQ_HOST
-#include "playback.h" /* wheel_held */
-#include "stock.h"    /* system_bar */
+#include "playback.h"                   /* wheel_held */
+#include "stock.h"                      /* system_bar */
 void np_modes(void *win, void *canvas); /* np_bar.c: shuffle and repeat */
 
 /* The slide_view is on this page. */
 static int on_page(void) {
-    return vz.page && widget_get_prop_int(vz.slide, "value", 0) == (int)widget_count_children(vz.slide) - 1;
+    return vz.page &&
+           widget_get_prop_int(vz.slide, "value", 0) == (int)widget_count_children(vz.slide) - 1;
 }
 
 static int full(void);
@@ -193,7 +209,8 @@ static unsigned capture(void) {
     ++t->want; /* keep the writer copying */
     unsigned seq = t->seq, rate = t->rate;
     long long age = now_ns() - t->stamp;
-    /* nothing written lately (DSD, or the filter is off), or a stamp read torn mid-write: one frame at rest */
+    /* nothing written lately (DSD, or the filter is off), or a stamp read torn mid-write: one frame
+     * at rest */
     if (!rate || age < 0 || age > 1000000000LL) return 0;
     int lag = (int)(rate * (VIS_LATENCY_MS / 1000.0f - (int)age * 1e-9f));
     lag = lag < 0 ? 0 : lag > VIS_RING / 2 ? VIS_RING / 2 : lag; /* well clear of the next write */
@@ -214,8 +231,9 @@ static int tick(const void *unused) {
         vz.timer = 0;
         return 7; /* RET_REMOVE */
     }
-    /* The tap lives in hciplayer's PEQ filter, which boot leaves out of the chain when PEQ is off: the
-     * first tick (outside the paint) while playing puts it in, in bypass, as the editor's switch does. */
+    /* The tap lives in hciplayer's PEQ filter, which boot leaves out of the chain when PEQ is off:
+     * the first tick (outside the paint) while playing puts it in, in bypass, as the editor's
+     * switch does. */
     peq_chain();
     unsigned now = time_now_ms(), rate = capture();
     float dt = (now - vz.last) / 1000.0f;
@@ -226,7 +244,8 @@ static int tick(const void *unused) {
      * under it, then none until it plays again. */
     if (rate) vz.heard = now;
     /* A finger resting on the page pauses nothing: under it the page drew only when something else
-     * repainted, a frame a second (#303). A drag is the page off its place, which settled() sees. */
+     * repainted, a frame a second (#303). A drag is the page off its place, which settled() sees.
+     */
     int still = settled();
     if (still && vz.quiet != (now - vz.heard > 1500 && mclGetPlayStatus() != 2)) {
         vz.quiet = !vz.quiet; /* at rest: the track's name, or back */
@@ -244,7 +263,8 @@ static void arm(void) {
     if (vz.timer || !showing()) return;
     vz.last = time_now_ms();
     if (vz.last - vz.heard > 1500) vis_reset();
-    vz.chrome = 0, vz.chrome_at = vz.last, vz.lift = vz.last - CHROME_HOLD_MS; /* hidden until a thumb rests */
+    vz.chrome = 0, vz.chrome_at = vz.last,
+    vz.lift = vz.last - CHROME_HOLD_MS; /* hidden until a thumb rests */
     vz.timer = timer_add(tick, 0, 1000 / VIS_FPS);
 }
 
@@ -271,14 +291,17 @@ static void field_sprites(void) {
             for (int y = 0; y < FIELD_PX; ++y)
                 for (int x = 0; x < FIELD_PX; ++x) {
                     float dx = (x + 0.5f - FIELD_PX / 2.0f) / (FIELD_PX / 2.0f),
-                          dy = (y + 0.5f - FIELD_PX / 2.0f) / (FIELD_PX / 2.0f), r2 = dx * dx + dy * dy;
-                    /* a soft halo to the edge, a bright core in its middle sixth (no expf in demo) */
+                          dy = (y + 0.5f - FIELD_PX / 2.0f) / (FIELD_PX / 2.0f),
+                          r2 = dx * dx + dy * dy;
+                    /* a soft halo to the edge, a bright core in its middle sixth (no expf in demo)
+                     */
                     float q = 1 - r2, c = 1 - 9 * r2, halo = q * q * q, core = c > 0 ? c * c : 0,
                           a = strength * (0.5f * halo + core);
                     unsigned rgb = mix(field_rgb[b], 0xffffff, (int)(60 * core), 100);
                     unsigned alpha = r2 >= 1 ? 0 : a >= 1 ? 255 : (unsigned)(a * 255);
                     /* RGBA8888 in memory: r, g, b, a */
-                    d[y * stride + x] = alpha << 24 | (rgb & 255) << 16 | (rgb & 0xff00) | rgb >> 16;
+                    d[y * stride + x] =
+                        alpha << 24 | (rgb & 255) << 16 | (rgb & 0xff00) | rgb >> 16;
                 }
             bitmap_unlock_buffer(bm);
             vz.glow[b][k] = bm;
@@ -314,17 +337,19 @@ static int look(const void *unused) {
     return 0; /* a one-shot */
 }
 
-/* The track, title · artist, or the title alone, trimmed to fit, at alpha over the slide area's foot
- * (the canvas at the slide area). */
+/* The track, title · artist, or the title alone, trimmed to fit, at alpha over the slide area's
+ * foot (the canvas at the slide area). */
 static void song_line(void *canvas, unsigned alpha) {
-    void *tl = widget_lookup(vz.win, "scrlabel_title", 1), *al = widget_lookup(vz.win, "scrlabel_artist", 1);
+    void *tl = widget_lookup(vz.win, "scrlabel_title", 1),
+         *al = widget_lookup(vz.win, "scrlabel_artist", 1);
     const unsigned *t = tl ? widget_get_text(tl) : 0, *a = al ? widget_get_text(al) : 0;
     unsigned text[160], n = 0, title;
     while (t && *t && n < 100) text[n++] = *t++;
     title = n;
     if (n && a && *a) text[n++] = ' ', text[n++] = 0xb7, text[n++] = ' ';
     while (a && *a && n < sizeof text / sizeof *text) text[n++] = *a++;
-    canvas_set_font(canvas, (void *)0, 14); /* draw_centred's */
+    int px = 14;
+    canvas_set_font(canvas, theme_face(text, (int)n, &px), (unsigned)px); /* draw_centred's face */
     if (title && canvas_measure_text(canvas, text, n) > PAGE_W) n = title;
     while (n > 1 && canvas_measure_text(canvas, text, n) > PAGE_W) text[--n - 1] = 0x2026; /* … */
     int r[4] = { VIS_X, VIS_H - 22, PAGE_W, 20 };
@@ -332,8 +357,8 @@ static void song_line(void *canvas, unsigned alpha) {
 }
 
 /* OLED's full screen (full()) over the status row, which the window manager paints before Now
- * Playing, outside its window's clip: after the bar's own paint, black, Field's part there, then the
- * bar again at chrome's alpha over it. */
+ * Playing, outside its window's clip: after the bar's own paint, black, Field's part there, then
+ * the bar again at chrome's alpha over it. */
 static void bar_paint(void *bar, void *canvas) {
     int bx = I(canvas, CANVAS_X), by = I(canvas, CANVAS_Y), old[4], clip[4];
     if (!clip_within(canvas, old, clip, bx, by, I(bar, W_W), I(bar, W_H))) return;
@@ -377,7 +402,8 @@ static void full_paint(void *canvas) {
         for (unsigned i = 0; i < sizeof parts / sizeof *parts; ++i) {
             void *c = widget_lookup(vz.win, parts[i], 1);
             int dx = 0, dy = 0; /* its parent's place in the window */
-            for (void *p = c ? P(c, W_PARENT) : 0; p && p != vz.win; p = P(p, W_PARENT)) dx += I(p, W_X), dy += I(p, W_Y);
+            for (void *p = c ? P(c, W_PARENT) : 0; p && p != vz.win; p = P(p, W_PARENT))
+                dx += I(p, W_X), dy += I(p, W_Y);
             if (!c) continue;
             I(canvas, CANVAS_X) = wx + dx, I(canvas, CANVAS_Y) = wy + dy;
             widget_paint(c, canvas);
@@ -392,9 +418,9 @@ static void full_paint(void *canvas) {
     canvas_set_clip_rect(canvas, old);
 }
 
-/* ringnav_paint, after stock, on Now Playing's window (after all its children): Field over the slide
- * area, and the track's name at its foot once at rest. Drawing on the window, clipped to the slide
- * area, not on the page: the slide_view clips the page it was given at run time to a sliver.
+/* ringnav_paint, after stock, on Now Playing's window (after all its children): Field over the
+ * slide area, and the track's name at its foot once at rest. Drawing on the window, clipped to the
+ * slide area, not on the page: the slide_view clips the page it was given at run time to a sliver.
  * Painting starts the timer. */
 void visualizer_paint(void *w, void *canvas) {
     if (!w) return;
@@ -408,8 +434,8 @@ void visualizer_paint(void *w, void *canvas) {
     }
     if (w != vz.win || !P(canvas, CANVAS_LCD) || !on_page()) return;
     arm();
-    if (!settled()) { /* under a closing window (the lock screen), sliding or dragged: paused, nothing
-                       * else would paint it once that ends */
+    if (!settled()) { /* under a closing window (the lock screen), sliding or dragged: paused,
+                       * nothing else would paint it once that ends */
         if (!vz.retry) vz.retry = timer_add(look, 0, VIS_RETRY_MS);
         return;
     }
@@ -419,7 +445,8 @@ void visualizer_paint(void *w, void *canvas) {
         return;
     }
     int x = vz.ox, y = vz.oy, old[4], clip[4];
-    if (!clip_within(canvas, old, clip, I(canvas, CANVAS_X) + x, I(canvas, CANVAS_Y) + y, vz.w, VIS_H))
+    if (!clip_within(canvas, old, clip, I(canvas, CANVAS_X) + x, I(canvas, CANVAS_Y) + y, vz.w,
+                     VIS_H))
         return;
     canvas_set_clip_rect(canvas, clip);
     I(canvas, CANVAS_X) += x; /* the slide area's origin */
@@ -431,9 +458,9 @@ void visualizer_paint(void *w, void *canvas) {
     canvas_set_clip_rect(canvas, old);
 }
 
-/* The slide_view's page changed. Under OLED's full screen, a slide off this page repaints the window
- * and the status row whole: Field covered all of it, and the slide repaints only the slide area, so
- * the rest (shuffle and repeat's row among it) kept Field's last frame. */
+/* The slide_view's page changed. Under OLED's full screen, a slide off this page repaints the
+ * window and the status row whole: Field covered all of it, and the slide repaints only the slide
+ * area, so the rest (shuffle and repeat's row among it) kept Field's last frame. */
 static int slid(void *ctx, void *event) {
     if (full() && vz.win && !on_page()) repaint_all();
     arm();
@@ -451,7 +478,8 @@ static int gone(void *win, void *event) {
 
 /* ringnav_playing: the page joins the slide_view's art and lyrics pages, and its dots. */
 void visualizer_attach(void *win) {
-    void *slide = widget_lookup(win, "slide_view", 1), *dots = widget_lookup(win, "slide_indicator1", 1);
+    void *slide = widget_lookup(win, "slide_view", 1),
+         *dots = widget_lookup(win, "slide_indicator1", 1);
     if (!slide) return;
     vz.win = win;
     vz.slide = slide;
