@@ -1626,6 +1626,19 @@ void catalogue_poll(void) {
     if (cat.ix.n && library_gen != cat.gen) cat_start(-1, 0);
 }
 
+/* Streaming Songs turned off asks first while this is 1: a catalogue app (q2app catalogue=1) has
+ * its catalogue.tsv on the card (library_settings.c). The apps looked for again unless a job is
+ * reading them. */
+int catalogue_kept(void) {
+    if (!cat.running) cat_scan();
+    char path[64];
+    for (int i = 0; i < cat.napps; ++i) {
+        tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/catalogue.tsv", cat.app[i].id);
+        if (!access(path, 0)) return 1;
+    }
+    return 0;
+}
+
 /* The setting, turned on or off: the union starts or stops, lists query again. */
 void catalogue_changed(void) {
     if (!catalogue_on()) cat_detach();

@@ -406,8 +406,12 @@ def test_more_apps_than_slots(fw):
 def test_the_features_are_published_at_every_scan(fw):
     world = card(fw)
     scan(fw)
-    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings artist album playlists storage signin\n'
-    assert world.of('rename') == [(b'/tmp/q2-addon.caps.tmp', b'/tmp/q2-addon.caps')]
+    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings artist album playlists storage signin libsource\n'
+    # Streaming Songs' state goes first (library_settings.c), so an app that reads libsource in the caps finds it
+    # (the settings' first read writes it too)
+    assert world.of('rename')[-2:] == [(b'/tmp/q2-addon.library.tmp', b'/tmp/q2-addon.library'),
+                                       (b'/tmp/q2-addon.caps.tmp', b'/tmp/q2-addon.caps')]
+    assert world.written[b'/tmp/q2-addon.library.tmp'] == b'local\n'
 
 
 def test_hostile_manifests(fw):
@@ -1867,6 +1871,54 @@ def test_an_action_sends_its_context_toasts_and_asks_again(fw):
     assert p.request().endswith(b'\top1\ta%25b\n') and p.pg.act == 1
     p.answer(msg=b'Done')
     assert p.toasts == [b'Done'] and p.request().endswith(b'\tmenu\n') and p.top.state == K_LOAD
+
+
+def needslib_page(fw, source, answer, during=None):
+    """A page with a needslib row and an action row, LIBRARYSOURCE as given; the confirm answers answer (10: Turn On)
+    after running during, if any, as the ask's own loop would. Its asks' questions."""
+    asked: list = []
+
+    def read(path, section, key, out, default, *_):
+        v = str(source).encode() if C.string_at(key) == b'LIBRARYSOURCE' else C.string_at(default)
+        C.memmove(out, v + b'\0', len(v) + 1)
+    fw.mock('toolsReadConfig', read)
+    p = Page(fw)
+
+    def ask(path, info, *_):
+        asked.append(C.string_at(info + 8))
+        if during:
+            during(p)
+        return answer
+    p.answer(rows=[item(1, b'needslib', b'on'), item(2)])
+    fw.mock('navigator_to_with_context', ask)
+    return p, asked
+
+
+@pytest.mark.parametrize('source, answer, sent', [(1, 0, True), (0, 10, True), (0, 0, False)])
+def test_a_needslib_row_is_an_action_that_needs_streaming_songs(fw, source, answer, sent):
+    """Pressed with Streaming Songs on, its action goes at once, with its context, as an action row's; off, it asks
+    first, and the action goes only after Turn On (which turned it on: library_settings.c library_needs)."""
+    p, asked = needslib_page(fw, source, answer)
+    req = p.req.id
+    p.click(0)
+    assert asked == ([] if source else [b'Show streaming songs?'])
+    assert (p.req.id != req) == sent and p.pg.act == sent
+    if sent:
+        assert p.request().endswith(b'\top1\ton\n')
+
+
+def test_a_needslib_row_rebuilt_while_it_asks_sends_nothing(fw):
+    """The ask runs its own loop: a live level's reply that lands meanwhile rebuilds the list, and the row pressed is
+    gone."""
+    ids = []
+
+    def reply(p):
+        p.fw.fn('addon__fetch', None, C.POINTER(Lv))(p.pg.lv)
+        p.answer(rows=[item(3)])
+        ids.append(p.req.id)
+    p, asked = needslib_page(fw, 0, 10, during=reply)
+    p.click(0)
+    assert asked == [b'Show streaming songs?'] and p.pg.act == 0 and [p.req.id] == ids  # nothing sent after it
 
 
 def test_an_action_refused_toasts_why(fw):

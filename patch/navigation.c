@@ -262,6 +262,8 @@ menu_t g_menu __attribute__((section(".scratch")));
  * one of the audited local row lists that carry over at the ends. The index is remembered
  * instead of the name pointer: AWTK owns and frees the window's name string. */
 enum { CTX_DYNAMIC, CTX_FIXED, CTX_FOLDER, CTX_LOCAL };
+/* a stock page opened again as a sub-page of its own: which, on its window (context_now) */
+#define SUB_PAGE "_sub_page"
 enum { RING = 1, DRILL = 2, BUTTONS = 4, CHOICE = 8 };
 typedef struct {
     const char *name;
@@ -838,7 +840,9 @@ static int context_now(unsigned *scope) {
         }
         *scope = hash_bytes(h, album_modetype, 4);
     } else if (contexts[ctx].kind == CTX_FIXED) {
-        *scope = 1;
+        /* a stock page opened again as a sub-page of its own (Display's, Library's) keeps its own
+         */
+        *scope = 1 + (unsigned)widget_get_prop_int(top, SUB_PAGE, 0);
     } else if (!tk_strcmp(name, "coverflow_page")) {
         *scope = coverflow_scope(top);
         if (!*scope) return -1;
@@ -2492,7 +2496,7 @@ void *list_row(void *view, const char *icon, int (*click)(void *, void *), void 
 }
 
 /* A settings row that opens a page, its label clear of the chevron. */
-static void *list_row_into(void *view, const char *icon, int (*click)(void *, void *), void *ctx) {
+void *list_row_into(void *view, const char *icon, int (*click)(void *, void *), void *ctx) {
     return list_row_core(view, icon, click, ctx, 202, 1);
 }
 
@@ -2691,7 +2695,9 @@ static void lock_set(int choice) {
 }
 /* Control Center's Lock tile (control_center.c): Buttons Lock on, as its mode was last, or off. */
 void keylock_toggle(void) {
-    lock_set(g_keylock_flag ? 0 : g_keylock_mode >= 1 && g_keylock_mode <= 3 ? 4 - g_keylock_mode : 1);
+    lock_set(g_keylock_flag                               ? 0
+             : g_keylock_mode >= 1 && g_keylock_mode <= 3 ? 4 - g_keylock_mode
+                                                          : 1);
 }
 static int lock_pick(void *ctx, void *event) {
     lock_set((int)(long)ctx);
@@ -2705,6 +2711,7 @@ static int lock_pick(void *ctx, void *event) {
     return 0;
 }
 int ringnav_keylock_rows(void *win) {
+    if (picker_rows(win)) return 0; /* a settings picker over the same page (library_settings.c) */
     void *view = win ? widget_lookup(win, "scroll_view_keylock", 1) : 0;
     if (!view) return 0;
     widget_destroy_children(view);
@@ -2872,6 +2879,7 @@ void pod_settings(void) {
             *pod_values[i] = config_value("Q2POD", pod_keys[i], pod_choices(i),
                                           i == POD_ARTIST_CF || i == POD_OTG);
     st.pod_read = 1;
+    library_source_file(); /* Streaming Songs' state for card apps, from the first read */
 }
 int ringnav_year_old(void) {
     pod_settings();
@@ -2945,15 +2953,14 @@ static void pod_text(int i) {
         { "Charge Limit: Off", "Charge Limit: " STR(CHARGE_STOP) "%" },
         { "Wake: Single Press", "Wake: Double Press" },
         { "Artist View: Grid", "Artist View: Cover Flow", "Artist View: List" },
-        { "Year Order: Newest First", "Year Order: Oldest First" },
+        { "Years: Newest First", "Years: Oldest First" },
         { "Artists: Artist", "Artists: Album Artist" },
         { "Resume on Connect: Off", "Resume on Connect: On" },
-        { "Artist Album Order: Year", "Artist Album Order: A–Z" },
+        { "Artist's Albums: Year", "Artist's Albums: A–Z" },
         { "Volume Guard: Off", "Volume Guard: On" },
         { "Hold Return: Recent", "Hold Return: Home" },
         { "Standby Limit: Off", "Standby Limit: " STR(STANDBY_LIMIT_1) "h",
-          "Standby Limit: " STR(STANDBY_LIMIT_2) "h",
-          "Standby Limit: " STR(STANDBY_LIMIT_3) "h" },
+          "Standby Limit: " STR(STANDBY_LIMIT_2) "h", "Standby Limit: " STR(STANDBY_LIMIT_3) "h" },
         { 0 }, /* Control Device Volume: a switch */
         { 0 }, /* Coverflow Sort's from coverflow.c */
         { "Refresh Cover Flow" },
@@ -2967,7 +2974,7 @@ static void pod_text(int i) {
         { "Playlist View: List", "Playlist View: Cover Flow" },
         { 0 }, /* Scan Song Durations: a switch */
         { 0 }, /* Position Bar: a switch */
-        { "Library: Local Only", "Library: Local + Server" },
+        { 0 }, /* Streaming Songs: a switch */
         { 0 }, /* On-The-Go: a switch */
     };
     _Static_assert(sizeof names / sizeof *names == POD_COUNT, "a names entry per row");
@@ -2975,10 +2982,8 @@ static void pod_text(int i) {
         widget_set_text_utf8(st.pod_label[i], clicker_text());
         return;
     }
-    if (i == POD_CF_SORT) {
-        char sort[48];
-        tk_snprintf(sort, sizeof sort, "Cover Flow %s", coverflow_sort_name());
-        row_value_text(st.pod_label[i], sort); /* key/value on a set with a right column */
+    if (i == POD_CF_SORT) { /* key/value on a set with a right column */
+        row_value_text(st.pod_label[i], coverflow_sort_name());
         return;
     }
     int v = i == POD_ARTISTS       ? I(artist_type, 0) == 1
@@ -3001,6 +3006,7 @@ static void pod_text(int i) {
                          : i == POD_SCAN_DURATIONS ? "Scan Song Durations"
                          : i == POD_CF_POSITION    ? "Position Bar"
                          : i == POD_OTG            ? "On-The-Go"
+                         : i == POD_LIBRARY_SOURCE ? "Streaming Songs"
                                                    : 0;
     if (toggle)
         list_toggle(st.pod_label[i], toggle, v);
@@ -3011,18 +3017,24 @@ static void pod_text(int i) {
     if (i == POD_COVERMODE) widget_set_tr_text(st.pod_label[i], "playset_covermode");
     if (i == POD_FOLDERCOVER) widget_set_tr_text(st.pod_label[i], "playset_foldercover");
 }
+void pod_text_again(int i) {
+    if (st.pod_label[i]) pod_text(i);
+}
 /* Centre or tap toggles and saves. Charge limit takes effect on the next UI loop pass
  * (power_poll), Smart Wi-Fi within SMART_POLL_MS; Artists on the next load of an artist list, as
  * the artist page's switch does; Fast Navigation's letters at the next spin, its half copies at
- * Cover Flow's next idle pass; Standby limit at the next Standby; Coverflow Sort and Refresh
- * Coverflow at Coverflow's next open (coverflow.c), Refresh with a toast, as it changes nothing in
- * view. */
+ * Cover Flow's next idle pass; Standby limit at the next Standby; Refresh Cover Flow at Cover
+ * Flow's next open (coverflow.c), with a toast, as it changes nothing in view. Cover Flow's Sort
+ * opens its picker, and Streaming Songs may ask first (library_settings.c). */
 static int pod_click(void *ctx, void *event) {
     int i = (int)(long)ctx;
     pod_settings();
-    if (i == POD_CF_SORT)
-        coverflow_sort_step();
-    else if (i == POD_CF_REFRESH) {
+    if (i == POD_CF_SORT) {
+        cf_sort_open(); /* its pick writes the row */
+        return 0;
+    } else if (i == POD_LIBRARY_SOURCE) {
+        if (!library_source_toggle()) return 0;
+    } else if (i == POD_CF_REFRESH) {
         coverflow_refresh_art();
         toast("Cover Flow rebuilds artwork next time");
     } else if (i == POD_ARTISTS) {
@@ -3047,7 +3059,6 @@ static int pod_click(void *ctx, void *event) {
         write_int_config(*value, "Q2POD", pod_keys[i]);
         if (i == POD_SCAN_DURATIONS && !*value) durations_cancel();
         if (i == POD_CF_POSITION) coverflow_position_reset();
-        if (i == POD_LIBRARY_SOURCE) catalogue_changed();
         st.charge_at = 0;
         /* Control Device Volume: off, stock's gain back at once; on, bt_volume_poll's next pass
          * sends the Q2's level to the device. */
@@ -3061,7 +3072,8 @@ void pod_rows(void *win, const char *view_name, int first, int n, const char *co
     void *view = win ? widget_lookup(win, view_name, 1) : (void *)0;
     pod_settings();
     for (int i = 0; view && i < n; ++i) {
-        st.pod_label[first + i] = list_row(view, icons[i], pod_click, (void *)(long)(first + i));
+        st.pod_label[first + i] = (first + i == POD_CF_SORT ? list_row_into : list_row)(
+            view, icons[i], pod_click, (void *)(long)(first + i));
         pod_text(first + i);
     }
 }
@@ -3083,7 +3095,7 @@ int ringnav_powermanager(void *win, void *ctx) {
     if (view)
         caption_row(st.pod_label[POD_SMART_WIFI],
                     (const unsigned *)L"Turns Wi-Fi off after 5 minutes when nothing needs it. "
-                                       L"AirPlay and Car Remote keep it on.");
+                                      L"AirPlay and Car Remote keep it on.");
     pod_rows(win, "scroll_view_powermanager", POD_CARMODE, 1, icons + 2);
     if (view) /* battery.c's page */
         widget_set_text_utf8(list_row_into(view, "system_powermanager", battery_history, 0),
@@ -3121,9 +3133,9 @@ static void reorder(void *view, const unsigned char *order, unsigned n) {
     for (unsigned i = 0; i < n; i++) widget_restack(rows[order[i]], i);
 }
 
-/* Everyday listening, what plays next, level, channels, then specialist output controls; the ring
- * puts Library & Folders one detent from the top. Stock's rows 0-10 (ringnav_audioset drops its
- * Volume and Album Display and Folder skip), then ours as built. */
+/* Everyday listening, what plays next, the Sleep Timer, level, channels, then specialist output
+ * controls. Stock's rows 0-10 (ringnav_audioset drops its Volume and Album Display and Folder
+ * skip), then ours as built. */
 static const unsigned char playset_order[] = {
     3 /* Play Mode */,
     2 /* EQ */,
@@ -3132,25 +3144,17 @@ static const unsigned char playset_order[] = {
     6 /* Memory play */,
     12 /* Resume Songs */,
     8 /* Headphones required */,
-    0 /* Gain */,
-    9 /* ReplayGain */,
+    15 /* Sleep Timer */,
     16 /* Max Volume */,
     17 /* Default Vol */,
+    0 /* Gain */,
+    9 /* ReplayGain */,
     10 /* Balance */,
     13 /* Mono Audio */,
     14 /* Swap L/R */,
-    18 /* Enlarged art */,
     1 /* Filters */,
     4 /* DSD Output */,
     5 /* USB Audio */,
-    19 /* On-The-Go */,
-    15 /* Library & Folders */,
-};
-/* Library & Folders: stock's Folder skip (0), then ours as built. */
-static const unsigned char library_order[] = {
-    2 /* Artists */,          3 /* Artist album order */, 1 /* Year order */,
-    4 /* Folder Root */,      0 /* Folder skip */,        5 /* Folder art */,
-    6 /* Import Playlists */, 7 /* Export Playlists */,
 };
 /* General, iOS's: About first, then device maintenance, Network's receivers and Reset. Stock's
  * Language, Wireless, Display, Power, Wheel Function, In-Vehicle, General and System stay hidden,
@@ -3227,66 +3231,66 @@ static int root_click(void *ctx, void *event) {
     root_text(name);
     return 0;
 }
+/* Settings > Library > Folders' Folder Root row (library_settings.c) */
+void *folder_root_row(void *view) {
+    char name[256];
+    root_read(name);
+    st.root_label = list_row(view, "playset_folderjump", root_click, 0);
+    root_text(name);
+    return st.root_label;
+}
+/* a 12 px space between rows, which the wheel passes (an empty label, as power_rows' gap) */
+void settings_gap(void *view) { widget_set_text_utf8(label_create(view, 0, 0, 0, 12), ""); }
 
 /* A row that opens the stock page ctx names, as stock's own rows do. */
 static int to_page(void *ctx, void *event) {
     navigator_to((const char *)ctx);
     return 0;
 }
-/* Playback's Library & Folders opens stock's page again (as Display's sub-pages do) with only the
- * library rows: stock's Folder skip (12) kept, its others dropped. The main page drops it instead,
- * and stock's Volume and Album Display (11): that page's four rows are here as they were, Max
- * Volume, Default Volume and Enlarged Album Art on Playback and Folder Album Cover on Library &
- * Folders, opening stock's pages and flipping stock's switches (pod_click). Each page builds only
- * its own rows, so a row's kept label is its page's. */
+/* Settings > Library and its pages (library_settings.c) open stock's Playback page again (as
+ * Display's sub-pages do), playset_sub naming the page while its init runs, with the page's rows
+ * instead of stock's: Folders keeps stock's Folder skip (12), the others none. Playback itself
+ * drops stock's Volume and Album Display (11) and Folder skip; Album Display's rows are elsewhere,
+ * Max Volume and Default Volume here, Enlarged Album Art on Display and Folder Album Cover on
+ * Library > Folders, opening stock's pages and flipping stock's switches (pod_click). Each page
+ * builds only its own rows, so a row's kept label is its page's. */
 static int playset_sub __attribute__((section(".scratch")));
-static int library_open(void *ctx, void *event) {
-    playset_sub = 1;
+int library_open(void *ctx, void *event) {
+    playset_sub = (int)(long)ctx;
     navigator_to("playset/playset_page");
     playset_sub = 0;
     return 0;
 }
 int ringnav_audioset(void *win, void *ctx) {
-    static const char *const icons[] = { "playset_covermode", "playset_folderjump" },
-                             *const cover_icons[] = { "playset_covermode", "playset_foldercover" };
     int sub = playset_sub, result = stock_audioset_trampoline(win, ctx);
     void *view = win ? widget_lookup(win, "scroll_view_playset", 1) : (void *)0;
     if (!view) return result;
     for (int i = (int)widget_count_children(view); i-- > 0;)
-        if (sub ? i != 12 : i >= 11) widget_destroy(widget_get_child(view, (unsigned)i));
+        if (sub ? sub != LIB_FOLDERS || i != 12 : i >= 11)
+            widget_destroy(widget_get_child(view, (unsigned)i));
     if (sub) {
+        static const char *const titles[] = { 0, "Library", "Sorting", "Playlists", "Folders" };
         void *nav = widget_lookup(win, "view_navbar", 1),
              *title = nav ? widget_get_child(nav, 0) : (void *)0;
-        if (title) widget_set_text_utf8(title, "Library & Folders");
-        pod_rows(win, "scroll_view_playset", POD_YEAR_OLD, 2, icons);
-        pod_rows(win, "scroll_view_playset", POD_ARTIST_AZ, 1, icons);
-        char name[256];
-        root_read(name);
-        st.root_label = list_row(view, "playset_folderjump", root_click, 0);
-        root_text(name);
-        pod_rows(win, "scroll_view_playset", POD_FOLDERCOVER, 1, cover_icons + 1);
-        /* playlists.c: the Playlists page's own rows under the other themes */
-        widget_set_text_utf8(list_row(view, "playset_folderjump", playlists_transfer, 0),
-                             "Import Playlists");
-        widget_set_text_utf8(list_row(view, "playset_folderjump", playlists_transfer, (void *)1),
-                             "Export Playlists");
-        reorder(view, library_order, sizeof library_order);
+        if (title) widget_set_text_utf8(title, titles[sub]);
+        widget_set_prop_int(win, SUB_PAGE, sub);
+        library_page(win, view, sub);
         return result;
     }
     xfade_row(list_row_into(view, "playset_gapless", xfade_open, (void *)0));  /* crossfade.c */
     resume_row(list_row_into(view, "playset_memplay", xfade_open, (void *)2)); /* crossfade.c */
     mono_row(list_row(view, "playset_balance", mono_click, 0));
     swap_row(list_row(view, "playset_balance", swap_click, 0));
-    widget_set_text_utf8(list_row_into(view, "playset_folderjump", library_open, 0),
-                         "Library & Folders");
+    /* stock's timer page, which Control Center's tile opens too (ringnav_sleeptimer) */
+    widget_set_text_utf8(
+        list_row_into(view, "system_powermanager", to_page, (void *)"systemset/sleepshutdown_page"),
+        "Sleep Timer");
     widget_set_tr_text(
         list_row_into(view, "playset_maxvol", to_page, (void *)"playset/maxvol_page"),
         "playset_maxvol");
     widget_set_tr_text(
         list_row_into(view, "playset_bootvol", to_page, (void *)"playset/bootvol_page"),
         "playset_bootvol");
-    pod_rows(win, "scroll_view_playset", POD_COVERMODE, 1, cover_icons);
-    pod_rows(win, "scroll_view_playset", POD_OTG, 1, icons + 1);
     reorder(view, playset_order, sizeof playset_order);
     return result;
 }
@@ -5998,19 +6002,19 @@ int ringnav_display(void *win, void *ctx) {
         for (int i = DISPLAY_APPEARANCE; i <= DISPLAY_COVERFLOW; ++i)
             widget_set_text_utf8(list_row_into(view, sub_icons[i], display_open, (void *)(long)i),
                                  titles[i]);
+        pod_rows(win, "scroll_view_display", POD_COVERMODE, 1, cf_icons); /* Now Playing's art */
         return result;
     }
     widget_destroy_children(view);
     void *nav = widget_lookup(win, "view_navbar", 1), *title = nav ? widget_get_child(nav, 0) : 0;
     if (title) widget_set_text_utf8(title, titles[sub]);
-    if (sub == DISPLAY_COVERFLOW) {
-        pod_rows(win, "scroll_view_display", POD_ARTIST_CF, 1, cf_icons);
-        pod_rows(win, "scroll_view_display", POD_PL_CF, 1, cf_icons);
-        pod_rows(win, "scroll_view_display", POD_CF_SORT, 2, cf_icons + 1);
+    widget_set_prop_int(win, SUB_PAGE, 0x10 + sub); /* apart from Library's pages */
+    if (sub == DISPLAY_COVERFLOW) { /* what changes Cover Flow alone; the Library's are Library's */
+        pod_rows(win, "scroll_view_display", POD_CF_SORT, 1, cf_icons);
         pod_rows(win, "scroll_view_display", POD_BIG_LIB, 1, cf_icons + 3);
-        pod_rows(win, "scroll_view_display", POD_SCAN_DURATIONS, 1, cf_icons + 3);
         pod_rows(win, "scroll_view_display", POD_CF_POSITION, 1, cf_icons + 3);
-        pod_rows(win, "scroll_view_display", POD_LIBRARY_SOURCE, 1, cf_icons + 3);
+        settings_gap(view);
+        pod_rows(win, "scroll_view_display", POD_CF_REFRESH, 1, cf_icons + 2);
         return result;
     }
     if (sub == DISPLAY_APPEARANCE) {
@@ -6029,21 +6033,25 @@ int ringnav_display(void *win, void *ctx) {
 }
 
 /* Settings' rows on Home that are not stock's (tools/ipod.py HOME_SETS; stock binds General and
- * Playback): Wi-Fi's and Bluetooth's pages, which Wireless held, Car Remote, Display, Controls and
- * Battery, which General (stock's System page, ringnav_systemset) held. Here, as display_open is. */
+ * Playback): Wi-Fi's and Bluetooth's pages, which Wireless held, Library (library_settings.c), Car
+ * Remote, Display, Controls and Battery, which General (stock's System page, ringnav_systemset)
+ * held. Here, as display_open is. */
 static int set_open(void *ctx, void *event) {
     int i = (int)(long)ctx;
-    if (i == 2) return carremote_open(0, event);
-    if (i == 4) return display_open((void *)DISPLAY_CONTROLS, event);
-    static const char *const pages[] = { "systemset/wifi_page",    "systemset/bluetooth_page", 0,
-                                         "systemset/display_page", 0,
-                                         "systemset/powermanager_page" };
+    if (i == 2) return library_open((void *)LIB_LIBRARY, event);
+    if (i == 3) return carremote_open(0, event);
+    if (i == 5) return display_open((void *)DISPLAY_CONTROLS, event);
+    static const char *const pages[] = {
+        "systemset/wifi_page",        "systemset/bluetooth_page", 0, 0, "systemset/display_page", 0,
+        "systemset/powermanager_page"
+    };
     navigator_to(pages[i]);
     return 0;
 }
 void home_sets_bind(void *win) {
-    static const char *const names[] = { "img_set_wifi",    "img_set_bt",       "img_set_car",
-                                         "img_set_display", "img_set_controls", "img_set_power" };
+    static const char *const names[] = { "img_set_wifi", "img_set_bt",      "img_set_library",
+                                         "img_set_car",  "img_set_display", "img_set_controls",
+                                         "img_set_power" };
     for (unsigned i = 0; i < sizeof names / sizeof *names; ++i)
         widget_on(widget_lookup(win, names[i], 1), EVT_CLICK, set_open, (void *)(long)i);
 }

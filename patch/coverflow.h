@@ -17,7 +17,7 @@
 enum { ARTIST_ALBUMS = 1, RATED_ALBUMS, ALBUM_TRACKS, PLAYLISTS }; /* cf.scoped */
 /* after the albums: an artist's All albums (two or more), the rated albums' Sort; none after the
  * library's, whose Sort and Refresh are Display settings' Coverflow Sort and Refresh Coverflow
- * (coverflow_sort_step, coverflow_refresh_art), nor after the playlists */
+ * (coverflow_sort_set, coverflow_refresh_art), nor after the playlists */
 #define CARDS                                                                                      \
     (cf.scoped == ARTIST_ALBUMS ? deque_size(cf.albums) > 1 : cf.scoped && cf.scoped != PLAYLISTS)
 #define ABS(x) ((x) < 0 ? -(x) : (x))

@@ -121,6 +121,15 @@ static const char *const verbs[] = {
 };
 #define CONFIRM_ROW 32
 #define CONFIRM_Y 58 /* the list's top (oled-design.md Spacing) */
+/* The footer (feedback_confirm_foot): 13 px Text Tertiary lines 8 px under the rows, each line's
+ * own label, at the rows' text column */
+#define FOOT_GAP 8
+#define FOOT_LINE 17
+#define FOOT_PX 16 /* Inter 13 px, AWTK's size (13 x 1.21) */
+
+/* The next confirm's footer, its lines split at '\n': why it asks, where the setting lives. */
+static const char *confirm_foot __attribute__((section(".scratch")));
+void feedback_confirm_foot(const char *foot) { confirm_foot = foot; }
 
 static int confirm_on(void *w) { return top_named(w, "confirminfo_dialog"); }
 
@@ -175,6 +184,28 @@ int feedback_confirm_dress(void *w) {
         widget_set_prop_str(label, "style:normal:text_align_h", "left");
         theme_font(label, ROLE_TITLE, FONT_ROW);
         widget_set_sensitive(label, 0);
+    }
+    /* the footer under the answers (Streaming Songs' asks, library_settings.c) */
+    int k = 0;
+    for (const char *line = confirm_foot; line && *line; ++k) {
+        char words[96];
+        unsigned n = 0;
+        while (line[n] && line[n] != '\n') ++n;
+        tk_snprintf(words, sizeof words, "%.*s", (int)n, line);
+        int px = FOOT_PX;
+        void *label = text(w, geom_val(V_TEXT_X) - 2,
+                           CONFIRM_Y + (2 + !!check) * CONFIRM_ROW + FOOT_GAP + k * FOOT_LINE,
+                           375 - 2 * geom_val(V_TEXT_X), FOOT_LINE);
+        widget_set_name(label, "_foot");
+        widget_set_text_utf8(label, words);
+        widget_set_prop_int(label, "loop", 0);
+        const char *face = theme_face(widget_get_text(label), -1, &px);
+        widget_set_prop_str(label, "style:normal:font_name", face ? face : "default");
+        widget_set_prop_int(label, "style:normal:font_size", px);
+        widget_set_prop_str(label, "style:normal:text_align_h", "left");
+        text_ink(label, RGBA(ipod_light() ? 0x6e6e6e : 0x858585), INK_LABEL);
+        widget_set_sensitive(label, 0);
+        line += n + (line[n] == '\n');
     }
     if (st.bar_title) {
         widget_set_text_utf8(st.bar_title, title);

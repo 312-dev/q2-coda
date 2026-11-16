@@ -524,6 +524,11 @@ char *catalogue_union(const char *sql), *catalogue_search(const char *sql);
 const char *catalogue_rows(void); /* library_query's union, "" without one */
 void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);
 void catalogue_changed(void), catalogue_card_away(void), catalogue_rated(void *r, int hearts);
+int catalogue_kept(void); /* a catalogue app's catalogue.tsv is on the card */
+/* library_settings.c: Streaming Songs' state for card apps (/tmp/q2-addon.library), and a needslib
+ * row's check, which asks to turn it on: 1 when it is on */
+void library_source_file(void);
+int library_needs(void);
 /* a server playlist changed on the Q2: its songs (PLS_SET), its name, or its deletion, to its app
  */
 enum { PLS_SET, PLS_NAME, PLS_DELETE };
@@ -684,8 +689,10 @@ int need_link(int (*fn)(void *, void *), void *ctx); /* smart_hold, else "Connec
  * netupdate.c's and onlinematch.c's */
 int spot_running(void), scrobble_busy(void), tidal_busy(void), addon_running(void),
     netupdate_busy(void), album_lyrics_busy(void);
-const char *coverflow_sort_name(void); /* coverflow.c */
-void coverflow_sort_step(void), coverflow_refresh_art(void);
+/* coverflow.c: Display > Cover Flow's Sort, its value and its picker's choices */
+const char *coverflow_sort_name(void), *coverflow_sort_at(int i);
+int coverflow_sort_count(void), coverflow_sort_now(void);
+void coverflow_sort_set(int i), coverflow_refresh_art(void);
 void coverflow_clean_end(void); /* coverflow.c: a clean end mid-build strikes no album */
 /* Playlists as Cover Flow: coverflow.c's covers of lists (p_deque_playlist), 0 when it has none,
  * its centred playlist (a cover's hold) and its close of the covers; playlists.c's open of playlist

@@ -881,7 +881,7 @@ def validate_assets(directory):
         if short == HOME_PAGE:  # seven rows with the stock names, beside the art; bytes equal patch_asset above
             art, (lv, lg, _, [sv]), (sl, sg, sp, [ss]), *carousel = root[3]
             assert lv == 'list_view' and sv[0] == 'scroll_view' and art[2]['name'] == 'img_homeart'
-            # The Settings list: eight rows, stock's Playback and System setting rows among them (stock binds them; their
+            # The Settings list: nine rows, stock's Playback and System setting rows among them (stock binds them; their
             # labels are literal), hidden in the list's place until Home's Settings row slides it in.
             assert sl == 'list_view' and sp['name'] == 'list_view_homeset' and sp['visible'] == 'false'
             assert sg == [0, HOME_TOP, HOME_LIST_W, 7*HOME_ROW] and [r[2]['name'] for r in ss[3]] == ['btn_'+n for n in HOME_SETS]

@@ -1315,3 +1315,66 @@ def test_five_hearts_from_the_server_put_the_row_in_my_fav_in_place_of_its_copy(
     fw.var('g_backlight_status', C.c_ubyte).value = 1
     ui.fire('rate_tick')
     assert ui.image[heart.heart] == 'play_fav' and heart.badge() is None
+
+
+# Streaming Songs (library_settings.c): [Q2POD] LIBRARYSOURCE, its state for card apps in /tmp/q2-addon.library, and the
+# house confirm (Cancel first, its verb the other answer, a footer) before it hides an app's catalogue or a needslib row
+# turns it on.
+LIBRARY = '/tmp/q2-addon.library'
+
+
+class Asks:
+    """The confirms asked: (question, footer as it was set while it showed); answer is what the confirm returns (10:
+    its verb)."""
+    def __init__(self, fw, answer):
+        self.fw, self.answer, self.seen = fw, answer, []
+        fw.mock('navigator_to_with_context', self.show)
+
+    def show(self, name, info, *_):
+        assert C.string_at(name) == b'dialog/confirminfo_dialog'
+        foot = C.c_char_p.in_dll(self.fw.lib, 'feedback__confirm_foot').value
+        self.seen.append((C.string_at(info + 8).decode(), foot.decode() if foot else None))
+        return self.answer
+
+
+def source_writes(fw):
+    return [C.c_int(a[0]).value for _, a in fw.calls('write_int_config') if C.string_at(a[2]) == b'LIBRARYSOURCE']
+
+
+def test_the_state_file_is_written_at_the_first_read_of_the_settings(rig):
+    rig.source = 0
+    rig.fw.fn('pod_settings', None)()
+    assert rig.files.files[LIBRARY] == b'local\n'
+
+
+@pytest.mark.parametrize('kept, answer, off', [(False, 0, True), (True, 0, False), (True, 10, True)])
+def test_streaming_songs_off_asks_only_while_an_app_keeps_a_catalogue(rig, kept, answer, off):
+    if kept:
+        rig.files.files[TSV] = catalogue(1, [])
+    asks = Asks(rig.fw, answer)
+    assert rig.fw.fn('library_source_toggle', C.c_int)() == off
+    assert asks.seen == ([('Hide streaming songs?', 'Streaming songs leave the Library, and\n'
+                           'Show in Library pauses until they return.')] if kept else [])
+    assert source_writes(rig.fw) == ([0] if off else [])
+    assert rig.files.files[LIBRARY] == (b'local\n' if off else b'server\n')
+    assert rig.fw.fn('catalogue_on', C.c_int)() == (not off)
+    assert C.c_char_p.in_dll(rig.fw.lib, 'feedback__confirm_foot').value is None  # the next confirm has none
+
+
+def test_streaming_songs_on_is_at_once(rig):
+    rig.source = 0
+    rig.files.files[TSV] = catalogue(1, [])
+    asks = Asks(rig.fw, 0)
+    assert rig.fw.fn('library_source_toggle', C.c_int)() == 1
+    assert asks.seen == [] and source_writes(rig.fw) == [1] and rig.files.files[LIBRARY] == b'server\n'
+
+
+@pytest.mark.parametrize('source, answer, on', [(1, 0, 1), (0, 0, 0), (0, 10, 1)])
+def test_a_needslib_row_needs_streaming_songs_and_asks_to_turn_it_on(rig, source, answer, on):
+    rig.source = source
+    asks = Asks(rig.fw, answer)
+    assert rig.fw.fn('library_needs', C.c_int)() == on
+    assert asks.seen == ([] if source else [('Show streaming songs?', 'Show in Library needs Streaming Songs on\n'
+                                             '(Settings > Library > Streaming Songs).')])
+    assert source_writes(rig.fw) == ([1] if on and not source else [])
+    assert rig.files.files[LIBRARY] == (b'server\n' if on else b'local\n')

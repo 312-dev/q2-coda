@@ -3048,14 +3048,19 @@ static int sort_saved(void) {
     return SORT_ALBUM;
 }
 
-/* Display settings' Coverflow Sort: its label ("Sort: Album"), and a press's next order, saved,
- * which Coverflow takes at its next open (load). */
+/* Display > Cover Flow's Sort: its label ("Sort: Album"), and its picker's choices, all_sorts in
+ * order, each its name past "Sort: "; a pick is saved, and Coverflow takes it at its next open
+ * (load). */
 const char *coverflow_sort_name(void) { return sort_names[sort_saved()]; }
-void coverflow_sort_step(void) {
-    int sort = sort_saved();
-    unsigned i = 0;
+int coverflow_sort_count(void) { return (int)sizeof all_sorts; }
+const char *coverflow_sort_at(int i) { return sort_names[all_sorts[i]] + 6; }
+int coverflow_sort_now(void) {
+    int sort = sort_saved(), i = 0;
     while (all_sorts[i] != sort) ++i;
-    sort = all_sorts[(i + 1) % sizeof all_sorts];
+    return i;
+}
+void coverflow_sort_set(int i) {
+    int sort = all_sorts[i];
     BLOB_IO(SORT_FILE, sort, 1);
     cf.resort = 1;
 }

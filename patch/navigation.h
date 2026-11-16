@@ -402,6 +402,7 @@ void *feedback_under(void *toast);
 void *feedback_top(void);
 void feedback_toast_paint(void *w, void *canvas);
 int feedback_confirm_dress(void *w);
+void feedback_confirm_foot(const char *foot);
 void feedback_confirm_bar(void *w, void *canvas);
 void feedback_confirm_switch(void *w, void *canvas);
 void feedback_songs(void *top, void *row);
@@ -872,7 +873,19 @@ void lr_edit_keydown(unsigned key), lr_edit_paint(void *w, void *canvas);
 int lr_edit_key(void *top, unsigned key, int owned), lr_edit_touch(void *event),
     lr_edit_dragging(void), lr_edit_click(void *target), lr_edit_row(void *w),
     lr_editing(void *page);
+/* library_settings.c: Settings > Library and its pages (docs/ipod.md#settings) */
+enum { LIB_LIBRARY = 1, LIB_SORTING, LIB_PLAYLISTS, LIB_FOLDERS };
+void library_page(void *win, void *view, int page);
+int picker_rows(void *win); /* a picker's rows on stock's Buttons Lock page */
+void cf_sort_open(void);
+int library_source_toggle(void);
 /* navigation.c */
+int library_open(void *ctx, void *event); /* Library's page ctx (LIB_*) */
+void *list_row_into(void *view, const char *icon, int (*click)(void *, void *), void *ctx);
+void pod_rows(void *win, const char *view_name, int first, int n, const char *const *icons);
+void pod_text_again(int i);        /* a settings row's text, its value changed elsewhere */
+void *folder_root_row(void *view); /* Folder Root's row, its label */
+void settings_gap(void *view);     /* a 12 px space between a settings page's rows */
 void pull_cancel(void); /* a pull to search let go: Edit Library's drag takes the touch */
 void ringnav_jump(void *w, int id); /* table w's row id selected, at the list's top */
 int own_order(const char *page);    /* a page whose list is not in name order */
