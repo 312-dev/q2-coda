@@ -6973,7 +6973,9 @@ static int qm_open(const void *unused);
 static void qm_values(void *dialog);
 static int qm_back(void *dialog, void *event) {
     if (I(event, EVENT_TYPE) == EVT_KEY_UP && I(event, EVENT_KEY) != KEY_RETURN) return 0;
-    modal_close(st.qm_dialog); /* a sheet falls away (menu_modal.c) */
+    void *menu = st.qm_dialog; /* forgotten at once, as qm_close: the next hold may open another */
+    st.qm_dialog = (void *)0;
+    modal_close(menu); /* a sheet falls away first (menu_modal.c) */
     return STOP;
 }
 
