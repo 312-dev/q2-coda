@@ -304,6 +304,7 @@ typedef struct {
 int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *ctx, void *event));
 int empty_row_y(int free_top);
 int empty_shown(void *page);
+int empty_button(void *list);
 void *empty_list(void *page, void *body, const char *name, const empty_t *e,
                  int (*on_row)(void *ctx, void *event));
 void *empty_open(const char *window, const char *name, const empty_t *e,
@@ -594,6 +595,12 @@ void spot_yield(void), spot_stop(void), radio_stop(void);
 void headset_volume_reset(void);
 int vol_next(unsigned key); /* volume.c: the volume a wheel tick moves to, at the wheel's speed */
 void headset_poll(void), headset_eq_poll(void), headset_manual(void);
+/* guest.c: Guest Play's side in demo (docs/internals.md#guest-play) */
+int guest_send(const char *line), guest_active(void), guest_key(int code);
+unsigned guest_seq(void);
+void guest_field(const char *key, char *out, unsigned n), guest_poll(void), guest_bt_on(void);
+int guest_net(const char *kind, const char *id, const char *name);
+void spot_send_play(int playing);
 void q2eq_poll(void); /* peq_ui.c, --dev builds only: a q2eq request (q2eq.h) */
 int media_owner(void), media_status(void), media_playing(void), media_focused(void);
 void media_set_playing(int playing), media_key(unsigned key);

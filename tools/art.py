@@ -378,14 +378,15 @@ SCAN_FOLDER_PX = 15
 SCAN_GLYPHS = {'done': 'check-circle', 'card': 'memory', 'folder': 'folder'}
 SCAN_INKS = inks('secondary', 'd', 'l')
 HOLD_BACK_PX = 20  # search_strip.c's Return-held card: Phosphor arrow-u-up-left, bold, white
-# The empty state (feedback.c empty_state): its glyph on the middle of its stacked tiles, fill, white at 92 %, by the
-# glyph a page names (empty_t.glyph; docs/oled-design.md#empty-and-offline has the pages). Phosphor has no sd-card: the
-# card's is its memory chip, as the mock-up's fallback (mock_placeholders.py FALLBACK).
-EMPTY_PX = 28
-EMPTY_GLYPHS = {g: f'{g}-fill' for g in (
+# The empty state (feedback.c empty_state): its glyph in outline, Phosphor's regular weight at EMPTY_PX, in Text
+# Secondary per half (_d, _l), by the glyph a page names (empty_t.glyph; docs/oled-design.md#empty-and-offline has the
+# pages; the user's outline style, 2026-11-16). Phosphor has no sd-card: the card's is its memory chip, as the
+# mock-up's fallback (mock_placeholders.py FALLBACK).
+EMPTY_PX = 60
+EMPTY_GLYPHS = {g: g for g in (
     'cards', 'music-notes', 'vinyl-record', 'microphone-stage', 'music-notes-simple', 'guitar', 'folder', 'playlist',
     'heart', 'clock-counter-clockwise', 'chart-bar', 'sparkle', 'timer', 'calendar-blank', 'star', 'magnifying-glass',
-    'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile')} | {'sd-card': 'memory-fill'}
+    'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile')} | {'sd-card': 'memory'}
 USB_TOASTS = {'unplugged': ('plug-fill', token('secondary')), 'ejected': ('check-circle-fill', token('positive')), 'audio': ('speaker-hifi-fill', 0xffffff)}
 # The status row's battery (list_marks.c battery_slim): charging, Phosphor's lightning, too weak a charger its warning,
 # fill weight at BATT_GLYPH_PX in Text Primary, with a BATT_GLYPH_GAP px gap in the Canvas cut round it (iOS's way of
@@ -656,7 +657,8 @@ def images(t):
     out[f'{prefix}_chargebolt'] = phosphor('lightning-fill', CHARGE_BOLT_PX, token('positive'))
     out |= {f'{prefix}_swspin_{k}_{f}': spinner(f, SW_SPIN_SPOKES, SW_SPIN_PX, SW_SPIN_R, SW_SPIN_STROKE, SW_SPIN_FADE, c)
             for k, c in STATE_INKS.items() for f in range(SW_SPIN_SPOKES)}
-    out |= {f'{prefix}_empty_{n}': phosphor(g, EMPTY_PX, 0xebebeb) for n, g in EMPTY_GLYPHS.items()}
+    out |= {f'{prefix}_empty_{n}_{k}': phosphor(g, EMPTY_PX, c) for n, g in EMPTY_GLYPHS.items()
+            for k, c in inks('secondary', 'd', 'l').items()}
     out |= {f'{prefix}_scan_{n}_{k}': phosphor(g, SCAN_FOLDER_PX if n == 'folder' else SCAN_GLYPH_PX, c)
             for n, g in SCAN_GLYPHS.items() for k, c in SCAN_INKS.items()}
     return out

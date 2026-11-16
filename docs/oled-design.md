@@ -260,8 +260,12 @@ All lists share one grid.
   (the house [marquee](#motion)). A label so long the value would get less than 96 px (`KV_VALUE_MIN`,
   or the value's own width when shorter) shrinks to leave it that, and scrolls the same way
   (`patch/ui_kit.c` `kv_fit`, `patch/settings_pages.c` `kv_row`).
-- **Switch row:** every on/off setting, a 34x20 fully round switch ending on the right column, its
-  16 px white knob 2 px in: Track when off, Accent Blue when on. On the selection bar: on is a white
+- **Switch row:** every on/off setting, a 40x24 fully round switch ending on the right column, its
+  20 px white knob 2 px in: Track when off, Accent Blue when on. A flip slides the knob over 200 ms,
+  easing out, the track's colour crossing with it; flipped again mid-slide it turns back from where it
+  is. One painter draws every switch (`patch/list_marks.c` `switch_mark`), stock's image switches too,
+  whose art is emptied and drawn over, so they all move alike; a switch appearing (a page opening, a
+  list scrolling) stands still. On the selection bar: on is a white
   track with an Accent Blue knob, off a 1.5 px white outline round the white knob. No "On"/"Off"
   text beside it. A setting with two or three named choices (Gain's High and Low, Charge Limit's
   Off and 80%) is a key/value row that Centre cycles; the value is never part of the label.
@@ -659,19 +663,25 @@ states' buttons, a card's answers) and any other mark that shows where the wheel
 
 ### Empty and offline
 
-**The empty state** (`patch/feedback.c` `empty_state`) is the one form for every page with nothing to show
-(`mock_placeholders.py`, approved 2026-11-16): three stacked tiles, a 58 px one in front (`#2C2C2E`, its edge
-`#48484C`) and two 48 px ones 30 px either side behind it at about a quarter's strength, 9 px corners, with the
-page's 28 px Phosphor glyph (fill, white at 92 %; `tools/art.py` `EMPTY_GLYPHS`) on the front one; 18 px under them
-the title in Title Case, Inter Medium 20, Text Primary; under it the hint in 15 px Text Secondary; and at most one
-action row, 24 px lower, already selected. The whole stack, with or without its row, is centred between the status
-row's foot (or the end of any rows the page keeps above it) and the screen's. No app names. No fake rows, and no
-Shuffle row or Add to Sync over nothing. A page that is a list (`empty_list`) keeps its name for the status row; a
-Library list stock would open black (Albums, Artists, Composers, Genres) and a streaming service with no link open
-a page of their own holding only the empty state (`empty_open`). With no SD card in, the Library's pages say so
-(`empty_card`).
+**The empty state** (`patch/feedback.c` `empty_state`) is the one form for every page with nothing to show (the
+user's outline style, 2026-11-16, `empty-states-all/mock_empty_all_v2.py`, as Apple's ContentUnavailableView): the
+page's Phosphor glyph in outline (regular weight, 60 px, Text Secondary; `tools/art.py` `EMPTY_GLYPHS`) with no tile
+or disc behind it; 14 px under it the title in Title Case, Inter Medium 20, Text Primary; under it the hint in 15 px
+Text Secondary; and at most its [buttons](#buttons), 20 px lower. The whole stack, with or without buttons, is
+centred between the status row's foot (or the end of any rows the page keeps above it) and the screen's. No app
+names. No fake rows, and no Shuffle row or Add to Sync over nothing. A page that is a list (`empty_list`) keeps its
+name for the status row; a Library list stock would open black (Albums, Artists, Composers, Genres) and a streaming
+service with no link open a page of their own holding only the empty state (`empty_open`). With no SD card in, the
+Library's pages say so (`empty_card`).
 
-| Screen | Glyph | Title | Hint | Row |
+<a id="buttons"></a>**Buttons** (`mock_empty_cta.py`, the user's, 2026-11-16; `patch/ui_kit.c` `ui_cta_paint`): one
+is a filled Accent Blue capsule 38 px tall, its label Inter Medium 17 in white, 24 px each side, at least 140 px; a
+pair is two equal capsules 10 px apart (20 px each side, at least 120, the two within the 327 px text box), the second
+grey (`#2C2C2E`, Light Mode `#E5E5EA`) with its label in Text Primary. Selected, a button wears a 2 px Text Primary
+ring 3 px out, under the [focus rule](#focus-ring); pressed, its fill darkens a step (`#1A4DAD`; grey `#3A3A3C`,
+`#D1D1D6`). The first is selected when the page opens, and the wheel reaches it as a row; it has no selection bar.
+
+| Screen | Glyph | Title | Hint | Button |
 | --- | --- | --- | --- | --- |
 | Songs, an empty library | `music-notes` | No Songs | Copy music to the SD card | **Scan Music Now** (stock's button, `scan_row`) |
 | Artists | `microphone-stage` | No Artists | Copy music to the SD card | |
@@ -694,7 +704,7 @@ a page of their own holding only the empty state (`empty_open`). With no SD card
 | Internet Radio, a station list with none | `radio` | No Stations | Add stations from your computer | |
 | Streaming, a service with no link | `cloud-slash` | Not Connected | Turn on Wi-Fi to stream | **Turn on Wi-Fi** (opens Settings > Wi-Fi) |
 | Library, no SD card | `sd-card` (Phosphor's `memory`) | No SD Card | Insert an SD card with music | |
-| Car Remote, no phone paired | `car-profile` | No Paired Phones | Open the Car Remote app on your phone | none: under the switch; a phone pairs from its own app |
+| Car Remote, no phone paired | `car-profile` | No Paired Phones | Open Q2 Muse Remote on your phone | none: under the switch; a phone pairs from its own app |
 | Downloads (Tidal Downloads, a card app's songs) | `download-simple` | No Downloads Yet | Synced music shows up here | |
 | Chapters | `list-numbers` | No Chapters | This file has no chapter marks (or: This file's chapters couldn't be read) | |
 
@@ -1166,7 +1176,7 @@ pattern.
 | Add Songs                           | [Add Songs](#add-songs)     | The chooser, then artists, albums and songs with marks                                                     |
 | Hold menu, More                     | [Menus](#menus)             | The inset modal over the page                                                                              |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
-| About                               | Key/value table             | The wheel walks the rows and nothing opens; values in Text Secondary, a cut-off one scrolling when selected |
+| About                               | [Label/value rows](#labelvalue-rows) | Model, Firmware (V1.36), the product's version under its name, Capacity and Available with their unit ("779.72 GB"), Wi-Fi Address, IP Address ("Not connected" with no network); the wheel walks the rows and nothing opens; values in Text Secondary |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
 | Storage                             | Storage bar                 | [Progress and sliders](#progress-and-sliders): the bar, its legend rows (Downloads and Stream Cache open pages) and two footers |
 | Storage > Downloads                 | Key/value rows              | Limit (its picker the inset modal's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centred on x 33, its name at x 52, size and chevron; a footer (the mock's second line, "Auto items refill on the next Sync.", waits for the app to keep items on its own) |

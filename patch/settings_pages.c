@@ -57,10 +57,10 @@ void kv_row(void *key, void *val, int kw, int vw, int right) {
 }
 
 /* Each row's first hscroll_label is its key, the next its value (stock's order, and
- * ringnav_about's for CFW. Version). Stock's value box is 149 px from x 176, too narrow for a dev
- * build's version or a Wi-Fi MAC beside a short key: kv_row splits the row. This runs on every
- * layout, so the value's right edge, which set_child put on the right column, is the one fixed
- * point. */
+ * ringnav_about's for the product's version row). Stock's value box is 149 px from x 176, too
+ * narrow for a dev build's version or a Wi-Fi MAC beside a short key: kv_row splits the row. This
+ * runs on every layout, so the value's right edge, which set_child put on the right column, is the
+ * one fixed point. */
 void about_rows(void *view) {
     unsigned value = theme()->set_value_ink[ipod_light()],
              primary = flip_if(ipod_light(), 0xffffff); /* Text Primary: black in Light Mode */

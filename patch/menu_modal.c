@@ -20,7 +20,7 @@
 #define MODAL_TEXT 16   /* a row's text and symbols from the panel's sides */
 #define MODAL_LEAD 26   /* a setting's or a choice's label after its leading symbol */
 #define MODAL_ICON 19   /* tools/art.py MENU_ICON_PX */
-#define MODAL_SWITCH 34 /* list_marks.c switch_mark's width */
+#define MODAL_SWITCH 40 /* list_marks.c switch_mark's width */
 #define MODAL_FILL RGB_RAISED
 #define MODAL_DIM 0x80000000u /* black at 50% */
 

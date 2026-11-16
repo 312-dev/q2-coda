@@ -240,8 +240,9 @@ def ui(fw):
 
 
 def empty_state(ui, page):
-    """The empty state shown in page (feedback.c empty_state): (glyph, title, hint, its row's caption or None), else
-    None. Its view is insensitive, so the rows beside it keep their taps."""
+    """The empty state shown in page (feedback.c empty_state): (glyph, title, hint, its button's label or None), else
+    None. Its view is insensitive, so the rows beside it keep their taps; the button's row is blank, its label the
+    painter's."""
     art = ui.lookup(page, '_empty_state', 1)
     if not art or art in ui.hidden:
         return None
@@ -250,7 +251,8 @@ def empty_state(ui, page):
     caption = None
     if row and row not in ui.hidden:
         (item,) = ui.kids[ui.kids[row][0]]
-        caption = next(ui.text[k] for k in ui.subtree(item) if ui.kind[k] == 'hscroll_label_create')
+        assert next(ui.text[k] for k in ui.subtree(item) if ui.kind[k] == 'hscroll_label_create') == ''
+        caption = ui.props[(art, '_es_row')]
     return tuple(ui.props[(art, f'_es_{k}')] for k in ('glyph', 'title', 'hint')) + (caption,)
 
 
@@ -2334,8 +2336,19 @@ def test_about_shows_stock_s_version_and_the_payload_s_after_it_without_stock_s_
     fw.mock('stock_about_trampoline', lambda *_: 5)
     assert fw.fn('ringnav_about', C.c_int, C.c_void_p, C.c_void_p)(win, None) == 5
     version, beta = host.tools_build.VERSION, host.tools_build.BETA
-    assert about_rows(ui, view) == [ABOUT[0], ('FW. Version', host.tools_build.STOCK_VERSION), ('CFW. Version', f'{version} Pod' + (f' beta {beta}' if beta else '')),
+    name = host.tools_build.PRODUCT_NAME
+    assert about_rows(ui, view) == [ABOUT[0], ('FW. Version', host.tools_build.STOCK_VERSION), (name, version + (f' beta {beta}' if beta else '')),
                                     *ABOUT[2:]]
+
+
+@pytest.mark.parametrize('value, shown', [('779.72G', '779.72 GB'), ('512.5M', '512.5 MB'), ('0.0.0.0', 'Not connected'),
+                                          ('192.168.1.4', '192.168.1.4'), ('Shanling Q2', 'Shanling Q2')])
+def test_about_s_values_take_the_approved_words(fw, ui, value, shown):
+    """audit-2 #31: sizes with their unit, and no network's IP address as words."""
+    win, view = about(ui, [*ABOUT[:2], ('Capacity', value), *ABOUT[3:]])
+    fw.mock('stock_about_trampoline', lambda *_: 5)
+    fw.fn('ringnav_about', C.c_int, C.c_void_p, C.c_void_p)(win, None)
+    assert about_rows(ui, view)[3] == ('Capacity', shown)  # after the product's row
 
 
 def test_an_about_page_that_is_not_stock_s_is_left(fw, ui):
@@ -3124,11 +3137,11 @@ def test_a_streaming_service_with_no_link_is_the_empty_state_and_its_row_opens_w
     (page,) = ui.windows
     assert ui.name[page] == 'empty_page' and 'Streaming' not in ui.shown(page)  # the status row names it
     assert empty_state(ui, page) == ('cloud-slash', 'Not Connected', 'Turn on Wi-Fi to stream', 'Turn on Wi-Fi')
-    # the stack with its row (176 px) centred under the status row: the row 144 px under the stack's top
+    # the stack with its button (176 px) centred under the status row: the button 138 px under the stack's top
     top = 40 + (280 - 176) // 2
     assert ui.props[(ui.lookup(page, '_empty_state', 1), '_es_top')] == top
     row = ui.lookup(page, '_empty_row', 1)
-    assert struct.unpack_from('<4i', ui.blocks[row], 0)[1] == top + 144 and ui.kind[row] == 'list_view_create'
+    assert struct.unpack_from('<4i', ui.blocks[row], 0)[1] == top + 138 and ui.kind[row] == 'list_view_create'
     assert ui.props[(ui.kids[row][0], '_ringnav_index')] == 0  # its one row already selected
     assert call(fw, 'feedback_offline') == 1 and len(ui.windows) == 1  # pressed again: the one page
     ui.handler(ui.kids[ui.kids[row][0]][0], EVT_CLICK)()  # the row: list view, scroll view, item
