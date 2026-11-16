@@ -1319,7 +1319,7 @@ def test_an_installed_app_draws_its_page_and_its_sync_updates_the_library_once_t
     w.ui.run(250)
     assert w.ui.texts(page) == ['Starting Foo…']  # no socket yet
     w.ui.run(1000)
-    assert w.ui.rows(page) == [('Sync now', 'From your server'), ('Albums', '')]
+    assert w.ui.rows(page) == [('Sync now', 'From your server'), 'Albums']  # no subtitle: a one-line row
     w.ui.press(page, 'Sync now')
     w.ui.run(1500)  # its page shows no library records: the request runs under it
     assert w.ui.toasts == ['Syncing 1 playlist', 'Playlists updated'] and app.ops == [b'menu', b'sync', b'menu']
@@ -1347,7 +1347,7 @@ def test_a_card_app_reply_that_lands_before_pthread_create_returns_is_still_take
     w.fn('addon_open', C.c_int, C.c_void_p, C.c_void_p)(0, None)
     page = w.ui.top()
     w.ui.run(3000)
-    assert w.ui.rows(page) == [('Sync now', 'From your server'), ('Albums', '')]
+    assert w.ui.rows(page) == [('Sync now', 'From your server'), 'Albums']  # no subtitle: a one-line row
 
 
 # Spotify: Streaming's row, librespot on the card, the hand-over both ways and the idle stop
