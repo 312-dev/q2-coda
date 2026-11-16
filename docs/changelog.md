@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Up Next (OLED): while a row is lifted, the queue's grips stand where Edit Library's do, 4 px further right, with square ends.
   - Display (OLED): Car Remote's Forget, Tidal's Clear All Downloads and Spotify's Remove Downloads and Sign Out, a playlist's Remove from Playlist and the EQ's Delete and Replace of a preset ask on the confirmation card over their page instead of a page of their own.
   - Display (OLED): a Wi-Fi network's name too long for its row now scrolls when its row is selected, as every row's title does, instead of being cut off. Scrolling text fades out at its ends into whatever is behind it, so on the blue selection the fade is blue, not a black band.
   - Display (OLED): every confirmation (Shut Down, Restart, the Resets, Delete Song, Unpair, forgetting a Wi-Fi network, Line Out and the rest) is now a card over the page you were on, so you can still see what it is about. Its title names the question (**Forget This Network?** instead of "Delete Record?"), Cancel comes first and is selected, and an answer that deletes or resets is red, after a gap. Delete Song's "Also delete source file" is a switch on the card.

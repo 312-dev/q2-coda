@@ -403,13 +403,7 @@ static void un_level(void *canvas, int x, int base, unsigned rgb) {
     }
 }
 
-/* The grip a lifted row's queue shows: three bars on the right column */
-static void un_grip(void *canvas, int y, unsigned rgb) {
-    for (int i = -1; i <= 1; ++i) {
-        rect_t r = { 375 - geom_val(V_RIGHT_X) - 17, y + i * 5 - 1, 18, 2 };
-        fill_box(canvas, &r, RGBA(rgb), 1);
-    }
-}
+#define UN_GRIP_X 5 /* the grip's middle this far left of the right column, as Edit Library's */
 
 /* ringnav_paint, after a widget's own paint: Up Next's rows, headings and Clear */
 void upnext_paint(void *w, void *canvas) {
@@ -457,7 +451,8 @@ void upnext_paint(void *w, void *canvas) {
                     UN_ARTIST_Y, end - right - tx, 2);
         if (w == un.now) un_level(canvas, tx + tw + 7, UN_TITLE_Y + 6, accent);
         if (un.lifted && queued)
-            un_grip(canvas, h / 2, lifted || on ? 0xffffff : RGB_TERTIARY);
+            grip_mark(canvas, 375 - geom_val(V_RIGHT_X) - UN_GRIP_X - I(canvas, CANVAS_X), h / 2,
+                      lifted || on ? 0xffffff : tok(TOK_TERTIARY), 100); /* list_marks.c's */
         else if (queued && k > 0) {
             unsigned bitmap[64]; /* bitmap_t: the bump arrow */
             const char *ink = on ? "bump_w" : ipod_light() ? "bump_l" : "bump_d";
