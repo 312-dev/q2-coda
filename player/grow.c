@@ -9,7 +9,9 @@
  * says done or fail, the line is gone, the file has not been rewritten for STALE_S (the app is gone), or a stop or
  * a skip (ctl.cut) gives the song up.
  * ponytail: a pause or a seek asked while the read waits is taken once the bytes come; the engine reads between
- * requests. */
+ * requests. A demuxer that reads the file's end while it opens would wait there for the whole
+ * song and start it only then, as before; measured for FLAC (test/player/run.py grow), not yet for MP3, whose demuxer
+ * may look for ID3v1 and APE tags at the end. */
 #include "q2player.h"
 #include <errno.h>
 #include <stdio.h>
