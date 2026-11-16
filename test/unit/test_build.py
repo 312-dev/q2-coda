@@ -234,6 +234,14 @@ def test_append_payload_wants_one_final_null_slot(rows):
         build.append_payload(program(*rows), b'', 0x500000, 0, 'x')
 
 
+def test_the_payload_has_1_5_mb_below_its_scratch_state_and_link_ld_agrees():
+    """SCRATCH (0xc80000): code and constants up to 1,572,864 bytes; patch/link.ld places .scratch there too."""
+    assert build.SCRATCH - build.BASE == 1_572_864 == 0x180000
+    assert f'.scratch {build.SCRATCH:#x} (NOLOAD)' in (build.ROOT/'patch/link.ld').read_text()
+    with pytest.raises(ValueError, match='^Payload overlaps its scratch page$'):
+        build.check_layout(bytes(1_572_865), {'__scratch_start': build.SCRATCH, '__scratch_end': build.SCRATCH})
+
+
 @pytest.mark.parametrize('size,refused', [(build.SCRATCH - build.BASE - 1, False), (build.SCRATCH - build.BASE, False),
                                           (build.SCRATCH - build.BASE + 1, True)])
 def test_check_layout_payload_may_reach_its_scratch_page(size, refused):

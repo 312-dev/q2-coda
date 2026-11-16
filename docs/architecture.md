@@ -19,9 +19,9 @@ Q2 Pod ships no program of Shanling's and no source of theirs. `tools/build.py` 
 
 ## The payload
 
-The payload is one MIPS o32 image linked by `patch/link.ld`: `.text` and `.rodata` from `0xb00000` (`BASE`), and `.scratch`, zero-filled writable state, at `0xc00000` (`SCRATCH`). `append_payload` (`tools/build.py`) maps it through demo's last, unused `PT_NULL` program header. A variable that must keep its value goes in `.scratch`: `static int x __attribute__((section(".scratch")));`, as `st`, the UI's shared state (`scratch_t` in `patch/navigation.h`), does.
+The payload is one MIPS o32 image linked by `patch/link.ld`: `.text` and `.rodata` from `0xb00000` (`BASE`), and `.scratch`, zero-filled writable state, at `0xc80000` (`SCRATCH`). `append_payload` (`tools/build.py`) maps it through demo's last, unused `PT_NULL` program header. A variable that must keep its value goes in `.scratch`: `static int x __attribute__((section(".scratch")));`, as `st`, the UI's shared state (`scratch_t` in `patch/navigation.h`), does.
 
-`check_layout` (`tools/build.py`) holds the two limits: the code and constants fit the 1 MB below `SCRATCH`, and the state fits 128 KB. demo's heap begins where the scratch state ends, so `SCRATCH` can move up without colliding with anything of stock's.
+`check_layout` (`tools/build.py`) holds the two limits: the code and constants fit the 1.5 MB below `SCRATCH`, and the state fits 128 KB. demo's heap begins where the scratch state ends, so `SCRATCH` can move up without colliding with anything of stock's.
 
 It is compiled from two lists, and a new file in neither is not part of it:
 
