@@ -747,6 +747,18 @@ The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `de
 - **The wheel** rings the stop it is on in white (2 px, 1 px out); a slider that has the wheel is ringed in
   Accent Blue.
 
+### USB
+
+The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `design/mockups/mock_usb_connect.py`):
+
+- **Chooser**, "Use USB For": Charge Only, Transfer Files, USB Audio (and USB Debugging in a `--dev` build), each
+  with its Phosphor symbol (regular, 19 px, Text Secondary, white on the selection) and its caption under it while
+  selected, the row grown to hold it; then Always Do This, a switch row, after a gap.
+- **Mode page** (Transfer Files, USB Audio, USB Debugging, Ejected): a solid circle with its glyph (fill, 44 px,
+  white; the eject's a bold check on Positive green), the title, a line in Text Secondary and a Stop pill.
+- **Toasts** with a 15 px glyph beside the words: Unplugged (Text Secondary), OK to Disconnect (Positive green),
+  USB Audio Ready (white).
+
 ### Motion
 
 - Page push and pop: 220 ms horizontal slide, `cubic_out`.
