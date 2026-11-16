@@ -9291,7 +9291,41 @@ static void thumb_poll(void) {
     if (r & THUMB_CLICK) buzzeer_switch(1);
 }
 
+#if Q2POD_DEV && !defined(PEQ_HOST)
+/* Hot swap spike (docs/hotswap-discovery.md): tools/ci/memswap.py writes new payload text into the
+ * running demo from outside, then asks here, on the UI thread, for qemu to drop its translations of
+ * the old: cell 0 is the request (the host bumps it), 1 the last one done, 2 the way (1 store to
+ * each page, 2 mprotect read+exec then read+write+exec), 3 and 4 the range, 7 the way's result. Cells
+ * 5 and 6 are probes the host reads: an immediate in this code and a word of a literal. */
+extern int cf_syscall(int nr, int a, int b, int c);
+volatile unsigned hotswap_cell[8] __attribute__((section(".scratch")));
+static void hotswap_poll(void) {
+    unsigned v;
+    __asm__ volatile("li %0, 0x1111" : "=r"(v));
+    hotswap_cell[5] = v;
+    hotswap_cell[6] = *(volatile const unsigned *)"HS01";
+    unsigned req = hotswap_cell[0];
+    if (req == hotswap_cell[1]) return;
+    unsigned a = hotswap_cell[3] & ~4095u, b = hotswap_cell[4];
+    if (hotswap_cell[2] == 1) {
+        for (; a < b; a += 4096) {
+            volatile unsigned *p = (volatile unsigned *)a;
+            *p = *p;
+        }
+        hotswap_cell[7] = 0;
+    } else if (hotswap_cell[2] == 2) {
+        b = (b + 4095u) & ~4095u;
+        int r = cf_syscall(4125 /* mprotect */, (int)a, (int)(b - a), 5 /* read, exec */);
+        hotswap_cell[7] = (unsigned)r | (unsigned)cf_syscall(4125, (int)a, (int)(b - a), 7);
+    }
+    hotswap_cell[1] = req;
+}
+#else
+static void hotswap_poll(void) {}
+#endif
+
 int ringnav_sleep(void *loop) {
+    hotswap_poll();
     splash_poll();
     usb_ui_poll(); /* USB and charging toasts, adbd's questions (usb_ui.c) */
     stale_heal();
