@@ -3091,77 +3091,39 @@ assert m.get(w+O['TABLE_ANIMATOR'])==0
 m.confirm(); assert m.clicks==[es[1]] and m.clicks[0] not in old
 passed()
 
-# The theme's end bump (motion.bump.px, BUMP_PX for OLED): the bar moves 6 px against the end.
-px=OLED_T['bump_px']; assert px==O['BUMP_PX']==6
-m,w,es=walk(6,5,height=96,extent=288,name='playlist_page')
-assert m.call(gap=100)==11 and m.selected(w)==5
-m.paint(w,gap=0); assert m.sel()[1]==48-px
-passed()
-# Ring lists bump at both ends and hard-stop while the wheel keeps turning; the first
-# same-direction detent after a pause wraps to the other end.
-m,w,es=walk(6,5,height=96,extent=288,name='playlist_page'); assert m.get(w+O['SCROLL_Y'])==192
-assert m.call(gap=100)==11 and m.selected(w)==5 and m.get(w+O['SCROLL_Y'])==192
-m.paint(w,gap=0)
-assert m.sel()==(inset,42,240-2*inset,48)   # bumped up against the end
-for _ in range(3): assert m.call(gap=100)==11 and m.selected(w)==5   # still spinning: hard stop
-assert m.call(gap=O['EDGE_PAUSE_MS'])==11 and m.selected(w)==0 and m.get(w+O['SCROLL_Y'])==0
-m.paint(w,gap=0); assert m.sel()==(inset,0,240-2*inset,48)
-assert m.call(O['KEY_PREV'],gap=100)==11 and m.selected(w)==0
-m.paint(w,gap=0); assert m.sel()==(inset,6,240-2*inset,48)   # bumped down at the top
-assert m.call(O['KEY_PREV'],gap=100)==11 and m.selected(w)==0
-assert m.call(O['KEY_PREV'],gap=O['EDGE_PAUSE_MS'])==11 and m.selected(w)==5 and m.get(w+O['SCROLL_Y'])==192
-m.paint(w,gap=0); assert m.sel()==(inset,48,240-2*inset,48)
-passed()
+# Every list ends at its ends: a detent past either one leaves the selection, the bar and the view
+# where they are, however long the pause before it (a spin, a run's gap, a second). No bump, no wrap.
+PAST_END=(100,0,300,301,1000,2000)
+for name in ('playlist_page','display_page','playerqueue_page',
+             'playermore_page','sortselect_dialog','playset_page','sysset_page'):
+    m,w,es=walk(6,5,height=96,extent=288,name=name); assert m.get(w+O['SCROLL_Y'])==192
+    for gap in PAST_END:
+        assert m.call(gap=gap)==11 and m.selected(w)==5 and m.get(w+O['SCROLL_Y'])==192,(name,gap,m.selected(w))
+        m.paint(w,gap=0); assert m.sel()==(inset,48,240-2*inset,48),(name,gap,m.sel())   # on its row
+    for _ in range(5): assert m.call(O['KEY_PREV'],gap=100)==11
+    assert m.selected(w)==0 and m.get(w+O['SCROLL_Y'])==0
+    for gap in PAST_END:
+        assert m.call(O['KEY_PREV'],gap=gap)==11 and m.selected(w)==0 and m.get(w+O['SCROLL_Y'])==0,(name,gap)
+        m.paint(w,gap=0); assert m.sel()==(inset,0,240-2*inset,48),(name,gap,m.sel())
+    passed()
 
-# The pause is measured from the last stopped detent, to the millisecond.
-m=Machine(); w,es=m.page_list(6,height=96,extent=288,name='folder_page')
-m.folder('/sd/albums')
-m.paint(w)
-for _ in range(5): assert m.call()==11
-assert m.call(gap=100)==11 and m.selected(w)==5
-assert m.call(gap=O['EDGE_PAUSE_MS']-1)==11 and m.selected(w)==5
-m.paint(w,gap=0); assert m.sel()==(inset,42,240-2*inset,48)
-assert m.call(gap=O['EDGE_PAUSE_MS']-1)==11 and m.selected(w)==5   # re-armed, not wrapped
-assert m.call(gap=O['EDGE_PAUSE_MS'])==11 and m.selected(w)==0
-passed()
-
-# Virtual music tables carry over too; the wrap lands on the first logical row.
+# Virtual music tables end on their last logical row.
 m=Machine(); w,rs,es=m.table_page(n=4,rebind=True)
 m.word(w+O['W_H'],96); m.word(w+O['TABLE_ROWS'],20)
 m.paint(w)
 for _ in range(19): assert m.call()==11
 assert m.selected(w)==19 and m.get(w+O['TABLE_TOP'])==864
-assert m.call(gap=100)==11 and m.selected(w)==19
-assert m.call(gap=O['EDGE_PAUSE_MS'])==11 and m.selected(w)==0 and m.get(w+O['TABLE_TOP'])==0
-assert any(c[0]=='table_client_set_yoffset' for c in m.calls)
+for gap in PAST_END:
+    assert m.call(gap=gap)==11 and m.selected(w)==19 and m.get(w+O['TABLE_TOP'])==864
 passed()
 
-# The Library's Albums grid (album_page, 0xf003) carries over at its ends as Artists do; an album's
-# songs (0xff10) on the same page keep hard ends. The class is set before the list loads, as the
-# Library sets it: changing it under a live list reloads the list and drops the bump.
-for cls,wraps in ((0xf003,True),(0xff10,False)):
+# The Library's Albums grid (album_page, 0xf003) and an album's songs (0xff10) on the same page
+# both end at their ends.
+for cls in (0xf003,0xff10):
     m=Machine(); m.word(syms['g_class_type'],cls)
     w,es=m.page_list(6,height=96,extent=288,name='album_page'); m.paint(w)
     for _ in range(5): assert m.call()==11
-    assert m.call(gap=100)==11 and m.selected(w)==5
-    m.paint(w,gap=0)
-    if wraps:
-        assert m.call(gap=O['EDGE_PAUSE_MS'])==11 and m.selected(w)==0,(cls,m.selected(w))
-    else:
-        assert m.call(gap=O['EDGE_PAUSE_MS'])==11 and m.selected(w)==5,(cls,m.selected(w))
-    passed()
-# Other settings, dynamic pages and other grids keep hard ends; one-row lists never wrap.
-for name in ('display_page','playerqueue_page'):
-    m,w,es=walk(6,5,height=96,extent=288,name=name)
-    assert m.call(gap=100)==11 and m.selected(w)==5
-    m.paint(w,gap=0); assert m.sel()==(inset,48,240-2*inset,48)
-    assert m.call(gap=100)==11 and m.selected(w)==5
-    passed()
-# The hold menu and Now Playing's More page carry over as Library lists do.
-for name in ('playermore_page','sortselect_dialog','playset_page','sysset_page'):
-    m,w,es=walk(6,5,height=96,extent=288,name=name)
-    assert m.call(gap=100)==11 and m.selected(w)==5
-    assert m.call(gap=O['EDGE_PAUSE_MS'])==11 and m.selected(w)==0,(name,m.selected(w))
+    for gap in PAST_END: assert m.call(gap=gap)==11 and m.selected(w)==5,(cls,gap,m.selected(w))
     passed()
 m=Machine(); w,es=m.page_list(1,height=96,extent=96,name='playlist_page')
 m.paint(w)
@@ -3222,27 +3184,6 @@ for count,bar_present in ((2,True),(20,False)):
     parent=m.node('list_view',children=[w]+([m.node('scroll_bar_m')] if bar_present else []))
     m.word(w+O['W_PARENT'],parent); m.paint(w); m.call()
     assert not any(c[0]=='scroll_bar_scroll_to' for c in m.calls)
-    passed()
-
-# Bump repaints at precisely 120 ms, independently of the pause-to-wrap arm.
-m=Machine(); w,es=m.page_list(2,height=96,extent=96,name='playlist_page')
-m.paint(w); m.call(); m.call(gap=0)
-assert m.timers and min(t[0] for t in m.timers.values())==m.now+O['BUMP_MS']
-m.advance(O['BUMP_MS']-1); assert not m.calls
-m.advance(1); assert any(c[0]=='widget_invalidate_force' and c[1]==w for c in m.calls)
-m.paint(w,gap=0); assert m.sel()==(inset,48,240-2*inset,48)
-m.call(gap=O['EDGE_PAUSE_MS']); assert m.selected(w)==0
-passed()
-for cancel in ('touch','activate','recycle','destroy','scope'):
-    m=Machine(); w,es=m.page_list(2,height=96,extent=96,name='folder_page')
-    m.folder('/sd/a'); m.paint(w); m.call(); m.call(gap=0)
-    if cancel=='touch': m.touch()
-    elif cancel=='activate': m.click(es[-1])
-    elif cancel=='recycle': m.nodes[w].pop('_ringnav_fx')
-    elif cancel=='destroy': m.top=0; m.nodes.clear()
-    else: m.folder('/sd/b'); m.paint(w,gap=0)
-    m.advance(O['BUMP_MS'])
-    assert not any(c[0]=='widget_invalidate_force' and c[1]==w for c in m.calls)
     passed()
 
 # Execute stock navigator, Now Playing initialization/key-up, and native window switch/close.
@@ -5544,7 +5485,7 @@ assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==204
 assert [c[0] for c in m.moved()]==['scroll_view_set_offset']; passed()
 
 # Home is an ordinary list: the wheel walks its rows (HOME_ROWS) one by one, the seven its box shows and then
-# any it scrolls in, so the last rests where the seventh did; it bumps at both ends and wraps after a
+# any it scrolls in, so the last rests where the seventh did; it stops at both ends however long the
 # pause, Return selects Now Playing, the bar spans the list's width and centre clicks the image.
 m=Machine(); view,imgs=home_list(m); click_target(m,imgs[HOME_ROWS.index('coverflow')])
 m.paint(view)
@@ -5553,10 +5494,11 @@ last=len(HOME_ROWS)-1; shown=min(len(HOME_ROWS),7)
 for i in range(1,last+1): assert m.call()==11 and m.selected(view)==i
 assert m.get(view+O['SCROLL_Y'])==(last+1-shown)*HOME_ROW
 m.paint(view); assert not m.rounded and [b[:5] for b in m.bands]==bar_bands(inset,(shown-1)*HOME_ROW,HOME_LIST_W-2*inset,HOME_ROW,radius)
-assert m.call(gap=50)==11 and m.selected(view)==last   # bumped
-assert m.call(gap=O['EDGE_PAUSE_MS'])==11 and m.selected(view)==0 and m.get(view+O['SCROLL_Y'])==0
-assert m.call(O['KEY_PREV'],gap=50)==11 and m.selected(view)==0   # bumped
-assert m.call(O['KEY_PREV'],gap=O['EDGE_PAUSE_MS'])==11 and m.selected(view)==last
+for gap in (50,300,1000):
+    assert m.call(gap=gap)==11 and m.selected(view)==last and m.get(view+O['SCROLL_Y'])==(last+1-shown)*HOME_ROW
+for i in range(last-1,-1,-1): assert m.call(O['KEY_PREV'])==11 and m.selected(view)==i
+for gap in (50,300,1000): assert m.call(O['KEY_PREV'],gap=gap)==11 and m.selected(view)==0
+for i in range(1,last+1): assert m.call()==11 and m.selected(view)==i
 for i in range(last-1,2,-1): assert m.call(O['KEY_PREV'])==11 and m.selected(view)==i
 assert m.call(O['KEY_RETURN'])==11 and m.selected(view)==0 and not destinations(m)
 for i in (1,2): assert m.call(gap=1000)==11 and m.selected(view)==i
@@ -11200,11 +11142,11 @@ for table in (False,True):
             else: w,es=m.page_list(count,extent=count*48)
             m.paint(w); assert turn(m,w,gaps)==list(range(1,len(gaps)+1)),(table,count,gaps)
             passed()
-# Home as built: the same, its ends bump then wrap after a pause, and Centre opens the row that is highlighted.
+# Home as built: the same, its ends stop it however long the pause, and Centre opens the row that is highlighted.
 m=Machine(); view,imgs=home_list(m); click_target(m,imgs[HOME_ROWS.index('coverflow')]); m.paint(view); last=len(HOME_ROWS)-1
-assert turn(m,view,(1000,100,100,1000,100,100,100,100)[:last]+(100,400))==[*range(1,last+1),last,0]
-assert m.get(view+O['SCROLL_Y'])==0 and turn(m,view,(1000,400,100,100),PREV)==[0,last,last-1,last-2]
-assert m.confirm()==11 and m.dispatched()[0][1]==imgs[last-2]; passed()
+assert turn(m,view,(1000,100,100,1000,100,100,100,100)[:last]+(100,400))==[*range(1,last+1),last,last]
+assert turn(m,view,(1000,400,100,100),PREV)==[last-1,last-2,last-3,last-4]
+assert m.confirm()==11 and m.dispatched()[0][1]==imgs[last-4]; passed()
 # A BUTTONS dialog: the same between its buttons, and nothing scrolls.
 m=Machine(); d=m.node('dialog','confirminfo_dialog'); m.word(d+O['W_PARENT'],m.wm); m.top=d
 buttons=[m.entry(d,220) for _ in range(3)]; m.nodes[d]['children']=buttons
@@ -11213,28 +11155,26 @@ m.paint(d); got=[]
 for gap in (1000,100,100): assert m.call(gap=gap)==11 and not m.moved(); got.append(m.selected(d))
 assert got==[1,2,2] and m.confirm()==11 and m.dispatched()[0][1]==buttons[2]; passed()
 
-# 4. List ends. Reaching an end ends the run, and every
-# tick against an end bumps and re-arms the stop, so ticks 100 or 200ms apart never wrap, and only a tick
-# EDGE_PAUSE_MS after the last one does, once. The tick after the wrap is a first one. The bar is OLED's, in from each
-# side by the selection's inset (oled/theme.xml list.selection).
+# 4. List ends. Reaching an end ends the run, and a tick against an end changes nothing, however long the pause
+# before it: no bump, no wrap. The bar is OLED's, in from each side by the selection's inset (oled/theme.xml
+# list.selection).
 SI=OLT['sel_inset']
 def ring(name='playlist_page'):
     m=Machine(); w,es=m.page_list(6,height=96,extent=288,name=name); m.paint(w)
     assert turn(m,w,(1000,)*5)==[1,2,3,4,5]
     return m,w,es
 m,w,es=ring()
-for gap in (100,100,200,200,O['EDGE_PAUSE_MS']-1):
+for gap in (100,100,200,200,299,300,1000):
     assert m.call(gap=gap)==11 and m.selected(w)==5 and m.get(w+O['SCROLL_Y'])==192,gap
-    m.paint(w,gap=0); assert m.sel()==(SI,42,240-2*SI,48)  # bumped against the end
-assert m.call(gap=O['EDGE_PAUSE_MS'])==11 and m.selected(w)==0 and m.get(w+O['SCROLL_Y'])==0
-m.paint(w,gap=0); assert m.sel()==(SI,0,240-2*SI,48)
-assert turn(m,w,(100,100,100))==[1,2,3] and turn(m,w,(100,100,100),PREV)==[2,1,0]
-assert m.call(PREV,gap=100)==11 and m.selected(w)==0
-m.paint(w,gap=0); assert m.sel()==(SI,6,240-2*SI,48)   # bumped down at the top, on the first tick
-assert m.call(PREV,gap=O['EDGE_PAUSE_MS'])==11 and m.selected(w)==5; passed()
-# Settings keep hard ends: no bump and no wrap, however long the pause.
+    m.paint(w,gap=0); assert m.sel()==(SI,48,240-2*SI,48)  # on its row
+assert turn(m,w,(100,)*5,PREV)==[4,3,2,1,0]
+for gap in (100,300,1000):
+    assert m.call(PREV,gap=gap)==11 and m.selected(w)==0 and m.get(w+O['SCROLL_Y'])==0
+    m.paint(w,gap=0); assert m.sel()==(SI,0,240-2*SI,48)
+assert turn(m,w,(100,100,100))==[1,2,3]; passed()
+# Settings the same.
 m,w,es=ring('display_page')
-for gap in (100,O['EDGE_PAUSE_MS'],1000):
+for gap in (100,300,1000):
     assert m.call(gap=gap)==11 and m.selected(w)==5
     m.paint(w,gap=0); assert m.sel()==(SI,48,240-2*SI,48)
 passed()
@@ -11252,11 +11192,11 @@ for gap in (1000,100,100,1000):
     n=press(m,gap=gap); assert n==0 and m.down==0 and m.u.mem_read(SOUND_LATCH,1)==b'\x01'
     got.append((n+lift(m),m.selected(view))); assert m.ret==11
 assert got==[(1,1),(1,2),(1,3),(1,4)],got; passed()
-# Slow ticks click on every row; Home's end bumps silently, then the wrap after a pause clicks;
-# a repaint and a long wait add nothing.
+# Slow ticks click on every row; Home's end is silent however long the pause; a repaint and a long wait add
+# nothing.
 m,view=home_machine()
 assert [tick(m) for _ in range(8)]==[1]*8 and m.selected(view)==8
-assert [tick(m,gap=gap) for gap in (1000,50,400,100)]==[0,0,1,1] and m.selected(view)==1
+assert [tick(m,gap=gap) for gap in (1000,50,400,100)]==[0,0,0,0] and m.selected(view)==8
 m.paint(view); assert not buzzes(m)
 m.advance(10000); assert not buzzes(m); passed()
 # buzzeer_switch also runs when it is silent, so its calls are not the count: stock always calls
@@ -11268,12 +11208,11 @@ assert tick(m)==1 and seen==[0,1] and tick(m,gap=100)==1 and seen==[0,1,0,1]; pa
 # 1,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8 rows).
 m,w,es=long_list(100,audible(Machine()))
 assert [tick(m,gap=100) for _ in range(16)]==[1]*16 and m.selected(w)==65; passed()
-# An end bump is silent and the wrap clicks once; the tick after it is a first one and clicks.
+# A tick at an end is silent, however long the pause; the tick back off it clicks.
 m=audible(Machine()); w,es=m.page_list(6,height=96,extent=288,name='playlist_page'); m.paint(w)
 assert sum(tick(m) for _ in range(5))==5 and m.selected(w)==5
-assert [tick(m,gap=gap) for gap in (100,200,200,O['EDGE_PAUSE_MS']-1)]==[0,0,0,0] and m.selected(w)==5
-assert tick(m,gap=O['EDGE_PAUSE_MS'])==1 and m.selected(w)==0
-assert tick(m,gap=100)==1 and m.selected(w)==1; passed()
+assert [tick(m,gap=gap) for gap in (100,200,200,300,1000)]==[0,0,0,0,0] and m.selected(w)==5
+assert tick(m,PREV,gap=100)==1 and m.selected(w)==4; passed()
 # Rejected input is silent: a finger down, a window animation (held, its tick plays after),
 # stock's wheel lockout after a button (until its countdown ends), and a turn while the screen
 # is locked still clicks as stock.
@@ -12752,15 +12691,16 @@ m.close()
 sheet,chooser=games_open(); G=m.get(payload_syms['g'])
 assert labels(chooser)==['Games','Sudoku','Vortex','Solitaire','Snake','Bricks'] and not m.nodes[sheet]['visible']
 rows=m.nodes[m.find('scroll_view',chooser)]['children']
-# The wheel carries over at both ends of the real chooser: a bump, then after a pause the other end.
+# The wheel stops at both ends of the real chooser, however long the pause.
 w=m.find('scroll_view',chooser); m.paint(w,gap=0)
 for _ in range(6):
     if m.selected(w)!=4: assert m.call(gap=1000)==11; m.paint(w,gap=0)
 assert m.selected(w)==4
-assert m.call(gap=100)==11 and m.selected(w)==4; m.paint(w,gap=0)
-assert m.call(gap=O['EDGE_PAUSE_MS'])==11 and m.selected(w)==0; m.paint(w,gap=0)
-assert m.call(PREV,gap=100)==11 and m.selected(w)==0; m.paint(w,gap=0)
-assert m.call(PREV,gap=O['EDGE_PAUSE_MS'])==11 and m.selected(w)==4; m.paint(w,gap=0); passed()
+for gap in (100,300,1000): assert m.call(gap=gap)==11 and m.selected(w)==4; m.paint(w,gap=0)
+for _ in range(4): assert m.call(PREV,gap=1000)==11; m.paint(w,gap=0)
+assert m.selected(w)==0
+for gap in (100,300,1000): assert m.call(PREV,gap=gap)==11 and m.selected(w)==0; m.paint(w,gap=0)
+passed()
 def pick(i):
     f,ctx=m.handler(rows[i],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.advance(0)
 def paint(): m.call(address=HOOKS['widget_on_paint_border'][0],args=(sheet,m.canvas,0,0),gap=0,clear=False,count=50_000_000)
