@@ -76,7 +76,7 @@ class Rig:
         defs = {'QG_RUN': f'"{d}/run"', 'QG_DATA': f'"{d}/data"', 'QG_BIN': f'"{d}/bin/"', 'QG_ASK_S': '2',
                 'QG_GIVEUP_MS': '3000', 'QG_ARRIVE_MS': '3000', 'QG_OUT_WAIT_MS': '1500',
                 'QG_MAIN_SOURCE': f'"echo MAIN source >> {self.log}"', 'QG_MAIN_STOCK': f'"echo MAIN stock >> {self.log}"',
-                'QG_HOTSPOT': f'"{d}/bin/q2-hotspot"', 'QG_HOTSPOT_CHECK_MS': '1000'}
+                'QG_HOTSPOT': f'"{d}/bin/q2-hotspot"', 'QG_HOTSPOT_CHECK_MS': '1000', 'QG_SPOT': f'"{d}/spot"'}
         S.run(CC + ['-DCODA_HOST', *(f'-D{k}={v}' for k, v in defs.items()), '-o', str(self.helper),
                     str(ROOT / 'patch/q2_guest.c'), '-l:libdbus-1.so.3'], check=True)
         self.main = S.Popen(['/usr/bin/python3', str(fake), 'main', str(d / 'main.ctl'), str(self.log)], env=self.env)
@@ -441,11 +441,49 @@ def run(rig, d):
     rig.until('... saved', hotspot_pass='river-tulip-07')
     check('... in the config', 'hotspot_pass=river-tulip-07\n' in (d / 'data/config').read_text())
 
+    # a Spotify Connect guest (docs/internals.md#guest-play-receivers)
+    import socket
+    spot = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    spot.bind(str(d / 'spot.sock'))
+    spot.settimeout(5)
+    rig.cmd('allow ask')
+    rig.cmd('net spotify connect Spotify Connect')
+    s = rig.until('a receiver\'s session asks too', state='asking', source='spotify', guest='Spotify Connect',
+                  mac='spotify:connect', code='')
+    seq = int(s['netdeny_seq'])
+    rig.cmd('decline')
+    s = rig.until('Decline: the payload is told to stop it', state='idle', event='declined', netdeny='spotify')
+    check('... counted', int(s['netdeny_seq']) == seq + 1)
+    (d / 'spot.state').write_text('state=playing\ntitle=Levitating\nartist=Dua Lipa\nalbum=Future Nostalgia\n'
+                                  'duration=203000\nposition=1000\nat=0\n')
+    rig.mark()
+    rig.cmd('net spotify connect Spotify Connect')
+    rig.until('asked again', state='asking', source='spotify')
+    rig.cmd('allow-always')
+    s = rig.until('Always Allow: it plays, its song from librespot', state='playing', source='spotify',
+                  title='Levitating', artist='Dua Lipa', album='Future Nostalgia', duration='203000')
+    check('... no relay for a receiver', not rig.seen('APLAY'))
+    want = track_record(0, 0, 203000, 'Levitating', 'Dua Lipa', 'Future Nostalgia')
+    rig.wait(lambda: any(l == 'NOTIFY 0x108 ' + want for l in rig.lines()[rig.at:]), 'its song to the car')
+    print('ok   ... and to the car')
+    for key, letter in (('next', b'n'), ('prev', b'b'), ('pause', b's'), ('play', b'P'), ('toggle', b'p')):
+        rig.cmd('key ' + key)
+        check(f'key {key}: librespot\'s {letter.decode()}', spot.recv(8) == letter)
+    (d / 'spot.state').write_text('state=none\n')
+    rig.until('the phone picks another device: left', state='idle', event='left', eventname='Spotify Connect')
+    (d / 'spot.state').write_text('state=playing\ntitle=Levitating\n')
+    rig.cmd('net spotify connect Spotify Connect')
+    rig.until('trusted now: plays without asking', state='playing', source='spotify')
+    rig.cmd('net-end spotify')
+    rig.until('net-end: the session ends', state='idle', event='left')
+    spot.close()
+
     # forget, off
     rig.mark()
     rig.cmd(f'forget {SAM}')
     rig.expect('REMOVEDEVICE /org/bluez/hci0/dev_AA_BB_CC_DD_EE_02', 'forget: its pairing removed')
-    rig.wait(lambda: (d / 'data/trusted').read_text() == '', 'gone from the list')
+    rig.wait(lambda: SAM not in (d / 'data/trusted').read_text(), 'gone from the list')
+    check('... the Spotify Connect guest still in it', (d / 'data/trusted').read_text().startswith('spotify:connect\t0\t'))
     print('ok   ... and from the list')
     rig.mark()
     rig.cmd('off')

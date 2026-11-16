@@ -7,8 +7,9 @@
  * - stops the owner's music when a guest starts and restarts it when the guest leaves, as the
  *   settings say, then sends the owner's song to the car again;
  * - hands the car's buttons to the guest's phone while one plays (guest_key, from headset_command);
- * - keeps stock's receiver page shut while Guest Play is on (guest_a2dp, hooked at btrecvA2dpFunc).
- */
+ * - keeps stock's receiver page shut while Guest Play is on (guest_a2dp, hooked at btrecvA2dpFunc);
+ * - holds a receiver's session (Spotify Connect) until the owner allows it, and stops it when
+ * refused (guest_net, docs/internals.md#guest-play-receivers). */
 #include "offsets.inc"
 #include "peq.h"
 #include "stock.h"
@@ -31,6 +32,8 @@ static struct {
     unsigned seq;
     volatile int on; /* Guest Play is on: read by guest_a2dp on libbtctl's thread */
     int active, stopped, was_playing;
+    unsigned netdeny_seq;
+    char held[12]; /* the receiver held paused until allowed */
     int queued;
     char queue[GUEST_QUEUE][GUEST_LINE];
 } gp __attribute__((section(".scratch")));
@@ -79,6 +82,40 @@ void guest_bt_on(void) {
     if (strstr((state_read(GUEST_CONFIG, raw, sizeof raw), raw), "\nenabled=1\n")) guest_start();
 }
 
+/* A receiver's session starting (kind spotify, airplay, dlna; id who, as far as it knows): 1 to
+ * hold it paused, as Guest Play is on and q2-guest has not let this guest play; then the owner is
+ * asked, and guest_poll releases it once allowed. 0 to play as without Guest Play. */
+int guest_net(const char *kind, const char *id, const char *name) {
+    char state[12], source[12], line[GUEST_LINE];
+    if (!gp.on) return 0;
+    field(gp.raw, "state", state, sizeof state);
+    field(gp.raw, "source", source, sizeof source);
+    if ((!strcmp(state, "playing") || !strcmp(state, "paused")) && !strcmp(source, kind)) return 0;
+    if (strcmp(gp.held, kind)) { /* asked once a hold */
+        snprintf(line, sizeof line, "net %s %s %s", kind, id, name);
+        guest_send(line);
+        snprintf(gp.held, sizeof gp.held, "%s", kind);
+    }
+    return 1;
+}
+
+/* What q2-guest decided about a held or playing receiver: released when its guest plays, stopped
+ * when refused (netdeny_seq counts each). */
+static void net_follow(const char *state) {
+    char source[12], deny[12];
+    field(gp.raw, "source", source, sizeof source);
+    if (*gp.held && !strcmp(state, "playing") && !strcmp(source, gp.held)) {
+        if (!strcmp(gp.held, "spotify")) spot_send_play(1);
+        gp.held[0] = 0;
+    }
+    unsigned seq = (unsigned)number(gp.raw, "netdeny_seq");
+    if (seq == gp.netdeny_seq) return;
+    gp.netdeny_seq = seq;
+    field(gp.raw, "netdeny", deny, sizeof deny);
+    if (!strcmp(deny, "spotify")) spot_send_play(0);
+    if (!strcmp(deny, gp.held)) gp.held[0] = 0;
+}
+
 /* A guest started: the owner's music stops. The local player is stopped with its place kept, as a
  * paused hciplayer may hold its PCM, which bluealsa-aplay then can't open; the rest pause. */
 static void owner_stop(void) {
@@ -119,13 +156,17 @@ void guest_poll(void) {
         memmove(gp.queue[0], gp.queue[1], gp.queued * GUEST_LINE);
     }
     if (gp.queued) guest_start();
+    if (gp.seq) net_follow(state);
     int active = !strcmp(state, "playing") || !strcmp(state, "paused");
     if (active == gp.active) return;
     gp.active = active;
-    if (active)
+    char source[12];
+    field(gp.raw, "source", source, sizeof source);
+    if (active && !*source)
         owner_stop();
-    else
-        owner_resume();
+    else if (!active)
+        owner_resume(); /* after a receiver's guest: nothing was stopped, the car gets the owner's
+                           song */
 }
 
 /* headset_command's codes while a guest plays: to the guest's phone. 1 when taken. */

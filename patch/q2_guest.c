@@ -19,7 +19,16 @@ int mkfifo(const char *, unsigned), system(const char *);
 __attribute__((noreturn)) void _exit(int);
 #define WNOHANG 1
 #define SIGKILL 9
+#define AF_UNIX 1
+#define SOCK_DGRAM 1 /* MIPS swaps STREAM and DGRAM */
+#define MSG_DONTWAIT 0x80
+struct sockaddr_un {
+    unsigned short sun_family;
+    char sun_path[108];
+};
+ssize_t sendto(int, const void *, size_t, int, const void *, socklen_t);
 #else
+#include <sys/un.h>
 #include <sys/wait.h>
 #endif
 
@@ -112,6 +121,9 @@ int dbus_message_iter_close_container(DBusMessageIter *, DBusMessageIter *);
 #define QG_PID QG_RUN ".pid"
 #define QG_CONFIG QG_DATA "/config"
 #define QG_TRUSTED QG_DATA "/trusted"
+#ifndef QG_SPOT /* librespot's status file and control socket (docs/internals.md#spotify) */
+#define QG_SPOT "/tmp/q2-librespot"
+#endif
 
 /* the timings; the tests shorten some */
 #define QG_TICK_MS 250
@@ -166,16 +178,19 @@ int dbus_message_iter_close_container(DBusMessageIter *, DBusMessageIter *);
 enum { ASK_NONE, ASK_PAIR, ASK_STREAM };
 
 typedef struct {
-    char mac[18], name[QG_NAME];
+    char mac[48], name[QG_NAME]; /* a network guest's mac is KIND:ID
+                                    (docs/internals.md#guest-play-receivers) */
     int ask;
     long last;
 } qg_trusted_t;
 
 typedef struct {
-    char path[160]; /* its PCM on bluealsa */
-    char mac[18], name[QG_NAME];
-    int on_main; /* the PCM is the main daemon's (no -B for aplay) */
+    char path[160];              /* its PCM on bluealsa */
+    char mac[48], name[QG_NAME]; /* a network guest's mac is KIND:ID
+                                    (docs/internals.md#guest-play-receivers) */
+    int on_main;                 /* the PCM is the main daemon's (no -B for aplay) */
     char codec[48];
+    char source[12]; /* "" Bluetooth, else the receiver: airplay, spotify, dlna */
 } qg_dev_t;
 
 static struct {
@@ -230,7 +245,8 @@ static struct {
     int sinkd, aplay;
     long sinkd_at, aplay_at;
     /* the state file */
-    unsigned seq, event_seq;
+    unsigned seq, event_seq, netdeny_seq;
+    char netdeny[12]; /* the receiver the payload is to stop, counted by netdeny_seq */
     char event[16], event_name[QG_NAME];
     char last[4096];
     long written_at;
@@ -324,7 +340,7 @@ static void trusted_load(void) {
             char *tab = strchr(f[i - 1], '\t');
             if (tab) *tab = 0, f[i] = tab + 1;
         }
-        if (f[3] && strlen(f[0]) == 17) {
+        if (f[3] && *f[0] && strlen(f[0]) < sizeof qg.trusted[0].mac) {
             qg_trusted_t *t = &qg.trusted[qg.n_trusted++];
             copy(t->mac, f[0], sizeof t->mac);
             t->ask = atoi(f[1]) != 0;
@@ -484,6 +500,7 @@ static void dev_name(qg_dev_t *d) {
 
 static void dev_call(const char *mac, const char *method) {
     char path[64];
+    if (strlen(mac) != 17) return; /* a network guest's KIND:ID */
     dev_path(mac, path, sizeof path);
     send_only(BLUEZ, path, "org.bluez.Device1", method, T_END);
 }
@@ -567,7 +584,7 @@ static void sinkd_start(void) {
 }
 
 static void aplay_start(void) {
-    char dev[64];
+    char dev[96];
     if (*qg.out.mac)
         snprintf(dev, sizeof dev, "bluealsa:DEV=%s,PROFILE=a2dp", qg.out.mac);
     else
@@ -713,6 +730,12 @@ static void state_write(void) {
                      "hotspot_clients=%d\nhotspot_qr=%s\n",
                      qg.hotspot, qg.hotspot_up, ssid, qg.hotspot_pass,
                      qg.hotspot_up ? QG_HOTSPOT_IP : "", qg.hotspot_clients, qr);
+    if (h > 0 && n + h < (int)sizeof b) n += h;
+    h = snprintf(b + n, sizeof b - n, "source=%s\nnewsource=%s\nnetdeny=%s\nnetdeny_seq=%u\n",
+                 qg.ask       ? qg.asking.source
+                 : qg.playing ? qg.guest.source
+                              : "",
+                 qg.replace ? qg.newcomer.source : "", qg.netdeny, qg.netdeny_seq);
     if (h > 0 && n + h < (int)sizeof b) n += h;
     if (!strcmp(b, qg.last)) return;
     memcpy(qg.last, b, (unsigned)n + 1);
@@ -889,7 +912,19 @@ static void player_find(void) {
     if (*found) player_read(found);
 }
 
+static void spot_send(char c);
+
 static void player_key(const char *key) {
+    if (qg.playing && !strcmp(qg.guest.source, "spotify")) { /* librespot's own letters */
+        char c = !strcmp(key, "play")     ? 'P'
+                 : !strcmp(key, "pause")  ? 's'
+                 : !strcmp(key, "next")   ? 'n'
+                 : !strcmp(key, "prev")   ? 'b'
+                 : !strcmp(key, "toggle") ? 'p'
+                                          : 0;
+        if (c) spot_send(c);
+        return;
+    }
     if (!qg.playing || !*qg.player) return;
     const char *method = !strcmp(key, "play")     ? "Play"
                          : !strcmp(key, "pause")  ? "Pause"
@@ -898,6 +933,41 @@ static void player_key(const char *key) {
                          : !strcmp(key, "toggle") ? (status_byte() == 1 ? "Pause" : "Play")
                                                   : 0;
     if (method) send_only(BLUEZ, qg.player, "org.bluez.MediaPlayer1", method, T_END);
+}
+
+/* ---- a Spotify Connect guest: librespot's status file and control socket
+ * (docs/internals.md#spotify) ---- */
+
+static void session_end(const char *why, int disconnect);
+
+/* librespot's song and state, as the guest's while a Spotify Connect guest plays. */
+static void spot_read(void) {
+    char raw[2048], v[QG_FIELD];
+    if (!read_whole(QG_SPOT ".state", raw, sizeof raw)) return;
+    qg_field(raw, "state", v, sizeof v);
+    if (!strcmp(v, "none")) { /* the phone chose another device */
+        session_end("left", 0);
+        return;
+    }
+    copy(qg.status, v, sizeof qg.status);
+    qg_field(raw, "title", qg.title, sizeof qg.title);
+    qg_field(raw, "artist", qg.artist, sizeof qg.artist);
+    qg_field(raw, "album", qg.album, sizeof qg.album);
+    qg.duration = (unsigned)atoi((qg_field(raw, "duration", v, sizeof v), v));
+    qg.pos = (unsigned)atoi((qg_field(raw, "position", v, sizeof v), v));
+    qg.pos_at =
+        atoi((qg_field(raw, "at", v, sizeof v), v)); /* librespot's CLOCK_MONOTONIC ms, as qg_ms */
+}
+
+static void spot_send(char c) {
+    struct sockaddr_un a;
+    memset(&a, 0, sizeof a);
+    a.sun_family = AF_UNIX;
+    copy(a.sun_path, QG_SPOT ".sock", sizeof a.sun_path);
+    int s = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (s < 0) return;
+    sendto(s, &c, 1, MSG_DONTWAIT, (const void *)&a, sizeof a);
+    close(s);
 }
 
 /* ---- Let a Guest Connect ---- */
@@ -957,6 +1027,21 @@ static void window_open(void) {
 
 static void out_find(void);
 
+/* A network guest's receiver to stop (the payload does it: docs/internals.md#guest-play-receivers).
+ */
+static void net_deny(const char *source) {
+    copy(qg.netdeny, source, sizeof qg.netdeny);
+    ++qg.netdeny_seq;
+}
+
+/* A guest turned away or ended: a phone disconnected, a receiver stopped. */
+static void refuse(const qg_dev_t *d) {
+    if (*d->source)
+        net_deny(d->source);
+    else
+        dev_call(d->mac, "Disconnect");
+}
+
 static void session_start(const qg_dev_t *d) {
     qg.guest = *d;
     qg.playing = 1;
@@ -972,7 +1057,7 @@ static void session_start(const qg_dev_t *d) {
     if (t) t->last = time(0), trusted_save();
     window_close();
     out_find();
-    if (*d->path) aplay_start(), player_find();
+    if (*d->path && !*d->source) aplay_start(), player_find();
 }
 
 /* The guest's stream is here (its PCM): play it. */
@@ -983,6 +1068,7 @@ static void session_arrived(const qg_dev_t *d) {
     qg.arrive_by = 0;
     qg.resend_at = qg_ms() + QG_RESEND_MS;
     if (!*qg.status) copy(qg.status, "playing", sizeof qg.status);
+    if (*qg.guest.source) return; /* a receiver plays by itself */
     if (!qg.aplay) aplay_start();
     player_find();
 }
@@ -990,7 +1076,7 @@ static void session_arrived(const qg_dev_t *d) {
 static void session_end(const char *why, int disconnect) {
     if (!qg.playing) return;
     stop_child(&qg.aplay);
-    if (disconnect) dev_call(qg.guest.mac, "Disconnect");
+    if (disconnect) refuse(&qg.guest);
     event(why, qg.guest.name);
     qg.playing = 0;
     qg.approved[0] = 0;
@@ -1019,7 +1105,7 @@ static void ask_end(int allow, int always, const char *why) {
     agent_reply(qg.pending, allow);
     qg.pending = 0;
     if (!allow) {
-        if (kind == ASK_STREAM) dev_call(d.mac, "Disconnect");
+        if (kind == ASK_STREAM) refuse(&d);
         event(why, d.name);
         return;
     }
@@ -1042,7 +1128,7 @@ static void replace_end(int replace) {
     int paired = agent_reply(qg.rep_pending, replace);
     qg.rep_pending = 0;
     if (!replace) {
-        if (!paired) dev_call(d.mac, "Disconnect");
+        if (!paired) refuse(&d);
         event("kept", d.name);
         return;
     }
@@ -1066,7 +1152,7 @@ static void wants(qg_dev_t *d, DBusMessage *req, unsigned code) {
     if (!*d->name) dev_name(d);
     if (qg.ask || qg.replace) { /* one prompt at a time */
         agent_reply(req ? dbus_message_ref(req) : 0, 0);
-        if (!req) dev_call(d->mac, "Disconnect");
+        if (!req) refuse(d);
         event("refused", d->name);
         return;
     }
@@ -1080,7 +1166,7 @@ static void wants(qg_dev_t *d, DBusMessage *req, unsigned code) {
         return;
     }
     if (!req && qg.trusted_only && !t) {
-        dev_call(d->mac, "Disconnect");
+        refuse(d);
         event("refused", d->name);
         return;
     }
@@ -1177,7 +1263,23 @@ static void command(char *line) {
         session_end("stopped", 1);
     else if (!strcmp(line, "key") && arg)
         player_key(arg);
-    else if (!strcmp(line, "hotspot") && arg) {
+    else if (!strcmp(line, "net") && arg) { /* net KIND ID NAME: a receiver's session started */
+        char *id = strchr(arg, ' '), *name = id ? strchr(id + 1, ' ') : 0;
+        if (!name) return;
+        *id++ = 0, *name++ = 0;
+        qg_dev_t d;
+        memset(&d, 0, sizeof d);
+        copy(d.source, arg, sizeof d.source);
+        snprintf(d.mac, sizeof d.mac, "%s:%s", arg, id);
+        copy(d.name, name, sizeof d.name);
+        copy(d.path, "net", sizeof d.path); /* here already: no stream to wait for */
+        wants(&d, 0, 0);
+    } else if (!strcmp(line, "net-end") && arg) {
+        if (qg.playing && !strcmp(qg.guest.source, arg)) session_end("left", 0);
+        if (qg.ask && !strcmp(qg.asking.source, arg)) qg.ask = 0, event("left", qg.asking.name);
+        if (qg.replace && !strcmp(qg.newcomer.source, arg))
+            qg.replace = 0, event("left", qg.newcomer.name);
+    } else if (!strcmp(line, "hotspot") && arg) {
         qg.hotspot = !strcmp(arg, "on");
         config_save();
         hotspot_apply();
@@ -1370,8 +1472,10 @@ static void tick(void) {
         else if (now - qg.paused_since >= QG_GIVEUP_MS)
             session_end("gaveup", 1);
     }
-    if (qg.playing && *qg.guest.path && !qg.aplay && now - qg.aplay_at >= QG_RESPAWN_MS)
+    if (qg.playing && *qg.guest.path && !*qg.guest.source && !qg.aplay &&
+        now - qg.aplay_at >= QG_RESPAWN_MS)
         aplay_start();
+    if (qg.playing && !strcmp(qg.guest.source, "spotify")) spot_read();
     /* the sink role once the car or headset had its chance to connect first */
     if (qg.enabled && qg.bluez_up && qg.main_up && !qg.sinkd && !*qg.reconnect &&
         now - qg.sinkd_at >= QG_RESPAWN_MS &&

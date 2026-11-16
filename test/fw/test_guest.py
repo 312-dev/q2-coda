@@ -213,3 +213,78 @@ def test_the_receiver_page_stays_shut_while_guest_play_is_on(rig, fw):
     rig.poll()
     assert a2dp(0x103, None, None) == 0 and len(rig.fw.calls('stock_btrecv_trampoline')) == 2
     assert rig.fw.calls('stock_btrecv_trampoline')[0][1][0] == 0x103  # passed on as it came
+
+
+# Receivers (docs/internals.md#guest-play-receivers): a Spotify Connect session waits for the owner.
+
+class Spot:
+    """librespot's control socket: the letters sent to it."""
+    def __init__(self, fw):
+        self.sent = []
+        fw.mock('fw_socket', lambda *_: 5)
+        fw.mock('fw_sendto', lambda s, data, n, flags, to, *_: self.sent.append(
+            (C.string_at(to + 2).decode(), C.string_at(data, n).decode())) or n)
+
+
+def net(fw):
+    return fw.fn('guest_net', C.c_int, C.c_char_p, C.c_char_p, C.c_char_p)(b'spotify', b'connect', b'Spotify Connect')
+
+
+def test_without_guest_play_a_receiver_plays_as_before(rig, fw):
+    rig.fifo_up = True
+    rig.poll()  # no daemon
+    assert net(fw) == 0 and rig.lines == []
+    rig.state(state='off')
+    rig.poll()
+    assert net(fw) == 0 and rig.lines == []
+
+
+def test_a_receiver_is_held_and_the_owner_asked_once(rig, fw):
+    rig.fifo_up = True
+    rig.state(state='idle')
+    rig.poll()
+    assert net(fw) == 1 and net(fw) == 1
+    assert rig.lines == ['net spotify connect Spotify Connect\n']
+
+
+def test_allowed_it_is_released_and_plays_on(rig, fw):
+    spot = Spot(fw)
+    rig.fifo_up = True
+    rig.state(state='idle')
+    rig.poll()
+    net(fw)
+    rig.state(state='asking', source='spotify')
+    rig.poll()
+    assert spot.sent == []
+    rig.state(state='playing', source='spotify')
+    rig.poll()
+    assert spot.sent == [('/tmp/q2-librespot.sock', 'P')]
+    assert net(fw) == 0  # its guest now: spot_take goes on
+    assert not rig.fw.calls('player_save_stop')  # the receiver stops the owner's player itself
+
+
+def test_refused_it_is_paused(rig, fw):
+    spot = Spot(fw)
+    rig.fifo_up = True
+    rig.state(state='idle', netdeny_seq=0)
+    rig.poll()
+    net(fw)
+    rig.state(state='idle', netdeny='spotify', netdeny_seq=1, event='declined')
+    rig.poll()
+    assert spot.sent == [('/tmp/q2-librespot.sock', 's')]
+    rig.poll()
+    assert len(spot.sent) == 1  # once a refusal
+    assert net(fw) == 1 and rig.lines[-1] == 'net spotify connect Spotify Connect\n'  # a new session asks again
+
+
+def test_spot_take_holds_a_guest_session(rig, fw):
+    spot = Spot(fw)
+    rig.fifo_up = True
+    rig.state(state='idle')
+    rig.poll()
+    fw.fn('spotify__spot_take', None)()
+    assert spot.sent == [('/tmp/q2-librespot.sock', 's')] and not rig.fw.calls('player_stop')
+    rig.state(state='playing', source='spotify')
+    rig.poll()
+    fw.fn('spotify__spot_take', None)()
+    assert spot.sent[-1] == ('/tmp/q2-librespot.sock', 'P')

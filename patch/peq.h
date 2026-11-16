@@ -597,6 +597,8 @@ void headset_poll(void), headset_eq_poll(void), headset_manual(void);
 int guest_send(const char *line), guest_active(void), guest_key(int code);
 unsigned guest_seq(void);
 void guest_field(const char *key, char *out, unsigned n), guest_poll(void), guest_bt_on(void);
+int guest_net(const char *kind, const char *id, const char *name);
+void spot_send_play(int playing);
 void q2eq_poll(void); /* peq_ui.c, --dev builds only: a q2eq request (q2eq.h) */
 int media_owner(void), media_status(void), media_playing(void), media_focused(void);
 void media_set_playing(int playing), media_key(unsigned key);
