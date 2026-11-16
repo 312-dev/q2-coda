@@ -522,6 +522,7 @@ unsigned np_glide_wait(unsigned max); /* np_bar.c: the progress bar's next pixel
 /* np_bar.c: Now Playing's shuffle and repeat as the theme's own pair (playing.modes.icons) */
 void np_modes(void *win, void *canvas);
 void np_stream_paint(void *w, void *canvas); /* np_stream.c: a server song loading */
+int np_stream_loading(unsigned *have, unsigned *total, unsigned *ms); /* and for the car remote */
 /* np_bar.c: ... and its own heart and More over stock's (playing.modes.icons) */
 void np_glyphs_bind(void *win), np_glyphs(void *win);
 void wheel_sb_arm(void *list);

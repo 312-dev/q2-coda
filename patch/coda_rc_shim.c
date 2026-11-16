@@ -161,6 +161,11 @@ static void cr_now(void) {
     put_int(b, sizeof b, &n, "qpos", (int)pos);
     put_int(b, sizeof b, &n, "qlen", q ? (int)deque_size(q) : 0);
     put_int(b, sizeof b, &n, "qgen", (int)cr.q_gen);
+    unsigned have, btotal, bms; /* a server song loading (np_stream.c), NowPlaying.buffering */
+    put_int(b, sizeof b, &n, "buf", np_stream_loading(&have, &btotal, &bms));
+    put_int(b, sizeof b, &n, "bhave", (int)have);
+    put_int(b, sizeof b, &n, "btotal", (int)btotal);
+    put_int(b, sizeof b, &n, "bms", (int)bms);
     put(b, sizeof b, &n, "path", r ? P(r, REC_PATH) : "");
     put(b, sizeof b, &n, "title", title);
     put(b, sizeof b, &n, "artist", r ? P(r, REC_ARTIST) : "");

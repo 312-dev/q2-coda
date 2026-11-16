@@ -46,6 +46,7 @@ enum {
 #define CAP_QUEUE_JUMP 256u /* PlayQueueItem */
 #define CAP_RATE 512u       /* Rate, NowPlaying.hearts and .rateable */
 #define CAP_RESUME 1024u    /* Play.resume, ACTION_RESUME */
+#define CAP_BUFFERING 8192u /* NowPlaying.buffering and its bytes (2048 and 4096 are taken) */
 
 /* ---- the protobuf subset: varints (wire type 0) and length-delimited fields (wire type 2) ---- */
 typedef struct { uint8_t *p; size_t n, cap; int over; } pbw;
@@ -90,6 +91,8 @@ typedef struct crc_session {
 
 /* ---- what the platform provides (coda_rc.c; the host test's fakes) ---- */
 void crc_random(void *buf, size_t n);
+/* NowPlaying.buffered_ms: have of total bytes as a share of ms, 0 without a total or a length; in 32 bits */
+uint32_t crc_buffered_ms(uint32_t have, uint32_t total, uint32_t ms);
 uint32_t crc_now_ms(void);
 uint32_t crc_now_s(void);  /* wall clock, for crc_peer.created */
 int crc_write(crc_session *s, const uint8_t *buf, size_t n);  /* the whole frame, or -1 */

@@ -81,6 +81,8 @@ enum Capability {
   CAP_QUEUE_JUMP = 256;  // PlayQueueItem
   CAP_RATE = 512;        // Rate, and NowPlaying.hearts / rateable
   CAP_RESUME = 1024;     // Play.resume, and ACTION_RESUME on playlists
+  // 2048 and 4096 are CAP_FAVORITES and CAP_RECENT (feat/carremote-lists)
+  CAP_BUFFERING = 8192;  // NowPlaying.buffering and its bytes: a server song loading
 }
 
 // type 0x03. Asks the Q2 to show a 6-digit code. Refused with BUSY while another phone pairs,
@@ -174,6 +176,12 @@ message NowPlaying {
   uint32 volume = 10;    // 0..100 (the Q2's own 0..100 steps)
   uint32 hearts = 11;    // CAP_RATE: the song's rating, 0..5 hearts; 5 is the Q2's Favorites
   bool rateable = 12;    // CAP_RATE: Rate works on this song (a card or server song, not a stream)
+  // CAP_BUFFERING (docs/server-library.md#download-ahead-and-the-streaming-state): a server song waiting to start,
+  // or playback caught up with its download. Android Auto's STATE_BUFFERING. 0 when not loading.
+  bool buffering = 13;
+  uint32 buffered_bytes = 14;  // on the card so far
+  uint32 total_bytes = 15;     // the whole song, 0 unknown
+  uint32 buffered_ms = 16;     // buffered_bytes as a share of the song's length, 0 unknown
 }
 
 enum PlayState {

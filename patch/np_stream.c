@@ -49,6 +49,15 @@ static int ns_loading(sline_t *l) {
            stream_line(id, p, l) && (l->state == SL_GET || l->state == SL_STALL);
 }
 
+/* For the car remote (coda_rc_shim.c): whether the song Now Playing shows is loading, and its bytes and
+ * length (0 when not). */
+int np_stream_loading(unsigned *have, unsigned *total, unsigned *ms) {
+    sline_t l;
+    int on = ns_loading(&l);
+    *have = on ? l.have : 0, *total = on ? l.total : 0, *ms = on ? l.ms : 0;
+    return on;
+}
+
 static int ns_tick(const void *unused) {
     (void)unused;
     void *win = st.np_win;
