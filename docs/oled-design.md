@@ -833,7 +833,7 @@ pattern.
 | Library                             | List row                    | Rows in the user's order: [Edit Library](#edit-library)                                                    |
 | Albums                              | Two-line row with art       |                                                                                                            |
 | Album tracks                        | Song rows                   | Track number, title, length                                                                                |
-| Folder view                         | Song rows                   | Songs as album tracks; folders with the folder glyph and a chevron                                         |
+| Folder view                         | Song rows                   | Songs as album tracks; folders with the folder glyph and a chevron; videos (Library > Videos) plain rows on the text column |
 | Artists, Genres, Composers          | List row                    | The [A-Z index](#a-z-index) past 50 rows, as Albums                                                        |
 | A card app's artist                 | [Artist page](#artist-page) | Header, Shuffle and Radio, then Top Songs, Albums, Singles & EPs, Similar Artists and All Songs            |
 | A Library artist                    | [Artist page](#artist-page) | Header, Shuffle alone, then Top Songs (once played), Albums and All Songs                                  |
