@@ -608,7 +608,7 @@ as its callers move onto it.
 - **Timeout:** a card that answers itself (Guest Play's 30 s Decline) shows the seconds left on that row in 15 px
   Text Tertiary and a 2 px bar along its foot emptying toward it, and answers it at 0 whatever the input.
 - **For code:** `confirm(&(confirm_t){ .title, .name, .body, .code, .rows, .n_rows, .kind, .back, .toggle,
-  .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx })` (`patch/navigation.h`); `answer(ctx, row, toggle_on)` runs
+  .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx })` (`patch/ui_kit.h`, so every payload file reaches it); `answer(ctx, row, toggle_on)` runs
   once after the card has closed. One card at a time: `confirm` answers 0 while one is up.
 
 ### Empty and offline

@@ -421,8 +421,8 @@ Stock's Wireless page (Wi-Fi, Bluetooth and SyncLink) is not reached from Settin
 **Car Remote** (`Q2POD CARREMOTE`, off by default) opens its own page: the switch first, then the
 paired phones by name. On, demo starts the `coda-rc` daemon, which lets a paired phone browse and play
 the library from the car ([remote-protocol](remote-protocol.md), [internals](internals.md#car-remote));
-off, it stops, and nothing listens. Centre on a phone asks `Forget "name"?` with Cancel first, then
-Forget; Return is Cancel. With none paired the page shows the empty state under the switch, "No Paired Phones", "Open the Car
+off, it stops, and nothing listens. Centre on a phone asks `Forget "name"?` on the [confirmation card](oled-design.md#confirmation-card), Cancel first,
+then Forget; Return is Cancel. With none paired the page shows the empty state under the switch, "No Paired Phones", "Open the Car
 Remote app on your phone" ([oled-design](oled-design.md#empty-and-offline)).
 
 Every row is built natively, about 60 builders in all, one pattern throughout: a
