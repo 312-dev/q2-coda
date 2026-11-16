@@ -146,10 +146,13 @@ void guest_poll(void) {
     unsigned now = time_now_ms();
     if (now - gp.read_at < GUEST_READ_MS) return;
     gp.read_at = now;
-    state_read(GUEST_STATE, gp.raw, sizeof gp.raw);
-    gp.seq = (unsigned)number(gp.raw, "seq");
-    char state[12];
-    field(gp.raw, "state", state, sizeof state);
+    char state[12] = "";
+    if (state_read(GUEST_STATE, gp.raw,
+                   sizeof gp.raw)) { /* none: the daemon isn't running, Guest Play off */
+        gp.seq = (unsigned)number(gp.raw, "seq");
+        field(gp.raw, "state", state, sizeof state);
+    } else
+        gp.seq = 0;
     gp.on = gp.seq && strcmp(state, "off");
     while (gp.queued && guest_write(gp.queue[0])) {
         --gp.queued;
