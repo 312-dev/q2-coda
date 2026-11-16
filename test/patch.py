@@ -5471,6 +5471,7 @@ class QueryDone(Exception): pass
 class LibraryQueryMachine(Machine):
     def __init__(self):
         super().__init__(); self.mock('strstr@GLIBC_2.0'); self.handlers.pop(syms['toolsQueryDbTable'])
+        self.word(payload_syms['ui_thread'],1)  # another thread's loads: stock's own sorted call (name_order.c sorts the UI thread's)
         self.db=sqlite3.connect(':memory:')
         self.db.execute('create table songtable(id,album,songer,albumsonger,fileurl,track,cd_num)')
         self.db.executemany('insert into songtable(id,album,songer,albumsonger,fileurl) values(?,?,?,?,?)',[
@@ -6406,7 +6407,7 @@ class CoverflowMachine(QueueMachine):
         elif name=='free':
             self.freed+=a!=0; self.live.pop(a,0)
             if a in getattr(self,'poison',{}): self.u.mem_write(a,b'\0'*self.poison.pop(a))
-        elif name=='statfs': self.word(b+4,4096); self.word(b+28,1<<20)
+        elif name=='statfs': self.word(b+4,4096); self.word(b+28,1<<20 if getattr(self,'room',True) else 1024)  # 4 GB free, or 4 MB
         elif name=='pthread_create': self.word(a,77); self.threads.append((c,d))
         elif name=='pthread_join': self.joins.append(a)
         self.returns(ret,clobber=True)
@@ -6441,7 +6442,14 @@ class CoverflowMachine(QueueMachine):
         body=[c[0] for c in self.calls].index(WRITERS[writer])
         indexed=[self.text(c[1]) for c in self.calls if c[0]=='toolsUpdateDbTable']
         assert indexed==[self.text(c[1]) for c in self.calls[body:] if c[0]=='toolsUpdateDbTable']
-        assert indexed==([] if writer=='deleteMusicFromMusicDb' else ['/mnt/data/database.db'])
+        assert indexed==([] if writer=='deleteMusicFromMusicDb' else ['/mnt/data/database.db'])*(
+            2 if writer=='scanAllMusicFile' and getattr(self,'room',True) else 1)
+        # a full scan with 8 MB free on /mnt/data adds the album grouping's and the Unknown checks' indexes,
+        # before songtable_album, which SQLite then still takes for the album groupings
+        sql=[self.text(c[2]) for c in self.calls if c[0]=='toolsUpdateDbTable']
+        assert all('songtable_album on' in q and 'songtable_group' not in q for q in sql[-1:])
+        assert [q.count('create index if not exists songtable_') for q in sql[:-1]]==[3]*(len(sql)-1)
+        assert all(q.index('songtable_group')<q.index('songtable_album_exact')<q.index('songtable_artist') for q in sql[:-1])
     def queried(self): return sum(c[0]=='getAllAlbum' for c in self.calls)
     def close(self):
         f,ctx=self.handler(self.page,O['EVT_DESTROY'])
@@ -9315,6 +9323,7 @@ m.open(); assert not m.queried() and len(m.nodes[m.slide]['children'])==3; m.clo
 for writer in WRITERS:
     m.rescan(writer); m.calls=[]; m.open(); assert m.queried()==1; m.close()
     m.calls=[]; m.open(); assert not m.queried(); m.close(); passed()
+m.room=False; m.rescan('scanAllMusicFile'); m.room=True; passed()  # under 8 MB free: the three larger indexes wait
 # Update Local Music while the dialog's count reads songtable on its own connection: stock's
 # scanAllMusicFile and toolsInitDatabase run on a real SQLite file. The scan's thread waits for the
 # count, so the drop commits and the scan runs. Back ends the wait and the scan: no drop is tried.
@@ -9359,7 +9368,7 @@ with tempfile.TemporaryDirectory() as directory:
         m.byte(STOP,back)  # toolsStopUpdateMusic's flag
         m.call(address=HOOKS['scanAllMusicFile'][0],args=(m.string('/mnt/mmc'),1,0,0),gap=0); m.reading.close()
         ran=[c[0] for c in m.calls if c[0].startswith('tools') or c[0]=='usleep']
-        assert ran==([] if back else ['usleep','toolsClearDbCount','toolsLoadAllFile','toolsUpdateDbTable']),(ran,m.sqls)
+        assert ran==([] if back else ['usleep','toolsClearDbCount','toolsLoadAllFile','toolsUpdateDbTable','toolsUpdateDbTable']),(ran,m.sqls)  # the larger indexes, then the rest
         assert m.sqls if not back else not m.sqls,m.sqls
         assert m.db.execute('select count(*) from songtable').fetchone()[0]==(1000 if back else 0); m.db.close()  # kept, or made again
 passed()
