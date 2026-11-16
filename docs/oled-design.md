@@ -1234,7 +1234,8 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   charging green and low red keep their colours (`home_ink`, approved from `mock_split_top.py` on 2026-11-14, one
   ink a glyph from the same day, as each pixel's own pick speckled over lettering), the playing cover panning slowly
   across its 110 % zoom with an eased turn at each end and 2 % of the zoom kept clear of the pane at each edge, so a
-  cover's own border never shows, on Now Playing's row (there only while something is playing or paused); on every
+  cover's own border never shows, on Now Playing's row (there only while something is playing or paused), and with no
+  cover to show (a song without art) the placeholder tile the same way, from the top edge under the status row; on every
   other row the library's covers in turn as an iPod classic's menu shows them, cross-fading from the frame as it
   stands as the wheel moves between the two, each zooming between 1 and 0.9 of the cover and drifting once over its 9 s, 1.5 s cross-fades between covers
   and on a track change (docs/ipod.md#home, `slideshow.c`)), the main menu from y 40, its top rows painted by the bar (`coverflow_home_strip`, approved from

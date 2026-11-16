@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Home (Split, OLED): with a song that has no art, the placeholder fills the right pane up to the top edge under the clock and battery, as a cover does; it started below the status row, leaving a black band.
   - Display (OLED): an empty Favorites list shows a crossed-out heart.
   - Settings > Display: a **Reduce Motion** switch, last on the page. On, pages cross-fade instead of sliding, Control Center lands without its bounce, the selection bar no longer leans as you turn the wheel, Cover Flow stops at its ends without bouncing, switches flip at once, and the charging screen's sweep and Up Next's level bars stand still. Scrolling, progress, the volume bar and swipe back still move.
   - Display (OLED): toasts rise and fade in, then sink and fade out, instead of popping; the confirmation card fades in and out over the page.

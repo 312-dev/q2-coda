@@ -3608,6 +3608,20 @@ def test_a_dark_screen_arms_no_pan(fw, mcl):
     assert not ui.timer(address(fw, 'coverflow__home_drift'))
 
 
+def test_the_placeholder_runs_up_under_the_status_row_as_a_cover_does(fw, mcl, library):
+    """Split's pane with no cover to show (nothing queued, or a song with no art) shows the placeholder from the
+    screen's top edge, under the status row, as a cover does (user, 2026-11-16: it started under the status row,
+    leaving a black band): it is loaded as the pane's slide, so the bar paints its top rows and inks its glyphs."""
+    _, ui, h, _ = home_open(fw)
+    row, _ = split_inset_set(fw, library, 2)  # OLED's set, whose art runs up split_art_up rows
+    assert row['split_art_up']
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    Bitmaps(fw, {'default_album_home': (290, 290, rgba(290, 290, lambda x, y: (58, 58, 58, 255)))})
+    home = fw.var('coverflow__home', Home)
+    fw.fn('coverflow_home_art', None, C.c_void_p)(h.win)
+    assert home.sl[0].tw and fw.fn('coverflow_home_split', C.c_int, C.c_void_p)(h.win) == 2
+
+
 # Stock's bitmaps and canvas
 
 class Bitmaps:
