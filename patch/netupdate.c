@@ -571,6 +571,15 @@ int ringnav_fwupdate(void *win, void *ctx) {
         widget_on(nu.label, EVT_DESTROY, label_gone, nu.label);
         if (nu.state == NU_RUNNING) show("Downloading…");
     }
+    /* SD Card Update acts (or asks) in place, so no chevron; Network Update opens its check, so
+     * it keeps stock's list_into (docs/oled-design.md#list-row) */
+    void *first = view && widget_count_children(view) == 2 ? widget_get_child(view, 0) : 0;
+    for (unsigned i = 0, n = first ? widget_count_children(first) : 0; i < n; ++i) {
+        void *b = widget_get_child(first, i);
+        for (unsigned k = 0, m = widget_count_children(b); k < m; ++k)
+            if (!tk_strcmp(widget_get_prop_str(widget_get_child(b, k), "image", ""), "list_into"))
+                widget_set_visible(widget_get_child(b, k), 0, 0);
+    }
     return result;
 }
 

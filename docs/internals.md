@@ -1755,7 +1755,7 @@ ponytail: the key can't be rotated without a release signed by the old one: a Q2
 
 ## Network Update
 
-**System settings → System Update** keeps stock's page (`systemset_fwupdate_page_init`, hooked by `ringnav_fwupdate` in `patch/netupdate.c`). Stock's row builder (`0x4c8660`) names each row's button by its index, and stock's click (`0x4c84cc`) runs `atoi` on the name: 0 is the TF card update (`0x4c7eb4`), 1 Shanling's plain-HTTP server (`openwin.shanling.com:9000`, `/tmp/versioninfo`, `download_ota_thd`). The hook renames the second button "2", which stock's click ignores, and adds its own click (`online_click`).
+**System settings → System Update** keeps stock's page (`systemset_fwupdate_page_init`, hooked by `ringnav_fwupdate` in `patch/netupdate.c`). Stock's row builder (`0x4c8660`) names each row's button by its index, and stock's click (`0x4c84cc`) runs `atoi` on the name: 0 is the TF card update (`0x4c7eb4`), 1 Shanling's plain-HTTP server (`openwin.shanling.com:9000`, `/tmp/versioninfo`, `download_ota_thd`). The first row's stock chevron (`list_into`) is hidden, as that row acts in place rather than opening a page; Network Update's stays. The hook renames the second button "2", which stock's click ignores, and adds its own click (`online_click`).
 
 The click says "Connect to Wi-Fi first" when `get_wifisignal` is 0 or below. Otherwise one pthread (`worker`) runs three transfers through demo's libcurl, all verified against `/etc/scrobble-ca.pem` (`SSL_VERIFYPEER`, `SSL_VERIFYHOST` 2), and checks the release's signature ([Release signatures](#release-signatures)):
 

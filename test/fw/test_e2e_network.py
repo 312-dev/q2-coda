@@ -509,9 +509,12 @@ class Ui:
     def prop_str(self, p, name, default, *_):
         """A widget's name, as AWTK hands out its widget->name: one buffer per name a widget has had,
         kept to the test's end, so a name the C holds stays readable while it asks again."""
-        if s(name) != 'name' or p not in self.widgets:
+        if s(name) not in ('name', 'image') or p not in self.widgets:
             return default
-        key = (p, self.get(p).name)
+        value = self.get(p).name if s(name) == 'name' else getattr(self.get(p), 'image', None)
+        if value is None:
+            return default
+        key = (p, value)
         if key not in self.names:
             self.names[key] = C.create_string_buffer(key[1].encode())
         return C.addressof(self.names[key])
@@ -787,6 +790,7 @@ class SystemUpdate:
         for i, text in enumerate(('tr:update_tf', 'tr:update_online')):
             self.buttons.append(ui.new(ui.new(view, 'row'), 'button', str(i)))
             self.labels.append(ui.new(self.buttons[-1], 'label', text=text))
+            ui.get(ui.new(self.buttons[-1], 'image')).image = 'list_into'  # stock's chevron
         w.mock('stock_fwupdate_trampoline', lambda *_: 0)
         w.mock('fwupdate_tf', lambda *_: w.log.append(('fwupdate_tf',)))
         assert w.fn('ringnav_fwupdate', C.c_int, C.c_void_p, C.c_void_p)(self.page, None) == 0
@@ -1976,3 +1980,11 @@ def test_the_cover_search_offline_asks_once(w):
     w.mock('online_addcoverlist', lambda url, *_: covers.append(s(url)))
     w.fn('ringnav_cover_search', None, C.c_char_p)(b'Album B Artist B')
     assert w.net.asked == [MB_SEARCH] and not covers
+
+
+def test_sd_card_update_has_no_chevron_and_network_update_keeps_its_own(w):
+    """SD Card Update acts in place (audit2 J4): stock's chevron goes from its row; Network Update opens its check."""
+    page = SystemUpdate(w)
+    chevrons = [[w.ui.get(c).visible for c in w.ui.get(b).children if getattr(w.ui.get(c), 'image', None)]
+                for b in page.buttons]
+    assert chevrons == [[False], [True]]
