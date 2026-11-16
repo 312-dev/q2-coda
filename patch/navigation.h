@@ -868,6 +868,22 @@ void usb_ui_status(void), usb_ui_poll(void), usb_ui_mode_load(void *win), usb_ui
 void usb_ui_paint(void *w, void *canvas);
 const char *usb_ui_title(const char *name);
 int usb_ui_key(void *top, unsigned key);
+/* A mode page (docs/oled-design.md#usb): the solid circle's radius, its glyph's size (tools/art.py
+ * USB_MODE_PX), Positive green, and the ring that draws no circle (a spinner in its place). */
+#define MODE_R 46
+#define MODE_GLYPH 44
+#define MODE_GREEN 0x34c759
+#define MODE_BARE 0x1000000u
+typedef struct {
+    unsigned ring;     /* 0xRRGGBB, or MODE_BARE */
+    const char *glyph; /* theme image stem, white */
+    int glyph_px;      /* 0: MODE_GLYPH */
+    const char *title, *line, *pill; /* pill 0: none */
+} mode_page_t;
+int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
+/* sw_update.c */
+void sw_update_paint(void *w, void *canvas), sw_update_restarting(void *win);
+const char *sw_update_title(const char *name);
 void toast_icon(const char *glyph, const char *text); /* feedback.c */
 int tsv_split(char *line, char **f, int max); /* catalogue.c */
 

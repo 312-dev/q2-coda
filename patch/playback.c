@@ -1975,9 +1975,12 @@ int ringnav_reboot(void) {
     reboot_save();
     return stock_reboot_trampoline();
 }
+void sw_update_restarting(void *win); /* sw_update.c */
 int ringnav_checkfw(void *win, void *ctx) {
     reboot_save();
-    return stock_checkfw_trampoline(win, ctx);
+    int result = stock_checkfw_trampoline(win, ctx);
+    sw_update_restarting(win); /* drawn as Restarting to Install */
+    return result;
 }
 
 /* Stock passes its audio extension list and the final dot suffix in folder and scan paths.

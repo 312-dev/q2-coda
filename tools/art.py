@@ -168,15 +168,17 @@ def tidal_mark(px, rgb):
     return png(px, px, laid(px, px, [(coverage_nonzero(polys, (0, 0, px, px)), lambda x, y: (rgb, 1))]))
 
 
-def spinner(f):
-    """The spinner's frame f, a CARET_PX square PNG (SPIN_* above)."""
-    c, layers = CARET_PX / 2, []
-    for k in range(SPIN_SPOKES):
-        a = 2 * math.pi * k / SPIN_SPOKES - math.pi / 2
-        ends = [(c + r * math.cos(a), c + r * math.sin(a)) for r in SPIN_R]
-        alpha = 1 - SPIN_FADE * ((f - k) % SPIN_SPOKES)
-        layers.append((stroke([ends], SPIN_STROKE), lambda x, y, alpha=alpha: (0xffffff, alpha)))
-    return png(CARET_PX, CARET_PX, compose((0, 0, CARET_PX, CARET_PX), layers))
+def spinner(f, spokes=8, px=15, radii=(3.4, 6.4), width=1.9, fade=0.1, rgb=0xffffff):
+    """A spinner's frame f, a px square PNG: spokes round capped from radii[0] to radii[1] from the centre, width wide,
+    in rgb, the head at f spokes' turn clockwise from 12 o'clock and each spoke behind it fade dimmer. The defaults
+    are the list's (SPIN_* below); SW_SPIN_* the software update's."""
+    c, layers = px / 2, []
+    for k in range(spokes):
+        a = 2 * math.pi * k / spokes - math.pi / 2
+        ends = [(c + r * math.cos(a), c + r * math.sin(a)) for r in radii]
+        alpha = 1 - fade * ((f - k) % spokes)
+        layers.append((stroke([ends], width), lambda x, y, alpha=alpha: (rgb, alpha)))
+    return png(px, px, compose((0, 0, px, px), layers))
 
 
 def phosphor(name, px, rgb):
@@ -283,6 +285,16 @@ USB_ROWS = {'charge': 'lightning', 'files': 'folder-simple', 'audio': 'speaker-h
 USB_MODE_PX = 44
 USB_MODES = {'files': 'folder-simple-fill', 'audio': 'speaker-hifi-fill', 'debug': 'terminal-window-fill', 'ejected': 'check-bold'}
 USB_TOAST_PX = 15
+# The software update's pages (sw_update.c, docs/oled-design.md Software Update): each result's glyph (fill, white on
+# its solid circle; the up-to-date check and the restart's arrow bold) at the mode page's size, and the check's
+# spinner, iOS's twelve spokes in the half's Text Primary (_d white, _l black) on no circle, 48 px across.
+SW_MODES = {'latest': 'check-bold', 'none': 'file-arrow-down-fill', 'low': 'battery-warning-fill', 'bad': 'warning-fill',
+            'restart': 'arrow-clockwise-bold'}
+SW_SPIN_SPOKES = 12
+SW_SPIN_PX = 48
+SW_SPIN_R = (13.2, 22)  # round capped: the outer cap reaches 24, the mock-up's radius
+SW_SPIN_STROKE = 4
+SW_SPIN_FADE = 0.75 / 11  # the spoke behind the head's head a quarter as bright
 USB_TOASTS = {'unplugged': ('plug-fill', 0xababab), 'ejected': ('check-circle-fill', 0x34c759), 'audio': ('speaker-hifi-fill', 0xffffff)}
 # The status row's battery (list_marks.c battery_slim): charging, Phosphor's lightning, too weak a charger its warning,
 # fill weight at BATT_GLYPH_PX in Text Primary, with a BATT_GLYPH_GAP px gap in the Canvas cut round it (iOS's way of
@@ -466,7 +478,7 @@ def images(t):
     # every drill row's caret (list_marks.c chevron_icon), the spinner in its place while Cover Flow opens, and the
     # status row's play state
     out |= {f'{prefix}_chevron_{k}': phosphor('caret-right-bold', CARET_PX, c) for k, c in (CHEVRON_INKS | CHEVRON_MUTED_INKS).items()}
-    out |= {f'{prefix}_spin_{f}': spinner(f) for f in range(SPIN_SPOKES)}
+    out |= {f'{prefix}_spin_{f}': spinner(f, SPIN_SPOKES, CARET_PX, SPIN_R, SPIN_STROKE, SPIN_FADE) for f in range(SPIN_SPOKES)}
     out |= {f'{prefix}_{n}_{k}': phosphor(f'{n}-fill', STATE_PX, c) for n in ('play', 'pause') for k, c in STATE_INKS.items()}
     # and Buttons Lock's padlock beside it (keylock.c keylock_bar), and its card (keylock.c keylock_paint)
     out |= {f'{prefix}_keylock_{k}': phosphor('lock-simple-fill', STATE_PX, c) for k, c in STATE_INKS.items()}
@@ -535,4 +547,7 @@ def images(t):
     out |= {f'{prefix}_chargetoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in CHARGE_TOASTS.items()}
     out |= {f'{prefix}_chargetoast_battery_{k}': phosphor('battery-high-fill', USB_TOAST_PX, c) for k, c in CHARGE_TOAST_BATTERY.items()}
     out[f'{prefix}_chargebolt'] = phosphor('lightning-fill', CHARGE_BOLT_PX, 0x34c759)
+    out |= {f'{prefix}_swmode_{n}': phosphor(g, USB_MODE_PX, 0xffffff) for n, g in SW_MODES.items()}
+    out |= {f'{prefix}_swspin_{k}_{f}': spinner(f, SW_SPIN_SPOKES, SW_SPIN_PX, SW_SPIN_R, SW_SPIN_STROKE, SW_SPIN_FADE, c)
+            for k, c in STATE_INKS.items() for f in range(SW_SPIN_SPOKES)}
     return out

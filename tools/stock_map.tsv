@@ -250,7 +250,7 @@ demo	0x4c6b94	0x378	systemset_display_row_build	Builds one Display settings row:
 demo	0x4c6f0c	0xc8	systemset_display_timer_start	Adds the 500 ms page timer once, storing its id in the timer_idex prop; callback 4c697c.
 demo	0x4c6fd4	0x50	systemset_display_page_on_foreground	Page handler for window to foreground: refreshes the navbar play gif, then starts the page timer.
 demo	0x4c7024	0x144	systemset_display_row_on_click	Display row click by row name: 0 backlight_page, 1 lighttime_page, 2 screensaver_page, 3 flips g_navhide_flag, saves SYSSET NAVHIDE, swaps img_navhideswitch and returns to Home.
-demo	0x4c7eb4	0x2b0	fwupdate_tf	System Update's TF card row: starts stock's update from the card.
+demo	0x4c7eb4	0x2b0	fwupdate_tf	System Update's TF card row: asks (confirminfo_dialog), runs check_updatefw_exist, then dialog/checkfw_dialog, and says its answer in msginfo_dialog.
 demo	0x4c84cc	0x7c	systemset_fwupdate_row_on_click	System Update row click: atoi of the row name, 0 starts the TF card update, 1 the Shanling server update.
 demo	0x4c8660	0x270	systemset_fwupdate_row_build	Builds one System Update row, its button named by the row index.
 demo	0x4c8f9c	0x458	systemset_general_rows	New in V1.34. Builds General's rows (Date & Time, Key Tone with g_keytone_flag's switch, Buttons Lock).

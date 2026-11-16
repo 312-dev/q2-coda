@@ -43,6 +43,8 @@
 { "usbchoose_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/usb_ui.c) */
 { "usbdebug_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/usb_ui.c) */
 { "adbauth_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/usb_ui.c), --dev */
+{ "swupdate_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/sw_update.c) */
+{ "swconfirm_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/sw_update.c) */
 { "album_page", CTX_LOCAL, 0 },
 { "albuminfo_page", CTX_LOCAL, RING },
 { "allmusic_page", CTX_LOCAL, RING },

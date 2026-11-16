@@ -522,7 +522,7 @@ static int wait_done(const void *unused) {
     if (state != NU_DONE)
         toast(said[state]);
     else if (nu.label)
-        fwupdate_tf(); /* stock's TF card update: its battery check and confirm */
+        fwupdate_tf(); /* SD Card Update (sw_update.c): its checks, its confirm, stock's flash */
     else
         toast("Update downloaded: use SD Card Update");
     return 0;

@@ -2404,6 +2404,7 @@ int ringnav_paint(void *w, void *canvas) {
     if (w && w == slider_page_win) slider_page_paint(w, canvas);
     storage_paint(w, canvas);
     usb_ui_paint(w, canvas);
+    sw_update_paint(w, canvas); /* SD Card Update's pages (sw_update.c) */
     if (w && w == st.np_win && !(NP_VISUALIZER && visualizer_full()))
         np_modes(w, canvas); /* else the page's own */
     coverflow_home_clip(w, canvas, 0);
@@ -4978,6 +4979,7 @@ static const char *bar_title_of(void *win, void **label) {
     if (!tk_strcmp(name, "spotify_page")) return "Spotify"; /* they hide their own name's label */
     if (!tk_strcmp(name, "radionp_page")) return "Internet Radio";
     if (usb_ui_title(name)) return usb_ui_title(name); /* the USB mode pages (usb_ui.c) */
+    if (sw_update_title(name)) return sw_update_title(name); /* SD Card Update's (sw_update.c) */
     if (!tk_strcmp(name, "qrcode_page")) return addon_qr_title(win); /* the card app's name */
     if (!tk_strcmp(name, "search_dialog")) return "Search"; /* stock's toolbar has no label */
     if (!tk_strcmp(name, "statusbar_dialog")) return ""; /* Control Center: the clock centred, as Home's */
