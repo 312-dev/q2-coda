@@ -535,7 +535,8 @@ static void lr_show(void *view, int all) {
     void *was[LR_ROWS];
     int n = lr_rows(view, was), id = widget_get_prop_int(view, SEL, -1);
     if (lr.list == LR_HOME) {
-        coverflow_home_layout(); /* lr_home_apply, lr_edit_labels */
+        coverflow_home_layout();          /* lr_home_apply, lr_edit_labels */
+        widget_layout(P(view, W_PARENT)); /* the rows in place now, for a finger's grab */
     } else {
         lr_library_show(view, lr.vis, all);
         widget_layout(view);
