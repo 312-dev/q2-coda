@@ -131,7 +131,7 @@ void feedback_toast_paint(void *w, void *canvas) {
     int pw = (int)(canvas_measure_text(canvas, s, n) + 0.5f) + 2 * PILL_PAD + glyph;
     if (pw > PILL_MAX) pw = PILL_MAX;
     rect_t pill = { (375 - pw) / 2, PILL_Y + ovm_shift(&tm.mo, TOAST_RISE), pw, PILL_H };
-    for (tm.n = 0; tm.n < n && tm.n < sizeof tm.text / sizeof *tm.text; ++tm.n)
+    for (tm.n = 0; tm.n < (unsigned)n && tm.n < sizeof tm.text / sizeof *tm.text; ++tm.n)
         tm.text[tm.n] = s[tm.n];
     tm.px = px, tm.face = face;
     tk_snprintf(tm.glyph, sizeof tm.glyph, "%s", glyph ? pill_glyph : "");
