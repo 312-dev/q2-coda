@@ -3788,9 +3788,9 @@ static void pod_text(int i) {
         { "Artist Album Order: Year", "Artist Album Order: A–Z" },
         { "Volume Guard: Off", "Volume Guard: On" },
         { "Hold Return: Recent", "Hold Return: Home" },
-        { "Standby Limit: Off", "Standby Limit: " STR(STANDBY_LIMIT_1) " h",
-          "Standby Limit: " STR(STANDBY_LIMIT_2) " h",
-          "Standby Limit: " STR(STANDBY_LIMIT_3) " h" },
+        { "Standby Limit: Off", "Standby Limit: " STR(STANDBY_LIMIT_1) "h",
+          "Standby Limit: " STR(STANDBY_LIMIT_2) "h",
+          "Standby Limit: " STR(STANDBY_LIMIT_3) "h" },
         { 0 }, /* Control Device Volume: a switch */
         { 0 }, /* Coverflow Sort's from coverflow.c */
         { "Refresh Cover Flow" },

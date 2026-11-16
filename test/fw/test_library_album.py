@@ -94,6 +94,23 @@ def test_the_header_reads_the_pages_songs(fw, st, records):
     assert head.props['_ar_meta'] == b'kept'  # the same three songs: not read again
 
 
+@pytest.mark.parametrize('secs, span', [((20,), b'1 min'), ((3570,), b'1h'), ((3600, 1200), b'1h20m')])
+def test_the_headers_span_takes_minutes_hours_or_both(fw, st, records, secs, span):
+    """The songs' summed length, rounded to the minute: under an hour "N min", whole hours "Nh", else "NhMm"
+    (docs/oled-design.md#type)."""
+    ui, win, *_ = album_page(fw, st)
+    fw.fn('album_local_load', None, C.c_void_p)(win.addr)
+    songs = [records.song(album=b'Caracal', artist=b'Disclosure', path=b'/m/D/C/%02d.flac' % i)
+             for i in range(len(secs))]
+    for r, sec in zip(songs, secs):
+        C.c_int.from_address(r + O['REC_CUE_END']).value = sec
+    fw.var('fw_ctx_p_deque_showlist', C.c_uint).value = Deques(fw).new(songs)
+    (head,) = [w for w in made(win) if '_ar_name' in w.props]
+    canvas = C.create_string_buffer(0x200)
+    fw.fn('album_local_paint', None, C.c_void_p, C.c_void_p)(head.addr, C.addressof(canvas))
+    assert head.props['_ar_meta'].endswith(DOT + span)
+
+
 def test_an_album_page_over_another_hands_the_design_back(fw, st, records):
     """Look up Album over a Library album: the new page is drawn, and the first, back on top, is dressed again
     (one header, its own) with the stop it had."""

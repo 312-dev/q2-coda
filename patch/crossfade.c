@@ -50,7 +50,7 @@ static void settings(void) {
 
 static void row_text(void *label) {
     char t[32] = "Crossfade: Off";
-    if (xf.on) tk_snprintf(t, sizeof t, "Crossfade: %d s", xf.seconds);
+    if (xf.on) tk_snprintf(t, sizeof t, "Crossfade: %ds", xf.seconds);
     row_value_text(label, t);
 }
 
@@ -271,7 +271,7 @@ static void refresh(int save) {
                     night_kelvin());
         image_base_set_image(xf.sw, night_on() ? "switch_on" : "switch_off");
     } else {
-        tk_snprintf(t, sizeof t, xf.on ? "%d s" : "Off", xf.seconds);
+        tk_snprintf(t, sizeof t, xf.on ? "%ds" : "Off", xf.seconds);
         image_base_set_image(xf.sw, xf.on ? "switch_on" : "switch_off");
     }
     widget_set_text_utf8(xf.label, t);
@@ -368,7 +368,7 @@ void xfade_ends(char *lo, char *hi, unsigned n) {
         tk_snprintf(hi, n, "%d%%", 200);
     } else {
         tk_snprintf(lo, n, "Off");
-        tk_snprintf(hi, n, "%d s", XF_MAX);
+        tk_snprintf(hi, n, "%ds", XF_MAX);
     }
 }
 

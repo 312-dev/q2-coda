@@ -784,10 +784,10 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('msg_addfavsuccess', 'Added To Fav', 'Added to Favorites'), ('msg_favsuccess', 'Added To Fav', 'Added to Favorites'),
     ('msg_namenull', "The name can't be empty", "Name can't be empty"),
     ('scan_now', 'Scan music now', 'Scan Music Now'), ('scan_spec', 'Scan specified folders', 'Scan Specified Folders'),
-    # Screen Off Time's and Standby's choices: a number, a space, a unit (docs/oled-design.md Type)
-    *((f'{page}_{n}{u}', f'{n}{u}', f'{n} {u}') for page, choices in (
-        ('lighttime', ((15, 's'), (30, 's'), (1, 'min'), (2, 'min'), (5, 'min'), (30, 'min'))),
-        ('standbyoff', ((1, 'min'), (3, 'min'), (5, 'min'), (10, 'min')))) for n, u in choices)))
+    # Screen Off Time's and Standby's minute choices: "min" takes a space, as "s" does not, which stock's
+    # 15s and 30s already have (docs/oled-design.md Type)
+    *((f'{page}_{n}min', f'{n}min', f'{n} min') for page, choices in (
+        ('lighttime', (1, 2, 5, 30)), ('standbyoff', (1, 3, 5, 10))) for n in choices)))
 
 # Wi-Fi transfer's web page (stock thttpd on :8888): in English, an Upload Folder button, and a folder,
 # picked or dropped, keeps its tree: each file's folders are made with stock's create (a plain mkdir) before
