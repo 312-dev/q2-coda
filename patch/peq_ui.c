@@ -1107,8 +1107,8 @@ static void load(eq_state *s) {
     ui.draft.bypass = !g_equalizer_flag || s->mode != EQ_PEQ;
 }
 
-/* The tab bar's tap, or Centre on it: the other tab, the wheel kept on the bar. Neither changes
- * what plays. */
+/* The tab bar's tap, or the wheel or Previous or Next on it (eq_key): that tab, the wheel kept on the
+ * bar. Neither changes what plays. */
 static void tab_to(int tab) {
     if (tab == ui.tab) return;
     if (ui.tab == SIMPLE) {
@@ -1282,7 +1282,7 @@ static void e3_presets(void) {
 
 static void e3_activate(void) {
     e3.status = 0;
-    if (e3.focus == E3_TABS) tab_to(ADVANCED);
+    if (e3.focus == E3_TABS) e3.focus = E3_SWITCH; /* into the tab's rows */
     else if (e3.focus == E3_SWITCH) e3_switch(!e3.on && ui.draft.bypass); /* a playing PEQ shows on */
     else if (e3.focus == E3_PRESETS) e3_presets();
     else if (e3.focus == E3_RESET) {
@@ -1292,9 +1292,16 @@ static void e3_activate(void) {
     e3_show();
 }
 
+/* Advanced's tab bar left for its list's first row, as the bar's Centre or a turn down does. */
+static void tabs_leave(void) {
+    ui.tabs = 0;
+    if (ui.view) widget_set_prop_int(ui.view, "_ringnav_index", 0); /* else its render's first row */
+    e3_show();
+}
+
 static int e3_single(const void *unused) {
     e3.press = 0;
-    if (ui.tab == ADVANCED) tab_to(SIMPLE);
+    if (ui.tab == ADVANCED) tabs_leave();
     else e3_activate();
     return 7;
 }
@@ -1306,11 +1313,21 @@ int eq_tabs_hold(void *view) {
     return view && view == ui.view && ui.tab == ADVANCED && ui.screen == HOME && ui.tabs;
 }
 
-/* ringnav(), the page on top: Simple's wheel and Centre, and Advanced's tab bar, which the wheel
- * reaches past the list's first row. */
+/* ringnav(), the page on top: Simple's wheel and Centre, and the tab bar, which the wheel reaches past
+ * either tab's first row (docs/oled-design.md#tabs). On the bar the wheel moves between the tabs,
+ * each opening as the wheel reaches it, Simple then Advanced: a turn down past Advanced, or Centre,
+ * goes into the open tab's rows, and a turn up on Simple stays. Previous and Next (the buttons, from
+ * ringnav's page keys) open the other tab while the wheel is on the bar, as on Search's tabs. */
 int eq_key(void *top, unsigned key) {
     static const unsigned release[EVENT_KEY / 4 + 1] = { [EVENT_KEY / 4] = KEY_CENTER };
     if (!ui.page || top != ui.page) return 0;
+    int button = key == KEY_FWD_BTN || key == KEY_BACK_BTN;
+    if (button) {
+        if (ui.screen != HOME || e3.adjusting || (ui.tab == ADVANCED ? !ui.tabs : e3.focus != E3_TABS))
+            return 0; /* stock's: off the bar, the track's */
+        tab_to(ui.tab == ADVANCED ? SIMPLE : ADVANCED);
+        return 1;
+    }
     if (e3.caption && (key == KEY_NEXT || key == KEY_PREV)) {
         e3.caption = 0;
         e3.status = 0;
@@ -1318,15 +1335,27 @@ int eq_key(void *top, unsigned key) {
         if (ui.bar) widget_set_text_utf8(ui.bar, "");
     }
     if (ui.tab == ADVANCED) {
-        if (ui.screen != HOME || !ui.view ||
+        if (ui.screen != HOME || (!ui.view && !ui.tabs) ||
             (!ui.tabs && (key != KEY_PREV || widget_get_prop_int(ui.view, "_ringnav_index", -1) > 0)))
             return 0; /* the list's */
-        if (key == KEY_NEXT || key == KEY_PREV) {
-            ui.tabs = key == KEY_PREV;
-            widget_set_prop_int(ui.view, "_ringnav_index", ui.tabs ? -1 : 0);
+        if (key == KEY_PREV && ui.tabs) { /* up the bar: Simple */
+            tab_to(SIMPLE);
+            return 1;
+        }
+        if (key == KEY_NEXT) {
+            tabs_leave();
+            return 1;
+        }
+        if (key == KEY_PREV) { /* up from the first row: the bar */
+            ui.tabs = 1;
+            widget_set_prop_int(ui.view, "_ringnav_index", -1);
             e3_show();
             return 1;
         }
+    }
+    if (ui.tab == SIMPLE && key == KEY_NEXT && e3.focus == E3_TABS && !e3.adjusting) {
+        tab_to(ADVANCED); /* down the bar: Advanced */
+        return 1;
     }
     if (key == KEY_CENTER && e3.adjusting) {
         e3_done();

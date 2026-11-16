@@ -11,11 +11,13 @@
  * text, and Return erases the character before it (nothing, but the click, at the start). Next
  * with the cursor at the text's end moves to the results: the wheel moves their bar, Centre opens
  * a song, which plays with the songs after it as the queue, an artist (stock's artist page) or an
- * album (its tracks in Cover Flow). A turn up from the first result lands on the tabs, where
- * Centre and Next pick the next tab and Previous the one before, a turn down goes back to the
- * results and a turn up to the strip. Previous or Return on the results, and Return on the tabs,
- * go back to the strip, the text, cursor and tab kept. A held Return closes Search from any of
- * them (search_strip_hold, from Hold Return's compact_now_playing). Play/Pause stays the player's.
+ * album (its tracks in Cover Flow). A turn up from the first result lands on the tabs, where the
+ * wheel moves between them, each picked as it is reached (docs/oled-design.md#tabs): a turn down
+ * past Albums, or Centre, goes back to the results, a turn up past All to the strip, and Next picks
+ * the next tab and Previous the one before. Previous or Return on the results, and Return on the
+ * tabs, go back to the strip, the text, cursor and tab kept. A held Return closes Search from any
+ * of them (search_strip_hold, from Hold Return's compact_now_playing). Play/Pause stays the
+ * player's.
  *
  * The key pop (ss_pop_paint): when the wheel or a drag lands on a letter or digit, or a tap types
  * one, its key grows a bubble holding the letter large, and the key keeps it at the strip's size,
@@ -324,12 +326,15 @@ int search_strip_key(void *top, unsigned key) {
     if (ss.focus && key && !wheel && !button && key != KEY_CENTER && key != KEY_RETURN)
         return 0; /* Play/Pause, on the results too */
     if (ss.focus == SS_ON_TABS) {
-        if (wheel < 0 || key == KEY_RETURN)
+        int to = ss.tab + wheel; /* the wheel's tab, past either end off the tabs */
+        if (key == KEY_RETURN || to < 0)
             ss.focus = SS_ON_STRIP;
-        else if (wheel > 0 && ss.nmatch)
+        else if (wheel && to < SS_TABS)
+            ss_pick(to);
+        else if ((wheel || key == KEY_CENTER) && ss.nmatch)
             ss.focus = SS_ON_LIST, ss.sel = ss.top;
-        else if (key == KEY_CENTER || button)
-            ss_pick(ss.tab + (button < 0 ? -1 : 1));
+        else if (button)
+            ss_pick(ss.tab + button);
     } else if (ss.focus == SS_ON_LIST) {
         if (wheel && ss.sel + wheel >= 0 && ss.sel + wheel < ss.nmatch) ss.sel += wheel;
         if (key == KEY_CENTER) ss_play();

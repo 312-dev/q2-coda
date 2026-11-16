@@ -297,6 +297,10 @@ Search's All, Songs, Artists and Albums ([ipod](ipod.md#search)), the theme's on
 - The open tab a segment 2 px inside the track, rounded 8 px: raised `#3A3A3C` while the wheel is
   elsewhere, Accent Blue only while the wheel is on the tabs, so the open tab reads apart from the
   wheel's place. In Light Mode the track is `#E5E5EA` and the raised segment white.
+- **The wheel** reaches the tabs past the first row (or control) under them. On them it moves between the tabs, each
+  opening as the wheel reaches it, left to right going down; a turn down past the last tab, or Centre, goes into the
+  open tab's rows, and a turn up past the first stays (EQ) or goes up to what is above (Search's strip). Previous
+  and Next open the tab before and after, round (`peq_ui.c` `eq_key`, `search_strip.c` `search_strip_key`).
 - Labels in Inter Medium 17 px, centred in their segments: the open one white (Text Primary on Light
   Mode's white segment), the other `#ABABAB` (`#8A8A8E` in Light Mode), at the size of iOS's
   own control.

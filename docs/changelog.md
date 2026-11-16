@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - EQ and Search (OLED): the wheel switches tabs. Turn up past the first row to the tabs, then turn to move between them (each opens as you reach it); press Center, or turn down past the last tab, to go into it. Previous and Next switch EQ's tabs too, as they already did Search's.
   - Lists (OLED): EQ's Advanced tab, its band and picker screens, and Up Next end like every other list: the rows below the last full one show through the fade into black instead of stopping above a black band (EQ) or being cut off near the bottom edge (Up Next).
   - Settings (OLED): the Settings list reached from Home ends like every list: Battery peeks through the fade under Controls instead of hiding until you scroll, and the highlighted row's lean as you turn the wheel is no longer cut off at the top or bottom of a list.
   - Lists (OLED): a list scrolled to its last row keeps the space under it after you open that row and press Return; the last row no longer sits on the screen's bottom edge.
