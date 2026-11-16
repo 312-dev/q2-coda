@@ -510,6 +510,12 @@ void tilt_end(void *w, int dir);
 /* swipe_back.c: the left edge's swipe back (docs/internals.md#swipe-back) */
 void swipe_back_down(void *event, int allowed);
 void swipe_back_poll(void);
+/* np_settle.c: Now Playing's art settles smaller on pause (docs/oled-design.md#motion) */
+void np_settle_poll(void);
+int np_settle_scale(void);
+int np_settle_box(void *w, int *box);
+void np_settle_begin(void *w, void *canvas);
+void np_settle_paint(void *w, void *canvas);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
 void marquee_fade(void *w, void *canvas), marquee_fade_under(void *w, void *canvas);

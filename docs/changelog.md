@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Now Playing: when you pause, the album art settles back to a slightly smaller size, and grows back when you press Play, as on an iPhone. With Reduce Motion on, the art stays its size.
   - Now Playing (OLED): the progress bar's track and its played part have round ends, as the design has them; they were square.
   - Menus (OLED): the hold menus, Now Playing's ⋯ and a playlist's ⋯ now open as a frosted sheet over the page, which shrinks back and dims behind it. The sheet shows the song, album or playlist at the top with its cover, its rows run the full width of the screen and fade at the bottom, and Delete and Remove rows are red.
   - Menus (OLED): the menu sheet rises from the bottom of the screen as the page behind shrinks back, and falls away when you press Return. With Reduce Motion on, it fades in and out instead.

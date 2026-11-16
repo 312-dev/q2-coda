@@ -1133,6 +1133,10 @@ interruptible: a turn mid-run starts from where it is.
 ### Motion
 
 - Page push and pop: 120 ms horizontal slide, `cubic_out` (`PAGE_SLIDE_MS`, stock's window animator).
+- **Now Playing's art settles on pause**, as Apple Music's: paused, it shrinks to 88% about its center over 280 ms,
+  `cubic_out`; played, it grows back over 320 ms, no overshoot. A turn mid-way starts from where it is; a page opened
+  on a paused song shows it small at once. The play/pause glyph is the cue, so Reduce Motion keeps the art its size
+  ([internals](internals.md#now-playing-motion)).
 - Selection bar: moves with the wheel, no animation of its own beyond the list's scroll.
 - Nothing pulses, glows or bounces, a list's end included, with two deliberate exceptions: Control Center's
   landing (an 8 px overshoot and one 2 px undershoot over 280 ms as it comes to rest open, [Control
@@ -1148,7 +1152,7 @@ interruptible: a turn mid-run starts from where it is.
   push and pop is a 150 ms cross-fade (AWTK's `fade` window animator); Home's sub-list swap and a folder level in
   place change at once; Control Center lands still; tug to tilt is off (the bar steps without leaning); Cover Flow
   stops at its end with no bounce; the remembered-row recall, the captioned row's grow, Edit Library's slide-aside,
-  the radio pill's grow and the switches' knob are at their end at once; the charging sweep stands at the level and Up
+  the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause; the charging sweep stands at the level and Up
   Next's level bars stand still; a toast and the confirmation card fade only (150 ms in, 120 ms out). Kept: swipe
   back's finger tracking and its finish, the selection bar, wheel scroll, Cover Flow's and the carousel's wheel step
   (the scroll itself), the volume, brightness and progress bars, the marquee and its fades, the scroll indicator's and
