@@ -1663,15 +1663,16 @@ static int cover_flow_row(void *row) {
 
 /* The iPod `>` of each drill row, where stock rows place img_into, as stock hides its own
  * list_into: not in multi-select, and not on grid tiles. The theme's own on each row, on the set's
- * right column (list_marks.c), Home's too under chevron_home, and on Home's Cover Flow row,
- * selected, the spinner while Cover Flow opens (coverflow.c coverflow_spinner). */
+ * right column (list_marks.c), Home's list's too under chevron_home (not Carousel's cards, which
+ * are stock's), and on Home's Cover Flow row, selected, the spinner while Cover Flow opens
+ * (coverflow.c coverflow_spinner). */
 static void paint_chevrons(void *w, void *canvas) {
     rect_t old;
     void *win = window_of(w);
     int home = home_menu(win);
     /* a picker's tap adds and closes: no `>` */
     if (g_navbar_status || !kind(w) || !P(canvas, CANVAS_LCD) || !drill(w) ||
-        (home && !theme()->chevron_home) || !load_rows(&g_menu, w) ||
+        (home && (!theme()->chevron_home || kind(w) == 3)) || !load_rows(&g_menu, w) ||
         !clip_surface(canvas, &g_menu, &old))
         return;
     for (int i = 0; i < g_menu.n; ++i) {
@@ -6715,7 +6716,7 @@ static void set_child(void *c, int row_w, int row_h, int shift) {
     const theme_t *T = theme();
     /* A set without settings icons: any image leading the row goes, whatever its width (a paired
      * device's 50 px one), and text after one starts at the text column. A payload picker's mark
-     * (Theme, Key Lock) stays, in the column of stock's own marks. */
+     * (Key Lock's) stays, in the column of stock's own marks. */
     if (!icon && x < SET_RIGHT_SIDE && !tk_strcmp(widget_get_type(c), "image")) {
         const char *image = widget_get_prop_str(c, "image", "");
         if (!tk_strcmp(image, "select") || !tk_strcmp(image, "unselect"))
@@ -9245,8 +9246,8 @@ static int now_playing(void) {
     return top && !tk_strcmp(widget_get_prop_str(top, "name", ""), "playing_page");
 }
 
-/* Now Playing's visualizer repainting, its album marquee moving or its lyrics gliding: their 40 and
- * 50 ms timers and the glide's steps would run late on an idle pass. Its progress and the lyrics'
+/* Now Playing's visualizer repainting or its lyrics gliding: its 40 ms timer and the glide's steps
+ * would run late on an idle pass. Its progress and the lyrics'
  * follow tick every 250 ms and keep up. A game's 33 ms frame timer too: Vortex's raw wheel posts no
  * input to stamp, nor does a card game's, whose travel goes once a pass. */
 static int np_animating(void) {
