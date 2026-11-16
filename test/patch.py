@@ -14104,7 +14104,7 @@ SMENU=[('remote','','Phone Remote','192.168.1.23:8080','',''),('search','','Sear
        ('list','downloads','Downloads','None yet','',''),('action','set','Sharing: Off','Nothing is shared','sharing',''),
        ('action','stop','Stop Soulseek','','','')]
 SLABELS=['Soulseek','Phone Remote','192.168.1.23:8080','Search','Online as alice','Downloads','None yet','Sharing: Off',
-         'Nothing is shared','Stop Soulseek','']
+         'Nothing is shared','Stop Soulseek']  # a row with no subtitle is one line, no empty second label
 # A card app's levels don't slide: OLED's motion.inplace is 0 (theme.py MOTION_ROLES gives it no macro), so
 # page_push moves nothing. The next level's rows, Return's and a refresh show at x 0 at once, no animator made.
 m=SlskMachine(); m.mock('widget_animator_prop_create','widget_animator_prop_set_params','widget_animator_start')
