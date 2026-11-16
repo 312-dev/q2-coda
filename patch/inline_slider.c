@@ -240,9 +240,17 @@ static int pair_click(void *ctx, void *event) {
         xfade_set(!on, seconds);
     }
     if (is.item[i] == is.open) is.open = (void *)0;
+    int id = widget_get_prop_int(is.view, SEL, -1);
     pair_sync(i);
     void *list = P(is.view, W_PARENT);
     if (list) widget_layout(list);
+    /* The list's row count changed, which resets a live list's selection (lists.c load): the
+     * switch's row keeps it, the slider row being under it. The first select loads the new count
+     * (g_menu.rows), the second stores it with the row. */
+    if (id >= 0) {
+        ringnav_select(is.view, id, 0);
+        ringnav_select(is.view, id, g_menu.rows);
+    }
     repaint(is.item[i]);
     return 0;
 }
