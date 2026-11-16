@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Now Playing (OLED): the progress bar's track and its played part have round ends, as the design has them; they were square.
   - Light Mode: an empty page's title (No Playlists, No Genres, No Matches) showed white on white; it is black now.
   - Display (OLED): an empty Favorites list shows a crossed-out heart.
   - Home (Split, OLED): with a song that has no art, the placeholder fills the right pane up to the top edge under the clock and battery, as a cover does; it started below the status row, leaving a black band.
