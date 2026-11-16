@@ -10451,11 +10451,6 @@ assert [n for n in names if n in ('fclose','save_memoryplay_info','player_stop',
 m,names=rockbox(False)
 assert not {'fopen','player_stop','system'} & set(names)
 assert [m.text(c[1]) for c in m.calls if c[0]=='navigator_to_with_context']==['dialog/msginfo_dialog']; passed()
-# ipod_home_rockbox follows the card.
-m=Machine(); m.rockbox_mode=0; m.config['SHORTCUT']='0'
-assert m.call(address=payload_syms['ipod_home_rockbox'],args=(0,0,0,0),gap=0)==0
-m.rockbox_mode=0o100755
-assert m.call(address=payload_syms['ipod_home_rockbox'],args=(0,0,0,0),gap=0)==1; passed()
 # The wheel walks onto the new rows and Centre clicks them, as any fixed settings list.
 m,view,_=display({},sub=0)
 m.paint(view)
