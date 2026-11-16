@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Card apps: a progress row with no subtitle (a finished download, say) no longer crashes the page.
   - Bluetooth: car stereos and smart speakers that show what's playing (an Echo, a BMW's iDrive and most headsets' apps) now get the song's title, artist, album, track number and length from the Q2. They showed nothing before.
   - Confirmations: removing a song from a playlist, and deleting or replacing an EQ preset, now open on **Cancel**, so a stray Center press no longer removes or overwrites anything.
   - Line Out's warning reads "Line Out sets max volume, continue?" (a missing space).
