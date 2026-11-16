@@ -1019,8 +1019,8 @@ static int queue(crc_session *s, unsigned req_id, const uint8_t *p, size_t n, in
 
 /* ---- covers ---- */
 
-/* Where an album's picture is: Cover Flow's 160 px cache when it is small enough, a server app's cover,
- * a picture file in the folder, or the first FLAC's embedded picture (q2bridge.py cover). */
+/* Where an album's picture is: Cover Flow's 160 px cache when it is small enough, a server app's cover (its 512 px
+ * one for a bigger ask), a picture file in the folder, or the first FLAC's embedded picture (q2bridge.py cover). */
 typedef struct {
     char path[400];
     long off, len;
@@ -1131,11 +1131,14 @@ static int cover_find(const char *art, int max_px, cover_t *c) {
     const char *a, *app;
     size_t an, appn;
     if (server_album(url, &a, &an, &app, &appn)) {
-        char rel[160];
-        snprintf(rel, sizeof rel, "/mnt/mmc/%.*s/covers/%.*s.jpg", (int)appn, app, (int)an, a);
-        crc_path(p, sizeof p, rel);
-        long n = file_len(p);
-        if (n > 0) { snprintf(c->path, sizeof c->path, "%s", p); c->len = n; return 1; }
+        /* the app's 512 px copy (covers/512/) for an ask over 160 px, else its 160 px one */
+        for (int big = max_px > 160; big >= 0; --big) {
+            char rel[160];
+            snprintf(rel, sizeof rel, "/mnt/mmc/%.*s/covers/%s%.*s.jpg", (int)appn, app, big ? "512/" : "", (int)an, a);
+            crc_path(p, sizeof p, rel);
+            long n = file_len(p);
+            if (n > 0) { snprintf(c->path, sizeof c->path, "%s", p); c->len = n; return 1; }
+        }
         return stream_picture(art, app, appn, c);
     }
     static const char *names[] = {"cover.jpg", "folder.jpg", "front.jpg", "cover.png", "folder.png"};

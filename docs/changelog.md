@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Remote: album covers from your server look sharp in the car. Q2 Muse sends the Subsonic app's 512-pixel copy when the car asks for a big cover, and the 160-pixel one until the app has fetched it; before, every server album's cover was 160 pixels, stretched to fit.
   - Now Playing (OLED): the progress bar's track and its played part have round ends, as the design has them; they were square.
   - Menus (OLED): the hold menus, Now Playing's ⋯ and a playlist's ⋯ now open as a frosted sheet over the page, which shrinks back and dims behind it. The sheet shows the song, album or playlist at the top with its cover, its rows run the full width of the screen and fade at the bottom, and Delete and Remove rows are red.
   - Menus (OLED): the menu sheet rises from the bottom of the screen as the page behind shrinks back, and falls away when you press Return. With Reduce Motion on, it fades in and out instead.

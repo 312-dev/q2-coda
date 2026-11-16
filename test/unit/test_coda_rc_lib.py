@@ -197,3 +197,23 @@ def test_a_streamed_albums_cover_is_its_stream_files_picture(lib, tmp_path):
     assert t == T['COVER'] and client.one(m, 1) == len(image) and client.one(m, 3) == image[:4096]
     f.unlink()
     assert q2.ask(T['GET_COVER'], [(1, 'sthird'), (2, 0), (3, 4096), (4, 160)]) == 'NOT_FOUND'
+
+
+def test_a_big_ask_gets_the_app_s_512_px_cover(lib, tmp_path):
+    """The app keeps each server album's cover at 160 px (covers/<album>.jpg, the Q2's) and, after those, at 512 px
+    (covers/512/<album>.jpg): a phone asking for more than 160 px gets the 512 one when it is there, else the
+    160 one (2026-11-16 17:04: album art looked low-res in the car, a 160 px cover in a ~350 px box)."""
+    q2 = Q2(lib, tmp_path, server=SERVER, cat=True)
+    small, big = b'\xff\xd8small\xff\xd9', b'\xff\xd8' + bytes(range(256)) * 30 + b'\xff\xd9'
+    covers = tmp_path / 'mnt/mmc/.subsonic/covers'
+    (covers / '512').mkdir(parents=True)
+    (covers / 'third.jpg').write_bytes(small)
+    (covers / '512/third.jpg').write_bytes(big)
+    def got(max_px):
+        t, m = q2.ask(T['GET_COVER'], [(1, 'sthird'), (2, 0), (3, 4096), (4, max_px)])
+        assert t == T['COVER']
+        return client.one(m, 1), client.one(m, 3)
+    assert got(350) == (len(big), big[:4096])
+    assert got(160) == (len(small), small)  # the Q2's size: the small one
+    (covers / '512/third.jpg').unlink()
+    assert got(350) == (len(small), small)  # none at 512 yet
