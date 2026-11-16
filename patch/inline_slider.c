@@ -12,10 +12,10 @@
  * Volume's level g_bootvolume (stock's 0x4b73b8); Crossfade's length crossfade.c xfade_set. A
  * setting with a switch and a value (Default Volume, Crossfade) is a switch row with its slider row
  * under it, shown only while the switch is on (inline_pair). The rows are drawn from their
- * list_item's paint (inline_slider_paint, row_paint.c ringnav_paint), grown from the list's
- * selection paint (inline_slider_sel, row_paint.c paint_selection), and take the keys while grabbed
- * (inline_slider_key, nav/input.c ringnav). One list's rows at a time, IS_ROWS of them: a row from
- * another list clears the table. */
+ * list_item's paint (inline_slider_paint, row_paint.c ringnav_paint), grown on a timer (is_step),
+ * set down when the list's selection paints off a grabbed row (inline_slider_sel, row_paint.c
+ * paint_selection), and take the keys while grabbed (inline_slider_key, nav/input.c ringnav). One
+ * list's rows at a time, IS_ROWS of them: a row from another list clears the table. */
 #include "navigation.h"
 
 #define IS_ROWS 8
@@ -58,11 +58,14 @@ static struct {
     unsigned char kind[IS_ROWS];
     void *open, *closing; /* the row grabbed (growing or grown) and the one set down, shrinking */
     anim_t run;           /* their change (ui_kit.h): MO_SPATIAL, at once under Reduce Motion */
+    unsigned timer;       /* is_step's, while it runs */
 } is __attribute__((section(".scratch")));
 
 static int is_gone(void *view, void *event) {
     (void)event;
-    if (view == is.view) memset(&is, 0, sizeof is);
+    if (view != is.view) return 0;
+    stop_timer(&is.timer);
+    memset(&is, 0, sizeof is);
     return 0;
 }
 /* A free slot in view's table, which a row from another view clears; -1 when full. */
@@ -133,11 +136,53 @@ static void repaint(void *item) {
     if (win) widget_invalidate_force(win, (void *)0);
 }
 
+/* The rows' heights for the change's progress, the list laid out again when they moved and the
+ * grabbed row's foot kept in sight, the view moved by whole rows; 1 while the change runs. */
+static int heights(void) {
+    void *view = is.view;
+    int k = anim_at(&is.run), moved = 0;
+    for (int i = 0; view && i < IS_ROWS; ++i) {
+        void *it = is.item[i];
+        if (!it) continue;
+        int full = full_h(is.kind[i]), h = it == is.open ? IS_PITCH + (full - IS_PITCH) * k / 1000
+                                           : it == is.closing ? full - (full - IS_PITCH) * k / 1000
+                                                              : IS_PITCH;
+        if (I(it, W_H) != h) I(it, W_H) = h, moved = 1;
+    }
+    if (k >= 1000) is.closing = (void *)0;
+    if (!moved) return k < 1000;
+    void *list = P(view, W_PARENT), *o = is.open;
+    if (list) widget_layout(list);
+    if (o) {
+        int over = I(o, W_Y) + I(o, W_H) - I(view, SCROLL_Y) - I(view, W_H);
+        if (over > 0)
+            scroll_view_set_offset(view, I(view, SCROLL_X),
+                                   I(view, SCROLL_Y) + (over + IS_PITCH - 1) / IS_PITCH * IS_PITCH);
+    }
+    widget_invalidate_force(view, (void *)0);
+    return k < 1000;
+}
+/* Each MO_FRAME_MS while a row grows or shrinks, as a captioned row's (settings_pages.c cap_step):
+ * the heights follow the change on a timer, not on the selection's paints, which can stop coming.
+ */
+static int is_step(const void *unused) {
+    (void)unused;
+    if (heights()) return 8; /* RET_REPEAT */
+    is.timer = 0;
+    return 7; /* RET_REMOVE */
+}
+/* A grab or a set-down starts the change: at once under Reduce Motion (MO_SPATIAL). */
+static void change(void) {
+    anim_start(&is.run, IS_MS, EASE_QUAD_OUT, MO_SPATIAL);
+    heights();
+    if (!is.timer) is.timer = timer_add(is_step, (void *)0, MO_FRAME_MS);
+}
+
 /* The grabbed row set down, shrinking back. */
 static void set_down(void) {
     if (!is.open) return;
     is.closing = is.open, is.open = (void *)0;
-    anim_start(&is.run, IS_MS, EASE_QUAD_OUT, MO_SPATIAL);
+    change();
     repaint(is.closing);
 }
 
@@ -155,7 +200,7 @@ static int is_click(void *ctx, void *event) {
     is.closing = is.open, is.open = item;
     st.touch_mode = 0;                          /* the bar shows on it, as after the wheel */
     *(volatile unsigned char *)KEY_LOCKOUT = 0; /* the wheel at once, as Edit Library's Centre */
-    anim_start(&is.run, IS_MS, EASE_QUAD_OUT, MO_SPATIAL);
+    change();
     repaint(item);
     return 0;
 }
@@ -213,30 +258,10 @@ void inline_pair(void *view, const char *icon, int k) {
 
 /* Each paint of the list's selection (row_paint.c paint_selection): item the selected row's
  * list_item, 0 with none showing. The selection moved off the grabbed row (a tap on another) sets
- * it down; then the rows' heights for the change's progress, the list laid out again when they
- * moved, the grabbed row's foot kept in sight, the view moved by whole rows. */
+ * it down. */
 void inline_slider_sel(void *view, void *item) {
     if (!is.view || view != is.view) return;
     if (is.open && item && item != is.open) set_down();
-    int k = anim_at(&is.run), moved = 0;
-    for (int i = 0; i < IS_ROWS; ++i) {
-        void *it = is.item[i];
-        if (!it) continue;
-        int full = full_h(is.kind[i]), h = it == is.open ? IS_PITCH + (full - IS_PITCH) * k / 1000
-                                           : it == is.closing ? full - (full - IS_PITCH) * k / 1000
-                                                              : IS_PITCH;
-        if (I(it, W_H) != h) I(it, W_H) = h, moved = 1;
-    }
-    if (k >= 1000) is.closing = (void *)0;
-    if (!moved) return;
-    void *list = P(view, W_PARENT), *o = is.open;
-    if (list) widget_layout(list);
-    if (o) {
-        int over = I(o, W_Y) + I(o, W_H) - I(view, SCROLL_Y) - I(view, W_H);
-        if (over > 0)
-            scroll_view_set_offset(view, I(view, SCROLL_X),
-                                   I(view, SCROLL_Y) + (over + IS_PITCH - 1) / IS_PITCH * IS_PITCH);
-    }
 }
 
 /* navigation.c's key filter, a key's release on top: 1 if a grabbed row took it. The wheel sets its

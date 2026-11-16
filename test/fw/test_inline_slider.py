@@ -43,9 +43,14 @@ class Playback:
         return self.fw.fn('inline_slider_key', C.c_int, C.c_void_p, C.c_uint, C.c_int)(top, code, owned)
 
     def sel(self, item, after=200):
-        """A paint of the list's selection on item, after ms."""
+        """A paint of the list's selection on item, then the change's timer, after ms: the heights follow the
+        timer alone (a selection paint can stop coming while a row grows, seen on the emulator)."""
         self.now += after
         self.fw.fn('inline_slider_sel', None, C.c_void_p, C.c_void_p)(self.view.addr, item.addr if item else None)
+        self.step()
+
+    def step(self):
+        return self.fw.fn('inline_slider__is_step', C.c_int, C.c_void_p)(None)
 
 
 def titles(view):
@@ -159,6 +164,16 @@ def test_crossfade_s_switch_and_duration_save_its_two_keys(fw):
     p.key(KEY_CENTER)
     p.click('Crossfade')
     assert writes(fw)[-2:] == [('XFADE', 0), ('XFADESEC', 6)] and not p.item('Duration').visible
+
+
+def test_the_row_grows_on_its_timer_with_no_selection_paint(fw):
+    p = Playback(fw)
+    item = p.item('Max Volume')
+    p.click('Max Volume')
+    p.now += 75
+    assert p.step() == 8 and PITCH < item.box[3] < GROWN  # repeating, part way
+    p.now += 100
+    assert p.step() == 7 and item.box[3] == GROWN  # grown, and the timer ends
 
 
 def test_reduce_motion_grows_the_row_at_once(fw):
