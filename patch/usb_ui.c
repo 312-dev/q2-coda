@@ -163,7 +163,10 @@ static const char *const usb_glyphs[] = { "usb_charge", "usb_files", "usb_audio"
 static int usb_chooser_closed(void *ctx, void *event) {
     if (u.chooser == ctx) {
         u.chooser = u.view = u.always = (void *)0;
-        if (!u.chosen && g_usbdet_value) usb_apply(USB_CHARGE, 0); /* Return: charge only */
+        if (!u.chosen && g_usbdet_value) { /* Return: charge only, the probe's gadget stopped as a row's */
+            u.chosen = 1;
+            usb_apply(USB_CHARGE, 0);
+        }
     }
     return 0;
 }
