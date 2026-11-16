@@ -4330,9 +4330,10 @@ class BtInitMachine(Machine):
         super().hook(u,addr,size,_)
 for result in (0,-7):
     bt_init=BtInitMachine(); bt_init.result=result; thread=bt_init.alloc(4)
+    bt_init.mock('system@GLIBC_2.0')  # bt_name.c's Alias at Bluetooth on (dbus-send), between the callbacks
     assert bt_init.call(address=payload_syms['headset_bt_init'],args=(thread,0,0,0),gap=0)==result
     assert bt_init.calls[0][0]=='initBluetoothParam'
-    assert [c[:3] for c in bt_init.calls[1:]]==[
+    assert [c[:3] for c in bt_init.calls[1:] if c[0].startswith('btctl')]==[
         ('btctl_set_prompt_callback',0x4f9d20,0),
         ('btctl_device_status_callback',payload_syms['headset_bt_status'],0),
         ('btctl_set_a2dp_callback',syms['btrecvA2dpFunc'],0x01020304),
@@ -4349,6 +4350,7 @@ class BtLinkMachine(Machine):
         super().__init__(); self.links=[list(x) for x in links]; self.paired=paired
         self.u.mem_write(0xa4c0d8,saved.encode()+b'\0')  # BTLINKMAC
         self.word(syms['bt_connectstatus'],connecting); self.handlers[0x4fc180]='device_status'
+        self.mock('system@GLIBC_2.0')  # bt_name.c's Alias as Bluetooth comes on (dbus-send)
     def hook(self,u,addr,size,_):
         name=self.handlers.get(addr)
         if name not in ('getBtLinkStatus','getBtLinkSize','getBtLinkItem','addBtLinkItem','updateBtLinkStatus','checkPairDev','device_status'):
@@ -4367,7 +4369,7 @@ class BtLinkMachine(Machine):
         self.returns(ret,clobber=True)
 a_mac,b_mac='AA:AA:AA:AA:AA:AA','BB:BB:BB:BB:BB:BB'
 link=BtLinkMachine([]); link.call(address=payload_syms['headset_status_register'],args=(0,0,0,0),gap=0)
-assert [c[:3] for c in link.calls]==[('btctl_device_status_callback',payload_syms['headset_bt_status'],0)]
+assert [c[:3] for c in link.calls if c[0].startswith('btctl')]==[('btctl_device_status_callback',payload_syms['headset_bt_status'],0)]
 link=BtLinkMachine([(a_mac,5)])  # 5 while the thread's Connect runs
 link.call(address=payload_syms['headset_bt_status'],args=(3,link.string(b_mac),0,0),gap=0)
 assert link.links==[[a_mac,4],[b_mac,3]] and 'device_status' not in [c[0] for c in link.calls]; passed()
