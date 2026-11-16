@@ -15250,7 +15250,7 @@ windows(m,*SAFE); m.files[LIB]=bytearray(f'700\nimport {EXP}/Mix.m3u\n'.encode()
 # Version, so the added row is checked against the real stock widgets, geometry and styles. A page of another
 # count of rows (V1.32's seven) is left as stock built it. Stock's thanks, V1.36's eighth child, is dropped.
 m=ShuffleMachine(); m.handlers[int(manifest['patch_symbols']['stock_about_trampoline'],16)]='stock_about'
-m.mock('strcpy@GLIBC_2.0','widget_set_tr_text')
+m.mock('strcpy@GLIBC_2.0','widget_set_tr_text','strstr@GLIBC_2.0')  # strstr: About's value words (settings_pages.c)
 def tree(w):
     n=m.nodes[w]
     return (n['type'],[m.get(w+O[k]) for k in ('W_X','W_Y','W_W','W_H')],n.get('style'),
