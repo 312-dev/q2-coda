@@ -2115,12 +2115,13 @@ for name in ('backlight_page','maxvol_page','bootvol_page','balance_page'):
     assert m.call(O['KEY_CENTER'])==11 and m.call(O['KEY_CENTER'],gap=50)==11
     m.advance(300,clear=False); names=[c[0] for c in m.calls]
     assert 'on_wm_keyup_fun' in names and 'navigator_back' not in names; passed()
-# Quick Settings (OLED's rows, quick_rows_key): Centre on its first row, Brightness, gives the wheel the slider
-# (QS_ADJUST), which it sets within its range; Return goes back to the rows, and Return there closes it, as its swipe
-# up does (dialog_quit), not stock's screen off and Home.
-QS_ADJUST='_qs_adjust'  # navigation.c QS_ADJUST: 1 while the wheel moves the brightness
+# Control Center (control_center.c cc_key): Centre on Brightness gives the wheel the slider (QS_ADJUST), which it sets
+# within its range; Return gives it back, and Return off a slider closes it, as its swipe up does (dialog_quit), not
+# stock's screen off and Home.
+QS_ADJUST='_cc_adjust'  # control_center.c CC_ADJUST: 1 while a slider has the wheel
+CC_BRIGHT=4  # control_center.c's Brightness stop
 m=Machine(); bright=m.node('slider','slider_backlight',value=99)
-m.top=m.node('dialog','statusbar_dialog',[m.node('view','view_backlight',[bright])]); m.mock('dialog_quit')
+m.top=m.node('dialog','statusbar_dialog',[m.node('view','view_backlight',[bright])],_cc_focus=CC_BRIGHT); m.mock('dialog_quit')
 assert m.call(O['KEY_CENTER'])==11 and m.nodes[m.top][QS_ADJUST]==1
 assert m.call()==11 and m.nodes[bright]['value']==100
 assert m.call()==11 and m.nodes[bright]['value']==100
@@ -2144,12 +2145,12 @@ passed()
 # does nothing there, on the slider too: only the rested, open panel takes a tick.
 for state,timer in ((1,7),(2,7),(3,7)):
     m=Machine(); bright=m.node('slider','slider_backlight',value=50)
-    m.top=m.node('dialog','statusbar_dialog',[m.node('view','view_backlight',[bright])],timer_idex=timer,**{QS_ADJUST:1})
+    m.top=m.node('dialog','statusbar_dialog',[m.node('view','view_backlight',[bright])],timer_idex=timer,_cc_focus=CC_BRIGHT,**{QS_ADJUST:1})
     m.word(syms['g_dropdown_menu_state'],state)
     assert m.call()==11 and m.nodes[bright]['value']==50, (state,timer)
 for state,timer,want in ((1,-1,50),(2,-1,50),(3,-1,51)):  # the state alone gates it, and at rest it ticks
     m=Machine(); bright=m.node('slider','slider_backlight',value=50)
-    m.top=m.node('dialog','statusbar_dialog',[m.node('view','view_backlight',[bright])],timer_idex=timer,**{QS_ADJUST:1})
+    m.top=m.node('dialog','statusbar_dialog',[m.node('view','view_backlight',[bright])],timer_idex=timer,_cc_focus=CC_BRIGHT,**{QS_ADJUST:1})
     m.word(syms['g_dropdown_menu_state'],state)
     assert m.call()==11 and m.nodes[bright]['value']==want, (state,timer)
 passed()
@@ -3762,9 +3763,11 @@ m.press(6000); assert m.hold()==11 and m.labels()==SONG_MENU[:2]+['View Queue']+
 # A folder play's untagged record: the player's parsed title once it has parsed that file.
 m=playing_menu(); id3=syms['g_play_id3_info']; m.u.mem_write(id3,b'/p/B\0'); m.u.mem_write(id3+O['ID3_TITLE'],b'Parsed\0')
 m.press(6000); assert m.hold()==11 and m.nodes[m.title]['text']=='Parsed'; passed()
-m=playing_menu(); assert m.run(2) is None and m.opened[-1][0]=='playerqueue_page' and m.names()==['A','B','C'] and not m.playback(); passed()
+# View Queue opens Up Next (upnext.c, a page of the payload's), not stock's queue page, and plays nothing
+m=playing_menu(); assert m.run(2) is None and not any(o[0]=='playerqueue_page' for o in m.opened) and m.names()==['A','B','C'] and not m.playback(); passed()
 # OLED says what an in-place action did (navigation.c's toasts): Playing Next, Added to Queue, the favourites' own.
-for action,expected,said in ((0,['A','B','B','C'],'Playing Next'),(1,['A','B','C','B'],'Playing Last')):
+# Play Last lands at the end of Playing Next (playback.c), here empty: right after the playing song, as Play Next does
+for action,expected,said in ((0,['A','B','B','C'],'Playing Next'),(1,['A','B','B','C'],'Playing Last')):
     m=playing_menu(); assert m.run(action)==said and m.names()==expected and not m.playback(); passed()
 m=playing_menu(); assert m.run(3)=='Added to Favorites'
 assert [c[2:] for c in m.calls if c[0]=='batch_add_file']==[(0xf00a,m.get(syms['mcl_pdeqplaylist']))]
