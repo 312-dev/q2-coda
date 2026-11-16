@@ -2,7 +2,6 @@
 its state read for the UI; the owner's music stopped while a guest plays and back after, as Leave says; the car's keys
 to the guest; stock's receiver page kept shut while Guest Play is on."""
 import ctypes as C
-import struct
 
 import pytest
 
@@ -25,8 +24,7 @@ class Rig:
         fw.mock('fw_close', lambda *_: 0)
         fw.mock('fw_system', lambda cmd, *_: self.commands.append(C.string_at(cmd).decode()) or 0)
         fw.mock('fw_access', lambda path, *_: 0 if C.string_at(path).decode() == '/proc/77' else -1)
-        fw.mock('fw_clock_gettime', lambda kind, ts, *_: C.memmove(ts, struct.pack('<qq', self.ms // 1000,
-                                                                                    self.ms % 1000 * 1000000), 16) and 0)
+        fw.mock('time_now_ms', lambda *_: self.ms)
         fw.mock('mclGetPlayStatus', lambda *_: self.status)
         self.handles = {}
 

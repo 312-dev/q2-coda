@@ -27,8 +27,8 @@
 extern int stock_btrecv_trampoline(int event, void *data, void *user);
 
 static struct {
-    char raw[2048]; /* the state file behind a '\n', as field() reads it */
-    unsigned long long read_at, started_at;
+    char raw[2048];               /* the state file behind a '\n', as field() reads it */
+    unsigned read_at, started_at; /* time_now_ms, as headset.c times its polls */
     unsigned seq;
     volatile int on; /* Guest Play is on: read by guest_a2dp on libbtctl's thread */
     int active, stopped, was_playing;
@@ -46,7 +46,7 @@ static int guest_running(void) {
 }
 
 static void guest_start(void) {
-    unsigned long long now = now_ms();
+    unsigned now = time_now_ms();
     if (gp.started_at && now - gp.started_at < GUEST_START_MS) return;
     gp.started_at = now;
     if (!guest_running()) system("( " GUEST_DAEMON " >/dev/null 2>&1 & )");
@@ -143,7 +143,7 @@ static void owner_resume(void) {
 }
 
 void guest_poll(void) {
-    unsigned long long now = now_ms();
+    unsigned now = time_now_ms();
     if (now - gp.read_at < GUEST_READ_MS) return;
     gp.read_at = now;
     state_read(GUEST_STATE, gp.raw, sizeof gp.raw);
