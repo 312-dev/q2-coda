@@ -159,10 +159,13 @@ static void round_path(void *vg, float x, float y, float w, float h, float r) {
 #define BATT_SLIM_DIM 0x6e6e6e
 #define BATT_SLIM_LOW 0xff453a /* under 20 %, the only red on any screen (docs/oled-design.md) */
 #define BATT_SLIM_LOW_PCT 20
+/* The charge fill's share of the body, in percent, for battery_now's key: the level, on the cable
+ * as off it. */
+static unsigned battery_fill(unsigned key) { return key >> 3; }
 void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key) {
     void *vg = canvas_get_vgcanvas(canvas);
     if (!vg) return;
-    unsigned pct = key & 2 ? 100 : key >> 3, ink = ipod_light() ? 0x000000 : 0xffffff;
+    unsigned pct = battery_fill(key), ink = ipod_light() ? 0x000000 : 0xffffff;
     unsigned level = key & 2 ? BATT_CHARGE_RGB : pct < BATT_SLIM_LOW_PCT ? BATT_SLIM_LOW : ink;
     float fx = (float)x + BATT_SLIM_IN, fy = (float)y + BATT_SLIM_IN,
           fw = ((float)bw - 2 * BATT_SLIM_IN) * (float)pct / 100, fh = (float)bh - 2 * BATT_SLIM_IN;

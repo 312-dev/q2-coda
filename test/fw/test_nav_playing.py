@@ -481,6 +481,13 @@ def test_the_icon_is_the_slim_battery(fw, st, ui):
     assert canvas.rects == [] and len(fw.calls('vgcanvas_stroke')) == 1 and len(fw.calls('vgcanvas_fill')) == 2
 
 
+@pytest.mark.parametrize('level, charging', [(62, 0), (62, 1), (5, 1), (100, 1)])
+def test_the_slim_batterys_fill_is_the_level_charging_or_not(fw, level, charging):
+    """The fill shows the real level on the cable too: forced full while charging, it hid how much was left."""
+    fill = fw.fn('list_marks__battery_fill', C.c_uint, C.c_uint)
+    assert fill(level << 3 | charging << 1) == level
+
+
 def test_with_a_bar_widget_missing_nothing_moves(fw, st, ui):
     theme(fw, st, BATTERY=1)
     bar = Bar(fw, ui)
