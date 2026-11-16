@@ -4783,16 +4783,15 @@ void final_text(void *canvas, const char *face, const unsigned *s, const void *r
     st.raw_ink = raw;
 }
 
-/* USB Storage's page, every theme: the computer's eject (SCSI START STOP UNIT, LoEj) closes the
+/* USB Storage's page: the computer's eject (SCSI START STOP UNIT, LoEj) closes the
  * card's LUN in the kernel's f_mass_storage, and its configfs file then reads empty. Once it has
- * read open, empty is the eject: stock's line (scrlabel_info, which
- * stock's timer rewrites "USB Connected" every 500 ms, so a label of its style covers it) says OK
- * to Disconnect. No file (the gadget not built yet, or torn down) is no eject. The LUN stays closed
- * until stock rebuilds the gadget, so the poll ends there.
- * ponytail: only a host that sends LoEj counts (macOS, Linux, Explorer's Eject); Windows' Safely
- * Remove Hardware may only stop the device, leaving the page on Connected. The upgrade is
- * telling that apart from a cable still in (the gadget's suspend state, which configfs doesn't
- * show). */
+ * read open, empty is the eject: stock's line (scrlabel_info, which stock's timer rewrites "USB
+ * Connected" every 500 ms, so a label of its style covers it) says OK to Disconnect. No file (the
+ * gadget not built yet, or torn down) is no eject. The LUN stays closed until stock rebuilds the
+ * gadget, so the poll ends there. ponytail: only a host that sends LoEj counts (macOS, Linux,
+ * Explorer's Eject); Windows' Safely Remove Hardware may only stop the device, leaving the page on
+ * Connected. The upgrade is telling that apart from a cable still in (the gadget's suspend state,
+ * which configfs doesn't show). */
 #define USB_LUN "/sys/kernel/config/usb_gadget/storage_demo/functions/mass_storage.msg/lun.0/file"
 static int usb_poll(const void *info) {
     void *win = P(info, TIMER_CTX), *c;
@@ -4802,10 +4801,7 @@ static int usb_poll(const void *info) {
     if (f) fclose(f);
     if (n > 0) st.usb_lun = 1;
     if (n || !st.usb_lun) return 8; /* RET_REPEAT */
-    if ((c = widget_lookup(win, "msg_heading", 1))) {
-        widget_set_text_utf8(c, "OK to Disconnect");
-        widget_set_text_utf8(widget_lookup(win, "msg_line", 1), "");
-    } else if ((c = widget_lookup(win, "scrlabel_info", 1))) {
+    if ((c = widget_lookup(win, "scrlabel_info", 1))) {
         void *ok = hscroll_label_create(P(c, W_PARENT), I(c, W_X), I(c, W_Y), I(c, W_W), I(c, W_H));
         widget_use_style(ok, "s_scrlabel_white24c");
         widget_set_text_utf8(ok, "OK to Disconnect");
@@ -6811,7 +6807,7 @@ static int set_row_h(void *button, int h) {
     return h;
 }
 
-/* Streaming's list: settings rows at the set's stream_row (52 under the classic-light set), matched
+/* Streaming's list: settings rows at the set's stream_row, matched
  * by name, at layout time only. Its list on Home's window matches too, but its buttons are Home's
  * by then (coverflow.c home_fill), so set_button leaves them alone. */
 static int stream_list(void *view) {
