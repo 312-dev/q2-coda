@@ -852,7 +852,6 @@ void search_strip_text(const char *title, const char *text, int max,
 void playlist_page_open(int dest, const char *name);
 /* add_songs.c: Add Songs (docs/oled-design.md#add-songs) */
 void add_songs(int dest, const char *name);
-int add_songs_open(void);
 int add_songs_key(void *top, unsigned key);
 void add_songs_paint(void *w, void *canvas);
 int add_songs_mark(void *r);

@@ -10973,7 +10973,6 @@ for value,name in ((1,'Percent'),(0,'Icon'),(1,'Percent')):
 for stored in ('2','3'):
     m,view,kids=appearance({'BATTERY':stored}); row=kids[3]; f,ctx=m.handler(m.nodes[row]['children'][0],O['EVT_CLICK'])
     assert row_text(row)=='Battery: Icon' and not [c for c in m.calls if c[0]=='write_int_config'] and m.config['BATTERY']==stored
-    assert m.call(address=payload_syms['ipod_battery'],args=(0,0,0,0),gap=0)==0
     m.calls=[]; m.call(address=f,args=(ctx,m.event,0,0),gap=0)  # from what it reads as: on to Percent
     assert [(c[1],m.text(c[3])) for c in m.calls if c[0]=='write_int_config']==[(1,'BATTERY')] and row_text(row)=='Battery: Percent'
 passed()

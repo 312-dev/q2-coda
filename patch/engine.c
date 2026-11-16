@@ -267,26 +267,6 @@ void eng_fill(struct eng_surface *s, int x, int y, int w, int h, unsigned rgb) {
         for (unsigned *p = row(s, c[0], j), *end = p + (c[2] - c[0]); p < end; ++p) *p = rgb;
 }
 
-void eng_blend(struct eng_surface *s, int x, int y, int w, int h, unsigned rgb, unsigned alpha) {
-    int c[4];
-    if (!clip(s, x, y, w, h, c)) return;
-    alpha += alpha >> 7; /* 255 is all of it */
-    for (int j = c[1]; j < c[3]; ++j)
-        for (unsigned *p = row(s, c[0], j), *end = p + (c[2] - c[0]); p < end; ++p)
-            *p = blend1(*p, rgb, alpha);
-}
-
-void eng_mask(struct eng_surface *s, int x, int y, int w, int h, const unsigned char *alpha,
-              int stride, unsigned rgb) {
-    int c[4];
-    if (!clip(s, x, y, w, h, c)) return;
-    for (int j = c[1]; j < c[3]; ++j) {
-        const unsigned char *a = alpha + (j - y) * stride + (c[0] - x);
-        for (unsigned *p = row(s, c[0], j), *end = p + (c[2] - c[0]); p < end; ++p, ++a)
-            if (*a) *p = blend1(*p, rgb, *a + (*a >> 7));
-    }
-}
-
 static unsigned root(unsigned n) {
     unsigned r = 0, bit = 1u << 30;
     while (bit > n) bit >>= 2;

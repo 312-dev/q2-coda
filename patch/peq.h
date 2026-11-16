@@ -652,7 +652,6 @@ void eq_tabs_paint(void *w, void *canvas, int simple, int focus);
 /* slider_page.c: an iOS segmented control of n segments, w by h from x, y; open is lit */
 void segments_paint(void *canvas, const char *const *names, int n, int open, int focus, int x,
                     int y, int w, int h);
-int ipod_battery(void);               /* theme_engine.c: IPOD BATTERY, 0 Icon, else a percentage */
 int title_gone(void *w, void *event); /* ... and looks for its source again at the next sync */
 int bar_title_fits(void *label);      /* label's text fits the bar's title box */
 int ipod_light(void);                 /* theme_engine.c: Light Mode */

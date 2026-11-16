@@ -269,10 +269,6 @@ int ipod_light(void) {
     int v = accent();
     return light_on(themes, v);
 }
-int ipod_battery(void) {
-    accent();
-    return st.battery;
-}
 /* The card's Rockbox and Groovebox as the carousel's Shortcut card was last named for
  * (coverflow_home_layout): the bar's pass lays it out again when either comes or goes. */
 void ipod_shortcut_seen(void) {

@@ -114,14 +114,13 @@ Return never reaches a game. A game that sets neither flag gets ticks and runs i
 
 `draw` gets a `struct eng_surface`: the screen's pixels, the sheet's origin, and the rows and columns of this paint. It paints its whole scene, background first; every call clips, so the cost is the changed part's. Coordinates are the sheet's, colours `0xRRGGBB` as they reach the screen (Light Mode does not flip them; Night Shift still warms them, as it reads every pixel written).
 
-| Call                    | Draws                                                                                          |
-| ----------------------- | ---------------------------------------------------------------------------------------------- |
-| `eng_fill`, `eng_blend` | a box, solid or at an alpha of 255                                                             |
-| `eng_disc`              | a disc with a smoothed edge, its centre and radius in 16.16: it moves by sixteenths of a pixel |
-| `eng_round`             | a box with round corners, smoothed                                                             |
-| `eng_mask`              | an 8-bit mask in one colour: a sprite's shape or a glyph of the game's own                     |
-| `eng_text`              | ASCII in the theme's face through stock's canvas (left, centred or right); returns its width   |
-| `eng_inset(y)`          | not a drawing: the columns the glass's 80 px corners hide at each end of the sheet's row `y`   |
+| Call           | Draws                                                                                          |
+| -------------- | ---------------------------------------------------------------------------------------------- |
+| `eng_fill`     | a box, solid                                                                                   |
+| `eng_disc`     | a disc with a smoothed edge, its centre and radius in 16.16: it moves by sixteenths of a pixel |
+| `eng_round`    | a box with round corners, smoothed                                                             |
+| `eng_text`     | ASCII in the theme's face through stock's canvas (left, centred or right); returns its width   |
+| `eng_inset(y)` | not a drawing: the columns the glass's 80 px corners hide at each end of the sheet's row `y`   |
 
 A buffer that is not stock's 375 x 320 BGRA8888 `lcd_mem` (a window animation's snapshot of another layout) is left as stock drew it.
 
@@ -180,7 +179,7 @@ Every one is an original game in its genre. None reproduces an Apple iPod game's
 
 **Controls.** The raw wheel moves the paddle 2 px a position, no acceleration; Previous and Next held, 4 px a step; a finger, to its x. Centre launches from Ready (the ball rides the paddle a third of its width out, alternating sides) and plays again after the end. Play/Pause does nothing.
 
-**Screens.** Ready shows "Level N" and "Centre to launch" (Text Tertiary) under the lattice. Clearing the lattice fades the next one in over 20 frames: each row takes 4 of them, the rows starting in turn, so a frame repaints two rows at most, their discs drawn in their colours scaled toward black (`dim`). The brief asked for the fade by `eng_blend` over the drawn rows; that measured 634,287 instructions for its dearest frame, over the 600,000 a frame may, so the colours are scaled before drawing instead, which looks the same and skips a pass over the rows' pixels. The end shows the score, the best (or "New best") and "Centre: play again". Pausing is the engine's.
+**Screens.** Ready shows "Level N" and "Centre to launch" (Text Tertiary) under the lattice. Clearing the lattice fades the next one in over 20 frames: each row takes 4 of them, the rows starting in turn, so a frame repaints two rows at most, their discs drawn in their colours scaled toward black (`dim`). The brief asked for the fade by an alpha blend over the drawn rows; that measured 634,287 instructions for its dearest frame, over the 600,000 a frame may, so the colours are scaled before drawing instead, which looks the same and skips a pass over the rows' pixels. The end shows the score, the best (or "New best") and "Centre: play again". Pausing is the engine's.
 
 **Sound** is the Clicker's three as rhythm: a tick off the paddle and for a grey's first hit, a tap for a cell broken, two taps six frames apart for the keystone, three ticks for a level cleared, the alert for a miss.
 
@@ -210,7 +209,7 @@ Looked at for vendoring. The project is GPL-3.0, so MIT, BSD, zlib, public domai
 | Sudoku solving and generating | [kudoku](https://github.com/attractivechaos/plb/tree/master/sudoku) | MIT                   | 190 lines of C, integers only, one `calloc` of its matrix       | No, but the nearest to a yes. It solves by exact cover; the game needs a solver that counts to two solutions and can stop and resume between frames, which is a different loop. A bitmask backtracker is under 100 lines |
 | Sudoku generating             | [QQWing](https://qqwing.com)                                        | GPL-2.0-or-later      | C++                                                             | No. The payload is C with no C++ runtime                                                                                                                                                                                 |
 | Klondike solvability          | [Klondike-Solver](https://github.com/ShootMe/Klondike-Solver)       | MIT                   | C++; searches up to 5,000,000 states by default                 | Not in the firmware: that search does not fit a Q2's memory. Solvability is checked offline by a small solver in the test tree, and the firmware carries a table of seeds it solved (512 bytes)                          |
-| Sprite and shape blitting     | [olive.c](https://github.com/tsoding/olive.c)                       | MIT                   | one header                                                      | No. `eng_fill`, `eng_blend`, `eng_mask`, `eng_disc` and `eng_round` are 150 lines, clip to the rect being painted, and write the screen's own pixel format                                                               |
+| Sprite and shape blitting     | [olive.c](https://github.com/tsoding/olive.c)                       | MIT                   | one header                                                      | No. `eng_fill`, `eng_disc` and `eng_round` are short, clip to the rect being painted, and write the screen's own pixel format                                                                                            |
 | Random numbers                | [PCG](https://www.pcg-random.org)                                   | Apache-2.0 or MIT     | a few lines                                                     | No. `rand_below` (xorshift, `patch/playback.c`) is already there and is enough for deals and levels                                                                                                                      |
 | Whole games to port           | [Rockbox](https://www.rockbox.org)'s plugins                        | GPL-2.0-or-later      | each tied to Rockbox's plugin API and LCD model                 | No. Compatible, but a port brings the API with it, and these games are designed for this screen and wheel                                                                                                                |
 
