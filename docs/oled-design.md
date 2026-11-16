@@ -780,6 +780,10 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
   and its left end while it is scrolled away from its start, so it rests crisp; each goes from
   clear to the colour behind the text (the Canvas, or Accent Blue on the selection). A truncated
   text that is not scrolling keeps its ellipsis (`list.marquee.fade`).
+- **A value cut off scrolls too** (the user's, 2026-11-16, from About's CFW. Version): on the selected
+  row the marquee takes the first text cut off at its column, the title, else a key/value row's value,
+  so any value too long for its row reads in full when its row is selected (`navigation.c`
+  `marq_moved`); every other row's keeps its ellipsis.
 - **Now Playing's lines** move as one marquee: the title, artist and album that overflow hold at
   rest 2.75 s, slide left together at 35 px a second (the longest line's pace; the others take the
   same time), and land back at rest together, each followed by its own copy 40 px behind, so
@@ -813,7 +817,7 @@ pattern.
 | Add Songs                           | [Add Songs](#add-songs)     | The chooser, then artists, albums and songs with marks                                                     |
 | Hold menu, More                     | [Menus](#menus)             | The inset modal over the page                                                                              |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
-| About                               | Key/value table             | Inert: no selection; values in Text Secondary                                                              |
+| About                               | Key/value table             | The wheel walks the rows and nothing opens; values in Text Secondary, a cut-off one scrolling when selected |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
 | Storage                             | Storage bar                 | [Progress and sliders](#progress-and-sliders): the bar, its legend rows (Downloads and Stream Cache open pages) and two footers |
 | Storage > Downloads                 | Key/value rows              | Limit (its picker the inset modal's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centred on x 33, its name at x 52, size and chevron; two footers |

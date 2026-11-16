@@ -530,6 +530,26 @@ def test_a_marquee_off_its_row_or_screen_ends_with_the_pass(fw, st, lit, moved):
     assert [c[1][0] for c in fw.calls('hscroll_label_stop')] == [label.addr]
 
 
+@pytest.mark.parametrize('key_w, value_w, scrolls', [(80, 300, 'value'), (400, 300, 'key'), (80, 100, None)])
+def test_a_cut_off_value_scrolls_on_the_selected_row(fw, st, key_w, value_w, scrolls):
+    """A key/value row (About's CFW. Version, 0about): the house marquee takes the row's first label that is cut off,
+    the title before its value, so a value cut off at its column scrolls when its row is selected; with nothing cut
+    off, nothing moves."""
+    ui = Ui(fw)
+    view, rows = library(fw, ui, name='about_page')
+    key = rows[1].children[0]
+    value = ui.add('hscroll_label', rows[1], (180, 0, 150, 48), 'value1')
+    for label, w in ((key, key_w), (value, value_w)):
+        label.move(*label.box[:2], 150, 48)
+        label.int_at(O['HSCROLL_TEXT_W']).value = w
+        label.byte_at(O['HSCROLL_ONLY_FOCUS']).value = 1
+    st('sel_w', C.c_void_p).value, st('sel_row').value = view.addr, 1
+    st('marq_row', C.c_void_p).value, st('marq_id').value = rows[1].addr, 1
+    fw.fn('navigation__marq_moved', C.c_int, C.c_void_p)(None)
+    started = [a[0] for _, a in fw.calls('hscroll_label_start')]
+    assert started == ([] if scrolls is None else [(key if scrolls == 'key' else value).addr])
+
+
 # The wheel's scroll indicator: a track and its thumb on a list the wheel just moved, drawn after the list's children
 # (ringnav_paint, list_marks.c wheel_sb_alpha). The track stands on the screen rows sb_top to sb_bottom whatever the
 # list's own box; the thumb's place and length are the scroll's and the screenful's shares of it.
@@ -2940,3 +2960,22 @@ def test_an_album_page_and_search_grey_their_songs_that_cannot_play(fw, st, low,
     page.paint()
     labels = [b.children[0] for b in page.rows]
     assert [text_ink(fw, st, label) == 0xff666666 for label in labels] == [False, False, greyed, False]
+
+
+def test_about_s_rows_take_the_selection_but_open_nothing(fw, st):
+    """About's rows (settings_pages.c about_rows, 0about): no longer disabled, so the wheel walks them and a cut-off
+    value scrolls on the selected row; stock's row click (systemset_about_row_on_click, the serial number's QR code)
+    gives way to one that does nothing, once however often the page lays out."""
+    ui = oled(fw, st)
+    view = ui.add('scroll_view', ui.window('about_page'), (0, 26, 375, 294))
+    item = ui.add('list_item', view, (0, 0, 375, 32))
+    button = ui.add('button', item, (20, 0, 335, 32), '6').clickable(ctx=0x77)
+    struct.pack_into('<Q', button.items[-1], 12, 0x4c12f8)
+    ui.add('hscroll_label', button, (10, 0, 160, 32), 'key')
+    offs = []
+    fw.mock('widget_off_by_func', lambda w, ev, fn, ctx, *_: offs.append((w, i32(ev), fn, ctx)))
+    for _ in range(2):
+        fw.fn('about_rows', None, C.c_void_p)(view.addr)
+    assert offs == [(button.addr, EVT_CLICK, 0x4c12f8, 0x77)]
+    assert len([h for h in button.handlers if h[0] == EVT_CLICK]) == 1
+    assert not [a for _, a in fw.calls('widget_set_enable') if a[0] == item.addr]

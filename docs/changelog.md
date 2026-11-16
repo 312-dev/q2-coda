@@ -7,6 +7,7 @@
   - Settings (OLED): the Settings list reached from Home ends like every list: Battery peeks through the fade under Controls instead of hiding until you scroll, and the highlighted row's lean as you turn the wheel is no longer cut off at the top or bottom of a list.
   - Lists (OLED): a list scrolled to its last row keeps the space under it after you open that row and press Return; the last row no longer sits on the screen's bottom edge.
   - Books is gone: the Library has no **Books** row and the Q2 no longer reads `.txt` and `.epub` books. Audiobooks are unchanged, a Library order you set yourself is kept without the row, and a `.books` folder left on the card can be deleted. Wi-Fi transfer's upload no longer lists EPUB.
+  - Settings (OLED): in **About** the wheel moves through the rows, and a value too long for its row, such as **CFW. Version**, scrolls when its row is highlighted instead of staying cut off; the same goes for any setting's value that is cut off.
   - Lists (OLED): a long name scrolling on the highlighted row fades into the blue highlight at its ends on every page, where some pages faded it to black.
   - Settings: in **System Update**, **SD Card Update** has no arrow at its right, as it starts the update rather than opening a page; **Network Update** keeps its arrow.
   - Night Shift (OLED): its page shows **Off**, **On** or **Auto** beside the name instead of a switch that hid which of the three it was, the warmth stays shown as "3400 K", and while Night Shift is off the slider is grey.

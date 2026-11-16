@@ -1959,13 +1959,19 @@ static void marq_stop(void) {
     hscroll_label_stop(label);
     hscroll_label_set_only_focus(label, 1);
 }
-static void *row_scroller(void *w, int depth) {
+/* stock's two margins (2 px each by default, 0x5fb23c) count towards its ellipsis */
+static int scroller_over(void *label) { return I(label, HSCROLL_TEXT_W) + 4 - I(label, W_W); }
+/* The row's first visible hscroll_label that is cut off, in order (its title, then a key/value
+ * row's value: any value cut off on the selected row scrolls, docs/oled-design.md#motion); with
+ * none cut off, its first. */
+static void *row_scroller(void *w, int depth, int cut) {
     unsigned n = widget_count_children(w);
     for (unsigned i = 0; i < n; ++i) {
         void *c = widget_get_child(w, i);
         if (!widget_get_visible(c)) continue;
-        if (!tk_strcmp(widget_get_type(c), "hscroll_label")) return c;
-        void *in = depth ? row_scroller(c, depth - 1) : (void *)0;
+        if (!tk_strcmp(widget_get_type(c), "hscroll_label") && (!cut || scroller_over(c) > 0))
+            return c;
+        void *in = depth ? row_scroller(c, depth - 1, cut) : (void *)0;
         if (in) return in;
     }
     return (void *)0;
@@ -1995,9 +2001,8 @@ static int marq_moved(const void *info) {
         st.marq_row = (void *)0; /* the next paint with a selection starts over */
         return 0;
     }
-    void *label = row_scroller(row, 2);
-    /* stock's two margins (2 px each by default, 0x5fb23c) count towards its ellipsis */
-    int over = label ? I(label, HSCROLL_TEXT_W) + 4 - I(label, W_W) : 0;
+    void *label = row_scroller(row, 2, 1) ?: row_scroller(row, 2, 0);
+    int over = label ? scroller_over(label) : 0;
     if (over <= 0 || !B(label, HSCROLL_ONLY_FOCUS)) return 0; /* until it moves */
     B(label, HSCROLL_LOOP) = 1;
     st.marq_label = label;
