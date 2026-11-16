@@ -524,7 +524,7 @@ def font_row(setup,text):
     assert k.call(address=0x4a7f44,args=(w,0,0,0))==0
     button,=[n for n,v in k.nodes.items() if v['type']=='button']
     native_row_layout(k,button)
-    kids=k.nodes[button]['children']  # the title as compact_row_layout finds it (check_title_bounds' rule)
+    kids=k.nodes[button]['children']  # the title as compact_row_layout finds it: the first hscroll_label, or the view holding one
     text=next(c for c in kids if k.nodes[c]['type']=='hscroll_label' or any(k.nodes[t]['type']=='hscroll_label' for t in k.nodes[c]['children']))
     return k,button,next((c for c in k.nodes[text]['children'] if k.nodes[c]['type']=='hscroll_label'),text)
 TFACE,TPX=FACE_NAMES[OLT['font[ROLE_TITLE]']],OLT['font_px[ROLE_TITLE]']

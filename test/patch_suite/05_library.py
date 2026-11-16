@@ -1002,7 +1002,7 @@ assert m.call(O['KEY_RETURN'])==0; m.paint(w,gap=0); assert m.drawn()
 m.paint(w2,gap=0); assert not m.drawn(); passed()
 # A sliding page's first paint is its snapshot, so a recalled row is revealed at once, not by a glide.
 m,w,es=walk(10,5); w2,es2=m.page_list(10,extent=1000); m.nodes[m.top]['anim_hint']=HINT
-assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==204
+assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==192
 assert [c[0] for c in m.moved()]==['scroll_view_set_offset']; passed()
 
 # Home is an ordinary list: the wheel walks its rows (HOME_ROWS) one by one, the seven its box shows and then

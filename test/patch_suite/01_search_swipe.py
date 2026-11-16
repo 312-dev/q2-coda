@@ -215,8 +215,9 @@ passed()
 # stock FP64 (unsupported by Unicorn); this checks capture and delivery, including outside drags.
 from ipod import decode,walk as ui_walk
 node=next(n for n in ui_walk(decode((B/'ui/playing_page.bin').read_bytes())) if n[2].get('name')=='slider_play')
-for x in (22,187,353):
-  for y in (234,255,276):
+bx,by,bw,bh=node[1]  # the target's ends and middle, each way
+for x in (bx,bx+bw//2,bx+bw-1):
+  for y in (by,by+bh//2,by+bh-1):
    for end in (U,A):
     m=Machine(); slider=m.node('slider','slider_play'); parent=m.node('window','playing_page',[slider])
     m.word(slider+O['W_PARENT'],parent)
@@ -319,7 +320,7 @@ assert m.paint(w3)==0 and m.selected(w3)==5; passed()
 # A wheel detent after recreation interrupts recall and sets the offset immediately.
 m,w,es=walk(10,5); w2,es2=m.page_list(10,extent=1000); m.glide=False
 assert m.call()==11 and m.selected(w2)==6
-assert m.moved()[-1][0]=='scroll_view_set_offset' and m.moved()[-1][3]==252; passed()
+assert m.moved()[-1][0]=='scroll_view_set_offset' and m.moved()[-1][3]==240; passed()  # whole rows (OLED's list_fit)
 
 # A live list whose row count changes resets the selection without re-reading the table.
 m,w,es=walk(10,5)
@@ -330,10 +331,10 @@ m.paint(w); assert m.selected(w)==0; passed()
 m=Machine(); w,_,entries=m.table_page()
 m.paint(w)
 for _ in range(2): assert m.call()==11
-assert m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==60
+assert m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48  # a whole row under the top (OLED's list_fit)
 m.rebind=None
 w2,_,entries2=m.table_page()
-m.paint(w2); assert m.selected(w2)==2 and m.get(w2+O['TABLE_TOP'])==60
+m.paint(w2); assert m.selected(w2)==2 and m.get(w2+O['TABLE_TOP'])==48
 assert m.confirm()==11 and m.dispatched()[0][1]==entries2[2]; passed()
 
 # Table recall survives interruption even when the target is outside the recycled row pool.
@@ -342,7 +343,7 @@ for wanted in (2,12):
     for _ in range(wanted): m.call()
     w2,rs2,es2=m.table_page(); m.glide=False
     m.touch(); m.paint(w2)
-    assert m.selected(w2)==wanted and m.moved()[-1][2]==(wanted-1)*48+12
+    assert m.selected(w2)==wanted and m.moved()[-1][2]==(wanted-1)*48
     # Rebind the pool as the restarted glide completes.
     top=(wanted-1)*48+12
     m.word(w2+O['TABLE_TOP'],top); m.word(w2+O['TABLE_ANIMATOR'],0)
@@ -664,14 +665,13 @@ m=Machine(); w,es=m.page_list(17,height=960,extent=17*48)
 m.nodes[w]['children']=es; m.paint(w)
 for want in (1,2,3,5,7):  # iPod: two rows from 300ms of spin
     assert m.call(gap=100)==11 and m.selected(w)==want
-m.nodes[w]['children']=es[:16]; m.paint(w)
-assert m.call(gap=100)==11 and m.selected(w)==1   # fresh one-row run on the short list
-for want in (2,3):
-    assert m.call(gap=100)==11 and m.selected(w)==want
-m.nodes[w]['children']=es; m.paint(w)
-assert m.call(gap=100)==11 and m.selected(w)==1   # and again after growing back
-for want in (2,3,5):
-    assert m.call(gap=100)==11 and m.selected(w)==want
+# The new count's paint selects the row in view (OLED's whole rows leave the list scrolled); from there:
+m.nodes[w]['children']=es[:16]; m.paint(w); at=m.selected(w)
+for want in (1,2,3):  # a fresh one-row run on the short list
+    assert m.call(gap=100)==11 and m.selected(w)==at+want
+m.nodes[w]['children']=es; m.paint(w); at=m.selected(w)
+for want in (1,2,3,5):  # and again after growing back
+    assert m.call(gap=100)==11 and m.selected(w)==at+want
 passed()
 
 # Sustained ticks ramp one row per 100ms of same-direction spin up to eight rows, then hold;
@@ -681,6 +681,7 @@ passed()
 # the last tick, rows per step then); every gap is inside the 140ms window, so the run is one.
 IPOD_SPIN=((0,1),(100,1),(100,1),(99,1),(1,2),(100,2),(99,2),(1,3),(100,3),(99,3),(1,4),(100,4),(99,4),
            (1,5),(100,5),(99,5),(1,6),(100,6),(99,6),(1,7),(100,7),(99,7),(1,8),(100,8))
+TICK_500=400_000  # a tick on OLED's set over this 500-row list runs past call()'s 100,000 instructions
 for table in (False,True):
     for start in (0,0xfffffff0):
         m=Machine(); m.now=start
@@ -693,11 +694,11 @@ for table in (False,True):
         # 299/300, 499/500 ... 1499/1500ms
         seq=[(gap,sum(g for _,g in IPOD_SPIN[:i+1])) for i,(gap,_) in enumerate(IPOD_SPIN)]
         for gap,want in seq:
-            assert m.call(gap=gap)==11 and m.selected(w)==want
+            assert m.call(gap=gap,count=TICK_500)==11 and m.selected(w)==want,(table,gap,want,m.selected(w))
         # 140ms still counts as spinning, 141ms breaks the run and drops back to one row.
-        assert m.call(gap=140)==11 and m.selected(w)==want+8
-        assert m.call(gap=141)==11 and m.selected(w)==want+9
-        assert m.call(O['KEY_PREV'],gap=1)==11 and m.selected(w)==want+8
+        assert m.call(gap=140,count=TICK_500)==11 and m.selected(w)==want+8
+        assert m.call(gap=141,count=TICK_500)==11 and m.selected(w)==want+9
+        assert m.call(O['KEY_PREV'],gap=1,count=TICK_500)==11 and m.selected(w)==want+8
         passed()
 # Pixel-scroll fallback keeps the 100ms ramp, and immediate offsets.
 m=Machine(); w=m.page(t='table_client')

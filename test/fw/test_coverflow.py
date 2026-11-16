@@ -18,6 +18,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 CX, TOP, ART, ONE, MISS = 187, 13, 160, 65536, 99
 VIEW_W, VIEW_H = 375, 220
 HOME_PW, HOME_H = 188, 290
+# Split's art pane as home_render fills it under the geometry set the build bakes (coverflow.c pane_w, pane_h), and a
+# cover zoomed 110% to cover it (slide_load)
+_G = host.tools_theme.built_geometry(host.tools_theme.builtins())
+PANE_W, PANE_H = 375 - _G.split_art, 320 - _G.bar + _G.split_art_up
+TEX_H = PANE_H * 11 // 10
 PREPARING, COVERS, TRACKS = range(3)
 ARTIST_ALBUMS, RATED_ALBUMS = 1, 2
 CF_REACH, CF_WIDE_REACH = 3, 7  # the ring's slots either side of the centre: fx_ring's, and its callers' window
@@ -283,7 +288,7 @@ def test_the_vignette_darkens_the_pane_s_top_50_and_bottom_40_screen_rows(fw):
     """V4: 0.25 + 0.75 t^1.6 of a row's brightness, t its distance from the edge over 50 px at the top and 40 at the
     bottom, in 256ths; the rows between untouched; alpha kept, each channel scaled."""
     k = fw.fn('coverflow__vig_k', C.c_uint, C.c_int)
-    up = 320 - HOME_H  # the frame's row 0 on the screen
+    up = 320 - fw.fn('coverflow__pane_h', C.c_int)()  # the frame's row 0 on the screen
     def screen(y):
         return k(y - up)
     assert [screen(y) for y in (0, 25, 49, 50, 160, 279, 280, 300, 319)] == [64, 127, 250, 256, 256, 256, 248, 122, 64]
@@ -297,11 +302,11 @@ def test_the_vignette_darkens_the_pane_s_top_50_and_bottom_40_screen_rows(fw):
 
 def test_a_flat_cover_renders_flat_at_any_phase(fw):
     g = api(fw)
-    tex = slide_tex(fw, 206, 319, lambda x, y: 0xff123456)
-    d = exact(C.c_uint, HOME_PW * HOME_H)
+    tex = slide_tex(fw, 206, TEX_H, lambda x, y: 0xff123456)
+    d = exact(C.c_uint, PANE_W * PANE_H)
     for u, v in ((0, 0), (128, 128), (257, 3), (1111, 2222), (18 * 256, 29 * 256)):
-        render(fw, d, HOME_PW, u, v)
-        assert all(d[i] == vigged(fw, 0xff123456, i // HOME_PW) for i in range(0, len(d), 7)), (u, v)
+        render(fw, d, PANE_W, u, v)
+        assert all(d[i] == vigged(fw, 0xff123456, i // PANE_W) for i in range(0, len(d), 7)), (u, v)
     libc.free(C.addressof(d))
     libc.free(C.addressof(tex))
 
@@ -309,12 +314,12 @@ def test_a_flat_cover_renders_flat_at_any_phase(fw):
 def test_a_ramp_comes_out_at_the_sub_pixel_position(fw):
     """A cubic B-spline reproduces straight lines: the output of a ramp reads the position sampled."""
     g = api(fw)
-    tex = slide_tex(fw, 206, 200 + 90, lambda x, y: 0xff400000 | x | min(y, 255) << 8)
-    d = exact(C.c_uint, HOME_PW * HOME_H)
+    tex = slide_tex(fw, 206, PANE_H + 90, lambda x, y: 0xff400000 | x | min(y, 255) << 8)
+    d = exact(C.c_uint, PANE_W * PANE_H)
     for u, v in ((0, 0), (64, 0), (128, 128), (1000, 192), (16 * 256 + 37, 0)):
-        render(fw, d, HOME_PW, u, v)
-        for py, px in ((60, 0), (100, 50), (150, 187), (163, 100)):  # rows clear of the vignette
-            c = d[py * HOME_PW + px]
+        render(fw, d, PANE_W, u, v)
+        for py, px in ((60, 0), (100, 50), (150, PANE_W - 1), (163, 100)):  # rows clear of the vignette
+            c = d[py * PANE_W + px]
             assert abs((c & 255) - (u / 256 + px + 1)) <= 1, (u, v, px)
             assert abs((c >> 8 & 255) - (v / 256 + py + 1)) <= 1, (u, v, py)
             assert c >> 16 == 0xff40
@@ -324,10 +329,10 @@ def test_a_ramp_comes_out_at_the_sub_pixel_position(fw):
 
 def test_render_at_the_pan_s_far_corner_stays_inside_the_border(fw):
     g = api(fw)
-    tw, th = 206, 319
+    tw, th = 206, TEX_H
     tex = slide_tex(fw, tw, th, lambda x, y: 0xff000000)
-    d = exact(C.c_uint, HOME_PW * HOME_H)
-    render(fw, d, HOME_PW, (tw - HOME_PW) * 256, (th - HOME_H) * 256)  # an overrun is the sanitizer's
+    d = exact(C.c_uint, PANE_W * PANE_H)
+    render(fw, d, PANE_W, (tw - PANE_W) * 256, (th - PANE_H) * 256)  # an overrun is the sanitizer's
     assert d[-1] == 0xff000000
     libc.free(C.addressof(d))
     libc.free(C.addressof(tex))
@@ -335,12 +340,12 @@ def test_render_at_the_pan_s_far_corner_stays_inside_the_border(fw):
 
 def test_render_honours_the_bitmap_s_pitch(fw):
     g = api(fw)
-    tex = slide_tex(fw, 206, 319, lambda x, y: 0xffffffff)
-    pitch = HOME_PW + 12
-    d = exact(C.c_uint, pitch * HOME_H)
+    tex = slide_tex(fw, 206, TEX_H, lambda x, y: 0xffffffff)
+    pitch = PANE_W + 12
+    d = exact(C.c_uint, pitch * PANE_H)
     render(fw, d, pitch, 300, 300)
-    assert all(d[y * pitch + HOME_PW - 1] == vigged(fw, 0xffffffff, y) and d[y * pitch + HOME_PW] == 0
-               for y in range(0, HOME_H, 7))
+    assert all(d[y * pitch + PANE_W - 1] == vigged(fw, 0xffffffff, y) and d[y * pitch + PANE_W] == 0
+               for y in range(0, PANE_H, 7))
     libc.free(C.addressof(d))
     libc.free(C.addressof(tex))
 
@@ -349,13 +354,13 @@ def test_render_honours_the_bitmap_s_pitch(fw):
 
 def fit(fw, w, h):
     a, b = C.c_int(), C.c_int()
-    api(fw).home_fit(w, h, HOME_H, r(a), r(b))  # the panel's height, as the caller passes it
+    api(fw).home_fit(w, h, PANE_H, r(a), r(b))  # the panel's height, as the caller passes it
     return a.value, b.value
 
 
 @pytest.mark.parametrize('w, h', ((0, 0), (0, 100), (100, 0), (8193, 100), (100, 8193), (2**31, 2**31)))
 def test_home_fit_unknown_sizes_fill_the_panel(fw, w, h):
-    assert fit(fw, w, h) == (HOME_PW, HOME_H)
+    assert fit(fw, w, h) == (PANE_W, PANE_H)
 
 
 def test_home_fit_just_covers_the_panel_at_its_proportions(fw):
@@ -363,17 +368,18 @@ def test_home_fit_just_covers_the_panel_at_its_proportions(fw):
     for _ in range(500):
         w, h = rng.randint(1, 8192), rng.randint(1, 8192)
         fw_, fh = fit(fw, w, h)
-        assert fw_ >= HOME_PW and fh >= HOME_H
-        assert fw_ == HOME_PW or fh == HOME_H  # one side exact: just covering
-        if fw_ == HOME_PW:
-            assert fh == math.ceil(HOME_PW * h / w)
+        assert fw_ >= PANE_W and fh >= PANE_H
+        assert fw_ == PANE_W or fh == PANE_H  # one side exact: just covering
+        if fw_ == PANE_W:
+            assert fh == math.ceil(PANE_W * h / w)
         else:
-            assert fw_ == math.ceil(HOME_H * w / h)
+            assert fw_ == math.ceil(PANE_H * w / h)
 
 
-@pytest.mark.parametrize('w, h, want', (
-    (188, 290, (188, 290)), (376, 580, (188, 290)), (500, 500, (290, 290)), (1000, 100, (2900, 290)), (100, 1000, (188, 1880)),
-    (8192, 8192, (290, 290)), (8192, 1, (2375680, 290)), (1, 8192, (188, 1540096))))
+@pytest.mark.parametrize('w, h, want', (  # a pane taller than wide (OLED's 179 x 320)
+    (PANE_W, PANE_H, (PANE_W, PANE_H)), (2 * PANE_W, 2 * PANE_H, (PANE_W, PANE_H)), (500, 500, (PANE_H, PANE_H)),
+    (1000, 100, (10 * PANE_H, PANE_H)), (100, 1000, (PANE_W, 10 * PANE_W)), (8192, 8192, (PANE_H, PANE_H)),
+    (8192, 1, (8192 * PANE_H, PANE_H)), (1, 8192, (PANE_W, 8192 * PANE_W))))
 def test_home_fit_exact_cases(fw, w, h, want):
     assert fit(fw, w, h) == want
 
@@ -3373,13 +3379,13 @@ def test_a_library_slides_ends_stay_inside_the_inset_one_zoomed_in_one_not(fw, l
 
 def test_a_zoomed_window_samples_the_cover_at_its_scale(fw):
     """A ramp through the zoom: each pixel reads the texel at u + x k, v + y k."""
-    tex = slide_tex(fw, 206, 290 + 90, lambda x, y: 0xff400000 | x | min(y, 255) << 8)
-    d = exact(C.c_uint, HOME_PW * HOME_H)
+    tex = slide_tex(fw, 206, PANE_H + 90, lambda x, y: 0xff400000 | x | min(y, 255) << 8)
+    d = exact(C.c_uint, PANE_W * PANE_H)
     k = O['KB_NEAR']
     for u, v in ((0, 0), (3 * 256 + 77, 5 * 256 + 3)):
-        render(fw, d, HOME_PW, u, v, k)
-        for py, px in ((60, 0), (100, 50), (150, 187), (200, 100)):  # rows clear of the vignette
-            c = d[py * HOME_PW + px]
+        render(fw, d, PANE_W, u, v, k)
+        for py, px in ((60, 0), (100, 50), (150, PANE_W - 1), (200, 100)):  # rows clear of the vignette
+            c = d[py * PANE_W + px]
             assert abs((c & 255) - (u / 256 + px * k / 65536 + 1)) <= 1, (u, px)
             assert abs((c >> 8 & 255) - (v / 256 + py * k / 65536 + 1)) <= 1, (v, py)
     libc.free(C.addressof(d))
@@ -3387,11 +3393,11 @@ def test_a_zoomed_window_samples_the_cover_at_its_scale(fw):
 
 
 def test_a_zoomed_out_window_at_the_far_corner_stays_inside_the_border(fw):
-    tw, th = 206, 319
+    tw, th = 206, TEX_H
     tex = slide_tex(fw, tw, th, lambda x, y: 0xff000000)
-    d = exact(C.c_uint, HOME_PW * HOME_H)
+    d = exact(C.c_uint, PANE_W * PANE_H)
     k = 65536 * 109 // 100  # wider than any slide's window
-    render(fw, d, HOME_PW, tw * 256 - HOME_PW * k // 256, th * 256 - HOME_H * k // 256, k)  # an overrun is the sanitizer's
+    render(fw, d, PANE_W, tw * 256 - PANE_W * k // 256, th * 256 - PANE_H * k // 256, k)  # an overrun is the sanitizer's
     assert d[-1] == 0xff000000
     libc.free(C.addressof(d))
     libc.free(C.addressof(tex))
@@ -3399,15 +3405,15 @@ def test_a_zoomed_out_window_at_the_far_corner_stays_inside_the_border(fw):
 
 def test_the_incoming_slide_is_laid_over_the_frame_by_its_share(fw):
     home = fw.var('coverflow__home', Home)
-    first = slide_tex(fw, 206, 319, lambda x, y: 0xff000000)
-    second = exact(C.c_uint, 209 * 322)
-    for i in range(209 * 322):
+    first = slide_tex(fw, 206, TEX_H, lambda x, y: 0xff000000)
+    second = exact(C.c_uint, 209 * (TEX_H + 3))
+    for i in range(209 * (TEX_H + 3)):
         second[i] = 0xffc8641e
-    home.sl[1].tex, home.sl[1].tw, home.sl[1].th = C.addressof(second), 206, 319
-    d = exact(C.c_uint, HOME_PW * HOME_H)
-    render(fw, d, HOME_PW, 0, 0)
-    render(fw, d, HOME_PW, 0, 0, blend=64, slide=1)
-    middle = d[60 * HOME_PW:(HOME_H - 50) * HOME_PW]  # rows clear of the vignette
+    home.sl[1].tex, home.sl[1].tw, home.sl[1].th = C.addressof(second), 206, TEX_H
+    d = exact(C.c_uint, PANE_W * PANE_H)
+    render(fw, d, PANE_W, 0, 0)
+    render(fw, d, PANE_W, 0, 0, blend=64, slide=1)
+    middle = d[60 * PANE_W:(PANE_H - 50) * PANE_W]  # rows clear of the vignette
     assert set(middle) == {0xff000000 | (0xc8 * 64 + 128) >> 8 << 16 | (0x64 * 64 + 128) >> 8 << 8 | (0x1e * 64 + 128) >> 8}
     for b in (first, second, d):
         libc.free(C.addressof(b))
