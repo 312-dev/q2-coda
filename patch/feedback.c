@@ -357,7 +357,8 @@ void empty_paint(void *w, void *canvas, const empty_t *e, int top) {
     tk_snprintf(art, sizeof art, "empty_%s_%c", glyph ? e->glyph : "", light ? 'l' : 'd');
     if (glyph) paint_art(w, canvas, theme_art(art), 375 / 2 - ES_GLYPH / 2, top);
     int ty = top + (glyph ? ES_GLYPH + ES_GLYPH_GAP : 0);
-    ui_text(canvas, e->title ? e->title : "", 1, ES_TITLE_PX, flip_if(light, 0xffffff), 0, 375 / 2,
+    /* Text Primary: white, which ui_ink turns black on Light Mode's paper */
+    ui_text(canvas, e->title ? e->title : "", 1, ES_TITLE_PX, 0xffffff, 0, 375 / 2,
             ty + ES_TITLE_H / 2 - 1, 375 - 48, 1);
     ui_text(canvas, e->hint ? e->hint : "", 0, ES_HINT_PX, tok(TOK_SECONDARY), 0, 375 / 2,
             ty + ES_TITLE_H + ES_HINT_H / 2, 375 - 48, 1);

@@ -603,6 +603,17 @@ def test_no_match_is_the_empty_state_centred_above_the_strip(fw, ui, song, st):
     assert fw.fn('empty_top', C.c_int, C.c_int, C.c_int, C.c_int)(58, 58 + 196, 0) - 58 == top
 
 
+@pytest.mark.parametrize('light', [0, 1])
+def test_the_empty_state_s_title_reads_in_either_half(fw, ui, song, st, light):
+    """The empty state's title is Text Primary: white on the black canvas, black on Light Mode's paper (emulator,
+    2026-11-16: it was flipped twice in Light Mode, white on white, so only the glyph and hint showed)."""
+    s = Strip(fw, ui, library(song))
+    st('light').value = light
+    s.type('zz')
+    title = [colour for t, _, colour in painted(fw, s).texts if t == 'No Matches']
+    assert title and rgb(title[0]) == (0x000000 if light else 0xffffff), [hex(c) for c in title]
+
+
 class Renames:
     """sqlite3_exec as Rename runs it: the name lookup's count (taken, else 0), the rest logged; fail fails an
     update."""
