@@ -263,13 +263,16 @@ int feedback_empty(void *parent, int free, const char *message, const char *hint
  * to show: the page's glyph in outline (tools/art.py EMPTY_GLYPHS, ES_GLYPH px, Text Secondary), a
  * title ES_GLYPH_GAP under it in Inter Medium 20, a hint in 15 px Text Secondary and, when the page
  * has one, its button (ui_kit.c ui_cta_paint) CTA_GAP_ABOVE under it; the whole stack centred
- * between free_top (or the status row's foot) and the screen's. A view over the page holds it
- * (ES_NAME, its words and top in its props, painted by empty_state_paint; insensitive, so rows
- * above it keep their taps). The button is a one-row list (ES_ROW_NAME) the wheel and Centre reach
- * as any, its row the button's band, its own words hidden: the capsule and its label are painted
- * with the stack, ringed by the focus rule (docs/oled-design.md#focus-ring), and the list's
- * selection bar is not drawn (empty_button). A page drawn by its own painter (Search's sheet)
- * paints the stack itself (empty_paint, at empty_top).
+ * between free_top (or the status row's foot) and the screen's. Under rows the page keeps above it
+ * (a free_top past the set's bar: Car Remote's switch, Playlists' On-The-Go) it is the compact
+ * form, the title and hint (and button) with no glyph, as the glyph is for a page that is empty
+ * whole. A view over the page holds it (ES_NAME, its words and top in its props, painted by
+ * empty_state_paint; insensitive, so rows above it keep their taps). The button is a one-row list
+ * (ES_ROW_NAME) the wheel and Centre reach as any, its row the button's band, its own words hidden:
+ * the capsule and its label are painted with the stack, ringed by the focus rule
+ * (docs/oled-design.md#focus-ring), and the list's selection bar is not drawn (empty_button). A
+ * page drawn by its own painter (Search's sheet) paints the stack itself (empty_paint, at
+ * empty_top).
  */
 #define ES_NAME "_empty_state"
 #define ES_ROW_NAME "_empty_row"
@@ -282,15 +285,22 @@ int feedback_empty(void *parent, int free, const char *message, const char *hint
 #define CTA_GAP_ABOVE 20
 #define ES_TITLE_PX TYPE(20) /* Inter Medium 20, AWTK's size */
 #define ES_HINT_PX TYPE(15)  /* Inter 15 */
-#define ES_TEXT (ES_GLYPH + ES_GLYPH_GAP + ES_TITLE_H + ES_HINT_H)
+#define ES_WORDS (ES_TITLE_H + ES_HINT_H)
+#define ES_TEXT (ES_GLYPH + ES_GLYPH_GAP + ES_WORDS)
+/* Whether the empty state under free_top is the compact form: rows above it on the page. */
+int empty_compact(int free_top) { return free_top > geom_val(V_BAR) && free_top > ES_TOP; }
+/* The stack's height down to its button's gap: the glyph's part only in the full form. */
+static int es_text(int compact) { return compact ? ES_WORDS : ES_TEXT; }
 /* The stack's top, centred between free_top (the status row's foot at least) and free_end. */
 int empty_top(int free_top, int free_end, int row) {
-    int stack = ES_TEXT + (row ? CTA_GAP_ABOVE + CTA_H : 0),
+    int stack = es_text(empty_compact(free_top)) + (row ? CTA_GAP_ABOVE + CTA_H : 0),
         from = free_top > ES_TOP ? free_top : ES_TOP;
     return from + (free_end - from - stack) / 2;
 }
 /* The button's screen y, for a page whose own widget is the button (Songs' Scan Music Now). */
-int empty_row_y(int free_top) { return empty_top(free_top, ES_END, 1) + ES_TEXT + CTA_GAP_ABOVE; }
+int empty_row_y(int free_top) {
+    return empty_top(free_top, ES_END, 1) + es_text(empty_compact(free_top)) + CTA_GAP_ABOVE;
+}
 /* The empty state in page, made once and written again on each call: e 0 hides it (0). An e with a
  * row but no on_row keeps the button's place in the stack for the caller's own (empty_row_y). The
  * row list is made with the view; a later call shows or hides it but keeps its words and click. */
@@ -302,13 +312,14 @@ int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *
         if (row) widget_set_visible(row, 0, 0);
         return 0;
     }
-    int y = screen_y(page), top = empty_top(free_top, ES_END, e->row != 0);
+    int y = screen_y(page), top = empty_top(free_top, ES_END, e->row != 0),
+        compact = empty_compact(free_top);
     if (!art) {
         art = widget_factory_create_widget(widget_factory(), "view", page, 0, 0, 375, I(page, W_H));
         widget_set_name(art, ES_NAME);
         widget_set_sensitive(art, 0);
     }
-    widget_set_prop_str(art, "_es_glyph", e->glyph ? e->glyph : "");
+    widget_set_prop_str(art, "_es_glyph", e->glyph && !compact ? e->glyph : ""); /* "": compact */
     widget_set_prop_str(art, "_es_title", e->title ? e->title : "");
     widget_set_prop_str(art, "_es_hint", e->hint ? e->hint : "");
     widget_set_prop_str(art, "_es_row", e->row && on_row ? e->row : "");
@@ -318,7 +329,8 @@ int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *
     if (row)
         widget_set_visible(row, e->row && on_row, 0);
     else if (e->row && on_row) {
-        void *view = rows_view(page, top + ES_TEXT + CTA_GAP_ABOVE - y, 375, CTA_H, 1, CTA_H);
+        void *view =
+            rows_view(page, top + es_text(compact) + CTA_GAP_ABOVE - y, 375, CTA_H, 1, CTA_H);
         widget_set_name(P(view, W_PARENT), ES_ROW_NAME);
         widget_set_prop_int(P(view, W_PARENT), "style:normal:bg_color",
                             0);                  /* the capsule under it */
@@ -337,13 +349,14 @@ int empty_button(void *list) {
     void *p = list ? P(list, W_PARENT) : (void *)0;
     return p && !tk_strcmp(widget_get_prop_str(p, "name", ""), ES_ROW_NAME);
 }
-/* The stack painted in w at top (a y in w); its button, when e->row, selected or not. */
+/* The stack painted in w at top (a y in w); its button, when e->row, selected or not. No glyph
+ * (0 or ""): the compact form, the title at top. */
 void empty_paint(void *w, void *canvas, const empty_t *e, int top) {
-    int light = ipod_light();
+    int light = ipod_light(), glyph = e->glyph && *e->glyph;
     char art[48];
-    tk_snprintf(art, sizeof art, "empty_%s_%c", e->glyph ? e->glyph : "", light ? 'l' : 'd');
-    paint_art(w, canvas, theme_art(art), 375 / 2 - ES_GLYPH / 2, top);
-    int ty = top + ES_GLYPH + ES_GLYPH_GAP;
+    tk_snprintf(art, sizeof art, "empty_%s_%c", glyph ? e->glyph : "", light ? 'l' : 'd');
+    if (glyph) paint_art(w, canvas, theme_art(art), 375 / 2 - ES_GLYPH / 2, top);
+    int ty = top + (glyph ? ES_GLYPH + ES_GLYPH_GAP : 0);
     ui_text(canvas, e->title ? e->title : "", 1, ES_TITLE_PX, flip_if(light, 0xffffff), 0, 375 / 2,
             ty + ES_TITLE_H / 2 - 1, 375 - 48, 1);
     ui_text(canvas, e->hint ? e->hint : "", 0, ES_HINT_PX, tok(TOK_SECONDARY), 0, 375 / 2,
@@ -362,7 +375,8 @@ void empty_state_paint(void *w, void *canvas) {
     if (list && widget_get_visible(row)) {
         /* selected: the wheel's list is the button's, on its one row */
         int sel = g_menu.w == list && widget_get_prop_int(list, SEL, -1) == 0 ? 0 : -1;
-        ui_cta_paint(canvas, &label, 1, top + ES_TEXT + CTA_GAP_ABOVE, sel, pointer_down() && !sel);
+        ui_cta_paint(canvas, &label, 1, top + es_text(!*e.glyph) + CTA_GAP_ABOVE, sel,
+                     pointer_down() && !sel);
     }
 }
 /* A list page with nothing listed (page_list's, no rows): the empty state in body, the page's name

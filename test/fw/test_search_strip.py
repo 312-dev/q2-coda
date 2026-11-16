@@ -9,6 +9,7 @@ import pytest
 
 from conftest import O
 from test_nav_library_pages import Config, Library, Songs, Ui, field
+from test_nav_display_library import use_set
 from test_nav_painters import scratch, st  # noqa: F401  (fixtures: the payload's state)
 
 KEY_RETURN, KEY_CENTER, KEY_PREV, KEY_NEXT, KEY_PLAY, KEY_FWD_BTN, KEY_BACK_BTN = (
@@ -586,11 +587,12 @@ def test_a_server_song_that_cannot_play_is_greyed_with_the_offline_mark(fw, ui, 
     assert {t: colour for t, r, colour in c.texts}['Song Two'] == 0xb3ffffff
 
 
-def test_no_match_is_the_empty_state_centred_above_the_strip(fw, ui, song):
+def test_no_match_is_the_empty_state_centred_above_the_strip(fw, ui, song, st):
     """docs/oled-design.md#empty-and-offline: typed text that matches nothing paints the empty state, its outline
     glyph, "No Matches" and "Try fewer letters", centred between the status row (the page at screen y 58) and the
     strip (196 on the sheet): its 118 px stack from sheet y 39, no tiles."""
     s = Strip(fw, ui, library(song))
+    use_set(st, 'oled')  # its bar ends at 58: nothing above the page, so the whole form, its glyph
     struct.pack_into('<i', (C.c_char * 8).from_address(s.ss.page), 4, 58)  # the page under the status row
     s.type('zz')
     c = painted(fw, s)
