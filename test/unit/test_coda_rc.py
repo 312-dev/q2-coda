@@ -240,9 +240,72 @@ def test_one_pairing_at_a_time(fresh):
     with pytest.raises(client.RemoteError) as e:
         b.pair_start()
     assert e.value.name == 'BUSY'
-    fresh.crc_close(a.sock.s)  # the first phone goes: the code goes with it
-    assert var(fresh, 'hidden').value == -1
-    assert len(b.pair_start()) == 32
+    fresh.crc_close(a.sock.s)  # the first phone goes: its code stays up for its return, but no longer holds the Q2
+    assert var(fresh, 'hidden').value == -9
+    assert len(b.pair_start()) == 32 and (ctypes.c_char * 32).in_dll(fresh, 'shown_name').value == b'b'
+
+
+def test_a_phone_that_reconnects_keeps_its_code(fresh):
+    """The Q2's log of a pairing that failed (2026-11-16): shown, ended, shown, wrong code. The phone's
+    connection dropped and came back while the user typed; the code on screen must stay the one that works."""
+    a = client.Session(Core(fresh, 0), 'Pixel 10 Pro')
+    a.hello()
+    a.pair_start()
+    code = shown(fresh)
+    fresh.crc_close(a.sock.s)
+    assert var(fresh, 'hidden').value == -9 and shown(fresh) == code  # the Dialog stays up, its code too
+    b = client.Session(Core(fresh, 1), 'Pixel 10 Pro')
+    b.hello()
+    point = b.pair_start()
+    assert shown(fresh) == code
+    peer, ltk = b.pair_finish(code, point)
+    assert var(fresh, 'hidden').value == 1 and len(peer) == 8
+
+
+def test_a_kept_code_still_lives_120_s_and_takes_one_guess(fresh):
+    a = client.Session(Core(fresh, 0), 'Pixel 8')
+    a.hello()
+    a.pair_start()
+    code = shown(fresh)
+    fresh.crc_close(a.sock.s)
+    var(fresh, 'now_ms', ctypes.c_uint32).value += 60000
+    fresh.crc_tick()
+    b = client.Session(Core(fresh, 1), 'Pixel 8')
+    b.hello()
+    point = b.pair_start()
+    assert shown(fresh) == code
+    wrong = '%06d' % ((int(code) + 1) % 1000000)
+    with pytest.raises(client.RemoteError) as e:
+        b.pair_finish(wrong, point)
+    assert e.value.name == 'PAIRING_FAILED' and not shown(fresh)  # a wrong guess still ends the code
+    c = client.Session(Core(fresh, 2), 'Pixel 8')
+    c.hello()
+    c.pair_start()
+    code = shown(fresh)
+    fresh.crc_close(c.sock.s)
+    var(fresh, 'now_ms', ctypes.c_uint32).value += 120001  # 120 s from when it was first shown, whoever holds it
+    fresh.crc_tick()
+    assert var(fresh, 'hidden').value == -1 and not shown(fresh)
+    d = client.Session(Core(fresh, 3), 'Pixel 8')
+    d.hello()
+    d.pair_start()
+    assert shown(fresh) and shown(fresh) != code
+
+
+def test_another_phone_gets_a_code_of_its_own(fresh):
+    a = client.Session(Core(fresh, 0), 'Pixel 8')
+    a.hello()
+    a.pair_start()
+    code = shown(fresh)
+    b = client.Session(Core(fresh, 1), 'Car tablet')
+    b.hello()
+    with pytest.raises(client.RemoteError) as e:  # while the first is connected, one pairing at a time
+        b.pair_start()
+    assert e.value.name == 'BUSY'
+    fresh.crc_close(a.sock.s)
+    point = b.pair_start()
+    assert (ctypes.c_char * 32).in_dll(fresh, 'shown_name').value == b'Car tablet' and shown(fresh) != code
+    b.pair_finish(shown(fresh), point)
 
 
 def test_code_expires_and_cancel_ends_it(fresh):

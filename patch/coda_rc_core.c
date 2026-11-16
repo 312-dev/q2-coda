@@ -154,20 +154,32 @@ int crc_error(crc_session *s, unsigned req_id, int code, const char *message) {
 
 /* ---- pairing ---- */
 
-/* One pairing at a time for the whole device, so the code on the screen belongs to one session. */
+/* One pairing at a time for the whole device, so the code on the screen belongs to one phone. The
+ * code lives CRC_PAIR_TIMEOUT_MS from when it was shown, whichever of that phone's sessions holds it:
+ * a phone whose connection drops while the user types reconnects to the same code
+ * (docs/remote-protocol.md#pairing-a-pake-on-the-6-digit-code). Keeping it costs nothing: a session
+ * that never sends PairFinish learns nothing of the code, and a wrong guess still ends it. */
 static struct {
-    crc_session *owner;
-    char code[7];
+    crc_session *owner;  /* the session pairing on the code; 0 while its phone reconnects */
+    char code[7];        /* the code on screen; empty when none */
+    char name[CRC_NAME]; /* the phone it is shown for */
     uint32_t since, locked_until;
     int fails;
 } pair;
 
-static void pair_end(int outcome) {
+/* The owner's part in the pairing wiped, the code kept */
+static void pair_leave(void) {
     if (!pair.owner) return;
     crypto_wipe(pair.owner->scalar, 32);
-    crypto_wipe(pair.code, sizeof pair.code);
     if (pair.owner->state == S_PAIRING) pair.owner->state = S_HELLO;
     pair.owner = 0;
+}
+
+static void pair_end(int outcome) {
+    if (!pair.code[0]) return;
+    pair_leave();
+    crypto_wipe(pair.code, sizeof pair.code);
+    crypto_wipe(pair.name, sizeof pair.name);
     crc_pair_hide(outcome);
 }
 
@@ -209,15 +221,21 @@ static int pair_start(crc_session *s, unsigned req_id, const uint8_t *p, size_t 
         return crc_error(s, req_id, E_PAIRING_FULL, "forget a phone on the Q2 first");
     if (locked()) return crc_error(s, req_id, E_PAIRING_LOCKED, "too many wrong codes; try again later");
     if (pair.owner && pair.owner != s) return crc_error(s, req_id, E_BUSY, "another phone is pairing");
-    pair_end(-1);
+    const char *name = s->client_name[0] ? s->client_name : "Phone";
+    pair_leave();
+    if (!pair.code[0] || strcmp(pair.name, name) ||
+        crc_now_ms() - pair.since > CRC_PAIR_TIMEOUT_MS) {  /* else the same phone again: the same code */
+        pair_end(-1);
+        pair.since = crc_now_ms();
+        new_code(pair.code);
+        memcpy(pair.name, name, strlen(name) + 1); /* client_name holds under CRC_NAME */
+        crc_pair_show(pair.code, name);
+    }
     pair.owner = s;
-    pair.since = crc_now_ms();
-    new_code(pair.code);
     generator(s->gen, pair.code, s->sid);
     crc_random(s->scalar, 32);
     crypto_x25519(s->dpoint, s->scalar, s->gen);
     s->state = S_PAIRING;
-    crc_pair_show(pair.code, s->client_name[0] ? s->client_name : "Phone");
     uint8_t b[40];
     pbw w = {b, 0, sizeof b, 0};
     pb_bytes(&w, 1, s->dpoint, 32);
@@ -281,15 +299,14 @@ static int pair_finish(crc_session *s, unsigned req_id, const uint8_t *p, size_t
 }
 
 void crc_tick(void) {
-    if (!pair.owner) return;
+    if (!pair.code[0]) return;
+    crc_session *s = pair.owner;
     if (crc_pair_cancelled()) {
-        crc_session *s = pair.owner;
         pair_end(-1);
-        crc_error(s, 0, E_PAIRING_CANCELLED, "canceled on the Q2");
+        if (s) crc_error(s, 0, E_PAIRING_CANCELLED, "canceled on the Q2");
     } else if (crc_now_ms() - pair.since > CRC_PAIR_TIMEOUT_MS) {
-        crc_session *s = pair.owner;
         pair_end(-1);
-        crc_error(s, 0, E_PAIRING_FAILED, "the code expired");
+        if (s) crc_error(s, 0, E_PAIRING_FAILED, "the code expired");
     }
 }
 
@@ -435,7 +452,7 @@ int crc_feed(crc_session *s, const uint8_t *p, size_t n) {
 }
 
 void crc_close(crc_session *s) {
-    if (pair.owner == s) pair_end(-1);
+    if (pair.owner == s) pair_leave(); /* the code stays up for the phone's next session */
     s->state = S_CLOSED;
     crypto_wipe(s->ltk, sizeof s->ltk);
     crypto_wipe(s->kc, sizeof s->kc);
