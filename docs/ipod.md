@@ -144,7 +144,11 @@ Split narrows both menus to the geometry set's `split_row` (OLED's 204; `HOME_SP
 screen, in the built-in set) and shows the cover itself in the panel right of them, from `split_art`
 (OLED's 196) to the screen's edge, and with OLED's `split_art_up` from the top edge, under the status
 row ([Theme](#theme)) (`img_homeart` is an `image` for this, fitted to the cover's proportions and
-clipped to the panel, the menus clipped left of it; `default_album_home` without a cover); Full
+clipped to the panel, the menus clipped left of it; `default_album_home` without a cover). The cover's top
+50 and bottom 40 rows on the screen are darkened toward 25% brightness, 0.25 + 0.75 t^1.6 of each row, t its
+distance from the edge over the fade (`coverflow.c` `vig_k`, the V4 vignette approved on 2026-11-15), as the frame
+is drawn (`home_render`), so the status row's glyphs, which take white or black from the frame under them
+(`home_ink`), read the darkened art; Full
 hides the art and widens the menus to the screen, their rows to `home.rows.full_row` (375). Where
 the theme's face lacks a character of a label's text, stock's font stands in, which has CJK
 ([internals](internals.md#themes), Faces). The chevron is the theme's own glyph on every row that

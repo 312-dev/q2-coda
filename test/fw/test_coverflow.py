@@ -272,13 +272,35 @@ def render(fw, d, pitch, u, v, k=65536, blend=0, slide=0):
     api(fw).home_render(d, pitch, C.addressof(home.sl[slide]), u, v, k, blend)
 
 
+def vigged(fw, c, y):
+    """c as the vignette leaves it on the frame's row y (coverflow.c vig_k, vig)."""
+    k = fw.fn('coverflow__vig_k', C.c_uint, C.c_int)(y)
+    return c if k >= 256 else fw.fn('coverflow__vig', C.c_uint, C.c_uint, C.c_uint)(c, k)
+
+
+def test_the_vignette_darkens_the_pane_s_top_50_and_bottom_40_screen_rows(fw):
+    """V4: 0.25 + 0.75 t^1.6 of a row's brightness, t its distance from the edge over 50 px at the top and 40 at the
+    bottom, in 256ths; the rows between untouched; alpha kept, each channel scaled."""
+    k = fw.fn('coverflow__vig_k', C.c_uint, C.c_int)
+    up = 320 - HOME_H  # the frame's row 0 on the screen
+    def screen(y):
+        return k(y - up)
+    assert [screen(y) for y in (0, 25, 49, 50, 160, 279, 280, 300, 319)] == [64, 127, 250, 256, 256, 256, 248, 122, 64]
+    for y in range(50):
+        assert screen(y) == round(256 * (0.25 + 0.75 * (y / 50) ** 1.6))
+    for d in range(40):
+        assert screen(319 - d) == round(256 * (0.25 + 0.75 * (d / 40) ** 1.6))
+    vig = fw.fn('coverflow__vig', C.c_uint, C.c_uint, C.c_uint)
+    assert vig(0x80ff8040, 64) == 0x803f2010 and vig(0xffffffff, 256) == 0xffffffff
+
+
 def test_a_flat_cover_renders_flat_at_any_phase(fw):
     g = api(fw)
     tex = slide_tex(fw, 206, 319, lambda x, y: 0xff123456)
     d = exact(C.c_uint, HOME_PW * HOME_H)
     for u, v in ((0, 0), (128, 128), (257, 3), (1111, 2222), (18 * 256, 29 * 256)):
         render(fw, d, HOME_PW, u, v)
-        assert all(x == 0xff123456 for x in d), (u, v)
+        assert all(d[i] == vigged(fw, 0xff123456, i // HOME_PW) for i in range(0, len(d), 7)), (u, v)
     libc.free(C.addressof(d))
     libc.free(C.addressof(tex))
 
@@ -290,7 +312,7 @@ def test_a_ramp_comes_out_at_the_sub_pixel_position(fw):
     d = exact(C.c_uint, HOME_PW * HOME_H)
     for u, v in ((0, 0), (64, 0), (128, 128), (1000, 192), (16 * 256 + 37, 0)):
         render(fw, d, HOME_PW, u, v)
-        for py, px in ((0, 0), (100, 50), (150, 187), (163, 100)):
+        for py, px in ((60, 0), (100, 50), (150, 187), (163, 100)):  # rows clear of the vignette
             c = d[py * HOME_PW + px]
             assert abs((c & 255) - (u / 256 + px + 1)) <= 1, (u, v, px)
             assert abs((c >> 8 & 255) - (v / 256 + py + 1)) <= 1, (u, v, py)
@@ -316,7 +338,8 @@ def test_render_honours_the_bitmap_s_pitch(fw):
     pitch = HOME_PW + 12
     d = exact(C.c_uint, pitch * HOME_H)
     render(fw, d, pitch, 300, 300)
-    assert all(d[y * pitch + HOME_PW - 1] == 0xffffffff and d[y * pitch + HOME_PW] == 0 for y in range(0, HOME_H, 7))
+    assert all(d[y * pitch + HOME_PW - 1] == vigged(fw, 0xffffffff, y) and d[y * pitch + HOME_PW] == 0
+               for y in range(0, HOME_H, 7))
     libc.free(C.addressof(d))
     libc.free(C.addressof(tex))
 
@@ -3334,7 +3357,7 @@ def test_a_zoomed_window_samples_the_cover_at_its_scale(fw):
     k = O['KB_NEAR']
     for u, v in ((0, 0), (3 * 256 + 77, 5 * 256 + 3)):
         render(fw, d, HOME_PW, u, v, k)
-        for py, px in ((0, 0), (100, 50), (150, 187), (200, 100)):
+        for py, px in ((60, 0), (100, 50), (150, 187), (200, 100)):  # rows clear of the vignette
             c = d[py * HOME_PW + px]
             assert abs((c & 255) - (u / 256 + px * k / 65536 + 1)) <= 1, (u, px)
             assert abs((c >> 8 & 255) - (v / 256 + py * k / 65536 + 1)) <= 1, (v, py)
@@ -3363,7 +3386,8 @@ def test_the_incoming_slide_is_laid_over_the_frame_by_its_share(fw):
     d = exact(C.c_uint, HOME_PW * HOME_H)
     render(fw, d, HOME_PW, 0, 0)
     render(fw, d, HOME_PW, 0, 0, blend=64, slide=1)
-    assert set(d) == {0xff000000 | (0xc8 * 64 + 128) >> 8 << 16 | (0x64 * 64 + 128) >> 8 << 8 | (0x1e * 64 + 128) >> 8}
+    middle = d[60 * HOME_PW:(HOME_H - 50) * HOME_PW]  # rows clear of the vignette
+    assert set(middle) == {0xff000000 | (0xc8 * 64 + 128) >> 8 << 16 | (0x64 * 64 + 128) >> 8 << 8 | (0x1e * 64 + 128) >> 8}
     for b in (first, second, d):
         libc.free(C.addressof(b))
 
@@ -3444,7 +3468,7 @@ def test_play_starting_mid_library_fade_fades_from_the_frame_as_it_stands(fw):
             assert all(abs((p >> s & 255) - (q >> s & 255)) <= 1 for s in (0, 8, 16)), (x, y, hex(p), hex(q))
     home.fade = O['SLIDE_FADE_MS'] - 1
     assert frame()
-    p = pixels_of(b, home.frame)[10][10]
+    p = pixels_of(b, home.frame)[100][10]  # a row clear of the vignette
     assert p & 255 <= 1 and 198 <= p >> 8 & 255 <= 200 and p >> 16 & 255 <= 1  # all but a 256th the green
 
 
