@@ -583,6 +583,11 @@ folders reloads the folder page in place, so only opening and leaving that page 
 drops every key and touch while a page slides; none is queued
 ([internals.md](internals.md#page-transitions-ipod)).
 
+A drag right from the screen's left edge is Return by touch ([internals](internals.md#swipe-back),
+`patch/swipe_back.c`): the page, or on Home the list a row opened, follows the finger over black,
+and let go past 40% of the width or flicked it slides on and Return goes back, with the window's
+own close slide left out; let go short it springs back.
+
 A theme can set these from its `motion` view ([internals](internals.md#themes), Motion); OLED takes
 the defaults from `patch/offsets.inc`, so its pages open and close with stock's slide or none, as
 above, and confirms, add to playlist, the hold menu and every other dialog show at once, with no

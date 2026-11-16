@@ -762,6 +762,18 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
 - **Toasts** with a 15 px glyph beside the words: Unplugged (Text Secondary), OK to Disconnect (Positive green),
   USB Audio Ready (white).
 
+### Gestures
+
+- **Swipe back**, as iOS's: a finger that comes down within 24 px of the screen's left edge and
+  drags right takes the page with it, the status row staying; what it uncovers is black. Let go
+  past 40% of the width, or flicked right, and the page slides on off the right edge and Return
+  goes back; let go short and it springs back. Both take the page slide's 120 ms, `cubic_out`.
+  Wherever Return leaves a page: a page over another, and on Home the list a row opened
+  (Settings, Streaming). A drag up or down from the edge scrolls as anywhere; a sideways drag that
+  starts mid-screen stays the screen's own (Now Playing's pages, Cover Flow, the letter strip,
+  sliders). Not on Home's own list, dialogs, Control Center or the keyboard
+  ([internals](internals.md#swipe-back)).
+
 ### Motion
 
 - Page push and pop: 220 ms horizontal slide, `cubic_out`.

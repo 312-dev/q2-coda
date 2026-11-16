@@ -6177,6 +6177,11 @@ int ringnav_touch(void *ctx, void *event) {
     /* a press on a Library row (OLED): its hold, in Edit Library its grip (library_edit.c) */
     if (!result && event && I(event, EVENT_TYPE) == EVT_POINTER_DOWN && lr_edit_touch(event))
         return result;
+    /* a press near the left edge may be a swipe back (swipe_back.c); not where Return stays on
+     * the page: full-screen lyrics go back to the column, the rating picker closes */
+    if (!result)
+        swipe_back_down(event, !st.rt_page && !(st.np_full && window_manager_get_top_window(
+                                                                  window_manager()) == st.np_win));
     /* Pointer-down must not recall/rebind the row that native touch is about to hit. */
     if (!result && w && load_rows(&g_menu, w)) {
         stop_scroll(&g_menu);
@@ -9356,6 +9361,7 @@ int ringnav_sleep(void *loop) {
     power_poll();
     thumb_poll();
     tilt_poll();
+    swipe_back_poll();
     lyric_poll();
     keep_lit_poll();
     np_art_poll();
