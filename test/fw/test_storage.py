@@ -7,7 +7,7 @@ import pytest
 
 from conftest import O, Files
 from test_battery import MOUNTS, SEL, Page
-from test_peq_page import Canvas, oled
+from test_peq_page import Canvas
 
 APP = '/mnt/mmc/.subsonic'
 TSV = ('#Q2STORE/1\tlimit=16000\tdownloads=8200000000\tcache=1600000000\n'
@@ -21,7 +21,7 @@ class Storage(Page):
     """The pages on Page's stubs: a card with .subsonic's q2app (storage=1) and its file, 64 GB (61,035 MiB) of
     which 25.6 GB (24,414 MiB) are free; each page its own window."""
     def __init__(self, fw, tsv=TSV):
-        said = oled(fw)
+        said = []
         super().__init__(fw)
         self.toasts = said
         fw.mock('navigator_to_with_context', lambda name, info, *_: said.append(C.string_at(info + 8).decode()) or 0)

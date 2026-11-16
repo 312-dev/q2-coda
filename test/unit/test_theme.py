@@ -439,7 +439,7 @@ def test_coverflow_range_rejects(monkeypatch, field, value):
 @pytest.mark.parametrize('field,value,message', [
     ('cf.top', 15, 'top \\+ 160 \\+ reflect = 221 exceeds 220'), ('cf.reflect', 48, 'top \\+ 160 \\+ reflect = 221 exceeds 220'),
     ('cf.view_h', 263, 'view_h 263 exceeds the client height 262'),
-    ('cf.bright2', 193, 'bright2 193 exceeds bright1 192'), ('cf.text_y', 213, 'text_y \\+ 50 = 263 exceeds the client height 262'),
+    ('cf.bright2', 193, 'bright2 193 exceeds bright1 192'), ('cf.text_y', 208, 'text_y \\+ 55 = 263 exceeds the client height 262'),
     ('cf.row_out', 29, 'row_out 29 puts 16 covers of the held row on the screen, past CF_WIDE 15')])
 def test_coverflow_cross_rejects(field, value, message):
     with pytest.raises(theme.ThemeError, match=message):
@@ -502,13 +502,13 @@ def test_coverflow_swing_near_edge_clears_the_eye_mid_step():
 def test_coverflow_caption_follows_the_bar(monkeypatch):
     monkeypatch.setitem(theme.GEOMETRIES, 'tall', Geometry(name='tall', bar=34, right_x=28))
     t = {**oled(), 'geom_set': 'tall'}
-    with pytest.raises(theme.ThemeError, match='text_y \\+ 50 = 287 exceeds the client height 286'):
-        theme.validate({**t, 'cf.text_y': 237}, 't.xml')
-    theme.validate({**t, 'cf.text_y': 236}, 't.xml')
+    with pytest.raises(theme.ThemeError, match='text_y \\+ 55 = 287 exceeds the client height 286'):
+        theme.validate({**t, 'cf.text_y': 232}, 't.xml')
+    theme.validate({**t, 'cf.text_y': 231}, 't.xml')
 
 
 def test_coverflow_edges_pass():   # each limit itself is allowed
-    for edge in ({'cf.top': 14}, {'cf.text_y': 212}, {'cf.bright2': 192}):
+    for edge in ({'cf.top': 14}, {'cf.text_y': 207}, {'cf.bright2': 192}):
         theme.validate({**oled(), **edge}, 't.xml')
     theme.validate({**oled(), 'cf.eye': 2046, 'cf.x1': 1023, 'cf.xs': 0}, 't.xml')
 

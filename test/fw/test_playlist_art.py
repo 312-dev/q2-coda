@@ -321,9 +321,9 @@ def test_a_playlist_s_own_read_pages_every_row(fw, messy):
     assert (s.hash, s.songs, s.cd_num) == (mine.hash, mine.songs, 3) and s.songs == len(messy[1][3])
 
 
-def test_a_row_whose_art_is_gone_shows_the_placeholder(fw):
+def test_a_row_whose_art_is_gone_shows_the_tile(fw):
     """A playlist emptied, or left with albums without art: its row's re-ask finds no art (playlist_art 0)
-    and its image goes back to stock's placeholder, never left on the old 2x2."""
+    and no server cover: its image is emptied for pl_tile_paint's tile, never left on the old 2x2."""
     art, name = 0x5a, C.create_string_buffer(b'0')
     title, rec = C.create_string_buffer(b'Mix'), C.create_string_buffer(0x60)
     struct.pack_into('<i', rec, O['REC_DISC'], 3)
@@ -337,4 +337,4 @@ def test_a_row_whose_art_is_gone_shows_the_placeholder(fw):
     fw.mock('image_base_set_image', lambda w, image, *_: shown.append((w, C.string_at(image))))
     asked = C.c_int(1)
     fw.fn('playlists__pl_art_row', None, C.c_void_p, C.c_void_p)(0x77, C.byref(asked))
-    assert shown == [(art, b'playlist_default')]
+    assert shown == [(art, b'')]
