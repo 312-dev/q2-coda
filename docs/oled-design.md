@@ -648,6 +648,8 @@ states' buttons, a card's answers) and any other mark that shows where the wheel
   record of that, `st.touch_mode` (`patch/navigation.c`: a touch sets it, the wheel clears it), read through
   `ui_focus_shown()` (`patch/ui_kit.c`); nothing keeps a second.
 - **Centre with no ring** still does the screen's default: the primary button, a card's default answer.
+- **Now Playing's Centre cycle** follows it too: the Shuffle or Repeat stage keeps its place, but its outline
+  (`np_bar.c` `glyph_framed`) draws only while `ui_focus_shown()`.
 - **Not under this rule:** Control Center's ring keeps its own form (it wakes on the first wheel tick or Centre
   without acting, and goes 5 s after the last, `control_center.c` `cc_ring_on`), and the lists' selection bar, which
   boots shown.

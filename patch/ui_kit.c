@@ -127,7 +127,7 @@ void ui_cta_paint(void *canvas, const char *const *labels, int n, int y, int sel
         rect_t r = { 0, y, 0, CTA_H };
         r.x = ui_cta_x(canvas, labels, n, i, &r.w);
         int lit = i == sel, down = lit && pressed;
-        unsigned fill = i ? (light ? (down ? 0xd1d1d6 : 0xe5e5ea) : (down ? 0x3a3a3c : 0x2c2c2e))
+        unsigned fill = i ? (light ? (down ? 0xd1d1d6 : 0xe5e5ea) : (down ? RGB_OFF : RGB_RAISED_2))
                         : down ? CTA_ACCENT_DOWN
                                : (scheme()->tones[0] & 0xffffffu);
         if (lit && ring) { /* a 2 px ring in Text Primary CTA_RING_OFF px out */

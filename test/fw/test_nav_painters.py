@@ -902,6 +902,16 @@ def test_now_playings_focus_outline_fits_the_glyph_and_its_dot(fw, st, mcl, mode
     assert ((62, 299, 4, 4) in [b[:4] for b in boxes[2:]]) == dot
 
 
+def test_now_playings_focus_outline_hides_while_touch_is_the_modality(fw, st, mcl):
+    """oled-design.md#focus-ring: the Centre cycle's outline is the wheel's, so after a touch (st.touch_mode,
+    ui_focus_shown 0) the stage still stands but no outline is drawn; the wheel's next turn brings it back."""
+    row = Row(fw, st, mcl, 0, stage=1)  # NP_STAGE_SHUFFLE
+    st('touch_mode', C.c_int).value = 1
+    assert row.paint() == []
+    st('touch_mode', C.c_int).value = 0
+    assert row.paint()[:2] == [(*ink_box(64, 8), 0xffffff), (*ink_box(64, 6), 0)]
+
+
 def test_now_playings_tapped_button_shows_a_square_that_fades(fw, st, mcl):
     """22 v4: a tap puts #2C2C2E under the glyph's ink, 8 px clear on every side, fading over 250 ms; the wheel's outline
     is not drawn for it, and Up Next, which has no dot, fits its glyph alone."""
