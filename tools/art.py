@@ -342,6 +342,7 @@ CC_ICONS = {'wifi': ('wifi-high-fill', 22, 0xffffff), 'bluetooth': ('bluetooth-f
             'moon': ('moon-stars-fill', 22, 0xffffff), 'eq': ('equalizer-fill', 22, 0xffffff),
             'leaf': ('leaf-fill', 22, 0xffffff), 'back': ('skip-back-fill', 22, 0xffffff),
             'forward': ('skip-forward-fill', 22, 0xffffff), 'pause': ('pause-fill', 30, 0xffffff),
+            'guest': ('device-mobile-fill', 22, 0xffffff),
             'play': ('play-fill', 30, 0xffffff)}
 
 # A card app's sign-in steps on its QR page (addon.c qr_paint, the state file's step): fill, white on the step's solid
@@ -368,7 +369,8 @@ BT_ROW_GLYPHS = {'bt': 'bluetooth', 'headphones': 'headphones', 'car': 'car-prof
 BT_SPIN_INKS = {'d': 0x858585, 'l': 0x6e6e6e}
 BT_TOASTS = {'headphones': ('headphones-fill', 0xffffff), 'car': ('car-profile-fill', 0xffffff),
              'speaker': ('speaker-hifi-fill', 0xffffff), 'phone': ('device-mobile-fill', 0xffffff),
-             'bt': ('bluetooth-fill', 0xffffff), 'low': ('battery-warning-fill', 0xff453a)}
+             'bt': ('bluetooth-fill', 0xffffff), 'low': ('battery-warning-fill', 0xff453a),
+             'warn': ('warning-fill', 0xff9f0a), 'no': ('prohibit-fill', 0xababab)}  # Guest Play's (guest_ui.c)
 # The software update's pages (sw_update.c, docs/oled-design.md Software Update): each result's glyph (fill, white on
 # its solid circle; the up-to-date check and the restart's arrow bold) at the mode page's size, and the check's
 # spinner, iOS's twelve spokes in the half's Text Primary (_d white, _l black) on no circle, 48 px across.
@@ -659,6 +661,11 @@ def images(t):
             for k, c in BT_SPIN_INKS.items() for f in range(SPIN_SPOKES)}
     out |= {f'{prefix}_bttoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in BT_TOASTS.items()}
     out |= {f'{prefix}_bttoast_{n}_off': phosphor(g, USB_TOAST_PX, 0xababab) for n, (g, _) in BT_TOASTS.items() if n != 'low'}
+    # Guest Play (guest_ui.c, status_row.c): the guest's phone in the accent, beside "Playing from" and in the status row,
+    # and the status row's relay mark (phone › car) in Text Secondary per half
+    out[f'{prefix}_guestphone_a'] = phosphor('device-mobile-fill', USB_TOAST_PX, on)
+    out[f'{prefix}_status_guest'] = phosphor('device-mobile-fill', STATUS_PX, on, STATUS_INK)
+    out |= {f'{prefix}_status_relay_{k}': phosphor('caret-right-bold', 8, c) for k, c in STATUS_SECONDARY.items()}
     out |= {f'{prefix}_btmode_{n}': phosphor(g, USB_MODE_PX, 0xffffff) for n, g in BT_MODES.items()}
     out |= {f'{prefix}_batt{n}_{k}': inset_glyph(g, *inks) for n, g in BATT_GLYPHS.items() for k, inks in BATT_GLYPH_INKS.items()}
     out |= {f'{prefix}_chargetoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in CHARGE_TOASTS.items()}

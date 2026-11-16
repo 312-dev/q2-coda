@@ -160,6 +160,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     # bt_ui.c's device kinds, its scan spinner and the connection toasts (a drop's in Text Secondary)
     btdev = {f'btdev_{n}_{k}': c for n in art.BT_ROW_GLYPHS for k, c in (('d', 0xababab), ('l', 0x5c5c5c), ('w', 0xffffff))}
     btspin = [f'btspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SPIN_SPOKES)]
+    guest = ['guestphone_a', 'status_guest', 'status_relay_d', 'status_relay_l']  # guest_ui.c's, status_row.c's
     bttoast = {**{f'bttoast_{n}': c for n, (_, c) in art.BT_TOASTS.items()},
                **{f'bttoast_{n}_off': 0xababab for n in art.BT_TOASTS if n != 'low'}}
     circles = {'circle_check_a': (art.CIRCLE_CHECK_PX, blue), 'circle_check_w': (art.CIRCLE_CHECK_PX, 0xffffff),
@@ -176,7 +177,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                                               'search_pop', 'search_pop_letters', 'search_pop_echoes', 'holdback',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)), *sw,
                                               *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
-                                              *btdev, *btspin, *bttoast)}
+                                              *btdev, *btspin, *bttoast, *guest)}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
                           ('play_d', art.STATE_PX, 0xffffff), ('play_l', art.STATE_PX, 0),

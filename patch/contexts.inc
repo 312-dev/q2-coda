@@ -41,6 +41,9 @@
 { "empty_page", CTX_DYNAMIC, 0 },      /* runtime window (patch/feedback.c empty_open) */
 { "storage_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/storage.c) */
 { "btdevice_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/bt_detail.c) */
+{ "guestset_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/guest_ui.c) */
+{ "guesttrust_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/guest_ui.c) */
+{ "hotspot_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/guest_ui.c) */
 { "downloads_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/storage.c) */
 { "usbchoose_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/usb_ui.c) */
 { "usbdebug_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/usb_ui.c) */

@@ -195,7 +195,9 @@ All lists share one grid.
   - **Bluetooth**, 5 px left (P9 in `design/bt-redesign`): nothing while Bluetooth is off or nothing is
     connected; Phosphor `bluetooth` (bold) in Text Tertiary while a device connects and in Text Primary once one
     is connected; a headset that reports its level, `headphones` (bold) and a 15x8 battery 2 px after it, filled
-    to the level as the status battery's (red under 20%); a car, `car-profile` (bold).
+    to the level as the status battery's (red under 20%); a car, `car-profile` (bold). While a guest plays
+    ([Guest Play](#guest-play)), `device-mobile` (fill) in the accent, and while it is relayed to the Q2's
+    Bluetooth device a `›` (8 px, Text Secondary) and that device's glyph.
   - **Buttons Lock**, 5 px left: the padlock (Phosphor `lock-simple`, fill, 13 px, Text Primary).
 - The new glyphs are 14 px boxes at the padlock's optical size, 11 px of ink ([Icons](#icons)), centred on the
   row; every gap is at least 4 columns of black, so Split inks each glyph by itself.
@@ -945,8 +947,10 @@ The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `de
   13, Text Secondary) beside it; Previous, Play/Pause (30 px) and Next on y 132, 52 px apart.
 - **Sliders**: Brightness and Volume side by side from y 170, 38 px tall, fully round, `#3A3A3C` with a
   `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start.
-- **Tiles**: Lock, Sleep, Night Shift, EQ and Smart Wi-Fi, 44 px squares with 12 px corners on y 238, 12 px
-  in from the blocks' ends and evenly apart, named under them as the toggles are.
+- **Tiles**: Lock, Sleep, Night Shift, EQ, Smart Wi-Fi and Guest, 40 px squares with 12 px corners on y 238,
+  12 px in from the blocks' ends and evenly apart, named under them as the toggles are. Guest is Guest Play's
+  switch (a hold opens its settings), lit while it is on, and named by the guest ("Alex") while one plays
+  ([Guest Play](#guest-play)).
 - **Grab bar**: 36 x 5, `#5A5A5E`, at y 304, where the swipe up that closes the page starts.
 - **The wheel** rings the stop it is on in white (2 px, 1 px out); a slider that has the wheel is ringed in
   Accent Blue. The stops, in reading order: the four toggles, the Now Playing block (only while something is
@@ -1019,6 +1023,39 @@ Settings > Bluetooth and its pages ([internals](internals.md#bluetooth-page), `p
 - **Bluetooth Stopped**: when the radio never answers, a mode page, the warning glyph on an orange (Warning)
   circle, "Bluetooth Stopped", "Restarting the Q2 to fix it in 9 s" counting down, and a Not Now pill (Centre,
   Return or a tap), instead of a toast and an unannounced restart.
+
+### Guest Play
+
+A guest's phone plays through the Q2 to what the Q2 plays to ([internals](internals.md#guest-play-screens),
+`patch/guest_ui.c`, on q2-guest's [contract](internals.md#contract); approved from `design/bt-redesign`'s
+`bt-guest-flow.png`, G1 to G12, and N8 to N13):
+
+- **Asking** (G3, G4): the [confirmation card](#confirmation-card): the guest's name, "wants to play music" (or "on
+  Spotify", "over AirPlay"), on a first pairing the phone's code large ("482 913") with "Check that Alex's phone
+  shows this code"; Allow Once (selected: one Centre answers), Always Allow, Decline, and the daemon's 30 s
+  counting down to Decline. Return declines. A second guest while one plays (G6): "Replace Alex's Pixel?", "Sam's
+  iPhone wants to play music", Keep Alex's Pixel (selected) and Replace, counting down to Keep.
+- **The guest's Now Playing** (G5, G12): the art's place, the guest's title and artist, the phone glyph in the
+  accent with "Playing from Alex's Pixel", "Your music is paused" (or "Paused on Alex's phone"), the path "Alex's
+  Pixel → Q2 → BMW 6R81" (17 px) and each leg's codec line (14 px Text Tertiary), and one selected thing, Stop
+  Guest Play: Centre stops at once, no confirm. Play/Pause, Next and Previous go to the guest's phone. It opens as
+  a phone's guest starts.
+- **Toasts** (G7, G8, G11): "Alex left. Resuming your music", "Lost Alex. Resuming your music" (warning, orange),
+  "Declined Alex's Pixel" (no answer too), "Sam iPhone isn't a trusted guest", "Turned away Sam iPhone"
+  (prohibit, Text Secondary). A failed pairing (G10) is a mode page: the warning on orange, "Couldn't Connect",
+  "Try again from Alex's phone" and Try Again, which opens the window again.
+- **Settings > Bluetooth > Guest Play** (N10, N11): the switch, Name (the strip, "Guests and AirPlay see this
+  name"), Let a Guest Connect, then Allow (Ask Every Time, Trusted Guests Only), When a Guest Leaves (Resume My
+  Music, Stay Paused), each choice checked, Trusted Guests (each its page: Rename, Ask Before Playing, Forget on
+  the card) and Hotspot. Switched off, the switch and a line saying what it gives. The Bluetooth page's Audio group
+  leads with its row, the value Ask, Trusted or Off.
+- **Let a Guest Connect** (G2): "On your phone, connect to", the name in 30 px, "in Bluetooth settings"; the
+  window's two minutes as an accent ring emptying round m:ss; while the hotspot runs, its join QR code with
+  "AirPlay or Spotify?"; Done (Centre, a tap, Return) closes the window.
+- **Hotspot** (N13): its switch, Name (Guest Play's) and Password (the strip), and while it runs its join QR code,
+  "Scan to join".
+- **Home** has a Guest Play row while Guest Play is on (unless hidden in Edit Home, Folders' rule): the guest's Now
+  Playing while one plays, else Let a Guest Connect.
 
 ### Plug-in screen
 
@@ -1126,6 +1163,7 @@ pattern.
 | Bluetooth                           | [Bluetooth](#bluetooth)     | Devices first under My Devices and Other Devices, the connected one two lines ("Connected · LDAC · 72%" after the Positive dot); then Audio |
 | A Bluetooth device                  | [Bluetooth](#bluetooth)     | The path and its codec line, then Battery, Disconnect, Rename and Forget This Device                      |
 | Bluetooth Stopped                   | [USB](#usb)'s mode page     | The warning on an orange circle, the restart's countdown and Not Now (`bt_stopped.c`)                      |
+| Guest Play and its pages            | [Guest Play](#guest-play)   | The prompts on the confirmation card, the guest's Now Playing, the settings, Let a Guest Connect, Hotspot  |
 | Bluetooth receiver (a phone playing to the Q2) | [USB](#usb)'s mode page | The accent circle with the Bluetooth glyph, the phone's title over its artist ("Playing from Phone" over "Wheel sets the volume" before it names one), the codec in the pill (`bt_recv.c`) |
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |

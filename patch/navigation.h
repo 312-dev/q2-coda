@@ -863,6 +863,14 @@ void bt_name_apply(void), bt_name_row(void *view);
 /* bt_ui.c: Settings > Bluetooth's order, rows and marks (docs/oled-design.md#bluetooth) */
 void bt_page(void *view, int on), bt_rows_pre(void *view), bt_rows_post(void *view);
 int bt_list(void *list), bt_mac_ok(const char *s), bt_dev_find(const char *mac);
+#define BT_MARK_CHECK 6 /* bt_mark's kind: a picker's check on the right column */
+void *bt_mark(void *parent, const char *name, int kind, int x, int y, int w, int h);
+/* guest_ui.c: Guest Play's screens (docs/oled-design.md#guest-play) */
+void guest_ui_poll(void), guest_ui_paint(void *w, void *canvas), guest_np_open(void);
+int guest_ui_state(void), guest_ui_on(void), guest_settings_open(void *ctx, void *event),
+    guest_home_click(void *ctx, void *event);
+const char *guest_ui_value(void), *guest_ui_title(const char *name);
+void guest_short(const char *name, char *out, unsigned n);
 void bt_ui_paint(void *w, void *canvas), bt_ui_poll(void);
 int ringnav_bt_resume(void); /* navigation.c: Resume on Connect */
 const char *bt_codec(void), *bt_kind(unsigned cls), *bt_dev_mac(int i), *bt_dev_name(int i);

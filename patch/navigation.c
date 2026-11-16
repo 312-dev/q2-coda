@@ -2367,6 +2367,7 @@ int ringnav_paint(void *w, void *canvas) {
     bt_recv_paint(w, canvas);    /* Bluetooth receiver mode (bt_recv.c) */
     bt_ui_paint(w, canvas);      /* Settings > Bluetooth's marks (bt_ui.c) */
     bt_stopped_paint(w, canvas); /* Bluetooth Stopped (bt_stopped.c) */
+    guest_ui_paint(w, canvas);   /* Guest Play's pages (guest_ui.c) */
     sw_update_paint(w, canvas);  /* SD Card Update's pages (sw_update.c) */
     if (w && w == st.np_win && !(NP_VISUALIZER && visualizer_full()))
         np_modes(w, canvas); /* else the page's own */
@@ -4941,6 +4942,7 @@ static const char *bar_title_of(void *win, void **label) {
     if (bt_recv_title(name)) return bt_recv_title(name); /* Bluetooth receiver mode (bt_recv.c) */
     if (bt_detail_title(name)) return bt_detail_title(name);   /* a Bluetooth device's page */
     if (bt_stopped_title(name)) return bt_stopped_title(name); /* Bluetooth Stopped */
+    if (guest_ui_title(name)) return guest_ui_title(name);     /* Guest Play's pages */
     if (sw_update_title(name)) return sw_update_title(name);   /* SD Card Update's (sw_update.c) */
     if (!tk_strcmp(name, "qrcode_page")) return addon_qr_title(win); /* the card app's name */
     if (!tk_strcmp(name, "search_dialog")) return "Search"; /* stock's toolbar has no label */

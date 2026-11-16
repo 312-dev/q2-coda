@@ -49,7 +49,15 @@
 /* What a row's state label says, from stock's tr_text (navigation.h BT_ROW_*). */
 enum { BT_FOUND = BT_ROW_FOUND, BT_PAIRED, BT_CONNECTING, BT_CONNECTED };
 /* A mark image's job (its BT_MARK prop). */
-enum { MARK_NONE, MARK_GLYPH, MARK_DOT, MARK_SPIN, MARK_CHEVRON, MARK_HEAD_SPIN };
+enum {
+    MARK_NONE,
+    MARK_GLYPH,
+    MARK_DOT,
+    MARK_SPIN,
+    MARK_CHEVRON,
+    MARK_HEAD_SPIN,
+    MARK_CHECK = BT_MARK_CHECK
+};
 
 static struct {
     void *view;      /* the Bluetooth page's list while it is open */
@@ -258,8 +266,8 @@ static void *small_label(void *parent, int x, int y, int w, int h, int px) {
     return l;
 }
 
-/* A mark image in parent, drawn by bt_ui_paint. */
-static void *mark(void *parent, const char *name, int kind, int x, int y, int w, int h) {
+/* A mark image in parent, drawn by bt_ui_paint (guest_ui.c's checks too). */
+void *bt_mark(void *parent, const char *name, int kind, int x, int y, int w, int h) {
     void *m = widget_lookup(parent, name, 0);
     if (!m) {
         m = image_create(parent, x, y, w, h);
@@ -404,9 +412,12 @@ void bt_page(void *view, int on) {
     if (!other) rows[k++] = head(view, (void *)0, "Other Devices");
     /* Other Devices' spinner: beside its label (bt_ui_paint measures it) */
     void *oh = rows[other ? other - 1 : k - 1];
-    bt.head_spin = mark(oh, "_bt_headspin", MARK_HEAD_SPIN, 0, 0, 375, BT_HEAD_H);
+    bt.head_spin = bt_mark(oh, "_bt_headspin", MARK_HEAD_SPIN, 0, 0, 375, BT_HEAD_H);
     widget_on(bt.head_spin, EVT_DESTROY, head_spin_gone, bt.head_spin);
     rows[k++] = head(view, (void *)0, "Audio");
+    void *guest = list_row_into(view, 0, guest_settings_open, 0);
+    list_value(guest, "Guest Play", guest_ui_value());
+    rows[k++] = P(P(guest, W_PARENT), W_PARENT);
     quality_value(quality);
     rows[k++] = quality;
     rows[k++] = volume;
@@ -453,18 +464,19 @@ static void dress(void *item, void *b) {
             widget_set_visible(c, 0,
                                0); /* stock's icon, and a paired row's Unpair (navbar_delete) */
     }
-    mark(b, "_bt_glyph", MARK_GLYPH, BT_GLYPH_CX - BT_ROW_GLYPH / 2, (h - BT_ROW_GLYPH) / 2,
-         BT_ROW_GLYPH, BT_ROW_GLYPH);
+    bt_mark(b, "_bt_glyph", MARK_GLYPH, BT_GLYPH_CX - BT_ROW_GLYPH / 2, (h - BT_ROW_GLYPH) / 2,
+            BT_ROW_GLYPH, BT_ROW_GLYPH);
     int end = right - (state == BT_FOUND ? 0 : VALUE_CHEVRON_GAP);
     if (state == BT_PAIRED || state == BT_CONNECTED)
-        mark(b, "_bt_chevron", MARK_CHEVRON, right - BT_SPIN, (h - BT_SPIN) / 2, BT_SPIN, BT_SPIN);
+        bt_mark(b, "_bt_chevron", MARK_CHEVRON, right - BT_SPIN, (h - BT_SPIN) / 2, BT_SPIN,
+                BT_SPIN);
     if (state == BT_CONNECTING)
-        mark(b, "_bt_spin", MARK_SPIN, right - BT_SPIN, (h - BT_SPIN) / 2, BT_SPIN, BT_SPIN);
+        bt_mark(b, "_bt_spin", MARK_SPIN, right - BT_SPIN, (h - BT_SPIN) / 2, BT_SPIN, BT_SPIN);
     if (state == BT_CONNECTED && title && line) {
         char s[64];
         widget_move_resize(title, BT_TEXT_X - 2, BT_TITLE_Y, end - BT_TEXT_X, BT_TITLE_H);
         int x = BT_TEXT_X + BT_DOT + BT_DOT_GAP;
-        mark(b, "_bt_dot", MARK_DOT, BT_TEXT_X, BT_LINE_Y, BT_DOT, BT_LINE_H);
+        bt_mark(b, "_bt_dot", MARK_DOT, BT_TEXT_X, BT_LINE_Y, BT_DOT, BT_LINE_H);
         widget_move_resize(line, x - 2, BT_LINE_Y, end - x, BT_LINE_H);
         face_font(line, theme()->font[ROLE_META], BT_LINE_PX, FONT_ROW);
         text_ink(line, 0xff000000u | tok(TOK_TERTIARY), INK_LABEL);
@@ -553,7 +565,8 @@ static void art(void *w, void *canvas, const char *stem, int cx, int cy) {
 
 /* A mark (bt_page's, dress's), in final colours: white on the selection. */
 void bt_ui_paint(void *w, void *canvas) {
-    int kind = w && bt.view ? widget_get_prop_int(w, BT_MARK, 0) : 0;
+    int kind =
+        w && !tk_strcmp(widget_get_type(w), "image") ? widget_get_prop_int(w, BT_MARK, 0) : 0;
     if (!kind || !widget_get_visible(w)) return;
     void *b = P(w, W_PARENT), *item = b ? P(b, W_PARENT) : (void *)0;
     int selected = st.sel_accent && painting_in(st.sel_accent), light = ipod_light();
@@ -574,6 +587,9 @@ void bt_ui_paint(void *w, void *canvas) {
         fill_box(canvas, &r, RGBA(selected ? tok(TOK_ON_ACCENT) : tok(TOK_POSITIVE)), BT_DOT / 2);
         break;
     }
+    case MARK_CHECK: /* a picker's choice, the theme's check (tools/art.py CHECK_PX) */
+        art(w, canvas, selected ? "check_w" : "check_a", cx, cy);
+        break;
     case MARK_CHEVRON:
         chevron_icon(w, canvas, I(w, W_W) - BT_SPIN / 2 + 5, cy, selected);
         break;
@@ -699,6 +715,7 @@ static void link_poll(unsigned now) {
 void bt_ui_poll(void) {
     unsigned now = (unsigned)time_now_ms();
     if (bt.view) page_poll(now);
+    guest_ui_poll();
     bt_detail_poll();
     if (now - bt.link_poll_at >= BT_POLL_MS) {
         bt.link_poll_at = now;

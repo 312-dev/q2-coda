@@ -1,5 +1,5 @@
 """bt_ui.c: Settings > Bluetooth, devices before settings. The switch, Name, My Devices and Other Devices with their
-rows, then the Audio group (Quality, Headset Volume, Resume on Connect, Link Volume); stock's Scan now row gone, a scan
+rows, then the Audio group (Guest Play, Quality, Headset Volume, Resume on Connect, Link Volume); stock's Scan now row gone, a scan
 started by the page itself while it is open; the connected device a two-line row ("Connected · LDAC · 72%")."""
 import ctypes as C
 import os
@@ -129,7 +129,7 @@ DEVICES = [(HEAD, 'WH-1000XM5', 'connected'), (CAR, 'BMW 6R81', 'paired'), (SPEA
 
 def test_devices_come_before_the_audio_group_and_scan_now_goes(fw):
     p = Page(fw, DEVICES)
-    assert p.names() == ['s0', 'Name', 'My Devices', 'd0', 'd1', 'Other Devices', 'd2', 'Audio', 's2', 's3',
+    assert p.names() == ['s0', 'Name', 'My Devices', 'd0', 'd1', 'Other Devices', 'd2', 'Audio', 'Guest Play', 's2', 's3',
                          'Resume on Connect', 'Link Volume']
     assert 's4' not in p.names()  # Scan now
 
@@ -145,7 +145,7 @@ def test_other_devices_shows_with_nothing_found_yet_and_carries_the_spinner(fw):
 
 def test_no_devices_still_has_both_lists_headers(fw):
     p = Page(fw)
-    assert p.names() == ['s0', 'Name', 'Other Devices', 'Audio', 's2', 's3', 'Resume on Connect', 'Link Volume']
+    assert p.names() == ['s0', 'Name', 'Other Devices', 'Audio', 'Guest Play', 's2', 's3', 'Resume on Connect', 'Link Volume']
 
 
 def test_bluetooth_off_keeps_name_and_says_what_on_gives(fw):
