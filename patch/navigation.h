@@ -406,7 +406,6 @@ void empty_paint(void *w, void *canvas, const empty_t *e, int top);
 int empty_top(int free_top, int free_end, int row);
 int empty_card(empty_t *e);
 void feedback_confirm_bar(void *w, void *canvas);
-void feedback_confirm_switch(void *w, void *canvas);
 void feedback_songs(void *top, void *row);
 void feedback_folder(void *top);
 int feedback_offline(void);

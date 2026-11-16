@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Display (OLED): every confirmation (Shut Down, Restart, the Resets, Delete Song, Unpair, forgetting a Wi-Fi network, Line Out and the rest) is now a card over the page you were on, so you can still see what it is about. Its title names the question (**Forget This Network?** instead of "Delete Record?"), Cancel comes first and is selected, and an answer that deletes or resets is red, after a gap. Delete Song's "Also delete source file" is a switch on the card.
   - Display (OLED): text sizes follow one scale. Mode-page titles (USB, sign-in) and the update's name grow a pixel to their intended size; the A-Z index and Control Center labels grow from 11 to 13 px; small 14 px lines (an artist's album, Up Next's Clear, the QR page's address, the update's size) become 15 px and the ADB note 13 px; Search's letters become 20 px; the A-Z bubble's letter and an artist's monogram 22 px. In Light Mode, the scan's and the update's progress tracks and the USB Stop pill take the same light grey as every other track and pill, and the QR page's address line its proper grey. Songs added in Add Songs are marked in the same green as everything else.
   - Confirmations: removing a song from a playlist, and deleting or replacing an EQ preset, now open on **Cancel**, so a stray Center press no longer removes or overwrites anything.
   - Line Out's warning reads "Line Out sets max volume, continue?" (a missing space).
