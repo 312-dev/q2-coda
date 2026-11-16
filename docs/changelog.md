@@ -1,6 +1,9 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Settings: Playback's **Library & Folders** becomes **Library**, Playback's second row after EQ, and gathers what the Library holds and how it looks: **On-The-Go**, **Streaming Songs** (the switch that adds a card app's server songs, until now "Library: Local + Server" at the bottom of Display > Cover Flow), **Sorting** (Songs' order, Artist's Albums, Years), Artists, Artist View, **Playlists** (Playlist View, Import and Export) and **Folders** (Folder Root, Folder Skip, Folder Album Cover), and Scan Song Durations. Playback loses On-The-Go and Enlarged Album Art (now at the end of Display) and gains **Sleep Timer**. Display > Cover Flow keeps Sort (now a list to pick from), Fast Navigation, Position Bar and Refresh Cover Flow.
+  - Streaming Songs: turning it off while a streaming app keeps songs on the card asks "Hide streaming songs?" first, and an app's Show in Library asks "Show streaming songs?" and turns it on for you when it is off. Card apps can now tell whether it is on.
+  - Menus (OLED): a list's hold menu no longer starts with Sorting; Songs' order is in Settings > Playback > Library > Sorting.
   - Settings (OLED): the Settings list reached from Home ends like every list: Battery peeks through the fade under Controls instead of hiding until you scroll, and the highlighted row's lean as you turn the wheel is no longer cut off at the top or bottom of a list.
   - Lists (OLED): a list scrolled to its last row keeps the space under it after you open that row and press Return; the last row no longer sits on the screen's bottom edge.
   - SyncLink, Shanling's phone remote, is gone from Settings and stays off.
