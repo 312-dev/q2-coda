@@ -27,8 +27,10 @@ Heavy suites run under q2-heavy (fw.py and patch_shards.py wrap their own proces
 its own log; the table gives each one's exit status and time. Exit status: 0 when all passed, else 1.
 
 A plan (affected.py --json) that runs unit, fw and patch whole is the whole gate; any other plan runs what
-it names, each `other` path a suite of its own. --only runs just those names, each from the plan when it
-has one, else whole; the name `build` builds even when no suite needs it. docs/building.md#gate.
+it names, each `other` path a suite of its own. --only keeps just those names: a plan's suite as the plan
+has it, one only the whole gate has (GATE_ONLY: fw-asan, mypy-tools, mypy-fw, test/peq.py) whole, and
+any other name the plan lacks not at all; the name `build` builds even when no suite needs it.
+docs/building.md#gate.
 """
 import argparse
 import json
@@ -51,6 +53,7 @@ MEM_GB = {'build': 2.0, 'unit': 1.5, 'mypy-tools': 1.0, 'mypy-fw': 1.0, 'fw': 3.
 SECONDS = {'fw-asan': 720, 'unit': 330, 'patch': 270, 'fw': 100, 'test/build.py': 60, 'test/peq.py': 60,
            'mypy-tools': 40, 'mypy-fw': 30}
 FULL = tuple(SECONDS)
+GATE_ONLY = ('fw-asan', 'mypy-tools', 'mypy-fw', 'test/peq.py')  # in the whole gate, never in a narrower plan
 
 
 class Suite:
@@ -118,7 +121,9 @@ def suites_for(plan, only, py, logs):
         for o in plan['other']:
             out[o] = full_suite(o, py, logs)() if o in FULL else other_suite(o, py)
     if only:
-        out = {n: out.get(n) or (full_suite(n, py, logs) or (lambda: other_suite(n, py)))() for n in only}
+        # a plan's suite is cut to only; a suite no plan names (GATE_ONLY) runs whole; any other name the plan
+        # lacks is left out, as nothing the plan's changes touch reaches it
+        out = {n: out[n] if n in out else full_suite(n, py, logs)() for n in only if n in out or n in GATE_ONLY}
     return out
 
 

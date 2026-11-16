@@ -313,6 +313,8 @@ def test_gate_plan_that_runs_everything_is_the_whole_gate(tmp_path):
     assert set(gate.suites_for(every, [], 'py', tmp_path)) == set(gate.FULL)
     docs = {'unit': ['test_docs.py'], 'fw': [], 'patch': [], 'other': [], 'why': []}
     assert list(gate.suites_for(docs, [], 'py', tmp_path)) == ['unit']
-    # --only a name the plan lacks runs that suite whole
-    only = gate.suites_for(docs, ['fw-asan', 'unit'], 'py', tmp_path)
+    # --only: the plan's unit as the plan has it, fw-asan (only the whole gate has it) whole, patch (the
+    # plan lacks it: its changes cannot reach it) not at all
+    only = gate.suites_for(docs, ['fw-asan', 'unit', 'patch'], 'py', tmp_path)
+    assert list(only) == ['fw-asan', 'unit']
     assert only['fw-asan'].argv[-1] == '--asan' and only['unit'].argv[-1] == 'test/unit/test_docs.py'

@@ -182,6 +182,7 @@ class Real:
         self.target, self.tip, self.logs, self.dev, self.log = target, tip, logs, dev, log
         self.shas = {}
         self.runs = 0  # numbers each test's log directory
+        self.batch_plan = None  # the first plan made, the whole batch's: what the tip alone is checked with
         self.build_args = ['--dev', '--', '--new-player'] if dev else ['--', '--new-player']  # gate.py's default
 
     def wt(self, level):
@@ -225,7 +226,8 @@ class Real:
 
     def test(self, level, head, suites, tag):
         """head's tests through the worktree's tools/ci/gate.py: the plan affected.py makes for head against the
-        tip (the whole gate when that plan is everything), cut to suites when given."""
+        tip (the whole gate when that plan is everything), cut to suites when given (gate.py --only: a suite
+        the plan lacks is skipped, as head's changes cannot reach it)."""
         wt = self.wt(level)
         if git('rev-parse', 'HEAD', cwd=wt).stdout.strip() != head:
             git('checkout', '-q', '--detach', '-f', head, cwd=wt)
@@ -233,7 +235,19 @@ class Real:
         self.runs += 1
         out = self.logs/f'{self.runs:02d}-{re.sub(r"[^\w.-]+", "_", tag)[:60]}'
         out.mkdir(parents=True, exist_ok=True)
-        (out/'plan.json').write_text(json.dumps(self.plan(wt)))
+        if head == self.tip:
+            # the tip's own diff is empty: check it with the batch's plan, as far as the tip has those files
+            # (the joined suite's line numbers are the batch's, so test/patch.py runs whole)
+            plan = dict(self.batch_plan, patch='all' if self.batch_plan['patch'] else [])
+            for k in ('unit', 'fw'):
+                if plan[k] != 'all':
+                    plan[k] = [f for f in plan[k] if (wt/'test'/k/f).exists()]
+            plan['other'] = [o for o in plan['other'] if (wt/o).exists()]
+        else:
+            plan = self.plan(wt)
+            if self.batch_plan is None:
+                self.batch_plan = plan
+        (out/'plan.json').write_text(json.dumps(plan))
         cmd = [sys.executable, str(wt/'tools/ci/gate.py'), '--plan-json', str(out/'plan.json'), '--logs', str(out),
                '--results', str(out/'results.json'), *(['--only', ','.join(suites)] if suites else []),
                '--', *self.build_args]
