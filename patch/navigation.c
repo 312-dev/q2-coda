@@ -1615,6 +1615,10 @@ static int drill(void *w) {
     if (more_image(w)) return 0;
     if (!tk_strcmp(widget_get_prop_str(w, "name", ""), PL_ACTION)) return 0;
     w = window_of(w);
+    /* a row that acts in place opens nothing: the Add to Playlist picker's add and close */
+    if (w && widget_get_prop_int(w, PL_MODE, 0) &&
+        !tk_strcmp(widget_get_prop_str(w, "name", ""), "playlist_page"))
+        return 0;
     int ctx = w ? context_id(widget_get_prop_str(w, "name", (void *)0)) : -1;
     return ctx >= 0 && (contexts[ctx].flags & DRILL);
 }
@@ -10069,11 +10073,11 @@ int ringnav(void *ctx, void *event) {
     if (spot_key(top, key)) return STOP;     /* Spotify's page: Centre scrubs */
     if (np_about_key(top, key)) return STOP; /* OLED's About: the wheel scrolls it */
     if (sw_update_key(top, key)) return STOP; /* Software Update's button and the line under it */
+    if (battery_key(top, key)) return STOP;   /* Battery History: the wheel scrubs, Centre exports */
     if (xfade_key(top, key))
         return STOP; /* Crossfade's page: Centre toggles, the wheel sets the length */
     if (eq_key(top, key))
         return STOP; /* EQ's Simple tab, or its tabs: the wheel moves or adjusts, Centre acts */
-    if (battery_key(top, key)) return STOP;   /* Battery History: the wheel scrubs, Centre exports */
     if (edit_key(top, key)) {
         drop_input();
         return STOP;

@@ -241,7 +241,8 @@ All lists share one grid.
 ### List row
 
 - 32 px pitch, title at the text inset, a chevron on the right column when the row opens
-  another page, nothing at the right when it acts in place (a song).
+  another page, nothing at the right when it acts in place (a song, a playlist in Add to Playlist, Reset Settings'
+  rows), or opens only a confirmation card.
 - **Chevron:** Phosphor `caret-right`, bold, 15 px, centred 5 px left of the right column:
   Chevron grey, On Accent on the selection.
 - **Opening:** a row whose page has to load first (Home's Cover Flow, on its first open after a
@@ -1068,8 +1069,8 @@ page paints it first, as Control Center does (`msg_title`).
 | Done | Phosphor `check-circle`, regular, Text Secondary | "Library Updated" | "738 songs, 34 new" (a whole scan that grew the library), else "738 songs" | Done, primary |
 | Stopped (Stop) | as Done | "Scan Stopped" | "120 songs found" | Done |
 | `/mnt/data` full | Phosphor `memory`, regular, Text Secondary | "Not Enough Space" | "Some songs weren't added" | Done |
-
 | The card pulled during the scan | as `/mnt/data` full | "SD Card Removed" | "Put it back and scan again" | Done |
+
 - No frame draws the focus ring until the wheel turns ([focus ring](#focus-ring)); Centre presses the one button.
 - Stock holds the ending about 2.6 s (three polls, then a 2 s sleep on the UI thread) and closes the dialog itself,
   so Done shows what happened rather than waiting for a press.
@@ -1127,7 +1128,6 @@ the status row "Software Update" over mode pages as USB's:
   check's line under it when it has one (28 px under the page's own). Return leaves, and so does Centre unless the
   wheel is on that line.
 
-### Gestures
 ### Battery History
 
 <a id="battery-history"></a>Power's Battery History (approved as 33 v3 on 2026-11-16, `patch/battery.c`) is a graph
@@ -1145,6 +1145,7 @@ over the whole page, under the status row titled "Battery History":
 - ponytail: the button has no pressed frame under Centre (the export runs on the key's press); a press frame needs
   the key's down and up told apart in `battery_key`.
 
+### Gestures
 
 - **Swipe back**, as iOS's: a finger that comes down within 24 px of the screen's left edge and
   drags right takes the page with it, the status row staying; what it uncovers is black. Let go

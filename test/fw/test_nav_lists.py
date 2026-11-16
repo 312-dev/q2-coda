@@ -2029,6 +2029,13 @@ def test_no_chevrons_off_a_drill_list_or_in_multi_select(fw, ui, name, navbar):
     assert chevrons(fw, page, canvas) == []
 
 
+@pytest.mark.parametrize('mode', [1, 2])  # Add to Playlist from a list, from Now Playing
+def test_the_add_to_playlist_picker_s_rows_act_in_place_and_get_no_chevron(fw, ui, mode):
+    page, canvas = Page(ui, titles(6), name='playlist_page'), Canvas(fw)
+    page.win.props[b'_pl_mode'] = mode
+    assert chevrons(fw, page, canvas) == []
+
+
 def test_homes_rows_each_get_the_themes_chevron_the_selected_one_white(fw, ui, st):
     """OLED's home.chevron.visible: every row of Home's list, as on a drill list, on its own middle; the selected
     row's on the bar is the white one (list_marks.c chevron_icon)."""
