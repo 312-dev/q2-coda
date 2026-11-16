@@ -455,6 +455,10 @@ the artist (13 px, Text Tertiary), 46 px right of the text column.
   white knob (Channel Balance fills from the centre; in Light Mode, where white is the canvas, the
   knob is edged 1 px in Track, as iOS edges its white thumb); the range's ends in 15 px Text
   Tertiary centred on y 214, at the two columns. The wheel moves it; there are no +/- buttons.
+  Night Shift's first row is a key/value row, its value Off, On or Auto, which Centre cycles (three
+  named choices: [List row](#list-row)); the value is the warmth ("3400 K") in every mode, and while
+  Off it, the track and the knob are Text Tertiary with no accent, as a disabled row's (the user's,
+  from audit2 J7).
 - **Vertical slider (EQ):** 4 px Track line, Accent Blue fill from 0 dB to the value (Text Tertiary
   while the EQ is off), a 14 px white knob, ringed 2 px in Accent Blue while the wheel is on it
   (1 px in Track otherwise in Light Mode, as the slider page's). The band's name and gain under it

@@ -566,8 +566,15 @@ def test_night_shifts_switch_cycles_off_on_and_auto(fw):
         page.fire('img_bootswitch', CLICK)
         seen.append((page.label(), page.switch()))
     assert [v for k, v in page.config.written if k == 'NIGHTSHIFT'] == [1, 2, 0]
-    assert seen[3] == seen[0] and len({label for label, _ in seen[:3]}) == 3 and '3000' in seen[1][0]
-    assert seen[1][1] == seen[2][1] != seen[0][1]  # On and Auto both light the switch
+    # the value is the temperature whatever the mode: Off, On and Auto are the row's value (slider_page.c, audit2 J7)
+    assert {label for label, _ in seen} == {'3000 K'}
+    assert seen[1][1] == seen[2][1] != seen[0][1]  # On and Auto both set the hidden switch, as stock's tap reads it
+    assert fw.fn('night_page', C.c_int, C.c_void_p)(xf(fw).page) == 1
+
+
+def test_only_night_shifts_page_is_night_shifts(fw):
+    page = opened(fw, 0, {'XFADE': 0, 'XFADESEC': 5})
+    assert fw.fn('night_page', C.c_int, C.c_void_p)(xf(fw).page) == 0
 
 
 def test_night_shifts_wheel_warms_a_step_a_tick_and_turns_it_on(fw):
