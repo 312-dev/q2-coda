@@ -937,7 +937,8 @@ void confirm_rows_paint(void *w, void *canvas) {
             lit = ringnav_row_selected(item) && ui_focus_shown();
         if (k < 0) {
             ui_text(canvas, cf.c.toggle, 0, TYPE(20), lit ? 0xffffff : primary, 1,
-                    x + out + CARD_IN, y, CARD_W - 2 * CARD_IN - 44, 2);
+                    x + out + CARD_IN, y, CARD_W - 2 * CARD_IN - 50,
+                    2); /* clear of the 40 px switch */
             switch_mark(canvas, x + out + CARD_W - CARD_IN, y, card_toggle_on(), lit);
             continue;
         }

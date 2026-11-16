@@ -1830,7 +1830,7 @@ def test_oled_more_shows_ab_repeat_as_the_themes_switch(fw, ui, st, image, selec
     inset = THEMES[0]['sel_inset']
     right = 259 + (inset - 8) - 16  # the row's right column, in the row
     x, _, w, _ = ui.nodes[label].rect()
-    assert not ui.nodes[sw].visible and x + w <= right - 34
+    assert not ui.nodes[sw].visible and x + w <= right - 40
     assert ui.fn('switch_flipped') in ui.handlers(button, EVT_CLICK)  # stock flips the hidden image: the row repaints
     lcd = C.create_string_buffer(0x400)
     canvas = C.create_string_buffer(0x400)

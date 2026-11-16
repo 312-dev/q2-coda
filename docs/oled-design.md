@@ -260,8 +260,12 @@ All lists share one grid.
   (the house [marquee](#motion)). A label so long the value would get less than 96 px (`KV_VALUE_MIN`,
   or the value's own width when shorter) shrinks to leave it that, and scrolls the same way
   (`patch/ui_kit.c` `kv_fit`, `patch/settings_pages.c` `kv_row`).
-- **Switch row:** every on/off setting, a 34x20 fully round switch ending on the right column, its
-  16 px white knob 2 px in: Track when off, Accent Blue when on. On the selection bar: on is a white
+- **Switch row:** every on/off setting, a 40x24 fully round switch ending on the right column, its
+  20 px white knob 2 px in: Track when off, Accent Blue when on. A flip slides the knob over 200 ms,
+  easing out, the track's colour crossing with it; flipped again mid-slide it turns back from where it
+  is. One painter draws every switch (`patch/list_marks.c` `switch_mark`), stock's image switches too,
+  whose art is emptied and drawn over, so they all move alike; a switch appearing (a page opening, a
+  list scrolling) stands still. On the selection bar: on is a white
   track with an Accent Blue knob, off a 1.5 px white outline round the white knob. No "On"/"Off"
   text beside it. A setting with two or three named choices (Gain's High and Low, Charge Limit's
   Off and 80%) is a key/value row that Centre cycles; the value is never part of the label.

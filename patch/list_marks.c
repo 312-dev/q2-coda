@@ -280,28 +280,92 @@ void battery_slim(void *w, void *canvas, int x, int y, int bw, int bh, unsigned 
  * SWITCH_KNOB px knob SWITCH_KNOB_IN px in. Off the selection: the accent's track when on, Track
  * (each half's) when off, a white knob. On the selection, whose bar is the accent: a white track
  * with an accent knob when on, a SWITCH_RING px white outline round a white knob when off. Final
- * colours. */
-#define SWITCH_W 34.0f
-#define SWITCH_H 20.0f
-#define SWITCH_KNOB 16.0f
+ * colours. Every switch is drawn here, stock's image switches too (paint_into), so all of them move
+ * alike: a switch seen at the same place before with the other value slides its knob there over
+ * SWITCH_MS, easing out, and the track's colour crosses with it (unselected) or turns halfway
+ * (selected). A change during the slide starts from where the knob is. A switch first seen at a
+ * place (a page opening, a list scrolled) stands still. */
+#define SWITCH_W 40.0f
+#define SWITCH_H 24.0f
+#define SWITCH_KNOB 20.0f
 #define SWITCH_KNOB_IN 2.0f
 #define SWITCH_RING 1.5f
+#define SWITCH_MS 200
+#define SWITCH_STEP_MS 16
+#define SWITCH_SLOTS 4 /* the switches remembered: a page's in sight, the last few painted */
+static struct {
+    struct {
+        int x, y, on;
+        unsigned at; /* the slide's start, time_now_ms */
+        short from;  /* the knob's place then, 0 off .. 1000 on */
+    } s[SWITCH_SLOTS];
+    unsigned next, timer;
+} sw __attribute__((section(".scratch")));
+
+/* 1 - (1 - t)^3 in thousandths, t in thousandths */
+static int ease_out(int t) {
+    int u = 1000 - t;
+    return 1000 - u * u / 1000 * u / 1000;
+}
+/* the knob's place now in slot k, 0 off .. 1000 on */
+static int sw_place(int k) {
+    unsigned gone = time_now_ms() - sw.s[k].at;
+    int to = sw.s[k].on ? 1000 : 0;
+    if (gone >= SWITCH_MS) return to;
+    return sw.s[k].from + (to - sw.s[k].from) * ease_out((int)(gone * 1000 / SWITCH_MS)) / 1000;
+}
+static int sw_due(const void *info) {
+    (void)info;
+    sw.timer = 0;
+    int moving = 0;
+    for (int k = 0; k < SWITCH_SLOTS; ++k)
+        moving |= time_now_ms() - sw.s[k].at < SWITCH_MS + SWITCH_STEP_MS;
+    void *top = window_manager_get_top_window(window_manager());
+    if (top) widget_invalidate_force(top, (void *)0);
+    if (moving) sw.timer = timer_add(sw_due, (void *)0, SWITCH_STEP_MS);
+    return 0;
+}
+/* the knob's place for a switch at screen x, y showing on: 0 off .. 1000 on */
+static int sw_knob(int x, int y, int on) {
+    int k = 0;
+    while (k < SWITCH_SLOTS && (sw.s[k].x != x || sw.s[k].y != y || !sw.s[k].at)) ++k;
+    if (k == SWITCH_SLOTS) { /* first seen here: at rest */
+        k = (int)(sw.next++ % SWITCH_SLOTS);
+        sw.s[k].x = x, sw.s[k].y = y, sw.s[k].on = on, sw.s[k].from = (short)(on ? 1000 : 0);
+        sw.s[k].at = time_now_ms() - SWITCH_MS;
+        if (!sw.s[k].at) sw.s[k].at = 1;
+    } else if (sw.s[k].on != on) { /* flipped: slide from where it is */
+        sw.s[k].from = (short)sw_place(k);
+        sw.s[k].on = on;
+        sw.s[k].at = time_now_ms() ?: 1;
+        if (!sw.timer) sw.timer = timer_add(sw_due, (void *)0, SWITCH_STEP_MS);
+    }
+    return sw_place(k);
+}
+static unsigned sw_mix(unsigned a, unsigned b, int t) { /* a to b by t thousandths */
+    unsigned out = 0;
+    for (int sh = 0; sh < 24; sh += 8) {
+        int ca = (int)(a >> sh & 255), cb = (int)(b >> sh & 255);
+        out |= (unsigned)(ca + (cb - ca) * t / 1000) << sh;
+    }
+    return out;
+}
+
 void switch_mark(void *canvas, int right, int y, int on, int selected) {
     void *vg = canvas ? canvas_get_vgcanvas(canvas) : (void *)0;
     if (!vg) return;
+    int p = sw_knob(right + I(canvas, CANVAS_X), y + I(canvas, CANVAS_Y), on), lit = p >= 500;
     unsigned accent = scheme()->tones[0] & 0xffffffu,
-             track = selected       ? 0xffffff
-                     : on           ? accent
-                     : ipod_light() ? RGB_TRACK_L
-                                    : RGB_TRACK,
-             knob = selected && on ? accent : 0xffffff;
+             track =
+                 selected ? 0xffffff : sw_mix(ipod_light() ? RGB_TRACK_L : RGB_TRACK, accent, p),
+             knob = selected && lit ? accent : 0xffffff;
     float x = (float)right - SWITCH_W, top = (float)y - SWITCH_H / 2,
-          kx = on ? x + SWITCH_W - SWITCH_KNOB_IN - SWITCH_KNOB : x + SWITCH_KNOB_IN;
+          kx = x + SWITCH_KNOB_IN + (SWITCH_W - 2 * SWITCH_KNOB_IN - SWITCH_KNOB) * (float)p / 1000;
     unsigned raw = st.raw_ink;
     st.raw_ink = 1; /* final: Light Mode's flip leaves them */
     vgcanvas_save(vg);
     vgcanvas_translate(vg, (float)I(canvas, CANVAS_X), (float)I(canvas, CANVAS_Y));
-    if (selected && !on) { /* the outline's centre line SWITCH_RING / 2 inside the track's edge */
+    if (selected && !lit) { /* the outline's centre line SWITCH_RING / 2 inside the track's edge */
         round_path(vg, x + SWITCH_RING / 2, top + SWITCH_RING / 2, SWITCH_W - SWITCH_RING,
                    SWITCH_H - SWITCH_RING, (SWITCH_H - SWITCH_RING) / 2);
         vgcanvas_set_line_width(vg, SWITCH_RING);

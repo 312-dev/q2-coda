@@ -69,3 +69,22 @@ def test_the_focus_ring_shows_after_the_wheel_and_hides_after_a_tap(fw, st, touc
     opens with it."""
     st('touch_mode').value = touch_mode
     assert fw.fn('ui_focus_shown', C.c_int)() == shown
+
+
+def test_a_switch_slides_its_knob_over_200_ms_easing_out_and_a_flip_mid_slide_turns_back_from_there(fw, st):
+    """list_marks.c switch_mark (docs/oled-design.md List row, the user's 40x24 animated switch, 2026-11-16): a switch
+    first seen at a place stands still; seen there again with the other value its knob slides over 200 ms, easing
+    out (1 - (1 - t)^3); a flip mid-slide starts from where the knob is. 0 is off, 1000 on."""
+    now = [5000]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    timers = []
+    fw.mock('timer_add', lambda fn, ctx, ms, *_: timers.append(ms) or len(timers))
+    knob = fw.fn('list_marks__sw_knob', C.c_int, C.c_int, C.c_int, C.c_int)
+    assert knob(355, 100, 0) == 0 and knob(355, 140, 1) == 1000 and not timers  # first seen: at rest
+    assert knob(355, 100, 1) == 0 and timers == [16]  # flipped: the slide starts, repainting every 16 ms
+    now[0] += 100
+    assert knob(355, 100, 1) == 875  # half the time, 1 - 0.5^3 of the way
+    now[0] += 50  # 150 ms: 985 (984.4, in whole thousandths); flipped back from there
+    assert knob(355, 100, 0) == 985
+    now[0] += 200
+    assert knob(355, 100, 0) == 0 and knob(355, 140, 1) == 1000  # done; the other switch never moved

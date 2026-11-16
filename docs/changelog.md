@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Display (OLED): switches are larger (40x24) and their knob slides when flipped.
   - Settings: **About** says Firmware, Capacity, Available and Wi-Fi Address, shows sizes with their unit (779.72 GB), shows **Not connected** for the IP address with no network, and names this firmware's version row after the product.
   - Display (OLED): About's and the settings' label/value rows keep at least 16 px between a label and its value; a value too long for its room fades at its end and scrolls when selected, instead of crowding the label (About's Wi-Fi Address).
   - Cover Flow (OLED): with no albums to show, the status row names the page, **Cover Flow**, as the design has it; it showed only the clock.
