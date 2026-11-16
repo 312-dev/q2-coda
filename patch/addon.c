@@ -1493,9 +1493,9 @@ static void row(lv_t *l, int i) {
     if (l->art) {
         char url[ART_URL];
         item = art_row(i, cell(i, 2), sub, art_file(i, url) ? url : 0, opens(i));
-    } else
-        item = (opens(i) ? page_row_detail_into : page_row_detail)(pg.view, i, cell(i, 2),
-                                                                   *sub ? sub : 0, clicked);
+    } else /* a progress row keeps its detail label, empty or not: progress_row re-dresses both */
+        item = (opens(i) ? page_row_detail_into : page_row_detail)(
+            pg.view, i, cell(i, 2), *sub || !strcmp(cell(i, 0), "progress") ? sub : 0, clicked);
     if (!strcmp(cell(i, 0), "progress")) progress_row(item, strtol(cell(i, 5), 0, 10));
 }
 

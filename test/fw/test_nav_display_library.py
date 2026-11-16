@@ -314,8 +314,8 @@ def test_display_adds_smart_awake_night_shift_and_its_two_pages_among_stocks_row
 
 
 def titles(view):
-    """Each row's title (a stock row's name), its text up to any ': '."""
-    return [item.name or item.labels()[0].text.split(': ')[0] for item in view.children]
+    """Each row's title (a stock row's name), its text up to any ': '; '' for a gap (settings_gap, no label)."""
+    return [item.name or (item.labels()[0].text.split(': ')[0] if item.labels() else '') for item in view.children]
 
 
 def appearance(fw, ui, **config):
