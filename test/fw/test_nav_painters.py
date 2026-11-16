@@ -851,7 +851,7 @@ class Row:
         for py in range(y - 1, y + h + 1):
             for px in range(x - 1, x + w + 1):
                 inside = x <= px < x + w and y <= py < y + h
-                self.pixels[(py * 22 + px) * 4 + 3] = 255 if inside else 40
+                self.pixels[(py * 22 + px) * 4 + 3] = b"\xff" if inside else b"\x28"
 
         def load(w, name, bitmap, *_):
             struct.pack_into('<II', (C.c_char * 16).from_address(bitmap), 0, 22, 22)

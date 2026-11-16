@@ -357,7 +357,7 @@ void np_mode_step(int repeat, int dir) {
 #define NP_GROW_MS 200
 #define NP_WORD_FROM 60 /* the word shows past this percent of the grow, fading in */
 #define NP_DOT 4
-#define NP_DOT_DY 15      /* the on dot's centre below the glyph's: 2 px under its 22 px */
+#define NP_DOT_DY 15 /* the on dot's centre below the glyph's: 2 px under its 22 px */
 #define NP_RADIO_PX                                                                                \
     TYPE(16)              /* "Radio": Inter Medium, the design's 16 px (docs/oled-design.md#type) */
 #define NP_RADIO_GLYPH 24 /* the antenna's centre this far left of the pill's, the word 10 px */
@@ -365,7 +365,7 @@ void np_mode_step(int repeat, int dir) {
 #define NP_PRESS_PAD 8    /* the ink to the pressed square's edge */
 #define NP_FRAME_R 9      /* both boxes' corners */
 #define NP_PRESS_MS 250   /* a tapped button's square fades out over this */
-#define NP_PRESS_INK 0x2c2c2e
+#define NP_PRESS_INK RGB_RAISED_2
 #define NP_INK_ALPHA 64 /* a glyph's pixel this opaque or more is its ink */
 enum { NB_SHUFFLE, NB_RADIO, NB_REPEAT, NB_QUEUE, NB_N };
 
