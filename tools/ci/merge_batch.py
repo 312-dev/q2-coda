@@ -181,6 +181,7 @@ class Real:
     def __init__(self, target, tip, logs, dev=True, log=print):
         self.target, self.tip, self.logs, self.dev, self.log = target, tip, logs, dev, log
         self.shas = {}
+        self.runs = 0  # numbers each test's log directory
         self.build_args = ['--dev', '--', '--new-player'] if dev else ['--', '--new-player']  # gate.py's default
 
     def wt(self, level):
@@ -229,8 +230,8 @@ class Real:
         if git('rev-parse', 'HEAD', cwd=wt).stdout.strip() != head:
             git('checkout', '-q', '--detach', '-f', head, cwd=wt)
             git('clean', '-q', '-ffdx', cwd=wt)
-        name = re.sub(r'[^\w.-]+', '_', tag)[:80]
-        out = self.logs/name
+        self.runs += 1
+        out = self.logs/f'{self.runs:02d}-{re.sub(r"[^\w.-]+", "_", tag)[:60]}'
         out.mkdir(parents=True, exist_ok=True)
         (out/'plan.json').write_text(json.dumps(self.plan(wt)))
         cmd = [sys.executable, str(wt/'tools/ci/gate.py'), '--plan-json', str(out/'plan.json'), '--logs', str(out),
@@ -243,7 +244,8 @@ class Real:
             results = json.loads((out/'results.json').read_text())
         except (OSError, ValueError):
             return {'gate': Suite(False, str(out/'gate.log'), failures((out/'gate.log').read_text(), wt))}
-        self.log(f'  gate: {time.perf_counter() - t:.0f} s, table in {out/"summary.txt"}')
+        self.log(f'  gate: {time.perf_counter() - t:.0f} s')
+        self.log('\n'.join('    ' + line for line in (out/'summary.txt').read_text().splitlines()))
         return {s: Suite(r['rc'] == 0, r['log'], [] if r['rc'] == 0 else failures(pathlib.Path(r['log']).read_text(), wt))
                 for s, r in results.items()}
 
