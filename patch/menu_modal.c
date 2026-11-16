@@ -80,6 +80,7 @@ static head_t head_next __attribute__((section(".scratch"))); /* modal_head's, f
  * receding, then the sheet's rows from SH_TOP; edge the corner's inset by row, in 1/16 px. */
 static struct {
     unsigned *buf;
+    unsigned *fb; /* the screen's buffer the sheet last drew into */
     unsigned short edge[SH_R];
 } fr __attribute__((section(".scratch")));
 /* The foot fade's alpha, 255 (1 - t)^1.6 at each row's middle from SH_FOOT to the screen's foot */
@@ -96,6 +97,14 @@ int modal_row_w(void) { return SH_W; }
 static int text_x(void) { return geom_val(V_TEXT_X); }
 static int right_x(void) { return SH_W - geom_val(V_RIGHT_X); }
 
+/* The whole screen painted again once the last sheet has gone. */
+static int sheet_repaint(const void *unused) {
+    widget_invalidate_force(window_manager(), (void *)0);
+    return 0;
+}
+/* A sheet gone: its material goes with the last one. What it drew straight into the screen's buffer
+ * goes too, cleared to black: a page under the status row's band (Edit Home's) paints nothing
+ * there, so its pixels stayed; every window paints its own part again on the next pass. */
 static int modal_gone(void *win, void *event) {
     int open = 0;
     for (int i = 0; i < MODAL_MAX; ++i) {
@@ -103,6 +112,11 @@ static int modal_gone(void *win, void *event) {
         open |= modals[i].win != 0;
     }
     if (!open && fr.buf) free(fr.buf), fr.buf = (unsigned *)0;
+    if (!open && fr.fb) {
+        for (unsigned i = 0; i < SH_W * SH_H; ++i) fr.fb[i] = 0xff000000u;
+        fr.fb = (unsigned *)0;
+        timer_add(sheet_repaint, (void *)0, 0);
+    }
     return 0;
 }
 
@@ -425,6 +439,7 @@ void modal_paint(void *w, void *canvas) {
     int c[4], light = ipod_light(), wy = screen_y(w);
     sheet_clip(canvas, c);
     if (fb && !fr.buf && !c[0] && !c[1] && c[2] == SH_W && c[3] == SH_H) sheet_build(fb);
+    if (fb) fr.fb = fb;
     if (fb && fr.buf) {
         const unsigned *mat = fr.buf + SH_STRIP * SH_W;
         for (int y = c[1]; y < c[3]; ++y) {

@@ -3140,3 +3140,16 @@ def test_a_destructive_rows_words_are_red_and_white_on_its_bar(fw, st):
     paint(view.addr, canvas.addr, row.addr, Rect(0, 0, 375, 32), 1)
     white = label.props['style:normal:text_color']
     assert red & 0xffffff == 0x303bff and white & 0xffffff == 0xffffff  # AWTK's colour: red in the low byte
+
+
+def test_a_closed_sheet_leaves_nothing_on_the_screen(fw, st):
+    """What the sheet drew straight into the screen's buffer goes when the last sheet closes: cleared to black and
+    the whole screen painted again on the next pass, so a page that paints nothing under the status row (Edit Home)
+    never shows the receding page or the sheet's top."""
+    ui, win, view, canvas, buf = sheet(fw, st)
+    timers = []
+    fw.mock('timer_add', lambda f, ctx, ms, *_: timers.append(f) or 1)
+    fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
+    assert rgb(buf, 187, 30) != (0, 0, 0)
+    fw.fn('menu_modal__modal_gone', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
+    assert all(v == 0xff000000 for v in buf) and timers
