@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Remote: with Library on Local + Server and a card app's server songs imported, Q2 Muse Remote's lists (and Android Auto's) showed nothing; they list both libraries again.
   - Now Playing: the Shuffle and Repeat outline from the Centre cycle hides after a tap, as every focus ring does.
   - Car Remote's empty state names the phone app: "Open Q2 Muse Remote on your phone".
   - Display (OLED): empty pages show a large outline glyph instead of stacked tiles, and their action is a round blue button (Scan Music Now, Turn on Wi-Fi, Turn on Streaming) whose ring shows only after the wheel is used.
