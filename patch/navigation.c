@@ -2421,9 +2421,11 @@ int ringnav_paint(void *w, void *canvas) {
  * Scrolled to its end by the wheel its last row's foot is on the list end (scroll_end, sel_height):
  * so a drag stops there too, its content runs on by the box's rows past the end (LIST_PAD, set
  * again at each paint, as a relayout puts stock's height back; LIST_PADDED the padded height, so a
- * reset shows). Home has its own (home_fades), an inset modal's rows end in its panel. */
+ * reset shows; LIST_TOP the scroll the paint saw, plus 1, which a reset's clamp gets back). Home
+ * has its own (home_fades, home_pad), an inset modal's rows end in its panel. */
 #define LIST_PAD "_list_pad"
 #define LIST_PADDED "_list_padded"
+#define LIST_TOP "_list_top"
 static int list_pad(void *w) {
     return widget_get_prop_int(w, LIST_PADDED, -1) == I(w, VIEW_CONTENT_H)
                ? widget_get_prop_int(w, LIST_PAD, 0)
@@ -2442,10 +2444,17 @@ static void list_fade(void *w, void *canvas) {
     int off = k == 2 ? I(w, TABLE_TOP) : I(w, SCROLL_Y),
         content = k == 2 ? I(w, TABLE_ROWS) * I(w, ROW_HEIGHT) : I(w, VIEW_CONTENT_H) - list_pad(w);
     if (k == 1) { /* a drag's end at the wheel's */
-        int pad = bottom - end;
+        int pad = bottom - end, h = I(w, W_H), kept = widget_get_prop_int(w, LIST_TOP, 0) - 1;
+        /* A relayout (the page back on top) puts stock's height back, unpadded, and AWTK clamps
+         * the scroll to it, which put a list scrolled to its end down until its last row sat on
+         * the screen's foot: the scroll the last paint saw goes back while it fits. */
+        int relaid = widget_get_prop_int(w, LIST_PADDED, -1) != I(w, VIEW_CONTENT_H);
         widget_set_prop_int(w, LIST_PAD, pad);
         I(w, VIEW_CONTENT_H) = content + pad;
         widget_set_prop_int(w, LIST_PADDED, content + pad);
+        if (relaid && kept > off && kept <= content + pad - h)
+            scroll_view_set_offset(w, I(w, SCROLL_X), off = kept);
+        widget_set_prop_int(w, LIST_TOP, off + 1);
     }
     int s0 = 1, s1 = 0; /* the selected row, on the screen */
     if (st.sel_w == w) s0 = y + st.sel_y - st.sel_h / 2, s1 = s0 + st.sel_h;

@@ -56,7 +56,8 @@ those spots are under the glass. So:
   250, seven in all), peek through a fade into black from y 266 to y 316, black below; once the
   list has scrolled, its top row's first 14 px fade under the status row. A selected row is never
   faded and never lands past y 282: scrolled to its end, by the wheel or a drag, the last row's
-  foot is on y 282 (Q2 Pod's `list_end` and `list_fit`, `navigation.c` `list_fade`).
+  foot is on y 282 (Q2 Pod's `list_end` and `list_fit`, `navigation.c` `list_fade`), also after
+  the page comes back on top (Return from a row's page).
 - Every screen is checked against the glass: a screenshot composited with the 80 px mask shows
   no lit pixel under the curve.
 

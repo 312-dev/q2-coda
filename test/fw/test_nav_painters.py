@@ -1374,6 +1374,29 @@ def test_a_list_past_the_list_end_fades_as_home_s_does(fw, st, scroll):
     assert view.int_at(O['VIEW_CONTENT_H']).value == rows * h + (320 - end)
 
 
+def test_a_list_scrolled_to_its_end_keeps_its_padding_through_stock_s_relayout(fw, st):
+    """The last row selected, opened, then Return: the page's relayout puts stock's height back (the rows' foot) and
+    AWTK clamps the scroll to it, which sat the last row on the screen's foot (seen on Artists). The paint pads the
+    content again and puts back the scroll it last saw; a scroll of the user's own, with no relayout, stays."""
+    rows, h = 12, THEMES[OLED]['page_detail']
+    view, _, _ = detail_page(fw, st, rows=rows, touch=1)
+    fw.mock('scroll_view_set_offset', lambda w, x, y, *_: struct.pack_into('<i', view.block, O['SCROLL_Y'], y) or 0)
+    paint = lambda: fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(view.addr, Canvas(fw).addr)
+    box = 294
+    paint()
+    padded = view.int_at(O['VIEW_CONTENT_H']).value
+    end_top = padded - box  # the wheel's end: the last row's foot on the list end
+    view.int_at(O['SCROLL_Y']).value = end_top
+    paint()
+    view.int_at(O['VIEW_CONTENT_H']).value = rows * h  # Return: stock's relayout
+    view.int_at(O['SCROLL_Y']).value = rows * h - box  # and AWTK's clamp to it
+    paint()
+    assert view.int_at(O['VIEW_CONTENT_H']).value == padded and view.int_at(O['SCROLL_Y']).value == end_top
+    view.int_at(O['SCROLL_Y']).value = h  # a drag up, no relayout
+    paint()
+    assert view.int_at(O['SCROLL_Y']).value == h
+
+
 def test_a_list_cut_above_the_list_end_has_no_fade(fw, st):
     ui = oled(fw, st)
     view = ui.add('scroll_view', ui.window('about_page'), (0, 26, 375, 200))
