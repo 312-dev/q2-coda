@@ -124,6 +124,7 @@ python3 test/mp3_gapless_player.py /tmp/q2-build  # built MIPS gapless hooks, pr
 python3 test/ldac.py /tmp/q2-build         # shipped LDAC intermediate rates and native adaptive controller
 python3 test/headset_io.py /tmp/q2-build   # real MIPS headset worker with simulated kernel I/O (cc)
 python3 test/bluealsa.py /tmp/q2-build     # the patched bluealsa's DROP paths against stock's, delayed encoder signal
+python3 test/bluetoothd.py /tmp/q2-build   # the patched bluetoothd's GetElementAttributes, at a load address of its own, against stock's
 python3 test/alsa.py BUILD QEMU_MIPSEL     # ALSA startup lock regression (see internals.md)
 python3 test/thirdparty.py BUILD QEMU_MIPSEL  # the rebuilt OpenSSL, curl, zlib, SQLite, libpng, BusyBox, wpa_supplicant and FFmpeg in a bwrap chroot of BUILD's rootfs: versions, links, TLS (network; --offline skips it) (third-party.md)
 python3 -m pytest test/unit                # tools/: no stock ZIP, no build, no Q2 (pip install -r test/unit/requirements.txt); GitHub runs it on every pull request
@@ -213,7 +214,7 @@ mutmut run $(python3 test/unit/targets.py --since main)     # or only what a bra
 python3 test/unit/report.py --survivors /tmp/survivors.txt  # score, table, each survivor's diff (--since as above)
 ```
 
-- **Needs no stock firmware:** the fixtures in `test/unit` are synthetic, and the stock ZIP is neither fetched nor kept. A function that pins a Shanling file's hash or links against one carries `# pragma: no mutate block` on its `def` line, so it has no mutants: `compile_payload`, `patch_asset`, `compile_common`, `patch_player`, the audio module's `validate_stock` and `patch_module`, the rotator's `patch_module`, and PWM's `link`, `patch_pwm`, `patch_mcu` and `patch_bundle`. They stay with the scripts above, which need a build. A new one gets the same pragma.
+- **Needs no stock firmware:** the fixtures in `test/unit` are synthetic, and the stock ZIP is neither fetched nor kept. A function that pins a Shanling file's hash or links against one carries `# pragma: no mutate block` on its `def` line, so it has no mutants: `compile_payload`, `patch_asset`, `compile_common`, `patch_player`, `patch_bluetoothd`, the audio module's `validate_stock` and `patch_module`, the rotator's `patch_module`, and PWM's `link`, `patch_pwm`, `patch_mcu` and `patch_bundle`. They stay with the scripts above, which need a build. A new one gets the same pragma.
 - **Keep tests behind the fence:** a mutant changes a command before it runs, and `q2remote`'s commands are shell scripts for a live Q2. `test/unit/conftest.py` refuses every process but the compilers, along with sockets and signals, and hides `Q2_HOST`. `test/remote.py` runs real commands through a real shell, so it stays out of `test/unit`.
 - **`build()`** carries `# pragma: no mutate block`. mutmut writes out a whole copy of a function per mutant, so its 440 lines alone made a 96 MB file that never finished generating. The pragma is on art.py's `wave()` too: only `WAVES` calls it, at import, before mutmut can switch a mutant on, so all 21 of its mutants survived.
 - **Survivors are not all gaps.** Most left are equivalent (`<I` as `<i` on a word under 2^31) or machine code in `patch_bluealsa`, which only `test/bluealsa.py` can judge against a build.
