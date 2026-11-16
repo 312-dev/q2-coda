@@ -13,7 +13,7 @@
 #     name other sysfs files, and Q2_HEAVY_PSI another /proc/pressure, for a test).
 # Under 10 GB free on /mnt/c it refuses outright (exit 75), and a running job is paused (SIGSTOP) until
 # 25 GB are free again (Q2_HEAVY_DISK_START_GB and Q2_HEAVY_DISK_STOP_GB move the two marks). Starts are
-# spaced Q2_HEAVY_RAMP seconds (15) apart, so the next job's check sees the last one's memory. Each job runs
+# spaced Q2_HEAVY_RAMP seconds (5) apart, so the next job's check sees the last one's memory. Each job runs
 # in its own systemd scope with MemoryMax=Q2_HEAVY_MEM (3G; 8G under ASan), so a runaway is killed alone,
 # and with tools/ci/nodump.c preloaded, so a crash writes no core dump.
 # A q2-heavy inside a q2-heavy job runs its command at once (it already holds a slot).
@@ -21,7 +21,7 @@ slots=${Q2_HEAVY_SLOTS:-10}
 # An ASan job (libasan in LD_PRELOAD) gets 8G: test/fw under ASan in one process peaks at 7.4 GB (measured).
 case "$LD_PRELOAD" in *libasan*) mem=${Q2_HEAVY_MEM:-8G} ;; *) mem=${Q2_HEAVY_MEM:-3G} ;; esac
 reserve=${Q2_HEAVY_RESERVE_GB:-5}
-ramp=${Q2_HEAVY_RAMP:-15}
+ramp=${Q2_HEAVY_RAMP:-5}
 disk_start=${Q2_HEAVY_DISK_START_GB:-25}
 disk_stop=${Q2_HEAVY_DISK_STOP_GB:-10}
 ac=${Q2_HEAVY_AC:-/sys/class/power_supply/AC1/online}
