@@ -22,7 +22,7 @@
 #include "playback.h"
 
 #define UN_ROWS 500
-#define UN_BOTTOM 296 /* the list's foot on screen, above the bottom corners' glass */
+#define UN_BOTTOM 296 /* the list's foot on screen without a list_fit set, above the glass */
 #define UN_ROW_H 46   /* a song's row */
 #define UN_NOW_H 50   /* the playing song's, and the gap under it */
 #define UN_HEAD_H 24  /* Playing Next's heading */
@@ -160,9 +160,12 @@ static void un_fill(int sel) {
     void *view = un.view = page_list(un.page, un.page, 0, "Up Next", UN_ROWS, UN_ROW_H);
     void *lv = P(view, W_PARENT), *wm = window_manager();
     widget_set_prop_int(lv, "item_height", 0); /* each child its own height */
-    int y = 0; /* the list down to UN_BOTTOM on screen, rows of mixed heights cut there */
+    /* the list down to UN_BOTTOM on screen, rows of mixed heights cut there; a list_fit set's
+     * stays on to the window's foot, as page_list leaves it, its rows past the list end fading
+     * into it (navigation.c list_fade) */
+    int y = 0;
     for (void *p = lv; p && p != wm; p = P(p, W_PARENT)) y += I(p, W_Y);
-    if (UN_BOTTOM > y)
+    if (!list_fit_end() && UN_BOTTOM > y)
         widget_resize(lv, I(lv, W_W), UN_BOTTOM - y),
             widget_resize(view, I(view, W_W), UN_BOTTOM - y);
     void *now = queue_now(&at, &size);

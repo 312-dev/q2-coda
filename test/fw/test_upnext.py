@@ -272,6 +272,24 @@ def test_up_next_stops_at_500_rows_of_a_longer_queue(fw, mcl):
     low.close()
 
 
+@pytest.mark.parametrize('set_name', ['oled', None])
+def test_up_next_s_list_runs_on_to_the_foot_under_a_list_fit_set(fw, up, st, set_name):
+    """OLED's (list_fit) list stays as page_list leaves it, on to the window's foot, its rows past the list end fading
+    (navigation.c list_fade) where a box cut at UN_BOTTOM showed them cut off; a set without one stops at UN_BOTTOM."""
+    sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
+    st('geom').value = [g.name for g in sets].index(set_name) if set_name else 0
+    _, page = up
+    fw.mock('widget_resize', lambda w, width, h, *_: struct.pack_into('<i', page_block(page, w), O['W_H'], h) or 0)
+    page.open()
+    lv = C.c_uint64.from_address(page.view + O['W_PARENT']).value
+    h = C.c_int.from_address(lv + O['W_H']).value
+    assert h == (290 if set_name else 296)  # the page's own height (prop 'h'), from its top at y 0
+
+
+def page_block(page, w):
+    return next(b for b in page.blocks if C.addressof(b) == w)
+
+
 @pytest.mark.parametrize('mode, n', [(0, 5), (3, 8), (1, 0)])  # List, Repeat All, Repeat One
 def test_outside_advanced_play_up_next_is_the_queues_order(fw, plain, mode, n):
     queue, page = plain

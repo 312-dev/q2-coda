@@ -1131,6 +1131,36 @@ def fit_rows(g, top, pitch):
     return 320 - g.bar - top
 
 
+# Lists a list_fit set may end above list_end: Home's main list, which home_overflow runs on at run time (coverflow.c),
+# Now Playing's lyrics, which are no rows and fade their own (lyrics.c lyrics_fade), and stock's Scan Specified
+# Folders table, whose Scan button sits under it. ponytail: Scan Specified Folders keeps stock's 78 px table until its
+# page is rebuilt as rows; then it leaves this list.
+UNFIT_LISTS = (('home_page.bin', 'list_view_home'), ('playing_page.bin', 'view_lrc'), ('specfolder_page.bin', 'table_view'))
+
+
+def cut_lists(path, data, g):
+    """Under a list_fit set, the names of page path's lists (list_view, table_view; data, the page built) whose box
+    stops at or above list_end, where their rows would end on a whole row over a black band rather than peek through
+    the fade into the window's foot (navigation.c list_fade, which leaves such a box alone). A box sized by its parent's
+    layout is its parent's; a modal set's menus end in their panel (menu_modal.c)."""
+    if not (g.list_fit and g.list_end) or (g.modal and path in MODAL_PAGES):
+        return []
+    cut = []
+
+    def down(n, y):
+        kind, box, props, children = n
+        if kind != 'window':
+            y += box[1]
+            if (kind in ('list_view', 'table_view') and '100%' not in props.get('self_layout', '') and
+                    props.get('visible') != 'false' and y + box[3] <= g.list_end and
+                    (path, props.get('name', '')) not in UNFIT_LISTS):
+                cut.append(props.get('name', kind))
+        for c in children:
+            down(c, y)
+    down(decode(data), 0)
+    return cut
+
+
 # The menus a modal set opens over the page under them (Geometry.modal): each stays the page its set makes, as a dialog.
 MODAL_PAGES = ('playermore_page.bin', 'localmusic/playlistsmore_page.bin')
 
@@ -1293,6 +1323,8 @@ def set_assets(cat, g):
     for rel in UI_ASSETS | STOCK_ROWS:
         data = cat(ui + rel)
         mine = patch_asset(rel, data, g=g)
+        cut = cut_lists(rel, mine, g)
+        check(not cut, f'{rel}: {", ".join(cut)} end above list_end under {g.name}: run them on to the window foot (fit_rows)')
         if mine != patch_asset(rel, data):
             folder, _, base = rel.rpartition('/')
             out[ui + (folder and folder + '/') + f'{g.name}_{base}'] = mine

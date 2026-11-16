@@ -748,6 +748,44 @@ def test_no_oled_home_list_ends_on_whole_rows_above_the_list_end():
         assert ipod.HOME_TOP + n[k][1][3] >= 320 - g.bar, k  # Library's and Streaming's are window-high, from HOME_TOP
 
 
+def cut_page(h, name='list_view', y=0, **props):
+    return w('a_page', w(name, kind='list_view', at=[0, y, 375, h], **props), kind='window')
+
+
+@pytest.mark.parametrize('h, y, cut', [(224, 0, True), (192, 32, True), (225, 0, False), (262, 0, False),
+                                       (100, 140, False)])
+def test_cut_lists_names_a_list_ending_on_a_row_above_the_list_end(h, y, cut):
+    """Any list on a list_fit set: a box stopping at or above list_end (224 in OLED's window) ends its rows over a
+    black band, unfaded (navigation.c list_fade leaves such a box alone); one running past it is the fade's."""
+    data = ipod.encode(cut_page(h, y=y))
+    assert ipod.cut_lists('a_page.bin', data, OLED_SET) == (['list_view'] if cut else [])
+    assert ipod.cut_lists('a_page.bin', data, ipod.SET0) == []  # no list_fit: stock's ends
+
+
+def test_cut_lists_skips_lists_it_cannot_see_end():
+    page = w('a_page', w('box', w('table_view', kind='table_view', at=[0, 8, 375, 100]), at=[0, 40, 375, 108]),
+             w('hidden', kind='list_view', at=[0, 0, 375, 100], visible='false'),
+             w('laid', kind='list_view', at=[0, 0, 375, 100], self_layout='default(x=0,y=0,w=100%,h=100%)'), kind='window')
+    assert ipod.cut_lists('a_page.bin', ipod.encode(page), OLED_SET) == ['table_view']  # its parent's y counts
+    for path, name in ipod.UNFIT_LISTS:
+        assert ipod.cut_lists(path, ipod.encode(cut_page(100, name)), OLED_SET) == []
+    modal = dataclasses.replace(OLED_SET, modal=1)
+    assert ipod.cut_lists(ipod.MODAL_PAGES[0], ipod.encode(cut_page(100)), modal) == []  # an inset menu's panel
+
+
+def test_set_assets_refuses_a_list_fit_set_s_list_cut_above_the_list_end(monkeypatch):
+    monkeypatch.setattr(ipod, 'UI_ASSETS', {'a_page.bin': ''})
+    monkeypatch.setattr(ipod, 'STOCK_ROWS', {})
+    monkeypatch.setattr(ipod, 'patch_asset', lambda rel, data, g=ipod.SET0: data)
+    for h, ok in ((224, False), (262, True)):
+        cat = lambda p, h=h: ipod.encode(cut_page(h))
+        if ok:
+            assert ipod.set_assets(cat, OLED_SET) == {}
+        else:
+            with pytest.raises(Exception, match='a_page.bin: list_view end above list_end under oled'):
+                ipod.set_assets(cat, OLED_SET)
+
+
 def test_status_bar_takes_the_bar_height():
     root = bar(); ipod.status_bar(root, g=T26); n = named(root)
     assert [root[1][3], n['view_left'][1][3], n['view_right'][1][3]] == [26, 26, 26]

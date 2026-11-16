@@ -766,9 +766,12 @@ static int render(const void *unused) {
     int selection = 0, offset = 0, kept = 0;
     int height = widget_get_prop_int(ui.page, "h", 320), graph = ui.screen == HOME || ui.screen == BAND;
     int head = graph * graph_head(), rh = page_h(48);
-    /* Whole rows only, so the last row is never clipped; a set_switch theme's end above the bottom
-     * corners' glass, as its other lists do (list_end) */
-    int rows = ((eq_rows() ? eq_list_end() : height) - 48) / rh * rh;
+    /* shown: the whole rows in view, a set_switch theme's ending above the bottom corners' glass,
+     * as its other lists do (list_end). rows, the list's box: shown, or under a list_fit set on to
+     * the window's foot, its rows past the list end fading into it (navigation.c list_fade), where
+     * the wheel's end leaves the last row on the last whole row above the end (fit_top). */
+    int shown = ((eq_rows() ? eq_list_end() : height) - 48) / rh * rh,
+        rows = list_fit_end() ? height - 48 : shown;
     if (ui.view && ui.rendered != ui.screen && (ui.rendered == HOME || ui.rendered == BAND)) {
         ui.kept[ui.rendered][0] = widget_get_prop_int(ui.view, "_ringnav_index", 0) + 1;
         ui.kept[ui.rendered][1] = widget_get_prop_int(ui.view, "yoffset", 0);
@@ -784,8 +787,8 @@ static int render(const void *unused) {
         kept = 1;
     } else if (ui.screen == TYPES) { /* opens on the band's type, centred as a picker's value */
         selection = ui.draft.bands[ui.band].type;
-        offset = selection * rh - (rows - rh) / 2;
-        offset = offset < 0 ? 0 : offset > PEQ_TYPES * rh - rows ? PEQ_TYPES * rh - rows : offset;
+        offset = selection * rh - (shown - rh) / 2;
+        offset = offset < 0 ? 0 : offset > PEQ_TYPES * rh - shown ? PEQ_TYPES * rh - shown : offset;
         if (offset < 0) offset = 0; /* a list tall enough for all eight */
     } else if (ui.screen == PICK) { /* opens on the nearest row to the current value (Auto if on it), centred */
         int last = picks[ui.pick - BALANCE].rows - 1;
@@ -793,8 +796,8 @@ static int render(const void *unused) {
         selection = r < 0 ? 0 : r > last ? last : (int)r;
         if (ui.pick == PREAMP && on_auto()) selection = 0;
         else if (ui.pick == PREAMP && !selection) selection = 1;
-        offset = selection * rh - (rows - rh) / 2;
-        offset = offset < 0 ? 0 : offset > (last + 1) * rh - rows ? (last + 1) * rh - rows : offset;
+        offset = selection * rh - (shown - rh) / 2;
+        offset = offset < 0 ? 0 : offset > (last + 1) * rh - shown ? (last + 1) * rh - shown : offset;
     }
     ui.rendered = ui.screen;
     ui.edit = 0;

@@ -814,6 +814,22 @@ def test_a_render_lets_t9_go_before_replacing_its_edit(fw):
     assert requests[-1] == 0 and p.edit() != old and p.ui.keyboard_timer == 0
 
 
+@pytest.mark.parametrize('pick', (None, 'Balance'))
+def test_a_scrolling_list_runs_on_to_the_page_s_foot(fw, pick):
+    """Under a list_fit set (OLED's) Advanced's list and a picker's run from under the tab bar on to the page's foot,
+    so their rows past the list end peek through its fade (navigation.c list_fade) as every list's do, rather than
+    stopping on a whole row above it over a black band."""
+    p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()
+    if pick:
+        p.click(pick)
+    view = p.ui.view
+    lv = p.parent[view]
+    box = lambda w: struct.unpack_from('<4i', p.blocks[w], 0)
+    foot = p.props[(p.page, 'h')]
+    assert box(lv)[1] == 48 and box(lv)[1] + box(lv)[3] == foot and box(view)[3] == foot - 48
+    assert (lv, 'resized') not in p.props  # it scrolls: never shrunk to its rows
+
+
 @pytest.mark.parametrize('pick, value, title, rows, row', (('Balance', 0, 'Balance', 49, 24), ('Balance', -3, 'Balance', 49, 18),
                                                           ('Preamp', None, 'Preamp', 74, 0), ('Preamp', -3, 'Preamp', 74, 31)))
 def test_a_picker_opens_centred_on_its_value(fw, pick, value, title, rows, row):

@@ -57,7 +57,10 @@ those spots are under the glass. So:
   list has scrolled, its top row's first 14 px fade under the status row. A selected row is never
   faded and never lands past y 282: scrolled to its end, by the wheel or a drag, the last row's
   foot is on y 282 (Q2 Pod's `list_end` and `list_fit`, `navigation.c` `list_fade`), also after
-  the page comes back on top (Return from a row's page).
+  the page comes back on top (Return from a row's page). A list whose top is off the 32 px grid (EQ's, under its
+  48 px tab bar) or whose rows are of another pitch keeps whole rows at its top, so scrolled to its end its last row
+  ends on the last whole row above y 282. The build refuses a list box that stops at or above y 282
+  (`tools/ipod.py` `cut_lists`).
 - Every screen is checked against the glass: a screenshot composited with the 80 px mask shows
   no lit pixel under the curve.
 
