@@ -6,6 +6,8 @@
   - Up Next (OLED): Up Next opens in the same sheet as the menus, from the queue button, a swipe up on the cover or the hold menu's View Queue. The playing song is at the top with its cover, moving level bars, artist and album; in Light Mode the **Clear** pill is light grey with blue words.
   - Menus (OLED): Now Playing's ⋯ reads **Get Cover & Lyrics** and **Get Album Lyrics**, no longer cut off.
   - Menus (OLED): in Now Playing's hold menu, Shuffle, Repeat and Group by show just their setting (**Songs**, **All**, **Album**), and Center on Group by switches between Album and Folder without opening a list.
+  - Subsonic comes built in: it is in Streaming without installing it. A newer Subsonic from the App Store still takes over.
+  - Car Remote: with Library on Local + Server and a card app's server songs imported, Q2 Muse Remote's lists (and Android Auto's) showed nothing; they list both libraries again.
   - Now Playing: the Shuffle and Repeat outline from the Centre cycle hides after a tap, as every focus ring does.
   - Display (OLED): an empty Favorites list shows a crossed-out heart.
   - Home (Split, OLED): with a song that has no art, the placeholder fills the right pane up to the top edge under the clock and battery, as a cover does; it started below the status row, leaving a black band.

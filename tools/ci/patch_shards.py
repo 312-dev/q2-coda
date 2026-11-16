@@ -5,7 +5,8 @@
     python3 tools/ci/patch_shards.py BUILD --lines 9000:9400          # only the statements on those lines
     python3 tools/ci/patch_shards.py BUILD --verify                   # also a serial run: the traces must match
 
-test/patch.py is one script of about 13,000 top-level statements that share module state. A shard runs
+test/patch.py's suite (test/patch_suite/'s files, joined in run order: `suite_text`) is one script of about
+13,400 top-level statements that share module state; line numbers here are the joined suite's. A shard runs
 a contiguous range of them, preceded by the statements before the range that it depends on (its slice):
 every def, class and import, plus each earlier statement that binds or changes a name the range reads,
 found by name from the source (`slice_of`), never by editing test/patch.py. Statements replayed for a
@@ -175,6 +176,21 @@ def _walk_tables(table):
     yield table
     for child in table.get_children():
         yield from _walk_tables(child)
+
+
+def suite_text(test):
+    """The script to shard: test/patch.py's suite, its test/patch_suite/ files joined in run order
+    (test/suite_source.py), so line numbers here are the joined suite's (`python3 test/suite_source.py LINE`
+    names the file and line); any other script as it is."""
+    test = pathlib.Path(test)
+    if (test.parent/'patch_suite').is_dir() and test.name == 'patch.py':
+        sys.path.insert(0, str(test.parent))
+        try:
+            import suite_source  # type: ignore[import-not-found]  # test/, put on sys.path just above
+        finally:
+            sys.path.remove(str(test.parent))
+        return suite_source.source()
+    return test.read_text()
 
 
 def analyse(source):
@@ -454,7 +470,7 @@ def child(test, build, start, stop, trace_file, result_file, whole):
     before them, as a serial run would), and write the result to result_file."""
     faulthandler.enable()  # a crash in C (unicorn) prints the Python stack that reached it
     no_core_dump()
-    source = pathlib.Path(test).read_text()
+    source = suite_text(test)
     stmts = analyse(source)
     cost(stmts, load_profile())
     keep = set(range(start)) if whole else set(slice_of(stmts, start, stop, CHEAP))
@@ -606,7 +622,7 @@ def main():
     if args.child:
         start, stop = args.child
         child(test, build, start, stop, args.trace, args.result, args.whole)
-    stmts = analyse(pathlib.Path(test).read_text())
+    stmts = analyse(suite_text(test))
     cost(stmts, load_profile())
     if args.lines:
         ranges = []

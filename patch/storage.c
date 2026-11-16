@@ -93,7 +93,7 @@ static void st_app(void) {
     for (struct dirent *e; d && !so.id[0] && (e = readdir(d));) {
         const char *id = e->d_name + 1;
         if (e->d_name[0] != '.' || !*id || strlen(id) >= sizeof so.id) continue;
-        tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/q2app", id);
+        addon_q2app(id, path, sizeof path);
         if (state_read(path, raw, sizeof raw) && number(raw, "storage") == 1)
             tk_snprintf(so.id, sizeof so.id, "%s", id);
     }

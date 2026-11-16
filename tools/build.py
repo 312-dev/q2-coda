@@ -258,6 +258,16 @@ GUEST_LIBS = ['lib/libc-2.28.so', 'usr/lib/libdbus-1.so.3.19.15']
 GUEST_DBUS = 'etc/dbus-1/system.d/bluealsa-sink.conf'
 GUEST_HOTSPOT = 'usr/bin/q2-hotspot'  # its hotspot (docs/internals.md#guest-play-hotspot), a shell script q2-guest runs
 PLAYER_STOCK_DIR = b'usr/lib/hciplayer-stock'  # --new-player: hciplayer.xz's place, player/main.c's STOCK_XZ
+# Card apps the firmware carries (docs/internals.md#bundled-apps): id -> (version, release zip, its size, its
+# SHA-256), each the zip its release ships for the App Store, read from --apps (APPS_DIR). Its .<id>/ files go
+# to BUNDLED_DIR/<id> (patch/addon.c BUNDLED) with a version file and bundled_launcher's run in place of the
+# app's, so the app keeps its data in the card's .<id>. A new pin is a new zip: the source hash covers the pin.
+BUNDLED_DIR = 'usr/lib/q2apps'
+BUNDLED_APPS = {
+    'subsonic': ('q2-v0.9', 'q2-subsonic-v0.9-43b537a.zip', 2834040,
+                 'fd96e4790e655cd95cb1c2c044b9ac3787960a0c1bc035126d886625471d710a'),
+}
+APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
 ROCKBOX_FLAG = '/tmp/q2pod-rockbox'
 # Rockbox can't use Wi-Fi and the radio costs battery, so rockbox() below stops it. Nothing is saved or restored
@@ -1470,6 +1480,38 @@ def symbols(p, table=None):
 ROOTFS_ROOM = 72 << 20  # 75,497,472 bytes
 
 
+# The lines of an app's launcher (its card copy's run) that bundled_launcher changes, each found once: the
+# folder it keeps its data in, the card's .<id> made if it is missing, and the binary linked into /tmp from
+# the read-only image, not copied there (7.9 MB of RAM for q2-subsonic).
+LAUNCHER_DIR = 'dir=$(cd "$(dirname "$0")" && pwd)'
+LAUNCHER_COPY = 'cp -f "$dir/q2-{id}" /tmp/q2-{id}.bin && chmod 755 /tmp/q2-{id}.bin || exit 1'
+
+
+def bundled_launcher(app_id, text):
+    """An app's own launcher, made to run the firmware's copy of it with its data in the card's .<id>."""
+    copy = LAUNCHER_COPY.format(id=app_id)
+    check(text.count(LAUNCHER_DIR) == 1 and text.count(copy) == 1, f'Unexpected launcher in the {app_id} app')
+    return (text.replace(LAUNCHER_DIR, f'dir=/mnt/mmc/.{app_id}; mkdir -p "$dir" || exit 1')
+                .replace(copy, f'ln -sf /{BUNDLED_DIR}/{app_id}/q2-{app_id} /tmp/q2-{app_id}.bin || exit 1'))
+
+
+def bundled_app(app_id, apps_dir):
+    """BUNDLED_APPS[app_id]'s files, name -> (bytes, executable), from its pinned zip in apps_dir."""
+    version, name, size, digest = BUNDLED_APPS[app_id]
+    path = pathlib.Path(apps_dir)/name
+    check(path.is_file(), f'Missing {path}: build {app_id}\'s {version} (docs/building.md#bundled-apps)')
+    data = path.read_bytes()
+    check(len(data) == size and sha(data) == digest, f'{path} is not the pinned {app_id} {version}')
+    prefix = f'.{app_id}/'
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        files = {n[len(prefix):]: z.read(n) for n in z.namelist() if n.startswith(prefix) and not n.endswith('/')}
+    need_files = {f'q2-{app_id}', 'run', 'q2app'}
+    check(need_files <= set(files) and all('/' not in n for n in files), f'Unexpected files in {name}')
+    files['run'] = bundled_launcher(app_id, files['run'].decode()).encode()
+    files['version'] = version.encode() + b'\n'
+    return {n: (b, n in (f'q2-{app_id}', 'run')) for n, b in sorted(files.items())}
+
+
 def rootfs_fits(size, new_player=False):
     """Refuse a repacked rootfs of size bytes that leaves mtd2 less than its bad-block spare."""
     check(size <= ROOTFS_ROOM, f'Repacked rootfs is {size:,} bytes, {size - ROOTFS_ROOM:,} over the {ROOTFS_ROOM:,} mtd2 holds'
@@ -2272,7 +2314,7 @@ def signing_key(path, dev):
     check(path.is_file(), f'{path}: no release public key (docs/releasing.md#signing-a-release)')
     return public_key(path.read_bytes())
 
-def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, flac_experiments='sync,lpc,output', signing_pub=None, new_player=False):  # pragma: no mutate block
+def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, flac_experiments='sync,lpc,output', signing_pub=None, new_player=False, apps_dir=APPS_DIR):  # pragma: no mutate block
     from flac import selection
     flac_experiments = selection(flac_experiments)
     # Kernel-module experiments: no measured saving (docs/clock-gating.md, pwm-clock-gating.md,
@@ -2692,6 +2734,25 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         p = (p + PLAYER_STOCK_DIR + b' D ' + b' '.join(stock_dir.groups()) + b'\n' + PLAYER_STOCK_DIR + b'/hciplayer.xz F ' +
              b' '.join(hci.groups()) + b' cat ' + shlex.quote(str(stock_xz)).encode() + b'\n')
         player_added = [[PLAYER_STOCK_DIR, b'D', *stock_dir.groups()], [PLAYER_STOCK_DIR + b'/hciplayer.xz', b'R', *hci.groups()]]
+    # The card apps the firmware carries (BUNDLED_APPS): folders as usr/lib is, the app and its launcher as a
+    # stock program is, the rest as a stock data file is
+    lib_dir = need(re.search(rb'^usr/lib D (\d+) (\d+) (\d+) (\d+)$', p, re.M), 'Missing usr/lib pseudo inode')
+    program, data_file = need(inode(p, HELPER_LIKE.encode()), 'Missing program inode'), need(inode(p, b'etc/hosts'), 'Missing etc/hosts inode')
+    bundled = {}
+    for d in [BUNDLED_DIR, *(f'{BUNDLED_DIR}/{i}' for i in BUNDLED_APPS)]:
+        p += d.encode() + b' D ' + b' '.join(lib_dir.groups()) + b'\n'
+        player_added.append([d.encode(), b'D', *lib_dir.groups()])
+    for app_id in BUNDLED_APPS:
+        files = bundled_app(app_id, apps_dir)
+        (out/'q2apps'/app_id).mkdir(parents=True, exist_ok=True)
+        for name, (data, executable) in files.items():
+            src, path, like = out/'q2apps'/app_id/name, f'{BUNDLED_DIR}/{app_id}/{name}'.encode(), program if executable else data_file
+            src.write_bytes(data)
+            p += path + b' F ' + b' '.join(like.groups()) + b' cat ' + shlex.quote(str(src)).encode() + b'\n'
+            player_added.append([path, b'R', *like.groups()])
+        app_version, zip_name, _, digest = BUNDLED_APPS[app_id]
+        bundled[app_id] = dict(version=app_version, zip=zip_name, sha256=digest,
+                               bytes=sum(len(d) for d, _ in files.values()))
     for path, src in ((b'release/bin/demo', out/'demo'), (b'usr/bin/hciplayer', q2player or out/'peq/hciplayer'),
                       (BLUEALSA.encode(), out/'bluealsa'), (BLUETOOTHD.encode(), out/'bluetoothd'), (WATCHDOG.encode(), out/'watchdog'),
                       (S90PLAY.encode(), out/'S90play'), (S11LOGO.encode(), out/'S11logo'),
@@ -2878,6 +2939,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         **({'rotator_clock': rotator} if rotator else {}),
         **({'adbd': adbd_record(out)} if dev else {}),
         **({'q2player_sha256': sha(q2player.read_bytes()), 'rootfs_bytes': size} if q2player else {}),
+        bundled_apps=bundled, rootfs_squashfs_bytes=len(blobs['recovery-update/rootfs.squashfs']),
         **({'pwm_clock': pwm} if pwm else {}),
         patch_symbols={n:hex(v) for n,v in ps.items() if n.startswith('stock_')},
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']} |
@@ -2907,10 +2969,12 @@ if __name__ == '__main__':
                     help='experimental: defer the rotator clock until its first conversion (requires --dev)')
     ap.add_argument('--new-player', action='store_true',
                     help='install q2player as /usr/bin/hciplayer, falling back to hciplayer unless /mnt/data/q2player exists (requires --dev)')
+    ap.add_argument('--apps', type=pathlib.Path, default=APPS_DIR, metavar='DIR',
+                    help=f'where the pinned zips of the card apps the firmware carries are (default {APPS_DIR})')
     ap.add_argument('--pwm-idle-clock', action='store_true',
                     help='experimental: cooperative Linux/MCU PWM clock gating (requires --dev)')
     a=ap.parse_args()
     try:
-        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.flac_experiments,a.signing_key,a.new_player)
+        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.flac_experiments,a.signing_key,a.new_player,a.apps)
     except (OSError, ValueError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
         ap.error(str(exc))
