@@ -678,10 +678,20 @@ int need_link(int (*fn)(void *, void *), void *ctx); /* smart_hold, else "Connec
 int spot_running(void), scrobble_busy(void), tidal_busy(void), addon_running(void),
     netupdate_busy(void), album_lyrics_busy(void);
 /* netupdate.c: Software Update's online half (sw_update.c draws its page): the check's answers,
- * the download's states (netupdate_poll's), and sw_update.c's page, General's Software Update row */
+ * the download's states (netupdate_poll's); sw_update_open opens the page (General's row) */
 enum { NET_NEWER = 1, NET_LATEST, NET_FAILED };
-enum { NU_IDLE, NU_RUNNING, NU_DONE, NU_LATEST, NU_NET, NU_MISSING, NU_CARD, NU_CANCELLED,
-       NU_UNSIGNED, NU_FORGED };
+enum {
+    NU_IDLE,
+    NU_RUNNING,
+    NU_DONE,
+    NU_LATEST,
+    NU_NET,
+    NU_MISSING,
+    NU_CARD,
+    NU_CANCELLED,
+    NU_UNSIGNED,
+    NU_FORGED
+};
 int netupdate_check(char *tag, unsigned n, unsigned *kb);
 int netupdate_start(void), netupdate_poll(int *percent, int *verifying);
 void netupdate_cancel(void);

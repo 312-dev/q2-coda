@@ -21,12 +21,13 @@
  * from SD Card instead (both have one), Turn on Wi-Fi to check online, or Couldn't check online ·
  * Try Again;
  * - Download and Install fetches it to the card (netupdate.c) with its progress on the page, then
- * checks the card's file as above; Install asks on the confirmation card, Install SW_PRODUCT 1.8.3?:
- * the update's version, this build's tag and the file's size, Cancel (selected) and Install and
- * Restart, which runs stock's checkfw_dialog as stock's fwupdate_tf did: its thread unpacks and
- * checks the tar again, marks the next boot as the recovery's and restarts, and the recovery
- * flashes. That dialog is drawn as a mode page here (Restarting to Install), with the unpacking's
- * progress; should its own check fail after all, the dialog's answer opens the page it means. */
+ * checks the card's file as above; Install asks on the confirmation card, Install
+ * SW_PRODUCT 1.8.3?: the update's version, this build's tag and the file's size, Cancel (selected)
+ * and Install and Restart, which runs stock's checkfw_dialog as stock's fwupdate_tf did: its thread
+ * unpacks and checks the tar again, marks the next boot as the recovery's and restarts, and the
+ * recovery flashes. That dialog is drawn as a mode page here (Restarting to Install), with the
+ * unpacking's progress; should its own check fail after all, the dialog's answer opens the page it
+ * means. */
 #include "navigation.h"
 
 #define SW_CARD "/mnt/mmc"
@@ -81,7 +82,7 @@ enum { QUIT_NOFILE = 9, QUIT_LATEST = 13, QUIT_BAD = 18 };
 #define SW_OFFER_HAVE_Y 188
 #define SW_OFFER_BTN_Y 225
 #define SW_OFFER_LINE_Y 266
-#define SW_LINK_H 32 /* the line's tap target */
+#define SW_LINK_H 32  /* the line's tap target */
 #define SW_NOTE_Y 176 /* a result's line, from its mode page's top: 28 px under its own line */
 
 static struct {
@@ -251,10 +252,7 @@ static void sw_version(char *out, unsigned n) {
     const char *pod = strstr(Q2POD_VERSION, " Pod");
     tk_snprintf(v, sizeof v, "%s", Q2POD_VERSION);
     if (pod) v[pod - Q2POD_VERSION] = 0; /* "1.8.2", then " Dev" or the beta's " beta 2" */
-    tk_snprintf(out, n, "%s%s", v,
-                Q2POD_DEV ? " Dev"
-                : pod     ? pod + 4
-                          : "");
+    tk_snprintf(out, n, "%s%s", v, Q2POD_DEV ? " Dev" : pod ? pod + 4 : "");
 }
 /* This build as You're Up to Date says it: "1.8.2 Dev (V0JYi)", "1.8.2 beta 2 (V1822)", "1.8.2
  * (V1820)". */
@@ -564,7 +562,8 @@ static void sw_offer_name(char *out, unsigned n) {
 /* The line under the offer's button or a result (accent text, the focus ring's underline when
  * the wheel is on it), its tap target kept. */
 static void sw_note_paint(void *canvas, int y, int dy) {
-    static const char *const said[] = { "", "Install from SD Card instead", "Turn on Wi-Fi to check online",
+    static const char *const said[] = { "", "Install from SD Card instead",
+                                        "Turn on Wi-Fi to check online",
                                         "Couldn't check online · Try Again" };
     int w;
     swu.link.w = 0;
@@ -603,8 +602,8 @@ static void sw_offer_paint(void *w, void *canvas, int dy, unsigned accent) {
     tk_snprintf(s, sizeof s, "Installed: %s", v);
     ui_line(canvas, s, 0, 375, top + SW_OFFER_HAVE_Y, 1, "inter", TYPE(13), tok(TOK_TERTIARY));
     const char *label = net ? "Download and Install" : "Install";
-    int bw = ui_button(canvas, cx, top + SW_OFFER_BTN_Y, label, 1,
-                       swu.focus == 0 && ui_focus_shown());
+    int bw =
+        ui_button(canvas, cx, top + SW_OFFER_BTN_Y, label, 1, swu.focus == 0 && ui_focus_shown());
     swu.button = (rect_t){ cx - bw / 2, top + SW_OFFER_BTN_Y - UI_BTN_H / 2 + dy, bw, UI_BTN_H };
     sw_note_paint(canvas, top + SW_OFFER_LINE_Y, dy);
 }
@@ -660,9 +659,8 @@ void sw_update_paint(void *w, void *canvas) {
             break;
         case SW_LOW:
             tk_snprintf(s, sizeof s, "Needs %d%% or a charger · now %d%%", SW_BATTERY, swu.level);
-            m = (mode_page_t){
-                RGB_WARNING, "modepage_low", 0, "Charge to Update", s, (const char *)0
-            };
+            m = (mode_page_t){ RGB_WARNING, "modepage_low", 0, "Charge to Update",
+                               s,           (const char *)0 };
             break;
         case SW_FULL:
             m = (mode_page_t){
@@ -676,7 +674,9 @@ void sw_update_paint(void *w, void *canvas) {
                                "modepage_check",
                                0,
                                "Downloading the Update",
-                               swu.verifying ? "Verifying…" : swu.percent ? s : "Starting…",
+                               swu.verifying ? "Verifying…"
+                               : swu.percent ? s
+                                             : "Starting…",
                                (const char *)0 };
         }
         int top = mode_page_paint(w, canvas, dy, &m);
