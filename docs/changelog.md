@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Subsonic comes built in: it is in Streaming without installing it. A newer Subsonic from the App Store still takes over.
   - Car Remote: with Library on Local + Server and a card app's server songs imported, Q2 Muse Remote's lists (and Android Auto's) showed nothing; they list both libraries again.
   - Now Playing: the Shuffle and Repeat outline from the Centre cycle hides after a tap, as every focus ring does.
   - Car Remote's empty state names the phone app: "Open Q2 Muse Remote on your phone".

@@ -8,6 +8,7 @@ import re
 import shutil
 import struct
 import subprocess
+import zipfile
 
 import pytest
 
@@ -1332,3 +1333,71 @@ def test_a_rootfs_over_72_mib_is_refused_and_one_at_it_fits():
         build.rootfs_fits(build.ROOTFS_ROOM + 1)
     with pytest.raises(ValueError, match=r'--new-player adds q2player'):
         build.rootfs_fits(80 << 20, new_player=True)
+
+
+LAUNCHER = ('#!/bin/sh\npid=/tmp/q2-demo\nif [ "$1" != --loop ]; then\n'
+            '    dir=$(cd "$(dirname "$0")" && pwd)\n'
+            '    cp -f "$dir/q2-demo" /tmp/q2-demo.bin && chmod 755 /tmp/q2-demo.bin || exit 1\n'
+            '    exec /bin/sh /tmp/q2-demo.run --loop "$dir"\nfi\n')
+
+
+def test_a_carried_apps_launcher_keeps_its_data_on_the_card_and_runs_the_image_copy():
+    text = build.bundled_launcher('demo', LAUNCHER)
+    assert 'dir=/mnt/mmc/.demo; mkdir -p "$dir" || exit 1\n' in text
+    assert 'ln -sf /usr/lib/q2apps/demo/q2-demo /tmp/q2-demo.bin || exit 1\n' in text
+    assert 'dirname' not in text and 'cp -f' not in text and text.endswith('--loop "$dir"\nfi\n')
+
+
+@pytest.mark.parametrize('text', [LAUNCHER.replace('dirname', 'basename'), LAUNCHER.replace('cp -f', 'cp'),
+                                  LAUNCHER + LAUNCHER])
+def test_a_launcher_not_as_expected_is_refused(text):
+    with pytest.raises(ValueError, match='Unexpected launcher in the demo app'):
+        build.bundled_launcher('demo', text)
+
+
+def app_zip(files):
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, 'w') as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    return out.getvalue()
+
+
+def pinned(monkeypatch, tmp_path, data, version='q2-v1.2'):
+    (tmp_path/'demo.zip').write_bytes(data)
+    monkeypatch.setitem(build.BUNDLED_APPS, 'demo', (version, 'demo.zip', len(data), hashlib.sha256(data).hexdigest()))
+
+
+def test_a_carried_app_is_its_pinned_zips_files_with_a_version_and_the_new_launcher(monkeypatch, tmp_path):
+    pinned(monkeypatch, tmp_path, app_zip({'.demo/q2app': 'name=Demo\n', '.demo/q2-demo': b'ELF', '.demo/run': LAUNCHER,
+                                           '.demo/icon.png': b'png', 'README': 'outside its folder'}))
+    files = build.bundled_app('demo', tmp_path)
+    assert sorted(files) == ['icon.png', 'q2-demo', 'q2app', 'run', 'version']
+    assert files['q2-demo'] == (b'ELF', True) and files['run'][1] and files['q2app'] == (b'name=Demo\n', False)
+    assert files['version'] == (b'q2-v1.2\n', False) and b'/usr/lib/q2apps/demo/q2-demo' in files['run'][0]
+
+
+def test_a_carried_app_must_be_the_pinned_zip(monkeypatch, tmp_path):
+    good = app_zip({'.demo/q2app': '', '.demo/q2-demo': b'ELF', '.demo/run': LAUNCHER})
+    with pytest.raises(ValueError, match='Missing .*demo.zip'):
+        monkeypatch.setitem(build.BUNDLED_APPS, 'demo', ('q2-v1', 'demo.zip', 1, '0' * 64))
+        build.bundled_app('demo', tmp_path)
+    pinned(monkeypatch, tmp_path, good)
+    (tmp_path/'demo.zip').write_bytes(good[:-1] + b'x')  # same size, other bytes
+    with pytest.raises(ValueError, match='is not the pinned demo q2-v1.2'):
+        build.bundled_app('demo', tmp_path)
+
+
+@pytest.mark.parametrize('files', [{'.demo/q2app': '', '.demo/run': LAUNCHER},  # no binary
+                                   {'.demo/q2app': '', '.demo/q2-demo': b'', '.demo/run': LAUNCHER, '.demo/sub/x': ''}])
+def test_a_carried_apps_zip_holds_its_app_and_nothing_nested(monkeypatch, tmp_path, files):
+    pinned(monkeypatch, tmp_path, app_zip(files))
+    with pytest.raises(ValueError, match='Unexpected files in demo.zip'):
+        build.bundled_app('demo', tmp_path)
+
+
+def test_every_carried_apps_paths_fit_addon_cs_slots():
+    for app_id, (version, name, size, digest) in build.BUNDLED_APPS.items():
+        assert len(f'/{build.BUNDLED_DIR}/{app_id}/q2-{app_id}') < 48 and len(f'/bin/sh /{build.BUNDLED_DIR}/{app_id}/run') < 48
+        assert len(f'file:///{build.BUNDLED_DIR}/{app_id}/icon-40.png') < 56 and len(version) < 24
+        assert re.fullmatch(r'[a-z0-9-]{1,15}', app_id) and size > 0 and re.fullmatch('[0-9a-f]{64}', digest)
