@@ -221,7 +221,9 @@ class PlaylistEditMachine(CoverflowMachine):
             self.nested(*self.handler(self.page,O['EVT_DESTROY']),self.event)
             self.stack.remove(self.page); self.top=self.stack[-1]
         self.returns(ret,clobber=True)
-    def open_editor(self,h=72,inner=68):
+    def open_editor(self,h=OLED_G.pitch,inner=OLED_G.body):
+        # Edit Playlist's row (playlists.c ringnav_playlistsmore) under OLED's set: no toolbar, so the third row from the
+        # top, h high; no settings icons (set_icon 0), so its icon hidden, the button the row's width, the label at text_x.
         more=self.node('window','playlistsmore_page'); self.word(more+O['W_PARENT'],self.wm)
         self.top=more; self.stack.append(more)
         deleted=self.node('hscroll_label',name='label_del')
@@ -230,14 +232,14 @@ class PlaylistEditMachine(CoverflowMachine):
         assert self.nodes[deleted]['text']=='Delete Playlist'
         row=self.nodes[more]['children'][-1]; button=self.nodes[row]['children'][0]
         image,label=self.nodes[button]['children']
-        y=10+2*h
-        assert [self.get(row+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[0,y,375,h]
+        assert OLED_G.toolbar==0 and OLED_G.set_icon==0
+        assert [self.get(row+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[0,2*h,375,h]
         assert self.nodes[row]['style']=='s_listitem_black'
-        assert [self.get(button+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[20,0,335,inner]
+        assert [self.get(button+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[0,0,375,h]
         assert self.nodes[button]['style']=='s_btn_listitem'
-        assert [self.get(image+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[10,0,52,inner]
+        assert [self.get(image+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[10,0,52,inner] and not self.nodes[image]['visible']
         assert self.nodes[image]['image']=='rename' and self.nodes[image]['draw_type']==O['IMAGE_DRAW_CENTER']
-        assert [self.get(label+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[72,0,253,inner]
+        assert [self.get(label+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[OLED_G.text_x,0,253,inner]
         assert self.nodes[label]['style']=='s_scrlabel_white20l' and self.nodes[label]['text']=='Edit Playlist'
         f,ctx=self.handler(button,O['EVT_CLICK'])
         self.call(address=f,args=(ctx,self.event,0,0),gap=0)
@@ -724,7 +726,7 @@ b.nodes[img]['image']='default_bigcover'; assert fit()==bc_mv and geo(img)==sq; 
 OLED=theme_builtins()[0]; bh=OLED['np_bar']
 m=QueueMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'
 m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'  # the first system_bar load
-m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)  # puts up OLED's geometry set, its status row (theme_boot)
+m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)  # as on a unit (accent, theme_boot)
 slider,elapsed,remain=m.node('slider','slider_play',max=225,value=100,bar_size=4),m.node('label','label_playtime'),m.node('label','label_ipod_remain')
 win=m.node('window','playing_page',[slider,elapsed,remain]); m.word(win+O['W_PARENT'],m.wm); m.top=win
 def put(w,*g):

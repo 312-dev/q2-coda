@@ -588,8 +588,8 @@ assert [switch_image(m,r) for r in rows[:2]]==['switch_on','switch_on']; passed(
 m,rows,*_=settings_page('btrows','scroll_view_bluetooth',stock_rows=1,bt=0)  # just the switch
 assert rows==[]; passed()
 
-def oled_set(m):  # the first system_bar load: theme_boot writes OLED's set (st.geom), as on a unit
-    m.record_syscalls(lambda page:False); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
+def oled_set(m):  # the first system_bar load, as on a unit (accent, theme_boot); the calls it made cleared
+    m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
     m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0); m.calls=[]
     return m
 # The sleep timer has no list: the row sits over its fields, set_row (32) high, its title at text_x in the row's
@@ -634,10 +634,8 @@ for R in (14,5,0):  # 14 has no table; 5 has, 4 hasn't
     for y in range(41,69): assert len(rows[y])==2 and rows[y][0][0]<=rows[y][1][0] and rows[y][0][0]-20==20+60-1-rows[y][1][0],(R,y)  # its sides, mirrored
     assert rows[55][0][0]==20 and rows[55][1][0]==79 and (R in (0,5) or rows[42][0][0]>20)  # 5's arc is in by row 2 less than a pixel
 passed()
-# Every Search row site holds the set's value once OLED's set is written (theme.xml's search_* geometry), and stock's before.
+# Every Search row site holds OLED's set's value (theme.xml's search_* geometry), as the build bakes it.
 SEARCH_SITES={0x49d470:52,0x49e7b0:52,0x49f320:52,0x49d4a8:52,0x49e7e8:52,0x49f35c:52,0x49f6fc:52,0x49cdd8:52,0x49cec4:52,0x49d62c:52,0x49e970:52,0x49f164:52,0x49cde0:0,0x49d67c:4,0x49e9c0:4,0x49d670:28,0x49e9b4:28,0x49d724:31,0x49ea28:31,0x49d718:20,0x49ea1c:20}
-STOCK_SITES={0x49d470:78,0x49e7b0:78,0x49f320:78,0x49d4a8:70,0x49e7e8:70,0x49f35c:70,0x49f6fc:70,0x49cdd8:70,0x49cec4:70,0x49d62c:70,0x49e970:70,0x49f164:70,0x49cde0:50,0x49d67c:11,0x49e9c0:14,0x49d670:24,0x49e9b4:24,0x49d724:41,0x49ea28:41,0x49d718:16,0x49ea1c:16}
 imm=lambda m,a: m.get(a)&0xffff
-k=oled_set(Machine()); assert {a:imm(k,a) for a in SEARCH_SITES}==SEARCH_SITES
-k=Machine(); assert {a:imm(k,a) for a in STOCK_SITES}==STOCK_SITES; passed()
+k=Machine(); assert {a:imm(k,a) for a in SEARCH_SITES}==SEARCH_SITES; passed()
 

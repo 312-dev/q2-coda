@@ -1163,85 +1163,32 @@ m.call(address=f,args=(ctx,m.event,0,0),gap=0)
 # Time in Title has no row: OLED does not declare it (its own theme's undeclared TIMETITLE), and its clock stays in
 # the title.
 assert not [r for r in kids if row_text(r).startswith('Time in Title')]
-# The window loader loads each window by the name asked while no set is booted (st.geom 0, SET0's code).
+# The window loader loads each window by the name asked.
 load=HOOKS['ui_loader_load_widget_with_parent'][0]; m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
 def loaded(name):
     m.calls=[]; m.call(address=load,args=(m.string(name),0,0,0),gap=0)
     return [m.text(c[1]) for c in m.calls if c[0]=='stock_ui_load']
 assert loaded('playing_page')==['playing_page'] and loaded('home_page')==['home_page']; passed()
-# Geometry sets: the first system_bar load rewrites only the stock immediates whose set value differs.
 settings_m=m  # the Appearance cases go on with it below
-from build import segments
-from ipod import AUDIT, VALUE_NAMES
-PAGE=4096  # the Q2's kernel page: mprotect's rounding unit
-TEXT=[(v,((v+m_+4095)&~4095)-v) for _,(t,o,v,_,f,m_,fl,_) in segments((B/'demo').read_bytes()) if t==1 and fl&1 and v<BASE][0]
+from ipod import AUDIT, immediate_values
 SITES={int(a,16):g['value'] for g in AUDIT['immediates'] if isinstance(g['value'],str) for a,_ in g['sites']}
-GEOM_OLED=[g.name for g in geometry_sets(theme_builtins())].index('oled'); assert GEOM_OLED  # boot_values' row; 0 is SET0
-def set_geom(m,g):  # the active theme's theme_t.geom (THEME_GEOM_OFF): the set theme_boot writes
-    m.byte((m.call(address=payload_syms['theme'],args=(0,0,0,0),gap=0)&0xffffffff)+THEME_GEOM_OFF,g)
-def set_value(m,name,v): m.u.mem_write(payload_syms['boot_values']+2*VALUE_NAMES.index(name),struct.pack('<H',v))
-def booted(values=(),fail=lambda page:False,geom=None):  # geom: the set to boot in place of OLED's own
-    m=Machine(); m.u.mem_protect(*TEXT,5); m.record_syscalls(fail)
-    m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
-    for name,v in values: set_value(m,name,v)
-    if geom is not None: set_geom(m,geom)
-    before={a:m.get(a) for a in SITES}
-    m.call(address=load,args=(m.string('system_bar'),0,0,0),gap=0)
-    return m,before
-def boot_vals(g): return struct.unpack(f'<{len(VALUE_NAMES)}H',m.u.mem_read(payload_syms['boot_values']+2*len(VALUE_NAMES)*g,2*len(VALUE_NAMES)))
-# SET0 makes no syscall and writes nothing.
-m,before=booted(geom=0)
-assert m.syscalls==[] and {a:m.get(a) for a in SITES}==before; passed()
-m,before=booted((('pitch',28),),geom=0)
-pages=sorted({a&~(PAGE-1) for a,v in SITES.items() if v=='pitch'}); assert len(pages)>1
-# All or nothing: every page goes RWX first, lowest first, and only then is any word written.
-assert m.syscalls==[(4125,p,PAGE,7) for p in pages]+[s for p in pages for s in ((4147,p,PAGE,3),(4125,p,PAGE,5))]
-assert {a:m.get(a) for a in SITES}=={a:(w&0xffff0000|28 if SITES[a]=='pitch' else w) for a,w in before.items()}
-assert [p for b,e,p in m.u.mem_regions() for q in pages if b<=q<=e]==[5]*len(pages)
-m.call(address=load,args=(m.string('system_bar'),0,0,0),gap=0); assert len(m.syscalls)==3*len(pages); passed()  # once a boot
-# An mprotect that fails on the second page puts the first back to R-X and writes no word.
-gm,gbefore=booted((('pitch',28),),fail=lambda page:page==pages[1],geom=0)
-assert gm.syscalls==[(4125,pages[0],PAGE,7),(4125,pages[1],PAGE,7),(4125,pages[0],PAGE,5)]
-assert {a:gm.get(a) for a in SITES}==gbefore
-assert [p for b,e,p in gm.u.mem_regions() for q in pages if b<=q<=e]==[5]*len(pages); passed()
-# OLED boots its own set (oled/theme.xml's geometry): every word whose value differs from SET0's takes the oled row's.
-om,obefore=booted(); oled=boot_vals(GEOM_OLED)
-assert any(oled[i]!=boot_vals(0)[i] for i in range(len(VALUE_NAMES)))  # the real row differs from the code
-assert {a:om.get(a) for a in SITES}=={a:w&0xffff0000|oled[VALUE_NAMES.index(SITES[a])] for a,w in obefore.items()}
-assert {om.get(a)&0xffff for a,v in SITES.items() if v=='pitch'}=={OLED['geoms']['oled'].pitch}; passed()
-# A set theme_boot did not write is not applied: with every mprotect failing, the windows still load as SET0's, which
-# theme_boot left in the code.
-gm,gbefore=booted(fail=lambda page:True)
-assert [s[3] for s in gm.syscalls]==[7] and {a:gm.get(a) for a in SITES}==gbefore
-def gloaded(name,sets):
-    gm.word(payload_syms['ui_redirects'],gm.string(name)); gm.byte(payload_syms['ui_redirects']+4,sets)
-    gm.calls=[]; gm.call(address=load,args=(gm.string(name),0,0,0),gap=0)
-    return [gm.text(c[1]) for c in gm.calls if c[0]=='stock_ui_load']
-assert gloaded('home_page',1<<GEOM_OLED)==['home_page'] and gloaded('home_page',1)==['ipod_home_page']; passed()
-# A set's own window: <set>_<name>, in its folder; other names load as asked.
-m=Machine(); set_geom(m,0); m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
-def redirect(name): m.word(payload_syms['ui_redirects'],m.string(name)); m.u.mem_write(payload_syms['ui_redirects']+4,b'\1')
-redirect('system_bar'); assert loaded('system_bar')==['ipod_system_bar'] and loaded('home_page')==['home_page']
-redirect('dialog/volume_dialog'); assert loaded('dialog/volume_dialog')==['dialog/ipod_volume_dialog']; passed()
-# OLED's first system_bar loads its set's own bar (tools/build.py oled_system_bar).
+def set_value(m,name,v): m.u.mem_write(payload_syms['geom_words']+2*VALUE_NAMES.index(name),struct.pack('<H',v))  # geom(G_<name>)'s word
+# The build bakes OLED's set (tools/theme.py built_geometry) into the stock immediates, and geom_words holds the same values.
+gm=Machine(); words=struct.unpack(f'<{len(VALUE_NAMES)}H',gm.u.mem_read(payload_syms['geom_words'],2*len(VALUE_NAMES)))
+assert words==tuple(immediate_values(OLED_G)[n] for n in VALUE_NAMES)
+assert {a:gm.get(a)&0xffff for a in SITES}=={a:words[VALUE_NAMES.index(v)] for a,v in SITES.items()}
+assert {gm.get(a)&0xffff for a,v in SITES.items() if v=='pitch'}=={OLED_G.pitch}; passed()
+# The first system_bar load loads stock's system_bar.
 nm=Machine(); nm.record_syscalls(); nm.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
 nm.call(address=load,args=(nm.string('system_bar'),0,0,0),gap=0)
-assert [nm.text(c[1]) for c in nm.calls if c[0]=='stock_ui_load']==['oled_system_bar']; passed()
-# client_h() follows the written set: 320 less SET0's bar when OLED's boot fails, less OLED's 58 px bar once its set is written.
-for fail,bar in ((lambda page:True,geometry_sets(theme_builtins())[0].bar),(lambda page:False,OLED['geoms']['oled'].bar)):
-    cm,_=booted(fail=fail)
-    assert cm.call(address=payload_syms['client_h'],args=(0,0,0,0),gap=0)==320-bar
-passed()
-# The path a set's window loads by lives in ringnav_ui_load's own frame (stack), so a window stock loads
-# while loading another cannot overwrite it: OLED's Songs loads as its set's copy.
-nm.calls=[]
-nm.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(nm.string('localmusic/allmusic_page'),0,0,0),gap=0)
-assert [(nm.text(c[1]),0x70000000<=c[1]<0x70010000) for c in nm.calls if c[0]=='stock_ui_load']==[('localmusic/oled_allmusic_page',True)]; passed()
+assert [nm.text(c[1]) for c in nm.calls if c[0]=='stock_ui_load']==['system_bar']; passed()
+# client_h() is 320 less OLED's 58 px bar.
+assert OLED_G.bar==58 and Machine().call(address=payload_syms['client_h'],args=(0,0,0,0),gap=0)==320-OLED_G.bar; passed()
 # Migration (navigation.c theme_boot): a unit an older build left on another theme (IPOD THEME other than 3, or no
 # key) takes OLED's preset once at its first system_bar load, as choosing OLED did, then THEME 3 is written; with
 # THEME 3 nothing is written. The preset is theme.xml's (theme_preset): Light Mode off unless Auto (keep), Blue,
-# Home Split, and its own options' presets; Shortcut and Battery are kept, and only a change is saved. A failed set
-# boot migrates all the same, and a second load does nothing again.
+# Home Split, and its own options' presets; Shortcut and Battery are kept, and only a change is saved. A second load
+# does nothing again.
 OPT_KEY={'SETTING_LIGHT':'LIGHT','SETTING_ACCENT':'OLED_ACCENT','SETTING_HOME':'HOME','SETTING_SHORTCUT':'SHORTCUT','SETTING_BATTERY':'BATTERY'}
 def preset_writes(config):  # theme_preset's saves for config, from OLED's options (oled/theme.xml), in their order
     out=[]
@@ -1254,10 +1201,10 @@ def preset_writes(config):  # theme_preset's saves for config, from OLED's optio
         if o['preset']>=0 and v!=o['keep'] and v!=o['preset']: out.append((o['preset'],'IPOD',key))
     return out
 assert preset_writes({})==[]  # a fresh unit: already OLED's preset (Home Split, Light Mode off, Blue)
-for config,fail in (({},False),({'THEME':'1'},False),({'THEME':'0','LIGHT':'1','HOME':'2','SONGARTIST':'2','SONGLENGTH':'1','NPTIME':'1','OLED_ACCENT':'4'},False),
-                    ({'THEME':'2','LIGHT':'2','HOME':'1','BATTERY':'1','SHORTCUT':'5'},False),({'THEME':'12'},False),({'THEME':'1'},True),
-                    ({'THEME':'3'},False),({'THEME':'3','LIGHT':'1','HOME':'2'},False)):
-    mm=Machine(); mm.config=dict(config); mm.record_syscalls((lambda page:True) if fail else (lambda page:False))
+for config in ({},{'THEME':'1'},{'THEME':'0','LIGHT':'1','HOME':'2','SONGARTIST':'2','SONGLENGTH':'1','NPTIME':'1','OLED_ACCENT':'4'},
+               {'THEME':'2','LIGHT':'2','HOME':'1','BATTERY':'1','SHORTCUT':'5'},{'THEME':'12'},
+               {'THEME':'3'},{'THEME':'3','LIGHT':'1','HOME':'2'}):
+    mm=Machine(); mm.config=dict(config); mm.record_syscalls()
     mm.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'; mm.calls=[]
     mm.call(address=load,args=(mm.string('system_bar'),0,0,0),gap=0)
     writes=[(c[1],mm.text(c[2]),mm.text(c[3])) for c in mm.calls if c[0]=='write_int_config']
@@ -1269,7 +1216,7 @@ def bar_of(nm,*children):  # a 375x26 system bar holding children
     b=nm.node('system_bar','system_bar',list(children)); nm.word(b+O['W_PARENT'],nm.wm)
     nm.word(b+O['W_W'],375); nm.word(b+O['W_H'],26); nm.word(syms['system_bar'],b); return b
 def channels(c): return (c&255,c>>8&255,c>>16&255)  # color_t's R, G, B
-def oled_on(m):  # theme_boot done: st.geom is OLED's own set (GEOM_OLED), as at the first system_bar load
+def oled_on(m):  # the first system_bar load, as on a unit (accent, theme_boot)
     m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
     m.call(address=load,args=(m.string('system_bar'),0,0,0),gap=0); return m
 # Radio rows: stock's ring images (select, unselect) are emptied; select draws OLED's check (theme art check_a, the
@@ -1311,12 +1258,12 @@ home=asset_tree(m,HOME_PAGE)
 m.handlers[HOOKS['home_page_init'][0]+12]='stock_home'
 m.call(address=HOOKS['home_page_init'][0],args=(home,0,0,0),gap=0)
 art=named(m,home,'img_homeart')
-# Home's lists from OLED's home.rows (oled/theme.xml): labels from text_x to label_end short of the row. Machine boots no
-# set, so Split's menu is SET0's split_row wide; Full widens it and its rows to full_row. Home's other lists are full
+# Home's lists from OLED's home.rows (oled/theme.xml): labels from text_x to label_end short of the row. Split's menu
+# is the set's split_row wide, its art from split_art; Full widens the menu and its rows to full_row. Home's other lists are full
 # width in either (home.lists full), on full_row rows with Full's label end. Shuffle Songs, which opens nothing and has
 # no chevron, takes the chevron's room to the set's right column (home.c home_in_place).
 def home_bounds(full):
-    split,right=geometry_sets(theme_builtins())[0].split_row,geometry_sets(theme_builtins())[0].right_x
+    split,right=OLED_G.split_row,OLED_G.right_x
     for name,sub in (('list_view_home',full),('list_view_homeset',True)):
         x0,end,row=OLED['home_text_x'],OLED[f'home_label_end[{int(sub)}]'],OLED['home_full_row'] if sub else split
         menu=named(m,home,name)
@@ -1327,7 +1274,7 @@ def home_bounds(full):
             e=min(end,right) if m.nodes[label].get('name')=='label_shuffle_songs' else end
             assert x==x0 and width>0 and x+width==row-e and m.get(r+O['W_W'])==row,(name,x,width,row)
     assert m.nodes[art]['visible']==(not full)
-    assert tuple(signed(m.get(art+O[k])) for k in ('W_X','W_Y','W_W','W_H'))==(split,0,375-split,320-geometry_sets(theme_builtins())[0].bar)
+    assert tuple(signed(m.get(art+O[k])) for k in ('W_X','W_Y','W_W','W_H'))==(OLED_G.split_art,0,375-OLED_G.split_art,320-OLED_G.bar)
 def carousel(on):
     """Home: Carousel: stock's carousel and arrows in the lists' place, the art hidden; else the
     main list, the carousel hidden, neither taking taps while hidden."""

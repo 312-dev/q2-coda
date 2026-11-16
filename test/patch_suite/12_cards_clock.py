@@ -560,15 +560,14 @@ assert zone_labels.index('GMT-4 New York')<zone_labels.index("GMT-3:30 St. John'
 assert 'GMT-5 Chicago' not in zone_labels and 'GMT-6 Chicago' in zone_labels
 passed()
 # Stock's caption, in the row-high item between row 0 and row 1, sits at y 20 of it, over row 1, and the row hook leaves
-# it there, on OLED's set or not, as it leaves row 0 with no caption (Automatic off).
-def zone_caption(boot,text=1):
-    z=ZoneRowMachine(); boot and oled_set(z)
+# it there, as it leaves row 0 with no caption (Automatic off).
+def zone_caption(text=1):
+    z=ZoneRowMachine(); oled_set(z)
     z.mock('image_create','hscroll_label_create','widget_use_style','widget_set_name','toolsSetTimeZone','image_set_draw_type','image_base_set_image','set_hscroll_label_attribute','widget_set_tr_text','widget_on','tk_snprintf')
     cap=z.node('hscroll_label','',text='Time Zone Selection') if text else z.node('button','0'); first=z.node('list_item'); capitem=z.node('list_item','',[cap]); item=z.node('list_item')
     sv=z.node('scroll_view','scroll_view',[first,capitem,item]); parents(z,sv); place(z,cap,0,20,375,20)
     z.call(address=HOOKS['timezone_row'][0],args=(item,1,0,0),gap=0); return z,cap
-z,zc=zone_caption(1); assert wbox(z,zc)==(0,20,375,20)
-z,zc=zone_caption(1,0); assert wbox(z,zc)==(0,20,375,20)
+z,zc=zone_caption(); assert wbox(z,zc)==(0,20,375,20)
 z,zc=zone_caption(0); assert wbox(z,zc)==(0,20,375,20); passed()
 def stream_rows(m):
     """Streaming's page over stock's one Tidal row: the hook's rows' buttons by their labels, in order."""

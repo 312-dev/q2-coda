@@ -19,8 +19,8 @@ for name,key in (('demo','demo_sha256'),('stock-demo','stock_demo_sha256'),('pat
         raise SystemExit(f'{B/name} does not match manifest.json; rebuild into a fresh directory')
 assert manifest['version'] == (dev_tag(manifest['dev']) if manifest.get('dev') else TAG), 'Wrong version'
 assert manifest.get('compact_code')
-from ipod import INC, O  # patch/offsets.inc and its integer #defines
-from theme import MOTION_WIDGET, MOTION_WINDOW, SCHEME_MODE_OFF, THEME_GEOM_OFF, THEME_MOTION_OFF, builtins as theme_builtins, geometry_sets
+from ipod import GEOM_VALS, INC, O, VALUE_NAMES  # patch/offsets.inc and its integer #defines; the geometry tables' columns
+from theme import MOTION_WIDGET, MOTION_WINDOW, SCHEME_MODE_OFF, THEME_MOTION_OFF, builtins as theme_builtins, built_geometry
 from theme import theme_keys  # tools/theme.py: the theme's own keys
 CONFIG_READS=9+len(theme_keys(theme_builtins()))  # settings_read: the payload's nine keys (REDUCEMOTION last), then the theme's own
 DC=O['DOUBLE_CLICK_MS']  # centre double-press window
@@ -984,6 +984,7 @@ assert not m.rounded and not m.strokes and m.global_alpha==0
 # surface, its ends list.selection.radius (under the row's half height, pill_radius), in one-pixel bands; each end
 # circle's chord sampled at the band's centre in 1/16 px, a partly covered edge pixel at that coverage's alpha.
 OLED_T=theme_builtins()[0]  # assets/themes/oled/theme.xml, the one theme
+OLED_G=built_geometry(theme_builtins()); assert OLED_G==OLED_T['geoms']['oled']  # its geometry set, baked into the build
 OLED_SCHEME=OLED_T['schemes'][next(o['def'] for o in OLED_T['opts'] if o['setting']=='SETTING_ACCENT')]  # Accent's default, oled-blue
 OLED_TONES=OLED_SCHEME['tones']
 assert len(set(OLED_TONES))==1  # Accent Blue, one value for every tone: the bar is solid
@@ -1192,17 +1193,17 @@ def battery_checks():
     # level change: the badge's fade leaves the plain glyph's BT_REACH.
     b,bar,w,paint=battery_bar(1); b.nodes[w['label_battery']]['text']='100%'
     b.nodes[w['img_bt']]['image']='bar_aptxhd'
-    paint(); assert b.get(w['view_battery']+O['W_W'])==O['BATT_BODY_W']+O['BATT_NUB_W']
+    paint(); assert b.get(w['view_battery']+O['W_W'])==OLED_G.batt_w+O['BATT_NUB_W']
     b.advance(O['CODEC_MS'])
     for _ in range(O['CODEC_STEPS']): b.advance(O['CODEC_STEP_MS'])
     b.calls=[]; paint()
     assert b.get(w['view_battery']+O['W_W'])==O['BATT_PCT_W']
     assert ('widget_invalidate_force',bar) in [c[:2] for c in b.calls]
     # OLED offers Icon and Percent (theme.xml battery values): a stored 2 (Icon + Percent) or 3 (Percent Inside) reads
-    # as its default, the icon, as an invalid value does; the body SET0's (geom batt_w) with its nub outside.
+    # as its default, the icon, as an invalid value does; the body the set's (geom batt_w) with its nub outside.
     for invalid in ('2','3','4','9','-1','33','bad',''):
         b,bar,w,paint=battery_bar(invalid); paint()
-        assert b.get(w['view_battery']+O['W_W'])==O['BATT_BODY_W']+O['BATT_NUB_W'],invalid
+        assert b.get(w['view_battery']+O['W_W'])==OLED_G.batt_w+O['BATT_NUB_W'],invalid
     for mode in range(2):
         for bt in (0,1):
             for wifi in (0,1):
@@ -1212,12 +1213,12 @@ def battery_checks():
                 b.nodes[w['label_battery']]['text']='100%'
                 paint()
                 assert shown(b,w)==['view_battery']
-                assert b.get(w['view_battery']+O['W_W'])==(O['BATT_PCT_W'] if mode==1 else O['BATT_BODY_W']+O['BATT_NUB_W'])
+                assert b.get(w['view_battery']+O['W_W'])==(O['BATT_PCT_W'] if mode==1 else OLED_G.batt_w+O['BATT_NUB_W'])
     passed()
-    # The slot takes the bar's height in the set theme_boot wrote (geom_vals[st.geom][V_BAR], 30 under SET0): 26 poked into SET0's row sizes it 26, then 30 again.
-    b,bar,w,paint=battery_bar(1); assert b.u.mem_read(payload_syms['geom_vals'],2)==struct.pack('<h',30)
-    for bar_h in (26,30):
-        b.u.mem_write(payload_syms['geom_vals'],struct.pack('<h',bar_h)); b.word(w['view_battery']+O['W_H'],0); paint()
+    # The slot takes the set's bar height (geom_vals[V_BAR], OLED's 58): 26 poked there sizes it 26, then 58 again.
+    b,bar,w,paint=battery_bar(1); assert b.u.mem_read(payload_syms['geom_vals']+2*GEOM_VALS.index('bar'),2)==struct.pack('<h',OLED_G.bar)
+    for bar_h in (26,OLED_G.bar):
+        b.u.mem_write(payload_syms['geom_vals']+2*GEOM_VALS.index('bar'),struct.pack('<h',bar_h)); b.word(w['view_battery']+O['W_H'],0); paint()
         assert b.get(w['view_battery']+O['W_H'])==bar_h
     passed()
 battery_checks()
@@ -1467,11 +1468,10 @@ for address in (0x533bc4, 0x4ac588, 0x4b39f4, 0x4a6910):
             assert all(m.get(n+O['W_CHILDREN_LAYOUT'])==0 for row in rows for n in m.nodes[row]['children'])
 passed()
 
-def oled_boot(m,fail=None):  # the first system_bar load: theme_boot writes OLED's oled set (st.geom), as on a unit
-    m.record_syscalls(fail or (lambda page:False)); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
+def oled_boot(m):  # the first system_bar load, as on a unit (accent, theme_boot's migration): the windows stock_ui_load was asked for
+    m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
     m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)
     return [m.text(c[1]) for c in m.calls if c[0]=='stock_ui_load']
-OLED_G=OLED_T['geoms']['oled']  # OLED's geometry set (theme.xml <geometry name="oled">)
 # OLED's Artists/Composers/Genres rows are one line at its set's lib_pitch (32 px): the leading artwork (lib_art 0)
 # and playing gif and the second line hide, and the title sits centred in the row.
 assert OLED_G.lib_pitch==32 and OLED_G.lib_art==0
@@ -1510,15 +1510,6 @@ for address in (0x4b39f4,):
     unnamed=m.node('image'); m.nodes[button]['children'].insert(0,unnamed); native_row_layout(m,button)
     assert not m.nodes[unnamed]['visible'],address
 passed()
-
-# Before theme_boot writes a set (SET0), the Songs rows stay stock's 72 px rows with their art.
-m=Machine(); w=m.page('allmusic_page','table_client')
-m.mock('table_row_create','button_create','image_create','view_create','hscroll_label_create','gif_image_create',
-       'widget_use_style','widget_set_name','widget_set_children_layout','image_set_draw_type','image_base_set_image',
-       'set_hscroll_label_attribute','widget_set_visible')
-assert m.call(address=0x4ac588,args=(w,w,1,0))==0
-button=m.nodes[m.nodes[w]['children'][0]]['children'][0]; assert m.get(button+O['W_H'])==68
-native_row_layout(m,button); assert [m.nodes[c]['visible'] for c in m.nodes[button]['children']][1]; passed()
 
 # OLED's Albums row (its set's art_pitch, 52 px): the title takes the tall role (list.row tall_font, tall_px) and the
 # second line, nested in stock's view_artist, the meta role (meta_font at meta_px), and stock's secondary grey in its

@@ -410,13 +410,13 @@ for stale in (False,True):
 
 # OLED's Playlists (its set has no toolbar, toolbar 0): rows over stock's own page. Stock's toolbar builder, row builder,
 # row click and its handlers run for real; each hidden widget's click runs its real handlers, nested, as stock's dispatch.
-# booted=True makes the first system_bar load, which writes OLED's set (oled_boot: no THEME stored, so theme_boot takes
-# OLED's preset once, as on a unit an older build left); booted=False boots nothing, leaving SET0's page with its toolbar.
+# It makes the first system_bar load (oled_boot: no THEME stored, so theme_boot takes OLED's preset once, as on a unit
+# an older build left).
 class PlaylistPageMachine(PlaylistMachine):
     REBUILD_DONE=0x4b58d4
-    def __init__(self,count=3,mode=0,booted=True):
+    def __init__(self,count=3,mode=0):
         super().__init__(count,mode)
-        if booted: oled_boot(self)
+        oled_boot(self)
         self.handlers.pop(self.STOCK_PICK); self.handlers.pop(0x4b3f0c)
         self.handlers[syms['widget_restack']]='picker_restack'
         self.mock('batch_get_selectitem','batch_set_selectitem','batch_init_selectrecord','batch_clear_selectrecord','batch_empty_selectrecord',
@@ -496,7 +496,7 @@ class PlaylistPageMachine(PlaylistMachine):
         if ret is not None:
             self.calls.append((name,a,b,c)); self.returns(ret); return
         super().hook(u,address,size,unused)
-class RowPlaylistMachine(PlaylistPageMachine):  # OLED's page: its set booted as on a unit (oled_boot)
+class RowPlaylistMachine(PlaylistPageMachine):  # OLED's page, past the first system_bar load as on a unit (oled_boot)
     def __init__(self,count=3,mode=0):
         super().__init__(count,mode)
 def cpm_wheel(m,key,n=1):
@@ -507,10 +507,6 @@ def cpm_centre(m):  # Centre on the selected row, the row's click running as sto
 NEW='New Playlist…'
 LISTS=['List 0','List 1','List 2']
 PL_ART=lambda cd: f'file:///mnt/mmc/.coverflow/pl_{cd}_0000abcd_s.jpg'
-def pl_art_lists(m,n):  # List i at cd_num 10+i, as RowPlaylistMachine.lists
-    records=[m.song(f'List {i}') for i in range(n)]
-    for i,r in enumerate(records): m.word(r+O['REC_TITLE'],m.string(f'List {i}')); m.word(r+O['REC_DISC'],10+i)
-    m.word(syms['p_deque_playlist'],m.deque(records))
 def pl_art_of(m,button): return next(k for k in m.nodes[button]['children'] if m.nodes[k]['type']=='image' and not (m.nodes[k].get('name') or '').startswith('img_'))
 
 # A playlist row's click runs pl_pick alone, which counts the marks after stock's: every dress is on stock's fresh rows,
@@ -518,13 +514,7 @@ def pl_art_of(m,button): return next(k for k in m.nodes[button]['children'] if m
 m=RowPlaylistMachine(); m.rebuild(); m.rebuild()
 for t in LISTS: assert [f for e,f,c in m.nodes[m.row_button(t)]['handlers'] if e==O['EVT_CLICK']]==[payload_syms['pl_pick']]
 passed()
-# Before theme_boot writes a set (SET0: stock's toolbar page, no row art) the rows are stock's: its placeholder, nothing
-# asked, read or stopped; and the Add to Playlist picker shares the page and stays as it is.
-for mode in (0,1,2):
-    m=PlaylistMachine(0,mode); pl_art_lists(m,3); m.art={11:PL_ART(11)}; kids=m.rebuild()
-    assert [m.nodes[pl_art_of(m,m.nodes[r]['children'][0])]['image'] for r in kids[-3:]]==['playlist_default']*3
-    assert not m.asks and not m.refreshes and not [h for h in m.nodes[m.top].get('handlers',()) if h[0]==O['EVT_DESTROY']]; passed()
-# ... the picker keeps its text rows: their art hidden, the text from page.rows text_x, and none built for them.
+# The Add to Playlist picker shares the page and keeps its text rows: their art hidden, the text from page.rows text_x, and none built for them.
 m=RowPlaylistMachine(3,1); m.art={11:PL_ART(11)}; m.rebuild()
 for name in LISTS:
     button=m.row_button(name); info=next(k for k in m.nodes[button]['children'] if m.nodes[k]['name']=='view_info')
@@ -532,21 +522,20 @@ for name in LISTS:
 assert not m.asks and not m.refreshes; passed()
 
 # Stock's add mode is one global, left by a picker however it closes: a page coming back rebuilds as what it opened as.
-for cls in (PlaylistMachine,RowPlaylistMachine):
-    m=cls(3,0); kids=m.rebuild(); home=m.top; shown=len(kids)
-    picker=m.node('window','playlist_page',[m.node('scroll_view','scroll_view')]); m.word(m.nodes[picker]['children'][0]+O['W_PARENT'],picker)
-    m.word(m.mode,1); m.top,m.view=picker,m.nodes[picker]['children'][0]
-    if cls is RowPlaylistMachine: m.nav=m.node('view','view_navbar',visible=0); m.nodes[picker]['children'].insert(0,m.nav)
-    kids=m.rebuild(); assert m.get(m.mode)==1 and len(kids)==3+(cls is RowPlaylistMachine)
-    m.top,m.view=home,next(c for c in m.nodes[home]['children'] if m.nodes[c]['name']=='scroll_view')  # past OLED's note (feedback_empty)
-    if cls is RowPlaylistMachine: m.nav=m.nodes[home]['children'][0]
-    kids=m.rebuild(); assert m.get(m.mode)==0 and len(kids)==shown; passed()
+m=RowPlaylistMachine(3,0); kids=m.rebuild(); home=m.top; shown=len(kids)
+picker=m.node('window','playlist_page',[m.node('scroll_view','scroll_view')]); m.word(m.nodes[picker]['children'][0]+O['W_PARENT'],picker)
+m.word(m.mode,1); m.top,m.view=picker,m.nodes[picker]['children'][0]
+m.nav=m.node('view','view_navbar',visible=0); m.nodes[picker]['children'].insert(0,m.nav)
+kids=m.rebuild(); assert m.get(m.mode)==1 and len(kids)==4
+m.top,m.view=home,next(c for c in m.nodes[home]['children'] if m.nodes[c]['name']=='scroll_view')  # past OLED's note (feedback_empty)
+m.nav=m.nodes[home]['children'][0]
+kids=m.rebuild(); assert m.get(m.mode)==0 and len(kids)==shown; passed()
 
 # Playlist View: Cover Flow (Display, PLAYLISTCF): the page opens unseen (opacity 0, no slide) and its playlists go to
 # Cover Flow on the next pass (coverflow_playlists, test/coverflow.py), the page shown under them for their Return; once
 # per page, so coming back to it shows the list. Library's row, Home's list and shortcut 7 all open it through this
-# rebuild. Off, the Add to Playlist picker, no playlists, or the page gone or covered first: the list, as before. With
-# row art or without (SET0's page): the covers are the playlists' art.
+# rebuild. Off, the Add to Playlist picker, no playlists, or the page gone or covered first: the list, as before. The
+# covers are the playlists' art.
 PL_HINT='htranslate(duration=200)'
 def pl_cf(base,count=2,mode=0,on='1',**kw):
     class M(base):
@@ -555,26 +544,20 @@ def pl_cf(base,count=2,mode=0,on='1',**kw):
             self.handed.append(self.names(u.reg_read(REGS[0]))); self.returns(1)
     m=M(count,mode,**kw)
     m.handlers[syms['widget_set_prop_str']]='widget_set_prop_str'; m.handed=[]; m.config['PLAYLISTCF']=on
-    if base is PlaylistMachine: pl_art_lists(m,count)
     m.nodes[m.top]['anim_hint']=PL_HINT; m.byte(m.top+0x34,0xff)
     return m
 pl_veiled=lambda m: m.u.mem_read(m.top+0x34,1)[0]==0 and m.nodes[m.top]['anim_hint']==''
 pl_shown=lambda m: m.u.mem_read(m.top+0x34,1)[0]==0xff and m.nodes[m.top]['anim_hint']==PL_HINT
-for base in (PlaylistMachine,RowPlaylistMachine):
-    m=pl_cf(base); m.rebuild()
-    assert pl_veiled(m) and not m.handed and m.refreshes==1; m.advance(0,clear=False)  # one read of the songs, rows and covers
-    assert bool(m.asks)==(base is RowPlaylistMachine),(base,m.asks)  # the rows' art under a set with row art alone
-    assert m.handed==[['List 0','List 1']] and pl_shown(m),base
-    m.rebuild(); m.advance(0,clear=False); assert len(m.handed)==1 and pl_shown(m); passed()  # back on the page: the list
-for base in (PlaylistMachine,RowPlaylistMachine):
-    for count,mode,on in ((2,0,'0'),(2,1,'1'),(2,2,'1'),(0,0,'1')):
-        m=pl_cf(base,count,mode,on); m.rebuild(); m.advance(0,clear=False)
-        assert not m.handed and pl_shown(m),(base,count,mode,on); passed()
-m=pl_cf(PlaylistMachine); m.rebuild()
-f,ctx=m.handler(m.top,O['EVT_DESTROY']); m.call(address=f,args=(ctx,0,0,0),gap=0,clear=False)
-m.advance(0,clear=False); assert not m.handed and m.stops==1; passed()  # SET0's page: the covers' builds stop too
+m=pl_cf(RowPlaylistMachine); m.rebuild()
+assert pl_veiled(m) and not m.handed and m.refreshes==1; m.advance(0,clear=False)  # one read of the songs, rows and covers
+assert m.asks  # the rows' art
+assert m.handed==[['List 0','List 1']] and pl_shown(m)
+m.rebuild(); m.advance(0,clear=False); assert len(m.handed)==1 and pl_shown(m); passed()  # back on the page: the list
+for count,mode,on in ((2,0,'0'),(2,1,'1'),(2,2,'1'),(0,0,'1')):
+    m=pl_cf(RowPlaylistMachine,count,mode,on); m.rebuild(); m.advance(0,clear=False)
+    assert not m.handed and pl_shown(m),(count,mode,on); passed()
 # ... or another window over it by the next pass: no covers, the page shown under it.
-m=pl_cf(PlaylistMachine); m.rebuild(); page=m.top; m.top=m.node('window','other_page'); m.stack.append(m.top)
+m=pl_cf(RowPlaylistMachine); m.rebuild(); page=m.top; m.top=m.node('window','other_page'); m.stack.append(m.top)
 m.advance(0,clear=False); m.top=page; assert not m.handed and pl_shown(m); passed()
 # Centre on a playlist under the covers (coverflow.c): a click at x 0 on its row on the Playlists page under
 # the covers, which stay; its list opens over them, so Return comes back to them, as from an album. The row is found
@@ -583,11 +566,10 @@ def pl_under(m):  # the covers over the page, reordered after they opened; the p
     lists=m.items(m.get(syms['p_deque_playlist'])); m.word(syms['p_deque_playlist'],m.deque(lists[::-1])); m.rebuild()
     page=m.top; m.top=m.node('window','coverflow_page'); m.stack.append(m.top)
     return page
-for base in (PlaylistMachine,RowPlaylistMachine):
-    m=pl_cf(base,count=3,on='0'); m.rebuild(); page=pl_under(m); m.clicks=[]; xs=[]
-    m.on_click=lambda w,e,f=m.on_click: (xs.append(m.get(e+O['EVENT_X'])),f and f(w,e))
-    m.call(address=payload_syms['playlist_open'],args=(page,10,0,0),gap=0,clear=False)  # List 0, now the third row
-    assert [m.nodes[c]['name'] for c in m.clicks]==['2'] and xs==[0],(base,m.clicks); passed()
+m=pl_cf(RowPlaylistMachine,count=3,on='0'); m.rebuild(); page=pl_under(m); m.clicks=[]; xs=[]
+m.on_click=lambda w,e,f=m.on_click: (xs.append(m.get(e+O['EVENT_X'])),f and f(w,e))
+m.call(address=payload_syms['playlist_open'],args=(page,10,0,0),gap=0,clear=False)  # List 0, now the third row
+assert [m.nodes[c]['name'] for c in m.clicks]==['2'] and xs==[0],m.clicks; passed()
 # ... stock finds the row by the playlist's place in the live list, in name order, and the page's rows are the list as it
 # was built: one past them (a playlist added since sorts in, a song's Add to Playlist → New under the covers, and pushes
 # the last ones past) has no row there, and the covers close, for the page to build its rows again as it comes to the

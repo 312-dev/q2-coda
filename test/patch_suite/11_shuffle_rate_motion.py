@@ -247,8 +247,8 @@ assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.top==m.page; m.cl
 # down to client_h(), the set's bar under the screen's 320, cut to its whole rows above list_fit_end (coverflow.c
 # fit_view). Rows at the theme's page.rows: plain ones a row high, a detail row two lines at detail_height, all at its
 # text column. The mock measures 10 px a character.
-def oled_client(pm,fail=lambda page:False):  # oled_set, then client_h()
-    oled_set(pm,fail); return pm.call(address=payload_syms['client_h'],args=(0,0,0,0),gap=0)
+def oled_client(pm):  # oled_set, then client_h()
+    oled_set(pm); return pm.call(address=payload_syms['client_h'],args=(0,0,0,0),gap=0)
 def page_bar(pm):  # the bar's title: 94 px of text between hscroll_label's 2 px margins; its paint finds it
     t=pm.node('hscroll_label','label_title'); pm.word(t+O['W_W'],98); b=bar_of(pm,t)
     pm.call(address=HOOKS['widget_on_paint_background'][0],args=(b,pm.canvas,0,0),gap=0); return t
@@ -309,13 +309,10 @@ for caption,n,keep,shown in (('Remove Downloads?',3,False,False),('Exactly90',3,
         assert box(pl,pt)==[PX,0,PW,OLT['page_row']] and top==OLT['page_row'] and pl.nodes[pt]['style:normal:font_size']==TPX,caption
         assert box(pl,ll)[3]==min(n*DH,(OLG.list_end-OLT['page_row'])//DH*DH)
     else: assert top==0
-# page_retitle writes the caption and the bar's. A failed boot leaves SET0's bar: the client is its 290.
+# page_retitle writes the caption and the bar's.
 pl.top=under_bar(pl,'measure_page'); plist(pl,'Measuring',1,48,True); mt,=page_kids(pl,'hscroll_label')
 pl.call(address=payload_syms['page_retitle'],args=(pl.top,mt,pl.string('Measured 1/2'),0),gap=0)
-assert pl.nodes[mt]['text']=='Measured 1/2' and pl.nodes[plbar]['text']=='Measured 1/2'
-pf=CoverflowMachine(); assert oled_client(pf,fail=lambda page:True)==290
-pf.top=pf.node('window','games_page'); plist(pf,'Games',20,48)  # 20 rows: past the clamp to n * item_h
-pl2,=page_kids(pf,'list_view'); assert next(c[3] for c in pf.calls if c[0]=='list_view_create')+box(pf,pl2)[3]==290; passed()
+assert pl.nodes[mt]['text']=='Measured 1/2' and pl.nodes[plbar]['text']=='Measured 1/2'; passed()
 # The bar names the page from a hidden caption. A page of two lists, a level and one opened over it: the level's, then,
 # the other on show over it and the source dropped (title_gone), the other's; a list on show wins over a hidden one that
 # comes first.
@@ -334,31 +331,23 @@ pu.call(address=payload_syms['page_retitle'],args=(uunder,ucap,pu.string('Prepar
 assert pu.nodes[ubar]['text']=='' and not [c for c in pu.calls if c[0]=='widget_set_text_utf8' and c[1]==ubar]
 pu.top=uunder; usync(uunder); assert pu.nodes[ubar]['text']=='Preparing'; passed()
 # Streaming on OLED's set: its rows lay out as settings rows at stream_row, the set's settings row, so with no icon
-# (set_icon 0) and the label's box at the text column (navigation.c set_child, set_text_x). On SET0 (nothing booted, or
-# a theme_boot that failed and left stock's set) 68 px rows with stock's icon column and the label after it. Either way a
-# service's own icon is hidden for the theme's mark painted in its place (home.c stream_marks).
-for boot,row in (('set',OLG.stream_row),('none',SET['ROW']),('failed',SET['ROW'])):
-    def prep(sm,boot=boot):
-        if boot=='set': oled_set(sm)
-        if boot=='failed': oled_set(sm,fail=lambda page:True)
-        sm.handlers[int(manifest['patch_symbols']['stock_stream_trampoline'],16)]='stock_stream'
-    sm,sv=settings(HOOKS['stream_page_init'][0],default=row,boot=prep)
-    assert lay(sm,sv)==0
-    items=[i for i in sm.nodes[sv]['children'] if sm.nodes[i]['visible']]
-    assert items and all(geometry(sm,i)[3]==row for i in items),boot
-    for i in items:
-        b=sm.nodes[i]['children'][0]; kids=sm.nodes[b]['children']
-        lead=[c for c in kids if sm.nodes[c]['type']=='image' and geometry(sm,c)[0]<SET['TEXT_X']+SET['ICON_X']]
-        label=next(c for c in kids if sm.nodes[c]['type']=='hscroll_label')
-        assert geometry(sm,i)[0]==geometry(sm,b)[0]==0 and lead and not [c for c in lead if sm.nodes[c]['visible']],boot
-        if boot=='set': assert geometry(sm,label)[0]==OLG.text_x-2
-        else:
-            assert [geometry(sm,c) for c in lead]==[(SET['ICON_X'],(row-SET['ICON'])//2,SET['ICON'],SET['ICON'])],boot
-            assert geometry(sm,label)[0]==SET['ICON_X']+SET['ICON']+SET['GAP'],boot
+# (set_icon 0) and the label's box at the text column (navigation.c set_child, set_text_x). A service's own icon is
+# hidden for the theme's mark painted in its place (home.c stream_marks).
+def prep(sm):
+    oled_set(sm); sm.handlers[int(manifest['patch_symbols']['stock_stream_trampoline'],16)]='stock_stream'
+row=OLG.stream_row; sm,sv=settings(HOOKS['stream_page_init'][0],default=row,boot=prep)
+assert lay(sm,sv)==0
+items=[i for i in sm.nodes[sv]['children'] if sm.nodes[i]['visible']]
+assert items and all(geometry(sm,i)[3]==row for i in items)
+for i in items:
+    b=sm.nodes[i]['children'][0]; kids=sm.nodes[b]['children']
+    lead=[c for c in kids if sm.nodes[c]['type']=='image' and geometry(sm,c)[0]<SET['TEXT_X']+SET['ICON_X']]
+    label=next(c for c in kids if sm.nodes[c]['type']=='hscroll_label')
+    assert geometry(sm,i)[0]==geometry(sm,b)[0]==0 and lead and not [c for c in lead if sm.nodes[c]['visible']]
+    assert geometry(sm,label)[0]==OLG.text_x-2
 passed()
-# Geometry sets: Edit Playlist's row follows the live pitch and body, as the page's asset rows do.
+# Edit Playlist's row follows geom()'s pitch and body (geom_words), as the page's asset rows do.
 m=PlaylistEditMachine(); set_value(m,'pitch',28); set_value(m,'body',26); m.open_editor(28,26); passed()
-gm=PlaylistEditMachine(); set_geom(gm,[g.name for g in geometry_sets(theme_builtins())].index('oled')); gm.open_editor(); passed()  # the set theme_boot wrote, SET0
 # Home's Settings list pushes in over the theme's swap motion: PAGE_SLIDE_MS, SLIDE_EASING (tools/theme.py MOTION_ROLES).
 def swap_values(m,ms,easing):
     f,ctx=m.handler(named(m,m.top,'img_settings'),O['EVT_CLICK']); m.calls=[]; m.call(address=f,args=(ctx,m.event,0,0),gap=0)
@@ -441,12 +430,11 @@ for n,kw in (('playing_page',{}),('localmusic/albuminfo_page',{'anim_hint':ASSET
     motion_load(m,n,**kw); hints+=hint_writes(m)
 motion_open(m,'shuffle_page'); hints+=hint_writes(m); motion_open(m,'coverflow_page'); hints+=hint_writes(m); assert hints==0
 passed()
-# The Library rows follow the constructor's live body and icon x, whichever group the audit gave them: OLED's set's row
-# poked (boot_values, its index in tools/theme.py geometry_sets) before its boot writes them. Search is the Library's
-# first row there; Shuffle (hidden until Edit Library shows it) keeps its (hidden) icon.
-OLG_I=[g.name for g in geometry_sets(theme_builtins())].index('oled')
-def set_oled_value(m,name,v): m.u.mem_write(payload_syms['boot_values']+2*len(VALUE_NAMES)*OLG_I+2*VALUE_NAMES.index(name),struct.pack('<H',v))
-m=ShuffleMachine(); set_oled_value(m,SITES[0x535540],60); set_oled_value(m,SITES[0x535678],6); oled_set(m)
+# The Library rows follow the constructor's live body and icon x (rows_settings.c list_row_core reads the immediates
+# LIBRARY_ROW_BODY and LIBRARY_ROW_ICON_X), whichever group the audit gave them: both poked in the code here. Search is
+# the Library's first row there; Shuffle (hidden until Edit Library shows it) keeps its (hidden) icon.
+m=ShuffleMachine(); oled_set(m)
+for a,v in ((O['LIBRARY_ROW_BODY'],60),(O['LIBRARY_ROW_ICON_X'],6)): m.u.mem_write(a,struct.pack('<H',v))
 stock=[m.node('list_item') for _ in range(11)]; view=m.node('scroll_view','scroll_view_localmusic',stock); m.top=m.node('window','localmusic_page',[view])
 assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0)==0
 button,=[b for r in m.nodes[view]['children'] for b in m.nodes[r]['children'][:1] if 'Shuffle' in [m.nodes[k].get('text') for k in m.nodes[b]['children'][1:2]]]

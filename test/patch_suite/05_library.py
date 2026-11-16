@@ -145,8 +145,7 @@ for cls,shown in ((0xf004,0),(0xf006,1),(0xf005,1),(0xf004,0)):
     assert m.nodes[icon]['visible']==shown and [c[1:3] for c in m.calls if c[0]=='class_icon']==([(row,3)] if shown else [])
 passed()
 # A song with no artist tag (an empty REC_ARTIST): under OLED's set (text_art 0) the second line is empty
-# (ringnav_song_unknown), and a rebound row loses the last song's artist; a record that says Unknown reads so. Before a set
-# is written (SET0, text-row artwork) the row keeps stock's "Unknown Artist".
+# (ringnav_song_unknown), and a rebound row loses the last song's artist; a record that says Unknown reads so.
 from build import SONG_UNKNOWN_CALL
 assert struct.unpack_from('<I',demo,fileoff(demo,SONG_UNKNOWN_CALL))[0]==jal(payload_syms['ringnav_song_unknown'])
 class SongBindMachine(Machine):
@@ -155,17 +154,16 @@ class SongBindMachine(Machine):
             self.formats.append(self.text(u.reg_read(UC_MIPS_REG_A0))); self.u.mem_write(u.reg_read(UC_MIPS_REG_A1),b'Unknown Artist\0'); self.returns(0); return
         return super().hook(u,address,size,unused)
 assert OLED_G.text_art==0
-for boot,want in ((oled_boot,''),(lambda k:None,'Unknown Artist')):
-    m=SongBindMachine(); boot(m); m.formats=[]; m.handlers[syms['getFormatString']]='b:format'
-    m.mock('deque_at','tk_snprintf','widget_set_text_utf8','widget_use_style','file_is_playing','toolsTrimLeft','toolsTrimRight')
-    title,meta,badge=(m.node('hscroll_label','scrlabel_name'),m.node('hscroll_label','scrlabel_artist'),m.node('image','img_pic'))
-    view_info=m.node('view','view_info',[title,meta,badge]); button=m.node('button','',[view_info]); m.row_record=m.alloc(0x80)
-    m.mock('list_get_img_pic'); m.word(m.row_record+8,m.string('Song')); m.word(m.row_record+12,m.string('/mnt/mmc/x.flac')); m.word(m.row_record+0x48,1)
-    for artist,text in (('Mac Quayle','Mac Quayle'),('',want),('Unknown','Unknown'),('',want)):
-        m.word(m.row_record+0x18,m.string(artist))
-        rc=m.call(address=0x4ab208,args=(button,0,0,0)); assert rc==0,(rc,artist,[c[:2] for c in m.calls][-6:])
-        assert m.nodes[meta].get('text')==text,(artist,m.nodes[meta].get('text'),want)
-    assert m.formats==(['Unknown Artist']*2 if want else []),m.formats
+m=SongBindMachine(); oled_boot(m); m.formats=[]; m.handlers[syms['getFormatString']]='b:format'
+m.mock('deque_at','tk_snprintf','widget_set_text_utf8','widget_use_style','file_is_playing','toolsTrimLeft','toolsTrimRight')
+title,meta,badge=(m.node('hscroll_label','scrlabel_name'),m.node('hscroll_label','scrlabel_artist'),m.node('image','img_pic'))
+view_info=m.node('view','view_info',[title,meta,badge]); button=m.node('button','',[view_info]); m.row_record=m.alloc(0x80)
+m.mock('list_get_img_pic'); m.word(m.row_record+8,m.string('Song')); m.word(m.row_record+12,m.string('/mnt/mmc/x.flac')); m.word(m.row_record+0x48,1)
+for artist,text in (('Mac Quayle','Mac Quayle'),('',''),('Unknown','Unknown'),('','')):
+    m.word(m.row_record+0x18,m.string(artist))
+    rc=m.call(address=0x4ab208,args=(button,0,0,0)); assert rc==0,(rc,artist,[c[:2] for c in m.calls][-6:])
+    assert m.nodes[meta].get('text')==text,(artist,m.nodes[meta].get('text'))
+assert m.formats==[],m.formats
 passed()
 # Library sorts: both stock name comparators, on the patched trim calls, skip a leading article.
 from build import SORT_TRIMS
@@ -1043,13 +1041,12 @@ paint_bar(); assert ('widget_invalidate_force',view) not in [c[:2] for c in m.ca
 # (home.chevron visible), but for Shuffle Songs, which acts rather than opening a list. Stock draws its own on folder,
 # category, album-list and Local Music rows, so those windows, song lists and grids get none from here. The names are
 # read as each loads (Machine.image_loads): theme_art's answer is one buffer, rewritten by the next.
-from ipod import SET0  # Home's asset as built is SET0's, before theme_boot writes a set
 def window(m,name,w):
     m.top=m.node('window',name,[w]); m.word(w+O['W_PARENT'],m.top); m.word(m.top+O['W_PARENT'],m.wm)
 def loaded(m): return [m.text(c[2]) for c in m.calls if c[0]=='widget_load_image']
 m=Machine(); view,imgs=home_list(m); click_target(m,imgs[HOME_ROWS.index('coverflow')]); m.clip=(0,0,375,320)
 m.image_loads=[]; m.paint(view)
-CHEV_X=HOME_LIST_W-SET0.right_x-5
+CHEV_X=HOME_LIST_W-OLED_G.right_x-5
 def bar(sel):  # Home's chevrons, their row's selected one white
     rows=[i for i,r in enumerate(HOME_ROWS) if r!='shuffle_songs']
     return ([(CHEV_X,i*HOME_ROW+HOME_ROW//2-m.get(view+O['SCROLL_Y']),(0,0,HOME_LIST_W,7*HOME_ROW)) for i in rows],
@@ -1066,7 +1063,7 @@ m=Machine(); w,es=m.page_list(10,height=96,extent=480,name='playlist_page'); win
 tile=m.entry(w,0); m.word(tile+O['W_W'],100); m.nodes[w]['children'].insert(0,tile)
 for top in (0,24):
     m.word(w+O['SCROLL_Y'],top); m.paint(w)
-    assert m.icons==[(240-SET0.right_x-5,48*i+24-top,(0,0,240,96)) for i in range(10)]; passed()
+    assert m.icons==[(240-OLED_G.right_x-5,48*i+24-top,(0,0,240,96)) for i in range(10)]; passed()
 # Leaf lists, grids and windows whose rows stock already marks draw none.
 for name in ('allmusic_page','albuminfo_page','artistinfo_page','album_page','folder_page',
              'localclass_page','localmusic_page','sysset_page'):
@@ -1158,7 +1155,7 @@ for mode in (1,0,1,0):
     assert ('widget_invalidate_force',bar) in [c[:2] for c in m.calls]  # the whole bar, after the frame
     if mode != 1:
         assert m.nodes[slot]['visible']
-        assert m.get(slot+O['W_W'])==O['BATT_BODY_W']+O['BATT_NUB_W']
+        assert m.get(slot+O['W_W'])==OLED_G.batt_w+O['BATT_NUB_W']
         assert signed(m.get(views[1]+O['W_X']))+signed(m.get(slot+O['W_X']))+m.get(slot+O['W_W'])==375-STATUS_MARGIN
 passed()
 

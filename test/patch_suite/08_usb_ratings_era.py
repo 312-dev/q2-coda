@@ -538,7 +538,7 @@ assert m.nodes[row]['loop']==0 and m.nodes[row]['hscroll_label_set_only_focus']=
 # Wheel only: the covers' slide_menu takes no touch.
 m=CoverflowMachine(); m.open()
 assert m.nodes[m.slide].get('sensitive')==0; passed()
-# Text geometry, with the theme's set written (the first system_bar load) and the page under the status row, where the
+# Text geometry, past the first system_bar load as on a unit, and the page under the status row, where the
 # window manager puts it: album over artist under the covers (the theme's coverflow caption: text_y, artist_y, name_px,
 # artist_px), the album white and the artist grey (CF_GREY), CF_EDGE from the sides and clear of the rounded glass. The
 # tracks are the theme's one-line song rows, page_x from the sides, the album named in the bar, not over them, the list
@@ -550,7 +550,7 @@ def clear(x,top,w,px):  # a label's text band, top in screen rows
     return max(corner_inset(top),corner_inset(top+px))<=x and x+w<=375-max(corner_inset(top),corner_inset(top+px))
 OLED=theme_builtins()[0]
 m=CoverflowMachine(); m.found=[m.song(f'T{i}') for i in range(12)]
-m.record_syscalls(lambda page:False); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
+m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
 m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)
 BAR=320-m.call(address=payload_syms['client_h'],args=(0,0,0,0),gap=0); assert BAR==58
 page=m.open(); m.word(page+O['W_Y'],BAR); labels=[w for w in m.nodes[m.get(m.slide+O['W_PARENT'])]['children'] if m.nodes[w]['type']=='hscroll_label']

@@ -1,4 +1,4 @@
-# An A-B marker's x, stock's on the boot set's bar (np_bar_x and np_bar_w), is the same share of the slider
+# An A-B marker's x, stock's on the built bar (np_bar_x and np_bar_w), is the same share of the slider
 # where the page has it (ringnav_ab_x); a point left of the bar, and 0 (no point to mark), stay as they are.
 class ABMachine(QueueMachine):
     ab=0
@@ -7,7 +7,7 @@ class ABMachine(QueueMachine):
         self.calls.append(('ab_x',u.reg_read(UC_MIPS_REG_A0))); self.returns(self.ab,clobber=True)
 m=ABMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'; m.handlers[0x53b9d8]='ab:x'
 m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
-m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)  # OLED's set (theme_boot)
+m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)  # the first system_bar load, as on a unit (accent, theme_boot)
 slider=m.node('slider','slider_play',max=225,value=100); win=m.node('window','playing_page',[slider]); m.word(win+O['W_PARENT'],m.wm); m.top=win
 def geo(w): return tuple(signed(m.get(w+O[k])) for k in ('W_X','W_Y','W_W','W_H'))
 assert m.call(address=playing,args=(win,7,0,0),gap=0)==0
@@ -17,7 +17,7 @@ from build import AB_X_CALLS  # the placement's three calls of the x go through 
 assert [struct.unpack_from('<I',demo,fileoff(demo,a))[0] for a in AB_X_CALLS]==[jal(payload_syms['ringnav_ab_x'])]*3
 def ab_x(x): m.ab=x; m.calls=[]; r=signed(m.call(address=payload_syms['ringnav_ab_x'],args=(77,0,0,0),gap=0)); assert m.calls[0]==('ab_x',77); return r
 for k,v in zip(('W_X','W_Y','W_W','W_H'),(BX,233,BW,44)): m.word(slider+O[k],v)
-assert BW>0 and [ab_x(x) for x in (BX,BX+89,BX+BW-1,0)]==[BX,BX+89,BX+BW-1,0]; passed()  # on the boot set's bar: stock's own
+assert BW>0 and [ab_x(x) for x in (BX,BX+89,BX+BW-1,0)]==[BX,BX+89,BX+BW-1,0]; passed()  # on the built bar: stock's own
 for k,v in zip(('W_X','W_W'),(87,201)): m.word(slider+O[k],v)
 assert [ab_x(x) for x in (BX,BX+89,BX+BW-1,BX-1,0)]==[87,87+89*201//BW,87+(BW-1)*201//BW,BX-1,0]; passed()
 
@@ -175,7 +175,7 @@ def centre(m,gap=1000):  # a double press
     assert m.call(O['KEY_CENTER'],gap=gap)==11 and not did(m,'playing_timer_clear')
     assert m.call(O['KEY_CENTER'],gap=100,clear=False)==11
     m.advance(DC,clear=False); keep(m); assert not m.screens  # no single press left behind
-def oled_scrub(**kw):  # Now Playing once the first system_bar load has put up OLED's set and its status row (theme_boot)
+def oled_scrub(**kw):  # Now Playing past the first system_bar load, as on a unit (accent, theme_boot)
     m=QueueMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'
     m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
     m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)
@@ -1275,10 +1275,10 @@ class PlaylistCoverMachine(CoverflowMachine):
             self.deqs[self.get(syms['tools_pdeq_directory'])][1]=[self.copy('stSongInfo',r) for r in self.heads]
             return self.returns(len(self.heads))
         self.returns(0)
-def geom_boot(m):  # the first system_bar load (ringnav_ui_load's theme_boot) writes the theme's geometry set
+def bar_load(m):  # the first system_bar load, as on a unit (ringnav_ui_load: accent, theme_boot)
     m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
     m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)
-m=PlaylistCoverMachine(); geom_boot(m)
+m=PlaylistCoverMachine(); bar_load(m)
 m.word(m.slide+O['SLIDE_INDEX'],1); m.press(100); assert m.hold()==11 and m.release()==0
 rows=[m.nodes[m.nodes[i]['children'][0]]['text'] for i in m.nodes[m.view]['children'] if m.nodes[i]['type']=='list_item']
 assert rows==PL_COVER_MENU and m.nodes[m.title]['text']=='List 1',rows; passed()
@@ -1299,7 +1299,7 @@ def destroyed(m,w):  # w gone from the stack, then its destroy handlers, in orde
     if w in m.stack: m.stack.remove(w); m.top=m.stack[-1]
     for t,f,ctx in list(m.nodes[w].get('handlers',())):
         if t==O['EVT_DESTROY']: m.call(address=f,args=(ctx,m.event,0,0),gap=0,clear=False)
-m=ClosingCoverMachine()  # New Playlist, before the set is written
+m=ClosingCoverMachine()  # New Playlist
 m.closing=[]; m.press(100); assert m.hold()==11 and m.release()==0; dlg=m.top
 m.pick(4); m.advance(0,clear=False); m.advance(0,clear=False)
 assert m.closing==[dlg] and m.top==dlg and not m.edits,(m.closing,m.edits)
@@ -1330,7 +1330,7 @@ m.pick(3); m.advance(0); assert m.opened[-1]==('localmusic/playlistsmore_page',1
 # New Playlist (playlists.c playlists_new): the covers close (coverflow_playlists_close) and New runs as the page's
 # own: its row's target (OLED's set has no toolbar), which under list.entry.ipod is the letter strip's New Playlist
 # (search_strip.c playlist_new_open) in place of stock's dialog. With no covers up, nothing.
-def pl_new(covers=True):  # the Playlists page booted (PlaylistPageMachine's default: OLED's set written)
+def pl_new(covers=True):  # the Playlists page past the first system_bar load (PlaylistPageMachine)
     class M(PlaylistPageMachine):
         def hook(self,u,address,size,unused):
             if address!=payload_syms['coverflow_playlists_close']: return super().hook(u,address,size,unused)
