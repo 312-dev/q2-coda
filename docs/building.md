@@ -102,6 +102,7 @@ python3 test/build.py --build BUILD         # a finished build's payloads and pa
 python3 test/aic.py STOCKFS               # stopped audio notifier: actual MIPS hooks and modeled wait races
 python3 test/aic_build.py STOCKFS BUILD    # notifier development guard, ABI, default/experimental packaging
 python3 test/remote.py                     # q2remote protocol, auth, event and framebuffer checks
+python3 test/q2eq.py                       # the q2eq helper (adb.md#q2eq) against a fake demo: each command's request, the JSON, the wait (host cc)
 python3 test/adb.py [BUILD]                # adbd under qemu-mipsel in bwrap (descriptors, authorization and the prompt's socket, shell, exec, push, pull) and q2adb-gadget on a stand-in configfs (adb.md)
 python3 test/coda_rc_e2e.py --emu DIR [--build BUILD] [--shots DIR]  # coda-rc end to end over TCP against a q2-emu copy with CARREMOTE=1: pair, browse (album numbers, NOT_FOUND), play an album, State pushes, Pause and Play acked once played, Next, Previous, a cover (docs/remote-protocol.md)
 bash test/wifi_transfer_cgi.sh             # Wi-Fi transfer's file manager (assets/web/q2cgi) under the host's busybox ash (the Q2's is 1.38.0, [third-party.md](third-party.md#busybox)): no ZIP or build; on a tmpfs at /mnt/mmc (one already there, or its own as root); --fat for a FAT32 image and its short-name cases (root). GitHub runs it on every pull request

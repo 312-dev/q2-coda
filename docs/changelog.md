@@ -2,6 +2,7 @@
 
 - **Unreleased (q2-coda)**:
   - Pages of text you scroll (OLED): when the last line sits just under the fade at the bottom, turning the wheel now scrolls it into view, as a drag does, instead of showing the scroll bar and staying put.
+  - Development builds: `q2eq` over adb lists, loads and adjusts the EQ from a computer (every control on the EQ page, presets, import and export), through the same steps as the EQ page, so the page, EQ per Output and what plays stay in step.
   - Status bar: while it charges, the battery shows how full it really is. It used to fill to the end the moment the cable went in.
   - Status bar (OLED): a charging battery shows a small lightning bolt inside it, in green; full on the cable, or held at **Charge Limit**, it stays green with no bolt.
   - Status bar: with **Battery** on Percent, the percentage stays on one line in the status bar; at 100% or while charging it could drop onto a second line.

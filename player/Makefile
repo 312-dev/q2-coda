@@ -26,10 +26,10 @@ $(OUT)/%.o: %.c q2player.h alsa_min.h | $(OUT)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # patch/peq.c, the payload's EQ engine, built for the player as test/peq.py builds it (PEQ_HOST: libc calls)
-$(OUT)/peq.o: ../patch/peq.c ../patch/peq.h ../patch/theme.h | $(OUT)
+$(OUT)/peq.o: ../patch/peq.c ../patch/peq.h ../patch/peq_types.h ../patch/theme.h | $(OUT)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(OUT)/dsp.o: ../patch/peq.h
+$(OUT)/dsp.o: ../patch/peq.h ../patch/peq_types.h
 
 $(OUT):
 	mkdir -p $@

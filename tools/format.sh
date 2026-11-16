@@ -13,7 +13,7 @@ prettier=${PRETTIER:-prettier}
 # read from the lists, so a file added to either is formatted once it builds
 c=$(python3 -c 'import sys; sys.path.insert(0, "tools"); import build, peq
 print(" ".join("patch/" + f for f in build.NAVIGATION + [f for f in peq.UI_SOURCES if f not in peq.UNFORMATTED]))')
-c="$c patch/navigation.h patch/theme.h patch/coverflow.h patch/playlist_art.h patch/library_scope.h patch/xiph.h"
+c="$c patch/navigation.h patch/theme.h patch/coverflow.h patch/playlist_art.h patch/library_scope.h patch/xiph.h patch/peq_types.h patch/q2eq.h"
 
 if [ "${1:-}" = --check ]; then
     $clang_format --dry-run -Werror $c

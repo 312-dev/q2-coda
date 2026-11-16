@@ -89,8 +89,8 @@ static inline int ink_vgcanvas_set_fill_linear_gradient(void *vg, float sx, floa
 #endif
 #endif
 #include "theme.h"
+#include "peq_types.h"
 
-#define PEQ_BANDS 30 /* 10 per side plus 10 shared, as L/R APO files use */
 #define PEQ_CHANNELS 8
 #define PEQ_FILE_LIMIT 16384
 #define PEQ_LINE_LIMIT 512
@@ -102,32 +102,7 @@ static inline int ink_vgcanvas_set_fill_linear_gradient(void *vg, float sx, floa
 #define EQ_OUTPUTS                                                                                 \
     PEQ_ROOT "/mnt/data/peq-outputs" /* EQ per Output: an eq_state per output, and owner */
 #define EQ_DEVICES 32                /* Bluetooth devices remembered at once */
-/* A band's type (docs/internals.md#parametric-eq): the RBJ Audio EQ Cookbook's biquads, in the
- * order peq_compile designs them and peq_export names them. Only the first three use a gain. */
-enum { PEQ_PK, PEQ_LS, PEQ_HS, PEQ_LP, PEQ_HP, PEQ_BP, PEQ_NO, PEQ_AP, PEQ_TYPES };
-#define PEQ_GAINED(type) ((type) <= PEQ_HS)
-#define PEQ_Q_MAX(type) ((type) == PEQ_NO ? 30 : 10) /* APO's notch without a Q is Q 30 */
 
-/* Versioned disk representation: fixed-width fields, no pointers or implicit padding.
- * enabled: 0 off, 1 both channels, 2 left only, 3 right only (v1 files hold 0 or 1).
- * type: PEQ_* (firmware before the pass, notch, band-pass and all-pass types reads only 0 to 2).
- * balance: dB, above 0 turns the left channel down, below 0 the right (v2 only).
- * automatic: the preamp is 1 Auto (preamp holds the loudest cut over the standard PCM rates, kept
- * so by demo: peq_ui.c headroom), 2 picked (an import's own preamp too), 0 never picked (saved
- * before 1.3.6: PEQ_PRESET_V2 bytes, or imported before 1.4.4), which the UI takes as Auto. Every
- * preamp plays as saved. */
-typedef struct {
-    int enabled, type;
-    double frequency, gain, q;
-} peq_band;
-typedef struct {
-    int count, bypass;
-    double preamp;
-    peq_band bands[PEQ_BANDS];
-    double balance;
-    int automatic, spare;
-} peq_preset;
-#define PEQ_PRESET_V2 __builtin_offsetof(peq_preset, automatic)
 /* Why peq_parse failed, at line; or, when it loads, what it left out: skipped lines, the first at
  * line, reason as a failure would give it, and what a word or two naming it for a message. */
 typedef struct {
@@ -145,14 +120,6 @@ typedef struct {
     int bypass, used, only[PEQ_BANDS]; /* used: bands past it are identity with zero memory; only: 0
                                           every channel, else channel only-1 */
 } peq_engine;
-/* The EQ state (docs/internals.md#3eq), PEQ_ACTIVE's Q2PEQ03 record, replaced whole: which EQ plays
- * (mode, EQ_*), the last applied PEQ and the 3EQ, its three fixed bands (eq3_bands) and their
- * headroom preamp. hold: Off, but the 3EQ's preamp kept while its page compares against bypass. */
-enum { EQ_OFF, EQ_3, EQ_PEQ };
-typedef struct {
-    int mode, hold;
-    peq_preset peq, eq3;
-} eq_state;
 typedef struct {
     peq_engine current, next, pending;
     int rate, channels, ramp, ramp_length, waiting;
@@ -610,6 +577,7 @@ void spot_yield(void), spot_stop(void), radio_stop(void);
 void headset_volume_reset(void);
 int vol_next(unsigned key); /* volume.c: the volume a wheel tick moves to, at the wheel's speed */
 void headset_poll(void), headset_eq_poll(void), headset_manual(void);
+void q2eq_poll(void); /* peq_ui.c, --dev builds only: a q2eq request (q2eq.h) */
 int media_owner(void), media_status(void), media_playing(void), media_focused(void);
 void media_set_playing(int playing), media_key(unsigned key);
 void video_key(unsigned key);
