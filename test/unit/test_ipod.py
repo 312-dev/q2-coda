@@ -440,10 +440,11 @@ def test_playing_page_oled_grid():
     assert play[2]['style:normal:font_name'] == 'inter' == remain[2]['style:normal:font_name']
     assert play[2]['style:normal:text_color'] == '#FFFFFF' == remain[2]['style:normal:text_color']
     mode = n['img_playmode']
-    assert root[3][-1] is mode and mode[2]['opacity'] == '0' and mode[1] == [(375 - 88) // 2, bar_y + 48 - 22, 88, 44]
-    assert g.bar + mode[1][1] + mode[1][3] // 2 == 276
+    assert root[3][-1] is mode and mode[2]['opacity'] == '0' and mode[1] == [53, bar_y + ipod.NP_GRID_MODES_DY - 22, 269, 44]
+    assert g.bar + mode[1][1] + mode[1][3] // 2 == 286  # the four buttons' row (np_bar.c np_modes)
     dots = n['slide_indicator1'][1]
-    assert dots[1] == bar_y + ipod.NP_GRID_DOTS_DY > mode[1][1] + mode[1][3] - 10 and n['slide_view_view'][1][3] == dots[1] + 10
+    assert dots[1] == bar_y + ipod.NP_GRID_DOTS_DY and n['slide_indicator1'][2]['visible'] == 'false'  # the row's on dots take their place
+    assert n['slide_view_view'][1][3] == dots[1] + 10
     assert g.bar + dots[1] + 10 <= 320 - 8
     # the other sets' page is the base layout (np_art 0)
     assert named(base)['img_cover'][1] != n['img_cover'][1] and named(base)['img_playmode'] in named(base)['view_album'][3]

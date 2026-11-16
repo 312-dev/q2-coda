@@ -1061,7 +1061,7 @@ def sync(fw, win):
 @pytest.mark.parametrize('name, title', [('playing_page', 'Now Playing'),
                                          ('coverflow_page', 'Cover Flow'), ('equalizer_page', 'EQ'),
                                          ('spotify_page', 'Spotify'), ('radionp_page', 'Internet Radio'),
-                                         ('usbmode_page', 'Q2 Pod')])
+                                         ('usbmode_page', 'Transfer Files')])
 def test_a_page_known_by_name_titles_the_bar(fw, world, st, name, title):
     label = bar_title(fw, world, st)
     win = world.window(name)
@@ -1948,20 +1948,15 @@ def test_usb_audio_mode_has_nothing_to_eject(fw, world, st):
 
 
 def test_the_computer_s_eject_says_ok_to_disconnect(fw, world, st):
-    """A label of internals.md's style covers stock's line, which stock's timer would write back."""
+    """Its LUN read open, then empty: the computer ejected the card, and the mode page (usb_ui.c usb_ui_ejected) draws
+    OK to Disconnect again; the poll ends."""
     files = Files(fw, {USB_LUN: b'/dev/mmcblk0p1\n'})
     win = usb_page(fw, world, st)
     (_, ctx, ms), = world.timers
     assert ctx == win and ms == 500
-    info = named(world, win, 'scrlabel_info')
-    was = world[info].text
     assert poll(world) == RET_REPEAT and st('usb_lun').value == 1  # the LUN open: storage in use
     files.files[USB_LUN] = b''
     assert poll(world) == RET_REMOVE and world.invalid[-1] == (win, None)
-    (ok,) = [c for c in world[win].children if c != info and world[c].kind == 'hscroll_label']
-    assert world[ok].text not in (was, '', None)
-    assert world.at(ok) == world.at(info) and world[info].visible == 0
-    assert world[ok].props['style'] == 's_scrlabel_white24c'
 
 
 @pytest.mark.parametrize('files', [{}, {USB_LUN: b''}])

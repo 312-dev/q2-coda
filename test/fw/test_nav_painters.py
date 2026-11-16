@@ -741,14 +741,14 @@ def test_a_fade_keeps_to_the_column_its_styles_margins_leave(fw, st):
     (0, 0, ['oled_mode_shuffle_d', 'oled_mode_repeat_d']), (1, 0, ['oled_mode_shuffle_d', 'oled_mode_repeat1_on']),
     (2, 1, ['oled_mode_shuffle_on', 'oled_mode_repeat_on']), (3, 1, ['oled_mode_shuffle_l', 'oled_mode_repeat_on'])])
 def test_now_playings_modes_are_the_themes_pair_lit_by_stocks_mode(fw, st, mcl, mode, light, names):
-    """playing.modes.icons (np_bar.c np_modes): shuffle and repeat 44 px apart about the play mode's target's centre,
-    each the accent's while on (shuffle at MCL_MODE 2, repeat at 3 and at 2, as stock's Shuffle never ends, unless
+    """playing.modes.icons (np_bar.c np_modes): the row's four buttons evenly across its target, shuffle, radio, repeat
+    and Up Next; shuffle and repeat each the accent's while on (shuffle at MCL_MODE 2, repeat at 3 and at 2, as stock's Shuffle never ends, unless
     Off was chosen under it; repeat-once's glyph at 1), else the half's grey."""
     ui = Ui(fw)
     theme(fw)
     st('light').value, mcl.mode = light, mode
     win = ui.window('playing_page')
-    button = ui.add('image', win, (143, 196, 88, 44), 'img_playmode')
+    button = ui.add('image', win, (53, 264, 269, 44), 'img_playmode')  # the row's target, x 53 to 322 (np_bar.c)
     fw.mock('widget_lookup', lambda w, name, deep, *_: button.addr if C.string_at(name) == b'img_playmode' and not deep else 0)
     loads, drawn = [], []
     fw.mock('widget_load_image', lambda w, name, bitmap, *_: loads.append(C.string_at(name).decode()) or 0)
@@ -756,7 +756,9 @@ def test_now_playings_modes_are_the_themes_pair_lit_by_stocks_mode(fw, st, mcl, 
     lcd, raw = C.create_string_buffer(0x200), C.create_string_buffer(0x100)
     struct.pack_into('<Q', raw, CANVAS_LCD, C.addressof(lcd))
     fw.fn('np_modes', None, C.c_void_p, C.c_void_p)(win.addr, C.addressof(raw))
-    assert loads == names and drawn == [(187 - 22, 218), (187 + 22, 218)]
+    half = 'l' if light else 'd'  # radio (off) and Up Next after them, in the half's ink
+    assert loads == names + [f'oled_mode_radio_{half}', f'oled_mode_queue_{half}']
+    assert drawn == [(64, 286), (228, 286), (146, 286), (311, 286)]  # shuffle, repeat, then radio and Up Next
 
 
 def test_now_playings_heart_and_more_are_the_themes_glyphs_in_each_half(fw, st):
@@ -790,15 +792,15 @@ def test_now_playings_heart_and_more_are_the_themes_glyphs_in_each_half(fw, st):
 
 
 class Modes:
-    """OLED's Now Playing on top with the play mode's target at (143, 252, 88, 44): its left half shuffle's, its right
-    repeat's (np_bar.c np_mode_click). config_playmode sets stock's mode as stock's does."""
+    """OLED's Now Playing on top with the row's target at (53, 264, 269, 44): a tap goes to the nearest of shuffle,
+    radio, repeat and Up Next (np_bar.c np_mode_click). config_playmode sets stock's mode as stock's does."""
     def __init__(self, fw, st, mcl, mode):
         self.fw, self.mcl = fw, mcl
         ui = Ui(fw)
         self.settings = theme(fw)
         mcl.mode = mode
         self.win = ui.window('playing_page')
-        self.button = ui.add('image', self.win, (143, 252, 88, 44), 'img_playmode')
+        self.button = ui.add('image', self.win, (53, 264, 269, 44), 'img_playmode')
         st('np_win', C.c_void_p).value = self.win.addr
         fw.mock('widget_lookup', lambda w, name, deep, *_: self.button.addr if C.string_at(name) == b'img_playmode' else 0)
         self.sent = []
@@ -807,7 +809,7 @@ class Modes:
     def tap(self, side):
         event = C.create_string_buffer(0x40)
         struct.pack_into('<i', event, 0, O['EVT_CLICK'])
-        struct.pack_into('<ii', event, O['EVENT_X'], 160 if side == 'shuffle' else 215, 270)
+        struct.pack_into('<ii', event, O['EVENT_X'], 64 if side == 'shuffle' else 228, 286)
         return self.fw.fn('np_mode_click', C.c_int, C.c_void_p, C.c_void_p)(self.button.addr, C.addressof(event))
 
 
@@ -851,14 +853,14 @@ def test_what_stocks_mode_cant_say_outlives_a_restart(fw, st, mcl, library, tmp_
     try:
         theme(again, **saved)
         win = Ui(again).window('playing_page')
-        button = Ui(again).add('image', win, (143, 196, 88, 44), 'img_playmode')
+        button = Ui(again).add('image', win, (53, 264, 269, 44), 'img_playmode')
         again.mock('widget_lookup', lambda w, name, deep, *_: button.addr if C.string_at(name) == b'img_playmode' else 0)
         loads: list = []
         again.mock('widget_load_image', lambda w, name, bitmap, *_: loads.append(C.string_at(name).decode()) or 0)
         lcd, raw = C.create_string_buffer(0x200), C.create_string_buffer(0x100)
         struct.pack_into('<Q', raw, CANVAS_LCD, C.addressof(lcd))
         again.fn('np_modes', None, C.c_void_p, C.c_void_p)(win.addr, C.addressof(raw))
-        assert loads == names
+        assert loads == names + ['oled_mode_radio_d', 'oled_mode_queue_d']
     finally:
         again.close()
 
