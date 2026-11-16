@@ -353,7 +353,8 @@ void np_mode_step(int repeat, int dir) {
 #define NP_WORD_FROM 60 /* the word shows past this percent of the grow, fading in */
 #define NP_DOT 4
 #define NP_DOT_DY 15      /* the on dot's centre below the glyph's: 2 px under its 22 px */
-#define NP_RADIO_PX 19    /* "Radio": Inter Medium, the design's 16 px (docs/oled-design.md#type) */
+#define NP_RADIO_PX                                                                                \
+    TYPE(16)              /* "Radio": Inter Medium, the design's 16 px (docs/oled-design.md#type) */
 #define NP_RADIO_GLYPH 24 /* the antenna's centre this far left of the pill's, the word 10 px */
 #define NP_RING_W 38      /* the ring round the glyph the Centre cycle's wheel sets, 2 px wide */
 #define NP_RING_H 34
@@ -470,7 +471,7 @@ void np_modes(void *win, void *canvas) {
         fill_box(canvas, &pill, RGBA(accent), NP_PILL_H / 2);
         glyph(win, canvas, "mode_radio_w", word ? cx[NB_RADIO] - NP_RADIO_GLYPH : cx[NB_RADIO], cy);
         if (word)
-            ar_text(canvas, "Radio", 1, NP_RADIO_PX, blend(0xffffff, accent, word), 1,
+            ui_text(canvas, "Radio", 1, NP_RADIO_PX, blend(0xffffff, accent, word), 1,
                     cx[NB_RADIO] - 10, cy, w, 2);
     } else
         glyph(win, canvas, ipod_light() ? "mode_radio_l" : "mode_radio_d", cx[NB_RADIO], cy);

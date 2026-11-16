@@ -41,6 +41,18 @@ CONTEXT = {name: max(size, 8) for name, size in tools_build.CONTEXT_DATA.items()
 FLOATS = ('float', 'double')
 
 
+def defines(path, prefix=r'\w+'):
+    """path's (patch/ relative) #defines named prefix... with a value: a number, TYPE(px) (patch/ui_kit.h) or a
+    colour token's RGB_<NAME>[_L] (tools/theme.py TOKENS), as ints."""
+    tokens = {f'RGB_{n.upper()}{"_L" if light else ""}': tools_theme.token(n, light) for n in tools_theme.TOKENS
+              for light in (False, True)}
+    def value(v):
+        type_ = re.fullmatch(r'TYPE\((\d+)\)', v)
+        return (int(type_[1]) * 121 + 50) // 100 if type_ else tokens[v] if v in tokens else int(v, 0)
+    return {k: value(v) for k, v in re.findall(rf'^#define ({prefix}\w*) +(0x[0-9a-fA-F]+|\d+|TYPE\(\d+\)|RGB_\w+)(?!\w)',
+                                                 (ROOT/'patch'/path).read_text(), re.M)}
+
+
 def returns():
     """Each stock and stubbed libc call's C return type, by the name its stub has."""
     types = {name if name in PURE else f'fw_{name}': ret for name, (ret, _) in tools_peq.LIBC.items()}

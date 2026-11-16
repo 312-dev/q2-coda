@@ -122,15 +122,16 @@ static void oled_scan(void *win, void *src, void *btn) {
     char key[STYLE_KEY];
     void *c =
         scan_label(win, "Update Library", STATUS_ROW_INSET, geom_val(V_STATUS_Y) - SCAN_ROW / 2,
-                   240, "inter-medium", 18, 0xffababab, "left");
+                   240, "inter-medium", 18, 0xff000000u | RGB_SECONDARY, "left");
     if (c) widget_set_name(c, "msg_heading");
     scan_label(win, "Songs", SCAN_X, SCAN_TOP, SCAN_NAME_W, "inter", 24, 0xffffffff, "left");
     scan_label(win, "Folder", SCAN_X, SCAN_TOP + SCAN_ROW, SCAN_NAME_W, "inter", 24, 0xffffffff,
                "left");
     int vx = SCAN_X + SCAN_NAME_W, vw = SCAN_RIGHT - vx;
-    cp.msg_line = scan_label(win, 0, vx, SCAN_TOP, vw, "inter", 24, 0xffababab, "right");
-    cp.msg_folder =
-        scan_label(win, 0, vx, SCAN_TOP + SCAN_ROW, vw, "inter", 24, 0xffababab, "right");
+    cp.msg_line =
+        scan_label(win, 0, vx, SCAN_TOP, vw, "inter", 24, 0xff000000u | RGB_SECONDARY, "right");
+    cp.msg_folder = scan_label(win, 0, vx, SCAN_TOP + SCAN_ROW, vw, "inter", 24,
+                               0xff000000u | RGB_SECONDARY, "right");
     if (cp.msg_line) widget_set_name(cp.msg_line, "msg_line");
     widget_move_resize(btn, 16, SCAN_TOP + 2 * SCAN_ROW, 343, SCAN_ROW);
     for (unsigned i = 0; i < sizeof state / sizeof *state; ++i) {
@@ -178,7 +179,7 @@ void msg_paint(void *w, void *canvas) {
     msg_sync();
     rect_t track = { SCAN_X, SCAN_BAR_Y - dy, SCAN_BAR_W, 6 }, part = track;
     part.w = cp.msg_part < 6 ? 6 : cp.msg_part;
-    unsigned rest = ipod_light() ? 0xffd1d1d1u : 0xff000000u | theme()->np_track_rgb;
+    unsigned rest = ipod_light() ? 0xff000000u | RGB_TRACK_L : 0xff000000u | theme()->np_track_rgb;
     for (int i = 0; cp.msg_part >= 0 && i < 6; ++i) {
         round_row(canvas, &track, 3, i, rest);
         round_row(canvas, &part, 3, i, 0xff000000u | scheme()->tones[0]);

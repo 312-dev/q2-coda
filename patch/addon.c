@@ -2738,24 +2738,9 @@ int addon_hold(void *w) {
 #define QR_PLATE_Y 4  /* its top, on the page: under the status row */
 #define QR_SCAN_Y 192 /* the note's centre, then the address line's */
 #define QR_ADDR_Y 216
-#define QR_SCAN_PX 20     /* Inter Medium 17 */
-#define QR_ADDR_PX 17     /* Inter Regular 14 */
-#define QR_TER 0x858585   /* Text Tertiary */
-#define QR_SEC_D 0xababab /* Text Secondary, dark and light halves */
-#define QR_SEC_L 0x5c5c5c
-#define QR_DONE_MS 1500 /* Signed In shows this long before the app's page */
-/* A step's mode page, in screen y: the stack (circle, title, line) centred as one between the
- * status row's foot (MODE_TOP) and the screen's bottom */
-#define MODE_TOP 40
-#define MODE_STACK 158
-#define MODE_R 46
-#define MODE_GLYPH 44 /* tools/art.py SIGNIN_PX */
-#define MODE_TITLE_Y 120
-#define MODE_TITLE_PX 26 /* Inter Medium 22 */
-#define MODE_LINE_Y 148
-#define MODE_LINE_PX 18 /* Inter Regular 15 */
-#define MODE_GREEN 0x34c759
-#define MODE_RED 0xff453a
+#define QR_SCAN_PX TYPE(17) /* Inter Medium 17 */
+#define QR_ADDR_PX TYPE(15) /* Inter Regular 15 */
+#define QR_DONE_MS 1500     /* Signed In shows this long before the app's page */
 static struct {
     void *page, *view;
     unsigned timer, leave, done, seen; /* seen: the state file as last read, hashed */
@@ -2867,21 +2852,17 @@ static void plate(void *canvas, int x, int y, int w, int h, unsigned color, unsi
     }
 }
 
-/* s, UTF-8, centred on the line at y (the page's) in face at px, in a final 0xAARRGGBB. */
+/* s, UTF-8, centred on the line at y (the page's) in face at px, in a final 0xRRGGBB. */
 static void qr_text(void *canvas, const char *s, int y, const char *face, unsigned px,
-                    unsigned argb) {
-    unsigned buf[128];
-    int box[4] = { 8, y - (int)px, 375 - 16, 2 * (int)px };
-    ar_wide(s, buf, 128);
-    final_text(canvas, face, buf, box, px, argb);
+                    unsigned rgb) {
+    unsigned raw = ui_ink_raw(1);
+    ui_line(canvas, s, 8, 375 - 16, y, 1, face, (int)px, rgb);
+    ui_ink_raw(raw);
 }
 
 /* The page as qr_refresh read it, on qp.view (the page's coordinates). */
 static void qr_paint(void *w, void *canvas) {
-    int light = ipod_light();
-    unsigned ink = light ? 0xff000000u : 0xffffffffu,
-             sec = 0xff000000u | (light ? QR_SEC_L : QR_SEC_D),
-             ter = 0xff000000u | (light ? QR_SEC_L : QR_TER);
+    unsigned ink = tok(TOK_PRIMARY), ter = tok(TOK_TERTIARY);
     if (qp.code && !qp.step[0]) {
         int side = QR_PLATE, x0 = (375 - side) / 2, y0 = QR_PLATE_Y;
         int n = qp.size, m = side / (n + 4), o = (side - m * n) / 2, digits = (n + 3) / 4;
@@ -2912,25 +2893,16 @@ static void qr_paint(void *w, void *canvas) {
         return;
     }
     const char *s = qp.step;
-    unsigned ring = !strcmp(s, "done")                          ? MODE_GREEN
-                    : !strcmp(s, "fail") || !strcmp(s, "error") ? MODE_RED
+    unsigned ring = !strcmp(s, "done")                          ? RGB_POSITIVE
+                    : !strcmp(s, "fail") || !strcmp(s, "error") ? RGB_NEGATIVE
                                                                 : scheme()->tones[0] & 0xffffffu;
-    const char *glyph = !strcmp(s, "phone") || !strcmp(s, "check") || !strcmp(s, "done") ||
-                                !strcmp(s, "fail") || !strcmp(s, "error")
-                            ? s
-                            : 0;
-    int dy = widget_get_prop_int(qp.page, "y", 0),
-        top = MODE_TOP + (320 - MODE_TOP - MODE_STACK) / 2 - dy, cx = 375 / 2;
-    if (glyph) {
-        char name[40];
-        unsigned raw = ui_ink_raw(0);
-        plate(canvas, cx - MODE_R, top, 2 * MODE_R, 2 * MODE_R, rgba(ring, 255), MODE_R);
-        ui_ink_raw(raw);
-        tk_snprintf(name, sizeof name, "%ssignin_%s", theme()->art, glyph);
-        paint_art(w, canvas, name, cx - MODE_GLYPH / 2, top + MODE_R - MODE_GLYPH / 2);
-    }
-    qr_text(canvas, qp.title, top + MODE_TITLE_Y, "inter-medium", MODE_TITLE_PX, ink);
-    qr_text(canvas, qp.line, top + MODE_LINE_Y, "inter", MODE_LINE_PX, sec);
+    int known = !strcmp(s, "phone") || !strcmp(s, "check") || !strcmp(s, "done") ||
+                !strcmp(s, "fail") || !strcmp(s, "error");
+    char glyph[24];
+    tk_snprintf(glyph, sizeof glyph, "modepage_%s", s);
+    mode_page_paint(w, canvas, widget_get_prop_int(qp.page, "y", 0),
+                    &(mode_page_t){ known ? ring : MODE_BARE, known ? glyph : (const char *)0, 0,
+                                    qp.title, qp.line, (const char *)0 });
 }
 
 /* ringnav_paint, every widget after stock painted it: a progress row's bar, a flat rectangle filled

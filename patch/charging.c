@@ -11,19 +11,6 @@
  * Charging) would lift this; a guess from the level would not. */
 int charge_weak(void) { return 0; }
 
-/* A charging toast waits for the next UI loop pass (charging_poll, from usb_ui_poll): those that
- * start inside stock's USB pass or an input's dispatch, whose own loop a toast's would run again.
- */
-static struct {
-    char text[48];
-    char glyph[32];
-} chg __attribute__((section(".scratch")));
-
-static void charge_toast(const char *glyph, const char *text) {
-    tk_snprintf(chg.glyph, sizeof chg.glyph, "%s", glyph);
-    tk_snprintf(chg.text, sizeof chg.text, "%s", text);
-}
-
 /* The status battery's state in words and its toast glyph (a theme image's name without the art
  * prefix), for battery_now's key: too weak, held at Charge Limit, full, charging, low, or the level
  * alone. "·" is U+00B7, UTF-8. */
@@ -60,7 +47,7 @@ static const char *charge_words(unsigned key, char *out, int size) {
 void charge_tap(void) {
     char words[48];
     const char *glyph = charge_words(st.batt_key, words, sizeof words);
-    charge_toast(glyph, words);
+    toast_later(glyph, words);
 }
 
 /* ---- the cable's toasts and the plug-in screen ---- */
@@ -94,7 +81,7 @@ static unsigned cable_key(void) {
 #define S1_H 76.0f
 #define S1_R 16.0f
 #define S1_LINE 3.0f
-#define S1_BODY_RGB 0x3a3a3c
+#define S1_BODY_RGB RGB_OFF
 #define S1_IN 8.0f /* the fill S1_IN inside the body, S1_FILL_R corners */
 #define S1_FILL_R 9.0f
 #define S1_NUB_GAP                                                                                 \
@@ -102,7 +89,6 @@ static unsigned cable_key(void) {
 #define S1_NUB_W 7.0f
 #define S1_NUB_H 28.0f
 #define S1_NUB_R 4.0f
-#define S1_GREEN 0x34c759
 #define S1_PCT_Y                                                                                   \
     212 /* the level's line, Inter Medium 30 (36 in AWTK's sizes), S1_PCT_DX right of */
 #define S1_PCT_PX 36 /* centre, the bolt (tools/art.py CHARGE_BOLT_PX) S1_BOLT_GAP left of it */
@@ -110,8 +96,8 @@ static unsigned cable_key(void) {
 #define S1_BOLT 26
 #define S1_BOLT_GAP 3
 #define S1_WORD_Y 244 /* "Charging", Inter Regular 16 (19), Text Secondary */
-#define S1_WORD_PX 19
-#define S1_WORD_RGB 0xababab
+#define S1_WORD_PX TYPE(16)
+#define S1_WORD_RGB RGB_SECONDARY
 #define S1_LINE_H 40
 
 static struct {
@@ -221,9 +207,9 @@ void charge_paint(void *w, void *canvas) {
     if (!s1.still) {
         unsigned alpha, t = ((unsigned)time_now_ms() - s1.at) % S1_LOOP_MS;
         int reach = s1_sweep(base, s1.level, t, &alpha);
-        s1_fill(vg, fx, fy, (float)reach, fh, (RGBA(S1_GREEN) & 0xffffffu) | alpha << 24);
+        s1_fill(vg, fx, fy, (float)reach, fh, (RGBA(RGB_POSITIVE) & 0xffffffu) | alpha << 24);
     }
-    s1_fill(vg, fx, fy, (float)base * 10, fh, RGBA(S1_GREEN));
+    s1_fill(vg, fx, fy, (float)base * 10, fh, RGBA(RGB_POSITIVE));
     vgcanvas_restore(vg);
     st.raw_ink = raw;
     /* the level, the bolt S1_BOLT_GAP left of it, and the word under them */
@@ -276,29 +262,24 @@ void usb_charger_in(void) {
     char words[48];
     unsigned key = cable_key();
     const char *glyph = charge_words(key, words, sizeof words);
-    charge_toast(glyph, words);
+    toast_later(glyph, words);
 }
 
 /* system.c charge_poll: Charge Limit has stopped charging on a cable (T3). */
 void charge_limited(void) {
     char words[48];
     tk_snprintf(words, sizeof words, "Charged to %d%%", CHARGE_STOP);
-    charge_toast("chargetoast_full", words);
+    toast_later("chargetoast_full", words);
 }
 
-/* usb_ui_poll, every UI loop pass: the plug-in screen a dark plug-in asked for, a weak charger's
- * start (T6), and a toast left by a tap or the cable. */
+/* usb_ui_poll, every UI loop pass: the plug-in screen a dark plug-in asked for and a weak charger's
+ * start (T6). */
 void charging_poll(void) {
     if (s1.pending) {
         s1.pending = 0;
         if (!g_backlight_status && !video_on() && !addon_game_on()) s1_on();
     }
     int weak = g_usbdet_value == 1 && charge_weak();
-    if (weak && !s1.weak_was) charge_toast("chargetoast_weak", "Charger too weak");
+    if (weak && !s1.weak_was) toast_later("chargetoast_weak", "Charger too weak");
     s1.weak_was = weak;
-    if (!chg.text[0]) return;
-    char text[sizeof chg.text];
-    tk_snprintf(text, sizeof text, "%s", chg.text);
-    chg.text[0] = 0;
-    if (g_backlight_status) toast_icon(theme_art(chg.glyph), text);
 }

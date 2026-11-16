@@ -17,16 +17,14 @@
 #define CARD_W 185
 #define CARD_H 140
 #define CARD_R 22
-#define CARD_RGB 0x1c1c1e
+#define CARD_RGB RGB_RAISED
 #define CARD_GLYPH 56
 #define CARD_GLYPH_Y (140 - CARD_GLYPH / 2)
 #define CARD_TITLE_Y 192
-#define CARD_TITLE_PX 19 /* Inter Medium 16 */
+#define CARD_TITLE_PX TYPE(16) /* Inter Medium 16 */
 #define CARD_HINT_Y 212
-#define CARD_HINT_PX 16 /* Inter Regular 13 */
+#define CARD_HINT_PX TYPE(13) /* Inter Regular 13 */
 #define CARD_LINE 22
-#define TEXT_SECONDARY_D 0xababab
-#define TEXT_SECONDARY_L 0x5c5c5c
 
 static struct {
     unsigned eat;   /* the keys whose press was dropped here: their long press and release go too */
@@ -153,6 +151,6 @@ void keylock_paint(void *w, void *canvas) {
     final_text(canvas, "inter-medium", (const unsigned *)L"Buttons Locked", &title, CARD_TITLE_PX,
                light ? 0xff000000u : 0xffffffffu);
     final_text(canvas, "inter", (const unsigned *)L"Press Center to unlock", &hint, CARD_HINT_PX,
-               0xff000000u | (light ? TEXT_SECONDARY_L : TEXT_SECONDARY_D));
+               0xff000000u | (light ? RGB_SECONDARY_L : RGB_SECONDARY));
     stock_canvas_set_fill_color(canvas, fill);
 }

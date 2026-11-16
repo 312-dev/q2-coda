@@ -674,19 +674,23 @@ def test_a_song_changed_under_the_editor_is_not_moved(editor, ui):
     assert ui.toasts == ['Could not save playlist'] and editor.table.log[-1] == 'rollback'
 
 
-def test_remove_asks_then_takes_the_song_out(editor, ui):
+def ple_answer(fw, row):
+    """Remove from Playlist's confirmation card answered (feedback.c runs it once the card has closed)."""
+    fw.fn('playlists__ple_remove_answer', None, C.c_void_p, C.c_int, C.c_int)(None, row, 0)
+
+
+def test_remove_asks_on_the_card_then_takes_the_song_out(editor, ui):
     editor.pick('Two')
     editor.pick('Remove from Playlist')
-    assert editor.rows() == ['Remove from Playlist', 'Cancel'] and editor.title() == 'Remove song?: Road Trip'
-    assert ui.nodes[editor.view()].props['_ringnav_index'] == 1  # opens on Cancel: a Centre on arrival removes nothing
-    editor.pick('Remove from Playlist')
+    assert ui.went[-1] == 'dialog/sortselect_dialog' and editor.table.songs(3) == ['One', 'Two', 'Three']
+    ple_answer(editor.fw, 1)  # Remove
     assert editor.table.songs(3) == ['One', 'Three'] and editor.rows() == ['Add Songs', 'Done', 'One', 'Three']
 
 
 def test_cancel_keeps_the_song(editor):
     editor.pick('Two')
     editor.pick('Remove from Playlist')
-    editor.pick('Cancel')
+    ple_answer(editor.fw, 0)
     assert editor.table.songs(3) == ['One', 'Two', 'Three'] and editor.rows()[0] == 'Add Songs' and not editor.table.log
 
 
@@ -696,7 +700,7 @@ def test_the_last_song_removed_leaves_the_selection_on_the_list(fw, ui, recs, st
     e.open(1, None)
     e.pick('One')
     e.pick('Remove from Playlist')
-    e.pick('Remove from Playlist')
+    ple_answer(fw, 1)
     assert e.rows() == ['Add Songs', 'Done'] and e.ple.selected == 0
 
 
@@ -704,7 +708,7 @@ def test_a_remove_that_cant_be_saved_says_so(editor, ui):
     editor.table.fail = ('delete',)
     editor.pick('One')
     editor.pick('Remove from Playlist')
-    editor.pick('Remove from Playlist')
+    ple_answer(editor.fw, 1)
     assert ui.toasts == ['Could not save playlist'] and editor.table.songs(3) == ['One', 'Two', 'Three']
 
 
@@ -1087,7 +1091,7 @@ def test_no_playlists_is_the_empty_state_under_the_rows_left(rows_page, ui, fw, 
     props = ui.nodes[art].props
     assert (props['_es_glyph'], props['_es_title'], props['_es_hint']) == ('playlist', 'No Playlists', 'Make one with New Playlist')
     free = 58 + 44 * len(p.shown())  # the status row's foot (V_BAR) and the rows shown, 44 px each
-    assert free + 120 <= 320 and props['_es_top'] == free + (320 - free - 120) // 2
+    assert free + 118 <= 320 and props['_es_top'] == free + (320 - free - 118) // 2  # the 118 px stack, no button
     fw.var('fw_ctx_p_deque_playlist', C.c_uint).value = p.deques.new([recs(name='Gym', title='Gym', disc=1, id_=1)])
     fw.fn('playlists__pl_rows', None, C.c_void_p)(p.win)  # the rows again, as a rebuild or a click has them
     assert not ui.nodes[art].visible
@@ -1826,7 +1830,7 @@ def test_oled_more_shows_ab_repeat_as_the_themes_switch(fw, ui, st, image, selec
     inset = THEMES[0]['sel_inset']
     right = 259 + (inset - 8) - 16  # the row's right column, in the row
     x, _, w, _ = ui.nodes[label].rect()
-    assert not ui.nodes[sw].visible and x + w <= right - 34
+    assert not ui.nodes[sw].visible and x + w <= right - 40
     assert ui.fn('switch_flipped') in ui.handlers(button, EVT_CLICK)  # stock flips the hidden image: the row repaints
     lcd = C.create_string_buffer(0x400)
     canvas = C.create_string_buffer(0x400)

@@ -22,7 +22,7 @@
 #define PV_ICON_X 26   /* an action glyph's left: centred in a 22 px column at the text inset */
 #define PV_ACTION_X 54 /* an action's label, after its glyph */
 #define PV_GAP 8
-#define PV_PX_15 18 /* AWTK's size for the design's 15 px */
+#define PV_PX_15 TYPE(15) /* AWTK's size for the design's 15 px */
 
 enum { PV_SHUFFLE = 1000, PV_ADD, PV_SAVE, PV_CLEAR };
 
@@ -228,8 +228,8 @@ void pv_paint(void *w, void *canvas) {
         return;
     const char *icon = widget_get_prop_str(w, PV_ICON, ""),
                *right = widget_get_prop_str(w, PV_RIGHT, "");
-    int on = pv_lit(w), light = ipod_light(), h = I(w, W_H), end = 375 - geom_val(V_RIGHT_X);
-    unsigned muted = on ? 0xffffff : light ? 0x6e6e6e : 0x858585;
+    int on = pv_lit(w), h = I(w, W_H), end = 375 - geom_val(V_RIGHT_X);
+    unsigned muted = on ? 0xffffff : tok(TOK_TERTIARY);
     void *label = widget_count_children(w) ? widget_get_child(w, 0) : (void *)0;
     char art[32];
     if (icon && *icon) {
@@ -242,7 +242,7 @@ void pv_paint(void *w, void *canvas) {
         return;
     }
     if (right && *right)
-        end -= ar_text(canvas, right, 0, PV_PX_15, muted, 1, end, h / 2, 150, 3) + PV_GAP;
+        end -= ui_text(canvas, right, 0, PV_PX_15, muted, 1, end, h / 2, 150, 3) + PV_GAP;
     if (label && I(label, W_X) + I(label, W_W) != end && end > I(label, W_X))
         widget_resize(label, end - I(label, W_X), I(label, W_H));
 }

@@ -2029,13 +2029,14 @@ def test_homes_rows_each_get_the_themes_chevron_the_selected_one_white(fw, ui, s
 # The selected row's title marquee.
 class Marquee:
     """Row row of page selected and painted, its title an hscroll_label of text_w px in a 300 px label."""
-    def __init__(self, fw, ui, st, text_w, row=3, only_focus=1):
+    def __init__(self, fw, ui, st, text_w, row=3, only_focus=1, parent_focus=0):
         self.page = Page(ui, titles(10))
         self.labels = []
         for r in self.page.rows:
             label = ui.widget('hscroll_label', r.children[0], (0, 0, 300, 20))
             label.int(O['HSCROLL_TEXT_W'], text_w)
             label.byte(O['HSCROLL_ONLY_FOCUS'], only_focus)
+            label.byte(O['HSCROLL_ONLY_FOCUS'] + 1, parent_focus)  # only_parent_focus, the char after
             self.labels.append(label)
         st('sel_w', C.c_void_p).value = self.page.view.at
         st('sel_row').value = st('marq_id').value = row
@@ -2050,6 +2051,20 @@ def test_the_selected_rows_long_title_scrolls(fw, ui, st):
     assert [a[0] for _, a in fw.calls('hscroll_label_start')] == [marquee.label.at]
     assert marquee.label.byte(O['HSCROLL_LOOP']) == 1
     assert (marquee.label.at, 0) in [a[:2] for _, a in fw.calls('hscroll_label_set_only_focus')]
+
+
+def test_a_long_title_stock_gave_its_parents_focus_flag_scrolls_too(fw, ui, st):
+    """set_hscroll_label_attribute's labels (stock's Wi-Fi networks, its settings rows) wait for their parent's focus,
+    which no row has under ringnav (only_parent_focus, 0x79): the selected row's long one scrolls as an only_focus
+    one does, its flag off while it runs and back once the selection moves on (user, 2026-11-16: Wi-Fi names
+    clipped)."""
+    marquee = Marquee(fw, ui, st, 400, only_focus=0, parent_focus=1)
+    marquee.moved(None)
+    assert [a[0] for _, a in fw.calls('hscroll_label_start')] == [marquee.label.at]
+    assert marquee.label.byte(O['HSCROLL_ONLY_FOCUS'] + 1) == 0
+    st('sel_row').value = 4
+    marquee.moved(None)
+    assert marquee.label.byte(O['HSCROLL_ONLY_FOCUS'] + 1) == 1 and marquee.label.byte(O['HSCROLL_ONLY_FOCUS']) == 0
 
 
 @pytest.mark.parametrize('text_w, only_focus', [(300 - 4, 1), (400, 0)])

@@ -16,9 +16,14 @@ INSTALLED = b'V0JYi'
 
 
 class Sw(C.Structure):
-    _fields_ = [('thread', C.c_ulong), *((n, C.c_int) for n in ('state', 'cancel', 'result', 'level', 'ready', 'frame')),
+    _fields_ = [('thread', C.c_ulong), *((n, C.c_int) for n in ('state', 'cancel', 'result', 'level', 'frame')),
                 ('timer', C.c_uint), ('size_kb', C.c_uint), ('parts', C.c_longlong),
-                *((n, C.c_void_p) for n in ('page', 'confirm', 'view', 'restart')), ('tag', C.c_char * 24)]
+                *((n, C.c_void_p) for n in ('page', 'restart')), ('tag', C.c_char * 24)]
+
+
+def carded(fw):
+    """Whether the confirmation card asked (feedback.c confirm opens stock's sortselect_dialog for it)."""
+    return any(C.string_at(a[0]) == b'dialog/sortselect_dialog' for _, a in fw.calls('navigator_to'))
 
 
 def update_tar(version='V0JZi', model='Shanling Q2', image=b'k' * 700, rootfs=b'r' * 1500, md5s=None, members=None,
@@ -168,6 +173,8 @@ def test_a_found_file_is_checked_on_a_thread_and_one_at_a_time(fw):
 
 @pytest.mark.parametrize('state, confirm', [(SW_OK, True), (SW_BAD, False), (SW_LATEST, False)])
 def test_the_checks_answer(fw, state, confirm):
+    """An update stock will take asks Install Update? on the confirmation card over the check's page; any other answer
+    is its result's page."""
     pages = opened(fw)
     fw.mock('check_updatefw_exist', lambda *_: 1)
     fw.mock('fw_pthread_create', lambda *_: 0)
@@ -177,30 +184,21 @@ def test_the_checks_answer(fw, state, confirm):
     tick = fw.fn('sw_update__sw_tick', C.c_int, C.c_void_p)
     assert tick(None) == 8 and sw.frame == 1  # still checking: the spinner's next frame
     sw.state = state
-    top = [0]
-    fw.mock('window_manager_get_top_window', lambda *_: top[0])
-    assert tick(None) == (8 if confirm else 7) and len(fw.calls('fw_pthread_join')) == 1
-    assert pages() == ['swupdate_page'] + ['swconfirm_page'] * confirm
-    assert sw.page and sw.result == (SW_CHECKING if confirm else state) and bool(sw.confirm) == confirm
-    if confirm:  # the check's page stays under Install Update? until that is on top and settled
-        assert tick(None) == 8 and sw.page and not sw.ready
-        top[0] = sw.confirm
-        assert tick(None) == 7 and not sw.page and sw.ready and len(fw.calls('fw_pthread_join')) == 1
-    assert not sw.timer
+    assert tick(None) == 7 and len(fw.calls('fw_pthread_join')) == 1 and not sw.timer
+    assert pages() == ['swupdate_page'] and carded(fw) == confirm
+    assert (sw.state == SW_ASKING) == confirm and (confirm or sw.result == state)
 
 
-def test_install_update_left_before_it_settled_takes_the_check_page_with_it(fw):
+@pytest.mark.parametrize('row, installs', [(0, False), (1, True)])
+def test_the_cards_answer_closes_the_page_and_install_runs_stocks_dialog_next(fw, row, installs):
     opened(fw)
     fw.mock('check_updatefw_exist', lambda *_: 1)
     fw.mock('fw_pthread_create', lambda *_: 0)
-    fw.mock('timer_add', lambda *_: 5)
     fw.fn('ringnav_fwupdate_tf', C.c_int)()
     sw = fw.var('sw_update__swu', Sw)
-    tick = fw.fn('sw_update__sw_tick', C.c_int, C.c_void_p)
-    sw.state = SW_OK
-    assert tick(None) == 8
-    fw.fn('sw_update__sw_gone', C.c_int, C.c_void_p, C.c_void_p)(sw.confirm, None)
-    assert tick(None) == 7 and not sw.page and not sw.timer and len(fw.calls('fw_pthread_join')) == 1
+    assert sw.page
+    fw.fn('sw_update__sw_answer', None, C.c_void_p, C.c_int, C.c_int)(None, row, 0)
+    assert not sw.page and bool(fw.calls('idle_add')) == installs
 
 
 def test_the_answer_waits_for_the_check_page_to_finish_sliding_in(fw):
@@ -214,9 +212,9 @@ def test_the_answer_waits_for_the_check_page_to_finish_sliding_in(fw):
     sw = fw.var('sw_update__swu', Sw)
     sw.state = SW_OK
     tick = fw.fn('sw_update__sw_tick', C.c_int, C.c_void_p)
-    assert tick(None) == 8 and pages() == ['swupdate_page'] and not fw.calls('fw_pthread_join')
+    assert tick(None) == 8 and pages() == ['swupdate_page'] and not fw.calls('fw_pthread_join') and not carded(fw)
     sliding[0] = 0
-    assert tick(None) == 8 and pages() == ['swupdate_page', 'swconfirm_page']  # then settles: test_the_checks_answer
+    assert tick(None) == 7 and carded(fw)
 
 
 def test_leaving_while_it_checks_cancels(fw):
@@ -236,13 +234,6 @@ def test_stocks_dialog_answers_as_a_page(fw, quit, page):
     assert fw.fn('sw_update__sw_install', C.c_int, C.c_void_p)(None) == 7
     assert C.string_at(fw.calls('navigator_to')[0][1][0]) == b'dialog/checkfw_dialog'
     assert len(pages()) == (page is not None) and (page is None or fw.var('sw_update__swu', Sw).result == page)
-
-
-def test_install_and_restart_runs_stocks_dialog_after_the_click(fw):
-    fw.fn('sw_update__sw_click', C.c_int, C.c_void_p, C.c_void_p)(None, None)
-    assert not fw.calls('idle_add')
-    fw.fn('sw_update__sw_click', C.c_int, C.c_void_p, C.c_void_p)(1, None)
-    assert len(fw.calls('idle_add')) == 1
 
 
 def test_the_restart_dialog_hides_stocks_label(fw):

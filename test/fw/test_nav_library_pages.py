@@ -240,8 +240,9 @@ def ui(fw):
 
 
 def empty_state(ui, page):
-    """The empty state shown in page (feedback.c empty_state): (glyph, title, hint, its row's caption or None), else
-    None. Its view is insensitive, so the rows beside it keep their taps."""
+    """The empty state shown in page (feedback.c empty_state): (glyph, title, hint, its button's label or None), else
+    None. Its view is insensitive, so the rows beside it keep their taps; the button's row is blank, its label the
+    painter's."""
     art = ui.lookup(page, '_empty_state', 1)
     if not art or art in ui.hidden:
         return None
@@ -250,7 +251,8 @@ def empty_state(ui, page):
     caption = None
     if row and row not in ui.hidden:
         (item,) = ui.kids[ui.kids[row][0]]
-        caption = next(ui.text[k] for k in ui.subtree(item) if ui.kind[k] == 'hscroll_label_create')
+        assert next(ui.text[k] for k in ui.subtree(item) if ui.kind[k] == 'hscroll_label_create') == ''
+        caption = ui.props[(art, '_es_row')]
     return tuple(ui.props[(art, f'_es_{k}')] for k in ('glyph', 'title', 'hint')) + (caption,)
 
 
@@ -1781,30 +1783,32 @@ def test_no_downloads_says_so(fw, ui, song):
     assert ui.rows(ui.top()) == []  # no Clear All Downloads over nothing
 
 
-def test_clear_all_asks_first_and_cancel_keeps_them(fw, ui, song):
+def td_card(fw, ui):
+    """Clear All Downloads' confirmation card (feedback.c confirm, on stock's sortselect_dialog): asked, and its body."""
+    return 'dialog/sortselect_dialog' in ui.went, C.string_at(C.addressof(fw.var('library_lists__td_body', C.c_char * 48))).decode()
+
+
+def td_answer(fw, row):
+    fw.fn('library_lists__td_answer', None, C.c_void_p, C.c_int, C.c_int)(None, row, 0)
+
+
+def test_clear_all_asks_on_the_card_and_cancel_keeps_them(fw, ui, song):
     card = Card(fw, ui, song, TIDAL_SONGS)
     call(fw, 'tidal_downloads')
     page = ui.top()
     ui.click(page, 3)
-    ui.fire('td_show')  # from a timer: the click's own list isn't rebuilt under it
-    assert ui.rows(page) == [('3 tracks', 'Keeps settings'), ('Cancel', ''), ('Remove', '')]
-    assert ui.props[(ui.view(page), '_ringnav_index')] == 1  # on Cancel
-    ui.click(page, 1)
+    assert td_card(fw, ui) == (True, '3 tracks. Settings are kept.')
+    td_answer(fw, 0)  # Cancel
     ui.fire('td_show')
     assert ui.captions(page)[-1] == 'Clear All Downloads…' and len(card.files) == 3
     assert ui.props[(ui.view(page), '_ringnav_index')] == 3  # back on Clear
 
 
-def test_return_on_the_question_is_cancel(fw, ui, song):
+def test_return_on_the_list_leaves(fw, ui, song):
     Card(fw, ui, song, TIDAL_SONGS)
     call(fw, 'tidal_downloads')
     page = ui.top()
-    ui.click(page, 3)
-    ui.fire('td_show')
-    assert ui.key(page, KEY_RETURN) == STOP and ui.backs == 0
-    ui.fire('td_show')
-    assert len(ui.rows(page)) == 4
-    assert ui.key(page, KEY_RETURN) == STOP and ui.backs == 1  # on the list it leaves
+    assert ui.key(page, KEY_RETURN) == STOP and ui.backs == 1
 
 
 def test_remove_clears_every_download(fw, ui, song):
@@ -1812,10 +1816,9 @@ def test_remove_clears_every_download(fw, ui, song):
     call(fw, 'tidal_downloads')
     page = ui.top()
     ui.click(page, 3)
+    td_answer(fw, 1)  # Remove
     ui.fire('td_show')
-    ui.click(page, 2)
-    ui.fire('td_show')
-    assert list(card.files) == ['/mnt/mmc/.tidal/.cache-size']  # Keeps settings
+    assert list(card.files) == ['/mnt/mmc/.tidal/.cache-size']  # Settings are kept
     assert empty_state(ui, page)[1] == 'No Downloads Yet'
 
 
@@ -1823,17 +1826,17 @@ def test_one_download_is_a_track(fw, ui, song):
     Card(fw, ui, song, {b'/mnt/mmc/.tidal/1-HIGH A.flac': 5})
     call(fw, 'tidal_downloads')
     ui.click(ui.top(), 1)
-    ui.fire('td_show')
-    assert ui.rows(ui.top())[0] == ('1 track', 'Keeps settings')
+    assert td_card(fw, ui)[1] == '1 track. Settings are kept.'
 
 
-def test_leaving_the_page_drops_the_question(fw, ui, lists, song):
+def test_an_answer_after_the_page_closed_rebuilds_nothing(fw, ui, lists, song):
     Card(fw, ui, song, TIDAL_SONGS)
     call(fw, 'tidal_downloads')
     page = ui.top()
     ui.click(page, 3)
     ui.close(page)
-    assert not ui.pending('td_show') and not lists('td_asking').value and not lists('td_list', C.c_void_p).value
+    td_answer(fw, 0)
+    assert not ui.pending('td_show') and not lists('td_list', C.c_void_p).value
     call(fw, 'tidal_downloads')
     assert ui.captions(ui.top())[-1] == 'Clear All Downloads…'
 
@@ -1986,49 +1989,39 @@ def erasing(fw):
     fw.mock('fw_pthread_create', lambda *_: 0)
 
 
-def test_erase_wants_a_second_press(fw, ui):
+def erase_answer(fw, row):
+    """Erase Spotify Data's confirmation card answered (navigation.c sc_erase_answer), as feedback.c runs it."""
+    fw.fn('navigation__sc_erase_answer', None, C.c_void_p, C.c_int, C.c_int)(None, row, 0)
+
+
+def test_erase_asks_on_the_card_first(fw, ui):
     erasing(fw)
     page, *_ = configuration(fw, ui)
     ui.click(page, 2)
-    assert ui.captions(page)[2] == 'Press again to erase the login and cache' and not fw.calls('fw_system')
-    ui.click(page, 2)
+    assert 'dialog/sortselect_dialog' in ui.went and not fw.calls('fw_system')  # the card, nothing erased
+    erase_answer(fw, 0)  # Cancel
+    assert ui.captions(page)[2] == 'Erase Spotify Data' and not fw.calls('fw_system')
+    erase_answer(fw, 1)  # Erase
     assert ui.captions(page)[2] == 'Erasing…' and fw.calls('fw_system')  # librespot stopped first
 
 
-def test_another_row_drops_the_first_press(fw, ui):
-    page, *_ = configuration(fw, ui)
-    ui.click(page, 2)
-    ui.click(page, 0)
-    assert ui.captions(page)[2] == 'Erase Spotify Data'
-    ui.click(page, 2)
-    assert ui.captions(page)[2] == 'Press again to erase the login and cache'
-
-
-def test_leaving_drops_the_first_press(fw, ui, st):
-    page, *_ = configuration(fw, ui)
-    ui.click(page, 2)
-    ui.close(page)
-    assert not st('sc_armed').value and not st('sc_page', C.c_void_p).value
-    page, *_ = configuration(fw, ui)
-    assert ui.captions(page)[2] == 'Erase Spotify Data'
-
-
-def test_while_erasing_spotify_s_cache_waits(fw, ui):
+def test_while_erasing_spotify_s_cache_and_erase_wait(fw, ui):
     erasing(fw)
     page, disk, *_ = configuration(fw, ui)
-    ui.click(page, 2), ui.click(page, 2)
+    erase_answer(fw, 1)
     ui.click(page, 1)
     assert ui.toasts == ['Wait for the one in progress'] and f'{SPOT_DIR}/.cache-size' not in disk.files
-    ui.click(page, 2)
+    asked = ui.went.count('dialog/sortselect_dialog')
+    ui.click(page, 2)  # no card while one runs: it says to wait
     assert ui.toasts[-1] == 'Wait for the one in progress' and ui.captions(page)[2] == 'Erasing…'
+    assert ui.went.count('dialog/sortselect_dialog') == asked
 
 
 def test_an_erase_s_end_shows_on_the_page(fw, ui):
     page, disk, *_ = configuration(fw, ui, {f'{SPOT_DIR}/.cache-size': b'1024M'})
-    ui.click(page, 2)
     del disk.files[f'{SPOT_DIR}/.cache-size']  # netupdate.c's erase took it, and calls back
     fw.fn('stream_erased', None)()
-    assert ui.captions(page)[1:3] == ['Spotify Cache: 2 GB', 'Press again to erase the login and cache']
+    assert ui.captions(page)[1:3] == ['Spotify Cache: 2 GB', 'Erase Spotify Data']
 
 
 def test_an_erase_s_end_with_the_page_gone_writes_nothing(fw, ui):
@@ -2343,8 +2336,19 @@ def test_about_shows_stock_s_version_and_the_payload_s_after_it_without_stock_s_
     fw.mock('stock_about_trampoline', lambda *_: 5)
     assert fw.fn('ringnav_about', C.c_int, C.c_void_p, C.c_void_p)(win, None) == 5
     version, beta = host.tools_build.VERSION, host.tools_build.BETA
-    assert about_rows(ui, view) == [ABOUT[0], ('FW. Version', host.tools_build.STOCK_VERSION), ('CFW. Version', f'{version} Pod' + (f' beta {beta}' if beta else '')),
+    name = host.tools_build.PRODUCT_NAME
+    assert about_rows(ui, view) == [ABOUT[0], ('FW. Version', host.tools_build.STOCK_VERSION), (name, version + (f' beta {beta}' if beta else '')),
                                     *ABOUT[2:]]
+
+
+@pytest.mark.parametrize('value, shown', [('779.72G', '779.72 GB'), ('512.5M', '512.5 MB'), ('0.0.0.0', 'Not connected'),
+                                          ('192.168.1.4', '192.168.1.4'), ('Shanling Q2', 'Shanling Q2')])
+def test_about_s_values_take_the_approved_words(fw, ui, value, shown):
+    """audit-2 #31: sizes with their unit, and no network's IP address as words."""
+    win, view = about(ui, [*ABOUT[:2], ('Capacity', value), *ABOUT[3:]])
+    fw.mock('stock_about_trampoline', lambda *_: 5)
+    fw.fn('ringnav_about', C.c_int, C.c_void_p, C.c_void_p)(win, None)
+    assert about_rows(ui, view)[3] == ('Capacity', shown)  # after the product's row
 
 
 def test_an_about_page_that_is_not_stock_s_is_left(fw, ui):
@@ -3133,11 +3137,11 @@ def test_a_streaming_service_with_no_link_is_the_empty_state_and_its_row_opens_w
     (page,) = ui.windows
     assert ui.name[page] == 'empty_page' and 'Streaming' not in ui.shown(page)  # the status row names it
     assert empty_state(ui, page) == ('cloud-slash', 'Not Connected', 'Turn on Wi-Fi to stream', 'Turn on Wi-Fi')
-    # the stack with its row (176 px) centred under the status row: the row 144 px under the stack's top
+    # the stack with its button (176 px) centred under the status row: the button 138 px under the stack's top
     top = 40 + (280 - 176) // 2
     assert ui.props[(ui.lookup(page, '_empty_state', 1), '_es_top')] == top
     row = ui.lookup(page, '_empty_row', 1)
-    assert struct.unpack_from('<4i', ui.blocks[row], 0)[1] == top + 144 and ui.kind[row] == 'list_view_create'
+    assert struct.unpack_from('<4i', ui.blocks[row], 0)[1] == top + 138 and ui.kind[row] == 'list_view_create'
     assert ui.props[(ui.kids[row][0], '_ringnav_index')] == 0  # its one row already selected
     assert call(fw, 'feedback_offline') == 1 and len(ui.windows) == 1  # pressed again: the one page
     ui.handler(ui.kids[ui.kids[row][0]][0], EVT_CLICK)()  # the row: list view, scroll view, item
