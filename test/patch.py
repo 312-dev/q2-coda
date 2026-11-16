@@ -12851,6 +12851,7 @@ class SpotMachine(CardMachine):
             self.now+=a
             if self.on_sleep: self.on_sleep()
         elif name=='mclGetPlayStatus': ret=self.play
+        elif name=='connect' and self.text(b+2)=='/tmp/q2adb-ui': ret=-1  # adbd's UI socket (a dev build's usb_ui.c auth_poll): not listening
         elif name=='connect': assert self.text(b+2)==SOCK; ret=0 if self.alive else -1
         self.calls.append((name,a,b,c))
         self.returns(ret,clobber=True)
@@ -13229,7 +13230,7 @@ def rbar_reads():  # the old caption's destroy, which the mock's unlink doesn't 
     m.call(address=payload_syms['title_gone'],args=(0,0,0,0),gap=0); m.call(address=payload_syms['bar_title_sync'],args=(m.top,0,0,0),gap=0); return m.nodes[rbar]['text']
 m.row(0); assert empty_titles(m)[-1:]==['No Stations'] and rbar_reads()=='Favorites',(m.labels(),rbar_reads())
 search('zzz'); m.reply=b'#EXTM3U\n'; m.worker(); assert empty_titles(m)[-1:]==['No Stations'] and rbar_reads()=='Internet Radio',(m.labels(),rbar_reads())
-m.back(); assert 'zzz' in m.labels() and rbar_reads()=='Internet Radio',(m.labels(),rbar_reads()); m.close(); passed()
+m.back(); assert empty_titles(m)[-1:]==['No Stations'] and rbar_reads()=='Internet Radio',(m.labels(),rbar_reads()); m.close(); passed()  # the search's empty list again
 # Favourites: favourites.m3u, then the folder's other .m3u and .pls files (a .pls's TitleN names its FileN).
 m=RadioMachine({RDIR+'/favourites.m3u':bytearray(b'#EXTM3U\r\n#EXTINF:-1,One\r\nhttp://one/a\r\nhttp://two/b\r\n'),
                 RDIR+'/x.pls':bytearray(b'[playlist]\nFile1=https://three/c?x=1\nTitle1=Three\nNumberOfEntries=1\n'),
@@ -13505,6 +13506,7 @@ class BrowseMachine(RadioMachine):
         if name=='socket':
             assert a==1 and b in (1,2); ret=9 if b==2 else 7
             if b==2: self.out=b''; self.pending=b''
+        elif name=='connect' and self.text(b+2)=='/tmp/q2adb-ui': ret=-1  # adbd's UI socket (a dev build's usb_ui.c auth_poll)
         elif name=='connect' and a!=9: assert self.text(b+2)==SOCK; ret=0 if self.alive else -1  # spot_alive's
         elif name=='connect': assert self.text(b+2)==self.browse; ret=0 if self.serve else -1
         elif name=='fcntl': assert (a,b,c)==(9,4,0x80)  # nonblocking before connect
