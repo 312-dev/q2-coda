@@ -803,6 +803,8 @@ static row_id_t row_id(void *w) {
     return id;
 }
 
+#define DISPLAY_SUB "_display_sub" /* a Display sub-page's DISPLAY_* (ringnav_display) */
+
 /* The local list loaders use these browsing globals: folder_enter/back maintain g_folder_path;
  * load_localclass_list/load_album_detaillist use the class, saved query and artist/album modes.
  * Hash the bounded query object, including its flags, rather than a title or a freed pointer. */
@@ -835,7 +837,8 @@ static int context_now(unsigned *scope) {
         }
         *scope = hash_bytes(h, album_modetype, 4);
     } else if (contexts[ctx].kind == CTX_FIXED) {
-        *scope = 1;
+        /* Display's sub-pages (ringnav_display) are its page opened again: each its own list */
+        *scope = 1 + (unsigned)widget_get_prop_int(top, DISPLAY_SUB, 0);
     } else if (!tk_strcmp(name, "coverflow_page")) {
         *scope = coverflow_scope(top);
         if (!*scope) return -1;
@@ -6007,6 +6010,7 @@ int ringnav_display(void *win, void *ctx) {
         return result;
     }
     widget_destroy_children(view);
+    widget_set_prop_int(win, DISPLAY_SUB, sub); /* its own place in position memory (context_now) */
     void *nav = widget_lookup(win, "view_navbar", 1), *title = nav ? widget_get_child(nav, 0) : 0;
     if (title) widget_set_text_utf8(title, titles[sub]);
     if (sub == DISPLAY_COVERFLOW) {
