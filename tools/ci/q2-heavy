@@ -10,7 +10,7 @@
 #   - the Windows drive (/mnt/c, where WSL's disk and crash dumps live) has 25 GB free;
 #   - on battery (AC1 offline), fewer jobs run: one under 30% charge, none under 15%; plugging the
 #     charger back in restores every slot at the next admission (Q2_HEAVY_AC and Q2_HEAVY_BATTERY
-#     name other sysfs files, for a test).
+#     name other sysfs files, and Q2_HEAVY_PSI another /proc/pressure, for a test).
 # Under 10 GB free on /mnt/c it refuses outright (exit 75), and a running job is paused (SIGSTOP) until
 # 25 GB are free again (Q2_HEAVY_DISK_START_GB and Q2_HEAVY_DISK_STOP_GB move the two marks). Starts are
 # spaced Q2_HEAVY_RAMP seconds (15) apart, so the next job's check sees the last one's memory. Each job runs
@@ -44,7 +44,7 @@ fi
 gb() { echo $(( ${1%G} )); }
 avail_gb() { awk '/^MemAvailable:/ {print int($2 / 1048576)}' /proc/meminfo; }
 disk_gb() { df --output=avail -BG /mnt/c 2>/dev/null | awk 'NR == 2 {print int($1)}'; }
-psi() { awk -v k="$2" '$1 == k {split($2, a, "="); print int(a[2])}' "/proc/pressure/$1" 2>/dev/null; }
+psi() { awk -v k="$2" '$1 == k {split($2, a, "="); print int(a[2])}' "${Q2_HEAVY_PSI:-/proc/pressure}/$1" 2>/dev/null; }
 
 # How many heavy jobs may run at once on this power: all slots on the charger (or with no battery to read),
 # one on battery under 30%, none under 15%.
