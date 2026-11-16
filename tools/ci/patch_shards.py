@@ -38,6 +38,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import resource
 import subprocess
 import sys
@@ -665,6 +666,22 @@ def main():
     return status
 
 
+def join_traces(traces):
+    """The shards' traces as one serial trace: passed() writes `== N` with its shard's own count, so each
+    shard's N is moved on by the checks of the shards before it."""
+    out, before = [], 0
+    for trace in traces:
+        last = 0
+        for line in trace.splitlines(keepends=True):
+            m = re.fullmatch(rb'== (\d+)(\n?)', line)
+            if m:
+                last = int(m[1])
+                line = b'== %d' % (last + before) + m[2]
+            out.append(line)
+        before += last
+    return b''.join(out)
+
+
 def verify(test, build, python, trace_dir, n):
     """The serial run under Q2_TRACE; its trace must equal the shards' traces in order."""
     serial = pathlib.Path(trace_dir)/'serial.trace'
@@ -675,7 +692,7 @@ def verify(test, build, python, trace_dir, n):
     last = p.stdout.strip().splitlines()[-1] if p.stdout.strip() else ''
     print(f'serial run: exit {p.returncode}, {time.perf_counter() - t:.0f} s: {last}')
     parts = [pathlib.Path(trace_dir)/f'{k}.trace' for k in range(n)]
-    joined = b''.join(f.read_bytes() for f in parts if f.exists())
+    joined = join_traces([f.read_bytes() for f in parts if f.exists()])
     expected = serial.read_bytes()
     if p.returncode:  # a serial run stops at its failure: compare up to there
         joined = joined[:len(expected)]
