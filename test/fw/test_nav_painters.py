@@ -1346,9 +1346,13 @@ class Confirm:
         return self.canvas
 
 
-@pytest.mark.parametrize('prompt, verb', [('Restart?', 'Restart'), ('Shut Down?', 'Shut Down')])
-def test_oleds_power_confirms_say_their_verb(fw, st, prompt, verb):
-    """Power's Restart and Shut Down rows (power_rows.c) as OLED's dialog page: Cancel, then the verb, never OK."""
+@pytest.mark.parametrize('prompt, title, verb', [('Restart?', 'Restart?', 'Restart'), ('Shut Down?', 'Shut Down?', 'Shut Down'),
+                                                  ('Line Out sets max volume,continue?', 'Use Line Out?', 'Use Line Out'),
+                                                  ('Delete Record?', 'Forget This Network?', 'Forget')])
+def test_oleds_confirms_are_the_card_with_cancel_and_their_verb(fw, st, prompt, title, verb):
+    """Stock's confirm pop-up as the confirmation card (feedback.c feedback_confirm_dress): the card at x 42, 291 wide,
+    the prompt named as the design writes it, Cancel and then the verb painted on the cells, never OK; stock's own
+    prompt hidden and the cells' words cleared."""
     theme(fw)
     ui = Ui(fw)
     confirm = Confirm(fw, ui, [prompt])
@@ -1358,16 +1362,18 @@ def test_oleds_power_confirms_say_their_verb(fw, st, prompt, verb):
         C.memmove(out, words, len(words))
         return 0
     fw.mock('widget_get_text_utf8', utf8)
-    confirm.paint()
-    assert (confirm.ui.text(confirm.cancel), confirm.ui.text(confirm.enter)) == ('Cancel', verb)
-    assert not confirm.lines[0].visible  # the question is the status row's title
+    texts = [t[0] for t in confirm.paint().texts]
+    assert texts[0] == title and texts[-2:] == ['Cancel', verb]
+    assert any(b[0][0] == 42 and b[0][2] == 291 for b in confirm.canvas.boxes)
+    assert not confirm.lines[0].visible and confirm.ui.text(confirm.enter) == ''
+    assert confirm.cancel.box[0] == 42 + 8 - THEMES[OLED]['sel_inset']  # the bar 8 px in from the card
 
 
-@pytest.mark.parametrize('prompt, note', [('Reset Settings Only', 'Music, playlists and ratings are kept'),
+@pytest.mark.parametrize('prompt, body', [('Reset Settings Only', 'Music, playlists and ratings are kept.'),
                                           ('Full Factory Reset', None)])
-def test_oleds_reset_settings_confirm_says_what_it_keeps(fw, st, prompt, note):
-    """Reset Settings Only's confirm (audit2 J1) notes under its rows what a settings reset leaves alone; the
-    other resets, which take more, have no note."""
+def test_oleds_reset_settings_confirm_says_what_it_keeps(fw, st, prompt, body):
+    """Reset Settings Only's card (audit2 J1) says in its body what a settings reset leaves alone; the other resets,
+    which take more, have none; Reset is red, after the gap, as a destructive verb's."""
     theme(fw)
     ui = Ui(fw)
     confirm = Confirm(fw, ui, [prompt])
@@ -1377,9 +1383,12 @@ def test_oleds_reset_settings_confirm_says_what_it_keeps(fw, st, prompt, note):
         C.memmove(out, words, len(words))
         return 0
     fw.mock('widget_get_text_utf8', utf8)
-    confirm.paint()
-    shown = [ui.text(n) for n in ui.nodes.values() if n.name == '_empty' and n.visible]
-    assert shown == ([note] if note else [])
+    confirm.canvas = Canvas(fw, char_w=5)  # the body fits its 251 px
+    texts = confirm.paint().texts
+    assert [t[0] for t in texts] == [p for p in (prompt.replace(' Only', '') + '?' if 'Settings' in prompt else prompt + '?',
+                                                 body, 'Cancel', 'Reset') if p]
+    assert texts[-1][2] == rgba(0xff453a)  # red
+    assert confirm.enter.box[1] - confirm.cancel.box[1] == 32 + 12
 
 
 # No list has dividers (user, 2026-11-15): two-line rows, a card app's page_list's and a table's, stand on space alone.

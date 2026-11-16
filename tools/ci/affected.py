@@ -1,0 +1,287 @@
+#!/usr/bin/env python3
+"""Which tests a feature branch's changes need, from the files it changed against a base.
+
+    python3 tools/ci/affected.py                      # changes against release/p31's merge base, as a plan
+    python3 tools/ci/affected.py --base main --json   # the same plan as JSON
+    python3 tools/ci/affected.py --run BUILD          # and run it (patch.py through tools/ci/patch_shards.py)
+    python3 tools/ci/affected.py --all --run BUILD    # everything: what an integration branch runs
+
+A feature branch runs what its files map to; an integration branch (release/*, main) runs everything, as
+does any branch whose changes include a file no rule knows (`RULES`: an unknown file means all). The
+mapping is conservative: a change to the payload (patch/, a build input in tools/, assets/) runs all of
+test/patch.py, which executes the payload as one program. What gets narrowed:
+
+- test/patch.py edits run only the tests (passed() to passed()) holding a changed statement, plus every
+  test that names a changed def or class, through patch_shards.py --lines;
+- patch/X.c runs the test/fw files that name X.c, its X__ statics, or a function X.c defines, and the
+  end-to-end files; a source no fw file names runs all of test/fw;
+- tools/X.py runs test/unit/test_X.py when it exists (else all of test/unit), and, for a build input,
+  test/patch.py and test/fw;
+- a test file runs itself.
+
+Documented in docs/building.md#fast-test-runs; tools/ci/test_ci.py checks the rules.
+"""
+import argparse
+import ast
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT/'tools'/'ci'))
+import patch_shards  # noqa: E402
+
+ALL = 'all'
+# tools/ modules the build or the fw host build imports: a change reaches the payload or the fw library.
+BUILD_INPUTS = {'build', 'ipod', 'theme', 'art', 'peq', 'flac', 'aic', 'rotator', 'pwm', 'mcu_park', 'module_elf',
+                'splash', 'player', 'thirdparty', 'signing'}
+INTEGRATION = re.compile(r'^(release/|integrate/|main$|master$)')
+
+
+class Plan:
+    """What to run: each suite is ALL, a sorted list of its parts, or empty (nothing)."""
+    def __init__(self):
+        self.unit: set | str = set()
+        self.fw: set | str = set()
+        self.patch: set | str = set()
+        self.other: set = set()
+        self.why: list = []
+
+    def everything(self, why):
+        self.unit, self.fw, self.patch = ALL, ALL, ALL
+        self.other.add('test/build.py')
+        self.why.append(why)
+
+    def add(self, suite, parts, why):
+        current = getattr(self, suite)
+        if current != ALL:
+            setattr(self, suite, ALL if parts == ALL else current | set(parts))
+        self.why.append(why)
+
+    def summary(self):
+        d = self.as_dict()
+        parts = [f'{k} {"all" if d[k] == ALL else len(d[k])}' for k in ('unit', 'fw', 'patch') if d[k]]
+        return ', '.join(parts + d['other']) or 'nothing'
+
+    def to_json(self):
+        return json.dumps(self.as_dict())
+
+    @classmethod
+    def from_json(cls, text):
+        p, d = cls(), json.loads(text)
+        for k in ('unit', 'fw', 'patch'):
+            setattr(p, k, ALL if d[k] == ALL else set(d[k]))
+        p.other, p.why = set(d['other']), d['why']
+        return p
+
+    def as_dict(self):
+        def show(v):
+            return v if v == ALL else sorted(v)
+        return {'unit': show(self.unit), 'fw': show(self.fw), 'patch': show(self.patch),
+                'other': sorted(self.other), 'why': self.why}
+
+
+def fw_files_for(source, root=ROOT):
+    """The test/fw files that exercise patch/<source>: named for it, or naming the file, its statics or a
+    function it defines. ALL when none does."""
+    stem = pathlib.PurePath(source).stem
+    text = (root/'patch'/source).read_text(errors='replace') if (root/'patch'/source).exists() else ''
+    defined = {m for m in re.findall(r'^[A-Za-z_][\w \t\*]*?\b([A-Za-z_]\w{4,})\s*\([^;{]*\)\s*\{', text, re.M)}
+    hits = set()
+    for path in sorted((root/'test/fw').glob('test_*.py')):
+        body = path.read_text(errors='replace')
+        if (path.name == f'test_{stem}.py' or f'{stem}.c' in body or f'{stem}__' in body or
+                any(f"'{d}'" in body or f'"{d}"' in body for d in defined)):
+            hits.add(path.name)
+    if not hits:
+        return ALL
+    return hits | {p.name for p in (root/'test/fw').glob('test_e2e_*.py')}
+
+
+def patch_tests_for(changed_lines, source):
+    """test/patch.py line ranges (A:B) holding the tests a change to those lines (of the new file) touches."""
+    stmts = patch_shards.analyse(source)
+    ends = [s.index for s in stmts if isinstance(s.node, ast.Expr) and ast.unparse(s.node) == 'passed()']
+    touched = [s for s in stmts if any(s.line <= n <= s.end for n in changed_lines)]
+    if not touched:
+        return set()
+    bound = set().union(*(s.kills for s in touched if s.definition))
+    users = {s.index for s in stmts if not s.definition and s.loads & bound}
+    want = {s.index for s in touched if not s.definition} | users
+    if len(want) > len(stmts) // 3:
+        return ALL
+    ranges = set()
+    for i in want:  # the whole test around it: from the previous passed() to the next
+        before = [e for e in ends if e < i]
+        after = [e for e in ends if e >= i]
+        a = before[-1] + 1 if before else 0
+        b = after[0] if after else len(stmts) - 1
+        ranges.add((stmts[a].line, stmts[b].end))
+    merged = []
+    for a, b in sorted(ranges):
+        if merged and a <= merged[-1][1] + 1:
+            merged[-1] = (merged[-1][0], max(b, merged[-1][1]))
+        else:
+            merged.append((a, b))
+    return {f'{a}:{b}' for a, b in merged}
+
+
+def plan_for(changes, root=ROOT, patch_source=None):
+    """A Plan for changes: {path: set of changed line numbers in the new file (empty if deleted or unknown)}."""
+    p = Plan()
+    for path, lines in sorted(changes.items()):
+        parts = pathlib.PurePath(path).parts
+        name, stem, suffix = parts[-1], pathlib.PurePath(path).stem, pathlib.PurePath(path).suffix
+        if path == 'test/patch.py':
+            if patch_source is None:
+                patch_source = (root/path).read_text()
+            if not lines:
+                p.add('patch', ALL, f'{path}: changed, lines unknown')
+            else:
+                ranges = patch_tests_for(lines, patch_source)
+                p.add('patch', ranges, f'{path}: the tests on lines {", ".join(sorted(ranges)) if ranges != ALL else "(most)"}')
+        elif parts[0] == 'patch':
+            p.add('patch', ALL, f'{path}: the payload')
+            fw = fw_files_for(name, root) if suffix == '.c' and len(parts) == 2 else ALL
+            p.add('fw', fw, f'{path}: test/fw ' + ('all' if fw == ALL else ', '.join(sorted(fw))))
+            p.other.add('test/build.py')
+        elif parts[0] == 'tools' and len(parts) == 2:
+            unit = root/'test/unit'/f'test_{stem}.py'
+            p.add('unit', {unit.name} if unit.exists() else ALL, f'{path}: its unit tests')
+            if stem in BUILD_INPUTS or suffix in ('.c', '.h', '.S', '.tsv', '.patch'):
+                p.add('patch', ALL, f'{path}: a build input')
+                p.add('fw', ALL, f'{path}: a build input (test/fw builds from tools/ lists)')
+                p.other.add('test/build.py')
+        elif parts[:2] == ('tools', 'ci'):
+            p.other.add('tools/ci/test_ci.py')
+            p.why.append(f'{path}: the CI tools\' own tests')
+        elif parts[0] == 'assets':
+            p.add('patch', ALL, f'{path}: an asset the build rewrites')
+            p.add('fw', ALL, f'{path}: an asset the fw build reads (themes)')
+            p.add('unit', ALL, f'{path}: tools/ tests read the assets')
+        elif parts[:2] == ('test', 'fw'):
+            if name.startswith('test_'):
+                p.add('fw', {name}, f'{path}: itself')
+            else:
+                p.add('fw', ALL, f'{path}: fw infrastructure')
+        elif parts[:2] == ('test', 'unit'):
+            if name.startswith('test_'):
+                p.add('unit', {name}, f'{path}: itself')
+            else:
+                p.add('unit', ALL, f'{path}: unit infrastructure')
+        elif parts[0] == 'test' and len(parts) == 2 and suffix in ('.py', '.sh'):
+            p.other.add(path)
+            p.why.append(f'{path}: itself')
+        elif parts[:2] == ('test', 'player') or parts[0] == 'player':
+            p.other.add('test/player/run.py')
+            p.why.append(f'{path}: the new player')
+        elif parts[:2] == ('docs', 'manual'):
+            p.other.add('test/build.py')
+            p.why.append(f'{path}: packaged in the build')
+        elif suffix == '.md' or parts[0] == 'docs':
+            p.add('unit', {'test_docs.py'}, f'{path}: doc anchors')
+        elif name in ('.gitattributes', '.gitignore', 'LICENSE', 'CODE_OF_CONDUCT.md') or parts[0] == '.github':
+            p.why.append(f'{path}: no test')
+        else:
+            p.everything(f'{path}: no rule, so everything')
+    return p
+
+
+def changed(base, head='HEAD', root=ROOT):
+    """{path: changed line numbers in head} between base's merge base with head and head, plus the work tree."""
+    merge_base = subprocess.run(['git', '-C', str(root), 'merge-base', base, head], capture_output=True, text=True,
+                                check=True).stdout.strip()
+    diff = subprocess.run(['git', '-C', str(root), 'diff', '-U0', '--no-color', '--no-renames', merge_base],
+                          capture_output=True, text=True, check=True).stdout
+    out = {}
+    path = None
+    for line in diff.splitlines():
+        if line.startswith('+++ '):
+            path = None if line[4:] == '/dev/null' else line[6:]
+            if path:
+                out.setdefault(path, set())
+        elif line.startswith('--- ') and line[4:] != '/dev/null':
+            out.setdefault(line[6:], set())
+        elif line.startswith('@@') and path:
+            m = re.match(r'@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@', line)
+            if m:
+                start, count = int(m[1]), int(m[2] if m[2] is not None else 1)
+                out[path] |= set(range(start, start + max(count, 1)))  # a pure deletion marks the line after it
+    untracked = subprocess.run(['git', '-C', str(root), 'ls-files', '--others', '--exclude-standard'],
+                               capture_output=True, text=True, check=True).stdout.split()
+    for path in untracked:
+        out.setdefault(path, set())
+    return out
+
+
+def run(plan, build, python):
+    """Run the plan; returns the number of suites that failed."""
+    failed = 0
+    q2heavy = os.environ.get('Q2_HEAVY', str(pathlib.Path.home()/'.local/bin/q2-heavy'))
+    heavy = [q2heavy] if pathlib.Path(q2heavy).exists() else []
+
+    def go(name, cmd, is_heavy=False):
+        nonlocal failed
+        print(f'== {name}: {" ".join(cmd)}', flush=True)
+        rc = subprocess.run((heavy if is_heavy else []) + cmd, cwd=ROOT).returncode
+        print(f'== {name}: {"ok" if not rc else f"FAILED (exit {rc})"}', flush=True)
+        failed += bool(rc)
+
+    d = plan.as_dict()
+    if d['unit']:
+        go('unit', [python, '-m', 'pytest', '-q', '-p', 'no:cacheprovider',
+                    *(['test/unit'] if d['unit'] == ALL else [f'test/unit/{f}' for f in d['unit']])])
+    if d['fw']:
+        go('fw', [python, str(ROOT/'tools/ci/fw.py'), *([] if d['fw'] == ALL else [f'test/fw/{f}' for f in d['fw']])])
+    if d['patch'] and build:
+        go('patch', [python, str(ROOT/'tools/ci/patch_shards.py'), build,
+                     *([] if d['patch'] == ALL else ['--lines', ','.join(d['patch'])])])
+    for other in d['other']:
+        if other == 'tools/ci/test_ci.py':
+            go(other, [python, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', other])
+        elif other == 'test/build.py':
+            go(other, [python, other] + (['--build', build] if build else []))
+        elif other.endswith('.py') and build:
+            go(other, [python, other, build], is_heavy=True)
+        else:
+            print(f'== {other}: run it by hand (docs/building.md#tests says what it needs)')
+    return failed
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--base', default='release/p31', help='what the branch is compared with (default: release/p31)')
+    ap.add_argument('--all', action='store_true', help='everything, as an integration branch runs')
+    ap.add_argument('--json', action='store_true')
+    ap.add_argument('--run', metavar='BUILD', nargs='?', const='', help='run the plan; BUILD for the suites that need one')
+    ap.add_argument('--python', default=sys.executable)
+    ap.add_argument('--plan-json', metavar='FILE', help='take the plan from FILE (- for stdin), as merge_train.py hands it')
+    args = ap.parse_args()
+    branch = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', '--abbrev-ref', 'HEAD'], capture_output=True,
+                            text=True).stdout.strip()
+    if args.plan_json:
+        plan = Plan.from_json(sys.stdin.read() if args.plan_json == '-' else pathlib.Path(args.plan_json).read_text())
+    elif args.all or INTEGRATION.match(branch):
+        plan = Plan()
+        plan.everything('--all' if args.all else f'{branch} is an integration branch: everything')
+    else:
+        plan = plan_for(changed(args.base))
+    d = plan.as_dict()
+    if args.json:
+        print(json.dumps(d, indent=1))
+    else:
+        for suite in ('unit', 'fw', 'patch', 'other'):
+            v = d[suite]
+            print(f'{suite:6} {"all" if v == ALL else ", ".join(v) if v else "-"}')
+        for why in d['why']:
+            print(f'  {why}')
+    if args.run is not None:
+        return 1 if run(plan, args.run or None, args.python) else 0
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

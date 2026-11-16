@@ -5182,7 +5182,6 @@ int ringnav_paint_bg(void *w, void *canvas) {
     grey_rows(w); /* first: paint_songs reserves the marks of the rows it greys */
     paint_songs(w, canvas);
     paint_modal_rows(w, canvas);
-    feedback_confirm_switch(w, canvas);
     confirm_rows_paint(w, canvas);
     feedback_switch_bar(w, canvas);
     feedback_scan_bar(w, canvas);

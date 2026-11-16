@@ -561,20 +561,16 @@ Shown for a moment after a mode change (Shuffle, Repeat).
 
 ### Dialogs and toasts
 
-- A dialog is a list: its question as the page title, its answers as rows, the selection bar
-  on the default answer. No boxes, no shadows.
-- A confirm (stock's `confirminfo_dialog`: Shut Down, Restart, the three Resets, Delete Song, Delete
-  Playlist and the rest) is that dialog: the question in the status row in sentence case, naming
-  the object where it can ("Delete playlist “a”?"), then **Cancel**, selected when it opens, and
-  the verb that says what the other does ("Shut Down", "Reset", "Delete"), never "OK". Delete
-  Song's "Also delete source file" is a third row with a switch on the right column.
-  A confirm whose answer leaves things alone says which under its rows, as iOS's reset alert does,
-  in the [empty note](#empty-and-offline)'s form: Reset Settings Only asks "Reset settings?" over
-  "Music, playlists and ratings are kept".
-- A confirm may end with a **footer**: why it asks and where the setting lives, in 13 px Text
-  Tertiary lines 17 px apart, 8 px under the last row, at the rows' text column, never selected
-  (`feedback_confirm_foot`). Streaming Songs' two asks have one: "Show streaming songs?" (Cancel, Turn
-  On) and "Hide streaming songs?" (Cancel, Turn Off).
+- A question is the [confirmation card](#confirmation-card) over the page that asked. Stock's confirm
+  (`confirminfo_dialog`: Shut Down, Restart, the three Resets, Delete Song, Delete File, Unpair, the Wi-Fi
+  network's Forget and Disconnect, Line Out and the rest) is drawn as the card with no change to its callers
+  (`feedback.c` `feedback_confirm_dress`): its prompt named as the design writes it ("Forget This Network?" for
+  stock's "Delete Record?", "Use Line Out?" for its "Line Out sets max volume,continue?"), **Cancel** first and
+  selected when it opens, then the verb ("Shut Down", "Reset", "Delete"), never "OK"; a verb that loses something
+  (Delete, Reset, Forget, Unpair, Remove, Clear) red after the gap. Delete Song's "Also delete source file" is the
+  card's switch row. What the answer leaves alone, or why it asks (a caller's `feedback_confirm_foot`: Streaming
+  Songs' "Show streaming songs?" and "Hide streaming songs?"), is the body: Reset Settings Only asks "Reset
+  Settings?" over "Music, playlists and ratings are kept."
 - A toast is one line of 16 px Text Primary on a `#1C1C1E` pill, 12 px corners, 32 px tall,
   as wide as its text and 16 px each side, centred on y 252 (y 236 to 268), above the bottom
   glass curve. It is the only raised surface in the theme. The page stays in sight round it,
@@ -1204,6 +1200,9 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   (`catalogue.c` `catalogue_row_mark`).
 - The toast, the confirm as a dialog page and the empty note (`patch/feedback.c`), and the confirmation after a shuffle.
 - The confirmation card (`patch/feedback.c` `confirm`, [Confirmation card](#confirmation-card)).
+- One mode page painter for USB's pages, a card app's sign-in steps, SD Card Update and Bluetooth's receiver
+  (`patch/feedback.c` `mode_page_paint`, `mode_page_t` in `patch/ui_kit.h`). The plug-in screen keeps its own
+  approved layout ([Plug-in screen](#plug-in-screen)).
 
 Still to build:
 

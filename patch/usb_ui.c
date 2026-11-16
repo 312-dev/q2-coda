@@ -47,22 +47,6 @@ enum { USB_ASK, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_CHOICES };
 #define USB_CAP_PX TYPE(15) /* Inter Regular 15 */
 #define USB_CAP_RGB RGB_CAPTION_ON_ACCENT
 
-/* A mode page (U2-U6): the stack, circle, title, line and the optional Stop pill, centred as one
- * between the status row's foot (MODE_TOP) and the screen's bottom. */
-#define MODE_TOP 40
-#define MODE_STACK 158
-#define MODE_STACK_PILL 204
-#define MODE_TITLE_Y 120
-#define MODE_TITLE_PX TYPE(22) /* Inter Medium 22 */
-#define MODE_LINE_Y 148
-#define MODE_LINE_PX TYPE(15) /* Inter Regular 15 */
-#define MODE_PILL_Y 172
-#define MODE_PILL_H 32
-#define MODE_PILL_PAD 22
-#define MODE_PILL_PX TYPE(17) /* Inter Medium 17 */
-#define MODE_PILL_RGB RGB_RAISED_2
-#define MODE_TEXT_LINE 32
-
 /* The ADB prompt (U5) under its title: the key's lines, then Cancel, Allow, the switch and the note. */
 #define AUTH_SOCKET "/tmp/q2adb-ui" /* tools/adbd.patch adb_auth_client.c ADB_UI_SOCKET */
 #define AUTH_KEYS "/mnt/data/adb_keys"
@@ -306,41 +290,6 @@ int usb_ui_key(void *top, unsigned key) {
     return 1;
 }
 
-static void usb_text(void *canvas, const char *s, int x, int w, int y, int align, const char *face, int px,
-                     unsigned rgb) {
-    unsigned buf[64], n = ar_wide(s, buf, 64);
-    sp_text(canvas, buf, n, x, w, y, align, face, px, RGBA(rgb));
-}
-static int usb_measure(void *canvas, const char *s, const char *face, int px) {
-    unsigned buf[64], n = ar_wide(s, buf, 64);
-    canvas_set_font(canvas, face, (unsigned)px);
-    return (int)(canvas_measure_text(canvas, buf, n) + 0.5f);
-}
-
-/* A mode page in w's coordinates (dy its y on screen): m's glyph on its solid circle (none for
- * MODE_BARE: a spinner), the title, the line and the optional pill. Returns the stack's top in w's
- * coordinates. Shared with sw_update.c. */
-int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
-    const char *pill = m->pill;
-    int stack = pill ? MODE_STACK_PILL : MODE_STACK, px = m->glyph_px ? m->glyph_px : MODE_GLYPH;
-    int top = MODE_TOP + (320 - MODE_TOP - stack) / 2 - dy, cx = 375 / 2;
-    rect_t circle = { cx - MODE_R, top, 2 * MODE_R, 2 * MODE_R };
-    if (m->ring != MODE_BARE) fill_box(canvas, &circle, RGBA(m->ring), MODE_R);
-    paint_art(w, canvas, theme_art(m->glyph), cx - px / 2, top + MODE_R - px / 2);
-    usb_text(canvas, m->title, 0, 375, top + MODE_TITLE_Y, 1, "inter-medium", MODE_TITLE_PX,
-             tok(TOK_PRIMARY));
-    usb_text(canvas, m->line, 0, 375, top + MODE_LINE_Y, 1, "inter", MODE_LINE_PX,
-             tok(TOK_SECONDARY));
-    if (pill) {
-        int pw = usb_measure(canvas, pill, "inter-medium", MODE_PILL_PX) + 2 * MODE_PILL_PAD;
-        rect_t r = { cx - pw / 2, top + MODE_PILL_Y, pw, MODE_PILL_H };
-        fill_box(canvas, &r, RGBA(tok(TOK_RAISED_2)), MODE_PILL_H / 2);
-        usb_text(canvas, pill, r.x, r.w, r.y + MODE_PILL_H / 2, 1, "inter-medium", MODE_PILL_PX,
-                 tok(TOK_PRIMARY));
-    }
-    return top;
-}
-
 /* A page opened from a poll, not from a key: once it is on top and settled, the wheel's list is
  * loaded on it (ringnav_select), so the first Centre presses its row. */
 static void usb_ready(void *page, void *view, int *ready, int rows) {
@@ -386,8 +335,8 @@ void usb_ui_paint(void *w, void *canvas) {
             paint_art(w, canvas, theme_art(glyph), USB_ICON_X - USB_ICON / 2 - I(canvas, CANVAS_X),
                       USB_ROW / 2 - USB_ICON / 2);
             if (sel)
-                usb_text(canvas, usb_caps[i], USB_TEXT_X - I(canvas, CANVAS_X), 375 - USB_TEXT_X, USB_CAP_Y, 2,
-                         "inter", USB_CAP_PX, USB_CAP_RGB);
+                ui_line(canvas, usb_caps[i], USB_TEXT_X - I(canvas, CANVAS_X), 375 - USB_TEXT_X,
+                        USB_CAP_Y, 2, "inter", USB_CAP_PX, USB_CAP_RGB);
         }
     } else if (w == u.auth) {
         if (u.auth_view) usb_ready(u.auth, u.auth_view, &u.auth_ready, 3);
@@ -520,13 +469,12 @@ static void usb_auth_paint(void *w, void *canvas) {
     int dy = I(w, W_Y), x = geom_val(V_TEXT_X);
     void *list = u.auth_view ? P(u.auth_view, W_PARENT) : (void *)0;
     int top = list ? I(list, W_Y) - AUTH_HEAD : 58 - dy;
-    usb_text(canvas, "This computer's key:", x, 375 - 2 * x, top + 12, 2, "inter", MODE_LINE_PX,
-             tok(TOK_SECONDARY));
-    usb_text(canvas, u.fp, x, 375 - 2 * x, top + 34, 2, "inter-medium", MODE_PILL_PX,
-             tok(TOK_PRIMARY));
+    ui_line(canvas, "This computer's key:", x, 375 - 2 * x, top + 12, 2, "inter", TYPE(15),
+            tok(TOK_SECONDARY));
+    ui_line(canvas, u.fp, x, 375 - 2 * x, top + 34, 2, "inter-medium", TYPE(17), tok(TOK_PRIMARY));
     if (list)
-        usb_text(canvas, "Gives full control of the Q2.", x, 375 - 2 * x,
-                 I(list, W_Y) + I(list, W_H) + 20, 2, "inter", AUTH_NOTE_PX, tok(TOK_TERTIARY));
+        ui_line(canvas, "Gives full control of the Q2.", x, 375 - 2 * x,
+                I(list, W_Y) + I(list, W_H) + 20, 2, "inter", AUTH_NOTE_PX, tok(TOK_TERTIARY));
 }
 
 /* adbd's UI socket, connected once a second until it is there, and its questions. */
