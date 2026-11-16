@@ -1895,6 +1895,30 @@ def test_pulled_down_the_page_shows_no_ring(fw, world):
     assert boxes(control_center(fw, world)) == [(32, 43, 46, 46)]  # Wi-Fi's
 
 
+def landed(fw, world, t):
+    """Control Center painted t ms after it came to rest open: each rounded box with the canvas's y offset then."""
+    now = [100000 + t]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    theme(fw)
+    win, _, _ = quick_window(world)
+    world[win].props.update(_cc_landed=100001)
+    canvas = Canvas(fw)
+    drawn = []
+    fw.mock('canvas_fill_rounded_rect', lambda c, r, bg, color, radius, *_: drawn.append(
+        (rect(r), C.c_uint.from_address(color).value, struct.unpack_from('<i', canvas.raw, O['CANVAS_Y'])[0])))
+    paint_bg(fw, win, canvas)
+    assert struct.unpack_from('<i', canvas.raw, O['CANVAS_Y'])[0] == 0  # given back
+    return drawn
+
+
+@pytest.mark.parametrize('t, dy', [(0, 0), (50, 8), (140, 0), (190, -2), (279, 0), (280, 0), (5000, 0)])
+def test_landing_open_the_blocks_overshoot_8_px_and_settle_by_280_ms(fw, world, t, dy):
+    """The landing's spring (cc_springs): every block, slider and tile drawn dy lower (the canvas's offset)."""
+    drawn = landed(fw, world, t)
+    blocks = [d for d in drawn if d[0] == (20, 38, 138, 124)]
+    assert blocks and {y for _, _, y in drawn} == {dy}
+
+
 def test_the_sliders_fill_to_their_eased_levels(fw, world):
     """Control Center's sliders draw their bars' eased levels (levels.c), as Now Playing's volume bar does: the volume
     at 100 eased to 50, the brightness at 50 eased to 25."""

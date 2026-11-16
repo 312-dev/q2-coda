@@ -4,6 +4,7 @@
   - Control Center (OLED): the white outline that shows which control the wheel is on appears only once you turn the wheel, not when you pull the page down or touch it, and goes after 5 seconds without a turn or press; the next turn brings it back where it was.
   - Control Center (OLED): the Volume slider follows the wheel as fast as Now Playing's volume does, a little at a time when you turn slowly and quickly on a fast spin, and its bar glides to the new level the same way.
   - Brightness: turning the wheel sets the brightness as quickly as the volume, in Control Center and on Settings > Display > Brightness alike, and the bar glides to the new level.
+  - Control Center (OLED): pulled down, the page settles with a small bounce as it lands.
   - Settings (OLED): the Settings list reached from Home ends like every list: Battery peeks through the fade under Controls instead of hiding until you scroll, and the highlighted row's lean as you turn the wheel is no longer cut off at the top or bottom of a list.
   - Lists (OLED): a list scrolled to its last row keeps the space under it after you open that row and press Return; the last row no longer sits on the screen's bottom edge.
   - SyncLink, Shanling's phone remote, is gone from Settings and stays off.

@@ -2415,6 +2415,40 @@ def test_the_brightness_page_s_wheel_keeps_the_ends(fw, keys, value, key, want):
     assert keys(key) == STOP and slider.ints[b'value'] == want
 
 
+def cc_opened(fw, ui):
+    """Control Center laid out (cc_open) over the window cc_window gives: its clear buttons by stop."""
+    top, slider = cc_window(fw, ui)
+    top.add(W(ui, 'view', 'view_backlight')).add(slider)
+    buttons = []
+    fw.mock('button_create', lambda win, x, y, w, h, *_: buttons.append(ui.by[win].add(W(ui, 'button', x=x, y=y, w=w, h=h)))
+            or buttons[-1].p)
+    fw.fn('cc_open', None, C.c_void_p)(top.p)
+    stops = [i for i in range(2, CC_STOPS + 3) if i != CC_BRIGHT]  # CC_AIRPLAY to the transport's Next
+    return top, dict(zip(stops, buttons))
+
+
+def test_the_landing_waits_for_rest_then_springs_for_280_ms(fw, keys):
+    """cc_land, from the page's open: nothing while stock slides it (state 1, or its slide timer running); at rest
+    open the landing starts and the blocks' band is drawn again every pass until CC_SPRING_MS has gone."""
+    timers = WidgetTimers(fw)
+    ui = Ui(fw)
+    top, _ = cc_opened(fw, ui)
+    land = [i for i, (_, w, ms) in enumerate(timers.added) if w == top.p and ms == O['VOL_POLL_MS']]
+    assert len(land) == 1
+    state = fw.var('fw_ctx_g_dropdown_menu_state', C.c_int)
+    state.value = 1
+    assert timers.fire(land[0]) == 8 and b'_cc_landed' not in top.ints
+    state.value, top.ints[b'timer_idex'] = 3, 4
+    assert timers.fire(land[0]) == 8 and b'_cc_landed' not in top.ints
+    top.ints[b'timer_idex'] = -1
+    keys.clock.now = 200000
+    assert timers.fire(land[0]) == 8 and top.ints[b'_cc_landed'] == 200001
+    keys.clock.now = 200279
+    assert timers.fire(land[0]) == 8
+    keys.clock.now = 200280
+    assert timers.fire(land[0]) == 7  # its last pass draws it at rest
+
+
 def time_window(ui, name='manualtime_page', at=(4, 2, 4, 9, 5)):
     """Stock's Set Date and Time page: a slide view of a date page (year from 2022, month, day) and a time
     page (hour 0-23, minute), and OK; the sleep timer's has hour and minute only."""

@@ -756,6 +756,9 @@ The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `de
   a tick on a fast spin, `vol_next`), and Brightness by the same curve over its own range, identically here and
   on Settings > Display > Brightness (`bright_wheel`); each fill eases to its level at Now Playing's bar's speed
   (`VOL_EASE_MS`).
+- **Landing**: as the page comes to rest open, however it was opened, the blocks under the status row overshoot
+  8 px down and spring back through rest to 2 px short, still after 280 ms (a damped sine, ease-out, as iOS's
+  sheet settles). Only on opening; the status row stays put. The one exception to Motion's no bounce.
 
 ### USB
 
@@ -773,7 +776,8 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
 
 - Page push and pop: 220 ms horizontal slide, `cubic_out`.
 - Selection bar: moves with the wheel, no animation of its own beyond the list's scroll.
-- Nothing pulses, glows or bounces.
+- Nothing pulses, glows or bounces, with one deliberate exception: Control Center's landing (an 8 px overshoot
+  and one 2 px undershoot over 280 ms as it comes to rest open, [Control Center](#control-center)).
 - **Marquee fades.** A scrolling text (the selected row's title, the status row's title, Now
   Playing's title, artist and album) is clipped to its own column, inside the glass and before any
   value or chevron on its row. A 12 px fade covers its right end while the text goes on past it,

@@ -16,10 +16,11 @@
  * there when the page is pulled down, nor under touch: the first wheel tick or Centre brings it up
  * on the stop the wheel is on, without stepping or acting, and it goes CC_RING_MS after the last
  * (cc_ring_on). The sliders step at the wheel's speed and their fills ease, as Now Playing's volume
- * does (levels.c). ponytail: AirPlay and Sleep Timer open their settings pages (stock's receiver
- * switch and timer have no call this file can make without their page), so their circle and tile
- * are lit only by AirPlay's flag and never by a running timer; the Wi-Fi circle reads "Wi-Fi", not
- * the network's name, which only the Wi-Fi page reads. */
+ * does (levels.c). Landing open, the blocks overshoot and settle (cc_spring). ponytail: AirPlay and
+ * Sleep Timer open their settings pages (stock's receiver switch and timer have no call this file
+ * can make without their page), so their circle and tile are lit only by AirPlay's flag and never
+ * by a running timer; the Wi-Fi circle reads "Wi-Fi", not the network's name, which only the Wi-Fi
+ * page reads. */
 #include "navigation.h"
 
 extern int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x,
@@ -57,6 +58,9 @@ extern unsigned char now_cover(void *r, const char **file); /* coverflow.c */
 #define CC_ADJUST "_cc_adjust" /* 1 while a slider has the wheel */
 #define CC_SEEN "_cc_seen"     /* the last wheel tick or key, time_now_ms + 1; 0 none yet */
 #define CC_RING_MS 5000        /* the ring stays this long after it */
+#define CC_LANDED "_cc_landed" /* when the page came to rest open, time_now_ms + 1; 0 not yet */
+#define CC_SPRING_MS 280       /* the landing's overshoot and settle (cc_spring) */
+#define CC_SPRING_STEP 20      /* ms between cc_springs' samples */
 
 enum {
     CC_WIFI,
@@ -85,6 +89,13 @@ static const char *const cc_glyphs[CC_BUTTONS] = { "wifi",  "bluetooth", "airpla
                                                    "sun",   "speaker",   "lock",    "timer",
                                                    "moon",  "eq",        "leaf",    "back",
                                                    "pause", "forward" };
+/* The landing's offset of the blocks from rest, in quarter pixels every CC_SPRING_STEP ms from
+ * the moment the page comes to rest: a damped sine, 8 px past rest at about 50 ms, back through it
+ * at 140, 2 px short at about 190 and still at CC_SPRING_MS (amplitude 14.6 px, decay ln 4 per
+ * 140 ms, period 280 ms): a sheet settling as iOS's does, ease-out, not wobbly. */
+static const signed char cc_springs[CC_SPRING_MS / CC_SPRING_STEP + 1] = { 0,  21, 31, 31, 26,
+                                                                           17, 8,  0,  -5, -8,
+                                                                           -8, -6, -4, -2, 0 };
 
 /* Stop i's box on the window: a circle's square, a slider's track, a tile, a transport glyph's. */
 static rect_t cc_box(int i) {
@@ -189,17 +200,46 @@ static int cc_ring_wake(void *win) {
     return !was;
 }
 
+/* The blocks' offset from rest, in pixels down, CC_SPRING_MS from the landing (cc_springs). */
+static int cc_spring(void *win) {
+    unsigned at = (unsigned)widget_get_prop_int(win, CC_LANDED, 0),
+             t = (unsigned)time_now_ms() - (at - 1);
+    if (!at || t >= CC_SPRING_MS) return 0;
+    unsigned k = t / CC_SPRING_STEP, f = t % CC_SPRING_STEP;
+    int q =
+        (cc_springs[k] * (int)(CC_SPRING_STEP - f) + cc_springs[k + 1] * (int)f) / CC_SPRING_STEP;
+    return (q + (q < 0 ? -2 : 2)) / 4;
+}
+/* Every VOL_POLL_MS from the page's open: once it is at rest open (g_dropdown_menu_state 3, stock's
+ * slide timer gone), however it got there, the landing starts, and the blocks under the status row
+ * are drawn again each pass until CC_SPRING_MS has gone by. */
+static int cc_land(const void *info) {
+    void *win = P(info, TIMER_CTX);
+    unsigned now = (unsigned)time_now_ms(), at = (unsigned)widget_get_prop_int(win, CC_LANDED, 0);
+    if (!at) {
+        if (I(g_dropdown_menu_state, 0) != 3 || widget_get_prop_int(win, "timer_idex", -1) != -1)
+            return 8; /* RET_REPEAT: not down yet */
+        widget_set_prop_int(win, CC_LANDED, (int)(at = now + 1));
+    }
+    rect_t r = { 0, CC_Y0 - CC_RING - 2, I(win, W_W), I(win, W_H) - (CC_Y0 - CC_RING - 2) };
+    widget_invalidate_force(win, &r); /* the blocks' band, 2 px short of rest to the foot */
+    return now - (at - 1) < CC_SPRING_MS ? 8 : 7; /* RET_REPEAT, RET_REMOVE */
+}
+
 /* The page, under the window's children (navigation.c's paint of statusbar_dialog): the status row
- * the dialog covers first, its clock centred, then the blocks, whose top reaches up into it. */
+ * the dialog covers first, its clock centred, then the blocks, whose top reaches up into it, moved
+ * down by the landing's spring (cc_spring). */
 void cc_paint(void *win, void *canvas) {
     void *bar = *(void *const *)system_bar;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), accent = scheme()->tones[0];
     int focus = widget_get_prop_int(win, CC_FOCUS, 0),
-        adjust = widget_get_prop_int(win, CC_ADJUST, 0), shown = cc_ring_on(win);
+        adjust = widget_get_prop_int(win, CC_ADJUST, 0), shown = cc_ring_on(win),
+        dy = cc_spring(win);
     rect_t block = { CC_X0, CC_Y0, CC_BLOCK_W, CC_BLOCK_H },
            np = { CC_X0 + CC_BLOCK_W + CC_GAP, CC_Y0, CC_X1 - CC_X0 - CC_BLOCK_W - CC_GAP,
                   CC_BLOCK_H };
     if (bar) widget_paint(bar, canvas);
+    I(canvas, CANVAS_Y) += dy;
     fill_box(canvas, &block, RGBA(CC_BLOCK), CC_BLOCK_R);
     fill_box(canvas, &np, RGBA(CC_BLOCK), CC_BLOCK_R);
     for (int i = 0; i < CC_STOPS; ++i) {
@@ -248,6 +288,7 @@ void cc_paint(void *win, void *canvas) {
     }
     rect_t grab = { 375 / 2 - 18, CC_GRAB_Y, 36, 5 };
     fill_box(canvas, &grab, RGBA(CC_GRAB), 3);
+    I(canvas, CANVAS_Y) -= dy;
     st.paint_w = win;
     stock_canvas_set_fill_color(canvas, fill);
 }
@@ -374,6 +415,7 @@ void cc_open(void *win) {
             widget_on(button, EVT_CLICK, cc_click, (void *)(long)i);
     }
     vol_bar.easing = bright_bar.easing = 0; /* the sliders open on their levels */
+    widget_add_timer(win, cc_land, VOL_POLL_MS);
 }
 
 /* The wheel on the page: from stop to stop, ends kept; or a slider's level while it has it,
