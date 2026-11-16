@@ -120,7 +120,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     got = art.images(t)
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     modes = [f'mode_{n}_{k}' for n in ('shuffle', 'repeat') for k in ('d', 'l', 'on')] + ['mode_repeat1_on']
-    wifi = [f'{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'lock') for k in ('d', 'l')]
+    wifi = [f'{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'lock', 'trash') for k in ('d', 'l')]
     glyphs = {'np_fav': 0, 'np_unfav_d': 0xffffff, 'np_unfav_l': 0, 'np_more_d': 0xffffff, 'np_more_l': 0,
               'np_moredown_d': 0xababab, 'np_moredown_l': 0x5c5c5c}
     rates = [f'rate_{on}_{k}' for on in ('on', 'off') for k in ('d', 'l', 'w')]
@@ -240,10 +240,11 @@ def test_oleds_rating_hearts_are_phosphors_filled_and_outlined_heart():
 
 
 def test_oleds_tidal_mark_is_four_diamonds_three_across_one_under():
-    """TIDAL's mark: the three top diamonds' centres and the lower one's are inked, the corners between them clear."""
+    """TIDAL's mark, at its optical size (ROW_INK across, centred): the three top diamonds' centres and the lower one's
+    are inked, the corners between them clear."""
     w, h, at = pixels(art.images(theme.builtins()[0])['oled_stream_tidal_d'])
-    assert all(at(x, 6)[3] > 200 for x in (3, 10, 16)) and at(10, 13)[3] > 200
-    assert at(3, 13)[3] == 0 and at(16, 13)[3] == 0 and at(10, 1)[3] == 0
+    assert all(at(x, 7)[3] > 200 for x in (4, 10, 15)) and at(10, 12)[3] > 200
+    assert at(4, 12)[3] == 0 and at(15, 12)[3] == 0 and at(10, 2)[3] == 0
 
 
 def test_oleds_subsonic_mark_is_q2_codas_submarine():
@@ -251,8 +252,22 @@ def test_oleds_subsonic_mark_is_q2_codas_submarine():
     above the hull and inside it, between the portholes, clear."""
     w, h, at = pixels(art.images(theme.builtins()[0])['oled_stream_subsonic_d'])
     assert (w, h) == (art.STREAM_PX, art.STREAM_PX)
-    assert all(at(x, y)[3] > 200 for x, y in ((6, 8), (8, 4), (1, 11), (13, 11), (5, 11)))
-    assert all(at(x, y)[3] == 0 for x, y in ((2, 4), (16, 4), (10, 11), (10, 17)))
+    assert all(at(x, y)[3] > 200 for x, y in ((6, 9), (8, 5), (3, 10), (12, 10), (16, 9)))  # at its optical size
+    assert all(at(x, y)[3] == 0 for x, y in ((3, 5), (16, 5), (10, 10), (10, 17)))
+
+
+@pytest.mark.parametrize('name', ['wifi_3_d', 'lock_d', 'trash_d', 'folder_d', 'shuffle_w', 'np_more_d', 'np_fav',
+                                  'stream_spotify_d', 'stream_tidal_d'])
+def test_a_row_symbol_is_drawn_at_its_optical_size(name):
+    """Every 20 px symbol (rows, Now Playing's heart and More, Streaming's marks) is scaled about its ink's centre
+    until the ink's longer side is ROW_INK (15.5 px), centred in its box, so a wide glyph and a tall one read as one
+    size (docs/oled-design.md Icons)."""
+    w, h, at = pixels(art.images(theme.builtins()[0])['oled_' + name])
+    xs = [x for y in range(h) for x in range(w) if at(x, y)[3] > 24]
+    ys = [y for y in range(h) for x in range(w) if at(x, y)[3] > 24]
+    long = max(max(xs) - min(xs), max(ys) - min(ys)) + 1
+    assert (w, h) == (art.ROW_ICON_PX, art.ROW_ICON_PX) and abs(long - art.ROW_INK) <= 1.5, long
+    assert abs((min(xs) + max(xs) + 1) / 2 - w / 2) <= 1 and abs((min(ys) + max(ys) + 1) / 2 - h / 2) <= 1
 
 
 def test_a_theme_draws_only_the_images_its_keys_ask_for():
@@ -262,6 +277,6 @@ def test_a_theme_draws_only_the_images_its_keys_ask_for():
     bare = {**oled, 'np_modes': 0, 'shuffle_row': 0, 'set_switch': 0, 'entry_ipod': 0,
             'geoms': {n: dataclasses.replace(g, modal=0) for n, g in oled['geoms'].items()}}
     full, got = set(art.images(oled)), set(art.images(bare))
-    groups = ('oled_mode_', 'oled_np_', 'oled_vol_', 'oled_shuffle_', 'oled_check_', 'oled_wifi_', 'oled_lock_', 'oled_menu_',
+    groups = ('oled_mode_', 'oled_np_', 'oled_vol_', 'oled_shuffle_', 'oled_check_', 'oled_wifi_', 'oled_lock_', 'oled_trash_', 'oled_menu_',
               'oled_pair_', 'oled_quality_', 'oled_pltile_', 'oled_plact_', 'oled_plmark_', 'oled_search_pop', 'oled_bump_')
     assert got == {n for n in full if not n.startswith(groups)} and all(any(n.startswith(p) for n in full) for p in groups)

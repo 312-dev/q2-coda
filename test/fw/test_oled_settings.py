@@ -75,3 +75,24 @@ def test_a_networks_signal_moves_to_the_right_column(fw, st, geometry, stand_in)
     sig, name = rows['net'].children[0].children
     assert sig.visible and sig.box[0] + sig.box[2] == 375 - 28 and sig.box[3] == lst.g['V_SET_ROW']
     assert name.box[0] + name.box[2] <= sig.box[0]
+
+
+def test_the_connected_networks_trash_ends_on_the_right_column_with_its_glyphs_left_of_it(fw, st, geometry, stand_in):
+    """Stock's Forget image (navbar_delete) on the connected row keeps its tap but no art, centred on the right
+    column's last 20 px slot; the signal's box takes that slot too, for wifi_mark to draw the trash there and the
+    signal, lock and check a slot left, so the trash lines up with every other row's signal, selected or not."""
+    lst, rows = wifi_list(fw, st, geometry, stand_in, searching=0)
+    conn = lst.row(('image', (10, 9, O['SET_STOCK_ICON'], 52), '', b'wifi_sig4'),
+                   ('hscroll_label', (72, 0, 200, STOCK_BODY), 'label'),
+                   ('label', (72, 40, 200, 20), 'state'), ('image', (276, 0, 50, STOCK_BODY), 'forget', b'navbar_delete'))
+    conn.children[0].children[2].props['tr_text'] = b'msg_connected'
+    lst()
+    sig, name, _, trash = conn.children[0].children
+    other = rows['net'].children[0].children[0]
+    right = 375 - 28
+    assert sig.box[0] + sig.box[2] == right and sig.box[2] == 4 * 20 + 3 * 8  # the trash's slot, then three
+    assert other.box[0] + other.box[2] == right and other.box[2] == 3 * 20 + 2 * 8
+    assert trash.box[0] + trash.box[2] // 2 == right - 10 and trash.box[2] == 50 and trash.visible  # its tap, centred
+    assert trash.props['image'] in (b'', '') and name.box[0] + name.box[2] <= sig.box[0]
+    lst()  # a second layout finds it by its mark, not its emptied image
+    assert trash.box[0] + trash.box[2] // 2 == right - 10

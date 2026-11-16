@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Icons (OLED): the 20 px symbols (Wi-Fi's signal and lock, folders, Streaming's marks, Now Playing's heart and More) are sized by their ink, so wide and tall ones look the same size; the connected Wi-Fi network's trash now lines up on the right edge with the other networks' signal, whether its row is highlighted or not.
   - EQ and Search (OLED): the wheel switches tabs. Turn up past the first row to the tabs, then turn to move between them (each opens as you reach it); press Center, or turn down past the last tab, to go into it. Previous and Next switch EQ's tabs too, as they already did Search's.
   - Lists (OLED): EQ's Advanced tab, its band and picker screens, and Up Next end like every other list: the rows below the last full one show through the fade into black instead of stopping above a black band (EQ) or being cut off near the bottom edge (Up Next).
   - Settings (OLED): the Settings list reached from Home ends like every list: Battery peeks through the fade under Controls instead of hiding until you scroll, and the highlighted row's lean as you turn the wheel is no longer cut off at the top or bottom of a list.

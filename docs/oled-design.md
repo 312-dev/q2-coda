@@ -734,6 +734,11 @@ Recently Added, Artists, Albums and Songs, each with the chevron.
   heart and More. Sizes are the design's: 13 px play state, 15 px chevron, 20 px row symbols,
   heart and More, 22 px state row, 56 px confirmation, 12 px for About's quality badge
   (`waveform-bold`).
+- **Optical sizes** (the user's, 2026-11-16, `mock_wifi_trash.py`): a size is the glyph's box, and the glyph inside it
+  is scaled about its ink's centre until its ink's longer side is a set length, centred in the box, so a wide glyph
+  (Wi-Fi's signal) and a tall one (the lock, the trash) read as one size. The 20 px symbols (rows', Streaming's marks,
+  Now Playing's heart and More) have 15.5 px of ink (`tools/art.py` `ROW_INK`, `glyph_png`). Wi-Fi's row glyphs end
+  on the right column, the connected row's trash (Forget) last, selected or not (`wifi_rows.c`).
 - No coloured app tiles: the concept's tinted "For You" squares are for content the Q2 does
   not have.
 
