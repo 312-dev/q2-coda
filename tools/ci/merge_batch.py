@@ -4,6 +4,7 @@
     python3 tools/ci/merge_batch.py feat/a feat/b fix/c ...   # in the integration branch's clean worktree
     python3 tools/ci/merge_batch.py --from-ready              # every branch workers marked ready
     python3 tools/ci/merge_batch.py --dry-run --from-ready    # the plan: conflicts and tests; merges nothing
+    python3 tools/ci/merge_batch.py --dry-run --onto release/p31 feat/a   # the same from any worktree
     python3 tools/ci/merge_batch.py --mark-ready              # in a feature worktree: queue this branch
 
 Run it with the test venv's python in a clean worktree of the integration branch (release/p31's is
@@ -345,12 +346,15 @@ def main():
     ap.add_argument('--mark-ready', nargs='?', const='', metavar='BRANCH',
                     help='append BRANCH (default: this worktree\'s) at its current commit to the ready list')
     ap.add_argument('--dry-run', action='store_true', help='print the plan; merge, build and test nothing')
+    ap.add_argument('--onto', metavar='BRANCH', help='with --dry-run: plan onto BRANCH, not this worktree\'s')
     ap.add_argument('--release', dest='dev', action='store_false', help='test a release build (default: --dev)')
     args = ap.parse_args()
     if args.mark_ready is not None:
         return mark_ready(args.ready, args.mark_ready)
-    target = git('rev-parse', '--abbrev-ref', 'HEAD').stdout.strip()
-    tip = git('rev-parse', 'HEAD').stdout.strip()
+    if args.onto and not args.dry_run:
+        raise SystemExit('--onto is for --dry-run: a real batch lands on the branch of the worktree it runs in')
+    target = args.onto or git('rev-parse', '--abbrev-ref', 'HEAD').stdout.strip()
+    tip = git('rev-parse', f'{args.onto or "HEAD"}^{{commit}}').stdout.strip()
     stamp = time.strftime('%Y%m%d-%H%M%S')
     logs = CACHE/stamp
     queued = read_ready(args.ready) if args.from_ready else []
