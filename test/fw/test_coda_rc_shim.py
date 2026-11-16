@@ -163,11 +163,12 @@ def test_settings_page_lists_phones_and_forgets_one(fw, ui, mcl, recs):
     assert ui.name[page] == 'carremote_page'
     rows = ui.captions(page)
     assert rows[0] == 'Car Remote' and rows[2:] == ['Pixel 8', 'Car tablet']
-    ui.click(page, 3)
-    ui.fire('cr_page_show')
-    assert ui.shown(page)[0] == 'Forget "Car tablet"?' or 'Forget "Car tablet"?' in ui.shown(page)
-    assert ui.captions(page) == ['Cancel', 'Forget']
-    ui.click(page, 1)
+    ui.click(page, 3)  # a phone: the confirmation card asks (feedback.c confirm), on stock's sortselect_dialog
+    assert ui.went[-1] == 'dialog/sortselect_dialog' and q2.files[PEERS] == peer('Pixel 8') + peer('Car tablet')
+    answer = fw.fn('coda_rc_shim__cr_forget_answer', None, C.c_void_p, C.c_int, C.c_int)
+    answer(1, 0, 0)  # Cancel keeps it
+    assert q2.files[PEERS] == peer('Pixel 8') + peer('Car tablet')
+    answer(1, 1, 0)  # Forget, the second phone
     ui.fire('cr_page_show')
     assert q2.files[PEERS] == peer('Pixel 8') and ui.captions(page)[2:] == ['Pixel 8']
 

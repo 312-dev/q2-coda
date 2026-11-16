@@ -41,7 +41,6 @@ static struct {
     int want; /* a Pause (1) or Play (2) waiting for the player; 0 none */
     unsigned want_seq, want_at;
     void *pair_page, *page; /* the code's Dialog; Settings > Car Remote */
-    int forget; /* the phone row Forget asks about, + 1 */
     int toast_what;
     int hearts; /* the playing song's, as rate_car_hearts; read at hearts_at for hearts_id, hearts_gen */
     unsigned hearts_at, hearts_id, hearts_gen;
@@ -452,15 +451,32 @@ void coda_rc_toggle(void) {
         cr_stop();
 }
 
+/* The confirmation card's answer for phone ctx (its row - 2): Forget is row 1. */
+static void cr_forget_answer(void *ctx, int row, int toggle_on) {
+    if (row == 1) cr_forget((int)(long)ctx);
+    if (cr.page) timer_add(cr_page_show, 0, 0);
+}
+
 static int cr_click(void *ctx, void *event) {
     int i = (int)(long)ctx;
-    if (cr.forget) { /* the Dialog: 0 Cancel, 1 Forget */
-        if (i == 1) cr_forget(cr.forget - 1);
-        cr.forget = 0;
-    } else if (i == 0) {
+    if (i == 0) {
         coda_rc_toggle();
-    } else if (i >= 2) {
-        cr.forget = i - 1;
+    } else if (i >= 2) { /* a phone: the card asks (docs/oled-design.md#confirmation-card) */
+        static const char *const rows[] = { "Cancel", "Forget" };
+        char names[CR_PEERS_MAX][32];
+        static char name[32];
+        int n = cr_peers(names);
+        tk_snprintf(name, sizeof name, "%s", i - 2 < n ? names[i - 2] : "phone");
+        confirm(&(confirm_t){ .title = "Forget \"%s\"?",
+                              .name = name,
+                              .body = "It has to pair again to control the Q2.",
+                              .rows = rows,
+                              .n_rows = 2,
+                              .kind = CONFIRM_DESTRUCTIVE,
+                              .back = -1,
+                              .answer = cr_forget_answer,
+                              .ctx = (void *)(long)(i - 2) });
+        return 0;
     }
     stop_timer(&cr.toast_timer);
     timer_add(cr_page_show, 0, 0); /* a row's click may not rebuild its own list */
@@ -471,15 +487,6 @@ static int cr_page_show(const void *unused) {
     if (!cr.page) return 0;
     char names[CR_PEERS_MAX][32];
     int n = cr_peers(names);
-    if (cr.forget) {
-        char q[64];
-        snprintf(q, sizeof q, "Forget \"%s\"?", cr.forget <= n ? names[cr.forget - 1] : "phone");
-        void *view = page_list(cr.page, cr.page, 0, q, 2, 48);
-        page_row_detail(view, 0, "Cancel", 0, cr_click);
-        page_row_detail(view, 1, "Forget", 0, cr_click);
-        ringnav_select(view, 0, 2);
-        return 0;
-    }
     void *view = page_list(cr.page, cr.page, 0, "Car Remote", 2 + n, 48);
     list_toggle(widget_get_child(page_row_detail(view, 0, "", 0, cr_click), 0), "Car Remote", coda_rc_enabled());
     int rh = page_h(48); /* a gap before the phones, clear as the rows */
@@ -496,21 +503,12 @@ static int cr_page_show(const void *unused) {
 
 static int cr_page_closed(void *ctx, void *event) {
     cr.page = 0;
-    cr.forget = 0;
     return 0;
-}
-
-/* Return on the Forget Dialog is its Cancel */
-static int cr_page_keyup(void *ctx, void *event) {
-    if (!cr.forget || I(event, EVENT_KEY) != KEY_RETURN) return page_keyup(ctx, event);
-    cr.forget = 0;
-    timer_add(cr_page_show, 0, 0);
-    return STOP;
 }
 
 /* System Settings' Car Remote row (navigation.c ringnav_systemset) */
 int carremote_open(void *ctx, void *event) {
-    if (cr.page || !(cr.page = page_open("carremote_page", cr_page_closed, cr_page_keyup))) return 0;
+    if (cr.page || !(cr.page = page_open("carremote_page", cr_page_closed, page_keyup))) return 0;
     cr_page_show(0);
     return 0;
 }
