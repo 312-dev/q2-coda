@@ -855,6 +855,7 @@ int add_songs_mark(void *r);
 void add_songs_toggle(void *r);
 void add_songs_search(void); /* search_strip.c: the strip over the library's songs, picking */
 int playlist_page_hold(void *top);
+int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*pick)(void));
 int otg_count(void);
 void pv_paint(void *w, void *canvas);
 int playlists_transfer(void *ctx, void *event); /* Settings: Import (ctx 0) or Export Playlists */
