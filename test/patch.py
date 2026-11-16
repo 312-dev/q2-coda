@@ -6255,7 +6255,7 @@ for key,want in ((O['KEY_FWD_BTN'],['B','A','C']),(O['KEY_FWD_BTN'],['B','C','A'
 assert m.names()==m.before_queue and not m.playback(); passed()
 # Touch actions and confirmation (Remove on the confirmation card, its answer feedback.c runs once
 # the card has closed: playlists.c ple_remove_answer); cancel and Back leave the entry intact.
-def ple_answer(m,row): m.call(address=payload_syms['ple_remove_answer'],args=(0,row,0,0),gap=0,clear=False)
+def ple_answer(m,row): m.call(address=payload_syms['ple_remove_answer'],args=(0,row,0,0),gap=0,clear=False); m.advance(0); m.view=m.find('scroll_view')
 m.choose(3); assert m.showlabels()==['Move Up','Move Down','Remove from Playlist']
 m.choose(2); ple_answer(m,0)
 assert m.order()==['B','A','C']; m.choose(3); m.choose(0); assert m.order()==['A','B','C']
