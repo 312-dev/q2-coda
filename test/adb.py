@@ -431,6 +431,9 @@ def gadget_checks():
         expect('bind while parked (adbd restarting under stock\'s gadget) binds nothing and mounts nothing',
                r.returncode == 0 and read('UDC') == '' and str(cfs) not in (run/'mounts').read_text().split(), r.stderr)
         r = gadget('unpark')
+        end = time.monotonic() + 10  # it binds in the background
+        while read('UDC') != '13500000.otg' and time.monotonic() < end:
+            time.sleep(.05)
         expect('unpark: configfs mounted again, q2adb on the controller',
                r.returncode == 0 and read('UDC') == '13500000.otg' and str(cfs) in (run/'mounts').read_text().split()
                and not (run/'q2adb.parked').exists(), r.stderr)

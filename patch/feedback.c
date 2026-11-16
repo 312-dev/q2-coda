@@ -20,7 +20,21 @@ static int top_named(void *w, const char *name) {
 #define PILL_RGB 0x1c1c1e
 #define PILL_MAX 327 /* the text column to the right column */
 
+#define PILL_GLYPH 15 /* an icon toast's glyph (tools/art.py USB_TOAST_PX), PILL_GLYPH_GAP before its words */
+#define PILL_GLYPH_GAP 8
+
+/* The next toast's glyph, a theme image's name, while toast_icon's toast is up. */
+static char pill_glyph[48] __attribute__((section(".scratch")));
+
 int feedback_toast(void *top) { return top_named(top, "msginfo_dialog"); }
+
+/* A toast with a glyph before its words (docs/oled-design.md#dialogs-and-toasts): glyph a theme image's
+ * whole name. */
+void toast_icon(const char *glyph, const char *text) {
+    tk_snprintf(pill_glyph, sizeof pill_glyph, "%s", glyph ? glyph : "");
+    toast(text);
+    pill_glyph[0] = 0;
+}
 /* The window under OLED's toast: the window manager's last window before it. */
 void *feedback_under(void *toast) {
     void *wm = window_manager(), *under = (void *)0;
@@ -63,11 +77,12 @@ void feedback_toast_paint(void *w, void *canvas) {
     int px = PILL_PX, n = (int)wide_len(s);
     const char *face = theme_face(s, n, &px);
     canvas_set_font(canvas, face, px);
-    int pw = (int)(canvas_measure_text(canvas, s, n) + 0.5f) + 2 * PILL_PAD;
+    int glyph = pill_glyph[0] ? PILL_GLYPH + PILL_GLYPH_GAP : 0;
+    int pw = (int)(canvas_measure_text(canvas, s, n) + 0.5f) + 2 * PILL_PAD + glyph;
     if (pw > PILL_MAX) pw = PILL_MAX;
     rect_t pill = { (375 - pw) / 2, PILL_Y, pw, PILL_H };
-    if (I(line, W_Y) != PILL_Y || I(line, W_W) != pw) {
-        widget_move_resize(line, pill.x, pill.y, pill.w, pill.h);
+    if (I(line, W_Y) != PILL_Y || I(line, W_W) != pw - glyph) {
+        widget_move_resize(line, pill.x + glyph, pill.y, pill.w - glyph, pill.h);
         widget_set_prop_int(line, "line_wrap", 0);
         widget_set_prop_str(line, "style:normal:font_name", face ? face : "default");
         widget_set_prop_int(line, "style:normal:font_size", px);
@@ -77,6 +92,7 @@ void feedback_toast_paint(void *w, void *canvas) {
     }
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     fill_box(canvas, &pill, RGBA(flip_if(ipod_light(), PILL_RGB)), PILL_R);
+    if (glyph) paint_art(w, canvas, pill_glyph, pill.x + PILL_PAD, PILL_Y + (PILL_H - PILL_GLYPH) / 2);
     stock_canvas_set_fill_color(canvas, fill);
 }
 

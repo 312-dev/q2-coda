@@ -78,6 +78,7 @@ int ringnav_usb_status(void) {
     pthread_mutex_lock(usb_charge.mutex);
     charge_apply(0);
     pthread_mutex_unlock(usb_charge.mutex);
+    usb_ui_status(); /* a cable in: the chooser's probe, or a remembered choice (usb_ui.c) */
     return stock_usb_status_trampoline();
 }
 

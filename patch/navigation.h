@@ -828,6 +828,12 @@ int carremote_open(void *ctx, void *event);
 /* storage.c: Settings > Storage and its Downloads (docs/internals.md#storage) */
 int storage_open(void *ctx, void *event), storage_hold(void *top);
 void storage_paint(void *w, void *canvas);
+/* usb_ui.c */
+void usb_ui_status(void), usb_ui_poll(void), usb_ui_mode_load(void *win), usb_ui_ejected(void *win);
+void usb_ui_paint(void *w, void *canvas);
+const char *usb_ui_title(const char *name);
+int usb_ui_key(void *top, unsigned key);
+void toast_icon(const char *glyph, const char *text); /* feedback.c */
 int tsv_split(char *line, char **f, int max); /* catalogue.c */
 
 /* az_index.c: the A-Z index on a long Library list in name order (docs/oled-design.md#a-z-index):

@@ -2461,6 +2461,7 @@ int ringnav_paint(void *w, void *canvas) {
     if (theme()->marquee_fade) marquee_fade(w, canvas);
     if (w && w == slider_page_win) slider_page_paint(w, canvas);
     storage_paint(w, canvas);
+    usb_ui_paint(w, canvas);
     if (w && w == st.np_win && !(NP_VISUALIZER && visualizer_full()))
         np_modes(w, canvas); /* else the page's own */
     coverflow_home_clip(w, canvas, 0);
@@ -4800,20 +4801,14 @@ void final_text(void *canvas, const char *face, const unsigned *s, const void *r
  * which configfs doesn't show). */
 #define USB_LUN "/sys/kernel/config/usb_gadget/storage_demo/functions/mass_storage.msg/lun.0/file"
 static int usb_poll(const void *info) {
-    void *win = P(info, TIMER_CTX), *c;
+    void *win = P(info, TIMER_CTX);
     char path[2];
     void *f = fopen(USB_LUN, "rb");
     int n = f ? (int)fread(path, 1, sizeof path, f) : -1;
     if (f) fclose(f);
     if (n > 0) st.usb_lun = 1;
     if (n || !st.usb_lun) return 8; /* RET_REPEAT */
-    if ((c = widget_lookup(win, "scrlabel_info", 1))) {
-        void *ok = hscroll_label_create(P(c, W_PARENT), I(c, W_X), I(c, W_Y), I(c, W_W), I(c, W_H));
-        widget_use_style(ok, "s_scrlabel_white24c");
-        widget_set_text_utf8(ok, "OK to Disconnect");
-        widget_set_visible(c, 0, 0);
-    }
-    widget_invalidate_force(win, (void *)0);
+    usb_ui_ejected(win); /* the mode page says OK to Disconnect */
     return 7; /* RET_REMOVE */
 }
 
@@ -4828,7 +4823,8 @@ void *ringnav_ui_load(const char *name, void *parent) {
     int np = name && !tk_strcmp(name, "playing_page");
     void *root = stock_ui_load_trampoline(ui_redirect(name, path), parent);
     if (root && slider_page(root)) slider_open(root); /* no knob; slider_page.c's form */
-    if (root) msg_open(root); /* the scan page (scan_page.c oled_scan); USB's page stays stock's */
+    if (root) msg_open(root); /* the scan page (scan_page.c oled_scan) */
+    if (root) usb_ui_mode_load(root); /* USB's page as a mode page (usb_ui.c) */
     if (root && g_usbmode != 1 && !tk_strcmp(widget_get_prop_str(root, "name", ""), "usbmode_page"))
         st.usb_lun = 0, widget_add_timer(root, usb_poll, 500);
     if (root) album_local_load(root); /* OLED's album page on stock's (library_album.c) */
@@ -5131,7 +5127,7 @@ static const char *bar_title_of(void *win, void **label) {
     if (!tk_strcmp(name, "equalizer_page")) return "EQ"; /* its 48 px row is the tabs' own label */
     if (!tk_strcmp(name, "spotify_page")) return "Spotify"; /* they hide their own name's label */
     if (!tk_strcmp(name, "radionp_page")) return "Internet Radio";
-    if (!tk_strcmp(name, "usbmode_page")) return "Q2 Pod";
+    if (usb_ui_title(name)) return usb_ui_title(name); /* the USB mode pages (usb_ui.c) */
     if (!tk_strcmp(name, "search_dialog")) return "Search"; /* stock's toolbar has no label */
     if (!tk_strcmp(name, "statusbar_dialog")) return "Quick Settings";
     if (artist_local_on(win)) return ""; /* the design's artist page: the header names it */
@@ -9505,6 +9501,7 @@ static void thumb_poll(void) {
 
 int ringnav_sleep(void *loop) {
     splash_poll();
+    usb_ui_poll(); /* adbd's questions, --dev builds (usb_ui.c) */
     stale_heal();
     quick_poll();
     headset_poll();
@@ -10258,6 +10255,7 @@ int ringnav(void *ctx, void *event) {
             return STOP;
         }
     }
+    if (usb_ui_key(window_manager_get_top_window(window_manager()), key)) return STOP; /* USB's Stop */
     if (search_key(key)) return STOP;
     int result = usb_prompt() ? 0 : stock_keyup_trampoline(ctx, event);
     if (key == KEY_PLAY && hold_released()) return STOP;

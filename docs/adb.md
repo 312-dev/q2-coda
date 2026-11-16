@@ -42,13 +42,13 @@ The Q2's USB modes are configfs gadgets that stock's scripts make and demo runs:
 
 - `setup` (boot): the gadget with ID `1d6b:0105` (Linux's FunctionFS gadget), `bcdDevice` `0x0223`, serial `Q2CODA`, adbd's function `ffs.adb`, and Microsoft OS descriptors on (`os_desc`, vendor code 1, `MSFT100`); FunctionFS mounted at `/dev/usb-ffs/adb`.
 - `bind`: once adbd has written its descriptors (`ep1` exists), the gadget goes on the controller, unless parked.
-- `park` / `unpark`: in a `--dev` build, `/usr/bin/storage_config.sh` and `uac_device_config.sh` are wrappers (`adb_wrapper` in `tools/build.py`) that call `park` before stock's start and `unpark` after its stop, stock's scripts kept unchanged beside them as `storage_config_stock.sh` and `uac_device_config_stock.sh`. `park` takes `q2adb` off the controller and unmounts configfs, which stock's start refuses to find mounted; `unpark` binds it again once stock's stop has unmounted it. A flag file keeps adbd's restart loop from binding over stock's gadget, and a lock serializes the calls.
+- `park` / `unpark`: in a `--dev` build, `/usr/bin/storage_config.sh` and `uac_device_config.sh` are wrappers (`adb_wrapper` in `tools/build.py`) that call `park` before stock's start and `unpark` after its stop, stock's scripts kept unchanged beside them as `storage_config_stock.sh` and `uac_device_config_stock.sh`. `park` takes `q2adb` off the controller and unmounts configfs, which stock's start refuses to find mounted; `unpark` binds it again, in the background, once stock's stop has unmounted it (demo runs stock's stop on its UI thread, which must not wait out adbd). A flag file keeps adbd's restart loop from binding over stock's gadget, and a lock serializes the calls.
 
 So with a cable in, the Q2 is a USB drive (or the DAC) exactly as stock makes it, and an adb device once the USB page is left with Return, until the cable comes out. Under Audio and DAC the DAC keeps the controller while the cable is in, so adb needs USB Mode on storage.
 
 Why not one composite storage + adb gadget: it would change the gadget stock's USB storage and its eject handling (`usb_poll`) rely on, adb would come and go with the drive, and while the card is shared the Q2 has unmounted it and its UI sits on USB Connected, which is little use for development. Its own gadget leaves storage and the DAC untouched. Its own USB IDs matter on Windows, which keys its driver choice, and whether it asks for Microsoft OS descriptors at all (the answer is cached), on the vendor, product and `bcdDevice`.
 
-The USB chooser planned for plug-in (Charge Only, Transfer Files, USB Audio, USB Debugging) would make **USB Debugging** the way to this gadget: `q2adb-gadget unpark` in place of stock's start.
+The USB chooser on plug-in ([internals: USB pages](internals.md#usb-pages)) makes **USB Debugging** the way to this gadget: its probe's stop hands the controller back to `q2adb`, and its page's Stop parks it until the cable comes out.
 
 ### Authorization
 
