@@ -491,7 +491,7 @@ def test_the_slim_batterys_fill_is_the_level_charging_or_not(fw, level, bits):
     assert fill(level << 4 | bits) == level
 
 
-@pytest.mark.parametrize('level, bits, tone', [(62, 0, 0xffffff), (12, 0, 0xff453a), (12, KEY_CHARGING, O['BATT_CHARGE_RGB']),
+@pytest.mark.parametrize('level, bits, tone', [(62, 0, 0xffffff), (12, 0, O['BATT_LOW_RGB']), (12, KEY_CHARGING, O['BATT_CHARGE_RGB']),
                                                (80, KEY_PLUGGED, O['BATT_CHARGE_RGB']), (41, KEY_WEAK, O['BATT_WEAK_RGB'])])
 def test_the_fill_is_white_red_green_or_orange(fw, level, bits, tone):
     assert fw.fn('list_marks__battery_tone', C.c_uint, C.c_uint, C.c_uint)(level << 4 | bits, 0xffffff) == tone
@@ -577,12 +577,13 @@ def test_the_slot_holds_the_percentage_whole(fw, st, ui):
     assert text == '100%' and x >= 0 and slot_width(ui, bar) >= 3 * 9.4 + 12.6
 
 
-@pytest.mark.parametrize('icon, color', [(b'bar_battery', 0xffffff), (b'bar_charge', O['BATT_CHARGE_RGB']),
-                                         (b'bar_lowcharge', O['BATT_LOW_RGB'])])
-def test_the_percentage_says_charging_or_low_in_its_colour(fw, st, ui, icon, color):
+@pytest.mark.parametrize('text, icon, color', [('20%', b'bar_battery', 0xffffff), ('15%', b'bar_charge', O['BATT_CHARGE_RGB']),
+                                               ('19%', b'bar_battery', O['BATT_LOW_RGB']), ('15%', b'bar_lowcharge', O['BATT_LOW_RGB'])])
+def test_the_percentage_says_charging_or_low_in_its_colour(fw, st, ui, text, icon, color):
+    """Low is one threshold, under BATT_LOW_PCT (20%), as the slim battery's red fill."""
     theme(fw, st, BATTERY=1)
-    canvas = Paint(fw, ui, Bar(fw, ui))('15%', icon)
-    assert canvas.texts[0][3] == rgba(color)
+    canvas = Paint(fw, ui, Bar(fw, ui))(text, icon)
+    assert canvas.texts[0][3] == rgba(color) and O['BATT_LOW_RGB'] == 0xff453a
 
 
 def test_a_cable_in_with_charging_held_off_is_not_shown_charging(fw, st, ui):

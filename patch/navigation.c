@@ -3757,7 +3757,7 @@ static void paint_battery(void *w, void *canvas) {
     if (!inside) s[n++] = '%';
     unsigned color = RGBA(key & BATT_KEY_WEAK                            ? BATT_WEAK_RGB
                           : key & (BATT_KEY_CHARGING | BATT_KEY_PLUGGED) ? BATT_CHARGE_RGB
-                          : key & BATT_KEY_LOW                           ? BATT_LOW_RGB
+                          : level < BATT_LOW_PCT                         ? BATT_LOW_RGB
                                                                          : 0xffffff);
     /* whole pixels up, so the slot is never narrower than the ink */
     if (!inside && !st.pct_digit) {

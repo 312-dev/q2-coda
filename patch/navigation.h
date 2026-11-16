@@ -506,7 +506,7 @@ unsigned wheel_sb_alpha(void *list);
 /* The status battery's key (navigation.c battery_now): the level from bit 4, then what the cable
  * does. CHARGING: green, the bolt inside; PLUGGED: on a cable, full or held at Charge Limit, green
  * with no glyph; WEAK: the charger too weak (charging.c charge_weak), orange, the warning inside;
- * LOW: stock's low. */
+ * LOW: stock's low icon (the painters' red is the level under BATT_LOW_PCT). */
 #define BATT_KEY_LOW 1u
 #define BATT_KEY_CHARGING 2u
 #define BATT_KEY_PLUGGED 4u

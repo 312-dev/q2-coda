@@ -162,7 +162,6 @@ void round_path(void *vg, float x, float y, float w, float h, float r) {
 #define BATT_SLIM_NUB_H 4.4f
 #define BATT_SLIM_NUB_R 0.8f
 #define BATT_SLIM_DIM 0x6e6e6e
-#define BATT_SLIM_LOW 0xff453a /* under 20 %, the only red on any screen (docs/oled-design.md) */
 #define BATT_GLYPH_X 4.5f /* tools/art.py BATT_GLYPH_BOX (9 x 10) and the glyph's centre in it */
 #define BATT_GLYPH_Y 5.0f
 /* The charge fill's share of the body, in percent, for battery_now's key: the level, on the cable
@@ -172,7 +171,7 @@ static unsigned battery_fill(unsigned key) { return BATT_KEY_LEVEL(key); }
 static unsigned battery_tone(unsigned key, unsigned ink) {
     return key & BATT_KEY_WEAK                            ? BATT_WEAK_RGB
            : key & (BATT_KEY_CHARGING | BATT_KEY_PLUGGED) ? BATT_CHARGE_RGB
-           : BATT_KEY_LEVEL(key) < BATT_LOW_PCT           ? BATT_SLIM_LOW
+           : BATT_KEY_LEVEL(key) < BATT_LOW_PCT           ? BATT_LOW_RGB
                                                           : ink;
 }
 /* The glyph inside the body for key, a theme image's name, or 0 for none. */
