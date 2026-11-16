@@ -27,6 +27,7 @@ void bt_name_apply(void); /* bt_name.c */
 void headset_status_register(void) {
     btctl_device_status_callback(headset_bt_status, 0);
     bt_name_apply();
+    guest_bt_on();
 }
 /* The connected (3) link, its MAC in mac[32]. */
 static int bt_connected(char *mac) {
@@ -351,6 +352,7 @@ void headset_command(int code) {
     if (hs.last_key == code && now - hs.last_at < 150) return;
     hs.last_key = code;
     hs.last_at = now;
+    if (guest_key(code)) return; /* a guest plays: its phone's (docs/internals.md#guest-play) */
     if (code == 163 || code == 165)
         media_key(code == 163 ? KEY_FWD_BTN : KEY_BACK_BTN);
     else if (code == 164) {
@@ -397,6 +399,7 @@ void headset_eq_poll(void) {
 #endif
 }
 void headset_poll(void) {
+    guest_poll();
     unsigned now = time_now_ms();
     if (now - hs.checked < 100) return;
     hs.checked = now;
