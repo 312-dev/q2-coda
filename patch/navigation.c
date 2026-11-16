@@ -4931,6 +4931,7 @@ static const char *bar_title_of(void *win, void **label) {
     if (usb_ui_title(name)) return usb_ui_title(name);   /* the USB mode pages (usb_ui.c) */
     if (bt_recv_title(name)) return bt_recv_title(name); /* Bluetooth receiver mode (bt_recv.c) */
     if (sw_update_title(name)) return sw_update_title(name); /* SD Card Update's (sw_update.c) */
+    if (msg_title(name)) return msg_title(name); /* the library scan's (scan_page.c) */
     if (!tk_strcmp(name, "qrcode_page")) return addon_qr_title(win); /* the card app's name */
     if (!tk_strcmp(name, "search_dialog")) return "Search"; /* stock's toolbar has no label */
     if (!tk_strcmp(name, "statusbar_dialog")) return ""; /* Control Center: the clock centred, as Home's */
@@ -5081,9 +5082,11 @@ void bar_title_sync(void *win) {
         title_gone(0, 0);
         st.title_win = win;
         widget_on(win, EVT_DESTROY, title_gone, win);
-        /* Control Center (control_center.c) is a page under the bar's clock */
+        /* Control Center (control_center.c) and the library scan (scan_page.c) are pages under
+         * the bar */
         if (tk_strcmp(widget_get_type(win), "window") &&
-            tk_strcmp(widget_get_prop_str(win, "name", ""), "statusbar_dialog"))
+            tk_strcmp(widget_get_prop_str(win, "name", ""), "statusbar_dialog") &&
+            !msg_title(widget_get_prop_str(win, "name", "")))
             return;
         t = bar_title_of(win, &st.title_lbl);
         /* a page may have Songs' action bar: only a set with action_row looks */

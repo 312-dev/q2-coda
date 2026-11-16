@@ -1028,6 +1028,30 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
   says ("Charging · 62%", lightning, green), Charged to 80% when Charge Limit stops it (battery-full, green), and
   Charger too weak (warning, orange).
 
+### Update Library
+
+<a id="update-library"></a>The library scan (Update Local Music, Scan Music Now, a folder's scan; approved as 27 v4 on
+2026-11-16, `patch/scan_page.c`) is the empty states' stack over stock's dialog: a 60 px figure, 14 px, the title in
+Inter Medium 20, the line in 15 px Text Secondary, 20 px, then the shared [button](#button), the whole centred from
+y 40 to the screen's end. The full status row stays, titled "Update Library": stock's dialog covers the bar, so the
+page paints it first, as Control Center does (`msg_title`).
+
+| State | Figure | Title | Line | Button |
+| --- | --- | --- | --- | --- |
+| Scanning, no total yet | Software Update's twelve-spoke spinner | "1,284 songs found" | folder glyph and the folder's name (the house marquee when long) | Stop, secondary |
+| Scanning against the library before it | a 56 px ring, 4 px, Accent on Track, the percent in Medium 16 inside (at most 99%) | "312 of 704 songs" | as above | Stop |
+| Done | Phosphor `check-circle`, regular, Text Secondary | "Library Updated" | "738 songs, 34 new" (a whole scan that grew the library), else "738 songs" | Done, primary |
+| Stopped (Stop) | as Done | "Scan Stopped" | "120 songs found" | Done |
+| `/mnt/data` full | Phosphor `memory`, regular, Text Secondary | "Not Enough Space" | "Some songs weren't added" | Done |
+
+- No frame draws the focus ring until the wheel turns ([focus ring](#focus-ring)); Centre presses the one button.
+- Stock holds the ending about 2.6 s (three polls, then a 2 s sleep on the UI thread) and closes the dialog itself,
+  so Done shows what happened rather than waiting for a press.
+- ponytail: the mock-up's "SD Card Removed" ending is not built. Stock's scan has no card-removed state (its only
+  endings are the finish and `msg_no_storage`, the database partition full), and the emulator cannot pull a card
+  mid-scan to show what the scan does then. It needs a device run: pull the card during a scan and read the
+  dialog's text and the database after.
+
 ### Plug-in screen
 
 A cable in while the screen is off lights it for 3 s and then turns it off again (S1, V1 from
