@@ -489,8 +489,8 @@ void reveal(menu_t *m, int id, int immediate) {
      * fit, rather than stopping a margin into it. Kind 1's ids are its row order. */
     if (m->kind == 1 && id == 0 && y + h + margin <= height) want = 0;
     want = fit_top(m, clamp_step(want, max_top(m), 0));
-    const theme_t *T = theme();
-    if (immediate || !T->recall_ms) {
+    int glide = motion_ms(theme()->recall_ms, MO_SPATIAL);
+    if (immediate || !glide) {
         wheel_offset(m, want);
         return;
     }
@@ -500,7 +500,7 @@ void reveal(menu_t *m, int id, int immediate) {
     if (m->kind == 2) {
         table_client_scroll_to(m->w, want);
     } else
-        scroll_view_scroll_delta_to(m->w, 0, want - top, T->recall_ms);
+        scroll_view_scroll_delta_to(m->w, 0, want - top, glide);
 }
 
 /* The A-Z index's jump (az_index.c): table w's row id selected and at the top of the list, as far

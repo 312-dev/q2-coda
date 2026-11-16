@@ -581,7 +581,7 @@ m.link=1; m.poll(); assert [c[0] for c in m.calls].count('fork')==1; passed()
 
 # Boot logo: a card mount (boot, USB storage's end) starts a thread that keeps the card's logo as the
 # splash's /mnt/data copy; the poll toasts its failure. The thread is run here once the poll starts it.
-LOGO_SRC,LOGO_DST,LOGO_ROT='/mnt/mmc/Q2Pod/boot/boot-logo.jpg','/mnt/data/boot-logo.jpg','/tmp/boot-logo.jpg'
+LOGO_SRC,LOGO_DST,LOGO_ROT='/mnt/mmc/Q2Muse/boot/boot-logo.jpg','/mnt/data/boot-logo.jpg','/tmp/boot-logo.jpg'
 LOGO_BAD,LOGO_FAIL='Boot logo must be a 320x375 JPEG','Could not save boot logo'
 LOGO_SEEN='/mnt/data/boot-logo.bad'  # the refused card file's size and mtime: told once
 def jpg(w,h,sof=0xc0,bits=8,n=3,pad=0):  # an APP0 behind a fill byte, then the frame header
@@ -692,14 +692,14 @@ def boot_row(value=None,mode=0o100755):
 def toggle_boot(m,button):
     f,ctx=m.handler(button,O['EVT_CLICK']); m.calls=[]
     assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0
-for value,expected in ((None,'Rockbox'),(b'bad','Rockbox'),(b'q2pod','Q2 Pod'),(b'rockbox','Rockbox'),
-                       (b'q2pod\n','Q2 Pod'),(b'q2pod\0bad','Rockbox')):
+for value,expected in ((None,'Rockbox'),(b'bad','Rockbox'),(b'q2pod','Q2 Muse'),(b'rockbox','Rockbox'),
+                       (b'q2pod\n','Q2 Muse'),(b'q2pod\0bad','Rockbox')):
     m,button,label=boot_row(value)
     assert m.nodes[label]['text']=='Boot to: '+expected
     toggle_boot(m,button)
-    next_value=b'rockbox' if expected=='Q2 Pod' else b'q2pod'
+    next_value=b'rockbox' if expected=='Q2 Muse' else b'q2pod'
     assert m.files['/mnt/data/boot-target']==next_value
-    assert m.nodes[label]['text']=='Boot to: '+('Rockbox' if next_value==b'rockbox' else 'Q2 Pod')
+    assert m.nodes[label]['text']=='Boot to: '+('Rockbox' if next_value==b'rockbox' else 'Q2 Muse')
     restarted,_,l=boot_row(next_value); assert restarted.nodes[l]['text']==m.nodes[label]['text']
     passed()
 for mode in (0,0o040755,0o020644): boot_row(mode=mode); passed()

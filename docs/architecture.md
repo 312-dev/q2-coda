@@ -4,7 +4,7 @@ How the pieces fit: what a build makes, where the payload lives in stock's `demo
 
 ## What is patched
 
-Q2 Pod ships no program of Shanling's and no source of theirs. `tools/build.py` takes the stock V1.36 ZIP, checks its SHA-256 (`ZIP_SHA` in `tools/build.py`, compared in `build()`), changes these files inside its `rootfs.squashfs` and packs `update.tar` again. The kernel (`xImage`) is byte-identical.
+Q2 Muse ships no program of Shanling's and no source of theirs. `tools/build.py` takes the stock V1.36 ZIP, checks its SHA-256 (`ZIP_SHA` in `tools/build.py`, compared in `build()`), changes these files inside its `rootfs.squashfs` and packs `update.tar` again. The kernel (`xImage`) is byte-identical.
 
 | File on the Q2                                | Change                                                                  | Where                                                          |
 | --------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------- |
@@ -62,11 +62,11 @@ demo is AWTK. Everything the payload draws or reads from a widget runs on the UI
 
 | Entry                                | Function                                             | At                   |
 | ------------------------------------ | ---------------------------------------------------- | -------------------- |
-| a key or wheel tick                  | `ringnav`, after `ringnav_input`'s gates             | `patch/navigation.c` |
-| a touch                              | `ringnav_touch`, `ringnav_dispatch`                  | `patch/navigation.c` |
-| a widget painted, after its children | `ringnav_paint`, which calls each feature's painter  | `patch/navigation.c` |
-| a widget's background                | `ringnav_paint_bg` (selection bar, status bar)       | `patch/navigation.c` |
-| every pass of the main loop          | `ringnav_sleep`, which calls each feature's `*_poll` | `patch/navigation.c` |
+| a key or wheel tick                  | `ringnav`, after `ringnav_input`'s gates             | `patch/nav/input.c`  |
+| a touch                              | `ringnav_touch`, `ringnav_dispatch`                  | `patch/nav/touch_dispatch_layout.c` |
+| a widget painted, after its children | `ringnav_paint`, which calls each feature's painter  | `patch/nav/row_paint.c` |
+| a widget's background                | `ringnav_paint_bg` (selection bar, status bar)       | `patch/nav/theme_titles_paint.c` |
+| every pass of the main loop          | `ringnav_sleep`, which calls each feature's `*_poll` | `patch/nav/playback_power.c` |
 | a stock page opening                 | the page's `*_page_init` hook in `HOOKS`             | `tools/build.py`     |
 
 The wheel's ticks are made on stock's encoder thread (`wheel_sample` in `patch/playback.c`) and posted to the loop. Slow work (art, network, scans) runs on a pthread that touches only files and its own counters, and a `*_poll` on the UI thread takes the result: `patch/coverflow.c`'s head states the rule, and `scrobble.c`, `durations.c`, `playlist_art.c` and `radio.c` follow it.
@@ -75,17 +75,17 @@ A page the wheel can move on is named in `patch/contexts.inc`; the build refuses
 
 ## Settings
 
-Settings are keys in stock's `/mnt/data/config.ini`, read once and kept in `st`: the theme's under `[IPOD]` (`settings_read` in `patch/theme_engine.c`), the rest under `[Q2POD]` (`pod_keys` in `patch/navigation.c`). `config_value` (`patch/theme_engine.c`) reads one, stock's `write_int_config` saves one. [ipod.md](ipod.md#display-settings) lists the keys.
+Settings are keys in stock's `/mnt/data/config.ini`, read once and kept in `st`: the theme's under `[IPOD]` (`settings_read` in `patch/theme_engine.c`), the rest under `[Q2POD]` (`pod_keys` in `patch/nav/rows_settings.c`, part of navigation.c's unit). `config_value` (`patch/theme_engine.c`) reads one, stock's `write_int_config` saves one. [ipod.md](ipod.md#display-settings) lists the keys.
 
 ## Where to start
 
 | To change                         | Start at                                                                                                                                                                                                                                |
 | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | a new feature                     | a new `patch/<name>.c`, in `NAVIGATION` or `UI_SOURCES`; its poll in `ringnav_sleep`, its painter in `ringnav_paint`, its declarations in `navigation.h` under its file's name ([CONTRIBUTING](../CONTRIBUTING.md#where-new-code-goes)) |
-| a stock page's rows               | that page's `*_page_init` hook; `ringnav_display` (`patch/navigation.c`) is a worked example                                                                                                                                            |
+| a stock page's rows               | that page's `*_page_init` hook; `ringnav_display` (`patch/nav/settings_display.c`) is a worked example                                                                                                                                            |
 | a stock page's layout             | `patch_asset` in `tools/ipod.py`, and the page's hash in `patch/ipod.json`                                                                                                                                                              |
 | a label                           | `LABELS` (`tools/build.py`), or `ENGLISH` (`tools/build.py`) for a Chinese string                                                                                                                                                       |
-| a theme's colours or sizes        | `assets/themes/<id>/theme.xml`, checked by `tools/theme.py` ([Themes](internals.md#themes))                                                                                                                                             |
+| a theme's colors or sizes        | `assets/themes/<id>/theme.xml`, checked by `tools/theme.py` ([Themes](internals.md#themes))                                                                                                                                             |
 | a list row's geometry             | `Geometry` (`tools/ipod.py`) and `GEOM_RANGES` in `tools/theme.py`                                                                                                                                                                      |
 | what the player does to the sound | `patch/peq_player.c`, hooked from `tools/peq.py`                                                                                                                                                                                        |
 | the boot scripts                  | `BOOT_HOOK` (`tools/build.py`), checked by `test/build.py` under the host `sh`                                                                                                                                                          |

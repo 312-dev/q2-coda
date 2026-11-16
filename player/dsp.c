@@ -1,6 +1,6 @@
-/* The DSP chain (docs/player-plan.md#architecture): what Q2 Pod's filter in hciplayer does (patch/peq_player.c),
+/* The DSP chain (docs/player-plan.md#architecture): what Q2 Muse's filter in hciplayer does (patch/peq_player.c),
  * as stages on the playback thread. In order, each left out while its setting is off: ReplayGain, the PEQ or 3EQ
- * (patch/peq.c, Q2 Pod's engine, compiled in as it is into the payload), Mono Audio, Swap L/R, crossfade (the hold
+ * (patch/peq.c, Q2 Muse's engine, compiled in as it is into the payload), Mono Audio, Swap L/R, crossfade (the hold
  * and the equal-power mix), AirPlay's tap. With every stage off a block goes to the output as the decoder gave it,
  * not a bit changed. With any on, the block is float from the first stage to one conversion
  * back at the end, which rounds and saturates as hciplayer's converters do.
@@ -478,7 +478,7 @@ static int chain(struct dsp *s, const uint8_t *data, int frames, double pts, con
 
 /* mcl-getuvmeter's two levels, as hciplayer's output computes them for each write (0x43a778): the peak of the first
  * 480 bytes' samples, even ones the left and odd ones the right, as whole dB below full scale truncated toward 0, and
- * -60 for silence, a write under 481 bytes or DSD. demo only asks from its VU page, which Q2 Pod leaves out. */
+ * -60 for silence, a write under 481 bytes or DSD. demo only asks from its VU page, which Q2 Muse leaves out. */
 void dsp_meter(const struct pcm_format *f, int untouched, const uint8_t *data, int frames, int uv[2]) {
     int bytes = frames * f->channels * f->bytes, n = 480 / f->bytes;
     double peak[2] = {0, 0}, full = f->is_float ? 1.0 : f->bytes == 2 ? 32767.0 : 2147483647.0;

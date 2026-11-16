@@ -26,7 +26,7 @@ artwork never rescales, so glyphs and covers stay as sharp as stock, and the row
 layout's eight-pixel left margin seats the artwork exactly. ART_INSET also
 positions the playing overlay. Font definitions are untouched. Full-height
 text/icon containers are shortened with their button. Titles and metadata keep
-their stock centring, one pixel higher for the two-pixel-shorter body.
+their stock centering, one pixel higher for the two-pixel-shorter body.
 
 Native local row-pool constructors are at 0x533bc4 (folder), 0x4ac588 (songs),
 0x4b39f4 (local categories) and 0x4a6910 (album list/grid). The album grid branch
@@ -66,27 +66,27 @@ page or a touch's hidden selection stops it only at the end of its pass, not at 
 ## Flat rows and selection
 
 The iPod theme uses black surfaces, white titles and subdued secondary text. Settings icons are
-resized as before; a theme with `list.icons.mono` (OLED) turns every icon's coloured disc the same
-neutral grey (the scheme's `chevron`, `MINIMAL_CHEVRON` `#777777`, as stock's folder and song discs),
+resized as before; a theme with `list.icons.mono` (OLED) turns every icon's colored disc the same
+neutral gray (the scheme's `chevron`, `MINIMAL_CHEVRON` `#777777`, as stock's folder and song discs),
 keeping the white glyph and blending its edges by saturation, as the image manager loads them
 (`ringnav_image_add`). Built-in library discs use the same mapping; navigation, streaming and
 control icons become monochrome while retaining their light/dark glyphs and active states. Alpha
-stays intact. Artwork, photos, external images and battery warning colours stay unchanged.
+stays intact. Artwork, photos, external images and battery warning colors stay unchanged.
 The pinned style edits in `patch/ipod.json` remove list fills and corners and make pressed
-feedback neutral grey. Playing titles keep the separate playing glyph.
+feedback neutral gray. Playing titles keep the separate playing glyph.
 
 Wheel selection is the accent's flat bar (`gradient()` in the scheme's tones), `list.selection.inset`
 in from each side of a list row (OLED's 16; `SEL_INSET`, 6, for a theme that states none) with ends
 rounded by `list.selection.radius` at most (OLED's 8), less on a row whose cover the round end would
 cut, such as Search's results: `pill_radius` shrinks them until the cover's corners are inside,
-checking only the row's own visible left-hand, non-centred images, so Folder's hidden multi-select
-check doesn't square it. A grid tile's selection is a square card in the accent's colour,
+checking only the row's own visible left-hand, non-centered images, so Folder's hidden multi-select
+check doesn't square it. A grid tile's selection is a square card in the accent's color,
 `TILE_INSET` inside the tile ([Theme](#theme), [internals](internals.md#themes)). The rows keep their
 own (white) ink on the bar (`sel_accent`). The background hook resolves the selected row. Paint
 ancestry determines the colors, so no style overrides can remain on recycled rows or stale
 scrolling labels. Selected backgrounds stay transparent over the selection. Touch hides wheel
-selection until wheel/centre input; the native pressed state remains visible. A pressed list row
-(`s_btn_listitem`) is grey across the whole row (`pressed_pill`), and a pressed tile under half its
+selection until wheel/center input; the native pressed state remains visible. A pressed list row
+(`s_btn_listitem`) is gray across the whole row (`pressed_pill`), and a pressed tile under half its
 row's width (the album grid's, the playlist page's pair) is the tile's card, `TILE_INSET` inside it;
 other pressed widgets keep stock's box. The same hooks cover settings, streaming, dialogs, PEQ rows
 and media browser chrome. Video and EQ plots keep their own
@@ -165,7 +165,7 @@ drops what a paint invalidates when the frame ends, so a 0 ms timer then repaint
 otherwise the new art and its fit would reach only the regions repainted later. `g_playcover_finishflag` remains
 stock-owned. Now Playing and Spotify's page keep their black background behind the art.
 
-**Carousel** replaces the lists and the art with stock's home carousel. It has eight cards: Now Playing, Library, Cover Flow, Folder, the Rockbox shortcut, Streaming, Playback Settings and System Settings. The Rockbox shortcut card opens what the saved Shortcut chooses ([Home](#home)), and stays when its target is gone (no Rockbox, or no Groovebox, on the card), where tapping it shows a message. With Shortcut: None, or no key, it shows and opens Rockbox when the card has it, else Favorites. The cards keep their own colours, as on the stock Home, whatever the accent or Light Mode. The wheel moves through the carousel ([internals.md](internals.md#home-carousel)), Centre opens the card and touch drags and taps as in stock; Return keeps stock's behaviour there. Leaving Carousel for Split or Full shows the main list.
+**Carousel** replaces the lists and the art with stock's home carousel. It has eight cards: Now Playing, Library, Cover Flow, Folder, the Rockbox shortcut, Streaming, Playback Settings and System Settings. The Rockbox shortcut card opens what the saved Shortcut chooses ([Home](#home)), and stays when its target is gone (no Rockbox, or no Groovebox, on the card), where tapping it shows a message. With Shortcut: None, or no key, it shows and opens Rockbox when the card has it, else Favorites. The cards keep their own colors, as on the stock Home, whatever the accent or Light Mode. The wheel moves through the carousel ([internals.md](internals.md#home-carousel)), Center opens the card and touch drags and taps as in stock; Return keeps stock's behavior there. Leaving Carousel for Split or Full shows the main list.
 
 The player writes every track's cover to the same `/tmp` file, so before Split loads it `coverflow_home_art` drops AWTK's cached bitmap of that name, as the full-screen art does; otherwise the image manager hands back the last track's cover.
 
@@ -278,10 +278,10 @@ where the clip, not the pane, ends (a repaint of part of the battery) keeps the 
 part alone would average differently. A pan step invalidates those rows of the bar with the
 window's, so the ink follows the art. Inking them costs about 0.84 million instructions a step
 (`test/patch.py`, 188 × 58 with a pause and a battery), a sixth of the frame's render: a pixel left
-the ground's colour (the bare art, most of them) takes one compare, not the share's three channels. The clock is drawn in Text Primary there (`clock_place`), so it
+the ground's color (the bare art, most of them) takes one compare, not the share's three channels. The clock is drawn in Text Primary there (`clock_place`), so it
 is inked as one glyph like the others.
-The battery's charging green and low red keep their own colours over the art, each pixel's share
-read against the glyph's most saturated pixel, and only its grey part (the dim outline as a
+The battery's charging green and low red keep their own colors over the art, each pixel's share
+read against the glyph's most saturated pixel, and only its gray part (the dim outline as a
 lighter share, the nub) is inked (`INK_KEEP_STATUS_COLOURS`; 0 inks them with the rest). Where the bar
 draws off the screen, the art is painted under the glyphs as they are. With nothing
 playing, or a cover the frame cannot hold, the pane is the window's panel, as in a set without
@@ -296,11 +296,11 @@ EQ, Bluetooth, SyncLink and Wi-Fi widgets and sets their images and text, but
 never their geometry. The built-in set's `system_bar.bin` (iPod) therefore keeps the play state
 and EQ in `view_left`, as stock does, and puts Bluetooth/codec, Wi-Fi and the
 battery in `view_right`, and the layout below is that set's; OLED's set has its own copy, a status
-row with the title on the left and the clock, the payload's glyph slots and the battery on the right ([Theme](#theme), [Status row slots](internals.md#status-row-slots)). EQ uses an explicit 16 px font and a 28 px cell: its text is 24 px wide in the shipped font, so stock's 20 px cell clips it. A 16 px `Q2` label at the left inset appears only when both playback state and EQ are hidden. Stock's tick also hides `img_state` whenever its own player is stopped, as it is under Spotify, radio or a video; `ringnav_showface` runs `bar_state_sync`, the play state and the `Q2` label alone, straight after the tick, so the payload's play state is back before any paint, dark or not (no file reads; a relayout waits for the paint); the codec badge, accent and Rockbox check wait for paint (`bar_sync`). A new battery level or charge state repaints the bar from the tick while lit ([Status bar](internals.md#status-bar-ipod)). Correcting it at paint time instead relaid the row twice a second, and EQ was drawn for a frame in the play icon's place. When `bar_sync` changes `img_state` while another window paints (Now Playing paints every 250 ms, so it usually sees a Play/Pause first), it arms a 0 ms timer that runs `widget_invalidate_force` on the bar after the frame: an invalidate made mid-paint is dropped with that frame's dirty rects, and `img_state` keeps its dirty flag (`+0x24` bit `0x200`), which makes stock `widget_invalidate` return early, so the 1 s tick's own invalidates skipped it until something else repainted the bar (#116). `bar_sync` updates its visibility without moving the centred clock. The volume icon and number and SyncLink move to `x = -200`, where they
+row with the title on the left and the clock, the payload's glyph slots and the battery on the right ([Theme](#theme), [Status row slots](internals.md#status-row-slots)). EQ uses an explicit 16 px font and a 28 px cell: its text is 24 px wide in the shipped font, so stock's 20 px cell clips it. A 16 px `Q2` label at the left inset appears only when both playback state and EQ are hidden. Stock's tick also hides `img_state` whenever its own player is stopped, as it is under Spotify, radio or a video; `ringnav_showface` runs `bar_state_sync`, the play state and the `Q2` label alone, straight after the tick, so the payload's play state is back before any paint, dark or not (no file reads; a relayout waits for the paint); the codec badge, accent and Rockbox check wait for paint (`bar_sync`). A new battery level or charge state repaints the bar from the tick while lit ([Status bar](internals.md#status-bar-ipod)). Correcting it at paint time instead relaid the row twice a second, and EQ was drawn for a frame in the play icon's place. When `bar_sync` changes `img_state` while another window paints (Now Playing paints every 250 ms, so it usually sees a Play/Pause first), it arms a 0 ms timer that runs `widget_invalidate_force` on the bar after the frame: an invalidate made mid-paint is dropped with that frame's dirty rects, and `img_state` keeps its dirty flag (`+0x24` bit `0x200`), which makes stock `widget_invalidate` return early, so the 1 s tick's own invalidates skipped it until something else repainted the bar (#116). `bar_sync` updates its visibility without moving the centered clock. The volume icon and number and SyncLink move to `x = -200`, where they
 draw off-screen. Both groups sit 54 pixels
 from the edges (`STATUS_MARGIN`): the 50 where the 16-pixel icons clear the top corners
 ([Rounded corners](#rounded-corners)) plus 2 (`STATUS_PAD`) so they don't crowd the glass. A new
-`label_clock` (`s_scrlabel_white20c`, overridden to 16 px) is centred on the screen. It has the width left in the
+`label_clock` (`s_scrlabel_white20c`, overridden to 16 px) is centered on the screen. It has the width left in the
 narrowest case, 109 pixels at x 133, clear of either group with every icon shown (left 94
 pixels, right 133); the build fails if that would be under `CLOCK_MIN` (105). The payload paints
 the bar and writes the time into `label_clock` (see
@@ -319,7 +319,7 @@ stock font at 16 pixels.
 - Icon: a clean 16×11 charge-level outline and a 2-pixel nub, drawn in `view_battery`.
 - Percent: the 16 px percentage alone, drawn in `view_battery`.
 - Icon + Percent: the same charge-level icon with a 16 px percentage beside it.
-- Percent Inside (`BATTERY=3`): a compact 28×15 solid battery with a 2×5 terminal. Centred 13 px dark digits show the percentage without a percent sign. The body turns green while charging and red when low.
+- Percent Inside (`BATTERY=3`): a compact 28×15 solid battery with a 2×5 terminal. Centered 13 px dark digits show the percentage without a percent sign. The body turns green while charging and red when low.
 
 The percentage's slot is as wide as its digits (measured once in the stock font, which has tabular
 digits), so every mode ends on the icons' margin with the same 4-pixel gap to Wi-Fi; `BATT_PCT_W`
@@ -393,14 +393,14 @@ rows dropped, each page's own built; each keeps its own place in position memory
 - Library: an **On-The-Go** switch first (`Q2POD OTG`, on by default: Playlists' On-The-Go row and the hold menu's
   Add to On-The-Go), then a **Streaming Songs** switch (`Q2POD LIBRARYSOURCE`, off by default; caption "Streaming songs join your
   Library"): on, the songs and playlists of a music server that a card app such as the Subsonic app lists join the
-  Library, greyed while they can't play ([Server library](internals.md#server-library)). Off asks first, "Hide
+  Library, grayed while they can't play ([Server library](internals.md#server-library)). Off asks first, "Hide
   streaming songs?" (Cancel, Turn Off, a footer saying Show in Library pauses), while a card app has a catalogue on
   the card; then Sorting, "Artists: Artist" or "Album Artist" (stock's `PLAYSET ARTISTTYPE`), "Artist View: Cover
   Flow" (`Q2POD ARTISTCF`, the default; Grid and List; Cover Flow ends with an All albums card, see
   [internals.md](internals.md#artist-albums-in-coverflow)), Playlists, Folders, and a "Scan Song Durations" switch
   (`Q2POD SCANDURATIONS`, off; caption "Measures lengths after each update"; durations.c).
 - Sorting: **Songs**, a picker of Title, Artist, Album and Recently Added (`song_sort.c`), the current one's direction
-  as an arrow, Centre on it again flipping it and another taking its natural one (A to Z, the newest first); "Artist's
+  as an arrow, Center on it again flipping it and another taking its natural one (A to Z, the newest first); "Artist's
   Albums: Year" or "A–Z" (`Q2POD ARTISTAZ`); "Years: Newest First" or "Oldest First" (`Q2POD YEAROLD`).
 - Playlists: "Playlist View: List" (`Q2POD PLAYLISTCF`, List (default) or Cover Flow; [Playlists as
   covers](#cover-flow)), then Import Playlists and Export Playlists after a 12 px gap.
@@ -421,7 +421,7 @@ Stock's Wireless page (Wi-Fi, Bluetooth and SyncLink) is not reached from Settin
 **Car Remote** (`Q2POD CARREMOTE`, off by default) opens its own page: the switch first, then the
 paired phones by name. On, demo starts the `coda-rc` daemon, which lets a paired phone browse and play
 the library from the car ([remote-protocol](remote-protocol.md), [internals](internals.md#car-remote));
-off, it stops, and nothing listens. Centre on a phone asks `Forget "name"?` on the [confirmation card](oled-design.md#confirmation-card), Cancel first,
+off, it stops, and nothing listens. Center on a phone asks `Forget "name"?` on the [confirmation card](oled-design.md#confirmation-card), Cancel first,
 then Forget; Return is Cancel. With none paired the page shows the empty state under the switch, "No Paired Phones", "Open Q2 Muse
 Remote on your phone" ([oled-design](oled-design.md#empty-and-offline)).
 
@@ -447,12 +447,12 @@ owns the geometry:
   (`widget_get_children_for_layout` without `keep_invisible`, `0x5fd074`) and leaves them unsized,
   so a hidden row is mapped once it is shown and laid out. Its icon box shrinks to 40 pixels (`SET_ICON`, drawn
   `scale_down`, value 5 in the stock draw type table at `0x93ae54`, which draws a bitmap that
-  already fits 1:1; see [Settings icons](#settings-icons)), centred on the row at x 28
+  already fits 1:1; see [Settings icons](#settings-icons)), centered on the row at x 28
   (`SET_ICON_X`). Text starts 12 pixels (`SET_GAP`) after the icon, at x 80, or at x 20
   (`SET_TEXT_X`) without one.
   Trailing images end 24 pixels (`SET_EDGE`) from the right, at x 351; value labels and the text's
   right edge move with them, never nearer the edge than 20. Full-height children fill the row and
-  shorter ones keep their centre. A mapped button no longer matches the stock geometry, so a later
+  shorter ones keep their center. A mapped button no longer matches the stock geometry, so a later
   layout leaves it alone.
 
 With these values the text, icons and trailing images of the first and the last visible row clear
@@ -471,8 +471,8 @@ build runs ImageMagick (`magick`, else `convert`) with an alpha-weighted Lanczos
 place, keeping its inode metadata. The build fails if an input's hash or format differs, or if an
 output is not 40-pixel 8-bit RGBA with the same transparency; the manifest records both hashes
 and the ImageMagick version under `changed_assets` and `tools`. `test/build.py` checks the
-packaged bytes, the sizes, and that each icon's average colour on black and on the Graphite
-selection grey matches the stock icon's, and that the runtime grey (`MINIMAL_CHEVRON`, OLED's) is neutral on black. Other 52-pixel images that land in settings rows, such as
+packaged bytes, the sizes, and that each icon's average color on black and on the Graphite
+selection gray matches the stock icon's, and that the runtime gray (`MINIMAL_CHEVRON`, OLED's) is neutral on black. Other 52-pixel images that land in settings rows, such as
 Streaming's Tidal logo (`list_tidal`, which the folder root may also use) and the Spotify row's
 build-added icon ([internals.md](internals.md#spotify)), keep their bytes and still scale down. The
 Spotify row's Now Playing page uses Now Playing's layout (`NP_*`), rounded art included. The recolouring of accent-red artwork
@@ -484,7 +484,7 @@ page and inherit its styling. All keep their ranges and wheel/touch controls, bu
 the images stay, named, with no image and no size, since stock looks them up. The quick
 settings slider and custom volume overlay retain their layouts. Under OLED (`settings.values.switch`) the four
 windows and Default Volume's other uses take one slider page instead ([oled-design.md](oled-design.md#progress-and-sliders),
-`patch/slider_page.c`): the value centred, a 6 px track with a knob, the range's ends under it, and the feature's
+`patch/slider_page.c`): the value centered, a 6 px track with a knob, the range's ends under it, and the feature's
 switch, where it has one, as a row; the +/- discs are hidden, and the wheel moves the value.
 
 ## Quick settings
@@ -493,20 +493,20 @@ The pull-down (`dialog/statusbar_dialog.bin`) covers the whole screen when open.
 controls keep their four columns in two rows from y 20. Every label is the stock 16-pixel white
 style (`s_label_white16c`), 80 pixels wide and 40 high (two lines), top-aligned so one- and
 two-line labels start on the same line, 6 pixels under its icon and 12 above the next row. The
-brightness slider becomes a 6-pixel track in Now Playing's default colours (`TRACK_COLOR`, whatever the theme's progress track, filled with the accent's light tone as the progress bar, `quick_fill`) in a 48-pixel-high slider that
+brightness slider becomes a 6-pixel track in Now Playing's default colors (`TRACK_COLOR`, whatever the theme's progress track, filled with the accent's light tone as the progress bar, `quick_fill`) in a 48-pixel-high slider that
 still takes a tap or drag anywhere on it (`slide_with_bar`), from x 68 to 307. The stock dim and
 bright suns stay at its ends, in line with the first and last icon columns. Sizes are `QS_*` in
 `tools/ipod.py`. `dialog_statusbar_dialog_init` (`0x4a2338`) finds every widget by name and
 never moves or resizes one. A finger held on Wi-Fi or Bluetooth opens its settings
 ([internals.md](internals.md#quick-settings-holds)); a tap stays stock's.
 
-At run time the page is Control Center ([oled-design](oled-design.md#control-center), `patch/control_center.c`): `cc_open` hides stock's buttons and labels but Wi-Fi's and Bluetooth's, which it lays at opacity 0 over their circles (their taps and the Wi-Fi and Bluetooth holds stay stock's), puts the brightness slider at opacity 0 over the Brightness slider's track, and makes a clear button over every other control. `cc_paint` draws the page under the window's children: the status row first, its clock centred (no title), then the blocks. The wheel walks the stops (the four toggles, the Now Playing block while something is playing or paused, the two sliders, the five tiles; the window's `_cc_focus`), stopping at the ends; Centre acts on a stop as a tap does, or gives a slider the wheel (`_cc_adjust`, the accent's ring) until Centre or Return takes it back (`cc_key`, `cc_wheel`). Return off a slider closes the page. The ring shows only after the wheel or a key: pulled down there is none, the first tick or Centre brings it up without stepping or acting (`_cc_seen`), and it goes 5 s after the last (`CC_RING_MS`). A tap on the Now Playing block, or Centre on it, closes the page and opens Now Playing (`playback_np_open`); the transport's buttons lie over it and keep their taps. A toggle or tile held `QUICK_HOLD_MS` opens its settings page ([internals](internals.md#quick-settings-holds)). Coming to rest open, the blocks spring 8 px past rest and back (`cc_land`, `cc_spring`). Volume steps as Now Playing's wheel volume (`vol_next`) and is set as Car Remote sets it (up to Volume Limit, saved for the output in use); Brightness steps as the Brightness page does (`bright_wheel`, [internals](internals.md#wheel-volume)); Lock turns Buttons Lock on in its last mode or off (`keylock_toggle`), Car Remote starts or stops its daemon (`coda_rc_toggle`), EQ turns the EQ off or on as PEQ (`eq_toggle`), Night Shift on or off, Smart Wi-Fi its setting; AirPlay and Sleep close the page for their settings pages.
+At run time the page is Control Center ([oled-design](oled-design.md#control-center), `patch/control_center.c`): `cc_open` hides stock's buttons and labels but Wi-Fi's and Bluetooth's, which it lays at opacity 0 over their circles (their taps and the Wi-Fi and Bluetooth holds stay stock's), puts the brightness slider at opacity 0 over the Brightness slider's track, and makes a clear button over every other control. `cc_paint` draws the page under the window's children: the status row first, its clock centered (no title), then the blocks. The wheel walks the stops (the four toggles, the Now Playing block while something is playing or paused, the two sliders, the five tiles; the window's `_cc_focus`), stopping at the ends; Center acts on a stop as a tap does, or gives a slider the wheel (`_cc_adjust`, the accent's ring) until Center or Return takes it back (`cc_key`, `cc_wheel`). Return off a slider closes the page. The ring shows only after the wheel or a key: pulled down there is none, the first tick or Center brings it up without stepping or acting (`_cc_seen`), and it goes 5 s after the last (`CC_RING_MS`). A tap on the Now Playing block, or Center on it, closes the page and opens Now Playing (`playback_np_open`); the transport's buttons lie over it and keep their taps. A toggle or tile held `QUICK_HOLD_MS` opens its settings page ([internals](internals.md#quick-settings-holds)). Coming to rest open, the blocks spring 8 px past rest and back (`cc_land`, `cc_spring`). Volume steps as Now Playing's wheel volume (`vol_next`) and is set as Car Remote sets it (up to Volume Limit, saved for the output in use); Brightness steps as the Brightness page does (`bright_wheel`, [internals](internals.md#wheel-volume)); Lock turns Buttons Lock on in its last mode or off (`keylock_toggle`), Car Remote starts or stops its daemon (`coda_rc_toggle`), EQ turns the EQ off or on as PEQ (`eq_toggle`), Night Shift on or off, Smart Wi-Fi its setting; AirPlay and Sleep close the page for their settings pages.
 
 The rows page keeps stock's controls at opacity 0, for their taps. Their stock images are 60-pixel discs: `#444444` with a white glyph when off, stock red
 (`#FF1448`) with a white glyph when on (`drop_wifiopen`, `drop_btopen`, `drop_keylockopen`,
-`drop_highgain`, `drop_lo`, `drop_usbaudio`, `drop_usbdac`), grey glyphs when disabled. An active
+`drop_highgain`, `drop_lo`, `drop_usbaudio`, `drop_usbdac`), gray glyphs when disabled. An active
 disc takes the accent's red tone, as everything else red does, so it stands clearly apart from the
-grey inactive discs. On a tone brighter than `GLYPH_LIGHT_MAX` (perceived brightness 160 of 255),
+gray inactive discs. On a tone brighter than `GLYPH_LIGHT_MAX` (perceived brightness 160 of 255),
 which is Graphite's silver, the white glyph and its anti-aliased edges turn `CONFIRM_SURFACE`
 (`#2B2B2B`) so the glyph stays legible; Crimson, Tidal, Champagne and Cobalt keep the white glyph (3:1 or
 more). Only an image that holds the red disc gets the dark glyph, so inactive discs keep their white
@@ -531,11 +531,11 @@ Values are `coverflow.shelf` and `coverflow.caption` in OLED's `theme.xml` and `
 
 **Opening.** The first open after a restart, a library update or a server catalogue import reads the library's albums first ([internals](internals.md#coverflow)), half a second to a second for 2,000 albums in the emulator; later opens reuse them. Home's Cover Flow row keeps the selection meanwhile and its chevron turns into a spinner (eight spokes, white, in the chevron's 15 px place, [oled-design](oled-design.md#list-row)) until the covers show; Return stays on Home, and the wheel and the other buttons do nothing until it opens. An open quick enough never shows it.
 
-The wheel holds the covers directly ([internals](internals.md#coverflow-thumb)): turned slowly, about 70 degrees moves one album at the default Wheel Sensitivity (50%; half that at 100%) and a cover stays part-way while your thumb does; let go, it settles on the nearest. Turned faster they speed up smoothly to at most 20 albums a second, and from about a turn and a half a second the covers bend into an arch: the ones near the middle drop back level with the side covers and lean in gradually, none swinging out towards you, and as you slow or stop they open out again onto the album the caption names. (With Fast Navigation on there is no arch: the side covers form a narrower row that slides along as the caption goes on ahead.) Turned at about a turn a second (at 50%) for 0.7 s, sorted by album or artist, they go by letters (with Fast Navigation on, at about two turns a second for a quarter of a second), and a thumb re-gripping on the way doesn't start the wait again. Sorted by recently added, most played or at random, and on an artist's or the rated albums, they never do. With Fast Navigation off (Display → Cover Flow; off unless you turn it on) the letters are as they were: the big letter shows and the covers keep flowing through the alphabet, about six letters a second however hard you spin, and a gentler turn steps through them more slowly. Slowing down or turning back carries straight on album by album from where you are. Letting go lands on the letter's first album, and picking the spin back up while the letter still shows goes on by letters. With Fast Navigation on, sorted by year they go by years too, newest or oldest first as Playback settings' Year Order has them, each year shown big ("1994") and the albums with no year last, shown as "–", and letters and years go like this. Going in, you overtake the cover facing you: it leaves the screen the way you were turning as the first letter shows big, and the row carries your speed on into that letter's first album. Each further letter is about one tick of turn, at any speed and either way: the big letter changes at once and the row slides to that letter's first album, faster the farther it is, the caption naming each album it passes. Letters last until your thumb lifts: slowing down or resting your thumb keeps them, and turning back steps back a letter. Past the last letter it goes round to the first, and back, as the albums do. Lifting lets the row reach the letter's first album, then the covers fold out onto it in about half a second, none passing through another; turning meanwhile doesn't steer it. Centre, Return, a touch or the screen going dark land on the caption's album at once. To go by letters smoothly Fast Navigation keeps a half-size copy of each cover beside its cache (about 26 MB for 1000 albums, or up to 128 MB on a card formatted with 128 KB clusters), made while it sits idle, about ten a second, which Refresh Coverflow removes with the rest. The numbers are `coverflow.shelf`'s.
+The wheel holds the covers directly ([internals](internals.md#coverflow-thumb)): turned slowly, about 70 degrees moves one album at the default Wheel Sensitivity (50%; half that at 100%) and a cover stays part-way while your thumb does; let go, it settles on the nearest. Turned faster they speed up smoothly to at most 20 albums a second, and from about a turn and a half a second the covers bend into an arch: the ones near the middle drop back level with the side covers and lean in gradually, none swinging out towards you, and as you slow or stop they open out again onto the album the caption names. (With Fast Navigation on there is no arch: the side covers form a narrower row that slides along as the caption goes on ahead.) Turned at about a turn a second (at 50%) for 0.7 s, sorted by album or artist, they go by letters (with Fast Navigation on, at about two turns a second for a quarter of a second), and a thumb re-gripping on the way doesn't start the wait again. Sorted by recently added, most played or at random, and on an artist's or the rated albums, they never do. With Fast Navigation off (Display → Cover Flow; off unless you turn it on) the letters are as they were: the big letter shows and the covers keep flowing through the alphabet, about six letters a second however hard you spin, and a gentler turn steps through them more slowly. Slowing down or turning back carries straight on album by album from where you are. Letting go lands on the letter's first album, and picking the spin back up while the letter still shows goes on by letters. With Fast Navigation on, sorted by year they go by years too, newest or oldest first as Playback settings' Year Order has them, each year shown big ("1994") and the albums with no year last, shown as "–", and letters and years go like this. Going in, you overtake the cover facing you: it leaves the screen the way you were turning as the first letter shows big, and the row carries your speed on into that letter's first album. Each further letter is about one tick of turn, at any speed and either way: the big letter changes at once and the row slides to that letter's first album, faster the farther it is, the caption naming each album it passes. Letters last until your thumb lifts: slowing down or resting your thumb keeps them, and turning back steps back a letter. Past the last letter it goes round to the first, and back, as the albums do. Lifting lets the row reach the letter's first album, then the covers fold out onto it in about half a second, none passing through another; turning meanwhile doesn't steer it. Center, Return, a touch or the screen going dark land on the caption's album at once. To go by letters smoothly Fast Navigation keeps a half-size copy of each cover beside its cache (about 26 MB for 1000 albums, or up to 128 MB on a card formatted with 128 KB clusters), made while it sits idle, about ten a second, which Refresh Coverflow removes with the rest. The numbers are `coverflow.shelf`'s.
 
-Centre on a cover opens the album's tracks as a list in the page, the covers hidden behind it ([internals](internals.md#coverflow)); Return comes back to them.
+Center on a cover opens the album's tracks as a list in the page, the covers hidden behind it ([internals](internals.md#coverflow)); Return comes back to them.
 
-**Playlists as covers.** Display → Cover Flow's **Playlist View: Cover Flow** (`Q2POD PLAYLISTCF`, List by default) opens the Playlists list ([internals.md](internals.md#playlist-art)) as covers, from every entry (Library, Home's list, the shortcut): the page opens veiled, and on the next pass the covers open over it, the playlists in the list's order, stopping at both ends. Return closes both and goes back to where Playlists was opened. With no playlists, or in the Add to Playlist picker, the list shows. A cover is the playlist's art at 160 pixels (a placeholder until it is made): the covers are the view; the caption is its name over "N songs" (or "1 song"), in the album's two lines. There are no letters, no Sort cards and no remembered position. Centre opens the playlist's own list over the covers, as a tap on its row does, and Return comes back to them. A song plays in the list's order; Now Playing's More then has no Delete, which for those songs would take the song out of the library, not the playlist, until another queue plays. Edits made from the covers show as they come back to them: after More…'s Rename or Delete a deleted playlist's cover goes and a renamed one shows its new name, a new playlist gets a cover, and a playlist whose songs changed shows its new count and art. Hold Play/Pause on a cover gives Play Next, Add to Queue, Shuffle and More… as on the list's row, then **New Playlist**, which closes the covers for New Playlist's letter strip over the Playlists page, and, on a set with no toolbar (OLED's), **Select Playlists…**, which closes them for its select mode (a set with a toolbar edits from the page's toolbar).
+**Playlists as covers.** Display → Cover Flow's **Playlist View: Cover Flow** (`Q2POD PLAYLISTCF`, List by default) opens the Playlists list ([internals.md](internals.md#playlist-art)) as covers, from every entry (Library, Home's list, the shortcut): the page opens veiled, and on the next pass the covers open over it, the playlists in the list's order, stopping at both ends. Return closes both and goes back to where Playlists was opened. With no playlists, or in the Add to Playlist picker, the list shows. A cover is the playlist's art at 160 pixels (a placeholder until it is made): the covers are the view; the caption is its name over "N songs" (or "1 song"), in the album's two lines. There are no letters, no Sort cards and no remembered position. Center opens the playlist's own list over the covers, as a tap on its row does, and Return comes back to them. A song plays in the list's order; Now Playing's More then has no Delete, which for those songs would take the song out of the library, not the playlist, until another queue plays. Edits made from the covers show as they come back to them: after More…'s Rename or Delete a deleted playlist's cover goes and a renamed one shows its new name, a new playlist gets a cover, and a playlist whose songs changed shows its new count and art. Hold Play/Pause on a cover gives Play Next, Add to Queue, Shuffle and More… as on the list's row, then **New Playlist**, which closes the covers for New Playlist's letter strip over the Playlists page, and, on a set with no toolbar (OLED's), **Select Playlists…**, which closes them for its select mode (a set with a toolbar edits from the page's toolbar).
 
 ## Rounded corners
 
@@ -552,7 +552,7 @@ same calibration by the tests.
 
 `test/build.py` fails a build when any fixed text or icon in a changed asset reaches
 under the glass (screen coordinates: the bar at y 0 to 30, windows at 30 to 320, the quick settings
-and confirm pop-ups at 0 to 320): a label's font-high band, an image drawn centred at its size, a
+and confirm pop-ups at 0 to 320): a label's font-high band, an image drawn centered at its size, a
 slider's bar, else the widget. Backgrounds, tap targets and list rows, which scroll, are not
 checked there; `test/patch.py` checks the settings rows in the first and last visible slots,
 Cover Flow's labels and lowest track row, and the status bar clock against every combination of
@@ -564,7 +564,7 @@ under `CLOCK_MIN` fails the build.
 The stock long-key function at 0x4f27e4 retains all instructions except the final
 Home call at 0x4f29cc (`HOLD_RETURN`). The hold fires after 700 ms, as Play/Pause's does
 ([internals.md](internals.md#queue-menu), `HOLD_KEYS`); stock waited 1000 ms. Stock power, lock, test and key-lock gates and its release
-latch execute first. The payload cancels centre confirmation and spin state, checks
+latch execute first. The payload cancels center confirmation and spin state, checks
 the shared screen/navigation restrictions, and then, on Now Playing, goes back
 (`navigator_back`) when the page it opened over (`np_origin`) lies right under it, or
 calls the stock Home destination otherwise; anywhere else it remembers the page and calls the stock switch
@@ -588,14 +588,14 @@ close (`0x4a1d30`, on `EVT_WINDOW_CLOSE`) makes it: Now Playing had no Quick Set
 had gone back to the one left open and closed it (#303). Inferred from the handlers; the emulator
 mocks the window manager.
 
-Over a prompt (`confirminfo_dialog` in front: Shut Down?, and Q2 Pod's own) the hold cancels it
+Over a prompt (`confirminfo_dialog` in front: Shut Down?, and Q2 Muse's own) the hold cancels it
 with `dialog_quit(top, 4)`, the prompt's own Return (`0x499bdc`). `usable` is true there, so the
 hold used to open Now Playing under the prompt's modal loop, and the prompt came back over it: a
 second Shut Down? (#303). That it was the same prompt back, not a new one, is inferred from a
 tester's video and stock's handlers; the emulator mocks the window manager.
 
 **System settings → Controls → Hold Return** (`Q2POD HOLDRETURN`) picks the
-destination: Recent (0, the default) is the behaviour above; Home (1) calls the stock Home
+destination: Recent (0, the default) is the behavior above; Home (1) calls the stock Home
 destination from any page but Home, Now Playing included, and clears `np_origin`. On Home the hold
 still opens Now Playing, as does iPod's short Return on Home's first row (on any other row it first
 selects that row). A list open on Home (Library, Streaming, Settings) closes first: at once under a page
@@ -642,7 +642,7 @@ stock's select mode with Select All, Import, Export, Delete and Done as rows, an
 mode ([internals.md](internals.md#playlists-without-a-toolbar)). Tiles narrower than half the list (the
 playlist page's Import/Export on a set with a toolbar) get none. Those two tiles, built by stock at run time,
 have no icon: the build gives the icon no width and stretches the label across the tile in stock's
-centred `s_scrlabel_white24c` (`tools/ipod.py`). The artist page's Albums tab drills but has no
+centered `s_scrlabel_white24c` (`tools/ipod.py`). The artist page's Albums tab drills but has no
 stock chevron or payload row layouter, so it has none.
 
 The payload's own pages (`page_list`) draw the same `list_into` at x 302 on every row
@@ -651,14 +651,14 @@ albums, playlists, artists, saved playlists and download jobs, and Download Cont
 lists, folders and phone-remote rows; Internet Radio's lists, Games, Ratings, Era's decades and
 albums; and the equalizer's Balance, Preamp, Presets, band, Frequency, Gain and Q rows and the
 Presets menu, the value moved left of it (`patch/peq_ui.c` `INTO`). A 64 px row with an empty detail
-centres its caption beside it. Rows that act in place (play, toggle, cycle a value) have none; on/off
+centers its caption beside it. Rows that act in place (play, toggle, cycle a value) have none; on/off
 rows (EQ Enabled, a band's Band, Spotify's Shuffle, Streaming Configuration's services) carry stock's
 `switch_on`/`switch_off` (`list_toggle`), as Shanling's settings rows do.
 
 ## Fast-scroll letter
 
 Spinning quickly through a list of more than 16 rows shows the first character of the selected
-row's title in a large white letter, centred over the list on a rounded dark square. It appears
+row's title in a large white letter, centered over the list on a rounded dark square. It appears
 once a step moves more than one row, from 300 ms of continuous spin
 ([internals.md](internals.md#wheel-movement)), and disappears 400 ms after the last such step, or
 at once on a slow tick, a touch or the end of the list. Latin letters show in
@@ -674,7 +674,7 @@ Queue while a shuffle is on (Up Next) and Chapters. Values are in `patch/offsets
 ## Now Playing
 
 `playing_page.bin` follows Rockbox's iVideo Now Playing in the 375x290 client area, below the
-status bar and its clock, with Apple's finish: rounded art, a larger title over grey artist and
+status bar and its clock, with Apple's finish: rounded art, a larger title over gray artist and
 album, and a four-pixel progress line:
 
 ```
@@ -683,21 +683,21 @@ album, and a four-pixel progress line:
  40 +---------------------------------------------------------+
     |  .-----------.                                          |  slide_view 0,40 375x186
     |  |    art    |  Title   (194,58 165x28, white 22)       |
-    |  |   16,42   |  Artist  (194,92 165x22, grey 18)        |
-    |  |  166x166  |  Album   (194,120 165x22, grey 18)       |
+    |  |   16,42   |  Artist  (194,92 165x22, gray 18)        |
+    |  |  166x166  |  Album   (194,120 165x22, gray 18)       |
     |  '-----------'              mode 247  fav 303 (y 158)   |  icons 50x50
 222 |                     . o .   (page dots)                 |
 253 |  (=========================------------------------)   |  line 21,253 333x4
-265 |      01:23 (46 80x16)           -02:34 (249 80x16)      |  grey 14
+265 |      01:23 (46 80x16)           -02:34 (249 80x16)      |  gray 14
 290 +---------------------------------------------------------+
 ```
 
 The art and the metadata keep 16 pixels from the sides (`NP_MARGIN`) and 12 from each other; the
 art is 166 pixels, as large as that leaves while the text column keeps its 165 pixels. Each band
 has its own space: the top row, then the art 2 pixels below it, 14 pixels under the foot of a
-16-pixel line centred in the top row and as far above the page dots (`NP_ART_Y`), the bar with the stock A-B markers
+16-pixel line centered in the top row and as far above the page dots (`NP_ART_Y`), the bar with the stock A-B markers
 (y 250 to 260) and the quiet time labels at y 265. The page dots keep their place while a swipe
-moves the pages: they are anchored on their own row, at the slide_view's centre.
+moves the pages: they are anchored on their own row, at the slide_view's center.
 
 The art's corners are rounded at 12 pixels (`NP_ART_RADIUS`), the radius of stock's own
 placeholder cover at this size, so real art and the placeholder match; a theme's
@@ -734,8 +734,8 @@ OLED lays the page out on its own grid ([oled-design.md](oled-design.md#now-play
 6 pixels; the title, artist and album 18 pixels right of it, ending on the 28-pixel right column,
 the artist and album in Inter's 18 in Text Secondary; More and the heart at the right end of the
 art's foot, on an 18-pixel line whose baseline is the art's bottom row; a 6-pixel bar from the text column to the right column at y 228,
-the times under its ends in Inter's tabular digits, and shuffle and repeat centred under them in the
-accent when on, grey when off, over the play mode button: a tap on shuffle turns it on or off and
+the times under its ends in Inter's tabular digits, and shuffle and repeat centered under them in the
+accent when on, gray when off, over the play mode button: a tap on shuffle turns it on or off and
 a tap on repeat steps Off, All, One, each keeping the other. The page dots
 sit under those, and the swipe's other pages stop above the bar. Each line that scrolls fades at
 the end it runs past (Display's [Theme](#theme)).
@@ -747,20 +747,20 @@ About, and Return goes back to ⋯ (under OLED its panel, over Now Playing), as 
 rows' pages. The build takes stock's info page out of the slide_view and leaves it hidden in Now
 Playing's window, where stock fills it; About moves it into its own page while open, at the same
 place on screen (under About's title where that is a row of the page), so the details look as they did on the swipe (`tools/ipod.py`
-`np_info_out`, `patch/np_about.c`). The details keep their stock 225-pixel column, centred; the lyrics
+`np_info_out`, `patch/np_about.c`). The details keep their stock 225-pixel column, centered; the lyrics
 page spans the screen (**Lyrics** below). The details' lines read `Label: value`, with spaced units
 (`35.92 MB`, `16-bit`, `950 kbps`, `44.1 kHz`), **Genre** and **Year** for stock's Genres and Era,
-`Unknown` for a missing value and `Location:` before the folder (`ringnav_np_info`). Under OLED About is an info grid instead ([oled-design](oled-design.md#track-details), `patch/np_about.c`): the cover, title, artist and length; a quality line, a Lossless, Hi-Res Lossless or DSD badge and the format's spec (`FLAC · 16-bit / 44.1 kHz`, `MP3 · 320 kbps`); then small grey names over white values, two a row, Album, Year, Genre, Bit Rate and Size, and Location across the last row in plain words (`SD Card · Music/Disclosure`, `Server · Downloaded`, `Server · Streaming`). A value that is unknown leaves its cell out, and the wheel scrolls the page when it is taller than the screen. A Genre line too long for the column scrolls at the album marquee's pace while About shows (`genre_step`). The play/pause overlay has zero opacity, retaining its original gesture target without
+`Unknown` for a missing value and `Location:` before the folder (`ringnav_np_info`). Under OLED About is an info grid instead ([oled-design](oled-design.md#track-details), `patch/np_about.c`): the cover, title, artist and length; a quality line, a Lossless, Hi-Res Lossless or DSD badge and the format's spec (`FLAC · 16-bit / 44.1 kHz`, `MP3 · 320 kbps`); then small gray names over white values, two a row, Album, Year, Genre, Bit Rate and Size, and Location across the last row in plain words (`SD Card · Music/Disclosure`, `Server · Downloaded`, `Server · Streaming`). A value that is unknown leaves its cell out, and the wheel scrolls the page when it is taller than the screen. A Genre line too long for the column scrolls at the album marquee's pace while About shows (`genre_step`). The play/pause overlay has zero opacity, retaining its original gesture target without
 a transport glyph; stock may update its visibility without making it appear. The loading
-spinner stays centred on the artwork. The on-screen Return icon moves off-screen, as on the pages whose navbars are
+spinner stays centered on the artwork. The on-screen Return icon moves off-screen, as on the pages whose navbars are
 hidden; the hardware Return does the same. More keeps its place at the top row's right. The play
-mode (shuffle/order) and Favourite icons sit at the foot of the art page under the text, the
-favourite centred directly beneath More at x 303, with the play-mode control 56 pixels to its left, leaving a 6 px gap between touch targets;
-the three lines centre in the art's height above them. Both retain their 50 px touch targets and
+mode (shuffle/order) and Favorite icons sit at the foot of the art page under the text, the
+favorite centered directly beneath More at x 303, with the play-mode control 56 pixels to its left, leaving a 6 px gap between touch targets;
+the three lines center in the art's height above them. Both retain their 50 px touch targets and
 vertical position. Both keep their stock images and handlers and swipe away with the art.
 Internet Radio uses the same heart alignment.
 
-The bar is a plain-colour line inside a 44-pixel seek target, with no thumb: a track in
+The bar is a plain-color line inside a 44-pixel seek target, with no thumb: a track in
 `playing.scrubber.track` (`TRACK_COLOR`, `#1C1C1C`, where a theme states none; OLED's `#333333`) and a
 fill in the accent, `playing.scrubber.height` high (OLED's 6; `bar_size` and `round_radius` set on the
 slider at runtime, `np_theme`). Spotify's bar follows the theme's height up to its 8-pixel view.
@@ -773,7 +773,7 @@ Cover Flow under Artist View: Cover Flow), and a tap on the album or the art ope
 songs, as ⋯'s Look up Album does: stock's album page, never a carousel. Return comes back to Now
 Playing. Where the hold menu offers no Go to row (a stream, AirPlay, a song with no album or artist
 tag, its page already open) the tap does nothing. While the finger is down the artist or album
-turns the accent's text colour and the art dims 15%; a touch that moves more than 10 pixels is a swipe,
+turns the accent's text color and the art dims 15%; a touch that moves more than 10 pixels is a swipe,
 which changes the page and goes nowhere. The taps use the layout's own boxes
 ([internals](internals.md#now-playing-links), `np_taps.c`). The wheel's way to the same places is
 the hold menu or ⋯.
@@ -783,7 +783,7 @@ any tap or Return closes it), whatever Enlarged Album Art is set to, and while t
 stopped, as stock's tap opened it; the art is dimmed while held, and letting go after it opens
 does not also open the album. A stream's art holds to full screen too, though its tap goes
 nowhere. Enlarged Album Art's idle countdown still opens it as well. Stock fits the
-cover to the whole screen, 320 pixels high, so the glass hid its corners; iPod centres it on black as
+cover to the whole screen, 320 pixels high, so the glass hid its corners; iPod centers it on black as
 the largest box of the cover's own shape whose corners clear the glass by `GLASS_SLACK` (`bc_fit`; a
 square cover is `BC_ART` in `tools/ipod.py`, 292 pixels with the defaults: 41 from the sides, 14 from
 the top and bottom; a 16:9 one 360 by 202), so the whole cover shows,
@@ -796,21 +796,21 @@ once that is another track's (Tidal's URL never is a queue path, so its art stay
 `default_bigcover` placeholder is the square. A layout back to the square refits from the kept shape. Its song name and the shade band behind it sit on the art's foot, show for `BC_MS` (3 s), then fade out together over `BC_STEPS` steps
 `BC_STEP_MS` apart (`ringnav_bigcover`, after stock's init). They show again for each new song while it is open.
 
-**Scrub.** A press of the centre button starts scrubbing, as on an iPod classic (with the screen off it only
+**Scrub.** A press of the center button starts scrubbing, as on an iPod classic (with the screen off it only
 wakes it, [Wake](internals.md#wake)), and a 14 px white knob marks the playhead while it lasts, the fill keeping the accent (on a set with
 no status row the fill turns white instead, `np_fill`). Each wheel tick moves 5 seconds, times a ramp of one more step per 100 ms of spin
 (up to 40 seconds a tick; the lists' gentler ramp does not apply), within the
 track. Both times and the bar follow the target at once, and so does the music: playing, the
 track jumps to the target as you turn, at most every 200 ms (`SCRUB_SEEK_MS`, `patch/seek.c`), so a
-fast spin is heard as a few jumps and lands on the target. A press of the centre button confirms it at once
+fast spin is heard as a few jumps and lands on the target. A press of the center button confirms it at once
 and leaves the screen on (and moves on to shuffle, below), as do Return, a touch and
 3 seconds without a tick, and each gives the wheel back to the volume; Return then stays on the
 page. Ending without having moved the target does not seek. Paused, the track stays paused and
-plays from the target at Play. Centre cycles the controls the wheel sets, as an iPod classic's
+plays from the target at Play. Center cycles the controls the wheel sets, as an iPod classic's
 does (`np_centre`): a press starts scrubbing at once,
 the next ends the scrub and rings shuffle, the next repeat (a tick toggles shuffle or steps repeat
 Off, All, One; under a theme without the pair these two are skipped), the next opens the rating
-picker, whose Centre saves and leaves the page at rest, the wheel back on the volume. Return, a
+picker, whose Center saves and leaves the page at rest, the wheel back on the volume. Return, a
 touch or 3 seconds without a key end a stage. A short hold (`NP_HOLD_MS`, 400 ms) turns the
 screen off, and a long hold is still Shut Down. The presses work the same while the volume shows
 `patch/offsets.inc`; see [internals.md](internals.md#scrub-ipod).
@@ -819,7 +819,7 @@ The top row's text and icons, the bar's ends and the times keep clear of the cor
 ([Rounded corners](#rounded-corners)).
 
 <a id="lyrics"></a>**Lyrics.** The lyrics page shows the lyrics large, for reading at a glance, as Apple Music's do:
-the playing line centred, the one before above it and the next below, on the 24-pixel text column
+the playing line centered, the one before above it and the next below, on the 24-pixel text column
 (`LYRIC_OLED_X`). Every line is Inter (the design's 22 px, AWTK's 27, `LYRIC_OLED_PX`), the playing line
 in Medium and the rest in Regular; a long one wraps, at a space or beside a CJK character, onto as
 many rows as it takes, up to four, which still fit the page (the rest cut), `LY_PITCH` (30 pixels)
@@ -887,7 +887,7 @@ were, and a held press there does what it did. Values are `SEEK_*` and `seek_pha
 The confirm and choice dialogs in `patch/contexts.inc` (flag `BUTTONS`) have no list: their buttons
 sit directly in the dialog. For those, the dialog itself is the navigation surface, a kind that
 never scrolls, and its clickable descendants are the rows in UI order. The wheel moves between
-them with hard ends, Centre clicks the selected one after the usual double-press window, and the
+them with hard ends, Center clicks the selected one after the usual double-press window, and the
 bar is drawn in the dialog's background: the button's own rectangle for a button narrower than half
 the dialog (the confirm pair), the full width otherwise. A new dialog starts on its first button,
 Cancel on the confirm pair.
@@ -903,7 +903,7 @@ The confirm itself is the confirmation card over the page that asked (`patch/fee
 [oled-design](oled-design.md#confirmation-card)): its title asks the question ("Shut Down?", "Delete Playlist
 “a”?"), and its answers are **Cancel** and the action's verb ("Shut Down", "Reset", "Delete"), a verb that
 loses something red after a gap; Delete Song's "Also delete source file" is the card's switch row, which
-Centre turns. Its toasts are a pill near the screen's foot over the page, which keeps its status row and
+Center turns. Its toasts are a pill near the screen's foot over the page, which keeps its status row and
 selection.
 
 | Dialog                        | Buttons                                         |
@@ -919,7 +919,7 @@ selection.
 wheel does nothing there (the keyboard's keys take it instead, [The keyboard](#keyboard); [Wheel volume](internals.md#wheel-volume)): the text-entry dialogs (`addplaylist`, `editwifi`, `kbwifiadd`,
 `kbwifipass`, `renameplaylist`, `searchbox`, `tidal_searchbox` and Baidu's `edit_dialog`), the Update
 Local Music progress (`updatemusic_dialog`, whose only button cancels a scan that can run for
-minutes), the pull-down quick settings (`statusbar_dialog`, whose rows the wheel walks, handing it to the brightness slider on Centre: see
+minutes), the pull-down quick settings (`statusbar_dialog`, whose rows the wheel walks, handing it to the brightness slider on Center: see
 [internals.md](internals.md#setting-editors)), and the dialogs without buttons
 (`volume_dialog`, `msginfo_dialog`, `checkfw_dialog`, `showsn_dialog`, `dialog_wifibt_test`).
 
@@ -936,8 +936,8 @@ builds three rows with `0x4c6b94`: a `list_item_create(view, 0, 0, 0, 0)` in `s_
 `s_btn_listitem` with a click handler, and in it a 52-pixel icon at x 10, a
 `s_scrlabel_white24l` `hscroll_label` at (72, 0, 210, 70) and `list_into` at x 282. The rows
 show no value; each opens a sub-page (iPod's [settings rows](#settings) then lay them out 68
-pixels high). The build destroys stock's Lock Screen and Show Navigation Bar rows (Q2 Pod has no lock screen: [Screen off and wake](internals.md#screen-off-and-wake)), then adds a "Smart Awake" switch and Night Shift, and, the same way with stock's `list_into` chevron, **Appearance**
-(`system_display`) and **Cover Flow** (Play settings' cover mode icon, `playset_covermode`), in that order: Brightness, Screen Off Time, Smart Awake, Night Shift, Appearance, Cover Flow, and last the **Enlarged Album Art** switch (stock's `PLAYSET COVERMODE`, Now Playing's art). System settings' **Controls** row (Play settings' folder jump icon, `playset_folderjump`) is the third sub-page. Each opens stock's
+pixels high). The build destroys stock's Lock Screen and Show Navigation Bar rows (Q2 Muse has no lock screen: [Screen off and wake](internals.md#screen-off-and-wake)), then adds a "Smart Awake" switch and Night Shift, and, the same way with stock's `list_into` chevron, **Appearance**
+(`system_display`) and **Cover Flow** (Play settings' cover mode icon, `playset_covermode`), in that order: Brightness, Screen Off Time, Smart Awake, Night Shift, Appearance, Cover Flow, the **Enlarged Album Art** switch (stock's `PLAYSET COVERMODE`, Now Playing's art), and last the **Reduce Motion** switch. System settings' **Controls** row (Play settings' folder jump icon, `playset_folderjump`) is the third sub-page. Each opens stock's
 Display page again (`display_open`, `display_sub` naming the sub-page while its init runs), which
 drops the stock rows, takes the sub-page's title and builds only its own rows:
 
@@ -946,6 +946,10 @@ drops the stock rows, takes the sub-page's title and builds only its own rows:
   Percent; see [Status bar and clock](#status-bar-and-clock)), then its own options, "Song Artist: Inline",
   "Song Length: Albums" and "Track Time: Remaining" ([Theme](#theme)). Under OLED (`set_text`) a row shows its
   value on the right column, apart from its label.
+- Display's main page, last: a "Reduce Motion" switch (`IPOD REDUCEMOTION`, off unless chosen; `ui_kit.c`
+  `motion_reduced`, read with the other `IPOD` keys and written by the row's click, so the next animation follows it),
+  captioned "Fades in place of slides, zooms and bounces": what it changes is [oled-design.md:
+  Motion](oled-design.md#motion).
 - Display's main page: a "Smart Awake" switch (`IPOD KEEPLIT`, on unless chosen, and a reset's `config.ini` says 1;
   `keep_lit_poll`): with Now Playing lit in front on its lyrics page, or its
   full-screen art (`bigcover_page`) or ⋯'s About in front, and a song playing, it calls
@@ -966,9 +970,9 @@ drops the stock rows, takes the sub-page's title and builds only its own rows:
   (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); "Clicker: Both", Key Tone's row, cycling Speaker, Headphones, Both and Off (`IPOD CLICKER`, Off being Key Tone off; [Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; and "Wake: Single Press".
 
 All are among the [settings icons](#settings-icons) the build pre-sizes. A value row has its value
-in the label (260 pixels wide, to where the chevron ends) and no chevron, since Centre or a tap
+in the label (260 pixels wide, to where the chevron ends) and no chevron, since Center or a tap
 changes it in place.
-The build also appends **Boot to: Rockbox / Q2 Pod** to Battery when Rockbox is present; see [Boot](boot.md#rockbox).
+The build also appends **Boot to: Rockbox / Q2 Muse** to Battery when Rockbox is present; see [Boot](boot.md#rockbox).
 General ends with **Restart** and **Shut Down** (`patch/power_rows.c`), 12 px below the rows above them (an empty `label`, which
 the wheel passes) and with no chevron. Each asks first in stock's `confirminfo_dialog`, drawn as the confirmation card
 ("Restart?" or "Shut Down?" as the title, then Cancel, selected, and the verb); Cancel or Return leaves the page as it was.
@@ -994,10 +998,10 @@ OLED offers one accent, its own Blue (`OLED_ACCENT` 9, after the nine `ACCENTS` 
 five tones (`<colorScheme name="oled-blue" base="cobalt">`), the selection bar, the progress fill and
 every red stock draws ([Theme](#theme)). The engine keeps the `ACCENTS` rows (`patch/offsets.inc`:
 Graphite, Crimson, Tidal, Champagne, Cobalt, Tangerine, Plum, Ivory, Green) for a theme to offer;
-Crimson returns every color unchanged. Greys and artwork remain unchanged by the live accent
+Crimson returns every color unchanged. Grays and artwork remain unchanged by the live accent
 mapper. See [internals.md](internals.md#accent) for the mapping.
 
-Now Playing uses 24 px monochrome control glyphs on 28 px canvases inside the existing touch targets. Favourite keeps its outline/filled states; inactive dots are muted. Artwork, scrolling metadata and playback controls retain their existing behavior.
+Now Playing uses 24 px monochrome control glyphs on 28 px canvases inside the existing touch targets. Favorite keeps its outline/filled states; inactive dots are muted. Artwork, scrolling metadata and playback controls retain their existing behavior.
 
 ### Theme
 
@@ -1021,17 +1025,17 @@ Now Playing's bar has no thumb: stock draws its dragger (a box and knob, the sto
 `slider_knobless` the second, which stock's default slider style would otherwise supply. 1.3.9 first
 painted it white, which drew the box at rest.
 
-- **The status row.** No bar band: the page's title, small and grey, from x 62, and on the right, right to left, a
+- **The status row.** No bar band: the page's title, small and gray, from x 62, and on the right, right to left, a
   slim battery ending 62 px from the right edge (`STATUS_ROW_INSET`), three level bars while something plays (frozen
-  and grey while paused; a tap on them opens Now Playing), Wi-Fi's signal while connected (a crossed glyph with no
+  and gray while paused; a tap on them opens Now Playing), Wi-Fi's signal while connected (a crossed glyph with no
   link past the access point), a card app's sync (turning arrows while it checks, a filling ring while it
-  downloads), a Bluetooth headset's battery, and a 13 px padlock while Buttons Lock is on, each centred on y 23, up in
+  downloads), a Bluetooth headset's battery, and a 13 px padlock while Buttons Lock is on, each centered on y 23, up in
   the glass's top curve and clear of it ([Status row slots](internals.md#status-row-slots)). A press Buttons Lock
   blocks with the screen off shows a card saying so for 1.5 s, as the iPod's Hold switch did ([Buttons
-  lock](internals.md#buttons-lock)). The clock, in the title's face and grey, sits 6 px left of the leftmost of them,
+  lock](internals.md#buttons-lock)). The clock, in the title's face and gray, sits 6 px left of the leftmost of them,
   and the title ends with an ellipsis 12 px short of the widest clock ("00:00"), however long it is: under a status row a
   page's caption never takes a row of its own (`bar_title_fits`), so the list keeps its top. A page with no title (Home, Now Playing, Cover Flow's covers;
-  an artist's are titled by the artist) has the clock centred across the row instead (at the right where centred it
+  an artist's are titled by the artist) has the clock centered across the row instead (at the right where centered it
   would reach the glyphs), but Home in Split keeps it at the right, over the art, where it is inked white or black as
   one glyph with the others (`clock_place`).
 - **The grid.** 32 px rows from y 58 with their text at x 24, seven to a screen: the list ends at y 282, above
@@ -1040,7 +1044,7 @@ painted it white, which drew the box at rest.
   take it; Albums and stock's search results are two lines at 52 px, four to a page, the covers with 4 px corners. A row that
   opens a page and shows a value (Crossfade, Resume Songs) has the value just left of its chevron. The status row
   names the Library and Songs by those words, where stock calls both "Local Songs".
-- **Colour.** Black (white in Light Mode), white text, second lines in Text Tertiary (`#858585`), a settings row's
+- **Color.** Black (white in Light Mode), white text, second lines in Text Tertiary (`#858585`), a settings row's
   value in Text Secondary (`#ABABAB`, `#5C5C5C` on paper), and one blue, `#2160D8`, for the selection bar, the
   progress fill and every mark stock draws red. **Accent** offers that Blue alone (`OLED_ACCENT`).
 - **Type.** Inter Regular for rows (20 px) and second lines (15 px), Inter Medium for the status row (15 px) and
@@ -1065,58 +1069,58 @@ painted it white, which drew the box at rest.
   none; an album shows each track's number in a 14 px column before the title (from x 50) and its length on the
   right column, once Scan Song Durations has measured it. **Song Artist**: Inline (the default), Selected Row (the
   selected row's artist on the right column), Right (every row's) or Off. **Song Length**: Albums (the default), All
-  Lists or Off; with a length on the right column, Right and Selected Row put the artist inline. Lists Q2 Pod builds
+  Lists or Off; with a length on the right column, Right and Selected Row put the artist inline. Lists Q2 Muse builds
   itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep their own rows.
 - <a id="search"></a>**Search.** The Library's Search row (and Songs' pull) opens an iPod classic's letter strip, not
   stock's search box and keyboard (`list.entry.ipod`, `patch/search_strip.c`): a `#1C1C1E` pill low in the glass,
   x 40 to 335 and y 254 to 288 with 17 px corners, the typed text in 18 px white in a black box at its left (x 46 to
   142, 5 px in, 12 px corners) with a steady 2 px cursor, and A to Z, 0 to 9, a space and delete in 19 px Inter, each
-  centred in an equal 19 px cell, the lit one white on a fixed accent key in the middle of the run (x 148 to 327),
-  the rest Text Secondary, both ends of the run fading into the pill's grey over 22 px. When the wheel lands on a
+  centered in an equal 19 px cell, the lit one white on a fixed accent key in the middle of the run (x 148 to 327),
+  the rest Text Secondary, both ends of the run fading into the pill's gray over 22 px. When the wheel lands on a
   letter or digit its key pops up, as an iPhone's keyboard does: the key grows a bubble above the strip (a 30 px head
   with 9 px corners narrowing over 18 px to the 18 px key, the accent) holding the letter in 26 px white Inter
   Medium, and the key keeps the letter at 19 px in white at 60 %; it goes 300 ms after the wheel stops. Turning
   faster than 8 letters a second shows none until the wheel stops, then one. The bubble may cover the last result
-  rows while it shows. The wheel walks the strip (round from delete to A) and Centre enters the lit character at
+  rows while it shows. The wheel walks the strip (round from delete to A) and Center enters the lit character at
   the cursor; Previous and Next move the cursor along the text, Return erases the character before it (at the
   text's start it does nothing but click), and a held Return closes Search from anywhere on the page: 200 ms into
   the hold a card says "Keep holding to go back" over the dimmed page, its ring filling until 800 ms, when Search
   closes; let go before and nothing is erased (`search_strip_down`, [oled-design](oled-design.md#text-entry)). A space is never typed first or beside
   another. A text longer than the box scrolls to keep the cursor in it. With nothing typed, the free area above
   the strip says what Search finds, as an empty list's note does: "Search your music" in 16 px Text Secondary and
-  "Artists, albums and songs" in 15 px Text Tertiary 24 px under it, the pair centred on y 144 and 168 (Add Songs'
+  "Artists, albums and songs" in 15 px Text Tertiary 24 px under it, the pair centered on y 144 and 168 (Add Songs'
   Search: "Songs by title or artist").
   What holds the text lists above the strip as it is typed: the songs whose title, artist or album holds it, then
   the artists whose name holds it, then the albums, each artist and album once; six single-line rows from y 58, the
   name in 20 px white and after it, in 15 px Text Tertiary, the artist on a song's row, "Artist" on an artist's,
   "Album" and its artist on an album's. Next with the cursor at the text's end moves to the results: the selection
-  bar takes the first one, the strip's key goes grey, and an iOS segmented control takes the first row (All, Songs,
+  bar takes the first one, the strip's key goes gray, and an iOS segmented control takes the first row (All, Songs,
   Artists, Albums; a 30 px `#1C1C1E` track with 9 px corners, the open tab a raised `#3A3A3C` segment, the accent
   while the wheel is on it, labels in Inter Medium 17, the others `#ABABAB`), leaving five rows under it. All lists
   the three groups, 32 of each at most, so a common string's artists are never more than 32 rows down (under five
   turns of the wheel at the default sensitivity); Songs, Artists and Albums list their group in full, the artists
   and albums A to Z. The tab chosen stays while the text changes, and the strip's list shows it. The wheel moves the
-  bar; Centre plays a song with the songs found after it as the queue, opens an artist's page, or opens an album's
+  bar; Center plays a song with the songs found after it as the queue, opens an artist's page, or opens an album's
   tracks in Cover Flow. A turn up from the first result lands on the tabs, where the wheel moves between them, each
-  picked as it is reached ([Tabs](oled-design.md#tabs)): a turn down past Albums, or Centre, goes back to the results
+  picked as it is reached ([Tabs](oled-design.md#tabs)): a turn down past Albums, or Center, goes back to the results
   and a turn up past All to the strip; Next picks the next tab and Previous the one before. Previous or Return
   on the results, and Return on the tabs, go back to the strip with the text, cursor and tab as they were. With text
   and no match, the empty state stands in the list's place, "No Matches", "Try fewer letters"
   ([oled-design](oled-design.md#empty-and-offline)), and Next stays on the strip; on a tab with nothing, Next
   lands on the tabs. A server song that can't play now (offline, no copy on the card), and an artist or album none
-  of whose songs can, is greyed with the offline mark at its right, as in every other list
-  ([server library](server-library.md#greyed-rows)). By touch, a drag along the strip moves the alphabet a letter
+  of whose songs can, is grayed with the offline mark at its right, as in every other list
+  ([server library](server-library.md#grayed-rows)). By touch, a drag along the strip moves the alphabet a letter
   per 19 px as the finger goes, popping each one as the wheel does, and types nothing; a tap on a letter, the faded
   ones at the ends too, pops it and types it at the cursor; a tap on a tab opens it, a tap on a result opens or
   plays it, and a drag up or down the results scrolls them a row per 32 px. Each tick along the strip clicks as a
-  list's row change does, and Centre, Next, Previous and Return click as a button does, through the Clicker
+  list's row change does, and Center, Next, Previous and Return click as a button does, through the Clicker
   setting.
 - <a id="name-strip"></a>**Naming a playlist.** New Playlist (stock's add-playlist dialog's place: Cover Flow's
   playlists' hold menu, the Add to Playlist picker's New Playlist… row; `playlist_new_open`) and a playlist's Rename
   (`playlist_rename_open`, prefilled with the name, the cursor at its end) are the same strip with its typed-text
-  field off: the same pill in the same place, the letters run across the whole of it (x 46 to 329, the lit key centred
+  field off: the same pill in the same place, the letters run across the whole of it (x 46 to 329, the lit key centered
   at x 178, seven cells each side), and the name is written large in the middle of the screen, Inter Medium 22 white
-  centred on y 140 with a steady cursor, over the hint "Press Next to create" or "Press Next to save" in 15 px Text
+  centered on y 140 with a steady cursor, over the hint "Press Next to create" or "Press Next to save" in 15 px Text
   Tertiary on y 180. The status row reads New Playlist or Rename Playlist. A word's first letter is typed as a
   capital. Previous and Next move the cursor along the name; Next with the cursor at the name's end creates the
   playlist (`ringnav_playlist_create`, "Playlist created", and the list goes back to open on it) or saves the new name
@@ -1134,7 +1138,7 @@ painted it white, which drew the box at rest.
   acts as it did: the Wi-Fi password joins, an EQ preset is renamed, a search searches; the keyboard, the strip with it,
   closes as its Done closes it. A held Return closes the keyboard and the strip (an edit of ours emptied first, as the
   keyboard's Return did), leaving the box. Under another theme
-  the keyboard stays stock's, its keys `#1C1C1E` boxes on black, the wheel walking them and Centre pressing the lit
+  the keyboard stays stock's, its keys `#1C1C1E` boxes on black, the wheel walking them and Center pressing the lit
   one.
 - **Track Time.** Now Playing's right-hand time shows what is left of the track ("-3:29", the default) or its
   length ("4:12"). A tap on the time switches it and the choice is kept across tracks and restarts (`IPOD NPTIME`,
@@ -1151,22 +1155,22 @@ painted it white, which drew the box at rest.
 **Light Mode: Auto** (`LIGHT=2`) is light from 07:00 to 18:59 by the device clock and dark the rest of the day. The row cycles Off, On, Auto on each click. It switches at 07:00 and 19:00 while the device is on, and the cached images are dropped and an open screen repaints then (`clock_show`, at each minute with the status bar's clock). The boot logo picks its mode by the same hours, in the saved time zone ([boot](boot.md#light-mode)).
 
 **Light Mode: On** (`LIGHT=1`) turns the theme light at runtime, over the same assets. Every
-neutral colour (channels within `LIGHT_SPREAD`) flips per channel, black to `LIGHT_PAPER` (`#F4F4F4`)
-and white to `LIGHT_INK` (`#161616`), or the theme's own paper and ink (OLED's `#FFFFFF` and `#000000`, `scheme.paper`, `scheme.ink`), alpha kept; other hues are left as they are. Stock's colours
+neutral color (channels within `LIGHT_SPREAD`) flips per channel, black to `LIGHT_PAPER` (`#F4F4F4`)
+and white to `LIGHT_INK` (`#161616`), or the theme's own paper and ink (OLED's `#FFFFFF` and `#000000`, `scheme.paper`, `scheme.ink`), alpha kept; other hues are left as they are. Stock's colors
 flip in the style hooks (`accent_map`, after the accent), the payload's own in `ui_ink`, which
-`patch/peq.h` puts in front of every canvas and vgcanvas colour setter. A colour read back from the
+`patch/peq.h` puts in front of every canvas and vgcanvas color setter. A color read back from the
 LCD to restore it goes through `stock_canvas_set_*`, since it has flipped already. Only the outermost
 style hook call maps: a mutable style (inline `style:*`) answers from its default style through
-`style_get_color` again, and the flip is not idempotent. A clear colour (`#00000000`) stays clear,
+`style_get_color` again, and the flip is not idempotent. A clear color (`#00000000`) stays clear,
 because stock tests for it (Now Playing's dragger).
 
 The accent keeps its tones. On the accent's bar the rows' ink stays white, as on an iPod's blue bar
 (`sel_accent`), and so does the chevron (the theme's white caret, `chevron_icon`). A red tint over black
 (stock's pressed tints) becomes the same tint of the tone over paper.
 
-A theme image without colour (no pixel more than `LIGHT_CHROMA` saturated) flips too when it is
+A theme image without color (no pixel more than `LIGHT_CHROMA` saturated) flips too when it is
 mostly glyph: under 1/`LIGHT_SURFACE` of its area opaque and darker than `LIGHT_GLYPH`. White marks,
-chevrons, spinners and status icons turn dark, while a grey or dark disc keeps its white glyph.
+chevrons, spinners and status icons turn dark, while a gray or dark disc keeps its white glyph.
 Quick Settings' inactive discs (`drop_*`) flip whole, to light discs under dark glyphs, and the
 active ones keep the accent. An image the accent mapped is final, and `switch_off` keeps its white
 knob, as `switch_on` does. Cover Flow's frame composites over paper instead of black, its side covers and reflections fading to paper. Solitaire's face-up cards stay light with black suits (`unflipped`). The status bar's stock
@@ -1193,7 +1197,7 @@ with a toast saying so. How the PIN and the timer work:
 **Library → Games** opens Sudoku, Vortex, Solitaire and Snake ([internals](internals.md#games)). A game
 takes every key but Power and a held Return, so the music keeps playing untouched.
 
-| Game      | Wheel                                    | Centre                                          | Play/Pause            | Previous/Next                                                           | Return                              |
+| Game      | Wheel                                    | Center                                          | Play/Pause            | Previous/Next                                                           | Return                              |
 | --------- | ---------------------------------------- | ----------------------------------------------- | --------------------- | ----------------------------------------------------------------------- | ----------------------------------- |
 | Sudoku    | Moves through the cells; picks the digit | Opens the digit, then writes it                 | New game (asks first) | Up or down a row                                                        | Cancels the digit; back to Games    |
 | Vortex    | Turns the paddle                         | Launches; plays again after a game              | Pauses and resumes    |                                                                         | Pause menu: Continue or Quit        |

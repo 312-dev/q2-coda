@@ -110,10 +110,11 @@ int split_geom(int k) { return geom_val(V_SPLIT_ROW + k); }
 int list_fit_end(void) { return geom_val(V_LIST_FIT) ? geom_val(V_BAR) + geom_val(V_LIST_END) : 0; }
 /* The Display rows' settings, by ringnav_display's index: 0 Accent, 1 Home (0 Split, 1 Full,
  * 2 Carousel), 2 Battery, 3 Shortcut, 4 Light Mode, 5 Smart Awake, 6 the Clicker's output (no row
- * of its own: Controls' Key Tone row shows it, clicker.c), 7 Time in Title; 8 on: the theme's own
- * options, SETTING_OWN + k for theme_keys[k]. */
-static const char *const setting_keys[] = { "ACCENT", "HOME",    "BATTERY", "SHORTCUT",
-                                            "LIGHT",  "KEEPLIT", "CLICKER", "TIMETITLE" };
+ * of its own: Controls' Key Tone row shows it, clicker.c), 7 Time in Title, 8 Reduce Motion; 9 on:
+ * the theme's own options, SETTING_OWN + k for theme_keys[k]. */
+static const char *const setting_keys[] = { "ACCENT",    "HOME",    "BATTERY", "SHORTCUT",
+                                            "LIGHT",     "KEEPLIT", "CLICKER", "TIMETITLE",
+                                            "REDUCEMOTION" };
 const int setting_counts[] = { SETTING_N_ACCENT,
                                SETTING_N_HOME,
                                SETTING_N_BATTERY,
@@ -121,9 +122,11 @@ const int setting_counts[] = { SETTING_N_ACCENT,
                                SETTING_N_LIGHT,
                                2,
                                3,
+                               2,
                                2 };
-int *const setting_values[] = { &st.accent, &st.home,     &st.battery, &st.shortcut,
-                                &st.light,  &st.keep_lit, &st.clicker, &st.time_title };
+int *const setting_values[] = { &st.accent,     &st.home,     &st.battery, &st.shortcut,
+                                &st.light,      &st.keep_lit, &st.clicker, &st.time_title,
+                                &st.reduce_motion };
 /* An option's value and config key: the accent's are the theme's own, an own option's st.own[] and
  * theme_keys[], the rest setting_values'. */
 int *option_slot(const theme_t *T, int setting) {
@@ -182,6 +185,7 @@ __attribute__((noinline)) static void settings_read(void) {
     st.keep_lit = config_value("IPOD", "KEEPLIT", 2, 1);
     st.clicker = config_value("IPOD", "CLICKER", 3, 0);      /* Both unless chosen (clicker.c) */
     st.time_title = config_value("IPOD", "TIMETITLE", 2, 1); /* the clock unless chosen */
+    st.reduce_motion = config_value("IPOD", "REDUCEMOTION", 2, 0); /* full motion unless chosen */
     /* the theme's own keys, after the payload's, in table order */
     for (int k = 0; k < THEME_KEYS; ++k)
         st.own[k] = config_value("IPOD", theme_keys[k].key, theme_keys[k].n, theme_keys[k].def);

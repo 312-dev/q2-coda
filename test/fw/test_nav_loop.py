@@ -205,7 +205,7 @@ def test_the_suspend_is_recorded_and_the_watchdog_sleeps_through_it(fw, power):
 
 
 # The boot logo (docs/boot.md).
-LOGO_SRC, LOGO_DST, LOGO_ROT = '/mnt/mmc/Q2Pod/boot/boot-logo.jpg', '/mnt/data/boot-logo.jpg', '/tmp/boot-logo.jpg'
+LOGO_SRC, LOGO_DST, LOGO_ROT = '/mnt/mmc/Q2Muse/boot/boot-logo.jpg', '/mnt/data/boot-logo.jpg', '/tmp/boot-logo.jpg'
 
 
 def jpeg(w, h, marker=0xc0, bits=8, parts=3, before=b'', tag=b''):

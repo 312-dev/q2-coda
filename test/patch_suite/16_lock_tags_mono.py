@@ -92,11 +92,11 @@ assert texts()==['Folder Root: Card','playset_foldercover'] and icons==['playset
 assert [(m.entries+rows).index(c) for c in m.nodes[m.settings_view]['children']]==[13,12,14]
 m.byte(syms['g_foldercover_flag'],0); assert click(1)==[(1,'PLAYSET','FOLDERCOVER')] and m.u.mem_read(syms['g_foldercover_flag'],1)==b'\1' and switch_image(m,rows[1])=='switch_on'
 assert click(1)==[(0,'PLAYSET','FOLDERCOVER')] and switch_image(m,rows[1])=='switch_off'; passed()
-# Display: Enlarged Album Art last, flipping stock's own byte and key
+# Display: Enlarged Album Art, then Reduce Motion last; Enlarged Album Art flips stock's own byte and key
 m,rows,texts,icons,click=settings_page('display','scroll_view_display',stock_rows=4)
-assert texts()[-1]=='playset_covermode'
-m.byte(syms['g_bigcovermode'],0); assert click(len(rows)-1)==[(1,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\1' and switch_image(m,rows[-1])=='switch_on'
-assert click(len(rows)-1)==[(0,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\0'; passed()
+assert texts()[-2:]==['playset_covermode','Reduce Motion'],texts()
+m.byte(syms['g_bigcovermode'],0); assert click(len(rows)-2)==[(1,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\1' and switch_image(m,rows[-2])=='switch_on'
+assert click(len(rows)-2)==[(0,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\0'; passed()
 # Artists is Album Artist until a choice is saved (read_artistype_value); a saved Artist stays.
 for config,want in (({},1),({'ARTISTTYPE':'0'},0),({'ARTISTTYPE':'1'},1)):
     a=Machine(); a.config.update(config); a.word(syms['artist_type'],7)

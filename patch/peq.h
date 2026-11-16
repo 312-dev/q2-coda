@@ -282,8 +282,9 @@ void page_retitle(void *page, void *title, const char *caption);
 void *page_list(void *page, void *body, void **title, const char *caption, int n, int item_h);
 void *rows_view(void *parent, int y, int w, int h, int n, int item_h);
 void *page_list_or(void *page, void *body, const char *name, const char *none, int n, int item_h);
-/* feedback.c: the empty state (docs/oled-design.md#empty-and-offline), stacked tiles with a glyph
- * (tools/art.py EMPTY_GLYPHS), a title, a hint and at most one action row */
+/* feedback.c: the empty state (docs/oled-design.md#empty-and-offline), an outline glyph
+ * (tools/art.py EMPTY_GLYPHS; none in the compact form, under rows), a title, a hint and at most
+ * one button */
 typedef struct {
     const char *glyph, *title, *hint, *row;
 } empty_t;
@@ -472,6 +473,9 @@ int airplay_on(void), airplay_lyrics(int *ms);
  * 0 when the card didn't take it. */
 int addon_fav(const char *id, const char *kind, const char *key, int on);
 int addon_fav_path(const char *path, int on);
+/* addon.c: which copy of a card app runs, the card's or the firmware's (docs/internals.md#bundled-apps) */
+int addon_dir(const char *id, char *dir, unsigned n), addon_version_cmp(const char *x, const char *y);
+void addon_q2app(const char *id, char *path, unsigned n);
 /* catalogue.c: the server library (docs/internals.md#server-library). catalogue_on: Local + Server;
  * catalogue_path: a server row's path; catalogue_unavailable: a record that can't play now;
  * catalogue_album_unavailable: an album list's record none of whose songs can play now, and

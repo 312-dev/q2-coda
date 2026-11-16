@@ -1,5 +1,5 @@
 #!/bin/sh
-# Q2 Pod — safe replacement for the stock Wi-Fi transfer file-manager CGIs (create/delete/
+# Q2 Muse — safe replacement for the stock Wi-Fi transfer file-manager CGIs (create/delete/
 # list/download/upload), and the PIN check in front of them (auth). One script behind all five
 # cgi-bin/*.cgi inodes and cgi-bin/auth.cgi; it dispatches on SCRIPT_NAME, so it answers both
 # /name and /cgi-bin/name.cgi — no bypass route.

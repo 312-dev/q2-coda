@@ -231,9 +231,9 @@ HELPER, HELPER_LIKE = 'usr/bin/q2video', 'usr/bin/display_logo'
 HELPER_LIBS = ['lib/libc-2.28.so', 'lib/libpthread-2.28.so', 'usr/lib/libasound.so.2.0.0']
 # Rockbox dual boot (docs/boot.md#rockbox): S90play starts Rockbox whenever the card has it, as an
 # iPod with Rockbox does. Play/Pause held at power-on (patch/boot.c reads the key) or Rockbox's
-# exit 0x51 (Boot stock OS) starts Q2 Pod for that session only. boot-target selects the next
+# exit 0x51 (Boot stock OS) starts Q2 Muse for that session only. boot-target selects the next
 # power-on default (missing or invalid retains Rockbox). ponytail: the card's mount is awaited (up to 3 s without a card)
-# unless Q2 Pod was asked for, as the card probe can't tell "no card" from "not yet". Rockbox runs
+# unless Q2 Muse was asked for, as the card probe can't tell "no card" from "not yet". Rockbox runs
 # with the launcher contract in its tools/shanlingq2/README; demo starts when it exits, or when the
 # card has none. demo keeps its argv[0], which checkappprocess.sh pgreps for. iPod's Home Rockbox row
 # (navigation.c rockbox_open) leaves ROCKBOX_FLAG and kills demo: Rockbox runs again, its
@@ -258,6 +258,16 @@ GUEST_LIBS = ['lib/libc-2.28.so', 'usr/lib/libdbus-1.so.3.19.15']
 GUEST_DBUS = 'etc/dbus-1/system.d/bluealsa-sink.conf'
 GUEST_HOTSPOT = 'usr/bin/q2-hotspot'  # its hotspot (docs/internals.md#guest-play-hotspot), a shell script q2-guest runs
 PLAYER_STOCK_DIR = b'usr/lib/hciplayer-stock'  # --new-player: hciplayer.xz's place, player/main.c's STOCK_XZ
+# Card apps the firmware carries (docs/internals.md#bundled-apps): id -> (version, release zip, its size, its
+# SHA-256), each the zip its release ships for the App Store, read from --apps (APPS_DIR). Its .<id>/ files go
+# to BUNDLED_DIR/<id> (patch/addon.c BUNDLED) with a version file and bundled_launcher's run in place of the
+# app's, so the app keeps its data in the card's .<id>. A new pin is a new zip: the source hash covers the pin.
+BUNDLED_DIR = 'usr/lib/q2apps'
+BUNDLED_APPS = {
+    'subsonic': ('q2-v0.9', 'q2-subsonic-v0.9-43b537a.zip', 2834040,
+                 'fd96e4790e655cd95cb1c2c044b9ac3787960a0c1bc035126d886625471d710a'),
+}
+APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
 ROCKBOX_FLAG = '/tmp/q2pod-rockbox'
 # Rockbox can't use Wi-Fi and the radio costs battery, so rockbox() below stops it. Nothing is saved or restored
@@ -273,9 +283,9 @@ ROCKBOX_FLAG = '/tmp/q2pod-rockbox'
 # again, catches a shell that took longer. ponytail: 300 ms and 2 s are guesses; a shell slower than 2 s still escapes.
 WIFI_OFF = 'killall -9 wifi_connect.sh udhcpc wpa_supplicant 2>/dev/null; ifconfig wlan0 down 2>/dev/null'
 DEFAULT_CONFIG = 'release/assets/default/raw/config.ini'  # stock's reset copies it (DEFAULT_CONFIG_OFF below)
-DEFAULTS_MARK = '/mnt/data/q2-defaults'  # written once Q2 Pod's defaults replaced the config before it (BOOT_HOOK)
+DEFAULTS_MARK = '/mnt/data/q2-defaults'  # written once Q2 Muse's defaults replaced the config before it (BOOT_HOOK)
 BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
-        # Q2 Pod's defaults over every config.ini from before the q2-defaults mark, once, before demo reads it: a stock
+        # Q2 Muse's defaults over every config.ini from before the q2-defaults mark, once, before demo reads it: a stock
         # Shanling config, or an earlier build's, holds stock's values (Enlarged Album Art on); later updates keep
         # the user's settings. Saved Wi-Fi, Bluetooth pairings and the library are other files (docs/internals.md#first-boot)
         d={DEFAULTS_MARK}
@@ -296,7 +306,7 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             rm -f $m
         }}
         rm -f /mnt/data/q2-cf-trace /mnt/data/q2-stall
-        # Baidu Netdisk's sign-in, which stock sends over plain HTTP: Q2 Pod has no Baidu row to use it from
+        # Baidu Netdisk's sign-in, which stock sends over plain HTTP: Q2 Muse has no Baidu row to use it from
         rm -f /mnt/data/baidu_token.conf
         [ -f $c ] && (
             i=0
@@ -367,13 +377,13 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
     ) &
 '''.encode())
 # User boot logo (docs/boot.md#custom-boot-logo): demo copies the card's to /mnt/data, which
-# S10mount_ubifs mounts before the splash; without it, the built-in one, or under Light Mode
-# (LIGHT=1 in config.ini, also on /mnt/data) its light twin, which iPod builds of the default logo ship.
+# S10mount_ubifs mounts before the splash; without it, the built-in one, in Light Mode too (the boot is
+# dark in either mode: docs/boot.md#light-mode).
 # Boot animation (docs/boot.md#boot-animation): where the built-in dark splash would show and the build
 # ships LOGO_ANIM (the default logo's builds), display_logo draws LOGO_BLACK, which turns the screen on as
 # for any splash, and q2splash plays the animation over it; if q2splash can't start, the still logo shows.
 S11LOGO = 'etc/init.d/S11logo_display_shell'
-LOGO, LOGO_LIGHT = 'release/assets/default/raw/images/xx/logo.jpg', 'release/assets/default/raw/images/xx/logo-light.jpg'
+LOGO = 'release/assets/default/raw/images/xx/logo.jpg'
 LOGO_ANIM, LOGO_BLACK = 'release/assets/default/raw/images/xx/logo.q2a', 'release/assets/default/raw/images/xx/logo-black.jpg'
 REMOTE_HOOK = (b'/usr/bin/dbus-daemon --config-file=/etc/dbus-1/system.conf\n',
                b'/usr/bin/dbus-daemon --config-file=/etc/dbus-1/system.conf\n/usr/bin/q2remote &\n')
@@ -461,7 +471,7 @@ THTTPD_CONF = 'etc/thttpd.conf'
 THTTPD_USER = (b'\nuser=root\n', b'\nuser=www-data\n')
 WWW_DATA = b'\nwww-data:x:33:33:'  # stock's /etc/passwd line: cgi_root.c WWW_UID
 Q2CGI = 'usr/bin/q2cgi'
-CGIS = ('create', 'delete', 'list', 'download', 'upload', 'auth')  # cgi-bin/<name>.cgi; auth is Q2 Pod's own
+CGIS = ('create', 'delete', 'list', 'download', 'upload', 'auth')  # cgi-bin/<name>.cgi; auth is Q2 Muse's own
 CGI_MODE = (b'775', b'4755')  # stock's mode for a CGI, then set-uid root and no group write
 # Every V1.36 unit has the same root password hash, and init runs a login on the board's serial pad (ttyS3).
 # Nothing on the Q2 logs in (q2remote, --dev only, runs /bin/sh itself), so root is locked and the getty goes;
@@ -511,10 +521,10 @@ BT_SILENCE_SITES = ((0x41465c, 0x8e460030, 'j', 'timeout'), (0x414684, 0x0000282
 # platform_init's crash watchdog forks pgrep every 2 s; 10 s is still quick to reboot a dead UI.
 WATCHDOG = 'usr/bin/checkappprocess.sh'
 WATCHDOG_SLEEP = (b'\tsleep 2\n', b'\tsleep 10\n')
-# The config a reset copies to /mnt/data: Enlarged Album Art (10 s wait) and Standby start off. So does stock's Wheel Function: Q2 Pod runs stock in Volume Mode whatever the key holds (WHEEL_MODE), and a Q2 reset here and returned to stock gets Menu Mode, the default stock's changelog names and a missing key gives (the shipped file says 1).
+# The config a reset copies to /mnt/data: Enlarged Album Art (10 s wait) and Standby start off. So does stock's Wheel Function: Q2 Muse runs stock in Volume Mode whatever the key holds (WHEEL_MODE), and a Q2 reset here and returned to stock gets Menu Mode, the default stock's changelog names and a missing key gives (the shipped file says 1).
 # It also names the language, English (2): stock's config_init (0x5047f8) sets g_guideflag when SYSSET LANGUAGE is
-# missing, and the first boot and every reset opened stock's language guide, where Q2 Pod's wheel and Centre are off.
-# Q2 Pod is English only (Settings has no Language row), so the guide is never shown (docs/internals.md#first-boot).
+# missing, and the first boot and every reset opened stock's language guide, where Q2 Muse's wheel and Centre are off.
+# Q2 Muse is English only (Settings has no Language row), so the guide is never shown (docs/internals.md#first-boot).
 # Smart Awake (IPOD KEEPLIT) starts on, as a missing key reads (theme_engine.c settings_read); stock's file has no [IPOD],
 # and ends with no newline (docs/internals.md#config-ini), so the section starts on a line of its own.
 DEFAULT_CONFIG_OFF = (b'COVERMODE', b'STANDBYMODE', b'WHEELMODE')
@@ -579,7 +589,7 @@ KEY_ABORTED = (0x6b35fc, 0x10400011, 0x10000011)
 # so the resuming key acts as it does dark (Play plays, centre wakes).
 STANDBY_WAKE = (0x5024b4, 0x0411ff26, 0x24020001)
 # config_init reads SYSSET NAVHIDE and WHEELMODE, V1.36's Show Navigation Bar and Wheel Function, into g_navhide_flag and
-# g_wheelmode. Q2 Pod's themes own the bar and every list's box, and its wheel is built on stock's Volume Mode (1): NAVHIDE's
+# g_wheelmode. Q2 Muse's themes own the bar and every list's box, and its wheel is built on stock's Volume Mode (1): NAVHIDE's
 # sb stores $zero (the bar shown) and WHEELMODE's movz $v0, $zero, $v1 becomes li $v0, 1, whatever the keys hold. Neither
 # key is written, and stock's two rows are not offered (navigation.c ringnav_display, ringnav_systemset).
 NAV_SHOWN = (0x504b5c, 0xa0620000, 0xa0600000)
@@ -662,7 +672,7 @@ HSCROLL_ONCE = (0x5fb870, 0x1440002f, 0x1000002f)
 # ringnav_ellipsis_text, which narrows the box so the cut before stock's "..." never ends on a space.
 HSCROLL_ELLIPSIS = (0x5fc074, 0x0320f809)
 # Since V1.36 set_hscroll_label_attribute gives a label a loop_interval_distance of its own width (widget_set_prop_int,
-# its jalr): the text runs off the label and comes back in after that gap, without an end to hold. Q2 Pod's labels hold
+# its jalr): the text runs off the label and comes back in after that gap, without an end to hold. Q2 Muse's labels hold
 # at the start and the end and snap back (ringnav_hscroll_start, ringnav_hscroll_lull), so the call goes and the
 # distance stays at its default, -1, with which hscroll_label's range, timer and paint are V1.34's.
 HSCROLL_GAP = (0x4f1f4c, 0x0320f809, 0)
@@ -673,7 +683,7 @@ HSCROLL_GAP = (0x4f1f4c, 0x0320f809, 0)
 ALBUM_LABELS = (0x4a6cb8, 0x4a6f9c, 0x4a71e4, 0x4a742c)
 # V1.36 puts the focus back on the row that had it once the album page or Playlists has loaded its rows again, for
 # Menu Mode: widget_set_focused, which scrolls the list to that row, on a row it judges in view by stock's 78 px
-# pitch. Q2 Pod's selection is ringnav's and its rows are a theme's pitch, so neither page finds a focused row: the
+# pitch. Q2 Muse's selection is ringnav's and its rows are a theme's pitch, so neither page finds a focused row: the
 # album page's beqz past the look is taken always, and Playlists' bnez to it never.
 FOCUS_RESTORE = ((0x4a8ee4, 0x1040000c, 0x1000000c), (0x4b5948, 0x14400061, 0))
 # The page refresh's bal to the lyric row builder (0x53b67c, which ends at offset 0) becomes jal
@@ -824,7 +834,7 @@ def tidal_https(data):
         data = data.replace(old, new)
     return data
 # Mozilla's CA bundle as curl publishes it, whole, for stock's HTTPS (above) and the player's (tools/peq.py TLS_OPTIONS),
-# whose hosts no list of ours could cover; /etc/scrobble-ca.pem stays the few roots Q2 Pod's own code needs.
+# whose hosts no list of ours could cover; /etc/scrobble-ca.pem stays the few roots Q2 Muse's own code needs.
 STOCK_CA = 'etc/ssl/certs/ca-certificates.crt'
 STOCK_CA_SHA = '796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe'  # https://curl.se/ca/cacert-2026-10-20.pem
 # The same function's other command, no lyrics chosen: rm -rf "/mnt/mmc/.downpic/<name>" for the same system().
@@ -896,7 +906,7 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
 
 # Wi-Fi transfer's web page (stock thttpd on :8888): in English, an Upload Folder button, and a folder,
 # picked or dropped, keeps its tree: each file's folders are made with stock's create (a plain mkdir) before
-# it goes, as stock's upload only moves a file into an existing folder. The formats Q2 Pod's pages read are allowed too.
+# it goes, as stock's upload only moves a file into an existing folder. The formats Q2 Muse's pages read are allowed too.
 MKDIR_JS = r'''// Each folder of a folder upload is made once per batch, parents first; one that exists is no
 // error, and a folder that really couldn't be made shows as its files' upload errors.
 var _made = {};
@@ -1331,8 +1341,8 @@ class Face:
 FACES = {
     'regular': Face('default'),
     # Inter 4.1 (OFL), Regular and Medium, with tabular figures: OLED's
-    'inter': Face('inter', 'Inter-Regular.ttf', 'Q2 Pod OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98, tabular='.tf'),
-    'inter-medium': Face('inter-medium', 'Inter-Medium.ttf', 'Q2 Pod OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98,
+    'inter': Face('inter', 'Inter-Regular.ttf', 'Q2 Muse OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98, tabular='.tf'),
+    'inter-medium': Face('inter-medium', 'Inter-Medium.ttf', 'Q2 Muse OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98,
                          tabular='.tf'),
 }
 # OFL 2 asks each copy to hold its licence, and the subsets' name tables don't: these ship beside the fonts
@@ -1470,6 +1480,38 @@ def symbols(p, table=None):
 ROOTFS_ROOM = 72 << 20  # 75,497,472 bytes
 
 
+# The lines of an app's launcher (its card copy's run) that bundled_launcher changes, each found once: the
+# folder it keeps its data in, the card's .<id> made if it is missing, and the binary linked into /tmp from
+# the read-only image, not copied there (7.9 MB of RAM for q2-subsonic).
+LAUNCHER_DIR = 'dir=$(cd "$(dirname "$0")" && pwd)'
+LAUNCHER_COPY = 'cp -f "$dir/q2-{id}" /tmp/q2-{id}.bin && chmod 755 /tmp/q2-{id}.bin || exit 1'
+
+
+def bundled_launcher(app_id, text):
+    """An app's own launcher, made to run the firmware's copy of it with its data in the card's .<id>."""
+    copy = LAUNCHER_COPY.format(id=app_id)
+    check(text.count(LAUNCHER_DIR) == 1 and text.count(copy) == 1, f'Unexpected launcher in the {app_id} app')
+    return (text.replace(LAUNCHER_DIR, f'dir=/mnt/mmc/.{app_id}; mkdir -p "$dir" || exit 1')
+                .replace(copy, f'ln -sf /{BUNDLED_DIR}/{app_id}/q2-{app_id} /tmp/q2-{app_id}.bin || exit 1'))
+
+
+def bundled_app(app_id, apps_dir):
+    """BUNDLED_APPS[app_id]'s files, name -> (bytes, executable), from its pinned zip in apps_dir."""
+    version, name, size, digest = BUNDLED_APPS[app_id]
+    path = pathlib.Path(apps_dir)/name
+    check(path.is_file(), f'Missing {path}: build {app_id}\'s {version} (docs/building.md#bundled-apps)')
+    data = path.read_bytes()
+    check(len(data) == size and sha(data) == digest, f'{path} is not the pinned {app_id} {version}')
+    prefix = f'.{app_id}/'
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        files = {n[len(prefix):]: z.read(n) for n in z.namelist() if n.startswith(prefix) and not n.endswith('/')}
+    need_files = {f'q2-{app_id}', 'run', 'q2app'}
+    check(need_files <= set(files) and all('/' not in n for n in files), f'Unexpected files in {name}')
+    files['run'] = bundled_launcher(app_id, files['run'].decode()).encode()
+    files['version'] = version.encode() + b'\n'
+    return {n: (b, n in (f'q2-{app_id}', 'run')) for n, b in sorted(files.items())}
+
+
 def rootfs_fits(size, new_player=False):
     """Refuse a repacked rootfs of size bytes that leaves mtd2 less than its bad-block spare."""
     check(size <= ROOTFS_ROOM, f'Repacked rootfs is {size:,} bytes, {size - ROOTFS_ROOM:,} over the {ROOTFS_ROOM:,} mtd2 holds'
@@ -1533,12 +1575,9 @@ TIMEZONES = (
     ('GMT+5:30 Kolkata', 'Asia/Kolkata'), ('GMT+10 Brisbane', 'Australia/Brisbane'),
     ('GMT+12 Auckland', 'Pacific/Auckland'),
 )
-# LIGHT=2 goes by the wall clock, as demo's Auto: the boot shell has no TZ, so the saved index picks it.
-# One missing or out of range is config_init's: index 22.
-LOGO_ZONES = ' '.join(f"{i}) z='{zone}';;" for i, (_, zone) in enumerate(TIMEZONES)) + f" *) z='{TIMEZONES[22][1]}';;"
 LOGO_HOOK = (b'   \tdisplay_logo /release/assets/default/raw/images/xx/logo.jpg\n',
-             b'   \tl=/mnt/data/boot-logo.jpg; [ -f $l ] || { l=/%s; light=0; grep -qx LIGHT=1 /mnt/data/config.ini 2>/dev/null && light=1; grep -qx LIGHT=2 /mnt/data/config.ini 2>/dev/null && { case $(sed -n s/^TIMEZONE=//p /mnt/data/config.ini) in %s esac; case $(TZ=$z date +%%H) in 0[7-9]|1[0-8]) light=1;; esac; }; [ $light = 1 ] && [ -f /%s ] && l=/%s; [ $l = /%s ] && [ -f /%s ] && display_logo /%s && /usr/bin/q2splash /%s && l=; }; [ -z "$l" ] || display_logo $l\n'
-             % (LOGO.encode(), LOGO_ZONES.encode(), LOGO_LIGHT.encode(), LOGO_LIGHT.encode(), LOGO.encode(), LOGO_ANIM.encode(), LOGO_BLACK.encode(), LOGO_ANIM.encode()))
+             b'   \tl=/mnt/data/boot-logo.jpg; [ -f $l ] || { l=/%s; [ -f /%s ] && display_logo /%s && /usr/bin/q2splash /%s && l=; }; [ -z "$l" ] || display_logo $l\n'
+             % (LOGO.encode(), LOGO_ANIM.encode(), LOGO_BLACK.encode(), LOGO_ANIM.encode()))
 def timezone_offset(label):
     sign, h, m = need(re.match(r'GMT([+-])(\d+)(?::(\d+))?', label), f'Unexpected time zone {label}').groups()
     return (1 if sign == '+' else -1) * (int(h) * 60 + int(m or 0))
@@ -1992,7 +2031,7 @@ STOCK_EQ = ['release/assets/default/raw/ui/playset/preseteq_page.bin'] + [
     ['eq_bg', 'eq_off', 'eq_sidebg', 'eqbox'] + [f'eq_{p}{s}' for p in
     ('blues', 'classical', 'custon', 'dance', 'jazz', 'metal', 'pop', 'rock', 'scene') for s in ('', '_select')]]
 # Stock V1.36's Album Wall, spectrum and VU pages, and the images only they and the buttons that open them show.
-# Q2 Pod offers none: tools/ipod.py takes their Home card and their two Now Playing buttons out of the assets, and
+# Q2 Muse offers none: tools/ipod.py takes their Home card and their two Now Playing buttons out of the assets, and
 # only those widgets' click handlers name the pages (on_home_coverflow_onclick, and Now Playing's two in
 # tools/stock_map.tsv, playing_page_vu_on_click and playing_page_spectrum_on_click), so nothing can load them.
 STOCK_PAGES = [f'release/assets/default/raw/ui/{n}_page.bin' for n in ('coverflow', 'spectrum', 'vu')] + [
@@ -2243,7 +2282,7 @@ def patch_bluealsa(raw):
         struct.pack_into('<I', image, fileoff(raw, address), new)
     return bytes(image)
 
-PRODUCT_NAME = 'Q2 Pod'  # the product's name on screen (About); one place to rename it
+PRODUCT_NAME = 'Q2 Muse'  # the product's name on screen (About); one place to rename it
 STOCK_VERSION = 'V1.36'
 
 def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
@@ -2265,14 +2304,14 @@ def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
     header += [f'#define {name} 0x{address:x}u' for name, (_, address) in NAME_COMPARATORS.items()]  # name_order.c
     # About: the stock firmware's version on its own row, and this build's on a row named for the
     # product (PRODUCT_NAME, the one place the name the screens show is spelled).
-    header += [f'#define PRODUCT_NAME "{PRODUCT_NAME}"', f'#define STOCK_VERSION "{STOCK_VERSION}"', f'#define Q2POD_VERSION "{VERSION} Pod{f" dev {dev}" if dev else f" beta {BETA}" if BETA else ""}"',
+    header += [f'#define PRODUCT_NAME "{PRODUCT_NAME}"', f'#define STOCK_VERSION "{STOCK_VERSION}"', f'#define Q2POD_VERSION "{VERSION} Muse{f" dev {dev}" if dev else f" beta {BETA}" if BETA else ""}"',
                f'#define Q2POD_TAG "{"" if dev else VERSION}"',  # netupdate.c: the release tag, none when --dev
                f'#define Q2POD_DEV {1 if dev else 0}',  # navigation.c stale_note
                # sw_update.c: the updater's identity (firmware_v20.info's version), which an equal update.tar's repeats
                f'#define Q2POD_FW_TAG "{dev_tag(dev) if dev else TAG}"',
                f'#define Q2POD_REPO "{repo}"',  # netupdate.c: the repo whose latest release it fetches
                '#define Q2POD_SIGN_KEY {' + ','.join(f'0x{b:02x}' for b in key or signing_key(None, False)) + '}',  # release_sig.c
-               f'#define Q2POD_UA "Q2Pod/{VERSION} (https://github.com/{REPO})"']  # onlinematch.c, as MusicBrainz asks: the project's contact, not --update-repo's
+               f'#define Q2POD_UA "Q2Muse/{VERSION} (https://github.com/{REPO})"']  # onlinematch.c, as MusicBrainz asks: the project's contact, not --update-repo's
     check(len(themes) == 1, f'{len(themes)} built-in themes: the payload has one (theme_engine.c theme())')
     header.append(f'#define THEME_N {len(themes)}')  # theme_engine.c theme()
     header.append(f'#define THEME_KEYS {len(theme_keys(themes))}')  # navigation.c st.own[], themes.inc theme_keys[]
@@ -2290,7 +2329,7 @@ def signing_key(path, dev):
     check(path.is_file(), f'{path}: no release public key (docs/releasing.md#signing-a-release)')
     return public_key(path.read_bytes())
 
-def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, flac_experiments='sync,lpc,output', signing_pub=None, new_player=False):  # pragma: no mutate block
+def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, flac_experiments='sync,lpc,output', signing_pub=None, new_player=False, apps_dir=APPS_DIR):  # pragma: no mutate block
     from flac import selection
     flac_experiments = selection(flac_experiments)
     # Kernel-module experiments: no measured saving (docs/clock-gating.md, pwm-clock-gating.md,
@@ -2560,7 +2599,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patch_word(patched, *TABLE_DRAG_CALL, jal(ps['ringnav_table_drag']), 'a drag stops at a table\'s ends')
     for word in FOLDER_NAME:
         patch_word(patched, *word, 'folder names are literal text')
-    # The GOT loads Q2 Pod writes (FOLDER_NAME's, and tools/ipod.py's two): no stock word beside one names its slot, and
+    # The GOT loads Q2 Muse writes (FOLDER_NAME's, and tools/ipod.py's two): no stock word beside one names its slot, and
     # V1.36 moved two of the three to other functions' slots. Each slot holds its function, or the build stops.
     for load, name in ((FOLDER_NAME[1][2], 'tk_strncpy'), (CLOSE_LOAD, 'navigator_close'), (DUMMY_LOAD, 'dummy_destroy')):
         check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, GP + ((load & 0xffff) ^ 0x8000) - 0x8000))[0] == syms[name],
@@ -2681,11 +2720,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     # Package exactly the validated bytes, even if the input is edited during compression.
     logo = out/'logo.jpg'
     logo.write_bytes(logo_data)
-    # Light Mode's splash: the default logo inverted. A custom --logo has no twin, so it shows either way.
-    light = logo_data == (ROOT/'assets/boot-logo.jpg').read_bytes() and (ROOT/'assets/boot-logo-light.jpg').read_bytes()
-    check(not light or jpeg_size(light) == (320, 375), 'Light logo must be 320x375 like the stock splash')
+    default_logo = logo_data == (ROOT/'assets/boot-logo.jpg').read_bytes()
     # The boot animation is the default logo's too: a custom --logo shows as a still, as it always has.
-    anim = bool(light) and {LOGO_ANIM: (ROOT/'assets/boot-anim.q2a').read_bytes(), LOGO_BLACK: (ROOT/'assets/boot-black.jpg').read_bytes()}
+    anim = default_logo and {LOGO_ANIM: (ROOT/'assets/boot-anim.q2a').read_bytes(), LOGO_BLACK: (ROOT/'assets/boot-black.jpg').read_bytes()}
     check(not anim or (anim[LOGO_ANIM][:4] == b'Q2AN' and struct.unpack_from('<2H', anim[LOGO_ANIM], 8) == (320, 375)
                        and jpeg_size(anim[LOGO_BLACK]) == (320, 375)), 'Boot animation must be 320x375 like the stock splash')
     q2player, player_added = None, []
@@ -2710,6 +2747,25 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         p = (p + PLAYER_STOCK_DIR + b' D ' + b' '.join(stock_dir.groups()) + b'\n' + PLAYER_STOCK_DIR + b'/hciplayer.xz F ' +
              b' '.join(hci.groups()) + b' cat ' + shlex.quote(str(stock_xz)).encode() + b'\n')
         player_added = [[PLAYER_STOCK_DIR, b'D', *stock_dir.groups()], [PLAYER_STOCK_DIR + b'/hciplayer.xz', b'R', *hci.groups()]]
+    # The card apps the firmware carries (BUNDLED_APPS): folders as usr/lib is, the app and its launcher as a
+    # stock program is, the rest as a stock data file is
+    lib_dir = need(re.search(rb'^usr/lib D (\d+) (\d+) (\d+) (\d+)$', p, re.M), 'Missing usr/lib pseudo inode')
+    program, data_file = need(inode(p, HELPER_LIKE.encode()), 'Missing program inode'), need(inode(p, b'etc/hosts'), 'Missing etc/hosts inode')
+    bundled = {}
+    for d in [BUNDLED_DIR, *(f'{BUNDLED_DIR}/{i}' for i in BUNDLED_APPS)]:
+        p += d.encode() + b' D ' + b' '.join(lib_dir.groups()) + b'\n'
+        player_added.append([d.encode(), b'D', *lib_dir.groups()])
+    for app_id in BUNDLED_APPS:
+        files = bundled_app(app_id, apps_dir)
+        (out/'q2apps'/app_id).mkdir(parents=True, exist_ok=True)
+        for name, (data, executable) in files.items():
+            src, path, like = out/'q2apps'/app_id/name, f'{BUNDLED_DIR}/{app_id}/{name}'.encode(), program if executable else data_file
+            src.write_bytes(data)
+            p += path + b' F ' + b' '.join(like.groups()) + b' cat ' + shlex.quote(str(src)).encode() + b'\n'
+            player_added.append([path, b'R', *like.groups()])
+        app_version, zip_name, _, digest = BUNDLED_APPS[app_id]
+        bundled[app_id] = dict(version=app_version, zip=zip_name, sha256=digest,
+                               bytes=sum(len(d) for d, _ in files.values()))
     for path, src in ((b'release/bin/demo', out/'demo'), (b'usr/bin/hciplayer', q2player or out/'peq/hciplayer'),
                       (BLUEALSA.encode(), out/'bluealsa'), (BLUETOOTHD.encode(), out/'bluetoothd'), (WATCHDOG.encode(), out/'watchdog'),
                       (S90PLAY.encode(), out/'S90play'), (S11LOGO.encode(), out/'S11logo'),
@@ -2789,7 +2845,6 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                GUEST: (HELPER_LIKE, compile_helper(out, cat, 'q2_guest', 'q2-guest', GUEST_LIBS)),
                                GUEST_DBUS: ('etc/dbus-1/system.d/bluealsa.conf', (ROOT/'assets/dbus/bluealsa-sink.conf').read_bytes()),
                                GUEST_HOTSPOT: (HELPER_LIKE, (ROOT/'patch/q2_hotspot.sh').read_bytes()),
-                               **({LOGO_LIGHT: (xx+'list_tidal.png', light)} if light else {}),  # the swapped logo.jpg has no stock inode left
                                **{path: (FONT, data) for path, (data, _) in fonts.items()},
                                **{FONT_DIR + n: ('etc/hosts', (ROOT/'assets/fonts'/n).read_bytes()) for n in FONT_NOTICES},
                                **(adb_files(out, cat) if dev else {}),
@@ -2896,6 +2951,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         **({'rotator_clock': rotator} if rotator else {}),
         **({'adbd': adbd_record(out)} if dev else {}),
         **({'q2player_sha256': sha(q2player.read_bytes()), 'rootfs_bytes': size} if q2player else {}),
+        bundled_apps=bundled, rootfs_squashfs_bytes=len(blobs['recovery-update/rootfs.squashfs']),
         **({'pwm_clock': pwm} if pwm else {}),
         patch_symbols={n:hex(v) for n,v in ps.items() if n.startswith('stock_')},
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']} |
@@ -2925,10 +2981,12 @@ if __name__ == '__main__':
                     help='experimental: defer the rotator clock until its first conversion (requires --dev)')
     ap.add_argument('--new-player', action='store_true',
                     help='install q2player as /usr/bin/hciplayer, falling back to hciplayer unless /mnt/data/q2player exists (requires --dev)')
+    ap.add_argument('--apps', type=pathlib.Path, default=APPS_DIR, metavar='DIR',
+                    help=f'where the pinned zips of the card apps the firmware carries are (default {APPS_DIR})')
     ap.add_argument('--pwm-idle-clock', action='store_true',
                     help='experimental: cooperative Linux/MCU PWM clock gating (requires --dev)')
     a=ap.parse_args()
     try:
-        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.flac_experiments,a.signing_key,a.new_player)
+        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.flac_experiments,a.signing_key,a.new_player,a.apps)
     except (OSError, ValueError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
         ap.error(str(exc))

@@ -96,11 +96,12 @@ static void reset(void) {
 }
 
 /* The layer from where it is to off over the theme's swap motion, which a page's slide keeps pace
- * with (both PAGE_SLIDE_MS); at once without one. */
+ * with (both PAGE_SLIDE_MS); at once without one. It finishes what the finger did, so Reduce Motion
+ * keeps it (MO_FEEDBACK). */
 static void glide(int off) {
     sb.from = sb.off;
     sb.to = off;
-    sb.ms = theme()->motion[MOTION_SWAP].ms;
+    sb.ms = motion_ms(theme()->motion[MOTION_SWAP].ms, MO_FEEDBACK);
     sb.at = (unsigned)time_now_ms() | 1;
 }
 

@@ -176,11 +176,11 @@ void sw_update_name(char *out, unsigned n, const char *tag) {
     for (int i = 1; digits && i < 4; ++i) digits = tag[i] >= '0' && tag[i] <= '9';
     if (digits) v[0] = tag[1], v[1] = '.', v[2] = tag[2], v[3] = '.', v[4] = tag[3]; /* "1.8.2" */
     if (digits && tag[4] >= '1' && tag[4] <= '9')
-        tk_snprintf(out, n, "Q2 Pod %s beta %c · %s", v, tag[4], tag);
+        tk_snprintf(out, n, "Q2 Muse %s beta %c · %s", v, tag[4], tag);
     else if (digits && (tag[4] == '0' || tag[4] == 'I'))
-        tk_snprintf(out, n, "Q2 Pod %s · %s", v, tag);
+        tk_snprintf(out, n, "Q2 Muse %s · %s", v, tag);
     else if (strlen(tag) == 5 && tag[0] == 'V' && tag[4] == 'i')
-        tk_snprintf(out, n, "Q2 Pod Dev · %s", tag);
+        tk_snprintf(out, n, "Q2 Muse Dev · %s", tag);
     else
         tk_snprintf(out, n, "%s", tag);
 }
@@ -189,12 +189,12 @@ void sw_update_name(char *out, unsigned n, const char *tag) {
  * (V1820)". */
 void sw_installed(char *out, unsigned n) {
     char v[sizeof Q2POD_VERSION];
-    const char *pod = strstr(Q2POD_VERSION, " Pod");
+    const char *pod = strstr(Q2POD_VERSION, " Muse");
     tk_snprintf(v, sizeof v, "%s", Q2POD_VERSION);
     if (pod) v[pod - Q2POD_VERSION] = 0; /* "1.8.2", then " Dev" or the beta's " beta 2" */
     tk_snprintf(out, n, "%s%s (" Q2POD_FW_TAG ") is installed", v,
                 Q2POD_DEV ? " Dev"
-                : pod     ? pod + 4
+                : pod     ? pod + sizeof " Muse" - 1
                           : "");
 }
 

@@ -912,6 +912,7 @@ int ringnav_paint(void *w, void *canvas) {
     night_paint(canvas);
     coverflow_paint(w, canvas);
     keylock_paint(w, canvas);
+    feedback_toast_leave(w, canvas);
     search_strip_overlay(w, canvas);
     confirm_bar_dim(w, canvas);
     if (w == st.cf_letter_surface && st.cf_letter &&
