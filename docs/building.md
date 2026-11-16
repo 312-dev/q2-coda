@@ -74,6 +74,8 @@ Network Update and the App Store take only what the q2-coda release key signed (
 
 Development builds also start `q2remote`, a key-gated root shell with screenshots and input over Wi-Fi, for developers and agents; see [remote.md](remote.md).
 
+They also run `adbd`, Android's debug daemon, so `adb` gets a root shell, file copies and screenshots over the USB cable once the computer is authorized, from its own USB gadget that gives way to stock's USB storage and DAC; see [adb.md](adb.md). It is built by `tools/thirdparty.py` ([third-party.md](third-party.md#adbd)), and the manifest records its version, SHA-256 and size under `adbd`. Release builds have neither adbd, its gadget script nor the wrapped USB scripts, and `test/build.py --build` checks that.
+
 Off by default, `--dev --rotator-lazy-clock`: the rotator clock is held only from its first conversion. See [clock gating](clock-gating.md) for the exact module guard and tests.
 
 Off by default, `--dev --pwm-idle-clock`: the paired PWM/MCU clock gating. It needs all three matching files and a reboot. See [PWM clock gating](pwm-clock-gating.md) for its ownership protocol and fallbacks.
@@ -101,6 +103,7 @@ python3 test/build.py --build BUILD         # a finished build's payloads and pa
 python3 test/aic.py STOCKFS               # stopped audio notifier: actual MIPS hooks and modeled wait races
 python3 test/aic_build.py STOCKFS BUILD    # notifier development guard, ABI, default/experimental packaging
 python3 test/remote.py                     # q2remote protocol, auth, event and framebuffer checks
+python3 test/adb.py [BUILD]                # adbd under qemu-mipsel in bwrap (descriptors, authorization and the prompt's socket, shell, exec, push, pull) and q2adb-gadget on a stand-in configfs (adb.md)
 python3 test/coda_rc_e2e.py --emu DIR [--build BUILD] [--shots DIR]  # coda-rc end to end over TCP against a q2-emu copy with CARREMOTE=1: pair, browse (album numbers, NOT_FOUND), play an album, State pushes, Pause and Play acked once played, Next, Previous, a cover (docs/remote-protocol.md)
 bash test/wifi_transfer_cgi.sh             # Wi-Fi transfer's file manager (assets/web/q2cgi) under the host's busybox ash (the Q2's is 1.38.0, [third-party.md](third-party.md#busybox)): no ZIP or build; on a tmpfs at /mnt/mmc (one already there, or its own as root); --fat for a FAT32 image and its short-name cases (root). GitHub runs it on every pull request
 python3 test/rotator.py STOCK_MODULE        # actual MIPS rotator clock ownership and failure paths
