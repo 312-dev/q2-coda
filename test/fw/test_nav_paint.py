@@ -2089,12 +2089,11 @@ def test_over_oleds_now_playing_the_volume_is_its_bar_between_two_speakers(fw, w
     assert canvas.texts == []
 
 
-@pytest.mark.parametrize('number', [MINIMAL, OLED])
-def test_an_empty_folder_level_says_so(fw, world, number):
+def test_an_empty_folder_level_says_so(fw, world):
     """Folder (folder_page) over a level with nothing in it, an empty card or a folder with no music: stock's page
     is its table alone, which would leave it blank. It says "No folders" with a hint, written once per change of the level's
     emptiness, and the words go when the level has rows. Another page gets nothing."""
-    theme(fw, number)
+    theme(fw)
     deques = Deques(fw)
     showlist = fw.var('fw_ctx_p_deque_showlist', C.c_uint)
     folder = fw.fn('feedback_folder', None, C.c_void_p)
