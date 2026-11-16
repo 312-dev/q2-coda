@@ -752,8 +752,10 @@ def boxed(fw, ui, text=b'', kind='password'):
     C.c_void_p.from_address(C.addressof(im) + O['IM_WIDGET']).value = edit
     fw.mock('input_method', lambda *_: C.addressof(im))
     s = Strip.__new__(Strip)
-    s.fw, s.ui, s.stock, s.im, s.edit = fw, ui, [], im, edit
-    assert fw.fn('search_strip_box', C.c_int, C.c_void_p, C.c_char_p)(edit, b'Home Wi-Fi') == 1
+    kb = ui.new('window_create', 0, 0, 60, 375, 260)  # the input method's keyboard window, top
+    keys = ui.new('pages', kb, 0, 40, 375, 221)
+    s.fw, s.ui, s.stock, s.im, s.edit, s.kb, s.keys = fw, ui, [], im, edit, kb, keys
+    assert fw.fn('search_strip_box', C.c_int, C.c_void_p, C.c_void_p, C.c_char_p)(kb, edit, b'Home Wi-Fi') == 1
     s.ss, s.take = fw.var('search_strip__ss', Ss), fw.fn('search_strip_key', C.c_int, C.c_void_p, C.c_uint)
     return s
 
@@ -762,6 +764,7 @@ def test_a_password_box_types_its_sets_and_next_at_the_end_is_its_ok(fw, ui):
     fw.mock('time_now_ms', lambda *_: 50000)  # the last character typed, a moment ago
     s = boxed(fw, ui)
     assert s.ss.secret == 1 and s.ss.set == LOWER and 'Home Wi-Fi' in ui.text.values()
+    assert s.ss.page == s.kb and s.keys in ui.hidden  # on the keyboard's window, its keys hidden: no focus moves
     s.key(KEY_NEXT, KEY_CENTER)  # b
     s.key(KEY_PLAY)  # ABC
     s.key(KEY_CENTER)  # the set's first: A
@@ -773,8 +776,9 @@ def test_a_password_box_types_its_sets_and_next_at_the_end_is_its_ok(fw, ui):
     s.key(KEY_BACK_BTN, KEY_FWD_BTN)
     assert not fw.calls('input_method_dispatch_action')  # Next before the end moves the cursor
     s.key(KEY_FWD_BTN)
-    assert ui.backs == 1 and ui.text[s.edit] == 'bA!b'
+    assert ui.text[s.edit] == 'bA!b' and not ui.backs
     assert [a[0] for _, a in fw.calls('input_method_dispatch_action')] == [C.addressof(s.im)]
+    assert [a[1] for _, a in fw.calls('input_method_request')] == [0]  # the OK left it open: closed, as Done does
 
 
 def test_a_number_box_opens_on_digits_and_a_text_one_keeps_its_text(fw, ui):
@@ -788,5 +792,5 @@ def test_return_held_on_a_box_closes_it_and_its_keyboard(fw, ui):
     fw.fn('search_strip_down', None, C.c_void_p, C.c_uint)(ui.top(), KEY_RETURN)
     s.now[0] += HOLD_MS
     ui.fire('search_strip__ss_hold_tick')
-    assert ui.backs == 1 and not fw.calls('input_method_dispatch_action')
+    assert not ui.backs and not fw.calls('input_method_dispatch_action')
     assert [a[1] for _, a in fw.calls('input_method_request')] == [0]  # the keyboard closed with it

@@ -11,8 +11,8 @@
  * keyboard (kb_style), and kb_wheel_bg paints in its place under the label stock still draws.
  *
  * Under a list.entry.ipod theme no box keeps it (the user's, 2026-11-17: the letter strip, option
- * P1, for the Wi-Fi password and every other text box): a keyboard seen for the first time is
- * hidden and the letter strip opens over it for the same edit (kb_strip_due, search_strip.c
+ * P1, for the Wi-Fi password and every other text box): a keyboard seen for the first time gives
+ * its window to the letter strip for the same edit, its keys hidden (kb_strip_due, search_strip.c
  * search_strip_box), titled as the page the box is on. The rest of this file is what it was for a
  * keyboard the strip could not take. */
 #include "navigation.h"
@@ -70,15 +70,15 @@ static void kb_clear(void *w) {
     widget_set_prop_int(w, "_kb_clear", 1);
     for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) kb_clear(widget_get_child(w, i));
 }
-/* The keyboard first seen, from the next loop pass: its edit to the letter strip, the keyboard
- * hidden under it (the input method keeps it, so the box's OK still reaches the edit). */
+/* The keyboard first seen, from the next loop pass: its window and edit to the letter strip (the
+ * input method keeps both, so the box's OK reaches the edit and nothing takes its focus). */
 static int kb_strip_due(const void *unused) {
     void *kb = kb_window(), *im = input_method(), *edit = im ? P(im, IM_WIDGET) : (void *)0;
     char title[64] = "";
     kw.timer = 0;
     if (!kb || !edit || !widget_get_visible(kb)) return 0;
     if (st.bar_title) widget_get_text_utf8(st.bar_title, title, sizeof title);
-    if (search_strip_box(edit, title)) widget_set_visible(kb, 0, 0);
+    search_strip_box(kb, edit, title);
     return 0;
 }
 

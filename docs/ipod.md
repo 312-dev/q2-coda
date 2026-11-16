@@ -1102,13 +1102,16 @@ painted it white, which drew the box at rest.
   says so and stays. Return erases the character before the cursor, and a held Return leaves without a change, as
   on Search.
 - <a id="keyboard"></a>**The keyboard.** Under `list.entry.ipod` (OLED's) no text box shows stock's keyboard: the first
-  time one opens, `patch/keyboard.c` (`kb_strip_due`) hides it and opens the letter strip for the input method's edit
-  (`search_strip_box`, [oled-design](oled-design.md#text-entry)), field off, with its set chip (abc, ABC, 123, #+=,
+  time one opens, `patch/keyboard.c` (`kb_strip_due`) gives its window to the letter strip for the input method's edit,
+  its keys hidden and the window over the screen under the status row (`search_strip_box`,
+  [oled-design](oled-design.md#text-entry)); a page of its own would take the edit's focus, which ends a search box.
+  Field off, with its set chip (abc, ABC, 123, #+=,
   stepped by Play/Pause) and the box's text prefilled; a password shows as dots ("Password" over them, the character
-  just typed for a second, all of it while Play/Pause is held). Next at the text's end closes the strip, writes the
+  just typed for a second, all of it while Play/Pause is held). Next at the text's end writes the
   text into the edit and presses the keyboard's OK (`input_method_dispatch_action`, as its Enter key does), so the box
-  acts as it did: the Wi-Fi password joins, an EQ preset is renamed, a search searches. A held Return closes the strip
-  and the keyboard (an edit of ours emptied first, as the keyboard's Return did), leaving the box. Under another theme
+  acts as it did: the Wi-Fi password joins, an EQ preset is renamed, a search searches; the keyboard, the strip with it,
+  closes as its Done closes it. A held Return closes the keyboard and the strip (an edit of ours emptied first, as the
+  keyboard's Return did), leaving the box. Under another theme
   the keyboard stays stock's, its keys `#1C1C1E` boxes on black, the wheel walking them and Centre pressing the lit
   one.
 - **Track Time.** Now Playing's right-hand time shows what is left of the track ("-3:29", the default) or its

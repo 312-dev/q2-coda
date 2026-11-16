@@ -304,23 +304,24 @@ static void ss_save(void) {
     }
 }
 
-/* A text box's end: the page closes, then the box's edit takes the text typed and its keyboard's
- * OK is pressed (input_method_dispatch_action, as stock's keyboard's Enter key does), so the box
- * acts as it always has: a Wi-Fi password joins, an EQ preset is renamed, a search searches. */
+/* A text box's end: its edit takes the text typed and the keyboard's OK is pressed
+ * (input_method_dispatch_action, as stock's keyboard's Enter key does), so the box acts as it
+ * always has: a Wi-Fi password joins, an EQ preset is renamed, a search searches. The strip is
+ * on the keyboard's window (search_strip_box), so it goes with the keyboard; one the OK leaves
+ * open is closed, as the keyboard's Done closes it. */
 static void ss_box_done(void) {
     void *edit = ss.box, *im = input_method();
     char text[SS_TEXT_MAX + 1];
     tk_snprintf(text, sizeof text, "%s", ss.text);
-    navigator_back(); /* ss_closed clears ss */
     if (!edit || !im || P(im, IM_WIDGET) != edit) return;
     widget_set_text_utf8(edit, text);
     input_method_dispatch_action(im);
+    if (ss.box && P(im, IM_WIDGET) == edit) input_method_request(im, (void *)0);
 }
-/* Return held on a text box: the page closes and the box with its keyboard, as the keyboard's
- * Return did (navigation.c search_key: our own edits emptied first, so their pages back out). */
+/* Return held on a text box: the box's keyboard closes, the strip with it, as the keyboard's Return
+ * did (navigation.c search_key: our own edits emptied first, so their pages back out). */
 static void ss_box_cancel(void) {
     void *edit = ss.box, *im = input_method();
-    navigator_back();
     if (!edit || !im || P(im, IM_WIDGET) != edit) return;
     if (!tk_strcmp(widget_get_prop_str(edit, "name", ""), EDIT_NAME))
         widget_set_text_utf8(edit, "");
@@ -1018,13 +1019,21 @@ void add_songs_search(void) {
     ss.tab = SS_TAB_SONGS;
 }
 
-/* A stock text box's keyboard (keyboard.c, the input method's for edit): the strip with its field
- * off types for it in its place, titled as the page under it is, the box's text prefilled, the
- * cursor at its end; a password's characters as dots. The sets start on letters, or on digits
- * for a box holding a number. 1 when it opened. */
-int search_strip_box(void *edit, const char *title) {
-    if (ss.page || !edit || !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup)))
-        return 0;
+/* A stock text box's keyboard (keyboard.c, the input method's kb for edit): the strip with its
+ * field off types for it on the keyboard's own window, the keys hidden and the window over the
+ * screen under the status row, so nothing takes the edit's focus (a page of its own would: a
+ * window to the background blurs its focus, which ends a search box); titled as the page under
+ * it is, the box's text prefilled, the cursor at its end, a password's characters as dots. The sets
+ * start on letters, or on digits for a box holding a number. 1 when it opened. */
+int search_strip_box(void *kb, void *edit, const char *title) {
+    if (ss.page || !kb || !edit) return 0;
+    int top = geom_val(V_BAR);
+    ss.page = kb;
+    for (unsigned i = 0, n = widget_count_children(kb); i < n; ++i)
+        widget_set_visible(widget_get_child(kb, i), 0, 0);
+    widget_move_resize(kb, 0, top, 375, 320 - top);
+    widget_set_prop_int(kb, "h", 320 - top);
+    widget_on(kb, EVT_DESTROY, ss_closed, 0);
     ss.box = edit;
     ss.secret = !tk_strcmp(widget_get_prop_str(edit, "input_type", ""), "password");
     widget_get_text_utf8(edit, ss.text, sizeof ss.text);
@@ -1035,5 +1044,7 @@ int search_strip_box(void *edit, const char *title) {
             (ss.text[i] >= '0' && ss.text[i] <= '9') || ss.text[i] == '.' || ss.text[i] == '-';
     ss.set = digits ? SS_SET_DIGITS : SS_SET_LOWER;
     ss_sheet(title && *title ? title : ss.secret ? "Wi-Fi Password" : "Text");
+    bar_title_sync(kb);
+    widget_invalidate_force(kb, (void *)0);
     return 1;
 }

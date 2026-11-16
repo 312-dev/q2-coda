@@ -759,7 +759,7 @@ to its line with 24 px sides and 20 px above and below, shows a 44 px ring (a 4 
 fills clockwise from the top) round Phosphor's `arrow-u-up-left` (bold, 20 px, white) and, 14 px under it,
 "Keep holding to go back" in Inter Medium 16 white; at 800 ms the page closes. Let go before that and nothing
 happens: a hold never erases. The dim covers the status row too, as Buttons Lock's card's does: both
-draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keyboard](ipod.md#keyboard): one first seen is hidden under the strip
+draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keyboard](ipod.md#keyboard): one first seen gives its window to the strip
 (`patch/keyboard.c` `kb_strip_due`).
 
 ### Icons
