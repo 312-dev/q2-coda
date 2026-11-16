@@ -1986,7 +1986,7 @@ int ringnav_checkfw(void *win, void *ctx) {
 /* Stock passes its audio extension list and the final dot suffix in folder and scan paths.
  * Keep every existing format; TagLib's FileRef already dispatches M4B to MP4. Folder view's
  * listing (toolsLoadDirectory) in the card's Videos folder also takes videos, which a row click
- * hands to books_video; the library scan never does, and no queue keeps them (no_videos). */
+ * hands to video_click (videos.c); the library scan never does, and no queue keeps them (no_videos). */
 #define LOAD_DIRECTORY_RET 0x5d4cb4 /* toolsLoadDirectory's (build.py AUDIO_EXTENSION_CALLS) */
 extern int folder_videos(void);
 char *ringnav_audio_extension(const char *formats, const char *ext) {
