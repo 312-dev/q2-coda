@@ -28,6 +28,12 @@
   - Home (OLED): **Edit Home**. Hold Center on Home (or hold a row with your finger) to put Home's rows in your own order, as Edit Library does, and to choose which show: each row has a circle on its left, filled for a row that shows and empty for one that is hidden. Press Play/Pause, or tap the circle, to show or hide the highlighted row; hidden rows are left off Home when you finish. Settings always stays.
   - Library (OLED): Edit Library has the same circles, so rows the Library hides by default (Shuffle, Hi-Res, Long Songs, Upload Scrobbles) can be shown again, and any other row hidden. The hint reads "Drag ≡ to move · Play/Pause shows or hides".
   - Home: **Folders** shows only once the SD card has folders to list, and appears by itself the first time there are some. Show or hide it in Edit Home and your choice stays, folders or not.
+  - Control Center (OLED): the white outline that shows which control the wheel is on appears only once you turn the wheel, not when you pull the page down or touch it, and goes after 5 seconds without a turn or press; the next turn brings it back where it was.
+  - Control Center (OLED): the Volume slider follows the wheel as fast as Now Playing's volume does, a little at a time when you turn slowly and quickly on a fast spin, and its bar glides to the new level the same way.
+  - Brightness: turning the wheel sets the brightness as quickly as the volume, in Control Center and on Settings > Display > Brightness alike, and the bar glides to the new level.
+  - Control Center (OLED): pulled down, the page settles with a small bounce as it lands.
+  - Control Center (OLED): tap what's playing (anywhere but its buttons), or press Center on it, to open Now Playing; the wheel stops on it between the round buttons and the sliders.
+  - Control Center (OLED): hold a round button or a tile (or hold Center on it) to open its settings, such as Wi-Fi's network list or the Sleep Timer; a tap still turns it on or off.
   - Controls: Clicker set to **Headphones** no longer clicks the Q2's own buzzer. The click is heard only in your headphones, mixed into what plays; while nothing plays there is no click.
   - Playlists: removed the unused code behind a playlist cover's hidden **Select Playlists…** hold row; nothing you can see changes.
   - Photos is gone: the Library has no **Photos** row, viewer or thumbnail grid. Home's Split slideshow of album covers is unchanged, a Library order you set yourself is kept without the row, and a `.photos` folder left on the card can be deleted.

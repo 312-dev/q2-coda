@@ -1,40 +1,35 @@
 /* The volume panel: stock's volume dialog, drawn over Now Playing's times or on its own. */
 #include "navigation.h"
 
-/* The dialog vol_paint last drew, its value and the redraw timer. vol_shown:
- * the bar's eased level in 1/256 steps, moving towards the value while vol_easing (vol_ease), from
- * vol_eased_at. */
+/* The dialog vol_paint last drew, its value and the redraw timer. */
 static struct {
     void *vol_dialog;
-    int vol_drawn, vol_shown, vol_easing;
-    unsigned vol_timer, vol_eased_at;
+    int vol_drawn;
+    unsigned vol_timer;
 } vd __attribute__((section(".scratch")));
+/* The volume bar's ease (levels.c level_ease), from vol_next: the dialog's bar and Control
+ * Center's slider draw it. */
+level_ease_t vol_bar __attribute__((section(".scratch")));
 
 /* A wheel tick's volume steps at the wheel's speed (wheel_speed, degrees a second): Rockbox's iPod
  * list acceleration (firmware/drivers/button.c button_apply_acceleration, WHEEL_ACCELERATION 3 and
  * WHEEL_ACCEL_START 270 in its ipodvideo.h and ipod6g.h), (speed / 270)^4 rounded, at least 1 and
  * at most VOL_ACCEL_MAX. Rockbox steps an iPod's volume 1 a click at any speed; Apple's own curve
  * is not published (docs/internals.md#wheel-volume). */
-static int vol_accel(void) {
+int vol_accel(void) {
     unsigned v = (unsigned)wheel_speed;
     if (v > VOL_ACCEL_TOP) v = VOL_ACCEL_TOP;
     unsigned r = v * 256 / VOL_ACCEL_START, r2 = r * r >> 8, n = ((r2 * r2 >> 8) + 128) >> 8;
     return n < 1 ? 1 : n > VOL_ACCEL_MAX ? VOL_ACCEL_MAX : (int)n;
 }
-/* The volume a wheel tick (KEY_NEXT up, KEY_PREV down) moves to: vol_accel's steps, up to 100 and
- * g_maxvolume (never down to them from above), down to 0. A change starts the bar's ease from where
- * it was (vol_ease). Nothing is set: the caller does, as stock's dialog would. */
+/* The volume a wheel tick (KEY_NEXT up, KEY_PREV down) moves to: vol_accel's steps (levels.c
+ * wheel_level), up to 100 and g_maxvolume (never down to them from above), down to 0. A change
+ * starts the bar's ease from where it was (vol_bar). Nothing is set: the caller does, as stock's
+ * dialog would. */
 int vol_next(unsigned key) {
-    int v = g_volume, n = vol_accel(), limit = g_maxvolume < 100 ? g_maxvolume : 100;
-    int to = key == KEY_NEXT ? (v >= limit      ? v
-                                : v + n > limit ? limit
-                                                : v + n)
-                             : (v - n < 0 ? 0 : v - n);
-    if (to != v && !vd.vol_easing) {
-        vd.vol_shown = v << 8;
-        vd.vol_easing = 1;
-        vd.vol_eased_at = (unsigned)time_now_ms();
-    }
+    int v = g_volume, limit = g_maxvolume < 100 ? g_maxvolume : 100;
+    int to = wheel_level(v, 0, limit, 100, key == KEY_NEXT ? 1 : -1);
+    if (to != v) level_ease_from(&vol_bar, v);
     return to;
 }
 /* volume_dialog_on_keyup (HOOKS): a wheel tick takes g_volume to one step short of vol_next's, so
@@ -75,23 +70,8 @@ int vol_wm_keyup(void *ctx, void *e) {
     return stock_wm_keyup_trampoline(ctx, e);
 }
 
-/* The bar's level towards level (in steps) while vol_easing: a first-order follow with time
- * constant VOL_EASE_MS, by the time since the last move, so a slow pass jumps further rather than
- * lagging; 1 while it moved. Within a 1/256 step of level it lands and stops. */
-static int vol_ease(int level) {
-    if (!vd.vol_easing) return 0;
-    unsigned now = (unsigned)time_now_ms();
-    int dt = (int)(now - vd.vol_eased_at), d = (level << 8) - vd.vol_shown;
-    vd.vol_eased_at = now;
-    int step = dt > 0 ? d * dt / (VOL_EASE_MS + dt) : 0;
-    if (!step && dt > 0) step = d > 0 ? 1 : -1; /* the last few 1/256ths */
-    if (d > -2 && d < 2) step = d, vd.vol_easing = 0;
-    vd.vol_shown += step;
-    return step != 0 || !vd.vol_easing;
-}
-
 /* Every VOL_POLL_MS while the dialog vol_paint drew is still on top: a changed volume, or a bar
- * still easing towards it (vol_ease), repaints it whole. Stock's own invalidation of the hidden
+ * still easing towards it (level_ease), repaints it whole. Stock's own invalidation of the hidden
  * slider does not reliably reach the screen, so the bar would stop following the wheel after a tick
  * or two. */
 static int vol_poll(const void *info) {
@@ -103,7 +83,8 @@ static int vol_poll(const void *info) {
         return 0; /* RET_OK: removed */
     }
     int level = widget_get_prop_int(vol, "value", 0);
-    if (vol_ease(level) | (level != vd.vol_drawn)) widget_invalidate_force(top, (void *)0);
+    if (level_ease(&vol_bar, level) | (level != vd.vol_drawn))
+        widget_invalidate_force(top, (void *)0);
     return 8; /* RET_REPEAT */
 }
 
@@ -115,7 +96,7 @@ static int vol_poll(const void *info) {
  * (Quick Settings included) a VOL_PANEL_* rounded panel in the fast-scroll letter's style holds a
  * pill bar and the number alone. slider_vol and label_vol are hidden, and slider_vol is moved onto
  * the area drawn, so stock's partial repaints land on it; vol_poll catches the changes those miss.
- * The bar draws vol_shown, which a wheel tick (vol_next) eases towards the value; the number is the
+ * The bar draws vol_bar, which a wheel tick (vol_next) eases towards the value; the number is the
  * value. */
 void vol_paint(void *top, void *canvas) {
     void *wm = window_manager(), *lcd = P(canvas, CANVAS_LCD);
@@ -145,10 +126,9 @@ void vol_paint(void *top, void *canvas) {
     widget_set_visible(vol, 0, 0);
     if (label) widget_set_visible(label, 0, 0);
     int max = widget_get_prop_int(vol, "max", 100), level = widget_get_prop_int(vol, "value", 0);
-    if (top != vd.vol_dialog) vd.vol_easing = 0; /* a new dialog opens on its value */
-    if (!vd.vol_easing) vd.vol_shown = level << 8;
+    if (top != vd.vol_dialog) vol_bar.easing = 0; /* a new dialog opens on its value */
     /* the bar's level: the eased one, in 1/256 steps */
-    int eased = max > 0 ? clamp_step(0, max << 8, vd.vol_shown) : 0;
+    int eased = max > 0 ? clamp_step(0, max << 8, level_shown(&vol_bar, level)) : 0;
     vd.vol_dialog = top;
     vd.vol_drawn = level;
     if (!vd.vol_timer) vd.vol_timer = timer_add(vol_poll, (void *)0, VOL_POLL_MS);

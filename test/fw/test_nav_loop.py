@@ -9,7 +9,7 @@ import struct
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, Files, claim
+from conftest import NAVIGATION_SOURCE, O, Files, claim, ui_name
 
 KEY_CENTER, KEY_PREV, KEY_NEXT, KEY_PLAY, KEY_RETURN = (O[k] for k in ('KEY_CENTER', 'KEY_PREV', 'KEY_NEXT', 'KEY_PLAY', 'KEY_RETURN'))
 KEY_BACK_BTN, KEY_FWD_BTN = O['KEY_BACK_BTN'], O['KEY_FWD_BTN']
@@ -2116,7 +2116,7 @@ def slider_window(ui, name='backlight_page'):
     return top
 
 
-@pytest.mark.parametrize('name', ['backlight_page', 'maxvol_page', 'bootvol_page', 'balance_page'])
+@pytest.mark.parametrize('name', ['maxvol_page', 'bootvol_page', 'balance_page'])
 def test_the_wheel_steps_a_setting_through_its_own_buttons(fw, keys, name):
     ui = Ui(fw)
     slider_window(ui, name)
@@ -2188,14 +2188,19 @@ def test_a_pending_centre_does_nothing_while_the_page_slides(fw, keys):
     assert not fw.calls('navigator_back')
 
 
-def quick_window(ui, value=50, lo=10, hi=100, visible=1):
+def quick_window(ui, value=50, lo=10, hi=100, visible=1, ring=100000):
+    """Quick Settings open; ring: the time of the wheel's last tick there (Keys' clock starts at 100000), so its
+    ring shows; None for a page just pulled down."""
     top = ui.window('statusbar_dialog', 'dialog')
+    if ring is not None:
+        top.ints[b'_cc_seen'] = ring + 1
     slider = top.add(W(ui, 'slider', 'slider_backlight', value=value, min=lo, max=hi))
     slider.visible = visible
     return slider
 
 
-CC_BRIGHT, CC_VOLUME, CC_LOCK, CC_STOPS = 4, 5, 6, 11  # control_center.c's stops: four toggles, the sliders, five tiles
+# control_center.c's stops: four toggles, the Now Playing block, the sliders, five tiles
+CC_NOW, CC_BRIGHT, CC_VOLUME, CC_LOCK, CC_SLEEP, CC_NIGHT, CC_EQ, CC_SMART, CC_STOPS = 4, 5, 6, 7, 8, 9, 10, 11, 12
 
 
 @pytest.mark.parametrize('value, key, want', [(50, KEY_NEXT, 51), (50, KEY_PREV, 49), (100, KEY_NEXT, 100), (10, KEY_PREV, 10)])
@@ -2218,25 +2223,30 @@ def test_quick_settings_wheel_waits_while_it_slides(fw, keys, state, timer, visi
     assert keys(KEY_NEXT) == STOP and slider.ints[b'value'] == 50
 
 
-def cc_window(fw, ui):
+def cc_window(fw, ui, ring=100000):
     """Control Center open (control_center.c): its brightness slider and Wi-Fi's and Bluetooth's buttons."""
     Config(fw, QSVOLUME=b'1')  # the wheel's volume mode does not take Control Center's stops
     fw.var('fw_ctx_g_dropdown_menu_state', C.c_int).value = 3
-    slider = quick_window(ui)
+    slider = quick_window(ui, ring=ring)
     for name in ('img_wifiswitch', 'img_btswitch'):
         slider.parent.add(W(ui, 'image', name))
     return slider.parent, slider
 
 
-def test_control_center_s_wheel_walks_its_stops_and_stops_at_the_ends(fw, keys):
-    """The toggles, the two sliders and the five tiles in reading order; the ends hold."""
+@pytest.mark.parametrize('status', [0, 2, 3])
+def test_control_center_s_wheel_walks_its_stops_and_stops_at_the_ends(fw, keys, status):
+    """The toggles, Now Playing's block, the two sliders and the five tiles in reading order; the ends hold. With
+    nothing loaded (status 0), as Home's Now Playing row goes, the block is passed by."""
+    fw.mock('mclGetPlayStatus', lambda *_: status)
     ui = Ui(fw)
     top, slider = cc_window(fw, ui)
     stops = []
-    for key in [KEY_NEXT] * (CC_STOPS + 1) + [KEY_PREV] * (CC_STOPS + 1):
+    for key in [KEY_NEXT] * CC_STOPS + [KEY_PREV] * CC_STOPS:
         assert keys(key) == STOP
         stops.append(top.ints[b'_cc_focus'])
-    assert stops == [*range(1, CC_STOPS), CC_STOPS - 1, CC_STOPS - 1, *range(CC_STOPS - 2, -1, -1), 0, 0]
+    walk = [i for i in range(CC_STOPS) if status or i != CC_NOW]
+    ends = CC_STOPS - len(walk)  # the ticks the block's pass leaves at each end
+    assert stops == [*walk[1:], *[CC_STOPS - 1] * (ends + 1), *walk[-2::-1], *[0] * (ends + 1)]
     assert slider.ints[b'value'] == 50
 
 
@@ -2291,6 +2301,309 @@ def test_quick_settings_wheel_as_volume_is_stocks(fw, keys):
     slider = quick_window(ui)
     keys(KEY_NEXT)
     assert slider.ints[b'value'] == 50 and fw.calls('stock_keyup_trampoline')
+
+
+class WidgetTimers:
+    """widget_add_timer's timers, kept to run: (fn, the widget, ms) each."""
+    def __init__(self, fw):
+        self.added = []
+        fw.mock('widget_add_timer', lambda w, fn, ms, *_: self.added.append((fn, w, ms)) or len(self.added))
+
+    def fire(self, i):
+        """Timer i run as stock's timer manager does, its widget the context; its result (8 repeats)."""
+        fn, w, _ = self.added[i]
+        info = C.create_string_buffer(0x40)
+        struct.pack_into('<Q', info, O['TIMER_CTX'], w)
+        return TIMER(fn)(C.addressof(info))
+
+
+def test_control_center_opens_with_no_ring_and_the_first_tick_only_brings_it_up(fw, keys):
+    """Pulled down, the wheel's ring is not there: the first tick shows it on the stop the wheel is on without moving
+    it, and Centre then does not act; the next tick steps."""
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui, ring=None)
+    top.ints[b'_cc_focus'] = CC_LOCK
+    assert keys(KEY_NEXT) == STOP and top.ints[b'_cc_focus'] == CC_LOCK and top.ints[b'_cc_seen'] == 100001
+    assert keys(KEY_NEXT, 100) == STOP and top.ints[b'_cc_focus'] == CC_LOCK + 1
+
+
+def test_centre_with_no_ring_only_brings_it_up(fw, keys):
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui, ring=None)
+    flag = fw.var('g_keylock_flag', C.c_ubyte)
+    top.ints[b'_cc_focus'] = CC_LOCK
+    assert keys(KEY_CENTER) == STOP and flag.value == 0 and top.ints[b'_cc_seen'] == 100001
+    assert keys(KEY_CENTER, 600) == STOP and flag.value == 1  # with the ring up, Centre acts
+
+
+def test_the_ring_goes_5_s_after_the_last_input_and_comes_back_where_it_was(fw, keys):
+    """Each tick or key moves the ring's end on; its timer, once due, is added again for what is left, so the ring
+    goes CC_RING_MS after the last, not up to twice that; the next tick only brings it back, on the same stop."""
+    timers = WidgetTimers(fw)
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui, ring=None)
+    keys(KEY_NEXT)  # brings it up at 100000
+    assert [ms for _, _, ms in timers.added] == [5000]
+    keys(KEY_NEXT, 3000)  # moves it to stop 1 at 103000: no second timer
+    assert len(timers.added) == 1 and top.ints[b'_cc_focus'] == 1
+    keys.clock.now = 105000
+    ui.invalidated.clear()
+    assert timers.fire(0) == 7 and timers.added[1][2] == 3000 and not ui.invalidated  # 3 s left: added again
+    keys.clock.now = 107999
+    assert keys(KEY_NEXT, 0) == STOP and top.ints[b'_cc_focus'] == 2  # still up at 4999 ms
+    keys.clock.now = 108000
+    assert timers.fire(1) == 7 and timers.added[2][2] == 4999  # what is left of 107999's
+    keys.clock.now = 112999
+    ui.invalidated.clear()
+    assert timers.fire(2) == 7 and ui.invalidated == [top.p] and len(timers.added) == 3  # gone: drawn without it
+    assert keys(KEY_NEXT, 10) == STOP and top.ints[b'_cc_focus'] == 2  # back on stop 2, not moved
+
+
+@pytest.mark.parametrize('speed', [0, 300, 400, 600])
+def test_control_center_s_volume_steps_as_now_playing_s(fw, keys, speed):
+    """N ticks at a speed take Control Center's Volume slider where they take Now Playing's (vol_next, its dialog's
+    and every wheel volume's step), up and down."""
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui)
+    top.ints[b'_cc_focus'] = CC_VOLUME
+    vol, limit = fw.var('g_volume', C.c_ubyte), fw.var('g_maxvolume', C.c_ubyte)
+    fw.var('wheel_speed', C.c_int).value = speed
+    step = fw.fn('vol_next', C.c_int, C.c_uint)
+    for key in (KEY_NEXT, KEY_PREV):
+        vol.value, limit.value = 30 if key == KEY_NEXT else 70, 100
+        want = []
+        for _ in range(4):
+            vol.value = step(key)
+            want.append(vol.value)
+        vol.value = 30 if key == KEY_NEXT else 70
+        keys(KEY_CENTER, 600)  # the slider takes the wheel
+        got = []
+        for _ in range(4):
+            assert keys(key, 10) == STOP
+            got.append(vol.value)
+        keys(KEY_CENTER, 600)
+        assert got == want and len(set(b - a for a, b in zip([want[0]] + want, want))) <= 2
+
+
+def brightness_page(ui, value):
+    """Settings' Brightness page: stock's slider (0 to 100) and its -/+ buttons."""
+    top = slider_window(ui)
+    return top.add(W(ui, 'slider', 'slider_backlight', value=value, min=0, max=100))
+
+
+@pytest.mark.parametrize('speed', [0, 300, 400, 600])
+def test_control_center_and_the_brightness_page_step_the_brightness_alike(fw, keys, speed):
+    """N ticks at a speed move both brightness sliders alike, by the volume's steps (the range is 100 on each), through
+    the slider's value (stock's change callback saves it), never its -/+ buttons."""
+    fw.var('wheel_speed', C.c_int).value = speed
+    paths = []
+    for page in (0, 1):
+        ui = Ui(fw)
+        if page:
+            slider = brightness_page(ui, 20)
+        else:
+            top, slider = cc_window(fw, ui)
+            slider.ints[b'min'], slider.ints[b'value'] = 0, 20
+            top.ints[b'_cc_focus'] = CC_BRIGHT
+            keys(KEY_CENTER, 600)
+        seen = []
+        for key in [KEY_NEXT] * 4 + [KEY_PREV] * 2:
+            assert keys(key, 10) == STOP
+            seen.append(slider.ints[b'value'])
+        assert not [c for c in ui.clicks if c[0] in (b'img_add', b'img_dec')]
+        paths.append(seen)
+    vol, limit = fw.var('g_volume', C.c_ubyte), fw.var('g_maxvolume', C.c_ubyte)
+    vol.value, limit.value = 20, 100
+    step, want = fw.fn('vol_next', C.c_int, C.c_uint), []
+    for key in [KEY_NEXT] * 4 + [KEY_PREV] * 2:
+        vol.value = step(key)
+        want.append(vol.value)
+    assert paths[0] == paths[1] == want
+
+
+def full_range_ticks(fw, keys, where, speed, cc_bright, cc_volume):
+    """Wheel ticks from 0 to 100 at a steady speed: Now Playing's volume (vol_next), Control Center's Volume and
+    Brightness sliders, the Brightness page."""
+    fw.var('wheel_speed', C.c_int).value = speed
+    vol, limit = fw.var('g_volume', C.c_ubyte), fw.var('g_maxvolume', C.c_ubyte)
+    vol.value, limit.value = 0, 100
+    ui = Ui(fw)
+    if where == 'np':
+        step = fw.fn('vol_next', C.c_int, C.c_uint)
+        level = lambda: vol.value
+        tick = lambda: setattr(vol, 'value', step(KEY_NEXT))
+    elif where == 'page':
+        top = slider_window(ui)
+        slider = top.add(W(ui, 'slider', 'slider_backlight', value=0, min=0, max=100))
+        level = lambda: slider.ints[b'value']
+        tick = lambda: keys(KEY_NEXT, 10)
+    else:
+        top, slider = cc_window(fw, ui)
+        slider.ints[b'min'], slider.ints[b'value'] = 0, 0
+        top.ints[b'_cc_focus'] = cc_bright if where == 'cc_bright' else cc_volume
+        keys(KEY_CENTER, 600)
+        level = (lambda: slider.ints[b'value']) if where == 'cc_bright' else (lambda: vol.value)
+        tick = lambda: keys(KEY_NEXT, 10)
+    n = 0
+    while level() < 100 and n < 1000:
+        tick()
+        n += 1
+    return n
+
+
+@pytest.mark.parametrize('where', ['np', 'cc_volume', 'cc_bright', 'page'])
+@pytest.mark.parametrize('speed, ticks', [(200, 100), (600, 10)])
+def test_every_wheel_level_crosses_its_range_in_the_same_ticks(fw, keys, where, speed, ticks):
+    """docs/internals.md#wheel-volume's table: 0 to 100 takes 100 ticks turned slowly and 10 on a steady fast spin,
+    for the volume on Now Playing and Control Center and the brightness on Control Center and its page."""
+    assert full_range_ticks(fw, keys, where, speed, CC_BRIGHT, CC_VOLUME) == ticks
+
+@pytest.mark.parametrize('value, key, want', [(100, KEY_NEXT, 100), (0, KEY_PREV, 0)])
+def test_the_brightness_page_s_wheel_keeps_the_ends(fw, keys, value, key, want):
+    ui = Ui(fw)
+    slider = brightness_page(ui, value)
+    assert keys(key) == STOP and slider.ints[b'value'] == want
+
+
+@pytest.mark.parametrize('status, opens', [(2, 1), (3, 1), (0, 0)])
+def test_centre_on_the_now_playing_block_opens_now_playing(fw, keys, status, opens):
+    """Centre on the block closes Control Center and opens Now Playing, as the status bar's playing button does;
+    with nothing loaded it does nothing, as Home's row is not there then."""
+    fw.mock('mclGetPlayStatus', lambda *_: status)
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui)
+    top.ints[b'_cc_focus'] = CC_NOW
+    assert keys(KEY_CENTER) == STOP
+    assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p] * opens
+    assert [C.string_at(c[1][0]) for c in fw.calls('navigator_switch_to_with_context')] == [b'playing_page'] * opens
+    assert not fw.calls('player_play_pause')  # what plays stays as it is
+
+
+def cc_opened(fw, ui):
+    """Control Center laid out (cc_open) over the window cc_window gives: its clear buttons by stop."""
+    top, slider = cc_window(fw, ui)
+    top.add(W(ui, 'view', 'view_backlight')).add(slider)
+    buttons = []
+    fw.mock('button_create', lambda win, x, y, w, h, *_: buttons.append(ui.by[win].add(W(ui, 'button', x=x, y=y, w=w, h=h)))
+            or buttons[-1].p)
+    fw.fn('cc_open', None, C.c_void_p)(top.p)
+    stops = [i for i in range(2, CC_STOPS + 3) if i != CC_BRIGHT]  # CC_AIRPLAY to the transport's Next
+    return top, dict(zip(stops, buttons))
+
+
+@pytest.mark.parametrize('status', [2, 0])
+def test_a_tap_on_the_now_playing_block_opens_now_playing_and_the_transport_keeps_its_taps(fw, keys, status):
+    fw.mock('mclGetPlayStatus', lambda *_: status)
+    ui = Ui(fw)
+    top, buttons = cc_opened(fw, ui)
+    block, play = buttons[CC_NOW], buttons[CC_STOPS + 1]
+    assert top.children.index(play) > top.children.index(block)  # over it: the transport's taps are its own
+    ui.emit(play, EVT_CLICK)
+    assert fw.calls('player_play_pause') and not fw.calls('dialog_quit')
+    ui.emit(block, EVT_CLICK)
+    assert [C.string_at(c[1][0]) for c in fw.calls('navigator_switch_to_with_context')] == [b'playing_page'] * (status > 0)
+    assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p] * (status > 0)
+
+
+HOLDS = [(0, b'systemset/wifi_page'), (1, b'systemset/bluetooth_page'), (2, b'systemset/netservice_page'),
+         (3, None), (CC_LOCK, b'systemset/keylock_page'), (CC_SLEEP, b'systemset/sleepshutdown_page'),
+         (CC_NIGHT, b'playset/bootvol_page'), (CC_EQ, b'playset/equalizer_page'), (CC_SMART, b'systemset/wifi_page')]
+
+
+def opened(fw):
+    """The pages opened: navigator_to's paths, None for a page of the payload's own (Car Remote's, window_create)."""
+    if not hasattr(fw, 'cc_windows'):
+        fw.cc_windows = []
+        fw.mock('window_create', lambda *_: fw.cc_windows.append(None) and 0)
+    return [C.string_at(c[1][0]) for c in fw.calls('navigator_to')] + fw.cc_windows
+
+
+@pytest.mark.parametrize('stop, page', [h for h in HOLDS if h[0] > 1])
+def test_a_finger_held_on_a_tile_opens_its_settings_page_and_a_tap_still_acts(fw, keys, stop, page):
+    """Held QUICK_HOLD_MS (navigation.c quick_long, as Wi-Fi's and Bluetooth's stock buttons are), a toggle or tile
+    closes Control Center and opens its page; its release does not click it."""
+    ui = Ui(fw)
+    top, buttons = cc_opened(fw, ui)
+    button = buttons[stop]
+    assert button.ints[b'_quick_hold'] == 16 + stop
+    fw.mock('window_manager_get_pointer_pressed', lambda *_: 1)
+    ui.emit(button, O['EVT_POINTER_DOWN'])
+    assert [ms for _, _, ms in ui.timers.values()][-1] == O['QUICK_HOLD_MS']
+    opened(fw)
+    ui.fire(ui_name(fw.lib, 'quick_long'))
+    assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p]
+    assert opened(fw) == [page]
+    event = C.create_string_buffer(0x40)
+    struct.pack_into('<i', event, EVENT_TYPE, EVT_CLICK)
+    assert fw.fn('ringnav_dispatch', C.c_int, C.c_void_p, C.c_void_p)(button.p, event) == STOP
+
+
+def test_a_tap_on_a_tile_acts_and_opens_nothing(fw, keys):
+    ui = Ui(fw)
+    _, buttons = cc_opened(fw, ui)
+    flag = fw.var('g_keylock_flag', C.c_ubyte)
+    ui.emit(buttons[CC_LOCK], EVT_CLICK)
+    assert flag.value == 1 and not fw.calls('navigator_to') and not fw.calls('dialog_quit')
+
+
+@pytest.mark.parametrize('stop, page', HOLDS)
+def test_centre_held_on_a_toggle_or_tile_opens_its_settings_page(fw, keys, stop, page):
+    """Centre held QUICK_HOLD_MS with the ring on a toggle or tile: Control Center closes, its page opens, and the
+    release does nothing more (no toggle, no click on the page now in front)."""
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui)
+    top.ints[b'_cc_focus'] = stop
+    keys.press(KEY_CENTER)
+    keys.press(KEY_CENTER, 50)  # a held key's repeat leaves the hold running
+    hold = ui.due(ui_name(fw.lib, 'cc_hold_due'))
+    assert len(hold) == 1 and ui.timers[hold[0]][2] == O['QUICK_HOLD_MS']
+    opened(fw)
+    ui.fire(ui_name(fw.lib, 'cc_hold_due'))
+    assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p]
+    assert opened(fw) == [page]
+    seen = top.ints[b'_cc_seen']
+    assert keys(KEY_CENTER, 600) == STOP and not ui.clicks and fw.var('g_keylock_flag', C.c_ubyte).value == 0
+    assert len(fw.calls('dialog_quit')) == 1 and top.ints[b'_cc_seen'] == seen  # the release reached nothing
+
+
+def test_a_short_centre_on_a_tile_acts_and_drops_its_hold(fw, keys):
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui)
+    top.ints[b'_cc_focus'] = CC_LOCK
+    keys.press(KEY_CENTER)
+    assert keys(KEY_CENTER, 200) == STOP and fw.var('g_keylock_flag', C.c_ubyte).value == 1
+    assert not ui.due(ui_name(fw.lib, 'cc_hold_due')) and not fw.calls('navigator_to')
+
+
+@pytest.mark.parametrize('stop, ring', [(CC_VOLUME, True), (CC_NOW, True), (CC_LOCK, False)])
+def test_centre_held_on_a_slider_the_block_or_with_no_ring_holds_nothing(fw, keys, stop, ring):
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui, ring=100000 if ring else None)
+    top.ints[b'_cc_focus'] = stop
+    keys.press(KEY_CENTER)
+    assert not ui.due(ui_name(fw.lib, 'cc_hold_due'))
+
+
+def test_the_landing_waits_for_rest_then_springs_for_280_ms(fw, keys):
+    """cc_land, from the page's open: nothing while stock slides it (state 1, or its slide timer running); at rest
+    open the landing starts and the blocks' band is drawn again every pass until CC_SPRING_MS has gone."""
+    timers = WidgetTimers(fw)
+    ui = Ui(fw)
+    top, _ = cc_opened(fw, ui)
+    land = [i for i, (_, w, ms) in enumerate(timers.added) if w == top.p and ms == O['VOL_POLL_MS']]
+    assert len(land) == 1
+    state = fw.var('fw_ctx_g_dropdown_menu_state', C.c_int)
+    state.value = 1
+    assert timers.fire(land[0]) == 8 and b'_cc_landed' not in top.ints
+    state.value, top.ints[b'timer_idex'] = 3, 4
+    assert timers.fire(land[0]) == 8 and b'_cc_landed' not in top.ints
+    top.ints[b'timer_idex'] = -1
+    keys.clock.now = 200000
+    assert timers.fire(land[0]) == 8 and top.ints[b'_cc_landed'] == 200001
+    keys.clock.now = 200279
+    assert timers.fire(land[0]) == 8
+    keys.clock.now = 200280
+    assert timers.fire(land[0]) == 7  # its last pass draws it at rest
 
 
 def time_window(ui, name='manualtime_page', at=(4, 2, 4, 9, 5)):

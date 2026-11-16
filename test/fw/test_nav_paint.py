@@ -1861,14 +1861,18 @@ def test_the_scan_dialog_is_a_page_of_rows(fw, world, st, whole):
     assert max(f[0] + f[2] for f in lit) <= 24 + 323 * 312 // 704 + 1
 
 
-def control_center(fw, world, focus=0, adjust=0):
+CC_NOW, CC_BRIGHT = 4, 5  # control_center.c's stops: the Now Playing block, the Brightness slider
+
+
+def control_center(fw, world, focus=0, adjust=0, ring=True):
     """Control Center painted (control_center.c cc_paint): Wi-Fi on, Bluetooth off, the lock on, nothing playing, the
-    brightness at half; the wheel on focus, a slider adjusting or not. The canvas."""
+    brightness at half; the wheel on focus, a slider adjusting or not, its ring showing (a tick just now, the clock
+    at 0) or the page just pulled down. The canvas."""
     theme(fw)
     fw.var('g_wififlag', C.c_ubyte).value, fw.var('g_bluetoothflag', C.c_ubyte).value = 1, 0
     fw.var('g_keylock_flag', C.c_ubyte).value = 1
     win, _, _ = quick_window(world)
-    world[win].props.update(_cc_focus=focus, _cc_adjust=adjust)
+    world[win].props.update(_cc_focus=focus, _cc_adjust=adjust, **({'_cc_seen': 1} if ring else {}))
     canvas = Canvas(fw)
     paint_bg(fw, win, canvas)
     return canvas
@@ -1892,9 +1896,52 @@ def test_control_center_is_v3a_s_blocks_toggles_sliders_and_tiles(fw, world):
 
 def test_a_slider_with_the_wheel_takes_the_accent_s_ring(fw, world):
     rings = lambda canvas: [r for r, c, _ in canvas.rounded if r == (17, 167, 169, 44)]
-    assert rings(control_center(fw, world, focus=4, adjust=1)) and \
-        [c for r, c, _ in control_center(fw, world, focus=4, adjust=1).rounded if r == (17, 167, 169, 44)] == [rgba(0x2160d8)]
-    assert [c for r, c, _ in control_center(fw, world, focus=4).rounded if r == (17, 167, 169, 44)] == [rgba(0xffffff)]
+    assert rings(control_center(fw, world, focus=CC_BRIGHT, adjust=1)) and \
+        [c for r, c, _ in control_center(fw, world, focus=CC_BRIGHT, adjust=1).rounded if r == (17, 167, 169, 44)] == [rgba(0x2160d8)]
+    assert [c for r, c, _ in control_center(fw, world, focus=CC_BRIGHT).rounded if r == (17, 167, 169, 44)] == [rgba(0xffffff)]
+
+
+def test_pulled_down_the_page_shows_no_ring_and_the_now_playing_block_takes_one(fw, world):
+    """No wheel input yet: no ring anywhere. On the Now Playing block the ring goes round the whole block."""
+    boxes = lambda canvas: [r for r, c, _ in canvas.rounded if c == rgba(0xffffff)]
+    assert boxes(control_center(fw, world, ring=False)) == []
+    assert boxes(control_center(fw, world)) == [(32, 43, 46, 46)]  # Wi-Fi's
+    assert boxes(control_center(fw, world, focus=CC_NOW)) == [(163, 35, 195, 130)]
+
+
+def landed(fw, world, t):
+    """Control Center painted t ms after it came to rest open: each rounded box with the canvas's y offset then."""
+    now = [100000 + t]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    theme(fw)
+    win, _, _ = quick_window(world)
+    world[win].props.update(_cc_landed=100001)
+    canvas = Canvas(fw)
+    drawn = []
+    fw.mock('canvas_fill_rounded_rect', lambda c, r, bg, color, radius, *_: drawn.append(
+        (rect(r), C.c_uint.from_address(color).value, struct.unpack_from('<i', canvas.raw, O['CANVAS_Y'])[0])))
+    paint_bg(fw, win, canvas)
+    assert struct.unpack_from('<i', canvas.raw, O['CANVAS_Y'])[0] == 0  # given back
+    return drawn
+
+
+@pytest.mark.parametrize('t, dy', [(0, 0), (50, 8), (140, 0), (190, -2), (279, 0), (280, 0), (5000, 0)])
+def test_landing_open_the_blocks_overshoot_8_px_and_settle_by_280_ms(fw, world, t, dy):
+    """The landing's spring (cc_springs): every block, slider and tile drawn dy lower (the canvas's offset)."""
+    drawn = landed(fw, world, t)
+    blocks = [d for d in drawn if d[0] == (20, 38, 138, 124)]
+    assert blocks and {y for _, _, y in drawn} == {dy}
+
+
+def test_the_sliders_fill_to_their_eased_levels(fw, world):
+    """Control Center's sliders draw their bars' eased levels (levels.c), as Now Playing's volume bar does: the volume
+    at 100 eased to 50, the brightness at 50 eased to 25."""
+    fw.var('g_volume', C.c_ubyte).value = 100
+    struct.pack_into('<iiI', fw.var('vol_bar', C.c_char * 12), 0, 50 << 8, 1, 0)
+    struct.pack_into('<iiI', fw.var('bright_bar', C.c_char * 12), 0, 25 << 8, 1, 0)
+    canvas = control_center(fw, world)
+    fills = [r for r, c, _ in canvas.rounded if c == rgba(0xe5e5ea)]
+    assert (192, 170, 163 * 128 // 256, 38) in fills and (20, 170, 163 * 64 // 256, 38) in fills
 
 
 @pytest.mark.parametrize('flag, text, songs, line', [(0, 'Scanned 312', 704, '312'), (1, 'Scanned 800', 704, '800'),

@@ -2715,6 +2715,8 @@ static int quick_long(const void *unused) {
     widget_dispatch_event_to_target_recursive(win, abort_event);
     quick_cancel(0, 0);
     dialog_quit(win, 0);
+    if (page >= QUICK_CC)
+        return cc_hold(page - QUICK_CC), 0; /* Control Center's (control_center.c) */
     /* An open EQ page is already the goal: a second would share peq_ui.c's one state. */
     if (page == 3 && navigator_window_is_exist("equalizer_page")) return 0;
     navigator_to(page == 1   ? "systemset/wifi_page"
@@ -2729,8 +2731,14 @@ static int quick_down(void *icon, void *event) {
     quick.win = window_manager_get_top_window(window_manager());
     quick.icon = icon;
     quick.x = I(event, EVENT_X), quick.y = I(event, EVENT_Y);
-    rearm(&quick.timer, quick_long, RATE_HOLD_MS);
+    rearm(&quick.timer, quick_long, QUICK_HOLD_MS);
     return 0;
+}
+/* button held QUICK_HOLD_MS opens page (quick_long): 1 Wi-Fi's settings, 2 Bluetooth's, 3 the EQ
+ * page, QUICK_CC and on Control Center's stop's (control_center.c cc_hold). */
+void quick_hold(void *button, int page) {
+    prop(button, QUICK_HOLD, page);
+    widget_on(button, EVT_POINTER_DOWN, quick_down, button);
 }
 int ringnav_quick_settings(void *win, void *ctx) {
     int result = stock_quicksettings_trampoline(win, ctx);
@@ -2740,9 +2748,7 @@ int ringnav_quick_settings(void *win, void *ctx) {
         static const char *const names[] = { "img_wifiswitch", "img_btswitch", "img_playset" };
         for (int i = 0; i < 3; ++i) {
             void *icon = widget_lookup(win, names[i], 1);
-            if (!icon) continue;
-            prop(icon, QUICK_HOLD, i + 1);
-            widget_on(icon, EVT_POINTER_DOWN, quick_down, icon);
+            if (icon) quick_hold(icon, i + 1);
         }
         cc_open(win); /* Control Center (control_center.c) */
         widget_on(win, EVT_DESTROY, quick_cancel, win);
@@ -9638,6 +9644,7 @@ int ringnav_keydown(void *ctx, void *event) {
         st.center_down_at = st.centre_at ? st.centre_at : (unsigned)time_now_ms() | 1;
     lr_edit_keydown(key); /* Center held on the Library or Home: its editor (library_edit.c) */
     search_strip_down(top, key); /* Return held on a letter strip: its card (search_strip.c) */
+    cc_keydown(key);      /* ... on a Control Center stop: its page (control_center.c) */
     un_keydown(key);      /* ... on a queued song in Up Next: it lifts (upnext.c) */
     unsigned char tone = g_keytone_flag;
     void *row = (void *)0;
@@ -9768,9 +9775,12 @@ static int edit_key(void *top, unsigned key) {
     if (quick) {
         cc_wheel(top, dir); /* Control Center's stops, or a slider's level (control_center.c) */
     } else if (!n) {
-        void *button = widget_lookup(top, dir > 0 ? "img_add" : "img_dec", 1);
+        void *button = widget_lookup(top, dir > 0 ? "img_add" : "img_dec", 1),
+             *bright = widget_lookup(top, "slider_backlight", 1);
         char click[0x30];
-        if (button && widget_get_prop_bool(button, "enable", 1))
+        if (bright)
+            bright_wheel(bright, dir); /* Control Center's step, at the wheel's speed (levels.c) */
+        else if (button && widget_get_prop_bool(button, "enable", 1))
             stock_dispatch_trampoline(button, pointer_event_init(click, EVT_CLICK, button, 0, 0));
     } else {
         int f = field_at(top);
@@ -9952,6 +9962,7 @@ int ringnav(void *ctx, void *event) {
     if (usable() && games_key(window_manager_get_top_window(window_manager()), key)) return STOP;
     /* the row editors' keys, and the release of the Center hold that entered or left one */
     if (lr_edit_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
+    if (cc_key_release(key)) return STOP; /* the release of a Centre hold on Control Center */
     if (un_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
     if (usable() && search_strip_key(window_manager_get_top_window(window_manager()), key))
         return STOP;

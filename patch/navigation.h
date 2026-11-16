@@ -491,7 +491,11 @@ void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
 /* control_center.c: Quick Settings drawn as Control Center (ringnav_quick_settings, its paint and
  * keys) */
 void cc_open(void *win), cc_paint(void *win, void *canvas), cc_wheel(void *win, int dir);
-int cc_key(void *win, unsigned key);
+int cc_key(void *win, unsigned key), cc_key_release(unsigned key);
+void cc_keydown(unsigned key), cc_hold(int stop);
+/* navigation.c: a button's touch held QUICK_HOLD_MS opens page; Control Center's from QUICK_CC */
+#define QUICK_CC 16
+void quick_hold(void *button, int page);
 /* tilt.c: the selection bar leans toward the wheel's next tick (paint_selection, ringnav_sleep) */
 void tilt_poll(void);
 void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius);
@@ -683,6 +687,17 @@ void vol_paint(void *top, void *canvas);
 int vol_keyup(void *dialog, void *e); /* volume_dialog_on_keyup's hook: the wheel's steps */
 /* on_wm_keyup_fun's hook: the wheel's volume, playback screens' alone */
 int vol_wm_keyup(void *ctx, void *e);
+int vol_accel(void);                  /* volume.c: a wheel tick's steps at its speed */
+/* levels.c: the wheel's step and the bar's ease, shared by the volume and the brightness. shown:
+ * the bar's level in 1/256 steps, moving towards the level while easing, from at. */
+typedef struct {
+    int shown, easing;
+    unsigned at;
+} level_ease_t;
+extern level_ease_t vol_bar, bright_bar; /* volume.c, levels.c */
+int wheel_level(int value, int lo, int hi, int full, int dir), bright_wheel(void *slider, int dir);
+void level_ease_from(level_ease_t *e, int from), level_follow(void *win);
+int level_ease(level_ease_t *e, int level), level_shown(const level_ease_t *e, int level);
 
 /* smart_wifi.c */
 void smart_wake(void); /* Smart Wi-Fi's radio back now, if it had it off */

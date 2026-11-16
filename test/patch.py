@@ -2130,9 +2130,10 @@ assert m.confirm()==11 and m.clicks==[sw] and 'navigator_back' not in [c[0] for 
 # within its range; Return gives it back, and Return off a slider closes it, as its swipe up does (dialog_quit), not
 # stock's screen off and Home.
 QS_ADJUST='_cc_adjust'  # control_center.c CC_ADJUST: 1 while a slider has the wheel
-CC_BRIGHT=4  # control_center.c's Brightness stop
+CC_BRIGHT=5  # control_center.c's Brightness stop
+RING='_cc_seen'  # control_center.c CC_SEEN: the wheel's last tick, time_now_ms + 1, so its ring shows and a key acts
 m=Machine(); bright=m.node('slider','slider_backlight',value=99)
-m.top=m.node('dialog','statusbar_dialog',[m.node('view','view_backlight',[bright])],_cc_focus=CC_BRIGHT); m.mock('dialog_quit')
+m.top=m.node('dialog','statusbar_dialog',[m.node('view','view_backlight',[bright])],_cc_focus=CC_BRIGHT,**{RING:m.now+1}); m.mock('dialog_quit')
 assert m.call(O['KEY_CENTER'])==11 and m.nodes[m.top][QS_ADJUST]==1
 assert m.call()==11 and m.nodes[bright]['value']==100
 assert m.call()==11 and m.nodes[bright]['value']==100
@@ -2140,6 +2141,18 @@ assert m.call(O['KEY_PREV'])==11 and m.nodes[bright]['value']==99
 assert m.call(O['KEY_RETURN'])==11 and m.nodes[m.top][QS_ADJUST]==0 and not [c for c in m.calls if c[0]=='dialog_quit']
 assert m.call(O['KEY_RETURN'])==11 and [c[1:3] for c in m.calls if c[0]=='dialog_quit']==[(m.top,0)]
 passed()
+# Control Center's landing (control_center.c cc_land, cc_spring): a frame of it, 50 ms in with the blocks 8 px down,
+# stays within the 600,000 payload instructions a frame may take (docs/games-engine.md), stock's drawing aside.
+m=Machine(); bright=m.node('slider','slider_backlight',value=50)
+m.top=m.node('dialog','statusbar_dialog',[m.node('view','view_backlight',[bright])],_cc_landed=m.now+1-50,**{RING:m.now+1})
+instructions=[0]
+def count_payload(*args): instructions[0]+=1
+hook=m.u.hook_add(UC_HOOK_CODE,count_payload,begin=BASE,end=SCRATCH-1)
+m.call(address=payload_syms['cc_paint'],args=(m.top,m.canvas,0,0),gap=0,count=5_000_000)
+m.u.hook_del(hook)
+print('Control Center landing frame:',instructions[0],'payload instructions')
+assert any(r['rect']==(20,38,138,124) for r in m.rounded),m.rounded  # cc_paint ran: the connectivity block
+assert instructions[0]<600_000,instructions; passed()
 # A swipe down whose release the pull-down never got (stock state 1 or 2, no touch, no slide timer)
 # leaves it on top off screen, the page under it stopped (#189): the next UI pass hands it the
 # release, which stock's handler slides; an open panel, a live drag and a running slide are left.
@@ -2156,12 +2169,12 @@ passed()
 # does nothing there, on the slider too: only the rested, open panel takes a tick.
 for state,timer in ((1,7),(2,7),(3,7)):
     m=Machine(); bright=m.node('slider','slider_backlight',value=50)
-    m.top=m.node('dialog','statusbar_dialog',[m.node('view','view_backlight',[bright])],timer_idex=timer,_cc_focus=CC_BRIGHT,**{QS_ADJUST:1})
+    m.top=m.node('dialog','statusbar_dialog',[m.node('view','view_backlight',[bright])],timer_idex=timer,_cc_focus=CC_BRIGHT,**{QS_ADJUST:1,RING:m.now+1})
     m.word(syms['g_dropdown_menu_state'],state)
     assert m.call()==11 and m.nodes[bright]['value']==50, (state,timer)
 for state,timer,want in ((1,-1,50),(2,-1,50),(3,-1,51)):  # the state alone gates it, and at rest it ticks
     m=Machine(); bright=m.node('slider','slider_backlight',value=50)
-    m.top=m.node('dialog','statusbar_dialog',[m.node('view','view_backlight',[bright])],timer_idex=timer,_cc_focus=CC_BRIGHT,**{QS_ADJUST:1})
+    m.top=m.node('dialog','statusbar_dialog',[m.node('view','view_backlight',[bright])],timer_idex=timer,_cc_focus=CC_BRIGHT,**{QS_ADJUST:1,RING:m.now+1})
     m.word(syms['g_dropdown_menu_state'],state)
     assert m.call()==11 and m.nodes[bright]['value']==want, (state,timer)
 passed()
@@ -15686,28 +15699,28 @@ for radio,page in (('wifiswitch','systemset/wifi_page'),('btswitch','systemset/b
             return m.call(key=x,address=HOOKS['widget_dispatch'][0],args=(icon,m.event,0,0),event_type=kind,gap=0)
         return m,icon,win,down,dispatch
     m,icon,win,down,dispatch=quick_page(); down()
-    m.advance(O['RATE_HOLD_MS']-1); assert not m.opened
+    m.advance(O['QUICK_HOLD_MS']-1); assert not m.opened
     dispatch(O['EVT_POINTER_UP_BEFORE']); assert not m.timers
     assert dispatch(O['EVT_CLICK'])==0 and any(c[0]=='stock_dispatch' for c in m.calls)
-    m.advance(O['RATE_HOLD_MS']); assert not m.opened; passed()
-    m,icon,win,down,dispatch=quick_page(); down(); m.advance(O['RATE_HOLD_MS'])
+    m.advance(O['QUICK_HOLD_MS']); assert not m.opened; passed()
+    m,icon,win,down,dispatch=quick_page(); down(); m.advance(O['QUICK_HOLD_MS'])
     assert m.opened==[(page,None)] and [c[1:3] for c in m.calls if c[0]=='dialog_quit']==[(win,0)]
     assert any(c[0]=='widget_dispatch_event_to_target_recursive' for c in m.calls)
     assert dispatch(O['EVT_CLICK'])==11 and not any(c[0]=='stock_dispatch' for c in m.calls)
     # A later touch can tap the same icon normally.
     m.top=win; down(); dispatch(O['EVT_POINTER_UP_BEFORE']); assert dispatch(O['EVT_CLICK'])==0; passed()
     if radio=='playset':  # pulled down over the EQ page: the hold only closes the panel, no second EQ page
-        m,icon,win,down,dispatch=quick_page(); m.open_pages.add('equalizer_page'); down(); m.advance(O['RATE_HOLD_MS'])
+        m,icon,win,down,dispatch=quick_page(); m.open_pages.add('equalizer_page'); down(); m.advance(O['QUICK_HOLD_MS'])
         assert not m.opened and [c[1:3] for c in m.calls if c[0]=='dialog_quit']==[(win,0)]; passed()
     for kind in (O['EVT_POINTER_MOVE_BEFORE'],O['EVT_POINTER_ABORT'],O['EVT_KEY_DOWN_BEFORE']):
         m,icon,win,down,dispatch=quick_page(); down(); dispatch(kind,x=50)
-        m.advance(O['RATE_HOLD_MS']); assert not m.opened, (kind,m.opened)
+        m.advance(O['QUICK_HOLD_MS']); assert not m.opened, (kind,m.opened)
     for kind in (O['EVT_DESTROY'],O['EVT_WINDOW_CLOSE'],O['EVT_WINDOW_BACKGROUND']):
         m,icon,win,down,dispatch=quick_page(); down(); f,ctx=m.handler(win,kind)
         m.call(address=f,args=(ctx,m.event,0,0),event_type=kind,gap=0)
-        m.advance(O['RATE_HOLD_MS']); assert not m.opened
+        m.advance(O['QUICK_HOLD_MS']); assert not m.opened
     m,icon,win,down,dispatch=quick_page(); down(); m.top=m.node('window','other')
-    m.advance(O['RATE_HOLD_MS']); assert not m.opened
+    m.advance(O['QUICK_HOLD_MS']); assert not m.opened
     m,icon,win,down,dispatch=quick_page(); m.timer_fail=True; down()
     assert dispatch(O['EVT_CLICK'])==0 and not m.opened; passed()
 

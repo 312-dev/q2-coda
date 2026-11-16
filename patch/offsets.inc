@@ -162,8 +162,9 @@ static inline int arc_out(int r, int y) {
 }
 #define PLACEHOLDER "default_album_flow" /* Cover Flow's and Spotify's missing art */
 #define VOL_POLL_MS 16 /* how often the volume indicator checks for a change, and eases its bar */
-/* The volume bar's ease (volume.c vol_ease): a first-order follow with this time constant, so 95%
- * of a step in 3 x VOL_EASE_MS. A choice, not a measurement: no source times an iPod's bar. */
+/* A level bar's ease, the volume's and the brightness's (levels.c level_ease): a first-order
+ * follow with this time constant, so 95% of a step in 3 x VOL_EASE_MS. A choice, not a
+ * measurement: no source times an iPod's bar. */
 #define VOL_EASE_MS 60
 /* The wheel's volume acceleration (volume.c vol_accel): (speed / VOL_ACCEL_START)^4 steps a tick,
  * speed in degrees a second, Rockbox's iPod curve; at most VOL_ACCEL_MAX (reached from 475 deg/s),
@@ -483,6 +484,10 @@ static inline int arc_out(int r, int y) {
  * Now Playing's heart RATE_HOLD_MS opens the picker. */
 #define RATE_SLOTS 4096
 #define RATE_HOLD_MS 500
+/* A Quick Settings or Control Center button held this long, by a finger (navigation.c quick_long)
+ * or Centre (control_center.c cc_keydown), opens its page: the house hold, Edit Library's and Up
+ * Next's (LR_HOLD_MS, UN_HOLD_MS). */
+#define QUICK_HOLD_MS 550
 /* Long Songs (docs/internals.md#long-songs): songs longer than this. */
 #define LONG_SONG_S 600
 /* Following lyrics' nudge against the wheel (lyric_poll), in px. */

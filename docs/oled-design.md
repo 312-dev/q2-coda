@@ -868,7 +868,25 @@ The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `de
   in from the blocks' ends and evenly apart, named under them as the toggles are.
 - **Grab bar**: 36 x 5, `#5A5A5E`, at y 304, where the swipe up that closes the page starts.
 - **The wheel** rings the stop it is on in white (2 px, 1 px out); a slider that has the wheel is ringed in
-  Accent Blue.
+  Accent Blue. The stops, in reading order: the four toggles, the Now Playing block (only while something is
+  playing or paused, as Home's Now Playing row), the two sliders, the five tiles. The ring is not there when the
+  page is pulled down, and touch never brings it: the first wheel tick (or Center) shows it on the stop the wheel
+  is on, without moving or acting, and it goes 5 s after the last wheel tick or key; the next tick brings it back
+  on the same stop.
+- **Sliders and the wheel**: Volume steps exactly as Now Playing's volume does (1 a tick turned slowly, up to 10
+  a tick on a fast spin, `vol_next`), and Brightness by the same curve over its own range, identically here and
+  on Settings > Display > Brightness (`bright_wheel`); each fill eases to its level at Now Playing's bar's speed
+  (`VOL_EASE_MS`).
+- **Now Playing block**: a tap anywhere on it but the transport, or Center on it, closes the page and opens Now
+  Playing; Previous, Play/Pause and Next keep their own taps. With nothing loaded it does nothing.
+- **Holds**: a toggle or tile held 550 ms (`QUICK_HOLD_MS`), by a finger or by Center with the ring on it, closes
+  the page and opens its settings; a tap still toggles. Wi-Fi: Settings > Wi-Fi; Bluetooth: Settings >
+  Bluetooth; AirPlay: the Network service page (its receiver switch); Car Remote: Settings > Car Remote; Lock:
+  Buttons Lock; Sleep: Sleep Timer; Night Shift: its slider page (Display's Night Shift row); EQ: the EQ page;
+  Smart Wi-Fi: Settings > Wi-Fi. The sliders and the Now Playing block have no hold.
+- **Landing**: as the page comes to rest open, however it was opened, the blocks under the status row overshoot
+  8 px down and spring back through rest to 2 px short, still after 280 ms (a damped sine, ease-out, as iOS's
+  sheet settles). Only on opening; the status row stays put. The one exception to Motion's no bounce.
 
 ### USB
 
@@ -922,7 +940,9 @@ SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, a
 
 - Page push and pop: 220 ms horizontal slide, `cubic_out`.
 - Selection bar: moves with the wheel, no animation of its own beyond the list's scroll.
-- Nothing pulses, glows or bounces, a list's end included.
+- Nothing pulses, glows or bounces, a list's end included, with one deliberate exception: Control Center's
+  landing (an 8 px overshoot and one 2 px undershoot over 280 ms as it comes to rest open, [Control
+  Center](#control-center)).
 - **Marquee fades.** A scrolling text (the selected row's title, the status row's title, Now
   Playing's title, artist and album) is clipped to its own column, inside the glass and before any
   value or chevron on its row. A 12 px fade covers its right end while the text goes on past it,
