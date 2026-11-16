@@ -14,6 +14,7 @@
   - Home (OLED): in Split, the list above Home's window no longer repaints the status bar every frame, and Carousel's cards no longer carry a list's arrows.
   - Library: the Shuffle page's note about albums and folders shows under OLED; it sat below the screen.
   - EQ: a preset name with accents (Café) draws correctly on the slider and EQ pages.
+  - Car Remote: from the car's screen you can now turn shuffle on or off, change repeat, heart the playing song (it goes into Favorites, as Now Playing's heart does), tap a song in the queue to play it, and pick **Resume** on a playlist to carry on from the song you were on when you last played it from the car. A phone app from before this keeps working as it did.
   - Settings: after a reset, the first settings q2-coda saved could be lost, so the next start turned USB DAC Charging back On if you had turned it Off. Settings are now saved where they are read back, and a settings file already affected is put right the next time a setting is saved.
   - Lists: a title cut short just after a word puts its dots right after the word, as "Wicked Garden (2017...", with no space before them that read as a gap.
   - Streaming (OLED): the Subsonic app's row has its own mark, a small submarine sending out sonar, and any other card app with its own icon shows it again, small and grey beside its name, as the other services' marks are (it showed no icon at all). A card app without an icon shows the app-window mark.

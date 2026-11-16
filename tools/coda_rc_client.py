@@ -7,8 +7,11 @@ usage: coda_rc_client.py [--host H] [--port P] [--keys DIR] COMMAND ...
   watch [SECONDS]                    State pushes as they come
   browse [NODE] [--sort KEY] [--offset N] [--limit N]
   search TEXT
-  play NODE [--sort KEY] [--start SONG_ID] [--shuffle]
+  play NODE [--sort KEY] [--start SONG_ID] [--shuffle] [--resume]
   queue [--offset N] [--limit N]
+  jump INDEX SONG_ID                 play the queue's song at INDEX (its id from queue)
+  shuffle off|on | repeat off|one|all
+  rate HEARTS SONG_ID                0..5 hearts for the playing song (5 is Favorites)
   key play|pause|toggle|next|previous|volume-up|volume-down
   seek SECONDS | volume 0..100
   cover ART_ID OUT [--px N]
@@ -34,11 +37,12 @@ VERSION = 1
 SEALED = 1
 T = dict(HELLO=0x01, HELLO_RESP=0x02, PAIR_START=0x03, PAIR_CHALLENGE=0x04, PAIR_FINISH=0x05, PAIR_RESULT=0x06,
          AUTH=0x07, AUTH_RESP=0x08, ERROR=0x0F, SUBSCRIBE=0x10, STATE=0x11, GET_STATE=0x12, TRANSPORT=0x20, ACK=0x21,
-         BROWSE=0x30, BROWSE_RESP=0x31, SEARCH=0x32, SEARCH_RESP=0x33, PLAY=0x40, GET_QUEUE=0x42, QUEUE_RESP=0x43,
-         GET_COVER=0x50, COVER=0x51, PING=0x7E, PONG=0x7F)
+         SET_MODE=0x22, RATE=0x24, BROWSE=0x30, BROWSE_RESP=0x31, SEARCH=0x32, SEARCH_RESP=0x33, PLAY=0x40,
+         GET_QUEUE=0x42, QUEUE_RESP=0x43, PLAY_QUEUE_ITEM=0x44, GET_COVER=0x50, COVER=0x51, PING=0x7E, PONG=0x7F)
 ERRORS = {1: "UNSUPPORTED", 2: "UNAUTHORIZED", 3: "BAD_REQUEST", 4: "NOT_FOUND", 5: "BUSY", 6: "PAIRING_FAILED",
           7: "PAIRING_LOCKED", 8: "TOO_LARGE", 9: "INTERNAL", 10: "VERSION", 11: "UNAVAILABLE", 12: "PAIRING_CANCELLED",
           13: "PAIRING_FULL"}
+SHUFFLES, REPEATS = ("off", "on"), ("off", "one", "all")
 COMMANDS = {"play": 1, "pause": 2, "toggle": 3, "next": 4, "previous": 5, "seek": 6, "volume-up": 7, "volume-down": 8,
             "volume": 9}
 
@@ -132,7 +136,8 @@ def state(raw):
         n = decode(m[1][0])
         out["now_playing"] = {"track_id": text(n, 1), "title": text(n, 2), "artist": text(n, 3), "album": text(n, 4),
                               "duration_ms": one(n, 5, 0), "art": text(n, 6), "play_state": one(n, 7, 0),
-                              "shuffle": one(n, 8, 0), "repeat": one(n, 9, 0), "volume": one(n, 10, 0)}
+                              "shuffle": one(n, 8, 0), "repeat": one(n, 9, 0), "volume": one(n, 10, 0),
+                              "hearts": one(n, 11, 0), "rateable": bool(one(n, 12, 0))}
     if 2 in m:
         p = decode(m[2][0])
         out["position"] = {"position_ms": one(p, 1, 0), "at_ms": one(p, 2, 0)}
@@ -268,15 +273,27 @@ class Session:
         return {"node": text(m, 1), "title": text(m, 2), "total": one(m, 3, 0), "offset": one(m, 4, 0),
                 "items": [item(x) for x in m.get(5, [])], "sort": text(m, 6),
                 "sorts": [{"key": text(decode(x), 1), "label": text(decode(x), 2)} for x in m.get(7, [])],
-                "actions": [{1: "play", 2: "shuffle"}.get(a, a) for a in m.get(8, [])]}
+                "actions": [{1: "play", 2: "shuffle", 3: "resume"}.get(a, a) for a in m.get(8, [])]}
 
     def search(self, query, limit=20):
         m = decode(self.call(T["SEARCH"], encode([(1, query), (2, limit)]), T["SEARCH_RESP"]))
         return [{"title": text(g, 1), "total": one(g, 3, 0), "items": [item(x) for x in g.get(2, [])]}
                 for g in map(decode, m.get(1, []))]
 
-    def play(self, node, sort=None, start=None, shuffle=False):
-        self.call(T["PLAY"], encode([(1, node), (2, sort), (3, start), (4, shuffle)]), T["ACK"])
+    def play(self, node, sort=None, start=None, shuffle=False, resume=False):
+        self.call(T["PLAY"], encode([(1, node), (2, sort), (3, start), (4, shuffle), (5, resume or None)]), T["ACK"])
+
+    def set_mode(self, shuffle=None, repeat=None):
+        """SetMode: each of shuffle and repeat set when given (Shuffle and Repeat enum numbers)."""
+        fields = [(1, True), (2, shuffle)] if shuffle is not None else []
+        fields += [(3, True), (4, repeat)] if repeat is not None else []
+        self.call(T["SET_MODE"], encode(fields), T["ACK"])
+
+    def rate(self, track_id, hearts):
+        self.call(T["RATE"], encode([(1, track_id), (2, hearts)]), T["ACK"])
+
+    def jump(self, index, track_id):
+        self.call(T["PLAY_QUEUE_ITEM"], encode([(1, index), (2, track_id)]), T["ACK"])
 
     def queue(self, offset=0, limit=50):
         m = decode(self.call(T["GET_QUEUE"], encode([(1, offset), (2, limit)]), T["QUEUE_RESP"]))
@@ -376,6 +393,7 @@ def main(argv=None):
     ap.add_argument("--sort")
     ap.add_argument("--start")
     ap.add_argument("--shuffle", action="store_true")
+    ap.add_argument("--resume", action="store_true")
     ap.add_argument("--offset", type=int, default=0)
     ap.add_argument("--limit", type=int, default=50)
     ap.add_argument("--px", type=int, default=160)
@@ -404,7 +422,19 @@ def main(argv=None):
     elif a.cmd == "search":
         out = s.search(" ".join(a.args))
     elif a.cmd == "play":
-        s.play(a.args[0], a.sort, a.start, a.shuffle)
+        s.play(a.args[0], a.sort, a.start, a.shuffle, a.resume)
+        out = {"ok": True}
+    elif a.cmd == "jump":
+        s.jump(int(a.args[0]), a.args[1])
+        out = {"ok": True}
+    elif a.cmd in ("shuffle", "repeat"):
+        names = SHUFFLES if a.cmd == "shuffle" else REPEATS
+        if a.args[0] not in names:
+            ap.error(f"{a.cmd}: one of {', '.join(names)}")
+        s.set_mode(**{a.cmd: names.index(a.args[0])})
+        out = {"ok": True}
+    elif a.cmd == "rate":
+        s.rate(a.args[1], int(a.args[0]))
         out = {"ok": True}
     elif a.cmd == "queue":
         out = s.queue(a.offset, a.limit)

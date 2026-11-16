@@ -123,7 +123,19 @@ Labels are ASCII with no terminator; `||` is concatenation. `tools/coda_rc_crypt
 - `Hello.proto_version` is the highest version the client speaks; `HelloResp.proto_version` is the one the session uses, and `min_version` the oldest the device still speaks. A client older than `min_version` gets `Error{VERSION}` and the session closes. This is version 1.
 - Within a version, change is additive: new frame types, new fields, new enum values. Readers skip unknown fields and treat unknown enum values as their zero value. An unknown frame type gets `Error{UNSUPPORTED}` and the session goes on.
 - `HelloResp.caps` says what this Q2 serves (`Capability` in the proto): a Q2 without the play shim, or whose demo is not answering it, leaves `CAP_PLAY` clear, and the app greys out Play rather than failing.
+- Commands added within version 1 come with a capability bit, so a phone and a Q2 of different ages still work together: `SetMode` (`CAP_MODES`), `Rate` with `NowPlaying.hearts` and `rateable` (`CAP_RATE`), `PlayQueueItem` (`CAP_QUEUE_JUMP`), and `Play.resume` with the playlists' `ACTION_RESUME` (`CAP_RESUME`). An older Q2 leaves the bits clear and answers the frames `UNSUPPORTED`; the app then hides the car's Shuffle, Repeat and heart buttons, leaves the queue untappable and shows no Resume row, as before. An older app never sends them and ignores the new fields. All four need demo's shim, as Play does: they are clear when it is not answering. See [Modes, rating, the queue and Resume](#modes-rating-the-queue-and-resume).
 - A change that cannot be additive (a new frame layout, a new key schedule) is a new `proto_version`. The labels carry the version (`"coda-rc pake v1"`), so a v2 key schedule never collides with v1.
+
+## Modes, rating, the queue and Resume
+
+Each goes to demo's shim as one line in `/tmp/coda-rc.cmd`, as Transport does, and is acked once the Q2 has done it; the State push that follows shows the result.
+
+- **SetMode** sets the playing queue's shuffle or repeat as the Play/Pause hold menu's Shuffle and Repeat rows do (`playback_set`). The Q2 has more modes than the protocol names, so a SetMode keeps the nearest Q2 mode where it can: shuffle on keeps a shuffle by album, Off keeps Play One Song or Play One Album (else Play All), One is Repeat Song, All keeps Repeat Album (else Repeat All). `UNAVAILABLE` when there is no queue to apply it to.
+- **Rate** gives the playing song 0 to 5 hearts as Now Playing's heart and its picker do ([Ratings](internals.md#ratings)): 5 puts it in Favorites, 1 to 4 keep that many hearts, 0 clears both. It names the song (`track_id`), so a song that changed meanwhile answers `NOT_FOUND`; a streamed song (`rateable` false) answers `UNAVAILABLE`.
+- **PlayQueueItem** plays the queue's song at an index of `GetQueue`'s list, as a row of the Q2's View Queue does: the playing song plays on, another starts unless Headphones required forbids it (`UNAVAILABLE`). It names the row's song too, and a queue that changed since the phone fetched it answers `NOT_FOUND`.
+- **Play with `resume`** carries on a list where it was left. The daemon remembers, for each list a phone played (not shuffled), the song it was on, in `/mnt/data/coda-rc/places` (the 16 most recent lists). If the Q2's queue is still that list's, Resume is Play; otherwise the list starts again from that song, and the Q2's Resume Songs takes a long song back to its place. A list never played from a phone starts at its first song. The app offers it as the playlists' Resume row (`ACTION_RESUME`), as Symfonium does.
+
+There is no song radio to start: the Q2's Internet Radio plays stations, not songs like the one playing.
 
 ## Errors
 

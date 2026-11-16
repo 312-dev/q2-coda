@@ -240,3 +240,74 @@ def test_next_and_previous_go_to_the_player(fw, ui, mcl, recs):
     q2.files[CMD] = b'15 previous\n'
     q2.tick()
     assert len(fw.calls('player_prev_music')) == 1 and q2.files.pop(ACK) == b'15 0\n'
+
+
+def test_mode_sets_shuffle_and_repeat_as_the_hold_menu(fw, ui, mcl, recs):
+    """SetMode's "mode <shuffle> <repeat>": the hold menu's playback_set, the nearest Q2 mode, -1 left alone."""
+    q2 = Q2(fw, ui, recs)
+    q2.queue()
+    q2.tick()
+    option = fw.fn('playback_option', C.c_int, C.c_int)
+    q2.files[CMD] = b'20 mode 1 2\n'
+    q2.tick()
+    assert q2.files.pop(ACK) == b'20 0\n'
+    assert (option(0), option(1)) == (1, 5)  # All Songs, Repeat All
+    assert q2.now()['shuffle'] == '1' and q2.now()['repeat'] == '2'  # written before the ack
+    q2.files[CMD] = b'21 mode -1 1\n'
+    q2.tick()
+    assert q2.files.pop(ACK) == b'21 0\n' and (option(0), option(1)) == (1, 3)  # shuffle kept, Repeat Song
+    q2.files[CMD] = b'22 mode 0 0\n'
+    q2.tick()
+    assert q2.files.pop(ACK) == b'22 0\n' and (option(0), option(1)) == (0, 2)  # Off, Play All
+    fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(0, 3)  # Albums, from the hold menu
+    fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(1, 4)  # Repeat Album
+    q2.files[CMD] = b'23 mode 1 2\n'
+    q2.tick()
+    assert q2.files.pop(ACK) == b'23 0\n' and (option(0), option(1)) == (3, 4)  # both kept: already on
+
+
+def test_rate_hearts_the_playing_song_and_now_playing_shows_them(fw, ui, mcl, recs):
+    q2 = Q2(fw, ui, recs)
+    q2.queue(at=2)
+    C.c_int.from_address(O['MCL_TYPE']).value = 1
+    q2.tick()
+    assert q2.now()['hearts'] == '0'
+    q2.files[CMD] = b'30 rate 3 12\n'
+    q2.tick()
+    assert q2.files.pop(ACK) == b'30 0\n' and q2.now()['hearts'] == '3'
+    assert not fw.calls('batch_add_file')
+    q2.files[CMD] = b'31 rate 5 12\n'  # Favorites: batch-select's Add on the queue's row, as the menu's
+    q2.tick()
+    assert q2.files.pop(ACK) == b'31 0\n'
+    (_, args), = fw.calls('batch_add_file')
+    assert args[:2] == (0xf001, 0xf00a) and [a[0] for _, a in fw.calls('batch_set_selectitem')] == [2]
+    q2.files[CMD] = b'32 rate 4 11\n'  # not the playing song: NOT_FOUND, nothing kept
+    q2.tick()
+    assert q2.files.pop(ACK) == b'32 3\n'
+
+
+def test_a_stream_has_no_hearts(fw, ui, mcl, recs):
+    q2 = Q2(fw, ui, recs)
+    q2.queue()
+    C.c_int.from_address(O['MCL_TYPE']).value = 0xf1
+    q2.tick()
+    assert q2.now()['hearts'] == '-1'
+
+
+def test_jump_plays_a_queue_entry_if_it_is_still_that_song(fw, ui, mcl, recs):
+    q2 = Q2(fw, ui, recs)
+    q2.queue(at=0)
+    q2.tick()
+    q2.files[CMD] = b'40 jump 3 13\n'
+    q2.tick()
+    assert q2.files.pop(ACK) == b'40 0\n' and [a[0] for _, a in fw.calls('player_start_queue')] == [3]
+    q2.files[CMD] = b'41 jump 2 13\n'  # the queue moved under the phone
+    q2.tick()
+    assert q2.files.pop(ACK) == b'41 3\n' and len(fw.calls('player_start_queue')) == 1
+    q2.files[CMD] = b'42 jump 9 13\n'
+    q2.tick()
+    assert q2.files.pop(ACK) == b'42 3\n'
+    fw.mock('check_forbid_play_no_headset', lambda *_: 1)  # Headphones required
+    q2.files[CMD] = b'43 jump 1 11\n'
+    q2.tick()
+    assert q2.files.pop(ACK) == b'43 1\n' and len(fw.calls('player_start_queue')) == 1

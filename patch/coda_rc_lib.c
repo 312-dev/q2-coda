@@ -3,7 +3,8 @@
  * (its tools/q2bridge.py, remote/coda-rc.proto "browse"), built here with SQL over two temporary views of
  * stock's songtable and, with Local + Server on, the catalogue's servertable (docs/server-library.md). The
  * database is opened per request and closed after it, so no lock or stale schema outlives an answer, and
- * nothing is ever written to it. */
+ * nothing is ever written to it. Play.resume's places, the song each list last played from a phone was on,
+ * are the daemon's own file (PLACES). */
 #include "coda_rc_sys.h"
 #include "coda_rc.h"
 
@@ -16,6 +17,8 @@
 #define PLAY_MAX 20000    /* songs one Play may queue */
 #define NO_LETTER "123"
 #define SERVER_ID 0x40000000 /* catalogue.c: server song ids start here */
+#define PLACES "/mnt/data/coda-rc/places" /* "rid key" a line, the most recent first */
+#define PLACES_MAX 16
 
 /* ---- small helpers ---- */
 
@@ -37,7 +40,7 @@ static unsigned fnv32(unsigned h, const char *s) { /* coverflow.c fnv: with its 
 }
 
 /* "song:t12" -> 12 (and 'c' ids are the catalogue's); 0 when not a song id */
-static int song_rid(const char *id) {
+int lib_song_rid(const char *id) {
     if (strncmp(id, "song:", 5) || (id[5] != 't' && id[5] != 'c')) return 0;
     char *end;
     unsigned long v = strtoul(id + 6, &end, 10);
@@ -352,7 +355,7 @@ typedef struct {
     int bucketed, years;  /* the order has a bucket key; it is a year order (decades) */
     const sort_t *sorts;
     const char *sort;
-    int actions;          /* bit 0 Play, bit 1 Shuffle */
+    int actions;          /* bit 0 Play, bit 1 Shuffle, bit 2 Resume */
     char title[200];
 } list_t;
 
@@ -431,7 +434,7 @@ static int list_of(const char *base, const char *sort, list_t *l) {
         unsigned long n = strtoul(arg, &end, 10);
         if (*end || !*arg || n > 100) return 0;
         l->sorts = PL_SORTS;
-        l->actions = 3;
+        l->actions = 7;
         l->sort = pick(l->sorts, sort)->key;
         l->order = order_of("pl", l->sort, &l->bucketed, &l->years, &bk);
         /* a playlist row's place is its row id, so a song listed twice keeps both places */
@@ -670,6 +673,7 @@ static int browse(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
     }
     if (l.actions & 1) pb_varint(&w, 8, 1);
     if (l.actions & 2) pb_varint(&w, 8, 2);
+    if (l.actions & 4) pb_varint(&w, 8, 3);
     lib_close();
     if (w.over) return crc_error(s, req_id, E_TOO_LARGE, "ask for fewer items");
     return crc_send(s, T_BROWSE_RESP, req_id, out, w.n);
@@ -731,22 +735,96 @@ fail:
     return crc_error(s, req_id, E_INTERNAL, "query");
 }
 
+/* ---- Play.resume: where each list played from a phone was left ---- */
+
+/* The list the last Play started ("node#sort", empty after a shuffle or a single song) and its queue's
+ * version once the shim took it; the song noted last; the key a Play in flight will start. */
+static struct {
+    char key[440], pending[440];
+    int gen, id;
+} cur;
+static char places[PLACES_MAX * 452 + 1];
+
+static int places_read(void) {
+    char p[256];
+    int fd = open(crc_path(p, sizeof p, PLACES), O_RDONLY | O_CLOEXEC), n = 0;
+    while (fd >= 0 && n < (int)sizeof places - 1) {
+        int r = (int)read(fd, places + n, sizeof places - 1 - n);
+        if (r <= 0) break;
+        n += r;
+    }
+    if (fd >= 0) close(fd);
+    places[n] = 0;
+    return n;
+}
+
+/* key's line in places, or 0 */
+static char *place_line(const char *key) {
+    size_t kn = strlen(key);
+    for (char *line = places; *line;) {
+        char *sp = strchr(line, ' '), *end = strchr(line, '\n');
+        if (!end) break;
+        if (sp && sp < end && (size_t)(end - sp - 1) == kn && !memcmp(sp + 1, key, kn)) return line;
+        line = end + 1;
+    }
+    return 0;
+}
+
+static int place_of(const char *key) {
+    places_read();
+    char *line = place_line(key);
+    return line ? atoi(line) : 0;
+}
+
+/* key's song is now id: its line first, the oldest past PLACES_MAX dropped */
+static void place_put(const char *key, int id) {
+    static char b[sizeof places + 460];
+    places_read();
+    char *old = place_line(key);
+    int n = snprintf(b, sizeof b, "%d %s\n", id, key), lines = 1;
+    for (char *line = places; *line && lines < PLACES_MAX; ++lines) {
+        char *end = strchr(line, '\n');
+        if (!end) break;
+        if (line != old) memcpy(b + n, line, end + 1 - line), n += (int)(end + 1 - line);
+        else --lines;
+        line = end + 1;
+    }
+    char p[256];
+    mkdir(crc_path(p, sizeof p, "/mnt/data/coda-rc"), 0700);
+    crc_write_file(PLACES, b, n, 0600);
+}
+
+void lib_played(int ok, int qgen) {
+    if (!ok) return; /* the queue the Q2 had plays on, and so does what it was */
+    snprintf(cur.key, sizeof cur.key, "%s", cur.pending);
+    cur.gen = qgen;
+    cur.id = 0;
+}
+
+void lib_now(int qgen, int id) {
+    if (!cur.key[0] || qgen != cur.gen || id <= 0 || id == cur.id) return;
+    cur.id = id;
+    place_put(cur.key, id);
+}
+
 /* ---- play: the list's song ids to the shim (coda_rc_shim.c), which queues them in demo ---- */
 
-static int play(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
+static int play(crc_session *s, unsigned req_id, const uint8_t *p, size_t n, int qgen) {
     pbr r = {p, p + n};
     pbf f;
-    char node[400] = "", sort[24] = "", start[40] = "";
-    int shuffle = 0, k;
+    char node[400] = "", sort[24] = "", start[40] = "", key[440] = "";
+    int shuffle = 0, resume = 0, k;
     while ((k = pb_next(&r, &f)) > 0) {
         if (f.field == 1) pb_cstr(&f, node, sizeof node);
         if (f.field == 2) pb_cstr(&f, sort, sizeof sort);
         if (f.field == 3) pb_cstr(&f, start, sizeof start);
         if (f.field == 4 && f.wire == 0) shuffle = f.v != 0;
+        if (f.field == 5 && f.wire == 0) resume = f.v != 0;
     }
-    if (k < 0 || !*node) return crc_error(s, req_id, E_BAD_REQUEST, "Play");
+    if (k < 0 || !*node || strchr(node, '\n')) return crc_error(s, req_id, E_BAD_REQUEST, "Play");
+    if (resume) start[0] = 0, shuffle = 0;
     if (!crc_shim_alive()) return crc_error(s, req_id, E_UNAVAILABLE, "demo is not answering");
-    int one = song_rid(node), want = start[0] ? song_rid(start) : 0;
+    int one = lib_song_rid(node), want = start[0] ? lib_song_rid(start) : 0;
     if (start[0] && !want) return crc_error(s, req_id, E_BAD_REQUEST, "start_id");
     char *ids = malloc(PLAY_MAX * 11 + 1);
     if (!ids) return crc_error(s, req_id, E_INTERNAL, "memory");
@@ -788,6 +866,13 @@ static int play(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
             ok = 1;
         }
         if (!ok) { lib_close(); free(ids); return crc_error(s, req_id, E_NOT_FOUND, "not a playable list"); }
+        if (!shuffle) snprintf(key, sizeof key, "%s#%s", node, l.sort);
+        if (resume && cur.key[0] && !strcmp(key, cur.key) && qgen == cur.gen) {
+            lib_close(); /* the Q2 still plays this list: it carries on */
+            free(ids);
+            return crc_shim_command(s, req_id, "resume");
+        }
+        if (resume) want = place_of(key);
         char bw[64];
         bucket_where(bw, sizeof bw, &l, bucket);
         snprintf(sql, sizeof sql, "select * from (%s) where %s order by %s limit %d", l.src, bw, l.order, PLAY_MAX);
@@ -799,7 +884,7 @@ static int play(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
             return crc_error(s, req_id, E_INTERNAL, "query");
         }
         while (sqlite3_step(st) == SQLITE_ROW) {
-            int rid = song_rid((const char *)sqlite3_column_text(st, 0));
+            int rid = lib_song_rid((const char *)sqlite3_column_text(st, 0));
             if (!rid) continue;  /* a folder row in dir: */
             if (rid == want) at = count;
             len += snprintf(ids + len, 12, "%d\n", rid);
@@ -814,6 +899,7 @@ static int play(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
     if (e) return crc_error(s, req_id, E_INTERNAL, "list");
     char verb[48];
     snprintf(verb, sizeof verb, "play %d %d %d", at, shuffle, count);
+    snprintf(cur.pending, sizeof cur.pending, "%s", key);
     return crc_shim_command(s, req_id, verb);
 }
 
@@ -1039,7 +1125,7 @@ int lib_request(crc_session *s, int type, unsigned req_id, const uint8_t *p, siz
     switch (type) {
     case T_BROWSE: return browse(s, req_id, p, n);
     case T_SEARCH: return search(s, req_id, p, n);
-    case T_PLAY: return play(s, req_id, p, n);
+    case T_PLAY: return play(s, req_id, p, n, qgen);
     case T_GET_QUEUE: return queue(s, req_id, p, n, qgen, qpos);
     case T_GET_COVER: return cover(s, req_id, p, n);
     }

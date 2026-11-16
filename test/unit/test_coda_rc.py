@@ -453,7 +453,7 @@ def item(id_, title, **kw):
 
 
 NOW = client.encode([(1, client.encode([(1, 's:12'), (2, 'Song'), (3, 'Artist'), (4, 'Album'), (5, 200000),
-                                       (6, 'a:3'), (7, 1), (8, 1), (9, 2), (10, 40)])),
+                                       (6, 'a:3'), (7, 1), (8, 1), (9, 2), (10, 40), (11, 3), (12, 1)])),
                      (2, client.encode([(1, 30000), (2, 99)])), (3, client.encode([(1, 4), (2, 2), (3, 9)]))])
 ACK = lambda m: [(0x21, None, b'')]  # noqa: E731
 COVER = b'\xff\xd8' + bytes(range(256)) * 20 + b'\xff\xd9'
@@ -471,14 +471,14 @@ def cover_answers():
 
 
 ANSWERS = {
-    0x10: ACK, 0x20: ACK, 0x40: ACK,
+    0x10: ACK, 0x20: ACK, 0x22: ACK, 0x24: ACK, 0x40: ACK, 0x44: ACK,
     0x12: lambda m: [(0x7F, 0, b''), (0x11, None, NOW)],  # a push first: kept, then the answer
     0x30: lambda m: [(0x31, None, client.encode([(1, client.text(m, 1)), (2, 'Albums'), (3, 2), (4, 0),
                                                  (5, item('al:1', 'One', subtitle='A', art='a:1', browsable=1,
                                                           playable=1, group='O')),
                                                  (5, item('s:1', 'Two', icon=2, duration=1000, number=3, playable=1)),
                                                  (6, 'name'), (7, client.encode([(1, 'name'), (2, 'Name')])),
-                                                 (8, 1), (8, 2), (8, 5)]))],
+                                                 (8, 1), (8, 2), (8, 3), (8, 5)]))],
     0x32: lambda m: [(0x33, None, client.encode([(1, client.encode([(1, 'Songs'), (2, item('s:1', 'Two')), (3, 1)]))]))],
     0x42: lambda m: [(0x43, None, client.encode([(1, 4), (2, 2), (3, 9), (4, client.one(m, 1, 0)),
                                                  (5, item('s:5', 'Five'))]))],
@@ -534,22 +534,26 @@ def test_client_commands(q2, capsys, tmp_path):
     st = run(capsys, 'state')
     assert st == {'now_playing': {'track_id': 's:12', 'title': 'Song', 'artist': 'Artist', 'album': 'Album',
                                   'duration_ms': 200000, 'art': 'a:3', 'play_state': 1, 'shuffle': 1, 'repeat': 2,
-                                  'volume': 40},
+                                  'volume': 40, 'hearts': 3, 'rateable': True},
                   'position': {'position_ms': 30000, 'at_ms': 99}, 'queue': {'version': 4, 'index': 2, 'total': 9}}
     b = run(capsys, 'browse', 'albums', '--sort', 'name', '--limit', '2')
     assert b['items'][0] == {'id': 'al:1', 'title': 'One', 'subtitle': 'A', 'art': 'a:1', 'group': 'O',
                              'browsable': True, 'playable': True}
     assert b['items'][1] == {'id': 's:1', 'title': 'Two', 'icon': 2, 'duration_ms': 1000, 'number': 3,
                              'browsable': False, 'playable': True}
-    assert b['sorts'] == [{'key': 'name', 'label': 'Name'}] and b['actions'] == ['play', 'shuffle', 5]
+    assert b['sorts'] == [{'key': 'name', 'label': 'Name'}] and b['actions'] == ['play', 'shuffle', 'resume', 5]
     assert q2[-1].requests[0][1] == {1: [b'albums'], 2: [b'name'], 3: [0], 4: [2]}
     assert run(capsys, 'browse')['node'] == 'root'
     assert run(capsys, 'search', 'two', 'words')[0]['items'][0]['id'] == 's:1'
     assert client.text(q2[-1].requests[0][1], 1) == 'two words'
     assert run(capsys, 'play', 'al:1', '--start', 's:1', '--shuffle') == {'ok': True}
     assert q2[-1].requests[0][1] == {1: [b'al:1'], 3: [b's:1'], 4: [1]}
+    assert run(capsys, 'play', 'pl:1', '--sort', 'order', '--resume') == {'ok': True}
+    assert q2[-1].requests[0][1] == {1: [b'pl:1'], 2: [b'order'], 4: [0], 5: [1]}
     for argv, fields in ((('key', 'next'), {1: [4]}), (('seek', '75.5'), {1: [6], 2: [75500]}),
-                         (('volume', '30'), {1: [9], 3: [30]})):
+                         (('volume', '30'), {1: [9], 3: [30]}), (('shuffle', 'off'), {1: [1], 2: [0]}),
+                         (('repeat', 'all'), {3: [1], 4: [2]}), (('rate', '5', 's:12'), {1: [b's:12'], 2: [5]}),
+                         (('jump', '3', 's:5'), {1: [3], 2: [b's:5']})):
         assert run(capsys, *argv) == {'ok': True} and q2[-1].requests[0][1] == fields
     out = tmp_path / 'cover.jpg'
     assert run(capsys, 'cover', 'a:3', str(out), '--px', '80') == {'bytes': len(COVER), 'mime': 'image/jpeg'}
@@ -557,6 +561,8 @@ def test_client_commands(q2, capsys, tmp_path):
     assert [client.one(m, 2) for _, m in q2[-1].requests] == [0, 4096, 0, 4096]  # the etag changed: again
     with pytest.raises(SystemExit):
         run(capsys, 'nonsense')
+    with pytest.raises(SystemExit):
+        run(capsys, 'repeat', 'sometimes')
 
 
 def test_client_watch_prints_pushes_until_its_time(q2, capsys, monkeypatch):
