@@ -2,7 +2,7 @@
 
 Can a rebuilt payload be written into a running emulated `demo` in two or three seconds, keeping its state, instead of `tools/ci/q2live.py`'s restart and route replay (17.8 s, [building: Live reload](building.md#live-reload))? A spike on 2026-11-16, on branch `infra/q2-hotswap-mem`, with one pool emulator (slot 1, fast boot), qemu-mipsel 8.2.2 (Ubuntu 24.04's `qemu-user-binfmt`). The spike's tool is `tools/ci/memswap.py`; its guest side is `hotswap_poll` in `patch/navigation.c` (a `--dev` build only), called first in `ringnav_sleep`.
 
-**Answer: yes.** A one-word painter change went from save to screen in 3.7 s, 0.15 s of it the swap, on the page it was on (Settings, scrolled, its row selected). The build is the rest. The limit is layout: a swap that moves a function something still points at crashed `demo` within 2 s. The design below keeps the swap to edits that move nothing live, and falls back to `q2live.py`'s restart for the others.
+**Answer: yes.** A one-constant painter change went from save to screen in 3.7 s, 0.15 s of it the swap, on the page it was on (Settings, scrolled, its row selected). The build is the rest. The limit is layout: a swap that moves a function something still points at crashed `demo` within 2 s. The design below keeps the swap to edits that move nothing live, and falls back to `q2live.py`'s restart for the others.
 
 ## 1. Where the payload is in the qemu process
 
@@ -41,7 +41,7 @@ The pid is ours by `demo_pid()`: each `demo` qemu's parents are walked up to the
 | 1 | a store of each payload page's first word back to itself | each store to an `r--p` page faults → `page_unprotect` → that page's TBs dropped | 21.6 ms |
 | 2 | `mprotect(text, R+X)` then `mprotect(text, R+W+X)` (syscall 4125 through `cf_syscall`) | `target_mprotect` (`linux-user/mmap.c`) → `page_set_flags` → `pageflags_set_clear`, which flushes when a region holding code "removes exec, or adds write" → one `tb_invalidate_phys_range` over the whole range | 2.2 to 24.8 ms, both calls return 0 |
 
-Way 2 is the one to keep: two syscalls, one range flush, and the payload never loses exec, so the code asking for it can live inside the range it flushes (dropping exec instead, `R+W`, would also flush but fault on the hook's own next instruction). MIPS has no `TARGET_HAS_PRECISE_SMC`, so `tb_invalidate_phys_page_unwind` does not stop a TB that is running; the request is made from the UI loop between TBs, so this does not arise for the UI thread.
+Way 2 is the one to keep: two syscalls, one range flush, and the payload never loses exec, so the code asking for it can live inside the range it flushes (dropping exec instead, `R+W`, would also flush but fault on the hook's own next instruction). Only `target/i386` and `target/s390x` define `TARGET_HAS_PRECISE_SMC`, so on MIPS `tb_invalidate_phys_page_unwind` never stops the TB that is running; way 2 does not depend on it, as each `syscall` already ends its TB and the next instruction is looked up afresh.
 
 The hook then calls `widget_invalidate_force(window_manager(), 0)`, so every painter runs again with the new code without an input event.
 
@@ -62,7 +62,7 @@ A swap is safe when nothing that still holds an address into changed code reache
 
 **The unsafe case, run:** swapping a build in which 244 `navigation.c` functions moved by 4 bytes (114,169 bytes in 303 runs, among them `set_open`, `tone_worker` and `ipod_list_layout`, held as pointers, and `ringnav_dark_usleep`, `ringnav_dark_cover_usleep` and `tone_worker`, on parked threads' stacks) ended with `qemu: uncaught target signal 10 (Bus error)` within 2 s. A move of only `switch_mark`, `grip_mark`, `lift_card_paint` and `check_circle` (8 bytes, reached only by direct calls the same swap rewrote) was fine, and the toggles they draw painted.
 
-`memswap.py risk COPY OLD NEW` is that check: it said safe for the battery change (10 functions changed, none held as a pointer or on a stack) and unsafe for the build that crashed (30 moved functions held as pointers, 33 with return addresses on stacks). Its stack half scans whole stacks, dead frames too, so it refuses more than it must: with `navigation.c`'s functions moving it flags `ringnav_wm_paint` and `bar_status`, which are stale slots, not frames (see the idle point below).
+`memswap.py risk COPY OLD NEW` is that check: it said safe for the battery change (10 functions changed, none held as a pointer or on a stack) and unsafe from the current base to the build that crashed (2,839 functions differ, as the base's hook has grown since; 30 of them held as pointers, 33 with return addresses on stacks). Its stack half scans whole stacks, dead frames too, so it refuses more than it must: with `navigation.c`'s functions moving it flags `ringnav_wm_paint` and `bar_status`, which are stale slots, not frames (see the idle point below).
 
 So **a fixed jump table is needed** for anything other than edits that keep every function in place, and it is not enough on its own: the parked threads' frames and `.rodata` pointers also pin code.
 
@@ -80,7 +80,7 @@ So **a fixed jump table is needed** for anything other than edits that keep ever
 
 The only payload frames are the hook's own two, so the swap must leave `hotswap_poll` and `ringnav_sleep` in place and unchanged, or return through a fixed stub (below). A flat scan of the same stack finds payload return addresses higher up (`ringnav_wm_paint`, `bar_status`, `coverflow_home`), but those are stale slots inside stock's frames, not frames. The payload runs no nested main loop (no `dialog_modal`), so the idle point is never inside payload code. A stock page that runs one (a stock modal dialog) was not checked.
 
-**Other threads are not.** Of 27 threads, 7 besides the UI thread run payload code and sit in it while they block (table above). They are not stopped at a known point and cannot be: the swap leaves them alone, so the functions on their stacks must not change. The other 19 had no payload return address anywhere in their stacks in the conservative scan (41 stack regions scanned, 8 with any).
+**Other threads are not.** Of 27 threads, 7 besides the UI thread run payload code and sit in it while they block (table above). They are not stopped at a known point and cannot be: the swap leaves them alone, so the functions on their stacks must not change. The conservative scan found no payload return address on any other stack (41 candidate stack regions, 8 with any: the UI thread's and these 7).
 
 ## 5. End to end
 
@@ -102,4 +102,4 @@ The battery turned green on the same page, scroll and selection kept. Two more c
 3. **Make "safe" the common case:** in `--dev` builds, put `.rodata` at a fixed address above the text with slack (link.ld), and pad each object's text (or each function, `-falign-functions` with a large value) so a small edit is absorbed in place; route the payload's registered callbacks (`timer_add`, `widget_on`, `pthread_create`) through a fixed table of stubs at the start of `.text`.
 4. **What a swap cannot do:** change `.scratch`'s layout (state keeps its old addresses: a new or resized field needs a restart), change stock's data, or re-run init code (a page already open keeps the widgets its `*_page_init` made).
 
-Effort: 1 and 2 without 3 is about a day (`memswap.py` is most of it; the safety check needs per-thread sp, which `hotswap_poll` gives for the UI thread and the others need either the gdbstub or a conservative scan). 3 is another one to two days, mostly link.ld and a callback table, and is what decides how often a save takes the 3.7 s path instead of 17.8 s.
+Effort, estimated: 1 and 2 without 3 is about a day (`memswap.py` is most of it; the safety check needs per-thread sp, which `hotswap_poll` gives for the UI thread and the others need either the gdbstub or a conservative scan). 3 is another one to two days, mostly link.ld and a callback table, and is what decides how often a save takes the 3.7 s path instead of 17.8 s.
