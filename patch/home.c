@@ -96,14 +96,13 @@ int ringnav_localmusic(void *win, void *ctx) {
     void *longs = library_row(view, "local_longsongs", long_songs, 0, "Long Songs", 1);
     lr_put(rows, 'L', longs);
     widget_set_visible(longs, 0, 0);
-    /* Podcasts, Audiobooks, Photos, Books and Videos, each only with its folder; then iPod's Games.
-     */
+    /* Podcasts, Audiobooks, Photos and Videos, each only with its folder; then iPod's Games. */
     static const char *const icons[] = { "local_podcasts", "local_audiobooks", "local_photos",
-                                         "local_books", "local_videos" };
+                                         "local_videos" };
     char path[sizeof st.media_root];
     for (int k = 0; k < VIDEOS; k++)
         if (media_find(k + 1, path))
-            lr_put(rows, "PAoBv"[k],
+            lr_put(rows, "PAov"[k],
                    library_row(view, icons[k], media_click, (void *)(long)(k + 1), MEDIA[k], 1));
     lr_put(rows, 'G', library_row(view, "local_games", games_open, 0, "Games", 1));
     if (scrobble_ready()) {

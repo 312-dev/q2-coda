@@ -3642,7 +3642,7 @@ class Canvas:
         fw.mock('canvas_fill_rect', lambda c, x, y, w, h, *_: self.rects.append((self.fills[-1], *(C.c_int(v).value for v in (x, y, w, h)))))
 
 
-# The pages' pieces, shared with photos.c, books.c and navigation.c
+# The pages' pieces, shared with photos.c and navigation.c
 
 @pytest.fixture(scope='module')
 def scratch(library):

@@ -212,9 +212,8 @@ extern void coverflow_home_strip(void *canvas, void *top);
 extern void coverflow_home_painted(void);
 extern void coverflow_home_row(void *surface, void *row, int id, int painting);
 extern void coverflow_paint(void *w, void *canvas), photos_paint(void *w, void *canvas),
-    photos_open(const char *root), books_paint(void *w, void *canvas), books_open(const char *root),
-    video_poll(void);
-extern int books_key(void *top, unsigned key), video_on(void), books_video(const char *path);
+    photos_open(const char *root), video_poll(void);
+extern int video_on(void), video_click(const char *path);
 extern void games_paint(void *w, void *canvas);
 extern void spot_poll(void), spot_paint(void *w, void *canvas), *spot_art(void);
 extern void up_next(int (*keyup)(void *, void *));
@@ -414,7 +413,7 @@ void rearm(unsigned *timer, int (*fn)(const void *), unsigned ms) {
     *timer = timer_add(fn, (void *)0, ms);
 }
 
-/* A page's keyup (Books, Photos, Radio): Return runs its leave from the next loop pass. */
+/* A page's keyup (Photos, Radio, Games): Return runs its leave from the next loop pass. */
 int return_key(void *event, unsigned *timer, int (*leave)(const void *)) {
     if (I(event, EVENT_KEY) != KEY_RETURN) return 0;
     rearm(timer, leave, 0);
@@ -2358,7 +2357,6 @@ int ringnav_paint(void *w, void *canvas) {
     }
     edit_paint(w, canvas);
     photos_paint(w, canvas);
-    books_paint(w, canvas);
     spot_paint(w, canvas);
     if (theme()->sb_w) {
         int table = 0;
@@ -7949,8 +7947,6 @@ int media_click(void *ctx, void *event) {
         toast(t);
     } else if (kind == PHOTOS)
         photos_open(root);
-    else if (kind == BOOKS)
-        books_open(root);
     else {
         memcpy(st.media_root, root, sizeof root);
         st.media_open = 1;
@@ -8041,8 +8037,8 @@ int ringnav_folder_back(void *yoffset, void *index) {
 }
 
 /* folder_page's row click (stock's, 0x532414: the tapped or Centre-pressed row's index into
- * p_deque_showlist, then folder_enter, whose 8, a file, it queues as songs): a video plays as from
- * Library's Videos row (books_video). Select mode (g_navbar_status) and everything else is stock's.
+ * p_deque_showlist, then folder_enter, whose 8, a file, it queues as songs): a video plays
+ * (videos.c video_click). Select mode (g_navbar_status) and everything else is stock's.
  */
 int ringnav_folder_click(void *ctx, void *event) {
     void *row = event && !g_navbar_status ? table_row_of(P(event, EVENT_TARGET)) : (void *)0;
@@ -8050,7 +8046,7 @@ int ringnav_folder_click(void *ctx, void *event) {
     unsigned i = row ? (unsigned)I(row, ROW_INDEX) : ~0u;
     if (i < deque_size(list)) {
         void *r = deque_at(list, i);
-        if (I(r, REC_TYPE) == 8 && books_video(P(r, REC_PATH))) return 0;
+        if (I(r, REC_TYPE) == 8 && video_click(P(r, REC_PATH))) return 0;
     }
     int layer = g_folder_layer, result = stock_folder_click_trampoline(ctx, event);
     if (g_folder_layer > layer) folder_push(1);
@@ -9557,7 +9553,7 @@ static int remote_match(void *e, int spend) {
 }
 static int remote_key(void *e) { return remote_match(e, 1); }
 
-/* window_manager_dispatch_input_event: while q2video plays (books.c) no key or touch reaches the
+/* window_manager_dispatch_input_event: while q2video plays (videos.c) no key or touch reaches the
  * UI; a key's release goes to the player instead. A card game (addon.c) takes every event but the
  * music's keys. Every event times ringnav_sleep's idle. */
 int ringnav(void *ctx, void *event);
@@ -10212,8 +10208,8 @@ int ringnav(void *ctx, void *event) {
         drop_input();
         if (!kb) return result;
     }
-    /* A double Centre turns the screen off on every listed page, also where the page takes Centre
-     * itself (the Books reader's caption), has no row selected or is still sliding in. A list's
+    /* A double Centre turns the screen off on every listed page, also where the page has no row
+     * selected or is still sliding in. A list's
      * selected row times its own double press (center_timer). */
     if (key == KEY_CENTER && !st.center_timer) {
         unsigned now = (unsigned)time_now_ms();
@@ -10244,8 +10240,7 @@ int ringnav(void *ctx, void *event) {
         return STOP;
     }
     coverflow_lost_touch();
-    if (!dir) coverflow_wheel_land();     /* Centre opens the album the caption names */
-    if (books_key(top, key)) return STOP; /* the reader's pages and caption */
+    if (!dir) coverflow_wheel_land(); /* Centre opens the album the caption names */
     void *w = surface_under(top, (void *)0, (void *)0, dir != 0);
     if (!is_home(top, w) || w != st.home_surface) st.home_surface = (void *)0;
     if (!w || !load(&g_menu, w, 1)) {

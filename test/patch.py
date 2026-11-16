@@ -3721,16 +3721,16 @@ assert m.closed==['playermore_page','artistinfo_page','albuminfo_page'] and m.ba
 assert m.opened==[('localmusic/artistinfo_page',0xf001,m.items(m.get(syms['mcl_pdeqplaylist']))[1])]
 assert m.u.mem_read(syms['g_songerinfo_flag'],1)==b'\1'; passed()
 
-# Folder view's row click (ringnav_folder_click over stock's 0x532414): a video file goes to books_video,
-# as Library's Videos row plays it, and stock never queues it as a song; a song row, a video books_video
+# Folder view's row click (ringnav_folder_click over stock's 0x532414): a video file goes to video_click,
+# which plays it, and stock never queues it as a song; a song row, a video video_click
 # refuses and any row in select mode stay stock's (folder_enter's 8, then the queue and Now Playing).
 class FolderClickMachine(LookupMachine):
     def __init__(self,*a):
         super().__init__(*a); self.videos=[]
-        self.handlers[payload_syms['books_video']]='lookup:books_video'; self.handlers[syms['folder_enter']]='lookup:folder_enter'
+        self.handlers[payload_syms['video_click']]='lookup:video_click'; self.handlers[syms['folder_enter']]='lookup:folder_enter'
     def hook(self,u,address,size,unused):
         name=self.handlers.get(address,'')
-        if name=='lookup:books_video':
+        if name=='lookup:video_click':
             path=self.text(u.reg_read(UC_MIPS_REG_A0)); self.videos.append(path); self.returns(int(path.endswith('.mp4')),clobber=True); return
         if name=='lookup:folder_enter': self.returns(8,clobber=True); return
         return super().hook(u,address,size,unused)
@@ -11758,7 +11758,7 @@ swap_values(m,O['PAGE_SLIDE_MS'],O['SLIDE_EASING']); passed()
 OTHER_HINT='htranslate(duration=270,easing=linear)'; FADE_HINT='fade(duration=300,easing=quadratic_out)'; ASSET_HINT=f"htranslate(duration={O['PAGE_SLIDE_MS']})"
 HINT_PROPS=('anim_hint','open_anim_hint','close_anim_hint','highlight')
 EXTRA=('playerqueue_page','playermore_page','playerjumpinfo_page')
-PAYLOAD=('shuffle_page','mostplayed_page','ratings_page','rated_page','era_page','era_albums_page','upnext_page','playlistedit_page','streamconf_page','games_page','books_page','apps_page')
+PAYLOAD=('shuffle_page','mostplayed_page','ratings_page','rated_page','era_page','era_albums_page','upnext_page','playlistedit_page','streamconf_page','games_page','apps_page')
 DIALOGS=('confirminfo_dialog','addplaylist_dialog','sortselect_dialog')
 class MotionMachine(UiLoad,CoverflowMachine): pass
 def motion_machine():  # the light half, as the confirm's dim depends on none
@@ -12572,9 +12572,10 @@ for fail_size in (5, 20):
     m.close(); assert m.freed==8
 passed()
 
-class BooksMachine(DepthMachine):
+TEXT_PITCH=9
+class CardMachine(DepthMachine):
     """The card as a tree of {path: [(name, d_type)]} and files as {path: bytearray}, with stdio
-    handles over them, and a fixed-pitch font: every character BOOK_PITCH wide."""
+    handles over them, and a fixed-pitch font: every character TEXT_PITCH wide."""
     def __init__(self,tree,files):
         super().__init__()
         self.tree=tree; self.files=files; self.handles={}; self.dirs={}; self.lines=[]
@@ -12638,7 +12639,7 @@ class BooksMachine(DepthMachine):
         elif name=='strlen': ret=len(self.raw(a))  # bytes: a buffer may end inside a UTF-8 character
         elif name=='strstr':
             i=self.raw(a).find(self.raw(b)); ret=a+i if i>=0 else 0
-        elif name=='canvas_measure_text': u.reg_write(UC_MIPS_REG_F0,struct.unpack('<I',struct.pack('<f',(getattr(self,'char_em',0)*self.font[1] or BOOK_PITCH)*c))[0])
+        elif name=='canvas_measure_text': u.reg_write(UC_MIPS_REG_F0,struct.unpack('<I',struct.pack('<f',(getattr(self,'char_em',0)*self.font[1] or TEXT_PITCH)*c))[0])
         elif name=='mclGetOutputWay': ret=self.way
         elif name=='open': ret=0xffffffff  # the child's oom_score_adj write: refused here, so nothing is written
         elif name=='fork': ret=self.forked
@@ -12662,79 +12663,11 @@ class BooksMachine(DepthMachine):
             u.reg_write(UC_MIPS_REG_V0,0);u.reg_write(UC_MIPS_REG_SP,0x7000f000);u.reg_write(UC_MIPS_REG_PC,0x1000000);return
         self.returns(ret,clobber=True)
 
-# Books (patch/books.c): Local Music's last row opens the card's Books folder (case aside): its own
-# .txt and .epub files and its subfolders', by path, named without the extension.
-import io, zipfile
-BOOK_PITCH=9
-R='/mnt/mmc/books'
-para=lambda i: ' '.join(f'w{i}x{k}' for k in range(30))
-txt='﻿'+'\n\n'.join(para(i) for i in range(40))
-buf=io.BytesIO()
-with zipfile.ZipFile(buf,'w',zipfile.ZIP_DEFLATED) as z:
-    z.writestr('mimetype','application/epub+zip')
-    z.writestr('META-INF/container.xml','<container><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>')
-    z.writestr('content.opf','<package><manifest><item id="a" href="a.xhtml"/><item id="b" href="b.xhtml"/></manifest>'
-               '<spine><itemref idref="a"/><itemref idref="b"/></spine></package>')
-    z.writestr('a.xhtml','<html><head><title>T</title></head><body><h1>Chapter 1</h1><p>Caf&#233; &amp; tea.</p></body></html>')
-    z.writestr('b.xhtml','<html><body><p>Chapter 2</p></body></html>')
-tree={'/mnt/mmc':[('Music',4),('books',4)],R:[('Zed.txt',8),('notes.md',8),('._Zed.txt',8),('Series',4)],R+'/Series':[('A Tale.EPUB',8)]}
-files={R+'/Zed.txt':bytearray(txt.encode()),R+'/Series/A Tale.EPUB':bytearray(buf.getvalue())}
-m=BooksMachine(tree,files)
-view=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)]); m.top=m.node('window','localmusic_page',[view])
-assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0,count=5_000_000)==0
-button=m.nodes[m.nodes[view]['children'][-2]]['children'][0]; icon,label,into=m.nodes[button]['children']
-assert m.nodes[icon]['image']=='local_books' and m.nodes[label]['text']=='Books' and len(m.nodes[view]['children'])==18
-library_geometry(m,m.nodes[view]['children'][-2])
-f,ctx=m.handler(button,O['EVT_CLICK']); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0
-page=m.page=m.top; assert m.nodes[page]['name']=='books_page' and m.nodes[page]['style:normal:bg_color']==-0x1000000
-books,reader=m.nodes[page]['children']; sheet,info=m.nodes[reader]['children']
-assert not m.nodes[reader]['visible'] and labels(books)==['Books','A Tale','Zed']; passed()
-# A .txt opens on its first page: up to ten white lines of the default font, the BOM dropped,
-# wrapped at spaces within the margins, every line clear of the glass's rounded corners.
-rows=m.nodes[m.find('scroll_view',books)]['children']
-def open_book(i):
-    f,ctx=m.handler(rows[i],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.advance(0)
-def page_lines():
-    m.lines=[]; m.call(address=HOOKS['widget_on_paint_border'][0],args=(sheet,m.canvas,0,0),gap=0,clear=False,count=50_000_000)
-    return m.lines
-open_book(1); assert m.nodes[reader]['visible'] and not m.nodes[books]['visible'] and not m.nodes[info]['visible']
-first=page_lines(); words=txt[1:].split()
-assert len(first)==10 and all(c==0xffffffff and font==('default',20) for _,_,_,c,font in first)
-assert ' '.join(t for t,*_ in first if t).split()==words[:len(' '.join(t for t,*_ in first).split())] and first[0][0].startswith('w0x0 ')
-for t,x,y,*_ in first:
-    top,bottom=30+y,30+y+26; inset=max(corner_inset(top),corner_inset(bottom))
-    assert inset<=x and x+BOOK_PITCH*len(t)<=375-inset and len(t)*BOOK_PITCH<=375-2*x,(t,x,y)
-assert [y for _,_,y,*_ in first]==[6+26*i for i in range(10)] and len(first[0][0])*BOOK_PITCH>375-2*24-BOOK_PITCH*6; passed()
-# The wheel turns the page (the next starts where this one ended), back again, and stops at the start.
-m.top=page; assert m.call()==11; second=page_lines()
-seen=' '.join(t for t,*_ in first+second).split(); assert seen==words[:len(seen)] and second[0][0]!=first[0][0]
-assert m.call(O['KEY_PREV'])==11 and page_lines()==first and m.call(O['KEY_PREV'])==11 and page_lines()==first; passed()
-# Centre shows how far in and the title on a band clear of the glass; Return keeps the page.
-m.call(); m.call(); third=page_lines()
-assert m.call(O['KEY_CENTER'])==11 and m.nodes[info]['visible'] and re.fullmatch(r'\d%  Zed',m.nodes[info]['text'])
-x,y,bw,bh=cf_geometry(m,info); inset=max(corner_inset(30+y),corner_inset(30+y+bh)); assert inset<=x and x+bw<=375-inset
-assert m.key()==11 and m.nodes[books]['visible'] and '/mnt/data/ringnav-books' in m.files
-assert m.nodes[m.find('scroll_view',books)]['_ringnav_index']==1
-open_book(1); assert page_lines()==third; passed()
-# An EPUB is made into text on the worker first ("Preparing…"), then read like a .txt: chapters
-# on new pages, head dropped, entities decoded.
-m.key(); open_book(0); assert m.nodes[info]['visible'] and m.nodes[info]['text']=='Preparing…' and len(m.threads)==1 and not page_lines()
-worker,arg=m.threads[0]; assert m.call(address=worker,args=(arg,0,0,0),gap=0,count=50_000_000)==0
-m.advance(250); cache=f'/mnt/mmc/.books/{fnv(R+"/Series/A Tale.EPUB"):08x}.txt'
-assert bytes(m.files[cache])=='Chapter 1\n\nCafé & tea.\f\nChapter 2'.encode() and not m.nodes[info]['visible']
-assert [t for t,*_ in page_lines()]==['Chapter 1','','Café & tea.'] and m.call()==11 and [t for t,*_ in page_lines()]==['Chapter 2']
-passed()
-# A broken EPUB says so; closing joins nothing and frees the window.
-m.key(); m.files[R+'/Series/A Tale.EPUB']=bytearray(b'PK junk'); m.files.pop(cache); open_book(0)
-worker,arg=m.threads[-1]; m.call(address=worker,args=(arg,0,0,0),gap=0,count=50_000_000); m.advance(250)
-assert m.nodes[info]['visible'] and m.nodes[info]['text']=="Can't open this book" and m.call()==11 and not page_lines()
-m.close(); passed()
-
 # Games (patch/games.c, iPod): the Library's Games row, always there, opens a chooser of Sudoku,
 # Vortex, Solitaire and Snake. A game's keys never reach stock's filter or the media keys; Return goes game -> chooser ->
 # Library. Vortex's frame timer and raw wheel run only while it plays: Play/Pause, the screen going
 # off and leaving each stop them, and closing frees the state.
-CONFIG['SHORTCUT']='6'; m=BooksMachine({},{}); del CONFIG['SHORTCUT']
+CONFIG['SHORTCUT']='6'; m=CardMachine({},{}); del CONFIG['SHORTCUT']
 G_SCREEN,G_PICKING,G_PAUSED,G_CELL,G_CUR,G_VX=36,44,56,76,157,164
 def games_open():
     view=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)]); m.top=m.node('window','localmusic_page',[view])
@@ -12878,7 +12811,7 @@ m.close(); assert m.get(payload_syms['g'])==0 and not frames() and m.get(payload
 # only inside the rect being painted. What a frame costs is counted in the payload's instructions and bounded, a little
 # over what it measured, so a change cannot quietly make a frame dearer: the engine's budget for a whole frame is
 # 2,000,000 (docs/games-engine.md#budgets).
-CONFIG['ENGINEDEMO']='1'; m=BooksMachine({},{}); del CONFIG['ENGINEDEMO']
+CONFIG['ENGINEDEMO']='1'; m=CardMachine({},{}); del CONFIG['ENGINEDEMO']
 sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
 if not manifest.get('dev'): assert labels(chooser)==['Games','Sudoku','Vortex','Solitaire','Snake','Bricks']; m.close()
 else:
@@ -12929,7 +12862,7 @@ passed()
 # of play, then the dearest frames it can have, each made on purpose: the keystone taking its six neighbours in one
 # frame, and each frame of the next level's fade. Bounded in the payload's instructions a little over what they
 # measured, under the brief's 600,000 a frame (docs/games-engine.md#budgets).
-m=BooksMachine({},{})
+m=CardMachine({},{})
 sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
 eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
 O_ENG_RECT,O_ENG_STATE=80,216  # struct eng's rect and the game's state after it (patch/engine.c), on MIPS
@@ -12986,26 +12919,26 @@ assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0 and not eframes()
 m.close(); assert m.get(payload_syms['g'])==0
 passed()
 
-# Videos (patch/books.c, docs/internals.md#videos): the card's Videos folder (case aside) lists its and
-# its subfolders' video files as Books does; a row stops the music and starts /usr/bin/q2video with
+# Videos (patch/videos.c, docs/internals.md#videos): the card's Videos folder (case aside) is browsed
+# in Folder view; a video's row stops the music and starts /usr/bin/q2video with
 # the headphone DAC's PCM and the path as plain argv, never through a shell.
 R='/mnt/mmc/VIDEOS'
 tree={'/mnt/mmc':[('Music',4),('VIDEOS',4)],R:[('b.MKV',8),('a.mp4',8),('notes.txt',8),('._a.mp4',8),('Trip',4)],R+'/Trip':[('c.avi',8)]}
-m=BooksMachine(tree,{})
+m=CardMachine(tree,{})
 view=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)]); m.top=m.node('window','localmusic_page',[view])
 assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0,count=5_000_000)==0
 button=m.nodes[m.nodes[view]['children'][-2]]['children'][0]; icon,label,into=m.nodes[button]['children']
 assert m.nodes[icon]['image']=='local_videos' and m.nodes[label]['text']=='Videos' and len(m.nodes[view]['children'])==18
 f,ctx=m.handler(button,O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and [m.text(c[1]) for c in m.calls if c[0]=='navigator_to']==['folder_page']; m.page=m.node('window','folder_page'); passed()
-# Folder view's video (books_video) starts the same q2video, with no Videos page open; anything else is left to stock.
+# Folder view's video (video_click) starts the same q2video, with no Videos page open; anything else is left to stock.
 for path,ok in ((R+'/b.MKV',1),(R+'/notes.txt',0),(R+'/._a.mp4',0)):
-    v=BooksMachine(tree,{}); assert v.call(address=payload_syms['books_video'],args=(v.string(path),0,0,0),gap=0)==ok,path
-    v=BooksMachine(tree,{}); v.forked=0; v.call(address=payload_syms['books_video'],args=(v.string(path),0,0,0),gap=0)  # the child
+    v=CardMachine(tree,{}); assert v.call(address=payload_syms['video_click'],args=(v.string(path),0,0,0),gap=0)==ok,path
+    v=CardMachine(tree,{}); v.forked=0; v.call(address=payload_syms['video_click'],args=(v.string(path),0,0,0),gap=0)  # the child
     assert v.execs==([('/usr/bin/q2video','/usr/bin/q2video','plughw:0,0',path,0)] if ok else []),path
 passed()
-def play(path):  # Folder view's row (books_video), with the child run as the fork's
-    m.calls=[]; m.call(address=payload_syms['books_video'],args=(m.string(path),0,0,0),gap=0)
+def play(path):  # Folder view's row (video_click), with the child run as the fork's
+    m.calls=[]; m.call(address=payload_syms['video_click'],args=(m.string(path),0,0,0),gap=0)
     return [c[0] for c in m.calls]
 # The headphone output is readied as stock's player_start readies it (config_outputchannel, PCM
 # mode, unmuted, the volume) before q2video starts; a DAC check_dacoff_state powered off comes on with it. Bluetooth (way 1) plays on hciplayer's
@@ -13078,8 +13011,8 @@ passed()
 # Spotify (patch/spotify.c, docs/internals.md#spotify): librespot from the card's .spotify folder, its
 # state from the q2-librespot fork's --status-file, its commands to --control-socket.
 STATE,SOCK='/tmp/q2-librespot.state','/tmp/q2-librespot.sock'
-class SpotMachine(BooksMachine):
-    """BooksMachine's card and files, plus librespot's side: system() starts, the monotonic clock is
+class SpotMachine(CardMachine):
+    """CardMachine's card and files, plus librespot's side: system() starts, the monotonic clock is
     self.now, the player's status, and the thumbnailer (a .jpg it makes is a file)."""
     def __init__(self,files):
         super().__init__({},files)
@@ -16500,7 +16433,7 @@ for config,want in (({},1),({'ARTISTTYPE':'0'},0),({'ARTISTTYPE':'1'},1)):
     assert a.get(syms['artist_type'])==want and a.config_reads[-1][1:3]==('PLAYSET','ARTISTTYPE'),config
 passed()
 # A FLAC's "ALBUM ARTIST" comment (foobar2000's spelling) when stock's libtag found no ALBUMARTIST (ringnav_music_info).
-class TagMachine(BooksMachine):
+class TagMachine(CardMachine):
     def __init__(self,files):
         super().__init__({},files); self.stock_artist=b''
         self.handlers.pop(syms['toolsGetMusicInfo'],None)  # run the hook; only stock's body is mocked
@@ -17946,7 +17879,7 @@ assert m.labels()[2:4]==['Spotify Cache: 2 GB','Erase Spotify Data']; passed()
 # Now Playing's About (np_about.c, its Return its own), none with a list, handle their own keys.
 pages=set(re.findall(r'page_open\("(\w+)"',''.join(p.read_text() for p in (ROOT/'patch').glob('*.c'))))
 assert pages-set(re.findall(r'"(\w+)"',(ROOT/'patch/contexts.inc').read_text()))=={'radionp_page','spotify_page','qrcode_page','offline_page','npabout_page'}; passed()
-m=BooksMachine({},{}); vid=payload_syms['vid']; m.word(vid+12,4242); m.word(vid+16,7)
+m=CardMachine({},{}); vid=payload_syms['vid']; m.word(vid+12,4242); m.word(vid+16,7)
 for playing,command in ((0,'a'),(1,'r')):
     m.sent=[]; endpoint(m,'video_set_playing',playing); endpoint(m,'video_set_playing',playing)
     assert [x[1] for x in m.sent]==[command,command] and endpoint(m,'video_status')==(2 if playing else 3)
@@ -17956,7 +17889,7 @@ ready_gain(m,0,32); m.now+=500; m.sent=[]; endpoint(m,'video_poll'); assert m.se
 m.files['/tmp/q2video.state']=bytearray(struct.pack('<i',1)); m.now+=500; endpoint(m,'video_poll'); assert endpoint(m,'video_status')==3
 passed()
 # Manual video pause must take effect before the helper's next state report.
-m=BooksMachine({},{}); m.word(payload_syms['vid']+12,4242); m.word(payload_syms['vid']+16,7)
+m=CardMachine({},{}); m.word(payload_syms['vid']+12,4242); m.word(payload_syms['vid']+16,7)
 endpoint(m,'headset_ears',7); endpoint(m,'video_key',O['KEY_PLAY'])
 assert endpoint(m,'video_status')==3
 endpoint(m,'headset_ears',6); endpoint(m,'headset_ears',7)
@@ -18283,7 +18216,6 @@ def empty_row(m,row):  # Local Music's row, opened
     f,ctx=m.handler(m.nodes[m.nodes[view]['children'][row]]['children'][0],O['EVT_CLICK']); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0; m.page=m.top
 for count_failed,title in (((0,False),'No embedded chapters'),((0,True),'Could not read chapters')):
     m=ChapterMachine(count=count_failed[0],failed=count_failed[1]); ebar=page_bar(m); m.open_chapters(); m.advance(50); shows_empty(m,ebar,title,'Chapters'); passed()
-m=BooksMachine(tree={'/mnt/mmc':[('books',4)],'/mnt/mmc/books':[]},files={}); ebar=page_bar(m); empty_row(m,-2); shows_empty(m,ebar,'No books','Books'); passed()
 m=PhotosMachine(tree={'/mnt/mmc':[('photos',4)],'/mnt/mmc/photos':[]},data={}); ebar=page_bar(m); empty_row(m,-2); shows_empty(m,ebar,'No photos','Photos'); passed()
 m=ShuffleMachine(); ebar=page_bar(m); empty_row(m,11); shows_empty(m,ebar,'No plays yet','Most Played'); passed()
 m=SpotMachine(files={}); ebar=page_bar(m); erows=stream_rows(m); f,ctx=m.handler(erows['Tidal Downloads'],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000); shows_empty(m,ebar,'No downloads yet','Tidal Downloads'); passed()

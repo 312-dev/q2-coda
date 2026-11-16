@@ -61,8 +61,8 @@ static const struct {
       ".spotify/librespot" },
 };
 /* The firmware's own card folders, never a card app's: a remove deletes .<id> whole. */
-static const char *const reserved[] = { "books", "coverflow", "downpic", "photos", "q2", "q2pod",
-                                        "sldp", "tidal" };
+static const char *const reserved[] = { "coverflow", "downpic", "photos", "q2", "q2pod", "sldp",
+                                        "tidal" };
 
 /* Whether id is a special[] app's, which a remove never deletes whole. */
 static int special_id(const char *id) {

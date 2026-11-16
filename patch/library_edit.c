@@ -41,9 +41,10 @@
 /* The Library's rows in their default order (the menu review's, 2026-11-15), each its letter in
  * LR_FILE: Shuffle (hidden), Songs, Playlists, Artists, Albums, Search, Genres, Years, Ratings, My
  * Fav (hidden), Recently Added, Recent, Most Played, Frequent (hidden), Hi-Res (hidden), Long Songs
- * (hidden), Podcasts, Audiobooks, Videos, Photos, Books, Games, Upload Scrobbles (hidden), Update
- * Local Music. A letter is never reused: a new row takes a new one, here where it goes by default. */
-const char lr_default[] = "hspalSgerfncmqiLPAvoBGUu";
+ * (hidden), Podcasts, Audiobooks, Videos, Photos, Games, Upload Scrobbles (hidden), Update Local
+ * Music. A letter is never reused: a new row takes a new one, here where it goes by default. B
+ * named Books, retired: a saved order holding it loads without it (lr_resolve). */
+const char lr_default[] = "hspalSgerfncmqiLPAvoGUu";
 _Static_assert(sizeof lr_default <= LR_ROWS, "a row per letter");
 
 static struct {

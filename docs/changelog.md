@@ -2,6 +2,7 @@
 
 - **Unreleased (q2-coda)**:
   - Lists (OLED): a list scrolled to its last row keeps the space under it after you open that row and press Return; the last row no longer sits on the screen's bottom edge.
+  - Books is gone: the Library has no **Books** row and the Q2 no longer reads `.txt` and `.epub` books. Audiobooks are unchanged, a Library order you set yourself is kept without the row, and a `.books` folder left on the card can be deleted. Wi-Fi transfer's upload no longer lists EPUB.
   - SyncLink, Shanling's phone remote, is gone from Settings and stays off.
   - Settings: this update starts every Q2 on q2-coda's own default settings, whatever it ran before (stock firmware or an earlier q2-coda), so no stock setting such as Enlarged Album Art stays on. Saved Wi-Fi networks, Bluetooth pairings, your library and ratings are kept. Later updates keep your settings.
   - Quick Settings (OLED): the pull-down is now a Control Center, as on an iPhone: round Wi-Fi, Bluetooth, AirPlay and Car Remote buttons, what's playing with its controls, Brightness and Volume sliders, and Lock, Sleep, Night Shift, EQ and Smart Wi-Fi buttons. Turn the wheel to move between them and press Center to use one; on a slider Center lets the wheel set it.
