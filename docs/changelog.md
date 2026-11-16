@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Lists (OLED): every list ends as Home's does: the rows below the last full one show through a fade into black instead of stopping above an empty band, and once you scroll, the top row fades under the clock instead of being cut off. Scrolled to the end, the last row sits where it always did.
+  - Lists (OLED): no more lines between rows, and in card apps (the Subsonic app's pages) a row without a second line is an ordinary one-line row, the same height and spacing as Home's.
   - Settings: times with a one-letter unit sit against their number: **Crossfade** reads "5s", **Standby Limit** "8h", and an album's length on its page "1h12m"; "min" keeps its space ("Resume Songs: 30 min").
   - Library: on Songs with no music on the card, pressing Centre presses **Scan Music Now**, as tapping it does. It used to turn the screen off.
   - Folder: an SD card or folder with nothing to list says **No folders** and **Copy music to the SD card**, instead of showing a blank screen.

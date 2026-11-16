@@ -92,7 +92,7 @@ class Geometry:
     search_meta_y: int = 41
     search_meta_h: int = 16
     toolbar: int = 1  # 0: the toolbars of TOOLBAR_SWITCHES and STOCK_ROWS hide and the bar holds the title, as on NAVBAR_ONLY pages
-    list_fit: int = 0  # 1: list boxes end by list_end on a whole row (fit_rows), so nothing draws below it (0: they reach the window's bottom)
+    list_fit: int = 0  # 1: lists scroll by whole rows and stop with the last row's foot on list_end, their rows past it fading into the window's foot (fit_rows); 0: they reach the window's bottom unfaded
     # A status row in place of a bar band (OLED's): its glyphs centred on screen row status_y, the page's title from
     # STATUS_ROW_INSET in the bar's face and px (bar_px), the clock beside the play state or centred (navigation.c clock_place), the play state and
     # battery ending STATUS_ROW_INSET from the screen's right edge; the bar is drawn black, so the row reads as part of the page. 0: the bar's own layout.
@@ -1118,8 +1118,9 @@ def songs_action_row(root, g):
 
 
 def fit_rows(g, top, pitch):
-    """A list_fit set's list box from top: the whole rows of pitch that end by list_end, so no part row shows below."""
-    return (g.list_end - top) // pitch * pitch
+    """A list_fit set's list box from top: on to the window's foot, the rows past list_end fading into it (navigation.c
+    list_fade), as Home's do; pitch, the rows' own, no longer cuts it."""
+    return 320 - g.bar - top
 
 
 # The menus a modal set opens over the page under them (Geometry.modal): each stays the page its set makes, as a dialog.

@@ -51,9 +51,12 @@ those spots are under the glass. So:
   below it.
 - No text or control may start inside `corner_x(y, h)` for its row. In the middle of the
   screen, from y 80 to y 240, the inset is 0.
-- A list ends at the last whole row above the bottom corners: the 32 px slots from y 58 are
-  y 58, 90, ..., 250, seven in all, ending at y 282; 52 px rows fit four (y 58 to 266). The strip
-  below stays black and a selected row never lands there (Q2 Pod's `list_end` and `list_fit`).
+- Every scrolling list ends as Home (Full)'s does (the user's, 2026-11-15): its box runs on to the
+  screen's foot and the rows past the list end, y 282 (the 32 px slots from y 58 are y 58, 90, ...,
+  250, seven in all), peek through a fade into black from y 266 to y 316, black below; once the
+  list has scrolled, its top row's first 14 px fade under the status row. A selected row is never
+  faded and never lands past y 282: scrolled to its end, by the wheel or a drag, the last row's
+  foot is on y 282 (Q2 Pod's `list_end` and `list_fit`, `navigation.c` `list_fade`).
 - Every screen is checked against the glass: a screenshot composited with the 80 px mask shows
   no lit pixel under the curve.
 
@@ -68,7 +71,6 @@ All colours are opaque. Alpha is not used for text: greys are stated as greys.
 | Text Secondary | `#ABABAB` | Artist, album, values in key/value rows ("Off", "Flat")                      | `#AAAAAA` to `#B2B2B2`                                     |
 | Text Tertiary  | `#858585` | Second lines ("1,234 Songs", "Connected"), section headers, captions         | `#7D` to `#8C` by ratio (est)                              |
 | Chevron        | `#999999` | List chevrons on black                                                       | `#8C8C8C` read on a 1 px stroke, so lighter in truth (est) |
-| Divider        | `#222222` | 1 px rules between two-line rows only                                        | `#222222`                                                  |
 | Track          | `#333333` | Unfilled progress and slider tracks; switch off (the storage bar's is its own) | `#313131`                                                  |
 | Accent Blue    | `#2160D8` | Selection bar, progress fill, switch on, slider knob ring, big status glyphs | Bar `#1544B2` to `#225BCB`, progress `#2368D9`             |
 | On Accent      | `#FFFFFF` | Text and chevrons on the selection bar                                       |                                                            |
@@ -90,7 +92,6 @@ half flips greys, not hues:
 | Text Secondary | `#ABABAB` | `#5C5C5C` |
 | Text Tertiary  | `#858585` | `#6E6E6E` |
 | Chevron        | `#999999` | `#8A8A8A` |
-| Divider        | `#222222` | `#E5E5E5` |
 | Track          | `#333333` | `#D9D9D9` |
 | Accent Blue    | `#2160D8` | `#2160D8` |
 
@@ -287,10 +288,10 @@ Search's All, Songs, Artists and Albums ([ipod](ipod.md#search)), the theme's on
   line's top 32 px down.
 - Optional leading 40 px square art with 4 px corners (Albums) at x 24, 6 px down; text then
   starts at 72.
-- Dividers (Divider, 1 px) between two-line rows only, from the text column to the right column,
-  not drawn on either edge of the selected row. Single-line lists have no dividers. Q2 Pod's own
-  two-line lists (Era, View Queue, Most Played, Ratings' lists) have them as stock's do, and end
-  on the last whole row above y 282 (`page_fit`).
+- No dividers (the user's, 2026-11-15): rows stand on space alone, in every list. A row with no
+  second line is a one-line row at Home's pitch, even in a list whose other rows have one (a card
+  app's, `addon.c` `stack_rows`). Q2 Pod's own two-line lists (Era, View Queue, Most Played,
+  Ratings' lists) end as every list does ([Corners](#corners)).
 
 ### Song rows
 
@@ -502,7 +503,7 @@ the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where
   8 px corners, its Phosphor symbol (16 px) and label (Inter Medium 17) centred together in the
   accent. The lit one fills with the accent, its content white. The page opens on Shuffle; the
   wheel steps Shuffle, Radio, then the rows, and back.
-- **Drill-down rows** from y 168, 32 px, as many whole rows as end by y 282, scrolling: Top Songs,
+- **Drill-down rows** from y 168, 32 px, scrolling, the rows past y 282 fading as every list's: Top Songs,
   Albums, Singles & EPs, Similar Artists, All Songs; Albums, Singles & EPs and All Songs with their
   count right-aligned 44 px from the edge in Inter Regular 15 Text Tertiary (white on the
   selection), each with the chevron. A row the app does not send, or sends nothing for, is left
@@ -589,7 +590,7 @@ header and pair (`patch/artist_page.c`).
 - **Action pair** at y 128: **Play** (Phosphor `play`) and **Shuffle**, as the artist page's pair. The
   page opens on Play, as the artist page opens on Shuffle; the wheel steps Play, Shuffle, then the
   tracks, and back. Play plays the album from its first track, Shuffle shuffles it.
-- **Tracks** from y 168, 32 px, as many whole rows as end by y 282, scrolling: the track number
+- **Tracks** from y 168, 32 px, scrolling, the rows past y 282 fading as every list's: the track number
   right-aligned on x 38 in Inter Regular 15 Text Tertiary, the title in Inter Regular 20 from x 50
   (ellipsis), the length right-aligned on the right column in Inter Regular 15 Text Tertiary (white
   on the selection); Centre plays the album from that track. The Library's tracks are the album's
@@ -699,7 +700,7 @@ pattern.
 
 | Q2 Pod screen                       | Pattern                     | Notes                                                                                                      |
 | ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock, centred. Nine rows from y 58, seven at rest: the rows below fade into black from y 266 to 316, and once scrolled the top row's first 14 px fade too; scrolled to the end the last row's foot is at y 282 |
+| Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock, centred. Nine rows from y 58, seven at rest: the rows below fade into black from y 266 to 316, and once scrolled the top row's first 14 px fade too; scrolled to the end the last row's foot is at y 282: every list's ending ([Corners](#corners)) |
 | Home (Split)                        | List row beside art         | Rows from y 40 (into the status row's empty left, the clock at its right) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges: the playing cover panning slowly while a song plays, else the library's covers in turn, each zooming and drifting and cross-fading into the next; the status row's clock, play state and battery over it at the right, each glyph white or black by contrast. Nine rows, seven at rest (the last's foot at y 264, scrolled to the end too); the rows past them fade into black within 56 px of the glass's bottom edge and, once scrolled, the row above y 40 within 34 px of its top edge, both following its rounded corners |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Now Playing's About                 | [Track details](#track-details) | Header, quality line, then a grid of name over value                                                   |
@@ -757,12 +758,12 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - Font faces as a table, with Inter Regular and Medium and tabular digits.
 - A theme's own accent tones, and the selection bar's radius and inset on every row.
 - A status row in place of a bar band (`status_y`), its title and its battery's end `STATUS_ROW_INSET`
-  in from the sides and its clock beside the play state, or centred where there is no title; list boxes that end on a whole row by `list_end`
-  (`list_fit`).
+  in from the sides and its clock beside the play state, or centred where there is no title; lists that scroll a
+  whole row at a time and stop with the last row's foot on `list_end`, the rows past it fading (`list_fit`).
 - A theme's own art from Phosphor (`tools/art.py`), loaded by its own prefix (`theme_art`): the
   chevron (`chevron_icon`, `patch/list_marks.c`) and the play state; the slim battery
   (`battery_slim`); the wheel's scroll indicator (`list.scrollbar.*`, `wheel_sb_arm`);
-  1 px dividers on the text and right columns (`list.divider.ink`); row art's 4 px corners
+  row art's 4 px corners
   (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column; the
   switch, Gain's value, the pickers' check, disabled rows, the slider page, EQ's Simple tab and the Wi-Fi
   page as above (`settings.values.switch`); song rows

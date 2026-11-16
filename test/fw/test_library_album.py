@@ -38,13 +38,14 @@ def made(win):
 
 @pytest.mark.parametrize('name', ('albuminfo_page', 'playerjumpinfo_page'))
 def test_under_oled_an_album_page_is_dressed_as_it_loads(fw, st, name):
-    """The navbar and the Shuffle row go, the list moves under the pair at y 168 (three 32 px rows to y 282), and the
+    """The navbar and the Shuffle row go, the list moves under the pair at y 168, down to the screen's foot (its rows
+    past y 282 fading, navigation.c list_fade), and the
     window holds the header (the album the page opened, its cover's square) and Play and Shuffle; the page has no
     title and opens on Play."""
     ui, win, nav, row, lv, rows = album_page(fw, st, name)
     fw.fn('album_local_load', None, C.c_void_p)(win.addr)
     assert not nav.visible and (row is None or not row.visible)
-    assert lv.box == (0, 168 - 58, 375, 96)
+    assert lv.box == (0, 168 - 58, 375, 320 - 168)
     head = [w for w in made(win) if '_ar_name' in w.props]
     assert [(w.props['_ar_name'], w.props.get('_ar_square')) for w in head] == [(b'Caracal', 1)]
     assert [w.props['_ar_left'] for w in made(win) if '_ar_left' in w.props] == [b'Play', b'Shuffle']

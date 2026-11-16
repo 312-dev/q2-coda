@@ -1,7 +1,6 @@
 /* OLED's feedback forms (docs/oled-design.md#dialogs-and-toasts): stock's toast as a pill over the
  * page, and stock's confirm pop-up as a dialog page whose status row asks the question over Cancel
- * and the action's verb; an empty or offline page's note (Folder's too); the confirmation after a shuffle.
- * page_fit, a page_list cut to whole rows above the glass, shares the note's screen arithmetic. */
+ * and the action's verb; an empty or offline page's note (Folder's too); the confirmation after a shuffle. */
 #include "navigation.h"
 
 static int top_named(void *w, const char *name) {
@@ -219,18 +218,6 @@ static int screen_y(void *w) {
     return y;
 }
 int feedback_below(void *w) { return w ? screen_y(w) + I(w, W_H) : 0; }
-/* A page_list's view (coverflow.c) under a list_fit set: its list box cut to the whole rows that
- * end by the set's list end (y 282 on OLED), as tools/ipod.py fit_rows cuts stock's, so no row runs
- * under the bottom corners' glass. */
-void page_fit(void *view) {
-    void *lv = view ? P(view, W_PARENT) : (void *)0;
-    int item = lv ? widget_get_prop_int(lv, "item_height", 0) : 0;
-    if (!geom_val(V_LIST_FIT) || item <= 0) return;
-    int room = geom_val(V_BAR) + geom_val(V_LIST_END) - screen_y(lv), h = room - room % item;
-    if (h <= 0 || I(lv, W_H) <= h) return;
-    widget_resize(lv, I(lv, W_W), h);
-    widget_resize(view, I(view, W_W), h);
-}
 /* Two labels of one parent placed and inked as the note, their text left as it is: line centred
  * between free and NOTE_END, hint (if any) 24 px lower. */
 int feedback_note(void *line, void *hint, int free) {

@@ -1044,11 +1044,13 @@ static int sel_height(menu_t *m) {
 }
 
 /* Largest viewport top that still shows content; the clamp bound for every glide. */
+static int list_pad(void *w);
+static void list_fade(void *w, void *canvas);
 static int scroll_end(menu_t *m, int height) {
     int foot;
     if (m->kind == 2) return m->rows * m->row - height;
     if (m->kind == 1 && home_rest(m->w, &foot)) return foot - height; /* its shown rows' */
-    return m->kind == 1 ? I(m->w, VIEW_CONTENT_H) - height : 0;
+    return m->kind == 1 ? I(m->w, VIEW_CONTENT_H) - list_pad(m->w) - height : 0;
 }
 static int max_top(menu_t *m) { return scroll_end(m, sel_height(m)); }
 
@@ -2185,7 +2187,7 @@ static void paint_selection(void *w, void *canvas) {
     }
     st.sel_w = w;
     st.sel_row = i;
-    st.sel_y = r.y + r.h / 2;
+    st.sel_y = r.y + r.h / 2, st.sel_h = r.h;
     if (g_menu.at[i] != st.marq_row || g_menu.id[i] != st.marq_id) {
         st.marq_row = g_menu.at[i];
         st.marq_id = g_menu.id[i];
@@ -2202,66 +2204,6 @@ static void paint_selection(void *w, void *canvas) {
     canvas_set_clip_rect(canvas, &old);
 }
 
-/* A theme's separators, behind the rows: the last rows of each two-line row but the selected one's,
- * across the list. A row's two_lines is a few words of its children, on a pool of a few rows. A
- * page_list's rows are the view's own children, each page_detail high and named so, and every stock
- * scroll view comes here too: no walk, the screenful from the top's index, a name read only at that
- * height. A theme with a divider (list.divider.ink) draws it under
- * each two-line row followed by another, on the text and right columns, on neither edge of the
- * selected row, a table's and a page_list's alike. */
-static int two_lines(void *row);
-/* A page_list's two-line row (coverflow.c page_row_detail): page_detail high, a label for its
- * title and one for its second line (a stock row of that height, Streaming's, holds a button). */
-static int page_two(void *row) {
-    return I(row, W_H) == theme()->page_detail && widget_count_children(row) >= 2 &&
-           !tk_strcmp(widget_get_type(widget_get_child(row, 1)), "hscroll_label");
-}
-static void paint_separators(void *w, void *canvas) {
-    rect_t old;
-    int clip[4];
-    const theme_t *T = theme();
-    unsigned div = T->div_ink[ipod_light()];
-    int k = w && div ? kind(w) : 0;
-    if (!(k == 1 || (k == 2 && I(w, ROW_HEIGHT) > geom(G_PITCH))) || !P(canvas, CANVAS_LCD) ||
-        (k == 2 && !load_rows(&g_menu, w)) ||
-        !clip_within(canvas, &old.x, clip, I(canvas, CANVAS_X), I(canvas, CANVAS_Y), I(w, W_W),
-                     I(w, W_H)))
-        return;
-    canvas_set_clip_rect(canvas, clip);
-    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-    /* st.sel_row counts load_rows' clickable entries, which a view's children needn't all be */
-    int sel = st.sel_w == w ? st.sel_row : -1;
-    void *sel_child = st.sel_w == w ? st.sel_accent : (void *)0;
-    if (k == 2) { /* the divider: from the text (or art's text) column to the right one */
-        int x = T->art_x ? T->art_text_x : geom_val(V_TEXT_X),
-            end = I(w, W_W) - geom_val(V_RIGHT_X);
-        stock_canvas_set_fill_color(canvas, RGBA(div));
-        for (int i = 0; i + 1 < g_menu.n; ++i) {
-            rect_t r = bounds(&g_menu, i);
-            if (i != sel && i + 1 != sel && r.h > geom(G_PITCH))
-                canvas_fill_rect(canvas, x, r.y + r.h - 1, end - x, 1);
-        }
-    } else { /* a page_list's two-line rows (Era, View Queue, Ratings): the same divider */
-        int top = I(w, SCROLL_Y), n = (int)widget_count_children(w), lit = -1,
-            first = top > 0 ? top / T->page_detail : 0, x = geom_val(V_TEXT_X),
-            end = I(w, W_W) - geom_val(V_RIGHT_X);
-        for (int i = first; sel_child && i < n && lit < 0; ++i) {
-            void *row = widget_get_child(w, i);
-            if (row == sel_child || P(sel_child, W_PARENT) == row) lit = i;
-        }
-        stock_canvas_set_fill_color(canvas, RGBA(div));
-        for (int i = first; i + 1 < n; ++i) {
-            void *row = widget_get_child(w, i), *next = widget_get_child(w, i + 1);
-            int y = I(row, W_Y) - top, rh = I(row, W_H);
-            if (y >= I(w, W_H)) break;
-            if (i != lit && i + 1 != lit && page_two(row) && page_two(next) &&
-                widget_get_visible(row) && widget_get_visible(next))
-                canvas_fill_rect(canvas, x, y + rh - 1, end - x, 1);
-        }
-    }
-    stock_canvas_set_fill_color(canvas, fill);
-    canvas_set_clip_rect(canvas, &old);
-}
 
 static void edit_paint(void *w, void *canvas);
 
@@ -2464,8 +2406,46 @@ int ringnav_paint(void *w, void *canvas) {
     if (w && w == st.np_win && !(NP_VISUALIZER && visualizer_full()))
         np_modes(w, canvas); /* else the page's own */
     coverflow_home_clip(w, canvas, 0);
+    list_fade(w, canvas);
     st.paint_w = w ? P(w, W_PARENT) : (void *)0;
     return result;
+}
+
+/* A list_fit set's scrolling list whose box runs on below the set's list end (y 282 on OLED): its
+ * rows past it peek through a fade into the page's ground, and once scrolled its top rows fade
+ * under the status row, as Home (Full)'s do (home.c list_fades; docs/oled-design.md#corners).
+ * Scrolled to its end by the wheel its last row's foot is on the list end (scroll_end, sel_height):
+ * so a drag stops there too, its content runs on by the box's rows past the end (LIST_PAD, set
+ * again at each paint, as a relayout puts stock's height back; LIST_PADDED the padded height, so a
+ * reset shows). Home has its own (home_fades), an inset modal's rows end in its panel. */
+#define LIST_PAD "_list_pad"
+#define LIST_PADDED "_list_padded"
+static int list_pad(void *w) {
+    return widget_get_prop_int(w, LIST_PADDED, -1) == I(w, VIEW_CONTENT_H)
+               ? widget_get_prop_int(w, LIST_PAD, 0)
+               : 0;
+}
+static void list_fade(void *w, void *canvas) {
+    int k = w && geom_val(V_LIST_FIT) && P(canvas, CANVAS_LCD) ? kind(w) : 0;
+    if ((k != 1 && k != 2) || home_rest(w, (int *)0) || modal_rows_of(w) ||
+        window_manager_is_animating(window_manager()))
+        return;
+    int y = 0;
+    void *wm = window_manager();
+    for (void *p = w; p && p != wm; p = P(p, W_PARENT)) y += I(p, W_Y);
+    int end = list_fit_end(), bottom = y + I(w, W_H);
+    if (bottom <= end) return; /* a box cut above the end */
+    int off = k == 2 ? I(w, TABLE_TOP) : I(w, SCROLL_Y),
+        content = k == 2 ? I(w, TABLE_ROWS) * I(w, ROW_HEIGHT) : I(w, VIEW_CONTENT_H) - list_pad(w);
+    if (k == 1) { /* a drag's end at the wheel's */
+        int pad = bottom - end;
+        widget_set_prop_int(w, LIST_PAD, pad);
+        I(w, VIEW_CONTENT_H) = content + pad;
+        widget_set_prop_int(w, LIST_PADDED, content + pad);
+    }
+    int s0 = 1, s1 = 0; /* the selected row, on the screen */
+    if (st.sel_w == w) s0 = y + st.sel_y - st.sel_h / 2, s1 = s0 + st.sel_h;
+    list_fades(canvas, y, bottom, end, off > 0, y + content - off > end, s0, s1);
 }
 
 /* A s_listitem_black list_item in view with a 335x70 s_btn_listitem button; returns the button. */
@@ -5358,7 +5338,6 @@ int ringnav_paint_bg(void *w, void *canvas) {
     paint_modal_rows(w, canvas);
     feedback_confirm_switch(w, canvas);
     feedback_switch_bar(w, canvas);
-    paint_separators(w, canvas);
     coverflow_home_clip(w, canvas, 1);
     if (w && w == st.bar_slot) paint_battery(w, canvas);
     if (w && w == st.action_view && P(canvas, CANVAS_LCD) && theme()->shuffle_row) {

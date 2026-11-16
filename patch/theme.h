@@ -116,10 +116,6 @@ typedef struct {
     short art_x, art_text_x, art_text_end;
     short art_radius; /* a row cover's corner radius on screen at the set's art; 0: NP_ART_RADIUS's
                          share of its size */
-    /* a 1 px divider under each row taller than the set's pitch, from its text column to the right
-     * column, on neither edge of the selected row (paint_separators), final: [0] dark, [1] light;
-     * 0: none */
-    unsigned div_ink[2];
     short art_placeholder; /* stock's grey tiles (list_folder, list_song) this size, centred, 0:
                               as stock */
     unsigned char np_meta_font; /* Now Playing's artist and album: FONT_* at the asset's size, by

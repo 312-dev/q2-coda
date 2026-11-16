@@ -1316,8 +1316,7 @@ def test_oleds_power_confirms_say_their_verb(fw, st, prompt, verb):
     assert not confirm.lines[0].visible  # the question is the status row's title
 
 
-# The divider (list.divider.ink, paint_separators): a 1 px line on the last row of each two-line row followed by
-# another, from the text column (a row with art: its text's) to the right column, on neither edge of the selected row.
+# No list has dividers (user, 2026-11-15): two-line rows, a card app's page_list's and a table's, stand on space alone.
 def oled(fw, st, **config):
     """OLED on its own set, as theme_boot leaves it, on a lit, usable screen."""
     theme(fw, **config)
@@ -1347,39 +1346,41 @@ def detail_page(fw, st, rows=5, h=None, scroll=0, touch=0):
     return view, items, canvas
 
 
-def divided(canvas, y, x0=None):
-    """Whether the divider ends at y: its one row, in the half's ink, from x0 (the set's text column) to the right
-    column, and nothing else on that row."""
-    x0 = SETS[OLED_SET].text_x if x0 is None else x0
-    x1 = 375 - SETS[OLED_SET].right_x
-    ink = rgba(THEMES[OLED]['div_ink'])
-    return canvas.row(y - 1) == [None] * x0 + [ink] * (x1 - x0) + [None] * (375 - x1)
+def test_a_page_list_s_two_line_rows_have_no_divider(fw, st):
+    _, _, canvas = detail_page(fw, st, rows=10, scroll=THEMES[OLED]['page_detail'] + 10, touch=1)
+    assert not canvas.px  # under touch no selection either: nothing but the rows' own widgets
 
 
-def test_every_detail_row_but_the_selecteds_edges_and_the_last_ends_on_the_divider(fw, st):
-    view, items, canvas = detail_page(fw, st)
-    h = THEMES[OLED]['page_detail']
-    assert [divided(canvas, (i + 1) * h) for i in range(5)] == [0, 0, 1, 1, 0]
-    assert canvas.restored() and canvas.clip == [0, 0, 375, 320]
+def faded_rows(canvas):
+    """The screen rows the fades filled, each a 1 px band across the clip."""
+    return sorted({y for (x, y, w, h), _ in canvas.rects if h == 1 and w == 375})
 
 
-def test_under_touch_every_row_followed_by_another_is_divided(fw, st):
-    _, _, canvas = detail_page(fw, st, touch=1)
-    h = THEMES[OLED]['page_detail']
-    assert [divided(canvas, (i + 1) * h) for i in range(5)] == [1, 1, 1, 1, 0]
+@pytest.mark.parametrize('scroll', [0, 40])
+def test_a_list_past_the_list_end_fades_as_home_s_does(fw, st, scroll):
+    """Every scrolling list (navigation.c list_fade) as Home (Full): its rows past the list end (y 282) peek through a
+    fade from 16 px above it to y 316, the ground below; scrolled, its top 14 px fade under the status row; and its
+    content runs on by the box's rows past the end, so a drag stops where the wheel does."""
+    rows, h = 12, THEMES[OLED]['page_detail']
+    view, _, _ = detail_page(fw, st, rows=rows, scroll=scroll, touch=1)
+    canvas = Canvas(fw)
+    fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(view.addr, canvas.addr)
+    end = SETS[OLED_SET].bar + SETS[OLED_SET].list_end
+    bands = faded_rows(canvas)
+    assert [y for y in bands if y >= 40] == list(range(end - 14, 320))  # the foot: from y 266, clear for its first rows
+    assert [y for y in bands if y < 40] == (list(range(26, 26 + 14)) if scroll else [])  # the top, once scrolled
+    assert view.int_at(O['VIEW_CONTENT_H']).value == rows * h + (320 - end)
 
 
-def test_dividers_follow_the_scroll_and_stop_below_the_view(fw, st):
-    h = THEMES[OLED]['page_detail']
-    scroll = h + 10
-    _, _, canvas = detail_page(fw, st, rows=10, scroll=scroll, touch=1)
-    lines = sorted({y for (_, y), c in canvas.px.items() if c == rgba(THEMES[OLED]['div_ink'])})
-    assert lines == [y for y in ((i + 1) * h - scroll - 1 for i in range(9)) if 0 <= y < 294]
-
-
-def test_a_row_of_another_height_has_none(fw, st):
-    _, _, canvas = detail_page(fw, st, h=40, touch=1)
-    assert not canvas.px
+def test_a_list_cut_above_the_list_end_has_no_fade(fw, st):
+    ui = oled(fw, st)
+    view = ui.add('scroll_view', ui.window('about_page'), (0, 26, 375, 200))
+    view.byte_at(O['VIEW_VERTICAL']).value = 1
+    view.int_at(O['VIEW_CONTENT_H']).value = 400
+    view.int_at(O['SCROLL_Y']).value = 40
+    canvas = Canvas(fw)
+    fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(view.addr, canvas.addr)
+    assert not faded_rows(canvas)
 
 
 def table(fw, st):
@@ -1403,10 +1404,9 @@ def table(fw, st):
     return row_h, canvas
 
 
-def test_a_tables_two_line_rows_are_divided_from_the_art_rows_text_column(fw, st):
-    row_h, canvas = table(fw, st)
-    x0 = THEMES[OLED]['art_text_x']  # list.art's text column: the theme's rows have art
-    assert [divided(canvas, (i + 1) * row_h, x0) for i in range(4)] == [1, 1, 1, 0]
+def test_a_table_s_two_line_rows_have_no_divider(fw, st):
+    _, canvas = table(fw, st)
+    assert not canvas.px
 
 
 # Marks on a row (ringnav_paint over an image): a checked row's mark and a playlist's quiet More.
