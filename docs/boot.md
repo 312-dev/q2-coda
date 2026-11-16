@@ -1,19 +1,20 @@
 # Boot
 
-The Q2 splash shown on the screen at power-on is a JPEG inside the rootfs. A JPEG on the microSD card replaces it without a firmware update; a build can also change the built-in one ([Custom boot logo](#custom-boot-logo)).
+The Q2 splash shown on the screen at power-on is a JPEG inside the rootfs, and on Q2 Pod's default builds in Dark Mode a short animation played over it ([Boot animation](#boot-animation)). A JPEG on the microSD card replaces both without a firmware update; a build can also change the built-in one ([Custom boot logo](#custom-boot-logo)).
 
-| What       | Where                                                                                                                                                 |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Image      | `/mnt/data/boot-logo.jpg` when present, else under Light Mode `logo-light.jpg`, else `/release/assets/default/raw/images/xx/logo.jpg` (320x375 JPEGs) |
-| Drawn by   | `/usr/bin/display_logo` (libjpeg, writes `/dev/fb0`)                                                                                                  |
-| Started by | `/etc/init.d/S11logo_display_shell`, as soon as `/dev/fb0` exists                                                                                     |
+| What       | Where                                                                                                                                                          |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Image      | `/mnt/data/boot-logo.jpg` when present, else under Light Mode `logo-light.jpg`, else `/release/assets/default/raw/images/xx/logo.jpg` (320x375 JPEGs)          |
+| Drawn by   | `/usr/bin/display_logo` (libjpeg, writes `/dev/fb0`)                                                                                                           |
+| Animation  | `/release/assets/default/raw/images/xx/logo.q2a`, played by `/usr/bin/q2splash` (`patch/splash.c`) over `logo-black.jpg`, in place of the built-in dark splash |
+| Started by | `/etc/init.d/S11logo_display_shell`, as soon as `/dev/fb0` exists                                                                                              |
 
 ## Boot sequence
 
 BusyBox `init` runs `/etc/init.d/rcS`, which starts the `S??*` scripts in order:
 
 1. `S10mdev`, `S10mount_ubifs`: devices and the data partition.
-2. `S11logo_display_shell`: in the background, polls every 20 ms for `/dev/fb0`, then runs `display_logo` on `/mnt/data/boot-logo.jpg` if it exists, else on the built-in splash ([Light Mode](#light-mode)).
+2. `S11logo_display_shell`: in the background, polls every 20 ms for `/dev/fb0`, then runs `display_logo` on `/mnt/data/boot-logo.jpg` if it exists, else on the built-in splash ([Light Mode](#light-mode)), or plays the animation where the built-in dark splash would show ([Boot animation](#boot-animation)).
 3. `S11module_driver_default`: `/module_driver/driver_default_init_script.sh` loads the drivers, among them `soc_fb.sh` (the framebuffer, so `/dev/fb0` appears and the splash is drawn) and the LCD panel.
 4. `S20urandom`, `S40network`.
 5. `S90play`: starts `dbus-daemon`, then the player: `/release/bin/demo`, or Rockbox first when the card has it ([Rockbox](#rockbox)).
@@ -59,6 +60,34 @@ demo runs with its stderr appended to `/tmp/q2-demo.err`, in RAM. Stock starts `
 
 Bluetooth survives the hand-over: demo starts `rtk_hciattach`, `bluetoothd` and `bluealsa` with `system("... &")`, so none is demo's child and the headphones stay connected. Wi-Fi goes off ([Rockbox](#rockbox)), but `8733bs` stays loaded: it also holds Bluetooth's power line (`gpio_bt_dis_n`, `module_driver/rtl8733bs.sh`). Rockbox opens bluez-alsa's `bluealsa` PCM (the most recently connected device, through `plug` for its rate and format) whenever it opens, and the DAC otherwise ([q2-rockbox](https://github.com/DiamondBond/q2-rockbox), `shanlingq2_codec.c`). bluealsa is Q2 Pod's, so AirPods keep its 48 kHz AAC fix ([internals.md](internals.md#bluetooth-aac)). When Rockbox exits, demo starts afresh and sets Bluetooth up again. Rockbox's volume is pcm-alsa's software mixer alone, so before the hand-over `rockbox_open` sets the headset's AVRCP absolute volume to the Maximum volume limit (`btctl_transport_set_volume`); left at the Q2's volume it would cap Rockbox's. demo syncs the headset back to the Q2's volume once it starts again.
 
+## Boot animation
+
+A build with the default logo ships a boot animation, about 7 seconds at 30 frames a second: a bullet train leaves the Guangzhou skyline under Shanling's wordmark, crosses the screen, and arrives as a Chicago L train under 312.dev, where its doors open. It plays where the built-in dark splash would show. A card logo, Light Mode's splash and a build with a custom `--logo` show their still image as before.
+
+| What        | Where                                                                                                    |
+| ----------- | -------------------------------------------------------------------------------------------------------- |
+| Frames      | `release/assets/default/raw/images/xx/logo.q2a` (`assets/boot-anim.q2a`, packed by `tools/splash.py`)    |
+| First frame | `release/assets/default/raw/images/xx/logo-black.jpg` (`assets/boot-black.jpg`), drawn by `display_logo` |
+| Player      | `/usr/bin/q2splash` (`patch/splash.c`)                                                                   |
+| Source      | `assets/boot-anim/anim.html`, drawn on a canvas; `assets/boot-anim/render.js` captures its frames        |
+
+The splash hook (`LOGO_HOOK`) first runs `display_logo` on the black JPEG, which turns the screen on as it does for any splash, then `q2splash` on the frames. `q2splash` draws on the framebuffer's page 0, where `display_logo` drew, and exits after the last frame, which stays on the screen. If it can't start (exit 1: no file, a file for another screen size, a framebuffer that is not the Q2's) the hook shows the still logo instead.
+
+It never holds the boot back: the hook already runs in the background, and nothing waits for it. Each frame it reads the display's pan offset and stops once that has left page 0, which is demo showing the first frame it drew on the other page ([Framebuffer](#framebuffer)); demo then draws over page 0 as it does over the still splash. Rockbox does not pan, so `S90play` kills `q2splash` before it starts Rockbox. ponytail: a boot shorter than the animation cuts it off at demo's first frame, and neither the boot's length nor the hand-over to demo has been measured on a Q2; frames are drawn on the page being shown, so a frame can tear, where drawing the hidden page and panning would cost a second copy of every change.
+
+The file is the frames as the framebuffer stores them (320x375, turned 90° clockwise) in 16 grey levels, each as the pixels that changed since the frame before (the format is in `tools/splash.py`'s docstring). `q2splash` maps the 16 levels onto the splash's off-white (#F2F2F0). 221 frames are 514 KB in the file and about 230 KB in the rootfs, whose LZO compression is weaker than the file's own would need.
+
+To change the animation, edit `assets/boot-anim/anim.html` (opened in a browser it plays in a loop), then render and pack it:
+
+```sh
+npm install playwright   # once, anywhere on node's path
+pip install pillow       # once: tools/splash.py reads the frames with it
+node assets/boot-anim/render.js /tmp/q2-frames
+python3 tools/splash.py /tmp/q2-frames assets/boot-anim.q2a
+```
+
+`render.js` averages 16 renders over a 45 ms shutter for each frame, which is the motion blur. `anim.html` loads the Outfit font for 312.dev from Google Fonts; Shanling's wordmark is a traced path in `assets/boot-anim/paths.js`.
+
 ## Custom boot logo
 
 ### From the card
@@ -73,7 +102,7 @@ Put your logo on the microSD card as `/Q2Pod/boot/boot-logo.jpg`. While Q2 Pod i
 
 ### In a build
 
-Every build replaces the built-in splash with `assets/boot-logo.jpg`. Pass another 320x375 JPEG with `--logo` to use your own:
+Every build replaces the built-in splash with `assets/boot-logo.jpg`, and plays the [boot animation](#boot-animation) in its place in Dark Mode. Pass another 320x375 JPEG with `--logo` to use your own, which also leaves the animation out:
 
 ```sh
 python3 tools/build.py 'Q2 Firmware V1.36.zip' --out /tmp/q2-logo --logo my-logo.jpg
@@ -83,7 +112,7 @@ Flash `/tmp/q2-logo/update.tar` the normal way: copy it to the root of the micro
 
 ### Light Mode
 
-The default logo also ships `assets/boot-logo-light.jpg`, the same logo inverted (dark lettering on white), as `release/assets/default/raw/images/xx/logo-light.jpg`. While `/mnt/data/config.ini` has `LIGHT=1`, or `LIGHT=2` and the saved time zone's clock says 07:00 to 18:59 ([Light Mode](ipod.md#light-mode)), the splash hook shows it instead of the built-in one, so a power-on after turning Light Mode on or off matches it. A card logo still wins, and a build with a custom `--logo` ships no light twin and shows its logo in both modes. The boot shell has no `TZ` (only the player sets it, [Clock](internals.md#clock)) and the RTC holds UTC, so for `LIGHT=2` the hook sets `TZ` from `SYSSET TIMEZONE`, the same index and names as the player (`TIMEZONES` in `tools/build.py`); a missing or unknown index reads as the player's does, index 22, Shanghai (`config_init`). ponytail: the hour is only as right as the RTC, so a clock that was never set can pick the other logo, until it is set. To regenerate it from the default:
+The default logo also ships `assets/boot-logo-light.jpg`, the same logo inverted (dark lettering on white), as `release/assets/default/raw/images/xx/logo-light.jpg`. While `/mnt/data/config.ini` has `LIGHT=1`, or `LIGHT=2` and the saved time zone's clock says 07:00 to 18:59 ([Light Mode](ipod.md#light-mode)), the splash hook shows it instead of the built-in one, so a power-on after turning Light Mode on or off matches it. A card logo still wins, and a build with a custom `--logo` ships no light twin and shows its logo in both modes. Light Mode's splash is a still: the [boot animation](#boot-animation) is light on black and plays in Dark Mode only. The boot shell has no `TZ` (only the player sets it, [Clock](internals.md#clock)) and the RTC holds UTC, so for `LIGHT=2` the hook sets `TZ` from `SYSSET TIMEZONE`, the same index and names as the player (`TIMEZONES` in `tools/build.py`); a missing or unknown index reads as the player's does, index 22, Shanghai (`config_init`). ponytail: the hour is only as right as the RTC, so a clock that was never set can pick the other logo, until it is set. To regenerate it from the default:
 
 ```sh
 magick assets/boot-logo.jpg -negate -colorspace sRGB -type TrueColor -strip -interlace none \
@@ -95,7 +124,7 @@ magick assets/boot-logo.jpg -negate -colorspace sRGB -type TrueColor -strip -int
 - **Orientation: rotate upright artwork 90° clockwise before fitting it.** The stock JPEG is stored sideways because of the framebuffer orientation. The supplied logo therefore reads sideways in the stored JPEG and appears upright on the device. The card also takes an upright 375x320 JPEG and turns it for you.
 - **Canvas: exactly 320x375 pixels, black.** `display_logo` does not scale the image. Fit the rotated artwork within both dimensions, preserve its aspect ratio, and centre it horizontally and vertically without cropping. The build rejects any other size, and the card any other than 320x375 or upright 375x320.
 - **Format: 8-bit, three-component baseline JPEG (RGB/YCbCr).** No PNG, alpha, grayscale or CMYK. The stock renderer assumes three decoded bytes per pixel; the builder rejects incompatible frame headers.
-- **Keep it small.** On the card, at most 512 KB. In a build, JPEG data barely compresses and the repacked rootfs must stay within the stock image size (50,688,000 bytes; `tools/build.py` compares the two files' sizes). A rebuilt rootfs with `assets/boot-logo.jpg` (about 7 KB) leaves about 295 KB of slack (a `--dev --new-player` build of 2026-11-15 is 50,393,088 bytes, 294,912 under), so a built-in logo can grow by about that much, well short of the card's 512 KB; if the build fails with `Repacked rootfs is N bytes, M over the 50,688,000 the stock image holds`, re-save at lower quality or put the logo on the card instead.
+- **Keep it small.** On the card, at most 512 KB. In a build, JPEG data barely compresses and the repacked rootfs must stay within the stock image size (50,688,000 bytes; `tools/build.py` compares the two files' sizes). A rebuilt rootfs with `assets/boot-logo.jpg` (about 7 KB) and the boot animation leaves about 217 KB of slack (a `--dev --new-player` build of 2026-11-15 is 50,470,912 bytes, 217,088 under), and a custom `--logo` leaves the animation's 230 KB out, so a built-in logo can grow by about 450 KB, short of the card's 512 KB; if the build fails with `Repacked rootfs is N bytes, M over the 50,688,000 the stock image holds`, re-save at lower quality or put the logo on the card instead.
 
 The default is an outlined URW Gothic Book wordmark on black, in warm off-white (#F2F2F0), about 140x72 pixels. The Q keeps its sweeping tail, while the 2 is widened for a balanced base. Below it, widely spaced POD in muted warm grey (#BDBDB8) has a tiny centre button inside the O, a subtle reference to the Q2's click wheel. The group is centred at about 47% of the screen height, because perfect centring looks low. There are no gradients or glows. All lettering is converted to paths, so no fonts are required to render it. Its upright source is `assets/boot-logo.svg` (375x320). To reproduce the firmware JPEG with librsvg and ImageMagick:
 

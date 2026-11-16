@@ -50,5 +50,5 @@ local_partial_types = true  # which allow_redefinition_new needs
 warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
-module = ["fontTools.*"]  # ships no type information
+module = ["fontTools.*", "PIL.*"]  # fontTools ships no type information; Pillow is only for tools/splash.py and not in requirements.txt
 ignore_missing_imports = true

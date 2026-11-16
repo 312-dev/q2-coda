@@ -252,12 +252,14 @@ boot_check()
 def logo_check():
     """S11logo_display_shell's splash choice (build.py LOGO_HOOK) under the host sh."""
     import subprocess, tempfile, pathlib
-    from build import LOGO_HOOK, LOGO, LOGO_LIGHT, TIMEZONES
+    from build import LOGO_HOOK, LOGO, LOGO_LIGHT, LOGO_ANIM, LOGO_BLACK, TIMEZONES
     with tempfile.TemporaryDirectory(prefix='q2-logo-') as tmp:
         tmp = pathlib.Path(tmp)
         user, config, dark, light = tmp/'boot-logo.jpg', tmp/'config.ini', tmp/'logo.jpg', tmp/'logo-light.jpg'
+        anim, black = tmp/'logo.q2a', tmp/'logo-black.jpg'
         script = (LOGO_HOOK[1].decode().replace('/mnt/data/boot-logo.jpg', str(user)).replace('/mnt/data/config.ini', str(config))
-                  .replace('/'+LOGO_LIGHT, str(light)).replace('/'+LOGO, str(dark)).replace('display_logo', 'echo'))
+                  .replace('/'+LOGO_LIGHT, str(light)).replace('/'+LOGO_ANIM, str(anim)).replace('/'+LOGO_BLACK, str(black))
+                  .replace('/'+LOGO, str(dark)).replace('display_logo', 'echo').replace('/usr/bin/q2splash', 'q2splash'))
         def shown(): return subprocess.run(['sh', '-c', script], check=True, capture_output=True, text=True).stdout.strip()
         assert shown() == str(dark)  # no card logo, no config: the built-in splash
         config.write_text('[IPOD]\nLIGHT=1\n')
@@ -283,12 +285,23 @@ def logo_check():
             config.write_text(text)
             fake = f'''date() {{ [ "$TZ" = '{TIMEZONES[22][1]}' ] && echo 12 || echo 22; }}; '''
             assert subprocess.run(['sh', '-c', fake + script], check=True, capture_output=True, text=True).stdout.strip() == str(light)
-    print('Boot logo: the saved card logo, else the light splash under Light Mode, else the built-in one, passed.')
+        # The boot animation (docs/boot.md#boot-animation), on builds that ship it: in place of the built-in dark splash only
+        anim.write_bytes(b'')
+        def played(status=0): return subprocess.run(['sh', '-c', f'q2splash() {{ echo play $1; return {status}; }}; ' + script], check=True, capture_output=True, text=True).stdout.split('\n')[:-1]
+        config.write_text('[IPOD]\nLIGHT=0\n')
+        assert played() == [str(black), f'play {anim}']  # the black splash turns the screen on, then the animation
+        assert played(1) == [str(black), f'play {anim}', str(dark)]  # q2splash could not start: the still logo
+        config.write_text('[IPOD]\nLIGHT=1\n')
+        assert played() == [str(light)]
+        user.write_bytes(b'')
+        config.write_text('[IPOD]\nLIGHT=0\n')
+        assert played() == [str(user)]
+    print('Boot logo: the saved card logo, else the light splash under Light Mode, else the boot animation or the built-in one, passed.')
 logo_check()
 
 def validate_assets(directory):
     import functools, json, re, struct, subprocess
-    from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, BOOT_HOOK, REMOTE, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, LOGO_LIGHT, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, WATCHDOG, WATCHDOG_SLEEP, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, WHEEL_TS_READ, PDR
+    from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, SPLASH, LOGO_ANIM, LOGO_BLACK, BOOT_HOOK, REMOTE, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, LOGO_LIGHT, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, WATCHDOG, WATCHDOG_SLEEP, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, WHEEL_TS_READ, PDR
     from ipod import (ART_PLACEHOLDERS, sized_art, AUDIT, TOOLBAR_SWITCHES, BOTTOM, CONFIRM, VOLUME, BIGCOVER, BC_ART, BC_TITLE_PAD, QUICK_SETTINGS, QS_TOP, QS_LABEL_GAP, QS_LABEL_H,
                       QS_LABEL_W, QS_ROW_GAP, QS_PITCH, QS_BAR, QS_TOUCH, QS_EDGE, QS_SUN, HOME_LABEL_END, HOME_LIST_W, HOME_TEXT_X, HOME_TOP, PITCH, ARTIST_PAGE, HOME_OURS, HOME_PAGE, HOME_ROW, HOME_ROWS, NAVBAR_ONLY, PLAYING_PAGE, SET_ROW, SET_ROWS, SET_TOP, UI_ASSETS,
                       NP_BAR, NP_TOUCH, NP_MARGIN, NP_TOP, STATUS_BAR, STATUS_HIDDEN, STATUS_LEFT, STATUS_MARGIN, STATUS_RIGHT, CLOCK_MIN, CLOCK_TEXT, corner_inset, corner_x,
@@ -477,6 +490,9 @@ def validate_assets(directory):
     # Rockbox's dual boot: q2boot likewise, and S90play differs from stock only in starting demo.
     boot = read('rootfs.squashfs', BOOT)
     assert sha(boot) == manifest['q2boot_sha256'] and boot[:4] == b'\x7fELF' and boot[36:40] == helper[36:40]
+    # The boot animation's player (docs/boot.md#boot-animation)
+    splash = read('rootfs.squashfs', SPLASH)
+    assert sha(splash) == manifest['q2splash_sha256'] and splash[:4] == b'\x7fELF' and splash[36:40] == helper[36:40]
     expected_start = read('stock.squashfs', S90PLAY).replace(*BOOT_HOOK)
     if manifest['dev']:
         remote = read('rootfs.squashfs', REMOTE)
@@ -637,6 +653,9 @@ def validate_assets(directory):
     light = (ROOT/'assets/boot-logo-light.jpg').read_bytes()
     default = manifest['logo_sha256'] == sha((ROOT/'assets/boot-logo.jpg').read_bytes())
     assert ('squashfs-root/'+LOGO_LIGHT in names) == default and (not default or read('rootfs.squashfs', LOGO_LIGHT) == light)
+    # and so does the boot animation, with the black splash it starts from
+    for path, source in ((LOGO_ANIM, 'assets/boot-anim.q2a'), (LOGO_BLACK, 'assets/boot-black.jpg')):
+        assert ('squashfs-root/'+path in names) == default and (not default or read('rootfs.squashfs', path) == (ROOT/source).read_bytes())
     assert not {'squashfs-root/'+rel for rel in STOCK_EQ} & names, 'Stock EQ assets remain'
     # Album Wall, the spectrum and the VU meter: their pages and images are gone, and no page that ships names what opened them
     assert not {'squashfs-root/'+rel for rel in STOCK_PAGES} & names and {'squashfs-root/'+rel for rel in STOCK_PAGES} <= stock_names
