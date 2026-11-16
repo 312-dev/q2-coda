@@ -18270,10 +18270,10 @@ class SwMachine(CoverflowMachine):
         elif name=='navigator_to': self.opened.append((self.text(a),)); ret=self.quit
         elif name=='idle_add': self.idles.append((a,b)); ret=1
         self.returns(ret,clobber=True)
-    def sw(self,field): return signed(self.get(payload_syms['swu']+{'state':4,'result':12,'frame':24}[field]))
+    def sw(self,field): return signed(self.get(payload_syms['swu']+{'state':4,'result':12,'frame':20}[field]))
     def said(self,w):
         self.letters.clear(); self.image_loads.clear(); self.paint(w,gap=0)
-        return [l['text'] for l in self.letters],[i.rsplit('_',1)[-1] if 'swspin' not in i else i.split('swspin_')[1] for i in self.image_loads if 'sw' in i]
+        return [l['text'] for l in self.letters],[i.rsplit('_',1)[-1] if 'swspin' not in i else i.split('swspin_')[1] for i in self.image_loads if 'swspin' in i or 'modepage' in i]
 def sw_open(code=1,quit=0):
     m=SwMachine(code,quit); m.call(address=syms['fwupdate_tf'],args=(0,0,0,0),gap=0); return m
 for code,result,words,glyph in ((-15,SW_LOW,['Charge to Update','Needs 16% or a charger \u00b7 now 12%'],'low'),
@@ -18293,19 +18293,16 @@ texts,images=m.said(page); assert texts==['Checking for an Update\u2026','Lookin
 m.advance(160); texts,images=m.said(page); assert images==['d_2'],images
 m.call(address=syms['fwupdate_tf'],args=(0,0,0,0),gap=0); assert len(m.threads)==1 and m.top==page  # one at a time
 passed()
-# Its answer: OK opens Install Update? over it and closes it; another, its page.
-for state,want in ((SW_OK,'swconfirm_page'),(SW_LATEST,'swupdate_page'),(SW_BAD,'swupdate_page')):
-    m=sw_open(); page=m.top; m.word(payload_syms['swu']+4,state); m.u.mem_write(payload_syms['swu']+0x40,b'V1830\0')
-    m.advance(80); assert m.joins and m.nodes[m.top]['name']==want,(state,m.nodes[m.top]['name'])
-    if state!=SW_OK: assert m.top==page and m.sw('result')==state and not m.timers; passed(); continue
-    confirm=m.top; assert not m.alive(page) and not m.timers  # Install Update? on top and still: the check's page closed under it
-    view=m.find('scroll_view',confirm); assert m.selected(view)==0  # Cancel
-    rows=m.nodes[view]['children']  # page_row_detail's list_items
-    assert [m.nodes[m.nodes[r]['children'][0]].get('text') for r in rows]==['Cancel','Install and Restart']
-    texts,_=m.said(confirm)  # this machine's fixed-pitch font cuts the longer lines with an ellipsis
-    assert texts[0]=='Q2 Pod 1.8.3 \u00b7 V1830' and texts[1].startswith(f'Installed: {manifest["version"]} \u00b7 0.0 MB') and texts[2].startswith('Takes about 2 minutes'),texts
-    f,ctx=m.handler(rows[1],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
-    assert len(m.idles)==1 and not m.alive(confirm); passed()
+# Its answer: OK asks Install Update? on the confirmation card over it (feedback.c confirm, which opens stock's
+# sortselect_dialog); another, its page. The card's answer (sw_update.c sw_answer) closes the page, Install and Restart
+# then running stock's dialog from an idle.
+for state in (SW_OK,SW_LATEST,SW_BAD):
+    m=sw_open(); page=m.top; m.word(payload_syms['swu']+4,state); m.u.mem_write(payload_syms['swu']+0x30,b'V1830\0')
+    m.advance(80); assert m.joins and not m.timers,state
+    if state!=SW_OK: assert m.top==page and m.sw('result')==state; passed(); continue
+    assert ('dialog/sortselect_dialog',) in m.opened or m.top!=page,m.opened
+    m.call(address=payload_syms['sw_answer'],args=(0,1,0,0),gap=0,clear=False)
+    assert len(m.idles)==1 and not m.alive(page); passed()
 # After the click, stock's dialog; its answer (no file 9, up to date 13, damaged 18) is a page, a success never comes back.
 for quit,result in ((9,SW_NONE),(13,SW_LATEST),(18,SW_BAD)):
     m=SwMachine(quit=quit); m.call(address=payload_syms['sw_install'],args=(0,0,0,0),gap=0)

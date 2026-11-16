@@ -1004,10 +1004,9 @@ SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, a
 
 - **Checking for an Update…**, "Looking on the SD card": no circle, a 48 px spinner of twelve round 4 px spokes in
   Text Primary, the head turning a spoke every 80 ms and each spoke behind it dimmer, to a quarter.
-- **Install Update?**, the confirm with the question in the status row: the update's name and tag in Inter Medium
-  17 centred on y 66, "Installed: TAG · SIZE on the SD card" in 15 px Text Tertiary on y 88, then Cancel (selected)
-  and Install and Restart from y 112, and a two-line footer under them ("Takes about 2 minutes. Keep the Q2 charged;
-  your music and settings stay.").
+- **Install Update?** on the [confirmation card](#confirmation-card) over the check's page: "Install Q2 Pod 1.8.3 ·
+  V1830?", its body "SIZE MB, over TAG. Takes about 2 min;" over "your music and settings stay.", then Cancel
+  (selected) and Install and Restart.
 - **Restarting to Install**, "Don't turn off the Q2": `arrow-clockwise` bold on Accent Blue, and a 180 x 6 bar with
   round ends under the stack (top + 172), Track `#333333` filled in Accent Blue with the unpacking (the user's, 2026-11-16: progress fills are the accent).
 - **Results**, each a fill glyph on its circle: You're Up to Date (check, bold, Positive green, "VERSION (TAG) is
