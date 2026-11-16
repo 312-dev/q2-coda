@@ -83,7 +83,10 @@ i	<pid>	<sid>	<card path or empty>
   an app takes a `.catplay` present at its start as already answered. The 4 s wait runs from the
   write; an app that isn't listening within 15 s (`CATPLAY_START_MS`) has its list played by the
   firmware. Nothing is started with Local only, offline, or for an app whose binary is gone; the
-  app's own idle exit stands, and the next press starts it again.
+  app's own idle exit stands, and the next press starts it again. With Smart Wi-Fi's radio off
+  (after the app's idle exit nothing keeps it on) the rows still count as online: a press wakes
+  the radio and starts the app once the link is up, or plays the list offline when no link comes
+  within 15 s.
 
 - <a id="covers"></a>**Covers:** `/mnt/mmc/.<id>/covers/<album id>.jpg`, written whole (temp and rename) by the app
   whenever it has one: the cover of an album the catalogue has `s` rows of, a baseline JPEG of at

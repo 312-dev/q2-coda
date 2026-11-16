@@ -143,6 +143,38 @@ void caption_row(void *label, const unsigned *text) {
 #define STR_(x) #x
 #define STR(x) STR_(x)
 #define W(s) ((const unsigned *)L##s)
+/* Reset Settings (stock's reset_page; approved as 30 v2 on 2026-11-16): its three rows act at
+ * once behind a confirmation card (feedback.c asks[]), so none has a chevron; under the selected
+ * one a caption says what it takes, as stock's handlers do (feedback.c's asks[] note). Each row's
+ * button is named by its index; its list_into image goes, insensitive too, as stock's hit test
+ * skips only the insensitive. Runs on every layout; a row is captioned once. */
+void reset_rows(void *view) {
+    static const unsigned *const caps[] = {
+        W("Keeps your music, playlists and ratings"),
+        W("Erases playlists and Favorites, then rescans"),
+        W("Erases all settings and playlists; music stays"),
+    };
+    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
+        void *item = widget_get_child(view, i),
+             *b = widget_count_children(item) ? widget_get_child(item, 0) : (void *)0;
+        const char *name = b ? widget_get_prop_str(b, "name", "") : "";
+        if (!name || name[0] < '0' || name[0] > '2' || name[1]) continue;
+        void *label = (void *)0;
+        for (unsigned k = 0, m = widget_count_children(b); k < m; ++k) {
+            void *c = widget_get_child(b, k);
+            if (!tk_strcmp(widget_get_type(c), "hscroll_label") && !label)
+                label = c;
+            else if (!tk_strcmp(widget_get_prop_str(c, "image", ""), "list_into"))
+                widget_set_visible(c, 0, 0), widget_set_sensitive(c, 0);
+        }
+        if (label && cap_find(item) < 0) caption_row(label, caps[name[0] - '0']);
+    }
+}
+int reset_list(void *list) {
+    return list && theme()->set_switch &&
+           !tk_strcmp(widget_get_prop_str(window_of(list), "name", ""), "reset_page");
+}
+
 /* pod_rows' captions by POD_* (0: none), each one line at CAP_PX on OLED's settings bar, each from
  * what the code does: In-Vehicle Mode, stock's boot resume and its shutdown when the cable goes
  * (docs/internals.md#boot-resume-ipod); Standby Limit's alarm (system.c ringnav_standby); Charge

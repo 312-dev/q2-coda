@@ -479,6 +479,8 @@ void synclink_default(void);
  * texts */
 int about_list(void *list);
 void about_rows(void *view);
+int reset_list(void *list);
+void reset_rows(void *view);     /* settings_pages.c: Reset Settings' rows */
 int kv_text_w(void *label); /* an hscroll_label's text width in its row's face; -1 unmeasured */
 void kv_row(void *key, void *val, int kw, int vw, int right); /* settings_pages.c: kv_fit's split */
 void diag_about_row(void *view); /* diagnostics.c, --dev builds' Save Diagnostics */
@@ -857,6 +859,7 @@ int add_songs_mark(void *r);
 void add_songs_toggle(void *r);
 void add_songs_search(void); /* search_strip.c: the strip over the library's songs, picking */
 int playlist_page_hold(void *top);
+int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*pick)(void));
 int otg_count(void);
 void pv_paint(void *w, void *canvas);
 int playlists_transfer(void *ctx, void *event); /* Settings: Import (ctx 0) or Export Playlists */

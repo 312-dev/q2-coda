@@ -6725,6 +6725,7 @@ int ipod_list_layout(void *layout, void *view) {
     }
     if (wifi) wifi_rows_post(view);
     if (settings && about_list(list)) about_rows(view);
+    if (settings && reset_list(list)) reset_rows(view); /* settings_pages.c */
     return ret;
 }
 
@@ -6834,7 +6835,8 @@ enum {
     QA_OTG,  /* Add to On-The-Go (playlist_pages.c) */
     QA_PLAY, /* the inset modal's playlist: Play, Rename, Delete (playlists.c) */
     QA_RENAME,
-    QA_DELETE
+    QA_DELETE,
+    QA_REMOVE /* a payload page's own last row (qm_song_hold): Remove from Playlist */
 };
 
 static char *play_key(void) {
@@ -6885,8 +6887,21 @@ unsigned queue_hash(void *q) {
     return h;
 }
 
+/* A payload page's own songs held (qm_song_hold): the page, its list, its last row's words and
+ * what that row runs. */
+static struct {
+    void *page, *list;
+    const char *extra;
+    void (*pick)(void);
+} qm_held __attribute__((section(".scratch")));
+static int qm_held_on(void *page) {
+    return st.qm_kind == QM_COVERFLOW && page && page == qm_held.page;
+}
+
 static void *qm_list(void) {
     if (st.qm_kind == QM_PLAYING) return P(mcl_pdeqplaylist, 0);
+    void *top = window_manager_get_top_window(window_manager());
+    if (qm_held_on(top)) return qm_held.list;
     if (st.qm_kind == QM_PLAYLIST) return P(p_deque_playlist, 0);
     return st.qm_kind == QM_COVERFLOW ? page_tracks(window_manager_get_top_window(window_manager()))
                                       : P(p_deque_showlist, 0);
@@ -8323,6 +8338,8 @@ static int qm_run(const void *unused) {
         } else
             toast("Queue unchanged");
         if (add) deque_destroy(add);
+    } else if (r && a == QA_REMOVE) {
+        if (qm_held.pick) qm_held.pick(); /* its page asks first (playlist_pages.c) */
     } else if (r && a == QA_RENAME) {
         playlist_rename_open(I(r, REC_DISC), P(r, REC_TITLE));
     } else if (r && a == QA_DELETE) {
@@ -8521,7 +8538,8 @@ static int qm_open(const void *unused) {
     if (!own && (st.qm_kind < QM_COVERFLOW || st.qm_kind == QM_PLAYING)) acts[n++] = QA_PLAYLIST;
     /* a card app's song isn't in the Library: Go to only to the app's own page */
     int hidden = song && !addon_goes(P(r, REC_PATH));
-    if ((st.qm_kind == QM_SONG || st.qm_kind == QM_PLAYING) && !hidden &&
+    int held = qm_held_on(page); /* a playlist's page: a song's whole menu, then its Remove */
+    if ((st.qm_kind == QM_SONG || st.qm_kind == QM_PLAYING || held) && !hidden &&
         (cls & 0xfff0) != 0xff10 && qm_goes(r, 1))
         acts[n++] = QA_ALBUM;
     if ((song || cls == CLASS_ALBUMS) && !hidden && qm_goes(r, 0)) acts[n++] = QA_ARTIST;
@@ -8539,6 +8557,7 @@ static int qm_open(const void *unused) {
     if (st.qm_kind == QM_PLAYLIST && !list) acts[n++] = QA_MORE; /* its dots' page */
     /* the list's own New Playlist, which its covers hide */
     if (st.qm_kind == QM_PLAYLIST && !list && coverflow_playlist(page)) acts[n++] = QA_NEW_PLAYLIST;
+    if (held && qm_held.extra) acts[n++] = QA_REMOVE; /* destructive, last */
     static const char *const rows[] = { "Play Next",
                                         "Play Last",
                                         "Shuffle",
@@ -8562,7 +8581,8 @@ static int qm_open(const void *unused) {
                                         "Add to On-The-Go",
                                         "Play",
                                         "Rename",
-                                        "Delete" };
+                                        "Delete",
+                                        "Remove" };
     /* the inset modal's symbols (tools/art.py MENU_ICONS), by row */
     static const char *const icons[] = { "arrow-bend-down-right",
                                          "queue",
@@ -8587,6 +8607,7 @@ static int qm_open(const void *unused) {
                                          "sneaker-move",
                                          "play",
                                          "pencil-simple",
+                                         "trash",
                                          "trash" };
     char rated[32];
     /* stock sortselect row styles; the inset modal's rows */
@@ -8616,11 +8637,15 @@ static int qm_open(const void *unused) {
                              : acts[i] == QA_PLAYLIST && own ? "Add to Playlist\xe2\x80\xa6"
                              : acts[i] == QA_FAV && modal    ? "Add to Favorites"
                              : acts[i] == QA_UNFAV && modal  ? "Remove from Favorites"
+                             : acts[i] == QA_REMOVE          ? qm_held.extra
                                                              : rows[acts[i] - 1]);
+        if (acts[i] == QA_REMOVE) /* red, as the card's losing verb */
+            widget_set_prop_int(label, "style:normal:text_color", (int)RGBA(RGB_NEGATIVE));
         if (modal) {
             int kind = acts[i] - QA_ADV_SHUFFLE;
             const char *value = setting ? qm_choice_name(kind, playback_option(kind)) : 0;
-            if (acts[i] == QA_DELETE) modal_gap(view); /* destructive, last after a gap */
+            if (acts[i] == QA_DELETE || acts[i] == QA_REMOVE)
+                modal_gap(view); /* destructive, last after a gap */
             widget_restack(item, widget_count_children(view) - 1);
             modal_row(item, label, icons[acts[i] - 1], value, setting ? MM_SETTING : MM_ACTION);
         }
@@ -8652,11 +8677,33 @@ static int qm_list_hold(unsigned at, char *key, void *cover) {
     return 1;
 }
 
+/* A payload page's own song list held (a playlist's page, playlist_pages.c): song at of list, on
+ * page, gets the menu a Library song gets, and extra, when given, as its last row after a gap, in
+ * red, which runs pick. 1 when the menu is on its way. */
+int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*pick)(void)) {
+    char *key = play_key();
+    void *r = list && at < deque_size(list) ? deque_at(list, at) : (void *)0;
+    if (!page || !r || !key || playback_video(r) || st.qm_dialog || st.qm_timer ||
+        !(st.qm_timer = timer_add(qm_open, (void *)0, 0)))
+        return 0;
+    st.qm_choice = 0;
+    qm_held.page = page, qm_held.list = list, qm_held.extra = extra, qm_held.pick = pick;
+    st.qm_kind = QM_COVERFLOW; /* a song of a list on the top page, as Cover Flow's tracks */
+    st.qm_cls = 0xf001;
+    st.qm_idx = at;
+    st.qm_rows = deque_size(list);
+    st.qm_hash = rec_hash(r);
+    st.qm_press = *(unsigned long long *)(key + INPUT_KEY_TIME);
+    drop_input();
+    return 1;
+}
+
 /* The hold: the same gates and row as a centre press, over the stock showlist or Coverflow's
  * own tracks (row count checked), or the album at the centre of Coverflow's covers. Everything
  * else stays stock. */
 static int qm_hold(void) {
     st.qm_choice = 0;
+    qm_held.page = (void *)0; /* Cover Flow's own tracks, not a page qm_song_hold held */
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
     const char *name = top ? widget_get_prop_str(top, "name", "") : "";
     int playing = !tk_strcmp(name, "playing_page");

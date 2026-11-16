@@ -368,12 +368,11 @@ void storage_paint(void *w, void *canvas) {
         st_text(canvas, a, x0, x1 - x0, ST_TEXT_DY, 2, ROLE_META, ST_HEAD_PX, RGB_SECONDARY);
         st_bar(canvas, x0, x1, ST_BAR_DY);
     } else if (w == so.foot) {
-        st_foot(canvas, "Your Music is never changed by Sync or Radio.",
+        st_foot(canvas, "Your Music is never changed by Sync.",
                 "Downloads stay under the limit you set.");
     } else if (w == so.dl_foot) {
         if (so.n)
-            st_foot(canvas, "Hold Play/Pause on an item to remove it.",
-                    "Auto items refill on the next Sync.");
+            st_foot(canvas, "Hold Play/Pause on an item to remove it.", 0);
         else
             st_foot(canvas, "Nothing downloaded yet.", 0);
     } else if (parent && (parent == so.view || parent == so.dl_view)) {

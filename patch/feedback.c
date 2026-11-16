@@ -788,10 +788,16 @@ static const struct {
     { "Shut Down?", "Shut Down?", "Shut Down", 0 },
     { "Restart?", "Restart?", "Restart", 0 }, /* Power's Restart (power_rows.c) */
     { "Restart to apply?", "Restart to Apply?", "Restart", 0 },
-    { "Reset Settings Only", "Reset Settings?", "Reset",
-      "Music, playlists and ratings\nare kept." },
-    { "Reset Database", "Reset the Database?", "Reset", 0 },
-    { "Full Factory Reset", "Full Factory Reset?", "Reset", 0 },
+    /* what each really takes (stock's reset_page row click: init_usersetting deletes config.ini,
+     * wpa_supplicant.conf, bluetooth, userequalizer, memoryfile and the histories; init_database
+     * deletes database.db, its playlists and My Fav with it, then the Q2 restarts to scan; the
+     * factory reset runs both; none touches the card's music or the payload's ratings) */
+    { "Reset Settings Only", "Reset Settings?", "Reset Settings",
+      "Forgets Wi-Fi, Bluetooth, EQ;\nmusic and playlists stay." },
+    { "Reset Database", "Reset the Database?", "Reset Database",
+      "Erases playlists, Favorites;\nthen restarts and rescans." },
+    { "Full Factory Reset", "Full Factory Reset?", "Reset All",
+      "Erases settings, playlists\nand Favorites. Music stays." },
     { "Delete Song?", "Delete This Song?", "Delete", 0 },
     { "Delete File?", "Delete This File?", "Delete", 0 },
     { "Scan music?", "Scan Music?", "Scan", 0 },

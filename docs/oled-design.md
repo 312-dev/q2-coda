@@ -490,6 +490,13 @@ has no place for keeps a place of its own:
   cycle, as the app picks the order. A tap on radio opens the playing app's page, where a radio
   starts and stops; with no app playing it does nothing. The queue button, and a swipe up on the
   art's page, open [Up Next](#up-next); the hold menu's View Queue opens it too.
+- **A state button's focus and press** (approved as 22 v4 on 2026-11-16, `audit2/proposed/v2/22v4-L5-np-state-row.png`):
+  the Centre cycle's wheel outlines the control it sets in today's 2 px Text Primary stroke, 9 px corners, no fill;
+  a tap puts a `#2C2C2E` square, 9 px corners, under the button and fades it out over 250 ms; the wheel never
+  shows the square. Both fit what is drawn: the glyph's ink alone with no dot showing (Up Next, radio, and
+  shuffle or repeat while off), the glyph and its on dot together while it shows, padded 6 px to the outline's
+  inner edge (8 px to its outer) or 8 px to the square's edge on every side; an outline grows by the dot when its
+  control turns on. The radio's pill is its own press.
 - **The volume** and the scrub draw on the bar where it is. The volume (the "A: iPod speakers"
   mock-up) keeps the bar's rows, inset to x 48 to 323, white on the track, with Phosphor's
   `speaker-simple-none` and `speaker-simple-high` (fill, 16 px, Text Secondary) centred at x 32
@@ -576,11 +583,18 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   (`feedback.c` `feedback_confirm_dress`): its prompt named as the design writes it ("Forget This Network?" for
   stock's "Delete Record?", "Use Line Out?" for its "Line Out sets max volume, continue?"), **Cancel** first, then the
   verb; it opens on Cancel, or on the verb for a question whose mistake costs least (Scan, Import, Export, Reconnect,
-  Turn On). The verb says what it does ("Shut Down", "Reset", "Delete"), never "OK"; a verb that loses something
+  Turn On). The verb says what it does ("Shut Down", "Reset Settings", "Delete"), never "OK"; a verb that loses something
   (Delete, Reset, Forget, Unpair, Remove, Clear) red after the gap. Delete Song's "Also delete source file" is the
   card's switch row. What the answer leaves alone, or why it asks (a caller's `feedback_confirm_foot`: Streaming
-  Songs' "Show streaming songs?" and "Hide streaming songs?"), is the body: Reset Settings Only asks "Reset
-  Settings?" over "Music, playlists and ratings are kept."
+  Songs' "Show streaming songs?" and "Hide streaming songs?"), is the body.
+- **Reset Settings** (approved as 30 v2 on 2026-11-16): its three rows have no chevron, and under the selected
+  one a caption says what it takes; Center asks on the card, each body what stock's handler really does
+  (`feedback.c` `asks[]`): Reset Settings Only, "Reset Settings?", "Forgets Wi-Fi, Bluetooth, EQ; music and
+  playlists stay." (it deletes `config.ini`, the saved networks, the pairings, the EQ presets and the resume
+  points); Reset Database, "Reset the Database?", "Erases playlists, Favorites; then restarts and rescans."
+  (`database.db`); Full Factory Reset, "Erases settings, playlists and Favorites. Music stays." (both). Their
+  verbs are Reset Settings, Reset Database and Reset All, red. Ratings (`ringnav-ratings`) and the card's music
+  survive all three.
 - A toast is one line of 16 px Text Primary on a `#1C1C1E` pill, 12 px corners, 32 px tall,
   as wide as its text and 16 px each side, centred on y 252 (y 236 to 268), above the bottom
   glass curve. It is the only raised surface in the theme. The page stays in sight round it,
@@ -863,13 +877,14 @@ page, On-The-Go) and `patch/add_songs.c`.
 - **A playlist's page**: Shuffle (Songs' Shuffle row: the accent's glyph, 18 px, at x 26 and the
   label at x 54), Add Songs (`plus-circle`) and its songs, each one line, the artist on the right
   column in 15 px Text Tertiary; no Shuffle row over nothing. Centre plays the list from the song;
-  a hold offers **Remove from Playlist** alone. The songs are in the playlist's own order.
+  a hold opens the song's whole hold menu (below), then **Remove from Playlist** last, after a gap and red, which
+  asks on the confirmation card first (the user's ruling, 2026-11-16). The songs are in the playlist's own order.
 - **On-The-Go** (Settings > Playback > Library > On-The-Go, on by default; off hides its row and Add to On-The-Go):
   Shuffle, Add Songs, Save as Playlist (`arrow-down`), Clear (`x`), then its songs. Save as Playlist
   makes "On-The-Go N", the first number free, with its songs, empties On-The-Go and lands on the new
   playlist in the list; Clear asks first, Cancel first. Empty, it is Add Songs alone with the note
-  "Or hold Play/Pause on any song", hint "and choose Add to On-The-Go.". A hold on a song offers
-  **Remove from On-The-Go**. It lasts across a restart.
+  "Or hold Play/Pause on any song", hint "and choose Add to On-The-Go.". A hold on a song opens its
+  hold menu with **Remove from On-The-Go** last. It lasts across a restart.
 - **A song's hold menu**: Play Next, Play Last (to the end of Up Next's Playing Next), Add to
   On-The-Go (while On-The-Go is on), Add to Playlist…, Favorite (Remove from Favorites when it is one), then Go to Album, Go to Artist and Go to
   Folder. Add to Playlist… is a picker in the same panel: New Playlist (`plus`) first, which makes
@@ -1115,7 +1130,7 @@ pattern.
 | About                               | [Label/value rows](#labelvalue-rows) | Model, Firmware (V1.36), the product's version under its name, Capacity and Available with their unit ("779.72 GB"), Wi-Fi Address, IP Address ("Not connected" with no network); the wheel walks the rows and nothing opens; values in Text Secondary |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
 | Storage                             | Storage bar                 | [Progress and sliders](#progress-and-sliders): the bar, its legend rows (Downloads and Stream Cache open pages) and two footers |
-| Storage > Downloads                 | Key/value rows              | Limit (its picker the inset modal's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centred on x 33, its name at x 52, size and chevron; two footers |
+| Storage > Downloads                 | Key/value rows              | Limit (its picker the inset modal's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centred on x 33, its name at x 52, size and chevron; a footer (the mock's second line, "Auto items refill on the next Sync.", waits for the app to keep items on its own) |
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             | Its [tabs](#tabs), then rows: the switch, Presets, Reset                                                   |
 | Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right                      |
@@ -1203,3 +1218,6 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 Still to build:
 
 - The confirmation for Repeat and Now Playing's mode changes.
+- The Songs legend, "Plain: yours · arrow: downloaded · cloud: streams" as a footer under a song list (`mock_radio.py`
+  `songs_marks`): a stock table's rows are pooled and its scroll end has no room for a footer; the manual explains the
+  marks meanwhile.
