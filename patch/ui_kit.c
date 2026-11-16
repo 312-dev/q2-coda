@@ -99,3 +99,23 @@ int kv_fit(int span, int label_w, int value_w, int *box) {
 }
 
 int ui_focus_shown(void) { return !st.touch_mode; }
+
+int ui_button(void *canvas, int cx, int cy, const char *label, int primary, int focused) {
+    unsigned raw = ui_ink_raw(1);
+    int w = ui_measure(canvas, label, "inter-medium", UI_BTN_PX) + 2 * UI_BTN_PAD;
+    rect_t r = { cx - w / 2, cy - UI_BTN_H / 2, w, UI_BTN_H };
+    if (focused) { /* the ring: Text Primary, UI_BTN_GAP of the page between it and the button */
+        int out = UI_BTN_GAP + UI_BTN_RING;
+        rect_t ring = { r.x - out, r.y - out, r.w + 2 * out, r.h + 2 * out },
+               gap = { r.x - UI_BTN_GAP, r.y - UI_BTN_GAP, r.w + 2 * UI_BTN_GAP,
+                       r.h + 2 * UI_BTN_GAP };
+        fill_box(canvas, &ring, RGBA(tok(TOK_PRIMARY)), (unsigned)ring.h / 2);
+        fill_box(canvas, &gap, RGBA(tok(TOK_CANVAS)), (unsigned)gap.h / 2);
+    }
+    fill_box(canvas, &r, RGBA(primary ? scheme()->tones[0] & 0xffffffu : tok(TOK_RAISED_2)),
+             UI_BTN_H / 2);
+    ui_line(canvas, label, r.x, r.w, cy, 1, "inter-medium", UI_BTN_PX,
+            primary ? tok(TOK_ON_ACCENT) : tok(TOK_PRIMARY));
+    ui_ink_raw(raw);
+    return w;
+}
