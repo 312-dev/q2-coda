@@ -224,6 +224,7 @@ static void scan_ring(void *canvas, int cy, int pct, unsigned accent) {
  *   scan measured them against the library before it), Done (the accent);
  * - stopped by Stop: the check circle, "Scan Stopped", the songs found;
  * - /mnt/data full: the memory chip, "Not Enough Space", "Some songs weren't added".
+ * - over with the card gone: the memory chip, "SD Card Removed", "Put it back and scan again".
  *
  * Stock shows its ending's text three polls, then sleeps 2 s on the UI thread and quits the
  * dialog: the ending holds that long and closes by itself, Done or not. */
@@ -238,7 +239,10 @@ void msg_paint(void *w, void *canvas) {
     if (bar) widget_paint(bar, canvas); /* the status row the dialog covers, its title msg_title */
     msg_sync();
     st.raw_ink = 1;
-    const char *glyph = state == SCAN_FULL ? "card" : "done";
+    /* a finish with the card gone (stock's /tmp/mmc_add, docs/oled-design.md#update-library): stock
+     * ends a scan the card left as a finish, its library cut to the songs it had read */
+    int gone = state == SCAN_FINISHED && access("/tmp/mmc_add", 0);
+    const char *glyph = state == SCAN_FULL || gone ? "card" : "done";
     scan_num(n, sizeof n, cp.msg_count);
     *line = 0;
     if (state == SCAN_RUNNING && cp.msg_pct >= 0) {
@@ -257,13 +261,16 @@ void msg_paint(void *w, void *canvas) {
         if (state == SCAN_FULL)
             tk_snprintf(title, sizeof title, "Not Enough Space"),
                 tk_snprintf(line, sizeof line, "Some songs weren't added");
+        else if (gone)
+            tk_snprintf(title, sizeof title, "SD Card Removed"),
+                tk_snprintf(line, sizeof line, "Put it back and scan again");
         else if (state == SCAN_STOPPED)
             tk_snprintf(title, sizeof title, "Scan Stopped"),
                 tk_snprintf(line, sizeof line, "%s song%s found", n, cp.msg_count == 1 ? "" : "s");
         else if (*(volatile char *)SCAN_WHOLE == 1 && cp.msg_total > 0 && added > 0)
-            tk_snprintf(title, sizeof title, "Library Updated"),
-                tk_snprintf(line, sizeof line, "%s song%s, %d new", n, cp.msg_count == 1 ? "" : "s",
-                            added);
+            scan_num(m, sizeof m, added), tk_snprintf(title, sizeof title, "Library Updated"),
+                tk_snprintf(line, sizeof line, "%s song%s, %s new", n, cp.msg_count == 1 ? "" : "s",
+                            m);
         else
             tk_snprintf(title, sizeof title, "Library Updated"),
                 tk_snprintf(line, sizeof line, "%s song%s", n, cp.msg_count == 1 ? "" : "s");

@@ -1069,13 +1069,14 @@ page paints it first, as Control Center does (`msg_title`).
 | Stopped (Stop) | as Done | "Scan Stopped" | "120 songs found" | Done |
 | `/mnt/data` full | Phosphor `memory`, regular, Text Secondary | "Not Enough Space" | "Some songs weren't added" | Done |
 
+| The card pulled during the scan | as `/mnt/data` full | "SD Card Removed" | "Put it back and scan again" | Done |
 - No frame draws the focus ring until the wheel turns ([focus ring](#focus-ring)); Centre presses the one button.
 - Stock holds the ending about 2.6 s (three polls, then a 2 s sleep on the UI thread) and closes the dialog itself,
   so Done shows what happened rather than waiting for a press.
-- ponytail: the mock-up's "SD Card Removed" ending is not built. Stock's scan has no card-removed state (its only
-  endings are the finish and `msg_no_storage`, the database partition full), and the emulator cannot pull a card
-  mid-scan to show what the scan does then. It needs a device run: pull the card during a scan and read the
-  dialog's text and the database after.
+- The card-removed ending's line differs from the mock-up's "Your library is unchanged": with the card pulled
+  mid-scan (emulator, 2026-11-16) stock ends the scan as a finish, toasts its own "SD Card Removed", and keeps
+  only the songs it had read (3,800 became 3,000), so the library is not unchanged. The page tells it from a
+  finish by stock's `/tmp/mmc_add`, gone once the card is. The wording is the default pending the user's OK.
 
 ### Plug-in screen
 
