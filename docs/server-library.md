@@ -219,7 +219,7 @@ until the next one.
 | Setting: `[Q2POD] LIBRARYSOURCE`, 0 Local Only (default) or 1 Local + Server, the Streaming Songs switch on Settings > Playback > Library; apps read it from `/tmp/q2-addon.library` (caps word `libsource`) | `navigation.c` (`pod_keys` and the rows' tables beside it), `library_settings.c` | yes |
 | Ratings: `ratings.out` appended for every app with `ratings=1`; `ratings.in` renamed to `ratings.in.taking`, applied, then deleted. Hearts given on Now Playing while a server song plays from its Stream Cache copy are its server row's (kept under the row's key, the line with the row's sid, the copy's My Fav counted as the row's), and the Ratings lists read the server's songs beside every card song (`all_songs`'s `LIBRARY_ALL`) | `catalogue.c` (`catalogue_rated`, `catalogue_song_key`), `ratings.c` (`rate_song_key`, `rate_all`, `rated_open`), `navigation.c` (`library_query`) | yes |
 
-The server library adds 43,600 bytes to the payload: `patch_bytes` is 864,504 of the 1 MB in this branch's `--dev` build against 820,904 at the commit it branched from, `catalogue.o` being 39,870 bytes of text and 1,236 of data (`llvm-size`). All catalogue data lives on the heap or the card.
+The server library adds 43,600 bytes to the payload: `patch_bytes` is 864,504 of the then 1 MB in this branch's `--dev` build against 820,904 at the commit it branched from, `catalogue.o` being 39,870 bytes of text and 1,236 of data (`llvm-size`). All catalogue data lives on the heap or the card.
 
 ### Greyed rows
 

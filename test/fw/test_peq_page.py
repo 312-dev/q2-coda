@@ -989,6 +989,7 @@ def test_saving_offers_ten_slots_and_asks_before_replacing(fw):
     assert f'{FOLDER}/Manual 03.txt' in p.card.files and p.said == ['Preset saved; active EQ unchanged'] and p.title() == 'Presets'
     p.click('Save as Manual 03')
     assert p.captions() == ['Replace existing preset? Confirm', 'Cancel replacement'] and p.ui.screen == CONFIRM
+    assert p.props[(p.ui.view, '_ringnav_index')] == 1  # opens on Cancel: a Centre on arrival replaces nothing
     p.click('Cancel replacement')
     assert p.ui.screen == SAVES
 
@@ -1008,6 +1009,7 @@ def test_deleting_asks_then_deletes(fw):
     p.click('Delete a preset')
     p.click('a.txt')
     assert p.captions() == ['Delete a.txt? Confirm', 'Cancel']
+    assert p.props[(p.ui.view, '_ringnav_index')] == 1  # opens on Cancel: a Centre on arrival deletes nothing
     rh = fw.fn('page_h', C.c_int, C.c_int)(48)
     shrunk = [h for (w, k), h in p.props.items() if k == 'resized' and w in p.alive]
     assert shrunk == [2 * rh, 2 * rh]  # the list and its view end at the last row: no white below

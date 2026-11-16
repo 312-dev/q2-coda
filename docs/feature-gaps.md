@@ -21,7 +21,7 @@ Q2 Pod covers almost all of the iPod classic's music side: Cover Flow, Shuffle S
 | 9   | [Lyrics timing offset](#9-lyrics-timing-offset)                                             | S      | low-medium | UI payload (under 1 KB)                        |
 | 10  | [AirPlay 2 receiver](#10-airplay-2-receiver)                                                | L      | high       | card app                                       |
 
-Items 1, 3 and 9 together come to under 3 KB of payload, which the 1 MB below `SCRATCH` ([inefficiencies.md entry 1](inefficiencies.md#1-the-ui-payloads-room-resolved)) holds.
+Items 1, 3 and 9 together come to under 3 KB of payload, which the 1.5 MB below `SCRATCH` ([inefficiencies.md entry 1](inefficiencies.md#1-the-ui-payloads-room-resolved)) holds.
 
 ### Quick wins (S effort, medium or high value)
 

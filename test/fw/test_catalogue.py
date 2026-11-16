@@ -613,7 +613,7 @@ def test_a_playlist_synced_as_an_m3u_is_shown_once_as_the_catalogue_s(rig):
     assert playlists(rig)[0] == [(3, 'Road Trip'), (5, 'Mine')]
 
 
-STOCK_SLOT = 0xbff000  # stock's shared connection's global: a stock address, so catalogue_attach keeps it
+STOCK_SLOT = 0xa56000  # stock's shared connection's global: in demo's image, below the payload, so catalogue_attach keeps it
 
 
 def test_the_library_s_queries_read_the_server_s_songs_only_with_local_and_server(rig, fw):

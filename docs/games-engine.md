@@ -147,7 +147,7 @@ To see it: a `--dev` build, `ENGINEDEMO=1` under `[Q2POD]` in `/mnt/data/config.
 
 ## Budgets
 
-**The payload** may hold 1,048,576 bytes of code and constants. With the engine and its demo, `patch_bytes` is 982,392 (build `--dev --new-player`), so 66,184 bytes are free. The engine is 5.9 KB of code and constants (`engine.o`), the demo 1.7 KB.
+**The payload** may hold 1,572,864 bytes of code and constants (1,048,576 when this was measured). With the engine and its demo, `patch_bytes` is 982,392 (build `--dev --new-player`), so 66,184 bytes are free. The engine is 5.9 KB of code and constants (`engine.o`), the demo 1.7 KB.
 
 | Game (see [Games](#games)) | Payload bytes | Heap (`size`) | A frame, worst (instructions) | Whole sheet |
 | -------------------------- | ------------- | ------------- | ----------------------------- | ----------- |

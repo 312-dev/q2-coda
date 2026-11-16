@@ -29,7 +29,7 @@ def dev_tag(number):
     for _ in range(3): n, d = divmod(n, 36); digits = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'[d] + digits
     return 'V' + digits + 'i'
 BASE = 0xb00000
-SCRATCH = 0xc00000  # 1 MB of payload text below it; demo's heap starts after the scratch state
+SCRATCH = 0xc80000  # 1.5 MB of payload text below it; demo's heap starts after the scratch state
 RING_STEP = 48
 HOOKS = {
     # USB charging is inhibited before insertion and guarded through enumeration/disconnect.
@@ -849,6 +849,7 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('msg_addplaylistsuccess', 'Added To Playlist', 'Added to Playlist'),
     ('msg_addfavsuccess', 'Added To Fav', 'Added to Favorites'), ('msg_favsuccess', 'Added To Fav', 'Added to Favorites'),
     ('msg_namenull', "The name can't be empty", "Name can't be empty"),
+    ('msg_lowarn', 'Line Out sets max volume,continue?', 'Line Out sets max volume, continue?'),
     ('scan_now', 'Scan music now', 'Scan Music Now'), ('scan_spec', 'Scan specified folders', 'Scan Specified Folders'),
     # the card is an SD card in every label (docs/oled-design.md Copy): stock says TF
     ('update_tf', 'TF card update', 'SD Card Update'), ('msg_nottf', 'No TF Card Found', 'No SD Card Found'),
