@@ -1,74 +1,125 @@
 # bluetoothd: Shanling's changes to BlueZ 5.66
 
 Stock's `/usr/bin/bluetoothd` is BlueZ 5.66 with Shanling's changes, for which no source is published. A
-bluetoothd rebuilt from upstream 5.66 has to carry them, or receiver mode, codec priority, the track
-information a car shows and SyncLink stop working. This is what the stock binary does differently,
-read from its disassembly (`llvm-objdump` of V1.36's bluetoothd; BlueZ's debug strings name the file and
-function around each site). Addresses are the stock binary's.
+bluetoothd rebuilt from upstream 5.66 (`tools/thirdparty.py` `bluez`) has to carry them, or receiver
+mode, codec priority, the track information a car shows and SyncLink stop working. This is what the
+stock binary does differently, read from its disassembly (`llvm-objdump` of V1.36's bluetoothd); the
+debug strings BlueZ keeps in the binary name the file and function around each change, and comparing
+them with an upstream 5.66 build's finds every function Shanling added to or logged differently.
+Addresses are the stock binary's.
 
 ## The link to libbtctl
 
-bluetoothd links Shanling's `libbtctl.so` (its first `DT_NEEDED` after ncurses) and imports from it two
-functions and four data objects, through 18 sites in all:
+bluetoothd links Shanling's `libbtctl.so` and imports from it two functions and five data objects:
 
-| Import | Sites | Where (upstream function) | What it does |
-| --- | --- | --- | --- |
-| `bluez_main()` | 1 | `src/main.c` `main` (`0xf228`), after the config is read, before the main loop | Starts the `shanling.bluez` D-Bus service inside bluetoothd: `NotifyChanged` (demo's `btctl_notify_track_changed` and `btctl_notify_playback_status_changed`), `SetSynclink`, `GetVolumePath`; it writes the four globals below |
-| `bluez_play_info_signal(event, data, len)` | 4 | four small wrappers at `0xa5cf0` to `0xa5efc`, after `src/settings.c` | Emits `PlayInfoChange` on `shanling.bluez`, which demo's libbtctl turns into its A2DP callback (`btrecvA2dpFunc`): receiver mode |
-| `g_track_meta` | 4 | `profiles/audio/avrcp.c`: GetElementAttributes (`0x3bb7c`, 3) and GetItemAttributes (`0x3bf74`, 1) | The playing track as demo last sent it |
-| `g_play_status` | 2 | `avrcp.c`: GetPlayStatus (`0x37324`) and the PLAYBACK_STATUS_CHANGED notification (`0x38c14`) | Its play status byte |
-| `g_high_priority_lcodec` | 1 | `profiles/audio/a2dp.c` `a2dp_find_eps` (`0x17bd0`) | The codec the Quality page asks for first |
-| `g_synclink_mode` | 6 | `plugins/policy.c` `service_cb` (1), `avdtp.c` `session_cb` (2), `avctp.c` `avctp_confirm_cb` (2), `avrcp.c` target and controller setup (`0x3cfc8`, 1) | SyncLink on: no reconnects, no A2DP or AVRCP to a phone while Shanling's app holds the link |
+| Import | Kind | What it is |
+| --- | --- | --- |
+| `bluez_main()` | function | Starts the `shanling.bluez` D-Bus service inside bluetoothd: `NotifyChanged`, `SetSynclink`, `GetVolumePath`, `PlayInfoChange` |
+| `bluez_play_info_signal(event, data, len)` | function | Emits `PlayInfoChange` on `shanling.bluez`; demo's libbtctl hands it to the A2DP callback (`btrecvA2dpFunc`) |
+| `g_track_meta` | pointer, 4 bytes | The playing track as demo last sent it (below) |
+| `g_play_status` | 4 bytes | Its play status |
+| `g_avrcp_event_fun` | function pointer | Set by bluetoothd to `avrcp_hciplayer_event`; libbtctl calls it to send AVRCP notifications |
+| `g_notify_mutex` | `pthread_mutex_t`, 24 bytes | Guards the two above |
+| `g_high_priority_lcodec` | 1 byte | The codec the Quality page asks for first |
+| `g_synclink_mode` | 1 byte | SyncLink on |
 
-## Each site
+## Track information, from demo to a controller
 
-**`main` (`bluez_main`).** Called once, with no arguments, between reading `main.conf` and entering the
-main loop. Everything `shanling.bluez` does is libbtctl's own code.
+demo's `on_wm_timer_dialog` calls `sendBtHeadsetPlayInfo` (`0x4fae8c` in demo) on a track change and
+`sendBtHeadsetPlayStatus` (`0x4fae10`) on play or pause; libbtctl's `btctl_notify_*` send them as
+`NotifyChanged(type, bytes)` to the service `bluez_main` runs in bluetoothd. Its handler (`0x298e4` in
+libbtctl):
 
-**Receiver mode (`bluez_play_info_signal`).** Four wrappers, each `bluez_play_info_signal(event, buf,
-len)` then `return 0`:
+- type `0x107`: `g_play_status` = the first byte, under `g_notify_mutex`; then
+  `g_avrcp_event_fun(1, &status)`, AVRCP's PLAYBACK_STATUS_CHANGED.
+- type `0x108`: a 16-byte header (track number, track count, playing time in ms, attribute count, each
+  32 bits) and attributes `{u16 id, u16 len, bytes}` with ids 1 title, 2 artist, 3 album, 6 genre,
+  become a record: `+0` track number, `+4` track count, `+8` playing time, `+0xc` title, `+0x10` artist,
+  `+0x14` album, `+0x18` genre. It replaces `g_track_meta` under the mutex (freeing the old one), then
+  `g_avrcp_event_fun(2, &uid)`, TRACK_CHANGED, the UID 0 with a track and all ones without.
 
-- `0xa5cf0`: event `0x103`, its argument passed through, 12 bytes. Called from `avdtp.c`'s command
-  parser inside `session_cb` when a phone's START (`0x07`) arrives, with `{-1, -1, 0x11}`, and on its
-  SUSPEND (`0x09`), with `{-1, -1, 0x12}`; and from `avrcp.c` (`0x3e5f0`, the controller's side) with
-  `{-1, x, -1}`. demo's `btrecvA2dpFunc` opens the receiver page on `0x11` and closes it on `0x12`.
-- `0xa5d2c`: called from `avrcp_parse_attribute_list` (`0x3b190`, the controller's side) with the
-  phone's track attributes (title, artist, album, genre, track number, duration) as it read them; it
-  packs them into a buffer and emits them, which `btrecv_info_labels_update` shows.
-- `0xa5ebc` (event `0x106`) and `0xa5efc` (event `0x105`), 4 bytes each: no caller in the binary.
+In bluetoothd (`profiles/audio/avrcp.c`):
 
-**Track information (`g_track_meta`, `g_play_status`).** demo's `on_wm_timer_dialog` calls
-`sendBtHeadsetPlayInfo` (`0x4fae8c` in demo) on a track change and `sendBtHeadsetPlayStatus`
-(`0x4fae10`) on play or pause; they fill a record and call libbtctl's `btctl_notify_*`, which reach
-`NotifyChanged` in bluetoothd. The record: track number (`+0`), track count (`+4`), playing time in
-ms (`+8`), then pointers to title (`+0xc`), artist (`+0x10`), album (`+0x14`) and genre (`+0x18`).
-Shanling's GetElementAttributes (`0x3bb7c`) ignores the attributes asked for and the registered
-player: under `g_notify_mutex` it answers all seven (title, artist, album, track number, number of
-tracks, genre, playing time) from `g_track_meta`, numbers formatted `%d`, character set UTF-8 (`0x6a`),
-or an empty answer while it is null. GetItemAttributes (`0x3bf74`) answers the same way. GetPlayStatus
-(`0x37324`) takes its status byte from `g_play_status`, and the PLAYBACK_STATUS_CHANGED notification
-(`0x38c14`) too.
+- `avrcp_init` (`0x388c0`) sets `g_avrcp_event_fun` to `avrcp_hciplayer_event` when it is still null.
+- `avrcp_hciplayer_event(id, data)` (`0x38e2c`) sends a CHANGED vendor-dependent RegisterNotification
+  response (company `0x001958`, PDU `0x31`) for event 1 (status byte from `data[0]`) or 2 (UID from
+  `data[0..7]`) on the one session in `g_hci_session`, when it registered for that event, then clears the
+  registration, as upstream's `avrcp_player_event` does per session. Other ids log "Unknown event".
+- `g_hci_session`, a global of Shanling's, is the target session last set up (`session_init_control`,
+  `0x3d388` and `0x3d4b8`), set to null by `adapter.c`'s `dev_disconnected` (`0x79e50`) at any device's
+  disconnection.
+- GetPlayStatus (`0x37324`): the position and duration from the registered player as upstream, a
+  duration of 0 reported as `0xffffffff`, and with no player duration `0xffffffff` and position 0; the
+  status byte from `g_play_status`.
+- RegisterNotification (`0x38c14`): as upstream, but PLAYBACK_STATUS_CHANGED's interim status comes from
+  `g_play_status` and TRACK_CHANGED's interim UID is always 0.
+- The control channel's GetElementAttributes (`0x39454`) is upstream's: it reads a registered player,
+  and stock has none, so it answers nothing useful.
+- The browsing channel: Shanling's handler table (`0x13345c`) has GetFolderItems (`0x3c310`: the media
+  player list only, one entry, from the default features; other scopes refused with INVALID_SCOPE),
+  GetItemAttributes (`0x3bf74`) and a PDU `0x20` (`0x3bb7c`), both answering from `g_track_meta`: all
+  seven attributes (title, artist, album, track number, number of tracks, genre, playing time; numbers
+  as `%d`, UTF-8) whatever was asked, or a title of one space with no track; and GetTotalNumberOfItems
+  as upstream.
 
-**Codec priority (`g_high_priority_lcodec`).** Shanling's `a2dp_find_eps` replaces upstream's "last
-used first" with an order of codec ids, `0xffffff` (none), `0x12d` (LDAC's vendor id), `0xd7` (aptX
-HD), `0x4f` (aptX), `2` (AAC), and moves the one `g_high_priority_lcodec` names to the front (`0x12`,
-`0x11` and `2` among the values it maps), logged as `modify_priority` and `codec_list[%d]`. demo sets
-it through `btctl_set_codec_priority` from the Quality page.
+## Receiver mode (a phone playing to the Q2)
 
-**SyncLink (`g_synclink_mode`).** Read as a byte at each site:
+`bluez_play_info_signal` is called through four small wrappers after `src/settings.c` (`0xa5cf0` to
+`0xa5efc`):
+
+- `0xa5cf0(int v[3])`: event `0x103`, 12 bytes `{duration, position, status}`. `avdtp.c`'s command parser
+  sends `{-1, -1, 0x11}` when a phone's START arrives and `{-1, -1, 0x12}` on its SUSPEND, which open and
+  close demo's receiver page; `avrcp.c`'s controller side sends the phone's play status
+  (`avrcp_get_play_status_rsp`, `0x38124`, after upstream's `media_player_set_*`) and `{-1, position, -1}`
+  on a PLAYBACK_POS_CHANGED notification (`0x3e5f0`).
+- `0xa5d2c(recv_meta *)`: event `0x104`, the phone's track: `{u32 duration, u32 count}` then entries
+  `{u16 id, u16 len, text and its NUL}` for 1 title, 2 artist, 3 album. `recv_meta` is a static record
+  (`{int duration; GString *title, *artist, *album}`) `avrcp_init` creates and `avrcp_parse_attribute_list`
+  (`0x3b190`, the controller side) fills from the phone's attributes as well as upstream's, sending it
+  when one changed (it also cuts a text at a `C0 80` pair, the modified-UTF-8 NUL some phones send).
+- `0xa5ebc` (event `0x106`) and `0xa5efc` (event `0x105`), 4 bytes each: no caller.
+
+## Codec priority
+
+`a2dp.c`'s `a2dp_find_eps` (`0x17bd0`) lists the remote endpoints in a fixed codec order in place of
+upstream's "last used first": the codec `g_high_priority_lcodec` names first (`0x13` LDAC, `0x12` aptX HD,
+`0x11` aptX, `2` AAC, anything else none), then LDAC (vendor `0x12d`), aptX HD (`0xd7`), aptX (`0x4f`),
+AAC (`2`) and SBC (`0`), each once; endpoints of any other codec are left out. `codec_compare`
+(`0x180dc`) matches a standard codec by its id and a vendor codec (`0xff`) by the vendor id its local
+endpoint's capabilities carry. demo sets the byte through `btctl_set_codec_priority` from the Quality page.
+
+`endpoint_setconf_ind` (`0x1d954`) also registers the remote endpoint a headset configured itself
+(`avdtp_register_remote_sep` and `register_remote_sep`, logged "AAA Unable to register Endpoint" and "AAA
+avdtp_unregister_remote_sep" on failure) when the channel already knows other remote endpoints, where
+upstream only starts a reverse discovery when it knows none.
+
+## SyncLink
+
+`g_synclink_mode` is read at six places:
 
 - `policy.c` `service_cb` (`0x13e80`): Shanling's `struct reconnect_data` has one more bool after
-  `reconnect` (offset 5) holding what `reconnect_match` said; `reconnect` becomes `false` while
-  SyncLink is on, else that value.
-- `avdtp.c` `session_cb` (`0x24764`, `0x24c70`): A2DP signalling handled differently while SyncLink
-  is on (to be read in full when porting).
-- `avctp.c` `avctp_confirm_cb` (`0x33984`, `0x33ae8`): an incoming AVCTP connection is refused while
-  SyncLink is on ("AVCTP: SyncLink Mode | disconnect connect from %s").
-- `avrcp.c` (`0x3cfc8`, at `0x3d2cc`): a call made when a session's field `+0x20` is unset is skipped
-  while SyncLink is on (which of the controller's or target's setups it is, to be read when porting).
+  `reconnect` (offset 5) holding what `reconnect_match` said; `reconnect` becomes `false` while SyncLink
+  is on, else that value.
+- `avdtp.c` `session_cb` (`0x24764`): a DISCOVER command is rejected as if no endpoint existed; and
+  (`0x24c70`) a peer's accepted DISCOVER response is turned into a reject (NOT_SUPPORTED_COMMAND, `0x19`).
+- `avctp.c` `avctp_confirm_cb` (`0x33984`, `0x33ae8`): an incoming AVCTP connection is shut down ("AVCTP:
+  SyncLink Mode | disconnect connect from %s").
+- `avrcp.c` `session_init_control` (`0x3d2cc`): the passthrough handler is not registered.
+
+## The shanling plugin
+
+`profiles/shanling/shanling.c`, a `btd_profile` named `shanling-target` for the remote UUID
+`0000cc0c-0000-1000-8000-00805f9b34fb`, whose adapter probe adds an SDP record to the adapter: browse
+group public, service class `0xcc0c`, profile descriptor `0xcc0c` version `0x0101`, L2CAP and RFCOMM
+channel 28, name "SHANLING TG". It listens on nothing itself: demo's `libSL.so` serves SyncLink's RFCOMM
+channel; the record lets Shanling's phone app find it.
+
+## `main`
+
+`bluez_main()`, with no arguments, right after `umask(0077)`.
 
 ## What a rebuilt bluetoothd needs
 
-Link `libbtctl.so` as stock does, call `bluez_main()` where stock does, and put each site above back
-in the upstream source; SyncLink's sites matter only when the user turns SyncLink on, the others
-always. Then Q2 Pod's own additions (the library browsable from a car, cover art) go on top.
+Link `libbtctl.so` as stock does and put each change above back in the upstream source; SyncLink's
+matter only while the user has SyncLink on, the others always. Q2 Pod's own additions (the control
+channel answering from `g_track_meta`, the library browsable from a car, cover art) go on top.
