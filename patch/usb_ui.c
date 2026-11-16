@@ -322,7 +322,7 @@ static int usb_measure(void *canvas, const char *s, const char *face, int px) {
  * coordinates. Shared with sw_update.c. */
 int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
     const char *pill = m->pill;
-    int light = ipod_light(), stack = pill ? MODE_STACK_PILL : MODE_STACK, px = m->glyph_px ? m->glyph_px : MODE_GLYPH;
+    int stack = pill ? MODE_STACK_PILL : MODE_STACK, px = m->glyph_px ? m->glyph_px : MODE_GLYPH;
     int top = MODE_TOP + (320 - MODE_TOP - stack) / 2 - dy, cx = 375 / 2;
     rect_t circle = { cx - MODE_R, top, 2 * MODE_R, 2 * MODE_R };
     if (m->ring != MODE_BARE) fill_box(canvas, &circle, RGBA(m->ring), MODE_R);
@@ -517,7 +517,7 @@ static void auth_open(void) {
     ringnav_select(view, 0, 3); /* Cancel */
 }
 static void usb_auth_paint(void *w, void *canvas) {
-    int dy = I(w, W_Y), light = ipod_light(), x = geom_val(V_TEXT_X);
+    int dy = I(w, W_Y), x = geom_val(V_TEXT_X);
     void *list = u.auth_view ? P(u.auth_view, W_PARENT) : (void *)0;
     int top = list ? I(list, W_Y) - AUTH_HEAD : 58 - dy;
     usb_text(canvas, "This computer's key:", x, 375 - 2 * x, top + 12, 2, "inter", MODE_LINE_PX,

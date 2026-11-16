@@ -228,7 +228,7 @@ void pv_paint(void *w, void *canvas) {
         return;
     const char *icon = widget_get_prop_str(w, PV_ICON, ""),
                *right = widget_get_prop_str(w, PV_RIGHT, "");
-    int on = pv_lit(w), light = ipod_light(), h = I(w, W_H), end = 375 - geom_val(V_RIGHT_X);
+    int on = pv_lit(w), h = I(w, W_H), end = 375 - geom_val(V_RIGHT_X);
     unsigned muted = on ? 0xffffff : tok(TOK_TERTIARY);
     void *label = widget_count_children(w) ? widget_get_child(w, 0) : (void *)0;
     char art[32];

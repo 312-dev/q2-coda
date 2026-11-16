@@ -288,7 +288,7 @@ int feedback_below(void *w) { return w ? screen_y(w) + I(w, W_H) : 0; }
  * between free and NOTE_END, hint (if any) 24 px lower. */
 int feedback_note(void *line, void *hint, int free) {
     if (!line) return 0;
-    int py = screen_y(P(line, W_PARENT)), light = ipod_light();
+    int py = screen_y(P(line, W_PARENT));
     if (free < py) free = py;
     int mid = (free + NOTE_END) / 2 - NOTE_H / 2 - py;
     void *both[2] = { line, hint };
@@ -642,7 +642,6 @@ void feedback_shuffled(const char *what, int songs) {
     void *glyph = image_create(page, (375 - CONF_GLYPH) / 2, 140 - CONF_GLYPH / 2 - geom_val(V_BAR),
                                CONF_GLYPH, CONF_GLYPH);
     image_base_set_image(glyph, theme_art("confirm_shuffle"));
-    int light = ipod_light();
     conf_line(page, 200, 32, what, ROLE_NP, 0, tok(TOK_PRIMARY));
     char count[24];
     int k = songs / 1000;

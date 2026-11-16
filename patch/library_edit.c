@@ -864,7 +864,7 @@ void lr_edit_paint(void *w, void *canvas) {
                                      ' ', 'h', 'i', 'd', 'e', 's', 0 };
     void *view = lr.view, *rows[LR_ROWS], *lcd = P(canvas, CANVAS_LCD);
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), ground = ui_ink(RGBA(0)), raw = ui_ink_raw(1);
-    int light = ipod_light(), ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), h,
+    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), h,
         box = lr_box(view, &h), top = box - oy - I(view, SCROLL_Y), n = lr_rows(view, rows),
         sel = st.touch_mode ? -1 : widget_get_prop_int(view, SEL, -1),
         gx = 375 - geom_val(V_RIGHT_X) - LR_GRIP_X - ox, cx0 = LR_CIRCLE_X - ox;
