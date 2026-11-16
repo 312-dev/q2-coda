@@ -293,7 +293,9 @@ An iOS section index that is not there at rest (the user's option B from `mock_a
 other song lists its page shows in name order: Favorites, Hi-Res, a playlist sorted by name),
 Artists, Albums, Composers and Genres. Lists in any other order (Recently Added, Songs by artist
 or album, an album's tracks, a playlist by time added, an artist's or a genre's songs) and
-settings have none.
+settings have none. The rule is one opt-in list of name-sorted Library lists (`az_index.c`
+`name_sorted`), shared with the fast-scroll letter: Wi-Fi's networks, Bluetooth's devices, Up Next,
+Most Played, Battery History and card apps are in their own order and show neither.
 
 - **Shown by** a finger on the list's right edge (its last 28 px), or the wheel spun fast (300
   degrees a second or more, the speed at which Rockbox's list acceleration first moves two rows a

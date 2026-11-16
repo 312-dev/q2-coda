@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Spinning the wheel fast through the Wi-Fi network list (or Bluetooth's devices, the queue, Internet Radio and other lists not in A to Z order) no longer flashes a big letter in the middle of the screen; the letter and the A-Z index show only on the Library's alphabetical lists.
   - Settings > General > Reset Settings (OLED): the rows lose their arrows and say under the selected one what they erase, and each asks on the confirmation card with the truth: Reset Settings Only also forgets saved Wi-Fi networks, Bluetooth pairings and EQ presets; Reset Database erases playlists and Favorites, then restarts.
   - Playlists (OLED): holding Play/Pause on a song inside a playlist opens the full song menu (Play Next, Play Last, Add to Playlist, Go to Album, Go to Artist and the rest), with Remove from Playlist last in red; it asks before removing.
   - Now Playing (OLED): the outline the wheel puts round Shuffle or Repeat now fits the button snugly, taking in its dot only while it's on, and a tapped button shows a soft grey square that fades out.

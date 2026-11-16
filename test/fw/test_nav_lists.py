@@ -1863,7 +1863,7 @@ def letter(fw, page, canvas):
     ('beatles', 'allmusic_page', 'B'), ('The Beatles', 'allmusic_page', 'B'), ('An Elephant', 'allmusic_page', 'E'),
     ('A Tribe', 'allmusic_page', 'T'), ('A', 'allmusic_page', 'A'), ('The ', 'allmusic_page', 'T'),  # no name after it
     ('Theory', 'allmusic_page', 'T'), ('  zed', 'allmusic_page', 'Z'),
-    ('The Beatles', 'radio_page', 'T'),  # only the Library sorts past "The"
+    ('The Beatles', 'folder_page', 'T'),  # only the Library sorts past "The": a folder sorts by its file name
     ('Éclair', 'allmusic_page', 'É'),
     ('', 'allmusic_page', None), ('   ', 'allmusic_page', None),
 ])
@@ -1904,7 +1904,7 @@ def test_the_letter_goes_with_its_timer_or_a_touch(fw, ui):
 
 
 def test_homes_library_pane_shows_no_letter(fw, ui):
-    page, canvas = spun(fw, ui, titles(200))
+    page, canvas = spun(fw, ui, titles(200), 'home_page')  # Library's categories beside Home's pane: not A to Z
     page.view.props[b'name'] = b'scroll_view_localmusic'
     assert letter(fw, page, canvas) == []
 
@@ -1980,6 +1980,23 @@ def test_edit_playlists_songs_show_no_letter_but_its_picker_does(fw, ui, mode, s
     ple.page, ple.mode = 1, mode
     page, canvas = spun(fw, ui, titles(200), 'playlistedit_page')
     assert letter(fw, page, canvas) == (['S'] if shown else [])
+
+
+# The letter is opt-in: a list takes it only when its page is one of the name-sorted Library lists (az_index.c
+# name_order). Every other long list, whatever its rows say, is in an order of its own: Wi-Fi's networks (by signal),
+# Bluetooth's devices, Settings, the queue, the play-count and battery lists, a card app's.
+@pytest.mark.parametrize('name', ['wifi_page', 'bluetooth_page', 'sysset_page', 'playerqueue_page', 'mostplayed_page',
+                                  'era_albums_page', 'radio_page', 'home_page'])
+def test_only_a_name_sorted_library_list_shows_the_letter(fw, ui, name):
+    page, canvas = spun(fw, ui, titles(200), name)
+    assert letter(fw, page, canvas) == []
+
+
+@pytest.mark.parametrize('cls', [0xff07, 0xff09])  # an artist's songs, a genre's: unsorted (getMusicBySonger, ByGenre)
+def test_an_artists_or_genres_songs_show_no_letter(fw, ui, cls):
+    fw.var('fw_ctx_g_class_type', C.c_int).value = cls
+    page, canvas = spun(fw, ui, titles(200))
+    assert letter(fw, page, canvas) == []
 
 
 # The iPod `>` on rows that open another list.

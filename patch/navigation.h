@@ -951,6 +951,8 @@ int tsv_split(char *line, char **f, int max);         /* catalogue.c */
 #define AZ_MIN_ROWS 50
 #define AZ_EDGE_PX 28
 #define AZ_SPIN_DPS 300
+int name_sorted(const char *page); /* the top page's list is a name-sorted Library list */
+int own_order(const char *page);    /* a page whose list is not in name order */
 void az_mark(void *w, int letter, int held, int bubble);
 void az_wheel(void *w, int id), az_paint(void *w, void *canvas);
 int az_touch(void *w, void *event), az_held(void *event), az_on(void *w), az_right(void *w),
@@ -993,7 +995,6 @@ void *folder_root_row(void *view); /* Folder Root's row, its label */
 void settings_gap(void *view);     /* a 12 px space between a settings page's rows */
 void pull_cancel(void); /* a pull to search let go: Edit Library's drag takes the touch */
 void ringnav_jump(void *w, int id); /* table w's row id selected, at the list's top */
-int own_order(const char *page);    /* a page whose list is not in name order */
 void ringnav_sort_key(char *s);     /* a name's sort key: trimmed, its article dropped */
 
 #endif
