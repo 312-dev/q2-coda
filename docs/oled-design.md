@@ -454,7 +454,8 @@ the artist (13 px, Text Tertiary), 46 px right of the text column.
   column to the right column with its top at y 186, Track behind and Accent Blue filled to a 14 px
   white knob (Channel Balance fills from the centre; in Light Mode, where white is the canvas, the
   knob is edged 1 px in Track, as iOS edges its white thumb); the range's ends in 15 px Text
-  Tertiary centred on y 214, at the two columns. The wheel moves it; there are no +/- buttons.
+  Tertiary centred on y 214, at the two columns. The wheel moves it; there are no +/- buttons. Centre
+  turns the switch on or off where there is one, else goes back; Return goes back.
 - **Vertical slider (EQ):** 4 px Track line, Accent Blue fill from 0 dB to the value (Text Tertiary
   while the EQ is off), a 14 px white knob, ringed 2 px in Accent Blue while the wheel is on it
   (1 px in Track otherwise in Light Mode, as the slider page's). The band's name and gain under it

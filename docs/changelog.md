@@ -3,6 +3,7 @@
 - **Unreleased (q2-coda)**:
   - Volume: the wheel changes the volume only on a playing page: Now Playing (TIDAL's and card apps' songs too), Spotify's, Internet Radio's and AirPlay's, and videos. Anywhere else it never opens the volume; on a page with nothing to scroll (TIDAL's **Not connected**, a card app's QR code, Now Playing's About) it does nothing and Return goes straight back. With the screen off the wheel does nothing.
   - Settings: **Playback → Volume**, just before Max Volume, sets the volume from any page: turn the wheel or drag the slider, up to Max Volume.
+  - Settings: on **Playback → Default Volume**, Center turns Default Volume on or off, as on Crossfade's page; it went back a page instead. Return goes back.
   - Controls: **Volume Guard** is gone. With the screen off the wheel no longer changes the volume, so there is nothing left for it to guard.
   - Settings (OLED): the Settings list reached from Home ends like every list: Battery peeks through the fade under Controls instead of hiding until you scroll, and the highlighted row's lean as you turn the wheel is no longer cut off at the top or bottom of a list.
   - Lists (OLED): a list scrolled to its last row keeps the space under it after you open that row and press Return; the last row no longer sits on the screen's bottom edge.

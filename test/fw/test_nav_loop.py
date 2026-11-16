@@ -2158,6 +2158,19 @@ def test_centre_goes_back_from_a_setting_once_no_second_press_comes(fw, keys, st
     assert len(fw.calls('navigator_back')) == 1 and C.c_ubyte.from_address(O['KEY_LOCKOUT']).value == 0
 
 
+@pytest.mark.parametrize('shown', [1, 0])
+def test_centre_on_default_volume_turns_its_switch_on_or_off(fw, keys, shown):
+    """Default Volume's page has a switch, its row selected: Centre turns it on or off, as a tap on the row does, and
+    Return goes back; a page whose switch is hidden (crossfade.c's Volume, Resume Songs) goes back on Centre."""
+    ui = Ui(fw)
+    page = slider_window(ui, 'bootvol_page')
+    page.add(W(ui, 'image', 'img_bootswitch', click=True)).visible = shown
+    keys(KEY_CENTER)
+    ui.fire('navigation__edit_single')
+    assert ui.clicks == ([(b'img_bootswitch', EVT_CLICK)] if shown else [])
+    assert len(fw.calls('navigator_back')) == 1 - shown
+
+
 def test_a_double_centre_on_a_setting_turns_the_screen_off(fw, keys):
     ui = Ui(fw)
     slider_window(ui)

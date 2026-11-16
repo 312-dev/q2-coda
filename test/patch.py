@@ -2119,6 +2119,11 @@ for name in ('backlight_page','maxvol_page','bootvol_page','balance_page'):
     assert m.call(O['KEY_CENTER'])==11 and m.call(O['KEY_CENTER'],gap=50)==11
     m.advance(300,clear=False); names=[c[0] for c in m.calls]
     assert 'on_wm_keyup_fun' in names and 'navigator_back' not in names; passed()
+# Default Volume's page has its switch (img_bootswitch), its row selected: Centre turns it on or off, as a tap on the row
+# does, and stays on the page; Return goes back.
+m=Machine(); sw=m.node('image','img_bootswitch')
+m.top=m.node('window','bootvol_page',[m.node('view','view_navbar',[sw]),m.node('view','view_body',[m.node('image','img_dec'),m.node('image','img_add')])])
+assert m.confirm()==11 and m.clicks==[sw] and 'navigator_back' not in [c[0] for c in m.calls]; passed()
 # Control Center (control_center.c cc_key): Centre on Brightness gives the wheel the slider (QS_ADJUST), which it sets
 # within its range; Return gives it back, and Return off a slider closes it, as its swipe up does (dialog_quit), not
 # stock's screen off and Home.

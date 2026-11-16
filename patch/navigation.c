@@ -9746,7 +9746,9 @@ int ringnav_keydown(void *ctx, void *event) {
 }
 
 /* Stock's setting editors, which have no list. Brightness, maximum and startup volume and balance
- * step with the wheel through their own +/- (limits and saving stay stock's), and Centre goes back.
+ * step with the wheel through their own +/- (limits and saving stay stock's), and Centre goes back;
+ * on a page with a switch (Default Volume's img_bootswitch, its row selected) Centre turns it on or
+ * off instead, as a tap on the row does, and Return goes back.
  * Quick Settings' brightness slider has no +/-: its value is set, firing stock's change callback.
  * Set date and time and the sleep timer edit one text_selector field at a time, outlined by
  * edit_paint: the wheel turns it, Centre moves to the next field and, after the last, to OK, which
@@ -9807,7 +9809,12 @@ static int edit_single(const void *info) {
     if (hidden && !widget_get_visible(hidden)) /* the switch's off: only its row is showing */
         switch_click(0, 0);
     else if (!n) {
-        if (slider_page(top)) navigator_back();
+        void *sw = slider_page(top) ? widget_lookup(top, "img_bootswitch", 1) : (void *)0;
+        char click[0x30];
+        if (sw && widget_get_visible(sw))
+            stock_dispatch_trampoline(sw, pointer_event_init(click, EVT_CLICK, sw, 0, 0));
+        else if (slider_page(top))
+            navigator_back();
     } else if (f < n)
         field_set(top, f + 1);
     else {
