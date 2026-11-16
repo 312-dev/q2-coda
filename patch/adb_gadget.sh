@@ -3,9 +3,12 @@
 # FunctionFS function alone, holds the USB controller whenever stock's storage and USB DAC gadgets don't.
 #   setup   at boot, before adbd: configfs, the gadget, and its FunctionFS mounted where adbd opens it
 #   bind    put q2adb on the controller, once adbd has written its descriptors, unless parked
-#   park    take it off and unmount configfs: stock's storage_config.sh and uac_device_config.sh
-#           refuse to start while configfs is mounted, and need the controller
-#   unpark  after stock's stop, which unmounts configfs: bind again, in the background
+#   park    take it off the controller, stop adbd, unmount FunctionFS, remove the gadget's directory and unmount
+#           configfs: stock's storage_config.sh and uac_device_config.sh refuse to start while configfs is
+#           mounted and need the controller, and this kernel's configfs makes each gadget directory a device
+#           named android_usb/android0, so a second gadget directory fails (EEXIST) while q2adb's exists
+#   unpark  after stock's stop, which unmounts configfs: the gadget made again (setup), and bound in the
+#           background once adbd, which its restart loop starts again, has written its descriptors
 # The wrapped storage_config.sh and uac_device_config.sh call park and unpark around stock's copies.
 # One lock serializes them, and the parked flag keeps a late bind (adbd's restart loop) off stock's gadget.
 CFS=${Q2ADB_CONFIGFS:-/sys/kernel/config}
@@ -16,27 +19,10 @@ G=$CFS/usb_gadget/q2adb
 PARKED=$RUN/q2adb.parked
 
 lock() { exec 9>"$RUN/q2adb.lock" && flock 9; }
-configfs() { mountpoint -q "$CFS" || mount -t configfs none "$CFS"; }
-
-bind() {
-    # adbd writes its descriptors within moments of starting; an unready function can't be bound.
-    # Waited for outside the lock, so park (demo's UI thread, at a cable in) never waits on it.
-    i=0
-    while [ ! -e "$FFS/ep1" ] && [ $i -lt 50 ]; do usleep 100000; i=$((i+1)); done
-    lock
-    [ -f "$PARKED" ] && return 0
-    [ -e "$FFS/ep1" ] || { echo "q2adb-gadget: adbd has not set up $FFS" >&2; return 1; }
-    configfs && [ -d "$G" ] || return 1
-    [ -n "$(cat "$G/UDC")" ] && return 0
-    ls "$UDCS" > "$G/UDC"
-}
-
-case "$1" in
-setup)
-    lock
-    configfs || exit 1
+gadget_make() {
+    configfs || return 1
     if [ ! -d "$G" ]; then
-        mkdir "$G" && cd "$G" || exit 1
+        mkdir "$G" && cd "$G" || return 1
         # Linux Foundation's FunctionFS Gadget ID, not stock's storage one: Windows keys its driver choice,
         # and whether it asks for Microsoft OS descriptors at all, on the IDs, so they must be this
         # gadget's own. bcdDevice is unusual so no earlier device's cached answer applies.
@@ -63,6 +49,37 @@ setup)
     fi
     mkdir -p "$FFS"
     mountpoint -q "$FFS" || mount -t functionfs adb "$FFS"
+}
+# The gadget's directory gone, configfs's way: off the controller, its links, then its directories
+# innermost first. adbd holds FunctionFS open, so it is stopped first (its restart loop starts it
+# again; while parked it finds no FunctionFS and ends) and FunctionFS unmounted.
+gadget_remove() {
+    killall adbd 2>/dev/null
+    ! mountpoint -q "$FFS" || umount "$FFS"
+    [ -d "$G" ] || return 0
+    echo "" 2>/dev/null > "$G/UDC"
+    rm -f "$G/os_desc/c.1" "$G/configs/c.1/ffs.adb"
+    rmdir "$G/configs/c.1/strings/0x409" "$G/configs/c.1" "$G/functions/ffs.adb" "$G/strings/0x409" "$G"
+}
+configfs() { mountpoint -q "$CFS" || mount -t configfs none "$CFS"; }
+
+bind() {
+    # adbd writes its descriptors within moments of starting; an unready function can't be bound.
+    # Waited for outside the lock, so park (demo's UI thread, at a cable in) never waits on it.
+    i=0
+    while [ ! -e "$FFS/ep1" ] && [ $i -lt 50 ]; do usleep 100000; i=$((i+1)); done
+    lock
+    [ -f "$PARKED" ] && return 0
+    [ -e "$FFS/ep1" ] || { echo "q2adb-gadget: adbd has not set up $FFS" >&2; return 1; }
+    configfs && [ -d "$G" ] || return 1
+    [ -n "$(cat "$G/UDC")" ] && return 0
+    ls "$UDCS" > "$G/UDC"
+}
+
+case "$1" in
+setup)
+    lock
+    gadget_make
     ;;
 bind)
     bind
@@ -70,11 +87,11 @@ bind)
 park)
     lock
     : > "$PARKED"
-    [ -d "$G" ] && echo "" 2>/dev/null > "$G/UDC"
+    gadget_remove
     ! mountpoint -q "$CFS" || umount "$CFS"
     ;;
 unpark)
-    (lock; rm -f "$PARKED")
+    (lock; rm -f "$PARKED"; gadget_make)
     bind &  # demo runs stock's stop on its UI thread: the wait for adbd is not demo's
     ;;
 *)

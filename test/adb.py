@@ -379,8 +379,19 @@ GADGET_STUBS = {
     'umount': 'grep -vx "$1" "$Q2ADB_RUN/mounts" > "$Q2ADB_RUN/m"; mv "$Q2ADB_RUN/m" "$Q2ADB_RUN/mounts"; echo "umount $1" >> "$Q2ADB_RUN/log"',
     'mountpoint': 'grep -qx "$2" "$Q2ADB_RUN/mounts"',
     'usleep': 'sleep 0.01',
-    # configfs fills a new gadget's directory itself; the stand-in tree gets the parts setup writes into
-    'mkdir': '/bin/mkdir "$@" || exit; for a; do case "$a" in */usb_gadget/q2adb) /bin/mkdir -p "$a/os_desc" "$a/strings" "$a/configs" "$a/functions"; : > "$a/UDC";; esac; done',
+    # configfs fills a new gadget's directory itself; the stand-in tree gets the parts setup writes into. This
+    # kernel's configfs makes each gadget directory the device android_usb/android0, so a second one fails (EEXIST)
+    'mkdir': 'p=; for a; do case "$a" in -p) p=-p; continue;; */usb_gadget/*/*) ;; */usb_gadget/*) for o in "${a%/*}"/*; '
+             'do [ -d "$o" ] && { echo "mkdir: $a: File exists" >&2; exit 1; }; done;; esac; /bin/mkdir $p "$a" || exit; '
+             'case "$a" in */configs/*/*|configs/*/*) ;; */configs/*|configs/*) /bin/mkdir -p "$a/strings";; '
+             '*/usb_gadget/*/*) ;; */usb_gadget/*) /bin/mkdir -p "$a/os_desc" "$a/strings" "$a/configs" "$a/functions"; '
+             ': > "$a/UDC";; esac; done',
+    # configfs's rmdir takes a directory's attributes and its own default groups (strings, configs...) with it, but
+    # not a directory or link made in it
+    'rmdir': 'for a; do bad=; for c in "$a"/* "$a"/*/*; do [ -L "$c" ] && bad=1; if [ -d "$c" ] && [ ! -L "$c" ]; then '
+             'case "${c#$a/}" in strings|os_desc|configs|functions) ;; *) bad=1;; esac; fi; done; '
+             '[ -n "$bad" ] && { echo "rmdir: $a: Directory not empty" >&2; exit 1; }; rm -rf "$a"; done',
+    'killall': 'echo "killall $1" >> "$Q2ADB_RUN/log"',
 }
 
 
@@ -424,18 +435,27 @@ def gadget_checks():
         r = gadget('bind')
         expect('bind once adbd wrote its descriptors: q2adb on the controller', r.returncode == 0 and read('UDC') == '13500000.otg', r.stderr)
 
+        stock = cfs/'usb_gadget/storage_demo'
+        r = subprocess.run(['sh', '-c', f'mkdir {stock}'], env=env, capture_output=True, text=True)
+        expect('the stand-in refuses a second gadget directory, as the kernel does (EEXIST)', r.returncode != 0 and not stock.exists())
         r = gadget('park')
-        expect('park: off the controller, configfs unmounted, parked',
-               r.returncode == 0 and read('UDC') == '' and str(cfs) not in (run/'mounts').read_text().split() and (run/'q2adb.parked').exists(), r.stderr)
+        mounts = (run/'mounts').read_text().split()
+        expect('park: adbd stopped, FunctionFS and configfs unmounted, the gadget\'s directory gone, parked',
+               r.returncode == 0 and not g.exists() and str(cfs) not in mounts and str(ffs) not in mounts
+               and 'killall adbd' in (run/'log').read_text() and (run/'q2adb.parked').exists(), r.stderr)
+        r = subprocess.run(['sh', '-c', f'mkdir {stock} && rmdir {stock}'], env=env, capture_output=True, text=True)
+        expect('parked, stock\'s storage gadget can be made, and taken down again at its stop', r.returncode == 0, r.stderr)
         r = gadget('bind')
         expect('bind while parked (adbd restarting under stock\'s gadget) binds nothing and mounts nothing',
-               r.returncode == 0 and read('UDC') == '' and str(cfs) not in (run/'mounts').read_text().split(), r.stderr)
+               r.returncode == 0 and not g.exists() and str(cfs) not in (run/'mounts').read_text().split(), r.stderr)
         r = gadget('unpark')
         end = time.monotonic() + 10  # it binds in the background
         while read('UDC') != '13500000.otg' and time.monotonic() < end:
             time.sleep(.05)
-        expect('unpark: configfs mounted again, q2adb on the controller',
-               r.returncode == 0 and read('UDC') == '13500000.otg' and str(cfs) in (run/'mounts').read_text().split()
+        mounts = (run/'mounts').read_text().split()
+        expect('unpark: the gadget made again, configfs and FunctionFS mounted, q2adb on the controller',
+               r.returncode == 0 and read('UDC') == '13500000.otg' and str(cfs) in mounts and str(ffs) in mounts
+               and read('idVendor') == '0x1d6b' and os.readlink(g/'configs/c.1/ffs.adb') == 'functions/ffs.adb'
                and not (run/'q2adb.parked').exists(), r.stderr)
         expect('a bound q2adb is left as it is', gadget('bind').returncode == 0 and read('UDC') == '13500000.otg')
         expect('an unknown command is refused', gadget('frob').returncode == 2)
