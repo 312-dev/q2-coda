@@ -986,7 +986,7 @@ def test_stock_tables_keep_their_toolbar_and_boxes(monkeypatch, path):
 
 
 def test_toolbar_switch_pages(monkeypatch):
-    # The Sleep Timer's panel makes room for the row its switch becomes. Crossfade's page keeps its toolbar. SET0's keep theirs.
+    # The Sleep Timer's panel makes room for the row its switch becomes, and ends with the window. Crossfade's page keeps its toolbar. SET0's keep theirs.
     sleep, boot = 'systemset/sleepshutdown_page.bin', 'playset/bootvol_page.bin'
     pages = {sleep: w('sleepshutdown_page', w('view_navbar', at=[0, 0, 375, 50]), w('view_sleep', at=[0, 50, 375, 240]), kind='window'),
              boot: w('bootvol_page', w('view_navbar', at=[0, 0, 375, 50]), w('view_bootvol', at=[0, 50, 375, 240]),
@@ -995,7 +995,8 @@ def test_toolbar_switch_pages(monkeypatch):
         monkeypatch.setitem(ipod.UI_ASSETS, path, ipod.sha(ipod.encode(page)))
     data = {path: ipod.encode(page) for path, page in pages.items()}
     n = named(ipod.decode(ipod.patch_asset(sleep, data[sleep], g=OLED_SET)))
-    assert n['view_navbar'][2]['visible'] == 'false' and n['view_sleep'][1] == [0, 32, 375, 240]
+    # under the switch's row, and cut to end at the window's foot (320 - 58 = 262), not 10 px past it
+    assert n['view_navbar'][2]['visible'] == 'false' and n['view_sleep'][1] == [0, 32, 375, 262 - 32]
     assert 'visible' not in named(ipod.decode(ipod.patch_asset(boot, data[boot], g=OLED_SET)))['view_navbar'][2]
     for path in (sleep, boot):
         n = named(ipod.decode(ipod.patch_asset(path, data[path])))

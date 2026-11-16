@@ -1221,6 +1221,8 @@ def patch_asset(path, data, g=SET0):  # pragma: no mutate block
         elif path in NAVBAR_ONLY:  # settings panels and notes keep their size; text ends clear of a top corner
             check(box[1] >= 50, f'{path}: unexpected content under the toolbar')
             box[1] -= 50 - (g.set_row if path == SLEEP_TIMER and plain else 0)  # under the row its switch moves to
+            if path == SLEEP_TIMER and plain:  # moved down a row, its 240 px would run past the window's foot
+                box[3] = min(box[3], geo.BOTTOM - box[1])
             if kind in ('label', 'hscroll_label') and corner_inset(g.bar + box[1]):
                 box[2] = min(box[2], 375 - box[0] - corner_x(g.bar + box[1], 0))
     if path in NAVBAR_ONLY:

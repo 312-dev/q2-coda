@@ -339,7 +339,7 @@ those two pages (`TOOLBAR_SWITCHES`) keep it. There the switch takes the toolbar
 slot and the title runs up to it (225 pixels); the Home and Now Playing buttons are 0 wide, as the
 keys do what they did (`immediates` in `ipod.json`). A set with `toolbar` 0 (OLED's) hides those toolbars
 too, Startup volume's aside: `navigation.c`'s `ringnav_sleeptimer` makes the Sleep Timer's switch a row whose click is
-`img_switch`'s, hidden with its toolbar, a loop pass later. The set's `stock_row`, `stock_body`,
+`img_switch`'s, hidden with its toolbar, a loop pass later; its fields' panel (`view_sleep`) moves down a row under it and is cut to end with the window. The set's `stock_row`, `stock_body`,
 `stock_title_y` and `stock_title_h` re-pitch stock's own pages (`stock_rows` in `ipod.json`), which
 other sets get back byte for byte: Update Library and More as settings rows, Queue, Go to and
 Special Folders through their row constructors' immediates. More's Speed row keeps 78 pixels: its
