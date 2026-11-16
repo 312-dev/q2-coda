@@ -472,7 +472,8 @@ def main(argv):
         libs = pathlib.Path.home()/'.cache/q2-adb-test'/hashlib.sha256(image.read_bytes()).hexdigest()[:16]
         if not (libs/'lib').is_dir():
             shutil.rmtree(libs, ignore_errors=True)
-            subprocess.run(['unsquashfs', '-q', '-no-xattrs', '-d', str(libs), str(image), 'lib'], check=True, capture_output=True)
+            libs.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(['unsquashfs', '-no-xattrs', '-d', str(libs), str(image), 'lib'], check=True, capture_output=True)
     else:  # the cached one, with the toolchain's glibc (the rootfs's own build)
         import thirdparty
         adbd = thirdparty.build('adbd')/'usr/bin/adbd'
