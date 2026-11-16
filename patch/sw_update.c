@@ -419,7 +419,7 @@ void sw_update_paint(void *w, void *canvas) {
         rect_t track = { 375 / 2 - SW_BAR_W / 2, top + SW_BAR_Y, SW_BAR_W, SW_BAR_H }, part = track;
         part.w = sw_unpacked(SW_BAR_W);
         fill_box(canvas, &track, RGBA(light ? 0xd1d1d6 : 0x333333), SW_BAR_H / 2);
-        if (part.w >= SW_BAR_H) fill_box(canvas, &part, RGBA(ink), SW_BAR_H / 2);
+        if (part.w >= SW_BAR_H) fill_box(canvas, &part, RGBA(accent), SW_BAR_H / 2);
     }
     st.raw_ink = raw;
     stock_canvas_set_fill_color(canvas, fill);

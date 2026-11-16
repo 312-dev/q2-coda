@@ -774,7 +774,7 @@ SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, a
   and Install and Restart from y 112, and a two-line footer under them ("Takes about 2 minutes. Keep the Q2 charged;
   your music and settings stay.").
 - **Restarting to Install**, "Don't turn off the Q2": `arrow-clockwise` bold on Accent Blue, and a 180 x 6 bar with
-  round ends under the stack (top + 172), Track `#333333` filled white with the unpacking.
+  round ends under the stack (top + 172), Track `#333333` filled in Accent Blue with the unpacking (the user's, 2026-11-16: progress fills are the accent).
 - **Results**, each a fill glyph on its circle: You're Up to Date (check, bold, Positive green, "VERSION (TAG) is
   installed"), No Update Found and No SD Card (`file-arrow-down`, `#3A3A3C`), Charge to Update and Not Enough Space
   (`battery-warning` and `warning`, `#FF9F0A`), Update Can't Be Used (`warning`, `#FF453A`). Return or Centre
