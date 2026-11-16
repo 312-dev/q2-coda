@@ -445,7 +445,7 @@ the artist (13 px, Text Tertiary), 46 px right of the text column.
 
 - **Progress:** 6 px, round ends, Track and Accent Blue. Used for playback, scans and
   downloads.
-- **Slider page** (Max Volume, Default Volume, Channel Balance, Brightness, Crossfade, Resume Songs,
+- **Slider page** (Volume, Max Volume, Default Volume, Channel Balance, Brightness, Crossfade, Resume Songs,
   Night Shift, Wheel Sensitivity): the status row names it; a feature with a switch has it as the
   first row, selected; the value in Inter Medium 22 centred on y 150; a 6 px track from the text
   column to the right column with its top at y 186, Track behind and Accent Blue filled to a 14 px

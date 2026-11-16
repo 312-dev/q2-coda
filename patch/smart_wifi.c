@@ -156,7 +156,7 @@ int smart_wifi_wait(void) {
 
 /* The page in use: the top window, past stock's self-closing overlays: toasts (msginfo_dialog, ours
  * or stock's) and the volume (volume_dialog, which a wheel turn opens over a toast). */
-static void *page_in_use(void) {
+void *page_in_use(void) {
     void *wm = window_manager();
     for (int i = (int)widget_count_children(wm) - 1; i >= 0; --i) {
         void *w = widget_get_child(wm, i);

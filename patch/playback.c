@@ -106,35 +106,6 @@ void wheel_set_pct(int n) {
     if (n != wheel_pct()) wheel_apply(n);
 }
 
-/* Volume guard (Power, Q2POD VOLGUARD, off by default; navigation.c's pod rows set wheel_guard):
- * screen off, a pocket brush must not move the volume (#46). A touch's travel one way counts in
- * wh_guard (1/16 unit) and ticks nothing; past WHEEL_DARK_GUARD the wheel is open (DARK_OPEN) and
- * ticks as lit, reversals too, across lifts. A reversal or a lift before then, or WHEEL_DARK_IDLE_MS
- * without travel, arms it again; so does the screen on. The guard's travel is dropped, not ticked:
- * it is the dead zone, so a brush past it moves the volume by its excess only. */
-#define DARK_OPEN (WHEEL_DARK_GUARD * WHEEL_FINE)
-int wheel_guard __attribute__((section(".scratch")));
-static int wh_guard __attribute__((section(".scratch")));
-static unsigned wh_dark_at __attribute__((section(".scratch"))); /* the last dark travel */
-void wheel_guard_reset(void) { wh_guard = 0; }
-static int dark_held(int *delta) {
-    int d = *delta;
-    if (g_backlight_status || !wheel_guard) return wh_guard = 0;
-    unsigned now = (unsigned)time_now_ms();
-    if (now - wh_dark_at >= WHEEL_DARK_IDLE_MS || (d && wh_guard != DARK_OPEN && (d ^ wh_guard) < 0))
-        wh_guard = 0;
-    if (d) wh_dark_at = now;
-    if (wh_guard == DARK_OPEN) return 0;
-    wh_acc = 0;
-    wh_guard += d;
-    if (wh_guard >= DARK_OPEN || wh_guard <= -DARK_OPEN) {
-        *delta = wh_guard > 0 ? wh_guard - DARK_OPEN : wh_guard + DARK_OPEN;
-        wh_guard = DARK_OPEN;
-        return 0;
-    }
-    return 1;
-}
-
 static void wheel_post(char *info, int key) {
     /* Read unlocked: off by one at worst, and the headroom covers it. */
     unsigned short *q = *(unsigned short **)(*(char **)(info + WHEEL_INFO_LOOP) + LOOP_QUEUE);
@@ -332,7 +303,6 @@ void wheel_sample(int *s, int ret, char *info) {
         s[0] = wh_anchor;
         wh_anchor = 0;
         wheel_mute = wh_armed = 0;
-        if (wh_guard != DARK_OPEN) wh_guard = 0;
         wheel_held = 0;
         return;
     }
@@ -374,7 +344,7 @@ void wheel_sample(int *s, int ret, char *info) {
         wh_units = units;
     }
     if (d && (d ^ wh_acc) < 0) wh_acc = 0; /* reversed */
-    wh_acc = dark_held(&d) ? 0 : wh_acc + d;
+    wh_acc += d;
     while (wh_acc >= units || wh_acc <= -units) {
         int dir = wh_acc > 0 ? 1 : -1;
         unsigned before = wh_tick_at;

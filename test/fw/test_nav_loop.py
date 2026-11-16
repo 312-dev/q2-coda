@@ -1970,19 +1970,60 @@ def test_a_double_centre_over_the_keyboard_turns_the_screen_off_once(fw, keys):
 def test_the_wheel_over_the_keyboard_and_centre_over_the_volume_stay_stocks(fw, keys):
     ui = Ui(fw)
     keyboard_up(fw, ui)
-    assert keys(KEY_NEXT) == 0  # the volume
+    assert keys(KEY_NEXT) == 0  # on to on_wm_keyup_fun, which drops it (vol_wm_keyup)
     ui.window('volume_dialog', 'dialog')
     assert keys(KEY_CENTER, 1000) == 0  # stock's screen off
 
 
-def test_the_wheel_does_nothing_on_a_card_apps_qr_page(fw, keys):
-    """The QR page has nothing to move, and stock's volume over it would hide the code (addon.c addon_qr_page). The
-    same page that isn't the app's QR page (none open) keeps stock's volume."""
+def wm_keyup(fw):
+    """vol_wm_keyup, on_wm_keyup_fun's hook: the keys it passes on to stock."""
+    seen = []
+    fw.mock('stock_wm_keyup_trampoline', lambda ctx, e, *_: seen.append(C.c_int.from_address(e + EVENT_KEY).value) or 0)
+    hook = fw.fn('vol_wm_keyup', C.c_int, C.c_void_p, C.c_void_p)
+    return seen, lambda key: hook(None, key_event(key))
+
+
+@pytest.mark.parametrize('name, volume', [('playing_page', 1), ('airplay_page', 1), ('spotify_page', 0),
+                                          ('radionp_page', 1), ('sysset_page', 0), ('qrcode_page', 0),
+                                          ('offline_page', 0), ('spotbrowse_page', 0), ('npabout_page', 0)])
+def test_only_a_playback_screens_wheel_reaches_stocks_volume(fw, name, volume):
+    """The wheel tick no page took opens stock's volume dialog on a playback screen alone: a list, a card app's QR
+    page and a page with nothing to scroll (TIDAL's Not connected, Now Playing's About) take it as nothing, and every
+    other key is stock's there."""
     ui = Ui(fw)
-    page = ui.window('qrcode_page')
-    assert keys(KEY_NEXT) == 0  # stock's volume: no QR page open
-    C.c_void_p.from_address(C.addressof(fw.var('addon__qp', C.c_void_p))).value = page.p  # qp.page, its first field
-    assert keys(KEY_NEXT, 1000) == STOP and keys(KEY_PREV, 1000) == STOP
+    ui.wm.add(ui.window(name))
+    seen, key = wm_keyup(fw)
+    assert key(KEY_NEXT) == 0 and key(KEY_PREV) == 0 and seen == [KEY_NEXT, KEY_PREV] * volume
+    key(KEY_RETURN), key(KEY_CENTER)
+    assert seen[-2:] == [KEY_RETURN, KEY_CENTER]
+
+
+@pytest.mark.parametrize('track', [0, 1])
+def test_spotifys_now_playing_is_the_volumes_while_it_shows_a_track(fw, track):
+    """Its notes (Spotify missing, loading, a phone to pick it) have nothing for the wheel (spotify.c spot_np_track)."""
+    ui = Ui(fw)
+    page = ui.wm.add(ui.window('spotify_page'))
+    info = page.add(W(ui, 'view'))
+    info.visible = track
+    spot = C.c_void_p.from_address(C.addressof(fw.var('spotify__ui', C.c_void_p)))  # ui.page, ui.info: its first two
+    spot.value = page.p
+    C.c_void_p.from_address(C.addressof(spot) + 8).value = info.p
+    seen, key = wm_keyup(fw)
+    key(KEY_NEXT)
+    assert seen == [KEY_NEXT] * track
+    spot.value = None
+
+
+def test_the_volume_opens_on_now_playing_under_a_toast_and_never_dark(fw):
+    ui = Ui(fw)
+    ui.wm.add(ui.window('playing_page'))
+    ui.wm.add(ui.window('msginfo_dialog', 'dialog'))
+    seen, key = wm_keyup(fw)
+    key(KEY_NEXT)
+    assert seen == [KEY_NEXT]
+    fw.var('g_backlight_status', C.c_ubyte).value = 0
+    key(KEY_NEXT), key(KEY_CENTER)
+    assert seen == [KEY_NEXT, KEY_CENTER]  # the dark tick dropped; Centre, the wake, stock's
 
 
 def test_a_key_stock_takes_is_stocks_and_ends_the_run(fw, keys, st):
@@ -2829,21 +2870,29 @@ def test_a_touch_on_a_prompt_starts_below_the_pull_downs_band(fw, stock_bytes, f
     assert keys(O['EVT_POINTER_FIRST'], 0, y=y) == 7 and start.value == want
 
 
-@pytest.mark.parametrize('lit', [0, 1])
-def test_a_tick_before_the_volume_dialog_takes_keys_steps_it_and_opens_no_other(fw, keys, lit):
+def test_a_tick_before_the_volume_dialog_takes_keys_steps_it_and_opens_no_other(fw, keys):
     """The dialog is in front from navigator_to on, the window manager's key target only from its open event (#303)."""
     ui = Ui(fw)
     ui.window('home_page')
     vol = ui.window('volume_dialog')
     slider = vol.add(W(ui, 'slider', 'slider_vol', value=31))
     fw.var('g_volume', C.c_ubyte).value, fw.var('g_maxvolume', C.c_ubyte).value = 31, 100
-    fw.var('g_backlight_status', C.c_ubyte).value = lit
     target = C.c_void_p.from_address(ui.wm.p + O['W_KEY_TARGET'])
-    assert keys(KEY_PREV) == STOP and keys(KEY_PREV, 20) == STOP and keys(KEY_NEXT, 20) == STOP  # one dark pass's ticks
+    assert keys(KEY_PREV) == STOP and keys(KEY_PREV, 20) == STOP and keys(KEY_NEXT, 20) == STOP  # one pass's ticks
     assert fw.var('g_volume', C.c_ubyte).value == 30 == slider.ints[b'value']
     assert [c[1][:2] for c in fw.calls('device_set_volume')] == [(30, 1), (29, 1), (30, 1)]
     target.value = vol.p  # opened: the ticks are the dialog's own
     assert keys(KEY_PREV, 20) != STOP and fw.var('g_volume', C.c_ubyte).value == 30
+
+
+def test_a_dark_tick_before_the_volume_dialog_takes_keys_moves_nothing(fw, keys):
+    """Dark, the tick goes on to on_wm_keyup_fun, whose hook drops it (volume.c vol_wm_keyup)."""
+    ui = Ui(fw, lit=False)
+    vol = ui.window('volume_dialog')
+    slider = vol.add(W(ui, 'slider', 'slider_vol', value=31))
+    fw.var('g_volume', C.c_ubyte).value, fw.var('g_maxvolume', C.c_ubyte).value = 31, 100
+    assert keys(KEY_PREV) == 0 and fw.var('g_volume', C.c_ubyte).value == 31 == slider.ints[b'value']
+    assert not fw.calls('device_set_volume')
 
 
 def test_a_locked_wheels_tick_before_the_volume_dialog_takes_keys_stays_stocks(fw, keys):

@@ -1513,6 +1513,7 @@ def test_the_volume_dialogs_tick_leaves_stock_one_step_to_make(fw, volume, key, 
     the limits) lands on it, with its save, slider and count."""
     g = volumes(fw, volume)
     fw.var('wheel_speed', C.c_int).value = 540  # 10 a tick
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
     k = KEY_NEXT if key == 'next' else KEY_PREV
     seen = []
 
@@ -1534,6 +1535,18 @@ def test_other_keys_over_the_volume_dialog_are_stocks(fw):
     e = C.create_string_buffer(0x40)
     struct.pack_into('<I', e, O['EVENT_KEY'], O['KEY_RETURN'])
     assert fw.fn('vol_keyup', C.c_int, C.c_void_p, C.c_void_p)(None, C.addressof(e)) == 0 and g.value == 40
+
+
+def test_a_dark_tick_over_the_volume_dialog_moves_nothing(fw):
+    """A dialog left open past the screen-off: its tick goes on (0) to on_wm_keyup_fun's hook, which drops it."""
+    g = volumes(fw, 40)
+    fw.var('wheel_speed', C.c_int).value = 540
+    fw.var('g_backlight_status', C.c_ubyte).value = 0
+    seen = []
+    fw.mock('stock_vol_keyup_trampoline', lambda *_: seen.append(1) or 11)
+    e = C.create_string_buffer(0x40)
+    struct.pack_into('<I', e, O['EVENT_KEY'], KEY_NEXT)
+    assert fw.fn('vol_keyup', C.c_int, C.c_void_p, C.c_void_p)(None, C.addressof(e)) == 0 and g.value == 40 and not seen
 
 
 def eased_widths(fw, world, st, clock, ms, polls, frm=40, to=50, maximum=100):

@@ -430,7 +430,8 @@ def test_the_page_swaps_stock_boot_volumes_handlers_for_its_own(fw):
 
 
 @pytest.mark.parametrize('mode, maker, switched', [(0, 'xfade_row', True), (1, 'wheel_row', False),
-                                                    (2, 'resume_row', False), (3, 'night_row', True)])
+                                                    (2, 'resume_row', False), (3, 'night_row', True),
+                                                    (4, 'volume_row', False)])
 def test_each_row_opens_the_page_under_its_own_name(fw, mode, maker, switched):
     page = Page(fw, {})
     row = page.row_text(maker)
@@ -577,6 +578,40 @@ def test_night_shifts_wheel_warms_a_step_a_tick_and_turns_it_on(fw):
     one = kelvin()
     assert one < 3000 and fw.fn('night_on', C.c_int)() == 1 and str(one) in page.label()
     assert page.key(NEXT) == 1 and 3000 - kelvin() == 2 * (3000 - one) and str(kelvin()) in page.label()
+
+
+def volume_page(fw, volume, limit):
+    fw.var('g_volume', C.c_ubyte).value, fw.var('g_maxvolume', C.c_ubyte).value = volume, limit
+    fw.var('wheel_speed', C.c_int).value = 0  # a slow turn: 1 a tick (volume.c vol_next)
+    return opened(fw, 4, {})
+
+
+def test_the_volume_row_shows_the_volume(fw):
+    fw.var('g_volume', C.c_ubyte).value = 37
+    assert digits(Page(fw, {}).row_text('volume_row')) == '37'
+
+
+def test_the_volume_page_sets_and_saves_the_volume_up_to_max_volume(fw):
+    page = volume_page(fw, 58, 60)
+    volume = fw.var('g_volume', C.c_ubyte)
+    assert page.label() == '58' and page.key(NEXT) == 1 and volume.value == 59 and page.label() == '59'
+    assert page.config.written == [('VOLUME', 59)] and [a[:2] for _, a in fw.calls('device_set_volume')] == [(59, 1)]
+    page.key(NEXT), page.key(NEXT)
+    assert volume.value == 60 and len(page.config.written) == 2  # Max Volume's top: nothing more to save
+    page.fire('img_dec', CLICK)
+    assert volume.value == 59 and page.config.written[-1] == ('VOLUME', 59)
+    assert page.key(CENTER) == 0  # no switch: Centre is stock's, which goes back
+
+
+def test_a_drag_on_the_volume_plays_each_step_and_saves_at_its_release(fw):
+    page = volume_page(fw, 10, 60)
+    for value in (30, 120):  # past Max Volume: held to it
+        page.shows = value
+        page.fire('slider_bootvol', CHANGING)
+    assert fw.var('g_volume', C.c_ubyte).value == 60 and not page.config.written
+    assert [a[0] for _, a in fw.calls('device_set_volume')] == [30, 60]
+    page.fire('slider_bootvol', CHANGED)
+    assert page.config.written == [('VOLUME', 60)]
 
 
 class Centre:

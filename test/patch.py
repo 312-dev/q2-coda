@@ -910,11 +910,15 @@ for name in ['playing_page','volume_dialog','saverscreen_page','usbmode_page','u
     m=Machine(); m.page(name); assert m.call()==0 and not m.moved(); passed()
 # A volume dialog in front that is not yet the window manager's key target (its open event comes on the pass's idle): the
 # tick would pass it and open another dialog over it (#303). The filter steps the volume and the dialog's slider and stops
-# the key, at the limit too; dark as lit.
+# the key, at the limit too. Dark it moves nothing and goes on, to on_wm_keyup_fun's hook, which drops it
+# (volume.c vol_wm_keyup).
 for lit in (1,0):
-    m=Machine(); m.mock('device_set_volume','write_int_config'); slider=m.node('slider','slider_vol')
+    m=Machine(); m.mock('device_set_volume','write_int_config'); slider=m.node('slider','slider_vol',value=30)
     m.top=m.node('dialog','volume_dialog',[slider])
     for name,v in (('g_backlight_status',lit),('g_volume',30),('g_maxvolume',31)): m.byte(syms[name],v)
+    if not lit:
+        assert m.call(O['KEY_NEXT'])==0 and m.u.mem_read(syms['g_volume'],1)[0]==30 and m.nodes[slider]['value']==30
+        assert not any(c[0]=='device_set_volume' for c in m.calls); passed(); continue
     assert [m.call(O['KEY_NEXT']) for _ in range(3)]==[11]*3 and m.u.mem_read(syms['g_volume'],1)[0]==31 and m.nodes[slider]['value']==31
     assert m.call(O['KEY_PREV'])==11 and m.u.mem_read(syms['g_volume'],1)[0]==30 and m.nodes[slider]['value']==30; passed()
 GATES=[('g_backlight_status',0),('g_lockscreen_pageflag',1),('g_testmode_flag',1),
@@ -16079,14 +16083,10 @@ limits=[f"Standby Limit: {O[f'STANDBY_LIMIT_{i}']}h" for i in (1,2,3)]
 for v,want in ((1,limits[0]),(2,limits[1]),(3,limits[2]),(0,'Standby Limit: Off')):
     assert click(0)==[(v,'Q2POD','STANDBYLIMIT')] and texts()[0]==want
 passed()
-# Volume guard (#46; its wheel engine in test/playback.py): off by default, the dark wheel as stock;
-# the row saves VOLGUARD and sets wheel_guard, which the encoder thread reads.
+# Controls: the wheel's and the buttons' rows (Buttons Lock stock's by key, for its translation).
 m,rows,texts,icons,click=settings_page('display','scroll_view_display',stock_rows=3,sub=3)
-assert texts()==['Wheel Sensitivity: 50%','Hold Return: Recent','Clicker: Off','system_keylock','Wake: Single Press','Volume Guard']  # stock's by key, for its translation
-assert icons==['system_display','playset_folderjump','system_keytone','system_keylock','system_keylock','system_keylock']
-guard=lambda: m.get(payload_syms['wheel_guard'])
-assert guard()==0 and click(5)==[(1,'Q2POD','VOLGUARD')] and texts()[5]=='Volume Guard' and guard()==1
-assert click(5)==[(0,'Q2POD','VOLGUARD')] and texts()[5]=='Volume Guard' and guard()==0; passed()
+assert texts()==['Wheel Sensitivity: 50%','Hold Return: Recent','Clicker: Off','system_keylock','Wake: Single Press']
+assert icons==['system_display','playset_folderjump','system_keytone','system_keylock','system_keylock']; passed()
 # Fast Navigation (Display, Cover Flow's page, fourth from the end, before Scan Song Durations, Position Bar and Library): off by default; the row saves BIGLIBRARY, and Cover
 # Flow reads it at once (ringnav_big_library: letters, years and half copies); a stored value other than 1 is off.
 bm,brows,btexts,bicons,bclick=settings_page('display','scroll_view_display',stock_rows=3,sub=2)
@@ -16330,17 +16330,35 @@ def saver_mode(patched,read):
     c.u.emu_start(0x504c78,0x504c7c,count=1)
     return c.u.mem_read(syms['g_screensaver_mode'],1)[0]
 assert [saver_mode(True,v) for v in (0,1)]==[0,0] and [saver_mode(False,v) for v in (0,1)]==[0,1]; passed()
-# The volume dialog steps the volume with the screen off, as on V1.32 (build.py VOL_DARK, #303): stock V1.36's
-# volume_dialog_on_keyup returns 0 dark, so the tick went on to on_wm_keyup_fun, which opened one more volume dialog over
-# the last and changed nothing. Stock's own handler, a wheel tick up at 10: patched it stores 11, sets and saves it and
-# stops the key (RET_STOP) dark as lit; stock's does so only lit.
+# The volume dialog's wheel tick, up at 10: lit, it stores 11, sets and saves it and stops the key (RET_STOP), patched
+# or not. Dark, stock V1.36's volume_dialog_on_keyup returns 0 at once, so the tick went on to on_wm_keyup_fun, which
+# opened one more volume dialog over the last (#303). Patched, the dialog's step is stock's dark too (build.py VOL_DARK)
+# but its hook (volume.c vol_keyup) returns 0 first, and on_wm_keyup_fun's hook drops the tick (vol_wm_keyup, below):
+# the wheel sets nothing with the screen off.
 def vol_steps(patched,lit):
     c=Machine(patched); c.mock('device_set_volume','write_int_config','widget_get_prop','value_uint32','timer_count','widget_remove_timer','value_set_uint32','widget_set_prop','widget_add_timer')
     for name,v in (('g_backlight_status',lit),('g_volume',10),('g_maxvolume',100)): c.byte(syms[name],v)
     ret=c.call(O['KEY_NEXT'],address=0x4a3688,args=(c.node('dialog','volume_dialog'),c.event,0,0),gap=0)
     return ret,c.u.mem_read(syms['g_volume'],1)[0],[x[0] for x in c.calls if x[0] in ('device_set_volume','write_int_config')]
-for lit in (0,1): assert vol_steps(True,lit)==(0xb,11,['device_set_volume','write_int_config']),lit
+assert vol_steps(True,1)==(0xb,11,['device_set_volume','write_int_config']) and vol_steps(True,0)==(0,10,[])
 assert vol_steps(False,1)==(0xb,11,['device_set_volume','write_int_config']) and vol_steps(False,0)==(0,10,[]); passed()
+# The wheel's volume is a lit playback screen's (volume.c vol_wm_keyup, on_wm_keyup_fun's hook): stock's own
+# on_wm_keyup_fun opens its volume dialog on a wheel tick no page took on Now Playing, AirPlay's and Internet Radio's
+# pages (and Spotify's showing a track, test/fw), a toast over them too, and on nothing else, nor dark; stock's opens it
+# on every page, lit or dark. The keys it does not drop stay stock's (Play/Pause's own test above).
+def wheel_volume(name,patched=True,lit=1,toast=False,key=O['KEY_NEXT']):
+    m=Machine(patched); m.mock('navigator_to')
+    stack=[m.node('window',name)]+([m.node('dialog','msginfo_dialog')] if toast else [])
+    m.nodes[m.wm]={'children':stack}; m.top=stack[-1]; m.byte(syms['g_backlight_status'],lit)
+    m.call(key,address=syms['on_wm_keyup_fun'],gap=0)
+    return [m.text(c[1]) for c in m.calls if c[0]=='navigator_to']
+VOL=['dialog/volume_dialog']
+for name in ('playing_page','airplay_page','radionp_page'):
+    assert wheel_volume(name)==VOL and wheel_volume(name,key=O['KEY_PREV'])==VOL and wheel_volume(name,lit=0)==[],name
+assert wheel_volume('playing_page',toast=True)==VOL
+for name in ('sysset_page','qrcode_page','offline_page','spotify_page','spotbrowse_page','npabout_page'):
+    assert wheel_volume(name)==[] and wheel_volume(name,patched=False)==VOL,name
+assert wheel_volume('sysset_page',patched=False,lit=0)==VOL; passed()
 # A press the window in front changed under stays ended until its release, as on V1.32 (build.py KEY_ABORTED, #303).
 # Stock's own input_device_status, a held Play/Pause: its press, its hold, the window change (the abort a window's open
 # event makes), the button's next repeat, time for another hold, its release. Stock V1.36 takes the repeat as a new press:
@@ -16463,21 +16481,20 @@ passed()
 m,rows,texts,*_=settings_page('power','scroll_view_powermanager',{'CHARGELIMIT':'1','WAKEDOUBLE':'1','VOLGUARD':'1','STANDBYLIMIT':'2'})
 assert texts()==[limits[1],f"Charge Limit: {O['CHARGE_STOP']}%",'USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox','Restart','Shut Down']
 m,rows,texts,*_=settings_page('display','scroll_view_display',{'WAKEDOUBLE':'1','VOLGUARD':'1'},stock_rows=3,sub=3)
-assert texts()[4:]==['Wake: Double Press','Volume Guard']
-assert m.get(payload_syms['wheel_guard'])==1; passed()
+assert texts()[4:]==['Wake: Double Press']; passed()  # VOLGUARD, Volume Guard's key in 1.8.2 and before: no row
 m,rows,texts,*_=settings_page('power','scroll_view_powermanager',{'STANDBYLIMIT':'4'})
 assert texts()[0]=='Standby Limit: Off'; passed()  # out of range: Off
 # Playback: stock V1.36's thirteen rows less its last two (Volume and Album Display, whose page's rows are here, and
-# Folder skip, Library & Folders'), then ours; stock's Max Volume and Default Volume pages open from their rows, and
-# Enlarged Album Art flips stock's own byte and key.
+# Folder skip, Library & Folders'), then ours; Volume (its slider page, below), stock's Max Volume and Default Volume
+# pages open from their rows, and Enlarged Album Art flips stock's own byte and key.
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13)
-assert len(rows)==9 and icons==['playset_gapless','playset_memplay','playset_balance','playset_balance','playset_folderjump','playset_maxvol','playset_bootvol','playset_covermode','playset_folderjump']
-assert texts()==['Crossfade: Off','Resume Songs: 30 min','Mono Audio','Swap L/R','Library & Folders','playset_maxvol','playset_bootvol','playset_covermode','On-The-Go']
-assert len(m.nodes[m.settings_view]['children'])==20 and not set(m.entries[11:])&set(m.nodes[m.settings_view]['children'])
-assert [click(5),m.opened[-1],click(6),m.opened[-1]]==[[],('playset/maxvol_page',None),[],('playset/bootvol_page',None)]
-m.byte(syms['g_bigcovermode'],0); assert click(7)==[(1,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\1' and switch_image(m,rows[7])=='switch_on'
-assert click(7)==[(0,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\0' and switch_image(m,rows[7])=='switch_off'
-assert click(8)==[(0,'Q2POD','OTG')] and click(8)==[(1,'Q2POD','OTG')]  # On-The-Go, on unless chosen
+assert len(rows)==10 and icons==['playset_gapless','playset_memplay','playset_balance','playset_balance','playset_folderjump','playset_maxvol','playset_maxvol','playset_bootvol','playset_covermode','playset_folderjump']
+assert texts()==['Crossfade: Off','Resume Songs: 30 min','Mono Audio','Swap L/R','Library & Folders','Volume: 0','playset_maxvol','playset_bootvol','playset_covermode','On-The-Go']
+assert len(m.nodes[m.settings_view]['children'])==21 and not set(m.entries[11:])&set(m.nodes[m.settings_view]['children'])
+assert [click(6),m.opened[-1],click(7),m.opened[-1]]==[[],('playset/maxvol_page',None),[],('playset/bootvol_page',None)]
+m.byte(syms['g_bigcovermode'],0); assert click(8)==[(1,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\1' and switch_image(m,rows[8])=='switch_on'
+assert click(8)==[(0,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\0' and switch_image(m,rows[8])=='switch_off'
+assert click(9)==[(0,'Q2POD','OTG')] and click(9)==[(1,'Q2POD','OTG')]  # On-The-Go, on unless chosen
 # Library & Folders: its row opens stock's page again as the sub-page, stock's Folder skip kept, ours built.
 assert click(4)==[] and m.opened[-1]==('playset/playset_page',None) and m.get(payload_syms['playset_sub'])==0
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,sub=1)
@@ -16822,6 +16839,18 @@ m.stack=[m.top]; m.nodes[m.wm]=dict(type='window_manager',name='',children=m.sta
 assert click(1)==[]
 m.nodes[m.slider]['value']=53; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and texts()[1]=='Resume Songs: 55 min'
 assert press(m.top,O['EVT_DESTROY'])==[(55,*R)] and texts()[1]=='Resume Songs: 55 min'; passed()
+# Playback's Volume row opens it on the volume (crossfade.c xfade_open 4): no switch, 0 to Max Volume, heard and saved
+# at once (a drag at its release), the wheel vol_next's steps (1 a slow tick); Centre goes back.
+m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13)
+m.mock('device_set_volume'); m.byte(syms['g_volume'],30); m.byte(syms['g_maxvolume'],60)
+m.stack=[m.top]; m.nodes[m.wm]=dict(type='window_manager',name='',children=m.stack,visible=1)
+assert click(5)==[] and m.nodes[m.top]['name']=='bootvol_page' and m.nodes[m.title]['text']=='Volume'
+assert m.nodes[m.switch]['visible']==0 and m.nodes[m.vol]['text']=='30'
+V='PLAYSET','VOLUME'
+assert turn()==[(31,*V)] and m.nodes[m.vol]['text']=='31' and texts()[5]=='Volume: 31' and press(m.dec)==[(30,*V)]
+m.nodes[m.slider]['value']=90; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and m.nodes[m.vol]['text']=='60'
+assert press(m.slider,O['EVT_VALUE_CHANGED'])==[(60,*V)] and turn()==[] and texts()[5]=='Volume: 60'
+assert m.confirm()==11 and [c[0] for c in m.calls].count('navigator_back')==1; passed()
 # Crossfade's row opens it with its switch: Off or XF_MIN..XF_MAX s. A drag saves both keys at its
 # release; the switch, +/- and the wheel save each change.
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13)

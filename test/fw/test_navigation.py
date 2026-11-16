@@ -387,8 +387,9 @@ def test_pod_settings_read_their_keys_once(fw):
     assert fw.fn('ringnav_artist_view', C.c_int)() == 2 and fw.fn('ringnav_big_library', C.c_int)() == 1
     assert fw.fn('ringnav_playlist_coverflow', C.c_int)() == 1
     assert fw.fn('ringnav_year_old', C.c_int)() == 1 and fw.fn('ringnav_artist_az', C.c_int)() == 0
-    assert fw.var('wheel_guard', C.c_int).value == 1
-    count = len(fw.calls('toolsReadConfig'))
+    keys = [C.string_at(c[1][2]) for c in fw.calls('toolsReadConfig')]
+    assert b'VOLGUARD' not in keys  # Volume Guard's key, left by an older version, is never read
+    count = len(keys)
     fw.fn('ringnav_year_old', C.c_int)()
     assert len(fw.calls('toolsReadConfig')) == count
 

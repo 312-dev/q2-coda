@@ -921,7 +921,7 @@ SIXTEENTHS_MOST=lambda pct: 100*16//SIXTEENTHS[pct]+1  # half a turn's ticks, an
 # Ordinary use, stamped, at four sensitivities: a slow turn over the seam, a fast one, a reversal, a
 # rest, a tap and a flick. The same ticks at the same times mean the same list ramp downstream; this
 # number is the code before the gate and Return's stop, so normal feel did not move. It covers what's
-# in it: none of Volume Guard, the raw travel, a fractional step or a lost lift.
+# in it: none of the raw travel, a fractional step or a lost lift.
 ORDINARY_WANT=0x1ac3e3c3
 def ordinary(pct):
     m=EncoderMachine(pct); m.now=m.start; out=[]
@@ -933,8 +933,7 @@ def ordinary(pct):
     return out
 assert zlib.crc32(repr([ordinary(pct) for pct in (50,100,130,200)]).encode())==ORDINARY_WANT
 # The same with what the CRC left out, against its own number from the code before: a lost lift (the
-# next touch goes on from it) and a fractional step, 130%'s, over a mid-turn change; Volume Guard's
-# own checks follow this block.
+# next touch goes on from it) and a fractional step, 130%'s, over a mid-turn change.
 ORDINARY2_WANT=0xb7bde5ad
 def ordinary2(pct):
     m=EncoderMachine(pct); m.now=m.start; out=m.turn(50,3,15); m.now+=2000; out+=m.turn(50,3,15,x=0); m.fn('wheel_set_pct',130); out+=m.turn(50,3,15,x=0); m.read(m.x,0)
@@ -1114,10 +1113,9 @@ for _ in range(3): m.x=(m.x+U-1)%200+1; assert not m.read(m.x,1,gap=FRESH-1) and
 m=stopped(); ghost(m,100,5); assert m.mute(); m.press(O['KEY_CENTER']); assert m.loop_posts[-1][1]==O['KEY_CENTER'] and m.input(DOWN_,O['KEY_CENTER'])
 m.x=(m.x+4)%200+1; assert not m.read(m.x,1,gap=0) and m.mute()
 m.x=(m.x+4)%200+1; m.read(m.x,1,gap=3600*1000); assert not m.mute() and ghost(m,20,5)
-# Volume Guard: no shield from a ghost. Screen off, it holds the first WHEEL_DARK_GUARD units of any touch, then a
-# ghost with no lift ticks on (docs/internals.md); the stop works dark too.
-m=EncoderMachine(); m.word(ps['wheel_guard'],1); m.byte(syms['g_backlight_status'],0)
-m.read(100,1); m.x=100; assert not m.read(100+U,1) and ghost(m,100,5); m.drain(); m.press(); since(m,STOP); m.press(); assert m.mute() and not ghost(m,20,5)
+# The stop works dark too: a ghost with no lift ticks on there as lit (the UI takes each tick as nothing).
+m=EncoderMachine(); m.byte(syms['g_backlight_status'],0)
+m.read(100,1); m.x=100; assert ghost(m,100,5); m.drain(); m.press(); since(m,STOP); m.press(); assert m.mute() and not ghost(m,20,5)
 # Vortex and the lyrics read the raw travel with a thumb held down as long as they like: not ticks.
 m=EncoderMachine(); m.word(ps['wheel_raw'],1); n=m.turn(3000,2,20)
 assert m.get(ps['wheel_travel'])==2*3000 and not m.q and not n; m.word(ps['wheel_raw'],0)
@@ -1169,46 +1167,13 @@ else:
     m.now+=FRESH; assert not m.input(DOWN_,N); assert m.log_opens==2
     m=stopped(); n=m.log_opens; m.read(m.x,1,gap=1); assert not m.input(DOWN_,N) and not m.input(UP_,N) and m.log_opens==n and m.get(ps['wl_drops'])==0
 checks+=1
-# Volume guard on (Q2POD VOLGUARD, #46), screen off: a touch's first WHEEL_DARK_GUARD units one way
-# tick nothing and are dropped; then it ticks as lit, reversals and new touches too, until WHEEL_DARK_IDLE_MS without travel. A
-# reversal, lift or pause under the guard starts it again; travel is units, so sensitivity aside.
-D,IDLE=O['WHEEL_DARK_GUARD'],O['WHEEL_DARK_IDLE_MS']
-lit=lambda m: m.byte(syms['g_backlight_status'],1)
-def dark(m,on=1):
-    m.config['VOLGUARD']=str(on)
-    m.byte(syms['g_backlight_status'],0); m.word(ps['wheel_guard'],on)
-def later(ms): return lambda m: setattr(m,'now',m.now+ms)
+# Screen off the wheel ticks as lit: the encoder thread has no dark rule (the UI drops a dark tick, volume.c
+# vol_wm_keyup), and a config.ini's VOLGUARD, Volume Guard's key in 1.8.2 and before, changes nothing.
+def dark(m):
+    m.config['VOLGUARD']='1'; m.byte(syms['g_backlight_status'],0)
 def turn(x,n,step=1): return [((x+step*k-1)%200+1,1) for k in range(1,n+1)]  # a unit per sample from x
-X=10+D-1  # where D-1 units up from 10 stop
-assert D==130 and wheel([dark,(10,1)]+turn(10,D-1))[0]==[]           # a brush under the guard
-assert wheel([dark,(10,1)]+turn(10,D-1),sensitivity('200')[0])[0]==[]  # at any sensitivity
-assert wheel([dark,(10,1)]+turn(10,D+2*U-1))[0]==[P]                  # past it: every U ticks
-assert wheel([dark,(10,1)]+turn(10,D+2*U))[0]==[P,P]
-assert wheel([dark,(150,1)]+turn(150,D+U,-1))[0]==[N]                 # either way, over the seam
-assert wheel([dark,(150,1),(90,1),(90,1)]+turn(90,D+U-60,-1))[0]==[N]  # still samples do not reverse
-for step,key in ((1,P),(-1,N)):
-    samples=[dark,(100,1),((100+90*step-1)%200+1,1),((100+170*step-1)%200+1,1)]
-    assert wheel(samples)[0]==[key]                                  # crossing carries its excess
-    assert wheel(samples+[((100+(D+2*U)*step-1)%200+1,1)])[0]==[key,key]
-assert wheel([(100,1),(100-U//2,1),(100-U//2,1),(100-U,1)])[0]==[N]  # lit carry survives still samples too
-assert wheel([dark,(10,1)]+turn(10,D+U//4),sensitivity('200')[0])[0]==[P]
-assert wheel([dark,(10,1)]+turn(10,D-1)+turn(X,D+U-1,-1))[0]==[]      # a reversal starts it again
-assert wheel([dark,(10,1)]+turn(10,D-1)+turn(X,D+U,-1))[0]==[N]
-assert wheel([dark,(10,1)]+turn(10,D-1)+[(X,0),(X,1)]+turn(X,D-1))[0]==[]  # so does a lift
-assert wheel([dark,(10,1)]+turn(10,D-1)+[later(IDLE)]+turn(X,U))[0]==[]    # and a pause
-assert wheel([dark,(10,1)]+turn(10,D-1)+[later(IDLE-1)]+turn(X,1+U))[0]==[P]
-Y=10+D  # open: a new touch and a reversal tick at once, until the wheel idles
-assert wheel([dark,(10,1)]+turn(10,D)+[(Y,0),later(IDLE-1),(Y,1)]+turn(Y,U))[0]==[P]
-assert wheel([dark,(10,1)]+turn(10,D)+turn(Y,U,-1))[0]==[N]
-assert wheel([dark,(10,1)]+turn(10,D)+[(Y,0),later(IDLE),(Y,1)]+turn(Y,D))[0]==[]
-assert wheel([(10,1)]+turn(10,U))[0]==[P]                               # lit: as before
-assert wheel([lambda m: dark(m,0),(10,1)]+turn(10,U))[0]==[P]           # the guard off (default): as before
-assert wheel([dark,(10,1)]+turn(10,D-1)+[lit]+turn(X,U))[0]==[P]       # lit mid-turn ticks at once
-assert wheel([dark,(10,1)]+turn(10,D)+[lit]+turn(Y,1)+[dark]+turn(Y+1,U))[0]==[]  # and dark again arms
-def ui_pass(m):
-    m.handlers[ps['stock_sleep_trampoline']]='stock_sleep'
-    m.fn('ringnav_sleep',0x1234)
-assert wheel([dark,ui_pass,(10,1)]+turn(10,D)+[(Y,0),lit,ui_pass,dark,(Y,1)]+turn(Y,U))[0]==[]  # wake without wheel travel re-arms
+assert wheel([dark,(10,1)]+turn(10,U))[0]==[P] and wheel([(10,1)]+turn(10,U))[0]==[P]
+assert wheel([(100,1),(100-U//2,1),(100-U//2,1),(100-U,1)])[0]==[N]  # the carry survives still samples
 checks+=1
 # UI wiring: stock-style choice menu, selected marker, touch and wheel slider.
 m=PlaybackMachine(); m.top=m.node('window','playing_page'); m.stack=[m.top]; m.word(m.top+O['W_PARENT'],m.wm)

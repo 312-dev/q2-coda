@@ -48,6 +48,8 @@ HOOKS = {
     'on_wm_keylong_fun': (0x4f27e4, 'ringnav_keylong', 'keylong'),
     # The volume dialog's wheel ticks step at the wheel's speed, then stock's own step (volume.c vol_keyup)
     'volume_dialog_on_keyup': (0x4a3688, 'vol_keyup', 'vol_keyup'),
+    # The key-up no page took, whose wheel tick opens the volume dialog: playback screens' alone (volume.c vol_wm_keyup)
+    'on_wm_keyup_fun': (0x4f30c0, 'vol_wm_keyup', 'wm_keyup'),
     'playset_equalizer_page_init': (0x4b9c94, 'peq_page_init', None),
     'set_equalizer_value': (0x5039c0, 'peq_stock_eq', 'eq'),
     'select_timezone': (0x503b40, 'ringnav_timezone', 'timezone'),
@@ -553,7 +555,8 @@ SAVER_OFF = (0x504c78, 0xa0620000, 0xa0600000)
 # V1.36's volume_dialog_on_keyup leaves at once with the screen off (beqz g_backlight_status), so a dark wheel tick over the
 # volume dialog falls through to on_wm_keyup_fun, which opens "dialog/volume_dialog" again: navigator_to looks an open window
 # up by that path, never its name "volume_dialog", so every tick stacked one more dialog and none changed the volume. Each
-# closes on its own 3 s only once on top, so the lit screen sat under them (#303). The dialog steps dark as V1.32's: no branch.
+# closes on its own 3 s only once on top, so the lit screen sat under them (#303). The dialog takes its keys dark as V1.32's
+# (no branch); its hook (volume.c vol_keyup) still sends a dark wheel tick on, to on_wm_keyup_fun's, which drops it.
 VOL_DARK = (0x4a36b4, 0x10400045, 0)
 # Now Playing More's Artist info (0x5398fc) asks navigator_window_is_exist for "artistinfo_page" and "albuminfo_page", then
 # closes "localmusic/artistinfo_page" and "localmusic/albuminfo_page", the names it opens them by: navigator_close finds a

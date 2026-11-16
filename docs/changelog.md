@@ -1,6 +1,9 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Volume: the wheel changes the volume only on a playing page: Now Playing (TIDAL's and card apps' songs too), Spotify's, Internet Radio's and AirPlay's, and videos. Anywhere else it never opens the volume; on a page with nothing to scroll (TIDAL's **Not connected**, a card app's QR code, Now Playing's About) it does nothing and Return goes straight back. With the screen off the wheel does nothing.
+  - Settings: **Playback → Volume**, just before Max Volume, sets the volume from any page: turn the wheel or drag the slider, up to Max Volume.
+  - Controls: **Volume Guard** is gone. With the screen off the wheel no longer changes the volume, so there is nothing left for it to guard.
   - SyncLink, Shanling's phone remote, is gone from Settings and stays off.
   - Settings: this update starts every Q2 on q2-coda's own default settings, whatever it ran before (stock firmware or an earlier q2-coda), so no stock setting such as Enlarged Album Art stays on. Saved Wi-Fi networks, Bluetooth pairings, your library and ratings are kept. Later updates keep your settings.
   - Quick Settings (OLED): the pull-down is now a Control Center, as on an iPhone: round Wi-Fi, Bluetooth, AirPlay and Car Remote buttons, what's playing with its controls, Brightness and Volume sliders, and Lock, Sleep, Night Shift, EQ and Smart Wi-Fi buttons. Turn the wheel to move between them and press Center to use one; on a slider Center lets the wheel set it.

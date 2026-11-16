@@ -7,7 +7,10 @@
  * same way, the length a music track needs to keep its place (navigation.c resume_poll). Display's
  * Night Shift row opens it as well (xf.ctx 3): the switch and Centre cycle Off, On and Auto, as
  * Light Mode's row does, and the slider runs NS_COOL to NS_WARM, warmer to the right, a NS_STEP a
- * tick (nightshift.c). Mono Audio's row lives here too (mono_sync). */
+ * tick (nightshift.c). Playback's Volume row opens it as well (xf.ctx 4): the volume, 0 to Max
+ * Volume (vol_limit), no switch, the wheel at Now Playing's speed (volume.c vol_next) and Centre
+ * back, set and saved as a wheel tick on Now Playing sets it. Mono Audio's row lives here too
+ * (mono_sync). */
 #include "offsets.inc"
 #include "peq.h"
 #include "playback.h"
@@ -20,13 +23,14 @@
 #define WHEEL_ROW "label_wheel"  /* and Display's Wheel sensitivity row's */
 #define RS_ROW "label_resumemin" /* and Playback's Resume Songs row's */
 #define NS_ROW "label_night"     /* and Display's Night Shift row's */
+#define VOL_ROW "label_volume"   /* and Playback's Volume row's */
 #define RS_MIN 20
 #define RS_MAX 120
 #define RS_DEFAULT 30
 
 static struct {
     int read, on, seconds, done, key[8], stops, counted;
-    int ctx; /* the page's: 0 Crossfade, 1 Wheel sensitivity, 2 Resume Songs, 3 Night Shift */
+    int ctx; /* the page's: 0 Crossfade, 1 Wheel sensitivity, 2 Resume Songs, 3 Night Shift, 4 Volume */
     int sliding, unsaved, setting; /* a finger on the slider; a value it moved; refresh's own set */
     int rs_read, rs_min;
     int mono_read, mono, swap_read, swap;
@@ -112,6 +116,21 @@ static void night_text(void *label) {
 void night_row(void *label) {
     widget_set_name(label, NS_ROW);
     night_text(label);
+}
+
+/* The volume's top: Max Volume (g_maxvolume), at most 100. */
+static int vol_limit(void) { return g_maxvolume < 100 ? g_maxvolume : 100; }
+
+static void vol_text(void *label) {
+    char t[32];
+    tk_snprintf(t, sizeof t, "Volume: %d", g_volume);
+    row_value_text(label, t);
+}
+
+/* Playback's row (navigation.c ringnav_audioset makes it): the label, named for refresh(). */
+void volume_row(void *label) {
+    widget_set_name(label, VOL_ROW);
+    vol_text(label);
 }
 
 /* An int shared with hciplayer's filter (and q2video): made whole under tmp and renamed, as the
@@ -230,13 +249,14 @@ int swap_click(void *ctx, void *event) {
 }
 
 /* The slider's value: the sensitivity; Resume's minutes, RS_MIN - 5 for Off; Night Shift's steps
- * below NS_COOL, on or off; or 0 for Off, else the length. */
+ * below NS_COOL, on or off; the volume; or 0 for Off, else the length. */
 static int value(void) {
+    if (xf.ctx == 4) return g_volume;
     if (xf.ctx == 3) return (NS_COOL - night_kelvin()) / NS_STEP;
     if (xf.ctx == 2) return resume_min() ? resume_min() : RS_MIN - 5;
     return xf.ctx ? wheel_pct() : xf.on ? xf.seconds : 0;
 }
-static const int steps[] = { 1, 10, 5, 1 }; /* a tick or +/-, by xf.ctx */
+static const int steps[] = { 1, 10, 5, 1, 1 }; /* a tick or +/-, by xf.ctx */
 
 /* Whether the page has its switch: Crossfade's and Night Shift's. */
 static int switched(void) { return xf.ctx == 0 || xf.ctx == 3; }
@@ -248,6 +268,7 @@ static void refresh(int save) {
     if (save && xf.ctx == 1) write_int_config(wheel_pct(), "Q2POD", "WHEELSENSITIVITY");
     if (save && xf.ctx == 2) write_int_config(xf.rs_min, "Q2POD", "RESUMEMIN");
     if (save && xf.ctx == 3) night_save();
+    if (save && xf.ctx == 4) write_int_config(g_volume, "PLAYSET", "VOLUME");
     if (save && !xf.ctx) {
         write_int_config(xf.on, "Q2POD", "XFADE");
         write_int_config(xf.seconds, "Q2POD", "XFADESEC");
@@ -257,9 +278,12 @@ static void refresh(int save) {
     if ((row = widget_lookup(window_manager(), WHEEL_ROW, 1))) wheel_text(row);
     if ((row = widget_lookup(window_manager(), RS_ROW, 1))) rs_text(row);
     if ((row = widget_lookup(window_manager(), NS_ROW, 1))) night_text(row);
+    if ((row = widget_lookup(window_manager(), VOL_ROW, 1))) vol_text(row);
     if (!xf.page) return;
     char t[16];
-    if (xf.ctx == 1)
+    if (xf.ctx == 4)
+        tk_snprintf(t, sizeof t, "%d", g_volume);
+    else if (xf.ctx == 1)
         tk_snprintf(t, sizeof t, "%d%%", wheel_pct());
     else if (xf.ctx == 2)
         tk_snprintf(t, sizeof t, xf.rs_min ? "%d min" : "Off", xf.rs_min);
@@ -284,6 +308,14 @@ static void refresh(int save) {
 }
 
 static void take(int n) {
+    if (xf.ctx == 4) { /* heard at once, a drag's every step too; saved as the rest (refresh) */
+        n = n < 0 ? 0 : n > vol_limit() ? vol_limit() : n;
+        if (n == g_volume) return;
+        g_volume = (unsigned char)n;
+        device_set_volume(n, 1);
+        refresh(1);
+        return;
+    }
     if (xf.ctx == 3) { /* a move turns it on, Auto kept */
         int top = (NS_COOL - NS_WARM) / NS_STEP;
         n = n < 0 ? 0 : n > top ? top : n;
@@ -357,7 +389,10 @@ int xfade_page(void *top) { return xf.page && top == xf.page; }
 /* The open page's range ends as its value reads them, into lo and hi, n bytes each: the slider's
  * minimum and maximum (slider_page.c). */
 void xfade_ends(char *lo, char *hi, unsigned n) {
-    if (xf.ctx == 3) { /* the slider runs cool to warm */
+    if (xf.ctx == 4) {
+        tk_snprintf(lo, n, "0");
+        tk_snprintf(hi, n, "%d", vol_limit());
+    } else if (xf.ctx == 3) { /* the slider runs cool to warm */
         tk_snprintf(lo, n, "%d K", NS_COOL);
         tk_snprintf(hi, n, "%d K", NS_WARM);
     } else if (xf.ctx == 2) {
@@ -373,7 +408,7 @@ void xfade_ends(char *lo, char *hi, unsigned n) {
 }
 
 /* The row's click: stock's Boot volume page, its handlers swapped for these; ctx 1 for Wheel
- * sensitivity's row, 2 for Resume Songs', 3 for Night Shift's. */
+ * sensitivity's row, 2 for Resume Songs', 3 for Night Shift's, 4 for Volume's. */
 int xfade_open(void *ctx, void *event) {
     int mode = (int)(long)ctx, wheel = mode == 1;
     settings();
@@ -405,7 +440,8 @@ int xfade_open(void *ctx, void *event) {
     widget_on(xf.slider, EVT_VALUE_CHANGING, slid, (void *)1L);
     widget_on(xf.slider, EVT_VALUE_CHANGED, slid, 0);
     widget_on(page, EVT_DESTROY, gone, page);
-    widget_set_text_utf8(title, mode == 3   ? "Night Shift"
+    widget_set_text_utf8(title, mode == 4   ? "Volume"
+                                : mode == 3 ? "Night Shift"
                                 : mode == 2 ? "Resume Songs"
                                 : wheel     ? "Wheel Sensitivity"
                                             : "Crossfade");
@@ -416,7 +452,8 @@ int xfade_open(void *ctx, void *event) {
     xf.ctx = mode;
     if (!switched()) widget_set_visible(xf.sw, 0, 0);
     slider_set_min(xf.slider, mode == 2 ? RS_MIN - 5 : wheel ? WHEEL_PCT_MIN : 0);
-    slider_set_max(xf.slider, mode == 3   ? (NS_COOL - NS_WARM) / NS_STEP
+    slider_set_max(xf.slider, mode == 4   ? vol_limit()
+                              : mode == 3 ? (NS_COOL - NS_WARM) / NS_STEP
                               : mode == 2 ? RS_MAX
                               : wheel     ? 200
                                           : XF_MAX);
@@ -435,7 +472,8 @@ static int single(const void *info) {
 
 /* ringnav(), the page on top: Centre toggles, a double press turns the screen off as on every
  * page, and the wheel sets the length, down to Off. Wheel sensitivity: the wheel a ten a tick
- * (not through +/-, which stock may have disabled), Centre to edit_key, which goes back. */
+ * (not through +/-, which stock may have disabled), Centre to edit_key, which goes back; Volume
+ * the same, its tick vol_next's. */
 int xfade_key(void *top, unsigned key) {
     static const unsigned release[EVENT_KEY / 4 + 1] = { [EVENT_KEY / 4] = KEY_CENTER };
     if (!xf.page || top != xf.page) return 0;
@@ -446,7 +484,7 @@ int xfade_key(void *top, unsigned key) {
         return press;
     }
     if (key != KEY_NEXT && key != KEY_PREV) return 0;
-    set_value(value() + (key == KEY_NEXT ? 1 : -1) * steps[xf.ctx], 0);
+    set_value(xf.ctx == 4 ? vol_next(key) : value() + (key == KEY_NEXT ? 1 : -1) * steps[xf.ctx], 0);
     return 1;
 }
 

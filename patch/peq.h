@@ -458,7 +458,6 @@ int card_path(const char *path); /* on the card, no ".." segment: what an app or
 int addon_is_icon(const char *name); /* a card app's Streaming icon, by its file:// name */
 void addon_poll(void), addon_stop(void), addon_paint(void *w, void *canvas), addon_card_away(void);
 const char *addon_qr_title(void *win); /* addon.c: the QR page's app name, 0 for another window */
-int addon_qr_page(void *win); /* addon.c: win is the QR page, where the wheel does nothing */
 void addon_forget(const char *dir), addon_quit(const char *dir);
 /* addon.c: a catalogue app started for a catplay (0 running, 1 started, -1 can't), and whether a
  * started one reads it yet */
@@ -609,6 +608,7 @@ int media_owner(void), media_status(void), media_playing(void), media_focused(vo
 void media_set_playing(int playing), media_key(unsigned key);
 void video_key(unsigned key);
 int radio_media(unsigned key), spot_media(unsigned key);
+int spot_np_track(void *win); /* spotify.c: win is Spotify's Now Playing with a track on it */
 int headset_gain(void);
 int spot_status(void), radio_status(void), video_status(void);
 unsigned spot_session(void), radio_session(void), video_session(void);
