@@ -78,6 +78,19 @@ def test_dev_build_ignores_an_enclosing_repository(tmp_path, monkeypatch):
     assert build.dev_build() == 1 and not (tmp_path/'.git').exists()
 
 
+STOCK_CONFIG = b'[PLAYSET]\nCOVERMODE=1\n[SYSSET]\nAUTOSCAN=1\nSTANDBYMODE=1\nWHEELMODE=1\nNAVHIDE=0'
+
+
+def test_the_default_config_names_english_so_no_language_guide_opens():
+    """A reset's config.ini: the three settings off, and LANGUAGE=2 (English) first in SYSSET, whose absence is what
+    sends config_init to stock's first-boot language guide."""
+    out = build.default_config(STOCK_CONFIG)
+    assert out == b'[PLAYSET]\nCOVERMODE=0\n[SYSSET]\nLANGUAGE=2\nAUTOSCAN=1\nSTANDBYMODE=0\nWHEELMODE=0\nNAVHIDE=0'
+    for bad in (STOCK_CONFIG.replace(b'AUTOSCAN', b'LANGUAGE=1\nAUTOSCAN'), STOCK_CONFIG + b'\n[SYSSET]\n'):
+        with pytest.raises(ValueError, match='Unexpected default config.ini'):
+            build.default_config(bad)
+
+
 def test_jumps():
     assert build.j(0x450000) == 0x08114000 and build.jal(0x450000) == 0x0c114000
     assert build.j(0x7) == 0x08000001 and build.jal(0x7) == 0x0c000001

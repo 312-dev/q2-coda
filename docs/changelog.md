@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - First start: a new Q2, or one after a reset, starts on Home in English instead of stock's language picker.
   - Library: Songs with no music on the card is a single **Scan Music Now** row with **No songs** and **Copy music to the SD card** under it, in place of stock's picture, its second message and the blue button.
   - Folders: the top of the screen says **Folders** at the SD card's root and the folder's own name inside it, instead of SD or a path.
   - Wording: the card is called the SD card everywhere: **System Update → SD Card Update**, and the messages when it goes in or comes out (stock said TF card).

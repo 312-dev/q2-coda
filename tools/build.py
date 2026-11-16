@@ -460,13 +460,18 @@ BT_SILENCE_SITES = ((0x41465c, 0x8e460030, 'j', 'timeout'), (0x414684, 0x0000282
 WATCHDOG = 'usr/bin/checkappprocess.sh'
 WATCHDOG_SLEEP = (b'\tsleep 2\n', b'\tsleep 10\n')
 # The config a reset copies to /mnt/data: Enlarged Album Art (10 s wait) and Standby start off. So does stock's Wheel Function: Q2 Pod runs stock in Volume Mode whatever the key holds (WHEEL_MODE), and a Q2 reset here and returned to stock gets Menu Mode, the default stock's changelog names and a missing key gives (the shipped file says 1).
+# It also names the language, English (2): stock's config_init (0x5047f8) sets g_guideflag when SYSSET LANGUAGE is
+# missing, and the first boot and every reset opened stock's language guide, where Q2 Pod's wheel and Centre are off.
+# Q2 Pod is English only (Settings has no Language row), so the guide is never shown (docs/internals.md#first-boot).
 DEFAULT_CONFIG = 'release/assets/default/raw/config.ini'
 DEFAULT_CONFIG_OFF = (b'COVERMODE', b'STANDBYMODE', b'WHEELMODE')
+DEFAULT_LANGUAGE = b'LANGUAGE=2\n'
 def default_config(config):
     for key in DEFAULT_CONFIG_OFF:
         check(config.count(b'\n%s=1\n' % key) == 1, 'Unexpected default config.ini')
         config = config.replace(b'\n%s=1\n' % key, b'\n%s=0\n' % key)
-    return config
+    check(config.count(b'[SYSSET]\n') == 1 and b'\nLANGUAGE=' not in config, 'Unexpected default config.ini')
+    return config.replace(b'[SYSSET]\n', b'[SYSSET]\n' + DEFAULT_LANGUAGE)
 # toolsSetRtcTime's command, with its padding; -u keeps the RTC in UTC. See docs/internals.md#clock.
 RTC_WRITE = (b'hwclock -w\0\0', b'hwclock -wu\0')
 # networktime_adjust_thd's time servers (0x7836bc, after time.apple.com, before time.windows.com): stock's
