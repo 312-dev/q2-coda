@@ -2308,6 +2308,7 @@ int ringnav_paint(void *w, void *canvas) {
     coverflow_paint(w, canvas);
     keylock_paint(w, canvas);
     search_strip_overlay(w, canvas);
+    confirm_bar_dim(w, canvas);
     if (w == st.cf_letter_surface && st.cf_letter &&
         (st.cf_letter_held || (unsigned)time_now_ms() - st.cf_letter_at < LETTER_MS) &&
         P(canvas, CANVAS_LCD)) {
@@ -5180,11 +5181,13 @@ int ringnav_paint_bg(void *w, void *canvas) {
     void *wm = window_manager(), *bar = *(void *const *)system_bar;
     feedback_confirm_bar(w, canvas);
     modal_paint(w, canvas);
+    confirm_paint(w, canvas); /* the confirmation card (feedback.c) */
     paint_selection(w, canvas);
     grey_rows(w); /* first: paint_songs reserves the marks of the rows it greys */
     paint_songs(w, canvas);
     paint_modal_rows(w, canvas);
     feedback_confirm_switch(w, canvas);
+    confirm_rows_paint(w, canvas);
     feedback_switch_bar(w, canvas);
     feedback_scan_bar(w, canvas);
     empty_state_paint(w, canvas); /* a page's empty state (feedback.c) */

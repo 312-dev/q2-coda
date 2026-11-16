@@ -653,3 +653,272 @@ void feedback_shuffled(const char *what, int songs) {
     conf_line(page, 228, 24, count, -1, 18, tok(TOK_TERTIARY));
     conf.timer = timer_add(conf_due, (void *)0, CONF_MS);
 }
+
+/* The confirmation card (docs/oled-design.md#confirmation-card): stock's sortselect_dialog, as the
+ * inset modal's pickers use it (menu_modal.c modal_list), its list the card's answers and the rest
+ * painted here. The scrim dims the page and the status row (confirm_bar_dim); the card is
+ * CARD_W wide at CARD_X, its stack centred on CARD_CY and kept within CARD_TOP..CARD_FOOT: 18 px
+ * of padding, the title (Inter Medium 20), the body (15 px Text Secondary, 19 px lines, 4 px under
+ * the title), the code (Inter Medium 30), then 14 px down the switch row and the answers, 32 px
+ * each, a destructive answer 12 px after the rest, and 8 px of padding. The answers' bar is 8 px in
+ * from the card's sides; a destructive one is red (Negative), its bar too when lit. */
+#define CARD_X 42
+#define CARD_W 291
+#define CARD_R 16
+#define CARD_CY 168
+#define CARD_TOP 44
+#define CARD_FOOT 302
+#define CARD_PAD_TOP 18
+#define CARD_PAD_FOOT 8
+#define CARD_IN 20 /* the text column, in from each side */
+#define CARD_TITLE_H 24
+#define CARD_BODY_GAP 4
+#define CARD_BODY_LINE 19
+#define CARD_CODE_GAP 6
+#define CARD_CODE_H 40
+#define CARD_ROWS_GAP 14
+#define CARD_ROW 32
+#define CARD_DEST_GAP 12
+#define CARD_BAR_IN 8
+#define CARD_SCRIM 0x80000000u /* the inset modal's dim */
+#define CARD_TIMER_MS 100      /* the timeout's seconds and bar */
+#define CARD_COUNT_PX TYPE(15)
+
+static struct {
+    void *dialog, *view;
+    confirm_t c;
+    char title[96], body[2][64], code[16];
+    int lines, toggle_on, top, rows_y, h, chosen;
+    unsigned timer, answer_timer, until;
+} cf __attribute__((section(".scratch")));
+
+int confirm_up(void) { return cf.dialog != (void *)0; }
+static int card_items(void) { return cf.c.n_rows + !!cf.c.toggle; }
+static int card_destructive(int row) {
+    return cf.c.kind == CONFIRM_DESTRUCTIVE && cf.c.n_rows > 1 && row == cf.c.n_rows - 1;
+}
+
+/* The card's height and top, and where its switch row and answers start (screen y). */
+static void card_layout(void) {
+    int h = CARD_PAD_TOP + CARD_TITLE_H;
+    if (cf.lines) h += CARD_BODY_GAP + cf.lines * CARD_BODY_LINE;
+    if (cf.code[0]) h += CARD_CODE_GAP + CARD_CODE_H;
+    int rows = h + CARD_ROWS_GAP;
+    h = rows + card_items() * CARD_ROW + (card_destructive(cf.c.n_rows - 1) ? CARD_DEST_GAP : 0) +
+        CARD_PAD_FOOT;
+    int top = CARD_CY - h / 2;
+    if (top + h > CARD_FOOT) top = CARD_FOOT - h;
+    if (top < CARD_TOP) top = CARD_TOP;
+    cf.top = top, cf.h = h, cf.rows_y = top + rows;
+}
+
+void confirm_close(void) {
+    void *d = cf.dialog;
+    cf.dialog = cf.view = (void *)0;
+    if (cf.timer) timer_remove(cf.timer), cf.timer = 0;
+    if (d) window_close(d);
+}
+
+static int card_answer(const void *unused) {
+    cf.answer_timer = 0;
+    confirm_t c = cf.c;
+    int row = cf.chosen, on = cf.toggle_on;
+    confirm_close();
+    if (c.answer) c.answer(c.ctx, row, on);
+    return 0;
+}
+/* Answers row once, from the next pass: the dialog closes before the caller's answer runs. */
+static void card_choose(int row) {
+    if (!cf.dialog || cf.answer_timer) return;
+    cf.chosen = row;
+    cf.answer_timer = timer_add(card_answer, (void *)0, 0);
+}
+static int card_back_row(void) { return cf.c.back >= 0 ? cf.c.back : 0; }
+
+static int card_click(void *ctx, void *event) {
+    int k = (int)(long)ctx;
+    if (k < 0) { /* the switch row */
+        cf.toggle_on = !cf.toggle_on;
+        if (cf.dialog) widget_invalidate_force(cf.dialog, (void *)0);
+    } else
+        card_choose(k);
+    return 0;
+}
+/* Return answers the back row; the music's keys go nowhere while the card asks. */
+static int card_key(void *dialog, void *event) {
+    unsigned key = (unsigned)I(event, EVENT_KEY);
+    if (key == KEY_PLAY || key == KEY_PREV || key == KEY_NEXT) return STOP;
+    if (I(event, EVENT_TYPE) != EVT_KEY_UP || key != KEY_RETURN) return 0;
+    card_choose(card_back_row());
+    return STOP;
+}
+static int card_gone(void *dialog, void *event) {
+    if (cf.dialog == dialog) {
+        cf.dialog = cf.view = (void *)0;
+        if (cf.timer) timer_remove(cf.timer), cf.timer = 0;
+    }
+    return 0;
+}
+/* The timeout's tick: a repaint for its seconds and bar, the answer at the end. */
+static int card_tick(const void *unused) {
+    if (!cf.dialog) return cf.timer = 0, 0;
+    if ((int)(cf.until - (unsigned)time_now_ms()) <= 0) {
+        cf.timer = 0;
+        card_choose(cf.c.timeout_row);
+        return 0;
+    }
+    widget_invalidate_force(cf.dialog, (void *)0);
+    return 1;
+}
+
+int confirm(const confirm_t *c) {
+    void *wm = window_manager(), *page = window_manager_get_top_window(wm);
+    if (cf.dialog || !c || c->n_rows <= 0) return 0;
+    navigator_to("dialog/sortselect_dialog");
+    void *dialog = window_manager_get_top_window(wm);
+    if (dialog == page) return 0;
+    if (tk_strcmp(widget_get_prop_str(dialog, "name", ""), "sortselect_dialog")) {
+        window_close(dialog);
+        return 0;
+    }
+    memset(&cf, 0, sizeof cf);
+    cf.c = *c;
+    cf.toggle_on = c->toggle_on;
+    tk_snprintf(cf.title, sizeof cf.title, c->title ? c->title : "", c->name ? c->name : "");
+    for (const char *s = c->body; s && *s && cf.lines < 2; ++cf.lines) {
+        unsigned n = 0;
+        while (s[n] && s[n] != '\n') ++n;
+        tk_snprintf(cf.body[cf.lines], sizeof cf.body[0], "%.*s", (int)n, s);
+        s += n + (s[n] == '\n');
+    }
+    tk_snprintf(cf.code, sizeof cf.code, "%s", c->code ? c->code : "");
+    card_layout();
+    void *back = widget_lookup(dialog, "img_return", 1),
+         *list = widget_lookup(dialog, "list_view", 1),
+         *view = widget_lookup(dialog, "scroll_view", 1),
+         *nav = widget_lookup(dialog, "view_navbar", 1);
+    widget_off_by_func(dialog, EVT_KEY_UP, (void *)SORTSELECT_KEYUP, dialog);
+    widget_off_by_func(back, EVT_CLICK, (void *)SORTSELECT_CLOSE, dialog);
+    widget_on(dialog, EVT_KEY_UP, card_key, dialog);
+    widget_on(dialog, EVT_KEY_DOWN, card_key, dialog);
+    widget_on(dialog, EVT_DESTROY, card_gone, dialog);
+    if (nav) widget_set_visible(nav, 0, 0);
+    widget_set_prop_str(dialog, "highlight", "");
+    widget_set_prop_int(dialog, "style:normal:bg_color", 0);
+    widget_set_prop_int(dialog, "style:normal:border_color", 0);
+    widget_destroy_children(view);
+    int out = theme()->sel_inset - CARD_BAR_IN, w = CARD_W + 2 * out, y = 0;
+    for (int k = c->toggle ? -1 : 0; k < c->n_rows; ++k) {
+        if (card_destructive(k)) {
+            void *gap = label_create(view, 0, y, w, CARD_DEST_GAP);
+            widget_set_text_utf8(gap, "");
+            y += CARD_DEST_GAP;
+        }
+        void *item = list_item_create(view, 0, y, w, CARD_ROW);
+        widget_use_style(item, "s_listitem_black");
+        widget_set_prop_int(item, "style:normal:bg_color", 0);
+        widget_on(item, EVT_CLICK, card_click, (void *)(long)k);
+        y += CARD_ROW;
+    }
+    if (list) {
+        I(list, ROW_HEIGHT) = 0;
+        I(list, LIST_DEFAULT_ITEM_HEIGHT) = 0;
+        widget_set_prop_int(list, "style:normal:bg_color", 0);
+        widget_move_resize(list, CARD_X - out, cf.rows_y - I(dialog, W_Y), w, y);
+        widget_set_prop_int(view, "virtual_h", y);
+        widget_set_prop_str(view, "self_layout", "default(x=0,y=0,w=100%,h=100%)");
+    }
+    cf.dialog = dialog, cf.view = view;
+    int first = c->kind == CONFIRM_NEUTRAL ? c->n_rows - 1 : 0;
+    st.touch_mode = 0;
+    ringnav_select(view, first + !!c->toggle, card_items());
+    if (c->timeout_ms > 0) {
+        cf.until = (unsigned)time_now_ms() + (unsigned)c->timeout_ms;
+        cf.timer = timer_add(card_tick, (void *)0, CARD_TIMER_MS);
+    }
+    return 1;
+}
+
+/* The status row under the card's scrim, from ringnav_paint after stock painted it. */
+void confirm_bar_dim(void *w, void *canvas) {
+    void *bar = *(void *const *)system_bar, *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
+    if (!cf.dialog || w != bar || !lcd) return;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
+    stock_canvas_set_fill_color(canvas, CARD_SCRIM);
+    canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
+    stock_canvas_set_fill_color(canvas, fill);
+}
+
+/* Under the dialog's rows: the scrim over the page, the card, its title, body, code and the
+ * timeout's bar along its foot. */
+void confirm_paint(void *w, void *canvas) {
+    void *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
+    if (!cf.dialog || w != cf.dialog || !lcd) return;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), raw = ui_ink_raw(1);
+    int dy = I(w, W_Y), top = cf.top - dy, cx = CARD_X + CARD_W / 2, tw = CARD_W - 2 * CARD_IN;
+    stock_canvas_set_fill_color(canvas, CARD_SCRIM);
+    canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
+    rect_t card = { CARD_X, top, CARD_W, cf.h };
+    fill_box(canvas, &card, RGBA(ipod_light() ? 0xffffff : RGB_RAISED), CARD_R);
+    int y = top + CARD_PAD_TOP + CARD_TITLE_H / 2;
+    ar_text(canvas, cf.title, 1, TYPE(20), tok(TOK_PRIMARY), 1, cx, y, tw, 1);
+    y += CARD_TITLE_H / 2;
+    for (int i = 0; i < cf.lines; ++i, y += CARD_BODY_LINE)
+        ar_text(canvas, cf.body[i], 0, TYPE(15), tok(TOK_SECONDARY), 1, cx,
+                y + (i ? 0 : CARD_BODY_GAP) + CARD_BODY_LINE / 2, tw, 1);
+    if (cf.lines) y += CARD_BODY_GAP;
+    if (cf.code[0])
+        ar_text(canvas, cf.code, 1, TYPE(30), tok(TOK_PRIMARY), 1, cx,
+                y + CARD_CODE_GAP + CARD_CODE_H / 2, tw, 1);
+    if (cf.c.timeout_ms > 0) { /* 2 px along the foot, emptying toward the answer it gives */
+        int left = (int)(cf.until - (unsigned)time_now_ms());
+        if (left < 0) left = 0;
+        rect_t track = { CARD_X + CARD_IN, top + cf.h - CARD_PAD_FOOT / 2 - 1, tw, 2 }, bar = track;
+        bar.w = (int)((long long)tw * left / cf.c.timeout_ms);
+        fill_box(canvas, &track, RGBA(tok(TOK_OFF)), 0);
+        if (bar.w > 0) fill_box(canvas, &bar, RGBA(tok(TOK_TERTIARY)), 0);
+    }
+    stock_canvas_set_fill_color(canvas, fill);
+    ui_ink_raw(raw);
+}
+
+/* Over the answers' list after the selection's bar: each row's words centred (a destructive one
+ * red, its lit bar red), the switch row's label and switch, the timeout's seconds. */
+void confirm_rows_paint(void *w, void *canvas) {
+    void *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
+    if (!cf.dialog || w != cf.view || !lcd) return;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), raw = ui_ink_raw(1), red = RGB_NEGATIVE,
+             primary = tok(TOK_PRIMARY);
+    int out = theme()->sel_inset - CARD_BAR_IN, cx = out + CARD_W / 2, k = cf.c.toggle ? -1 : 0;
+    for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) {
+        void *item = widget_get_child(w, i);
+        if (tk_strcmp(widget_get_type(item), "list_item")) continue;
+        int y = I(item, W_Y) + CARD_ROW / 2, lit = ringnav_row_selected(item) && !st.touch_mode;
+        if (k < 0) {
+            ar_text(canvas, cf.c.toggle, 0, TYPE(20), lit ? 0xffffff : primary, 1, out + CARD_IN, y,
+                    CARD_W - 2 * CARD_IN - 44, 2);
+            switch_mark(canvas, out + CARD_W - CARD_IN, y, cf.toggle_on, lit);
+        } else {
+            if (lit && card_destructive(k)) {
+                rect_t bar = { out + CARD_BAR_IN, I(item, W_Y), CARD_W - 2 * CARD_BAR_IN,
+                               CARD_ROW };
+                fill_box(canvas, &bar, RGBA(red), (unsigned)theme()->sel_radius);
+            }
+            ar_text(canvas, cf.c.rows[k], 0, TYPE(20),
+                    lit                   ? 0xffffff
+                    : card_destructive(k) ? red
+                                          : primary,
+                    1, cx, y, CARD_W - 2 * CARD_IN, 1);
+            if (cf.c.timeout_ms > 0 && k == cf.c.timeout_row) {
+                char s[16];
+                int left = (int)(cf.until - (unsigned)time_now_ms());
+                tk_snprintf(s, sizeof s, "%d s", left > 0 ? (left + 999) / 1000 : 0);
+                ar_text(canvas, s, 0, CARD_COUNT_PX, lit ? 0xffffff : tok(TOK_TERTIARY), 1,
+                        out + CARD_W - CARD_IN, y, 60, 3);
+            }
+        }
+        ++k;
+    }
+    stock_canvas_set_fill_color(canvas, fill);
+    ui_ink_raw(raw);
+}

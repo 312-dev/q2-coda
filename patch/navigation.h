@@ -413,6 +413,32 @@ int feedback_offline(void);
 void feedback_switch_bar(void *w, void *canvas);
 void feedback_scan_bar(void *w, void *canvas);
 void feedback_shuffled(const char *what, int songs);
+/* The confirmation card (docs/oled-design.md#confirmation-card): a card over the dimmed page that
+ * asked. title names the object ("Forget %s?": the one %s is name); body is at most two lines
+ * ('\n' between); code a large line ("482 913"); rows the answers top down, the safe one first.
+ * kind sets the default row and inks: CONFIRM_DESTRUCTIVE (the last row red after a gap, opens on
+ * row 0), CONFIRM_CONSEQUENTIAL (opens on row 0), CONFIRM_NEUTRAL (opens on the last row, Return
+ * answers row 0), CONFIRM_INFO (one row). back: the row Return and a tap off the card answer, -1
+ * for row 0. toggle: a switch row's label above the answers, toggle_on its start. timeout_ms: the
+ * card answers timeout_row by itself after this long, the seconds left shown on that row and a bar
+ * emptying along the card's foot. answer runs once, after the card has closed, with the chosen row
+ * and the switch's state. */
+enum { CONFIRM_NEUTRAL, CONFIRM_DESTRUCTIVE, CONFIRM_CONSEQUENTIAL, CONFIRM_INFO };
+typedef struct {
+    const char *title, *name, *body, *code;
+    const char *const *rows;
+    int n_rows, kind, back;
+    const char *toggle;
+    int toggle_on;
+    int timeout_ms, timeout_row;
+    void (*answer)(void *ctx, int row, int toggle_on);
+    void *ctx;
+} confirm_t;
+int confirm(const confirm_t *c); /* 1: shown; 0: another card is up, or no dialog */
+void confirm_close(void);        /* closes the card without an answer */
+int confirm_up(void);            /* a card is up */
+void confirm_paint(void *w, void *canvas), confirm_rows_paint(void *w, void *canvas);
+void confirm_bar_dim(void *w, void *canvas);
 void cf_veil(void *win, int on);              /* win unseen (1) or seen again under Coverflow */
 int ringnav_otg(void);                        /* Library's On-The-Go switch */
 int ringnav_playlist_coverflow(void);         /* Display's Playlist View is Cover Flow */

@@ -590,6 +590,31 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   Play Last ("Playing Last") and Add to and Remove from Favourites ("Added to Favorites",
   "Removed from Favorites").
 
+### Confirmation card
+
+A question answered in place: a card over the page that asked, the page dimmed behind it (approved 2026-11-16 from
+`design/confirm-overlay/`; `patch/feedback.c` `confirm`). It replaces the full-screen dialog page for every confirm
+as its callers move onto it.
+
+- **Surface:** the whole screen, status row too, under black at 50%; the card `#1C1C1E` (white in Light Mode), 291 px
+  wide at x 42 with 16 px corners, its stack centred on y 168 and kept inside y 44 to 302.
+- **Content**, 20 px in from each side: 18 px of padding; the title in Inter Medium 20, Text Primary, centred, naming
+  the object ("Forget WH-1000XM5?", never "Are you sure"), an ellipsis ending a long one; at most two body lines in
+  15 px Text Secondary on 19 px lines, 4 px under it, one consequence in sentence case; a code (a pairing's "482
+  913") in Inter Medium 30; then 14 px down an optional switch row (label at the text column, the switch at the right
+  column) and the answers, 32 px rows of Inter Regular 20 centred, stacked; 8 px of padding.
+- **Kinds:** destructive (Cancel, then 12 px of space, then the verb in Negative red; opens on Cancel), consequential
+  (Cancel, the verb; opens on Cancel), neutral (the safe answer, the verb; opens on the verb), info (OK). The lit
+  answer's bar is the accent, 8 px in from the card's sides, or Negative red on a destructive verb.
+- **Red:** Negative `#FF453A`, the design's one red, not the mock's `#FF3B30` (iOS's light-mode red, darker on black).
+- **Input:** the wheel moves the bar, stepping over the gap; Centre answers the lit row or flips the switch;
+  Return answers the safe row; Play/Pause, Next and Previous do nothing while the card asks.
+- **Timeout:** a card that answers itself (Guest Play's 30 s Decline) shows the seconds left on that row in 15 px
+  Text Tertiary and a 2 px bar along its foot emptying toward it, and answers it at 0 whatever the input.
+- **For code:** `confirm(&(confirm_t){ .title, .name, .body, .code, .rows, .n_rows, .kind, .back, .toggle,
+  .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx })` (`patch/navigation.h`); `answer(ctx, row, toggle_on)` runs
+  once after the card has closed. One card at a time: `confirm` answers 0 while one is up.
+
 ### Empty and offline
 
 **The empty state** (`patch/feedback.c` `empty_state`) is the one form for every page with nothing to show
@@ -1137,6 +1162,7 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   items' marks, the values beside their chevrons and the footers; and the song rows' marks for where a song lives
   (`catalogue.c` `catalogue_row_mark`).
 - The toast, the confirm as a dialog page and the empty note (`patch/feedback.c`), and the confirmation after a shuffle.
+- The confirmation card (`patch/feedback.c` `confirm`, [Confirmation card](#confirmation-card)).
 
 Still to build:
 
