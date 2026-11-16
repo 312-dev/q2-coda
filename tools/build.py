@@ -1921,6 +1921,8 @@ def compile_payload(out):  # pragma: no mutate block
         '--undefined=coverflow_player_cover', '--undefined=coverflow_grid_cover', '--undefined=coverflow_album_cover', '--undefined=coverflow_folder_cover', '--undefined=headset_bt_init',
         '--undefined=headset_status_register', '--undefined=headset_bt_autolink',
         *nav,out/'trampoline.o',*extra,'-o',out/'patch.elf')
+    # link.ld has no .data: an initialised static would land in the payload's read-only text
+    check(not re.search(r'\] \.s?data ', run('readelf', '-SW', out/'patch.elf')), 'Payload has .data: writable state goes in .scratch')
     run('llvm-objcopy','-O','binary',out/'patch.elf',out/'patch.bin')
     return symbols(out/'patch.elf')
 

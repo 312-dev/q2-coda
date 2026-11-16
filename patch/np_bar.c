@@ -66,11 +66,11 @@ int np_time_tap(void *ctx, void *event) {
     return 0;
 }
 
-/* Time in Title off: the bar's centre names the page in front, as an iPod's, in the bar role's face:
- * Now Playing or Cover Flow, else stock's title in the page's hidden navbar (scrlabel_title, or a
- * settings page's unnamed first child). Home, a page showing its navbar and an untitled page keep
- * the clock; a pop-up or keyboard leaves the bar as it is. This runs in a paint, which drops the
- * label's invalidate, so bar_repaint follows; the clock waits for its timer. */
+/* Time in Title off: the bar's centre names the page in front, as an iPod's, in the bar role's
+ * face: Now Playing or Cover Flow, else stock's title in the page's hidden navbar (scrlabel_title,
+ * or a settings page's unnamed first child). Home, a page showing its navbar and an untitled page
+ * keep the clock; a pop-up or keyboard leaves the bar as it is. This runs in a paint, which drops
+ * the label's invalidate, so bar_repaint follows; the clock waits for its timer. */
 void bar_title(void *bar, void *top) {
     static const unsigned
         now_playing[] = { 'N', 'o', 'w', ' ', 'P', 'l', 'a', 'y', 'i', 'n', 'g', 0 },
@@ -266,11 +266,12 @@ void np_theme(void) {
     static const char *const track[] = { "style:normal:bg_color", "style:pressed:bg_color",
                                          "style:over:bg_color", "style:disable:bg_color",
                                          "style:focused:bg_color" };
-    static unsigned written = TRACK_COLOR;
-    if (st.np_slider && (T->np_track_rgb != TRACK_COLOR || written != TRACK_COLOR)) {
+    static unsigned written
+        __attribute__((section(".scratch"))); /* the last written ^ TRACK_COLOR */
+    if (st.np_slider && (T->np_track_rgb != TRACK_COLOR || written)) {
         for (unsigned i = 0; i < sizeof track / sizeof *track; ++i)
             widget_set_prop_int(st.np_slider, track[i], (int)RGBA(T->np_track_rgb));
-        written = T->np_track_rgb;
+        written = T->np_track_rgb ^ TRACK_COLOR;
     }
     if (glyph) widget_set_opacity(glyph, T->np_state_op);
     if (st.np_album) widget_set_opacity(st.np_album, T->np_album_op);
