@@ -1517,6 +1517,21 @@ def test_a_turn_takes_the_lyrics_a_line_a_ticks_worth_and_holds_them(fw, ui, mcl
     assert lyr.settle() == taken - (detents + 1) * ROW  # rows' tops, a row a tick
 
 
+def test_a_held_turn_moves_the_lyrics_one_oled_row_a_tick_before_any_snap(fw, ui, mcl, st, wheel):
+    """lyric_poll: while the thumb stays on the wheel nothing snaps, so a tick's worth of travel shows bare: one of
+    OLED's one-row lines (lyrics_row_h, 51 px), not stock's LYRIC_SLOT (59), which the snap would then pull back."""
+    theme(fw, st)
+    lyr = Lyrics(fw, ui, mcl, st, sec=35)
+    start = lyr.settle()
+    assert ROW != SLOT  # else this test tells nothing
+    travel, held = wheel
+    held.value = 1
+    ticks = O['LYRIC_PUSH_DETENTS'] + 1
+    travel.value = -ticks * O['WHEEL_TICK_UNITS']  # clockwise, past a push: taken, a row a tick
+    lyr.poll(1)
+    assert lyr.settle() == start + ticks * ROW
+
+
 def test_a_small_turn_only_nudges_and_springs_back_still_following(fw, ui, mcl, st, wheel):
     theme(fw, st)
     lyr = Lyrics(fw, ui, mcl, st, sec=35)
