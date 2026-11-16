@@ -908,7 +908,7 @@ def test_a_download_that_ends_as_the_page_closes_says_where_it_is(w):
     w.ui.work()
     w.ui.destroy(page.page)  # after the rename, before the join
     w.ui.run(500)
-    assert w.ui.toasts == ['Update downloaded: use TF card update'] and w.card.files[TAR] == UPDATE_TAR
+    assert w.ui.toasts == ['Update downloaded: use SD Card Update'] and w.card.files[TAR] == UPDATE_TAR
     assert not w.calls('fwupdate_tf')
 
 

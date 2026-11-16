@@ -525,7 +525,7 @@ static int wait_done(const void *unused) {
     else if (nu.label)
         fwupdate_tf(); /* stock's TF card update: its battery check and confirm */
     else
-        toast("Update downloaded: use TF card update");
+        toast("Update downloaded: use SD Card Update");
     return 0;
 }
 

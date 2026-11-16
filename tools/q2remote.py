@@ -548,7 +548,7 @@ def main(argv):
         pull(*a); return 0
     if cmd == "install" and len(a) == 1:
         install(a[0])
-        print("update.tar is on the card: System settings → System Update → TF card update"); return 0
+        print("update.tar is on the card: System settings → System Update → SD Card Update"); return 0
     if cmd == "log" and len(a) <= 1:
         if a == ["-f"]:
             shell(f"tail -f {LOG}", timeout=None, sink=sys.stdout.buffer); return 0

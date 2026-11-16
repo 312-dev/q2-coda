@@ -1743,7 +1743,7 @@ def test_a_download_finished_off_the_page_waits_for_the_card_update(fw):
     Net(fw, rel((0, 200, None, BODY)))
     row.run()
     row.leave()
-    assert row.wait() == 0 and row.toasts == ['Update downloaded: use TF card update'] and not row.flashed
+    assert row.wait() == 0 and row.toasts == ['Update downloaded: use SD Card Update'] and not row.flashed
     assert card.files[TAR] == BODY
 
 

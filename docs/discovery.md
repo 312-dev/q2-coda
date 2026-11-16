@@ -1,6 +1,6 @@
 # Hide folders from library browsing
 
-Put an empty file named `database.ignore` inside any folder on the microSD card, then update
+Put an empty file named `database.ignore` inside any folder on the SD card, then update
 the music library. That folder and its subfolders are hidden from normal music browsing.
 Folder names and locations are unrestricted: `/Singles/database.ignore` and
 `/Needledrop/database.ignore` can keep the two collections separate. Use the exact lowercase

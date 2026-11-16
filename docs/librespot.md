@@ -1,6 +1,6 @@
 # Spotify (librespot)
 
-Q2 Pod plays Spotify through a librespot port that runs from the microSD card. Spotify Premium is required. After a one-time Spotify Connect pairing from a phone, the Q2 browses and plays on its own over Wi-Fi; the phone can still pick the music over Spotify Connect. Either way the Q2 streams and decodes it itself.
+Q2 Pod plays Spotify through a librespot port that runs from the SD card. Spotify Premium is required. After a one-time Spotify Connect pairing from a phone, the Q2 browses and plays on its own over Wi-Fi; the phone can still pick the music over Spotify Connect. Either way the Q2 streams and decodes it itself.
 
 ## Port
 

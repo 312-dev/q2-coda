@@ -163,7 +163,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
     <li class="chap"><span class="n">{{p:c2}}</span><a href="#c2">Chapter 2: Library and Music</a></li>
     <li><span class="n">{{p:addmusic}}</span><a href="#addmusic">Adding music</a></li>
     <li><span class="n">{{p:tagging}}</span><a href="#tagging">Tagging your music</a></li>
-    <li><span class="n">{{p:card}}</span><a href="#card">What goes on the microSD card</a></li>
+    <li><span class="n">{{p:card}}</span><a href="#card">What goes on the SD card</a></li>
     <li><span class="n">{{p:ratings}}</span><a href="#ratings">Rating songs and albums</a></li>
     <li><span class="n">{{p:playlists}}</span><a href="#playlists">Playlists and Long Songs</a></li>
     <li><span class="n">{{p:shuffle}}</span><a href="#shuffle">Shuffle, repeat and grouping</a></li>
@@ -278,14 +278,14 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
   </div>
   <div class="sec">
   <h2 id="install">Installing Q2 Pod</h2>
-  <p><b>What you need:</b> a Shanling Q2 with a microSD card, a USB-C cable, and a computer with an internet connection.</p>
-  <div class="note important"><p><span class="label">Important:</span> Charge the Q2 before you start. Only insert or remove the microSD card while the Q2 is <b>fully shut down</b> (not asleep), or the card can be corrupted.</p></div>
+  <p><b>What you need:</b> a Shanling Q2 with a SD card, a USB-C cable, and a computer with an internet connection.</p>
+  <div class="note important"><p><span class="label">Important:</span> Charge the Q2 before you start. Only insert or remove the SD card while the Q2 is <b>fully shut down</b> (not asleep), or the card can be corrupted.</p></div>
   <p class="task">Install Q2 Pod:</p>
   <ol class="steps">
     <li><b>Download</b> <code>update.tar</code> from the latest release at github.com/DiamondBond/q2-pod/releases/latest.</li>
     <li><b>Plug the Q2 into your computer</b> with the USB-C cable. The card shows up as a drive.</li>
     <li>Copy <code>update.tar</code> to the <b>root</b> of the card (not inside a folder), then eject and unplug.</li>
-    <li><b>Update:</b> on the Q2, open <b>System settings → System Update → TF card update</b>. Leave the card in until the Q2 restarts, and don’t unplug it while it updates.</li>
+    <li><b>Update:</b> on the Q2, open <b>System settings → System Update → SD Card Update</b>. Leave the card in until the Q2 restarts, and don’t unplug it while it updates.</li>
   </ol>
   <div class="note"><p><span class="label">Tip:</span> Still on the old Legacy build? Network Update can’t move you to this one. Install <code>update.tar</code> by hand once: copy it to the card’s root and update, as for a first install.</p></div>
 
@@ -364,7 +364,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
 <!-- ============ 2 LIBRARY ============ -->
 <section class="chapter" style="page: ch2">
   <div class="opener"><h1 id="c2">Library and Music</h1><div class="num">2</div></div>
-  <p class="lead">Put your music on the microSD card, build the library, and organise it with ratings, playlists and shuffle.</p>
+  <p class="lead">Put your music on the SD card, build the library, and organise it with ratings, playlists and shuffle.</p>
 
   <div class="sec">
   <h2 id="addmusic">Adding music</h2>
@@ -374,7 +374,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
     <li>On the Q2, choose <b>Library → Update Local Music</b>.</li>
   </ol>
   <p><b>Over Wi-Fi:</b> with the Q2 on your Wi-Fi network, open <b>System settings → Network → Wi-Fi File Transfer</b>. It shows an address and a six-digit PIN. Open the address in a browser on a computer on the same network and type the PIN when the page asks for it; then you can upload, download and delete files on the card. Each time you open Wi-Fi File Transfer it makes a new PIN. Five wrong PINs lock the page out: go back on the Q2 and open Wi-Fi File Transfer again for a new one. It turns itself off after 10 minutes with nothing uploaded, downloaded or listed, and when you go back.</p>
-  <p>These folders at the card’s root each add their own <b>Library</b> entry: <code>Podcasts/</code>, <code>Audiobooks/</code>, <code>Photos/</code>, <code>Books/</code> and <code>Videos/</code>; <code>EQ/</code> holds EQ presets. Other folder names, such as <code>Images/</code>, aren’t picked up. See <a href="#card">What goes on the microSD card</a> for supported formats.</p>
+  <p>These folders at the card’s root each add their own <b>Library</b> entry: <code>Podcasts/</code>, <code>Audiobooks/</code>, <code>Photos/</code>, <code>Books/</code> and <code>Videos/</code>; <code>EQ/</code> holds EQ presets. Other folder names, such as <code>Images/</code>, aren’t picked up. See <a href="#card">What goes on the SD card</a> for supported formats.</p>
   <p>Update Local Music no longer stops at 20,000 songs, so with a larger library run it again after updating. Shanling rates the Q2 for 20,000 songs: a much larger library takes longer to scan and browse, and isn’t guaranteed to work.</p>
   <p><b>What the Library lists:</b> every song a scan finds, loose files beside your album folders included. On a very large card, <b>Songs</b>, <b>Albums</b> and <b>Artists</b> may not list everything; <b>Folder</b> view still plays every file. To list only part of a card, scan just those folders with <b>Scan Folders</b>, below.</p>
   <p><b>A large library:</b> Update Local Music goes through every folder on the card before it starts counting songs, so with tens of thousands of songs or a slow card it can stay at <b>No.0</b> for a long time. Leave it running; Return stops it. To add new music later without going through the whole card again, choose <b>System settings → Update Library → Scan Folders</b>, tick the folders you copied to, and press <b>Scan</b>. Open a folder, such as <code>Music</code>, to tick the artist or album folders inside it; tapping a folder that has no folders inside ticks it. Ticking the whole folder reads every song in it again, which takes about as long as a full update.</p>
@@ -405,7 +405,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
 
   </div>
   <div class="sec">
-  <h2 id="card">What goes on the microSD card</h2>
+  <h2 id="card">What goes on the SD card</h2>
   <p>Media folders go at the card’s root, with any capitalisation; each adds its own <b>Library</b> row when present. Q2 Pod’s own caches, <code>.coverflow/</code>, <code>.photos/</code> and <code>.books/</code>, can be deleted to free space: Q2 Pod rebuilds them as needed, and Cover Flow and Photos need 16 MB free. Don’t delete <code>.spotify/cache/</code> or <code>.tidal/</code>: they hold your saved Spotify login and the songs you downloaded for offline play. Deleting them signs you out or removes those offline songs, and the Spotify and Tidal caches are sized in Streaming → Configuration instead.</p>
   <table class="paths">
     <thead><tr><th>Path</th><th>What it is</th><th>Made by</th></tr></thead>
@@ -563,7 +563,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
   </div>
   <div class="sec">
   <h2 id="scrobble">Scrobbling to Last.fm and ListenBrainz</h2>
-  <p>Save a plain-text file named <code>.scrobble.ini</code> in the microSD card’s root (next to <code>update.tar</code>, not inside a folder). Keep the leading dot and make sure your editor hasn’t added <code>.txt</code>. Copy the example for the service you use, including the section heading and field names, and replace only the values after <code>=</code> with your own. Don’t add quotes.</p>
+  <p>Save a plain-text file named <code>.scrobble.ini</code> in the SD card’s root (next to <code>update.tar</code>, not inside a folder). Keep the leading dot and make sure your editor hasn’t added <code>.txt</code>. Copy the example for the service you use, including the section heading and field names, and replace only the values after <code>=</code> with your own. Don’t add quotes.</p>
   <div class="sub">
   <h3>Last.fm</h3>
   <pre>[LASTFM]
@@ -620,7 +620,7 @@ AUTO=1</pre>
   <h2 id="np">The Now Playing screen</h2>
   <img class="shot" src="../../assets/screenshots/now-playing.png" alt="Now Playing: “25 of 40” at the top, the album cover beside the title, artist and album, the play mode and heart buttons, four page dots, and the progress bar with elapsed and remaining time">
   <p>Now Playing shows a large cover beside the title, artist and album, the play mode and heart buttons, and a progress bar with the elapsed and remaining time. Tap the cover to see it full screen. Swipe for the lyrics; the dots show which page you’re on. For the track’s details (album, genre, year, format, sample rate, bit rate, file size and folder), open <b>⋯</b> and choose <b>About</b>; Return goes back to <b>⋯</b>. About shows the cover, title, artist and length, a <b>Lossless</b>, <b>Hi-Res Lossless</b> or <b>DSD</b> badge beside the format, and the rest in two columns, ending with where the song is (<b>SD Card</b> and its folder, or <b>Server</b>, downloaded or streaming); anything the file doesn’t say is left out. Turn the wheel to see the bottom when it doesn’t fit.</p>
-  <p>For synced lyrics, copy the song’s <code>.lrc</code> file into the same folder as the song on the microSD card. Embedded lyrics may not display; use the separate <code>.lrc</code> file. Or, with Wi-Fi, open <b>⋯</b> on Now Playing: <b>Download Cover &amp; Lyrics</b> finds lyrics for the playing song, and <b>Download Album Lyrics</b> saves them beside every song of its album, leaving songs that already have a <code>.lrc</code> file alone.</p>
+  <p>For synced lyrics, copy the song’s <code>.lrc</code> file into the same folder as the song on the SD card. Embedded lyrics may not display; use the separate <code>.lrc</code> file. Or, with Wi-Fi, open <b>⋯</b> on Now Playing: <b>Download Cover &amp; Lyrics</b> finds lyrics for the playing song, and <b>Download Album Lyrics</b> saves them beside every song of its album, leaving songs that already have a <code>.lrc</code> file alone.</p>
   <ul>
     <li><b>Options:</b> hold <b>Play/Pause</b> for the queue, favourites, playlists, shuffle and repeat. During Shuffle Albums or Folders it also has <b>Next Album / Previous Album</b>.</li>
     <li><b>Rate:</b> hold the heart, turn to 0–5 hearts, and press Centre to save.</li>
@@ -731,7 +731,7 @@ AUTO=1</pre>
 
   <div class="sec">
   <h2 id="spotify"><img class="hicon" src="../../assets/icons/stream_spotify.png" alt="">Spotify</h2>
-  <p><b>Streaming → Spotify</b> browses and plays Spotify on the Q2 over Wi-Fi: Liked Songs, your playlists, saved albums and followed artists, Search, the queue and shuffle and repeat. It needs Spotify Premium and isn’t in the firmware: it runs from the microSD card (see “Installing and pairing Spotify”, below). The Q2 is also a Spotify Connect speaker, so the phone can still pick it and control it.</p>
+  <p><b>Streaming → Spotify</b> browses and plays Spotify on the Q2 over Wi-Fi: Liked Songs, your playlists, saved albums and followed artists, Search, the queue and shuffle and repeat. It needs Spotify Premium and isn’t in the firmware: it runs from the SD card (see “Installing and pairing Spotify”, below). The Q2 is also a Spotify Connect speaker, so the phone can still pick it and control it.</p>
   </div>
   <div class="sec">
   <h2 id="spinstall">Installing and pairing Spotify</h2>
@@ -1050,7 +1050,7 @@ http://stream.radioparadise.com/mp3-128</pre>
   <div class="sec">
   <h2 id="update">Updating Q2 Pod</h2>
   <p>Repeat the <a href="#install">install steps</a> in Chapter 1 with the newest release. Your settings, ratings and play counts are kept. The updater skips a version that’s already installed, so a newer release always goes on.</p>
-  <p>Or, over Wi-Fi: <b>System settings → System Update → Network Update</b> downloads the newest q2-coda release to the card’s <code>update.tar</code>, replacing any that’s there, then opens the TF card update’s confirmation. Press the row again to cancel the download. Each release is signed, and the Q2 checks it (“Verifying…”) before the update can start: a release that isn’t signed by q2-coda, such as Q2 Pod’s own, or one that was changed after signing, isn’t installed, and the message says so.</p>
+  <p>Or, over Wi-Fi: <b>System settings → System Update → Network Update</b> downloads the newest q2-coda release to the card’s <code>update.tar</code>, replacing any that’s there, then opens the SD Card Update’s confirmation. Press the row again to cancel the download. Each release is signed, and the Q2 checks it (“Verifying…”) before the update can start: a release that isn’t signed by q2-coda, such as Q2 Pod’s own, or one that was changed after signing, isn’t installed, and the message says so.</p>
   <div class="sub">
   <h3 id="apps">Installing apps over Wi-Fi</h3>
   <p><b>System settings → App Store</b> installs and updates Rockbox, the Rockbox themes, Spotify and the card apps from their GitHub releases, instead of unzipping them by hand. Its list of apps, signed by q2-coda, names the exact download for each app, and the Q2 installs nothing else: a list that isn’t signed, or a download that isn’t the one it names, is refused with a message. The list is fetched over Wi-Fi and kept on the card, so the first time it needs Wi-Fi to show any; until then <b>Check for Updates</b> is the one row, and pressing it loads the list. Each app’s row shows <b>Install</b>, <b>Update</b> or <b>Installed</b>; with Wi-Fi on, the page fetches the list again when it opens (at most every 10 minutes), and a newer release shows as <b>Update</b> once q2-coda adds it to the list. Rockbox Themes appears once Rockbox is on the card. An installed app that leaves the list keeps its row, so you can still remove it.</p>
@@ -1068,7 +1068,7 @@ http://stream.radioparadise.com/mp3-128</pre>
   </div>
   <div class="sec">
   <h2 id="custom-logo">Custom boot logo</h2>
-  <p>Put <code>boot-logo.jpg</code> in <code>/Q2Pod/boot/</code> on the microSD card. Use an 8-bit, three-component baseline JPEG (RGB/YCbCr), at most 512 KB (524,288 bytes): upright at 375×320 pixels, or 320×375 pixels with the artwork turned 90° clockwise. PNG, progressive JPEG, grayscale and CMYK are not supported.</p>
+  <p>Put <code>boot-logo.jpg</code> in <code>/Q2Pod/boot/</code> on the SD card. Use an 8-bit, three-component baseline JPEG (RGB/YCbCr), at most 512 KB (524,288 bytes): upright at 375×320 pixels, or 320×375 pixels with the artwork turned 90° clockwise. PNG, progressive JPEG, grayscale and CMYK are not supported.</p>
   <p>Start Q2 Pod with the card inserted, or leave USB storage mode, to synchronize the logo. It appears at the following power-on. Booting directly into Rockbox does not import it. To restore the built-in logo, delete the card file and run Q2 Pod with the card mounted once; the following power-on uses the built-in logo.</p>
 
   </div>
@@ -1146,7 +1146,7 @@ http://stream.radioparadise.com/mp3-128</pre>
   <p>Each entry starts with checks you can undo, such as reconnecting or rescanning. Recovery steps come last and link to where they’re explained.</p>
   <ul>
     <li><b>The Q2 won’t turn on, won’t charge, or is frozen.</b> Plug it into the charger. Hold <b>Centre</b> for 15 seconds, and keep holding through the on-screen shutdown prompt until it powers off and restarts. For Rockbox, hold Play/Pause for 15 seconds instead. A Q2 that stops responding while it’s on restarts by itself within a minute; afterwards q2-crash.log on the card says what it was doing, so attach it to a bug report.</li>
-    <li><b>A song is missing.</b> Check it’s in a folder the Q2 scans, with a supported format (<a href="#card">What goes on the microSD card</a>), then run <b>Library → Update Local Music</b>. DRM-protected files don’t appear. Still missing? Check its tags with <a href="#tagging">Tagging your music</a>.</li>
+    <li><b>A song is missing.</b> Check it’s in a folder the Q2 scans, with a supported format (<a href="#card">What goes on the SD card</a>), then run <b>Library → Update Local Music</b>. DRM-protected files don’t appear. Still missing? Check its tags with <a href="#tagging">Tagging your music</a>.</li>
     <li><b>An album is split in two.</b> Give every track the same Album Artist (<a href="#tagging">Tagging your music</a>). Then run <b>Update Local Music</b> again.</li>
     <li><b>Artwork is missing.</b> The grey disc means no cover was found, and Cover Flow won’t look again until you refresh it. Embed the cover in the songs, or add a <code>cover</code> or <code>folder</code> image (<code>.jpg</code>, <code>.png</code> or <code>.webp</code>) next to them. A folder image is skipped when the folder holds more than one album, and songs with a different Album or Album Artist tag count as another album: match the tags (<a href="#tagging">Tagging your music</a>) or embed the cover. Then press <b>System settings → Display → Cover Flow → Refresh Cover Flow</b> (<a href="#cf">Browsing with Cover Flow</a>).</li>
     <li><b>Cover Flow restarts the Q2 while preparing artwork.</b> Open Cover Flow again: the album it was reading is skipped and shows the grey disc, and its file is named in <code>q2-crash.log</code> on the card, under <b>cover flow skipped</b>. If several albums do this, the Q2 restarts once for each. Shrink that album’s very large embedded covers: about 500 × 500 pixels is plenty for the screen, and many taggers resize covers in bulk. Then press <b>System settings → Display → Cover Flow → Refresh Cover Flow</b>. If it keeps happening, install Shanling’s firmware and then Q2 Pod again (<a href="#restore">Restoring stock firmware</a>), and attach the card’s <code>q2-crash.log</code> to a bug report.</li>
