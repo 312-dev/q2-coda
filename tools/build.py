@@ -377,13 +377,13 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
     ) &
 '''.encode())
 # User boot logo (docs/boot.md#custom-boot-logo): demo copies the card's to /mnt/data, which
-# S10mount_ubifs mounts before the splash; without it, the built-in one, or under Light Mode
-# (LIGHT=1 in config.ini, also on /mnt/data) its light twin, which iPod builds of the default logo ship.
+# S10mount_ubifs mounts before the splash; without it, the built-in one, in Light Mode too (the boot is
+# dark in either mode: docs/boot.md#light-mode).
 # Boot animation (docs/boot.md#boot-animation): where the built-in dark splash would show and the build
 # ships LOGO_ANIM (the default logo's builds), display_logo draws LOGO_BLACK, which turns the screen on as
 # for any splash, and q2splash plays the animation over it; if q2splash can't start, the still logo shows.
 S11LOGO = 'etc/init.d/S11logo_display_shell'
-LOGO, LOGO_LIGHT = 'release/assets/default/raw/images/xx/logo.jpg', 'release/assets/default/raw/images/xx/logo-light.jpg'
+LOGO = 'release/assets/default/raw/images/xx/logo.jpg'
 LOGO_ANIM, LOGO_BLACK = 'release/assets/default/raw/images/xx/logo.q2a', 'release/assets/default/raw/images/xx/logo-black.jpg'
 REMOTE_HOOK = (b'/usr/bin/dbus-daemon --config-file=/etc/dbus-1/system.conf\n',
                b'/usr/bin/dbus-daemon --config-file=/etc/dbus-1/system.conf\n/usr/bin/q2remote &\n')
@@ -1575,12 +1575,9 @@ TIMEZONES = (
     ('GMT+5:30 Kolkata', 'Asia/Kolkata'), ('GMT+10 Brisbane', 'Australia/Brisbane'),
     ('GMT+12 Auckland', 'Pacific/Auckland'),
 )
-# LIGHT=2 goes by the wall clock, as demo's Auto: the boot shell has no TZ, so the saved index picks it.
-# One missing or out of range is config_init's: index 22.
-LOGO_ZONES = ' '.join(f"{i}) z='{zone}';;" for i, (_, zone) in enumerate(TIMEZONES)) + f" *) z='{TIMEZONES[22][1]}';;"
 LOGO_HOOK = (b'   \tdisplay_logo /release/assets/default/raw/images/xx/logo.jpg\n',
-             b'   \tl=/mnt/data/boot-logo.jpg; [ -f $l ] || { l=/%s; light=0; grep -qx LIGHT=1 /mnt/data/config.ini 2>/dev/null && light=1; grep -qx LIGHT=2 /mnt/data/config.ini 2>/dev/null && { case $(sed -n s/^TIMEZONE=//p /mnt/data/config.ini) in %s esac; case $(TZ=$z date +%%H) in 0[7-9]|1[0-8]) light=1;; esac; }; [ $light = 1 ] && [ -f /%s ] && l=/%s; [ $l = /%s ] && [ -f /%s ] && display_logo /%s && /usr/bin/q2splash /%s && l=; }; [ -z "$l" ] || display_logo $l\n'
-             % (LOGO.encode(), LOGO_ZONES.encode(), LOGO_LIGHT.encode(), LOGO_LIGHT.encode(), LOGO.encode(), LOGO_ANIM.encode(), LOGO_BLACK.encode(), LOGO_ANIM.encode()))
+             b'   \tl=/mnt/data/boot-logo.jpg; [ -f $l ] || { l=/%s; [ -f /%s ] && display_logo /%s && /usr/bin/q2splash /%s && l=; }; [ -z "$l" ] || display_logo $l\n'
+             % (LOGO.encode(), LOGO_ANIM.encode(), LOGO_BLACK.encode(), LOGO_ANIM.encode()))
 def timezone_offset(label):
     sign, h, m = need(re.match(r'GMT([+-])(\d+)(?::(\d+))?', label), f'Unexpected time zone {label}').groups()
     return (1 if sign == '+' else -1) * (int(h) * 60 + int(m or 0))
@@ -2705,11 +2702,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     # Package exactly the validated bytes, even if the input is edited during compression.
     logo = out/'logo.jpg'
     logo.write_bytes(logo_data)
-    # Light Mode's splash: the default logo inverted. A custom --logo has no twin, so it shows either way.
-    light = logo_data == (ROOT/'assets/boot-logo.jpg').read_bytes() and (ROOT/'assets/boot-logo-light.jpg').read_bytes()
-    check(not light or jpeg_size(light) == (320, 375), 'Light logo must be 320x375 like the stock splash')
+    default_logo = logo_data == (ROOT/'assets/boot-logo.jpg').read_bytes()
     # The boot animation is the default logo's too: a custom --logo shows as a still, as it always has.
-    anim = bool(light) and {LOGO_ANIM: (ROOT/'assets/boot-anim.q2a').read_bytes(), LOGO_BLACK: (ROOT/'assets/boot-black.jpg').read_bytes()}
+    anim = default_logo and {LOGO_ANIM: (ROOT/'assets/boot-anim.q2a').read_bytes(), LOGO_BLACK: (ROOT/'assets/boot-black.jpg').read_bytes()}
     check(not anim or (anim[LOGO_ANIM][:4] == b'Q2AN' and struct.unpack_from('<2H', anim[LOGO_ANIM], 8) == (320, 375)
                        and jpeg_size(anim[LOGO_BLACK]) == (320, 375)), 'Boot animation must be 320x375 like the stock splash')
     q2player, player_added = None, []
@@ -2832,7 +2827,6 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                GUEST: (HELPER_LIKE, compile_helper(out, cat, 'q2_guest', 'q2-guest', GUEST_LIBS)),
                                GUEST_DBUS: ('etc/dbus-1/system.d/bluealsa.conf', (ROOT/'assets/dbus/bluealsa-sink.conf').read_bytes()),
                                GUEST_HOTSPOT: (HELPER_LIKE, (ROOT/'patch/q2_hotspot.sh').read_bytes()),
-                               **({LOGO_LIGHT: (xx+'list_tidal.png', light)} if light else {}),  # the swapped logo.jpg has no stock inode left
                                **{path: (FONT, data) for path, (data, _) in fonts.items()},
                                **{FONT_DIR + n: ('etc/hosts', (ROOT/'assets/fonts'/n).read_bytes()) for n in FONT_NOTICES},
                                **(adb_files(out, cat) if dev else {}),

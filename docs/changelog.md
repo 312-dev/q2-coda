@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - The boot logo reads Q2 MUSE, and Light Mode boots with the same dark animation as Dark Mode.
   - Q2 Pod is now Q2 Muse: the name on every screen, page and guide. Settings, the card's files and paired devices carry over as they are.
   - Light Mode: an empty page's title (No Playlists, No Genres, No Matches) showed white on white; it is black now.
   - Display (OLED): an empty Favorites list shows a crossed-out heart.

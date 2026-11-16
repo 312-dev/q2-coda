@@ -4,7 +4,7 @@ The Q2 splash shown on the screen at power-on is a JPEG inside the rootfs, and o
 
 | What       | Where                                                                                                                                                          |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Image      | `/mnt/data/boot-logo.jpg` when present, else under Light Mode `logo-light.jpg`, else `/release/assets/default/raw/images/xx/logo.jpg` (320x375 JPEGs)          |
+| Image      | `/mnt/data/boot-logo.jpg` when present, else `/release/assets/default/raw/images/xx/logo.jpg` (320x375 JPEGs), in Light Mode too                                    |
 | Drawn by   | `/usr/bin/display_logo` (libjpeg, writes `/dev/fb0`)                                                                                                           |
 | Animation  | `/release/assets/default/raw/images/xx/logo.q2a`, played by `/usr/bin/q2splash` (`patch/splash.c`) over `logo-black.jpg`, in place of the built-in dark splash |
 | Started by | `/etc/init.d/S11logo_display_shell`, as soon as `/dev/fb0` exists                                                                                              |
@@ -14,7 +14,7 @@ The Q2 splash shown on the screen at power-on is a JPEG inside the rootfs, and o
 BusyBox `init` runs `/etc/init.d/rcS`, which starts the `S??*` scripts in order:
 
 1. `S10mdev`, `S10mount_ubifs`: devices and the data partition.
-2. `S11logo_display_shell`: in the background, polls every 20 ms for `/dev/fb0`, then runs `display_logo` on `/mnt/data/boot-logo.jpg` if it exists, else on the built-in splash ([Light Mode](#light-mode)), or plays the animation where the built-in dark splash would show ([Boot animation](#boot-animation)).
+2. `S11logo_display_shell`: in the background, polls every 20 ms for `/dev/fb0`, then runs `display_logo` on `/mnt/data/boot-logo.jpg` if it exists, else on the built-in splash (in Light Mode too: [Light Mode](#light-mode)), or plays the animation where the built-in dark splash would show ([Boot animation](#boot-animation)).
 3. `S11module_driver_default`: `/module_driver/driver_default_init_script.sh` loads the drivers, among them `soc_fb.sh` (the framebuffer, so `/dev/fb0` appears and the splash is drawn) and the LCD panel.
 4. `S20urandom`, `S40network`.
 5. `S90play`: starts `dbus-daemon`, then the player: `/release/bin/demo`, or Rockbox first when the card has it ([Rockbox](#rockbox)).
@@ -62,7 +62,7 @@ Bluetooth survives the hand-over: demo starts `rtk_hciattach`, `bluetoothd` and 
 
 ## Boot animation
 
-A build with the default logo ships a boot animation, about 7 seconds at 30 frames a second: a bullet train leaves the Guangzhou skyline under Shanling's wordmark, crosses the screen, and arrives as a Chicago L train under 312.dev, where its doors open. It plays where the built-in dark splash would show. A card logo, Light Mode's splash and a build with a custom `--logo` show their still image as before.
+A build with the default logo ships a boot animation, about 7 seconds at 30 frames a second: a bullet train leaves the Guangzhou skyline under Shanling's wordmark, crosses the screen, and arrives as a Chicago L train under 312.dev, where its doors open. It plays where the built-in splash would show, in Light Mode as in Dark Mode. A card logo and a build with a custom `--logo` show their still image as before.
 
 | What        | Where                                                                                                    |
 | ----------- | -------------------------------------------------------------------------------------------------------- |
@@ -112,12 +112,7 @@ Flash `/tmp/q2-logo/update.tar` the normal way: copy it to the root of the SD ca
 
 ### Light Mode
 
-The default logo also ships `assets/boot-logo-light.jpg`, the same logo inverted (dark lettering on white), as `release/assets/default/raw/images/xx/logo-light.jpg`. While `/mnt/data/config.ini` has `LIGHT=1`, or `LIGHT=2` and the saved time zone's clock says 07:00 to 18:59 ([Light Mode](ipod.md#light-mode)), the splash hook shows it instead of the built-in one, so a power-on after turning Light Mode on or off matches it. A card logo still wins, and a build with a custom `--logo` ships no light twin and shows its logo in both modes. Light Mode's splash is a still: the [boot animation](#boot-animation) is light on black and plays in Dark Mode only. The boot shell has no `TZ` (only the player sets it, [Clock](internals.md#clock)) and the RTC holds UTC, so for `LIGHT=2` the hook sets `TZ` from `SYSSET TIMEZONE`, the same index and names as the player (`TIMEZONES` in `tools/build.py`); a missing or unknown index reads as the player's does, index 22, Shanghai (`config_init`). ponytail: the hour is only as right as the RTC, so a clock that was never set can pick the other logo, until it is set. To regenerate it from the default:
-
-```sh
-magick assets/boot-logo.jpg -negate -colorspace sRGB -type TrueColor -strip -interlace none \
-  -sampling-factor 4:4:4 -quality 92 assets/boot-logo-light.jpg
-```
+The boot is dark in either mode: under Light Mode (`LIGHT=1`, or `LIGHT=2` by the clock, [Light Mode](ipod.md#light-mode)) the splash hook plays the same [boot animation](#boot-animation), or shows the same built-in logo, as in Dark Mode. Light Mode starts with demo's first page. A card logo still wins in either mode.
 
 ## Making a logo that works
 
@@ -126,7 +121,7 @@ magick assets/boot-logo.jpg -negate -colorspace sRGB -type TrueColor -strip -int
 - **Format: 8-bit, three-component baseline JPEG (RGB/YCbCr).** No PNG, alpha, grayscale or CMYK. The stock renderer assumes three decoded bytes per pixel; the builder rejects incompatible frame headers.
 - **Keep it small.** On the card, at most 512 KB. In a build, JPEG data barely compresses and the repacked rootfs must stay within `ROOTFS_ROOM` (`tools/build.py`, 72 MiB: mtd2 less a bad-block spare, [hardware](hardware.md#flash-layout)), so a built-in logo up to the card's 512 KB fits; if the build fails with `Repacked rootfs is N bytes, M over the 75,497,472 mtd2 holds`, re-save at lower quality or put the logo on the card instead.
 
-The default is an outlined URW Gothic Book wordmark on black, in warm off-white (#F2F2F0), about 140x72 pixels. The Q keeps its sweeping tail, while the 2 is widened for a balanced base. Below it, widely spaced POD in muted warm gray (#BDBDB8) has a tiny center button inside the O, a subtle reference to the Q2's click wheel. The group is centerd at about 47% of the screen height, because perfect centring looks low. There are no gradients or glows. All lettering is converted to paths, so no fonts are required to render it. Its upright source is `assets/boot-logo.svg` (375x320). To reproduce the firmware JPEG with librsvg and ImageMagick:
+The default is an outlined URW Gothic Book wordmark on black, in warm off-white (#F2F2F0), about 140x72 pixels. The Q keeps its sweeping tail, while the 2 is widened for a balanced base. Below it, MUSE in muted warm gray (#BDBDB8), URW Gothic Book outlined at POD's old cap height (10.35 px) and tracked 8 px (the user's pick of four, 2026-11-16: `design/wordmark/wordmark-1-continuity.svg`). The group is centered at about 46% of the screen height, because perfect centring looks low. There are no gradients or glows. All lettering is converted to paths, so no fonts are required to render it. Its upright source is `assets/boot-logo.svg` (375x320). To reproduce the firmware JPEG with librsvg and ImageMagick:
 
 ```sh
 rsvg-convert -w 1500 -h 1280 assets/boot-logo.svg | \
