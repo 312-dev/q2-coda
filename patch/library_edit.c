@@ -255,7 +255,7 @@ static int lr_shown_before(void *view, void *row) {
 /* coverflow.c coverflow_home_layout, before the list is laid out again: Home's rows in the saved
  * order, each shown as its mark and rule say, Now Playing only while something is loaded (np) and
  * Folders by its own rule only while the card has folders (home.c home_folders), Guest Play by its
- * own only while it is switched on (guest_ui.c guest_ui_on); in Edit Home every row it lists. A row
+ * own only while a guest plays or is paused (guest.c guest_active); in Edit Home every row it lists. A row
  * that comes or goes keeps the selection and the rows in view (home.c home_keep); the hidden rows
  * go last, as the list's layout keeps a hidden row's slot. */
 void lr_home_apply(void *view, int np) {
@@ -279,7 +279,7 @@ void lr_home_apply(void *view, int np) {
         void *row = rows[i];
         int c = widget_get_prop_int(row, LR_PROP, 0), rule = widget_get_prop_int(row, LR_AUTO, 0);
         if (c == 'f' && rule != LR_A_LOCKED) rule = folders ? LR_A_SHOWN : LR_A_HIDDEN;
-        if (c == 'g' && rule != LR_A_LOCKED) rule = guest_ui_on() ? LR_A_SHOWN : LR_A_HIDDEN;
+        if (c == 'g' && rule != LR_A_LOCKED) rule = guest_active() ? LR_A_SHOWN : LR_A_HIDDEN;
         if (rule != LR_A_LOCKED) prop(row, LR_AUTO, rule); /* the editor's circle reads it */
         int on = editing || (lr_shows(vis[lr_at_in(lr_home, c)], rule) && (c != 'p' || np));
         if (on == !!widget_get_visible(row)) continue;

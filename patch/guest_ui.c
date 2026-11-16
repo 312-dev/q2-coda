@@ -99,7 +99,7 @@ static struct {
         unsigned played;
     } trusted[GU_TRUSTED];
     int ntrusted, cur; /* the trusted guests read; the one whose page is open */
-    int on;            /* Guest Play on at the last look */
+    int home;          /* a guest playing at the last look: Home's Guest Play row shown */
 } gu __attribute__((section(".scratch")));
 
 /* ---- the state ---- */
@@ -486,7 +486,8 @@ static void conn_paint(void *w, void *canvas) {
             1);
 }
 
-/* Home's Guest Play row: the guest's Now Playing while one plays, else Let a Guest Connect. */
+/* Home's Guest Play row, there while a guest plays (library_edit.c lr_home_apply): the guest's Now
+ * Playing; Let a Guest Connect if the guest left before the row went. */
 int guest_home_click(void *ctx, void *event) {
     (void)ctx, (void)event;
     int state = guest_ui_state();
@@ -825,15 +826,14 @@ void guest_ui_poll(void) {
         if (gu.ask && !confirm_up()) gu.ask = ASK_NONE; /* answered (answered() ran) */
         return;
     }
-    int was = gu.state, state = guest_ui_state(), on = guest_ui_on();
-    if (on != gu.on) { /* Home's Guest Play row comes or goes (library_edit.c lr_home_apply) */
-        gu.on = on;
+    int was = gu.state, state = guest_ui_state(), playing = state == G_PLAYING || state == G_PAUSED;
+    if (playing != gu.home) { /* Home's Guest Play row comes or goes (lr_home_apply) */
+        gu.home = playing;
         coverflow_home_layout();
     }
     event_follow();
     gu.seq = seq, gu.state = state;
     ask_follow(state);
-    int playing = state == G_PLAYING || state == G_PAUSED;
     if (playing && was != G_PLAYING && was != G_PAUSED && !*gv("source")) guest_np_open();
     if (!playing && gu.np) window_close(gu.np);
     if (gu.np) widget_invalidate_force(gu.np, (void *)0);

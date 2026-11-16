@@ -6,7 +6,7 @@ import ctypes as C
 import pytest
 
 from test_guest import Rig
-from test_nav_library_pages import Config, Ui
+from test_nav_library_pages import Config, Ui, stock_page
 
 KEY_CENTER, KEY_RETURN, KEY_PLAY, KEY_NEXT = 218, 170, 171, 173
 TRUSTED = '/mnt/data/q2-guest/trusted'
@@ -153,6 +153,33 @@ def test_a_trusted_guest_s_page_forgets_and_asks(g):
     assert g.sent()[-1] == 'ask AA:BB 1'
     g.fw.fn('guest_ui__forgot', None, C.c_void_p, C.c_int, C.c_int)(None, 1, 0)
     assert g.sent()[-1] == 'forget AA:BB'
+
+
+HOME = ['playing', 'localmusic', 'stream', 'folder', 'coverflow', 'home_search', 'guest', 'settings']
+
+
+def test_home_shows_guest_play_only_while_a_guest_plays(g):
+    """Home's Guest Play row is there while a guest plays or is paused, as Now Playing's is while something is loaded;
+    Guest Play merely on (idle, the window open) leaves Home its other rows."""
+    _, view = stock_page(g.ui, 'scroll_view_home')
+    for row in HOME:
+        g.ui.name[g.ui.new('view_create', view, 0, 0, 375, 52)] = 'btn_' + row
+    g.fw.fn('lr_home_tag', None, C.c_void_p)(view)
+
+    def shown():
+        g.fw.fn('lr_home_apply', None, C.c_void_p, C.c_int)(view, 1)
+        return 'guest' in [g.ui.name[i][4:] for i in g.ui.kids[view] if i not in g.ui.hidden]
+    assert not shown()  # Guest Play off
+    g.look(state='idle', enabled=1)
+    assert not shown()
+    g.look(state='open', enabled=1, window=120)
+    assert not shown()
+    g.look(state='playing', enabled=1, guest='Alex')
+    assert shown()
+    g.look(state='paused', enabled=1, guest='Alex')
+    assert shown()
+    g.look(state='idle', enabled=1)
+    assert not shown()
 
 
 def test_home_s_row_opens_the_window_or_the_guest(g):

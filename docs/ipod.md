@@ -102,7 +102,10 @@ Home splits the screen: the menu on the left, the current local track's art in t
 The selection is the lists' bar, and each row that opens a page has the chevron ([Theme](#theme)).
 
 The seven rows, by default in the order the menu review chose (2026-11-15), are Now Playing, Library, Streaming,
-Folders, Cover Flow, Search and Settings. **Now Playing** is there only while something is loaded, playing or paused, as
+Folders, Cover Flow, Search and Settings, with an eighth, **Guest Play**, between Search and Settings only while a
+guest plays or is paused ([internals](internals.md#guest-play)): it opens the guest's Now Playing, and it comes and
+goes as Now Playing's row does (`lr_home_apply` on `guest_active`, `guest_ui_poll` restacking Home when a guest
+starts or ends), so with no guest Home keeps its seven rows. **Now Playing** is there only while something is loaded, playing or paused, as
 on an iPod: with nothing loaded, or once play has stopped for `NP_GONE_MS` (3 s, so the moment
 between two tracks keeps it), the row goes, in Split and Full, and it comes back as play
 starts (`np_loaded`, checked on each bar paint and by `np_due` when the 3 s are up;

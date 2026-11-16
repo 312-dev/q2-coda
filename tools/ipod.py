@@ -343,8 +343,8 @@ def home_card(menu, at, row, text):
 
 
 # Home becomes a list of the stock cards' names in the user's order (menu review, 2026-11-15): Now Playing,
-# Library, Streaming, Folders, Cover Flow, then three rows of the payload's, Search, Guest Play (shown while Guest Play
-# is on, library_edit.c lr_home_apply) and Settings.
+# Library, Streaming, Folders, Cover Flow, then three rows of the payload's, Search, Guest Play (shown only while a
+# guest plays, library_edit.c lr_home_apply) and Settings.
 # home_page_init (0x534b6c) looks up no widget: its widget_foreach visitor (0x534750) binds img_*
 # clicks and translates label_* by name, and only img_left/img_right reach the slide_menu. Each row's transparent image covers the row, on top of its label, so it takes the
 # tap and is the row's click target for the wheel. The payload binds Cover Flow, Search, Guest Play and Settings, which slides

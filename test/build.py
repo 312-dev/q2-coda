@@ -878,7 +878,7 @@ def validate_assets(directory):
             assert shade[1] == [x, y + BC_ART - 50, BC_ART, 50] and shade[2] == decode(original)[3][1][2]
             assert title[1] == [x + BC_TITLE_PAD, y + BC_ART - 50 + 11, BC_ART - 2 * BC_TITLE_PAD, 28] and title[2] == decode(original)[3][2][2]
             continue
-        if short == HOME_PAGE:  # seven rows with the stock names, beside the art; bytes equal patch_asset above
+        if short == HOME_PAGE:  # eight rows with the stock names, beside the art; bytes equal patch_asset above
             art, (lv, lg, _, [sv]), (sl, sg, sp, [ss]), *carousel = root[3]
             assert lv == 'list_view' and sv[0] == 'scroll_view' and art[2]['name'] == 'img_homeart'
             # The Settings list: eight rows, stock's Playback and System setting rows among them (stock binds them; their
@@ -897,8 +897,9 @@ def validate_assets(directory):
                 # Labels end before the chevron's glyph; longer ones scroll (only_focus) or end in an ellipsis.
                 assert label[1][0] + label[1][2] == image[1][2] - HOME_LABEL_END and label[1][2] >= 100
                 assert label[2]['only_focus'] == 'true' and label[2]['ellipses'] == 'true'
-            assert [r[3][0][2].get('text') for r in sv[3]] == [None, 'Library', None, 'Folders', 'Cover Flow', 'Search', 'Settings']
-            # Seven rows, all in the box at rest (HOME_REST): the payload would scroll any more (home.c home_overflow).
+            assert [r[3][0][2].get('text') for r in sv[3]] == [None, 'Library', None, 'Folders', 'Cover Flow', 'Search', 'Guest Play', 'Settings']
+            # The box holds seven rows at rest (HOME_REST): Guest Play's shows only while a guest plays (library_edit.c
+            # lr_home_apply), and the payload scrolls any past seven (home.c home_overflow).
             assert lg == [0, HOME_TOP, HOME_LIST_W, 7*HOME_ROW] and HOME_TOP + 7*HOME_ROW <= BOTTOM - HOME_TOP
             # Home: Carousel's: stock's carousel and arrows after the lists, hidden and taking no taps
             # until chosen (coverflow_home_layout); its cards stock's in their places, Library's label
