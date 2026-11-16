@@ -580,7 +580,7 @@ class Renames:
 
 
 def renaming(fw, ui, name):
-    Config(fw, THEME=OLED)
+    Config(fw)
     fw.fn('playlist_rename_open', None, C.c_int, C.c_char_p)(4, name)
     s = Strip.__new__(Strip)
     s.fw, s.ui, s.stock = fw, ui, []
@@ -624,7 +624,7 @@ def test_add_songs_search_lists_songs_by_title_or_artist_and_centre_adds_in_plac
     """Add Songs' Search row: songs alone (no artist or album rows), found by title or artist, never by album;
     Centre on one adds it to the playlist (stock's batch add, as Add to Playlist's) and the results stay."""
     songs = library(song)
-    Config(fw, THEME=OLED)
+    Config(fw)
     Library(fw, ui, songs)
     there, added = [], []
     fw.mock('checkPlayListExist', lambda r, dest, *_: int(r in there))
