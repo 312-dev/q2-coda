@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 import host
-from conftest import O, Deques, Externpic, Files, ask_cover, claim, high_halves, in_fork
+from conftest import O, Deques, Externpic, Files, ask_cover, high_halves, in_fork
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CX, TOP, ART, ONE, MISS = 187, 13, 160, 65536, 99
@@ -47,11 +47,8 @@ class Slide(C.Structure):
 class Home(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'win art list sets lib stream'.split()), ('carousel', C.c_void_p * 3),
                 *((k, C.c_uint) for k in 'key repaint drift drift_last tick'.split()), ('sl', Slide * 2),
-                ('frame', C.c_void_p), *((k, C.c_uint) for k in 'fade drawn'.split()), *((k, C.c_int) for k in 'pane show'.split()),
-                *((k, C.c_uint) for k in 'idle seed'.split()),
-                *((k, C.c_void_p) for k in 'row row_image row_label svc'.split()), ('svc_name', C.c_char * 72),
-                *((k, C.c_int) for k in 'kind songs albums services games free_tenths counted counting got_songs got_albums'.split()),
-                ('count_thread', C.c_ulong), *((k, C.c_uint) for k in 'asked pane_read count_timer pane_timer'.split()),
+                ('frame', C.c_void_p), *((k, C.c_uint) for k in 'fade drawn'.split()), ('show', C.c_int), ('seed', C.c_uint),
+                ('row', C.c_void_p), ('kind', C.c_int), ('pane_timer', C.c_uint),
                 ('ring', (C.c_uint * HOME_PW) * 4), ('clip', C.c_int * 4), ('clipped', C.c_int),
                 ('ink_bar', C.c_void_p), ('ground', C.c_uint), ('held', C.c_ubyte * HOME_PW),
                 ('strip_timer', C.c_uint), ('stripping', C.c_int), ('strip_need', C.c_int * 2), ('strip_done', C.c_int * 2),
@@ -589,8 +586,16 @@ def test_the_centre_cover_comes_out_texel_for_texel(fw):
         libc.free(C.addressof(t))
 
 
-def test_the_reflection_mirrors_the_cover_and_fades_out_in_46_px(fw):
+@pytest.mark.parametrize('top', (None, 90))
+def test_the_reflection_mirrors_the_cover_and_fades_out_in_46_px(fw, style, top):
+    """OLED's reflection starts at 0 of the cover's brightness (reflect_top 0), so it is the page's black and none
+    shows; a theme starting it at 90 of 256 mirrors the cover, fading out over its 46 px."""
     g = api(fw)
+    reflect_top = C.c_short.from_address(C.addressof(fw.var('cfs', C.c_char)) + style['reflect_top'])
+    assert reflect_top.value == 0  # OLED's
+    if top is not None:
+        reflect_top.value = top
+    top = reflect_top.value
     tex = exact(C.c_uint, ART * ART)
     tex[:] = [0xff000000 | (y + 60) for y in range(ART) for x in range(ART)]
     d = exact(C.c_uint, VIEW_W * VIEW_H)
@@ -601,7 +606,7 @@ def test_the_reflection_mirrors_the_cover_and_fades_out_in_46_px(fw):
     for k in range(46):
         red = d[(bottom + k) * VIEW_W + CX] >> 16 & 255  # BGRA8888
         mirrored = ART - 1 - k + 60
-        assert abs(red - mirrored * 90 / 256 * (1 - (k + .5) / 46)) <= 2, k
+        assert abs(red - mirrored * top / 256 * (1 - (k + .5) / 46)) <= 2, k
     assert all(d[y * VIEW_W + CX] == 0xff000000 for y in range(bottom + 46, VIEW_H))
     for t in (tex, d):
         libc.free(C.addressof(t))
@@ -794,7 +799,8 @@ def test_split_raises_home_s_list_to_y_40_where_the_art_runs_under_the_status_ro
 
 def test_the_bar_paints_the_rows_split_raises_above_home_s_window(fw, library):
     """coverflow_home_strip, from the bar's background: the list painted at its place on the screen (the canvas moved
-    to Home's window and back), clipped to its rows above the window and left of the pane, the clip put back."""
+    to Home's window and back), clipped to the band above the window from the screen's top (OLED's pages: the row
+    above the list too, once it has scrolled) and left of the pane, the clip put back."""
     ui = Ui(fw)
     split_inset_set(fw, library, 2)
     home = fw.var('coverflow__home', Home)
@@ -811,7 +817,7 @@ def test_the_bar_paints_the_rows_split_raises_above_home_s_window(fw, library):
     strip = fw.fn('coverflow_home_strip', None, C.c_void_p, C.c_void_p)
     strip(0x40, win)
     assert painted == [home.list] and moves == [(0, 58), (0, -58)]
-    assert clips == [(0, 40, 196, 18), (0, 0, 375, 320)]
+    assert clips == [(0, 0, 196, 58), (0, 0, 375, 320)]
     painted.clear()
     ui.animating = 1  # Home is a snapshot while a window slides
     strip(0x40, win)
@@ -837,15 +843,16 @@ def test_the_bar_paints_the_rows_split_raises_above_home_s_window(fw, library):
     i, ms = ui.timer(address(fw, 'coverflow__strip_due'))
     assert ms == 0 and not ui.dirty
     ui.fire(i)
-    assert ui.dirty == [(bar, (0, 40, 196, 18))]
+    assert ui.dirty == [(bar, (0, 0, 196, 58))]
     home.stripping = 1  # the bar's own paint of it: no repaint after
     clip(home.list)
     painted_frame()
     assert not ui.timer(address(fw, 'coverflow__strip_due'))
     home.stripping = 0
-    # strip_due's frame: AWTK widens the band to 0, 36, 201, 27, so the list paints its top rows in the window too,
-    # and the bar paints the band whole: nothing more is due, or each strip would ask for the next
-    screen[:] = [0, 36, 201, 27]
+    # strip_due's frame: AWTK widens the band (rows 0 to 58, the screen's top to the window's) to 0, 0, 201, 62, so
+    # the list paints its top rows in the window too, and the bar paints the band whole: nothing more is due, or each
+    # strip would ask for the next
+    screen[:] = [0, 0, 201, 62]
     clip(home.list)
     strip(0x40, win)
     painted_frame()
@@ -2460,19 +2467,17 @@ def deque_of(fw, recs):
     fw.mock('fw_deque_at', lambda d, i, *_: recs[i].p if i < len(recs) else 0)
 
 
-@pytest.mark.parametrize('theme', ['oled', 'classic-light', 'minimal'])
-def test_the_bar_names_an_album_s_tracks_under_song_rows_and_an_artist_s_covers_under_a_status_row(fw, theme):
+def test_the_bar_names_an_album_s_tracks_under_song_rows_and_an_artist_s_covers_under_a_status_row(fw):
     """OLED's one-line song rows take the album's name from the tracks' hidden caption (0: read it); an artist's
     covers read the artist under a status row, and other covers there no title, so the row shows the clock as
     Home's does; anything else is Cover Flow."""
-    index = {t['id']: t['index'] for t in THEMES}[theme]
-    themed(fw, index)
+    themed(fw)
     recs = [Rec(artist='Bob Dylan', path='/a')]
     deque_of(fw, recs)
     title = fw.fn('coverflow_bar_title', C.c_char_p, C.c_int)
     c = cf(fw)
     c.albums, c.scoped, c.screen = 0x5000, ARTIST_ALBUMS, TRACKS
-    assert title(1) == (None if theme == 'oled' else b'Cover Flow')
+    assert title(1) is None
     c.screen = COVERS
     assert title(1) == b'Bob Dylan' and title(0) == b'Cover Flow'
     c.scoped = 0
@@ -2653,7 +2658,7 @@ def test_without_a_third_cover_the_second_fades_out_over_the_next_step(fw, style
 
 @pytest.mark.parametrize('scoped', (ARTIST_ALBUMS, 0))
 def test_an_artist_s_shelf_shows_no_cover_past_its_ends(fw, scoped):
-    t = themed(fw, MINIMAL)
+    t = themed(fw)
     frame = C.create_string_buffer(0x40)
     fw.mock('bitmap_create_ex', lambda *_: C.addressof(frame))
     fw.mock('widget_load_image', lambda *_: 1)  # nothing decodes: the placeholder
@@ -2698,16 +2703,15 @@ def test_a_tap_in_the_flat_fallback_opens_the_centre_cover_alone(fw):
 # Stock's widgets, for the pages and Home
 
 THEMES = host.tools_theme.builtins()
-MINIMAL, CLASSIC, MODERN, OLED = ({t['id']: t['index'] for t in THEMES}[i] for i in ('minimal', 'classic-light', 'modern', 'oled'))
+OLED = THEMES[0]['index']  # the one theme, stored as THEME 3 (navigation.c theme_boot)
 EVT_CLICK, EVT_WINDOW_FOREGROUND = O['EVT_CLICK'], O['EVT_WINDOW_FOREGROUND']
-PANE_NOW, PANE_LIBRARY, PANE_SHUFFLE, PANE_COVERFLOW, PANE_FOLDER, PANE_GAMES, PANE_ROCKBOX, PANE_STREAM, PANE_SETTINGS, \
-    PANE_SERVICE = range(10)
-SPLIT_W, BACK_W = 187, 294
+PANE_NOW, PANE_LIBRARY = range(2)  # what Split's pane shows: coverflow.c's
 
 
-def themed(fw, theme, **keys):
-    """config.ini's [IPOD] keys as navigation.c reads them at its first theme(): Theme, and any others."""
-    values = {b'THEME': str(theme).encode(), **{k.encode(): v.encode() for k, v in keys.items()}}
+def themed(fw, **keys):
+    """config.ini's [IPOD] keys as navigation.c reads them at its first theme(): THEME as OLED stores it, and any
+    others."""
+    values = {b'THEME': b'3', **{k.encode(): v.encode() for k, v in keys.items()}}
 
     def read(path, section, key, out, default, *_):
         value = values.get(C.string_at(key), C.string_at(default))
@@ -2715,7 +2719,7 @@ def themed(fw, theme, **keys):
     fw.mock('toolsReadConfig', read)
     fw.mock('fw___xstat', lambda *_: -1)  # no Rockbox on the card
     fw.mock('tk_str_start_with', lambda s, prefix, *_: C.string_at(s).startswith(C.string_at(prefix)))
-    return THEMES[theme]
+    return THEMES[0]
 
 
 def address(fw, name):
@@ -2881,8 +2885,9 @@ class Ui:
 
 
 class Homes:
-    """A Home window as the asset lays it out: the art, the main list's rows, the Settings, Library and Streaming lists
-    (hidden, two rows each: a button with its label and icon), and Carousel's slide_menu and arrows."""
+    """A Home window as OLED's asset lays it out: the art, the main list's rows, the Settings list (hidden, two rows: a
+    button with its label and icon), and Carousel's slide_menu and arrows. OLED's set has no home_lib, so no Library
+    or Streaming list (tools/ipod.py ipod_home)."""
     ROWS = ('img_playing', 'img_library', 'img_cover_flow', 'img_folder', 'img_rockbox', 'img_shuffle_songs', 'img_services',
             'img_home_search', 'img_settings')
 
@@ -2897,7 +2902,7 @@ class Homes:
             ui[self.rows['img_rockbox']].name = 'btn_rockbox'
             ui.make(self.rows['img_rockbox'], 'label', name='label_rockbox')
         self.lists = {}
-        for k in ('homeset', 'homelib', 'homestream'):
+        for k in ('homeset',):
             self.lists[k] = ui.make(self.win, 'list_view', 0, 0, 375, 290, name='list_view_' + k)
             ui[self.lists[k]].visible = 0
             view = ui.make(self.lists[k], 'scroll_view', 0, 0, 375, 290)
@@ -2906,7 +2911,7 @@ class Homes:
                 b = ui.make(row, 'button', 10, 60 * i, 355, 60)
                 ui.make(b, 'hscroll_label', 80, 10, 200, 40)
                 ui[ui.make(b, 'image', 10, 10, 50, 50)].image = ('stream_radio', 'file:///mnt/mmc/apps/x/icon.png')[i]
-        self.sets, self.lib, self.stream = self.lists['homeset'], self.lists['homelib'], self.lists['homestream']
+        self.sets, self.lib, self.stream = self.lists['homeset'], None, None
         self.carousel = []
         if carousel:
             self.carousel = [ui.make(self.win, 'slide_menu', name='slide_menu'), ui.make(self.win, 'image', name='img_left'),
@@ -2922,47 +2927,38 @@ class Homes:
         return fw.fn('coverflow_home', C.c_int, C.c_void_p, C.c_void_p)(self.win, 0)
 
 
-def home_open(fw, theme=CLASSIC, carousel=False, rockbox=False, **keys):
-    t = themed(fw, theme, **keys)
+def home_open(fw, carousel=False, rockbox=False, **keys):
+    t = themed(fw, **keys)
     ui = Ui(fw)
     h = Homes(ui, carousel, rockbox)
     h.open(fw)
     return t, ui, h, fw.var('coverflow__home', Home)
 
 
-def test_home_binds_its_cards_and_lists_and_asks_the_pane_s_counts_after_boot(fw):
-    themed(fw, CLASSIC)
+def test_home_binds_its_cards_and_lists(fw):
+    themed(fw)
     ui = Ui(fw)
     h = Homes(ui, carousel=True)
     assert h.open(fw, 5) == 5  # stock's answer
     home = fw.var('coverflow__home', Home)
     assert (home.win, home.art, home.list, home.sets, home.lib, home.stream) == (h.win, h.art, h.main, h.sets, h.lib, h.stream)
     assert list(home.carousel) == h.carousel
-    assert not any(ui[w].sensitive for w in (h.art, h.sets, h.lib, h.stream))  # taps find the shown list's rows
+    assert not any(ui[w].sensitive for w in (h.art, h.sets))  # taps find the shown list's rows
     want = {'img_cover_flow': ('coverflow__coverflow_open', 0), 'img_rockbox': ('home_shortcut_open', 0),
-            'img_settings': ('coverflow__home_settings', 0), 'img_library': ('coverflow__home_library', h.win),
-            'img_services': ('coverflow__home_streaming', h.win), 'img_shuffle_songs': ('shuffle_songs', 0),
+            'img_settings': ('coverflow__home_settings', 0), 'img_shuffle_songs': ('shuffle_songs', 0),
             'img_home_search': ('library_search_open', 0)}
     for row, (fn, ctx) in want.items():
         assert ui.handlers(h.rows[row]) == [(address(fw, fn), ctx)], row
+    assert not ui.handlers(h.rows['img_library']) and not ui.handlers(h.rows['img_services'])  # stock's, by name
     on_card = [ui.handlers(ui.lookup(h.carousel[0], n)) for n in ('img_cover_flow', 'img_rockbox')]
     assert on_card == [[(address(fw, 'coverflow__coverflow_open'), 0)], [(address(fw, 'home_shortcut_open'), 0)]]
-    assert ui.handlers(h.win, EVT_WINDOW_FOREGROUND) == [(address(fw, 'coverflow__home_foreground'), 0)]
-    assert ui.timer(address(fw, 'coverflow__home_counts'))[1] > 0  # not in boot's first paints: later
 
 
-def test_a_theme_without_the_pane_asks_no_counts(fw):
-    _, ui, h, _ = home_open(fw, MINIMAL)
-    assert not ui.handlers(h.win, EVT_WINDOW_FOREGROUND) and not ui.timer(address(fw, 'coverflow__home_counts'))
-
-
-@pytest.mark.parametrize('fit', (True, False))
-def test_a_page_list_on_a_list_fit_set_ends_on_its_last_whole_row_above_the_glass(fw, library, fit):
+def test_a_page_list_on_a_list_fit_set_ends_on_its_last_whole_row_above_the_glass(fw, library):
     """page_list under OLED's set (list_fit, list end 224 under a 58 px bar): twelve 32 px rows end by y 282 on
-    screen, the eighth row no longer under the glass; the built-in set keeps the list to the page's bottom."""
-    themed(fw, OLED if fit else MINIMAL)
-    if fit:
-        split_inset_set(fw, library, 2)  # OLED's set
+    screen, the eighth row no longer under the glass."""
+    themed(fw)
+    split_inset_set(fw, library, 2)  # OLED's set
     ui = Ui(fw)
     fw.mock('widget_resize', lambda w, ww, h, *_: ui.box(w, *ui.at(w)[:2], ww, h))
     client = fw.fn('client_h', C.c_int)()
@@ -2973,34 +2969,34 @@ def test_a_page_list_on_a_list_fit_set_ends_on_its_last_whole_row_above_the_glas
     lv = ui[view].parent
     top, h = 320 - client + ui.at(lv)[1], ui.at(lv)[3]
     row = fw.fn('page_h', C.c_int, C.c_int)(48)
-    if fit:
-        assert top + h <= 282 and top + h + row > 282 and h % row == 0, (top, h, row)
-        assert ui.at(view)[3] == h
-    else:
-        assert top + h == 320 or h == 12 * row
+    assert top + h <= 282 and top + h + row > 282 and h % row == 0, (top, h, row)
+    assert ui.at(view)[3] == h
 
 
 def test_settings_slides_in_over_the_list_and_return_slides_the_list_back(fw):
+    """Under home.lists.full Settings, laid out a page's width, slides in from the right by that width over the
+    theme's swap motion, the art hidden; Return slides the main list back in from the left by its own width."""
     t, ui, h, _ = home_open(fw)
     title, back = fw.fn('coverflow_home_title', C.c_char_p), fw.fn('coverflow_home_back', C.c_int, C.c_void_p)
     assert title() == b'Q2 Pod' and not back(h.win)
-    ui.box(h.sets, 50, 0, SPLIT_W, 290)  # a list still sliding goes to its rest first
+    ui.box(h.sets, 50, 0, 375, 290)  # a list still sliding goes to its rest first
     ui.click(h.rows['img_settings'])
     assert not ui[h.main].visible and not ui[h.main].sensitive and ui[h.sets].visible and ui[h.sets].sensitive
-    assert ui.at(h.sets)[0] == SPLIT_W and ui.animators == [(h.sets, t['motion.swap.ms'], t['motion.swap.easing'], 'x')]
-    assert ui[h.art].visible and title() == b'Settings'
+    assert ui.at(h.sets)[0] == 375 and ui.animators == [(h.sets, t['motion.swap.ms'], t['motion.swap.easing'], 'x')]
+    assert not ui[h.art].visible and title() == b'Settings'
     ui.click(h.rows['img_settings'])  # open already: nothing moves
     assert len(ui.animators) == 1
     assert not back(h.art) and back(h.win) == 1
     assert ui[h.main].visible and ui[h.main].sensitive and not ui[h.sets].visible and not ui[h.sets].sensitive
-    assert ui.at(h.main)[0] == -SPLIT_W and ui.animators[-1][0] == h.main  # in from the left
+    assert ui.at(h.main)[0] == -ui.at(h.main)[2] and ui.animators[-1][0] == h.main  # in from the left
+    assert ui[h.art].visible
     assert title() == b'Q2 Pod' and not back(h.win)
 
 
 def test_under_home_lists_full_settings_is_a_page_and_return_brings_the_art_back(fw):
     """OLED's home.lists.full: the list a row opens takes the screen's width with the art hidden, as a page; Return
     shows the main list beside the art again."""
-    t, ui, h, home = home_open(fw, OLED, HOME='0')
+    t, ui, h, home = home_open(fw, HOME='0')
     assert t['home_lists_full'] and ui[h.art].visible
     assert ui.at(h.sets)[2] == 375  # laid out a page's width while hidden
     ui.click(h.rows['img_settings'])
@@ -3010,18 +3006,10 @@ def test_under_home_lists_full_settings_is_a_page_and_return_brings_the_art_back
     assert ui[h.main].visible and ui[h.art].visible
 
 
-def test_without_home_lists_full_settings_keeps_the_art_beside_it(fw):
-    t, ui, h, _ = home_open(fw, CLASSIC)
-    assert not t['home_lists_full']
-    ui.click(h.rows['img_settings'])
-    assert ui[h.sets].visible and ui[h.art].visible
-
-
-@pytest.mark.parametrize('theme', [MINIMAL, CLASSIC, MODERN])
-def test_a_list_return_leaves_on_home_opens_at_its_top_again(fw, theme):
+def test_a_list_return_leaves_on_home_opens_at_its_top_again(fw):
     """list.reopen.top on Home's own lists, which stay alive hidden: Return drops the row the list was left on and
     scrolls it to its top (navigation.c forget_rows), so choosing it again opens there."""
-    _, ui, h, _ = home_open(fw, theme)
+    _, ui, h, _ = home_open(fw)
     ui.click(h.rows['img_settings'])
     view = ui[h.sets].kids[0]
     ui[view].props['_ringnav_index'] = 1  # the wheel left it on its second row
@@ -3036,28 +3024,8 @@ def test_a_swap_with_no_animator_shows_the_list_in_place(fw):
     assert ui[h.sets].visible and ui.at(h.sets)[0] == 0
 
 
-@pytest.mark.parametrize('bar', (False, True))
-def test_a_hold_going_home_shows_the_main_list_at_once(fw, bar):
-    _, ui, h, _ = home_open(fw)
-    ui.click(h.rows['img_settings'])
-    top = fw.fn('coverflow_home_top', None)
-    over, first = ui.make(0, 'window'), []
-    if bar:  # the bar, application_init's first window, under them all
-        first = [ui.make(0, 'window')]
-        fw.var('fw_ctx_system_bar', C.c_void_p).value = first[0]
-    ui[ui.wm].kids[:] = first + [over, h.win]  # Home over another window: not the bottom one
-    top()
-    assert ui[h.sets].visible
-    ui[ui.wm].kids[:] = first + [h.win, over]
-    animated = len(ui.animators)
-    top()
-    assert ui[h.main].visible and ui[h.main].sensitive and not ui[h.sets].visible and len(ui.animators) == animated
-    top()  # nothing open: nothing to do
-    assert ui[h.main].visible
-
-
-def test_home_owns_its_four_lists_rows(fw):
-    themed(fw, CLASSIC)
+def test_home_owns_its_lists_rows(fw):
+    themed(fw)
     ui = Ui(fw)
     h = Homes(ui)
     owns = fw.fn('coverflow_home_owns', C.c_int, C.c_void_p)
@@ -3068,77 +3036,12 @@ def test_home_owns_its_four_lists_rows(fw):
     assert owns(h.rows['img_library']) and owns(h.main) and not owns(h.art) and not owns(h.win) and not owns(None)
 
 
-@pytest.fixture
-def stock_bg():
-    """Stock's background handlers library_rows and stream_rows call by address (LOCALMUSIC_BG, STREAM_BG): each a
-    stand-in counting its calls. Unlike test_navigation's stock_stub and test_playback's Wheel, which run only in
-    in_fork's child, these run in this process, so the gcov counts of the C they reach are kept (a forked child's
-    are lost); the teardown after the yield puts the original bytes back whether or not the test passed."""
-    counts, saved = (C.c_long * 2)(), []
-    for k, name in enumerate(('LOCALMUSIC_BG', 'STREAM_BG')):
-        at = O[name]
-        claim(at)
-        code = b'\x48\xb8' + struct.pack('<Q', C.addressof(counts) + 8 * k) + b'\x48\xff\x00\x31\xc0\xc3'  # ++*counter; return 0
-        saved.append((at, C.string_at(at, len(code))))
-        C.memmove(at, code, len(code))
-    yield counts
-    for at, data in saved:
-        C.memmove(at, data, len(data))
-
-
-def rows_of(ui, lst):
-    return [ui[r].kids[0] for r in ui[ui[lst].kids[0]].kids]
-
-
-def test_the_library_row_slides_its_rows_in_split_s_shape(fw, stock_bg):
-    t, ui, h, _ = home_open(fw)
-    ui.click(h.rows['img_library'])
-    assert stock_bg[0] == 1  # library_rows filled it, as the page's constructor
-    assert ui[h.lib].visible and not ui[h.main].visible and fw.fn('coverflow_home_title', C.c_char_p)() == b'Library'
-    for b in rows_of(ui, h.lib):
-        assert ui.at(b)[::2] == (0, SPLIT_W) and ui.at(b)[3] == 60  # Home's rows' width, their own height
-        label = ui.of('hscroll_label', b)[0]
-        assert ui.at(label)[0] == t['home_text_x'] and ui.at(label)[2] == SPLIT_W - t['home_text_x'] - t['home_label_end[0]']
-    ui.click(h.rows['img_library'])
-    assert stock_bg[0] == 1  # open already
-
-
-@pytest.mark.parametrize('keys', ({'HOME': '1'}, {'HOMELIB': '0'}))
-def test_the_library_row_opens_the_page_in_full_or_without_library_on_home(fw, stock_bg, keys):
-    _, ui, h, _ = home_open(fw, **keys)
-    fw.mock('on_home_music_onclick', lambda *_: 7)
-    assert ui.click(h.rows['img_library']) == [7] and stock_bg[0] == 0 and not ui[h.lib].visible
-
-
-def test_the_streaming_row_takes_home_s_row_height_and_decodes_the_build_s_icons(fw, stock_bg):
-    _, ui, h, home = home_open(fw)
-    home.kind, home.row = PANE_SERVICE, 0x1234
-    loads = []
-    fw.mock('widget_load_image', lambda owner, url, *_: loads.append((owner, C.string_at(url))) or 1)
-    ui.click(h.rows['img_services'])
-    assert stock_bg[1] == 1 and ui[h.stream].visible and fw.fn('coverflow_home_title', C.c_char_p)() == b'Streaming'
-    assert home.kind == PANE_STREAM and not home.row  # the rows the pane read are rebuilt
-    for b in rows_of(ui, h.stream):
-        assert ui.at(b) == (0, 0, SPLIT_W, 70)  # the main list's row height
-        assert ui.at(ui.of('hscroll_label', b)[0])[1::2] == (0, 70)
-    assert loads == [(h.art, b'classic_light_stream_radio')]  # a card app's own file waits for the pane
-    ui.click(h.rows['img_services'])
-    assert stock_bg[1] == 1
-
-
-def test_the_streaming_row_opens_the_page_in_full(fw, stock_bg):
-    _, ui, h, _ = home_open(fw, HOME='1')
-    fw.mock('on_home_stream_onclick', lambda *_: 9)
-    assert ui.click(h.rows['img_services']) == [9] and stock_bg[1] == 0
-
-
 @pytest.mark.parametrize('home', ('0', '1', '2'))
-@pytest.mark.parametrize('theme', (MINIMAL, CLASSIC, MODERN))
 @pytest.mark.parametrize('shortcut, shown, label', (('0', 0, 'Rockbox'), ('6', 1, 'Games'), ('11', 0, 'Favorites'),
                                                     ('12', 1, 'Favorites')))
-def test_the_shortcut_row_sits_after_folder_unless_rockbox_is_missing_or_none(fw, theme, home, shortcut, shown, label):
-    # None hides the row in every layout and theme; the carousel's card stays, naming the default as with no choice
-    themed(fw, theme, SHORTCUT=shortcut, HOME=home)
+def test_the_shortcut_row_sits_after_folder_unless_rockbox_is_missing_or_none(fw, home, shortcut, shown, label):
+    # None hides the row in every layout; the carousel's card stays, naming the default as with no choice
+    themed(fw, SHORTCUT=shortcut, HOME=home)
     ui = Ui(fw)
     h = Homes(ui, carousel=True, rockbox=True)
     rockbox = h.rows['img_rockbox']
@@ -3151,9 +3054,9 @@ def test_the_shortcut_row_sits_after_folder_unless_rockbox_is_missing_or_none(fw
     assert ui[ui.named('label_rockbox')].text == label and ui[ui.lookup(h.carousel[0], 'label_rockbox')].text == label
 
 
-def np_home(fw, theme=OLED, status=1, home='0'):
+def np_home(fw, status=1, home='0'):
     """Home with its Now Playing row named as the asset names it, play's state status[0] and the clock now[0]."""
-    themed(fw, theme, HOME=home)
+    themed(fw, HOME=home)
     ui = Ui(fw)
     h = Homes(ui, carousel=True, rockbox=True)
     playing = h.rows['img_playing']
@@ -3169,12 +3072,12 @@ def shown_rows(ui, h):
     return [ui[r].name for r in ui[h.view].kids if ui[r].visible]
 
 
-@pytest.mark.parametrize('theme, home', ((OLED, '0'), (OLED, '1'), (CLASSIC, '0'), (MINIMAL, '1')))
+@pytest.mark.parametrize('home', ('0', '1'))
 @pytest.mark.parametrize('status, shown', ((1, False), (0, False), (2, True), (3, True)))
-def test_now_playing_s_row_shows_only_while_something_is_loaded(fw, theme, home, status, shown):
-    """An iPod's main menu: Now Playing only while a song plays or is paused, in Split, Full and every theme; hidden, it
-    is restacked last and takes no taps, and the Shortcut stays after Folder."""
-    ui, h, playing, _, _ = np_home(fw, theme, status, home)
+def test_now_playing_s_row_shows_only_while_something_is_loaded(fw, home, status, shown):
+    """An iPod's main menu: Now Playing only while a song plays or is paused, in Split and Full; hidden, it is
+    restacked last and takes no taps, and the Shortcut stays after Folder."""
+    ui, h, playing, _, _ = np_home(fw, status, home)
     rows = ui[h.view].kids
     assert ui[playing].visible == shown and ui[playing].sensitive == shown
     assert rows.index(playing) == (0 if shown else len(rows) - 1)
@@ -3239,19 +3142,18 @@ def test_now_playing_s_row_coming_keeps_the_selected_row_in_sight(fw, sel, y, wa
 
 
 @pytest.mark.parametrize('mode', (1, 2))
-def test_full_and_carousel_close_an_open_list_and_carousel_shows_its_cards(fw, mode):
-    themed(fw, CLASSIC, HOME=str(mode))
+def test_full_and_carousel_hide_the_art_and_carousel_shows_its_cards(fw, mode):
+    themed(fw, HOME=str(mode))
     ui = Ui(fw)
     h = Homes(ui, carousel=True)
-    ui[h.lib].visible = 1
     h.open(fw)
-    assert not ui[h.lib].visible and not ui[h.art].visible
+    assert not ui[h.art].visible
     assert all(ui[w].visible == (mode == 2) for w in h.carousel)
     assert ui[h.main].visible == (mode != 2) and not ui[h.sets].visible
 
 
 def test_split_puts_the_carousel_away(fw):
-    themed(fw, CLASSIC)
+    themed(fw)
     ui = Ui(fw)
     h = Homes(ui, carousel=True)
     for w in h.carousel:
@@ -3269,35 +3171,29 @@ def home_row(fw, surface, row, id=0, painting=0):
 
 
 def pane_rect(fw, h):
-    return h.win, (SPLIT_W, 0, HOME_PW, fw.fn('client_h', C.c_int)())
+    x = fw.fn('coverflow__pane_x', C.c_int)()
+    return h.win, (x, 0, 375 - x, fw.fn('client_h', C.c_int)())
 
 
-@pytest.mark.parametrize('name, kind', (('img_library', PANE_LIBRARY), ('img_cover_flow', PANE_COVERFLOW), ('img_folder', PANE_FOLDER),
-                                        ('img_services', PANE_STREAM), ('img_stream', PANE_STREAM), ('img_settings', PANE_SETTINGS),
-                                        ('img_shuffle_songs', PANE_SHUFFLE), ('img_home_search', PANE_LIBRARY),
-                                        ('img_unknown', PANE_LIBRARY)))
-def test_the_pane_follows_the_highlighted_row(fw, name, kind):
-    _, ui, h, _ = home_open(fw)
+@pytest.mark.parametrize('name', ('img_library', 'img_cover_flow', 'img_folder', 'img_services', 'img_settings',
+                                  'img_shuffle_songs', 'img_home_search', 'img_unknown'))
+def test_the_pane_follows_the_highlighted_row(fw, name):
+    """Off Now Playing's row (the pane's first kind) any row shows the library's covers."""
+    _, ui, h, home = home_open(fw)
+    assert home.kind == PANE_NOW
     row = ui.make(h.view, 'image', name=name)
     ui.dirty.clear()
-    assert home_row(fw, h.view, row) == kind
+    assert home_row(fw, h.view, row) == PANE_LIBRARY
     assert ui.dirty == [pane_rect(fw, h)]  # on a wheel move the pane joins the row's frame
     ui.dirty.clear()
     home_row(fw, h.view, row)
     assert not ui.dirty  # the same row: nothing compared or drawn again
 
 
-@pytest.mark.parametrize('shortcut, kind', (('6', PANE_GAMES), ('0', PANE_ROCKBOX), ('5', PANE_SHUFFLE), ('8', PANE_FOLDER),
-                                            ('9', PANE_FOLDER), ('1', PANE_LIBRARY), ('4', PANE_LIBRARY)))
-def test_the_shortcut_row_shows_what_its_shortcut_opens(fw, shortcut, kind):
-    _, ui, h, _ = home_open(fw, SHORTCUT=shortcut)
-    assert home_row(fw, h.view, h.rows['img_rockbox']) == kind
-
-
 def test_a_paint_s_row_change_shows_in_the_next_frame(fw):
     _, ui, h, home = home_open(fw)
     ui.dirty.clear()
-    assert home_row(fw, h.view, h.rows['img_cover_flow'], painting=1) == PANE_COVERFLOW
+    assert home_row(fw, h.view, h.rows['img_cover_flow'], painting=1) == PANE_LIBRARY
     assert not ui.dirty  # a paint can't invalidate: AWTK drops it with the frame
     i, ms = ui.timer(address(fw, 'coverflow__pane_after'))
     assert ms == 0 and home.pane_timer == i
@@ -3305,101 +3201,15 @@ def test_a_paint_s_row_change_shows_in_the_next_frame(fw):
     assert ui.dirty == [pane_rect(fw, h)] and not home.pane_timer
 
 
-def test_the_pane_in_home_s_other_lists(fw):
-    _, ui, h, _ = home_open(fw)
-    search = fw.fn('library_search', C.c_int)()
-    sets_view, lib_view, stream_view = (ui[lst].kids[0] for lst in (h.sets, h.lib, h.stream))
-    assert home_row(fw, sets_view, ui[sets_view].kids[0]) == PANE_SETTINGS
-    assert home_row(fw, lib_view, ui[lib_view].kids[0], id=search) == PANE_SHUFFLE  # Search's row: Shuffle's count, the songs
-    assert home_row(fw, lib_view, ui[lib_view].kids[1], id=search + 1) == PANE_LIBRARY
-    assert home_row(fw, stream_view, ui[stream_view].kids[0]) == PANE_SERVICE
-    ui.dirty.clear()
-    home_row(fw, stream_view, ui[stream_view].kids[1])
-    assert ui.dirty == [pane_rect(fw, h)]  # another service: drawn again though the kind stays
-
-
-def test_the_pane_finds_a_service_row_s_icon_and_name(fw):
-    _, ui, h, home = home_open(fw)
-    stream_view = ui[h.stream].kids[0]
-    row = ui.make(stream_view, 'view')
-    label, icon = ui.make(row, 'hscroll_label'), ui.make(row, 'image')
-    home_row(fw, stream_view, row)
-    assert (home.row, home.row_image, home.row_label) == (row, icon, label)
-
-
-@pytest.mark.parametrize('theme, keys, follows', ((CLASSIC, {'ROWPREVIEW': '0'}, PANE_NOW), (MINIMAL, {}, PANE_LIBRARY),
-                                                  (CLASSIC, {'HOME': '1'}, None), (CLASSIC, {'ART': ''}, None)))
-def test_without_row_preview_the_pane_is_now_playing_s_and_without_the_pane_rows_change_nothing(fw, theme, keys, follows):
-    """Classic's Row Preview off: Now Playing's pane on every row; a set with no row icons: the show on Settings; Carousel
-    or no art: nothing."""
-    _, ui, h, home = home_open(fw, theme, **{k: v for k, v in keys.items() if k != 'ART'})
+@pytest.mark.parametrize('keys', ({'HOME': '1'}, {'HOME': '2'}, {'ART': ''}))
+def test_without_the_pane_rows_change_nothing(fw, keys):
+    """Full, Carousel or no art: no pane, so a row it would follow leaves it as it was."""
+    _, ui, h, home = home_open(fw, **{k: v for k, v in keys.items() if k != 'ART'})
     if 'ART' in keys:
         home.art = 0
-    home.kind = PANE_GAMES
-    kind = home_row(fw, h.view, h.rows['img_settings'])
-    assert (kind, home.row) == ((follows, h.rows['img_settings']) if follows is not None else (PANE_GAMES, None))
-
-
-@pytest.mark.parametrize('kind, counts, want', (
-    (PANE_SHUFFLE, dict(songs=1), b'1 Song'), (PANE_LIBRARY, dict(songs=12), b'12 Songs'), (PANE_COVERFLOW, dict(albums=1), b'1 Album'),
-    (PANE_COVERFLOW, dict(albums=704), b'704 Albums'), (PANE_GAMES, dict(games=4), b'4 Games'), (PANE_GAMES, dict(games=1), b'1 Game'),
-    (PANE_STREAM, dict(services=5), b'5 Services'), (PANE_STREAM, dict(services=1), b'1 Service'),
-    (PANE_SETTINGS, dict(free_tenths=412), b'41.2 GB Free'), (PANE_SETTINGS, dict(free_tenths=5), b'0.5 GB Free'),
-    (PANE_LIBRARY, {}, b''), (PANE_COVERFLOW, dict(songs=3), b''), (PANE_SETTINGS, {}, b''), (PANE_FOLDER, dict(songs=9), b''),
-    (PANE_ROCKBOX, dict(games=9), b'')))
-def test_the_pane_s_caption_counts_what_its_row_opens(fw, kind, counts, want):
-    home = fw.var('coverflow__home', Home)
-    home.kind = kind
-    for k, v in counts.items():
-        setattr(home, k, v)
-    t = C.create_string_buffer(20)
-    assert fw.fn('coverflow__pane_caption', C.c_int, C.c_void_p, C.c_uint)(t, 20) == len(want) and t.value == want
-
-
-@pytest.mark.parametrize('queued, want', ((0, b''), (1, b'1 Song'), (12, b'12 Songs')))
-def test_now_playing_s_pane_counts_the_queue(fw, mcl, queued, want):
-    q = Deques(fw)
-    if queued:
-        fw.var('fw_ctx_mcl_pdeqplaylist', C.c_void_p).value = q.new(range(1, queued + 1))
-    t = C.create_string_buffer(20)
-    assert fw.fn('coverflow__pane_caption', C.c_int, C.c_void_p, C.c_uint)(t, 20) == len(want) and t.value == want
-
-
-def test_home_s_counts_wait_out_a_scan_and_forget_what_it_will_change(fw):
-    _, ui, h, home = home_open(fw)
-    counts = fw.fn('coverflow__home_counts', C.c_int, C.c_void_p)
-    claim(O['SCAN_THREAD'])
-    saved = C.string_at(O['SCAN_DONE'], 8)
-    try:
-        C.c_int.from_address(O['SCAN_THREAD']).value, C.c_int.from_address(O['SCAN_DONE']).value = 1, 0
-        home.songs, home.albums, home.counted = 40, 3, 1
-        ui.dirty.clear()
-        assert counts(None) == 8 and (home.songs, home.albums, home.counted) == (0, 0, 0)  # looks again until it ends
-        assert ui.dirty == [pane_rect(fw, h)]
-        assert counts(None) == 8 and len(ui.dirty) == 1  # nothing shown to take back
-        assert not fw.calls('fw_pthread_create')
-    finally:
-        C.memmove(O['SCAN_DONE'], saved, 8)
-
-
-def test_a_refused_count_thread_is_asked_again_at_the_next_home(fw):
-    _, ui, h, home = home_open(fw)
-    fw.mock('fw_pthread_create', lambda *_: 11)
-    counts = fw.fn('coverflow__home_counts', C.c_int, C.c_void_p)
-    assert counts(None) == 0 and not home.counting and not home.count_timer and home.pane_read & 1  # the card's reads still run
-    counts(None)
-    assert len(fw.calls('fw_pthread_create')) == 2
-
-
-def test_home_s_foreground_asks_the_counts_again_sooner_than_boot_and_reads_the_row_afresh(fw):
-    _, ui, h, home = home_open(fw)
-    _, boot = ui.timer(address(fw, 'coverflow__home_counts'))
-    ui.timers.clear()
-    home.count_timer, home.row = 0, h.rows['img_settings']
-    ui.click(h.win, EVT_WINDOW_FOREGROUND)
-    i, ms = ui.timer(address(fw, 'coverflow__home_counts'))
-    assert 0 < ms < boot and home.count_timer == i  # once Home has slid back, not after a boot's paints
-    assert not home.row  # Row Preview may have changed in Settings
+    home.kind = PANE_LIBRARY
+    kind = home_row(fw, h.view, h.rows['img_playing'])
+    assert (kind, home.row) == (PANE_LIBRARY, None)
 
 
 # The pan's timer
@@ -3442,7 +3252,7 @@ def test_a_pan_that_has_not_moved_repaints_nothing(fw):
     assert fw.fn('coverflow__home_drift', C.c_int, C.c_void_p)(None) == 8 and not ui.dirty
 
 
-@pytest.mark.parametrize('change', ('dark', 'locked', 'covered', 'sliding', 'still', 'margin', 'pane', 'row'))
+@pytest.mark.parametrize('change', ('dark', 'locked', 'covered', 'sliding', 'still', 'margin'))
 def test_the_pan_stops_once_it_no_longer_shows(fw, change):
     _, ui, h, _ = home_open(fw)
     home = drifting(fw)
@@ -3456,12 +3266,8 @@ def test_the_pan_stops_once_it_no_longer_shows(fw, change):
         ui.animating = 1
     elif change == 'still':
         home.sl[0].tw = 0
-    elif change == 'margin':  # no margin left to pan across (a split_inset as wide as the zoom's)
+    else:  # no margin left to pan across (a split_inset as wide as the zoom's)
         home.sl[0].rx = home.sl[0].ry = 0
-    elif change == 'pane':
-        home.pane = 1
-    else:
-        home.kind = PANE_SETTINGS
     home.drift = 4
     ui.dirty.clear()
     assert fw.fn('coverflow__home_drift', C.c_int, C.c_void_p)(None) == 0 and not home.drift and not ui.dirty
@@ -3662,41 +3468,20 @@ def source(fw):
 SHOW_NOW, SHOW_LIB = 0, 1
 
 
-def test_where_the_pane_does_not_follow_the_row_the_show_starts_once_play_has_stopped_a_while(fw):
-    """Classic with Row Preview off: one pane for every row, the playing cover while a song plays; stopped or paused for
-    SLIDE_IDLE_MS, the library's."""
-    _, ui, h, home = home_open(fw, CLASSIC, HOME='0', ROWPREVIEW='0')
-    home_row(fw, h.view, h.rows['img_settings'])
-    assert home.kind == PANE_NOW
-    status, now = [2], [1000]
-    fw.mock('mclGetPlayStatus', lambda *_: status[0])
-    fw.mock('time_now_ms', lambda *_: now[0])
-    assert source(fw) == SHOW_NOW and home.idle == 0
-    status[0] = 3  # paused
-    assert source(fw) == SHOW_NOW
-    assert home.idle == 1001  # the time play was first seen stopped, | 1
-    now[0] = 1001 + O['SLIDE_IDLE_MS'] - 1
-    assert source(fw) == SHOW_NOW  # a track change's moment stopped starts nothing
-    now[0] += 1
-    assert source(fw) == SHOW_LIB
-    status[0] = 2
-    assert source(fw) == SHOW_NOW and home.idle == 0  # play again: the playing cover at once
-
-
 @pytest.mark.parametrize('name, kind', (('img_playing', PANE_NOW), ('img_library', PANE_LIBRARY), ('img_cover_flow', PANE_LIBRARY),
                                         ('img_shuffle_songs', PANE_LIBRARY), ('img_home_search', PANE_LIBRARY),
                                         ('img_settings', PANE_LIBRARY), ('img_rockbox', PANE_LIBRARY)))
 def test_under_oled_the_pane_follows_the_row_between_the_playing_cover_and_the_show(fw, name, kind):
     """OLED, an iPod classic's menu: Now Playing's row the playing cover, playing or paused however long; every other
     row the library's covers."""
-    _, ui, h, home = home_open(fw, OLED, HOME='0')
+    _, ui, h, home = home_open(fw, HOME='0')
     fw.mock('mclGetPlayStatus', lambda *_: 3)
     now = [1000]
     fw.mock('time_now_ms', lambda *_: now[0])
     ui.dirty.clear()
     assert home_row(fw, h.view, h.rows[name]) == kind
     assert source(fw) == (SHOW_NOW if kind == PANE_NOW else SHOW_LIB)
-    now[0] += 10 * O['SLIDE_IDLE_MS']
+    now[0] += 600000  # ten minutes paused
     assert source(fw) == (SHOW_NOW if kind == PANE_NOW else SHOW_LIB)
 
 
@@ -3722,25 +3507,13 @@ def test_under_oled_the_wheel_off_now_playing_mid_fade_fades_the_show_in_over_th
             assert all(abs((p >> s & 255) - (q >> s & 255)) <= 1 for s in (0, 8, 16)), (x, y, hex(p), hex(q))
 
 
-@pytest.mark.parametrize('kind, want', ((PANE_NOW, SHOW_NOW), (PANE_LIBRARY, SHOW_LIB)))
-def test_where_the_pane_follows_the_row_the_library_row_shows_the_library(fw, kind, want):
-    """Classic with Row Preview, an iPod classic's menu: Now Playing's row the playing cover, whatever plays; the
-    Library's the slideshow."""
-    _, ui, h, home = home_open(fw, CLASSIC, ROWPREVIEW='1')
-    fw.mock('mclGetPlayStatus', lambda *_: 1)
-    fw.mock('time_now_ms', lambda *_: 100000)
-    home.kind = kind
-    home.idle = 1
-    assert source(fw) == want
-
-
 def test_the_show_goes_on_over_a_track_change(fw, mcl):
-    _, ui, h, _ = home_open(fw, OLED, HOME='0')
+    _, ui, h, _ = home_open(fw, HOME='0')
     home = drifting(fw)
     library_slide(home.sl[0])
     fw.mock('mclGetPlayStatus', lambda *_: 1)
     fw.mock('time_now_ms', lambda *_: 100000)
-    home.idle, home.show, home.key, home.kind = 1, SHOW_LIB, 12345, PANE_LIBRARY
+    home.show, home.key, home.kind = SHOW_LIB, 12345, PANE_LIBRARY
     fw.fn('coverflow_home_art', None, C.c_void_p)(h.win)
     assert home.key != 12345 and not fw.calls('widget_load_image') and home.sl[0].lib == 1
 
@@ -3787,7 +3560,7 @@ def test_a_dark_screen_arms_no_pan(fw, mcl):
     assert not ui.timer(address(fw, 'coverflow__home_drift'))
 
 
-# A Streaming row's icon in the pane
+# Stock's bitmaps and canvas
 
 class Bitmaps:
     """widget_load_image by url: a bitmap_t (w @0, h @4, format @0xe) whose lock reads its pixels; bitmap_create_ex a
@@ -3827,64 +3600,9 @@ class Bitmaps:
         return C.addressof(block)
 
 
-ICON = 'file:///mnt/mmc/apps/x/icon.png'
-
-
-def scaled(fw, bitmaps, w, h, colour, px, name=ICON, fmt=1):
-    src = (C.c_uint * 64)()
-    bitmaps.put(C.addressof(src), w, h, rgba(w, h, colour), fmt)
-    bitmaps.keep.append(src)
-    return fw.fn('coverflow__pane_scaled', C.c_void_p, C.c_void_p, C.c_char_p, C.c_uint)(C.addressof(src), name.encode(), px), \
-        C.addressof(src)
-
-
 def pixels_of(bitmaps, b):
     pixels, line = bitmaps.data[b]
     return [list((C.c_uint * (line // 4)).from_buffer(pixels, y * line)) for y in range(len(pixels) // line)]
-
-
-def test_pane_scaled_keeps_a_flat_icon_flat_at_the_theme_s_size(fw):
-    b = Bitmaps(fw)
-    out, src = scaled(fw, b, 2, 2, lambda x, y: (200, 100, 50, 255), 7)
-    assert out != src and rect(out)[:2] == (7, 7)
-    assert all(p == 0xff3264c8 for row in pixels_of(b, out) for p in row)  # RGBA8888, its bytes r, g, b, a
-    assert fw.var('coverflow__home', Home).svc_name == ICON.encode()
-
-
-def test_pane_scaled_weighs_by_alpha_so_a_transparent_pixel_lends_no_colour(fw):
-    b = Bitmaps(fw)
-    out, _ = scaled(fw, b, 2, 1, lambda x, y: (0, 0, 255, 255) if x == 0 else (255, 0, 0, 0), 8)
-    for row in pixels_of(b, out):
-        assert all(p & 255 == 0 for p in row)  # no red from the transparent pixel
-        alphas = [p >> 24 for p in row]
-        assert alphas[0] == 255 and alphas[-1] == 0 and alphas == sorted(alphas, reverse=True)
-        assert all(p >> 16 & 255 == 255 for p in row if p >> 24)  # what shows is the opaque pixel's blue, whole
-        assert row[-1] == 0
-
-
-def test_pane_scaled_stretches_an_edge_over_one_pixel_not_the_stretch(fw):
-    """#303: a card app's 52 px icon at 96 px was soft, plain bilinear blending every edge over two pixels."""
-    b = Bitmaps(fw)
-    out, _ = scaled(fw, b, 2, 1, lambda x, y: (0, 0, 0, 255) if x == 0 else (255, 255, 255, 255), 8)
-    for row in pixels_of(b, out):
-        reds = [p & 255 for p in row]
-        assert reds == sorted(reds) and len([r for r in reds if 0 < r < 255]) <= 1, reds
-
-
-def test_pane_scaled_scales_an_app_once(fw):
-    b = Bitmaps(fw)
-    out, _ = scaled(fw, b, 4, 4, lambda x, y: (9, 9, 9, 255), 6)
-    reads = b.reads
-    again, _ = scaled(fw, b, 4, 4, lambda x, y: (1, 2, 3, 255), 6)
-    assert again == out and b.reads == reads and len(b.made) == 1
-
-
-@pytest.mark.parametrize('w, h, fmt, create', ((513, 4, 1, True), (4, 513, 1, True), (0, 4, 1, True), (4, 4, 5, True), (4, 4, 0, True),
-                                               (4, 4, 1, False)))
-def test_pane_scaled_leaves_what_it_can_t_scale_as_it_is(fw, w, h, fmt, create):
-    b = Bitmaps(fw, create=create)
-    out, src = scaled(fw, b, w, h, lambda x, y: (1, 2, 3, 255), 6, fmt=fmt)
-    assert out == src and not fw.var('coverflow__home', Home).svc_name
 
 
 class Canvas:
@@ -3904,79 +3622,6 @@ class Canvas:
         fw.mock('canvas_fill_rect', lambda c, x, y, w, h, *_: self.rects.append((self.fills[-1], *(C.c_int(v).value for v in (x, y, w, h)))))
 
 
-def service_rig(fw, icon, name='Spotify', images=None):
-    t, ui, h, home = home_open(fw)
-    row = ui.make(0, 'view')
-    image, label = ui.make(row, 'image'), ui.make(row, 'hscroll_label')
-    ui[image].image, ui[label].text = icon, name
-    home.kind, home.row, home.row_image, home.row_label = PANE_SERVICE, row, image, label
-    bitmaps, canvas = Bitmaps(fw, images), Canvas(fw)
-
-    def paint():
-        canvas.images.clear(), canvas.texts.clear()
-        fw.fn('home_pane_paint', None, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int)(canvas.p, 5, -3, HOME_PW, 294)
-        assert canvas.fills[-1] == 0x12345678  # the LCD's fill back
-    return t, ui, home, bitmaps, canvas, paint
-
-
-def icon_at(t, side):
-    return (0, 0, side, side), (5 + t['pane_svc_x'], -3 + t['pane_svc_y'], side, side)
-
-
-def name_at(t):
-    return 5, -3 + t['pane_count_y'], t['pane_count_w'], 24
-
-
-def test_a_built_in_service_s_pane_is_its_icon_and_name(fw):
-    t, ui, home, b, canvas, paint = service_rig(fw, 'stream_radio')
-    side = t['pane_svc_px']
-    b.images['classic_light_stream_radio'] = (side, side, rgba(1, 1, lambda x, y: (0, 0, 0, 0)))  # the build's, made at it
-    paint()
-    assert b.loads == ['classic_light_stream_radio'] and not b.unloads  # the build's copy, at the pane's size
-    assert [i[1:] for i in canvas.images] == [icon_at(t, side)] and not b.made  # drawn as it is: nothing scaled
-    assert canvas.texts == [('Spotify', name_at(t), t['pane_count_px'])]
-
-
-def test_a_card_app_s_icon_is_scaled_to_the_pane_once_and_its_file_let_go(fw):
-    t, ui, home, b, canvas, paint = service_rig(fw, ICON, images={ICON: (64, 64, rgba(64, 64, lambda x, y: (5, 6, 7, 255)))})
-    side = t['pane_svc_px']
-    paint()
-    assert canvas.images == [(home.svc, *icon_at(t, side))] and rect(home.svc)[:2] == (side, side)
-    assert len(b.unloads) == 1  # the app's file leaves the image cache
-    paint()
-    assert canvas.images == [(home.svc, *icon_at(t, side))] and b.loads == [ICON] and len(b.made) == 1
-
-
-def test_a_service_icon_that_won_t_load_shows_the_card_apps_own(fw):
-    t, ui, home, b, canvas, paint = service_rig(fw, 'stream_gone', images={'classic_light_stream_app': (90, 80, rgba(1, 1, lambda x, y: (0, 0, 0, 0)))})
-    paint()
-    assert b.loads == ['classic_light_stream_gone', 'classic_light_stream_app'] and not b.unloads
-    assert [i[1:] for i in canvas.images] == [((0, 0, 90, 80), icon_at(t, 0)[1][:2] + (t['pane_svc_px'],) * 2)]
-    b.images.clear()
-    paint()
-    assert not canvas.images and canvas.texts  # no icon at all: the name still shows
-
-
-def test_a_long_service_name_shrinks_to_three_quarters_then_loses_its_end(fw):
-    t, ui, home, b, canvas, paint = service_rig(fw, 'stream_radio', name='Internet Radio Stations')
-    paint()
-    (text, box, px), = canvas.texts
-    px0 = t['pane_count_px']
-    assert box == name_at(t) and px <= px0 * 3 // 4
-    assert text.endswith('…') and 'Internet Radio Stations'.startswith(text[:-1])
-    assert len(text) * (px0 * 3 // 4) * .75 <= box[2] < (len(text) + 1) * (px0 * 3 // 4) * .75  # as much as fits
-
-
-def test_no_service_row_or_name_draws_no_service(fw):
-    t, ui, home, b, canvas, paint = service_rig(fw, 'stream_radio', name='')
-    ui[home.row_label].text = None
-    paint()
-    assert not canvas.texts
-    home.row = 0
-    paint()
-    assert not canvas.images and not canvas.texts
-
-
 # The pages' pieces, shared with photos.c, books.c and navigation.c
 
 @pytest.fixture(scope='module')
@@ -3986,7 +3631,7 @@ def scratch(library):
 
 
 def bar_title(fw, ui, scratch, width):
-    """Classic's bar title, width px: a caption of n characters measures 10 n px."""
+    """The bar's title, width px: a caption of n characters measures 10 n px."""
     bar = ui.make(0, 'hscroll_label', 0, 0, width, 30)
     C.c_void_p.from_address(C.addressof(fw.var('st', C.c_char)) + scratch['bar_title']).value = bar
     fw.mock('widget_get_canvas', lambda *_: 0x1234)
@@ -3997,32 +3642,11 @@ def page_title(fw, body, caption, n):
     return fw.fn('page_title', C.c_void_p, C.c_void_p, C.c_char_p, C.c_int)(body, caption, n)
 
 
-def test_minimal_s_page_title_is_its_own_row(fw):
-    t = themed(fw, MINIMAL)
-    ui = Ui(fw)
-    title = page_title(fw, ui.make(0, 'view'), b'Albums', 3)
-    assert ui.at(title) == (t['page_x'], 0, 375 - 2 * t['page_x'], t['page_title_h']) and ui[title].text == 'Albums'
-    assert ui[title].visible and not ui[title].name  # nothing for a bar to read
-
-
-@pytest.mark.parametrize('rows, width, hidden', ((3, 200, True), (3, 40, False), (0, 200, False)))
-def test_classic_s_bar_holds_the_caption_unless_it_is_all_the_page_says_or_won_t_fit(fw, scratch, rows, width, hidden):
-    t = themed(fw, CLASSIC)
-    ui = Ui(fw)
-    bar_title(fw, ui, scratch, width)
-    title = page_title(fw, ui.make(0, 'view'), b'Albums', rows)
-    assert ui[title].name == '_page_title' and ui[title].text == 'Albums'  # what the bar reads
-    assert ui[title].visible == (not hidden)
-    if not hidden:  # the page's first line, a row high, in the page's text column
-        x, y, w, h = ui.at(title)
-        assert (x, y, h) == (fw.fn('page_x', C.c_int)(), 0, t['page_row']) and x + w == 375 - x
-
-
 @pytest.mark.parametrize('rows, hidden', ((3, True), (0, False)))
 def test_a_status_row_ends_a_long_caption_in_an_ellipsis_and_keeps_the_rows_where_they_are(fw, scratch, rows, hidden):
     """OLED's status row holds a caption too wide for its box too (its label ends it in an ellipsis), so a page's rows
     start under the status row whatever the caption's length; a page with no rows still says it as its first line."""
-    t = themed(fw, OLED)
+    t = themed(fw)
     geom = C.c_int.from_address(C.addressof(fw.var('st', C.c_char)) + scratch['geom'])
     geom.value = fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())  # theme_boot's set, OLED's
     ui = Ui(fw)
@@ -4039,9 +3663,8 @@ def page_list_or(fw, page, body, name, none, n, item_h=48):
         page, body, name, none, n, item_h)
 
 
-@pytest.mark.parametrize('theme', (MINIMAL, CLASSIC))
-def test_an_empty_page_says_so_and_a_bar_still_reads_its_name(fw, theme):
-    themed(fw, theme)
+def test_an_empty_page_says_so_and_a_bar_still_reads_its_name(fw):
+    themed(fw)
     ui = Ui(fw)
     page = ui.make(0, 'window')
     body = ui.make(page, 'view')
@@ -4049,20 +3672,23 @@ def test_an_empty_page_says_so_and_a_bar_still_reads_its_name(fw, theme):
     labels = ui.of('hscroll_label', body)
     assert [ui[w].text for w in labels if ui[w].visible] == ['No photos']
     read = [ui[w].text for w in labels if ui[w].name == '_page_title' and not ui[w].visible]
-    assert read == (['Photos'] if theme == CLASSIC else [])
+    assert read == ['Photos']
     assert ui.at(ui.of('list_view', body)[0])[3] == 0  # no rows
 
 
 @pytest.mark.parametrize('n, rows', ((3, 3), (30, None)))
 def test_a_page_list_s_rows_run_from_its_title_to_the_page_s_bottom_or_its_last_row(fw, n, rows):
-    t = themed(fw, MINIMAL)
+    """With no bar to hold it (none here), the caption is the page's first line, a row high, and the rows run from
+    under it."""
+    t = themed(fw)
     ui = Ui(fw)
     page = ui.make(0, 'window')
     body = ui.make(page, 'view')
     view = page_list_or(fw, page, body, b'Albums', b'None', n)
     lv, row = ui[view].parent, t['page_row']
-    room = fw.fn('client_h', C.c_int)() - t['page_title_h']
-    assert ui.at(lv) == (0, t['page_title_h'], 375, rows * row if rows else room)
+    assert t['page_title_h'] == 0  # OLED's: the title is the bar's, when it fits
+    room = fw.fn('client_h', C.c_int)() - row
+    assert ui.at(lv) == (0, row, 375, rows * row if rows else room)
     assert ui[lv].props['item_height'] == row and ui[view].props['virtual_h'] == n * row and ui[view].props['yslidable'] == 1
     assert [ui[w].text for w in ui.of('hscroll_label', body)] == ['Albums'] and ui[body].visible
 
@@ -4072,9 +3698,8 @@ def page_row_detail(fw, view, index, caption, detail, click=0x1234, into=False):
     return fw.fn(name, C.c_void_p, C.c_void_p, C.c_int, C.c_char_p, C.c_char_p, C.c_void_p)(view, index, caption, detail, click)
 
 
-@pytest.mark.parametrize('theme', (MINIMAL, CLASSIC))
-def test_a_row_with_a_detail_puts_its_caption_over_it_in_the_page_s_text_column(fw, theme):
-    t = themed(fw, theme)
+def test_a_row_with_a_detail_puts_its_caption_over_it_in_the_page_s_text_column(fw):
+    t = themed(fw)
     ui = Ui(fw)
     item = page_row_detail(fw, ui.make(0, 'scroll_view'), 2, b'Song', b'3 plays')
     h = t['page_detail']
@@ -4088,53 +3713,43 @@ def test_a_row_with_a_detail_puts_its_caption_over_it_in_the_page_s_text_column(
     grey = ui[detail].props['style:normal:text_color'] & 0xffffffff
     r, g, b, a = (grey >> s & 255 for s in (0, 8, 16, 24))
     assert a == 255 and r == g == b < 255  # stock's second line: an opaque grey, dimmer than the caption's white
-    assert ui[item].name == ('_page_tall' if t['sep'] else '')  # its separators' row
 
 
-@pytest.mark.parametrize('theme', (MINIMAL, CLASSIC))
-def test_an_empty_detail_centres_the_caption_above_the_theme_s_separators(fw, theme):
-    t = themed(fw, theme)
+def test_an_empty_detail_keeps_the_caption_where_it_stands_over_one(fw):
+    themed(fw)
     ui = Ui(fw)
     item = page_row_detail(fw, ui.make(0, 'scroll_view'), 0, b'Song', b'')
     over = ui.of('hscroll_label', page_row_detail(fw, ui.make(0, 'scroll_view'), 0, b'Song', b'3 plays'))[0]
     caption, detail = ui.of('hscroll_label', item)
-    h, sep = t['page_detail'], len(t['sep'])
-    _, y, _, ch = ui.at(caption)
-    assert ui.at(caption)[::2] == ui.at(over)[::2]  # the same text column
-    if sep:
-        assert 2 * y + ch == h - sep  # centred in the row above its separators
-    else:
-        assert ui.at(caption) == ui.at(over)  # where it stands over a detail
+    assert ui.at(caption) == ui.at(over)  # the same text column, where it stands over a detail
     assert ui[detail].text == ''  # kept for whoever writes it
 
 
 CHEVRON_GLYPH = 322  # row_into: stock's list_into glyph spans x 322 to 332 on a full-width row, as on the Library's
 
 
-@pytest.mark.parametrize('theme', (MINIMAL, CLASSIC))
-def test_a_row_into_another_page_ends_its_labels_before_the_chevron(fw, theme):
-    t = themed(fw, theme)
+def test_a_row_into_another_page_ends_its_labels_before_the_chevron(fw):
+    t = themed(fw)
     ui = Ui(fw)
     view = ui.make(0, 'scroll_view')
     item = page_row_detail(fw, view, 1, b'Albums', b'', into=True)
-    h, sep, x = t['page_detail'], len(t['sep']), fw.fn('page_x', C.c_int)()
+    h, x = t['page_detail'], fw.fn('page_x', C.c_int)()
     caption, detail = ui.of('hscroll_label', item)
     (cx, cy, cw, ch), (dx, _, dw, _) = ui.at(caption), ui.at(detail)
-    assert cx == dx == x and 2 * cy + ch == h - sep  # centred in the row (above any separators), beside the chevron
+    assert cx == dx == x and 2 * cy + ch == h  # centred in the row, beside the chevron
     assert cw == dw > 0 and x + cw <= CHEVRON_GLYPH  # both labels end before its glyph
     chevron, = ui.of('image', item)
     vx, vy, vw, vh = ui.at(chevron)
     assert vx <= CHEVRON_GLYPH and CHEVRON_GLYPH + 10 <= vx + vw <= 375 and (vy, vh) == (0, h)  # the glyph in it, a row high
-    assert ui[chevron].image == 'list_into' and ui[chevron].visible == (not t['chevron_sel'])  # else the selection's
+    assert ui[chevron].image == 'list_into' and ui[chevron].visible
     fw.fn('page_row_into', None, C.c_void_p, C.c_int, C.c_char_p, C.c_void_p)(view, 2, b'Songs', 0)
     row = ui[view].kids[-1]
     lx, ly, lw, lh = ui.at(ui.of('hscroll_label', row)[0])
     assert ui.at(row)[3] == t['page_row'] and (lx, ly, lh) == (x, 0, t['page_row']) and 0 < lw <= CHEVRON_GLYPH - x
 
 
-@pytest.mark.parametrize('theme', (MINIMAL, CLASSIC))
-def test_a_level_slides_in_from_the_side_it_comes_from_where_the_theme_moves_levels(fw, theme):
-    t = themed(fw, theme)
+def test_a_level_slides_in_from_the_side_it_comes_from_where_the_theme_moves_levels(fw):
+    t = themed(fw)
     ui = Ui(fw)
     lv = ui.make(0, 'list_view', 30, 48, 375, 200)
     view = ui.make(lv, 'scroll_view')
@@ -4161,8 +3776,8 @@ class Th(C.Structure):
                 ('hold_k', C.c_int), ('arch', C.c_float), ('seen_arch', C.c_float)]
 
 
-def captions(fw, theme, scoped=0, albums=(('Abbey', 'Beatles'), ('Help', 'Beatles'))):
-    t = themed(fw, theme)
+def captions(fw, scoped=0, albums=(('Abbey', 'Beatles'), ('Help', 'Beatles'))):
+    t = themed(fw)
     ui = Ui(fw)
     recs = [Rec(n, artist=a) for n, a in albums]
     deque_of(fw, recs)
@@ -4176,34 +3791,27 @@ def captions(fw, theme, scoped=0, albums=(('Abbey', 'Beatles'), ('Help', 'Beatle
 
 
 def test_the_captions_name_the_centre_album_and_its_artist(fw):
-    _, ui, c, titles = captions(fw, MINIMAL)
+    _, ui, c, titles = captions(fw)
     titles(1)
     assert (ui[c.name].text, ui[c.artist].text) == ('Help', 'Beatles') and c.titled == 2
     assert ui[c.name].props['xoffset'] == 0 and ui[c.artist].props['xoffset'] == 0
     ui[c.name].text = 'stale'
     titles(1)
     assert ui[c.name].text == 'stale'  # once each time it changes
-    assert 'style:normal:font_name' not in ui[c.name].props  # Minimal's captions keep the style's face
+    assert 'style:normal:font_name' not in ui[c.name].props  # the captions keep the style's face
 
 
 @pytest.mark.parametrize('scoped, card', ((ARTIST_ALBUMS, 'All albums'), (2, 'Sort: Rating')))
 def test_the_card_after_the_albums_is_named_for_what_it_does(fw, scoped, card):
-    _, ui, c, titles = captions(fw, MINIMAL, scoped)
+    _, ui, c, titles = captions(fw, scoped)
     c.sort = SORT_RATING
     titles(2)
     assert (ui[c.name].text, ui[c.artist].text) == (card, '')
 
 
-def test_classic_s_captions_are_in_now_playing_s_face(fw):
-    t, ui, c, titles = captions(fw, CLASSIC)
-    titles(0)
-    for w in (c.name, c.artist):
-        assert ui[w].props['style:normal:font_name'] == 'classic-light' and ui[w].props['style:normal:font_size'] == t['font_px[ROLE_NP]']
-
-
 @pytest.mark.parametrize('state', ('covers', 'thumb', 'tracks', 'gone'))
 def test_the_captions_catch_up_with_the_frame_after_the_paint(fw, state):
-    _, ui, c, titles = captions(fw, MINIMAL)
+    _, ui, c, titles = captions(fw)
     fw.var('fx', Fx).c = 1
     c.title_timer = 7
     if state == 'thumb':
@@ -4216,76 +3824,12 @@ def test_the_captions_catch_up_with_the_frame_after_the_paint(fw, state):
     assert ui[c.name].text == ('Help' if state == 'covers' else None)
 
 
-# The flip's panel paint, shared with navigation.c's hold menu
-
-@pytest.mark.parametrize('light', (0, 1))
-def test_the_panel_s_paper_header_shadow_and_border(fw, light):
-    themed(fw, CLASSIC, LIGHT=str(light))
-    canvas = Canvas(fw)
-    paint = fw.fn('coverflow_panel_paint', None, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int)
-    paint(canvas.p, 40, 9, 57, 285, 0)
-    paper, *head = canvas.rects
-    assert paper[1:] == (40, 9, BACK_W, 285) and paper[0] >> 24 == 255 and bool(paper[0] & 0xffffff) == bool(light)
-    assert [r[1:] for r in head] == [(40, 9 + j, BACK_W, 1) for j in range(57)]
-    assert len({r[0] >> 24 for r in head}) == 1  # one alpha all the way down
-    assert all(r[0] >> 16 & 255 > max(r[0] >> 8 & 255, r[0] & 255) for r in head)  # a blue: RGBA8888, b the third byte
-    for s in (0, 8, 16):  # lighter row by row
-        assert [r[0] >> s & 255 for r in head] == sorted(r[0] >> s & 255 for r in head)
-    assert head[-1][0] != head[0][0]
-    canvas.rects.clear()
-    paint(canvas.p, 40, 9, 57, 285, 1)
-    shadow, border = canvas.rects[:8], canvas.rects[8:]
-    assert [r[1:] for r in shadow] == [(40, 9 + 55 + j, BACK_W, 1) for j in range(8)]  # over the header's foot and the rows
-    alpha = [r[0] >> 24 for r in shadow]
-    assert all(not r[0] & 0xffffff for r in shadow) and alpha[0] == alpha[-1] == 0 and max(alpha) > 0
-    assert [r[1:] for r in border] == [(39, 8, BACK_W + 2, 1), (39, 9 + 285, BACK_W + 2, 1), (39, 9, 1, 285), (40 + BACK_W, 9, 1, 285)]
-    assert len({r[0] for r in border}) == 1 and border[0][0] >> 24 == 255  # one opaque colour all round
-    assert (border[0][0] & 255 > 0x80) == bool(light)
-
-
-# The album panel's rows: the title runs to the length's text, not to the box reserved for it
-
-def panel_row(fw, text, canvas=1):
-    """panel_fit on two fake widgets, the length's box 66 wide (88 from an hour) and the title's 194; a character measures 10 px."""
-    wide = (C.c_uint * (len(text) + 1))(*map(ord, text))
-    title, time = bytearray(0x80), bytearray(0x80)
-    for w, (width, height) in ((title, (194, 45)), (time, (88 if len(text) > 5 else 66, 45))):
-        C.c_int.from_buffer(w, O['W_W']).value, C.c_int.from_buffer(w, O['W_H']).value = width, height
-    bufs = {C.addressof((C.c_char * 0x80).from_buffer(w)): w for w in (title, time)}
-    fw.mock('widget_get_canvas', lambda *a: 0x1000 * canvas)
-    fw.mock('widget_get_text', lambda *a: C.addressof(wide))
-    fw.mock('canvas_measure_text', lambda c, s, n, *a: 10.0 * n)
-    fit = fw.fn('coverflow__panel_fit', None, C.c_void_p, C.c_void_p, C.c_uint)
-    fit(C.addressof((C.c_char * 0x80).from_buffer(title)), C.addressof((C.c_char * 0x80).from_buffer(time)), len(text))
-    return list(bufs.values()), fw.calls('widget_resize'), fw.calls('widget_move_resize'), title, time
-
-
-@pytest.mark.parametrize('text,w', [('4:01', 40), ('14:57', 50), ('1:02:03', 70)])
-def test_a_panel_title_runs_to_its_length_s_own_text(fw, text, w):
-    _, resize, move, title, time = panel_row(fw, text)
-    gap, box = 8, w + 4  # hscroll_label paints in its width less two 2 px margins, and scrolls a text wider than that
-    assert [a[1:3] for _, a in resize] == [(BACK_W - 12 - box - gap - 12, 45)]  # from x 12, ending gap before the box
-    assert [a[1:5] for _, a in move] == [(BACK_W - 12 - box, 0, box, 45)]  # the length stays at the right margin
-
-
-def test_a_panel_length_too_wide_for_its_reserve_keeps_it(fw):
-    _, resize, move, *_ = panel_row(fw, '10:00:00')  # 80 px and its margins against the 88 px reserve: 84 fits
-    assert [a[3] for _, a in move] == [84]
-    _, resize, move, *_ = panel_row(fw, '100:00:00')  # 90 px: left alone
-    assert len(resize) == 1 and len(move) == 1
-
-
-def test_a_panel_row_keeps_its_reserve_with_no_canvas(fw):
-    _, resize, move, *_ = panel_row(fw, '4:01', canvas=0)
-    assert not resize and not move
-
-
 # Home's overflow (home.c): nine rows resting on seven, OLED's fades
 
 def test_once_scrolled_the_bar_paints_the_row_above_oled_s_split_list_and_its_fade(fw, library):
     """Under OLED's pages the strip runs from the screen's top: a scrolled list paints there 40 px taller upward, its
     rows where they were, put back after, and the top's fade goes over it."""
-    ui, home, view = overflow_rig(fw, OLED)
+    ui, home, view = overflow_rig(fw)
     split_inset_set(fw, library, 2)
     fw.fn('home_overflow', None, C.c_void_p, C.c_int)(home.list, 262)
     home.art = ui.make(home.win, 'image', 196, 0, 179, 262)
@@ -4309,9 +3853,9 @@ def test_once_scrolled_the_bar_paints_the_row_above_oled_s_split_list_and_its_fa
     assert canvas.rects and all(r[2] < 58 for r in canvas.rects)  # the top's band, inside the strip's clip
 
 
-def overflow_rig(fw, theme, rows=9, top=-18, hidden=()):
+def overflow_rig(fw, rows=9, top=-18, hidden=()):
     """Home's main list as coverflow_home_layout leaves it before home.c sizes it: the rest's box, rows 32 px."""
-    themed(fw, theme)
+    themed(fw)
     ui = Ui(fw)
     home = fw.var('coverflow__home', Home)
     home.win = ui.make(ui.wm, 'window', 0, 58, 375, 262)
@@ -4334,11 +3878,11 @@ def offset(w, y=None):
     return C.c_int.from_address(w + O['SCROLL_Y']).value
 
 
-@pytest.mark.parametrize('theme, box', ((OLED, 280), (CLASSIC, 224), (MINIMAL, 224), (MODERN, 224)))
-def test_home_rests_on_seven_rows_and_scrolls_the_rest(fw, theme, box):
+def test_home_rests_on_seven_rows_and_scrolls_the_rest(fw):
     """home_overflow: the box the rest's rows, or under OLED's pages the screen's bottom; the content as a drag
     clamps it, so it stops where the wheel does (the shown rows' foot less the rest); a kept scroll clamped."""
-    ui, home, view = overflow_rig(fw, theme)
+    box = 280  # OLED's pages: to the screen's bottom, 320 less the window's 58 px top and the list's 18 px rise
+    ui, home, view = overflow_rig(fw)
     rest = fw.fn('home_rest', C.c_int, C.c_void_p, C.c_void_p)
     foot = C.c_int()
     assert rest(view, C.byref(foot)) == 7 * 32 and foot.value == 9 * 32
@@ -4350,7 +3894,7 @@ def test_home_rests_on_seven_rows_and_scrolls_the_rest(fw, theme, box):
 
 
 def test_a_hidden_row_restacked_last_is_not_scrolled_to(fw):
-    ui, home, view = overflow_rig(fw, OLED, hidden=(8,))
+    ui, home, view = overflow_rig(fw, hidden=(8,))
     foot = C.c_int()
     fw.fn('home_rest', C.c_int, C.c_void_p, C.c_void_p)(view, C.byref(foot))
     assert foot.value == 8 * 32
@@ -4358,9 +3902,9 @@ def test_a_hidden_row_restacked_last_is_not_scrolled_to(fw):
     assert content(view) == 8 * 32  # the box is the rest's: the content is the shown rows'
 
 
-@pytest.mark.parametrize('theme, end', ((OLED, 204 - 28), (CLASSIC, 150)))
-def test_shuffle_songs_label_takes_the_chevron_s_room_where_every_row_has_one(fw, library, theme, end):
-    ui, home, view = overflow_rig(fw, theme)
+def test_shuffle_songs_label_takes_the_chevron_s_room_where_every_row_has_one(fw, library):
+    end = 204 - 28  # OLED's 204 px rows less the right column (theme.xml right_x)
+    ui, home, view = overflow_rig(fw)
     split_inset_set(fw, library, 2)  # OLED's set: its right column
     row = ui[view].kids[5]
     label = ui.make(row, 'hscroll_label', 24, 0, 126, 32, name='label_shuffle_songs')
@@ -4368,10 +3912,10 @@ def test_shuffle_songs_label_takes_the_chevron_s_room_where_every_row_has_one(fw
     assert rect(label) == (24, 0, end - 24, 32)
 
 
-def fades(fw, theme, scroll, sel=None, top=-18, split=1, list_y=40, cols=196, hidden=()):
+def fades(fw, scroll, sel=None, top=-18, split=1, list_y=40, cols=196, hidden=()):
     """home_fades over the rig's list, on a canvas at the screen's origin: {screen row: [(x, w, alpha)]}. The theme
     is read once a test."""
-    ui, home, view = overflow_rig(fw, theme, top=top, hidden=hidden)
+    ui, home, view = overflow_rig(fw, top=top, hidden=hidden)
     fw.fn('home_overflow', None, C.c_void_p, C.c_int)(home.list, 262)
     offset(view, scroll)
     if sel is not None:
@@ -4387,24 +3931,20 @@ def fades(fw, theme, scroll, sel=None, top=-18, split=1, list_y=40, cols=196, hi
 
 
 def test_full_fades_straight_across_from_the_rest_s_foot_and_under_the_top_once_scrolled(fw):
-    rows = fades(fw, OLED, 0, top=0, split=0, list_y=58, cols=375)
+    rows = fades(fw, 0, top=0, split=0, list_y=58, cols=375)
     assert 58 + 224 - 16 < min(rows) < 58 + 224 - 12 and all(r == [(0, 375, r[0][2])] for r in rows.values())
     alphas = [rows[y][0][2] for y in sorted(rows)]
     assert alphas == sorted(alphas) and alphas[-1] == 255 and max(rows) == 319  # into the ground by y 316
-    rows = fades(fw, OLED, 32, top=0, split=0, list_y=58, cols=375, sel=8)
+    rows = fades(fw, 32, top=0, split=0, list_y=58, cols=375, sel=8)
     assert min(rows) == 58 and rows[58][0][2] > rows[70][0][2] > 0 and 72 not in rows  # the top's 14 rows
-    rows = fades(fw, OLED, 64, top=0, split=0, list_y=58, cols=375, sel=8)
+    rows = fades(fw, 64, top=0, split=0, list_y=58, cols=375, sel=8)
     assert max(rows) < 72  # scrolled to its end: nothing below to fade
 
 
 def test_split_fades_follow_the_glass_and_never_the_selected_row(fw):
-    rows = fades(fw, OLED, 0)
+    rows = fades(fw, 0)
     assert min(rows) > 40 and not [y for y in rows if y < 40 + 224 and rows[y][-1][0] >= 80]  # the straight part from y 264
     assert rows[230][0] == (0, 8, rows[230][0][2]) and rows[230][0][2] > 0  # the corner's, higher up
     assert all(x + w <= 196 for r in rows.values() for x, w, _ in r)  # left of the art
-    rows = fades(fw, OLED, 32, sel=6)  # row 6 on the screen from 40 + 192 - 32
+    rows = fades(fw, 32, sel=6)  # row 6 on the screen from 40 + 192 - 32
     assert not [y for y in rows if 200 <= y < 232] and rows[0][-1] == (80, 116, 255)  # the top: the ground at the edge
-
-
-def test_only_oled_s_pages_fade(fw):
-    assert fades(fw, CLASSIC, 32) == {}

@@ -29,7 +29,6 @@ RATINGS, ALBUM_RATINGS, LENGTHS = '/mnt/data/ringnav-ratings', '/mnt/data/ringna
 FAV_CLICK = 0x53c968  # Now Playing's heart: stock's My Fav toggle
 TIDAL_DIR, SPOT_DIR = '/mnt/mmc/.tidal', '/mnt/mmc/.spotify'
 DOT = '·'
-HEART, NO_HEART = '♥', '♡'
 CLICK = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)
 TICK = C.CFUNCTYPE(C.c_int, C.c_void_p)
 TYPES = {'window_create': 'window', 'list_item_create': 'list_item', 'hscroll_label_create': 'hscroll_label',
@@ -390,11 +389,16 @@ def call(fw, name, ctx=0):
 
 
 # The Library's Shuffle row.
-def test_shuffle_opens_one_page_of_three_picks(fw, ui):
+def test_shuffle_opens_one_page_of_three_picks(fw, ui, st):
+    boot(fw, st)
     call(fw, 'shuffle_menu')
     page = ui.top()
     assert ui.name[page] == 'shuffle_page' and ui.captions(page) == ['Shuffle Songs', 'Shuffle Albums', 'Shuffle Folders']
     assert 'Albums and folders take a moment to shuffle' in ui.shown(page)
+    # the note at the page's foot, inside the window under the bar (OLED's is 262 px), 4 px clear of its end
+    note = next(w for w in ui.subtree(page) if ui.text.get(w) == 'Albums and folders take a moment to shuffle')
+    y, h = (C.c_int.from_address(note + k).value for k in (4, 12))
+    assert (y, h) == (fw.fn('client_h', C.c_int)() - 28, 24) and y + h <= fw.fn('client_h', C.c_int)() - 4
     call(fw, 'shuffle_menu')  # pressed again while it is open: the same page
     assert ui.windows == [page]
 
@@ -570,19 +574,21 @@ class Rated:
         fw.mock('getAllFav', lambda *_: self.library.deques[self.library.directory()].append(stock_fav) or 1)
 
 
+# Each row's second line its artist after a dot (a space for none); its hearts are glyphs drawn before the words
+# (RATE_HEARTS, test_oled_draws_a_ratings_rows_hearts_as_glyphs)
 @pytest.mark.parametrize('row, title, want', [
-    (0, 'Top Rated', [('Fav', f'{HEART * 5} {DOT} F'), ('Four', HEART * 4 + NO_HEART)]),
-    (1, 'Loved', [('Fav', f'{HEART * 5} {DOT} F')]),
-    (3, 'All Rated', [('Fav', f'{HEART * 5} {DOT} F'), ('Four', HEART * 4 + NO_HEART),
-                      ('Three', f'{HEART * 3 + NO_HEART * 2} {DOT} T'), ('One', f'{HEART + NO_HEART * 4} {DOT} O')]),
-    (4, 'Disliked', [('One', f'{HEART + NO_HEART * 4} {DOT} O')]),
+    (0, 'Top Rated', [('Fav', f'{DOT} F', 5), ('Four', ' ', 4)]),
+    (1, 'Loved', [('Fav', f'{DOT} F', 5)]),
+    (3, 'All Rated', [('Fav', f'{DOT} F', 5), ('Four', ' ', 4), ('Three', f'{DOT} T', 3), ('One', f'{DOT} O', 1)]),
+    (4, 'Disliked', [('One', f'{DOT} O', 1)]),
 ])
 def test_a_ratings_list_is_its_hearts_most_first(fw, ui, song, row, title, want):
     Rated(fw, ui, song)
     call(fw, 'ratings_menu')
     ui.click(ui.top(), row)
     page = ui.top()
-    assert ui.name[page] == 'rated_page' and title in ui.shown(page) and ui.rows(page) == want
+    assert ui.name[page] == 'rated_page' and title in ui.shown(page) and ui.rows(page) == [w[:2] for w in want]
+    assert [ui.props.get((item, '_hearts')) for item in ui.kids[ui.view(page)]] == [w[2] for w in want]
 
 
 def test_oled_draws_a_ratings_rows_hearts_as_glyphs(fw, ui, song, st):
@@ -1276,32 +1282,6 @@ def test_the_picker_is_made_once_per_window(fw, ui, song, mcl):
     made = len(ui.kids[heart.win])
     heart.hold()
     assert len(ui.kids[heart.win]) == made and heart.picker() == ('1 of 5', hearts(1))
-
-
-def test_classic_s_picker_counts_hearts_and_a_tap_outside_leaves_it(fw, ui, song, mcl):
-    Config(fw, THEME=b'1')
-    heart = Heart(fw, ui, song, mcl, kept=1)
-    heart.hold()
-    caption, images = heart.picker()
-    on, off = images[0], images[1]  # Classic's own lit and unlit heart
-    assert caption == '1 Heart' and images == hearts(1, on, off) and on != off
-    assert not {on, off} & {'play_fav', 'play_unfav'}  # not Now Playing's
-    heart.key(KEY_NEXT)
-    assert heart.picker() == ('2 Hearts', hearts(2, on, off))
-    out = ui.lookup(heart.win, 'rate_out', 0)
-    assert out not in ui.hidden and out not in ui.dull  # a tap outside the panel reaches it
-    assert ui.handler(out, EVT_CLICK)() == STOP and heart.picker() is not None  # the opening hold's release
-    assert heart.tap(out) == STOP
-    assert heart.picker() is None and heart.kept() == 1 and out in ui.hidden and out in ui.dull
-
-
-def test_classic_s_hearts_are_set_only_when_they_change(fw, ui, song, mcl):
-    Config(fw, THEME=b'1')
-    heart = Heart(fw, ui, song, mcl, kept=2)
-    heart.hold()
-    sets = len(fw.calls('image_base_set_image'))
-    heart.key(KEY_NEXT)  # one heart changes
-    assert len(fw.calls('image_base_set_image')) == sets + 1
 
 
 def test_the_picker_goes_with_its_window(fw, ui, song, mcl, st):
@@ -2217,60 +2197,6 @@ def test_streaming_without_its_list_is_stock_s(fw, ui):
     assert ui.kids[win] == [] and not fw.calls('fw_opendir')
 
 
-BLOCKS = {'/mnt/mmc/.blocks/q2app': b'name=Blocks\ngame=1\n', '/mnt/mmc/.blocks/q2-blocks': b'ELF'}  # a card game
-
-
-def home_pane(fw):
-    """home_pane_read's services, games and the card's free tenths of a GB."""
-    out = (C.c_int * 3)()
-    fw.fn('home_pane_read', None, C.c_void_p, C.c_void_p, C.c_void_p)(C.byref(out, 0), C.byref(out, 4), C.byref(out, 8))
-    return list(out)
-
-
-@pytest.mark.parametrize('hide, services', [(b'', 6), (b'RADIO,deez', 4)])
-def test_home_counts_the_shown_services(fw, hide, services):
-    Disk(fw, {**deezer(), **BLOCKS})
-    Config(fw, STREAMHIDE=hide)
-    assert home_pane(fw)[0] == services  # less Configuration; a card game is in Games, not Streaming
-
-
-def test_home_counts_the_games_page_s_rows(fw, ui):
-    """Home's Games caption is what Games lists: its own games and the card's, one fewer once a card game goes."""
-    disk = Disk(fw, {**deezer(), **BLOCKS})
-    Config(fw)
-    fw.fn('games_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
-    rows = ui.captions(ui.top())
-    assert rows[-1] == 'Blocks' and 'Deezer' not in rows and home_pane(fw)[1] == len(rows)
-    ui.close(ui.top())
-    for path in BLOCKS:
-        del disk.files[path]
-    assert home_pane(fw)[1] == len(rows) - 1
-
-
-def statfs(fw, device=(1, 2), bsize=4096, bavail=0):
-    """stat's st_dev (word 0) of /mnt/mmc and /mnt, and statfs's f_bsize (word 1) and f_bavail (word 7), MIPS o32."""
-    def stat(version, path, info, *_):
-        C.c_uint.from_address(info).value = device[C.string_at(path) == b'/mnt']
-        return 0
-    def fs(path, out, *_):
-        C.c_uint.from_address(out + 4).value, C.c_uint.from_address(out + 28).value = bsize, bavail
-        return 0
-    fw.mock('fw___xstat', stat)
-    fw.mock('fw_statfs', fs)
-
-
-@pytest.mark.parametrize('device, bsize, bavail, tenths', [
-    ((1, 2), 4096, 5 * 2 ** 18, 50),  # 5 GiB free
-    ((1, 2), 32768, 54931640, 16763),  # a 2 TB card's 1.8 TB: 1676.3 GiB
-    ((1, 2), 512, 209714, 0), ((1, 2), 512, 209715, 1),  # a tenth of a GiB in 512-byte blocks
-    ((2, 2), 4096, 5 * 2 ** 18, 0),  # /mnt/mmc on /mnt's own device: no card mounted
-])
-def test_home_shows_the_card_s_free_space_in_tenths_of_a_gb(fw, device, bsize, bavail, tenths):
-    Disk(fw)
-    Config(fw)
-    statfs(fw, device, bsize, bavail)
-    assert home_pane(fw)[2] == tenths
-
 
 LIBRARY_STOCK = ['Update Local Music', 'All Songs', 'Album', 'Artist', 'Genre', 'Hi-Res', 'My Fav', 'Frequent', 'Recent',
                  'Recently Added', 'Playlist']
@@ -2287,22 +2213,18 @@ def library(fw, ui, folders=(), token=b'', extra=0):
     return win, view
 
 
-def boot(fw, st, theme=None):
-    """config.ini's THEME (None: never set, Minimal) and the geometry set theme_boot writes for it (st.geom)."""
-    Config(fw, **({} if theme is None else {'THEME': theme}))
+def boot(fw, st):
+    """The geometry set theme_boot writes (st.geom): OLED's."""
+    Config(fw)
     st('geom').value = fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())
 
 
-# Minimal's set has Library icons; Classic's has none, so its Library leads with Search (library_search).
-LEADS = [(None, []), (b'1', ['Search'])]
-
-
-@pytest.mark.parametrize('theme, lead', LEADS)
-def test_the_library_s_rows_in_their_order(fw, ui, st, theme, lead):
-    boot(fw, st, theme)
+def test_the_library_s_rows_in_their_order(fw, ui, st):
+    boot(fw, st)
     win, view = library(fw, ui)
-    # My Fav and Frequent hidden, kept in the page for stock's index: Ratings and Most Played list theirs
-    assert page_rows(ui, view) == [(c, c not in ('My Fav', 'Frequent')) for c in lead + [
+    # Search first, as OLED's set has no Library icons (lib_art 0: library_search); My Fav and Frequent hidden,
+    # kept in the page for stock's index: Ratings and Most Played list theirs
+    assert page_rows(ui, view) == [(c, c not in ('My Fav', 'Frequent')) for c in ['Search',
         'Shuffle', 'Artist', 'Album', 'All Songs', 'Genre', 'Era', 'Playlist', 'Ratings', 'My Fav', 'Recently Added', 'Recent',
         'Most Played', 'Frequent', 'Hi-Res', 'Long Songs', 'Games', 'Update Local Music']]
 
@@ -2331,9 +2253,9 @@ def test_a_library_that_is_not_stock_s_is_left(fw, ui):
     assert [c for c, _ in page_rows(ui, view)] == LIBRARY_STOCK + ['more']
 
 
-def test_classic_s_library_leads_with_search_and_drops_its_icons(fw, ui, st):
-    boot(fw, st, b'1')
-    assert fw.fn('library_search', C.c_int)() == 1  # Classic's set has no Library icons
+def test_the_library_leads_with_search_and_drops_its_icons(fw, ui, st):
+    boot(fw, st)
+    assert fw.fn('library_search', C.c_int)() == 1  # OLED's set has no Library icons (lib_art 0)
     win, view = library(fw, ui)
     assert page_rows(ui, view)[:2] == [('Search', True), ('Shuffle', True)]
     images = [w for item in ui.kids[view] for w in ui.subtree(item) if ui.kind[w] == 'image_create']
@@ -2341,21 +2263,20 @@ def test_classic_s_library_leads_with_search_and_drops_its_icons(fw, ui, st):
     assert icons and all(w in ui.hidden for w in icons)
     assert not [w for w in images if ui.image[w] == 'list_into' and w in ui.hidden]  # the chevrons stay
     search, = [ui.kids[item][0] for item in ui.kids[view] if row_text(ui, item) == 'Search']
-    # search_strip.c's opener, which is stock's search under every theme but OLED
+    # search_strip.c's opener
     assert [fn for w, e, fn, _ in ui.handlers if w == search and e == EVT_CLICK] == [C.cast(fw.lib.library_search_open, C.c_void_p).value]
 
 
-@pytest.mark.parametrize('theme, lead', LEADS)
 @in_fork
-def test_home_s_library_list_is_the_library_s_rows(fw, ui, st, theme, lead):
+def test_home_s_library_list_is_the_library_s_rows(fw, ui, st):
     log = (C.c_long * 3)()
     stock_stub(O['LOCALMUSIC_BG'], 0, log)
-    boot(fw, st, theme)
+    boot(fw, st)
     _, page = library(fw, ui)  # the Library page's own rows
     win, view = stock_page(ui, 'scroll_view_localmusic', *[(c, None, str(i)) for i, c in enumerate(LIBRARY_STOCK)])
     fw.fn('library_rows', None, C.c_void_p)(win)
     rows = [c for c, _ in page_rows(ui, view)]
-    assert page_rows(ui, view) == page_rows(ui, page) and rows[:len(lead) + 2] == lead + ['Shuffle', 'Artist']
+    assert page_rows(ui, view) == page_rows(ui, page) and rows[:3] == ['Search', 'Shuffle', 'Artist']
     assert log[0] == win  # its play gif's timer stopped, as the page's background does
     assert [c[1][:2] for c in fw.calls('widget_off_by_ctx')] == [(win, win)]
 
@@ -2778,25 +2699,6 @@ def test_back_below_the_root_is_stock_s(fw, ui, st):
     folder.path.value, folder.layer.value = b'/mnt/mmc/Podcasts/Show', 4
     folder.back()
     assert folder.layer.value == 3 and st('media_root', C.c_char * 32).value == b'/mnt/mmc/Podcasts'
-
-
-def test_classic_s_folder_levels_slide_in(fw, ui, song):
-    Config(fw, THEME=b'1')  # its levels move in place
-    folder = Folder(fw, ui)
-    table = ui.new('list_view_create', folder.win, 0, 0, 375, 300)
-    ui.name[table] = 'tableview_folder'
-    ui.new('scroll_view_create', table, 0, 0, 375, 300)
-    fw.mock('widget_animator_prop_create', lambda w, *_: w)
-    folder.layer.value = 4
-    folder.back()
-    rows = Rows(fw, ui, [song(b'/mnt/mmc/A/B', kind=4)])
-    fw.mock('stock_folder_click_trampoline', lambda *_: setattr(folder.layer, 'value', folder.layer.value + 1) or 2)
-    rows.click(0)
-    folder.layer.value = 1
-    folder.back()  # out of Folder view: no level to slide
-    # Back's level comes in from the left, a deeper one from the right: each starts a width off, animated to 0
-    assert [signed(c[1][1]) for c in fw.calls('widget_move_resize') if c[1][0] == table] == [-375, 375]
-    assert len(fw.calls('widget_animator_start')) == 2
 
 
 @pytest.mark.parametrize('otg, roots', [(0, 1), (1, 2)])

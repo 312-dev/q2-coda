@@ -992,17 +992,8 @@ def test_no_window_no_page(fw):
 SCREEN_W, SCREEN_H = 375, 320
 
 
-def classic(fw):
-    """THEME 1, Classic: the bar holds a page's title (page_title_h 0) and lists slide in place. Before anything reads
-    the theme."""
-    def read(path, section, key, out, default, *_):
-        v = b'1' if C.string_at(key) == b'THEME' else C.string_at(default)
-        C.memmove(out, v + b'\0', len(v) + 1)
-    fw.mock('toolsReadConfig', read)
-
-
-def classic_bar(fw, page):
-    """Classic's status bar over page, the top window: its title label, found where navigation.c looks for it
+def status_bar(fw, page):
+    """The status bar over page, the top window: its title label, found where navigation.c looks for it
     (bar_state_sync: label_title), and AWTK's answers to what the title's paint (bar_title_sync, page_caption) asks of
     the page's widgets: their types, children, visibility and names. Returns the bar's title label."""
     w, keep = page.w, {}
@@ -1047,7 +1038,7 @@ def media_name(fw):
 
 
 def bar_label(page):
-    """The grid's label Classic's bar reads its title from (peq.h PAGE_TITLE)."""
+    """The grid's label the bar reads its title from (peq.h PAGE_TITLE)."""
     (label,) = [w for w in page.w.children(page.ph.grid) if page.w.names.get(w) == '_page_title']
     return label
 
@@ -1105,16 +1096,13 @@ def test_the_grid_scrolls_whole_rows_of_four(fw, n, rows):
     assert prop(fw, page.ph.view, 'virtual_h') == rows * TILE_H
 
 
-@pytest.mark.parametrize('bar_titles', [False, True])
-def test_the_grid_scrolls_up_and_down_below_its_title(fw, bar_titles):
-    """Under a title row (Minimal), three whole rows; where the bar holds the title (Classic), on to the page's foot."""
-    if bar_titles:
-        classic(fw)
+def test_the_grid_scrolls_up_and_down_to_the_page_s_foot(fw):
+    """The bar holds the title (OLED's page_title_h 0): the grid runs on to the page's foot."""
     page = Page(fw, Card(fw, files(*[f'{i:02}.jpg' for i in range(10)])))
     title = page.w.children(page.ph.grid)[0]
     x, y, w, h = box(page.ph.view)
     assert (x, y, w) == (0, box(title)[3], box(page.ph.grid)[2])
-    assert y + h == fw.fn('client_h', C.c_int)() if bar_titles else h == 3 * TILE_H
+    assert y + h == fw.fn('client_h', C.c_int)()
     assert (prop(fw, page.ph.view, 'yslidable'), prop(fw, page.ph.view, 'xslidable')) == (1, 0)
 
 
@@ -1130,30 +1118,28 @@ def test_a_tile_is_styled_as_a_list_row(fw):
     assert styles[row] and [styles[t] for t in page.tiles()] == [styles[row]] * 2
 
 
-def test_classic_s_bar_reads_the_folder_s_name_over_no_photos(fw):
-    classic(fw)
+def test_the_bar_reads_the_folder_s_name_over_no_photos(fw):
     page = Page(fw, Card(fw, folders=[ROOT]))
     label = bar_label(page)
     assert page.w.texts[label] == media_name(fw) and visible(fw, label) == 0
-    (line,) = [w for w in page.w.children(page.ph.grid) if page.w.kind(w) == 'hscroll_label_create' and w != label]
-    assert page.w.texts[line] not in ('', page.w.texts[label])  # the message, not the name
-    assert not [a for _, a in fw.calls('widget_set_visible') if a[0] == line]  # the page's one line
+    # OLED's note (feedback_empty): the message shown, no hint
+    notes = {page.w.texts[w]: visible(fw, w) for w in page.w.children(page.ph.grid)
+             if page.w.kind(w) == 'hscroll_label_create' and w != label}
+    assert notes == {'No photos': 1, '': 0}
 
 
-def test_classic_s_bar_names_an_album_s_grid_by_its_album(fw):
-    classic(fw)
+def test_the_bar_names_an_album_s_grid_by_its_album(fw):
     page = Page(fw, Card(fw, files('Trip/1.jpg', 'Beach/2.png')))
     page.clicks()[2][1]()
     page.fire()
     assert page.w.texts[bar_label(page)] == 'Trip'
 
 
-def test_classic_s_bar_names_an_album_s_grid_as_it_opens(fw):
+def test_the_bar_names_an_album_s_grid_as_it_opens(fw):
     """The bar finds a window's title label once, and the albums' stays alive under the grid, hidden: opening the grid
     has the bar drop it and read the grid's, at once."""
-    classic(fw)
     page = Page(fw, Card(fw, files('Trip/1.jpg', 'Beach/2.png')))
-    bar = classic_bar(fw, page)
+    bar = status_bar(fw, page)
     fw.fn('bar_title_sync', None, C.c_void_p)(page.ph.page)  # the bar's paint over the albums
     albums = page.w.labels(page.ph.albums)[0]
     assert page.w.texts[bar] == albums
@@ -1162,21 +1148,7 @@ def test_classic_s_bar_names_an_album_s_grid_as_it_opens(fw):
     assert page.w.texts[bar] == page.w.texts[bar_label(page)] != albums
 
 
-def test_classic_slides_an_album_s_grid_in_and_the_albums_back(fw):
-    classic(fw)
-    page = Page(fw, Card(fw, files('Trip/1.jpg', 'Beach/2.png')))
-    def start(w):  # where its slide starts: its first move
-        return [C.c_int(a[1]).value for _, a in fw.calls('widget_move_resize') if a[0] == w][:1]
-    page.clicks()[2][1]()
-    page.fire()
-    assert start(page.ph.grid) == [box(page.ph.grid)[2]]  # in from the right, deeper
-    keyup(page)
-    page.fire()
-    assert start(page.ph.albums) == [-box(page.ph.albums)[2]]  # back in from the left
-
-
-def test_classic_opens_a_folder_without_albums_on_its_grid_still(fw):
-    classic(fw)
+def test_a_folder_without_albums_opens_on_its_grid_still(fw):
     page = Page(fw, Card(fw, files('a.jpg')))
     assert page.ph.screen == GRID and not [a for _, a in fw.calls('widget_move_resize') if a[0] == page.ph.grid]
 

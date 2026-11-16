@@ -26,7 +26,6 @@ SCOPE_MAX = 131072
 RULES = b'/mnt/data/q2-library-scope'
 TOKEN = b'/*q2-library-scope*/1'
 K_LOAD, K_READY, K_ERROR, K_WAIT = range(4)
-G_FIND, G_SORT = 4, 5
 REQ_OK, REQ_NOSOCK, REQ_FAIL = range(3)
 S_WAIT, S_PLAY, S_DONE = range(3)
 L_IDLE, L_WAIT, L_SCAN, L_IMPORT = range(4)
@@ -1575,7 +1574,7 @@ def test_the_child_runs_the_game_first_for_the_oom_killer_and_with_none_of_demos
     assert order[execl + 1] == 'child_exit' and calls[execl + 1][1][0] == 127  # its exec failed
     (name, value, over), = env  # the child's own, after demo's files: the theme's pop-up (test_games)
     assert order.index('fw_setenv') == execl - 1 and name == b'Q2_POPUP' and over == 1
-    assert value.split()[0] in (b'minimal', b'modern', b'classic') and len(value.split()) in (7, 71)
+    assert value.split()[0] == b'modern' and len(value.split()) == 7  # games.c popup_env: the style and six colours
 
 
 def test_a_game_off_the_card_says_so(fw):
@@ -2724,15 +2723,6 @@ def test_a_refresh_with_other_rows_is_rebuilt(fw, rows, cursor):
     assert len(fw.calls('list_item_create')) > drawn
 
 
-def test_a_refresh_compares_the_rows_after_a_taken_search(fw):
-    """The first Search row is the title bar's icon: the rows compared are the ones under it."""
-    p = live(fw, [SEARCH, *rows_of(0, 2)])
-    assert p.top.find == 1 and p.top.n == 2
-    drawn = len(fw.calls('list_item_create'))
-    refresh(p, [SEARCH, item(0), (b'action', b'op1', b'Row 1 moved', b'sub', b'', b'')])
-    assert p.top.find == 1 and len(fw.calls('list_item_create')) == drawn and p.cell(1, 2) == b'Row 1 moved'
-
-
 def test_a_refresh_in_place_keeps_the_covers_and_a_new_cover_rebuilds(fw):
     """Written in place, the shown covers stay in the image manager (drop isn't run); one more cover draws the
     list again."""
@@ -2782,10 +2772,10 @@ def edit_box(fw):
 
 
 def tap_find(p):
-    """The title bar's icon tapped: the box stands, alone on the page."""
+    """The first row, a search, pressed (OLED has no title bar to take it as an icon): the box stands, alone on the
+    page."""
     box = edit_box(p.fw)
-    p.fw.fn('addon__bar_tapped', C.c_int, C.c_void_p, C.c_void_p)(G_FIND, None)
-    p.fw.fn('addon__go', C.c_int, C.c_void_p)(None)
+    p.click(0)
     assert p.pg.edit == box and p.pg.view is None
 
 
@@ -2803,7 +2793,7 @@ def test_the_search_box_opens_a_level_for_its_text(fw):
 
 def test_an_empty_search_goes_back_to_the_menu(fw):
     p = Page(fw)
-    p.answer(rows=[SEARCH, item(0, b'list')])  # a first search row: the title bar's icon
+    p.answer(rows=[SEARCH, item(0, b'list')])
     tap_find(p)
     fw.fn('addon__searched', C.c_int, C.c_void_p, C.c_void_p)(None, None)
     fw.fn('addon__go', C.c_int, C.c_void_p)(None)
@@ -2958,17 +2948,10 @@ def test_a_sole_search_row_stays_a_row(fw):
 SORT = (b'sort', b'sorts', b'Sort', b'', b'by', b'')
 
 
-def test_a_sort_row_after_a_taken_search_is_the_title_bar_s_sort_icon(fw):
-    p = Page(fw)
-    p.answer(rows=[SEARCH, SORT, item(0)])
-    assert p.top.find == 1 and p.top.sort == 1 and p.top.n == 1 and p.cell(0, 1) == b'op0'
-    assert p.pg.sort[0] == b'sort' and p.pg.sort[1] == b'sorts' and p.pg.sort[4] == b'by'
-
-
 @pytest.mark.parametrize('rows,find,n', [
     ([SORT, item(0)], 0, 2),          # no search before it
-    ([SEARCH, SORT], 1, 1),           # the last row left
-    ([SEARCH, item(0), SORT], 1, 2),  # not the row after the search
+    ([SEARCH, SORT], 0, 2),           # with no title bar the search stays a row too
+    ([SEARCH, item(0), SORT], 0, 3),
 ])
 def test_a_sort_row_stays_a_row(fw, rows, find, n):
     p = Page(fw)
@@ -2976,17 +2959,16 @@ def test_a_sort_row_stays_a_row(fw, rows, find, n):
     assert p.top.find == find and not p.top.sort and p.top.n == n
 
 
-def test_a_sort_row_stays_a_row_without_a_title_bar(fw, settings_read):
-    boot(fw, settings_read, b'1')  # Classic: the name is in the status bar
+def test_a_sort_row_stays_a_row_without_a_title_bar(fw):
+    """OLED's page name is in the status row: no title bar for a search or a sort icon."""
     p = Page(fw)
     p.answer(rows=[SEARCH, SORT, item(0)])
     assert not p.top.find and not p.top.sort and p.top.n == 3 and p.cell(1, 0) == b'sort'
 
 
-def test_under_classic_a_next_window_selects_past_a_search_and_a_sort_row(fw, settings_read):
+def test_without_a_title_bar_a_next_window_selects_past_a_search_and_a_sort_row(fw):
     """addon.c page_to: both kept as rows (no title bar), the window's first content row is 3, past them and
     Previous page."""
-    boot(fw, settings_read, b'1')
     p = Page(fw)
     p.answer(rows=[SEARCH, SORT, item(0)])
     fw.fn('addon__page_to', None, C.c_void_p, C.c_char_p, C.c_int)(C.addressof(p.top), b'c', 1)
@@ -3000,82 +2982,6 @@ def test_a_sort_row_left_as_a_row_is_a_list_row(fw):
     assert fw.fn('addon__opens', C.c_int, C.c_int)(0) == 1
     p.click(0)
     assert p.pg.depth == 2 and p.top.op == b'sorts' and p.top.args == b'\tby' and p.top.title == b'Sort'
-
-
-def tap_sort(p):
-    p.fw.fn('addon__bar_tapped', C.c_int, C.c_void_p, C.c_void_p)(G_SORT, None)
-    p.fw.fn('addon__go', C.c_int, C.c_void_p)(None)
-
-
-def test_the_sort_icon_s_tap_opens_its_row_s_level(fw):
-    p = Page(fw)
-    p.answer(rows=[SEARCH, SORT, item(0)])
-    tap_sort(p)
-    assert p.pg.depth == 2 and p.top.op == b'sorts' and p.top.args == b'\tby' and p.top.title == b'Sort'
-    p.answer(rows=[item(1)])  # a level without one: a tap does nothing
-    tap_sort(p)
-    assert p.pg.depth == 2
-
-
-def test_a_sort_tap_on_a_level_that_isn_t_ready_does_nothing(fw):
-    p = Page(fw)
-    p.answer(rows=[SEARCH, SORT, item(0)])
-    p.top.state = K_LOAD
-    tap_sort(p)
-    assert p.pg.depth == 1
-
-
-def icons(fw, p, rows):
-    """The title bar as find_icon leaves it in a 48 px title: the images' boxes and styles, the title's box and the icons' click codes."""
-    C.c_int.from_address(p.view + W_H).value = 48
-    made: list[list] = []
-    moved: dict = {}
-    def image(parent, x, y, w, h, *_):
-        made.append([C.c_int(v).value for v in (x, y, w, h)])
-        return block(fw, size=4096)
-    fw.mock('image_create', image)
-    fw.mock('widget_use_style', lambda w, s, *_: made[-1].append(C.string_at(s)) if made else 0)
-    fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: moved.__setitem__(w, tuple(C.c_int(v).value for v in (x, y, ww, h))))
-    p.answer(rows=rows)
-    tapped = C.cast(fw.fn('addon__bar_tapped', C.c_int, C.c_void_p, C.c_void_p), C.c_void_p).value
-    clicks = [a[3] for _, a in fw.calls('widget_on') if a[1] == O['EVT_CLICK'] and a[2] == tapped]
-    return made, moved[p.view], clicks
-
-
-def test_the_glass_alone_narrows_the_title_to_end_before_it(fw):
-    made, title, clicks = icons(fw, Page(fw), [SEARCH, item(0)])
-    # centred on the screen, ending at the glass's box, as before the sort icon
-    assert made == [[302, 0, 50, 48, b's_img_search']] and title == (73, 0, 229, 48) and clicks == [G_FIND]
-
-
-def test_the_sort_icon_is_left_of_the_glass_and_the_title_narrows_before_it(fw):
-    made, title, clicks = icons(fw, Page(fw), [SEARCH, SORT, item(0)])
-    # the sort style draws from its box's top left: a 50 px box centred on the title's line, as the glass's centring
-    # the sort made first: its box overlaps the glass's at 302 to 315, and a tap goes to the last made
-    assert made == [[265, -1, 50, 50, b's_img_order_navbar'], [302, 0, 50, 48, b's_img_search']]
-    assert clicks == [G_SORT, G_FIND]
-    x, _, w, _ = title
-    assert title == (95, 0, 185, 48) and x + w / 2 == 375 / 2 and x + w == 280  # centred, to the sort's ink
-
-
-def test_a_refresh_that_takes_or_leaves_the_sort_row_is_rebuilt(fw):
-    p = live(fw, [SEARCH, SORT, *rows_of(0, 2)])
-    assert p.top.sort == 1 and p.top.n == 2
-    drawn = len(fw.calls('list_item_create'))
-    refresh(p, [SEARCH, SORT, item(0), (b'action', b'op1', b'Row 1 moved', b'sub', b'', b'')])
-    assert p.top.sort == 1 and len(fw.calls('list_item_create')) == drawn  # in place
-    refresh(p, [SEARCH, *rows_of(0, 2)])
-    assert not p.top.sort and len(fw.calls('list_item_create')) > drawn
-
-
-def test_after_a_refresh_written_in_place_the_sort_icon_opens_the_new_reply_s_row(fw):
-    """pg.sort points into the shown reply: written in place, that is the new one (the old is freed)."""
-    p = live(fw, [SEARCH, SORT, *rows_of(0, 2)])
-    drawn = len(fw.calls('list_item_create'))
-    refresh(p, [SEARCH, (b'sort', b'sorts', b'Sort', b'Release Date', b'by2', b''), *rows_of(0, 2)])
-    assert p.top.sort == 1 and len(fw.calls('list_item_create')) == drawn  # in place
-    tap_sort(p)
-    assert p.pg.depth == 2 and p.top.op == b'sorts' and p.top.args == b'\tby2'
 
 
 def test_levels_past_the_depth_forget_the_oldest(fw):
@@ -3400,14 +3306,13 @@ def key_event(fw, code):
 
 
 def search_box(fw):
-    """A page whose first row is a search, its box open from the title bar's icon, and the rows its level drew."""
+    """A page whose first row is a search, its box open from that row, and the rows its level drew."""
     p = Page(fw)
     edit = block(fw, size=4096)
     fw.mock('widget_factory_create_widget', lambda f, kind, *_: edit if C.string_at(kind) == b'edit' else p.view)
     p.answer(rows=[SEARCH, item(1)])
     shown = p.drawn
-    fw.fn('addon__bar_tapped', C.c_int, C.c_void_p, C.c_void_p)(G_FIND, None)
-    fw.fn('addon__go', C.c_int, C.c_void_p)(None)
+    p.click(0)  # the search row
     assert p.pg.edit == edit and p.pg.view is None
     return p, edit, shown
 
@@ -3675,6 +3580,8 @@ def test_now_playings_more_tapped_opens_the_apps_page_instead_of_stocks(fw, scra
     qa.app, qa.loads = C.addressof(p.ap.a[0]), fw.var('playback_loads', C.c_uint).value
     C.c_void_p.from_address(C.addressof(fw.var('st', C.c_char)) + scratch['np_win']).value = block(fw, size=4096)
     fw.mock('stock_dispatch_trampoline', lambda *_: 4)
+    # the view is every widget Page's lookup finds but the play mode's, whose halves OLED's np_modes would take
+    fw.mock('widget_lookup', lambda w, name, *_: 0 if C.string_at(name) == b'img_playmode' else p.view)
     event = C.create_string_buffer(0x40)
     struct.pack_into('<i', event, O['EVENT_TYPE'], O['EVT_CLICK'])
     fw.fn('ringnav_dispatch', C.c_int, C.c_void_p, C.c_void_p)(p.view, C.addressof(event))
@@ -3904,18 +3811,6 @@ def test_a_code_page_that_cant_open_keeps_nothing(fw):
     assert not qp.page and not qp.hex and not qp.timer
 
 
-@pytest.fixture(scope='module')
-def settings_read(library):
-    """navigation.c's st.settings_read in this build (test_navigation.py's scratch): theme() reads config.ini once."""
-    return host.offsets(library.parent/'navigation.o', 'scratch_t')['settings_read']
-
-
-def boot(fw, settings_read, theme):
-    """theme() as a boot under theme has it: config.ini read again at its next use."""
-    settings(fw, THEME=theme)
-    C.c_int.from_address(C.addressof(fw.var('st', C.c_char)) + settings_read).value = 0
-
-
 def drawn(fw, paint, rounds=True):
     """What paint(canvas) draws: the rounded plates it asks for, (x, y, w, h, colour), and its fills, (x, y, w, h,
     the colour set then). A canvas that can't round (rounds False) leaves it to fill square ones."""
@@ -3937,59 +3832,7 @@ def paint_of(fw, widget):
     return lambda canvas: fw.fn('addon_paint', None, C.c_void_p, C.c_void_p)(widget, canvas)
 
 
-def code_in(plate, fills, n=21):
-    """A code whose every module is dark (HEX21's), each row one rectangle, centred in the plate drawn inside a
-    quiet zone of two modules, its modules as big as that leaves room for; their side."""
-    x, y, side, high = plate[:4]
-    m = fills[0][3]
-    left = fills[0][0] - x
-    right = side - left - n * m
-    assert side == high and [f[:4] for f in fills] == [(x + left, y + left + r * m, n * m, m) for r in range(n)]
-    assert abs(left - right) <= 1 and min(left, right) >= 2 * m and (n + 4) * (m + 1) > side
-    return m
-
-
-def test_classics_code_is_smaller_on_a_shadowed_plate_its_name_the_bars(fw, settings_read):
-    looks = []
-    for theme in (b'0', b'1'):  # Minimal, then Classic
-        boot(fw, settings_read, theme)
-        named = len(fw.calls('widget_set_name'))
-        q = Qr(fw, qr_state())
-        plates, fills = drawn(fw, paint_of(fw, q.qp.qr))
-        looks.append(dict(titled=b'_page_title' in [C.string_at(a[1]) for _, a in fw.calls('widget_set_name')[named:]],
-                          plates=plates, module=code_in(plates[-1], fills), view=q.widths[q.qp.qr]))
-        assert b'Title' in q.texts and plates[-1][2] == q.widths[q.qp.qr]  # the plate is the code's whole view
-        fw.fn('addon__qr_closed', C.c_int, C.c_void_p, C.c_void_p)(None, None)
-    minimal, classic = looks
-    assert not minimal['titled'] and len(minimal['plates']) == 1
-    assert classic['titled'] and len(classic['plates']) == 2  # its title the bar's; a shadow first, under the plate
-    (sx, sy, sw, sh, shade), (px, py, pw, ph, white) = classic['plates']
-    assert sx < px and sy < py and sx + sw > px + pw and sy + sh > py + ph and shade >> 24 < white >> 24
-    assert classic['view'] < minimal['view'] and classic['module'] < minimal['module']
-
-
-def test_classics_progress_bar_is_its_scrubbers_rows(fw, settings_read):
-    height = fw.fn('addon__progress_h', C.c_int)
-    boot(fw, settings_read, b'0')
-    strip = height()  # Minimal's flat strip
-    boot(fw, settings_read, b'1')  # Classic, whose scrubber is rows
-    gloss = height()
-    Page(fw)
-    fw.mock('widget_get_prop_int', lambda w, name, default, *_: 250 if C.string_at(name) == b'_pml' else default)
-    bars = []
-    for h in (strip, gloss):
-        bar = block(fw, size=4096)
-        C.c_int.from_address(bar + W_W).value, C.c_int.from_address(bar + W_H).value = 300, h
-        bars.append(drawn(fw, paint_of(fw, bar)))
-    rows = fw.fn('paint_rows_bar', None, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int)
-    scrubber = drawn(fw, lambda canvas: rows(canvas, 0, 0, 300, gloss, 300 * 250 // 1000))
-    # Minimal's strip isn't Classic's bar; Classic's is the scrubber's rows, the played quarter of its width over them
-    assert strip != gloss and bars == [([], []), scrubber] and scrubber[1]
-
-
-@pytest.mark.parametrize('theme', [b'0', b'1'])  # Minimal, Classic
-def test_a_canvas_that_cant_round_gets_square_plates(fw, theme):
-    settings(fw, THEME=theme)
+def test_a_canvas_that_cant_round_gets_square_plates(fw):
     q = Qr(fw, qr_state())
     plates, code = drawn(fw, paint_of(fw, q.qp.qr))
     # each plate filled square where it would have been rounded, in its colour, under the same code
@@ -4835,7 +4678,6 @@ def test_hostile_rules_files(fw):
         sql = predicate(fw)
         assert sql == b'1' or (sql.startswith(b'case ') and sql.endswith(b'else 1 end'))
         hidden(fw, b'/mnt/mmc/A/x')
-
 
 
 def shortcut(fw, value):

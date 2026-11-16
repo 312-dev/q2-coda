@@ -11,7 +11,6 @@ from test_nav_library_pages import Config, Ui
 KEY_RETURN, KEY_CENTER, KEY_PREV, KEY_NEXT, KEY_PLAY = (
     O[k] for k in ('KEY_RETURN', 'KEY_CENTER', 'KEY_PREV', 'KEY_NEXT', 'KEY_PLAY'))
 EVT_CLICK, IM_KEYBOARD = O['EVT_CLICK'], 0x0c  # offsets.inc's IM_KEYBOARD, a define O can't read (two lines)
-OLED = b'3'
 
 
 @pytest.fixture
@@ -22,9 +21,9 @@ def ui(fw):
 class Keyboard:
     """A keyboard window as stock's: candidates, then pages whose active child holds rows of buttons; the input
     method names it as its open keyboard."""
-    def __init__(self, fw, ui, theme=OLED, rows=(('123', 'abc', 'def'), ('ABC', 'ghi'))):
+    def __init__(self, fw, ui, rows=(('123', 'abc', 'def'), ('ABC', 'ghi'))):
         self.fw, self.ui = fw, ui
-        Config(fw, **({} if theme is None else {'THEME': theme}))
+        Config(fw)
         self.kb = ui.new('window_create', 0, 0, 60, 375, 260)
         self.cand = ui.new('candidates', self.kb, 0, 0, 375, 40)
         pages = ui.new('pages', self.kb, 0, 40, 375, 221)
@@ -109,11 +108,6 @@ def test_with_no_keyboard_up_nothing_is_taken(fw, ui):
     k = Keyboard(fw, ui)
     C.c_void_p.from_address(C.addressof(k.im) + IM_KEYBOARD).value = 0
     assert k.key(KEY_NEXT, KEY_CENTER) == [0, 0]
-
-
-def test_other_themes_keep_stock_s_keyboard(fw, ui):
-    k = Keyboard(fw, ui, theme=None)
-    assert k.key(KEY_NEXT, KEY_CENTER) == [0, 0] and not k.lit()
 
 
 def test_stock_s_fills_are_cleared_once_per_keyboard(fw, ui):

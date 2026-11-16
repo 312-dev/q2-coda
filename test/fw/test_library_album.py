@@ -4,14 +4,13 @@ import ctypes as C
 import pytest
 
 from conftest import O, Deques
-from test_nav_display_library import Ui, records, scratch, st  # noqa: F401 (fixtures)
+from test_nav_display_library import Ui, records, scratch, st, use_set  # noqa: F401 (fixtures)
 
 DOT = ' \xb7 '.encode('utf-8')
 
 
 def album_page(fw, st, name='albuminfo_page', theme='oled'):
     """A stock album page as its UI loads, over Home, under theme's set: its navbar, Songs' action row and list."""
-    from test_nav_hold import use_set
     ui = Ui(fw)
     fw.mock('widget_factory_create_widget', lambda f, kind, parent, x, y, w, *_:
             ui.new(C.string_at(kind).decode(), parent, x, y, w, 0))

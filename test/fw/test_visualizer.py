@@ -1,5 +1,5 @@
 """visualizer.c (docs/ipod.md#visualizer, docs/internals.md#visualizer-ipod): the analysis's bands and dynamics, the
-tap's frames, and Now Playing's last page: its timer, its paint, Field's drawing and the track's name at rest.
+tap's frames, and Now Playing's last page: its timer, its paint, Field over the whole screen and the song's line.
 test/peq.py checks vis_bands' sine levels in its own host build too."""
 import ctypes as C
 import math
@@ -419,7 +419,8 @@ class Now:
         return lambda: C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, 0)
 
     def invalidated(self):
-        return len([1 for _, a in self.fw.calls('widget_invalidate_force') if a[0] == self.slide])
+        """The window's repaints: Field covers the whole screen, so a frame repaints the window (and the status row)."""
+        return len([1 for _, a in self.fw.calls('widget_invalidate_force') if a[0] == self.win])
 
 
 class Canvas:
@@ -486,27 +487,20 @@ def test_the_page_is_its_slide_s_width_up_to_the_screen_s(fw, width, page):
     assert Now(fw, width=width).v.w == page
 
 
-def test_classic_s_centred_slide_draws_over_itself(fw):
-    """The 225-wide slide sits 75 px into its view: the drawing goes there with it."""
-    now = Now(fw, width=225, slide_x=75)
+def test_a_page_slid_in_from_its_rest_paints_at_rest(fw):
+    """The page's canvas x is noted against the slide area's own x: a slide set into its view paints at rest there."""
+    now = Now(fw, slide_x=75)
     v = now.v
     assert (v.ox, v.oy) == (75, 60)
     paint(fw, v.page, Canvas(fw, x=75))  # the page first, at rest: at the slide area's own x
-    canvas = Canvas(fw)
-    paint(fw, now.win, canvas)
-    assert v.page_x == 0 and canvas.clips[0] == (75, 60, 225, 186)
-
-
-def test_classic_s_centred_page_starts_where_its_lyrics_do(fw):
-    now = Now(fw, width=225, lrc_y=18)
-    page = struct.unpack_from('<4i', (C.c_char * 16).from_address(now.v.page))
-    assert page == (0, 18, 225, 186) and (now.v.w, now.v.oy) == (225, 78)
+    paint(fw, now.win, Canvas(fw))
+    assert v.page_x == 0 and drew(fw)
 
 
 @pytest.mark.parametrize('slide_h, lrc_y, h', [(160, 0, 160), (178, 18, 160), (186, 0, 186), (250, 18, 186)])
 def test_a_slide_that_ends_sooner_ends_the_page_with_it(fw, slide_h, lrc_y, h):
-    """OLED's slide stops above its progress bar (tools/ipod.py np_grid): the page takes the slide's height below the
-    lyrics' top where that is under the 186 px a slide has elsewhere, which stays the page's height at most."""
+    """The slide stops above its progress bar (tools/ipod.py np_grid): the page takes the slide's height below the
+    lyrics' top where that is under VIS_SLIDE_H, 186 px, which stays the page's height at most."""
     now = Now(fw, lrc_y=lrc_y, slide_h=slide_h)
     page = struct.unpack_from('<4i', (C.c_char * 16).from_address(now.v.page))
     assert page == (0, lrc_y, 375, h) and now.v.h == h
@@ -603,19 +597,25 @@ def test_a_page_mid_slide_paints_nothing(fw):
     assert not drew(fw) and [ms for _, ms in now.timers].count(250) == 1
 
 
-def test_the_drawing_is_clipped_to_the_slide_area_and_the_canvas_given_back(fw):
+def clip(fw, x, y, w, h):
+    """The canvas's clip as the paint finds it."""
+    fw.mock('canvas_get_clip_rect', lambda c, r, *_: struct.pack_into('<4i', (C.c_char * 16).from_address(r), 0,
+                                                                      x, y, w, h))
+
+
+def test_the_drawing_is_clipped_to_the_screen_and_the_canvas_given_back(fw):
     now = Now(fw)
     canvas = Canvas(fw, x=0, y=0)
+    clip(fw, 0, 300, 400, 40)  # a dirty rect running past the screen's foot and right edge
     paint(fw, now.win, canvas)
-    assert canvas.clips == [(0, 60, 375, 186), (0, 0, 375, 320)] and canvas.origin == (0, 0)
+    assert canvas.clips == [(0, 300, 375, 20), (0, 300, 400, 40)] and canvas.origin == (0, 0)
     assert len(fw.calls('bitmap_create_ex')) == 1  # Field's paint, its sprites not made here
 
 
-def test_a_clip_clear_of_the_slide_area_draws_nothing(fw):
+def test_a_clip_clear_of_the_screen_draws_nothing(fw):
     now = Now(fw)
     canvas = Canvas(fw)
-    fw.mock('canvas_get_clip_rect', lambda c, r, *_: struct.pack_into('<4i', (C.c_char * 16).from_address(r), 0,
-                                                                      0, 280, 375, 40))  # the bar under it only
+    clip(fw, 0, 320, 375, 40)  # below the screen's foot
     paint(fw, now.win, canvas)
     assert canvas.clips == [] and not drew(fw) and now.v.timer == 1
 
@@ -635,15 +635,16 @@ def test_paint_of_another_widget_does_nothing(fw):
     assert now.timers == []
 
 
-def test_the_drawing_moves_to_the_slide_area_and_the_canvas_comes_back(fw):
-    """The window under the status bar paints at its own place; the slide area is 12, 60 into it."""
-    now = Now(fw, box_x=12, now=100001)
-    canvas = Canvas(fw, x=3, y=30)
+def test_the_drawing_moves_to_the_screen_s_origin_and_the_canvas_comes_back(fw):
+    """The window under the status row (y 58) paints at its own place; Field draws from the screen's top left,
+    wherever the slide area (12, 60 into the window) sits."""
+    now = Now(fw, box_x=12, win_y=58, now=100001)
+    canvas = Canvas(fw, x=0, y=58)
     origins = []
     fw.mock('bitmap_create_ex', lambda *_: origins.append(canvas.origin) or 0)  # Field's first step
     paint(fw, now.win, canvas)
-    assert canvas.clips == [(15, 90, 360, 186), (0, 0, 375, 320)] and canvas.origin == (3, 30)
-    assert origins == [(15, 90)]
+    assert canvas.clips == [(0, 0, 375, 320), (0, 0, 375, 320)] and canvas.origin == (0, 58)
+    assert origins == [(0, 0)]
 
 
 def ticking(fw, playing=True, **page):
@@ -688,7 +689,7 @@ def test_a_finger_held_on_the_page_holds_no_repaint(fw):
     assert now.invalidated() == count + 1
 
 
-def test_at_rest_one_repaint_puts_the_track_s_name_up_then_none(fw):
+def test_at_rest_one_repaint_then_none(fw):
     now, _ = ticking(fw, playing=False)
     now.v.heard = 0
     counts, start = [], now.invalidated()
@@ -699,7 +700,7 @@ def test_at_rest_one_repaint_puts_the_track_s_name_up_then_none(fw):
     assert fw.fn('visualizer_live', C.c_int)() == 0
 
 
-def test_at_rest_a_finger_held_on_the_page_still_gets_the_track_s_name(fw):
+def test_at_rest_a_finger_held_on_the_page_still_gets_the_repaint(fw):
     now, _ = ticking(fw, playing=False)
     now.v.heard = 0
     now.pressed, count = 1, now.invalidated()
@@ -708,7 +709,7 @@ def test_at_rest_a_finger_held_on_the_page_still_gets_the_track_s_name(fw):
 
 
 def test_the_page_is_live_or_at_rest_never_both(fw):
-    """Not playing: 1.5 s after the last audio the repaints stop and the track's name comes up, at the same
+    """Not playing: 1.5 s after the last audio the repaints stop and the page is at rest (quiet), at the same
     millisecond."""
     now, _ = ticking(fw, playing=False)
     v = now.v
@@ -719,7 +720,7 @@ def test_the_page_is_live_or_at_rest_never_both(fw):
 
 
 def test_playing_with_nothing_heard_is_not_at_rest(fw):
-    """DSD, or a filter that writes nothing: playing, so the track's name stays down."""
+    """DSD, or a filter that writes nothing: playing, so the page is not at rest."""
     now, _ = ticking(fw)
     now.v.heard = 0
     for _ in range(3):
@@ -802,46 +803,56 @@ def test_a_page_shown_again_keeps_its_history_while_the_audio_is_live(fw, since,
     assert v.level[0] == (0.5 if kept else 0)
 
 
-def quiet_paint(fw, now, title, artist, width_px=7, quiet=1, full=False):
-    """The page at rest with the track's title and artist labels (None: no such label), each letter width_px wide:
-    the text drawn, or the canvas (full), whose measured list holds the font each measure was made in."""
+def song_paint(fw, now, title, artist, width_px=7, held=1, full=False):
+    """The page with the track's title and artist labels (None: no such label), each letter width_px wide, painted
+    once to start its timer, then 150 ms on with the thumb resting on the wheel (held), so the rest of the page, the
+    song's line among it, shows at full alpha: the text drawn, or the canvas (full), whose measured list holds the font
+    each measure was made in."""
     labels = {k: v for k, v in (('scrlabel_title', title), ('scrlabel_artist', artist)) if v is not None}
     wide = {k: (C.c_uint * (len(v) + 1))(*map(ord, v), 0) for k, v in labels.items()}
     widgets = {k: 0x6100 + i for i, k in enumerate(labels)}
     found = {'slide_view': now.slide}
     fw.mock('widget_lookup', lambda w, name, deep, *_: deep and widgets.get(C.string_at(name).decode(), found.get(C.string_at(name).decode(), 0)))
     fw.mock('widget_get_text', lambda w, *_: C.addressof(wide[{v: k for k, v in widgets.items()}[w]]) if w in widgets.values() else 0)
+    fw.var('wheel_held', C.c_int).value = held
+    paint(fw, now.win, Canvas(fw))  # arms the timer, the rest of the page hidden
+    now.now += 150  # CHROME_FADE_MS
     canvas = Canvas(fw)
     fw.mock('canvas_measure_text', lambda c, s, n, *_: canvas.measured.append(canvas.font) or float(n * width_px))
-    now.v.quiet = quiet
     paint(fw, now.win, canvas)
     return canvas if full else [t for t, _ in canvas.texts]
 
 
-def test_at_rest_the_track_shows_as_title_and_artist(fw):
+def test_the_song_line_shows_title_and_artist_at_the_slide_area_s_foot(fw):
+    """Drawn with the rest of the page at its alpha, in the slide area (0, 60 into the window): VIS_X in, 22 px above
+    the page's foot, PAGE_W (343) wide, in 0xaaaaaa."""
     now = Now(fw)
-    assert quiet_paint(fw, now, 'Song', 'Band') == ['Song · Band']
+    canvas = song_paint(fw, now, 'Song', 'Band', full=True)
+    assert now.v.chrome == 255
+    (drawn,) = canvas.drawn
+    assert drawn['text'] == 'Song · Band' and drawn['rect'] == (16, 186 - 22, W, 20)
+    assert drawn['origin'] == (0, 60) and drawn['color'] == 0xffaaaaaa
 
 
 def test_a_track_too_long_for_both_shows_its_title(fw):
     now = Now(fw)
-    assert quiet_paint(fw, now, 'T' * 40, 'A' * 20) == ['T' * 40]
+    assert song_paint(fw, now, 'T' * 40, 'A' * 20) == ['T' * 40]
 
 
 def test_a_title_too_long_alone_ends_in_an_ellipsis(fw):
     now = Now(fw)
-    shown, = quiet_paint(fw, now, 'T' * 90, '')
+    shown, = song_paint(fw, now, 'T' * 90, '')
     assert shown == 'T' * 48 + '…' and len(shown) * 7 <= W
 
 
 def test_no_track_no_text(fw):
     now = Now(fw)
-    assert quiet_paint(fw, now, '', '') == []
+    assert song_paint(fw, now, '', '') == []
 
 
-def test_playing_no_track_name(fw):
+def test_no_thumb_on_the_wheel_no_song_line(fw):
     now = Now(fw)
-    assert quiet_paint(fw, now, 'Song', 'Band', quiet=0) == []
+    assert song_paint(fw, now, 'Song', 'Band', held=0) == [] and now.v.chrome == 0
 
 
 @pytest.mark.parametrize('title, artist, shown', [
@@ -852,15 +863,15 @@ def test_playing_no_track_name(fw):
 def test_the_track_s_name_fits_the_page(fw, title, artist, shown):
     """title · artist, the title alone if both don't fit, cut to fit with an ellipsis; no separator without
     both; no such label is no text."""
-    assert quiet_paint(fw, Now(fw), title, artist) == [shown]
+    assert song_paint(fw, Now(fw), title, artist) == [shown]
 
 
 def test_a_text_too_wide_for_even_a_letter_is_an_ellipsis(fw):
-    assert quiet_paint(fw, Now(fw), 'Song', 'Band', width_px=1000) == ['…']
+    assert song_paint(fw, Now(fw), 'Song', 'Band', width_px=1000) == ['…']
 
 
 def test_the_track_s_name_is_measured_in_the_font_it_is_drawn_in(fw):
-    canvas = quiet_paint(fw, Now(fw), 'T' * 40, 'A' * 20, full=True)
+    canvas = song_paint(fw, Now(fw), 'T' * 40, 'A' * 20, full=True)
     (drawn,) = canvas.drawn
     assert len(canvas.measured) > 1 and set(canvas.measured) == {drawn['font']}
 
@@ -905,19 +916,10 @@ def test_the_window_s_end_stops_a_pending_look(fw):
     assert look and now.v.retry == 0 and look in [a[0] for _, a in fw.calls('timer_remove')]
 
 
-def oled_now(fw):
-    """Now under OLED (THEME 3, the theme with pages.own.painter="oled")."""
-    def config(path, section, key, out, default, *_):
-        value = b'3' if C.string_at(key) == b'THEME' else C.string_at(default)
-        C.memmove(out, value + b'\0', len(value) + 1)
-    fw.mock('toolsReadConfig', config)
-    return Now(fw)
-
-
 def test_field_draws_five_bands_of_glow_sprites_inside_the_screen(fw):
     """Each band's FIELD_DOTS sprites, 32 px, drawn whole at their size (no scaling), all round the page's centre;
     the sprites are made once, four strengths a band, and a sprite's corners are clear."""
-    now = oled_now(fw)
+    now = Now(fw)
     bufs, made, drawn = [], [], []
 
     def create(w, h, line, fmt, *_):
@@ -934,7 +936,7 @@ def test_field_draws_five_bands_of_glow_sprites_inside_the_screen(fw):
         paint(fw, now.win, Canvas(fw))
     assert made == [(32, 32, 1)] * 20 and len(drawn) == 2 * 5 * 40
     assert all(src == (0, 0, 32, 32) and dst[2:] == (32, 32) for _, src, dst in drawn)
-    cx, cy = 375 / 2, 320 / 2  # the screen's: OLED's Field fills it (full_paint)
+    cx, cy = 375 / 2, 320 / 2  # the screen's: Field fills it (full_paint)
     assert all(abs(x + 16 - cx) <= 375 / 2 and abs(y + 16 - cy) <= 320 / 2 for _, _, (x, y, _, _) in drawn)
     corner = struct.unpack_from('<I', bufs[0], 0)[0]
     centre = struct.unpack_from('<I', bufs[0], (16 * 32 + 16) * 4)[0]
@@ -943,12 +945,12 @@ def test_field_draws_five_bands_of_glow_sprites_inside_the_screen(fw):
 
 # OLED's Field over the whole screen: the page's other parts only while a thumb rests on the wheel.
 class Full:
-    """oled_now with the parts full_paint paints again by name, the system bar, the sprites and every widget_paint,
+    """Now with the parts full_paint paints again by name, the system bar, the sprites and every widget_paint,
     canvas_fill_rect and global alpha as called."""
     PARTS = ('slider_play', 'label_playtime', 'label_ipod_remain', 'slide_indicator1')
 
     def __init__(self, fw):
-        self.fw, self.now = fw, oled_now(fw)
+        self.fw, self.now = fw, Now(fw)
         self.parts = {n: self.now.widget(0, 0, 10, 10, self.now.win) for n in self.PARTS}
         self.bar = self.now.widget(0, 0, 375, 58)
         fw.var('fw_ctx_system_bar', C.c_void_p).value = self.bar
@@ -1009,38 +1011,17 @@ def test_oled_s_page_stays_1_5_s_after_the_thumb_lifts_then_fades(fw):
     assert full.frame(1900) == 0 and full.painted == []
 
 
-def test_another_theme_draws_field_in_the_slide_area(fw):
-    """Only OLED fills the screen: another theme's Field stays in the slide area, round its centre, with the page's
-    parts as they are."""
-    now, bufs, dots, fills = Now(fw), [], [], []
-    fw.mock('bitmap_create_ex', lambda w, h, line, fmt, *_: bufs.append(C.create_string_buffer(w * h * 4)) or len(bufs))
-    fw.mock('bitmap_lock_buffer_for_write', lambda bm, *_: C.addressof(bufs[bm - 1]))
-    fw.mock('bitmap_get_line_length', lambda bm, *_: 32 * 4)
-    fw.mock('bitmap_unlock_buffer', lambda *_: 0)
-    fw.mock('canvas_draw_image', lambda c, bm, src, dst, *_: dots.append(tuple((C.c_int * 4).from_address(dst))) or 0)
-    fw.mock('canvas_fill_rect', lambda c, x, y, w, h, *_: fills.append((x, y, w, h)) or 0)
-    canvas = Canvas(fw)
-    paint(fw, now.win, canvas)
-    xs, ys = [x + 16 for x, _, _, _ in dots], [y + 16 for _, y, _, _ in dots]
-    assert len(dots) == 200 and fills == [] and canvas.clips[0] == (0, 60, 375, 186)
-    assert abs(sum(xs) / len(xs) - 187.5) < 12 and abs(sum(ys) / len(ys) - 93) < 12  # the slide area's own
-
-
-@pytest.mark.parametrize('oled', [True, False])
-def test_a_slide_off_oled_s_field_repaints_the_window_and_the_status_row_whole(fw, oled):
+def test_a_slide_off_oled_s_field_repaints_the_window_and_the_status_row_whole(fw):
     """Field covered the whole screen; the slide repaints the slide area alone, so without this the rows around it
-    (shuffle and repeat's among them) kept Field's last frame (seen in the emulator). Another theme's Field stays in
-    the slide area, which the slide repaints."""
-    now = Full(fw).now if oled else Now(fw)
-    if not oled:
-        fw.var('fw_ctx_system_bar', C.c_void_p).value = now.widget(0, 0, 375, 58)
+    (shuffle and repeat's among them) kept Field's last frame (seen in the emulator)."""
+    now = Full(fw).now
     bar = C.c_void_p.in_dll(fw.lib, 'fw_ctx_system_bar').value
     slid = now.handler(now.slide, EVT_VALUE_CHANGED)
     before = [a[0] for _, a in fw.calls('widget_invalidate_force')]
     now.value = 1  # the lyrics
     assert slid() == 0
     after = [a[0] for _, a in fw.calls('widget_invalidate_force')][len(before):]
-    assert after == ([now.win, bar] if oled else [])
+    assert after == [now.win, bar]
     now.value = now.pages - 1  # back onto the page: its own frames repaint it
     slid()
     assert [a[0] for _, a in fw.calls('widget_invalidate_force')][len(before) + len(after):] == []

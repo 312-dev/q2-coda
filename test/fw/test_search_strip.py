@@ -14,7 +14,6 @@ KEY_RETURN, KEY_CENTER, KEY_PREV, KEY_NEXT, KEY_PLAY, KEY_FWD_BTN, KEY_BACK_BTN 
 LIBRARY, SPACE, DELETE, ENTRIES = 0xf001, 36, 37, 38
 EVT_POINTER_DOWN, EVT_POINTER_UP_BEFORE, EVENT_X = O['EVT_POINTER_DOWN'], O['EVT_POINTER_UP_BEFORE'], O['EVENT_X']
 STRIP_Y, CELL_X, STEP = 158, 108, 17  # the strip's top on the page, its first letter cell, a cell's width
-OLED = b'3'
 
 
 class Ss(C.Structure):
@@ -35,10 +34,10 @@ def song():
 
 
 class Strip:
-    """The Search page opened under theme, over songs; key() sends one key as ringnav does."""
-    def __init__(self, fw, ui, songs, theme=OLED):
+    """The Search page opened over songs; key() sends one key as ringnav does."""
+    def __init__(self, fw, ui, songs):
         self.fw, self.ui = fw, ui
-        Config(fw, **({} if theme is None else {'THEME': theme}))
+        Config(fw)
         Library(fw, ui, songs)
         self.stock = []
         fw.mock('stock_search', lambda *a: self.stock.append(a) or 0)
@@ -91,11 +90,6 @@ def test_search_opens_straight_on_the_strip_with_nothing_listed(fw, ui, song):
     assert ui.name[ui.top()] == 'searchstrip_page' and not s.stock
     assert s.ss.text == b'' and s.ss.letter == 0 and s.ss.focus == 0 and s.ss.nmatch == 0
     assert 'Search' in ui.text.values()  # the status row's title
-
-
-def test_other_themes_keep_stock_s_search(fw, ui, song):
-    s = Strip(fw, ui, library(song), theme=None)
-    assert len(s.stock) == 1 and not ui.windows
 
 
 def test_the_wheel_walks_letters_then_digits_space_and_delete_and_wraps(fw, ui, song):

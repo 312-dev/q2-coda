@@ -8,7 +8,7 @@ import struct
 import pytest
 
 import host
-from conftest import text, Game, c_enum, libc
+from conftest import text, Game, c_enum
 from conftest import FNV_PRIME, O, Deques, Files, claim, fnv1a, in_fork  # noqa: F401
 
 STOCK_RED = O['STOCK_RED']
@@ -22,6 +22,13 @@ CP1252 = {0x80: 0x20ac, 0x82: 0x201a, 0x83: 0x192, 0x84: 0x201e, 0x85: 0x2026, 0
           0x9c: 0x153, 0x9e: 0x17e, 0x9f: 0x178}
 ACCENTS = [[int(v, 16) for v in re.findall(r'0x[0-9a-f]+', row)]
            for row in re.findall(r'\{ (0x[^}]*)\}', (host.ROOT/'patch/offsets.inc').read_text())][:9]
+OLED_XML = (host.ROOT/'assets/themes/oled/theme.xml').read_text()
+# OLED's light half's paper and ink (theme.xml's colorScheme light.paper, light.ink)
+OLED_PAPER, OLED_INK = (int(host.tools_build.need(re.search(rf'<colorScheme sel[^>]*light\.{k}="#([0-9a-f]{{6}})"', OLED_XML),
+                                                  f'No light.{k}')[1], 16) for k in ('paper', 'ink'))
+# OLED's one accent (theme.xml's colorScheme oled-blue): its five tones
+OLED_BLUE = [int(v, 16) for v in host.tools_build.need(re.search(r'name="oled-blue"[^>]*tones="([^"]*)"', OLED_XML),
+                                                       'No oled-blue')[1].replace('#', '').split()]
 
 
 LOWER = bytes.maketrans(bytes(range(65, 91)), bytes(range(97, 123)))
@@ -207,7 +214,7 @@ def test_flip_if(fw):
 
 
 @pytest.mark.parametrize('light, color, inked', [
-    (b'0', 0xff000000, 0xff000000), (b'1', 0xff000000, 0xff000000 | PAPER * 0x010101),
+    (b'0', 0xff000000, 0xff000000), (b'1', 0xff000000, 0xff000000 | OLED_PAPER),  # black flips to OLED's paper
     (b'1', 0x00000000, 0x00000000),  # clear stays clear: stock tests for it
 ])
 def test_ui_ink_flips_only_in_light_mode(fw, clock, light, color, inked):
@@ -309,12 +316,6 @@ def test_red_map_every_tone_of_the_extremes(fw):
                 assert mapped(rgba(r << 16 | g << 8 | b), 0xffffff, 0xffffff, 0) >> 24 == 0xff
 
 
-def test_accent_map_crimson_keeps_every_colour(fw, clock):
-    Config(fw)
-    accent_map = fw.fn('accent_map', C.c_uint, C.c_uint, C.c_int, C.c_int)
-    assert accent_map(rgba(0x7f0a24), O['CRIMSON'], 3) == rgba(0x7f0a24)
-
-
 def test_accent_map_maps_red_to_the_presets_tone(fw, clock):
     Config(fw)
     accent_map = fw.fn('accent_map', C.c_uint, C.c_uint, C.c_int, C.c_int)
@@ -324,31 +325,16 @@ def test_accent_map_maps_red_to_the_presets_tone(fw, clock):
 def test_accent_map_in_light_mode_flips_neutrals_and_keeps_clear(fw, clock):
     Config(fw, LIGHT=b'1')
     accent_map = fw.fn('accent_map', C.c_uint, C.c_uint, C.c_int, C.c_int)
-    assert accent_map(rgba(0xffffff), 4, 3) == rgba(INK * 0x010101)
+    assert accent_map(rgba(0xffffff), 4, 3) == rgba(OLED_INK)  # white flips to OLED's light ink
     assert accent_map(rgba(STOCK_RED, 0), 4, 3) == rgba(STOCK_RED, 0)
 
 
-def test_a_neutral_accent_in_light_mode_takes_its_silver_for_both(fw, clock):
-    Config(fw, LIGHT=b'1', THEME=b'2', ACCENT=b'0')
+@pytest.mark.parametrize('light', [b'0', b'1'])
+def test_the_accent_keeps_its_tones(fw, clock, light):
+    """OLED's one accent, oled-blue (theme.xml): a colored accent keeps its five tones in either half."""
+    Config(fw, LIGHT=light)
     tone = fw.fn('accent_tone', C.c_uint, C.c_int)
-    assert tone(0) == tone(2) == ACCENTS[0][3]
-
-
-def test_a_coloured_accent_keeps_its_tones(fw, clock):
-    Config(fw, THEME=b'2', ACCENT=b'4')
-    tone = fw.fn('accent_tone', C.c_uint, C.c_int)
-    assert [tone(i) for i in range(5)] == ACCENTS[4]
-
-
-def test_ivory_is_minimal_only(fw, clock):
-    Config(fw, THEME=b'2', ACCENT=b'7')
-    tone = fw.fn('accent_tone', C.c_uint, C.c_int)
-    assert tone(0) == ACCENTS[0][0]  # Classic has no Ivory: Graphite
-
-
-def test_ivory_on_minimal(fw, clock):
-    Config(fw, MINIMAL_ACCENT=b'7')  # Minimal's Ivory
-    assert fw.fn('accent_tone', C.c_uint, C.c_int)(2) == O['MINIMAL_FILL']
+    assert [tone(i) for i in range(5)] == OLED_BLUE
 
 
 def test_mix_runs_from_one_to_the_other(fw):
@@ -416,47 +402,48 @@ def test_artists_default_to_album_artist(fw):
     assert fw.var('fw_ctx_artist_type', C.c_int).value == 0
 
 
-@pytest.mark.parametrize('values, theme, home, light', [
-    ({}, 0, 0, 0), (dict(THEME=b'2', HOME=b'2', LIGHT=b'1'), 2, 2, 1), (dict(THEME=b'7', HOME=b'3', LIGHT=b'3'), 0, 0, 0),
+@pytest.mark.parametrize('values, home, light', [
+    ({}, 0, 0), (dict(HOME=b'2', LIGHT=b'1'), 2, 1), (dict(HOME=b'3', LIGHT=b'3'), 0, 0),
 ])
-def test_display_settings(fw, clock, st, values, theme, home, light):
+def test_display_settings(fw, clock, values, home, light):
     Config(fw, **values)
-    assert (fw.fn('ipod_home', C.c_int)(), fw.fn('ipod_light', C.c_int)(), st('theme').value) == (home, light, theme)
+    assert (fw.fn('ipod_home', C.c_int)(), fw.fn('ipod_light', C.c_int)()) == (home, light)
 
 
-THEMES = host.tools_theme.builtins()
-SETTING_ROUNDED = c_enum('SETTING_ACCENT')['SETTING_ROUNDED']
-
-
-def theme_index(id_):
-    return next(t['index'] for t in THEMES if t['id'] == id_)
-
-
-@pytest.mark.parametrize('id_, rounded', [('minimal', 1), ('modern', 0), ('classic-light', 0), ('oled', 0)])
-def test_a_missing_rounded_reads_the_theme_s_corners(fw, clock, st, id_, rounded):
-    Config(fw, THEME=str(theme_index(id_)).encode())
+def boot(fw):
+    """theme_boot as the system bar's load runs it (ringnav_ui_load: accent(), then theme_boot), its pages
+    left unwritten (theme_mprotect refuses: st.geom stays SET0's, which is not under test here). The keys
+    write_int_config saved, by name, in order."""
+    written = []
+    fw.mock('write_int_config', lambda v, s, k, *_: written.append((C.string_at(k).decode(), C.c_int(v).value)))
+    fw.mock('theme_mprotect', lambda *_: -1)
     fw.fn('accent', C.c_int)()
-    assert st('rounded').value == rounded
+    fw.fn('navigation__theme_boot', None)()
+    return written
 
 
-@pytest.mark.parametrize('id_, stored', [('minimal', b'0'), ('modern', b'1')])
-def test_a_stored_rounded_wins_over_the_preset(fw, clock, st, id_, stored):
-    Config(fw, THEME=str(theme_index(id_)).encode(), ROUNDED=stored)
-    fw.fn('accent', C.c_int)()
-    assert st('rounded').value == int(stored)
+# An older build's unit (THEME 0 Minimal, 1 Classic, 2 Modern, or no key) boots on OLED with its preset
+# (theme.xml: Full Home, Light Mode off unless Auto) applied once, and THEME 3 written.
+@pytest.mark.parametrize('theme', [{'THEME': b'0'}, {'THEME': b'1'}, {'THEME': b'2'}, {}])
+def test_a_unit_on_a_retired_theme_takes_oled_s_preset_once(fw, clock, theme):
+    config = Config(fw, HOME=b'2', LIGHT=b'1', **theme)
+    written = boot(fw)
+    assert fw.fn('theme', C.c_void_p)() == C.addressof(fw.var('themes', C.c_char))  # themes[0]: OLED
+    assert written == [('LIGHT', 0), ('HOME', 1), ('THEME', 3)]
+    assert (fw.fn('ipod_home', C.c_int)(), fw.fn('ipod_light', C.c_int)()) == (1, 0)
+    config.values.update({k.encode(): str(v).encode() for k, v in written})
+    assert boot(fw) == []  # the next boot reads THEME 3: no preset again
 
 
-def test_a_missing_rounded_follows_the_live_theme_s_preset_not_its_place(fw, clock, st, library):
-    """Modern's Corners row made Round in this test's load of the table: a missing key reads Round."""
-    Config(fw, THEME=str(theme_index('modern')).encode())
-    row = fw.fn('option_of', C.c_void_p, C.c_void_p, C.c_int)(fw.fn('theme', C.c_void_p)(), SETTING_ROUNDED)
-    assert row
-    at = row + host.offsets(library.parent/'theme_engine.o', 'option_t')['preset']
-    assert not libc.mprotect(at & ~0xfff, 0x2000, 3)  # PROT_READ | PROT_WRITE
-    C.c_byte.from_address(at).value = 1
-    st('settings_read').value = 0  # read the keys again
-    fw.fn('accent', C.c_int)()
-    assert st('rounded').value == 1
+def test_a_unit_on_oled_keeps_its_choices(fw, clock):
+    Config(fw, THEME=b'3', HOME=b'2', LIGHT=b'1')
+    assert boot(fw) == []
+    assert (fw.fn('ipod_home', C.c_int)(), fw.fn('ipod_light', C.c_int)()) == (2, 1)
+
+
+def test_the_preset_keeps_light_mode_s_auto(fw, clock):
+    Config(fw, THEME=b'0', HOME=b'1', LIGHT=b'2')
+    assert boot(fw) == [('THEME', 3)]
 
 
 @pytest.mark.parametrize('value, rockbox, name', [
@@ -1505,7 +1492,7 @@ def test_toast_cuts_a_long_text(fw, heap):
     fw.mock('navigator_to_with_context', show)
     fw.fn('toast', None, C.c_void_p)(heap.string(b'x' * 2000))
     assert seen[0][0] == b'dialog/msginfo_dialog'
-    assert struct.unpack_from('<2i', seen[0][1]) == (1, 2000) and seen[0][1][8:] == b'x' * 0x3ff + b'\0'
+    assert struct.unpack_from('<2i', seen[0][1]) == (1, 1500) and seen[0][1][8:] == b'x' * 0x3ff + b'\0'
 
 
 class Wifi:
@@ -2966,13 +2953,6 @@ def test_painting_in_nothing(fw, st):
     held, at = widgets(0, 1)
     st('paint_w', C.c_void_p).value = at[0]
     assert fw.fn('painting_in', C.c_int, C.c_void_p)(None) == 0 and held
-
-
-def test_selected_ink_is_the_selected_widgets(fw, st):
-    held, at = widgets(0, 1)
-    st('paint_w', C.c_void_p).value = at[0]
-    st('sel_widget', C.c_void_p).value = at[1]
-    assert fw.fn('navigation__selected_ink', C.c_int)() == 1 and held
 
 
 def test_artist_songs_by_the_artist_setting(fw):

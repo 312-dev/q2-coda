@@ -13,15 +13,8 @@ from conftest import NAVIGATION_SOURCE, O, Deques, Files, claim, high_halves
 W_PARENT, EVT_CLICK, EVENT_TYPE, EVENT_KEY, EVENT_X = O['W_PARENT'], O['EVT_CLICK'], O['EVENT_TYPE'], O['EVENT_KEY'], O['EVENT_X']
 STOP = 11
 THEMES = host.tools_theme.builtins()
-KEYS = list(host.tools_theme.theme_keys(THEMES))  # the themes' own IPOD keys, st.own[] in this order
-MINIMAL, CLASSIC, MODERN = (next(t['index'] for t in THEMES if t['id'] == i) for i in ('minimal', 'classic-light', 'modern'))
-
-
-PICKER = sorted(THEMES, key=lambda t: t['order'])  # the Theme picker's rows, and Status Bar's looks 1..N
-
-
-def theme_of(index):
-    return next(t for t in THEMES if t['index'] == index)
+OLED_THEME = next(t for t in THEMES if t['id'] == 'oled')  # the one built-in theme
+OLED = 3  # config.ini's THEME for OLED, the value theme_boot keeps (navigation.c THEME_OLED)
 
 
 def tables(library):
@@ -49,11 +42,18 @@ def geometry(library):
 
 @pytest.fixture
 def st(fw, scratch):
-    """navigation.c's st by field: st('theme').value; st('setting_label', i=3) a pointer array's cell."""
+    """navigation.c's st by field: st('geom').value; st('setting_label', i=3) a pointer array's cell."""
     base = C.addressof(fw.var('st', C.c_char))
     def field(name, ctype=C.c_int, i=0):
         return ctype.from_address(base + scratch[name] + i * C.sizeof(ctype))
     return field
+
+
+def use_set(st, name):
+    """Geometry set name ('ipod', 'oled') as theme_boot leaves st.geom, the settings already read."""
+    sets = host.tools_theme.geometry_sets(THEMES)
+    st('geom').value, st('settings_read').value = [g.name for g in sets].index(name), 1
+    return sets[st('geom').value]
 
 
 class Config:
@@ -322,31 +322,16 @@ def appearance(fw, ui, **config):
     return page
 
 
-# The payload's Appearance rows (setting_text, setting_keys[]): a setting's title, its stored key, and whether it is a
-# switch (list_toggle's On or Off). A theme's own option brings its own label and key, its accent the theme's key.
-PAYLOAD = {'SETTING_LIGHT': ('Light Mode', 'LIGHT', False), 'SETTING_ACCENT': ('Accent', None, False),
-           'SETTING_ROUNDED': ('Rounded Corners', 'ROUNDED', True), 'SETTING_HOME': ('Home', 'HOME', False),
-           'SETTING_SHORTCUT': ('Shortcut', 'SHORTCUT', False), 'SETTING_BATTERY': ('Battery', 'BATTERY', False),
-           'SETTING_TIMETITLE': ('Time in Title', 'TIMETITLE', True),
-           'SETTING_NPCENTRED': ('Centred Now Playing', 'NPCENTRED', True)}
-# st's field for each stored key a theme's preset writes
-STATE = {'THEME': 'theme', 'LIGHT': 'light', 'ACCENT': 'accent', 'ROUNDED': 'rounded', 'HOME': 'home', 'SHORTCUT': 'shortcut',
-         'BATTERY': 'battery', 'TIMETITLE': 'time_title', 'NPCENTRED': 'np_centred'}
+# The payload's Appearance rows (setting_text, setting_keys[]): a setting's title and its stored key. A theme's own
+# option brings its own label and key, its accent the theme's key.
+PAYLOAD = {'SETTING_LIGHT': ('Light Mode', 'LIGHT'), 'SETTING_ACCENT': ('Accent', None), 'SETTING_HOME': ('Home', 'HOME'),
+           'SETTING_SHORTCUT': ('Shortcut', 'SHORTCUT'), 'SETTING_BATTERY': ('Battery', 'BATTERY'),
+           'SETTING_TIMETITLE': ('Time in Title', 'TIMETITLE')}
 
 
 def appearance_titles(t):
-    """Appearance's rows under theme t: Theme, then t's options in its theme.xml's order."""
-    return ['Theme'] + [o['label'] if o['setting'] == 'SETTING_OWN' else PAYLOAD[o['setting']][0] for o in t['opts']]
-
-
-def stored_key(t, o):
-    if o['setting'] == 'SETTING_OWN':
-        return o['key']
-    return t['accent_key'] if o['setting'] == 'SETTING_ACCENT' else PAYLOAD[o['setting']][1]
-
-
-def preset(t, setting):
-    return next(o['preset'] for o in t['opts'] if o['setting'] == setting)
+    """Appearance's rows under theme t: t's options in its theme.xml's order."""
+    return [o['label'] if o['setting'] == 'SETTING_OWN' else PAYLOAD[o['setting']][0] for o in t['opts']]
 
 
 def accent_name(t, v):
@@ -355,63 +340,20 @@ def accent_name(t, v):
     return names[v].capitalize() if v < len(names) else t['schemes'][v]['label']
 
 
-def value_name(setting, v):
-    """A payload setting's value v as its row reads it: tools/theme.py's name for it (Light Mode's on: On)."""
-    return {s: names for s, names in host.tools_theme.SETTINGS.values()}[setting][v].capitalize()
-
-
-def preset_writes(t, stored):
-    """What choosing t saves after THEME, over the stored values (key -> value): each option's preset, in t's order,
-    where it changes the value and the value isn't the option's keep (Light Mode's Auto)."""
-    out = []
-    for o in t['opts']:
-        key = stored_key(t, o)
-        if o['preset'] >= 0 and stored[key] not in (o['preset'], o['keep']):
-            out.append((key, o['preset']))
-    return out
-
-
-def readings(view):
-    """view's rows as {title: value}: the value label's or the switch's reading, else the text after ': '."""
-    out = {}
-    for row in rows(view):
-        if row:
-            title, _, after = row[0].partition(': ')
-            out[title] = row[1] if row[1] is not None else after
-    return out
-
-
-def test_appearance_lists_theme_then_minimals_options_in_its_order(fw):
+def test_oled_appearance_rows_read_title_and_value_in_its_order(fw):
     ui = Ui(fw)
     page = appearance(fw, ui)
-    t = theme_of(MINIMAL)
+    t = OLED_THEME
     assert len(page.pages) == 2 and page.title() == 'Appearance'
-    assert titles(page.view()) == appearance_titles(t)
-    # no set_text: a row reads "Title: value", a switch its On or Off
-    switches = [PAYLOAD[o['setting']][0] for o in t['opts'] if o['setting'] in PAYLOAD and PAYLOAD[o['setting']][2]]
-    assert switches and [row[0] for row in rows(page.view()) if row[1] is not None] == switches
-    read = readings(page.view())
-    # the running theme's name, and Accent at Minimal's own default, under its own key
-    assert read['Theme'] == t['name'] and read['Accent'] == accent_name(t, host.tools_theme.accent_default(t))
-    # nothing stored: the payload's own defaults (dark, Minimal round, Split, the clock in the title); no Rockbox: Favorites
-    assert (read['Light Mode'], read['Rounded Corners'], read['Home'], read['Shortcut'], read['Time in Title']) == \
-        ('Off', 'On' if t['name'] == 'Minimal' else 'Off', 'Split', 'Favorites', 'On')
-
-
-def test_classic_appearance_rows_read_title_and_value_and_its_own_options(fw):
-    ui = Ui(fw)
-    page = appearance(fw, ui, THEME=b'%d' % CLASSIC)
-    t = theme_of(CLASSIC)
-    # set_text: each row its title, the value in its own right-hand label (a switch's On or Off too)
-    assert [row[0] for row in rows(page.view())] == appearance_titles(t)
+    # set_text: each row its title, the value in its own right-hand label
+    assert titles(page.view()) == appearance_titles(t) == [row[0] for row in rows(page.view())]
     read = dict(rows(page.view()))
     # Accent: the theme's own scheme, its default
-    assert read['Theme'] == t['name'] and read['Accent'] == accent_name(t, host.tools_theme.accent_default(t))
+    assert read['Accent'] == accent_name(t, host.tools_theme.accent_default(t))
     own = [o for o in t['opts'] if o['setting'] == 'SETTING_OWN']
     assert own and [read[o['label']] for o in own] == [o['names'][o['def']] for o in own]  # each at its default
-    # nothing stored: the payload's own defaults, Battery's Icon one of Classic's two
-    assert (read['Light Mode'], read['Home'], read['Shortcut'], read['Battery'], read['Time in Title']) == \
-        ('Off', 'Split', 'Favorites', 'Icon', 'On')
+    # nothing stored: the payload's own defaults (dark, Split, Battery's Icon); no Rockbox: Favorites
+    assert (read['Light Mode'], read['Home'], read['Shortcut'], read['Battery']) == ('Off', 'Split', 'Favorites', 'Icon')
 
 
 def clicks_of(fw, ui, page, title, n):
@@ -425,30 +367,15 @@ def clicks_of(fw, ui, page, title, n):
     return seen
 
 
-# Accent's stored values are its ACCENTS rows, in order: tools/theme.py names them from the same rows
-ACCENT_VALUE = {name.capitalize(): i for i, name in enumerate(host.tools_theme.ACCENT_NAMES)}
-
-
-def test_minimal_accent_runs_graphite_to_green_then_its_ivory(fw):
+def test_oled_accent_offers_its_blue_alone(fw):
+    """OLED's accent option names one value, its own scheme (theme.xml): a click comes back to it."""
     ui = Ui(fw)
-    page = appearance(fw, ui, MINIMAL_ACCENT=b'0')
-    seen = clicks_of(fw, ui, page, 'Accent', 9)
-    order = ['Crimson', 'Tidal', 'Champagne', 'Cobalt', 'Tangerine', 'Plum', 'Green', 'Ivory', 'Graphite']
-    assert seen == [(v, [('MINIMAL_ACCENT', ACCENT_VALUE[v])]) for v in order]
-
-
-def test_modern_accent_skips_ivory(fw):
-    ui = Ui(fw)
-    page = appearance(fw, ui, THEME=b'2', ACCENT=b'5')
-    assert [v for v, _ in clicks_of(fw, ui, page, 'Accent', 4)] == ['Plum', 'Green', 'Graphite', 'Crimson']
-    assert [k for k, _ in writes(fw)] == ['ACCENT'] * 4
-
-
-def test_classic_accent_takes_classic_blue_after_green_and_skips_ivory(fw):
-    ui = Ui(fw)
-    page = appearance(fw, ui, THEME=b'1', CLASSIC_LIGHT_ACCENT=b'6')
-    assert [v for v, _ in clicks_of(fw, ui, page, 'Accent', 4)] == ['Green', 'Classic Blue', 'Graphite', 'Crimson']
-    assert [k for k, _ in writes(fw)] == ['CLASSIC_LIGHT_ACCENT'] * 4
+    t = OLED_THEME
+    v = host.tools_theme.accent_default(t)
+    (o,) = [o for o in t['opts'] if o['setting'] == 'SETTING_ACCENT']
+    assert o['values'] == 1 << v
+    page = appearance(fw, ui, **{t['accent_key']: b'%d' % v})
+    assert clicks_of(fw, ui, page, 'Accent', 2) == [(accent_name(t, v), [(t['accent_key'], v)])] * 2
 
 
 def test_shortcut_cycles_in_its_menu_order(fw):
@@ -473,11 +400,11 @@ def test_home_cycles_split_full_carousel(fw):
     assert clicks_of(fw, ui, page, 'Home', 3) == [('Full', [('HOME', 1)]), ('Carousel', [('HOME', 2)]), ('Split', [('HOME', 0)])]
 
 
-def test_classic_battery_takes_only_its_three_styles(fw):
+def test_oled_battery_takes_only_its_two_styles(fw):
+    """OLED's battery option names Icon and Percent (theme.xml values="icon percent")."""
     ui = Ui(fw)
-    page = appearance(fw, ui, THEME=b'1')
-    assert clicks_of(fw, ui, page, 'Battery', 3) == [('Percent', [('BATTERY', 1)]), ('Percent Inside', [('BATTERY', 3)]),
-                                                     ('Icon', [('BATTERY', 0)])]
+    page = appearance(fw, ui)
+    assert clicks_of(fw, ui, page, 'Battery', 2) == [('Percent', [('BATTERY', 1)]), ('Icon', [('BATTERY', 0)])]
 
 
 @pytest.fixture
@@ -507,28 +434,16 @@ def repaints(fw):
     return len(fw.calls('image_manager_unload_all')), len(fw.calls('widget_invalidate_force'))
 
 
-@pytest.mark.parametrize('theme', [MINIMAL, MODERN])
-def test_corners_drop_the_art_cache_only_where_art_takes_them(fw, theme):
+def test_a_switch_from_smart_awake_on_redraws_only_its_toggle(fw):
+    """Smart Awake (SETTING_KEEPLIT, a switch on a set_switch theme) changes its row and nothing else."""
     ui = Ui(fw)
-    page = appearance(fw, ui, THEME=b'%d' % theme)
-    before = repaints(fw)
-    assert clicks_of(fw, ui, page, 'Rounded Corners', 1)[0][1] == [('ROUNDED', int(theme != MINIMAL))]  # Minimal's starts round
-    after = repaints(fw)
-    # a theme drawing its art square bakes the corners into its thumbnails: those cached images go
-    unload = 1 if theme_of(theme)['art_square'] else 0
-    assert after[0] - before[0] == unload and after[1] > before[1]  # the screen repaints either way
-
-
-@pytest.mark.parametrize('title, key', [('Time in Title', 'TIMETITLE'), ('Centred Now Playing', 'NPCENTRED')])
-def test_a_switch_from_smart_awake_on_redraws_only_its_toggle(fw, title, key):
-    ui = Ui(fw)
-    page = appearance(fw, ui)
-    label = button_of(page.view(), title).labels()[0]
+    page = display(fw, ui)
+    label = button_of(page.view(), 'Smart Awake').labels()[0]
     was = row_of(label)[1]
     before = repaints(fw)
     ui.click(label.parent)
     assert row_of(label)[1] == {'On': 'Off', 'Off': 'On'}[was]
-    assert writes(fw) == [(key, int(was == 'Off'))] and repaints(fw) == before
+    assert writes(fw) == [('KEEPLIT', int(was == 'Off'))] and repaints(fw) == before
 
 
 def test_accent_repaints_and_drops_the_cached_images(fw):
@@ -538,29 +453,6 @@ def test_accent_repaints_and_drops_the_cached_images(fw):
     clicks_of(fw, ui, page, 'Accent', 1)
     after = repaints(fw)
     assert after[0] == before[0] + 1 and after[1] > before[1]
-
-
-def test_library_on_home_toggles_without_a_restart(fw, st, geometry):
-    names, _ = geometry
-    st('geom').value = names['GEOM_CLASSIC_LIGHT']
-    ui = Ui(fw)
-    page = appearance(fw, ui, THEME=b'1')
-    assert clicks_of(fw, ui, page, 'Library on Home', 2) == [('Off', [('HOMELIB', 0)]), ('On', [('HOMELIB', 1)])]
-    assert not fw.calls('navigator_to_with_context')
-
-
-def test_status_bar_steps_its_looks_and_repaints_the_bar_without_a_restart(fw, st, geometry):
-    names, _ = geometry
-    st('geom').value = names['GEOM_CLASSIC_LIGHT']
-    ui = Ui(fw)
-    page = appearance(fw, ui, THEME=b'1')
-    st('pct_digit').value = 9
-    before = repaints(fw)
-    looks = [(t['name'], [('STATUSBAR', 1 + i)]) for i, t in enumerate(PICKER)]  # every theme's look, in the picker's order
-    assert clicks_of(fw, ui, page, 'Status Bar', len(PICKER) + 1) == [*looks, ('Theme', [('STATUSBAR', 0)])]
-    assert not fw.calls('navigator_to_with_context') and st('pct_digit').value == 0  # the digits, measured again
-    after = repaints(fw)
-    assert after[0] == before[0] and after[1] == before[1] + len(PICKER) + 1  # the bar alone, no art dropped
 
 
 class Prompts:
@@ -573,139 +465,6 @@ class Prompts:
         kind, ms = struct.unpack('<ii', C.string_at(info, 8))
         self.seen.append((C.string_at(name).decode(), kind, ms, C.string_at(info + 8).decode()))
         return self.answer
-
-
-@pytest.mark.parametrize('answer', [0, 10])
-def test_row_art_needs_a_restart_into_its_other_set(fw, st, geometry, answer):
-    names, _ = geometry
-    st('geom').value = names['GEOM_CLASSIC_LIGHT']  # Row Art On's set, as booted
-    ui = Ui(fw)
-    page = appearance(fw, ui, THEME=b'1')
-    prompts = Prompts(fw, answer)
-    label = button_of(page.view(), 'Row Art').labels()[0]
-    ui.click(label.parent)
-    assert prompts.seen == [('dialog/confirminfo_dialog', 1, 0, 'Restart to apply?')]
-    # the running state keeps the booted set's value either way; confirmed, the config takes Off and the Q2 restarts
-    assert row_of(label) == ('Row Art', 'On') and st('own', i=KEYS.index('ROWART')).value == 1
-    assert writes(fw) == ([('ROWART', 0)] if answer else [])
-    assert len(fw.calls('stock_reboot_trampoline')) == (answer == 10)
-
-
-def themes_page(fw, ui, page):
-    """Appearance's Theme row: the picker over it."""
-    ui.click(button_of(page.view(), 'Theme'))
-    return page.pages[-1]
-
-
-def picks(view):
-    return [(item.labels()[0].text, item.children[0].children[0].props['image'].decode()) for item in view.children]
-
-
-def test_the_theme_picker_lists_every_theme_in_order_marking_the_running_one(fw):
-    ui = Ui(fw)
-    page = appearance(fw, ui, THEME=b'2')
-    themes_page(fw, ui, page)
-    assert page.title() == 'Theme'
-    assert picks(page.view()) == [(t['name'], 'select' if t['index'] == MODERN else 'unselect') for t in PICKER]
-    assert [t['name'] for t in PICKER] == ['Minimal', 'Modern', 'Classic', 'OLED']  # as shipped
-
-
-def pick(ui, page, t):
-    """The Theme picker's row for theme t, clicked."""
-    (item,) = [item for item in page.view().children if item.labels()[0].text == t['name']]
-    ui.click(item.children[0])
-
-
-def test_choosing_a_theme_puts_status_bar_back_on_theme(fw, st):
-    ui = Ui(fw)
-    page = appearance(fw, ui, STATUSBAR=b'3')
-    themes_page(fw, ui, page)
-    pick(ui, page, theme_of(MODERN))
-    assert ('STATUSBAR', 0) in writes(fw) and st('own', i=KEYS.index('STATUSBAR')).value == 0
-
-
-def test_picking_oled_from_classic_asks_to_restart_into_its_own_set(fw, st, geometry):
-    """OLED boots its own oled set (assets/themes/oled), so a pick from Classic's set asks to restart."""
-    names, _ = geometry
-    oled = next(t for t in THEMES if t['id'] == 'oled')
-    st('geom').value = names['GEOM_CLASSIC_LIGHT']  # Classic, as booted
-    ui = Ui(fw)
-    page = appearance(fw, ui, THEME=b'%d' % CLASSIC)
-    themes_page(fw, ui, page)
-    prompts = Prompts(fw, 10)
-    pick(ui, page, oled)
-    assert [p[3] for p in prompts.seen] == ['Restart to apply?'] and len(fw.calls('stock_reboot_trampoline')) == 1
-    assert writes(fw)[0] == ('THEME', oled['index']) == ('THEME', 3)
-    assert st('theme').value == CLASSIC  # the running state stays Classic's until the restart
-
-
-def test_picking_modern_applies_its_preset_live(fw, st):
-    modern = theme_of(MODERN)
-    # Minimal running dark on Full, the clock in the title, its corners already Modern's
-    stored = {'LIGHT': 0, 'ACCENT': 0, 'ROUNDED': preset(modern, 'SETTING_ROUNDED'), 'HOME': 1, 'TIMETITLE': 1, 'STATUSBAR': 0}
-    ui = Ui(fw)
-    page = appearance(fw, ui, **{k: b'%d' % v for k, v in stored.items()})
-    under = page.view()
-    themes_page(fw, ui, page)
-    pick(ui, page, modern)
-    saved = writes(fw)
-    # THEME, then Modern's preset where it changes what is stored: only what differs is saved
-    assert saved[0] == ('THEME', MODERN) and saved[1:] == preset_writes(modern, stored) and saved[1:]
-    assert 'ROUNDED' not in dict(saved)
-    # live: the running state is what was saved, and the picker marks Modern
-    assert [(k, st(STATE[k]).value) for k, _ in saved] == saved
-    assert [name for name, image in picks(page.view()) if image == 'select'] == [modern['name']]
-    # Appearance, under the picker, reads the new theme
-    read = readings(under)
-    assert list(read) == appearance_titles(modern)
-    assert (read['Theme'], read['Light Mode'], read['Accent'], read['Time in Title']) == (
-        modern['name'], value_name('SETTING_LIGHT', preset(modern, 'SETTING_LIGHT')),
-        accent_name(modern, preset(modern, 'SETTING_ACCENT')), value_name('SETTING_TIMETITLE', preset(modern, 'SETTING_TIMETITLE')))
-    assert not fw.calls('navigator_to_with_context')
-
-
-def test_picking_the_running_theme_changes_nothing(fw):
-    ui = Ui(fw)
-    page = appearance(fw, ui)
-    themes_page(fw, ui, page)
-    pick(ui, page, theme_of(MINIMAL))
-    assert writes(fw) == [] and not fw.calls('image_manager_unload_all')
-
-
-@pytest.mark.parametrize('answer', [0, 10])
-def test_picking_classic_asks_to_restart_and_saves_its_preset_alone(fw, st, answer):
-    classic = theme_of(CLASSIC)
-    # Light Mode on Auto, Home on Carousel, the clock in the title, the themes' own keys at their defaults
-    stored = {'LIGHT': 2, 'HOME': 2, 'TIMETITLE': 1} | {k: d for k, (_, d, _) in host.tools_theme.theme_keys(THEMES).items()}
-    ui = Ui(fw)
-    page = appearance(fw, ui, **{k: b'%d' % v for k, v in stored.items()})
-    themes_page(fw, ui, page)
-    prompts = Prompts(fw, answer)
-    pick(ui, page, classic)
-    assert [p[3] for p in prompts.seen] == ['Restart to apply?']
-    # confirmed, THEME and what Classic's preset changes are saved; Light Mode's Auto is kept
-    saved = writes(fw)
-    assert saved == ([('THEME', CLASSIC)] + preset_writes(classic, stored) if answer else [])
-    assert 'LIGHT' not in dict(saved) and bool(saved[1:]) == bool(answer)
-    # the running state stays Minimal's until the restart
-    assert (st('theme').value, st('home').value, st('light').value) == (MINIMAL, 2, 2)
-    assert len(fw.calls('stock_reboot_trampoline')) == (answer == 10)
-
-
-def test_a_new_theme_moves_a_cached_settings_list_to_its_top(fw, st, geometry):
-    names, rows_ = geometry
-    ui = Ui(fw)
-    page = appearance(fw, ui)
-    set_row = rows_['geom_vals'][st('geom').value][names['V_SET_ROW']]
-    tops = {t['index']: t['set_top'] for t in THEMES}
-    cached = ui.add('list_view', page.pages[0], (0, tops[MINIMAL], 375, 290))
-    struct.pack_into('<i', cached.block, O['LIST_DEFAULT_ITEM_HEIGHT'], set_row)
-    other = ui.add('list_view', page.pages[0], (0, tops[MINIMAL], 375, 290))
-    struct.pack_into('<i', other.block, O['LIST_DEFAULT_ITEM_HEIGHT'], set_row + 4)
-    assert tops[MINIMAL] != tops[MODERN]
-    themes_page(fw, ui, page)
-    pick(ui, page, theme_of(MODERN))
-    assert cached.box[1] == tops[MODERN] and other.box[1] == tops[MINIMAL]
 
 
 def test_cover_flow_page_holds_artist_view_playlists_sort_refresh_and_large_library_mode(fw):
@@ -756,8 +515,8 @@ def test_controls_opens_display_as_its_own_page(fw, keytone):
     ui.click(button_of(settings.view, 'Controls'))
     assert page.title() == 'Controls'
     found = titles(page.view())
-    assert found[:3] == ['Wheel Sensitivity', 'Hold Return', 'Single Press Scrub']
-    assert 'Clicker' in found and 'system_keylock' in found and 'Click With Headphones' not in found
+    assert found[:3] == ['Wheel Sensitivity', 'Hold Return', 'Clicker']
+    assert 'system_keylock' in found and 'Click With Headphones' not in found
     # Key Lock opens stock's page
     opened = []
     fw.mock('navigator_to', lambda name, *_: opened.append(C.string_at(name).decode()))
@@ -862,7 +621,7 @@ INFO = ['label_album', 'label_genre', 'label_size', 'label_year', 'label_encode'
 
 class Info:
     """Now Playing's info page: a label per stock line, stock's np_info having written them; rows adds
-    Classic's <name>_value labels."""
+    the oled set's <name>_value labels (tools/ipod.py np_info_values)."""
     def __init__(self, fw, ui, texts, rows=False, location=b'Location'):
         self.fw, self.ui = fw, ui
         self.win = ui.window('playing_page')
@@ -931,19 +690,19 @@ def test_the_folder_gets_its_location_label(fw, stock, location, shown):
     assert Info(fw, ui, {'label_location': stock}, location=location)()['label_location'] == shown
 
 
-def test_classic_rows_split_name_and_value_in_its_grey(fw, st):
+def test_oled_rows_split_name_and_value_in_its_grey(fw, st):
     ui = Ui(fw)
-    Config(fw, THEME=b'1')
+    Config(fw, THEME=b'%d' % OLED)
     info = Info(fw, ui, dict(STOCK_INFO, label_genre='Genre:Jazz'), rows=True)
     texts = info()
     value = {name: info.win.find(name + '_value') for name in INFO}
     assert texts == {'label_album': 'Album', 'label_genre': 'Genre', 'label_size': 'Size', 'label_year': 'Year',
-                     'label_encode': 'Format', 'label_bits': 'Bits', 'label_kbps': 'Bitrate', 'label_sample': 'Sample rate',
-                     'label_location': 'Location'}
+                     'label_encode': 'Format', 'label_bits': 'Bits', 'label_kbps': 'Bit Rate', 'label_sample': 'Sample rate',
+                     'label_location': 'Location'}  # stock's Bitrate in the English name About's grid gives it
     assert [value[n].text for n in INFO] == ['Kind of Blue', 'Jazz', '35.92 MB', 'Unknown', 'FLAC', '16-bit', '950 kbps',
                                              '44.1 kHz', '/mnt/mmc/Music/Miles']
     assert info.genre() is None  # the genre is a row like the others: no marquee
-    grey = next(t for t in THEMES if t['index'] == CLASSIC)['np_info_value']  # dark Light Mode: the dark grey as it is
+    grey = OLED_THEME['np_info_value']  # dark Light Mode: the dark value ink as it is
     ink = C.c_int(0xff000000 | (grey & 255) << 16 | grey & 0xff00 | grey >> 16).value
     assert {value[n].props['_ink'] for n in INFO} == {ink} == {value[n].props['style:normal:text_color'] for n in INFO}
     set_before = len(fw.calls('widget_set_prop_int'))
@@ -951,9 +710,9 @@ def test_classic_rows_split_name_and_value_in_its_grey(fw, st):
     assert len([a for _, a in fw.calls('widget_set_prop_int')[set_before:] if C.string_at(a[1]) == b'_ink']) == 0
 
 
-def test_classic_rows_take_a_value_without_a_value_label(fw):
+def test_oled_rows_take_a_value_without_a_value_label(fw):
     ui = Ui(fw)
-    Config(fw, THEME=b'1')
+    Config(fw, THEME=b'%d' % OLED)
     info = Info(fw, ui, {'label_album': 'Album:Kind of Blue'}, rows=True)
     info.win.find('label_size_value').name = 'gone'
     info.labels['label_size'].text = 'Size:35.92MB'
@@ -1129,27 +888,16 @@ class About:
         return C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, event(O['EVT_KEY_UP'], key))
 
 
-def test_about_moves_the_details_into_its_page_shown_and_filled(fw, st):
+def test_about_moves_the_details_into_its_page_hidden_and_filled(fw, st):
     about = About(fw, Ui(fw), st)
     assert about.open() == 0
     page = about.page
     assert page and page.name == 'npabout_page' and about.ui.wm.children[-1] is page
-    assert about.details.parent is page and about.details.visible == 1 and about.details not in about.np.children
+    # the details stay hidden, the source of the grid np_about.c paints over the page
+    assert about.details.parent is page and about.details.visible == 0 and about.details not in about.np.children
     assert about.details.box == (0, 60, 375, 230)  # its place in Now Playing's window, which the page's box is
     assert about.fills == [page.addr]  # filled at once, on the page
     assert about.np.find('label_album') is None and page.find('label_album').text == 'Album: Kind of Blue'
-
-
-@pytest.mark.parametrize('top', [0, 60])
-def test_about_s_details_start_under_a_title_row(fw, st, top):
-    """Centred Now Playing's details start at the window's top: under a theme whose page title is a row of the page
-    (page_title's label shown) they move down under it; details already under it stay where they are."""
-    about = About(fw, Ui(fw), st)
-    about.details.box = (75, top, 225, 198)
-    about.open()
-    title = next(c for c in about.page.children if c.text == 'About')
-    below = title.box[1] + title.box[3]
-    assert title.visible and 0 < below <= 60 and about.details.box == (75, max(top, below), 225, 198)
 
 
 def test_while_about_is_open_now_playing_s_fills_go_to_it(fw, st):
@@ -1207,7 +955,6 @@ def test_no_genre_label_no_marquee(fw, st):
 
 
 # OLED's About: the info grid (np_about.c), painted from the hidden details.
-OLED = next(t['index'] for t in THEMES if t['id'] == 'oled')
 GRID_INFO = {'label_album': 'Album:Caracal (Deluxe)', 'label_genre': 'Genre:Electronic', 'label_size': 'File Size:38.27MB',
              'label_year': 'Year:2015', 'label_encode': 'Encoding:FLAC', 'label_bits': 'Bit Depth:16bit',
              'label_kbps': 'Bitrate:1001kbps', 'label_sample': 'Sample Rate:44.1kHz',
@@ -1369,7 +1116,7 @@ SLIDE_PX = nav_define('SLIDE_PX')
 
 class Quick(C.Structure):
     """navigation.c's quick: Quick Settings' press, hold and slider state."""
-    _fields_ = [('win', C.c_void_p), ('icon', C.c_void_p), ('slider', C.c_void_p), ('pressed', C.c_void_p), ('timer', C.c_uint),
+    _fields_ = [('win', C.c_void_p), ('icon', C.c_void_p), ('slider', C.c_void_p), ('timer', C.c_uint),
                 ('x', C.c_int), ('y', C.c_int), ('sx', C.c_int), ('sy', C.c_int), ('slide', C.c_int)]
 
 
@@ -1570,49 +1317,6 @@ def test_settings_brightness_slider_is_stocks_alone(fw, st):
     assert stock.seen == [(slider.addr, POINTER_DOWN, 100, 210)] and not fw.var('navigation__quick', Quick).slider
 
 
-def pressdown(fw):
-    return C.c_int.from_address(C.addressof(fw.var('fw_ctx_g_pressdown_y', C.c_char)))
-
-
-@pytest.mark.parametrize('theme, start, moved, counts', [
-    (b'1', O['QS_SWIPE_Y'], SLIDE_PX, 1), (b'1', O['QS_SWIPE_STOCK'] - 1, SLIDE_PX, 1),
-    (b'1', O['QS_SWIPE_Y'] - 1, SLIDE_PX, 0), (b'1', O['QS_SWIPE_Y'], SLIDE_PX - 1, 0), (b'0', O['QS_SWIPE_Y'], SLIDE_PX, 0)])
-def test_classics_swipe_up_starts_above_stocks_line(fw, st, theme, start, moved, counts):
-    ui = Ui(fw)
-    Config(fw, THEME=theme)
-    qs = QuickPage(fw, ui, st)
-    stock = Stock(fw, ui)
-    pressdown(fw).value = start
-    stock.send(qs.dialog, POINTER_MOVE, x=100, y=start - moved)
-    # counted, stock's handler sees the touch as one from its own line
-    assert pressdown(fw).value == (O['QS_SWIPE_STOCK'] if counts else start)
-    assert len(stock.seen) == 1
-
-
-def test_a_swipe_the_slider_owns_is_not_counted(fw, st):
-    ui = Ui(fw)
-    Config(fw, THEME=b'1')
-    qs = QuickPage(fw, ui, st)
-    stock = Stock(fw, ui)
-    qs.quick.slider, qs.quick.slide = qs.slider.addr, 1
-    pressdown(fw).value = O['QS_SWIPE_Y']
-    stock.send(qs.dialog, POINTER_MOVE, x=100, y=O['QS_SWIPE_Y'] - 2 * SLIDE_PX)
-    assert pressdown(fw).value == O['QS_SWIPE_Y']
-
-
-def test_a_swipe_is_counted_on_the_dialogs_own_move_only(fw, st):
-    ui = Ui(fw)
-    Config(fw, THEME=b'%d' % CLASSIC)
-    qs = QuickPage(fw, ui, st)
-    stock = Stock(fw, ui)
-    pressdown(fw).value = O['QS_SWIPE_Y']
-    inner = qs.slider.parent  # the view the slider sits in, under the dialog
-    stock.send(inner, POINTER_MOVE, x=100, y=O['QS_SWIPE_Y'] - SLIDE_PX)
-    assert pressdown(fw).value == O['QS_SWIPE_Y']  # a widget inside it: left alone, the dialog's own move counts
-    stock.send(qs.dialog, POINTER_MOVE, x=100, y=O['QS_SWIPE_Y'] - SLIDE_PX)
-    assert pressdown(fw).value == O['QS_SWIPE_STOCK']
-
-
 @pytest.mark.parametrize('kind, dx, cancels', [
     (POINTER_MOVE, 10, 0), (POINTER_MOVE, 11, 1), (POINTER_UP, 0, 1), (O['EVT_POINTER_ABORT'], 0, 1), (EVT_CLICK, 0, 1),
     (KEY_DOWN_BEFORE, None, 1)])
@@ -1627,18 +1331,6 @@ def test_a_quick_settings_hold_ends_with_a_move_or_any_end(fw, st, kind, dx, can
     else:
         stock.send(icon, kind, x=60 + dx, y=60)
     assert (qs.quick.timer, qs.quick.icon) == ((0, None) if cancels else (4, icon.addr))
-
-
-def test_a_release_lets_go_of_the_pressed_quick_button(fw, st):
-    ui = Ui(fw)
-    qs = QuickPage(fw, ui, st)
-    stock = Stock(fw, ui)
-    icon = ui.add('image', qs.dialog)
-    qs.quick.pressed = icon.addr
-    stock.send(icon, POINTER_MOVE, x=1, y=1)
-    assert qs.quick.pressed == icon.addr
-    stock.send(icon, POINTER_UP, x=1, y=1)
-    assert not qs.quick.pressed and [a[0] for _, a in fw.calls('widget_invalidate_force')] == [icon.addr]
 
 
 def test_a_touch_reaches_stock_and_hides_the_outline_once(fw, st):
@@ -1691,30 +1383,13 @@ def test_untouch_brings_the_outline_back(fw, st):
     assert [a[0] for _, a in fw.calls('widget_invalidate_force')] == [page.addr]
 
 
-@pytest.mark.parametrize('name, at, blurs', [('search_edit', (40, 10), 1), ('search_edit', (75, 10), 0), ('search_edit', (40, 35), 0),
-                                             ('other_edit', (40, 10), 0)])
-def test_t9s_chevron_goes_back_before_the_box_blurs(fw, st, name, at, blurs):
-    ui = Ui(fw)
-    page = ui.window('search_page')
-    back = ui.add('image', page, (30, 0, 40, 30))
-    edit = ui.add('edit', page, (72, 2, 244, 27), name)
-    st('t9_back', C.c_void_p).value = back.addr
-    im = C.create_string_buffer(0x20)
-    C.c_void_p.from_address(C.addressof(im) + O['IM_WIDGET']).value = edit.addr
-    fw.mock('input_method', lambda *_: C.addressof(im))
-    stock = Stock(fw, ui)
-    stock.touch(None, event(O['EVT_POINTER_DOWN'], x=at[0], y=at[1]))
-    assert [a[:2] for _, a in fw.calls('widget_set_focused')] == ([(edit.addr, 0)] if blurs else [])
-    assert len(fw.calls('input_method_request')) == blurs and len(stock.touched) == 1
-
-
 class Scrub:
     """Now Playing after a paused seek: the settle wait running, its slider at (20, 200, 335, 30)."""
     def __init__(self, fw, ui, st, status):
         page = ui.window('playing_page')
         self.slider = ui.add('slider', page, (20, 200, 335, 30))
         st('np_slider', C.c_void_p).value = self.slider.addr
-        st('settle_timer').value, st('np_press').value = 8, 5
+        st('settle_timer').value = 8
         fw.mock('mclGetPlayStatus', lambda *_: status)
 
 
@@ -1725,7 +1400,7 @@ def test_a_swipe_keeps_a_paused_seeks_preview(fw, st, status, at, keeps):
     stock = Stock(fw, ui)
     stock.touch(None, event(O['EVT_POINTER_DOWN'], x=at[0], y=at[1]))
     # off the slider while paused the seek waits on; on it, or playing, the wait ends as any scrub's
-    assert st('np_press').value == 0 and st('settle_timer').value == (8 if keeps else 0)
+    assert st('settle_timer').value == (8 if keeps else 0)
 
 
 # The rows' layouts: stock's default row layouter with ours in its slot, and the settings lists'.
@@ -1773,18 +1448,17 @@ def layout():
 
 class Rows:
     """A list's rows in a window, laid out by compact_row_layout."""
-    def __init__(self, fw, ui, st, geometry, window='localmusic_page', geom='GEOM_IPOD', theme=b'0'):
+    def __init__(self, fw, ui, st, geometry, window='localmusic_page', geom='GEOM_IPOD'):
         names, self.rows = geometry
         self.names = names
-        Config(fw, THEME=theme)
-        st('settings_read').value = 0  # read again: a test may lay out under two themes
+        Config(fw, THEME=b'%d' % OLED)
         st('geom').value = names[geom]
         fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
         self.ui, self.fw = ui, fw
         self.view = ui.add('scroll_view', ui.window(window), (0, 30, 375, 290))
         self.lay = layout()
         self.run = fw.fn('navigation__compact_row_layout', C.c_int, C.c_void_p, C.c_void_p)
-        self.theme = next(t for t in THEMES if t['index'] == int(theme))
+        self.theme = OLED_THEME
 
     def row(self, h, *children):
         """A row h high holding children: (kind, box, name) each, a 'view' kind with its own (kind, box, name) list."""
@@ -1834,11 +1508,11 @@ def test_a_drill_rows_title_ends_clear_of_the_chevron(fw, st, geometry, default_
 TWO_LINES = [('hscroll_label', (0, 0, 200, 16), 'title'), ('hscroll_label', (0, 16, 200, 16), 'artist')]
 
 
-def test_classics_one_line_row_hides_its_art_and_second_line(fw, st, geometry, default_layout):
+def test_oleds_one_line_row_hides_its_art_and_second_line(fw, st, geometry, default_layout):
     ui = Ui(fw)
-    rows = Rows(fw, ui, st, geometry, geom='GEOM_CLASSIC_LIGHT', theme=b'1')
-    pitch = rows.rows['boot_values'][rows.names['GEOM_CLASSIC_LIGHT']][rows.names['G_PITCH']]
-    text_x = rows.rows['geom_vals'][rows.names['GEOM_CLASSIC_LIGHT']][rows.names['V_TEXT_X']]
+    rows = Rows(fw, ui, st, geometry, geom='GEOM_OLED')
+    pitch = rows.rows['boot_values'][rows.names['GEOM_OLED']][rows.names['G_PITCH']]
+    text_x = rows.rows['geom_vals'][rows.names['GEOM_OLED']][rows.names['V_TEXT_X']]
     item = rows.row(pitch, ICON, ('image', (66, 0, 20, 20), 'img_playing'), ('image', (90, 0, 26, 26), 'img_choice0'),
                     ('view', (MARGIN, 0, 200, pitch), 'view_info', TWO_LINES))
     text = item.children[3]
@@ -1852,10 +1526,11 @@ def test_classics_one_line_row_hides_its_art_and_second_line(fw, st, geometry, d
     assert title.box[2] == width - title.box[0]
 
 
-def test_classics_two_line_row_without_art_ends_its_text_at_the_themes_column(fw, st, geometry, default_layout):
+def test_oleds_two_line_row_without_art_keeps_both_lines_and_a_chevrons_ends_at_the_art_column(fw, st, geometry,
+                                                                                               default_layout):
     ui = Ui(fw)
-    rows = Rows(fw, ui, st, geometry, geom='GEOM_CLASSIC_LIGHT', theme=b'1')
-    text_x = rows.rows['geom_vals'][rows.names['GEOM_CLASSIC_LIGHT']][rows.names['V_TEXT_X']]
+    rows = Rows(fw, ui, st, geometry, geom='GEOM_OLED')
+    text_x = rows.rows['geom_vals'][rows.names['GEOM_OLED']][rows.names['V_TEXT_X']]
     item = rows.row(52, ('image', (MARGIN, 0, 0, 52), 'img_icon'), ('view', (MARGIN, 0, 300, 52), 'view_info', TWO_LINES))
     with_chevron = rows.row(52, ('image', (MARGIN, 0, 0, 52), 'img_icon'), ('view', (MARGIN, 0, 300, 52), 'view_info', TWO_LINES),
                             ('image', (300, 0, 58, 52), 'img_into'))
@@ -1865,17 +1540,16 @@ def test_classics_two_line_row_without_art_ends_its_text_at_the_themes_column(fw
     text = item.children[1]
     title, second = text.children
     assert not item.children[0].visible and second.visible  # the two lines stay
-    # the text's box on screen, hscroll_label's 2 px margin past the theme's column
-    assert (text.box[0], text.box[0] + text.box[2]) == (text_x, rows.theme['row_text_end'] + 2)
-    assert title.box[2] == second.box[2] == text.box[2]
-    # a chevron's row ends its text where an art row's does
+    # the text from the set's inset, both lines as wide as its box
+    assert text.box[0] == text_x and title.box[2] == second.box[2] == text.box[2]
+    # a chevron's row ends its text where an art row's does, hscroll_label's 2 px margin past the theme's column
     other = with_chevron.children[1]
-    assert other.box[0] + other.box[2] == rows.theme['art_text_end'] + 2
+    assert (other.box[0], other.box[0] + other.box[2]) == (text_x, rows.theme['art_text_end'] + 2)
 
 
-def test_classics_art_row_puts_cover_and_text_on_the_themes_columns(fw, st, geometry, default_layout):
+def test_oleds_art_row_puts_cover_and_text_on_the_themes_columns(fw, st, geometry, default_layout):
     ui = Ui(fw)
-    rows = Rows(fw, ui, st, geometry, geom='GEOM_CLASSIC_LIGHT', theme=b'1')
+    rows = Rows(fw, ui, st, geometry, geom='GEOM_OLED')
     item = rows.row(52, ('image', (MARGIN, 0, 52, 52), 'img_icon'), ('view', (66, 0, 300, 52), 'view_info',
                     [('hscroll_label', (0, 0, 200, 26), 'title'), ('view', (0, 26, 151, 26), 'meta')]))
     meta_label = ui.add('hscroll_label', item.children[1].children[1], (0, 0, 151, 26))
@@ -1893,7 +1567,7 @@ def test_classics_art_row_puts_cover_and_text_on_the_themes_columns(fw, st, geom
 
 def test_an_art_row_with_stocks_choice_box_keeps_stocks_places(fw, st, geometry, default_layout):
     ui = Ui(fw)
-    rows = Rows(fw, ui, st, geometry, geom='GEOM_CLASSIC_LIGHT', theme=b'1')
+    rows = Rows(fw, ui, st, geometry, geom='GEOM_OLED')
     item = rows.row(52, ('image', (MARGIN, 0, 26, 52), 'img_choice0'), ('image', (40, 0, 52, 52), 'img_icon'),
                     ('view', (100, 0, 200, 52), 'view_info', TWO_LINES))
     rows(item)
@@ -1901,22 +1575,21 @@ def test_an_art_row_with_stocks_choice_box_keeps_stocks_places(fw, st, geometry,
 
 
 def test_a_rows_second_line_takes_the_meta_grey_once_where_the_theme_has_a_meta_face(fw, st, geometry, default_layout):
-    for theme, grey in ((b'1', True), (b'0', False)):
-        ui = Ui(fw)
-        rows = Rows(fw, ui, st, geometry, theme=theme)
-        item = rows.row(72, ('view', (MARGIN, 0, 300, 72), 'view_info', TWO_LINES))
-        rows(item)
-        second = item.children[0].children[1]
-        assert ('style:normal:text_color' in second.props) == grey
-        if grey:
-            second.props['style:normal:text_color'] = 0
-            rows(item)  # already in its face: left as it is
-            assert second.props['style:normal:text_color'] == 0
+    assert OLED_THEME['font[ROLE_META]']  # OLED's own meta face (theme.xml list.row meta_font)
+    ui = Ui(fw)
+    rows = Rows(fw, ui, st, geometry)
+    item = rows.row(72, ('view', (MARGIN, 0, 300, 72), 'view_info', TWO_LINES))
+    rows(item)
+    second = item.children[0].children[1]
+    assert 'style:normal:text_color' in second.props
+    second.props['style:normal:text_color'] = 0
+    rows(item)  # already in its face: left as it is
+    assert second.props['style:normal:text_color'] == 0
 
 
 def test_a_playlist_row_keeps_its_own_places(fw, st, geometry, default_layout):
     ui = Ui(fw)
-    rows = Rows(fw, ui, st, geometry, geom='GEOM_CLASSIC_LIGHT', theme=b'%d' % CLASSIC)
+    rows = Rows(fw, ui, st, geometry, geom='GEOM_OLED')
     h = rows.theme['page_detail']  # pl_row's height: a name over its count
     def playlist(trailing, image):
         item = rows.row(h)
@@ -1946,14 +1619,14 @@ def test_a_playlist_row_keeps_its_own_places(fw, st, geometry, default_layout):
 
 def test_a_row_of_choice_boxes_alone_is_stocks(fw, st, geometry, default_layout):
     ui = Ui(fw)
-    rows = Rows(fw, ui, st, geometry, geom='GEOM_CLASSIC_LIGHT', theme=b'1')
+    rows = Rows(fw, ui, st, geometry, geom='GEOM_OLED')
     item = rows.row(52, ('image', (MARGIN, 0, 26, 52), 'img_choice0'), ('image', (40, 0, 26, 52), 'img_choice1'))
     assert rows(item) == 4 and [c.visible for c in item.children] == [1, 1] and [c.box[0] for c in item.children] == [MARGIN, 40]
 
 
 def test_a_row_with_no_title_is_stocks(fw, st, geometry, default_layout):
     ui = Ui(fw)
-    rows = Rows(fw, ui, st, geometry, geom='GEOM_CLASSIC_LIGHT', theme=b'1')
+    rows = Rows(fw, ui, st, geometry, geom='GEOM_OLED')
     item = rows.row(32, ICON, ('label', (66, 0, 200, 32), 'label'))
     assert rows(item) == 4 and [c.visible for c in item.children] == [1, 1] and item.children[1].box == (66, 0, 200, 32)
 
@@ -1988,7 +1661,7 @@ def test_a_row_stock_refused_a_layout_keeps_its_own(fw, default_layout):
     assert not C.c_void_p.from_buffer(lay, O['CHILDREN_LAYOUT_VTABLE']).value
 
 
-@pytest.mark.parametrize('geom, ours', [('GEOM_IPOD', 0), ('GEOM_CLASSIC_LIGHT', 1)])
+@pytest.mark.parametrize('geom, ours', [('GEOM_IPOD', 0), ('GEOM_OLED', 1)])
 def test_stocks_table_rows_take_ours_only_under_a_set_that_repitches_them(fw, st, geometry, default_layout, geom, ours):
     names, _ = geometry
     st('geom').value = names[geom]
@@ -1999,11 +1672,11 @@ def test_stocks_table_rows_take_ours_only_under_a_set_that_repitches_them(fw, st
     assert bool(C.c_void_p.from_buffer(lay, O['CHILDREN_LAYOUT_VTABLE']).value) == bool(ours)
 
 
-@pytest.mark.parametrize('geom', ['GEOM_IPOD', 'GEOM_CLASSIC_LIGHT'])
+@pytest.mark.parametrize('geom', ['GEOM_IPOD', 'GEOM_OLED'])
 def test_queues_label_goes_to_the_sets_text_inset(fw, st, geometry, geom):
     names, rows_ = geometry
     st('geom').value = names[geom]
-    Config(fw, THEME=b'1' if geom != 'GEOM_IPOD' else b'0')
+    Config(fw, THEME=b'%d' % OLED)
     ui = Ui(fw)
     button = ui.add('button', ui.window('playlist_page'), (O['SET_STOCK_X'], 0, 335, 70))
     label = ui.add('hscroll_label', button, (10, 0, 260, 70))
@@ -2019,7 +1692,7 @@ def test_queues_label_goes_to_the_sets_text_inset(fw, st, geometry, geom):
         assert other.box == (72, 0, 200, 70) and 'style:normal:font_name' in label.props
 
 
-@pytest.mark.parametrize('geom', ['GEOM_IPOD', 'GEOM_CLASSIC_LIGHT'])
+@pytest.mark.parametrize('geom', ['GEOM_IPOD', 'GEOM_OLED'])
 def test_the_playing_rows_red_keeps_its_colour_under_a_repitched_set(fw, st, geometry, geom):
     names, _ = geometry
     st('geom').value = names[geom]
@@ -2043,11 +1716,11 @@ def test_the_playing_rows_red_keeps_its_colour_under_a_repitched_set(fw, st, geo
     assert playing.props[colour] == other.props[colour]
 
 
-@pytest.mark.parametrize('geom', ['GEOM_IPOD', 'GEOM_CLASSIC_LIGHT'])
+@pytest.mark.parametrize('geom', ['GEOM_IPOD', 'GEOM_OLED'])
 def test_mores_speed_row_keeps_stocks_height_its_labels_before_the_buttons(fw, st, geometry, geom):
     names, rows_ = geometry
     st('geom').value = names[geom]
-    Config(fw, THEME=b'1' if geom != 'GEOM_IPOD' else b'0')
+    Config(fw, THEME=b'%d' % OLED)
     ui = Ui(fw)
     win = ui.window('playmore_page')
     row = ui.add('list_item', ui.add('scroll_view', win), (0, 0, 375, 32))
@@ -2075,12 +1748,13 @@ SET_EDGE, SET_TEXT_X, SET_ICON_X, SET_GAP = O['SET_EDGE'], O['SET_TEXT_X'], O['S
 class SettingsList:
     """A settings page's list_view (its asset's default_item_height the set's settings row) and scroll view, laid out
     by ipod_list_layout around a stand-in for stock's list layouter, which notes the list's item_height it saw."""
-    def __init__(self, fw, ui, st, geometry, stand_in, geom='GEOM_IPOD', theme=b'0', view='scroll_view_wireless',
+    def __init__(self, fw, ui, st, geometry, stand_in, geom='GEOM_IPOD', theme=b'%d' % OLED, view='scroll_view_wireless',
                  item_height=None, row_height=0, window='wireless_page'):
         names, rows = geometry
         Config(fw, THEME=theme)
         st('geom').value = names[geom]
-        self.g = {n: rows['geom_vals'][names[geom]][names[n]] for n in ('V_SET_ROW', 'V_SET_ICON', 'V_STREAM_ROW', 'V_TEXT_X')}
+        self.g = {n: rows['geom_vals'][names[geom]][names[n]] for n in ('V_SET_ROW', 'V_SET_ICON', 'V_STREAM_ROW', 'V_TEXT_X',
+                                                                          'V_RIGHT_X')}
         self.ui, self.fw = ui, fw
         self.win = ui.window(window)
         self.list = ui.add('list_view', self.win, (0, 30, 375, 290))
@@ -2167,12 +1841,12 @@ def test_rows_another_builder_made_keep_their_own(fw, st, geometry, stand_in):
     assert tall.children[0].box == (0, 0, 375, 90)  # a stock button in a taller row: mapped at the row's own height
 
 
-@pytest.mark.parametrize('geom, theme, doubles', [
-    ('GEOM_IPOD', MINIMAL, False),  # SET_ROW's 68 px rows hold a title over a detail line
-    ('GEOM_CLASSIC_LIGHT', CLASSIC, True)])  # Classic Light's 32 px settings rows (theme.xml) don't
-def test_a_detail_line_doubles_a_short_row(fw, st, geometry, stand_in, geom, theme, doubles):
+@pytest.mark.parametrize('geom, doubles', [
+    ('GEOM_IPOD', False),  # SET_ROW's 68 px rows hold a title over a detail line
+    ('GEOM_OLED', True)])  # OLED's 32 px settings rows (theme.xml) don't
+def test_a_detail_line_doubles_a_short_row(fw, st, geometry, stand_in, geom, doubles):
     ui = Ui(fw)
-    lst = SettingsList(fw, ui, st, geometry, stand_in, geom=geom, theme=b'%d' % theme)
+    lst = SettingsList(fw, ui, st, geometry, stand_in, geom=geom)
     detail = lst.row(('hscroll_label', (72, 5, 260, 30), 'name'), ('hscroll_label', (72, STOCK_BODY // 2, 260, 30), 'quality'))
     single = lst.row(('hscroll_label', (72, 5, 260, 30), 'name'))
     lst()
@@ -2182,56 +1856,32 @@ def test_a_detail_line_doubles_a_short_row(fw, st, geometry, stand_in, geom, the
     assert (detail.box[3], single.box[3]) == ((2 * row if doubles else row), row)
 
 
-def test_classics_rows_drop_their_icons_and_keep_a_pickers_mark(fw, st, geometry, stand_in):
+def test_oleds_rows_drop_their_icons_and_keep_a_pickers_mark(fw, st, geometry, stand_in):
     ui = Ui(fw)
-    lst = SettingsList(fw, ui, st, geometry, stand_in, geom='GEOM_CLASSIC_LIGHT', theme=b'1')
+    lst = SettingsList(fw, ui, st, geometry, stand_in, geom='GEOM_OLED')
     assert lst.g['V_SET_ICON'] == 0
     plain = lst.row(STOCK_ICON, STOCK_LABEL, STOCK_INTO)
     device = lst.row(('image', (10, 10, 50, 50), 'device', b'bt_headset'), STOCK_LABEL)
     picker = lst.row(('image', (10, 9, 52, 52), 'mark', b'select'), STOCK_LABEL)
     lst()
     row = lst.g['V_SET_ROW']
+    # OLED's set has a right column: text starts on its text column less hscroll_label's 2 px, a trailing image
+    # ends on the right column (navigation.c set_text_x, set_edge)
+    text_x, edge = lst.g['V_TEXT_X'] - 2, lst.g['V_RIGHT_X']
     icon, label, into = plain.children[0].children
-    assert not icon.visible and label.box[0] == SET_TEXT_X and centre(into.box) == row / 2
-    assert not device.children[0].children[0].visible and device.children[0].children[1].box[0] == SET_TEXT_X
+    assert not icon.visible and label.box[0] == text_x and centre(into.box) == row / 2
+    assert not device.children[0].children[0].visible and device.children[0].children[1].box[0] == text_x
     mark = picker.children[0].children[0]
-    assert mark.visible and mark.box == (375 - SET_EDGE - 50, 0, 50, row)  # in the column of stock's own marks
+    assert mark.visible and mark.box == (375 - edge - 50, 0, 50, row)  # in the column of stock's own marks
 
 
 def test_an_icon_sized_image_goes_wherever_it_sits_in_a_set_without_icons(fw, st, geometry, stand_in):
     ui = Ui(fw)
-    lst = SettingsList(fw, ui, st, geometry, stand_in, geom='GEOM_CLASSIC_LIGHT', theme=b'1')
+    lst = SettingsList(fw, ui, st, geometry, stand_in, geom='GEOM_OLED')
     item = lst.row(STOCK_LABEL, ('image', (200, 9, O['SET_STOCK_ICON'], 52), 'badge', b'bt_codec'))
     lst()
     label, badge = item.children[0].children
     assert not badge.visible and label.visible
-
-
-# Stock's More rows' kinds (PLAYMORE_ROWS), out of index order here, so a row's kind is not its place
-MORE_KINDS = [6, 0, 3, 7, 2, 5, 1, 4]
-
-
-@pytest.mark.parametrize('theme, geom, count, marks', [
-    (CLASSIC, 'GEOM_CLASSIC_LIGHT', O['PLAYMORE_COUNT'], True),  # its chevron on the selected row alone
-    (CLASSIC, 'GEOM_CLASSIC_LIGHT', O['PLAYMORE_COUNT'] - 1, False),  # not More's own rows: none read
-    (MINIMAL, 'GEOM_IPOD', O['PLAYMORE_COUNT'], False)])  # a chevron on every drill row: nothing to mark
-def test_mores_rows_that_open_a_screen_end_their_text_before_the_selected_chevron(fw, st, geometry, stand_in, theme, geom,
-                                                                                  count, marks):
-    assert sorted(MORE_KINDS) == list(range(O['PLAYMORE_COUNT']))
-    stand_in(O['PLAYMORE_ROWS'], struct.pack(f'<{len(MORE_KINDS)}i', *MORE_KINDS))
-    ui = Ui(fw)
-    lst = SettingsList(fw, ui, st, geometry, stand_in, geom=geom, theme=b'%d' % theme, view='scroll_view_more',
-                       window='playmore_page')
-    items = [lst.row(STOCK_LABEL) for _ in range(count)]
-    fw.fn('stock_more_into', None, C.c_void_p)(lst.win.addr)  # as More's page is built, then laid out
-    lst()
-    # a row whose kind opens a screen (PLAYMORE_INTO_FIRST to _LAST), wherever it sits, ends its text before the
-    # theme's chevron; the others run to the text margin
-    chevron = theme_of(theme)['chevron_x']
-    ends = [item.children[0].children[0].box[0] + item.children[0].children[0].box[2] for item in items]
-    opens = [O['PLAYMORE_INTO_FIRST'] <= MORE_KINDS[i] <= O['PLAYMORE_INTO_LAST'] for i in range(count)]
-    assert ends == [chevron - 1 if marks and opening else 375 - SET_TEXT_X for opening in opens]
-    assert not any(c.visible for item in items for c in item.children[1:])  # no mark is drawn
 
 
 def test_a_wide_trailing_image_sets_the_right_column(fw, st, geometry, stand_in):
@@ -2242,20 +1892,6 @@ def test_a_wide_trailing_image_sets_the_right_column(fw, st, geometry, stand_in)
     _, switch, into = item.children[0].children
     # the rightmost trailing image ends SET_EDGE from the row's edge; the others move with it
     assert into.box[0] + into.box[2] == 375 - SET_EDGE and into.box[0] - switch.box[0] == 290 - 230
-
-
-def test_streamings_rows_take_its_own_height_and_the_themes_art_columns(fw, st, geometry, stand_in):
-    ui = Ui(fw)
-    lst = SettingsList(fw, ui, st, geometry, stand_in, geom='GEOM_CLASSIC_LIGHT', theme=b'1', view='scroll_view_streamsset',
-                       item_height=0)
-    item = lst.row(STOCK_ICON, STOCK_LABEL)
-    lst()
-    t = next(t for t in THEMES if t['index'] == CLASSIC)
-    row = lst.g['V_STREAM_ROW']
-    icon, label = item.children[0].children
-    assert item.box[3] == row and row != lst.g['V_SET_ROW']
-    assert icon.visible and (icon.box[0], centre(icon.box)) == (t['art_x'], row / 2) and icon.box[2] == O['SET_ICON']
-    assert label.box[0] == t['art_text_x'] - 2
 
 
 def test_another_list_is_stocks_alone(fw, st, geometry, stand_in):
@@ -2280,9 +1916,10 @@ def test_a_grid_keeps_its_rows_height_under_a_forced_item_height(fw, st, geometr
 def test_a_settings_list_takes_the_themes_top(fw, st, geometry, stand_in):
     ui = Ui(fw)
     lst = SettingsList(fw, ui, st, geometry, stand_in)
-    lst.list.box = (0, 0, 375, 290)
+    top = OLED_THEME['set_top']
+    lst.list.box = (0, top + 30, 375, 290)  # anywhere but the theme's top
     lst()
-    assert lst.list.box[1] == next(t for t in THEMES if t['index'] == MINIMAL)['set_top']
+    assert lst.list.box[1] == top
 
 
 # Hold Return's Now Playing, and the boot resume.
@@ -2291,9 +1928,9 @@ LATCH = O['RETURN_RELEASE_LATCH']
 
 class Hold:
     """Hold Return on top of ui's windows: navigator calls move the window stack as stock's do."""
-    def __init__(self, fw, ui, stand_in, hold_home=b'0', theme=b'0'):
+    def __init__(self, fw, ui, stand_in, hold_home=b'0'):
         self.fw, self.ui = fw, ui
-        Config(fw, HOLDRETURN=hold_home, THEME=theme)
+        Config(fw, HOLDRETURN=hold_home, THEME=b'%d' % OLED)
         fw.var('g_backlight_status', C.c_ubyte).value = 1
         stand_in(LATCH, b'\1')  # stock's long Return armed it
         self.opened = []
@@ -2352,11 +1989,10 @@ def test_now_playing_not_opened_by_a_hold_goes_home(fw, st, stand_in):
     assert hold() == ['home_page'] and not fw.calls('navigator_back')
 
 
-@pytest.mark.parametrize('theme', [b'0', b'1'])
-def test_hold_return_home_goes_home_from_any_page_but_home(fw, st, stand_in, theme):
+def test_hold_return_home_goes_home_from_any_page_but_home(fw, st, stand_in):
     ui = Ui(fw)
     ui.window('home_page'), ui.window('localmusic_page'), ui.window('folder_page')
-    hold = Hold(fw, ui, stand_in, hold_home=b'1', theme=theme)
+    hold = Hold(fw, ui, stand_in, hold_home=b'1')
     st('np_origin', C.c_void_p).value = 0x1234
     assert hold() == ['home_page'] and not st('np_origin', C.c_void_p).value
     assert hold() == ['home_page', 'playing_page']  # on Home itself it still opens Now Playing
@@ -2386,7 +2022,7 @@ def test_the_boot_resume_starts_paused_without_opening_now_playing(fw, ctx, forb
     assert [a[:4] for _, a in fw.calls('player_start')] == ([start] if start else [])
 
 
-@pytest.mark.parametrize('geom, asks', [('GEOM_IPOD', 1), ('GEOM_CLASSIC_LIGHT_TEXT', 0)])
+@pytest.mark.parametrize('geom, asks', [('GEOM_IPOD', 1), ('GEOM_OLED', 0)])
 def test_an_unknown_artist_reads_stocks_words_only_where_rows_keep_stocks_art(fw, st, geometry, geom, asks):
     names, _ = geometry
     st('geom').value = names[geom]
@@ -3104,7 +2740,7 @@ def test_an_untagged_song_with_no_path_reads_its_name_as_stored(fw, records):
     assert load.shown() == [b'01 Intro.flac', b'Tagged', None]  # a tag stays; a folder row is left as it is
 
 
-@pytest.mark.parametrize('cls, geom, shown', [(0xf004, 'GEOM_IPOD', 0), (0xf005, 'GEOM_IPOD', 1), (0xf005, 'GEOM_CLASSIC_LIGHT', 0)])
+@pytest.mark.parametrize('cls, geom, shown', [(0xf004, 'GEOM_IPOD', 0), (0xf005, 'GEOM_IPOD', 1), (0xf005, 'GEOM_OLED', 0)])
 def test_a_class_rows_icon_shows_on_composers_and_genres_two_line_rows_only(fw, st, geometry, cls, geom, shown):
     names, _ = geometry
     st('geom').value = names[geom]
@@ -3268,7 +2904,6 @@ def test_cover_flow_for_a_page_no_longer_on_top_drops_its_albums(fw, st, stand_i
 
 def oled_artist(fw, st, stand_in, records, view=b'1'):
     """An artist page under OLED's set: its page, the Ui and the artist's songs and albums tab as queen's."""
-    from test_nav_hold import use_set
     ui = Ui(fw)
     page = ArtistPage(fw, ui)
     fw.mock('widget_factory_create_widget', lambda f, kind, parent, x, y, w, *_: ui.new(C.string_at(kind).decode(), parent, x, y, w, 0))

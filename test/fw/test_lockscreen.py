@@ -1,8 +1,7 @@
 """lockscreen.c (docs/internals.md#lock-screen): the six built-in wallpapers wall_render draws, their place in
-stock's picture list, the lock window's wallpaper and the picker's thumbnails, the Large clock and Classic's
-info screen."""
+stock's picture list, the lock window's wallpaper and the picker's thumbnails, the Large clock and OLED's lock
+screen."""
 import ctypes as C
-import functools
 import math
 import statistics
 import struct
@@ -10,8 +9,7 @@ import struct
 import pytest
 
 import host
-import art as tools_art  # tools/, which host puts on the path
-import ipod as tools_ipod
+import ipod as tools_ipod  # tools/, which host puts on the path
 from conftest import O, block
 
 WALLS = [b'q2pod:' + n for n in (b'aurora', b'sunrise', b'graphite', b'tide', b'ember', b'black')]
@@ -29,9 +27,9 @@ SUNRISE_RGB = [(1.00, 0.74, 0.38), (0.96, 0.56, 0.46), (0.92, 0.38, 0.36), (0.74
 
 
 class Lk(C.Structure):
-    _fields_ = [*((n, C.c_void_p) for n in 'img full date pct card title artist hint'.split()),
-                *((n, C.c_int) for n in 'built_in info page black large oled'.split()),
-                ('timer', C.c_uint), ('shown', C.c_uint), ('full_key', C.c_uint),
+    _fields_ = [*((n, C.c_void_p) for n in 'img full date title artist'.split()),
+                *((n, C.c_int) for n in 'built_in black oled'.split()),
+                ('full_key', C.c_uint),
                 ('thumb', C.c_void_p * 6), ('small', C.c_void_p * 6)]
 
 
@@ -631,8 +629,40 @@ def lock_window(fw, picture, size=(375, 320), names=('img_screensaver',), **conf
     return win
 
 
+class Canvas:
+    """A canvas with its lcd, whose fill colour stock's setter writes."""
+    def __init__(self, fw, fill=0xff123456):
+        self.lcd = C.create_string_buffer(0x200)
+        self.raw = C.create_string_buffer(0x100)
+        struct.pack_into('<Q', self.raw, 0x38, C.addressof(self.lcd))
+        struct.pack_into('<I', self.lcd, 0xbc, fill)
+        self.p = C.addressof(self.raw)
+        self.fills = []
+        fw.mock('canvas_set_fill_color', lambda c, color, *_: self.set(color))
+        fw.mock('canvas_fill_rect', lambda c, x, y, w, h, *_: self.fills.append(
+            (C.c_int(x).value, C.c_int(y).value, w, h, struct.unpack_from('<I', self.lcd, 0xbc)[0])))
+
+    def set(self, color):
+        struct.pack_into('<I', self.lcd, 0xbc, color & 0xffffffff)
+
+
+@pytest.fixture(scope='module')
+def scratch(library):
+    """navigation.c's scratch_t's field offsets as this build lays it out."""
+    return host.offsets(library.parent/'navigation.o', 'scratch_t')
+
+
+@pytest.fixture
+def st(fw, scratch):
+    base = C.addressof(fw.var('st', C.c_char))
+    return lambda name, ctype=C.c_int: ctype.from_address(base + scratch[name])
+
+
 def paint(fw, w):
-    fw.fn('lockscreen_paint', None, C.c_void_p, C.c_void_p)(w, 0x6600)
+    """lockscreen_paint's pass over w on a canvas with its lcd: the canvas."""
+    canvas = Canvas(fw)
+    fw.fn('lockscreen_paint', None, C.c_void_p, C.c_void_p)(w, canvas.p)
+    return canvas
 
 
 @pytest.mark.parametrize('wall', range(5))
@@ -645,9 +675,11 @@ def test_a_built_in_is_rendered_at_the_picture_s_size_and_painted_over_it(fw, wa
     bm, = bitmaps.made
     assert bitmaps.made[bm][:2] == (120, 90) and bitmaps.opaque(bm) and bitmaps.unlocked == [bm]
     assert bitmaps.pixels(bm) == [row[:120] for row in render(fw, wall, 120, 90)[1]]
-    paint(fw, img)
+    canvas = paint(fw, img)
     assert seen == [(bm, (0, 0, 120, 90), (0, 0, 120, 90))]
-    assert [args[:2] for _, args in fw.calls('widget_on_paint_children')] == [(img, 0x6600)]  # its children on top
+    # OLED's screen (oled_dim): the picture dimmed to half its light, the fill put back, its children on top once
+    assert canvas.fills == [(0, 0, 120, 90, 0x80000000)] and struct.unpack_from('<I', canvas.lcd, 0xbc)[0] == 0xff123456
+    assert [args[:2] for _, args in fw.calls('widget_on_paint_children')] == [(img, canvas.p)]
 
 
 def test_the_wallpaper_follows_the_bitmap_s_line_length(fw):
@@ -660,9 +692,12 @@ def test_the_wallpaper_follows_the_bitmap_s_line_length(fw):
 def test_black_needs_no_bitmap_the_window_is_black(fw):
     bitmaps, seen = Bitmaps(fw), draws(fw)
     win = lock_window(fw, WALLS[BLACK])
-    paint(fw, win['img_screensaver'])
-    assert bitmaps.made == {} and seen == [] and fw.calls('widget_on_paint_children') == []
-    assert lk(fw).built_in == 1
+    img = win['img_screensaver']
+    canvas = paint(fw, img)
+    assert bitmaps.made == {} and seen == []
+    assert canvas.fills == [(0, 0, 375, 320, 0xff000000)]  # opaque black under the children, in either half
+    assert [args[:2] for _, args in fw.calls('widget_on_paint_children')] == [(img, canvas.p)]
+    assert lk(fw).built_in == 1 and lk(fw).black == 1
 
 
 def test_a_card_picture_is_stock_s_to_paint(fw):
@@ -805,15 +840,13 @@ def test_each_picture_and_size_is_a_render_of_its_own(fw, first, then):
     assert [bm for bm, _, _ in seen] == [new]
 
 
-@pytest.mark.parametrize('flow', ['info', 'large', 'rows', 'cover'])
-def test_every_widget_is_found_however_deep_it_sits(fw, clock, flow):
+@pytest.mark.parametrize('flow', ['oled', 'large', 'rows', 'cover'])
+def test_every_widget_is_found_however_deep_it_sits(fw, flow):
     """Stock's windows nest their widgets (the clocks in view_timeinfo, the song's in view_playinfo, the
     thumbnails in scroll_view's rows): every lookup searches the whole tree."""
     Bitmaps(fw)
-    Battery(fw)
-    timers(fw)
-    if flow == 'info':
-        lock_window(fw, WALLS[TIDE], names=INFO, THEME='1')
+    if flow == 'oled':
+        oled_window(fw)
     elif flow == 'large':
         lock_window(fw, WALLS[TIDE], names=CLOCK, LOCKCLOCK='1')
     elif flow == 'rows':
@@ -837,7 +870,11 @@ class Picker:
         if not listed:
             fw.var('fw_ctx_p_deque_screensaverlist', C.c_void_p).value = 0
         self.win = Window(fw, ['scroll_view'])
+        # the thumbnails in a row of the list, as stock's are (lock_grid lays them out in it)
+        self.grid = self.win.add('grid_row', 375, 110)
         self.thumbs = [self.win.add('image_%d' % i, 110, 94) for i in range(len(names))]
+        for i in range(len(names)):
+            struct.pack_into('<Q', self.win.blocks[-1 - i], W_PARENT, self.grid)
         self.rows = [self.win.add('row%d' % i, 375, 60) for i in range(children)]
         # list_row's label sits in its button in the row: switch_row restacks the row
         self.parent = self.win.add('button')
@@ -947,9 +984,10 @@ def test_a_page_with_no_list_looks_for_no_thumbnails(fw):
     assert (picker.rows[-1], 375, 78) in [args[:3] for _, args in fw.calls('widget_resize')]  # the row still comes
 
 
-# The Large clock (Q2POD LOCKCLOCK 1), outside Classic.
+# The Large clock (Q2POD LOCKCLOCK 1) of a lock window without its picture widget (big_clock): with one, OLED's
+# screen lays the clocks out (oled_lock).
 
-CLOCK = ['img_screensaver', 'view_timeinfo', 'clock_time', 'clock_date', 'label_battery', 'img_battery']
+CLOCK = ['view_timeinfo', 'clock_time', 'clock_date', 'label_battery', 'img_battery']
 
 
 def boxes(win):
@@ -983,7 +1021,7 @@ def test_standard_leaves_stock_s_clock(fw):
     assert fw.calls('widget_move_resize') == [] and win.calls('widget_set_visible') == []
 
 
-@pytest.mark.parametrize('missing', CLOCK[1:])
+@pytest.mark.parametrize('missing', CLOCK)
 def test_large_with_a_widget_missing_moves_nothing(fw, missing):
     Bitmaps(fw)
     lock_window(fw, WALLS[AURORA], names=[n for n in CLOCK if n != missing], LOCKCLOCK='1')
@@ -1006,629 +1044,17 @@ def test_large_s_lines_share_the_box_across_the_screen(fw):
     assert dy < ty and ty + th == h
 
 
-# Classic's info screen (THEME 1).
-
-INFO = CLOCK + ['pgbar_battery', 'view_shade', 'view_playinfo', 'img_playcover', 'img_slide', 'scrlabel_title',
-                'scrlabel_artist']
-
-
-@pytest.fixture
-def clock(fw):
-    """The time of day in minutes, None when the clock can't be read."""
-    state = {'minutes': 7 * 60 + 5}
-    def local(now, out, *_):
-        C.c_int.from_address(out + 4).value = state['minutes'] % 60
-        C.c_int.from_address(out + 8).value = state['minutes'] // 60
-        return out
-    fw.mock('fw_time', lambda *_: -1 if state['minutes'] is None else 1700000000)
-    fw.mock('fw_localtime_r', local)
-    return state
-
-
-class Battery:
-    """label_battery's text, a wide string."""
-    def __init__(self, fw, text='88%'):
-        self.set(text)
-        fw.mock('widget_get_text', lambda *_: C.addressof(self.wide))
-
-    def set(self, text):
-        self.wide = (C.c_uint * (len(text) + 1))(*map(ord, text), 0)
-
-
-def timers(fw):
-    """timer_add's timers, numbered from 1: [(fn, ms)]."""
-    added = []
-    fw.mock('timer_add', lambda fn, ctx, ms, *_: added.append((fn, ms)) or len(added))
-    return added
-
-
-@pytest.mark.parametrize('picture, page', [(b'', 1), (b'screensaver_default', 1), (WALLS[TIDE], 0), (WALLS[AURORA], 0),
-                                           (b'/mnt/mmc/lockscreenimage/a.jpg', 0)])
-def test_classic_s_info_screen_dresses_stock_s_widgets(fw, clock, picture, page):
-    """Over the page (no picture, or the default) or a picture: the bar's date, a tray with the clock, one
-    with the song; stock's shade and battery icon and bar hidden."""
-    Bitmaps(fw)
-    Battery(fw)
-    added = timers(fw)
-    win = lock_window(fw, picture, names=INFO, THEME='1', BATTERY='1')
-    state = lk(fw)
-    assert state.info == 1 and state.page == page and state.img == win['img_screensaver']
-    assert win.props('widget_set_prop_str', 'clock_date')['format'] == 'MMM D, Y'
-    visible = {name: args[0] for name, args in win.calls('widget_set_visible')}
-    assert visible == {'view_shade': 0, 'img_battery': 0, 'pgbar_battery': 0, 'label_battery': 1}
-    cleared = [name for name, _ in win.calls('image_base_set_image')]
-    assert cleared == ([] if picture.startswith(b'/') else ['img_screensaver'])  # a card's file is stock's
-    assert [ms for _, ms in added] == [1000] and state.timer == 1  # a look each second
-    assert len(handlers(fw, EVT_DESTROY)) == 1  # whichever picture: its end stops the timer
-
-
-def test_classic_s_info_screen_with_the_icon_hides_the_percent(fw, clock):
-    Bitmaps(fw)
-    Battery(fw)
-    timers(fw)
-    win = lock_window(fw, WALLS[TIDE], names=INFO, THEME='1', BATTERY='0')
-    assert {name: args[0] for name, args in win.calls('widget_set_visible')}['label_battery'] == 0
-
-
-@pytest.mark.parametrize('large', [0, 1])
-def test_classic_s_clock_box_holds_large_s_bigger_digits(fw, clock, large):
-    Bitmaps(fw)
-    Battery(fw)
-    timers(fw)
-    win = lock_window(fw, WALLS[TIDE], names=INFO, THEME='1', LOCKCLOCK=str(large))
-    box = boxes(win)
-    assert lk(fw).large == large
-    info, time = box['view_timeinfo'], box['clock_time']
-    assert time[1] + time[3] <= info[3]  # the time inside its box
-    assert win.props('widget_set_prop_int', 'clock_time')['style:normal:font_size'] == (166 if large else 112)
-
-
-def test_the_info_screen_s_end_stops_its_timer(fw, clock):
-    Bitmaps(fw)
-    Battery(fw)
-    timers(fw)
-    lock_window(fw, b'', names=INFO, THEME='1')
-    (_, forget), = handlers(fw, EVT_DESTROY)
-    forget()
-    state = lk(fw)
-    assert (state.img, state.info, state.timer, state.date, state.title) == (None, 0, 0, None, None)
-    assert [args[0] for _, args in fw.calls('timer_remove')] == [1]
-
-
-def info(fw, clock, battery='88%'):
-    Bitmaps(fw)
-    bat = Battery(fw, battery)
-    added = timers(fw)
-    lock_window(fw, WALLS[TIDE], names=INFO, THEME='1', BATTERY='1')
-    fw.var('g_backlight_status', C.c_ubyte).value = 1
-    tick = C.CFUNCTYPE(C.c_int, C.c_void_p)(added[0][0])
-    return bat, added, tick
-
-
-def invalidated(fw):
-    return [args[0] for _, args in fw.calls('widget_invalidate_force')]
-
-
-def test_the_info_screen_repaints_only_when_the_minute_changes(fw, clock):
-    _, _, tick = info(fw, clock)
-    img = lk(fw).img
-    assert tick(0) == RET_REPEAT and invalidated(fw) == []
-    clock['minutes'] += 1
-    assert tick(0) == RET_REPEAT and invalidated(fw) == [img]
-    assert tick(0) == RET_REPEAT and invalidated(fw) == [img]
-
-
-def test_the_info_screen_repaints_when_the_battery_changes(fw, clock):
-    bat, _, tick = info(fw, clock)
-    bat.set('87%')
-    assert tick(0) == RET_REPEAT and invalidated(fw) == [lk(fw).img]
-
-
-def test_the_info_screen_s_timer_ends_while_the_screen_is_off(fw, clock):
-    _, _, tick = info(fw, clock)
-    fw.var('g_backlight_status', C.c_ubyte).value = 0
-    clock['minutes'] += 1
-    assert tick(0) == RET_OK and lk(fw).timer == 0 and invalidated(fw) == []
-
-
-def test_info_poll_starts_it_again_when_the_screen_lights(fw, clock):
-    _, added, tick = info(fw, clock)
-    poll = fw.fn('info_poll', None)
-    fw.var('g_backlight_status', C.c_ubyte).value = 0
-    tick(0)
-    poll()  # still dark
-    assert len(added) == 1
-    fw.var('g_backlight_status', C.c_ubyte).value = 1
-    clock['minutes'] += 3  # what it shows now is the state it compares with
-    poll()
-    assert len(added) == 2 and added[1][1] == 1000 and lk(fw).timer == 2
-    poll()  # running already
-    assert len(added) == 2
-    assert tick(0) == RET_REPEAT and invalidated(fw) == []
-
-
-def test_info_poll_without_the_info_screen_does_nothing(fw, clock):
-    added = timers(fw)
-    fw.var('g_backlight_status', C.c_ubyte).value = 1
-    fw.fn('info_poll', None)()
-    assert added == []
-
-
-class Canvas:
-    """A canvas with its lcd, whose fill colour stock's setter writes."""
-    def __init__(self, fw, fill=0xff123456):
-        self.lcd = C.create_string_buffer(0x200)
-        self.raw = C.create_string_buffer(0x100)
-        struct.pack_into('<Q', self.raw, 0x38, C.addressof(self.lcd))
-        struct.pack_into('<I', self.lcd, 0xbc, fill)
-        self.p = C.addressof(self.raw)
-        self.fills = []
-        fw.mock('canvas_set_fill_color', lambda c, color, *_: self.set(color))
-        fw.mock('canvas_fill_rect', lambda c, x, y, w, h, *_: self.fills.append(
-            (C.c_int(x).value, C.c_int(y).value, w, h, struct.unpack_from('<I', self.lcd, 0xbc)[0])))
-
-    def set(self, color):
-        struct.pack_into('<I', self.lcd, 0xbc, color & 0xffffffff)
-
-
-@pytest.mark.parametrize('picture, black, shown', [(WALLS[BLACK], 1, 0), (WALLS[TIDE], 0, 0), (WALLS[BLACK], 1, 1)])
-def test_black_s_info_screen_paints_black_and_gives_the_fill_back(fw, clock, picture, black, shown):
-    Bitmaps(fw)
-    Battery(fw)
-    timers(fw)
-    win = lock_window(fw, picture, names=INFO, THEME='1')
-    fw.mock('widget_get_visible', lambda *_: shown)  # the song's card and the slide hint
-    art = []
-    fw.mock('widget_load_image', lambda w, name, bm, *_: art.append(C.string_at(name)) or 1)  # none drawn
-    canvas = Canvas(fw)
-    fw.fn('lockscreen_paint', None, C.c_void_p, C.c_void_p)(win['img_screensaver'], canvas.p)
-    assert ((0, 26, 375, 294, 0xff000000) in canvas.fills) == bool(black)  # under the bar, whichever half
-    assert (b'classic_light_hint_shadow' in art) == bool(shown)  # the hint's shadow only under a shown hint
-    assert struct.unpack_from('<I', canvas.lcd, 0xbc)[0] == 0xff123456
-
-
-def test_a_window_without_its_picture_gets_no_info_screen(fw, clock):
-    Bitmaps(fw)
-    added = timers(fw)
-    win = lock_window(fw, b'', names=[n for n in INFO if n != 'img_screensaver'], THEME='1', LOCKCLOCK='1')
-    assert lk(fw).info == 0 and added == []
-    assert boxes(win)['view_timeinfo'][1] == 14  # Large's own layout, as outside Classic
-
-
-def test_the_info_screen_paints_nothing_without_an_lcd(fw, clock):
-    Bitmaps(fw)
-    Battery(fw)
-    timers(fw)
-    win = lock_window(fw, WALLS[BLACK], names=INFO, THEME='1')
-    no_lcd = C.create_string_buffer(0x100)
-    fw.fn('lockscreen_paint', None, C.c_void_p, C.c_void_p)(win['img_screensaver'], C.addressof(no_lcd))
-    assert fw.calls('canvas_fill_rect') == []
-
-
-@functools.cache
-def art_size(name):
-    """The size tools/art.py draws the info screen's art at: the dark face and the slide hint's shadow (its PNG's
-    own width and height); None for any other name."""
-    if name == 'classic_light_clock_dark':
-        return tools_art.CLOCK_DARK_PX, tools_art.CLOCK_DARK_PX
-    if name == 'classic_light_hint_shadow':
-        return struct.unpack('>II', tools_art.hint_shadow()[16:24])  # IHDR's width, height
-    return None
-
-
-class Art:
-    """widget_load_image of the art tools/art.py draws for Classic, at its size; any other name fails, as an
-    asset that isn't there. drawn: canvas_draw_image's (art's name, dst rect), None for a bitmap of the payload's."""
-    def __init__(self, fw):
-        self.loaded, self.drawn = None, []
-        fw.mock('widget_load_image', self.load)
-        fw.mock('canvas_draw_image', self.draw)
-
-    def load(self, w, name, bitmap, *_):
-        self.loaded = C.string_at(name).decode()
-        size = art_size(self.loaded)
-        if not size:
-            return 1  # RET_FAIL
-        C.c_uint.from_address(bitmap).value, C.c_uint.from_address(bitmap + 4).value = size
-        return RET_OK
-
-    def draw(self, canvas, bm, src, dst, *_):
-        self.drawn.append((self.loaded, tuple((C.c_int * 4).from_address(dst))))
-        self.loaded = None
-
-    def at(self, name):
-        return [dst for drawn, dst in self.drawn if drawn == name]
-
-
-def info_paint(fw, picture=WALLS[TIDE], shown=1, names=INFO, **config):
-    """Classic's info screen over picture, painted once with the song's card and the hint shown or not: (window,
-    art, canvas)."""
-    Bitmaps(fw)
-    Battery(fw)
-    timers(fw)
-    win = lock_window(fw, picture, names=names, THEME='1', **config)
-    fw.mock('widget_get_visible', lambda *_: shown)
-    art, canvas = Art(fw), Canvas(fw)
-    fw.fn('lockscreen_paint', None, C.c_void_p, C.c_void_p)(win['img_screensaver'], canvas.p)
-    return win, art, canvas
-
-
-def channels(color):
-    return color & 255, color >> 8 & 255, color >> 16 & 255
-
-
-def dark(color):
-    """Black or near it, at any strength: each channel under a quarter."""
-    return color >> 24 and max(channels(color)) < 0x40
-
-
-def light(color):
-    """White or near it, at any strength: each channel over three quarters."""
-    return color >> 24 and min(channels(color)) >= 0xc0
-
-
-def rings(canvas):
-    """paint_tray's trays under the bar, top first, each by the box of the dark ring that frames it: the dark fills
-    short of the screen's sides that run on down the rows together (the ring's rounded rows, and inside them the
-    tray's own darkest rows)."""
-    found, bar = [], bar_height(canvas)
-    for y, x, w in sorted((y, x, w) for x, y, w, h, color in canvas.fills if dark(color) and y >= bar and w < 375):
-        if found and y <= found[-1][3] + 1:
-            found[-1] = [min(found[-1][0], x), found[-1][1], max(found[-1][2], x + w), y]
-        else:
-            found.append([x, y, x + w, y])
-    return [(x0, y0, x1 - x0, y1 - y0 + 1) for x0, y0, x1, y1 in found]
-
-
-def bar_height(canvas):
-    """The dark bar's rows: full-width rows of a pixel from the top."""
-    return max(y + h for x, y, w, h, _ in canvas.fills if (x, w, h) == (0, 375, 1) and y < 60)
-
-
-@pytest.mark.parametrize('missing', INFO[1:])
-def test_the_info_screen_with_a_widget_missing_touches_none_that_isn_t_there(fw, clock, missing):
-    win, _, _ = info_paint(fw, names=[n for n in INFO if n != missing], BATTERY='1')
-    assert lk(fw).info == 1 and missing not in win.widgets
-    assert [(name, args) for name, args in fw.calls() if name.startswith(('widget_', 'image_')) and args[0] == 0] == []
-
-
-@pytest.mark.parametrize('large', [0, 1])
-def test_the_clock_s_tray_holds_the_time(fw, clock, large):
-    """The clock box spans the screen from its top. Standard: a tray under the bar holds the face, centred on its
-    rows, and right of it the time on the tray's rows, the box ending above the song's card. Large: no face, the
-    time across the tray and down to the box's foot, over the card's top rows (the card stays above it for taps)."""
-    win, art, canvas = info_paint(fw, LOCKCLOCK=str(large))
-    box = boxes(win)
-    info, time, card = box['view_timeinfo'], box['clock_time'], box['view_playinfo']
-    assert info[:3] == (0, 0, 375)
-    rx, ry, rw, rh = rings(canvas)[0]
-    tray = rx + 1, ry + 1, rw - 2, rh - 2
-    assert tray[0] + tray[2] / 2 == 375 / 2 and tray[1] >= bar_height(canvas)
-    faces = art.at('classic_light_clock_dark')
-    if large:
-        assert faces == [] and (time[0], time[2]) == (tray[0], tray[2])
-        assert time[1] + time[3] == info[3] > card[1]
-    else:
-        (fx, fy, fw_, fh), = faces
-        assert (time[1], time[3]) == (tray[1], tray[3])
-        assert tray[0] <= fx and fx + fw_ < time[0] and time[0] + time[2] <= tray[0] + tray[2]
-        assert time[2] >= tray[2] / 2  # the tray's right part, beside the face
-        assert fy + fh / 2 == tray[1] + tray[3] / 2
-        assert time[1] + time[3] <= info[3] <= card[1]
-    assert win.props('widget_set_prop_str', 'clock_time')['style:normal:text_align_h'] == 'center'
-
-
-def test_the_date_and_the_percent_sit_in_the_dark_bar(fw, clock, st):
-    """The date spans the bar on the real bar's title row, centred; the percent fills the bar's height, set
-    right."""
-    title = C.create_string_buffer(0x400)
-    struct.pack_into('<i', title, W_Y, 1)
-    st('bar_title', C.c_void_p).value = C.addressof(title)
-    win, _, canvas = info_paint(fw, BATTERY='1')
-    bar = bar_height(canvas)
-    x, y, w, h = boxes(win)['clock_date']
-    assert (x, y, w) == (0, 1, 375) and y + h <= bar
-    assert h >= win.props('widget_set_prop_int', 'clock_date')['style:normal:font_size']
-    assert win.props('widget_set_prop_str', 'clock_date')['style:normal:text_align_h'] == 'center'
-    px, py, pw, ph = boxes(win)['label_battery']
-    assert (py, ph) == (0, bar)
-    assert win.props('widget_set_prop_str', 'label_battery')['style:normal:text_align_h'] == 'right'
-    size = win.props('widget_set_prop_int', 'label_battery')['style:normal:font_size']
-    assert 0 < size < bar and pw >= 2 * size  # wide enough for "100%"
-    # set right against the bar's battery, at the bar's right end
-    battery = [(x, x + w) for x, y, w, h, _ in canvas.fills if y < bar and w < 375 and x > 375 // 2]
-    left, right = min(x for x, _ in battery), max(x for _, x in battery)
-    assert px + pw <= left < px + pw + (right - left)
-
-
-@pytest.mark.parametrize('shown', [0, 1])
-def test_the_song_s_tray_paints_only_while_its_card_shows(fw, clock, shown):
-    """A hidden card takes its tray's ring and the row under it."""
-    _, _, canvas = info_paint(fw, shown=shown)
-    assert len(rings(canvas)) == 1 + shown
-
-
-def test_the_song_s_card_holds_its_tray_the_cover_and_the_labels(fw, clock):
-    """The card's box is the tray's ring and the light row under it, its own background cleared for the tray. In
-    it the cover, square, as far in from the tray's left as from its top and centred on its rows; right of it the
-    title over the artist, from the same x to the same width inside the tray, set left, the title the bigger, the
-    artist in the title's light ink, dimmer."""
-    win, _, canvas = info_paint(fw)
-    box = boxes(win)
-    card = box['view_playinfo']
-    rx, ry, rw, rh = rings(canvas)[1]
-    assert card == (rx, ry, rw, rh + 1)
-    below = [(x, w) for x, y, w, _, color in canvas.fills if y == ry + rh and light(color)]
-    assert below and all(rx <= x and x + w <= rx + rw for x, w in below)
-    assert sum(w for _, w in below) >= 0.9 * rw  # across the ring, short of its rounded corners
-    assert win.props('widget_set_prop_int', 'view_playinfo')['style:normal:bg_color'] == 0
-    tray = rx + 1 - card[0], ry + 1 - card[1], rw - 2, rh - 2  # in the card
-    cx, cy, cw, ch = box['img_playcover']
-    assert cw == ch and cx - tray[0] == cy - tray[1] and cy + ch / 2 == tray[1] + tray[3] / 2
-    title, artist = box['scrlabel_title'], box['scrlabel_artist']
-    assert title[0] == artist[0] > cx + cw and title[2] == artist[2] and title[0] + title[2] <= tray[0] + tray[2]
-    assert tray[1] <= title[1] < artist[1] and artist[1] + artist[3] <= tray[1] + tray[3]
-    size = {n: win.props('widget_set_prop_int', n)['style:normal:font_size'] for n in ('scrlabel_title', 'scrlabel_artist')}
-    assert size['scrlabel_title'] > size['scrlabel_artist'] > 0
-    assert title[3] >= size['scrlabel_title'] and artist[3] >= size['scrlabel_artist']  # each box holds its line
-    for name in ('scrlabel_title', 'scrlabel_artist'):
-        assert win.props('widget_set_prop_str', name)['style:normal:text_align_h'] == 'left'
-    ink = {n: win.props('widget_set_prop_int', n)['style:normal:text_color'] & 0xffffffff
-           for n in ('scrlabel_title', 'scrlabel_artist')}  # what AWTK draws them in
-    assert ink['scrlabel_title'] & 0xffffff == ink['scrlabel_artist'] & 0xffffff and light(ink['scrlabel_title'])
-    assert ink['scrlabel_artist'] >> 24 < ink['scrlabel_title'] >> 24
-
-
-@pytest.mark.parametrize('shown', [0, 1])
-def test_the_slide_hint_is_centred_under_the_card_dimmed_on_its_shadow(fw, clock, shown):
-    """Stock's >>> flat at the size of the shadow's marks, centred under the card, its white dimmed but showing; its
-    shadow, HINT_PAD past it all round, paints only while it shows."""
-    win, art, _ = info_paint(fw, shown=shown)
-    box = boxes(win)
-    x, y, w, h = box['img_slide']
-    card = box['view_playinfo']
-    assert x + w / 2 == 375 / 2 and card[1] + card[3] <= y and y + h <= 320
-    opacity, = [args[0] for name, args in win.calls('widget_set_opacity') if name == 'img_slide']
-    assert 0 < opacity < 255
-    assert [args[0] for name, args in win.calls('image_set_draw_type') if name == 'img_slide'] == [8]  # FILL: to the box
-    pad = tools_art.HINT_PAD
-    shadow = (x - pad, y - pad, w + 2 * pad, h + 2 * pad)
-    assert art.at('classic_light_hint_shadow') == [shadow] * shown
-
-
-def test_the_info_screen_paints_only_over_its_picture(fw, clock):
-    """ringnav_paint calls lockscreen_paint for every widget: the clocks' and the song's own paint nothing more."""
-    win, art, canvas = info_paint(fw)
-    painted = len(canvas.fills), len(art.drawn)
-    for name in ('clock_time', 'view_playinfo', 'scrlabel_title'):
-        fw.fn('lockscreen_paint', None, C.c_void_p, C.c_void_p)(win[name], canvas.p)
-    assert (len(canvas.fills), len(art.drawn)) == painted
-
-
-def test_a_card_picture_after_a_built_in_shows_no_wallpaper_under_the_info_screen(fw, clock):
-    """The built-in's render stays for its next lock window, but a card image's is stock's to paint."""
-    Bitmaps(fw)
-    Battery(fw)
-    timers(fw)
-    lock_window(fw, WALLS[AURORA], names=INFO, THEME='1')
-    win = lock_window(fw, b'/mnt/mmc/lockscreenimage/a.jpg', names=INFO, THEME='1')
-    fw.mock('widget_get_visible', lambda *_: 1)
-    art, canvas = Art(fw), Canvas(fw)
-    fw.fn('lockscreen_paint', None, C.c_void_p, C.c_void_p)(win['img_screensaver'], canvas.p)
-    assert lk(fw).full and [dst for name, dst in art.drawn if name is None] == []
-    assert fw.calls('widget_on_paint_children') == []
-
-
-@pytest.mark.parametrize('picture, page', [(b'', 1), (b'screensaver_default', 1), (WALLS[TIDE], 0),
-                                           (b'/mnt/mmc/lockscreenimage/a.jpg', 0)])
-def test_the_page_paints_under_the_bar_only_with_no_picture(fw, clock, picture, page):
-    _, _, canvas = info_paint(fw, picture)
-    bar = bar_height(canvas)
-    assert len([f for f in canvas.fills if f[:4] == (0, bar, 375, 320 - bar)]) == page
-
-
-def whites(canvas):
-    """The pixels white (or near it) was filled at, at any coverage."""
-    return {(x + i, y + j) for x, y, w, h, color in canvas.fills if light(color) for j in range(h) for i in range(w)}
-
-
-def pixel(at):
-    """The pixel holding the point at."""
-    return math.floor(at[0]), math.floor(at[1])
-
-
-def face_centre(art):
-    (x, y, w, h), = art.at('classic_light_clock_dark')
-    return x + w / 2, y + h / 2
-
-
-def along(centre, degrees, distance):
-    """distance px from centre at degrees clockwise from 12."""
-    a = math.radians(degrees)
-    return centre[0] + distance * math.sin(a), centre[1] - distance * math.cos(a)
-
-
-def apart(a, b):
-    return abs((a - b + 180) % 360 - 180)
-
-
-@pytest.mark.parametrize('h, m', [(0, 0), (3, 0), (7, 5), (9, 40), (12, 59)])
-def test_the_hands_show_the_time(fw, clock, h, m):
-    """The hour hand at h % 12 * 30 + m / 2 degrees and the minute hand at m * 6, out from the face's centre: each
-    white along its own angle well past the hub, the minute hand's tip past the hour hand's, both inside the face.
-    Out past the hands' broad feet the face is white nowhere else: not off their angles, nor past the hour hand's
-    tip off the minute hand's."""
-    clock['minutes'] = h * 60 + m
-    _, art, canvas = info_paint(fw)
-    centre, radius, lit = face_centre(art), tools_art.CLOCK_DARK_PX / 2, whites(canvas)
-    hour, minute = h % 12 * 30 + m / 2, m * 6
-
-    def reach(degrees):
-        """How far out the face's white goes along degrees, to a quarter pixel."""
-        out = [d / 4 for d in range(int(4 * radius) + 1) if pixel(along(centre, degrees, d / 4)) in lit]
-        return max(out, default=0)
-    away = max(range(0, 360, 5), key=lambda a: min(apart(a, hour), apart(a, minute)))  # as far from both as can be
-    hub, hour_tip, minute_tip = reach(away), reach(hour), reach(minute)
-    assert 2 * hub < hour_tip <= minute_tip < radius
-    if apart(hour, minute) > 20:  # on its own: where the two coincide they reach as one
-        assert hour_tip < minute_tip
-    for a in range(0, 360, 5):
-        for d in range(math.ceil(hour_tip / 2), math.floor(radius) + 1):
-            if apart(a, minute) > 20 and (apart(a, hour) > 20 or d > hour_tip + 1):
-                assert pixel(along(centre, a, d)) not in lit, (a, d)
-
-
-def test_at_12_the_hands_stand_straight_up_from_the_face_s_centre(fw, clock):
-    clock['minutes'] = 0
-    _, art, canvas = info_paint(fw)
-    cx, cy = face_centre(art)
-    near = [(x, y, w, color >> 24) for x, y, w, _, color in canvas.fills
-            if light(color) and abs(y - cy) < tools_art.CLOCK_DARK_PX / 2 and abs(x - cx) < 10]
-    weight = sum(w * a for _, _, w, a in near)
-    assert sum((x + w / 2) * w * a for x, _, w, a in near) / weight == pytest.approx(cx, abs=0.1)
-    assert all(y < cy + 4 for _, y, _, _ in near)  # nothing below the pivot
-
-
-def test_a_clock_that_can_t_be_read_shows_the_face_without_hands(fw, clock):
-    clock['minutes'] = None
-    _, art, canvas = info_paint(fw)
-    cx, cy = face_centre(art)
-    assert not [f for f in canvas.fills if light(f[4]) and abs(f[1] - cy) < 40 and abs(f[0] - cx) < 40]
-
-
-class Texts:
-    """widget_get_text by widget: a wide string for each name given, none for the rest."""
-    def __init__(self, fw, win, **texts):
-        self.win, self.wide = win, {}
-        for name, value in texts.items():
-            self.set(name, value)
-        fw.mock('widget_get_text', lambda w, *_: C.addressof(self.wide[w]) if w in self.wide else 0)
-
-    def set(self, name, value):
-        self.wide[self.win[name]] = (C.c_uint * (len(value) + 1))(*map(ord, value), 0)
-
-
-def readable(fw, win):
-    """widget_get_prop_int reads back what widget_set_prop_int set, else the default, as a widget's props do."""
-    def get(w, key, default, *_):
-        name = C.string_at(key).decode()
-        set_ = [v for kind, at, k, v in win.set if kind == 'widget_set_prop_int' and at == w and k == name]
-        return set_[-1] if set_ else default
-    fw.mock('widget_get_prop_int', get)
-
-
-def test_the_song_s_and_the_date_s_labels_take_the_face_their_text_has(fw, clock):
-    """Stock writes their text after the window loads, in any script: each paint gives each label the face
-    theme_face finds for its text at the label's size (Classic's own, bold at its fallback size, or the system
-    font), only when that changed."""
-    Bitmaps(fw)
-    timers(fw)
-    win = lock_window(fw, WALLS[TIDE], names=INFO, THEME='1')
-    labels = {'scrlabel_title': 'Song', 'scrlabel_artist': 'Песня', 'clock_date': '日本'}
-    size = {name: win.props('widget_set_prop_int', name)['style:normal:font_size'] for name in labels}  # at load
-    texts = Texts(fw, win, **labels)
-    readable(fw, win)
-    theme_face = fw.fn('theme_face', C.c_char_p, C.c_void_p, C.c_int, C.POINTER(C.c_int))
-
-    def wanted(name, value):
-        wide, px = (C.c_uint * (len(value) + 1))(*map(ord, value), 0), C.c_int(size[name])
-        face = theme_face(wide, -1, C.byref(px))
-        return {'style:normal:font_name': (face or b'default').decode(), 'style:normal:font_size': px.value}
-    want = {name: wanted(name, value) for name, value in labels.items()}
-    assert len({w['style:normal:font_name'] for w in want.values()}) == 3  # Classic's own, bold and the system's
-    fw.mock('widget_get_visible', lambda *_: 1)
-    canvas = Canvas(fw)
-
-    def painted():
-        mark = len(win.set)
-        fw.fn('lockscreen_paint', None, C.c_void_p, C.c_void_p)(win['img_screensaver'], canvas.p)
-        return {name: {k: v for _, at, k, v in win.set[mark:] if at == win[name] and k.startswith('style:normal:font_')}
-                for name in labels}
-    assert painted() == want
-    assert painted() == {name: {} for name in labels}  # the same text: nothing to set
-    texts.set('scrlabel_title', '日本')
-    assert painted()['scrlabel_title'] == wanted('scrlabel_title', '日本')
-
-
-@pytest.mark.parametrize('large', [0, 1])
-def test_the_info_screen_s_labels_load_in_the_theme_s_face(fw, clock, large):
-    """Before stock writes their text, the date, the time and the song's labels are in Classic's own face."""
-    win, _, _ = info_paint(fw, LOCKCLOCK=str(large))
-    latin = (C.c_uint * 2)(ord('A'), 0)
-    face = fw.fn('theme_face', C.c_char_p, C.c_void_p, C.c_int, C.c_void_p)(latin, -1, None).decode()
-    for name in ('clock_date', 'clock_time', 'scrlabel_title', 'scrlabel_artist'):
-        assert [v for kind, at, k, v in win.set if at == win[name] and k == 'style:normal:font_name'][0] == face
-
-
-@pytest.fixture(scope='module')
-def scratch(library):
-    """navigation.c's scratch_t's field offsets as this build lays it out."""
-    return host.offsets(library.parent/'navigation.o', 'scratch_t')
-
-
-@pytest.fixture
-def st(fw, scratch):
-    base = C.addressof(fw.var('st', C.c_char))
-    return lambda name, ctype=C.c_int: ctype.from_address(base + scratch[name])
-
-
-class Playing:
-    """What the player reports (2 playing, 3 paused, 0 neither) and the status bar's battery icon, charging or
-    not, as the info screen reads them."""
-    def __init__(self, fw, st, status=2):
-        self.status, self.icon = status, C.create_string_buffer(b'bar_battery', 16)
-        fw.mock('mclGetPlayStatus', lambda *_: self.status)
-        self.bar_icon = C.create_string_buffer(0x400)
-        st('bar_icon', C.c_void_p).value = C.addressof(self.bar_icon)
-        fw.mock('widget_get_prop_str', lambda w, key, default, *_:
-                C.addressof(self.icon) if w == C.addressof(self.bar_icon) and C.string_at(key) == b'image' else default)
-
-    def charging(self, on):
-        self.icon.value = b'bar_charge' if on else b'bar_battery'
-
-
-def ticking(fw, clock, st, status, battery='88%'):
-    playing = Playing(fw, st, status)
-    bat, _, tick = info(fw, clock, battery)
-    return playing, bat, tick
-
-
-@pytest.mark.parametrize('was, now', [(2, 3), (3, 2), (0, 2), (2, 0)])
-def test_the_info_screen_repaints_when_the_song_pauses_plays_or_stops(fw, clock, st, was, now):
-    playing, _, tick = ticking(fw, clock, st, was)
-    assert tick(0) == RET_REPEAT and invalidated(fw) == []
-    playing.status = now
-    assert tick(0) == RET_REPEAT and invalidated(fw) == [lk(fw).img]
-
-
-@pytest.mark.parametrize('status', [2, 3])
-def test_the_info_screen_repaints_every_minute_playing_or_paused(fw, clock, st, status):
-    _, _, tick = ticking(fw, clock, st, status)
-    clock['minutes'] = 7 * 60 + 4
-    tick(0)
-    before = len(invalidated(fw))
-    for n in range(1, 4):
-        clock['minutes'] += 1
-        assert tick(0) == RET_REPEAT and len(invalidated(fw)) == before + n
-
-
-@pytest.mark.parametrize('status', [2, 3])
-def test_the_info_screen_repaints_on_each_percent_and_on_charging(fw, clock, st, status):
-    playing, bat, tick = ticking(fw, clock, st, status, '89%')
-    bat.set('88%')
-    assert tick(0) == RET_REPEAT and len(invalidated(fw)) == 1
-    playing.charging(True)
-    assert tick(0) == RET_REPEAT and len(invalidated(fw)) == 2
-    assert tick(0) == RET_REPEAT and len(invalidated(fw)) == 2
-
-
 # OLED's lock window (oled_lock, lockscreen_hold): the song at rest on an ellipsis, a hint, and a held Centre unlocks.
+SCREEN = ['img_screensaver', *CLOCK, 'pgbar_battery', 'view_shade', 'view_playinfo', 'img_playcover', 'img_slide',
+          'scrlabel_title', 'scrlabel_artist']
+
+
 def oled_window(fw):
     """OLED's lock window over Tide, its init run: the window and the boxes label_create made (label1 the first)."""
-    Config(fw, THEME='3')
+    Config(fw)
     fw.var('fw_ctx_g_screensaver_picture', C.c_char * 256).value = WALLS[TIDE]
     fw.mock('stock_saver_trampoline', lambda *_: 31)
-    win, made = Window(fw, INFO + ['label1']), []
+    win, made = Window(fw, SCREEN + ['label1']), []
     fw.mock('label_create', lambda parent, x, y, w, h, *_: made.append((x, y, w, h)) or win['label1'])
     fw.fn('lockscreen_init', C.c_int, C.c_void_p, C.c_void_p)(0x7700, 0x7800)
     return win, made
@@ -1653,9 +1079,9 @@ def test_oled_s_lock_screen_says_how_to_unlock(fw):
     assert win.props('widget_set_prop_str', 'label1')['style:normal:text_align_h'] == 'center'
 
 
-def hold(fw, name=b'saverscreen_page', flag=1, lit=1, theme='3'):
+def hold(fw, name=b'saverscreen_page', flag=1, lit=1):
     """lockscreen_hold on a top window called name: its answer and the windows closed."""
-    Config(fw, THEME=theme)
+    Config(fw)
     fw.var('g_lockscreen_pageflag', C.c_ubyte).value = flag
     fw.var('g_backlight_status', C.c_ubyte).value = lit
     names = {0x7700: name}
@@ -1670,7 +1096,7 @@ def test_a_held_centre_unlocks_oled_s_lit_lock_window(fw):
     assert hold(fw) == (1, [0x7700], [42])  # its timer first, as stock's slide
 
 
-@pytest.mark.parametrize('kw', [dict(name=b'home_page'), dict(flag=0), dict(lit=0), dict(theme='0')])
+@pytest.mark.parametrize('kw', [dict(name=b'home_page'), dict(flag=0), dict(lit=0)])
 def test_a_held_centre_elsewhere_stays_stock_s(fw, kw):
     """Only OLED's lock window while it's up and lit: elsewhere, and from dark, the hold is the Shut Down? prompt."""
     assert hold(fw, **kw) == (0, [], [])

@@ -592,28 +592,3 @@ def test_a_clean_end_waits_about_five_seconds_for_a_wedged_file(fw):
     state.running, state.thread = 1, 0x78
     fw.fn('ringnav_clean_end', None)()
     assert len(fw.calls('fw_usleep')) == 500 and not fw.calls('fw_pthread_join') and state.running
-
-
-# Minimal's and Modern's text track list: one row height a list, as stock's layouter forces item_height on each row.
-@pytest.mark.parametrize('end,want', [(200, [('One', '03:20'), ('Two', '')]), (0, [('One', None), ('Two', None)])])
-def test_a_track_list_with_any_length_gives_every_row_the_detail_height(fw, ui, song, stock_clock, end, want):
-    from test_coverflow import Cf
-    Files(fw)
-    tracks = [song(b'/m/a.flac', b'One', track=1, end=end), song(b'/m/a.flac', b'Two', track=2, cue=end)]
-    directory = fw.var('fw_ctx_tools_pdeq_directory', C.c_uint)
-    fw.mock('getMusicByAlbum', lambda *_: ui.deques[directory.value].extend(tracks) or 2)
-    page = ui.new('window_create', 0, 0, 0, 0, 0)
-    c = fw.var('cf', Cf)
-    c.page, c.body, c.scoped, c.album = page, page, 2, 0  # Rated albums: no last-album note to write
-    c.albums = ui.deques.new([song(id_=-1)])  # Unknown Album: every track getMusicByAlbum(NULL) has
-    fw.fn('coverflow__to_tracks', C.c_int, C.c_void_p)(None)
-    assert ui.rows(page) == want  # the last CUE track's file never measured: an empty detail
-    items = ui.kids[ui.view(page)]
-    boxes = [struct.unpack_from('<4i', ui.blocks[w]) for w in items]
-    h = boxes[0][3]
-    assert h == (fw.fn('page_h', C.c_int, C.c_int)(64 if end else 48)) and [b[1] for b in boxes] == [0, h]
-    assert all(b[3] == h for b in boxes)
-    centre = {a[0] for _, a in fw.calls('widget_set_prop_str')
-              if C.string_at(a[1]) == b'style:normal:text_align_h' and C.string_at(a[2]) == b'center'}
-    details = [ui.kids[w][1] for w in items if len(ui.kids[w]) > 1]
-    assert len(details) == (2 if end else 0) and all(d in centre for d in details)  # under its centred title

@@ -28,6 +28,9 @@ SIMPLE, ADVANCED = range(2)
 E3_TABS, E3_SWITCH, E3_PRESETS, E3_RESET, E3_LOW, E3_MID, E3_HIGH = range(7)
 GRAPH_X, GRAPH_W, PLOT_TOP, PLOT_BOTTOM, GRAPH_DB = 16, 343, 6, 78, 15
 WHITE = 3 * 255  # bright() of white
+ROW_PX = 24  # OLED's row font size (assets/themes/oled/theme.xml row title_px)
+MUTED, TRACK = 0x858585, 0x333333  # its scheme's muted (theme.xml) and slider_page.c SP_TRACK_DARK
+EQ_ROWS_Y, EQ_ROW, EQ_TOP, EQ_BOTTOM, EQ_LINE = 48, 32, 150, 186, 4  # peq.h EQ_*, slider_page.c EQ_LINE
 BANDS = 30
 r = C.byref
 
@@ -162,7 +165,8 @@ def peak(fw, gain=6.0, frequency=1000.0, enabled=1, count=1):
 
 class Page:
     """The EQ page in an AWTK of zeroed widgets (x, y, w, h and parent where stock keeps them), their texts, int
-    props, names and images; its timers, run as the next loop pass would; the input method and its keyboard."""
+    props, names and images; its timers, run as the next loop pass would; the input method and its keyboard; the
+    toasts it opens."""
     def __init__(self, fw, card, values=None, now=10000):
         self.fw, self.card, self.now = fw, card, now
         self.blocks, self.parent, self.kids, self.alive, self.kind, self.on = {}, {}, {}, {}, {}, {}
@@ -196,6 +200,9 @@ class Page:
         fw.mock('input_method_request', self.request)
         self.values, self.config = dict(values or {}), []
         fw.mock('toolsReadConfig', self.read_config)
+        self.said = []  # the toasts' texts as they open (navigation.c toast: the text 8 bytes into its info)
+        fw.mock('navigator_to_with_context', lambda name, info, *_: self.said.append(C.string_at(info + 8).decode())
+                if C.string_at(name) == b'dialog/msginfo_dialog' else None)
         fw.mock('write_int_config', lambda v, s, k, *_: self.config.append((C.string_at(s).decode(), C.string_at(k).decode(), i32(v))))
         self.page = self.new(0, 0, 0, 375, 320)
         self.props[(self.page, 'h')] = 290  # under the status bar
@@ -403,6 +410,20 @@ def tone(fw):
     return fw.fn('accent_tone', C.c_uint, C.c_int)(2) & 0xffffff  # TONE: the accent's light tone
 
 
+@pytest.fixture(scope='module')
+def scratch(library):
+    """navigation.c's scratch_t's field offsets as this build lays it out."""
+    return host.offsets(library.parent/'navigation.o', 'scratch_t')
+
+
+@pytest.fixture(autouse=True)
+def oled_set(fw, scratch):
+    """OLED's geometry set, as theme_boot leaves st.geom on the device (a zeroed st is SET0's, with no list_end)."""
+    st = C.addressof(fw.var('st', C.c_char))
+    sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
+    C.c_int.from_address(st + scratch['geom']).value = [g.name for g in sets].index('oled')
+
+
 def page(fw, s=None, files=None, values=None):
     card = Card(fw, {ACTIVE: saved(s if s is not None else state(fw)), **(files or {})})
     return Page(fw, card, values)
@@ -518,7 +539,8 @@ def test_nothing_to_apply_is_display_only_until_an_edit(fw):
     p.ret()
     assert p.captions()[0] == 'Apply changes'
     p.click('Apply changes')
-    assert p.title() == 'Applied' and p.card.state().peq.bands[0].gain == 6 and p.card.state().mode == EQ_PEQ
+    assert p.said == ['Applied'] and p.title() == ''  # a toast; the bar keeps the tabs
+    assert p.card.state().peq.bands[0].gain == 6 and p.card.state().mode == EQ_PEQ
     assert p.captions()[0] == 'Nothing to apply'
 
 
@@ -533,7 +555,9 @@ def test_auto_is_one_cut_for_every_rate_at_the_row_s_size(fw):
     assert f'Preamp Auto ({cut:.1f} dB)' in p.captions() and cut < fw.fn('peq_auto', C.c_double, C.c_void_p, C.c_int)(r(s.peq), 48000)
     preamp = [item for t, item in p.rows() if t.startswith('Preamp')][0]
     value = [c for c in p.children(preamp) if p.text.get(c, '').startswith('Auto')][0]
-    assert (value, 'style:normal:font_size') not in p.props
+    caption = [c for c in p.children(preamp) if p.text.get(c) == 'Preamp'][0]
+    size = lambda w: p.props.get((w, 'style:normal:font_size'))
+    assert size(value) == size(caption) == ROW_PX  # the row's own size, not fit's 20
 
 
 def test_applying_auto_saves_the_cut_the_player_plays(fw):
@@ -575,7 +599,7 @@ def test_a_preset_s_name_and_a_picked_preamp_show_as_set(fw):
     p.click('Presets')
     p.click('Rock.txt')
     assert 'Presets Rock' in p.captions() and 'Preamp -4.5 dB' in p.captions()
-    assert p.title() == 'Preset loaded; choose Apply to activate'
+    assert p.said == ['Preset loaded; choose Apply to activate'] and p.title() == ''
 
 
 def test_a_long_preset_name_ellipsises_right_aligned_clear_of_its_caption(fw):
@@ -593,7 +617,7 @@ def test_a_long_preset_name_ellipsises_right_aligned_clear_of_its_caption(fw):
     x, _, w, _ = struct.unpack_from('<4i', p.blocks[value], 0)
     assert style[value] == 's_scrlabel_white20r' and p.props[(value, 'style:normal:margin_right')] == 0
     assert (value, 1) in cut and (value, 1) in focus  # without only_focus stock scrolls it from its first paint
-    assert x > 118 and x + w == 316  # past Classic's 27 px caption; ends where the other values do
+    assert x > 118 and x + w == 316  # past the widest caption at 27 px; ends where the other values do
 
 
 # The curve.
@@ -800,7 +824,8 @@ def test_a_picker_opens_centred_on_its_value(fw, pick, value, title, rows, row):
         s.peq.automatic, s.peq.preamp = 2, value
     p = page(fw, s).advanced()
     p.click(pick)
-    rh, height = fw.fn('page_h', C.c_int, C.c_int)(48), (290 - 48) // fw.fn('page_h', C.c_int, C.c_int)(48) * fw.fn('page_h', C.c_int, C.c_int)(48)
+    rh = fw.fn('page_h', C.c_int, C.c_int)(48)
+    height = (fw.fn('eq_list_end', C.c_int)() - 48) // rh * rh  # whole rows down to the set's list_end (render)
     assert p.title() == title and len(p.rows()) == rows and p.props[(p.ui.view, '_ringnav_count')] == rows
     assert p.props[(p.ui.view, '_ringnav_index')] == row and not p.ui.graph
     offset = p.props[(p.ui.view, 'offset')]
@@ -834,7 +859,7 @@ def test_a_kept_screen_keeps_its_selection_and_scroll(fw):
     p.props[(view, '_ringnav_index')], p.props[(view, 'yoffset')] = 5, 96
     p.click('Reset to defaults')
     assert p.props[(p.ui.view, '_ringnav_index')] == 5 and p.props[(p.ui.view, 'offset')] == 96
-    assert p.title() == 'Reset; choose Apply to activate'
+    assert p.said == ['Reset; choose Apply to activate'] and p.title() == ''
 
 
 def test_coming_back_from_a_picker_lands_on_the_row_that_opened_it(fw):
@@ -911,7 +936,8 @@ def test_a_page_the_card_no_longer_fills_is_its_last(fw):
     p.click('Next page')
     del p.card.files[f'{FOLDER}/128.txt'], p.card.files[f'{FOLDER}/129.txt']  # gone from the card meanwhile
     p.click('128.txt')
-    assert p.ui.file_page == 0 and p.title() == 'Line 1: cannot open file' and p.captions()[4] == '000.txt'
+    assert p.said == ['Line 1: cannot open file'] and p.ui.file_page == 0 and p.captions()[4] == '000.txt'
+    assert p.title() == 'Presets'  # 128 left: one page (FILE_PAGE)
     assert p.props[(p.ui.view, 'offset')] == 0 and p.props[(p.ui.view, '_ringnav_index')] == 0
 
 
@@ -921,7 +947,7 @@ def test_saving_offers_ten_slots_and_asks_before_replacing(fw):
     p.click('Save editor preset')
     assert p.captions() == [f'Save as Manual {k:02}' for k in range(1, 11)] and p.title() == 'Presets'
     p.click('Save as Manual 03')
-    assert f'{FOLDER}/Manual 03.txt' in p.card.files and p.title() == 'Preset saved; active EQ unchanged'
+    assert f'{FOLDER}/Manual 03.txt' in p.card.files and p.said == ['Preset saved; active EQ unchanged'] and p.title() == 'Presets'
     p.click('Save as Manual 03')
     assert p.captions() == ['Replace existing preset? Confirm', 'Cancel replacement'] and p.ui.screen == CONFIRM
     p.click('Cancel replacement')
@@ -934,7 +960,7 @@ def test_a_failed_save_says_so(fw):
     p.click('Save editor preset')
     p.card.fail_writes = True
     p.click('Save as Manual 01')
-    assert p.title() == 'Save failed; settings unchanged' and f'{FOLDER}/Manual 01.txt' not in p.card.files
+    assert p.said == ['Save failed; settings unchanged'] and p.title() == 'Presets' and f'{FOLDER}/Manual 01.txt' not in p.card.files
 
 
 def test_deleting_asks_then_deletes(fw):
@@ -947,7 +973,8 @@ def test_deleting_asks_then_deletes(fw):
     shrunk = [h for (w, k), h in p.props.items() if k == 'resized' and w in p.alive]
     assert shrunk == [2 * rh, 2 * rh]  # the list and its view end at the last row: no white below
     p.click('Delete a.txt? Confirm')
-    assert f'{FOLDER}/a.txt' not in p.card.files and p.title() == 'Deleted a.txt; active EQ unchanged'
+    assert f'{FOLDER}/a.txt' not in p.card.files and p.said == ['Deleted a.txt; active EQ unchanged']
+    assert p.title() == 'No presets found'  # the list's own state, which its render puts in the title (list_files)
     p.ret()
     assert p.ui.screen == PRESETS
 
@@ -959,7 +986,7 @@ def test_a_failed_delete_says_so(fw):
     p.click('a.txt')
     fw.mock('fw_unlink', lambda *_: -1)
     p.click('Delete a.txt? Confirm')
-    assert p.title() == 'Delete failed; preset kept'
+    assert p.said == ['Delete failed; preset kept'] and p.title() == 'Presets'
 
 
 def test_the_stock_presets(fw):
@@ -976,7 +1003,8 @@ def test_a_preset_with_nothing_usable_says_which_line(fw):
     p.click('Presets')
     assert p.captions()[4:] == ['x.txt'] and p.title() == 'Presets'
     p.click('x.txt')
-    assert p.title() == 'Use the ParametricEQ file, not GraphicEQ' and p.ui.screen == PRESETS and p.ui.draft.count == 10
+    assert p.said == ['Use the ParametricEQ file, not GraphicEQ'] and p.title() == 'Presets'
+    assert p.ui.screen == PRESETS and p.ui.draft.count == 10
 
 
 @pytest.mark.parametrize('extra, said', ((b'Filter: ON IIR Fc 30 Hz\n', 'Loaded; skipped IIR filter'),
@@ -985,7 +1013,7 @@ def test_a_preset_loads_what_plays_and_says_what_it_left_out(fw, extra, said):
     p = page(fw, files={f'{FOLDER}/x.txt': b'Preamp: -3 dB\nFilter: ON PK Fc 1000 Hz Gain 2 dB Q 1\n' + extra}).advanced()
     p.click('Presets')
     p.click('x.txt')
-    assert p.title() == said and p.ui.screen == HOME and p.ui.draft.count == 1 and p.ui.draft.preamp == -3
+    assert p.said == [said] and p.title() == '' and p.ui.screen == HOME and p.ui.draft.count == 1 and p.ui.draft.preamp == -3
 
 
 def test_no_folder_on_the_card_says_why(fw):
@@ -1051,7 +1079,7 @@ def test_renaming_opens_the_name_with_the_keyboard_up(fw):
     p.handler(edit, EVT_IM_ACTION)()
     p.handler(edit, EVT_VALUE_CHANGED)()  # Done sends both: renamed once
     p.settle()
-    assert f'{FOLDER}/Jazz.txt' in p.card.files and p.ui.screen == PRESETS and p.title() == 'Renamed to Jazz'
+    assert f'{FOLDER}/Jazz.txt' in p.card.files and p.ui.screen == PRESETS and p.said == ['Renamed to Jazz'] and p.title() == 'Presets'
 
 
 def test_return_from_the_name_goes_back_to_the_list(fw):
@@ -1073,7 +1101,7 @@ def test_a_tap_on_the_row_renames_through_the_edit_s_blur_once(fw):
     p.handler(p.edit(), EVT_VALUE_CHANGED)()  # the blur, as the touch leaves the edit
     p.handler(row, EVT_CLICK)()  # then the row's own click: renamed already
     p.settle()
-    assert sorted(p.card.files) == [ACTIVE, f'{FOLDER}/Jazz.txt'] and p.ui.screen == PRESETS and p.title() == 'Renamed to Jazz'
+    assert sorted(p.card.files) == [ACTIVE, f'{FOLDER}/Jazz.txt'] and p.ui.screen == PRESETS and p.said == ['Renamed to Jazz']
 
 
 def test_return_steps_back_and_leaves_from_the_main_screen(fw):
@@ -1212,11 +1240,12 @@ def test_centre_or_return_ends_an_adjustment(fw):
     assert fw.calls('navigator_back')
 
 
-def test_a_tap_on_r_resets_the_sliders_and_a_drag_follows_the_finger(fw):
+def test_a_tap_on_reset_resets_the_sliders_and_a_drag_follows_the_finger(fw):
     p = page(fw, state(fw, EQ_3, gains=(3, -2, 4))).open()
     view, y, shown = p.e3.view, fw.fn('peq_ui__e3_y', C.c_int, C.c_double), e3_canvas(fw, p)
     centre = lambda text: (lambda left, top, w, h: (left + w // 2, top + h // 2))(*shown.text(text)[0][3])  # where it's drawn
-    assert p.touch(view, EVT_POINTER_DOWN, *centre('R')) == 0 and p.e3.focus == E3_RESET
+    assert EQ_ROWS_Y + 2 * EQ_ROW <= centre('Reset')[1] < EQ_ROWS_Y + 3 * EQ_ROW  # the third row
+    assert p.touch(view, EVT_POINTER_DOWN, *centre('Reset')) == 0 and p.e3.focus == E3_RESET
     assert list(p.e3.gain) == [0, 0, 0] and [p.card.state().eq3.bands[k].gain for k in range(3)] == [0, 0, 0]  # saved at once
     assert fw.calls('stock_eq_trampoline') and not p.e3.dirty  # and heard
     top, bottom, x = y(6), y(-6), centre('Mid')[0]  # the travel's ends: +-6 dB
@@ -1239,110 +1268,90 @@ def e3_canvas(fw, p):
     return canvas
 
 
-def test_simple_paints_the_switch_the_sliders_and_their_values(fw):
+def test_simple_paints_the_rows_the_sliders_and_their_values(fw):
+    """slider_page.c eq_rows_paint: Enabled, Presets and Reset on EQ_ROW rows from EQ_ROWS_Y; each band a track from
+    EQ_TOP to EQ_BOTTOM, a bar from 0 dB to its gain in the accent, and its name and gain centred under it."""
     p = page(fw, state(fw, EQ_3, gains=(1.5, 0, -6))).open()
+    before = len(fw.calls('vgcanvas_set_fill_color'))
     c = e3_canvas(fw, p)
-    assert [t[0] for t in c.texts] == ['Enabled: On', 'Presets', 'R', 'Low', '+1.5 dB', 'Mid', '0 dB', 'High', '-6.0 dB']
-    y = fw.fn('peq_ui__e3_y', C.c_int, C.c_double)
-    zero, up, down = y(0), y(1.5), y(-6)
-    assert up < zero < down
-    rects = grid(c)
-    bars = [g for g in rects if g[0] == tone(fw) and g[2] <= zero <= g[2] + g[4]]  # the accent's that meet 0 dB
-    assert [(y, h) for _, _, y, _, h in bars] == [(up, zero - up), (zero, 1), (zero, down - zero + 1)]  # each from 0 dB to its gain
-    xs = [x for _, x, _, _, _ in bars]
-    assert xs[0] < xs[1] < xs[2] and xs[1] - xs[0] == xs[2] - xs[1]  # Low, Mid, High evenly
-    assert [g for g in rects if g[2] == zero and g[4] == 1 and g[1] < xs[0] and g[1] + g[3] > xs[2] + bars[2][3]]  # 0 dB, across all
+    accent = rgb(fw.calls('vgcanvas_set_fill_color')[before + 2][1][1])  # Low's ring, after the on switch's two
+    assert not grey(accent)
+    assert [t[0] for t in c.texts] == ['Enabled', 'Presets', 'Reset', 'Low', '+1.5 dB', 'Mid', '0 dB', 'High', '-6.0 dB']
+    centre = lambda t: (t[3][0] + t[3][2] // 2, t[3][1] + t[3][3] // 2)
+    assert [centre(t)[1] for t in c.texts[:3]] == [EQ_ROWS_Y + k * EQ_ROW + EQ_ROW // 2 for k in range(3)]
+    assert [(t[1], rgb(t[2])) for t in c.texts[:3]] == [(ROW_PX, 0xffffff)] * 3
+    xs = [62 + 125 * k for k in range(3)]  # the columns e3_touch reads
+    assert [centre(t) for t in c.texts[3:]] == [(x, y) for x in xs for y in (200, 216)]  # EQ_NAME_Y, EQ_GAIN_Y
+    # 0 dB at 168, 12 dB to the travel's 36 px: +1.5 dB 4.5 px up, 0 dB no bar, -6 dB down to the end
+    assert grid(c) == [(TRACK, 60, EQ_TOP, EQ_LINE, 36), (accent, 60, 163, EQ_LINE, 5), (TRACK, 185, EQ_TOP, EQ_LINE, 36),
+                       (TRACK, 310, EQ_TOP, EQ_LINE, 36), (accent, 310, 168, EQ_LINE, 18)]
     assert c.fill == c.lcd_fill
-    # the wheel's slider on a card: its name, its travel and its value on it, and one slider along as the wheel turns
+    # the wheel's band's name in Text Primary, the rest muted; a turn moves it along
+    assert [(t[1], rgb(t[2])) for t in c.texts[3:]] == [(18, 0xffffff)] + [(18, MUTED)] * 5  # SP_ENDS_PX
     assert p.key(KEY_NEXT) == 1 and p.e3.focus == E3_MID
-    turned = grid(e3_canvas(fw, p))
-    (low,), (mid,) = [g for g in rects if g not in turned], [g for g in turned if g not in rects]
-    for card, name, value, bar in ((low, 'Low', '+1.5 dB', bars[0]), (mid, 'Mid', '0 dB', bars[1])):
-        travel = (bar[1], y(6), bar[3], y(-6) - y(6))
-        assert holds(card[1:], c.text(name)[0][3]) and holds(card[1:], travel) and holds(card[1:], c.text(value)[0][3])
-    assert mid[1] - low[1] == xs[1] - xs[0] and mid[2:] == low[2:] and rects.index(low) < rects.index(bars[0])  # under its bar
+    assert [rgb(t[2]) for t in e3_canvas(fw, p).texts[3:]] == [MUTED, MUTED, 0xffffff, MUTED, MUTED, MUTED]
 
 
-def slider(c, name, at):
-    """Simple's slider called name, its gain at y == at, in a paint: its value's colour and its handle's, each centred under
-    the name, the handle on y."""
-    (left, _, w, _), = [t[3] for t in c.texts if t[0] == name]
-    (value,) = [t[2] for t in c.texts if t[0].endswith('dB') and 2 * t[3][0] + t[3][2] == 2 * left + w]
-    (handle,) = [g[0] for g in c.rects if 2 * g[1] + g[3] == 2 * left + w and 2 * g[2] + g[4] == 2 * at]
-    return value, handle
-
-
-def test_simple_off_is_grey_and_an_adjusted_slider_lit(fw):
-    gains = (3, -2, 4)  # apart, so no handle shares its centre with the track's or a bar's
-    p = page(fw, state(fw, EQ_OFF, gains=gains)).open()
-    y = fw.fn('peq_ui__e3_y', C.c_int, C.c_double)
+def test_simple_off_is_muted_and_an_adjusted_band_s_gain_lit(fw):
+    """Off, eq_rows_paint's bars are the scheme's muted, not the accent; adjusting lights that band's gain alone."""
+    p = page(fw, state(fw, EQ_OFF, gains=(3, -2, 4))).open()
+    gains = lambda c: [rgb(t[2]) for t in c.texts if t[0].endswith('dB')]
     c = e3_canvas(fw, p)
-    assert c.text('Enabled: Off') and not [g for g in grid(c) if g[0] == tone(fw)]  # no accent anywhere
-    sliders = lambda c: [slider(c, name, y(gain)) for name, gain in zip(('Low', 'Mid', 'High'), gains)]
-    before = sliders(c)
+    assert [g[0] for g in grid(c)] == [TRACK, MUTED] * 3 and gains(c) == [MUTED] * 3
     p.centre()
     p.run('e3_single')
     assert p.e3.adjusting and p.e3.focus == E3_LOW
     c = e3_canvas(fw, p)
-    after = sliders(c)
-    assert not [g for g in grid(c) if g[0] == tone(fw)]  # adjusting doesn't turn it on
-    assert after[1:] == before[1:] and after[0][0] != before[0][0] and after[0][1] != before[0][1]  # Low's value and handle
-    assert all(bright(after[0][k]) > bright(other[k]) for other in after[1:] for k in (0, 1))  # the brighter
+    assert [g[0] for g in grid(c)] == [TRACK, MUTED] * 3  # adjusting doesn't turn it on
+    assert gains(c) == [0xffffff, MUTED, MUTED]
 
 
-@pytest.mark.parametrize('name, shown, small', (('', 'Advanced', False), ('Rock', 'Rock', False), ('Headphones', 'Headphones', True),
-                                                ('Headphones X', 'Headphones X', True), ('Sennheiser HD 600', 'Sennheiser H', True),
-                                                ('Café Del Mar!', 'Café Del Ma', True),  # 12 bytes, the e two of them
-                                                ('Bass Boost €€', 'Bass Boost ', True),  # byte 12 inside the euro: all of it goes
-                                                ('Party Mix \U0001f389', 'Party Mix ', True),
-                                                ('€€€€€', '€€€€', True)))
-def test_a_playing_peq_shows_on_under_its_preset_s_name(fw, name, shown, small):
+@pytest.mark.parametrize('name, shown', (('', 'Advanced'), ('Rock', 'Rock'), ('Headphones', 'Headphones'),
+                                         ('Headphones X', 'Headphones X'), ('Sennheiser HD 600', 'Sennheiser H'),
+                                         ('Café Del Mar!', 'Café Del Ma'),  # 12 bytes, the e two of them
+                                         ('Bass Boost €€', 'Bass Boost '),  # byte 12 inside the euro: all of it goes
+                                         ('Party Mix \U0001f389', 'Party Mix '),
+                                         ('€€€€€', '€€€€')))
+def test_a_playing_peq_shows_its_preset_s_name_as_presets_value(fw, name, shown):
+    """e3_paint hands eq_rows_paint the applied preset's name, 12 bytes at most cut on a UTF-8 boundary (Advanced
+    unnamed), drawn as Presets' value at the row's size."""
     p = page(fw, state(fw, EQ_PEQ)).open()
     p.ui.applied = name.encode()
     c = e3_canvas(fw, p)
-    switch = c.texts[0]
-    assert switch[0] == shown and len(shown.encode()) <= 12
-    assert (switch[1] < c.text('Presets')[0][1]) == small  # past nine characters, smaller
-    names = [t[2] for t in c.texts if t[0] in ('Low', 'Mid', 'High')]
-    assert len(names) == 3 and all(bright(n) < bright(switch[2]) for n in names)  # dimmed: one takes over as 3EQ
+    assert [t[0] for t in c.texts[:4]] == ['Enabled', 'Presets', shown, 'Reset'] and len(shown.encode()) <= 12
+    assert c.texts[2][1] == c.text('Presets')[0][1] == ROW_PX
 
 
 def test_a_stray_continuation_byte_is_drawn_as_itself(fw):
     p = page(fw, state(fw, EQ_PEQ)).open()
     p.ui.applied = b'a\x80b\xf0\x9f\x8e\xb5'
-    assert e3_canvas(fw, p).texts[0][0] == 'a\x80b\U0001f3b5'
+    assert e3_canvas(fw, p).texts[2][0] == 'a\x80b\U0001f3b5'
 
 
-def test_the_tabs_paint_the_open_one_and_the_wheel_s(fw):
+def test_a_message_on_simple_has_the_tab_bar(fw):
+    """tabs_paint: the segmented control, unless Simple's message has the bar (e3_show puts it in the bar's title)."""
     p = page(fw).open()
     c = Canvas(fw)
     paint(fw, p.ui.bar, c)
-    (simple,), (advanced,) = c.text('Simple'), c.text('Advanced')
-    assert bright(simple[2]) > bright(advanced[2])  # the open tab the brighter
-    (accent,) = [g for g in grid(c) if g[0] == tone(fw)]
-    left, width = simple[3][0], simple[3][2]
-    assert left <= accent[1] and accent[1] + accent[3] <= left + width  # under Simple
-    for _ in range(E3_LOW - E3_TABS):
-        p.key(KEY_PREV)
-    assert p.e3.focus == E3_TABS
-    wheel = Canvas(fw)
-    paint(fw, p.ui.bar, wheel)
-    assert [g for g in c.rects if g not in wheel.rects] == [] and wheel.texts == c.texts
-    (card,) = [g for g in grid(wheel) if g not in grid(c)]  # Advanced on the card Centre would open
-    x, w = advanced[3][0], advanced[3][2]
-    assert card[1] <= x and x + w <= card[1] + card[3] and card[1] >= left + width  # under Advanced, clear of Simple
-    assert card[0] != tone(fw)
+    assert [t[0] for t in c.texts] == ['Simple', 'Advanced'] and len(fw.calls('canvas_fill_rounded_rect')) == 2
     p.e3.status = b'Save failed; EQ unchanged'
     c = Canvas(fw)
     paint(fw, p.ui.bar, c)
-    assert not c.texts  # the message has the bar
+    assert not c.texts and not c.rects and len(fw.calls('canvas_fill_rounded_rect')) == 2  # the track and segment only
 
+
+def light_mode(fw, light):
+    """Config reads as their defaults, LIGHT 1 (Light Mode) if light."""
+    def config(path, section, key, out, default, *_):
+        value = b'1' if light and C.string_at(key) == b'LIGHT' else C.string_at(default)
+        C.memmove(out, value + b'\0', len(value) + 1)
+    fw.mock('toolsReadConfig', config)
 
 
 def test_oled_s_tabs_are_a_segmented_control_whose_open_tab_turns_accent_only_with_the_wheel(fw):
     """docs/oled-design.md#tabs: a #1C1C1E track, the open tab a raised #3A3A3C segment, the accent while the wheel is on
     the bar; the open label white in Inter Medium 17 (21 as AWTK sizes it), the other #ABABAB."""
-    oled(fw)
+    light_mode(fw, False)
     assert fw.fn('eq_rows', C.c_int)()  # the theme read now: the page's card answers config reads after
     rounded = []
     def fill(c, r, _, color, radius, *__):
@@ -1378,7 +1387,7 @@ def test_oled_s_tabs_are_a_segmented_control_whose_open_tab_turns_accent_only_wi
 def test_oled_s_knobs_are_white_and_edged_in_track_in_light_mode_alone(fw, light):
     """docs/oled-design.md Progress and sliders: a 14 px white knob, ringed in the accent on the band the wheel is on.
     White is Light Mode's canvas, so there a knob with no ring is edged in its Track, #D9D9D9."""
-    oled(fw, light)
+    light_mode(fw, light)
     assert fw.fn('eq_rows', C.c_int)() and fw.fn('ipod_light', C.c_int)() == light
     p = page(fw, state(fw, EQ_3, gains=(1.5, 0, -3))).open()  # the wheel on Low
     before = len(fw.calls('vgcanvas_set_fill_color'))
@@ -1392,9 +1401,9 @@ def test_oled_s_knobs_are_white_and_edged_in_track_in_light_mode_alone(fw, light
 
 @pytest.mark.parametrize('light', [False, True])
 def test_oled_s_switch_stays_enabled_and_presets_shows_the_preset_playing(fw, light):
-    """iOS's value row: under OLED the switch keeps its title while PEQ plays, and the preset's name is Presets'
+    """iOS's value row: the switch keeps its title while PEQ plays, and the preset's name is Presets'
     value, right-aligned short of its chevron in Text Secondary (#ABABAB, #5C5C5C in Light Mode)."""
-    oled(fw, light)
+    light_mode(fw, light)
     assert fw.fn('eq_rows', C.c_int)()
     p = page(fw, state(fw, EQ_PEQ, peq=peak(fw))).open()
     p.ui.applied = b'Rock'
@@ -1563,34 +1572,17 @@ def test_unsaved_gains_wait_for_the_next_pass(fw):
     assert owner(card) == '3.5mm' and p.e3.dirty
 
 
-def oled(fw, light=False):
-    """Theme: OLED (THEME 3), in Light Mode if light, whose messages are toasts; the toasts' texts as they open."""
-    def config(path, section, key, out, default, *_):
-        name = C.string_at(key)
-        value = b'3' if name == b'THEME' else b'1' if light and name == b'LIGHT' else C.string_at(default)
-        C.memmove(out, value + b'\0', len(value) + 1)
-    fw.mock('toolsReadConfig', config)
-    said = []
-    fw.mock('navigator_to_with_context', lambda name, info, *_: said.append(C.string_at(info + 8).decode()) or 0)
-    return said
-
-
-def test_under_oled_a_message_is_a_toast_over_the_page_s_own_title(fw):
-    said = oled(fw)
-    assert fw.fn('feedback_oled', C.c_int)()
+def test_a_message_is_a_toast_over_the_page_s_own_title(fw):
+    """action: what an action did opens stock's msginfo dialog (navigation.c toast) and leaves ui.status clear, so the
+    render that follows keeps the screen's own title (docs/oled-design.md#dialogs-and-toasts)."""
     p = page(fw, files={f'{FOLDER}/x.txt': b'GraphicEQ: 20 -3\n'}).advanced()
     p.click('Presets')
     p.click('x.txt')
-    assert said == ['Use the ParametricEQ file, not GraphicEQ'] and p.title() == 'Presets'
+    assert [C.string_at(c[1][0]) for c in fw.calls('navigator_to_with_context')] == [b'dialog/msginfo_dialog']
+    assert p.said == ['Use the ParametricEQ file, not GraphicEQ'] and p.ui.status == b'' and p.title() == 'Presets'
 
 
 # The Type picker (docs/internals.md#parametric-eq): every type, a screen of them or the inset modal's.
-
-@pytest.fixture(scope='module')
-def scratch(library):
-    """navigation.c's scratch_t's field offsets as this build lays it out."""
-    return host.offsets(library.parent/'navigation.o', 'scratch_t')
-
 
 def test_the_type_picker_opens_on_the_band_s_type_and_return_leaves_it(fw):
     p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()
@@ -1632,11 +1624,7 @@ def test_a_notch_s_q_goes_to_30_and_back_to_10_for_another_type(fw):
     assert p.ui.draft.bands[0].q == 10 and 'Gain +6.0 dB' in p.captions()  # the gain it had, kept
 
 
-def test_under_a_modal_set_type_opens_the_inset_modal_s_picker(fw, scratch):
-    oled(fw)
-    st = C.addressof(fw.var('st', C.c_char))
-    sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
-    C.c_int.from_address(st + scratch['geom']).value = [g.name for g in sets].index('oled')
+def test_under_a_modal_set_type_opens_the_inset_modal_s_picker(fw):
     assert fw.fn('modal_set', C.c_int)()
     p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()
     p.click('1  ')
@@ -1647,13 +1635,9 @@ def test_under_a_modal_set_type_opens_the_inset_modal_s_picker(fw, scratch):
 
 
 
-def test_under_the_inset_modal_the_band_s_list_waits_and_a_pick_sets_the_type(fw, scratch):
+def test_under_the_inset_modal_the_band_s_list_waits_and_a_pick_sets_the_type(fw):
     """The panel opening over the page (menu_modal.c modal_list, its dialog stood in for): no render while it is up,
     and a pick, run as its next pass, sets the type with the wheel still on Type."""
-    oled(fw)
-    st = C.addressof(fw.var('st', C.c_char))
-    sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
-    C.c_int.from_address(st + scratch['geom']).value = [g.name for g in sets].index('oled')
     p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()
     p.click('1  ')
     p.props[(p.ui.view, '_ringnav_index')] = 2  # the wheel on Type

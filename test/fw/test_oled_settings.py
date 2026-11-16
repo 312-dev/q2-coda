@@ -5,9 +5,7 @@ import ctypes as C
 
 from conftest import O
 from test_nav_display_library import (  # noqa: F401 (fixtures)
-    CLASSIC, STOCK_BODY, STOCK_ROW, THEMES, SettingsList, Ui, button_of, display, geometry, scratch, st, stand_in)
-
-OLED = next(t['index'] for t in THEMES if t['id'] == 'oled')
+    OLED, STOCK_BODY, SettingsList, Ui, button_of, display, geometry, scratch, st, stand_in)
 
 
 def test_a_set_switch_themes_on_off_row_is_a_switch(fw):
@@ -15,12 +13,6 @@ def test_a_set_switch_themes_on_off_row_is_a_switch(fw):
     ui = Ui(fw)
     b = button_of(display(fw, ui, THEME=b'%d' % OLED).view(), 'Smart Awake')
     assert b.find('_setting_value') is None and b.find('_setting_switch').props['image'] == b'switch_off'
-
-
-def test_a_set_text_themes_on_off_row_still_reads_on_or_off(fw):
-    ui = Ui(fw)
-    b = button_of(display(fw, ui, THEME=b'%d' % CLASSIC).view(), 'Smart Awake')
-    assert b.find('_setting_switch') is None and b.find('_setting_value').text == 'Off'
 
 
 def test_oled_settings_text_starts_on_the_text_column(fw, st, geometry, stand_in):

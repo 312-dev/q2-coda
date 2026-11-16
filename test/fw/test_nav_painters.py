@@ -1,7 +1,7 @@
 """patch/navigation.c's painters and settings rows, with the scheme and Light Mode (now theme_engine.c's)
-and a row action's confirm (now playlists.c's): the marquee's lull, Classic's dialogs and toast, the
-selection, separators, marks and scrollbar, ringnav_paint, the settings pages' rows, the tag and scan
-hooks, the lyrics' follow and the status bar's play state.
+and a row action's confirm (now playlists.c's): the marquee's lull and fade, OLED's dialog, the
+selection, dividers, marks and the wheel's scroll indicator, ringnav_paint, the settings pages' rows,
+the tag and scan hooks, the lyrics' follow and the status bar's play state and clock.
 
 The widgets are a small AWTK of their own (Ui): each a zeroed block whose box and parent the C reads
 by offset, its type, name, props, text and children answered by the stubs; the canvas (Canvas) keeps
@@ -20,17 +20,17 @@ import host
 from conftest import NAVIGATION_SOURCE, O, c_enum, Deques, Files, claim, high_halves, libc, ui_name
 
 STRINGS = dict(re.findall(r'^#define (\w+) "([^"]*)"', (host.ROOT/'patch/offsets.inc').read_text(), re.M))
-LIST_INTO_WHITE, BT_GLYPH = STRINGS['LIST_INTO_WHITE'], STRINGS['BT_GLYPH']
+BT_GLYPH = STRINGS['BT_GLYPH']
 
 W_X, W_Y, W_W, W_H, W_PARENT, W_EMITTER = O['W_X'], O['W_Y'], O['W_W'], O['W_H'], O['W_PARENT'], O['W_EMITTER']
 EVT_CLICK, EVT_DESTROY = O['EVT_CLICK'], O['EVT_DESTROY']
 CANVAS_X, CANVAS_Y, CANVAS_LCD = O['CANVAS_X'], O['CANVAS_Y'], O['CANVAS_LCD']
 LCD_FILL, LCD_STROKE = O['LCD_FILL_COLOR'], O['LCD_STROKE_COLOR']
 THEMES = host.tools_theme.builtins()
-MINIMAL, CLASSIC, MODERN = (next(i for i, t in enumerate(THEMES) if t['name'] == name) for name in ('Minimal', 'Classic', 'Modern'))
+OLED = next(i for i, t in enumerate(THEMES) if t['name'] == 'OLED')  # the one theme
 SETS = host.tools_theme.geometry_sets(THEMES)  # boot_values' rows: st.geom indexes them
 SET0 = SETS[0]  # the set st.geom 0 reads: theme_boot's before it writes one
-CLASSIC_SET = next(i for i, s in enumerate(SETS) if s.name == 'classic-light')
+OLED_SET = next(i for i, s in enumerate(SETS) if s.name == 'oled')  # the set theme_boot writes
 
 
 def i32(v):
@@ -356,9 +356,9 @@ def strings(fw):
     fw.mock('tk_str_start_with', lambda s, prefix, *_: C.string_at(s).startswith(C.string_at(prefix)))
 
 
-def theme(fw, index, **values):
-    """The theme config.ini names, read as accent() reads it."""
-    settings = Settings(fw, THEME=str(index).encode(), **values)
+def theme(fw, **values):
+    """config.ini's keys for the theme (OLED, stored as THEME 3), read as accent() reads them."""
+    settings = Settings(fw, THEME=b'3', **values)
     fw.fn('ipod_light', C.c_int)()
     return settings
 
@@ -530,14 +530,17 @@ def test_a_marquee_off_its_row_or_screen_ends_with_the_pass(fw, st, lit, moved):
     assert [c[1][0] for c in fw.calls('hscroll_label_stop')] == [label.addr]
 
 
-# The theme's scrollbar: a thumb alone, drawn after a list's children (ringnav_paint).
+# The wheel's scroll indicator: a track and its thumb on a list the wheel just moved, drawn after the list's children
+# (ringnav_paint, list_marks.c wheel_sb_alpha). The track stands on the screen rows sb_top to sb_bottom whatever the
+# list's own box; the thumb's place and length are the scroll's and the screenful's shares of it.
 class Lists:
-    """A list_view holding its scroll_view (or a table's client) and stock's scroll_bar_m, under Classic's
-    thumb: the list's top at screen row y."""
+    """A list_view holding its scroll_view (or a table's client) and stock's scroll_bar_m, its top at screen row y,
+    the wheel's tick on it just now."""
     def __init__(self, fw, y=26, h=294, content=1200, value=0, table=0):
         self.ui, self.fw = Ui(fw), fw
-        theme(fw, CLASSIC)
-        self.T = THEMES[CLASSIC]
+        theme(fw)
+        self.T = THEMES[OLED]
+        fw.mock('time_now_ms', lambda *_: 5000)
         win = self.ui.window('allmusic_page')
         self.list = self.ui.add('list_view', win, (0, y, 375, h))
         client = self.ui.add('table_client' if table else 'scroll_view', self.list, (0, 0, 375, h))
@@ -546,16 +549,22 @@ class Lists:
         self.bar = self.ui.add('scroll_bar_m', self.list, (369, 0, 6, h))
         self.bar.int_at(O['BAR_MAX']).value = 1000 if table else content  # a table's bar: an asset's 1000
         self.bar.int_at(O['BAR_VALUE']).value = value
+        fw.fn('wheel_sb_arm', None, C.c_void_p)(client.addr)
         self.canvas = Canvas(fw, y=y)
 
     def paint(self):
         self.fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(self.list.addr, self.canvas.addr)
         return sorted(self.canvas.px)
 
+    def thumb(self):
+        """The pixels in the dark half's thumb colour (its ends' too, part transparent)."""
+        ink = rgba(self.T['sb_thumb']) & 0xffffff
+        return [p for p, c in self.canvas.px.items() if c & 0xffffff == ink]
+
     def track(self):
-        """The screen rows the thumb travels, in the list's own rows."""
-        y, h = struct.unpack_from('<i', self.canvas.block, CANVAS_Y)[0], self.list.box[3]
-        return max(y, self.T['sb_top']) - y, min(y + h, self.T['sb_bottom']) - y
+        """The screen rows the track stands on, in the list's own rows."""
+        y = struct.unpack_from('<i', self.canvas.block, CANVAS_Y)[0]
+        return self.T['sb_top'] - y, self.T['sb_bottom'] - y
 
 
 def thumb_box(pixels):
@@ -565,34 +574,32 @@ def thumb_box(pixels):
 
 def test_the_thumb_sits_at_the_lists_right_edge_and_starts_at_the_tracks_top(fw):
     lists = Lists(fw)
-    x0, y0, x1, y1 = thumb_box(lists.paint())
+    lists.paint()
+    x0, y0, x1, y1 = thumb_box(lists.thumb())
     top, bottom = lists.track()
     T = lists.T
     assert (x0, x1) == (375 - T['sb_right'] - T['sb_w'], 375 - T['sb_right'])
-    assert y0 == top and y1 - y0 == (bottom - top) * 294 // 1200  # the screenful's share of the content
+    assert y0 == top and y1 - y0 == (bottom - top) * 294 // 1200  # the screenful's share of the track
+    assert thumb_box(lists.paint()) == (x0, top, x1, bottom)  # the track under it, top to bottom
     assert lists.canvas.restored()
-
-
-def test_the_thumb_ends_at_the_tracks_bottom_at_the_lists_end(fw):
-    lists = Lists(fw, value=1200)
-    _, y0, _, y1 = thumb_box(lists.paint())
-    assert y1 == lists.track()[1]
 
 
 @pytest.mark.parametrize('value', [-50, 0, 300, 906, 1200, 5000])
 def test_the_thumb_moves_with_the_list_and_stays_on_its_track(fw, value):
+    """The scroll's share of the track places it, held to the bar's range; it never runs past the track's end, so
+    at the bar's max it has no rows."""
     lists = Lists(fw, value=value)
-    _, y0, _, y1 = thumb_box(lists.paint())
+    lists.paint()
     top, bottom = lists.track()
-    length, at = y1 - y0, max(0, min(value, 1200))
-    assert top <= y0 and y1 <= bottom
-    assert y0 == top + (bottom - top - length) * at // 1200
-
-
-def test_a_long_list_keeps_the_thumbs_least_length(fw):
-    lists = Lists(fw, content=100000)
-    _, y0, _, y1 = thumb_box(lists.paint())
-    assert y1 - y0 == lists.T['sb_min']
+    track = bottom - top
+    at = track * max(0, min(value, 1200)) // 1200
+    length = min(track * 294 // 1200, track - at)
+    thumb = lists.thumb()
+    if length <= 0:
+        assert thumb == []
+        return
+    _, y0, _, y1 = thumb_box(thumb)
+    assert (y0, y1) == (top + at, top + at + length) and y1 <= bottom
 
 
 def test_a_list_that_fits_has_no_thumb(fw):
@@ -603,7 +610,8 @@ def test_a_list_that_fits_has_no_thumb(fw):
 def test_a_table_measures_by_its_virtual_height(fw):
     """Before its first scroll a table's bar holds an asset's 1000: the client's height counts."""
     lists = Lists(fw, content=2940, table=1)
-    _, y0, _, y1 = thumb_box(lists.paint())
+    lists.paint()
+    _, y0, _, y1 = thumb_box(lists.thumb())
     top, bottom = lists.track()
     assert y1 - y0 == (bottom - top) * 294 // 2940
 
@@ -611,7 +619,8 @@ def test_a_table_measures_by_its_virtual_height(fw):
 def test_a_list_under_the_bar_keeps_the_thumb_below_it(fw):
     """The track's ends are screen rows: a list from the top of the screen starts its thumb at sb_top."""
     lists = Lists(fw, y=0, h=320)
-    _, y0, _, _ = thumb_box(lists.paint())
+    lists.paint()
+    _, y0, _, _ = thumb_box(lists.thumb())
     assert y0 == lists.T['sb_top']
 
 
@@ -624,19 +633,13 @@ def test_the_thumb_is_the_themes_in_either_half(fw, st):
     assert rgba(lists.T['sb_thumb']) in dark and dark != light
 
 
-def test_minimal_has_no_thumb(fw, st):
-    lists = Lists(fw)
-    st('theme').value = MINIMAL
-    assert lists.paint() == [] and fw.calls('stock_paint_trampoline')
-
-
 def test_an_inset_modals_scroll_indicator_stays_in_its_panel(fw, st):
     """OLED's wheel indicator on an inset modal's rows (menu_modal.c): inside the panel's right padding, clear of the
     selection bar's end, so nothing lights past the panel's edge (x 58 to 317 on screen, the rows' box from 50)."""
     now = [5000]
     fw.mock('time_now_ms', lambda *_: now[0])
     ui = Ui(fw)
-    theme(fw, OLED)
+    theme(fw)
     T = THEMES[OLED]
     win = ui.window('sortselect_dialog', kind='dialog')
     lv = ui.add('list_view', win, (0, 44, 375, 210), 'list_view')
@@ -659,7 +662,6 @@ def test_an_inset_modals_scroll_indicator_stays_in_its_panel(fw, st):
 
 # A scrolling text's faded ends (list.marquee.fade, OLED's; list_marks.c marquee_fade): its own column inside stock's
 # 2 px margins, 12 columns at an end, clear inside to opaque at the end, in the colour behind the text.
-OLED = next(i for i, t in enumerate(THEMES) if t['name'] == 'OLED')
 FADE = 12
 
 
@@ -668,7 +670,7 @@ class Fade:
     keeps each fill as (x, y, w, h, color_t)."""
     def __init__(self, fw, st, text_w=260, off=0, timer=41, ellipses=1):
         self.fw, self.ui = fw, Ui(fw)
-        theme(fw, OLED)
+        theme(fw)
         self.label = self.ui.add('hscroll_label', None, (100, 50, 200, 24), 'title')
         self.label.int_at(O['HSCROLL_TEXT_W']).value = text_w
         self.label.int_at(O['HSCROLL_XOFFSET']).value = off
@@ -743,7 +745,7 @@ def test_now_playings_modes_are_the_themes_pair_lit_by_stocks_mode(fw, st, mcl, 
     each the accent's while on (shuffle at MCL_MODE 2, repeat at 3 and at 2, as stock's Shuffle never ends, unless
     Off was chosen under it; repeat-once's glyph at 1), else the half's grey."""
     ui = Ui(fw)
-    theme(fw, OLED)
+    theme(fw)
     st('light').value, mcl.mode = light, mode
     win = ui.window('playing_page')
     button = ui.add('image', win, (143, 196, 88, 44), 'img_playmode')
@@ -755,18 +757,14 @@ def test_now_playings_modes_are_the_themes_pair_lit_by_stocks_mode(fw, st, mcl, 
     struct.pack_into('<Q', raw, CANVAS_LCD, C.addressof(lcd))
     fw.fn('np_modes', None, C.c_void_p, C.c_void_p)(win.addr, C.addressof(raw))
     assert loads == names and drawn == [(187 - 22, 218), (187 + 22, 218)]
-    loads.clear()
-    st('theme').value = MINIMAL  # stock's one icon: nothing drawn
-    fw.fn('np_modes', None, C.c_void_p, C.c_void_p)(win.addr, C.addressof(raw))
-    assert loads == []
 
 
 def test_now_playings_heart_and_more_are_the_themes_glyphs_in_each_half(fw, st):
     """np_bar.c np_glyphs, on each paint of OLED's Now Playing: stock's play_fav and play_unfav become the theme's full
     heart and its empty one in the half's ink, an empty heart follows a Light Mode change, an app's heart stays, and
-    More's states take the half's dots (pressed, the dimmer ones) once per half. Minimal keeps stock's."""
+    More's states take the half's dots (pressed, the dimmer ones) once per half."""
     ui = Ui(fw)
-    theme(fw, OLED)
+    theme(fw)
     win = ui.window('playing_page')
     fav = ui.add('image', win, (289, 145, 34, 34), 'img_fav', image='play_unfav')
     more = ui.add('image', win, (323, 145, 34, 34), 'img_more', **{'style:normal:bg_image': 'play_more'})
@@ -789,9 +787,6 @@ def test_now_playings_heart_and_more_are_the_themes_glyphs_in_each_half(fw, st):
     fav.props['image'] = 'tidal_fav_add'
     glyphs(win.addr)
     assert fav.props['image'] == 'tidal_fav_add'
-    st('theme').value, fav.props['image'] = MINIMAL, 'play_unfav'
-    glyphs(win.addr)
-    assert fav.props['image'] == 'play_unfav'
 
 
 class Modes:
@@ -800,7 +795,7 @@ class Modes:
     def __init__(self, fw, st, mcl, mode):
         self.fw, self.mcl = fw, mcl
         ui = Ui(fw)
-        self.settings = theme(fw, OLED)
+        self.settings = theme(fw)
         mcl.mode = mode
         self.win = ui.window('playing_page')
         self.button = ui.add('image', self.win, (143, 252, 88, 44), 'img_playmode')
@@ -854,7 +849,7 @@ def test_what_stocks_mode_cant_say_outlives_a_restart(fw, st, mcl, library, tmp_
     (tmp_path/'restart').mkdir()
     again = host.Fw(library, tmp_path/'restart')  # scratch zeroed, as at power-on; mcl's globals stay
     try:
-        theme(again, OLED, **saved)
+        theme(again, **saved)
         win = Ui(again).window('playing_page')
         button = Ui(again).add('image', win, (143, 196, 88, 44), 'img_playmode')
         again.mock('widget_lookup', lambda w, name, deep, *_: button.addr if C.string_at(name) == b'img_playmode' else 0)
@@ -879,12 +874,6 @@ def test_a_tap_that_keeps_what_was_saved_writes_nothing(fw, st, mcl):
     assert m.settings.written == [('NPSHUFONE', 1), ('NPREPOFF', 1), ('NPREPOFF', 0)]
 
 
-def test_other_themes_keep_stocks_play_mode_tap(fw, st, mcl):
-    m = Modes(fw, st, mcl, 0)
-    st('theme').value = MINIMAL
-    assert m.tap('shuffle') == 0 and m.sent == []
-
-
 @pytest.mark.parametrize('timer, ellipses, faded', [(0, 1, False), (41, 1, True), (0, 0, True)])
 def test_a_label_at_rest_on_its_ellipsis_keeps_it(fw, st, timer, ellipses, faded):
     """Stock ends a stopped label with ellipses in "...": that one is left alone. Running, or stopped without an ellipsis
@@ -896,7 +885,7 @@ def test_the_selected_rows_marquee_fades_into_the_selection_and_light_mode_into_
     fade = Fade(fw, st)
     st('marq_label', C.c_void_p).value = fade.label.addr
     fade.paint()
-    tones = C.c_void_p.from_address(fw.fn('scheme', C.c_void_p)() + layout[0]['tones']).value or 0
+    tones = C.c_void_p.from_address(fw.fn('scheme', C.c_void_p)() + layout['tones']).value or 0
     top = C.c_uint.from_address(tones).value  # the selection bar's top tone, the colour under the text
     assert top and {f[4] & 0xffffff for f in fade.fills} == {rgba(top) & 0xffffff}
     t = THEMES[OLED]
@@ -904,22 +893,18 @@ def test_the_selected_rows_marquee_fades_into_the_selection_and_light_mode_into_
     st('marq_label', C.c_void_p).value = None
     st('light').value = 1
     fade.paint()
-    paper = C.c_uint.from_address(fw.fn('scheme', C.c_void_p)() + layout[0]['paper']).value  # the light half's
+    paper = C.c_uint.from_address(fw.fn('scheme', C.c_void_p)() + layout['paper']).value  # the light half's
     assert paper > 0xe00000 and {f[4] & 0xffffff for f in fade.fills} == {rgba(paper) & 0xffffff}
 
 
-def test_other_themes_and_widgets_get_no_fade(fw, st):
+def test_other_widgets_get_no_fade(fw, st):
     fade = Fade(fw, st)
     fade.paint()
     assert fade.fills
-    label = fade.label
     fade.label = fade.ui.add('label', None, (100, 50, 200, 24), 'plain')
     fade.label.int_at(O['HSCROLL_TEXT_W']).value = 260
     assert fade.paint() == []
-    fade.label = label
-    st('theme').value = MINIMAL  # ringnav_paint asks list.marquee.fade first: Minimal's is 0
-    assert THEMES[MINIMAL]['marquee_fade'] == 0 == THEMES[CLASSIC]['marquee_fade'] == THEMES[MODERN]['marquee_fade']
-    assert THEMES[OLED]['marquee_fade'] == 1
+    assert THEMES[OLED]['marquee_fade'] == 1  # ringnav_paint asks list.marquee.fade first
 
 
 # The status bar's play state (ringnav_showface, each second).
@@ -941,9 +926,9 @@ class Bar:
         self.fw.fn('ringnav_showface', C.c_int, C.c_void_p)(self.bar.addr)
 
 
-@pytest.mark.parametrize('status, shown, image', [(2, 1, 'bar_play'), (3, 1, 'bar_pause'), (0, 0, None), (1, 0, None)])
+@pytest.mark.parametrize('status, shown, image', [(2, 1, 'oled_play_d'), (3, 1, 'oled_pause_d'), (0, 0, None), (1, 0, None)])
 def test_the_bar_shows_whats_playing(fw, status, shown, image):
-    theme(fw, MODERN)
+    theme(fw)
     bar = Bar(fw, status)
     bar.w['label_eq'].visible = 0
     bar.sync()
@@ -952,7 +937,7 @@ def test_the_bar_shows_whats_playing(fw, status, shown, image):
 
 
 def test_idle_stays_hidden_under_eq(fw):
-    theme(fw, MODERN)
+    theme(fw)
     bar = Bar(fw, 0)
     bar.sync()
     assert bar.w['label_eq'].visible and not bar.w['label_idle'].visible
@@ -961,7 +946,7 @@ def test_idle_stays_hidden_under_eq(fw):
 def test_a_second_sync_with_nothing_new_sets_no_image(fw):
     """The image is set only when it changes (a set image is a relayout and a repaint); visibility
     writes are stock's no-ops when unchanged."""
-    theme(fw, MODERN)
+    theme(fw)
     bar = Bar(fw, 2)
     bar.sync()
     shown = {n: w.visible for n, w in bar.w.items()}
@@ -969,24 +954,25 @@ def test_a_second_sync_with_nothing_new_sets_no_image(fw):
     assert len(fw.calls('image_base_set_image')) == 1 and {n: w.visible for n, w in bar.w.items()} == shown
     bar.status = 3
     bar.sync()
-    assert bar.w['img_state'].props['image'] == 'bar_pause'
+    assert bar.w['img_state'].props['image'] == 'oled_pause_d'
 
 
 @pytest.mark.parametrize('light', [0, 1])
 @pytest.mark.parametrize('status', [2, 3])
-def test_classic_draws_its_own_state_by_half(fw, light, status):
-    theme(fw, CLASSIC, LIGHT=str(light).encode())
+def test_the_state_is_the_themes_own_art_by_half(fw, light, status):
+    """The play state is the theme's own art (tools/art.py, its art prefix), by state and half."""
+    theme(fw, LIGHT=str(light).encode())
     bar = Bar(fw, status)
     bar.sync()
     state = 'play' if status == 2 else 'pause'
-    assert bar.w['img_state'].props['image'] == f'classic_light_{state}_{"dl"[light]}'
-    assert bar.w['label_eq'].visible  # stock's, left alone: Classic's bar keeps it off-screen (tools/ipod.py)
+    assert bar.w['img_state'].props['image'] == f'oled_{state}_{"dl"[light]}'
+    assert bar.w['label_eq'].visible  # stock's, left alone
 
 
 @pytest.mark.parametrize('status', [2, 3])
 def test_on_homes_list_the_state_stays_by_the_battery_and_the_title_shows(fw, status):
-    """Home's own list is like any page: Classic's play state shows in img_state and leaves the title alone."""
-    theme(fw, CLASSIC)
+    """Home's own list is like any page: the play state shows in img_state and leaves the title alone."""
+    theme(fw)
     bar = Bar(fw, status)
     home = bar.ui.window('home_page')
     bar.sync()
@@ -1005,45 +991,26 @@ def test_on_homes_list_the_state_stays_by_the_battery_and_the_title_shows(fw, st
 @pytest.fixture(scope='module')
 def layout(library):
     obj = library.parent/'navigation.o'
-    return host.offsets(obj, 'scheme_t'), host.offsets(obj, 'stops_t')
+    return host.offsets(obj, 'scheme_t')
 
 
 class Scheme:
     """The live scheme's fields (theme.h scheme_t), as the theme table states them."""
     def __init__(self, fw, layout):
-        at, stops = layout
         base = fw.fn('scheme', C.c_void_p)()
-        tones = C.c_void_p.from_address(base + at['tones']).value or 0
+        tones = C.c_void_p.from_address(base + layout['tones']).value or 0
         self.tones = [C.c_uint.from_address(tones + 4 * i).value for i in range(5)]
-        self.flags = C.c_ubyte.from_address(base + at['flags']).value
-        get = lambda name: C.c_uint.from_address(base + at[name]).value
-        self.fill, self.muted, self.sel_text, self.ink = get('fill'), get('muted'), get('sel_text'), get('ink')
-        self.sel_top, self.sel_edge, self.sel_tall_edge, self.sel_tall_line = (get('sel_top'), get('sel_edge'),
-                                                                               get('sel_tall_edge'), get('sel_tall_line'))
-        sel = base + at['sel']
-        n = C.c_ubyte.from_address(sel + stops['n']).value
-        self.sel = [C.c_uint.from_address(sel + stops['rgb'] + 4 * i).value for i in range(n)]
-        self.sel_pos = [C.c_ubyte.from_address(sel + stops['pos'] + i).value for i in range(n)]
-        self.paper = C.c_uint.from_address(base + at['paper']).value
-
-    def sel_row(self, j, h):
-        """Row j of h of the selection's stops: j / (h - 1) of the way down, mixed between the stops
-        around it (theme.h stops_t)."""
-        pos, rgb = self.sel_pos, self.sel
-        if len(rgb) == h:
-            return rgb[j]
-        p, k = j * 25600 // (h - 1), 0
-        while k + 2 < len(rgb) and p > pos[k + 1] * 256:
-            k += 1
-        return mix(rgb[k], rgb[k + 1], p - pos[k] * 256, (pos[k + 1] - pos[k]) * 256)
+        get = lambda name: C.c_uint.from_address(base + layout[name]).value
+        self.chevron, self.muted, self.sel_text, self.paper, self.ink = (get('chevron'), get('muted'), get('sel_text'),
+                                                                         get('paper'), get('ink'))
 
 
 class Page:
-    """A list page under a theme, its row sel the one selected and settled (its count and scope the
+    """A list page, its row sel the one selected and settled (its count and scope the
     view's), painted as stock paints a widget's background."""
-    def __init__(self, fw, which, rows=4, pitch=48, sel=1, name='localmusic_page', **config):
+    def __init__(self, fw, rows=4, pitch=48, sel=1, name='localmusic_page', **config):
         self.fw = fw
-        theme(fw, which, **config)
+        theme(fw, **config)
         self.ui = Ui(fw)
         self.view, self.rows = library(fw, self.ui, rows, pitch, name)
         if sel is not None:
@@ -1094,23 +1061,20 @@ def text_ink(fw, st, w, color=0xffffffff):
     return style_ink(fw, color)
 
 
-def test_modern_bars_the_selected_row_full_width(fw, st, layout):
-    page = Page(fw, MODERN)
+def test_the_selected_row_is_the_accents_bar_inset_with_round_ends(fw, st, layout):
+    """list.selection: the bar sel_inset in from each side, its ends sel_radius round, a one-pixel highlight over the
+    accent's gradient, each row j / 47 of the way top tone to bottom (OLED's tones are one blue: solid)."""
+    page = Page(fw)
     S = Scheme(fw, layout)
+    T = THEMES[OLED]
+    inset, radius = T['sel_inset'], T['sel_radius']
     band = page.band() if page.paint() else {}
-    assert list(band) == list(range(48, 96)) and all(r[:2] == (0, 375) for r in band.values())
-    # a one-pixel highlight over the accent's gradient, each row j / 47 of the way top tone to bottom
-    assert solid(band[48]) == rgba(S.tones[4])
-    assert [solid(band[48 + j]) for j in (1, 24, 47)] == [rgba(mix(S.tones[0], S.tones[1], j, 47)) for j in (1, 24, 47)]
-    assert page.canvas.restored() and page.canvas.clip == [0, 0, 375, 320]
-
-
-def test_rounded_corners_make_modern_a_pill_inset_from_the_glass(fw, layout):
-    page = Page(fw, MODERN, ROUNDED=b'1')
-    band = page.band() if page.paint() else {}
-    inset = O['SEL_INSET']
-    assert band[72][:2] == (inset, 375 - inset)
+    assert list(band) == list(range(48, 96))
+    assert all(band[y][:2] == (inset, 375 - inset) for y in range(48 + radius, 96 - radius))
     assert band[48][0] > inset and band[95][0] > inset  # its ends round in
+    assert solid(band[72]) == rgba(mix(S.tones[0], S.tones[1], 24, 47)) and band[48][2][len(band[48][2]) // 2] == rgba(S.tones[4])
+    assert S.tones[0] == T['schemes'][T['accents'].bit_length() - 1]['tones'][0]  # OLED's Accent Blue
+    assert page.canvas.restored() and page.canvas.clip == [0, 0, 375, 320]
 
 
 # A theme's own selection shape and accent (an OLED theme's: a flat exact blue, 8 px in, 6 px ends), written into the
@@ -1134,11 +1098,11 @@ def own_shape(fw, theme_layout, layout, radius, inset):
     T = fw.fn('theme', C.c_void_p)()
     poke(T + theme_layout['sel_radius'], C.c_ubyte, radius)
     poke(T + theme_layout['sel_inset'], C.c_ubyte, inset)
-    poke(fw.fn('scheme', C.c_void_p)() + layout[0]['tones'], C.c_void_p, C.addressof(OLED_TONES))
+    poke(fw.fn('scheme', C.c_void_p)() + layout['tones'], C.c_void_p, C.addressof(OLED_TONES))
 
 
 def test_a_theme_s_own_bar_is_its_inset_its_radius_and_its_tones(fw, layout, theme_layout):
-    page = Page(fw, MODERN, ROUNDED=b'1')
+    page = Page(fw)
     own_shape(fw, theme_layout, layout, 6, 8)
     band = page.band() if page.paint() else {}
     blue = rgba(0x2f5bea)
@@ -1150,29 +1114,21 @@ def test_a_theme_s_own_bar_is_its_inset_its_radius_and_its_tones(fw, layout, the
 
 
 def test_a_theme_s_square_ended_bar_keeps_its_inset(fw, layout, theme_layout):
-    page = Page(fw, MODERN, ROUNDED=b'1')
+    page = Page(fw)
     own_shape(fw, theme_layout, layout, 0, 8)
     band = page.band() if page.paint() else {}
     assert list(band) == list(range(48, 96)) and all(r[:2] == (8, 375 - 8) and solid(r) == rgba(0x2f5bea) for r in band.values())
-
-
-def test_corners_square_keeps_a_theme_s_bar_full_width_and_square(fw, layout, theme_layout):
-    page = Page(fw, MODERN, ROUNDED=b'0')
-    own_shape(fw, theme_layout, layout, 6, 8)
-    band = page.band() if page.paint() else {}
-    assert list(band) == list(range(48, 96)) and all(r[:2] == (0, 375) and solid(r) == rgba(0x2f5bea) for r in band.values())
 
 
 def test_an_own_scheme_s_tones_compile_into_its_row(tmp_path):
     """tools/theme.py's table for a theme whose own scheme states its tones: that row's tones are them, every ACCENTS
     row's its own, as cc reads the emitted C."""
     T = host.tools_theme
-    by_id = {n.attrs['id']: n for n in map(T.load, sorted((host.ROOT/'assets/themes').glob('*/theme.xml')))}
-    root = T.parse('<theme format="1" id="oled" name="OLED" index="3" extends="minimal">'
-                   '<colorScheme name="oled-blue" base="cobalt" label="Blue" tones="#2f5bea #2f5bea #5a7cee #5a7cee #2f5bea"/>'
-                   '<colorSchemes accents="oled-blue"/><option setting="accent" key="OLED_ACCENT" default="oled-blue"/></theme>',
-                   'oled/theme.xml')
-    t = T.resolve(root, {**by_id, 'oled': root})
+    text = (host.ROOT/'assets/themes/oled/theme.xml').read_text()
+    own = re.sub(r'(<colorScheme name="oled-blue"[^>]*tones=")[^"]*"', r'\1#2f5bea #2f5bea #5a7cee #5a7cee #2f5bea"', text)
+    assert own != text  # OLED's own scheme, its tones restated
+    root = T.parse(own, 'oled/theme.xml')
+    t = T.resolve(root, {'oled': root})
     T.validate(t, 'oled/theme.xml')
     T.emit([t], tmp_path)
     inc = (tmp_path/'themes.inc').read_text()
@@ -1193,43 +1149,10 @@ def test_a_radius_past_half_the_row_is_the_pill(fw, layout, theme_layout):
     """SEL_MAX_RADIUS, the default, and any radius past half the row draw the pill alike."""
     bands = []
     for radius in (O['SEL_MAX_RADIUS'], 24, 30):
-        page = Page(fw, MODERN, ROUNDED=b'1')
+        page = Page(fw)
         own_shape(fw, theme_layout, layout, radius, O['SEL_INSET'])
         bands.append(page.band() if page.paint() else {})
     assert bands[0] == bands[1] == bands[2] and bands[0][48][0] > O['SEL_INSET'] + 10
-
-
-def test_minimal_ivory_lays_a_card_under_the_row(fw, st, layout):
-    page = Page(fw, MINIMAL, MINIMAL_ACCENT=b'7', ROUNDED=b'0')
-    S = Scheme(fw, layout)
-    page.paint()
-    assert S.flags & 1  # Ivory: SCHEME_CARD
-    assert page.canvas.boxes == [((0, 48, 375, 48), rgba(S.fill), 0)]  # Corners: Square, full width
-    # the card's row takes a dark ink on it; the other rows keep stock's
-    lit, other = (text_ink(fw, st, page.rows[k].children[0]) for k in (1, 2))
-    assert bright(lit) < bright(S.fill) <= bright(other)
-
-
-def test_minimal_rounded_card_is_a_pill_inset_from_the_glass(fw, layout):
-    page = Page(fw, MINIMAL, ROUNDED=b'1')
-    page.paint()
-    inset = O['SEL_INSET']
-    assert page.canvas.boxes[0][0] == (inset, 48, 375 - 2 * inset, 48) and page.canvas.boxes[0][2] == 24
-
-
-@pytest.mark.parametrize('coloured', [1, 0])
-def test_minimal_accent_card_is_its_tone_and_a_coloured_ones_row_keeps_white_ink(fw, st, layout, coloured):
-    page = Page(fw, MINIMAL)
-    for accent in range(len(THEMES[MINIMAL]['schemes'])):
-        st('minimal_accent').value = accent
-        S = Scheme(fw, layout)
-        if not S.flags & 1 and neutral(S.tones[0]) != coloured:
-            break
-    page.paint()
-    assert page.canvas.boxes[0][1] == rgba(S.tones[0])
-    # Light Mode keeps the row's white text white on a coloured card, and flips it on a grey one
-    st('light').value = 1
-    assert (text_ink(fw, st, page.rows[1].children[0]) == 0xffffffff) == bool(coloured)
 
 
 @pytest.mark.parametrize('stop, lit', [(1, True), (2, False)])
@@ -1237,7 +1160,7 @@ def test_the_shuffle_rows_label_on_the_bar_keeps_the_selections_ink_in_light_mod
     """OLED's Shuffle row stands outside the list (navigation.c shuffle_paint): while its Shuffle is lit its label takes
     the selection's text colour, white on the bar in Light Mode too, not the page's flipped ink; on Sort's stop it is
     page text again."""
-    page = Page(fw, OLED)
+    page = Page(fw)
     page.paint()
     st('light').value = 1
     label, view = page.rows[2].children[0], page.rows[3]
@@ -1247,47 +1170,30 @@ def test_the_shuffle_rows_label_on_the_bar_keeps_the_selections_ink_in_light_mod
     assert (text_ink(fw, st, label) == 0xffffffff) == lit
 
 
-@pytest.mark.parametrize('tall', [0, 1])
-def test_classic_lays_its_stops_band_with_its_lines(fw, layout, tall):
-    """A crisp top line, the stops, an edge; a row taller than the set's pitch ends on its two rows."""
-    pitch = SET0.pitch + 16 if tall else SET0.pitch
-    page = Page(fw, CLASSIC, pitch=pitch)
-    S = Scheme(fw, layout)
-    band = page.band() if page.paint() else {}
-    y0, y1 = pitch, 2 * pitch
-    assert list(band) == list(range(y0, y1)) and all(r[:2] == (0, 375) for r in band.values())
-    assert solid(band[y0]) == rgba(S.sel_top)
-    if tall:
-        assert solid(band[y1 - 2]) == rgba(S.sel_tall_edge) and solid(band[y1 - 1]) == rgba(S.sel_tall_line)
-    else:
-        assert solid(band[y0 + 1]) == rgba(S.sel[0]) and solid(band[y1 - 2]) == rgba(S.sel[-1])
-        assert solid(band[y1 - 1]) == rgba(S.sel_edge)
-
-
 def test_a_fresh_page_settles_on_its_first_row(fw, layout):
-    page = Page(fw, MODERN, sel=None)
+    page = Page(fw, sel=None)
     band = page.band() if page.paint() else {}
     assert min(band) == 0 and max(band) == 47
     assert page.view.props['_ringnav_index'] == 0 and page.view.props['_ringnav_count'] == 4
 
 
 def test_touch_hides_the_selection_until_the_wheel(fw, st):
-    page = Page(fw, MODERN)
+    page = Page(fw)
     st('touch_mode').value = 1
     assert not page.paint().px and page.view.props['_ringnav_index'] == 1
 
 
 def test_a_boundary_bump_nudges_the_band_by_the_themes_detent(fw, st):
-    page = Page(fw, MODERN)
+    page = Page(fw)
     st('fx_surface', C.c_void_p).value, st('fx_token').value, st('bump_dir').value = page.view.addr, 5, 1
     page.view.props['_ringnav_fx'] = 5
     band = page.band() if page.paint() else {}
-    assert min(band) == 48 - THEMES[MODERN]['bump_px'] and len(band) == 48
+    assert min(band) == 48 - THEMES[OLED]['bump_px'] and len(band) == 48
 
 
 def test_the_band_takes_a_rows_whole_pitch_under_its_button(fw):
     """The Library's row is a button over its pitch's top: the bar fills the row."""
-    page = Page(fw, MODERN)
+    page = Page(fw)
     for item in page.view.children:
         item.move(*item.box[:3], 56)
         item.children[0].move(20, 0, 335, 48)
@@ -1298,7 +1204,7 @@ def test_the_band_takes_a_rows_whole_pitch_under_its_button(fw):
 
 
 def test_a_new_row_starts_its_marquee_timer_and_the_same_row_doesnt(fw, st):
-    page = Page(fw, MODERN)
+    page = Page(fw)
     marq_moved = C.cast(fw.lib.navigation__marq_moved, C.c_void_p).value
     page.paint()
     assert page.timers.count(marq_moved) == 1 and st('marq_row', C.c_void_p).value == page.rows[1].addr
@@ -1319,19 +1225,19 @@ def grid(page, columns=3):
             page.ui.add('button', item, (k * w, 0, w - 1, item.box[3]), f'{button.name}.{k}').clickable()
 
 
-@pytest.mark.parametrize('rounded, radius', [(b'0', 0), (b'1', O['SEL_RADIUS'])])
-def test_a_grid_tile_keeps_its_own_card_inset_all_round(fw, rounded, radius):
-    page = Page(fw, MINIMAL, ROUNDED=rounded)
+def test_a_grid_tile_keeps_its_own_card_inset_all_round(fw, layout):
+    """A tile's card is the accent's top tone, square, TILE_INSET inside the tile."""
+    page = Page(fw)
     grid(page)
     page.view.props.update({'_ringnav_count': 12, '_ringnav_index': 4})  # the second row's middle tile
     page.paint()
     t = O['TILE_INSET']
-    assert page.canvas.boxes == [((125 + t, 48 + t, 124 - 2 * t, 48 - 2 * t), page.canvas.boxes[0][1], radius)]
+    assert page.canvas.boxes == [((125 + t, 48 + t, 124 - 2 * t, 48 - 2 * t), rgba(Scheme(fw, layout).tones[0]), 0)]
 
 
 def test_a_page_under_a_sliding_one_draws_the_row_it_holds(fw, st):
     """The snapshot of the page under a sliding page: its own held row, nothing loaded or settled."""
-    page = Page(fw, MODERN)
+    page = Page(fw)
     top = page.ui.window('playset_page')
     top.props['anim_hint'] = 'htranslate'
     page.view.props['_ringnav_index'] = 3
@@ -1339,53 +1245,17 @@ def test_a_page_under_a_sliding_one_draws_the_row_it_holds(fw, st):
     assert (min(band), max(band) + 1) == (144, 192)
 
 
-def test_classics_speed_row_is_one_band_its_stops_on_the_paper(fw, st, layout):
-    """More's Speed row under the stops band: the band the row's whole height, each speed's 24 px
-    button a plate of the paper on it so their marks read, the wheel's framed white, and the row's
-    text the band's."""
-    theme(fw, CLASSIC)
-    st('geom').value = CLASSIC_SET
-    ui = Ui(fw)
-    view, _ = library(fw, ui, rows=0, name='playermore_page')
-    item = ui.add('list_item', view, (0, 0, 375, 70))
-    button = ui.add('button', item, (0, 20, 375, 40), style='s_btn_forwardspeed')
-    for k in range(4):
-        ui.add('image', button, (40 + 80 * k, 0, 60, 61)).clickable()
-    view.props.update({'_ringnav_count': 4, '_ringnav_scope': 0, '_ringnav_index': 2})  # a dynamic page: no scope
-    canvas = Canvas(fw)
-    paint_bg(fw, view, canvas)
-    S = Scheme(fw, layout)
-    rows = sorted({y for _, y in canvas.px})
-    assert (rows[0], rows[-1] + 1) == (0, 70) and canvas.row(10) == canvas.row(10)[:1] * 375  # one band
-    assert [b[:2] for b in canvas.boxes] == [((40 + 80 * k, 20, 60, 24), rgba(0)) for k in range(4)]
-    assert canvas.frames[0][:2] == ((200, 20, 60, 24), 0xffffffff)
-    assert text_ink(fw, st, button) == rgba(S.sel_text)
-
-
-def test_minimals_home_list_marks_its_row_with_a_dot(fw, st):
-    theme(fw, MINIMAL)
-    ui = Ui(fw)
-    view, rows = library(fw, ui, name='home_page')
-    view.props.update({'_ringnav_count': 4, '_ringnav_scope': 0, '_ringnav_index': 2})
-    canvas = Canvas(fw)
-    paint_bg(fw, view, canvas)
-    dot = O['HOME_DOT']
-    assert canvas.boxes == [((O['HOME_DOT_X'], 96 + (48 - dot) // 2, dot, dot), 0xffffffff, dot // 2)]
-    lit, other = (text_ink(fw, st, rows[k].children[0]) for k in (2, 0))
-    assert bright(lit) > bright(other)  # the dot's row bright, the rest of the list dimmed
-
-
 def test_a_list_mid_layout_paints_nothing_and_ends_a_pending_centre(fw, st):
-    page = Page(fw, MODERN)
+    page = Page(fw)
     page.view.int_at(O['VIEW_CONTENT_H']).value = -1  # stock's relayout under way
     st('center_timer').value = 7  # a centre press pending on this list
     st('center_top', C.c_void_p).value, st('center_surface', C.c_void_p).value = page.ui.top.addr, page.view.addr
     assert not page.paint().px and st('center_timer').value == 0 and fw.calls('timer_remove')
 
 
-def buttons_page(fw, which, name='playlistsmore_page', **config):
+def buttons_page(fw, name='playlistsmore_page', **config):
     """A BUTTONS window, its own tappable buttons the rows: three tiles side by side."""
-    theme(fw, which, **config)
+    theme(fw, **config)
     ui = Ui(fw)
     for flag, value in (('g_backlight_status', 1), ('g_usblink_status', 0)):
         g(fw, flag, value)
@@ -1395,33 +1265,29 @@ def buttons_page(fw, which, name='playlistsmore_page', **config):
     return ui, win, tiles
 
 
-@pytest.mark.parametrize('which', [MINIMAL, MODERN])
-def test_a_pop_ups_button_is_framed_white_on_its_accent(fw, which):
-    ui, win, tiles = buttons_page(fw, which)
+def test_a_pop_ups_button_is_framed_white_on_its_accent(fw):
+    ui, win, tiles = buttons_page(fw)
     canvas = Canvas(fw)
     fw.fn('ringnav_paint_bg', C.c_int, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
     assert canvas.frames[0][:2] == (tiles[1].box, 0xffffffff)  # the selected tile's own box
     assert canvas.restored()
 
 
-# Classic's confirm pop-up: Form A's page or, for a row action's question, the tray.
+# The confirm pop-up, OLED's dialog page (feedback.c).
 def paint_bg(fw, w, canvas):
     return fw.fn('ringnav_paint_bg', C.c_int, C.c_void_p, C.c_void_p)(w.addr, canvas.addr)
 
 
 class Confirm:
     """Stock's confirminfo_dialog as dialog_confirminfo_dialog_init leaves it: full-screen and clear, its
-    prompt's hscroll_label lines, maybe msg_delcheckbutton, and the asset's two buttons."""
-    def __init__(self, fw, ui, lines=('Delete this song?',), check=None, cells=('Cancel', 'OK')):
+    prompt's hscroll_label lines and the asset's two buttons."""
+    def __init__(self, fw, ui, lines=('Delete this song?',), cells=('Cancel', 'OK')):
         self.fw, self.ui = fw, ui
         self.win = ui.window('confirminfo_dialog', kind='dialog')
         self.lines = []
         for text in lines:
             self.lines.append(ui.add('hscroll_label', self.win, (0, 100, 375, 30)))
             ui.set_text(self.lines[-1], text)
-        if check is not None:
-            self.check = ui.add('check_button', self.win, (40, 124, 295, 40), 'msg_delcheckbutton', value=check)
-            ui.set_text(self.check, 'Also delete source file')
         self.cancel = ui.add('button', self.win, (40, 250, 140, 50), 'img_cancel').clickable()
         self.enter = ui.add('button', self.win, (195, 250, 140, 50), 'img_enter').clickable()
         ui.set_text(self.cancel, cells[0])
@@ -1433,162 +1299,10 @@ class Confirm:
         return self.canvas
 
 
-def classic(fw, st, light=0, **config):
-    theme(fw, CLASSIC, LIGHT=str(light).encode(), **config)
-    st('geom').value = CLASSIC_SET
-    for flag, value in (('g_backlight_status', 1), ('g_usblink_status', 0)):
-        g(fw, flag, value)
-    return Ui(fw)
-
-
-def test_a_confirm_lays_its_buttons_side_by_side_centred_under_its_prompt(fw, st):
-    confirm = Confirm(fw, classic(fw, st))
-    confirm.paint()
-    (x0, y0, w0, h0), (x1, y1, w1, h1) = confirm.cancel.box, confirm.enter.box
-    assert (y0, h0) == (y1, h1) and x0 + w0 == x1  # one track, the cells abutting
-    assert abs((x0 + x1 + w1) - 375) <= 1 and y0 + h0 <= 320  # centred, on the screen
-    assert w0 > 6 * 10 and w1 > 2 * 10  # each wider than its text
-    lx, ly, lw, lh = confirm.lines[0].box
-    assert 2 * lx + lw == 375 and confirm.lines[0].props['style:normal:text_align_h'] == 'center'  # the prompt centred
-    assert ly + lh <= y0  # over the cells
-    for cell in (confirm.cancel, confirm.enter):  # confirm_labels draws their text
-        assert all(cell.props[f'style:{s}:text_color'] == 0 for s in ('normal', 'pressed', 'over', 'focused'))
-    assert confirm.win.props['style:normal:bg_color'] == 0  # clear: the bar and the page show through
-    moves = len(fw.calls('widget_move_resize'))
-    confirm.paint()
-    assert len(fw.calls('widget_move_resize')) == moves  # dressed once: the cells' height says so
-
-
-def test_a_cell_grows_with_its_text_past_a_least_width(fw, st):
-    """Short words share one least width, wider than either; past it a cell grows as its text does."""
-    widths = []
-    for cells in (('No', 'Yes'), ('Cancel', 'Remove'), ('Cancel!!', 'Remove')):
-        confirm = Confirm(fw, classic(fw, st), cells=cells)
-        confirm.paint()
-        widths.append((confirm.cancel.box[2], confirm.enter.box[2]))
-    (no, yes), (cancel, remove), (longer, _) = widths
-    assert no == yes > 3 * 10 and cancel == remove > no
-    assert longer - cancel == 2 * 10  # two characters more, their width more
-
-
-def test_a_long_prompt_line_breaks_at_its_last_space_that_fits(fw, st):
-    text = 'Remove every song of this album from the playlist?'
-    confirm = Confirm(fw, classic(fw, st), [text])
-    confirm.paint()
-    line, rest = confirm.lines[0], confirm.win.children[-1]
-    head, tail = confirm.ui.text(line), confirm.ui.text(rest)
-    x, y, w, h = line.box
-    assert head + ' ' + tail == text and len(head) * 10 <= w < len(head + ' ' + tail.split()[0]) * 10
-    assert rest.box == (x, y + h, w, h)  # the next line, under it
-    assert y + 2 * h <= confirm.cancel.box[1]  # the cells under both
-
-
-def test_a_long_prompt_with_nowhere_to_break_keeps_its_marquee(fw, st):
-    confirm = Confirm(fw, classic(fw, st), ['x' * 60])
-    confirm.paint()
-    assert confirm.ui.text(confirm.lines[0]) == 'x' * 60 and len(confirm.win.children) == 3
-
-
-@pytest.mark.parametrize('light', [0, 1])
-def test_the_page_form_lays_paper_under_the_bar_and_the_track_under_the_cells(fw, st, layout, light):
-    confirm = Confirm(fw, classic(fw, st, light))
-    S = Scheme(fw, layout)
-    canvas = confirm.paint()
-    bar = SETS[CLASSIC_SET].bar
-    assert ((0, bar, 375, 320 - bar), rgba(S.paper)) in canvas.rects
-    x0, y0, w0, h0 = confirm.cancel.box
-    track = [x for x in range(375) if canvas.px.get((x, y0 + h0 // 2)) != rgba(S.paper)]
-    assert (min(track), max(track) + 1) == (x0, x0 + w0 + confirm.enter.box[2])  # the track spans both cells
-    assert canvas.restored()
-
-
-@pytest.mark.parametrize('light', [0, 1])
-def test_the_pop_up_opens_on_cancel_and_the_wheel_lights_the_other(fw, st, layout, light):
-    confirm = Confirm(fw, classic(fw, st, light))
-    S = Scheme(fw, layout)
-    canvas = confirm.paint()
-    mid = lambda cell: canvas.px[cell.box[0] + cell.box[2] // 2, cell.box[1] + 15]
-    assert confirm.win.props['_ringnav_index'] == 0
-    assert mid(confirm.cancel) == rgba(S.sel_row(15, 30)) != mid(confirm.enter)
-    texts = {t: c for t, r, c in canvas.texts if r[1] == confirm.cancel.box[1]}
-    assert texts['Cancel'] != texts['OK'] or light  # dark: the unlit cell's text is dimmer
-    confirm.win.props['_ringnav_index'] = 1
-    confirm.paint()
-    assert mid(confirm.enter) == rgba(S.sel_row(15, 30)) != mid(confirm.cancel)
-
-
-def test_the_cells_texts_sit_over_their_shadows_a_row_up(fw, st):
-    confirm = Confirm(fw, classic(fw, st))
-    canvas = confirm.paint()
-    for cell, text in ((confirm.cancel, 'Cancel'), (confirm.enter, 'OK')):
-        drawn = [(r, c) for t, r, c in canvas.texts if t == text]
-        (shadow, shade), (box, ink) = drawn
-        assert box == cell.box and shadow == (box[0], box[1] - 1, box[2], box[3])
-        assert shade >> 24 < 0xff and shade & 0xffffff == 0  # black, part transparent
-    inks = {t: c for t, r, c in canvas.texts[1::2]}
-    assert inks['Cancel'] == rgba(0xffffff) != inks['OK']  # the dark half's unlit cell is dimmer
-
-
-def test_delete_files_check_is_drawn_where_the_icon_goes(fw, st, layout):
-    """Stock centres the check's icon, its spacer and its text together, and the box is drawn in the
-    icon's place: on the button's middle row, left of the text, a shorter text moving it right by
-    half the width it lost. Checked, the box holds the tick."""
-    confirm = Confirm(fw, classic(fw, st), check=0)
-    S = Scheme(fw, layout)
-    x0, y0, w0, h0 = confirm.check.box
-
-    def inked(value, text):
-        confirm.check.props['value'] = value
-        confirm.ui.set_text(confirm.check, text)
-        confirm.canvas = Canvas(fw)
-        px = confirm.paint().px
-        return {(x, y) for (x, y), c in px.items() if c == rgba(S.ink) and x0 <= x < x0 + w0 and y0 <= y < y0 + h0}
-
-    ring = inked(0, 'Also delete source file')
-    rx0, ry0, rx1, ry1 = thumb_box(ring)
-    assert ry0 + ry1 == 2 * y0 + h0 and rx1 <= x0 + w0 // 2  # on the middle row, its text to its right
-    tick = inked(1, 'Also delete source file') - ring
-    tx0, ty0, tx1, ty1 = thumb_box(tick)
-    assert rx0 < tx0 and tx1 < rx1 and ry0 < ty0 and ty1 < ry1  # inside the box
-    assert abs((tx0 + tx1) - (rx0 + rx1)) <= 1 and abs((ty0 + ty1) - (ry0 + ry1)) <= 1  # in its middle
-    assert thumb_box(inked(0, 'Delete source file')) == (rx0 + 25, ry0, rx1 + 25, ry1)  # 50 px of text fewer
-
-
-def test_a_row_actions_question_is_the_tray_its_cell_the_verb(fw, st):
-    ui = classic(fw, st)
-    seen: dict = {}
-
-    def open_dialog(name, prompt, *_):
-        confirm = Confirm(fw, ui, ['Delete "Song"?'])
-        confirm.canvas.art['classic_light_confirm_shadow'] = (315, 70)
-        canvas = confirm.paint()
-        seen['tray'] = (ui.text(confirm.enter), confirm.lines[0].visible, list(canvas.images),
-                        [confirm.cancel.box, confirm.enter.box], {t: c for t, r, c in canvas.texts[1::2]})
-        over = Confirm(fw, ui, ['Shut down?'])  # a prompt stock opens over it stays a question
-        over.paint()
-        seen['over'] = (ui.text(over.enter), over.lines[0].visible, over.lines[0].box, over.enter.box)
-        return 1
-
-    fw.mock('navigator_to_with_context', open_dialog)
-    verb = C.create_string_buffer(b'Delete')
-    assert fw.fn('playlists__confirm_over', C.c_int, C.c_void_p, C.c_char_p)(None, verb) == 1
-    text, shown, images, cells, inks = seen['tray']
-    assert text == 'Delete' and not shown  # the cell says what it's for; no question
-    (ix, iy, iw, ih), = images  # the tray's shadow at its art's size, centred, the cells on it
-    assert (iw, ih) == (315, 70) and 2 * ix + iw == 375
-    assert all(ix <= x and x + w <= ix + iw and iy <= y and y + h <= iy + ih for x, y, w, h in cells)
-    assert inks['Cancel'] == inks['Delete']  # lit or not, both cells' text alike
-    text, shown, (lx, ly, lw, lh), (_, y, _, _) = seen['over']
-    assert text == 'OK' and shown and ly + lh <= y  # its prompt asked, the cells under it
-    after = Confirm(fw, ui, ['Shut down?'])  # the row action answered: the next confirm is a question
-    after.paint()
-    assert ui.text(after.enter) == 'OK' and after.lines[0].visible
-
-
 @pytest.mark.parametrize('prompt, verb', [('Restart?', 'Restart'), ('Shut Down?', 'Shut Down')])
 def test_oleds_power_confirms_say_their_verb(fw, st, prompt, verb):
     """Power's Restart and Shut Down rows (power_rows.c) as OLED's dialog page: Cancel, then the verb, never OK."""
-    theme(fw, OLED)
+    theme(fw)
     ui = Ui(fw)
     confirm = Confirm(fw, ui, [prompt])
 
@@ -1602,116 +1316,30 @@ def test_oleds_power_confirms_say_their_verb(fw, st, prompt, verb):
     assert not confirm.lines[0].visible  # the question is the status row's title
 
 
-def test_minimal_leaves_stocks_confirm(fw, st):
-    theme(fw, MINIMAL)
-    confirm = Confirm(fw, Ui(fw))
-    box = confirm.cancel.box
-    confirm.paint()
-    assert confirm.cancel.box == box and 'style:normal:bg_color' not in confirm.win.props
-
-
-# The toast and the update's dialog: a box sized to its lines.
-def toast(fw, st, lines, name='msginfo_dialog'):
-    ui = classic(fw, st)
-    win = ui.window(name, kind='dialog')
-    labels = []
-    for text in lines:
-        labels.append(ui.add('hscroll_label', win, (0, 140, 375, 30)))
-        ui.set_text(labels[-1], text)
-    canvas = Canvas(fw)
-    paint_bg(fw, win, canvas)
-    return win, labels, canvas
-
-
-@pytest.mark.parametrize('lines', [['Done'], ['Saved', 'Cover Flow rebuilds artwork']])
-def test_a_toasts_box_holds_its_lines_centred(fw, st, lines):
-    win, labels, canvas = toast(fw, st, lines)
-    (x, y, w, h), color, radius = canvas.boxes[0]
-    assert abs(2 * x + w - 375) <= 1 and 0 < radius <= h // 2  # centred, its corners round
-    assert color >> 24 < 0xff  # the page shows through it a little
-    for label, text in zip(labels, lines):
-        lx, ly, lw, lh = label.box
-        assert 2 * lx + lw == 375 and label.props['style:normal:text_align_h'] == 'center'  # each line centred
-        assert x < (375 - 10 * len(text)) // 2 and (375 + 10 * len(text)) // 2 < x + w  # its text inside the box
-        assert y < ly and ly + lh < y + h
-    ys = [label.box[1] for label in labels]
-    assert [b - a for a, b in zip(ys, ys[1:])] == [labels[0].box[3]] * (len(ys) - 1)  # the lines abut
-    assert all(label.props['_final_n'] for label in labels)  # white, in either half
-    assert win.props['style:normal:bg_color'] == 0 and win.props['_toast'] == 1  # the window clear
-
-
-def test_a_toast_grows_a_line_at_a_time_and_with_its_widest_line(fw, st):
-    boxes = [toast(fw, st, lines)[2].boxes[0][0] for lines in (['Done'], ['Done'] * 2, ['Done'] * 3, ['Done', 'Done!!'])]
-    one, two, three, wider = boxes
-    pitch = two[3] - one[3]
-    assert pitch > 0 and three[3] - two[3] == pitch and one[1] == two[1] == three[1]  # down from one top
-    assert pitch == toast(fw, st, ['Done'])[1][0].box[3]  # a line's height a line
-    assert (wider[2] - two[2], wider[3]) == (2 * 10, two[3])  # two characters wider
-
-
-def test_a_line_too_long_scrolls_in_its_label_never_a_wider_box(fw, st):
-    _, labels, canvas = toast(fw, st, ['x' * 40])
-    (x, _, w, _), _, _ = canvas.boxes[0]
-    assert w == labels[0].box[2] and abs(2 * x + w - 375) <= 1
-
-
-def test_v134s_wrapping_label_gets_the_box_its_wrapped_lines_need(fw, st):
-    """V1.36's plain toast is one word-wrapping label: AWTK sizes it, the box follows its height."""
-    ui = classic(fw, st)
-    win = ui.window('msginfo_dialog', kind='dialog')
-    label = ui.add('label', win, (10, 100, 355, 120))
-    ui.set_text(label, 'Rockbox Themes are ready in Rockbox\'s Theme Settings')
-    fw.mock('label_resize_to_content', lambda w, lo, hi, lo_h, hi_h, *_: ui.nodes[w].move(*ui.nodes[w].box[:2], hi, 3 * lo_h))
-    canvas = Canvas(fw)
-    paint_bg(fw, win, canvas)
-    (x, y, w, h), _, _ = canvas.boxes[0]
-    lx, ly, lw, lh = label.box
-    assert lw == w and lh == 3 * 24 and y < ly and ly + lh < y + h  # three lines inside the box
-    assert label.props['style:normal:text_align_h'] == 'center' and label.props['_final_n']
-
-
-def test_a_toast_moves_its_lines_once(fw, st):
-    win, labels, canvas = toast(fw, st, ['Done'])
-    moves = len(fw.calls('widget_move_resize'))
-    paint_bg(fw, win, canvas)
-    assert len(fw.calls('widget_move_resize')) == moves and len(canvas.boxes) == 2
-
-
-def test_a_toast_is_the_same_dark_box_in_either_half(fw, st):
-    """flip_if undoes the ink's Light Mode flip, to within the flip's rounding."""
-    dark = toast(fw, st, ['Done'])[2].boxes[0][1]
-    st('light').value = 1
-    light = toast(fw, st, ['Done'])[2].boxes[0][1]
-    assert dark >> 24 == light >> 24 and all(abs((dark >> s & 255) - (light >> s & 255)) <= 3 for s in (0, 8, 16))
-    assert bright(light) < 3 * 0x80  # dark in the light half too
-
-
-def test_the_serials_qr_takes_the_boxs_colour_on_its_own_rect(fw, st):
-    (_, color, radius), = toast(fw, st, ['Done'])[2].boxes
-    win, labels, canvas = toast(fw, st, ['SN'], name='showsn_dialog')
-    assert win.props['style:normal:bg_color'] == i32(color) and win.props['style:normal:round_radius'] == radius
-    assert not canvas.boxes and labels[0].box == (0, 140, 375, 30)  # no box: its lines where stock put them
-
-
-def test_another_dialog_is_not_a_toast(fw, st):
-    win, labels, canvas = toast(fw, st, ['?'], name='other_dialog')
-    assert '_toast' not in win.props and not canvas.boxes
-
-
-# Classic's separators: the last rows of each two-line row but the selected one's.
-SEP = THEMES[CLASSIC]['sep']  # the dark half's stops, one a row
+# The divider (list.divider.ink, paint_separators): a 1 px line on the last row of each two-line row followed by
+# another, from the text column (a row with art: its text's) to the right column, on neither edge of the selected row.
+def oled(fw, st, **config):
+    """OLED on its own set, as theme_boot leaves it, on a lit, usable screen."""
+    theme(fw, **config)
+    st('geom').value = OLED_SET
+    for flag, value in (('g_backlight_status', 1), ('g_usblink_status', 0)):
+        g(fw, flag, value)
+    return Ui(fw)
 
 
 def detail_page(fw, st, rows=5, h=None, scroll=0, touch=0):
-    """A page_list's rows, each page_detail high and named so, tappable, in a vertical view."""
-    ui = classic(fw, st)
-    h = h or THEMES[CLASSIC]['page_detail']
+    """A page_list's rows, each page_detail high, a title and its detail line, tappable, in a vertical view."""
+    ui = oled(fw, st)
+    h = h or THEMES[OLED]['page_detail']
     win = ui.window('about_page')
     view = ui.add('scroll_view', win, (0, 26, 375, 294))
     view.byte_at(O['VIEW_VERTICAL']).value = 1
     view.int_at(O['VIEW_CONTENT_H']).value = rows * h
     view.int_at(O['SCROLL_Y']).value = scroll
     items = [ui.add('list_item', view, (0, i * h, 375, h), '_page_tall').clickable() for i in range(rows)]
+    for item in items:
+        ui.add('label', item, (24, 4, 300, 24))
+        ui.add('hscroll_label', item, (24, 31, 300, 20))
     view.props.update({'_ringnav_count': rows, '_ringnav_scope': 1, '_ringnav_index': 1})
     st('touch_mode').value = touch
     canvas = Canvas(fw)
@@ -1719,29 +1347,34 @@ def detail_page(fw, st, rows=5, h=None, scroll=0, touch=0):
     return view, items, canvas
 
 
-def separated(canvas, y):
-    """Whether the stops' rows end at y: one stop a row, across the list."""
-    return all(canvas.row(y - len(SEP) + j) == [rgba(rgb)] * 375 for j, (_, rgb) in enumerate(SEP))
+def divided(canvas, y, x0=None):
+    """Whether the divider ends at y: its one row, in the half's ink, from x0 (the set's text column) to the right
+    column, and nothing else on that row."""
+    x0 = SETS[OLED_SET].text_x if x0 is None else x0
+    x1 = 375 - SETS[OLED_SET].right_x
+    ink = rgba(THEMES[OLED]['div_ink'])
+    return canvas.row(y - 1) == [None] * x0 + [ink] * (x1 - x0) + [None] * (375 - x1)
 
 
-def test_every_detail_row_but_the_selected_ends_on_the_separator(fw, st):
+def test_every_detail_row_but_the_selecteds_edges_and_the_last_ends_on_the_divider(fw, st):
     view, items, canvas = detail_page(fw, st)
-    h = THEMES[CLASSIC]['page_detail']
-    assert [separated(canvas, (i + 1) * h) for i in range(5)] == [1, 0, 1, 1, 1]
+    h = THEMES[OLED]['page_detail']
+    assert [divided(canvas, (i + 1) * h) for i in range(5)] == [0, 0, 1, 1, 0]
     assert canvas.restored() and canvas.clip == [0, 0, 375, 320]
 
 
-def test_under_touch_every_row_is_separated(fw, st):
+def test_under_touch_every_row_followed_by_another_is_divided(fw, st):
     _, _, canvas = detail_page(fw, st, touch=1)
-    h = THEMES[CLASSIC]['page_detail']
-    assert all(separated(canvas, (i + 1) * h) for i in range(5))
+    h = THEMES[OLED]['page_detail']
+    assert [divided(canvas, (i + 1) * h) for i in range(5)] == [1, 1, 1, 1, 0]
 
 
-def test_separators_follow_the_scroll_and_stop_below_the_view(fw, st):
-    h, scroll = THEMES[CLASSIC]['page_detail'], THEMES[CLASSIC]['page_detail'] + 10
+def test_dividers_follow_the_scroll_and_stop_below_the_view(fw, st):
+    h = THEMES[OLED]['page_detail']
+    scroll = h + 10
     _, _, canvas = detail_page(fw, st, rows=10, scroll=scroll, touch=1)
-    middles = sorted({y for (_, y), c in canvas.px.items() if c == rgba(SEP[1][1])})
-    assert middles == [y for y in ((i + 1) * h - scroll - 2 for i in range(10)) if 0 <= y < 294]
+    lines = sorted({y for (_, y), c in canvas.px.items() if c == rgba(THEMES[OLED]['div_ink'])})
+    assert lines == [y for y in ((i + 1) * h - scroll - 1 for i in range(9)) if 0 <= y < 294]
 
 
 def test_a_row_of_another_height_has_none(fw, st):
@@ -1749,18 +1382,18 @@ def test_a_row_of_another_height_has_none(fw, st):
     assert not canvas.px
 
 
-def table(fw, st, art=(0, 0, 52, 0)):
-    """A virtual table of two-line rows (taller than the set's pitch): each row a tappable table_row,
-    its first child the leading image, with no width unless it has art."""
-    ui = classic(fw, st)
+def table(fw, st):
+    """A virtual table of two-line rows (taller than the set's pitch): each row a tappable table_row, its leading
+    image and its title."""
+    ui = oled(fw, st)
     win = ui.window('allmusic_page')
     client = ui.add('table_client', win, (0, 26, 375, 294))
-    row_h = SETS[CLASSIC_SET].pitch + 20
+    row_h = SETS[OLED_SET].pitch + 20
     client.int_at(O['ROW_HEIGHT']).value, client.int_at(O['TABLE_ROWS']).value = row_h, 4
-    for i, width in enumerate(art):
+    for i in range(4):
         row = ui.add('table_row', client, (0, i * row_h, 375, row_h)).clickable()
         row.int_at(O['ROW_INDEX']).value = i
-        ui.add('image', row, (0, 0, width, row_h))
+        ui.add('image', row, (0, 0, 52, row_h))
         ui.add('hscroll_label', row, (10, 0, 300, 30))
     client.props.update({'_ringnav_count': 4, '_ringnav_scope': 1, '_ringnav_index': 0})
     st('touch_mode').value = 1
@@ -1770,34 +1403,24 @@ def table(fw, st, art=(0, 0, 52, 0)):
     return row_h, canvas
 
 
-def test_a_tables_two_line_rows_are_separated_but_not_rows_with_art(fw, st):
+def test_a_tables_two_line_rows_are_divided_from_the_art_rows_text_column(fw, st):
     row_h, canvas = table(fw, st)
-    assert [separated(canvas, (i + 1) * row_h) for i in range(4)] == [1, 1, 0, 1]
+    x0 = THEMES[OLED]['art_text_x']  # list.art's text column: the theme's rows have art
+    assert [divided(canvas, (i + 1) * row_h, x0) for i in range(4)] == [1, 1, 1, 0]
 
 
-def test_minimal_draws_no_separators(fw, st):
-    theme(fw, MINIMAL)
-    ui = Ui(fw)
-    view, _ = library(fw, ui)
-    st('touch_mode').value = 1
-    canvas = Canvas(fw)
-    paint_bg(fw, view, canvas)
-    assert not canvas.px
-
-
-# Marks on the selected row (ringnav_paint over an image): Classic's tick and More's dots, Minimal's card's
-# radio rings, and the chevron.
+# Marks on a row (ringnav_paint over an image): a checked row's mark and a playlist's quiet More.
 class Mark:
     """An image in a row of a list, painted as AWTK paints a widget: its canvas at its own place."""
-    def __init__(self, fw, st, which, image, name='', selected=True, size=(50, 48), **config):
+    def __init__(self, fw, st, image, name='', selected=True, size=(50, 48), **config):
         self.fw, self.st = fw, st
-        theme(fw, which, **config)
+        theme(fw, **config)
         self.ui = Ui(fw)
         self.view, self.rows = library(fw, self.ui)
         row = self.rows[1] if selected else self.rows[2]
         self.w = self.ui.add('image', row, (280, 0, *size), name, image=image)
         st('sel_w', C.c_void_p).value = self.view.addr
-        st('sel_widget', C.c_void_p).value = st('sel_accent', C.c_void_p).value = self.rows[1].addr
+        st('sel_accent', C.c_void_p).value = self.rows[1].addr  # the selected row, on the accent's bar
         self.canvas = Canvas(fw, x=300)
 
     def paint(self):
@@ -1824,28 +1447,13 @@ def dots_in_a_row(boxes):
             and len({b - a for a, b in zip(xs, xs[1:])}) == 1 and xs[1] - xs[0] > w)
 
 
-@pytest.mark.parametrize('selected', [1, 0])
-def test_classics_checked_row_has_its_tick_in_the_rows_ink(fw, st, layout, selected):
-    mark = Mark(fw, st, CLASSIC, 'select', selected=selected)
-    S = Scheme(fw, layout)
-    canvas = mark.paint()
-    tick = [p for p, c in canvas.px.items() if c == rgba(S.sel_text if selected else S.ink)]
-    x0, y0, x1, y1 = thumb_box(tick)
-    assert abs(x0 + x1 - MIDDLE[0]) <= 1 and abs(y0 + y1 - MIDDLE[1]) <= 1  # on the image's middle
-    # a tick: its long stroke ends high on the right, its foot left of the middle, its short stroke
-    # starting between the two
-    assert all(2 * x > x0 + x1 for x, y in tick if y == y0) and all(2 * x < x0 + x1 for x, y in tick if y == y1 - 1)
-    assert y0 < min(y for x, y in tick if x == x0) < y1 - 1
-    assert canvas.restored()
-
-
-def test_classics_unchecked_row_has_nothing(fw, st):
-    assert not Mark(fw, st, CLASSIC, 'unselect').paint().px
+def test_an_unchecked_row_has_nothing(fw, st):
+    assert not Mark(fw, st, 'unselect').paint().px
 
 
 @pytest.mark.parametrize('selected', [0, 1])
 def test_a_playlists_quiet_more_is_three_grey_dots_off_the_band(fw, st, layout, selected):
-    mark = Mark(fw, st, CLASSIC, 'unselect', 'img_more3', selected=selected)
+    mark = Mark(fw, st, 'unselect', 'img_more3', selected=selected)
     S = Scheme(fw, layout)
     boxes = mark.paint().boxes
     if selected:  # on the band its chevron takes their place
@@ -1855,110 +1463,25 @@ def test_a_playlists_quiet_more_is_three_grey_dots_off_the_band(fw, st, layout, 
     assert middle(boxes[1][0]) == MIDDLE  # the middle one on the image's middle
 
 
-@pytest.mark.parametrize('image, dot', [('select', 1), ('unselect', 0)])
-def test_minimals_card_redraws_its_radio_in_the_cards_ink(fw, st, layout, image, dot):
-    """Stock's white ring and dot would vanish on the off-white card: a ring of ink with the card's
-    fill in it, and the dot when checked, one inside the other on the image's middle."""
-    mark = Mark(fw, st, MINIMAL, image, MINIMAL_ACCENT=b'7')
-    S = Scheme(fw, layout)
-    boxes = mark.paint().boxes
-    assert len(boxes) == 2 + dot
-    assert all(middle(box) == MIDDLE and box[2] == box[3] == 2 * r for box, _, r in boxes)  # discs, one middle
-    sizes = [box[2] for box, _, _ in boxes]
-    assert sizes == sorted(sizes, reverse=True) and len(set(sizes)) == len(sizes)  # ring, hole, dot
-    (_, ink, _), (_, hole, _) = boxes[:2]
-    assert hole == rgba(S.fill) and bright(ink) < bright(S.fill)  # dark ink on the card
-    assert all(c == ink for _, c, _ in boxes[2:])
-
-
-def test_minimals_radio_off_the_card_is_stocks(fw, st):
-    assert not Mark(fw, st, MINIMAL, 'select', selected=False).paint().boxes
-
-
-def test_minimals_card_redraws_more_dots_and_delete(fw, st, layout):
-    mark = Mark(fw, st, MINIMAL, 'unselect', 'img_more0', MINIMAL_ACCENT=b'7')
-    S = Scheme(fw, layout)
-    (clear, fill, _), *dots = mark.paint().boxes
-    assert fill == rgba(S.fill) and middle(clear) == MIDDLE  # stock's white dots wiped in the card's fill
-    assert len(dots) == 3 and dots_in_a_row(dots) and all(bright(c) < bright(S.fill) for _, c, _ in dots)
-    cx, cy, cw, ch = clear
-    assert all(cx <= x and x + w <= cx + cw and cy <= y and y + h <= cy + ch for (x, y, w, h), _, _ in dots)
-    mark = Mark(fw, st, MINIMAL, 'navbar_delete')
-    mark.canvas.art['list_delete'] = art = (30, 30)
-    canvas = mark.paint()
-    (box, fill, _), = canvas.boxes  # list_delete's own size cleared, then it, on the image's middle
-    assert fill == rgba(S.fill) and box[2:] == art and middle(box) == MIDDLE
-    assert canvas.icons == [(art, MIDDLE[0] // 2, MIDDLE[1] // 2)]
-
-
-def test_a_coloured_minimal_card_leaves_the_radio(fw, st):
-    assert not Mark(fw, st, MINIMAL, 'select', MINIMAL_ACCENT=b'0').paint().boxes
-
-
-@pytest.mark.parametrize('selected', [1, 0])
-def test_classics_chevron_is_the_selected_rows_alone(fw, st, selected):
-    mark = Mark(fw, st, CLASSIC, 'list_into', selected=selected)
-    mark.canvas.art['classic_light_chevron'] = (12, 18)
-    canvas = mark.paint()
-    # the theme's box on screen, the canvas at the image's x
-    assert canvas.icons == ([((12, 18), THEMES[CLASSIC]['chevron_x'] + 6 - 300, 24)] if selected else [])
-
-
-def test_classics_folder_keeps_stocks_chevron(fw, st):
-    mark = Mark(fw, st, CLASSIC, 'list_into', name='into')
-    mark.ui.top.name = 'folder_page'
-    mark.canvas.art['classic_light_chevron'] = (12, 18)
-    assert not mark.paint().icons
-
-
-@pytest.mark.parametrize('light', [1, 0])
-def test_light_modes_chevron_on_a_coloured_bar_is_white(fw, st, layout, light):
-    mark = Mark(fw, st, MODERN, 'list_into', LIGHT=str(light).encode(), ACCENT=b'1')
-    mark.canvas.art[LIST_INTO_WHITE] = art = (50, 50)
-    canvas = mark.paint()
-    if not light:
-        assert not canvas.icons and not canvas.boxes
-        return
-    # the glyph's middle half cleared in the bar's tone, then the white glyph, on the image's middle
-    (box, color, _), = canvas.boxes
-    mx, my = middle(box)
-    assert box[2:] == (art[0], art[1] // 2) and mx == MIDDLE[0] and abs(my - MIDDLE[1]) <= 1
-    tone = Scheme(fw, layout).tones[0]
-    assert not neutral(tone) and color == rgba(tone)  # a coloured bar's own tone
-    assert canvas.icons == [(art, MIDDLE[0] // 2, MIDDLE[1] // 2)]
-
-
-@pytest.mark.parametrize('marked', [1, 0])
-def test_a_bold_marked_label_paints_its_text_again_one_pixel_right(fw, marked):
-    """font_weight.c, through the border hook: stock's self painter once more, 1 px right and back."""
-    ui = Ui(fw)
-    label = ui.add('label', ui.window('songs_page'), (0, 0, 200, 30), _q2_bold_fallback=marked)
-    ui.set_text(label, '专辑')
-    log: list = []
-    fw.mock('canvas_translate', lambda c, x, y, *_: log.append(('translate', i32(x), i32(y))))
-    fw.mock('widget_vtable_on_paint_self', lambda w, c, *_: log.append(('self', w)))
-    fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(label.addr, Canvas(fw).addr)
-    assert log == ([('translate', 1, 0), ('self', label.addr), ('translate', -1, 0)] if marked else [])
-
-
 # ringnav_paint's own work around the painters.
 def test_ringnav_paint_returns_stocks_and_hands_the_paint_to_the_parent(fw, st):
-    """Stock paints a widget's border after its children: once the card's row's title is done, the
-    row is painting again and takes the card's ink; once the row is done, its item, off the card."""
-    page = Page(fw, MINIMAL, MINIMAL_ACCENT=b'7')
+    """Stock paints a widget's border after its children: once the selected row's title is done, the
+    row is painting again and takes the selection's ink; once the row is done, its item, off the bar."""
+    page = Page(fw)
     page.paint()
     row = page.rows[1]
-    card = text_ink(fw, st, row.children[0])
+    grey = 0xff808080  # stock's colour for a text: the selection's text colour stands out from it
+    lit = text_ink(fw, st, row.children[0], grey)
     fw.mock('stock_paint_trampoline', lambda *_: 5)
     paint = fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)
     assert paint(row.children[0].addr, Canvas(fw).addr) == 5  # stock's answer
-    assert style_ink(fw) == card
+    assert style_ink(fw, grey) == lit != grey
     paint(row.addr, Canvas(fw).addr)
-    assert style_ink(fw) != card
+    assert style_ink(fw, grey) != lit
 
 
 def cf_letter(fw, st, elapsed, drawn):
-    theme(fw, MODERN)
+    theme(fw)
     ui = Ui(fw)
     w = ui.add('slide_menu', ui.window('coverflow_page'), (0, 0, 375, 294))
     st('cf_letter_surface', C.c_void_p).value, st('cf_letter').value, st('cf_letter_at').value = w.addr, ord('M'), 1000
@@ -2003,31 +1526,11 @@ def test_a_paint_off_a_carousel_ends_homes_slide(fw, st):
     assert st('home_surface', C.c_void_p).value is None
 
 
-@pytest.mark.parametrize('over', [0, 1])
-def test_the_hold_menus_panel_has_its_header_and_rows(fw, st, over):
-    """The navbar its header, the list its rows: before the dialog's children the panel, after them its
-    frame; Cover Flow's flip panel is the same paint."""
-    ui = classic(fw, st)
-    dialog = ui.window('sortselect_dialog', kind='dialog')
-    nav = ui.add('view', dialog, (40, 60, 295, 30), 'view_navbar')
-    listed = ui.add('list_view', dialog, (40, 90, 295, 150), 'list_view')
-    st('qm_dialog', C.c_void_p).value = dialog.addr
-    canvas = Canvas(fw)
-    fw.fn('ringnav_paint' if over else 'ringnav_paint_bg', C.c_int, C.c_void_p, C.c_void_p)(dialog.addr, canvas.addr)
-    rows = sorted({y for _, y in canvas.px})
-    top, bottom = nav.box[1], nav.box[1] + nav.box[3] + listed.box[3]
-    if over:  # the frame: a line above the header and below the rows
-        assert {top - 1, bottom} <= set(rows)
-    else:  # the panel from the header's top over header and rows
-        assert (rows[0], rows[-1] + 1) == (top, bottom)
-    assert canvas.restored()
-
-
 # The settings pages' rows: stock's builders, then ours in the same widgets and styles.
-def settings_page(fw, which, win_name, view_name, stock_rows=0, row_h=70, **config):
+def settings_page(fw, win_name, view_name, stock_rows=0, row_h=70, **config):
     """A settings window and its list, stock's own rows (each list_item named s<id>, row_h high, its
     button a settings row's) built by stock's init, as its trampoline does."""
-    settings = theme(fw, which, **config)
+    settings = theme(fw, **config)
     ui = Ui(fw)
     win = ui.window(win_name)
     view = ui.add('scroll_view', win, (0, 26, 375, 294), view_name)
@@ -2055,18 +1558,13 @@ def switch(item):
     return s and s.props['image']
 
 
-def value(ui, item):
-    v = next((c for c in item.walk() if c.name == '_setting_value'), None)
-    return v and ui.text(v)
-
-
 def click(ui, item):
     button = item.children[0]
     return ui.fire(button, EVT_CLICK)
 
 
 def test_power_adds_standby_charge_and_in_vehicle_rows_after_stocks(fw):
-    ui, win, view, settings, build = settings_page(fw, MINIMAL, 'powermanager_page', 'scroll_view_powermanager', 2)
+    ui, win, view, settings, build = settings_page(fw, 'powermanager_page', 'scroll_view_powermanager', 2)
     fw.mock('stock_power_trampoline', build)
     assert fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None) == 3
     stock, ours, power = view.children[:2], view.children[2:8], view.children[8:]
@@ -2079,9 +1577,12 @@ def test_power_adds_standby_charge_and_in_vehicle_rows_after_stocks(fw):
     assert icons == ['system_powermanager', 'usb_chargeswitch', 'usb_chargeswitch', 'wifiset_wifi', 'system_carmode',
                      'system_powermanager']
     standby, charge, *_, history = (ui.text(label_of(r)) for r in ours)
-    assert standby.endswith('Off') and f'{O["CHARGE_STOP"]}%' in charge  # Standby off; where Charge stops
+    # Standby off; Charge Limit a key/value row on a set_switch theme, Off or where it stops (here off, and on a set
+    # with no right column, as written)
+    assert standby.endswith('Off') and charge == 'Charge Limit: Off'
+
     assert history == 'Battery History' and 'list_into' in [c.props.get('image') for c in ours[-1].walk()]  # opens a page
-    assert [switch(r) for r in ours] == [None, 'switch_off', 'switch_off', 'switch_off', 'switch_off', None]
+    assert [switch(r) for r in ours] == [None, None, 'switch_off', 'switch_off', 'switch_off', None]
     for r in ours:  # stock's settings row: its button, the title clear of the icon, both the row's height
         button, label = r.children[0], label_of(r)
         icon = next(c for c in r.walk() if c.kind == 'image')
@@ -2093,7 +1594,7 @@ def test_power_adds_standby_charge_and_in_vehicle_rows_after_stocks(fw):
 
 
 def test_standby_limit_cycles_its_four_choices_and_saves_each(fw):
-    ui, win, view, settings, build = settings_page(fw, MINIMAL, 'powermanager_page', 'scroll_view_powermanager')
+    ui, win, view, settings, build = settings_page(fw, 'powermanager_page', 'scroll_view_powermanager')
     fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     standby = view.children[0]
     texts = []
@@ -2107,21 +1608,23 @@ def test_standby_limit_cycles_its_four_choices_and_saves_each(fw):
 
 
 def test_charge_limit_switches_and_takes_effect_on_the_next_pass(fw, st):
-    ui, win, view, settings, build = settings_page(fw, MINIMAL, 'powermanager_page', 'scroll_view_powermanager')
+    ui, win, view, settings, build = settings_page(fw, 'powermanager_page', 'scroll_view_powermanager')
     fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     charge = view.children[1]
     st('charge_at', C.c_uint).value = 12345
     click(ui, charge)
-    assert switch(charge) == 'switch_on' and settings.written == [('CHARGELIMIT', 1)] and st('charge_at', C.c_uint).value == 0
+    on = f'Charge Limit: {O["CHARGE_STOP"]}%'  # where it stops: a set_switch theme's key/value row
+    assert ui.text(label_of(charge)) == on and settings.written == [('CHARGELIMIT', 1)] and st('charge_at', C.c_uint).value == 0
     click(ui, charge)
-    assert switch(charge) == 'switch_off' and settings.written[-1] == ('CHARGELIMIT', 0)
+    assert ui.text(label_of(charge)) == 'Charge Limit: Off' and settings.written[-1] == ('CHARGELIMIT', 0)
+    assert switch(charge) is None
 
 
 def dac_power(fw, **charging):
     """The Power page over usb_charge.c's guard, its settings loaded (test_usb_charge.Charging); its USB DAC
     Charging row."""
     from test_usb_charge import Charging
-    ui, win, view, settings, build = settings_page(fw, MINIMAL, 'powermanager_page', 'scroll_view_powermanager')
+    ui, win, view, settings, build = settings_page(fw, 'powermanager_page', 'scroll_view_powermanager')
     q = Charging(fw, **charging)
     q.config()
     fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
@@ -2170,7 +1673,7 @@ def test_charge_limits_hold_wins_over_usb_dac_charging_on(fw, st):
 
 
 def test_in_vehicle_mode_is_stocks_byte_and_key(fw):
-    ui, win, view, settings, build = settings_page(fw, MINIMAL, 'powermanager_page', 'scroll_view_powermanager')
+    ui, win, view, settings, build = settings_page(fw, 'powermanager_page', 'scroll_view_powermanager')
     fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     g(fw, 'g_carmode_state', 4)
     standby, charge, dac, smart, car, history = view.children[:6]  # then the gap, Restart and Shut Down
@@ -2180,36 +1683,22 @@ def test_in_vehicle_mode_is_stocks_byte_and_key(fw):
 
 
 def test_smart_wifi_switches_and_saves_its_own_key(fw, st):
-    ui, win, view, settings, build = settings_page(fw, MINIMAL, 'powermanager_page', 'scroll_view_powermanager')
+    ui, win, view, settings, build = settings_page(fw, 'powermanager_page', 'scroll_view_powermanager')
     fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     car_mode = g(fw, 'g_carmode')
     standby, charge, dac, smart, car, history = view.children[:6]  # then the gap, Restart and Shut Down
     click(ui, smart)
     assert switch(smart) == 'switch_on' and settings.written == [('SMARTWIFI', 1)] and st('smart_wifi').value == 1
-    assert switch(charge) == switch(car) == 'switch_off' and g(fw, 'g_carmode') == car_mode  # the other rows as they were
+    assert ui.text(label_of(charge)) == 'Charge Limit: Off' and switch(car) == 'switch_off'  # the other rows as they were
+    assert g(fw, 'g_carmode') == car_mode
     click(ui, smart)
     assert switch(smart) == 'switch_off' and settings.written[-1] == ('SMARTWIFI', 0) and st('smart_wifi').value == 0
-
-
-def test_classic_shows_a_switch_as_its_value(fw, st):
-    ui, win, view, settings, build = settings_page(fw, CLASSIC, 'powermanager_page', 'scroll_view_powermanager', CHARGELIMIT=b'1')
-    fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
-    standby, charge, dac, smart, car, history = view.children[:6]  # then the gap, Restart and Shut Down
-    assert value(ui, charge) == 'On' and value(ui, smart) == value(ui, car) == 'Off' and switch(charge) is None
-    assert f'{O["CHARGE_STOP"]}%' in ui.text(label_of(charge))
-    v = next(c for c in charge.walk() if c.name == '_setting_value')
-    title, width = label_of(charge), charge.children[0].box[2]
-    # the value in the trailing column to the row's end, the title ending short of it
-    assert title.box[0] + title.box[2] < v.box[0] and width // 2 < v.box[0] and v.box[0] + v.box[2] >= width
-    assert ui.text(label_of(standby)).endswith('Off') and value(ui, standby) is None  # not a switch: its text whole
-    click(ui, charge)
-    assert value(ui, charge) == 'Off' and len([c for c in charge.walk() if c.name == '_setting_value']) == 1
 
 
 @pytest.mark.parametrize('bt', [1, 0])
 def test_bluetooth_adds_resume_and_device_volume_after_its_fourth_row(fw, bt):
     """Iconless and as high as stock's rows (78 px on this page), each saving its own key."""
-    ui, win, view, settings, build = settings_page(fw, MINIMAL, 'bluetooth_page', 'scroll_view_bluetooth', 7, row_h=78)
+    ui, win, view, settings, build = settings_page(fw, 'bluetooth_page', 'scroll_view_bluetooth', 7, row_h=78)
     fw.mock('stock_btrows_trampoline', build)
     g(fw, 'g_bluetoothflag', bt)
     fw.fn('ringnav_btrows', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
@@ -2231,7 +1720,7 @@ def test_bluetooth_adds_resume_and_device_volume_after_its_fourth_row(fw, bt):
 
 @pytest.mark.parametrize('way, sent', [(1, 1), (0, 0)])
 def test_device_volume_off_gives_stock_its_gain_back_at_once(fw, way, sent):
-    ui, win, view, settings, build = settings_page(fw, MINIMAL, 'bluetooth_page', 'scroll_view_bluetooth', 0, BTVOLLINK=b'1')
+    ui, win, view, settings, build = settings_page(fw, 'bluetooth_page', 'scroll_view_bluetooth', 0, BTVOLLINK=b'1')
     g(fw, 'g_bluetoothflag', 1)
     g(fw, 'g_volume', 37)
     fw.mock('mclGetOutputWay', lambda *_: way)
@@ -2259,7 +1748,7 @@ def icon(item):
 
 
 def test_playback_orders_its_rows_and_ends_on_library_and_folders(fw):
-    ui, win, view, settings, _ = settings_page(fw, MINIMAL, 'playset_page', 'scroll_view_playset')
+    ui, win, view, settings, _ = settings_page(fw, 'playset_page', 'scroll_view_playset')
     playset(fw, ui, view)
     fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     rows = view.children
@@ -2280,7 +1769,7 @@ def test_playback_orders_its_rows_and_ends_on_library_and_folders(fw):
 
 
 def test_playback_s_volume_rows_open_stock_s_pages_and_enlarged_art_is_stock_s_switch(fw):
-    ui, win, view, settings, _ = settings_page(fw, MINIMAL, 'playset_page', 'scroll_view_playset')
+    ui, win, view, settings, _ = settings_page(fw, 'playset_page', 'scroll_view_playset')
     playset(fw, ui, view)
     g(fw, 'g_bigcovermode', 0)
     fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
@@ -2302,7 +1791,7 @@ def test_playback_s_volume_rows_open_stock_s_pages_and_enlarged_art_is_stock_s_s
 
 
 def test_library_and_folders_is_stocks_page_again_with_the_library_rows(fw, st):
-    ui, win, view, settings, _ = settings_page(fw, MINIMAL, 'playset_page', 'scroll_view_playset')
+    ui, win, view, settings, _ = settings_page(fw, 'playset_page', 'scroll_view_playset')
     fw.var('fw_ctx_artist_type', C.c_int).value = 1
     playset(fw, ui, view)
     audioset = fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)
@@ -2341,7 +1830,7 @@ def test_library_and_folders_is_stocks_page_again_with_the_library_rows(fw, st):
 
 
 def test_artists_toggles_stocks_artist_type(fw):
-    ui, win, view, settings, _ = settings_page(fw, MINIMAL, 'playset_page', 'scroll_view_playset')
+    ui, win, view, settings, _ = settings_page(fw, 'playset_page', 'scroll_view_playset')
     fw.var('fw_ctx_artist_type', C.c_int).value = 1
     fw.fn('pod_rows', None, C.c_void_p, C.c_char_p, C.c_int, C.c_int, C.c_void_p)(win.addr, b'scroll_view_playset', 4, 1, (C.c_char_p * 1)(b'x'))
     artists = view.children[0]
@@ -2357,7 +1846,7 @@ def pod_rows(fw, win, view_name, first, n):
 
 
 def test_cover_flow_sort_steps_and_refresh_says_when(fw):
-    ui, win, view, settings, _ = settings_page(fw, MINIMAL, 'display_page', 'scroll_view_display')
+    ui, win, view, settings, _ = settings_page(fw, 'display_page', 'scroll_view_display')
     Files(fw)
     toasts = []
     fw.mock('navigator_to_with_context', lambda name, info, *_: toasts.append(C.string_at(info + 8)) and 0)
@@ -2375,7 +1864,7 @@ def test_cover_flow_sort_steps_and_refresh_says_when(fw):
 
 def test_scan_song_durations_turned_off_cancels_a_pass(fw):
     from test_durations import Ds
-    ui, win, view, settings, _ = settings_page(fw, MINIMAL, 'display_page', 'scroll_view_display', SCANDURATIONS=b'1')
+    ui, win, view, settings, _ = settings_page(fw, 'display_page', 'scroll_view_display', SCANDURATIONS=b'1')
     pod_rows(fw, win, 'scroll_view_display', POD['POD_SCAN_DURATIONS'], 1)
     state = fw.var('durations__ds', Ds)
     state.due = 1  # an update's end, its paths not read yet
@@ -2391,7 +1880,7 @@ def test_scan_song_durations_turned_off_cancels_a_pass(fw):
     (0, b'1', 'Off', 'Speaker', [('KEYTONE', 1)]), (1, None, 'Both', 'Off', [('KEYTONE', 0)]),
 ])
 def test_the_clicker_row_cycles_and_saves(fw, tone, clicker, now, then, written):
-    ui, win, view, settings, _ = settings_page(fw, MINIMAL, 'controls_page', 'scroll_view_controls', **({'CLICKER': clicker} if clicker else {}))
+    ui, win, view, settings, _ = settings_page(fw, 'controls_page', 'scroll_view_controls', **({'CLICKER': clicker} if clicker else {}))
     g(fw, 'g_keytone_flag', tone)
     pod_rows(fw, win, 'scroll_view_controls', POD['POD_KEYTONE'], 1)
     row = view.children[0]
@@ -2410,10 +1899,10 @@ def test_eq_per_output_turned_off_forgets_the_outputs_eq(fw, on):
     assert bool(fw.calls('fw_unlink')) == bool(on)  # off: what plays stays, the owner's file goes
 
 
-# Classic's settings rows: the title left, the value right-aligned.
+# A set_text theme's settings rows: the title left, the value right-aligned.
 def set_text_row(fw, text):
-    """navigation.c's row_label under Classic on a settings row: the row's button, title and value."""
-    theme(fw, CLASSIC)
+    """navigation.c's row_label on a settings row: the row's button, title and value."""
+    theme(fw)
     ui = Ui(fw)
     button = ui.add('button', ui.add('list_item', ui.window('display_page')), (20, 0, 335, 70))
     label = ui.add('hscroll_label', button, (72, 0, 260, 70))
@@ -2421,7 +1910,7 @@ def set_text_row(fw, text):
     return ui, button, label, button.child('_setting_value')
 
 
-@pytest.mark.parametrize('text, title, val', [('Theme: Classic', 'Theme', 'Classic'), ('Classic Blue', 'Accent', 'Classic Blue'),
+@pytest.mark.parametrize('text, title, val', [('Light Mode: Auto', 'Light Mode', 'Auto'), ('Blue', 'Accent', 'Blue'),
                                               ('Wheel: 50%: x', 'Wheel', '50%: x')])
 def test_a_set_text_rows_title_and_value(fw, text, title, val):
     ui, button, label, v = set_text_row(fw, text)
@@ -2439,21 +1928,13 @@ def test_a_long_title_is_cut_and_keeps_its_value(fw):
     assert title and 'x' * 50 != title == 'x' * len(title) and ui.text(v) == 'y'
 
 
-def test_a_rows_label_elsewhere_is_its_text(fw):
-    theme(fw, MINIMAL)
-    ui = Ui(fw)
-    label = ui.add('hscroll_label', ui.add('button', ui.window('display_page')), (72, 0, 260, 70))
-    fw.fn('navigation__row_label', None, C.c_void_p, C.c_char_p)(label.addr, b'Theme: Minimal')
-    assert ui.text(label) == 'Theme: Minimal' and not label.parent.children[1:]
-
-
 def test_the_librarys_rows_take_its_constructors_live_words(fw):
     """Under the Library's own list the row's body and icon x are the ipod.json words theme_boot wrote."""
     body, icon_x = O['LIBRARY_ROW_BODY'], O['LIBRARY_ROW_ICON_X']
     saved = C.c_ushort.from_address(body).value, C.c_ushort.from_address(icon_x).value
     try:
         C.c_ushort.from_address(body).value, C.c_ushort.from_address(icon_x).value = 52, 14
-        ui, win, view, settings, _ = settings_page(fw, MINIMAL, 'localmusic_page', 'scroll_view_localmusic')
+        ui, win, view, settings, _ = settings_page(fw, 'localmusic_page', 'scroll_view_localmusic')
         list_row = fw.fn('list_row', C.c_void_p, C.c_void_p, C.c_char_p, C.c_void_p, C.c_void_p)
         label = ui.nodes[list_row(view.addr, b'music_artist', None, None)]
         other = ui.nodes[list_row(ui.add('scroll_view', win, (0, 26, 375, 294), 'scroll_view_playset').addr, b'icon', None, None)]
@@ -2468,7 +1949,7 @@ def test_the_librarys_rows_take_its_constructors_live_words(fw):
 
 # Buttons lock and Quick Settings.
 def test_buttons_lock_lists_its_four_choices_and_a_pick_moves_the_check(fw):
-    ui, win, view, settings, _ = settings_page(fw, MINIMAL, 'keylock_page', 'scroll_view_keylock')
+    ui, win, view, settings, _ = settings_page(fw, 'keylock_page', 'scroll_view_keylock')
     old = ui.add('list_item', view)
     assert fw.fn('ringnav_keylock_rows', C.c_int, C.c_void_p)(win.addr) == 0
     names = [ui.text(label_of(r)) for r in view.children]
@@ -2485,11 +1966,9 @@ class Quick:
     """Quick Settings (statusbar_dialog): its icons and labels by stock's names, opened through its init."""
     ICONS = ['img_wifiswitch', 'img_btswitch', 'img_lock', 'img_gain', 'img_usbmode', 'img_po', 'img_playset', 'img_sysset']
 
-    def __init__(self, fw, st, which=MINIMAL):
+    def __init__(self, fw, st):
         self.fw, self.st = fw, st
-        theme(fw, which)
-        if which == CLASSIC:
-            st('geom').value = CLASSIC_SET
+        theme(fw)
         self.ui = Ui(fw)
         g(fw, 'g_backlight_status', 1)
         self.win = self.ui.window('statusbar_dialog', kind='dialog')
@@ -2588,45 +2067,11 @@ def test_a_tap_on_the_lock_steps_through_its_choices(fw, st):
     assert len(set(images[:3])) == 1 and images[3] != images[0]  # one image locked, another not
 
 
-def test_classics_page_lays_its_icons_on_a_grid_that_paints_nothing(fw, st):
-    quick = Quick(fw, st, CLASSIC)
-    boxes = [quick.icons[n].box for n in Quick.ICONS]
-    top, bottom = boxes[:4], boxes[4:]
-    (x, y, w, h), xs = top[0], [b[0] for b in top]
-    assert all(b[2:] == (w, h) for b in boxes) and w == h  # one square size
-    assert {b[1] for b in top} == {y} and len({b[1] for b in bottom}) == 1 and y + h < bottom[0][1]  # two rows apart
-    assert [b[0] for b in bottom] == xs  # in the same columns
-    assert len({b - a for a, b in zip(xs, xs[1:])}) == 1 and xs[1] - xs[0] > w  # evenly apart
-    assert abs(xs[0] + xs[-1] + w - 375) <= 1  # centred
-    mx, my, mw, mh = quick.menu.box
-    assert (mx, my, mw, mh) == (0, 0, quick.menu_was[2], quick.menu_was[1] + quick.menu_was[3])  # top to its old bottom
-    assert all(b[0] >= 0 and b[0] + b[2] <= mw and b[1] >= 0 and b[1] + b[3] <= mh for b in boxes)  # all on it
-    assert [c[1][1] for c in fw.calls('widget_set_opacity')] == [0] * 8
-    assert not quick.win.child('image0').visible and not quick.win.child('image1').visible
-    # each icon a tap: Classic's press shows under the finger, its hold as before
-    down = quick.fn('quick_down')
-    assert all(len(quick.ui.handled(quick.icons[n], down)) == 1 for n in Quick.ICONS)
-    moved = quick.fn('quick_moved')
-    assert quick.ui.handled(quick.slider, moved) == [quick.slider.parent.addr] * 2
-    C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(moved)(quick.slider.parent.addr, None)  # the knob reaches past it
-    assert fw.calls('widget_invalidate_force')[-1][1][0] == quick.slider.parent.addr
-
-
-def test_classics_pressed_icon_repaints_under_the_finger_and_after(fw, st):
-    quick = Quick(fw, st, CLASSIC)
-    quick.press('img_gain')
-    assert [c[1][0] for c in fw.calls('widget_invalidate_force')] == [quick.icons['img_gain'].addr]
-    quick.press('img_po')
-    assert [c[1][0] for c in fw.calls('widget_invalidate_force')][1:] == [quick.icons['img_gain'].addr, quick.icons['img_po'].addr]
-    quick.dispatch('img_po', O['EVT_POINTER_UP_BEFORE'])
-    assert [c[1][0] for c in fw.calls('widget_invalidate_force')][-1] == quick.icons['img_po'].addr
-
-
 def test_oled_s_quick_settings_lays_its_buttons_over_whole_rows(fw, st):
     """OLED's page (quick_rows_open): Wi-Fi, Bluetooth, the lock, Gain, Output and USB each over a 32 px row from y 90
     at opacity 0, so a tap there is stock's; Playback and System gone; the slider inline on the first row's right
     column, its knob's 14 px reaching the track's ends."""
-    quick = Quick(fw, st, OLED)
+    quick = Quick(fw, st)
     rows = ['img_wifiswitch', 'img_btswitch', 'img_lock', 'img_gain', 'img_po', 'img_usbmode']
     assert [quick.icons[n].box for n in rows] == [(0, 90 + 32 * i, 375, 32) for i in range(6)]
     assert [quick.icons[n].visible for n in Quick.ICONS] == [1, 1, 1, 1, 1, 1, 0, 0]
@@ -2634,17 +2079,9 @@ def test_oled_s_quick_settings_lays_its_buttons_over_whole_rows(fw, st):
     assert quick.slider.box == (183, 0, 171, 32) and quick.slider.parent.box == (0, 58, 375, 32)
 
 
-def test_closing_quick_settings_forgets_the_press(fw, st):
-    quick = Quick(fw, st, CLASSIC)
-    quick.press('img_gain')
-    quick.ui.fire(quick.win, EVT_DESTROY)
-    quick.dispatch('img_gain', O['EVT_POINTER_UP_BEFORE'])  # nothing pressed now: nothing repainted
-    assert [c[1][0] for c in fw.calls('widget_invalidate_force')] == [quick.icons['img_gain'].addr]
-
-
 # A page's switch as a row, under a set without stock's toolbars.
-def sleep_page(fw, st, image='switch_off', geom=CLASSIC_SET, which=CLASSIC):
-    theme(fw, which)
+def sleep_page(fw, st, image='switch_off', geom=OLED_SET):
+    theme(fw)
     st('geom').value = geom
     ui = Ui(fw)
     win = ui.window('sleeptimer_page')
@@ -2661,9 +2098,9 @@ def test_the_sleep_timers_switch_is_its_first_row_reading_the_switch(fw, st):
     ui, win, sw, timers = sleep_page(fw, st)
     label = win.child('_switch_row')
     button = label.parent
-    s = SETS[CLASSIC_SET]
+    s = SETS[OLED_SET]
     assert button.box == (0, 0, 375, s.set_row) and button.props['style'] == 's_btn_listitem'
-    assert label.box[0] == s.text_x and ui.text(label) == 'Sleep Timer' and value(ui, button) == 'Off'
+    assert label.box[0] == s.text_x and ui.text(label) == 'Sleep Timer' and switch(button) == 'switch_off'
 
 
 def test_the_rows_click_is_the_switchs_on_the_next_pass(fw, st):
@@ -2674,7 +2111,7 @@ def test_the_rows_click_is_the_switchs_on_the_next_pass(fw, st):
     assert not fw.calls('stock_dispatch_trampoline')  # a click rebuilds Lock Screen's list: it waits
     C.CFUNCTYPE(C.c_int, C.c_void_p)(timers[-1])(None)
     assert [c[1][0] for c in fw.calls('stock_dispatch_trampoline')] == [sw.addr]
-    assert value(ui, button) == 'On'
+    assert switch(button) == 'switch_on'
 
 
 def test_a_set_with_toolbars_keeps_stocks_switch(fw, st):
@@ -2683,8 +2120,8 @@ def test_a_set_with_toolbars_keeps_stocks_switch(fw, st):
 
 
 def test_lock_screens_switch_row_heads_its_list(fw, st):
-    theme(fw, MINIMAL)
-    st('geom').value = CLASSIC_SET
+    theme(fw)
+    st('geom').value = OLED_SET
     ui = Ui(fw)
     win = ui.window('lockscreen_page')
     ui.add('image', win, (300, 270, 50, 50), 'img_switch', image='switch_on')
@@ -3159,7 +2596,7 @@ def test_rows_for_another_song_start_at_the_top(fw, st):
     assert offsets()[2:] == [(lrc.addr, 0, 50)]
 
 
-# The status bar: the codec badge's fade, the percentage's width, Classic's dark bar.
+# The status bar: the codec badge's fade, the percentage's width, the clock.
 RET_REPEAT = 8  # AWTK's ret_t: a timer that answers it runs again, any other answer ends it
 
 
@@ -3195,83 +2632,9 @@ def test_the_percentage_is_as_wide_as_its_digits(fw, st, level, digits):
     assert width(level) == digits * 11 + 13
 
 
-class DarkBar(Bar):
-    def __init__(self, fw, st):
-        theme(fw, CLASSIC)
-        st('geom').value = CLASSIC_SET
-        super().__init__(fw, 2)
-        fw.mock('fw___xstat', lambda *_: -1)
-        self.w['label_title'].move(60, 3, 200, 20)
-        self.w['view_battery'].move(300, 2, 30, 20)
-        self.w['img_state'].move(345, 2, 20, 20)  # right of the battery, where the dark bar's isn't
-        self.ui.set_text(self.w['label_title'], 'Songs')
-        styles = {b'text_align_h': 1, b'text_color': i32(0xff00ff00)}
-        fw.mock('style_get_int', lambda style, key, default, *_: styles.get(C.string_at(key), i32(default)))
-        self.timers: list = []
-        fw.mock('timer_add', lambda fn, ctx, ms, *_: self.timers.append(fn) or 5)
-        self.sync()  # stock's showface: finds the bar's widgets
-
-    def to(self, name):
-        self.ui.window(name)
-        self.fw.fn('navigation__bar_sync', None, C.c_void_p)(self.bar.addr)
-
-
-def test_a_dark_page_takes_the_bars_title_across_in_white_and_hides_the_clock(fw, st):
-    bar = DarkBar(fw, st)
-    bar.to('usbmode_page')
-    title = bar.w['label_title']
-    assert title.box[:3] == (0, 3, 375) and title.props['style:normal:text_align_h'] == 'center'
-    assert title.props['_final_n'] and not bar.w['label_clock'].visible
-    assert bar.timers == [C.cast(fw.lib.bar_repaint, C.c_void_p).value]
-    C.CFUNCTYPE(C.c_int, C.c_void_p)(bar.timers[0])(None)  # the repaint, after this paint
-    assert fw.calls('widget_invalidate_force')[-1][1][0] == bar.bar.addr and st('bar_timer', C.c_uint).value == 0
-
-
-def test_the_dark_bars_latin_title_drops_a_cjk_pages_bold_mark(fw, st):
-    bar = DarkBar(fw, st)
-    title = bar.w['label_title']
-    bar.ui.set_text(title, '专辑')
-    fw.fn('theme_font', C.c_int, C.c_void_p, C.c_int, C.c_int)(title.addr, 2, -2)  # ROLE_BAR, FONT_ROW: the CJK page's
-    assert title.props['_q2_bold_fallback'] == 1
-    bar.to('usbmode_page')
-    fw.fn('bar_title_sync', None, C.c_void_p)(bar.ui.top.addr)
-    assert bar.ui.text(title) == 'Q2 Pod' and title.props['_q2_bold_fallback'] == 0
-
-
-def test_the_dark_bars_marks_take_its_places_and_stay(fw, st):
-    bar = DarkBar(fw, st)
-    bar.to('usbmode_page')
-    w = bar.w
-    assert all(w[n].box[0] + w[n].box[2] <= 0 for n in ('img_bt', 'img_wifi'))  # off screen, where a relayout finds them
-    (sx, sy, sw, sh), (bx, by, bw, bh) = state, slot = w['img_state'].box, w['view_battery'].box
-    assert all(0 <= x and x + ww <= 375 and 0 <= y and y + h <= bar.bar.box[3] for x, y, ww, h in (state, slot))  # on the bar
-    assert 2 * sx + sw < 2 * bx and by <= sy + sh // 2 < by + bh  # the play state left of the battery, on its line
-    moves = len(fw.calls('widget_move_resize'))
-    fw.fn('navigation__bar_sync', None, C.c_void_p)(bar.bar.addr)
-    assert len(fw.calls('widget_move_resize')) == moves
-
-
-def test_leaving_a_dark_page_puts_the_title_back_as_it_was(fw, st):
-    bar = DarkBar(fw, st)
-    bar.to('usbmode_page')
-    bar.to('about_page')
-    title = bar.w['label_title']
-    assert title.box[:3] == (60, 3, 200) and bar.w['label_clock'].visible
-    assert (title.props['style:normal:text_align_h'], title.props['style:normal:text_color']) == (1, i32(0xff00ff00))
-    assert title.props['_final_n'] == 0  # its own ink again, not the dark bar's white
-    assert fw.calls('widget_layout_children')[-1][1][0] == bar.bar.addr and st('clock_key', C.c_uint).value == 0
-
-
-def test_the_bar_stays_light_off_classic(fw, st):
-    bar = DarkBar(fw, st)
-    st('theme').value = MINIMAL
-    bar.to('usbmode_page')
-    assert bar.w['label_clock'].visible and bar.w['img_bt'].box[0] != -400
-
-
 @pytest.mark.parametrize('titled, shown', [(0, '6:05 PM'), (1, '6:05')])
 def test_the_clocks_timer_shows_the_minute_and_rearms(fw, st, titled, shown):
-    """Beside Classic's bar title the 12-hour clock drops AM and PM, which would reach the title."""
+    """Beside the bar's title the 12-hour clock drops AM and PM, which would reach the title."""
     ui = Ui(fw)
     bar = ui.window('statusbar', top=False)
     clock = ui.add('label', bar, (150, 0, 75, 26), 'label_clock')
@@ -3293,15 +2656,13 @@ def test_the_clocks_timer_shows_the_minute_and_rearms(fw, st, titled, shown):
 # beside the play state, its text ending CLOCK_BESIDE (24) left of the battery's body, the title short of it. Its box
 # is its text's width (canvas_measure_text) and hscroll_label's two 2 px margins.
 
-OLED_SET = next(i for i, s in enumerate(SETS) if s.name == 'oled')
 CLOCK_W = 38  # canvas_measure_text's width of "00:00", the widest clock
 INK_ROW = 0xffababab
 
 
 class StatusRow(Bar):
     def __init__(self, fw, st, title=''):
-        oled = next(i for i, t in enumerate(THEMES) if t['name'] == 'OLED')
-        theme(fw, oled)
+        theme(fw)
         st('geom').value = OLED_SET
         super().__init__(fw, 2)
         self.ui.window('home_page' if not title else 'albums_page')
@@ -3365,7 +2726,7 @@ def tap(fw, target):
 
 
 def test_a_tapped_row_takes_the_selection(fw, st):
-    page = Page(fw, MODERN)
+    page = Page(fw)
     fw.mock('stock_dispatch_trampoline', lambda *_: 4)
     assert tap(fw, page.rows[2].children[0]) == 4  # its title: the row that owns it
     assert page.view.props['_ringnav_index'] == 2 and st('touch_mode').value == 1
@@ -3373,7 +2734,7 @@ def test_a_tapped_row_takes_the_selection(fw, st):
 
 
 def test_a_tap_in_one_pane_clears_the_others(fw, st):
-    page = Page(fw, MODERN)
+    page = Page(fw)
     other = page.ui.add('scroll_view', page.ui.top, (0, 200, 375, 120), 'other')
     other.byte_at(O['VIEW_VERTICAL']).value = 1
     item = page.ui.add('list_item', other, (0, 0, 375, 48))
@@ -3385,28 +2746,17 @@ def test_a_tap_in_one_pane_clears_the_others(fw, st):
 
 
 def test_a_tap_off_every_row_changes_nothing(fw, st):
-    page = Page(fw, MODERN)
+    page = Page(fw)
     tap(fw, page.view)
     assert page.view.props['_ringnav_index'] == 1
 
 
-@pytest.mark.parametrize('which, revealed', [(CLASSIC, 1), (MODERN, 0)])
-def test_classic_brings_a_cut_row_whole_when_tapped(fw, st, which, revealed):
-    page = Page(fw, which, rows=8)
-    st('geom').value = CLASSIC_SET if which == CLASSIC else 0
-    tap(fw, page.rows[6])  # 288 to 336 in a 294 px view
-    offsets = [i32(c[1][2]) for c in fw.calls('scroll_view_set_offset')]
-    assert bool(offsets) == revealed
-    if revealed:
-        assert offsets[0] + 294 >= 336 and offsets[0] <= 288
-
-
 # A Library row that can't play now (catalogue.c): its text and its offline mark.
 def test_a_greyed_row_keeps_its_contrast_on_the_selection_and_carries_the_offline_mark(fw, st, layout):
-    """Off the selection a greyed row's text is CAT_GREY; on Modern's accent bar it is the bar's own ink at
+    """Off the selection a greyed row's text is CAT_GREY; on the accent's bar it is the bar's own ink at
     70% (not grey on blue), and each greyed row has the cloud-slash mark at its right in its text's colour,
     after the rows are painted (ringnav_paint)."""
-    page = Page(fw, MODERN)
+    page = Page(fw)
     labels = [b.children[0] for b in page.rows]
     for label in labels:  # titles as wide as the row: they would run under the mark
         label.move(10, 0, 320, 48)
@@ -3449,7 +2799,7 @@ def test_oleds_song_rows_end_their_title_and_inline_artist_clear_of_the_offline_
     left for an artist drops it and stops there too. A row that can play keeps the right column. The box
     song_row gives a title is the last word: catalogue_fit, which runs first, never widens it again, so the rows
     settle instead of resizing on every paint."""
-    page = Page(fw, OLED, rows=3, pitch=32, sel=None, name='allmusic_page')
+    page = Page(fw, rows=3, pitch=32, sel=None, name='allmusic_page')
     st('geom').value = OLED_SET
     songs = [('Ten Thousand Weight', 'The Head and the Heart'),  # the shot's row: the artist ran under the mark
              ('A Title That Runs All The Way Across', 'Some Artist'),
@@ -3494,7 +2844,7 @@ def test_a_greyed_album_rows_second_line_ends_clear_of_the_offline_mark_too(fw, 
     """An album list's two-line row nests its artist a level deeper than its title (the text's view, then
     view_artist, as stock builds it): a greyed row's artist ends where its title does, 12 px clear of the mark,
     not on stock's box running up to it."""
-    page = Page(fw, MODERN)
+    page = Page(fw)
     artists = []
     for b in page.rows:
         b.children[0].move(10, 0, 320, 24)
@@ -3515,11 +2865,13 @@ def test_a_greyed_album_rows_second_line_ends_clear_of_the_offline_mark_too(fw, 
 @pytest.mark.parametrize('name, tab, greyed', [('albuminfo_page', None, True), ('playerjumpinfo_page', None, True),
                                                ('localmusic_page', None, False), ('search_dialog', 1, True),
                                                ('search_dialog', 0, False)])
-def test_an_album_page_and_search_grey_their_songs_that_cannot_play(fw, st, name, tab, greyed):
+def test_an_album_page_and_search_grey_their_songs_that_cannot_play(fw, st, low, name, tab, greyed):
     """An album's songs, and Search's songs, are a scroll_view's rows, one per record of the showlist (Search's:
     p_deque_searchshowlist, the lit tab's rows), not a pooled table: with Local + Server, offline, a
-    server song's row is greyed as the page paints; another page's rows, or another tab's, are left alone."""
-    page = Page(fw, MODERN, name=name, LIBRARYSOURCE=b'1')
+    server song's row is greyed as the page paints; another page's rows, or another tab's, are left alone.
+    Each record's path is a 4-byte field as the Q2's (low), so the 8-byte read of its title after it finds none:
+    untagged rows, which an album page's song rows (song_rows.c) leave unpainted."""
+    page = Page(fw, name=name, LIBRARYSOURCE=b'1')
     if tab is not None:
         group = page.ui.add('view', page.view.parent, name='tab_button_group')
         page.ui.add('tab_button', group, value=tab)
@@ -3529,10 +2881,10 @@ def test_an_album_page_and_search_grey_their_songs_that_cannot_play(fw, st, name
     keep = []
 
     def record(path):
-        s, r = C.create_string_buffer(path), C.create_string_buffer(O['REC_SIZE'] + 8)
-        struct.pack_into('<Q', r, O['REC_PATH'], C.addressof(s))
+        r = C.create_string_buffer(O['REC_SIZE'] + 8)
+        struct.pack_into('<I', r, O['REC_PATH'], low(path))
         struct.pack_into('<i', r, O['REC_TYPE'], 8)
-        keep.extend((s, r))
+        keep.append(r)
         return C.addressof(r)
     deques = Deques(fw)
     shown = deques.new([record(p) for p in (b'/mnt/mmc/a.flac', b'/mnt/mmc/b.flac',

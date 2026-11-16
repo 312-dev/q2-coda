@@ -64,7 +64,7 @@ class Ui(C.Structure):
 
 class Np(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'page station artist song info elapsed heart'.split()),
-                ('timer', C.c_uint), ('leave', C.c_uint), ('seen', C.c_uint), ('ipod', C.c_int)]
+                ('timer', C.c_uint), ('leave', C.c_uint), ('seen', C.c_uint)]
 
 
 def rd(fw):
@@ -365,14 +365,6 @@ def title(p):
     return p.w.text[p.w.under(ui(p.fw).page, 'hscroll_label_create')[-1]]
 
 
-def classic(fw):
-    """The Classic theme (THEME=1 in the config)."""
-    def read(path, section, key, out, default, *_):
-        v = b'1' if C.string_at(key) == b'THEME' else C.string_at(default)
-        C.memmove(out, v + b'\0', len(v) + 1)
-    fw.mock('toolsReadConfig', read)
-
-
 # The menu and the built-in lists.
 
 def test_the_menu_without_a_station_played_has_no_now_playing(fw):
@@ -462,10 +454,9 @@ def test_a_list_shorter_than_its_kept_row_selects_its_last(fw):
     assert ui(fw).list.n == 2 and selected(p) == 1
 
 
-def test_no_favourites_under_classic_is_an_empty_page_its_bar_names_favourites(fw):
-    """page_empty: Classic's bar holds the title, so the empty list's caption stays its first line and the bar reads
-    the list's name; a list with rows has no such page, and an empty one selects no row."""
-    classic(fw)
+def test_no_favourites_is_an_empty_page_its_bar_names_favourites(fw):
+    """page_empty: the bar holds the title, so it reads the list's name and OLED's note says the list is empty; a list
+    with rows has no such page, and an empty one selects no row."""
     p = page(fw)
     fw.mock('widget_get_child', lambda w, i, *_: (p.w.under(w) + [0] * (i + 1))[i])
     p.menu('Featured')
@@ -1831,19 +1822,6 @@ def test_the_session_moves_with_each_start_and_favourites_change(fw):
     assert len({first, second, session()}) == 3
 
 
-def test_classic_s_now_playing_is_the_local_page_s(fw):
-    def read(path, section, key, out, default, *_):
-        v = b'1' if C.string_at(key) == b'THEME' else C.string_at(default)
-        C.memmove(out, v + b'\0', len(v) + 1)
-    fw.mock('toolsReadConfig', read)
-    p = page(fw)
-    play(fw, p, 0)
-    arts = [C.string_at(a[1]).decode() for _, a in fw.calls('image_base_set_image') if a[0] != np_(fw).heart]
-    assert np_(fw).ipod == 1 and arts[-2:] == ['stream_radio', 'classic_light_station']  # after the rows' arrows
-    name = [w for w, t in p.w.text.items() if t == 'Internet Radio'][-1]  # the page's, after the menu's title
-    assert (name, 0) in [a[:2] for _, a in fw.calls('widget_set_visible')]  # Classic's bar names the page
-
-
 def test_held_on_now_playing_toggles_the_station_playing(fw):
     p = page(fw)
     play(fw, p, 5)
@@ -1934,35 +1912,8 @@ def test_the_art_and_the_heart_are_local_now_playing_s(fw):
     assert [ms for f, ms in p.timers if f == p.fn('np_tick')] == [500]
 
 
-@pytest.mark.parametrize('for_s, box', [(65, 'NP_IPOD_TIME_W2'), (3599, 'NP_IPOD_TIME_W2'), (3600, 'NP_IPOD_TIME_W')])
-def test_classic_s_running_time_box(fw, for_s, box):
-    """Classic: boxes for "-59:59" (NP_IPOD_TIME_W2) until the stream has played an hour, then for the hours."""
-    classic(fw)
-    p = page(fw)
-    play(fw, p).ends = False
-    p.clock.now = 10_000_000
-    rd(fw).since = p.clock.now - for_s * 1000
-    fw.var('g_backlight_status', C.c_ubyte).value = 1
-    p.run('np_tick')
-    assert [a[3] for _, a in fw.calls('widget_move_resize') if a[0] == np_(fw).elapsed][-1] == O[box]
-
-
-def test_classic_s_rows_are_the_local_page_s_four(fw):
-    """The station, artist, song and stream (the "3 of 12" row) in one column, each wholly under the one before, the
-    station in the theme's face for the local page's title (theme_font)."""
-    classic(fw)
-    p = page(fw)
-    play(fw, p)
-    np = np_(fw)
-    moved = {a[0]: a[1:5] for _, a in fw.calls('widget_move_resize')}
-    rows = [moved[w] for w in (np.station, np.artist, np.song, np.info)]
-    assert len({x for x, *_ in rows}) == 1
-    assert all(y + h <= below for (_, y, _, h), (_, below, *_) in zip(rows, rows[1:]))
-    assert p.w.strs.get((np.station, b'style:normal:font_name'))
-
-
-def test_stock_s_now_playing_keeps_its_own_layout(fw):
-    """Nothing moved (stream_ipod's and ipod_times' are Classic's), "Internet Radio" shown over the station's icon."""
+def test_now_playing_keeps_its_own_layout(fw):
+    """Nothing moved once made, "Internet Radio" shown over the station's icon."""
     p = page(fw)
     play(fw, p).ends = False
     rd(fw).since = p.clock.now - 65000

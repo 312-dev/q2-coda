@@ -8,13 +8,11 @@ from typing import Any
 
 import pytest
 
-import host
 from conftest import O, Deques, ROOT
-from test_nav_lists import ROW_H, SLOW, STOP, Canvas, Pull, Table, key, theme, ui  # noqa: F401  (ui: fixture)
+from test_nav_lists import ROW_H, SLOW, STOP, Canvas, Pull, Table, key, ui  # noqa: F401  (ui: fixture)
 
 SOURCE = (ROOT / 'patch' / 'az_index.c').read_text()
 AZ = {k: int(v) for k, v in re.findall(r'^#define (AZ_\w+) (\d+)\b', SOURCE, re.M)}
-OLED = next(i for i, t in enumerate(host.tools_theme.builtins()) if t['name'] == 'OLED')
 LETTERS = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 EVT_MOVE, EVT_UP = O['EVT_POINTER_MOVE_BEFORE'], O['EVT_POINTER_UP_BEFORE']
 KEEP = []  # the records' buffers, alive for the test
@@ -73,8 +71,15 @@ def library(n=78):
     return [f'{chr(65 + i // 3)} song {i}' for i in range(n)]
 
 
-def touchable(fw, ui, n=78, name='allmusic_page', themed=OLED, cls=0xf001, sort=0):
-    theme(fw, themed)
+def defaults(fw):
+    """config.ini with no keys: every setting its default."""
+    def read(path, section, name, out, default, *_):
+        C.memmove(out, C.string_at(default) + b'\0', len(C.string_at(default)) + 1)
+    fw.mock('toolsReadConfig', read)
+
+
+def touchable(fw, ui, n=78, name='allmusic_page', cls=0xf001, sort=0):
+    defaults(fw)
     fw.mock('toolsTrimLeft', lambda *_: None)
     fw.var('fw_ctx_g_class_type', C.c_int).value = cls
     fw.var('fw_ctx_g_sort_flag', C.c_int).value = sort
@@ -129,9 +134,9 @@ def test_a_press_after_a_missed_lift_ends_the_hold(fw, ui):
     assert ui.timers[fade][2] == AZ['AZ_SHOW_MS'] - AZ['AZ_FADE_MS']
 
 
-@pytest.mark.parametrize('case', ['short', 'other theme', 'by time added', 'artists songs', 'mid list', 'settings'])
+@pytest.mark.parametrize('case', ['short', 'by time added', 'artists songs', 'mid list', 'settings'])
 def test_no_index_on_a_short_or_unsorted_list_or_away_from_the_edge(fw, ui, case):
-    cases: dict[str, dict[str, Any]] = {'short': dict(n=50), 'other theme': dict(themed=0), 'by time added': dict(sort=3),
+    cases: dict[str, dict[str, Any]] = {'short': dict(n=50), 'by time added': dict(sort=3),
                                         'artists songs': dict(cls=0xff07), 'settings': dict(name='sysset_page')}
     args = cases.get(case, {})
     table, pull = touchable(fw, ui, **args)
