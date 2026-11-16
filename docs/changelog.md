@@ -3,6 +3,14 @@
 - **Unreleased (q2-coda)**:
   - Settings (OLED): Max Volume, Balance, Brightness, Crossfade's length and Default Volume's level change right in the list. Each row shows a small slider and its value; press Center and the row grows, turn the wheel to set it (heard or seen as you turn), and press Center or Back when done. Crossfade and Default Volume are switches, with their slider showing under them while they're on.
   - Now Playing (OLED): the progress bar's track and its played part have round ends, as the design has them; they were square.
+  - Menus (OLED): the hold menus, Now Playing's ⋯ and a playlist's ⋯ now open as a frosted sheet over the page, which shrinks back and dims behind it. The sheet shows the song, album or playlist at the top with its cover, its rows run the full width of the screen and fade at the bottom, and Delete and Remove rows are red.
+  - Menus (OLED): the menu sheet rises from the bottom of the screen as the page behind shrinks back, and falls away when you press Return. With Reduce Motion on, it fades in and out instead.
+  - Up Next (OLED): Up Next opens in the same sheet as the menus, from the queue button, a swipe up on the cover or the hold menu's View Queue. The playing song is at the top with its cover, moving level bars, artist and album; in Light Mode the **Clear** pill is light grey with blue words.
+  - Menus (OLED): Now Playing's ⋯ reads **Get Cover & Lyrics** and **Get Album Lyrics**, no longer cut off.
+  - Menus (OLED): in Now Playing's hold menu, Shuffle, Repeat and Group by show just their setting (**Songs**, **All**, **Album**), and Center on Group by switches between Album and Folder without opening a list.
+  - Subsonic comes built in: it is in Streaming without installing it. A newer Subsonic from the App Store still takes over.
+  - Car Remote: with Library on Local + Server and a card app's server songs imported, Q2 Muse Remote's lists (and Android Auto's) showed nothing; they list both libraries again.
+  - Now Playing: the Shuffle and Repeat outline from the Centre cycle hides after a tap, as every focus ring does.
   - The boot logo reads Q2 MUSE, and Light Mode boots with the same dark animation as Dark Mode.
   - Car Remote: Shuffle and Repeat now match between the car and the Q2 Muse. Changing them on the Q2 Muse's Now Playing shows in the car, and changing them in the car lights the Q2 Muse's buttons; before, neither side saw the other's.
   - Q2 Pod is now Q2 Muse: the name on every screen, page and guide. Settings, the card's files and paired devices carry over as they are.
@@ -13,8 +21,10 @@
   - Settings > Display: a **Reduce Motion** switch, last on the page. On, pages cross-fade instead of sliding, Control Center lands without its bounce, the selection bar no longer leans as you turn the wheel, Cover Flow stops at its ends without bouncing, switches flip at once, and the charging screen's sweep and Up Next's level bars stand still. Scrolling, progress, the volume bar and swipe back still move.
   - Display (OLED): toasts rise and fade in, then sink and fade out, instead of popping; the confirmation card fades in and out over the page.
   - Subsonic comes built in: it is in Streaming without installing it. A newer Subsonic from the App Store still takes over.
-  - Car Remote: a song streaming from a card app showed its temporary file's name as the title in Android Auto, with no artist, no cover and 0:00; it shows the song's title, artist, album, length and cover.
+  - Car Remote: a song streaming from a card app showed its temporary file's name as the title in Android Auto, with no artist, no cover and 0:00; it shows the song's title, artist, album, length and cover, and the car can heart it.
   - Car Remote: with Library on Local + Server and a card app's server songs imported, Q2 Muse Remote's lists (and Android Auto's) showed nothing; they list both libraries again.
+  - Now Playing: the Shuffle and Repeat outline from the Centre cycle hides after a tap, as every focus ring does.
+  - The visualizer is gone. It was already switched off to save battery; its code, and the audio tap the player kept for it, are now removed.
   - Now Playing: the Shuffle and Repeat outline from the Center cycle hides after a tap, as every focus ring does.
   - Car Remote's empty state names the phone app: "Open Q2 Muse Remote on your phone".
   - Display (OLED): empty pages show a large outline glyph instead of stacked tiles, and their action is a round blue button (Scan Music Now, Turn on Wi-Fi, Turn on Streaming) whose ring shows only after the wheel is used.

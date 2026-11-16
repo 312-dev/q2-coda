@@ -2477,6 +2477,8 @@ def test_the_menu_closes_on_return_or_its_arrow_and_forgets_a_closed_dialog(fw, 
     back = fw.fn('navigation__qm_back', C.c_int, C.c_void_p, C.c_void_p)
     assert back(dialog.addr, event(O['EVT_KEY_UP'], O['KEY_CENTER'])) == 0 and st('qm_dialog', C.c_void_p).value
     assert back(dialog.addr, event(O['EVT_KEY_UP'], O['KEY_RETURN'])) == STOP
+    # closed through menu_modal.c modal_close (no sheet here, so at once) and forgotten at once, so the next hold can
+    # open another menu before stock destroys this one
     assert not st('qm_dialog', C.c_void_p).value and [a[0] for _, a in fw.calls('window_close')] == [dialog.addr]
     st('qm_dialog', C.c_void_p).value = dialog.addr
     assert back(dialog.addr, event(EVT_CLICK)) == STOP  # the title bar's arrow

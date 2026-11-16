@@ -1629,7 +1629,7 @@ def test_a_message_is_a_toast_over_the_page_s_own_title(fw):
     assert p.said == ['Use the ParametricEQ file, not GraphicEQ'] and p.ui.status == b'' and p.title() == 'Presets'
 
 
-# The Type picker (docs/internals.md#parametric-eq): every type, a screen of them or the inset modal's.
+# The Type picker (docs/internals.md#parametric-eq): every type, a screen of them or the menu sheet's.
 
 def test_the_type_picker_opens_on_the_band_s_type_and_return_leaves_it(fw):
     p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()

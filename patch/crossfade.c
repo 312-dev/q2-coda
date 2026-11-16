@@ -133,8 +133,8 @@ void volume_row(void *label) {
     vol_text(label);
 }
 
-/* An int shared with hciplayer's filter (and q2video): made whole under tmp and renamed, as the
- * visualizer's tap is, then mapped; 0 if it cannot be made yet, so the caller tries next pass.
+/* An int shared with hciplayer's filter (and q2video): made whole under tmp and renamed, then
+ * mapped; 0 if it cannot be made yet, so the caller tries next pass.
  * Written, not ftruncate'd: that allocates no page, so a full tmpfs would SIGBUS the first store. */
 static volatile int *shared_int(const char *tmp, const char *path) {
     void *p = (void *)-1;
@@ -191,7 +191,7 @@ void press_forget(void) {
     if (xf.press_file) *xf.press_file = 0;
 }
 
-/* The PEQ filter into the chain, in bypass, for the visualizer's tap, a fade or Mono Audio: boot
+/* The PEQ filter into the chain, in bypass, for a fade, Mono Audio or AirPlay's tap: boot
  * leaves it out with the EQ off, and any peq_stock_eq since (the EQ switched) has put it in. Only
  * while something plays (1 stopped), so a call while stopped is simply made again later.
  * ponytail: whether an attach while stopped would stick is unknown; waiting for play covers both.
@@ -503,7 +503,7 @@ int xfade_key(void *top, unsigned key) {
 }
 
 /* playback_poll, each UI pass: the next change's fade into XFADE_FILE, made whole under another
- * name first as the visualizer's tap is. A fade only when Crossfade and stock's Gapless are on and
+ * name first. A fade only when Crossfade and stock's Gapless are on and
  * the next track is another album's (album_cmp), so albums stay gapless; stock Shuffle's next
  * always counts as another album's, and is -2 when not drawn ahead (playback.c shuffle_peek). Its
  * change is a cold start (stock preloads nothing in Shuffle), which the filter's tail waits out

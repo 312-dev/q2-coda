@@ -215,7 +215,7 @@ extern void coverflow_paint(void *w, void *canvas), video_poll(void);
 extern int video_on(void), video_click(const char *path);
 extern void games_paint(void *w, void *canvas);
 extern void spot_poll(void), spot_paint(void *w, void *canvas), *spot_art(void);
-extern void up_next(int (*keyup)(void *, void *));
+extern void up_next(void);
 extern int un_hold(void *top), un_key(void *top, unsigned key, int owned);
 extern void un_keydown(unsigned key), upnext_paint(void *w, void *canvas);
 extern void radio_poll(void);
@@ -225,9 +225,7 @@ extern int mono_click(void *ctx, void *event), swap_click(void *ctx, void *event
 extern int xfade_open(void *ctx, void *event), xfade_key(void *top, unsigned key), resume_min(void);
 extern int eq_key(void *top, unsigned key), eq_tabs_hold(void *view); /* peq_ui.c */
 extern const char *radio_hold(void *top);
-extern void visualizer_paint(void *w, void *canvas), visualizer_attach(void *win);
-extern int visualizer_full(void); /* OLED's full-screen Field draws the modes itself */
-extern int visualizer_live(void), games_live(void);
+extern int games_live(void);
 extern unsigned char now_cover(void *r, const char **file);
 extern unsigned now_cover_written(const char *file);
 extern int scrobble_append(const char *line, unsigned n);

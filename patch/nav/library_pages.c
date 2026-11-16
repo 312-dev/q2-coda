@@ -90,7 +90,7 @@ enum {
     QA_MORE,
     QA_NEW_PLAYLIST,
     QA_OTG,  /* Add to On-The-Go (playlist_pages.c) */
-    QA_PLAY, /* the inset modal's playlist: Play, Rename, Delete (playlists.c) */
+    QA_PLAY, /* the menu sheet's playlist: Play, Rename, Delete (playlists.c) */
     QA_RENAME,
     QA_DELETE,
     QA_REMOVE /* a payload page's own last row (qm_song_hold): Remove from Playlist */
@@ -212,9 +212,12 @@ static void qm_close(void) {
 
 /* Return and the title bar arrow dismiss without the stock sort-change flag. */
 static int qm_open(const void *unused);
+static void qm_values(void *dialog);
 static int qm_back(void *dialog, void *event) {
     if (I(event, EVENT_TYPE) == EVT_KEY_UP && I(event, EVENT_KEY) != KEY_RETURN) return 0;
-    qm_close();
+    void *menu = st.qm_dialog; /* forgotten at once, as qm_close: the next hold may open another */
+    st.qm_dialog = (void *)0;
+    modal_close(menu); /* a sheet falls away first (menu_modal.c) */
     return STOP;
 }
 
@@ -811,7 +814,7 @@ int np_queue(const void *unused) {
         if (queue && at < deque_size(queue) && rec_hash(deque_at(queue, at)) == st.qm_forced_hash)
             playback_move(at);
     }
-    up_next(page_keyup);
+    up_next();
     return 0;
 }
 

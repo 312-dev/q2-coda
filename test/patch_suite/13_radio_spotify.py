@@ -285,7 +285,7 @@ assert m.search('Yellow','Coldplay',found,code=0)==1 and len(m.urls)==1 and not 
 assert m.search('','Coldplay',found)==1 and not m.written and not m.urls; passed()  # no title: no request
 
 # Its accept (onlinematch.c ringnav_lyric_save, at LYRIC_SAVE_CALL): stock's snprintf of cp -rf /tmp/oslyric_N
-# "/mnt/mmc/.downpic/<name>" for system() becomes a copy beside the song, through .part, as Download Album Lyrics
+# "/mnt/mmc/.downpic/<name>" for system() becomes a copy beside the song, through .part, as Get Album Lyrics
 # saves, the .downpic copy stock's loader would show first goes, and system() gets ":". The song is the queue's
 # whose file name stock turns into name. Not in the queue, a CUE track's, or a card that can't be written there: the
 # copy goes to stock's .downpic/<name> instead, never stock's command, whose name the shell would run (GHSA-qp92-mq7c-6r64).

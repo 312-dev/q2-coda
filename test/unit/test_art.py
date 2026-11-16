@@ -112,7 +112,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     (each half's), the shuffle confirmation's glyph (bold) in Accent Blue, Now Playing's heart and More (regular) in
     Text Primary (each half's), More pressed in Text Secondary and the full heart (fill) in Accent Blue, and the
     Ratings rows' filled and outlined hearts and Streaming's service marks in the folder's inks, all from the vendored
-    Phosphor SVGs but TIDAL's mark, drawn in art.py, and Subsonic's, q2-coda's own SVG, and the inset modal's symbols
+    Phosphor SVGs but TIDAL's mark, drawn in art.py, and Subsonic's, q2-coda's own SVG, and the menu sheet's symbols
     (regular, 19 px) in Text Secondary (each half's) and white for the selection and the picker's check in Accent Blue,
     the volume's two speakers (fill, 16 px) in Text Secondary (each half's), an artist page's Shuffle and Radio
     (regular, 16 px) in Accent Blue and white for the lit one, About's quality badge's waveform (bold, 12 px) in Text
@@ -367,7 +367,7 @@ def test_a_row_symbol_is_drawn_at_its_optical_size(name):
 
 def test_a_theme_draws_only_the_images_its_keys_ask_for():
     """Each optional group is its key's: a theme without Now Playing's own glyphs, the Shuffle row, the switch rows,
-    the inset modal or iPod text entry draws none of their images, and keeps the rest."""
+    the menu sheet or iPod text entry draws none of their images, and keeps the rest."""
     oled = theme.builtins()[0]
     bare = {**oled, 'np_modes': 0, 'shuffle_row': 0, 'set_switch': 0, 'entry_ipod': 0,
             'geoms': {n: dataclasses.replace(g, modal=0) for n, g in oled['geoms'].items()}}

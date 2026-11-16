@@ -468,6 +468,15 @@ static int edit_widget, edit_parent, edit_bottom, focused, keyboard_owner, selec
 static unsigned selected[2];
 static char at_focus[sizeof w->text]; /* the edit's text when it took focus */
 #include "offsets.inc"
+#include "ui_kit.h"
+/* The confirmation card (feedback.c confirm): its answer, run when the test answers it (shim_card_answer). */
+static confirm_t card;
+static int card_up;
+int confirm(const confirm_t *c) { if (card_up) return 0; card = *c, card_up = 1; return 1; }
+int confirm_up(void) { return card_up; }
+const char *shim_card_title(void) { return card_up ? card.title : ""; }
+const char *shim_card_name(void) { return card_up && card.name ? card.name : ""; }
+int shim_card_answer(int row) { if (!card_up) return 0; card_up = 0; card.answer(card.ctx, row, 0); return 1; }
 /* The input method's editing target (IM_WIDGET) and open keyboard (IM_KEYBOARD, stock's window 4000). */
 static unsigned char im[32];
 static char edit_name[16];
@@ -819,6 +828,9 @@ def editor_check(lib, tmp):
         p = Preset(); assert lib.peq_load_active(C.byref(p)); return p
     def click(text): assert ui.shim_click(text.encode(), 1), (text, ui.shim_title())
     title = lambda: ui.shim_title().decode()
+    ui.shim_card_title.restype = ui.shim_card_name.restype = C.c_char_p
+    def asked(t, n): assert (ui.shim_card_title().decode(), ui.shim_card_name().decode()) == (t, n), (ui.shim_card_title(), ui.shim_card_name())
+    def answer(row): assert ui.shim_card_answer(row); ui.shim_run()  # the card closes, its answer runs, then the page's timer
     ui.shim_told.restype = C.c_char_p
     told = lambda: ui.shim_told().decode()  # what an action did: a toast over the page, the title kept
     def auto(p):  # the Preamp row's and picker's Auto: the cut for every standard rate
@@ -830,7 +842,7 @@ def editor_check(lib, tmp):
     assert lib.peq_save(bytes(active), C.byref(preset(enabled=1)), 1) == 1
     # With the stock flag clear no filter runs, so the saved ON reads OFF.
     assert advanced() == 0 and title() == ''
-    # The visualizer's attach puts the filter in the chain with PEQ off: the saved ON becomes OFF, so it stays silent.
+    # peq_attach (peq_chain's, for a fade, Mono Audio or AirPlay) puts the filter in the chain with PEQ off: the saved ON becomes OFF, so it stays silent.
     ui.shim_close(); ui.peq_attach(); assert read().bypass == 1 and ui.shim_flag() == 0; advanced()
     assert lib.peq_save(bytes(active), C.byref(preset(enabled=1)), 1) == 1
     # The switch writes the stock config key, so boot restores it; the flag follows the preset.
@@ -926,9 +938,9 @@ def editor_check(lib, tmp):
     ui.shim_return(); assert named('HD650')
     # Deleting asks first, removes only the saved copy and leaves the active EQ alone.
     before = active.read_bytes()
-    click('Presets'); click('Delete a preset'); click('HD650.txt'); click('Cancel')
+    click('Presets'); click('Delete a preset'); click('HD650.txt'); asked('Delete "%s"?', 'HD650.txt'); answer(0)  # Cancel
     assert (eqdir/'HD650.txt').exists()
-    click('HD650.txt'); click('Delete HD650.txt? Confirm')
+    click('HD650.txt'); asked('Delete "%s"?', 'HD650.txt'); answer(1)  # Delete
     assert not (eqdir/'HD650.txt').exists() and active.read_bytes() == before
     assert told() == 'Deleted HD650.txt; active EQ unchanged' and not ui.shim_click(b'HD650.txt', 0)
     # Stock presets are built in: picking one loads stock's curve, writes nothing until Apply.
@@ -1107,7 +1119,7 @@ def editor_check(lib, tmp):
     ui.shim_return(); click('Presets')
     click('Next page'); click('Batch 0128.txt'); assert named('Batch 0128')
     click('Presets'); click('Delete a preset'); click('Next page'); click('Next page')
-    click('Batch 0256.txt'); click('Delete Batch 0256.txt? Confirm')
+    click('Batch 0256.txt'); asked('Delete "%s"?', 'Batch 0256.txt'); answer(1)
     assert not (eqdir/'Batch 0256.txt').exists() and active.read_bytes() == before
     ui.shim_return(); ui.shim_return()
     # Under a theme's 28 px rows: the rows step 28 on its text column, the curve's head is whole rows
@@ -1394,16 +1406,18 @@ def eq3_editor_check(lib, ui, tmp):
     ui.shim_e3_open(); assert ui.shim_e3_touch(0x100, 50, 70) == 0 and (state().mode, state().hold) == (EQ_OFF, 0)  # shown on: off
     assert ui.shim_e3_touch(0x100, 50, 70) == 0 and state().mode == EQ_3  # and back
     ui.shim_e3_close(); assert state().mode == EQ_3 and ui.shim_flag() == 1
-    # The tabs: the wheel reaches the bar above Simple's switch, Centre opens Advanced with the wheel
-    # still on the bar; past it the list's first row, and back. Neither tab changes what plays.
+    # The tabs (oled-design.md: the wheel moves between the tabs, each opening as it is reached): the wheel
+    # reaches the bar above Simple's switch, and a turn up there stays; down opens Advanced with the wheel still
+    # on the bar; past it the list's first row, and back up to the bar, then up again to Simple, whose own rows
+    # Centre enters. Neither tab changes what plays.
     before = active.read_bytes()
-    ui.shim_e3_open(); keys(*[PREV] * 4, CENTRE); ui.shim_run()
+    ui.shim_e3_open(); keys(*[PREV] * 4, NEXT); ui.shim_run()
     assert ui.shim_click(b'Enabled Off', 2) and ui.shim_selection() == -1 and title() == ''
     keys(NEXT); assert ui.shim_selection() == 0
     assert not ui.shim_e3_key(NEXT)  # the list's own
     keys(PREV); assert ui.shim_selection() == -1
-    keys(CENTRE); ui.shim_run(); assert not ui.shim_click(b'Enabled', 2)  # Simple: no list
-    keys(NEXT, CENTRE); assert state().mode == EQ_OFF; keys(CENTRE)  # the switch, from the bar
+    keys(PREV); ui.shim_run(); assert not ui.shim_click(b'Enabled', 2)  # Simple: no list
+    keys(CENTRE); ui.shim_run(); keys(CENTRE); assert state().mode == EQ_OFF; keys(CENTRE)  # into its rows: the switch
     assert active.read_bytes() == before and state().mode == EQ_3
     ui.shim_e3_close()
     # Restarting with the Simple page still open must not keep its temporary Off attenuation.
@@ -1495,35 +1509,15 @@ static peq_preset active(double preamp, double gain) {
 
 static int negotiate(af_instance *af, af_data *in) { return af->control(af, 0x10000100, in); }
 
-/* The visualizer's tap (demo creates the file before the player maps it). */
-static vis_tap *tap_view(void) {
-    static vis_tap *t;
-    if (!t) {
-        int fd = open(VIS_FILE, O_RDWR | O_CREAT, 0644);
-        assert(fd >= 0 && !ftruncate(fd, sizeof(vis_tap)));
-        t = mmap(0, sizeof(vis_tap), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-        assert(t != MAP_FAILED && !close(fd));
-    }
-    return t;
-}
-
 /* One block through the filter equals the same block through the reference DSP, and is filtered. */
 static void same(af_instance *af, peq_dsp *ref, int rate, int nch) {
     float a[1024], b[1024], in[1024];
     unsigned frames = 1024 / nch;
     for (int i = 0; i < 1024; ++i) a[i] = b[i] = in[i] = 0.5f * sinf(i * 0.05f);
     af_data d = {a, (int)(frames * nch * 4), rate, nch, 0x1d, 4};
-    ++tap_view()->want; /* the visualizer is watching */
     assert(af->play(af, &d) == &d);
     peq_process(ref, b, frames);
     assert(!memcmp(a, b, sizeof(a)) && memcmp(a, in, sizeof(a)));
-    /* The tap ends with what played: the first two channels, every rate / 44100th frame above 48 kHz. */
-    vis_tap *t = tap_view();
-    unsigned step = rate > 48000 ? (unsigned)rate / 44100 : 1, n = (frames + step - 1) / step;
-    assert(t->rate == (unsigned)rate / step && t->stamp > 0);
-    for (unsigned i = 0; i < n; ++i)
-        for (int ch = 0; ch < 2; ++ch)
-            assert(t->ring[(t->seq - n + i) % VIS_RING][ch] == a[i * step * nch + (ch && nch > 1)]);
 }
 
 /* Crossfade (peq_player.c crossfade): demo's flag, one filter instance per track. */
@@ -1599,8 +1593,6 @@ static void crossfade_check(void) {
     /* No fade asked (another album next, Crossfade off, Gapless off): every block whole. */
     xfade_view(0);
     track(&a, 48000);
-    /* Let the unwatched visualizer tap settle before counting clock queries. */
-    for (n = 0; n < 2 * 48000;) assert(block(&a, buf, 1024, &n, 1, 48000) == 1024);
     unsigned reads = clock_reads;
     for (n = 0; n < 10 * 48000;) assert(block(&a, buf, 1024, &n, 1, 48000) == 1024);
     assert(clock_reads == reads);
@@ -1877,7 +1869,7 @@ static void carry_check(void) {
     peq_reset(&ref, 44100, 2, &p);
     continues(&a, &ref, &n);
     a.uninit(&a);
-    /* Mid-track with EQ on, once the unwatched tap settles: no clock reads. */
+    /* Mid-track with EQ on: no clock reads. */
     peq_length = 60, peq_pts = 10;
     track(&a, 44100);
     for (int i = 0; i < 100; ++i) continues(&a, &ref, &n);
@@ -1887,28 +1879,6 @@ static void carry_check(void) {
     a.uninit(&a);
     peq_length = 0, peq_pts = -1;
     assert(!unlink(PEQ_ACTIVE));
-}
-
-/* The tap before demo has made its file: looked for on the first block, then once a second of audio
- * has played since; the block that starts past that second finds it and writes what plays. */
-static void tap_wait_check(void) {
-    static float buf[1000];
-    af_instance af;
-    unlink(VIS_FILE);
-    memset(&af, 0, sizeof af);
-    assert(peq_open(&af) == 1);
-    af_data in = {0, 0, 44100, 1, 0x1d, 4};
-    assert(negotiate(&af, &in) == 1);
-    af_data d = {buf, sizeof buf, 44100, 1, 0x1d, 4};
-    assert(af.play(&af, &d) == &d); /* the first look: no file */
-    vis_tap *t = tap_view();         /* demo makes it now */
-    unsigned since = 0;              /* frames played since that look */
-    for (; since < 44100; since += 1000)
-        assert(af.play(&af, &d) == &d && !t->seq); /* not looked for again within the second */
-    for (int i = 0; i < 1000; ++i) buf[i] = (float)i / 1000;
-    assert(af.play(&af, &d) == &d && t->seq == 1000 && t->rate == 44100);
-    for (int i = 0; i < 1000; ++i) assert(t->ring[i][0] == buf[i] && t->ring[i][1] == buf[i]); /* mono: both sides */
-    af.uninit(&af);
 }
 
 /* Mid-mix (the next track under the held tail): demo's stop drops what is left, as does another track
@@ -2007,8 +1977,6 @@ static void txxx_check(void) {
 
 int main(void) {
     af_instance af;
-    tap_wait_check();
-    tap_view();
     /* A failed open is cleaned up by af_create calling uninit on the partial state. */
     for (int n = 0; n < 2; ++n) {
         memset(&af, 0, sizeof(af));
@@ -2164,17 +2132,6 @@ int main(void) {
     peq_default(&defaults);
     assert(!memcmp(&s->preset, &defaults, sizeof(defaults)));
 
-    /* With nobody watching for a second of audio, the tap stops copying; a bump resumes it. */
-    vis_tap *t = tap_view();
-    unsigned seq = t->seq;
-    float block[2 * 1000] = {0};
-    af_data idle = {block, (int)sizeof(block), 44100, 1, 0x1d, 4};
-    for (int i = 0; i < 100; ++i) af.play(&af, &idle); /* 200000 frames, past 44100 */
-    unsigned after = t->seq;
-    assert(after != seq && after - seq < 50000);
-    af.play(&af, &idle); assert(t->seq == after);
-    ++t->want; af.play(&af, &idle); assert(t->seq == after + 2000);
-
     af.uninit(&af);
     assert(!af.data && !af.setup);
     crossfade_check();
@@ -2223,49 +2180,7 @@ def player_check(tmp):
                     '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-I', str(ROOT/'patch'),
                     *map(str, sources), '-Wl,--wrap=clock_gettime', '-lm', '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)
-    print('PEQ player: negotiation, pass-through, the visualizer tap and its wait, live updates, track changes, carried filter memory, cleanup, crossfade and its mid-mix stop, wait and rate change, mono, the Xing seek table and TXXX bodies passed.')
-
-def visualizer_check(tmp):
-    """The visualizer's analysis (patch/visualizer.c vis_bands): a sine lands in its band at full scale."""
-    lib = compile_host(tmp, 'visualizer.so', ROOT/'patch/visualizer.c', ROOT/'patch/peq.c', '-I', ROOT/'patch')
-    rate, n, bands = 44100, 1024, 64
-    def levels(pcm):
-        out = (C.c_float * bands)()
-        lib.vis_bands((C.c_float * (2 * n))(*pcm), rate, out)
-        return list(out)
-    assert levels([0.0] * (2 * n)) == [0.0] * bands  # silence rests
-    edge = lambda b: int(40 * 400 ** (b / bands) * n / rate + 0.5)  # the C band_bin
-    for k in (12, 100, 300):  # a sine exactly on bin k, in both channels
-        pcm = [math.sin(2 * math.pi * k * i / n) for i in range(n) for _ in (0, 1)]
-        got, want = levels(pcm), max(b for b in range(bands) if edge(b) <= k)
-        assert got[want] > 0.99 and got.index(max(got)) <= want, (k, want, got)
-        assert all(v == 0 for b, v in enumerate(got) if edge(b) > k + 1 or edge(b + 1) < k - 1), (k, got)
-        assert abs(levels([v / 2 for v in pcm])[want] - (1 - 6.0206 / 60)) < 0.01  # half scale: 6 dB down
-    harness = tmp/'visualizer_checks.c'
-    harness.write_text(r"""
-#include <assert.h>
-#include "visualizer.c"
-void check_levels(void) {
-    memset(&vz, 0, sizeof vz);
-    for (int i = 0; i < VIS_N; ++i) {
-        vz.pcm[i][0] = sinf(TAU * 12 * i / VIS_N);
-        vz.pcm[i][1] = 0;
-    }
-    vis_analyze(44100, 0.04f);
-    assert(vz.bin_rate == 44100);
-    float max = 0;
-    for (int i = 0; i < VIS_BANDS; ++i) if (vz.level[i] > max) max = vz.level[i];
-    assert(max > 0.5f);
-    vis_reset();
-    for (int i = 0; i < VIS_BANDS; ++i) assert(vz.level[i] == 0);
-    vis_analyze(44100, 0.04f);
-    for (int k = 0; k < 40; ++k) vis_analyze(0, 0.04f); /* 1.6 s of silence: at rest */
-    for (int i = 0; i < VIS_BANDS; ++i) assert(vz.level[i] == 0);
-}
-""")
-    checked = compile_host(tmp, 'visualizer_checks.so', harness, ROOT/'patch/peq.c', '-I', ROOT/'patch')
-    checked.check_levels()
-    print('Visualizer: FFT bands, the levels\' rise and pause decay passed.')
+    print('PEQ player: negotiation, pass-through, live updates, track changes, carried filter memory, cleanup, crossfade and its mid-mix stop, wait and rate change, mono, the Xing seek table and TXXX bodies passed.')
 
 SCROBBLE = r"""
 #include <assert.h>
@@ -3286,7 +3201,7 @@ LJ_DONE, LJ_OFFLINE, LJ_CARD, LJ_CANCELLED = range(4)
 
 
 def album_check(tmp):
-    """Download Album Lyrics (onlinematch.c): the .lrc beside a song, each track of an incomplete
+    """Get Album Lyrics (onlinematch.c): the .lrc beside a song, each track of an incomplete
     album on its own (gone, already with a .lrc, not found), LRCLIB's busy replies asked again, the
     retry once LRCLIB has answered, offline, busy and card-full ends, a cancel, no .part left behind,
     and the summary toast."""
@@ -3452,7 +3367,6 @@ if __name__ == '__main__':
         editor_check(lib, tmp)
         output_check(tmp)
         player_check(tmp)
-        visualizer_check(tmp)
         scrobble_check(tmp)
         games_check(tmp)
         video_check(tmp)
