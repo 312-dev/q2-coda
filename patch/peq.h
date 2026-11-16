@@ -296,8 +296,9 @@ void page_retitle(void *page, void *title, const char *caption);
 void *page_list(void *page, void *body, void **title, const char *caption, int n, int item_h);
 void *rows_view(void *parent, int y, int w, int h, int n, int item_h);
 void *page_list_or(void *page, void *body, const char *name, const char *none, int n, int item_h);
-/* feedback.c: the empty state (docs/oled-design.md#empty-and-offline), stacked tiles with a glyph
- * (tools/art.py EMPTY_GLYPHS), a title, a hint and at most one action row */
+/* feedback.c: the empty state (docs/oled-design.md#empty-and-offline), an outline glyph
+ * (tools/art.py EMPTY_GLYPHS; none in the compact form, under rows), a title, a hint and at most
+ * one button */
 typedef struct {
     const char *glyph, *title, *hint, *row;
 } empty_t;

@@ -1085,17 +1085,19 @@ def test_the_picker_offers_new_playlist_and_no_dots(rows_page, ui):
 
 
 def test_no_playlists_is_the_empty_state_under_the_rows_left(rows_page, ui, fw, recs):
-    """docs/oled-design.md#empty-and-offline: no playlists, the empty state under the rows still shown, centred in
-    what is left, with no row of its own (New Playlist is a song's hold menu's); one playlist made, it goes. The
-    picker keeps its rows alone: no room under them."""
+    """docs/oled-design.md#empty-and-offline: no playlists, the empty state under the rows still shown, in its
+    compact form (rows sit above it: no glyph, the title and hint alone, 44 px) centred in what is left, with no row of
+    its own (New Playlist is a song's hold menu's); one playlist made, it goes. The picker keeps its rows alone: no
+    room under them."""
     p = rows_page(counts=())
     p.ring(p.win)
     art = ui.lookup(p.win, '_empty_state', 0)
     assert art and ui.nodes[art].visible
     props = ui.nodes[art].props
-    assert (props['_es_glyph'], props['_es_title'], props['_es_hint']) == ('playlist', 'No Playlists', 'Make one with New Playlist')
+    assert p.shown()  # On-The-Go's row above it
+    assert (props['_es_glyph'], props['_es_title'], props['_es_hint']) == ('', 'No Playlists', 'Make one with New Playlist')
     free = 58 + 44 * len(p.shown())  # the status row's foot (V_BAR) and the rows shown, 44 px each
-    assert free + 118 <= 320 and props['_es_top'] == free + (320 - free - 118) // 2  # the 118 px stack, no button
+    assert props['_es_top'] == free + (320 - free - 44) // 2  # the title's 24 px band and the hint's 20, no button
     fw.var('fw_ctx_p_deque_playlist', C.c_uint).value = p.deques.new([recs(name='Gym', title='Gym', disc=1, id_=1)])
     fw.fn('playlists__pl_rows', None, C.c_void_p)(p.win)  # the rows again, as a rebuild or a click has them
     assert not ui.nodes[art].visible

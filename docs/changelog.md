@@ -7,6 +7,9 @@
   - Menus (OLED): Now Playing's ⋯ reads **Get Cover & Lyrics** and **Get Album Lyrics**, no longer cut off.
   - Menus (OLED): in Now Playing's hold menu, Shuffle, Repeat and Group by show just their setting (**Songs**, **All**, **Album**), and Center on Group by switches between Album and Folder without opening a list.
   - Now Playing: the Shuffle and Repeat outline from the Centre cycle hides after a tap, as every focus ring does.
+  - Display (OLED): an empty Favorites list shows a crossed-out heart.
+  - Home (Split, OLED): with a song that has no art, the placeholder fills the right pane up to the top edge under the clock and battery, as a cover does; it started below the status row, leaving a black band.
+  - Display (OLED): an empty state under other rows (Car Remote's switch, Playlists' On-The-Go, Search's tabs) shows just its title and hint, without the large glyph, which is kept for pages that are empty whole.
   - Settings > Display: a **Reduce Motion** switch, last on the page. On, pages cross-fade instead of sliding, Control Center lands without its bounce, the selection bar no longer leans as you turn the wheel, Cover Flow stops at its ends without bouncing, switches flip at once, and the charging screen's sweep and Up Next's level bars stand still. Scrolling, progress, the volume bar and swipe back still move.
   - Display (OLED): toasts rise and fade in, then sink and fade out, instead of popping; the confirmation card fades in and out over the page.
   - Car Remote's empty state names the phone app: "Open Q2 Muse Remote on your phone".

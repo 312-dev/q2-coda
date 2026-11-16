@@ -179,7 +179,7 @@ def test_settings_page_follows_pairing_and_connections_live(fw, ui, mcl, recs):
     q2 = Q2(fw, ui, recs)
     call(fw, 'carremote_open')
     page = ui.top()
-    assert empty_state(ui, page)[1] == 'No Paired Phones'
+    assert empty_state(ui, page)[:2] == ('', 'No Paired Phones')  # under the switch's rows: compact, no glyph
     a, b = b'\x01' * 8, b'\x02' * 8
     q2.files[PEERS] = peer('Pixel 10 Pro', a)  # the daemon saved a pairing
     q2.files[ONLINE] = a                        # and the phone authenticated
@@ -232,7 +232,7 @@ def test_settings_switch_turns_it_on_and_off(fw, ui, mcl, recs):
     page = ui.top()
     # no phone: the empty state under the switch, with no row (a phone pairs from its own app)
     assert len(ui.rows(page)) == 2 and 'No paired phones' not in ui.shown(page)  # the switch and its gap
-    assert empty_state(ui, page) == ('car-profile', 'No Paired Phones', 'Open Q2 Muse Remote on your phone', None)
+    assert empty_state(ui, page) == ('', 'No Paired Phones', 'Open Q2 Muse Remote on your phone', None)  # compact
     ui.click(page, 0)
     assert [a[:1] for _, a in fw.calls('write_int_config')][-1] == (1,) and q2.system[-1].startswith('( /usr/bin/coda-rc')
     ui.click(page, 0)

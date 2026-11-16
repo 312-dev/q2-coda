@@ -667,7 +667,10 @@ user's outline style, 2026-11-16, `empty-states-all/mock_empty_all_v2.py`, as Ap
 page's Phosphor glyph in outline (regular weight, 60 px, Text Secondary; `tools/art.py` `EMPTY_GLYPHS`) with no tile
 or disc behind it; 14 px under it the title in Title Case, Inter Medium 20, Text Primary; under it the hint in 15 px
 Text Secondary; and at most its [buttons](#buttons), 20 px lower. The whole stack, with or without buttons, is
-centred between the status row's foot (or the end of any rows the page keeps above it) and the screen's. No app
+centred between the status row's foot (or the end of any rows the page keeps above it) and the screen's. The glyph
+shows only when the empty state is the whole page (the user's rule, 2026-11-16): under anything the page keeps above
+it (Car Remote's switch, Playlists' On-The-Go, Search's tabs) it is the **compact** form, the title, hint and any
+button with no glyph, centred in the room left (`empty_compact`: a top past the set's bar). No app
 names. No fake rows, and no Shuffle row or Add to Sync over nothing. A page that is a list (`empty_list`) keeps its
 name for the status row; a Library list stock would open black (Albums, Artists, Composers, Genres) and a streaming
 service with no link open a page of their own holding only the empty state (`empty_open`). With no SD card in, the
@@ -691,19 +694,19 @@ ring 3 px out, under the [focus rule](#focus-ring); pressed, its fill darkens a 
 | Cover Flow, no card music | `cards` | No Albums | Copy music to the SD card | |
 | Cover Flow, a streaming app signed in | `cards` | No Albums | Streaming albums can show here | **Turn on Streaming** (while Streaming Songs is off) |
 | Cover Flow, the card's music not scanned | `cards` | No Albums Yet | Music on the card isn't scanned | **Scan Music Now** |
-| Playlists | `playlist` | No Playlists | Make one with New Playlist | none: under On-The-Go's row; New Playlist is in a song's hold menu (Add to Playlist…), not on this page. The picker keeps its rows alone |
-| Favorites | `heart` | No Favorites | Hold Play/Pause on a song to add it | |
+| Playlists | none (compact) | No Playlists | Make one with New Playlist | none: under On-The-Go's row; New Playlist is in a song's hold menu (Add to Playlist…), not on this page. The picker keeps its rows alone |
+| Favorites | `heart-slash` | No Favorites | Hold Play/Pause on a song to add it | |
 | Recently Played | `clock-counter-clockwise` | Nothing Played Yet | Songs you play show up here | |
 | Most Played (both lists) | `chart-bar` | No Plays Yet | Your most played songs show up here | |
 | Recently Added | `sparkle` | No Songs Added Yet | New music on the card shows up here | |
 | Long Songs | `timer` | No Long Songs | None over 10 minutes | |
 | Years (Era) | `calendar-blank` | No Dated Albums Yet | Albums need a year tag | |
 | Ratings' song lists | `star` | No Rated Songs Yet | Hold the heart on Now Playing to rate | |
-| Search, typed text matching nothing | `magnifying-glass` | No Matches | Try fewer letters | none (painted in the free area above the strip) |
+| Search, typed text matching nothing | `magnifying-glass` (compact under the tabs) | No Matches | Try fewer letters | none (painted in the free area above the strip) |
 | Internet Radio, a station list with none | `radio` | No Stations | Add stations from your computer | |
 | Streaming, a service with no link | `cloud-slash` | Not Connected | Turn on Wi-Fi to stream | **Turn on Wi-Fi** (opens Settings > Wi-Fi) |
 | Library, no SD card | `sd-card` (Phosphor's `memory`) | No SD Card | Insert an SD card with music | |
-| Car Remote, no phone paired | `car-profile` | No Paired Phones | Open Q2 Muse Remote on your phone | none: under the switch; a phone pairs from its own app |
+| Car Remote, no phone paired | none (compact) | No Paired Phones | Open Q2 Muse Remote on your phone | none: under the switch; a phone pairs from its own app |
 | Downloads (Tidal Downloads, a card app's songs) | `download-simple` | No Downloads Yet | Synced music shows up here | |
 | Chapters | `list-numbers` | No Chapters | This file has no chapter marks (or: This file's chapters couldn't be read) | |
 
@@ -993,7 +996,10 @@ draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keybo
   `tools/art.py` draws the theme's bitmaps from them at build time, in final colours per half.
   A mark Phosphor lacks is drawn for q2-coda in Phosphor's regular style (16 unit strokes, round
   caps and joins, on the 256 unit grid), outlined to filled paths, and kept apart in
-  `assets/icons/q2coda/` under the repository's licence: the Subsonic card app's `subsonic.svg`.
+  `assets/icons/q2coda/` under the repository's licence: the Subsonic card app's `subsonic.svg`, and
+  `heart-slash.svg` for Favorites' empty state: Phosphor's regular heart cut as its outline `bell-slash`
+  is (a 16 unit slash from (48,40) to (208,216) joined to the ring below it, the ring above it ending in
+  round caps 32 units from the slash), traced to filled paths.
 - Weights by role: `fill` for the padlock and a favourite's heart, `bold` for chevrons, the status row's Wi-Fi, sync and Bluetooth, Now
   Playing's and the confirmation's shuffle and repeat and About's quality badge, `regular` for row symbols and Now Playing's
   heart and More. Sizes are the design's: 13 px padlock and 14 px status glyphs, 15 px chevron, 20 px row symbols,
@@ -1266,7 +1272,8 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   charging green and low red keep their colours (`home_ink`, approved from `mock_split_top.py` on 2026-11-14, one
   ink a glyph from the same day, as each pixel's own pick speckled over lettering), the playing cover panning slowly
   across its 110 % zoom with an eased turn at each end and 2 % of the zoom kept clear of the pane at each edge, so a
-  cover's own border never shows, on Now Playing's row (there only while something is playing or paused); on every
+  cover's own border never shows, on Now Playing's row (there only while something is playing or paused), and with no
+  cover to show (a song without art) the placeholder tile the same way, from the top edge under the status row; on every
   other row the library's covers in turn as an iPod classic's menu shows them, cross-fading from the frame as it
   stands as the wheel moves between the two, each zooming between 1 and 0.9 of the cover and drifting once over its 9 s, 1.5 s cross-fades between covers
   and on a track change (docs/ipod.md#home, `slideshow.c`)), the main menu from y 40, its top rows painted by the bar (`coverflow_home_strip`, approved from

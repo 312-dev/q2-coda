@@ -822,9 +822,11 @@ void search_strip_paint(void *w, void *canvas) {
                 ss.pick ? "Songs by title or artist" : "Artists, albums and songs", secondary,
                 tertiary);
     if (ss.text[0] && !ss.nmatch && !ss_named()) { /* the empty state, between the tabs and strip */
+        int y = I(ss.page, W_Y), free = y + ss_list_y(); /* empty_top's are screen ys */
         static const empty_t none = { "magnifying-glass", "No Matches", "Try fewer letters", 0 };
-        int y = I(ss.page, W_Y); /* empty_top's are screen ys */
-        empty_paint(ss.sheet, canvas, &none, empty_top(y + ss_list_y(), y + SS_STRIP_Y, 0) - y);
+        empty_t e = none;
+        if (empty_compact(free)) e.glyph = 0; /* under the tabs, the compact form */
+        empty_paint(ss.sheet, canvas, &e, empty_top(free, y + SS_STRIP_Y, 0) - y);
     }
     /* the strip: a #1C1C1E pill, the text in a black box with its cursor, the letters in
      * equal cells about the lit one, white on the accent while the strip has the wheel */

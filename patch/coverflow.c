@@ -4118,6 +4118,9 @@ void coverflow_home_art(void *top) {
     if (cover) image_manager_unload_bitmap_by_name(image_manager(), cover);
     int moves = cover ? slide_show(cover, 0, cut) : -1;
     if (moves < 0 && r) moves = slide_show(url, 0, cut), src = url;
+    /* no cover: the placeholder as the pane's slide, so it runs up under the status row as a cover
+     * does (coverflow_home_bar) */
+    if (moves < 0) moves = slide_show(HOME_PLACEHOLDER, 0, cut), src = HOME_PLACEHOLDER;
     if (moves > 0) return;
     slides_drop();
     int shown = moves == 0 && image_show(home.art, src, size);
@@ -4286,7 +4289,8 @@ static int bar_rows(void *canvas, int *r) {
 }
 
 /* Whether top is Home in Split, its art beside the list (1), and 2 when the art runs up under the
- * status row (a split_art_up and a cover that fills the pane), where the bar's glyphs are inked
+ * status row (a split_art_up and a slide that fills the pane: a cover, or the placeholder with
+ * none), where the bar's glyphs are inked
  * over it: navigation.c's clock_place puts the clock beside them. */
 int coverflow_home_split(void *top) {
     if (!home.art || top != home.win || !widget_get_visible(home.art)) return 0;

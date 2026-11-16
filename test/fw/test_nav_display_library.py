@@ -3259,9 +3259,11 @@ def test_appearance_keeps_its_own_place_not_displays(fw):
 # The empty state (feedback.c empty_state): one view over the page holding the page's glyph, title and hint for its
 # painter, and at most one button, the whole stack centred from the status row's foot (y 40) or free_top down: the
 # 60 px glyph, 14, the title's 24 and the hint's 20 (118), then 20 and the 38 px button (176).
-@pytest.mark.parametrize('row, free, top', [(None, 0, 40 + (280 - 118) // 2), ('Scan Music Now', 0, 40 + (280 - 176) // 2),
-                                            ('Scan Music Now', 90, 90 + (230 - 176) // 2)])
-def test_the_empty_state_centres_its_stack_and_its_one_row(fw, st, row, free, top):
+@pytest.mark.parametrize('row, free, top, glyph', [(None, 0, 40 + (280 - 118) // 2, b'cards'),
+                                                   ('Scan Music Now', 0, 40 + (280 - 176) // 2, b'cards'),
+                                                   # rows above it: the compact form, no glyph (44 px of words)
+                                                   ('Scan Music Now', 90, 90 + (230 - 102) // 2, b'')])
+def test_the_empty_state_centres_its_stack_and_its_one_row(fw, st, row, free, top, glyph):
     ui = Ui(fw)
     fw.mock('widget_factory_create_widget', lambda f, kind, parent, x, y, w, *_: ui.new(C.string_at(kind).decode(), parent, x, y, w, 0))
     use_set(st, 'oled')
@@ -3273,13 +3275,14 @@ def test_the_empty_state_centres_its_stack_and_its_one_row(fw, st, row, free, to
     clicked = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(lambda *_: 0)
     assert fw.fn('empty_state', C.c_int, C.c_void_p, C.c_int, C.c_void_p, C.c_void_p)(body.addr, free, C.addressof(e), C.cast(clicked, C.c_void_p)) == 1
     art = body.find('_empty_state')
-    assert art and art.props['_es_glyph'] == b'cards' and art.props['_es_title'] == b'No Albums Yet' and art.props['_es_top'] == top
+    assert art and art.props['_es_glyph'] == glyph and art.props['_es_title'] == b'No Albums Yet' and art.props['_es_top'] == top
     lists = [c for c in body.children if c.kind == 'list_view']
     if not row:
         assert lists == []
     else:
         (lv,) = lists  # the button's band, its words the painter's (the row's own are blank)
-        assert lv.box[1] == top + 60 + 14 + 24 + 20 + 20 - 58 and lv.box[3] == 38 and lv.labels()[0].text == ''
+        words = 24 + 20 + (60 + 14 if glyph else 0)  # the glyph's part only in the whole form
+        assert lv.box[1] == top + words + 20 - 58 and lv.box[3] == 38 and lv.labels()[0].text == ''
         assert art.props['_es_row'] == b'Scan Music Now' and lv.props['style:normal:bg_color'] == 0
 
 
