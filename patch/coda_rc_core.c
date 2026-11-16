@@ -154,11 +154,11 @@ int crc_error(crc_session *s, unsigned req_id, int code, const char *message) {
 
 /* ---- pairing ---- */
 
-/* One pairing at a time for the whole device, so the code on the screen belongs to one phone. The code
- * lives CRC_PAIR_TIMEOUT_MS from when it was shown, whichever of that phone's sessions holds it: a phone
- * whose connection drops while the user types reconnects to the same code (docs/remote-protocol.md#pairing-a-pake-on-the-6-digit-code).
- * Keeping it costs nothing: a session that never sends PairFinish learns nothing of the code, and a
- * wrong guess still ends it. */
+/* One pairing at a time for the whole device, so the code on the screen belongs to one phone. The
+ * code lives CRC_PAIR_TIMEOUT_MS from when it was shown, whichever of that phone's sessions holds it:
+ * a phone whose connection drops while the user types reconnects to the same code
+ * (docs/remote-protocol.md#pairing-a-pake-on-the-6-digit-code). Keeping it costs nothing: a session
+ * that never sends PairFinish learns nothing of the code, and a wrong guess still ends it. */
 static struct {
     crc_session *owner;  /* the session pairing on the code; 0 while its phone reconnects */
     char code[7];        /* the code on screen; empty when none */
