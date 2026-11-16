@@ -1,8 +1,8 @@
 diff --git a/Makefile.am b/Makefile.am
-index 7041f8e..3a4f4b4 100644
+index 7041f8e..a1fc244 100644
 --- a/Makefile.am
 +++ b/Makefile.am
-@@ -326,12 +326,13 @@ src_bluetoothd_SOURCES = $(builtin_sources) \
+@@ -326,13 +326,15 @@ src_bluetoothd_SOURCES = $(builtin_sources) \
  			src/eir.h src/eir.c \
  			src/adv_monitor.h src/adv_monitor.c \
  			src/battery.h src/battery.c \
@@ -14,10 +14,13 @@ index 7041f8e..3a4f4b4 100644
  			src/libshared-glib.la \
  			$(BACKTRACE_LIBS) $(GLIB_LIBS) $(DBUS_LIBS) -ldl -lrt \
 -			$(builtin_ldadd)
-+			-lbtctl -lpthread $(builtin_ldadd)
- src_bluetoothd_LDFLAGS = $(AM_LDFLAGS) -Wl,--export-dynamic \
+-src_bluetoothd_LDFLAGS = $(AM_LDFLAGS) -Wl,--export-dynamic \
++			-lncurses -lbtctl -lgio-2.0 -lgmodule-2.0 -lgobject-2.0 \
++			-lpcre2-8 -lffi -lgthread-2.0 -lpthread $(builtin_ldadd)
++src_bluetoothd_LDFLAGS = $(AM_LDFLAGS) -Wl,--export-dynamic -Wl,--no-as-needed \
  				-Wl,--version-script=$(srcdir)/src/bluetooth.ver
  
+ src_bluetoothd_DEPENDENCIES = lib/libbluetooth-internal.la \
 diff --git a/Makefile.plugins b/Makefile.plugins
 index 20cac38..bc329dc 100644
 --- a/Makefile.plugins

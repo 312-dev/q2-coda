@@ -502,6 +502,11 @@ def build_adbd(src, stage, env, log):
 BLUEZ_DIR = pathlib.Path(__file__).resolve().parent/'bluez'
 GLIBCONFIG = (BLUEZ_DIR/'glibconfig.h').read_text()
 STUBS = (BLUEZ_DIR/'stubs.tsv').read_text()
+# Shanling's changes to BlueZ 5.66 put back (docs/bluetoothd.md), and the libraries stock's bluetoothd names that
+# libbtctl.so leans on without naming them itself (GIO and the rest), linked as stock links them
+SHANLING_PATCH = (BLUEZ_DIR/'shanling.patch').read_text()
+BLUEZ_STUBS = ['libbtctl.so', 'libncurses.so.6', 'libgio-2.0.so.0', 'libgmodule-2.0.so.0', 'libgobject-2.0.so.0',
+               'libpcre2-8.so.0', 'libffi.so.8', 'libgthread-2.0.so.0']
 # Stock's plugins are hostname, wiimote, autopair, policy, a2dp, avrcp, scanparam, deviceinfo and battery
 # (docs/third-party.md); no HID, HoG, network, LE audio, OBEX, mesh or tools
 BLUEZ_OPTIONS = ['--sysconfdir=/etc', '--localstatedir=/var', '--libexecdir=/usr/libexec', '--with-dbusconfdir=/etc',
@@ -571,8 +576,15 @@ def build_dbus(src, stage, env, log):
 
 
 def build_bluez(src, stage, env, log):
-    run('./configure', f'--host={env.host}', '--prefix=/usr', *BLUEZ_OPTIONS, cwd=src, env=env.vars, log=log)
-    run('make', f'-j{JOBS}', cwd=src, env=env.vars, log=log)  # BUILT_SOURCES (lib/bluetooth) first
+    run('patch', '-p1', '-i', BLUEZ_DIR/'shanling.patch', cwd=src, log=log)
+    (src/'.shanling.patch').write_text(SHANLING_PATCH)  # the text the cache key holds
+    run('autoreconf', '-fi', cwd=src, log=log)  # the patch adds sources and libraries to Makefile.am
+    stubs = src/'q2-stubs'
+    for lib in BLUEZ_STUBS:
+        stub_library(env, lib, stubs)
+    vars = dict(env.vars, LDFLAGS=f'{env.vars["LDFLAGS"]} -L{stubs}')
+    run('./configure', f'--host={env.host}', '--prefix=/usr', *BLUEZ_OPTIONS, cwd=src, env=vars, log=log)
+    run('make', f'-j{JOBS}', cwd=src, env=vars, log=log)  # BUILT_SOURCES (lib/bluetooth) first
     (stage/'usr/bin').mkdir(parents=True)
     shutil.copy(src/'src/bluetoothd', stage/'usr/bin/bluetoothd')
     shutil.copy(src/'COPYING', stage/'COPYING')
