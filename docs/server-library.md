@@ -97,7 +97,9 @@ i	<pid>	<sid>	<card path or empty>
   it), Now Playing (`coverflow_player_cover`, after the file's own art and folder images), and
   under OLED the app's own artist page's Albums, Singles & EPs, Top Songs and All Songs
   ([oled-design.md](oled-design.md#artist-page)), by the album id in the row's `album:` context.
-  Until it is there the placeholder shows; nothing waits for it. A server playlist's cover (its
+  Until it is there the placeholder shows; nothing waits for it. Once the app has every album's 160 px cover it also
+  fetches each at 512 px into `covers/512/<album id>.jpg` (the same baseline-JPEG rule, a budget of its own), which only
+  the car remote reads, for a phone that asks for more than 160 px ([internals.md: Car remote](internals.md#car-remote)). A server playlist's cover (its
   `coverArt`, at the same size) is `covers/pl-<pid>.jpg`, which OLED's Playlists rows show
   ([oled-design.md](oled-design.md#playlists)), as do Cover Flow's playlist covers (as the playlist's picture when it has
   none of its own, before the 2x2 of its albums: [internals.md: Playlist art](internals.md#playlist-art)) and the car
