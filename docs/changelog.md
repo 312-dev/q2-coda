@@ -1,6 +1,9 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Controls: Clicker set to **Headphones** no longer clicks the Q2's own buzzer. The click is heard only in your headphones, mixed into what plays; while nothing plays there is no click.
+  - Settings (OLED): the Settings list reached from Home ends like every list: Battery peeks through the fade under Controls instead of hiding until you scroll, and the highlighted row's lean as you turn the wheel is no longer cut off at the top or bottom of a list.
+  - Lists (OLED): a list scrolled to its last row keeps the space under it after you open that row and press Return; the last row no longer sits on the screen's bottom edge.
   - SyncLink, Shanling's phone remote, is gone from Settings and stays off.
   - **SD Card Update** checks the card's `update.tar` before it asks: **Checking for an Update…**, then **Install Update?** with the update's version, the installed one and the file's size, Cancel first. Install and Restart shows **Restarting to Install** with a bar. Instead of stock's messages it says **You're Up to Date**, **No Update Found**, **Charge to Update** (below 16% with no cable), **Not Enough Space** or **Update Can't Be Used** (a damaged file, or not a Q2 firmware), before anything is changed. Network Update's download ends in the same check.
   - Settings: this update starts every Q2 on q2-coda's own default settings, whatever it ran before (stock firmware or an earlier q2-coda), so no stock setting such as Enlarged Album Art stays on. Saved Wi-Fi networks, Bluetooth pairings, your library and ratings are kept. Later updates keep your settings.

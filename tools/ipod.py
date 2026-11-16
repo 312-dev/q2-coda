@@ -390,8 +390,12 @@ def home_list(name, rows, g, extra=None, view_name=None):
     # The list_view's layout (0x5fd234) makes its scroll view vertical only for a mobile scroll bar,
     # which Home has none of, and scroll_view_create leaves it off; the payload navigates only
     # vertical scroll views.
-    # Home's main list shows HOME_REST rows and scrolls the rest (coverflow.c home_overflow).
+    # Home's main list shows HOME_REST rows and scrolls the rest (coverflow.c home_overflow). The lists its rows open
+    # (Settings', and Library's and Streaming's, which a page's constructor fills) run on to the window's foot under a
+    # list_fit set, their rows past list_end fading into it (navigation.c list_fade), as every list does.
     h = g.home_row * min(len(views), HOME_REST) or 320 - g.bar
+    if name != 'home' and views and g.list_fit:
+        h = fit_rows(g, HOME_TOP, g.home_row)
     view = ['scroll_view', [0, 0, HOME_LIST_W, h],
             {'name': 'scroll_view_' + (view_name or name), 'self_layout': 'default(x=0,y=0,w=100%,h=100%)', 'yslidable': 'true'}, views]
     return ['list_view', [0, HOME_TOP, HOME_LIST_W, h],
