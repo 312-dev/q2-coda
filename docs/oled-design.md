@@ -467,6 +467,13 @@ has no place for keeps a place of its own:
   cycle, as the app picks the order. A tap on radio opens the playing app's page, where a radio
   starts and stops; with no app playing it does nothing. The queue button, and a swipe up on the
   art's page, open [Up Next](#up-next); the hold menu's View Queue opens it too.
+- **A state button's focus and press** (approved as 22 v4 on 2026-11-16, `audit2/proposed/v2/22v4-L5-np-state-row.png`):
+  the Centre cycle's wheel outlines the control it sets in today's 2 px Text Primary stroke, 9 px corners, no fill;
+  a tap puts a `#2C2C2E` square, 9 px corners, under the button and fades it out over 250 ms; the wheel never
+  shows the square. Both fit what is drawn: the glyph's ink alone with no dot showing (Up Next, radio, and
+  shuffle or repeat while off), the glyph and its on dot together while it shows, padded 6 px to the outline's
+  inner edge (8 px to its outer) or 8 px to the square's edge on every side; an outline grows by the dot when its
+  control turns on. The radio's pill is its own press.
 - **The volume** and the scrub draw on the bar where it is. The volume (the "A: iPod speakers"
   mock-up) keeps the bar's rows, inset to x 48 to 323, white on the track, with Phosphor's
   `speaker-simple-none` and `speaker-simple-high` (fill, 16 px, Text Secondary) centred at x 32

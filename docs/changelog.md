@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Now Playing (OLED): the outline the wheel puts round Shuffle or Repeat now fits the button snugly, taking in its dot only while it's on, and a tapped button shows a soft grey square that fades out.
   - Now Playing's More: tapping the **Speed** row on its left half no longer sets the speed back to 1x behind the picker it opens.
   - Settings > Storage: the notes under the rows no longer mention Radio or items that refill by themselves, which the Subsonic app doesn't do yet.
   - Manual: a new **Car Remote** section says how to pair a phone, what it can do from the car's screen, and how to forget a phone.

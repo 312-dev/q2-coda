@@ -798,6 +798,91 @@ def test_now_playings_modes_are_the_themes_pair_lit_by_stocks_mode(fw, st, mcl, 
     assert drawn == [(64, 286), (228, 286), (146, 286), (311, 286)]  # shuffle, repeat, then radio and Up Next
 
 
+class Row:
+    """OLED's Now Playing row over glyphs whose ink is a known box: each 22 px image's opaque pixels are x 2 to 19,
+    y 4 to 17 (its faint edge, alpha 40, a pixel round them, under NP_INK_ALPHA), so drawn centred on (cx, 286) its
+    ink is (cx - 9, 279, 18, 14). Records the rounded boxes painted, as (x, y, w, h, colour)."""
+    INK = (2, 4, 18, 14)
+
+    def __init__(self, fw, st, mcl, mode=0, stage=0):
+        self.fw = fw
+        ui = Ui(fw)
+        theme(fw)
+        mcl.mode = mode
+        st('np_stage', C.c_uint).value = stage
+        self.win = ui.window('playing_page')
+        self.button = ui.add('image', self.win, (53, 264, 269, 44), 'img_playmode')
+        st('np_win', C.c_void_p).value = self.win.addr
+        fw.mock('widget_lookup', lambda w, name, deep, *_: self.button.addr if C.string_at(name) == b'img_playmode' else 0)
+        self.pixels = C.create_string_buffer(22 * 22 * 4)
+        x, y, w, h = self.INK
+        for py in range(y - 1, y + h + 1):
+            for px in range(x - 1, x + w + 1):
+                inside = x <= px < x + w and y <= py < y + h
+                self.pixels[(py * 22 + px) * 4 + 3] = 255 if inside else 40
+
+        def load(w, name, bitmap, *_):
+            struct.pack_into('<II', (C.c_char * 16).from_address(bitmap), 0, 22, 22)
+            C.c_ushort.from_address(bitmap + 14).value = 1  # RGBA8888
+            return 0
+        fw.mock('widget_load_image', load)
+        fw.mock('bitmap_lock_buffer_for_read', lambda *_: C.addressof(self.pixels))
+        fw.mock('bitmap_get_line_length', lambda *_: 22 * 4)
+        self.boxes = []
+
+        def box(canvas, r, src, color, radius, *_):
+            red, green, blue = C.string_at(color, 3)  # RGBA's bytes in order
+            self.boxes.append((*struct.unpack('<4i', C.string_at(r, 16)), red << 16 | green << 8 | blue))
+            return 0
+        fw.mock('canvas_fill_rounded_rect', box)
+        self.now = 1000
+        fw.mock('time_now_ms', lambda *_: self.now)
+
+    def paint(self):
+        self.boxes.clear()
+        lcd, raw = C.create_string_buffer(0x200), C.create_string_buffer(0x100)
+        struct.pack_into('<Q', raw, CANVAS_LCD, C.addressof(lcd))
+        self.fw.fn('np_modes', None, C.c_void_p, C.c_void_p)(self.win.addr, C.addressof(raw))
+        return self.boxes
+
+    def tap(self, x):
+        event = C.create_string_buffer(0x40)
+        struct.pack_into('<i', event, 0, O['EVT_CLICK'])
+        struct.pack_into('<ii', event, O['EVENT_X'], x, 286)
+        return self.fw.fn('np_mode_click', C.c_int, C.c_void_p, C.c_void_p)(self.button.addr, C.addressof(event))
+
+
+def ink_box(cx, pad, dot=False):
+    """Row's ink centred on cx, 286, joined with the on dot (y 299 to 302) when it shows, padded pad px."""
+    x, y, w, h = cx - 9, 279, 18, (303 - 279) if dot else 14
+    return (x - pad, y - pad, w + 2 * pad, h + 2 * pad)
+
+
+@pytest.mark.parametrize('mode, dot', [(0, False), (2, True)])
+def test_now_playings_focus_outline_fits_the_glyph_and_its_dot(fw, st, mcl, mode, dot):
+    """22 v4 (docs/oled-design.md#now-playing): the Centre cycle's Shuffle stage draws a 2 px white outline 6 px clear
+    of the glyph's ink (8 px to its outer edge), the ink alone with shuffle off, the ink and the on dot with it on."""
+    row = Row(fw, st, mcl, mode, stage=1)  # NP_STAGE_SHUFFLE
+    boxes = row.paint()
+    outer, inner = ink_box(64, 8, dot), ink_box(64, 6, dot)
+    assert boxes[:2] == [(*outer, 0xffffff), (*inner, 0)]
+    # the dot after the glyph, over the outline's inside
+    assert ((62, 299, 4, 4) in [b[:4] for b in boxes[2:]]) == dot
+
+
+def test_now_playings_tapped_button_shows_a_square_that_fades(fw, st, mcl):
+    """22 v4: a tap puts #2C2C2E under the glyph's ink, 8 px clear on every side, fading over 250 ms; the wheel's outline
+    is not drawn for it, and Up Next, which has no dot, fits its glyph alone."""
+    row = Row(fw, st, mcl, 0)
+    assert row.paint() == []
+    assert row.tap(311) == 1  # Up Next
+    assert row.paint() == [(*ink_box(311, 8), 0x2c2c2e)]
+    row.now += 125
+    assert row.paint() == [(*ink_box(311, 8), 0x161617)]  # half way
+    row.now += 125
+    assert row.paint() == []
+
+
 def test_now_playings_heart_and_more_are_the_themes_glyphs_in_each_half(fw, st):
     """np_bar.c np_glyphs, on each paint of OLED's Now Playing: stock's play_fav and play_unfav become the theme's full
     heart and its empty one in the half's ink, an empty heart follows a Light Mode change, an app's heart stays, and
