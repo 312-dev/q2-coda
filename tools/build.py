@@ -252,7 +252,15 @@ ROCKBOX_FLAG = '/tmp/q2pod-rockbox'
 # starts udhcpc later too. A second pass 2 s in, called off if Rockbox has already left and demo is starting Wi-Fi
 # again, catches a shell that took longer. ponytail: 300 ms and 2 s are guesses; a shell slower than 2 s still escapes.
 WIFI_OFF = 'killall -9 wifi_connect.sh udhcpc wpa_supplicant 2>/dev/null; ifconfig wlan0 down 2>/dev/null'
+DEFAULT_CONFIG = 'release/assets/default/raw/config.ini'  # stock's reset copies it (DEFAULT_CONFIG_OFF below)
+DEFAULTS_MARK = '/mnt/data/q2-defaults'  # written once Q2 Pod's defaults replaced the config before it (BOOT_HOOK)
 BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
+        # Q2 Pod's defaults over every config.ini from before the q2-defaults mark, once, before demo reads it: a stock
+        # Shanling config, or an earlier build's, holds stock's values (Enlarged Album Art on); later updates keep
+        # the user's settings. Saved Wi-Fi, Bluetooth pairings and the library are other files (docs/internals.md#first-boot)
+        d={DEFAULTS_MARK}
+        [ -f $d ] || {{ cp /{DEFAULT_CONFIG} /mnt/data/config.ini.new && sync &&
+            mv -f /mnt/data/config.ini.new /mnt/data/config.ini && echo 1 > $d && sync; }}
         c=/mnt/data/q2-crash.log
         m=/mnt/data/q2-state
         [ -f $m ] && {{
@@ -463,7 +471,6 @@ WATCHDOG_SLEEP = (b'\tsleep 2\n', b'\tsleep 10\n')
 # It also names the language, English (2): stock's config_init (0x5047f8) sets g_guideflag when SYSSET LANGUAGE is
 # missing, and the first boot and every reset opened stock's language guide, where Q2 Pod's wheel and Centre are off.
 # Q2 Pod is English only (Settings has no Language row), so the guide is never shown (docs/internals.md#first-boot).
-DEFAULT_CONFIG = 'release/assets/default/raw/config.ini'
 DEFAULT_CONFIG_OFF = (b'COVERMODE', b'STANDBYMODE', b'WHEELMODE')
 DEFAULT_LANGUAGE = b'LANGUAGE=2\n'
 def default_config(config):

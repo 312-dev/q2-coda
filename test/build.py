@@ -44,7 +44,7 @@ def boot_check():
         def host(hook):
             script = hook.decode().replace(' &\n', '\n')
             for old in ('/mnt/', '/tmp/mmc_add', ROCKBOX_FLAG, '/usr/bin/q2boot', '/release/bin/demo', '/proc/mounts', '/tmp/q2-demo.log',
-                        '/tmp/q2-scan-file', '/tmp/q2-scan.log', '/tmp/q2-art-file', '/tmp/q2-art.log'):
+                        '/tmp/q2-scan-file', '/tmp/q2-scan.log', '/tmp/q2-art-file', '/tmp/q2-art.log', '/release/assets/'):
                 script = script.replace(old, f'{r}{old}')
             script = script.replace('usleep 200000\n', ':\n').replace('usleep 500000', ':')
             # demo's stderr file, and its cap's minute: one pass here while {r}/minute exists
@@ -85,6 +85,17 @@ def boot_check():
             subprocess.run(['sh', '-c', script], check=True, env=dict(os.environ, PATH=f'{r}/bin:' + os.environ['PATH']))
             return (r/'ran').read_text().split(), target.exists() and target.read_text().strip()
         (r/'proc/mounts').write_text('')
+        # the first boot over a config.ini from before the q2-defaults mark (stock's, or an earlier build's) puts Q2 Pod's
+        # defaults in its place, before demo; the saved Wi-Fi stays; every later boot keeps the user's settings
+        ours, config, wifi, mark = r/'release/assets/default/raw/config.ini', r/'mnt/data/config.ini', r/'mnt/data/wpa_supplicant.conf', r/'mnt/data/q2-defaults'
+        ours.parent.mkdir(parents=True)
+        ours.write_text('[PLAYSET]\nCOVERMODE=0\n[SYSSET]\nLANGUAGE=2\n')
+        config.write_text('[PLAYSET]\nCOVERMODE=1\n[SYSSET]\nLANGUAGE=1\n[Q2POD]\nCARREMOTE=1\n')
+        wifi.write_text('network={ssid="Home"}\n')
+        assert boot(False, False) == (['demo'], False)
+        assert config.read_text() == ours.read_text() and mark.exists() and wifi.read_text() == 'network={ssid="Home"}\n'
+        config.write_text('[PLAYSET]\nCOVERMODE=1\n')  # the user's own choice since
+        assert boot(False, False) == (['demo'], False) and config.read_text() == '[PLAYSET]\nCOVERMODE=1\n'
         rockbox = [str(rb.parent), 'demo']
         assert boot(False, False) == (['demo'], False)          # no Rockbox on the card: Q2 Pod
         assert boot(False, True, 1) == (rockbox, False)         # Rockbox by default; a crash starts Q2 Pod
