@@ -919,9 +919,11 @@ void cstl_sort(void *list, void *cmp);
 extern unsigned long ui_thread; /* playback.c: the UI thread, from its first pass */
 
 /* coda_rc_shim.c: Car Remote (docs/internals.md#car-remote) */
-void coda_rc_poll(void);
+void coda_rc_poll(void), coda_rc_toggle(void);
 int coda_rc_enabled(void);
+/* carremote_page.c: Settings > Car Remote, its phone page and Pair a Phone */
 int carremote_open(void *ctx, void *event);
+void carremote_poll(void), carremote_paired(const char *name), carremote_paint(void *w, void *canvas);
 /* storage.c: Settings > Storage and its Downloads (docs/internals.md#storage) */
 int storage_open(void *ctx, void *event), storage_hold(void *top);
 void storage_paint(void *w, void *canvas);

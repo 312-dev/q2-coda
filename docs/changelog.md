@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Remote: **Settings → Car Remote** is redesigned. Each phone's row says whether it's **Connected over Wi-Fi** or **over Bluetooth**, or when it was last seen; before, its second line was cut off and showed nothing. **Pair a Phone** says how to pair and shows the Q2 Muse's address. Each phone has its own page with when it paired and last connected, **Rename** and **Forget Phone**, and a new pairing is announced by the phone's name ("Pixel 10 Pro paired").
   - Car Remote: Q2 Muse Remote can browse and play your Favorites (hearted songs) and Recently Added (the 100 newest songs) from the Q2 Muse.
   - Car Remote: with Library on Local + Server and a card app's server songs imported, Q2 Muse Remote's lists (and Android Auto's) showed nothing; they list both libraries again.
   - Now Playing: the Shuffle and Repeat outline from the Centre cycle hides after a tap, as every focus ring does.

@@ -1,6 +1,6 @@
 """Car Remote's side in demo, patch/coda_rc_shim.c (docs/internals.md#car-remote): the daemon started only while
 the switch is on, Now Playing written for it, its play, Play/Pause, Next and Previous, seek and volume commands,
-the pairing code's Dialog and Settings > Car Remote with its phones and Forget. /tmp and /mnt/data are a dict (conftest.Files); AWTK is
+the pairing code's Dialog (Settings > Car Remote is test_carremote_page.py's). /tmp and /mnt/data are a dict (conftest.Files); AWTK is
 test_nav_library_pages' fake, and the songs are test_nav_hold's Records, laid out as P() reads them."""
 import ctypes as C
 import pytest
@@ -132,7 +132,7 @@ def test_pairing_shows_the_code_and_cancel_tells_the_daemon(fw, ui, mcl, recs):
     q2.tick()
     page = ui.top()
     assert ui.name[page] == 'carpair_page'
-    assert {'Pair with "Pixel 8"?', '123 456', 'Enter this code on your phone'} <= set(ui.shown(page))
+    assert {'Pair with "Pixel 8"?', '123 456', 'Enter this code in Q2 Muse Remote'} <= set(ui.shown(page))
     assert ui.captions(page) == ['Cancel']
     ui.key(page, KEY_RETURN)
     assert q2.files[PAIR_CANCEL] == b'1\n' and page not in ui.windows
@@ -172,71 +172,6 @@ def peer(name, id_=bytes(8)):
 
 
 ONLINE = '/tmp/coda-rc.online'
-
-
-def test_settings_page_follows_pairing_and_connections_live(fw, ui, mcl, recs):
-    """Pairing on an open Settings > Car Remote (2026-11-16): the page kept "No Paired Phones" until left."""
-    q2 = Q2(fw, ui, recs)
-    call(fw, 'carremote_open')
-    page = ui.top()
-    assert empty_state(ui, page)[1] == 'No Paired Phones'
-    a, b = b'\x01' * 8, b'\x02' * 8
-    q2.files[PEERS] = peer('Pixel 10 Pro', a)  # the daemon saved a pairing
-    q2.files[ONLINE] = a                        # and the phone authenticated
-    q2.tick()
-    ui.fire('cr_page_show')
-    assert ui.rows(page)[2:] == [('Pixel 10 Pro', 'Connected')] and empty_state(ui, page) is None
-    q2.files[PEERS] += peer('Car tablet', b)
-    q2.tick()
-    ui.fire('cr_page_show')
-    assert ui.rows(page)[2:] == [('Pixel 10 Pro', 'Connected'), ('Car tablet', 'Not connected')]
-    ui.props[(ui.view(page), '_ringnav_index')] = 3  # the wheel on Car tablet
-    q2.files[ONLINE] = b + a
-    q2.tick()
-    ui.fire('cr_page_show')
-    assert ui.rows(page)[2:] == [('Pixel 10 Pro', 'Connected'), ('Car tablet', 'Connected')]
-    assert ui.props[(ui.view(page), '_ringnav_index')] == 3  # a live change leaves the selection where it was
-    q2.files[ONLINE] = b''
-    q2.tick()
-    ui.fire('cr_page_show')
-    assert [v for _, v in ui.rows(page)[2:]] == ['Not connected', 'Not connected']
-    q2.tick()
-    assert not ui.pending('cr_page_show')  # nothing changed: no rebuild
-    q2.files[PEERS] = b''  # both forgotten (the daemon's file rewritten)
-    q2.tick()
-    ui.fire('cr_page_show')
-    assert len(ui.rows(page)) == 2 and empty_state(ui, page)[1] == 'No Paired Phones'
-
-
-def test_settings_page_lists_phones_and_forgets_one(fw, ui, mcl, recs):
-    q2 = Q2(fw, ui, recs)
-    q2.files[PEERS] = peer('Pixel 8') + peer('Car tablet')
-    call(fw, 'carremote_open')
-    page = ui.top()
-    assert ui.name[page] == 'carremote_page'
-    rows = ui.captions(page)
-    assert rows[0] == 'Car Remote' and rows[2:] == ['Pixel 8', 'Car tablet']
-    ui.click(page, 3)  # a phone: the confirmation card asks (feedback.c confirm), on stock's sortselect_dialog
-    assert ui.went[-1] == 'dialog/sortselect_dialog' and q2.files[PEERS] == peer('Pixel 8') + peer('Car tablet')
-    answer = fw.fn('coda_rc_shim__cr_forget_answer', None, C.c_void_p, C.c_int, C.c_int)
-    answer(1, 0, 0)  # Cancel keeps it
-    assert q2.files[PEERS] == peer('Pixel 8') + peer('Car tablet')
-    answer(1, 1, 0)  # Forget, the second phone
-    ui.fire('cr_page_show')
-    assert q2.files[PEERS] == peer('Pixel 8') and ui.captions(page)[2:] == ['Pixel 8']
-
-
-def test_settings_switch_turns_it_on_and_off(fw, ui, mcl, recs):
-    q2 = Q2(fw, ui, recs, on=0)
-    call(fw, 'carremote_open')
-    page = ui.top()
-    # no phone: the empty state under the switch, with no row (a phone pairs from its own app)
-    assert len(ui.rows(page)) == 2 and 'No paired phones' not in ui.shown(page)  # the switch and its gap
-    assert empty_state(ui, page) == ('car-profile', 'No Paired Phones', 'Open Q2 Muse Remote on your phone', None)
-    ui.click(page, 0)
-    assert [a[:1] for _, a in fw.calls('write_int_config')][-1] == (1,) and q2.system[-1].startswith('( /usr/bin/coda-rc')
-    ui.click(page, 0)
-    assert [a[:1] for _, a in fw.calls('write_int_config')][-1] == (0,) and q2.system[-1].startswith('kill $(cat /tmp/coda-rc.pid')
 
 
 def test_pause_and_play_go_to_the_player_and_ack_once_it_shows_them(fw, ui, mcl, recs):
