@@ -18,7 +18,7 @@
 @page ch3  { @bottom-left { content: "Chapter 3   Now Playing and Cover Flow"; } }
 @page ch4  { @bottom-left { content: "Chapter 4   EQ"; } }
 @page ch5  { @bottom-left { content: "Chapter 5   Streaming"; } }
-@page ch6  { @bottom-left { content: "Chapter 6   Podcasts, Audiobooks, Photos, Books and Videos"; } }
+@page ch6  { @bottom-left { content: "Chapter 6   Podcasts, Audiobooks and Videos"; } }
 @page ch7  { @bottom-left { content: "Chapter 7   Settings and Battery"; } }
 @page ch8  { @bottom-left { content: "Chapter 8   Bluetooth and AirPods"; } }
 @page ch9  { @bottom-left { content: "Chapter 9   Updating, Restoring and Rockbox"; } }
@@ -186,9 +186,9 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
     <li><span class="n">{{p:radio}}</span><a href="#radio">Internet Radio</a></li>
     <li><span class="n">{{p:airplay}}</span><a href="#airplay">AirPlay</a></li>
 
-    <li class="chap"><span class="n">{{p:c6}}</span><a href="#c6">Chapter 6: Podcasts, Audiobooks, Photos, Books and Videos</a></li>
+    <li class="chap"><span class="n">{{p:c6}}</span><a href="#c6">Chapter 6: Podcasts, Audiobooks and Videos</a></li>
     <li><span class="n">{{p:pods}}</span><a href="#pods">Podcasts and audiobooks</a></li>
-    <li><span class="n">{{p:pbv}}</span><a href="#pbv">Photos, books and videos</a></li>
+    <li><span class="n">{{p:pbv}}</span><a href="#pbv">Videos</a></li>
 
     <li class="chap"><span class="n">{{p:c7}}</span><a href="#c7">Chapter 7: Settings and Battery</a></li>
     <li><span class="n">{{p:display}}</span><a href="#display">Display</a></li>
@@ -353,7 +353,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
     <li>Rate songs and albums 0–5 hearts, then browse Top Rated, Loved and rated albums</li>
     <li>Use favorites, playlists you can edit, Years, Most Played, Long Songs, Play Next, Crossfade, and shuffle by song, album or folder, and pick up the queue where you left it</li>
     <li>Read synced lyrics, or download lyrics and covers for your songs over Wi-Fi</li>
-    <li>Resume <code>.m4b</code> audiobooks (also split by a CUE sheet) and podcasts where you stopped, with per-folder playback speed, and keep photos, books and videos on the card</li>
+    <li>Resume <code>.m4b</code> audiobooks (also split by a CUE sheet) and podcasts where you stopped, with per-folder playback speed, and keep videos on the card</li>
     <li>Use AirPods stem controls, ear detection, two-way volume sync and smoother AAC audio</li>
     <li>Look after the battery with an optional 80% charge limit, a Standby limit and a sleep timer</li>
   </ul>
@@ -374,7 +374,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
     <li>On the Q2, choose <b>Library → Update Local Music</b>.</li>
   </ol>
   <p><b>Over Wi-Fi:</b> with the Q2 on your Wi-Fi network, open <b>Settings → General → Network → Wi-Fi File Transfer</b>. It shows an address and a six-digit PIN. Open the address in a browser on a computer on the same network and type the PIN when the page asks for it; then you can upload, download and delete files on the card. Each time you open Wi-Fi File Transfer it makes a new PIN. Five wrong PINs lock the page out: go back on the Q2 and open Wi-Fi File Transfer again for a new one. It turns itself off after 10 minutes with nothing uploaded, downloaded or listed, and when you go back.</p>
-  <p>These folders at the card’s root each add their own <b>Library</b> entry: <code>Podcasts/</code>, <code>Audiobooks/</code>, <code>Photos/</code>, <code>Books/</code> and <code>Videos/</code>; <code>EQ/</code> holds EQ presets. Other folder names, such as <code>Images/</code>, aren’t picked up. See <a href="#card">What goes on the SD card</a> for supported formats.</p>
+  <p>These folders at the card’s root each add their own <b>Library</b> entry: <code>Podcasts/</code>, <code>Audiobooks/</code> and <code>Videos/</code>; <code>EQ/</code> holds EQ presets. Other folder names, such as <code>Images/</code>, aren’t picked up. See <a href="#card">What goes on the SD card</a> for supported formats.</p>
   <p>Update Local Music no longer stops at 20,000 songs, so with a larger library run it again after updating. Shanling rates the Q2 for 20,000 songs: a much larger library takes longer to scan and browse, and isn’t guaranteed to work.</p>
   <p><b>What the Library lists:</b> every song a scan finds, loose files beside your album folders included. On a very large card, <b>Songs</b>, <b>Albums</b> and <b>Artists</b> may not list everything; <b>Folder</b> view still plays every file. To list only part of a card, scan just those folders with <b>Scan Folders</b>, below.</p>
   <p><b>A large library:</b> Update Local Music goes through every folder on the card before it starts counting songs, so with tens of thousands of songs or a slow card it can stay at <b>No.0</b> for a long time. Leave it running; Return stops it. To add new music later without going through the whole card again, choose <b>System settings → Update Library → Scan Folders</b>, tick the folders you copied to, and press <b>Scan</b>. Open a folder, such as <code>Music</code>, to tick the artist or album folders inside it; tapping a folder that has no folders inside ticks it. Ticking the whole folder reads every song in it again, which takes about as long as a full update.</p>
@@ -389,7 +389,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
     <li><b>Leaving:</b> hold <b>Return</b>.</li>
   </ul>
   <p><b>Hiding a folder:</b> to keep a folder out of <b>Songs</b>, <b>Albums</b>, <b>Artists</b>, Cover Flow and library shuffle, put an empty file named <code>database.ignore</code> in it and run <b>Update Local Music</b> again. Its songs still play from Folder view and from playlists, so a folder of singles or needledrops stays reachable without filling your library. An empty <code>database.unignore</code> in a subfolder lets that subfolder back in. Name the markers <code>.database.ignore</code> and <code>.database.unignore</code>, with a leading dot, if other players shouldn’t list them. Remove the marker and update the library to show the folder again.</p>
-  <p>Settings, play counts, ratings, resume points and book pages are stored on the Q2 itself, not the card, so they stay put when you swap cards.</p>
+  <p>Settings, play counts, ratings and resume points are stored on the Q2 itself, not the card, so they stay put when you swap cards.</p>
 
   </div>
   <div class="sec">
@@ -406,13 +406,11 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
   </div>
   <div class="sec">
   <h2 id="card">What goes on the SD card</h2>
-  <p>Media folders go at the card’s root, with any capitalisation; each adds its own <b>Library</b> row when present. Q2 Pod’s own caches, <code>.coverflow/</code>, <code>.photos/</code> and <code>.books/</code>, can be deleted to free space: Q2 Pod rebuilds them as needed, and Cover Flow and Photos need 16 MB free. Don’t delete <code>.spotify/cache/</code> or <code>.tidal/</code>: they hold your saved Spotify login and the songs you downloaded for offline play. Deleting them signs you out or removes those offline songs, and the Spotify and Tidal caches are sized in Streaming → Configuration instead.</p>
+  <p>Media folders go at the card’s root, with any capitalisation; each adds its own <b>Library</b> row when present. Q2 Pod’s own cache, <code>.coverflow/</code>, can be deleted to free space: Q2 Pod rebuilds it as needed, and Cover Flow needs 16 MB free. Don’t delete <code>.spotify/cache/</code> or <code>.tidal/</code>: they hold your saved Spotify login and the songs you downloaded for offline play. Deleting them signs you out or removes those offline songs, and the Spotify and Tidal caches are sized in Streaming → Configuration instead.</p>
   <table class="paths">
     <thead><tr><th>Path</th><th>What it is</th><th>Made by</th></tr></thead>
     <tbody>
       <tr><td><code>Podcasts/</code>, <code>Audiobooks/</code></td><td>One folder per show or book; always resume, never count as plays</td><td>You</td></tr>
-      <tr><td><code>Photos/</code></td><td><code>.jpg</code>, <code>.jpeg</code>, <code>.png</code> (JPEG up to 6 MB, PNG 1 MB); subfolders are albums</td><td>You</td></tr>
-      <tr><td><code>Books/</code></td><td><code>.txt</code>, <code>.epub</code> (no DRM); one level of subfolders</td><td>You</td></tr>
       <tr><td><code>Videos/</code></td><td><code>.mp4</code>, <code>.m4v</code>, <code>.mkv</code>, <code>.avi</code>, <code>.mov</code>, <code>.mpg</code>; one level of subfolders</td><td>You</td></tr>
       <tr><td><code>EQ/</code></td><td>EQ presets, as AutoEQ / Equalizer APO <code>.txt</code> files</td><td>Both</td></tr>
       <tr><td><code>Radio/</code></td><td>Internet Radio favorites, <code>.m3u</code> and <code>.pls</code></td><td>Both</td></tr>
@@ -422,8 +420,6 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
       <tr><td><code>.scrobbler.log</code></td><td>Every listen, Rockbox format; for Upload Scrobbles or any uploader</td><td>Q2 Pod</td></tr>
       <tr><td><code>.scrobbler.log.sent</code></td><td>Listens already uploaded</td><td>Q2 Pod</td></tr>
       <tr><td><code>.coverflow/</code></td><td>Cover Flow artwork cache, and the playlists’ art</td><td>Q2 Pod</td></tr>
-      <tr><td><code>.photos/</code></td><td>Photo thumbnails and screen-size copies</td><td>Q2 Pod</td></tr>
-      <tr><td><code>.books/</code></td><td>EPUBs converted to text</td><td>Q2 Pod</td></tr>
       <tr><td><code>.sldp/</code></td><td>Stock’s own cover cache</td><td>Stock</td></tr>
       <tr><td><code>.spotify/</code></td><td>Spotify add-on. <code>cache/</code> holds the saved login and downloads, so keep it; deleting the whole folder removes Spotify</td><td>You</td></tr>
       <tr><td><code>.tidal/</code></td><td>Tidal tracks you’ve played, so they replay without streaming or Wi-Fi (Streaming → Tidal Downloads); up to 2 GB, set in Streaming → Configuration</td><td>Q2 Pod</td></tr>
@@ -820,12 +816,11 @@ http://stream.radioparadise.com/mp3-128</pre>
 
 <!-- ============ 6 PODCASTS ETC ============ -->
 <section class="chapter" style="page: ch6">
-  <div class="opener"><h1 id="c6">Podcasts, Audiobooks, Photos, Books and Videos</h1><div class="num">6</div></div>
-  <p class="lead">Add a folder to the card and the Q2 adds it to the Library: spoken word that resumes, photos, books to read and videos to watch.</p>
+  <div class="opener"><h1 id="c6">Podcasts, Audiobooks and Videos</h1><div class="num">6</div></div>
+  <p class="lead">Add a folder to the card and the Q2 adds it to the Library: spoken word that resumes, and videos to watch.</p>
   <div class="icons">
     <figure><img src="../../assets/icons/local_podcasts.png" alt="">Podcasts</figure>
     <figure><img src="../../assets/icons/local_audiobooks.png" alt="">Audiobooks</figure>
-    <figure><img src="../../assets/icons/local_books.png" alt="">Books</figure>
     <figure><img src="../../assets/icons/local_videos.png" alt="">Videos</figure>
   </div>
 
@@ -847,18 +842,14 @@ http://stream.radioparadise.com/mp3-128</pre>
   </div>
   </div>
   <div class="sec">
-  <h2 id="pbv">Photos, books and videos</h2>
+  <h2 id="pbv">Videos</h2>
   <table class="three">
     <thead><tr><th>Screen</th><th>Wheel</th><th>Center</th><th>Other</th></tr></thead>
     <tbody>
-      <tr><td>Photo</td><td>Previous or next photo</td><td>Shows or hides “3 of 40” and the name</td><td><b>Return</b> goes back</td></tr>
-      <tr><td>Book</td><td>Turns the pages</td><td>Shows or hides progress</td><td><b>Return</b> goes back; books reopen where you left off</td></tr>
       <tr><td>Video</td><td>Volume</td><td>Toggles seek: 10s per tick</td><td><b>Play/Pause</b> pauses, Previous/Next skip, <b>Return</b> exits</td></tr>
     </tbody>
   </table>
   <ul>
-    <li><b>Photos</b> go in <code>Photos/</code> at the card’s root: <code>.jpg</code>, <code>.jpeg</code> and <code>.png</code> (JPEG up to 6 MB, PNG 1 MB); subfolders are albums. Other formats, such as WebP, are skipped.</li>
-    <li><b>Books</b> go in <code>Books/</code> at the card’s root: <code>.txt</code> and <code>.epub</code> (no DRM); one level of subfolders.</li>
     <li><b>Videos</b> go in <code>Videos/</code> at the card’s root: <code>.mp4</code>, <code>.m4v</code>, <code>.mkv</code>, <code>.avi</code>, <code>.mov</code> and <code>.mpg</code>; one level of subfolders.</li>
   </ul>
   <p>Video sound plays on the headphone jack, Bluetooth or a USB DAC, and music stops meanwhile. Decoding is done in software, so encodes near the screen’s 375 × 320 play smoothest.</p>

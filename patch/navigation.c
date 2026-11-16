@@ -211,10 +211,8 @@ extern int coverflow_home_sub(void), coverflow_home_split(void *top);
 extern void coverflow_home_strip(void *canvas, void *top);
 extern void coverflow_home_painted(void);
 extern void coverflow_home_row(void *surface, void *row, int id, int painting);
-extern void coverflow_paint(void *w, void *canvas), photos_paint(void *w, void *canvas),
-    photos_open(const char *root), books_paint(void *w, void *canvas), books_open(const char *root),
-    video_poll(void);
-extern int books_key(void *top, unsigned key), video_on(void), books_video(const char *path);
+extern void coverflow_paint(void *w, void *canvas), video_poll(void);
+extern int video_on(void), video_click(const char *path);
 extern void games_paint(void *w, void *canvas);
 extern void spot_poll(void), spot_paint(void *w, void *canvas), *spot_art(void);
 extern void up_next(int (*keyup)(void *, void *));
@@ -414,7 +412,7 @@ void rearm(unsigned *timer, int (*fn)(const void *), unsigned ms) {
     *timer = timer_add(fn, (void *)0, ms);
 }
 
-/* A page's keyup (Books, Photos, Radio): Return runs its leave from the next loop pass. */
+/* A page's keyup (Radio, Games, card apps): Return runs its leave from the next loop pass. */
 int return_key(void *event, unsigned *timer, int (*leave)(const void *)) {
     if (I(event, EVENT_KEY) != KEY_RETURN) return 0;
     rearm(timer, leave, 0);
@@ -469,8 +467,7 @@ void drop_input(void) {
  * ticks leave several fighting over the offset and committing the index twice. */
 static int carousel_page(void *top) {
     const char *name = top ? widget_get_prop_str(top, "name", "") : "";
-    return !tk_strcmp(name, "home_page") || !tk_strcmp(name, "coverflow_page") ||
-           !tk_strcmp(name, "photos_page"); /* its viewer */
+    return !tk_strcmp(name, "home_page") || !tk_strcmp(name, "coverflow_page");
 }
 
 static int is_home(void *top, void *w) { return w && kind(w) == 3 && carousel_page(top); }
@@ -2359,8 +2356,6 @@ int ringnav_paint(void *w, void *canvas) {
         stock_canvas_set_fill_color(canvas, fill);
     }
     edit_paint(w, canvas);
-    photos_paint(w, canvas);
-    books_paint(w, canvas);
     spot_paint(w, canvas);
     if (theme()->sb_w) {
         int table = 0;
@@ -6822,7 +6817,6 @@ enum {
     QA_CHAPTERS,
     QA_MORE,
     QA_NEW_PLAYLIST,
-    QA_EDIT_PLAYLISTS,
     QA_SORT, /* the inset modal's Sorting row (menu_modal.c) */
     QA_OTG,  /* Add to On-The-Go (playlist_pages.c) */
     QA_PLAY, /* the inset modal's playlist: Play, Rename, Delete (playlists.c) */
@@ -7949,11 +7943,7 @@ int media_click(void *ctx, void *event) {
     if (!media_find(kind, root)) {
         tk_snprintf(t, sizeof t, "No %s folder on the card", MEDIA[kind - 1]);
         toast(t);
-    } else if (kind == PHOTOS)
-        photos_open(root);
-    else if (kind == BOOKS)
-        books_open(root);
-    else {
+    } else {
         memcpy(st.media_root, root, sizeof root);
         st.media_open = 1;
         navigator_to("folder_page");
@@ -8043,8 +8033,8 @@ int ringnav_folder_back(void *yoffset, void *index) {
 }
 
 /* folder_page's row click (stock's, 0x532414: the tapped or Centre-pressed row's index into
- * p_deque_showlist, then folder_enter, whose 8, a file, it queues as songs): a video plays as from
- * Library's Videos row (books_video). Select mode (g_navbar_status) and everything else is stock's.
+ * p_deque_showlist, then folder_enter, whose 8, a file, it queues as songs): a video plays
+ * (videos.c video_click). Select mode (g_navbar_status) and everything else is stock's.
  */
 int ringnav_folder_click(void *ctx, void *event) {
     void *row = event && !g_navbar_status ? table_row_of(P(event, EVENT_TARGET)) : (void *)0;
@@ -8052,7 +8042,7 @@ int ringnav_folder_click(void *ctx, void *event) {
     unsigned i = row ? (unsigned)I(row, ROW_INDEX) : ~0u;
     if (i < deque_size(list)) {
         void *r = deque_at(list, i);
-        if (I(r, REC_TYPE) == 8 && books_video(P(r, REC_PATH))) return 0;
+        if (I(r, REC_TYPE) == 8 && video_click(P(r, REC_PATH))) return 0;
     }
     int layer = g_folder_layer, result = stock_folder_click_trampoline(ctx, event);
     if (g_folder_layer > layer) folder_push(1);
@@ -8194,15 +8184,15 @@ int np_goto(int album, int go) {
 /* Deferred so the dialog is never closed under its own click dispatch. */
 static int qm_open(const void *unused);
 
-/* New Playlist (edit 0) and Select Playlists… run once the dialog is destroyed, so the Playlists
- * page is on top however its close animates (playlists.c's click acts on the top page only), and
- * from the pass after, so the covers never close inside the dialog's destroy. */
-static int qm_edit_run(const void *info) {
-    playlists_edit((int)(long)P(info, TIMER_CTX));
+/* New Playlist runs once the dialog is destroyed, so the Playlists page is on top however its
+ * close animates (playlists.c's click acts on the top page only), and from the pass after, so the
+ * covers never close inside the dialog's destroy. */
+static int qm_edit_run(const void *unused) {
+    playlists_new();
     return 0;
 }
-static int qm_edit_due(void *edit, void *event) {
-    timer_add(qm_edit_run, edit, 0);
+static int qm_edit_due(void *ctx, void *event) {
+    timer_add(qm_edit_run, 0, 0);
     return 0;
 }
 /* A song's My Fav changed from the menu, kept as Now Playing's heart keeps it (ratings.c
@@ -8217,9 +8207,7 @@ static void qm_rated(void *r, int hearts) {
 static int qm_run(const void *unused) {
     st.qm_timer = 0;
     if (!st.qm_dialog) return 0;
-    if (st.qm_action == QA_NEW_PLAYLIST || st.qm_action == QA_EDIT_PLAYLISTS)
-        widget_on(st.qm_dialog, EVT_DESTROY, qm_edit_due,
-                  (void *)(long)(st.qm_action == QA_EDIT_PLAYLISTS));
+    if (st.qm_action == QA_NEW_PLAYLIST) widget_on(st.qm_dialog, EVT_DESTROY, qm_edit_due, 0);
     qm_close();
     void *r = qm_record();
     int a = st.qm_action, cls = st.qm_kind == QM_COVERFLOW ? 0xf001 : (int)st.qm_cls;
@@ -8243,7 +8231,7 @@ static int qm_run(const void *unused) {
     } else if (r && a == QA_SORT) {
         st.qm_choice = QM_SORT_CHOICE;
         qm_open(0);
-    } else if (a == QA_NEW_PLAYLIST || a == QA_EDIT_PLAYLISTS) {
+    } else if (a == QA_NEW_PLAYLIST) {
         /* the page's own, not the playlist's: qm_edit_due */
     } else if (a == QA_MORE) {
         void *more = np_more(); /* clicked as a tap would, so stock's own handler opens it */
@@ -8525,8 +8513,7 @@ static int qm_open(const void *unused) {
         if (np_more()) acts[n++] = QA_MORE; /* last: Now Playing's own menu */
     }
     if (st.qm_kind == QM_PLAYLIST && !list) acts[n++] = QA_MORE; /* its dots' page */
-    /* the list's own New Playlist, which its covers hide; Select Playlists… is hidden (the menu
-     * review's, 2026-11-15) */
+    /* the list's own New Playlist, which its covers hide */
     if (st.qm_kind == QM_PLAYLIST && !list && coverflow_playlist(page)) acts[n++] = QA_NEW_PLAYLIST;
     static const char *const rows[] = { "Play Next",
                                         "Play Last",
@@ -8548,7 +8535,6 @@ static int qm_open(const void *unused) {
                                         "Chapters",
                                         "More…",
                                         "New Playlist",
-                                        "Select Playlists…",
                                         "Sorting",
                                         "Add to On-The-Go",
                                         "Play",
@@ -8575,7 +8561,6 @@ static int qm_open(const void *unused) {
                                          "bookmark-simple",
                                          "dots-three",
                                          "plus",
-                                         "list-checks",
                                          "funnel-simple",
                                          "sneaker-move",
                                          "play",
@@ -9559,7 +9544,7 @@ static int remote_match(void *e, int spend) {
 }
 static int remote_key(void *e) { return remote_match(e, 1); }
 
-/* window_manager_dispatch_input_event: while q2video plays (books.c) no key or touch reaches the
+/* window_manager_dispatch_input_event: while q2video plays (videos.c) no key or touch reaches the
  * UI; a key's release goes to the player instead. A card game (addon.c) takes every event but the
  * music's keys. Every event times ringnav_sleep's idle. */
 int ringnav(void *ctx, void *event);
@@ -10214,8 +10199,8 @@ int ringnav(void *ctx, void *event) {
         drop_input();
         if (!kb) return result;
     }
-    /* A double Centre turns the screen off on every listed page, also where the page takes Centre
-     * itself (the Books reader's caption), has no row selected or is still sliding in. A list's
+    /* A double Centre turns the screen off on every listed page, also where the page has no row
+     * selected or is still sliding in. A list's
      * selected row times its own double press (center_timer). */
     if (key == KEY_CENTER && !st.center_timer) {
         unsigned now = (unsigned)time_now_ms();
@@ -10246,8 +10231,7 @@ int ringnav(void *ctx, void *event) {
         return STOP;
     }
     coverflow_lost_touch();
-    if (!dir) coverflow_wheel_land();     /* Centre opens the album the caption names */
-    if (books_key(top, key)) return STOP; /* the reader's pages and caption */
+    if (!dir) coverflow_wheel_land(); /* Centre opens the album the caption names */
     void *w = surface_under(top, (void *)0, (void *)0, dir != 0);
     if (!is_home(top, w) || w != st.home_surface) st.home_surface = (void *)0;
     if (!w || !load(&g_menu, w, 1)) {
