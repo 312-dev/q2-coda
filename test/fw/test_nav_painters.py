@@ -3056,6 +3056,33 @@ def test_about_s_rows_take_the_selection_but_open_nothing(fw, st):
     assert not [a for _, a in fw.calls('widget_set_enable') if a[0] == item.addr]
 
 
+@pytest.mark.parametrize('key, value, key_w', [
+    ('Wi-Fi Address', 'Not connected', 13 * 7),                 # both fit: the value right-aligned in the rest
+    ('Wi-Fi Address', 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55', 13 * 7),  # the value scrolls in the rest
+    ('K' * 60, 'Q2', 321 - 16 - 2 * 7),                         # a short value keeps its width, the key scrolls
+    ('K' * 60, 'V' * 60, 321 - 16 - 96),                        # both over: the value keeps KV_VALUE_MIN
+])
+def test_a_label_value_row_keeps_the_gap_the_label_s_width_and_marquees_what_overflows(fw, st, key, value, key_w):
+    """docs/oled-design.md#labelvalue-rows (About's Wi-Fi Address, 2026-11-16): the label at its own width, at least
+    KV_GAP (16) px to the value, the value the rest; a value too wide scrolls in its box (ellipses off, so the
+    marquee fades its cut end) rather than crowding or cutting hard; a label too wide shrinks and scrolls, the value
+    keeping min(its width, KV_VALUE_MIN). The row's text spans 321 px: x 10 to 335, less the labels' 2 px margins."""
+    ui = oled(fw, st)
+    fw.mock('widget_get_canvas', lambda *_: 0x40)
+    fw.mock('canvas_measure_text', lambda c, s, n, *_: float(7 * (n & 0xffffffff)))
+    view = ui.add('scroll_view', ui.window('about_page'), (0, 26, 375, 294))
+    button = ui.add('button', ui.add('list_item', view, (0, 0, 375, 32)), (20, 0, 335, 32), '6')
+    k = ui.add('hscroll_label', button, (10, 0, 160, 32), key)
+    v = ui.add('hscroll_label', button, (176, 0, 159, 32), value)
+    ui.set_text(k, key), ui.set_text(v, value)  # their wide text, which the row measures
+    fw.fn('about_rows', None, C.c_void_p)(view.addr)
+    val_w = 321 - 16 - key_w
+    assert k.box[2] - 4 == key_w and v.box[0] + v.box[2] == 335  # the value's right edge stays on the column
+    assert v.box[2] - 4 == val_w and (v.box[0] + 2) - (k.box[0] + 2 + key_w) == 16
+    ellipses = dict((a[0], a[1]) for _, a in fw.calls('hscroll_label_set_ellipses'))
+    assert ellipses[k.addr] == (key_w >= 7 * len(key)) and ellipses[v.addr] == (val_w >= 7 * len(value))
+
+
 @pytest.mark.parametrize('prompt, selected', [('Scan music?', 1), ('Import Playlists?', 1), ('Shut Down?', None),
                                               ('Delete Record?', None)])
 def test_a_neutral_stock_confirm_opens_on_its_verb_the_rest_on_cancel(fw, st, prompt, selected):

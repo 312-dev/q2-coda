@@ -89,3 +89,11 @@ int ui_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int r
     stock_canvas_set_text_color(canvas, text);
     return ink;
 }
+
+int kv_fit(int span, int label_w, int value_w, int *box) {
+    int keep = value_w < KV_VALUE_MIN ? value_w : KV_VALUE_MIN; /* the value's least */
+    if (label_w > span - KV_GAP - keep) label_w = span - KV_GAP - keep;
+    if (label_w < 0) label_w = 0;
+    *box = span - label_w - KV_GAP;
+    return label_w;
+}

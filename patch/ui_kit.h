@@ -59,6 +59,15 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
  * timeout_row by itself after this long, the seconds left shown on that row and a bar emptying
  * along the card's foot. answer runs once, after the card has closed, with the chosen row and the
  * switch's state. */
+/* A label/value row's split (docs/oled-design.md#labelvalue-rows: About, Storage, Bluetooth's
+ * device page, Configuration): the label at its natural width, KV_GAP px, then the value's box to
+ * the row's end, the value right-aligned in it. A value wider than its box scrolls in it (the house
+ * marquee); a label that leaves the value less than KV_VALUE_MIN shrinks to keep it, and scrolls.
+ * span is the row's text width, label_w and value_w the texts' natural widths; *box the value's
+ * box width. Returns the label's width. */
+#define KV_GAP 16
+#define KV_VALUE_MIN 96
+int kv_fit(int span, int label_w, int value_w, int *box);
 enum { CONFIRM_NEUTRAL, CONFIRM_DESTRUCTIVE, CONFIRM_CONSEQUENTIAL, CONFIRM_INFO };
 typedef struct {
     const char *title, *name, *body, *code;

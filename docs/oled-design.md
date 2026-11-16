@@ -253,6 +253,13 @@ All lists share one grid.
   meanwhile the wheel and buttons do nothing but Return, which stays on Home.
 - **Key/value row:** value in Text Secondary, right-aligned on the right column, no chevron.
   On the selection bar the value is On Accent.
+- <a id="labelvalue-rows"></a>**Label/value rows** (About, a settings row's value; the user's, 2026-11-16,
+  from About's Wi-Fi Address): the label keeps its natural width and the value takes the rest of the
+  row, at least 16 px (`KV_GAP`) after the label's text. A value wider than its box is not squeezed
+  against the label or cut hard: it fades at its cut end at rest and scrolls when its row is selected
+  (the house [marquee](#motion)). A label so long the value would get less than 96 px (`KV_VALUE_MIN`,
+  or the value's own width when shorter) shrinks to leave it that, and scrolls the same way
+  (`patch/ui_kit.c` `kv_fit`, `patch/settings_pages.c` `kv_row`).
 - **Switch row:** every on/off setting, a 34x20 fully round switch ending on the right column, its
   16 px white knob 2 px in: Track when off, Accent Blue when on. On the selection bar: on is a white
   track with an Accent Blue knob, off a 1.5 px white outline round the white knob. No "On"/"Off"
@@ -1044,7 +1051,8 @@ SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, a
 - **A value cut off scrolls too** (the user's, 2026-11-16, from About's CFW. Version): on the selected
   row the marquee takes the first text cut off at its column, the title, else a key/value row's value,
   so any value too long for its row reads in full when its row is selected (`navigation.c`
-  `marq_moved`); every other row's keeps its ellipsis. That holds for stock's rows too, whose labels
+  `marq_moved`); every other row's keeps its ellipsis, except a [label/value row](#labelvalue-rows)'s,
+  which fades. That holds for stock's rows too, whose labels
   wait on their parent's focus (a Wi-Fi network's name, user 2026-11-16: they clipped).
 - **Now Playing's lines** move as one marquee: the title, artist and album that overflow hold at
   rest 2.75 s, slide left together at 35 px a second (the longest line's pace; the others take the

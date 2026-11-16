@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Display (OLED): About's and the settings' label/value rows keep at least 16 px between a label and its value; a value too long for its room fades at its end and scrolls when selected, instead of crowding the label (About's Wi-Fi Address).
   - Cover Flow (OLED): with no albums to show, the status row names the page, **Cover Flow**, as the design has it; it showed only the clock.
   - Display (OLED): a question whose wrong answer costs nothing (Scan Music?, Import Playlists?, Export Playlists?, Reconnect Bluetooth?) opens on its verb, so Center twice does it; the rest still open on Cancel.
   - Up Next (OLED): while a row is lifted, the queue's grips stand where Edit Library's do, 4 px further right, with square ends.
