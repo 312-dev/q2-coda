@@ -39,11 +39,12 @@
 #define UN_PILL_PAD 10
 #define UN_PILL_REST 0x2c2c2e
 #define UN_PILL_INK 0x7fa6f5
-#define UN_PILL_REST_L 0xe5e5ea /* Light Mode's at rest, the tab track's grey, the accent's words  \
-                                 */
-#define UN_THIRD 0x858585       /* Text Tertiary */
-#define UN_SECOND 0xababab      /* Text Secondary */
-#define UN_BARS_MS 125          /* the level bars, about 8 frames a second */
+#define UN_PILL_REST_L                                                                             \
+    0xe5e5ea               /* Light Mode's at rest, the tab track's grey, the accent's words       \
+                            */
+#define UN_THIRD 0x858585  /* Text Tertiary */
+#define UN_SECOND 0xababab /* Text Secondary */
+#define UN_BARS_MS 125     /* the level bars, about 8 frames a second */
 #define UN_POLL_MS 1000
 #define UN_HOLD_MS 550  /* Centre held this long on a queued row lifts it */
 #define UN_FRESH_MS 700 /* a bumped row's accent edge */
@@ -186,8 +187,9 @@ static void un_fill(int sel) {
     if (un.npn) {
         un.head = label_create(view, 0, 0, 375, UN_HEAD_H);
         widget_use_style(un.head, "s_listitem_black");
-        widget_set_prop_int(un.head, "style:normal:bg_color", 0); /* on the sheet */
-        un.clear = list_item_create(un.head, 0, 0, 0, UN_PILL_H); /* placed when painted */
+        widget_set_prop_int(un.head, "style:normal:bg_color", 0);  /* on the sheet */
+        un.clear = list_item_create(un.head, 0, 0, 0, UN_PILL_H);  /* placed when painted */
+        widget_set_prop_int(un.clear, "style:normal:bg_color", 0); /* its corners the sheet's */
         widget_set_prop_int(un.clear, "_un_stop", stop++);
         widget_on(un.clear, EVT_CLICK, un_clear, (void *)0);
     }

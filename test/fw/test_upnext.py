@@ -357,6 +357,9 @@ def test_up_next_opens_in_the_menu_sheet_its_rows_at_their_own_heights(fw, plain
     assert [page.box(w)[3] for w in kids[:5]] == [72, 24, 46, 26, 46]
     assert [page.box(w)[1] for w in kids[:3]] == [0, 72, 96]
     assert 'Clear' == page.stops[0] and queue.name(queue.mcl.pos) not in page.stops  # the header is no stop
+    clear = page.children[kids[1]][0]
+    for w in [clear] + kids[1:]:  # no paint of their own: the sheet shows round Clear's pill and under each row
+        assert page.props.get((w, b'style:normal:bg_color')) == 0, w
 
 
 def page_block(page, w):
