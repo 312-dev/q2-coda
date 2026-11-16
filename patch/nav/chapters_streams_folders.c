@@ -152,10 +152,13 @@ int stream_cache(int spotify) {
 /* Row i's caption: a cache row's size, or Erase Spotify Data's state. */
 static void sc_text(int i) {
     static const char *const sizes[] = { "512 MB", "1 GB", "2 GB", "4 GB", "8 GB" };
+    static const char *const ahead[] = { "Off", "1 Song", "2 Songs", "3 Songs" };
     char s[40];
     if (i < 2)
         tk_snprintf(s, sizeof s, "%s Cache: %s", i ? "Spotify" : "Tidal", sizes[stream_cache(i)]);
-    widget_set_text_utf8(widget_get_child(st.sc_row[i], 0), i < 2 ? s
+    else if (i == 3)
+        tk_snprintf(s, sizeof s, "Download Ahead: %s", ahead[ahead_n()]);
+    widget_set_text_utf8(widget_get_child(st.sc_row[i], 0), i != 2 ? s
                                                             : shelf_erase(0)
                                                                 ? "Erasing…"
                                                                 : "Erase Spotify Data");
@@ -231,7 +234,12 @@ static void sc_erase_answer(void *ctx, int row, int toggle_on) {
  * already stopped is left as it is. */
 static int sc_click(void *ctx, void *event) {
     int i = (int)(long)ctx;
-    if (i > 4) return svc_toggle(i - 5);
+    if (i > 5) return svc_toggle(i - 6);
+    if (i == 3) { /* Download Ahead: Off, 1, 2, 3 songs (stream_state.c), told at the next .ahead */
+        ahead_step();
+        sc_text(3);
+        return 0;
+    }
     if (i == 2) {
         static const char *const rows[] = { "Cancel", "Erase" };
         if (shelf_erase(0))
@@ -246,7 +254,7 @@ static int sc_click(void *ctx, void *event) {
                                   .answer = sc_erase_answer });
         return 0;
     }
-    if (i == 3) {
+    if (i == 4) {
         unsigned type = (unsigned)MCL(MCL_TYPE);
         spot_stop();
         radio_stop();
@@ -270,15 +278,15 @@ int stream_config(void *ctx, void *event) {
     if (st.sc_page || !(st.sc_page = page_open("streamconf_page", page_closed, page_keyup)))
         return 0;
     int n = SVC_FIXED + st.svc_n;
-    void *view = page_list(st.sc_page, st.sc_page, 0, "Configuration", 5 + n, 48);
-    for (int i = 0; i < 3; ++i)
+    void *view = page_list(st.sc_page, st.sc_page, 0, "Configuration", 6 + n, 48);
+    for (int i = 0; i < 4; ++i)
         st.sc_row[i] = page_row_detail(view, i, "", 0, sc_click), sc_text(i);
-    page_row_detail(view, 3, "Stop Streaming Services", 0, sc_click);
+    page_row_detail(view, 4, "Stop Streaming Services", 0, sc_click);
     /* a section header before the toggles, a whole row so the list scrolls in whole rows: what
      * they do, in 15 px Text Tertiary at the text column (docs/oled-design.md Section header),
      * clear as the rows (the theme's default list_item fills) */
     int rh = page_h(48), px = 18; /* Inter 15, AWTK's size */
-    void *head = list_item_create(view, 0, 4 * rh, 375, rh);
+    void *head = list_item_create(view, 0, 5 * rh, 375, rh);
     widget_use_style(head, "s_listitem_black");
     void *label = text(head, theme()->page_x, 0, 375 - 2 * theme()->page_x, rh);
     widget_set_text_utf8(label, "Show in Streaming");
@@ -290,7 +298,7 @@ int stream_config(void *ctx, void *event) {
     char hide[SVC_HIDE];
     svc_hidden(hide);
     for (int i = 0; i < n; ++i) {
-        st.sc_check[i] = widget_get_child(page_row_detail(view, 5 + i, "", 0, sc_click), 0);
+        st.sc_check[i] = widget_get_child(page_row_detail(view, 6 + i, "", 0, sc_click), 0);
         list_toggle(st.sc_check[i], svc(i, 1), !svc_find(hide, i));
     }
     return 0;

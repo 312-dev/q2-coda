@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Streaming > Configuration: a **Download Ahead** row (Off, 1, 2 or 3 songs; 2 by default). A music-server app such as Subsonic downloads that many of the songs coming next, in the order the Q2 Muse will play them (shuffle and Up Next included), so a skip or the next song starts at once.
   - Now Playing (OLED): the progress bar's track and its played part have round ends, as the design has them; they were square.
   - The boot logo reads Q2 MUSE, and Light Mode boots with the same dark animation as Dark Mode.
   - Car Remote: Shuffle and Repeat now match between the car and the Q2 Muse. Changing them on the Q2 Muse's Now Playing shows in the car, and changing them in the car lights the Q2 Muse's buttons; before, neither side saw the other's.

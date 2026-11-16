@@ -435,6 +435,20 @@ int addon_games_last(void); /* the card's games as the last addon_scan found the
 #define GAMES_BUILTIN 4     /* games.c's Sudoku, Vortex, Solitaire and Snake */
 const char *addon_name(int a), *addon_id(int a), *addon_icon(int a);
 int card_path(const char *path); /* on the card, no ".." segment: what an app or server may name */
+/* stream_state.c: Download Ahead and a card app's .stream
+ * (docs/server-library.md#download-ahead-and-the-streaming-state) */
+enum { SL_NONE, SL_WAIT, SL_GET, SL_STALL, SL_DONE, SL_FAIL };
+typedef struct {
+    int state;               /* SL_* */
+    unsigned have, total, ms; /* bytes on the card, of the whole (0 unknown), length (0 unknown) */
+} sline_t;
+int ahead_n(void), ahead_step(void);
+const char *ahead_caps(void);
+int stream_line(const char *id, const char *path, sline_t *l);
+int stream_startable(const char *id, const char *path);
+int stream_app_of(const char *path, char *id, unsigned size);
+int stream_player_waits(const char *path);
+void ahead_poll(const char *id, const char *seq, void *queue);
 int addon_is_icon(const char *name); /* a card app's Streaming icon, by its file:// name */
 void addon_poll(void), addon_stop(void), addon_paint(void *w, void *canvas), addon_card_away(void);
 const char *addon_qr_title(void *win); /* addon.c: the QR page's app name, 0 for another window */

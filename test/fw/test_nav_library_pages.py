@@ -1942,7 +1942,7 @@ def configuration(fw, ui, files=None, hide=None):
 def switches(ui, page):
     """The service rows' captions and switches."""
     out = []
-    for item in ui.kids[ui.view(page)][5:]:
+    for item in ui.kids[ui.view(page)][6:]:
         label, switch = ui.kids[item][0], ui.lookup(item, '_setting_switch', 0)
         out.append((ui.text[label], ui.image[switch] == 'switch_on'))
     return out
@@ -1955,8 +1955,8 @@ def test_configuration_lists_the_caches_erase_stop_and_each_service(fw, ui):
     page, *_ = configuration(fw, ui, {f'{SPOT_DIR}/.cache-size': b'1024M'}, hide=b'RADIO')
     assert ui.name[page] == 'streamconf_page'
     # the toggles under a section header (audit2 E1): a whole row, so the list scrolls in whole rows
-    assert ui.captions(page)[:5] == ['Tidal Cache: 2 GB', 'Spotify Cache: 1 GB', 'Erase Spotify Data', 'Stop Streaming Services',
-                                     'Show in Streaming']
+    assert ui.captions(page)[:6] == ['Tidal Cache: 2 GB', 'Spotify Cache: 1 GB', 'Erase Spotify Data', 'Download Ahead: 2 Songs',
+                                     'Stop Streaming Services', 'Show in Streaming']
     assert switches(ui, page) == [(s, s != 'Internet Radio') for s in SERVICES]
     call(fw, 'stream_config')
     assert ui.windows == [page]
@@ -2037,16 +2037,34 @@ def test_stop_streaming_ends_streams_and_leaves_local_music(fw, ui, mcl, kind, s
     page, *_ = configuration(fw, ui)
     mcl.type = kind
     fw.mock('mclGetPlayStatus', lambda *_: status)
-    ui.click(page, 3)
+    ui.click(page, 4)
     assert ui.toasts == ['Streaming stopped'] and len(fw.calls('player_stop')) == stops
     assert fw.calls('fw_system')  # librespot's loop ended whatever played
 
 
+@pytest.mark.parametrize('saved, shown', [(None, '2 Songs'), (b'0', 'Off'), (b'1', '1 Song'), (b'3', '3 Songs'), (b'7', '2 Songs')])
+def test_download_ahead_reads_back(fw, ui, saved, shown):
+    Disk(fw)
+    Config(fw, **({} if saved is None else {'AHEAD': saved}))
+    call(fw, 'stream_config')
+    assert ui.captions(ui.top())[3] == f'Download Ahead: {shown}'
+
+
+def test_download_ahead_steps_off_one_two_three_and_keeps_it(fw, ui):
+    page, *_ = configuration(fw, ui)
+    kept = []
+    fw.mock('write_int_config', lambda v, section, key, *_: kept.append((C.string_at(section), C.string_at(key), v)))
+    for shown in ('3 Songs', 'Off', '1 Song', '2 Songs'):
+        ui.click(page, 3)
+        assert ui.captions(page)[3] == f'Download Ahead: {shown}'
+    assert kept == [(b'Q2POD', b'AHEAD', n) for n in (3, 0, 1, 2)]
+
+
 def test_a_service_row_hides_it(fw, ui):
     page, _, config, written = configuration(fw, ui, hide=b'TIDAL')
-    ui.click(page, 5 + 3)
+    ui.click(page, 6 + 3)
     assert written == [b'TIDAL,RADIO'] and switches(ui, page)[3] == ('Internet Radio', False)
-    ui.click(page, 5)
+    ui.click(page, 6)
     assert written[-1] == b'RADIO' and switches(ui, page)[0] == ('TIDAL', True)
 
 
@@ -2195,11 +2213,11 @@ def test_a_service_hidden_on_configuration_goes_from_streaming_at_once(fw, ui):
     ui.handler(button, EVT_CLICK)()  # Configuration
     config = ui.top()
     assert ui.name[config] == 'streamconf_page'
-    ui.click(config, 5 + 3)  # Internet Radio's switch
+    ui.click(config, 6 + 3)  # Internet Radio's switch
     assert dict(page_rows(ui, view))['Internet Radio'] is False
-    ui.click(config, 5 + 3)
+    ui.click(config, 6 + 3)
     assert dict(page_rows(ui, view))['Internet Radio'] is True
-    ui.click(config, 5 + 0)  # stock's own TIDAL row too
+    ui.click(config, 6 + 0)  # stock's own TIDAL row too
     assert dict(page_rows(ui, view))['TIDAL'] is False
 
 

@@ -287,7 +287,7 @@ on the developer's Navidrome: a 160 px baseline JPEG of 3 to 6 KB, 50 to 350 ms 
 
 ## Download Ahead and the streaming state
 
-Status: designed (p32), not built. A streamed song today is handed to the player only once it is
+Status: the app's half is built (q2-subsonic `feat/p32-prefetch`); the firmware's is not yet. A streamed song today is handed to the player only once it is
 whole (`.part`, sync, rename; `m3u_songs` waits at a line until its file exists), the app fetches a
 fixed two songs ahead in list order (`streamWindow`), and nothing tells the firmware how far a
 download has got. Three files, all on tmpfs and written whole (temp and rename), and two
@@ -311,11 +311,14 @@ Not rewritten for position or pause.
 <card path>
 ```
 
-One line a song, the next `n` songs after the one playing as the player will reach them (shuffle
-and repeat applied), only that app's own lines, so fewer than `n` near the queue's end. `n=0` is
-Off: the app fetches only the song playing. The song playing is not listed: it is `.playing`, as
-today. A seq that is not the app's latest `.play` is ignored. With no `.ahead` (older firmware) the
-app keeps two ahead in list order.
+One line a song: the songs the firmware's queue holds after the one playing, in its play order
+(shuffle, repeat and Play Next applied, `playback_upcoming`), at most `n`, and only that app's own
+lines. Its queue holds the m3u's lines up to the first one not there yet (or under `START`, below),
+so it may name fewer than `n`: the rest are the m3u's songs after the one playing that are not
+whole yet, in list order, the ones it queues next, which the app takes itself. `n=0` is Off: the
+app fetches only the song playing. The song playing is not listed: it is `.playing`, as today. A
+seq that is not the app's latest `.play` is ignored. With no `.ahead` (older firmware) the app keeps
+two ahead in list order.
 
 **What the app does with it.** Its plan is the song playing, then the `.ahead` lines in order:
 one download at a time, each started once the one before it is whole. A song whose file is already
@@ -370,9 +373,9 @@ Then Now Playing's times row shows the spinner and `<bytes> of <total> MB` from 
 and the car remote's NowPlaying says buffering (below). Read at Now Playing's 500 ms tick, and only
 while a stream's `.stream` exists.
 
-**The car remote** (`remote/coda-rc.proto`, `CAP_BUFFERING`): NowPlaying gains `buffering` (the
-loading state above), `buffered_bytes` and `total_bytes` (the `.stream` line's, 0 when not
-streaming) and `buffered_ms` (bytes over total times length, 0 when unknown), sent when they change,
+**The car remote** (`remote/coda-rc.proto`, `CAP_BUFFERING` = 8192): NowPlaying gains `buffering` (13, the
+loading state above), `buffered_bytes` (14) and `total_bytes` (15) (the `.stream` line's, 0 when
+not streaming) and `buffered_ms` (16) (bytes over total times length, 0 when unknown), sent when they change,
 at most twice a second.
 
 ## Keeping in step with the server
