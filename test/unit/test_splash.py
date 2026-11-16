@@ -38,10 +38,15 @@ def host(tmp_path_factory):
     return ctypes.CDLL(str(so))
 
 
-def play(host, blob, pan_at=-1):
-    """(exit status, page 0's words, frames waited for, the clock in microseconds) after playing blob."""
-    page, waits, clock = (ctypes.c_uint * N)(), ctypes.c_long(), ctypes.c_uint()
-    status = host.splash_run(blob, ctypes.c_long(len(blob)), ctypes.c_long(pan_at), page, ctypes.byref(waits), ctypes.byref(clock))
+def play(host, blob, gone=-1, refuse=0, mark=None):
+    """(exit status, page 0's words, frames waited for, the clock in microseconds) after playing blob. gone: the
+    frame before which demo removes the marker; refuse: 1 its open, 2 its lock, 3 its rename. mark, a list, gets
+    [frames drawn without the marker there and locked, its unlinks, whether it is left]."""
+    page, waits, clock, marks = (ctypes.c_uint * N)(), ctypes.c_long(), ctypes.c_uint(), (ctypes.c_int * 3)()
+    status = host.splash_run(blob, ctypes.c_long(len(blob)), ctypes.c_long(gone), refuse, page, ctypes.byref(waits),
+                             ctypes.byref(clock), marks)
+    if mark is not None:
+        mark[:] = list(marks)
     return status, list(page), waits.value, clock.value
 
 
@@ -71,16 +76,25 @@ def test_committed_animation_decodes():
 
 
 def test_player_draws_the_last_frame(host):
-    fs = frames(5)
-    status, fb, waits, clock = play(host, splash.pack(fs, 30))
+    fs, mark = frames(5), []
+    status, fb, waits, clock = play(host, splash.pack(fs, 30), mark=mark)
     assert status == 0 and fb == [lut(v) for v in fs[-1]]
     assert waits == 5 and clock == 5 * 1000000 // 30  # one frame time each
+    assert mark == [0, 1, 0]  # every frame under the lock demo waits on, the marker removed at the end
 
 
-def test_player_stops_when_the_display_is_panned_away(host):
-    fs = frames(5)
-    status, fb, waits, _ = play(host, splash.pack(fs, 30), 2)
+def test_player_stops_when_demo_has_waited_its_longest(host):
+    fs, mark = frames(5), []
+    status, fb, waits, _ = play(host, splash.pack(fs, 30), 2, mark=mark)
     assert status == 0 and waits == 2 and fb == [lut(v) for v in fs[1]]
+    assert mark == [0, 0, 0]  # demo removed it
+
+
+@pytest.mark.parametrize('refuse', (1, 2, 3))
+def test_player_fails_without_drawing_when_demo_could_not_wait_for_it(host, refuse):
+    mark = []
+    status, fb, waits, _ = play(host, splash.pack(frames(2), 30), refuse=refuse, mark=mark)
+    assert status == 1 and waits == 0 and not any(v & 0xffffff for v in fb) and mark == [0, 0, 0]
 
 
 def test_player_fails_without_drawing_on_a_bad_file(host):
@@ -94,8 +108,10 @@ def test_player_fails_without_drawing_on_a_bad_file(host):
 def test_player_stays_inside_the_page_on_a_run_past_its_end(host):
     frame = splash.varint(N - 2) + splash.varint(6) + bytes(3)
     blob = splash.MAGIC + struct.pack('<4H', 30, 1, splash.W, splash.H) + struct.pack('<I', len(frame)) + frame
-    status, fb, waits, _ = play(host, blob)
+    mark = []
+    status, fb, waits, _ = play(host, blob, mark=mark)
     assert status == 1 and waits == 0  # host exits 3 if anything outside page 0's rows was written
+    assert mark == [0, 1, 0]  # demo need not wait for it
 
 
 def test_player_keeps_what_it_drew_when_the_file_is_cut_short(host):

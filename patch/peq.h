@@ -363,6 +363,7 @@ int mono_on(void);      /* crossfade.c: Mono Audio's setting */
 #define NS_DEFAULT 3400
 int night_on(void), night_kelvin(void); /* night_on: 0 Off, 1 On, 2 Auto */
 void night_set(int on, int kelvin), night_save(void), night_paint(void *canvas), night_clock(int dark);
+void splash_poll(void); /* splash_hold.c: the boot animation's hold, every UI loop pass */
 int clock_night(void); /* theme_engine.c: Night Shift's Auto hours now */
 int worker_stop(unsigned long thread, int *running, volatile int *cancel, unsigned *timer);
 void ringnav_select(void *w, int id, int rows);

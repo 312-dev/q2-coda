@@ -199,6 +199,8 @@ HOOKS = {
     'playermore_online': (0x539614, 'ringnav_online_match', 'online_match'),
     # Scan Folders' row click: a tap on a folder with no folders inside ticks it (scan_folders.c)
     'specfolder_click': (0x53f9b4, 'ringnav_specfolder_click', 'specfolder_click'),
+    # The boot animation plays to its end: demo's screen shows nothing until it has (splash_hold.c)
+    'lcd_linux_fb_create': (0x63a57c, 'splash_lcd', 'lcd_create'),
 }
 # The payload's stock_<name>_trampoline, the hooks' third element, resumes each hook past its 3-word PIC
 # prologue.
