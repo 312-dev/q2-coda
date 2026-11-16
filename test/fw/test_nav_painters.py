@@ -1776,8 +1776,9 @@ def test_playback_orders_its_rows_and_ends_on_library_and_folders(fw):
     rows = view.children
     ids = [r.name for r in rows]
     # stock's Volume and Album Display is not offered; Folder skip is Library & Folders'
-    assert len(rows) == 20 and 's11' not in ids and 's12' not in ids
-    at = {r.name or icon(r): k for k, r in enumerate(rows)}
+    assert len(rows) == 21 and 's11' not in ids and 's12' not in ids
+    at = {r.name or icon(r): k for k, r in enumerate(rows)}  # Max Volume's icon: Volume's row has it too
+    volume = next(k for k, r in enumerate(rows) if icon(r) == 'playset_maxvol')
     assert rows[-1] is row(ui, view, 'Library & Folders') and 'list_into' in [c.props.get('image') for c in rows[-1].walk()]
     assert rows[-2] is row(ui, view, 'On-The-Go')  # its switch (playlist_pages.c), before Library & Folders
     assert (at['s3'], at['s2']) == (0, 1)  # Play Mode, then EQ
@@ -1785,9 +1786,11 @@ def test_playback_orders_its_rows_and_ends_on_library_and_folders(fw):
     assert at['s8'] == at['playset_memplay'] + 1  # Headphones required, after Resume Songs
     balance = [k for k, r in enumerate(rows) if icon(r) == 'playset_balance']
     assert balance == [at['s10'] + 1, at['s10'] + 2]  # Mono Audio and Swap L/R
-    assert at['s5'] == at['s4'] + 1 == 17  # DSD Output, then USB Audio last but one
-    # that page's rows, where V1.32 had them: the two volumes before Balance, Enlarged Album Art after Swap L/R
-    assert [at['playset_maxvol'], at['playset_bootvol'], at['s10']] == list(range(at['s9'] + 1, at['s9'] + 4))
+    assert at['s5'] == at['s4'] + 1 == 18  # DSD Output, then USB Audio last but one
+    # that page's rows, where V1.32 had them: the two volumes before Balance, Enlarged Album Art after Swap L/R; the
+    # Volume row (crossfade.c volume_row) just before Max Volume
+    assert [volume, at['playset_maxvol'], at['playset_bootvol'], at['s10']] == list(range(at['s9'] + 1, at['s9'] + 5))
+    assert ui.text(label_of(rows[volume])).startswith('Volume')
     assert at['playset_covermode'] == balance[1] + 1
 
 
@@ -1851,7 +1854,7 @@ def test_library_and_folders_is_stocks_page_again_with_the_library_rows(fw, st):
     again = ui.add('scroll_view', ui.window('playset_page'), (0, 26, 375, 294), 'scroll_view_playset')
     playset(fw, ui, again)
     audioset(ui.top.addr, None)
-    assert len(again.children) == 20  # the next open is the main page again
+    assert len(again.children) == 21  # the next open is the main page again
 
 
 def test_artists_toggles_stocks_artist_type(fw):
