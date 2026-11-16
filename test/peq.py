@@ -1406,16 +1406,18 @@ def eq3_editor_check(lib, ui, tmp):
     ui.shim_e3_open(); assert ui.shim_e3_touch(0x100, 50, 70) == 0 and (state().mode, state().hold) == (EQ_OFF, 0)  # shown on: off
     assert ui.shim_e3_touch(0x100, 50, 70) == 0 and state().mode == EQ_3  # and back
     ui.shim_e3_close(); assert state().mode == EQ_3 and ui.shim_flag() == 1
-    # The tabs: the wheel reaches the bar above Simple's switch, Centre opens Advanced with the wheel
-    # still on the bar; past it the list's first row, and back. Neither tab changes what plays.
+    # The tabs (oled-design.md: the wheel moves between the tabs, each opening as it is reached): the wheel
+    # reaches the bar above Simple's switch, and a turn up there stays; down opens Advanced with the wheel still
+    # on the bar; past it the list's first row, and back up to the bar, then up again to Simple, whose own rows
+    # Centre enters. Neither tab changes what plays.
     before = active.read_bytes()
-    ui.shim_e3_open(); keys(*[PREV] * 4, CENTRE); ui.shim_run()
+    ui.shim_e3_open(); keys(*[PREV] * 4, NEXT); ui.shim_run()
     assert ui.shim_click(b'Enabled Off', 2) and ui.shim_selection() == -1 and title() == ''
     keys(NEXT); assert ui.shim_selection() == 0
     assert not ui.shim_e3_key(NEXT)  # the list's own
     keys(PREV); assert ui.shim_selection() == -1
-    keys(CENTRE); ui.shim_run(); assert not ui.shim_click(b'Enabled', 2)  # Simple: no list
-    keys(NEXT, CENTRE); assert state().mode == EQ_OFF; keys(CENTRE)  # the switch, from the bar
+    keys(PREV); ui.shim_run(); assert not ui.shim_click(b'Enabled', 2)  # Simple: no list
+    keys(CENTRE); ui.shim_run(); keys(CENTRE); assert state().mode == EQ_OFF; keys(CENTRE)  # into its rows: the switch
     assert active.read_bytes() == before and state().mode == EQ_3
     ui.shim_e3_close()
     # Restarting with the Simple page still open must not keep its temporary Off attenuation.
