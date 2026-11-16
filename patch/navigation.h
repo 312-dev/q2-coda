@@ -506,6 +506,7 @@ void about_rows(void *view);
 void diag_about_row(void *view); /* diagnostics.c, --dev builds' Save Diagnostics */
 int diag_row(void *item);
 void caption_row(void *label, const unsigned *text);
+int caption_has(void *label); /* ... its caption in the table now */
 const unsigned *pod_caption(int i);
 extern const unsigned *const smart_awake_caption, *const folder_skip_caption;
 void caption_sel(void *view, void *item);

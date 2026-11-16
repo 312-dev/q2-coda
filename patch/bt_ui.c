@@ -38,9 +38,9 @@
 #define BT_SPIN_MS 100        /* a spoke a frame */
 #define BT_POLL_MS 500        /* the scan's and the class file's checks, the link's */
 #define BT_CLASS_WAIT_MS 3000 /* a connect toast waits this long at most for the device's Class */
-#define BT_STATE_W 170        /* a paired row's state, right-aligned in this much */
-#define BT_NOTE_H 52          /* the switch-off line, two lines of 13 px */
-#define BT_NOTE_PX TYPE(13)   /* the caption's size */
+#define BT_STATE_W 130      /* a paired row's state ("Not Connected"), right-aligned in this much */
+#define BT_NOTE_H 52        /* the switch-off line, two lines of 13 px */
+#define BT_NOTE_PX TYPE(13) /* the caption's size */
 #define BT_ROWS_MAX 48
 #define BT_CLASS_FILE "/tmp/q2-btclass"
 #define BT_CLASS_MAX 12 /* devices whose Class one fetch asks for */
@@ -59,8 +59,9 @@ static struct {
     int frame, scans; /* the spinner's frame; scans started for this view */
     char link[24];    /* the device connected at the last look, "" none */
     unsigned link_at, link_cls, link_poll_at;
-    int link_pending,
-        low; /* its connect toast not yet shown; the battery steps toasted (1 20%, 2 10%) */
+    int link_pending; /* its connect toast not yet shown */
+    int low;          /* the battery's steps toasted this connection: 1 at 20%, 2 at 10% */
+    void *auto_label; /* Quality's LDAC Auto title, while its page lasts */
     char classes[BT_CLASS_MAX * 32 + 2];
 } bt __attribute__((section(".scratch")));
 
@@ -516,9 +517,16 @@ static unsigned choice_kbps(int i) {
     static const unsigned short kbps[] = { 990, 660, 0, 576, 384, 0, 0, 0 };
     return i >= 0 && i < (int)(sizeof kbps / sizeof *kbps) ? kbps[i] : 0;
 }
-#define BT_AUTO 2    /* LDAC Auto's row */
+#define BT_AUTO 2 /* LDAC Auto's row */
+#define BT_AUTO_CAPTION ((const unsigned *)L"Steps with the signal, 330 to 990 kbps")
 #define BT_KBPS_W 90 /* a choice's rate, right-aligned before the check */
 #define BT_KBPS_GAP 24
+
+static int auto_gone(void *ctx, void *event) {
+    (void)event;
+    if (bt.auto_label == ctx) bt.auto_label = (void *)0;
+    return 0;
+}
 
 /* After the layout: the picker's rows get their rates, Auto its caption. */
 static void quality_rows(void *view) {
@@ -530,8 +538,11 @@ static void quality_rows(void *view) {
             if (!tk_strcmp(widget_get_type(widget_get_child(b, j)), "hscroll_label"))
                 title = widget_get_child(b, j);
         unsigned kbps = choice_kbps(choice);
-        if (choice == BT_AUTO && title)
-            caption_row(title, (const unsigned *)L"Steps with the signal, 330 to 990 kbps");
+        if (choice == BT_AUTO && title) {
+            caption_row(title, BT_AUTO_CAPTION);
+            if (bt.auto_label != title) widget_on(title, EVT_DESTROY, auto_gone, title);
+            bt.auto_label = title;
+        }
         if (!kbps) continue;
         char s[16];
         int right = I(b, W_W) - geom_val(V_RIGHT_X) - BT_KBPS_GAP;
@@ -691,8 +702,17 @@ static void link_poll(unsigned now) {
     }
 }
 
+/* Quality in sight: Auto's caption back in the table when the Bluetooth page under it, rebuilt at a
+ * scan's result or a link change, cleared it (its own rows' captions are one page's at a time). */
+static void quality_poll(void) {
+    void *top = window_manager_get_top_window(window_manager());
+    if (window_of(bt.auto_label) == top && !caption_has(bt.auto_label))
+        caption_row(bt.auto_label, BT_AUTO_CAPTION);
+}
+
 void bt_ui_poll(void) {
     unsigned now = (unsigned)time_now_ms();
+    if (bt.auto_label) quality_poll();
     if (bt.view) page_poll(now);
     bt_detail_poll();
     if (now - bt.link_poll_at >= BT_POLL_MS) {

@@ -88,11 +88,15 @@ static void fill(void) {
     bd.rows[bd.n++] = ROW_LINK;
     bd.rows[bd.n++] = ROW_RENAME;
     bd.rows[bd.n++] = ROW_FORGET;
-    int sel = bd.view ? widget_get_prop_int(bd.view, "_ringnav_index", 0) : 0;
+    /* where it was, or first Disconnect (Connect): Battery only says */
+    int sel =
+        bd.view ? widget_get_prop_int(bd.view, "_ringnav_index", 0) : bd.rows[0] == ROW_BATTERY;
     bd.view = page_list(bd.page, bd.page, 0, bd.name, bd.n, 48);
     void *list = P(bd.view, W_PARENT);
-    widget_move_resize(list, 0, I(list, W_Y) + BD_HEAD, 375, I(list, W_H) - BD_HEAD);
-    widget_resize(bd.view, 375, I(bd.view, W_H) - BD_HEAD);
+    int room = widget_get_prop_int(bd.page, "h", client_h()) - I(list, W_Y) - BD_HEAD,
+        h = I(list, W_H) < room ? I(list, W_H) : room;
+    widget_move_resize(list, 0, I(list, W_Y) + BD_HEAD, 375, h);
+    widget_resize(bd.view, 375, h);
     int y = I(list, W_Y) - BD_HEAD, w = 375 - 2 * geom_val(V_TEXT_X);
     tk_snprintf(s, sizeof s, "Q2 → %s", bd.name);
     bd.path = label(bd.page, geom_val(V_TEXT_X), y + BD_PATH_Y, w, BD_LINE_H, "s_scrlabel_white20c",
