@@ -822,8 +822,18 @@ int playlist_confirm(const char *question, const char *verb);
 void playlist_pick_open(void *r);
 void playlist_rename_open(int id, const char *name); /* search_strip.c: the letter strip */
 void playlist_new_open(void); /* search_strip.c: New Playlist on the strip, its field off */
+/* bt_name.c: the Q2's Bluetooth name (docs/internals.md#bluetooth-name) and Settings > Bluetooth's
+ * Name row */
+const char *bt_name(char *out, unsigned n);
+int bt_name_valid(const char *s);
+void bt_name_apply(void), bt_name_row(void *view);
 /* search_strip.c: a text box on the strip, on its keyboard's window */
 int search_strip_box(void *kb, void *edit, const char *title);
+/* ... or on a page of its own, for a text the payload keeps itself: titled title, text prefilled,
+ * at most max characters; Next at the text's end calls done, whose 0 closes the page and anything
+ * else is a toast saying why not, the text kept to edit */
+void search_strip_text(const char *title, const char *text, int max,
+                       const char *(*done)(const char *));
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);
 /* add_songs.c: Add Songs (docs/oled-design.md#add-songs) */
@@ -923,6 +933,12 @@ typedef struct {
     const char *title, *line, *pill; /* pill 0: none */
 } mode_page_t;
 int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
+/* bt_battery.c: a connected headset's battery, 0 to 100, -1 for none
+ * (docs/internals.md#headset-battery) */
+int bt_headset_battery(void);
+/* bt_recv.c: Bluetooth receiver mode as a mode page (docs/internals.md#bluetooth-receiver) */
+void bt_recv_load(void *win), bt_recv_paint(void *w, void *canvas);
+const char *bt_recv_title(const char *name), *bt_recv_codec(void *win);
 /* sw_update.c */
 void sw_update_paint(void *w, void *canvas), sw_update_restarting(void *win);
 const char *sw_update_title(const char *name);

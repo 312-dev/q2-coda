@@ -840,7 +840,7 @@ It has two forms, in the same place, width and corners:
   Next when done" under it; a box holding a number opens on 123. A password reads "Password" (15 px Text
   Tertiary, y 84) over dots (y 128), the character just typed shown for a second, all of it in plain text
   while Play/Pause is held, and "Hold Play/Pause to show · Next at the end to join" (13 px, y 176). Next
-  at the text's end is the box's own OK, as the keyboard's Enter was: the box takes the text and acts.
+  at the text's end is the box's own OK, as the keyboard's Enter was: the box takes the text and acts. Settings > Bluetooth's Name (`bt_name.c`) is this form on a page of its own (`search_strip_text`), the status row reading Bluetooth: Next at the end saves the name.
 
 On every form, the wheel walks the letters and Centre types the lit one. A Return press erases the character
 before the cursor; held, Return goes back (the user's, from `mock_hold_back.py` on 2026-11-17): 200 ms into
@@ -1034,7 +1034,8 @@ pattern.
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             | Its [tabs](#tabs), then rows: the switch, Presets, Reset                                                   |
 | Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right                      |
-| Bluetooth                           | Two-line row                | Second line "Connected" with the Positive dot                                                              |
+| Bluetooth                           | Two-line row                | Second line "Connected" with the Positive dot; Name a key/value row opening the letter strip               |
+| Bluetooth receiver (a phone playing to the Q2) | [USB](#usb)'s mode page | The accent circle with the Bluetooth glyph, the phone's title over its artist ("Playing from Phone" over "Wheel sets the volume" before it names one), the codec in the pill (`bt_recv.c`) |
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
 | SD Card Update                      | [Software Update](#software-update) | A spinner while it checks, the confirm, then mode pages                                         |

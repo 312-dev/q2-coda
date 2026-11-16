@@ -2364,6 +2364,7 @@ int ringnav_paint(void *w, void *canvas) {
     if (w && w == slider_page_win) slider_page_paint(w, canvas);
     storage_paint(w, canvas);
     usb_ui_paint(w, canvas);
+    bt_recv_paint(w, canvas);   /* Bluetooth receiver mode (bt_recv.c) */
     sw_update_paint(w, canvas); /* SD Card Update's pages (sw_update.c) */
     if (w && w == st.np_win && !(NP_VISUALIZER && visualizer_full()))
         np_modes(w, canvas); /* else the page's own */
@@ -3063,7 +3064,8 @@ int ringnav_powermanager(void *win, void *ctx) {
 /* The Bluetooth page's list (stock's local builder, btmenu_rows), rebuilt whole on every search and
  * link change: its rows, five with Bluetooth on (one, the switch, off), then the device lists.
  * With Bluetooth on, Resume on connect and Control Device Volume follow the fourth, Bluetooth
- * Headset Volume Control (bt_adjvol), each time, iconless and 78 high as stock's rows. */
+ * Headset Volume Control (bt_adjvol), each time, iconless and 78 high as stock's rows, and the
+ * second, stock's Bluetooth Name, is bt_name.c's Name row. */
 int ringnav_btrows(void *win, void *ctx) {
     static const char *const icons[] = { 0 };
     int result = stock_btrows_trampoline(win, ctx);
@@ -3078,6 +3080,7 @@ int ringnav_btrows(void *win, void *ctx) {
         widget_resize(row, I(row, W_W), 78);
         widget_restack(row, 4 + k);
     }
+    bt_name_row(view);
     return result;
 }
 /* A settings list's rows, stock's (in its table's order, each button named by its place there,
@@ -4747,6 +4750,7 @@ void *ringnav_ui_load(const char *name, void *parent) {
     if (root && slider_page(root)) slider_open(root); /* no knob; slider_page.c's form */
     if (root) msg_open(root); /* the scan page (scan_page.c oled_scan) */
     if (root) usb_ui_mode_load(root); /* USB's page as a mode page (usb_ui.c) */
+    if (root) bt_recv_load(root);     /* the Bluetooth receiver's (bt_recv.c) */
     if (root && g_usbmode != 1 && !tk_strcmp(widget_get_prop_str(root, "name", ""), "usbmode_page"))
         st.usb_lun = 0, widget_add_timer(root, usb_poll, 500);
     if (root) album_local_load(root); /* OLED's album page on stock's (library_album.c) */
@@ -4938,7 +4942,8 @@ static const char *bar_title_of(void *win, void **label) {
     if (!tk_strcmp(name, "equalizer_page")) return "EQ"; /* its 48 px row is the tabs' own label */
     if (!tk_strcmp(name, "spotify_page")) return "Spotify"; /* they hide their own name's label */
     if (!tk_strcmp(name, "radionp_page")) return "Internet Radio";
-    if (usb_ui_title(name)) return usb_ui_title(name); /* the USB mode pages (usb_ui.c) */
+    if (usb_ui_title(name)) return usb_ui_title(name);   /* the USB mode pages (usb_ui.c) */
+    if (bt_recv_title(name)) return bt_recv_title(name); /* Bluetooth receiver mode (bt_recv.c) */
     if (sw_update_title(name)) return sw_update_title(name); /* SD Card Update's (sw_update.c) */
     if (!tk_strcmp(name, "qrcode_page")) return addon_qr_title(win); /* the card app's name */
     if (!tk_strcmp(name, "search_dialog")) return "Search"; /* stock's toolbar has no label */

@@ -506,6 +506,10 @@ def validate_assets(directory):
     # The boot animation's player (docs/boot.md#boot-animation)
     splash = read('rootfs.squashfs', SPLASH)
     assert sha(splash) == manifest['q2splash_sha256'] and splash[:4] == b'\x7fELF' and splash[36:40] == helper[36:40]
+    # Bluetooth's Now Playing to a car (docs/internals.md#track-metadata)
+    from build import AVRCP
+    avrcp = read('rootfs.squashfs', AVRCP)
+    assert sha(avrcp) == manifest['q2_avrcp_sha256'] and avrcp[:4] == b'\x7fELF' and avrcp[36:40] == helper[36:40]
     expected_start = read('stock.squashfs', S90PLAY).replace(*BOOT_HOOK)
     if manifest['dev']:
         remote = read('rootfs.squashfs', REMOTE)
@@ -563,10 +567,12 @@ def validate_assets(directory):
     for path in DEBUG_TOOLS + DEBUG_LINKS:
         assert path in stock_listing and path not in listing, path
     print('Removed from the rootfs:', ' '.join(DEBUG_TOOLS + DEBUG_LINKS))
-    # Bluetooth is discoverable for 180 s, not for as long as it is on.
-    from build import BT_MAIN, BT_DISCOVERABLE
-    assert read('rootfs.squashfs', BT_MAIN) == read('stock.squashfs', BT_MAIN).replace(*BT_DISCOVERABLE)
+    # Bluetooth is discoverable for 180 s, not for as long as it is on, named Q2, with BlueZ's experimental interfaces.
+    from build import BT_MAIN, BT_DISCOVERABLE, BT_NAME, BT_EXPERIMENTAL
+    assert read('rootfs.squashfs', BT_MAIN) == read('stock.squashfs', BT_MAIN).replace(*BT_DISCOVERABLE).replace(*BT_NAME).replace(*BT_EXPERIMENTAL)
+    assert b'\nExperimental = true\n' in read('rootfs.squashfs', BT_MAIN)
     assert b'\nDiscoverableTimeout = 180\n' in read('rootfs.squashfs', BT_MAIN)
+    assert b'\nName = Q2\n' in read('rootfs.squashfs', BT_MAIN) and b'Shanling' not in read('rootfs.squashfs', BT_MAIN)
     # The boot deletes Baidu Netdisk's saved sign-in.
     assert expected_start.count(b'\n        rm -f /mnt/data/baidu_token.conf\n') == 1
     # bluealsa: AAC capability, the two DROP jumps, the silence sites, and one appended LOAD payload.

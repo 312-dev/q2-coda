@@ -4,6 +4,10 @@
   - Pages of text you scroll (OLED): when the last line sits just under the fade at the bottom, turning the wheel now scrolls it into view, as a drag does, instead of showing the scroll bar and staying put.
   - Development builds: `q2eq` over adb lists, loads and adjusts the EQ from a computer (every control on the EQ page, presets, import and export), through the same steps as the EQ page, so the page, EQ per Output and what plays stay in step.
   - Display (OLED): every empty page now looks the same: a stack of tiles with a picture, a title such as **No Songs**, **No Playlists** or **No Matches**, a line saying what to do, and at most one button under it (**Scan Music Now**, **Turn on Streaming**, **Turn on Wi-Fi**). Empty Albums, Artists, Composers and Genres open such a page instead of a message, Years opens with no dated albums, and with no SD card in, the Library's pages say **No SD Card**.
+  - Bluetooth: cars and headsets that show what's playing now get the song's title, artist, album and length from the Q2, and see when it's paused (stock sent nothing).
+  - Bluetooth: the Q2 can read a connected headset's battery level (where the headset reports it), for the status bar.
+  - Bluetooth receiver (OLED): while your phone plays through the Q2, the screen shows the song's title and artist in large type under a Bluetooth circle, with the codec (LDAC, AAC…) below, instead of stock's big picture and small labels.
+  - Bluetooth: the Q2 shows up as **Q2** on phones, cars and speakers instead of "Shanling Q2". Rename it in **Settings → Bluetooth → Name** on the letter strip (up to 30 characters); the new name is used at once and kept through updates.
   - Status bar: while it charges, the battery shows how full it really is. It used to fill to the end the moment the cable went in.
   - Status bar (OLED): a charging battery shows a small lightning bolt inside it, in green; full on the cable, or held at **Charge Limit**, it stays green with no bolt.
   - Status bar: with **Battery** on Percent, the percentage stays on one line in the status bar; at 100% or while charging it could drop onto a second line.

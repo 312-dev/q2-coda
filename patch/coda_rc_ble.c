@@ -168,7 +168,9 @@ static int props(const char *path, const char *iface, DBusMessageIter *dict) {
         static const char *const uuids[] = {SERVICE_UUID, 0};
         prop_str(dict, "Type", T_STR, "peripheral");
         prop_strs(dict, "ServiceUUIDs", uuids);
-        prop_str(dict, "LocalName", T_STR, "Q2 Pod");
+        /* the Q2's default Bluetooth name (bt_name.c); fixed, not the user's: with the 128-bit service
+         * UUID and the flags only a few bytes of the 31 are left for it */
+        prop_str(dict, "LocalName", T_STR, "Q2");
         return 1;
     }
     return 0;

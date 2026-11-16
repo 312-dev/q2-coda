@@ -304,6 +304,8 @@ USB_ROWS = {'charge': 'lightning', 'files': 'folder-simple', 'audio': 'speaker-h
 USB_MODE_PX = 44
 USB_MODES = {'files': 'folder-simple-fill', 'audio': 'speaker-hifi-fill', 'debug': 'terminal-window-fill', 'ejected': 'check-bold'}
 USB_TOAST_PX = 15
+# The Bluetooth receiver's mode page (bt_recv.c): its glyph, fill, white on the solid accent circle at the mode page's size.
+BT_MODES = {'receive': 'bluetooth-fill'}
 # The software update's pages (sw_update.c, docs/oled-design.md Software Update): each result's glyph (fill, white on
 # its solid circle; the up-to-date check and the restart's arrow bold) at the mode page's size, and the check's
 # spinner, iOS's twelve spokes in the half's Text Primary (_d white, _l black) on no circle, 48 px across.
@@ -578,6 +580,7 @@ def images(t):
     out |= {f'{prefix}_usb_{n}_{k}': phosphor(g, USB_ROW_PX, c) for n, g in USB_ROWS.items() for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_usbmode_{n}': phosphor(g, USB_MODE_PX, 0xffffff) for n, g in USB_MODES.items()}
     out |= {f'{prefix}_usbtoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in USB_TOASTS.items()}
+    out |= {f'{prefix}_btmode_{n}': phosphor(g, USB_MODE_PX, 0xffffff) for n, g in BT_MODES.items()}
     out |= {f'{prefix}_batt{n}_{k}': inset_glyph(g, *inks) for n, g in BATT_GLYPHS.items() for k, inks in BATT_GLYPH_INKS.items()}
     out |= {f'{prefix}_chargetoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in CHARGE_TOASTS.items()}
     out |= {f'{prefix}_chargetoast_battery_{k}': phosphor('battery-high-fill', USB_TOAST_PX, c) for k, c in CHARGE_TOAST_BATTERY.items()}

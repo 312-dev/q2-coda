@@ -154,10 +154,13 @@ static struct {
     int rename;           /* Rename's playlist + 1 (playlist_rename_open), 0 for Search */
     int pick;             /* Add Songs' (add_songs_search): songs alone, Centre adds them */
     int create;           /* New Playlist's (playlist_new_open) */
-    void *box;            /* a stock text box's edit the strip types for (search_strip_box) */
-    int secret, set;      /* the box is a password; its strip's set, SS_SET_* */
-    unsigned typed_at, show_timer;  /* the last character typed (shown a moment); Play's hold */
-    unsigned char shown, play_held; /* the password in plain text; Play/Pause down */
+    void *box; /* a stock text box's edit the strip types for (search_strip_box), or the page
+                * itself for a text of the payload's own (search_strip_text) */
+    const char *(*done)(const char *); /* ... the latter's, given the text at Next */
+    int max;                           /* ... the latter's characters, at most */
+    int secret, set;                   /* the box is a password; its strip's set, SS_SET_* */
+    unsigned typed_at, show_timer;     /* the last character typed (shown a moment); Play's hold */
+    unsigned char shown, play_held;    /* the password in plain text; Play/Pause down */
     short down_x, down_y, pressed, swiped; /* a touch: where it went down, cells it moved */
     char text[SS_TEXT_MAX + 1];
     unsigned pop_timer, pop_step_at; /* the pop's timer; the wheel's last step on the strip */
@@ -270,7 +273,7 @@ static void ss_type(int e) {
                         : e < 26        ? (cap ? 'A' : 'a') + (unsigned)e
                                         : ss_char(e));
         /* a box takes any space (a password may hold them); a name or a search no doubled one */
-        if (n >= SS_TEXT_MAX ||
+        if (n >= (ss.max ? ss.max : SS_TEXT_MAX) ||
             (c == ' ' && !ss.box && (!at || ss.text[at - 1] == ' ' || ss.text[at] == ' ')))
             return;
         unsigned now = (unsigned)time_now_ms();
@@ -315,6 +318,14 @@ static void ss_box_done(void) {
     void *edit = ss.box, *im = input_method();
     char text[SS_TEXT_MAX + 1];
     tk_snprintf(text, sizeof text, "%s", ss.text);
+    if (ss.done) { /* the payload's own text (search_strip_text): its page closes once taken */
+        const char *why = ss.done(text);
+        if (why)
+            toast(why);
+        else
+            navigator_back();
+        return;
+    }
     if (!edit || !im || P(im, IM_WIDGET) != edit) return;
     widget_set_text_utf8(edit, text);
     input_method_dispatch_action(im);
@@ -324,6 +335,10 @@ static void ss_box_done(void) {
  * did (navigation.c search_key: our own edits emptied first, so their pages back out). */
 static void ss_box_cancel(void) {
     void *edit = ss.box, *im = input_method();
+    if (ss.done) { /* the payload's own text: its page closes, the text as it was */
+        navigator_back();
+        return;
+    }
     if (!edit || !im || P(im, IM_WIDGET) != edit) return;
     if (!tk_strcmp(widget_get_prop_str(edit, "name", ""), EDIT_NAME))
         widget_set_text_utf8(edit, "");
@@ -1050,4 +1065,19 @@ int search_strip_box(void *kb, void *edit, const char *title) {
     bar_title_sync(kb);
     widget_invalidate_force(kb, (void *)0);
     return 1;
+}
+
+/* A text the payload keeps itself (the Bluetooth name, bt_name.c): the strip in a text box's form,
+ * its sets and chip, on a page of its own titled title, text prefilled and the cursor at its end;
+ * Next at the end hands the text to done, which closes the page (0) or toasts why not, and a held
+ * Return closes it with nothing changed. */
+void search_strip_text(const char *title, const char *text, int max,
+                       const char *(*done)(const char *)) {
+    if (ss.page || !done || !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup)))
+        return;
+    ss.box = ss.page, ss.done = done;
+    ss.max = max > 0 && max < SS_TEXT_MAX ? max : SS_TEXT_MAX;
+    tk_snprintf(ss.text, (unsigned)ss.max + 1, "%s", text ? text : "");
+    ss.cur = (int)strlen(ss.text);
+    ss_sheet(title);
 }
