@@ -14246,7 +14246,7 @@ m.nodes[edit]['text']='aphex\ttwin'; f,ctx=m.handler(edit,O['EVT_VALUE_CHANGED']
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0; m.advance(0,clear=False)
 m.answer('ok','refresh','50',[('action','download','01 Xtal.flac','bob · FLAC 16/44.1 · 31 MB · free','12.3','downloadfolder')])
 assert m.wire[-1].endswith(b'\tsearch\taphex%09twin\n'),m.wire[-1]
-assert m.labels()==['aphex\ttwin','01 Xtal.flac','bob · FLAC 16/44.1 · 31 MB · free','More…',''],m.labels()
+assert m.labels()==['aphex\ttwin','01 Xtal.flac','bob · FLAC 16/44.1 · 31 MB · free','More…'],m.labels()
 # A press downloads the file; Play/Pause held, the hold op (its whole folder); More… the next page.
 m.pick(0); m.answer('ok','Downloading 01 Xtal.flac','',[]); assert m.requests[-1]==('download','12.3') and m.toasts[-1][3]=='Downloading 01 Xtal.flac'
 m.answer('ok','refresh','50',[('action','download','01 Xtal.flac','bob','12.3','downloadfolder')])
@@ -14265,7 +14265,7 @@ m.back(); m.answer('ok','','100',[('info','','Second','','','')]); assert m.requ
 # live one as well: its 2 s refresh asks the first page alone.
 def arts(k,n=50): return [('list','artist',f'Artist {k*50+i:03}','',f'ar-{k*50+i}','playartist') for i in range(n)]
 s=SlskMachine(); s.open(); s.answer('ok','refresh','',SMENU); s.pick(2); s.answer('ok','pages','c1',arts(0))
-view=s.find('scroll_view'); rows=s.rows(); assert len(rows)==51 and s.labels()[-2:]==['Loading…',''],s.labels()[-2:]
+view=s.find('scroll_view'); rows=s.rows(); assert len(rows)==51 and s.labels()[-1:]==['Loading…'],s.labels()[-2:]
 asked=len(s.threads); s.pick(50); assert len(s.threads)==asked
 s.nodes[view]['_ringnav_index']=7; s.word(view+O['SCROLL_Y'],6*52); y=s.get(view+O['SCROLL_Y'])  # row 7 on screen (OLED's 52 px detail rows)
 s.answer('ok','pages','c2',arts(1)); assert s.requests[-1]==('downloads','c1') and s.rows()[:50]==rows[:50] and len(s.rows())==101,s.requests[-1]
@@ -14300,17 +14300,17 @@ assert s.requests[-3:]==[('downloads',),('downloads','c1'),('downloads','c2')] a
 # Without "pages" (every app before it: q2-deezer, q2-soulseek, q2-filebrowser) a reply with a cursor keeps
 # More… and nothing more is asked; a later page without it ends the list at More… as well.
 s.back(); s.answer('ok','refresh','',SMENU); s.pick(2); t=len(s.threads); s.answer('ok','','c1',arts(0))
-assert len(s.threads)==t and len(s.rows())==51 and s.labels()[-2:]==['More…',''],s.labels()[-2:]
+assert len(s.threads)==t and len(s.rows())==51 and s.labels()[-1:]==['More…'],s.labels()[-2:]
 s.back(); s.answer('ok','refresh','',SMENU); s.pick(2); s.answer('ok','pages','c1',arts(0)); t=len(s.threads); s.answer('ok','','c2',arts(1))
-assert s.requests[-1]==('downloads','c1') and len(s.threads)==t and len(s.rows())==101 and s.labels()[-2:]==['More…',''],s.labels()[-2:]; passed()
+assert s.requests[-1]==('downloads','c1') and len(s.threads)==t and len(s.rows())==101 and s.labels()[-1:]==['More…'],s.labels()[-2:]; passed()
 # At ADDON_PAGES replies (500 rows, under ringnav's 512) the list stops at More…, which asks for the rest as a
 # level of its own; a page that fails ends the list at More… too, its rows kept, nothing asked again. (A fresh
 # machine: the mock's memory isn't freed.)
 s=SlskMachine(); s.open(); s.answer('ok','refresh','',SMENU); s.pick(2)
 for k in range(10): s.answer('ok','pages',f'c{k+1}',arts(k))
-assert len(s.rows())==501 and s.labels()[-2:]==['More…',''] and s.requests[-1]==('downloads','c9'); t=len(s.threads); s.advance(2000); assert len(s.threads)==t
+assert len(s.rows())==501 and s.labels()[-1:]==['More…'] and s.requests[-1]==('downloads','c9'); t=len(s.threads); s.advance(2000); assert len(s.threads)==t
 s.pick(500); s.answer('ok','pages','c11',arts(10,30)); assert s.requests[-1]==('downloads','c10')
-s.answer('error','Server down','',[]); assert s.requests[-1]==('downloads','c11') and len(s.rows())==31 and s.labels()[-2:]==['More…','']
+s.answer('error','Server down','',[]); assert s.requests[-1]==('downloads','c11') and len(s.rows())==31 and s.labels()[-1:]==['More…']
 t=len(s.threads); s.advance(2000); assert len(s.threads)==t; passed()
 # Windows (caps word "window", addon.c page_to): a page row shows the level's own list from its context's
 # cursor in the level's place, not as a level over it. Next page selects the row after Previous page,
@@ -14509,7 +14509,7 @@ m=QobuzMachine(); m.top=m.node('window','playing_page'); m.mock('navigator_back'
 assert run(m,'addon_goto',m.string(QSONG),m.string('Record'),1)==1; m.page=m.top
 assert m.nodes[m.page]['name']=='addon_page' and m.systems==['/bin/sh /mnt/mmc/.qobuz/run'] and m.labels()==['Loading…']
 m.answer('ok','','40',[('list','artist','The Band','Artist','5',''),('action','play','First','3:20','album-a1:t1','dl:album-a1:t1')])
-assert m.requests[-1]==('goto','album',QSONG) and m.labels()==['Record','The Band','Artist','First','3:20','More…',''],m.labels()
+assert m.requests[-1]==('goto','album',QSONG) and m.labels()==['Record','The Band','Artist','First','3:20','More…'],m.labels()
 m.pick(2); m.answer(*OK,[]); assert m.requests[-1]==('goto','album',QSONG,'40'),m.requests[-1]
 m.back(); m.answer('ok','','40',[]); m.back(); assert 'navigator_back' in [c[0] for c in m.calls]; passed()
 m=QobuzMachine(); m.open(); m.answer(*OK,[]); old=m.page; m.mock('window_manager_close_window_force')
