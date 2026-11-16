@@ -853,7 +853,7 @@ m.call(address=payload_syms['child_exit'],args=(127,0,0,0),gap=0)
 assert exited==[(4001,127)];passed()
 
 # Speed's four 42x61 image buttons: the wheel walks them and Centre clicks the last one (#135). They are picture
-# tiles, which OLED leaves unpainted (paint_selection's sel_frame frames Lock Screen's grid alone).
+# tiles, which OLED leaves unpainted (paint_selection).
 m=Machine(); w=m.page('playermore_page'); row=m.node('button',style='s_btn_forwardspeed')
 m.word(row+O['W_PARENT'],w); m.nodes[w]['children']=[row]
 buttons=[]
