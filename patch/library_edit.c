@@ -779,6 +779,9 @@ int lr_edit_touch(void *event) {
     void *top = window_manager_get_top_window(window_manager()), *view = lr_view_of(top, &list);
     if (!view || !event) return 0;
     int xy[2] = { lr.x = I(event, EVENT_X), lr.y = I(event, EVENT_Y) }, h;
+    /* a press above the window (Split's raised rows, which the status bar paints) is the bar's: its
+     * lift never reaches the page (lr_event), so it starts no hold */
+    if (lr.y < I(top, W_Y)) return 0;
     lr_box(view, &h);
     widget_to_local(view, xy); /* the view's content's: its scroll counted */
     int y = xy[1];
