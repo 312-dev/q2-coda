@@ -602,9 +602,8 @@ static void sw_offer_paint(void *w, void *canvas, int dy, unsigned accent) {
     tk_snprintf(s, sizeof s, "Installed: %s", v);
     ui_line(canvas, s, 0, 375, top + SW_OFFER_HAVE_Y, 1, "inter", TYPE(13), tok(TOK_TERTIARY));
     const char *label = net ? "Download and Install" : "Install";
-    int bw =
-        ui_button(canvas, cx, top + SW_OFFER_BTN_Y, label, 1, swu.focus == 0 && ui_focus_shown());
-    swu.button = (rect_t){ cx - bw / 2, top + SW_OFFER_BTN_Y - UI_BTN_H / 2 + dy, bw, UI_BTN_H };
+    int bw = ui_button(canvas, cx, top + SW_OFFER_BTN_Y, label, 1, swu.focus == 0, 0);
+    swu.button = (rect_t){ cx - bw / 2, top + SW_OFFER_BTN_Y - CTA_H / 2 + dy, bw, CTA_H };
     sw_note_paint(canvas, top + SW_OFFER_LINE_Y, dy);
 }
 

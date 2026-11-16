@@ -65,16 +65,6 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
  * navigation.c's st.touch_mode is the one record of it: a touch sets it, the wheel clears it.
  * Centre with no ring still answers the screen's default. */
 int ui_focus_shown(void);
-/* The shared button (docs/oled-design.md#button): a pill UI_BTN_H tall centred on (cx, cy), its
- * label in Inter Medium 20 with UI_BTN_PAD each side; primary: the accent with white words (a
- * screen's main action), else secondary: Raised 2 grey with Text Primary words. focused: the focus
- * ring round it, UI_BTN_RING px of Text Primary UI_BTN_GAP px out. Returns its width. */
-#define UI_BTN_H 38
-#define UI_BTN_PAD 24
-#define UI_BTN_PX TYPE(20)
-#define UI_BTN_GAP 3
-#define UI_BTN_RING 2
-int ui_button(void *canvas, int cx, int cy, const char *label, int primary, int focused);
 /* The empty states' buttons (docs/oled-design.md#buttons): one, a filled Accent Blue capsule
  * CTA_H tall sized to its label (CTA_PAD each side, at least CTA_MIN), or a pair of equal capsules
  * CTA_GAP apart, the second grey with its label in Text Primary, together within CTA_BOX; centred
@@ -96,6 +86,11 @@ int ui_text_w(void *canvas, const char *s, int medium, int px);
 int ui_cta_w(void *canvas, const char *const *labels, int n);
 int ui_cta_x(void *canvas, const char *const *labels, int n, int i, int *w);
 void ui_cta_paint(void *canvas, const char *const *labels, int n, int y, int sel, int pressed);
+/* One button of the same form centred on (cx, cy) (Software Update's, the library scan's): primary
+ * the accent with white words (a screen's main action), else the grey with Text Primary words;
+ * focused: ringed while ui_focus_shown; pressed: a step darker. Returns its width. */
+int ui_button(void *canvas, int cx, int cy, const char *label, int primary, int focused,
+              int pressed);
 /* A label/value row's split (docs/oled-design.md#labelvalue-rows: About, Storage, Bluetooth's
  * device page, Configuration): the label at its natural width, KV_GAP px, then the value's box to
  * the row's end, the value right-aligned in it. A value wider than its box scrolls in it (the house

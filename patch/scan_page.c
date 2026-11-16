@@ -26,12 +26,12 @@ static struct {
 #define SCAN_TITLE_H 24
 #define SCAN_LINE_H 20
 #define SCAN_BTN_GAP 20
-#define SCAN_STACK (SCAN_FIG + SCAN_FIG_GAP + SCAN_TITLE_H + SCAN_LINE_H + SCAN_BTN_GAP + UI_BTN_H)
+#define SCAN_STACK (SCAN_FIG + SCAN_FIG_GAP + SCAN_TITLE_H + SCAN_LINE_H + SCAN_BTN_GAP + CTA_H)
 #define SCAN_Y (SCAN_TOP + (SCAN_END - SCAN_TOP - SCAN_STACK) / 2) /* the figure's top */
 #define SCAN_FIG_CY (SCAN_Y + SCAN_FIG / 2)
 #define SCAN_TITLE_CY (SCAN_Y + SCAN_FIG + SCAN_FIG_GAP + SCAN_TITLE_H / 2)
 #define SCAN_LINE_CY (SCAN_TITLE_CY + SCAN_TITLE_H / 2 + SCAN_LINE_H / 2)
-#define SCAN_BTN_CY (SCAN_LINE_CY + SCAN_LINE_H / 2 + SCAN_BTN_GAP + UI_BTN_H / 2)
+#define SCAN_BTN_CY (SCAN_LINE_CY + SCAN_LINE_H / 2 + SCAN_BTN_GAP + CTA_H / 2)
 #define SCAN_RING_R 26 /* the ring's line's middle: 56 px across, its 4 px line included */
 #define SCAN_RING_LINE 4
 #define SCAN_SPIN_PX                                                                               \
@@ -148,7 +148,7 @@ static void oled_scan(void *win, void *src, void *btn) {
         widget_set_name(cp.msg_folder, "msg_folder");
         hscroll_label_set_only_focus(cp.msg_folder, 0); /* a long name runs as the marquee */
     }
-    widget_move_resize(btn, (375 - 160) / 2, SCAN_BTN_CY - UI_BTN_H / 2, 160, UI_BTN_H);
+    widget_move_resize(btn, (375 - 160) / 2, SCAN_BTN_CY - CTA_H / 2, 160, CTA_H);
     for (unsigned i = 0; i < sizeof state / sizeof *state; ++i) {
         widget_set_prop_int(btn, style_key(key, state[i], "bg_color"), 0);
         widget_set_prop_int(btn, style_key(key, state[i], "border_color"), 0);
@@ -288,10 +288,9 @@ void msg_paint(void *w, void *canvas) {
         ui_text(canvas, line, 0, TYPE(15), tok(TOK_SECONDARY), 1, 375 / 2, SCAN_LINE_CY - dy,
                 375 - 48, 1);
     int bw = ui_button(canvas, 375 / 2, SCAN_BTN_CY - dy, state == SCAN_RUNNING ? "Stop" : "Done",
-                       state != SCAN_RUNNING, ui_focus_shown());
+                       state != SCAN_RUNNING, 1, 0);
     if (cp.msg_btn && I(cp.msg_btn, W_W) != bw)
-        widget_move_resize(cp.msg_btn, (375 - bw) / 2, SCAN_BTN_CY - UI_BTN_H / 2 - dy, bw,
-                           UI_BTN_H);
+        widget_move_resize(cp.msg_btn, (375 - bw) / 2, SCAN_BTN_CY - CTA_H / 2 - dy, bw, CTA_H);
     st.raw_ink = raw;
     stock_canvas_set_fill_color(canvas, fill);
     stock_canvas_set_text_color(canvas, text);

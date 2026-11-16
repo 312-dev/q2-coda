@@ -639,13 +639,6 @@ as its callers move onto it.
   .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx })` (`patch/ui_kit.h`, so every payload file reaches it); `answer(ctx, row, toggle_on)` runs
   once after the card has closed. One card at a time: `confirm` answers 0 while one is up.
 
-### Button
-
-<a id="button"></a>The shared button (`patch/ui_kit.c` `ui_button`): a pill 38 px tall, its label in Inter Medium 20
-with 24 px each side. **Primary** (a screen's main action: Software Update's Download and Install) is the accent with
-white words; **secondary** (a lesser action: Stop, Export Log) is Raised 2 `#2C2C2E` with Text Primary words. In focus
-it wears the [focus ring](#focus-ring): 2 px of Text Primary 3 px outside it.
-
 ### Focus ring
 
 <a id="focus-ring"></a>The user's universal rule (2026-11-16), for every screen with one or two buttons (the empty
@@ -679,7 +672,9 @@ is a filled Accent Blue capsule 38 px tall, its label Inter Medium 17 in white, 
 pair is two equal capsules 10 px apart (20 px each side, at least 120, the two within the 327 px text box), the second
 grey (`#2C2C2E`, Light Mode `#E5E5EA`) with its label in Text Primary. Selected, a button wears a 2 px Text Primary
 ring 3 px out, under the [focus rule](#focus-ring); pressed, its fill darkens a step (`#1A4DAD`; grey `#3A3A3C`,
-`#D1D1D6`). The first is selected when the page opens, and the wheel reaches it as a row; it has no selection bar.
+`#D1D1D6`). The first is selected when the page opens, and the wheel reaches it as a row; it has no selection bar. A page with one button of either kind draws it with `ui_button` (Software Update's offer, the
+library scan): **primary** (the screen's main action) is the accent capsule, **secondary** (a lesser action: Stop)
+the grey one.
 
 | Screen | Glyph | Title | Hint | Button |
 | --- | --- | --- | --- | --- |
@@ -1042,7 +1037,7 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
 
 <a id="update-library"></a>The library scan (Update Local Music, Scan Music Now, a folder's scan; approved as 27 v4 on
 2026-11-16, `patch/scan_page.c`) is the empty states' stack over stock's dialog: a 60 px figure, 14 px, the title in
-Inter Medium 20, the line in 15 px Text Secondary, 20 px, then the shared [button](#button), the whole centred from
+Inter Medium 20, the line in 15 px Text Secondary, 20 px, then the shared [button](#buttons), the whole centred from
 y 40 to the screen's end. The full status row stays, titled "Update Library": stock's dialog covers the bar, so the
 page paints it first, as Control Center does (`msg_title`).
 
@@ -1093,7 +1088,7 @@ the status row "Software Update" over mode pages as USB's:
 - **The offer** (29 v3): a 60 px accent circle (its glyph white, 30 px: `download-simple` from the internet,
   `file-arrow-down` from the card) centred on y 92, the update's name ("Q2 Muse 1.8.3", Inter Medium 22) on 142, "From
   the internet · 55.6 MB" or "From the SD card · 55.6 MB" (15 px Text Secondary) on 168, "Installed: 1.8.2" (13 px
-  Text Tertiary) on 188, and the [button](#button), selected, centred on 225: **Download and Install** or
+  Text Tertiary) on 188, and the [button](#buttons), selected, centred on 225: **Download and Install** or
   **Install**. When both have an update the internet's is offered and "Install from SD Card instead" sits under the
   button on y 266 (15 px Accent Text); with Wi-Fi off the card's is offered with "Turn on Wi-Fi to check online"
   (Settings > Wi-Fi) there. The wheel reaches the line after the button (an underline marks it); Centre acts on the
