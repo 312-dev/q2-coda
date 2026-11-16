@@ -489,8 +489,9 @@ static int slides(void *win) {
 }
 
 /* win's anim_hint becomes the theme's for kind (Reduce Motion's fade under that flag: ui_kit.c
- * motion_row), at load or open only. A theme with no hint for kind reads and writes nothing. Now Playing takes it as close_anim_hint, its open stays immediate. No
- * kind reaches a dialog: a clear one's snapshot would show black under its animation. */
+ * motion_row), at load or open only. A theme with no hint for kind reads and writes nothing. Now
+ * Playing takes it as close_anim_hint, its open stays immediate. No kind reaches a dialog: a clear
+ * one's snapshot would show black under its animation. */
 static void motion_hint(void *win, int kind) {
     const char *hint = motion_row(kind)->hint;
     if (!hint) return;

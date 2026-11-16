@@ -86,13 +86,13 @@ void about_rows(void *view) {
 
 /* Settings rows with a caption (docs/oled-design.md#list-row, approved as S3 on 2026-11-15): the
  * caption shows only under the selected row, which grows over CAP_MS (at once under Reduce Motion)
- * to hold its title and the caption's lines inside the accent's bar; every other captioned row stays one row high. The row's
- * button keeps its CAP_TOP px at the item's top (set_row mapped it once; a later layout leaves it
- * alone), so the title and switch stay where they were and the item's own height, which the
- * settings list stacks by and the bar spans (navigation.c paint_selection), makes the room. The
- * caption is wrapped at words to the bar's text column, at most CAP_LINES lines, measured at its
- * first paint. One page's captions at a time, CAP_MAX of them (caption_row drops any more): a row
- * from another view clears the table. */
+ * to hold its title and the caption's lines inside the accent's bar; every other captioned row
+ * stays one row high. The row's button keeps its CAP_TOP px at the item's top (set_row mapped it
+ * once; a later layout leaves it alone), so the title and switch stay where they were and the
+ * item's own height, which the settings list stacks by and the bar spans (navigation.c
+ * paint_selection), makes the room. The caption is wrapped at words to the bar's text column, at
+ * most CAP_LINES lines, measured at its first paint. One page's captions at a time, CAP_MAX of them
+ * (caption_row drops any more): a row from another view clears the table. */
 #define CAP_MAX 8
 #define CAP_LINES 3
 #define CAP_TOP 32    /* the row's own height, title and switch */

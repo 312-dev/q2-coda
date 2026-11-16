@@ -131,7 +131,8 @@ void feedback_toast_paint(void *w, void *canvas) {
     int pw = (int)(canvas_measure_text(canvas, s, n) + 0.5f) + 2 * PILL_PAD + glyph;
     if (pw > PILL_MAX) pw = PILL_MAX;
     rect_t pill = { (375 - pw) / 2, PILL_Y + ovm_shift(&tm.mo, TOAST_RISE), pw, PILL_H };
-    for (tm.n = 0; tm.n < n && tm.n < sizeof tm.text / sizeof *tm.text; ++tm.n) tm.text[tm.n] = s[tm.n];
+    for (tm.n = 0; tm.n < n && tm.n < sizeof tm.text / sizeof *tm.text; ++tm.n)
+        tm.text[tm.n] = s[tm.n];
     tm.px = px, tm.face = face;
     tk_snprintf(tm.glyph, sizeof tm.glyph, "%s", glyph ? pill_glyph : "");
     if (I(line, W_Y) != pill.y || I(line, W_W) != pw - glyph) {
@@ -145,7 +146,8 @@ void feedback_toast_paint(void *w, void *canvas) {
     }
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     fill_box(canvas, &pill, RGBA(flip_if(ipod_light(), PILL_RGB)), PILL_R);
-    if (glyph) paint_art(w, canvas, pill_glyph, pill.x + PILL_PAD, pill.y + (PILL_H - PILL_GLYPH) / 2);
+    if (glyph)
+        paint_art(w, canvas, pill_glyph, pill.x + PILL_PAD, pill.y + (PILL_H - PILL_GLYPH) / 2);
     stock_canvas_set_fill_color(canvas, fill);
 }
 
@@ -161,7 +163,8 @@ void feedback_toast_leave(void *w, void *canvas) {
     canvas_set_font(canvas, tm.face, (unsigned)px);
     int pw = (int)(canvas_measure_text(canvas, tm.text, tm.n) + 0.5f) + 2 * PILL_PAD + glyph;
     if (pw > PILL_MAX) pw = PILL_MAX;
-    rect_t pill = { (375 - pw) / 2, PILL_Y + ovm_shift(&tm.mo, TOAST_SINK) - I(w, W_Y), pw, PILL_H };
+    rect_t pill = { (375 - pw) / 2, PILL_Y + ovm_shift(&tm.mo, TOAST_SINK) - I(w, W_Y), pw,
+                    PILL_H };
     fill_box(canvas, &pill, a << 24 | (RGBA(flip_if(ipod_light(), PILL_RGB)) & 0xffffffu), PILL_R);
     unsigned raw = ui_ink_raw(1);
     ui_line_w(canvas, tm.text, tm.n, pill.x + glyph, pill.w - glyph, pill.y + PILL_H / 2, 1,
@@ -953,8 +956,8 @@ void confirm_bar_dim(void *w, void *canvas) {
     void *bar = *(void *const *)system_bar, *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
     if (!cf.dialog || w != bar || !lcd) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
-    stock_canvas_set_fill_color(canvas, cf.stock ? CARD_SCRIM
-                                                 : (unsigned)ovm_alpha(&cf.mo, CARD_SCRIM >> 24) << 24);
+    stock_canvas_set_fill_color(
+        canvas, cf.stock ? CARD_SCRIM : (unsigned)ovm_alpha(&cf.mo, CARD_SCRIM >> 24) << 24);
     canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
     stock_canvas_set_fill_color(canvas, fill);
 }

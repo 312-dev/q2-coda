@@ -57,7 +57,8 @@ static int tilt_now(void) {
     unsigned t = (unsigned)time_now_ms() - tilt.at;
     if (t >= TILT_SPRING_MS) return 0;
     /* cubic out, cubic-bezier(.2,0,0,1) near enough */
-    return tilt.from * (1000 - motion_ease((int)(t * 1000 / TILT_SPRING_MS), EASE_CUBIC_OUT)) / 1000;
+    return tilt.from * (1000 - motion_ease((int)(t * 1000 / TILT_SPRING_MS), EASE_CUBIC_OUT)) /
+           1000;
 }
 
 /* Each UI loop pass: the bar's box painted again while its lean changes; a lift starts a spring. */

@@ -170,11 +170,16 @@ int motion_ease(int t, int ease) {
     if (t >= 1000) return 1000;
     int u = 1000 - t;
     switch (ease) {
-    case EASE_LINEAR: return t;
-    case EASE_QUAD_IN: return t * t / 1000;
-    case EASE_QUAD_OUT: return 1000 - u * u / 1000;
-    case EASE_CUBIC_IN: return t * t / 1000 * t / 1000;
-    default: return 1000 - u * u / 1000 * u / 1000; /* EASE_CUBIC_OUT */
+    case EASE_LINEAR:
+        return t;
+    case EASE_QUAD_IN:
+        return t * t / 1000;
+    case EASE_QUAD_OUT:
+        return 1000 - u * u / 1000;
+    case EASE_CUBIC_IN:
+        return t * t / 1000 * t / 1000;
+    default:
+        return 1000 - u * u / 1000 * u / 1000; /* EASE_CUBIC_OUT */
     }
 }
 static struct {
