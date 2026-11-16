@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build Q2-Pod-User-Guide.pdf from guide.html with headless Chromium.
+"""Build Q2-Muse-User-Guide.pdf from guide.html with headless Chromium.
 
 Two passes: the first finds which page each heading lands on (via hidden
 @@id@@ markers read back with pdftotext), the second fills in the contents.
@@ -31,6 +31,6 @@ pages = {m: i + 1 for i, t in enumerate(text.split("\f")) for m in re.findall(r"
 missing = set(re.findall(r"\{\{p:([^}]+)\}\}", src)) - pages.keys()
 if missing:
     sys.exit(f"headings not found in PDF: {sorted(missing)}")
-out = Path(sys.argv[1]) if len(sys.argv) > 1 else here / "Q2-Pod-User-Guide.pdf"
+out = Path(sys.argv[1]) if len(sys.argv) > 1 else here / "Q2-Muse-User-Guide.pdf"
 render(re.sub(r"\{\{p:([^}]+)\}\}", lambda m: str(pages[m[1]]), src), out)
 print(f"wrote {out}")

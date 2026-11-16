@@ -357,12 +357,14 @@ static int un_poll(const void *info) {
     return 8; /* RET_REPEAT */
 }
 
-/* The level bars' frame, while the page is in front and the song plays */
+/* The level bars' frame, while the page is in front and the song plays; MO_DECOR (ui_kit.h), so
+ * still under Reduce Motion */
 static int un_bars_due(const void *info) {
     (void)info;
     if (!un.page) return 0;
-    if (window_manager_get_top_window(window_manager()) != un.page || mclGetPlayStatus() != 2)
-        return 8; /* RET_REPEAT: still, the frame stays */
+    if (window_manager_get_top_window(window_manager()) != un.page || mclGetPlayStatus() != 2 ||
+        !motion_ms(UN_BARS_MS, MO_DECOR))
+        return 8; /* RET_REPEAT: still, the frame stays (Reduce Motion's too) */
     ++un.frame;
     if (un.now) widget_invalidate_force(un.now, (void *)0);
     return 8;

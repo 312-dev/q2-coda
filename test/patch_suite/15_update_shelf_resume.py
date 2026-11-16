@@ -118,7 +118,7 @@ assert m.labels()==['App Store','Check for Updates',BLANK,'Rockbox','Install','S
 m.close(); m.wifi=3; m.rockbox_mode=0o100755; m.dirs['/mnt/mmc/.spotify']=[]; apps_open(m)
 assert m.labels()==['App Store','Check for Updates','Checking…','Rockbox','Update','Rockbox Themes','Install','Spotify','Installed','Deezer','Install','Soulseek','Install','File Browser','Install','Subsonic','Install','Podcasts','Install','Live Music Archive','Install','Buddy','Install','Groovebox','Install','AirPlay','Install']+NOTE
 m.listed=shelf_list(**{'DiamondBond/q2-librespot':'q2-v9.9','DiamondBond/q2-rockbox':'v3.2'}); m.reply=ZIP; shelf_job(m)
-assert m.opts[10002]==LIST_URL and m.opts[10018]=='Q2Pod'  # the list, the check's one request
+assert m.opts[10002]==LIST_URL and m.opts[10018]=='Q2Muse'  # the list, the check's one request
 assert m.opts[10065]=='/etc/scrobble-ca.pem' and m.opts[64]==1 and m.opts[81]==2 and 20108 not in m.opts
 assert m.labels()[8]=='Update' and m.labels()[2]==BLANK and '/tmp/q2-shelf.json' not in m.files  # the pin's q2-v9.9 against the card's tag
 assert m.toasts[-1][3]=='1 app can be updated'; passed()  # the opening check's end, the page on top
@@ -209,8 +209,9 @@ class ResumeMachine(QueueMachine):
         name=name[2:].split('@')[0]; a,b,c,d=[u.reg_read(r) for r in REGS]; ret=0; self.calls.append((name,a,b,c))
         if name=='fopen':
             path,mode=self.text(a),self.text(b)
-            # the boot logo's lit-only mount poll; dark, any open counts
-            self.opens+=path!=RECORD and (path!='/proc/mounts' or not self.u.mem_read(syms['g_backlight_status'],1)[0])
+            # the boot logo's lit-only mount poll, and Guest Play's state read (guest.c guest_poll, each GUEST_READ_MS
+            # from the headset poll whether or not a guest plays); dark, any other open counts
+            self.opens+=path not in (RECORD,'/tmp/q2-guest.state') and (path!='/proc/mounts' or not self.u.mem_read(syms['g_backlight_status'],1)[0])
             if mode=='rb' and path not in self.files: ret=0
             else: ret=0x2000000+len(self.calls); self.open[ret]=[path,mode,0,b'' if mode=='wb' else self.files.get(path,b'')]
         elif name=='fread':
@@ -346,7 +347,7 @@ playing(m,0,200,pos=1,n=5); m.poll(150,200); playing(m,151,200,n=40); assert len
 playing(m,0,20,pos=2,n=25); assert len(counts(m))==1; passed()  # too short
 playing(m,0,3600,pos=1,n=242); assert counts(m)[0]==(fnv('/p/B'),1); passed()  # 4 minutes of a long track
 log=m.files['/mnt/mmc/.scrobbler.log'].decode().split('\n')  # the same listens, scrobbled
-assert log[:3]==['#AUDIOSCROBBLER/1.1','#TZ/UTC','#CLIENT/Q2 Pod'] and log[-1]=='' and len(log)==7
+assert log[:3]==['#AUDIOSCROBBLER/1.1','#TZ/UTC','#CLIENT/Q2 Muse'] and log[-1]=='' and len(log)==7
 assert log[3]==f'Artist\tAlbum\tA\t\t200\tL\t{1700000000-100}\t' and log[4]==log[3] and log[5].startswith('Artist\tAlbum\tB\t\t3600\tL\t'); passed()
 m=ResumeMachine(); m.epoch=2**32-1000; playing(m,0,200,pos=0,n=101); playing(m,100,200,n=50)  # 2106: time() wrapped
 assert m.files['/mnt/mmc/.scrobbler.log'].decode().split('\n')[3].endswith(f'\tL\t{2**32-1000-100}\t'); passed()
@@ -744,7 +745,7 @@ m.byte(syms['g_backlight_status'],0)
 m.byte(O['BOOT_KEY_GUARD'],1); assert not wake(DOWN,gap=1000) and not wake(UP,gap=50) and m.u.mem_read(O['BOOT_KEY_GUARD'],1)==b'\0'
 assert wake(DOWN,gap=100) and m.u.mem_read(O['BOOT_KEY_GUARD'],1)==b'\0' and wake(UP,gap=50)
 assert click(4)==[(0,'Q2POD','WAKEDOUBLE')]; passed()
-# Stock V1.36's Show Navigation Bar and Wheel Function stay where Q2 Pod's theme and wheel need them (build.py
+# Stock V1.36's Show Navigation Bar and Wheel Function stay where Q2 Muse's theme and wheel need them (build.py
 # NAV_SHOWN, WHEEL_MODE): config_init's own code, from its NAVHIDE read to past its WHEELMODE store, leaves the bar
 # shown and Volume Mode whatever the keys hold, missing included (stock reads a missing WHEELMODE as 0). Neither is written.
 for held in ({},{'WHEELMODE':'0','NAVHIDE':'1'},{'WHEELMODE':'1','NAVHIDE':'0'},{'WHEELMODE':'7','NAVHIDE':'7'}):
@@ -777,7 +778,7 @@ def home_return(handler):
 assert home_keyup(True)[0]==[] and home_keyup(False)[0]==[(O['EVT_KEY_UP'],home_keyup(True)[1])]
 assert home_return(home_keyup(True)[1])==(0xb,['on_home_playing_onclick']); passed()
 # Buttons lock acts only with the screen off, as on V1.32 (build.py KEYLOCK_LIT): stock V1.36's on_wm_keyup_before_fun
-# applies it on the lit lock window too, where Q2 Pod's wheel and keys already have their own rules. Its own test, from
+# applies it on the lit lock window too, where Q2 Muse's wheel and keys already have their own rules. Its own test, from
 # the backlight's byte, with Next under lock mode 1: locked, it leaves by the STOP exit; else it goes on to 0x4f276c.
 def lock_applies(patched,lit,window,on=1):
     c=Machine(patched)
@@ -852,14 +853,14 @@ for patched in (True,False):
     started=b.call(address=syms['btinput_thread_run'],args=(b.string('/dev/input/event4'),0x1234,0,0),gap=0)
     assert [c[0] for c in b.calls if c[0] in ('open@GLIBC_2.0','tk_thread_create')]==([] if patched else ['open@GLIBC_2.0','tk_thread_create']) and (not started or not patched)
 passed()
-# What stock's own key-up handlers do with a key ringnav lets through, on the pages and dialogs Q2 Pod keeps: stop it,
+# What stock's own key-up handlers do with a key ringnav lets through, on the pages and dialogs Q2 Muse keeps: stop it,
 # or pass it on to on_wm_keyup_fun (stock's volume, screen off and track keys), and the stock function that acts on it.
 # V1.34 changed two things here, in functions that hold no patch site: the toast and the confirm stop the wheel and
 # Centre themselves (how the Shut Down prompt lost its Centre, #303), and with the screen off a handler passes every
 # key on untouched, as the volume dialog's did before VOL_DARK (above). V1.36 changed a third: Now Playing's handler
 # takes Centre, for a screen-off of its own 350 ms on, which NP_CENTRE undoes (below). Each runs alone, lit then dark,
 # with g_wheelmode as WHEEL_MODE holds it; whatever it calls answers 0 (no widget, nothing playing) and is named if
-# stock exports it, widget lookups aside. Q2 Pod patches none of the others, so stock's own answer the same.
+# stock exports it, widget lookups aside. Q2 Muse patches none of the others, so stock's own answer the same.
 def keyups(patched,handler):
     """{key: (lit, dark)} for each key handler doesn't pass untouched both ways: the functions it calls, then stop if it stops the key."""
     c=Machine(patched); c.handlers.clear(); end=handler+4; names={a:n for n,a in syms.items()}

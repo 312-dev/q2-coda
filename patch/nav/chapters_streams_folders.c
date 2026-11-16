@@ -431,7 +431,7 @@ void ringnav_folder_top(void) {
 
 /* A folder level's list, stock's table on the open page, pushes in as a page_list level does. */
 static void folder_push(int dir) {
-    if (!theme()->motion[MOTION_INPLACE].ms) return;
+    if (!motion_row(MOTION_INPLACE)->ms) return;
     void *table =
         widget_lookup(window_manager_get_top_window(window_manager()), "tableview_folder", 1);
     if (table) page_push(widget_get_child(table, 0), dir);
@@ -536,10 +536,10 @@ int ringnav_about(void *win, void *ctx) {
                              STOCK_VERSION);
         void *button = list_button(view);
         char v[sizeof Q2POD_VERSION];
-        const char *pod = strstr(Q2POD_VERSION, " Pod");
+        const char *pod = strstr(Q2POD_VERSION, " Muse");
         tk_snprintf(v, sizeof v, "%s", Q2POD_VERSION);
         if (pod) /* "1.8.2" then its " dev ..." or " beta 2": the row's name is the product's */
-            tk_snprintf(v + (pod - Q2POD_VERSION), sizeof v - (pod - Q2POD_VERSION), "%s", pod + 4);
+            tk_snprintf(v + (pod - Q2POD_VERSION), sizeof v - (pod - Q2POD_VERSION), "%s", pod + sizeof " Muse" - 1);
         about_label(button, 10, 166, "s_scrlabel_white24l", PRODUCT_NAME);
         about_label(button, 176, 149, "s_scrlabel_white20r", v);
         widget_restack(P(button, W_PARENT), 2);

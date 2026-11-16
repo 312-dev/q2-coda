@@ -80,6 +80,55 @@ void lib_art_of(const char *path, char *art, size_t cap) {
     akey(path, art, cap);
 }
 
+/* A card app's streaming song plays from its temporary download, /mnt/mmc/.<app>/stream/<hash>/original/0/<title>
+ * [<sid>].<suffix> (the app's stream cache), with no library record (the shim's id is 0) and the file's name as its
+ * title. Its server id is between the name's last brackets; app gets ".<app>". 0 for any other path. */
+static int stream_sid(const char *path, char *app, size_t appcap, char *sid, size_t cap) {
+    if (!path || strncmp(path, "/mnt/mmc/.", 10)) return 0;
+    const char *slash = strchr(path + 10, '/');
+    if (!slash || strncmp(slash, "/stream/", 8)) return 0;
+    const char *name = strrchr(path, '/') + 1, *o = strrchr(name, '['), *c = o ? strchr(o, ']') : 0;
+    if (!c || c == o + 1 || (size_t)(c - o) > cap) return 0;
+    for (const char *k = o + 1; k < c; ++k)
+        if (!(*k >= '0' && *k <= '9') && !((*k | 32) >= 'a' && (*k | 32) <= 'z') && *k != '-' && *k != '_') return 0;
+    snprintf(sid, cap, "%.*s", (int)(c - o - 1), o + 1);
+    snprintf(app, appcap, "%.*s", (int)(slash - (path + 9)), path + 9);
+    return 1;
+}
+
+/* The catalogue's row for a streaming song's file (stream_sid): its id, tags, length and album art id, as the
+ * server song the Library lists; 0 when path is not a stream or the catalogue does not have it. */
+int lib_stream_song(const char *path, lib_song_t *o) {
+    char app[64], sid[64], p[256], like[80];
+    memset(o, 0, sizeof *o);
+    if (!stream_sid(path, app, sizeof app, sid, sizeof sid)) return 0;
+    sqlite3 *c = 0;
+    sqlite3_stmt *st;
+    int ok = 0;
+    if (sqlite3_open_v2(crc_path(p, sizeof p, CAT), &c, SQLITE_OPEN_READONLY, 0) == SQLITE_OK &&
+        sqlite3_prepare_v2(c, "select s.id, ifnull(nullif(s.name,''),s.filename), ifnull(s.songer,''), "
+                              "ifnull(s.album,''), ifnull(m.seconds,0), ifnull(s.track,0), s.fileurl "
+                              "from servermeta m join servertable s on s.fileurl = m.fileurl "
+                              "where m.sid = ?1 and m.fileurl like ?2 limit 1", -1, &st, 0) == SQLITE_OK) {
+        snprintf(like, sizeof like, "/mnt/mmc/%s/%%", app);
+        sqlite3_bind_text(st, 1, sid, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 2, like, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            o->id = sqlite3_column_int(st, 0);
+            snprintf(o->title, sizeof o->title, "%s", sqlite3_column_text(st, 1));
+            snprintf(o->artist, sizeof o->artist, "%s", sqlite3_column_text(st, 2));
+            snprintf(o->album, sizeof o->album, "%s", sqlite3_column_text(st, 3));
+            o->secs = sqlite3_column_int(st, 4);
+            o->track = sqlite3_column_int(st, 5);
+            akey((const char *)sqlite3_column_text(st, 6), o->art, sizeof o->art);
+            ok = o->id > 0;
+        }
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(c);
+    return ok;
+}
+
 /* The sort form of a name (q2bridge.py norm): trimmed, ASCII lowercased, a leading "the " dropped. */
 static int norm(const char *s, char *out, int cap) {
     if (!s) s = "";
@@ -1048,6 +1097,32 @@ static int flac_picture(const char *path, cover_t *c) {
     return found;
 }
 
+/* A server album with no covers/<album>.jpg: the picture in a song of it streamed lately, from the app's stream cache
+ * (stream_sid's files), the one the Q2 Muse shows while it plays. */
+static int stream_picture(const char *art, const char *app, size_t appn, cover_t *c) {
+    sqlite3_stmt *st;
+    int found = 0;
+    if (sqlite3_prepare_v2(db, "select m.sid from s2 join cat.servermeta m on m.fileurl = s2.url where s2.ak = ?1",
+                           -1, &st, 0))
+        return 0;
+    sqlite3_bind_text(st, 1, art, -1, SQLITE_TRANSIENT);
+    while (!found && sqlite3_step(st) == SQLITE_ROW) {
+        const char *sid = (const char *)sqlite3_column_text(st, 0);
+        char rel[200], p[512];
+        glob_t g;
+        int plain = sid && *sid; /* a glob pattern's own characters, or a path's, would widen it */
+        for (const char *k = sid; plain && *k; ++k) plain = !strchr("*?[]\\/", *k);
+        if (!plain) continue;
+        snprintf(rel, sizeof rel, "/mnt/mmc/%.*s/stream/*/original/0/*\\[%s\\].*", (int)appn, app, sid);
+        if (glob(crc_path(p, sizeof p, rel), 0, 0, &g)) continue;
+        for (size_t i = 0; i < g.gl_pathc && !found; ++i)
+            if (flac_picture(g.gl_pathv[i], c)) snprintf(c->path, sizeof c->path, "%s", g.gl_pathv[i]), found = 1;
+        globfree(&g);
+    }
+    sqlite3_finalize(st);
+    return found;
+}
+
 static int cover_find(const char *art, int max_px, cover_t *c) {
     sqlite3_stmt *st;
     char url[400] = "", aartist[256] = "", album[256] = "", artist[256] = "";
@@ -1084,7 +1159,7 @@ static int cover_find(const char *art, int max_px, cover_t *c) {
         crc_path(p, sizeof p, rel);
         long n = file_len(p);
         if (n > 0) { snprintf(c->path, sizeof c->path, "%s", p); c->len = n; return 1; }
-        return 0;
+        return stream_picture(art, app, appn, c);
     }
     static const char *names[] = {"cover.jpg", "folder.jpg", "front.jpg", "cover.png", "folder.png"};
     const char *slash = strrchr(url, '/');

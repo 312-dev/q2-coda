@@ -373,12 +373,14 @@ HOLD_BACK_PX = 20  # search_strip.c's Return-held card: Phosphor arrow-u-up-left
 # The empty state (feedback.c empty_state): its glyph in outline, Phosphor's regular weight at EMPTY_PX, in Text
 # Secondary per half (_d, _l), by the glyph a page names (empty_t.glyph; docs/oled-design.md#empty-and-offline has the
 # pages; the user's outline style, 2026-11-16). Phosphor has no sd-card: the card's is its memory chip, as the
-# mock-up's fallback (mock_placeholders.py FALLBACK).
+# mock-up's fallback (mock_placeholders.py FALLBACK). Nor a heart-slash: Favorites' is q2-coda's own, traced from the
+# approved mock-up (assets/icons/q2coda/heart-slash.svg).
 EMPTY_PX = 60
 EMPTY_GLYPHS = {g: g for g in (
     'cards', 'music-notes', 'vinyl-record', 'microphone-stage', 'music-notes-simple', 'guitar', 'folder', 'playlist',
-    'heart', 'clock-counter-clockwise', 'chart-bar', 'sparkle', 'timer', 'calendar-blank', 'star', 'magnifying-glass',
-    'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile')} | {'sd-card': 'memory'}
+    'clock-counter-clockwise', 'chart-bar', 'sparkle', 'timer', 'calendar-blank', 'star', 'magnifying-glass',
+    'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile')} | {'sd-card': 'memory',
+    'heart-slash': 'q2coda/heart-slash'}
 USB_TOASTS = {'unplugged': ('plug-fill', token('secondary')), 'ejected': ('check-circle-fill', token('positive')), 'audio': ('speaker-hifi-fill', 0xffffff)}
 # The status row's battery (list_marks.c battery_slim): charging, Phosphor's lightning, too weak a charger its warning,
 # fill weight at BATT_GLYPH_PX in Text Primary, with a BATT_GLYPH_GAP px gap in the Canvas cut round it (iOS's way of

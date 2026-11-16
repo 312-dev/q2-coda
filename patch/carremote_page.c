@@ -421,9 +421,8 @@ static int cr_page_show(const void *ctx) {
     cp.sel = -1;
     ringnav_select(view, sel, children);
     cp.view = view;
-    /* none: the empty state under the switch (docs/oled-design.md#empty-and-offline), its button Pair a Phone,
-     * selected as the page opens. ponytail: the compact form (no glyph) for a state under rows is not in the
-     * shared component yet, so this one keeps the glyph; under the selected switch's caption it still fits. */
+    /* none: the empty state under the switch, in its compact form as rows stand above it (feedback.c
+     * empty_compact; docs/oled-design.md#empty-and-offline), its button Pair a Phone, selected as the page opens */
     static const empty_t none = { "car-profile", "No Paired Phones", "Open Q2 Muse Remote on your phone to pair",
                                   "Pair a Phone" };
     int empty = on && !n;

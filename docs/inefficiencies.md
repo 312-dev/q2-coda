@@ -157,9 +157,9 @@ Entries 7 to 17 are costs the code marks itself.
 ### 13. Ratings compare every song with every rated one (resolved)
 
 - **Where:** `rate_all` in `patch/ratings.c`, inlined into `rated_open`: once per Ratings list opened, on the UI thread.
-- **Measured:** the scan compared each song with every favourite and kept slot, 12 MIPS instructions per entry that did not match (`-Oz`, `llvm-objdump` of `rated_open`). At 20,000 songs and 1,000 rated that is 240,000,000 instructions, about 480 ms at 5 x 10^8 a second.
-- **State:** the favourites and kept slots are sorted once (`qsort`, by key above the hearts' three bits, then by their place in the old scan), and each song binary-searches its run and reads it in that order, so every song's hearts are the scan's. A search step is 16 instructions: about 180 a song at 1,000 rated, 3,600,000 for 20,000 songs, plus the sort (about 10,000 comparisons of an 11-instruction comparator through libc's `qsort`), under 10 ms in all.
-- **Guard:** the `rate_all` cases in `test/fw/test_nav_library_pages.py` (favourite and kept, a damaged table's repeated keys, slots of 5 to 7 hearts, and 300 songs against a model of the scan).
+- **Measured:** the scan compared each song with every favorite and kept slot, 12 MIPS instructions per entry that did not match (`-Oz`, `llvm-objdump` of `rated_open`). At 20,000 songs and 1,000 rated that is 240,000,000 instructions, about 480 ms at 5 x 10^8 a second.
+- **State:** the favorites and kept slots are sorted once (`qsort`, by key above the hearts' three bits, then by their place in the old scan), and each song binary-searches its run and reads it in that order, so every song's hearts are the scan's. A search step is 16 instructions: about 180 a song at 1,000 rated, 3,600,000 for 20,000 songs, plus the sort (about 10,000 comparisons of an 11-instruction comparator through libc's `qsort`), under 10 ms in all.
+- **Guard:** the `rate_all` cases in `test/fw/test_nav_library_pages.py` (favorite and kept, a damaged table's repeated keys, slots of 5 to 7 hearts, and 300 songs against a model of the scan).
 
 ### 14. An EPUB's spine is quadratic in its items (resolved)
 
@@ -213,7 +213,7 @@ Entries 7 to 17 are costs the code marks itself.
 
   | Open    | Phase                                                                   |              Before |              After |
   | ------- | ----------------------------------------------------------------------- | ------------------: | -----------------: |
-  | all     | Centre's release to the load (the double-press wait, `DOUBLE_CLICK_MS`) |             250-270 |            250-270 |
+  | all     | Center's release to the load (the double-press wait, `DOUBLE_CLICK_MS`) |             250-270 |            250-270 |
   | Songs   | `getAllMusic(0)`: exec and row callback                                 |             220-530 |            225-270 |
   | Songs   | its name sort                                                           |         1,250-2,740 |        0 once kept |
   | Songs   | load end to first paint                                                 |              40-120 |              40-50 |
@@ -225,7 +225,7 @@ Entries 7 to 17 are costs the code marks itself.
   With 10,000 server songs beside them (Local + Server), Songs' sort was 1,860-1,970 ms of a 2.4-2.6 s load; kept, the load took 470-530 ms. Albums' grouping was 330-350 ms there.
 
 - **State:** the name sort's order is kept, in RAM and on the card ([internals](internals.md#name-order)): the first Songs open after a boot took 534 ms from the load to the first paint, from 1,855-2,930 ms. A load whose records changed (a scan, a server import or a deletion that changed them) still sorts once. Nothing repeats a query within one open.
-- **Decision:** three indexes are made at the end of a full scan when `/mnt/data` has 8 MB free (the album grouping's three terms, `album`, and the album-artist expression; [internals](internals.md#coverflow), Indexes): back to back in this emulator the grouping went from 240-347 ms to 171-273 ms and both Unknown checks from 37-67 ms to 0-2 ms, for 1.69 MB of `/mnt/data` (17.7 MB) at 20,103 songs, more with real paths, and 0.5-1.6 s at the end of the scan under QEMU. The rest left as is. The double-press wait is Centre's (a second press turns the screen off). A sort that still runs (a load whose records changed) runs on a thread of its own with stock's own call and comparator, the UI thread drawing a spinner over the screen meanwhile; the wait itself is unchanged.
+- **Decision:** three indexes are made at the end of a full scan when `/mnt/data` has 8 MB free (the album grouping's three terms, `album`, and the album-artist expression; [internals](internals.md#coverflow), Indexes): back to back in this emulator the grouping went from 240-347 ms to 171-273 ms and both Unknown checks from 37-67 ms to 0-2 ms, for 1.69 MB of `/mnt/data` (17.7 MB) at 20,103 songs, more with real paths, and 0.5-1.6 s at the end of the scan under QEMU. The rest left as is. The double-press wait is Center's (a second press turns the screen off). A sort that still runs (a load whose records changed) runs on a thread of its own with stock's own call and comparator, the UI thread drawing a spinner over the screen meanwhile; the wait itself is unchanged.
 
 ## Duplicated tables kept in step by hand
 
