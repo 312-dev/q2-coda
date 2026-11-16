@@ -1159,7 +1159,7 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - Settings > Storage and its Downloads (`patch/storage.c` `storage_paint`): the storage bar and its legend, the
   items' marks, the values beside their chevrons and the footers; and the song rows' marks for where a song lives
   (`catalogue.c` `catalogue_row_mark`).
-- The toast, the confirm as a dialog page and the empty note (`patch/feedback.c`), and the confirmation after a shuffle.
+- The toast, the confirm as the confirmation card and the empty note (`patch/feedback.c`), and the confirmation after a shuffle.
 - The confirmation card (`patch/feedback.c` `confirm`, [Confirmation card](#confirmation-card)).
 - One flat selection bar for pages that paint their own rows (`patch/list_marks.c` `sel_bar_flat`: Sleep Timer's
   switch row, Scan Music Now, the slider page's and the EQ's rows, Add Songs), the theme's inset and radius.
