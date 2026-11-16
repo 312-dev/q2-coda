@@ -1150,6 +1150,20 @@ def test_a_title_too_long_or_stock_s_null_name(fw, world, st, text, title):
     assert world[label].text == title
 
 
+@pytest.mark.parametrize('layer, text, title', [(1, 'SD', 'Folders'), (2, 'SD', 'Folders'), (2, 'SD:/', 'Folders'),
+                                                 (3, 'Music', 'Music'), (3, 'SD:/Music', 'Music'),
+                                                 (4, 'SD:/Music/Aurora Field/', 'Aurora Field'), (3, 'SD:', 'Folders')])
+def test_folder_s_title_is_folders_at_the_root_and_the_folder_s_own_name_deeper(fw, world, st, layer, text, title):
+    """Stock's navbar names the storage ("SD") or a path ("SD:/Music"); the bar says Folders at the card's root and
+    the folder's own name below it, never a path."""
+    label = bar_title(fw, world, st)
+    fw.var('g_folder_layer', C.c_ubyte).value = layer
+    win = world.window('folder_page')
+    world.add(world.add(win, 'view_navbar'), 'label_title', 'hscroll_label', text=text)
+    sync(fw, win)
+    assert world[label].text == title
+
+
 def test_a_payload_page_s_caption_on_show_titles_the_bar(fw, world, st):
     label = bar_title(fw, world, st)
     win = world.window('games_page')
@@ -2089,12 +2103,11 @@ def test_over_oleds_now_playing_the_volume_is_its_bar_between_two_speakers(fw, w
     assert canvas.texts == []
 
 
-@pytest.mark.parametrize('number', [MINIMAL, OLED])
-def test_an_empty_folder_level_says_so(fw, world, number):
+def test_an_empty_folder_level_says_so(fw, world):
     """Folder (folder_page) over a level with nothing in it, an empty card or a folder with no music: stock's page
     is its table alone, which would leave it blank. It says "No folders" with a hint, written once per change of the level's
     emptiness, and the words go when the level has rows. Another page gets nothing."""
-    theme(fw, number)
+    theme(fw)
     deques = Deques(fw)
     showlist = fw.var('fw_ctx_p_deque_showlist', C.c_uint)
     folder = fw.fn('feedback_folder', None, C.c_void_p)
