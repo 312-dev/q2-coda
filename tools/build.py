@@ -116,6 +116,8 @@ HOOKS = {
     # the firmware update's dialog, which stops the player before it flashes and reboots
     'device_reboot': (0x502004, 'ringnav_reboot', 'reboot'),
     'dialog_checkfw_dialog_init': (0x49982c, 'ringnav_checkfw', 'checkfw'),
+    # SD Card Update (patch/sw_update.c): the card's update.tar checked, then stock's checkfw_dialog flashes it
+    'fwupdate_tf': (0x4c7eb4, 'ringnav_fwupdate_tf', None),
     'mclLoadPlayList': (0x5bcfc8, 'ringnav_load', 'load'),
     'mclNextSong': (0x5c063c, 'ringnav_next', 'next'),
     # Lyrics: a local track without a .lrc takes its LYRICS tag (lyrics.c ringnav_lyric)
@@ -1720,7 +1722,9 @@ FUNCTIONS = {
  'check_forbid_play_no_headset': ('int', 'int'),
  'on_wm_keyup_fun': ('int', 'void *, void *'),  # stock key-up: np_single replays a centre release
  'get_wifisignal': ('int', 'void'),  # the status bar's Wi-Fi bars, 1-4; -1 when not connected
- 'fwupdate_tf': ('int', 'void'),  # System Update's TF card update: battery check, confirm, flash
+ 'fwupdate_tf': ('int', 'void'),  # System Update's SD Card Update (sw_update.c ringnav_fwupdate_tf)
+ # its stock checks: -15 battery under 16% with no cable, -2 no card, -11 no file, -12 under 0.1 GB free, else 1
+ 'check_updatefw_exist': ('int', 'const char *, const char *'),
  'widget_set_tr_text': ('int', 'void *, const char *'),
  # Podcasts and Audiobooks (navigation.c): folder_page's reload of g_folder_path, title and list rebuild
  'folder_reload_data': ('int', 'void'),
@@ -1818,7 +1822,7 @@ PRIVATE_FUNCTIONS = {
     "folder_click": HOOKS['folder_click'][0],  # folder_page's row click (folder_enter, then a file's queue)
     "np_info": 0x53bc78,  # Now Playing's info page labels, from the track (NP_INFO_CALL)
     "ab_x": 0x53b9d8,  # an A-B marker's x, on the boot set's np_bar_x and np_bar_w (AB_X_CALLS)
-    "fwupdate_tf": 0x4c7eb4,  # systemset_fwupdate_page's row 0 click (0x4c84cc): stock's TF card update
+    "fwupdate_tf": HOOKS['fwupdate_tf'][0],  # systemset_fwupdate_page's row 0 click (0x4c84cc): sw_update.c's SD Card Update
     # Smart Wi-Fi's held stock actions (smart_wifi.c smart_hold)
     "stream_row": HOOKS['stream_row'][0],  # Streaming's Tidal row: atoi of the button's name
     "netservice_row": HOOKS['netservice_row'][0],  # Network service's DLNA, AirPlay and Wi-Fi transfer
@@ -1875,7 +1879,8 @@ CONTEXT_DATA = {'bt_showcoding': 4, 'g_memory_info': 3476, 'g_folder_path': 1024
 PAYLOAD_WINDOWS = {'searchstrip_page', 'playlistedit_page', 'playlistsongs_page', 'addsongs_page', 'chapters_page', 'coverflow_page', 'photos_page', 'books_page', 'games_page', 'mostplayed_page', 'shuffle_page', 'upnext_page', 'ratings_page', 'era_page', 'era_albums_page', 'rated_page', 'longsongs_page', 'spotify_page',
                    'spotbrowse_page', 'radio_page', 'radionp_page', 'streamconf_page', 'tidal_downloads', 'apps_page',
                    'addon_page', 'app_songs', 'qrcode_page', 'battery_page', 'carremote_page', 'carpair_page', 'artistrows_page',
-                   'storage_page', 'downloads_page', 'usbchoose_page', 'usbdebug_page', 'adbauth_page'}
+                   'storage_page', 'downloads_page', 'usbchoose_page', 'usbdebug_page', 'adbauth_page',
+                   'swupdate_page', 'swconfirm_page'}
 ICONS = [f'menu_{c}{s}.png' for c in ('coverflow', 'rockbox') for s in ('', 'down')]
 # The stock EQ preset page and the images only it and the stock equalizer page show: the PEQ
 # editor clears that page's widgets on init and never binds the preset button, so none can load.
@@ -1922,7 +1927,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'upnext.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'upnext.c', 'sw_update.c']
 
 def compile_payload(out):  # pragma: no mutate block
     """Compile and link the payload."""
@@ -2111,6 +2116,8 @@ def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
     header += [f'#define STOCK_VERSION "{STOCK_VERSION}"', f'#define Q2POD_VERSION "{VERSION} Pod{f" dev {dev}" if dev else f" beta {BETA}" if BETA else ""}"',
                f'#define Q2POD_TAG "{"" if dev else VERSION}"',  # netupdate.c: the release tag, none when --dev
                f'#define Q2POD_DEV {1 if dev else 0}',  # navigation.c stale_note
+               # sw_update.c: the updater's identity (firmware_v20.info's version), which an equal update.tar's repeats
+               f'#define Q2POD_FW_TAG "{dev_tag(dev) if dev else TAG}"',
                f'#define Q2POD_REPO "{repo}"',  # netupdate.c: the repo whose latest release it fetches
                '#define Q2POD_SIGN_KEY {' + ','.join(f'0x{b:02x}' for b in key or signing_key(None, False)) + '}',  # release_sig.c
                f'#define Q2POD_UA "Q2Pod/{VERSION} (https://github.com/{REPO})"']  # onlinematch.c, as MusicBrainz asks: the project's contact, not --update-repo's

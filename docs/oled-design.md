@@ -759,6 +759,24 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
 - **Toasts** with a 15 px glyph beside the words: Unplugged (Text Secondary), OK to Disconnect (Positive green),
   USB Audio Ready (white).
 
+### Software Update
+
+SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, approved from
+`design/mockups/mock_fwupdate.py` on 2026-11-16), the status row "Software Update" over mode pages as USB's:
+
+- **Checking for an Update…**, "Looking on the SD card": no circle, a 48 px spinner of twelve round 4 px spokes in
+  Text Primary, the head turning a spoke every 80 ms and each spoke behind it dimmer, to a quarter.
+- **Install Update?**, the confirm with the question in the status row: the update's name and tag in Inter Medium
+  17 centred on y 66, "Installed: TAG · SIZE on the SD card" in 14 px Text Tertiary on y 88, then Cancel (selected)
+  and Install and Restart from y 112, and a two-line footer under them ("Takes about 2 minutes. Keep the Q2 charged;
+  your music and settings stay.").
+- **Restarting to Install**, "Don't turn off the Q2": `arrow-clockwise` bold on Accent Blue, and a 180 x 6 bar with
+  round ends under the stack (top + 172), Track `#333333` filled white with the unpacking.
+- **Results**, each a fill glyph on its circle: You're Up to Date (check, bold, Positive green, "VERSION (TAG) is
+  installed"), No Update Found and No SD Card (`file-arrow-down`, `#3A3A3C`), Charge to Update and Not Enough Space
+  (`battery-warning` and `warning`, `#FF9F0A`), Update Can't Be Used (`warning`, `#FF453A`). Return or Centre
+  leaves.
+
 ### Motion
 
 - Page push and pop: 220 ms horizontal slide, `cubic_out`.
@@ -813,6 +831,7 @@ pattern.
 | Bluetooth                           | Two-line row                | Second line "Connected" with the Positive dot                                                              |
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
+| SD Card Update                      | [Software Update](#software-update) | A spinner while it checks, the confirm, then mode pages                                         |
 | Quick Settings                      | [Control Center](#control-center) | The status row's clock centred, no title                                                        |
 | Search                              | Own                         | An iPod classic's letter strip, a pill at y 254-288, under six single-line results ([ipod](ipod.md#search)) |
 | Keyboard                            | Own                         | Stock's keys as `#1C1C1E` boxes on black, the wheel's key in the accent ([ipod](ipod.md#keyboard))          |

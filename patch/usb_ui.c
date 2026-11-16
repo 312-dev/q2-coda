@@ -51,8 +51,6 @@ enum { USB_ASK, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_CHOICES };
 #define MODE_TOP 40
 #define MODE_STACK 158
 #define MODE_STACK_PILL 204
-#define MODE_R 46
-#define MODE_GLYPH 44 /* tools/art.py USB_MODE_PX */
 #define MODE_TITLE_Y 120
 #define MODE_TITLE_PX 26 /* Inter Medium 22 */
 #define MODE_LINE_Y 148
@@ -62,7 +60,6 @@ enum { USB_ASK, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_CHOICES };
 #define MODE_PILL_PAD 22
 #define MODE_PILL_PX 20 /* Inter Medium 17 */
 #define MODE_PILL_RGB 0x2c2c2e
-#define MODE_GREEN 0x34c759
 #define MODE_TEXT_LINE 32
 
 /* The ADB prompt (U5) under its title: the key's lines, then Cancel, Allow, the switch and the note. */
@@ -318,17 +315,19 @@ static int usb_measure(void *canvas, const char *s, const char *face, int px) {
     return (int)(canvas_measure_text(canvas, buf, n) + 0.5f);
 }
 
-/* A mode page in w's coordinates (dy its y on screen). */
-static void usb_mode_paint(void *w, void *canvas, int dy, unsigned ring, const char *glyph, const char *title,
-                           const char *line, const char *pill) {
-    int light = ipod_light(), stack = pill ? MODE_STACK_PILL : MODE_STACK;
+/* A mode page in w's coordinates (dy its y on screen): m's glyph on its solid circle (none for
+ * MODE_BARE: a spinner), the title, the line and the optional pill. Returns the stack's top in w's
+ * coordinates. Shared with sw_update.c. */
+int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
+    const char *pill = m->pill;
+    int light = ipod_light(), stack = pill ? MODE_STACK_PILL : MODE_STACK, px = m->glyph_px ? m->glyph_px : MODE_GLYPH;
     int top = MODE_TOP + (320 - MODE_TOP - stack) / 2 - dy, cx = 375 / 2;
     rect_t circle = { cx - MODE_R, top, 2 * MODE_R, 2 * MODE_R };
-    fill_box(canvas, &circle, RGBA(ring), MODE_R);
-    paint_art(w, canvas, theme_art(glyph), cx - MODE_GLYPH / 2, top + MODE_R - MODE_GLYPH / 2);
-    usb_text(canvas, title, 0, 375, top + MODE_TITLE_Y, 1, "inter-medium", MODE_TITLE_PX,
+    if (m->ring != MODE_BARE) fill_box(canvas, &circle, RGBA(m->ring), MODE_R);
+    paint_art(w, canvas, theme_art(m->glyph), cx - px / 2, top + MODE_R - px / 2);
+    usb_text(canvas, m->title, 0, 375, top + MODE_TITLE_Y, 1, "inter-medium", MODE_TITLE_PX,
              light ? 0x000000 : 0xffffff);
-    usb_text(canvas, line, 0, 375, top + MODE_LINE_Y, 1, "inter", MODE_LINE_PX, light ? 0x5c5c5c : 0xababab);
+    usb_text(canvas, m->line, 0, 375, top + MODE_LINE_Y, 1, "inter", MODE_LINE_PX, light ? 0x5c5c5c : 0xababab);
     if (pill) {
         int pw = usb_measure(canvas, pill, "inter-medium", MODE_PILL_PX) + 2 * MODE_PILL_PAD;
         rect_t r = { cx - pw / 2, top + MODE_PILL_Y, pw, MODE_PILL_H };
@@ -336,6 +335,7 @@ static void usb_mode_paint(void *w, void *canvas, int dy, unsigned ring, const c
         usb_text(canvas, pill, r.x, r.w, r.y + MODE_PILL_H / 2, 1, "inter-medium", MODE_PILL_PX,
                  light ? 0x000000 : 0xffffff);
     }
+    return top;
 }
 
 /* A page opened from a poll, not from a key: once it is on top and settled, the wheel's list is
@@ -361,16 +361,17 @@ void usb_ui_paint(void *w, void *canvas) {
         int dac = g_usbmode == USB_MODE_DAC;
         usb_mode_hide(w); /* stock's face for the mode shows the DAC's switches again */
         if (u.ejected && !dac)
-            usb_mode_paint(w, canvas, I(w, W_Y), MODE_GREEN, "usbmode_ejected", "OK to Disconnect",
-                           "Safe to unplug now", (const char *)0);
+            mode_page_paint(w, canvas, I(w, W_Y),
+                            &(mode_page_t){ MODE_GREEN, "usbmode_ejected", 0, "OK to Disconnect", "Safe to unplug now" });
         else if (dac)
-            usb_mode_paint(w, canvas, I(w, W_Y), accent, "usbmode_audio", "Playing from Computer",
-                           "Wheel sets the volume", "Stop");
+            mode_page_paint(w, canvas, I(w, W_Y),
+                            &(mode_page_t){ accent, "usbmode_audio", 0, "Playing from Computer", "Wheel sets the volume", "Stop" });
         else
-            usb_mode_paint(w, canvas, I(w, W_Y), accent, "usbmode_files", "Connected",
-                           "Eject on your computer first", "Stop");
+            mode_page_paint(w, canvas, I(w, W_Y),
+                            &(mode_page_t){ accent, "usbmode_files", 0, "Connected", "Eject on your computer first", "Stop" });
     } else if (w == u.debug) {
-        usb_mode_paint(w, canvas, I(w, W_Y), accent, "usbmode_debug", "Debugging", "Charging and connected", "Stop");
+        mode_page_paint(w, canvas, I(w, W_Y),
+                        &(mode_page_t){ accent, "usbmode_debug", 0, "Debugging", "Charging and connected", "Stop" });
     } else if (u.view && parent == u.view) {
         usb_ready(u.chooser, u.view, &u.view_ready, USB_ROWS + 1);
         usb_layout();

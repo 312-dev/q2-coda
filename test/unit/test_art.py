@@ -114,8 +114,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     and arrow (regular, 18 px) in Text Tertiary (each half's) and white for the selection, and Downloads' picked arrow
     in Accent Blue and white and its kept-by-the-app arrows in Text Secondary (each half's) and white, and a card app's
     sign-in steps (fill, the done check bold, 44 px) in white for their solid circles, Control Center's glyphs (fill,
-    white, its sliders' in the block's grey), the USB pages' rows, mode glyphs and toasts, and Up Next's bump arrow and
-    Now Playing's queue and radio glyphs."""
+    white, its sliders' in the block's grey), the USB pages' rows, mode glyphs and toasts, Up Next's bump arrow and
+    Now Playing's queue and radio glyphs, and SD Card Update's result glyphs (white, 44 px) and its spinner."""
     t = theme.builtins()[0]
     got = art.images(t)
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
@@ -137,6 +137,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
            *(f'usbtoast_{n}' for n in art.USB_TOASTS)]  # usb_ui.c's chooser rows, mode pages and toasts
     upnext = [f'bump_{k}' for k in ('d', 'l', 'w')] + [f'mode_{n}' for n in ('queue_d', 'queue_l', 'radio_d', 'radio_l', 'radio_w',
                                                                               'shuffle_xd', 'shuffle_xl', 'repeat_xd', 'repeat_xl')]
+    sw = [f'swmode_{n}' for n in art.SW_MODES]  # sw_update.c's result glyphs
     keylock = [f'keylock_{k}' for k in ('d', 'l')]  # keylock.c: the status row's padlock and the card's
     card = [f'keylock_card_{k}' for k in ('d', 'l')]
     tiles = {f'pltile_{n}_{k}': c for n in ('playlist', 'otg') for k, c in (('d', 0x858585), ('l', 0x6e6e6e), ('w', 0xffffff))}
@@ -148,7 +149,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality,
                                               *keylock, *card, *tiles, *acts, *pmarks, *lives, *store, *signin, *cc, *usb, *upnext,
                                               'search_pop', 'search_pop_letters', 'search_pop_echoes',
-                                              *(f'spin_{f}' for f in range(art.SPIN_SPOKES)))}
+                                              *(f'spin_{f}' for f in range(art.SPIN_SPOKES)), *sw,
+                                              *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)))}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
                           ('play_d', art.STATE_PX, 0xffffff), ('play_l', art.STATE_PX, 0),
@@ -172,7 +174,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.PL_MARK_PX, c) for n, c in pmarks.items()),
                           *((n, art.MARK_PX, {'d': 0x858585, 'l': 0x6e6e6e, 'w': 0xffffff}[n[-1]]) for n in lives),
                           *((n, art.MARK_PX, {'a': blue, 'd': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in store),
-                          *((n, art.SIGNIN_PX, 0xffffff) for n in signin),
+                          *((n, art.SIGNIN_PX, 0xffffff) for n in signin), *((n, art.USB_MODE_PX, 0xffffff) for n in sw),
                           *((f'cc_{n}', px, c) for n, (_, px, c) in art.CC_ICONS.items())):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
@@ -196,6 +198,24 @@ def test_oleds_spinner_turns_its_bright_spoke_clockwise_a_frame_at_a_time():
         alphas = [spoke((f - d) % art.SPIN_SPOKES) for d in range(art.SPIN_SPOKES)]
         assert alphas == sorted(alphas, reverse=True) and alphas[0] > 240 and alphas[-1] < alphas[0] * 0.5
         assert at(w // 2, h // 2)[3] == 0  # the hub is clear
+
+
+def test_the_software_updates_spinner_has_twelve_spokes_in_each_halfs_ink():
+    """SD Card Update's check (sw_update.c): twelve frames per half, 48 px, Text Primary alone (white on black, black on
+    paper), the head f twelfths of a turn clockwise from 12 o'clock and each spoke behind it dimmer, to a quarter."""
+    got = art.images(theme.builtins()[0])
+    for k, ink in (('d', (255, 255, 255)), ('l', (0, 0, 0))):
+        for f in range(art.SW_SPIN_SPOKES):
+            w, h, at = pixels(got[f'oled_swspin_{k}_{f}'])
+            assert (w, h) == (art.SW_SPIN_PX, art.SW_SPIN_PX)
+            assert {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]} == {ink}
+            def spoke(n):
+                a = 2 * math.pi * n / art.SW_SPIN_SPOKES - math.pi / 2
+                r = sum(art.SW_SPIN_R) / 2
+                return at(int(w / 2 + r * math.cos(a)), int(h / 2 + r * math.sin(a)))[3]
+            alphas = [spoke((f - d) % art.SW_SPIN_SPOKES) for d in range(art.SW_SPIN_SPOKES)]
+            assert alphas == sorted(alphas, reverse=True) and alphas[0] > 240 and 50 < alphas[-1] < 80, alphas
+            assert at(w // 2, h // 2)[3] == 0
 
 
 def test_phosphor_fills_nonzero_so_an_inner_contour_is_a_hole():

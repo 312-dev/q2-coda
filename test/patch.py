@@ -18435,4 +18435,72 @@ m,more,rows,edit=pl_more(); f,ctx=m.handler(m.nodes[edit[0]]['children'][0],O['E
 m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.page=m.top; m.view=m.find('scroll_view')
 m.choose(0); assert m.showlabels()[0]=='Search' and m.nodes[m.nodes[m.page]['children'][0]]['text']=='Add Songs'
 assert any(c[0]=='hscroll_label_set_only_focus' for c in m.calls); passed()
+# SD Card Update (sw_update.c): stock's fwupdate_tf is the payload's whole. Stock's own checks (check_updatefw_exist, its
+# answer the machine's) are mode pages at once, each its words and glyph; a found file is checked on a thread under the
+# spinner, whose answer opens Install Update? (OK) or its page; Install and Restart runs stock's checkfw_dialog after the
+# click, whose answer is a page too; and stock's dialog is drawn as Restarting to Install. The tar check itself is
+# test/fw's (test_sw_update.py).
+SW_CHECKING,SW_OK,SW_LATEST,SW_NONE,SW_NOCARD,SW_LOW,SW_BAD,SW_FULL=range(8)
+class SwMachine(CoverflowMachine):
+    def __init__(self,code=1,quit=0):
+        super().__init__(); oled_set(self); self.code,self.quit,self.idles=code,quit,[]
+        for n in ('check_updatefw_exist','navigator_to','idle_add'): self.handlers[syms[n]]='sw:'+n
+        self.word(syms['g_power_capacity'],12)
+    def hook(self,u,address,size,unused):
+        name=self.handlers.get(address,'')
+        if not name.startswith('sw:'): return super().hook(u,address,size,unused)
+        name=name[3:]; a,b=[u.reg_read(r) for r in REGS[:2]]; self.calls.append((name,a,b)); ret=0
+        if name=='check_updatefw_exist': assert (self.text(a),self.text(b))==('/mnt/mmc','/mnt/mmc/update.tar'); ret=self.code
+        elif name=='navigator_to': self.opened.append((self.text(a),)); ret=self.quit
+        elif name=='idle_add': self.idles.append((a,b)); ret=1
+        self.returns(ret,clobber=True)
+    def sw(self,field): return signed(self.get(payload_syms['sw']+{'state':4,'result':12,'frame':24}[field]))
+    def said(self,w):
+        self.letters.clear(); self.image_loads.clear(); self.paint(w,gap=0)
+        return [l['text'] for l in self.letters],[i.rsplit('_',1)[-1] if 'swspin' not in i else i.split('swspin_')[1] for i in self.image_loads if 'sw' in i]
+def sw_open(code=1,quit=0):
+    m=SwMachine(code,quit); m.call(address=syms['fwupdate_tf'],args=(0,0,0,0),gap=0); return m
+for code,result,words,glyph in ((-15,SW_LOW,['Charge to Update','Needs 16% or a charger \u00b7 now 12%'],'low'),
+                                (-2,SW_NOCARD,['No SD Card','Insert the card with update.tar'],'none'),
+                                (-11,SW_NONE,['No Update Found','Put update.tar on the SD card'],'none'),
+                                (-12,SW_FULL,['Not Enough Space','Free 100 MB on the SD card'],'bad'),
+                                (-3,SW_BAD,["Update Can't Be Used",'The file is damaged or not for the Q2'],'bad')):
+    m=sw_open(code); page=m.top
+    assert m.nodes[page]['name']=='swupdate_page' and m.sw('result')==result and not m.threads and not m.timers,code
+    texts,images=m.said(page); assert texts==words and images==[glyph],(code,texts,images)
+    assert len(m.rounded)==1 and m.rounded[0]['rect']==(375//2-46,40+(320-40-158)//2-signed(m.get(page+O['W_Y'])),92,92),m.rounded
+    passed()
+# A found file: the thread, the spinner turning a spoke each 80 ms, no circle; Return leaves and cancels it.
+m=sw_open(); page=m.top
+assert m.sw('result')==SW_CHECKING and m.sw('state')==SW_CHECKING and len(m.threads)==1 and m.threads[0][0]==payload_syms['sw_check']
+texts,images=m.said(page); assert texts==['Checking for an Update\u2026','Looking on the SD card'] and images==['d_0'] and not m.rounded,(texts,images)
+m.advance(160); texts,images=m.said(page); assert images==['d_2'],images
+m.call(address=syms['fwupdate_tf'],args=(0,0,0,0),gap=0); assert len(m.threads)==1 and m.top==page  # one at a time
+passed()
+# Its answer: OK opens Install Update? over it and closes it; another, its page.
+for state,want in ((SW_OK,'swconfirm_page'),(SW_LATEST,'swupdate_page'),(SW_BAD,'swupdate_page')):
+    m=sw_open(); page=m.top; m.word(payload_syms['sw']+4,state); m.u.mem_write(payload_syms['sw']+0x48,b'V1830\0')
+    m.advance(80); assert m.joins and m.nodes[m.top]['name']==want and not m.timers,(state,m.nodes[m.top]['name'])
+    if state!=SW_OK: assert m.top==page and m.sw('result')==state; passed(); continue
+    confirm=m.top; assert not m.alive(page)
+    rows=[k for k in m.nodes if m.nodes[k]['type']=='list_item' and m.alive(k)]
+    assert [m.nodes[m.nodes[r]['children'][0]].get('text') for r in rows]==['Cancel','Install and Restart']
+    texts,_=m.said(confirm)
+    assert texts[:2]==['Q2 Pod 1.8.3 \u00b7 V1830',f'Installed: {manifest["version"]} \u00b7 0.0 MB on the SD card'] and texts[2].startswith('Takes about 2 minutes'),texts
+    f,ctx=m.handler(rows[1],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
+    assert len(m.idles)==1 and not m.alive(confirm); passed()
+# After the click, stock's dialog; its answer (no file 9, up to date 13, damaged 18) is a page, a success never comes back.
+for quit,result in ((9,SW_NONE),(13,SW_LATEST),(18,SW_BAD)):
+    m=SwMachine(quit=quit); m.call(address=payload_syms['sw_install'],args=(0,0,0,0),gap=0)
+    assert ('dialog/checkfw_dialog',) in m.opened and m.nodes[m.top]['name']=='swupdate_page' and m.sw('result')==result,quit
+passed()
+# Stock's checkfw_dialog: its label hidden, the dialog drawn as Restarting to Install with the status row's title, and the
+# bar the unpacked images' share (none here: no files).
+m=SwMachine(); label=m.node('hscroll_label','scrlabel_checkfw',text='Checking FW...'); dlg=m.node('dialog','checkfw_dialog',[label])
+parents(m,dlg); m.word(dlg+O['W_PARENT'],m.wm); place(m,dlg,0,0,375,320); m.top=dlg
+m.handlers[payload_syms['stock_checkfw_trampoline']]='stock_checkfw'
+m.call(address=syms['dialog_checkfw_dialog_init'],args=(dlg,0,0,0),gap=0)
+assert not m.nodes[label]['visible']; texts,images=m.said(dlg)
+assert texts==['Software Update','Restarting to Install',"Don't turn off the Q2"] and images==['restart'],(texts,images)
+top=40+(320-40-158)//2; assert [r['rect'] for r in m.rounded]==[(375//2-46,top,92,92),(375//2-90,top+172,180,6)],m.rounded; passed()
 print(f'{checks} MIPS execution scenarios passed; toolkit services mocked, stock lock filter executed.')
