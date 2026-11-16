@@ -101,18 +101,3 @@ def test_the_gate_leaves_alone(fw, case):
     h = Hold(fw, flag=case != 'unlocked', lit=case == 'lit')
     assert [h(k, KEY_PLAY, remote=case == 'remote') for k in (DOWN, LONG, UP)] == [0] * 3
     assert not fw.calls('screen_action') and h.lit.value == (case == 'lit')
-
-
-def test_the_padlock_follows_the_lock_in_the_themes_ink(fw):
-    Hold(fw, flag=1, lit=1)
-    lock, shown, image, empty = C.create_string_buffer(0x100), [0], [], C.create_string_buffer(b'')
-    fw.mock('widget_lookup', lambda w, name, *_: C.addressof(lock) if C.string_at(name) == b'img_keylock' else 0)
-    fw.mock('widget_get_visible', lambda *_: shown[0])
-    fw.mock('widget_set_visible', lambda w, v, *_: shown.__setitem__(0, v))
-    fw.mock('widget_get_prop_str', lambda *_: C.addressof(empty))
-    fw.mock('image_base_set_image', lambda w, name, *_: image.append(C.string_at(name)))
-    bar = fw.fn('keylock_bar', C.c_int, C.c_void_p)
-    room = fw.fn('keylock_room', C.c_int)
-    assert bar(C.addressof(lock)) == 1 and shown == [1] and image == [b'oled_keylock_d'] and room() == O['STATUS_ROW_LOCK_ROOM']
-    fw.var('g_keylock_flag', C.c_ubyte).value = 0
-    assert bar(C.addressof(lock)) == 1 and shown == [0] and room() == 0

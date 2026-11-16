@@ -47,7 +47,7 @@ those spots are under the glass. So:
 - The status row sits up in the glass's top curve, centred on y 23, where the glass hides 32 px at
   its glyphs' top edge (y 16), so its ends draw in to follow the curve: the title's text starts
   62 px in (`STATUS_ROW_INSET`) and the battery ends 62 px from the right edge, the clock beside
-  its play state (or centred, on a page with no title). The list's own columns (24 and 28) stay
+  its glyphs (or centred, on a page with no title). The list's own columns (24 and 28) stay
   below it.
 - No text or control may start inside `corner_x(y, h)` for its row. In the middle of the
   screen, from y 80 to y 240, the inset is 0.
@@ -159,14 +159,31 @@ All lists share one grid.
 - Left, from x 62: the page's title in Inter Medium 15 px, Text Secondary, ending with an
   ellipsis 12 px short of the clock's widest ("00:00"), however long: a title never moves to a
   row of its own, so the list keeps its place.
-- The clock, in the same face, size and colour, right-aligned 24 px left of the battery's body,
-  beside the play state. Home, Now Playing and Cover Flow's covers (but an artist's, titled by the
-  artist) have no title, and there the clock is centred across the row (x 187.5) instead; Home in
-  Split keeps it at the right, over the art, inked white or black as one glyph with the play state
+- The clock, in the same face, size and colour, right-aligned 6 px left of the leftmost glyph
+  (the battery's body when it is alone). Home, Now Playing and Cover Flow's covers (but an artist's, titled by the
+  artist) have no title, and there the clock is centred across the row (x 187.5) instead, unless centred it would
+  reach the glyphs; Home in
+  Split keeps it at the right, over the art, inked white or black as one glyph with the other glyphs
   and battery (approved from `mock_clock_center.py` and `mock_clock_right.py` on 2026-11-15).
-- Right: the play state (Phosphor `play`/`pause`, fill, 13 px, Text Primary, nothing when
-  stopped), then the battery, its nub's end 62 px from the right edge (x 313), the play state's centre
-  12 px left of the battery's body.
+- Right, right to left: the battery, its nub's end 62 px from the right edge (x 313), then the glyph
+  slots, each shown only while it has something to say, nothing in the row ever wrapping (`status_row.c`;
+  [internals](internals.md#status-row-slots)):
+  - **Play state**, 4 px left of the battery's body: three level bars as Up Next's, 2 px wide and 4 px apart,
+    standing 6 px below the row's centre, 3 to 11 px tall and moving on offset sines (a 1.25 s loop) in Text
+    Primary while playing; paused, frozen at their last heights in Text Secondary; stopped, nothing. Only their
+    10 px box repaints as they move. A tap on them opens Now Playing (`mock_status_bars.py`, the user's, 2026-11-15).
+  - **Wi-Fi**, 5 px left of the bars: Phosphor `wifi-high` (bold) lit by the signal, one, two or three arcs in Text
+    Primary and the rest in `#3A3A3C` so the shape keeps its width; `wifi-x` (bold) connected with no internet;
+    nothing with Wi-Fi off or not connected (`mock_wifi_status.py`).
+  - **Sync**, 4 px left of the glyph before it: while a card app checks its server or its metadata, Phosphor
+    `arrows-clockwise` (bold) turning in Text Secondary (S1); while it downloads songs, a 14 px ring (1.6 px) in
+    `#333333` filling clockwise from 12 o'clock in the accent, Phosphor `arrow-down` (bold, 8 px, Text Primary) in
+    it (S2, `mock_sync_status.py`).
+  - **Headset battery**, 5 px left: a connected Bluetooth headset's level, Phosphor `bluetooth` (bold) then the
+    level and "%" in the battery's percentage type, Text Primary.
+  - **Buttons Lock**, 5 px left: the padlock (Phosphor `lock-simple`, fill, 13 px, Text Primary).
+- The new glyphs are 14 px boxes at the padlock's optical size, 11 px of ink ([Icons](#icons)), centred on the
+  row; every gap is at least 4 columns of black, so Split inks each glyph by itself.
 - Battery, in iOS's proportions: a 25x12 body with 4 px corners and a 1 px `#6E6E6E` outline,
   the charge a solid fill 2 px inside it with 2.2 px corners to the level, charging or not, in
   Text Primary (under 20 % `#FF453A`, the only red on any screen; `#34C759` green on a cable that
@@ -181,7 +198,7 @@ All lists share one grid.
   each digit and the sign rounded up to a whole pixel, and the row lays out from the right edge, so
   the glyphs to its left move over for it.
 - A tap on the battery (a 44 x 40 px target round its body, or round the percentage on Percent, so
-  at least 40 px round it) toasts
+  at least 40 px round it; where it meets the level bars' target the nearer centre has it) toasts
   its state; see [Dialogs and toasts](#dialogs-and-toasts).
 
 ### Selection bar
@@ -832,9 +849,9 @@ draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keybo
   A mark Phosphor lacks is drawn for q2-coda in Phosphor's regular style (16 unit strokes, round
   caps and joins, on the 256 unit grid), outlined to filled paths, and kept apart in
   `assets/icons/q2coda/` under the repository's licence: the Subsonic card app's `subsonic.svg`.
-- Weights by role: `fill` for the play state and a favourite's heart, `bold` for chevrons, Now
+- Weights by role: `fill` for the padlock and a favourite's heart, `bold` for chevrons, the status row's Wi-Fi, sync and Bluetooth, Now
   Playing's and the confirmation's shuffle and repeat and About's quality badge, `regular` for row symbols and Now Playing's
-  heart and More. Sizes are the design's: 13 px play state, 15 px chevron, 20 px row symbols,
+  heart and More. Sizes are the design's: 13 px padlock and 14 px status glyphs, 15 px chevron, 20 px row symbols,
   heart and More, 22 px state row, 56 px confirmation, 12 px for About's quality badge
   (`waveform-bold`).
 - **Missing art** is one placeholder everywhere stock shows its own (Now Playing, the album grids,
@@ -1013,7 +1030,7 @@ pattern.
 | Search                              | [Text entry](#text-entry)   | The letter strip's field on, under six single-line results ([ipod](ipod.md#search))                         |
 | New Playlist, Rename Playlist       | [Text entry](#text-entry)   | The letter strip's field off, the name large over it ([ipod](ipod.md#name-strip))                          |
 | Keyboard                            | [Text entry](#text-entry)   | None shows: a text box is the letter strip's ([ipod](ipod.md#keyboard))                                    |
-| Buttons locked                      | Own                         | A padlock left of the play state while Buttons Lock is on; a blocked press shows a #1C1C1E card over the page dimmed to 45%: a 56 px padlock, "Buttons Locked" 16 px Medium and the hint 13 px Secondary, for 1.5 s |
+| Buttons locked                      | Own                         | A padlock leftmost in the status row while Buttons Lock is on; a blocked press shows a #1C1C1E card over the page dimmed to 45%: a 56 px padlock, "Buttons Locked" 16 px Medium and the hint 13 px Secondary, for 1.5 s |
 | A card app's QR page (sign-in)      | Own                         | The status row names the app. The code on a white plate (166 px, radius 12) centred under it, the app's note ("Scan with your phone to sign in") 17 px Medium white and "or open ADDR · PIN 482 913" 14 px Text Tertiary under it. Once the app reports a step, a mode page: one solid 92 px circle (Accent for phone and check, #34C759 done, #FF453A fail and error) with a 44 px white Phosphor fill glyph (`device-mobile`, `arrows-clockwise`, `check` bold, `cloud-slash`, `x` bold), the title 22 px Medium and one line 15 px Text Secondary, the stack centred between the status row and the bottom; the wheel does nothing |
 
 The concept's Apple Music, Apple TV and CD sync pages have no Q2 Pod equivalent and are out of scope; its storage
@@ -1040,10 +1057,11 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - Font faces as a table, with Inter Regular and Medium and tabular digits.
 - A theme's own accent tones, and the selection bar's radius and inset on every row.
 - A status row in place of a bar band (`status_y`), its title and its battery's end `STATUS_ROW_INSET`
-  in from the sides and its clock beside the play state, or centred where there is no title; lists that scroll a
+  in from the sides, its glyph slots left of the battery (`patch/status_row.c`: `status_slots_left`,
+  `status_slots_paint`, `status_slot_at`) and its clock beside them, or centred where there is no title; lists that scroll a
   whole row at a time and stop with the last row's foot on `list_end`, the rows past it fading (`list_fit`).
 - A theme's own art from Phosphor (`tools/art.py`), loaded by its own prefix (`theme_art`): the
-  chevron (`chevron_icon`, `patch/list_marks.c`) and the play state; the slim battery
+  chevron (`chevron_icon`, `patch/list_marks.c`) and the status row's glyphs (`STATUS_GLYPHS`); the slim battery
   (`battery_slim`); the wheel's scroll indicator (`list.scrollbar.*`, `wheel_sb_arm`);
   row art's 4 px corners
   (`list.art.radius`); key/value rows, switches and values beside a chevron on the right column; the
@@ -1059,7 +1077,7 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - Menus as the inset modal over the page ([Menus](#menus)): the set's `modal`, `patch/menu_modal.c`, the
   Phosphor symbols as the theme's own art.
 - Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_inset` (the art from
-  x 196 and the top edge to the edges, its top 58 rows painted by the bar with the status row's clock, play state
+  x 196 and the top edge to the edges, its top 58 rows painted by the bar with the status row's clock, glyphs
   and battery over them, each glyph in one ink, white or black, whichever has the higher WCAG contrast against the
   art's mean luminance under it, weighted by the glyph's coverage and held 0.03 past the bound against flicker; the
   charging green and low red keep their colours (`home_ink`, approved from `mock_split_top.py` on 2026-11-14, one

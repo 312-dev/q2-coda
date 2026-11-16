@@ -144,7 +144,9 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
               'chargetoast_battery_d': 0xffffff, 'chargetoast_battery_l': 0}  # charging.c's toasts
     inset = [f'batt{n}_{k}' for n in art.BATT_GLYPHS for k in ('d', 'l')]  # list_marks.c battery_slim
     sw = [f'swmode_{n}' for n in art.SW_MODES]  # sw_update.c's result glyphs
-    keylock = [f'keylock_{k}' for k in ('d', 'l')]  # keylock.c: the status row's padlock and the card's
+    keylock = [f'keylock_{k}' for k in ('d', 'l')]  # status_row.c's padlock (the card's below)
+    status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'down', *(f'sync_{f}' for f in range(art.STATUS_SPIN)))
+              for k in ('d', 'l')]  # status_row.c's other glyphs: their own test
     circles = {'circle_check_a': (art.CIRCLE_CHECK_PX, blue), 'circle_check_w': (art.CIRCLE_CHECK_PX, 0xffffff),
                'circle_lock_d': (art.CIRCLE_LOCK_PX, 0xababab), 'circle_lock_l': (art.CIRCLE_LOCK_PX, 0x5c5c5c)}  # list_marks.c
     card = [f'keylock_card_{k}' for k in ('d', 'l')]
@@ -155,7 +157,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     assert set(got) == {'sort_bars'} | {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality,
-                                              *keylock, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *signin, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
+                                              *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *signin, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
                                               'search_pop', 'search_pop_letters', 'search_pop_echoes', 'holdback',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)), *sw,
                                               *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)))}
@@ -192,6 +194,34 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
         assert (w, h) == (px, px) and inked == {tuple(rgb >> s & 255 for s in (16, 8, 0))}
         assert max(at(x, y)[3] for y in range(h) for x in range(w)) > 200
+
+
+@pytest.mark.parametrize('half, primary, secondary, unlit', [('d', 0xffffff, 0xababab, 0x3a3a3c), ('l', 0, 0x5c5c5c, 0xc7c7cc)])
+def test_the_status_rows_glyphs_share_one_optical_size_in_each_halfs_ink(half, primary, secondary, unlit):
+    """status_row.c's slots (STATUS_GLYPHS): Wi-Fi's levels light their arcs over the rest of wifi-high in STATUS_UNLIT,
+    the full glyph's ink one box in every level, so the shape keeps its width; wifi-x and the headset's Bluetooth in
+    Text Primary; the sync arrows' STATUS_SPIN frames in Text Secondary, each turned from the last; every one a
+    STATUS_PX box with STATUS_INK px of ink on its longer side (the padlock's 11), centred."""
+    got = art.images(theme.builtins()[0])
+    def ink(name):
+        w, h, at = pixels(got[f'oled_status_{name}_{half}'])
+        lit = [(x, y) for y in range(h) for x in range(w) if at(x, y)[3] > 64]
+        colours = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3] > 250}
+        return (w, h), lit, colours
+    rgb = lambda c: tuple(c >> s & 255 for s in (16, 8, 0))  # noqa: E731
+    boxes = set()
+    for level in (1, 2, 3):
+        size, lit, colours = ink(f'wifi_{level}')
+        boxes.add((min(x for x, _ in lit), max(x for x, _ in lit), min(y for _, y in lit), max(y for _, y in lit)))
+        near = lambda c: any(max(abs(a - b) for a, b in zip(rgb(c), k)) <= 16 for k in colours)  # noqa: E731 (blended edges)
+        assert size == (art.STATUS_PX,) * 2 and near(primary) and near(unlit) == (level < 3)
+    assert len(boxes) == 1 and 10 <= max(b - a + 1 for a, b in (list(boxes)[0][:2], list(boxes)[0][2:])) <= 12
+    for name in ('wifi_x', 'bt'):
+        size, lit, colours = ink(name)
+        assert size == (art.STATUS_PX,) * 2 and colours == {rgb(primary)}
+        assert 10 <= max(max(x for x, _ in lit) - min(x for x, _ in lit), max(y for _, y in lit) - min(y for _, y in lit)) + 1 <= 12
+    frames = [got[f'oled_status_sync_{f}_{half}'] for f in range(art.STATUS_SPIN)]
+    assert len(set(frames)) == art.STATUS_SPIN and all(ink(f'sync_{f}')[2] == {rgb(secondary)} for f in range(art.STATUS_SPIN))
 
 
 @pytest.mark.parametrize('half, ink, gap', [('d', (255, 255, 255), (0, 0, 0)), ('l', (0, 0, 0), (255, 255, 255))])

@@ -1,7 +1,7 @@
 /* Buttons Lock as the iPod's Hold switch (docs/internals.md#buttons-lock), under OLED's pages:
- * while it is on, a padlock sits in the status row left of the play state (keylock_bar), and a
- * press the lock blocks with the screen off lights the screen for KEYLOCK_CARD_MS with a card over
- * the page dimmed: a padlock, "Buttons Locked" and how to get past it (keylock_gate,
+ * while it is on, a padlock sits in the status row (status_row.c's SLOT_LOCK, left of the others),
+ * and a press the lock blocks with the screen off lights the screen for KEYLOCK_CARD_MS with a card
+ * over the page dimmed: a padlock, "Buttons Locked" and how to get past it (keylock_gate,
  * keylock_paint). The lock is still stock's, the dark screen's alone (tools/build.py KEYLOCK_LIT):
  * Centre wakes the screen and the buttons work while it is lit, so Centre on the card is that wake,
  * and the card says so. Without OLED's pages a blocked press stays stock's, dropped in the dark. */
@@ -32,7 +32,6 @@ static struct {
     unsigned eat;   /* the keys whose press was dropped here: their long press and release go too */
     unsigned timer; /* the card's end */
     int shown;      /* the card is up, the screen lit for it */
-    void *lock;     /* the status row's padlock (tools/ipod.py status_row's img_keylock) */
 } kl __attribute__((section(".scratch")));
 
 /* A key's bit in kl.eat: Return, Play/Pause, the wheel's two, the previous and next buttons, and
@@ -156,26 +155,4 @@ void keylock_paint(void *w, void *canvas) {
     final_text(canvas, "inter", (const unsigned *)L"Press Center to unlock", &hint, CARD_HINT_PX,
                0xff000000u | (light ? TEXT_SECONDARY_L : TEXT_SECONDARY_D));
     stock_canvas_set_fill_color(canvas, fill);
-}
-
-/* The status row's room the padlock takes left of the play state while it shows, for the clock
- * beside them (navigation.c clock_place). */
-int keylock_room(void) { return kl.lock && widget_get_visible(kl.lock) ? STATUS_ROW_LOCK_ROOM : 0; }
-
-/* bar_state_sync: the padlock shows while Buttons Lock is on, in the bar theme's ink for the half.
- * Returns whether it changed. */
-int keylock_bar(void *bar) {
-    if (!kl.lock && bar) kl.lock = widget_lookup(bar, "img_keylock", 1);
-    if (!kl.lock) return 0;
-    int on = g_keylock_flag != 0, changed = on != !!widget_get_visible(kl.lock);
-    if (changed) widget_set_visible(kl.lock, on, 0);
-    if (on) {
-        char icon[32];
-        tk_snprintf(icon, sizeof icon, "%skeylock_%c", theme()->art, ipod_light() ? 'l' : 'd');
-        if (tk_strcmp(widget_get_prop_str(kl.lock, "image", ""), icon)) {
-            image_base_set_image(kl.lock, icon);
-            changed = 1;
-        }
-    }
-    return changed;
 }

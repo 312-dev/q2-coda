@@ -526,7 +526,7 @@ def status_bar(root, g=SET0):
         'name': 'label_clock', 'style': 's_scrlabel_white20c', 'style:normal:font_size': '16', 'only_focus': 'true', 'ellipses': 'true'}, []])
 
 
-STATUS_ROW_RIGHT = ['img_state', *STATUS_RIGHT[2:]]  # a status row's right group: the play state, then the battery
+STATUS_ROW_RIGHT = STATUS_RIGHT[2:]  # a status row's right group: the battery, its slots left of it the payload's (status_row.c)
 STATUS_ROW_ICON = 16  # stock's status icon canvases (bar_play, bar_pause), their glyph centred
 STATUS_ROW_TITLE_W = 240  # the title's and clock's box from the row's inset, until the payload's first paint moves both (clock_place)
 
@@ -536,22 +536,22 @@ def status_row(root, g, widgets, left, right, eq):
     STATUS_ROW_INSET in from the screen's sides, inside the glass's top curve. The title and the clock start in one box
     whose text starts on that inset, in the bar's face at bar_px in Text Secondary; the payload moves the clock beside
     the play state, or centres it where the page has no title, and ends the title's box short of the clock
-    (navigation.c clock_place). The right group is Buttons Lock's padlock (img_keylock, hidden until keylock.c shows
-    it), the play state, then the battery, its nub's last column STATUS_ROW_INSET from the screen's edge. Bluetooth,
-    Wi-Fi, EQ and the rest stay, off-screen, for stock to update."""
+    (navigation.c clock_place). The right group is the battery, its nub's last column STATUS_ROW_INSET from the
+    screen's edge; the payload paints the row's other glyphs left of it (status_row.c: the level bars, Wi-Fi, a sync,
+    a headset's battery, Buttons Lock's padlock). The play state, Bluetooth, Wi-Fi, EQ and the rest stay, off-screen,
+    for stock to update: the payload reads the play state's and Wi-Fi's from them."""
     inset = inc('STATUS_ROW_INSET')
     top = g.status_y - STATUS_ROW_LINE // 2
     check(inset >= corner_x(top, STATUS_ROW_LINE), f'Status row inset {inset} is under the glass at y {top}')
     box_y = g.status_y - STATUS_ROW_ICON // 2
     left[3] = []
-    lock = ['image', [0, 0, STATUS_ROW_LOCK_W, 0], {**widgets['img_state'][2], 'name': 'img_keylock', 'image': '', 'visible': 'false'}, []]
-    right[3] = [lock, *(widgets[n] for n in STATUS_ROW_RIGHT)]
+    right[3] = [widgets[n] for n in STATUS_ROW_RIGHT]
     layout = right[2]['children_layout']
     check('xm=50,s=5)' in layout, 'Unexpected status bar layout')
     right[2]['children_layout'] = layout.replace('xm=50,s=5', f'xm={inset},s={STATUS_ROW_GAP}')
     right[1][1], right[1][3] = box_y, STATUS_ROW_ICON
     widgets['img_state'][1][2] = STATUS_ROW_ICON
-    for name in (*STATUS_HIDDEN, 'img_bt', 'img_wifi'):
+    for name in (*STATUS_HIDDEN, 'img_state', 'img_bt', 'img_wifi'):
         box = widgets[name][1]
         box[0], box[3] = -200, g.bar  # still updated by stock, drawn off-screen
         root[3].append(widgets[name])
@@ -568,8 +568,7 @@ def status_row(root, g, widgets, left, right, eq):
                         {'name': 'label_' + name, 'style': 's_scrlabel_white20l', 'only_focus': 'true', 'ellipses': 'true', **text}, []])
 
 
-STATUS_ROW_GAP = 3  # the play state's 16 px box this far left of the battery: its 10 px glyph 16 px left of the body
-STATUS_ROW_LOCK_W = inc('STATUS_ROW_LOCK_ROOM') - STATUS_ROW_GAP  # Buttons Lock's padlock: its 13 px glyph centred 18 px left of the play state's
+STATUS_ROW_GAP = 3  # the right group's spacing (the battery's modes, one shown at a time)
 STATUS_ROW_LINE = 24  # the title's and clock's line box, centred on status_y
 STATUS_ROW_INK = '#ABABAB'  # Text Secondary (docs/oled-design.md): Light Mode's flip gives the paper's grey
 
