@@ -790,7 +790,7 @@ def test_a_standby_limit_chosen_on_power_ends_that_long_a_standby_in_a_power_off
     assert q2.screen.row('Standby Limit') == 'Standby Limit: Off'
     for _ in range(presses):
         q2.screen.click('Standby Limit')
-    assert q2.screen.row('Standby Limit') == f'Standby Limit: {hours} h'
+    assert q2.screen.row('Standby Limit') == f'Standby Limit: {hours}h'
     assert q2.flash.get('Q2POD', 'STANDBYLIMIT') == str(presses)
     q2.power_on()
     q2.loop()

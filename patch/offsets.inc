@@ -77,6 +77,10 @@
 #define LCD_TEXT_COLOR 0xb8     /* lcd_set_text_color @0x65aa34 */
 /* Night Shift (nightshift.c): the screen's lcd_mem, BGRA8888 (lcd_mem create @0x6a5870) */
 #define LCD_END_FRAME 0x7c   /* lcd_end_frame @0x65aec8 calls it */
+/* The boot animation's hold (splash_hold.c): lcd_mem's end_frame calls one of them, and
+ * lcd_linux_fb_create @0x63a57c sets both to its copy to the hidden page and pan @0x6398d8 */
+#define LCD_SWAP 0x60  /* lcd_swap @0x65af44 */
+#define LCD_FLUSH 0x74 /* lcd_flush @0x65af70 */
 #define LCD_W 0xb0
 #define LCD_H 0xb4
 #define LCD_DRAW_MODE 0xcc   /* lcd_begin_frame @0x65a818 */

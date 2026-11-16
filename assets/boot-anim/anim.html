@@ -1,0 +1,206 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Q2 boot animation</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;700&display=block" rel="stylesheet">
+<style>html,body{margin:0;background:#111}canvas{display:block;margin:20px auto}</style>
+</head><body>
+<canvas id="c"></canvas>
+<script src="paths.js"></script>
+<script>
+// The Q2's boot animation (docs/boot.md#boot-animation), 375x320 upright. render.js captures its
+// frames and tools/splash.py packs them into assets/boot-anim.q2a. Opened in a browser it plays in a loop.
+// A compact emblem in the centre of the screen (wordmark, skyline, train on a
+// rail, wordmark) that breaks out to the full screen width for the journey and
+// collapses back into the emblem on arrival. White only, one heavy stroke with
+// round caps and joins. render(t) depends on t alone.
+const W = 375, H = 320, TOTAL = 7.8;
+const VW = 210, VX = (W - VW) / 2;               // emblem box
+const G = 196;                                   // rail; the skyline stands on it, behind the train
+const SW = 3, SD = 2.4, WHITE = '#F2F2F0';       // outline stroke, inner-detail stroke
+const qs = new URLSearchParams(location.search);
+const SCALE = +(qs.get('scale') || 2), MASK = qs.get('mask') !== '0';
+const cv = document.getElementById('c'); cv.width = W * SCALE; cv.height = H * SCALE;
+const ctx = cv.getContext('2d');
+
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const smooth = u => u * u * (3 - 2 * u);
+const easeIO = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const easeOut = u => 1 - Math.pow(1 - u, 3);
+
+const easeIn = u => u * u * u;
+
+// ---------- polylines that draw themselves ----------
+function poly(pts) { const L = [0]; for (let i = 1; i < pts.length; i++) L.push(L[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])); return { pts, L, len: L[L.length - 1] }; }
+function strokePart(p, u, dx) {
+  if (u <= 0) return; const lim = p.len * clamp(u), P = p.pts;
+  ctx.beginPath(); ctx.moveTo(P[0][0] + dx, P[0][1]);
+  for (let i = 1; i < P.length; i++) {
+    if (p.L[i] <= lim) ctx.lineTo(P[i][0] + dx, P[i][1]);
+    else { const k = (lim - p.L[i - 1]) / (p.L[i] - p.L[i - 1]); ctx.lineTo(lerp(P[i - 1][0], P[i][0], k) + dx, lerp(P[i - 1][1], P[i][1], k)); break; }
+  }
+  ctx.stroke();
+}
+// Round the corners of a polyline (radius r), so silhouettes read as drawn
+// shapes, not boxes.
+function rounded(pts, r) {
+  const o = [pts[0]];
+  for (let i = 1; i < pts.length - 1; i++) { const [ax, ay] = pts[i - 1], [bx, by] = pts[i], [cx, cy] = pts[i + 1];
+    const l1 = Math.hypot(bx - ax, by - ay), l2 = Math.hypot(cx - bx, cy - by), k = Math.min(r, l1 / 2, l2 / 2);
+    const p = [bx + (ax - bx) * k / l1, by + (ay - by) * k / l1], q = [bx + (cx - bx) * k / l2, by + (cy - by) * k / l2];
+    for (let j = 0; j <= 6; j++) { const u = j / 6, v = 1 - u; o.push([v * v * p[0] + 2 * v * u * bx + u * u * q[0], v * v * p[1] + 2 * v * u * by + u * u * q[1]]); } }
+  o.push(pts[pts.length - 1]); return o;
+}
+// A building is a list of [points, strokeWidth, revealStart, revealEnd]; the
+// first item is its outline, filled black so it hides what stands behind it.
+const B = items => items.map(it => ({ p: poly(it[0]), w: it[1] ?? SW, s: it[2] ?? 0, e: it[3] ?? .75 }));
+const up = (x, h) => [x, G - h];
+const sil = (steps, r = 3) => B([[rounded(steps.map(([x, h]) => up(x, h)), r)]]);
+const mast = (x, h0, h1, s = .6) => [[up(x, h0), up(x, h1)], SW, s, s + .3];
+function canton(cx) {                            // hourglass, cap, mast
+  const hb = 66, side = s => { const p = []; for (let i = 0; i <= 20; i++) { const u = i / 20, r = 4 + 8 * Math.pow(Math.abs(u - .62) / .62, 1.7); p.push(up(cx + s * Math.min(r, 12), u * hb)); } return p; };
+  const o = side(-1).concat(side(1).reverse());
+  return B([[o], [[up(cx - 8, hb), up(cx + 8, hb)], SW, .5, .8], mast(cx, hb, hb + 28, .65)]);
+}
+// Guangzhou, back row then front row: IFC, CTF and the Canton Tower lead.
+const GZ = [
+  sil([[18, 0], [18, 50], [42, 62], [42, 0]], 4),
+  sil([[50, 0], [51, 52], [56, 70], [62, 78], [68, 70], [73, 52], [74, 0]], 7),                                   // IFC
+  sil([[116, 0], [116, 58], [121, 58], [121, 74], [126, 74], [130, 90], [134, 74], [139, 74], [139, 58], [144, 58], [144, 0]], 2.5),   // CTF
+  sil([[152, 0], [152, 44], [158, 56], [170, 56], [176, 44], [176, 0]], 7),
+  sil([[180, 0], [180, 40], [198, 32], [198, 0]], 4),
+  canton(95),
+  sil([[34, 0], [34, 42], [56, 42], [56, 0]], 9),
+  sil([[138, 0], [138, 46], [160, 46], [160, 0]], 9),
+];
+// Chicago: Willis and Hancock lead.
+const CHI = [
+  sil([[12, 0], [12, 42], [36, 60], [36, 0]], 4),
+  B([[rounded([[44, 0], [44, 44], [50, 44], [50, 62], [55, 62], [55, 76], [65, 76], [65, 62], [70, 62], [70, 44], [76, 44], [76, 0]].map(([x, h]) => up(x, h)), 2.5)],
+     mast(57, 76, 96), mast(63, 76, 90, .65)]),                                                               // Willis
+  sil([[86, 0], [86, 50], [91, 62], [101, 62], [106, 50], [106, 0]], 8),
+  B([[rounded([[116, 0], [121, 72], [141, 72], [146, 0]].map(([x, h]) => up(x, h)), 3)],
+     [[up(117, 4), up(140.5, 70)], SD, .35, .8], [[up(145, 4), up(121.5, 70)], SD, .4, .85], mast(127, 72, 92), mast(135, 72, 86, .65)]),   // Hancock
+  B([[rounded([[154, 0], [154, 44], [165, 60], [176, 44], [176, 0]].map(([x, h]) => up(x, h)), 3)], mast(165, 59, 72, .7)]),
+  sil([[180, 0], [180, 36], [200, 36], [200, 0]], 8),
+  sil([[70, 0], [70, 40], [92, 40], [92, 0]], 9),
+];
+function drawBuilding(b, ox, prog) {
+  b.forEach((it, k) => { const u = (prog - it.s) / (it.e - it.s); if (u <= 0) return;
+    if (k === 0) { ctx.beginPath(); it.p.pts.forEach(([x, y], i) => i ? ctx.lineTo(x + ox, y) : ctx.moveTo(x + ox, y)); ctx.fillStyle = '#000'; ctx.fill(); }
+    ctx.lineWidth = it.w; strokePart(it.p, u, ox); });
+}
+
+// ---------- train ----------
+// Side view, nose to the right. m = 0 bullet train, 1 Chicago El car in the
+// 312.dev icon's style: a rounded box with a centre door and a window each side.
+function carShape(L, h, m, noseR, noseL) {
+  const nl = .42, pts = [], N = 36;
+  const nose = v => 1 - .78 * Math.pow(smooth(clamp(v)), .85);
+  const hf = u => { let b = 1; if (noseR && u > 1 - nl) b = nose((u - (1 - nl)) / nl); if (noseL && u < nl) b = nose((nl - u) / nl);
+    const d = Math.min(u, 1 - u) * L, r = 6.5, e = d < r ? 1 - (r - Math.sqrt(r * r - (r - d) * (r - d))) / h : 1; return lerp(b, e, m); };
+  pts.push([0, 0], [L, 0]); for (let i = N; i >= 0; i--) { const u = i / N; pts.push([u * L, -h * hf(u)]); } pts.push([0, 0]);
+  return { pts, hf };
+}
+// Nose x on screen. The bullet train waits in the box, leaves off the right
+// edge, and the El arrives from the left edge and brakes into the box.
+const REST_B = VX + (VW + 144) / 2, REST_E = VX + (VW + 117) / 2;
+function nose(t) {
+  if (t < 3.3) return REST_B - 14 * (1 - easeOut(seg(t, .9, 1.6))) + (W + 220 - REST_B) * easeIn(seg(t, 2.25, 3.05));
+  return lerp(-12, REST_E, easeOut(seg(t, 3.7, 5.2)));
+}
+function drawTrain(t) {
+  const m = easeIO(seg(t, 3.95, 4.95)), f = nose(t);
+  const h = lerp(15, 21, m), gap = lerp(4, 5, m), L = lerp(70, 56, m);
+  const st = t - 5.2, bob = st > 0 ? Math.exp(-st * 4) * Math.sin(st * 16) : 0;
+  const base = G - 5.5 + bob, doors = easeIO(seg(t, 6.5, 7.1));
+  const TA = seg(t, .9, 1.4); if (TA <= 0) return; ctx.globalAlpha = TA;
+  let x = f;
+  for (let i = 0; i < 2; i++) {
+    const x0 = x - L, noseR = i === 0, noseL = i === 1, top = base - h;
+    const { pts } = carShape(L, h, m, noseR, noseL);
+    ctx.fillStyle = '#000'; ctx.fillRect(x0 - (i === 0 ? gap : 0), base - 1, L + (i === 0 ? gap : 0), G - SW / 2 - base + 1); if (i === 0) ctx.fillRect(x0 - gap, top + 3, gap, h);
+    ctx.lineWidth = SD; for (const u of [.2, .8]) { ctx.beginPath(); ctx.arc(x0 + u * L, G - 3.2, 2.4, 0, 7); ctx.stroke(); }
+    ctx.beginPath(); pts.forEach(([a, b], k) => k ? ctx.lineTo(x0 + a, base + b) : ctx.moveTo(x0 + a, base + b)); ctx.closePath();
+    ctx.fillStyle = '#000'; ctx.fill(); ctx.lineWidth = SW; ctx.stroke();
+    const bA = 1 - smooth(seg(m, 0, .5));       // bullet: one window band
+    if (bA > 0) { ctx.globalAlpha = bA * TA; ctx.lineWidth = SD; const a = noseL ? .44 : .1, b = noseR ? .56 : .9;
+      ctx.beginPath(); ctx.moveTo(x0 + a * L, base - h * .58); ctx.lineTo(x0 + b * L, base - h * .58); ctx.stroke(); ctx.globalAlpha = TA; }
+    const eA = smooth(seg(m, .5, 1));           // El: window, door, window
+    if (eA > 0) { ctx.globalAlpha = eA; ctx.lineWidth = SD;
+      for (const a of [.12, .66]) { ctx.beginPath(); ctx.roundRect(x0 + a * L, top + 5.5, .22 * L, 6.5, 3.2); ctx.stroke(); }
+      const dx = x0 + L / 2, dw = 5, o = SD / 2 + doors * (dw - SD + .6);   // door frame; the centre seam widens into a lit doorway
+      ctx.fillStyle = WHITE; ctx.fillRect(dx - o, top + 5.5, o * 2, base - top - 5.5);
+      ctx.beginPath(); ctx.moveTo(dx - dw, base); ctx.lineTo(dx - dw, top + 5.5); ctx.lineTo(dx + dw, top + 5.5); ctx.lineTo(dx + dw, base); ctx.stroke(); ctx.globalAlpha = TA; }
+    if (i === 0) { ctx.lineWidth = SW; ctx.beginPath(); ctx.moveTo(x0 - gap, base - 5); ctx.lineTo(x0, base - 5); ctx.stroke(); }
+    x = x0 - gap;
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ---------- track ----------
+// The rail is box-wide at rest, reaches the right edge for the departure, the
+// left edge for the arrival, and pulls back into the box on settle. Under it:
+// an arched viaduct in Guangzhou, the L's bracketed columns in Chicago.
+const VIA = poly((() => { const p = []; for (let i = 0; i < 5; i++) for (let j = 0; j <= 16; j++) { const a = Math.PI - j / 16 * Math.PI; p.push([i * 42 + 21 + Math.cos(a) * 18, G + 19 - Math.sin(a) * 14]); } return p; })());
+function drawTrack(t, gz, ch) {
+  const back = easeIO(seg(t, 5.0, 5.8));
+  const x0 = lerp(VX, lerp(-4, VX, back), easeIO(seg(t, 2.6, 3.1)));
+  const x1 = lerp(VX, lerp(lerp(VX + VW, W + 4, easeIO(seg(t, 1.9, 2.35))), VX + VW, back), easeIO(seg(t, .1, 1.0)));
+  ctx.lineWidth = SW;
+  if (t < 3.5) strokePart(VIA, easeIO(seg(t, .5, 1.6)), VX + gz);
+  if (t > 3.3) for (let i = 0; i < 4; i++) { const x = VX + ch + 33 + i * 48; ctx.beginPath(); ctx.moveTo(x, G); ctx.lineTo(x, G + 19); ctx.moveTo(x - 11, G); ctx.quadraticCurveTo(x - 1, G + 1, x, G + 12); ctx.quadraticCurveTo(x + 1, G + 1, x + 11, G); ctx.stroke(); }
+  ctx.beginPath(); ctx.moveTo(x0, G); ctx.lineTo(x1, G); ctx.stroke();
+}
+
+// ---------- wordmarks ----------
+const svgNS = 'http://www.w3.org/2000/svg';
+const meas = document.createElementNS(svgNS, 'svg'); meas.style.cssText = 'position:absolute;visibility:hidden'; document.body.appendChild(meas);
+const WORD = (d => { const p = document.createElementNS(svgNS, 'path'); p.setAttribute('d', d); meas.appendChild(p); const bb = p.getBBox();
+  return { path: new Path2D(d), x0: bb.x * .1, x1: (bb.x + bb.width) * .1, y0: 1200 - (bb.y + bb.height) * .1, y1: 1200 - bb.y * .1 }; })(LOGO.gray);
+const SH = 12, SY = 70;                           // SHANLING cap height and top
+function drawShanling(t) {
+  const p = easeOut(seg(t, .5, 1.5)); if (p <= 0) return;
+  const s = SH / (WORD.y1 - WORD.y0), w = (WORD.x1 - WORD.x0) * s, x = (W - w) / 2;
+  ctx.save(); ctx.beginPath(); ctx.rect(x - 2, 0, (w + 4) * p, H); ctx.clip(); ctx.globalAlpha = p;
+  ctx.translate(x - WORD.x0 * s, SY - WORD.y0 * s); ctx.scale(s, s); ctx.translate(0, 1200); ctx.scale(.1, -.1); ctx.fillStyle = WHITE; ctx.fill(WORD.path); ctx.restore();
+}
+function drawWordmark(t) {                       // 312.dev: heavy numerals, light "dev"
+  const p = easeOut(seg(t, 5.3, 6.0)); if (p <= 0) return;
+  const size = 23, y = 247 + (1 - p) * 6; ctx.textBaseline = 'alphabetic';
+  ctx.font = `700 ${size}px Outfit`; const w1 = ctx.measureText('312.').width;
+  ctx.font = `300 ${size}px Outfit`; const w2 = ctx.measureText('dev').width, x0 = (W - w1 - w2) / 2;
+  ctx.globalAlpha = p; ctx.fillStyle = WHITE;
+  ctx.font = `700 ${size}px Outfit`; ctx.fillText('312.', x0, y);
+  ctx.font = `300 ${size}px Outfit`; ctx.fillText('dev', x0 + w1, y); ctx.globalAlpha = 1;
+}
+
+// ---------- frame ----------
+function render(t) {
+  ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = WHITE;
+  const gz = -(VX + VW + 20) * easeIn(seg(t, 2.7, 3.45));         // Guangzhou leaves left
+  const ch = (W - VX + 20) * (1 - easeOut(seg(t, 3.3, 4.7)));     // Chicago arrives from the right
+  if (t < 3.5) GZ.forEach((b, i) => drawBuilding(b, VX + gz, easeIO(seg(t, .2 + i * .1, 1.2 + i * .1))));
+  if (t > 3.3) CHI.forEach(b => drawBuilding(b, VX + ch, 1));
+  drawTrack(t, gz, ch); drawTrain(t);
+  drawShanling(t); drawWordmark(t);
+  if (MASK) { ctx.fillStyle = '#111'; ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.roundRect(0, 0, W, H, 80); ctx.fill('evenodd'); }
+}
+// Motion blur by temporal supersampling: average n renders spread over an open shutter of `sh` seconds.
+const acc = document.createElement('canvas'), actx = acc.getContext('2d');
+function renderBlur(t, sh, n) {
+  acc.width = cv.width; acc.height = cv.height;
+  actx.fillStyle = '#000'; actx.fillRect(0, 0, acc.width, acc.height);
+  actx.globalCompositeOperation = 'lighter'; actx.globalAlpha = 1 / n;
+  for (let i = 0; i < n; i++) { render(Math.max(0, t + sh * ((i + .5) / n - .5))); actx.drawImage(cv, 0, 0); }
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.drawImage(acc, 0, 0);
+}
+window.renderBlur = renderBlur;
+window.render = render; window.TOTAL = TOTAL;
+window.ready = Promise.all([document.fonts.load('700 23px Outfit'), document.fonts.load('300 23px Outfit')]).then(() => document.fonts.ready);
+if (!qs.has('capture')) window.ready.then(() => { const t0 = performance.now();
+  const loop = () => { render(Math.min(((performance.now() - t0) / 1000) % (TOTAL + 2.5), TOTAL)); requestAnimationFrame(loop); }; loop(); });
+</script></body></html>
