@@ -540,8 +540,8 @@ as a menu's; a lit row's foot never passes y 282.
 
 - **Progress:** 6 px, round ends, Track and Accent Blue. Used for playback, scans and
   downloads.
-- **Slider page** (Volume, Max Volume, Default Volume, Channel Balance, Brightness, Crossfade, Resume Songs,
-  Night Shift, Wheel Sensitivity): the status row names it; a feature with a switch has it as the
+- **Slider page** (Volume, Resume Songs, Night Shift, Wheel Sensitivity; stock's Max Volume, Default Volume, Channel
+  Balance and Brightness pages and Crossfade's keep the form where they still open): the status row names it; a feature with a switch has it as the
   first row, selected; the value in Inter Medium 22 centered on y 150; a 6 px track from the text
   column to the right column with its top at y 186, Track behind and Accent Blue filled to a 14 px
   white knob (Channel Balance fills from the center; in Light Mode, where white is the canvas, the
@@ -552,6 +552,18 @@ as a menu's; a lit row's foot never passes y 282.
   named choices: [List row](#list-row)); the value is the warmth ("3400 K") in every mode, and while
   Off it, the track and the knob are Text Tertiary with no accent, as a disabled row's (the user's,
   from audit2 J7).
+- <a id="inline-sliders"></a>**Inline slider rows** (Playback's Max Volume, Balance, Crossfade's Duration and Default
+  Volume's Level, Display's Brightness; the user's, 2026-11-16, from `design/mockups/mock_inline_slider.py`): a setting
+  with one value changes in its list, not on a slider page. At rest the row holds its title, a 4 px track from x 190 to
+  62 px short of the right column (Track behind, Accent Blue filled to a 12 px white knob; on the selection bar the track
+  is `#7DA2EA` and the fill white) and its value in 15 px Text Secondary (Caption On Accent on the bar) ending on the
+  right column; no chevron. Center or a tap grabs it: the row grows to 64 px over 150 ms, as a captioned row grows (at
+  once under Reduce Motion), its value in Inter Medium 20 on the right column and a full-width track 10 px in from the
+  two columns centered 43 px down with a 16 px knob; Balance grows to 82 px for Left and Right in 13 px under its
+  track, and its track has a 12 px center mark and no fill. The wheel sets the value live at the wheel's speed, each
+  step set and saved as stock's page for it sets a step; Center or Return sets it down, as does the selection moving
+  off it. A setting with a switch and a value (Crossfade, Default Volume) is a switch row with its slider row under it,
+  shown only while the switch is on (`patch/inline_slider.c`).
 - **Vertical slider (EQ):** 4 px Track line, Accent Blue fill from 0 dB to the value (Text Tertiary
   while the EQ is off), a 14 px white knob, ringed 2 px in Accent Blue while the wheel is on it
   (1 px in Track otherwise in Light Mode, as the slider page's). The band's name and gain under it
@@ -1115,7 +1127,10 @@ interruptible: a turn mid-run starts from where it is.
   (a `ponytail:` in `feedback.c`). Stock's own confirm, which closes itself, appears and goes at once.
 - **Menu sheet, and Up Next in it:** rises 260 ms `cubic_out` while the page behind recedes to 94% and dims and
   the frost fades in; falls 180 ms ease-in (quadratic), from where a rise left it (`menu_modal.c` `sheet_run`).
-- Under Reduce Motion each fades only: 150 ms in, 120 ms out, nothing moved or scaled.
+- Under Reduce Motion the toast and the card appear at once and fade out over 120 ms; the sheet fades only, 150 ms
+  in and 120 ms out; nothing moves or scales.
+- A toast's and the card's fade is their dialog's opacity, which the shared frame timer sets (`ovm_bind`), never the
+  dialog's own paint: stock skips painting a widget whose opacity is under 9, so a dialog at 0 would stay there.
 
 ### Gestures
 

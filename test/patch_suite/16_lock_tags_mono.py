@@ -46,16 +46,20 @@ assert texts()[4:]==['Wake: Double Press']; passed()  # VOLGUARD, Volume Guard's
 m,rows,texts,*_=settings_page('power','scroll_view_powermanager',{'STANDBYLIMIT':'4'})
 assert texts()[0]=='Standby Limit: Off'; passed()  # out of range: Off
 # Playback: stock V1.36's thirteen rows less its last two (Volume and Album Display, whose page's rows are here, on
-# Display and on Library > Folders, and Folder skip, Library > Folders'), then ours, EQ and the Library first; the
-# Sleep Timer, Volume (its slider page, below), stock's Max Volume and Default Volume pages and the Library open from
-# their rows.
+# Display and on Library > Folders, and Folder skip, Library > Folders'), then ours, EQ and the Library first; stock's
+# Balance (10) stays, hidden, for the inline one. The Sleep Timer, Volume (its slider page, below) and the Library open
+# from their rows; Max Volume, Balance and Crossfade's and Default Volume's values are inline sliders (inline_slider.c),
+# Crossfade and Default Volume switches with their slider row under them.
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13)
-assert len(rows)==9 and icons==['playset_gapless','playset_memplay','playset_balance','playset_balance','system_powermanager','playset_maxvol','playset_maxvol','playset_bootvol','playset_folderjump']
-assert texts()==['Crossfade: Off','Resume Songs: 30 min','Mono Audio','Swap L/R','Sleep Timer','Volume: 0','playset_maxvol','playset_bootvol','Library']
-assert len(m.nodes[m.settings_view]['children'])==20 and not set(m.entries[11:])&set(m.nodes[m.settings_view]['children'])
-assert [(m.entries+rows).index(c) for c in m.nodes[m.settings_view]['children']]==[2,21,3,7,13,6,14,8,17,18,19,20,0,9,10,15,16,1,4,5]  # EQ, Library first
-assert [click(4),m.opened[-1],click(6),m.opened[-1],click(7),m.opened[-1]]==[[],('systemset/sleepshutdown_page',None),[],('playset/maxvol_page',None),[],('playset/bootvol_page',None)]
-assert click(8)==[] and m.opened[-1]==('playset/playset_page',None) and m.get(payload_syms['playset_sub'])==0
+assert len(rows)==12 and icons==['playset_gapless','playset_gapless','playset_memplay','playset_balance','playset_balance','system_powermanager','playset_maxvol','playset_maxvol','playset_bootvol','playset_bootvol','playset_balance','playset_folderjump'],icons
+assert texts()==['Crossfade','Duration','Resume Songs: 30 min','Mono Audio','Swap L/R','Sleep Timer','Volume: 0','Max Volume','Default Volume','Level','Balance','Library'],texts()
+assert len(m.nodes[m.settings_view]['children'])==23 and not set(m.entries[11:])&set(m.nodes[m.settings_view]['children'])
+assert [(m.entries+rows).index(c) for c in m.nodes[m.settings_view]['children']]==[2,24,3,7,13,14,6,15,8,18,19,20,21,22,0,9,23,10,16,17,1,4,5]  # EQ, Library first
+assert m.nodes[m.entries[10]].get('visible',1)==0 and m.nodes[rows[1]].get('visible',1)==0 and m.nodes[rows[9]].get('visible',1)==0  # stock's Balance; the sliders of switches that are off
+assert [click(5),m.opened[-1]]==[[],('systemset/sleepshutdown_page',None)]
+n=len(m.opened); assert click(7)==[] and len(m.opened)==n  # Max Volume: grabbed in place, no page
+assert click(8)==[(1,'PLAYSET','BOOTVOLFLAG')] and m.nodes[rows[9]].get('visible',1)==1  # Default Volume on: its Level shows
+assert click(11)==[] and m.opened[-1]==('playset/playset_page',None) and m.get(payload_syms['playset_sub'])==0
 passed()
 # Playback > Library (library_settings.c): stock's Playback page again, its rows gone, ours built; a chevron row opens
 # its page the same way (playset_sub naming it while its init runs).
@@ -341,16 +345,18 @@ for _ in range(6):
     saved.append((m.config['FOLDERROOT'],texts()[0]))
 assert [v for v,_ in saved]==['Música ñ','Unknown','Zeta','','alpha','B'*200]
 assert [t for _,t in saved]==['Folder Root: '+(v or 'Card') for v,_ in saved]; passed()
-# Crossfade (crossfade.c): the row shows the saved length while on; an unreadable one is the default.
-for config,text in (({'XFADE':'1','XFADESEC':'7'},'Crossfade: 7s'),({'XFADE':'1','XFADESEC':'15'},'Crossfade: 15s'),({'XFADE':'1','XFADESEC':'16'},'Crossfade: 5s'),({'XFADESEC':'7'},'Crossfade: Off')):
+# Crossfade (crossfade.c xfade_state): the switch row, its Duration row shown while on holding the saved length; an
+# unreadable one is the default.
+for config,on,sec in (({'XFADE':'1','XFADESEC':'7'},1,7),({'XFADE':'1','XFADESEC':'15'},1,15),({'XFADE':'1','XFADESEC':'16'},1,5),({'XFADESEC':'7'},0,7)):
     m,rows,texts,*_=settings_page('audioset','scroll_view_playset',config,stock_rows=13)
-    assert texts()[0]==text and m.nodes[m.nodes[m.nodes[rows[0]]['children'][0]]['children'][1]].get('name')=='label_xfade'
+    assert texts()[:2]==['Crossfade','Duration'] and m.nodes[rows[1]].get('visible',1)==on
+    assert m.call(address=payload_syms['inline_value'],args=(4,0,0,0),gap=0)==sec,config
 passed()
 # Resume Songs (crossfade.c resume_min): the row shows Q2POD RESUMEMIN, 30 min unless 0 or a five in 20-120.
 for config,text in (({},'30 min'),({'RESUMEMIN':'0'},'Off'),({'RESUMEMIN':'120'},'120 min'),({'RESUMEMIN':'125'},'30 min'),
                     ({'RESUMEMIN':'22'},'30 min'),({'RESUMEMIN':'15'},'30 min'),({'RESUMEMIN':'x'},'30 min')):
     m,rows,texts,*_=settings_page('audioset','scroll_view_playset',config,stock_rows=13)
-    assert texts()[1]=='Resume Songs: '+text and m.nodes[m.nodes[m.nodes[rows[1]]['children'][0]]['children'][1]].get('name')=='label_resumemin',config
+    assert texts()[2]=='Resume Songs: '+text and m.nodes[m.nodes[m.nodes[rows[2]]['children'][0]]['children'][1]].get('name')=='label_resumemin',config
 passed()
 # Wheel sensitivity (playback.c wheel_pct, test/playback.py's travel): Display → Controls' last row in both
 # builds, Q2POD WHEELSENSITIVITY as 1.0.6 saved it, 50% unless a canonical ten in 10-200.

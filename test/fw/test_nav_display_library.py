@@ -302,15 +302,16 @@ def test_display_adds_smart_awake_night_shift_and_its_two_pages_among_stocks_row
     ui = Ui(fw)
     page = display(fw, ui)
     view = page.view()
-    # stock's first two, then Smart Awake and Night Shift, then Appearance and Cover Flow, then Enlarged Album Art
-    # (stock's switch, by its translation key), then Reduce Motion last; its third, Lock Screen, and its fourth, Show
-    # Navigation Bar, are not offered
-    assert titles(view) == ['stock_0', 'stock_1', 'Smart Awake', 'Night Shift', 'Appearance', 'Cover Flow',
-                            'playset_covermode', 'Reduce Motion']
-    # Night Shift and the two pages open a page, so they carry the chevron; Smart Awake, Enlarged Album Art and Reduce
-    # Motion change in place
+    # Brightness, an inline slider in place of stock's first row (kept, hidden), then stock's second, Smart Awake and
+    # Night Shift, then Appearance and Cover Flow, then Enlarged Album Art (stock's switch, by its translation key), then
+    # Reduce Motion last; its third, Lock Screen, and its fourth, Show Navigation Bar, are not offered
+    assert titles(view) == ['Brightness', 'stock_0', 'stock_1', 'Smart Awake', 'Night Shift', 'Appearance',
+                            'Cover Flow', 'playset_covermode', 'Reduce Motion']
+    assert not view.children[1].visible and view.children[0].visible
+    # Night Shift and the two pages open a page, so they carry the chevron; Brightness, Smart Awake, Enlarged Album Art
+    # and Reduce Motion change in place
     into = [any(c.props.get('image') == b'list_into' for c in item.children[0].children) for item in view.children if not item.name]
-    assert into == [False, True, True, True, False, False]
+    assert into == [False, False, True, True, True, False, False]
 
 
 def titles(view):
@@ -631,10 +632,10 @@ def test_playback_has_the_sleep_timer_and_leaves_the_library_s_rows(fw):
     page = Pages(fw, ui)
     page.open('playset/playset_page')
     texts = page.texts()
-    assert texts == ['stock_2', 'Library', 'stock_3', 'stock_7', 'Crossfade: Off', 'stock_6', 'Resume Songs: 30 min',
-                     'stock_8', 'Sleep Timer', 'Volume: 0', 'playset_maxvol', 'playset_bootvol', 'stock_0', 'stock_9',
-                     'stock_10',
-                     'Mono Audio', 'Swap L/R', 'stock_1', 'stock_4', 'stock_5']  # EQ (stock_2), then the Library
+    assert texts == ['stock_2', 'Library', 'stock_3', 'stock_7', 'Crossfade', 'Duration', 'stock_6',
+                     'Resume Songs: 30 min', 'stock_8', 'Sleep Timer', 'Volume: 0', 'Max Volume', 'Default Volume',
+                     'Level', 'stock_0', 'stock_9', 'Balance', 'stock_10', 'Mono Audio', 'Swap L/R', 'stock_1',
+                     'stock_4', 'stock_5']  # EQ (stock_2), then the Library
     ui.click(button_of(page.view(), 'Sleep Timer'))
     assert page.opened[-1] == 'systemset/sleepshutdown_page'
 

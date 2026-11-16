@@ -381,7 +381,7 @@ review's order, 2026-11-15; `tools/ipod.py` `HOME_SETS`): Wi-Fi and Bluetooth op
 page held, and the rows that are not stock's are bound by `home_sets_bind`. General is stock's System page
 (`ringnav_systemset`): About, System Update, Storage, Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
 Transfer) and Reset Settings, then Restart and Shut Down after a 12 px gap (`power_rows`); Battery is stock's Power
-page under its new name. No list has headings. EQ and **Library** come first, then Play Mode, Gapless, Crossfade, Memory Playback, Resume Songs, Headphones Required and the Sleep Timer (stock's timer page, which Control Center's tile opens too); the volume rows (Volume, Max Volume, Default Volume) and specialist output controls come next. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)). Added binary settings
+page under its new name. No list has headings. EQ and **Library** come first, then Play Mode, Gapless, Crossfade, Memory Playback, Resume Songs, Headphones Required and the Sleep Timer (stock's timer page, which Control Center's tile opens too); the volume rows (Volume, Max Volume, Default Volume) and specialist output controls come next. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)); Max Volume, Balance, Crossfade's length and Default Volume's level are inline sliders set in the list, Crossfade and Default Volume switches with their slider under them while on, and Display's Brightness is one too ([oled-design](oled-design.md#inline-sliders)). Added binary settings
 use Shanling's `switch_on` / `switch_off` images with the whole row as the tap target. Settings
 that cycle between named choices retain their value labels. Volume, Crossfade, Resume Songs, Wheel
 Sensitivity and App Store show a chevron, as do the added Library browsing rows.
@@ -479,7 +479,7 @@ Spotify row's Now Playing page uses Now Playing's layout (`NP_*`), rounded art i
 (`ringnav_image_add`) works on the decoded bitmap, so it applies at either size.
 
 Brightness, Balance, Maximum Volume and Default Volume use eight-pixel rounded, theme-aware bars
-with their original touch areas. Crossfade, Wheel Sensitivity, Resume Songs, Night Shift and Playback's Volume reuse Default Volume's
+with their original touch areas, where they still open (Settings sets them in its list instead). Crossfade, Wheel Sensitivity, Resume Songs, Night Shift and Playback's Volume reuse Default Volume's
 page and inherit its styling. All keep their ranges and wheel/touch controls, but lose their endpoint icons (`slider_plain`, tools/ipod.py):
 the images stay, named, with no image and no size, since stock looks them up. The quick
 settings slider and custom volume overlay retain their layouts. Under OLED (`settings.values.switch`) the four
