@@ -616,8 +616,8 @@ static void state_write(void) {
                      qg.out.mac, *qg.out.mac ? qg.out.codec : "", qg.playing ? qg.title : "",
                      qg.playing ? qg.artist : "", qg.playing ? qg.album : "",
                      qg.playing ? qg.genre : "", qg.track, qg.tracks, qg.duration,
-                     qg.playing ? position() : 0, qg.playing ? qg.status : "", qg.event,
-                     qg.event_seq, qg.event_name);
+                     qg.playing ? position() / 1000 * 1000 : 0, qg.playing ? qg.status : "",
+                     qg.event, qg.event_seq, qg.event_name);
     if (n < 0 || n >= (int)sizeof b) n = (int)sizeof b - 1;
     if (!strcmp(b, qg.last)) return;
     memcpy(qg.last, b, (unsigned)n + 1);
