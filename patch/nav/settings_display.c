@@ -311,7 +311,8 @@ static void setting_row(void *view, int i) {
  * holding a 335x70 s_btn_listitem button with a 52px icon, a 24px label at x 72 and list_into).
  * Its fourth, Show Navigation Bar, goes: the themes own the bar and each list's box, so stock's
  * switch is held on (tools/build.py NAV_SHOWN). Its third, Lock Screen, goes too: Q2 Muse has no
- * lock screen (docs/internals.md#screen-off-and-wake). Smart Awake and Night Shift (the brightness
+ * lock screen (docs/internals.md#screen-off-and-wake). Its first, Brightness, is hidden for an
+ * inline slider row in its place (inline_slider.c). Smart Awake and Night Shift (the brightness
  * icon, opening its slider page, crossfade.c) follow Brightness and Screen Off Time, then
  * Appearance and Coverflow, each opening stock's page again (display_open) with its stock rows
  * dropped and its own instead: the theme's options (OLED's: Light Mode, Accent, Home, Shortcut,
@@ -335,6 +336,11 @@ int ringnav_display(void *win, void *ctx) {
     if (!sub) {
         widget_destroy(widget_get_child(view, 3)); /* Show Navigation Bar */
         widget_destroy(widget_get_child(view, 2)); /* Lock Screen */
+        /* Brightness, set in the list (inline_slider.c), first; stock's row, which opens its page,
+         * stays hidden */
+        widget_set_visible(widget_get_child(view, 0), 0, 0);
+        void *bright = inline_slider_row(view, "display_backlight", IS_BRIGHT);
+        widget_restack(P(P(bright, W_PARENT), W_PARENT), 0);
         setting_row(view, SETTING_KEEPLIT);
         night_row(list_row_into(view, "display_backlight", xfade_open, (void *)3));
         for (int i = DISPLAY_APPEARANCE; i <= DISPLAY_COVERFLOW; ++i)

@@ -214,8 +214,8 @@ for n,kept in ((999,True),(1000,False)):
 m=PlaybackMachine(); assert m.fn('playback_shuffle')==1 and '/mnt/data/ringnav-queue' in m.files
 m.fail='alloc'; assert m.fn('playback_shuffle')==0 and '/mnt/data/ringnav-queue' not in m.files and m.fn('playback_option',0)==0; checks+=1
 
-# The Now Playing hold's View Queue opens the Up Next list only while a shuffle is on (stock's page
-# otherwise); it lists those rows, in play order, and opens nothing else. No separate Up Next row.
+# The Now Playing hold's View Queue opens the Up Next sheet; it lists the rows in play order, and plays
+# nothing. No separate Up Next row.
 def now_playing():
     m=PlaybackMachine(page='playing_page',pos=1); m.handlers.pop(syms['mclGetPlayStatus'],None); m.word(0xa50084,2); return m
 m=now_playing(); m.options(0,2,0); m.press(5000); assert m.release()==1
@@ -224,7 +224,7 @@ m.press(7000); assert m.release()==1; checks+=1
 m=now_playing(); m.options(1,2,0); calls=m.random_calls
 m.press(6000); assert m.hold()==11 and m.release()==0 and 'Up Next' not in m.labels()
 m.pick(m.labels().index('View Queue')); m.advance(0)
-assert 'window_create' in [c[0] for c in m.calls] and m.random_calls==calls and not m.playback(); checks+=1
+assert m.nodes[m.top]['name']=='upnext_page' and m.random_calls==calls and not m.playback(); checks+=1  # Up Next's sheet (upnext.c)
 
 # Album identity (name, then album artist, else folder) crosses folders with an album artist;
 # folder grouping does not. Disc/track and CUE order differ from source order, and categories keep
@@ -1498,9 +1498,12 @@ m=PickMachine(); assert m.at_site(m.ROW,at=0)==['stock_queue']
 m=PickMachine(status=1); assert m.at_site(m.ROW)==['stock_queue']
 m=PickMachine(); m.held=0; assert m.at_site(m.ROW)==['stock_queue']
 m=PickMachine(); m.handlers.pop(syms['player_start_queue'],None); m.fn('ringnav_start_queue',1); assert m.seen==['resume_held','stock_queue'] or m.seen==['stock_queue'],m.seen  # DLNA, a delete
-# Up Next's row of it closes the page, then opens Now Playing. Any other row plays, as before.
-m=PickMachine(); m.word(O['MCL_POS'],0); del m.seen[:]; m.fn('un_play',0); assert [e for e in m.seen if e!='resume_held']==['back','np'],m.seen
-m=PickMachine(); m.held=0; m.word(O['MCL_POS'],0); del m.seen[:]; m.fn('un_play',0); assert [e for e in m.seen if e!='resume_held']==['stock_queue','back'],m.seen
+# Up Next's row of it closes the sheet, then opens Now Playing. Any other row plays, as before.
+def up_next_row(m,at):  # upnext.c's rows as un_fill leaves them: one song, queue index at, nothing queued
+    un=ps['un']; m.word(un+20,at); m.word(un+20+4*500,1); m.word(un+20+4*501,0)
+    m.fn('un_click',0,0)  # its row's stop 0, pressed by Centre (no event)
+m=PickMachine(); m.word(O['MCL_POS'],0); del m.seen[:]; up_next_row(m,0); assert [e for e in m.seen if e!='resume_held']==['back','np'],m.seen
+m=PickMachine(); m.held=0; m.word(O['MCL_POS'],0); del m.seen[:]; up_next_row(m,0); assert [e for e in m.seen if e!='resume_held']==['stock_queue','back'],m.seen
 checks+=30
 # player_start's real body: another list loads and starts through the hook, past stock's mclLoadPlayList and mclStartPlayer.
 class BodyMachine(PickMachine):
@@ -1898,7 +1901,7 @@ for kind,stamps in ((1,True),(0xff10,True),(0xf001,True),(2,False),(3,False),(0x
 # Stock's own player_start_queue hook doesn't stamp (DLNA, SyncLink's URL plays); Up Next's row does, before it.
 m=PressMachine(); m.handlers[ps['stock_start_queue_trampoline']]='xf:none'; m.fn('ringnav_start_queue',2); assert m.nothing()
 m=PressMachine(); m.handlers[syms['player_start_queue']]='xf:start'; m.handlers[syms['navigator_back']]='xf:none'
-m.fn('un_play',0); assert m.stock==['xf:start'] and m.seen==5001
+up_next_row(m,0); assert m.stock==['xf:start'] and m.seen==5001
 # Play from a stop stamps, a headset's own too (media_set_playing, through the same hook); playing or paused doesn't.
 m=PressMachine(); m.word(0xa50084,1); m.enter('player_play_pause'); assert m.at()==5001 and m.stock==['xf:pause']
 m=PressMachine(); m.handlers.pop(syms['player_play_pause'],None); m.word(0xa50084,1); m.fn('media_set_playing',1); assert m.at()==5001 and m.stock==['xf:pause']

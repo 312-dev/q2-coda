@@ -145,27 +145,62 @@ def test_a_two_line_body_stands_on_19_px_lines_under_the_title(fw, ui, st):
     assert centres == [top + 18 + 12, top + 18 + 24 + 4 + 9, top + 18 + 24 + 4 + 19 + 9]
 
 
-@pytest.mark.parametrize('reduce, out_ms', [(0, 120), (1, 120)])
-def test_the_card_fades_in_over_200_ms_and_out_over_120_before_its_answer(fw, ui, st, reduce, out_ms):
+def mo_frame(ui):
+    """One tick of ui_kit.c's shared frame timer, kept while it answers RET_REPEAT as stock keeps it."""
+    for t, (fn, ctx, ms) in list(ui.timers.items()):
+        if fn == ui.fn('ui_kit__mo_frame'):
+            if ui.due('ui_kit__mo_frame') == [8]:
+                ui.timers[t] = (fn, ctx, ms)
+            return
+
+
+def opacity_of(fw, w):
+    """w's opacity as last set; stock's 255 until then."""
+    mine = [a[1] for _, a in fw.calls('widget_set_opacity') if a[0] == w]
+    return mine[-1] if mine else 255
+
+
+@pytest.mark.parametrize('reduce', [0, 1])
+def test_the_card_shows_though_stock_never_paints_a_dialog_under_opacity_9(fw, ui, st, reduce):
+    """Stock's widget_paint (demo 0x672848) returns before any paint hook while a widget's opacity is under 9. The
+    card's dialog starts at 0, so what fades it in runs from the shared frame timer (ui_kit.c ovm_bind), never from the
+    dialog's own paint; under Reduce Motion it is at 255 at once."""
+    theme(fw, **({'REDUCEMOTION': b'1'} if reduce else {}))
+    now = [1000]
+    card = Card(fw, ui, now)
+    assert card.ask('Replace Manual 01?', ['Cancel', 'Replace'])
+    assert opacity_of(fw, card.dialog) == (255 if reduce else 0)
+    painted = 0
+    for _ in range(20):  # 320 ms of frames
+        now[0] += 16
+        mo_frame(ui)
+        if opacity_of(fw, card.dialog) >= 9:  # as stock's widget_paint: below 9, no paint at all
+            card.paint()
+            painted += 1
+    assert opacity_of(fw, card.dialog) == 255 and painted >= 10
+
+
+@pytest.mark.parametrize('reduce', [0, 1])
+def test_the_card_fades_in_over_200_ms_and_out_over_120_before_its_answer(fw, ui, st, reduce):
     """docs/oled-design.md#overlay-motion: the dialog (scrim and card together) at opacity 0 when asked, up cubic out
-    over 200 ms (150 under Reduce Motion), the status row's dim with it; an answer fades it out, linear, and runs once
-    that is done."""
+    over 200 ms on the frame timer (at once under Reduce Motion), the status row's dim with it; an answer fades it
+    out, linear, over 120 ms, and runs once that is done."""
     theme(fw, **({'REDUCEMOTION': b'1'} if reduce else {}))
     now = [1000]
     card = Card(fw, ui, now)
     assert card.ask('Scan Music?', ['Not Now', 'Scan'], kind=NEUTRAL)
-    opacity = lambda: [a[1] for _, a in fw.calls('widget_set_opacity')][-1]  # noqa: E731
-    assert opacity() == 0
-    now[0] += 75 if reduce else 100  # half way: 7/8 in
-    card.paint()
-    assert opacity() == 223
+    opacity = lambda: opacity_of(fw, card.dialog)  # noqa: E731
+    assert opacity() == (255 if reduce else 0)
+    now[0] += 100  # half way: 7/8 in
+    mo_frame(ui)
+    assert opacity() == (255 if reduce else 223)
     now[0] += 200
-    card.paint()
+    mo_frame(ui)
     assert opacity() == 255
     ui.key(card.dialog, KEY_RETURN)
-    assert [ms for fn, _, ms in ui.timers.values() if fn == ui.fn('feedback__card_answer')] == [out_ms]
-    now[0] += out_ms // 2
-    card.paint()
+    assert [ms for fn, _, ms in ui.timers.values() if fn == ui.fn('feedback__card_answer')] == [120]
+    now[0] += 60
+    mo_frame(ui)
     assert opacity() == 127 and not card.answers
-    ui.due()
+    ui.due('feedback__card_answer')
     assert card.answers == [(0, 0)]
