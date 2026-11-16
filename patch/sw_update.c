@@ -261,7 +261,9 @@ static void sw_confirm_open(void) {
 
 /* The check's spinner, and its answer once the thread has one. */
 static int sw_tick(const void *unused) {
-    if (sw.state == SW_CHECKING) {
+    /* and not while the check's page still slides in: a page opened then is held back by the
+     * window manager until that ends, and took no input once it showed */
+    if (sw.state == SW_CHECKING || (sw.page && window_manager_is_animating(window_manager()))) {
         sw.frame = (sw.frame + 1) % 12;
         if (sw.page) widget_invalidate_force(sw.page, (void *)0);
         return 8; /* RET_REPEAT */

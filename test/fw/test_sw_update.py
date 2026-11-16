@@ -183,6 +183,22 @@ def test_the_checks_answer(fw, state, confirm):
     assert sw.page and sw.result == (SW_CHECKING if confirm else state) and bool(sw.confirm) == confirm
 
 
+def test_the_answer_waits_for_the_check_page_to_finish_sliding_in(fw):
+    pages = opened(fw)
+    fw.mock('check_updatefw_exist', lambda *_: 1)
+    fw.mock('fw_pthread_create', lambda *_: 0)
+    fw.mock('timer_add', lambda *_: 5)
+    sliding = [1]
+    fw.mock('window_manager_is_animating', lambda *_: sliding[0])
+    fw.fn('ringnav_fwupdate_tf', C.c_int)()
+    sw = fw.var('sw_update__sw', Sw)
+    sw.state = SW_OK
+    tick = fw.fn('sw_update__sw_tick', C.c_int, C.c_void_p)
+    assert tick(None) == 8 and pages() == ['swupdate_page'] and not fw.calls('fw_pthread_join')
+    sliding[0] = 0
+    assert tick(None) == 7 and pages() == ['swupdate_page', 'swconfirm_page']
+
+
 def test_leaving_while_it_checks_cancels(fw):
     opened(fw)
     fw.mock('check_updatefw_exist', lambda *_: 1)
