@@ -8054,7 +8054,8 @@ m.heads=[m.lists[0],new_one,m.lists[2]]; pl_front(m); assert cover_cd(m)==11
 m.press(100); assert m.hold()==11 and m.release()==0 and m.nodes[m.title]['text']=='Renamed',m.nodes[m.title]['text']
 m.pick(3); m.advance(0); assert m.opened[-1]==('localmusic/playlistsmore_page',1); passed()
 # New Playlist (playlists.c playlists_new): the covers close (coverflow_playlists_close) and New runs as the page's
-# own: its row's target (OLED's set has no toolbar), stock's dialog. With no covers up, nothing.
+# own: its row's target (OLED's set has no toolbar), which under list.entry.ipod is the letter strip's New Playlist
+# (search_strip.c playlist_new_open) in place of stock's dialog. With no covers up, nothing.
 def pl_new(covers=True):  # the Playlists page booted (PlaylistPageMachine's default: OLED's set written)
     class M(PlaylistPageMachine):
         def hook(self,u,address,size,unused):
@@ -8067,7 +8068,8 @@ def pl_new(covers=True):  # the Playlists page booted (PlaylistPageMachine's def
     m.before=m.bar(); m.calls.clear()
     m.call(address=payload_syms['playlists_new'],args=(0,0,0,0),gap=0,clear=False); m.advance(0,clear=False); m.stack_rows()
     return m
-m=pl_new(); assert m.shut==1 and m.top==m.page and m.dialogs==['dialog/addplaylist_dialog'] and m.navbar()==0; passed()
+m=pl_new(); strips=[n for n in m.nodes.values() if n.get('name')=='searchstrip_page']
+assert m.shut==1 and not m.dialogs and len(strips)==1 and m.navbar()==0,(m.dialogs,len(strips)); passed()
 m=pl_new(covers=False); assert m.shut==1 and m.top==m.page and not m.dialogs and m.navbar()==0; passed()
 
 # Album favourites and ratings (ratings.c rate_*, coverflow.c album_id): a cover keeps 0-5 hearts of its own in
