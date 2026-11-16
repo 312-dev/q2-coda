@@ -296,7 +296,7 @@ EQ, Bluetooth, SyncLink and Wi-Fi widgets and sets their images and text, but
 never their geometry. The built-in set's `system_bar.bin` (iPod) therefore keeps the play state
 and EQ in `view_left`, as stock does, and puts Bluetooth/codec, Wi-Fi and the
 battery in `view_right`, and the layout below is that set's; OLED's set has its own copy, a status
-row with the title on the left and the clock, play state and battery on the right ([Theme](#theme)). EQ uses an explicit 16 px font and a 28 px cell: its text is 24 px wide in the shipped font, so stock's 20 px cell clips it. A 16 px `Q2` label at the left inset appears only when both playback state and EQ are hidden. Stock's tick also hides `img_state` whenever its own player is stopped, as it is under Spotify, radio or a video; `ringnav_showface` runs `bar_state_sync`, the play state and the `Q2` label alone, straight after the tick, so the payload's play state is back before any paint, dark or not (no file reads; a relayout waits for the paint); the codec badge, accent and Rockbox check wait for paint (`bar_sync`). A new battery level or charge state repaints the bar from the tick while lit ([Status bar](internals.md#status-bar-ipod)). Correcting it at paint time instead relaid the row twice a second, and EQ was drawn for a frame in the play icon's place. When `bar_sync` changes `img_state` while another window paints (Now Playing paints every 250 ms, so it usually sees a Play/Pause first), it arms a 0 ms timer that runs `widget_invalidate_force` on the bar after the frame: an invalidate made mid-paint is dropped with that frame's dirty rects, and `img_state` keeps its dirty flag (`+0x24` bit `0x200`), which makes stock `widget_invalidate` return early, so the 1 s tick's own invalidates skipped it until something else repainted the bar (#116). `bar_sync` updates its visibility without moving the centred clock. The volume icon and number and SyncLink move to `x = -200`, where they
+row with the title on the left and the clock, the payload's glyph slots and the battery on the right ([Theme](#theme), [Status row slots](internals.md#status-row-slots)). EQ uses an explicit 16 px font and a 28 px cell: its text is 24 px wide in the shipped font, so stock's 20 px cell clips it. A 16 px `Q2` label at the left inset appears only when both playback state and EQ are hidden. Stock's tick also hides `img_state` whenever its own player is stopped, as it is under Spotify, radio or a video; `ringnav_showface` runs `bar_state_sync`, the play state and the `Q2` label alone, straight after the tick, so the payload's play state is back before any paint, dark or not (no file reads; a relayout waits for the paint); the codec badge, accent and Rockbox check wait for paint (`bar_sync`). A new battery level or charge state repaints the bar from the tick while lit ([Status bar](internals.md#status-bar-ipod)). Correcting it at paint time instead relaid the row twice a second, and EQ was drawn for a frame in the play icon's place. When `bar_sync` changes `img_state` while another window paints (Now Playing paints every 250 ms, so it usually sees a Play/Pause first), it arms a 0 ms timer that runs `widget_invalidate_force` on the bar after the frame: an invalidate made mid-paint is dropped with that frame's dirty rects, and `img_state` keeps its dirty flag (`+0x24` bit `0x200`), which makes stock `widget_invalidate` return early, so the 1 s tick's own invalidates skipped it until something else repainted the bar (#116). `bar_sync` updates its visibility without moving the centred clock. The volume icon and number and SyncLink move to `x = -200`, where they
 draw off-screen. Both groups sit 54 pixels
 from the edges (`STATUS_MARGIN`): the 50 where the 16-pixel icons clear the top corners
 ([Rounded corners](#rounded-corners)) plus 2 (`STATUS_PAD`) so they don't crowd the glass. A new
@@ -1039,14 +1039,19 @@ Now Playing's bar has no thumb: stock draws its dragger (a box and knob, the sto
 `slider_knobless` the second, which stock's default slider style would otherwise supply. 1.3.9 first
 painted it white, which drew the box at rest.
 
-- **The status row.** No bar band: the page's title, small and grey, from x 62, and the play state and a slim
-  battery ending 62 px from the right edge (`STATUS_ROW_INSET`), centred on y 23, up in the glass's top curve and clear
-  of it. While Buttons Lock is on a 13 px padlock stands left of the play state, and a press it blocks with the screen
-  off shows a card saying so for 1.5 s, as the iPod's Hold switch did ([Buttons lock](internals.md#buttons-lock)). The clock, in the title's face and grey, sits 24 px left of the battery's body, beside the play state (and further left by the
-  padlock's room while it shows), and the title ends with an ellipsis 12 px short of the widest clock ("00:00"), however long it is: under a status row a
+- **The status row.** No bar band: the page's title, small and grey, from x 62, and on the right, right to left, a
+  slim battery ending 62 px from the right edge (`STATUS_ROW_INSET`), three level bars while something plays (frozen
+  and grey while paused; a tap on them opens Now Playing), Wi-Fi's signal while connected (a crossed glyph with no
+  link past the access point), a card app's sync (turning arrows while it checks, a filling ring while it
+  downloads), a Bluetooth headset's battery, and a 13 px padlock while Buttons Lock is on, each centred on y 23, up in
+  the glass's top curve and clear of it ([Status row slots](internals.md#status-row-slots)). A press Buttons Lock
+  blocks with the screen off shows a card saying so for 1.5 s, as the iPod's Hold switch did ([Buttons
+  lock](internals.md#buttons-lock)). The clock, in the title's face and grey, sits 6 px left of the leftmost of them,
+  and the title ends with an ellipsis 12 px short of the widest clock ("00:00"), however long it is: under a status row a
   page's caption never takes a row of its own (`bar_title_fits`), so the list keeps its top. A page with no title (Home, Now Playing, Cover Flow's covers;
-  an artist's are titled by the artist) has the clock centred across the row instead, but Home in Split keeps it at
-  the right, over the art, where it is inked white or black as one glyph with the others (`clock_place`).
+  an artist's are titled by the artist) has the clock centred across the row instead (at the right where centred it
+  would reach the glyphs), but Home in Split keeps it at the right, over the art, where it is inked white or black as
+  one glyph with the others (`clock_place`).
 - **The grid.** 32 px rows from y 58 with their text at x 24, seven to a screen: the list ends at y 282, above
   the bottom corners, and the strip below it stays black (`list_fit`). Chevrons and values share one column 28 px
   from the right edge on every row. Settings, the Library, Home (Full and Split) and stock's own list pages all

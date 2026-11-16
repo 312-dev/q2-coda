@@ -168,14 +168,20 @@ def coverage_nonzero(polys, box):
 PHOSPHOR = ROOT/'assets/icons/phosphor'
 
 
+def optical(polys, px, ink, ref=None):
+    """polys, a glyph laid in a px box, at its optical size: scaled about its ink's centre, put on the box's, until its
+    ink's longer side is ink px (docs/oled-design.md Icons), so glyphs of one size read as one size. ref: another
+    glyph's polygons whose ink sets the scale and centre instead, so parts drawn apart (Wi-Fi's lit and unlit arcs)
+    stay in register."""
+    xs, ys = [x for poly in ref or polys for x, _ in poly], [y for poly in ref or polys for _, y in poly]
+    k, cx, cy = ink / max(max(xs) - min(xs), max(ys) - min(ys)), (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+    return [[(px / 2 + (x - cx) * k, px / 2 + (y - cy) * k) for x, y in poly] for poly in polys]
+
+
 def glyph_png(polys, px, rgb, ink=0.0):
-    """polys, a glyph laid in a px box, as a px square PNG in rgb, filled nonzero. ink, its optical size: the glyph
-    scaled about its ink's centre, put on the box's, until its ink's longer side is ink px (docs/oled-design.md Icons),
-    so glyphs of one size read as one size."""
+    """polys, a glyph laid in a px box, as a px square PNG in rgb, filled nonzero; ink, its optical size (optical)."""
     if ink:
-        xs, ys = [x for poly in polys for x, _ in poly], [y for poly in polys for _, y in poly]
-        k, cx, cy = ink / max(max(xs) - min(xs), max(ys) - min(ys)), (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
-        polys = [[(px / 2 + (x - cx) * k, px / 2 + (y - cy) * k) for x, y in poly] for poly in polys]
+        polys = optical(polys, px, ink)
     return png(px, px, laid(px, px, [(coverage_nonzero(polys, (0, 0, px, px)), lambda x, y: (rgb, 1))]))
 
 
@@ -197,13 +203,36 @@ def spinner(f, spokes=8, px=15, radii=(3.4, 6.4), width=1.9, fade=0.1, rgb=0xfff
     return png(px, px, compose((0, 0, px, px), layers))
 
 
-def phosphor(name, px, rgb, ink=0.0):
-    """Phosphor's icon name (its file's stem, the weight in it; 'q2coda/<stem>' for one of ours) as a px square PNG in
-    rgb, its paths filled nonzero (glyph_png's ink)."""
+def phosphor_polys(name, px):
+    """Phosphor's icon name (its file's stem, the weight in it; 'q2coda/<stem>' for one of ours) as polygons in a px
+    box."""
     svg = (PHOSPHOR.parent/f'{name}.svg' if name.startswith('q2coda/') else PHOSPHOR/f'{name}.svg').read_text()
     check('viewBox="0 0 256 256"' in svg, f'{name}: expected a 256 unit viewBox')
-    polys = [[(x * px / 256, y * px / 256) for x, y in poly] for d in re.findall(r'\sd="([^"]+)"', svg) for poly in path(d)]
-    return glyph_png(polys, px, rgb, ink)
+    return [[(x * px / 256, y * px / 256) for x, y in poly] for d in re.findall(r'\sd="([^"]+)"', svg) for poly in path(d)]
+
+
+def phosphor(name, px, rgb, ink=0.0):
+    """Phosphor's icon name as a px square PNG in rgb, its paths filled nonzero (glyph_png's ink)."""
+    return glyph_png(phosphor_polys(name, px), px, rgb, ink)
+
+
+def status_wifi(level, px, ink, lit, unlit):
+    """The status row's Wi-Fi at level (1 to 3 arcs, wifi-low to wifi-high), a px square PNG: the full glyph in unlit,
+    the level's arcs over it in lit, both at wifi-high's optical size and centre, so the shape keeps its width."""
+    full = phosphor_polys('wifi-high-bold', px)
+    part = phosphor_polys(f"wifi-{('low', 'medium', 'high')[level - 1]}-bold", px)
+    box = (0, 0, px, px)
+    return png(px, px, laid(px, px, [(coverage_nonzero(optical(full, px, ink), box), lambda x, y: (unlit, 1)),
+                                     (coverage_nonzero(optical(part, px, ink, full), box), lambda x, y: (lit, 1))]))
+
+
+def status_turn(name, px, ink, rgb, turn):
+    """name at its optical size, turned clockwise by turn (a fraction of a whole turn) about the box's centre, a px
+    square PNG in rgb: a frame of the status row's sync arrows."""
+    a, c = 2 * math.pi * turn, px / 2
+    polys = [[(c + (x - c) * math.cos(a) - (y - c) * math.sin(a), c + (x - c) * math.sin(a) + (y - c) * math.cos(a)) for x, y in poly]
+             for poly in optical(phosphor_polys(name, px), px, ink)]
+    return png(px, px, laid(px, px, [(coverage_nonzero(polys, (0, 0, px, px)), lambda x, y: (rgb, 1))]))
 
 
 # A theme's own glyphs (docs/oled-design.md Icons), in final colours per half: _d on black, _l on paper, _w on the
@@ -220,6 +249,20 @@ SPIN_R = (3.4, 6.4)  # a spoke's ends' distances from the centre, round capped
 SPIN_STROKE = 1.9
 SPIN_FADE = 0.1
 STATE_INKS = {'d': 0xffffff, 'l': 0x000000}
+# The status row's glyphs by role (status_row.c, docs/oled-design.md#status-row): name -> (Phosphor stem, box px,
+# optical ink, 0 for none), each in Text Primary per half (STATE_INKS). The play state and the padlock are 13 px boxes
+# drawn as they were (their ink 10.6 and 11 px); the rest are STATUS_PX boxes at STATUS_INK, the padlock's ink, so
+# they read as one size. Wi-Fi's levels (status_wifi) light 1 to 3 of wifi-high's arcs over the rest in STATUS_UNLIT;
+# the sync arrows turn through STATUS_SPIN frames of a half turn (the glyph repeats every half turn), in Text
+# Secondary; the download's arrow sits in its ring, white.
+STATUS_PX = 14
+STATUS_INK = 11.0
+STATUS_GLYPHS = {'play': ('play-fill', STATE_PX, 0), 'pause': ('pause-fill', STATE_PX, 0), 'keylock': ('lock-simple-fill', STATE_PX, 0),
+                 'status_wifi_x': ('wifi-x-bold', STATUS_PX, STATUS_INK), 'status_bt': ('bluetooth-bold', STATUS_PX, STATUS_INK),
+                 'status_down': ('arrow-down-bold', 8, 0)}
+STATUS_UNLIT = {'d': 0x3a3a3c, 'l': 0xc7c7cc}
+STATUS_SECONDARY = {'d': 0xababab, 'l': 0x5c5c5c}
+STATUS_SPIN = 8
 KEYLOCK_CARD_PX = 56  # Buttons Lock's card's padlock (keylock.c CARD_GLYPH)
 # Now Playing's shuffle and repeat (playing.modes.icons, np_bar.c np_modes): bold, MODE_PX, off in Text Secondary per
 # half, on in the theme's own accent's top tone in both; repeat-once is repeat's on glyph for Repeat One.
@@ -488,6 +531,16 @@ def pop_images(accent):
     return out
 
 
+def status_images(prefix):
+    """The status row's glyphs (STATUS_GLYPHS and the rest of its role), {name: PNG bytes}, per half."""
+    out = {f'{prefix}_{n}_{k}': phosphor(g, px, c, ink) for n, (g, px, ink) in STATUS_GLYPHS.items() for k, c in STATE_INKS.items()}
+    out |= {f'{prefix}_status_wifi_{n}_{k}': status_wifi(n, STATUS_PX, STATUS_INK, c, STATUS_UNLIT[k])
+            for n in (1, 2, 3) for k, c in STATE_INKS.items()}
+    out |= {f'{prefix}_status_sync_{f}_{k}': status_turn('arrows-clockwise-bold', STATUS_PX, STATUS_INK, c, f / STATUS_SPIN / 2)
+            for f in range(STATUS_SPIN) for k, c in STATUS_SECONDARY.items()}
+    return out
+
+
 def theme_images(themes):
     """Every theme's images, {name: PNG bytes}, each name once. A theme that draws another's art (its art attribute)
     makes that theme's names, so its values must draw the same bytes: the payload has one image per name."""
@@ -509,9 +562,8 @@ def images(t):
     # status row's play state
     out |= {f'{prefix}_chevron_{k}': phosphor('caret-right-bold', CARET_PX, c) for k, c in (CHEVRON_INKS | CHEVRON_MUTED_INKS).items()}
     out |= {f'{prefix}_spin_{f}': spinner(f, SPIN_SPOKES, CARET_PX, SPIN_R, SPIN_STROKE, SPIN_FADE) for f in range(SPIN_SPOKES)}
-    out |= {f'{prefix}_{n}_{k}': phosphor(f'{n}-fill', STATE_PX, c) for n in ('play', 'pause') for k, c in STATE_INKS.items()}
-    # and Buttons Lock's padlock beside it (keylock.c keylock_bar), and its card (keylock.c keylock_paint)
-    out |= {f'{prefix}_keylock_{k}': phosphor('lock-simple-fill', STATE_PX, c) for k, c in STATE_INKS.items()}
+    out |= status_images(prefix)
+    # Buttons Lock's card (keylock.c keylock_paint)
     out |= {f'{prefix}_keylock_card_{k}': phosphor('lock-simple-fill', KEYLOCK_CARD_PX, c) for k, c in STATE_INKS.items()}
     if t['np_modes']:
         for n in ('shuffle', 'repeat'):

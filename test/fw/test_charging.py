@@ -9,6 +9,7 @@ from test_nav_playing import Bar, Ui, scratch, st, theme  # noqa: F401 (fixtures
 
 KEY_LOW, KEY_CHARGING, KEY_PLUGGED, KEY_WEAK = 1, 2, 4, 8  # navigation.h BATT_KEY_*
 TOUCH_DOWN, TOUCH_UP = 0xff, 0x103
+SLOT_X = 240 + 60  # test_nav_playing.Bar's view_battery on the bar: view_right's x and its own
 
 
 @pytest.fixture
@@ -48,8 +49,9 @@ class Tap:
         self.bar.level(text, icon)
         self.bar.sync()
         fw.mock('navigator_to_with_context', lambda page, info, *_: self.toasts.append(C.string_at(info + 8).decode()) or 0)
-        # widget_to_local's stub leaves the point as it is: touches are in the slot's own pixels
-        self.touch = fw.fn('charge_touch', None, C.c_uint, C.c_int, C.c_int)
+        # touches in the bar's pixels (status_row.c status_touch): the slot's own plus its x on the bar
+        touch = fw.fn('status_touch', None, C.c_uint, C.c_int, C.c_int)
+        self.touch = lambda kind, x, y: touch(kind, x + SLOT_X, y)
         self.poll = fw.fn('charging_poll', None)
 
     def __call__(self, x0, y0, x1=None, y1=None):
@@ -210,8 +212,7 @@ def test_a_plug_in_chirps_in_what_plays(fw, st, ui, clicker, tone, there, status
 
 def test_ringnav_input_turns_the_panels_portrait_touch_upright(fw, st, ui):
     """The panel reports portrait axes (x 0-319 across the short side): upright x is its y, upright y 319 less its x,
-    so a tap on the battery at upright (12, 15) arrives as (304, 12)."""
-    # widget_to_local's stub leaves the point as it is, so upright is the slot's own pixels here
+    so a tap on the battery at upright (12, 15) in its slot, SLOT_X + 12 on the bar, arrives as (304, SLOT_X + 12)."""
     tap = Tap(fw, st, ui)
     fw.mock('stock_input_trampoline', lambda *_: 0)
     send = fw.fn('ringnav_input', C.c_int, C.c_void_p, C.c_void_p)
@@ -219,7 +220,7 @@ def test_ringnav_input_turns_the_panels_portrait_touch_upright(fw, st, ui):
         e = C.create_string_buffer(0x40)
         struct.pack_into('<i', e, O['EVENT_TYPE'], kind)
         struct.pack_into('<i', e, O['EVENT_X'], 319 - 15)
-        struct.pack_into('<i', e, O['EVENT_Y'], 12)
+        struct.pack_into('<i', e, O['EVENT_Y'], SLOT_X + 12)
         send(ui.wm, e)
     tap.poll()
     assert tap.toasts == ['Battery 62%']

@@ -531,11 +531,21 @@ unsigned wheel_sb_alpha(void *list);
 #define BATT_LOW_PCT 20 /* under it the fill is red and a tap says Low battery */
 void round_path(void *vg, float x, float y, float w, float h, float r); /* list_marks.c */
 void battery_slim(void *w, void *canvas, int x, int y, int bw, int bh, unsigned key);
-/* charging.c: 1 while the charger cannot keep up (no signal for it yet: always 0); ringnav_input's
- * touches, for a tap on the status row's battery; usb_ui_poll's toasts */
+/* charging.c: 1 while the charger cannot keep up (no signal for it yet: always 0); a tap on the
+ * status row's battery (status_row.c status_touch); usb_ui_poll's toasts */
 int charge_weak(void);
-void charge_touch(unsigned type, int x, int y);
+void charge_tap(void);
 void charging_poll(void);
+/* status_row.c: the status row's glyph slots, right to left (docs/oled-design.md#status-row): their
+ * clock edge (navigation.c clock_place), paint (ringnav_paint_bg), the slot under a touch, the sync
+ * bar_state_sync runs (1: repaint the bar), ringnav_input's touches; the headset's battery, 0-100
+ * or -1 */
+enum { SLOT_BATTERY, SLOT_PLAY, SLOT_WIFI, SLOT_SYNC, SLOT_HEADSET, SLOT_LOCK, SLOT_N };
+int status_slots_left(void);
+void status_slots_paint(void *bar, void *canvas);
+int status_slot_at(int x, int y);
+int status_row_sync(void);
+void status_touch(unsigned type, int x, int y);
 /* charging.c: the cable in (usb_ui_status), Charge Limit reached (system.c charge_poll), the
  * plug-in screen's input gate (ringnav_input; 1 drops the event) and paint (ringnav_paint) */
 void charge_plugged(void), charge_limited(void), usb_charger_in(void);
@@ -628,8 +638,9 @@ void np_seek_bar(int phase, int to, int paused);
 void seek_scrub(int to);
 int seek_scrub_end(int to, int seek);
 int video_on(void);
-/* keylock.c: Buttons Lock's padlock and its card (docs/internals.md#buttons-lock) */
-int keylock_gate(void *e, int remote), keylock_bar(void *bar), keylock_room(void);
+/* keylock.c: Buttons Lock's card (docs/internals.md#buttons-lock); its padlock is a status_row.c
+ * slot */
+int keylock_gate(void *e, int remote);
 void keylock_paint(void *w, void *canvas);
 /* feedback.c: an overlay card's scrim over the top window and the status bar; 1 on the window */
 int overlay_scrim(void *w, void *canvas, unsigned argb, int *dy);

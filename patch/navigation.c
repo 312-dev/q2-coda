@@ -3511,7 +3511,7 @@ static int bar_state_sync(void *bar) {
             }
         }
     }
-    changed |= keylock_bar(bar); /* keylock.c */
+    changed |= status_row_sync(); /* status_row.c: its slots, the padlock among them */
     if (st.bar_idle && st.bar_state && st.bar_eq)
         widget_set_visible(st.bar_idle,
                            !widget_get_visible(st.bar_state) && !widget_get_visible(st.bar_eq), 0);
@@ -3537,14 +3537,16 @@ int bar_repaint(const void *info) {
 static int slider_page(void *top);
 /* A status row's clock (tools/ipod.py status_row; docs/ipod.md#status-bar-and-clock): on a page
  * with no title, centred on the screen (x 187.5); else (a title on the left, or Home's Split with
- * its art beside the list) at the right, its text ending CLOCK_BESIDE left of the battery's body,
- * beside the play state, and further left by Buttons Lock's padlock while it shows (keylock_room).
+ * its art beside the list) at the right, its text ending CLOCK_BESIDE left of the leftmost shown
+ * slot (status_row.c status_slots_left: the battery's body, or the level bars, Wi-Fi, a sync, a
+ * headset or Buttons Lock's padlock left of it); a centred clock that would reach that edge goes
+ * there too.
  * Over Split's art it is in Text Primary, so the art's ink (coverflow.c home_ink) covers it whole
  * as one glyph. The title's box ends CLOCK_CLEAR short of the widest clock, "00:00", so its
  * ellipsis does. The box is sized to the text as measured in the bar's
  * face, with hscroll_label's 2 px margins, so the label's own alignment plays no part. Runs in
  * the bar's background paint, before the clock draws; a move repaints the bar after. */
-#define CLOCK_BESIDE 24
+#define CLOCK_BESIDE 6
 #define CLOCK_CLEAR 12
 static int clock_width(void *canvas, const unsigned *s) {
     int n = (int)wide_len(s), px = theme()->font_px[ROLE_BAR];
@@ -3564,10 +3566,9 @@ static void clock_place(void *bar, void *top) {
     }
     if (!widest) widest = clock_width(canvas, zeros); /* the face holds until a restart */
     const unsigned *text = widget_get_text(clock);
-    int split = coverflow_home_split(top), right = !!st.bar_titled || split,
-        edge =
-            I(P(st.bar_slot, W_PARENT), W_X) + I(st.bar_slot, W_X) - CLOCK_BESIDE - keylock_room(),
+    int split = coverflow_home_split(top), edge = status_slots_left() - CLOCK_BESIDE,
         w = (text && *text ? clock_width(canvas, text) : widest) + 4,
+        right = st.bar_titled || split || (375 - w + 1) / 2 + w - 2 > edge,
         x = right ? edge + 2 - w : (375 - w + 1) / 2,
         color = split == 2 ? (int)RGBA(0xffffff) : ink,
         title_w = edge - widest - CLOCK_CLEAR + 2 - I(st.bar_title, W_X);
@@ -5206,8 +5207,9 @@ int ringnav_paint_bg(void *w, void *canvas) {
         stock_canvas_set_fill_color(canvas, fill);
         coverflow_home_bar(canvas, window_manager_get_top_window(wm));   /* OLED's art in the bar */
         coverflow_home_strip(canvas, window_manager_get_top_window(wm)); /* and Split's list */
-        artist_cap(w, canvas);   /* an artist's monogram, its top over the bar */
-        np_about_cap(w, canvas); /* About's header, its top over the bar */
+        artist_cap(w, canvas);         /* an artist's monogram, its top over the bar */
+        np_about_cap(w, canvas);       /* About's header, its top over the bar */
+        status_slots_paint(w, canvas); /* the status row's glyphs but the battery (status_row.c) */
         st.paint_w = w;
         stock_canvas_set_fill_color(canvas, fill);
     }
@@ -9557,8 +9559,8 @@ int ringnav_input(void *wm, void *e) {
         st.touch_type = (int)type;
         st.touch_x = I(e, EVENT_X);
         st.touch_y = I(e, EVENT_Y);
-        /* a tap on the status battery (charging.c), upright: the panel's raw axes are portrait */
-        charge_touch(type, st.touch_y, 319 - st.touch_x);
+        /* a tap on a status row slot (status_row.c), upright: the panel's raw axes are portrait */
+        status_touch(type, st.touch_y, 319 - st.touch_x);
     }
     if ((type == EVT_KEY_DOWN || type == EVT_KEY_UP || type == EVT_KEY_LONG) &&
         (key == KEY_PREV || key == KEY_NEXT || key == KEY_CENTER) && usb_prompt()) {

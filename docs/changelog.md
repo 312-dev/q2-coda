@@ -8,6 +8,11 @@
   - Bluetooth: the Q2 can read a connected headset's battery level (where the headset reports it), for the status bar.
   - Bluetooth receiver (OLED): while your phone plays through the Q2, the screen shows the song's title and artist in large type under a Bluetooth circle, with the codec (LDAC, AAC…) below, instead of stock's big picture and small labels.
   - Bluetooth: the Q2 shows up as **Q2** on phones, cars and speakers instead of "Shanling Q2". Rename it in **Settings → Bluetooth → Name** on the letter strip (up to 30 characters); the new name is used at once and kept through updates.
+  - Status bar (OLED): while a song plays the play triangle becomes three moving level bars; paused they stop and turn grey. Tap them to open Now Playing. The clock sits beside whatever glyphs show, and moves over when there are fewer.
+  - Status bar (OLED): Wi-Fi shows its signal left of the play state while connected, one to three arcs lit; connected with no internet it shows a crossed Wi-Fi glyph, and with Wi-Fi off, nothing.
+  - Status bar (OLED): while a streaming app checks its server, turning arrows show beside the battery; while it downloads songs, a ring fills in the accent colour with an arrow in it.
+  - Status bar (OLED): a connected Bluetooth headset that reports its battery shows a Bluetooth glyph and its percentage.
+  - Status bar (OLED): the Buttons Lock padlock sits leftmost of the status glyphs, and long titles end in an ellipsis sooner when more glyphs show: nothing wraps.
   - Status bar: while it charges, the battery shows how full it really is. It used to fill to the end the moment the cable went in.
   - Status bar (OLED): a charging battery shows a small lightning bolt inside it, in green; full on the cable, or held at **Charge Limit**, it stays green with no bolt.
   - Status bar: with **Battery** on Percent, the percentage stays on one line in the status bar; at 100% or while charging it could drop onto a second line.
