@@ -558,9 +558,10 @@ def validate_assets(directory):
     for path in DEBUG_TOOLS + DEBUG_LINKS:
         assert path in stock_listing and path not in listing, path
     print('Removed from the rootfs:', ' '.join(DEBUG_TOOLS + DEBUG_LINKS))
-    # Bluetooth is discoverable for 180 s, not for as long as it is on, and named Q2.
-    from build import BT_MAIN, BT_DISCOVERABLE, BT_NAME
-    assert read('rootfs.squashfs', BT_MAIN) == read('stock.squashfs', BT_MAIN).replace(*BT_DISCOVERABLE).replace(*BT_NAME)
+    # Bluetooth is discoverable for 180 s, not for as long as it is on, named Q2, with BlueZ's experimental interfaces.
+    from build import BT_MAIN, BT_DISCOVERABLE, BT_NAME, BT_EXPERIMENTAL
+    assert read('rootfs.squashfs', BT_MAIN) == read('stock.squashfs', BT_MAIN).replace(*BT_DISCOVERABLE).replace(*BT_NAME).replace(*BT_EXPERIMENTAL)
+    assert b'\nExperimental = true\n' in read('rootfs.squashfs', BT_MAIN)
     assert b'\nDiscoverableTimeout = 180\n' in read('rootfs.squashfs', BT_MAIN)
     assert b'\nName = Q2\n' in read('rootfs.squashfs', BT_MAIN) and b'Shanling' not in read('rootfs.squashfs', BT_MAIN)
     # The boot deletes Baidu Netdisk's saved sign-in.

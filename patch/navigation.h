@@ -935,6 +935,8 @@ typedef struct {
     const char *title, *line, *pill; /* pill 0: none */
 } mode_page_t;
 int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
+/* bt_battery.c: a connected headset's battery, 0 to 100, -1 for none (docs/internals.md#headset-battery) */
+int bt_headset_battery(void);
 /* bt_recv.c: Bluetooth receiver mode as a mode page (docs/internals.md#bluetooth-receiver) */
 void bt_recv_load(void *win), bt_recv_paint(void *w, void *canvas);
 const char *bt_recv_title(const char *name), *bt_recv_codec(void *win);

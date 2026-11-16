@@ -417,6 +417,10 @@ BT_DISCOVERABLE = (b'\nDiscoverableTimeout = 0\n', b'\nDiscoverableTimeout = 180
 # The name a phone lists the Q2 as when the user chose none: BlueZ's own Name, which bt_name.c's Alias of "" falls
 # back to (docs/internals.md#bluetooth-name); a chosen one is [Q2POD] BTNAME in config.ini.
 BT_NAME = (b'\nName = Shanling Q2\n', b'\nName = Q2\n')
+# BlueZ 5.66's experimental D-Bus interfaces, off in stock's file: BatteryProviderManager1 among them, through which
+# bluealsa hands BlueZ the level a headset reports over HFP, so it shows as the device's Battery1 (patch/bt_battery.c,
+# docs/internals.md#headset-battery).
+BT_EXPERIMENTAL = (b'\n#Experimental = false\n', b'\nExperimental = true\n')
 # Wi-Fi transfer's server (docs/internals.md#wi-fi-transfer-root). thttpd drops to www-data once it has bound :8888, so its
 # own request parsing, which runs before the PIN check, is not root's; stock's conf kept it root. Only root may write
 # the card, so each of the six CGIs is patch/cgi_root.c, set-uid root (CGI_MODE), which runs Q2CGI as root.
@@ -1945,7 +1949,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c']
 
 def compile_payload(out):  # pragma: no mutate block
     """Compile and link the payload."""
@@ -2295,8 +2299,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(gettys == 1 and b'getty' not in inittab, 'Unexpected inittab')
     (out/'inittab').write_bytes(inittab)
     bt_main = cat(BT_MAIN)
-    check(bt_main.count(BT_DISCOVERABLE[0]) == 1 and bt_main.count(BT_NAME[0]) == 1, 'Unexpected Bluetooth main.conf')
-    (out/'main.conf').write_bytes(bt_main.replace(*BT_DISCOVERABLE).replace(*BT_NAME))
+    check(all(bt_main.count(old) == 1 for old, _ in (BT_DISCOVERABLE, BT_NAME, BT_EXPERIMENTAL)), 'Unexpected Bluetooth main.conf')
+    (out/'main.conf').write_bytes(bt_main.replace(*BT_DISCOVERABLE).replace(*BT_NAME).replace(*BT_EXPERIMENTAL))
     thttpd_conf = cat(THTTPD_CONF)
     check(thttpd_conf.count(THTTPD_USER[0]) == 1 and b'user=' not in thttpd_conf.replace(THTTPD_USER[0], b''),
           'Unexpected thttpd.conf')
