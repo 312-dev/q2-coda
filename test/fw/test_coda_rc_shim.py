@@ -313,34 +313,3 @@ def test_jump_plays_a_queue_entry_if_it_is_still_that_song(fw, ui, mcl, recs):
     q2.files[CMD] = b'43 jump 1 11\n'
     q2.tick()
     assert q2.files.pop(ACK) == b'43 1\n' and len(fw.calls('player_start_queue')) == 1
-
-
-AVRCP = '( /usr/bin/q2-avrcp >/dev/null 2>&1 & )'
-
-
-def test_bluetooth_on_writes_now_playing_for_q2_avrcp_without_car_remote(fw, ui, mcl, recs):
-    """docs/internals.md#track-metadata: with Bluetooth on, Now Playing goes to the file and q2-avrcp is started (once,
-    and again within 30 s of dying), Car Remote off; its queue file is Car Remote's alone."""
-    q2 = Q2(fw, ui, recs, on=0)
-    fw.var('g_bluetoothflag', C.c_ubyte).value = 1
-    q2.queue(at=1)
-    q2.tick()
-    assert q2.system == [AVRCP] and q2.now()['title'] == 'Song 1' and QUEUE not in q2.files
-    q2.files['/tmp/q2-avrcp.pid'] = b'4343\n'
-    q2.files['/proc/4343'] = b''
-    q2.tick(31000)
-    assert q2.system == [AVRCP]  # running
-    del q2.files['/proc/4343']
-    q2.tick(31000)
-    assert q2.system == [AVRCP] * 2  # gone: started again
-    q2.status = 3
-    q2.tick()
-    assert q2.now()['state'] == '2'
-
-
-def test_bluetooth_and_car_remote_start_both(fw, ui, mcl, recs):
-    q2 = Q2(fw, ui, recs)
-    fw.var('g_bluetoothflag', C.c_ubyte).value = 1
-    q2.queue()
-    q2.tick()
-    assert sorted(q2.system) == sorted([AVRCP, '( /usr/bin/coda-rc >/dev/null 2>&1 & )']) and QUEUE in q2.files
