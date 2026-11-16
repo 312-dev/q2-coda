@@ -26,7 +26,7 @@ static void setting_text(int i) {
         return;
     }
     static const char *const toggles[] = { "Smart Awake", 0 /* 6: the Clicker's, no row */,
-                                           "Time in Title" };
+                                           "Time in Title", "Reduce Motion" };
     if (i >= SETTING_KEEPLIT) {
         list_toggle(st.setting_label[i], toggles[i - SETTING_KEEPLIT], *setting_values[i]);
         return;
@@ -298,11 +298,13 @@ static void setting_row(void *view, int i) {
     static const char *const icons[] = { "system_display",      "playset_covermode",
                                          "system_powermanager", "playset_covermode",
                                          "system_display",      "system_display",
-                                         "system_keytone",      "system_display" };
+                                         "system_keytone",      "system_display",
+                                         "system_display" };
     const char *icon = i < SETTING_OWN ? icons[i] : "system_display";
     st.setting_label[i] = list_row(view, icon, setting_click, (void *)(long)i);
     setting_text(i);
     if (i == SETTING_KEEPLIT) caption_row(st.setting_label[i], smart_awake_caption);
+    if (i == SETTING_REDUCEMOTION) caption_row(st.setting_label[i], reduce_motion_caption);
 }
 
 /* systemset_display_page_init: stock builds its four rows (0x4c6b94: a s_listitem_black list_item
@@ -339,6 +341,7 @@ int ringnav_display(void *win, void *ctx) {
             widget_set_text_utf8(list_row_into(view, sub_icons[i], display_open, (void *)(long)i),
                                  titles[i]);
         pod_rows(win, "scroll_view_display", POD_COVERMODE, 1, cf_icons); /* Now Playing's art */
+        setting_row(view, SETTING_REDUCEMOTION); /* last (docs/oled-design.md#motion) */
         return result;
     }
     widget_destroy_children(view);

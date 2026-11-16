@@ -431,7 +431,7 @@ void ringnav_folder_top(void) {
 
 /* A folder level's list, stock's table on the open page, pushes in as a page_list level does. */
 static void folder_push(int dir) {
-    if (!theme()->motion[MOTION_INPLACE].ms) return;
+    if (!motion_row(MOTION_INPLACE)->ms) return;
     void *table =
         widget_lookup(window_manager_get_top_window(window_manager()), "tableview_folder", 1);
     if (table) page_push(widget_get_child(table, 0), dir);

@@ -9,6 +9,7 @@ import pytest
 
 from conftest import O
 from test_nav_library_pages import Config, Library, Songs, Ui, field
+from test_nav_display_library import use_set
 from test_nav_painters import scratch, st  # noqa: F401  (fixtures: the payload's state)
 
 KEY_RETURN, KEY_CENTER, KEY_PREV, KEY_NEXT, KEY_PLAY, KEY_FWD_BTN, KEY_BACK_BTN = (
@@ -586,11 +587,12 @@ def test_a_server_song_that_cannot_play_is_greyed_with_the_offline_mark(fw, ui, 
     assert {t: colour for t, r, colour in c.texts}['Song Two'] == 0xb3ffffff
 
 
-def test_no_match_is_the_empty_state_centred_above_the_strip(fw, ui, song):
+def test_no_match_is_the_empty_state_centred_above_the_strip(fw, ui, song, st):
     """docs/oled-design.md#empty-and-offline: typed text that matches nothing paints the empty state, its outline
     glyph, "No Matches" and "Try fewer letters", centred between the status row (the page at screen y 58) and the
     strip (196 on the sheet): its 118 px stack from sheet y 39, no tiles."""
     s = Strip(fw, ui, library(song))
+    use_set(st, 'oled')  # its bar ends at 58: nothing above the page, so the whole form, its glyph
     struct.pack_into('<i', (C.c_char * 8).from_address(s.ss.page), 4, 58)  # the page under the status row
     s.type('zz')
     c = painted(fw, s)
@@ -599,6 +601,17 @@ def test_no_match_is_the_empty_state_centred_above_the_strip(fw, ui, song):
     words = [t for t, *_ in c.texts]
     assert 'No Matches' in words and 'Try fewer letters' in words and 'No results' not in words
     assert fw.fn('empty_top', C.c_int, C.c_int, C.c_int, C.c_int)(58, 58 + 196, 0) - 58 == top
+
+
+@pytest.mark.parametrize('light', [0, 1])
+def test_the_empty_state_s_title_reads_in_either_half(fw, ui, song, st, light):
+    """The empty state's title is Text Primary: white on the black canvas, black on Light Mode's paper (emulator,
+    2026-11-16: it was flipped twice in Light Mode, white on white, so only the glyph and hint showed)."""
+    s = Strip(fw, ui, library(song))
+    st('light').value = light
+    s.type('zz')
+    title = [colour for t, _, colour in painted(fw, s).texts if t == 'No Matches']
+    assert title and rgb(title[0]) == (0x000000 if light else 0xffffff), [hex(c) for c in title]
 
 
 class Renames:

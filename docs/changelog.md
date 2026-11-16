@@ -2,6 +2,12 @@
 
 - **Unreleased (q2-coda)**:
   - Q2 Pod is now Q2 Muse: the name on every screen, page and guide. Settings, the card's files and paired devices carry over as they are.
+  - Light Mode: an empty page's title (No Playlists, No Genres, No Matches) showed white on white; it is black now.
+  - Display (OLED): an empty Favorites list shows a crossed-out heart.
+  - Home (Split, OLED): with a song that has no art, the placeholder fills the right pane up to the top edge under the clock and battery, as a cover does; it started below the status row, leaving a black band.
+  - Display (OLED): an empty state under other rows (Car Remote's switch, Playlists' On-The-Go, Search's tabs) shows just its title and hint, without the large glyph, which is kept for pages that are empty whole.
+  - Settings > Display: a **Reduce Motion** switch, last on the page. On, pages cross-fade instead of sliding, Control Center lands without its bounce, the selection bar no longer leans as you turn the wheel, Cover Flow stops at its ends without bouncing, switches flip at once, and the charging screen's sweep and Up Next's level bars stand still. Scrolling, progress, the volume bar and swipe back still move.
+  - Display (OLED): toasts rise and fade in, then sink and fade out, instead of popping; the confirmation card fades in and out over the page.
   - Subsonic comes built in: it is in Streaming without installing it. A newer Subsonic from the App Store still takes over.
   - Car Remote: with Library on Local + Server and a card app's server songs imported, Q2 Muse Remote's lists (and Android Auto's) showed nothing; they list both libraries again.
   - Now Playing: the Shuffle and Repeat outline from the Centre cycle hides after a tap, as every focus ring does.

@@ -283,62 +283,42 @@ void battery_slim(void *w, void *canvas, int x, int y, int bw, int bh, unsigned 
  * colours. Every switch is drawn here, stock's image switches too (paint_into), so all of them move
  * alike: a switch seen at the same place before with the other value slides its knob there over
  * SWITCH_MS, easing out, and the track's colour crosses with it (unselected) or turns halfway
- * (selected). A change during the slide starts from where the knob is. A switch first seen at a
- * place (a page opening, a list scrolled) stands still. */
+ * (selected); under Reduce Motion it is there at once. A change during the slide starts from where
+ * the knob is. A switch first seen at a place (a page opening, a list scrolled) stands still. The
+ * slide's frames are ui_kit.c's shared timer's. */
 #define SWITCH_W 40.0f
 #define SWITCH_H 24.0f
 #define SWITCH_KNOB 20.0f
 #define SWITCH_KNOB_IN 2.0f
 #define SWITCH_RING 1.5f
 #define SWITCH_MS 200
-#define SWITCH_STEP_MS 16
 #define SWITCH_SLOTS 4 /* the switches remembered: a page's in sight, the last few painted */
 static struct {
     struct {
         int x, y, on;
-        unsigned at; /* the slide's start, time_now_ms */
-        short from;  /* the knob's place then, 0 off .. 1000 on */
+        anim_t slide; /* the knob's run (ui_kit.h): MO_SPATIAL, at once under Reduce Motion */
+        short from;   /* the knob's place at its start, 0 off .. 1000 on */
     } s[SWITCH_SLOTS];
-    unsigned next, timer;
+    unsigned next;
 } sw __attribute__((section(".scratch")));
 
-/* 1 - (1 - t)^3 in thousandths, t in thousandths */
-static int ease_out(int t) {
-    int u = 1000 - t;
-    return 1000 - u * u / 1000 * u / 1000;
-}
 /* the knob's place now in slot k, 0 off .. 1000 on */
 static int sw_place(int k) {
-    unsigned gone = time_now_ms() - sw.s[k].at;
     int to = sw.s[k].on ? 1000 : 0;
-    if (gone >= SWITCH_MS) return to;
-    return sw.s[k].from + (to - sw.s[k].from) * ease_out((int)(gone * 1000 / SWITCH_MS)) / 1000;
-}
-static int sw_due(const void *info) {
-    (void)info;
-    sw.timer = 0;
-    int moving = 0;
-    for (int k = 0; k < SWITCH_SLOTS; ++k)
-        moving |= time_now_ms() - sw.s[k].at < SWITCH_MS + SWITCH_STEP_MS;
-    void *top = window_manager_get_top_window(window_manager());
-    if (top) widget_invalidate_force(top, (void *)0);
-    if (moving) sw.timer = timer_add(sw_due, (void *)0, SWITCH_STEP_MS);
-    return 0;
+    return sw.s[k].from + (to - sw.s[k].from) * anim_at(&sw.s[k].slide) / 1000;
 }
 /* the knob's place for a switch at screen x, y showing on: 0 off .. 1000 on */
 static int sw_knob(int x, int y, int on) {
     int k = 0;
-    while (k < SWITCH_SLOTS && (sw.s[k].x != x || sw.s[k].y != y || !sw.s[k].at)) ++k;
+    while (k < SWITCH_SLOTS && (sw.s[k].x != x || sw.s[k].y != y || !sw.s[k].slide.at)) ++k;
     if (k == SWITCH_SLOTS) { /* first seen here: at rest */
         k = (int)(sw.next++ % SWITCH_SLOTS);
         sw.s[k].x = x, sw.s[k].y = y, sw.s[k].on = on, sw.s[k].from = (short)(on ? 1000 : 0);
-        sw.s[k].at = time_now_ms() - SWITCH_MS;
-        if (!sw.s[k].at) sw.s[k].at = 1;
+        anim_start(&sw.s[k].slide, 0, EASE_CUBIC_OUT, MO_SPATIAL);
     } else if (sw.s[k].on != on) { /* flipped: slide from where it is */
         sw.s[k].from = (short)sw_place(k);
         sw.s[k].on = on;
-        sw.s[k].at = time_now_ms() ?: 1;
-        if (!sw.timer) sw.timer = timer_add(sw_due, (void *)0, SWITCH_STEP_MS);
+        anim_start(&sw.s[k].slide, SWITCH_MS, EASE_CUBIC_OUT, MO_SPATIAL);
     }
     return sw_place(k);
 }

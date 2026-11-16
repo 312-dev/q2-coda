@@ -145,3 +145,94 @@ void ui_cta_paint(void *canvas, const char *const *labels, int n, int y, int sel
                 r.y + r.h / 2, r.w - 2 * CTA_INSET, 1);
     }
 }
+
+/* Motion (ui_kit.h): the one Reduce Motion flag, the curves, a run's progress and the shared
+ * frame timer. */
+int motion_reduced(void) {
+    accent(); /* the [IPOD] keys, read once */
+    return st.reduce_motion;
+}
+int motion_ms(int ms, int kind) { return kind == MO_FEEDBACK || !motion_reduced() ? ms : 0; }
+int motion_fade_ms(int ms) { return motion_reduced() ? MO_FADE_MS : ms; }
+const motion_t *motion_row(int kind) {
+    /* a window kind fades: Page's too, whose slide is its windows' asset hint (tools/ipod.py
+     * SLIDE) and so no row of its own; a swap and an in-place slide are immediate (ms 0); the
+     * wheel's steps are the scroll itself and stay */
+    static const motion_t fade = { "fade(duration=150)", 0, 0 }, still = { 0, 0, 0 };
+    _Static_assert(MO_FADE_MS == 150, "fade's duration is MO_FADE_MS");
+    const motion_t *m = &theme()->motion[kind];
+    if (!motion_reduced() || kind >= MOTION_STEP) return m;
+    if (kind == MOTION_INPLACE || kind == MOTION_SWAP) return &still;
+    return m->hint || kind == MOTION_PAGE ? &fade : m;
+}
+int motion_ease(int t, int ease) {
+    if (t <= 0) return 0;
+    if (t >= 1000) return 1000;
+    int u = 1000 - t;
+    switch (ease) {
+    case EASE_LINEAR:
+        return t;
+    case EASE_QUAD_IN:
+        return t * t / 1000;
+    case EASE_QUAD_OUT:
+        return 1000 - u * u / 1000;
+    case EASE_CUBIC_IN:
+        return t * t / 1000 * t / 1000;
+    default:
+        return 1000 - u * u / 1000 * u / 1000; /* EASE_CUBIC_OUT */
+    }
+}
+static struct {
+    unsigned until, timer; /* the last running motion's end, time_now_ms; the shared timer */
+} mo __attribute__((section(".scratch")));
+static int mo_frame(const void *info) {
+    (void)info;
+    void *top = window_manager_get_top_window(window_manager());
+    if (top) widget_invalidate_force(top, (void *)0);
+    if ((int)(mo.until - (unsigned)time_now_ms()) > -MO_FRAME_MS) return 8; /* RET_REPEAT */
+    mo.timer = 0;
+    return 7; /* RET_REMOVE */
+}
+void motion_frames(unsigned ms) {
+    unsigned end = (unsigned)time_now_ms() + ms;
+    if (!mo.timer || (int)(end - mo.until) > 0) mo.until = end;
+    if (!mo.timer) mo.timer = timer_add(mo_frame, (void *)0, MO_FRAME_MS);
+}
+void anim_start(anim_t *a, int ms, int ease, int kind) {
+    a->at = (unsigned)time_now_ms() ?: 1;
+    a->ms = (unsigned short)motion_ms(ms, kind);
+    a->ease = (unsigned char)ease;
+    if (a->ms) motion_frames(a->ms);
+}
+int anim_at(const anim_t *a) {
+    unsigned gone = (unsigned)time_now_ms() - a->at;
+    if (!a->at || !a->ms || gone >= a->ms) return 1000;
+    return motion_ease((int)(gone * 1000 / a->ms), a->ease);
+}
+int anim_running(const anim_t *a) {
+    return a->at && a->ms && (unsigned)time_now_ms() - a->at < a->ms;
+}
+
+/* An overlay's run: from its level at the start (ovm_level) to 1000 in, or 0 out. Under Reduce
+ * Motion an enter takes MO_FADE_MS and an exit MO_OUT_FADE_MS, and nothing moves or scales. */
+static void ovm_go(ovm_t *o, int ms, int ease, int out) {
+    o->from = (short)ovm_level(o);
+    o->out = (unsigned char)out;
+    anim_start(&o->a, motion_reduced() ? out ? MO_OUT_FADE_MS : MO_FADE_MS : ms, ease, MO_FEEDBACK);
+}
+void ovm_enter(ovm_t *o, int ms, int ease) { ovm_go(o, ms, ease, 0); }
+void ovm_exit(ovm_t *o, int ms, int ease) { ovm_go(o, ms, ease, 1); }
+int ovm_level(const ovm_t *o) {
+    if (!o->a.at) return 0;
+    int p = anim_at(&o->a);
+    return o->out ? o->from - o->from * p / 1000 : o->from + (1000 - o->from) * p / 1000;
+}
+int ovm_alpha(const ovm_t *o, int alpha) { return alpha * ovm_level(o) / 1000; }
+int ovm_shift(const ovm_t *o, int px) {
+    return motion_reduced() ? 0 : px * (1000 - ovm_level(o)) / 1000;
+}
+int ovm_scale(const ovm_t *o, int from) {
+    return motion_reduced() ? 1000 : from + (1000 - from) * ovm_level(o) / 1000;
+}
+int ovm_running(const ovm_t *o) { return anim_running(&o->a); }
+int ovm_shown(const ovm_t *o) { return o->a.at && (!o->out || anim_running(&o->a)); }
