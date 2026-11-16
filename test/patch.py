@@ -16478,7 +16478,7 @@ m.call(address=payload_syms['mono_sync'],args=(0,0,0,0),gap=0)
 assert 'mono:peq_attach' not in [c[0] for c in m.calls]; passed()
 # Playback Setting restacks by use (navigation.c playset_order): stock's rows by id, then ours.
 def stacked(m,view_name): return [(m.entries+rows).index(c) for c in m.nodes[named(m,m.top,view_name)]['children'] if c in m.entries+rows]
-assert stacked(m,'scroll_view_playset')==[3,2,7,13,6,14,8,0,9,18,19,10,15,16,20,1,4,5,21,17]; passed()
+assert stacked(m,'scroll_view_playset')==[2,21,3,7,13,6,14,8,17,18,19,20,0,9,10,15,16,1,4,5]; passed()  # EQ, Library first
 assert all(r in m.entries+rows for r in m.nodes[m.settings_view]['children'])  # no headings
 for i in (0,1,4,5,6):
     button=m.nodes[rows[i]]['children'][0]
