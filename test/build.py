@@ -585,6 +585,12 @@ def validate_assets(directory):
     assert new[AAC_44K1] == 0 and manifest['bluealsa_sha256'] == sha(new)
     from bluealsa import check as check_bluetooth_drop
     check_bluetooth_drop(directory)
+    # bluetoothd: the control channel's GetElementAttributes from g_track_meta (tools/bt_meta.c)
+    from build import BLUETOOTHD, patch_bluetoothd
+    assert read('rootfs.squashfs', BLUETOOTHD) == patch_bluetoothd(read('stock.squashfs', BLUETOOTHD))
+    assert manifest['bluetoothd_sha256'] == sha(read('rootfs.squashfs', BLUETOOTHD))
+    from bluetoothd import check as check_bluetoothd
+    check_bluetoothd(directory)
     from build import SCROBBLE_CA
     assert read('rootfs.squashfs', SCROBBLE_CA) == (ROOT/'assets/scrobble-ca.pem').read_bytes()
     # The whole Mozilla bundle, for stock's HTTPS and the player's; ffmpeg's tls options in the patched hciplayer

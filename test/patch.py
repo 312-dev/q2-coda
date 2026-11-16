@@ -4330,9 +4330,10 @@ class BtInitMachine(Machine):
         super().hook(u,addr,size,_)
 for result in (0,-7):
     bt_init=BtInitMachine(); bt_init.result=result; thread=bt_init.alloc(4)
+    bt_init.mock('system@GLIBC_2.0')  # bt_name.c's Alias at Bluetooth on (dbus-send), between the callbacks
     assert bt_init.call(address=payload_syms['headset_bt_init'],args=(thread,0,0,0),gap=0)==result
     assert bt_init.calls[0][0]=='initBluetoothParam'
-    assert [c[:3] for c in bt_init.calls[1:]]==[
+    assert [c[:3] for c in bt_init.calls[1:] if c[0].startswith('btctl')]==[
         ('btctl_set_prompt_callback',0x4f9d20,0),
         ('btctl_device_status_callback',payload_syms['headset_bt_status'],0),
         ('btctl_set_a2dp_callback',syms['btrecvA2dpFunc'],0x01020304),
@@ -4349,6 +4350,7 @@ class BtLinkMachine(Machine):
         super().__init__(); self.links=[list(x) for x in links]; self.paired=paired
         self.u.mem_write(0xa4c0d8,saved.encode()+b'\0')  # BTLINKMAC
         self.word(syms['bt_connectstatus'],connecting); self.handlers[0x4fc180]='device_status'
+        self.mock('system@GLIBC_2.0')  # bt_name.c's Alias as Bluetooth comes on (dbus-send)
     def hook(self,u,addr,size,_):
         name=self.handlers.get(addr)
         if name not in ('getBtLinkStatus','getBtLinkSize','getBtLinkItem','addBtLinkItem','updateBtLinkStatus','checkPairDev','device_status'):
@@ -4367,7 +4369,7 @@ class BtLinkMachine(Machine):
         self.returns(ret,clobber=True)
 a_mac,b_mac='AA:AA:AA:AA:AA:AA','BB:BB:BB:BB:BB:BB'
 link=BtLinkMachine([]); link.call(address=payload_syms['headset_status_register'],args=(0,0,0,0),gap=0)
-assert [c[:3] for c in link.calls]==[('btctl_device_status_callback',payload_syms['headset_bt_status'],0)]
+assert [c[:3] for c in link.calls if c[0].startswith('btctl')]==[('btctl_device_status_callback',payload_syms['headset_bt_status'],0)]
 link=BtLinkMachine([(a_mac,5)])  # 5 while the thread's Connect runs
 link.call(address=payload_syms['headset_bt_status'],args=(3,link.string(b_mac),0,0),gap=0)
 assert link.links==[[a_mac,4],[b_mac,3]] and 'device_status' not in [c[0] for c in link.calls]; passed()
@@ -4868,13 +4870,34 @@ assert m.call(address=HOOKS['load_localclass_list'][0],args=(0xf004,0,0,0),gap=0
 m.word(m.row(0)+O['REC_ID'],-1); m.run(1)
 assert m.read==[1,2],m.read; passed()
 # The empty state's titles shown (feedback.c empty_state: its view's _es_title), in the order made.
-def empty_titles(m): return [n.get('_es_title') for w,n in m.nodes.items() if n.get('name')=='_empty_state' and n.get('visible',1) and (not hasattr(m,'alive') or m.alive(w))]
+def empty_titles(m): return [n.get('_es_title') for w,n in m.nodes.items() if n.get('name')=='_empty_state' and n.get('visible',1) and (not callable(getattr(m,'alive',None)) or m.alive(w))]  # SpotMachine's alive is its socket's flag
 # An empty class list: its page, once the window manager marks it opened (stage 3, after the open
 # animation), is force-closed from the next loop pass, then the empty state's page (navigation.c empty_class,
 # feedback.c empty_open) says so. Until then it is polled (EMPTY_POLL_MS) until it opens or stops being on top, then
 # the empty state's page alone; a page already left, or another class's, keeps that page only.
+class EmptyClassMachine(ClassMachine):
+    """A class list whose empty state opens a page of its own (feedback.c empty_open): window_create and the widget
+    factories make nodes, as CoverflowMachine's do."""
+    MAKE=('window_create','widget_factory_create_widget','list_view_create','scroll_view_create')
+    def __init__(self,**kw):
+        super().__init__(**kw)
+        for n in self.MAKE: self.handlers[syms[n]]='c:'+n
+        self.present.add('/tmp/mmc_add')  # a card in: an empty list says why (feedback.c empty_card)
+    def hook(self,u,address,size,unused):
+        name=self.handlers.get(address,'')[2:]
+        if name not in self.MAKE: return super().hook(u,address,size,unused)
+        a,b,c,d=[u.reg_read(r) for r in REGS]; sp=u.reg_read(UC_MIPS_REG_SP); self.calls.append((name,a,b,c))
+        kind,parent,h={'window_create':('window',0,0),'widget_factory_create_widget':(self.text(b),c,self.get(sp+24))}.get(
+            name,(name.removesuffix('_create'),a,self.get(sp+16)))
+        ret=self.node(kind)
+        if kind=='window': self.top=ret; self.stack.append(ret)
+        else: self.nodes[parent]['children'].append(ret); self.word(ret+O['W_PARENT'],parent); self.word(ret+O['W_H'],h)
+        if name=='widget_factory_create_widget':  # x in a3; y, w on the stack
+            for off,v in (('W_X',d),('W_Y',self.get(sp+16)),('W_W',self.get(sp+20))): self.word(ret+O[off],v)
+        if kind=='list_view': self.word(ret+O['W_W'],d)
+        self.returns(ret,clobber=True)
 def empty(cls,page,stage=O['WINDOW_STAGE_OPENED'],leave=False,shown=None):
-    m=ClassMachine(page=page,cls=cls,rows=0); m.found=[]; m.query=None
+    m=EmptyClassMachine(page=page,cls=cls,rows=0); m.found=[]; m.query=None
     assert m.call(address=HOOKS['load_localclass_list'][0],args=(cls,0,0,0),gap=0)==0 and len(m.timers)==1
     m.nodes[m.top]['stage']=stage
     if shown is not None: m.word(syms['g_class_type'],shown)
@@ -4883,7 +4906,7 @@ def empty(cls,page,stage=O['WINDOW_STAGE_OPENED'],leave=False,shown=None):
     return m
 closes=lambda m: [c[:3] for c in m.calls if c[0]=='window_manager_close_window_force']
 for cls,page in ((0xf003,'album_page'),(0xf003,'localclass_page'),(0xf004,'localclass_page'),(0xf005,'localclass_page'),(0xf006,'localclass_page')):
-    m=empty(cls,page); top=m.stack[-1]
+    m=empty(cls,page); top=next(w for w in m.stack if m.nodes[w]['name']==page)  # the class page, under the empty state's
     assert closes(m)==[('window_manager_close_window_force',m.wm,top)]
     assert not m.toasts and empty_titles(m)==[{0xf003:'No Albums',0xf004:'No Artists',0xf005:'No Composers',0xf006:'No Genres'}[cls]] and not m.timers
     passed()
@@ -5047,7 +5070,7 @@ for cls in (0xf00a,0xf008,0xf007):
     assert m.text(m.get(m.row(0)+O['REC_TITLE']))=='Song' and m.text(t)=='Row 1', hex(cls)
 passed()
 # An empty category list says so once its page is up, instead of a black page.
-m=ClassMachine(page='localclass_page',cls=0xf001,rows=0)
+m=EmptyClassMachine(page='localclass_page',cls=0xf001,rows=0)
 assert m.call(address=HOOKS['load_localclass_list'][0],args=(0xf006,0,0,0),gap=0)==0 and not empty_titles(m)
 m.advance(0); assert empty_titles(m)==['No Genres'] and not m.toasts; passed()
 # Albums: each stock row (a name) becomes that name's albums, told apart by album artist, else folder.
@@ -6708,10 +6731,11 @@ assert [b[:5] for b in m.bands]==[(*band,color_t(0))],m.bands
 assert [(r['rect'],r['radius'],r['color']) for r in m.rounded]==[(bar,bh//2,color_t(OLED['np_track_rgb'])),((*bar[:2],bar[2]*40//100,bh),bh//2,color_t(0xffffff))],m.rounded
 cy=lo[1]+bh//2-O['VOL_SPK_PX']//2
 assert not m.letters and m.image_loads==['oled_vol_lo_d','oled_vol_hi_d'] and [d[:2] for _,d in m.image_draws]==[(lo[0]+O['VOL_SPK_X']-O['VOL_SPK_PX']//2,cy),(lo[0]+lo[2]-O['VOL_SPK_X']-O['VOL_SPK_PX']//2,cy)],(m.image_loads,m.image_draws); passed()  # the dark half's speakers
-assert len(m.timers)==1; poll=next(iter(m.timers))
-m.advance(O['VOL_POLL_MS']); assert not did('widget_invalidate_force') and poll in m.timers  # unchanged: nothing
+vol=[t for t,v in m.timers.items() if v[1]==payload_syms['vol_poll']]; assert len(vol)==1; poll=vol[0]  # beside the status row's bars (status_row.c sr_tick)
+inv=lambda: [c[0] for c in did('widget_invalidate_force') if c[0]==dlg]  # the status row's bars repaint their own box
+m.advance(O['VOL_POLL_MS']); assert not inv() and poll in m.timers  # unchanged: nothing
 m.nodes[sv]['value']=41; m.advance(O['VOL_POLL_MS'])  # changed: the whole dialog repaints
-assert [c[0] for c in did('widget_invalidate_force')]==[dlg]; passed()
+assert inv()==[dlg]; passed()
 m.nodes[sv]['value']=100; paint(dlg)
 assert m.rounded[-1]['rect'][2]==bar[2] and not m.letters and len(m.timers)==1; passed()
 m.nodes[m.wm]['children']=[win]; m.top=win; m.advance(O['VOL_POLL_MS']); assert not m.timers; passed()  # closed: it stops
@@ -10901,14 +10925,15 @@ for fname in ('list_folder','list_song'):
 fa=ftile('file:///mnt/mmc/.downpic/fd1.jpg'); assert fa(0,0)==0 and fa(51,26)==fa(26,0)==255
 for fname in ('list_tf','list_album'): fa=ftile(fname); assert fa(0,0)==fa(51,26)==255,fname
 passed()
-# With no row to select the wheel scrolls the view itself, to its own end, not list_end's, on OLED's set or not.
+# With no row to select the wheel scrolls the view itself: to its own end, or on OLED's set (list_fit) until the
+# content's foot is on the list end, y 282, as a drag stops (navigation.c max_top).
 for boot in (1,0):
     lm=Machine(); boot and oled_set(lm)
     lw,les=lm.page_list(14,height=294,extent=672,name='playlist_page'); window(lm,'playlist_page',lw); lm.nodes[lw]['children']=[]; lm.paint(lw)
     tops=[]
     for _ in range(40):
         lm.call(); lm.paint(lw); tops.append(lm.get(lw+O['SCROLL_Y']))
-    assert max(tops)==672-294,(boot,max(tops))
+    assert max(tops)==(672-OLG.list_end if boot else 672-294),(boot,max(tops))
 passed()
 # Text on the bar is sel_text, white, whatever the row's own ink.
 sk=Machine(); sw,srows=sk.page_list(3); slabels=[]
@@ -11507,20 +11532,15 @@ ev=m.alloc(0x40); m.word(ev,O['EVT_KEY_UP']); m.word(ev+O['EVENT_KEY'],O['KEY_RE
 assert m.call(address=fk,args=(ck,ev,0,0),gap=0)==11 and [c[0] for c in m.calls].count('navigator_back')==1
 m.close(); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.top!=page and m.nodes[m.top]['name']=='shuffle_page'; passed()
 def home_settings(full):
-        # Home's Rockbox row shows only while the card has Rockbox: hidden, it moves after Settings, so the
-        # list's layout leaves no gap; it comes back after Folder once the card has it.
-        CONFIG['SHORTCUT']='0'; CONFIG['HOME']=str(full); m=ShuffleMachine(); del CONFIG['SHORTCUT']; del CONFIG['HOME']; m.rockbox_mode=0; view,imgs=home_list(m)
+        # Home's rows in HOME_ROWS' order (tools/ipod.py home_list), Now Playing's and Folders' shown here.
+        CONFIG['HOME']=str(full); m=ShuffleMachine(); del CONFIG['HOME']; view,imgs=home_list(m)
         assert m.call(address=home_hook[0],args=(m.top,0,0,0),gap=0)==0
-        btn=named(m,m.top,'btn_rockbox'); order=lambda: [m.nodes[r]['name'][4:] for r in m.nodes[view]['children']]
-        assert order()==['playing','localmusic','coverflow','folder','shuffle_songs','stream','home_search','settings','rockbox'] and not m.nodes[btn]['visible']
-        assert m.nodes[btn]['sensitive']==0  # hidden rows keep their taps: Streaming's would launch Rockbox
-        m.rockbox_mode=0o100755; m.call(address=payload_syms['coverflow_home_layout'],args=(0,0,0,0),gap=0)
-        assert order()==HOME_ROWS and m.nodes[btn]['visible'] and m.nodes[btn]['sensitive']==1; passed()
-        # Its click and Settings' are bound at Home init. Settings slides the Settings list, stock's
+        order=lambda: [m.nodes[r]['name'][4:] for r in m.nodes[view]['children']]
+        assert order()==HOME_ROWS; passed()
+        # Settings' click is bound at Home init. Settings slides the Settings list, stock's
         # Playback and System setting rows (stock binds them), in from the right as a full-width page
         # (oled/theme.xml home.lists full), the art hidden in Split too; the wheel walks it, and Return slides the list back from the left with
         # its row kept.
-        assert m.handler(named(m,m.top,'img_rockbox'),O['EVT_CLICK'])[0]==payload_syms['home_shortcut_open']
         m.mock('widget_animator_prop_create','widget_animator_prop_set_params','widget_animator_start')
         lst,sets,art=(named(m,m.top,n) for n in ('list_view_home','list_view_homeset','img_homeart'))
         sview=named(m,m.top,'scroll_view_homeset'); assert not m.nodes[sets]['visible']
@@ -18236,6 +18256,7 @@ SW_CHECKING,SW_OK,SW_LATEST,SW_NONE,SW_NOCARD,SW_LOW,SW_BAD,SW_FULL=range(8)
 class SwMachine(CoverflowMachine):
     def __init__(self,code=1,quit=0):
         super().__init__(); oled_set(self); self.code,self.quit,self.idles=code,quit,[]
+        self.handlers.pop(HOOKS['fwupdate_tf'][0],None)  # FUNCTIONS' stand-in: run the hooked entry (sw_update.c)
         for n in ('check_updatefw_exist','navigator_to','idle_add'): self.handlers[syms[n]]='sw:'+n
         self.word(syms['g_power_capacity'],12)
     def hook(self,u,address,size,unused):
@@ -18276,10 +18297,10 @@ for state,want in ((SW_OK,'swconfirm_page'),(SW_LATEST,'swupdate_page'),(SW_BAD,
     if state!=SW_OK: assert m.top==page and m.sw('result')==state and not m.timers; passed(); continue
     confirm=m.top; assert not m.alive(page) and not m.timers  # Install Update? on top and still: the check's page closed under it
     view=m.find('scroll_view',confirm); assert m.selected(view)==0  # Cancel
-    rows=[k for k in m.nodes if m.nodes[k]['type']=='list_item' and m.alive(k)]
+    rows=m.nodes[view]['children']  # page_row_detail's list_items
     assert [m.nodes[m.nodes[r]['children'][0]].get('text') for r in rows]==['Cancel','Install and Restart']
-    texts,_=m.said(confirm)
-    assert texts[:2]==['Q2 Pod 1.8.3 \u00b7 V1830',f'Installed: {manifest["version"]} \u00b7 0.0 MB on the SD card'] and texts[2].startswith('Takes about 2 minutes'),texts
+    texts,_=m.said(confirm)  # this machine's fixed-pitch font cuts the longer lines with an ellipsis
+    assert texts[0]=='Q2 Pod 1.8.3 \u00b7 V1830' and texts[1].startswith(f'Installed: {manifest["version"]} \u00b7 0.0 MB') and texts[2].startswith('Takes about 2 minutes'),texts
     f,ctx=m.handler(rows[1],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
     assert len(m.idles)==1 and not m.alive(confirm); passed()
 # After the click, stock's dialog; its answer (no file 9, up to date 13, damaged 18) is a page, a success never comes back.
