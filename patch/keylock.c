@@ -140,7 +140,7 @@ void keylock_paint(void *w, void *canvas) {
                hint = { CARD_X, CARD_HINT_Y - CARD_LINE / 2 - dy, CARD_W, CARD_LINE };
         final_text(canvas, "inter-medium", (const unsigned *)L"Buttons Locked", &title,
                    CARD_TITLE_PX, light ? 0xff000000u : 0xffffffffu);
-        final_text(canvas, "inter", (const unsigned *)L"Press Centre to unlock", &hint,
+        final_text(canvas, "inter", (const unsigned *)L"Press Center to unlock", &hint,
                    CARD_HINT_PX, 0xff000000u | (light ? TEXT_SECONDARY_L : TEXT_SECONDARY_D));
     }
     stock_canvas_set_fill_color(canvas, fill);

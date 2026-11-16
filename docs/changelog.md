@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Buttons Lock (OLED): the card a locked press shows reads **Press Center to unlock**.
   - Settings: times with a one-letter unit sit against their number: **Crossfade** reads "5s", **Standby Limit** "8h", and an album's length on its page "1h12m"; "min" keeps its space ("Resume Songs: 30 min").
   - Library: on Songs with no music on the card, pressing Centre presses **Scan Music Now**, as tapping it does. It used to turn the screen off.
   - Folder: an SD card or folder with nothing to list says **No folders** and **Copy music to the SD card**, instead of showing a blank screen.
