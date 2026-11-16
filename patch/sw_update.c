@@ -293,8 +293,8 @@ static int sw_tick(const void *unused) {
         swu.timer = 0;
         return 7; /* RET_REMOVE */
     }
-    /* and not while the check's page still slides in: a page opened then is held back by the
-     * window manager until that ends, and took no input once it showed */
+    /* and not while the check's page still slides in: a fast check (the emulator's took one
+     * frame) shows the spinner before its answer replaces it */
     if (swu.state == SW_CHECKING || (swu.page && window_manager_is_animating(window_manager()))) {
         swu.frame = (swu.frame + 1) % 12;
         if (swu.page) widget_invalidate_force(swu.page, (void *)0);
