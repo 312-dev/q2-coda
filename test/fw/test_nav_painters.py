@@ -3054,3 +3054,22 @@ def test_about_s_rows_take_the_selection_but_open_nothing(fw, st):
     assert offs == [(button.addr, EVT_CLICK, 0x4c12f8, 0x77)]
     assert len([h for h in button.handlers if h[0] == EVT_CLICK]) == 1
     assert not [a for _, a in fw.calls('widget_set_enable') if a[0] == item.addr]
+
+
+@pytest.mark.parametrize('prompt, selected', [('Scan music?', 1), ('Import Playlists?', 1), ('Shut Down?', None),
+                                              ('Delete Record?', None)])
+def test_a_neutral_stock_confirm_opens_on_its_verb_the_rest_on_cancel(fw, st, prompt, selected):
+    """The card's rule for the default (docs/oled-design.md#confirmation-card): Scan, Import, Export, Reconnect and
+    Turn On cost least by mistake, so their card opens on the verb; a destructive or consequential one stays on
+    Cancel, stock's first stop (no selection written)."""
+    theme(fw)
+    ui = Ui(fw)
+    confirm = Confirm(fw, ui, [prompt])
+
+    def utf8(w, out, size, *_):
+        words = ui.text(ui.nodes[w]).encode()[:size - 1] + b'\0'
+        C.memmove(out, words, len(words))
+        return 0
+    fw.mock('widget_get_text_utf8', utf8)
+    confirm.paint()
+    assert confirm.win.props.get('_ringnav_index') == selected

@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Display (OLED): a question whose wrong answer costs nothing (Scan Music?, Import Playlists?, Export Playlists?, Reconnect Bluetooth?) opens on its verb, so Center twice does it; the rest still open on Cancel.
   - Up Next (OLED): while a row is lifted, the queue's grips stand where Edit Library's do, 4 px further right, with square ends.
   - Display (OLED): Car Remote's Forget, Tidal's Clear All Downloads and Spotify's Remove Downloads and Sign Out, a playlist's Remove from Playlist, the EQ's Delete and Replace of a preset, SD Card Update's Install, Streaming's Erase Spotify Data and (development builds) Allow USB Debugging ask on the confirmation card over their page instead of a page of their own.
   - Display (OLED): a Wi-Fi network's name too long for its row now scrolls when its row is selected, as every row's title does, instead of being cut off. Scrolling text fades out at its ends into whatever is behind it, so on the blue selection the fade is blue, not a black band.
