@@ -798,6 +798,7 @@ void pl_fit(void *button);
 /* clicker.c: the Clicker (docs/internals.md#key-tone), the Key Tone row's value and click, and a
  * click's route */
 enum { CLICK_KIND_WHEEL = 1, CLICK_KIND_BUTTON, CLICK_KIND_BEEP }; /* q2player's mcl-click sounds */
+int clicker_chirp(void); /* clicker.c: the plug-in chirp mixed into what plays; 1 if sent */
 enum { ROUTE_BUZZER = 1, ROUTE_MIXED = 2 };
 extern int clicker_kind; /* CLICK_KIND_*, 0 the wheel's (zero at start, as .scratch is) */
 const char *clicker_text(void);

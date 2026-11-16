@@ -187,3 +187,21 @@ def test_charge_limit_toasts_charged_to_80_once_on_a_cable(fw, st, ui):
     fw.fn('charge_limited', None)()
     plug.poll()
     assert plug.toasts == [f"Charged to {O['CHARGE_STOP']}%"]
+
+
+# The plug-in chirp (clicker.c clicker_chirp): q2player mixes it into what plays under Headphones (2) or Both (0);
+# Speaker (1), a pause, the stock player or Off sends nothing, and the buzzer never plays it.
+@pytest.mark.parametrize('clicker, tone, there, status, sent', [
+    ('2', 1, True, 2, True), ('0', 1, True, 2, True), ('1', 1, True, 2, False), ('0', 0, True, 2, False),
+    ('0', 1, True, 3, False), ('0', 1, False, 2, False)])
+def test_a_plug_in_chirps_in_what_plays(fw, st, ui, clicker, tone, there, status, sent):
+    from test_nav_loop import Player
+    from test_nav_playing import Config
+    Config(fw, CLICKER=clicker)
+    st.settings_read = 0  # accent() reads [IPOD] CLICKER again
+    fw.var('g_keytone_flag', C.c_ubyte).value = tone
+    player = Player(fw, there, status)
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    fw.fn('charge_plugged', None)()
+    assert player.clicks() == ([b'{mcl-click\\charge}'] if sent else [])
+    assert not fw.calls('fw_pthread_create')  # no buzzer

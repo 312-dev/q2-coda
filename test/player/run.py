@@ -471,6 +471,44 @@ def click_sound(kind, rate=44100):
     return out
 
 
+def chirp_sound(rate=44100):
+    """The plug-in chirp as player/output.c makes it (chirp_at, click_table's CLICK_CHARGE), in float as it does."""
+    f32 = lambda v: struct.unpack('f', struct.pack('f', v))[0]
+    n, level, tick, seed, raw = int(340 * rate / 1000), 10 ** (-12 / 20), 0.0, 7, []
+    for i in range(n):
+        t, y, e = i / rate, 0.0, 0.0
+        if t < 0.003:
+            seed = (seed * 1664525 + 1013904223) & 0xffffffff
+            noise = (seed >> 8) / (1 << 23) - 1
+            tick = 0.7 * noise + 0.3 * tick if i else 0.0
+            env = 0.7 * math.exp(-t * 4000 / 3)
+            y, e = y + env * tick, e + env
+        for hz, at, length, decay in ((880, 30, 180, 50), (1320, 90, 250, 70)):
+            u = t - at / 1000
+            if 0 <= u < length / 1000:
+                env, ph = 0.6 * min(u * 1000 / 2, 1) * math.exp(-u * 1000 / decay), 2 * math.pi * hz * u
+                y, e = y + env * (math.sin(ph) + 0.15 * math.sin(2 * ph)), e + env * 1.15
+        raw.append((f32(y), f32(e)))
+    peak = max(abs(y) for y, _ in raw)
+    return [(f32(level * min(e / peak, 1)), f32(level * y / peak)) for y, e in raw]
+
+
+def test_chirp(player, songs, tmp):
+    """mcl-click charge while silence plays: patch/charging.c's plug-in chirp, once, both channels, at its level (its
+    peak -12 dBFS) and within a step of the sound made; none once paused."""
+    s, pcm, names = play(player, songs, 'chirp', tmp/'chirp')
+    x = array.array('h', b''.join(pcm))
+    found, sound = runs(x), chirp_sound()
+    first, n = found[0][0], found[-1][0] + found[-1][1] - found[0][0]  # the tick, a gap, then the two blips
+    assert found and n <= len(sound), f'one chirp, {len(sound)} frames: {found}'
+    lead = next(i for i, (e, c) in enumerate(sound) if abs(round(c * 32768)) >= 1)
+    err = max(abs(x[2 * (first - lead + i) + c] - c2 * 32768) for i, (e, c2) in enumerate(sound) for c in (0, 1))
+    assert err <= 1, f'{err:.2f} from the sound made'
+    peak = max(abs(v) for v in x) / 32768
+    assert abs(20 * math.log10(peak) + 12) < 0.1, f'peak {20 * math.log10(peak):.2f} dBFS'
+    return f'{n} frames within {err:.2f} of the chirp made, its peak {20 * math.log10(peak):.2f} dBFS'
+
+
 def runs(x):
     """The stretches of x (an S16 stereo array) that are not silent, as (first frame, frames)."""
     out, start = [], None

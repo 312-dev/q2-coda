@@ -117,7 +117,7 @@ void output_pause(struct output *, int on);
 void output_drop(struct output *);     /* forget what is buffered: a seek, a skip, a stop */
 void output_drain(struct output *);    /* play what is buffered to its end */
 void output_close(struct output *);
-enum { CLICK_WHEEL = 1, CLICK_BUTTON, CLICK_BEEP }; /* mcl-click's wheel, button and beep */
+enum { CLICK_WHEEL = 1, CLICK_BUTTON, CLICK_BEEP, CLICK_CHARGE }; /* mcl-click's wheel, button, beep and charge */
 int output_click(struct output *, int kind); /* mixed into what is about to be heard */
 /* the headphone DAC (output way 0; on the others only dac_song's mode) */
 void dac_song(int outputway, int dsd);     /* at each song's start: DoP or PCM mode */

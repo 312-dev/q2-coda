@@ -5,6 +5,7 @@
   - Status bar (OLED): a charging battery shows a small lightning bolt inside it, in green; full on the cable, or held at **Charge Limit**, it stays green with no bolt.
   - Status bar (OLED): tap the battery to see its state in a toast: **Charging · 62%**, **Fully charged**, **Charge Limit Reached (80%)**, **Battery 62%** or, under 20%, **Low battery · 12%**.
   - Charging (OLED): plugging in with the screen off lights it for three seconds with a big battery filling up to its level, then it goes dark again. With the screen on, a toast says **Charging · 62%** instead. Charge Limit says **Charged to 80%** when it stops charging.
+  - Charging: with the new player playing a song and **Clicker** on Headphones or Both, plugging in plays a short tick-and-chirp in your headphones, mixed into the music.
   - SyncLink, Shanling's phone remote, is gone from Settings and stays off.
   - Settings: this update starts every Q2 on q2-coda's own default settings, whatever it ran before (stock firmware or an earlier q2-coda), so no stock setting such as Enlarged Album Art stays on. Saved Wi-Fi networks, Bluetooth pairings, your library and ratings are kept. Later updates keep your settings.
   - Quick Settings (OLED): the pull-down is now a Control Center, as on an iPhone: round Wi-Fi, Bluetooth, AirPlay and Car Remote buttons, what's playing with its controls, Brightness and Volume sliders, and Lock, Sleep, Night Shift, EQ and Smart Wi-Fi buttons. Turn the wheel to move between them and press Center to use one; on a slider Center lets the wheel set it.

@@ -280,9 +280,11 @@ int charge_gate(void *e) {
     return 1;
 }
 
-/* usb_ui_status: a cable in. Dark, the plug-in screen at the next pass (not inside stock's USB
- * pass); lit, the toast waits for usb_charger_in, which knows it is not a computer. */
+/* usb_ui_status: a cable in. The chirp in the headphones (clicker.c clicker_chirp), and dark, the
+ * plug-in screen at the next pass (not inside stock's USB pass); lit, the toast waits for
+ * usb_charger_in, which knows it is not a computer. */
 void charge_plugged(void) {
+    clicker_chirp();
     if (!g_backlight_status) s1.pending = 1;
 }
 

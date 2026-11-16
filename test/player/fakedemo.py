@@ -143,6 +143,9 @@ def scenarios(m):
         'click': boot + [(1.0, song('set-songurl', f'{m}/silence.wav')), (2.0, '{mcl-click\\wheel}'), (3.0, '{mcl-click\\button}'),
                          (4.0, '{mcl-click\\beep}'), (4.5, '{mcl-pause\\null}'), (5.0, '{mcl-click\\wheel}'), (5.5, '{mcl-play\\null}'),
                          (7.5, '{mcl-stop\\null}'), (8.0, '{mcl-click\\wheel}'), (8.5, None)],
+        # the plug-in chirp (patch/charging.c): once into silence, then none while paused
+        'chirp': boot + [(1.0, song('set-songurl', f'{m}/silence.wav')), (2.0, '{mcl-click\\charge}'), (3.0, '{mcl-pause\\null}'),
+                         (3.5, '{mcl-click\\charge}'), (4.0, '{mcl-stop\\null}'), (4.5, None)],
         'click-full': boot + [(1.0, song('set-songurl', f'{m}/full.wav')), (2.0, '{mcl-click\\wheel}'), (4.0, '{mcl-stop\\null}'), (4.5, None)],
         # the level meter (mcl-setexplayinfo 1): a full-scale square, silence, a 1 kHz sine at -20 dBFS, asked twice each
         'meter': boot + [(0.5, '{mcl-setexplayinfo\\1}'), (1.0, song('set-songurl', f'{m}/full.wav')), (2.5, '{mcl-getuvmeter\\null}'),

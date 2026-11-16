@@ -81,3 +81,15 @@ int clicker_route(int listening) {
     int buzz = mode == SHOWN_BOTH || (!listening && (mode == SHOWN_SPEAKER || !mixed));
     return (buzz ? ROUTE_BUZZER : 0) | (mixed ? ROUTE_MIXED : 0);
 }
+
+/* The plug-in chirp (charging.c charge_plugged; q2player's {mcl-click\charge}, player/output.c
+ * chirp_at): a sound, not a click, so the buzzer, which can only click, never plays it. Mixed into
+ * what q2player plays under Headphones or Both, as a click is; with nothing playing, the stock
+ * player or Speaker or Off, there is none: the PCM is closed, or held by hciplayer with no mixer.
+ * 1 if sent. */
+int clicker_chirp(void) {
+    int mode = shown(), fd = *(volatile int *)MCL_FD;
+    if ((mode != SHOWN_HEADPHONES && mode != SHOWN_BOTH) || !player_mixes() || fd == -1) return 0;
+    static const char m[] = "{mcl-click\\charge}";
+    return send(fd, m, sizeof m - 1, 0x4040) > 0; /* MSG_DONTWAIT | MSG_NOSIGNAL */
+}
