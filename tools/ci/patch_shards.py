@@ -29,6 +29,7 @@ N defaults to what memory allows: MemAvailable less a 5 GB reserve, over one sha
 import argparse
 import ast
 import bisect
+import builtins
 import concurrent.futures
 import ctypes
 import faulthandler
@@ -53,6 +54,7 @@ RESERVE = 5e9  # what stays free for the rest of the machine: q2-heavy's floor
 # Names the runner handles itself: passed()'s counter is per shard and summed, and the trace file is
 # opened at the range's start, so neither ties a range to the statements before it.
 OWNED = {'checks', 'TRACE', 'trace'}
+BUILTINS = set(dir(builtins))
 # Methods that only read their receiver: a call of one on a module-level name does not change it.
 READS = {'get', 'keys', 'values', 'items', 'copy', 'index', 'count', 'startswith', 'endswith', 'split', 'rsplit',
          'splitlines', 'encode', 'decode', 'format', 'join', 'strip', 'rstrip', 'lstrip', 'find', 'rfind', 'lower',
@@ -241,8 +243,6 @@ def analyse(source):
         closures[key] = (r, c)
         return r, c
 
-    method_reads = set().union(*(direct[i][0] for i in classes)) if classes else set()
-    method_changes = set().union(*(direct[i][1] for i in classes)) if classes else set()
 
     lines = source.splitlines()
     seen = {}
@@ -293,12 +293,10 @@ def analyse(source):
             s.mutates = set()
             for n, local in mine:
                 s.mutates |= _changes([n], lambda name, local=local: name not in local, modules)
+            # What the callables it names read and change, a class's methods included: m.press() runs a
+            # method of the class m was made from, and the statement that made m named that class, so it
+            # is in the range or its slice with that class's reads.
             calls = (named - s.binds) & defined_at.keys()  # a loop variable named like a helper is not it
-            # A method call may run any class's methods, and what they call.
-            if any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) for n in seen_nodes):
-                calls |= method_reads & defined_at.keys()
-                s.loads |= method_reads
-                s.mutates |= method_changes
             r, c = expand(calls, i)
             s.loads |= r
             s.mutates |= c
@@ -309,10 +307,18 @@ def analyse(source):
                 if isinstance(target, (ast.Attribute, ast.Subscript)) and _base(target) in imported and not (
                         isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in READS):
                     s.pinned = True  # sys.path.insert(...), os.environ[k] = v
-            # A call may change what it is passed: lay(m, view) lays out m's rows.
+            # A call may change what it is passed: lay(m, view) lays out m's rows. A builtin (enumerate,
+            # len, zip...) does not, unless the module rebinds its name.
             s.mutates |= {a.id for n, local in mine if isinstance(n, ast.Call)
+                          and not (isinstance(n.func, ast.Name) and n.func.id in BUILTINS and n.func.id not in assigned | defined_at.keys())
                           for a in [*n.args, *(k.value for k in n.keywords)]
-                          if isinstance(a, ast.Name) and a.id not in local and a.id not in modules}
+                          if isinstance(a, ast.Name) and a.id not in local and a.id not in modules
+                          and not a.id.isupper()}  # an UPPER_CASE name passed is a constant, as in reg_read(UC_MIPS_REG_PC)
+            # X.clear() empties X whatever it held: what came before it no longer matters.
+            if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and not node.value.args
+                    and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == 'clear'
+                    and isinstance(node.value.func.value, ast.Name)):
+                s.kills.add(node.value.func.value.id)
             # Calling a bound object that is not a def (watch = FILTER.watch) may change it.
             s.mutates |= {n.func.id for n, local in mine if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
                           and n.func.id in assigned and n.func.id not in defined_at and n.func.id not in local}
@@ -366,27 +372,43 @@ def cost(stmts, profile):
 
 
 def plan(stmts, shards):
-    """Cut statements into `shards` contiguous ranges of about equal time, own plus replayed, each cut
-    placed just after a passed() (a test's end) where the slice after it is cheapest. Returns
-    [(start, stop, slice)]."""
+    """Cut statements into at most `shards` contiguous ranges, each starting just after a passed() (a
+    test's end), so that the slowest shard, its own statements plus its replayed slice, is as fast as it
+    can be: a binary search on that time, filling each shard greedily. Returns [(start, stop, slice)]."""
     if shards <= 1:
         return [(0, len(stmts), [])]
     ends = [s.index + 1 for s in stmts if isinstance(s.node, ast.Expr) and ast.unparse(s.node) == 'passed()']
+    ends = [c for c in ends if c < len(stmts)]
     prefix = [0.0]
     for s in stmts:
         prefix.append(prefix[-1] + s.cost)
     total = prefix[-1]
+    step = max(1, len(ends) // 300)  # replay is measured at every step-th test's end, ~300 slices
+    sampled = ends[::step]
+    replay = {c: sum(stmts[k].cost for k in slice_of(stmts, c, min(len(stmts), c + 300), CHEAP)) for c in sampled}
 
-    def replay(c):
-        return sum(stmts[k].cost for k in slice_of(stmts, c, min(len(stmts), c + 300), CHEAP))
+    def cuts_for(limit):
+        cuts, start = [0], 0
+        while True:
+            fits = [c for c in sampled if c > start and prefix[c] - prefix[start] + replay.get(start, 0) <= limit]
+            if prefix[-1] - prefix[start] + replay.get(start, 0) <= limit:
+                return cuts
+            if not fits:
+                return None
+            start = fits[-1]
+            cuts.append(start)
+            if len(cuts) > shards:
+                return None
 
-    # Later shards replay more, so they get less of their own: aim each at the same own + replayed time.
-    cuts = [0]
-    for k in range(1, shards):
-        want = total * k / shards
-        near = [c for c in ends if abs(prefix[c] - want) < total / shards / 4] or [min(ends, key=lambda c: abs(prefix[c] - want))]
-        cuts.append(min(near, key=lambda c: replay(c) + abs(prefix[c] - want) / 4))
-    cuts = sorted(set(cuts)) + [len(stmts)]
+    lo, hi, best = total / shards, total + max(replay.values(), default=0), [0]
+    for _ in range(30):
+        mid = (lo + hi) / 2
+        cuts = cuts_for(mid)
+        if cuts and len(cuts) <= shards:
+            best, hi = cuts, mid
+        else:
+            lo = mid
+    cuts = best + [len(stmts)]
     return [(a, b, slice_of(stmts, a, b, CHEAP)) for a, b in zip(cuts, cuts[1:])]
 
 
@@ -423,7 +445,11 @@ def child(test, build, start, stop, trace_file, result_file, whole):
     gc.collect()
     sys.argv = [test, build]
     sys.path[0] = str(pathlib.Path(test).parent)  # as when run as a script: tools/ is found from it
+    # The trace: statement 0's range runs test/patch.py's own TRACE = open(Q2_TRACE), so it is pointed at
+    # this shard's file; any other range replays that statement with no file and opens its own at its start.
     os.environ.pop('Q2_TRACE', None)
+    if start == 0 and trace_file:
+        os.environ['Q2_TRACE'] = trace_file
     g = {'__file__': test, '__name__': '__main__', '__builtins__': __builtins__, 'TRACE': None, 'checks': 0}
     times, status, failed_at, blocked, started = {}, 0, None, None, False
     index = line = None
@@ -432,7 +458,8 @@ def child(test, build, start, stop, trace_file, result_file, whole):
             if index == start:  # the range's own count and trace start here
                 started = True
                 g['checks'] = 0
-                g['TRACE'] = open(trace_file, 'w') if trace_file else None
+                if start:
+                    g['TRACE'] = open(trace_file, 'w') if trace_file else None
             t = time.perf_counter()
             if index < start:
                 try:
@@ -570,8 +597,13 @@ def main():
             if not idx:
                 raise SystemExit(f'no statement starts on lines {a}-{b}')
             ranges.append((idx[0], idx[-1] + 1, slice_of(stmts, idx[0], idx[-1] + 1, CHEAP)))
-    else:
-        ranges = plan(stmts, args.jobs or memory_shards())
+    elif args.jobs:
+        ranges = plan(stmts, args.jobs)
+    else:  # the fewest shards within 5% of the most memory allows: past a point a shard mostly replays
+        plans = [plan(stmts, n) for n in range(1, memory_shards() + 1)]
+        slowest = [max(sum(stmts[i].cost for i in range(a, b)) + sum(stmts[i].cost for i in sl) for a, b, sl in p)
+                   for p in plans]
+        ranges = next(p for p, t in zip(plans, slowest) if t <= min(slowest) * 1.05)
     total = sum(s.cost for s in stmts) or 1
     for k, (a, b, sl) in enumerate(ranges):
         own = sum(s.cost for s in stmts[a:b])
@@ -619,7 +651,8 @@ def verify(test, build, python, trace_dir, n):
     """The serial run under Q2_TRACE; its trace must equal the shards' traces in order."""
     serial = pathlib.Path(trace_dir)/'serial.trace'
     t = time.perf_counter()
-    p = subprocess.run([python, test, build], env={**os.environ, 'Q2_TRACE': str(serial)}, cwd=ROOT,
+    heavy = [str(HEAVY)] if HEAVY.exists() and not os.environ.get('Q2_HEAVY_JOB') else []
+    p = subprocess.run(heavy + [python, test, build], env={**os.environ, 'Q2_TRACE': str(serial)}, cwd=ROOT,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     last = p.stdout.strip().splitlines()[-1] if p.stdout.strip() else ''
     print(f'serial run: exit {p.returncode}, {time.perf_counter() - t:.0f} s: {last}')
