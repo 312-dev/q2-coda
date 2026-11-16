@@ -741,22 +741,7 @@ static inline int arc_out(int r, int y) {
 #define CF_GLIDE_MAX 1400  /* ms, the longest glide */
 #define CF_SETTLE_MS 280   /* a release with no flick settles on the nearest cover */
 #define CF_TAP_MS 320      /* a tapped side cover's glide to the centre */
-/* Photos (patch/photos.c, docs/internals.md#photos): under a 48px title, PH_COLS columns of
- * PH_TILE_W x PH_TILE_H tiles from x PH_GRID_X, three whole rows in the 240px below it (with the
- * title in the bar, the view runs to the page's foot), each a
- * thumbnail of at most PH_THUMB_W x PH_THUMB_H centred in its tile, so the selection shows round
- * it. The viewer's screen-size copy fits PH_SHOT_W x PH_SHOT_H (the client area). PH_GREY marks a
- * thumbnail not made yet or a file that will not open. */
-#define PH_COLS 4
-#define PH_GRID_X 1
-#define PH_TILE_W 93
-#define PH_TILE_H 80
-#define PH_THUMB_W 85
-#define PH_THUMB_H 72
-#define PH_SHOT_W 375
-#define PH_SHOT_H 290
-#define PH_GREY 0xff333333 /* color_t #333333 */
-#define PHOTOS_MAX 500 /* ponytail: ringnav navigates at most MAX_ENTRIES (512) rows; page beyond */
+#define PH_GREY 0xff333333 /* color_t #333333: a placeholder's grey (navigation.c) */
 /* PEQ editor (patch/peq_ui.c): on the main and band screens a PEQ_GRAPH_H view heads the Advanced
  * list and holds the response from PEQ_GRAPH_X to 375 - PEQ_GRAPH_X (20 Hz to 20 kHz, log),
  * +-PEQ_GRAPH_DB at its plot's top and bottom (rows PEQ_PLOT_TOP to PEQ_PLOT_BOTTOM), frequency

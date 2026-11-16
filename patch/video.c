@@ -1,5 +1,5 @@
 /* q2video, Videos' player (docs/internals.md#videos): /usr/bin/q2video DEVICE FILE [VOLUME],
- * started by demo (books.c play_video). Stock ffmpeg decodes FILE, fits it into the screen, turns
+ * started by demo (videos.c video_play). Stock ffmpeg decodes FILE, fits it into the screen, turns
  * it onto the portrait panel as the boot logo is stored and converts it to the framebuffer's BGRA,
  * frames on one pipe and 48 kHz stereo on another; this plays the sound on ALSA DEVICE ("-"
  * for none; VOLUME, Bluetooth's or a soft USB volume's 0-100, scales it as hciplayer does there,
@@ -27,7 +27,7 @@
 #define BAR_Y 22 /* its bottom from the picture's */
 #define BAR_H 8
 #define Q2VIDEO_SOCK "/tmp/q2video.sock"
-#define Q2VIDEO_PLACE "/tmp/q2video.place" /* an int, the second: books.c VIDEO_PLACE */
+#define Q2VIDEO_PLACE "/tmp/q2video.place" /* an int, the second: videos.c VIDEO_PLACE */
 #define RADIO_SOCK "/tmp/q2radio.sock"
 #define SINK_SOCK "/tmp/q2sink.sock" /* spotify.c SPOT_SINK */
 #define SWAP_FILE "/tmp/q2swap"

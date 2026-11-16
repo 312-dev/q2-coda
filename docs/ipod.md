@@ -89,7 +89,7 @@ selection until wheel/centre input; the native pressed state remains visible. A 
 (`s_btn_listitem`) is grey across the whole row (`pressed_pill`), and a pressed tile under half its
 row's width (the album grid's, the playlist page's pair) is the tile's card, `TILE_INSET` inside it;
 other pressed widgets keep stock's box. The same hooks cover settings, streaming, dialogs, PEQ rows
-and media browser chrome. Photos, video, book content, EQ plots and the visualizer keep their own
+and media browser chrome. Video, EQ plots and the visualizer keep their own
 drawing.
 
 A list left with Return opens at its top when it is chosen again (`list.reopen.top`, OLED's), as an
@@ -304,7 +304,7 @@ the bar and writes the time into `label_clock` (see
 [internals.md](internals.md#status-bar-ipod)); the widest text, `12:59 PM`, is 69 pixels in the
 stock font at 16 pixels.
 
-**Time in Title.** `IPOD TIMETITLE` (on unless chosen) is a theme option (`<option setting="time_title">`) that OLED does not offer, so Appearance has no row for it: OLED's status row names the page in a title of its own and keeps the clock beside it, whatever the key holds (`bar_title`). On a bar with no status row, the switch off has the bar name the page: in its own title label where the bar has one, the clock making way, else in `label_clock` instead of the time, as an iPod's title bar does: "Now Playing" or "Cover Flow", else stock's title in the page's hidden navbar (`scrlabel_title`, or a settings page's unnamed first child). Home, a page showing its navbar and a page with no title keep the clock, and a pop-up or keyboard leaves the bar as it is. A title past the clock's width ends in an ellipsis. ponytail: the payload's other pages (Games, Photos, Books) have no navbar, so that bar stays on the clock there, most with a heading on the page; naming them means reading each page's caption.
+**Time in Title.** `IPOD TIMETITLE` (on unless chosen) is a theme option (`<option setting="time_title">`) that OLED does not offer, so Appearance has no row for it: OLED's status row names the page in a title of its own and keeps the clock beside it, whatever the key holds (`bar_title`). On a bar with no status row, the switch off has the bar name the page: in its own title label where the bar has one, the clock making way, else in `label_clock` instead of the time, as an iPod's title bar does: "Now Playing" or "Cover Flow", else stock's title in the page's hidden navbar (`scrlabel_title`, or a settings page's unnamed first child). Home, a page showing its navbar and a page with no title keep the clock, and a pop-up or keyboard leaves the bar as it is. A title past the clock's width ends in an ellipsis. ponytail: the payload's other pages (Games) have no navbar, so that bar stays on the clock there, most with a heading on the page; naming them means reading each page's caption.
 
 **Codec.** The Bluetooth images are 42-pixel canvases with their ink at the right: the glyph takes
 10 pixels, while stock's codec badges take up to 40 (aptX HD). A new badge shows for a second
@@ -609,8 +609,8 @@ stock chevron or payload row layouter, so it has none.
 The payload's own pages (`page_list`) draw the same `list_into` at x 302 on every row
 that opens another page or screen: Spotify's menu, its Downloads hub and Storage Management, its
 albums, playlists, artists, saved playlists and download jobs, and Download Controls; a card app's
-lists, folders and phone-remote rows; Internet Radio's lists, Games, Photos, Ratings, Era's decades and
-albums; Books; and the equalizer's Balance, Preamp, Presets, band, Frequency, Gain and Q rows and the
+lists, folders and phone-remote rows; Internet Radio's lists, Games, Ratings, Era's decades and
+albums; and the equalizer's Balance, Preamp, Presets, band, Frequency, Gain and Q rows and the
 Presets menu, the value moved left of it (`patch/peq_ui.c` `INTO`). A 64 px row with an empty detail
 centres its caption beside it. Rows that act in place (play, toggle, cycle a value) have none; on/off
 rows (EQ Enabled, a band's Band, Spotify's Shuffle, Streaming Configuration's services) carry stock's

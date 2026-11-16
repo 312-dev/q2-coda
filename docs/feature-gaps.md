@@ -4,7 +4,7 @@ What Q2 Pod lacks against the iPod lineage first, then Rockbox and present-day p
 
 ## Summary
 
-Q2 Pod covers almost all of the iPod classic's music side: Cover Flow, Shuffle Songs at the top of Music, ratings, Most Played, Recently Added, a live queue, synced lyrics, audiobooks with chapters and speed, podcasts, photos, video, games and Notes-like text. Its gaps are in three places. The iPod's automatic lists are missing: no Smart Playlists, no Genius or Genius Mixes, and no way to save the queue as a playlist (On-The-Go). The Extras menu is missing apart from games and the sleep timer: no alarm, stopwatch, world clock, calendar, contacts or combination locks. Accessibility and reach are missing: the interface is English only (the Language row is hidden, [changelog.md](changelog.md)) and there are no Spoken Menus or larger text. Two hardware limits shape every answer: the UI payload has a fixed 1 MB for code ([inefficiencies.md, entry 1](inefficiencies.md#1-the-ui-payloads-room-resolved)), so features that fit stay in `demo`, and anything large belongs in a card app ([internals.md, Card apps](internals.md#card-apps)), which can already show pages, play card files and queues, import playlists, set sleep timers and run full-screen games with sound. The hciplayer payload (`PLAYER_BASE`, `tools/peq.py:8`) has no comparable squeeze, so sound processing is cheap to add.
+Q2 Pod covers almost all of the iPod classic's music side: Cover Flow, Shuffle Songs at the top of Music, ratings, Most Played, Recently Added, a live queue, synced lyrics, audiobooks with chapters and speed, podcasts, video and games. Its gaps are in three places. The iPod's automatic lists are missing: no Smart Playlists, no Genius or Genius Mixes, and no way to save the queue as a playlist (On-The-Go). The Extras menu is missing apart from games and the sleep timer: no alarm, stopwatch, world clock, calendar, contacts or combination locks. Accessibility and reach are missing: the interface is English only (the Language row is hidden, [changelog.md](changelog.md)) and there are no Spoken Menus or larger text. Two hardware limits shape every answer: the UI payload has a fixed 1 MB for code ([inefficiencies.md, entry 1](inefficiencies.md#1-the-ui-payloads-room-resolved)), so features that fit stay in `demo`, and anything large belongs in a card app ([internals.md, Card apps](internals.md#card-apps)), which can already show pages, play card files and queues, import playlists, set sleep timers and run full-screen games with sound. The hciplayer payload (`PLAYER_BASE`, `tools/peq.py:8`) has no comparable squeeze, so sound processing is cheap to add.
 
 ### Top 10 by value over effort
 
@@ -17,11 +17,11 @@ Q2 Pod covers almost all of the iPod classic's music side: Cover Flow, Shuffle S
 | 5   | [Genius-style mixes](#5-genius-style-mixes)                                                 | M      | high       | card app                                       |
 | 6   | [Alarm clock](#6-alarm-clock)                                                               | M      | medium     | card app, plus a small UI payload hook         |
 | 7   | [Extras: Clock, World Clock, Stopwatch, Timer](#7-extras-clock-world-clock-stopwatch-timer) | S      | low-medium | card game                                      |
-| 8   | [Photo slideshow](#8-photo-slideshow)                                                       | S      | low-medium | UI payload (under 1 KB)                        |
+| 8   | [Photo slideshow](#8-photo-slideshow): dropped, Photos is retired                           | -      | -          | -                                              |
 | 9   | [Lyrics timing offset](#9-lyrics-timing-offset)                                             | S      | low-medium | UI payload (under 1 KB)                        |
 | 10  | [AirPlay 2 receiver](#10-airplay-2-receiver)                                                | L      | high       | card app                                       |
 
-Items 1, 3, 8 and 9 together come to about 3 KB of payload, which the 1 MB below `SCRATCH` ([inefficiencies.md entry 1](inefficiencies.md#1-the-ui-payloads-room-resolved)) holds.
+Items 1, 3 and 9 together come to under 3 KB of payload, which the 1 MB below `SCRATCH` ([inefficiencies.md entry 1](inefficiencies.md#1-the-ui-payloads-room-resolved)) holds.
 
 ### Quick wins (S effort, medium or high value)
 
@@ -48,7 +48,6 @@ Support: **yes** the Q2 can do it as it is, **partial** with a limit named, **no
 | Crossfeed                                | Rockbox; Meier and Linkwitz headphone amplifiers              | yes: hciplayer filter                                                                                                | a Bauer-style filter beside Mono Audio in `peq_player.c`                      | S      | medium     |
 | Alarm clock                              | iPod classic, nano (Extras > Alarms); Rockbox (wake-up alarm) | partial: wakes from Standby through the RTC, not from power-off; sound through headphones or the buzzer              | card app sets it; payload arms `wakealarm` before Standby                     | M      | medium     |
 | Clock, World Clock, Stopwatch, Timer     | iPod classic, nano (Extras > Clock, Stopwatch)                | yes                                                                                                                  | one card game, full screen                                                    | S      | low-medium |
-| Photo slideshow with music               | iPod classic, nano, iPod photo                                | yes                                                                                                                  | a timer that steps the viewer's carousel                                      | S      | low-medium |
 | Lyrics timing offset                     | the `.lrc` format's `[offset:]` tag, honoured by many players | yes                                                                                                                  | a per-song offset added in `lyrics_now`                                       | S      | low-medium |
 | AirPlay 2 receiver                       | network streamers (WiiM, Bluesound); stock has AirPlay 1      | yes: Wi-Fi, CPU; needs nqptp's PTP ports                                                                             | card app: shairport-sync 4.x and nqptp, as librespot                          | L      | high       |
 | Translations (Language)                  | every iPod; stock Q2                                          | partial: stock's languages exist, Q2 Pod's own strings are C literals                                                | string table on the rootfs or card, looked up by key                          | XL     | high       |
@@ -166,15 +165,7 @@ Support: **yes** the Q2 can do it as it is, **partial** with a limit named, **no
 
 ### 8. Photo slideshow
 
-**What.** Photos > Slideshow on the iPod photo, classic and nano: each photo for a set time, with a transition, over the music playing.
-
-**Support.** Yes. Photos already has a full-screen viewer that steps through an album with the wheel's carousel step and keeps the neighbours decoded (`patch/photos.c:315` on; [internals.md, Photos](internals.md#photos)). Music keeps playing while Photos is open.
-
-**Approach.** **Play Slideshow** as the first row of an album, and Play/Pause in the viewer starting and stopping it. A `timer_add` (as the grid's 250 ms poll, `patch/photos.c:173`) steps the `slide_menu` to the next photo every 3 to 5 s, the slide animation as the transition, wrapping at the end. The screen should stay lit while it runs, as for a video.
-
-**Effort and value.** S. Low-medium: photos on a music player are a side feature, but a slideshow is how they are shown to someone.
-
-**Risks.** Battery with the screen held on; stop after 30 minutes. Under 1 KB of payload.
+**Dropped.** Photos, the viewer a slideshow would have stepped through, was retired from the firmware ([changelog.md](changelog.md)), so there is nothing on the Q2 to show photos with.
 
 ### 9. Lyrics timing offset
 
@@ -221,8 +212,6 @@ iPod-lineage features Q2 Pod or stock already has, with where. Stock means Shanl
 | Audiobooks, speed, chapters                  | `.m4b` and CUE books, resume, chapters, Speed per folder (stock's four steps)              | `patch/chapters.c`, `patch/playback.c:404` (`ringnav_speed`)                      |
 | Podcasts                                     | Podcasts folder with resume; the Podcasts card app subscribes and downloads                | [internals.md](internals.md#podcasts-and-audiobooks), `sources.list`              |
 | Sleep timer                                  | stock's Sleep Timer page; card apps' pause-at-time timer                                   | `patch/navigation.c:2888` (`ringnav_sleeptimer`), `patch/addon.c:616`             |
-| Notes                                        | Books shows `.txt` and `.epub` from the card's `Books` folder                              | `patch/books.c`, [internals.md](internals.md#books)                               |
-| Photos                                       | albums, a thumbnail grid, a full-screen viewer                                             | `patch/photos.c`                                                                  |
 | Video                                        | Videos folder, played by `q2video`                                                         | `patch/video.c`, [internals.md](internals.md#videos)                              |
 | Games                                        | Sudoku, Vortex, Solitaire, Snake, and card games                                           | `patch/games.c`, [internals.md](internals.md#games)                               |
 | Clock in the status bar, time zones          | clock kept across power-off, every zone at its current offset                              | [internals.md, Clock](internals.md#clock)                                         |
