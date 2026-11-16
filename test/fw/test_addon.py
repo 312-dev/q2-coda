@@ -73,7 +73,7 @@ AR_ALBUMS = 1 << 20  # addon.c's Albums row's click context
 
 class Pg(C.Structure):
     _fields_ = [*((n, C.c_void_p) for n in ('page', 'view', 'edit')), *((n, C.c_uint) for n in ('timer', 'go', 'leave', 'again')),
-                *((n, C.c_int) for n in ('depth', 'act', 'next', 'arg', 'a', 'code', 'arow', 'busy')), ('acted', C.c_uint),
+                *((n, C.c_int) for n in ('depth', 'act', 'next', 'arg', 'a', 'code', 'arow', 'busy', 'qrnext')), ('acted', C.c_uint),
                 ('term', C.c_char * 64), ('aop', C.c_char * 16), ('lv', C.POINTER(Lv)), ('buf', C.c_void_p * ADDON_PAGES),
                 ('f', C.POINTER(C.c_char_p)), ('pages', C.c_int), ('paging', C.c_int), ('moved', C.c_byte),
                 ('sec', C.c_void_p), ('nsec', C.c_byte), ('cur', C.c_byte), ('sx', C.c_int), ('sy', C.c_int),
@@ -82,8 +82,10 @@ class Pg(C.Structure):
 
 
 class Qp(C.Structure):
-    _fields_ = [*((n, C.c_void_p) for n in ('page', 'qr', 'col', 'msg', 'addr', 'pin', 'note', 'say', 'sub')),
-                *((n, C.c_uint) for n in ('timer', 'leave', 'seen')), ('state', C.c_void_p), ('size', C.c_int), ('hex', C.c_void_p)]
+    _fields_ = [('page', C.c_void_p), ('view', C.c_void_p), *((n, C.c_uint) for n in ('timer', 'leave', 'done', 'seen')),
+                ('state', C.c_void_p), ('marker', C.c_char * 48), ('name', C.c_char * 32), ('size', C.c_int), ('code', C.c_int),
+                ('hex', C.c_void_p), ('step', C.c_char * 8), ('title', C.c_char * 64), ('line', C.c_char * 96),
+                ('addr', C.c_char * 64), ('pin', C.c_char * 16), ('note', C.c_char * 128)]
 
 
 class Taken(C.Structure):
@@ -404,7 +406,7 @@ def test_more_apps_than_slots(fw):
 def test_the_features_are_published_at_every_scan(fw):
     world = card(fw)
     scan(fw)
-    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings artist album playlists storage\n'
+    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings artist album playlists storage signin\n'
     assert world.of('rename') == [(b'/tmp/q2-addon.caps.tmp', b'/tmp/q2-addon.caps')]
 
 
@@ -2497,6 +2499,32 @@ def test_an_action_on_a_live_level_whose_rows_keep_their_shape_writes_them_in_pl
     assert len(fw.calls('list_item_create')) == drawn and p.cell(1, 3) == b'Selected' and p.cell(0, 3) == b'-'
 
 
+def test_an_action_whose_refresh_makes_its_row_remote_opens_the_code(fw):
+    """One press signs in: the sign-in action's refresh turns its row into a remote one under the cursor, and the QR
+    page opens with no second press, once: the flag goes with that refresh."""
+    remote = row_of(b'', b'Sign In', b'', kind=b'remote')
+    p = live(fw, [row_of(b'x', b'Other', b'', kind=b'action'), row_of(b'signin', b'Sign In', b'', kind=b'action')])
+    p.world.files[b'/tmp/q2-foo.state'] = qr_state()
+    qp = fw.var('addon__qp', Qp)
+    p.sel = 1
+    p.click(1)
+    p.answer()
+    code = block(fw, size=4096)
+    fw.mock('window_create', lambda *_: code)
+    p.answer(msg=b'refresh', rows=[row_of(b'x', b'Other', b'', kind=b'action'), remote])
+    assert qp.page == code and C.string_at(qp.state) == b'/tmp/q2-foo.state' and p.pg.qrnext == 0  # once only
+
+
+def test_an_action_whose_refresh_leaves_another_row_under_the_cursor_opens_nothing(fw):
+    p = live(fw, [row_of(b'signin', b'Sign In', b'', kind=b'action'), row_of(b'x', b'Other', b'', kind=b'action')])
+    qp = fw.var('addon__qp', Qp)
+    p.sel = 1
+    p.click(1)
+    p.answer()
+    p.answer(msg=b'refresh', rows=[row_of(b'', b'Sign In', b'', kind=b'remote'), row_of(b'x', b'Other', b'', kind=b'action')])
+    assert not qp.page and p.pg.qrnext == 0
+
+
 def test_a_press_while_a_live_level_is_asked_again_takes_its_place(fw):
     """The level stays pressable while it is asked again: a second action cancels that request and is sent; its
     reply is taken as the action's, and the level is asked again after it."""
@@ -3660,22 +3688,17 @@ def test_a_qr_app_shows_its_code_at_the_first_answer(fw):
 
 
 class Qr:
+    """The QR page over status file raw (None: no file), opened as /tmp/q2-a.state's for app Title. texts: what its
+    last paint drew, (text, its rect's centre y)."""
     def __init__(self, fw, raw):
-        self.fw, self.texts, self.shown, self.widths = fw, [], {}, {}
+        self.fw, self.texts = fw, []
         self.world = World(fw, {} if raw is None else {b'/tmp/q2-a.state': raw})
         self.ids = [100]
         def widget(*_):
             self.ids[0] += 8
             return self.ids[0]
-        def view(factory, kind, parent, x, y, w, *_):  # its height is a seventh argument, past a stub's six
-            made = widget()
-            self.widths[made] = w
-            return made
         fw.mock('window_create', lambda *_: 99)
-        fw.mock('widget_factory_create_widget', view)
-        fw.mock('hscroll_label_create', widget)
-        fw.mock('widget_set_text_utf8', lambda w, s, *_: self.texts.append(C.string_at(s)))
-        fw.mock('widget_set_visible', lambda w, on, *_: self.shown.__setitem__(w, on))
+        fw.mock('widget_factory_create_widget', widget)
         self.qp = fw.var('addon__qp', Qp)
         fw.fn('addon__qr_open', None, C.c_char_p, C.c_char_p)(b'/tmp/q2-a.state', b'Title')
 
@@ -3683,39 +3706,56 @@ class Qr:
         self.world.files[b'/tmp/q2-a.state'] = raw
         self.fw.fn('addon__qr_refresh', None)()
 
+    def paint(self):
+        """The page painted: its texts, and its plates and fills as drawn() gives them."""
+        self.texts = []
+        self.fw.mock('canvas_draw_text_in_rect', lambda c, s, n, r, *_: self.texts.append(
+            (C.string_at(s, 4 * n).decode('utf-32-le'), (lambda b: b[1] + b[3] // 2)(C.cast(r, C.POINTER(C.c_int))[:4]))))
+        return drawn(self.fw, paint_of(self.fw, self.qp.view))
+
     @property
     def code(self):
-        return self.shown.get(self.qp.qr)
+        return self.qp.code == 1 and not self.qp.step
+
+    def said(self):
+        self.paint()
+        return [t for t, _ in self.texts]
 
 
 HEX21 = b'f' * (6 * 21)
 
 
-def qr_state(size=21, code=HEX21, addr=b'192.168.1.2:8080', pin=b'548001', note=b'Hi'):
-    return b'addr=%s\nhold=1\npin=%s\nnote=%s\nqrsize=%d\nqr=%s\n' % (addr, pin, note, size, code)
+def qr_state(size=21, code=HEX21, addr=b'192.168.1.2:8080', pin=b'548001', note=b'Hi', extra=b''):
+    return b'addr=%s\nhold=1\npin=%s\nnote=%s\nqrsize=%d\nqr=%s\n%s' % (addr, pin, note, size, code, extra)
 
 
 def test_a_code_shows_with_its_address_and_spaced_pin(fw):
     q = Qr(fw, qr_state())
-    assert q.code == 1 and C.string_at(q.qp.hex) == HEX21 and q.qp.size == 21
-    assert b'192.168.1.2:8080' in q.texts and b'548 001' in q.texts and b'Hi' in q.texts
+    assert q.code and C.string_at(q.qp.hex) == HEX21 and q.qp.size == 21
+    assert q.said() == ['Hi', 'or open 192.168.1.2:8080  \u00b7  PIN 548 001']  # the app's note, then where
+    q.again(qr_state(note=b''))
+    assert q.said()[0] == 'Scan with your phone'
+    assert [y for _, y in q.texts] == [192, 216]  # QR_SCAN_Y, QR_ADDR_Y
 
 
 def test_a_pin_of_another_length_shows_as_it_is(fw):
-    assert b'12345' in Qr(fw, qr_state(pin=b'12345')).texts
+    q = Qr(fw, qr_state(pin=b'12345'))
+    assert 'or open 192.168.1.2:8080  \u00b7  PIN 12345' in q.said()
+    q.again(qr_state(pin=b''))
+    assert 'or open 192.168.1.2:8080' in q.said()
 
 
 @pytest.mark.parametrize('raw,say', [
-    (None, b'Not running'), (b'', b'Not running'),
-    (b'hold=1\n', b'Connect the Q2 to Wi-Fi'),
-    (b'addr=x\n', b'No code yet'),
-    (qr_state(size=20), b'No code yet'), (qr_state(size=178), b'No code yet'),
-    (qr_state(code=HEX21[:-1]), b'No code yet'), (qr_state(code=HEX21 + b'f'), b'No code yet'),
-    (qr_state(addr=b''), b'Connect the Q2 to Wi-Fi'),
+    (None, 'Not running'), (b'', 'Not running'),
+    (b'hold=1\n', 'Connect the Q2 to Wi-Fi'),
+    (b'addr=x\n', 'No code yet'),
+    (qr_state(size=20), 'No code yet'), (qr_state(size=178), 'No code yet'),
+    (qr_state(code=HEX21[:-1]), 'No code yet'), (qr_state(code=HEX21 + b'f'), 'No code yet'),
+    (qr_state(addr=b''), 'Connect the Q2 to Wi-Fi'),
 ])
 def test_no_code_says_why(fw, raw, say):
     q = Qr(fw, raw)
-    assert not q.code and say in q.texts
+    assert not q.code and say in q.said()
 
 
 def test_a_code_longer_than_its_buffer_is_cut_and_never_shown(fw):
@@ -3733,11 +3773,13 @@ def test_hold_anywhere_in_the_status_file_holds(fw, state):
     assert a.hold == 1 and [c[1][:3] for c in fw.calls('reset_poweroptions_timer')] == [(1, 1, 0)]
 
 
-def test_the_same_file_again_writes_nothing(fw):
+def test_the_same_file_again_draws_nothing_new(fw):
     q = Qr(fw, qr_state())
-    count = len(q.texts)
+    count = len(fw.calls('widget_invalidate_force'))
     fw.fn('addon__qr_refresh', None)()
-    assert len(q.texts) == count
+    assert len(fw.calls('widget_invalidate_force')) == count
+    q.again(qr_state(pin=b'111111'))
+    assert len(fw.calls('widget_invalidate_force')) == count + 1
 
 
 def test_closing_the_code_frees_it(fw):
@@ -3746,26 +3788,96 @@ def test_closing_the_code_frees_it(fw):
     assert not q.qp.page and not q.qp.hex
 
 
+def test_the_page_keeps_its_marker_while_open(fw):
+    """/tmp/q2-<id>.qrpage exists from the open to the close: the app's sign-in stops once it goes."""
+    q = Qr(fw, qr_state())
+    assert q.world.written.get(b'/tmp/q2-a.qrpage') == b'' and q.qp.marker == b'/tmp/q2-a.qrpage'
+    assert (b'/tmp/q2-a.qrpage',) not in q.world.of('unlink')
+    fw.fn('addon__qr_closed', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+    assert q.world.of('unlink')[-1:] == [(b'/tmp/q2-a.qrpage',)]
+
+
+def test_the_page_names_its_app_in_the_status_row(fw):
+    q = Qr(fw, qr_state())
+    title, page = fw.fn('addon_qr_title', C.c_char_p, C.c_void_p), fw.fn('addon_qr_page', C.c_int, C.c_void_p)
+    assert title(q.qp.page) == b'Title' and title(q.qp.page + 1) is None and page(q.qp.page) == 1 and page(0) == 0
+    fw.fn('addon__qr_closed', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+    assert title(99) is None and page(99) == 0
+
+
 def qr_rects(fw, q):
-    lcd, canvas = block(fw, size=4096), block(fw, size=4096)
-    C.c_void_p.from_address(canvas + CANVAS_LCD).value = lcd
-    rects = []
-    fw.mock('canvas_fill_rect', lambda c, x, y, w, h, *_: rects.append((x, y, w, h)))
-    fw.fn('addon_paint', None, C.c_void_p, C.c_void_p)(q.qp.qr, canvas)
-    return rects
+    plates, fills = q.paint()
+    return [f[:4] for f in fills]
 
 
 def test_a_full_row_of_modules_is_one_rectangle(fw):
     q = Qr(fw, qr_state())
-    m, o = 186 // 25, (186 - 186 // 25 * 21) // 2
-    assert qr_rects(fw, q) == [(o, o + y * m, 21 * m, m) for y in range(21)]
+    m = 166 // 25
+    o, x0, y0 = (166 - m * 21) // 2, (375 - 166) // 2, 4
+    assert qr_rects(fw, q) == [(x0 + o, y0 + o + y * m, 21 * m, m) for y in range(21)]
 
 
 def test_modules_read_from_the_high_bit_and_a_bad_digit_is_blank(fw):
     code = b'800000' + b'000000' * 19 + b'0z8000'
     q = Qr(fw, qr_state(code=code))
-    m, o = 7, (186 - 7 * 21) // 2
-    assert qr_rects(fw, q) == [(o, o, m, m), (o + 8 * m, o + 20 * m, m, m)]
+    m = 166 // 25
+    o, x0, y0 = (166 - m * 21) // 2, (375 - 166) // 2, 4
+    assert qr_rects(fw, q) == [(x0 + o, y0 + o, m, m), (x0 + o + 8 * m, y0 + o + 20 * m, m, m)]
+
+
+STEPS: dict[bytes, int | None] = {b'phone': None, b'check': None, b'done': 0x34c759, b'fail': 0xff453a, b'error': 0xff453a}
+
+
+@pytest.mark.parametrize('step', list(STEPS))
+def test_a_step_is_a_mode_page(fw, step):
+    """A step replaces the code with its circle (accent; green done; red fail and error), its glyph, title and line,
+    the stack centred under the status row (the page at y 0 here)."""
+    q = Qr(fw, qr_state(extra=b'step=%s\ntitle=T\nline=L\n' % step))
+    arts = []
+    fw.mock('widget_load_image', lambda w, name, bm, *_: arts.append(C.string_at(name)) or 1)
+    plates, fills = q.paint()
+    top = 40 + (320 - 40 - 158) // 2
+    assert [p[:4] for p in plates] == [(187 - 46, top, 92, 92)] and not fills  # no code under it
+    rgb = STEPS[step]
+    if rgb is not None:
+        r, g, b = rgb >> 16, rgb >> 8 & 255, rgb & 255
+        assert plates[0][4] == 0xff000000 | b << 16 | g << 8 | r
+    assert q.texts == [('T', top + 120), ('L', top + 148)]
+    assert any(a.endswith(b'signin_' + step) for a in arts)
+
+
+def test_an_unknown_step_draws_its_words_without_a_circle(fw):
+    q = Qr(fw, qr_state(extra=b'step=later\ntitle=T\nline=L\n'))
+    plates, fills = q.paint()
+    assert not plates and not fills and [t for t, _ in q.texts] == ['T', 'L']
+
+
+def test_done_goes_back_to_the_apps_page_once(fw):
+    timers = []
+    fw.mock('timer_add', lambda fn, ctx, ms, *_: timers.append((fn, ms)) or len(timers))
+    q = Qr(fw, qr_state())
+    q.again(qr_state(extra=b'step=done\ntitle=Signed In\nline=u on h\n'))
+    q.again(qr_state(extra=b'step=done\ntitle=Signed In\nline=u on h \n'))  # read again: not armed twice
+    done = [fn for fn, ms in timers if ms == 1500]
+    assert len(done) == 1
+    fw.mock('window_manager_get_top_window', lambda *_: q.qp.page)
+    C.CFUNCTYPE(C.c_int, C.c_void_p)(done[0])(None)
+    assert len(fw.calls('navigator_back')) == 1 and q.qp.done == 0
+
+
+def test_done_leaves_a_page_opened_over_it(fw):
+    timers = []
+    fw.mock('timer_add', lambda fn, ctx, ms, *_: timers.append((fn, ms)) or len(timers))
+    q = Qr(fw, qr_state(extra=b'step=done\n'))
+    fw.mock('window_manager_get_top_window', lambda *_: q.qp.page + 8)
+    C.CFUNCTYPE(C.c_int, C.c_void_p)([fn for fn, ms in timers if ms == 1500][0])(None)
+    assert not fw.calls('navigator_back')
+
+
+def test_a_step_ends_when_the_app_does(fw):
+    q = Qr(fw, qr_state(extra=b'step=check\n'))
+    q.again(b'')
+    assert 'Not running' in q.said() and not q.qp.step
 
 
 def test_hostile_status_files(fw):
@@ -3776,8 +3888,7 @@ def test_hostile_status_files(fw):
     paint = fw.fn('addon_paint', None, C.c_void_p, C.c_void_p)
     for raw in hostile(45, samples, 800, b'0af=z\n '):
         q.again(raw)
-        if q.code:
-            paint(q.qp.qr, canvas)  # a hidden widget isn't painted
+        paint(q.qp.view, canvas)
 
 
 def test_the_code_is_read_again_only_while_the_screen_is_lit(fw):
@@ -3786,9 +3897,9 @@ def test_the_code_is_read_again_only_while_the_screen_is_lit(fw):
     q.world.files[b'/tmp/q2-a.state'] = qr_state(pin=b'222222')
     lit = fw.var('g_backlight_status', C.c_ubyte)
     lit.value = 0
-    assert tick(None) == 8 and b'222 222' not in q.texts  # RET_REPEAT
+    assert tick(None) == 8 and q.qp.pin == b'111111'  # RET_REPEAT
     lit.value = 1
-    assert tick(None) == 8 and b'222 222' in q.texts
+    assert tick(None) == 8 and q.qp.pin == b'222222'
 
 
 def test_return_on_the_code_goes_back(fw):
@@ -3834,9 +3945,9 @@ def paint_of(fw, widget):
 
 def test_a_canvas_that_cant_round_gets_square_plates(fw):
     q = Qr(fw, qr_state())
-    plates, code = drawn(fw, paint_of(fw, q.qp.qr))
+    plates, code = drawn(fw, paint_of(fw, q.qp.view))
     # each plate filled square where it would have been rounded, in its colour, under the same code
-    assert plates and drawn(fw, paint_of(fw, q.qp.qr), rounds=False) == ([], plates + code)
+    assert plates and drawn(fw, paint_of(fw, q.qp.view), rounds=False) == ([], plates + code)
 
 
 def worker(fw, script, connect=0):

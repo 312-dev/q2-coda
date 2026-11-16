@@ -82,15 +82,13 @@ enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 #define RESTART_MS 20000 /* Retry's restart starts the app by then, its old loop gone or not */
 #define QUIT_MS 20000    /* the Apps page's worker waits at most this long for an app to end */
 #define APP_ID 16        /* an id's bytes, its NUL included */
-#define QR_PX 186        /* the code's white plate: 5 px modules up to a 33-module code */
-#define QR_COL 214       /* the text beside it */
 #define QR_RAW 1536      /* an app's status file as far as it is read (poll_one, qr_refresh) */
 #define CARD "/mnt/mmc"
 #define CAPS_FILE "/tmp/q2-addon.caps"
 /* This firmware's card-app features, space-separated; a feature adds its word. */
 #define ADDON_CAPS                                                                                 \
     "playlist progress pages library goto sleep game audio sections art window urls sort field "   \
-    "more fav now catalogue ratings artist album playlists storage"
+    "more fav now catalogue ratings artist album playlists storage signin"
 #define ADDON_SECTIONS 8  /* sections an app's first page may have */
 #define SWIPE_CLAIM_PX 24 /* a sideways move this far, twice as far as up or down, is a swipe's */
 #define SWIPE_PX 60       /* and this far at the lift, more than up or down, changes section */
@@ -1209,6 +1207,7 @@ static struct {
         code; /* act: what the request in flight is for, 1 an action; a: the app's slot; code: its
                  QR code to show at the first answer */
     int arow, busy; /* the action's row, and whether it says Working… (busy_row) */
+    int qrnext; /* an action's refresh in flight: a remote row under the cursor opens its page */
     unsigned acted; /* when the action was sent */
     char term[64], aop[16];
     lv_t *lv; /* ADDON_DEPTH of them, calloc'd */
@@ -2055,6 +2054,8 @@ static void got(void) {
                               ? spot_reply(reply, req.n, act ? head : g, act ? 0 : ADDON_ROWS)
                               : -1;
     char **f = act ? head : g;
+    int qrnext = !act && pg.qrnext; /* this reply is the refresh an action asked for */
+    if (!act) pg.qrnext = 0;
     req.buf = 0;
     tk_snprintf(id, sizeof id, "%u", req.id);
     if (n >= 0 && strcmp(f[0], id)) n = -1;
@@ -2073,9 +2074,10 @@ static void got(void) {
         if (ok && !strcmp(pg.aop, "stop")) {
             app()->launched = app()->hold = 0;
             navigator_back();
-        } else if (ok && l == top() && l->state == K_READY && l->live)
+        } else if (ok && l == top() && l->state == K_READY && l->live) {
             keep_sel(), fetch(l); /* a live level stays shown, asked again now: no Loading… page */
-        else
+            pg.qrnext = 1;        /* one press: a sign-in's row turned remote opens the QR page */
+        } else
             keep_sel(), l->state = K_LOAD, show(); /* the level as the action left it */
     } else if (l->id != req.id) {
     } else if (pg.paging) { /* a next page appended, or the list ends at More… (rows kept) */
@@ -2132,6 +2134,8 @@ static void got(void) {
         }
         if (pg.code) /* turned on by its row: its address at once, the menu behind it */
             pg.code = 0, qr_open(app()->state, app()->name);
+        else if (qrnext && l->sel >= 0 && l->sel < l->n && !strcmp(cell(l->sel, 0), "remote"))
+            qr_open(app()->state, app()->name); /* the action's row is the QR page's now */
     }
     free(reply);
 }
@@ -2593,52 +2597,91 @@ int addon_hold(void *w) {
     return 1;
 }
 
-/* The QR code page (qrcode_page): an app's status file's qr (qrsize rows of hex, the leftmost
- * module the high bit), drawn on a white plate, beside its address (addr), PIN (pin) and note,
- * read again every second. Without an address (no Wi-Fi) or a file (not running), it says so. */
+/* The QR code page (qrcode_page), redrawn every half second from an app's status file:
+ *  - its code, qr (qrsize rows of hex, the leftmost module the high bit) on a white plate centred
+ *    at the top, the app's note under it ("Scan with your phone" without one: q2-subsonic's says
+ *    "Scan with your phone to sign in"), and under that, dimmer, the address (addr) and PIN (pin)
+ *    for a phone that types it; without an address (no Wi-Fi) or a file (not running), it says so;
+ *  - or, once the file has a step, that step as a mode page (docs/oled-design.md): one solid circle
+ *    with its glyph, the file's title and line under it, the stack centred under the status row.
+ *    phone, check: the accent's (the phone has the form; the server is being asked), done: green,
+ *    then the page closes itself after QR_DONE_MS so the app's page, signed in now, shows; fail
+ *    (the server not reached) and error (anything else): red.
+ * The status row names the app (addon_qr_title). While the page is open /tmp/q2-<id>.qrpage exists,
+ * so the app knows the page was left by its going ("signin" in ADDON_CAPS), not by guessing from
+ * the pauses in its page's refreshes, which the screen turning off makes too. The wheel does
+ * nothing here (addon_qr_page): there is nothing to move, and its volume would hide the code. */
 #define QR_HEX 640
+#define QR_PLATE                                                                                   \
+    166 /* the code's white plate: a 29-module code's 5 px modules, 2 quiet each side */
+#define QR_PLATE_Y 4  /* its top, on the page: under the status row */
+#define QR_SCAN_Y 192 /* the note's centre, then the address line's */
+#define QR_ADDR_Y 216
+#define QR_SCAN_PX 20     /* Inter Medium 17 */
+#define QR_ADDR_PX 17     /* Inter Regular 14 */
+#define QR_TER 0x858585   /* Text Tertiary */
+#define QR_SEC_D 0xababab /* Text Secondary, dark and light halves */
+#define QR_SEC_L 0x5c5c5c
+#define QR_DONE_MS 1500 /* Signed In shows this long before the app's page */
+/* A step's mode page, in screen y: the stack (circle, title, line) centred as one between the
+ * status row's foot (MODE_TOP) and the screen's bottom */
+#define MODE_TOP 40
+#define MODE_STACK 158
+#define MODE_R 46
+#define MODE_GLYPH 44 /* tools/art.py SIGNIN_PX */
+#define MODE_TITLE_Y 120
+#define MODE_TITLE_PX 26 /* Inter Medium 22 */
+#define MODE_LINE_Y 148
+#define MODE_LINE_PX 18 /* Inter Regular 15 */
+#define MODE_GREEN 0x34c759
+#define MODE_RED 0xff453a
 static struct {
-    void *page, *qr, *col, *msg, *addr, *pin, *note, *say, *sub;
-    unsigned timer, leave, seen; /* seen: the state file as last read, hashed */
+    void *page, *view;
+    unsigned timer, leave, done, seen; /* seen: the state file as last read, hashed */
     const char *state;
-    int size;
-    char *hex; /* the code's rows, QR_HEX bytes calloc'd with the page */
+    char marker[48]; /* /tmp/q2-<id>.qrpage */
+    char name[32];   /* the app's, the status row's title */
+    int size, code;  /* code: the file has one to draw */
+    char *hex;       /* the code's rows, QR_HEX bytes calloc'd with the page */
+    char step[8], title[64], line[96], addr[64], pin[16], note[128];
 } qp __attribute__((section(".scratch")));
 
-static void set(void *w, const char *s) {
-    if (tk_strcmp(widget_get_prop_str(w, "text", ""), s)) widget_set_text_utf8(w, s);
+static int qr_done(const void *unused) {
+    (void)unused;
+    qp.done = 0;
+    if (qp.page && window_manager_get_top_window(window_manager()) == qp.page) navigator_back();
+    return 0;
 }
 
-
 static void qr_refresh(void) {
-    char raw[QR_RAW], addr[64], pin[16], note[128], spaced[16];
+    char raw[QR_RAW];
     int n = (int)state_read(qp.state, raw, sizeof raw);
     unsigned h = hash_bytes(FNV_SEED, (const unsigned char *)raw, (unsigned)n + 1);
     if (h == qp.seen) return;
     qp.seen = h;
-    field(raw, "addr", addr, sizeof addr);
-    field(raw, "pin", pin, sizeof pin);
-    field(raw, "note", note, sizeof note);
+    field(raw, "addr", qp.addr, sizeof qp.addr);
+    field(raw, "pin", qp.pin, sizeof qp.pin);
+    field(raw, "note", qp.note, sizeof qp.note);
     field(raw, "qr", qp.hex, QR_HEX);
+    field(raw, "step", qp.step, sizeof qp.step);
+    field(raw, "title", qp.title, sizeof qp.title);
+    field(raw, "line", qp.line, sizeof qp.line);
+    if (!n) qp.step[0] = 0; /* not running: say so, whatever the last step was */
     qp.size = (int)number(raw, "qrsize");
-    int w = (qp.size + 3) / 4,
-        code = addr[0] && qp.size >= 21 && qp.size <= 177 && (int)strlen(qp.hex) == w * qp.size;
-    widget_set_visible(qp.qr, code, 0);
-    widget_set_visible(qp.col, code, 0);
-    widget_set_visible(qp.msg, !code, 0);
-    if (!code) {
-        set(qp.say, !n ? "Not running" : addr[0] ? "No code yet" : "Connect the Q2 to Wi-Fi");
-        set(qp.sub, !n ? "Open it again" : addr[0] ? "Wait a moment" : "Then come back here");
-        return;
+    int w = (qp.size + 3) / 4;
+    qp.code = qp.addr[0] && qp.size >= 21 && qp.size <= 177 && (int)strlen(qp.hex) == w * qp.size;
+    if (!qp.code) {
+        tk_snprintf(qp.title, sizeof qp.title, "%s",
+                    !n           ? "Not running"
+                    : qp.addr[0] ? "No code yet"
+                                 : "Connect the Q2 to Wi-Fi");
+        tk_snprintf(qp.line, sizeof qp.line, "%s",
+                    !n           ? "Open it again"
+                    : qp.addr[0] ? "Wait a moment"
+                                 : "Then come back here");
     }
-    if (strlen(pin) == 6) /* 548 001 */
-        memcpy(spaced, pin, 3), spaced[3] = ' ', memcpy(spaced + 4, pin + 3, 4);
-    widget_set_prop_int(qp.addr, "style:normal:font_size",
-                        strlen(addr) > 17 ? 14 : 16); /* 192.168.100.200:8080 */
-    set(qp.addr, addr);
-    set(qp.pin, strlen(pin) == 6 ? spaced : pin);
-    set(qp.note, note);
-    widget_invalidate_force(qp.qr, 0);
+    if (!strcmp(qp.step, "done") && !qp.done) rearm(&qp.done, qr_done, QR_DONE_MS);
+    widget_invalidate_force(qp.view, 0);
 }
 
 static int qr_tick(const void *unused) {
@@ -2663,14 +2706,11 @@ static int qr_closed(void *ctx, void *event) {
     (void)ctx, (void)event;
     stop_timer(&qp.timer);
     stop_timer(&qp.leave);
+    stop_timer(&qp.done);
+    unlink(qp.marker);
     free(qp.hex);
     memset(&qp, 0, sizeof qp);
     return 0;
-}
-
-static void *qr_label(void *parent, int x, int y, int w, int h, const char *style, int px,
-                      unsigned color) {
-    return label(parent, x, y, w, h, style, px, color);
 }
 
 static void qr_open(const char *state, const char *title) {
@@ -2679,45 +2719,27 @@ static void qr_open(const char *state, const char *title) {
         free(qp.hex), qp.hex = 0;
         return;
     }
-    void *f = widget_factory(), *page = qp.page;
-    int h = widget_get_prop_int(page, "h", client_h());
-    /* the two text lines, or open, the address, PIN, its value, the note: y, height, px */
-    static const short r[7][3] = { { 2, 22, 18 },   { 24, 22, 18 },  { 60, 18, 14 }, { 78, 22, 16 },
-                                   { 112, 18, 14 }, { 130, 28, 24 }, { 172, 20, 14 } };
-    int x = 0, w = 375 - QR_COL - 12, short_w = 140;
     qp.state = state;
-    void *name = qr_label(page, 16, 12, 240, 16, "s_scrlabel_white20l", 16, SPOT_GREY);
-    widget_set_text_utf8(name, title);
-    qp.qr = widget_factory_create_widget(f, "view", page, 16, 40, QR_PX, QR_PX);
-    qp.col = widget_factory_create_widget(f, "view", page, QR_COL, 40, w, QR_PX);
-    widget_set_text_utf8(
-        qr_label(qp.col, x, r[0][0], short_w, r[0][1], "s_scrlabel_white20l", r[0][2], 0xffffffffu),
-        "Scan with your");
-    widget_set_text_utf8(
-        qr_label(qp.col, x, r[1][0], short_w, r[1][1], "s_scrlabel_white20l", r[1][2], 0xffffffffu),
-        "phone's camera");
-    widget_set_text_utf8(
-        qr_label(qp.col, x, r[2][0], short_w, r[2][1], "s_scrlabel_white20l", r[2][2], SPOT_GREY),
-        "or open");
-    qp.addr = qr_label(qp.col, x, r[3][0], w, r[3][1], "s_scrlabel_white20l", r[3][2], 0xffffffffu);
-    widget_set_text_utf8(
-        qr_label(qp.col, x, r[4][0], short_w, r[4][1], "s_scrlabel_white20l", r[4][2], SPOT_GREY),
-        "PIN");
-    qp.pin =
-        qr_label(qp.col, x, r[5][0], short_w, r[5][1], "s_scrlabel_white20l", r[5][2], 0xffffffffu);
-    qp.note = qr_label(qp.col, 0, r[6][0], w, r[6][1], "s_scrlabel_white20l", r[6][2], SPOT_GREY);
-    void *scroll[] = { qp.addr, qp.note };
-    for (unsigned i = 0; i < 2; ++i)
-        hscroll_label_set_only_focus(scroll[i], 0), hscroll_label_set_ellipses(scroll[i], 0);
-    qp.msg = widget_factory_create_widget(f, "view", page, 0, 0, 375, h);
-    qp.say = qr_label(qp.msg, CF_EDGE, 100, 375 - 2 * CF_EDGE, 30, "s_scrlabel_white20c", 20,
-                      0xffffffffu);
-    qp.sub =
-        qr_label(qp.msg, CF_EDGE, 134, 375 - 2 * CF_EDGE, 24, "s_scrlabel_white20c", 16, SPOT_GREY);
+    tk_snprintf(qp.name, sizeof qp.name, "%s", title);
+    /* /tmp/q2-<id>.state's marker: /tmp/q2-<id>.qrpage */
+    unsigned k = strlen(state);
+    k = k > 6 && !strcmp(state + k - 6, ".state") ? k - 6 : k;
+    tk_snprintf(qp.marker, sizeof qp.marker, "%.*s.qrpage", (int)k, state);
+    void *f = fopen(qp.marker, "wb");
+    if (f) fclose(f);
+    int h = widget_get_prop_int(qp.page, "h", client_h());
+    qp.view = widget_factory_create_widget(widget_factory(), "view", qp.page, 0, 0, 375, h);
     qp.seen = 0; /* nothing read yet: no read hashes to 0 but by chance, and then only once */
     qr_refresh();
-    qp.timer = timer_add(qr_tick, 0, 1000);
+    qp.timer = timer_add(qr_tick, 0, 500);
 }
+
+/* The status row's title on the QR page: the app's name (navigation.c bar_title_of); 0 elsewhere.
+ */
+const char *addon_qr_title(void *win) { return qp.page && win == qp.page ? qp.name : 0; }
+
+/* Whether win is the QR page, where the wheel does nothing (navigation.c ringnav_input). */
+int addon_qr_page(void *win) { return qp.page && win == qp.page; }
 
 static void plate(void *canvas, int x, int y, int w, int h, unsigned color, unsigned radius) {
     int r[4] = { x, y, w, h };
@@ -2725,6 +2747,72 @@ static void plate(void *canvas, int x, int y, int w, int h, unsigned color, unsi
         canvas_set_fill_color(canvas, color);
         canvas_fill_rect(canvas, x, y, w, h);
     }
+}
+
+/* s, UTF-8, centred on the line at y (the page's) in face at px, in a final 0xAARRGGBB. */
+static void qr_text(void *canvas, const char *s, int y, const char *face, unsigned px,
+                    unsigned argb) {
+    unsigned buf[128];
+    int box[4] = { 8, y - (int)px, 375 - 16, 2 * (int)px };
+    ar_wide(s, buf, 128);
+    final_text(canvas, face, buf, box, px, argb);
+}
+
+/* The page as qr_refresh read it, on qp.view (the page's coordinates). */
+static void qr_paint(void *w, void *canvas) {
+    int light = ipod_light();
+    unsigned ink = light ? 0xff000000u : 0xffffffffu,
+             sec = 0xff000000u | (light ? QR_SEC_L : QR_SEC_D),
+             ter = 0xff000000u | (light ? QR_SEC_L : QR_TER);
+    if (qp.code && !qp.step[0]) {
+        int side = QR_PLATE, x0 = (375 - side) / 2, y0 = QR_PLATE_Y;
+        int n = qp.size, m = side / (n + 4), o = (side - m * n) / 2, digits = (n + 3) / 4;
+        unsigned raw = ui_ink_raw(0);
+        plate(canvas, x0, y0, side, side, 0xffffffffu, 12);
+        canvas_set_fill_color(canvas, rgba(0x000000, 255));
+        for (int y = 0; y < n; ++y)
+            for (int x = 0; x < n;) {
+                int run = 0;
+                for (; x + run < n; ++run) {
+                    int d = hex(qp.hex[y * digits + (x + run) / 4]);
+                    if (d < 0 || !(d >> (3 - (x + run) % 4) & 1)) break;
+                }
+                if (run) canvas_fill_rect(canvas, x0 + o + x * m, y0 + o + y * m, run * m, m);
+                x += run ? run : 1;
+            }
+        ui_ink_raw(raw);
+        char a[112], spaced[16];
+        if (strlen(qp.pin) == 6) /* 548 001 */
+            memcpy(spaced, qp.pin, 3), spaced[3] = ' ', memcpy(spaced + 4, qp.pin + 3, 4);
+        else
+            tk_snprintf(spaced, sizeof spaced, "%s", qp.pin);
+        tk_snprintf(a, sizeof a, spaced[0] ? "or open %s  \xc2\xb7  PIN %s" : "or open %s", qp.addr,
+                    spaced);
+        qr_text(canvas, qp.note[0] ? qp.note : "Scan with your phone", QR_SCAN_Y, "inter-medium",
+                QR_SCAN_PX, ink);
+        qr_text(canvas, a, QR_ADDR_Y, "inter", QR_ADDR_PX, ter);
+        return;
+    }
+    const char *s = qp.step;
+    unsigned ring = !strcmp(s, "done")                          ? MODE_GREEN
+                    : !strcmp(s, "fail") || !strcmp(s, "error") ? MODE_RED
+                                                                : scheme()->tones[0] & 0xffffffu;
+    const char *glyph = !strcmp(s, "phone") || !strcmp(s, "check") || !strcmp(s, "done") ||
+                                !strcmp(s, "fail") || !strcmp(s, "error")
+                            ? s
+                            : 0;
+    int dy = widget_get_prop_int(qp.page, "y", 0),
+        top = MODE_TOP + (320 - MODE_TOP - MODE_STACK) / 2 - dy, cx = 375 / 2;
+    if (glyph) {
+        char name[40];
+        unsigned raw = ui_ink_raw(0);
+        plate(canvas, cx - MODE_R, top, 2 * MODE_R, 2 * MODE_R, rgba(ring, 255), MODE_R);
+        ui_ink_raw(raw);
+        tk_snprintf(name, sizeof name, "%ssignin_%s", theme()->art, glyph);
+        paint_art(w, canvas, name, cx - MODE_GLYPH / 2, top + MODE_R - MODE_GLYPH / 2);
+    }
+    qr_text(canvas, qp.title, top + MODE_TITLE_Y, "inter-medium", MODE_TITLE_PX, ink);
+    qr_text(canvas, qp.line, top + MODE_LINE_Y, "inter", MODE_LINE_PX, sec);
 }
 
 /* ringnav_paint, every widget after stock painted it: a progress row's bar, a flat rectangle filled
@@ -2748,23 +2836,8 @@ void addon_paint(void *w, void *canvas) {
         stock_canvas_set_fill_color(canvas, fill);
         return;
     }
-    if (!qp.page || w != qp.qr || !P(canvas, CANVAS_LCD) || qp.size < 21) return;
+    if (!qp.page || w != qp.view || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-    int side = QR_PX;
-    int n = qp.size, m = side / (n + 4), o = (side - m * n) / 2, digits = (n + 3) / 4;
-    unsigned raw = ui_ink_raw(0);
-    plate(canvas, 0, 0, side, side, 0xffffffffu, 10);
-    canvas_set_fill_color(canvas, rgba(0x000000, 255));
-    for (int y = 0; y < n; ++y)
-        for (int x = 0; x < n;) {
-            int run = 0;
-            for (; x + run < n; ++run) {
-                int d = hex(qp.hex[y * digits + (x + run) / 4]);
-                if (d < 0 || !(d >> (3 - (x + run) % 4) & 1)) break;
-            }
-            if (run) canvas_fill_rect(canvas, o + x * m, o + y * m, run * m, m);
-            x += run ? run : 1;
-        }
-    ui_ink_raw(raw);
+    qr_paint(w, canvas);
     stock_canvas_set_fill_color(canvas, fill);
 }
