@@ -794,7 +794,7 @@ static int card_gone(void *dialog, void *event) {
 }
 /* s's width in the title's face (Inter Medium 20, a fallback face for a character Inter lacks). */
 static int card_text_w(void *canvas, const char *s) {
-    unsigned buf[96], n = ar_wide(s, buf, sizeof buf / sizeof *buf);
+    unsigned buf[96], n = ui_wide(s, buf, sizeof buf / sizeof *buf);
     int px = TYPE(20);
     const char *face = theme_face(buf, (int)n, &px);
     if (face && !tk_strcmp(face, "inter")) face = "inter-medium";
