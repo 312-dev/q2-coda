@@ -386,6 +386,14 @@ void wheel_sample(int *s, int ret, char *info) {
     s[0] = wh_anchor;
 }
 
+/* The wheel's way to its next tick, in 256ths of a tick: positive toward Next (clockwise), 0 with no
+ * finger on it or while it posts no ticks (wheel_raw). Read on the UI thread: two words the
+ * encoder thread writes whole, so at worst a sample stale (tilt.c). */
+int wheel_part(void) {
+    int acc = wh_acc, units = wh_units;
+    return wheel_held && !wheel_raw && units > 0 ? -acc * 256 / units : 0;
+}
+
 /* $t9 still holds ts_read, which stock loaded for its jalr; $s1 is the thread's info, which stock
  * hands its poster. tslib_thread_run's touch screen reads stay stock. */
 __asm__(".set noreorder\n.globl ringnav_ts_read\nringnav_ts_read:\n"

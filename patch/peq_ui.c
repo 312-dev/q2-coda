@@ -49,6 +49,16 @@ static int eq_commit(eq_state *s) {
     return 1;
 }
 
+/* Control Center's EQ tile (control_center.c): off, or on as the EQ page's Enabled switch turns it
+ * on (PEQ, 3EQ off); nothing if that cannot be saved. */
+void eq_toggle(void) {
+    eq_state s;
+    eq_load(&s);
+    s.mode = s.mode == EQ_OFF ? EQ_PEQ : EQ_OFF;
+    s.hold = 0;
+    eq_commit(&s);
+}
+
 /* EQ off but its filter in the chain, for the visualizer's tap (visualizer.c): the switch's Off, so a
  * mode saved on while the stock flag is clear stays silent; nothing if that cannot be saved. */
 void peq_attach(void) {

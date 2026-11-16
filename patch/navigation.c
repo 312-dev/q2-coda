@@ -2128,6 +2128,8 @@ static void paint_selection(void *w, void *canvas) {
      * pop-up's buttons, which open on their first (Cancel). */
     int home = home_menu(top);
     if (home && i >= 0) coverflow_home_row(w, g_menu.at[i], g_menu.id[i], 1);
+    /* a captioned settings row grows while selected (settings_pages.c) */
+    caption_sel(w, i < 0 || (!shown && !home) ? (void *)0 : P(g_menu.at[i], W_PARENT));
     if (i < 0 || (!shown && !home && g_menu.kind != 4)) return;
     if (st.shuffle_on && st.shuffle_on == st.action_view && st.shuffle_list == w)
         return;          /* the selection is on the Shuffle row above (shuffle_paint) */
@@ -2168,7 +2170,10 @@ static void paint_selection(void *w, void *canvas) {
         int in = tile ? 0 : T->sel_inset, radius = tile ? 0 : pill_radius(g_menu.at[i], r.h, in);
         if (radius > T->sel_radius) radius = T->sel_radius;
         bar.x += in, bar.w -= 2 * in + (tile ? 0 : az_bar_in(g_menu.w)); /* az_index.c */
+        if (!tile) tilt_bar(w, canvas, &bar, S->tones[0], radius); /* toward the next tick */
         gradient(canvas, bar, S->tones[0], S->tones[1], S->tones[4], radius);
+        if (!tile) tilt_gleam(canvas, &bar, radius);
+        if (!tile) caption_paint(w, P(g_menu.at[i], W_PARENT), canvas, &bar);
     } else if (theme()->set_switch && !tk_strcmp(widget_get_type(g_menu.at[i]), "image")) {
         /* a picture tile (Speed's buttons) is its own lit state: no card behind it */
     } else if (home) {
@@ -2701,6 +2706,10 @@ static void lock_set(int choice) {
     write_int_config(g_keylock_mode, "SYSSET", "LOCKMODE");
     write_int_config(g_keylock_flag, "SYSSET", "LOCKFLAG");
 }
+/* Control Center's Lock tile (control_center.c): Buttons Lock on, as its mode was last, or off. */
+void keylock_toggle(void) {
+    lock_set(g_keylock_flag ? 0 : g_keylock_mode >= 1 && g_keylock_mode <= 3 ? 4 - g_keylock_mode : 1);
+}
 static int lock_pick(void *ctx, void *event) {
     lock_set((int)(long)ctx);
     void *win = window_manager_get_top_window(window_manager());
@@ -2777,63 +2786,6 @@ static int quick_down(void *icon, void *event) {
     rearm(&quick.timer, quick_long, RATE_HOLD_MS);
     return 0;
 }
-/* Stock's buttons and their labels, which OLED's page hides (quick_rows_open) */
-static const char *const quick_icons[] = { "img_wifiswitch", "img_btswitch", "img_lock",
-                                           "img_gain",       "img_usbmode",  "img_po",
-                                           "img_playset",    "img_sysset" },
-                         *const quick_labels[] = { "label_wifi",    "label_bt",
-                                                   "label_lock",    "label_gain",
-                                                   "label_usbmode", "label_outputway",
-                                                   "label_playset", "label_sysset" };
-/* The knob reaches past the slider, whose own repaint would leave it behind. */
-static int quick_moved(void *view, void *event) {
-    widget_invalidate_force(view, (void *)0);
-    return 0;
-}
-/* OLED's page (quick_rows, quick_rows_key): seven QS_ROW_H rows from QS_ROW_TOP under the status
- * row, Brightness first with its slider inline on the right column, then a row for each of six of
- * stock's buttons, its icon at opacity 0 over the whole row, so a tap there and Wi-Fi's and
- * Bluetooth's holds stay stock's. Playback's and System's buttons go. */
-#define QS_ROW_TOP 58
-#define QS_ROW_H 32
-#define QS_ROWS 7
-#define QS_TRACK_X 190 /* the inline slider's track, to the right column */
-#define QS_TRACK_END 347
-#define QS_ROW_AT "_qs_row"    /* the selected row, 0 Brightness */
-#define QS_ADJUST "_qs_adjust" /* 1 while the wheel moves the brightness */
-static const char *const qs_row_icons[QS_ROWS] = { "slider_backlight", "img_wifiswitch",
-                                                   "img_btswitch",     "img_lock",
-                                                   "img_gain",         "img_po",
-                                                   "img_usbmode" },
-                         *const qs_row_names[QS_ROWS] = { "Brightness",   "Wi-Fi", "Bluetooth",
-                                                          "Buttons Lock", "Gain",  "Output",
-                                                          "USB Mode" };
-static void quick_rows_open(void *win) {
-    void *c = widget_lookup(win, "view_menu", 1);
-    if (c) widget_move_resize(c, 0, 0, 375, QS_ROW_TOP + QS_ROWS * QS_ROW_H);
-    for (unsigned i = 0; i < sizeof quick_icons / sizeof *quick_icons; ++i) {
-        if ((c = widget_lookup(win, quick_labels[i], 1))) widget_set_visible(c, 0, 0);
-        if ((c = widget_lookup(win, quick_icons[i], 1))) widget_set_visible(c, 0, 0);
-    }
-    for (int r = 1; r < QS_ROWS; ++r) {
-        if (!(c = widget_lookup(win, qs_row_icons[r], 1))) continue;
-        widget_move_resize(c, 0, QS_ROW_TOP + r * QS_ROW_H, 375, QS_ROW_H);
-        widget_set_opacity(c, 0);
-        widget_set_visible(c, 1, 0);
-    }
-    if ((c = widget_lookup(win, "view_backlight", 1)))
-        widget_move_resize(c, 0, QS_ROW_TOP, 375, QS_ROW_H);
-    if ((c = widget_lookup(win, "image0", 1))) widget_set_visible(c, 0, 0);
-    if ((c = widget_lookup(win, "image1", 1))) widget_set_visible(c, 0, 0);
-    if ((c = widget_lookup(win, "slider_backlight", 1))) {
-        /* the touch's span: the knob's 14 px centred on the track's ends */
-        widget_set_self_layout_params(c, "183", "0", "171", "32");
-        widget_move_resize(c, QS_TRACK_X - 7, 0, QS_TRACK_END - QS_TRACK_X + 14, QS_ROW_H);
-        widget_set_prop_int(c, "dragger_size", 14);
-        widget_on(c, EVT_VALUE_CHANGING, quick_moved, P(c, W_PARENT));
-        widget_on(c, EVT_VALUE_CHANGED, quick_moved, P(c, W_PARENT));
-    }
-}
 int ringnav_quick_settings(void *win, void *ctx) {
     int result = stock_quicksettings_trampoline(win, ctx);
     if (win) {
@@ -2846,7 +2798,7 @@ int ringnav_quick_settings(void *win, void *ctx) {
             prop(icon, QUICK_HOLD, i + 1);
             widget_on(icon, EVT_POINTER_DOWN, quick_down, icon);
         }
-        quick_rows_open(win);
+        cc_open(win); /* Control Center (control_center.c) */
         widget_on(win, EVT_DESTROY, quick_cancel, win);
         widget_on(win, EVT_WINDOW_CLOSE, quick_cancel, win);
         widget_on(win, EVT_WINDOW_BACKGROUND, quick_cancel, win);
@@ -3144,6 +3096,11 @@ int ringnav_powermanager(void *win, void *ctx) {
     void *view = win ? widget_lookup(win, "scroll_view_powermanager", 1) : (void *)0;
     usb_charge_row(win, view);
     pod_rows(win, "scroll_view_powermanager", POD_SMART_WIFI, 1, icons + 3);
+    /* smart_wifi.c's SMART_IDLE_MS; a caption shows under the selected row (settings_pages.c) */
+    if (view)
+        caption_row(st.pod_label[POD_SMART_WIFI],
+                    (const unsigned *)L"Turns Wi-Fi off after 5 minutes when nothing needs it. "
+                                       L"AirPlay and Car Remote keep it on.");
     pod_rows(win, "scroll_view_powermanager", POD_CARMODE, 1, icons + 2);
     if (view) /* battery.c's page */
         widget_set_text_utf8(list_row_into(view, "system_powermanager", battery_history, 0),
@@ -4896,117 +4853,6 @@ static int bright_tone(unsigned tone) {
     return ((tone >> 16) * 299 + (tone >> 8 & 255) * 587 + (tone & 255) * 114) / 1000 >
            GLYPH_LIGHT_MAX;
 }
-/* Quick Settings' brightness slider: OLED's row draws its bar (quick_rows), so stock's goes clear
- * before its paint; QFILL says it went. */
-#define QFILL "_ringnav_fill"
-static int quick_slider(void *w) {
-    void *win = w && !tk_strcmp(widget_get_prop_str(w, "name", ""), "slider_backlight")
-                    ? window_of(w)
-                    : (void *)0;
-    return win && !tk_strcmp(widget_get_prop_str(win, "name", ""), "statusbar_dialog");
-}
-static void quick_fill(void *w) {
-    if (!quick_slider(w)) return;
-    static const char *const track[] = { "style:normal:bg_color", "style:pressed:bg_color",
-                                         "style:over:bg_color", "style:focused:bg_color" };
-    if (widget_get_prop_int(w, QFILL, 0) == 1) return;
-    widget_set_prop_int(w, QFILL, 1);
-    slider_fill(w, 0);
-    for (unsigned i = 0; i < sizeof track / sizeof *track; ++i) widget_set_prop_int(w, track[i], 0);
-}
-/* One of OLED's Quick Settings texts in its row at y: Inter 20 (24 in AWTK's size), from x across
- * w, align AWTK's 2 left or 3 right. */
-static void quick_text(void *canvas, const unsigned *s, unsigned n, int x, int y, int w,
-                       unsigned rgb, int align) {
-    int align_h = I(canvas, CANVAS_ALIGN_H), align_v = I(canvas, CANVAS_ALIGN_V), px = 24;
-    const char *face = theme_face(s, (int)n, &px);
-    canvas_set_font(canvas, face, (unsigned)px);
-    canvas_set_text_color(canvas, RGBA(rgb));
-    I(canvas, CANVAS_ALIGN_V) = 1, I(canvas, CANVAS_ALIGN_H) = align;
-    canvas_draw_text_in_rect(canvas, s, n, &(rect_t){ x, y, w, QS_ROW_H });
-    I(canvas, CANVAS_ALIGN_V) = align_v, I(canvas, CANVAS_ALIGN_H) = align_h;
-}
-/* Row r's state: its switch, 0 or 1 (-1 for none), else its value's text in out (24 characters
- * with the NUL); returns 1 for a disabled row (Gain under Line Out). Stock's own words: the lock's
- * mode, Gain's label, USB's less its "USB " ("USB AUDIO" as Audio); Output by its image. */
-static int quick_state(void *win, int r, unsigned *out, int *on) {
-    void *icon = widget_lookup(win, qs_row_icons[r], 1);
-    const char *image = icon ? widget_get_prop_str(icon, "image", "") : "", *s = (const char *)0;
-    const unsigned *w = (const unsigned *)0;
-    unsigned n = 0, len = (unsigned)strlen(image);
-    *on = r == 1 || r == 2 ? named_in(QS_LIT, image) : -1;
-    if (r == 3) s = lock_names[lock_choice()];
-    if (r == 5)
-        s = !tk_strcmp(image, "drop_po")   ? "Phones"
-            : !tk_strcmp(image, "drop_lo") ? "Line Out"
-                                           : image + 5;
-    if (r == 4 || r == 6)
-        w = widget_get_text(widget_lookup(win, r == 4 ? "label_gain" : "label_usbmode", 1));
-    if (w && r == 6 && w[0] == 'U' && w[1] == 'S' && w[2] == 'B' && w[3] == ' ') w += 4;
-    for (; s && s[n] && n < 23; ++n)
-        out[n] = (unsigned char)(r == 5 && s == image + 5 ? s[n] & ~32 : s[n]);
-    for (; w && w[n] && n < 23; ++n) /* "AUDIO": all capitals past its first letter go small */
-        out[n] = n && w[n] >= 'A' && w[n] <= 'Z' && w[1] >= 'A' && w[1] <= 'Z' && w[3] ? w[n] | 32
-                                                                                       : w[n];
-    out[n] = 0;
-    return r == 4 && len > 7 && !tk_strcmp(image + len - 7, "disable");
-}
-/* OLED's Quick Settings page (quick_rows_open), under the window's children, in its coordinates:
- * the selection bar, each row's name, then on the right column Brightness's track (6 px, its fill
- * to the value; white with the accent's light fill on the bar), a 34x20 switch (RULES 7: on the bar
- * a white track with an Accent knob when on, a white outline when off) or the value in Text
- * Secondary; a disabled row's words in Text Tertiary. Adjusting, the 14 px white knob stands at the
- * fill's end inside a white focus ring. Then the status row, which the dialog covers. */
-static void quick_rows(void *win, void *canvas) {
-    void *bar = *(void *const *)system_bar;
-    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), text[24],
-             accent = scheme()->tones[0];
-    int sel = widget_get_prop_int(win, QS_ROW_AT, 0);
-    for (int r = 0; r < QS_ROWS; ++r) {
-        int y = QS_ROW_TOP + r * QS_ROW_H, cy = y + QS_ROW_H / 2, lit = r == sel, on, n = 0;
-        int off = quick_state(win, r, text, &on);
-        unsigned ink = lit ? 0xffffff : off ? 0x858585 : 0xffffff, name[16];
-        if (lit) fill_box(canvas, &(rect_t){ 16, y, 343, QS_ROW_H }, RGBA(accent), 8);
-        for (; qs_row_names[r][n]; ++n) name[n] = (unsigned char)qs_row_names[r][n];
-        quick_text(canvas, name, (unsigned)n, 24, y, QS_TRACK_X - 32, ink, 2);
-        if (!r) {
-            void *s = widget_lookup(win, "slider_backlight", 1);
-            int min = s ? widget_get_prop_int(s, "min", 0) : 0,
-                max = s ? widget_get_prop_int(s, "max", 100) : 100;
-            rect_t t = { QS_TRACK_X, cy - 3, QS_TRACK_END - QS_TRACK_X, 6 }, part = t;
-            part.w = max > min && s
-                         ? t.w *
-                               clamp_step(0, max - min, widget_get_prop_int(s, "value", 0) - min) /
-                               (max - min)
-                         : 0;
-            fill_box(canvas, &t, RGBA(lit ? 0xffffff : theme()->np_track_rgb), 3);
-            if (part.w >= 6)
-                fill_box(canvas, &part, RGBA(lit ? mix(accent, 0xffffff, 11, 20) : accent), 3);
-            if (lit && widget_get_prop_int(win, QS_ADJUST, 0)) {
-                int x = t.x + part.w;
-                fill_box(canvas, &(rect_t){ x - 11, cy - 11, 22, 22 }, RGBA(0xffffff), 11);
-                fill_box(canvas, &(rect_t){ x - 9, cy - 9, 18, 18 }, RGBA(accent), 9);
-                fill_box(canvas, &(rect_t){ x - 7, cy - 7, 14, 14 }, RGBA(0xffffff), 7);
-            }
-        } else if (on >= 0) {
-            rect_t t = { QS_TRACK_END - 34, cy - 10, 34, 20 };
-            fill_box(canvas, &t, RGBA(lit ? 0xffffff : on ? accent : theme()->np_track_rgb), 10);
-            if (lit && !on)
-                fill_box(canvas, &(rect_t){ t.x + 1, t.y + 1, 32, 18 }, RGBA(accent), 9);
-            fill_box(canvas, &(rect_t){ t.x + (on ? 16 : 2), cy - 8, 16, 16 },
-                     RGBA(lit && on ? accent : 0xffffff), 8);
-        } else
-            quick_text(canvas, text, wide_len(text), QS_TRACK_X - 40, y,
-                       QS_TRACK_END - QS_TRACK_X + 40,
-                       lit   ? 0xffffff
-                       : off ? 0x858585
-                             : 0xababab,
-                       3);
-    }
-    if (bar) widget_paint(bar, canvas);
-    st.paint_w = win;
-    stock_canvas_set_fill_color(canvas, fill);
-}
 /* The confirm pop-up's prompt (stock's own child, "Shut Down?"): CONFIRM_PROMPT_PX, centred in the
  * space above its rows, or above Delete File's "Also delete source file" (stock's check_button
  * msg_delcheckbutton at y 124, centred 20px), which keeps its stock place and style.
@@ -5363,7 +5209,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
     if (!w || P(w, W_PARENT) != wm) return result;
     if (w == st.np_win) np_glyphs(w); /* before its buttons paint */
     if (P(canvas, CANVAS_LCD) && !tk_strcmp(widget_get_prop_str(w, "name", ""), "statusbar_dialog"))
-        quick_rows(w, canvas);
+        cc_paint(w, canvas);
     if (w == st.msg_win) msg_paint(w, canvas);
     if (w == bar && P(canvas, CANVAS_LCD)) {
         unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
@@ -9519,6 +9365,7 @@ int ringnav_sleep(void *loop) {
     scrobble_auto();
     power_poll();
     thumb_poll();
+    tilt_poll();
     lyric_poll();
     keep_lit_poll();
     np_art_poll();
@@ -10019,16 +9866,8 @@ static int edit_key(void *top, unsigned key) {
     void *wm = window_manager();
     if (window_manager_is_animating(wm) || pointer_down()) return 1;
     int dir = key == KEY_NEXT ? 1 : -1;
-    if (quick && !widget_get_prop_int(top, QS_ADJUST, 0)) {
-        quick_walk(top, dir);
-    } else if (quick) {
-        void *slider = widget_lookup(top, "slider_backlight", 1);
-        if (!slider || !widget_get_visible(slider)) return 1;
-        int value = widget_get_prop_int(slider, "value", 0);
-        int min = widget_get_prop_int(slider, "min", 0),
-            max = widget_get_prop_int(slider, "max", 100);
-        int next = min + clamp_step(value - min, max - min, dir);
-        if (next != value) widget_set_prop_int(slider, "value", next);
+    if (quick) {
+        cc_wheel(top, dir); /* Control Center's stops, or a slider's level (control_center.c) */
     } else if (!n) {
         void *button = widget_lookup(top, dir > 0 ? "img_add" : "img_dec", 1);
         char click[0x30];
@@ -10229,7 +10068,7 @@ int ringnav(void *ctx, void *event) {
         usable()) {
         void *top = window_manager_get_top_window(window_manager());
         if (top && !tk_strcmp(widget_get_prop_str(top, "name", ""), "statusbar_dialog")) {
-            if (quick_rows_key(top, key)) return STOP;
+            if (cc_key(top, key)) return STOP;
             dialog_quit(top, 0);
             return STOP;
         }

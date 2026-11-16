@@ -106,7 +106,7 @@ static int ar_measure(void *canvas, const char *face, int px, const unsigned *s,
 }
 
 /* s in Inter (medium: Inter Medium) at AWTK size px, in rgb (0xRRGGBB; final when raw), its row
- * centred on y, from x (align 2) or ending at x (align 3), at most w wide: an ellipsis ends a
+ * centred on y, from x (align 2), ending at x (align 3) or centred on x (align 1), at most w wide: an ellipsis ends a
  * longer one. A character Inter lacks takes the theme's fallback face. Returns its width. Now
  * Playing's About (np_about.c) and playlist_pages.c paint their text with it too. */
 int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x, int y,
@@ -119,7 +119,7 @@ int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int r
     int ink = ar_measure(canvas, face, fpx, buf, n);
     while (n > 1 && ink > w)
         buf[--n - 1] = 0x2026, buf[n] = 0, ink = ar_measure(canvas, face, fpx, buf, n);
-    rect_t r = { align == 3 ? x - ink : x, y - fpx, ink + 1, 2 * fpx };
+    rect_t r = { align == 3 ? x - ink : align == 1 ? x - ink / 2 : x, y - fpx, ink + 1, 2 * fpx };
     unsigned text = (unsigned)I(P(canvas, CANVAS_LCD), LCD_TEXT_COLOR),
              was = ui_ink_raw((unsigned)raw);
     int align_v = I(canvas, CANVAS_ALIGN_V), align_h = I(canvas, CANVAS_ALIGN_H);
@@ -143,7 +143,7 @@ static void ar_box(void *canvas, const rect_t *r, int R, unsigned rgb) {
 
 /* A square image's corners over r rounded to R: the pixels outside each arc in behind, the final
  * 0xRRGGBB of what stands behind it. */
-static void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind) {
+void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind) {
     for (int i = 0; i < R; ++i) {
         int n = round_inset(R, i, r->h);
         for (int b = 0; b < 2 && n; ++b) {
