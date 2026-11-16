@@ -401,3 +401,16 @@ void check_circle(void *w, void *canvas, int cx, int cy, int state, int selected
         paint_art(w, canvas, theme_art(selected ? "circle_check_a" : "circle_check_w"),
                   cx - CIRCLE_CHECK_PX / 2, cy - CIRCLE_CHECK_PX / 2);
 }
+
+/* The selection's bar without its lean (docs/oled-design.md#selection-bar), for pages that paint
+ * their own rows: the accent from the theme's sel_inset in from x and from the right of x + w,
+ * its ends sel_radius, over the row's y and h (canvas coordinates). The fill is put back. */
+void sel_bar_flat(void *canvas, int x, int y, int w, int h) {
+    void *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
+    if (!lcd) return;
+    const theme_t *T = theme();
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
+    rect_t bar = { x + T->sel_inset, y, w - 2 * T->sel_inset, h };
+    fill_box(canvas, &bar, RGBA(scheme()->tones[0]), (unsigned)T->sel_radius);
+    stock_canvas_set_fill_color(canvas, fill);
+}

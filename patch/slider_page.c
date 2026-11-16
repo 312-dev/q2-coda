@@ -17,9 +17,7 @@
 #define SP_ENDS_Y 214  /* the range ends' centre */
 #define SP_TRACK_H 6
 #define SP_KNOB 14
-#define SP_ROW 32 /* the switch row, from the window's top */
-#define SP_BAR_INSET 16
-#define SP_BAR_R 8
+#define SP_ROW 32            /* the switch row, from the window's top */
 #define SP_VALUE_PX TYPE(22) /* Inter Medium 22, AWTK's size (oled-design.md Type) */
 #define SP_ENDS_PX TYPE(15)  /* 15 */
 #define SP_LINE 32           /* the value's box, centred on its row */
@@ -142,11 +140,10 @@ void slider_page_paint(void *w, void *canvas) {
     unsigned accent = S->tones[0] & 0xffffffu;
     void *sw = sp.kind == SLIDER_BOOT ? widget_lookup(w, "img_bootswitch", 1) : (void *)0;
     if (sw && widget_get_visible(sw)) { /* the selected row: its title is the toolbar's */
-        rect_t bar = { SP_BAR_INSET, 0, 375 - 2 * SP_BAR_INSET, SP_ROW };
         void *title = sp.nav && widget_count_children(sp.nav) ? widget_get_child(sp.nav, 0) : 0;
         const unsigned *s = title ? widget_get_text(title) : (void *)0;
         st.raw_ink = 1; /* final: white on the accent in either half */
-        fill_box(canvas, &bar, RGBA(accent), SP_BAR_R);
+        sel_bar_flat(canvas, 0, 0, 375, SP_ROW);
         if (s && *s) {
             px = theme()->font_px[ROLE_TITLE];
             const char *face = theme_face(s, -1, &px);
@@ -275,10 +272,7 @@ void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) {
     static const char *const rows[] = { "Enabled", "Presets", "Reset" };
     for (int i = 0; i < 3; ++i) {
         int y = EQ_ROWS_Y + i * EQ_ROW, cy = y + EQ_ROW / 2, sel = e->focus == 1 + i;
-        if (sel) {
-            rect_t bar = { SP_BAR_INSET, y, 375 - 2 * SP_BAR_INSET, EQ_ROW };
-            fill_box(canvas, &bar, RGBA(accent), SP_BAR_R);
-        }
+        if (sel) { sel_bar_flat(canvas, 0, y, 375, EQ_ROW); }
         eq_ink_text(canvas, rows[i], x0, x1 - x0 - 48, cy, 2, row_px,
                     sel ? 0xffffff : eq_primary());
         if (!i) switch_mark(canvas, x1, cy, e->on, sel);

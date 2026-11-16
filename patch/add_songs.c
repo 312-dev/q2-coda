@@ -323,8 +323,7 @@ static void as_row(void *canvas, as_level *l, int i, int y, int h, int on) {
     const char *title = text, *icon = 0;
     int chev = 0, mark = 0, num = 0;
     void *r = 0, *album = as_album(l, i);
-    if (on)
-        fill_box(canvas, &(rect_t){ 16, y, 375 - 32 - az_bar_in(as.sheet), h }, RGBA(accent), 8);
+    if (on) sel_bar_flat(canvas, 0, y, 375 - az_bar_in(as.sheet), h);
     if (l->kind == AS_CHOOSE) {
         title = as_names[AS_PLAYED + i], chev = 1;
     } else if (i < l->lead) {

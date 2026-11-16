@@ -1161,6 +1161,8 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   (`catalogue.c` `catalogue_row_mark`).
 - The toast, the confirm as a dialog page and the empty note (`patch/feedback.c`), and the confirmation after a shuffle.
 - The confirmation card (`patch/feedback.c` `confirm`, [Confirmation card](#confirmation-card)).
+- One flat selection bar for pages that paint their own rows (`patch/list_marks.c` `sel_bar_flat`: Sleep Timer's
+  switch row, Scan Music Now, the slider page's and the EQ's rows, Add Songs), the theme's inset and radius.
 - One mode page painter for USB's pages, a card app's sign-in steps, SD Card Update and Bluetooth's receiver
   (`patch/feedback.c` `mode_page_paint`, `mode_page_t` in `patch/ui_kit.h`). The plug-in screen keeps its own
   approved layout ([Plug-in screen](#plug-in-screen)).

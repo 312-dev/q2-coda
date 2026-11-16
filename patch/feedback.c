@@ -331,11 +331,7 @@ void feedback_switch_bar(void *w, void *canvas) {
         if (st.sel_accent == w) st.sel_accent = (void *)0;
         return;
     }
-    const theme_t *T = theme();
-    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-    rect_t bar = { T->sel_inset, 0, I(w, W_W) - 2 * T->sel_inset, I(w, W_H) };
-    fill_box(canvas, &bar, RGBA(scheme()->tones[0]), (unsigned)T->sel_radius);
-    stock_canvas_set_fill_color(canvas, fill);
+    sel_bar_flat(canvas, 0, 0, I(w, W_W), I(w, W_H));
     st.sel_accent = w;
 }
 
@@ -390,11 +386,7 @@ void feedback_scan_bar(void *w, void *canvas) {
     if (!w || !P(canvas, CANVAS_LCD) || !widget_get_prop_int(w, "_scan_row", 0) ||
         tk_strcmp(widget_get_prop_str(w, "name", ""), "btn_upmusic"))
         return;
-    const theme_t *T = theme();
-    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-    rect_t bar = { T->sel_inset, 0, I(w, W_W) - 2 * T->sel_inset, I(w, W_H) };
-    fill_box(canvas, &bar, RGBA(scheme()->tones[0]), (unsigned)T->sel_radius);
-    stock_canvas_set_fill_color(canvas, fill);
+    sel_bar_flat(canvas, 0, 0, I(w, W_W), I(w, W_H));
     st.sel_accent = w;
 }
 
