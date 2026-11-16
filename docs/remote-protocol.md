@@ -137,6 +137,10 @@ Each goes to demo's shim as one line in `/tmp/coda-rc.cmd`, as Transport does, a
 
 There is no song radio to start: the Q2's Internet Radio plays stations, not songs like the one playing.
 
+## A streaming song
+
+A card app's song played without an offline copy plays from its download, `/mnt/mmc/.<app>/stream/<hash>/original/0/<title> [<sid>].<suffix>`, which the library has no record of. `NowPlaying` then carries the catalogue's server song for the `<sid>` in the name's last brackets (`servermeta.sid`, joined to `servertable` by `fileurl`): its `track_id` (`song:c<id>`), title, artist, album, its length while the player reports none, and its album's `art_id` (`s<album>`). `GetCover` for a server album with no `covers/<album>.jpg` answers the picture embedded in a download of one of its songs, the one the Q2 Muse shows. A stream not in the catalogue keeps what the Q2 Muse reports. `rateable` stays false: the Q2 Muse rates library records, and a stream has none.
+
 ## Errors
 
 `Error{code, message}` answers a request that failed; codes are `ErrorCode` in the proto. `message` is English for logs, never for display. The device closes the session, after sending the error when it can, on:
