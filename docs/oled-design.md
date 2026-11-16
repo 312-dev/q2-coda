@@ -565,7 +565,7 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   (`feedback.c` `feedback_confirm_dress`): its prompt named as the design writes it ("Forget This Network?" for
   stock's "Delete Record?", "Use Line Out?" for its "Line Out sets max volume, continue?"), **Cancel** first, then the
   verb; it opens on Cancel, or on the verb for a question whose mistake costs least (Scan, Import, Export, Reconnect,
-  Turn On), the verb ("Shut Down", "Reset", "Delete"), never "OK"; a verb that loses something
+  Turn On). The verb says what it does ("Shut Down", "Reset", "Delete"), never "OK"; a verb that loses something
   (Delete, Reset, Forget, Unpair, Remove, Clear) red after the gap. Delete Song's "Also delete source file" is the
   card's switch row. What the answer leaves alone, or why it asks (a caller's `feedback_confirm_foot`: Streaming
   Songs' "Show streaming songs?" and "Hide streaming songs?"), is the body: Reset Settings Only asks "Reset
