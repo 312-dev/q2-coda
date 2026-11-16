@@ -53,6 +53,9 @@ SOURCES = {
                '926ef8d3eab93fbf6e06011901273eec076b25594a4e1cdadd50c987f4f6d64e'),
     'libpng': ('1.2.59', 'https://download.sourceforge.net/libpng/libpng-1.2.59.tar.xz',
                'b4635f15b8adccc8ad0934eea485ef59cc4cae24d0f0300a9a941e51974ffcc7'),
+    # --dev builds' adbd (docs/adb.md), not a replacement: Debian's android-tools source, as Buildroot fetches it
+    'adbd': ('4.2.2+git20130218', 'https://launchpad.net/ubuntu/+archive/primary/+files/android-tools_4.2.2+git20130218.orig.tar.xz',
+             '9bfba987e1351b12aa983787b9ae4424ab752e9e646d8e93771538dc1e5d932f'),
 }
 
 
@@ -429,6 +432,58 @@ def build_busybox(src, stage, env, log):
     shutil.copy(src/'.config', stage/'busybox.config')
 
 
+# adbd's other inputs: Debian's packaging, whose patches add adbd's non-Android build, and AOSP's libmincrypt
+# (BSD-3-Clause) at the same release, android-4.2.2_r1, for the RSA check the Debian build left out
+# (url, sha256). Then tools/adbd.patch, which carries Buildroot's fixes and the Q2's changes.
+ADBD_DEBIAN = ('https://launchpad.net/ubuntu/+archive/primary/+files/android-tools_4.2.2+git20130218-3ubuntu41.debian.tar.gz',
+               '73c3078de3e44d8a3cadf7a360863c63155d9d558c2f0933cf38ad901a3f5998')
+ADBD_MINCRYPT = 'https://raw.githubusercontent.com/aosp-mirror/platform_system_core/android-4.2.2_r1/libmincrypt/'
+ADBD_MINCRYPT_FILES = {'rsa.c': '865378dc08eb8ca78d0490016ad1ec75d4d1d9140548303f4b539760d01b2fda',
+                       'rsa_e_3.c': '8f8ac513313a888ecbcf62a061596453041e19476ab130fb8e78c935db930c27',
+                       'rsa_e_f4.c': 'bdebdf8ca1dd41a13162e9e1f4e20fa598b5c06191860a3deec383b23c5a3efe',
+                       'sha.c': '439f002fcdf064e85e853e5bfec4fe6668adffe143f442a518e75de75f2b3720',
+                       'NOTICE': 'b220fd3c79e0906eda798b23699305ab05576e849f45810eca74afcb2c7f2311'}
+ADBD_PATCH = (pathlib.Path(__file__).resolve().parent/'adbd.patch').read_text()
+# What adbd links, by directory under core/: Debian's adbd.mk less the services tools/adbd.patch removes.
+ADBD_SOURCES = {'adbd': ['adb', 'fdevent', 'transport', 'transport_usb', 'adb_auth_client', 'sockets', 'services',
+                         'file_sync_service', 'usb_linux_client', 'utils', 'base64'],
+                'libcutils': ['socket_inaddr_any_server', 'socket_local_client', 'socket_loopback_client',
+                              'socket_loopback_server', 'socket_local_server', 'list'],
+                'libmincrypt': ['rsa', 'rsa_e_3', 'rsa_e_f4', 'sha']}
+ADBD_DEFINES = ['-DADB_HOST=0', '-DHAVE_FORKEXEC=1', '-D_XOPEN_SOURCE', '-D_GNU_SOURCE', '-DADBD_NON_ANDROID',
+                '-DALLOW_ADBD_ROOT=1', '-DHAVE_SYMLINKS', '-DHAVE_TERMIO_H']
+
+
+def adbd_tree(src, log):
+    """src (android-tools' source) made adbd's: Debian's patches, libmincrypt, tools/adbd.patch."""
+    with tarfile.open(fetch(*ADBD_DEBIAN, ADBD_DEBIAN[0].rsplit('/', 1)[-1])) as t:
+        t.extractall(src, filter='data')
+    for p in (src/'debian/patches/series').read_text().split():
+        run('patch', '-p1', '-i', src/'debian/patches'/p, cwd=src, log=log)
+    (src/'core/libmincrypt').mkdir()
+    for name, digest in ADBD_MINCRYPT_FILES.items():
+        shutil.copy(fetch(ADBD_MINCRYPT + name, digest, f'mincrypt-4.2.2_r1-{name}'), src/'core/libmincrypt'/name)
+    (src/'q2-adbd.patch').write_text(ADBD_PATCH)
+    run('patch', '-p1', '-i', 'q2-adbd.patch', cwd=src, log=log)
+
+
+def build_adbd(src, stage, env, log):
+    # One static program, -Os and its unused sections dropped, against the toolchain's glibc: nothing in the
+    # rootfs to load, nothing in it that adbd could break.
+    adbd_tree(src, log)
+    objs = []
+    for d, names in ADBD_SOURCES.items():
+        for n in names:
+            objs.append(src/f'{d}-{n}.o')
+            run(*env.cc.split(), '-Os', '-ffunction-sections', '-fdata-sections', '-Wall', '-Wno-unused-parameter',
+                *ADBD_DEFINES, f'-I{src}/core/adbd', f'-I{src}/core/include', '-c', src/'core'/d/f'{n}.c', '-o', objs[-1],
+                cwd=src, log=log)
+    (stage/'usr/bin').mkdir(parents=True)
+    run(*env.cc.split(), '-static', '-Wl,--gc-sections', '-o', stage/'usr/bin/adbd', *objs, '-lpthread', cwd=src, log=log)
+    shutil.copy(src/'core/libmincrypt/NOTICE', stage/'mincrypt.NOTICE')
+    shutil.copy(src/'debian/copyright', stage/'copyright')
+
+
 RECIPES = {'openssl': (build_openssl, []),
            'zlib': (build_zlib, []),
            'mbedtls': (build_mbedtls, []), 'curl': (build_curl, ['mbedtls', 'zlib']),
@@ -436,7 +491,8 @@ RECIPES = {'openssl': (build_openssl, []),
            'libpng': (build_libpng, ['zlib']),
            'busybox': (build_busybox, []),
            'libnl': (build_libnl, []), 'wpa_supplicant': (build_wpa_supplicant, ['openssl', 'libnl']),
-           'ffmpeg': (build_ffmpeg, ['openssl', 'zlib'])}
+           'ffmpeg': (build_ffmpeg, ['openssl', 'zlib']),
+           'adbd': (build_adbd, [])}
 
 
 # Each top-level function's and class's text as this module was imported (inspect.getsource rereads
