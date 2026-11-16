@@ -371,9 +371,9 @@ int lyrics_on(void *lrc) {
 /* Lines (docs/oled-design.md#screens) are Inter on the 24 px text column, LYRIC_OLED_PX: the
  * playing line in Medium, the rest in Regular and Text Secondary, faded out at the view's top and
  * bottom (lyrics_fade). */
-#define LYRIC_OLED_PX 27 /* the design's 22, AWTK's size (docs/oled-design.md#type) */
+#define LYRIC_OLED_PX TYPE(22) /* the design's 22, AWTK's size (docs/oled-design.md#type) */
 #define LYRIC_OLED_X 24
-#define LYRIC_OLED_REST 0xababab
+#define LYRIC_OLED_REST RGB_SECONDARY
 /* A one-row line's height on the page: the step a wheel tick takes (navigation.c), so it lands on
  * the next row's top as the snap does */
 int lyrics_row_h(void) { return LY_PITCH(LYRIC_OLED_PX) + LYRIC_GAP; }

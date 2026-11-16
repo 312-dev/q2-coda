@@ -1457,7 +1457,7 @@ def test_oleds_scrub_keeps_the_accent_and_marks_the_playhead_with_a_knob(fw, ui,
 # takes them, a finger's drag holds them; a tap takes them full screen, over the whole window.
 LINES = [(f'Line {i}', 10 * i) for i in range(12)]
 SLOT = O['LYRIC_SLOT']
-LYRICS = {k: int(v) for k, v in re.findall(r'^#define (LYRIC_\w*PX) (\d+)', host.ROOT.joinpath('patch/lyrics.c').read_text(), re.M)}
+LYRICS = host.defines('lyrics.c', 'LYRIC_')
 
 
 def pitch(px):

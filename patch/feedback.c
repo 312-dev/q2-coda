@@ -1,6 +1,6 @@
 /* OLED's feedback forms (docs/oled-design.md#dialogs-and-toasts): stock's toast as a pill over the
- * page, and stock's confirm pop-up as a dialog page whose status row asks the question over Cancel
- * and the action's verb; an empty or offline page's note (Folder's too); the confirmation after a shuffle. */
+ * page; the confirmation card, ours (confirm) and stock's confirm pop-up drawn as it; an empty or
+ * offline page's note (Folder's too); the confirmation after a shuffle. */
 #include "navigation.h"
 
 static int top_named(void *w, const char *name) {
@@ -13,10 +13,10 @@ static int top_named(void *w, const char *name) {
  * row stay in sight round it. */
 #define PILL_Y 236
 #define PILL_H 32
-#define PILL_PX 19
+#define PILL_PX TYPE(16)
 #define PILL_PAD 16
 #define PILL_R 12
-#define PILL_RGB 0x1c1c1e
+#define PILL_RGB RGB_RAISED
 #define PILL_MAX 327 /* the text column to the right column */
 
 #define PILL_GLYPH 15 /* an icon toast's glyph (tools/art.py USB_TOAST_PX), PILL_GLYPH_GAP before its words */
@@ -34,6 +34,26 @@ void toast_icon(const char *glyph, const char *text) {
     toast(text);
     pill_glyph[0] = 0;
 }
+/* A toast shown by the next UI loop pass (toast_later_poll, from ringnav_sleep's usb_ui_poll),
+ * never inside stock's USB pass or an input's dispatch, whose own loop a toast's would run again:
+ * USB's and charging's. glyph is a theme image's name without the art prefix; the last one asked
+ * for wins. Dropped while the screen is dark. */
+static struct {
+    char glyph[32], text[48];
+} later __attribute__((section(".scratch")));
+void toast_later(const char *glyph, const char *text) {
+    tk_snprintf(later.glyph, sizeof later.glyph, "%s", glyph ? glyph : "");
+    tk_snprintf(later.text, sizeof later.text, "%s", text ? text : "");
+}
+void toast_later_poll(void) {
+    if (!later.text[0]) return;
+    char text[sizeof later.text];
+    tk_snprintf(text, sizeof text, "%s", later.text);
+    later.text[0] = 0;
+    if (g_backlight_status)
+        toast_icon(later.glyph[0] ? theme_art(later.glyph) : (const char *)0, text);
+}
+
 /* The window under OLED's toast: the window manager's last window before it. */
 void *feedback_under(void *toast) {
     void *wm = window_manager(), *under = (void *)0;
@@ -99,151 +119,12 @@ void feedback_toast_paint(void *w, void *canvas) {
  * turns itself on a click, Centre's as a tap's. */
 static int feedback_check_click(void *check, void *event) { return 0; }
 
-/* The confirm pop-up as a dialog (docs/oled-design.md#dialogs-and-toasts): stock's prompt becomes
- * the status row's title, in sentence case and asking the question, and its two cells are the
- * list's first rows, Cancel then the verb that says what the other does ("Shut Down", "Delete",
- * "Reset"), never OK. Prompts not listed keep their words, and their verb is the prompt's first
- * word when it is one of verbs[]; else OK. A prompt with a note says under its rows what the
- * answer leaves alone, as iOS's reset alert does, in the empty note's form (feedback_empty). */
-static const struct {
-    const char *prompt, *title, *verb, *note;
-} asks[] = {
-    { "Shut Down?", "Shut down?", "Shut Down", 0 },
-    { "Restart?", "Restart?", "Restart", 0 }, /* Power's Restart (power_rows.c) */
-    { "Reset Settings Only", "Reset settings?", "Reset", "Music, playlists and ratings are kept" },
-    { "Reset Database", "Reset the database?", "Reset", 0 },
-    { "Full Factory Reset", "Full factory reset?", "Reset", 0 },
-    { "Delete Song?", "Delete this song?", "Delete", 0 },
-    { "Delete File?", "Delete this file?", "Delete", 0 },
-    { "Scan music?", "Scan music?", "Scan", 0 },
-};
-static const char *const verbs[] = {
-    "Delete", "Import", "Export", "Quit", "Disconnect", "Reconnect"
-};
-#define CONFIRM_ROW 32
-#define CONFIRM_Y 58 /* the list's top (oled-design.md Spacing) */
-/* The footer (feedback_confirm_foot): 13 px Text Tertiary lines 8 px under the rows, each line's
- * own label, at the rows' text column */
-#define FOOT_GAP 8
-#define FOOT_LINE 17
-#define FOOT_PX 16 /* Inter 13 px, AWTK's size (13 x 1.21) */
-
-/* The next confirm's footer, its lines split at '\n': why it asks, where the setting lives. */
+/* The next confirm's body, its lines split at '\n': why it asks, where the setting lives
+ * (library_settings.c). */
 static const char *confirm_foot __attribute__((section(".scratch")));
 void feedback_confirm_foot(const char *foot) { confirm_foot = foot; }
 
 static int confirm_on(void *w) { return top_named(w, "confirminfo_dialog"); }
-
-/* The dialog's first paint, before its background: its prompt into the bar and hidden, the cells
- * moved onto the rows (stock binds them by name), the second one's text the verb. Once: the first
- * cell's height says it is done. */
-int feedback_confirm_dress(void *w) {
-    if (!confirm_on(w)) return 0;
-    void *cell[2] = { widget_lookup(w, "img_cancel", 0), widget_lookup(w, "img_enter", 0) };
-    if (!cell[0] || !cell[1] || I(cell[0], W_H) == CONFIRM_ROW) return 1;
-    char prompt[128] = "", word[16];
-    for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) {
-        void *c = widget_get_child(w, i);
-        if (!tk_strcmp(widget_get_type(c), "button") ||
-            !tk_strcmp(widget_get_prop_str(c, "name", ""), "msg_delcheckbutton"))
-            continue;
-        if (!*prompt) widget_get_text_utf8(c, prompt, sizeof prompt);
-        widget_set_visible(c, 0, 0);
-    }
-    const char *title = prompt, *verb = st.confirm_verb ? st.confirm_verb : "OK", *note = 0;
-    for (unsigned k = 0; k < sizeof asks / sizeof *asks; ++k)
-        if (!tk_strcmp(prompt, asks[k].prompt))
-            title = asks[k].title, verb = asks[k].verb, note = asks[k].note;
-    unsigned len = 0;
-    while (prompt[len] && prompt[len] != ' ' && len < sizeof word - 1)
-        word[len] = prompt[len], ++len;
-    word[len] = 0;
-    for (unsigned k = 0; !st.confirm_verb && k < sizeof verbs / sizeof *verbs; ++k)
-        if (!tk_strcmp(word, verbs[k])) verb = verbs[k];
-    widget_set_prop_int(w, "style:normal:bg_color", (int)RGBA(scheme()->paper));
-    widget_set_prop_int(w, "style:normal:border_color", 0);
-    for (int k = 0; k < 2; ++k) {
-        widget_move_resize(cell[k], 0, CONFIRM_Y + k * CONFIRM_ROW, 375, CONFIRM_ROW);
-        widget_set_text_utf8(cell[k], k ? verb : "Cancel");
-        widget_set_prop_str(cell[k], "style:normal:text_align_h", "left");
-        widget_set_prop_int(cell[k], "style:normal:margin_left", geom_val(V_TEXT_X));
-        theme_font(cell[k], ROLE_TITLE, FONT_ROW);
-    }
-    /* Delete Song's "Also delete source file": the third row, its words a label of ours at the text
-     * column (stock's check_button centres its own with its icon) that lets taps through to it, and
-     * a click handler that makes it a stop for the wheel (feedback_check_click) */
-    void *check = widget_lookup(w, "msg_delcheckbutton", 0);
-    if (check) {
-        int y = CONFIRM_Y + 2 * CONFIRM_ROW;
-        char words[64];
-        widget_get_text_utf8(check, words, sizeof words);
-        widget_set_text_utf8(check, "");
-        widget_move_resize(check, 0, y, 375, CONFIRM_ROW);
-        widget_on(check, EVT_CLICK, feedback_check_click, check);
-        void *label = text(w, geom_val(V_TEXT_X) - 2, y, 280, CONFIRM_ROW);
-        widget_set_name(label, "_check_words");
-        widget_set_text_utf8(label, words);
-        widget_set_prop_str(label, "style:normal:text_align_h", "left");
-        theme_font(label, ROLE_TITLE, FONT_ROW);
-        widget_set_sensitive(label, 0);
-    }
-    if (note) feedback_empty(w, CONFIRM_Y + 2 * CONFIRM_ROW, note, (const char *)0);
-    /* the footer under the answers (Streaming Songs' asks, library_settings.c) */
-    int k = 0;
-    for (const char *line = confirm_foot; line && *line; ++k) {
-        char words[96];
-        unsigned n = 0;
-        while (line[n] && line[n] != '\n') ++n;
-        tk_snprintf(words, sizeof words, "%.*s", (int)n, line);
-        int px = FOOT_PX;
-        void *label = text(w, geom_val(V_TEXT_X) - 2,
-                           CONFIRM_Y + (2 + !!check) * CONFIRM_ROW + FOOT_GAP + k * FOOT_LINE,
-                           375 - 2 * geom_val(V_TEXT_X), FOOT_LINE);
-        widget_set_name(label, "_foot");
-        widget_set_text_utf8(label, words);
-        widget_set_prop_int(label, "loop", 0);
-        const char *face = theme_face(widget_get_text(label), -1, &px);
-        widget_set_prop_str(label, "style:normal:font_name", face ? face : "default");
-        widget_set_prop_int(label, "style:normal:font_size", px);
-        widget_set_prop_str(label, "style:normal:text_align_h", "left");
-        text_ink(label, RGBA(ipod_light() ? 0x6e6e6e : 0x858585), INK_LABEL);
-        widget_set_sensitive(label, 0);
-        line += n + (line[n] == '\n');
-    }
-    if (st.bar_title) {
-        widget_set_text_utf8(st.bar_title, title);
-        theme_font(st.bar_title, ROLE_BAR, FONT_ROW);
-        widget_invalidate_force(st.bar_title, (void *)0);
-    }
-    return 1;
-}
-
-/* Delete Song's third row, a switch on the right column (docs/oled-design.md Switch row): 34x20, a
- * 16 px white knob 2 px in; off the bar the Track grey or the accent, on the bar a white track with
- * the accent's knob when on, a white outline round a white knob when off. Over the selection. */
-#define SWITCH_W 34
-#define SWITCH_H 20
-#define KNOB 16
-void feedback_confirm_switch(void *w, void *canvas) {
-    void *check = confirm_on(w) ? widget_lookup(w, "msg_delcheckbutton", 0) : (void *)0;
-    if (!check || I(check, W_H) != CONFIRM_ROW || !P(canvas, CANVAS_LCD)) return;
-    int on = widget_get_prop_int(check, "value", 0), lit = st.sel_w == w && st.sel_row == 2;
-    unsigned accent = RGBA(scheme()->tones[0]), white = RGBA(0xffffff),
-             fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-    rect_t track = { 375 - geom_val(V_RIGHT_X) - SWITCH_W,
-                     I(check, W_Y) + (CONFIRM_ROW - SWITCH_H) / 2, SWITCH_W, SWITCH_H },
-           knob = { track.x + (on ? SWITCH_W - 2 - KNOB : 2), track.y + 2, KNOB, KNOB };
-    if (lit && !on)
-        round_ring(canvas, &track, SWITCH_H / 2, white);
-    else
-        fill_box(canvas, &track,
-                 lit  ? white
-                 : on ? accent
-                      : RGBA(flip_if(ipod_light(), 0x333333)),
-                 SWITCH_H / 2);
-    fill_box(canvas, &knob, lit && on ? accent : white, KNOB / 2);
-    stock_canvas_set_fill_color(canvas, fill);
-}
 
 /* Over the dialog's background, under its rows: the status row, which the full-screen dialog
  * covers (over Quick Settings nothing else draws it). */
@@ -288,7 +169,7 @@ int feedback_below(void *w) { return w ? screen_y(w) + I(w, W_H) : 0; }
  * between free and NOTE_END, hint (if any) 24 px lower. */
 int feedback_note(void *line, void *hint, int free) {
     if (!line) return 0;
-    int py = screen_y(P(line, W_PARENT)), light = ipod_light();
+    int py = screen_y(P(line, W_PARENT));
     if (free < py) free = py;
     int mid = (free + NOTE_END) / 2 - NOTE_H / 2 - py;
     void *both[2] = { line, hint };
@@ -299,11 +180,7 @@ int feedback_note(void *line, void *hint, int free) {
         widget_set_prop_str(both[k], "style:normal:font_name", face ? face : "default");
         widget_set_prop_int(both[k], "style:normal:font_size", px);
         widget_set_prop_str(both[k], "style:normal:text_align_h", "center");
-        text_ink(both[k],
-                 RGBA(k       ? (light ? 0x6e6e6e : 0x858585)
-                      : light ? 0x5c5c5c
-                              : 0xababab),
-                 INK_LABEL);
+        text_ink(both[k], RGBA(k ? (tok(TOK_TERTIARY)) : tok(TOK_SECONDARY)), INK_LABEL);
     }
     return 1;
 }
@@ -348,8 +225,8 @@ int feedback_empty(void *parent, int free, const char *message, const char *hint
 #define ES_HINT_H 20
 #define ES_ROW_GAP 24
 #define ES_ROW_H 32
-#define ES_TITLE_PX 24 /* Inter Medium 20, AWTK's size */
-#define ES_HINT_PX 18  /* Inter 15 */
+#define ES_TITLE_PX TYPE(20) /* Inter Medium 20, AWTK's size */
+#define ES_HINT_PX TYPE(15)  /* Inter 15 */
 #define ES_TEXT (ES_TILE + ES_TITLE_GAP + ES_TITLE_H + ES_HINT_H)
 /* The stack's top, centred between free_top (the status row's foot at least) and free_end. */
 int empty_top(int free_top, int free_end, int row) {
@@ -405,7 +282,7 @@ void empty_paint(void *w, void *canvas, const empty_t *e, int top) {
     for (int k = 0; k < 3; ++k) { /* the two behind at about a quarter's strength */
         int s = k < 2 ? ES_SIDE : ES_TILE;
         rect_t r = { 375 / 2 + dx[k] - s / 2, top + ES_TILE / 2 - s / 2, s, s };
-        fill_box(canvas, &r, RGBA(flip_if(light, k < 2 ? 0x0a0a0b : 0x2c2c2e)), ES_TILE_R);
+        fill_box(canvas, &r, RGBA(k < 2 ? flip_if(light, 0x0a0a0b) : tok(TOK_RAISED_2)), ES_TILE_R);
         round_ring(canvas, &r, ES_TILE_R, RGBA(flip_if(light, k < 2 ? 0x111112 : 0x48484c)));
     }
     stock_canvas_set_fill_color(canvas, fill);
@@ -413,9 +290,9 @@ void empty_paint(void *w, void *canvas, const empty_t *e, int top) {
     tk_snprintf(art, sizeof art, "empty_%s", e->glyph ? e->glyph : "");
     paint_art(w, canvas, theme_art(art), 375 / 2 - ES_GLYPH / 2, top + ES_TILE / 2 - ES_GLYPH / 2);
     int ty = top + ES_TILE + ES_TITLE_GAP;
-    ar_text(canvas, e->title ? e->title : "", 1, ES_TITLE_PX, flip_if(light, 0xffffff), 0, 375 / 2,
+    ui_text(canvas, e->title ? e->title : "", 1, ES_TITLE_PX, flip_if(light, 0xffffff), 0, 375 / 2,
             ty + ES_TITLE_H / 2 - 1, 375 - 48, 1);
-    ar_text(canvas, e->hint ? e->hint : "", 0, ES_HINT_PX, light ? 0x5c5c5c : 0xababab, 0, 375 / 2,
+    ui_text(canvas, e->hint ? e->hint : "", 0, ES_HINT_PX, tok(TOK_SECONDARY), 0, 375 / 2,
             ty + ES_TITLE_H + ES_HINT_H / 2, 375 - 48, 1);
 }
 void empty_state_paint(void *w, void *canvas) {
@@ -474,11 +351,7 @@ void feedback_switch_bar(void *w, void *canvas) {
         if (st.sel_accent == w) st.sel_accent = (void *)0;
         return;
     }
-    const theme_t *T = theme();
-    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-    rect_t bar = { T->sel_inset, 0, I(w, W_W) - 2 * T->sel_inset, I(w, W_H) };
-    fill_box(canvas, &bar, RGBA(scheme()->tones[0]), (unsigned)T->sel_radius);
-    stock_canvas_set_fill_color(canvas, fill);
+    sel_bar_flat(canvas, 0, 0, I(w, W_W), I(w, W_H));
     st.sel_accent = w;
 }
 
@@ -533,11 +406,7 @@ void feedback_scan_bar(void *w, void *canvas) {
     if (!w || !P(canvas, CANVAS_LCD) || !widget_get_prop_int(w, "_scan_row", 0) ||
         tk_strcmp(widget_get_prop_str(w, "name", ""), "btn_upmusic"))
         return;
-    const theme_t *T = theme();
-    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-    rect_t bar = { T->sel_inset, 0, I(w, W_W) - 2 * T->sel_inset, I(w, W_H) };
-    fill_box(canvas, &bar, RGBA(scheme()->tones[0]), (unsigned)T->sel_radius);
-    stock_canvas_set_fill_color(canvas, fill);
+    sel_bar_flat(canvas, 0, 0, I(w, W_W), I(w, W_H));
     st.sel_accent = w;
 }
 
@@ -646,14 +515,440 @@ void feedback_shuffled(const char *what, int songs) {
     void *glyph = image_create(page, (375 - CONF_GLYPH) / 2, 140 - CONF_GLYPH / 2 - geom_val(V_BAR),
                                CONF_GLYPH, CONF_GLYPH);
     image_base_set_image(glyph, theme_art("confirm_shuffle"));
-    int light = ipod_light();
-    conf_line(page, 200, 32, what, ROLE_NP, 0, light ? 0x000000 : 0xffffff);
+    conf_line(page, 200, 32, what, ROLE_NP, 0, tok(TOK_PRIMARY));
     char count[24];
     int k = songs / 1000;
     if (k)
         tk_snprintf(count, sizeof count, "%d,%03d song%s", k, songs % 1000, "s");
     else
         tk_snprintf(count, sizeof count, "%d song%s", songs, songs == 1 ? "" : "s");
-    conf_line(page, 228, 24, count, -1, 18, light ? 0x6e6e6e : 0x858585);
+    conf_line(page, 228, 24, count, -1, 18, tok(TOK_TERTIARY));
     conf.timer = timer_add(conf_due, (void *)0, CONF_MS);
+}
+
+/* A mode page (docs/oled-design.md#usb, U2-U6; the sign-in steps, SD Card Update, Bluetooth's
+ * receiver): the stack, circle, title, line and the optional Stop pill, centred as one
+ * between the status row's foot (MODE_TOP) and the screen's bottom. */
+#define MODE_TOP 40
+#define MODE_STACK 158
+#define MODE_STACK_PILL 204
+#define MODE_TITLE_Y 120
+#define MODE_TITLE_PX TYPE(22) /* Inter Medium 22 */
+#define MODE_LINE_Y 148
+#define MODE_LINE_PX TYPE(15) /* Inter Regular 15 */
+#define MODE_PILL_Y 172
+#define MODE_PILL_H 32
+#define MODE_PILL_PAD 22
+#define MODE_PILL_PX TYPE(17) /* Inter Medium 17 */
+
+/* A mode page in w's coordinates (dy its y on screen): m's glyph on its solid circle (none for
+ * MODE_BARE: a spinner), the title, the line and the optional pill. Returns the stack's top in w's
+ * coordinates. */
+int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
+    const char *pill = m->pill;
+    unsigned raw = ui_ink_raw(1); /* final colours, each half's */
+    int stack = pill ? MODE_STACK_PILL : MODE_STACK, px = m->glyph_px ? m->glyph_px : MODE_GLYPH;
+    int top = MODE_TOP + (320 - MODE_TOP - stack) / 2 - dy, cx = 375 / 2;
+    rect_t circle = { cx - MODE_R, top, 2 * MODE_R, 2 * MODE_R };
+    if (m->ring != MODE_BARE) fill_box(canvas, &circle, RGBA(m->ring), MODE_R);
+    if (m->glyph) paint_art(w, canvas, theme_art(m->glyph), cx - px / 2, top + MODE_R - px / 2);
+    ui_line(canvas, m->title, 0, 375, top + MODE_TITLE_Y, 1, "inter-medium", MODE_TITLE_PX,
+            tok(TOK_PRIMARY));
+    ui_line(canvas, m->line, 0, 375, top + MODE_LINE_Y, 1, "inter", MODE_LINE_PX,
+            tok(TOK_SECONDARY));
+    if (pill) {
+        int pw = ui_measure(canvas, pill, "inter-medium", MODE_PILL_PX) + 2 * MODE_PILL_PAD;
+        rect_t r = { cx - pw / 2, top + MODE_PILL_Y, pw, MODE_PILL_H };
+        fill_box(canvas, &r, RGBA(tok(TOK_RAISED_2)), MODE_PILL_H / 2);
+        ui_line(canvas, pill, r.x, r.w, r.y + MODE_PILL_H / 2, 1, "inter-medium", MODE_PILL_PX,
+                tok(TOK_PRIMARY));
+    }
+    ui_ink_raw(raw);
+    return top;
+}
+
+/* The confirmation card (docs/oled-design.md#confirmation-card): stock's sortselect_dialog, as the
+ * inset modal's pickers use it (menu_modal.c modal_list), its list the card's answers and the rest
+ * painted here. The scrim dims the page and the status row (confirm_bar_dim); the card is
+ * CARD_W wide at CARD_X, its stack centred on CARD_CY and kept within CARD_TOP..CARD_FOOT: 18 px
+ * of padding, the title (Inter Medium 20), the body (15 px Text Secondary, 19 px lines, 4 px under
+ * the title), the code (Inter Medium 30), then 14 px down the switch row and the answers, 32 px
+ * each, a destructive answer 12 px after the rest, and 8 px of padding. The answers' bar is 8 px in
+ * from the card's sides; a destructive one is red (Negative), its bar too when lit. */
+#define CARD_X 42
+#define CARD_W 291
+#define CARD_R 16
+#define CARD_CY 168
+#define CARD_TOP 44
+#define CARD_FOOT 302
+#define CARD_PAD_TOP 18
+#define CARD_PAD_FOOT 8
+#define CARD_IN 20 /* the text column, in from each side */
+#define CARD_TITLE_H 24
+#define CARD_BODY_GAP 4
+#define CARD_BODY_LINE 19
+#define CARD_CODE_GAP 6
+#define CARD_CODE_H 40
+#define CARD_ROWS_GAP 14
+#define CARD_ROW 32
+#define CARD_DEST_GAP 12
+#define CARD_BAR_IN 8
+#define CARD_SCRIM 0x80000000u /* the inset modal's dim */
+#define CARD_TIMER_MS 100      /* the timeout's seconds and bar */
+#define CARD_COUNT_PX TYPE(15)
+
+static struct {
+    void *dialog, *view, *cell[2], *check; /* a dressed stock confirm's answers and its switch */
+    int stock;                             /* the dialog is stock's confirminfo_dialog */
+    confirm_t c;
+    char title[96], body[2][64], code[16], row[2][24], toggle[48];
+    const char *rows[2];
+    int lines, toggle_on, top, rows_y, h, chosen;
+    unsigned timer, answer_timer, until;
+} cf __attribute__((section(".scratch")));
+
+int confirm_up(void) { return cf.dialog != (void *)0; }
+/* w holds the card's answers as rows: navigation.c's selection keeps their own width */
+int confirm_surface(void *w) { return w && cf.dialog && w == (cf.stock ? cf.dialog : cf.view); }
+static int card_items(void) { return cf.c.n_rows + !!cf.c.toggle; }
+static int card_destructive(int row) {
+    return cf.c.kind == CONFIRM_DESTRUCTIVE && cf.c.n_rows > 1 && row == cf.c.n_rows - 1;
+}
+
+/* The card's height and top, and where its switch row and answers start (screen y). */
+static void card_body(const char *s);
+static void card_layout(void) {
+    int h = CARD_PAD_TOP + CARD_TITLE_H;
+    if (cf.lines) h += CARD_BODY_GAP + cf.lines * CARD_BODY_LINE;
+    if (cf.code[0]) h += CARD_CODE_GAP + CARD_CODE_H;
+    int rows = h + CARD_ROWS_GAP;
+    h = rows + card_items() * CARD_ROW + (card_destructive(cf.c.n_rows - 1) ? CARD_DEST_GAP : 0) +
+        CARD_PAD_FOOT;
+    int top = CARD_CY - h / 2;
+    if (top + h > CARD_FOOT) top = CARD_FOOT - h;
+    if (top < CARD_TOP) top = CARD_TOP;
+    cf.top = top, cf.h = h, cf.rows_y = top + rows;
+}
+
+void confirm_close(void) {
+    if (cf.stock) return; /* stock's runs its own loop to its answer */
+    void *d = cf.dialog;
+    cf.dialog = cf.view = (void *)0;
+    if (cf.timer) timer_remove(cf.timer), cf.timer = 0;
+    if (d) window_close(d);
+}
+
+static int card_answer(const void *unused) {
+    cf.answer_timer = 0;
+    confirm_t c = cf.c;
+    int row = cf.chosen, on = cf.toggle_on;
+    confirm_close();
+    if (c.answer) c.answer(c.ctx, row, on);
+    return 0;
+}
+/* Answers row once, from the next pass: the dialog closes before the caller's answer runs. */
+static void card_choose(int row) {
+    if (!cf.dialog || cf.answer_timer) return;
+    cf.chosen = row;
+    cf.answer_timer = timer_add(card_answer, (void *)0, 0);
+}
+static int card_back_row(void) { return cf.c.back >= 0 ? cf.c.back : 0; }
+
+static int card_click(void *ctx, void *event) {
+    int k = (int)(long)ctx;
+    if (k < 0) { /* the switch row */
+        cf.toggle_on = !cf.toggle_on;
+        if (cf.dialog) widget_invalidate_force(cf.dialog, (void *)0);
+    } else
+        card_choose(k);
+    return 0;
+}
+/* Return answers the back row; the music's keys go nowhere while the card asks. */
+static int card_key(void *dialog, void *event) {
+    unsigned key = (unsigned)I(event, EVENT_KEY);
+    if (key == KEY_PLAY || key == KEY_PREV || key == KEY_NEXT) return STOP;
+    if (I(event, EVENT_TYPE) != EVT_KEY_UP || key != KEY_RETURN) return 0;
+    card_choose(card_back_row());
+    return STOP;
+}
+static int card_gone(void *dialog, void *event) {
+    if (cf.dialog == dialog) {
+        cf.dialog = cf.view = (void *)0;
+        cf.stock = 0;
+        if (cf.timer) timer_remove(cf.timer), cf.timer = 0;
+    }
+    return 0;
+}
+/* The timeout's tick: a repaint for its seconds and bar, the answer at the end. */
+static int card_tick(const void *unused) {
+    if (!cf.dialog) return cf.timer = 0, 0;
+    if ((int)(cf.until - (unsigned)time_now_ms()) <= 0) {
+        cf.timer = 0;
+        card_choose(cf.c.timeout_row);
+        return 0;
+    }
+    widget_invalidate_force(cf.dialog, (void *)0);
+    return 1;
+}
+
+int confirm(const confirm_t *c) {
+    void *wm = window_manager(), *page = window_manager_get_top_window(wm);
+    if (cf.dialog || !c || c->n_rows <= 0) return 0;
+    navigator_to("dialog/sortselect_dialog");
+    void *dialog = window_manager_get_top_window(wm);
+    if (dialog == page) return 0;
+    if (tk_strcmp(widget_get_prop_str(dialog, "name", ""), "sortselect_dialog")) {
+        window_close(dialog);
+        return 0;
+    }
+    memset(&cf, 0, sizeof cf);
+    cf.c = *c;
+    cf.toggle_on = c->toggle_on;
+    tk_snprintf(cf.title, sizeof cf.title, c->title ? c->title : "", c->name ? c->name : "");
+    card_body(c->body);
+    tk_snprintf(cf.code, sizeof cf.code, "%s", c->code ? c->code : "");
+    card_layout();
+    void *back = widget_lookup(dialog, "img_return", 1),
+         *list = widget_lookup(dialog, "list_view", 1),
+         *view = widget_lookup(dialog, "scroll_view", 1),
+         *nav = widget_lookup(dialog, "view_navbar", 1);
+    widget_off_by_func(dialog, EVT_KEY_UP, (void *)SORTSELECT_KEYUP, dialog);
+    widget_off_by_func(back, EVT_CLICK, (void *)SORTSELECT_CLOSE, dialog);
+    widget_on(dialog, EVT_KEY_UP, card_key, dialog);
+    widget_on(dialog, EVT_KEY_DOWN, card_key, dialog);
+    widget_on(dialog, EVT_DESTROY, card_gone, dialog);
+    if (nav) widget_set_visible(nav, 0, 0);
+    widget_set_prop_str(dialog, "highlight", "");
+    widget_set_prop_int(dialog, "style:normal:bg_color", 0);
+    widget_set_prop_int(dialog, "style:normal:border_color", 0);
+    widget_destroy_children(view);
+    int out = theme()->sel_inset - CARD_BAR_IN, w = CARD_W + 2 * out, y = 0;
+    for (int k = c->toggle ? -1 : 0; k < c->n_rows; ++k) {
+        if (card_destructive(k)) {
+            void *gap = label_create(view, 0, y, w, CARD_DEST_GAP);
+            widget_set_text_utf8(gap, "");
+            y += CARD_DEST_GAP;
+        }
+        void *item = list_item_create(view, 0, y, w, CARD_ROW);
+        widget_use_style(item, "s_listitem_black");
+        widget_set_prop_int(item, "style:normal:bg_color", 0);
+        widget_on(item, EVT_CLICK, card_click, (void *)(long)k);
+        y += CARD_ROW;
+    }
+    if (list) {
+        I(list, ROW_HEIGHT) = 0;
+        I(list, LIST_DEFAULT_ITEM_HEIGHT) = 0;
+        widget_set_prop_int(list, "style:normal:bg_color", 0);
+        widget_move_resize(list, CARD_X - out, cf.rows_y - I(dialog, W_Y), w, y);
+        widget_set_prop_int(view, "virtual_h", y);
+        widget_set_prop_str(view, "self_layout", "default(x=0,y=0,w=100%,h=100%)");
+    }
+    cf.dialog = dialog, cf.view = view;
+    int first = c->kind == CONFIRM_NEUTRAL ? c->n_rows - 1 : 0;
+    st.touch_mode = 0;
+    ringnav_select(view, first + !!c->toggle, card_items());
+    if (c->timeout_ms > 0) {
+        cf.until = (unsigned)time_now_ms() + (unsigned)c->timeout_ms;
+        cf.timer = timer_add(card_tick, (void *)0, CARD_TIMER_MS);
+    }
+    return 1;
+}
+
+/* The body's lines from s, '\n' between them, two at most. */
+static void card_body(const char *s) {
+    for (; s && *s && cf.lines < 2; ++cf.lines) {
+        unsigned n = 0;
+        while (s[n] && s[n] != '\n') ++n;
+        tk_snprintf(cf.body[cf.lines], sizeof cf.body[0], "%.*s", (int)n, s);
+        s += n + (s[n] == '\n');
+    }
+}
+static int card_toggle_on(void) {
+    return cf.check ? widget_get_prop_int(cf.check, "value", 0) : cf.toggle_on;
+}
+
+/* Stock's confirm pop-up (confirminfo_dialog, its own loop answering 10 for the verb) as the card:
+ * its prompt named as asks[] says (else its words, its verb the prompt's first word when one of
+ * verbs[], else OK), a note or the caller's foot as the body, its two cells the answers Cancel and
+ * the verb, Delete Song's "Also delete source file" the switch row above them. Every stock caller
+ * gets the card with no change of its own. The dialog's first paint, before its background; once.
+ */
+static const struct {
+    const char *prompt, *title, *verb, *body;
+} asks[] = {
+    { "Shut Down?", "Shut Down?", "Shut Down", 0 },
+    { "Restart?", "Restart?", "Restart", 0 }, /* Power's Restart (power_rows.c) */
+    { "Restart to apply?", "Restart to Apply?", "Restart", 0 },
+    { "Reset Settings Only", "Reset Settings?", "Reset",
+      "Music, playlists and ratings\nare kept." },
+    { "Reset Database", "Reset the Database?", "Reset", 0 },
+    { "Full Factory Reset", "Full Factory Reset?", "Reset", 0 },
+    { "Delete Song?", "Delete This Song?", "Delete", 0 },
+    { "Delete File?", "Delete This File?", "Delete", 0 },
+    { "Scan music?", "Scan Music?", "Scan", 0 },
+    { "unpair?", "Unpair This Device?", "Unpair", 0 },
+    { "Unpair?", "Unpair This Device?", "Unpair", 0 },
+    { "Delete Record?", "Forget This Network?", "Forget", 0 },
+    { "Disconnect Now?", "Disconnect?", "Disconnect", 0 },
+    { "Line Out sets max volume, continue?", "Use Line Out?", "Use Line Out",
+      "Line Out sets the volume to its maximum." },
+    { "Export Playlist?", "Export Playlists?", "Export", 0 },
+};
+static const char *const verbs[] = {
+    "Delete", "Import", "Export", "Quit", "Disconnect", "Reconnect"
+};
+/* the verbs that lose something: red, after the gap */
+static const char *const losing[] = { "Delete", "Reset", "Forget", "Unpair", "Remove", "Clear" };
+
+int feedback_confirm_dress(void *w) {
+    if (!confirm_on(w)) return 0;
+    if (cf.dialog == w) return 1;
+    void *cell[2] = { widget_lookup(w, "img_cancel", 0), widget_lookup(w, "img_enter", 0) };
+    if (!cell[0] || !cell[1] || cf.dialog) return 1;
+    char prompt[128] = "", word[16];
+    for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) {
+        void *c = widget_get_child(w, i);
+        if (!tk_strcmp(widget_get_type(c), "button") ||
+            !tk_strcmp(widget_get_prop_str(c, "name", ""), "msg_delcheckbutton"))
+            continue;
+        if (!*prompt) widget_get_text_utf8(c, prompt, sizeof prompt);
+        widget_set_visible(c, 0, 0);
+    }
+    const char *title = prompt, *verb = st.confirm_verb ? st.confirm_verb : "OK",
+               *body = confirm_foot;
+    int asked = 0;
+    for (unsigned k = 0; k < sizeof asks / sizeof *asks; ++k)
+        if (!tk_strcmp(prompt, asks[k].prompt))
+            title = asks[k].title, verb = asks[k].verb, body = asks[k].body ? asks[k].body : body,
+            asked = 1;
+    unsigned len = 0;
+    while (prompt[len] && prompt[len] != ' ' && len < sizeof word - 1)
+        word[len] = prompt[len], ++len;
+    word[len] = 0;
+    for (unsigned k = 0; !st.confirm_verb && !asked && k < sizeof verbs / sizeof *verbs; ++k)
+        if (!tk_strcmp(word, verbs[k])) verb = verbs[k];
+    memset(&cf, 0, sizeof cf);
+    cf.dialog = w, cf.stock = 1, cf.cell[0] = cell[0], cf.cell[1] = cell[1];
+    tk_snprintf(cf.title, sizeof cf.title, "%s", title);
+    tk_snprintf(cf.row[0], sizeof cf.row[0], "Cancel");
+    tk_snprintf(cf.row[1], sizeof cf.row[1], "%s", verb);
+    cf.rows[0] = cf.row[0], cf.rows[1] = cf.row[1];
+    cf.c.rows = cf.rows, cf.c.n_rows = 2, cf.c.kind = CONFIRM_CONSEQUENTIAL;
+    for (unsigned k = 0; k < sizeof losing / sizeof *losing; ++k)
+        if (!strncmp(verb, losing[k], strlen(losing[k]))) cf.c.kind = CONFIRM_DESTRUCTIVE;
+    card_body(body);
+    cf.check = widget_lookup(w, "msg_delcheckbutton", 0);
+    if (cf.check) { /* the switch row: its words painted (confirm_rows_paint), the check a stop */
+        widget_get_text_utf8(cf.check, cf.toggle, sizeof cf.toggle);
+        widget_set_text_utf8(cf.check, "");
+        widget_on(cf.check, EVT_CLICK, feedback_check_click, cf.check);
+        cf.c.toggle = cf.toggle;
+    }
+    card_layout();
+    widget_on(w, EVT_DESTROY, card_gone, w);
+    widget_set_prop_int(w, "style:normal:bg_color", 0);
+    widget_set_prop_int(w, "style:normal:border_color", 0);
+    int out = theme()->sel_inset - CARD_BAR_IN, x = CARD_X - out, cw = CARD_W + 2 * out,
+        y = cf.rows_y - I(w, W_Y);
+    if (cf.check) widget_move_resize(cf.check, x, y, cw, CARD_ROW), y += CARD_ROW;
+    for (int k = 0; k < 2; ++k) {
+        if (card_destructive(k)) y += CARD_DEST_GAP;
+        widget_move_resize(cell[k], x, y, cw, CARD_ROW);
+        widget_set_text_utf8(cell[k], "");
+        y += CARD_ROW;
+    }
+    return 1;
+}
+
+/* The status row under the card's scrim, from ringnav_paint after stock painted it. */
+void confirm_bar_dim(void *w, void *canvas) {
+    void *bar = *(void *const *)system_bar, *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
+    if (!cf.dialog || w != bar || !lcd) return;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
+    stock_canvas_set_fill_color(canvas, CARD_SCRIM);
+    canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
+    stock_canvas_set_fill_color(canvas, fill);
+}
+
+/* Under the dialog's rows: the scrim over the page, the card, its title, body, code and the
+ * timeout's bar along its foot. */
+void confirm_paint(void *w, void *canvas) {
+    void *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
+    if (!cf.dialog || w != cf.dialog || !lcd) return;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), raw = ui_ink_raw(1);
+    int dy = I(w, W_Y), top = cf.top - dy, cx = CARD_X + CARD_W / 2, tw = CARD_W - 2 * CARD_IN;
+    stock_canvas_set_fill_color(canvas, CARD_SCRIM);
+    canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
+    rect_t card = { CARD_X, top, CARD_W, cf.h };
+    fill_box(canvas, &card, RGBA(ipod_light() ? 0xffffff : RGB_RAISED), CARD_R);
+    int y = top + CARD_PAD_TOP + CARD_TITLE_H / 2;
+    ui_text(canvas, cf.title, 1, TYPE(20), tok(TOK_PRIMARY), 1, cx, y, tw, 1);
+    y += CARD_TITLE_H / 2;
+    if (cf.lines) y += CARD_BODY_GAP;
+    for (int i = 0; i < cf.lines; ++i, y += CARD_BODY_LINE)
+        ui_text(canvas, cf.body[i], 0, TYPE(15), tok(TOK_SECONDARY), 1, cx, y + CARD_BODY_LINE / 2,
+                tw, 1);
+    if (cf.code[0])
+        ui_text(canvas, cf.code, 1, TYPE(30), tok(TOK_PRIMARY), 1, cx,
+                y + CARD_CODE_GAP + CARD_CODE_H / 2, tw, 1);
+    if (cf.c.timeout_ms > 0) { /* 2 px along the foot, emptying toward the answer it gives */
+        int left = (int)(cf.until - (unsigned)time_now_ms());
+        if (left < 0) left = 0;
+        rect_t track = { CARD_X + CARD_IN, top + cf.h - CARD_PAD_FOOT / 2 - 1, tw, 2 }, bar = track;
+        bar.w = tw * (left / 16) / (cf.c.timeout_ms / 16 + 1); /* no 64-bit divide in the payload */
+        fill_box(canvas, &track, RGBA(tok(TOK_OFF)), 0);
+        if (bar.w > 0) fill_box(canvas, &bar, RGBA(tok(TOK_TERTIARY)), 0);
+    }
+    stock_canvas_set_fill_color(canvas, fill);
+    ui_ink_raw(raw);
+}
+
+/* Over the answers' list after the selection's bar: each row's words centred (a destructive one
+ * red, its lit bar red), the switch row's label and switch, the timeout's seconds. */
+void confirm_rows_paint(void *w, void *canvas) {
+    void *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
+    if (!cf.dialog || w != (cf.stock ? cf.dialog : cf.view) || !lcd) return;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), raw = ui_ink_raw(1), red = RGB_NEGATIVE,
+             primary = tok(TOK_PRIMARY);
+    void *slot[8];
+    int n = 0, k = cf.c.toggle ? -1 : 0;
+    if (cf.stock) {
+        if (cf.check) slot[n++] = cf.check;
+        slot[n++] = cf.cell[0], slot[n++] = cf.cell[1];
+    } else
+        for (unsigned i = 0, m = widget_count_children(w); i < m && n < 8; ++i) {
+            void *item = widget_get_child(w, i);
+            if (!tk_strcmp(widget_get_type(item), "list_item")) slot[n++] = item;
+        }
+    for (int i = 0; i < n; ++i, ++k) {
+        void *item = slot[i];
+        int x = I(item, W_X), y = I(item, W_Y) + CARD_ROW / 2, cx = x + I(item, W_W) / 2,
+            out = theme()->sel_inset - CARD_BAR_IN,
+            lit = ringnav_row_selected(item) && !st.touch_mode;
+        if (k < 0) {
+            ui_text(canvas, cf.c.toggle, 0, TYPE(20), lit ? 0xffffff : primary, 1,
+                    x + out + CARD_IN, y, CARD_W - 2 * CARD_IN - 44, 2);
+            switch_mark(canvas, x + out + CARD_W - CARD_IN, y, card_toggle_on(), lit);
+            continue;
+        }
+        if (lit && card_destructive(k)) {
+            rect_t bar = { x + theme()->sel_inset, I(item, W_Y),
+                           I(item, W_W) - 2 * theme()->sel_inset, CARD_ROW };
+            fill_box(canvas, &bar, RGBA(red), (unsigned)theme()->sel_radius);
+        }
+        ui_text(canvas, cf.c.rows[k], 0, TYPE(20),
+                lit                   ? 0xffffff
+                : card_destructive(k) ? red
+                                      : primary,
+                1, cx, y, CARD_W - 2 * CARD_IN, 1);
+        if (cf.c.timeout_ms > 0 && k == cf.c.timeout_row) {
+            char t[16];
+            int left = (int)(cf.until - (unsigned)time_now_ms());
+            tk_snprintf(t, sizeof t, "%d s", left > 0 ? (left + 999) / 1000 : 0);
+            ui_text(canvas, t, 0, CARD_COUNT_PX, lit ? 0xffffff : tok(TOK_TERTIARY), 1,
+                    x + out + CARD_W - CARD_IN, y, 60, 3);
+        }
+    }
+    stock_canvas_set_fill_color(canvas, fill);
+    ui_ink_raw(raw);
 }

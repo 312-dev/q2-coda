@@ -50,9 +50,9 @@
 #define LR_CIRCLE_X 34  /* the check circle (list_marks.c check_circle): its middle at this x */
 #define LR_TEXT_X 52    /* the row's words, right of it */
 #define LR_LIFT 108     /* the lifted row's card: the selection bar's box grown to 108% */
-#define LR_HINT_PX 16   /* the hint: Inter Regular 13 px (AWTK's line size, 13 x 1.21) */
+#define LR_HINT_PX TYPE(13) /* the hint: Inter Regular 13 px (AWTK's line size, 13 x 1.21) */
 #define LR_HINT_Y 298   /* its middle, 14 px above the screen's foot */
-#define LR_LIFT_PX 27   /* the lifted row's words: Inter Medium 22 px, 20 px grown 8% */
+#define LR_LIFT_PX TYPE(22) /* the lifted row's words: Inter Medium 22 px, 20 px grown 8% */
 
 enum { LR_A_NONE, LR_A_SHOWN, LR_A_HIDDEN, LR_A_LOCKED }; /* LR_AUTO */
 enum { LR_LIBRARY, LR_HOME };
@@ -864,11 +864,11 @@ void lr_edit_paint(void *w, void *canvas) {
                                      ' ', 'h', 'i', 'd', 'e', 's', 0 };
     void *view = lr.view, *rows[LR_ROWS], *lcd = P(canvas, CANVAS_LCD);
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), ground = ui_ink(RGBA(0)), raw = ui_ink_raw(1);
-    int light = ipod_light(), ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), h,
+    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), h,
         box = lr_box(view, &h), top = box - oy - I(view, SCROLL_Y), n = lr_rows(view, rows),
         sel = st.touch_mode ? -1 : widget_get_prop_int(view, SEL, -1),
         gx = 375 - geom_val(V_RIGHT_X) - LR_GRIP_X - ox, cx0 = LR_CIRCLE_X - ox;
-    unsigned ink = light ? 0x000000 : 0xffffff, third = light ? 0x6e6e6e : 0x858585;
+    unsigned ink = tok(TOK_PRIMARY), third = tok(TOK_TERTIARY);
     rect_t old, clip; /* clips are the screen's, within the paint's own */
     if (clip_within(canvas, &old.x, &clip.x, 0, box, 375, h)) {
         canvas_set_clip_rect(canvas, &clip);

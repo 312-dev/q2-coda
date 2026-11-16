@@ -28,8 +28,8 @@ extern char *art_path(char *out, unsigned key, const char *suffix);
 #define AS_END 224 /* the list's height: down to y 282 on screen */
 #define AS_LEVELS 4
 #define AS_MAX_KEYS 4096 /* the songs whose marks are kept; past it a song shows none */
-#define AS_PX 24         /* a row's title: the design's 20 px, AWTK's size */
-#define AS_PX_15 18
+#define AS_PX TYPE(20)   /* a row's title: the design's 20 px, AWTK's size */
+#define AS_PX_15 TYPE(15)
 
 enum { AS_CHOOSE, AS_PLAYED, AS_ADDED, AS_ARTISTS, AS_ALBUMS, AS_SONGS, AS_ARTIST, AS_ALBUM };
 static const char *const as_names[] = { "",        "Recently Played", "Recently Added",
@@ -318,16 +318,12 @@ static void as_row(void *canvas, as_level *l, int i, int y, int h, int on) {
     unsigned ink = on      ? 0xffffff
                    : light ? 0
                            : 0xffffff,
-             muted = on      ? 0xffffff
-                     : light ? 0x6e6e6e
-                             : 0x858585,
-             accent = scheme()->tones[0] & 0xffffff;
+             muted = on ? 0xffffff : tok(TOK_TERTIARY), accent = scheme()->tones[0] & 0xffffff;
     char text[256], right[48] = "", url[520], art[32];
     const char *title = text, *icon = 0;
     int chev = 0, mark = 0, num = 0;
     void *r = 0, *album = as_album(l, i);
-    if (on)
-        fill_box(canvas, &(rect_t){ 16, y, 375 - 32 - az_bar_in(as.sheet), h }, RGBA(accent), 8);
+    if (on) sel_bar_flat(canvas, 0, y, 375 - az_bar_in(as.sheet), h);
     if (l->kind == AS_CHOOSE) {
         title = as_names[AS_PLAYED + i], chev = 1;
     } else if (i < l->lead) {
@@ -350,7 +346,7 @@ static void as_row(void *canvas, as_level *l, int i, int y, int h, int on) {
             rect_t src = { 0, 0, (int)bitmap[0], (int)bitmap[1] };
             canvas_draw_image(canvas, bitmap, &src, &box);
         } else
-            fill_box(canvas, &box, RGBA(flip_if(light, 0x2c2c2e)), 4);
+            fill_box(canvas, &box, RGBA(tok(TOK_RAISED_2)), 4);
         tx = x + AS_COVER + 8;
     } else if ((r = as_record(l, i))) {
         if (l->kind == AS_ARTISTS) {
@@ -385,10 +381,10 @@ static void as_row(void *canvas, as_level *l, int i, int y, int h, int on) {
     if (num > 0) {
         char d[8];
         tk_snprintf(d, sizeof d, "%d", num);
-        ar_text(canvas, d, 0, AS_PX_15, muted, 1, x + 18, y + h / 2, 18, 3);
+        ui_text(canvas, d, 0, AS_PX_15, muted, 1, x + 18, y + h / 2, 18, 3);
     }
-    if (*right) end -= ar_text(canvas, right, 0, AS_PX_15, muted, 1, end, y + h / 2, 150, 3) + 8;
-    ar_text(canvas, title, 0, AS_PX, ink, 1, tx, y + h / 2, end - tx, 2);
+    if (*right) end -= ui_text(canvas, right, 0, AS_PX_15, muted, 1, end, y + h / 2, 150, 3) + 8;
+    ui_text(canvas, title, 0, AS_PX, ink, 1, tx, y + h / 2, end - tx, 2);
 }
 
 /* ringnav_paint: the level's rows in view, on the sheet. */

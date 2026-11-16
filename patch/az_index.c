@@ -6,8 +6,8 @@
  * under that letter is at its top and selected (a letter with none: the next one that has rows,
  * else the last before it). A spin of the wheel at AZ_SPIN_DPS or faster brings it up too, the
  * selected row's letter lit and shown large beside it, as an iPod's fast scroll shows the letter
- * it passes. It goes AZ_SHOW_MS after the finger lifts or the last fast tick, fading over the last
- * AZ_FADE_MS, as the scroll indicator does (list_marks.c), which stays hidden meanwhile; so does
+ * it passes. It goes UI_SHOW_MS after the finger lifts or the last fast tick, fading over the last
+ * UI_FADE_MS, as the scroll indicator does (list_marks.c), which stays hidden meanwhile; so does
  * the fast-scroll letter (navigation.c paint_letter). While it shows, the rows' right column and
  * the selection bar's right end move in (az_right, az_bar_in) so nothing on a row runs under it.
  *
@@ -26,18 +26,18 @@
 #define AZ_BOTTOM 240
 #define AZ_SLOT 11 /* a letter's height: past AZ_SLOTS of them the column folds */
 #define AZ_SLOTS ((AZ_BOTTOM - AZ_TOP) / AZ_SLOT)
-#define AZ_PX 13 /* Inter Medium 11 px: AWTK sizes a face by its line, 1.21 em for Inter */
+#define AZ_PX TYPE(13) /* Inter Medium 13 px */
 #define AZ_DOT 8 /* the lit letter's white disc's radius */
 /* the bubble: AZ_BUB_W x AZ_BUB_H, AZ_BUB_R corners, ending AZ_BUB_GAP left of the column's centre,
- * its pointer AZ_PTR_W long and 2 * AZ_PTR_H tall towards it; its letter Inter Medium 30 px */
+ * its pointer AZ_PTR_W long and 2 * AZ_PTR_H tall towards it; its letter Inter Medium 22 px */
 #define AZ_BUB_W 52
 #define AZ_BUB_H 48
 #define AZ_BUB_R 12
 #define AZ_BUB_GAP 18
 #define AZ_PTR_W 7
 #define AZ_PTR_H 6
-#define AZ_BUB_PX 36
-#define AZ_BUB_RGB 0x2c2c2e
+#define AZ_BUB_PX TYPE(22)
+#define AZ_BUB_RGB RGB_RAISED_2
 /* while it shows: the right column AZ_RIGHT_IN px in (W - 32 from W - 28), the bar's end AZ_BAR_IN
  */
 #define AZ_RIGHT_IN 4
@@ -48,9 +48,6 @@
  * where the volume's goes from 1 step a tick to 2 (volume.c vol_accel,
  * docs/internals.md#wheel-volume). At 50% Wheel Sensitivity that is 0.83 turns a second, about 6
  * ticks. AZ_MIN_ROWS and AZ_EDGE_PX are there too, shared with add_songs.c. */
-#define AZ_SHOW_MS 1000
-#define AZ_FADE_MS 200
-#define AZ_STEP_MS 40
 #define AZ_BOUND "_az_bound"
 
 enum { AZ_NONE, AZ_SONGS, AZ_ALBUMS, AZ_ARTISTS, AZ_COMPOSERS, AZ_GENRES };
@@ -135,13 +132,8 @@ int az_column(signed char *out) {
     return n;
 }
 
-/* The strip's alpha now: 255 while held or until the fade, then falling to 0 at AZ_SHOW_MS. */
-static unsigned az_alpha(void) {
-    if (!az.list) return 0;
-    unsigned gone = (unsigned)time_now_ms() - az.at;
-    if (az.held || gone <= AZ_SHOW_MS - AZ_FADE_MS) return 255;
-    return gone >= AZ_SHOW_MS ? 0 : 255u * (AZ_SHOW_MS - gone) / AZ_FADE_MS;
-}
+/* The strip's alpha now: 255 while held, else ui_kit.h's show-then-fade from its last arm. */
+static unsigned az_alpha(void) { return !az.list ? 0 : az.held ? 255 : ui_fade_alpha(az.at); }
 
 /* Whether the strip is up on surface w (or on the list view w holds it in). */
 int az_on(void *w) { return az.list && w && (w == az.list || w == P(az.list, W_PARENT)); }
@@ -157,7 +149,7 @@ static int az_due(const void *info) {
     (void)info;
     az.timer = 0;
     void *top = window_manager_get_top_window(window_manager());
-    int gone = !az.held && (unsigned)time_now_ms() - az.at >= AZ_SHOW_MS;
+    int gone = !az.held && (unsigned)time_now_ms() - az.at >= UI_SHOW_MS;
     if (top && top == az.page) {
         rect_t r = { 375 - AZ_X - AZ_BUB_GAP - AZ_BUB_W, 0, AZ_X + AZ_BUB_GAP + AZ_BUB_W,
                      I(top, W_H) };
@@ -166,7 +158,7 @@ static int az_due(const void *info) {
     if (gone)
         az.list = az.page = (void *)0, az.letter = -1, az.bubble = 0;
     else if (!az.held)
-        az.timer = timer_add(az_due, (void *)0, AZ_STEP_MS);
+        az.timer = timer_add(az_due, (void *)0, UI_FADE_STEP_MS);
     return 0;
 }
 
@@ -179,7 +171,7 @@ static void az_show(void *w) {
     if (az.held)
         stop_timer(&az.timer);
     else
-        rearm(&az.timer, az_due, AZ_SHOW_MS - AZ_FADE_MS);
+        rearm(&az.timer, az_due, UI_SHOW_MS - UI_FADE_MS);
 }
 
 /* navigation.c's wheel: a tick moved table w's selection to row id. A fast one brings the strip up
@@ -305,7 +297,7 @@ void az_paint(void *w, void *canvas) {
     int oy = I(canvas, CANVAS_Y); /* the canvas's origin on screen */
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), raw = ui_ink_raw(1);
     int light = ipod_light(), x = 375 - AZ_X - I(canvas, CANVAS_X);
-    unsigned ink = light ? 0x000000 : 0xffffff, paper = light ? 0xffffff : 0x000000;
+    unsigned ink = tok(TOK_PRIMARY), paper = light ? 0xffffff : 0x000000;
     signed char col[AZ_LETTERS];
     int n = az_column(col);
     for (int i = 0; i < n; ++i) {

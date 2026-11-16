@@ -6253,12 +6253,14 @@ for key,want in ((O['KEY_FWD_BTN'],['B','A','C']),(O['KEY_FWD_BTN'],['B','C','A'
     assert m.call(key,gap=0)==11
     m.view=m.find('scroll_view'); assert m.selected(m.view)==want.index('A')+2
 assert m.names()==m.before_queue and not m.playback(); passed()
-# Touch actions and confirmation; cancel and Back leave the entry intact.
+# Touch actions and confirmation (Remove on the confirmation card, its answer feedback.c runs once
+# the card has closed: playlists.c ple_remove_answer); cancel and Back leave the entry intact.
+def ple_answer(m,row): m.call(address=payload_syms['ple_remove_answer'],args=(0,row,0,0),gap=0,clear=False); m.advance(0); m.view=m.find('scroll_view')
 m.choose(3); assert m.showlabels()==['Move Up','Move Down','Remove from Playlist']
-m.choose(2); assert m.showlabels()==['Remove from Playlist','Cancel']; m.choose(1)
+m.choose(2); ple_answer(m,0)
 assert m.order()==['B','A','C']; m.choose(3); m.choose(0); assert m.order()==['A','B','C']
 m.choose(2); m.choose(1); assert m.order()==['B','A','C']
-m.choose(3); m.choose(2); m.choose(0); assert m.order()==['B','C'] and m.selected(m.view)==3
+m.choose(3); m.choose(2); ple_answer(m,1); assert m.order()==['B','C'] and m.selected(m.view)==3
 assert m.order(1)==['Other']; passed()
 # The fixed destination picker stays open; failed writes never report success.
 saved=m.alloc(16); m.word(saved,0x12345678); m.word(syms['p_vector_select_record'],saved)
@@ -12851,6 +12853,7 @@ class SpotMachine(CardMachine):
             self.now+=a
             if self.on_sleep: self.on_sleep()
         elif name=='mclGetPlayStatus': ret=self.play
+        elif name=='connect' and self.text(b+2)=='/tmp/q2adb-ui': ret=-1  # adbd's UI socket (a dev build's usb_ui.c auth_poll): not listening
         elif name=='connect': assert self.text(b+2)==SOCK; ret=0 if self.alive else -1
         self.calls.append((name,a,b,c))
         self.returns(ret,clobber=True)
@@ -13229,7 +13232,7 @@ def rbar_reads():  # the old caption's destroy, which the mock's unlink doesn't 
     m.call(address=payload_syms['title_gone'],args=(0,0,0,0),gap=0); m.call(address=payload_syms['bar_title_sync'],args=(m.top,0,0,0),gap=0); return m.nodes[rbar]['text']
 m.row(0); assert empty_titles(m)[-1:]==['No Stations'] and rbar_reads()=='Favorites',(m.labels(),rbar_reads())
 search('zzz'); m.reply=b'#EXTM3U\n'; m.worker(); assert empty_titles(m)[-1:]==['No Stations'] and rbar_reads()=='Internet Radio',(m.labels(),rbar_reads())
-m.back(); assert 'zzz' in m.labels() and rbar_reads()=='Internet Radio',(m.labels(),rbar_reads()); m.close(); passed()
+m.back(); assert empty_titles(m)[-1:]==['No Stations'] and rbar_reads()=='Internet Radio',(m.labels(),rbar_reads()); m.close(); passed()  # the search's empty list again
 # Favourites: favourites.m3u, then the folder's other .m3u and .pls files (a .pls's TitleN names its FileN).
 m=RadioMachine({RDIR+'/favourites.m3u':bytearray(b'#EXTM3U\r\n#EXTINF:-1,One\r\nhttp://one/a\r\nhttp://two/b\r\n'),
                 RDIR+'/x.pls':bytearray(b'[playlist]\nFile1=https://three/c?x=1\nTitle1=Three\nNumberOfEntries=1\n'),
@@ -13505,6 +13508,7 @@ class BrowseMachine(RadioMachine):
         if name=='socket':
             assert a==1 and b in (1,2); ret=9 if b==2 else 7
             if b==2: self.out=b''; self.pending=b''
+        elif name=='connect' and self.text(b+2)=='/tmp/q2adb-ui': ret=-1  # adbd's UI socket (a dev build's usb_ui.c auth_poll)
         elif name=='connect' and a!=9: assert self.text(b+2)==SOCK; ret=0 if self.alive else -1  # spot_alive's
         elif name=='connect': assert self.text(b+2)==self.browse; ret=0 if self.serve else -1
         elif name=='fcntl': assert (a,b,c)==(9,4,0x80)  # nonblocking before connect
@@ -13681,8 +13685,10 @@ m.row(1); assert m.asked()==('repeat','off'); t=len(m.threads); m.answer('offlin
 assert m.toasts[-1][3]=="Spotify didn't answer in time" and len(m.threads)==t and m.labels()[1]=='Shuffle'; m.back(); passed()
 # Account: the name, Premium, and Sign out after a confirmation; then the pairing prompt.
 m.row(8); assert m.asked()==('account',); m.answer(*ME); assert m.labels()==['Account','Alice','Premium','Sign Out','']
-m.row(1); assert m.labels()==['Sign Out of Spotify?','Cancel','Sign Out']; m.row(0); assert m.labels()[:2]==['Account','Alice']
-t=len(m.threads); m.row(1); m.row(1); assert m.asked()==('signout',) and len(m.threads)==t+1
+# Sign Out asks on the confirmation card (feedback.c confirm); its answer (spotify.c signout_answer) runs once it has closed
+def card(m,answer,row): m.call(address=payload_syms[answer],args=(0,row,0,0),gap=0,clear=False)
+m.row(1); card(m,'signout_answer',0); assert m.labels()[:2]==['Account','Alice']
+t=len(m.threads); m.row(1); card(m,'signout_answer',1); assert m.asked()==('signout',) and len(m.threads)==t+1
 m.answer(*OK,[]); assert m.labels()==PAIR
 # librespot exits on signout and its launcher restarts it: meanwhile no socket is no old add-on.
 m.serve=None; m.advance(2000); m.worker(); assert m.labels()==PAIR; m.advance(5000); m.worker(); assert m.labels()==PAIR
@@ -13872,11 +13878,10 @@ m.row(2); assert m.asked()==('collections','p2')
 m.answer(*OK,[('collection','c','C','1/1','','')]); m.row(0); m.row(1)
 assert m.asked()==('remove','collections','b,c')
 m.answer('ok','Remove 2 playlists, 1 tracks?','',[])
-assert m.labels()[0]=='Remove Downloads?' and 'Remove 2 playlists, 1 tracks?' in m.labels()
-m.row(2); assert m.asked()==('remove','collections','b,c','confirm')
+card(m,'remove_answer',1); assert m.asked()==('remove','collections','b,c','confirm')
 m.answer('ok','Removed','',[]); assert m.labels()[0]=='Storage Management'
 m.row(2); assert m.asked()==('remove','all','')
-m.answer('ok','Remove 1 playlists, 3 tracks?','',[]); m.row(1)  # Cancel preserves downloads
+m.answer('ok','Remove 1 playlists, 3 tracks?','',[]); card(m,'remove_answer',0)  # Cancel preserves downloads
 assert m.labels()[0]=='Storage Management'
 # Return before Clear All's preview answers: a later action's ok reply never opens Remove Downloads?.
 m.row(2); assert m.asked()==('remove','all',''); m.back(); assert m.labels()[0]=='Downloads'
@@ -14407,7 +14412,7 @@ said=qr_painted(); assert not m.bands and 'Connect the Q2 to Wi-Fi' in said,said
 # A step (q2-subsonic's sign-in) is a mode page: a solid circle, its glyph, the title and the line.
 m.files[SSTATE]=bytearray(f'addr=192.168.1.23:8080\npin=548001\nqr={hexed}\nqrsize=21\nstep=check\ntitle=Signing In\u2026\nline=Checking with music.example.com\n'.encode()); m.advance(1000)
 said=qr_painted(); assert said==['Signing In\u2026','Checking with music.example.com'] and len(m.rounded)==1 and not m.bands,said
-assert any(i.endswith('signin_check') for i in m.image_loads),m.image_loads[-3:]
+assert any(i.endswith('modepage_check') for i in m.image_loads),m.image_loads[-3:]
 m.destroy(qp); m.top=m.page; passed()
 # Holding standby off: while the add-on asks (hold=1), each poll resets standby and auto power-off
 # (not the screen's); once it stops by itself (its loop's pid gone), it is let go.
@@ -14677,13 +14682,11 @@ m.tree[T]=[(n,8) for n in (*names,'13-2 C.flac.tmp','.cache-size')]; m.found=rec
 assert run(m,'tidal_downloads',0,0)==0; td=m.top; tdrows=lambda: m.nodes[m.find('scroll_view',td)]['children']
 LIST=['Tidal Downloads','B - Two','A - One','Clear All Downloads…']
 assert m.nodes[td]['name']=='tidal_downloads' and [l for l in m.labels(td) if l]==LIST,m.labels(td)
-ASK=['Remove Downloads?','2 tracks','Keeps settings','Cancel','Remove']
-m.click(tdrows()[2]); assert [l for l in m.labels(td) if l]==ASK,m.labels(td)
-m.click(tdrows()[1]); assert [l for l in m.labels(td) if l]==LIST  # Cancel, back on the Clear row
-assert m.nodes[m.find('scroll_view',td)]['_ringnav_index']==2
-m.click(tdrows()[2]); m.back(td); assert [l for l in m.labels(td) if l]==LIST and m.top==td  # Return is Cancel
+# Clear All Downloads asks on the confirmation card; its answer (library_lists.c td_answer) runs once it has closed
+def td_answer(row): m.call(address=payload_syms['td_answer'],args=(0,row,0,0),gap=0,clear=False); m.advance(1)
+m.click(tdrows()[2]); td_answer(0); assert [l for l in m.labels(td) if l]==LIST  # Cancel, back on the Clear row
 m.click(tdrows()[2]); m.found=[]  # stock's listing of the emptied folder
-m.click(tdrows()[2]); assert [p for p in m.files if p.startswith(T)]==[T+'/.cache-size'] and '/mnt/mmc/Music/keep.flac' in m.files
+td_answer(1); assert [p for p in m.files if p.startswith(T)]==[T+'/.cache-size'] and '/mnt/mmc/Music/keep.flac' in m.files
 assert [l for l in m.labels(td) if l]==['Tidal Downloads'] and empty_titles(m)[-1:]==['No Downloads Yet']; m.destroy(td); passed()  # empty_list: the name kept hidden, the empty state
 # Stream mode (q2-deezer's stream.go, addon.c stream_poll): its .play file names a session's folder; its
 # first song, once there, plays as a local album does (Now Playing opening); songs that come later join the
@@ -17734,19 +17737,20 @@ m.row(3); m.top=m.node('window','home_page')
 assert 'killall -9 librespot aplay' in m.systems[-1] and 'player_stop' in [c[0] for c in m.calls]
 assert [m.text(c[2]+8) for c in m.calls if c[0]=='navigator_to_with_context']==['Streaming stopped']
 assert endpoint(m,'radio_status')==0 and endpoint(m,'spot_status')==0 and m.key(O['KEY_PLAY'])!=11; m.close(); passed()
-# Erase Spotify Data, under Spotify Cache, as the App Store's Remove: a first press asks for a second;
-# another row's press, or leaving the page, drops it. The second erases Spotify's login and cache (and
-# .cache-size, so Spotify Cache reads 2 GB again) on the App Store's thread, Spotify stopped first.
+# Erase Spotify Data, under Spotify Cache, asks on the confirmation card (feedback.c confirm; its answer,
+# navigation.c sc_erase_answer, run as feedback.c would once the card has closed). Erase erases Spotify's login and
+# cache (and .cache-size, so Spotify Cache reads 2 GB again) on the App Store's thread, Spotify stopped first; a press
+# while it runs says to wait.
 def conf_open(m):
     m.top=m.node('window','home_page'); m.stream(); view=m.nodes[m.top]['children'][0]
     m.click(m.nodes[m.nodes[view]['children'][5]]['children'][0]); m.page=m.top
+def erase_answer(m,row): m.call(address=payload_syms['sc_erase_answer'],args=(0,row,0,0),gap=0,clear=False)
 m=ShelfMachine({SCAP:bytearray(b'4096M')}); conf_open(m)
 assert m.labels()[2:5]==['Spotify Cache: 4 GB','Erase Spotify Data','Stop Streaming Services']
-m.row(2); assert m.labels()[3]=='Press again to erase the login and cache' and not m.threads
-m.row(0); assert m.labels()[3]=='Erase Spotify Data'  # another row's press drops it
-m.row(2); m.destroy(m.page); conf_open(m); assert m.labels()[3]=='Erase Spotify Data'  # so does leaving
-m.row(2); m.row(2); assert m.labels()[3]=='Erasing…' and len(m.threads)==1 and KILL in m.systems[-1]
-m.row(2); m.row(2); assert m.toasts[-1][3]=='Wait for the one in progress' and len(m.threads)==1
+m.row(2); assert m.labels()[3]=='Erase Spotify Data' and not m.threads  # asked, nothing erased yet
+erase_answer(m,0); assert not m.threads  # Cancel
+erase_answer(m,1); assert m.labels()[3]=='Erasing…' and len(m.threads)==1 and KILL in m.systems[-1]
+m.row(2); assert m.toasts[-1][3]=='Wait for the one in progress' and len(m.threads)==1
 worker,arg=m.threads[-1]; assert m.call(address=worker,args=(arg,0,0,0),gap=0,count=50_000_000)==0
 assert 'rm -rf /mnt/mmc/.spotify/cache /mnt/mmc/.spotify/.cache-size /mnt/mmc/.spotify/spot.log /mnt/mmc/.spotify/aplay.log /mnt/mmc/.spotify/load.log' in m.systems; del m.files[SCAP]; m.advance(500,clear=False)
 assert m.toasts[-1][3]=="Spotify's login and cache erased" and KILL in m.systems[-1]
@@ -18271,10 +18275,10 @@ class SwMachine(CoverflowMachine):
         elif name=='navigator_to': self.opened.append((self.text(a),)); ret=self.quit
         elif name=='idle_add': self.idles.append((a,b)); ret=1
         self.returns(ret,clobber=True)
-    def sw(self,field): return signed(self.get(payload_syms['swu']+{'state':4,'result':12,'frame':24}[field]))
+    def sw(self,field): return signed(self.get(payload_syms['swu']+{'state':4,'result':12,'frame':20}[field]))
     def said(self,w):
         self.letters.clear(); self.image_loads.clear(); self.paint(w,gap=0)
-        return [l['text'] for l in self.letters],[i.rsplit('_',1)[-1] if 'swspin' not in i else i.split('swspin_')[1] for i in self.image_loads if 'sw' in i]
+        return [l['text'] for l in self.letters],[i.rsplit('_',1)[-1] if 'swspin' not in i else i.split('swspin_')[1] for i in self.image_loads if 'swspin' in i or 'modepage' in i]
 def sw_open(code=1,quit=0):
     m=SwMachine(code,quit); m.call(address=syms['fwupdate_tf'],args=(0,0,0,0),gap=0); return m
 for code,result,words,glyph in ((-15,SW_LOW,['Charge to Update','Needs 16% or a charger \u00b7 now 12%'],'low'),
@@ -18294,19 +18298,16 @@ texts,images=m.said(page); assert texts==['Checking for an Update\u2026','Lookin
 m.advance(160); texts,images=m.said(page); assert images==['d_2'],images
 m.call(address=syms['fwupdate_tf'],args=(0,0,0,0),gap=0); assert len(m.threads)==1 and m.top==page  # one at a time
 passed()
-# Its answer: OK opens Install Update? over it and closes it; another, its page.
-for state,want in ((SW_OK,'swconfirm_page'),(SW_LATEST,'swupdate_page'),(SW_BAD,'swupdate_page')):
-    m=sw_open(); page=m.top; m.word(payload_syms['swu']+4,state); m.u.mem_write(payload_syms['swu']+0x40,b'V1830\0')
-    m.advance(80); assert m.joins and m.nodes[m.top]['name']==want,(state,m.nodes[m.top]['name'])
-    if state!=SW_OK: assert m.top==page and m.sw('result')==state and not m.timers; passed(); continue
-    confirm=m.top; assert not m.alive(page) and not m.timers  # Install Update? on top and still: the check's page closed under it
-    view=m.find('scroll_view',confirm); assert m.selected(view)==0  # Cancel
-    rows=m.nodes[view]['children']  # page_row_detail's list_items
-    assert [m.nodes[m.nodes[r]['children'][0]].get('text') for r in rows]==['Cancel','Install and Restart']
-    texts,_=m.said(confirm)  # this machine's fixed-pitch font cuts the longer lines with an ellipsis
-    assert texts[0]=='Q2 Pod 1.8.3 \u00b7 V1830' and texts[1].startswith(f'Installed: {manifest["version"]} \u00b7 0.0 MB') and texts[2].startswith('Takes about 2 minutes'),texts
-    f,ctx=m.handler(rows[1],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
-    assert len(m.idles)==1 and not m.alive(confirm); passed()
+# Its answer: OK asks Install Update? on the confirmation card over it (feedback.c confirm, which opens stock's
+# sortselect_dialog); another, its page. The card's answer (sw_update.c sw_answer) closes the page, Install and Restart
+# then running stock's dialog from an idle.
+for state in (SW_OK,SW_LATEST,SW_BAD):
+    m=sw_open(); page=m.top; m.word(payload_syms['swu']+4,state); m.u.mem_write(payload_syms['swu']+0x30,b'V1830\0')
+    m.advance(80); assert m.joins and not m.timers,state
+    if state!=SW_OK: assert m.top==page and m.sw('result')==state; passed(); continue
+    assert ('dialog/sortselect_dialog',) in m.opened or m.top!=page,m.opened
+    m.call(address=payload_syms['sw_answer'],args=(0,1,0,0),gap=0,clear=False)
+    assert len(m.idles)==1 and not m.alive(page); passed()
 # After the click, stock's dialog; its answer (no file 9, up to date 13, damaged 18) is a page, a success never comes back.
 for quit,result in ((9,SW_NONE),(13,SW_LATEST),(18,SW_BAD)):
     m=SwMachine(quit=quit); m.call(address=payload_syms['sw_install'],args=(0,0,0,0),gap=0)

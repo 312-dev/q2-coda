@@ -590,7 +590,7 @@ static void spot_np(void) {
 /* The browser (docs/internals.md#spotify): spotbrowse_page, one page_list rebuilt per level, each
  * level a Q2SPOT/1 request to librespot's SPOT_BROWSE and its reply, cut in place. lv[0] is the
  * base: "account" asked first, then the menu, the pairing prompt or an old add-on's rows. */
-enum { L_BASE, L_LIST, L_CATS, L_CONFIRM, L_DOWNLOADS, L_JOB, L_STORAGE, L_SELECT, L_REMOVE };
+enum { L_BASE, L_LIST, L_CATS, L_DOWNLOADS, L_JOB, L_STORAGE, L_SELECT };
 enum { S_LOAD, S_READY, S_ERROR, S_PAIR, S_OLD, S_WAIT }; /* S_WAIT: no socket yet, asked again */
 enum { A_FETCH, A_PLAY, A_ENQUEUE, A_SET, A_SIGNOUT, A_DOWNLOAD, A_CAPS, A_REMOVE, A_PREVIEW };
 enum { M_PLAYING, M_LIKED, M_PLAYLISTS, M_ALBUMS, M_ARTISTS, M_SEARCH, M_QUEUE, M_SETTINGS, M_ACCOUNT, M_DOWNLOADED, M_DOWNLOADS };
@@ -643,12 +643,23 @@ static int put(char *out, unsigned size, const char *s) {
 
 static void request(const char *op, const char *tail, int act);
 
-static void remove_request(int confirm) {
+static void remove_request(int sure) {
     char tail[7000] = "";
     if (put(tail, sizeof tail, br.remove_kind) && put(tail, sizeof tail, br.selected) &&
-        (!confirm || put(tail, sizeof tail, "confirm")))
-        request("remove", tail, confirm ? A_REMOVE : A_PREVIEW);
+        (!sure || put(tail, sizeof tail, "confirm")))
+        request("remove", tail, sure ? A_REMOVE : A_PREVIEW);
 }
+
+/* The confirmation card's answers (docs/oled-design.md#confirmation-card): Remove Downloads? and
+ * Sign Out of Spotify?, each its verb on row 1. */
+static void remove_answer(void *ctx, int row, int toggle_on) {
+    if (row == 1) remove_request(1);
+}
+static void signout_answer(void *ctx, int row, int toggle_on) {
+    if (row == 1) request("signout", "", A_SIGNOUT);
+}
+static const char *const remove_rows[] = { "Cancel", "Remove" };
+static const char *const signout_rows[] = { "Cancel", "Sign Out" };
 
 static void fetch_cancel(void) {
     unsigned none = 0;
@@ -801,19 +812,10 @@ static void show(void) {
         into(0, "Remove Playlists…", "");
         into(1, "Remove Tracks…", "");
         row(2, "Clear All Downloads…", "Keeps login and settings");
-    } else if (l->kind == L_REMOVE) {
-        br.view = page_list(br.page, br.page, 0, "Remove Downloads?", n = 3, 64);
-        row(0, br.remove_note, "Track removal can make playlists incomplete");
-        row(1, "Cancel", "");
-        row(2, "Remove", "");
     } else if (l->kind == L_JOB) {
         static const char *const actions[] = { "Pause", "Resume", "Cancel Download", "Retry Failed", "Update Download" };
         br.view = page_list(br.page, br.page, 0, l->title, n = 5, 48);
         for (int i = 0; i < n; ++i) row(i, actions[i], 0);
-    } else if (l->kind == L_CONFIRM) {
-        br.view = page_list(br.page, br.page, 0, "Sign Out of Spotify?", n = 2, 48);
-        row(0, "Cancel", 0);
-        row(1, "Sign Out", 0);
     } else {
         int download = (br.can_download && !strcmp(l->op, "playlist")) || (br.downloads && !strcmp(l->op, "liked"));
         int manage = br.downloads && !strcmp(l->op, "collection");
@@ -951,9 +953,17 @@ static void got(void) {
             while (br.depth > 1 && top()->kind != L_STORAGE) drop(&br.lv[--br.depth]);
             show();
             toast(msg);
-        } else if (ok && act == A_PREVIEW) { /* its own act: no other reply opens Remove */
-            tk_snprintf(br.remove_note, sizeof br.remove_note, "%s", msg);
-            push(L_REMOVE, "", "", "", "");
+        } else if (ok && act == A_PREVIEW) { /* its own act: no other reply asks Remove */
+            /* the add-on's count over what removing tracks costs, the card's two lines */
+            tk_snprintf(br.remove_note, sizeof br.remove_note,
+                        "%s\nPlaylists can be left incomplete.", msg);
+            confirm(&(confirm_t){ .title = "Remove Downloads?",
+                                  .body = br.remove_note,
+                                  .rows = remove_rows,
+                                  .n_rows = 2,
+                                  .kind = CONFIRM_DESTRUCTIVE,
+                                  .back = -1,
+                                  .answer = remove_answer });
         } else if (!ok || act == A_DOWNLOAD)
             toast(msg);
     } else if (l->id != wk.id) {
@@ -1058,10 +1068,9 @@ static int go(const void *unused) {
         br.selected[0] = 0;
         tk_snprintf(br.remove_kind, sizeof br.remove_kind, "%s", i == 0 ? "collections" : i == 1 ? "tracks" : "all");
         if (i == 2) remove_request(0);
-        else push(L_SELECT, i ? "downloaded" : "collections", "", "", i ? "Select Tracks" : "Select Playlists");
-    } else if (l->kind == L_REMOVE) {
-        if (i == 2) remove_request(1);
-        else if (i == 1) pop();
+        else
+            push(L_SELECT, i ? "downloaded" : "collections", "", "",
+                 i ? "Select Tracks" : "Select Playlists");
     } else if (l->kind == L_JOB) {
         static const char *const actions[] = { "pause", "resume", "cancel", "retry", "update" };
         tk_snprintf(a, sizeof a, "%s", l->args);
@@ -1077,17 +1086,17 @@ static int go(const void *unused) {
         push(L_JOB, "", l->args, "", "Download Controls");
     } else if (!strcmp(l->op, "liked") && br.downloads && i == l->n + more(l)) {
         request("downloadliked", "", A_DOWNLOAD);
-    } else if (l->kind == L_CONFIRM) {
-        if (i)
-            request("signout", "", A_SIGNOUT);
-        else
-            pop();
     } else if (!strcmp(l->op, "playlist") && i == l->n + more(l))
         request("download", l->args, A_DOWNLOAD);
     else if (i == l->n) { /* More…, or Sign out */
         char c[sizeof l->cursor] = "";
         if (!l->f[3][0])
-            push(L_CONFIRM, "", "", "", "");
+            confirm(&(confirm_t){ .title = "Sign Out of Spotify?",
+                                  .rows = signout_rows,
+                                  .n_rows = 2,
+                                  .kind = CONFIRM_DESTRUCTIVE,
+                                  .back = -1,
+                                  .answer = signout_answer });
         else if (put(c, sizeof c, l->f[3]))
             push(l->kind, l->op, l->args, c, l->title);
     } else {

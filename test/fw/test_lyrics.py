@@ -6,6 +6,7 @@ import re
 import struct
 
 import pytest
+import host
 
 from conftest import O, ROOT, Deques, Files, block, libc, text
 
@@ -15,7 +16,7 @@ PRIME = 16777619
 SEED = 2166136261
 SLOT = O['LYRIC_SLOT']
 # lyrics.c's own: the text column's left edge and the ink of what is not sung (unsung part and other lines)
-_LYRICS = {k: int(v, 0) for k, v in re.findall(r'^#define (LYRIC_\w+) +(0x[0-9a-f]+|\d+)\b', (ROOT/'patch/lyrics.c').read_text(), re.M)}
+_LYRICS = host.defines('lyrics.c', 'LYRIC_')
 X, REST, PX = _LYRICS['LYRIC_OLED_X'], _LYRICS['LYRIC_OLED_REST'], _LYRICS['LYRIC_OLED_PX']
 
 

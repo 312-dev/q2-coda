@@ -1891,26 +1891,30 @@ static void paint_cover(void *w, void *canvas) {
 
 /* The selected row's long title scrolls, as an iPod's does, MARQUEE_PASSES times as soon as the
  * selection settles, through stock's scroller with every label's holds and pace
- * (ringnav_hscroll_start); every other row keeps its ellipsis. Only a title stock would scroll on
- * focus alone (only_focus; no row is focused): stock's timer stops such a label on its first tick
- * unless it is focused (0x5fb7ac), so only_focus is off while this one runs. It loops, so each pass
- * ends on its lull (ringnav_hscroll_lull), which counts it and stops it after the last, or once the
- * row isn't the selected one on a lit, usable screen: a dark screen or a covered page costs at most
- * the rest of one pass. A row is its widget and its id, as a table's pool can hold the selection in
- * one widget (paint_selection; a paint would drop hscroll_label_stop's invalidate, so marq_moved
- * stops it from a timer). */
+ * (ringnav_hscroll_start); every other row keeps its ellipsis. Only a title stock would scroll on a
+ * focus no row has under ringnav (only_focus, or only_parent_focus: set_hscroll_label_attribute's,
+ * stock's Wi-Fi networks): stock's timer stops such a label on its first tick unless it or its
+ * parent is focused (0x5fb7ac, 0x5fb7f0), so both flags are off while this one runs and back after.
+ * It loops, so each pass ends on its lull (ringnav_hscroll_lull), which counts it and stops it
+ * after the last, or once the row isn't the selected one on a lit, usable screen: a dark screen or
+ * a covered page costs at most the rest of one pass. A row is its widget and its id, as a table's
+ * pool can hold the selection in one widget (paint_selection; a paint would drop
+ * hscroll_label_stop's invalidate, so marq_moved stops it from a timer). */
 static int marq_gone(void *ctx, void *event) {
     (void)ctx, (void)event;
     st.marq_label = (void *)0;
     return 0;
 }
+/* The marquee's label's focus flags as it found them: only_focus, only_parent_focus. */
+static unsigned char marq_focus[2] __attribute__((section(".scratch")));
 static void marq_stop(void) {
     void *label = st.marq_label;
     if (!label) return;
     st.marq_label = (void *)0;
     widget_off_by_func(label, EVT_DESTROY, marq_gone, (void *)0);
     hscroll_label_stop(label);
-    hscroll_label_set_only_focus(label, 1);
+    hscroll_label_set_only_focus(label, marq_focus[0]);
+    B(label, HSCROLL_ONLY_PARENT_FOCUS) = marq_focus[1];
 }
 /* stock's two margins (2 px each by default, 0x5fb23c) count towards its ellipsis */
 static int scroller_over(void *label) { return I(label, HSCROLL_TEXT_W) + 4 - I(label, W_W); }
@@ -1956,10 +1960,17 @@ static int marq_moved(const void *info) {
     }
     void *label = row_scroller(row, 2, 1) ?: row_scroller(row, 2, 0);
     int over = label ? scroller_over(label) : 0;
-    if (over <= 0 || !B(label, HSCROLL_ONLY_FOCUS)) return 0; /* until it moves */
+    /* a label with neither flag scrolls by itself; one waiting on a focus no row has under ringnav
+     * (only_focus, or set_hscroll_label_attribute's only_parent_focus: stock's Wi-Fi networks and
+     * settings rows) scrolls here, its flags off while it runs */
+    if (over <= 0 || (!B(label, HSCROLL_ONLY_FOCUS) && !B(label, HSCROLL_ONLY_PARENT_FOCUS)))
+        return 0; /* until it moves */
     B(label, HSCROLL_LOOP) = 1;
     st.marq_label = label;
+    marq_focus[0] = B(label, HSCROLL_ONLY_FOCUS),
+    marq_focus[1] = B(label, HSCROLL_ONLY_PARENT_FOCUS);
     widget_on(label, EVT_DESTROY, marq_gone, (void *)0);
+    B(label, HSCROLL_ONLY_PARENT_FOCUS) = 0;
     hscroll_label_set_only_focus(label, 0);
     hscroll_label_start(label);
     return 0;
@@ -2108,7 +2119,8 @@ static void paint_selection(void *w, void *canvas) {
     if (!clip_surface(canvas, &g_menu, &old)) return;
     /* A list row gets the full surface width; a grid tile keeps its own rect. */
     int tile = 2 * r.w < I(g_menu.w, W_W);
-    if (!tile && !modal_rows_of(g_menu.w)) { /* an inset modal's rows keep the panel's */
+    /* an inset modal's rows keep the panel's, the confirmation card's the card's */
+    if (!tile && !modal_rows_of(g_menu.w) && !confirm_surface(g_menu.w)) {
         r.x = 0;
         r.w = I(g_menu.w, W_W);
         /* The Library's row is a button over the top BODY of its pitch: the bar takes the whole
@@ -2154,8 +2166,9 @@ static void paint_selection(void *w, void *canvas) {
         rearm(&st.marq_timer, marq_moved, 0);
     }
     /* a pop-up button's tile: framed white on any accent. An inset modal's row is no tile
-     * (menu_modal.c). */
-    if (g_menu.kind == 4 && r.w < I(g_menu.w, W_W) && !modal_rows_of(g_menu.w))
+     * (menu_modal.c), nor is the confirmation card's answer (feedback.c). */
+    if (g_menu.kind == 4 && r.w < I(g_menu.w, W_W) && !modal_rows_of(g_menu.w) &&
+        !confirm_surface(g_menu.w))
         frame_box(canvas, &r, 0xffffffff, SEL_RADIUS);
     /* Save/restore explicitly: this firmware's canvas_save/restore cover neither clip nor
      * either color, and the global alpha is deliberately never touched. */
@@ -2308,6 +2321,7 @@ int ringnav_paint(void *w, void *canvas) {
     coverflow_paint(w, canvas);
     keylock_paint(w, canvas);
     search_strip_overlay(w, canvas);
+    confirm_bar_dim(w, canvas);
     if (w == st.cf_letter_surface && st.cf_letter &&
         (st.cf_letter_held || (unsigned)time_now_ms() - st.cf_letter_at < LETTER_MS) &&
         P(canvas, CANVAS_LCD)) {
@@ -3562,7 +3576,7 @@ static void clock_place(void *bar, void *top) {
     if (!geom_val(V_STATUS_Y) || !st.bar_slot || !canvas) return;
     if (!clock) {
         if (!(clock = widget_lookup(bar, "label_clock", 1))) return;
-        ink = style_get_int(P(clock, W_ASTYLE), "text_color", (int)RGBA(0xababab));
+        ink = style_get_int(P(clock, W_ASTYLE), "text_color", (int)RGBA(RGB_SECONDARY));
     }
     if (!widest) widest = clock_width(canvas, zeros); /* the face holds until a restart */
     const unsigned *text = widget_get_text(clock);
@@ -5180,14 +5194,16 @@ int ringnav_paint_bg(void *w, void *canvas) {
     void *wm = window_manager(), *bar = *(void *const *)system_bar;
     feedback_confirm_bar(w, canvas);
     modal_paint(w, canvas);
+    confirm_paint(w, canvas); /* the confirmation card (feedback.c) */
     paint_selection(w, canvas);
     grey_rows(w); /* first: paint_songs reserves the marks of the rows it greys */
     paint_songs(w, canvas);
     paint_modal_rows(w, canvas);
-    feedback_confirm_switch(w, canvas);
+    confirm_rows_paint(w, canvas);
     feedback_switch_bar(w, canvas);
     feedback_scan_bar(w, canvas);
     empty_state_paint(w, canvas); /* a page's empty state (feedback.c) */
+    marquee_fade_under(w, canvas); /* last: what stands behind a scrolling label's ends */
     coverflow_home_clip(w, canvas, 1);
     if (w && w == st.bar_slot) paint_battery(w, canvas);
     if (w && w == st.action_view && P(canvas, CANVAS_LCD) && theme()->shuffle_row) {
@@ -6608,6 +6624,10 @@ static void set_child(void *c, int row_w, int row_h, int shift) {
     widget_move_resize(c, left, y, right > left ? right - left : 0, h);
     if (tk_strcmp(widget_get_type(c), "hscroll_label")) return;
     theme_font(c, ROLE_TITLE, FONT_ROW);
+    /* a long title rests on its ellipsis and scrolls when its row is selected (marq_moved): stock's
+     * flags, which the wheel's mode leaves off (set_hscroll_label_attribute), scroll it once on
+     * every row as the page opens and never again (a Wi-Fi network's, a Bluetooth device's) */
+    hscroll_label_set_only_focus(c, 1);
     /* a set_switch theme: a stock row's text on its right side is its value (About's), in the
      * value grey as list_value's; the selection's text still wins */
     unsigned ink = T->set_switch ? T->set_value_ink[ipod_light()] : 0;
@@ -7592,7 +7612,7 @@ static int page_closed(void *ctx, void *event) {
             st.ch = 0;
         }
     }
-    if (ctx == st.sc_page) st.sc_page = 0, st.sc_armed = 0;
+    if (ctx == st.sc_page) st.sc_page = 0;
     return 0;
 }
 
@@ -7756,11 +7776,10 @@ static void sc_text(int i) {
     char s[40];
     if (i < 2)
         tk_snprintf(s, sizeof s, "%s Cache: %s", i ? "Spotify" : "Tidal", sizes[stream_cache(i)]);
-    widget_set_text_utf8(widget_get_child(st.sc_row[i], 0),
-                         i < 2            ? s
-                         : shelf_erase(0) ? "Erasing…"
-                         : st.sc_armed    ? "Press again to erase the login and cache"
-                                          : "Erase Spotify Data");
+    widget_set_text_utf8(widget_get_child(st.sc_row[i], 0), i < 2 ? s
+                                                            : shelf_erase(0)
+                                                                ? "Erasing…"
+                                                                : "Erase Spotify Data");
 }
 
 /* netupdate.c's erase ended: .cache-size went with it, so Spotify's row reads 2 GB again. */
@@ -7820,19 +7839,34 @@ static int svc_toggle(int i) {
     return 0;
 }
 
+/* Erase Spotify Data's card (docs/oled-design.md#confirmation-card): Erase (row 1) starts it. */
+static void sc_erase_answer(void *ctx, int row, int toggle_on) {
+    if (row == 1) shelf_erase(1);
+    if (st.sc_page) sc_text(2);
+}
 /* A cache row steps to the next size and saves it: Tidal's applies at the next download's trim,
- * Spotify's when librespot next starts. Erase Spotify Data wants a second press in a row, as the
- * App Store's Remove: any other row's press or leaving the page drops the first. Stop Streaming
+ * Spotify's when librespot next starts. Erase Spotify Data asks first on the confirmation card
+ * (one running says to wait: shelf_erase's toast). Stop Streaming
  * Services ends librespot and its restart loop, a radio station, the card apps (addon.c) and a
  * stock stream (Tidal's) queue, so the keys and the output are local music's again; local music
  * already stopped is left as it is. */
 static int sc_click(void *ctx, void *event) {
     int i = (int)(long)ctx;
-    st.sc_armed = i == 2 && !st.sc_armed && !shelf_erase(0); /* erasing: says to wait */
-    if (i == 2 && !st.sc_armed) shelf_erase(1);
-    sc_text(2);
     if (i > 4) return svc_toggle(i - 5);
-    if (i == 2) return 0;
+    if (i == 2) {
+        static const char *const rows[] = { "Cancel", "Erase" };
+        if (shelf_erase(0))
+            shelf_erase(1); /* erasing already: says to wait */
+        else
+            confirm(&(confirm_t){ .title = "Erase Spotify Data?",
+                                  .body = "Its login, cache and logs go;\nsign in again to use it.",
+                                  .rows = rows,
+                                  .n_rows = 2,
+                                  .kind = CONFIRM_DESTRUCTIVE,
+                                  .back = -1,
+                                  .answer = sc_erase_answer });
+        return 0;
+    }
     if (i == 3) {
         unsigned type = (unsigned)MCL(MCL_TYPE);
         spot_stop();
@@ -7873,7 +7907,7 @@ int stream_config(void *ctx, void *event) {
     widget_set_prop_str(label, "style:normal:font_name", face ? face : "default");
     widget_set_prop_int(label, "style:normal:font_size", px);
     widget_set_prop_str(label, "style:normal:text_align_h", "left");
-    text_ink(label, RGBA(ipod_light() ? 0x6e6e6e : 0x858585), INK_LABEL);
+    text_ink(label, RGBA(tok(TOK_TERTIARY)), INK_LABEL);
     char hide[SVC_HIDE];
     svc_hidden(hide);
     for (int i = 0; i < n; ++i) {

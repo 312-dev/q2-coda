@@ -119,7 +119,6 @@ typedef struct {
     unsigned ch_timer, ch_track, ch_key;
     int ch_cue, ch_end;        /* the Chapters track's CUE start and end, file seconds */
     void *sc_page, *sc_row[3]; /* Streaming's Configuration page, its cache rows and Erase's */
-    int sc_armed;              /* Erase Spotify Data pressed once: the next press erases */
 /* Streaming's services (svc): five fixed, and at most APPS_MAX card apps. */
 #define SVC_FIXED 5
 #define SVC_MAX (SVC_FIXED + APPS_MAX)
@@ -406,13 +405,15 @@ void empty_paint(void *w, void *canvas, const empty_t *e, int top);
 int empty_top(int free_top, int free_end, int row);
 int empty_card(empty_t *e);
 void feedback_confirm_bar(void *w, void *canvas);
-void feedback_confirm_switch(void *w, void *canvas);
 void feedback_songs(void *top, void *row);
 void feedback_folder(void *top);
 int feedback_offline(void);
 void feedback_switch_bar(void *w, void *canvas);
 void feedback_scan_bar(void *w, void *canvas);
 void feedback_shuffled(const char *what, int songs);
+int confirm_surface(void *w);    /* w holds the card's answers */
+void confirm_paint(void *w, void *canvas), confirm_rows_paint(void *w, void *canvas);
+void confirm_bar_dim(void *w, void *canvas);
 void cf_veil(void *win, int on);              /* win unseen (1) or seen again under Coverflow */
 int ringnav_otg(void);                        /* Library's On-The-Go switch */
 int ringnav_playlist_coverflow(void);         /* Display's Playlist View is Cover Flow */
@@ -460,10 +461,7 @@ int coverflow_spinner(void), coverflow_wait_input(void *e);
  * after its children */
 void slider_page_open(void *win, void *s, unsigned kind);
 void slider_page_paint(void *w, void *canvas);
-extern void *slider_page_win; /* the page slider_page_paint draws */
-/* ... its text, shared with storage.c */
-void sp_text(void *canvas, const unsigned *s, unsigned n, int x, int w, int y, int align,
-             const char *face, int px, unsigned color);
+extern void *slider_page_win;       /* the page slider_page_paint draws */
 void slider_page_dirty(void *page); /* its switch row, after a change of the hidden switch */
 
 /* wifi_rows.c: a set_switch theme's Wi-Fi page, from ipod_list_layout and paint_into */
@@ -507,7 +505,8 @@ void swipe_back_down(void *event, int allowed);
 void swipe_back_poll(void);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
-void marquee_fade(void *w, void *canvas);
+void marquee_fade(void *w, void *canvas), marquee_fade_under(void *w, void *canvas);
+void sel_bar_flat(void *canvas, int x, int y, int w, int h); /* list_marks.c: the flat bar */
 /* np_marquee.c: Now Playing's lines as one marquee under a fading theme */
 int np_marq_owns(void *w);
 void np_marq_kick(void *w), np_marq_reset(void);
@@ -890,10 +889,7 @@ void modal_playlist_more(void *win);
 void album_local_load(void *win);
 int album_local_on(void *win);
 void album_local_paint(void *w, void *canvas);
-/* artist_page.c: s's UTF-8 as characters in out (at most n - 1, then 0) */
-unsigned ar_wide(const char *s, unsigned *out, unsigned n);
-/* artist_page.c: an artist's page's pair of stops and its monogram over the status bar; its
- * text painter, which Now Playing's About (np_about.c) paints with too */
+/* artist_page.c: an artist's page's pair of stops and its monogram over the status bar */
 int pair_key(void *top, void *w, int dir);
 int pair_holds(void *w);
 void artist_cap(void *bar, void *canvas);
@@ -903,8 +899,6 @@ int artist_local_on(void *win);
 void artist_local_paint(void *w, void *canvas);
 int artist_songs(void *unused);  /* navigation.c: the artist page's songs query */
 void *plays_ranked(void *songs); /* library_lists.c */
-int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x, int y,
-            int w, int align);
 /* song_sort.c: Songs' order, Playback > Library > Sorting's Songs */
 enum { SORT_TITLE, SORT_ARTIST, SORT_ALBUM, SORT_ADDED, SORT_N };
 int song_sort(void);
@@ -931,19 +925,6 @@ void usb_ui_status(void), usb_ui_poll(void), usb_ui_mode_load(void *win), usb_ui
 void usb_ui_paint(void *w, void *canvas);
 const char *usb_ui_title(const char *name);
 int usb_ui_key(void *top, unsigned key);
-/* A mode page (docs/oled-design.md#usb): the solid circle's radius, its glyph's size (tools/art.py
- * USB_MODE_PX), Positive green, and the ring that draws no circle (a spinner in its place). */
-#define MODE_R 46
-#define MODE_GLYPH 44
-#define MODE_GREEN 0x34c759
-#define MODE_BARE 0x1000000u
-typedef struct {
-    unsigned ring;     /* 0xRRGGBB, or MODE_BARE */
-    const char *glyph; /* theme image stem, white */
-    int glyph_px;      /* 0: MODE_GLYPH */
-    const char *title, *line, *pill; /* pill 0: none */
-} mode_page_t;
-int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
 /* bt_battery.c: a connected headset's battery, 0 to 100, -1 for none
  * (docs/internals.md#headset-battery) */
 int bt_headset_battery(void);
@@ -954,6 +935,8 @@ const char *bt_recv_title(const char *name), *bt_recv_codec(void *win);
 void sw_update_paint(void *w, void *canvas), sw_update_restarting(void *win);
 const char *sw_update_title(const char *name);
 void toast_icon(const char *glyph, const char *text); /* feedback.c */
+/* feedback.c: a toast with glyph (a theme image without its prefix) by the next loop pass */
+void toast_later(const char *glyph, const char *text), toast_later_poll(void);
 int tsv_split(char *line, char **f, int max);         /* catalogue.c */
 
 /* az_index.c: the A-Z index on a long Library list in name order (docs/oled-design.md#a-z-index):

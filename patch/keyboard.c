@@ -17,7 +17,7 @@
  * keyboard the strip could not take. */
 #include "navigation.h"
 
-#define KB_KEY_RGB 0x1c1c1e
+#define KB_KEY_RGB RGB_RAISED
 #define KB_KEY_RADIUS 8
 #define KB_KEYS 40 /* a page's keys and its candidates, at most */
 

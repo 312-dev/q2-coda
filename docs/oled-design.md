@@ -69,6 +69,10 @@ those spots are under the glass. So:
 
 All colours are opaque. Alpha is not used for text: greys are stated as greys.
 
+The tokens live once, in `tools/theme.py` `TOKENS`, written to `patch/tokens.h` for the payload (`tok()` in
+`patch/ui_kit.c` picks the half; `RGB_<NAME>` and `RGB_<NAME>_L` are each half) and read by `tools/art.py` for
+its glyphs' inks. A test fails on a colour literal equal to a token anywhere else in `patch/`.
+
 | Token          | Hex       | Use                                                                          | Concept measurement                                        |
 | -------------- | --------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | Canvas         | `#000000` | Every background                                                             | `#000000` on all grid screens                              |
@@ -79,7 +83,13 @@ All colours are opaque. Alpha is not used for text: greys are stated as greys.
 | Track          | `#333333` | Unfilled progress and slider tracks; switch off (the storage bar's is its own) | `#313131`                                                  |
 | Accent Blue    | `#2160D8` | Selection bar, progress fill, switch on, slider knob ring, big status glyphs | Bar `#1544B2` to `#225BCB`, progress `#2368D9`             |
 | On Accent      | `#FFFFFF` | Text and chevrons on the selection bar                                       |                                                            |
-| Positive       | `#30D158` | "Connected" dots only                                                        | Green dot on Bluetooth                                     |
+| Positive       | `#34C759` | "Connected" dots, charging, OK to Disconnect, a song added                    | Green dot on Bluetooth                                     |
+| Warning        | `#FF9F0A` | A charger too weak, Charge to Update                                         |                                                            |
+| Negative       | `#FF453A` | The low battery (under 20%), a failed step                                  |                                                            |
+| Raised         | `#1C1C1E` | Toasts, cards, the modal's panel, keys                                       |                                                            |
+| Raised 2       | `#2C2C2E` | Pills and placeholders on a raised surface, a lifted row                     |                                                            |
+| Off            | `#3A3A3C` | A grey glyph's circle, a control that is off                                 |                                                            |
+| Caption on accent | `#D6E2FA` | A selected row's caption, on the bar                                      |                                                            |
 
 The concept grades its blue differently in each image. Accent Blue is one value between the bar
 and the progress fill, chosen so white text on it reads at about 5:1. Use it everywhere; do not
@@ -99,6 +109,8 @@ half flips greys, not hues:
 | Chevron        | `#999999` | `#8A8A8A` |
 | Track          | `#333333` | `#D9D9D9` |
 | Accent Blue    | `#2160D8` | `#2160D8` |
+| Raised, Raised 2, Off | as dark | flipped as every grey: `#DCDCDA`, `#CECECC`, `#C2C2C0` |
+| Positive, Warning, Negative, Caption on accent | as dark | the same |
 
 ## Type
 
@@ -128,12 +140,12 @@ Rules:
   space: 15 min, 30 seconds.
 - **The card is the SD card:** "SD Card" in row names and titles (SD Card Update, SD Card Test),
   "SD card" in a sentence ("Copy music to the SD card"). Never TF or microSD, stock's words.
-- **Size steps are 15, 16, 18, 20, 22** (30 for the [plug-in screen](#plug-in-screen)'s level, 56 for the confirmation's glyph, 17 for the [tabs](#tabs)' labels, 13 for [Edit Library](#edit-library)'s hint). Nothing else.
+- **Size steps are 15, 16, 18, 20, 22** (30 for the [plug-in screen](#plug-in-screen)'s level, 56 for the confirmation's glyph, 17 for the [tabs](#tabs)' labels and a dialog's or pill's emphasis, 13 for hints, captions, footers and the small labels of the [A-Z index](#a-z-index) and [Control Center](#control-center)). Nothing else: an 11 is 13, a 14 is a 15 (a note under rows a 13, as a footer), a 19 is a 20, a 30 elsewhere a 22.
 - **Row pitch is about 1.6 times the row size** (32 px for 20 px type), as the concept's is
   about twice its cap height.
 - **Sizes are the em.** AWTK sizes a face by its line (ascent less descent), which for Inter is
   1.21 em, so `theme.xml` states each size times 1.21, rounded: 15 is 18, 16 is 19, 18 is 22,
-  20 is 24, 22 is 27.
+  20 is 24, 22 is 27. The payload writes `TYPE(px)` (`patch/ui_kit.h`), never the AWTK number.
 - **Truncate, then scroll.** A long title ends in an ellipsis; the selected row's title scrolls.
   Never shrink type to fit.
 
@@ -281,14 +293,14 @@ settings have none.
   click, as the volume's does). It fades out a second after the finger lifts or the last fast
   tick (the last 200 ms of it).
 - **The column:** centred 13 px from the right edge (x 362), from y 80 to y 240, the straight
-  part of the glass. Letters `#`, A to Z in Inter Medium 11 px, white (black in Light Mode), never
+  part of the glass. Letters `#`, A to Z in Inter Medium 13 px, white (black in Light Mode), never
   the accent. 27 letters do not fit 11 px slots in 160 px, so the column folds as iOS's does:
   seven letters spaced evenly, a dot between each two (`# • D • I • M • Q • V • Z`).
 - **The lit letter:** a white 16 px disc with the letter in black, at that letter's place on the
   column. The finger maps evenly over all 27 letters whether or not the column is folded.
 - **The bubble:** while a finger drags and while the wheel spins fast, a `#2C2C2E` box 52x48,
   12 px corners, ending 18 px left of the column with a 7 px pointer towards it, the letter in
-  Inter Medium 30 px white, beside the lit letter.
+  Inter Medium 22 px white, beside the lit letter.
 - **Dragging** jumps the list so the first row under the letter is at the top and selected; a
   letter with no rows goes to the next one that has some. `#` is digits and symbols. A row files
   under its name's first letter past "The", "A" or "An", as the sort puts it.
@@ -494,7 +506,7 @@ the artist (13 px, Text Tertiary), 46 px right of the text column.
   while it plays and still while paused.
 - **Playing Next** (Inter Medium 13 px, Text Secondary) heads the songs queued with Play Next, Play
   Last and the bump, with a **Clear** pill on its right, 22 px high, ending at x 359 with the
-  selection bar: `#2C2C2E` with `#7FA6F5` Inter Medium 14 px at rest, Accent Blue with white when
+  selection bar: `#2C2C2E` with `#7FA6F5` Inter Medium 15 px at rest, Accent Blue with white when
   the wheel is on it. It is a stop of its own; Centre on it empties Playing Next, no confirm.
 - **From** the list, album or page the queue was played from ("Next in Queue" when that is not
   known) heads the rest of the queue in play order.
@@ -554,20 +566,16 @@ Shown for a moment after a mode change (Shuffle, Repeat).
 
 ### Dialogs and toasts
 
-- A dialog is a list: its question as the page title, its answers as rows, the selection bar
-  on the default answer. No boxes, no shadows.
-- A confirm (stock's `confirminfo_dialog`: Shut Down, Restart, the three Resets, Delete Song, Delete
-  Playlist and the rest) is that dialog: the question in the status row in sentence case, naming
-  the object where it can ("Delete playlist “a”?"), then **Cancel**, selected when it opens, and
-  the verb that says what the other does ("Shut Down", "Reset", "Delete"), never "OK". Delete
-  Song's "Also delete source file" is a third row with a switch on the right column.
-  A confirm whose answer leaves things alone says which under its rows, as iOS's reset alert does,
-  in the [empty note](#empty-and-offline)'s form: Reset Settings Only asks "Reset settings?" over
-  "Music, playlists and ratings are kept".
-- A confirm may end with a **footer**: why it asks and where the setting lives, in 13 px Text
-  Tertiary lines 17 px apart, 8 px under the last row, at the rows' text column, never selected
-  (`feedback_confirm_foot`). Streaming Songs' two asks have one: "Show streaming songs?" (Cancel, Turn
-  On) and "Hide streaming songs?" (Cancel, Turn Off).
+- A question is the [confirmation card](#confirmation-card) over the page that asked. Stock's confirm
+  (`confirminfo_dialog`: Shut Down, Restart, the three Resets, Delete Song, Delete File, Unpair, the Wi-Fi
+  network's Forget and Disconnect, Line Out and the rest) is drawn as the card with no change to its callers
+  (`feedback.c` `feedback_confirm_dress`): its prompt named as the design writes it ("Forget This Network?" for
+  stock's "Delete Record?", "Use Line Out?" for its "Line Out sets max volume, continue?"), **Cancel** first and
+  selected when it opens, then the verb ("Shut Down", "Reset", "Delete"), never "OK"; a verb that loses something
+  (Delete, Reset, Forget, Unpair, Remove, Clear) red after the gap. Delete Song's "Also delete source file" is the
+  card's switch row. What the answer leaves alone, or why it asks (a caller's `feedback_confirm_foot`: Streaming
+  Songs' "Show streaming songs?" and "Hide streaming songs?"), is the body: Reset Settings Only asks "Reset
+  Settings?" over "Music, playlists and ratings are kept."
 - A toast is one line of 16 px Text Primary on a `#1C1C1E` pill, 12 px corners, 32 px tall,
   as wide as its text and 16 px each side, centred on y 252 (y 236 to 268), above the bottom
   glass curve. It is the only raised surface in the theme. The page stays in sight round it,
@@ -584,6 +592,31 @@ Shown for a moment after a mode change (Shuffle, Repeat).
 - Every in-place action says what it did in a toast: the hold menu's Play Next ("Playing Next"),
   Play Last ("Playing Last") and Add to and Remove from Favourites ("Added to Favorites",
   "Removed from Favorites").
+
+### Confirmation card
+
+A question answered in place: a card over the page that asked, the page dimmed behind it (approved 2026-11-16 from
+`design/confirm-overlay/`; `patch/feedback.c` `confirm`). It replaces the full-screen dialog page for every confirm
+as its callers move onto it.
+
+- **Surface:** the whole screen, status row too, under black at 50%; the card `#1C1C1E` (white in Light Mode), 291 px
+  wide at x 42 with 16 px corners, its stack centred on y 168 and kept inside y 44 to 302.
+- **Content**, 20 px in from each side: 18 px of padding; the title in Inter Medium 20, Text Primary, centred, naming
+  the object ("Forget WH-1000XM5?", never "Are you sure"), an ellipsis ending a long one; at most two body lines in
+  15 px Text Secondary on 19 px lines, 4 px under it, one consequence in sentence case; a code (a pairing's "482
+  913") in Inter Medium 30; then 14 px down an optional switch row (label at the text column, the switch at the right
+  column) and the answers, 32 px rows of Inter Regular 20 centred, stacked; 8 px of padding.
+- **Kinds:** destructive (Cancel, then 12 px of space, then the verb in Negative red; opens on Cancel), consequential
+  (Cancel, the verb; opens on Cancel), neutral (the safe answer, the verb; opens on the verb), info (OK). The lit
+  answer's bar is the accent, 8 px in from the card's sides, or Negative red on a destructive verb.
+- **Red:** Negative `#FF453A`, the design's one red, not the mock's `#FF3B30` (iOS's light-mode red, darker on black).
+- **Input:** the wheel moves the bar, stepping over the gap; Centre answers the lit row or flips the switch;
+  Return answers the safe row; Play/Pause, Next and Previous do nothing while the card asks.
+- **Timeout:** a card that answers itself (Guest Play's 30 s Decline) shows the seconds left on that row in 15 px
+  Text Tertiary and a 2 px bar along its foot emptying toward it, and answers it at 0 whatever the input.
+- **For code:** `confirm(&(confirm_t){ .title, .name, .body, .code, .rows, .n_rows, .kind, .back, .toggle,
+  .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx })` (`patch/ui_kit.h`, so every payload file reaches it); `answer(ctx, row, toggle_on)` runs
+  once after the card has closed. One card at a time: `confirm` answers 0 while one is up.
 
 ### Empty and offline
 
@@ -675,7 +708,7 @@ the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where
 
 - **Status row:** no title, the clock centred.
 - **Header** from y 52: a 64 px `#2C2C2E` disc at the text column with the name's first letter in
-  Inter Medium 30, white; beside it from x 102 the name in Inter Medium 20 (ellipsis), the counts
+  Inter Medium 22, white; beside it from x 102 the name in Inter Medium 20 (ellipsis), the counts
   ("4 albums · 3 singles · 62 songs" as the app sends them, else "4 albums" counted from its album
   rows) in Inter Regular 15 Text Secondary, and the genre in Inter Regular 13 Text Tertiary, a line
   left out when unknown. The disc's top stands over the status row's bottom 6 px.
@@ -692,7 +725,7 @@ the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where
   it leaves Top Songs out when the server has none.
 - **Top Songs** and **All Songs** (titled so): 36 px rows from y 58, a 28 px cover with 4 px
   corners at the text column (the song's album's server library cover, else the placeholder), the
-  title in Inter Regular 18 at x 62, then its album in Inter Regular 14 Text Tertiary where the
+  title in Inter Regular 18 at x 62, then its album in Inter Regular 15 Text Tertiary where the
   title leaves 30 px, and its length right-aligned on the right column in Inter Regular 15 Text
   Tertiary (white on the selection); Centre plays the list from that song. An app without
   `artist` sends neither album nor length: the title alone.
@@ -832,7 +865,7 @@ Recently Added, Artists, Albums and Songs, each with the chevron.
   [A-Z index](#a-z-index) past 50 rows.
 - **Marks:** each song shows where it stands against the playlist as it was when Add Songs
   opened, on the right column, 20 px Phosphor fills: `check-circle` in Text Secondary already in,
-  `plus-circle` green `#4FB477` added now, `minus-circle` red `#FF6B5E` taken out now, white on the
+  `plus-circle` Positive green `#34C759` added now, `minus-circle` red `#FF6B5E` taken out now, white on the
   selection; putting a removed song back returns it to the check. The right column keeps the
   mark's 22 px only on a row that has one. Centre adds or takes out in place, the wheel stays where
   it is, and a toast says which ("Added to name", "Removed", "Undone"); Add All adds every song not
@@ -912,7 +945,7 @@ The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `de
   right of it to x 355.
 - **Toggles**: Wi-Fi, Bluetooth, AirPlay and Car Remote, 40 px circles two by two in the connectivity block
   (centres x 55 and 123, y 66 and 126), Accent Blue when on, `#3A3A3C` off, a 22 px white glyph, the name 9 px
-  under in Inter Medium 11, white when on, Text Secondary off.
+  under in Inter Medium 13, white when on, Text Secondary off.
 - **Now Playing**: the cover, 52 px with 9 px corners, 12 px in; the title (Inter Medium 16) and artist (Inter
   13, Text Secondary) beside it; Previous, Play/Pause (30 px) and Next on y 132, 52 px apart.
 - **Sliders**: Brightness and Volume side by side from y 170, 38 px tall, fully round, `#3A3A3C` with a
@@ -978,10 +1011,9 @@ SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, a
 
 - **Checking for an Update…**, "Looking on the SD card": no circle, a 48 px spinner of twelve round 4 px spokes in
   Text Primary, the head turning a spoke every 80 ms and each spoke behind it dimmer, to a quarter.
-- **Install Update?**, the confirm with the question in the status row: the update's name and tag in Inter Medium
-  17 centred on y 66, "Installed: TAG · SIZE on the SD card" in 14 px Text Tertiary on y 88, then Cancel (selected)
-  and Install and Restart from y 112, and a two-line footer under them ("Takes about 2 minutes. Keep the Q2 charged;
-  your music and settings stay.").
+- **Install Update?** on the [confirmation card](#confirmation-card) over the check's page: "Install Q2 Pod 1.8.3 ·
+  V1830?", its body "SIZE MB, over TAG. Takes about 2 min;" over "your music and settings stay.", then Cancel
+  (selected) and Install and Restart.
 - **Restarting to Install**, "Don't turn off the Q2": `arrow-clockwise` bold on Accent Blue, and a 180 x 6 bar with
   round ends under the stack (top + 172), Track `#333333` filled in Accent Blue with the unpacking (the user's, 2026-11-16: progress fills are the accent).
 - **Results**, each a fill glyph on its circle: You're Up to Date (check, bold, Positive green, "VERSION (TAG) is
@@ -1011,13 +1043,15 @@ SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, a
 - **Marquee fades.** A scrolling text (the selected row's title, the status row's title, Now
   Playing's title, artist and album) is clipped to its own column, inside the glass and before any
   value or chevron on its row. A 12 px fade covers its right end while the text goes on past it,
-  and its left end while it is scrolled away from its start, so it rests crisp; each goes from
-  clear to the colour behind the text (the Canvas, or Accent Blue on the selection). A truncated
-  text that is not scrolling keeps its ellipsis (`list.marquee.fade`).
+  and its left end while it is scrolled away from its start, so it rests crisp; over it the text
+  itself fades out, whole at the inside to gone at the end, onto whatever is behind it (the Canvas,
+  the selection's blue, a destructive answer's red, a cover), never a band of a guessed colour. A
+  truncated text that is not scrolling keeps its ellipsis (`list.marquee.fade`).
 - **A value cut off scrolls too** (the user's, 2026-11-16, from About's CFW. Version): on the selected
   row the marquee takes the first text cut off at its column, the title, else a key/value row's value,
   so any value too long for its row reads in full when its row is selected (`navigation.c`
-  `marq_moved`); every other row's keeps its ellipsis.
+  `marq_moved`); every other row's keeps its ellipsis. That holds for stock's rows too, whose labels
+  wait on their parent's focus (a Wi-Fi network's name, user 2026-11-16: they clipped).
 - **Now Playing's lines** move as one marquee: the title, artist and album that overflow hold at
   rest 2.75 s, slide left together at 35 px a second (the longest line's pace; the others take the
   same time), and land back at rest together, each followed by its own copy 40 px behind, so
@@ -1068,7 +1102,7 @@ pattern.
 | New Playlist, Rename Playlist       | [Text entry](#text-entry)   | The letter strip's field off, the name large over it ([ipod](ipod.md#name-strip))                          |
 | Keyboard                            | [Text entry](#text-entry)   | None shows: a text box is the letter strip's ([ipod](ipod.md#keyboard))                                    |
 | Buttons locked                      | Own                         | A padlock leftmost in the status row while Buttons Lock is on; a blocked press shows a #1C1C1E card over the page dimmed to 45%: a 56 px padlock, "Buttons Locked" 16 px Medium and the hint 13 px Secondary, for 1.5 s |
-| A card app's QR page (sign-in)      | Own                         | The status row names the app. The code on a white plate (166 px, radius 12) centred under it, the app's note ("Scan with your phone to sign in") 17 px Medium white and "or open ADDR · PIN 482 913" 14 px Text Tertiary under it. Once the app reports a step, a mode page: one solid 92 px circle (Accent for phone and check, #34C759 done, #FF453A fail and error) with a 44 px white Phosphor fill glyph (`device-mobile`, `arrows-clockwise`, `check` bold, `cloud-slash`, `x` bold), the title 22 px Medium and one line 15 px Text Secondary, the stack centred between the status row and the bottom; the wheel does nothing |
+| A card app's QR page (sign-in)      | Own                         | The status row names the app. The code on a white plate (166 px, radius 12) centred under it, the app's note ("Scan with your phone to sign in") 17 px Medium white and "or open ADDR · PIN 482 913" 15 px Text Tertiary under it. Once the app reports a step, a mode page: one solid 92 px circle (Accent for phone and check, #34C759 done, #FF453A fail and error) with a 44 px white Phosphor fill glyph (`device-mobile`, `arrows-clockwise`, `check` bold, `cloud-slash`, `x` bold), the title 22 px Medium and one line 15 px Text Secondary, the stack centred between the status row and the bottom; the wheel does nothing |
 
 The concept's Apple Music, Apple TV and CD sync pages have no Q2 Pod equivalent and are out of scope; its storage
 page became Settings > Storage. Spotify's pages follow the list patterns.
@@ -1088,6 +1122,8 @@ page became Settings > Storage. Spotify's pages follow the list patterns.
 
 Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)):
 
+- The colour tokens and the type scale in one place: `tools/theme.py` `TOKENS` (to `patch/tokens.h` and
+  `tools/art.py`'s inks), `tok()` and `TYPE()` in `patch/ui_kit.c` and `patch/ui_kit.h`.
 - OLED as the one built-in theme, standing alone: `assets/themes/oled/theme.xml`, index 0, extending
   no other theme, its own `oled` geometry set. A unit left on another theme by an older build takes
   OLED's preset once at boot ([ipod](ipod.md#theme)).
@@ -1129,7 +1165,13 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - Settings > Storage and its Downloads (`patch/storage.c` `storage_paint`): the storage bar and its legend, the
   items' marks, the values beside their chevrons and the footers; and the song rows' marks for where a song lives
   (`catalogue.c` `catalogue_row_mark`).
-- The toast, the confirm as a dialog page and the empty note (`patch/feedback.c`), and the confirmation after a shuffle.
+- The toast, the confirm as the confirmation card and the empty note (`patch/feedback.c`), and the confirmation after a shuffle.
+- The confirmation card (`patch/feedback.c` `confirm`, [Confirmation card](#confirmation-card)).
+- One flat selection bar for pages that paint their own rows (`patch/list_marks.c` `sel_bar_flat`: Sleep Timer's
+  switch row, Scan Music Now, the slider page's and the EQ's rows, Add Songs), the theme's inset and radius.
+- One mode page painter for USB's pages, a card app's sign-in steps, SD Card Update and Bluetooth's receiver
+  (`patch/feedback.c` `mode_page_paint`, `mode_page_t` in `patch/ui_kit.h`). The plug-in screen keeps its own
+  approved layout ([Plug-in screen](#plug-in-screen)).
 
 Still to build:
 

@@ -17,21 +17,17 @@
 #define SP_ENDS_Y 214  /* the range ends' centre */
 #define SP_TRACK_H 6
 #define SP_KNOB 14
-#define SP_ROW 32 /* the switch row, from the window's top */
-#define SP_BAR_INSET 16
-#define SP_BAR_R 8
-#define SP_VALUE_PX 27 /* Inter Medium 22, AWTK's size (oled-design.md Type) */
-#define SP_ENDS_PX 18  /* 15 */
-#define SP_LINE 32     /* a text's box, centred on its row */
-#define SP_TRACK_DARK 0x333333
-#define SP_TRACK_LIGHT 0xd9d9d9
+#define SP_ROW 32            /* the switch row, from the window's top */
+#define SP_VALUE_PX TYPE(22) /* Inter Medium 22, AWTK's size (oled-design.md Type) */
+#define SP_ENDS_PX TYPE(15)  /* 15 */
+#define SP_LINE 32           /* the value's box, centred on its row */
 #define SP_KNOB_EDGE 1 /* Light Mode's Track ring round a knob no other ring has */
 
 /* A white knob centred on x, y of vg, ringed ring_px in ring (0xRRGGBB, the accent's on a focused
  * EQ band); with no ring in Light Mode, where white is the canvas, SP_KNOB_EDGE px of Track, as
  * iOS edges its white thumb. */
 static void knob(void *vg, float x, float y, int ring_px, unsigned ring) {
-    if (!ring_px && ipod_light()) ring_px = SP_KNOB_EDGE, ring = SP_TRACK_LIGHT;
+    if (!ring_px && ipod_light()) ring_px = SP_KNOB_EDGE, ring = RGB_TRACK_L;
     if (ring_px) {
         vgcanvas_begin_path(vg);
         vgcanvas_arc(vg, x, y, SP_KNOB / 2.0f + (float)ring_px, 0, 6.2831853f, 0);
@@ -128,22 +124,8 @@ static void pill(void *vg, float x, float y, float w, float h) {
     vgcanvas_close_path(vg);
 }
 
-/* s, n characters, centred on row y in the columns x to x + w, aligned (1 centre, 2 left, 3 right)
- * in face at px, in color (0xAARRGGBB: ui_ink's unless raw). */
-void sp_text(void *canvas, const unsigned *s, unsigned n, int x, int w, int y, int align,
-             const char *face, int px, unsigned color) {
-    rect_t r = { x, y - SP_LINE / 2, w, SP_LINE };
-    int align_v = I(canvas, CANVAS_ALIGN_V), align_h = I(canvas, CANVAS_ALIGN_H);
-    canvas_set_font(canvas, face, (unsigned)px);
-    canvas_set_text_color(canvas, color);
-    I(canvas, CANVAS_ALIGN_V) = 1;
-    I(canvas, CANVAS_ALIGN_H) = align;
-    canvas_draw_text_in_rect(canvas, s, n, &r);
-    I(canvas, CANVAS_ALIGN_V) = align_v;
-    I(canvas, CANVAS_ALIGN_H) = align_h;
-}
 /* s's UTF-8 as characters in out, n - 1 of them at most and a 0 */
-static unsigned wide(unsigned *out, unsigned n, const char *s) { return ar_wide(s, out, n); }
+static unsigned wide(unsigned *out, unsigned n, const char *s) { return ui_wide(s, out, n); }
 
 /* ringnav_paint, after the window's children: the switch row, the value, the track and the range
  * ends, in the window's coordinates. */
@@ -158,24 +140,23 @@ void slider_page_paint(void *w, void *canvas) {
     unsigned accent = S->tones[0] & 0xffffffu;
     void *sw = sp.kind == SLIDER_BOOT ? widget_lookup(w, "img_bootswitch", 1) : (void *)0;
     if (sw && widget_get_visible(sw)) { /* the selected row: its title is the toolbar's */
-        rect_t bar = { SP_BAR_INSET, 0, 375 - 2 * SP_BAR_INSET, SP_ROW };
         void *title = sp.nav && widget_count_children(sp.nav) ? widget_get_child(sp.nav, 0) : 0;
         const unsigned *s = title ? widget_get_text(title) : (void *)0;
         st.raw_ink = 1; /* final: white on the accent in either half */
-        fill_box(canvas, &bar, RGBA(accent), SP_BAR_R);
+        sel_bar_flat(canvas, 0, 0, 375, SP_ROW);
         if (s && *s) {
             px = theme()->font_px[ROLE_TITLE];
             const char *face = theme_face(s, -1, &px);
-            sp_text(canvas, s, wide_len(s), x0, x1 - x0 - 48, SP_ROW / 2, 2, face ? face : faces[0],
-                    px, RGBA(0xffffff));
+            ui_line_w(canvas, s, wide_len(s), x0, x1 - x0 - 48, SP_ROW / 2, 2,
+                      face ? face : faces[0], px, RGBA(0xffffff));
         }
         if (night_page(w)) { /* Night Shift's three choices: a value, white on the bar */
             static const char *const modes[] = { "Off", "On", "Auto" };
             int on = night_on();
             px = theme()->font_px[ROLE_TITLE];
-            sp_text(canvas, buf,
-                    wide(buf, sizeof buf / sizeof *buf, modes[on < 0 || on > 2 ? 0 : on]), x0,
-                    x1 - x0, SP_ROW / 2, 3, faces[theme()->font[ROLE_TITLE]], px, RGBA(0xffffff));
+            ui_line_w(canvas, buf,
+                      wide(buf, sizeof buf / sizeof *buf, modes[on < 0 || on > 2 ? 0 : on]), x0,
+                      x1 - x0, SP_ROW / 2, 3, faces[theme()->font[ROLE_TITLE]], px, RGBA(0xffffff));
         } else
             switch_mark(canvas, x1, SP_ROW / 2,
                         !tk_strcmp(widget_get_prop_str(sw, "image", ""), "switch_on"), 1);
@@ -196,8 +177,8 @@ void slider_page_paint(void *w, void *canvas) {
         const unsigned *p = v;
         while (*p && *p != ':') ++p;
         if (*p) v = p + 1 + (p[1] == ' ');
-        sp_text(canvas, v, wide_len(v), 0, 375, SP_VALUE_Y - top, 1, faces[FONT_INTER_MEDIUM],
-                SP_VALUE_PX, RGBA(idle ? S->muted : 0xffffff));
+        ui_line_w(canvas, v, wide_len(v), 0, 375, SP_VALUE_Y - top, 1, faces[FONT_INTER_MEDIUM],
+                  SP_VALUE_PX, RGBA(idle ? S->muted : 0xffffff));
     }
     /* the track, its fill to the knob's centre, and the knob, final in each half; Brightness's at
      * its eased level (levels.c bright_wheel), as Control Center's slider */
@@ -215,7 +196,7 @@ void slider_page_paint(void *w, void *canvas) {
         vgcanvas_save(vg);
         vgcanvas_translate(vg, (float)I(canvas, CANVAS_X), (float)I(canvas, CANVAS_Y));
         pill(vg, (float)x0, (float)y, (float)(x1 - x0), SP_TRACK_H);
-        vgcanvas_set_fill_color(vg, RGBA(ipod_light() ? SP_TRACK_LIGHT : SP_TRACK_DARK));
+        vgcanvas_set_fill_color(vg, RGBA(ipod_light() ? RGB_TRACK_L : RGB_TRACK));
         vgcanvas_fill(vg);
         /* Channel Balance's fill runs from the centre, where neither side is turned down */
         float from = sp.kind == SLIDER_BALANCE ? (float)(x0 + x1) / 2 : (float)x0,
@@ -249,10 +230,10 @@ void slider_page_paint(void *w, void *canvas) {
         tk_snprintf(lo, sizeof lo, "%d", min), tk_snprintf(hi, sizeof hi, "%d", max);
     px = SP_ENDS_PX;
     const char *face = faces[theme()->font[ROLE_META]];
-    sp_text(canvas, buf, wide(buf, sizeof buf / sizeof *buf, lo), x0, x1 - x0, SP_ENDS_Y - top, 2,
-            face, px, RGBA(S->muted));
-    sp_text(canvas, buf, wide(buf, sizeof buf / sizeof *buf, hi), x0, x1 - x0, SP_ENDS_Y - top, 3,
-            face, px, RGBA(S->muted));
+    ui_line_w(canvas, buf, wide(buf, sizeof buf / sizeof *buf, lo), x0, x1 - x0, SP_ENDS_Y - top, 2,
+              face, px, RGBA(S->muted));
+    ui_line_w(canvas, buf, wide(buf, sizeof buf / sizeof *buf, hi), x0, x1 - x0, SP_ENDS_Y - top, 3,
+              face, px, RGBA(S->muted));
     stock_canvas_set_fill_color(canvas, fill);
     stock_canvas_set_text_color(canvas, text);
 }
@@ -265,8 +246,6 @@ void slider_page_paint(void *w, void *canvas) {
  * while the wheel is on it (knob), and the band's name and gain under it in 15 px, Text Tertiary,
  * Text Primary on the focused band. */
 #define EQ_KNOB_RING 2
-#define EQ_VALUE 0xababab /* Text Secondary, and Light Mode's */
-#define EQ_VALUE_LIGHT 0x5c5c5c
 #define EQ_LINE 4
 int eq_rows(void) { return theme()->set_switch; }
 int eq_list_end(void) { return geom_val(V_LIST_END); }
@@ -277,10 +256,10 @@ static void eq_ink_text(void *canvas, const char *s, int x, int w, int y, int al
     unsigned buf[48], n = wide(buf, sizeof buf / sizeof *buf, s);
     int fpx = px;
     const char *face = theme_face(buf, (int)n, &fpx);
-    sp_text(canvas, buf, n, x, w, y, align, face ? face : faces[0], fpx, RGBA(rgb));
+    ui_line_w(canvas, buf, n, x, w, y, align, face ? face : faces[0], fpx, RGBA(rgb));
 }
 
-static unsigned eq_primary(void) { return ipod_light() ? 0x000000 : 0xffffff; }
+static unsigned eq_primary(void) { return tok(TOK_PRIMARY); }
 
 void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) {
     void *lcd = P(canvas, CANVAS_LCD), *vg = canvas_get_vgcanvas(canvas);
@@ -293,18 +272,15 @@ void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) {
     static const char *const rows[] = { "Enabled", "Presets", "Reset" };
     for (int i = 0; i < 3; ++i) {
         int y = EQ_ROWS_Y + i * EQ_ROW, cy = y + EQ_ROW / 2, sel = e->focus == 1 + i;
-        if (sel) {
-            rect_t bar = { SP_BAR_INSET, y, 375 - 2 * SP_BAR_INSET, EQ_ROW };
-            fill_box(canvas, &bar, RGBA(accent), SP_BAR_R);
-        }
+        if (sel) { sel_bar_flat(canvas, 0, y, 375, EQ_ROW); }
         eq_ink_text(canvas, rows[i], x0, x1 - x0 - 48, cy, 2, row_px,
                     sel ? 0xffffff : eq_primary());
         if (!i) switch_mark(canvas, x1, cy, e->on, sel);
         if (i == 1 && e->preset) /* the preset playing, as a settings row's value */
             eq_ink_text(canvas, e->preset, x0, x1 - 1 - VALUE_CHEVRON_GAP - x0, cy, 3, row_px,
                         sel            ? 0xffffff
-                        : ipod_light() ? EQ_VALUE_LIGHT
-                                       : EQ_VALUE);
+                        : ipod_light() ? RGB_SECONDARY_L
+                                       : RGB_SECONDARY);
         if (i == 1) chevron_icon(w, canvas, x1, cy, sel);
     }
     for (int i = 0; vg && i < 3; ++i) { /* the columns stock's touch reads (peq_ui.c e3_touch) */
@@ -313,7 +289,7 @@ void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) {
         float zero = (float)(EQ_SLIDERS_TOP + EQ_SLIDERS_BOTTOM) / 2,
               y = zero - (float)(e->gain[i] * (EQ_SLIDERS_BOTTOM - EQ_SLIDERS_TOP) / (2 * e->max)),
               a = y < zero ? y : zero, b = y < zero ? zero : y;
-        stock_canvas_set_fill_color(canvas, RGBA(ipod_light() ? SP_TRACK_LIGHT : SP_TRACK_DARK));
+        stock_canvas_set_fill_color(canvas, RGBA(ipod_light() ? RGB_TRACK_L : RGB_TRACK));
         canvas_fill_rect(canvas, x - EQ_LINE / 2, EQ_SLIDERS_TOP, EQ_LINE,
                          EQ_SLIDERS_BOTTOM - EQ_SLIDERS_TOP);
         if (b - a >= 1) {
@@ -346,10 +322,10 @@ void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) {
 #define SEG_IN 2
 #define SEG_TRACK_R 9
 #define SEG_R 8
-#define SEG_PX 21 /* Inter Medium 17, AWTK's size (oled-design.md Type) */
-#define SEG_TRACK 0x1c1c1e
-#define SEG_RAISED 0x3a3a3c
-#define SEG_INK 0xababab
+#define SEG_PX TYPE(17) /* Inter Medium 17, AWTK's size (oled-design.md Type) */
+#define SEG_TRACK RGB_RAISED
+#define SEG_RAISED RGB_OFF
+#define SEG_INK RGB_SECONDARY
 #define SEG_TRACK_LIGHT 0xe5e5ea /* iOS's light track and secondary label */
 #define SEG_INK_LIGHT 0x8a8a8e
 void segments_paint(void *canvas, const char *const *names, int n, int open, int focus, int x,
@@ -375,11 +351,11 @@ void segments_paint(void *canvas, const char *const *names, int n, int open, int
                      SEG_R);
         }
         unsigned buf[16], len = wide(buf, sizeof buf / sizeof *buf, names[i]);
-        sp_text(canvas, buf, len, sx, sw, y + h / 2, 1, faces[FONT_INTER_MEDIUM], SEG_PX,
-                RGBA(shown && focus ? 0xffffff
-                     : shown        ? eq_primary()
-                     : light        ? SEG_INK_LIGHT
-                                    : SEG_INK));
+        ui_line_w(canvas, buf, len, sx, sw, y + h / 2, 1, faces[FONT_INTER_MEDIUM], SEG_PX,
+                  RGBA(shown && focus ? 0xffffff
+                       : shown        ? eq_primary()
+                       : light        ? SEG_INK_LIGHT
+                                      : SEG_INK));
     }
     st.raw_ink = raw;
     stock_canvas_set_fill_color(canvas, fill);

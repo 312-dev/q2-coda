@@ -28,10 +28,6 @@
 #define SR_TAP_SLOP 12
 #define SR_TOUCH_DOWN 0xff /* the raw pointer events ringnav_input sees (EVT_POINTER_FIRST) */
 #define SR_TOUCH_UP 0x103
-#define SR_SECONDARY_D 0xababab /* Text Secondary per half: the paused bars */
-#define SR_SECONDARY_L 0x5c5c5c
-#define SR_TRACK_D 0x333333 /* the ring's track per half */
-#define SR_TRACK_L 0xd9d9d9
 
 /* A slot: its box's width now (0: not shown), the room before the shown slot to its right, and its
  * painter, given its box's left and the row's centre in the bar's pixels, in final colours. */
@@ -96,7 +92,7 @@ static const unsigned char bar_h[SR_FRAMES][3] = { { 7, 10, 3 }, { 9, 8, 3 },  {
 static void play_paint(void *bar, void *canvas, int x, int cy) {
     (void)bar;
     int light = ipod_light(), paused = bar_status() != 2;
-    unsigned rgb = paused ? (light ? SR_SECONDARY_L : SR_SECONDARY_D) : (light ? 0 : 0xffffff);
+    unsigned rgb = paused ? (light ? RGB_SECONDARY_L : RGB_SECONDARY) : (light ? 0 : 0xffffff);
     for (int i = 0; i < 3; ++i) {
         int h = bar_h[sr.frame % SR_FRAMES][i];
         rect_t r = { x + i * SR_BAR_PITCH, cy + SR_BAR_DROP - h, SR_BAR_W, h };
@@ -144,7 +140,7 @@ static void sync_paint(void *bar, void *canvas, int x, int cy) {
         vgcanvas_set_line_width(vg, SR_RING_LINE);
         vgcanvas_begin_path(vg);
         vgcanvas_arc(vg, cx, fy, SR_RING_R, 0, 6.2831853f, 0);
-        vgcanvas_set_stroke_color(vg, RGBA(light ? SR_TRACK_L : SR_TRACK_D));
+        vgcanvas_set_stroke_color(vg, RGBA(light ? RGB_TRACK_L : RGB_TRACK));
         vgcanvas_stroke(vg);
         if (permille > 0) {
             vgcanvas_begin_path(vg);
