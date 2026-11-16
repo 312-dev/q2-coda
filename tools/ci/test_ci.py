@@ -115,3 +115,8 @@ def test_calling_a_named_lambda_counts_as_its_body():
     source = 'm = []\npaint = lambda: m.append(1)\npaint()\nassert m == [1]\n'
     stmts = patch_shards.analyse(source)
     assert {stmts[i].line for i in patch_shards.slice_of(stmts, 3, 4)} == {1, 2, 3}
+
+
+def test_shard_traces_join_with_their_checks_numbered_on():
+    shards = [b'draw a\n== 1\n== 2\n', b'draw b\n== 1\n']
+    assert patch_shards.join_traces(shards) == b'draw a\n== 1\n== 2\ndraw b\n== 3\n'
