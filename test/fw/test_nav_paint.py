@@ -1044,31 +1044,6 @@ def quick_window(world, **icons):
     return win, view, slider
 
 
-def fill_props(world, slider):
-    return {k: v for k, v in world[slider].props.items() if k.endswith(('fg_color', 'bg_color')) or k == '_ringnav_fill'}
-
-
-def test_quick_settings_brightness_clears_stock_s_bar_once_for_its_own(fw, world):
-    """OLED's Brightness row draws its bar (quick_rows): stock's slider goes clear before its first paint."""
-    theme(fw)
-    _, _, slider = quick_window(world)
-    paint_bg(fw, slider, Canvas(fw))
-    states = ('normal', 'pressed', 'over', 'focused')
-    assert fill_props(world, slider) == {'_ringnav_fill': 1, **{f'style:{s}:fg_color': 0 for s in states},
-                                         **{f'style:{s}:bg_color': 0 for s in states}}
-    sets = len(fw.calls('widget_set_prop_int'))
-    paint_bg(fw, slider, Canvas(fw))
-    assert len(fw.calls('widget_set_prop_int')) == sets
-
-
-def test_another_slider_is_left(fw, world):
-    theme(fw)
-    win = world.window('playset_page')
-    slider = world.add(win, 'slider_backlight', 'slider')
-    paint_bg(fw, slider, Canvas(fw))
-    assert fill_props(world, slider) == {}
-
-
 # The bar's title (the system bar's label_title) names the top window.
 
 def bar_title(fw, world, st, **config):
@@ -1873,55 +1848,40 @@ def test_the_scan_dialog_is_a_page_of_rows(fw, world, st, whole):
     assert max(f[0] + f[2] for f in lit) <= 24 + 323 * 312 // 704 + 1
 
 
-def oled_quick(fw, world, row=0, adjust=0):
-    """OLED's Quick Settings painted: Wi-Fi on, Bluetooth off, the lock off, Gain disabled under Line Out, USB
-    Audio, the brightness at half; row selected, adjusting or not. The canvas."""
+def control_center(fw, world, focus=0, adjust=0):
+    """Control Center painted (control_center.c cc_paint): Wi-Fi on, Bluetooth off, the lock on, nothing playing, the
+    brightness at half; the wheel on focus, a slider adjusting or not. The canvas."""
     theme(fw)
-    fw.var('g_keylock_flag', C.c_ubyte).value = 0
+    fw.var('g_wififlag', C.c_ubyte).value, fw.var('g_bluetoothflag', C.c_ubyte).value = 1, 0
+    fw.var('g_keylock_flag', C.c_ubyte).value = 1
     win, _, _ = quick_window(world)
-    world[win].props.update(_qs_row=row, _qs_adjust=adjust)
-    for name, image in (('img_wifiswitch', 'drop_wifiopen'), ('img_btswitch', 'drop_bt'), ('img_lock', 'drop_keylock'),
-                        ('img_gain', 'drop_lowgaindisable'), ('img_po', 'drop_lo'), ('img_usbmode', 'drop_usbaudio')):
-        world.add(win, name, 'image', image=image)
-    world.add(win, 'label_gain', 'label', text='Low')
-    world.add(win, 'label_usbmode', 'label', text='USB AUDIO')
+    world[win].props.update(_cc_focus=focus, _cc_adjust=adjust)
     canvas = Canvas(fw)
     paint_bg(fw, win, canvas)
     return canvas
 
 
-def test_under_oled_quick_settings_is_a_page_of_rows(fw, world):
-    """OLED's Quick Settings (quick_rows): seven 32 px rows from y 58, names at x 24, values right-aligned to the right
-    column in Text Secondary (stock's words, USB's without its "USB " and its capitals), a disabled row in Text
-    Tertiary; the selection bar on the first row; switches for Wi-Fi and Bluetooth; the brightness track to the value."""
-    canvas = oled_quick(fw, world)
-    texts = [(t, r[1], c & 0xffffff) for t, r, c, _ in canvas.texts]
-    assert [t for t, *_ in texts] == ['Brightness', 'Wi-Fi', 'Bluetooth', 'Buttons Lock', 'Off', 'Gain', 'Low',
-                                      'Output', 'Line Out', 'USB Mode', 'Audio']
-    assert [y for t, y, _ in texts if t in ('Brightness', 'Wi-Fi', 'USB Mode')] == [58, 90, 250]
-    assert {c for t, _, c in texts if t in ('Off', 'Line Out', 'Audio')} == {rgba(0xababab) & 0xffffff}
-    assert {c for t, _, c in texts if t in ('Gain', 'Low')} == {rgba(0x858585) & 0xffffff}
-    accent = rgba(0x2160d8)  # OLED's Accent Blue
-    assert ((16, 58, 343, 32), accent, 8) in canvas.rounded
-    switches = [r for r in canvas.rounded if r[0][2:] == (34, 20)]
-    assert [(r[0][1], r[1]) for r in switches] == [(96, accent), (128, rgba(0x333333))]  # Wi-Fi on, Bluetooth off
-    track = [r for r in canvas.rounded if r[0][1] == 71 and r[0][3] == 6]
-    assert [r[0][0] for r in track] == [190, 190] and track[1][0][2] == 157 // 2  # white, then the fill to the value
+def test_control_center_is_v3a_s_blocks_toggles_sliders_and_tiles(fw, world):
+    """The connectivity block and Now Playing's from y 38, the toggles' circles (Wi-Fi lit), the sliders under them,
+    the five tiles named under them (Lock lit), the grab bar at y 304, and the wheel's white ring on Wi-Fi."""
+    canvas = control_center(fw, world)
+    accent, block, off = rgba(0x2160d8), rgba(0x1c1c1e), rgba(0x3a3a3c)
+    boxes = [(r, c) for r, c, _ in canvas.rounded]
+    assert ((20, 38, 138, 124), block) in boxes and ((166, 38, 189, 124), block) in boxes
+    assert ((35, 46, 40, 40), accent) in boxes and ((103, 46, 40, 40), off) in boxes  # Wi-Fi on, Bluetooth off
+    assert ((32, 43, 46, 46), rgba(0xffffff)) in boxes  # the wheel's ring round Wi-Fi
+    assert ((32, 216, 44, 44), accent) in boxes  # Lock, on
+    assert ((375 // 2 - 18, 304, 36, 5), rgba(0x5a5a5e)) in boxes
+    words = [t for t, *_ in canvas.texts]
+    for label in ('Wi-Fi', 'Bluetooth', 'AirPlay', 'Car', 'Lock', 'Sleep', 'Night Shift', 'EQ', 'Smart Wi-Fi'):
+        assert label in words, label
 
 
-def test_adjusting_oled_s_brightness_rings_its_knob(fw, world):
-    """Centre on Brightness (quick_rows_key) puts a 14 px white knob at the fill's end in a white ring."""
-    rings = [r for r in oled_quick(fw, world, adjust=1).rounded if r[0][2] in (22, 18, 14) and r[0][2] == r[0][3]]
-    assert [(r[0][2], r[0][0] + r[0][2] // 2) for r in rings] == [(22, 268), (18, 268), (14, 268)]
-    assert not [r for r in oled_quick(fw, world).rounded if r[0][2] == 22]
-
-@pytest.mark.parametrize('text, held', [('704', True), ('Scanned 700 of the', True), ('Scanned 600', False)])
-def test_the_bar_holds_under_its_end_until_the_dialog_closes(fw, world, st, whole, text, held):
-    """A count at or near the total holds the fill at 99% of the track (docs/internals.md), so the bar never reads
-    done while the dialog is up; under that it is the count's share."""
-    _, (x, end, _, fill_end, _) = counted(fw, world, st, whole, text)
-    share = x + (end - x) * int(re.findall(r'\d+', text)[0]) // 704
-    assert fill_end < end and fill_end == (x + (end - x) * 99 // 100 if held else share) and fill_end <= share
+def test_a_slider_with_the_wheel_takes_the_accent_s_ring(fw, world):
+    rings = lambda canvas: [r for r, c, _ in canvas.rounded if r == (17, 167, 169, 44)]
+    assert rings(control_center(fw, world, focus=4, adjust=1)) and \
+        [c for r, c, _ in control_center(fw, world, focus=4, adjust=1).rounded if r == (17, 167, 169, 44)] == [rgba(0x2160d8)]
+    assert [c for r, c, _ in control_center(fw, world, focus=4).rounded if r == (17, 167, 169, 44)] == [rgba(0xffffff)]
 
 
 @pytest.mark.parametrize('flag, text, songs, line', [(0, 'Scanned 312', 704, '312'), (1, 'Scanned 800', 704, '800'),

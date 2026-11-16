@@ -727,6 +727,26 @@ Recently Added, Artists, Albums and Songs, each with the chevron.
 - No coloured app tiles: the concept's tinted "For You" squares are for content the Q2 does
   not have.
 
+### Control Center
+
+The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `design/mockups/mock_cc3.py`
+`cc3(True)`; `patch/control_center.c`), under the status row, whose clock is centred:
+
+- **Blocks** from y 38, `#1C1C1E` with 22 px corners: connectivity, 138 x 124 from x 20; Now Playing, 8 px
+  right of it to x 355.
+- **Toggles**: Wi-Fi, Bluetooth, AirPlay and Car Remote, 40 px circles two by two in the connectivity block
+  (centres x 55 and 123, y 66 and 126), Accent Blue when on, `#3A3A3C` off, a 22 px white glyph, the name 9 px
+  under in Inter Medium 11, white when on, Text Secondary off.
+- **Now Playing**: the cover, 52 px with 9 px corners, 12 px in; the title (Inter Medium 16) and artist (Inter
+  13, Text Secondary) beside it; Previous, Play/Pause (30 px) and Next on y 132, 52 px apart.
+- **Sliders**: Brightness and Volume side by side from y 170, 38 px tall, fully round, `#3A3A3C` with a
+  `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start.
+- **Tiles**: Lock, Sleep, Night Shift, EQ and Smart Wi-Fi, 44 px squares with 12 px corners on y 238, 12 px
+  in from the blocks' ends and evenly apart, named under them as the toggles are.
+- **Grab bar**: 36 x 5, `#5A5A5E`, at y 304, where the swipe up that closes the page starts.
+- **The wheel** rings the stop it is on in white (2 px, 1 px out); a slider that has the wheel is ringed in
+  Accent Blue.
+
 ### Motion
 
 - Page push and pop: 220 ms horizontal slide, `cubic_out`.
@@ -781,7 +801,7 @@ pattern.
 | Bluetooth                           | Two-line row                | Second line "Connected" with the Positive dot                                                              |
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
-| Quick Settings                      | Own                         | Seven rows under the status row, Brightness's slider inline: Centre on it gives it the wheel               |
+| Quick Settings                      | [Control Center](#control-center) | The status row's clock centred, no title                                                        |
 | Search                              | Own                         | An iPod classic's letter strip, a pill at y 254-288, under six single-line results ([ipod](ipod.md#search)) |
 | Keyboard                            | Own                         | Stock's keys as `#1C1C1E` boxes on black, the wheel's key in the accent ([ipod](ipod.md#keyboard))          |
 | Buttons locked                      | Own                         | A padlock left of the play state while Buttons Lock is on; a blocked press shows a #1C1C1E card over the page dimmed to 45%: a 56 px padlock, "Buttons Locked" 16 px Medium and the hint 13 px Secondary, for 1.5 s |

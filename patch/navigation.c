@@ -4953,7 +4953,7 @@ static const char *bar_title_of(void *win, void **label) {
     if (usb_ui_title(name)) return usb_ui_title(name); /* the USB mode pages (usb_ui.c) */
     if (!tk_strcmp(name, "qrcode_page")) return addon_qr_title(win); /* the card app's name */
     if (!tk_strcmp(name, "search_dialog")) return "Search"; /* stock's toolbar has no label */
-    if (!tk_strcmp(name, "statusbar_dialog")) return "Quick Settings";
+    if (!tk_strcmp(name, "statusbar_dialog")) return ""; /* Control Center: the clock centred, as Home's */
     if (artist_local_on(win)) return ""; /* the design's artist page: the header names it */
     void *nav = widget_lookup(win, "view_navbar", 1);
     if (nav) {
@@ -5100,7 +5100,7 @@ void bar_title_sync(void *win) {
         title_gone(0, 0);
         st.title_win = win;
         widget_on(win, EVT_DESTROY, title_gone, win);
-        /* OLED's Quick Settings is a page (quick_rows) with the bar's title */
+        /* Control Center (control_center.c) is a page under the bar's clock */
         if (tk_strcmp(widget_get_type(win), "window") &&
             tk_strcmp(widget_get_prop_str(win, "name", ""), "statusbar_dialog"))
             return;

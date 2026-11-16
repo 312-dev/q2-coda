@@ -2067,16 +2067,13 @@ def test_a_tap_on_the_lock_steps_through_its_choices(fw, st):
     assert len(set(images[:3])) == 1 and images[3] != images[0]  # one image locked, another not
 
 
-def test_oled_s_quick_settings_lays_its_buttons_over_whole_rows(fw, st):
-    """OLED's page (quick_rows_open): Wi-Fi, Bluetooth, the lock, Gain, Output and USB each over a 32 px row from y 90
-    at opacity 0, so a tap there is stock's; Playback and System gone; the slider inline on the first row's right
-    column, its knob's 14 px reaching the track's ends."""
+def test_control_center_lays_stock_s_buttons_over_its_circles_and_slider(fw, st):
+    """Control Center (control_center.c cc_open): Wi-Fi's and Bluetooth's buttons over their circles at opacity 0, so a
+    tap and a hold there are stock's; the rest of stock's buttons hidden; the brightness slider over its track."""
     quick = Quick(fw, st)
-    rows = ['img_wifiswitch', 'img_btswitch', 'img_lock', 'img_gain', 'img_po', 'img_usbmode']
-    assert [quick.icons[n].box for n in rows] == [(0, 90 + 32 * i, 375, 32) for i in range(6)]
-    assert [quick.icons[n].visible for n in Quick.ICONS] == [1, 1, 1, 1, 1, 1, 0, 0]
-    assert sorted(c[1][0] for c in fw.calls('widget_set_opacity')) == sorted(quick.icons[n].addr for n in rows)
-    assert quick.slider.box == (183, 0, 171, 32) and quick.slider.parent.box == (0, 58, 375, 32)
+    assert [quick.icons[n].box for n in ('img_wifiswitch', 'img_btswitch')] == [(35, 46, 40, 40), (103, 46, 40, 40)]
+    assert [quick.icons[n].visible for n in Quick.ICONS] == [1, 1, 0, 0, 0, 0, 0, 0]
+    assert quick.slider.parent.box == (20, 170, 163, 38) and quick.slider.box == (0, 0, 163, 38)
 
 
 # A page's switch as a row, under a set without stock's toolbars.

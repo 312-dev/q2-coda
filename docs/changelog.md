@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Quick Settings (OLED): the pull-down is now a Control Center, as on an iPhone: round Wi-Fi, Bluetooth, AirPlay and Car Remote buttons, what's playing with its controls, Brightness and Volume sliders, and Lock, Sleep, Night Shift, EQ and Smart Wi-Fi buttons. Turn the wheel to move between them and press Center to use one; on a slider Center lets the wheel set it.
   - Development builds: plugging into a computer works every time again. With `adb` on, every other plug-in showed no USB Connected prompt and no card on the computer, as the debug gadget left in place stopped the card's from being made.
   - Card apps: **Sign In from Your Phone** opens its QR code with one press. The page shows the code alone with the address and PIN under it, then follows your phone: **Continue on Your Phone** once it opens the page, **Signing In…**, **Signed In** (then the app's page, signed in), or what went wrong. The wheel no longer changes the volume there, and the sign-in no longer ends when the screen turns off before the code is scanned (it needs the Subsonic app's matching update).
   - Lists (OLED): every list ends as Home's does: the rows below the last full one show through a fade into black instead of stopping above an empty band, and once you scroll, the top row fades under the clock instead of being cut off. Scrolled to the end, the last row sits where it always did.

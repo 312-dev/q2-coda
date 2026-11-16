@@ -2150,13 +2150,17 @@ def quick_window(ui, value=50, lo=10, hi=100, visible=1):
     return slider
 
 
+CC_BRIGHT, CC_VOLUME, CC_LOCK, CC_STOPS = 4, 5, 6, 11  # control_center.c's stops: four toggles, the sliders, five tiles
+
+
 @pytest.mark.parametrize('value, key, want', [(50, KEY_NEXT, 51), (50, KEY_PREV, 49), (100, KEY_NEXT, 100), (10, KEY_PREV, 10)])
-def test_quick_settings_wheel_sets_the_brightness_slider(fw, keys, value, key, want):
+def test_control_center_wheel_sets_the_brightness_slider(fw, keys, value, key, want):
     ui = Ui(fw)
     I = fw.var('fw_ctx_g_dropdown_menu_state', C.c_int)
     I.value = 3  # open
     slider = quick_window(ui, value)
-    assert keys(KEY_CENTER) == STOP  # Brightness, the first row: the wheel goes to its slider
+    slider.parent.ints[b'_cc_focus'] = CC_BRIGHT
+    assert keys(KEY_CENTER) == STOP  # on Brightness: the wheel goes to its slider
     assert keys(key) == STOP and slider.ints[b'value'] == want
 
 
@@ -2169,50 +2173,70 @@ def test_quick_settings_wheel_waits_while_it_slides(fw, keys, state, timer, visi
     assert keys(KEY_NEXT) == STOP and slider.ints[b'value'] == 50
 
 
-def oled_quick_window(fw, ui, gain='drop_highgain'):
-    """OLED's Quick Settings open: its slider and a button for each row after Brightness."""
-    Config(fw, QSVOLUME=b'1')  # the wheel's volume mode does not take OLED's rows
+def cc_window(fw, ui):
+    """Control Center open (control_center.c): its brightness slider and Wi-Fi's and Bluetooth's buttons."""
+    Config(fw, QSVOLUME=b'1')  # the wheel's volume mode does not take Control Center's stops
     fw.var('fw_ctx_g_dropdown_menu_state', C.c_int).value = 3
     slider = quick_window(ui)
-    for name, image in (('img_wifiswitch', 'drop_wifi'), ('img_btswitch', 'drop_bt'), ('img_lock', 'drop_keylock'),
-                        ('img_gain', gain), ('img_po', 'drop_po'), ('img_usbmode', 'drop_usbaudio')):
-        slider.parent.add(W(ui, 'image', name)).strs[b'image'] = image.encode()
+    for name in ('img_wifiswitch', 'img_btswitch'):
+        slider.parent.add(W(ui, 'image', name))
     return slider.parent, slider
 
 
-def test_oled_s_quick_settings_wheel_walks_its_rows(fw, keys):
-    """The wheel walks the rows, past a disabled one (Gain under Line Out), and stops at the ends."""
+def test_control_center_s_wheel_walks_its_stops_and_stops_at_the_ends(fw, keys):
+    """The toggles, the two sliders and the five tiles in reading order; the ends hold."""
     ui = Ui(fw)
-    top, slider = oled_quick_window(fw, ui, gain='drop_highgaindisable')
-    rows = []
-    for key in [KEY_NEXT] * 7 + [KEY_PREV] * 7:
+    top, slider = cc_window(fw, ui)
+    stops = []
+    for key in [KEY_NEXT] * (CC_STOPS + 1) + [KEY_PREV] * (CC_STOPS + 1):
         assert keys(key) == STOP
-        rows.append(top.ints[b'_qs_row'])
-    assert rows == [1, 2, 3, 5, 6, 6, 6, 5, 3, 2, 1, 0, 0, 0] and slider.ints[b'value'] == 50
+        stops.append(top.ints[b'_cc_focus'])
+    assert stops == [*range(1, CC_STOPS), CC_STOPS - 1, CC_STOPS - 1, *range(CC_STOPS - 2, -1, -1), 0, 0]
+    assert slider.ints[b'value'] == 50
 
 
-def test_centre_on_oled_s_brightness_gives_the_wheel_to_its_slider_until_centre_or_return(fw, keys):
+def test_centre_on_brightness_gives_the_wheel_to_its_slider_until_centre_or_return(fw, keys):
     ui = Ui(fw)
-    top, slider = oled_quick_window(fw, ui)
+    top, slider = cc_window(fw, ui)
+    top.ints[b'_cc_focus'] = CC_BRIGHT
     for key, adjust, value in ((KEY_CENTER, 1, 50), (KEY_NEXT, 1, 51), (KEY_NEXT, 1, 52), (KEY_RETURN, 0, 52),
                                (KEY_CENTER, 1, 52), (KEY_PREV, 1, 51), (KEY_CENTER, 0, 51)):
         assert keys(key) == STOP
-        assert (top.ints.get(b'_qs_adjust', 0), slider.ints[b'value'], top.ints.get(b'_qs_row', 0)) == (adjust, value, 0)
+        assert (top.ints.get(b'_cc_adjust', 0), slider.ints[b'value'], top.ints[b'_cc_focus']) == (adjust, value, CC_BRIGHT)
     assert not fw.calls('dialog_quit')
-    keys(KEY_RETURN)  # back on the rows, Return closes it
+    keys(KEY_RETURN)  # off the slider, Return closes it
     assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p]
 
 
-@pytest.mark.parametrize('rows, clicked', [(3, [(b'img_lock', EVT_CLICK)]), (4, [])])
-def test_centre_on_an_oled_quick_settings_row_clicks_its_button(fw, keys, rows, clicked):
-    """Centre acts in place as a tap on the row does; a disabled row's does nothing."""
+def test_centre_on_the_volume_slider_sets_the_volume_by_the_wheel(fw, keys):
     ui = Ui(fw)
-    top, _ = oled_quick_window(fw, ui)
-    top.ints[b'_qs_row'] = rows
-    if not clicked:
-        top.find(b'img_gain').strs[b'image'] = b'drop_highgaindisable'
+    top, _ = cc_window(fw, ui)
+    top.ints[b'_cc_focus'] = CC_VOLUME
+    vol, limit = fw.var('g_volume', C.c_ubyte), fw.var('g_maxvolume', C.c_ubyte)
+    vol.value, limit.value = 40, 41
+    assert keys(KEY_CENTER) == STOP and keys(KEY_NEXT) == STOP and vol.value == 41
+    assert keys(KEY_NEXT) == STOP and vol.value == 41  # Volume Limit holds it
+    assert [c[1][0] for c in fw.calls('device_set_volume')] == [41]
+
+
+@pytest.mark.parametrize('stop, clicked', [(0, [(b'img_wifiswitch', EVT_CLICK)]), (1, [(b'img_btswitch', EVT_CLICK)])])
+def test_centre_on_wi_fi_or_bluetooth_clicks_stock_s_button(fw, keys, stop, clicked):
+    """Centre acts as a tap on the circle does: stock's own button, at opacity 0 over it, clicked."""
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui)
+    top.ints[b'_cc_focus'] = stop
     assert keys(KEY_CENTER) == STOP
     assert ui.clicks == clicked and not fw.calls('dialog_quit')
+
+
+def test_centre_on_the_lock_tile_turns_buttons_lock_on_and_off(fw, keys):
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui)
+    top.ints[b'_cc_focus'] = CC_LOCK
+    flag, mode = fw.var('g_keylock_flag', C.c_ubyte), fw.var('g_keylock_mode', C.c_ubyte)
+    flag.value, mode.value = 0, 2  # off, its mode last Buttons only
+    assert keys(KEY_CENTER) == STOP and (flag.value, mode.value) == (1, 2)
+    assert keys(KEY_CENTER) == STOP and flag.value == 0
 
 
 def test_quick_settings_wheel_as_volume_is_stocks(fw, keys):

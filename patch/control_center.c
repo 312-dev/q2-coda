@@ -124,14 +124,15 @@ static int cc_level(void *win, int i) {
     return s && max > min ? (widget_get_prop_int(s, "value", 0) - min) * 256 / (max - min) : 0;
 }
 
-/* The page, under the window's children (navigation.c's paint of statusbar_dialog), then the
- * status row the dialog covers. */
+/* The page, under the window's children (navigation.c's paint of statusbar_dialog): the status row
+ * the dialog covers first, its clock centred, then the blocks, whose top reaches up into it. */
 void cc_paint(void *win, void *canvas) {
     void *bar = *(void *const *)system_bar;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), accent = scheme()->tones[0];
     int focus = widget_get_prop_int(win, CC_FOCUS, 0), adjust = widget_get_prop_int(win, CC_ADJUST, 0);
     rect_t block = { CC_X0, CC_Y0, CC_BLOCK_W, CC_BLOCK_H },
            np = { CC_X0 + CC_BLOCK_W + CC_GAP, CC_Y0, CC_X1 - CC_X0 - CC_BLOCK_W - CC_GAP, CC_BLOCK_H };
+    if (bar) widget_paint(bar, canvas);
     fill_box(canvas, &block, RGBA(CC_BLOCK), CC_BLOCK_R);
     fill_box(canvas, &np, RGBA(CC_BLOCK), CC_BLOCK_R);
     for (int i = 0; i < CC_STOPS; ++i) {
@@ -177,7 +178,6 @@ void cc_paint(void *win, void *canvas) {
     }
     rect_t grab = { 375 / 2 - 18, CC_GRAB_Y, 36, 5 };
     fill_box(canvas, &grab, RGBA(CC_GRAB), 3);
-    if (bar) widget_paint(bar, canvas);
     st.paint_w = win;
     stock_canvas_set_fill_color(canvas, fill);
 }

@@ -113,7 +113,9 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     white, Add Songs' marks (fill, 20 px) in Text Secondary, green and red (each half's) and white, the song rows' cloud
     and arrow (regular, 18 px) in Text Tertiary (each half's) and white for the selection, and Downloads' picked arrow
     in Accent Blue and white and its kept-by-the-app arrows in Text Secondary (each half's) and white, and a card app's
-    sign-in steps (fill, the done check bold, 44 px) in white for their solid circles."""
+    sign-in steps (fill, the done check bold, 44 px) in white for their solid circles, Control Center's glyphs (fill,
+    white, its sliders' in the block's grey), the USB pages' rows, mode glyphs and toasts, and Up Next's bump arrow and
+    Now Playing's queue and radio glyphs."""
     t = theme.builtins()[0]
     got = art.images(t)
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
@@ -130,6 +132,11 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     lives = [f'mark_{n}_{k}' for n in ('cloud', 'down') for k in ('d', 'l', 'w')]  # catalogue.c's song marks
     store = ['store_pick_a', 'store_pick_w'] + [f'store_auto_{k}' for k in ('d', 'l', 'w')]  # storage.c's Downloads
     signin = [f'signin_{n}' for n in ('phone', 'check', 'done', 'fail', 'error')]  # addon.c's QR page steps
+    cc = [f'cc_{n}' for n in art.CC_ICONS]  # control_center.c's glyphs
+    usb = [*(f'usb_{n}_{k}' for n in art.USB_ROWS for k in ('d', 'l', 'w')), *(f'usbmode_{n}' for n in art.USB_MODES),
+           *(f'usbtoast_{n}' for n in art.USB_TOASTS)]  # usb_ui.c's chooser rows, mode pages and toasts
+    upnext = [f'bump_{k}' for k in ('d', 'l', 'w')] + [f'mode_{n}' for n in ('queue_d', 'queue_l', 'radio_d', 'radio_l', 'radio_w',
+                                                                              'shuffle_xd', 'shuffle_xl', 'repeat_xd', 'repeat_xl')]
     keylock = [f'keylock_{k}' for k in ('d', 'l')]  # keylock.c: the status row's padlock and the card's
     card = [f'keylock_card_{k}' for k in ('d', 'l')]
     tiles = {f'pltile_{n}_{k}': c for n in ('playlist', 'otg') for k, c in (('d', 0x858585), ('l', 0x6e6e6e), ('w', 0xffffff))}
@@ -139,7 +146,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     assert set(got) == {'sort_bars'} | {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality,
-                                              *keylock, *card, *tiles, *acts, *pmarks, *lives, *store, *signin,
+                                              *keylock, *card, *tiles, *acts, *pmarks, *lives, *store, *signin, *cc, *usb, *upnext,
                                               'search_pop', 'search_pop_letters', 'search_pop_echoes',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)))}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
@@ -165,7 +172,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.PL_MARK_PX, c) for n, c in pmarks.items()),
                           *((n, art.MARK_PX, {'d': 0x858585, 'l': 0x6e6e6e, 'w': 0xffffff}[n[-1]]) for n in lives),
                           *((n, art.MARK_PX, {'a': blue, 'd': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in store),
-                          *((n, art.SIGNIN_PX, 0xffffff) for n in signin)):
+                          *((n, art.SIGNIN_PX, 0xffffff) for n in signin),
+                          *((f'cc_{n}', px, c) for n, (_, px, c) in art.CC_ICONS.items())):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
         assert (w, h) == (px, px) and inked == {tuple(rgb >> s & 255 for s in (16, 8, 0))}
@@ -255,5 +263,5 @@ def test_a_theme_draws_only_the_images_its_keys_ask_for():
             'geoms': {n: dataclasses.replace(g, modal=0) for n, g in oled['geoms'].items()}}
     full, got = set(art.images(oled)), set(art.images(bare))
     groups = ('oled_mode_', 'oled_np_', 'oled_vol_', 'oled_shuffle_', 'oled_check_', 'oled_wifi_', 'oled_lock_', 'oled_menu_',
-              'oled_pair_', 'oled_quality_', 'oled_pltile_', 'oled_plact_', 'oled_plmark_', 'oled_search_pop')
+              'oled_pair_', 'oled_quality_', 'oled_pltile_', 'oled_plact_', 'oled_plmark_', 'oled_search_pop', 'oled_bump_')
     assert got == {n for n in full if not n.startswith(groups)} and all(any(n.startswith(p) for n in full) for p in groups)
