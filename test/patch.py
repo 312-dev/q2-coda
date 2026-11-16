@@ -4002,6 +4002,12 @@ def cpm_centre(m):  # Centre on the selected row, the row's click running as sto
     m.confirm(); m.advance(0,clear=False); m.stack_rows(); m.paint(m.view)
 NEW,EDIT='New Playlist…','Select Playlists…'
 LISTS=['List 0','List 1','List 2']
+PL_ART=lambda cd: f'file:///mnt/mmc/.coverflow/pl_{cd}_0000abcd_s.jpg'
+def pl_art_lists(m,n):  # List i at cd_num 10+i, as RowPlaylistMachine.lists
+    records=[m.song(f'List {i}') for i in range(n)]
+    for i,r in enumerate(records): m.word(r+O['REC_TITLE'],m.string(f'List {i}')); m.word(r+O['REC_DISC'],10+i)
+    m.word(syms['p_deque_playlist'],m.deque(records))
+def pl_art_of(m,button): return next(k for k in m.nodes[button]['children'] if m.nodes[k]['type']=='image' and not (m.nodes[k].get('name') or '').startswith('img_'))
 
 # A playlist row's click runs pl_pick alone, which counts the marks after stock's: every dress is on stock's fresh rows,
 # PLAYLIST_PICK their one.
@@ -4082,6 +4088,7 @@ for base in (PlaylistMachine,RowPlaylistMachine):
 # was built: one past them (a playlist added since sorts in, a song's Add to Playlist → New under the covers, and pushes
 # the last ones past) has no row there, and the covers close, for the page to build its rows again as it comes to the
 # front. Appended last, the new one is that one.
+opens=lambda m: [(c[0],m.text(c[1])) for c in m.calls if c[0]=='navigator_to_with_context']
 class PlShut(RowPlaylistMachine):
     shut=0
     def hook(self,u,address,size,unused):
@@ -7927,12 +7934,12 @@ m=CoverflowMachine(); m.open(); m.press(100)
 assert m.call(O['KEY_PLAY'],address=syms['on_wm_keylong_fun'],event_type=O['EVT_KEY_LONG'],gap=0)==11
 m.close(); m.advance(0); assert not any(p[0]=='dialog/sortselect_dialog' for p in m.opened); passed()
 
-# Hold Play/Pause on a playlist's cover (navigation.c qm_hold): the list's own menu (playlist_hold), New Playlist and,
-# under a set without stock's toolbars (OLED's, toolbar="0", which the first system_bar load writes), Select
-# Playlists… last (a toolbar's page edits from its toolbar). The playlist is found in the live list by its cd_num, as New, Rename and Delete
-# read that list again under the covers after they copied it: More… opens the More page at its index there, and a
-# playlist gone from it holds nothing.
-PL_COVER_MENU=['Play Next','Add to Queue','Shuffle','More…','New Playlist','Select Playlists…']
+# Hold Play/Pause on a playlist's cover (navigation.c qm_hold): under OLED's set (the inset modal, which the first
+# system_bar load writes) the playlist's own menu, Play, Shuffle, Rename and Delete; before it, the list's menu
+# (playlist_hold) with More… and New Playlist (stock's toolbar page edits from its toolbar). The playlist is found in the
+# live list by its cd_num, as New, Rename and Delete read that list again under the covers after they copied it: More…
+# opens the More page at its index there, and a playlist gone from it holds nothing.
+PL_COVER_MENU=['Play','Shuffle','Rename','Delete']
 class PlaylistCoverMachine(CoverflowMachine):
     def __init__(self):
         super().__init__()
@@ -7960,7 +7967,8 @@ def geom_boot(m):  # the first system_bar load (ringnav_ui_load's theme_boot) wr
     m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)
 m=PlaylistCoverMachine(); geom_boot(m)
 m.word(m.slide+O['SLIDE_INDEX'],1); m.press(100); assert m.hold()==11 and m.release()==0
-assert m.labels()==PL_COVER_MENU and m.nodes[m.title]['text']=='List 1',m.labels(); passed()
+rows=[m.nodes[m.nodes[i]['children'][0]]['text'] for i in m.nodes[m.view]['children'] if m.nodes[i]['type']=='list_item']
+assert rows==PL_COVER_MENU and m.nodes[m.title]['text']=='List 1',rows; passed()
 m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[::-1]))  # read again, reordered
 m.press(100); assert m.hold()==11 and m.nodes[m.title]['text']=='List 0'
 m.pick(3); m.advance(0); assert m.opened[-1]==('localmusic/playlistsmore_page',2); passed()
@@ -7978,13 +7986,12 @@ def destroyed(m,w):  # w gone from the stack, then its destroy handlers, in orde
     if w in m.stack: m.stack.remove(w); m.top=m.stack[-1]
     for t,f,ctx in list(m.nodes[w].get('handlers',())):
         if t==O['EVT_DESTROY']: m.call(address=f,args=(ctx,m.event,0,0),gap=0,clear=False)
-for row,edit in ((4,0),(5,1)):  # New Playlist, Select Playlists…
-    m=ClosingCoverMachine(); geom_boot(m)
-    m.closing=[]; m.press(100); assert m.hold()==11 and m.release()==0; dlg=m.top
-    m.pick(row); m.advance(0,clear=False); m.advance(0,clear=False)
-    assert m.closing==[dlg] and m.top==dlg and not m.edits,(m.closing,m.edits)
-    destroyed(m,dlg); assert not m.edits; m.advance(0,clear=False)
-    assert m.edits==[edit] and [o[0] for o in m.opened]==['dialog/sortselect_dialog'],(m.edits,m.opened); passed()
+m=ClosingCoverMachine()  # New Playlist, before the set is written
+m.closing=[]; m.press(100); assert m.hold()==11 and m.release()==0; dlg=m.top
+m.pick(4); m.advance(0,clear=False); m.advance(0,clear=False)
+assert m.closing==[dlg] and m.top==dlg and not m.edits,(m.closing,m.edits)
+destroyed(m,dlg); assert not m.edits; m.advance(0,clear=False)
+assert m.edits==[0] and [o[0] for o in m.opened]==['dialog/sortselect_dialog'],(m.edits,m.opened); passed()
 m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[1:]))  # List 0 deleted under the covers
 m.press(100); assert m.hold()!=11 and not any(p[0]=='dialog/sortselect_dialog' for p in m.opened); passed()
 # More's Rename or Delete over the covers: as the covers come back to the front the playlists are read again
@@ -8008,8 +8015,7 @@ m.heads=[m.lists[0],new_one,m.lists[2]]; pl_front(m); assert cover_cd(m)==11
 m.press(100); assert m.hold()==11 and m.release()==0 and m.nodes[m.title]['text']=='Renamed',m.nodes[m.title]['text']
 m.pick(3); m.advance(0); assert m.opened[-1]==('localmusic/playlistsmore_page',1); passed()
 # New Playlist and Select Playlists… (playlists.c playlists_edit): the covers close (coverflow_playlists_close) and New
-# runs as the page's own: its row's target (OLED's set has no toolbar), stock's dialog. Select Playlists… is stock's
-# select mode, Import in it. With no covers up, nothing.
+# runs as the page's own: its row's target (OLED's set has no toolbar), stock's dialog. With no covers up, nothing.
 def pl_edit(edit,covers=True):  # the Playlists page booted (PlaylistPageMachine's default: OLED's set written)
     class M(PlaylistPageMachine):
         def hook(self,u,address,size,unused):
@@ -8023,8 +8029,6 @@ def pl_edit(edit,covers=True):  # the Playlists page booted (PlaylistPageMachine
     m.call(address=payload_syms['playlists_edit'],args=(edit,0,0,0),gap=0,clear=False); m.advance(0,clear=False); m.stack_rows()
     return m
 m=pl_edit(0); assert m.shut==1 and m.top==m.page and m.dialogs==['dialog/addplaylist_dialog'] and m.navbar()==0; passed()
-m=pl_edit(1); assert m.shut==1 and m.top==m.page and m.navbar()==1 and not m.dialogs
-assert m.rows()==['Select All']+LISTS+['Import Playlists','Done'] and m.bar()=='Select Playlists'; passed()
 for edit in (0,1):
     m=pl_edit(edit,covers=False); assert m.shut==1 and m.top==m.page and not m.dialogs and m.navbar()==0; passed()
 
@@ -16247,7 +16251,8 @@ def stock_keyups():
     assert keyups(True,0x53da5c)==back and keyups(False,0x53da5c)=={**back,centre:('power_keyup_detect power_keyup_pending_custom stop','')}
 stock_keyups(); passed()
 # SyncLink (#113): Eddict Player's keys, which stock posts with main_loop_post_key_event, reach
-# stock's lock filters dark with the Buttons lock off; the same keys from the buttons stay locked.
+# stock's lock filters dark with the Buttons lock off; the same keys from the buttons stay locked: the lock card
+# (keylock.c keylock_gate) takes their press and release before stock's filters see them.
 post=HOOKS['main_loop_post_key_event'][0]
 class LockMachine(Machine):
     def hook(self,u,address,size,_):
@@ -16262,8 +16267,8 @@ def lock_seen(key,kind,posted=None,gap=0):
     return l.locks
 for key in (O['KEY_PLAY'],O['KEY_BACK_BTN'],O['KEY_FWD_BTN']):
     assert lock_seen(key,DOWN,key)==[0] and lock_seen(key,UP,key)==[0]
-    assert lock_seen(key,DOWN,gap=1000)==[1] and lock_seen(key,UP,gap=1000)==[1]
-assert lock_seen(O['KEY_FWD_BTN'],DOWN,O['KEY_PLAY'])==[1] and lock_seen(O['KEY_PLAY'],DOWN)==[0]  # by key
+    assert lock_seen(key,DOWN,gap=1000)==[] and lock_seen(key,UP,gap=1000)==[]
+assert lock_seen(O['KEY_FWD_BTN'],DOWN,O['KEY_PLAY'])==[] and lock_seen(O['KEY_PLAY'],DOWN)==[0]  # by key
 assert lock_seen(O['KEY_PLAY'],UP,O['KEY_PLAY'],gap=1)==[1]  # and by its stamp
 assert l.u.mem_read(syms['g_keylock_flag'],1)==b'\1'; passed()
 # Play/Pause and Return hold after KEY_HOLD_MS (HOLD_KEYS), every other key at stock's time.
