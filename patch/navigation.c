@@ -5132,6 +5132,7 @@ static const char *bar_title_of(void *win, void **label) {
     if (!tk_strcmp(name, "spotify_page")) return "Spotify"; /* they hide their own name's label */
     if (!tk_strcmp(name, "radionp_page")) return "Internet Radio";
     if (!tk_strcmp(name, "usbmode_page")) return "Q2 Pod";
+    if (!tk_strcmp(name, "qrcode_page")) return addon_qr_title(win); /* the card app's name */
     if (!tk_strcmp(name, "search_dialog")) return "Search"; /* stock's toolbar has no label */
     if (!tk_strcmp(name, "statusbar_dialog")) return "Quick Settings";
     if (artist_local_on(win)) return ""; /* the design's artist page: the header names it */
@@ -10387,6 +10388,12 @@ int ringnav(void *ctx, void *event) {
      * does nothing, a double turns the screen off; stock turned it off on each one (#365). Its
      * wheel stays stock's volume. */
     int kb = key == KEY_CENTER && top && !tk_strcmp(widget_get_type(top), "keyboard");
+    /* A card app's QR page has nothing for the wheel, and stock's volume over it would hide the
+     * code (addon.c) */
+    if ((key == KEY_NEXT || key == KEY_PREV) && addon_qr_page(top)) {
+        drop_input();
+        return STOP;
+    }
     if (!allowed_top(top) && !usb_prompt()) {
         drop_input();
         if (!kb) return result;

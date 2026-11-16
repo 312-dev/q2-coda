@@ -732,6 +732,7 @@ pattern.
 | Search                              | Own                         | An iPod classic's letter strip, a pill at y 254-288, under six single-line results ([ipod](ipod.md#search)) |
 | Keyboard                            | Own                         | Stock's keys as `#1C1C1E` boxes on black, the wheel's key in the accent ([ipod](ipod.md#keyboard))          |
 | Buttons locked                      | Own                         | A padlock left of the play state while Buttons Lock is on; a blocked press shows a #1C1C1E card over the page dimmed to 45%: a 56 px padlock, "Buttons Locked" 16 px Medium and the hint 13 px Secondary, for 1.5 s |
+| A card app's QR page (sign-in)      | Own                         | The status row names the app. The code on a white plate (166 px, radius 12) centred under it, the app's note ("Scan with your phone to sign in") 17 px Medium white and "or open ADDR · PIN 482 913" 14 px Text Tertiary under it. Once the app reports a step, a mode page: one solid 92 px circle (Accent for phone and check, #34C759 done, #FF453A fail and error) with a 44 px white Phosphor fill glyph (`device-mobile`, `arrows-clockwise`, `check` bold, `cloud-slash`, `x` bold), the title 22 px Medium and one line 15 px Text Secondary, the stack centred between the status row and the bottom; the wheel does nothing |
 
 The concept's Apple Music, Apple TV and CD sync pages have no Q2 Pod equivalent and are out of scope; its storage
 page became Settings > Storage. Spotify's pages follow the list patterns.

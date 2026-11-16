@@ -1975,6 +1975,16 @@ def test_the_wheel_over_the_keyboard_and_centre_over_the_volume_stay_stocks(fw, 
     assert keys(KEY_CENTER, 1000) == 0  # stock's screen off
 
 
+def test_the_wheel_does_nothing_on_a_card_apps_qr_page(fw, keys):
+    """The QR page has nothing to move, and stock's volume over it would hide the code (addon.c addon_qr_page). The
+    same page that isn't the app's QR page (none open) keeps stock's volume."""
+    ui = Ui(fw)
+    page = ui.window('qrcode_page')
+    assert keys(KEY_NEXT) == 0  # stock's volume: no QR page open
+    C.c_void_p.from_address(C.addressof(fw.var('addon__qp', C.c_void_p))).value = page.p  # qp.page, its first field
+    assert keys(KEY_NEXT, 1000) == STOP and keys(KEY_PREV, 1000) == STOP
+
+
 def test_a_key_stock_takes_is_stocks_and_ends_the_run(fw, keys, st):
     ui = Ui(fw)
     sv = list_page(ui, rows=SHORT_LIST_MAX + 10)  # long enough to time a run

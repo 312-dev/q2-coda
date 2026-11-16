@@ -255,6 +255,11 @@ TILE_INKS = {'d': 0x858585, 'l': 0x6e6e6e, 'w': 0xffffff}
 PL_ACTION_PX = 18
 PL_ACTIONS = {'shuffle': 'shuffle', 'add': 'plus-circle', 'save': 'arrow-down', 'clear': 'x', 'search': 'magnifying-glass'}
 PL_MARK_PX = 20
+# A card app's sign-in steps on its QR page (addon.c qr_paint, the state file's step): fill, white on the step's solid
+# circle (the done check bold), at the mode page's glyph size.
+SIGNIN_PX = 44
+SIGNIN_STEPS = {'phone': 'device-mobile-fill', 'check': 'arrows-clockwise-fill', 'done': 'check-bold',
+                'fail': 'cloud-slash-fill', 'error': 'x-bold'}
 PL_MARKS = {'in': ('check-circle-fill', {'d': 0xababab, 'l': 0x5c5c5c}), 'add': ('plus-circle-fill', {'d': 0x4fb477, 'l': 0x4fb477}),
             'out': ('minus-circle-fill', {'d': 0xff6b5e, 'l': 0xff6b5e})}
 
@@ -462,4 +467,5 @@ def images(t):
     out |= {f'{prefix}_mark_{n}_{k}': phosphor(glyph, MARK_PX, c) for n, glyph in MARKS.items() for k, c in MARK_INKS.items()}
     out |= {f'{prefix}_store_pick_{k}': phosphor('arrow-circle-down', MARK_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
     out |= {f'{prefix}_store_auto_{k}': phosphor('arrows-clockwise', MARK_PX, c) for k, c in FOLDER_INKS.items()}
+    out |= {f'{prefix}_signin_{n}': phosphor(g, SIGNIN_PX, 0xffffff) for n, g in SIGNIN_STEPS.items()}
     return out

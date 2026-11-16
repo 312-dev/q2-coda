@@ -14208,7 +14208,7 @@ passed()
 CAPS='/tmp/q2-addon.caps'
 m=AppMachine(); stream_rows(m); caps=bytes(m.files[CAPS])
 assert caps.endswith(b'\n') and caps.count(b'\n')==1,caps
-assert set(caps.split())=={b'playlist',b'progress',b'pages',b'library',b'goto',b'sleep',b'game',b'audio',b'sections',b'art',b'window',b'urls',b'sort',b'field',b'more',b'fav',b'now',b'catalogue',b'ratings',b'artist',b'album',b'playlists',b'storage'},caps
+assert set(caps.split())=={b'playlist',b'progress',b'pages',b'library',b'goto',b'sleep',b'game',b'audio',b'sections',b'art',b'window',b'urls',b'sort',b'field',b'more',b'fav',b'now',b'catalogue',b'ratings',b'artist',b'album',b'playlists',b'storage',b'signin'},caps
 m.files[CAPS]=bytearray(b'stale\n'); stream_rows(m); assert m.files[CAPS]==caps; passed()
 # Card games (addon.c, q2app game=1): Library's Games lists them, Streaming doesn't. A row runs the binary
 # over the screen; each input event reaches its socket as a text datagram instead of the UI (a held Return
@@ -14628,21 +14628,30 @@ code=[[(x*7+y*3)%5<2 for x in range(21)] for y in range(21)]
 hexed=''.join(''.join('%x'%sum(8>>b for b in range(4) if d*4+b<21 and row[d*4+b]) for d in range(6)) for row in code)
 m.files[SSTATE]=bytearray(f'addr=192.168.1.23:8080\ndl=0\nhold=0\nnote=Online as alice\npin=548001\nqr={hexed}\nqrsize=21\n'.encode())
 m.pick(0); qp=m.top; assert m.nodes[qp]['name']=='qrcode_page'
-assert {'Soulseek','192.168.1.23:8080','548 001','Online as alice','Scan with your',"phone's camera"}<=set(texts(qp)),texts(qp)
-qr=next(w for w in m.nodes if m.nodes[w]['type']=='view' and m.get(w+O['W_PARENT'])==qp and cf_geometry(m,w)==(16,40,186,186))
-m.bands.clear(); m.rounded.clear(); m.call(address=HOOKS['widget_on_paint_border'][0],args=(qr,m.canvas,0,0))
-mod,off=186//25,(186-186//25*21)//2; want=[]
+# One view the size of the page, painted (addon.c qr_paint): the code on its plate centred under the status row, the
+# app's note under it and the address and spaced PIN under that.
+view=next(w for w in m.nodes if m.nodes[w]['type']=='view' and m.get(w+O['W_PARENT'])==qp)
+def qr_painted():
+    m.bands.clear(); m.rounded.clear(); m.letters.clear(); m.call(address=HOOKS['widget_on_paint_border'][0],args=(view,m.canvas,0,0))
+    return [l['text'] for l in m.letters]
+said=qr_painted(); assert said==['Online as alice','or open 192.168.1.23:8080  \u00b7  PIN 548 001'],said
+side,x0,y0=166,(375-166)//2,4; mod,off=side//25,(side-side//25*21)//2; want=[]
 for y,row in enumerate(code):
     x=0
     while x<21:
         r=0
         while x+r<21 and row[x+r]: r+=1
-        if r: want.append((off+x*mod,off+y*mod,r*mod,mod))
+        if r: want.append((x0+off+x*mod,y0+off+y*mod,r*mod,mod))
         x+=r or 1
-assert [b[:4] for b in m.bands]==want and {b[4] for b in m.bands}=={color_t(0)} and m.rounded[0]['rect']==(0,0,186,186),(m.bands[:3],want[:3],m.rounded[:1]); passed()
-# No address (no Wi-Fi): the code hides and the page says so; a second later it follows the file.
+assert [b[:4] for b in m.bands]==want and {b[4] for b in m.bands}=={color_t(0)} and m.rounded[0]['rect']==(x0,y0,side,side),(m.bands[:3],want[:3],m.rounded[:1]); passed()
+# No address (no Wi-Fi): no code, and the page says so; a second later it follows the file.
 m.files[SSTATE]=bytearray(b'dl=0\nhold=0\nnote=Connect the Q2 to Wi-Fi\npin=548001\nqr=\nqrsize=0\n'); m.advance(1000)
-assert not m.nodes[qr]['visible'] and 'Connect the Q2 to Wi-Fi' in texts(qp),texts(qp); m.destroy(qp); m.top=m.page; passed()
+said=qr_painted(); assert not m.bands and 'Connect the Q2 to Wi-Fi' in said,said
+# A step (q2-subsonic's sign-in) is a mode page: a solid circle, its glyph, the title and the line.
+m.files[SSTATE]=bytearray(f'addr=192.168.1.23:8080\npin=548001\nqr={hexed}\nqrsize=21\nstep=check\ntitle=Signing In\u2026\nline=Checking with music.example.com\n'.encode()); m.advance(1000)
+said=qr_painted(); assert said==['Signing In\u2026','Checking with music.example.com'] and len(m.rounded)==1 and not m.bands,said
+assert any(i.endswith('signin_check') for i in m.image_loads),m.image_loads[-3:]
+m.destroy(qp); m.top=m.page; passed()
 # Holding standby off: while the add-on asks (hold=1), each poll resets standby and auto power-off
 # (not the screen's); once it stops by itself (its loop's pid gone), it is let go.
 m.files[SSTATE]=bytearray(b'addr=x\ndl=1\nhold=1\n'); names=m.poll()
@@ -14711,7 +14720,9 @@ m.worker(); assert m.labels()==['Starting File Browser…']; m.advance(500)
 m.files[FSTATE]=bytearray(f"addr=192.168.1.23:8000\nhold=0\nnote=Manage the card's files there\npin=548001\nqr={hexed}\nqrsize=21\nversion=q2f-v1.0\n".encode())
 m.answer('ok','refresh','',FMENU); assert m.requests[-1]==('menu',) and m.labels()==FLABELS
 qp=m.top; assert m.nodes[qp]['name']=='qrcode_page'
-assert {'File Browser','192.168.1.23:8000','548 001',"Manage the card's files there",'Scan with your'}<=set(texts(qp)),texts(qp)
+view=next(w for w in m.nodes if m.nodes[w]['type']=='view' and m.get(w+O['W_PARENT'])==qp)
+m.letters.clear(); m.call(address=HOOKS['widget_on_paint_border'][0],args=(view,m.canvas,0,0))
+assert [l['text'] for l in m.letters]==["Manage the card's files there",'or open 192.168.1.23:8000  \u00b7  PIN 548 001'],m.letters
 m.destroy(qp); m.top=m.page
 # Asked again while on top: the same rows, and no second code page.
 m.advance(2000); m.worker(); assert m.requests[-1]==('menu',) and m.top==m.page and m.labels()==FLABELS; passed()
@@ -14835,7 +14846,10 @@ m.answer('ok','refresh','',DZOUT); assert m.requests[-1]==('menu',) and m.top==m
 assert m.labels()==['Deezer','Sign In from Your Phone','Press to show the code','Stop Deezer','Downloads carry on next time']
 assert [chevron(m,i) for i in range(2)]==[True,False]  # remote opens the QR page
 m.pick(0); qp=m.top; assert m.nodes[qp]['name']=='qrcode_page'
-assert {'Deezer','192.168.1.23:8090','135 790','Paste your Deezer ARL there'}<=set(texts(qp)),texts(qp); m.destroy(qp); m.top=m.page; passed()
+view=next(w for w in m.nodes if m.nodes[w]['type']=='view' and m.get(w+O['W_PARENT'])==qp)
+m.letters.clear(); m.call(address=HOOKS['widget_on_paint_border'][0],args=(view,m.canvas,0,0))
+assert [l['text'] for l in m.letters]==['Paste your Deezer ARL there','or open 192.168.1.23:8090  \u00b7  PIN 135 790'],m.letters
+m.destroy(qp); m.top=m.page; passed()
 # Signed in: Play/Pause held on a list downloads all of it; a list's song row, pressed, downloads it.
 SONGS='/mnt/mmc/Deezer'
 DZMENU=[('local',SONGS+'/','Downloaded Songs','2 songs on the card','',''),('list','tracks','Liked Songs','','liked','download'),

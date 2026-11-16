@@ -457,6 +457,8 @@ const char *addon_name(int a), *addon_id(int a), *addon_icon(int a);
 int card_path(const char *path); /* on the card, no ".." segment: what an app or server may name */
 int addon_is_icon(const char *name); /* a card app's Streaming icon, by its file:// name */
 void addon_poll(void), addon_stop(void), addon_paint(void *w, void *canvas), addon_card_away(void);
+const char *addon_qr_title(void *win); /* addon.c: the QR page's app name, 0 for another window */
+int addon_qr_page(void *win); /* addon.c: win is the QR page, where the wheel does nothing */
 void addon_forget(const char *dir), addon_quit(const char *dir);
 /* addon.c: a catalogue app started for a catplay (0 running, 1 started, -1 can't), and whether a
  * started one reads it yet */
@@ -629,6 +631,7 @@ void forget_rows(void *list);   /* navigation.c: a hidden list opens at its top 
 void paint_art(void *w, void *canvas, const char *name, int x, int y);
 void final_text(void *canvas, const char *face, const unsigned *s, const void *r, unsigned px,
                 unsigned color);
+unsigned ar_wide(const char *s, unsigned *out, unsigned n); /* artist_page.c: UTF-8 to wide */
 int bar_status(void);
 void slider_label(void *w, int x, int y, int ww, int h, int px, const char *face);
 void text_ink(void *w, unsigned color, int n); /* a label's final 0xAARRGGBB, in either half */
