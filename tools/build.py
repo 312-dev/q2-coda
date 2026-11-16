@@ -933,7 +933,7 @@ WEB = {
     ('山灵音乐', 'Shanling Q2'),
     ('支持音频格式:ISO,DFF,DSF,APE,FLAC,AIF,AIFF,WAV,M4A,AAC,MP2,AC3,DTS,MP3,OGG,WMA,CUE,M3U,M3U8<br/>图片格式:PNG,JPG,JPEG<br/>歌词格式:LRC<br/>固件升级包:BIN',
      'Audio: ISO, DFF, DSF, APE, FLAC, AIF, AIFF, WAV, M4A, M4B, AAC, MP2, AC3, DTS, MP3, OGG, WMA, CUE, M3U, M3U8<br/>'
-     'Pictures: PNG, JPG, JPEG<br/>Lyrics: LRC<br/>Videos: MP4, M4V, MKV, AVI, MOV, MPG<br/>Books: TXT, EPUB<br/>Firmware: BIN'),
+     'Pictures: PNG, JPG, JPEG<br/>Lyrics: LRC<br/>Videos: MP4, M4V, MKV, AVI, MOV, MPG<br/>EQ presets: TXT<br/>Firmware: BIN'),
     ('''上传文件
           <input id="fileupload" type="file" name="files[]" multiple>
         </button>''', '''Upload Files
@@ -947,7 +947,7 @@ WEB = {
     ('创建文件夹', 'New Folder'), ('返回上一级', 'Up'), ('正在进行文件上传', 'Uploading'), ('新建文件夹', 'New Folder'),
     ('请输入要创建的文件夹的名称:', 'Folder name:'), ('取消', 'Cancel'), ('移动项目', 'Move'), ('请输入此项的新位置:', 'New location:')],
   'usr/share/web/js/index.js': [
-    ('"LRC","BIN"];', '"LRC","BIN","M4B","MP4","M4V","MKV","AVI","MOV","MPG","TXT","EPUB"];'),
+    ('"LRC","BIN"];', '"LRC","BIN","M4B","MP4","M4V","MKV","AVI","MOV","MPG","TXT"];'),
     ('function _showError(', MKDIR_JS),
     ('function _reload(path) {', ESC_JS),
     ('// A file or folder name as HTML text, quotes included, for markup built from strings.', PIN_JS),
@@ -1553,7 +1553,7 @@ FUNCTIONS = {
  'canvas_set_text_color': ('int', 'void *, unsigned'),
  'canvas_draw_text_in_rect': ('int', 'void *, const unsigned *, unsigned, const void *'),
  'widget_draw_text_in_rect': ('int', 'void *, void *, const unsigned *, unsigned, const void *, int'),  # ringnav_ellipsis_text
- 'canvas_draw_text': ('int', 'void *, const unsigned *, unsigned, int, int'),  # Books (books.c)
+ 'canvas_draw_text': ('int', 'void *, const unsigned *, unsigned, int, int'),  # lyrics.c's words
  'canvas_measure_text': ('float', 'void *, const unsigned *, unsigned'),
  'canvas_fill_rounded_rect': ('int', 'void *, const void *, const void *, const void *, unsigned'),
  'canvas_stroke_rounded_rect': ('int', 'void *, const void *, const void *, const void *, unsigned, unsigned'),
@@ -1731,7 +1731,7 @@ FUNCTIONS = {
  'folder_reset_variable': ('int', 'void'),  # a fresh visit: layer 0, no path, enter history or CUE
  'folder_reinit_navbarname': ('int', 'void'),
  'folder_refresh': ('int', 'void *'),
- # Videos (books.c): stop the music, the DAC's power, and the screen and standby timeouts held off
+ # Videos (videos.c): stop the music, the DAC's power, and the screen and standby timeouts held off
  'mclGetOutputWay': ('int', 'void'),
  'mclGetLyricSize': ('int', 'void'),  # the playing track's lyric lines, 0 without
  'player_play_pause': ('int', 'void'),
@@ -1876,7 +1876,7 @@ CONTEXT_DATA = {'bt_showcoding': 4, 'g_memory_info': 3476, 'g_folder_path': 1024
                 'bt_initstatus': 4,  # Bluetooth's start-up status: -102 is stock's "Bluetooth abnormal" (system.c reboot_record)
                 'wifi_showlist': 4}  # the Wi-Fi page's scan records: name @0, flags @4 (wifi_rows.c)
 # Windows the payload creates at runtime (window_create), so no rootfs asset names them.
-PAYLOAD_WINDOWS = {'searchstrip_page', 'playlistedit_page', 'playlistsongs_page', 'addsongs_page', 'chapters_page', 'coverflow_page', 'photos_page', 'books_page', 'games_page', 'mostplayed_page', 'shuffle_page', 'upnext_page', 'ratings_page', 'era_page', 'era_albums_page', 'rated_page', 'longsongs_page', 'spotify_page',
+PAYLOAD_WINDOWS = {'searchstrip_page', 'playlistedit_page', 'playlistsongs_page', 'addsongs_page', 'chapters_page', 'coverflow_page', 'games_page', 'mostplayed_page', 'shuffle_page', 'upnext_page', 'ratings_page', 'era_page', 'era_albums_page', 'rated_page', 'longsongs_page', 'spotify_page',
                    'spotbrowse_page', 'radio_page', 'radionp_page', 'streamconf_page', 'tidal_downloads', 'apps_page',
                    'addon_page', 'app_songs', 'qrcode_page', 'battery_page', 'carremote_page', 'carpair_page', 'artistrows_page',
                    'storage_page', 'downloads_page', 'usbchoose_page', 'usbdebug_page', 'adbauth_page'}
@@ -2586,12 +2586,12 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     xx = 'release/assets/default/raw/images/xx/'
     icons = {n: ('menu_musicdown.png' if n.endswith('down.png') else 'menu_music.png',
                  (ROOT/'assets/icons'/n).read_bytes()) for n in ICONS}
-    drawn = ('podcasts', 'audiobooks', 'books', 'videos')
+    drawn = ('podcasts', 'audiobooks', 'videos')
     icons.update({f'local_{n}.png': (like, (ROOT/'assets/icons'/f'local_{n}.png').read_bytes() if n in drawn
                                      else cat(xx+like)) for n, like in dict(
         shuffle='playset_playmode.png', scrobble='wifiset_wifi.png', podcasts='netservice_dlna.png',
-        audiobooks='playset_foldercover.png', photos='playset_covermode.png', books='system_language.png',
-        videos='system_display.png', longsongs='system_time.png', era='local_genre.png').items()})
+        audiobooks='playset_foldercover.png', videos='system_display.png', longsongs='system_time.png',
+        era='local_genre.png').items()})
     icons['local_games.png'] = ('system_language.png', (ROOT/'assets/icons/local_games.png').read_bytes())
     for n in ('spotify', 'radio', 'app', 'config'):  # Streaming's Spotify, Internet Radio, card app and Configuration rows
         icons[f'stream_{n}.png'] = ('list_tidal.png', (ROOT/'assets/icons'/f'stream_{n}.png').read_bytes())

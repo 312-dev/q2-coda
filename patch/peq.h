@@ -309,8 +309,7 @@ typedef struct {
     int id, fresh, ending;
 } player_state;
 
-/* The payload's shared helpers: coverflow.c's pages, hashes and worker, photos.c's, navigation.c's.
- */
+/* The payload's shared helpers: coverflow.c's pages, hashes and worker, navigation.c's. */
 void *text(void *parent, int x, int y, int w, int h);
 /* feedback.c: OLED's empty and offline note (docs/oled-design.md#empty-and-offline); 0 elsewhere */
 int feedback_empty(void *parent, int free, const char *message, const char *hint);
@@ -363,8 +362,7 @@ void list_toggle(void *label, const char *title, int on); /* navigation.c: a row
 void list_value(void *label, const char *title, const char *value);
 char *csv_find(char *list, const char *item); /* navigation.c: comma lists */
 int csv_toggle(char *list, unsigned size, const char *item);
-void *bottom_caption(void *parent, int h);
-int text_differs(void *w, const char *s);
+int text_differs(void *w, const char *s); /* coverflow.c */
 long file_size(const char *path);                   /* coverflow.c: -1 when it can't be opened */
 int picture_size(const char *path, int *w, int *h); /* coverflow.c */
 void *read_all(const char *path, unsigned max, unsigned *size); /* scrobble.c */
@@ -373,7 +371,6 @@ int thumb(const char *src, const char *dst, int w, int h);
 extern volatile unsigned ff_kills; /* coverflow.c: ffmpeg runs killed or never started */
 int card_space(const char *dir);
 int card_room(const char *dir, unsigned mb, unsigned pct);
-int by_string(const void *a, const void *b);
 unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n);
 unsigned fnv(unsigned h, const unsigned char *s);
 void stop_timer(unsigned *timer), rearm(unsigned *timer, int (*fn)(const void *), unsigned ms);
@@ -553,8 +550,8 @@ int stream_cache(int spotify); /* navigation.c: Streaming's Configuration, a cap
 void album_memory(void *r);
 void draw_centred(void *canvas, const unsigned *s, unsigned n, const void *r, unsigned px,
                   unsigned color);
-unsigned book_char(const unsigned char *t, unsigned n,
-                   unsigned *i); /* books.c: UTF-8, else Latin-1 */
+unsigned utf8_char(const unsigned char *t, unsigned n,
+                   unsigned *i); /* lyrics.c: UTF-8, else Latin-1 */
 int utf8_text(const char *s);    /* xiph.c: valid UTF-8, a 4-byte character too */
 /* Lyrics as lyrics.c's loader reads them: each line's start (ms, LRC_FAR unsynced), the order it
  * came in, its UTF-8 text and its word stamps (A2's <mm:ss.xx>), each the ms a word starts and its
@@ -613,13 +610,13 @@ int headset_gain(void);
 int spot_status(void), radio_status(void), video_status(void);
 unsigned spot_session(void), radio_session(void), video_session(void);
 void spot_set_playing(int playing), radio_set_playing(int playing), video_set_playing(int playing);
-int video_start(const char *file, int radio); /* books.c */
+int video_start(const char *file, int radio); /* videos.c */
 /* peq_ui.c's T9 edit, named EDIT_NAME: navigation.c's search_key cancels it on Return while its
  * keyboard is up. */
 #define EDIT_NAME "q2_edit"
 void *edit_create(void *item, const char *input_type, int y, int h);
-const char *output_device(char *vol); /* books.c */
-void dac_take(void);                  /* books.c */
+const char *output_device(char *vol); /* videos.c */
+void dac_take(void);                  /* videos.c */
 /* navigation.c: the theme's font for role on w, or stock's; canvas text's face, 0: the system
  * font */
 int theme_font(void *w, int role, int was);
@@ -690,13 +687,13 @@ void coverflow_clean_end(void); /* coverflow.c: a clean end mid-build strikes no
 /* Playlists as Cover Flow: coverflow.c's covers of lists (p_deque_playlist), 0 when it has none,
  * its centred playlist (a cover's hold) and its close of the covers; playlists.c's open of playlist
  * cd_num from its row on the Playlists page win under them, its index in the live list, and New
- * Playlist (edit 0) or Select Playlists… (1) on that page. */
+ * Playlist on that page. */
 int coverflow_playlists(void *lists);
 int coverflow_playlist_queue(void); /* the queue a playlist's cover played, no load since */
 void *coverflow_playlist(void *page), *coverflow_playlists_close(void);
 void playlist_open(void *win, int cd_num);
 unsigned playlist_index(int cd_num);
-void playlists_edit(int edit);
+void playlists_new(void);
 int rockbox_available(void);   /* theme_engine.c: a regular Rockbox binary on the card */
 int groovebox_available(void); /* theme_engine.c: the Groovebox card app's binary on the card */
 #define SHORTCUT_GROOVEBOX 10  /* IPOD SHORTCUT's Groovebox, after the ten stock-era values */

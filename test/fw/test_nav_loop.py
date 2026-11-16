@@ -1197,7 +1197,7 @@ def test_now_playing_animates_while_its_lyrics_glide(fw, st, top, glide, animati
     assert fw.fn('navigation__np_animating', C.c_int)() == animating
 
 
-class Vid(C.Structure):  # books.c's q2video player, as test_headset.py mirrors it
+class Vid(C.Structure):  # videos.c's q2video player, as test_headset.py mirrors it
     _fields_ = [*((k, C.c_int) for k in 'paused volume gain pid sock seek'.split()),
                 *((k, C.c_uint) for k in 'polled control_at seek_at key at paused_at'.split())]
 
@@ -1227,7 +1227,7 @@ def test_dark_the_window_manager_paints_only_an_animation(fw, lit, animating, pa
 def test_a_player_or_game_on_the_framebuffer_keeps_the_ui_off_it(fw, away):
     fw.var('g_backlight_status', C.c_ubyte).value = 1
     if away == 'video':
-        fw.var('books__vid', Vid).pid = 77
+        fw.var('videos__vid', Vid).pid = 77
     else:
         fw.var('addon__gm', C.c_int).value = 78  # addon.c's gm, its pid first
     wm = Wm(fw)
@@ -1303,14 +1303,14 @@ class Player:
 
 
 # Clicker (IPOD CLICKER: 0 Both, 1 Speaker, 2 Headphones) against who listens and whether q2player mixes: the
-# buzzer's clicks and the mixed ones sent. Speaker is Key Tone as it was; Headphones has the buzzer only while
-# nothing mixes, under Speaker's gate; Both has the buzzer whatever listens.
+# buzzer's clicks and the mixed ones sent. Speaker is Key Tone as it was; Headphones never sounds the buzzer, with
+# headphones in or not, mixed or not (a pause, the stock player: no click); Both has the buzzer whatever listens.
 WHEEL = b'{mcl-click\\wheel}'
 @pytest.mark.parametrize('clicker, listening, there, status, buzzed, sent', [
     (b'1', False, True, 2, True, False), (b'1', True, True, 2, False, False),
     (b'2', False, True, 2, False, True), (b'2', True, True, 2, False, True),
-    (b'2', False, True, 3, True, False), (b'2', True, True, 3, False, False),
-    (b'2', False, False, 2, True, False), (b'2', True, False, 2, False, False),
+    (b'2', False, True, 3, False, False), (b'2', True, True, 3, False, False),
+    (b'2', False, False, 2, False, False), (b'2', True, False, 2, False, False), (b'2', False, True, 1, False, False),
     (b'0', True, True, 2, True, True), (b'0', False, True, 1, True, False), (b'0', True, False, 2, True, False),
 ])
 def test_the_clicker_routes_a_click(fw, clicker, listening, there, status, buzzed, sent):
@@ -2732,7 +2732,7 @@ def test_a_finger_is_noted_for_stale_heal(fw, stock_bytes, st, kind):
 
 def test_a_playing_video_takes_key_releases_and_nothing_reaches_the_ui(fw, stock_bytes, st):
     keys = Input(fw, stock_bytes)
-    fw.var('books__vid', Vid).pid = 77
+    fw.var('videos__vid', Vid).pid = 77
     fw.var('g_volume', C.c_ubyte).value, fw.var('g_maxvolume', C.c_ubyte).value = 30, 100
     keys(DOWN, KEY_PLAY), keys(UP, KEY_PLAY, 10)
     keys.frame.value = keys.clock.now
@@ -2910,7 +2910,7 @@ def test_homes_list_ends_on_its_last_shown_row_over_a_hidden_shortcut_row(fw, ke
 def test_play_follows_a_playing_video(fw, keys):
     ui = Ui(fw)
     list_page(ui)
-    vid = fw.var('books__vid', Vid)
+    vid = fw.var('videos__vid', Vid)
     vid.pid = 77
     assert keys(KEY_PLAY) == STOP and vid.paused == 1 and not fw.calls('player_play_pause')
 

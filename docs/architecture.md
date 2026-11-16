@@ -26,7 +26,7 @@ The payload is one MIPS o32 image linked by `patch/link.ld`: `.text` and `.rodat
 It is compiled from two lists, and a new file in neither is not part of it:
 
 - **`NAVIGATION`** (`tools/build.py`): `navigation.c` and the files split out of it. They include `patch/navigation.h`.
-- **`UI_SOURCES`** (`tools/peq.py`): the features that stand apart (Cover Flow, the EQ page, Spotify, card apps, Books, Games and the rest). They include `patch/peq.h`.
+- **`UI_SOURCES`** (`tools/peq.py`): the features that stand apart (Cover Flow, the EQ page, Spotify, card apps, Games and the rest). They include `patch/peq.h`.
 
 The player's payload is a third list, in `compile_common` (`tools/peq.py`): `peq.c`, `peq_player.c`, `mp3_gapless.c`, `lavf_gapless.c` and the chosen `flac_*.c`. `peq.c` is in both programs.
 

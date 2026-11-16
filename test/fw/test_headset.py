@@ -491,7 +491,7 @@ def test_a_card_game_with_the_sound_lets_a_headset_pause_what_plays(fw, how):
 
 def test_a_playing_video_takes_the_keys(fw):
     player = Player(fw)
-    fw.var('books__vid', Vid).pid = 4321
+    fw.var('videos__vid', Vid).pid = 4321
     fw.mock('fw_socket', lambda *_: 7)
     fw.fn('media_key', None, C.c_uint)(KEY_PLAY)
     assert player.toggles() == 0 and fw.fn('media_owner', C.c_int)() == 4
@@ -499,7 +499,7 @@ def test_a_playing_video_takes_the_keys(fw):
 
 def test_a_video_pauses_and_resumes_by_the_ears(fw):
     player = Player(fw)
-    vid = fw.var('books__vid', Vid)
+    vid = fw.var('videos__vid', Vid)
     vid.pid = 4321
     fw.mock('fw_socket', lambda *_: 7)
     ears(fw, player, 3, 1)
@@ -510,7 +510,7 @@ def test_a_video_pauses_and_resumes_by_the_ears(fw):
 
 def test_another_video_cancels_the_resume(fw):
     player = Player(fw)
-    vid = fw.var('books__vid', Vid)
+    vid = fw.var('videos__vid', Vid)
     vid.pid = 4321
     fw.mock('fw_socket', lambda *_: 7)
     ears(fw, player, 3, 1)
@@ -583,9 +583,9 @@ def test_a_focused_page_whose_player_isn_t_running_leaves_the_key_to_the_one_pla
 
 
 def players(fw, video=0, radio=0, spotify=0):
-    """Which players run: video (books.c vid.pid), radio (radio.c rd.active, rd.pid; q2video quits when told),
+    """Which players run: video (videos.c vid.pid), radio (radio.c rd.active, rd.pid; q2video quits when told),
     Spotify (spotify.c sp.active)."""
-    fw.var('books__vid', Vid).pid = video
+    fw.var('videos__vid', Vid).pid = video
     rd = fw.var('radio__rd', Rd)
     rd.pid, rd.active = radio, bool(radio)
     sp = fw.var('spotify__sp', Sp)
@@ -671,7 +671,7 @@ def test_a_focused_radio_page_takes_the_keys_from_a_video(fw):
     rd, keep = radio(fw)
     page = top_window(fw, 'radio_page')
     fw.fn('media_key', None, C.c_uint)(KEY_PLAY)
-    assert sent(fw) == [b'q'] and rd.pid == 0 and fw.var('books__vid', Vid).paused == 0
+    assert sent(fw) == [b'q'] and rd.pid == 0 and fw.var('videos__vid', Vid).paused == 0
 
 
 @pytest.mark.parametrize('playing, command', [(0, b's'), (1, b'P')])

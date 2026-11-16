@@ -2535,11 +2535,17 @@ def test_a_scrubs_presses_are_doubles_and_the_next_waits_for_nothing(fw, ui):
     assert press(5000 + 2 * DOUBLE) == 1 and press.timer.value  # later: a first press again
 
 
-# Photos' viewer steps like Home's carousel.
-def test_photos_viewer_glides_a_photo_a_tick(fw, ui):
-    viewer = Carousel(fw, ui, name='photos_page')
+# Cover Flow's page steps like Home's carousel; any other page's slide_menu is left to stock.
+def test_coverflow_s_page_glides_a_cover_a_tick(fw, ui):
+    covers = Carousel(fw, ui, name='coverflow_page')
     key(fw, ui, KEY_NEXT)
-    assert viewer.started == [(-viewer.stride, viewer.duration)]
+    assert covers.started == [(-covers.stride, covers.duration)]
+
+
+def test_another_page_s_slide_menu_is_not_a_carousel(fw, ui):
+    other = Carousel(fw, ui, name='games_page')
+    key(fw, ui, KEY_NEXT)
+    assert not other.started
 
 
 def test_a_glide_that_cannot_hear_its_end_lands_at_once(fw, ui):

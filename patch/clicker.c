@@ -1,8 +1,10 @@
 /* The Clicker (docs/internals.md#key-tone): where Key Tone's click is heard. System settings ->
  * Controls -> Clicker, the row that was Key Tone's, cycles Speaker, Headphones, Both and Off.
  * Speaker is the MCU's buzzer as Key Tone was, silent while headphones, Bluetooth or a USB DAC
- * listen. Headphones has q2player mix the click into what it plays ({mcl-click\KIND}), and while
- * nothing is mixed (a pause, nothing playing, the stock player) the buzzer clicks as for Speaker.
+ * listen. Headphones has q2player mix the click into what it plays ({mcl-click\KIND}) and never
+ * sounds the buzzer: while nothing is mixed (a pause, nothing playing, the stock player) there is no
+ * click. ponytail: a click while nothing plays would need its own PCM through the headphone DAC, as
+ * a paused q2player takes none.
  * Both has the mixed click and the buzzer whatever listens, as Click With Headphones lifted that
  * gate. Off is nothing: Key Tone off, stock's g_keytone_flag and SYSSET KEYTONE.
  * The output is IPOD CLICKER (0 Both, the default, 1 Speaker, 2 Headphones), so an absent key is
@@ -78,6 +80,6 @@ int clicker_route(int listening) {
         /* never waits on the player, nor dies with it (MSG_DONTWAIT | MSG_NOSIGNAL) */
         if (fd != -1 && send(fd, m, strlen(m), 0x4040) > 0) mixed = 1;
     }
-    int buzz = mode == SHOWN_BOTH || (!listening && (mode == SHOWN_SPEAKER || !mixed));
+    int buzz = mode == SHOWN_BOTH || (mode == SHOWN_SPEAKER && !listening);
     return (buzz ? ROUTE_BUZZER : 0) | (mixed ? ROUTE_MIXED : 0);
 }
