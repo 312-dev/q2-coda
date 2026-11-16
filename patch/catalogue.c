@@ -403,7 +403,8 @@ static char *clip(char *o, char *end, int n) {
     return o >= end ? o : n >= 0 && (unsigned)n < room(o, end) ? o + n : end;
 }
 #define PUT(o, end, ...) ((o) = clip((o), (end), tk_snprintf((o), room((o), (end)), __VA_ARGS__)))
-/* s quoted for SQL into o, as far as end. */
+/* s quoted for SQL into o, as far as end, unterminated: the caller ends the string (a PUT after
+ * it, or *o = 0). */
 static char *sq(char *o, char *end, const char *s) {
     if (o + 2 >= end) return o > end ? o : end;
     *o++ = '\'';
@@ -1215,8 +1216,8 @@ int catalogue_np_info(const char *path, char *genre, int *year) {
             PUT(o, sql + sizeof sql - CAT_SLACK,
                 "select style,year from cat.serverall where fileurl=");
             o = sq(o, sql + sizeof sql - CAT_SLACK, ix_str(&cat.ix, e->path));
-            if (o < sql + sizeof sql - CAT_SLACK)
-                np->known = !sqlite3_exec(*cat.stock_slot, sql, np_row, np, 0);
+            if (o < sql + sizeof sql - CAT_SLACK) /* sq leaves the end to its caller */
+                *o = 0, np->known = !sqlite3_exec(*cat.stock_slot, sql, np_row, np, 0);
         }
     }
     if (!np->known) return 0;

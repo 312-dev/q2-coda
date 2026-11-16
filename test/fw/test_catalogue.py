@@ -878,6 +878,27 @@ def test_now_playings_info_page_has_the_catalogues_genre_and_year_for_a_server_s
     slot.value = 0
 
 
+def test_now_playings_info_query_ends_at_the_rows_path(rig, fw):
+    """The query is built on the stack: a shorter path asked after a longer one must not carry the longer one's
+    tail into its SQL (the query failed, so the page had no genre or year, wherever the stack held old bytes)."""
+    rig.write(1, [song_row('s1', 'Short', 'B', 'A', 1, 100, 1),
+                  song_row('s22', 'Long', 'B', 'A', 1, 100, 2, album_id='al1-with-a-long-id')])
+    rig.poll()
+    slot = C.c_void_p.from_address(STOCK_SLOT)
+    rig.lib.sqlite3_open(str(rig.tmp/'database.db').encode(), C.byref(slot))
+    fw.fn('catalogue_attach', None, C.c_void_p)(STOCK_SLOT)
+    info = fw.fn('catalogue_np_info', C.c_int, C.c_char_p, C.c_char_p, C.POINTER(C.c_int))
+
+    def ask(path):
+        genre, year = C.create_string_buffer(96), C.c_int(-1)
+        return (genre.value.decode(), year.value) if info(path.encode(), genre, C.byref(year)) else None
+    assert ask(url('s22', 'al1-with-a-long-id')) == ('Rock', 2001)
+    assert ask(url('s1')) == ('Rock', 2001)
+    assert rig.sqls[-1].endswith(b"where fileurl='" + url('s1').encode() + b"'")
+    rig.lib.sqlite3_close(slot)
+    slot.value = 0
+
+
 def test_a_server_albums_cover_is_the_apps_by_its_album_id(rig, fw):
     """The app keeps /mnt/mmc/.<id>/covers/<album id>.jpg (docs/server-library.md#covers): a server row's path,
     or its offline copy's, names it, and the Library's album rows and grids (grid_cover) thumbnail it with
