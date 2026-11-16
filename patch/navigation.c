@@ -9504,6 +9504,7 @@ static void thumb_poll(void) {
 }
 
 int ringnav_sleep(void *loop) {
+    splash_poll();
     stale_heal();
     quick_poll();
     headset_poll();
