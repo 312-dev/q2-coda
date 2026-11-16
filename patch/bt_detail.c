@@ -172,7 +172,7 @@ static void forget(void *ctx, int row, int toggle_on) {
 static void forget_ask(void) {
     static const char *const rows[] = { "Cancel", "Forget Device" };
     confirm(&(confirm_t){ "Forget %s?", bd.name, "You'll need to pair again to use it.", 0, rows, 2,
-                          CONFIRM_DESTRUCTIVE, -1, 0, 0, 0, 0, forget, 0 });
+                          CONFIRM_DESTRUCTIVE, -1, 0, 0, 0, 0, forget, 0, 0 });
 }
 
 /* Rename's Next: why the name can't be used, or 0 once it is set. */
