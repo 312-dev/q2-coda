@@ -563,7 +563,7 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   (`confirminfo_dialog`: Shut Down, Restart, the three Resets, Delete Song, Delete File, Unpair, the Wi-Fi
   network's Forget and Disconnect, Line Out and the rest) is drawn as the card with no change to its callers
   (`feedback.c` `feedback_confirm_dress`): its prompt named as the design writes it ("Forget This Network?" for
-  stock's "Delete Record?", "Use Line Out?" for its "Line Out sets max volume,continue?"), **Cancel** first and
+  stock's "Delete Record?", "Use Line Out?" for its "Line Out sets max volume, continue?"), **Cancel** first and
   selected when it opens, then the verb ("Shut Down", "Reset", "Delete"), never "OK"; a verb that loses something
   (Delete, Reset, Forget, Unpair, Remove, Clear) red after the gap. Delete Song's "Also delete source file" is the
   card's switch row. What the answer leaves alone, or why it asks (a caller's `feedback_confirm_foot`: Streaming
