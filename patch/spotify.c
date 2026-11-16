@@ -176,6 +176,12 @@ static unsigned spot_position(void) {
  * (videos.c). Bluetooth and USB outputs are left alone: librespot's sink plays on them itself
  * (spot_output). */
 static void spot_take(void) {
+    /* Guest Play on: a Spotify Connect session is a guest's, held paused until the owner allows it
+     * (docs/internals.md#guest-play-receivers) */
+    if (guest_net("spotify", "connect", "Spotify Connect")) {
+        spot_send_play(0); /* taken once allowed, when it plays again */
+        return;
+    }
     headset_manual();
     radio_stop(); /* Internet Radio's q2video holds the PCM */
     if (mclGetPlayStatus() != 1) player_stop(); /* 1 stopped */
@@ -1232,6 +1238,9 @@ int spot_status(void) {
     return sp.active ? (playing ? 2 : 3) : 0;
 }
 unsigned spot_session(void) { return fnv(FNV_SEED, (const unsigned char *)sp.track); }
+/* Play or pause, whatever the page's state (guest.c's hold and release). */
+void spot_send_play(int playing) { dgram_send(&sp.sock, SPOT_SOCK, playing ? "P" : "s", 1); }
+
 void spot_set_playing(int playing) {
     if (sp.active && playing != (spot_status() == 2)) {
         dgram_send(&sp.sock, SPOT_SOCK, playing ? "P" : "s", 1);
