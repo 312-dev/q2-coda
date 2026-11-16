@@ -13688,8 +13688,10 @@ m.row(1); assert m.asked()==('repeat','off'); t=len(m.threads); m.answer('offlin
 assert m.toasts[-1][3]=="Spotify didn't answer in time" and len(m.threads)==t and m.labels()[1]=='Shuffle'; m.back(); passed()
 # Account: the name, Premium, and Sign out after a confirmation; then the pairing prompt.
 m.row(8); assert m.asked()==('account',); m.answer(*ME); assert m.labels()==['Account','Alice','Premium','Sign Out','']
-m.row(1); assert m.labels()==['Sign Out of Spotify?','Cancel','Sign Out']; m.row(0); assert m.labels()[:2]==['Account','Alice']
-t=len(m.threads); m.row(1); m.row(1); assert m.asked()==('signout',) and len(m.threads)==t+1
+# Sign Out asks on the confirmation card (feedback.c confirm); its answer (spotify.c signout_answer) runs once it has closed
+def card(m,answer,row): m.call(address=payload_syms[answer],args=(0,row,0,0),gap=0,clear=False)
+m.row(1); card(m,'signout_answer',0); assert m.labels()[:2]==['Account','Alice']
+t=len(m.threads); m.row(1); card(m,'signout_answer',1); assert m.asked()==('signout',) and len(m.threads)==t+1
 m.answer(*OK,[]); assert m.labels()==PAIR
 # librespot exits on signout and its launcher restarts it: meanwhile no socket is no old add-on.
 m.serve=None; m.advance(2000); m.worker(); assert m.labels()==PAIR; m.advance(5000); m.worker(); assert m.labels()==PAIR
@@ -13879,11 +13881,10 @@ m.row(2); assert m.asked()==('collections','p2')
 m.answer(*OK,[('collection','c','C','1/1','','')]); m.row(0); m.row(1)
 assert m.asked()==('remove','collections','b,c')
 m.answer('ok','Remove 2 playlists, 1 tracks?','',[])
-assert m.labels()[0]=='Remove Downloads?' and 'Remove 2 playlists, 1 tracks?' in m.labels()
-m.row(2); assert m.asked()==('remove','collections','b,c','confirm')
+card(m,'remove_answer',1); assert m.asked()==('remove','collections','b,c','confirm')
 m.answer('ok','Removed','',[]); assert m.labels()[0]=='Storage Management'
 m.row(2); assert m.asked()==('remove','all','')
-m.answer('ok','Remove 1 playlists, 3 tracks?','',[]); m.row(1)  # Cancel preserves downloads
+m.answer('ok','Remove 1 playlists, 3 tracks?','',[]); card(m,'remove_answer',0)  # Cancel preserves downloads
 assert m.labels()[0]=='Storage Management'
 # Return before Clear All's preview answers: a later action's ok reply never opens Remove Downloads?.
 m.row(2); assert m.asked()==('remove','all',''); m.back(); assert m.labels()[0]=='Downloads'
@@ -14684,13 +14685,11 @@ m.tree[T]=[(n,8) for n in (*names,'13-2 C.flac.tmp','.cache-size')]; m.found=rec
 assert run(m,'tidal_downloads',0,0)==0; td=m.top; tdrows=lambda: m.nodes[m.find('scroll_view',td)]['children']
 LIST=['Tidal Downloads','B - Two','A - One','Clear All Downloads…']
 assert m.nodes[td]['name']=='tidal_downloads' and [l for l in m.labels(td) if l]==LIST,m.labels(td)
-ASK=['Remove Downloads?','2 tracks','Keeps settings','Cancel','Remove']
-m.click(tdrows()[2]); assert [l for l in m.labels(td) if l]==ASK,m.labels(td)
-m.click(tdrows()[1]); assert [l for l in m.labels(td) if l]==LIST  # Cancel, back on the Clear row
-assert m.nodes[m.find('scroll_view',td)]['_ringnav_index']==2
-m.click(tdrows()[2]); m.back(td); assert [l for l in m.labels(td) if l]==LIST and m.top==td  # Return is Cancel
+# Clear All Downloads asks on the confirmation card; its answer (library_lists.c td_answer) runs once it has closed
+def td_answer(row): m.call(address=payload_syms['td_answer'],args=(0,row,0,0),gap=0,clear=False); m.advance(1)
+m.click(tdrows()[2]); td_answer(0); assert [l for l in m.labels(td) if l]==LIST  # Cancel, back on the Clear row
 m.click(tdrows()[2]); m.found=[]  # stock's listing of the emptied folder
-m.click(tdrows()[2]); assert [p for p in m.files if p.startswith(T)]==[T+'/.cache-size'] and '/mnt/mmc/Music/keep.flac' in m.files
+td_answer(1); assert [p for p in m.files if p.startswith(T)]==[T+'/.cache-size'] and '/mnt/mmc/Music/keep.flac' in m.files
 assert [l for l in m.labels(td) if l]==['Tidal Downloads'] and empty_titles(m)[-1:]==['No Downloads Yet']; m.destroy(td); passed()  # empty_list: the name kept hidden, the empty state
 # Stream mode (q2-deezer's stream.go, addon.c stream_poll): its .play file names a session's folder; its
 # first song, once there, plays as a local album does (Now Playing opening); songs that come later join the

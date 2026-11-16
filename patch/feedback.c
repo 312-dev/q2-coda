@@ -290,9 +290,9 @@ void empty_paint(void *w, void *canvas, const empty_t *e, int top) {
     tk_snprintf(art, sizeof art, "empty_%s", e->glyph ? e->glyph : "");
     paint_art(w, canvas, theme_art(art), 375 / 2 - ES_GLYPH / 2, top + ES_TILE / 2 - ES_GLYPH / 2);
     int ty = top + ES_TILE + ES_TITLE_GAP;
-    ar_text(canvas, e->title ? e->title : "", 1, ES_TITLE_PX, flip_if(light, 0xffffff), 0, 375 / 2,
+    ui_text(canvas, e->title ? e->title : "", 1, ES_TITLE_PX, flip_if(light, 0xffffff), 0, 375 / 2,
             ty + ES_TITLE_H / 2 - 1, 375 - 48, 1);
-    ar_text(canvas, e->hint ? e->hint : "", 0, ES_HINT_PX, tok(TOK_SECONDARY), 0, 375 / 2,
+    ui_text(canvas, e->hint ? e->hint : "", 0, ES_HINT_PX, tok(TOK_SECONDARY), 0, 375 / 2,
             ty + ES_TITLE_H + ES_HINT_H / 2, 375 - 48, 1);
 }
 void empty_state_paint(void *w, void *canvas) {
@@ -882,14 +882,14 @@ void confirm_paint(void *w, void *canvas) {
     rect_t card = { CARD_X, top, CARD_W, cf.h };
     fill_box(canvas, &card, RGBA(ipod_light() ? 0xffffff : RGB_RAISED), CARD_R);
     int y = top + CARD_PAD_TOP + CARD_TITLE_H / 2;
-    ar_text(canvas, cf.title, 1, TYPE(20), tok(TOK_PRIMARY), 1, cx, y, tw, 1);
+    ui_text(canvas, cf.title, 1, TYPE(20), tok(TOK_PRIMARY), 1, cx, y, tw, 1);
     y += CARD_TITLE_H / 2;
     if (cf.lines) y += CARD_BODY_GAP;
     for (int i = 0; i < cf.lines; ++i, y += CARD_BODY_LINE)
-        ar_text(canvas, cf.body[i], 0, TYPE(15), tok(TOK_SECONDARY), 1, cx, y + CARD_BODY_LINE / 2,
+        ui_text(canvas, cf.body[i], 0, TYPE(15), tok(TOK_SECONDARY), 1, cx, y + CARD_BODY_LINE / 2,
                 tw, 1);
     if (cf.code[0])
-        ar_text(canvas, cf.code, 1, TYPE(30), tok(TOK_PRIMARY), 1, cx,
+        ui_text(canvas, cf.code, 1, TYPE(30), tok(TOK_PRIMARY), 1, cx,
                 y + CARD_CODE_GAP + CARD_CODE_H / 2, tw, 1);
     if (cf.c.timeout_ms > 0) { /* 2 px along the foot, emptying toward the answer it gives */
         int left = (int)(cf.until - (unsigned)time_now_ms());
@@ -926,7 +926,7 @@ void confirm_rows_paint(void *w, void *canvas) {
             out = theme()->sel_inset - CARD_BAR_IN,
             lit = ringnav_row_selected(item) && !st.touch_mode;
         if (k < 0) {
-            ar_text(canvas, cf.c.toggle, 0, TYPE(20), lit ? 0xffffff : primary, 1,
+            ui_text(canvas, cf.c.toggle, 0, TYPE(20), lit ? 0xffffff : primary, 1,
                     x + out + CARD_IN, y, CARD_W - 2 * CARD_IN - 44, 2);
             switch_mark(canvas, x + out + CARD_W - CARD_IN, y, card_toggle_on(), lit);
             continue;
@@ -936,7 +936,7 @@ void confirm_rows_paint(void *w, void *canvas) {
                            I(item, W_W) - 2 * theme()->sel_inset, CARD_ROW };
             fill_box(canvas, &bar, RGBA(red), (unsigned)theme()->sel_radius);
         }
-        ar_text(canvas, cf.c.rows[k], 0, TYPE(20),
+        ui_text(canvas, cf.c.rows[k], 0, TYPE(20),
                 lit                   ? 0xffffff
                 : card_destructive(k) ? red
                                       : primary,
@@ -945,7 +945,7 @@ void confirm_rows_paint(void *w, void *canvas) {
             char t[16];
             int left = (int)(cf.until - (unsigned)time_now_ms());
             tk_snprintf(t, sizeof t, "%d s", left > 0 ? (left + 999) / 1000 : 0);
-            ar_text(canvas, t, 0, CARD_COUNT_PX, lit ? 0xffffff : tok(TOK_TERTIARY), 1,
+            ui_text(canvas, t, 0, CARD_COUNT_PX, lit ? 0xffffff : tok(TOK_TERTIARY), 1,
                     x + out + CARD_W - CARD_IN, y, 60, 3);
         }
     }

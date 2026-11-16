@@ -192,7 +192,7 @@ static void un_fill(int sel) {
         void *canvas = widget_get_canvas(un.head);
         if (canvas) {
             unsigned buf[8];
-            unsigned m = ar_wide("Clear", buf, 8);
+            unsigned m = ui_wide("Clear", buf, 8);
             canvas_set_font(canvas, "inter-medium", TYPE(15));
             w = (int)(canvas_measure_text(canvas, buf, m) + 0.5f);
         }
@@ -424,14 +424,14 @@ void upnext_paint(void *w, void *canvas) {
         rect_t r = { 0, 0, I(w, W_W), h };
         fill_box(canvas, &r, RGBA(black), 0); /* the corners: the page's, not the row's own paint */
         fill_box(canvas, &r, RGBA(on ? accent : UN_PILL_REST), UN_PILL_H / 2);
-        ar_text(canvas, "Clear", 1, TYPE(15), on ? 0xffffff : UN_PILL_INK, 1,
+        ui_text(canvas, "Clear", 1, TYPE(15), on ? 0xffffff : UN_PILL_INK, 1,
                 I(w, W_W) - UN_PILL_PAD, h / 2, I(w, W_W), 3);
     } else if (w == un.head) {
-        ar_text(canvas, "Playing Next", 1, TYPE(13), RGB_SECONDARY, 0, x, h / 2, 250, 2);
+        ui_text(canvas, "Playing Next", 1, TYPE(13), RGB_SECONDARY, 0, x, h / 2, 250, 2);
     } else if (widget_get_prop_int(w, "_un_from", 0)) {
         char from[160];
         tk_snprintf(from, sizeof from, un.source[0] ? "From %s" : "Next in Queue", un.source);
-        ar_text(canvas, from, 1, TYPE(13), RGB_SECONDARY, 0, x, 2 + (h - 2) / 2, end - x, 2);
+        ui_text(canvas, from, 1, TYPE(13), RGB_SECONDARY, 0, x, 2 + (h - 2) / 2, end - x, 2);
     } else {
         int stop = widget_get_prop_int(w, "_un_stop", -2), k = w == un.now ? -1 : un_place(stop),
             on = w != un.now && un_lit(w), lifted = un.lifted && k == un.lifted - 1;
@@ -450,10 +450,10 @@ void upnext_paint(void *w, void *canvas) {
         if (!title || !*title) title = track_name(name, sizeof name, r);
         int queued = k >= 0 && (unsigned)k < un.npn, right = un.lifted && queued ? 30 : 0;
         if (!right && queued && k > 0) right = 30; /* the arrow's room */
-        int tw = ar_text(canvas, title, lifted, lifted ? TYPE(18) : TYPE(17), 0xffffff, on, tx,
+        int tw = ui_text(canvas, title, lifted, lifted ? TYPE(18) : TYPE(17), 0xffffff, on, tx,
                          UN_TITLE_Y, end - right - tx, 2);
         if (artist && *artist)
-            ar_text(canvas, artist, 0, TYPE(13), on || lifted ? 0xffffff : RGB_TERTIARY, on, tx,
+            ui_text(canvas, artist, 0, TYPE(13), on || lifted ? 0xffffff : RGB_TERTIARY, on, tx,
                     UN_ARTIST_Y, end - right - tx, 2);
         if (w == un.now) un_level(canvas, tx + tw + 7, UN_TITLE_Y + 6, accent);
         if (un.lifted && queued)

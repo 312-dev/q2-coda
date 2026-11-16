@@ -625,7 +625,6 @@ void forget_rows(void *list);   /* navigation.c: a hidden list opens at its top 
 void paint_art(void *w, void *canvas, const char *name, int x, int y);
 void final_text(void *canvas, const char *face, const unsigned *s, const void *r, unsigned px,
                 unsigned color);
-unsigned ar_wide(const char *s, unsigned *out, unsigned n); /* artist_page.c: UTF-8 to wide */
 int bar_status(void);
 void slider_label(void *w, int x, int y, int ww, int h, int px, const char *face);
 void text_ink(void *w, unsigned color, int n); /* a label's final 0xAARRGGBB, in either half */

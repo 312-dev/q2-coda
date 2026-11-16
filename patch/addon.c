@@ -2852,18 +2852,17 @@ static void plate(void *canvas, int x, int y, int w, int h, unsigned color, unsi
     }
 }
 
-/* s, UTF-8, centred on the line at y (the page's) in face at px, in a final 0xAARRGGBB. */
+/* s, UTF-8, centred on the line at y (the page's) in face at px, in a final 0xRRGGBB. */
 static void qr_text(void *canvas, const char *s, int y, const char *face, unsigned px,
-                    unsigned argb) {
-    unsigned buf[128];
-    int box[4] = { 8, y - (int)px, 375 - 16, 2 * (int)px };
-    ar_wide(s, buf, 128);
-    final_text(canvas, face, buf, box, px, argb);
+                    unsigned rgb) {
+    unsigned raw = ui_ink_raw(1);
+    ui_line(canvas, s, 8, 375 - 16, y, 1, face, (int)px, rgb);
+    ui_ink_raw(raw);
 }
 
 /* The page as qr_refresh read it, on qp.view (the page's coordinates). */
 static void qr_paint(void *w, void *canvas) {
-    unsigned ink = 0xff000000u | tok(TOK_PRIMARY), ter = 0xff000000u | tok(TOK_TERTIARY);
+    unsigned ink = tok(TOK_PRIMARY), ter = tok(TOK_TERTIARY);
     if (qp.code && !qp.step[0]) {
         int side = QR_PLATE, x0 = (375 - side) / 2, y0 = QR_PLATE_Y;
         int n = qp.size, m = side / (n + 4), o = (side - m * n) / 2, digits = (n + 3) / 4;

@@ -76,54 +76,6 @@ static int ar_gone(void *w, void *event) {
     return 0;
 }
 
-/* s's UTF-8 as characters in out (at most n - 1, then 0); a malformed byte stands for itself. */
-unsigned ar_wide(const char *s, unsigned *out, unsigned n) {
-    unsigned k = 0;
-    const unsigned char *p = (const unsigned char *)s;
-    while (p && *p && k + 1 < n) {
-        unsigned c = *p++, more = c >= 0xf0 ? 3 : c >= 0xe0 ? 2 : c >= 0xc0 ? 1 : 0;
-        if (more) c &= 0x3f >> more;
-        for (; more && (*p & 0xc0) == 0x80; --more) c = c << 6 | (*p++ & 0x3f);
-        out[k++] = c;
-    }
-    out[k] = 0;
-    return k;
-}
-
-static int ar_measure(void *canvas, const char *face, int px, const unsigned *s, unsigned n) {
-    canvas_set_font(canvas, face, (unsigned)px);
-    return (int)(canvas_measure_text(canvas, s, n) + 0.5f);
-}
-
-/* s in Inter (medium: Inter Medium) at AWTK size px, in rgb (0xRRGGBB; final when raw), its row
- * centred on y, from x (align 2), ending at x (align 3) or centred on x (align 1), at most w wide: an ellipsis ends a
- * longer one. A character Inter lacks takes the theme's fallback face. Returns its width. Now
- * Playing's About (np_about.c) and playlist_pages.c paint their text with it too. */
-int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x, int y,
-            int w, int align) {
-    unsigned buf[96], n = ar_wide(s, buf, sizeof buf / sizeof *buf);
-    if (!n || w <= 0) return 0;
-    int fpx = px;
-    const char *face = theme_face(buf, (int)n, &fpx);
-    if (medium && face && !tk_strcmp(face, "inter")) face = "inter-medium";
-    int ink = ar_measure(canvas, face, fpx, buf, n);
-    while (n > 1 && ink > w)
-        buf[--n - 1] = 0x2026, buf[n] = 0, ink = ar_measure(canvas, face, fpx, buf, n);
-    rect_t r = { align == 3 ? x - ink : align == 1 ? x - ink / 2 : x, y - fpx, ink + 1, 2 * fpx };
-    unsigned text = (unsigned)I(P(canvas, CANVAS_LCD), LCD_TEXT_COLOR),
-             was = ui_ink_raw((unsigned)raw);
-    int align_v = I(canvas, CANVAS_ALIGN_V), align_h = I(canvas, CANVAS_ALIGN_H);
-    canvas_set_text_color(canvas, RGBA(rgb));
-    I(canvas, CANVAS_ALIGN_V) = 1;
-    I(canvas, CANVAS_ALIGN_H) = 2;
-    canvas_draw_text_in_rect(canvas, buf, n, &r);
-    I(canvas, CANVAS_ALIGN_V) = align_v;
-    I(canvas, CANVAS_ALIGN_H) = align_h;
-    ui_ink_raw(was);
-    stock_canvas_set_text_color(canvas, text);
-    return ink;
-}
-
 /* A disc or rounded box over r in a final 0xRRGGBB, its corners R. */
 static void ar_box(void *canvas, const rect_t *r, int R, unsigned rgb) {
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
@@ -176,7 +128,7 @@ static void mono(void *canvas, const char *name, int x, int y, int d, int px, un
     unsigned c[2];
     char letter[8] = "";
     ar_disc(canvas, x, y, d, flip_if(ipod_light(), rgb));
-    if (ar_wide(name, c, 2)) { /* the name's first character, upper case when ASCII */
+    if (ui_wide(name, c, 2)) { /* the name's first character, upper case when ASCII */
         unsigned k = 0, ch = c[0] >= 'a' && c[0] <= 'z' ? c[0] - 32 : c[0];
         const unsigned char *p = (const unsigned char *)name;
         if (ch != c[0])
@@ -188,11 +140,11 @@ static void mono(void *canvas, const char *name, int x, int y, int d, int px, un
     }
     int fpx = px;
     unsigned buf[4];
-    unsigned n = ar_wide(letter, buf, 4);
+    unsigned n = ui_wide(letter, buf, 4);
     const char *face = theme_face(buf, (int)n, &fpx);
     if (face && !tk_strcmp(face, "inter")) face = "inter-medium";
-    int w = n ? ar_measure(canvas, face, fpx, buf, n) : 0;
-    ar_text(canvas, letter, 1, px, 0xffffff, 0, x + (d - w) / 2, y + d / 2, d, 2);
+    int w = n ? ui_measure_w(canvas, face, fpx, buf, n) : 0;
+    ui_text(canvas, letter, 1, px, 0xffffff, 0, x + (d - w) / 2, y + d / 2, d, 2);
 }
 
 /* The header's art, its top dy px down the canvas from the header's top on screen: the name's
@@ -341,14 +293,14 @@ static void pair_paint(void *p, void *canvas) {
     ui_ink_raw((unsigned)raw);
     const char *label = widget_get_prop_str(p, AR_LEFT, "");
     char art[24];
-    unsigned buf[32], n = ar_wide(label, buf, 32);
+    unsigned buf[32], n = ui_wide(label, buf, 32);
     int px = TYPE(17);
     const char *face = theme_face(buf, (int)n, &px);
     if (face && !tk_strcmp(face, "inter")) face = "inter-medium";
-    int tw = n ? ar_measure(canvas, face, px, buf, n) : 0, x = (r.w - tw - PAIR_LABEL_DX) / 2;
+    int tw = n ? ui_measure_w(canvas, face, px, buf, n) : 0, x = (r.w - tw - PAIR_LABEL_DX) / 2;
     tk_snprintf(art, sizeof art, "pair_%s_%s", widget_get_prop_str(p, AR_ICON, ""), on ? "w" : "a");
     paint_art(p, canvas, theme_art(art), x, r.y + (PAIR_H - PAIR_ICON) / 2);
-    ar_text(canvas, label, 1, TYPE(17), on ? 0xffffff : accent, 1, x + PAIR_LABEL_DX,
+    ui_text(canvas, label, 1, TYPE(17), on ? 0xffffff : accent, 1, x + PAIR_LABEL_DX,
             r.y + PAIR_H / 2, r.w, 2);
 }
 
@@ -358,12 +310,12 @@ static void hero_paint(void *head, void *canvas) {
     int bar = geom_val(V_BAR), right = 375 - geom_val(V_RIGHT_X), w = right - HERO_TEXT;
     const char *meta = widget_get_prop_str(head, AR_META, "");
     hero_art(canvas, head, HERO_Y - bar);
-    ar_text(canvas, widget_get_prop_str(head, AR_NAME, ""), 1, TYPE(20), 0xffffff, 0, HERO_TEXT,
+    ui_text(canvas, widget_get_prop_str(head, AR_NAME, ""), 1, TYPE(20), 0xffffff, 0, HERO_TEXT,
             HERO_NAME_Y - bar, w, 2);
-    ar_text(canvas, widget_get_prop_str(head, AR_SUB, ""), 0, TYPE(15), RGB_SECONDARY, 0, HERO_TEXT,
+    ui_text(canvas, widget_get_prop_str(head, AR_SUB, ""), 0, TYPE(15), RGB_SECONDARY, 0, HERO_TEXT,
             HERO_SUB_Y - bar, w, 2);
     if (meta && *meta)
-        ar_text(canvas, meta, 0, TYPE(13), RGB_TERTIARY, 0, HERO_TEXT, HERO_META_Y - bar, w, 2);
+        ui_text(canvas, meta, 0, TYPE(13), RGB_TERTIARY, 0, HERO_TEXT, HERO_META_Y - bar, w, 2);
     if (!ar.cap) ar.cap = timer_add(cap_due, (void *)0, 0) | 1;
 }
 
@@ -450,7 +402,7 @@ static void cover_paint(void *item, void *canvas) {
     }
     stock_canvas_set_fill_color(canvas, fill);
     if (right && *right)
-        ar_text(canvas, right, 0, TYPE(15), on ? 0xffffff : RGB_TERTIARY, 0,
+        ui_text(canvas, right, 0, TYPE(15), on ? 0xffffff : RGB_TERTIARY, 0,
                 375 - geom_val(V_RIGHT_X), h / 2, 60, 3);
     if (after && *after) { /* the title's ink and two spaces, then what is left of its column */
         char title[160];
@@ -458,11 +410,11 @@ static void cover_paint(void *item, void *canvas) {
         int x = r.x + thumb + 10, w = 375 - geom_val(V_RIGHT_X) - (right && *right ? 50 : 0) - x,
             px = widget_get_prop_int(item, AR_PX, TYPE(20));
         tk_snprintf(title, sizeof title, "%s  ", widget_get_prop_str(item, AR_TITLE, ""));
-        n = ar_wide(title, buf, sizeof buf / sizeof *buf);
+        n = ui_wide(title, buf, sizeof buf / sizeof *buf);
         const char *face = theme_face(buf, (int)n, &px);
-        int tw = n ? ar_measure(canvas, face, px, buf, n) : 0;
+        int tw = n ? ui_measure_w(canvas, face, px, buf, n) : 0;
         if (tw < w - 30)
-            ar_text(canvas, after, 0, TYPE(15), on ? 0xffffff : RGB_TERTIARY, 0, x + tw, h / 2,
+            ui_text(canvas, after, 0, TYPE(15), on ? 0xffffff : RGB_TERTIARY, 0, x + tw, h / 2,
                     w - tw, 2);
     }
 }
@@ -506,15 +458,15 @@ void artist_paint(void *w, void *canvas) {
     if (num) { /* a track: its number, and its length on the right column */
         const char *len = widget_get_prop_str(w, AR_RIGHT, "");
         unsigned ink = ar_lit(w) ? 0xffffff : RGB_TERTIARY;
-        if (*num) ar_text(canvas, num, 0, TYPE(15), ink, 0, TRACK_NUM_X, I(w, W_H) / 2, 40, 3);
+        if (*num) ui_text(canvas, num, 0, TYPE(15), ink, 0, TRACK_NUM_X, I(w, W_H) / 2, 40, 3);
         if (len && *len)
-            ar_text(canvas, len, 0, TYPE(15), ink, 0, 375 - geom_val(V_RIGHT_X), I(w, W_H) / 2, 60,
+            ui_text(canvas, len, 0, TYPE(15), ink, 0, 375 - geom_val(V_RIGHT_X), I(w, W_H) / 2, 60,
                     3);
         return;
     }
     const char *count = widget_get_prop_str(w, AR_COUNT, (const char *)0);
     if (count && *count) {
-        ar_text(canvas, count, 0, TYPE(15), ar_lit(w) ? 0xffffff : RGB_TERTIARY, 0,
+        ui_text(canvas, count, 0, TYPE(15), ar_lit(w) ? 0xffffff : RGB_TERTIARY, 0,
                 375 - AR_COUNT_DX, I(w, W_H) / 2, 60, 3);
         return;
     }

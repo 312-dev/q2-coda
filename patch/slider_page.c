@@ -125,7 +125,7 @@ static void pill(void *vg, float x, float y, float w, float h) {
 }
 
 /* s's UTF-8 as characters in out, n - 1 of them at most and a 0 */
-static unsigned wide(unsigned *out, unsigned n, const char *s) { return ar_wide(s, out, n); }
+static unsigned wide(unsigned *out, unsigned n, const char *s) { return ui_wide(s, out, n); }
 
 /* ringnav_paint, after the window's children: the switch row, the value, the track and the range
  * ends, in the window's coordinates. */

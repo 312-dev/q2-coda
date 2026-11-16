@@ -471,7 +471,7 @@ void np_modes(void *win, void *canvas) {
         fill_box(canvas, &pill, RGBA(accent), NP_PILL_H / 2);
         glyph(win, canvas, "mode_radio_w", word ? cx[NB_RADIO] - NP_RADIO_GLYPH : cx[NB_RADIO], cy);
         if (word)
-            ar_text(canvas, "Radio", 1, NP_RADIO_PX, blend(0xffffff, accent, word), 1,
+            ui_text(canvas, "Radio", 1, NP_RADIO_PX, blend(0xffffff, accent, word), 1,
                     cx[NB_RADIO] - 10, cy, w, 2);
     } else
         glyph(win, canvas, ipod_light() ? "mode_radio_l" : "mode_radio_d", cx[NB_RADIO], cy);

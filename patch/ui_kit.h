@@ -16,6 +16,15 @@ unsigned tok(int t) __attribute__((pure));
 #define UI_FADE_MS 200
 #define UI_FADE_STEP_MS 40
 unsigned ui_fade_alpha(unsigned at);
+/* Text on a line (the payload's text painter): UTF-8 s in Inter (Inter Medium when medium) at AWTK
+ * size px, in rgb (0xRRGGBB; final when raw), its line centred on y, from x (align 2), ending at x
+ * (3) or centred on x (1), at most w wide, an ellipsis ending a longer one; a character Inter lacks
+ * takes the theme's fallback face. Returns its width. ui_wide: s's UTF-8 as characters in out (at
+ * most n - 1, then 0). ui_measure_w: n characters' width in face at px. */
+int ui_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x, int y,
+            int w, int align);
+unsigned ui_wide(const char *s, unsigned *out, unsigned n);
+int ui_measure_w(void *canvas, const char *face, int px, const unsigned *s, unsigned n);
 /* Text in a box: s (n characters, or UTF-8 for ui_line) centred on row y in the columns x to x + w,
  * aligned (1 centre, 2 left, 3 right), in face at px, in color (ui_line_w: 0xAARRGGBB; ui_line:
  * 0xRRGGBB), through ui_ink unless the draw is raw. ui_measure: UTF-8 s's width in face at px. */

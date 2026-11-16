@@ -397,13 +397,13 @@ static void ab_draw(void *w, void *canvas, int oy) {
     }
     stock_canvas_set_fill_color(canvas, fill);
     int tw = right - AB_TEXT_X;
-    ar_text(canvas, ab.t.title, 1, TYPE(20), 0xffffff, 0, AB_TEXT_X, y + AB_TITLE_DY, tw, 2);
-    ar_text(canvas, ab.t.artist, 0, TYPE(15), RGB_SECONDARY, 0, AB_TEXT_X, y + AB_ARTIST_DY, tw, 2);
-    ar_text(canvas, ab.t.len, 0, TYPE(13), RGB_TERTIARY, 0, AB_TEXT_X, y + AB_LEN_DY, tw, 2);
+    ui_text(canvas, ab.t.title, 1, TYPE(20), 0xffffff, 0, AB_TEXT_X, y + AB_TITLE_DY, tw, 2);
+    ui_text(canvas, ab.t.artist, 0, TYPE(15), RGB_SECONDARY, 0, AB_TEXT_X, y + AB_ARTIST_DY, tw, 2);
+    ui_text(canvas, ab.t.len, 0, TYPE(13), RGB_TERTIARY, 0, AB_TEXT_X, y + AB_LEN_DY, tw, 2);
     int qy = AB_QUALITY_Y - oy, sx = AB_ART_X;
     if (ab.badge) {
         static const char *const badges[] = { "", "Lossless", "Hi-Res Lossless", "DSD" };
-        int bw = ar_text(canvas, badges[ab.badge], 1, TYPE(13), 0xffffff, 0,
+        int bw = ui_text(canvas, badges[ab.badge], 1, TYPE(13), 0xffffff, 0,
                          AB_ART_X + AB_BADGE_TEXT, qy + AB_BADGE_H / 2, 200, 2) +
                  AB_BADGE_PAD;
         rect_t r = { AB_ART_X, qy, bw, AB_BADGE_H };
@@ -413,15 +413,15 @@ static void ab_draw(void *w, void *canvas, int oy) {
         stock_canvas_set_fill_color(canvas, fill);
         sx += bw + AB_SPEC_GAP;
     }
-    ar_text(canvas, ab.t.spec, 0, TYPE(13), RGB_TERTIARY, 0, sx, qy + AB_BADGE_H / 2, right - sx,
+    ui_text(canvas, ab.t.spec, 0, TYPE(13), RGB_TERTIARY, 0, sx, qy + AB_BADGE_H / 2, right - sx,
             2);
     for (int i = 0, slot = 0; i < ab.n; ++i) {
         const ab_cell *c = &ab.t.cell[i];
         int wide = ab.wide && i == ab.n - 1;
         if (wide && slot & 1) ++slot; /* Location starts a row of its own */
         int cx = slot & 1 ? AB_COL2 : AB_ART_X, cy = AB_GRID_Y + slot / 2 * AB_ROW - oy;
-        ar_text(canvas, c->name, 0, TYPE(13), RGB_TERTIARY, 0, cx, cy + AB_NAME_DY, AB_VALUE_W, 2);
-        ar_text(canvas, c->value, 0, TYPE(17), 0xffffff, 0, cx, cy + AB_VALUE_DY,
+        ui_text(canvas, c->name, 0, TYPE(13), RGB_TERTIARY, 0, cx, cy + AB_NAME_DY, AB_VALUE_W, 2);
+        ui_text(canvas, c->value, 0, TYPE(17), 0xffffff, 0, cx, cy + AB_VALUE_DY,
                 wide ? right - cx : AB_VALUE_W, 2);
         ++slot;
     }

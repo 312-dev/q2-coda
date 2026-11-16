@@ -381,10 +381,10 @@ static void as_row(void *canvas, as_level *l, int i, int y, int h, int on) {
     if (num > 0) {
         char d[8];
         tk_snprintf(d, sizeof d, "%d", num);
-        ar_text(canvas, d, 0, AS_PX_15, muted, 1, x + 18, y + h / 2, 18, 3);
+        ui_text(canvas, d, 0, AS_PX_15, muted, 1, x + 18, y + h / 2, 18, 3);
     }
-    if (*right) end -= ar_text(canvas, right, 0, AS_PX_15, muted, 1, end, y + h / 2, 150, 3) + 8;
-    ar_text(canvas, title, 0, AS_PX, ink, 1, tx, y + h / 2, end - tx, 2);
+    if (*right) end -= ui_text(canvas, right, 0, AS_PX_15, muted, 1, end, y + h / 2, 150, 3) + 8;
+    ui_text(canvas, title, 0, AS_PX, ink, 1, tx, y + h / 2, end - tx, 2);
 }
 
 /* ringnav_paint: the level's rows in view, on the sheet. */

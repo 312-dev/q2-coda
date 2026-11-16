@@ -242,7 +242,7 @@ void pv_paint(void *w, void *canvas) {
         return;
     }
     if (right && *right)
-        end -= ar_text(canvas, right, 0, PV_PX_15, muted, 1, end, h / 2, 150, 3) + PV_GAP;
+        end -= ui_text(canvas, right, 0, PV_PX_15, muted, 1, end, h / 2, 150, 3) + PV_GAP;
     if (label && I(label, W_X) + I(label, W_W) != end && end > I(label, W_X))
         widget_resize(label, end - I(label, W_X), I(label, W_H));
 }

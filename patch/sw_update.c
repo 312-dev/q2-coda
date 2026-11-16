@@ -425,18 +425,18 @@ void sw_update_paint(void *w, void *canvas) {
         sw_settle();
         int rows = I(list, W_Y), foot = rows + I(list, W_H) + SW_FOOT_DY;
         sw_update_name(s, sizeof s, swu.tag);
-        ar_text(canvas, s, 1, SW_NAME_PX, ink, 1, x, rows - SW_NAME_DY, tw, 2);
+        ui_text(canvas, s, 1, SW_NAME_PX, ink, 1, x, rows - SW_NAME_DY, tw, 2);
         unsigned tenths = swu.size_kb * 128 / 12500; /* KB * 1024 / 100,000: tenths of a MB */
         tk_snprintf(s, sizeof s, "Installed: %s · %u.%u MB on the SD card", Q2POD_FW_TAG,
                     tenths / 10, tenths % 10);
-        ar_text(canvas, s, 0, SW_SIZE_PX, tertiary, 1, x, rows - SW_SIZE_DY, tw, 2);
-        ar_text(canvas, "Takes about 2 minutes. Keep the Q2 charged;", 0, SW_FOOT_PX, tertiary, 1,
+        ui_text(canvas, s, 0, SW_SIZE_PX, tertiary, 1, x, rows - SW_SIZE_DY, tw, 2);
+        ui_text(canvas, "Takes about 2 minutes. Keep the Q2 charged;", 0, SW_FOOT_PX, tertiary, 1,
                 x, foot, tw, 2);
-        ar_text(canvas, "your music and settings stay.", 0, SW_FOOT_PX, tertiary, 1, x,
+        ui_text(canvas, "your music and settings stay.", 0, SW_FOOT_PX, tertiary, 1, x,
                 foot + SW_FOOT_LINE, tw, 2);
     } else {
         /* stock's dialog covers the status row: its title drawn in its place and face */
-        ar_text(canvas, "Software Update", 1, SW_STATUS_PX, tok(TOK_SECONDARY), 1, STATUS_ROW_INSET,
+        ui_text(canvas, "Software Update", 1, SW_STATUS_PX, tok(TOK_SECONDARY), 1, STATUS_ROW_INSET,
                 geom_val(V_STATUS_Y) - dy, 240, 2);
         int top =
             mode_page_paint(w, canvas, dy,

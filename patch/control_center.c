@@ -26,7 +26,7 @@
  * name, which only the Wi-Fi page reads. */
 #include "navigation.h"
 
-extern int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x,
+extern int ui_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x,
                    int y, int w, int align);
 extern void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind); /* artist_page.c */
 extern void keylock_toggle(void), coda_rc_toggle(void);     /* navigation.c, coda_rc_shim.c */
@@ -269,7 +269,7 @@ void cc_paint(void *win, void *canvas) {
         cc_shape(canvas, r, i <= CC_CAR ? CC_CIRCLE_R : CC_TILE_R, lit ? accent : CC_OFF, ring,
                  i <= CC_CAR ? CC_BLOCK : 0);
         cc_glyph(win, canvas, i, r.x + r.w / 2, r.y + r.h / 2, CC_ICON);
-        ar_text(canvas, cc_labels[i], 1, CC_LABEL_PX, lit ? 0xffffff : RGB_SECONDARY, 0,
+        ui_text(canvas, cc_labels[i], 1, CC_LABEL_PX, lit ? 0xffffff : RGB_SECONDARY, 0,
                 r.x + r.w / 2, r.y + r.h + 9, 120, 1);
     }
     /* Now Playing: the cover, the title and artist, and the transport */
@@ -290,10 +290,10 @@ void cc_paint(void *win, void *canvas) {
     } else
         fill_box(canvas, &art, RGBA(CC_OFF), CC_ART_R);
     int tx = art.x + CC_ART + 8, tw = np.x + np.w - 12 - tx;
-    ar_text(canvas, rec ? now_tag(rec, REC_TITLE) : "Not Playing", 1, 19, 0xffffff, 0, tx,
+    ui_text(canvas, rec ? now_tag(rec, REC_TITLE) : "Not Playing", 1, 19, 0xffffff, 0, tx,
             CC_Y0 + 28, tw, 2);
     if (rec)
-        ar_text(canvas, now_tag(rec, REC_ARTIST), 0, 16, RGB_SECONDARY, 0, tx, CC_Y0 + 48, tw, 2);
+        ui_text(canvas, now_tag(rec, REC_ARTIST), 0, 16, RGB_SECONDARY, 0, tx, CC_Y0 + 48, tw, 2);
     for (int i = CC_PREV; i <= CC_NEXT; ++i) {
         rect_t r = cc_box(i);
         cc_glyph(win, canvas, i, r.x + r.w / 2, r.y + r.h / 2, i == CC_PLAY ? 30 : CC_ICON);
