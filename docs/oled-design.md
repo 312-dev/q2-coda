@@ -56,7 +56,8 @@ those spots are under the glass. So:
   250, seven in all), peek through a fade into black from y 266 to y 316, black below; once the
   list has scrolled, its top row's first 14 px fade under the status row. A selected row is never
   faded and never lands past y 282: scrolled to its end, by the wheel or a drag, the last row's
-  foot is on y 282 (Q2 Pod's `list_end` and `list_fit`, `navigation.c` `list_fade`).
+  foot is on y 282 (Q2 Pod's `list_end` and `list_fit`, `navigation.c` `list_fade`), also after
+  the page comes back on top (Return from a row's page).
 - Every screen is checked against the glass: a screenshot composited with the 80 px mask shows
   no lit pixel under the curve.
 
@@ -193,6 +194,8 @@ All lists share one grid.
   is unchanged: past it the bar steps a row and the next tug starts from the leftover turn. Let go short of
   it and the bar springs back over 220 ms. The mock-up's 1 degree tilt is under a pixel on a 32 px row and is
   not drawn. A touch drag scrolls the list with the bar hidden, as touch always does, so it does not tilt.
+  The lean is never cut at the list's edge: on the first or last row it reaches up into the status row's
+  black band and down into the fade.
 - A list left by Return opens at its top when it is chosen again; Return lands on the row the
   page behind was left at (`list.reopen.top`).
 - Exactly one per screen. A dialog over a list takes the selection; the list's bar is hidden
