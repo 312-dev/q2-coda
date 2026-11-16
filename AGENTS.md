@@ -87,6 +87,7 @@ Many agents share one 16 GB laptop: use the shared tools in [building: Fast test
 - Test with `python3 tools/ci/affected.py --run "$B"`: what your branch's changes need. `tools/ci/patch_shards.py "$B"` and `tools/ci/fw.py` run whole suites in parallel; `test/patch.py` and `test/fw` run directly only for a serial check.
 - Wrap anything else heavy in `q2-heavy` (memory, disk, power and no-core-dump guards). Never `pytest -n auto`.
 - Borrow an emulator: `python3 tools/ci/emu_pool.py get "$B"`, `put SLOT` when done. Don't copy `~/q2-emu-server`.
+- UI work: `python3 tools/ci/q2live.py` rebuilds demo and reloads a pooled emulator on every save under `patch/`, back on your page ([building: Live reload](docs/building.md#live-reload)).
 - Integrating: `python3 tools/ci/merge_train.py BRANCH...` in the integration worktree.
 
 ## Traps

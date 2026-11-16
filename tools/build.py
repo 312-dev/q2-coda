@@ -1376,6 +1376,11 @@ def dev_build():
     def read(counter):
         try: return int(counter.read_text())
         except (OSError, ValueError): return 0
+    import os
+    if os.environ.get('Q2_DEV_NUMBER'):  # pragma: no mutate block
+        # tools/ci/q2live.py: one number for every rebuild of a live session, so stock.h, which holds it,
+        # stays the same and ccache recompiles only the files that changed; the counters are left alone
+        return int(os.environ['Q2_DEV_NUMBER'])
     number = max(map(read, counters)) + 1
     for counter in counters:
         temp = counter.with_name(counter.name + '.tmp'); temp.write_text(f'{number}\n'); temp.replace(counter)
@@ -2545,6 +2550,11 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patched[PDR[0]:PDR[0]+PDR[1]] = bytes(PDR[1])
     append_payload(patched, payload, BASE, ps['__scratch_end']-BASE, 'demo')
     (out/'demo').write_bytes(patched)
+    import os
+    if os.environ.get('Q2_DEMO_ONLY'):  # pragma: no mutate block
+        # tools/ci/q2live.py: a payload change needs only demo (and the player, already in out/peq); the
+        # rootfs, update.tar and manifest are not made
+        return
     # Pseudo-file round trip preserves every original inode's metadata and hardlinks.
     pseudo = out/'root.pseudo'
     run('unsquashfs','-pf',pseudo,sq)
