@@ -613,21 +613,66 @@ static void peers_poll(void) {
     crypto_wipe(peers, sizeof peers);
 }
 
-/* The paired phones connected now, for Settings > Car Remote's rows (coda_rc_shim.c cr_page_show): the
- * peer id of each authenticated session in /tmp/coda-rc.online, 8 bytes each, written when the set
- * changes. Ids are not secret (every Hello carries one in the clear). */
+#define ONLINE_REC (CRC_PEER_ID + 1)
+#define SEEN "/mnt/data/coda-rc/seen"
+#define SEEN_REC (CRC_PEER_ID + 4)
+
+/* Last Connected, for Settings > Car Remote's phone page (carremote_page.c): SEEN holds a record per paired
+ * phone, its peer id and the wall clock (little-endian seconds) when a session of it last authenticated or
+ * ended. The phones in changed (n ids) take the time now, the others keep theirs, and a phone no longer
+ * paired is dropped. Written only when a phone comes or goes, so the flash is not worn. */
+static void seen_stamp(const uint8_t *changed, int n) {
+    crc_peer peers[CRC_MAX_PEERS];
+    uint8_t old[CRC_MAX_PEERS * SEEN_REC], out[CRC_MAX_PEERS * SEEN_REC];
+    int np = crc_peers_load(peers, CRC_MAX_PEERS), k = read_file(SEEN, old, sizeof old), m = 0;
+    uint32_t now = crc_now_s();
+    k = k > 0 ? k / SEEN_REC : 0;
+    for (int i = 0; i < np; ++i) {
+        uint8_t *r = out + m * SEEN_REC;
+        int stamp = 0, kept = 0;
+        for (int j = 0; j < n; ++j) stamp |= !memcmp(changed + j * CRC_PEER_ID, peers[i].id, CRC_PEER_ID);
+        memcpy(r, peers[i].id, CRC_PEER_ID);
+        if (stamp)
+            for (int b = 0; b < 4; ++b) r[CRC_PEER_ID + b] = now >> (8 * b);
+        for (int j = 0; j < k && !stamp && !kept; ++j)
+            if (!memcmp(old + j * SEEN_REC, peers[i].id, CRC_PEER_ID))
+                memcpy(r + CRC_PEER_ID, old + j * SEEN_REC + CRC_PEER_ID, 4), kept = 1;
+        m += stamp || kept;
+    }
+    crypto_wipe(peers, sizeof peers);
+    crc_write_file(SEEN, out, m * SEEN_REC, 0600);
+}
+
+/* id (8 bytes) among the n ONLINE_REC records at set */
+static int online_has(const uint8_t *set, int n, const uint8_t *id) {
+    for (int i = 0; i < n; ++i)
+        if (!memcmp(set + i * ONLINE_REC, id, CRC_PEER_ID)) return 1;
+    return 0;
+}
+
+/* The paired phones connected now, for Settings > Car Remote's rows (carremote_page.c): a record per
+ * authenticated session in /tmp/coda-rc.online, its peer id and its link (0 Wi-Fi, TCP; 1 Bluetooth, BLE),
+ * written when the set changes; a phone that came or went is stamped in SEEN. Ids are not secret (every
+ * Hello carries one in the clear). */
 static void online_poll(void) {
-    static uint8_t was[(MAX_TCP + 1) * CRC_PEER_ID];
+    static uint8_t was[(MAX_TCP + 1) * ONLINE_REC];
     static int was_n = -1;
-    uint8_t ids[(MAX_TCP + 1) * CRC_PEER_ID];
-    int n = 0;
+    uint8_t ids[(MAX_TCP + 1) * ONLINE_REC], changed[(MAX_TCP + 1) * 2 * CRC_PEER_ID];
+    int n = 0, nc = 0;
     for (int i = 0; i <= MAX_TCP; ++i) {
         conn *c = i < MAX_TCP ? &tcp[i] : &ble;
-        if (c->used && c->s.state == S_AUTHED) memcpy(ids + CRC_PEER_ID * n++, c->s.peer, CRC_PEER_ID);
+        if (!c->used || c->s.state != S_AUTHED) continue;
+        memcpy(ids + ONLINE_REC * n, c->s.peer, CRC_PEER_ID);
+        ids[ONLINE_REC * n++ + CRC_PEER_ID] = c->s.transport == TR_BLE;
     }
-    if (n == was_n && !memcmp(ids, was, n * CRC_PEER_ID)) return;
-    if (crc_write_file("/tmp/coda-rc.online", ids, n * CRC_PEER_ID, 0644)) return; /* tried again next pass */
-    memcpy(was, ids, n * CRC_PEER_ID);
+    if (n == was_n && !memcmp(ids, was, n * ONLINE_REC)) return;
+    if (crc_write_file("/tmp/coda-rc.online", ids, n * ONLINE_REC, 0644)) return; /* tried again next pass */
+    for (int i = 0; i < n; ++i)
+        if (!online_has(was, was_n, ids + i * ONLINE_REC)) memcpy(changed + CRC_PEER_ID * nc++, ids + i * ONLINE_REC, CRC_PEER_ID);
+    for (int i = 0; i < was_n; ++i)
+        if (!online_has(ids, n, was + i * ONLINE_REC)) memcpy(changed + CRC_PEER_ID * nc++, was + i * ONLINE_REC, CRC_PEER_ID);
+    if (nc) seen_stamp(changed, nc);
+    memcpy(was, ids, n * ONLINE_REC);
     was_n = n;
 }
 
