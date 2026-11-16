@@ -491,6 +491,9 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   the object where it can ("Delete playlist “a”?"), then **Cancel**, selected when it opens, and
   the verb that says what the other does ("Shut Down", "Reset", "Delete"), never "OK". Delete
   Song's "Also delete source file" is a third row with a switch on the right column.
+  A confirm whose answer leaves things alone says which under its rows, as iOS's reset alert does,
+  in the [empty note](#empty-and-offline)'s form: Reset Settings Only asks "Reset settings?" over
+  "Music, playlists and ratings are kept".
 - A toast is one line of 16 px Text Primary on a `#1C1C1E` pill, 12 px corners, 32 px tall,
   as wide as its text and 16 px each side, centred on y 252 (y 236 to 268), above the bottom
   glass curve. It is the only raised surface in the theme. The page stays in sight round it,

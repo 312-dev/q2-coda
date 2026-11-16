@@ -1318,6 +1318,25 @@ def test_oleds_power_confirms_say_their_verb(fw, st, prompt, verb):
     assert not confirm.lines[0].visible  # the question is the status row's title
 
 
+@pytest.mark.parametrize('prompt, note', [('Reset Settings Only', 'Music, playlists and ratings are kept'),
+                                          ('Full Factory Reset', None)])
+def test_oleds_reset_settings_confirm_says_what_it_keeps(fw, st, prompt, note):
+    """Reset Settings Only's confirm (audit2 J1) notes under its rows what a settings reset leaves alone; the
+    other resets, which take more, have no note."""
+    theme(fw)
+    ui = Ui(fw)
+    confirm = Confirm(fw, ui, [prompt])
+
+    def utf8(w, out, size, *_):
+        words = ui.text(ui.nodes[w]).encode()[:size - 1] + b'\0'
+        C.memmove(out, words, len(words))
+        return 0
+    fw.mock('widget_get_text_utf8', utf8)
+    confirm.paint()
+    shown = [ui.text(n) for n in ui.nodes.values() if n.name == '_empty' and n.visible]
+    assert shown == ([note] if note else [])
+
+
 # No list has dividers (user, 2026-11-15): two-line rows, a card app's page_list's and a table's, stand on space alone.
 def oled(fw, st, **config):
     """OLED on its own set, as theme_boot leaves it, on a lit, usable screen."""

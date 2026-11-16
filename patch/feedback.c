@@ -103,18 +103,19 @@ static int feedback_check_click(void *check, void *event) { return 0; }
  * the status row's title, in sentence case and asking the question, and its two cells are the
  * list's first rows, Cancel then the verb that says what the other does ("Shut Down", "Delete",
  * "Reset"), never OK. Prompts not listed keep their words, and their verb is the prompt's first
- * word when it is one of verbs[]; else OK. */
+ * word when it is one of verbs[]; else OK. A prompt with a note says under its rows what the
+ * answer leaves alone, as iOS's reset alert does, in the empty note's form (feedback_empty). */
 static const struct {
-    const char *prompt, *title, *verb;
+    const char *prompt, *title, *verb, *note;
 } asks[] = {
-    { "Shut Down?", "Shut down?", "Shut Down" },
-    { "Restart?", "Restart?", "Restart" }, /* Power's Restart (power_rows.c) */
-    { "Reset Settings Only", "Reset settings only?", "Reset" },
-    { "Reset Database", "Reset the database?", "Reset" },
-    { "Full Factory Reset", "Full factory reset?", "Reset" },
-    { "Delete Song?", "Delete this song?", "Delete" },
-    { "Delete File?", "Delete this file?", "Delete" },
-    { "Scan music?", "Scan music?", "Scan" },
+    { "Shut Down?", "Shut down?", "Shut Down", 0 },
+    { "Restart?", "Restart?", "Restart", 0 }, /* Power's Restart (power_rows.c) */
+    { "Reset Settings Only", "Reset settings?", "Reset", "Music, playlists and ratings are kept" },
+    { "Reset Database", "Reset the database?", "Reset", 0 },
+    { "Full Factory Reset", "Full factory reset?", "Reset", 0 },
+    { "Delete Song?", "Delete this song?", "Delete", 0 },
+    { "Delete File?", "Delete this file?", "Delete", 0 },
+    { "Scan music?", "Scan music?", "Scan", 0 },
 };
 static const char *const verbs[] = {
     "Delete", "Import", "Export", "Quit", "Disconnect", "Reconnect"
@@ -140,9 +141,10 @@ int feedback_confirm_dress(void *w) {
         if (!*prompt) widget_get_text_utf8(c, prompt, sizeof prompt);
         widget_set_visible(c, 0, 0);
     }
-    const char *title = prompt, *verb = st.confirm_verb ? st.confirm_verb : "OK";
+    const char *title = prompt, *verb = st.confirm_verb ? st.confirm_verb : "OK", *note = 0;
     for (unsigned k = 0; k < sizeof asks / sizeof *asks; ++k)
-        if (!tk_strcmp(prompt, asks[k].prompt)) title = asks[k].title, verb = asks[k].verb;
+        if (!tk_strcmp(prompt, asks[k].prompt))
+            title = asks[k].title, verb = asks[k].verb, note = asks[k].note;
     unsigned len = 0;
     while (prompt[len] && prompt[len] != ' ' && len < sizeof word - 1)
         word[len] = prompt[len], ++len;
@@ -176,6 +178,7 @@ int feedback_confirm_dress(void *w) {
         theme_font(label, ROLE_TITLE, FONT_ROW);
         widget_set_sensitive(label, 0);
     }
+    if (note) feedback_empty(w, CONFIRM_Y + 2 * CONFIRM_ROW, note, (const char *)0);
     if (st.bar_title) {
         widget_set_text_utf8(st.bar_title, title);
         theme_font(st.bar_title, ROLE_BAR, FONT_ROW);
