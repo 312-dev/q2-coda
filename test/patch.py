@@ -4142,6 +4142,11 @@ passed()
 # press: the press time differs.
 m=QueueMachine(); m.press(1); assert m.hold()==11
 m.u.mem_write(m.status+O['INPUT_KEYS'],bytes(O['INPUT_KEY_SIZE'])); m.press(2); assert m.release()==1; passed()
+# Play Last ends Playing Next, empty in these machines, so under an ordered stock mode (List or Repeat All) its
+# songs land just after the one playing (MCL_POS, playback_queue_insert), not at the queue's end.
+def played_last(m,add,queue=('A','B','C')):
+    pos=m.mcl('MCL_POS'); assert m.mcl('MCL_MODE') in (0,3),m.mcl('MCL_MODE')
+    return [*queue[:pos+1],*add,*queue[pos+1:]]
 # The hold cancels a pending centre click. Wheel and centre then act on the menu only and the list
 # keeps its selection. Touch and centre arrive as the same click and run once.
 m=QueueMachine(); m.call(); m.call(); assert m.selected(m.surface)==2
@@ -4149,7 +4154,7 @@ m.call(O['KEY_CENTER']); m.press(100); m.hold(); m.release(); m.advance(300); as
 m.paint(m.view); assert m.call()==11 and m.selected(m.view)==1 and m.selected(m.surface)==2
 assert m.confirm()==11 and m.dispatched()[0][1]==m.nodes[m.view]['children'][1]
 m.pick(1); m.pick(1); m.advance(0)
-assert m.names()==['A','B','C','Row 2'] and [t[3] for t in m.toasts]==['Playing Last']  # once, said once
+assert m.names()==played_last(m,['Row 2']) and [t[3] for t in m.toasts]==['Playing Last'],m.names()  # once, said once
 assert m.top==page and m.selected(m.surface)==2 and not m.playback(); passed()
 # Play next lands after the playing track, on the logical row of a recycled table. Later tracks,
 # the shuffle pool and the previous index shift; duplicates stay; playback is never touched.
@@ -4176,7 +4181,7 @@ for action in (0,1):
     m=QueueMachine(page='folder_page'); m.word(m.row(0)+O['REC_TYPE'],4)
     m.found=[m.song('film.mp4'),m.song('song.flac'),m.song('film.MKV')]
     assert m.run(action)==('Playing Next','Playing Last')[action]
-    assert m.names()==(['A','song.flac','B','C'] if action==0 else ['A','B','C','song.flac']); passed()
+    assert m.names()==(['A','song.flac','B','C'] if action==0 else played_last(m,['song.flac'])); passed()
 m=QueueMachine(page='folder_page'); m.word(m.row(0)+O['REC_PATH'],m.string('/mnt/mmc/Videos/film.mp4'))
 m.press(100); m.hold(); assert m.nodes[m.top]['name']=='folder_page' and m.names()==['A','B','C']; passed()
 m=QueueMachine(page='folder_page'); m.word(m.row(0)+O['REC_TYPE'],4)
@@ -6352,8 +6357,8 @@ m=playlist_hold(0); m.press(7000); assert m.hold()!=11 and not m.opened  # Impor
 m=playlist_hold(); m.press(7100); assert m.hold()==11 and m.release()==0  # the locked hold's release never toggles playback
 assert m.labels()==['Play Next','Play Last','Shuffle','More…'] and m.nodes[m.title]['text']=='List 1'
 m.pick(3); m.advance(0); assert m.opened[-1]==('localmusic/playlistsmore_page',1) and m.names()==['A','B','C']; passed()
-for row,want in ((0,['A','T1','T2','B','C']),(1,['A','B','C','T1','T2'])):
-    m=playlist_hold(); assert m.run(row)==('Playing Next','Playing Last')[row] and m.names()==want and m.query[:2]==('getMusicByPlayList',8)
+for row,want in ((0,['A','T1','T2','B','C']),(1,None)):
+    m=playlist_hold(); assert m.run(row)==('Playing Next','Playing Last')[row] and m.names()==(want or played_last(m,['T1','T2'])) and m.query[:2]==('getMusicByPlayList',8)
     assert not m.playback(); passed()
 m=playlist_hold(1); m.found=[m.song('dir',4)]; assert m.run(0)=='Queue unchanged' and m.names()==['A','B','C']; passed()
 m=playlist_hold(); m.press(7100); assert m.hold()==11 and m.release()==0
@@ -7929,14 +7934,14 @@ for found,want in (((('b.mp3','/p/b.mp3',2,1),('a.mp3','/p/a.mp3',1,2),('c.mp3',
 
 COVER_ALBUM=['Play Next','Play Last','Shuffle','Add to Favorites','Rate Album']  # a cover's menu, Go to artist aside
 # Album holds use the live carousel before tracks have ever been opened, and the same ordering.
-for action,want in ((0,['A','early','late','B','C']),(1,['A','B','C','early','late'])):
+for action,want in ((0,['A','early','late','B','C']),(1,None)):
     m=CoverflowMachine(); m.found=[track(m,'late','/p/z',2,1),track(m,'early','/p/a',1,2)]
     m.open(); m.word(m.slide+O['SLIDE_INDEX'],2)
     m.press(100); assert m.hold()==11 and m.release()==0
     assert m.nodes[m.title]['text']=='Album 2' and m.labels()==[*COVER_ALBUM,'Go to Artist']
     assert m.hold()==0
     m.pick(action); m.pick(action); m.advance(0)
-    assert m.names()==want and not m.playback() and not m.plays and m.top==m.page
+    assert m.names()==(want or played_last(m,['early','late'])) and not m.playback() and not m.plays and m.top==m.page
     assert m.query[:2]==('getMusicByAlbum','Album 2') and m.names(m.get(syms['tools_pdeq_directory']))==['staged']; passed()
 m=CoverflowMachine(); m.open(); assert len(m.nodes[m.slide]['children'])==3; passed()  # no Sort or Refresh card to hold
 for kwargs in ({'albums':0},{'cached':False}):
@@ -8578,14 +8583,14 @@ assert m.nodes[m.title]['text']=='Album 2'; m.release(); m.pick(1); m.advance(0)
 assert m.query[:2]==('getMusicByAlbum','Album 2'); passed()
 
 # Coverflow's own song deque feeds the shared queue menu, independently of stock browsing state.
-for action,want in ((0,['A','T2','B','C']),(1,['A','B','C','T2'])):
+for action,want in ((0,['A','T2','B','C']),(1,None)):
     m=CoverflowMachine(cls=O['CLASS_ALBUMS']); m.open(); view=m.tracks()
     m.call(); assert m.selected(view)==1
     m.press(100); assert m.hold()==11 and m.nodes[m.title]['text']=='T2' and m.release()==0
     assert m.labels()==['Play Next','Play Last','Add to Favorites','Go to Artist']
     assert m.hold()==0  # a repeated hold while the dialog is open cannot open another
     m.pick(action); m.pick(action); m.advance(0)
-    assert m.names()==want and m.top==m.page and m.selected(view)==1 and not m.playback() and not m.plays
+    assert m.names()==(want or played_last(m,['T2'])) and m.top==m.page and m.selected(view)==1 and not m.playback() and not m.plays
     assert m.names(m.get(syms['p_deque_showlist']))==['Row 0','Row 1','Row 2','Row 3']
     m.press(200); assert m.release()==1; passed()
 # Its favourite is batch-select's over Coverflow's own deque, its songs taken as All Songs rows; each in-place
