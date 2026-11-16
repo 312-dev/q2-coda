@@ -1942,19 +1942,16 @@ def test_the_spinner_turns_with_the_poll(fw, world, st, whole, done):
     assert ('Scanning the SD card', 187, SCAN_LINE_CY) in [w[:3] for w in words] and not [a for a in arts if 'folder' in a[0]]
 
 
-@pytest.mark.parametrize('stop, whole_scan, text, total, figure, title, line, card', [
-    (0, 1, 'Updated 738', 704, 'oled_scan_done_d', 'Library Updated', '738 songs, 34 new', 1),
-    (0, 1, 'Updated 3800', 800, 'oled_scan_done_d', 'Library Updated', '3,800 songs, 3,000 new', 1),  # thousands, both
-    (0, 1, 'Updated 700', 704, 'oled_scan_done_d', 'Library Updated', '700 songs', 1),  # fewer: no "new"
-    (0, 0, 'Updated 738', 704, 'oled_scan_done_d', 'Library Updated', '738 songs', 1),  # a folder's scan: not measured
-    (1, 1, 'Updated 120', 704, 'oled_scan_done_d', 'Scan Stopped', '120 songs found', 1),
+@pytest.mark.parametrize('stop, whole_scan, text, total, figure, title, line', [
+    (0, 1, 'Updated 738', 704, 'oled_scan_done_d', 'Library Updated', '738 songs, 34 new'),
+    (0, 1, 'Updated 3800', 800, 'oled_scan_done_d', 'Library Updated', '3,800 songs, 3,000 new'),  # thousands, both
+    (0, 1, 'Updated 700', 704, 'oled_scan_done_d', 'Library Updated', '700 songs'),  # fewer: no "new"
+    (0, 0, 'Updated 738', 704, 'oled_scan_done_d', 'Library Updated', '738 songs'),  # a folder's scan: not measured
+    (1, 1, 'Updated 120', 704, 'oled_scan_done_d', 'Scan Stopped', '120 songs found'),
     (2, 1, 'No storage', 704, 'oled_scan_card_d', 'Not Enough Space', "Some songs weren't added")])
-def test_the_scan_s_ending_says_how_it_ended(fw, world, st, whole, done, stop, whole_scan, text, total, figure, title, line,
-                                            card):
+def test_the_scan_s_ending_says_how_it_ended(fw, world, st, whole, done, stop, whole_scan, text, total, figure, title, line):
     """Once wait_scan sets SCAN_DONE stock writes its ending into label_msg (scan_updatefinish, or msg_no_storage
-    with the stop flag at 2): the check circle or the memory chip, the title, the line and Done in the accent. With the
-    card gone (stock's /tmp/mmc_add) it says so instead."""
-    fw.mock('fw_access', lambda path, *_: 0 if card or C.string_at(path) != b'/tmp/mmc_add' else -1)
+    with the stop flag at 2): the check circle or the memory chip, the title, the line and Done in the accent."""
     whole.value = whole_scan
     win, threads = scan_dialog(fw, world, st, 'Scanned 100')
     count(fw, threads, total)
