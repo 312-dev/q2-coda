@@ -13966,7 +13966,7 @@ passed()
 CAPS='/tmp/q2-addon.caps'
 m=AppMachine(); stream_rows(m); caps=bytes(m.files[CAPS])
 assert caps.endswith(b'\n') and caps.count(b'\n')==1,caps
-assert set(caps.split())=={b'playlist',b'progress',b'pages',b'library',b'goto',b'sleep',b'game',b'audio',b'sections',b'art',b'window',b'urls',b'sort',b'field',b'more',b'fav',b'now',b'catalogue',b'ratings',b'artist',b'album',b'playlists',b'storage',b'signin'},caps
+assert set(caps.split())=={b'playlist',b'progress',b'pages',b'library',b'goto',b'sleep',b'game',b'audio',b'sections',b'art',b'window',b'urls',b'sort',b'field',b'more',b'fav',b'now',b'catalogue',b'ratings',b'artist',b'album',b'playlists',b'storage',b'signin',b'libsource'},caps
 m.files[CAPS]=bytearray(b'stale\n'); stream_rows(m); assert m.files[CAPS]==caps; passed()
 # Card games (addon.c, q2app game=1): Library's Games lists them, Streaming doesn't. A row runs the binary
 # over the screen; each input event reaches its socket as a text datagram instead of the UI (a held Return
@@ -14104,7 +14104,7 @@ SMENU=[('remote','','Phone Remote','192.168.1.23:8080','',''),('search','','Sear
        ('list','downloads','Downloads','None yet','',''),('action','set','Sharing: Off','Nothing is shared','sharing',''),
        ('action','stop','Stop Soulseek','','','')]
 SLABELS=['Soulseek','Phone Remote','192.168.1.23:8080','Search','Online as alice','Downloads','None yet','Sharing: Off',
-         'Nothing is shared','Stop Soulseek','']
+         'Nothing is shared','Stop Soulseek']  # a row with no subtitle is one line, no empty second label
 # A card app's levels don't slide: OLED's motion.inplace is 0 (theme.py MOTION_ROLES gives it no macro), so
 # page_push moves nothing. The next level's rows, Return's and a refresh show at x 0 at once, no animator made.
 m=SlskMachine(); m.mock('widget_animator_prop_create','widget_animator_prop_set_params','widget_animator_start')
@@ -14221,9 +14221,10 @@ def covers(files=(),rows=COVERS,msg='',cursor=''):
     c.pick(2); c.answer('ok',msg,cursor,rows); return c
 def heights(c): return [c.get(r+O['W_H']) for r in c.rows()]
 def cover_images(c): return [k for r in c.rows() for k in c.nodes[r]['children'] if c.nodes[k].get('image','').startswith('file://')]
-# (A list without covers has page_h(64) rows: OLED's page.rows.detail_height, 52.)
+# (A list without covers has page_h(64) rows, OLED's page.rows.detail_height, 52, for a row with a subtitle, and a
+# one-line row, 32, for one without: stack_rows.)
 for files in ((),(art_file('album','al-2'),)):
-    c=covers(files); assert c.labels()==['Downloads','One','An Artist','Two',''] and heights(c)==[52,52] and not cover_images(c),(c.labels(),heights(c))
+    c=covers(files); assert c.labels()==['Downloads','One','An Artist','Two'] and heights(c)==[52,32] and not cover_images(c),(c.labels(),heights(c))
 c=covers((art_file('album','al-1'),),[COVERS[0],('progress','','Half','','','500')])
 assert heights(c)==[52,52] and not cover_images(c); passed()
 c=covers((art_file('album','al-1'),)); x=24; tx=x+76; plain=covers()  # x: page_x, OLED's page.rows.text_x; tx: x + ART_PX + 12
