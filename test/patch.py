@@ -1131,7 +1131,7 @@ s.clock=(19,31); s.top=pages[-1]; minute(); assert clock()=='7:31 PM' and len(wr
 # each second; a new badge shows CODEC_MS, fades out and BT_GLYPH fades in over CODEC_STEPS steps
 # each way, and BT_GLYPH then replaces the badge stock sets again. The battery shows the icon or the
 # percentage in view_battery, and the icon while the group's ink would reach past BATT_ROOM.
-# The percentage is sized to its digits once the first paint measured them (10 px each here).
+# The percentage is sized to its digits once the first paint measured them (10 px each here, 11 rounded up).
 def battery_checks():
     def battery_bar(mode,**config):
         b=Machine(); b.config={'BATTERY':str(mode),**config}
@@ -1177,9 +1177,11 @@ def battery_checks():
     for image,value,rgb in (('bar_battery',100,0xffffff),('bar_battery',88,0xffffff),('bar_charge',7,O['BATT_CHARGE_RGB']),('bar_lowcharge',5,O['BATT_LOW_RGB'])):
         b.nodes[w['img_battery']]['image']=image; b.nodes[w['label_battery']]['text']=f'{value}%'
         paint(); paint(w['view_battery']); paint(); before=lcd(); bands,letters=slot()
-        pct=10*len(str(value))+10
+        pct=11*len(str(value))+11  # each 10 px character measured up to a whole pixel and one more
         assert b.get(w['view_battery']+O['W_W'])==pct and not bands
-        assert [(l['text'],l['rect'],l['color']) for l in letters]==[(f'{value}%',(0,0,pct,30),color_t(rgb))]
+        # one line, never a wrapping rect: centred across the slot, the line's top px/2 above the 30 px row's centre
+        assert [(l['text'],l['x'],l['y'],l['color']) for l in letters]==[
+            (f'{value}%',(pct-10*len(f'{value}%'))//2,(30+1-letters[0]['font'][1])//2,color_t(rgb))]
     passed()
     # A crowded codec (aptX HD's badge and Wi-Fi past BATT_ROOM) temporarily takes the icon and recovers without a
     # level change: the badge's fade leaves the plain glyph's BT_REACH.
