@@ -10,7 +10,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, Deques, Files, block, in_fork, libc
+from conftest import NAVIGATION_SOURCE, O, Deques, Files, block, in_fork, libc
 
 W_X, W_Y, W_W, W_H, W_PARENT = O['W_X'], O['W_Y'], O['W_W'], O['W_H'], O['W_PARENT']
 CANVAS_LCD, LCD_FILL_COLOR = O['CANVAS_LCD'], O['LCD_FILL_COLOR']
@@ -1337,7 +1337,7 @@ def action_view(world, n):
 
 def nav_define(name):
     """A number navigation.c #defines (clang-format may break the line after its name)."""
-    found = re.search(rf'^#define {name}[\s\\]*(\d+)', (host.ROOT/'patch/navigation.c').read_text(), re.M)
+    found = re.search(rf'^#define {name}[\s\\]*(\d+)', NAVIGATION_SOURCE, re.M)
     assert found, name
     return int(found[1])
 
