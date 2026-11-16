@@ -1351,7 +1351,7 @@ def test_the_window_going_drops_its_title_s_source(fw, world, st):
 def test_home_s_own_list_is_q2_pod(fw, world, st):
     label = bar_title(fw, world, st)
     sync(fw, world.window('home_page'))
-    assert world[label].text == 'Q2 Pod'
+    assert world[label].text == 'Q2 Muse'
     win, _ = navbar_page(world)
     sync(fw, win)
     assert world[label].text == 'Albums'
@@ -1474,7 +1474,7 @@ def test_painting_the_bar_keeps_its_clock_and_title_current(fw, world, st):
 
 def test_home_keeps_its_title_while_music_plays_and_the_state_sits_by_the_battery(fw, world, st):
     """Home's own list is like any page for the play state: the bar's paint shows it by the battery, as over a
-    page, and repaints the bar after it; 'Q2 Pod' stays shown."""
+    page, and repaints the bar after it; 'Q2 Muse' stays shown."""
     theme(fw)
     bar = system_bar(fw, world)
     title = world.add(bar, 'label_title', 'hscroll_label', box=(142, 0, 91, 26))
@@ -1491,13 +1491,13 @@ def test_home_keeps_its_title_while_music_plays_and_the_state_sits_by_the_batter
 
     home = world.window('home_page')
     on_home = shown()
-    assert on_home[:2] == ('Q2 Pod', 1) and on_home[2]
+    assert on_home[:2] == ('Q2 Muse', 1) and on_home[2]
     assert st('bar_timer', C.c_uint).value  # mid-paint: the bar again after this frame
     navbar_page(world)
     assert shown() == ('Albums', 1, on_home[2])  # over a page: the same image in the same img_state
     world.top = home
     status[0] = 0  # stopped
-    assert shown() == ('Q2 Pod', 1, 0)
+    assert shown() == ('Q2 Muse', 1, 0)
 
 
 def inside(r, box):

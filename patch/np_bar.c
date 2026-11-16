@@ -336,6 +336,9 @@ void np_mode_set(int on, int rep) {
     void *mode = st.np_win ? widget_lookup(st.np_win, "img_playmode", 1) : (void *)0;
     if (mode) widget_invalidate_force(mode, (void *)0);
 }
+/* The pair Now Playing's buttons show, for Car Remote (coda_rc_shim.c): shuffle on, and repeat as NP_REPEAT_* */
+int np_mode_shuffle(void) { return np_shuffle_on(*(volatile int *)MCL_MODE); }
+int np_mode_repeat(void) { return np_repeat_of(*(volatile int *)MCL_MODE); }
 /* A step of one control: shuffle (repeat 0) on or off, or repeat Off, All, One (dir 1) or back. */
 void np_mode_step(int repeat, int dir) {
     int m = *(volatile int *)MCL_MODE, on = np_shuffle_on(m), rep = np_repeat_of(m);

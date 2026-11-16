@@ -22,7 +22,7 @@ from build import ROOT, REPO, VERSION, BETA, TAG, ZIP_SHA, DEMO_SHA, build, chec
 ASSET = 'update.tar'
 SIGNATURE = ASSET + '.sig'  # the release key's signature of signing.update_message (docs/releasing.md#signing-a-release)
 # Rebuilt from docs/manual every release; the README links releases/latest/download/<GUIDE>.
-GUIDE = 'Q2-Pod-User-Guide.pdf'
+GUIDE = 'Q2-Muse-User-Guide.pdf'
 
 
 def notes():

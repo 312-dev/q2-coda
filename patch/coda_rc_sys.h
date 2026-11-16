@@ -11,6 +11,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <glob.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
@@ -92,6 +93,10 @@ unsigned long strtoul(const char *, char **, int);
 void exit(int);
 uint16_t htons(uint16_t);
 uint32_t htonl(uint32_t);
+/* glibc 2.28's glob_t on 32-bit MIPS: the count, the paths, then seven words glob keeps for itself */
+typedef struct { size_t gl_pathc; char **gl_pathv; size_t gl_offs; int gl_flags; void *gl_private[5]; } glob_t;
+int glob(const char *, int, int (*)(const char *, int), glob_t *);
+void globfree(glob_t *);
 #endif
 
 /* ---- SQLite (the rootfs's libsqlite3.so.0, 3.54; docs/third-party.md) ---- */

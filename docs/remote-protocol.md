@@ -57,7 +57,7 @@ The Q2 is the GATT peripheral, the phone the central. One primary service with t
 - The device's notifications start once the client enables them on `event` (its CCCD); the client should do that before writing `Hello`.
 - One session per connection; disconnecting ends it. The device serves one BLE connection at a time.
 - The characteristics require an encrypted link (`encrypt-write`, `encrypt-notify` in BlueZ terms), so the phone bonds with the Q2 (LE Secure Connections, Just Works) before the first write. That bond only keeps strangers' radios from talking to the GATT server cheaply; it is not what authenticates the phone, because Just Works has no user check. The app-level pairing below is.
-- Advertising carries the service UUID and the local name `Q2 Pod`. It runs only while Car Remote is on.
+- Advertising carries the service UUID and the local name `Q2 Muse`. It runs only while Car Remote is on.
 
 Implemented with BlueZ's D-Bus API (`org.bluez.GattManager1`, `org.bluez.LEAdvertisingManager1`) in `patch/coda_rc_ble.c`. The emulator has no Bluetooth, so this transport is proven only on a real Q2: see [Testing on a Q2](#testing-on-a-q2).
 
@@ -122,7 +122,7 @@ Labels are ASCII with no terminator; `||` is concatenation. `tools/coda_rc_crypt
 
 - `Hello.proto_version` is the highest version the client speaks; `HelloResp.proto_version` is the one the session uses, and `min_version` the oldest the device still speaks. A client older than `min_version` gets `Error{VERSION}` and the session closes. This is version 1.
 - Within a version, change is additive: new frame types, new fields, new enum values. Readers skip unknown fields and treat unknown enum values as their zero value. An unknown frame type gets `Error{UNSUPPORTED}` and the session goes on.
-- `HelloResp.caps` says what this Q2 serves (`Capability` in the proto): a Q2 without the play shim, or whose demo is not answering it, leaves `CAP_PLAY` clear, and the app greys out Play rather than failing.
+- `HelloResp.caps` says what this Q2 serves (`Capability` in the proto): a Q2 without the play shim, or whose demo is not answering it, leaves `CAP_PLAY` clear, and the app grays out Play rather than failing.
 - Commands added within version 1 come with a capability bit, so a phone and a Q2 of different ages still work together: `SetMode` (`CAP_MODES`), `Rate` with `NowPlaying.hearts` and `rateable` (`CAP_RATE`), `PlayQueueItem` (`CAP_QUEUE_JUMP`), and `Play.resume` with the playlists' `ACTION_RESUME` (`CAP_RESUME`). An older Q2 leaves the bits clear and answers the frames `UNSUPPORTED`; the app then hides the car's Shuffle, Repeat and heart buttons, leaves the queue untappable and shows no Resume row, as before. An older app never sends them and ignores the new fields. All four need demo's shim, as Play does: they are clear when it is not answering. See [Modes, rating, the queue and Resume](#modes-rating-the-queue-and-resume).
 - A change that cannot be additive (a new frame layout, a new key schedule) is a new `proto_version`. The labels carry the version (`"coda-rc pake v1"`), so a v2 key schedule never collides with v1.
 
@@ -130,12 +130,16 @@ Labels are ASCII with no terminator; `||` is concatenation. `tools/coda_rc_crypt
 
 Each goes to demo's shim as one line in `/tmp/coda-rc.cmd`, as Transport does, and is acked once the Q2 has done it; the State push that follows shows the result.
 
-- **SetMode** sets the playing queue's shuffle or repeat as the Play/Pause hold menu's Shuffle and Repeat rows do (`playback_set`). The Q2 has more modes than the protocol names, so a SetMode keeps the nearest Q2 mode where it can: shuffle on keeps a shuffle by album, Off keeps Play One Song or Play One Album (else Play All), One is Repeat Song, All keeps Repeat Album (else Repeat All). `UNAVAILABLE` when there is no queue to apply it to.
+- **SetMode** sets shuffle or repeat where the Q2 Muse keeps them. Normally that is Now Playing's Shuffle and Repeat buttons (stock's play mode), so the buttons show the phone's change and NowPlaying shows theirs. While the Play/Pause hold menu's extended play runs (one of its shuffles or repeats chosen), it is that menu's Shuffle and Repeat rows (`playback_set`); the Q2 Muse has more modes there than the protocol names, so a SetMode keeps the nearest one: shuffle on keeps a shuffle by album, Off keeps Play One Song or Play One Album (else Play All), One is Repeat Song, All keeps Repeat Album (else Repeat All). `UNAVAILABLE` when there is no queue to apply it to.
 - **Rate** gives the playing song 0 to 5 hearts as Now Playing's heart and its picker do ([Ratings](internals.md#ratings)): 5 puts it in Favorites, 1 to 4 keep that many hearts, 0 clears both. It names the song (`track_id`), so a song that changed meanwhile answers `NOT_FOUND`; a streamed song (`rateable` false) answers `UNAVAILABLE`.
 - **PlayQueueItem** plays the queue's song at an index of `GetQueue`'s list, as a row of the Q2's View Queue does: the playing song plays on, another starts unless Headphones required forbids it (`UNAVAILABLE`). It names the row's song too, and a queue that changed since the phone fetched it answers `NOT_FOUND`.
 - **Play with `resume`** carries on a list where it was left. The daemon remembers, for each list a phone played (not shuffled), the song it was on, in `/mnt/data/coda-rc/places` (the 16 most recent lists). If the Q2's queue is still that list's, Resume is Play; otherwise the list starts again from that song, and the Q2's Resume Songs takes a long song back to its place. A list never played from a phone starts at its first song. The app offers it as the playlists' Resume row (`ACTION_RESUME`), as Symfonium does.
 
 There is no song radio to start: the Q2's Internet Radio plays stations, not songs like the one playing.
+
+## A streaming song
+
+A card app's song played without an offline copy plays from its download, `/mnt/mmc/.<app>/stream/<hash>/original/0/<title> [<sid>].<suffix>`, which the library has no record of. `NowPlaying` then carries the catalogue's server song for the `<sid>` in the name's last brackets (`servermeta.sid`, joined to `servertable` by `fileurl`): its `track_id` (`song:c<id>`), title, artist, album, its length while the player reports none, and its album's `art_id` (`s<album>`). `GetCover` for a server album with no `covers/<album>.jpg` answers the picture embedded in a download of one of its songs, the one the Q2 Muse shows. A stream not in the catalogue keeps what the Q2 Muse reports. `rateable` stays false: the Q2 Muse rates library records, and a stream has none.
 
 ## Errors
 
@@ -152,7 +156,7 @@ Everything else (`NOT_FOUND`, `BAD_REQUEST` on a field, `UNAVAILABLE`, `BUSY`, t
 
 When a phone sends `PairStart`, the Q2 shows a Dialog over whatever is on screen: the title "Pair with "Pixel 8"?" (the phone's name), the code in 56 px digits as two groups of three, and the hint "Enter this code on your phone", with one row, Cancel. Return is Cancel. It closes by itself when the phone finishes, fails or gives up, with a toast: "Phone paired" or "Pairing failed".
 
-Settings > Car Remote: the first row is the switch (Off by default); under it, after a gap, each paired phone by name, its value Connected while it has an authenticated session and Not connected otherwise; Centre on one asks `Forget "Pixel 8"?` on the confirmation card ("It has to pair again to control the Q2."), Cancel first, then Forget in red. With no phones paired the page shows the empty state, "No Paired Phones", under the switch. The page follows the daemon while it is open: a phone paired, forgotten, connecting or going shows within half a second, without leaving the page (while the Forget card is up, at the first poll after it closes).
+Settings > Car Remote: the first row is the switch (Off by default); under it, after a gap, each paired phone by name, its value Connected while it has an authenticated session and Not connected otherwise; Center on one asks `Forget "Pixel 8"?` on the confirmation card ("It has to pair again to control the Q2."), Cancel first, then Forget in red. With no phones paired the page shows the empty state, "No Paired Phones", under the switch. The page follows the daemon while it is open: a phone paired, forgotten, connecting or going shows within half a second, without leaving the page (while the Forget card is up, at the first poll after it closes).
 
 ## Testing on a Q2
 

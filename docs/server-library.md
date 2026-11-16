@@ -3,7 +3,7 @@
 A planned library mode, **Local + Server**, in which a music server's songs (Navidrome or another
 OpenSubsonic server) appear in the Library beside the card's own: Artists, Albums, Songs, Cover Flow
 and playlists. When the Q2 is online every row plays; offline, rows that are not on the card are
-greyed and only card files and cached copies play, and shuffle leaves the greyed rows out. **Local
+grayed and only card files and cached copies play, and shuffle leaves the grayed rows out. **Local
 only** stays the default and behaves as the Library does without it. The firmware's half is built
 (`patch/catalogue.c`, [internals.md: Server library](internals.md#server-library)); the Subsonic
 app's half is on its branch `feat/q2-catalogue`. This file is the contract between them and the
@@ -17,7 +17,7 @@ Amperfy, Supersonic) model offline libraries and keep them in step with the serv
 
 - **The Library is the card.** Stock's `songtable` in `/mnt/data/database.db` is written only by the
   card scan (`scanAllMusicFile`, `scanSpecFolder`, `deleteMusicFromMusicDb`); every other database
-  write goes to favourites, playlists or play records. Update Local Music drops `songtable` and
+  write goes to favorites, playlists or play records. Update Local Music drops `songtable` and
   rebuilds it.
 - **Nearly every Library list goes through one SQL rewrite**, `library_query`
   (`patch/navigation.c:124-176`); Era builds its own SQL (`patch/library_lists.c:366-568`).
@@ -170,7 +170,7 @@ playlists.
 
 A server playlist changed on the Q2 (OLED's Add Songs, Add to Playlist…, Remove, Rename, Delete;
 docs/oled-design.md#playlists) goes back to the server through its app, when the app declares the
-caps word `playlists` (Q2 Pod writes it beside `catalogue`). The firmware appends a line to
+caps word `playlists` (Q2 Muse writes it beside `catalogue`). The firmware appends a line to
 `/mnt/mmc/.<id>/playlists.out` for each change, in the card-app channel's escapes, as it appends
 to `ratings.out` (`catalogue_playlist_sync`, `patch/catalogue.c`):
 
@@ -202,16 +202,16 @@ until the next one.
 | Change | Where | Built |
 |---|---|---|
 | Import: `catalogue.tsv` read on a pthread when its `seq` changes, a line at a time, into a new `catalogue.db` (`serverall` with `songtable`'s own columns, `servermeta` beside it), in one transaction on the job's own SQLite connection; the header's `rows=` checked against the rows read; answered in `.catalogue.done`; the library generation bumped so open lists query again | `catalogue.c` (`cat_worker`, `import_file`), polled from `addon_poll` | yes |
-| Each server row's identity: `fileurl` = `/mnt/mmc/.<id>/cat/<album id>/<sid>.<suffix>`, a hidden folder the scan skips, stable across imports, so playlists, ratings, favourites and play counts key on it as on a card path; `filename` the title alone, which stock's Search lists a song by | `catalogue.c` (`imp_song`) | yes |
+| Each server row's identity: `fileurl` = `/mnt/mmc/.<id>/cat/<album id>/<sid>.<suffix>`, a hidden folder the scan skips, stable across imports, so playlists, ratings, favorites and play counts key on it as on a card path; `filename` the title alone, which stock's Search lists a song by | `catalogue.c` (`imp_song`) | yes |
 | Duplicates: the three layers, again whenever `library_gen` moves (Update Local Music, the scans after USB storage and Wi-Fi transfer), including a scan that ends while a job runs | `catalogue.c` (`cat_match`, `cat_same`, `cat_poll`) | yes |
 | Merge: `union all select * from servertable` inside `library_query`'s music loads and in Era's SQL, only in Local + Server and while the file is attached | `navigation.c` (`library_query`), `library_lists.c` (`era_sql`) | yes |
-| Search: stock's Search (Library > Search, pull-to-search) runs `SearchMusicByName` and its kin, `... from songtable where <field> like '%<text>%'`, through `toolsQueryDbTable`, which is `library_query`, outside a music load; with Local + Server such a query reads the union, so server songs are found (Songs, Artists, Albums and Genres tabs). Pressing a result is stock's `search_track_row_on_click`, one of the `CATALOGUE_ACCESS` sites, so the offline rule holds; each tab's rows (one per record of `p_deque_searchshowlist`) are greyed as the rows below are: a song that can't play, an artist, album or genre none of whose songs can | `navigation.c` (`library_query`, three lines; `grey_rows`, `ringnav_search_rows`), `catalogue.c` (`catalogue_search`) | yes |
+| Search: stock's Search (Library > Search, pull-to-search) runs `SearchMusicByName` and its kin, `... from songtable where <field> like '%<text>%'`, through `toolsQueryDbTable`, which is `library_query`, outside a music load; with Local + Server such a query reads the union, so server songs are found (Songs, Artists, Albums and Genres tabs). Pressing a result is stock's `search_track_row_on_click`, one of the `CATALOGUE_ACCESS` sites, so the offline rule holds; each tab's rows (one per record of `p_deque_searchshowlist`) are grayed as the rows below are: a song that can't play, an artist, album or genre none of whose songs can | `navigation.c` (`library_query`, three lines; `grey_rows`, `ringnav_search_rows`), `catalogue.c` (`catalogue_search`) | yes |
 | Availability: an in-memory index of the server rows and linked card files (by path, and by sid), with each offline copy, from `servermeta.local` and `catalogue.avail`; online is `networkGetConnectStatus()` and no app's `server=down`, read once a second | `catalogue.c` | yes |
-| Greyed rows ([below](#greyed-rows)): stock's pooled Library rows as `ringnav_table_load` binds them to `p_deque_showlist`'s records; the scroll_view lists whose rows are one record each in order (an album's songs on `albuminfo_page` and Go to Album's `playerjumpinfo_page`, Cover Flow's tracks, where Go to Album lands with Artist View on, Most Played's and the Ratings lists' songs, and each of Search's tabs) as their surface paints, and the OLED letter strip's results as it paints them (`search_strip.c`); a press on one fails stock's play check (`CATALOGUE_ACCESS`), which says File Not Found. An album row (Library > Albums, an artist's, composer's or genre's albums), and Search's artist, album and genre rows (the letter strip's artists and albums too, `catalogue_artist_unavailable`), are greyed when none of their songs can play: offline, no card song has its name and none of its server songs has an offline copy | `navigation.c` (`ringnav_table_load`, one call; `grey_rows`, `paint_offline`, `ringnav_style_color`), `catalogue.c` (`catalogue_bind`, `catalogue_album_unavailable`, `group_unavailable`, `catalogue_mark`, `catalogue_greyed`, `catalogue_fit`, `catalogue_mark_paint`) | yes |
+| Grayed rows ([below](#grayed-rows)): stock's pooled Library rows as `ringnav_table_load` binds them to `p_deque_showlist`'s records; the scroll_view lists whose rows are one record each in order (an album's songs on `albuminfo_page` and Go to Album's `playerjumpinfo_page`, Cover Flow's tracks, where Go to Album lands with Artist View on, Most Played's and the Ratings lists' songs, and each of Search's tabs) as their surface paints, and the OLED letter strip's results as it paints them (`search_strip.c`); a press on one fails stock's play check (`CATALOGUE_ACCESS`), which says File Not Found. An album row (Library > Albums, an artist's, composer's or genre's albums), and Search's artist, album and genre rows (the letter strip's artists and albums too, `catalogue_artist_unavailable`), are grayed when none of their songs can play: offline, no card song has its name and none of its server songs has an offline copy | `navigation.c` (`ringnav_table_load`, one call; `grey_rows`, `paint_offline`, `ringnav_style_color`), `catalogue.c` (`catalogue_bind`, `catalogue_album_unavailable`, `group_unavailable`, `catalogue_mark`, `catalogue_greyed`, `catalogue_fit`, `catalogue_mark_paint`) | yes |
 | Play: a list with server rows played online writes `.catplay`, its app started first when it isn't running; the app's `.play` within 4 s is the answer, else the firmware plays the list itself from card rows and offline copies; offline it does so at once. Meanwhile Now Playing shows the pressed song ([below](#now-playing-while-it-loads)) | `playback.c` (`ringnav_load`), `catalogue.c` (`catalogue_load`, `catplay_poll`, `catalogue_np_now`), `addon.c` (`addon_wake`, `addon_ready`), `np_bar.c` (`np_sync`, two lines), `navigation.c` (`np_art`, two lines), `tags.c` (`id3_parses`) | yes |
-| Shuffle and connection loss: offline, the queue loaded is the playable rows only, so Shuffle Songs (which plays the whole library through the same load) leaves the greyed out; mid-queue, `upcoming()` skips rows that can't play now | `playback.c` | yes |
+| Shuffle and connection loss: offline, the queue loaded is the playable rows only, so Shuffle Songs (which plays the whole library through the same load) leaves the grayed out; mid-queue, `upcoming()` skips rows that can't play now | `playback.c` | yes |
 | Covers: a server row's album cover is the app's `covers/<album id>.jpg` (the album id from the row's path, or from its offline copy's row), in the Library's album rows and grids, Cover Flow's carousel and Now Playing | `catalogue.c` (`catalogue_cover`), `coverflow.c` (`grid_cover`, `build_art`, `coverflow_player_cover`) | yes |
-| Cover Flow: with Local + Server its album queries read the union (`cf_staged`), so the carousel has the server's albums; a server album's art is built from its app's cover once that is fetched (no job until then, so no "no art" marker); the centred album's captions are greyed with the offline mark while none of its songs can play | `coverflow.c` (`cf_staged`, `build_art`, `load_albums`, `caption_offline`, `caption_mark`) | yes |
+| Cover Flow: with Local + Server its album queries read the union (`cf_staged`), so the carousel has the server's albums; a server album's art is built from its app's cover once that is fetched (no job until then, so no "no art" marker); the centered album's captions are grayed with the offline mark while none of its songs can play | `coverflow.c` (`cf_staged`, `build_art`, `load_albums`, `caption_offline`, `caption_mark`) | yes |
 | Guards where code assumes a file exists: durations use the catalogue's seconds | `durations.c` | yes |
 | Play counts: a server song plays from its offline copy (the app's `.play`, or the firmware's offline queue), a Stream Cache file no Library row has, so a listen of a copy counts under its server row's `fileurl`; Most Played, a song's play count and Cover Flow's Most Played order follow the song | `navigation.c` (`play_count`, one line), `catalogue.c` (`catalogue_song_key`), `library_lists.c` (`mp_counted`) | yes |
 | Delete Song | | not needed: a server row never plays under its own `fileurl` (the app's `.play` and the offline queue both hold card files), so Now Playing's Delete only ever sees a card file, a Stream Cache copy included |
@@ -224,7 +224,7 @@ until the next one.
 
 The server library adds 43,600 bytes to the payload: `patch_bytes` is 864,504 of the then 1 MB in this branch's `--dev` build against 820,904 at the commit it branched from, `catalogue.o` being 39,870 bytes of text and 1,236 of data (`llvm-size`). All catalogue data lives on the heap or the card.
 
-### Greyed rows
+### Grayed rows
 
 A row that can't play now (a server song without an offline copy while offline, or with Local
 only; an album none of whose songs can play) keeps its place in the list and says so twice, so
@@ -232,11 +232,11 @@ it reads on any background:
 
 - **Its text** is `#666666` off the selection. On the selection it is the selection's own ink
   (white on OLED's Accent Blue bar) at 70% alpha,
-  never grey on the bar, so it keeps the contrast the theme chose for the bar.
+  never gray on the bar, so it keeps the contrast the theme chose for the bar.
 - **The offline mark**, Phosphor's `cloud-slash` (bold, 20 px wide, 16 high), sits at the row's
-  right in the same colour as its text: in the chevron's column, or just left of the chevron on
+  right in the same color as its text: in the chevron's column, or just left of the chevron on
   a row that shows one (a drill row's, or the selected album row's). It reserves its width and
-  the 12 px a length keeps from the text: while the row is greyed its labels' text ends 12 px
+  the 12 px a length keeps from the text: while the row is grayed its labels' text ends 12 px
   short of the mark's ink, so a long title ellipsizes or scrolls clear of it, and they take their
   width back when the row plays again. On OLED's one-line song rows the mark takes the right
   column's place: the length stands 12 px left of it, and the title and inline artist end 12 px
@@ -260,11 +260,11 @@ song once it plays, or another the user picked), when nothing of the list could 
 
 ### Compatibility
 
-- **Local only** runs no union, no grey test and no import, and ignores catalogue files.
+- **Local only** runs no union, no gray test and no import, and ignores catalogue files.
 - **Local + Server** with no catalogue app installed behaves as Local only.
 - Existing card apps see only a longer capability line; no existing file format changes.
 - Turning the mode off stops the union, detaches the file and bumps the library generation. The
-  playlists the catalogue made are kept, their server songs greyed and refused ("Turn on Local +
+  playlists the catalogue made are kept, their server songs grayed and refused ("Turn on Local +
   Server to play it"); turning it on again needs no new import.
 
 ### The app's side
@@ -310,8 +310,8 @@ full copy cheaply, and none uses the server's change hints to drive sync; the pl
   until the user clears it.
 - **Two flags per song:** on the server (present, gone) and on the Q2 (none, partial, cached, pinned).
   A song plays if it has a complete local copy, or if the server is reachable and has it. A gone song
-  without a local copy is hidden; a playable-later one is greyed. (The clients studied all hide
-  unavailable songs; greying is this design's choice, so a list keeps its shape offline.)
+  without a local copy is hidden; a playable-later one is grayed. (The clients studied all hide
+  unavailable songs; graying is this design's choice, so a list keeps its shape offline.)
 - **Online means the server answers,** not that Wi-Fi is up: only connection failures (name lookup,
   refused, timeout) switch to offline; a sign-in error is shown, not treated as offline; after a
   playback error the app pings before deciding. A hotspot with no internet can still reach a server
@@ -324,7 +324,7 @@ full copy cheaply, and none uses the server's change hints to drive sync; the pl
   refuses some names, such as a folder ending in a period (an Ultrasonic bug). Plays and stars made
   offline are queued on the card and sent when the server returns.
 
-## Ratings and favourites
+## Ratings and favorites
 
 A song's hearts ([internals.md: Ratings](internals.md#ratings)) follow it to the server and back,
 for server rows and for synced card files alike, whenever the Q2 can reach the server.
@@ -342,7 +342,7 @@ for server rows and for synced card files alike, whenever the Q2 can reach the s
   other way round, a song starred on the server puts the row in My Fav, so Now Playing fills the
   copy's heart by the row (stock draws it from the copy's own path), the picker opens on five, and
   taking the heart away takes the row out (stock's toggle would put the copy in instead).
-- **From the queue menu:** Add to and Remove from Favourites on a song send a line as Now Playing's
+- **From the queue menu:** Add to and Remove from Favorites on a song send a line as Now Playing's
   heart does (five hearts, or none) and clear its 1 to 4, for a Library row and for the playing
   copy alike; Remove on a copy takes its row out of My Fav too.
 - **Out:** each change on the Q2 is appended to `/mnt/mmc/.<id>/ratings.out`
@@ -394,12 +394,12 @@ Library; a Q2 has 128 MB, so this wants checking on a device. Every job copies t
 
 ## Risks and open questions
 
-1. **Greying** covers stock's pooled Library lists (bound in `ringnav_table_load`), song rows and
+1. **Graying** covers stock's pooled Library lists (bound in `ringnav_table_load`), song rows and
    album rows, and the one-record-per-row lists `grey_rows` knows (an album's songs, Cover Flow's
    tracks, Most Played, the Ratings lists, each of Search's tabs); a list built another way is not
-   greyed, though its rows' play check still refuses. An album, artist or genre row is matched by its name, as the Library's lists
+   grayed, though its rows' play check still refuses. An album, artist or genre row is matched by its name, as the Library's lists
    group it, so a server-only album that shares its name with a card album (another artist's
-   "Greatest Hits") is not greyed.
+   "Greatest Hits") is not grayed.
 2. **Scale** on a device: the emulator's numbers (above) are not a Q2's, and 50,000 server songs
    took demo's process from 70 to 96 MB there, QEMU included. To be measured on a Q2 (128 MB).
 3. **Code that expects a file** beyond the guards built: Long Songs leaves server songs out. Home's

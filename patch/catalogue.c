@@ -1371,7 +1371,7 @@ static int grey_of(void *w, int depth) {
 }
 /* The text colour of w, painted now, as the theme gave it: in a greyed row, CAT_GREY, or on the
  * selection that row's own ink at CAT_DIM, so it keeps its contrast with the bar or card
- * (docs/server-library.md#greyed-rows). Kept for the row's mark. */
+ * (docs/server-library.md#grayed-rows). Kept for the row's mark. */
 int catalogue_greyed(void *w, unsigned *color) {
     int i = cat.noff ? grey_of(w, 64) : -1;
     if (i < 0 || cat.grey_mark[i] != MK_OFFLINE) return 0;
@@ -2029,7 +2029,7 @@ done:
     if (db) sqlite3_close(db);
 }
 
-/* ---- Ratings (docs/server-library.md#ratings-and-favourites) ---- */
+/* ---- Ratings (docs/server-library.md#ratings-and-favorites) ---- */
 
 /* A song's hearts changed on the Q2: a line to each app with ratings=1. A server song playing
  * from its offline copy is its server row (catalogue_song_key): the row's key and sid. */

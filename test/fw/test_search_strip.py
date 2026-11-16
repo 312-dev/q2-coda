@@ -569,7 +569,7 @@ def test_the_rows_fill_the_glass_above_the_strip_and_the_tabs_take_the_first_one
 
 
 def test_a_server_song_that_cannot_play_is_greyed_with_the_offline_mark(fw, ui, song):
-    """docs/server-library.md#greyed-rows: Local Only, a server row can't play; its row's text is #666666 (the bar's
+    """docs/server-library.md#grayed-rows: Local Only, a server row can't play; its row's text is #666666 (the bar's
     white at 70% when selected) and the cloud-slash mark ends at the right column, the text 12 px clear of it."""
     fw.mock('tk_str_start_with', lambda a, b, *_: C.string_at(a).startswith(C.string_at(b)))
     songs = [song(b'/mnt/mmc/a.flac', b'Song One'), song(b'/mnt/mmc/.subsonic/cat/al1/s1.flac', b'Song Two')]

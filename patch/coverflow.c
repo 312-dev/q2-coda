@@ -2494,7 +2494,7 @@ static int album_offline(unsigned c) {
     return r && catalogue_album_unavailable(r);
 }
 /* The captions of an album that can't play now are greyed, as a Library row is
- * (docs/server-library.md#greyed-rows), the name narrowed CF_MARK_W a side, centred still, for
+ * (docs/server-library.md#grayed-rows), the name narrowed CF_MARK_W a side, centred still, for
  * the offline mark at its right (caption_mark); its own width again once it can. */
 #define CF_MARK_W 28
 static void caption_offline(int off) {
@@ -4706,7 +4706,7 @@ int coverflow_home_sub(void) { return home_open() != (void *)0; }
 /* The bar's title on Home (navigation.c bar_title_sync). */
 const char *coverflow_home_title(void) {
     void *open = home_open();
-    return !open                 ? "Q2 Pod"
+    return !open                 ? "Q2 Muse"
            : open == home.lib    ? "Library"
            : open == home.stream ? "Streaming"
                                  : "Settings";

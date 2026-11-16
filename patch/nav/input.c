@@ -851,7 +851,7 @@ int ringnav(void *ctx, void *event) {
     /* Songs over an empty library: stock hides the list and shows its note over Scan Music Now
      * (btn_upmusic), which takes no key. With no list under it, Centre would go on to
      * on_wm_keyup_fun, whose Centre turns the screen off; it presses the button, as a tap does
-     * (docs/internals.md#centre-button). */
+     * (docs/internals.md#center-button). */
     void *scan = !dir && top ? widget_lookup(top, "btn_upmusic", 1) : (void *)0;
     if (scan && widget_get_visible(scan) && widget_get_visible(P(scan, W_PARENT))) {
         unsigned click[12];

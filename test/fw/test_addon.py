@@ -1559,7 +1559,7 @@ SNAKE_SOCK = b'/tmp/q2-snake.input.sock'
 
 
 def settings(fw, **values):
-    """config.ini as Q2 Pod reads its settings: these keys' values, every other its default."""
+    """config.ini as Q2 Muse reads its settings: these keys' values, every other its default."""
     wanted = {k.encode(): v for k, v in values.items()}
     def read(path, section, key, out, default, *_):
         value = wanted.get(C.string_at(key), C.string_at(default))
