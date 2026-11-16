@@ -209,8 +209,9 @@ class ResumeMachine(QueueMachine):
         name=name[2:].split('@')[0]; a,b,c,d=[u.reg_read(r) for r in REGS]; ret=0; self.calls.append((name,a,b,c))
         if name=='fopen':
             path,mode=self.text(a),self.text(b)
-            # the boot logo's lit-only mount poll; dark, any open counts
-            self.opens+=path!=RECORD and (path!='/proc/mounts' or not self.u.mem_read(syms['g_backlight_status'],1)[0])
+            # the boot logo's lit-only mount poll, and Guest Play's state read (guest.c guest_poll, each GUEST_READ_MS
+            # from the headset poll whether or not a guest plays); dark, any other open counts
+            self.opens+=path not in (RECORD,'/tmp/q2-guest.state') and (path!='/proc/mounts' or not self.u.mem_read(syms['g_backlight_status'],1)[0])
             if mode=='rb' and path not in self.files: ret=0
             else: ret=0x2000000+len(self.calls); self.open[ret]=[path,mode,0,b'' if mode=='wb' else self.files.get(path,b'')]
         elif name=='fread':

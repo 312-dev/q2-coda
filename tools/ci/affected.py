@@ -11,8 +11,9 @@ does any branch whose changes include a file no rule knows (`RULES`: an unknown 
 mapping is conservative: a change to the payload (patch/, a build input in tools/, assets/) runs all of
 test/patch.py, which executes the payload as one program. What gets narrowed:
 
-- test/patch.py edits run only the tests (passed() to passed()) holding a changed statement, plus every
-  test that names a changed def or class, through patch_shards.py --lines;
+- an edit to a test/patch_suite/ file runs only the tests (passed() to passed()) holding a changed statement,
+  plus every test that names a changed def or class, through patch_shards.py --lines (the joined suite's
+  lines); an edit to the runner (test/patch.py, test/suite_source.py) runs all of it;
 - patch/X.c runs the test/fw files that name X.c, its X__ statics, or a function X.c defines, and the
   end-to-end files; a source no fw file names runs all of test/fw;
 - tools/X.py runs test/unit/test_X.py when it exists (else all of test/unit), and, for a build input,
@@ -102,7 +103,7 @@ def fw_files_for(source, root=ROOT):
 
 
 def patch_tests_for(changed_lines, source):
-    """test/patch.py line ranges (A:B) holding the tests a change to those lines (of the new file) touches."""
+    """Joined-suite line ranges (A:B) holding the tests a change to those lines (of the new suite) touches."""
     stmts = patch_shards.analyse(source)
     ends = [s.index for s in stmts if isinstance(s.node, ast.Expr) and ast.unparse(s.node) == 'passed()']
     touched = [s for s in stmts if any(s.line <= n <= s.end for n in changed_lines)]
@@ -129,20 +130,34 @@ def patch_tests_for(changed_lines, source):
     return {f'{a}:{b}' for a, b in merged}
 
 
+def suite_starts(root):
+    """{file name in test/patch_suite/: the joined suite's line its first line is}."""
+    out, line = {}, 1
+    for f in sorted((root/'test/patch_suite').glob('[0-9][0-9]_*.py')):
+        out[f.name] = line
+        line += f.read_text().count('\n')
+    return out
+
+
 def plan_for(changes, root=ROOT, patch_source=None):
     """A Plan for changes: {path: set of changed line numbers in the new file (empty if deleted or unknown)}."""
     p = Plan()
     for path, lines in sorted(changes.items()):
         parts = pathlib.PurePath(path).parts
         name, stem, suffix = parts[-1], pathlib.PurePath(path).stem, pathlib.PurePath(path).suffix
-        if path == 'test/patch.py':
+        if path.startswith('test/patch_suite/') and suffix == '.py':  # one file of the suite: its lines, joined
+            starts = suite_starts(root)
             if patch_source is None:
-                patch_source = (root/path).read_text()
-            if not lines:
+                patch_source = patch_shards.suite_text(root/'test/patch.py')
+            first = starts.get(name)
+            p.other.update({'test/playback.py', 'test/headset_io.py'})  # they load the suite's Machines
+            if not lines or first is None:
                 p.add('patch', ALL, f'{path}: changed, lines unknown')
             else:
-                ranges = patch_tests_for(lines, patch_source)
-                p.add('patch', ranges, f'{path}: the tests on lines {", ".join(sorted(ranges)) if ranges != ALL else "(most)"}')
+                ranges = patch_tests_for({first + n - 1 for n in lines}, patch_source)
+                p.add('patch', ranges, f'{path}: the tests on joined lines {", ".join(sorted(ranges)) if ranges != ALL else "(most)"}')
+        elif path in ('test/patch.py', 'test/suite_source.py'):  # the runner: every test
+            p.add('patch', ALL, f'{path}: the suite\'s runner')
         elif parts[0] == 'patch':
             p.add('patch', ALL, f'{path}: the payload')
             fw = fw_files_for(name, root) if suffix == '.c' and len(parts) == 2 else ALL
