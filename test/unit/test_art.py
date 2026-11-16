@@ -125,7 +125,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     white, its sliders' in the block's grey), the USB pages' rows, mode glyphs and toasts, and Up Next's bump arrow and
     Now Playing's queue and radio glyphs, charging's toasts (fill, 15 px, each in its colour, the battery's in each
     half's Text Primary) and the plug-in screen's bolt (fill, 26 px, Positive green), and SD Card Update's result glyphs
-    (white, 44 px) and its spinner. The status battery's inset glyphs have their own test."""
+    (white, 44 px) and its spinner, and Car Remote's phone (20 px) in Text Secondary (each half's) and white. The
+    status battery's inset glyphs have their own test."""
     t = theme.builtins()[0]
     got = art.images(t)
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
@@ -163,6 +164,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
               for k, c in (('d', d), ('l', l), ('w', 0xffffff))}
     assert set(got) == {'sort_bars'} | {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
+                                              'crphone_d', 'crphone_l', 'crphone_w',
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality,
                                               *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
                                               'search_pop', 'search_pop_letters', 'search_pop_echoes', 'holdback',
@@ -174,6 +176,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           ('shuffle_a', art.ROW_ICON_PX, blue), ('shuffle_w', art.ROW_ICON_PX, 0xffffff),
                           ('folder_d', art.ROW_ICON_PX, 0xababab), ('folder_l', art.ROW_ICON_PX, 0x5c5c5c),
                           ('folder_w', art.ROW_ICON_PX, 0xffffff), ('confirm_shuffle', art.CONFIRM_GLYPH_PX, blue),
+                          ('crphone_d', art.CR_PHONE_PX, 0xababab), ('crphone_l', art.CR_PHONE_PX, 0x5c5c5c),
+                          ('crphone_w', art.CR_PHONE_PX, 0xffffff),  # Car Remote's phone rows
                           ('chevron_td', art.CARET_PX, 0x858585), ('chevron_tl', art.CARET_PX, 0x6e6e6e),
                           ('check_a', art.CHECK_PX, blue), ('check_w', art.CHECK_PX, 0xffffff),
                           ('holdback', art.HOLD_BACK_PX, 0xffffff),  # search_strip.c's Return-held card
