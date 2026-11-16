@@ -13896,7 +13896,8 @@ m.back(); m.back(); m.row(3); assert m.labels()[0]=='Storage Management'
 m.row(1); m.answer(*OK,[track('spotify:track:a','A')]); m.row(0); m.row(1)
 assert m.asked()==('remove','tracks','spotify:track:a')
 m.answer('ok','Remove 0 playlists, 1 tracks? 2 playlists may become incomplete','',[])
-assert 'Track removal can make playlists incomplete' in m.labels(); m.row(1); passed()
+assert b'Remove 0 playlists, 1 tracks? 2 playlists may become incomplete\nPlaylists can be left incomplete.\0' in bytes(m.u.mem_read(payload_syms['br'],0x2000))  # the card's body (spotify.c br.remove_note)
+card(m,'remove_answer',1); assert m.asked()==('remove','tracks','spotify:track:a','confirm'); passed()
 # caps answered after Downloads opened (asked again once the base was idle, a request having cancelled
 # it): the open level is laid out again, so its rows and what a press opens agree.
 HUB=('collections','collection','playcollection','downloadliked','jobs','job','remove','download')
