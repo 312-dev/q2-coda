@@ -10984,13 +10984,13 @@ assert reads[at:at+4]==[('OLED_ACCENT',str(OLED_ACCENT))]+[(o['key'],str(o['def'
 # Battery takes Icon or Percent (theme.xml's values): the row cycles those two and writes the key as usual. A stored
 # value OLED does not offer (Icon + Percent, Percent Inside) reads as Icon, OLED's default, and stays stored until the
 # row moves it on; a key that is not stored reads as Icon.
-m,view,kids=appearance({}); row=kids[4]; f,ctx=m.handler(m.nodes[row]['children'][0],O['EVT_CLICK'])
+m,view,kids=appearance({}); row=kids[3]; f,ctx=m.handler(m.nodes[row]['children'][0],O['EVT_CLICK'])
 assert row_text(row)=='Battery: Icon'
 for value,name in ((1,'Percent'),(0,'Icon'),(1,'Percent')):
     m.calls=[]; assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0
     assert [(c[1],m.text(c[3])) for c in m.calls if c[0]=='write_int_config']==[(value,'BATTERY')] and row_text(row)=='Battery: '+name
 for stored in ('2','3'):
-    m,view,kids=appearance({'BATTERY':stored}); row=kids[4]; f,ctx=m.handler(m.nodes[row]['children'][0],O['EVT_CLICK'])
+    m,view,kids=appearance({'BATTERY':stored}); row=kids[3]; f,ctx=m.handler(m.nodes[row]['children'][0],O['EVT_CLICK'])
     assert row_text(row)=='Battery: Icon' and not [c for c in m.calls if c[0]=='write_int_config'] and m.config['BATTERY']==stored
     assert m.call(address=payload_syms['ipod_battery'],args=(0,0,0,0),gap=0)==0
     m.calls=[]; m.call(address=f,args=(ctx,m.event,0,0),gap=0)  # from what it reads as: on to Percent
@@ -11156,15 +11156,15 @@ for kw,want in (({'status':1},1),({},1),({'status':2},1),({'po':1},0),({'bal':1}
     assert buzzes(m)==want and not sent(m),kw
 m=clicker('1',tone=0); m.call(address=syms['buzzeer_switch'],args=(1,0,0,0)); assert not buzzes(m); passed()
 # Both, the default (no CLICKER, whatever an old KEYTONEHP holds): the buzzer with either jack or BT/USB too,
-# as Click With Headphones did; Key Tone off is still silent. Headphones (2) with no q2player (no
-# /tmp/q2clicks): as Speaker. With q2player playing (status 2) Headphones sends it the click and the buzzer is
-# quiet; paused (3), the buzzer as Speaker; Both sends it and buzzes.
+# as Click With Headphones did; Key Tone off is still silent. Headphones (2) never sounds the buzzer: with no
+# q2player (no /tmp/q2clicks) or paused (3) there is no click; with q2player playing (status 2) it sends the click
+# to be mixed; Both sends it and buzzes.
 for value,kw,tone,want in ((None,{'po':1},1,1),(None,{'bal':1},1,1),(None,{'way':1},1,1),(None,{'way':2},1,1),(None,{'po':1},0,0),
-                           (None,{},0,0),('2',{},1,1),('2',{'po':1},1,0)):
+                           (None,{},0,0),('2',{},1,0),('2',{'po':1},1,0)):
     m=clicker(value,tone=tone,**kw)
     if value is None: m.config['KEYTONEHP']='0'
     m.call(address=syms['buzzeer_switch'],args=(1,0,0,0)); assert buzzes(m)==want and not sent(m),(value,kw,tone)
-for value,status,buzz,mixed in (('2',2,0,1),('2',3,1,0),('0',2,1,1)):
+for value,status,buzz,mixed in (('2',2,0,1),('2',3,0,0),('0',2,1,1)):
     m=clicker(value,status=status); m.present.add('/tmp/q2clicks')
     m.call(address=syms['buzzeer_switch'],args=(1,0,0,0))
     assert buzzes(m)==buzz and sent(m)==['{mcl-click\\wheel}'][:mixed],(value,status)
