@@ -14221,9 +14221,10 @@ def covers(files=(),rows=COVERS,msg='',cursor=''):
     c.pick(2); c.answer('ok',msg,cursor,rows); return c
 def heights(c): return [c.get(r+O['W_H']) for r in c.rows()]
 def cover_images(c): return [k for r in c.rows() for k in c.nodes[r]['children'] if c.nodes[k].get('image','').startswith('file://')]
-# (A list without covers has page_h(64) rows: OLED's page.rows.detail_height, 52.)
+# (A list without covers has page_h(64) rows, OLED's page.rows.detail_height, 52, for a row with a subtitle, and a
+# one-line row, 32, for one without: stack_rows.)
 for files in ((),(art_file('album','al-2'),)):
-    c=covers(files); assert c.labels()==['Downloads','One','An Artist','Two',''] and heights(c)==[52,52] and not cover_images(c),(c.labels(),heights(c))
+    c=covers(files); assert c.labels()==['Downloads','One','An Artist','Two'] and heights(c)==[52,32] and not cover_images(c),(c.labels(),heights(c))
 c=covers((art_file('album','al-1'),),[COVERS[0],('progress','','Half','','','500')])
 assert heights(c)==[52,52] and not cover_images(c); passed()
 c=covers((art_file('album','al-1'),)); x=24; tx=x+76; plain=covers()  # x: page_x, OLED's page.rows.text_x; tx: x + ART_PX + 12
