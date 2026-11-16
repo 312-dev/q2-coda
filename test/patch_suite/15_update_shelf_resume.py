@@ -15,7 +15,7 @@ for i in range(2):
 tf,online=(m.nodes[r]['children'][0] for r in m.nodes[view]['children'])
 assert m.call(address=HOOKS['systemset_fwupdate_page_init'][0],args=(m.top,5,0,0),gap=0,count=5_000_000)==0
 assert m.calls[0][:3]==('stock_fwupdate',m.top,5) and m.nodes[tf]['name']=='0' and m.nodes[online]['name']=='2'
-assert [f for t,f,c in m.nodes[online]['handlers'] if t==O['EVT_CLICK']]==[payload_syms['sw_update_open']]; passed()
+assert [f for t,f,c in m.nodes[online]['handlers'] if t==O['EVT_CLICK']][-1]==payload_syms['sw_update_open']; passed()  # after stock's own
 UPDATE='/mnt/mmc/update.tar'; ASSET='update.tar'
 RELEASES=f"https://github.com/{manifest['update_repo']}/releases"  # build.py --update-repo
 m.files[UPDATE]=bytearray(b'old')
