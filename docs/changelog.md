@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Now Playing: the Shuffle and Repeat outline from the Centre cycle hides after a tap, as every focus ring does.
   - Car Remote's empty state names the phone app: "Open Q2 Muse Remote on your phone".
   - Display (OLED): empty pages show a large outline glyph instead of stacked tiles, and their action is a round blue button (Scan Music Now, Turn on Wi-Fi, Turn on Streaming) whose ring shows only after the wheel is used.
   - Display (OLED): switches are larger (40x24) and their knob slides when flipped.

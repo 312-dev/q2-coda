@@ -1,5 +1,6 @@
 /* Now Playing's bar: the bar's title, the theme's progress bar and its fill. */
 #include "navigation.h"
+#include "ui_kit.h"
 
 static int bar_bold __attribute__((section(".scratch"))); /* the bar's title set bold (bar_title) */
 static int row_frame(const void *info);
@@ -525,9 +526,11 @@ void np_modes(void *win, void *canvas) {
                     : i && rep == NP_REPEAT_ONE ? "1_on"
                     : lit[i]                    ? "_on"
                                                 : off);
-        /* on: the accent's dot under it; the wheel's stage: the outline round it */
+        /* on: the accent's dot under it; the wheel's stage: the outline round it, while the wheel is the
+         * modality (ui_focus_shown) */
         glyph_framed(win, canvas, name, x, cy, lit[i] && !rad.on,
-                     st.np_stage == (unsigned)(NP_STAGE_SHUFFLE + i), rad.on ? 0 : press_share(k));
+                     st.np_stage == (unsigned)(NP_STAGE_SHUFFLE + i) && ui_focus_shown(),
+                     rad.on ? 0 : press_share(k));
     }
     if (w > NP_BTN) { /* the pill, the antenna and, grown past NP_WORD_FROM, the word */
         rect_t pill = { cx[NB_RADIO] - w / 2, cy - NP_PILL_H / 2, w, NP_PILL_H };
