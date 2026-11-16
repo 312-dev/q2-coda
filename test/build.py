@@ -506,10 +506,6 @@ def validate_assets(directory):
     # The boot animation's player (docs/boot.md#boot-animation)
     splash = read('rootfs.squashfs', SPLASH)
     assert sha(splash) == manifest['q2splash_sha256'] and splash[:4] == b'\x7fELF' and splash[36:40] == helper[36:40]
-    # Bluetooth's Now Playing to a car (docs/internals.md#track-metadata)
-    from build import AVRCP
-    avrcp = read('rootfs.squashfs', AVRCP)
-    assert sha(avrcp) == manifest['q2_avrcp_sha256'] and avrcp[:4] == b'\x7fELF' and avrcp[36:40] == helper[36:40]
     expected_start = read('stock.squashfs', S90PLAY).replace(*BOOT_HOOK)
     if manifest['dev']:
         remote = read('rootfs.squashfs', REMOTE)
