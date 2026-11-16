@@ -55,7 +55,11 @@ class Page:
         for i in range(5 if self.fw.var('g_bluetoothflag', C.c_ubyte).value else 1):
             item = ui.new('list_item_create', view, 0, 0, 375, 78)
             ui.name[item] = f's{i}'
-            ui.name[ui.new('button_create', item, 20, 0, 335, 78)] = str(i)
+            b = ui.new('button_create', item, 20, 0, 335, 78)
+            ui.name[b] = str(i)
+            if i == 2:  # Quality over its choice, a second line (btmenu_setting_row_build)
+                ui.text[ui.new('hscroll_label_create', b, 10, 0, 266, 35)] = 'Quality'
+                ui.text[ui.new('hscroll_label_create', b, 10, 35, 266, 35)] = 'LDAC Auto'
         if not self.fw.var('g_bluetoothflag', C.c_ubyte).value:
             return 0
         paired = [i for i, d in enumerate(self.devices) if d[2] != 'found']
@@ -289,3 +293,139 @@ def test_the_page_gone_stops_its_scans(fw):
     s.p.ui.destroy(s.p.win)
     s.p.poll()
     assert s.started == 0
+
+
+class Links(Page):
+    """The page's machinery with stock's link list and the battery loop's file ("MAC PCT RATE CLASS")."""
+    def __init__(self, fw, devices=DEVICES, resume=b'0'):
+        super().__init__(fw, devices, RESUME=resume)
+
+    def link(self, mac=None, level=None, cls=None):
+        self.links = [(mac, 3)] if mac else []
+        lv = '' if level is None else level
+        self.files.files[BATT_FILE] = f'{mac} {lv} 48000 {cls or ""}\n'.encode() if mac else b''
+        self.now += 5000  # the loop's file read again
+        self.poll()
+
+
+HEADPHONES, CAR_CLASS = 0x240404, 0x200420
+
+
+def test_a_device_connecting_and_dropping_toasts_its_name(fw):
+    p = Links(fw)
+    p.link(HEAD, 80, HEADPHONES)
+    p.link(HEAD, 80, HEADPHONES)
+    p.link()
+    assert p.ui.toasts == ['WH-1000XM5 connected', 'WH-1000XM5 disconnected']
+
+
+@pytest.mark.parametrize('resume, said', [(b'1', 'BMW 6R81 connected · resuming'), (b'0', 'BMW 6R81 connected')])
+def test_a_car_says_it_resumes_when_resume_on_connect_is_on(fw, resume, said):
+    p = Links(fw, resume=resume)
+    p.link(CAR, None, CAR_CLASS)
+    assert p.ui.toasts == [said]
+
+
+def test_the_connect_toast_waits_a_moment_for_the_class(fw):
+    p = Links(fw)
+    p.links = [(CAR, 3)]
+    p.poll()
+    assert p.ui.toasts == []
+    p.poll(3000)
+    assert p.ui.toasts == ['BMW 6R81 connected']
+
+
+def test_a_drop_the_user_asked_for_keeps_stock_s_toast_alone(fw):
+    p = Links(fw)
+    p.link(HEAD, 80, HEADPHONES)
+    toast = p.ui.new('window_create', 0, 0, 0, 0, 0)
+    p.ui.name[toast] = 'msginfo_dialog'
+    p.link()
+    assert p.ui.toasts == ['WH-1000XM5 connected']
+
+
+def test_the_headset_s_battery_toasts_at_20_and_at_10_once_each(fw):
+    p = Links(fw)
+    for level in (25, 20, 15, 10, 5, 3):
+        p.link(HEAD, level, HEADPHONES)
+    assert p.ui.toasts == ['WH-1000XM5 connected', 'Headphones low · 20%', 'Headphones low · 10%']
+    p.link()
+    p.link(HEAD, 9, HEADPHONES)
+    p.poll()  # the connect toast first, the battery's at the next look
+    assert p.ui.toasts[-2:] == ['WH-1000XM5 connected', 'Headphones low · 9%']  # a new connection: its own
+
+
+class Stopped:
+    """playback.c's ringnav_reboot, as stock's idle loop calls it with the radio dead (bt_initstatus -102)."""
+    def __init__(self, fw, status=-102):
+        self.fw, self.ui = fw, Ui(fw)
+        Config(fw)
+        self.reboots, self.closed = [], []
+        fw.var('fw_ctx_bt_initstatus', C.c_int).value = status
+        fw.mock('stock_reboot_trampoline', lambda *_: self.reboots.append(1) or 0)
+        fw.mock('window_close', lambda w, *_: self.closed.append(w) or self.ui.destroy(w))
+        fw.mock('fw_system', lambda *_: 0)
+        self.reboot = fw.fn('ringnav_reboot', C.c_int)
+
+    def page(self):
+        return next((w for w in self.ui.windows if self.ui.name.get(w) == 'btstopped_page'), None)
+
+    def key(self, key):
+        return self.ui.key(self.page(), key)
+
+
+def test_a_dead_radio_asks_before_it_restarts_then_counts_down(fw):
+    s = Stopped(fw)
+    assert fw.fn('bt_stopped_toast', C.c_int, C.c_char_p, C.c_void_p)(b'dialog/msginfo_dialog', None) == 0
+    assert not s.ui.toasts  # stock's "Bluetooth abnormal": the page says it
+    assert s.reboot() == 0 and s.page() and not s.reboots
+    assert s.reboot() == 0 and not s.reboots  # stock asks again: the page is up
+    assert fw.fn('bt_stopped_title', C.c_char_p, C.c_char_p)(b'btstopped_page') == b'Bluetooth'
+    for _ in range(9):
+        assert s.ui.fire('bs_tick') == 8 and not s.reboots
+    s.ui.fire('bs_tick')
+    assert s.reboots == [1]
+
+
+@pytest.mark.parametrize('key', [218, 170])  # Centre, Return
+def test_not_now_keeps_the_q2_running_without_bluetooth(fw, key):
+    s = Stopped(fw)
+    s.reboot()
+    s.key(key)
+    assert not s.page() and not s.reboots
+    assert s.reboot() == 0 and not s.page() and not s.reboots  # stock's later calls do nothing
+
+
+def test_any_other_reboot_is_at_once(fw):
+    s = Stopped(fw, status=0)
+    assert s.reboot() == 0 and s.reboots == [1] and not s.page()
+
+
+def test_quality_is_a_key_value_row_naming_the_choice(fw):
+    p = Page(fw, DEVICES)
+    b = p.ui.kids[p.row('s2')][0]
+    labels = [(p.ui.text.get(w), p.ui.name.get(w)) for w in p.ui.subtree(b) if p.ui.kind[w] == 'hscroll_label_create']
+    assert labels == [('Quality', None), ('LDAC Auto', '_setting_value')]  # the title, its value (list_value), one line
+
+
+def test_quality_s_choices_show_their_bit_rates(fw):
+    ui = Ui(fw)
+    Config(fw)
+    win = ui.new('window_create', 0, 0, 0, 0, 0)
+    ui.name[win] = 'btquality_page'
+    lv = ui.new('list_view_create', win, 0, 26, 375, 294)
+    view = ui.new('scroll_view_create', lv, 0, 0, 375, 294)
+    names = ['LDAC Best', 'LDAC Standard', 'LDAC Auto', 'aptX HD', 'aptX', 'AAC', 'SBC HQ', 'SBC']
+    for i, n in enumerate(names):
+        item = ui.new('list_item_create', view, 0, 32 * i, 375, 32)
+        b = ui.new('button_create', item, 0, 0, 375, 32)
+        ui.name[b] = str(i)
+        ui.text[ui.new('hscroll_label_create', b, 22, 0, 266, 32)] = n
+    assert fw.fn('bt_list', C.c_int, C.c_void_p)(lv) == 1
+    fw.fn('bt_rows_post', None, C.c_void_p)(view)
+    fw.fn('bt_rows_post', None, C.c_void_p)(view)  # a second layout adds none
+    rates = []
+    for item in ui.kids[view]:
+        found = [ui.text[w] for w in ui.subtree(item) if ui.name.get(w) == '_bt_kbps']
+        rates.append(found[0] if found else None)
+    assert rates == ['990 kbps', '660 kbps', None, '576 kbps', '384 kbps', None, None, None]

@@ -13,39 +13,41 @@
  * speaker, phone or the Bluetooth rune, from the device's BlueZ Class, bt_class). The connected one
  * is a two-line row: its name over "Connected · LDAC · 72%" (stock's codec, bt_showcoding, and the
  * headset's battery, bt_battery.c) after the Positive dot; another paired one is a key/value row,
- * "Not Connected", or "Connecting…" with the activity spinner on the right column. Centre on a paired
- * row connects it, on the connected one opens its page (bt_detail.c); a found one pairs, as stock.
+ * "Not Connected", or "Connecting…" with the activity spinner on the right column. Centre on a
+ * paired row connects it, on the connected one opens its page (bt_detail.c); a found one pairs, as
+ * stock.
  */
 #include "navigation.h"
 
-#define BT_HEAD_H 32  /* a section header's item: a whole row, so the list scrolls in whole rows */
-#define BT_HEAD_Y 8   /* ... its label's box in it, the text on the row's lower part */
+#define BT_HEAD_H 32 /* a section header's item: a whole row, so the list scrolls in whole rows */
+#define BT_HEAD_Y 8  /* ... its label's box in it, the text on the row's lower part */
 #define BT_HEAD_PX TYPE(15) /* the section header's size (oled-design.md Type) */
-#define BT_TWO_H 52   /* the connected device's two-line row (oled-design.md Spacing) */
-#define BT_TITLE_Y 4  /* ... its title's box, the baseline 25 px down */
+#define BT_TWO_H 52         /* the connected device's two-line row (oled-design.md Spacing) */
+#define BT_TITLE_Y 4        /* ... its title's box, the baseline 25 px down */
 #define BT_TITLE_H 28
 #define BT_LINE_Y 30 /* ... its second line's box, the text's top 32 px down */
 #define BT_LINE_H 20
-#define BT_LINE_PX TYPE(15) /* Row second line */
-#define BT_GLYPH_CX 33    /* a row's kind glyph centred here (Storage > Downloads' column) */
-#define BT_TEXT_X 52      /* ... the name from here */
-#define BT_GLYPH 20       /* the glyph's box (tools/art.py ROW_ICON_PX) */
-#define BT_DOT 6          /* the Positive dot before "Connected", centred on the second line */
-#define BT_DOT_GAP 4      /* ... and the room after it */
-#define BT_SPIN 16        /* the spinner's box (list_marks.c SPIN_BOX) */
-#define BT_SPIN_GAP 8     /* between "Other Devices" and its spinner */
-#define BT_SPIN_MS 100    /* a spoke a frame */
-#define BT_POLL_MS 500    /* the scan's and the class file's checks */
-#define BT_STATE_W 170    /* a paired row's state, right-aligned in this much */
-#define BT_NOTE_H 52      /* the switch-off line, two lines of 13 px */
-#define BT_NOTE_PX TYPE(13) /* the caption's size */
+#define BT_LINE_PX TYPE(15)   /* Row second line */
+#define BT_GLYPH_CX 33        /* a row's kind glyph centred here (Storage > Downloads' column) */
+#define BT_TEXT_X 52          /* ... the name from here */
+#define BT_ROW_GLYPH 20       /* the glyph's box (tools/art.py ROW_ICON_PX) */
+#define BT_DOT 6              /* the Positive dot before "Connected", centred on the second line */
+#define BT_DOT_GAP 4          /* ... and the room after it */
+#define BT_SPIN 16            /* the spinner's box (list_marks.c SPIN_BOX) */
+#define BT_SPIN_GAP 8         /* between "Other Devices" and its spinner */
+#define BT_SPIN_MS 100        /* a spoke a frame */
+#define BT_POLL_MS 500        /* the scan's and the class file's checks, the link's */
+#define BT_CLASS_WAIT_MS 3000 /* a connect toast waits this long at most for the device's Class */
+#define BT_STATE_W 170        /* a paired row's state, right-aligned in this much */
+#define BT_NOTE_H 52          /* the switch-off line, two lines of 13 px */
+#define BT_NOTE_PX TYPE(13)   /* the caption's size */
 #define BT_ROWS_MAX 48
 #define BT_CLASS_FILE "/tmp/q2-btclass"
 #define BT_CLASS_MAX 12 /* devices whose Class one fetch asks for */
 #define BT_MARK "_btmark"
 
-/* What a row's state label says, from stock's tr_text. */
-enum { BT_FOUND, BT_PAIRED, BT_CONNECTING, BT_CONNECTED };
+/* What a row's state label says, from stock's tr_text (navigation.h BT_ROW_*). */
+enum { BT_FOUND = BT_ROW_FOUND, BT_PAIRED, BT_CONNECTING, BT_CONNECTED };
 /* A mark image's job (its BT_MARK prop). */
 enum { MARK_NONE, MARK_GLYPH, MARK_DOT, MARK_SPIN, MARK_CHEVRON, MARK_HEAD_SPIN };
 
@@ -55,6 +57,10 @@ static struct {
     void *line;      /* the connected row's second line */
     unsigned poll_at, spin_at, class_hash, class_seen;
     int frame, scans; /* the spinner's frame; scans started for this view */
+    char link[24];    /* the device connected at the last look, "" none */
+    unsigned link_at, link_cls, link_poll_at;
+    int link_pending,
+        low; /* its connect toast not yet shown; the battery steps toasted (1 20%, 2 10%) */
     char classes[BT_CLASS_MAX * 32 + 2];
 } bt __attribute__((section(".scratch")));
 
@@ -74,6 +80,27 @@ int bt_dev_find(const char *mac) {
     for (int i = 0; mac && (m = dev_at(i, 0)); ++i)
         if (!strcmp(m, mac)) return i;
     return -1;
+}
+
+/* Device i's name changed in place (a rename, bt_detail.c), as the list shows it till its next
+ * read. */
+void bt_dev_rename(int i, const char *name) {
+    char *at = (char *)dev_at(i, 1);
+    if (at) tk_snprintf(at, 0x100, "%s", name);
+}
+
+/* Where device i is in stock's link list: BT_ROW_CONNECTED as the last item at status 3 (stock's
+ * own test on its rows), BT_ROW_CONNECTING while a link thread runs for it, else BT_ROW_PAIRED. */
+int bt_dev_state(int i) {
+    const char *mac = dev_at(i, 0);
+    char item[32] = "";
+    int status = 0, n = getBtLinkSize();
+    if (!mac || n <= 0) return BT_ROW_PAIRED;
+    getBtLinkItem(n - 1, &status, item);
+    if (strcmp(item, mac)) return BT_ROW_PAIRED;
+    return status == 3                   ? BT_ROW_CONNECTED
+           : I(bt_connectstatus, 0) == 1 ? BT_ROW_CONNECTING
+                                         : BT_ROW_PAIRED;
 }
 
 /* A row's stock button (its first child, named by its device's index) and that index, -1 for a
@@ -97,7 +124,7 @@ static void *state_label(void *b) {
 static int row_state(void *b) {
     void *l = state_label(b);
     const char *tr = l ? widget_get_prop_str(l, "tr_text", "") : "";
-    return !l                                ? BT_FOUND
+    return !l                                 ? BT_FOUND
            : !tk_strcmp(tr, "msg_connected")  ? BT_CONNECTED
            : !tk_strcmp(tr, "msg_connecting") ? BT_CONNECTING
                                               : BT_PAIRED;
@@ -106,11 +133,16 @@ static int row_state(void *b) {
 /* The codec stock streams with (bt_showcoding, as its status bar's badge reads it), 0 for none. */
 const char *bt_codec(void) {
     switch (I(bt_showcoding, 0)) {
-    case 4: return "LDAC";
-    case 13: return "aptX HD";
-    case 3: return "aptX";
-    case 2: return "AAC";
-    case 1: return "SBC";
+    case 4:
+        return "LDAC";
+    case 13:
+        return "aptX HD";
+    case 3:
+        return "aptX";
+    case 2:
+        return "AAC";
+    case 1:
+        return "SBC";
     }
     return (const char *)0;
 }
@@ -135,10 +167,10 @@ const char *bt_kind(unsigned cls) {
     unsigned major = cls >> 8 & 0x1f, minor = cls >> 2 & 0x3f;
     if (major == 2) return "phone";
     if (major != 4) return "bt";
-    return minor == 1 || minor == 2 || minor == 6        ? "headphones"
-           : minor == 8                                  ? "car"
-           : minor == 5 || minor == 7 || minor == 10     ? "speaker"
-                                                         : "bt";
+    return minor == 1 || minor == 2 || minor == 6    ? "headphones"
+           : minor == 8                              ? "car"
+           : minor == 5 || minor == 7 || minor == 10 ? "speaker"
+                                                     : "bt";
 }
 
 /* Whether s is a MAC as stock lists it, AA:BB:CC:DD:EE:FF: it goes into a shell command. */
@@ -250,11 +282,52 @@ static void *head(void *view, void *item, const char *text) {
     widget_resize(item, I(item, W_W), BT_HEAD_H);
     widget_set_enable(item, 0);
     widget_set_prop_int(item, "_bt_head", 1);
-    void *l = small_label(item, geom_val(V_TEXT_X), BT_HEAD_Y, 240, BT_HEAD_H - BT_HEAD_Y,
-                          BT_HEAD_PX);
+    void *l =
+        small_label(item, geom_val(V_TEXT_X), BT_HEAD_Y, 240, BT_HEAD_H - BT_HEAD_Y, BT_HEAD_PX);
     widget_set_name(l, "_bt_head");
     widget_set_text_utf8(l, text);
     return item;
+}
+
+/* Stock's click on device dev's row on the Bluetooth page, as a tap at x: connect a paired or
+ * found one, disconnect the connected one (x under 276), or stock's Unpair? (x 276 on, a paired
+ * one's right end). 0 with no such row. */
+int bt_stock_click(int dev, int x) {
+    for (unsigned i = 0, n = bt.view ? widget_count_children(bt.view) : 0; i < n; ++i) {
+        void *item = widget_get_child(bt.view, i), *b = row_button(item);
+        if (b && row_dev(item) == dev) {
+            int event[16] = { 0 }; /* pointer_event_t: x at +0x18, the one field stock reads */
+            event[6] = x;
+            btmenu_item_on_click(b, event);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* A device row's Centre or tap (docs/oled-design.md#bluetooth): the connected device opens its
+ * page, any other connects (or pairs), as stock's click. */
+static int row_click(void *b, void *event) {
+    (void)event;
+    void *item = P(b, W_PARENT);
+    int dev = item ? row_dev(item) : -1;
+    if (dev < 0) return 0;
+    if (row_state(b) == BT_CONNECTED)
+        bt_detail_open(dev);
+    else
+        bt_stock_click(dev, 0);
+    return STOP;
+}
+
+/* ringnav_keylong: Play/Pause held on a paired device's row opens its page; 1 when it was one. */
+int bt_ui_hold(void *top) {
+    if (!bt.view || top != window_of(bt.view)) return 0;
+    int at = widget_get_prop_int(bt.view, "_ringnav_index", -1);
+    void *item = at >= 0 ? widget_get_child(bt.view, (unsigned)at) : (void *)0,
+         *b = item ? row_button(item) : (void *)0;
+    if (!b || row_dev(item) < 0 || row_state(b) == BT_FOUND) return 0;
+    bt_detail_open(row_dev(item));
+    return 1;
 }
 
 /* Bluetooth off: what turning it on gives, under the Name row. */
@@ -271,10 +344,30 @@ static void off_note(void *view) {
     widget_set_text_utf8(l, "Turn on to play to headphones, a car or a speaker.");
 }
 
+/* Stock's Quality row, its title over the choice (a second line), as a key/value row: Quality and
+ * the choice's name (LDAC Auto) on the right column before its chevron. */
+static void quality_value(void *item) {
+    void *b = row_button(item), *title = (void *)0, *choice = (void *)0;
+    for (unsigned i = 0, n = b ? widget_count_children(b) : 0; i < n; ++i) {
+        void *c = widget_get_child(b, i);
+        if (tk_strcmp(widget_get_type(c), "hscroll_label")) continue;
+        if (!title)
+            title = c;
+        else if (!choice)
+            choice = c;
+    }
+    if (!title || !choice) return;
+    char s[64] = "";
+    widget_get_text_utf8(choice, s, sizeof s);
+    widget_destroy(choice);
+    list_value(title, "Quality", s);
+}
+
 /* ringnav_btrows, after stock's builder and pod_rows' two (Resume on Connect, Link Volume, last):
  * the page's order. Stock's rows by place: 0 the switch, 1 Bluetooth Name (bt_name.c's Name row),
  * 2 Quality, 3 Headset Volume, 4 Scan now; then My Devices' header and rows, Other Devices' header
- * and rows (stock's headers only where it lists such a device). Any other count is left as built. */
+ * and rows (stock's headers only where it lists such a device). Any other count is left as built.
+ */
 void bt_page(void *view, int on) {
     bt_name_row(view);
     unsigned n = widget_count_children(view);
@@ -287,8 +380,8 @@ void bt_page(void *view, int on) {
         return;
     }
     if (n < 7 || n - 2 > BT_ROWS_MAX - 8) return;
-    void *rows[BT_ROWS_MAX], *quality = widget_get_child(view, 2), *volume = widget_get_child(view, 3),
-                             *scan = widget_get_child(view, 4);
+    void *rows[BT_ROWS_MAX], *quality = widget_get_child(view, 2),
+                             *volume = widget_get_child(view, 3), *scan = widget_get_child(view, 4);
     unsigned k = 0, other = 0;
     rows[k++] = widget_get_child(view, 0);
     rows[k++] = widget_get_child(view, 1);
@@ -296,6 +389,8 @@ void bt_page(void *view, int on) {
         void *item = widget_get_child(view, i), *b = row_button(item);
         if (b) {
             widget_set_prop_int(item, "_bt_dev", atoi(widget_get_prop_str(b, "name", "")) + 1);
+            widget_off_by_func(b, EVT_CLICK, (void *)btmenu_item_on_click, b);
+            widget_on(b, EVT_CLICK, row_click, b);
         } else { /* stock's header (btmenu_msginfo_layout): paired first, then found */
             other = k > 2;
             for (unsigned j = 2; j < k; ++j)
@@ -311,6 +406,7 @@ void bt_page(void *view, int on) {
     bt.head_spin = mark(oh, "_bt_headspin", MARK_HEAD_SPIN, 0, 0, 375, BT_HEAD_H);
     widget_on(bt.head_spin, EVT_DESTROY, head_spin_gone, bt.head_spin);
     rows[k++] = head(view, (void *)0, "Audio");
+    quality_value(quality);
     rows[k++] = quality;
     rows[k++] = volume;
     rows[k++] = widget_get_child(view, n - 2);
@@ -353,10 +449,11 @@ static void dress(void *item, void *b) {
         if (!tk_strcmp(type, "hscroll_label") && c != line && !title)
             title = c;
         else if (!tk_strcmp(type, "image") && !widget_get_prop_int(c, BT_MARK, 0))
-            widget_set_visible(c, 0, 0); /* stock's icon, and a paired row's Unpair (navbar_delete) */
+            widget_set_visible(c, 0,
+                               0); /* stock's icon, and a paired row's Unpair (navbar_delete) */
     }
-    mark(b, "_bt_glyph", MARK_GLYPH, BT_GLYPH_CX - BT_GLYPH / 2, (h - BT_GLYPH) / 2, BT_GLYPH,
-         BT_GLYPH);
+    mark(b, "_bt_glyph", MARK_GLYPH, BT_GLYPH_CX - BT_ROW_GLYPH / 2, (h - BT_ROW_GLYPH) / 2,
+         BT_ROW_GLYPH, BT_ROW_GLYPH);
     int end = right - (state == BT_FOUND ? 0 : VALUE_CHEVRON_GAP);
     if (state == BT_PAIRED || state == BT_CONNECTED)
         mark(b, "_bt_chevron", MARK_CHEVRON, right - BT_SPIN, (h - BT_SPIN) / 2, BT_SPIN, BT_SPIN);
@@ -389,16 +486,61 @@ static void dress(void *item, void *b) {
     }
 }
 
+static void quality_rows(void *view);
 void bt_rows_post(void *view) {
+    void *win = window_of(view);
+    if (win && !tk_strcmp(widget_get_prop_str(win, "name", ""), "btquality_page")) {
+        quality_rows(view);
+        return;
+    }
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *item = widget_get_child(view, i), *b = row_button(item);
         if (b && row_dev(item) >= 0) dress(item, b);
     }
 }
 
-/* The list's own page: Settings > Bluetooth's. */
+/* The list's own page: Settings > Bluetooth's, or its Quality picker's. */
 int bt_list(void *list) {
-    return list && !tk_strcmp(widget_get_prop_str(list, "name", ""), "list_view_bluetooth");
+    if (!list) return 0;
+    if (!tk_strcmp(widget_get_prop_str(list, "name", ""), "list_view_bluetooth")) return 1;
+    void *win = window_of(list);
+    return win && !tk_strcmp(widget_get_prop_str(win, "name", ""), "btquality_page");
+}
+
+/* ---- Quality (P5): each choice's bit rate, Auto's caption ---- */
+
+/* Quality's choice i (g_btcoding's, stock's row order: LDAC Best, Standard, Auto, aptX HD, aptX,
+ * AAC, SBC HQ, SBC): its bit rate at 48 kHz where the codec fixes one (bt_detail.c bt_kbps), 0
+ * for Auto, AAC and SBC, whose rate the link sets. */
+static unsigned choice_kbps(int i) {
+    static const unsigned short kbps[] = { 990, 660, 0, 576, 384, 0, 0, 0 };
+    return i >= 0 && i < (int)(sizeof kbps / sizeof *kbps) ? kbps[i] : 0;
+}
+#define BT_AUTO 2    /* LDAC Auto's row */
+#define BT_KBPS_W 90 /* a choice's rate, right-aligned before the check */
+#define BT_KBPS_GAP 24
+
+/* After the layout: the picker's rows get their rates, Auto its caption. */
+static void quality_rows(void *view) {
+    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
+        void *item = widget_get_child(view, i), *b = row_button(item), *title = (void *)0;
+        if (!b || widget_lookup(b, "_bt_kbps", 0)) continue;
+        int choice = atoi(widget_get_prop_str(b, "name", ""));
+        for (unsigned j = 0, k = widget_count_children(b); j < k && !title; ++j)
+            if (!tk_strcmp(widget_get_type(widget_get_child(b, j)), "hscroll_label"))
+                title = widget_get_child(b, j);
+        unsigned kbps = choice_kbps(choice);
+        if (choice == BT_AUTO && title)
+            caption_row(title, (const unsigned *)L"Steps with the signal, 330 to 990 kbps");
+        if (!kbps) continue;
+        char s[16];
+        int right = I(b, W_W) - geom_val(V_RIGHT_X) - BT_KBPS_GAP;
+        void *l = small_label(b, right - BT_KBPS_W, 0, BT_KBPS_W, I(b, W_H), BT_HEAD_PX);
+        widget_set_name(l, "_bt_kbps");
+        widget_set_prop_str(l, "style:normal:text_align_h", "right");
+        tk_snprintf(s, sizeof s, "%u kbps", kbps);
+        widget_set_text_utf8(l, s);
+    }
 }
 
 /* ---- painting ---- */
@@ -420,7 +562,9 @@ void bt_ui_paint(void *w, void *canvas) {
     case MARK_GLYPH: {
         int dev = item ? row_dev(item) : -1;
         tk_snprintf(stem, sizeof stem, "btdev_%s_%c", bt_kind(bt_class(dev_at(dev, 0))),
-                    selected ? 'w' : light ? 'l' : 'd');
+                    selected ? 'w'
+                    : light  ? 'l'
+                             : 'd');
         art(w, canvas, stem, cx, cy);
         break;
     }
@@ -489,7 +633,70 @@ static void page_poll(unsigned now) {
     g_btsetting_flag = 1; /* the page's timer rebuilds the list from the scan's first results */
 }
 
+/* ---- the connection toasts (docs/oled-design.md#dialogs-and-toasts) ---- */
+
+/* The device connected now (stock's link list's last item at status 3) into mac[24]; 0 none. */
+static int linked(char *mac) {
+    char item[32] = "";
+    int status = 0, n = g_bluetoothflag ? getBtLinkSize() : 0;
+    if (n > 0) getBtLinkItem(n - 1, &status, item);
+    if (status != 3) return 0;
+    tk_snprintf(mac, 24, "%s", item);
+    return 1;
+}
+
+/* A toast for mac: "<name> <what>", the kind's glyph (bttoast_<kind>, _off for a drop). */
+static void link_toast(const char *mac, const char *what, int off) {
+    const char *name = bt_dev_name(bt_dev_find(mac)), *kind = bt_kind(bt.link_cls);
+    char s[96], glyph[40];
+    tk_snprintf(s, sizeof s, "%s %s", name && *name ? name : "Bluetooth", what);
+    tk_snprintf(glyph, sizeof glyph, "bttoast_%s%s", kind, off ? "_off" : "");
+    toast_icon(theme_art(glyph), s);
+}
+
+/* Every BT_POLL_MS: a device connecting or dropping toasts it ("WH-1000XM5 connected", a car
+ * "BMW 6R81 connected · resuming" with Resume on Connect on); its connect toast waits up to
+ * BT_CLASS_WAIT_MS for its Class (bt_battery.c's loop) so a car says so. A headset's battery
+ * toasts once as it reaches 20% and once at 10% each connection. A drop the user asked for (stock
+ * toasts its own Disconnected) is not toasted again. */
+static void link_poll(unsigned now) {
+    char mac[24];
+    int on = linked(mac);
+    if (!on) {
+        if (bt.link[0] && !feedback_toast(window_manager_get_top_window(window_manager())) &&
+            !bt.link_pending)
+            link_toast(bt.link, "disconnected", 1);
+        bt.link[0] = 0, bt.link_pending = 0, bt.low = 0;
+        return;
+    }
+    if (strcmp(mac, bt.link)) { /* a new connection */
+        tk_snprintf(bt.link, sizeof bt.link, "%s", mac);
+        bt.link_at = now, bt.link_pending = 1, bt.low = 0, bt.link_cls = 0;
+    }
+    unsigned cls = bt_headset_class();
+    if (cls) bt.link_cls = cls;
+    if (bt.link_pending && (bt.link_cls || now - bt.link_at >= BT_CLASS_WAIT_MS)) {
+        bt.link_pending = 0;
+        int car = !tk_strcmp(bt_kind(bt.link_cls), "car");
+        link_toast(mac, car && ringnav_bt_resume() ? "connected · resuming" : "connected", 0);
+        return;
+    }
+    int level = bt_headset_battery();
+    int step = level < 0 ? 0 : level <= 10 ? 2 : level <= 20 ? 1 : 0;
+    if (!bt.link_pending && step > bt.low) {
+        char s[48];
+        bt.low = step;
+        tk_snprintf(s, sizeof s, "Headphones low · %d%%", level);
+        toast_icon(theme_art("bttoast_low"), s);
+    }
+}
+
 void bt_ui_poll(void) {
     unsigned now = (unsigned)time_now_ms();
     if (bt.view) page_poll(now);
+    bt_detail_poll();
+    if (now - bt.link_poll_at >= BT_POLL_MS) {
+        bt.link_poll_at = now;
+        link_poll(now);
+    }
 }

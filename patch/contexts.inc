@@ -40,6 +40,7 @@
 { "carpair_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/coda_rc_shim.c) */
 { "empty_page", CTX_DYNAMIC, 0 },      /* runtime window (patch/feedback.c empty_open) */
 { "storage_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/storage.c) */
+{ "btdevice_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/bt_detail.c) */
 { "downloads_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/storage.c) */
 { "usbchoose_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/usb_ui.c) */
 { "usbdebug_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/usb_ui.c) */

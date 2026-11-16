@@ -10,7 +10,8 @@
  * the new name at once, and one already paired shows it the next time it reads the Q2's name.
  *
  * Settings > Bluetooth's Name row shows the name and opens the letter strip in a text box's form
- * (search_strip_text): Next at the end saves, a held Return leaves it as it was. */
+ * (search_strip_text), saying who sees the name: Next at the end saves, a held Return leaves it as
+ * it was. */
 #include "navigation.h"
 
 #define BT_NAME_DEFAULT "Q2"
@@ -82,6 +83,7 @@ static const char *bt_name_done(const char *text) {
 static int bt_name_open(void *ctx, void *event) {
     (void)ctx, (void)event;
     char name[BT_NAME_MAX + 1];
+    search_strip_note("Phones and cars see this name");
     search_strip_text("Bluetooth", bt_name(name, sizeof name), BT_NAME_MAX, bt_name_done);
     return 0;
 }

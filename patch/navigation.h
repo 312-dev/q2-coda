@@ -671,7 +671,7 @@ void keylock_paint(void *w, void *canvas);
 /* feedback.c: an overlay card's scrim over the top window and the status bar; 1 on the window */
 int overlay_scrim(void *w, void *canvas, unsigned argb, int *dy);
 void search_strip_overlay(void *w, void *canvas); /* search_strip.c: Return held's card */
-int ringnav_wm_paint(void *wm); /* window_manager_paint's leaf */
+int ringnav_wm_paint(void *wm);                   /* window_manager_paint's leaf */
 
 /* theme_engine.c */
 #define ACCENT_N SETTING_N_ACCENT /* the ACCENTS rows: theme_engine.c's accents[] has as many */
@@ -727,7 +727,7 @@ void vol_paint(void *top, void *canvas);
 int vol_keyup(void *dialog, void *e); /* volume_dialog_on_keyup's hook: the wheel's steps */
 /* on_wm_keyup_fun's hook: the wheel's volume, playback screens' alone */
 int vol_wm_keyup(void *ctx, void *e);
-int vol_accel(void);                  /* volume.c: a wheel tick's steps at its speed */
+int vol_accel(void); /* volume.c: a wheel tick's steps at its speed */
 /* levels.c: the wheel's step and the bar's ease, shared by the volume and the brightness. shown:
  * the bar's level in 1/256 steps, moving towards the level while easing, from at. */
 typedef struct {
@@ -868,8 +868,21 @@ void bt_name_apply(void), bt_name_row(void *view);
 void bt_page(void *view, int on), bt_rows_pre(void *view), bt_rows_post(void *view);
 int bt_list(void *list), bt_mac_ok(const char *s), bt_dev_find(const char *mac);
 void bt_ui_paint(void *w, void *canvas), bt_ui_poll(void);
+int ringnav_bt_resume(void); /* navigation.c: Resume on Connect */
 const char *bt_codec(void), *bt_kind(unsigned cls), *bt_dev_mac(int i), *bt_dev_name(int i);
 unsigned bt_class(const char *mac);
+enum { BT_ROW_FOUND, BT_ROW_PAIRED, BT_ROW_CONNECTING, BT_ROW_CONNECTED };
+int bt_dev_state(int i), bt_stock_click(int dev, int x), bt_ui_hold(void *top);
+void bt_dev_rename(int i, const char *name);
+/* bt_detail.c: a Bluetooth device's page */
+void bt_detail_open(int dev), bt_detail_poll(void);
+const char *bt_detail_title(const char *name);
+int bt_codec_line(char *s, unsigned n);
+unsigned bt_kbps(const char *codec, unsigned hz);
+/* bt_stopped.c: Bluetooth Stopped, the dead radio's restart asked first */
+int bt_stopped_hold(void *caller), bt_stopped_toast(const char *name, void *ctx);
+void bt_stopped_paint(void *w, void *canvas);
+const char *bt_stopped_title(const char *name);
 /* search_strip.c: a text box on the strip, on its keyboard's window */
 int search_strip_box(void *kb, void *edit, const char *title);
 /* ... or on a page of its own, for a text the payload keeps itself: titled title, text prefilled,
@@ -877,6 +890,7 @@ int search_strip_box(void *kb, void *edit, const char *title);
  * else is a toast saying why not, the text kept to edit */
 void search_strip_text(const char *title, const char *text, int max,
                        const char *(*done)(const char *));
+void search_strip_note(const char *note); /* ... the next one's note: who sees the text */
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);
 /* add_songs.c: Add Songs (docs/oled-design.md#add-songs) */
@@ -970,15 +984,16 @@ int usb_ui_key(void *top, unsigned key);
 #define MODE_GLYPH 44
 #define MODE_BARE 0x1000000u
 typedef struct {
-    unsigned ring;     /* 0xRRGGBB, or MODE_BARE */
-    const char *glyph; /* theme image stem, white */
-    int glyph_px;      /* 0: MODE_GLYPH */
+    unsigned ring;                   /* 0xRRGGBB, or MODE_BARE */
+    const char *glyph;               /* theme image stem, white */
+    int glyph_px;                    /* 0: MODE_GLYPH */
     const char *title, *line, *pill; /* pill 0: none */
 } mode_page_t;
 int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
 /* bt_battery.c: a connected headset's battery, 0 to 100, -1 for none
  * (docs/internals.md#headset-battery) */
 int bt_headset_battery(void);
+unsigned bt_headset_rate(void), bt_headset_class(void);
 /* bt_recv.c: Bluetooth receiver mode as a mode page (docs/internals.md#bluetooth-receiver) */
 void bt_recv_load(void *win), bt_recv_paint(void *w, void *canvas);
 const char *bt_recv_title(const char *name), *bt_recv_codec(void *win);

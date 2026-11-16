@@ -361,7 +361,8 @@ USB_TOAST_PX = 15
 BT_MODES = {'receive': 'bluetooth-fill'}
 # Settings > Bluetooth (bt_ui.c, docs/oled-design.md#bluetooth): a device row's kind at the row symbols' size (regular,
 # Text Secondary per half, white on the selection), the scan's spinner beside Other Devices in Text Tertiary per half,
-# and the connection toasts' glyphs (fill, 15 px, white; the low headset battery's in the battery's red).
+# and the connection toasts' glyphs (fill, 15 px, white, a drop's in Text Secondary; the low headset battery's in the
+# battery's red).
 BT_ROW_GLYPHS = {'bt': 'bluetooth', 'headphones': 'headphones', 'car': 'car-profile', 'speaker': 'speaker-hifi',
                  'phone': 'device-mobile'}
 BT_SPIN_INKS = {'d': 0x858585, 'l': 0x6e6e6e}
@@ -657,6 +658,7 @@ def images(t):
     out |= {f'{prefix}_btspin_{k}_{f}': spinner(f, SPIN_SPOKES, CARET_PX, SPIN_R, SPIN_STROKE, SPIN_FADE, c)
             for k, c in BT_SPIN_INKS.items() for f in range(SPIN_SPOKES)}
     out |= {f'{prefix}_bttoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in BT_TOASTS.items()}
+    out |= {f'{prefix}_bttoast_{n}_off': phosphor(g, USB_TOAST_PX, 0xababab) for n, (g, _) in BT_TOASTS.items() if n != 'low'}
     out |= {f'{prefix}_btmode_{n}': phosphor(g, USB_MODE_PX, 0xffffff) for n, g in BT_MODES.items()}
     out |= {f'{prefix}_batt{n}_{k}': inset_glyph(g, *inks) for n, g in BATT_GLYPHS.items() for k, inks in BATT_GLYPH_INKS.items()}
     out |= {f'{prefix}_chargetoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in CHARGE_TOASTS.items()}

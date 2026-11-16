@@ -1,6 +1,14 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth (OLED): **Settings → Bluetooth** shows your devices first: **My Devices** and **Other Devices**, then the settings under **Audio** (Quality, Headset Volume, Resume on Connect, Link Volume). The page looks for devices by itself while it is open, a spinner beside Other Devices; the Scan now row is gone. With Bluetooth off, Name stays and a line says what turning it on gives.
+  - Bluetooth (OLED): the connected device says what it is doing on its row, **Connected · LDAC · 72%** with a green dot; others say **Not Connected**, or **Connecting…** with a spinner. Each row shows whether it is headphones, a car, a speaker or a phone.
+  - Bluetooth: Center on a paired device connects it; on the connected one it opens the device's page: how the sound gets there (**Q2 → WH-1000XM5**, **LDAC · 96 kHz · 990 kbps**), its battery, **Disconnect**, **Rename** and **Forget This Device**, which asks first. Hold Play/Pause on any paired device to open its page.
+  - Bluetooth: **Quality** shows each choice's bit rate (LDAC Best 990 kbps, LDAC Standard 660, aptX HD 576, aptX 384); LDAC HQ is called **LDAC Best** and LDAC Connection (auto) **LDAC Auto**. **Control Device Volume** is now **Link Volume**, and the headset volume page is **Headset Volume**.
+  - Bluetooth: renaming the Q2 says who sees the name: phones and cars.
+  - Bluetooth: if the Bluetooth chip stops answering, a **Bluetooth Stopped** screen says so and restarts the Q2 after a 10 s countdown, with **Not Now** to keep using it without Bluetooth, instead of a brief "Bluetooth abnormal" and a restart without warning.
+  - Status bar (OLED): Bluetooth shows what it is connected to: a dim Bluetooth glyph while connecting, a white one once connected, headphones with a small battery when the headset reports its level (red under 20%), or a car.
+  - Bluetooth: toasts say when a device connects or disconnects (**WH-1000XM5 connected**), when a car connects and the music resumes (**BMW 6R81 connected · resuming**), and when headphones run low (**Headphones low · 10%**, once at 20% and once at 10%).
   - Display (OLED): text sizes follow one scale. Mode-page titles (USB, sign-in) and the update's name grow a pixel to their intended size; the A-Z index and Control Center labels grow from 11 to 13 px; small 14 px lines (an artist's album, Up Next's Clear, the QR page's address, the update's size) become 15 px and the ADB note 13 px; Search's letters become 20 px; the A-Z bubble's letter and an artist's monogram 22 px. In Light Mode, the scan's and the update's progress tracks and the USB Stop pill take the same light grey as every other track and pill, and the QR page's address line its proper grey. Songs added in Add Songs are marked in the same green as everything else.
   - Confirmations: removing a song from a playlist, and deleting or replacing an EQ preset, now open on **Cancel**, so a stray Center press no longer removes or overwrites anything.
   - Line Out's warning reads "Line Out sets max volume, continue?" (a missing space).
@@ -13,7 +21,6 @@
   - Status bar (OLED): while a song plays the play triangle becomes three moving level bars; paused they stop and turn grey. Tap them to open Now Playing. The clock sits beside whatever glyphs show, and moves over when there are fewer.
   - Status bar (OLED): Wi-Fi shows its signal left of the play state while connected, one to three arcs lit; connected with no internet it shows a crossed Wi-Fi glyph, and with Wi-Fi off, nothing.
   - Status bar (OLED): while a streaming app checks its server, turning arrows show beside the battery; while it downloads songs, a ring fills in the accent colour with an arrow in it.
-  - Status bar (OLED): a connected Bluetooth headset that reports its battery shows a Bluetooth glyph and its percentage.
   - Status bar (OLED): the Buttons Lock padlock sits leftmost of the status glyphs, and long titles end in an ellipsis sooner when more glyphs show: nothing wraps.
   - Status bar: while it charges, the battery shows how full it really is. It used to fill to the end the moment the cable went in.
   - Status bar (OLED): a charging battery shows a small lightning bolt inside it, in green; full on the cable, or held at **Charge Limit**, it stays green with no bolt.

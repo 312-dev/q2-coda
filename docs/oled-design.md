@@ -192,8 +192,10 @@ All lists share one grid.
     `arrows-clockwise` (bold) turning in Text Secondary (S1); while it downloads songs, a 14 px ring (1.6 px) in
     `#333333` filling clockwise from 12 o'clock in the accent, Phosphor `arrow-down` (bold, 8 px, Text Primary) in
     it (S2, `mock_sync_status.py`).
-  - **Headset battery**, 5 px left: a connected Bluetooth headset's level, Phosphor `bluetooth` (bold) then the
-    level and "%" in the battery's percentage type, Text Primary.
+  - **Bluetooth**, 5 px left (P9 in `design/bt-redesign`): nothing while Bluetooth is off or nothing is
+    connected; Phosphor `bluetooth` (bold) in Text Tertiary while a device connects and in Text Primary once one
+    is connected; a headset that reports its level, `headphones` (bold) and a 15x8 battery 2 px after it, filled
+    to the level as the status battery's (red under 20%); a car, `car-profile` (bold).
   - **Buttons Lock**, 5 px left: the padlock (Phosphor `lock-simple`, fill, 13 px, Text Primary).
 - The new glyphs are 14 px boxes at the padlock's optical size, 11 px of ink ([Icons](#icons)), centred on the
   row; every gap is at least 4 columns of black, so Split inks each glyph by itself.
@@ -985,6 +987,43 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
   says ("Charging · 62%", lightning, green), Charged to 80% when Charge Limit stops it (battery-full, green), and
   Charger too weak (warning, orange).
 
+### Bluetooth
+
+Settings > Bluetooth and its pages ([internals](internals.md#bluetooth-page), `patch/bt_ui.c`, `patch/bt_detail.c`,
+`patch/bt_stopped.c`; approved from `design/bt-redesign`, its `NOTES.md` and sheets, on 2026-11-16):
+
+- **Devices before settings.** The switch, Name (the name as its value), then My Devices (the paired ones) and
+  Other Devices (the found ones), each a section header in 15 px Text Tertiary a whole row high, then Audio:
+  Quality (its choice as the value), Headset Volume, Resume on Connect and Link Volume. With Bluetooth off, the
+  switch, Name and a line in 13 px Text Tertiary: "Turn on to play to headphones, a car or a speaker."
+- **Scanning is automatic** while the page is open, the list's spinner (Text Tertiary) beside "Other Devices"
+  while a scan runs: one as the page opens, then again each time one ends while nothing is connected. No Scan
+  row.
+- **Device rows** lead with the device's kind (Phosphor `headphones`, `car-profile`, `speaker-hifi`,
+  `device-mobile`, else `bluetooth`; regular, 20 px, Text Secondary, white on the selection) centred on x 33, the
+  name at x 52. The connected one is a two-line row: the name over "Connected · LDAC · 72%" (what is known: the
+  codec, the headset's battery) after the Positive dot, with a chevron. Another paired one says "Not Connected"
+  as a value before its chevron; one connecting, "Connecting…" with the activity spinner on the right column.
+- **Centre** on a paired row connects it; on the connected one it opens the device's page; Play/Pause held on
+  any paired row opens its page.
+- **A device's page**: the status row names it; under it the path, "Q2 → WH-1000XM5" in 17 px, and the codec
+  line in 14 px Text Tertiary ("LDAC · 96 kHz · 990 kbps", only what is known: the bit rate where the codec
+  fixes it), then Battery (when reported), Disconnect (Connect when not connected), Rename and Forget This
+  Device. Forget asks on the [confirmation card](#confirmation-card): "Forget WH-1000XM5?", "You'll need to pair
+  again to use it.", Cancel first and Forget Device in red. Rename is the letter strip, "Shows on this Q2"
+  under the name.
+- **Quality**: each choice with its bit rate in 15 px Text Tertiary before the check where the codec fixes one
+  (LDAC Best 990 kbps, LDAC Standard 660, aptX HD 576, aptX 384); LDAC Auto's caption, under it while selected,
+  "Steps with the signal, 330 to 990 kbps".
+- **Name** (the Q2's): the letter strip says "Phones and cars see this name" in 15 px Text Secondary under the
+  name, the hint in 13 px under that.
+- **Toasts**, each with its 15 px glyph: "WH-1000XM5 connected" (the device's kind, white), "WH-1000XM5
+  disconnected" (the glyph in Text Secondary), "BMW 6R81 connected · resuming" with Resume on Connect on,
+  "Headphones low · 10%" (battery-warning, red) once at 20% and once at 10% each connection.
+- **Bluetooth Stopped**: when the radio never answers, a mode page, the warning glyph on an orange (Warning)
+  circle, "Bluetooth Stopped", "Restarting the Q2 to fix it in 9 s" counting down, and a Not Now pill (Centre,
+  Return or a tap), instead of a toast and an unannounced restart.
+
 ### Plug-in screen
 
 A cable in while the screen is off lights it for 3 s and then turns it off again (S1, V1 from
@@ -1088,7 +1127,9 @@ pattern.
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             | Its [tabs](#tabs), then rows: the switch, Presets, Reset                                                   |
 | Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right                      |
-| Bluetooth                           | Two-line row                | Second line "Connected" with the Positive dot; Name a key/value row opening the letter strip               |
+| Bluetooth                           | [Bluetooth](#bluetooth)     | Devices first under My Devices and Other Devices, the connected one two lines ("Connected · LDAC · 72%" after the Positive dot); then Audio |
+| A Bluetooth device                  | [Bluetooth](#bluetooth)     | The path and its codec line, then Battery, Disconnect, Rename and Forget This Device                      |
+| Bluetooth Stopped                   | [USB](#usb)'s mode page     | The warning on an orange circle, the restart's countdown and Not Now (`bt_stopped.c`)                      |
 | Bluetooth receiver (a phone playing to the Q2) | [USB](#usb)'s mode page | The accent circle with the Bluetooth glyph, the phone's title over its artist ("Playing from Phone" over "Wheel sets the volume" before it names one), the codec in the pill (`bt_recv.c`) |
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |

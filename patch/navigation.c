@@ -2164,7 +2164,6 @@ static void paint_selection(void *w, void *canvas) {
     canvas_set_clip_rect(canvas, &old);
 }
 
-
 static void edit_paint(void *w, void *canvas);
 
 /* Stock's radio images (select, unselect) are emptied (ringnav_image_add): a checked row gets the
@@ -2365,9 +2364,10 @@ int ringnav_paint(void *w, void *canvas) {
     if (w && w == slider_page_win) slider_page_paint(w, canvas);
     storage_paint(w, canvas);
     usb_ui_paint(w, canvas);
-    bt_recv_paint(w, canvas);   /* Bluetooth receiver mode (bt_recv.c) */
-    bt_ui_paint(w, canvas);     /* Settings > Bluetooth's marks (bt_ui.c) */
-    sw_update_paint(w, canvas); /* SD Card Update's pages (sw_update.c) */
+    bt_recv_paint(w, canvas);    /* Bluetooth receiver mode (bt_recv.c) */
+    bt_ui_paint(w, canvas);      /* Settings > Bluetooth's marks (bt_ui.c) */
+    bt_stopped_paint(w, canvas); /* Bluetooth Stopped (bt_stopped.c) */
+    sw_update_paint(w, canvas);  /* SD Card Update's pages (sw_update.c) */
     if (w && w == st.np_win && !(NP_VISUALIZER && visualizer_full()))
         np_modes(w, canvas); /* else the page's own */
     coverflow_home_clip(w, canvas, 0);
@@ -3091,11 +3091,11 @@ static void reorder(void *view, const unsigned char *order, unsigned n) {
  * channels, then specialist output controls. Stock's rows 0-10 (ringnav_audioset drops its Volume
  * and Album Display and Folder skip), then ours as built. */
 static const unsigned char playset_order[] = {
-    2 /* EQ */,           19 /* Library */,     3 /* Play Mode */,     7 /* Gapless */,
-    11 /* Crossfade */,   6 /* Memory play */,  12 /* Resume Songs */, 8 /* Headphones required */,
-    15 /* Sleep Timer */, 16 /* Volume */,      17 /* Max Volume */,   18 /* Default Vol */,
-    0 /* Gain */,         9 /* ReplayGain */,   10 /* Balance */,      13 /* Mono Audio */,
-    14 /* Swap L/R */,    1 /* Filters */,      4 /* DSD Output */,    5 /* USB Audio */,
+    2 /* EQ */,           19 /* Library */,    3 /* Play Mode */,     7 /* Gapless */,
+    11 /* Crossfade */,   6 /* Memory play */, 12 /* Resume Songs */, 8 /* Headphones required */,
+    15 /* Sleep Timer */, 16 /* Volume */,     17 /* Max Volume */,   18 /* Default Vol */,
+    0 /* Gain */,         9 /* ReplayGain */,  10 /* Balance */,      13 /* Mono Audio */,
+    14 /* Swap L/R */,    1 /* Filters */,     4 /* DSD Output */,    5 /* USB Audio */,
 };
 /* General, iOS's: About first, then device maintenance, Network's receivers and Reset. Stock's
  * Language, Wireless, Display, Power, Wheel Function, In-Vehicle, General and System stay hidden,
@@ -4728,8 +4728,8 @@ static int usb_poll(const void *info) {
     if (f) fclose(f);
     if (n > 0) st.usb_lun = 1;
     if (n || !st.usb_lun) return 8; /* RET_REPEAT */
-    usb_ui_ejected(win); /* the mode page says OK to Disconnect */
-    return 7; /* RET_REMOVE */
+    usb_ui_ejected(win);            /* the mode page says OK to Disconnect */
+    return 7;                       /* RET_REMOVE */
 }
 
 void *ringnav_ui_load(const char *name, void *parent) {
@@ -4743,9 +4743,9 @@ void *ringnav_ui_load(const char *name, void *parent) {
     int np = name && !tk_strcmp(name, "playing_page");
     void *root = stock_ui_load_trampoline(ui_redirect(name, path), parent);
     if (root && slider_page(root)) slider_open(root); /* no knob; slider_page.c's form */
-    if (root) msg_open(root); /* the scan page (scan_page.c oled_scan) */
-    if (root) usb_ui_mode_load(root); /* USB's page as a mode page (usb_ui.c) */
-    if (root) bt_recv_load(root);     /* the Bluetooth receiver's (bt_recv.c) */
+    if (root) msg_open(root);                         /* the scan page (scan_page.c oled_scan) */
+    if (root) usb_ui_mode_load(root);                 /* USB's page as a mode page (usb_ui.c) */
+    if (root) bt_recv_load(root);                     /* the Bluetooth receiver's (bt_recv.c) */
     if (root && g_usbmode != 1 && !tk_strcmp(widget_get_prop_str(root, "name", ""), "usbmode_page"))
         st.usb_lun = 0, widget_add_timer(root, usb_poll, 500);
     if (root) album_local_load(root); /* OLED's album page on stock's (library_album.c) */
@@ -4939,10 +4939,13 @@ static const char *bar_title_of(void *win, void **label) {
     if (!tk_strcmp(name, "radionp_page")) return "Internet Radio";
     if (usb_ui_title(name)) return usb_ui_title(name);   /* the USB mode pages (usb_ui.c) */
     if (bt_recv_title(name)) return bt_recv_title(name); /* Bluetooth receiver mode (bt_recv.c) */
-    if (sw_update_title(name)) return sw_update_title(name); /* SD Card Update's (sw_update.c) */
+    if (bt_detail_title(name)) return bt_detail_title(name);   /* a Bluetooth device's page */
+    if (bt_stopped_title(name)) return bt_stopped_title(name); /* Bluetooth Stopped */
+    if (sw_update_title(name)) return sw_update_title(name);   /* SD Card Update's (sw_update.c) */
     if (!tk_strcmp(name, "qrcode_page")) return addon_qr_title(win); /* the card app's name */
     if (!tk_strcmp(name, "search_dialog")) return "Search"; /* stock's toolbar has no label */
-    if (!tk_strcmp(name, "statusbar_dialog")) return ""; /* Control Center: the clock centred, as Home's */
+    if (!tk_strcmp(name, "statusbar_dialog"))
+        return "";                       /* Control Center: the clock centred, as Home's */
     if (artist_local_on(win)) return ""; /* the design's artist page: the header names it */
     void *nav = widget_lookup(win, "view_navbar", 1);
     if (nav) {
@@ -5224,7 +5227,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         clock_place(bar, top);
         if (st.action_view) action_row(st.action_view);
         feedback_songs(top, st.action_view); /* OLED: an empty list's note, no Shuffle row */
-        feedback_folder(top); /* an empty folder level's note */
+        feedback_folder(top);                /* an empty folder level's note */
         np_sync(top);
         if (w == top) vol_paint(top, canvas);
         /* Boot may paint Home before the screen is usable, so nothing chose or drew its first
@@ -6026,14 +6029,16 @@ int ringnav_display(void *win, void *ctx) {
 
 /* Settings' rows on Home that are not stock's (tools/ipod.py HOME_SETS; stock binds General and
  * Playback): Wi-Fi's and Bluetooth's pages, which Wireless held, Car Remote, Display, Controls and
- * Battery, which General (stock's System page, ringnav_systemset) held. Here, as display_open is. */
+ * Battery, which General (stock's System page, ringnav_systemset) held. Here, as display_open is.
+ */
 static int set_open(void *ctx, void *event) {
     int i = (int)(long)ctx;
     if (i == 2) return carremote_open(0, event);
     if (i == 4) return display_open((void *)DISPLAY_CONTROLS, event);
-    static const char *const pages[] = { "systemset/wifi_page",    "systemset/bluetooth_page", 0,
-                                         "systemset/display_page", 0,
-                                         "systemset/powermanager_page" };
+    static const char *const pages[] = {
+        "systemset/wifi_page",        "systemset/bluetooth_page", 0, "systemset/display_page", 0,
+        "systemset/powermanager_page"
+    };
     navigator_to(pages[i]);
     return 0;
 }
@@ -8795,8 +8800,9 @@ int ringnav_keylong(void *ctx, void *event) {
     if (!event || I(event, EVENT_KEY) != KEY_PLAY) return stock_keylong_trampoline(ctx, event);
     void *top = window_manager_get_top_window(window_manager());
     const char *fav = radio_hold(top);
-    int taken = fav || spot_hold(top) || addon_hold(top) || storage_hold(top) || un_hold(top) ||
-                home_cf_hold(top) || artist_local_on(top) || playlist_page_hold(top) ||
+    int taken = fav || spot_hold(top) || addon_hold(top) || storage_hold(top) || bt_ui_hold(top) ||
+                un_hold(top) || home_cf_hold(top) || artist_local_on(top) ||
+                playlist_page_hold(top) ||
                 lr_editing(top); /* Edit Library and Edit Home: Play/Pause's tap alone */
     if (!taken && qm_hold()) return STOP;
     if (taken) {
@@ -9668,8 +9674,8 @@ int ringnav_keydown(void *ctx, void *event) {
         st.center_down_at = st.centre_at ? st.centre_at : (unsigned)time_now_ms() | 1;
     lr_edit_keydown(key); /* Center held on the Library or Home: its editor (library_edit.c) */
     search_strip_down(top, key); /* Return held on a letter strip: its card (search_strip.c) */
-    cc_keydown(key);      /* ... on a Control Center stop: its page (control_center.c) */
-    un_keydown(key);      /* ... on a queued song in Up Next: it lifts (upnext.c) */
+    cc_keydown(key);             /* ... on a Control Center stop: its page (control_center.c) */
+    un_keydown(key);             /* ... on a queued song in Up Next: it lifts (upnext.c) */
     unsigned char tone = g_keytone_flag;
     void *row = (void *)0;
     entries_t s = { &row, 0, 1, 4096 };
@@ -9761,7 +9767,8 @@ static int edit_single(const void *info) {
         char click[0x30];
         if (sw && widget_get_visible(sw)) {
             stock_dispatch_trampoline(sw, pointer_event_init(click, EVT_CLICK, sw, 0, 0));
-            widget_invalidate_force(top, (void *)0); /* the hidden switch's change repaints no row */
+            widget_invalidate_force(top,
+                                    (void *)0); /* the hidden switch's change repaints no row */
         } else if (slider_page(top))
             navigator_back();
     } else if (f < n)
@@ -10034,7 +10041,8 @@ int ringnav(void *ctx, void *event) {
             return STOP;
         }
     }
-    if (usb_ui_key(window_manager_get_top_window(window_manager()), key)) return STOP; /* USB's Stop */
+    if (usb_ui_key(window_manager_get_top_window(window_manager()), key))
+        return STOP; /* USB's Stop */
     if (search_key(key)) return STOP;
     int result = usb_prompt() ? 0 : stock_keyup_trampoline(ctx, event);
     if (key == KEY_PLAY && play_hold_released()) return STOP;
