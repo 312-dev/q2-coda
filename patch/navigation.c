@@ -7877,9 +7877,19 @@ int stream_config(void *ctx, void *event) {
     for (int i = 0; i < 3; ++i)
         st.sc_row[i] = page_row_detail(view, i, "", 0, sc_click), sc_text(i);
     page_row_detail(view, 3, "Stop Streaming Services", 0, sc_click);
-    /* a gap before the toggles, clear as the rows (the theme's default list_item fills) */
-    int rh = page_h(48);
-    widget_use_style(list_item_create(view, 0, 4 * rh, 375, rh), "s_listitem_black");
+    /* a section header before the toggles, a whole row so the list scrolls in whole rows: what
+     * they do, in 15 px Text Tertiary at the text column (docs/oled-design.md Section header),
+     * clear as the rows (the theme's default list_item fills) */
+    int rh = page_h(48), px = 18; /* Inter 15, AWTK's size */
+    void *head = list_item_create(view, 0, 4 * rh, 375, rh);
+    widget_use_style(head, "s_listitem_black");
+    void *label = text(head, theme()->page_x, 0, 375 - 2 * theme()->page_x, rh);
+    widget_set_text_utf8(label, "Show in Streaming");
+    const char *face = theme_face(widget_get_text(label), -1, &px);
+    widget_set_prop_str(label, "style:normal:font_name", face ? face : "default");
+    widget_set_prop_int(label, "style:normal:font_size", px);
+    widget_set_prop_str(label, "style:normal:text_align_h", "left");
+    text_ink(label, RGBA(ipod_light() ? 0x6e6e6e : 0x858585), INK_LABEL);
     char hide[SVC_HIDE];
     svc_hidden(hide);
     for (int i = 0; i < n; ++i) {

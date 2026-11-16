@@ -1935,7 +1935,9 @@ SERVICES = ['TIDAL', 'Spotify', 'Tidal Downloads', 'Internet Radio', 'AirPlay']
 def test_configuration_lists_the_caches_erase_stop_and_each_service(fw, ui):
     page, *_ = configuration(fw, ui, {f'{SPOT_DIR}/.cache-size': b'1024M'}, hide=b'RADIO')
     assert ui.name[page] == 'streamconf_page'
-    assert ui.captions(page)[:5] == ['Tidal Cache: 2 GB', 'Spotify Cache: 1 GB', 'Erase Spotify Data', 'Stop Streaming Services', None]
+    # the toggles under a section header (audit2 E1): a whole row, so the list scrolls in whole rows
+    assert ui.captions(page)[:5] == ['Tidal Cache: 2 GB', 'Spotify Cache: 1 GB', 'Erase Spotify Data', 'Stop Streaming Services',
+                                     'Show in Streaming']
     assert switches(ui, page) == [(s, s != 'Internet Radio') for s in SERVICES]
     call(fw, 'stream_config')
     assert ui.windows == [page]
