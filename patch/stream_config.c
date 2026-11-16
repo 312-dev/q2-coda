@@ -117,7 +117,6 @@ static void sc_switch(void *view, int index, int i, const char *title, const cha
     st.sc_check[i] = widget_get_child(page_row_detail(view, index, "", 0, click), 0);
     list_toggle(st.sc_check[i], title, !svc_find((char *)hide, i));
 }
-#define W(s) ((const unsigned *)L##s)
 
 /* Erase Spotify Data's card (docs/oled-design.md#confirmation-card): Erase (row 1) starts it. */
 static void sc_erase_answer(void *ctx, int row, int toggle_on) {
@@ -178,12 +177,7 @@ static void sc_open_sub(int sp) {
     sc_switch(view, 0, sp, "Show in Streaming", hide, sub_click);
     if (!sp) sc_switch(view, 1, SVC_DOWNLOADS, "Show Downloads", hide, sub_click);
     st.sc_cache = widget_get_child(page_row_detail(view, sp ? 1 : 2, "", 0, sub_click), 0);
-    caption_item(P(st.sc_cache, W_PARENT), sp ? W("Space kept for songs played from Spotify")
-                                              : W("Space kept for songs played from TIDAL"));
-    if (sp) {
-        st.sc_erase = widget_get_child(page_row_detail(view, 2, "", 0, sub_click), 0);
-        caption_item(P(st.sc_erase, W_PARENT), W("Signs out of Spotify and clears its cache"));
-    }
+    if (sp) st.sc_erase = widget_get_child(page_row_detail(view, 2, "", 0, sub_click), 0);
     sc_text();
 }
 
@@ -219,8 +213,6 @@ int stream_config(void *ctx, void *event) {
         void *item = page_row_detail(view, 2 + p, "", 0, sc_click);
         row_into(item, page_h(48));
         st.sc_prov[p] = widget_get_child(item, 0);
-        caption_item(item, p ? W("Its cache, sign-in and place in Streaming")
-                             : W("Its cache, downloads and place in Streaming"));
     }
     sc_header(view, 4, "Show in Streaming");
     char hide[SVC_HIDE];

@@ -490,7 +490,6 @@ void kv_row(void *key, void *val, int kw, int vw, int right); /* settings_pages.
 void diag_about_row(void *view); /* diagnostics.c, --dev builds' Save Diagnostics */
 int diag_row(void *item);
 void caption_row(void *label, const unsigned *text);
-void caption_item(void *item, const unsigned *text); /* caption_row for a list_item itself */
 const unsigned *pod_caption(int i);
 extern const unsigned *const smart_awake_caption, *const folder_skip_caption;
 void caption_sel(void *view, void *item);

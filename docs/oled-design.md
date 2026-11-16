@@ -1036,8 +1036,7 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
 ### Streaming Configuration
 
 <a id="streaming-configuration"></a>Streaming's Configuration (approved as 25 v3 B on 2026-11-16,
-`patch/stream_config.c`) is two levels of [list rows](#list-row): values on the right, a caption only under the
-selected row.
+`patch/stream_config.c`) is two levels of [list rows](#list-row), values on the right.
 
 - **Configuration:** Stop Streaming Services; a "Services" header; **TIDAL** and **Spotify**, each with a chevron and
   its value, Shown or Hidden (what this page controls; a "Signed in" value would need each app's sign-in state), and
@@ -1049,6 +1048,8 @@ selected row.
 - **Spotify:** Show in Streaming, Cache ("Space kept for songs played from Spotify") and Erase Spotify Data ("Signs
   out of Spotify and clears its cache"), which asks on the [confirmation card](#confirmation-card).
 - Headers are 32 px rows of 15 px Text Tertiary, so the list scrolls in whole rows.
+- ponytail: the captions above are approved but not built. A `page_list` page's rows sit at fixed offsets, so a
+  selected row cannot grow under its title as a settings list's does ([internals](internals.md#streaming-configuration)).
 
 ### Update Library
 
