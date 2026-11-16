@@ -3642,7 +3642,19 @@ class Canvas:
         fw.mock('canvas_fill_rect', lambda c, x, y, w, h, *_: self.rects.append((self.fills[-1], *(C.c_int(v).value for v in (x, y, w, h)))))
 
 
-# The pages' pieces, shared with photos.c and navigation.c
+# The pages' pieces, shared with navigation.c and the other pages
+
+@pytest.mark.parametrize('current, failed, s, differs', [
+    (b'Loading', 0, b'Loading', 0), (b'Loading', 0, b'Loading\xe2\x80\xa6', 1), (b'', 0, b'', 0),
+    (b'x', 1, b'x', 1),  # stock wrote nothing: it didn't fit, so it differs
+])
+def test_text_differs(fw, current, failed, s, differs):
+    def get(w, out, n, *_):
+        C.memmove(out, current + b'\0', len(current) + 1)
+        return failed
+    fw.mock('widget_get_text_utf8', get)
+    assert fw.fn('text_differs', C.c_int, C.c_void_p, C.c_char_p)(0x40, s) == differs
+
 
 @pytest.fixture(scope='module')
 def scratch(library):
@@ -3688,11 +3700,11 @@ def test_an_empty_page_says_so_and_a_bar_still_reads_its_name(fw):
     ui = Ui(fw)
     page = ui.make(0, 'window')
     body = ui.make(page, 'view')
-    page_list_or(fw, page, body, b'Photos', b'No photos', 0)
+    page_list_or(fw, page, body, b'Most Played', b'No plays yet', 0)
     labels = ui.of('hscroll_label', body)
-    assert [ui[w].text for w in labels if ui[w].visible] == ['No photos']
+    assert [ui[w].text for w in labels if ui[w].visible] == ['No plays yet']
     read = [ui[w].text for w in labels if ui[w].name == '_page_title' and not ui[w].visible]
-    assert read == ['Photos']
+    assert read == ['Most Played']
     assert ui.at(ui.of('list_view', body)[0])[3] == 0  # no rows
 
 

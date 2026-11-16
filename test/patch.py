@@ -2484,7 +2484,7 @@ for start in (0,0xfffffff0):
             m.advance(200); settled=m.get(w+O['SLIDE_INDEX']); m.advance(500)
             assert m.get(w+O['SLIDE_INDEX'])==settled and not m.slides
             passed()
-# The theme's carousel and Photos viewer steps: a glide takes its kind's ms and easing, fast ticks too.
+# The theme's carousel steps: a glide takes its kind's ms and easing, fast ticks too.
 # OLED's (motion.step and step_fast) are 200 and 120 ms, SLIDE_EASING; a theme's other rows are read the same way.
 def step_ticks(m,w,*ticks):
     for gap,ms,e in ticks:
@@ -2493,7 +2493,6 @@ def step_ticks(m,w,*ticks):
 OLED_STEPS=((0,OLED_T['motion.step.ms'],OLED_T['motion.step.easing']),(50,OLED_T['motion.step_fast.ms'],OLED_T['motion.step_fast.easing']))
 assert OLED_STEPS==((0,200,8),(50,120,8))
 m=Machine(); w=m.page('home_page','slide_menu'); step_ticks(m,w,*OLED_STEPS)
-m=Machine(); w=m.page('photos_page','slide_menu'); step_ticks(m,w,*OLED_STEPS)
 m=Machine(); w=m.page('home_page','slide_menu'); set_motion(m,'step',250,2); set_motion(m,'step_fast',170,4)
 step_ticks(m,w,(0,250,2),(50,170,4)); passed()
 # A step's ms of 0 is an immediate move: no animator, a running one gone, the index there at once.
@@ -10117,7 +10116,7 @@ for name in ('drop_wifiopen','drop_btopen','drop_keylockopen','drop_highgain','d
 passed()
 import subprocess
 from ipod import imagemagick
-for name in ('local_album','local_photos','list_folder','list_tidal','player_playlist',
+for name in ('local_album','local_longsongs','list_folder','list_tidal','player_playlist',
              'small_stream','stream_spotify','stream_radio','tidal_fav_add','play_fav'):
     png=subprocess.check_output(['unsquashfs','-cat',str(B/'rootfs.squashfs'),
                                  'release/assets/default/raw/images/xx/'+name+'.png'])
@@ -11705,12 +11704,13 @@ assert pl.nodes[mt]['text']=='Measured 1/2' and pl.nodes[plbar]['text']=='Measur
 pf=CoverflowMachine(); assert oled_client(pf,fail=lambda page:True)==290
 pf.top=pf.node('window','games_page'); plist(pf,'Games',20,48)  # 20 rows: past the clamp to n * item_h
 pl2,=page_kids(pf,'list_view'); assert next(c[3] for c in pf.calls if c[0]=='list_view_create')+box(pf,pl2)[3]==290; passed()
-# The bar names the page from a hidden caption. Photos' two lists: the albums', then, the grid on show over them and the
-# source dropped (title_gone), the grid's; a list on show wins over a hidden one that comes first.
-pn=CoverflowMachine(); oled_client(pn); nbar=oled_page_bar(pn); pn.top=pn.node('window','photos_page')
+# The bar names the page from a hidden caption. A page of two lists, a level and one opened over it: the level's, then,
+# the other on show over it and the source dropped (title_gone), the other's; a list on show wins over a hidden one that
+# comes first.
+pn=CoverflowMachine(); oled_client(pn); nbar=oled_page_bar(pn); pn.top=pn.node('window','twolist_page')
 pa=pn.node('view','albums'); pg_=pn.node('view','grid',visible=0); pn.nodes[pn.top]['children']=[pa,pg_]
 psync=lambda: pn.call(address=payload_syms['bar_title_sync'],args=(pn.top,0,0,0),gap=0)
-pn.call(address=payload_syms['page_title'],args=(pa,pn.string('Photos'),1,0),gap=0); psync(); assert pn.nodes[nbar]['text']=='Photos'
+pn.call(address=payload_syms['page_title'],args=(pa,pn.string('Albums'),1,0),gap=0); psync(); assert pn.nodes[nbar]['text']=='Albums'
 pn.call(address=payload_syms['page_title'],args=(pg_,pn.string('Summer'),1,0),gap=0); pn.nodes[pa]['visible']=0; pn.nodes[pg_]['visible']=1
 pn.call(address=payload_syms['title_gone'],args=(0,0,0,0),gap=0); psync(); assert pn.nodes[nbar]['text']=='Summer'; passed()
 # A page under Now Playing that writes its caption ("Preparing artwork" four times a second) leaves the bar alone (on Now
@@ -12338,238 +12338,46 @@ m=playing_menu(); m.dirs.add('/mnt/mmc/Music'); m.word(m.items(m.get(syms['mcl_p
 m.press(6000); assert m.hold()==11 and m.labels()==SONG_MENU[:2]+['View Queue']+SONG_MENU[2:]+['Go to Folder','Shuffle','Repeat','Group by: Album']
 passed()
 
-# Photos (patch/photos.c): the helpers first. Names: .jpg, .jpeg and .png, case aside, not hidden.
-m=Machine(); m.mock('memcmp@GLIBC_2.0',prefix='cmp:')
-def ph_call(name,*args): return m.call(address=ps[name],args=(*args,0,0,0,0)[:4],gap=0,count=5_000_000)
-assert [ph_call('photo_file',m.string(n)) for n in ('a.JPG','b.jpeg','c.Png','d.gif','._e.jpg','.f.jpg','g','h.jpg.txt')]==[1,1,1,0,0,0,0,0]
-passed()
-# EXIF orientation: either byte order, after another segment, within the bytes read; else 1.
-def exif(o,le=True,pad=b''):
-    e='<' if le else '>'
-    tiff=(b'II' if le else b'MM')+struct.pack(e+'HI',42,8)+struct.pack(e+'H',2)+struct.pack(e+'HHI',0x10f,2,1)+bytes(4)
-    tiff+=struct.pack(e+'HHIH',0x112,3,1,o)+bytes(2)+bytes(4)
-    app1=b'Exif\0\0'+tiff
-    sof=b'\xff\xc0'+struct.pack('>HBHHB',17,8,480,640,3)+bytes(9)  # baseline, so stock's decoder takes it
-    return b'\xff\xd8'+pad+b'\xff\xe1'+struct.pack('>H',len(app1)+2)+app1+sof+b'\xff\xda'
+# thumb (coverflow.c), Cover Flow's, the playlists' and Spotify's: the card's files by path and stock's
+# thumbnailer, whose output it notes; ffmpeg's fork is refused (-1) or, with ff_pid 99, fails by itself.
 JFIF=b'\xff\xe0'+struct.pack('>H',16)+b'JFIF\0'+bytes(9)
-def orientation(data): a=m.alloc(len(data)+4); m.u.mem_write(a,data); return ph_call('photo_orientation',a,len(data))
-assert [orientation(d) for d in (exif(6),exif(8,le=False),exif(3,pad=JFIF),exif(9),exif(6)[:30],b'\x89PNG\r\n\x1a\n',b'\xff\xd8\xff\xda')]==[6,8,3,1,1,1,1]
-passed()
-# Orientation: each of the eight against its EXIF meaning (PIL's exif_transpose), the channels from
-# the format's byte order, alpha over black, and a crop to the box.
-W,H=3,2
-def stored(x,y): return (10*x+y+1,100+x,200+y,255)
-def shown(o,x,y):  # the stored pixel shown at x, y
-    return {1:(x,y),2:(W-1-x,y),3:(W-1-x,H-1-y),4:(x,H-1-y),5:(y,x),6:(y,H-1-x),7:(W-1-y,H-1-x),8:(W-1-y,x)}[o]
-src=m.alloc(64); at=m.alloc(4); dst=m.alloc(256); size=m.alloc(8)
-for o in range(1,9):
-    for y in range(H):
-        for x in range(W): r,g,b,a=stored(x,y); m.u.mem_write(src+y*16+x*4,bytes([b,g,r,a]))  # BGRA, format 3
-    m.u.mem_write(at,bytes([2,1,0,3]))
-    m.call(address=ps['photo_orient'],args=(src,W,H,16),stack=(at,o,dst,4,size),gap=0,count=5_000_000)
-    sw,sh=(H,W) if o>=5 else (W,H)
-    assert (m.get(size),m.get(size+4))==(sw,sh),o
-    for y in range(sh):
-        for x in range(sw):
-            r,g,b,_=stored(*shown(o,x,y)); assert m.get(dst+(y*4+x)*4)==0xff000000|b<<16|g<<8|r,(o,x,y)
-m.u.mem_write(src,bytes([200,100,50,128]))  # half transparent, over black
-m.call(address=ps['photo_orient'],args=(src,W,H,16),stack=(at,1,dst,2,size),gap=0,count=5_000_000)
-assert (m.get(size),m.get(size+4))==(2,2) and m.get(dst)==0xff000000|(200*128//255)<<16|(100*128//255)<<8|50*128//255
-passed()
-# Placing: fitted into the box, centred, never enlarged.
-r=m.alloc(16)
-for (w,h,bw,bh),want in (((100,50,85,72),(0,15,85,42)),((40,30,85,72),(22,21,40,30)),((50,100,85,72),(24,0,36,72)),
-                         ((281,375,375,290),(79,0,217,290))):
-    m.call(address=ps['photo_place'],args=(w,h,0,0),stack=(bw,bh,r),gap=0); assert tuple(signed(m.get(r+4*i)) for i in range(4))==want,(w,h,want)
-passed()
-
-class PhotosMachine(DepthMachine):
-    """The card as a tree of {path: [(name, d_type)]}, photo bytes by path, and the cache's files."""
-    def __init__(self,tree,data):
+R='/mnt/mmc/pictures'
+class ThumbMachine(DepthMachine):
+    def __init__(self,data):
         super().__init__()
-        self.tree=tree; self.data=data; self.cache=set(); self.thumbs=[]; self.forks=0; self.ff_pid=-1; self.bad=set(); self.open_files={}; self.dirs={}
-        for n in ('opendir@GLIBC_2.0','readdir@GLIBC_2.0','closedir@GLIBC_2.0','qsort@GLIBC_2.0','fopen@GLIBC_2.2',
-                  'fread@GLIBC_2.0','fseek@GLIBC_2.0','fclose@GLIBC_2.2','access@GLIBC_2.0','rename@GLIBC_2.0','unlink@GLIBC_2.0',
-                  'memcmp@GLIBC_2.0','toolsThumbSpecCover','fork@GLIBC_2.0','waitpid@GLIBC_2.0','pthread_mutex_lock@GLIBC_2.0',
+        self.data=data; self.thumbs=[]; self.forks=0; self.ff_pid=-1; self.open_files={}
+        for n in ('fopen@GLIBC_2.2','fread@GLIBC_2.0','fseek@GLIBC_2.0','fclose@GLIBC_2.2','access@GLIBC_2.0','memcmp@GLIBC_2.0',
+                  'toolsThumbSpecCover','fork@GLIBC_2.0','waitpid@GLIBC_2.0','pthread_mutex_lock@GLIBC_2.0',
                   'pthread_mutex_unlock@GLIBC_2.0'):
             self.handlers[syms[n]]='p:'+n
-        tramp=int(manifest['patch_symbols']['stock_localmusic_trampoline'],16)
-        self.handlers[tramp]='stock_localmusic'; self.u.hook_add(UC_HOOK_CODE,self.hook,begin=tramp,end=tramp)  # fast() ran
     def hook(self,u,address,size,unused):
         name=self.handlers.get(address,'')
         a,b,c,d=[u.reg_read(r) for r in REGS]
-        if name=='c:calloc@GLIBC_2.0' and a*b<=0x10000:
-            ret=0 if getattr(self,'fail_size',0)==a*b else self.alloc((a*b+7)&~3)
-        elif name=='widget_load_image' and '/mnt/mmc/.photos/' in self.text(b):
-            url=self.text(b); self.loads.append(url)
-            if url[7:] not in self.cache: ret=1
-            else:  # thumbnails decode 72x54, screen copies 375x281 (a turned photo's, as stored)
-                w,h=(72,54) if url.endswith('t.jpg') else (375,281); px=self.big_alloc(w*h*4)
-                self.u.mem_write(px,bytes([90,120,150,255])*(w*h))
-                self.word(c,w); self.word(c+4,h); self.word(c+8,w*4); self.u.mem_write(c+0xc,struct.pack('<HH',0,1)); self.word(c+0x14,px); ret=0
-        elif name=='canvas_draw_image':
-            self.draws.append(tuple(tuple(signed(self.get(r+4*i)) for i in range(4)) for r in (c,d))); ret=0
-        elif name.startswith('p:'):
-            name=name[2:].split('@')[0]; ret=0; text=self.text(a) if name not in ('readdir','closedir','qsort','fread','fseek','fclose','memcmp','fork','waitpid') else ''
-            if name=='opendir':
-                ret=0 if text not in self.tree else self.alloc(4); self.dirs[ret]=list(self.tree.get(text,[]))
-            elif name=='readdir' and self.dirs.get(a):
-                n,t=self.dirs[a].pop(0); ret=self.alloc(268); self.byte(ret+10,t); self.u.mem_write(ret+11,n.encode()+b'\0')
-            elif name=='qsort':
-                ptrs=[self.get(a+4*i) for i in range(b)]
-                for i,p in enumerate(sorted(ptrs,key=self.text)): self.word(a+4*i,p)
-            elif name=='fopen':
-                if text in self.data: ret=self.alloc(4); self.open_files[ret]=[self.data[text],0]  # bytes, position
-                elif text.endswith('.bad'): self.bad.add(text); ret=self.alloc(4)
-            elif name=='fread':
-                f=self.open_files.get(d,[b'',0]); chunk=f[0][f[1]:f[1]+b*c]; f[1]+=len(chunk); self.u.mem_write(a,chunk); ret=len(chunk)//b
-            elif name=='fseek': assert c==0; self.open_files[a][1]=b  # thumb's header read: SEEK_SET only
-            elif name=='access': ret=0 if text in self.cache or text in self.bad or text in self.data else -1
-            elif name=='toolsThumbSpecCover':
-                self.thumbs.append((self.text(a),self.text(b),c,d))
-                ret=0 if self.data.get(self.text(a))==b'corrupt' else 1
-                if ret: self.cache.add(self.text(b))
-            elif name=='rename': self.cache.discard(text); self.cache.add(self.text(b))
-            elif name=='unlink': self.cache.discard(text)
-            elif name=='fork': self.forks+=1; ret=self.ff_pid  # thumb()'s ffmpeg: refused (-1), or 99 to fail by itself
-            elif name=='waitpid': self.u.mem_write(b,struct.pack('<i',1<<8)); ret=a  # exit 1: the picture's fault
-            elif name=='memcmp': ret=0 if bytes(self.u.mem_read(a,c))==bytes(self.u.mem_read(b,c)) else 1
-        else: return super().hook(u,address,size,unused)
+        if not name.startswith('p:'): return super().hook(u,address,size,unused)
+        name=name[2:].split('@')[0]; ret=0
+        if name=='fopen':
+            if self.text(a) in self.data: ret=self.alloc(4); self.open_files[ret]=[self.data[self.text(a)],0]  # bytes, position
+        elif name=='fread':
+            f=self.open_files.get(d,[b'',0]); chunk=f[0][f[1]:f[1]+b*c]; f[1]+=len(chunk); self.u.mem_write(a,chunk); ret=len(chunk)//b
+        elif name=='fseek': assert c==0; self.open_files[a][1]=b  # thumb's header read: SEEK_SET only
+        elif name=='access': ret=0 if self.text(a) in self.data else -1
+        elif name=='memcmp': ret=0 if bytes(self.u.mem_read(a,c))==bytes(self.u.mem_read(b,c)) else 1
+        elif name=='toolsThumbSpecCover': self.thumbs.append((self.text(a),self.text(b),c,d)); ret=1
+        elif name=='fork': self.forks+=1; ret=self.ff_pid
+        elif name=='waitpid': self.u.mem_write(b,struct.pack('<i',1<<8)); ret=a  # exit 1: the picture's fault
         self.calls.append((name,a,b,c))
         self.returns(ret,clobber=True)
-
-# Local Music's last row opens the card's Photos folder (case aside) as albums: All Photos, then
-# each subfolder holding a photo, by name; hidden files, other types and empty folders are left out.
-R='/mnt/mmc/photos'
-tree={'/mnt/mmc':[('Music',4),('photos',4)],R:[('b.jpg',8),('A.png',8),('._b.jpg',8),('notes.txt',8),('Trip',4),('Empty',4),('.hidden',4)],
-      R+'/Trip':[('2.JPG',8),('1.jpg',0)],R+'/Empty':[('x.txt',8)],R+'/.hidden':[('h.jpg',8)]}
-data={R+'/b.jpg':exif(6),R+'/A.png':b'\x89PNG',R+'/Trip/1.jpg':b'corrupt',R+'/Trip/2.JPG':exif(1)}
-m=PhotosMachine(tree,data)
-view=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)]); m.top=m.node('window','localmusic_page',[view])
-assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0,count=5_000_000)==0
-button=m.nodes[m.nodes[view]['children'][-2]]['children'][0]; icon,label,into=m.nodes[button]['children']
-assert m.nodes[icon]['image']=='local_photos' and m.nodes[label]['text']=='Photos' and len(m.nodes[view]['children'])==18
-f,ctx=m.handler(button,O['EVT_CLICK']); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0
-page=m.top; assert m.nodes[page]['name']=='photos_page' and m.nodes[page]['style:normal:bg_color']==-0x1000000
-albums,grid,viewer=m.nodes[page]['children']; assert not m.nodes[grid]['visible'] and not m.nodes[viewer]['visible']
-def labels(w): return [m.nodes[x].get('text') for x in m.nodes if m.nodes[x]['type']=='hscroll_label' and m.get(x+O['W_PARENT']) in m.nodes and x in m.nodes[m.get(x+O['W_PARENT'])]['children'] and under(x,w)]
-def under(x,w):
-    while x and x!=w: x=m.get(x+O['W_PARENT']) if m.get(x+O['W_PARENT']) in m.nodes else 0
-    return x==w
-assert labels(albums)==['Photos','All Photos','Trip']; passed()
-# All Photos: the folder's own, then Trip's, by name; four tiles of three whole rows' grid, each a
-# s_listitem_black list_item in a bare vertical scroll view, and the worker for the uncached ones.
-rows=m.find('scroll_view',albums); first=m.nodes[rows]['children'][0]
-f,ctx=m.handler(first,O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.advance(0)
-assert not m.nodes[albums]['visible'] and m.nodes[grid]['visible'] and labels(grid)==['All Photos']
-tiles_view=m.find('scroll_view',grid); tiles=m.nodes[tiles_view]['children']
-assert m.nodes[tiles_view].get('yslidable')==1 and m.nodes[tiles_view].get('virtual_h')==O['PH_TILE_H']
-assert [cf_geometry(m,t) for t in tiles]==[(O['PH_GRID_X']+i*O['PH_TILE_W'],0,O['PH_TILE_W'],O['PH_TILE_H']) for i in range(4)]
-assert all(m.nodes[t]['style']=='s_listitem_black' for t in tiles) and len(m.threads)==1
-paths=[R+'/A.png',R+'/b.jpg',R+'/Trip/1.jpg',R+'/Trip/2.JPG']; keys=[fnv(p) for p in paths]
-def cache(i,s): return f'/mnt/mmc/.photos/{keys[i]:08x}{s}'
-# Grey until made; the worker makes each photo's screen copy (sides swapped for a turned photo),
-# then its thumbnail from that copy, and marks the corrupt one bad.
-def border(w): return m.call(address=HOOKS['widget_on_paint_border'][0],args=(w,m.canvas,0,0),gap=0,clear=False,count=50_000_000)
-border(tiles[0]); assert m.bands[-1][:5]==((O['PH_TILE_W']-O['PH_THUMB_W'])//2,(O['PH_TILE_H']-O['PH_THUMB_H'])//2,O['PH_THUMB_W'],O['PH_THUMB_H'],O['PH_GREY'])
-m.ff_pid=99  # ffmpeg runs and fails too: the corrupt photo's marker (a refused or killed one leaves none)
-worker,arg=m.threads[0]; assert m.call(address=worker,args=(arg,0,0,0),gap=0,count=20_000_000)==0
-SW,SH,TW,TH=O['PH_SHOT_W'],O['PH_SHOT_H'],O['PH_THUMB_W'],O['PH_THUMB_H']
-assert m.thumbs==[(paths[0],cache(0,'.tmp'),SW,SH),(cache(0,'.jpg'),cache(0,'.tmp'),TW,TH),
-                  (paths[1],cache(1,'.tmp'),SH,SW),(cache(1,'.jpg'),cache(1,'.tmp'),TH,TW),
-                  (paths[2],cache(2,'.tmp'),SW,SH),
-                  (paths[3],cache(3,'.tmp'),SW,SH),(cache(3,'.jpg'),cache(3,'.tmp'),TW,TH)],m.thumbs
-assert m.forks==1 and m.bad=={cache(2,'.bad')} and cache(2,'.jpg') not in m.cache
-m.advance(250); assert m.joins==[77]; passed()
 # thumb reads the header first: a PNG over 1024 px, or a progressive JPEG over 1024 px, goes to ffmpeg alone, as
 # stock would decode it whole in demo (#216); a smaller one, or a baseline JPEG of any size, stays with stock.
 def png_head(w,h): return b'\x89PNG\r\n\x1a\n'+struct.pack('>I4sII',13,b'IHDR',w,h)+bytes(9)
 def frame_jpeg(sof,w,h): return b'\xff\xd8'+JFIF+b'\xff'+bytes([sof])+struct.pack('>HBHHB',17,8,h,w,3)+bytes(9)+b'\xff\xda'+bytes(12)
 heads={R+'/a.png':(png_head(4000,4000),1),R+'/b.png':(png_head(1024,1024),0),R+'/c.jpg':(frame_jpeg(0xc2,3000,3000),1),
        R+'/d.jpg':(frame_jpeg(0xc2,1024,1024),0),R+'/e.jpg':(frame_jpeg(0xc0,4000,4000),0)}
-thumb_m=PhotosMachine({},{p:d for p,(d,_) in heads.items()})
+thumb_m=ThumbMachine({p:d for p,(d,_) in heads.items()})
 for p,(_,ff) in heads.items():
     thumb_m.thumbs=[]; thumb_m.forks=0  # ffmpeg's fork refused, so thumb answers 0
     assert thumb_m.call(address=ps['thumb'],args=(thumb_m.string(p),thumb_m.string('/tmp/x.jpg'),160,160),gap=0,count=5_000_000)==1-ff,p
     assert (len(thumb_m.thumbs),thumb_m.forks)==(1-ff,ff),p
-passed()
-# The turned photo's thumbnail is drawn upright, centred in its tile; the bad one stays grey.
-border(tiles[1]); assert m.draws[-1]==((0,0,54,72),((O['PH_TILE_W']-54)//2,(O['PH_TILE_H']-O['PH_THUMB_H'])//2,54,72))
-border(tiles[2]); assert m.bands[-1][4]==O['PH_GREY']
-# Centre on a tile: the viewer, a slide_menu one photo per child, a screen wide per step, drawing
-# the photo fitted and centred; at rest its neighbours are decoded too.
-f,ctx=m.handler(tiles[1],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.advance(0)
-s=m.find('slide_menu',viewer); m.slide=s
-assert m.nodes[viewer]['visible'] and not m.nodes[grid]['visible'] and len(m.nodes[s]['children'])==4
-assert signed(m.get(s+O['SLIDE_SPACER']))+O['PH_SHOT_H']==375 and m.get(s+O['SLIDE_INDEX'])==1
-m.draws=[]; m.loads=[]; paint(m)
-assert m.draws==[((0,0,281,375),((375-217)//2,0,217,290))] and m.loads==['file://'+cache(1,'.jpg'),'file://'+cache(0,'.jpg')]
-# Mid-slide back to the first photo: this one moves right and the first follows a screen behind it.
-m.draws=[]; m.word(s+O['SLIDE_OFFSET'],375//4); paint(m)
-(_,a),(_,b)=m.draws; assert len(m.draws)==2 and a[0]-(375-217)//2==b[0]+375 and 0<a[0]-(375-217)//2<375//2 and b[1:]==(4,375,281)
-m.word(s+O['SLIDE_OFFSET'],0); passed()
-# Centre shows "2 of 4" and the name; a bad photo says so whatever.
-info=[x for x in m.nodes[viewer]['children'] if m.nodes[x]['type']=='hscroll_label'][0]
-x,y,bw,bh=cf_geometry(m,info); inset=max(corner_inset(30+y),corner_inset(30+y+bh))
-assert not m.nodes[info]['visible'] and inset<=x and x+bw<=375-inset  # the whole rounded band clears the glass
-f,ctx=m.handler(m.nodes[s]['children'][1],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
-assert m.nodes[info]['visible'] and m.nodes[info]['text']=='2 of 4  b.jpg' and m.nodes[info]['style:normal:bg_color']==signed(0xb3000000)
-m.call(address=f,args=(ctx,m.event,0,0),gap=0); assert not m.nodes[info]['visible']
-m.word(s+O['SLIDE_INDEX'],2); f,ctx=m.handler(s,O['EVT_VALUE_CHANGED']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
-assert m.nodes[info]['visible'] and m.nodes[info]['text']=="Can't open this photo"; passed()
-# The wheel steps the viewer a screen at a time, as Coverflow's covers.
-m.top=page; assert m.call()==11 and signed(m.get(m.get(s+O['SLIDE_ANIMATOR'])+O['ANIM_X_TO']))==-375; passed()
-# Return: the grid with the photo last shown selected, then the albums, then Local Music.
-m.page=page; assert m.key()==11 and m.nodes[grid]['visible'] and not m.nodes[viewer]['visible']
-assert m.nodes[tiles_view]['_ringnav_index']==2 and m.nodes[tiles_view]['_ringnav_count']==4
-assert m.key()==11 and m.nodes[albums]['visible'] and not m.nodes[grid]['visible']
-assert m.key()==11 and [c[0] for c in m.calls].count('navigator_back')==1
-m.close(); assert sorted(m.destroyed)==sorted(m.frames) and m.frames; passed()
-# The grid's height: on OLED's set to the page's foot (client_h), the status row holding the title; back from the viewer
-# the fifth row's photo (y 320 to 400) shows whole in that height. With no bar label to hold it (before the bar is found,
-# or nothing booted, SET0's 290 client) the title is its own first line, a page row high (coverflow.c page_title).
-photo_tree={'/mnt/mmc':[('photos',4)],R:[(f'{i:02}.jpg',8) for i in range(20)]}; photo_data={f'{R}/{i:02}.jpg':exif(1) for i in range(20)}
-def photo_grid(m):
-    v=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)]); m.top=m.node('window','localmusic_page',[v])
-    assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0,count=5_000_000)==0
-    f,ctx=m.handler(m.nodes[m.nodes[v]['children'][-2]]['children'][0],O['EVT_CLICK']); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0
-    page=m.top; _,grid,_=m.nodes[page]['children']; tv=m.find('scroll_view',grid); assert m.nodes[grid]['visible'] and len(m.nodes[tv]['children'])==20
-    return page,tv,next(c[3] for c in reversed(m.calls) if c[0]=='scroll_view_create'),signed(m.get(tv+O['W_H']))
-def photo_back(m,page,tv):
-    f,ctx=m.handler(m.nodes[tv]['children'][19],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.advance(0)
-    m.page=page; assert m.key()==11; return signed(m.get(tv+O['SCROLL_Y']))
-pm_=PhotosMachine(photo_tree,photo_data); oled_set(pm_); oled_page_bar(pm_); page,tv,y,h=photo_grid(pm_)
-assert (y,h)==(0,320-OLG.bar); top=photo_back(pm_,page,tv); assert top<=320 and 400<=top+h,top
-pm_=PhotosMachine(photo_tree,photo_data); oled_set(pm_); assert photo_grid(pm_)[2:]==(OLT['page_row'],320-OLG.bar-OLT['page_row'])
-pm_=PhotosMachine(photo_tree,photo_data); assert photo_grid(pm_)[2:]==(OLT['page_row'],290-OLT['page_row']); passed()
-# OLED states no in-place motion (motion.inplace 0 ms: coverflow.c page_push), so nothing pushes; a theme with one (120
-# ms here): an album's grid pushes in, Return pushes the albums back; the viewer doesn't push, and a card with no albums
-# opens on its grid unmoved.
-photo_albums={'/mnt/mmc':[('photos',4)],R:[('Trip',4)],R+'/Trip':[('1.jpg',8)]}; photo_trip={R+'/Trip/1.jpg':exif(1)}
-def photos_at(tree,data,ms=120):
-    m=oled_set(PhotosMachine(tree=tree,data=data)); set_motion(m,'inplace',ms,0); m.mock('widget_animator_prop_create','widget_animator_prop_set_params','widget_animator_start')
-    v=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)]); m.top=m.node('window','localmusic_page',[v])
-    assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0,count=5_000_000)==0
-    f,ctx=m.handler(m.nodes[m.nodes[v]['children'][-2]]['children'][0],O['EVT_CLICK']); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0
-    m.page=m.top; return m
-m=photos_at(photo_albums,photo_trip,0); albums,grid,_=m.nodes[m.page]['children']
-f,ctx=m.handler(m.nodes[m.find('scroll_view',albums)]['children'][0],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.advance(0)
-assert m.nodes[grid]['visible'] and m.key()==11 and m.nodes[albums]['visible'] and m.x_pushes()==[]
-m=photos_at(photo_tree,photo_data); assert m.x_pushes()==[]; passed()
-m=photos_at(photo_albums,photo_trip); albums,grid,_=m.nodes[m.page]['children']; assert m.x_pushes()==[]
-f,ctx=m.handler(m.nodes[m.find('scroll_view',albums)]['children'][0],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.advance(0); assert m.x_pushes()==[(375,0)]
-f,ctx=m.handler(m.nodes[m.find('scroll_view',grid)]['children'][0],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.advance(0); assert m.x_pushes()==[(375,0)]  # the viewer
-assert m.key()==11 and m.x_pushes()==[(375,0)]  # back on its tiles
-assert m.key()==11 and m.x_pushes()==[(375,0),(-375,0)] and m.nodes[albums]['visible'] and not m.nodes[grid]['visible']; m.advance(120); assert m.get(albums+O['W_X'])==0; passed()
-# Failed key/state allocation releases the scanned paths too, so reopening Photos can recover.
-for fail_size in (5, 20):
-    m=PhotosMachine(tree,data); m.fail_size=fail_size
-    m.call(address=payload_syms['photos_open'],args=(m.string(R),0,0,0),gap=0,count=5_000_000)
-    m.page=m.top
-    rows=m.find('scroll_view'); first=m.nodes[rows]['children'][0]
-    f,ctx=m.handler(first,O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
-    m.advance(0); assert m.freed==4 and not m.threads
-    m.close(); assert m.freed==8
 passed()
 
 TEXT_PITCH=9
@@ -18216,7 +18024,6 @@ def empty_row(m,row):  # Local Music's row, opened
     f,ctx=m.handler(m.nodes[m.nodes[view]['children'][row]]['children'][0],O['EVT_CLICK']); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0; m.page=m.top
 for count_failed,title in (((0,False),'No embedded chapters'),((0,True),'Could not read chapters')):
     m=ChapterMachine(count=count_failed[0],failed=count_failed[1]); ebar=page_bar(m); m.open_chapters(); m.advance(50); shows_empty(m,ebar,title,'Chapters'); passed()
-m=PhotosMachine(tree={'/mnt/mmc':[('photos',4)],'/mnt/mmc/photos':[]},data={}); ebar=page_bar(m); empty_row(m,-2); shows_empty(m,ebar,'No photos','Photos'); passed()
 m=ShuffleMachine(); ebar=page_bar(m); empty_row(m,11); shows_empty(m,ebar,'No plays yet','Most Played'); passed()
 m=SpotMachine(files={}); ebar=page_bar(m); erows=stream_rows(m); f,ctx=m.handler(erows['Tidal Downloads'],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000); shows_empty(m,ebar,'No downloads yet','Tidal Downloads'); passed()
 m=CoverflowMachine(page='playing_page',pos=0); ebar=page_bar(m); q=m.deque([m.song('A')]); m.word(syms['mcl_pdeqplaylist'],q); m.word(O['MCL_POOL'],m.deque([0],'int')); assert m.call(address=payload_syms['playback_set'],args=(0,1,0,0),gap=0)==1

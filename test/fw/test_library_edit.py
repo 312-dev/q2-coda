@@ -276,12 +276,13 @@ def test_a_row_new_to_the_saved_order_shows_at_its_default_place_on_the_page(fw,
     assert lib.shown[-3:] == ['Update Local Music', 'Genre', 'Years']
 
 
-# A saved order from before Books' row was retired: "B" was its letter, between Photos and Games.
+# A saved order from before Photos' and Books' rows were retired: "o" and "B" were their letters, before Games.
 BEFORE_BOOKS = 'hspalSgerfncmqiLPAvoBGUu'
 
 
 def test_a_retired_rows_letter_in_a_saved_order_is_dropped(fw):
-    assert 'B' not in DEFAULT
+    assert 'B' not in DEFAULT and 'o' not in DEFAULT
+    assert resolve(fw, BEFORE_BOOKS.replace('o', '')) == DEFAULT
     assert resolve(fw, BEFORE_BOOKS) == DEFAULT
     mine = 'B' + BEFORE_BOOKS.replace('s', '').replace('B', '') + 's'  # Books first, Songs last
     assert resolve(fw, mine) == DEFAULT.replace('s', '') + 's'

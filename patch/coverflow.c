@@ -178,7 +178,7 @@ long file_size(const char *path) {
 }
 
 /* Runs that never reached ffmpeg's own exit, from any thread (counted atomically, so none is
- * lost); build_art and photos.c compare before and after. */
+ * lost); build_art and playlist_art.c compare before and after. */
 volatile unsigned ff_kills __attribute__((section(".scratch")));
 /* The wait for ffmpeg's child pid, writing tmp, which is renamed onto dst on success; shared with
  * playlist_art.c's 2x2. */
@@ -270,7 +270,7 @@ static int big_picture(const char *path) {
            ((kind == PICTURE_PNG || kind == 0xc2) && (w > 1024 || h > 1024));
 }
 
-/* stock's thumbnailer, under the lock every stock caller holds, else ffmpeg; shared with photos.c.
+/* stock's thumbnailer, under the lock every stock caller holds, else ffmpeg. Shared (peq.h).
  * A picture stock would decode whole in demo goes to ffmpeg alone, whose child the kernel kills
  * first. */
 int thumb(const char *src, const char *dst, int w, int h) {
@@ -593,7 +593,7 @@ int card_room(const char *dir, unsigned mb, unsigned pct) {
     return room >= (unsigned long long)mb << 20 &&
            room * 100 >= (unsigned long long)fs[3] * fs[1] * pct;
 }
-/* Whether dir's file system has MIN_FREE_MB free; shared with photos.c. */
+/* Whether dir's file system has MIN_FREE_MB free. Shared (peq.h). */
 int card_space(const char *dir) { return card_room(dir, MIN_FREE_MB, 0); }
 
 /* Cancel stops after the current album; finished thumbnails stay, so the next open resumes. */
@@ -1233,7 +1233,15 @@ void coverflow_newest(void *albums) {
     album_order(albums, YEAR_SQL " desc,album COLLATE NOCASE", 1);
 }
 
-void *text(void *parent, int x, int y, int w, int h) { /* shared with photos.c */
+/* w's text isn't s. AWTK keeps a widget's text as UTF-32, which widget_get_prop_str(w, "text")
+ * never returns, so a compare through it always differs and every set repaints. Shared (peq.h). */
+int text_differs(void *w, const char *s) {
+    char cur[512] = ""; /* stock writes nothing when it doesn't fit */
+    return widget_get_text_utf8(w, cur, sizeof cur) || strcmp(cur, s);
+}
+
+/* A label for the pages' text. Shared (peq.h). */
+void *text(void *parent, int x, int y, int w, int h) {
     void *label = hscroll_label_create(parent, x, y, w, h);
     widget_use_style(label, "s_scrlabel_white20c");
     set_hscroll_label_attribute(label);
@@ -1260,7 +1268,7 @@ void *page_open(const char *name, int (*closed)(void *, void *), int (*keyup)(vo
  * what it reads, unless the page also needs it as a first line, a row high: with no rows (n 0),
  * when it's all the page says, or when it doesn't fit the bar's box (bar_title_fits; a status
  * row's holds any, ending a long one in an ellipsis, so the rows keep their place under it).
- * Shared with photos.c. */
+ * Shared (peq.h). */
 void *page_title(void *body, const char *caption, int n) {
     const theme_t *T = theme();
     int x = T->page_x, w = 375 - 2 * x;
@@ -1296,7 +1304,7 @@ static void *rows_view(void *parent, int y, int w, int h, int n, int item_h) {
 /* The peq_ui.c page: a title bar (*title, unless 0: its caller writes it again, so it stays on
  * show) over n item_h rows (page_h) in body, down to the page's bottom (the last row's selection
  * meets the screen's edge) or shrunk so the list's white background never shows below a short list;
- * under a list_fit set its rows past the list end fade (navigation.c list_fade). Shared with photos.c. */
+ * under a list_fit set its rows past the list end fade (navigation.c list_fade). Shared (peq.h). */
 void *page_list(void *page, void *body, void **title, const char *caption, int n, int item_h) {
     int h = widget_get_prop_int(page, "h", client_h());
     item_h = page_h(item_h);
@@ -1340,7 +1348,7 @@ static void *list(const char *title, int n) {
 /* One row of a page_list (48px, the theme's page_h) or, with a detail (library_lists.c's Most
  * Played), a taller one: the caption over the detail in 16px #AAAAAA, stock's s_scrlabel_gray24l
  * grey, in the theme's boxes and fonts. iPod left-aligns them, as every stock list. Returns the
- * row. Shared with photos.c. */
+ * row. Shared (peq.h). */
 void *page_row_detail(void *view, int index, const char *caption, const char *detail,
                       int (*click)(void *, void *)) {
     const theme_t *T = theme();
@@ -2118,7 +2126,7 @@ static int floor_div(int a, int b) { /* floor division, b > 0 */ return a / b - 
 
 /* The visual position from the slide_menu's index and live offset (the wheel's animator): album c
  * (of n) at the centre and frac past it. Stock completion commits index - offset / stride. */
-int visual(void *s, int n, int *c, int *frac) { /* shared with photos.c */
+int visual(void *s, int n, int *c, int *frac) { /* shared with coverflow_position.c */
     int stride = slide_menu_item_width(s) + I(s, SLIDE_SPACER), d = -I(s, SLIDE_OFFSET);
     if (n <= 0 || stride <= 0) return 0;
     int q = floor_div(2 * d + stride, 2 * stride);
@@ -4565,7 +4573,7 @@ int page_push(void *view, int dir) {
     if (!theme()->motion[MOTION_INPLACE].ms) return 0;
     void *w = view ? P(view, W_PARENT) : (void *)0;
     if (!w || !dir) return 0;
-    /* A kept level (Photos', a folder's table) still sliding goes to its rest first. */
+    /* A kept level (a folder's table) still sliding goes to its rest first. */
     if (I(w, W_X)) widget_move_resize(w, 0, I(w, W_Y), I(w, W_W), I(w, W_H));
     return push_x(w, dir * I(w, W_W), &theme()->motion[MOTION_INPLACE]);
 }

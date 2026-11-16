@@ -211,8 +211,7 @@ extern int coverflow_home_sub(void), coverflow_home_split(void *top);
 extern void coverflow_home_strip(void *canvas, void *top);
 extern void coverflow_home_painted(void);
 extern void coverflow_home_row(void *surface, void *row, int id, int painting);
-extern void coverflow_paint(void *w, void *canvas), photos_paint(void *w, void *canvas),
-    photos_open(const char *root), video_poll(void);
+extern void coverflow_paint(void *w, void *canvas), video_poll(void);
 extern int video_on(void), video_click(const char *path);
 extern void games_paint(void *w, void *canvas);
 extern void spot_poll(void), spot_paint(void *w, void *canvas), *spot_art(void);
@@ -413,7 +412,7 @@ void rearm(unsigned *timer, int (*fn)(const void *), unsigned ms) {
     *timer = timer_add(fn, (void *)0, ms);
 }
 
-/* A page's keyup (Photos, Radio, Games): Return runs its leave from the next loop pass. */
+/* A page's keyup (Radio, Games, card apps): Return runs its leave from the next loop pass. */
 int return_key(void *event, unsigned *timer, int (*leave)(const void *)) {
     if (I(event, EVENT_KEY) != KEY_RETURN) return 0;
     rearm(timer, leave, 0);
@@ -468,8 +467,7 @@ void drop_input(void) {
  * ticks leave several fighting over the offset and committing the index twice. */
 static int carousel_page(void *top) {
     const char *name = top ? widget_get_prop_str(top, "name", "") : "";
-    return !tk_strcmp(name, "home_page") || !tk_strcmp(name, "coverflow_page") ||
-           !tk_strcmp(name, "photos_page"); /* its viewer */
+    return !tk_strcmp(name, "home_page") || !tk_strcmp(name, "coverflow_page");
 }
 
 static int is_home(void *top, void *w) { return w && kind(w) == 3 && carousel_page(top); }
@@ -2356,7 +2354,6 @@ int ringnav_paint(void *w, void *canvas) {
         stock_canvas_set_fill_color(canvas, fill);
     }
     edit_paint(w, canvas);
-    photos_paint(w, canvas);
     spot_paint(w, canvas);
     if (theme()->sb_w) {
         int table = 0;
@@ -7945,9 +7942,7 @@ int media_click(void *ctx, void *event) {
     if (!media_find(kind, root)) {
         tk_snprintf(t, sizeof t, "No %s folder on the card", MEDIA[kind - 1]);
         toast(t);
-    } else if (kind == PHOTOS)
-        photos_open(root);
-    else {
+    } else {
         memcpy(st.media_root, root, sizeof root);
         st.media_open = 1;
         navigator_to("folder_page");

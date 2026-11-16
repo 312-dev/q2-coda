@@ -163,7 +163,7 @@ def test_q2_pods_own_repos_by_any_owner(fw):
     b'me/q2-' + b'a' * 16,                   # an id is 15 at most
     b'me/q2-x ' + b'n' * 32,                 # a name, 31
     b'me/rockbox', b'me/q2-spotify', b'me/themes',          # another repo's "spotify" isn't Q2 Pod's
-    b'me/coverflow', b'me/q2-downpic', b'me/photos', b'me/q2', b'me/sldp', b'me/q2-tidal',
+    b'me/coverflow', b'me/q2-downpic', b'me/q2', b'me/sldp', b'me/q2-tidal',
 ])
 def test_a_bad_line_is_passed_over_and_the_next_read(fw, line):
     assert [a[2] for a in sources(fw, line + b'\nme/good\n')] == [b'good']

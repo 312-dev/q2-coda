@@ -309,8 +309,7 @@ typedef struct {
     int id, fresh, ending;
 } player_state;
 
-/* The payload's shared helpers: coverflow.c's pages, hashes and worker, photos.c's, navigation.c's.
- */
+/* The payload's shared helpers: coverflow.c's pages, hashes and worker, navigation.c's. */
 void *text(void *parent, int x, int y, int w, int h);
 /* feedback.c: OLED's empty and offline note (docs/oled-design.md#empty-and-offline); 0 elsewhere */
 int feedback_empty(void *parent, int free, const char *message, const char *hint);
@@ -363,8 +362,7 @@ void list_toggle(void *label, const char *title, int on); /* navigation.c: a row
 void list_value(void *label, const char *title, const char *value);
 char *csv_find(char *list, const char *item); /* navigation.c: comma lists */
 int csv_toggle(char *list, unsigned size, const char *item);
-void *bottom_caption(void *parent, int h);
-int text_differs(void *w, const char *s);
+int text_differs(void *w, const char *s); /* coverflow.c */
 long file_size(const char *path);                   /* coverflow.c: -1 when it can't be opened */
 int picture_size(const char *path, int *w, int *h); /* coverflow.c */
 void *read_all(const char *path, unsigned max, unsigned *size); /* scrobble.c */
@@ -373,7 +371,6 @@ int thumb(const char *src, const char *dst, int w, int h);
 extern volatile unsigned ff_kills; /* coverflow.c: ffmpeg runs killed or never started */
 int card_space(const char *dir);
 int card_room(const char *dir, unsigned mb, unsigned pct);
-int by_string(const void *a, const void *b);
 unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n);
 unsigned fnv(unsigned h, const unsigned char *s);
 void stop_timer(unsigned *timer), rearm(unsigned *timer, int (*fn)(const void *), unsigned ms);

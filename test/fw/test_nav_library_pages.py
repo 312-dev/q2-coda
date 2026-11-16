@@ -2614,18 +2614,11 @@ def test_a_media_row_opens_folder_view_at_its_folder(fw, ui, st):
     assert ui.went == ['folder_page'] and st('media_root', C.c_char * 32).value == b'/mnt/mmc/PODCASTS'
 
 
-@pytest.mark.parametrize('kind, name', [(1, 'Podcasts'), (4, 'Videos')])
+@pytest.mark.parametrize('kind, name', [(1, 'Podcasts'), (3, 'Videos')])
 def test_a_media_row_whose_folder_went_says_so(fw, ui, kind, name):
     Disk(fw, {'/mnt/mmc/Podcasts': b'a file, not a folder'}, folders=['/mnt/mmc/Music'])
     call(fw, 'media_click', kind)
     assert ui.toasts == [f'No {name} folder on the card'] and not ui.went
-
-
-def test_photos_open_their_own_page(fw, ui):
-    Disk(fw, folders=['/mnt/mmc/photos'])
-    fw.mock('fw_pthread_create', lambda *_: 0)
-    call(fw, 'media_click', 3)
-    assert ui.name[ui.top()] == 'photos_page' and not ui.went
 
 
 class Folder:
