@@ -472,7 +472,7 @@ def test_bricks_is_games_first_engine_row_and_pauses_under_its_menu(fw):
     p.go(ENGINE)
     assert p.s.screen == ENGINE and api(fw)['eng_live']()
     canvas = Canvas(fw)
-    screen(canvas)
+    buf = screen(canvas)  # held: the paint fills it
     assert 'centre to launch' in [t.lower() for t in texts(paint(p, canvas))]
     p.key(RETURN)
     assert p.s.paused == 2 and not api(fw)['eng_live']() and '/mnt/data/game-bricks' not in p.card.files
