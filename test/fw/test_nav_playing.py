@@ -939,7 +939,9 @@ def test_the_bar_takes_its_themes_height_and_ends_and_the_glyph_and_album_their_
     fw.mock('widget_set_opacity', lambda w, v, *_: opacity.__setitem__(w, v))
     now = Now(fw, ui, mcl, st)
     assert ui.ints[now.slider, b'bar_size'] == t['np_bar']
-    assert {ui.ints[now.slider, k] for k in (b'style:normal:round_radius', b'style:focused:round_radius')} == {t['np_bar'] // 2}
+    # round ends: stock's slider rounds nothing under a round_radius of 4 (0x62dd14), and OLED's bar is 6 px
+    assert t['np_bar'] == 6
+    assert {ui.ints[now.slider, k] for k in (b'style:normal:round_radius', b'style:focused:round_radius')} == {4}
     assert (opacity[now.state], opacity[now.album]) == (t['np_state_op'], t['np_album_op'])
 
 
