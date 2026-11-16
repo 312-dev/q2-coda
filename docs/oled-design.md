@@ -177,7 +177,8 @@ All lists share one grid.
   colours, on one line: nothing in the status row ever wraps. The slot is as wide as "100%" measures,
   each digit and the sign rounded up to a whole pixel, and the row lays out from the right edge, so
   the glyphs to its left move over for it.
-- A tap on the battery (a 44 x 40 px target round its body, so at least 40 px round it) toasts
+- A tap on the battery (a 44 x 40 px target round its body, or round the percentage on Percent, so
+  at least 40 px round it) toasts
   its state; see [Dialogs and toasts](#dialogs-and-toasts).
 
 ### Selection bar

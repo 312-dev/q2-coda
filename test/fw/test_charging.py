@@ -40,8 +40,8 @@ def test_the_battery_says_its_state_in_words(fw, st, ui, key, held, text, glyph)
 
 class Tap:
     """The status bar's battery synced from stock's label and icon, the screen lit, toasts caught."""
-    def __init__(self, fw, st, ui, text='62%', icon=b'bar_battery'):
-        theme(fw, st, BATTERY=0)
+    def __init__(self, fw, st, ui, text='62%', icon=b'bar_battery', battery=0):
+        theme(fw, st, BATTERY=battery)
         self.fw, self.toasts = fw, []
         fw.var('g_backlight_status', C.c_ubyte).value = 1
         self.bar = Bar(fw, ui)
@@ -223,3 +223,9 @@ def test_ringnav_input_turns_the_panels_portrait_touch_upright(fw, st, ui):
         send(ui.wm, e)
     tap.poll()
     assert tap.toasts == ['Battery 62%']
+
+
+def test_on_percent_a_tap_on_the_percentage_toasts_too(fw, st, ui):
+    """Battery: Percent puts the level where the battery was; the target is round the slot's centre."""
+    tap = Tap(fw, st, ui, battery=1)
+    assert tap(ui.box(tap.bar.slot)[2] // 2, 15) == ['Battery 62%']

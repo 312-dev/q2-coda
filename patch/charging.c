@@ -67,12 +67,13 @@ static const char *charge_words(unsigned key, char *out, int size) {
 #define TOUCH_UP 0x103
 static int on_battery(int x, int y) {
     void *slot = st.bar_slot, *bar = *(void *const *)system_bar;
-    if (!slot || !bar || !widget_get_visible(slot) || !widget_get_visible(bar) || st.batt_mode)
-        return 0;
+    if (!slot || !bar || !widget_get_visible(slot) || !widget_get_visible(bar)) return 0;
     int xy[2] = { x, y };
     widget_to_local(slot, xy);
-    /* the body's centre: centred on its row's height, as navigation.c batt_top places it */
-    int cx = geom_val(V_BATT_W) / 2, cy = (I(P(slot, W_PARENT), W_H) + 1) / 2;
+    /* the body's centre (the percentage's, on Percent): centred on its row's height, as
+     * navigation.c batt_top places it */
+    int cx = st.batt_mode ? I(slot, W_W) / 2 : geom_val(V_BATT_W) / 2,
+        cy = (I(P(slot, W_PARENT), W_H) + 1) / 2;
     return xy[0] >= cx - TAP_W / 2 && xy[0] < cx + TAP_W / 2 && xy[1] >= cy - TAP_H / 2 &&
            xy[1] < cy + TAP_H / 2;
 }
