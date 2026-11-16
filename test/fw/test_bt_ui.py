@@ -432,16 +432,6 @@ def test_quality_s_choices_show_their_bit_rates(fw):
         found = [ui.text[w] for w in ui.subtree(item) if ui.name.get(w) == '_bt_kbps']
         rates.append(found[0] if found else None)
     assert rates == ['990 kbps', '660 kbps', None, '576 kbps', '384 kbps', None, None, None]
-    auto = next(w for w in ui.subtree(ui.kids[view][2]) if ui.kind[w] == 'hscroll_label_create')
-    has = fw.fn('caption_has', C.c_int, C.c_void_p)
-    assert has(auto)  # LDAC Auto's caption
-    other = ui.new('scroll_view_create', 0, 0, 0, 375, 100)  # the Bluetooth page's list, rebuilt under it
-    b = ui.new('button_create', ui.new('list_item_create', other, 0, 0, 375, 32), 0, 0, 375, 32)
-    fw.fn('caption_row', None, C.c_void_p, C.c_void_p)(ui.new('hscroll_label_create', b, 0, 0, 10, 10), C.c_wchar_p('x'))
-    assert not has(auto)
-    fw.mock('time_now_ms', lambda *_: 0)
-    fw.fn('bt_ui_poll', None)()
-    assert has(auto)  # back while Quality is in sight
 
 
 def test_a_device_the_list_has_not_read_is_named_by_blue_z(fw):

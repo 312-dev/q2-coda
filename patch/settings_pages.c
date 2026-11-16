@@ -85,11 +85,11 @@ void about_rows(void *view) {
  * from another view clears the table. */
 #define CAP_MAX 8
 #define CAP_LINES 3
-#define CAP_TOP 32      /* the row's own height, title and switch */
+#define CAP_TOP 32    /* the row's own height, title and switch */
 #define CAP_PX TYPE(13) /* Inter 13 px, AWTK's size (13 x 1.21) */
-#define CAP_LINE 17     /* a line's pitch */
-#define CAP_FOOT 5      /* under the last line, inside the bar */
-#define CAP_INSET 8     /* the caption's left, past the bar's start: the title's column */
+#define CAP_LINE 17   /* a line's pitch */
+#define CAP_FOOT 5    /* under the last line, inside the bar */
+#define CAP_INSET 8   /* the caption's left, past the bar's start: the title's column */
 #define CAP_INK RGB_CAPTION_ON_ACCENT /* white, a little quieter than the title, on the accent */
 #define CAP_MS 150
 #define CAP_STEP_MS 16
@@ -112,12 +112,6 @@ static int cap_gone(void *view, void *event) {
     stop_timer(&cap.timer);
     memset(&cap, 0, sizeof cap);
     return 0;
-}
-/* Whether the row a label stands in has its caption in the table now: a list rebuilt under the
- * page in sight (Settings > Bluetooth's, at a scan's result) registers its own and clears it. */
-int caption_has(void *label) {
-    void *item = label ? P(P(label, W_PARENT), W_PARENT) : (void *)0;
-    return item && P(item, W_PARENT) == cap.view && cap_find(item) >= 0;
 }
 /* The row a list_row label stands in (its button's list_item) gets text as its caption; no text,
  * none. */
@@ -192,8 +186,7 @@ static int cap_step(const void *unused) {
         int over = I(o, W_Y) + I(o, W_H) - I(cap.view, SCROLL_Y) - I(cap.view, W_H);
         if (over > 0)
             scroll_view_set_offset(cap.view, I(cap.view, SCROLL_X),
-                                   I(cap.view, SCROLL_Y) +
-                                       (over + CAP_TOP - 1) / CAP_TOP * CAP_TOP);
+                                   I(cap.view, SCROLL_Y) + (over + CAP_TOP - 1) / CAP_TOP * CAP_TOP);
     }
     widget_invalidate_force(cap.view, (void *)0);
     if (k < 256) return 8; /* RET_REPEAT */
