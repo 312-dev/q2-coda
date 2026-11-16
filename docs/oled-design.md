@@ -456,7 +456,7 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   Store's "No apps listed" under its Check for Updates row, one line in the list's pitch). TIDAL
   with no Wi-Fi opens a page of its own titled TIDAL: "Not connected", hint "Turn on Wi-Fi in
   System > Wireless".
-- Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done.
+- Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done. A library list whose open sorts thousands of records (the first open after a library change) shows the payload's own spinner while it sorts, in every theme: a 64 px `#1C1C1E` square with 12 px corners at the screen's centre, eight dots turning clockwise (internals, [Name order](internals.md#name-order)).
 
 ### Menus
 

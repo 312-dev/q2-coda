@@ -218,14 +218,14 @@ Entries 7 to 17 are costs the code marks itself.
   | Songs   | its name sort                                                           |         1,250-2,740 |        0 once kept |
   | Songs   | load end to first paint                                                 |              40-120 |              40-50 |
   | Albums  | `getAllAlbum`: exec, then its name sort                                 |       55-90, 65-100 | 55-80, 0 once kept |
-  | Albums  | `coverflow_split`'s `ALBUM_SQL` grouping                                |             185-320 |          unchanged |
-  | Albums  | the Unknown Album check (`class_query`)                                 |               32-50 |          unchanged |
-  | Artists | the artists query, its sort; the Unknown check                          | 80-120, 8-13; 37-64 |          unchanged |
+  | Albums  | `coverflow_split`'s `ALBUM_SQL` grouping                                |             185-320 |   170-275, indexed |
+  | Albums  | the Unknown Album check (`class_query`)                                 |               32-50 |       0-2, indexed |
+  | Artists | the artists query, its sort; the Unknown check                          | 80-120, 8-13; 37-64 | unchanged; 0-1, indexed |
 
   With 10,000 server songs beside them (Local + Server), Songs' sort was 1,860-1,970 ms of a 2.4-2.6 s load; kept, the load took 470-530 ms. Albums' grouping was 330-350 ms there.
 
-- **State:** the name sort's order is kept ([internals](internals.md#name-order)); the first open after a boot, a scan or a server import still sorts. Nothing repeats a query within one open.
-- **Decision:** the rest left as is. Three indexes (the album grouping's three terms, `album`, and the album-artist expression) cut the grouping to 120-180 ms and both Unknown checks to under 1 ms, but cost 0.8, 0.5 and 0.4 MB of `/mnt/data` (17.7 MB) at 20,000 songs, more with real paths, and time at the end of every scan; worth it if `/mnt/data` moves to the card. The double-press wait is Centre's (a second press turns the screen off). A spinner during the sort would need the sort to yield, and it runs to its end inside stock's `toolsQueryDbTable`: only a sort of the payload's own, calling stock's comparator for the same order, could stop between steps for a main-loop pass. Keeping the order on the card as well would leave the sort to the first open after a library change.
+- **State:** the name sort's order is kept, in RAM and on the card ([internals](internals.md#name-order)): the first Songs open after a boot took 534 ms from the load to the first paint, from 1,855-2,930 ms. A load whose records changed (a scan, a server import or a deletion that changed them) still sorts once. Nothing repeats a query within one open.
+- **Decision:** three indexes are made at the end of a full scan when `/mnt/data` has 8 MB free (the album grouping's three terms, `album`, and the album-artist expression; [internals](internals.md#coverflow), Indexes): back to back in this emulator the grouping went from 240-347 ms to 171-273 ms and both Unknown checks from 37-67 ms to 0-2 ms, for 1.69 MB of `/mnt/data` (17.7 MB) at 20,103 songs, more with real paths, and 0.5-1.6 s at the end of the scan under QEMU. The rest left as is. The double-press wait is Centre's (a second press turns the screen off). A sort that still runs (a load whose records changed) runs on a thread of its own with stock's own call and comparator, the UI thread drawing a spinner over the screen meanwhile; the wait itself is unchanged.
 
 ## Duplicated tables kept in step by hand
 

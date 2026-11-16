@@ -144,6 +144,9 @@ LIBC = {
     'deque_assign': ('void', 'void *, const void *'), 'deque_clear': ('void', 'void *'),
     'deque_pop_back': ('void', 'void *'),
     'deque_destroy': ('void', 'void *'), 'send': ('int', 'int, const void *, unsigned, int'),
+    # stock's name sort, run by name_order.c as toolsQueryDbTable runs it (iterators by value, cstl_iter)
+    'deque_begin': ('cstl_iter', 'const void *'), 'deque_end': ('cstl_iter', 'const void *'),
+    'algo_sort_if': ('void', 'cstl_iter, cstl_iter, void *'),
     # Coverflow's art thread (coverflow.c)
     'pthread_create': ('int', 'unsigned long *, const void *, void *(*)(void *), void *'),
     'pthread_join': ('int', 'unsigned long, void **'), 'pthread_self': ('unsigned long', 'void'), 'pthread_detach': ('int', 'unsigned long'), 'pthread_mutex_lock': ('int', 'void *'),
@@ -202,6 +205,9 @@ UNFORMATTED = ['peq.c', 'peq_ui.c', 'coverflow.c', 'library_scope.c', 'scrobble.
                'nightshift.c', 'headset.c', 'chapters.c', 'lyrics.c', 'airplay.c',
                'monocypher/monocypher.c', 'monocypher/monocypher-ed25519.c']
 
+# libcstl's iterator, 28 bytes, which deque_begin returns and algo_sort_if takes by value
+CSTL_ITER = 'typedef struct { unsigned w[7]; } cstl_iter;'
+
 def function_macros(address):
     """Each stock function in address (name -> its C address) as a macro calling it there."""
     return [f'#define {name} (({ret} (*)({args})){address[name]})' for name, (ret, args) in FUNCTIONS.items() if name in address]
@@ -213,7 +219,8 @@ def compile_common(out, binary, player=False, flac_experiments=()):  # pragma: n
         if len(words) >= 6 and 'UND' in words and re.fullmatch('[0-9a-f]{8}', words[0]):
             got[words[-1].split('@')[0]] = int(words[0], 16)
     gp = 0xb17750 if player else GP
-    header = ['struct dirent { unsigned ino, off; unsigned short reclen; unsigned char d_type; char d_name[256]; };']
+    header = ['struct dirent { unsigned ino, off; unsigned short reclen; unsigned char d_type; char d_name[256]; };',
+              CSTL_ITER]
     asm = ['.set noreorder', '.text']
     for name, (ret, args) in LIBC.items():
         # Unused I/O is removed by --gc-sections in the player payload.

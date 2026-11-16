@@ -164,18 +164,18 @@ static int library_query(int content, const char *db, const char *sql, void *row
     /* no memory to expand it: the token alone is SQL's 1, the whole library (library_scope.c) */
     char *expanded = sql && strstr(sql, LIBRARY_SCOPE_TOKEN) ? library_scope_query(sql) : 0;
     const char *query = expanded ? expanded : sql;
-    /* A sorted load whose order is kept (name_order.c): the records unsorted, toolsQueryDbTable's
-     * sort 0 (toolsQueryDbTableAndSort sorts in every mode), then moved into that order */
+    /* A sorted load on the UI thread: the records unsorted (toolsQueryDbTable's sort 0, the same
+     * exec and row callback; toolsQueryDbTableAndSort sorts in every mode), then name_order.c puts
+     * them in stock's order, kept or sorted. Another thread's load sorts in stock. */
     int order = content == 2 ? 0x100 | (int)arg : content ? 0 : (int)arg; /* 0: no sort */
-    void *kept = name_order_find(query, order);
-    int result = kept ? stock_dbquery_trampoline(db, query, row, 0) : -1;
-    if (kept && (result < 0 || !name_order_apply(kept, P(tools_pdeq_directory, 0)))) kept = 0;
-    if (!kept) {
+    int result;
+    if (order && pthread_self() == ui_thread) {
+        result = stock_dbquery_trampoline(db, query, row, 0);
+        if (result >= 0) name_order(query, order, P(tools_pdeq_directory, 0));
+    } else
         result = content == 2 ? stock_sorted_query_trampoline(db, query, row, (int)arg)
                  : content    ? stock_content_query_trampoline(db, query, row, arg, sort)
                               : stock_dbquery_trampoline(db, query, row, (int)arg);
-        if (result >= 0) name_order_keep(query, order, P(tools_pdeq_directory, 0));
-    }
     if (expanded) free(expanded);
     free(search);
     return result;
