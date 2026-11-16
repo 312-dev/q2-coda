@@ -106,12 +106,12 @@ static void usb_toast(const char *glyph, const char *text) {
 
 /* The choice this cable gets without asking, USB_ASK for none. Transfer Files and USB Audio follow
  * the tile; Charge Only and USB Debugging are dropped once the tile has changed since they were
- * saved. */
+ * saved. config_value takes a value under its count, so each read names the values it may hold. */
 static int usb_remembered(void) {
-    int pick = config_value("Q2POD", USB_PICK_KEY, 0, USB_ASK);
-    if (pick <= USB_ASK || pick >= USB_CHOICES || (pick == USB_DEBUG && !Q2POD_DEV)) return USB_ASK;
+    int pick = config_value("Q2POD", USB_PICK_KEY, USB_CHOICES, USB_ASK);
+    if (pick <= USB_ASK || (pick == USB_DEBUG && !Q2POD_DEV)) return USB_ASK;
     if (pick == USB_FILES || pick == USB_AUDIO) return g_usbmode == USB_MODE_DAC ? USB_AUDIO : USB_FILES;
-    if (config_value("Q2POD", USB_PICK_MODE, 0, -1) != g_usbmode) return USB_ASK;
+    if (config_value("Q2POD", USB_PICK_MODE, 256, -1) != g_usbmode) return USB_ASK; /* a byte */
     return pick;
 }
 
