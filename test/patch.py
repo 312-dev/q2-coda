@@ -8646,7 +8646,7 @@ assert m.nodes[m.slide].get('sensitive')==0; passed()
 # window manager puts it: album over artist under the covers (the theme's coverflow caption: text_y, artist_y, name_px,
 # artist_px), the album white and the artist grey (CF_GREY), CF_EDGE from the sides and clear of the rounded glass. The
 # tracks are the theme's one-line song rows, page_x from the sides, the album named in the bar, not over them, the list
-# cut to the whole rows that end by the set's list end (fit_view: seven, y 58 to 282, docs/oled-design.md), the lowest
+# running on to the window's foot, its rows past the set's list end (y 282) fading (docs/oled-design.md), the seventh
 # clear of the glass too.
 from ipod import corner_inset
 def cf_geometry(m,w): return tuple(signed(m.get(w+O[k])) for k in ('W_X','W_Y','W_W','W_H'))
@@ -8669,7 +8669,7 @@ for w,px in ((name,OLED['cf.name_px']),(artist,OLED['cf.artist_px'])):
 view=m.tracks(); lv=m.get(view+O['W_PARENT']); title=next(w for w in m.nodes[m.get(lv+O['W_PARENT'])]['children'] if m.nodes[w]['type']=='hscroll_label')
 assert not m.nodes[title]['visible']
 X,ROW,px=OLED['page_x'],OLED['page_row'],OLED['font_px[ROLE_TITLE]']; fit=m.call(address=payload_syms['list_fit_end'],args=(0,0,0,0),gap=0)
-assert fit==282 and cf_geometry(m,lv)[1::2]==(0,(fit-BAR)//ROW*ROW)==(0,7*ROW)
+assert fit==282 and cf_geometry(m,lv)[1::2]==(0,320-BAR),cf_geometry(m,lv)  # on to the window's foot, its rows past fit fading (navigation.c list_fade)
 for i,item in enumerate(m.nodes[view]['children']):
     label=m.nodes[item]['children'][0]; assert cf_geometry(m,item)[1]==i*ROW and cf_geometry(m,label)==(X,0,375-2*X,ROW)
     assert m.nodes[label]['style:normal:font_size']==px
