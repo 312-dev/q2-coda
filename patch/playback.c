@@ -29,6 +29,7 @@ extern int album_before(const void *, const void *), folder_cmp(void *, void *),
 extern unsigned queue_hash(void *); /* navigation.c */
 extern int resume_held(void);       /* navigation.c */
 extern void resume_return(void), resume_restart(void);
+extern void un_source_take(void *q, int at, int type); /* upnext.c */
 
 typedef struct {
     unsigned index, group, rank;
@@ -36,7 +37,7 @@ typedef struct {
 typedef struct {
     int active, shuffle, repeat, folder, restoring, dirty, grouping;
     unsigned n, cursor, npend, hn, stamp;
-    unsigned pend[PEND_LIMIT]; /* Play Next: queue indices, the first plays first */
+    unsigned pend[PEND_LIMIT]; /* Playing Next: queue indices, the first plays first */
     int saved_elapsed, save_failed, resume_pending, resume_elapsed, resume_wait;
     unsigned saved_pos, saved_sum, saved_queue; /* saved_queue: a plain snapshot's queue_hash */
     int next_valid, next_value;
@@ -45,6 +46,7 @@ typedef struct {
     entry *order, *cycle;
     unsigned *groups, *seen, *history;
     unsigned poll_stamp;
+    unsigned plain_size; /* the queue's size the plain run was taken at (plain_follow) */
 } playback;
 static playback s __attribute__((section(".scratch")));
 /* Each queue entry's identity (its path's hash and CUE start) as the last rebuild took the queue, so
@@ -820,6 +822,42 @@ static int pend_take(unsigned x) {
     for (--s.npend; k < s.npend; ++k) s.pend[k] = s.pend[k + 1];
     return 1;
 }
+/* Playing Next outside advanced play, under an ordered stock mode (List or Repeat All): Play
+ * Next's and Play Last's tracks stand in the queue right after the playing one, so pend[] holds
+ * that run, pend[0] the position + 1 and each entry the one before + 1. plain_follow keeps it: a
+ * track that played from it leaves it; anything else (Previous, a pick elsewhere, an edit stock
+ * made, another mode) ends it, and its tracks play where they stand, now as the queue's own.
+ * ponytail: not in the plain snapshot, so a restart forgets which tracks were queued. */
+static int plain_ordered(void) { return !s.active && (M(MCL_MODE) == 0 || M(MCL_MODE) == 3); }
+static void plain_follow(void) {
+    if (s.active || !s.npend) return;
+    void *q = queue();
+    unsigned pos = (unsigned)M(MCL_POS), size = q ? deque_size(q) : 0, first = s.pend[0];
+    if (pos >= first && pos - first < s.npend) { /* played from the run: those leave it */
+        unsigned gone = pos - first + 1;
+        for (unsigned k = gone; k < s.npend; ++k) s.pend[k - gone] = s.pend[k];
+        s.npend -= gone;
+    }
+    int ok = plain_ordered() && size == s.plain_size && s.npend;
+    for (unsigned k = 0; ok && k < s.npend; ++k) ok = s.pend[k] == pos + 1 + k && s.pend[k] < size;
+    if (!ok) s.npend = 0;
+}
+/* n tracks inserted at at outside advanced play: the run's indices after them move, and Play Next's
+ * (next 1, at the position + 1) start it, Play Last's (2, at its end) end it; an app's (0, at the
+ * queue's end) leave it as it is */
+static void plain_insert(unsigned at, unsigned n, int next) {
+    void *q = queue();
+    for (unsigned i = 0; i < s.npend; ++i)
+        if (s.pend[i] >= at) s.pend[i] += n;
+    if (!plain_ordered()) {
+        s.npend = 0;
+        return;
+    }
+    for (unsigned i = n; next == 1 && i-- > 0;) pend_front(at + i);
+    for (unsigned i = 0; next == 2 && i < n && s.npend < PEND_LIMIT; ++i) s.pend[s.npend++] = at + i;
+    s.plain_size = q ? deque_size(q) : 0;
+    plain_follow(); /* a full list dropped some: the run ends */
+}
 /* A server row that can't play now (catalogue.c: offline with no copy), say one Add to Queue put
  * in or the link went while it waited: skipped from then on. */
 static int unplayable(unsigned x) {
@@ -851,9 +889,22 @@ static unsigned upcoming(unsigned *out, unsigned max) {
     }
     return k;
 }
+/* Outside advanced play, under an ordered stock mode: the queue's rows after the playing one, and
+ * under Repeat All the rows before it and itself again. Repeat One and stock Shuffle have none
+ * (View Queue gives stock Shuffle an order first, playback_listable). */
+static unsigned plain_upcoming(unsigned *out, unsigned max) {
+    void *q = queue();
+    unsigned pos = (unsigned)M(MCL_POS), size = q ? deque_size(q) : 0, k = 0;
+    plain_follow();
+    if (!plain_ordered() || pos >= size) return 0;
+    for (unsigned i = pos + 1; i < size && k < max; ++i) out[k++] = i;
+    for (unsigned i = 0; M(MCL_MODE) == 3 && i <= pos && k < max; ++i) out[k++] = i;
+    return k;
+}
 /* Up Next: what an automatic next plays after this track. Repeat Song and Play One Song have none,
  * as a natural end has none. */
 unsigned playback_upcoming(unsigned *out, unsigned max) {
+    if (!s.active) return plain_upcoming(out, max);
     return s.repeat == 0 || s.repeat == 3 ? 0 : upcoming(out, max);
 }
 /* Manual next bypasses single-song rules. */
@@ -965,6 +1016,7 @@ int ringnav_load(void *q, int at, int type) {
         s.restoring = 0;
     else if (!s.restoring) {
         press_stamp(); /* a list pick, after stock's load names the queue's type */
+        un_source_take(own ? own : served ? served : q, at, type); /* Up Next's "From ..." */
         s.resume_key = s.resume_pending = 0;
         s.npend = 0;
         /* Shuffle Albums/Folders end with any other queue; a repeat or Shuffle track mode carries on */
@@ -1273,6 +1325,7 @@ int ringnav_preload(void) {
 void playback_insert(unsigned at, unsigned n, int next) {
     if (!s.active) {
         s.dirty = 1; /* the plain snapshot, on the next UI pass */
+        plain_insert(at, n, next);
         return;
     }
     close_preload();
@@ -1292,10 +1345,19 @@ void playback_insert(unsigned at, unsigned n, int next) {
     s.active = rebuild(1);
     for (unsigned i = 0; i < s.npend; ++i)
         if (s.pend[i] >= at) s.pend[i] += n;
-    /* Play Next again before the last one finished: the new tracks go first, in order */
-    if (next)
+    /* Play Next again before the last one finished: the new tracks go first, in order; Play Last's
+     * go after the rest of Playing Next */
+    if (next == 1)
         for (unsigned i = n; i-- > 0;) pend_front(at + i);
+    for (unsigned i = 0; next == 2 && i < n && s.npend < PEND_LIMIT; ++i) s.pend[s.npend++] = at + i;
     playback_save();
+}
+/* Stock's preload of pos+1 closed, as mclSetPlayMode @0x5bd98c does (flag -1): the track there
+ * changed under it. */
+static void stock_unpreload(void) {
+    if (M(MCL_PRELOAD) != 1) return;
+    if (M(MCL_FD) != -1) send(M(MCL_FD), "{mcl-closegapless\\null}", 23, 0);
+    M(MCL_PRELOAD) = -1;
 }
 /* Reverses the queue's rows [from, to). deque_at points into the deque's own storage and a row owns
  * its strings (REC_SIZE), so swapping two rows' bytes moves them without stock's copy. */
@@ -1308,13 +1370,18 @@ static void reverse_rows(void *queue, unsigned from, unsigned to) {
         memcpy(b, t, REC_SIZE);
     }
 }
-/* Play Next or Add: the tracks land at pos+1 (next) or the end, and every queue index moves with
- * them. The stock side (deque, shuffle pool, last pick, previous index, gapless preload) is kept
+/* Play Next (next 1), Play Last (2) or an app's Add (0): the tracks land at pos+1, at the end of
+ * Playing Next or at the queue's end, and every queue index moves with them. The stock side (deque, shuffle pool, last pick, previous index, gapless preload) is kept
  * whether or not advanced play is on; the preload closes as mclSetPlayMode @0x5bd98c does, flag -1,
  * then advanced play's own state follows. Returns the index the first track lands at. */
 unsigned playback_queue_insert(void *queue, void *add, int next) {
     unsigned size = deque_size(queue), n = deque_size(add), pos = (unsigned)M(MCL_POS);
-    unsigned at = next && pos < size ? pos + 1 : size;
+    plain_follow();
+    /* Play Last outside advanced play stands after the plain run (plain_follow), in it; advanced
+     * play's goes at the end and joins pend[]'s end */
+    unsigned at = next == 1 && pos < size                       ? pos + 1
+                  : next == 2 && pos < size && plain_ordered() ? pos + 1 + s.npend
+                                                                : size;
     for (unsigned i = 0; i < n; ++i) _deque_push_back(queue, deque_at(add, i));
     /* Play Next turns the new rows, the only copies, from the end to at in place: rebuilding the
      * deque held a library-wide queue twice, and two copies of 47,283 songs got demo OOM-killed. */
@@ -1333,10 +1400,7 @@ unsigned playback_queue_insert(void *queue, void *add, int next) {
     /* back_to is the previous index + 1 (0 none), shifted like the rest */
     if (back_to && (unsigned)back_to - 1 >= at) back_to += (int)n;
     /* A preload always targets pos+1 (or the wrap); only an insert there makes it stale. */
-    if (M(MCL_PRELOAD) == 1 && at == pos + 1) {
-        if (M(MCL_FD) != -1) send(M(MCL_FD), "{mcl-closegapless\\null}", 23, 0);
-        M(MCL_PRELOAD) = -1;
-    }
+    if (at == pos + 1) stock_unpreload();
     playback_insert(at, n, next);
     return at;
 }
@@ -1356,6 +1420,98 @@ int playback_move(unsigned from) {
     pend_front(from);
     playback_save();
     return (int)from;
+}
+
+/* Up Next's Playing Next: the pending list, queue indices, the first plays first. */
+unsigned playback_next_rows(unsigned *out, unsigned max) {
+    unsigned k = 0;
+    plain_follow();
+    for (; k < s.npend && k < max; ++k) out[k] = s.pend[k];
+    return k;
+}
+/* Stock's indices into the queue (the shuffle pool, its last pick, the preload, back_to) after its
+ * rows moved: map[i] is row i's new index, ~0u for a row gone. */
+static void stock_remap(const unsigned *map, unsigned size) {
+    void *pool = P(MCL_POOL, 0);
+    unsigned w = 0, n = pool ? deque_size(pool) : 0;
+    for (unsigned i = 0; i < n; ++i) {
+        unsigned x = (unsigned)*(int *)deque_at(pool, i);
+        if (x < size && map[x] != ~0u) *(int *)deque_at(pool, w++) = (int)map[x];
+    }
+    while (n-- > w) deque_pop_back(pool);
+    unsigned last = (unsigned)M(MCL_LASTPOS), pre = (unsigned)M(MCL_PREPOS);
+    if (last < size) M(MCL_LASTPOS) = map[last] == ~0u ? -1 : (int)map[last];
+    if (pre < size) M(MCL_PREPOS) = map[pre] == ~0u ? -1 : (int)map[pre];
+    if (back_to && (unsigned)back_to - 1 < size)
+        back_to = map[back_to - 1] == ~0u ? 0 : (int)map[back_to - 1] + 1;
+}
+/* Swaps the queue's rows a and b, bytes and all (reverse_rows). */
+static void swap_rows(void *queue, unsigned a, unsigned b) {
+    char t[REC_SIZE], *x = deque_at(queue, a), *y = deque_at(queue, b);
+    memcpy(t, x, REC_SIZE);
+    memcpy(x, y, REC_SIZE);
+    memcpy(y, t, REC_SIZE);
+}
+/* Up Next's edit and bump: Playing Next's entry at place from goes to place to. Advanced play's
+ * list is play order alone, so only the entry moves; outside it the run is the rows after the
+ * playing one, so the row moves, the rows between take a step, and stock's indices follow. 1 when
+ * it moved (or stays). */
+int playback_next_move(unsigned from, unsigned to) {
+    void *q = queue();
+    plain_follow();
+    if (from >= s.npend || to >= s.npend || !q) return 0;
+    if (from == to) return 1;
+    unsigned x = s.pend[from], a = x, b = s.pend[to], size = deque_size(q), k;
+    if (!s.active) {
+        unsigned *map = calloc(size + 1, sizeof *map);
+        if (!map) return 0;
+        for (k = 0; k < size; ++k)
+            map[k] = k == a ? b : a > b && k >= b && k < a ? k + 1 : a < b && k > a && k <= b ? k - 1 : k;
+        for (k = a; k > b; --k) swap_rows(q, k, k - 1);
+        for (k = a; k < b; ++k) swap_rows(q, k, k + 1);
+        if (!from || !to) stock_unpreload(); /* the next track changed */
+        stock_remap(map, size);
+        free(map);
+        s.dirty = 1;
+        return 1;
+    }
+    for (k = from; k > to; --k) s.pend[k] = s.pend[k - 1];
+    for (k = from; k < to; ++k) s.pend[k] = s.pend[k + 1];
+    s.pend[to] = x;
+    close_preload();
+    s.next_valid = 0;
+    s.dirty = 1;
+    playback_save();
+    return 1;
+}
+/* Up Next's Clear: Playing Next's tracks leave the queue. The rows kept close up in order, those
+ * going end up last and are popped (the deque frees their strings), stock's indices follow
+ * (stock_remap) and advanced play's (follow_queue, by the rows' identities). 1 when any went. */
+int playback_next_clear(void) {
+    void *q = queue();
+    plain_follow();
+    unsigned size = q ? deque_size(q) : 0, pos = (unsigned)M(MCL_POS), w = 0;
+    unsigned *map = s.npend && pos < size ? calloc(size + 1, sizeof *map) : 0;
+    if (!map) return 0;
+    for (unsigned k = 0; k < s.npend; ++k)
+        if (s.pend[k] < size && s.pend[k] != pos) map[s.pend[k]] = ~0u;
+    s.npend = 0;
+    for (unsigned i = 0; i < size; ++i) {
+        if (map[i] == ~0u) continue;
+        if (i != w) swap_rows(q, i, w);
+        map[i] = w++;
+    }
+    if (pos + 1 < size && map[pos + 1] != pos + 1) stock_unpreload();
+    M(MCL_POS) = (int)map[pos];
+    stock_remap(map, size);
+    for (unsigned i = w; i < size; ++i) deque_pop_back(q);
+    free(map);
+    follow_queue();
+    s.plain_size = w;
+    s.next_valid = 0;
+    s.dirty = 1;
+    playback_save();
+    return w < size;
 }
 
 /* Snapshot fields are little-endian uint32 on this MIPS target, no pointers. Version 3: after the

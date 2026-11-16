@@ -2,6 +2,13 @@
 #include "navigation.h"
 
 static int bar_bold __attribute__((section(".scratch"))); /* the bar's title set bold (bar_title) */
+static int row_frame(const void *info);
+static struct {
+    int on;         /* radio as last painted (np_modes) */
+    int from, to;   /* the pill's width at the grow's start and its end */
+    unsigned at;    /* the grow's start, time_now_ms */
+    unsigned timer; /* the grow's next frame */
+} rad __attribute__((section(".scratch")));
 
 /* Now Playing's album and right-hand time: the remaining time (slider max less value,
  * stock's seconds, so a drag or scrub previews it), or the track's length under Track Time's Total
@@ -9,6 +16,7 @@ static int bar_bold __attribute__((section(".scratch"))); /* the bar's title set
  * was. */
 int np_sync(void *top) {
     if (!top || top != st.np_win) return 0;
+    if (addon_radio() != rad.on) row_frame(0); /* radio came or went: the row grows or shrinks */
     st.np_bold = theme_font(st.np_title, ROLE_NP, st.np_bold); /* the title, as it changes */
     const theme_t *T = theme();
     if (T->np_meta_font) { /* the artist and album in the theme's face, as their text allows */
@@ -327,54 +335,151 @@ void np_mode_step(int repeat, int dir) {
     int m = *(volatile int *)MCL_MODE, on = np_shuffle_on(m), rep = np_repeat_of(m);
     np_mode_set(repeat ? on : !on, repeat ? (rep + (dir < 0 ? 2 : 1)) % 3 : rep);
 }
-/* A tap on the play mode's target under the theme's pair: its left half is shuffle's, its right
- * repeat's, instead of stock's step through the one mode. 1 when it took the tap. */
+/* Now Playing's row (docs/oled-design.md#now-playing): shuffle, radio, repeat and Up Next across
+ * the play mode's target (tools/ipod.py np_grid), which keeps stock's image under opacity 0. The
+ * outer buttons' edges stay at the target's ends and the three gaps between the buttons are even.
+ * Shuffle and repeat are their glyph in Text Secondary, or the accent with an NP_DOT dot NP_DOT_DY
+ * under its centre while on; Repeat One has its own glyph. Radio is the antenna in Text Secondary,
+ * or while the playing app plays a radio (addon.c addon_radio) an NP_PILL wide accent pill holding
+ * the antenna and "Radio": turning on, the pill grows from the glyph's width over NP_GROW_MS and
+ * the gaps shrink with it, the word fading in over the last part (back the same way off). While
+ * radio is on, shuffle and repeat are NP_DIM and ignore taps and the Centre cycle: the app picks
+ * the order. The one the Centre cycle's wheel sets (np_stage) stands in a Text Primary ring,
+ * rounded as the selection bar. */
+#define NP_BTN 22  /* a glyph, and a button's width in the row */
+#define NP_PILL 92 /* the radio's pill, on */
+#define NP_PILL_H 34
+#define NP_GROW_MS 200
+#define NP_WORD_FROM 60 /* the word shows past this percent of the grow, fading in */
+#define NP_DOT 4
+#define NP_DOT_DY 15      /* the on dot's centre below the glyph's: 2 px under its 22 px */
+#define NP_RADIO_PX 19    /* "Radio": Inter Medium, the design's 16 px (docs/oled-design.md#type) */
+#define NP_RADIO_GLYPH 24 /* the antenna's centre this far left of the pill's, the word 10 px */
+#define NP_RING_W 38      /* the ring round the glyph the Centre cycle's wheel sets, 2 px wide */
+#define NP_RING_H 34
+enum { NB_SHUFFLE, NB_RADIO, NB_REPEAT, NB_QUEUE, NB_N };
+
+static void *np_row_widget(void) {
+    return st.np_win ? widget_lookup(st.np_win, "img_playmode", 1) : (void *)0;
+}
+static int row_frame(const void *info) {
+    (void)info;
+    rad.timer = 0;
+    void *mode = np_row_widget();
+    if (mode) widget_invalidate_force(mode, (void *)0);
+    return 0;
+}
+/* The pill's width now, eased 1 - (1 - t)^2 from where it was when radio last changed; 0..100 in
+ * *word, the word's share of its ink. A grow under way asks for its next frame. */
+static int pill_w(int *word) {
+    int on = addon_radio();
+    unsigned now = (unsigned)time_now_ms();
+    if (!rad.to) rad.from = rad.to = on ? NP_PILL : NP_BTN, rad.on = on; /* first paint: no grow */
+    int t = (int)(now - rad.at) * 100 / NP_GROW_MS;
+    if (t > 100) t = 100;
+    int e = 100 - (100 - t) * (100 - t) / 100, w = rad.from + (rad.to - rad.from) * e / 100;
+    if (on != rad.on) /* from where it is now, towards the other end */
+        rad.on = on, rad.from = w, rad.to = on ? NP_PILL : NP_BTN, rad.at = now;
+    if (w != rad.to && !rad.timer) rad.timer = timer_add(row_frame, (void *)0, 16);
+    int grown = (w - NP_BTN) * 100 / (NP_PILL - NP_BTN);
+    *word = grown <= NP_WORD_FROM ? 0 : (grown - NP_WORD_FROM) * 100 / (100 - NP_WORD_FROM);
+    return w;
+}
+/* The buttons' centres for a pill w wide, across the target from x0, row wide */
+static void row_x(int x0, int row, int w, int cx[NB_N]) {
+    int widths[NB_N] = { NP_BTN, w, NP_BTN, NP_BTN }, sum = 3 * NP_BTN + w, left = 0;
+    for (int i = 0; i < NB_N; ++i) {
+        cx[i] = x0 + left + widths[i] / 2 + i * (row - sum) / 3;
+        left += widths[i];
+    }
+}
+/* a over b, share percent of a, each 0xRRGGBB */
+static unsigned blend(unsigned a, unsigned b, int share) {
+    unsigned out = 0;
+    for (int s = 0; s < 24; s += 8)
+        out |=
+            ((((a >> s) & 0xff) * (unsigned)share + ((b >> s) & 0xff) * (unsigned)(100 - share)) /
+             100)
+            << s;
+    return out;
+}
+static void glyph(void *win, void *canvas, const char *name, int x, int y) {
+    unsigned bitmap[64]; /* bitmap_t */
+    if (!widget_load_image(win, theme_art(name), bitmap)) canvas_draw_icon(canvas, bitmap, x, y);
+}
+
+/* A tap on the row (the play mode's target): the button nearest it. Shuffle and repeat step as
+ * the Centre cycle's wheel does, unless radio is on; radio opens the playing app's page (addon.c
+ * addon_more), where a radio starts and stops; Up Next opens the queue (navigation.c np_queue).
+ * 1 when it took the tap, stock's step through the one mode never. */
+static int row_radio(const void *info) {
+    (void)info;
+    addon_more();
+    return 0;
+}
 int np_mode_click(void *target, void *event) {
-    if (!target || target != (st.np_win ? widget_lookup(st.np_win, "img_playmode", 1) : 0) ||
-        !theme()->np_modes) /* the theme last: theme() reads the settings */
+    if (!target || target != np_row_widget() || !theme()->np_modes) /* the theme last */
         return 0;
-    int x = I(event, EVENT_X);
+    int x = I(event, EVENT_X), word, cx[NB_N], k = 0;
     for (void *p = target; p && p != window_manager(); p = P(p, W_PARENT)) x -= I(p, W_X);
-    np_mode_step(x >= I(target, W_W) / 2, 1);
+    row_x(0, I(target, W_W), pill_w(&word), cx);
+    for (int i = 1; i < NB_N; ++i) /* past the midpoint between two centres: the next */
+        if (x > (cx[i - 1] + cx[i]) / 2) k = i;
+    if (k == NB_QUEUE)
+        timer_add(np_queue, (void *)0, 0);
+    else if (k == NB_RADIO)
+        timer_add(row_radio, (void *)0, 0);
+    else if (!rad.on)
+        np_mode_step(k == NB_REPEAT, 1);
     return 1;
 }
 
-/* playing.modes.icons: the pair (docs/oled-design.md#now-playing), NP_MODES_APART apart about the
- * centre of the play mode's target (tools/ipod.py np_grid), which keeps stock's image under
- * opacity 0 and np_mode_click's halves. Each glyph is the accent's while on, else the half's grey
- * (tools/art.py mode_*); Repeat One has its own glyph. The one the Centre cycle's wheel sets
- * (np_stage) stands in a Text Primary ring, rounded as the selection bar. */
-#define NP_MODES_APART 44
-#define NP_RING_W 38 /* the ring round the glyph the Centre cycle's wheel sets, 2 px wide */
-#define NP_RING_H 34
 void np_modes(void *win, void *canvas) {
     void *mode = theme()->np_modes && P(canvas, CANVAS_LCD) ? widget_lookup(win, "img_playmode", 0)
                                                             : (void *)0;
     if (!mode) return;
-    int m = *(volatile int *)MCL_MODE, cx = I(mode, W_X) + I(mode, W_W) / 2,
-        cy = I(mode, W_Y) + I(mode, W_H) / 2, rep = np_repeat_of(m);
-    const char *off = ipod_light() ? "_l" : "_d";
-    char name[2][24];
-    unsigned bitmap[64]; /* bitmap_t */
-    tk_snprintf(name[0], sizeof *name, "mode_shuffle%s", np_shuffle_on(m) ? "_on" : off);
-    tk_snprintf(name[1], sizeof *name, "mode_repeat%s",
-                rep == NP_REPEAT_ONE   ? "1_on"
-                : rep == NP_REPEAT_ALL ? "_on"
-                                       : off);
+    int m = *(volatile int *)MCL_MODE, cy = I(mode, W_Y) + I(mode, W_H) / 2, rep = np_repeat_of(m),
+        word, w = pill_w(&word), cx[NB_N];
+    row_x(I(mode, W_X), I(mode, W_W), w, cx);
+    const char *off = ipod_light() ? "_l" : "_d", *dim = ipod_light() ? "_xl" : "_xd";
+    unsigned saved = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR),
+             accent = accent_tone(TONE_LIGHT);
+    char name[24];
+    int lit[2] = { np_shuffle_on(m), rep != NP_REPEAT_OFF };
     for (int i = 0; i < 2; ++i) {
-        int x = cx + (2 * i - 1) * NP_MODES_APART / 2;
+        int x = cx[i ? NB_REPEAT : NB_SHUFFLE];
         if (st.np_stage == (unsigned)(NP_STAGE_SHUFFLE + i)) { /* the wheel's: a ring round it */
             rect_t ring = { x - NP_RING_W / 2, cy - NP_RING_H / 2, NP_RING_W, NP_RING_H },
                    in = { ring.x + 2, ring.y + 2, NP_RING_W - 4, NP_RING_H - 4 };
-            unsigned saved = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
             fill_box(canvas, &ring, ui_ink(RGBA(0xffffff)), 8);
             fill_box(canvas, &in, ui_ink(RGBA(0)), 6);
-            stock_canvas_set_fill_color(canvas, saved);
         }
-        if (!widget_load_image(win, theme_art(name[i]), bitmap))
-            canvas_draw_icon(canvas, bitmap, x, cy);
+        tk_snprintf(name, sizeof name, "mode_%s%s", i ? "repeat" : "shuffle",
+                    rad.on                      ? dim
+                    : i && rep == NP_REPEAT_ONE ? "1_on"
+                    : lit[i]                    ? "_on"
+                                                : off);
+        glyph(win, canvas, name, x, cy);
+        if (lit[i] && !rad.on) { /* on: the accent's dot under it */
+            rect_t dot = { x - NP_DOT / 2, cy + NP_DOT_DY - NP_DOT / 2, NP_DOT, NP_DOT };
+            fill_box(canvas, &dot, RGBA(accent), NP_DOT / 2);
+        }
     }
+    if (w > NP_BTN) { /* the pill, the antenna and, grown past NP_WORD_FROM, the word */
+        rect_t pill = { cx[NB_RADIO] - w / 2, cy - NP_PILL_H / 2, w, NP_PILL_H };
+        fill_box(canvas, &pill, RGBA(accent), NP_PILL_H / 2);
+        glyph(win, canvas, "mode_radio_w", word ? cx[NB_RADIO] - NP_RADIO_GLYPH : cx[NB_RADIO], cy);
+        if (word)
+            ar_text(canvas, "Radio", 1, NP_RADIO_PX, blend(0xffffff, accent, word), 1,
+                    cx[NB_RADIO] - 10, cy, w, 2);
+    } else
+        glyph(win, canvas, ipod_light() ? "mode_radio_l" : "mode_radio_d", cx[NB_RADIO], cy);
+    glyph(win, canvas, ipod_light() ? "mode_queue_l" : "mode_queue_d", cx[NB_QUEUE], cy);
+    stock_canvas_set_fill_color(canvas, saved);
 }
+
+/* 1 while radio is on: shuffle and repeat are the app's (np_mode_click, navigation.c np_centre) */
+int np_radio_on(void) { return rad.on; }
 
 /* playing.modes.icons: the theme's own heart and More as well (tools/art.py np_fav, np_unfav_*,
  * np_more_*, np_moredown_*). Stock's update and click, and rate_fav_click, keep setting the heart

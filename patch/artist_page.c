@@ -142,8 +142,8 @@ static void ar_box(void *canvas, const rect_t *r, int R, unsigned rgb) {
 }
 
 /* A square image's corners over r rounded to R: the pixels outside each arc in behind, the final
- * 0xRRGGBB of what stands behind it. */
-static void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind) {
+ * 0xRRGGBB of what stands behind it. Up Next's covers too (upnext.c). */
+void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind) {
     for (int i = 0; i < R; ++i) {
         int n = round_inset(R, i, r->h);
         for (int b = 0; b < 2 && n; ++b) {

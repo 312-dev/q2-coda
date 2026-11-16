@@ -490,6 +490,7 @@ int addon_goto(const char *path, const char *title, int album); /* Go to on a ca
 int addon_goes(const char *path);      /* addon.c: Go to on path opens a page */
 int addon_scrobbles(const char *path); /* addon.c: not when path's app says scrobble=0 */
 int addon_more(void); /* addon.c: Now Playing's ⋯ opens the playing queue's app's page */
+int addon_radio(void); /* addon.c: the playing queue's app plays a radio */
 void addon_open_id(const char *id); /* a card app's page by its id, hidden or not */
 /* ... at op, its one argument arg ("" for none), titled title (0: the app's name) */
 int addon_open_at(const char *id, const char *op, const char *arg, const char *title);
@@ -575,6 +576,7 @@ typedef struct {
  * faded edges over the view. */
 void lyrics_publish(const lrc_line *l, unsigned n, const lrc_mark *m);
 int lyrics_rows(void *lrc), lyrics_fit(void *lrc), lyrics_on(void *lrc), lyrics_now(void),
+    lyrics_row_h(void),
     lyrics_row_h(void),
     lyrics_sec(void), lyrics_line(void *lrc, int ms, int page);
 void lyrics_paint(void *row, void *canvas), lyrics_fade(void *lrc, void *canvas), lyrics_gone(void);

@@ -284,6 +284,7 @@ class Q2:
         self.status, self.file_sec, self.start_seek = STOPPED, 0, 0
         self.opened, self.seeks, self.toasts, self.pages, self.texts = [], [], [], [], {}
         self.blocks, self.keep, self.made, self.children, self.handlers, self.np = [], [], [], {}, {}, {}
+        self.titles = {}  # Up Next's rows' _un_title, by row
         self.timers, self.timer_n = {}, 0
         self.preloads, self.gapless, self.sent, self.speeds = [], [], [], []
         self.random = random.Random(7)
@@ -331,11 +332,13 @@ class Q2:
             'tk_str_start_with': lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)),
             'fw__deque_push_back': self.push_back, 'fw_deque_pop_back': lambda q, *_: self.deques[q].pop(),
             'widget_set_text_utf8': lambda w, s, *_: self.texts.__setitem__(w, C.string_at(s).decode()),
+            'widget_set_prop_str': lambda w, k, s, *_: C.string_at(k) == b'_un_title' and self.titles.__setitem__(
+                w, C.string_at(s).decode()) and 0,
             'timer_add': self.add_timer, 'timer_remove': lambda t, *_: self.timers.pop(t, None) and 0,
             'widget_factory_create_widget': lambda f, kind, parent, *_: self.widget(parent, C.string_at(kind).decode()),
         }
         for kind in ('window_create', 'scroll_view_create', 'list_item_create', 'image_create', 'hscroll_label_create',
-                     'list_view_create', 'button_create'):
+                     'list_view_create', 'button_create', 'label_create'):
             model[kind] = lambda parent, *_, kind=kind: self.widget(parent, kind)
         model['window_create'] = lambda *_: self.pages.append(self.widget(0, 'window_create')) or self.pages[-1]
         model['widget_on'] = lambda w, event, fn, ctx, *_: self.handlers.__setitem__((w, event), (fn, ctx)) or 1
@@ -362,6 +365,19 @@ class Q2:
     def rows_of(self, view):
         """A list's rows as they show: each row's caption and detail (its labels' text, in order)."""
         return [tuple(self.texts.get(label) for label in self.children.get(item, [])) for item in self.children.get(view, [])]
+
+    def songs_of(self, view):
+        """Up Next's songs after the playing one (upnext.c): each queued or coming row's title, as (title,)."""
+        return [(self.titles[item],) for item in self.children.get(view, []) if item in self.titles and
+                (item, O['EVT_CLICK']) in self.handlers]
+
+    def tap_song(self, title, view=None):
+        """Up Next's row of that title, tapped (Centre's click: no event)."""
+        view = view or self.last('scroll_view_create')
+        (item,) = [item for item in self.children.get(view, []) if self.titles.get(item) == title and
+                   (item, O['EVT_CLICK']) in self.handlers]
+        fn, ctx = self.handlers[item, O['EVT_CLICK']]
+        return C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, None)
 
     def tap(self, caption, view=None):
         """The row of view (the last list made) showing caption, tapped: its click handler runs."""
@@ -866,7 +882,7 @@ def test_a_marked_folder_stays_out_of_the_songs_and_albums_until_its_marker_goes
                                                          ('Kept', 'Gamma'), ('Second', 'Beta')]
 
 
-# A list played: an album to its end, gapless, a folder's speed, and the queue menu's Play Next and Add to Queue.
+# A list played: an album to its end, gapless, a folder's speed, and the queue menu's Play Next and Play Last.
 def test_an_album_picked_from_its_list_plays_on_to_its_end_and_stops_there(q2):
     files, tags = music_card()
     q = q2(files, tags)
@@ -924,15 +940,15 @@ def test_a_folders_speed_holds_across_its_tracks_and_the_next_folder_plays_at_it
     q.call('mclSetPlaySpeed', 2)  # Now Playing's speed, chosen while Dawn plays
     assert q.speeds == [0, 2]
     q.play_for(3 * SONG)
-    assert [title_of(q, p) for p in q.opened] == ['Dawn', 'Noon', 'Dusk', 'Rise']
-    assert q.gapless == q.preloads == [ALPHA + '02 Noon.flac', ALPHA + '03 Dusk.flac']  # one folder: seamless
-    assert q.speeds == [0, 2, 0]  # Rise, from another folder, was never opened ahead: a fresh start at its own
+    assert [title_of(q, p) for p in q.opened] == ['Dawn', 'Rise', 'Noon', 'Dusk']  # Play Last: Rise next
+    assert q.gapless == q.preloads == [ALPHA + '03 Dusk.flac']  # one folder: seamless
+    assert q.speeds == [0, 2, 0, 2]  # Rise, from another folder: a fresh start at its own; Noon at Alpha's again
     q.call('mclSetPlayMode', REPEAT_ALL)
-    q.play_for(SONG)  # round to Dawn: its folder's speed came back with it
+    q.play_for(SONG)  # round to Dawn: its folder's speed stays with it
     assert title_of(q, q.opened[-1]) == 'Dawn' and q.speeds == [0, 2, 0, 2]
 
 
-def test_play_next_and_add_to_queue_join_the_album_playing(q2):
+def test_play_next_and_play_last_join_the_album_playing(q2):
     files, tags = music_card()
     q = q2(files, tags)
     q.update()
@@ -940,13 +956,13 @@ def test_play_next_and_add_to_queue_join_the_album_playing(q2):
     q.open_album('First', 'Alpha')
     q.pick('Dawn')
     q.songs()  # Library → Songs, while Dawn plays
-    q.hold('Rise', QA['NEXT'])
     q.hold('Gem', QA['ADD'])
-    assert q.toasts == ['Playing Next', 'Added to Queue'] and q.now_playing() == ('1 of 5', 'First')  # OLED says each
+    q.hold('Rise', QA['NEXT'])  # ahead of Gem: Play Next goes first in Playing Next, Play Last after it
+    assert q.toasts == ['Playing Last', 'Playing Next'] and q.now_playing() == ('1 of 5', 'First')  # OLED says each
     q.play_for(SONG)
     assert q.opened[1:] == [BETA + 'Second/01 Rise.flac'] and q.now_playing() == ('2 of 5', 'Second')
     q.play_for(4 * SONG)
-    assert [title_of(q, p) for p in q.opened] == ['Dawn', 'Rise', 'Noon', 'Dusk', 'Gem'] and q.status == STOPPED
+    assert [title_of(q, p) for p in q.opened] == ['Dawn', 'Rise', 'Gem', 'Noon', 'Dusk'] and q.status == STOPPED
 
 
 # Library → Shuffle, and Up Next: View Queue while a shuffle is on.
@@ -956,10 +972,9 @@ def shuffle_albums(q):
 
 
 def up_next(q):
-    """View Queue in a shuffle: Up Next's rows, each its title over its artist."""
-    page = q.fw.lib.navigation__page_closed, q.fw.lib.page_keyup
-    q.fw.fn('up_next', None, C.c_void_p, C.c_void_p)(*(C.cast(f, C.c_void_p) for f in page))
-    return q.rows_of(q.last('scroll_view_create'))
+    """View Queue in a shuffle: Up Next's songs after the playing one, each (title,)."""
+    q.fw.fn('up_next', None, C.c_void_p)(C.cast(q.fw.lib.page_keyup, C.c_void_p))
+    return q.songs_of(q.last('scroll_view_create'))
 
 
 def test_shuffle_albums_plays_each_album_whole_in_turn_as_up_next_said(q2):
@@ -972,7 +987,7 @@ def test_shuffle_albums_plays_each_album_whole_in_turn_as_up_next_said(q2):
     rows = up_next(q)
     q.play_for(7 * SONG)
     played = [title_of(q, p) for p in q.opened]
-    assert played[1:] == [title for title, _ in rows] and q.status == STOPPED  # Up Next was right; one pass, then stop
+    assert played[1:] == [title for title, in rows] and q.status == STOPPED  # Up Next was right; one pass, then stop
     assert q.gapless == q.preloads == q.opened[1:]  # each next opened ahead, in the shuffle's order, and taken over
     assert sorted(played) == sorted(q.songs())  # every song the Library shows, once
     albums = [album_of(q, p) for p in q.opened]
@@ -990,10 +1005,10 @@ def test_a_pick_from_up_next_plays_it_and_previous_gives_back_what_it_jumped(q2)
     shuffle_albums(q)
     first = q.opened[0]
     q.hold_playing(QA['QUEUE'])  # View Queue: in a shuffle, Up Next
-    rows = q.rows_of(q.last('scroll_view_create'))
+    rows = q.songs_of(q.last('scroll_view_create'))
     page = q.pages[-1]
     assert len(rows) == 6
-    q.tap(rows[2][0])  # the third: two jumped
+    q.tap_song(rows[2][0])  # the third: two jumped
     assert title_of(q, q.opened[-1]) == rows[2][0] and page not in q.pages  # it plays, and Up Next closes
     q.play_for(2)
     q.previous_key()  # 2 s in: back to the track the pick left
@@ -1001,7 +1016,7 @@ def test_a_pick_from_up_next_plays_it_and_previous_gives_back_what_it_jumped(q2)
     q.play_for(SONG)  # on in the order from there: the jumped tracks come back
     assert title_of(q, q.opened[-1]) == rows[0][0]
     q.play_for(6 * SONG)
-    assert [title_of(q, p) for p in q.opened[4:]] == [title for title, _ in rows[1:]] and q.status == STOPPED
+    assert [title_of(q, p) for p in q.opened[4:]] == [title for title, in rows[1:]] and q.status == STOPPED
 
 
 def test_shuffle_songs_plays_each_song_once_a_pass_and_the_next_list_picked_plays_as_before(q2):
@@ -1011,7 +1026,7 @@ def test_shuffle_songs_plays_each_song_once_a_pass_and_the_next_list_picked_play
     q.fw.fn('shuffle_menu', C.c_int, C.c_void_p, C.c_void_p)(None, None)
     q.tap('Shuffle Songs')
     assert q.mcl.mode == SHUFFLE  # saved as stock's Shuffle
-    rows = [title for title, _ in up_next(q)]
+    rows = [title for title, in up_next(q)]
     assert len(rows) == 6 + 7  # the rest of this pass, then the whole of the next (Repeat All)
     q.play_for(13 * SONG)
     played = [title_of(q, p) for p in q.opened]
@@ -1047,11 +1062,12 @@ def test_crossfade_fades_into_another_album_only_and_never_into_dsd(q2):
     q.open_album('First', 'Alpha')
     q.pick('Noon')
     q.songs()
-    q.hold('Other', QA['ADD'])  # First too, but Beta's
-    q.hold('Echo', QA['ADD'])
     q.ui_pass()
     assert fade(q) == (0, 0)  # Noon into Dusk: one album, gapless
     q.play_for(SONG)
+    q.hold('Other', QA['ADD'])  # Play Last while Dusk plays: after it; First too, but Beta's
+    q.hold('Echo', QA['ADD'])  # ... and after Other
+    q.ui_pass()
     assert title_of(q, q.opened[-1]) == 'Dusk' and fade(q) == (6000, 0)  # into another album of the same name
     gapless.value = 0
     q.ui_pass()
@@ -1170,7 +1186,7 @@ def test_a_shuffle_restarted_with_memory_playback_plays_on_in_the_order_it_had(q
     q.update()
     q.fw.fn('shuffle_menu', C.c_int, C.c_void_p, C.c_void_p)(None, None)
     q.tap('Shuffle Songs')
-    rows = [title for title, _ in up_next(q)]
+    rows = [title for title, in up_next(q)]
     q.play_for(2 * SONG + 5)  # the third song of the pass, 5 s in
     playing = title_of(q, q.opened[-1])
     assert playing == rows[1]
@@ -1180,7 +1196,7 @@ def test_a_shuffle_restarted_with_memory_playback_plays_on_in_the_order_it_had(q
     q.boot_resume()
     q.call('player_play_pause')
     assert [title_of(q, p) for p in q.opened] == [playing] and q.elapsed() == 0  # Track: the song, from its start
-    assert [title for title, _ in up_next(q)] == rows[2:]  # Up Next as it was
+    assert [title for title, in up_next(q)] == rows[2:]  # Up Next as it was
     q.play_for(11 * SONG)
     assert [title_of(q, p) for p in q.opened[1:]] == rows[2:]  # the rest of the pass, then the next as it was drawn
 

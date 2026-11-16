@@ -732,8 +732,9 @@ def np_info_out(root, named):
 # right of it the title, artist and album, their line tops NP_GRID_LINES down the art, More and the heart at the right
 # end of the art's bottom row (the design has no place for them: they stay on the art's page); the slide
 # NP_GRID_SLIDE_GAP above the bar, which runs from text_x to the right column with its top at np_bar_y on screen; the
-# times NP_GRID_TIMES_DY under that, centred, on the same columns; shuffle and repeat (np_bar.c np_modes) centred
-# NP_GRID_MODES_DY under it, over the play mode's target; the page dots under them, NP_GRID_DOTS_DY. Sizes are AWTK's
+# times NP_GRID_TIMES_DY under that, centred, on the same columns; the row of shuffle, radio, repeat and Up Next
+# (np_bar.c np_modes) centred NP_GRID_MODES_DY under it, over the play mode's target, which spans the row; the page
+# dots NP_GRID_DOTS_DY under the bar, hidden, as the row's on dots take their place. Sizes are AWTK's
 # (1.21 times the design's em): the artist and album 22, the times 19 in Inter, whose digits are tabular.
 NP_GRID_GAP = 18
 NP_GRID_LINES = (6, 38, 62)
@@ -751,9 +752,9 @@ NP_GRID_BAR = 6
 NP_GRID_TOUCH = 22  # the bar's target, short of the heart's above and the times' below
 NP_GRID_SLIDE_GAP = 5
 NP_GRID_TIMES_DY = 22
-NP_GRID_MODES_DY = 48
-NP_GRID_MODES = (88, 44)  # the play mode's target: both glyphs, 44 px apart (np_bar.c NP_MODES_APART)
-NP_GRID_DOTS_DY = 70  # the page dots centred on y 302 on screen
+NP_GRID_MODES_DY = 58  # the row centred on y 286 on screen
+NP_GRID_MODES = (269, 44)  # the play mode's target: the row, its outer glyphs' edges at x 53 and 322 (np_bar.c np_modes)
+NP_GRID_DOTS_DY = 70  # the page dots centred on y 298 on screen, hidden
 NP_GRID_MARGIN = 2  # hscroll_label's own margin each side of its text (stock's margin_left and margin_right)
 
 
@@ -787,6 +788,7 @@ def np_grid(root, named, g, title, artist, album, remain):
     dots = named['slide_indicator1']
     dots[1][1] = dots_y
     dots[2]['self_layout'] = f'default(x=0,y={dots_y},w=100%,h=10)'
+    dots[2]['visible'] = 'false'  # the row's on dots sit there; a swipe still turns the page
     np_slider(named['slider_play'], g.text_x, bar_y + NP_GRID_BAR // 2, right - g.text_x, NP_GRID_BAR)
     named['slider_play'][1][1:4:2] = [bar_y + NP_GRID_BAR // 2 - NP_GRID_TOUCH // 2, NP_GRID_TOUCH]
     for name in ('img_repeata', 'img_repeatb'):
