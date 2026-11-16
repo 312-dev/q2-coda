@@ -71,10 +71,11 @@ def test_gradient_holds_the_first_stops_colour_before_it():
 
 def test_every_literal_corner_radius_is_in_the_table():
     source = ''.join(p.read_text() for p in sorted((pathlib.Path(__file__).parents[2] / 'patch').glob('*.c')))
-    def literal(names):
-        return {int(r) for r in re.findall(rf'(?:{names})\([^;]*?,\s*(\d+)(?:,[^;]*?)?\);', source)}
+    def literal(names, text=source):
+        return {int(r) for r in re.findall(rf'(?:{names})\([^;]*?,\s*(\d+)(?:,[^;]*?)?\);', text)}
+    assert literal('round_row', 'round_row(canvas, &track, 3, i, rest);') == {3}  # the pattern still reads a call
     radii = literal('paint_round_rows|round_row|row_below|inset_top|round_ring')
-    assert radii and radii <= set(art.CORNERS)
+    assert radii <= set(art.CORNERS)  # none at all is fine: every rounded box may take its radius from a name
     assert {r - 1 for r in literal('round_ring')} <= set(art.CORNERS)  # a ring reads its radius less one too
 
 
@@ -147,6 +148,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     usb = [*(f'usb_{n}_{k}' for n in art.USB_ROWS for k in ('d', 'l', 'w')),
            *(f'usbtoast_{n}' for n in art.USB_TOASTS)]  # usb_ui.c's chooser rows and toasts
     usb += [f'empty_{n}' for n in art.EMPTY_GLYPHS]  # feedback.c empty_state's glyphs
+    usb += [f'scan_{n}_{k}' for n in ('done', 'card', 'folder') for k in ('d', 'l')]  # scan_page.c's figures
     upnext = [f'bump_{k}' for k in ('d', 'l', 'w')] + [f'mode_{n}' for n in ('queue_d', 'queue_l', 'radio_d', 'radio_l', 'radio_w',
                                                                               'shuffle_xd', 'shuffle_xl', 'repeat_xd', 'repeat_xl')]
     charge = {**{f'chargetoast_{n}': c for n, (_, c) in art.CHARGE_TOASTS.items()},

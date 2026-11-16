@@ -370,6 +370,13 @@ SW_SPIN_FADE = 0.75 / 11  # the spoke behind the head's head a quarter as bright
 # internet's download tray, the card's file.
 SW_OFFER_PX = 30
 SW_OFFER = {'net': 'download-simple-fill', 'sd': 'file-arrow-down-fill'}
+# The library scan's page (scan_page.c, docs/oled-design.md#update-library): its ending's figure, regular weight,
+# SCAN_GLYPH_PX in Text Secondary per half (done the check circle; stopped short the memory chip, as the empty
+# state's card), and the folder glyph before the scanned folder's name, SCAN_FOLDER_PX. Scanning is SW_SPIN's spinner.
+SCAN_GLYPH_PX = 60
+SCAN_FOLDER_PX = 15
+SCAN_GLYPHS = {'done': 'check-circle', 'card': 'memory', 'folder': 'folder'}
+SCAN_INKS = inks('secondary', 'd', 'l')
 HOLD_BACK_PX = 20  # search_strip.c's Return-held card: Phosphor arrow-u-up-left, bold, white
 # The empty state (feedback.c empty_state): its glyph on the middle of its stacked tiles, fill, white at 92 %, by the
 # glyph a page names (empty_t.glyph; docs/oled-design.md#empty-and-offline has the pages). Phosphor has no sd-card: the
@@ -650,4 +657,6 @@ def images(t):
     out |= {f'{prefix}_swspin_{k}_{f}': spinner(f, SW_SPIN_SPOKES, SW_SPIN_PX, SW_SPIN_R, SW_SPIN_STROKE, SW_SPIN_FADE, c)
             for k, c in STATE_INKS.items() for f in range(SW_SPIN_SPOKES)}
     out |= {f'{prefix}_empty_{n}': phosphor(g, EMPTY_PX, 0xebebeb) for n, g in EMPTY_GLYPHS.items()}
+    out |= {f'{prefix}_scan_{n}_{k}': phosphor(g, SCAN_FOLDER_PX if n == 'folder' else SCAN_GLYPH_PX, c)
+            for n, g in SCAN_GLYPHS.items() for k, c in SCAN_INKS.items()}
     return out
