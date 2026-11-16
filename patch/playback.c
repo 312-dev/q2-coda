@@ -1017,6 +1017,8 @@ int ringnav_load(void *q, int at, int type) {
     if (!s.restoring && catalogue_load(q, &at, &served) == 2) return 0;
     void *own = no_videos(served ? served : q, &at);
     int result = stock_load_trampoline(own ? own : served ? served : q, at, type);
+    /* a list pick: Up Next's "From ..." from the rows stock was handed, while they are still there */
+    if (!s.restoring) un_source_take(own ? own : served ? served : q, at, type);
     if (own) deque_destroy(own);
     if (served) deque_destroy(served);
     back_to = 0;
@@ -1024,7 +1026,6 @@ int ringnav_load(void *q, int at, int type) {
         s.restoring = 0;
     else if (!s.restoring) {
         press_stamp(); /* a list pick, after stock's load names the queue's type */
-        un_source_take(own ? own : served ? served : q, at, type); /* Up Next's "From ..." */
         s.resume_key = s.resume_pending = 0;
         s.npend = 0;
         /* Shuffle Albums/Folders end with any other queue; a repeat or Shuffle track mode carries on */
