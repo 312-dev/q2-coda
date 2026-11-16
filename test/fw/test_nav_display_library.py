@@ -3213,7 +3213,7 @@ def test_the_empty_state_centres_its_stack_and_its_one_row(fw, st, row, free, to
     body = ui.add('view', win, (0, 58, 375, 262), 'body')
     keep = [C.create_string_buffer(s) for s in (b'cards', b'No Albums Yet', b"Music on the card isn't scanned",
                                                 row.encode() if row else b'')]
-    e = (C.c_char_p * 4)(*[C.addressof(k) for k in keep[:3]], C.addressof(keep[3]) if row else None)
+    e = (C.c_char_p * 4)(*[C.c_char_p(k.value) for k in keep[:3]], C.c_char_p(keep[3].value if row else None))
     clicked = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(lambda *_: 0)
     assert fw.fn('empty_state', C.c_int, C.c_void_p, C.c_int, C.c_void_p, C.c_void_p)(body.addr, free, C.addressof(e), C.cast(clicked, C.c_void_p)) == 1
     art = body.find('_empty_state')

@@ -45,6 +45,11 @@ def song():
 
 class Strip:
     """The Search page opened over songs; key() sends one key as ringnav does."""
+    im: C.Array[C.c_char]  # a text box's strip (boxed): its input method, edit, keyboard and pages
+    edit: int
+    kb: int
+    keys: int
+
     def __init__(self, fw, ui, songs):
         self.fw, self.ui = fw, ui
         Config(fw)
