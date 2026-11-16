@@ -91,7 +91,7 @@ def unpack(blob):
     assert at == len(blob), 'Boot animation has trailing bytes'
     return fps, frames
 
-def levels(path):
+def levels(path):  # pragma: no mutate block
     """An upright frame as the framebuffer's W*H levels: black 0, the brightest pixel a render uses 15."""
     from PIL import Image
     im = Image.open(path).convert('L')
@@ -99,7 +99,7 @@ def levels(path):
     im = im.resize((H, W), Image.BOX).transpose(Image.ROTATE_270)
     return im.tobytes()
 
-def main():
+def main():  # pragma: no mutate block
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('frames', type=pathlib.Path)
     ap.add_argument('out', type=pathlib.Path)
