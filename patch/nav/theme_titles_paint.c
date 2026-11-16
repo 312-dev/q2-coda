@@ -206,8 +206,8 @@ void *ringnav_ui_load(const char *name, void *parent) {
 /* bigcover_page_init: stock's full-screen art (a hold on Now Playing's art opens it, np_taps.c, as
  * does Enlarged Album Art's countdown; any tap closes it)
  * shows the song name BC_MS, then bc_fade fades it out. Stock's own timer writes the next song's
- * name; ringnav_sleep shows it again when the track changes. Off the art page (lyrics, info,
- * visualizer) there is no art to enlarge, so ringnav_sleep holds the countdown full there (#57).
+ * name; ringnav_sleep shows it again when the track changes. Off the art page (lyrics, info)
+ * there is no art to enlarge, so ringnav_sleep holds the countdown full there (#57).
  * Closing it after the open flashed it every 10 s (#153). */
 int ringnav_bigcover(void *win, void *ctx) {
     int result = stock_bigcover_trampoline(win, ctx);
@@ -330,7 +330,7 @@ static int pressed_pill(void *w, void *canvas) {
         return 1;
     }
     void *b = touch_target(w);
-    /* childless: not a row but a page, such as Now Playing's visualizer; a tile draws its own */
+    /* childless: not a row but a page; a tile draws its own */
     if (!pressed_row(b) || tile_in(b, w) || !widget_count_children(w) ||
         I(w, W_W) <= 2 * SEL_INSET + I(w, W_H)) {
         if (w == st.press_row) {

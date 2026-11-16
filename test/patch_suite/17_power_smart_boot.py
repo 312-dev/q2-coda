@@ -67,17 +67,9 @@ m.word(payload_syms['wheel_frame_at'],(m.now-O['WHEEL_FRESH_MS'])&0xffffffff)  #
 m.call(address=inp,args=(m.wm,m.event,0,0),event_type=O['EVT_KEY_DOWN'],gap=0,clear=False); assert m.pass_(1)[1]==[O['SCREEN_OFF_SLEEP_MS']]
 m.word(payload_syms['wheel_frame_at'],m.now); m.call(address=inp,args=(m.wm,m.event,0,0),event_type=O['EVT_KEY_DOWN'],gap=0,clear=False)
 assert m.pass_(0)[1]==[] and m.pass_(O['DARK_TURN_MS']-1)[1]==[] and m.pass_(1)[1]==[O['SCREEN_OFF_SLEEP_MS']]; passed()
-# Now Playing keeps stock's pace only while its visualizer repaints; idle, it idles like any page.
-if O['NP_VISUALIZER']:
-    class Live(PowerMachine):
-        def hook(self,u,address,size,unused):
-            if self.handlers.get(address)=='v:live':
-                self.returns(self.live); return
-            return super().hook(u,address,size,unused)
-    m=Live(); m.handlers[payload_syms['visualizer_live']]='v:live'; m.live=1
-    m.top=m.node('window','playing_page'); m.pass_(1)
-    assert m.pass_(O['IDLE_MS'])[1]==[]; m.live=0; assert m.pass_(1)[1]==[O['IDLE_SLEEP_MS']]; passed()
-else: assert 'visualizer_live' not in payload_syms; passed()
+# Now Playing with its lyrics at rest idles like any page.
+m=PowerMachine(); m.top=m.node('window','playing_page'); m.pass_(1); m.pass_(O['IDLE_MS'])
+assert m.pass_(1)[1]==[O['IDLE_SLEEP_MS']]; passed()
 # Standby limit (docs/internals.md#standby-limit): with a limit, toolsIntoStandby's suspend runs
 # between the RTC wake alarm's set (the limit past since_epoch) and its clear. A resume at or past the
 # alarm powers off on the next pass (poweroff_page), once, unless a cable is in or the music plays; a

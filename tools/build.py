@@ -1691,7 +1691,7 @@ FUNCTIONS = {
  'canvas_measure_text': ('float', 'void *, const unsigned *, unsigned'),
  'canvas_fill_rounded_rect': ('int', 'void *, const void *, const void *, const void *, unsigned'),
  'canvas_stroke_rounded_rect': ('int', 'void *, const void *, const void *, const void *, unsigned, unsigned'),
- # The PEQ curve (peq_ui.c) and the visualizer (visualizer.c): AWTK's software nanovg, float_t float, color_t by value
+ # The PEQ curve (peq_ui.c) among others: AWTK's software nanovg, float_t float, color_t by value
  'canvas_get_vgcanvas': ('void *', 'void *'),
  'vgcanvas_save': ('int', 'void *'), 'vgcanvas_restore': ('int', 'void *'),
  'vgcanvas_translate': ('int', 'void *, float, float'),
@@ -2071,13 +2071,29 @@ FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mi
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
 NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'status_row.c', 'ui_kit.c']
 
+# Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
+# pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
+# KeyError at the lookup.
+PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'ringnav_ab_x', 'ringnav_album_label',
+                 'ringnav_albumcovers', 'ringnav_art_header', 'ringnav_art_name', 'ringnav_artist_art_name',
+                 'ringnav_artist_covers', 'ringnav_boot', 'ringnav_bt_connect_start', 'ringnav_class_icon',
+                 'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text', 'ringnav_dark_cover_usleep',
+                 'ringnav_dark_usleep', 'ringnav_dialog_close', 'ringnav_ellipsis_text', 'ringnav_gbk_tag',
+                 'ringnav_hold_info', 'ringnav_hold_timer', 'ringnav_hscroll_lull', 'ringnav_id3_path',
+                 'ringnav_lyric_follow', 'ringnav_lyric_rows', 'ringnav_mainscheduling', 'ringnav_scan_dir',
+                 'ringnav_scan_refresh', 'ringnav_shuffle', 'ringnav_song_unknown', 'ringnav_table_drag',
+                 'ringnav_table_load', 'stock_row_style', 'stock_row_text', 'stock_set_row_layout']
+
+
 def compile_payload(out):  # pragma: no mutate block
     """Compile and link the payload."""
     from peq import compile_common
     extra = compile_common(out, out/'stock-demo')  # also writes the libc/libcstl imports navigation.c uses
     nav = [out/f'{name[:-2]}.o' for name in NAVIGATION]
+    # A section per function and per object, as UI_SOURCES get (peq.py compile_common), so --gc-sections drops
+    # whatever nothing reaches; what only build.py or ipod.py patch in is kept by its --undefined below.
     for name, o in zip(NAVIGATION, nav):
-        run('clang',*FLAGS,*FILL,'-I',out,'-c',ROOT/'patch'/name,'-o',o)
+        run('clang',*FLAGS,*FILL,'-ffunction-sections','-fdata-sections','-I',out,'-c',ROOT/'patch'/name,'-o',o)
     asm = ['.set noreorder', '.text']
     resume = {x: address for address, _, x in HOOKS.values() if x}
     for x, address in resume.items():
@@ -2092,6 +2108,8 @@ def compile_payload(out):  # pragma: no mutate block
         '--undefined=ringnav_baidu_poll', '--undefined=ringnav_stock_tls', '--undefined=ringnav_tidal_poll', '--undefined=catalogue_access', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
         '--undefined=coverflow_player_cover', '--undefined=coverflow_grid_cover', '--undefined=coverflow_album_cover', '--undefined=coverflow_folder_cover', '--undefined=headset_bt_init',
         '--undefined=headset_status_register', '--undefined=headset_bt_autolink',
+        *[f'--undefined={name}' for name in PAYLOAD_ROOTS],
+        '--undefined=scrobble_auto_ms',  # inlined where the payload calls it; test/patch.py calls its own copy
         *nav,out/'trampoline.o',*extra,'-o',out/'patch.elf')
     # link.ld has no .data: an initialised static would land in the payload's read-only text
     check(not re.search(r'\] \.s?data ', run('readelf', '-SW', out/'patch.elf')), 'Payload has .data: writable state goes in .scratch')

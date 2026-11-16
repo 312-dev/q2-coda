@@ -41,16 +41,6 @@ static volatile int *xfade_view(int ms) {
     *f = ms;
     return f;
 }
-static vis_tap *tap_view(void) {
-    static vis_tap *t;
-    if (!t) {
-        int fd = open(VIS_FILE, O_RDWR | O_CREAT, 0644);
-        assert(fd >= 0 && !ftruncate(fd, sizeof(vis_tap)));
-        t = mmap(0, sizeof(vis_tap), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-        assert(t != MAP_FAILED && !close(fd));
-    }
-    return t;
-}
 
 static struct dsp *track(int rate, int nch) {
     struct pcm_format f = {rate, nch, 4, 1, DSD_PCM};
@@ -73,20 +63,14 @@ static unsigned block(struct dsp *d, float *out, unsigned frames, unsigned *n, f
     return run(d, out, frames, 2, (double)*n / rate);
 }
 
-/* One block through the chain equals the same block through the reference DSP, and is filtered; the tap ends with it. */
-static void same(struct dsp *d, peq_dsp *ref, int rate, int nch) {
+/* One block through the chain equals the same block through the reference DSP, and is filtered. */
+static void same(struct dsp *d, peq_dsp *ref, int nch) {
     float a[1024], b[1024], in[1024];
     unsigned frames = 1024 / nch;
     for (int i = 0; i < 1024; ++i) a[i] = b[i] = in[i] = 0.5f * sinf(i * 0.05f);
-    ++tap_view()->want; /* the visualizer is watching */
     assert(run(d, a, frames, nch, 1) == frames);
     peq_process(ref, b, frames);
     assert(!memcmp(a, b, sizeof a) && memcmp(a, in, sizeof a));
-    vis_tap *t = tap_view();
-    unsigned step = rate > 48000 ? (unsigned)rate / 44100 : 1, n = (frames + step - 1) / step;
-    assert(t->rate == (unsigned)rate / step && t->stamp > 0);
-    for (unsigned i = 0; i < n; ++i)
-        for (int ch = 0; ch < 2; ++ch) assert(t->ring[(t->seq - n + i) % VIS_RING][ch] == a[i * step * nch + (ch && nch > 1)]);
 }
 
 static void crossfade_check(void) {
@@ -131,7 +115,6 @@ static void crossfade_check(void) {
     /* No fade asked (another album next, Crossfade off, Gapless off): every block whole, and no clock read. */
     xfade_view(0);
     a = track(48000, 2);
-    for (n = 0; n < 2 * 48000;) assert(block(a, buf, 1024, &n, 1, 48000) == 1024); /* the unwatched tap settles */
     unsigned reads = clock_reads;
     for (n = 0; n < 10 * 48000;) assert(block(a, buf, 1024, &n, 1, 48000) == 1024);
     assert(clock_reads == reads);
@@ -446,7 +429,7 @@ static void carry_check(void) {
     peq_reset(&ref, 44100, 2, &p);
     continues(a, &ref, &n);
     dsp_close(a, 1);
-    /* Mid-song with EQ on, once the unwatched tap settles: no clock reads. */
+    /* Mid-song with EQ on: no clock reads. */
     length = 60, pts = 10;
     a = track(44100, 2);
     for (int i = 0; i < 100; ++i) continues(a, &ref, &n);
@@ -458,24 +441,8 @@ static void carry_check(void) {
     assert(!unlink(PEQ_ACTIVE));
 }
 
-/* The tap before demo has made its file: looked for on the first block, then once a second of audio has played
- * since; the block that starts past that second finds it and writes what plays. Untouched blocks too. */
-static void tap_wait_check(void) {
-    static float buf[1000];
-    unlink(VIS_FILE);
-    struct dsp *d = track(44100, 1);
-    assert(run(d, buf, 1000, 1, 0.1) == 1000); /* the first look: no file */
-    vis_tap *t = tap_view();                    /* demo makes it now */
-    unsigned since = 0;
-    for (; since < 44100; since += 1000) assert(run(d, buf, 1000, 1, 0.1) == 1000 && !t->seq);
-    for (int i = 0; i < 1000; ++i) buf[i] = (float)i / 1000;
-    assert(run(d, buf, 1000, 1, 0.1) == 1000 && t->seq == 1000 && t->rate == 44100);
-    for (int i = 0; i < 1000; ++i) assert(t->ring[i][0] == buf[i] && t->ring[i][1] == buf[i]); /* mono: both sides */
-    dsp_close(d, 1);
-}
-
-/* With every stage off, integers come back as the very bytes given (no float in the path); with one on (here the
- * visualizer watching, then a bypassed EQ under a fade's flag) 16-bit and 24-bit samples survive the float round
+/* With every stage off, integers come back as the very bytes given (no float in the path); with one on (here a
+ * bypassed EQ under a fade's flag) 16-bit and 24-bit samples survive the float round
  * trip unchanged, and values past full scale saturate at the one conversion back. */
 static void bypass_check(void) {
     int16_t s[2048], keep[2048];
@@ -485,8 +452,6 @@ static void bypass_check(void) {
     const struct pcm_format f16 = {44100, 2, 2, 0, DSD_PCM}, f32 = {44100, 2, 4, 0, DSD_PCM};
     struct dsp *d = dsp_open(&f16, 0, 1, 60); /* a 60 s song: its fade's window is far off */
     const uint8_t *out;
-    for (int i = 0; i < 100; ++i) assert(dsp_run(d, (uint8_t *)s, 1024, 1, &out) == 1024 && out == (uint8_t *)s); /* the tap settles unwatched */
-    ++tap_view()->want;
     assert(dsp_run(d, (uint8_t *)s, 1024, 1, &out) == 1024 && out == (uint8_t *)s && !memcmp(s, keep, sizeof s));
     xfade_view(5000); /* a fade asked, nowhere near the end: float, and the same samples */
     assert(dsp_run(d, (uint8_t *)s, 1024, 1, &out) == 1024 && out != (uint8_t *)s && !memcmp(out, keep, sizeof s));
@@ -529,7 +494,7 @@ static void rates_check(void) {
             peq_dsp ref;
             peq_reset(&ref, rates[r], nch, &p);
             struct dsp *d = track(rates[r], nch);
-            same(d, &ref, rates[r], nch);
+            same(d, &ref, nch);
             dsp_close(d, 0);
         }
     float x[1024] = {0.5f}, keep[1024];
@@ -543,15 +508,15 @@ static void rates_check(void) {
     peq_dsp ref;
     peq_reset(&ref, 48000, 2, &p);
     d = track(48000, 2);
-    same(d, &ref, 48000, 2);
+    same(d, &ref, 2);
     peq_preset q = active(-3, -4);
     dsp_eq_changed(d);
     assert(peq_update(&ref, &q));
-    for (int i = 0; i < 4; ++i) same(d, &ref, 48000, 2); /* through the ramp */
+    for (int i = 0; i < 4; ++i) same(d, &ref, 2); /* through the ramp */
     FILE *junk = fopen(PEQ_ACTIVE, "wb");
     assert(junk && fputs("junk", junk) >= 0 && !fclose(junk));
     dsp_eq_changed(d);
-    same(d, &ref, 48000, 2);
+    same(d, &ref, 2);
     /* A 3EQ state record: the reread plays the 3EQ at its saved preamp; then Off's held preamp alone (the 3EQ page
      * comparing against bypass); then nothing at all. */
     eq_state st;
@@ -562,14 +527,14 @@ static void rates_check(void) {
     assert(eq_save(&st));
     dsp_eq_changed(d);
     assert(peq_update(&ref, &st.eq3));
-    for (int i = 0; i < 4; ++i) same(d, &ref, 48000, 2);
+    for (int i = 0; i < 4; ++i) same(d, &ref, 2);
     st.mode = EQ_OFF, st.hold = 1;
     assert(eq_save(&st));
     dsp_eq_changed(d);
     peq_preset held;
     eq_effective(&st, &held);
     assert(!held.bypass && !held.count && held.preamp == -3 && peq_update(&ref, &held));
-    for (int i = 0; i < 4; ++i) same(d, &ref, 48000, 2);
+    for (int i = 0; i < 4; ++i) same(d, &ref, 2);
     st.hold = 0;
     assert(eq_save(&st));
     dsp_eq_changed(d);
@@ -606,8 +571,6 @@ static void meter_check(void) {
 
 int main(void) {
     assert(!mkdir(PEQ_ROOT "/mnt", 0755) && !mkdir(PEQ_ROOT "/mnt/data", 0755) && !mkdir(PEQ_ROOT "/tmp", 0755));
-    tap_wait_check();
-    tap_view();
     bypass_check();
     rates_check();
     crossfade_check();
@@ -616,7 +579,7 @@ int main(void) {
     cast_check();
     carry_check();
     meter_check();
-    puts("dsp: tap and its wait, bypass and the round trip, ReplayGain's clip, DSD, the EQ at 8-384 kHz and 1-8 channels, "
+    puts("dsp: bypass and the round trip, ReplayGain's clip, DSD, the EQ at 8-384 kHz and 1-8 channels, "
          "the reread, 3EQ and its held preamp, crossfade, mid-mix, mono and swap, AirPlay's tap, carried filter memory, the meter");
     return 0;
 }

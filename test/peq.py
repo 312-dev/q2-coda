@@ -842,7 +842,7 @@ def editor_check(lib, tmp):
     assert lib.peq_save(bytes(active), C.byref(preset(enabled=1)), 1) == 1
     # With the stock flag clear no filter runs, so the saved ON reads OFF.
     assert advanced() == 0 and title() == ''
-    # The visualizer's attach puts the filter in the chain with PEQ off: the saved ON becomes OFF, so it stays silent.
+    # peq_attach (peq_chain's, for a fade, Mono Audio or AirPlay) puts the filter in the chain with PEQ off: the saved ON becomes OFF, so it stays silent.
     ui.shim_close(); ui.peq_attach(); assert read().bypass == 1 and ui.shim_flag() == 0; advanced()
     assert lib.peq_save(bytes(active), C.byref(preset(enabled=1)), 1) == 1
     # The switch writes the stock config key, so boot restores it; the flag follows the preset.
@@ -1507,35 +1507,15 @@ static peq_preset active(double preamp, double gain) {
 
 static int negotiate(af_instance *af, af_data *in) { return af->control(af, 0x10000100, in); }
 
-/* The visualizer's tap (demo creates the file before the player maps it). */
-static vis_tap *tap_view(void) {
-    static vis_tap *t;
-    if (!t) {
-        int fd = open(VIS_FILE, O_RDWR | O_CREAT, 0644);
-        assert(fd >= 0 && !ftruncate(fd, sizeof(vis_tap)));
-        t = mmap(0, sizeof(vis_tap), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-        assert(t != MAP_FAILED && !close(fd));
-    }
-    return t;
-}
-
 /* One block through the filter equals the same block through the reference DSP, and is filtered. */
 static void same(af_instance *af, peq_dsp *ref, int rate, int nch) {
     float a[1024], b[1024], in[1024];
     unsigned frames = 1024 / nch;
     for (int i = 0; i < 1024; ++i) a[i] = b[i] = in[i] = 0.5f * sinf(i * 0.05f);
     af_data d = {a, (int)(frames * nch * 4), rate, nch, 0x1d, 4};
-    ++tap_view()->want; /* the visualizer is watching */
     assert(af->play(af, &d) == &d);
     peq_process(ref, b, frames);
     assert(!memcmp(a, b, sizeof(a)) && memcmp(a, in, sizeof(a)));
-    /* The tap ends with what played: the first two channels, every rate / 44100th frame above 48 kHz. */
-    vis_tap *t = tap_view();
-    unsigned step = rate > 48000 ? (unsigned)rate / 44100 : 1, n = (frames + step - 1) / step;
-    assert(t->rate == (unsigned)rate / step && t->stamp > 0);
-    for (unsigned i = 0; i < n; ++i)
-        for (int ch = 0; ch < 2; ++ch)
-            assert(t->ring[(t->seq - n + i) % VIS_RING][ch] == a[i * step * nch + (ch && nch > 1)]);
 }
 
 /* Crossfade (peq_player.c crossfade): demo's flag, one filter instance per track. */
@@ -1611,8 +1591,6 @@ static void crossfade_check(void) {
     /* No fade asked (another album next, Crossfade off, Gapless off): every block whole. */
     xfade_view(0);
     track(&a, 48000);
-    /* Let the unwatched visualizer tap settle before counting clock queries. */
-    for (n = 0; n < 2 * 48000;) assert(block(&a, buf, 1024, &n, 1, 48000) == 1024);
     unsigned reads = clock_reads;
     for (n = 0; n < 10 * 48000;) assert(block(&a, buf, 1024, &n, 1, 48000) == 1024);
     assert(clock_reads == reads);
@@ -1889,7 +1867,7 @@ static void carry_check(void) {
     peq_reset(&ref, 44100, 2, &p);
     continues(&a, &ref, &n);
     a.uninit(&a);
-    /* Mid-track with EQ on, once the unwatched tap settles: no clock reads. */
+    /* Mid-track with EQ on: no clock reads. */
     peq_length = 60, peq_pts = 10;
     track(&a, 44100);
     for (int i = 0; i < 100; ++i) continues(&a, &ref, &n);
@@ -1899,28 +1877,6 @@ static void carry_check(void) {
     a.uninit(&a);
     peq_length = 0, peq_pts = -1;
     assert(!unlink(PEQ_ACTIVE));
-}
-
-/* The tap before demo has made its file: looked for on the first block, then once a second of audio
- * has played since; the block that starts past that second finds it and writes what plays. */
-static void tap_wait_check(void) {
-    static float buf[1000];
-    af_instance af;
-    unlink(VIS_FILE);
-    memset(&af, 0, sizeof af);
-    assert(peq_open(&af) == 1);
-    af_data in = {0, 0, 44100, 1, 0x1d, 4};
-    assert(negotiate(&af, &in) == 1);
-    af_data d = {buf, sizeof buf, 44100, 1, 0x1d, 4};
-    assert(af.play(&af, &d) == &d); /* the first look: no file */
-    vis_tap *t = tap_view();         /* demo makes it now */
-    unsigned since = 0;              /* frames played since that look */
-    for (; since < 44100; since += 1000)
-        assert(af.play(&af, &d) == &d && !t->seq); /* not looked for again within the second */
-    for (int i = 0; i < 1000; ++i) buf[i] = (float)i / 1000;
-    assert(af.play(&af, &d) == &d && t->seq == 1000 && t->rate == 44100);
-    for (int i = 0; i < 1000; ++i) assert(t->ring[i][0] == buf[i] && t->ring[i][1] == buf[i]); /* mono: both sides */
-    af.uninit(&af);
 }
 
 /* Mid-mix (the next track under the held tail): demo's stop drops what is left, as does another track
@@ -2019,8 +1975,6 @@ static void txxx_check(void) {
 
 int main(void) {
     af_instance af;
-    tap_wait_check();
-    tap_view();
     /* A failed open is cleaned up by af_create calling uninit on the partial state. */
     for (int n = 0; n < 2; ++n) {
         memset(&af, 0, sizeof(af));
@@ -2176,17 +2130,6 @@ int main(void) {
     peq_default(&defaults);
     assert(!memcmp(&s->preset, &defaults, sizeof(defaults)));
 
-    /* With nobody watching for a second of audio, the tap stops copying; a bump resumes it. */
-    vis_tap *t = tap_view();
-    unsigned seq = t->seq;
-    float block[2 * 1000] = {0};
-    af_data idle = {block, (int)sizeof(block), 44100, 1, 0x1d, 4};
-    for (int i = 0; i < 100; ++i) af.play(&af, &idle); /* 200000 frames, past 44100 */
-    unsigned after = t->seq;
-    assert(after != seq && after - seq < 50000);
-    af.play(&af, &idle); assert(t->seq == after);
-    ++t->want; af.play(&af, &idle); assert(t->seq == after + 2000);
-
     af.uninit(&af);
     assert(!af.data && !af.setup);
     crossfade_check();
@@ -2235,49 +2178,7 @@ def player_check(tmp):
                     '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-I', str(ROOT/'patch'),
                     *map(str, sources), '-Wl,--wrap=clock_gettime', '-lm', '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)
-    print('PEQ player: negotiation, pass-through, the visualizer tap and its wait, live updates, track changes, carried filter memory, cleanup, crossfade and its mid-mix stop, wait and rate change, mono, the Xing seek table and TXXX bodies passed.')
-
-def visualizer_check(tmp):
-    """The visualizer's analysis (patch/visualizer.c vis_bands): a sine lands in its band at full scale."""
-    lib = compile_host(tmp, 'visualizer.so', ROOT/'patch/visualizer.c', ROOT/'patch/peq.c', '-I', ROOT/'patch')
-    rate, n, bands = 44100, 1024, 64
-    def levels(pcm):
-        out = (C.c_float * bands)()
-        lib.vis_bands((C.c_float * (2 * n))(*pcm), rate, out)
-        return list(out)
-    assert levels([0.0] * (2 * n)) == [0.0] * bands  # silence rests
-    edge = lambda b: int(40 * 400 ** (b / bands) * n / rate + 0.5)  # the C band_bin
-    for k in (12, 100, 300):  # a sine exactly on bin k, in both channels
-        pcm = [math.sin(2 * math.pi * k * i / n) for i in range(n) for _ in (0, 1)]
-        got, want = levels(pcm), max(b for b in range(bands) if edge(b) <= k)
-        assert got[want] > 0.99 and got.index(max(got)) <= want, (k, want, got)
-        assert all(v == 0 for b, v in enumerate(got) if edge(b) > k + 1 or edge(b + 1) < k - 1), (k, got)
-        assert abs(levels([v / 2 for v in pcm])[want] - (1 - 6.0206 / 60)) < 0.01  # half scale: 6 dB down
-    harness = tmp/'visualizer_checks.c'
-    harness.write_text(r"""
-#include <assert.h>
-#include "visualizer.c"
-void check_levels(void) {
-    memset(&vz, 0, sizeof vz);
-    for (int i = 0; i < VIS_N; ++i) {
-        vz.pcm[i][0] = sinf(TAU * 12 * i / VIS_N);
-        vz.pcm[i][1] = 0;
-    }
-    vis_analyze(44100, 0.04f);
-    assert(vz.bin_rate == 44100);
-    float max = 0;
-    for (int i = 0; i < VIS_BANDS; ++i) if (vz.level[i] > max) max = vz.level[i];
-    assert(max > 0.5f);
-    vis_reset();
-    for (int i = 0; i < VIS_BANDS; ++i) assert(vz.level[i] == 0);
-    vis_analyze(44100, 0.04f);
-    for (int k = 0; k < 40; ++k) vis_analyze(0, 0.04f); /* 1.6 s of silence: at rest */
-    for (int i = 0; i < VIS_BANDS; ++i) assert(vz.level[i] == 0);
-}
-""")
-    checked = compile_host(tmp, 'visualizer_checks.so', harness, ROOT/'patch/peq.c', '-I', ROOT/'patch')
-    checked.check_levels()
-    print('Visualizer: FFT bands, the levels\' rise and pause decay passed.')
+    print('PEQ player: negotiation, pass-through, live updates, track changes, carried filter memory, cleanup, crossfade and its mid-mix stop, wait and rate change, mono, the Xing seek table and TXXX bodies passed.')
 
 SCROBBLE = r"""
 #include <assert.h>
@@ -3464,7 +3365,6 @@ if __name__ == '__main__':
         editor_check(lib, tmp)
         output_check(tmp)
         player_check(tmp)
-        visualizer_check(tmp)
         scrobble_check(tmp)
         games_check(tmp)
         video_check(tmp)

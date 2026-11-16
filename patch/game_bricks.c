@@ -327,7 +327,7 @@ static int step(void *state, const struct eng_input *in) {
 }
 
 /* rgb a 256ths of the way up from black: a fading row's colours. The fade draws its discs in
- * these rather than darkening the row with eng_blend afterwards, which cost 634,287 instructions a
+ * these rather than darkening the row with an alpha blend afterwards, which cost 634,287 instructions a
  * frame on MIPS (docs/games-engine.md#bricks), over the 600,000 a frame may. */
 static unsigned dim(unsigned rgb, int a) {
     return a >= 256 ? rgb
