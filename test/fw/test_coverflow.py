@@ -2958,6 +2958,29 @@ def home_open(fw, carousel=False, rockbox=False, **keys):
     return t, ui, h, fw.var('coverflow__home', Home)
 
 
+LIST_MARKS = {k: int(v) for k, v in re.findall(r'^#define (CHEV_SHIFT|SPIN_BOX) (\d+)', host.ROOT.joinpath(
+    'patch/list_marks.c').read_text(), re.M)}
+
+
+@pytest.mark.parametrize('mode', ('0', '1'))  # Split, Full
+def test_home_s_labels_end_clear_of_the_chevron(fw, library, mode):
+    """coverflow_home_layout under OLED's set (chevron_home): every row of Home's lists draws the chevron, or Cover
+    Flow's spinner in its place, centred CHEV_SHIFT left of the right column in a SPIN_BOX box (list_marks.c), so a
+    label's text, which ends HSCROLL_MARGIN inside its box, ends by that box's left edge, as long as it runs."""
+    t = themed(fw, HOME=mode)
+    assert t['chevron_home']
+    row, _ = split_inset_set(fw, library, 2)  # OLED's set
+    ui = Ui(fw)
+    h = Homes(ui)
+    labels = [ui.make(r, 'hscroll_label', 24, 0, 300, 70) for r in h.rows.values()]
+    h.open(fw)
+    sets = [ui.of('hscroll_label', b)[0] for r in ui[ui[h.sets].kids[0]].kids for b in ui[r].kids]
+    for label, width in [(w, ui.at(h.main)[2]) for w in labels] + [(w, 375) for w in sets]:
+        x, _, w, _ = ui.at(label)
+        chevron = width - row['right_x'] - LIST_MARKS['CHEV_SHIFT'] - LIST_MARKS['SPIN_BOX'] // 2
+        assert x + w - 2 <= chevron, (mode, x, w, width)  # navigation.h HSCROLL_MARGIN
+
+
 def test_home_binds_its_cards_and_lists(fw):
     themed(fw)
     ui = Ui(fw)

@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Home (OLED): a long name on a Home or Settings row now ends a little before its chevron instead of running up against it.
   - Cover Flow (OLED): the album and artist under the covers sit a few pixels higher, so an artist name with tails (p, y, g, q) no longer dips below the line every list ends on.
   - Controls: Clicker set to **Headphones** no longer clicks the Q2's own buzzer. The click is heard only in your headphones, mixed into what plays; while nothing plays there is no click.
   - Playlists: removed the unused code behind a playlist cover's hidden **Select Playlists…** hold row; nothing you can see changes.

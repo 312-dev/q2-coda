@@ -133,7 +133,7 @@ status row, shows through the top one (`home_fades`, from the list's paint and
 `coverflow_home_strip`'s). A fade is drawn only while rows lie past it, and never over the selected
 row. The labels start at `home.rows.text_x` (OLED's 24) in the theme's Home face (Inter at 24 here,
 the design's 20), and end `home.rows.label_end_split` (44) before the art in Split and
-`HOME_LABEL_END` (33) from the screen edge in Full. Both menus are 375 pixels wide in the asset; the
+`HOME_LABEL_END` (41) from the screen edge in Full, where the chevron's box starts. Both menus are 375 pixels wide in the asset; the
 payload lays them out (below). Long translated labels ellipsize and scroll.
 The background view paints before the transparent menus, and both menus are clipped to the
 window while sliding.
