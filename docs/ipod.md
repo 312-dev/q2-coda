@@ -422,7 +422,8 @@ Stock's Wireless page (Wi-Fi, Bluetooth and SyncLink) is not reached from Settin
 paired phones by name. On, demo starts the `coda-rc` daemon, which lets a paired phone browse and play
 the library from the car ([remote-protocol](remote-protocol.md), [internals](internals.md#car-remote));
 off, it stops, and nothing listens. Centre on a phone asks `Forget "name"?` with Cancel first, then
-Forget; Return is Cancel. With none paired the page says "No paired phones".
+Forget; Return is Cancel. With none paired the page shows the empty state under the switch, "No Paired Phones", "Open the Car
+Remote app on your phone" ([oled-design](oled-design.md#empty-and-offline)).
 
 Every row is built natively, about 60 builders in all, one pattern throughout: a
 `list_item_create(view, 0, 0, 0, 0)` (some pass 78 as the height) holding a `button_create(item,
@@ -1113,7 +1114,8 @@ painted it white, which drew the box at rest.
   picked as it is reached ([Tabs](oled-design.md#tabs)): a turn down past Albums, or Centre, goes back to the results
   and a turn up past All to the strip; Next picks the next tab and Previous the one before. Previous or Return
   on the results, and Return on the tabs, go back to the strip with the text, cursor and tab as they were. With text
-  and no match, "No results" stands in the list's place, and Next stays on the strip; on a tab with nothing, Next
+  and no match, the empty state stands in the list's place, "No Matches", "Try fewer letters"
+  ([oled-design](oled-design.md#empty-and-offline)), and Next stays on the strip; on a tab with nothing, Next
   lands on the tabs. A server song that can't play now (offline, no copy on the card), and an artist or album none
   of whose songs can, is greyed with the offline mark at its right, as in every other list
   ([server library](server-library.md#greyed-rows)). By touch, a drag along the strip moves the alphabet a letter

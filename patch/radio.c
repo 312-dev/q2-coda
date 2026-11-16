@@ -533,6 +533,10 @@ void radio_search(void) {
 }
 
 /* The page shows level's list, its row last chosen selected. */
+/* A station list with nothing in it, the favourites' or the directory's (oled-design.md Empty and
+ * offline): stations come from the card's RADIO_DIR, which a computer fills. */
+static const empty_t no_stations = { "radio", "No Stations", "Add stations from your computer", 0 };
+
 static void show(int level) {
     static const char *const menu[] = { "Now Playing", "Favorites", "Featured",
                                         "Top Stations", "By Country", "By Genre" };
@@ -554,8 +558,10 @@ static void show(int level) {
         const list_t *l = level == PICK ? &ui.pick : &ui.list;
         n = l->n;
         const char *caption = level == PICK ? ui.genre ? "Genres" : "Countries" : ui.caption;
-        ui.view = page_list(ui.page, ui.page, 0, caption, n, 48);
-        if (!n && level == STATIONS) page_empty(ui.page, ui.favs ? "Favorites" : "Internet Radio");
+        ui.view = !n && level == STATIONS
+                      ? empty_list(ui.page, ui.page, ui.favs ? "Favorites" : "Internet Radio",
+                                   &no_stations, 0)
+                      : page_list(ui.page, ui.page, 0, caption, n, 48);
         for (int i = 0; i < n; ++i)
             if (level == PICK)
                 page_row_into(ui.view, i, name_of(l, i), pick_click);
@@ -565,12 +571,16 @@ static void show(int level) {
     if (n) ringnav_select(ui.view, ui.sel[level] < n ? ui.sel[level] : n - 1, n);
 }
 
-/* A caption over no rows, in place of the list; Return leaves it for the list. */
+/* A caption over no rows, in place of the list, or with none the empty state's "No Stations";
+ * Return leaves it for the list. */
 static void note(const char *caption) {
     if (ui.view && !ui.note) ui.sel[ui.level] = widget_get_prop_int(ui.view, "_ringnav_index", 0);
     ui.note = 1;
     ui.view = ui.edit = 0;
-    page_list_or(ui.page, ui.page, "Internet Radio", caption, 0, 48);
+    if (caption)
+        page_list_or(ui.page, ui.page, "Internet Radio", caption, 0, 48);
+    else
+        empty_list(ui.page, ui.page, "Internet Radio", &no_stations, 0);
 }
 
 static void fetch_cancel(void) {
@@ -653,7 +663,7 @@ static int tick(const void *unused) {
         if (l->n)
             show(ui.want);
         else
-            note("No stations");
+            note((const char *)0); /* no stations */
     } else
         note(get_wifisignal() > 0 ? "Directory unavailable" : "No Wi-Fi");
     free(fx.body);
@@ -668,8 +678,7 @@ static int go(const void *unused) {
     ui.go = 0;
     if (ui.next == R_FAVS) {
         favs_read(&ui.list, 1);
-        tk_snprintf(ui.caption, sizeof ui.caption,
-                    ui.list.n ? "Favorites" : "No favorites");
+        tk_snprintf(ui.caption, sizeof ui.caption, "Favorites"); /* none: the empty state (show) */
         show(STATIONS);
     } else if (ui.next == R_FEATURED) {
         list_set(&ui.list, STARTERS, sizeof STARTERS - 1, 0, 0);

@@ -324,16 +324,20 @@ int feedback_empty(void *parent, int free, const char *message, const char *hint
     return feedback_note(line, sub, free);
 }
 
-/* The empty state (docs/oled-design.md#empty-and-offline), one form for every page with nothing to
- * show: three stacked tiles (ES_TILE in front, two ES_SIDE ones ES_SIDE_DX either side behind it,
- * faint) with the page's glyph (tools/art.py EMPTY_GLYPHS, ES_GLYPH px) on the front one, a title
- * in Inter Medium 20, a hint in 15 px Text Secondary and, when the page has one, one action row 24
- * px under it, already selected; the whole stack centred between free_top (or the status row's
- * foot) and the screen's. A view over the page holds it (ES_NAME, its words and top in its props,
- * painted by empty_state_paint), and the row is a one-row list the wheel and Centre reach as any.
+/* The empty state (docs/oled-design.md#empty-and-offline), the one form for every page with nothing
+ * to show: three stacked tiles (ES_TILE in front, two ES_SIDE ones ES_SIDE_DX either side behind
+ * it, faint) with the page's glyph (tools/art.py EMPTY_GLYPHS, ES_GLYPH px) on the front one, a
+ * title in Inter Medium 20, a hint in 15 px Text Secondary and, when the page has one, one action
+ * row 24 px under it, already selected; the whole stack centred between free_top (or the status
+ * row's foot) and the screen's. A view over the page holds it (ES_NAME, its words and top in its
+ * props, painted by empty_state_paint; insensitive, so rows above it keep their taps), and the row
+ * is a one-row list (ES_ROW_NAME) the wheel and Centre reach as any. A page drawn by its own
+ * painter (Search's sheet) paints the stack itself (empty_paint, at empty_top).
  */
 #define ES_NAME "_empty_state"
+#define ES_ROW_NAME "_empty_row"
 #define ES_TOP 40 /* the status row's foot, as the design measures it */
+#define ES_END 320
 #define ES_TILE 58
 #define ES_SIDE 48
 #define ES_SIDE_DX 30
@@ -346,32 +350,56 @@ int feedback_empty(void *parent, int free, const char *message, const char *hint
 #define ES_ROW_H 32
 #define ES_TITLE_PX 24 /* Inter Medium 20, AWTK's size */
 #define ES_HINT_PX 18  /* Inter 15 */
-static int es_top(int free_top, int row) {
-    int stack = ES_TILE + ES_TITLE_GAP + ES_TITLE_H + ES_HINT_H + (row ? ES_ROW_GAP + ES_ROW_H : 0),
+#define ES_TEXT (ES_TILE + ES_TITLE_GAP + ES_TITLE_H + ES_HINT_H)
+/* The stack's top, centred between free_top (the status row's foot at least) and free_end. */
+int empty_top(int free_top, int free_end, int row) {
+    int stack = ES_TEXT + (row ? ES_ROW_GAP + ES_ROW_H : 0),
         from = free_top > ES_TOP ? free_top : ES_TOP;
-    return from + (320 - from - stack) / 2;
+    return from + (free_end - from - stack) / 2;
 }
+/* The action row's screen y, for a page whose own widget is the row (Songs' Scan Music Now). */
+int empty_row_y(int free_top) { return empty_top(free_top, ES_END, 1) + ES_TEXT + ES_ROW_GAP; }
+/* The empty state in page, made once and written again on each call: e 0 hides it (0). An e with a
+ * row but no on_row keeps the row's place in the stack for the caller's own (empty_row_y). The row
+ * list is made with the view; a later call shows or hides it but keeps its words and click. */
 int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *ctx, void *event)) {
-    if (!page || !e) return 0;
-    int y = screen_y(page), top = es_top(free_top, e->row != 0);
-    void *art =
-        widget_factory_create_widget(widget_factory(), "view", page, 0, 0, 375, I(page, W_H));
-    widget_set_name(art, ES_NAME);
+    if (!page) return 0;
+    void *art = widget_lookup(page, ES_NAME, 0), *row = widget_lookup(page, ES_ROW_NAME, 0);
+    if (!e) {
+        if (art) widget_set_visible(art, 0, 0);
+        if (row) widget_set_visible(row, 0, 0);
+        return 0;
+    }
+    int y = screen_y(page), top = empty_top(free_top, ES_END, e->row != 0);
+    if (!art) {
+        art = widget_factory_create_widget(widget_factory(), "view", page, 0, 0, 375, I(page, W_H));
+        widget_set_name(art, ES_NAME);
+        widget_set_sensitive(art, 0);
+    }
     widget_set_prop_str(art, "_es_glyph", e->glyph ? e->glyph : "");
     widget_set_prop_str(art, "_es_title", e->title ? e->title : "");
     widget_set_prop_str(art, "_es_hint", e->hint ? e->hint : "");
     widget_set_prop_int(art, "_es_top", top);
-    if (e->row) {
-        int ry = top + ES_TILE + ES_TITLE_GAP + ES_TITLE_H + ES_HINT_H + ES_ROW_GAP;
-        page_row_detail(rows_view(page, ry - y, 375, ES_ROW_H, 1, page_h(48)), 0, e->row, 0,
-                        on_row);
+    widget_set_visible(art, 1, 0);
+    widget_invalidate_force(art, 0);
+    if (row)
+        widget_set_visible(row, e->row && on_row, 0);
+    else if (e->row && on_row) {
+        void *view = rows_view(page, top + ES_TEXT + ES_ROW_GAP - y, 375, ES_ROW_H, 1, page_h(48));
+        widget_set_name(P(view, W_PARENT), ES_ROW_NAME);
+        page_row_detail(view, 0, e->row, 0, on_row);
+        ringnav_select(view, 0, 1); /* already selected, as the design has it */
     }
     return 1;
 }
-void empty_state_paint(void *w, void *canvas) {
-    if (!w || !P(canvas, CANVAS_LCD) || tk_strcmp(widget_get_prop_str(w, "name", ""), ES_NAME))
-        return;
-    int top = widget_get_prop_int(w, "_es_top", ES_TOP) - screen_y(w), light = ipod_light();
+/* Whether page, or a view in it, shows the empty state. */
+int empty_shown(void *page) {
+    void *art = page ? widget_lookup(page, ES_NAME, 1) : (void *)0;
+    return art && widget_get_visible(art);
+}
+/* The stack painted in w at top (a y in w). */
+void empty_paint(void *w, void *canvas, const empty_t *e, int top) {
+    int light = ipod_light();
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     static const signed char dx[] = { -ES_SIDE_DX, ES_SIDE_DX, 0 };
     for (int k = 0; k < 3; ++k) { /* the two behind at about a quarter's strength */
@@ -382,13 +410,54 @@ void empty_state_paint(void *w, void *canvas) {
     }
     stock_canvas_set_fill_color(canvas, fill);
     char art[48];
-    tk_snprintf(art, sizeof art, "empty_%s", widget_get_prop_str(w, "_es_glyph", ""));
+    tk_snprintf(art, sizeof art, "empty_%s", e->glyph ? e->glyph : "");
     paint_art(w, canvas, theme_art(art), 375 / 2 - ES_GLYPH / 2, top + ES_TILE / 2 - ES_GLYPH / 2);
     int ty = top + ES_TILE + ES_TITLE_GAP;
-    ar_text(canvas, widget_get_prop_str(w, "_es_title", ""), 1, ES_TITLE_PX,
-            flip_if(light, 0xffffff), 0, 375 / 2, ty + ES_TITLE_H / 2 - 1, 375 - 48, 1);
-    ar_text(canvas, widget_get_prop_str(w, "_es_hint", ""), 0, ES_HINT_PX,
-            light ? 0x5c5c5c : 0xababab, 0, 375 / 2, ty + ES_TITLE_H + ES_HINT_H / 2, 375 - 48, 1);
+    ar_text(canvas, e->title ? e->title : "", 1, ES_TITLE_PX, flip_if(light, 0xffffff), 0, 375 / 2,
+            ty + ES_TITLE_H / 2 - 1, 375 - 48, 1);
+    ar_text(canvas, e->hint ? e->hint : "", 0, ES_HINT_PX, light ? 0x5c5c5c : 0xababab, 0, 375 / 2,
+            ty + ES_TITLE_H + ES_HINT_H / 2, 375 - 48, 1);
+}
+void empty_state_paint(void *w, void *canvas) {
+    if (!w || !P(canvas, CANVAS_LCD) || tk_strcmp(widget_get_prop_str(w, "name", ""), ES_NAME))
+        return;
+    empty_t e = { widget_get_prop_str(w, "_es_glyph", ""), widget_get_prop_str(w, "_es_title", ""),
+                  widget_get_prop_str(w, "_es_hint", ""), 0 };
+    empty_paint(w, canvas, &e, widget_get_prop_int(w, "_es_top", ES_TOP) - screen_y(w));
+}
+/* A list page with nothing listed (page_list's, no rows): the empty state in body, the page's name
+ * hidden on its first line for the status row (navigation.c page_caption). Its list view. */
+void *empty_list(void *page, void *body, const char *name, const empty_t *e,
+                 int (*on_row)(void *ctx, void *event)) {
+    void *view = page_list(page, body, 0, name, 0, 48);
+    widget_set_visible(widget_get_child(body, 0), 0, 0);
+    empty_state(body, 0, e, on_row);
+    bar_title_sync(page); /* after: Cover Flow's title follows its empty state (coverflow_bar_title) */
+    return view;
+}
+/* No card in the slot (stock's mount marks it with /tmp/mmc_add): the Library's empty pages say
+ * so, with no row (oled-design.md Empty and offline: Library). 1 when e was rewritten. */
+int empty_card(empty_t *e) {
+    if (!access("/tmp/mmc_add", 0)) return 0;
+    *e = (empty_t){ "sd-card", "No SD Card", "Insert an SD card with music", 0 };
+    return 1;
+}
+/* A page of its own holding only the empty state, its status row naming it (Albums, Artists,
+ * Composers and Genres with nothing to list; a streaming service with no link): Return leaves. One
+ * at a time; the page, or 0. */
+static void *empty_pg __attribute__((section(".scratch")));
+static int empty_gone(void *page, void *event) {
+    if (empty_pg == page) empty_pg = (void *)0;
+    return 0;
+}
+void *empty_open(const char *window, const char *name, const empty_t *e,
+                 int (*on_row)(void *ctx, void *event)) {
+    if (empty_pg) return empty_pg;
+    void *page = page_open(window, empty_gone, page_keyup);
+    if (!page) return (void *)0;
+    empty_pg = page;
+    empty_list(page, page, name, e, on_row);
+    return page;
 }
 
 /* Sleep Timer's page with its switch off shows only the switch's row (navigation.c
@@ -413,21 +482,17 @@ void feedback_switch_bar(void *w, void *canvas) {
     st.sel_accent = w;
 }
 
-/* A service's page with no link (oled-design.md Empty and offline): its name in the status row over
- * the note, "Not connected" and the setting that gives it one; Return leaves. 1 when shown. */
-static void *offline_page __attribute__((section(".scratch")));
-static int offline_gone(void *page, void *event) {
-    if (offline_page == page) offline_page = (void *)0;
+/* A streaming service's page with no link (oled-design.md Empty and offline: Streaming): the empty
+ * state on a page of its own, Turn on Wi-Fi opening Settings > Wi-Fi (whose open wakes Smart
+ * Wi-Fi's radio, smart_wifi.c ringnav_wifi_page). 1 when shown. */
+static int offline_wifi(void *ctx, void *event) {
+    navigator_to("systemset/wifi_page");
     return 0;
 }
-int feedback_offline(const char *title) {
-    if (offline_page) return 1;
-    void *page = page_open("offline_page", offline_gone, page_keyup);
-    if (!page) return 0;
-    offline_page = page;
-    page_title(page, title, 1);
-    bar_title_sync(page);
-    return feedback_empty(page, 0, "Not connected", "Turn on Wi-Fi in Settings > Wi-Fi");
+int feedback_offline(void) {
+    static const empty_t e = { "cloud-slash", "Not Connected", "Turn on Wi-Fi to stream",
+                               "Turn on Wi-Fi" };
+    return empty_open("empty_page", "Streaming", &e, offline_wifi) != (void *)0;
 }
 
 /* Songs over an empty library: stock's own panel (allmusic_page's "view": a picture, a line and a
@@ -439,11 +504,11 @@ static void *scan_button(void *top) {
     return btn && widget_get_visible(view) ? btn : (void *)0;
 }
 
-/* Stock's panel as one selected row where the Shuffle row stands (at row's y), Scan Music Now,
- * the button itself at the text column with no fill of its own (feedback_scan_bar paints the
- * selection's bar under it); the picture and the line go, as the note says it. */
+/* Stock's panel as the empty state's one selected row (at screen y), Scan Music Now: the button
+ * itself at the text column with no fill of its own (feedback_scan_bar paints the selection's bar
+ * under it); the picture and the line go, as the empty state says it. */
 #define SCAN_ROW_H 32
-static void scan_row(void *btn, void *row) {
+static void scan_row(void *btn, int y) {
     static const char *const fills[] = { "style:normal:bg_color", "style:pressed:bg_color",
                                          "style:over:bg_color", "style:focused:bg_color" };
     void *view = P(btn, W_PARENT);
@@ -451,7 +516,8 @@ static void scan_row(void *btn, void *row) {
         void *c = widget_get_child(view, i);
         if (c != btn) widget_set_visible(c, 0, 0);
     }
-    widget_move_resize(view, I(view, W_X), I(row, W_Y), I(view, W_W), I(view, W_H));
+    widget_move_resize(view, I(view, W_X), y - screen_y(P(view, W_PARENT)), I(view, W_W),
+                       I(view, W_H));
     widget_move_resize(btn, 0, 0, I(view, W_W), SCAN_ROW_H);
     for (unsigned i = 0; i < sizeof fills / sizeof *fills; ++i) widget_set_prop_int(btn, fills[i], 0);
     widget_set_prop_int(btn, "style:normal:border_color", 0);
@@ -476,11 +542,12 @@ void feedback_scan_bar(void *w, void *canvas) {
 }
 
 /* Songs' page (allmusic_page) over an empty list, under a shuffle_row theme: the Shuffle row
- * would stand over nothing, so it hides and the page says what is missing, by the list's class
+ * would stand over nothing, so it hides and the page shows the empty state, by the list's class
  * (g_class_type): My Fav (0xf00a), Recent (0xf007), Most Played's stock list (0xf008), Recently
- * Added (0xf009). Over an empty library stock shows its own panel instead of the list: that
- * becomes the Scan Music Now row (scan_row), with "No songs" and how to fill the card under it.
- * Runs on the bar's paint; writes only when the list's emptiness, or the panel's, changes. */
+ * Added (0xf009), else the library's songs. Over an empty library stock shows its own panel
+ * instead of the list: its button becomes the empty state's Scan Music Now row (scan_row), or,
+ * with no card in, the panel goes (empty_card). Runs on the bar's paint; writes only when the
+ * list's emptiness, or the panel's, changes. */
 void feedback_songs(void *top, void *row) {
     if (!theme()->shuffle_row || !row || window_of(row) != top) return;
     void *list = P(p_deque_showlist, 0);
@@ -489,48 +556,44 @@ void feedback_songs(void *top, void *row) {
     if (empty == was) return;
     widget_set_prop_int(top, "_empty_songs", empty);
     widget_set_visible(row, !empty, 0);
-    if (scan) {
-        scan_row(scan, row);
-        feedback_empty(top, feedback_below(scan), "No songs", "Copy music to the SD card");
+    if (!empty) {
+        empty_state(top, 0, (const empty_t *)0, 0);
         return;
     }
-    int cls = I(g_class_type, 0);
-    const char *message = cls == 0xf00a   ? "No favorites"
-                          : cls == 0xf007 ? "No recent songs"
-                          : cls == 0xf008 ? "No plays yet"
-                          : cls == 0xf009 ? "No songs added yet"
-                                          : "No songs";
-    feedback_empty(top, CONFIRM_Y, empty ? message : (const char *)0,
-                   cls == 0xf00a ? "Hold Play/Pause on a song to add it" : (const char *)0);
+    int cls = scan ? 0 : I(g_class_type, 0); /* stock's panel stands for the whole library */
+    empty_t e =
+        cls == 0xf00a
+            ? (empty_t){ "heart", "No Favorites", "Hold Play/Pause on a song to add it", 0 }
+        : cls == 0xf007 ? (empty_t){ "clock-counter-clockwise", "Nothing Played Yet",
+                                     "Songs you play show up here", 0 }
+        : cls == 0xf008
+            ? (empty_t){ "chart-bar", "No Plays Yet", "Your most played songs show up here", 0 }
+        : cls == 0xf009
+            ? (empty_t){ "sparkle", "No Songs Added Yet", "New music on the card shows up here", 0 }
+            : (empty_t){ "music-notes", "No Songs", "Copy music to the SD card",
+                         scan ? "Scan Music Now" : 0 };
+    int card = cls < 0xf007 || cls > 0xf00a ? empty_card(&e) : 0; /* the library's songs */
+    if (scan && card)
+        widget_set_visible(P(scan, W_PARENT), 0, 0);
+    else if (scan)
+        scan_row(scan, empty_row_y(0));
+    empty_state(top, 0, &e, 0);
 }
 
 /* Folder's page (folder_page) over a level with nothing in it, an empty card or a folder with no
- * music: stock's page is its table alone, with no message of its own, and would be blank. It
- * says "No folders" with a hint, as OLED's note (oled-design.md Empty and offline), else as two
- * centred lines in stock's white label styles. The level is stock's p_deque_showlist, which the
- * table's rows read (folder_into). Runs on the bar's paint; writes only when the level's emptiness
- * changes. */
-#define FOLDER_NOTE_Y 120
+ * music: stock's page is its table alone, with no message of its own, and would be blank. It shows
+ * the empty state, "No Folders", or "No SD Card" with none in (empty_card). The level is stock's
+ * p_deque_showlist, which the table's rows read (folder_into). Runs on the bar's paint; writes only
+ * when the level's emptiness changes. */
 void feedback_folder(void *top) {
     if (!top || tk_strcmp(widget_get_prop_str(top, "name", ""), "folder_page")) return;
     void *list = P(p_deque_showlist, 0);
     int empty = list && !deque_size(list), was = widget_get_prop_int(top, "_empty_folder", 0);
     if (empty == was) return;
     widget_set_prop_int(top, "_empty_folder", empty);
-    const char *message = empty ? "No folders" : (const char *)0, *hint = "Copy music to the SD card";
-    if (feedback_empty(top, 0, message, hint)) return;
-    void *line = widget_lookup(top, "_empty", 0), *sub = widget_lookup(top, "_empty_hint", 0);
-    if (!line) {
-        line = text(top, 0, FOLDER_NOTE_Y, 375, 30);
-        widget_set_name(line, "_empty");
-        sub = text(top, 0, FOLDER_NOTE_Y + 34, 375, 24);
-        widget_use_style(sub, "s_scrlabel_white16c");
-        widget_set_name(sub, "_empty_hint");
-        widget_set_text_utf8(line, "No folders");
-        widget_set_text_utf8(sub, hint);
-    }
-    widget_set_visible(line, empty, 0);
-    widget_set_visible(sub, empty, 0);
+    empty_t e = { "folder", "No Folders", "Copy music to the SD card", 0 };
+    if (empty) empty_card(&e);
+    empty_state(top, 0, empty ? &e : (const empty_t *)0, 0);
 }
 
 /* The confirmation after a shuffle (docs/oled-design.md#confirmation): over Now Playing, the

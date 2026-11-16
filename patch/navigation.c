@@ -7257,24 +7257,32 @@ int ringnav_art_header(char *buf, unsigned size, const char *fmt, const char *al
 
 /* An empty Library list (Albums, Artists, Composers, Genres): once stock marks its page opened
  * (the "stage" property the window manager sets after the open animation), the page is closed
- * again and the toast says so over the list it came from. Stock opened a black page, and an empty
- * Albums grid's Return then did nothing until a restart (Hold Return: Home, back_to_home, still
- * left it); the cause was not found in the window manager's close path, so the page goes before a
- * Return can reach it, with the forced close that path uses. The page is its class's
- * (g_class_type), on top, whichever of the two list pages shows it, polled every EMPTY_POLL_MS
- * until it opens or stops being on top. */
-static int empty_toast(const void *unused) {
-    static const char *const none[] = { "No albums", "No artists", "No composers", "No genres" };
+ * again and the empty state's page (feedback.c empty_open) takes its place. Stock opened a black
+ * page, and an empty Albums grid's Return then did nothing until a restart (Hold Return: Home,
+ * back_to_home, still left it); the cause was not found in the window manager's close path, so the
+ * page goes before a Return can reach it, with the forced close that path uses. The page is its
+ * class's (g_class_type), on top, whichever of the two list pages shows it, polled every
+ * EMPTY_POLL_MS until it opens or stops being on top. */
+static int empty_class(const void *unused) {
+    static const empty_t none[] = {
+        { "vinyl-record", "No Albums", "Copy music to the SD card", 0 },
+        { "microphone-stage", "No Artists", "Copy music to the SD card", 0 },
+        { "music-notes-simple", "No Composers", "Songs need a composer tag", 0 },
+        { "guitar", "No Genres", "Songs need a genre tag", 0 },
+    };
+    static const char *const names[] = { "Albums", "Artists", "Composers", "Genres" };
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
     const char *name = top ? widget_get_prop_str(top, "name", "") : "";
     int mine = (!tk_strcmp(name, "album_page") || !tk_strcmp(name, "localclass_page")) &&
                I(g_class_type, 0) == CLASS_ALBUMS + st.empty_kind;
     if (mine && widget_get_prop_int(top, "stage", 0) != WINDOW_STAGE_OPENED) {
-        timer_add(empty_toast, (void *)0, EMPTY_POLL_MS);
+        timer_add(empty_class, (void *)0, EMPTY_POLL_MS);
         return 0;
     }
     if (mine) window_manager_close_window_force(wm, top);
-    toast(none[st.empty_kind]);
+    empty_t e = none[st.empty_kind];
+    empty_card(&e);
+    empty_open("empty_page", names[st.empty_kind], &e, 0);
     return 0;
 }
 
@@ -7297,7 +7305,7 @@ int ringnav_class_icon(void *row, int i) {
  * went by the Artist tag; it follows artist_type, the setting the artist page itself uses.
  * getAllAlbum groups by name alone: Albums is split as Coverflow is (album artist, else folder),
  * and the name's songs an album row opens (0xff10) keep only that album (album_open). An empty
- * list toasts what it lacks. */
+ * list opens the empty state's page for what it lacks. */
 /* list_get_img_pic: a song row's format badge (img_flac, img_mp3, ...) by its extension. "null" is
  * stock's no badge, which hides it, as an iPod's rows carry none. */
 int ringnav_badge(const char *path, char *out, int size) {
@@ -7420,7 +7428,7 @@ int ringnav_localclass(int cls) {
     library_music = saved;
     if (n <= 0) { /* say so, not a black page; once the page that loads it is up */
         st.empty_kind = cls - CLASS_ALBUMS;
-        timer_add(empty_toast, (void *)0, 0);
+        timer_add(empty_class, (void *)0, 0);
     }
     return n;
 }
@@ -7667,9 +7675,12 @@ static int chapter_poll(const void *unused) {
         st.ch->rows[n++].sec = sec;
     }
     st.ch->count = n;
-    void *view =
-        page_list_or(st.ch_page, st.ch_page, "Chapters",
-                     st.ch->failed ? "Could not read chapters" : "No embedded chapters", n, 64);
+    static const empty_t none[] = {
+        { "list-numbers", "No Chapters", "This file has no chapter marks", 0 },
+        { "list-numbers", "No Chapters", "This file's chapters couldn't be read", 0 },
+    };
+    void *view = n ? page_list(st.ch_page, st.ch_page, 0, "Chapters", n, 64)
+                   : empty_list(st.ch_page, st.ch_page, "Chapters", &none[!!st.ch->failed], 0);
     int sec = 0, total, current = 0;
     player_playtime_and_length(&sec, &total);
     for (int i = 0; i < n; ++i) {

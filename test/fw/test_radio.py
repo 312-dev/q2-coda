@@ -403,7 +403,7 @@ def test_favourites_are_favourites_m3u_then_every_other_playlist(fw):
 def test_no_favourites(fw):
     p = page(fw)
     p.menu('Favorites')
-    assert ui(fw).list.n == 0 and ui(fw).caption == b'No favorites'
+    assert ui(fw).list.n == 0 and empty_states(p) == [NO_STATIONS]
 
 
 def test_the_menu_is_internet_radio_s_and_only_now_playing_plays_at_once(fw):
@@ -455,8 +455,8 @@ def test_a_list_shorter_than_its_kept_row_selects_its_last(fw):
 
 
 def test_no_favourites_is_an_empty_page_its_bar_names_favourites(fw):
-    """page_empty: the bar holds the title, so it reads the list's name and OLED's note says the list is empty; a list
-    with rows has no such page, and an empty one selects no row."""
+    """empty_list: the bar holds the title, so it reads the list's name and the empty state says the list is empty; a
+    list with rows has no such page, and an empty one selects no row."""
     p = page(fw)
     fw.mock('widget_get_child', lambda w, i, *_: (p.w.under(w) + [0] * (i + 1))[i])
     p.menu('Featured')
@@ -466,7 +466,7 @@ def test_no_favourites_is_an_empty_page_its_bar_names_favourites(fw):
     marks = len(p.w.set)
     p.menu('Favorites')
     shown = {p.w.text.get(w) for w in p.w.under(ui(fw).page, 'hscroll_label_create')}
-    assert {'No favorites', 'Favorites'} <= shown
+    assert 'Favorites' in shown and empty_states(p) == [NO_STATIONS]
     assert not [key for _, key, _ in p.w.set[marks:] if key.startswith(b'_ringnav')]  # ringnav_select's
 
 
@@ -1140,6 +1140,15 @@ def note(p):
     return [t for t in p.w.text.values()]
 
 
+def empty_states(p):
+    """The empty states alive on the page (feedback.c empty_state): (glyph, title, hint)."""
+    return [tuple(p.w.strs[(w, b'_es_' + k)] for k in (b'glyph', b'title', b'hint'))
+            for w, (kind, _, _) in p.w.made.items() if kind == 'view' and (w, b'_es_title') in p.w.strs]
+
+
+NO_STATIONS = (b'radio', b'No Stations', b'Add stations from your computer')
+
+
 def test_top_stations_fetches_by_votes_over_verified_tls(fw):
     p = page(fw)
     curl = Curl(fw, m3u(('Zed', 'http://z.example/'), ('Abe', 'http://a.example/')))
@@ -1207,7 +1216,7 @@ def test_a_fetch_with_no_stations_says_so(fw):
     curl = Curl(fw, b'#EXTM3U\n')
     p.menu('Top Stations')
     fetched(fw, p, curl)
-    assert 'No stations' in note(p)
+    assert empty_states(p) == [NO_STATIONS] and 'No stations' not in note(p)
 
 
 def test_a_body_over_256_kb_is_cut_off(fw):

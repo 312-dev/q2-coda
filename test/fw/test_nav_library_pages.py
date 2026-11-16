@@ -239,6 +239,21 @@ def ui(fw):
     return Ui(fw)
 
 
+def empty_state(ui, page):
+    """The empty state shown in page (feedback.c empty_state): (glyph, title, hint, its row's caption or None), else
+    None. Its view is insensitive, so the rows beside it keep their taps."""
+    art = ui.lookup(page, '_empty_state', 1)
+    if not art or art in ui.hidden:
+        return None
+    assert art in ui.dull
+    row = ui.lookup(page, '_empty_row', 1)
+    caption = None
+    if row and row not in ui.hidden:
+        (item,) = ui.kids[ui.kids[row][0]]
+        caption = next(ui.text[k] for k in ui.subtree(item) if ui.kind[k] == 'hscroll_label_create')
+    return tuple(ui.props[(art, f'_es_{k}')] for k in ('glyph', 'title', 'hint')) + (caption,)
+
+
 class Config:
     """config.ini: a key's value, or the default; a missing key with an empty default leaves out alone. A write
     is read back, and kept in written."""
@@ -490,7 +505,8 @@ def test_most_played_with_no_plays_says_so(fw, ui, song):
     Files(fw)
     Library(fw, ui, [song(b'/m/a.flac')])
     call(fw, 'most_played')
-    assert 'No plays yet' in ui.shown(ui.top()) and ui.rows(ui.top()) == []
+    assert empty_state(ui, ui.top()) == ('chart-bar', 'No Plays Yet', 'Your most played songs show up here', None)
+    assert ui.rows(ui.top()) == [] and 'Most Played' not in ui.shown(ui.top())  # the name is the status row's
 
 
 def test_most_played_ranks_its_kept_songs_again_without_the_library(fw, ui, song, st):
@@ -638,9 +654,8 @@ def test_an_empty_ratings_list_says_how_to_rate(fw, ui, song):
     Library(fw, ui, [song(b'/m/a.flac', b'A')])
     Files(fw)
     call(fw, 'rated_open', 0)
-    assert ui.rows(ui.top()) == [('No songs yet', 'Hold the heart on Now Playing to rate')]
-    item, = ui.kids[ui.view(ui.top())]
-    assert [fn for w, e, fn, _ in ui.handlers if w == item and e == EVT_CLICK] == [0]  # nothing to play
+    assert empty_state(ui, ui.top()) == ('star', 'No Rated Songs Yet', 'Hold the heart on Now Playing to rate', None)
+    assert ui.rows(ui.top()) == []  # no fake row, nothing to play
 
 
 def test_a_ratings_list_reads_every_song(fw, ui, song):
@@ -815,8 +830,9 @@ def test_long_songs_with_none_says_so(fw, ui, song):
     Library(fw, ui, [song(b'/m/a.flac', b'A')])
     Files(fw, {LENGTHS: lengths((b'/m/a.flac', 60))})
     call(fw, 'long_songs')
-    # the house note and its hint (audit2 K1), no fake row
-    assert {'No long songs', 'Songs over 10 min show up here'} <= set(ui.shown(ui.top())) and ui.rows(ui.top()) == []
+    # the empty state (audit2 K1), no fake row
+    assert empty_state(ui, ui.top()) == ('timer', 'No Long Songs', 'None over 10 minutes', None)
+    assert ui.rows(ui.top()) == []
     call(fw, 'long_songs')  # pressed again while it is open
     assert len(ui.windows) == 1
 
@@ -1566,13 +1582,13 @@ def test_chapters_poll_until_ffmpeg_ends(fw, ui, song, mcl):
     assert ui.fire('chapter_poll') == REPEAT and 'Loading chapters…' in ui.shown(page)
 
 
-@pytest.mark.parametrize('output, status, message', [(b';FFMETADATA1\ntitle=x\n', 0, 'No embedded chapters'),
-                                                     (b'', 256, 'Could not read chapters')])
-def test_chapters_none_or_unreadable_say_so(fw, ui, song, mcl, output, status, message):
+@pytest.mark.parametrize('output, status, hint', [(b';FFMETADATA1\ntitle=x\n', 0, 'This file has no chapter marks'),
+                                                  (b'', 256, "This file's chapters couldn't be read")])
+def test_chapters_none_or_unreadable_say_so(fw, ui, song, mcl, output, status, hint):
     book = Book(fw, ui, song, mcl, output=output, status=status)
     page = book.open()
     ui.fire('chapter_poll')
-    assert message in ui.shown(page) and ui.rows(page) == []
+    assert empty_state(ui, page) == ('list-numbers', 'No Chapters', hint, None) and ui.rows(page) == []
 
 
 def test_a_cue_track_s_chapters_are_on_its_own_clock(fw, ui, song, mcl):
@@ -1761,8 +1777,8 @@ def test_a_download_gone_from_the_card_does_not_play(fw, ui, song):
 def test_no_downloads_says_so(fw, ui, song):
     Card(fw, ui, song, {})
     call(fw, 'tidal_downloads')
-    shown = set(ui.shown(ui.top()))  # the house note and its hint: Tidal keeps what it plays (audit2 K1)
-    assert {'No downloads', 'Songs you play from TIDAL are kept here'} <= shown and ui.rows(ui.top()) == []
+    assert empty_state(ui, ui.top()) == ('download-simple', 'No Downloads Yet', 'Synced music shows up here', None)
+    assert ui.rows(ui.top()) == []  # no Clear All Downloads over nothing
 
 
 def test_clear_all_asks_first_and_cancel_keeps_them(fw, ui, song):
@@ -1800,7 +1816,7 @@ def test_remove_clears_every_download(fw, ui, song):
     ui.click(page, 2)
     ui.fire('td_show')
     assert list(card.files) == ['/mnt/mmc/.tidal/.cache-size']  # Keeps settings
-    assert 'No downloads' in ui.shown(page)
+    assert empty_state(ui, page)[1] == 'No Downloads Yet'
 
 
 def test_one_download_is_a_track(fw, ui, song):
@@ -2419,11 +2435,18 @@ def test_era_lists_each_decade_with_its_albums(fw, ui):
     assert ui.windows == [page]
 
 
-@pytest.mark.parametrize('opens, decades, toast', [(False, [], 'Years unavailable'), (True, [], 'No dated albums yet')])
-def test_era_with_nothing_to_list_says_why(fw, ui, opens, decades, toast):
-    EraDb(fw, decades=decades, opens=opens)
+def test_era_with_no_database_says_so(fw, ui):
+    EraDb(fw, decades=[], opens=False)
     call(fw, 'era_menu')
-    assert ui.toasts == [toast] and not ui.windows
+    assert ui.toasts == ['Years unavailable'] and not ui.windows
+
+
+def test_era_with_no_dated_album_opens_its_empty_state(fw, ui):
+    EraDb(fw, decades=[], opens=True)
+    call(fw, 'era_menu')
+    (page,) = ui.windows
+    assert ui.name[page] == 'era_page' and not ui.toasts and ui.rows(page) == []
+    assert empty_state(ui, page) == ('calendar-blank', 'No Dated Albums Yet', 'Albums need a year tag', None)
 
 
 ERA_ALBUMS = [(b'Blue', b'Band', b'1991', b'/m/blue/1.flac'), (b'Grey', b'', b'1995', b'/m/grey/1.flac'),
@@ -3102,3 +3125,22 @@ def test_a_database_that_refuses_leaves_the_playlist(fw, song, fail, rolled):
 def test_a_database_that_will_not_open_is_left(fw, song):
     db = Playlists(fw, {}, opens=False)
     assert mutate(fw, 3, entry(song, 201, b'/m/a.flac')) == 0 and db.log == []
+
+
+# The empty state's own page (feedback.c empty_open): a streaming service with no link.
+def test_a_streaming_service_with_no_link_is_the_empty_state_and_its_row_opens_wi_fi(fw, ui):
+    assert call(fw, 'feedback_offline') == 1
+    (page,) = ui.windows
+    assert ui.name[page] == 'empty_page' and 'Streaming' not in ui.shown(page)  # the status row names it
+    assert empty_state(ui, page) == ('cloud-slash', 'Not Connected', 'Turn on Wi-Fi to stream', 'Turn on Wi-Fi')
+    # the stack with its row (176 px) centred under the status row: the row 144 px under the stack's top
+    top = 40 + (280 - 176) // 2
+    assert ui.props[(ui.lookup(page, '_empty_state', 1), '_es_top')] == top
+    row = ui.lookup(page, '_empty_row', 1)
+    assert struct.unpack_from('<4i', ui.blocks[row], 0)[1] == top + 144 and ui.kind[row] == 'list_view_create'
+    assert ui.props[(ui.kids[row][0], '_ringnav_index')] == 0  # its one row already selected
+    assert call(fw, 'feedback_offline') == 1 and len(ui.windows) == 1  # pressed again: the one page
+    ui.handler(ui.kids[ui.kids[row][0]][0], EVT_CLICK)()  # the row: list view, scroll view, item
+    assert ui.went == ['systemset/wifi_page']
+    ui.close(page)
+    assert call(fw, 'feedback_offline') == 1 and len(ui.windows) == 1  # closed: it opens again

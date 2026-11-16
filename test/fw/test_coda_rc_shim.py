@@ -6,7 +6,7 @@ import ctypes as C
 import pytest
 
 from conftest import O, Files, mcl  # noqa: F401
-from test_nav_library_pages import KEY_RETURN, Config, Ui, call, ui  # noqa: F401
+from test_nav_library_pages import KEY_RETURN, Config, Ui, call, empty_state, ui  # noqa: F401
 from test_nav_hold import recs  # noqa: F401
 
 NOW, CMD, LIST, ACK, QUEUE = '/tmp/coda-rc.now', '/tmp/coda-rc.cmd', '/tmp/coda-rc.list', '/tmp/coda-rc.ack', '/tmp/coda-rc.queue'
@@ -176,7 +176,9 @@ def test_settings_switch_turns_it_on_and_off(fw, ui, mcl, recs):
     q2 = Q2(fw, ui, recs, on=0)
     call(fw, 'carremote_open')
     page = ui.top()
-    assert 'No paired phones' in ui.captions(page)
+    # no phone: the empty state under the switch, with no row (a phone pairs from its own app)
+    assert len(ui.rows(page)) == 2 and 'No paired phones' not in ui.shown(page)  # the switch and its gap
+    assert empty_state(ui, page) == ('car-profile', 'No Paired Phones', 'Open the Car Remote app on your phone', None)
     ui.click(page, 0)
     assert [a[:1] for _, a in fw.calls('write_int_config')][-1] == (1,) and q2.system[-1].startswith('( /usr/bin/coda-rc')
     ui.click(page, 0)

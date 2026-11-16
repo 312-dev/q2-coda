@@ -253,7 +253,7 @@ int ringnav_stream_row(void *button, void *event) {
     int row = row_of(button);
     if (row >= 0 && smart_hold(stream_row_again, (void *)(long)row, 0)) return 0;
     /* OLED: Tidal with no link is a page saying so (feedback.c), not stock's toast */
-    if (!row && get_wifisignal() <= 0 && feedback_offline("TIDAL")) return 0;
+    if (!row && get_wifisignal() <= 0 && feedback_offline()) return 0;
     return stock_stream_row_trampoline(button, event);
 }
 

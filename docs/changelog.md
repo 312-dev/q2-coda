@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Display (OLED): every empty page now looks the same: a stack of tiles with a picture, a title such as **No Songs**, **No Playlists** or **No Matches**, a line saying what to do, and at most one button under it (**Scan Music Now**, **Turn on Streaming**, **Turn on Wi-Fi**). Empty Albums, Artists, Composers and Genres open such a page instead of a message, Years opens with no dated albums, and with no SD card in, the Library's pages say **No SD Card**.
   - Status bar: while it charges, the battery shows how full it really is. It used to fill to the end the moment the cable went in.
   - Status bar (OLED): a charging battery shows a small lightning bolt inside it, in green; full on the cable, or held at **Charge Limit**, it stays green with no bolt.
   - Status bar: with **Battery** on Percent, the percentage stays on one line in the status bar; at 100% or while charging it could drop onto a second line.

@@ -546,7 +546,7 @@ static inline int arc_out(int r, int y) {
 /* A pointer press the window manager keeps this long with no pointer event is no finger
  * (navigation.c stale_heal): a release it never got would otherwise hold the wheel and Centre. */
 #define STALE_TOUCH_MS 5000
-/* An empty Library list's page (navigation.c empty_toast) closes once the window manager marks it
+/* An empty Library list's page (navigation.c empty_class) closes once the window manager marks it
  * opened ("stage" WINDOW_STAGE_OPENED, after the open animation): polled every EMPTY_POLL_MS.
  * The close path reads the same property @0x69d218 (3 or 5, suspended). */
 #define WINDOW_STAGE_OPENED 3
