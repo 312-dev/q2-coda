@@ -92,7 +92,7 @@ static int net_page_open(void) {
  * on_wm_timer_networkstatus stops once offline, whatever it is doing, as Play must fetch its URL at
  * once), Spotify's librespot running or waiting to start (it never retries a Connect login or mDNS
  * that failed), a station playing, a card app running, a scrobble upload, Network Update's download
- * or an Apps job, Download Album Lyrics, a Tidal download or an action held for the link
+ * or an Apps job, Get Album Lyrics, a Tidal download or an action held for the link
  * (smart_hold); a time sync pending on a link; or a page above. */
 static int smart_needed(void) {
     unsigned type = (unsigned)mclGetPlayType();

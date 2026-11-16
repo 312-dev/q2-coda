@@ -8066,7 +8066,7 @@ int ringnav_folder_click(void *ctx, void *event) {
 
 /* usbmode_page_init, as a cable to a computer opens USB mode, before stock unmounts the card for
  * USB storage: the card apps, which write to it (downloads, uploads), end first, so nothing of
- * theirs keeps it busy (they run from /tmp: addon.c), as do Download Album Lyrics' job, playlist
+ * theirs keeps it busy (they run from /tmp: addon.c), as do Get Album Lyrics' job, playlist
  * art's worker and the song durations' (durations.c). */
 int ringnav_usbmode(void *a, void *b, void *c, void *d) {
     addon_card_away();

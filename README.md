@@ -49,7 +49,7 @@
   </tr>
   <tr valign="top">
     <td><b>Lyrics and covers</b></td>
-    <td>Synced <code>.lrc</code> lyrics on Now Playing and full screen. Download Cover &amp; Lyrics from LRCLIB, the Cover Art Archive and iTunes, and Download Album Lyrics.</td>
+    <td>Synced <code>.lrc</code> lyrics on Now Playing and full screen. Get Cover &amp; Lyrics from LRCLIB, the Cover Art Archive and iTunes, and Get Album Lyrics.</td>
   </tr>
   <tr valign="top">
     <td><b>Streaming</b></td>

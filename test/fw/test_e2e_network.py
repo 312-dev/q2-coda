@@ -1858,7 +1858,7 @@ class Lyrics:
     REC_PATH runs into REC_TITLE, so REC_TITLE reads the path's high half as an address nothing maps.
     The paths here (lrc_song, ringnav_lyric_save, ringnav_lyric) read no other pointer in it. One that came
     to read REC_TITLE would crash the whole test/fw run rather than fail its test: it belongs with
-    test/patch.py, as Download Album Lyrics does (docs/building.md, Limits)."""
+    test/patch.py, as Get Album Lyrics does (docs/building.md, Limits)."""
     def __init__(self, w, mcl, low):
         self.w, self.lines, self.keep, self.stock = w, [], [], []
         w.card.put(SONG, b'fLaC', count=False)

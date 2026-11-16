@@ -709,7 +709,8 @@ int modal_actions(const char *const *names, const char *const *icons, int n, voi
 /* Now Playing's More (onlinematch.c ringnav_playermore): a dialog under a modal set
  * (tools/ipod.py modal_page), modeless, as the hold menu's, so navigator_to returns. Its rows as
  * the sheet's, each with its symbol: stock's by their kind (PLAYMORE_ROWS, the button's name its
- * index), AirPlay's, Download Album Lyrics' and About's by their images. The header is the playing song. Delete Song, which asks first, goes
+ * index), AirPlay's, Get Album Lyrics' and About's by their images; stock's Download Cover & Lyrics
+ * reads Get Cover & Lyrics. The header is the playing song. Delete Song, which asks first, goes
  * last after a gap, red. A-B Repeat's stock switch hides, and the row paints the theme's
  * (switch_mark) on the right column by its image. Multiple Speed is a setting row, its value the
  * speed, opening a picker of the four (M3); a pick is a click on stock's own speed button for it,
@@ -814,6 +815,8 @@ void modal_more(void *win) {
         if (kind >= 0 && kind < (int)(sizeof more_icons / sizeof *more_icons))
             icon = more_icons[kind];
         widget_move_resize(button, 0, 0, modal_row_w(), MODAL_ROW);
+        if (kind == 4 && label) /* a full-width row: no longer cut (audit2 L2) */
+            widget_set_text_utf8(label, "Get Cover & Lyrics");
         if (kind == 1) { /* Multiple Speed */
             how = MM_SETTING;
             widget_set_prop_str(button, "name", "_mm_speed");

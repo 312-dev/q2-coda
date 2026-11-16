@@ -668,6 +668,8 @@ pickers in them) open as a frosted page sheet over the page (the user's C3, 2026
   has no gaps, so it scrolls, and ends, on whole rows (the user's, from audit2 E1: a gap cut the end
   of Now Playing's More); its settings tell themselves apart by the symbol before the label. A
   list's hold menu has no Sorting row: sort orders are Settings > Library > Sorting's.
+- **Now Playing's More** names its downloads by what they get (audit2 L2): Get Cover & Lyrics
+  (stock's search for this song's cover and lyrics) and Get Album Lyrics (every song of its album).
 - The menu opens on its first action, lit; the wheel moves, Centre picks, Return closes it back to
   the row it came from.
 - ponytail: the sheet appears at once; the design's rise from the foot (260 ms `cubic_out`, out
