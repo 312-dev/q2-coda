@@ -10374,21 +10374,7 @@ def carousel(on):
         return n['visible']
     assert [shown(n) for n in ('slide_menu','img_left','img_right','list_view_home','list_view_homeset')]==[on]*3+[not on,0]
     if on: assert not m.nodes[art]['visible']
-shortcut_button=m.nodes[shortcut]['children'][0]
-sf,sc=m.handler(shortcut_button,O['EVT_CLICK'])
-# None ends the cycle: Home's row is hidden, the picker says so, and the carousel's card keeps the default's name.
-def shortcut_cycle(labels):
-    for label in labels:
-        m.call(address=sf,args=(sc,m.event,0,0),gap=0)
-        if label=='None':
-            assert row_text(shortcut)=='Shortcut: None'
-            assert m.nodes[named(m,home,'label_rockbox')]['text']==('Rockbox' if m.rockbox_mode else 'Favorites')
-            assert not m.nodes[named(m,home,'btn_rockbox')]['visible']
-        else: assert m.nodes[named(m,home,'label_rockbox')]['text']==label
-shortcut_cycle(('Favorites','Shuffle','Rated Albums','Playlists','Artists','Albums','Games','Podcasts','Audiobooks','None','Rockbox'))
-m.groovebox_mode=0o100755  # Groovebox on the card: the cycle offers it after Audiobooks
-shortcut_cycle(('Favorites','Shuffle','Rated Albums','Playlists','Artists','Albums','Games','Podcasts','Audiobooks','Groovebox','None','Rockbox'))
-m.groovebox_mode=0
+# (Appearance has no Shortcut row: the Carousel's card keeps its default, tested with ipod_home_shortcut above.)
 home_bounds(False); carousel(False)
 writes=click(1); assert [(w[0],m.text(w[2])) for w in writes]==[(1,'HOME')] and texts()[1]=='Home: Full'
 home_bounds(True); carousel(False)
@@ -10450,11 +10436,6 @@ assert [n for n in names if n in ('fclose','save_memoryplay_info','player_stop',
 m,names=rockbox(False)
 assert not {'fopen','player_stop','system'} & set(names)
 assert [m.text(c[1]) for c in m.calls if c[0]=='navigator_to_with_context']==['dialog/msginfo_dialog']; passed()
-# ipod_home_rockbox follows the card.
-m=Machine(); m.rockbox_mode=0; m.config['SHORTCUT']='0'
-assert m.call(address=payload_syms['ipod_home_rockbox'],args=(0,0,0,0),gap=0)==0
-m.rockbox_mode=0o100755
-assert m.call(address=payload_syms['ipod_home_rockbox'],args=(0,0,0,0),gap=0)==1; passed()
 # The wheel walks onto the new rows and Centre clicks them, as any fixed settings list.
 m,view,_=display({},sub=0)
 m.paint(view)
