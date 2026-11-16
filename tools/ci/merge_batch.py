@@ -183,7 +183,7 @@ class Real:
         self.target, self.tip, self.logs, self.dev, self.log = target, tip, logs, dev, log
         self.shas = {}
         self.runs = 0  # numbers each test's log directory
-        self.batch_plan = None  # the first plan made, the whole batch's: what the tip alone is checked with
+        self.batch_plan: dict | None = None  # the first plan made, the whole batch's: what the tip alone is checked with
         self.build_args = ['--dev', '--', '--new-player'] if dev else ['--', '--new-player']  # gate.py's default
 
     def wt(self, level):
@@ -239,6 +239,7 @@ class Real:
         if head == self.tip:
             # the tip's own diff is empty: check it with the batch's plan, as far as the tip has those files
             # (the joined suite's line numbers are the batch's, so test/patch.py runs whole)
+            assert self.batch_plan is not None  # the batch itself is always tested before the tip
             plan = dict(self.batch_plan, patch='all' if self.batch_plan['patch'] else [])
             for k in ('unit', 'fw'):
                 if plan[k] != 'all':

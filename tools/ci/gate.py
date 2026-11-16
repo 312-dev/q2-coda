@@ -42,6 +42,7 @@ import signal
 import subprocess
 import sys
 import time
+from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 HEAVY = pathlib.Path(os.environ.get('Q2_HEAVY', pathlib.Path.home()/'.local/bin/q2-heavy'))
@@ -63,8 +64,10 @@ class Suite:
         self.name, self.argv, self.needs_build, self.heavy = name, argv, needs_build, heavy
         self.env, self.after = env or {}, after  # after: a command run when it passed, its output appended
         self.mem = MEM_GB.get(name, 1.5)
-        self.proc = self.start = self.log = None
-        self.rc = None
+        self.proc: Any = None  # the Popen, once started
+        self.start: Any = None
+        self.log: Any = None
+        self.rc: Any = None
         self.seconds = 0.0
 
     def command(self, build, jobs=None):
@@ -142,9 +145,10 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
     """Build (unless build is given, or nothing needs it and not force_build) and run the suites, as memory
     allows; returns {name: {'rc', 'seconds', 'log'}} with 'build' among them when it ran."""
     logs.mkdir(parents=True, exist_ok=True)
-    pending = sorted(suites.values(), key=lambda s: -SECONDS.get(s.name, 60))
-    running, done = [], {}
-    builder = None
+    pending: list[Suite] = sorted(suites.values(), key=lambda s: -SECONDS.get(s.name, 60))
+    running: list[Suite] = []
+    done: dict = {}
+    builder: Suite | None = None
     if build is None and (force_build or any(s.needs_build for s in pending)):
         builder = Suite('build', [py, str(ROOT/'tools/ci/rebuild.py'), *build_args], heavy=True)
         pending.insert(0, builder)
@@ -153,9 +157,10 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
         s.log = logs/f'{s.name.replace("/", "_")}.log'
         s.start = clock()
         cmd = s.command(build or '', jobs)
-        out = subprocess.PIPE if s is builder else open(s.log, 'w')
-        s.proc = subprocess.Popen(cmd, cwd=ROOT, env={**os.environ, **s.env}, stdout=out,
-                                  stderr=open(s.log, 'w') if s is builder else subprocess.STDOUT, text=True,
+        log_file = open(s.log, 'w')
+        s.proc = subprocess.Popen(cmd, cwd=ROOT, env={**os.environ, **s.env},
+                                  stdout=subprocess.PIPE if s is builder else log_file,  # the build's path
+                                  stderr=log_file if s is builder else subprocess.STDOUT, text=True,
                                   start_new_session=True)  # its own group, which the finally below ends whole
         log(f'start {s.name}{f" ({jobs} shards)" if jobs else ""}: {shlex.join(cmd)}')
         running.append(s)
