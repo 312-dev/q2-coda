@@ -18236,6 +18236,7 @@ SW_CHECKING,SW_OK,SW_LATEST,SW_NONE,SW_NOCARD,SW_LOW,SW_BAD,SW_FULL=range(8)
 class SwMachine(CoverflowMachine):
     def __init__(self,code=1,quit=0):
         super().__init__(); oled_set(self); self.code,self.quit,self.idles=code,quit,[]
+        self.handlers.pop(HOOKS['fwupdate_tf'][0],None)  # FUNCTIONS' stand-in: run the hooked entry (sw_update.c)
         for n in ('check_updatefw_exist','navigator_to','idle_add'): self.handlers[syms[n]]='sw:'+n
         self.word(syms['g_power_capacity'],12)
     def hook(self,u,address,size,unused):
@@ -18276,10 +18277,10 @@ for state,want in ((SW_OK,'swconfirm_page'),(SW_LATEST,'swupdate_page'),(SW_BAD,
     if state!=SW_OK: assert m.top==page and m.sw('result')==state and not m.timers; passed(); continue
     confirm=m.top; assert not m.alive(page) and not m.timers  # Install Update? on top and still: the check's page closed under it
     view=m.find('scroll_view',confirm); assert m.selected(view)==0  # Cancel
-    rows=[k for k in m.nodes if m.nodes[k]['type']=='list_item' and m.alive(k)]
+    rows=m.nodes[view]['children']  # page_row_detail's list_items
     assert [m.nodes[m.nodes[r]['children'][0]].get('text') for r in rows]==['Cancel','Install and Restart']
-    texts,_=m.said(confirm)
-    assert texts[:2]==['Q2 Pod 1.8.3 \u00b7 V1830',f'Installed: {manifest["version"]} \u00b7 0.0 MB on the SD card'] and texts[2].startswith('Takes about 2 minutes'),texts
+    texts,_=m.said(confirm)  # this machine's fixed-pitch font cuts the longer lines with an ellipsis
+    assert texts[0]=='Q2 Pod 1.8.3 \u00b7 V1830' and texts[1].startswith(f'Installed: {manifest["version"]} \u00b7 0.0 MB') and texts[2].startswith('Takes about 2 minutes'),texts
     f,ctx=m.handler(rows[1],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
     assert len(m.idles)==1 and not m.alive(confirm); passed()
 # After the click, stock's dialog; its answer (no file 9, up to date 13, damaged 18) is a page, a success never comes back.
