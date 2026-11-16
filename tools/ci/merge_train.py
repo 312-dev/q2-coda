@@ -70,6 +70,8 @@ def main():
     ap.add_argument('--no-final', dest='final', action='store_false', help='skip the whole run after the last merge')
     ap.add_argument('--release', dest='dev', action='store_false', help='test a release build (default: --dev)')
     args = ap.parse_args()
+    if subprocess.run([sys.executable, '-c', 'import pytest, unicorn'], capture_output=True).returncode:
+        raise SystemExit(f'{sys.executable} lacks pytest or unicorn: run the train with the test venv\'s python')
     head = git('rev-parse', '--abbrev-ref', 'HEAD').stdout.strip()
     if not args.dry_run and git('status', '--porcelain', '--untracked-files=no').stdout.strip():
         raise SystemExit(f'{ROOT} has uncommitted changes: the train needs a clean worktree of the integration branch')
