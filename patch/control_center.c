@@ -87,10 +87,10 @@ enum {
     CC_NEXT,
     CC_BUTTONS
 };
-static const char *const cc_labels[CC_STOPS] = {
-    "Wi-Fi", "Bluetooth",   "AirPlay", "Car",         0,      0, 0, "Lock",
-    "Sleep", "Night Shift", "EQ",      "Smart Wi-Fi", "Guest"
-};
+static const char *const cc_labels[CC_STOPS] = { "Wi-Fi", "Bluetooth", "AirPlay", "Car",
+                                                 0,       0,           0,         "Lock",
+                                                 "Sleep", "Night",     "EQ",      "Smart Wi-Fi",
+                                                 "Guest" };
 /* Each stop's glyph (tools/art.py CC_ICONS): <art>cc_<name> */
 static const char *const cc_glyphs[CC_BUTTONS] = { "wifi",  "bluetooth", "airplay", "car",
                                                    0,       "sun",       "speaker", "lock",

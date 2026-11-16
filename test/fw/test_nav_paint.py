@@ -1937,7 +1937,7 @@ def test_control_center_is_v3a_s_blocks_toggles_sliders_and_tiles(fw, world):
     assert ((32, 218, 40, 40), accent) in boxes  # Lock, on (six 40 px tiles)
     assert ((375 // 2 - 18, 304, 36, 5), rgba(0x5a5a5e)) in boxes
     words = [t for t, *_ in canvas.texts]
-    for label in ('Wi-Fi', 'Bluetooth', 'AirPlay', 'Car', 'Lock', 'Sleep', 'Night Shift', 'EQ', 'Smart Wi-Fi', 'Guest'):
+    for label in ('Wi-Fi', 'Bluetooth', 'AirPlay', 'Car', 'Lock', 'Sleep', 'Night', 'EQ', 'Smart Wi-Fi', 'Guest'):
         assert label in words, label
 
 

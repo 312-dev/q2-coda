@@ -947,10 +947,11 @@ The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `de
   13, Text Secondary) beside it; Previous, Play/Pause (30 px) and Next on y 132, 52 px apart.
 - **Sliders**: Brightness and Volume side by side from y 170, 38 px tall, fully round, `#3A3A3C` with a
   `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start.
-- **Tiles**: Lock, Sleep, Night Shift, EQ, Smart Wi-Fi and Guest, 40 px squares with 12 px corners on y 238,
-  12 px in from the blocks' ends and evenly apart, named under them as the toggles are. Guest is Guest Play's
-  switch (a hold opens its settings), lit while it is on, and named by the guest ("Alex") while one plays
-  ([Guest Play](#guest-play)).
+- **Tiles**: Lock, Sleep, Night (Night Shift), EQ, Smart Wi-Fi and Guest, 40 px squares with 12 px corners on
+  y 238, 12 px in from the blocks' ends and evenly apart, named under them as the toggles are. Guest is Guest
+  Play's switch (a hold opens its settings), lit and named by the guest ("Alex") while one plays
+  ([Guest Play](#guest-play), `mock_bt.py`'s `control_center`). ponytail: at 13 px "Smart Wi-Fi" and "Guest" meet
+  edge to edge; the mock drew the labels at 11 px, which the type scale no longer has.
 - **Grab bar**: 36 x 5, `#5A5A5E`, at y 304, where the swipe up that closes the page starts.
 - **The wheel** rings the stop it is on in white (2 px, 1 px out); a slider that has the wheel is ringed in
   Accent Blue. The stops, in reading order: the four toggles, the Now Playing block (only while something is

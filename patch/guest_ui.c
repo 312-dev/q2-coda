@@ -88,6 +88,7 @@ static struct {
     int state, ask;          /* the last state read; the card of ours that is up */
     char ask_mac[40];        /* the guest it asks about */
     char keep[80], body[96]; /* the card's Keep row and body, while it is up */
+    char who[64];            /* ... and the guest it names (confirm keeps the pointers) */
     char code[12];           /* the pairing's code, spaced */
     void *np, *set, *set_view, *trust, *trust_view, *hot, *hot_view, *conn, *fail;
     int rows[GU_ROWS], n; /* the settings page's rows */
@@ -99,6 +100,7 @@ static struct {
         unsigned played;
     } trusted[GU_TRUSTED];
     int ntrusted, cur; /* the trusted guests read; the one whose page is open */
+    int on;            /* Guest Play on at the last look */
 } gu __attribute__((section(".scratch")));
 
 /* ---- the state ---- */
@@ -112,6 +114,11 @@ static const char *gv(const char *key) {
     return out;
 }
 static int gv_is(const char *key, const char *value) { return !tk_strcmp(gv(key), value); }
+/* key's value into out, for one held past a few more reads (gv's buffers turn over). */
+static char *gcopy(const char *key, char *out, unsigned n) {
+    guest_field(key, out, n);
+    return out;
+}
 
 /* The state's word as G_*: no file (the daemon not running) is off. */
 int guest_ui_state(void) {
@@ -160,7 +167,9 @@ static void answered(void *ctx, int row, int toggle_on) {
 static int ask_card(int ask) {
     static const char *const guest_rows[] = { "Allow Once", "Always Allow", "Decline" };
     static const char *rows[2] __attribute__((section(".scratch")));
-    const char *guest = gv("guest"), *code = gv("code");
+    char code[12];
+    const char *guest = gcopy("guest", gu.who, sizeof gu.who);
+    gcopy("code", code, sizeof code);
     int secs = atoi(gv("countdown"));
     if (secs <= 0 || secs > 30) secs = 30;
     if (ask == ASK_GUEST) {
@@ -169,7 +178,7 @@ static int ask_card(int ask) {
         int digits = strlen(code) == 6;
         if (digits) tk_snprintf(gu.code, sizeof gu.code, "%.3s %.3s", code, code + 3);
         tk_snprintf(gu.body, sizeof gu.body,
-                    digits ? "wants to play music%s\nCheck that %s's phone shows this code"
+                    digits ? "wants to play music%s\nCheck it's on %s's phone"
                            : "wants to play music%s",
                     source_words(gv("source")), who);
         return confirm(&(confirm_t){ "%s", guest, gu.body, digits ? gu.code : 0, guest_rows, 3,
@@ -228,7 +237,8 @@ static void event_follow(void) {
     int first = !gu.event_seq && !gu.seq;
     gu.event_seq = seq;
     if (first) return; /* the state's last event, from before this look: said already */
-    const char *event = gv("event"), *name = gv("eventname");
+    char event[16], name[64];
+    gcopy("event", event, sizeof event), gcopy("eventname", name, sizeof name);
     char who[40], s[96];
     int resume = !gv_is("leave", "stay");
     guest_short(name, who, sizeof who);
@@ -321,7 +331,9 @@ static void leg_words(const char *leg, char *out, unsigned n) {
 static void np_paint(void *w, void *canvas) {
     int dy = I(w, W_Y), x = GU_TEXT_X, primary = (int)tok(TOK_PRIMARY);
     unsigned secondary = tok(TOK_SECONDARY), tertiary = tok(TOK_TERTIARY);
-    const char *title = gv("title"), *artist = gv("artist"), *guest = gv("guest"), *out = gv("out");
+    char title[96], artist[96], guest[64], out[64];
+    gcopy("title", title, sizeof title), gcopy("artist", artist, sizeof artist);
+    gcopy("guest", guest, sizeof guest), gcopy("out", out, sizeof out);
     int paused = guest_ui_state() == G_PAUSED, jack = !*out || !tk_strcmp(out, "jack");
     char s[128], who[40];
     guest_short(guest, who, sizeof who);
@@ -811,7 +823,11 @@ void guest_ui_poll(void) {
         if (gu.ask && !confirm_up()) gu.ask = ASK_NONE; /* answered (answered() ran) */
         return;
     }
-    int was = gu.state, state = guest_ui_state();
+    int was = gu.state, state = guest_ui_state(), on = guest_ui_on();
+    if (on != gu.on) { /* Home's Guest Play row comes or goes (library_edit.c lr_home_apply) */
+        gu.on = on;
+        coverflow_home_layout();
+    }
     event_follow();
     gu.seq = seq, gu.state = state;
     ask_follow(state);

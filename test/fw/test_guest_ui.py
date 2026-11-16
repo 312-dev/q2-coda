@@ -57,7 +57,7 @@ def test_a_guest_asking_brings_up_the_card(g):
     assert 'dialog/sortselect_dialog' in g.ui.went  # confirm(): the card
     gu = C.c_char.in_dll(g.fw.lib, 'guest_ui__gu')
     text = C.string_at(C.addressof(gu), g.fw.sizes['guest_ui__gu'])
-    assert b'482 913' in text and b"Check that Alex's phone shows this code" in text
+    assert b'482 913' in text and b"Check it's on Alex's phone" in text
 
 
 @pytest.mark.parametrize('ask, row, line', [(1, 0, 'allow-once'), (1, 1, 'allow-always'), (1, 2, 'decline'),
@@ -169,3 +169,13 @@ def test_on_is_the_switch(g, state, enabled, on, value):
     g.look(state=state, enabled=enabled, allow='ask')
     assert g.fw.fn('guest_ui_on', C.c_int)() == on
     assert g.fw.fn('guest_ui_value', C.c_char_p)().decode() == value
+
+
+def test_the_replace_card_keeps_the_guest_s_name_it_shows(g):
+    """confirm() keeps the card's strings by pointer: the guest's name stays its own while later reads go on."""
+    g.look(state='idle', enabled=1)
+    g.look(state='replace', guest="Alex's Pixel", mac='AA', new="Sam's iPhone", newmac='BB', countdown=30)
+    for key in ('title', 'artist', 'out', 'state', 'event'):
+        g.fw.fn('guest_field', None, C.c_char_p, C.c_char_p, C.c_uint)(key.encode(), C.create_string_buffer(8), 8)
+    gu = C.string_at(C.addressof(C.c_char.in_dll(g.fw.lib, 'guest_ui__gu')), g.fw.sizes['guest_ui__gu'])
+    assert b"Keep Alex's Pixel" in gu and b"\x00Alex's Pixel\x00" in gu and b"Sam's iPhone wants to play music" in gu
