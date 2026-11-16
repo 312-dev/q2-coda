@@ -27,7 +27,7 @@ FRAME_MS = 40  # ffmpeg's -r 25
 # and 1.5 s bar run from the poll's start, up to this much before the key came.
 POLL_MS = 100
 CLIP, URL = '/mnt/mmc/Videos/a clip.mp4', 'http://radio.example/stream'
-JACK, BT, USB = 'plughw:0,0', 'plug:bluealsa', 'usb'  # the outputs demo names (books.c output_device)
+JACK, BT, USB = 'plughw:0,0', 'plug:bluealsa', 'usb'  # the outputs demo names (videos.c output_device)
 PLACE, STATE, RADIO_STATE = '/tmp/q2video.place', '/tmp/q2video.state', '/tmp/q2radio.state'
 SOCK, RADIO_SOCK, SINK_SOCK = '/tmp/q2video.sock', '/tmp/q2radio.sock', '/tmp/q2sink.sock'
 MONO, SWAP = '/tmp/q2mono', '/tmp/q2swap'
@@ -1006,7 +1006,7 @@ def q2(q2video, tmp_path):
 
 
 def play(q2, device=BT, volume='60', seconds=1, at=None, **media):
-    """q2video DEVICE CLIP [VOLUME], as books.c video_start runs it: CLIP seconds long, from its second at."""
+    """q2video DEVICE CLIP [VOLUME], as videos.c video_start runs it: CLIP seconds long, from its second at."""
     q2.media[CLIP] = Media(seconds, **media)
     if at is not None:
         q2.files[PLACE] = struct.pack('<i', at)

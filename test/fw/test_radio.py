@@ -103,7 +103,7 @@ class Sp(C.Structure):
 
 
 class Vid(C.Structure):
-    """books.c's video player (test_headset.py's mirror): pid while a video plays."""
+    """videos.c's video player (test_headset.py's mirror): pid while a video plays."""
     _fields_ = [*((k, C.c_int) for k in 'paused volume gain pid sock seek'.split()),
                 *((k, C.c_uint) for k in 'polled control_at seek_at key at paused_at'.split())]
 
@@ -1962,7 +1962,7 @@ def test_the_pages_go_by_the_names_the_firmware_knows_them_by(fw):
     fw.mock('widget_get_prop_str', name)
     fw.mock('window_manager_get_top_window', lambda *_: top[0])
     fw.mock('tk_str_start_with', lambda s, prefix, *_: C.string_at(s).startswith(C.string_at(prefix)))
-    fw.var('books__vid', Vid).pid = 4321
+    fw.var('videos__vid', Vid).pid = 4321
     def forward(window):
         """Next pressed with window on top: the station then playing and what the video was sent."""
         top[0] = window

@@ -7,8 +7,12 @@
   - Control Center (OLED): pulled down, the page settles with a small bounce as it lands.
   - Control Center (OLED): tap what's playing (anywhere but its buttons), or press Center on it, to open Now Playing; the wheel stops on it between the round buttons and the sliders.
   - Control Center (OLED): hold a round button or a tile (or hold Center on it) to open its settings, such as Wi-Fi's network list or the Sleep Timer; a tap still turns it on or off.
+  - Controls: Clicker set to **Headphones** no longer clicks the Q2's own buzzer. The click is heard only in your headphones, mixed into what plays; while nothing plays there is no click.
+  - Playlists: removed the unused code behind a playlist cover's hidden **Select Playlists…** hold row; nothing you can see changes.
+  - Photos is gone: the Library has no **Photos** row, viewer or thumbnail grid. Home's Split slideshow of album covers is unchanged, a Library order you set yourself is kept without the row, and a `.photos` folder left on the card can be deleted.
   - Settings (OLED): the Settings list reached from Home ends like every list: Battery peeks through the fade under Controls instead of hiding until you scroll, and the highlighted row's lean as you turn the wheel is no longer cut off at the top or bottom of a list.
   - Lists (OLED): a list scrolled to its last row keeps the space under it after you open that row and press Return; the last row no longer sits on the screen's bottom edge.
+  - Books is gone: the Library has no **Books** row and the Q2 no longer reads `.txt` and `.epub` books. Audiobooks are unchanged, a Library order you set yourself is kept without the row, and a `.books` folder left on the card can be deleted. Wi-Fi transfer's upload no longer lists EPUB.
   - SyncLink, Shanling's phone remote, is gone from Settings and stays off.
   - Settings: this update starts every Q2 on q2-coda's own default settings, whatever it ran before (stock firmware or an earlier q2-coda), so no stock setting such as Enlarged Album Art stays on. Saved Wi-Fi networks, Bluetooth pairings, your library and ratings are kept. Later updates keep your settings.
   - Quick Settings (OLED): the pull-down is now a Control Center, as on an iPhone: round Wi-Fi, Bluetooth, AirPlay and Car Remote buttons, what's playing with its controls, Brightness and Volume sliders, and Lock, Sleep, Night Shift, EQ and Smart Wi-Fi buttons. Turn the wheel to move between them and press Center to use one; on a slider Center lets the wheel set it.
