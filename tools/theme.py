@@ -24,7 +24,7 @@ ACCENT_KEYS = {'ACCENT': '&st.accent'}
 # theme's own key is never one of them.
 PAYLOAD_KEYS = frozenset(
     re.findall(r'"([A-Z0-9_]+)"', need(re.search(r'setting_keys\[\] = \{([^}]*)\}', (ROOT/'patch/theme_engine.c').read_text()), 'Missing setting_keys')[1])
-    + [k for f in sorted((ROOT/'patch').glob('*.c')) for k in re.findall(r'"IPOD", "([A-Z0-9_]+)"', f.read_text())])
+    + [k for f in sorted((ROOT/'patch').glob('**/*.c')) for k in re.findall(r'"IPOD", "([A-Z0-9_]+)"', f.read_text())])
 # value name -> its C name (theme.h); the font keys take FONTS, build.py's faces (stock.h's FONT_*)
 FONTS = {k: f.c for k, f in FACES.items()}
 CHOICES = {**dict.fromkeys(('playing.title.font', 'playing.info.font', 'home.rows.font', 'list.row.font', 'list.row.meta_font', 'list.row.tall_font', 'bar.title.font', 'playing.artist.font'), FONTS),
