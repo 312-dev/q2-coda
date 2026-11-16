@@ -120,7 +120,7 @@ def test_no_phones_is_the_empty_state_with_pair_a_phone(fw, ui, mcl, recs):
     Car(fw, ui, recs)
     page = open_page(fw, ui)
     assert rows(ui, page) == [('Car Remote', None)]
-    assert empty_state(ui, page) == ('car-profile', 'No Paired Phones', 'Open Q2 Muse Remote on your phone to pair',
+    assert empty_state(ui, page) == ('', 'No Paired Phones', 'Open Q2 Muse Remote on your phone to pair',  # compact
                                      'Pair a Phone')
     button = ui.lookup(page, '_empty_row', 1)
     ui.handler(ui.kids[ui.kids[button][0]][0], O['EVT_CLICK'])()  # Centre on the capsule
