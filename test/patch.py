@@ -10925,14 +10925,15 @@ for fname in ('list_folder','list_song'):
 fa=ftile('file:///mnt/mmc/.downpic/fd1.jpg'); assert fa(0,0)==0 and fa(51,26)==fa(26,0)==255
 for fname in ('list_tf','list_album'): fa=ftile(fname); assert fa(0,0)==fa(51,26)==255,fname
 passed()
-# With no row to select the wheel scrolls the view itself, to its own end, not list_end's, on OLED's set or not.
+# With no row to select the wheel scrolls the view itself: to its own end, or on OLED's set (list_fit) until the
+# content's foot is on the list end, y 282, as a drag stops (navigation.c max_top).
 for boot in (1,0):
     lm=Machine(); boot and oled_set(lm)
     lw,les=lm.page_list(14,height=294,extent=672,name='playlist_page'); window(lm,'playlist_page',lw); lm.nodes[lw]['children']=[]; lm.paint(lw)
     tops=[]
     for _ in range(40):
         lm.call(); lm.paint(lw); tops.append(lm.get(lw+O['SCROLL_Y']))
-    assert max(tops)==672-294,(boot,max(tops))
+    assert max(tops)==(672-OLG.list_end if boot else 672-294),(boot,max(tops))
 passed()
 # Text on the bar is sel_text, white, whatever the row's own ink.
 sk=Machine(); sw,srows=sk.page_list(3); slabels=[]
