@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Drive a --dev Q2 over Wi-Fi (Q2_HOST, and Q2_KEY or a key file; see docs/remote.md).
 
-usage: q2remote.py {sh [--timeout S] COMMAND|shot [--settle] OUT.png|state|wake|key NAME [MS]|wheel N [--step-ms MS]|tap X Y|swipe X1 Y1 X2 Y2 [MS]|push LOCAL REMOTE|pull REMOTE LOCAL|install UPDATE.TAR|log [LINES|-f|--clear]|events EVENT [S]|devices|find|reboot [--wait]|prof S [--all] [--build DIR]}"""
+usage: q2remote.py {sh [--timeout S] COMMAND|shot [--adb] [--settle] OUT.png|state|wake|key NAME [MS]|wheel N [--step-ms MS]|tap X Y|swipe X1 Y1 X2 Y2 [MS]|push LOCAL REMOTE|pull REMOTE LOCAL|install UPDATE.TAR|log [LINES|-f|--clear]|events EVENT [S]|devices|find|reboot [--wait]|prof S [--all] [--build DIR]}"""
 import concurrent.futures
 import contextlib
 import hashlib
@@ -273,19 +273,27 @@ def framebuffer_png(data):
     return bytes(png)
 
 
-def frame():
+def frame(adb=False):
+    """The displayed page as q2remote --shot gives it; with adb, through `adb exec-out` over USB (docs/adb.md)."""
     try:  # gzip: about 16 KB instead of 480 KB on the network
+        if adb:
+            got = subprocess.run(["adb", "exec-out", "/usr/bin/q2remote --shot 2>/dev/null | gzip -1"],
+                                 capture_output=True, timeout=TIMEOUT)
+            if got.returncode:
+                raise ConnectionError(f"adb: {got.stderr.decode(errors='replace').strip() or got.returncode}")
+            return zlib.decompress(got.stdout, 31)
         return zlib.decompress(shell("/usr/bin/q2remote --shot | gzip -1"), 31)
     except zlib.error as e:
         raise ValueError("invalid framebuffer response") from e
 
 
-def screenshot(out, settle=False):
-    """Save the displayed frame; with settle, once two frames SETTLE_POLL_S apart match (SETTLE_S at most)."""
-    shown, end = frame(), time.monotonic() + SETTLE_S
+def screenshot(out, settle=False, adb=False):
+    """Save the displayed frame; with settle, once two frames SETTLE_POLL_S apart match (SETTLE_S at most).
+    adb takes it over USB (frame), and leaves out the dark-screen warning, which asks q2remote."""
+    shown, end = frame(adb), time.monotonic() + SETTLE_S
     while settle:
         time.sleep(SETTLE_POLL_S)
-        shown, last = frame(), shown
+        shown, last = frame(adb), shown
         if shown == last:
             break
         if time.monotonic() > end:
@@ -294,6 +302,8 @@ def screenshot(out, settle=False):
     png = framebuffer_png(shown)  # no empty file left on an error
     with open(out, "wb") as f:
         f.write(png)
+    if adb:
+        return
     with contextlib.suppress(ValueError, OSError):
         if state()["backlight"] == 0:
             print("q2remote: the screen is off, so this is the last frame it showed; `wake` first", file=sys.stderr)
@@ -517,8 +527,10 @@ def main(argv):
         if not a[0]: raise ValueError("sh requires a non-empty command")
         out, rc = run(a[0], timeout)
         sys.stdout.buffer.write(out); return rc
-    if cmd == "shot" and len(a) in (1, 2) and a[:-1] in ([], ["--settle"]):
-        screenshot(a[-1], len(a) == 2); return 0
+    if cmd == "shot" and a and a[-1] != "--adb" and a.count("--adb") <= 1:
+        flags = [f for f in a[:-1] if f != "--adb"]
+        if flags in ([], ["--settle"]):
+            screenshot(a[-1], bool(flags), **({"adb": True} if "--adb" in a else {})); return 0
     if cmd == "state" and not a:
         print(" ".join(f"{k}={v}" for k, v in state().items())); return 0
     if cmd == "wake" and not a:

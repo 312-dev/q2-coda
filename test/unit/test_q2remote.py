@@ -589,7 +589,7 @@ def test_framebuffer_png_refuses_a_bad_page(w, h, stride, size, sent):
 def shots(monkeypatch):
     def install(frames, backlight=1):
         frames = iter(frames)
-        monkeypatch.setattr(q, 'frame', lambda: next(frames))
+        monkeypatch.setattr(q, 'frame', lambda adb=False: next(frames))
         monkeypatch.setattr(q, 'framebuffer_png', lambda data: b'png:' + data)
         if isinstance(backlight, Exception):
             def state():
@@ -644,8 +644,37 @@ def test_screenshot_keeps_the_frame_if_state_fails(shots, tmp_path, failure):
     assert (tmp_path/'out').exists()
 
 
+def test_screenshot_over_adb_asks_no_state(shots, tmp_path, monkeypatch, capsys):
+    shots([])
+    seen = []
+    monkeypatch.setattr(q, 'frame', lambda adb=False: seen.append(adb) or b'a')
+    monkeypatch.setattr(q, 'state', lambda: pytest.fail('state over Wi-Fi'))
+    q.screenshot(tmp_path/'out', adb=True)
+    assert (tmp_path/'out').read_bytes() == b'png:a' and seen == [True]
+
+
+def test_frame_over_adb(monkeypatch):
+    import gzip
+    ran = []
+    def run(argv, **kw):
+        ran.append((argv, kw))
+        return subprocess.CompletedProcess(argv, 0, gzip.compress(b'pixels'), b'')
+    monkeypatch.setattr(subprocess, 'run', run)
+    assert q.frame(adb=True) == b'pixels'
+    assert ran == [(['adb', 'exec-out', '/usr/bin/q2remote --shot 2>/dev/null | gzip -1'], dict(capture_output=True, timeout=q.TIMEOUT))]
+    monkeypatch.setattr(subprocess, 'run', lambda argv, **kw: subprocess.CompletedProcess(argv, 1, b'', b'error: no devices/emulators found\n'))
+    with pytest.raises(ConnectionError, match=r'^adb: error: no devices/emulators found$'):
+        q.frame(adb=True)
+    monkeypatch.setattr(subprocess, 'run', lambda argv, **kw: subprocess.CompletedProcess(argv, 2, b'', b''))
+    with pytest.raises(ConnectionError, match=r'^adb: 2$'):
+        q.frame(adb=True)
+    monkeypatch.setattr(subprocess, 'run', lambda argv, **kw: subprocess.CompletedProcess(argv, 0, b'not gzip', b''))
+    with pytest.raises(ValueError, match=r'^invalid framebuffer response$'):
+        q.frame(adb=True)
+
+
 def test_screenshot_bad_frame_leaves_no_file(monkeypatch, tmp_path):
-    monkeypatch.setattr(q, 'frame', lambda: b'junk')
+    monkeypatch.setattr(q, 'frame', lambda adb=False: b'junk')
     with pytest.raises(ValueError):
         q.screenshot(tmp_path/'out')
     assert not (tmp_path/'out').exists()
@@ -1225,6 +1254,9 @@ def test_main_sh_empty(world):
 @pytest.mark.parametrize('argv,expected', [
     (['shot', 'a.png'], ('screenshot', ('a.png', False), {})),
     (['shot', '--settle', 'a.png'], ('screenshot', ('a.png', True), {})),
+    (['shot', '--adb', 'a.png'], ('screenshot', ('a.png', False), {'adb': True})),
+    (['shot', '--adb', '--settle', 'a.png'], ('screenshot', ('a.png', True), {'adb': True})),
+    (['shot', '--settle', '--adb', 'a.png'], ('screenshot', ('a.png', True), {'adb': True})),
     (['tap', '1', '2'], ('input_action', ('tap', ['1', '2']), {})),
     (['key', 'play'], ('input_action', ('key', ['play']), {})),
     (['key', 'play', '5'], ('input_action', ('key', ['play', '5']), {})),
@@ -1243,7 +1275,7 @@ def test_main_dispatch(world, argv, expected, capsys):
 
 
 @pytest.mark.parametrize('argv', [
-    ['shot'], ['shot', '--fast', 'a.png'], ['shot', 'a', 'b', 'c'], ['state', 'x'], ['wake', 'x'], ['devices', 'x'],
+    ['shot'], ['shot', '--fast', 'a.png'], ['shot', 'a', 'b', 'c'], ['shot', '--adb'], ['shot', '--adb', 'a', 'b'], ['shot', 'a.png', '--adb'], ['shot', '--adb', '--adb', 'a.png'], ['state', 'x'], ['wake', 'x'], ['devices', 'x'],
     ['push', 'a'], ['pull', 'a'], ['install'], ['install', 'a', 'b'], ['log', 'a', 'b'], ['find', 'x'],
     ['reboot', '--now'], ['prof'], ['prof', 'x'], ['events'], ['events', '1', '2', '3'], ['nothing'], ['sh'],
     ['sh', '--timeout', '5'], ['sh', 'a', 'b'],

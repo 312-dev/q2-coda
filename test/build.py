@@ -288,7 +288,7 @@ logo_check()
 
 def validate_assets(directory):
     import functools, json, re, struct, subprocess
-    from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, BOOT_HOOK, REMOTE, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, LOGO_LIGHT, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, WATCHDOG, WATCHDOG_SLEEP, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, WHEEL_TS_READ, PDR
+    from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, BOOT_HOOK, REMOTE, REMOTE_HOOK, ADB_HOOK, ADBD, ADB_GADGET, USB_SCRIPTS, adb_wrapper, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, LOGO_LIGHT, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, WATCHDOG, WATCHDOG_SLEEP, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, WHEEL_TS_READ, PDR
     from ipod import (ART_PLACEHOLDERS, sized_art, AUDIT, TOOLBAR_SWITCHES, BOTTOM, CONFIRM, VOLUME, BIGCOVER, BC_ART, BC_TITLE_PAD, QUICK_SETTINGS, QS_TOP, QS_LABEL_GAP, QS_LABEL_H,
                       QS_LABEL_W, QS_ROW_GAP, QS_PITCH, QS_BAR, QS_TOUCH, QS_EDGE, QS_SUN, HOME_LABEL_END, HOME_LIST_W, HOME_TEXT_X, HOME_TOP, PITCH, ARTIST_PAGE, HOME_OURS, HOME_PAGE, HOME_ROW, HOME_ROWS, NAVBAR_ONLY, PLAYING_PAGE, SET_ROW, SET_ROWS, SET_TOP, UI_ASSETS,
                       NP_BAR, NP_TOUCH, NP_MARGIN, NP_TOP, STATUS_BAR, STATUS_HIDDEN, STATUS_LEFT, STATUS_MARGIN, STATUS_RIGHT, CLOCK_MIN, CLOCK_TEXT, corner_inset, corner_x,
@@ -482,8 +482,20 @@ def validate_assets(directory):
         remote = read('rootfs.squashfs', REMOTE)
         assert sha(remote) == manifest['q2remote_sha256'] and remote[:4] == b'\x7fELF'
         assert remote[36:40] == helper[36:40]
-        expected_start = expected_start.replace(*REMOTE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK)
+        expected_start = expected_start.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK)
         assert b'q2-wheel.log' in demo
+        # adbd (docs/adb.md): a static ELF with the stock binaries' ABI flags, its gadget script, stock's USB scripts
+        # wrapped and kept beside the wrappers
+        adbd = read('rootfs.squashfs', ADBD)
+        assert sha(adbd) == manifest['adbd']['sha256'] and len(adbd) == manifest['adbd']['bytes'] and adbd[:4] == b'\x7fELF'
+        phoff, = struct.unpack_from('<I', adbd, 28)
+        phentsize, phnum = struct.unpack_from('<HH', adbd, 42)
+        static = all(struct.unpack_from('<I', adbd, phoff + i * phentsize)[0] != 3 for i in range(phnum))  # no PT_INTERP
+        assert adbd[36:40] == helper[36:40] and static
+        assert read('rootfs.squashfs', ADB_GADGET) == (ROOT/'patch/adb_gadget.sh').read_bytes()
+        for n in USB_SCRIPTS:
+            assert read('rootfs.squashfs', 'usr/bin/' + n) == adb_wrapper(n)
+            assert read('rootfs.squashfs', 'usr/bin/' + n.replace('.sh', '_stock.sh')) == read('stock.squashfs', 'usr/bin/' + n)
     else:
         assert b'q2-wheel.log' not in demo and b'q2-wheel.log' not in expected_start  # a test build's diagnostic
         assert 'q2remote_sha256' not in manifest
@@ -491,6 +503,14 @@ def validate_assets(directory):
         absent = subprocess.run(['unsquashfs', '-cat', str(directory/'rootfs.squashfs'), REMOTE],
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         assert absent.returncode != 0, 'release rootfs contains q2remote'
+        # No ADB in a release: no adbd, no gadget, stock's USB scripts as they were
+        assert 'adbd' not in manifest and not (directory/'adbd').exists()
+        for path in (ADBD, ADB_GADGET, *('usr/bin/' + n.replace('.sh', '_stock.sh') for n in USB_SCRIPTS)):
+            absent = subprocess.run(['unsquashfs', '-cat', str(directory/'rootfs.squashfs'), path],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            assert absent.returncode != 0, f'release rootfs contains {path}'
+        for n in USB_SCRIPTS:
+            assert read('rootfs.squashfs', 'usr/bin/' + n) == read('stock.squashfs', 'usr/bin/' + n), f'release {n} is not stock\'s'
     assert read('rootfs.squashfs', S90PLAY) == expected_start
     assert read('rootfs.squashfs', S11LOGO) == read('stock.squashfs', S11LOGO).replace(*LOGO_HOOK)  # the card's logo, if saved
     assert read('rootfs.squashfs', BLUEALSA2) == read('stock.squashfs', BLUEALSA2).replace(*BT_KEEPALIVE)  # keep-alive 5 s

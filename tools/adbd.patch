@@ -4,12 +4,14 @@ changes, Apache-2.0. It carries Buildroot's fixes for building adbd off Ubuntu (
 0002, 0003, 0004, 0006, 0007, 0014 and 0015 at 8a25ff3f: no glib or D-Bus, adb's own base64, cdefs,
 capset and prctl) and then the Q2's changes:
 
-- adb_auth_client.c: RSA key authentication always on, the authorized keys read for every
-  connection from the card's /mnt/mmc/adb_keys, with a copy on /mnt/data used while the card is
-  away (USB storage); no framework socket, so an unknown key is refused. RSA_verify is libmincrypt's
-  (fetched beside the source), not OpenSSL's, whose RSA_verify the Debian build linked by mistake.
+- adb_auth_client.c: RSA key authentication always on. Authorized keys are /mnt/data/adb_keys and, while
+  the card is mounted, /mnt/mmc/adb_keys, read for every connection. An unknown key goes to the UI over
+  the socket /tmp/q2adb-ui as Android's framework gets it ("PK<key>", answered "OK" or anything else);
+  with no UI connected it is refused. RSA_verify is libmincrypt's (fetched beside the source), not
+  OpenSSL's, whose RSA_verify the Debian build linked by mistake. transport.c tells it when a computer
+  it asked about goes.
 - adb.c: USB FunctionFS only (no smartsocket on 5037, no TCP on 5555, no JDWP socket), no privilege
-  drop (a root shell, behind the key), umask 022, the keys reloaded at each CNXN.
+  drop (a root shell, behind authorization), umask 022, the keys reloaded at each CNXN.
 - usb_linux_client.c: FunctionFS v2 descriptors with Microsoft OS descriptors (compatible ID WINUSB,
   DeviceInterfaceGUID adb's), so Windows binds WinUSB itself; ep0 kept open for adbd's lifetime, as
   closing it makes the kernel unbind the gadget; host control requests answered.
@@ -230,45 +232,54 @@ index 9da8af8..2142bd0 100644
  #define USB_FFS_ADB_EP(x) USB_FFS_ADB_PATH#x
  
  #define USB_FFS_ADB_EP0   USB_FFS_ADB_EP(ep0)
+diff --git a/core/adbd/adb_auth.h b/core/adbd/adb_auth.h
+index 1fffa49..6faeb90 100644
+--- a/core/adbd/adb_auth.h
++++ b/core/adbd/adb_auth.h
+@@ -48,6 +48,7 @@ int adb_auth_generate_token(void *token, size_t token_size);
+ int adb_auth_verify(void *token, void *sig, int siglen);
+ void adb_auth_confirm_key(unsigned char *data, size_t len, atransport *t);
+ void adb_auth_reload_keys(void);
++void adb_auth_transport_gone(atransport *t);
+ 
+ #endif // ADB_HOST
+ 
 diff --git a/core/adbd/adb_auth_client.c b/core/adbd/adb_auth_client.c
-index 0b4913e..5bca157 100644
+index 0b4913e..6d59d9c 100644
 --- a/core/adbd/adb_auth_client.c
 +++ b/core/adbd/adb_auth_client.c
-@@ -18,7 +18,6 @@
- #include <string.h>
+@@ -19,6 +19,7 @@
  #include <resolv.h>
  #include <cutils/list.h>
--#include <cutils/sockets.h>
+ #include <cutils/sockets.h>
++#include <sys/stat.h>
  
  #include "sysdeps.h"
  #include "adb.h"
-@@ -28,6 +27,25 @@
+@@ -28,6 +29,22 @@
  
  #define TRACE_TAG TRACE_AUTH
  
-+/* Q2 (q2-coda): the authorized keys are the card's adb_keys, one adbkey.pub per line, and nothing
-+ * else: no framework socket, so an unknown key is refused rather than offered to a prompt. demo
-+ * unmounts the card while it is shared over USB storage, from boot if the cable is in, so the last
-+ * file read from the card is copied to internal storage and used only while the card is away;
-+ * deleting the card's file revokes the copy the next time the card is mounted and a computer
-+ * connects. The keys are read again for every connection. As patch/remote.c does for q2remote.key. */
++/* Q2 (q2-coda), docs/adb.md#authorization: a computer is let in when its key is in an authorized keys
++ * file, read again for every connection, or when the Q2's user allows it. As on Android, an unknown key
++ * goes to the UI over a socket (ADB_UI_SOCKET, root's alone) as "PK<adbkey.pub line>"; the UI answers
++ * "OK" to let that computer in this once, after adding the key to ADB_KEYS itself for "Always Allow",
++ * or "NO". With no UI connected, or no answer, the computer stays unauthorized. ADB_KEYS_CARD, a file a
++ * developer puts on the card, is read beside ADB_KEYS while the card is mounted. */
++#ifndef ADB_KEYS
++#define ADB_KEYS "/mnt/data/adb_keys"
++#endif
 +#ifndef ADB_KEYS_CARD
 +#define ADB_KEYS_CARD "/mnt/mmc/adb_keys"
 +#endif
-+#ifndef ADB_KEYS_COPY
-+#define ADB_KEYS_COPY "/mnt/data/adb_keys"
-+#endif
-+#ifndef ADB_CARD
-+#define ADB_CARD "/mnt/mmc"
-+#endif
-+#ifndef ADB_MOUNTS
-+#define ADB_MOUNTS "/proc/mounts"
++#ifndef ADB_UI_SOCKET
++#define ADB_UI_SOCKET "/tmp/q2adb-ui"
 +#endif
 +#define KEYS_MAX 65536 /* a 2048-bit adbkey.pub line is about 720 bytes */
  
  struct adb_public_key {
      struct listnode node;
-@@ -35,32 +53,27 @@ struct adb_public_key {
+@@ -35,32 +52,27 @@ struct adb_public_key {
  };
  
  static struct listnode key_list;
@@ -282,9 +293,9 @@ index 0b4913e..5bca157 100644
 -
 -static fdevent listener_fde;
 -static int framework_fd = -1;
+-
 +extern int adb_b64_pton(char const *src, u_char *target, size_t targsize);
  
--
 -static void read_keys(const char *file, struct listnode *list)
 +static void parse_keys(char *buf, struct listnode *list)
  {
@@ -315,7 +326,7 @@ index 0b4913e..5bca157 100644
          /* Allocate 4 extra bytes to decode the base64 data in-place */
          key = calloc(1, sizeof(*key) + 4);
          if (!key) {
-@@ -68,27 +81,21 @@ static void read_keys(const char *file, struct listnode *list)
+@@ -68,27 +80,21 @@ static void read_keys(const char *file, struct listnode *list)
              break;
          }
  
@@ -346,18 +357,14 @@ index 0b4913e..5bca157 100644
  }
  
  static void free_keys(struct listnode *list)
-@@ -102,20 +109,68 @@ static void free_keys(struct listnode *list)
+@@ -102,20 +108,35 @@ static void free_keys(struct listnode *list)
      }
  }
  
--void adb_auth_reload_keys(void)
 +/* The whole of path, NUL-terminated, in buf (KEYS_MAX + 1 bytes); its length, or -1 when it is
 + * missing, unreadable or larger than KEYS_MAX. */
 +static int load(const char *path, char *buf)
- {
--    char *path;
--    char **paths = key_paths;
--    struct stat buf;
++{
 +    int fd = adb_open(path, O_RDONLY), n = 0, r = 0;
 +
 +    if (fd < 0)
@@ -370,62 +377,33 @@ index 0b4913e..5bca157 100644
 +    buf[n] = '\0';
 +    return n;
 +}
++
+ void adb_auth_reload_keys(void)
+ {
+-    char *path;
+-    char **paths = key_paths;
+-    struct stat buf;
++    static char buf[KEYS_MAX + 1];
++    static const char *paths[] = { ADB_KEYS, ADB_KEYS_CARD };
++    unsigned i;
  
--    free_keys(&key_list);
-+static int card_mounted(void)
-+{
-+    char m[4096]; /* the Q2's few mounts fit */
-+    int fd = adb_open(ADB_MOUNTS, O_RDONLY), n = fd < 0 ? 0 : adb_read(fd, m, sizeof(m) - 1);
- 
++    adb_mutex_lock(&keys_lock);
+     free_keys(&key_list);
+-
 -    while ((path = *paths++)) {
 -        if (!stat(path, &buf)) {
 -            D("Loading keys from '%s'\n", path);
 -            read_keys(path, &key_list);
 -        }
-+    if (fd >= 0)
-+        adb_close(fd);
-+    m[n > 0 ? n : 0] = '\0';
-+    return strstr(m, " " ADB_CARD " ") != NULL;
-+}
-+
-+/* The authorized keys file's bytes in buf, the card's while it is mounted (refreshing the copy),
-+ * else the copy; -1 for none. */
-+static int keys_read(char *buf)
-+{
-+    static char old[KEYS_MAX + 1];
-+    int n, fd, ok;
-+
-+    if (!card_mounted())
-+        return load(ADB_KEYS_COPY, buf);
-+    n = load(ADB_KEYS_CARD, buf);
-+    if (n < 0) {
-+        adb_unlink(ADB_KEYS_COPY);
-+        return n;
-+    }
-+    if (load(ADB_KEYS_COPY, old) != n || memcmp(old, buf, n)) {
-+        fd = adb_open_mode(ADB_KEYS_COPY ".tmp", O_WRONLY | O_CREAT | O_TRUNC, 0600);
-+        ok = fd >= 0 && adb_write(fd, buf, n) == n && !fsync(fd);
-+        if (fd >= 0)
-+            adb_close(fd);
-+        if (!ok || rename(ADB_KEYS_COPY ".tmp", ADB_KEYS_COPY))
-+            adb_unlink(ADB_KEYS_COPY ".tmp");
-     }
-+    return n;
-+}
-+
-+void adb_auth_reload_keys(void)
-+{
-+    static char buf[KEYS_MAX + 1];
-+
-+    adb_mutex_lock(&keys_lock);
-+    free_keys(&key_list);
-+    if (keys_read(buf) > 0)
-+        parse_keys(buf, &key_list);
+-    }
++    for (i = 0; i < sizeof(paths) / sizeof(*paths); i++)
++        if (load(paths[i], buf) > 0)
++            parse_keys(buf, &key_list);
 +    adb_mutex_unlock(&keys_lock);
  }
  
  int adb_auth_generate_token(void *token, size_t token_size)
-@@ -137,109 +192,46 @@ int adb_auth_verify(void *token, void *sig, int siglen)
+@@ -137,109 +158,132 @@ int adb_auth_verify(void *token, void *sig, int siglen)
  {
      struct listnode *item;
      struct adb_public_key *key;
@@ -441,104 +419,142 @@ index 0b4913e..5bca157 100644
 -        ret = RSA_verify(&key->key, sig, siglen, token);
 -        if (ret)
 -            return 1;
--    }
--
--    return 0;
--}
--
--static void adb_auth_event(int fd, unsigned events, void *data)
--{
--    atransport *t = data;
--    char response[2];
--    int ret;
--
--    if (events & FDE_READ) {
--        ret = unix_read(fd, response, sizeof(response));
--        if (ret < 0) {
--            D("Disconnect");
--            fdevent_remove(&t->auth_fde);
--            framework_fd = -1;
--        }
--        else if (ret == 2 && response[0] == 'O' && response[1] == 'K') {
--            adb_auth_reload_keys();
--            adb_auth_verified(t);
 +        if (RSA_verify(&key->key, sig, siglen, token)) {
 +            ret = 1;
 +            break;
-         }
++        }
      }
 +    adb_mutex_unlock(&keys_lock);
 +
 +    return ret;
++}
++
++static fdevent listener_fde;
++static fdevent ui_fde;
++static int framework_fd = -1;
++static atransport *asking; /* the computer the UI was last asked about, until it answers or goes */
++
++void adb_auth_transport_gone(atransport *t)
++{
++    if (asking == t)
++        asking = NULL;
++}
+ 
+-    return 0;
++static void ui_close(void)
++{
++    if (framework_fd >= 0) {
++        fdevent_remove(&ui_fde);
++        adb_close(framework_fd);
++        framework_fd = -1;
++    }
++    asking = NULL;
  }
  
-+/* A key not in the file: nothing on the Q2 can approve it. */
++/* The UI's answer: "OK" lets the computer asked about in, anything else leaves it out. */
+ static void adb_auth_event(int fd, unsigned events, void *data)
+ {
+-    atransport *t = data;
+     char response[2];
+     int ret;
+ 
+     if (events & FDE_READ) {
+         ret = unix_read(fd, response, sizeof(response));
+-        if (ret < 0) {
+-            D("Disconnect");
+-            fdevent_remove(&t->auth_fde);
+-            framework_fd = -1;
++        if (ret <= 0) {
++            D("UI disconnected\n");
++            ui_close();
++            return;
+         }
+-        else if (ret == 2 && response[0] == 'O' && response[1] == 'K') {
++        if (ret == 2 && response[0] == 'O' && response[1] == 'K' && asking) {
+             adb_auth_reload_keys();
+-            adb_auth_verified(t);
++            adb_auth_verified(asking);
+         }
++        asking = NULL;
+     }
+ }
+ 
++/* The host's public key, once every key it signed with has failed: ask the UI. */
  void adb_auth_confirm_key(unsigned char *key, size_t len, atransport *t)
  {
--    char msg[MAX_PAYLOAD];
--    int ret;
--
--    if (framework_fd < 0) {
+     char msg[MAX_PAYLOAD];
+     int ret;
+ 
+     if (framework_fd < 0) {
 -        D("Client not connected\n");
--        return;
--    }
++        D("No UI to ask: the key is refused\n");
+         return;
+     }
 -
 -    if (key[len - 1] != '\0') {
--        D("Key must be a null-terminated string\n");
--        return;
--    }
++    if (len == 0 || key[len - 1] != '\0') {
+         D("Key must be a null-terminated string\n");
+         return;
+     }
 -
--    ret = snprintf(msg, sizeof(msg), "PK%s", key);
--    if (ret >= (signed)sizeof(msg)) {
--        D("Key too long. ret=%d", ret);
--        return;
--    }
--    D("Sending '%s'\n", msg);
++    /* adb sends its adbkey.pub's line; older adb kept the file's line end */
++    for (len = strlen((char *)key); len && (key[len - 1] == '\n' || key[len - 1] == '\r'); len--)
++        key[len - 1] = '\0';
++    if (!len || strpbrk((char *)key, "\r\n")) {
++        D("Key must be one line\n");
++        return;
++    }
+     ret = snprintf(msg, sizeof(msg), "PK%s", key);
+     if (ret >= (signed)sizeof(msg)) {
+         D("Key too long. ret=%d", ret);
+         return;
+     }
+     D("Sending '%s'\n", msg);
 -
 -    ret = unix_write(framework_fd, msg, ret);
 -    if (ret < 0) {
--        D("Failed to write PK, errno=%d\n", errno);
--        return;
--    }
++    if (unix_write(framework_fd, msg, ret) != ret) {
+         D("Failed to write PK, errno=%d\n", errno);
++        ui_close();
+         return;
+     }
 -
 -    fdevent_install(&t->auth_fde, framework_fd, adb_auth_event, t);
 -    fdevent_add(&t->auth_fde, FDE_READ);
-+    D("Unknown key refused\n");
++    asking = t;
  }
  
--static void adb_auth_listener(int fd, unsigned events, void *data)
-+/* Keep the card's file from boot: the card mounts around when adbd starts, and with a USB cable in
-+ * demo soon unmounts it, before any computer has connected. */
-+static void *keep_at_boot(void *x)
++/* One UI at a time: a new connection replaces the last. */
+ static void adb_auth_listener(int fd, unsigned events, void *data)
  {
 -    struct sockaddr addr;
 -    socklen_t alen;
 -    int s;
--
++    int s = adb_socket_accept(fd, NULL, NULL);
+ 
 -    alen = sizeof(addr);
 -
 -    s = adb_socket_accept(fd, &addr, &alen);
--    if (s < 0) {
--        D("Failed to accept: errno=%d\n", errno);
--        return;
--    }
-+    int i;
- 
--    framework_fd = s;
-+    for (i = 0; i < 150 && !card_mounted(); ++i)
-+        adb_sleep_ms(200);
-+    adb_auth_reload_keys();
-+    return NULL;
+     if (s < 0) {
+         D("Failed to accept: errno=%d\n", errno);
+         return;
+     }
+-
++    ui_close();
++    close_on_exec(s);
+     framework_fd = s;
++    fdevent_install(&ui_fde, s, adb_auth_event, NULL);
++    fdevent_add(&ui_fde, FDE_READ);
  }
  
  void adb_auth_init(void)
  {
 -    int fd, ret;
-+    adb_thread_t tid;
++    int fd;
  
      list_init(&key_list);
--    adb_auth_reload_keys();
--
+     adb_auth_reload_keys();
+ 
 -    fd = android_get_control_socket("adbd");
 -    if (fd < 0) {
 -        D("Failed to get adbd socket\n");
@@ -548,12 +564,17 @@ index 0b4913e..5bca157 100644
 -    ret = listen(fd, 4);
 -    if (ret < 0) {
 -        D("Failed to listen on '%d'\n", fd);
--        return;
--    }
++    fd = socket_local_server(ADB_UI_SOCKET, ANDROID_SOCKET_NAMESPACE_FILESYSTEM, SOCK_STREAM);
++    if (fd < 0 || chmod(ADB_UI_SOCKET, 0600)) {
++        D("Failed to listen on '%s'\n", ADB_UI_SOCKET);
++        if (fd >= 0)
++            adb_close(fd);
+         return;
+     }
 -
--    fdevent_install(&listener_fde, fd, adb_auth_listener, NULL);
--    fdevent_add(&listener_fde, FDE_READ);
-+    adb_thread_create(&tid, keep_at_boot, NULL);
++    close_on_exec(fd);
+     fdevent_install(&listener_fde, fd, adb_auth_listener, NULL);
+     fdevent_add(&listener_fde, FDE_READ);
  }
 diff --git a/core/adbd/arpa_nameser.h b/core/adbd/arpa_nameser.h
 index 438dc04..f3d2fee 100644
@@ -1093,6 +1114,28 @@ index 305cb44..0a0bbf6 100644
      return s;
  }
  
+diff --git a/core/adbd/transport.c b/core/adbd/transport.c
+index 9fd6cc2..88eda09 100644
+--- a/core/adbd/transport.c
++++ b/core/adbd/transport.c
+@@ -24,6 +24,7 @@
+ 
+ #define   TRACE_TAG  TRACE_TRANSPORT
+ #include "adb.h"
++#include "adb_auth.h"
+ 
+ static void transport_unref(atransport *t);
+ 
+@@ -596,6 +597,9 @@ static void transport_registration_func(int _fd, unsigned ev, void *data)
+         adb_mutex_unlock(&transport_lock);
+ 
+         run_transport_disconnects(t);
++#if !ADB_HOST
++        adb_auth_transport_gone(t);  /* Q2: a question the UI still has open is for nothing now */
++#endif
+ 
+         if (t->product)
+             free(t->product);
 diff --git a/core/adbd/usb_linux_client.c b/core/adbd/usb_linux_client.c
 index 33875a8..f1e1752 100644
 --- a/core/adbd/usb_linux_client.c

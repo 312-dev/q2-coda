@@ -1287,3 +1287,31 @@ def test_tidal_https_takes_a_padding_nul():
     assert made == b''.join(b'\0https://api.tidal.com' + p + b'\0\0' for p in build.TIDAL_HTTP)
     with pytest.raises(ValueError, match='Unexpected Tidal URL'):
         build.tidal_https(urls.replace(build.TIDAL_HTTP[0] + b'\0\0', build.TIDAL_HTTP[0] + b'\0X'))  # no spare NUL after it
+
+
+def test_adb_wrapper_parks_around_stocks_script_and_keeps_its_status():
+    # run under sh by test/adb.py; here its lines
+    assert build.adb_wrapper('uac_device_config.sh').decode().splitlines()[3:] == [
+        '[ "$1" = start ] && /usr/bin/q2adb-gadget park', '/usr/bin/uac_device_config_stock.sh "$@"', 'r=$?',
+        '[ "$1" = stop ] && /usr/bin/q2adb-gadget unpark', 'exit $r']
+
+
+def test_adb_hook_starts_adbd_after_q2remote_and_its_gadget_first():
+    old, new = build.ADB_HOOK
+    assert build.REMOTE_HOOK[1].endswith(old) and new.startswith(old)
+    line = new[len(old):].decode()
+    assert line.index('q2adb-gadget setup') < line.index('/usr/bin/adbd') < line.index('q2adb-gadget bind')
+    assert line.endswith(') &\n') and build.USB_SCRIPTS == ('storage_config.sh', 'uac_device_config.sh')
+
+
+def test_adbd_binary_is_thirdpartys_stripped(tmp_path, monkeypatch):
+    import thirdparty
+    monkeypatch.setattr(thirdparty, 'build', lambda name: tmp_path/f'stage-{name}')
+    def stripped(src, dst):
+        assert src == tmp_path/'stage-adbd/usr/bin/adbd'
+        dst.write_bytes(b'\x7fELF adbd')
+        return dst
+    monkeypatch.setattr(thirdparty, 'stripped', stripped)
+    assert build.adbd_binary(tmp_path) == b'\x7fELF adbd'
+    assert build.adbd_record(tmp_path) == dict(version=thirdparty.SOURCES['adbd'][0],
+                                               sha256=hashlib.sha256(b'\x7fELF adbd').hexdigest(), bytes=9)

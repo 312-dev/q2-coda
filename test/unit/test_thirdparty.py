@@ -13,6 +13,8 @@ import pytest
 
 import thirdparty
 
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+
 TC = pathlib.Path('/tc/bin')
 GCC = f'{TC}/mips-mti-linux-gnu-'
 
@@ -513,6 +515,56 @@ def test_busybox_stops_without_an_applet_table(env, tmp_path, monkeypatch):
     assert e.value.code == 'thirdparty: busybox: no applet table'
 
 
+def test_adbd_tree_applies_debians_patches_mincrypt_and_the_q2_patch(tmp_path, calls, monkeypatch):
+    src = tmp_path/'src'
+    deb = tmp_path/'debian.tar.gz'
+    tarball(deb, [('debian', None, 0), ('debian/patches', None, 0), ('debian/patches/series', b'a.patch\nb.patch\n', 0)])
+    fetched = []
+    def fetch(url, digest, name):
+        fetched.append((url, digest, name))
+        if url == thirdparty.ADBD_DEBIAN[0]:
+            return deb
+        f = tmp_path/name
+        f.write_text(name)
+        return f
+    monkeypatch.setattr(thirdparty, 'fetch', fetch)
+    (src/'core').mkdir(parents=True)
+    log = tmp_path/'log'
+    thirdparty.adbd_tree(src, log)
+    assert fetched[0] == (*thirdparty.ADBD_DEBIAN, 'android-tools_4.2.2+git20130218-3ubuntu41.debian.tar.gz')
+    assert fetched[1:] == [(thirdparty.ADBD_MINCRYPT + n, d, f'mincrypt-4.2.2_r1-{n}') for n, d in thirdparty.ADBD_MINCRYPT_FILES.items()]
+    assert sorted(p.name for p in (src/'core/libmincrypt').iterdir()) == sorted(thirdparty.ADBD_MINCRYPT_FILES)
+    assert (src/'q2-adbd.patch').read_text() == thirdparty.ADBD_PATCH
+    assert calls == [(['patch', '-p1', '-i', src/'debian/patches/a.patch'], src, None, log),
+                     (['patch', '-p1', '-i', src/'debian/patches/b.patch'], src, None, log),
+                     (['patch', '-p1', '-i', 'q2-adbd.patch'], src, None, log)]
+
+
+def test_adbd_is_one_static_program(tmp_path, env, calls, monkeypatch):
+    src, stage, log = tmp_path/'src', tmp_path/'stage', tmp_path/'log'
+    def tree(s, l):
+        (s/'core/libmincrypt').mkdir(parents=True)
+        (s/'core/libmincrypt/NOTICE').write_text('bsd')
+        (s/'debian').mkdir()
+        (s/'debian/copyright').write_text('apache')
+    monkeypatch.setattr(thirdparty, 'adbd_tree', tree)
+    thirdparty.build_adbd(src, stage, env, log)
+    n = sum(len(v) for v in thirdparty.ADBD_SOURCES.values())
+    compiles, link = calls[:n], calls[n]
+    assert len(calls) == n + 1
+    assert compiles[0][0] == [*env.cc.split(), '-Os', '-ffunction-sections', '-fdata-sections', '-Wall', '-Wno-unused-parameter',
+                              *thirdparty.ADBD_DEFINES, f'-I{src}/core/adbd', f'-I{src}/core/include', '-c',
+                              src/'core/adbd/adb.c', '-o', src/'adbd-adb.o']
+    assert compiles[-1][0][-3:] == [src/'core/libmincrypt/sha.c', '-o', src/'libmincrypt-sha.o']
+    assert link[0][:len(env.cc.split()) + 4] == [*env.cc.split(), '-static', '-Wl,--gc-sections', '-o', stage/'usr/bin/adbd']
+    assert link[0][-1] == '-lpthread' and len(link[0]) == len(env.cc.split()) + 4 + n + 1
+    assert (stage/'mincrypt.NOTICE').read_text() == 'bsd' and (stage/'copyright').read_text() == 'apache'
+
+
+def test_the_adbd_patch_is_the_files_text():
+    assert thirdparty.ADBD_PATCH == (ROOT/'tools/adbd.patch').read_text() and 'diff --git a/core/adbd/adb_auth_client.c' in thirdparty.ADBD_PATCH
+
+
 def test_every_recipe_has_a_source_and_its_dependencies_a_recipe():
     assert set(thirdparty.RECIPES) == set(thirdparty.SOURCES)
     assert all(d in thirdparty.RECIPES for _, needs in thirdparty.RECIPES.values() for d in needs)
@@ -932,7 +984,8 @@ def test_replacements_strips_every_install_entry(tmp_path, monkeypatch):
                 for name, entries in thirdparty.INSTALL.items() for path, rel in entries.items()}
     assert files == {path: dst for path, (_, dst) in expected.items()} and sorted(stripped) == sorted(expected.values())
     assert files['usr/lib/libz.so.1.2.11'] == out/'thirdparty/usr/lib/libz.so.1.2.11'
-    assert versions == {name: v for name, (v, _, _) in thirdparty.SOURCES.items()}  # mbedtls and libnl among them
+    # mbedtls and libnl among them; adbd is no replacement (a --dev build's program, docs/adb.md)
+    assert versions == {name: v for name, (v, _, _) in thirdparty.SOURCES.items() if name != 'adbd'}
 
 
 @pytest.fixture
