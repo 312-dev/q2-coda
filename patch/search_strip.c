@@ -806,12 +806,10 @@ void search_strip_paint(void *w, void *canvas) {
         ss_note(canvas, "Search your music",
                 ss.pick ? "Songs by title or artist" : "Artists, albums and songs", secondary,
                 tertiary);
-    if (ss.text[0] && !ss.nmatch && !ss_named()) {
-        int px = SS_PX_NOTE;
-        static const unsigned none[] = { 'N', 'o', ' ', 'r', 'e', 's', 'u', 'l', 't', 's', 0 };
-        rect_t r = { 0, ss_list_y(), 375, SS_STRIP_Y - ss_list_y() };
-        final_text(canvas, theme_face(none, 10, &px), none, &r, (unsigned)px,
-                   0xff000000u | secondary);
+    if (ss.text[0] && !ss.nmatch && !ss_named()) { /* the empty state, between the tabs and strip */
+        static const empty_t none = { "magnifying-glass", "No Matches", "Try fewer letters", 0 };
+        int y = I(ss.page, W_Y); /* empty_top's are screen ys */
+        empty_paint(ss.sheet, canvas, &none, empty_top(y + ss_list_y(), y + SS_STRIP_Y, 0) - y);
     }
     /* the strip: a #1C1C1E pill, the text in a black box with its cursor, the letters in
      * equal cells about the lit one, white on the accent while the strip has the wheel */

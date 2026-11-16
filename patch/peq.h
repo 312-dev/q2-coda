@@ -295,6 +295,18 @@ void page_retitle(void *page, void *title, const char *caption);
 void *page_list(void *page, void *body, void **title, const char *caption, int n, int item_h);
 void *rows_view(void *parent, int y, int w, int h, int n, int item_h);
 void *page_list_or(void *page, void *body, const char *name, const char *none, int n, int item_h);
+/* feedback.c: the empty state (docs/oled-design.md#empty-and-offline), stacked tiles with a glyph
+ * (tools/art.py EMPTY_GLYPHS), a title, a hint and at most one action row */
+typedef struct {
+    const char *glyph, *title, *hint, *row;
+} empty_t;
+int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *ctx, void *event));
+int empty_row_y(int free_top);
+int empty_shown(void *page);
+void *empty_list(void *page, void *body, const char *name, const empty_t *e,
+                 int (*on_row)(void *ctx, void *event));
+void *empty_open(const char *window, const char *name, const empty_t *e,
+                 int (*on_row)(void *ctx, void *event));
 int page_push(void *view, int dir);
 void *page_row_detail(void *view, int index, const char *caption, const char *detail,
                       int (*click)(void *, void *));

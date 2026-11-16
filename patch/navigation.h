@@ -131,7 +131,7 @@ typedef struct {
      * (0 when down); the page a Ratings list or Long Songs opened, with its tracks (page_tracks).
      */
     void *rate_win, *rate_on;
-    int empty_kind; /* the empty Library list empty_toast names and closes */
+    int empty_kind; /* the empty Library list empty_class closes and opens the empty state for */
     void *rt_page, *rt_list;
     int dark; /* 1: the backlight was off at the last UI loop pass; 2: a centre press woke it */
     /* Power's Charge limit (read once from config.ini's Q2POD), the value labels of that row
@@ -399,19 +399,17 @@ void *feedback_top(void);
 void feedback_toast_paint(void *w, void *canvas);
 int feedback_confirm_dress(void *w);
 void feedback_confirm_foot(const char *foot);
-/* the empty state (docs/oled-design.md#empty-and-offline): stacked tiles with a glyph (tools/art.py
- * EMPTY_GLYPHS), a title, a hint and at most one action row, centred in page from free_top (a
- * screen y) down */
-typedef struct {
-    const char *glyph, *title, *hint, *row;
-} empty_t;
-int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *ctx, void *event));
+/* the empty state's painters (feedback.c, docs/oled-design.md#empty-and-offline): its view's, and a
+ * painted page's stack at top (a y in w) */
 void empty_state_paint(void *w, void *canvas);
+void empty_paint(void *w, void *canvas, const empty_t *e, int top);
+int empty_top(int free_top, int free_end, int row);
+int empty_card(empty_t *e);
 void feedback_confirm_bar(void *w, void *canvas);
 void feedback_confirm_switch(void *w, void *canvas);
 void feedback_songs(void *top, void *row);
 void feedback_folder(void *top);
-int feedback_offline(const char *title);
+int feedback_offline(void);
 void feedback_switch_bar(void *w, void *canvas);
 void feedback_scan_bar(void *w, void *canvas);
 void feedback_shuffled(const char *what, int songs);

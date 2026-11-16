@@ -38,6 +38,7 @@
 { "battery_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/battery.c) */
 { "carremote_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/coda_rc_shim.c) */
 { "carpair_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/coda_rc_shim.c) */
+{ "empty_page", CTX_DYNAMIC, 0 },      /* runtime window (patch/feedback.c empty_open) */
 { "storage_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/storage.c) */
 { "downloads_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/storage.c) */
 { "usbchoose_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/usb_ui.c) */

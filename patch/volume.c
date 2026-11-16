@@ -54,7 +54,7 @@ int vol_keyup(void *dialog, void *e) {
 static const char *const vol_pages[] = { "playing_page", "airplay_page", "radionp_page" };
 /* on_wm_keyup_fun (HOOKS): the key-up no page took. Stock opens its volume dialog on any wheel tick
  * there, lit or dark; here only on a lit playback screen (vol_pages, under a toast), so a list's
- * end, a page with nothing to scroll (TIDAL's "Not connected", Spotify's note) or a QR code take
+ * end, a page with nothing to scroll (an empty state's own page, Spotify's note) or a QR code take
  * the tick as nothing and Return still goes back (docs/internals.md#wheel-volume). A dropped tick
  * returns before stock clears its power-key flags, which the next Centre release clears. Every
  * other key, and the Centre releases the payload replays, are stock's. */

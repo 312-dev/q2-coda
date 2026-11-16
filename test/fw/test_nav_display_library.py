@@ -2835,50 +2835,88 @@ def test_artists_follow_the_artist_pages_own_setting(fw, records, artist_type):
     assert fw.var('navigation__library_music', C.c_int).value == 0  # put back
 
 
-@pytest.mark.parametrize('cls, words', [(CLASS_ALBUMS, 'No albums'), (0xf004, 'No artists'), (0xf005, 'No composers'),
-                                        (0xf006, 'No genres')])
-def test_an_empty_class_list_closes_its_page_once_open_and_says_so(fw, st, records, cls, words):
+PAGE_TITLE_NAME = '_page_title'  # peq.h PAGE_TITLE: the caption the status row reads
+EMPTY_CLASSES = {CLASS_ALBUMS: ('Albums', b'vinyl-record', b'No Albums', b'Copy music to the SD card'),
+                 0xf004: ('Artists', b'microphone-stage', b'No Artists', b'Copy music to the SD card'),
+                 0xf005: ('Composers', b'music-notes-simple', b'No Composers', b'Songs need a composer tag'),
+                 0xf006: ('Genres', b'guitar', b'No Genres', b'Songs need a genre tag')}
+
+
+def empty_pages(fw, st, ui):
+    """page_open's windows, each over the others; the empty state's view made by the widget factory."""
+    use_set(st, 'oled')
+    fw.mock('window_create', lambda *_: ui.add('window', ui.wm, (0, 0, 375, 320)).addr)
+    fw.mock('widget_factory_create_widget', lambda f, kind, parent, x, y, w, *_: ui.new(C.string_at(kind).decode(), parent, x, y, w, 0))
+    return lambda: [w for w in ui.wm.children if w.name == 'empty_page']
+
+
+def shown_empty(page):
+    """page's empty state view: (glyph, title, hint)."""
+    art = page.find('_empty_state')
+    return art.visible and (art.props['_es_glyph'], art.props['_es_title'], art.props['_es_hint'])
+
+
+@pytest.mark.parametrize('cls', EMPTY_CLASSES)
+def test_an_empty_class_list_closes_its_page_once_open_for_the_empty_state(fw, st, records, cls):
     ui = Ui(fw)
     lib = Library(fw)
     prompts = Prompts(fw)
+    pages = empty_pages(fw, st, ui)
     load = Localclass(fw, lib, [records.song(id_=-1, kind=4)])
     assert load(cls) == 0 and [ms for _, ms in load.timers] == [0]
     C.c_int.from_address(C.addressof(fw.var('fw_ctx_g_class_type', C.c_char))).value = cls
     page = ui.window('album_page' if cls == CLASS_ALBUMS else 'localclass_page')
     page.props['stage'] = O['WINDOW_STAGE_OPENED'] - 1
     run(load.timers[-1][0])
-    assert [ms for _, ms in load.timers] == [0, O['EMPTY_POLL_MS']] and prompts.seen == []  # still opening: polled
+    assert [ms for _, ms in load.timers] == [0, O['EMPTY_POLL_MS']] and not pages()  # still opening: polled
     page.props['stage'] = O['WINDOW_STAGE_OPENED']
     run(load.timers[-1][0])
     assert [a[1] for _, a in fw.calls('window_manager_close_window_force')] == [page.addr]
-    assert [p[3] for p in prompts.seen] == [words]
+    (empty,) = pages()
+    name, *words = EMPTY_CLASSES[cls]
+    assert shown_empty(empty) == tuple(words) and prompts.seen == []
+    assert empty.find(PAGE_TITLE_NAME).text == name and not empty.find(PAGE_TITLE_NAME).visible  # the status row's
 
 
-def test_an_empty_list_whose_page_never_showed_only_says_so(fw, st, records):
+def test_an_empty_list_with_no_card_in_says_so(fw, st, records):
     ui = Ui(fw)
     lib = Library(fw)
-    prompts = Prompts(fw)
+    pages = empty_pages(fw, st, ui)
+    fw.mock('fw_access', lambda path, *_: -1 if C.string_at(path) == b'/tmp/mmc_add' else 0)
+    load = Localclass(fw, lib, [])
+    load(0xf004)
+    C.c_int.from_address(C.addressof(fw.var('fw_ctx_g_class_type', C.c_char))).value = 0xf004
+    ui.window('localmusic_page')
+    run(load.timers[-1][0])
+    (empty,) = pages()
+    assert shown_empty(empty) == (b'sd-card', b'No SD Card', b'Insert an SD card with music')
+
+
+def test_an_empty_list_whose_page_never_showed_only_opens_the_empty_state(fw, st, records):
+    ui = Ui(fw)
+    lib = Library(fw)
+    pages = empty_pages(fw, st, ui)
     load = Localclass(fw, lib, [])
     load(0xf005)
     C.c_int.from_address(C.addressof(fw.var('fw_ctx_g_class_type', C.c_char))).value = 0xf005
     ui.window('localmusic_page')
     run(load.timers[-1][0])
-    assert not fw.calls('window_manager_close_window_force') and [p[3] for p in prompts.seen] == ['No composers']
+    assert not fw.calls('window_manager_close_window_force') and shown_empty(pages()[0])[1] == b'No Composers'
 
 
 @pytest.mark.parametrize('page, shows', [('album_page', CLASS_ALBUMS), ('localclass_page', 0xf004)])
 def test_an_empty_list_leaves_a_list_page_showing_another_class(fw, st, records, page, shows):
     ui = Ui(fw)
     lib = Library(fw)
-    prompts = Prompts(fw)
+    pages = empty_pages(fw, st, ui)
     load = Localclass(fw, lib, [])
     load(0xf005)  # Composers, empty
     C.c_int.from_address(C.addressof(fw.var('fw_ctx_g_class_type', C.c_char))).value = shows
     ui.window(page).props['stage'] = O['WINDOW_STAGE_OPENED']
     run(load.timers[-1][0])
-    # the page on top lists another class: it stays, unpolled, and the toast says what was empty
+    # the page on top lists another class: it stays, unpolled, and the empty state says what was empty
     assert not fw.calls('window_manager_close_window_force') and len(load.timers) == 1
-    assert [p[3] for p in prompts.seen] == ['No composers']
+    assert shown_empty(pages()[0])[1] == b'No Composers'
 
 
 def test_songs_load_straight_into_the_showlist(fw, records):

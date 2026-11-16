@@ -4,7 +4,8 @@
  * scanned", Scan Music Now (stock's scan, its own dialog). No card music and a catalogue app
  * signed in (CF_STREAMING, catalogue.c catalogue_signed): "No Albums", "Streaming albums can show
  * here", and while Streaming Songs is off Turn on Streaming (library_settings.c library_needs,
- * which asks first). Neither (CF_NONE): "No Albums", "Copy music to the SD card", no row.
+ * which asks first). Neither (CF_NONE): "No Albums", "Copy music to the SD card", no row; with no
+ * card in, "No SD Card", "Insert an SD card with music" (feedback.c empty_card).
  * coverflow.c loads the covers again once the library changes. */
 #include "navigation.h"
 
@@ -74,6 +75,6 @@ int cf_empty(void *page, void *body) {
                   : cf_cause == CF_STREAMING ? "Streaming albums can show here"
                                              : "Copy music to the SD card",
                   row };
-    page_list(page, body, 0, "Cover Flow", 0, 48); /* the page's title; nothing listed */
-    return empty_state(body, 0, &e, row_click);
+    if (cf_cause == CF_NONE) empty_card(&e); /* no card in: "No SD Card" */
+    return empty_list(page, body, "Cover Flow", &e, row_click) != (void *)0;
 }

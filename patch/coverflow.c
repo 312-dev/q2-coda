@@ -2616,10 +2616,11 @@ static int song_tracks(void) { return !theme()->page_title_h; }
 /* The bar's title on Cover Flow's page (navigation.c bar_title_of): 0 on song_tracks' tracks, whose
  * hidden caption names the album; under a status row (status, the set's status_y) an artist's
  * covers by the artist's name, as the artist page under them, and the other covers none, so the
- * row shows the clock as Home's does; else "Cover Flow". */
+ * row shows the clock as Home's does; else, and over no albums (cf_empty.c's empty state), "Cover
+ * Flow". */
 const char *coverflow_bar_title(int status) {
     if (cf.screen == TRACKS && song_tracks()) return (const char *)0;
-    if (status && cf.screen == COVERS)
+    if (status && cf.screen == COVERS && !empty_shown(cf.body)) /* no albums: the page's name */
         return cf.scoped == ARTIST_ALBUMS && cf.albums && deque_size(cf.albums)
                    ? cover_artist(deque_at(cf.albums, 0))
                    : "";

@@ -563,31 +563,56 @@ Shown for a moment after a mode change (Shuffle, Repeat).
 
 ### Empty and offline
 
-- A list with nothing in it keeps its action rows (New Playlist..., Check for Updates) as
-  normal rows with the selection; the message is one line of 16 px Text Secondary centred in the
-  free area below them, down to y 282, with an optional hint in 15 px Text Tertiary 24 px lower.
-  No fake rows, and no Shuffle row over nothing: Favorites, Recent and the other song lists hide
-  it and say what is missing ("No favorites", hint "Hold Play/Pause on a song to add it").
-- Folder over a level with nothing in it (an empty card) says "No folders", hint "Copy music to
-  the SD card".
-- A card app's page with nothing in it (an empty Subsonic artist: its "No albums" info row and its sync
-  toggle, `patch/addon.c` `empty_view`) is that note too, the info row's subtitle the hint ("Empty Artist
-  has no albums on the server"), with no Add to Sync over nothing and no selectable info row (audit2 F1).
-- **The empty state** (`patch/feedback.c` `empty_state`, the one form every empty page is moving onto): three
-  stacked tiles, a 58 px one in front (`#2C2C2E`, its edge `#48484C`) and two 48 px ones 30 px either side behind it
-  at about a quarter's strength, 9 px corners, with the page's 28 px Phosphor glyph (fill, white at 92 %) on the
-  front one; 18 px under them the title in Title Case, Inter Medium 20, Text Primary; under it the hint in 15 px
-  Text Secondary; and at most one action row, 24 px lower, already selected. The whole stack is centred between the
-  status row's foot (or the end of any rows above it) and the screen's. No app names. Cover Flow uses it
-  (`patch/cf_empty.c`, glyph `cards`): "No Albums Yet", "Music on the card isn't scanned", **Scan Music Now** when
-  the card's music isn't scanned; "No Albums", "Streaming albums can show here", **Turn on Streaming** (while
-  Streaming Songs is off) with a signed-in streaming app; else "No Albums", "Copy music to the SD card".
-- Songs over an empty library is one selected row, **Scan Music Now** (Center or a tap runs the
-  scan), with "No songs", hint "Copy music to the SD card", under it; stock's picture and pill go.
-- Offline and missing things use the same form (Spotify's "Spotify isn't on the card", the App
-  Store's "No apps listed" under its Check for Updates row, one line in the list's pitch). TIDAL
-  with no Wi-Fi opens a page of its own titled TIDAL: "Not connected", hint "Turn on Wi-Fi in
-  System > Wireless".
+**The empty state** (`patch/feedback.c` `empty_state`) is the one form for every page with nothing to show
+(`mock_placeholders.py`, approved 2026-11-16): three stacked tiles, a 58 px one in front (`#2C2C2E`, its edge
+`#48484C`) and two 48 px ones 30 px either side behind it at about a quarter's strength, 9 px corners, with the
+page's 28 px Phosphor glyph (fill, white at 92 %; `tools/art.py` `EMPTY_GLYPHS`) on the front one; 18 px under them
+the title in Title Case, Inter Medium 20, Text Primary; under it the hint in 15 px Text Secondary; and at most one
+action row, 24 px lower, already selected. The whole stack, with or without its row, is centred between the status
+row's foot (or the end of any rows the page keeps above it) and the screen's. No app names. No fake rows, and no
+Shuffle row or Add to Sync over nothing. A page that is a list (`empty_list`) keeps its name for the status row; a
+Library list stock would open black (Albums, Artists, Composers, Genres) and a streaming service with no link open
+a page of their own holding only the empty state (`empty_open`). With no SD card in, the Library's pages say so
+(`empty_card`).
+
+| Screen | Glyph | Title | Hint | Row |
+| --- | --- | --- | --- | --- |
+| Songs, an empty library | `music-notes` | No Songs | Copy music to the SD card | **Scan Music Now** (stock's button, `scan_row`) |
+| Artists | `microphone-stage` | No Artists | Copy music to the SD card | |
+| Albums | `vinyl-record` | No Albums | Copy music to the SD card | |
+| Genres | `guitar` | No Genres | Songs need a genre tag | |
+| Composers | `music-notes-simple` | No Composers | Songs need a composer tag | |
+| Folders | `folder` | No Folders | Copy music to the SD card | |
+| Cover Flow, no card music | `cards` | No Albums | Copy music to the SD card | |
+| Cover Flow, a streaming app signed in | `cards` | No Albums | Streaming albums can show here | **Turn on Streaming** (while Streaming Songs is off) |
+| Cover Flow, the card's music not scanned | `cards` | No Albums Yet | Music on the card isn't scanned | **Scan Music Now** |
+| Playlists | `playlist` | No Playlists | Make one with New Playlist | none: under On-The-Go's row; New Playlist is in a song's hold menu (Add to Playlist…), not on this page. The picker keeps its rows alone |
+| Favorites | `heart` | No Favorites | Hold Play/Pause on a song to add it | |
+| Recently Played | `clock-counter-clockwise` | Nothing Played Yet | Songs you play show up here | |
+| Most Played (both lists) | `chart-bar` | No Plays Yet | Your most played songs show up here | |
+| Recently Added | `sparkle` | No Songs Added Yet | New music on the card shows up here | |
+| Long Songs | `timer` | No Long Songs | None over 10 minutes | |
+| Years (Era) | `calendar-blank` | No Dated Albums Yet | Albums need a year tag | |
+| Ratings' song lists | `star` | No Rated Songs Yet | Hold the heart on Now Playing to rate | |
+| Search, typed text matching nothing | `magnifying-glass` | No Matches | Try fewer letters | none (painted in the free area above the strip) |
+| Internet Radio, a station list with none | `radio` | No Stations | Add stations from your computer | |
+| Streaming, a service with no link | `cloud-slash` | Not Connected | Turn on Wi-Fi to stream | **Turn on Wi-Fi** (opens Settings > Wi-Fi) |
+| Library, no SD card | `sd-card` (Phosphor's `memory`) | No SD Card | Insert an SD card with music | |
+| Car Remote, no phone paired | `car-profile` | No Paired Phones | Open the Car Remote app on your phone | none: under the switch; a phone pairs from its own app |
+| Downloads (Tidal Downloads, a card app's songs) | `download-simple` | No Downloads Yet | Synced music shows up here | |
+| Chapters | `list-numbers` | No Chapters | This file has no chapter marks (or: This file's chapters couldn't be read) | |
+
+Not in this form, by design: Now Playing is reachable only while something is loaded, so it has no empty screen;
+the Wi-Fi page always holds its switch, Search Again and Add Network rows; the EQ's Presets page always holds its
+four action rows (no presets is a toast); and Upload Scrobbles with nothing to send is a toast after the press.
+
+The older note (`feedback_empty`): one line of 16 px Text Secondary centred in the free area below a page's rows,
+down to y 282, with an optional hint in 15 px Text Tertiary 24 px lower. Pages whose list keeps rows the note
+explains use it: the App Store's "No apps listed" under its Check for Updates row, On-The-Go's how-to under its
+rows, a card app's page with nothing in it (an empty Subsonic artist: its "No albums" info row's words, its subtitle
+the hint, with no Add to Sync over nothing and no selectable info row, audit2 F1), the confirm note under Reset
+Settings, and a payload list's other messages (Internet Radio's "Loading…", Battery History's "Unplug to start").
+
 - Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done. A library list whose open sorts thousands of records (the first open after a library change) shows the payload's own spinner while it sorts, in every theme: a 64 px `#1C1C1E` square with 12 px corners at the screen's centre, eight dots turning clockwise (internals, [Name order](internals.md#name-order)).
 
 ### Menus
@@ -746,7 +771,8 @@ page, On-The-Go) and `patch/add_songs.c`.
   `sneaker-move` (fill). On the selection the tile is the accent with an 18 % white veil and its
   glyph white. No dividers. No New Playlist, Select Playlists or Import and Export rows: a playlist
   is made from a song's hold menu, and Import and Export are Settings > Playback > Library > Playlists
-  rows. An empty list says "No playlists", hint "Hold Play/Pause on a song to add it".
+  rows. An empty list shows the [empty state](#empty-and-offline) under its rows, "No Playlists", "Make one with New
+  Playlist".
 - **A playlist's hold menu** ([Menus](#menus)): Play, Shuffle, Rename, then Delete after a gap,
   which asks "Delete playlist “name”?" with Cancel first. Rename is the [letter strip](#text-entry)
   with its field off, titled Rename Playlist, the name prefilled over it with the cursor at its end:
@@ -798,7 +824,8 @@ It has two forms, in the same place, width and corners:
 
 - **Field on** (Search, Add Songs' Search): the typed text in a black box at the pill's left with its
   cursor, the letters from x 148; the results above the strip, and with nothing typed the
-  [empty note](#empty-and-offline) in their place, "Search your music" over "Artists, albums and songs".
+  [empty note](#empty-and-offline) in their place, "Search your music" over "Artists, albums and songs";
+  with text that matches nothing, the [empty state](#empty-and-offline), "No Matches", "Try fewer letters".
 - **Field off** (New Playlist, Rename Playlist): the letters across the whole pill, the lit key centred,
   and the name written large in the middle of the screen, Inter Medium 22 white centred on y 140 with a
   steady cursor, over its hint in 15 px Text Tertiary on y 180, "Press Next to create" or "Press Next to

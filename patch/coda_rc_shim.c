@@ -480,13 +480,17 @@ static int cr_page_show(const void *unused) {
         ringnav_select(view, 0, 2);
         return 0;
     }
-    void *view = page_list(cr.page, cr.page, 0, "Car Remote", 2 + (n ? n : 1), 48);
+    void *view = page_list(cr.page, cr.page, 0, "Car Remote", 2 + n, 48);
     list_toggle(widget_get_child(page_row_detail(view, 0, "", 0, cr_click), 0), "Car Remote", coda_rc_enabled());
     int rh = page_h(48); /* a gap before the phones, clear as the rows */
     widget_use_style(list_item_create(view, 0, rh, 375, rh), "s_listitem_black");
     for (int i = 0; i < n; ++i) page_row_detail(view, 2 + i, names[i], "Paired", cr_click);
-    if (!n) widget_set_enable(page_row_detail(view, 2, "No paired phones", 0, 0), 0);
-    ringnav_select(view, 0, 2 + (n ? n : 1));
+    /* none: the empty state under the switch (docs/oled-design.md#empty-and-offline); a phone
+     * pairs from its own app, so there is no row to press */
+    static const empty_t none = { "car-profile", "No Paired Phones",
+                                  "Open the Car Remote app on your phone", 0 };
+    if (!n) empty_state(cr.page, feedback_below(view), &none, 0);
+    ringnav_select(view, 0, 2 + n);
     return 0;
 }
 

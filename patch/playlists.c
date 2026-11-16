@@ -1080,10 +1080,14 @@ static void pl_rows(void *win) {
     bar_title_sync(win);
     void *wait = widget_lookup(win, "image_wait", 1);
     if (wait) widget_resize(wait, 0, 0); /* no stock spinner (oled-design.md Empty) */
-    int shown = 0; /* the note under the rows shown (feedback_empty), or none */
+    /* no playlists: the empty state under the rows shown (On-The-Go), with no row of its own: New
+     * Playlist is a song's hold menu's (Add to Playlist...), not this page's; the picker keeps its
+     * rows alone, with no room under them */
+    int shown = 0;
     for (int i = 0; i < count; ++i) shown += widget_get_visible(widget_get_child(view, i));
-    feedback_empty(win, geom_val(V_BAR) + shown * pl_pitch(view), n ? 0 : "No playlists",
-                   add ? 0 : "Hold Play/Pause on a song to add it");
+    static const empty_t none = { "playlist", "No Playlists", "Make one with New Playlist", 0 };
+    empty_state(win, geom_val(V_BAR) + shown * pl_pitch(view),
+                n || add ? (const empty_t *)0 : &none, 0);
     widget_set_prop_int(win, PL_MARKING, marking);
     /* the list lays its rows out at pl_pitch's one pitch */
     void *lv = P(view, W_PARENT);

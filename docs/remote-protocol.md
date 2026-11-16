@@ -152,7 +152,7 @@ Everything else (`NOT_FOUND`, `BAD_REQUEST` on a field, `UNAVAILABLE`, `BUSY`, t
 
 When a phone sends `PairStart`, the Q2 shows a Dialog over whatever is on screen: the title "Pair with "Pixel 8"?" (the phone's name), the code in 56 px digits as two groups of three, and the hint "Enter this code on your phone", with one row, Cancel. Return is Cancel. It closes by itself when the phone finishes, fails or gives up, with a toast: "Phone paired" or "Pairing failed".
 
-Settings > Car Remote: the first row is the switch (Off by default); under it, after a gap, each paired phone by name, marked Paired; Centre on one asks `Forget "Pixel 8"?` with Cancel first, then Forget. With no phones paired the page says "No paired phones".
+Settings > Car Remote: the first row is the switch (Off by default); under it, after a gap, each paired phone by name, marked Paired; Centre on one asks `Forget "Pixel 8"?` with Cancel first, then Forget. With no phones paired the page shows the empty state, "No Paired Phones", under the switch.
 
 ## Testing on a Q2
 

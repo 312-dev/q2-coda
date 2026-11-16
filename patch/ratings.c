@@ -584,7 +584,10 @@ static int rated_open(void *ctx, void *event) {
     st.rt_list = list;
     deque_destroy(songs);
     int count = (int)deque_size(list);
-    void *view = page_list(st.rt_page, st.rt_page, 0, rt_names[k], count ? count : 1, 64);
+    static const empty_t none = { "star", "No Rated Songs Yet",
+                                  "Hold the heart on Now Playing to rate", 0 };
+    void *view = count ? page_list(st.rt_page, st.rt_page, 0, rt_names[k], count, 64)
+                       : empty_list(st.rt_page, st.rt_page, rt_names[k], &none, 0);
     char name[512], detail[300];
     for (int i = 0; i < count; i++) {
         void *t = deque_at(list, (unsigned)i);
@@ -595,8 +598,6 @@ static int rated_open(void *ctx, void *event) {
         rate_row(page_row_detail(view, i, track_name(name, sizeof name, t), detail, rt_play),
                  of[i]);
     }
-    if (!count)
-        page_row_detail(view, 0, "No songs yet", "Hold the heart on Now Playing to rate", 0);
     free(h);
     free(of);
     return 0;

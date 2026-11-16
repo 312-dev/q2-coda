@@ -43,10 +43,12 @@ def _arc(p0, rx, ry, phi, large, sweep, p1, steps=48):
 
 
 def path(d):
-    """An SVG path's d (M L H V C Q A Z, absolute or relative, an M's further pairs lines) as closed polylines."""
-    tokens = re.findall(r'[MLHVCQAZmlhvcqaz]|-?[0-9]*\.?[0-9]+', d)
+    """An SVG path's d (M L H V C S Q A Z, absolute or relative, an M's further pairs lines) as closed polylines. S's
+    first control point is the last C or S one's mirrored through the current point, else the current point."""
+    tokens = re.findall(r'[MLHVCSQAZmlhvcsqaz]|-?[0-9]*\.?[0-9]+', d)
     polys, pts, i, cmd = [], [], 0, None
     cur = (0.0, 0.0)
+    mirror = None  # the last C or S's second control point, while the command just drawn was one
 
     def num():
         nonlocal i
@@ -62,6 +64,7 @@ def path(d):
             i += 1
         cmd = need(cmd, 'SVG path data before its first command')
         rel, op = cmd.islower(), cmd.upper()
+        smooth, mirror = mirror, None
         if op == 'Z':
             polys.append(pts)
             cur, pts = pts[0], []
@@ -79,8 +82,11 @@ def path(d):
         elif op == 'V':
             cur = (cur[0], num() + (cur[1] if rel else 0))
             pts.append(cur)
-        elif op in 'CQ':
-            ctrl = [cur, *(at(rel) for _ in range(3 if op == 'C' else 2))]
+        elif op in 'CSQ':
+            first = [(2 * cur[0] - smooth[0], 2 * cur[1] - smooth[1]) if smooth else cur] if op == 'S' else []
+            ctrl = [cur, *first, *(at(rel) for _ in range(2 if op == 'Q' else 3 - len(first)))]
+            if op != 'Q':
+                mirror = ctrl[-2]
             n = len(ctrl) - 1
             for k in range(1, 25):
                 t = k / 24
@@ -310,9 +316,13 @@ SW_SPIN_STROKE = 4
 SW_SPIN_FADE = 0.75 / 11  # the spoke behind the head's head a quarter as bright
 HOLD_BACK_PX = 20  # search_strip.c's Return-held card: Phosphor arrow-u-up-left, bold, white
 # The empty state (feedback.c empty_state): its glyph on the middle of its stacked tiles, fill, white at 92 %, by the
-# glyph a page names (empty_t.glyph); Cover Flow's (cf_empty.c) so far
+# glyph a page names (empty_t.glyph; docs/oled-design.md#empty-and-offline has the pages). Phosphor has no sd-card: the
+# card's is its memory chip, as the mock-up's fallback (mock_placeholders.py FALLBACK).
 EMPTY_PX = 28
-EMPTY_GLYPHS = {'cards': 'cards-fill'}
+EMPTY_GLYPHS = {g: f'{g}-fill' for g in (
+    'cards', 'music-notes', 'vinyl-record', 'microphone-stage', 'music-notes-simple', 'guitar', 'folder', 'playlist',
+    'heart', 'clock-counter-clockwise', 'chart-bar', 'sparkle', 'timer', 'calendar-blank', 'star', 'magnifying-glass',
+    'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile')} | {'sd-card': 'memory-fill'}
 USB_TOASTS = {'unplugged': ('plug-fill', 0xababab), 'ejected': ('check-circle-fill', 0x34c759), 'audio': ('speaker-hifi-fill', 0xffffff)}
 # The status row's battery (list_marks.c battery_slim): charging, Phosphor's lightning, too weak a charger its warning,
 # fill weight at BATT_GLYPH_PX in Text Primary, with a BATT_GLYPH_GAP px gap in the Canvas cut round it (iOS's way of

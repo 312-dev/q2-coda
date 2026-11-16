@@ -40,6 +40,14 @@ def test_path_reads_arcs_and_further_subpaths():
     assert art.coverage([[(0, 0), (3, 0), (3, 1), (0, 1)], [(1, 0), (1.5, 0), (1.5, 1), (1, 1)]], (0, 0, 3, 1)) == [1.0, 1.0, 1.0]
 
 
+def test_path_s_mirrors_the_last_curves_control_point():
+    """S (Phosphor's guitar has one) is a C whose first control is the previous C's second mirrored through the current
+    point, or the current point itself after anything else; relative s counts from the current point."""
+    assert art.path('M0 0C0 10 10 10 10 0S20 -10 20 0Z') == art.path('M0 0C0 10 10 10 10 0C10 -10 20 -10 20 0Z')
+    assert art.path('M0 0C0 10 10 10 10 0s10 -10 10 0Z') == art.path('M0 0C0 10 10 10 10 0C10 -10 20 -10 20 0Z')
+    assert art.path('M0 0L10 0S20 10 20 0Z') == art.path('M0 0L10 0C10 0 20 10 20 0Z')
+
+
 @pytest.mark.parametrize('rx, ry, sweep', [(1, 1, 1), (1, 2, 1), (2, 1, 0)])
 def test_path_arc_too_small_for_its_chord_grows_to_fit(rx, ry, sweep):
     # SVG's rule (F.6.6): radii that can't span the ends scale up, in proportion, until they just do: half an
@@ -244,6 +252,17 @@ def test_the_software_updates_spinner_has_twelve_spokes_in_each_halfs_ink():
             alphas = [spoke((f - d) % art.SW_SPIN_SPOKES) for d in range(art.SW_SPIN_SPOKES)]
             assert alphas == sorted(alphas, reverse=True) and alphas[0] > 240 and 50 < alphas[-1] < 80, alphas
             assert at(w // 2, h // 2)[3] == 0
+
+
+def test_every_empty_states_glyph_is_drawn_and_every_drawn_one_is_named():
+    """The glyphs the payload's empty states name (each empty_t's first string, feedback.c empty_state) are
+    EMPTY_GLYPHS' keys, no more and no fewer: a page naming one the build never drew paints no glyph."""
+    named = set()
+    for c in (pathlib.Path(__file__).parents[2]/'patch').glob('*.c'):
+        src = c.read_text()
+        for m in re.finditer(r'empty_t\b[^;(]*?=\s*\{|\(empty_t\)\s*\{', src):
+            named |= set(re.findall(r'\{\s*"([a-z][a-z-]*)"', src[m.start():src.index(';', m.end())]))
+    assert named == set(art.EMPTY_GLYPHS)
 
 
 def test_phosphor_fills_nonzero_so_an_inner_contour_is_a_hole():

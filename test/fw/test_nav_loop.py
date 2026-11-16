@@ -1975,10 +1975,10 @@ def wm_keyup(fw):
 
 @pytest.mark.parametrize('name, volume', [('playing_page', 1), ('airplay_page', 1), ('spotify_page', 0),
                                           ('radionp_page', 1), ('sysset_page', 0), ('qrcode_page', 0),
-                                          ('offline_page', 0), ('spotbrowse_page', 0), ('npabout_page', 0)])
+                                          ('empty_page', 0), ('spotbrowse_page', 0), ('npabout_page', 0)])
 def test_only_a_playback_screens_wheel_reaches_stocks_volume(fw, name, volume):
     """The wheel tick no page took opens stock's volume dialog on a playback screen alone: a list, a card app's QR
-    page and a page with nothing to scroll (TIDAL's Not connected, Now Playing's About) take it as nothing, and every
+    page and a page with nothing to scroll (an empty state's own page, Now Playing's About) take it as nothing, and every
     other key is stock's there."""
     ui = Ui(fw)
     ui.wm.add(ui.window(name))

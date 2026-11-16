@@ -4867,10 +4867,12 @@ m=FirstMachine(2,page='localclass_page',cls=0xf004,rows=3); m.word(m.row(2)+O['R
 assert m.call(address=HOOKS['load_localclass_list'][0],args=(0xf004,0,0,0),gap=0)==3
 m.word(m.row(0)+O['REC_ID'],-1); m.run(1)
 assert m.read==[1,2],m.read; passed()
+# The empty state's titles shown (feedback.c empty_state: its view's _es_title), in the order made.
+def empty_titles(m): return [n.get('_es_title') for w,n in m.nodes.items() if n.get('name')=='_empty_state' and n.get('visible',1) and (not hasattr(m,'alive') or m.alive(w))]
 # An empty class list: its page, once the window manager marks it opened (stage 3, after the open
-# animation), is force-closed from the next loop pass, then the toast (1500 ms, navigation.c toast) says so. Until then it is
-# polled (EMPTY_POLL_MS) until it opens or stops being on top, then the toast alone; a page already left, or
-# another class's, keeps the toast only.
+# animation), is force-closed from the next loop pass, then the empty state's page (navigation.c empty_class,
+# feedback.c empty_open) says so. Until then it is polled (EMPTY_POLL_MS) until it opens or stops being on top, then
+# the empty state's page alone; a page already left, or another class's, keeps that page only.
 def empty(cls,page,stage=O['WINDOW_STAGE_OPENED'],leave=False,shown=None):
     m=ClassMachine(page=page,cls=cls,rows=0); m.found=[]; m.query=None
     assert m.call(address=HOOKS['load_localclass_list'][0],args=(cls,0,0,0),gap=0)==0 and len(m.timers)==1
@@ -4883,20 +4885,20 @@ closes=lambda m: [c[:3] for c in m.calls if c[0]=='window_manager_close_window_f
 for cls,page in ((0xf003,'album_page'),(0xf003,'localclass_page'),(0xf004,'localclass_page'),(0xf005,'localclass_page'),(0xf006,'localclass_page')):
     m=empty(cls,page); top=m.stack[-1]
     assert closes(m)==[('window_manager_close_window_force',m.wm,top)]
-    assert m.toasts==[('dialog/msginfo_dialog',1,1500,{0xf003:'No albums',0xf004:'No artists',0xf005:'No composers',0xf006:'No genres'}[cls])] and not m.timers
+    assert not m.toasts and empty_titles(m)==[{0xf003:'No Albums',0xf004:'No Artists',0xf005:'No Composers',0xf006:'No Genres'}[cls]] and not m.timers
     passed()
 m=empty(0xf003,'album_page',stage=2)  # created, its open animation still running
-assert not closes(m) and not m.toasts and len(m.timers)==1
-m.advance(O['EMPTY_POLL_MS']*5); assert not m.toasts and len(m.timers)==1
+assert not closes(m) and not empty_titles(m) and len(m.timers)==1
+m.advance(O['EMPTY_POLL_MS']*5); assert not empty_titles(m) and len(m.timers)==1
 m.nodes[m.top]['stage']=O['WINDOW_STAGE_OPENED']; m.calls=[]; m.advance(O['EMPTY_POLL_MS'])
-assert closes(m) and m.toasts and not m.timers; passed()
-m=empty(0xf003,'album_page',stage=2); m.advance(O['EMPTY_POLL_MS']*100); assert not m.toasts and len(m.timers)==1  # slow to open: still waits
+assert closes(m) and empty_titles(m) and not m.timers; passed()
+m=empty(0xf003,'album_page',stage=2); m.advance(O['EMPTY_POLL_MS']*100); assert not empty_titles(m) and len(m.timers)==1  # slow to open: still waits
 m.top=m.node('window','localmusic_page'); m.calls=[]; m.advance(O['EMPTY_POLL_MS'])
-assert not closes(m) and m.toasts and not m.timers; passed()  # left before it opened: the toast alone
+assert not closes(m) and empty_titles(m) and not m.timers; passed()  # left before it opened: the empty state's page alone
 m=empty(0xf003,'album_page',leave=True)
-assert not closes(m) and m.toasts and not m.timers; passed()
+assert not closes(m) and empty_titles(m) and not m.timers; passed()
 m=empty(0xf004,'localclass_page',shown=0xf006)  # Genres' page on top by now: not Artists' to close
-assert not closes(m) and m.toasts==[('dialog/msginfo_dialog',1,1500,'No artists')]; passed()
+assert not closes(m) and empty_titles(m)==['No Artists']; passed()
 # Library -> Songs reads straight into the showlist: stock's load holds its copy and the staging deque
 # together, the library twice. The staging pointer comes back, its deque cleared as stock leaves it.
 class SongsMachine(ClassMachine):
@@ -5046,8 +5048,8 @@ for cls in (0xf00a,0xf008,0xf007):
 passed()
 # An empty category list says so once its page is up, instead of a black page.
 m=ClassMachine(page='localclass_page',cls=0xf001,rows=0)
-assert m.call(address=HOOKS['load_localclass_list'][0],args=(0xf006,0,0,0),gap=0)==0 and not m.toasts
-m.advance(0); assert [t[3] for t in m.toasts]==['No genres']; passed()
+assert m.call(address=HOOKS['load_localclass_list'][0],args=(0xf006,0,0,0),gap=0)==0 and not empty_titles(m)
+m.advance(0); assert empty_titles(m)==['No Genres'] and not m.toasts; passed()
 # Albums: each stock row (a name) becomes that name's albums, told apart by album artist, else folder.
 m=ClassMachine(page='localclass_page',cls=0xf001,rows=2); m.word(m.row(1)+O['REC_ALBUM'],m.string('Other'))
 m.split=[m.song('Baroness'),m.song('STP')]; m.word(m.split[1]+O['REC_PATH'],m.string('/q/STP'))
@@ -8545,8 +8547,8 @@ m.open_era(); m.decade(0)
 f,ctx=m.handler(m.nodes[m.find('scroll_view')]['children'][1],O['EVT_CLICK'])
 m.call(address=f,args=(ctx,m.event,0,0),gap=0)
 assert m.play_names==['old'] and m.names(m.get(syms['tools_pdeq_directory']))==['staged']; passed()
-m=EraMachine(); top=m.top; assert m.open_era() is not None and m.top==top and m.toasts[-1][3]=='No dated albums yet'; passed()
-m=EraMachine([s for s in SONGS if s[4]==0]); top=m.top; m.open_era(); assert m.top==top and m.toasts[-1][3]=='No dated albums yet'; passed()
+m=EraMachine(); top=m.top; assert m.open_era() is not None and m.top!=top and m.nodes[m.top]['name']=='era_page' and empty_titles(m)==['No Dated Albums Yet']; passed()
+m=EraMachine([s for s in SONGS if s[4]==0]); top=m.top; m.open_era(); assert m.top!=top and empty_titles(m)==['No Dated Albums Yet'] and not m.toasts; passed()
 # Library > Ratings > Albums: the rated albums as Coverflow, most hearts first, with the rated Sort card alone
 # (Rating, Album, Artist, Year, kept); closing it brings the library's covers back, with no card.
 def ratings_albums(m):
@@ -11607,7 +11609,7 @@ def home_swap_motion():
     m.advance(300); assert m.get(sets+O['W_X'])==0
     m.call(O['KEY_RETURN']); m.advance(300); set_motion(m,'swap',0,0); assert not push() and m.nodes[sets]['visible'] and m.get(sets+O['W_X'])==0; passed()
 home_swap_motion()
-# Most Played opens a black mostplayed_page list (nothing played: "No plays yet" in OLED's empty note, no rows); a second
+# Most Played opens a black mostplayed_page list (nothing played: the empty state, "No Plays Yet", no rows); a second
 # press while it is open does nothing. Its rows are the top PLAYS_TOP, most played first and, among
 # equal counts, the most recently counted (earlier slot) first; a row plays that ranked list as a
 # library queue (0xf001) from itself, leaving the play mode alone.
@@ -11615,7 +11617,7 @@ f,ctx=m.handler(m.nodes[top]['children'][0],O['EVT_CLICK'])
 m.found=[m.song(n) for n in ('T1','T2','T3')]; m.calls=[]; toasts=len(m.toasts)
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and not m.plays and len(m.toasts)==toasts
 m.page=m.top; assert m.nodes[m.page]['name']=='mostplayed_page' and m.nodes[m.page]['style:normal:bg_color']==-0x1000000
-assert [m.nodes[c]['text'] for c in m.nodes[m.page]['children'] if m.nodes[c]['type']=='hscroll_label' and m.nodes[c]['visible']]==['No plays yet'] and not m.nodes[m.find('scroll_view')]['children']
+assert empty_titles(m)==['No Plays Yet'] and not [c for c in m.nodes[m.page]['children'] if m.nodes[c]['type']=='hscroll_label' and m.nodes[c]['visible']] and not m.nodes[m.find('scroll_view')]['children']
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.top==m.page; m.close(); passed()
 # page_list on OLED's set: the status row names the page, so it has no title row (page.title height 0): the list from y 0
 # down to client_h(), the set's bar under the screen's 320, cut to its whole rows above list_fit_end (coverflow.c
@@ -12058,7 +12060,7 @@ for i,names in want.items():
     m.close(); m.page=menu
 m.found=[m.song('Z')]; m.fav_songs=[]; m.calls=[]; row=m.nodes[m.find('scroll_view',menu)]['children'][0]; g,c=m.handler(row,O['EVT_CLICK'])
 m.call(address=g,args=(c,m.event,0,0),gap=0); m.page=m.top
-assert m.texts()==['Top Rated','No songs yet','Hold the heart on Now Playing to rate']; passed()
+assert m.texts()==['Top Rated'] and empty_titles(m)==['No Rated Songs Yet']; passed()  # the name hidden for the status row
 
 # Long Songs: over LONG_SONG_S, longest first, whatever Scan Song Durations is. Each file is statted on a worker and
 # one whose signature the cache lacks probed once by TagLib (a CUE track with both ends among them: the file's length
@@ -12088,7 +12090,7 @@ m.nodes[m.top]['children']=[view]; m.call(address=HOOKS['localmusic_page_init'][
 f,ctx=m.handler(m.nodes[m.nodes[view]['children'][14]]['children'][0],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.page=m.top
 cancel=m.nodes[m.find('scroll_view')]['children'][0]; g,c=m.handler(cancel,O['EVT_CLICK']); m.call(address=g,args=(c,m.event,0,0),gap=0)
 worker,arg=m.threads[0]; m.call(address=worker,args=(arg,0,0,0),gap=0); assert m.probed==[]  # cancelled before the first
-m.advance(250); assert [m.nodes[w]['text'] for w in m.nodes if m.nodes[w]['type']=='hscroll_label' and m.alive(w) and m.nodes[w]['visible']]==['No long songs','Songs over 10 min show up here'] and m.joins==[77]; passed()  # page_list_or: the message in OLED's empty note, the name hidden for the status row
+m.advance(250); assert not [m.nodes[w]['text'] for w in m.nodes if m.nodes[w]['type']=='hscroll_label' and m.alive(w) and m.nodes[w]['visible']] and empty_titles(m)==['No Long Songs'] and m.joins==[77]; passed()  # empty_list: the empty state, the name hidden for the status row
 # Two CUE tracks to the end of one file probe it once and keep one cache entry.
 m=RateMachine(); m.found=[m.song('A'),m.song('A')]; m.lengths={'/p/A':1300}; m.word(m.found[1]+O['REC_CUE_START'],600)
 m.top=m.node('window','localmusic_page'); view=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)])
@@ -12946,7 +12948,7 @@ def stream_page(m):
     assert m.nodes[icon]['image']=='list_tidal' and m.nodes[label]['text']=='Tidal Downloads'
     top=m.top; f,ctx=m.handler(tidal,O['EVT_CLICK']); m.calls=[]; assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0
     assert [m.text(c[1]) for c in m.calls if c[0]=='toolsLoadDirectory']==['/mnt/mmc/.tidal']
-    assert m.nodes[m.top]['name']=='tidal_downloads' and 'No downloads' in [n.get('text') for n in m.nodes.values()]
+    assert m.nodes[m.top]['name']=='tidal_downloads' and empty_titles(m)==['No Downloads Yet']
     f,ctx=m.handler(m.top,O['EVT_DESTROY']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.top=top
     # AirPlay, last: stock's own receiver, its switch on System settings' Network service page, one press away.
     airplay=m.nodes[m.nodes[view]['children'][4]]['children'][0]; icon,label=m.nodes[airplay]['children'][:2]
@@ -13159,12 +13161,12 @@ def radio_open(m):
     m.click(button); m.page=m.top; assert m.nodes[m.page]['name']=='radio_page'; return m.page
 # The row follows Spotify's. The first open makes the card's Radio folder but leaves Favourites
 # empty, the user's to fill; the starter stations are Featured. The menu has no Now Playing until
-# something has played. An empty list is OLED's note (navigation.c page_empty, feedback.c feedback_empty):
-# the hidden caption holds the page's name, then the note's line and its empty hint.
+# something has played. An empty list is the empty state (feedback.c empty_list): the hidden caption holds the
+# page's name, and the empty state says "No Stations".
 m=RadioMachine(); page=radio_open(m)
 assert RDIR in m.tree and RDIR+'/favourites.m3u' not in m.files
 assert m.labels()==['Internet Radio','Favorites','Featured','Top Stations','By Country','By Genre'] and m.nodes[m.find('scroll_view')]['_ringnav_index']==0
-m.row(0); assert m.labels()==['Favorites','No favorites','']; m.back()
+m.row(0); assert m.labels()==['Favorites'] and empty_titles(m)[-1:]==['No Stations']; m.back()
 m.row(1); featured=m.labels(); assert len(featured)==7 and featured[:3]==['Featured','Radio Paradise','SomaFM Groove Salad']; m.back()
 # The user's favourites.m3u is never touched by opening the page.
 m.close(); m.files[RDIR+'/favourites.m3u']=bytearray(b'#EXTM3U\n'); radio_open(m); assert RDIR+'/favourites.m3u' in m.files
@@ -13200,13 +13202,13 @@ for query in ('x'*64,'é'*32):
     assert m.labels()==featured and not m.find('edit') and len(m.threads)==workers
     assert len(m.toasts)==before+1 and m.toasts[-1][3]=='Search is too long'
 m.back()
-search('zzz'); m.reply=b'#EXTM3U\n'; m.worker(); assert m.labels()==['Internet Radio','No stations','']; m.close(); passed()
-# An empty list keeps its message as the note, and the bar reads the entry that opened it: Favourites only from Favourites.
+search('zzz'); m.reply=b'#EXTM3U\n'; m.worker(); assert m.labels()==['Internet Radio'] and empty_titles(m)[-1:]==['No Stations']; m.close(); passed()
+# An empty list is the empty state, and the bar reads the entry that opened it: Favourites only from Favourites.
 m=RadioMachine(); rbar=page_bar(m); radio_open(m)
 def rbar_reads():  # the old caption's destroy, which the mock's unlink doesn't fire, and the bar asked again
     m.call(address=payload_syms['title_gone'],args=(0,0,0,0),gap=0); m.call(address=payload_syms['bar_title_sync'],args=(m.top,0,0,0),gap=0); return m.nodes[rbar]['text']
-m.row(0); assert 'No favorites' in m.labels() and rbar_reads()=='Favorites',(m.labels(),rbar_reads())
-search('zzz'); m.reply=b'#EXTM3U\n'; m.worker(); assert 'No stations' in m.labels() and rbar_reads()=='Internet Radio',(m.labels(),rbar_reads())
+m.row(0); assert empty_titles(m)[-1:]==['No Stations'] and rbar_reads()=='Favorites',(m.labels(),rbar_reads())
+search('zzz'); m.reply=b'#EXTM3U\n'; m.worker(); assert empty_titles(m)[-1:]==['No Stations'] and rbar_reads()=='Internet Radio',(m.labels(),rbar_reads())
 m.back(); assert 'zzz' in m.labels() and rbar_reads()=='Internet Radio',(m.labels(),rbar_reads()); m.close(); passed()
 # Favourites: favourites.m3u, then the folder's other .m3u and .pls files (a .pls's TitleN names its FileN).
 m=RadioMachine({RDIR+'/favourites.m3u':bytearray(b'#EXTM3U\r\n#EXTINF:-1,One\r\nhttp://one/a\r\nhttp://two/b\r\n'),
@@ -14662,7 +14664,7 @@ assert m.nodes[m.find('scroll_view',td)]['_ringnav_index']==2
 m.click(tdrows()[2]); m.back(td); assert [l for l in m.labels(td) if l]==LIST and m.top==td  # Return is Cancel
 m.click(tdrows()[2]); m.found=[]  # stock's listing of the emptied folder
 m.click(tdrows()[2]); assert [p for p in m.files if p.startswith(T)]==[T+'/.cache-size'] and '/mnt/mmc/Music/keep.flac' in m.files
-assert [l for l in m.labels(td) if l]==['Tidal Downloads','No downloads yet']; m.destroy(td); passed()  # page_empty: the name kept hidden, OLED's note
+assert [l for l in m.labels(td) if l]==['Tidal Downloads'] and empty_titles(m)[-1:]==['No Downloads Yet']; m.destroy(td); passed()  # empty_list: the name kept hidden, the empty state
 # Stream mode (q2-deezer's stream.go, addon.c stream_poll): its .play file names a session's folder; its
 # first song, once there, plays as a local album does (Now Playing opening); songs that come later join the
 # queue's end, as Add to Queue does, while the queue is still the session's; the song playing is left in
@@ -16079,7 +16081,7 @@ VOL=['dialog/volume_dialog']
 for name in ('playing_page','airplay_page','radionp_page'):
     assert wheel_volume(name)==VOL and wheel_volume(name,key=O['KEY_PREV'])==VOL and wheel_volume(name,lit=0)==[],name
 assert wheel_volume('playing_page',toast=True)==VOL
-for name in ('sysset_page','qrcode_page','offline_page','spotify_page','spotbrowse_page','npabout_page'):
+for name in ('sysset_page','qrcode_page','empty_page','spotify_page','spotbrowse_page','npabout_page'):
     assert wheel_volume(name)==[] and wheel_volume(name,patched=False)==VOL,name
 assert wheel_volume('sysset_page',patched=False,lit=0)==VOL; passed()
 # A press the window in front changed under stays ended until its release, as on V1.32 (build.py KEY_ABORTED, #303).
@@ -17260,7 +17262,7 @@ for hook,t,page,row in HELD:
         m,win=held_machine(page,smart=smart); m.link=link; n=len(m.toasts); held_press(m,hook,win,row)
         offline=hook=='stream_row' and not link
         assert len(held_runs(m,t))==(not offline) and not m.timers and SW_WAIT not in [x[3] for x in m.toasts[n:]],(hook,smart,link)
-        assert [n_.get('text') for n_ in m.nodes.values() if n_.get('name')=='_empty']==(['Not connected'] if offline else []),(hook,smart,link)
+        assert empty_titles(m)==(['Not Connected'] if offline else []),(hook,smart,link)
         passed()
 # Network service's DLNA and AirPlay switches never wait, nor wake the radio: stock starts their
 # services once there is a link. Stock gets the pressed button.
@@ -17272,7 +17274,7 @@ for row in '01':
 for link in (1,0):
     m,win=held_machine('stream_page'); m.nodes[m.wm]['children']=[]; m.link=link; n=len(m.toasts); held_press(m,'stream_row',win,'0')
     assert len(held_runs(m,'stream_row'))==link and not m.timers and SW_WAIT not in [x[3] for x in m.toasts[n:]],link
-    assert [n_.get('text') for n_ in m.nodes.values() if n_.get('name')=='_empty']==([] if link else ['Not connected']),link
+    assert empty_titles(m)==([] if link else ['Not Connected']),link
 passed()
 # Home's Split Streaming list (home.c stream_rows) has stock's Tidal row too, in Home's window beside
 # its Library list, whose rows stock also names by index: held the same, and stock is given the
@@ -17720,10 +17722,11 @@ assert 'rm -rf /mnt/mmc/.spotify/cache /mnt/mmc/.spotify/.cache-size /mnt/mmc/.s
 assert m.toasts[-1][3]=="Spotify's login and cache erased" and KILL in m.systems[-1]
 assert m.labels()[2:4]==['Spotify Cache: 2 GB','Erase Spotify Data']; passed()
 # The wheel drives only allowlisted windows (patch/contexts.inc), so every runtime list page needs an
-# entry; the two streaming Now Playing pages, a card app's QR code page, OLED's offline note (feedback_offline) and
-# Now Playing's About (np_about.c, its Return its own), none with a list, handle their own keys.
+# entry; the two streaming Now Playing pages, a card app's QR code page and Now Playing's About (np_about.c, its
+# Return its own), none with a list, handle their own keys. The empty state's own page (feedback.c empty_open, its
+# window a caller's) is in the list for its one row.
 pages=set(re.findall(r'page_open\("(\w+)"',''.join(p.read_text() for p in (ROOT/'patch').glob('*.c'))))
-assert pages-set(re.findall(r'"(\w+)"',(ROOT/'patch/contexts.inc').read_text()))=={'radionp_page','spotify_page','qrcode_page','offline_page','npabout_page'}; passed()
+assert pages-set(re.findall(r'"(\w+)"',(ROOT/'patch/contexts.inc').read_text()))=={'radionp_page','spotify_page','qrcode_page','npabout_page'} and '"empty_page"' in (ROOT/'patch/contexts.inc').read_text(); passed()
 m=CardMachine({},{}); vid=payload_syms['vid']; m.word(vid+12,4242); m.word(vid+16,7)
 for playing,command in ((0,'a'),(1,'r')):
     m.sent=[]; endpoint(m,'video_set_playing',playing); endpoint(m,'video_set_playing',playing)
@@ -18050,19 +18053,20 @@ assert m.nodes[m.top]['name']!='chapters_page' and m.toasts[-1][3]=='Too long to
 m=ChapterMachine(); m.open_chapters(); m.advance(50); m.word(O['MCL_POS'],2); m.choose(1)
 assert not any(c[0] in ('player_seek_time','mclSetSeek') for c in m.calls)
 assert any(c[0]=='navigator_back' for c in m.calls); passed()
-for count,failed,title in ((0,False,'No embedded chapters'),(0,True,'Could not read chapters')):
+for count,failed in ((0,False),(0,True)):
     m=ChapterMachine(count,failed); m.open_chapters(); m.advance(50)
-    assert title in m.texts() and not m.rows(); passed()
-# An empty page, one per module: the message is OLED's note on the page (page_empty), and the bar reads the page's name.
-def shows_empty(m,bar,message,name): assert message in [n.get('text') for n in m.nodes.values() if n.get('name')=='_empty'] and bar_reads(m,bar)==name,(message,m.nodes[bar]['text'])
+    assert empty_titles(m)==['No Chapters'] and not m.rows(); passed()
+# An empty page, one per module: the message is OLED's note on the page (page_empty), or the empty state (empty_list),
+# and the bar reads the page's name.
+def shows_empty(m,bar,message,name): assert message in [n.get('text') for n in m.nodes.values() if n.get('name')=='_empty']+empty_titles(m) and bar_reads(m,bar)==name,(message,m.nodes[bar]['text'])
 def empty_row(m,row):  # Local Music's row, opened
     view=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)]); m.top=m.node('window','localmusic_page',[view])
     assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0,count=5_000_000)==0
     f,ctx=m.handler(m.nodes[m.nodes[view]['children'][row]]['children'][0],O['EVT_CLICK']); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0; m.page=m.top
-for count_failed,title in (((0,False),'No embedded chapters'),((0,True),'Could not read chapters')):
+for count_failed,title in (((0,False),'No Chapters'),((0,True),'No Chapters')):
     m=ChapterMachine(count=count_failed[0],failed=count_failed[1]); ebar=page_bar(m); m.open_chapters(); m.advance(50); shows_empty(m,ebar,title,'Chapters'); passed()
-m=ShuffleMachine(); ebar=page_bar(m); empty_row(m,11); shows_empty(m,ebar,'No plays yet','Most Played'); passed()
-m=SpotMachine(files={}); ebar=page_bar(m); erows=stream_rows(m); f,ctx=m.handler(erows['Tidal Downloads'],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000); shows_empty(m,ebar,'No downloads yet','Tidal Downloads'); passed()
+m=ShuffleMachine(); ebar=page_bar(m); empty_row(m,11); shows_empty(m,ebar,'No Plays Yet','Most Played'); passed()
+m=SpotMachine(files={}); ebar=page_bar(m); erows=stream_rows(m); f,ctx=m.handler(erows['Tidal Downloads'],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000); shows_empty(m,ebar,'No Downloads Yet','Tidal Downloads'); passed()
 m=CoverflowMachine(page='playing_page',pos=0); ebar=page_bar(m); q=m.deque([m.song('A')]); m.word(syms['mcl_pdeqplaylist'],q); m.word(O['MCL_POOL'],m.deque([0],'int')); assert m.call(address=payload_syms['playback_set'],args=(0,1,0,0),gap=0)==1
 m.press(10); assert m.hold()==11; m.release(); m.pick(m.labels().index('View Queue')); m.advance(0); m.page=m.top; shows_empty(m,ebar,'Nothing to play next','View Queue'); passed()
 m=ChapterMachine(ready=False); m.open_chapters(); m.advance(50)

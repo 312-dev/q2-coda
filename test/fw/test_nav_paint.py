@@ -625,6 +625,8 @@ class World:
         m('widget_add_timer', lambda w, fn, ms, *_: self.timers.append((fn, w, ms)) or len(self.timers))
         m('timer_remove', lambda t, *_: self.removed.append(t))
         m('widget_invalidate_force', lambda w, r, *_: self.invalid.append((w, rect(r))))
+        m('widget_set_sensitive', lambda w, v, *_: self.set(w, 'sensitive', v & 0xff))
+        m('widget_factory_create_widget', lambda f, kind, parent, x, y, ww, *_: self.add(parent, None, C.string_at(kind).decode(), (x, y, ww, 0)))
 
     def add(self, parent, name, kind='view', box=(0, 0, 375, 320), text=None, **props):
         node = Node(name, kind, parent)
@@ -1125,11 +1127,25 @@ def test_a_title_too_long_or_stock_s_null_name(fw, world, st, text, title):
     assert world[label].text == title
 
 
-def test_an_empty_library_s_songs_page_is_one_scan_music_now_row_and_a_note(fw, world, st):
-    """Songs over an empty library (stock's panel "view" on show): the panel's picture and line hide, its
-    btn_upmusic becomes the one selected row, Scan Music Now, where the Shuffle row stood, and the note says what is
-    missing and how to fill the card. The bar under the row is the selection's (feedback_scan_bar). Songs back, the
-    note goes and the Shuffle row returns."""
+def shown_empty(world, win):
+    """win's empty state (feedback.c empty_state) as shown: (glyph, title, hint), else None. Its view is insensitive:
+    a row beside it keeps its taps."""
+    art = world.find(win, '_empty_state')
+    if not art or not world[art].visible:
+        return None
+    assert world[art].props['sensitive'] == 0
+    return tuple(world[art].props[f'_es_{k}'] for k in ('glyph', 'title', 'hint'))
+
+
+# The empty state's stack with its row (58 + 18 + 24 + 20 + 24 + 32) centred under the status row (y 40): its row's y.
+EMPTY_ROW_Y = 40 + (280 - 176) // 2 + 120 + 24
+
+
+def test_an_empty_library_s_songs_page_is_the_empty_state_over_scan_music_now(fw, world, st):
+    """Songs over an empty library (stock's panel "view" on show): the panel's picture and line hide, its btn_upmusic
+    becomes the empty state's one selected row, Scan Music Now, under "No Songs" and how to fill the card. The bar
+    under the row is the selection's (feedback_scan_bar). Songs back, the empty state goes and the Shuffle row
+    returns."""
     theme(fw)
     deques = Deques(fw)
     showlist = fw.var('fw_ctx_p_deque_showlist', C.c_uint)
@@ -1144,21 +1160,52 @@ def test_an_empty_library_s_songs_page_is_one_scan_music_now_row_and_a_note(fw, 
     songs = fw.fn('feedback_songs', None, C.c_void_p, C.c_void_p)
     songs(win, row)
     assert not world[row].visible and not world[picture].visible and not world[line].visible
-    assert world[btn].visible and world.at(view)[1] == 0 and tuple(world.at(btn)) == (0, 0, 375, 32)
+    assert world[btn].visible and world.at(view)[1] == EMPTY_ROW_Y and tuple(world.at(btn)) == (0, 0, 375, 32)
     assert world[btn].text == 'Scan Music Now' and world[btn].props['style:normal:text_align_h'] == 'left'
     assert all(world[btn].props[f'style:{s}:bg_color'] == 0 for s in ('normal', 'pressed', 'over', 'focused'))
-    note, hint = world.find(win, '_empty'), world.find(win, '_empty_hint')
-    assert world[note].text == 'No songs' and world[hint].text == 'Copy music to the SD card'
+    assert shown_empty(world, win) == ('music-notes', 'No Songs', 'Copy music to the SD card')
+    assert world[world.find(win, '_empty_state')].props['_es_top'] == EMPTY_ROW_Y - 144  # the stack's top
     canvas = Canvas(fw)
     fw.fn("feedback_scan_bar", None, C.c_void_p, C.c_void_p)(btn, canvas.p)
     assert len(canvas.rounded) == 1 and st('sel_accent', C.c_void_p).value == btn
-    writes = len(fw.calls('widget_set_text_utf8'))
+    writes = len(fw.calls('widget_set_prop_str'))
     songs(win, row)
-    assert len(fw.calls('widget_set_text_utf8')) == writes  # unchanged: not written
+    assert len(fw.calls('widget_set_prop_str')) == writes  # unchanged: not written
     world[view].visible = 0
     deques[level].append(1)
     songs(win, row)
-    assert world[row].visible and not world[note].visible
+    assert world[row].visible and shown_empty(world, win) is None
+
+
+@pytest.mark.parametrize('cls, words', [
+    (0xf00a, ('heart', 'No Favorites', 'Hold Play/Pause on a song to add it')),
+    (0xf007, ('clock-counter-clockwise', 'Nothing Played Yet', 'Songs you play show up here')),
+    (0xf008, ('chart-bar', 'No Plays Yet', 'Your most played songs show up here')),
+    (0xf009, ('sparkle', 'No Songs Added Yet', 'New music on the card shows up here')),
+    (0xf001, ('music-notes', 'No Songs', 'Copy music to the SD card'))])
+def test_an_empty_song_list_shows_its_class_s_empty_state(fw, world, cls, words):
+    theme(fw)
+    deques = Deques(fw)
+    fw.var('fw_ctx_p_deque_showlist', C.c_uint).value = deques.new()
+    C.c_int.from_address(C.addressof(fw.var('fw_ctx_g_class_type', C.c_char))).value = cls
+    win = world.window('allmusic_page')
+    row = world.add(win, 'view_navbar_allplay', box=(0, 0, 375, 32))
+    fw.fn('feedback_songs', None, C.c_void_p, C.c_void_p)(win, row)
+    assert not world[row].visible and shown_empty(world, win) == words
+    assert world[world.find(win, '_empty_state')].props['_es_top'] == 40 + (280 - 120) // 2  # no row: centred alone
+
+
+def test_an_empty_library_with_no_card_in_says_so_and_drops_the_scan_row(fw, world):
+    theme(fw)
+    deques = Deques(fw)
+    fw.var('fw_ctx_p_deque_showlist', C.c_uint).value = deques.new()
+    fw.mock('fw_access', lambda path, *_: -1 if C.string_at(path) == b'/tmp/mmc_add' else 0)
+    win = world.window('allmusic_page')
+    row = world.add(win, 'view_navbar_allplay', box=(0, 0, 375, 32))
+    view = world.add(win, 'view', box=(0, 32, 375, 190))
+    world.add(view, 'btn_upmusic', 'button', box=(44, 136, 287, 40), text='Scan Music Now')
+    fw.fn('feedback_songs', None, C.c_void_p, C.c_void_p)(win, row)
+    assert not world[view].visible and shown_empty(world, win) == ('sd-card', 'No SD Card', 'Insert an SD card with music')
 
 
 @pytest.mark.parametrize('layer, text, title', [(1, 'SD', 'Folders'), (2, 'SD', 'Folders'), (2, 'SD:/', 'Folders'),
@@ -2156,8 +2203,8 @@ def test_over_oleds_now_playing_the_volume_is_its_bar_between_two_speakers(fw, w
 
 def test_an_empty_folder_level_says_so(fw, world):
     """Folder (folder_page) over a level with nothing in it, an empty card or a folder with no music: stock's page
-    is its table alone, which would leave it blank. It says "No folders" with a hint, written once per change of the level's
-    emptiness, and the words go when the level has rows. Another page gets nothing."""
+    is its table alone, which would leave it blank. It shows the empty state, "No Folders", written once per change of
+    the level's emptiness, and it goes when the level has rows. Another page gets nothing."""
     theme(fw)
     deques = Deques(fw)
     showlist = fw.var('fw_ctx_p_deque_showlist', C.c_uint)
@@ -2167,16 +2214,14 @@ def test_an_empty_folder_level_says_so(fw, world):
     level = deques.new()
     showlist.value = level
     folder(win)
-    line, hint = world.find(win, '_empty'), world.find(win, '_empty_hint')
-    assert world[line].text == 'No folders' and world[hint].text == 'Copy music to the SD card'
-    assert world[line].visible and world[hint].visible
-    writes = len(fw.calls('widget_set_text_utf8'))
+    assert shown_empty(world, win) == ('folder', 'No Folders', 'Copy music to the SD card')
+    writes = len(fw.calls('widget_set_prop_str'))
     folder(win)
-    assert len(fw.calls('widget_set_text_utf8')) == writes  # unchanged: not written
+    assert len(fw.calls('widget_set_prop_str')) == writes  # unchanged: not written
     deques[level].append(1)
     folder(win)
-    assert not world[line].visible and not world[hint].visible
+    assert shown_empty(world, win) is None
     other = world.window('allmusic_page')
     deques[level].clear()
     folder(other)
-    assert not world.find(other, '_empty')
+    assert not world.find(other, '_empty_state')
