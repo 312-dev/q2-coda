@@ -9351,7 +9351,7 @@ static void thumb_poll(void) {
 
 int ringnav_sleep(void *loop) {
     splash_poll();
-    usb_ui_poll(); /* adbd's questions, --dev builds (usb_ui.c) */
+    usb_ui_poll(); /* USB and charging toasts, adbd's questions (usb_ui.c) */
     stale_heal();
     quick_poll();
     headset_poll();
@@ -9616,6 +9616,7 @@ int ringnav_input(void *wm, void *e) {
         st.touch_type = (int)type;
         st.touch_x = I(e, EVENT_X);
         st.touch_y = I(e, EVENT_Y);
+        charge_touch(type, st.touch_x, st.touch_y); /* a tap on the status battery (charging.c) */
     }
     if ((type == EVT_KEY_DOWN || type == EVT_KEY_UP || type == EVT_KEY_LONG) &&
         (key == KEY_PREV || key == KEY_NEXT || key == KEY_CENTER) && usb_prompt()) {

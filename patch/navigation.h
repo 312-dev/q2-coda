@@ -511,9 +511,13 @@ unsigned wheel_sb_alpha(void *list);
 #define BATT_KEY_PLUGGED 4u
 #define BATT_KEY_WEAK 8u
 #define BATT_KEY_LEVEL(key) ((key) >> 4)
+#define BATT_LOW_PCT 20 /* under it the fill is red and a tap says Low battery */
 void battery_slim(void *w, void *canvas, int x, int y, int bw, int bh, unsigned key);
-/* charging.c: 1 while the charger cannot keep up (no signal for it yet: always 0) */
+/* charging.c: 1 while the charger cannot keep up (no signal for it yet: always 0); ringnav_input's
+ * touches, for a tap on the status row's battery; usb_ui_poll's toasts */
 int charge_weak(void);
+void charge_touch(unsigned type, int x, int y);
+void charging_poll(void);
 /* list_marks.c: an on/off setting's switch, ending on canvas column right, centred on y
  * (settings.values.switch) */
 void switch_mark(void *canvas, int right, int y, int on, int selected);

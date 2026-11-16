@@ -558,12 +558,13 @@ static void usb_auth_paint(void *w, void *canvas) {}
 static void auth_poll(void) {}
 #endif
 
-/* ringnav_sleep: a toast usb_ui_status left, and adbd's questions. */
+/* ringnav_sleep: a toast usb_ui_status left, charging's, and adbd's questions. */
 void usb_ui_poll(void) {
     if (u.toast_text) {
         const char *glyph = u.toast_glyph, *text = u.toast_text;
         u.toast_glyph = u.toast_text = (const char *)0;
         if (g_backlight_status) toast_icon(theme_art(glyph), text);
     }
+    charging_poll(); /* charging.c's toasts */
     auth_poll();
 }

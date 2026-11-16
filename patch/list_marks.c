@@ -148,7 +148,7 @@ static void round_path(void *vg, float x, float y, float w, float h, float r) {
 
 /* BATT_SLIM: the body bw x bh at x, y, BATT_SLIM_R corners and a 1 px outline in BATT_SLIM_DIM,
  * the charge a solid fill BATT_SLIM_IN px inside it with BATT_SLIM_FILL_R corners to the level, in
- * Text Primary (red under BATT_SLIM_LOW_PCT; green on a cable that charges it or holds it full, or
+ * Text Primary (red under BATT_LOW_PCT; green on a cable that charges it or holds it full, or
  * at Charge Limit; orange on one too weak), and the nub, BATT_SLIM_NUB_W x BATT_SLIM_NUB_H, a pixel
  * past the body in BATT_SLIM_DIM. Charging, Phosphor's lightning (fill, 7 px, Text Primary) sits on
  * the body's centre with a 1 px Canvas gap cut round it where it crosses the fill; too weak, its
@@ -163,7 +163,6 @@ static void round_path(void *vg, float x, float y, float w, float h, float r) {
 #define BATT_SLIM_NUB_R 0.8f
 #define BATT_SLIM_DIM 0x6e6e6e
 #define BATT_SLIM_LOW 0xff453a /* under 20 %, the only red on any screen (docs/oled-design.md) */
-#define BATT_SLIM_LOW_PCT 20
 #define BATT_GLYPH_X 4.5f /* tools/art.py BATT_GLYPH_BOX (9 x 10) and the glyph's centre in it */
 #define BATT_GLYPH_Y 5.0f
 /* The charge fill's share of the body, in percent, for battery_now's key: the level, on the cable
@@ -173,7 +172,7 @@ static unsigned battery_fill(unsigned key) { return BATT_KEY_LEVEL(key); }
 static unsigned battery_tone(unsigned key, unsigned ink) {
     return key & BATT_KEY_WEAK                              ? BATT_WEAK_RGB
            : key & (BATT_KEY_CHARGING | BATT_KEY_PLUGGED)   ? BATT_CHARGE_RGB
-           : BATT_KEY_LEVEL(key) < BATT_SLIM_LOW_PCT        ? BATT_SLIM_LOW
+           : BATT_KEY_LEVEL(key) < BATT_LOW_PCT        ? BATT_SLIM_LOW
                                                             : ink;
 }
 /* The glyph inside the body for key, a theme image's name, or 0 for none. */

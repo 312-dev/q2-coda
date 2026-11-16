@@ -172,6 +172,8 @@ All lists share one grid.
   1 px gap in the Canvas cut round it where it crosses the fill, and no outline; a weak charger's
   `warning` (fill) takes its place the same way. Full or held at Charge Limit, the fill is green
   with no glyph. Picked as I2 from `mock_batt_inside.py` on 2026-11-15.
+- A tap on the battery (a 44 x 40 px target round its body, so at least 40 px round it) toasts
+  its state; see [Dialogs and toasts](#dialogs-and-toasts).
 
 ### Selection bar
 
@@ -498,6 +500,14 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   glass curve. It is the only raised surface in the theme. The page stays in sight round it,
   with its status row and its selection; it lasts 1.5 s (stock's own toasts their own time).
   Words in sentence case ("Playing Last", "Name can't be empty").
+- A toast with an icon keeps the 16 px each side and puts a 15 px glyph (Phosphor, fill) after the
+  left one, then 8 px before the words: 16 + 15 + 8 + words + 16. Every icon toast is this one
+  (`feedback.c` `toast_icon`: USB's, charging's), approved from `mock_batt_toasts.py` on
+  2026-11-15.
+- A tap on the status row's battery toasts its state, the glyph in its colour: "Charging · 62%"
+  (lightning, green), "Charger too weak · 41%" (warning, orange), "Charge Limit Reached (80%)" and
+  "Fully charged" (battery-full, green), "Low battery · 12%" under 20 % (battery-warning, red) and
+  otherwise "Battery 62%" (battery-high, Text Primary). No time-left estimate.
 - Every in-place action says what it did in a toast: the hold menu's Play Next ("Playing Next"),
   Play Last ("Playing Last") and Add to and Remove from Favourites ("Added to Favorites",
   "Removed from Favorites").
