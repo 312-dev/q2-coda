@@ -6622,6 +6622,10 @@ static void set_child(void *c, int row_w, int row_h, int shift) {
     widget_move_resize(c, left, y, right > left ? right - left : 0, h);
     if (tk_strcmp(widget_get_type(c), "hscroll_label")) return;
     theme_font(c, ROLE_TITLE, FONT_ROW);
+    /* a long title rests on its ellipsis and scrolls when its row is selected (marq_moved): stock's
+     * flags, which the wheel's mode leaves off (set_hscroll_label_attribute), scroll it once on
+     * every row as the page opens and never again (a Wi-Fi network's, a Bluetooth device's) */
+    hscroll_label_set_only_focus(c, 1);
     /* a set_switch theme: a stock row's text on its right side is its value (About's), in the
      * value grey as list_value's; the selection's text still wins */
     unsigned ink = T->set_switch ? T->set_value_ink[ipod_light()] : 0;

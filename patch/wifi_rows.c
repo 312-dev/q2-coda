@@ -116,16 +116,12 @@ void wifi_rows_post(void *view) {
             }
             widget_move_resize(c, right - w, 0, w, I(b, W_H));
             widget_set_visible(c, 1, 0);
-            /* the name ends before the glyphs; a long one rests on its ellipsis and scrolls when
-             * its row is selected, as every row's title (navigation.c marq_moved): stock's own
-             * flags, which the wheel's mode leaves off, have it scroll once as the page opens, on
-             * every row, and never again */
+            /* the name ends before the glyphs (set_child made it only_focus: navigation.c) */
             for (unsigned m = 0; m < k; ++m) {
                 void *t = widget_get_child(b, m);
-                if (tk_strcmp(widget_get_type(t), "hscroll_label")) continue;
-                if (I(t, W_X) + I(t, W_W) > right - w - 8)
+                if (!tk_strcmp(widget_get_type(t), "hscroll_label") &&
+                    I(t, W_X) + I(t, W_W) > right - w - 8)
                     widget_resize(t, right - w - 8 - I(t, W_X), I(t, W_H));
-                hscroll_label_set_only_focus(t, 1);
             }
         }
     }

@@ -80,9 +80,9 @@ def test_a_networks_signal_moves_to_the_right_column(fw, st, geometry, stand_in)
 
 def test_a_networks_long_name_waits_for_the_selection_on_every_row(fw, st, geometry, stand_in):
     """Stock's rows' labels carry neither focus flag under the wheel's mode, so a long name scrolled once on every row as
-    the page opened and never again, not even selected (user, 2026-11-16, on hardware and in the emulator). Each name,
-    the connected row's with its trash too, is only_focus: at rest on its ellipsis, the house marquee
-    (navigation.c marq_moved) scrolls it on the selected row."""
+    the page opened and never again, not even selected (user, 2026-11-16, on hardware and in the emulator). set_child
+    (navigation.c) makes every settings row's title only_focus, each network's name and the connected row's beside
+    its trash too: at rest on its ellipsis, the house marquee (marq_moved) scrolls it on the selected row."""
     lst, rows = wifi_list(fw, st, geometry, stand_in, searching=0)
     conn = lst.row(('image', (10, 9, O['SET_STOCK_ICON'], 52), '', b'wifi_sig4'),
                    ('hscroll_label', (72, 0, 200, STOCK_BODY), 'label'),
