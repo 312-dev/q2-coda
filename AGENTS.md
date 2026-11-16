@@ -79,6 +79,17 @@ python3 test/playback.py /tmp/q2-dev     # queue traversal and the wheel's ticks
 
 The full list of suites, with what each needs, is in [docs/building.md](docs/building.md#tests). CI (`.github/workflows/`) runs `test/unit`, `test/fw`, the host suites that need no build, and mypy; nothing that needs the stock ZIP runs there, so run `test/patch.py` yourself after a change to `patch/`.
 
+## Working beside other agents
+
+Many agents share one 16 GB laptop: use the shared tools in [building: Fast test runs](docs/building.md#fast-test-runs), not your own copies.
+
+- Build with `B=$(python3 tools/ci/rebuild.py --dev | tail -1)`: one reused build per worktree, skipped when nothing changed. Not a new `bN` each time.
+- Test with `python3 tools/ci/affected.py --run "$B"`: what your branch's changes need. `tools/ci/patch_shards.py "$B"` and `tools/ci/fw.py` run whole suites in parallel; `test/patch.py` and `test/fw` run directly only for a serial check.
+- Wrap anything else heavy in `q2-heavy` (memory, disk, power and no-core-dump guards). Never `pytest -n auto`.
+- Borrow an emulator: `python3 tools/ci/emu_pool.py get "$B"`, `put SLOT` when done. Don't copy `~/q2-emu-server`.
+- UI work: `python3 tools/ci/q2live.py` rebuilds demo and reloads a pooled emulator on every save under `patch/`, back on your page ([building: Live reload](docs/building.md#live-reload)).
+- Integrating: `python3 tools/ci/merge_train.py BRANCH...` in the integration worktree.
+
 ## Traps
 
 - **Never read `docs/internals.md` whole.** It is 832 KB: a paragraph is one line, the longest 10,766 characters. `grep -n '^## '` for the heading, then read that line range, or `grep -o` a symbol with a few hundred characters around it.
