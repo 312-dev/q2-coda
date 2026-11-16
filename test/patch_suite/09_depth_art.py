@@ -1128,10 +1128,10 @@ def row_text(r):  # a row's label; a value row (OLED's settings.values text) rea
     return f'{t}: {v[0]}' if v else t
 m,main,_=display({},sub=0)
 kids=m.nodes[main]['children']
-assert len(kids)==8 and [row_text(r) for r in kids[2:]]==['Smart Awake','Night Shift: Off','Appearance','Cover Flow','playset_covermode','Reduce Motion']  # no Lock Screen; Enlarged Album Art, then Reduce Motion last
-keep_lit=kids[2]
-assert m.icons_set==['system_display','switch_on','display_backlight','list_into','system_display','list_into','playset_covermode','list_into','playset_covermode','switch_off','system_display','switch_off']  # Smart Awake on: its default; Reduce Motion off
-f,ctx=m.handler(m.nodes[kids[4]]['children'][0],O['EVT_CLICK']); m.calls=[]
+assert len(kids)==9 and row_text(kids[0])=='Brightness' and [row_text(r) for r in kids[3:]]==['Smart Awake','Night Shift: Off','Appearance','Cover Flow','playset_covermode','Reduce Motion']  # Brightness inline first (inline_slider.c), stock's row hidden; no Lock Screen; Enlarged Album Art, then Reduce Motion last
+keep_lit=kids[3]
+assert m.icons_set==['display_backlight','system_display','switch_on','display_backlight','list_into','system_display','list_into','playset_covermode','list_into','playset_covermode','switch_off','system_display','switch_off']  # Smart Awake on: its default; Reduce Motion off
+f,ctx=m.handler(m.nodes[kids[5]]['children'][0],O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==('systemset/display_page',None) and m.get(payload_syms['display_sub'])==0; passed()
 # Cover Flow: what changes Cover Flow alone, Sort (its picker's row, a chevron), Fast Navigation, Position Bar, then
 # Refresh Cover Flow after a 12 px gap; Controls, System's row: the wheel, the buttons and what they do.
