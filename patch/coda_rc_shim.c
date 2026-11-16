@@ -4,6 +4,8 @@
  * - starts the daemon (at boot and when the switch goes on; again if it dies) and stops it when the switch
  *   goes off: nothing listens while it is off;
  * - writes Now Playing for it to /tmp/coda-rc.now, and the queue's song ids to /tmp/coda-rc.queue;
+ *   while Bluetooth is on, Car Remote or not, Now Playing too, for q2-avrcp (patch/q2_avrcp.c), which
+ *   it starts;
  * - takes its commands from /tmp/coda-rc.cmd: play a list of song ids from one of them, or shuffled (ids in
  *   /tmp/coda-rc.list), Play, Pause, Play/Pause, Next, Previous, seek, set the volume, set shuffle and
  *   repeat, rate the playing song, play a song of the queue; and answers each in /tmp/coda-rc.ack, a
@@ -33,6 +35,8 @@
 #define CR_QUEUE_MAX 5000 /* ponytail: a longer queue lists its first 5000 to the phone */
 #define CR_LIST_MAX 20000 /* coda_rc_lib.c PLAY_MAX */
 #define CR_HEARTS_MS 5000 /* the playing song's hearts read again at least this often */
+#define AVRCP_DAEMON "/usr/bin/q2-avrcp"
+#define AVRCP_PID "/tmp/q2-avrcp.pid"
 
 static struct {
     int checked, on;
@@ -45,6 +49,7 @@ static struct {
     int toast_what;
     int hearts; /* the playing song's, as rate_car_hearts; read at hearts_at for hearts_id, hearts_gen */
     unsigned hearts_at, hearts_id, hearts_gen;
+    unsigned avrcp_at; /* q2-avrcp last checked (cr_avrcp) */
 } cr __attribute__((section(".scratch")));
 
 int coda_rc_enabled(void) {
@@ -69,6 +74,7 @@ static void cr_start(void) {
 static void cr_stop(void) {
     system("kill $(cat " CR_PID " 2>/dev/null) 2>/dev/null");
     unlink(CR_NOW);
+    cr.now_hash = 0; /* Bluetooth's q2-avrcp may want it again at once */
     unlink(CR_QUEUE);
     unlink(CR_CMD);
     unlink(CR_PAIR);
@@ -121,7 +127,7 @@ static void cr_now(void) {
     void *q = P(mcl_pdeqplaylist, 0), *r = 0;
     unsigned pos = (unsigned)I(MCL_POS, 0);
     if (q && pos < deque_size(q)) r = deque_at(q, pos);
-    cr_queue(q, pos);
+    if (cr.on) cr_queue(q, pos); /* the daemon's; q2-avrcp reads Now Playing alone */
     int status = mclGetPlayStatus(), sec = -1, total = 0;
     player_playtime_and_length(&sec, &total);
     int repeat = playback_option(1);
@@ -401,12 +407,28 @@ static void cr_pairing(void) {
     }
 }
 
+/* q2-avrcp (patch/q2_avrcp.c, docs/internals.md#track-metadata): started once Bluetooth is on, again if
+ * it died, at most every CR_RESTART_MS; it reads CR_NOW, which cr_now keeps while Bluetooth is on. It
+ * stays when Bluetooth goes off, idle until bluetoothd is back. */
+static void cr_avrcp(unsigned now) {
+    char raw[24], proc[24];
+    if (cr.avrcp_at && now - cr.avrcp_at < CR_RESTART_MS) return;
+    cr.avrcp_at = now | 1;
+    int pid = state_read(AVRCP_PID, raw, sizeof raw) ? atoi(raw + 1) : 0;
+    snprintf(proc, sizeof proc, "/proc/%d", pid);
+    if (pid <= 1 || access(proc, 0)) system("( " AVRCP_DAEMON " >/dev/null 2>&1 & )");
+}
+
 /* Every UI pass (ringnav_sleep). */
 void coda_rc_poll(void) {
     unsigned now = time_now_ms();
     if (cr.at && now - cr.at < CR_POLL_MS) return;
     cr.at = now | !now;
-    if (!coda_rc_enabled()) return;
+    if (g_bluetoothflag) cr_avrcp(now); /* Now Playing to a headset or car, Car Remote or not */
+    if (!coda_rc_enabled()) {
+        if (g_bluetoothflag) cr_now();
+        return;
+    }
     if (!cr.started_at || (now - cr.started_at >= CR_RESTART_MS && !cr_running())) cr_start();
     cr_now();
     cr_settle();

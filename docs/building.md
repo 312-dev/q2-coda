@@ -116,6 +116,7 @@ python3 test/hci_wait.py /tmp/q2-build     # the built player's futex waits for 
 python3 test/hci_ao.py /tmp/q2-build       # a natural change in the real player against a kernel-faithful PCM: reopens, a kept PCM, a dry first write
 python3 test/player/run.py                  # the new player (player/): bit-exact output, the DSP, the click and the socket protocol; builds its FFmpeg on first use, needs ffmpeg, lame and cc, no ZIP
 python3 test/bt_resample.py /tmp/q2-build  # the built player's Bluetooth resampler across a gapless change
+python3 test/q2_avrcp.py                   # q2-avrcp against a stand-in bluetoothd on a private D-Bus bus: registration, PropertiesChanged, bluetoothd back (cc, dbus-daemon, libdbus-1.so.3)
 python3 test/xfade_player.py /tmp/q2-build  # the built player's crossfade: the hold, the mix at the same and another rate, the drops
 python3 test/hci_natural.py /tmp/q2-build   # natural changes in the real player: a bit-exact seam, a bad next file, an understated length, a late preload, Crossfade's late next and moved fade
 python3 test/player_seam.py /tmp/q2-build   # AAC, Opus and Vorbis gapless trims in the real player, each format's seam and each wrong tag against stock (ffmpeg, unsquashfs)

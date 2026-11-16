@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: cars and headsets that show what's playing now get the song's title, artist, album and length from the Q2, and see when it's paused (stock sent nothing).
+  - Bluetooth: the Q2 can read a connected headset's battery level (where the headset reports it), for the status bar.
   - Bluetooth receiver (OLED): while your phone plays through the Q2, the screen shows the song's title and artist in large type under a Bluetooth circle, with the codec (LDAC, AAC…) below, instead of stock's big picture and small labels.
   - Bluetooth: the Q2 shows up as **Q2** on phones, cars and speakers instead of "Shanling Q2". Rename it in **Settings → Bluetooth → Name** on the letter strip (up to 30 characters); the new name is used at once and kept through updates.
   - Status bar: while it charges, the battery shows how full it really is. It used to fill to the end the moment the cable went in.
