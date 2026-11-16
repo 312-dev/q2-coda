@@ -925,6 +925,9 @@ static int load(menu_t *m, void *w, int recall) {
         if (st.wheel_surface == w) drop_wheel();
         prop(w, SEL, -1);
         prop(w, COUNT, m->rows);
+        /* A drag stops at the list's ends, as the wheel does: AWTK's default lets it run on past
+         * them by half the view and springs back on release (docs/internals.md#list-ends). */
+        if (m->kind == 1) widget_set_prop_int(w, "slide_limit_ratio", 0);
     }
     /* A recreated page has never seen this surface (COUNT unset) and lost its selection: put the
      * user back where they left off. A live page whose count changed resets the selection but
@@ -3805,6 +3808,16 @@ int ringnav_table_load(void *ctx, unsigned index, void *row) {
     row_faces(row);
     catalogue_bind(row, index); /* greyed when it is a server row that can't play now */
     return ret;
+}
+
+/* A drag on a virtual table (TABLE_DRAG_CALL, table_client's pointer move): stock's
+ * table_client_set_yoffset with the finger's offset held from the first row's top to the end its
+ * release scrolls to (table_client_scroll_to's: the rows less the client's height), so a drag stops
+ * at the ends instead of running on and springing back (docs/internals.md#list-ends). */
+int ringnav_table_drag(void *w, int y) {
+    int end = I(w, TABLE_ROWS) * I(w, ROW_HEIGHT) - I(w, W_H);
+    if (y > end) y = end;
+    return table_client_set_yoffset(w, y < 0 ? 0 : y);
 }
 
 /* Canvas text in the theme's list title face where it has the characters, else in its fallbacks as

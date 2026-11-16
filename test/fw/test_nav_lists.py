@@ -952,6 +952,25 @@ def test_a_virtual_table_recalls_its_logical_row(fw, ui):
     assert again.selected == 40 and scrolled and 0 <= ROW_H * 40 - scrolled[-1] <= VIEW_H - ROW_H
 
 
+@pytest.mark.parametrize('finger, top', [(-90, 0), (0, 0), (ROW_H * 30, ROW_H * 30), (ROW_H * 200, ROW_H * 100 - VIEW_H)])
+def test_a_drag_on_a_virtual_table_stops_at_its_ends(fw, ui, finger, top):
+    """TABLE_DRAG_CALL: table_client's pointer move hands its unbounded offset to ringnav_table_drag, which keeps it
+    from the first row's top to the end its release scrolls to (the rows less the client's height): nothing springs
+    back."""
+    table = Table(fw, ui, 100)
+    paint(fw, table)
+    drag = fw.fn('ringnav_table_drag', C.c_int, C.c_void_p, C.c_int)
+    drag(table.client.at, finger)
+    assert table.client.int(O['TABLE_TOP']) == top
+
+
+def test_a_list_takes_no_overscroll_once_bound(fw, ui):
+    """AWTK lets a drag run half a view past a scroll view's end and springs it back: a list's is 0."""
+    page = Page(ui, titles(30))
+    paint(fw, page)
+    assert page.view.props[b'slide_limit_ratio'] == 0
+
+
 # Home's carousel: one animator, retargeted tick by tick.
 ANIM_X_TO, ANIM_DURATION, SLIDE_OFFSET, SLIDE_INDEX = O['ANIM_X_TO'], O['ANIM_DURATION'], O['SLIDE_OFFSET'], O['SLIDE_INDEX']
 
