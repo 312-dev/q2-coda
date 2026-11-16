@@ -215,7 +215,7 @@ extern void coverflow_paint(void *w, void *canvas), video_poll(void);
 extern int video_on(void), video_click(const char *path);
 extern void games_paint(void *w, void *canvas);
 extern void spot_poll(void), spot_paint(void *w, void *canvas), *spot_art(void);
-extern void up_next(int (*keyup)(void *, void *));
+extern void up_next(void);
 extern int un_hold(void *top), un_key(void *top, unsigned key, int owned);
 extern void un_keydown(unsigned key), upnext_paint(void *w, void *canvas);
 extern void radio_poll(void);
@@ -6936,7 +6936,7 @@ static int qm_open(const void *unused);
 static void qm_values(void *dialog);
 static int qm_back(void *dialog, void *event) {
     if (I(event, EVENT_TYPE) == EVT_KEY_UP && I(event, EVENT_KEY) != KEY_RETURN) return 0;
-    qm_close();
+    modal_close(st.qm_dialog); /* a sheet falls away (menu_modal.c) */
     return STOP;
 }
 
@@ -7533,7 +7533,7 @@ int np_queue(const void *unused) {
         if (queue && at < deque_size(queue) && rec_hash(deque_at(queue, at)) == st.qm_forced_hash)
             playback_move(at);
     }
-    up_next(page_keyup);
+    up_next();
     return 0;
 }
 
@@ -10049,6 +10049,7 @@ int ringnav(void *ctx, void *event) {
     /* the row editors' keys, and the release of the Center hold that entered or left one */
     if (lr_edit_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
     if (cc_key_release(key)) return STOP; /* the release of a Centre hold on Control Center */
+    if (modal_closing()) return STOP; /* a menu sheet falling away (menu_modal.c) */
     if (un_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
     if (usable() && search_strip_key(window_manager_get_top_window(window_manager()), key))
         return STOP;

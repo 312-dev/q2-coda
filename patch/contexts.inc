@@ -21,7 +21,7 @@
 { "playlistsongs_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/playlist_pages.c) */
 { "addsongs_page", CTX_DYNAMIC, 0 },      /* runtime window (patch/add_songs.c) */
 { "chapters_page", CTX_DYNAMIC, 0 }, /* runtime chapter list */
-{ "upnext_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/navigation.c) */
+{ "upnext_page", CTX_DYNAMIC, 0 },   /* Up Next's menu sheet (patch/upnext.c), renamed */
 { "ratings_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/ratings.c) */
 { "era_page", CTX_DYNAMIC, 0 },       /* runtime window (patch/library_lists.c) */
 { "era_albums_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/library_lists.c) */

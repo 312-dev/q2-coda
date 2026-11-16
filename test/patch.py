@@ -3762,7 +3762,7 @@ m.press(6000); assert m.hold()==11 and m.labels()==SONG_MENU[:2]+['View Queue']+
 # A folder play's untagged record: the player's parsed title once it has parsed that file.
 m=playing_menu(); id3=syms['g_play_id3_info']; m.u.mem_write(id3,b'/p/B\0'); m.u.mem_write(id3+O['ID3_TITLE'],b'Parsed\0')
 m.press(6000); assert m.hold()==11 and m.nodes[m.title]['text']=='Parsed'; passed()
-# View Queue opens Up Next (upnext.c, a page of the payload's), not stock's queue page, and plays nothing
+# View Queue opens Up Next (upnext.c, in the menu sheet), not stock's queue page, and plays nothing
 m=playing_menu(); assert m.run(2) is None and not any(o[0]=='playerqueue_page' for o in m.opened) and m.names()==['A','B','C'] and not m.playback(); passed()
 # OLED says what an in-place action did (navigation.c's toasts): Playing Next, Added to Queue, the favourites' own.
 # Play Last lands at the end of Playing Next (playback.c), here empty: right after the playing song, as Play Next does
@@ -11919,14 +11919,14 @@ m.close(); m.calls=[]; m.rescan(); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=50_000_000)==0 and called('getAllMusic')
 m.page=m.top; assert m.texts()==['Most Played']+[x for p in zip(ranked[:3],details[:3]) for x in p]; passed()
 
-# View Queue (Now Playing's hold menu) opens Up Next (upnext.c) over the queue; its rows, holds, lifts and Clear are
-# test/fw/test_upnext.py's.
+# View Queue (Now Playing's hold menu) opens Up Next (upnext.c) in the menu sheet over the queue, its header the playing
+# song; its rows, holds, lifts and Clear are test/fw/test_upnext.py's.
 m=CoverflowMachine(page='playing_page',pos=1); q=m.deque([m.song(c) for c in 'ABCDE'])
 m.word(syms['mcl_pdeqplaylist'],q); m.word(O['MCL_POOL'],m.deque(list(range(5)),'int'))
 assert m.call(address=payload_syms['playback_set'],args=(0,1,0,0),gap=0)==1
 m.press(10); assert m.hold()==11 and 'Up Next' not in m.labels(); m.release()
 m.pick(m.labels().index('View Queue')); m.advance(0); m.page=m.top
-assert m.nodes[m.page]['name']=='upnext_page' and m.texts()[0]=='Up Next'
+assert m.nodes[m.page]['name']=='upnext_page' and m.nodes[m.page]['type']=='dialog' and any(n.get('name')=='_mm_head' for n in m.nodes.values())
 m.close(); passed()
 
 # Ratings (ratings.c rate_*): 5 hearts are stock's My Fav, 1-4 kept in /mnt/data/ringnav-ratings by listen_key with
@@ -18096,7 +18096,8 @@ for count_failed,title in (((0,False),'No Chapters'),((0,True),'No Chapters')):
 m=ShuffleMachine(); ebar=page_bar(m); empty_row(m,11); shows_empty(m,ebar,'No Plays Yet','Most Played'); passed()
 m=SpotMachine(files={}); ebar=page_bar(m); erows=stream_rows(m); f,ctx=m.handler(erows['Tidal Downloads'],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000); shows_empty(m,ebar,'No Downloads Yet','Tidal Downloads'); passed()
 m=CoverflowMachine(page='playing_page',pos=0); ebar=page_bar(m); q=m.deque([m.song('A')]); m.word(syms['mcl_pdeqplaylist'],q); m.word(O['MCL_POOL'],m.deque([0],'int')); assert m.call(address=payload_syms['playback_set'],args=(0,1,0,0),gap=0)==1
-m.press(10); assert m.hold()==11; m.release(); m.pick(m.labels().index('View Queue')); m.advance(0); m.page=m.top; shows_empty(m,ebar,'Nothing to play next','View Queue'); passed()
+m.press(10); assert m.hold()==11; m.release(); m.pick(m.labels().index('View Queue')); m.advance(0); m.page=m.top
+assert m.nodes[m.page]['name']=='upnext_page' and any(n.get('name')=='_mm_head' for n in m.nodes.values()); passed()  # never empty: the playing song heads the sheet (upnext.c)
 m=ChapterMachine(ready=False); m.open_chapters(); m.advance(50)
 f,ctx=m.handler(m.page,O['EVT_DESTROY']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
 assert m.cancelled==1

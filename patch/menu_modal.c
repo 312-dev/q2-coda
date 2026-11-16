@@ -9,12 +9,20 @@
  * they fade into the material (sheet_fade), a lit row never, and the wheel's last row ends on it.
  * A row's symbol (Phosphor, regular, tools/art.py MENU_ICONS) stands on the right column, a
  * setting's before its label with the value at the right. The list's own selection bar lights the
- * rows; a destructive row is red, its bar too (modal_red). */
+ * rows; a destructive row is red, its bar too (modal_red). Up Next (upnext.c) opens in the sheet
+ * too (modal_sheet), its rows its own heights, its header the playing song with its level bars.
+ *
+ * The sheet rises from the screen's foot over SH_RISE_MS, cubic_out, while the page behind recedes
+ * and dims and the frost fades in; Return lets it fall away over SH_CLOSE_MS, ease-in
+ * (modal_close), its keys taken meanwhile (modal_closing). Under Reduce Motion both are an
+ * SH_FADE_MS cross-fade in place (sheet_motion). */
 #include "navigation.h"
 
 extern unsigned char now_cover(void *r, const char **file); /* coverflow.c */
 extern unsigned album_key(void *r);                         /* coverflow.c */
 extern char *art_path(char *out, unsigned key, const char *suffix);
+void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind); /* artist_page.c */
+void un_bars(void *canvas, int x, int base);                            /* upnext.c */
 
 #define MODAL_ROW 32
 #define MODAL_ROWS 6
@@ -63,16 +71,20 @@ extern char *art_path(char *out, unsigned key, const char *suffix);
 #define MM_HOW "_mm_how"
 #define MM_RED "_mm_red"
 #define MM_HEAD "_mm_head" /* the header's space at the top of a list's rows */
+#define MM_OWN "_mm_own"   /* on a sheet's window: its rows keep their own heights (Up Next's) */
 
 /* The open modals, the top one last: a picker over More keeps More's (hidden) under it. Each has
- * its header: the item's name, the line under it and its cover's file:// URL, "" for none. */
+ * its header: the item's name, the line under it and its cover's file:// URL, "" for none, and
+ * whether the playing song's level bars follow the name (Up Next's). */
 #define MODAL_MAX 2
 typedef struct {
     char title[96], sub[96], url[160];
+    int bars;
 } head_t;
 static struct {
     void *win, *list, *view;
-    int top, high; /* the rows' box on screen */
+    int top, high; /* the rows' box on screen, at rest */
+    int ly, off;   /* the list's place in the window at rest, and how far the motion has it lower */
     head_t head;
 } modals[MODAL_MAX] __attribute__((section(".scratch")));
 static head_t head_next __attribute__((section(".scratch"))); /* modal_head's, for the next frame */
@@ -89,6 +101,37 @@ static const unsigned char foot_alpha[SH_H - SH_FOOT] = {
     130, 124, 118, 113, 107, 102, 96,  91,  86,  81,  76,  72,  67,  62,  58,  54,  49,  45,
     42,  38,  34,  31,  27,  24,  21,  18,  15,  13,  10,  8,   6,   4,   3,   1,   0,   0
 };
+
+/* The motion (the user's, design/menu-overlay NOTES.md "Up Next"): the sheet's rise, its fall,
+ * and their cross-fade under Reduce Motion (design/motion/MOTION.md, "Toast, confirm, sheet"). */
+#define SH_RISE_MS 260
+#define SH_CLOSE_MS 180
+#define SH_FADE_MS 150
+#define SH_FRAME_MS 16
+enum { MO_NONE, MO_WAIT, MO_RISE, MO_UP, MO_FALL };
+static struct {
+    int phase;  /* MO_WAIT: opened, its first whole paint (sheet_build) starts the rise */
+    int e, off; /* this frame's progress, 0 the page alone to 256 the sheet up; the sheet's drop */
+    unsigned start; /* the motion's start, ms */
+    unsigned timer;
+    void *win;      /* falling: the window closed at its end */
+    unsigned *page; /* the page under the sheet, whole, as its first whole paint found it */
+} mo __attribute__((section(".scratch")));
+
+/* The one place the sheet's timing and easing are taken: the progress at t ms into the rise
+ * (fall 0) or the fall (1), 0 to 256; *done once it is over. A rise is cubic_out over
+ * SH_RISE_MS, a fall an ease-in over SH_CLOSE_MS, each a straight SH_FADE_MS cross-fade under
+ * Reduce Motion. ponytail: Reduce Motion reads off here until the shared motion helper
+ * (design/motion/MOTION.md, components' anim_start and its flag) lands; this then calls it. */
+static int sheet_reduced(void) { return 0; }
+static unsigned isqrt(unsigned v);
+static int sheet_motion(unsigned t, int fall, int *done) {
+    int reduced = sheet_reduced(), ms = reduced ? SH_FADE_MS : fall ? SH_CLOSE_MS : SH_RISE_MS;
+    *done = t >= (unsigned)ms;
+    int p = *done ? 256 : (int)(t * 256 / (unsigned)ms), q = 256 - p;
+    if (reduced) return fall ? q : p;
+    return fall ? 256 - p * p / 256 : 256 - q * q / 256 * q / 256;
+}
 
 int modal_set(void) { return geom_val(V_MODAL); }
 
@@ -112,6 +155,11 @@ static int modal_gone(void *win, void *event) {
         open |= modals[i].win != 0;
     }
     if (!open && fr.buf) free(fr.buf), fr.buf = (unsigned *)0;
+    if (!open) { /* and its motion, done or not */
+        stop_timer(&mo.timer);
+        if (mo.page) free(mo.page);
+        mo.page = (unsigned *)0, mo.win = (void *)0, mo.phase = MO_NONE, mo.e = 256, mo.off = 0;
+    }
     if (!open && fr.fb) {
         for (unsigned i = 0; i < SH_W * SH_H; ++i) fr.fb[i] = 0xff000000u;
         fr.fb = (unsigned *)0;
@@ -148,6 +196,77 @@ int modal_sel_height(void *view, int h) {
     return end > 0 && end < h ? end : h;
 }
 
+/* This frame's progress, 256 with nothing moving, and how far below its place the sheet is */
+static int mo_e(void) {
+    return mo.phase == MO_WAIT || mo.phase == MO_RISE || mo.phase == MO_FALL ? mo.e : 256;
+}
+static int mo_off(void) { return mo_e() < 256 && !sheet_reduced() ? mo.off : 0; }
+
+/* Modal k's rows off below their place: its list moved, or a dialog of rows alone's rows. */
+static void sheet_shift(int k, int off) {
+    int by = off - modals[k].off;
+    void *win = modals[k].win;
+    modals[k].off = off;
+    if (!by || !win) return;
+    if (modals[k].list) {
+        void *l = modals[k].list;
+        widget_move_resize(l, I(l, W_X), modals[k].ly + off, I(l, W_W), I(l, W_H));
+        return;
+    }
+    for (unsigned i = 0, n = widget_count_children(win); i < n; ++i) {
+        void *c = widget_get_child(win, i);
+        const char *type = widget_get_type(c);
+        if (widget_get_visible(c) && (!tk_strcmp(type, "list_item") || !tk_strcmp(type, "label")))
+            widget_move_resize(c, I(c, W_X), I(c, W_Y) + by, I(c, W_W), I(c, W_H));
+    }
+}
+
+/* Each frame of the motion: its progress from the clock, the rows moved with the sheet, the screen
+ * painted again; at the rise's end the sheet stands, at the fall's the window closes. */
+static int sheet_tick(const void *unused) {
+    int done = 0, fall = mo.phase == MO_FALL;
+    if (mo.phase != MO_RISE && !fall) return mo.timer = 0, 0;
+    mo.e = sheet_motion((unsigned)time_now_ms() - mo.start, fall, &done);
+    mo.off = (SH_H - SH_TOP) * (256 - mo.e) / 256;
+    if (done && !fall) mo.phase = MO_UP;
+    for (int k = 0; k < MODAL_MAX; ++k)
+        if (modals[k].win) sheet_shift(k, mo_off());
+    void *top = window_manager_get_top_window(window_manager());
+    if (top) widget_invalidate_force(top, (void *)0);
+    if (!done) return 8; /* RET_REPEAT */
+    mo.timer = 0;
+    if (fall && mo.win) window_close(mo.win); /* modal_gone ends the motion */
+    return 0;
+}
+
+/* The first sheet opened: below the screen, until its first whole paint starts the rise */
+static void sheet_wait(void) {
+    stop_timer(&mo.timer);
+    mo.phase = MO_WAIT, mo.e = 0, mo.off = SH_H - SH_TOP, mo.win = (void *)0;
+}
+
+/* A sheet is falling away: navigation.c's key filter takes every key meanwhile. */
+int modal_closing(void) { return mo.phase == MO_FALL; }
+
+/* Win closed as a sheet does: it falls away, then closes (sheet_tick). At once when the motion
+ * can't run (no material yet, a picker over another sheet) or win is no sheet. A fall during
+ * the rise starts from where the rise has the sheet. */
+void modal_close(void *win) {
+    int open = 0;
+    for (int k = 0; k < MODAL_MAX; ++k) open += modals[k].win != 0;
+    if (mo.phase == MO_FALL) return;
+    if (!win || open != 1 || !modal_win(win) || !fr.buf || !mo.page ||
+        (mo.phase != MO_UP && mo.phase != MO_RISE)) {
+        if (win) window_close(win);
+        return;
+    }
+    int e = mo_e(), reduced = sheet_reduced(), ms = reduced ? SH_FADE_MS : SH_CLOSE_MS,
+        p = reduced ? 256 - e : (int)isqrt((unsigned)(256 * (256 - e))); /* the fall's own place */
+    mo.phase = MO_FALL, mo.win = win;
+    mo.start = (unsigned)time_now_ms() - (unsigned)(p * ms / 256);
+    if (!mo.timer) mo.timer = timer_add(sheet_tick, (void *)0, SH_FRAME_MS);
+}
+
 /* A 12 px space in the rows, never a rule; it is no row (nothing to click), so the wheel steps
  * over it. */
 void *modal_gap(void *view) {
@@ -162,7 +281,7 @@ void modal_head(const char *title, const char *sub, void *r) {
     head_t *h = &head_next;
     tk_snprintf(h->title, sizeof h->title, "%s", title ? title : "");
     tk_snprintf(h->sub, sizeof h->sub, "%s", sub ? sub : "");
-    h->url[0] = 0;
+    h->url[0] = 0, h->bars = 0;
     const char *file = (const char *)0;
     if (!r) return;
     if (now_cover(r, &file) && file && *file) {
@@ -175,6 +294,9 @@ void modal_head(const char *title, const char *sub, void *r) {
         if (file_size(h->url + 7) <= 0) h->url[0] = 0;
     }
 }
+
+/* ... and the playing song's level bars after its name (Up Next's header, upnext.c un_bars) */
+void modal_head_bars(void) { head_next.bars = 1; }
 
 /* Row lays out its label for the sheet and keeps its symbol and value for modal_row_paint: an
  * action's label from the text column to its symbol, a setting's or choice's after its leading
@@ -232,17 +354,24 @@ void modal_frame(void *win, void *list) {
     int k = 0; /* its own slot, else a free one, else the last */
     while (k < MODAL_MAX && modals[k].win != win) ++k;
     if (k == MODAL_MAX) {
+        int first = 1; /* the first sheet rises; a picker over one shows in its place */
+        for (int j = 0; j < MODAL_MAX; ++j) first &= !modals[j].win;
         k = 0;
         while (k < MODAL_MAX - 1 && modals[k].win) ++k;
         widget_on(win, EVT_DESTROY, modal_gone, win);
         modals[k].head = head_next;
         for (int j = 0; !head_next.title[0] && j < MODAL_MAX; ++j)
             if (j != k && modals[j].win) modals[k].head = modals[j].head; /* a picker's */
-        head_next.title[0] = head_next.sub[0] = head_next.url[0] = 0;
+        head_next.title[0] = head_next.sub[0] = head_next.url[0] = 0, head_next.bars = 0;
+        modals[k].off = 0;
+        if (first) sheet_wait();
+    } else if (head_next.title[0]) { /* framed again with a new header (Up Next's next song) */
+        modals[k].head = head_next;
+        head_next.title[0] = head_next.sub[0] = head_next.url[0] = 0, head_next.bars = 0;
     }
     int head = modals[k].head.title[0] ? SH_HEAD : 0, wy = screen_y(win),
         top = (head ? SH_CONTENT : SH_BARE) - wy, w = modal_row_w(), y = list ? 0 : top + head,
-        all = 0;
+        all = 0, own = widget_get_prop_int(win, MM_OWN, 0);
     void *space = list ? widget_lookup(view, MM_HEAD, 0) : (void *)0;
     if (list && head && !space) {
         space = label_create(view, 0, 0, w, head);
@@ -261,8 +390,11 @@ void modal_frame(void *win, void *list) {
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *c = widget_get_child(view, i);
         const char *type = widget_get_type(c);
-        int gap = !tk_strcmp(type, "label"), h = c == space ? head : gap ? MODAL_GAP : MODAL_ROW;
-        if (gap && c != space && all > MODAL_ROWS) widget_set_visible(c, 0, 0);
+        int gap = !tk_strcmp(type, "label"), h = c == space ? head
+                                                 : own      ? I(c, W_H)
+                                                 : gap      ? MODAL_GAP
+                                                            : MODAL_ROW;
+        if (gap && c != space && !own && all > MODAL_ROWS) widget_set_visible(c, 0, 0);
         if (!widget_get_visible(c) || (!list && !gap && tk_strcmp(type, "list_item"))) continue;
         widget_move_resize(c, 0, y, w, h);
         y += h;
@@ -276,7 +408,9 @@ void modal_frame(void *win, void *list) {
         widget_set_prop_str(view, "self_layout", "default(x=0,y=0,w=100%,h=100%)");
     }
     modals[k].win = win, modals[k].list = list, modals[k].view = view;
-    modals[k].top = top + wy, modals[k].high = y;
+    modals[k].top = top + wy, modals[k].high = y, modals[k].ly = top;
+    modals[k].off = 0; /* laid out at rest: the motion's drop again */
+    sheet_shift(k, mo_off());
     st.touch_mode = 0; /* opens on its row, lit, however it was asked for */
     timer_add(modal_lit, (void *)0, 0);
 }
@@ -311,11 +445,12 @@ static void sheet_clip(void *canvas, int c[4]) {
 static unsigned px_at(const unsigned *fb, int x, int y) {
     return x < 0 || y < 0 || x >= SH_W || y >= SH_H ? 0 : fb[y * SH_W + x];
 }
-/* The page receding: where screen pixel d's centre comes from, in 1/256 px, about the centre
- * twice_c / 2 */
-static int src_at(int d, int twice_c) {
-    return (2 * d + 1 - twice_c) * 128 * 256 / SH_SHRINK + twice_c * 128 - 128;
+/* The page receding to scale/256: where screen pixel d's centre comes from, in 1/256 px, about
+ * the centre twice_c / 2 */
+static int src_at_by(int d, int twice_c, int scale) {
+    return (2 * d + 1 - twice_c) * 128 * 256 / scale + twice_c * 128 - 128;
 }
+static int src_at(int d, int twice_c) { return src_at_by(d, twice_c, SH_SHRINK); }
 static unsigned bilerp(const unsigned *fb, int sx, int sy) {
     int x = sx >> 8, y = sy >> 8, fx = sx & 255, fy = sy & 255;
     unsigned a = px_at(fb, x, y), b = px_at(fb, x + 1, y), c = px_at(fb, x, y + 1),
@@ -426,8 +561,62 @@ static unsigned sheet_mix(unsigned under, unsigned over, int a) { /* over at a/2
     return out;
 }
 
+/* The rise from the sheet's first whole paint, fb the page alone: kept for the motion's frames.
+ * Without the memory for it the sheet stands at once. */
+static void sheet_start(const unsigned *fb) {
+    if (mo.phase != MO_WAIT) return;
+    mo.page = fr.buf ? calloc(SH_W * SH_H, sizeof *mo.page) : (unsigned *)0;
+    if (mo.page) {
+        for (unsigned i = 0; i < SH_W * SH_H; ++i) mo.page[i] = fb[i];
+        mo.phase = MO_RISE, mo.e = 0, mo.start = (unsigned)time_now_ms();
+        if (!mo.timer) mo.timer = timer_add(sheet_tick, (void *)0, SH_FRAME_MS);
+        return;
+    }
+    mo.phase = MO_UP;
+    for (int k = 0; k < MODAL_MAX; ++k)
+        if (modals[k].win) sheet_shift(k, 0);
+}
+
+/* A frame of the motion, e of 256 and the sheet off px low, in the clip c: the page receding as
+ * far as e has it (scaled from the whole page kept, dimmed), the sheet's material faded in over it
+ * by e, its top corners; under Reduce Motion the sheet in its place, faded in from the page by e
+ * above the rows' box (modal_after fades the box). */
+static void sheet_frame(unsigned *fb, const int c[4], int e, int off, int rows_top, int light) {
+    const unsigned *mat = fr.buf + SH_STRIP * SH_W;
+    if (sheet_reduced()) {
+        for (int y = c[1]; y < c[3] && y < rows_top; ++y)
+            for (int x = c[0]; x < c[2]; ++x)
+                fb[y * SH_W + x] = sheet_mix(mo.page[y * SH_W + x], fb[y * SH_W + x], e);
+        return;
+    }
+    int scale = 256 - (256 - SH_SHRINK) * e / 256, keep = light ? SH_PAGE_L : SH_PAGE,
+        dim = 256 - (256 - keep) * e / 256, top = SH_TOP + off, sx[SH_W];
+    for (int x = c[0]; x < c[2]; ++x) sx[x] = src_at_by(x, SH_W, scale);
+    for (int y = c[1]; y < c[3]; ++y) {
+        unsigned *d = fb + y * SH_W;
+        const unsigned *m = mat + (y - SH_TOP) * SH_W;
+        int sy = src_at_by(y, SH_H, scale), edge = y - top;
+        for (int x = c[0]; x < c[2]; ++x) {
+            unsigned b = bilerp(mo.page, sx[x], sy), page = 0xff000000u;
+            for (int s = 0; s < 24; s += 8) page |= ((b >> s & 255) * (unsigned)dim >> 8) << s;
+            if (edge < 0) {
+                d[x] = page;
+                continue;
+            }
+            unsigned sheet = sheet_mix(page, m[x], e);
+            if (edge < SH_R) {
+                int r = fr.edge[edge], l = clampi(16 * (x + 1) - r, 0, 16),
+                    rr = clampi(16 * (SH_W - x) - r, 0, 16);
+                sheet = sheet_mix(page, sheet, 16 * (l < rr ? l : rr));
+            }
+            d[x] = sheet;
+        }
+    }
+}
+
 /* The page receding and the sheet, under an open modal's rows; the C2 sheet (flat, the page
- * dimmed in place) until the material is made, and on a window's snapshot. */
+ * dimmed in place) until the material is made, and on a window's snapshot. While the sheet
+ * rises or falls, the frame of the motion (sheet_frame). */
 void modal_paint(void *w, void *canvas) {
     int i = 0;
     while (i < MODAL_MAX && (!w || modals[i].win != w)) ++i;
@@ -438,9 +627,24 @@ void modal_paint(void *w, void *canvas) {
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), *fb = sheet_fb(canvas);
     int c[4], light = ipod_light(), wy = screen_y(w);
     sheet_clip(canvas, c);
-    if (fb && !fr.buf && !c[0] && !c[1] && c[2] == SH_W && c[3] == SH_H) sheet_build(fb);
+    if (fb && !fr.buf && !c[0] && !c[1] && c[2] == SH_W && c[3] == SH_H)
+        sheet_build(fb), sheet_start(fb);
     if (fb) fr.fb = fb;
-    if (fb && fr.buf) {
+    int e = mo_e(), off = mo_off();
+    if (fb && fr.buf && mo.page && (e < 256 || mo.phase == MO_FALL)) {
+        int rows_top = modals[i].list ? screen_y(modals[i].view) : SH_TOP;
+        if (!sheet_reduced()) {
+            sheet_frame(fb, c, e, off, rows_top, light);
+        } else {
+            /* the sheet in its place, then faded in from the page above the rows */
+            int was = mo.phase;
+            mo.phase = MO_UP;
+            modal_paint(w, canvas);
+            mo.phase = was;
+            sheet_frame(fb, c, e, 0, rows_top, light);
+            return;
+        }
+    } else if (fb && fr.buf) {
         const unsigned *mat = fr.buf + SH_STRIP * SH_W;
         for (int y = c[1]; y < c[3]; ++y) {
             unsigned *d = fb + y * SH_W;
@@ -463,9 +667,34 @@ void modal_paint(void *w, void *canvas) {
         for (int y = 0; y < SH_H - SH_TOP; ++y)
             round_row(canvas, &sheet, SH_R, y, 0xff000000u | flip_if(light, MODAL_FILL));
     }
-    rect_t grab = { SH_W / 2 - 18, SH_GRAB_Y - wy, 36, 5 };
+    rect_t grab = { SH_W / 2 - 18, SH_GRAB_Y + off - wy, 36, 5 };
     fill_box(canvas, &grab, RGBA(light ? SH_GRAB_L : SH_GRAB), 2);
     stock_canvas_set_fill_color(canvas, fill);
+}
+
+/* r (canvas coordinates) rounded by R on the sheet: its corners the material under them; on a
+ * canvas not the screen's, or before the material is made, the flat sheet's colour. */
+void modal_corners(void *canvas, const rect_t *r, int R) {
+    unsigned *fb = sheet_fb(canvas);
+    if (!fb || !fr.buf) {
+        ar_corners(canvas, r, R, flip_if(ipod_light(), MODAL_FILL));
+        return;
+    }
+    int c[4], ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y);
+    sheet_clip(canvas, c);
+    for (int i = 0; i < R; ++i) {
+        int n = round_inset(R, i, r->h);
+        for (int b = 0; b < 2 && n; ++b) {
+            int y = oy + r->y + (b ? r->h - 1 - i : i);
+            if (y < c[1] || y >= c[3] || y < SH_TOP) continue;
+            for (int k = 0; k < n; ++k)
+                for (int side = 0; side < 2; ++side) {
+                    int x = ox + (side ? r->x + r->w - 1 - k : r->x + k);
+                    if (x >= c[0] && x < c[2])
+                        fb[y * SH_W + x] = fr.buf[(SH_STRIP + y - SH_TOP) * SH_W + x];
+                }
+        }
+    }
 }
 
 /* Over an open modal's rows once they are painted (navigation.c ringnav_paint), w its list's
@@ -479,12 +708,12 @@ void modal_after(void *w, void *canvas) {
         ++i;
     if (i == MODAL_MAX || !P(canvas, CANVAS_LCD)) return;
     const head_t *h = &modals[i].head;
-    int scroll = modals[i].list ? I(w, SCROLL_Y) : 0, top = modals[i].top - scroll,
+    int scroll = modals[i].list ? I(w, SCROLL_Y) : 0, top = modals[i].top - scroll + modals[i].off,
         ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), light = ipod_light(), c[4];
     unsigned *fb = sheet_fb(canvas);
     sheet_clip(canvas, c);
     /* only within the rows' box: the canvas's clip may be the window's */
-    int box0 = modals[i].list ? screen_y(w) : SH_TOP,
+    int box0 = modals[i].list ? screen_y(w) : SH_TOP + modals[i].off,
         box1 = modals[i].list ? box0 + I(modals[i].list, W_H) : SH_H; /* the view fills it */
     c[1] = c[1] > box0 ? c[1] : box0, c[3] = c[3] < box1 ? c[3] : box1;
     if (c[3] <= c[1]) return;
@@ -499,23 +728,13 @@ void modal_after(void *w, void *canvas) {
             int bw = (int)bitmap[0], bh = (int)bitmap[1], side = bw < bh ? bw : bh;
             rect_t src = { (bw - side) / 2, (bh - side) / 2, side, side };
             canvas_draw_image(canvas, bitmap, &src, &art);
-            for (int r = 0; fb && fr.buf && r < 6; ++r) { /* its corners the material's */
-                int n = round_inset(6, r, SH_ART);
-                for (int b = 0; b < 2; ++b) {
-                    int y = top + 6 + (b ? SH_ART - 1 - r : r), x0 = text_x();
-                    if (y < c[1] || y >= c[3] || y < SH_TOP) continue;
-                    for (int k = 0; k < n; ++k)
-                        for (int side2 = 0; side2 < 2; ++side2) {
-                            int x = side2 ? x0 + SH_ART - 1 - k : x0 + k;
-                            if (x >= c[0] && x < c[2])
-                                fb[y * SH_W + x] = fr.buf[(SH_STRIP + y - SH_TOP) * SH_W + x];
-                        }
-                }
-            }
+            modal_corners(canvas, &art, 6);
         } else
             fill_box(canvas, &art, RGBA(flip_if(light, 0x2c2c2e)), 6);
         int tw = right_x() - SH_NAME_X;
-        ar_text(canvas, h->title, 1, 24, 0xffffff, 0, SH_NAME_X - ox, top + 22 - oy, tw, 2);
+        int ink = ar_text(canvas, h->title, 1, 24, 0xffffff, 0, SH_NAME_X - ox, top + 22 - oy,
+                          h->bars ? tw - 24 : tw, 2);
+        if (h->bars) un_bars(canvas, SH_NAME_X - ox + ink + 7, top + 28 - oy);
         if (h->sub[0])
             ar_text(canvas, h->sub, 0, 18, MODAL_SECONDARY, 0, SH_NAME_X - ox, top + 44 - oy, tw,
                     2);
@@ -536,6 +755,10 @@ void modal_after(void *w, void *canvas) {
         const unsigned *m = mat + (y - SH_TOP) * SH_W;
         for (int x = c[0]; x < c[2]; ++x) d[x] = sheet_mix(m[x], d[x], a < 0 ? 0 : a);
     }
+    if (sheet_reduced() && mo.page && (mo_e() < 256 || mo.phase == MO_FALL)) /* the cross-fade */
+        for (int y = c[1]; y < c[3]; ++y)
+            for (int x = c[0]; x < c[2]; ++x)
+                fb[y * SH_W + x] = sheet_mix(mo.page[y * SH_W + x], fb[y * SH_W + x], mo_e());
 }
 
 static int modal_ink(void *canvas, const unsigned *s, unsigned n) {
@@ -660,7 +883,9 @@ static int pick_click(void *ctx, void *event) {
 }
 static int pick_back(void *dialog, void *event) {
     if (I(event, EVENT_TYPE) == EVT_KEY_UP && I(event, EVENT_KEY) != KEY_RETURN) return 0;
-    pick_close();
+    void *d = pk.dialog; /* a sheet of its own falls away; over another, it closes in place */
+    pk.dialog = (void *)0;
+    modal_close(d);
     return STOP;
 }
 static int pick_gone(void *dialog, void *event) {
@@ -671,25 +896,35 @@ static int pick_gone(void *dialog, void *event) {
     return 0;
 }
 
-static int modal_list(void *under, const char *const *names, const char *const *icons, int n,
-                      int current, void (*pick)(int i)) {
+/* A sheet opened empty: stock's sortselect dialog, its own keys and close gone, back (its Return
+ * and title arrow) and gone (its close) bound instead, its rows' scroll_view emptied for the
+ * caller's rows, which modal_frame then lays out. 0 when another window came up instead. */
+void *modal_sheet(int (*back)(void *dialog, void *event), int (*gone)(void *dialog, void *event)) {
     void *wm = window_manager(), *page = window_manager_get_top_window(wm);
-    if (pk.dialog || n <= 0) return 0;
     navigator_to("dialog/sortselect_dialog");
     void *dialog = window_manager_get_top_window(wm);
-    if (dialog == page) return 0;
+    if (!dialog || dialog == page) return (void *)0;
     if (tk_strcmp(widget_get_prop_str(dialog, "name", ""), "sortselect_dialog")) {
         window_close(dialog);
-        return 0;
+        return (void *)0;
     }
-    void *back = widget_lookup(dialog, "img_return", 1),
+    void *arrow = widget_lookup(dialog, "img_return", 1),
          *view = widget_lookup(dialog, "scroll_view", 1);
     widget_off_by_func(dialog, EVT_KEY_UP, (void *)SORTSELECT_KEYUP, dialog);
-    widget_off_by_func(back, EVT_CLICK, (void *)SORTSELECT_CLOSE, dialog);
-    widget_on(dialog, EVT_KEY_UP, pick_back, dialog);
-    widget_on(back, EVT_CLICK, pick_back, dialog);
-    widget_on(dialog, EVT_DESTROY, pick_gone, dialog);
+    widget_off_by_func(arrow, EVT_CLICK, (void *)SORTSELECT_CLOSE, dialog);
+    widget_on(dialog, EVT_KEY_UP, back, dialog);
+    widget_on(arrow, EVT_CLICK, back, dialog);
+    widget_on(dialog, EVT_DESTROY, gone, dialog);
     widget_destroy_children(view);
+    return dialog;
+}
+
+static int modal_list(void *under, const char *const *names, const char *const *icons, int n,
+                      int current, void (*pick)(int i)) {
+    if (pk.dialog || n <= 0) return 0;
+    void *dialog = modal_sheet(pick_back, pick_gone),
+         *view = dialog ? widget_lookup(dialog, "scroll_view", 1) : (void *)0;
+    if (!view) return 0;
     for (int i = 0; i < n; ++i) {
         void *item = list_item_create(view, 0, i * MODAL_ROW, modal_row_w(), MODAL_ROW);
         widget_use_style(item, "s_listitem_black");
@@ -763,7 +998,7 @@ static int modal_back(void *win, void *event) {
     if (I(event, EVENT_KEY) != KEY_RETURN) return 0;
     if (!widget_get_prop_int(win, "_mm_closing", 0)) { /* the list's and the dialog's: once */
         widget_set_prop_int(win, "_mm_closing", 1);
-        window_close(win);
+        modal_close(win);
     }
     return STOP;
 }

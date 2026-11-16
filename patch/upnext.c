@@ -1,6 +1,8 @@
 /* Up Next (docs/oled-design.md#up-next, docs/internals.md#queue-menu): the queue from the song
- * playing on, as Apple Music's. The playing song heads it, its level bars after its title (moving
- * while it plays, still while paused); then Playing Next, the songs Play Next, Play Last and a bump
+ * playing on, as Apple Music's, in the menu sheet (menu_modal.c modal_sheet), which rises over the
+ * page it opened from. The playing song heads it as the sheet's header, its cover, its title with
+ * its level bars after it (moving while it plays, still while paused) and its artist and album,
+ * never selected; then Playing Next, the songs Play Next, Play Last and a bump
  * queued (playback.c's pending list), under a heading whose Clear pill empties it; then the rest
  * of the queue in play order under "From <source>", the list, album or page it was played from
  * (un_source_take). Each song is a row of its cover, its title over its artist.
@@ -12,7 +14,8 @@
  * moment. Centre held on a queued row lifts it onto a raised card, as the Library's Edit Library
  * does (library_edit.c): the wheel carries it among Playing Next's rows, each showing a grip,
  * Centre puts it down there and Return puts it back. The rest of the queue is the queue's own
- * order: no arrow, no lift, and Play/Pause does nothing on it. Nothing toasts.
+ * order: no arrow, no lift, and Play/Pause does nothing on it. Nothing toasts. Return lets the
+ * sheet fall away (un_back, menu_modal.c modal_close).
  *
  * The rows are taken again whenever the queue moves on (un_poll, once a second: the song playing,
  * the queue's size and loads, Playing Next), so songs ending leave the list as they play.
@@ -22,12 +25,10 @@
 #include "playback.h"
 
 #define UN_ROWS 500
-#define UN_BOTTOM 296 /* the list's foot on screen without a list_fit set, above the glass */
-#define UN_ROW_H 46   /* a song's row */
-#define UN_NOW_H 50   /* the playing song's, and the gap under it */
-#define UN_HEAD_H 24  /* Playing Next's heading */
-#define UN_FROM_H 26  /* "From ..." and the gap over it */
-#define UN_ART 36     /* a row's cover, UN_ART_DY down, its corners UN_ART_R */
+#define UN_ROW_H 46  /* a song's row */
+#define UN_HEAD_H 24 /* Playing Next's heading */
+#define UN_FROM_H 26 /* "From ..." and the gap over it */
+#define UN_ART 36    /* a row's cover, UN_ART_DY down, its corners UN_ART_R */
 #define UN_ART_DY 5
 #define UN_ART_R 4
 #define UN_TEXT_DX 46 /* the words this far right of the text column */
@@ -38,9 +39,11 @@
 #define UN_PILL_PAD 10
 #define UN_PILL_REST 0x2c2c2e
 #define UN_PILL_INK 0x7fa6f5
-#define UN_THIRD 0x858585  /* Text Tertiary */
-#define UN_SECOND 0xababab /* Text Secondary */
-#define UN_BARS_MS 125     /* the level bars, about 8 frames a second */
+#define UN_PILL_REST_L 0xe5e5ea /* Light Mode's at rest, the tab track's grey, the accent's words  \
+                                 */
+#define UN_THIRD 0x858585       /* Text Tertiary */
+#define UN_SECOND 0xababab      /* Text Secondary */
+#define UN_BARS_MS 125          /* the level bars, about 8 frames a second */
 #define UN_POLL_MS 1000
 #define UN_HOLD_MS 550  /* Centre held this long on a queued row lifts it */
 #define UN_FRESH_MS 700 /* a bumped row's accent edge */
@@ -53,12 +56,15 @@
 #define PX_LIFT 22 /* the lifted row's title, Inter Medium, the design's 18 */
 
 void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind); /* artist_page.c */
+void *modal_sheet(int (*back)(void *, void *), int (*gone)(void *, void *));
+void modal_head_bars(void), modal_close(void *win),
+    modal_corners(void *canvas, const rect_t *r, int R);
 extern unsigned album_key(void *r);
 extern char *art_path(char *out, unsigned key, const char *suffix);
 
 static struct {
-    void *page, *view;        /* the page and its rows' scroll view, 0 when closed */
-    void *now, *head, *clear; /* the playing song's row, Playing Next's heading and its Clear */
+    void *page, *view;        /* the sheet and its rows' scroll view, 0 when closed */
+    void *now, *head, *clear; /* the header's space, Playing Next's heading and its Clear */
     unsigned idx[UN_ROWS];    /* the rows' queue indices: Playing Next's first, npn of them */
     unsigned n, npn, sig;     /* the rows, how many are queued, what they were taken from */
     unsigned poll, bars, hold, fresh_timer;
@@ -125,9 +131,9 @@ static int un_clear(void *ctx, void *event);
 /* A song's row: its cover as an image, the rest painted (upnext_paint) */
 static void *un_row(void *parent, void *r, int h, int stop, int (*click)(void *, void *)) {
     char url[520];
-    void *item =
-        click ? list_item_create(parent, 0, 0, 375, h) : label_create(parent, 0, 0, 375, h);
+    void *item = list_item_create(parent, 0, 0, 375, h);
     widget_use_style(item, "s_listitem_black");
+    widget_set_prop_int(item, "style:normal:bg_color", 0); /* on the sheet */
     widget_set_prop_int(item, "_un_stop", stop);
     char name[512];
     const char *title = r ? now_tag(r, REC_TITLE) : (const char *)0;
@@ -140,7 +146,7 @@ static void *un_row(void *parent, void *r, int h, int stop, int (*click)(void *,
         image_set_draw_type(img, 4); /* scaled to fit */
         image_base_set_image(img, cover);
     }
-    if (click) widget_on(item, EVT_CLICK, click, (void *)(long)stop);
+    widget_on(item, EVT_CLICK, click, (void *)(long)stop);
     return item;
 }
 
@@ -156,25 +162,31 @@ static void un_fill(int sel) {
     for (unsigned i = k; i < n && un.n < UN_ROWS; ++i) un.idx[un.n++] = up[i];
     un.npn = npn < UN_ROWS ? npn : UN_ROWS;
     un.sig = un_sig();
-    /* the list the page's whole height (page_list sizes it to its rows) */
-    void *view = un.view = page_list(un.page, un.page, 0, "Up Next", UN_ROWS, UN_ROW_H);
-    void *lv = P(view, W_PARENT), *wm = window_manager();
-    widget_set_prop_int(lv, "item_height", 0); /* each child its own height */
-    /* the list down to UN_BOTTOM on screen, rows of mixed heights cut there; a list_fit set's
-     * stays on to the window's foot, as page_list leaves it, its rows past the list end fading
-     * into it (navigation.c list_fade) */
-    int y = 0;
-    for (void *p = lv; p && p != wm; p = P(p, W_PARENT)) y += I(p, W_Y);
-    if (!list_fit_end() && UN_BOTTOM > y)
-        widget_resize(lv, I(lv, W_W), UN_BOTTOM - y),
-            widget_resize(view, I(view, W_W), UN_BOTTOM - y);
+    void *view = un.view;
+    widget_destroy_children(view);
+    /* the sheet's header space (menu_modal.c MM_HEAD): the playing song, drawn by the sheet */
     void *now = queue_now(&at, &size);
-    un.now = un_row(view, now, UN_NOW_H, -1, 0);
+    char name[512], sub[200];
+    const char *title = now ? now_tag(now, REC_TITLE) : (const char *)0,
+               *artist = now ? now_tag(now, REC_ARTIST) : (const char *)0,
+               *album = now ? P(now, REC_ALBUM) : (const char *)0;
+    if (now && (!title || !*title)) title = track_name(name, sizeof name, now);
+    un.now = label_create(view, 0, 0, 375, 0);
+    widget_set_text_utf8(un.now, "");
+    widget_set_name(un.now, "_mm_head");
+    widget_set_prop_str(un.now, "_un_title", title ? title : ""); /* what it reads as */
+    if (artist && *artist && album && *album)
+        tk_snprintf(sub, sizeof sub, "%s \xc2\xb7 %s", artist, album);
+    else
+        tk_snprintf(sub, sizeof sub, "%s", artist && *artist ? artist : album ? album : "");
+    modal_head(title ? title : "", sub, now);
+    modal_head_bars();
     un.head = un.clear = (void *)0;
     int stop = 0, first = -1;
     if (un.npn) {
         un.head = label_create(view, 0, 0, 375, UN_HEAD_H);
         widget_use_style(un.head, "s_listitem_black");
+        widget_set_prop_int(un.head, "style:normal:bg_color", 0); /* on the sheet */
         un.clear = list_item_create(un.head, 0, 0, 0, UN_PILL_H); /* placed when painted */
         widget_set_prop_int(un.clear, "_un_stop", stop++);
         widget_on(un.clear, EVT_CLICK, un_clear, (void *)0);
@@ -183,15 +195,13 @@ static void un_fill(int sel) {
         if (i == un.npn) {
             void *from = label_create(view, 0, 0, 375, UN_FROM_H);
             widget_use_style(from, "s_listitem_black");
+            widget_set_prop_int(from, "style:normal:bg_color", 0);
             widget_set_prop_int(from, "_un_from", 1);
         }
         if (first < 0) first = stop;
         un_row(view, un_record(un.idx[i]), UN_ROW_H, stop++, un_click);
     }
-    int h = 0;
-    for (unsigned i = 0, c = widget_count_children(view); i < c; ++i)
-        h += I(widget_get_child(view, i), W_H);
-    widget_set_prop_int(view, "virtual_h", h);
+    modal_frame(un.page, P(view, W_PARENT)); /* the rows at their own heights (MM_OWN) */
     widget_layout_children(view);
     if (un.clear) { /* Clear's pill on the heading's right, ending with the selection bar */
         int w = 0;
@@ -213,7 +223,7 @@ static void un_fill(int sel) {
 /* The row at stop, the place in un.idx it shows, -1 for Clear or none */
 static int un_place(int stop) { return stop - (un.npn ? 1 : 0); }
 
-/* A song's row pressed (Centre or a tap): it plays, as stock's View Queue row, and the page
+/* A song's row pressed (Centre or a tap): it plays, as stock's View Queue row, and the sheet
  * closes; a tap on a queued row's arrow bumps it instead. */
 static int un_bump(int k);
 static int un_click(void *ctx, void *event) {
@@ -259,8 +269,8 @@ static int un_bump(int k) {
     return 1;
 }
 
-/* A Play/Pause hold on the page (navigation.c ringnav_keylong): on a queued row past the first it
- * bumps it; on any other row it does nothing. 1 when the page took it. */
+/* A Play/Pause hold in the sheet (navigation.c ringnav_keylong): on a queued row past the first it
+ * bumps it; on any other row it does nothing. 1 when Up Next took it. */
 static int un_hold_due(const void *info) {
     (void)info;
     if (un.page && !un.lifted) un_bump(un_place(widget_get_prop_int(un.view, SEL, -1)));
@@ -363,7 +373,7 @@ static int un_poll(const void *info) {
     return 8; /* RET_REPEAT */
 }
 
-/* The level bars' frame, while the page is in front and the song plays */
+/* The level bars' frame, while the sheet is in front and the song plays */
 static int un_bars_due(const void *info) {
     (void)info;
     if (!un.page) return 0;
@@ -386,8 +396,22 @@ static int un_closed(void *ctx, void *event) {
     return 0;
 }
 
-void up_next(int (*keyup)(void *, void *)) {
-    if (un.page || !(un.page = page_open("upnext_page", un_closed, keyup))) return;
+/* Return lets the sheet fall away (a lifted row's Return is un_key's, before it) */
+static int un_back(void *dialog, void *event) {
+    if (I(event, EVENT_TYPE) == EVT_KEY_UP && I(event, EVENT_KEY) != KEY_RETURN) return 0;
+    modal_close(dialog);
+    return STOP;
+}
+
+/* Up Next opened in the sheet, named as its page was (contexts.inc, navigation.c own_order) */
+void up_next(void) {
+    if (un.page || !(un.page = modal_sheet(un_back, un_closed))) return;
+    widget_set_name(un.page, "upnext_page");
+    widget_set_prop_int(un.page, "_mm_own", 1); /* menu_modal.c MM_OWN: the rows' own heights */
+    if (!(un.view = widget_lookup(un.page, "scroll_view", 1))) {
+        window_close(un.page);
+        return;
+    }
     un_fill(-1);
     un.poll = timer_add(un_poll, (void *)0, UN_POLL_MS);
     un.bars = timer_add(un_bars_due, (void *)0, UN_BARS_MS);
@@ -399,13 +423,14 @@ static int un_lit(void *w) {
            widget_get_prop_int(un.view, SEL, -1) == widget_get_prop_int(w, "_un_stop", -2);
 }
 
-/* The playing song's level bars from x, standing on base: three, moving with un.frame */
-static void un_level(void *canvas, int x, int base, unsigned rgb) {
+/* The playing song's level bars from x, standing on base, in the accent: three, moving with
+ * un.frame (the sheet's header, menu_modal.c modal_after) */
+void un_bars(void *canvas, int x, int base) {
     static const unsigned char h[4][3] = { { 7, 11, 5 }, { 10, 6, 9 }, { 5, 9, 11 }, { 9, 12, 6 } };
     for (int i = 0; i < 3; ++i) {
         int bh = h[un.frame & 3][i];
         rect_t r = { x + i * 9 / 2, base - bh, 3, bh };
-        fill_box(canvas, &r, RGBA(rgb), 1);
+        fill_box(canvas, &r, RGBA(scheme()->tones[0] & 0xffffffu), 1);
     }
 }
 
@@ -421,17 +446,25 @@ static void un_grip(void *canvas, int y, unsigned rgb) {
 void upnext_paint(void *w, void *canvas) {
     if (!un.page || !w || !P(canvas, CANVAS_LCD)) return;
     void *parent = P(w, W_PARENT);
-    if (parent != un.view && w != un.clear) return;
+    if ((parent != un.view && w != un.clear) || w == un.now) return; /* the header: the sheet's */
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR),
-             accent = scheme()->tones[0] & 0xffffffu, black = flip_if(ipod_light(), 0);
+             accent = scheme()->tones[0] & 0xffffffu;
     int x = geom_val(V_TEXT_X), tx = x + UN_TEXT_DX, end = 375 - geom_val(V_RIGHT_X), h = I(w, W_H);
-    if (w == un.clear) {
-        int on = un_lit(w);
+    if (w == un.clear) { /* Light Mode's at rest: grey, the accent's words, final colours */
+        int on = un_lit(w), light = ipod_light() && !on, raw = st.raw_ink;
         rect_t r = { 0, 0, I(w, W_W), h };
-        fill_box(canvas, &r, RGBA(black), 0); /* the corners: the page's, not the row's own paint */
-        fill_box(canvas, &r, RGBA(on ? accent : UN_PILL_REST), UN_PILL_H / 2);
-        ar_text(canvas, "Clear", 1, PX_14, on ? 0xffffff : UN_PILL_INK, 1, I(w, W_W) - UN_PILL_PAD,
-                h / 2, I(w, W_W), 3);
+        st.raw_ink = light;
+        fill_box(canvas, &r,
+                 RGBA(on      ? accent
+                      : light ? UN_PILL_REST_L
+                              : UN_PILL_REST),
+                 UN_PILL_H / 2);
+        ar_text(canvas, "Clear", 1, PX_14,
+                on      ? 0xffffff
+                : light ? accent
+                        : UN_PILL_INK,
+                1, I(w, W_W) - UN_PILL_PAD, h / 2, I(w, W_W), 3);
+        st.raw_ink = raw;
     } else if (w == un.head) {
         ar_text(canvas, "Playing Next", 1, PX_13, UN_SECOND, 0, x, h / 2, 250, 2);
     } else if (widget_get_prop_int(w, "_un_from", 0)) {
@@ -439,29 +472,27 @@ void upnext_paint(void *w, void *canvas) {
         tk_snprintf(from, sizeof from, un.source[0] ? "From %s" : "Next in Queue", un.source);
         ar_text(canvas, from, 1, PX_13, UN_SECOND, 0, x, 2 + (h - 2) / 2, end - x, 2);
     } else {
-        int stop = widget_get_prop_int(w, "_un_stop", -2), k = w == un.now ? -1 : un_place(stop),
-            on = w != un.now && un_lit(w), lifted = un.lifted && k == un.lifted - 1;
-        unsigned at = 0, size = 0;
-        void *r = w == un.now                    ? queue_now(&at, &size)
-                  : k >= 0 && (unsigned)k < un.n ? un_record(un.idx[k])
-                                                 : (void *)0;
+        int stop = widget_get_prop_int(w, "_un_stop", -2), k = un_place(stop), on = un_lit(w),
+            lifted = un.lifted && k == un.lifted - 1;
+        void *r = k >= 0 && (unsigned)k < un.n ? un_record(un.idx[k]) : (void *)0;
         if (!r) return;
         rect_t art = { x, UN_ART_DY, UN_ART, UN_ART };
         if (!widget_count_children(w)) /* no cover: a placeholder, a shade lighter on the card */
             fill_box(canvas, &art, RGBA(lifted ? UN_LIFT_ART : UN_PILL_REST), UN_ART_R);
-        else
-            ar_corners(canvas, &art, UN_ART_R, lifted ? UN_LIFT_RGB : on ? accent : black);
+        else if (lifted || on)
+            ar_corners(canvas, &art, UN_ART_R, lifted ? UN_LIFT_RGB : accent);
+        else /* on the sheet: the material's corners */
+            modal_corners(canvas, &art, UN_ART_R);
         char name[512];
         const char *title = now_tag(r, REC_TITLE), *artist = P(r, REC_ARTIST);
         if (!title || !*title) title = track_name(name, sizeof name, r);
         int queued = k >= 0 && (unsigned)k < un.npn, right = un.lifted && queued ? 30 : 0;
         if (!right && queued && k > 0) right = 30; /* the arrow's room */
-        int tw = ar_text(canvas, title, lifted, lifted ? PX_LIFT : PX_17, 0xffffff, on, tx,
-                         UN_TITLE_Y, end - right - tx, 2);
+        ar_text(canvas, title, lifted, lifted ? PX_LIFT : PX_17, 0xffffff, on, tx, UN_TITLE_Y,
+                end - right - tx, 2);
         if (artist && *artist)
             ar_text(canvas, artist, 0, PX_13, on || lifted ? 0xffffff : UN_THIRD, on, tx,
                     UN_ARTIST_Y, end - right - tx, 2);
-        if (w == un.now) un_level(canvas, tx + tw + 7, UN_TITLE_Y + 6, accent);
         if (un.lifted && queued)
             un_grip(canvas, h / 2, lifted || on ? 0xffffff : UN_THIRD);
         else if (queued && k > 0) {

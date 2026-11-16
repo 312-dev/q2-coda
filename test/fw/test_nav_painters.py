@@ -3043,9 +3043,24 @@ def test_about_s_rows_take_the_selection_but_open_nothing(fw, st):
 
 # The menu sheet (menu_modal.c, docs/oled-design.md#menus): the page receding above it and the frosted material under
 # its rows, drawn straight into the screen's buffer once its first paint is whole.
-def sheet(fw, st, rows=10):
+class Clock:
+    """time_now_ms, and the timers the sheet's motion adds (menu_modal.c sheet_tick), run by hand."""
+    def __init__(self, fw):
+        self.now, self.timers = 10_000, []
+        fw.mock('time_now_ms', lambda *_: self.now)
+        fw.mock('timer_add', lambda f, ctx, ms, *_: self.timers.append(f) or len(self.timers))
+
+    def at(self, fw, ms):
+        """ms after the motion's start: its frame taken (the tick), as the timer would."""
+        self.now = 10_000 + ms
+        return fw.fn('menu_modal__sheet_tick', C.c_int, C.c_void_p)(None)
+
+
+def sheet(fw, st, rows=10, risen=True):
     """A sortselect dialog framed as the sheet on OLED's set, with a header, and the screen's buffer behind a canvas:
-    the page white above y 160 and blue below. Returns (ui, win, view, canvas, buf)."""
+    the page white above y 160 and blue below. Its first whole paint (the material, the rise from the page) is made at
+    the clock's 10 s; risen, the rise is run to its end and the buffer the page again. Returns (ui, win, view, canvas,
+    buf); the clock is fw.sheet_clock."""
     sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
     st('geom').value, st('settings_read').value = [g.name for g in sets].index('oled'), 1
     fw.mock('window_manager_is_animating', lambda *_: 0)
@@ -3064,6 +3079,12 @@ def sheet(fw, st, rows=10):
                    (O['LCD_FORMAT'], O['LCD_BGRA8888'])):
         C.c_int.from_buffer(canvas.lcd, off).value = v
     C.c_void_p.from_buffer(canvas.lcd, O['LCD_OFFLINE_FB']).value = C.addressof(buf)
+    fw.sheet_clock = Clock(fw)
+    if risen:
+        page = list(buf)
+        fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
+        assert fw.sheet_clock.at(fw, 1000) == 0  # done: the timer ends
+        buf[:] = page
     return ui, win, view, canvas, buf
 
 
@@ -3107,7 +3128,7 @@ def test_a_menu_sheet_recedes_the_page_and_frosts_it(fw, st):
 
 def test_a_menu_sheet_waits_for_a_whole_paint_to_make_its_material(fw, st):
     """A first paint of part of the screen can't see the whole page: the flat sheet until a whole one."""
-    ui, win, view, canvas, buf = sheet(fw, st)
+    ui, win, view, canvas, buf = sheet(fw, st, risen=False)
     canvas.clip = [0, 100, 375, 50]
     fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
     assert rgb(buf, 187, 300) == (0, 0, 255)  # the buffer untouched: drawn as rects on the canvas instead
@@ -3153,3 +3174,52 @@ def test_a_closed_sheet_leaves_nothing_on_the_screen(fw, st):
     assert rgb(buf, 187, 30) != (0, 0, 0)
     fw.fn('menu_modal__modal_gone', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     assert all(v == 0xff000000 for v in buf) and timers
+
+
+# The sheet's motion (menu_modal.c sheet_motion, docs/oled-design.md#menus): it rises 260 ms (cubic_out) from the
+# screen's foot while the page recedes and dims and the frost fades in; Return lets it fall 180 ms (ease-in), keys
+# taken meanwhile, then it closes.
+def list_y(ui, view):
+    return ui.nodes[view.addr].parent.box[1]
+
+
+def test_a_menu_sheet_rises_from_the_page(fw, st):
+    """Its first whole paint is the page alone, the rows a sheet's height (280 px) below their place; half way through
+    the rise (130 ms: cubic_out's 87.5%) the sheet's top is 35 px low, the page above it dimmed part way, the rows 35 px
+    low; at 260 ms it stands, its rows in place, the timer done, the page half dimmed and the frost under y 40."""
+    ui, win, view, canvas, buf = sheet(fw, st, risen=False)
+    page = list(buf)
+    clock = fw.sheet_clock
+    paint = fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)
+    assert list_y(ui, view) == 50 + 280
+    paint(win.addr, canvas.addr)
+    assert list(buf) == page and len(clock.timers) == 1
+    assert clock.at(fw, 130) == 8  # RET_REPEAT
+    assert list_y(ui, view) == 50 + 35
+    buf[:] = page
+    paint(win.addr, canvas.addr)
+    assert all(130 < c < 255 for c in rgb(buf, 187, 20))  # white, dimmed part way (half way at rest)
+    assert rgb(buf, 187, 70) != rgb(buf, 187, 80)  # the sheet's top edge between them: page above, frost under
+    assert clock.at(fw, 260) == 0 and list_y(ui, view) == 50
+    buf[:] = page
+    paint(win.addr, canvas.addr)
+    assert all(120 <= c <= 135 for c in rgb(buf, 187, 20)) and all(60 <= c <= 100 for c in rgb(buf, 187, 41))
+
+
+def test_return_lets_a_menu_sheet_fall_then_closes_it(fw, st):
+    """modal_close: the sheet stays open while it falls, every key taken (modal_closing); at 90 ms (ease-in: a quarter
+    gone) its rows are 70 px low; at 180 ms it closes, and the next close is at once."""
+    ui, win, view, canvas, buf = sheet(fw, st)
+    clock = fw.sheet_clock
+    fw.fn('modal_close', None, C.c_void_p)(win.addr)
+    assert not fw.calls('window_close') and fw.fn('modal_closing', C.c_int)() == 1
+    assert clock.at(fw, 1000 + 90) == 8 and list_y(ui, view) == 50 + 70
+    assert clock.at(fw, 1000 + 180) == 0
+    assert [a[0] for _, a in fw.calls('window_close')] == [win.addr]
+
+
+def test_a_sheet_closes_at_once_before_its_first_whole_paint(fw, st):
+    """With no material yet (nothing drawn of it) there is nothing to fall: it closes at once."""
+    ui, win, view, canvas, buf = sheet(fw, st, risen=False)
+    fw.fn('modal_close', None, C.c_void_p)(win.addr)
+    assert [a[0] for _, a in fw.calls('window_close')] == [win.addr] and fw.fn('modal_closing', C.c_int)() == 0

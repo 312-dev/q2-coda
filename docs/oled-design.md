@@ -478,17 +478,23 @@ has no place for keeps a place of its own:
 
 ### Up Next
 
-The queue from the song playing on (`patch/upnext.c`), titled Up Next. Rows are 46 px: the cover
-36 px square at the text column (4 px corners), the title (Inter Regular 17 px, Text Primary) over
-the artist (13 px, Text Tertiary), 46 px right of the text column.
+The queue from the song playing on (`patch/upnext.c`), in the [menu sheet](#menus) (the user's,
+2026-11-16, `design/menu-overlay/upnext`): it rises over the page it opened from as a menu does,
+whichever way it is opened (Now Playing's queue button, a swipe up on the cover, the hold menu's
+View Queue). Its rows are its own, not the menus': 46 px, the cover 36 px square at the text column
+(4 px corners), the title (Inter Regular 17 px, Text Primary) over the artist (13 px, Text
+Tertiary), 46 px right of the text column. The list runs edge to edge to the foot and fades there,
+as a menu's; a lit row's foot never passes y 282.
 
-- **The playing song** heads it, a row that takes no selection, with three Accent Blue level bars
-  (3 px wide, 4.5 px apart, up to 12 px high) 7 px after its title, moving about 8 times a second
-  while it plays and still while paused.
+- **The playing song** is the sheet's header and takes no selection: its cover, its title with
+  three Accent Blue level bars (3 px wide, 4.5 px apart, up to 12 px high) 7 px after it, moving
+  about 8 times a second while it plays and still while paused, and its artist and album
+  ("Pink Floyd · The Dark Side of the Moon").
 - **Playing Next** (Inter Medium 13 px, Text Secondary) heads the songs queued with Play Next, Play
   Last and the bump, with a **Clear** pill on its right, 22 px high, ending at x 359 with the
-  selection bar: `#2C2C2E` with `#7FA6F5` Inter Medium 14 px at rest, Accent Blue with white when
-  the wheel is on it. It is a stop of its own; Centre on it empties Playing Next, no confirm.
+  selection bar: `#2C2C2E` with `#7FA6F5` Inter Medium 14 px at rest (Light Mode `#E5E5EA`, the tab
+  track's grey, with Accent Blue words: the dark pill does not flip well), Accent Blue with white
+  when the wheel is on it. It is a stop of its own; Centre on it empties Playing Next, no confirm.
 - **From** the list, album or page the queue was played from ("Next in Queue" when that is not
   known) heads the rest of the queue in play order.
 - **The bump arrow**, Phosphor `arrow-up` (regular, 16 px, Text Tertiary; white on the selection),
@@ -499,8 +505,8 @@ the artist (13 px, Text Tertiary), 46 px right of the text column.
   its title in Inter Medium 18 px; Playing Next's songs show a grip (three 18 x 2 px bars) on the
   right column in place of their arrows; the wheel carries it, Centre puts it down, Return puts it
   back where it was.
-- Nothing toasts. Centre on a song plays it and closes Up Next. The list follows the queue as songs
-  end.
+- Nothing toasts. Centre on a song plays it and closes Up Next at once; Return lets the sheet fall
+  away. The list follows the queue as songs end, the header with it.
 
 ### Progress and sliders
 
@@ -675,10 +681,18 @@ pickers in them) open as a frosted page sheet over the page (the user's C3, 2026
   (stock's search for this song's cover and lyrics) and Get Album Lyrics (every song of its album).
 - The menu opens on its first action, lit; the wheel moves, Centre picks, Return closes it back to
   the row it came from.
-- ponytail: the sheet appears at once; the design's rise from the foot (260 ms `cubic_out`, out
-  180 ms) is not built. The name ends in an ellipsis where the design's marquee would scroll it.
+- **Motion:** the sheet rises from the screen's foot over 260 ms, `cubic_out`, while the page
+  behind recedes to 94% and dims and the frost fades in over it; Return lets it fall away over
+  180 ms, ease-in, the page coming back as it goes, and no key acts until it has gone. A picker
+  over a sheet shows in its place, and a pick closes at once. Under Reduce Motion each is a 150 ms
+  cross-fade in place. The rise starts from the sheet's first whole paint, which keeps the page
+  (480 KB) until the sheet closes.
+- ponytail: Reduce Motion reads off in `menu_modal.c` `sheet_motion` until the shared motion helper
+  and its setting (`design/motion/MOTION.md`) land; it then calls them. The name ends in an ellipsis
+  where the design's marquee would scroll it.
 
-Built by `patch/menu_modal.c` under a set with `modal` (OLED's). Now Playing's More and a
+Built by `patch/menu_modal.c` under a set with `modal` (OLED's); Up Next opens in it by
+`modal_sheet`. Now Playing's More and a
 playlist's More are stock pages, which such a set loads as dialogs (`tools/ipod.py` `modal_page`).
 
 ### Artist page

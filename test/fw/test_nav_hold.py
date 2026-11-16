@@ -1948,15 +1948,16 @@ def test_a_choice_picked_is_played_and_ticked_next_time(hold, recs, ui, fw):
 
 
 def test_oled_draws_the_menu_as_the_sheet(fw, ui, st, recs, mcl):
-    """A modal set's hold menu (menu_modal.c): no title bar, a sheet whose list runs from y 50 to the screen's foot,
-    the header's 72 px heading its rows, which span the screen 32 px each, so the first is on the house grid at y 122;
-    the settings read as settings, US English, and the menu opens on its first row."""
+    """A modal set's hold menu (menu_modal.c): no title bar, a sheet whose list runs from y 50 to the screen's foot
+    (280 px lower until its first paint starts the rise), the header's 72 px heading its rows, which span the screen
+    32 px each, so the first is on the house grid at y 122; the settings read as settings, US English, and the menu
+    opens on its first row."""
     use_set(st, 'oled')
     hold = Hold(fw, ui, st, recs, mcl).now_playing([song(recs, i) for i in range(3)])
     hold.hold()
     rows = hold.menu()
     lv = ui.lookup(hold.dialog, 'list_view', 1)
-    assert tuple(ui.nodes[lv].rect()) == (0, 50, 375, 270)
+    assert tuple(ui.nodes[lv].rect()) == (0, 50 + 280, 375, 270)  # below the screen until its first paint's rise
     assert not ui.nodes[ui.lookup(hold.dialog, 'view_navbar', 1)].visible
     head = ui.kids(hold.view())[0]
     assert ui.nodes[head].name == '_mm_head' and tuple(ui.nodes[head].rect()) == (0, 0, 375, 72)

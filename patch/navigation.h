@@ -891,6 +891,11 @@ void modal_row_paint(void *w, void *canvas, void *row, rect_t r, int selected);
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
 void modal_more(void *win);
 void modal_playlist_more(void *win);
+void *modal_sheet(int (*back)(void *dialog, void *event), int (*gone)(void *dialog, void *event));
+void modal_head_bars(void);
+void modal_close(void *win);
+int modal_closing(void);
+void modal_corners(void *canvas, const rect_t *r, int R);
 /* library_album.c: a Library album's page under the menu sheet's set (albuminfo_page,
  * playerjumpinfo_page) */
 void album_local_load(void *win);
