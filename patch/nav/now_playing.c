@@ -124,7 +124,7 @@ static void lyric_follow(void *lrc, int ms, int front, int shown) {
     }
 }
 
-/* Smart Awake (#57): Now Playing lit in front, a song playing, on its lyrics or visualizer page,
+/* Smart Awake (#57): Now Playing lit in front, a song playing, on its lyrics page,
  * or its full-screen art or ⋯'s About (np_about.c) in front, holds the screen on as the lyrics
  * wheel does; paused, it times out as usual. A guest's Now Playing in front with the guest's song
  * playing does too (guest_ui.c guest_ui_keeps_lit). */
@@ -607,7 +607,6 @@ int ringnav_playing(void *win, void *ctx) {
     } else
         st.held_sec = 0;
     np_sync(win);
-    if (NP_VISUALIZER) visualizer_attach(win); /* off: Now Playing has no visualizer page */
     return result;
 }
 

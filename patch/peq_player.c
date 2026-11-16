@@ -93,47 +93,6 @@ static int control(af_instance *af, int command, void *arg) {
     return -1;
 }
 
-/* The visualizer's tap (peq.h): what plays, after the filter, while the visualizer shows. The file
- * appears when it first opens; until then it is looked for once a second of audio. Counting frames,
- * not time, keeps an idle tap to a compare per block. */
-static void tap(const float *a, unsigned frames, int nch, int rate) {
-    static vis_tap *t;
-    static unsigned wait = ~0u, seen, idle;
-    if (!t) {
-        if (wait < (unsigned)rate) {
-            wait += frames;
-            return;
-        }
-        wait = 0;
-        int fd = open(VIS_FILE, 2); /* O_RDWR */
-        if (fd >= 0) {
-            void *p = mmap64(0, sizeof(vis_tap), 3, 1, fd, 0); /* PROT_READ | PROT_WRITE, MAP_SHARED */
-            close(fd);
-            if (p != (void *)-1) t = p;
-        }
-    }
-    if (!t) return;
-    if (t->want != seen) { /* watched again after a pause: no stale audio half a second back */
-        if (idle > (unsigned)rate) memset(t->ring, 0, sizeof t->ring);
-        seen = t->want, idle = 0;
-    }
-    else if (idle > (unsigned)rate || frames > (unsigned)rate - idle) {
-        idle = (unsigned)rate + 1;
-        return;
-    }
-    else idle += frames; /* nobody watching */
-    long long now = now_ns();
-    unsigned step = rate > 48000 ? (unsigned)rate / 44100 : 1, seq = t->seq;
-    for (unsigned i = 0; i < frames; i += step, ++seq) {
-        t->ring[seq % VIS_RING][0] = a[i * nch];
-        t->ring[seq % VIS_RING][1] = a[i * nch + (nch > 1)];
-    }
-    t->rate = (unsigned)rate / step;
-    t->stamp = now;
-    __asm__ volatile("" ::: "memory"); /* the frames before seq; the reader tolerates a torn one */
-    t->seq = seq;
-}
-
 /* Crossfade (docs/internals.md#crossfade). Near a track's end the filter holds its last seconds back,
  * putting out half of what comes in until the hold is full, so the decoder runs ahead at twice real
  * time and no gap opens. The next track's filter (a new instance: the player re-adds it at each file)
@@ -493,7 +452,6 @@ static af_data *play(af_instance *af, af_data *data) {
         frames = crossfade(s, data->audio, frames, data->nch, data->rate);
         data->len = (int)(frames * 4 * data->nch);
         if (cast) cast_tap_block(cast, s, data->audio, frames, data->nch, data->rate);
-        tap(data->audio, frames, data->nch, data->rate);
         if (mute) memset(data->audio, 0, (unsigned)data->len);
     } else if (data && data->len > 0 && !s->dsp.channels) {
         xf.len = xf.total = 0; /* DSD or the like plays between: the tail has nothing to mix under */

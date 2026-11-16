@@ -122,6 +122,19 @@ static int cr_hearts(unsigned id) {
     return cr.hearts;
 }
 
+/* Shuffle (0 Off, 1 on) and repeat (0 Off, 1 One, 2 All) as the phone has them: the hold menu's extended play
+ * while it runs (playback.c: 3 repeats the song, 4 and 5 wrap the queue, 4 within an album or folder), else Now
+ * Playing's buttons (np_bar.c), which stock's play mode and [IPOD] NPSHUFONE / NPREPOFF hold. */
+static void cr_modes(int *shuf, int *rep) {
+    if (playback_active()) {
+        int r = playback_option(1);
+        *shuf = playback_option(0) != 0, *rep = r == 3 ? 1 : r >= 4 ? 2 : 0;
+    } else {
+        int r = np_mode_repeat();
+        *shuf = np_mode_shuffle(), *rep = r == 2 ? 1 : r == 1 ? 2 : 0;
+    }
+}
+
 static void cr_now(void) {
     void *q = P(mcl_pdeqplaylist, 0), *r = 0;
     unsigned pos = (unsigned)I(MCL_POS, 0);
@@ -129,7 +142,9 @@ static void cr_now(void) {
     cr_queue(q, pos);
     int status = mclGetPlayStatus(), sec = -1, total = 0;
     player_playtime_and_length(&sec, &total);
-    int repeat = playback_option(1);
+    /* the hold menu's extended play while it runs, else Now Playing's own pair (cr_modes) */
+    int shuf, rep;
+    cr_modes(&shuf, &rep);
     char b[1400];
     unsigned n = 0;
     const char *title = r ? P(r, REC_TITLE) : 0;
@@ -138,9 +153,9 @@ static void cr_now(void) {
     put_int(b, sizeof b, &n, "pos", sec > 0 ? sec * 1000 : 0);
     put_int(b, sizeof b, &n, "len", total > 0 ? total : 0);
     put_int(b, sizeof b, &n, "id", r ? I(r, REC_ID) : 0);
-    put_int(b, sizeof b, &n, "shuffle", playback_option(0) != 0);
+    put_int(b, sizeof b, &n, "shuffle", shuf);
     /* playback.c: 3 repeats the song, 4 and 5 wrap the queue (4 within an album or folder) */
-    put_int(b, sizeof b, &n, "repeat", repeat == 3 ? 1 : repeat >= 4 ? 2 : 0);
+    put_int(b, sizeof b, &n, "repeat", rep);
     put_int(b, sizeof b, &n, "volume", g_volume);
     put_int(b, sizeof b, &n, "hearts", cr_hearts(r ? (unsigned)I(r, REC_ID) : 0));
     put_int(b, sizeof b, &n, "qpos", (int)pos);
@@ -254,10 +269,16 @@ static void cr_settle(void) {
     cr.want = 0;
 }
 
-/* SetMode's shuffle (0 Off, 1 on) and repeat (0 Off, 1 One, 2 All; -1 leave either) as the hold menu's
- * choices (navigation.c qm_run): on keeps a shuffle by album; Off keeps Play One Song or Album, else
- * Play All; All keeps Repeat Album, else Repeat All. 1 when set. */
+/* SetMode's shuffle (0 Off, 1 on) and repeat (0 Off, 1 One, 2 All; -1 leave either). While the hold menu's
+ * extended play runs, as its choices (navigation.c qm_run): on keeps a shuffle by album; Off keeps Play One
+ * Song or Album, else Play All; All keeps Repeat Album, else Repeat All. Otherwise as Now Playing's buttons
+ * (np_bar.c np_mode_set), so they show it. 1 when set. */
 static int cr_mode(int shuffle, int repeat) {
+    if (!playback_active()) {
+        int on = shuffle >= 0 ? shuffle : np_mode_shuffle();
+        np_mode_set(on, repeat == 1 ? 2 : repeat == 2 ? 1 : repeat == 0 ? 0 : np_mode_repeat());
+        return 1;
+    }
     int s = playback_option(0), r = playback_option(1), ok = 1;
     if (shuffle >= 0) ok = playback_set(0, !shuffle ? 0 : s ? s : 1);
     if (ok && repeat >= 0) ok = playback_set(1, repeat == 1 ? 3 : repeat == 2 ? (r == 4 ? 4 : 5) : r < 3 ? r : 2);

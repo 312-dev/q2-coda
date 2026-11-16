@@ -647,37 +647,12 @@ m.word(O['MCL_POS'],2); cover_is(b'/p/C',3); assert art_pass()==(reload,'play_de
 cover_is(b'/p/C',4); m.byte(syms['g_backlight_status'],0); assert art_pass()[0]==[]
 m.byte(syms['g_backlight_status'],1); assert art_pass()==(reload,'file:///tmp/externpic.jpg'); passed()
 
-# The visualizer page: a paint while not settled (a window still over Now Playing, closing) looks
-# again VIS_RETRY_MS later and repaints the page once settled; at rest (nothing heard for 1.5 s, not
-# playing) the track's title and artist show at the bottom.
-# NP_VISUALIZER (offsets.inc) 0: Now Playing has no visualizer page, and the payload no visualizer.c
-if O['NP_VISUALIZER']:
-    m=QueueMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'
-    title,artist=m.node('hscroll_label','scrlabel_title',text='Charge'),m.node('hscroll_label','scrlabel_artist',text='Elbow')
-    vslide=m.node('slide_view','slide_view',value=0); m.word(vslide+O['W_H'],186); m.word(vslide+O['W_W'],375)
-    box=m.node('view','slide_view_view',[vslide]); m.word(box+O['W_Y'],40)
-    win=m.node('window','playing_page',[box,title,artist])
-    for w,parent in ((vslide,box),(box,win),(title,win),(artist,win),(win,m.wm)): m.word(w+O['W_PARENT'],parent)
-    m.top=win; m.call(address=playing,args=(win,7,0,0),gap=0); vis=m.nodes[vslide]['children'][-1]
-    def vis_paint(): m.letters=[]; [m.call(address=HOOKS['widget_on_paint_border'][0],args=(w,m.canvas,0,0),gap=0) for w in (vis,win)]; return [l['text'] for l in m.letters]
-    m.timers.clear(); m.top=m.node('window','saverscreen_page'); vis_paint(); assert len(m.timers)==1
-    m.advance(O['VIS_RETRY_MS']); assert len(m.timers)==1
-    m.top=win; m.advance(O['VIS_RETRY_MS']-1); assert ('widget_invalidate_force',vslide) not in [c[:2] for c in m.calls]
-    m.advance(1,clear=False); assert ('widget_invalidate_force',vslide) in [c[:2] for c in m.calls] and not m.timers; passed()
-    # The tick (-mfp64 doubles: not emulated) sets vz.quiet, the struct's last word, at rest.
-    from build import run
-    quiet=[int(l.split()[1],16)+int(l.split()[2])-4 for l in run('readelf','-Ws',str(B/'patch.elf')).splitlines() if l.split()[-1:]==['vz']][0]
-    m.now+=1000; assert vis_paint()==[] and len(m.timers)==1
-    m.word(quiet,1); assert vis_paint()==['Charge \xb7 Elbow']; passed()
-    # VIS_W (343 px; 10 px a letter mocked): too long, the artist goes, then the title ends in an ellipsis.
-    m.nodes[title]['text']='T'*30; assert vis_paint()==['T'*30]
-    m.nodes[title]['text']='T'*40; assert vis_paint()==['T'*33+'\u2026']; passed()
-else:
-    m=QueueMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'
-    vslide=m.node('slide_view','slide_view',value=0); win=m.node('window','playing_page',[vslide])
-    for w,parent in ((vslide,win),(win,m.wm)): m.word(w+O['W_PARENT'],parent)
-    m.top=win; m.call(address=playing,args=(win,7,0,0),gap=0)
-    assert m.nodes[vslide]['children']==[] and not {'vz','visualizer_paint','visualizer_attach'} & set(payload_syms); passed()
+# Now Playing's swipe is its art and lyrics pages: ringnav_playing adds no page of its own.
+m=QueueMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'
+vslide=m.node('slide_view','slide_view',value=0); win=m.node('window','playing_page',[vslide])
+for w,parent in ((vslide,win),(win,m.wm)): m.word(w+O['W_PARENT'],parent)
+m.top=win; m.call(address=playing,args=(win,7,0,0),gap=0)
+assert m.nodes[vslide]['children']==[]; passed()
 
 # The full-screen art: stock init runs first; the song name and its shade show BC_MS, then fade
 # out together over BC_STEPS steps. Closing it mid-fade stops the fade.
@@ -766,7 +741,7 @@ band=(0,270,375,30+265+16-270); lo=(24,270+(30-bh)//2,327,bh); bar=(lo[0]+O['VOL
 m.nodes[m.wm]={'children':[win,dlg]}; m.top=dlg; paint(dlg)
 assert [m.nodes[w]['visible'] for w in (sv,lv,slider,elapsed)]==[0,0,1,1]
 assert [signed(m.get(sv+O[k])) for k in ('W_X','W_Y','W_W','W_H')]==list(band)
-assert m.nodes[slider]['bar_size']==bh and m.nodes[slider]['style:pressed:round_radius']==bh//2
+assert m.nodes[slider]['bar_size']==bh and m.nodes[slider]['style:pressed:round_radius']==max(bh//2,4)  # stock's slider rounds from 4
 assert [b[:5] for b in m.bands]==[(*band,color_t(0))],m.bands
 assert [(r['rect'],r['radius'],r['color']) for r in m.rounded]==[(bar,bh//2,color_t(OLED['np_track_rgb'])),((*bar[:2],bar[2]*40//100,bh),bh//2,color_t(0xffffff))],m.rounded
 cy=lo[1]+bh//2-O['VOL_SPK_PX']//2

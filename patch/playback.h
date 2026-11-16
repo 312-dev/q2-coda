@@ -1,6 +1,7 @@
 #ifndef Q2_PLAYBACK_H
 #define Q2_PLAYBACK_H
 int playback_option(int kind); /* 0 shuffle, 1 repeat, 2 grouping */
+int playback_active(void);     /* the extended play runs: playback_option holds */
 unsigned rand_below(unsigned n);
 int playback_set(int kind, int value);
 int playback_groups(void *all, int folder);

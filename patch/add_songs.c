@@ -52,8 +52,6 @@ static struct {
     char name[128];
 } as __attribute__((section(".scratch")));
 
-int add_songs_open(void) { return as.page != 0; }
-
 /* A song's place in the sets: its path's hash and its CUE start. */
 static unsigned as_key(void *r) {
     return hash_bytes(fnv(FNV_SEED, P(r, REC_PATH)), (const unsigned char *)r + REC_CUE_START, 4);

@@ -141,7 +141,7 @@ static unsigned article(const char *s) {
 }
 
 /* Text centred in r in the default font at px, in color; text color and alignment are restored,
- * the font is not (stock sets it before its own text). Shared with peq_ui.c and visualizer.c. */
+ * the font is not (stock sets it before its own text). Shared with peq_ui.c. */
 static void draw_in_face(void *canvas, const char *face, const unsigned *s, unsigned n,
                          const void *r, unsigned px, unsigned color) {
     unsigned text = (unsigned)I(P(canvas, CANVAS_LCD), LCD_TEXT_COLOR);
@@ -940,7 +940,6 @@ int ringnav_paint(void *w, void *canvas) {
     peq_paint(w, canvas);
     battery_paint(w, canvas);
     album_local_paint(w, canvas);
-    if (NP_VISUALIZER) visualizer_paint(w, canvas);
     games_paint(w, canvas);
     search_strip_paint(w, canvas);
     add_songs_paint(w, canvas);
@@ -981,8 +980,7 @@ int ringnav_paint(void *w, void *canvas) {
     bt_stopped_paint(w, canvas); /* Bluetooth Stopped (bt_stopped.c) */
     guest_ui_paint(w, canvas);   /* Guest Play's pages (guest_ui.c) */
     sw_update_paint(w, canvas);  /* SD Card Update's pages (sw_update.c) */
-    if (w && w == st.np_win && !(NP_VISUALIZER && visualizer_full()))
-        np_modes(w, canvas); /* else the page's own */
+    if (w && w == st.np_win) np_modes(w, canvas);
     coverflow_home_clip(w, canvas, 0);
     modal_after(w, canvas); /* a menu sheet's header and fades (menu_modal.c) */
     list_fade(w, canvas);

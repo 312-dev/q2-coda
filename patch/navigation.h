@@ -199,7 +199,7 @@ typedef struct {
     void *np_win, *np_album, *np_slider, *np_remain, *np_elapsed, *np_cover, *np_title, *np_artist;
     int np_meta[2];          /* face_font's answers for np_artist and np_album, -1 none yet */
     int np_bold;             /* the title's font: theme_font's face | px << 2, -1 not set yet */
-    void *np_slide, *np_lrc; /* the art/lyrics/visualizer pages and the lyric lines' scroll_view */
+    void *np_slide, *np_lrc; /* the art and lyrics pages and the lyric lines' scroll_view */
     /* Now Playing's full-screen lyrics (np_full) and where the last touch on them came down
      * (np_lyric_touch) */
     int np_full, np_tap_x, np_tap_y;
@@ -610,6 +610,7 @@ int np_about_key(void *top, unsigned key);
 int ringnav_np_info(void *win); /* navigation.c: Now Playing's details, filled */
 /* np_bar.c: Now Playing's shuffle and repeat as two controls */
 void np_mode_set(int on, int rep), np_mode_step(int repeat, int dir);
+int np_mode_shuffle(void), np_mode_repeat(void); /* repeat: 0 Off, 1 All, 2 One (np_bar.c NP_REPEAT_*) */
 /* Now Playing's Centre cycle: at rest (the wheel is the volume's), the scrubber, shuffle, repeat
  * and the rating picker (navigation.c np_centre; np_bar.c np_modes marks shuffle's and repeat's) */
 enum { NP_STAGE_REST, NP_STAGE_SHUFFLE, NP_STAGE_REPEAT };
@@ -891,7 +892,6 @@ void search_strip_note(const char *note); /* ... the next one's note: who sees t
 void playlist_page_open(int dest, const char *name);
 /* add_songs.c: Add Songs (docs/oled-design.md#add-songs) */
 void add_songs(int dest, const char *name);
-int add_songs_open(void);
 int add_songs_key(void *top, unsigned key);
 void add_songs_paint(void *w, void *canvas);
 int add_songs_mark(void *r);

@@ -82,7 +82,6 @@
 { "powermanager_page", CTX_FIXED, 0 },
 { "reset_page", CTX_FIXED, 0 },
 { "standby_page", CTX_FIXED, CHOICE },
-{ "synclink_page", CTX_FIXED, 0 },
 { "sysset_page", CTX_FIXED, 0 },
 { "wifi_page", CTX_DYNAMIC, 0 },
 { "wifiset_page", CTX_DYNAMIC, 0 },
