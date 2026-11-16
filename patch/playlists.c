@@ -586,8 +586,8 @@ static const unsigned pl_stock[PL_N] = { 0x4b46a4, 0x4b45a4, 0x4b44d4, 0x4b5e18,
 
 /* A row's place on the list's two heights: name over second line in the page rows' boxes, which
  * hold their fonts; the dots or a mark at the right edge, centred on the picker's tick's column
- * (x 346), where the selected row's chevron (x 317) shows in their place. The text ends clear of
- * whichever shows. With row art (G_ART) its art leads, in an album row's column, the text after it.
+ * (x 346), none on the selected row. The text ends clear of whichever shows. With row art (G_ART)
+ * its art leads, in an album row's column, the text after it.
  */
 #define PL_MARK_X 333 /* the tick's column, the dots' hit */
 void pl_fit(void *button) {
@@ -832,8 +832,8 @@ int pl_first(menu_t *m, int cur) {
 }
 /* Stock's row click opens More from x 286 outside select mode (0x4b48a8, 0x4b4988): a picker has
  * no More, so a tap anywhere picks; in the list the dots' column at the edge (PL_MARK_X on) stays
- * More, and a tap left of it, the chevron's column (from x 317) too, opens the playlist. The band's
- * row draws its chevron and no dots, so it opens to the edge; its More is the hold's. A pick or an
+ * More, and a tap left of it opens the playlist. The selected row has no dots, so it opens to the
+ * edge; its More is the hold's. A pick or an
  * open is a fresh click at x 0. */
 static int pl_pick(void *ctx, void *event) {
     char click[0x30];

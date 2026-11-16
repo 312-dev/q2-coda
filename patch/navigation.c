@@ -1409,8 +1409,9 @@ static void pull_begin(void *event) {
     if (!event || I(event, EVENT_Y) < QUICK_EDGE_PX) return;
     void *page = window_manager_get_top_window(window_manager());
     if (!page) return;
-    /* Local Songs' is stock's search; Internet Radio's is its own. A set with home_lib shows the
-     * Library on Home's window, in Split, whose own lists take no pull. */
+    /* Local Songs' is the Library's search (library_search_open); Internet Radio's is its own. A
+     * set with home_lib shows the Library on Home's window, in Split, whose own lists take no pull.
+     */
     const char *name = widget_get_prop_str(page, "name", "");
     int home = !tk_strcmp(name, "home_page");
     if (!home && tk_strcmp(name, "radio_page") && tk_strcmp(name, "localmusic_page")) return;
