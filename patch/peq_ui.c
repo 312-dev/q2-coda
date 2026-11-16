@@ -1,5 +1,8 @@
 #include "peq.h"
 #include "offsets.inc"
+#ifndef PEQ_HOST /* test/peq.py's shim builds a release's page */
+#include "stock.h" /* Q2POD_DEV */
+#endif
 
 extern int stock_eq_trampoline(int mode);
 int peq_chained __attribute__((section(".scratch"))); /* a peq_stock_eq since hciplayer connected: the filter is in */
@@ -94,6 +97,11 @@ static struct {
     char name[256], applied[256]; /* the draft's preset, and the active one's, when loaded from a file */
     float curve[2][GRAPH_W];      /* the left and right response, in graph rows */
 } ui __attribute__((section(".scratch")));
+
+#if Q2POD_DEV
+static int q2eq_busy __attribute__((section(".scratch")));       /* q2eq_poll's change */
+static char q2eq_said[160] __attribute__((section(".scratch"))); /* what its actions said */
+#endif
 
 static const int steps[] = {1, 10, 100, 1000};
 /* A band's types (PEQ_*), as its row and the Type picker name them */
@@ -459,28 +467,35 @@ static void write_out(void) {
     if (ok) peq_save_file(PEQ_SAVED "/.written", 0, "", 0);
 }
 
-/* ui.destination (a saved preset's path) renamed to the edit's text, kept if that starts with a
- * dot, holds a character the card's FAT cannot, names another preset or is too long to read back
- * (stock's conversion leaves it empty, 0x72a180); an empty one, as Return's cancel leaves it
- * (search_key), goes back to the list. The editor's and the active preset's names follow it. */
-static void rename_preset(void) {
+/* text as a preset's name: trailing spaces and dots dropped, as FAT drops them, and leading spaces;
+ * 0 if that is empty, starts with a dot or holds a character the card's FAT cannot. */
+static const char *preset_name(char *text) {
+    unsigned n = strlen(text);
+    while (n && (text[n - 1] == ' ' || text[n - 1] == '.')) text[--n] = 0;
+    const char *t = text;
+    while (*t == ' ') ++t;
+    for (const char *c = t; *c; ++c)
+        for (const char *bad = "/\\:*?\"<>|"; *bad; ++bad)
+            if (*c == *bad) return 0;
+    return *t && *t != '.' ? t : 0;
+}
+
+/* ui.destination (a saved preset's path) renamed to given, or with none to the edit's text, kept if
+ * that is no name (preset_name), names another preset or is too long to read back (stock's
+ * conversion leaves it empty, 0x72a180); an empty edit, as Return's cancel leaves it (search_key),
+ * goes back to the list. The editor's and the active preset's names follow it. */
+static void rename_preset(const char *given) {
     char text[256], to[600], old[256]; /* a whole name: list_files takes up to 255 bytes */
     const char *from = deleting();
     const unsigned *wide = ui.edit ? widget_get_text(ui.edit) : 0;
-    if (!ui.edit || widget_get_text_utf8(ui.edit, text, sizeof text)) text[0] = 0;
-    int typed = wide && *wide;
-    unsigned n = strlen(text);
-    while (n && (text[n - 1] == ' ' || text[n - 1] == '.')) text[--n] = 0; /* FAT drops these */
-    const char *t = text, *c;
-    while (*t == ' ') ++t;
-    for (c = t; *c; ++c) /* stops on a character FAT refuses */
-        for (const char *bad = "/\\:*?\"<>|"; *bad; ++bad)
-            if (*c == *bad) goto checked;
-checked:
+    if (given) snprintf(text, sizeof text, "%s", given);
+    else if (!ui.edit || widget_get_text_utf8(ui.edit, text, sizeof text)) text[0] = 0;
+    int typed = given || (wide && *wide);
+    const char *t = preset_name(text);
     snprintf(old, sizeof old, "%.*s", (int)strlen(from) - 4, from);
     ui.screen = PRESETS;
     if (!typed) ui.screen = RENAMES;
-    else if (!*t || *t == '.' || *c)
+    else if (!t)
         snprintf(ui.status, sizeof(ui.status), "Name not allowed; preset kept");
     else if (!strcmp(t, old)) return;
     else if (snprintf(to, sizeof to, PEQ_FOLDER "/%s.txt", t), strcasecmp(t, old) && !access(to, 0))
@@ -610,7 +625,7 @@ static int action(void *ctx, void *event) {
     else if (id == STOCK) ui.screen = STOCKS;
     else if (id == DELETE) ui.screen = DELETES;
     else if (id == RENAME) ui.screen = RENAMES;
-    else if (id == NAMED) rename_preset();
+    else if (id == NAMED) rename_preset(0);
     else if (id >= BALANCE && id <= GAIN) { ui.pick = id; ui.screen = PICK; }
     else if (id == FREQUENCY || id == QUALITY) { ui.adjust = id; ui.screen = ADJUST; }
     else if (id == SAVE) ui.screen = SAVES;
@@ -735,6 +750,10 @@ static int action(void *ctx, void *event) {
         char said[sizeof ui.status];
         memcpy(said, ui.status, sizeof said);
         ui.status[0] = 0;
+#if Q2POD_DEV
+        if (q2eq_busy) memcpy(q2eq_said, said, sizeof said); /* the reply's, not a toast */
+        else
+#endif
         toast(said);
     }
     return 0;
@@ -1094,6 +1113,7 @@ static int closed(void *ctx, void *event) {
     free(ui.names);
     ui.names = 0;
     ui.capacity = ui.file_page = 0;
+    ui.dirty = 0; /* unapplied edits go with the page; a draft q2eq made with it closed opens in it */
     return 0;
 }
 
@@ -1179,7 +1199,6 @@ int peq_page_init(void *page, void *context) {
     ui.kept[HOME][0] = 0;
     ui.status[0] = 0;
     ui.tabs = 0;
-    ui.dirty = 0;
     page_load();
     e3.focus = E3_LOW;
     e3.h = widget_get_prop_int(page, "h", client_h());
@@ -1478,3 +1497,200 @@ static void tabs_paint(void *canvas) {
     }
     stock_canvas_set_fill_color(canvas, fill);
 }
+
+#if Q2POD_DEV
+#include "q2eq.h"
+/* q2eq (q2eq.h, docs/adb.md#q2eq): a request from the helper, taken as the editor's own actions on
+ * the draft and the switches, as if its rows were pressed, so the page, EQ per Output and the player
+ * follow as they do for the wheel. Only a file that is root's alone is read. The page's screen is
+ * kept, and an open page renders again; with it closed the draft is the page's next one. */
+
+/* The action on screen's row id; what it said kept for the reply. */
+static void q2eq_act(int screen, int id) {
+    ui.screen = screen;
+    action((void *)(long)id, 0);
+}
+
+/* The picker's row for text, as a pick on it: its 0.5 dB rows, Preamp's Auto row 0; -1 off them. */
+static int q2eq_row(int pick, const char *text) {
+    double v, r;
+    ui.pick = pick;
+    if (pick == PREAMP && !strcmp(text, "auto")) return 0;
+    if (!peq_number(text, &v)) return -1;
+    r = (v - picks[pick - BALANCE].first) / picks[pick - BALANCE].step;
+    return r >= (pick == PREAMP) && r < picks[pick - BALANCE].rows && r == (int)r ? (int)r : -1;
+}
+
+/* name's row on screen, a list of the card's presets, pressed: 0 if there is none. */
+static int q2eq_preset(int screen, const char *name) {
+    unsigned n = strlen(name);
+    list_files(PEQ_FOLDER, ".txt");
+    for (int i = 0; i < ui.count; ++i)
+        if (!strncmp(ui.names[i], name, n) && !strcasecmp(ui.names[i] + n, ".txt")) {
+            ui.file_page = i / FILE_PAGE;
+            q2eq_act(screen, i % FILE_PAGE);
+            return 1;
+        }
+    return 0;
+}
+
+/* Stock's genre preset named name, or -1. */
+static int q2eq_stock(const char *name) {
+    for (int i = 0; i < STOCK_N; ++i)
+        if (!strcasecmp(stock_names[i], name)) return i;
+    return -1;
+}
+
+void q2eq_poll(void) {
+    char text[PEQ_FILE_LIMIT]; /* on the stack: the scratch state's 128 KB is shared */
+    q2eq_request rq;
+    q2eq_reply rp;
+    int st[40]; /* glibc 2.28 MIPS o32 stat: st_mode word 5, st_uid word 7 */
+    if (__xstat(3, Q2EQ_REQUEST, st) || (st[5] & 0170077) != 0100000 || st[7]) return;
+    void *f = fopen(Q2EQ_REQUEST, "rb");
+    unsigned n = f ? fread(&rq, 1, sizeof rq, f) : 0;
+    if (f) fclose(f);
+    unlink(Q2EQ_REQUEST);
+    if (n != sizeof rq) return;
+    rq.output[sizeof rq.output - 1] = rq.name[255] = rq.text[255] = 0;
+    int screen = ui.screen, band = ui.band, pick = ui.pick, adjust = ui.adjust, page = ui.file_page,
+        previous = ui.previous, tabs = ui.tabs, k = rq.op == Q2EQ_SIMPLE_PRESET ? q2eq_stock(rq.name) : -1, b = rq.band;
+    const char *fail = 0, *t;
+    if (!ui.page) page_load(); /* the draft from what plays, or the one q2eq left */
+    if (!eq_owner[0]) owner_read();
+    q2eq_busy = 1;
+    q2eq_said[0] = ui.status[0] = 0;
+    e3.status = 0;
+    peq_band *at = &ui.draft.bands[b < 0 || b >= PEQ_BANDS ? 0 : b];
+    if (ui.edit) fail = "A keyboard is up on the EQ page";
+    else if (rq.output[0] && (!ringnav_eq_output() || strcmp(rq.output, eq_owner)))
+        fail = "Only the output playing can be changed";
+    else if ((unsigned)rq.op >= Q2EQ_OPS) fail = "Unknown request";
+    else if (rq.op >= Q2EQ_BAND && rq.op <= Q2EQ_GAIN) {
+        /* The rows the main screen offers: ten, then one past the last used; opening one counts it. */
+        if (b < 0 || b >= PEQ_BANDS || (b >= 10 && b > ui.draft.count)) fail = "No such band row";
+        else if (ui.draft.count <= (ui.band = b)) ui.draft.count = b + 1;
+    }
+    if (fail) {
+    } else if (rq.op == Q2EQ_LIST) {
+        write_out();
+        list_files(PEQ_FOLDER, ".txt");
+        n = 0;
+        for (int i = 0; i < ui.count && n < sizeof text - 257; ++i)
+            n += snprintf(text + n, sizeof text - n, "%s\n", ui.names[i]);
+        peq_save_file(Q2EQ_TEXT, 0, text, n);
+    } else if (rq.op == Q2EQ_EXPORT) {
+        n = peq_export(&ui.draft, text, sizeof text);
+        if (!n || !peq_save_file(Q2EQ_TEXT, 0, text, n)) fail = "Export failed";
+    } else if (rq.op == Q2EQ_ON) {
+        eq_state s;
+        if (rq.arg == ui.draft.bypass) q2eq_act(HOME, BYPASS); /* Advanced's Enabled */
+        else if (!rq.arg && eq_load(&s) && s.mode != EQ_OFF)
+            eq_toggle(), load(&s); /* 3EQ plays: off as Control Center's EQ tile turns it */
+    } else if (rq.op == Q2EQ_PER_OUTPUT) {
+        if (rq.arg != ringnav_eq_output()) q2eq_act(HOME, PER_OUTPUT);
+    } else if (rq.op == Q2EQ_APPLY) {
+        if (ui.dirty) q2eq_act(HOME, APPLY);
+        else fail = "Nothing to apply";
+    } else if (rq.op == Q2EQ_DISCARD) {
+        ui.dirty = 0;
+        page_load();
+    } else if (rq.op == Q2EQ_RESET) q2eq_act(HOME, RESET);
+    else if (rq.op == Q2EQ_PREAMP || rq.op == Q2EQ_BALANCE || rq.op == Q2EQ_GAIN) {
+        int row = q2eq_row(rq.op == Q2EQ_GAIN ? GAIN : rq.op == Q2EQ_PREAMP ? PREAMP : BALANCE, rq.text);
+        if (row < 0 || (rq.op == Q2EQ_GAIN && !PEQ_GAINED(at->type))) fail = "Not a value the picker offers";
+        else q2eq_act(PICK, row);
+    } else if (rq.op == Q2EQ_BAND) {
+        if (!at->enabled != !rq.arg) q2eq_act(BAND, ENABLE);
+    } else if (rq.op == Q2EQ_CHANNEL) {
+        if (!at->enabled || rq.arg < 1 || rq.arg > 3) fail = "Turn the band on first";
+        else
+            while (at->enabled != rq.arg) q2eq_act(BAND, CHANNEL);
+    } else if (rq.op == Q2EQ_TYPE) {
+        if ((unsigned)rq.arg >= PEQ_TYPES) fail = "No such type";
+        else q2eq_act(TYPES, rq.arg);
+    } else if (rq.op == Q2EQ_FREQ || rq.op == Q2EQ_Q) {
+        ui.adjust = rq.op == Q2EQ_Q ? QUALITY : FREQUENCY;
+        if (!peq_number(rq.text, &ui.typed)) fail = "Not a number";
+        else q2eq_act(ADJUST, TYPED);
+    } else if (rq.op == Q2EQ_LOAD || rq.op == Q2EQ_DELETE || rq.op == Q2EQ_RENAME) {
+        if (!q2eq_preset(rq.op == Q2EQ_LOAD ? PRESETS : rq.op == Q2EQ_DELETE ? DELETES : RENAMES, rq.name))
+            fail = "No such preset";
+        else if (rq.op == Q2EQ_DELETE) q2eq_act(CONFIRM, YES);
+        else if (rq.op == Q2EQ_RENAME) rename_preset(rq.text);
+    } else if (rq.op == Q2EQ_STOCK) {
+        if ((k = q2eq_stock(rq.name)) < 0) fail = "No such stock preset";
+        else q2eq_act(STOCKS, k);
+    } else if (rq.op == Q2EQ_SAVE || rq.op == Q2EQ_SAVE_AS) {
+        if (rq.op == Q2EQ_SAVE) {
+            if ((unsigned)rq.arg < 10) q2eq_act(SAVES, rq.arg);
+            else fail = "No such slot";
+        } else if (!(t = preset_name(rq.name))) fail = "Name not allowed";
+        else {
+            ui.screen = SAVES;
+            snprintf(ui.destination, sizeof(ui.destination), PEQ_FOLDER "/%s.txt", t);
+            ui.candidate = ui.draft;
+            save_candidate(0);
+        }
+        if (ui.screen == CONFIRM) {
+            if (rq.flags & Q2EQ_REPLACE) q2eq_act(CONFIRM, YES);
+            else fail = "A preset has that name";
+        }
+    } else if (rq.op == Q2EQ_IMPORT_AS) {
+        peq_preset p;
+        peq_error e;
+        f = fopen(Q2EQ_IMPORT, "rb");
+        n = f ? fread(text, 1, sizeof text, f) : 0;
+        if (f) fclose(f);
+        if (!(t = preset_name(rq.name))) fail = "Name not allowed";
+        else if (!card_mounted()) fail = "No card";
+        else if (!peq_import_file(Q2EQ_IMPORT, &p, &e))
+            snprintf(ui.status, sizeof ui.status, "Line %u: %s", e.line, e.reason), fail = ui.status;
+        else if (snprintf(ui.destination, sizeof ui.destination, PEQ_FOLDER "/%s.txt", t),
+                 !(rq.flags & Q2EQ_REPLACE) && !access(ui.destination, 0))
+            fail = "A preset has that name";
+        else if (mkdir(PEQ_FOLDER, 0700), !peq_save_file(ui.destination, 0, text, n)) fail = "Save failed";
+        else q2eq_preset(PRESETS, t);
+        unlink(Q2EQ_IMPORT);
+    } else if (rq.op == Q2EQ_SIMPLE) {
+        if (!ui.page) e3.on = 0; /* Off holds its preamp only while the page compares */
+        e3_switch(rq.arg);
+    } else if (rq.op == Q2EQ_SIMPLE_GAIN) {
+        double v;
+        if ((unsigned)b > 2 || !peq_number(rq.text, &v)) fail = "Not a number";
+        else if (e3_take(), !e3.adjusting) fail = e3.status ? e3.status : "Switch failed; EQ unchanged";
+        else e3_set(b, v), e3_done();
+    } else if (rq.op == Q2EQ_SIMPLE_RESET) {
+        int focus = e3.focus;
+        e3.focus = E3_RESET;
+        e3_activate();
+        e3.focus = focus;
+    } else if (rq.op == Q2EQ_SIMPLE_PRESET) {
+        if (k < 0) fail = "No such stock preset";
+        else if (e3_presets(), ui.screen != STOCKS) fail = "Save failed; EQ unchanged";
+        else q2eq_act(STOCKS, k);
+    }
+    if (!fail && (rq.flags & Q2EQ_NOW) && ui.dirty) q2eq_act(HOME, APPLY);
+    q2eq_busy = 0;
+    ui.screen = screen, ui.band = band, ui.pick = pick, ui.adjust = adjust, ui.file_page = page;
+    ui.previous = previous, ui.tabs = tabs; /* the wheel stays where it was, on the tab bar too */
+    if (ui.page && !ui.timer) ui.timer = timer_add(render, 0, 1);
+    if (!ui.page) free(ui.names), ui.names = 0, ui.capacity = 0;
+    memset(&rp, 0, sizeof rp);
+    rp.nonce = rq.nonce;
+    t = fail ? fail : q2eq_said[0] ? q2eq_said : ui.status[0] ? ui.status : e3.status ? e3.status : "";
+    /* An action that failed says so in its message, as the editor's toast does. */
+    rp.ok = !fail && !strstr(t, "failed") && !strstr(t, "not allowed") && !strstr(t, "taken") &&
+            strncmp(t, "Line ", 5);
+    snprintf(rp.message, sizeof rp.message, "%s", t);
+    ui.status[0] = 0;
+    rp.page = ui.page != 0, rp.flag = g_equalizer_flag, rp.per_output = ringnav_eq_output(), rp.dirty = ui.dirty;
+    memcpy(rp.owner, eq_owner, sizeof rp.owner);
+    memcpy(rp.name, ui.name, sizeof rp.name);
+    memcpy(rp.applied, ui.applied, sizeof rp.applied);
+    rp.automatic = headroom(&ui.draft);
+    eq_load(&rp.state);
+    rp.draft = ui.draft;
+    peq_save_file(Q2EQ_REPLY, "Q2EQR01", &rp, sizeof rp);
+}
+#endif

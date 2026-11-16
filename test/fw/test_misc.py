@@ -1081,7 +1081,7 @@ def renamer(fw, text, old='Rock', others=()):
     u.name, u.applied = old.encode(), b'Other'
     card = Card(fw, {f'{FOLDER}/{old}.txt': b'p', **{f'{FOLDER}/{n}.txt': b'q' for n in others}})
     typed(fw, text)
-    fw.fn('peq_ui__rename_preset', None)()
+    fw.fn('peq_ui__rename_preset', None, C.c_char_p)(None)  # None: the edit's text
     return u, card
 
 
@@ -1117,7 +1117,7 @@ def test_a_case_change_is_a_rename_though_fat_finds_the_name(fw):
     u.edit, u.destination, u.name = 0x7000, f'{FOLDER}/Rock.txt'.encode(), b'Rock'
     typed(fw, b'ROCK')
     fw.mock('fw_access', lambda *_: 0)  # FAT: ROCK.txt "exists"
-    fw.fn('peq_ui__rename_preset', None)()
+    fw.fn('peq_ui__rename_preset', None, C.c_char_p)(None)  # None: the edit's text
     assert u.status == b'Renamed to ROCK' and u.name == b'ROCK'
 
 
@@ -1132,7 +1132,7 @@ def test_a_failed_rename_says_so(fw):
     card = Card(fw, {f'{FOLDER}/Rock.txt': b'p'})
     card.bad_rename = True
     typed(fw, b'Jazz')
-    fw.fn('peq_ui__rename_preset', None)()
+    fw.fn('peq_ui__rename_preset', None, C.c_char_p)(None)  # None: the edit's text
     assert u.status == b'Rename failed; preset kept'
 
 

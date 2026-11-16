@@ -18127,13 +18127,15 @@ passed()
 # setting is off, and with no output in use the EQ stays where it is.
 class EqOutputMachine(BtLinkMachine):
     def __init__(self,links=(),way=0,headset=0,po=0,bal=0,on=1):
-        super().__init__(links); self.way=way; self.on=on; self.keys=[]
+        super().__init__(links); self.way=way; self.on=on; self.keys=[]; self.requests=0
         self.handlers.update({syms['mclGetOutputWay']:'eo:way',payload_syms['ringnav_eq_output']:'eo:on',payload_syms['eq_output']:'eo:key'})
+        if 'q2eq_poll' in payload_syms: self.handlers[payload_syms['q2eq_poll']]='eo:q2eq'  # a --dev build's (docs/adb.md#q2eq)
         self.byte(syms['g_headset_output'],headset); self.byte(syms['g_po_status'],po); self.byte(syms['g_bal_status'],bal)
     def hook(self,u,addr,size,_):
         name=self.handlers.get(addr,'')
         if not name.startswith('eo:'): return super().hook(u,addr,size,_)
         if name=='eo:key': self.keys.append(self.text(u.reg_read(REGS[0])))
+        if name=='eo:q2eq': self.requests+=1
         self.returns({'eo:way':self.way,'eo:on':self.on}.get(name,0))
     def poll(self): self.call(address=payload_syms['headset_eq_poll'],args=(0,0,0,0),gap=1000); return self.keys
 for kw,want in ((dict(headset=0,po=1),['3.5mm']),(dict(headset=1,bal=1),['4.4mm']),(dict(headset=1,po=1,bal=1),['4.4mm']),
@@ -18143,7 +18145,10 @@ for kw,want in ((dict(headset=0,po=1),['3.5mm']),(dict(headset=1,bal=1),['4.4mm'
                 (dict(way=1,headset=2,links=[(a_mac,3),(b_mac,5)]),[a_mac]),(dict(way=1,headset=2,links=[(a_mac,5)]),[]),
                 (dict(way=1,headset=2),[]),(dict(headset=0,po=1,on=0),[])):
     assert EqOutputMachine(**kw).poll()==want,kw
-m=EqOutputMachine(headset=0,po=1); m.poll(); m.call(address=payload_syms['headset_eq_poll'],args=(0,0,0,0),gap=100); assert m.keys==['3.5mm']; passed()
+m=EqOutputMachine(headset=0,po=1); m.poll(); m.call(address=payload_syms['headset_eq_poll'],args=(0,0,0,0),gap=100); assert m.keys==['3.5mm']
+# q2eq's requests are looked for on the same 500 ms, with EQ per Output on or off, in a --dev build alone
+m=EqOutputMachine(headset=0,po=1,on=0); m.poll(); m.call(address=payload_syms['headset_eq_poll'],args=(0,0,0,0),gap=100)
+dev=bool(json.loads((B/'manifest.json').read_text())['dev']); assert m.requests==dev and ('q2eq_poll' in payload_syms)==dev; passed()
 # Advanced EQ's row (peq_ui.c): off unless set, and turning it off forgets whose EQ plays.
 class EqRowMachine(QueueMachine):  # a payload call has no t9 for Machine's handler check
     forgets=0

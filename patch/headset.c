@@ -382,10 +382,14 @@ void headset_eq_poll(void) {
     unsigned now = time_now_ms();
     if (now - hs.eq_checked < 500) return;
     hs.eq_checked = now;
-    if (!ringnav_eq_output()) return;
-    char mac[32] = { 0 };
-    const char *key = eq_output_key(mac);
-    if (key) eq_output(key);
+    if (ringnav_eq_output()) {
+        char mac[32] = { 0 };
+        const char *key = eq_output_key(mac);
+        if (key) eq_output(key);
+    }
+#if Q2POD_DEV
+    q2eq_poll(); /* after the swap, so a request finds the output playing (docs/adb.md#q2eq) */
+#endif
 }
 void headset_poll(void) {
     unsigned now = time_now_ms();

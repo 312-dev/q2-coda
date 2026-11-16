@@ -312,7 +312,7 @@ logo_check()
 
 def validate_assets(directory):
     import functools, json, re, struct, subprocess
-    from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, SPLASH, LOGO_ANIM, LOGO_BLACK, BOOT_HOOK, REMOTE, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, LOGO_LIGHT, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, WATCHDOG, WATCHDOG_SLEEP, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, WHEEL_TS_READ, PDR
+    from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, SPLASH, LOGO_ANIM, LOGO_BLACK, BOOT_HOOK, REMOTE, Q2EQ, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, LOGO_LIGHT, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, WATCHDOG, WATCHDOG_SLEEP, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, WHEEL_TS_READ, PDR
     from ipod import (ART_PLACEHOLDERS, sized_art, AUDIT, TOOLBAR_SWITCHES, BOTTOM, CONFIRM, VOLUME, BIGCOVER, BC_ART, BC_TITLE_PAD, QUICK_SETTINGS, QS_TOP, QS_LABEL_GAP, QS_LABEL_H,
                       QS_LABEL_W, QS_ROW_GAP, QS_PITCH, QS_BAR, QS_TOUCH, QS_EDGE, QS_SUN, HOME_LABEL_END, HOME_LIST_W, HOME_TEXT_X, HOME_TOP, PITCH, ARTIST_PAGE, HOME_OURS, HOME_PAGE, HOME_ROW, HOME_ROWS, HOME_SETS, NAVBAR_ONLY, PLAYING_PAGE, SET_ROW, SET_ROWS, SET_TOP, UI_ASSETS,
                       NP_BAR, NP_TOUCH, NP_MARGIN, NP_TOP, STATUS_BAR, STATUS_HIDDEN, STATUS_LEFT, STATUS_MARGIN, STATUS_RIGHT, CLOCK_MIN, CLOCK_TEXT, corner_inset, corner_x,
@@ -511,6 +511,9 @@ def validate_assets(directory):
         remote = read('rootfs.squashfs', REMOTE)
         assert sha(remote) == manifest['q2remote_sha256'] and remote[:4] == b'\x7fELF'
         assert remote[36:40] == helper[36:40]
+        q2eq = read('rootfs.squashfs', Q2EQ)  # docs/adb.md#q2eq
+        assert sha(q2eq) == manifest['q2eq_sha256'] and q2eq[:4] == b'\x7fELF' and q2eq[36:40] == helper[36:40]
+        assert b'Q2EQR01' in demo
         expected_start = expected_start.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK)
         assert b'q2-wheel.log' in demo
         # adbd (docs/adb.md): an ELF with the stock binaries' ABI flags and glibc alone, its gadget script, stock's USB
@@ -528,11 +531,13 @@ def validate_assets(directory):
             assert read('rootfs.squashfs', 'usr/bin/' + n.replace('.sh', '_stock.sh')) == read('stock.squashfs', 'usr/bin/' + n)
     else:
         assert b'q2-wheel.log' not in demo and b'q2-wheel.log' not in expected_start  # a test build's diagnostic
-        assert 'q2remote_sha256' not in manifest
-        assert not (directory/'q2remote').exists()
-        absent = subprocess.run(['unsquashfs', '-cat', str(directory/'rootfs.squashfs'), REMOTE],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        assert absent.returncode != 0, 'release rootfs contains q2remote'
+        assert 'q2remote_sha256' not in manifest and 'q2eq_sha256' not in manifest
+        assert not (directory/'q2remote').exists() and not (directory/'q2eq').exists()
+        for path in (REMOTE, Q2EQ):
+            absent = subprocess.run(['unsquashfs', '-cat', str(directory/'rootfs.squashfs'), path],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            assert absent.returncode != 0, f'release rootfs contains {path}'
+        assert b'Q2EQR01' not in demo  # q2eq_poll is compiled out
         # No ADB in a release: no adbd, no gadget, stock's USB scripts as they were
         assert 'adbd' not in manifest and not (directory/'adbd').exists()
         for path in (ADBD, ADB_GADGET, *('usr/bin/' + n.replace('.sh', '_stock.sh') for n in USB_SCRIPTS)):

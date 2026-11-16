@@ -28,6 +28,61 @@ python3 tools/q2remote.py shot --adb out.png   # the screen as an upright PNG, o
 
 `adb forward tcp:N tcp:M` works (the Q2 side connects to its own `127.0.0.1:M`). `adb root`, `adb remount`, `adb tcpip`, `adb logcat` and `adb install` don't: there is no Android behind them. `adb shell` gets the old, terminal-only protocol, so a command's exit status is not passed back.
 
+## q2eq
+
+`--dev` builds also install `q2eq` (`patch/q2eq.c`), which drives the EQ page's editor from a computer: list, load and adjust EQ live without touching the Q2, and without the app falling out of step. It never writes the EQ state itself: every command is a request that demo carries out through the editor's own actions, so the EQ page (it renders again if open), **EQ per Output** and the player follow exactly as they do for the wheel. Each command prints the resulting state as JSON on stdout and exits 0, or 1 when demo refused the change (`"ok": false` and the editor's own message, the text of the toast it would have shown), or 2 for a usage error or no answer.
+
+```sh
+adb shell q2eq current                       # the whole state as JSON
+adb shell q2eq list                          # presets on the card
+adb shell q2eq load 'Sennheiser HD 600'      # into the draft, as Presets does
+adb shell q2eq band 3 gain 2.5               # an edit to the draft
+adb shell q2eq apply                         # Apply changes: it plays
+adb shell q2eq --now band 3 freq 1200        # the edit applied at once
+adb push hd600.txt /tmp/ && adb shell q2eq import /tmp/hd600.txt
+adb exec-out q2eq export > draft.txt         # the draft as Equalizer APO text
+```
+
+Edits go to the editor's draft, as on the Q2: the Advanced tab's **Apply changes** (`apply`) plays them, and `--now` applies after each change. A draft made while the page is closed is the one the page opens with; edits left unapplied on the page go when it closes, as before. Values are checked by the editor itself: a gain, preamp or balance must be one of its picker's rows (0.5 dB steps: gain -24 to 24, preamp -24 to 12 or `auto`, balance -12 to 12, above 0 the left quieter), frequency and Q are read by the editor's number reader and clamped as a typed value is (20 to 20,000 Hz; Q 0.1 to 10, a notch's to 30). `q2eq --help` lists every command.
+
+### What each control is
+
+| On the Q2                                                | q2eq                                                                                    |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Simple: Enabled                                          | `simple on`, `simple off`                                                               |
+| Simple: Low, Mid, High sliders                           | `simple low DB`, `simple mid DB`, `simple high DB`                                      |
+| Simple: Reset (R)                                        | `simple reset`                                                                          |
+| Simple: Presets (a stock preset, playing at once)        | `simple preset NAME`                                                                    |
+| Advanced: Apply changes                                  | `apply` (or `--now` on any edit)                                                        |
+| Advanced: Reset to defaults                              | `reset`                                                                                 |
+| Advanced: Enabled                                        | `on`, `off` (`off` turns Simple's 3EQ off too, as Control Center's EQ tile does)        |
+| Advanced: EQ per Output                                  | `per-output on`, `per-output off`                                                       |
+| Advanced: Balance                                        | `balance DB`                                                                            |
+| Advanced: Preamp, and its Auto row                       | `preamp DB`, `preamp auto` (Auto's cut is `auto_preamp`)                                |
+| Advanced: a band's row, the spare one past the last used | `band N ...` (N 1-30; past 10, at most one past the last used)                          |
+| Band: Band switch                                        | `band N on`, `band N off`                                                               |
+| Band: Channels                                           | `band N channel both\|left\|right`                                                      |
+| Band: Type                                               | `band N type peaking\|lowshelf\|highshelf\|lowpass\|highpass\|bandpass\|notch\|allpass` |
+| Band: Frequency (typed, or Raise, Lower and Step)        | `band N freq HZ`                                                                        |
+| Band: Q (typed, or Raise and Lower)                      | `band N q Q`                                                                            |
+| Band: Gain                                               | `band N gain DB`                                                                        |
+| Presets: a saved preset                                  | `load NAME`; `list` lists them                                                          |
+| Presets: Stock presets (into the draft)                  | `stock NAME` (Pop, Rock, Dance, Blues, Metal, Vocal, Classical, Jazz)                   |
+| Presets: Save editor preset (Manual 01-10), Replace      | `save 1-10`, `save 1-10 --replace`                                                      |
+| Presets: Rename a preset                                 | `rename OLD NEW`                                                                        |
+| Presets: Delete a preset                                 | `delete NAME`                                                                           |
+| Leaving the page with edits unapplied                    | `discard`                                                                               |
+
+And beyond the page: `current` (the saved state, the draft, its name, Auto's figure, whether the page is open and which output's EQ it is), `outputs` (the outputs with an EQ remembered), `--output KEY` (`3.5mm`, `4.4mm`, `usb` or a Bluetooth MAC: a change is refused unless that is the output playing; `current --output KEY` reads another output's remembered EQ), `save-as NAME` (the draft saved under any name the rename rules allow), `import FILE` or `import - --name NAME` (Equalizer APO or AutoEQ text saved to the card's `EQ/`, then loaded as a preset; refused, and nothing written, when nothing in it can be used) and `export [NAME]` (the draft as Equalizer APO text, or a saved preset's file as it is).
+
+What it has no command for, and why:
+
+- **Removing a band.** The editor has no such control: a band's row stays once used, and a band is switched off instead (`band N off`).
+- **Changing another output's EQ.** The editor changes only the output playing, whose EQ demo files away when another takes over; writing a remembered one would go around demo. `current --output KEY` reads it.
+- **The Raise, Lower and Step rows** set a value in steps; `freq` and `q` set it outright, through the same clamp.
+
+A request waits for demo's next look, every 500 ms, and is refused while a keyboard is up on the EQ page (a Frequency, Q or name edit). One request is taken at a time: two `q2eq` commands run at once can lose one, which then says demo did not answer.
+
 ## How it works
 
 ### adbd
@@ -61,9 +116,13 @@ A key in neither is offered to the UI as Android's adbd offers it to Android's f
 
 The Q2's side of the prompt, the **Allow USB Debugging?** dialog in demo, is not built yet. Its design: the question in the status row, "This computer's key:" over the key's fingerprint (Android's: the MD5 of the base64-decoded key as colon-separated hex pairs), the rows **Cancel** (selected) and **Allow**, the switch **Always Allow This Computer**, and the note "Gives full control of the Q2." Cancel, Return or a timeout answers `NO`. Until it is, the card's `adb_keys` is the way in.
 
+### q2eq's requests
+
+`q2eq` writes a request (`q2eq_request`, `patch/q2eq.h`: the change, a band, a value as text, a name, flags for `--now` and `--replace`, and a random number to match its answer) to `/tmp/q2eq.req` through a temporary name, mode 0600. demo's `q2eq_poll` (`patch/peq_ui.c`, compiled into `--dev` builds alone) looks for it every 500 ms from `headset_eq_poll`, after EQ per Output's swap, takes only a regular file owned by root that no one else can read or write, removes it, carries it out, and answers in `/tmp/q2eq.rep` (`Q2EQR01`, then `q2eq_reply`: the message, the saved state, the draft and its name). How it maps onto the editor is in [internals: q2eq requests](internals.md#q2eq-requests). `q2eq` gives up after 10 s and removes its request, so a demo that comes back later does not act on it.
+
 ### Tests
 
-`python3 test/adb.py [BUILD]` runs the MIPS adbd (BUILD's with BUILD's `/lib`, or the one `tools/thirdparty.py` caches with the toolchain's glibc) under qemu-mipsel in a bwrap sandbox, with a stand-in FunctionFS whose `ep1` and `ep2` are FIFOs the test speaks adb's protocol through: the descriptors as the kernel parses them, refusal without a key, the prompt's socket (`PK`, `NO`, `OK`, Always Allow), the card's file, keys read again per connection, a key from `adb keygen` when adb and openssl are installed, `shell:`, `exec:` byte for byte, push and pull, and the refused services. It also runs `q2adb-gadget` and the wrapper under the host's sh against a directory tree standing in for configfs. The gadget on real hardware, Windows' driver binding and the controller hand-over are only tested on a Q2.
+`python3 test/q2eq.py` builds `q2eq` for the host and answers it with a fake demo: each command's request, usage, the JSON, the wait and its answer's match. `test/fw/test_q2eq.py` runs demo's side in a `--dev` build of the payload's C. `python3 test/adb.py [BUILD]` runs the MIPS adbd (BUILD's with BUILD's `/lib`, or the one `tools/thirdparty.py` caches with the toolchain's glibc) under qemu-mipsel in a bwrap sandbox, with a stand-in FunctionFS whose `ep1` and `ep2` are FIFOs the test speaks adb's protocol through: the descriptors as the kernel parses them, refusal without a key, the prompt's socket (`PK`, `NO`, `OK`, Always Allow), the card's file, keys read again per connection, a key from `adb keygen` when adb and openssl are installed, `shell:`, `exec:` byte for byte, push and pull, and the refused services. It also runs `q2adb-gadget` and the wrapper under the host's sh against a directory tree standing in for configfs. The gadget on real hardware, Windows' driver binding and the controller hand-over are only tested on a Q2.
 
 ## Troubleshooting
 
