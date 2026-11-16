@@ -757,7 +757,7 @@ void search_strip_overlay(void *w, void *canvas) {
 }
 
 /* ringnav_paint: the results and the strip, on the sheet. Colours are the theme's tokens
- * (docs/oled-design.md#colour), drawn as stated in each half. */
+ * (docs/oled-design.md#color), drawn as stated in each half. */
 void search_strip_paint(void *w, void *canvas) {
     if (!ss.page || w != ss.sheet || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), raw = ui_ink_raw(1);
@@ -779,7 +779,7 @@ void search_strip_paint(void *w, void *canvas) {
         const char *title = kind == SS_ARTIST  ? P(r, REC_ARTIST)
                             : kind == SS_ALBUM ? P(r, REC_ALBUM)
                                                : track_name(name, sizeof name, r);
-        /* a row that can't play now (docs/server-library.md#greyed-rows): a server song offline,
+        /* a row that can't play now (docs/server-library.md#grayed-rows): a server song offline,
          * an artist or album none of whose songs can play; its text CAT_GREY, on the bar the
          * bar's white at 70%, and the offline mark at its right, the text ending clear of it */
         int grey = kind == SS_ARTIST  ? catalogue_artist_unavailable(r)

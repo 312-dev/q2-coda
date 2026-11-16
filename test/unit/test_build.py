@@ -484,8 +484,8 @@ def test_inter_faces(face):
     have = sorted(u for u in source.getBestCmap() if 0x20 <= u < 0x530 or 0x2000 <= u < 0x2200) + [build.PLAY_MARK]
     assert sorted(font.getBestCmap()) == have and 0x416 in have and 0x3a9 in have  # Cyrillic, Greek
     names = {rec.nameID: str(rec) for rec in font['name'].names}
-    assert all('Inter' not in names[i] for i in (1, 3, 4, 6)) and names[6] in ('Q2PodOLED-Regular', 'Q2PodOLED-Medium')
-    assert names[1] == ('Q2 Pod OLED' if face == 'inter' else 'Q2 Pod OLED Medium')
+    assert all('Inter' not in names[i] for i in (1, 3, 4, 6)) and names[6] in ('Q2MuseOLED-Regular', 'Q2MuseOLED-Medium')
+    assert names[1] == ('Q2 Muse OLED' if face == 'inter' else 'Q2 Muse OLED Medium')
     assert names[0] == str(source['name'].getName(0, 3, 1, 0x409))
     assert re.fullmatch(rf'#define {f.ranges_macro} \{{0x20,0x7e,[0-9a-fx,]+\}}', ranges)
     cmap, hmtx = font.getBestCmap(), font['hmtx']
@@ -1091,9 +1091,9 @@ def stock_h(dev=0, repo=build.REPO):
     return build.stock_header(context, RANGES, builtins(), dev, repo)
 
 
-@pytest.mark.parametrize('dev,beta,repo,version,tag,flag', [(0, 0, build.REPO, f'{build.VERSION} Pod', build.VERSION, '0'),
-                                                            (0, 2, build.REPO, f'{build.VERSION} Pod beta 2', build.VERSION, '0'),
-                                                            (7, 2, 'someone/q2-fork', f'{build.VERSION} Pod dev 7', '', '1')])
+@pytest.mark.parametrize('dev,beta,repo,version,tag,flag', [(0, 0, build.REPO, f'{build.VERSION} Muse', build.VERSION, '0'),
+                                                            (0, 2, build.REPO, f'{build.VERSION} Muse beta 2', build.VERSION, '0'),
+                                                            (7, 2, 'someone/q2-fork', f'{build.VERSION} Muse dev 7', '', '1')])
 def test_stock_header_versions(dev, beta, repo, version, tag, flag, monkeypatch):
     monkeypatch.setattr(build, 'BETA', beta)
     header = stock_h(dev, repo)
@@ -1104,7 +1104,7 @@ def test_stock_header_versions(dev, beta, repo, version, tag, flag, monkeypatch)
     assert macros['Q2POD_VERSION'] == f'"{version}"' and macros['Q2POD_DEV'] == flag
     assert macros['Q2POD_TAG'] == f'"{tag}"'  # a dev build has none, and takes any release
     assert macros['Q2POD_REPO'] == f'"{repo}"'
-    assert macros['Q2POD_UA'] == f'"Q2Pod/{build.VERSION} (https://github.com/{build.REPO})"'  # the project's contact, not --update-repo's
+    assert macros['Q2POD_UA'] == f'"Q2Muse/{build.VERSION} (https://github.com/{build.REPO})"'  # the project's contact, not --update-repo's
     assert macros['bt_showcoding'] == '((const unsigned char *)0x700000u)'
 
 
@@ -1143,7 +1143,7 @@ const unsigned long h_sizes[] = {{sizeof h_zones / sizeof *h_zones, sizeof h_cit
     zones, cities, order, icons, rounds, medium = array(ctypes.c_ulong, 'h_sizes', 6)
     assert array(ctypes.c_int, 'h_ints', 4) == [build.RING_STEP, len(themes), len(theme.theme_keys(themes)), 0]
     assert [s.decode() for s in array(ctypes.c_char_p, 'h_strings', 6)] == [
-        build.ROCKBOX_FLAG, 'V1.36', f'{build.VERSION} Pod', build.VERSION, build.REPO, f'Q2Pod/{build.VERSION} (https://github.com/{build.REPO})']
+        build.ROCKBOX_FLAG, 'V1.36', f'{build.VERSION} Muse', build.VERSION, build.REPO, f'Q2Muse/{build.VERSION} (https://github.com/{build.REPO})']
     assert [s.decode() for s in array(ctypes.c_char_p, 'h_zones', zones)] == [zone for _, zone in build.TIMEZONES]
     # each row's city, its label after the offset
     cities = [s.decode() for s in array(ctypes.c_char_p, 'h_cities', cities)]

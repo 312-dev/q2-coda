@@ -757,7 +757,7 @@ class Power:
 
 @pytest.mark.parametrize('saved, shown', [
     (None, 'Rockbox'),  # no choice saved: the boot script's own default
-    (b'q2pod', 'Q2 Pod'), (b'q2pod\n', 'Q2 Pod'), (b'q2pod' + b'\n' * 40, 'Q2 Pod'),  # $(cat) drops trailing newlines
+    (b'q2pod', 'Q2 Muse'), (b'q2pod\n', 'Q2 Muse'), (b'q2pod' + b'\n' * 40, 'Q2 Muse'),  # $(cat) drops trailing newlines
     (b'rockbox', 'Rockbox'), (b'q2po', 'Rockbox'), (b'q2podx', 'Rockbox'), (b'q2pod\nx', 'Rockbox'), (b'\nq2pod', 'Rockbox'),
 ])
 def test_boot_to_reads_what_the_boot_script_would(fw, saved, shown):
@@ -782,7 +782,7 @@ def test_boot_to_flips_and_saves_through_a_temporary_file(fw):
     page = Power(fw, ui, {})
     label = page.boot()
     ui.click(label.parent)
-    assert label.text == 'Boot to: Q2 Pod' and page.files.files.get(BOOT) == b'q2pod'
+    assert label.text == 'Boot to: Q2 Muse' and page.files.files.get(BOOT) == b'q2pod'
     ui.click(label.parent)
     assert label.text == 'Boot to: Rockbox' and page.files.files.get(BOOT) == b'rockbox'
     assert {C.string_at(a[0]).decode() for _, a in fw.calls('fw_fopen')} >= {BOOT + '.tmp'}

@@ -116,7 +116,7 @@ void rate_album_favs(void *album, int on) {
 
 /* The key r's 1 to 4 hearts are kept under: its listen_key, or a server song's offline copy's
  * row's (catalogue_song_key), so hearts given while the copy plays are the song's on the server
- * and in the Library (docs/server-library.md#ratings-and-favourites). */
+ * and in the Library (docs/server-library.md#ratings-and-favorites). */
 unsigned rate_song_key(void *r) { return catalogue_song_key(r, listen_key(r)); }
 
 /* r's My Fav: stock's, by its own path, or a server song's Stream Cache copy's by its server row
@@ -267,7 +267,7 @@ static int rate_song(int n) {
     if (!r) return 0;
     int fav = checkFavExist(r) != 0, row = catalogue_row_fav(r) > 0;
     if (!rate_saved(rate_keep(0, rate_song_key(r), n))) return 0;
-    catalogue_rated(r, n); /* to the server too (docs/server-library.md#ratings-and-favourites) */
+    catalogue_rated(r, n); /* to the server too (docs/server-library.md#ratings-and-favorites) */
     ra.rate_row = 0;
     if (n != 5 && row) catalogue_row_unfav(r); /* a copy's row: stock's toggle would add the copy */
     if (n == 5 ? !fav && !row : fav) {

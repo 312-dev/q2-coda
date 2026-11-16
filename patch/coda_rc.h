@@ -1,4 +1,4 @@
-/* coda-rc, Q2 Pod's own remote-control protocol (docs/remote-protocol.md, remote/coda-rc.proto).
+/* coda-rc, Q2 Muse's own remote-control protocol (docs/remote-protocol.md, remote/coda-rc.proto).
  * The daemon is patch/coda_rc*.c, built as /usr/bin/coda-rc by tools/build.py (CODA_RC_SOURCES); it is not
  * part of demo's payload. coda_rc_core.c is the transport-agnostic part: frames, the protobuf subset, pairing,
  * authentication and sealing. coda_rc.c owns the transports and the data, coda_rc_ble.c the BLE GATT one.
@@ -125,6 +125,12 @@ int lib_request(crc_session *s, int type, unsigned req_id, const uint8_t *p, siz
 void lib_played(int ok, int qgen);
 void lib_now(int qgen, int id);
 void lib_art_of(const char *path, char *art, size_t cap); /* a song path's album art id */
+/* A streaming song's file (/mnt/mmc/.<app>/stream/.../<title> [<sid>].<suffix>) as the catalogue's server song */
+typedef struct {
+    int id, secs, track;
+    char title[160], artist[160], album[160], art[48];
+} lib_song_t;
+int lib_stream_song(const char *path, lib_song_t *o);
 int lib_song_rid(const char *id); /* "song:t12" -> 12; 0 when not a song id */
 int lib_has_server(void);
 /* BLE (coda_rc_ble.c): ble_start's fd joins the poll with ble_events(); -1 when BlueZ is not there */

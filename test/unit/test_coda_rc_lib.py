@@ -47,7 +47,7 @@ SONGS = [  # (id, file, title, artist, album, added): the card's songtable
 class Q2:
     """The device's files under root (a stock database.db), and one session's requests answered in place."""
 
-    def __init__(self, L, root, songs=SONGS, favs=(2, 3), server=()):
+    def __init__(self, L, root, songs=SONGS, favs=(2, 3), server=(), cat=False):
         self.L, self.req = L, 0
         (root / 'mnt/data').mkdir(parents=True)
         (root / 'tmp').mkdir()
@@ -67,16 +67,17 @@ class Q2:
         db.commit()
         db.close()
         if server:
-            self.serve(root, server)
+            self.serve(root, server, cat)
         self.s = L.session(0)
         self.out_n = ctypes.c_size_t.in_dll(L, 'out_n')
         self.out = (ctypes.c_uint8 * (1 << 20)).in_dll(L, 'out')
         self.root = root
 
     @staticmethod
-    def serve(root, songs):
+    def serve(root, songs, cat=False):
         """Local + Server: config.ini's LIBRARYSOURCE=1 and the catalogue on the card, made with catalogue.c's
-        own schema (servertable, and servermeta, which has a track column of its own)."""
+        own schema (servertable, and servermeta, which has a track column of its own); cat: the songs at catalogue.c's
+        own paths, /mnt/mmc/.subsonic/cat/<album>/<sid>.flac, whose album is the art id's."""
         (root / 'mnt/data/config.ini').write_text('[Q2POD]\nLIBRARYSOURCE=1\n')
         src = (PATCH / 'catalogue.c').read_text()
         schema = src[src.index('static const char *const SCHEMA ='):]
@@ -85,7 +86,7 @@ class Q2:
         cat = sqlite3.connect(root / 'mnt/mmc/.q2pod/catalogue.db')
         cat.executescript(schema)
         for k, (title, artist, album, added) in enumerate(songs, 1):
-            url = f'/mnt/mmc/.subsonic/{k}.flac'
+            url = f'/mnt/mmc/.subsonic/cat/{album.lower()}/s{k}.flac' if cat else f'/mnt/mmc/.subsonic/{k}.flac'
             cat.execute('insert into servertable(id, filename, fileurl, album, songer, style, name, albumsonger, year, '
                         'track, cd_num, time_create) values (?,?,?,?,?,?,?,?,?,?,?,?)',
                         (0x40000000 + k, f'{k}.flac', url, album, artist, 'Pop', title, artist, 2002, k, 1, added))
@@ -151,3 +152,48 @@ def test_a_server_album_lists_its_songs_in_track_order(lib, tmp_path):
     q2 = Q2(lib, tmp_path, server=SERVER)
     album, = [i for i in q2.browse('albums')['items'] if i['title'] == 'Third']
     assert titles(q2.browse(album['id'])) == ['Echo', 'Foxtrot']
+
+
+class Song(ctypes.Structure):
+    _fields_ = [('id', ctypes.c_int), ('secs', ctypes.c_int), ('track', ctypes.c_int), ('title', ctypes.c_char * 160),
+                ('artist', ctypes.c_char * 160), ('album', ctypes.c_char * 160), ('art', ctypes.c_char * 48)]
+
+
+STREAM = '/mnt/mmc/.subsonic/stream/9f2c/original/0/{} [{}].flac'
+
+
+def flac_with_picture(image):
+    """A FLAC's head: the marker and one last metadata block, a PICTURE holding image as a JPEG."""
+    mime = b'image/jpeg'
+    pic = struct.pack('>II', 3, len(mime)) + mime + struct.pack('>I', 0) + struct.pack('>IIIII', 1, 1, 24, 0, len(image)) + image
+    return b'fLaC' + bytes([0x86]) + len(pic).to_bytes(3, 'big') + pic
+
+
+def test_a_streaming_songs_file_is_its_server_song(lib, tmp_path):
+    """A card app's streaming song plays from its download, /mnt/mmc/.<app>/stream/.../<title> [<sid>].flac, with no
+    library record: coda-rc sent the file's name as the title, no artist, no id (no heart) and no cover
+    (Android Auto, 2026-11-16 14:34). The sid in the brackets names the catalogue's song."""
+    Q2(lib, tmp_path, server=SERVER, cat=True)
+    lib.lib_stream_song.argtypes = [ctypes.c_char_p, ctypes.POINTER(Song)]
+    s = Song()
+    assert lib.lib_stream_song(STREAM.format('foxtrot', 's2').encode(), ctypes.byref(s)) == 1
+    assert (s.id, s.title, s.artist, s.album, s.secs, s.track, s.art) == (
+        0x40000002, b'Foxtrot', b'Eve', b'Third', 200, 2, b'sthird')
+    for path in (STREAM.format('foxtrot', 's9'),           # not in the catalogue
+                 '/mnt/mmc/.subsonic/cat/third/s2.flac',    # a downloaded song: the library has it
+                 '/mnt/mmc/Music/foxtrot [s2].flac',        # brackets in a card file's name
+                 STREAM.format('foxtrot', 's2*')):          # not an id
+        assert lib.lib_stream_song(path.encode(), ctypes.byref(s)) == 0, path
+
+
+def test_a_streamed_albums_cover_is_its_stream_files_picture(lib, tmp_path):
+    """No covers/<album>.jpg: the album's cover is the picture in the song streaming, the one the Q2 Muse shows."""
+    q2 = Q2(lib, tmp_path, server=SERVER, cat=True)
+    image = b'\xff\xd8' + bytes(range(256)) * 4 + b'\xff\xd9'
+    f = tmp_path / STREAM.format('foxtrot', 's2').lstrip('/')
+    f.parent.mkdir(parents=True)
+    f.write_bytes(flac_with_picture(image))
+    t, m = q2.ask(T['GET_COVER'], [(1, 'sthird'), (2, 0), (3, 4096), (4, 160)])
+    assert t == T['COVER'] and client.one(m, 1) == len(image) and client.one(m, 3) == image[:4096]
+    f.unlink()
+    assert q2.ask(T['GET_COVER'], [(1, 'sthird'), (2, 0), (3, 4096), (4, 160)]) == 'NOT_FOUND'
