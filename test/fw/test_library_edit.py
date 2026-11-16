@@ -241,12 +241,14 @@ def test_a_finger_held_on_a_row_enters_edit_library_and_drags_it(fw, ui, st, key
         struct.pack_into('<2i', event, O['EVENT_X'], 100, y)
         return handler(C.addressof(event))
 
-    # Shuffle came in above it: Artist is caught where the finger held it, and goes where its middle is
+    # Shuffle came in above it: Artist stays a row down from the finger, and goes as far as the finger does
+    assert send(EVT_MOVE, 58 + PITCH * 2 + 10) == STOP  # not moved yet: it stays in its place
+    assert lib.shown[:5] == ['Shuffle', 'All Songs', 'Playlist', 'Artist', 'Album']
     assert send(EVT_MOVE, 58 + PITCH * 4 + 10) == STOP  # two rows down: the list does not scroll
-    assert lib.shown[:5] == ['Shuffle', 'All Songs', 'Playlist', 'Album', 'Artist']
+    assert lib.shown[:6] == ['Shuffle', 'All Songs', 'Playlist', 'Album', 'Search', 'Artist']
     assert lib.saved() == ''
     assert send(EVT_UP, 58 + PITCH * 4 + 10) == STOP
-    assert lib.saved().startswith('hspla')
+    assert lib.saved().startswith('hsplSa')
 
 
 def test_a_tap_in_edit_library_selects_its_row_and_opens_nothing(fw, ui, st, keys):

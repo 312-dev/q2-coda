@@ -594,9 +594,6 @@ static void lr_abort(void *page) {
 /* A finger takes row: the editor entered if it wasn't, the press the rows had let go, and the
  * row follows the finger from where it was caught. */
 static void lr_grab(void *page, void *view, void *row, int list) {
-    int xy[2] = { lr.x, lr.y };
-    widget_to_local(view, xy);
-    lr.grab = xy[1] - I(row, W_Y); /* where it was caught, before rows the editor shows come in */
     if (!lr.page) lr_enter(page, view, list);
     if (lr.page != page) return;
     lr.held = (void *)0;
@@ -605,6 +602,12 @@ static void lr_grab(void *page, void *view, void *row, int list) {
     pull_cancel(); /* the pull to search the press began is the drag's now */
     list_stop_scroll(view);
     if (lr.lifted && !lr.drag) lr_save(view); /* a row Center carried stays where it got to */
+    /* the finger's offset from the row where the editor shows it (the rows it lists and Home's Full
+     * layout may have moved it from under the finger): it stays in its place until the finger moves
+     */
+    int xy[2] = { lr.x, lr.y };
+    widget_to_local(view, xy);
+    lr.grab = xy[1] - I(row, W_Y);
     lr.lifted = row;
     lr.drag = 1;
     void *rows[LR_ROWS];
@@ -681,6 +684,7 @@ static void lr_drop(void) {
             button, pointer_event_init(abort_event, EVT_POINTER_ABORT, button, lr.x, lr.y));
     lr.drag = 0;
     lr.lifted = (void *)0;
+    st.touch_mode = 0; /* the dropped row stays selected, its circle and grip as the selection's */
     prop(row, "_lr_from", I(row, W_Y));
     lr.slide_at = (unsigned)time_now_ms();
     if (!lr.slide) lr.slide = timer_add(lr_slide_step, (void *)0, LR_STEP_MS);
