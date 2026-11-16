@@ -337,9 +337,9 @@ POP_HEAD_W, POP_HEAD_H, POP_HEAD_R = 30, 30, 9
 POP_NECK = 18
 POP_H = POP_HEAD_H + POP_NECK + POP_KEY_H - 6
 POP_LETTER_PX, POP_LETTER_DY = 26, 2  # the big letter's ink centred on the head, 2 px below its middle
-POP_ECHO_PX, POP_ECHO_A = 17, 153  # the echo: Inter Medium at the strip's size, white at 60 %
-POP_ECHO_H = 38  # the echo's box is the key's width by the strip's height, its baseline the strip letters' own
-POP_ECHO_BASELINE = 25  # ... where the payload's text rule puts the strip's 17 px letters (measured)
+POP_ECHO_PX, POP_ECHO_A = 19, 153  # the echo: Inter Regular at the strip's size, white at 60 %
+POP_ECHO_H = 34  # the echo's box is the key's width by the strip's height, its baseline the strip letters' own
+POP_ECHO_BASELINE = 23  # ... where the payload's text rule puts the strip's 19 px letters (measured)
 POP_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
 
 
@@ -355,15 +355,15 @@ def pop_bubble_d():
 
 
 @functools.lru_cache(maxsize=None)
-def inter_medium():
-    return TTFont(ROOT/'assets/fonts/Inter-Medium.ttf')
+def inter(face='Medium'):
+    return TTFont(ROOT/f'assets/fonts/Inter-{face}.ttf')
 
 
-def ink_polys(ch, px, cx, cy=None, baseline=None):
-    """ch in Inter Medium at px (the em), its ink's horizontal centre on cx exactly, half pixels included (no
-    snapping: the rasteriser covers sub-pixels, as stb_truetype's subpixel bitmaps do); vertically its ink centred on
-    cy, or its baseline on baseline. One polygon per contour, filled nonzero."""
-    font = inter_medium()
+def ink_polys(ch, px, cx, cy=None, baseline=None, face='Medium'):
+    """ch in Inter face (Medium or Regular) at px (the em), its ink's horizontal centre on cx exactly, half pixels
+    included (no snapping: the rasteriser covers sub-pixels, as stb_truetype's subpixel bitmaps do); vertically its
+    ink centred on cy, or its baseline on baseline. One polygon per contour, filled nonzero."""
+    font = inter(face)
     name = font.getBestCmap()[ord(ch)]
     g, k = font['glyf'][name], px / font['head'].unitsPerEm
     x = cx - (g.xMin + g.xMax) / 2 * k
@@ -384,7 +384,7 @@ def pop_images(accent):
             ('search_pop_letters', POP_HEAD_W, POP_HEAD_H, 1,
              lambda ch, cx: ink_polys(ch, POP_LETTER_PX, cx, cy=POP_HEAD_H / 2 + POP_LETTER_DY)),
             ('search_pop_echoes', POP_KEY_W, POP_ECHO_H, POP_ECHO_A / 255,
-             lambda ch, cx: ink_polys(ch, POP_ECHO_PX, cx, baseline=POP_ECHO_BASELINE))):
+             lambda ch, cx: ink_polys(ch, POP_ECHO_PX, cx, baseline=POP_ECHO_BASELINE, face='Regular'))):
         polys = [p for i, ch in enumerate(POP_CHARS) for p in place(ch, cell * i + cell / 2)]
         out[name] = png(cell * n, h, laid(cell * n, h, [(coverage_nonzero(polys, (0, 0, cell * n, h)), lambda x, y, a=a: (0xffffff, a))]))
     return out

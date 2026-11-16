@@ -329,7 +329,8 @@ extern int radio_media(unsigned key), radio_open(void *ctx, void *event);
 extern int games_key(void *top, unsigned key), games_open(void *ctx, void *event);
 extern int games_keydown(void *top, unsigned key);
 /* search_strip.c: Search, the strip under a list.entry.ipod theme, else stock's dialog */
-int library_search_open(void *ctx, void *event), search_strip_key(void *top, unsigned key);
+int library_search_open(void *ctx, void *event), search_strip_key(void *top, unsigned key),
+    search_strip_hold(void *top);
 void search_strip_paint(void *w, void *canvas);
 /* keyboard.c: the keyboard's keys by the wheel under a list.entry.ipod theme */
 int kb_wheel_key(unsigned key), kb_wheel_bg(void *w, void *canvas);

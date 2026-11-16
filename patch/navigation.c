@@ -6891,7 +6891,7 @@ void ringnav_boot(const char *page, const int *ctx) {
  * once it has gone (quick_poll): Now Playing opened over the dialog left it open underneath, and
  * stock's pull-down starts none while one is (g_dropdown_menu_state), so Now Playing had no Quick
  * Settings until Return had gone back to the one left open and closed it (#303). Over a prompt it
- * cancels it.
+ * cancels it, and over Search (search_strip.c) it closes Search.
  * ponytail: every way leaves the latch to the stock release filter, as stock's own Home call here
  * did: the hold's key-up, where it reaches the filter, is swallowed there; clearing it let that
  * release act on Home, and since V1.34 go straight back from the Now Playing it had opened (#303).
@@ -6915,6 +6915,7 @@ int compact_now_playing(void) {
             dialog_quit(top, 4);
             return 0;
         }
+        if (search_strip_hold(top)) return 0; /* Search closes: its Return erases */
         pod_settings();
         if (st.hold_home && tk_strcmp(name, "home_page")) {
             st.np_origin = (void *)0;

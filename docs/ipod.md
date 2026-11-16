@@ -1045,26 +1045,43 @@ painted it white, which drew the box at rest.
   Lists or Off; with a length on the right column, Right and Selected Row put the artist inline. Lists Q2 Pod builds
   itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep their own rows.
 - <a id="search"></a>**Search.** The Library's Search row (and Songs' pull) opens an iPod classic's letter strip, not
-  stock's search box and keyboard (`list.entry.ipod`, `patch/search_strip.c`): a `#1C1C1E` bar from y 216 to 254
-  with 12 px corners, the typed text in a black box at its left with the accent's caret, and A to Z, 0 to 9, a space
-  and delete passing under a fixed accent box, 17 px apart, the current one white Inter Medium, the rest Text
-  Secondary. When the wheel lands on a letter or digit its key pops up, as an iPhone's keyboard does: the key grows a
-  bubble above the strip (a 30 px head with 9 px corners narrowing over 18 px to the 18 px key, the accent) holding
-  the letter in 26 px white Inter Medium, and the key keeps the letter at 17 px in white at 60 %; it goes 300 ms
-  after the wheel stops. Turning faster than 8 letters a second shows none until the wheel stops, then one. The
-  bubble may cover the last result row while it shows. The wheel walks the strip (round from delete to A), Centre enters the highlighted character, and, as
-  Apple's guide gives the iPod's own, Next enters a space and Previous deletes. What holds the text lists above it as
-  it is typed, as an iPod's results mix artists, albums and songs: the artists whose name holds it, then the albums,
-  32 of each at most, then the songs whose title, artist or album holds it; four single-line rows from y 58, the
-  name in 20 px white and after it, in 15 px Text Tertiary, "Artist" on an artist's row, "Album" and its artist
-  on an album's, the artist on a song's. Return, as the iPod's Menu, moves to the results: the
-  selection bar takes the first one and the strip's highlight goes grey; the wheel moves the bar, and Centre opens an
-  artist's page or an album's tracks in Cover Flow, or plays a song with the songs found after it as the queue, and a turn up from the first result, Next or Previous goes back
-  to the strip. Return on the results, or on the strip with no text or no match, closes Search. With text and no
-  match, "No results" stands in the list's place. By touch, a tap on a letter types it and a drag along the strip
-  moves the alphabet a letter per 17 px; a tap on a result opens or plays it, and a drag up or down the results
-  scrolls them a row per 32 px. Each tick along the strip clicks as a list's row change does, and Centre, Next and
-  Previous click as a button does, through the Clicker setting.
+  stock's search box and keyboard (`list.entry.ipod`, `patch/search_strip.c`): a `#1C1C1E` pill low in the glass,
+  x 40 to 335 and y 254 to 288 with 17 px corners, the typed text in 18 px white in a black box at its left (x 46 to
+  142, 5 px in, 12 px corners) with a steady 2 px cursor, and A to Z, 0 to 9, a space and delete in 19 px Inter, each
+  centred in an equal 19 px cell, the lit one white on a fixed accent key in the middle of the run (x 148 to 327),
+  the rest Text Secondary, both ends of the run fading into the pill's grey over 22 px. When the wheel lands on a
+  letter or digit its key pops up, as an iPhone's keyboard does: the key grows a bubble above the strip (a 30 px head
+  with 9 px corners narrowing over 18 px to the 18 px key, the accent) holding the letter in 26 px white Inter
+  Medium, and the key keeps the letter at 19 px in white at 60 %; it goes 300 ms after the wheel stops. Turning
+  faster than 8 letters a second shows none until the wheel stops, then one. The bubble may cover the last result
+  rows while it shows. The wheel walks the strip (round from delete to A) and Centre enters the lit character at
+  the cursor; Previous and Next move the cursor along the text, Return erases the character before it (at the
+  text's start it does nothing but click), and a held Return closes Search from anywhere on the page (the hold's
+  700 ms, as [Hold Return](#hold-return) times it, `search_strip_hold`). A space is never typed first or beside
+  another. A text longer than the box scrolls to keep the cursor in it.
+  What holds the text lists above the strip as it is typed: the songs whose title, artist or album holds it, then
+  the artists whose name holds it, then the albums, each artist and album once; six single-line rows from y 58, the
+  name in 20 px white and after it, in 15 px Text Tertiary, the artist on a song's row, "Artist" on an artist's,
+  "Album" and its artist on an album's. Next with the cursor at the text's end moves to the results: the selection
+  bar takes the first one, the strip's key goes grey, and an iOS segmented control takes the first row (All, Songs,
+  Artists, Albums; a 30 px `#1C1C1E` track with 9 px corners, the open tab a raised `#3A3A3C` segment, the accent
+  while the wheel is on it, labels in Inter Medium 17, the others `#ABABAB`), leaving five rows under it. All lists
+  the three groups, 32 of each at most, so a common string's artists are never more than 32 rows down (under five
+  turns of the wheel at the default sensitivity); Songs, Artists and Albums list their group in full, the artists
+  and albums A to Z. The tab chosen stays while the text changes, and the strip's list shows it. The wheel moves the
+  bar; Centre plays a song with the songs found after it as the queue, opens an artist's page, or opens an album's
+  tracks in Cover Flow. A turn up from the first result lands on the tabs, where Centre and Next pick the next tab
+  and Previous the one before; a turn down goes back to the results and a turn up to the strip. Previous or Return
+  on the results, and Return on the tabs, go back to the strip with the text, cursor and tab as they were. With text
+  and no match, "No results" stands in the list's place, and Next stays on the strip; on a tab with nothing, Next
+  lands on the tabs. A server song that can't play now (offline, no copy on the card), and an artist or album none
+  of whose songs can, is greyed with the offline mark at its right, as in every other list
+  ([server library](server-library.md#greyed-rows)). By touch, a drag along the strip moves the alphabet a letter
+  per 19 px as the finger goes, popping each one as the wheel does, and types nothing; a tap on a letter, the faded
+  ones at the ends too, pops it and types it at the cursor; a tap on a tab opens it, a tap on a result opens or
+  plays it, and a drag up or down the results scrolls them a row per 32 px. Each tick along the strip clicks as a
+  list's row change does, and Centre, Next, Previous and Return click as a button does, through the Clicker
+  setting.
 - <a id="keyboard"></a>**The keyboard.** The keyboard other text boxes open (New Playlist, Rename, the Wi-Fi password)
   keeps stock's layout and labels on the page's black: each key a `#1C1C1E` box with 8 px corners, every one inside
   the glass's corners (`patch/keyboard.c`, the same `list.entry.ipod`). The wheel walks the keys of the page showing,

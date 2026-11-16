@@ -310,13 +310,12 @@ void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) {
     stock_canvas_set_text_color(canvas, text);
 }
 
-/* ... and its tabs, Simple and Advanced, as an iOS segmented control (docs/oled-design.md#tabs):
- * a SEG_H track rounded SEG_TRACK_R across the bar from SEG_X, centred in EQ_TABS_H, and the open
- * tab a segment SEG_IN inside it rounded SEG_R, raised in SEG_RAISED (white in Light Mode), the
- * accent only while the wheel is on the bar, so the open tab reads apart from the wheel's place.
- * The labels in Inter Medium 17 px: the open one white on the accent and Text Primary on the
- * raised segment, the other SEG_INK. */
-#define SEG_X 20
+/* An iOS segmented control (docs/oled-design.md#tabs): a track rounded SEG_TRACK_R, w by h from
+ * x, y (EQ's SEG_H high), cut into n equal segments, and the open one a segment SEG_IN inside it
+ * rounded SEG_R, raised in SEG_RAISED (white in Light Mode), the accent only while focus (the wheel
+ * is on the control), so the open segment reads apart from the wheel's place. The labels in Inter
+ * Medium 17 px: the open one white on the accent and Text Primary on the raised segment, the rest
+ * SEG_INK. EQ's Simple and Advanced and Search's All, Songs, Artists and Albums draw it. */
 #define SEG_H 34
 #define SEG_IN 2
 #define SEG_TRACK_R 9
@@ -327,31 +326,30 @@ void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) {
 #define SEG_INK 0xababab
 #define SEG_TRACK_LIGHT 0xe5e5ea /* iOS's light track and secondary label */
 #define SEG_INK_LIGHT 0x8a8a8e
-void eq_tabs_paint(void *w, void *canvas, int simple, int focus) {
-    (void)w;
+void segments_paint(void *canvas, const char *const *names, int n, int open, int focus, int x,
+                    int y, int w, int h) {
     static const char *const faces[] = FONT_NAMES;
-    static const char *const names[] = { "Simple", "Advanced" };
     void *lcd = P(canvas, CANVAS_LCD);
-    if (!lcd) return;
+    if (!lcd || n < 1) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), text = (unsigned)I(lcd, LCD_TEXT_COLOR),
              raw = st.raw_ink;
-    int light = ipod_light(), y = (EQ_TABS_H - SEG_H) / 2, inner = 375 - 2 * (SEG_X + SEG_IN);
+    int light = ipod_light(), inner = w - 2 * SEG_IN;
     st.raw_ink = 1;
-    rect_t track = { SEG_X, y, 375 - 2 * SEG_X, SEG_H };
+    rect_t track = { x, y, w, h };
     fill_box(canvas, &track, RGBA(light ? SEG_TRACK_LIGHT : SEG_TRACK), SEG_TRACK_R);
-    for (int i = 0; i < 2; ++i) {
-        int x = SEG_X + SEG_IN + i * inner / 2, half = (i + 1) * inner / 2 - i * inner / 2,
-            shown = i == !simple;
+    for (int i = 0; i < n; ++i) {
+        int sx = x + SEG_IN + i * inner / n, sw = (i + 1) * inner / n - i * inner / n,
+            shown = i == open;
         if (shown) {
-            rect_t seg = { x, y + SEG_IN, half, SEG_H - 2 * SEG_IN };
+            rect_t seg = { sx, y + SEG_IN, sw, h - 2 * SEG_IN };
             fill_box(canvas, &seg,
                      RGBA(focus   ? scheme()->tones[0] & 0xffffffu
                           : light ? 0xffffff
                                   : SEG_RAISED),
                      SEG_R);
         }
-        unsigned buf[16], n = wide(buf, sizeof buf / sizeof *buf, names[i]);
-        sp_text(canvas, buf, n, x, half, y + SEG_H / 2, 1, faces[FONT_INTER_MEDIUM], SEG_PX,
+        unsigned buf[16], len = wide(buf, sizeof buf / sizeof *buf, names[i]);
+        sp_text(canvas, buf, len, sx, sw, y + h / 2, 1, faces[FONT_INTER_MEDIUM], SEG_PX,
                 RGBA(shown && focus ? 0xffffff
                      : shown        ? eq_primary()
                      : light        ? SEG_INK_LIGHT
@@ -360,4 +358,13 @@ void eq_tabs_paint(void *w, void *canvas, int simple, int focus) {
     st.raw_ink = raw;
     stock_canvas_set_fill_color(canvas, fill);
     stock_canvas_set_text_color(canvas, text);
+}
+
+/* ... and EQ's tabs, Simple and Advanced, across the bar from SEG_X, centred in EQ_TABS_H. */
+#define SEG_X 20
+void eq_tabs_paint(void *w, void *canvas, int simple, int focus) {
+    (void)w;
+    static const char *const names[] = { "Simple", "Advanced" };
+    segments_paint(canvas, names, 2, !simple, focus, SEG_X, (EQ_TABS_H - SEG_H) / 2,
+                   375 - 2 * SEG_X, SEG_H);
 }

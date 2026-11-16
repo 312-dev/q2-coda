@@ -267,14 +267,15 @@ The Library's rows in the user's own order, from the approved mock-up `library-r
 
 ### Tabs
 
-An iOS segmented control, on EQ's Simple and Advanced (`slider_page.c` `eq_tabs_paint`), the theme's
-only tabs:
+An iOS segmented control (`slider_page.c` `segments_paint`), on EQ's Simple and Advanced (`eq_tabs_paint`) and
+Search's All, Songs, Artists and Albums ([ipod](ipod.md#search)), the theme's only tabs:
 
-- A `#1C1C1E` track rounded 9 px from x 20 to 355, 34 px tall, centred in the 48 px tab bar.
+- A `#1C1C1E` track rounded 9 px: on EQ from x 20 to 355, 34 px tall, centred in the 48 px tab bar; on Search
+  from x 16 to 359, 30 px tall, in the results' first 32 px row.
 - The open tab a segment 2 px inside the track, rounded 8 px: raised `#3A3A3C` while the wheel is
   elsewhere, Accent Blue only while the wheel is on the tabs, so the open tab reads apart from the
   wheel's place. In Light Mode the track is `#E5E5EA` and the raised segment white.
-- Labels in Inter Medium 17 px, centred in their halves: the open one white (Text Primary on Light
+- Labels in Inter Medium 17 px, centred in their segments: the open one white (Text Primary on Light
   Mode's white segment), the other `#ABABAB` (`#8A8A8E` in Light Mode), at the size of iOS's
   own control.
 
@@ -613,9 +614,9 @@ page, On-The-Go) and `patch/add_songs.c`.
   rows. An empty list says "No playlists", hint "Hold Play/Pause on a song to add it".
 - **A playlist's hold menu** ([Menus](#menus)): Play, Shuffle, Rename, then Delete after a gap,
   which asks "Delete playlist “name”?" with Cancel first. Rename is the [Search](ipod.md#search) letter
-  strip with the name in it, typed on at its end (a word's first letter a capital) under one row,
-  Done: Return moves to Done as to Search's results, Centre there saves, Return on it leaves the
-  name as it was. No More menu, no Edit Playlist: reordering is the server's or the phone's.
+  strip with the name in it, the cursor at its end (a word's first letter a capital), under one row,
+  Done: Next at the text's end moves to Done as to Search's results, Centre there saves, Return
+  goes back to the strip, and a held Return leaves the name as it was. No More menu, no Edit Playlist: reordering is the server's or the phone's.
 - **A playlist's page**: Shuffle (Songs' Shuffle row: the accent's glyph, 18 px, at x 26 and the
   label at x 54), Add Songs (`plus-circle`) and its songs, each one line, the artist on the right
   column in 15 px Text Tertiary; no Shuffle row over nothing. Centre plays the list from the song;
@@ -725,7 +726,7 @@ pattern.
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
 | Quick Settings                      | Own                         | Seven rows under the status row, Brightness's slider inline: Centre on it gives it the wheel               |
-| Search                              | Own                         | An iPod classic's letter strip at y 216-254 under four single-line results ([ipod](ipod.md#search))         |
+| Search                              | Own                         | An iPod classic's letter strip, a pill at y 254-288, under six single-line results ([ipod](ipod.md#search)) |
 | Keyboard                            | Own                         | Stock's keys as `#1C1C1E` boxes on black, the wheel's key in the accent ([ipod](ipod.md#keyboard))          |
 | Buttons locked                      | Own                         | A padlock left of the play state while Buttons Lock is on; a blocked press shows a #1C1C1E card over the page dimmed to 45%: a 56 px padlock, "Buttons Locked" 16 px Medium and the hint 13 px Secondary, for 1.5 s |
 

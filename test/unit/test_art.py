@@ -217,7 +217,7 @@ def test_oleds_search_pop_is_one_bubble_and_two_letter_strips():
     assert at(0, 0)[3] == 0 and at(0, 15)[3] == 255 and at(29, 15)[3] == 255  # the head's rounded corner; its sides
     assert at(3, 60)[3] == 0 and at(26, 60)[3] == 0 and at(6, 60)[3] == 255 and at(23, 60)[3] == 255  # the key, 6 px in
     n = len(art.POP_CHARS)
-    for name, cell, ch, alpha in (('letters', 30, 30, 255), ('echoes', 18, 38, 153)):
+    for name, cell, ch, alpha in (('letters', 30, 30, 255), ('echoes', 18, 34, 153)):
         w, h, at = pixels(got[f'oled_search_pop_{name}'])
         assert (w, h) == (cell * n, ch)
         i = art.POP_CHARS.index('H')
