@@ -27,13 +27,11 @@ void un_bars(void *canvas, int x, int base);                            /* upnex
 
 #define MODAL_ROW 32
 #define MODAL_ROWS 6
-#define MODAL_GAP 12             /* before a destructive row */
-#define MODAL_LEAD 26            /* a setting's or a choice's label after its leading symbol */
-#define MODAL_ICON 19            /* tools/art.py MENU_ICON_PX */
-#define MODAL_SWITCH 40          /* list_marks.c switch_mark's width */
-#define MODAL_FILL RGB_RAISED    /* the sheet before its material is made */
-#define MODAL_SECONDARY 0xababab /* Text Secondary; the light half's below */
-#define MODAL_SECONDARY_L 0x5c5c5c
+#define MODAL_GAP 12          /* before a destructive row */
+#define MODAL_LEAD 26         /* a setting's or a choice's label after its leading symbol */
+#define MODAL_ICON 19         /* tools/art.py MENU_ICON_PX */
+#define MODAL_SWITCH 40       /* list_marks.c switch_mark's width */
+#define MODAL_FILL RGB_RAISED /* the sheet before its material is made */
 
 #define SH_W 375
 #define SH_H 320
@@ -726,14 +724,13 @@ void modal_after(void *w, void *canvas) {
             canvas_draw_image(canvas, bitmap, &src, &art);
             modal_corners(canvas, &art, 6);
         } else
-            fill_box(canvas, &art, RGBA(flip_if(light, 0x2c2c2e)), 6);
+            fill_box(canvas, &art, RGBA(flip_if(light, RGB_RAISED_2)), 6);
         int tw = right_x() - SH_NAME_X;
         int ink = ui_text(canvas, h->title, 1, 24, 0xffffff, 0, SH_NAME_X - ox, top + 22 - oy,
                           h->bars ? tw - 24 : tw, 2);
         if (h->bars) un_bars(canvas, SH_NAME_X - ox + ink + 7, top + 28 - oy);
         if (h->sub[0])
-            ui_text(canvas, h->sub, 0, 18, MODAL_SECONDARY, 0, SH_NAME_X - ox, top + 44 - oy, tw,
-                    2);
+            ui_text(canvas, h->sub, 0, 18, RGB_SECONDARY, 0, SH_NAME_X - ox, top + 44 - oy, tw, 2);
     }
     canvas_set_clip_rect(canvas, (rect_t *)was);
     if (!fb || !fr.buf) return;
