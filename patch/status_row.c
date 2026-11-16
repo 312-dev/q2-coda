@@ -27,6 +27,7 @@
 #define SR_HS_BATT_W 15 /* the headset's battery: a 15x8 body (list_marks.c battery_slim) */
 #define SR_HS_BATT_H 8
 #define SR_HS_NUB 2 /* ... and its nub's columns past it */
+#define SR_RELAY 8  /* a guest's relay mark between its phone and the Q2's device (tools/art.py) */
 #define SR_TAP_W 44 /* a slot's tap target round its centre, as the battery's */
 #define SR_TAP_H 40
 #define SR_TAP_SLOP 12
@@ -76,8 +77,16 @@ static int sync_shown(void) { return addon_sync((int *)0) ? SR_RING : 0; }
 /* The Bluetooth slot (docs/oled-design.md#status-row, P9): what the link is, BT_SLOT_*. Stock's
  * link list's last item is the device it links (status 3 connected, as its rows read it); a link
  * thread running (bt_connectstatus 1) is a device connecting. */
-enum { BT_SLOT_NONE, BT_SLOT_CONNECTING, BT_SLOT_RUNE, BT_SLOT_HEADSET, BT_SLOT_CAR };
+enum {
+    BT_SLOT_NONE,
+    BT_SLOT_CONNECTING,
+    BT_SLOT_RUNE,
+    BT_SLOT_HEADSET,
+    BT_SLOT_CAR,
+    BT_SLOT_GUEST
+};
 static int bt_slot(void) {
+    if (guest_active()) return BT_SLOT_GUEST; /* a guest plays (guest_ui.c) */
     char item[32] = "";
     int status = 0, n = g_bluetoothflag ? getBtLinkSize() : 0;
     if (n > 0) getBtLinkItem(n - 1, &status, item);
@@ -86,8 +95,16 @@ static int bt_slot(void) {
     if (!tk_strcmp(bt_kind(bt_headset_class()), "car")) return BT_SLOT_CAR;
     return bt_headset_battery() >= 0 ? BT_SLOT_HEADSET : BT_SLOT_RUNE;
 }
+/* A guest's: its phone, and while relayed to a Bluetooth device the mark and that device's glyph */
+static int guest_relayed(void) {
+    char out[64];
+    guest_field("out", out, sizeof out);
+    return *out && tk_strcmp(out, "jack");
+}
 static int headset_shown(void) {
     int slot = bt_slot();
+    if (slot == BT_SLOT_GUEST)
+        return SR_GLYPH + (guest_relayed() ? SR_BT_GAP + SR_RELAY + SR_BT_GAP + SR_GLYPH : 0);
     return slot == BT_SLOT_NONE      ? 0
            : slot == BT_SLOT_HEADSET ? SR_GLYPH + SR_BT_GAP + SR_HS_BATT_W + SR_HS_NUB
                                      : SR_GLYPH;
@@ -165,9 +182,10 @@ static void sync_paint(void *bar, void *canvas, int x, int cy) {
     glyph(bar, canvas, "status_down", x, SR_RING, cy, SR_DOWN);
 }
 
-/* The Bluetooth slot: nothing while off or idle; the rune dim while a device connects and in Text
- * Primary once one is connected; a headset that reports its level, the headphones glyph and a 15x8
- * battery, filled to the level and red under 20% as the status battery's; a car, its glyph. */
+/* The Bluetooth slot: a guest playing (Guest Play), its phone in the accent, and relayed to a car
+ * or headset "› car"; else nothing while off or idle; the rune dim while a device connects and in
+ * Text Primary once one is connected; a headset that reports its level, the headphones glyph and a
+ * 15x8 battery, filled to the level and red under 20% as the status battery's; a car, its glyph. */
 static void headset_paint(void *bar, void *canvas, int x, int cy) {
     switch (bt_slot()) {
     case BT_SLOT_CONNECTING:
@@ -178,6 +196,18 @@ static void headset_paint(void *bar, void *canvas, int x, int cy) {
         break;
     case BT_SLOT_CAR:
         glyph(bar, canvas, "status_car", x, SR_GLYPH, cy, SR_GLYPH);
+        break;
+    case BT_SLOT_GUEST: /* the guest's phone in the accent, then › and where it plays */
+        paint_art(bar, canvas, theme_art("status_guest"), x, cy - (SR_GLYPH + 1) / 2);
+        if (guest_relayed()) {
+            int at = x + SR_GLYPH + SR_BT_GAP;
+            glyph(bar, canvas, "status_relay", at, SR_RELAY, cy, SR_RELAY);
+            at += SR_RELAY + SR_BT_GAP;
+            glyph(bar, canvas,
+                  !tk_strcmp(bt_kind(bt_headset_class()), "car") ? "status_car"
+                                                                 : "status_headphones",
+                  at, SR_GLYPH, cy, SR_GLYPH);
+        }
         break;
     case BT_SLOT_HEADSET: {
         int level = bt_headset_battery();

@@ -289,3 +289,22 @@ def test_a_download_outranks_a_check_and_a_stopped_app_says_nothing(fw, row):
     assert fw.fn('addon_sync', C.c_int, C.POINTER(C.c_int))(C.byref(got)) == 2 and got.value == 600
     row.ap.a[1].launched = 0
     assert fw.fn('addon_sync', C.c_int, C.POINTER(C.c_int))(None) == 1
+
+
+@pytest.mark.parametrize('out, width, art', [('BMW 6R81', 14 + 2 + 8 + 2 + 14, ['oled_status_guest', 'oled_status_relay_d', 'oled_status_headphones_d']),
+                                            ('jack', 14, ['oled_status_guest'])])
+def test_a_guest_playing_shows_its_phone_and_where_it_plays(fw, row, out, width, art):
+    """While a guest plays (guest.c's state), the slot is its phone in the accent, and relayed to the Q2's Bluetooth
+    device the relay mark and that device's glyph (a car's car; this one reports no Class: headphones)."""
+    from test_guest import Rig
+    rig = Rig(fw)
+    rig.state(state='playing', out=out)
+    rig.poll()
+    assert fw.fn('status_row__headset_shown', C.c_int)() == width
+    canvas = Canvas(fw)
+    names: list = []
+    load = canvas.load_image
+    fw.mock('widget_load_image', lambda w, n, b, *_: names.append(C.string_at(n).decode()) or load(w, n, b))
+    canvas.art = {n: (14, 14) for n in art}
+    fw.fn('status_row__headset_paint', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int)(row.bar.addr, canvas.addr, 200, CY)
+    assert names == art
