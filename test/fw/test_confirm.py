@@ -131,3 +131,15 @@ def test_only_one_card_at_a_time(fw, ui, st):
     assert not card.ask('Shut Down?', ['Cancel', 'Shut Down'], kind=CONSEQUENTIAL)
     fw.fn('confirm_close', None)()
     assert card.dialog in ui.closed and not fw.fn('confirm_up', C.c_int)() and not card.answers
+
+
+def test_a_two_line_body_stands_on_19_px_lines_under_the_title(fw, ui, st):
+    """The title's line from 18 px down, then 4 px, then each body line's 19 px: centres 9 or 10 px into each."""
+    theme(fw)
+    card = Card(fw, ui)
+    assert card.ask('Hide Streaming Songs?', ['Cancel', 'Turn Off'], kind=CONSEQUENTIAL,
+                    body='They leave the Library.\nShow in Library pauses.')
+    canvas = card.paint()
+    top = [b for b in canvas.boxes if b[0][0] == 42 and b[0][2] == 291][0][0][1]
+    centres = [r[1] + r[3] // 2 for _, r, _ in canvas.texts]
+    assert centres == [top + 18 + 12, top + 18 + 24 + 4 + 9, top + 18 + 24 + 4 + 19 + 9]

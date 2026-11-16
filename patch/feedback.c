@@ -596,6 +596,8 @@ static struct {
 } cf __attribute__((section(".scratch")));
 
 int confirm_up(void) { return cf.dialog != (void *)0; }
+/* w holds the card's answers as rows: navigation.c's selection keeps their own width */
+int confirm_surface(void *w) { return w && cf.dialog && w == (cf.stock ? cf.dialog : cf.view); }
 static int card_items(void) { return cf.c.n_rows + !!cf.c.toggle; }
 static int card_destructive(int row) {
     return cf.c.kind == CONFIRM_DESTRUCTIVE && cf.c.n_rows > 1 && row == cf.c.n_rows - 1;
@@ -765,7 +767,8 @@ static const struct {
     { "Shut Down?", "Shut Down?", "Shut Down", 0 },
     { "Restart?", "Restart?", "Restart", 0 }, /* Power's Restart (power_rows.c) */
     { "Restart to apply?", "Restart to Apply?", "Restart", 0 },
-    { "Reset Settings Only", "Reset Settings?", "Reset", "Music, playlists and ratings are kept." },
+    { "Reset Settings Only", "Reset Settings?", "Reset",
+      "Music, playlists and ratings\nare kept." },
     { "Reset Database", "Reset the Database?", "Reset", 0 },
     { "Full Factory Reset", "Full Factory Reset?", "Reset", 0 },
     { "Delete Song?", "Delete This Song?", "Delete", 0 },
@@ -869,10 +872,10 @@ void confirm_paint(void *w, void *canvas) {
     int y = top + CARD_PAD_TOP + CARD_TITLE_H / 2;
     ar_text(canvas, cf.title, 1, TYPE(20), tok(TOK_PRIMARY), 1, cx, y, tw, 1);
     y += CARD_TITLE_H / 2;
-    for (int i = 0; i < cf.lines; ++i, y += CARD_BODY_LINE)
-        ar_text(canvas, cf.body[i], 0, TYPE(15), tok(TOK_SECONDARY), 1, cx,
-                y + (i ? 0 : CARD_BODY_GAP) + CARD_BODY_LINE / 2, tw, 1);
     if (cf.lines) y += CARD_BODY_GAP;
+    for (int i = 0; i < cf.lines; ++i, y += CARD_BODY_LINE)
+        ar_text(canvas, cf.body[i], 0, TYPE(15), tok(TOK_SECONDARY), 1, cx, y + CARD_BODY_LINE / 2,
+                tw, 1);
     if (cf.code[0])
         ar_text(canvas, cf.code, 1, TYPE(30), tok(TOK_PRIMARY), 1, cx,
                 y + CARD_CODE_GAP + CARD_CODE_H / 2, tw, 1);

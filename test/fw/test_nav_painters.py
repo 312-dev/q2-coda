@@ -1372,8 +1372,8 @@ def test_oleds_confirms_are_the_card_with_cancel_and_their_verb(fw, st, prompt, 
     assert confirm.cancel.box[0] == 42 + 8 - THEMES[OLED]['sel_inset']  # the bar 8 px in from the card
 
 
-@pytest.mark.parametrize('prompt, body', [('Reset Settings Only', 'Music, playlists and ratings are kept.'),
-                                          ('Full Factory Reset', None)])
+@pytest.mark.parametrize('prompt, body', [('Reset Settings Only', ['Music, playlists and ratings', 'are kept.']),
+                                          ('Full Factory Reset', [])])
 def test_oleds_reset_settings_confirm_says_what_it_keeps(fw, st, prompt, body):
     """Reset Settings Only's card (audit2 J1) says in its body what a settings reset leaves alone; the other resets,
     which take more, have none; Reset is red, after the gap, as a destructive verb's."""
@@ -1388,8 +1388,8 @@ def test_oleds_reset_settings_confirm_says_what_it_keeps(fw, st, prompt, body):
     fw.mock('widget_get_text_utf8', utf8)
     confirm.canvas = Canvas(fw, char_w=5)  # the body fits its 251 px
     texts = confirm.paint().texts
-    assert [t[0] for t in texts] == [p for p in (prompt.replace(' Only', '') + '?' if 'Settings' in prompt else prompt + '?',
-                                                 body, 'Cancel', 'Reset') if p]
+    title = 'Reset Settings?' if 'Settings' in prompt else prompt + '?'
+    assert [t[0] for t in texts] == [title, *body, 'Cancel', 'Reset']  # the body two lines as written
     assert texts[-1][2] == rgba(0xff453a)  # red
     assert confirm.enter.box[1] - confirm.cancel.box[1] == 32 + 12
 

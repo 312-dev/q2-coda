@@ -2119,7 +2119,8 @@ static void paint_selection(void *w, void *canvas) {
     if (!clip_surface(canvas, &g_menu, &old)) return;
     /* A list row gets the full surface width; a grid tile keeps its own rect. */
     int tile = 2 * r.w < I(g_menu.w, W_W);
-    if (!tile && !modal_rows_of(g_menu.w)) { /* an inset modal's rows keep the panel's */
+    /* an inset modal's rows keep the panel's, the confirmation card's the card's */
+    if (!tile && !modal_rows_of(g_menu.w) && !confirm_surface(g_menu.w)) {
         r.x = 0;
         r.w = I(g_menu.w, W_W);
         /* The Library's row is a button over the top BODY of its pitch: the bar takes the whole
@@ -2165,8 +2166,9 @@ static void paint_selection(void *w, void *canvas) {
         rearm(&st.marq_timer, marq_moved, 0);
     }
     /* a pop-up button's tile: framed white on any accent. An inset modal's row is no tile
-     * (menu_modal.c). */
-    if (g_menu.kind == 4 && r.w < I(g_menu.w, W_W) && !modal_rows_of(g_menu.w))
+     * (menu_modal.c), nor is the confirmation card's answer (feedback.c). */
+    if (g_menu.kind == 4 && r.w < I(g_menu.w, W_W) && !modal_rows_of(g_menu.w) &&
+        !confirm_surface(g_menu.w))
         frame_box(canvas, &r, 0xffffffff, SEL_RADIUS);
     /* Save/restore explicitly: this firmware's canvas_save/restore cover neither clip nor
      * either color, and the global alpha is deliberately never touched. */

@@ -436,6 +436,7 @@ typedef struct {
 int confirm(const confirm_t *c); /* 1: shown; 0: another card is up, or no dialog */
 void confirm_close(void);        /* closes the card without an answer */
 int confirm_up(void);            /* a card is up */
+int confirm_surface(void *w);    /* w holds the card's answers */
 void confirm_paint(void *w, void *canvas), confirm_rows_paint(void *w, void *canvas);
 void confirm_bar_dim(void *w, void *canvas);
 void cf_veil(void *win, int on);              /* win unseen (1) or seen again under Coverflow */
