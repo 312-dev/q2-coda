@@ -88,6 +88,11 @@ def click(ui, page, row):
     return ui.handler(ui.kids[lists(ui, page)[-1]][row], O['EVT_CLICK'])()
 
 
+def stops(ui, page):
+    """The newest list's rows the wheel stops on: those with a click (navigation.c collect), the gap passed."""
+    return [w for w in ui.kids[lists(ui, page)[-1]] if any(h[0] == w and h[1] == O['EVT_CLICK'] for h in ui.handlers)]
+
+
 def open_page(fw, ui):
     call(fw, 'carremote_open')
     return ui.top()
@@ -180,6 +185,23 @@ def test_a_phones_page_and_rename(fw, ui, mcl, recs):
     assert done(b'   ') == b"Name can't be empty"
     assert done(b' Work phone ') is None
     assert q2.files[PEERS] == paired('Work phone', A) + paired('Galaxy S24', B)
+
+
+def test_each_page_counts_the_rows_the_wheel_stops_on(fw, ui, mcl, recs):
+    """The phone page opened on Status, not Rename (emulator, 2026-11-16): its count took the gap in (6 for 5
+    rows), so ringnav's next load found the count changed and dropped the selection (nav/lists.c load)."""
+    Car(fw, ui, recs, phones=paired('Pixel 10 Pro', A) + paired('Galaxy S24', B), online=A + b'\x00')
+    page = open_page(fw, ui)
+    assert ui.props[(lists(ui, page)[-1], '_ringnav_count')] == len(stops(ui, page)) == 4  # switch, Pair, 2 phones
+    click(ui, page, 3)
+    phone = ui.top()
+    view = lists(ui, phone)[-1]
+    assert ui.props[(view, '_ringnav_count')] == len(stops(ui, phone)) == 5
+    assert stops(ui, phone)[ui.props[(view, '_ringnav_index')]] == ui.kids[view][3]  # Rename
+    ui.props[(view, '_ringnav_index')] = 4  # Forget Phone, then a rebuild (a rename, a connection) keeps it
+    fw.fn('carremote_page__cr_phone_show', C.c_int, C.c_void_p)(1)
+    view = lists(ui, phone)[-1]
+    assert stops(ui, phone)[ui.props[(view, '_ringnav_index')]] == ui.kids[view][5]
 
 
 def test_last_connected_and_paired_on_another_year(fw, ui, mcl, recs):

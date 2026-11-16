@@ -354,7 +354,10 @@ static int cr_phone_show(const void *ctx) {
     void *forget = cr_row(view, 4, K_FORGET, "Forget Phone", 0, page_x(), cr_phone_click);
     widget_set_prop_int(widget_get_child(forget, 0), "style:normal:text_color", (int)RGBA(tok(TOK_NEGATIVE)));
     cr_fit(view);
-    ringnav_select(view, sel < 6 && sel != 4 ? sel : 3, 6); /* child 4 is the gap */
+    /* five rows: the wheel's count passes the gap (navigation.c collect), so Forget Phone is row 4, and a count
+     * that took the gap in would not match ringnav's own at its next load, which then drops the row (nav/lists.c
+     * load) and the page showed Status selected */
+    ringnav_select(view, sel < 5 ? sel : 3, 5);
     cp.phone_view = view;
     return 0;
 }
@@ -414,12 +417,11 @@ static int cr_page_show(const void *ctx) {
         widget_set_prop_int(item, "_cr_online", p[i].online);
         row_into(item, page_h(64));
     }
-    int children = rows > 1 ? rows + 1 : 1; /* the gap is child 1 */
-    if (sel >= children) sel = children - 1;
-    if (sel == 1) sel = 0;
+    /* rows counts what the wheel stops on (the gap is passed, so Pair a Phone is row 1, as its click's index) */
+    if (sel >= rows) sel = rows - 1;
     cr_fit(view); /* the switch grows at its first paint with the bar on it (carremote_paint) */
     cp.sel = -1;
-    ringnav_select(view, sel, children);
+    ringnav_select(view, sel, rows);
     cp.view = view;
     /* none: the empty state under the switch, in its compact form as rows stand above it (feedback.c
      * empty_compact; docs/oled-design.md#empty-and-offline), its button Pair a Phone, selected as the page opens */
