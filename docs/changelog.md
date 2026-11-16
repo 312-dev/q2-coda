@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Library (OLED): the A-Z index works on a list you have scrolled down; touching the lower letters there did nothing.
   - First start: a new Q2, or one after a reset, starts on Home in English instead of stock's language picker.
   - Library: Songs with no music on the card is a single **Scan Music Now** row with **No songs** and **Copy music to the SD card** under it, in place of stock's picture, its second message and the blue button.
   - Folders: the top of the screen says **Folders** at the SD card's root and the folder's own name inside it, instead of SD or a path.

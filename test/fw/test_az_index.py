@@ -125,6 +125,16 @@ def test_a_finger_on_the_right_edge_jumps_to_the_letter_and_holds_the_touch(fw, 
     assert not f['on'](table.client.at) and ui.invalidated == [table.win.at] and not ui.due('az_due')
 
 
+def test_a_finger_on_the_right_edge_of_a_scrolled_list_still_jumps(fw, ui):
+    """Scrolled down, widget_to_local gives the press in the list's content (its scroll added): the edge's test
+    takes the view's own y, so a press low on the strip is not taken for one below the list."""
+    table, pull = touchable(fw, ui)
+    table.client.int(O['TABLE_TOP'], 40 * ROW_H)
+    assert pull.down(370, letter_y('W')) == 0
+    w = 22 * 3  # W's first row
+    assert table.selected == w and pull.aborts == [(table.win.at, O['EVT_POINTER_ABORT'])]
+
+
 def test_a_press_after_a_missed_lift_ends_the_hold(fw, ui):
     table, pull = touchable(fw, ui)
     pull.down(370, letter_y('M'))

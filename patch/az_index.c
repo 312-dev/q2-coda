@@ -258,6 +258,7 @@ int az_touch(void *w, void *event) {
     if (!k || !event) return 0;
     int xy[2] = { I(event, EVENT_X), I(event, EVENT_Y) };
     widget_to_local(w, xy);
+    xy[1] -= I(w, TABLE_TOP); /* to_local counts the list's scroll: the press's place in the view */
     if (xy[0] < I(w, W_W) - AZ_EDGE_PX || xy[0] >= I(w, W_W) || xy[1] < 0 || xy[1] >= I(w, W_H))
         return 0;
     void *page = window_of(w), *list = P(p_deque_showlist, 0);
