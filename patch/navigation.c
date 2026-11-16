@@ -6815,7 +6815,6 @@ enum {
     QA_CHAPTERS,
     QA_MORE,
     QA_NEW_PLAYLIST,
-    QA_EDIT_PLAYLISTS,
     QA_SORT, /* the inset modal's Sorting row (menu_modal.c) */
     QA_OTG,  /* Add to On-The-Go (playlist_pages.c) */
     QA_PLAY, /* the inset modal's playlist: Play, Rename, Delete (playlists.c) */
@@ -8183,15 +8182,15 @@ int np_goto(int album, int go) {
 /* Deferred so the dialog is never closed under its own click dispatch. */
 static int qm_open(const void *unused);
 
-/* New Playlist (edit 0) and Select Playlists… run once the dialog is destroyed, so the Playlists
- * page is on top however its close animates (playlists.c's click acts on the top page only), and
- * from the pass after, so the covers never close inside the dialog's destroy. */
-static int qm_edit_run(const void *info) {
-    playlists_edit((int)(long)P(info, TIMER_CTX));
+/* New Playlist runs once the dialog is destroyed, so the Playlists page is on top however its
+ * close animates (playlists.c's click acts on the top page only), and from the pass after, so the
+ * covers never close inside the dialog's destroy. */
+static int qm_edit_run(const void *unused) {
+    playlists_new();
     return 0;
 }
-static int qm_edit_due(void *edit, void *event) {
-    timer_add(qm_edit_run, edit, 0);
+static int qm_edit_due(void *ctx, void *event) {
+    timer_add(qm_edit_run, 0, 0);
     return 0;
 }
 /* A song's My Fav changed from the menu, kept as Now Playing's heart keeps it (ratings.c
@@ -8206,9 +8205,7 @@ static void qm_rated(void *r, int hearts) {
 static int qm_run(const void *unused) {
     st.qm_timer = 0;
     if (!st.qm_dialog) return 0;
-    if (st.qm_action == QA_NEW_PLAYLIST || st.qm_action == QA_EDIT_PLAYLISTS)
-        widget_on(st.qm_dialog, EVT_DESTROY, qm_edit_due,
-                  (void *)(long)(st.qm_action == QA_EDIT_PLAYLISTS));
+    if (st.qm_action == QA_NEW_PLAYLIST) widget_on(st.qm_dialog, EVT_DESTROY, qm_edit_due, 0);
     qm_close();
     void *r = qm_record();
     int a = st.qm_action, cls = st.qm_kind == QM_COVERFLOW ? 0xf001 : (int)st.qm_cls;
@@ -8232,7 +8229,7 @@ static int qm_run(const void *unused) {
     } else if (r && a == QA_SORT) {
         st.qm_choice = QM_SORT_CHOICE;
         qm_open(0);
-    } else if (a == QA_NEW_PLAYLIST || a == QA_EDIT_PLAYLISTS) {
+    } else if (a == QA_NEW_PLAYLIST) {
         /* the page's own, not the playlist's: qm_edit_due */
     } else if (a == QA_MORE) {
         void *more = np_more(); /* clicked as a tap would, so stock's own handler opens it */
@@ -8514,8 +8511,7 @@ static int qm_open(const void *unused) {
         if (np_more()) acts[n++] = QA_MORE; /* last: Now Playing's own menu */
     }
     if (st.qm_kind == QM_PLAYLIST && !list) acts[n++] = QA_MORE; /* its dots' page */
-    /* the list's own New Playlist, which its covers hide; Select Playlists… is hidden (the menu
-     * review's, 2026-11-15) */
+    /* the list's own New Playlist, which its covers hide */
     if (st.qm_kind == QM_PLAYLIST && !list && coverflow_playlist(page)) acts[n++] = QA_NEW_PLAYLIST;
     static const char *const rows[] = { "Play Next",
                                         "Play Last",
@@ -8537,7 +8533,6 @@ static int qm_open(const void *unused) {
                                         "Chapters",
                                         "More…",
                                         "New Playlist",
-                                        "Select Playlists…",
                                         "Sorting",
                                         "Add to On-The-Go",
                                         "Play",
@@ -8564,7 +8559,6 @@ static int qm_open(const void *unused) {
                                          "bookmark-simple",
                                          "dots-three",
                                          "plus",
-                                         "list-checks",
                                          "funnel-simple",
                                          "sneaker-move",
                                          "play",
