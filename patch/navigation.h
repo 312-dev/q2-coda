@@ -119,7 +119,6 @@ typedef struct {
     unsigned ch_timer, ch_track, ch_key;
     int ch_cue, ch_end;        /* the Chapters track's CUE start and end, file seconds */
     void *sc_page, *sc_row[3]; /* Streaming's Configuration page, its cache rows and Erase's */
-    int sc_armed;              /* Erase Spotify Data pressed once: the next press erases */
 /* Streaming's services (svc): five fixed, and at most APPS_MAX card apps. */
 #define SVC_FIXED 5
 #define SVC_MAX (SVC_FIXED + APPS_MAX)

@@ -1987,49 +1987,39 @@ def erasing(fw):
     fw.mock('fw_pthread_create', lambda *_: 0)
 
 
-def test_erase_wants_a_second_press(fw, ui):
+def erase_answer(fw, row):
+    """Erase Spotify Data's confirmation card answered (navigation.c sc_erase_answer), as feedback.c runs it."""
+    fw.fn('navigation__sc_erase_answer', None, C.c_void_p, C.c_int, C.c_int)(None, row, 0)
+
+
+def test_erase_asks_on_the_card_first(fw, ui):
     erasing(fw)
     page, *_ = configuration(fw, ui)
     ui.click(page, 2)
-    assert ui.captions(page)[2] == 'Press again to erase the login and cache' and not fw.calls('fw_system')
-    ui.click(page, 2)
+    assert 'dialog/sortselect_dialog' in ui.went and not fw.calls('fw_system')  # the card, nothing erased
+    erase_answer(fw, 0)  # Cancel
+    assert ui.captions(page)[2] == 'Erase Spotify Data' and not fw.calls('fw_system')
+    erase_answer(fw, 1)  # Erase
     assert ui.captions(page)[2] == 'Erasing…' and fw.calls('fw_system')  # librespot stopped first
 
 
-def test_another_row_drops_the_first_press(fw, ui):
-    page, *_ = configuration(fw, ui)
-    ui.click(page, 2)
-    ui.click(page, 0)
-    assert ui.captions(page)[2] == 'Erase Spotify Data'
-    ui.click(page, 2)
-    assert ui.captions(page)[2] == 'Press again to erase the login and cache'
-
-
-def test_leaving_drops_the_first_press(fw, ui, st):
-    page, *_ = configuration(fw, ui)
-    ui.click(page, 2)
-    ui.close(page)
-    assert not st('sc_armed').value and not st('sc_page', C.c_void_p).value
-    page, *_ = configuration(fw, ui)
-    assert ui.captions(page)[2] == 'Erase Spotify Data'
-
-
-def test_while_erasing_spotify_s_cache_waits(fw, ui):
+def test_while_erasing_spotify_s_cache_and_erase_wait(fw, ui):
     erasing(fw)
     page, disk, *_ = configuration(fw, ui)
-    ui.click(page, 2), ui.click(page, 2)
+    erase_answer(fw, 1)
     ui.click(page, 1)
     assert ui.toasts == ['Wait for the one in progress'] and f'{SPOT_DIR}/.cache-size' not in disk.files
-    ui.click(page, 2)
+    asked = ui.went.count('dialog/sortselect_dialog')
+    ui.click(page, 2)  # no card while one runs: it says to wait
     assert ui.toasts[-1] == 'Wait for the one in progress' and ui.captions(page)[2] == 'Erasing…'
+    assert ui.went.count('dialog/sortselect_dialog') == asked
 
 
 def test_an_erase_s_end_shows_on_the_page(fw, ui):
     page, disk, *_ = configuration(fw, ui, {f'{SPOT_DIR}/.cache-size': b'1024M'})
-    ui.click(page, 2)
     del disk.files[f'{SPOT_DIR}/.cache-size']  # netupdate.c's erase took it, and calls back
     fw.fn('stream_erased', None)()
-    assert ui.captions(page)[1:3] == ['Spotify Cache: 2 GB', 'Press again to erase the login and cache']
+    assert ui.captions(page)[1:3] == ['Spotify Cache: 2 GB', 'Erase Spotify Data']
 
 
 def test_an_erase_s_end_with_the_page_gone_writes_nothing(fw, ui):

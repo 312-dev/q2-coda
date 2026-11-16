@@ -7612,7 +7612,7 @@ static int page_closed(void *ctx, void *event) {
             st.ch = 0;
         }
     }
-    if (ctx == st.sc_page) st.sc_page = 0, st.sc_armed = 0;
+    if (ctx == st.sc_page) st.sc_page = 0;
     return 0;
 }
 
@@ -7776,11 +7776,10 @@ static void sc_text(int i) {
     char s[40];
     if (i < 2)
         tk_snprintf(s, sizeof s, "%s Cache: %s", i ? "Spotify" : "Tidal", sizes[stream_cache(i)]);
-    widget_set_text_utf8(widget_get_child(st.sc_row[i], 0),
-                         i < 2            ? s
-                         : shelf_erase(0) ? "Erasing…"
-                         : st.sc_armed    ? "Press again to erase the login and cache"
-                                          : "Erase Spotify Data");
+    widget_set_text_utf8(widget_get_child(st.sc_row[i], 0), i < 2 ? s
+                                                            : shelf_erase(0)
+                                                                ? "Erasing…"
+                                                                : "Erase Spotify Data");
 }
 
 /* netupdate.c's erase ended: .cache-size went with it, so Spotify's row reads 2 GB again. */
@@ -7840,19 +7839,34 @@ static int svc_toggle(int i) {
     return 0;
 }
 
+/* Erase Spotify Data's card (docs/oled-design.md#confirmation-card): Erase (row 1) starts it. */
+static void sc_erase_answer(void *ctx, int row, int toggle_on) {
+    if (row == 1) shelf_erase(1);
+    if (st.sc_page) sc_text(2);
+}
 /* A cache row steps to the next size and saves it: Tidal's applies at the next download's trim,
- * Spotify's when librespot next starts. Erase Spotify Data wants a second press in a row, as the
- * App Store's Remove: any other row's press or leaving the page drops the first. Stop Streaming
+ * Spotify's when librespot next starts. Erase Spotify Data asks first on the confirmation card
+ * (one running says to wait: shelf_erase's toast). Stop Streaming
  * Services ends librespot and its restart loop, a radio station, the card apps (addon.c) and a
  * stock stream (Tidal's) queue, so the keys and the output are local music's again; local music
  * already stopped is left as it is. */
 static int sc_click(void *ctx, void *event) {
     int i = (int)(long)ctx;
-    st.sc_armed = i == 2 && !st.sc_armed && !shelf_erase(0); /* erasing: says to wait */
-    if (i == 2 && !st.sc_armed) shelf_erase(1);
-    sc_text(2);
     if (i > 4) return svc_toggle(i - 5);
-    if (i == 2) return 0;
+    if (i == 2) {
+        static const char *const rows[] = { "Cancel", "Erase" };
+        if (shelf_erase(0))
+            shelf_erase(1); /* erasing already: says to wait */
+        else
+            confirm(&(confirm_t){ .title = "Erase Spotify Data?",
+                                  .body = "Its login, cache and logs go;\nsign in again to use it.",
+                                  .rows = rows,
+                                  .n_rows = 2,
+                                  .kind = CONFIRM_DESTRUCTIVE,
+                                  .back = -1,
+                                  .answer = sc_erase_answer });
+        return 0;
+    }
     if (i == 3) {
         unsigned type = (unsigned)MCL(MCL_TYPE);
         spot_stop();
