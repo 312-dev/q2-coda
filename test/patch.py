@@ -4218,7 +4218,7 @@ for cls in (0xf004,0xf005,0xf006,0xff01,0xff02,0xff03,1):
         if cls==1: m.word(m.row(0)+O['REC_TYPE'],4)
         assert m.run(action)==('Playing Next','Playing Last')[action]
         added=['Music','Episode','Book'] if cls==1 else ['Music']
-        assert m.names()==(['A']+added+['B','C'] if action==0 else ['A','B','C']+added)
+        assert m.names()==(['A']+added+['B','C'] if action==0 else played_last(m,added))
         assert m.get(payload_syms['library_music'])==0
         assert m.names(m.get(syms['tools_pdeq_directory']))==['staged']
 passed()
@@ -4298,9 +4298,10 @@ for row,want in ((4,'playerjumpinfo_page'),(5,'localmusic/artistinfo_page')):
 # An empty queue is filled by the stock loader without starting playback.
 m=QueueMachine(queue=0); assert m.run(0)=='Playing Next' and m.names()==['Row 0'] and m.mcl('MCL_POS')==0
 assert m.mcl('MCL_TYPE')==0xf001 and m.pool()==[0] and not m.playback(); passed()
-# Gapless: a preload of pos+1 is closed exactly when the new tracks land there.
-for row,pos,closed in ((0,0,True),(1,0,False),(1,2,True)):
-    m=QueueMachine(pos=pos); m.word(O['MCL_PRELOAD'],1); m.word(O['MCL_FD'],9); m.run(row)
+# Gapless: a preload of pos+1 is closed exactly when the new tracks land there: Play Next always, Play Last under
+# List with nothing in Playing Next (played_last), or at the queue's end under a mode that is not List or Repeat All.
+for row,pos,mode,closed in ((0,0,0,True),(1,0,0,True),(1,0,1,False),(1,2,1,True)):
+    m=QueueMachine(pos=pos,mode=mode); m.word(O['MCL_PRELOAD'],1); m.word(O['MCL_FD'],9); m.run(row)
     assert (m.sent==[(9,b'{mcl-closegapless\\null}',23,0)] and m.mcl('MCL_PRELOAD')==-1) if closed else (not m.sent and m.mcl('MCL_PRELOAD')==1)
     passed()
 # Shuffle: the patched mclNextSong call runs the stock pick, then plays the Play next track once.
@@ -5479,7 +5480,7 @@ assert m.names(m.get(syms['p_deque_showlist']))==['Row 0'] and ('stock_localclas
 # the tracks query and handoff. The art thread itself runs on the host (test/coverflow.py).
 from ipod import HOME_TEXT_X, HOME_LIST_W, HOME_OURS, HOME_PAGE, HOME_ROW, HOME_ROWS, HOME_TOP, decode
 cards=[c[2]['name'] for c in decode((B/'ui'/HOME_PAGE).read_bytes())[3][1][3][0][3]]  # list_view_home's scroll_view's rows
-assert len(cards)==len(HOME_ROWS)==9 and cards[2]=='btn_coverflow', cards
+assert cards==[f'btn_{r}' for r in HOME_ROWS] and 'btn_coverflow' in cards, cards  # Home's rows, in tools/ipod.py's order
 home_hook=HOOKS['home_page_init']
 assert struct.unpack_from('<I',demo,fileoff(demo,home_hook[0]))[0]==j(payload_syms['coverflow_home'])
 passed()
@@ -5514,7 +5515,8 @@ def home_list(m):
     m.handlers.pop(syms['mclGetPlayStatus'],None); m.word(0xa50084,3)
     m.top=asset_tree(m,HOME_PAGE)
     imgs=[named(m,m.top,'img_'+HOME_OURS.get(r,r)) for r in HOME_ROWS]
-    for img in imgs[:2]+imgs[3:]: click_target(m,img)
+    cf=HOME_ROWS.index('coverflow')
+    for img in imgs[:cf]+imgs[cf+1:]: click_target(m,img)
     return named(m,m.top,'scroll_view_home'),imgs
 
 # Return is a button too: after a touch, the page it goes back to shows its selection again.
@@ -5541,20 +5543,21 @@ m,w,es=walk(10,5); w2,es2=m.page_list(10,extent=1000); m.nodes[m.top]['anim_hint
 assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==204
 assert [c[0] for c in m.moved()]==['scroll_view_set_offset']; passed()
 
-# Home is an ordinary list: the wheel walks the nine rows one by one, the seven its box shows and then
-# the two it scrolls in, so the last rests where the seventh did; it bumps at both ends and wraps after a
+# Home is an ordinary list: the wheel walks its rows (HOME_ROWS) one by one, the seven its box shows and then
+# any it scrolls in, so the last rests where the seventh did; it bumps at both ends and wraps after a
 # pause, Return selects Now Playing, the bar spans the list's width and centre clicks the image.
-m=Machine(); view,imgs=home_list(m); click_target(m,imgs[2])
+m=Machine(); view,imgs=home_list(m); click_target(m,imgs[HOME_ROWS.index('coverflow')])
 m.paint(view)
 assert m.selected(view)==0
-for i in range(1,9): assert m.call()==11 and m.selected(view)==i
-assert m.get(view+O['SCROLL_Y'])==2*HOME_ROW
-m.paint(view); assert not m.rounded and [b[:5] for b in m.bands]==bar_bands(inset,6*HOME_ROW,HOME_LIST_W-2*inset,HOME_ROW,radius)
-assert m.call(gap=50)==11 and m.selected(view)==8   # bumped
+last=len(HOME_ROWS)-1; shown=min(len(HOME_ROWS),7)
+for i in range(1,last+1): assert m.call()==11 and m.selected(view)==i
+assert m.get(view+O['SCROLL_Y'])==(last+1-shown)*HOME_ROW
+m.paint(view); assert not m.rounded and [b[:5] for b in m.bands]==bar_bands(inset,(shown-1)*HOME_ROW,HOME_LIST_W-2*inset,HOME_ROW,radius)
+assert m.call(gap=50)==11 and m.selected(view)==last   # bumped
 assert m.call(gap=O['EDGE_PAUSE_MS'])==11 and m.selected(view)==0 and m.get(view+O['SCROLL_Y'])==0
 assert m.call(O['KEY_PREV'],gap=50)==11 and m.selected(view)==0   # bumped
-assert m.call(O['KEY_PREV'],gap=O['EDGE_PAUSE_MS'])==11 and m.selected(view)==8
-for i in range(7,2,-1): assert m.call(O['KEY_PREV'])==11 and m.selected(view)==i
+assert m.call(O['KEY_PREV'],gap=O['EDGE_PAUSE_MS'])==11 and m.selected(view)==last
+for i in range(last-1,2,-1): assert m.call(O['KEY_PREV'])==11 and m.selected(view)==i
 assert m.call(O['KEY_RETURN'])==11 and m.selected(view)==0 and not destinations(m)
 for i in (1,2): assert m.call(gap=1000)==11 and m.selected(view)==i
 assert not m.slides and m.confirm()==11 and m.dispatched()[0][1]==imgs[2]; passed()
@@ -5579,7 +5582,7 @@ from ipod import SET0  # Home's asset as built is SET0's, before theme_boot writ
 def window(m,name,w):
     m.top=m.node('window',name,[w]); m.word(w+O['W_PARENT'],m.top); m.word(m.top+O['W_PARENT'],m.wm)
 def loaded(m): return [m.text(c[2]) for c in m.calls if c[0]=='widget_load_image']
-m=Machine(); view,imgs=home_list(m); click_target(m,imgs[2]); m.clip=(0,0,375,320)
+m=Machine(); view,imgs=home_list(m); click_target(m,imgs[HOME_ROWS.index('coverflow')]); m.clip=(0,0,375,320)
 m.image_loads=[]; m.paint(view)
 CHEV_X=HOME_LIST_W-SET0.right_x-5
 def bar(sel):  # Home's chevrons, their row's selected one white
@@ -6003,11 +6006,11 @@ class CoverflowMachine(QueueMachine):
         elif name=='pthread_join': self.joins.append(a)
         self.returns(ret,clobber=True)
     def open(self):
-        """Home with the card at index 2: centre confirms its image, whose click opens Coverflow."""
-        view,self.imgs=home_list(self); self.img=self.imgs[2]; self.home=self.top; self.stack=[self.top]
+        """Home with its Cover Flow row selected: centre confirms its image, whose click opens Coverflow."""
+        cf=HOME_ROWS.index('coverflow'); view,self.imgs=home_list(self); self.img=self.imgs[cf]; self.home=self.top; self.stack=[self.top]
         self.art=named(self,self.top,'img_homeart'); self.list=named(self,self.top,'list_view_home')
         assert self.call(address=home_hook[0],args=(self.top,0,0,0),gap=0)==0
-        self.paint(view); self.nodes[view]['_ringnav_index']=2
+        self.paint(view); self.nodes[view]['_ringnav_index']=cf
         self.clicks=[]; assert self.confirm()==11 and self.clicks==[self.img]
         f,ctx=self.handler(self.img,O['EVT_CLICK']); assert self.call(address=f,args=(ctx,self.event,0,0),gap=0)==0
         self.page=self.top; self.slide=self.find('slide_menu')
@@ -8094,9 +8097,9 @@ class FileMocks:
             if data: self.files[path]=data
         elif name=='rename': self.files[self.text(b)]=self.files.pop(self.text(a))
         return 0
-# USB Storage's page (navigation.c usb_poll): the card's LUN read open, then empty, is the computer's eject: OK to
-# Disconnect, once, over stock's scrlabel_info, which hides. Empty before it was ever open, or no file (no gadget), is no
-# eject; Audio and DAC have no poll.
+# USB Storage's page (navigation.c usb_poll): the card's LUN read open, then empty, is the computer's eject: the poll
+# ends and the mode page (usb_ui.c usb_ui_ejected) is drawn again, saying OK to Disconnect (test/fw test_nav_paint.py
+# checks its paint). Empty before it was ever open, or no file (no gadget), is no eject; Audio and DAC have no poll.
 USB_LUN='/sys/kernel/config/usb_gadget/storage_demo/functions/mass_storage.msg/lun.0/file'
 class UsbMachine(FileMocks,MsgMachine):
     def __init__(self): super().__init__(); self.file_mocks('u:'); self.widget_timers=True
@@ -8110,9 +8113,7 @@ for data in (None,b'',b'/dev/mmcblk0p1\n'):
     if data is not None: m.files[USB_LUN]=data
     m.advance(500); assert 'OK to Disconnect' not in said() and m.timers,data
 m.files.pop(USB_LUN); m.advance(500); assert 'OK to Disconnect' not in said() and m.timers  # torn down after a path: no eject
-m.files[USB_LUN]=b''; m.advance(500); assert 'OK to Disconnect' in said() and not m.timers and [c[1] for c in m.calls if c[0]=='widget_invalidate_force']==[win]
-ok=[w for w,n in m.nodes.items() if isinstance(n,dict) and n.get('text')=='OK to Disconnect']
-assert m.nodes[info]['visible']==0 and len(ok)==1 and m.nodes[ok[0]]['style']=='s_scrlabel_white24c' and wbox(m,ok[0])==wbox(m,info)
+m.files[USB_LUN]=b''; m.advance(500); assert not m.timers and [c[1] for c in m.calls if c[0]=='widget_invalidate_force']==[win]
 m,*_=usb_page(1,light='0',machine=UsbMachine); assert not m.timers
 passed()
 class AlbumRateMachine(FileMocks,CoverflowMachine):
@@ -11200,10 +11201,10 @@ for table in (False,True):
             m.paint(w); assert turn(m,w,gaps)==list(range(1,len(gaps)+1)),(table,count,gaps)
             passed()
 # Home as built: the same, its ends bump then wrap after a pause, and Centre opens the row that is highlighted.
-m=Machine(); view,imgs=home_list(m); click_target(m,imgs[2]); m.paint(view)
-assert turn(m,view,(1000,100,100,1000,100,100,100,100,100,400))==[1,2,3,4,5,6,7,8,8,0]
-assert m.get(view+O['SCROLL_Y'])==0 and turn(m,view,(1000,400,100,100),PREV)==[0,8,7,6]
-assert m.confirm()==11 and m.dispatched()[0][1]==imgs[6]; passed()
+m=Machine(); view,imgs=home_list(m); click_target(m,imgs[HOME_ROWS.index('coverflow')]); m.paint(view); last=len(HOME_ROWS)-1
+assert turn(m,view,(1000,100,100,1000,100,100,100,100)[:last]+(100,400))==[*range(1,last+1),last,0]
+assert m.get(view+O['SCROLL_Y'])==0 and turn(m,view,(1000,400,100,100),PREV)==[0,last,last-1,last-2]
+assert m.confirm()==11 and m.dispatched()[0][1]==imgs[last-2]; passed()
 # A BUTTONS dialog: the same between its buttons, and nothing scrolls.
 m=Machine(); d=m.node('dialog','confirminfo_dialog'); m.word(d+O['W_PARENT'],m.wm); m.top=d
 buttons=[m.entry(d,220) for _ in range(3)]; m.nodes[d]['children']=buttons
@@ -11244,7 +11245,7 @@ passed()
 # once each; stock's one-click-per-press latch is set by the press and cleared by the
 # release, as without the hook.
 def home_machine(tone=1):
-    m=audible(Machine(),tone); view,imgs=home_list(m); click_target(m,imgs[2]); m.paint(view)
+    m=audible(Machine(),tone); view,imgs=home_list(m); click_target(m,imgs[HOME_ROWS.index('coverflow')]); m.paint(view)
     return m,view
 m,view=home_machine(); got=[]
 for gap in (1000,100,100,1000):
