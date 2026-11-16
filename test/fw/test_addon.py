@@ -408,9 +408,8 @@ def test_the_features_are_published_at_every_scan(fw):
     scan(fw)
     assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings artist album playlists storage signin libsource\n'
     # Streaming Songs' state goes first (library_settings.c), so an app that reads libsource in the caps finds it
-    # (the settings' first read writes it too)
-    assert world.of('rename')[-2:] == [(b'/tmp/q2-addon.library.tmp', b'/tmp/q2-addon.library'),
-                                       (b'/tmp/q2-addon.caps.tmp', b'/tmp/q2-addon.caps')]
+    assert world.of('rename') == [(b'/tmp/q2-addon.library.tmp', b'/tmp/q2-addon.library'),
+                                  (b'/tmp/q2-addon.caps.tmp', b'/tmp/q2-addon.caps')]
     assert world.written[b'/tmp/q2-addon.library.tmp'] == b'local\n'
 
 

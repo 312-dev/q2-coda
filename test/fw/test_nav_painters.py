@@ -1769,32 +1769,30 @@ def icon(item):
     return next((c.props.get('image') for c in item.walk() if c.kind == 'image' and c.box[0] < 72), None)
 
 
-def test_playback_orders_its_rows_and_ends_on_library_and_folders(fw):
+def test_playback_orders_its_rows_eq_and_the_library_first(fw):
     ui, win, view, settings, _ = settings_page(fw, 'playset_page', 'scroll_view_playset')
     playset(fw, ui, view)
     fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     rows = view.children
     ids = [r.name for r in rows]
-    # stock's Volume and Album Display is not offered; Folder skip is Library & Folders'
-    assert len(rows) == 20 and 's11' not in ids and 's12' not in ids
+    # stock's Volume and Album Display is not offered; Folder skip is Library > Folders'
+    assert len(rows) == 19 and 's11' not in ids and 's12' not in ids
     at = {r.name or icon(r): k for k, r in enumerate(rows)}
-    assert rows[-1] is row(ui, view, 'Library & Folders') and 'list_into' in [c.props.get('image') for c in rows[-1].walk()]
-    assert rows[-2] is row(ui, view, 'On-The-Go')  # its switch (playlist_pages.c), before Library & Folders
-    assert (at['s3'], at['s2']) == (0, 1)  # Play Mode, then EQ
+    assert at['s2'] == 0 and rows[1] is row(ui, view, 'Library') and 'list_into' in [c.props.get('image') for c in rows[1].walk()]
+    assert at['s3'] == 2  # Play Mode after EQ and the Library
     assert at['playset_gapless'] == at['s7'] + 1 and at['playset_memplay'] == at['s6'] + 1  # Crossfade, Resume Songs
     assert at['s8'] == at['playset_memplay'] + 1  # Headphones required, after Resume Songs
+    assert rows[at['s8'] + 1] is row(ui, view, 'Sleep Timer')
+    assert [at['playset_maxvol'], at['playset_bootvol'], at['s0'], at['s9'], at['s10']] == list(range(at['s8'] + 2, at['s8'] + 7))
     balance = [k for k, r in enumerate(rows) if icon(r) == 'playset_balance']
     assert balance == [at['s10'] + 1, at['s10'] + 2]  # Mono Audio and Swap L/R
-    assert at['s5'] == at['s4'] + 1 == 17  # DSD Output, then USB Audio last but one
-    # that page's rows, where V1.32 had them: the two volumes before Balance, Enlarged Album Art after Swap L/R
-    assert [at['playset_maxvol'], at['playset_bootvol'], at['s10']] == list(range(at['s9'] + 1, at['s9'] + 4))
-    assert at['playset_covermode'] == balance[1] + 1
+    assert [at['s1'], at['s4'], at['s5']] == [balance[1] + 1, balance[1] + 2, 18]  # Filters, DSD Output, USB Audio last
+    assert 'playset_covermode' not in at and not [r for r in rows if not r.name and ui.text(label_of(r)) == 'On-The-Go']
 
 
-def test_playback_s_volume_rows_open_stock_s_pages_and_enlarged_art_is_stock_s_switch(fw):
+def test_playback_s_volume_rows_open_stock_s_pages(fw):
     ui, win, view, settings, _ = settings_page(fw, 'playset_page', 'scroll_view_playset')
     playset(fw, ui, view)
-    g(fw, 'g_bigcovermode', 0)
     fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     ours = {icon(r): r for r in view.children if not r.name}
     opened = []
@@ -1803,23 +1801,30 @@ def test_playback_s_volume_rows_open_stock_s_pages_and_enlarged_art_is_stock_s_s
         assert 'list_into' in [c.props.get('image') for c in ours[key].walk()]
         click(ui, ours[key])
     assert opened == ['playset/maxvol_page', 'playset/bootvol_page']
-    art = ours['playset_covermode']
-    assert switch(art) == 'switch_off' and ui.text(label_of(art)) == 'Enlarged Album Art'
     # stock's rows, stock's translations
-    assert [C.string_at(c[1][1]) for c in fw.calls('widget_set_tr_text')] == [b'playset_maxvol', b'playset_bootvol', b'playset_covermode']
+    assert [C.string_at(c[1][1]) for c in fw.calls('widget_set_tr_text')] == [b'playset_maxvol', b'playset_bootvol']
+
+
+def test_enlarged_album_art_is_display_s_last_row_and_stock_s_switch(fw):
+    ui, win, view, settings, _ = settings_page(fw, 'display_page', 'scroll_view_display')
+    g(fw, 'g_bigcovermode', 0)
+    pod_rows(fw, win, 'scroll_view_display', POD['POD_COVERMODE'], 1)
+    art = view.children[0]
+    assert switch(art) == 'switch_off' and ui.text(label_of(art)) == 'Enlarged Album Art'
+    assert [C.string_at(c[1][1]) for c in fw.calls('widget_set_tr_text')] == [b'playset_covermode']
     click(ui, art)
     assert switch(art) == 'switch_on' and g(fw, 'g_bigcovermode') == 1 and settings.written == [('COVERMODE', 1)]
     click(ui, art)
     assert switch(art) == 'switch_off' and g(fw, 'g_bigcovermode') == 0 and settings.written[-1] == ('COVERMODE', 0)
 
 
-def test_library_and_folders_is_stocks_page_again_with_the_library_rows(fw, st):
+def test_the_library_is_stocks_page_again_with_its_pages(fw, st):
     ui, win, view, settings, _ = settings_page(fw, 'playset_page', 'scroll_view_playset')
     fw.var('fw_ctx_artist_type', C.c_int).value = 1
     playset(fw, ui, view)
     audioset = fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)
     audioset(win.addr, None)
-    sub = {}
+    pages = []
 
     def open_page(name, *_):
         page = ui.window('playset_page')
@@ -1828,30 +1833,36 @@ def test_library_and_folders_is_stocks_page_again_with_the_library_rows(fw, st):
         sub_view = ui.add('scroll_view', page, (0, 26, 375, 294), 'scroll_view_playset')
         playset(fw, ui, sub_view)
         audioset(page.addr, None)
-        sub.update(name=C.string_at(name), title=ui.text(nav.children[0]), rows=list(sub_view.children))
+        pages.append((C.string_at(name), ui.text(nav.children[0]), sub_view))
         return 0
 
     fw.mock('navigator_to', open_page)
-    opener = row(ui, view, 'Library & Folders')
-    click(ui, opener)
-    assert sub['name'] == b'playset/playset_page' and sub['title'] == ui.text(label_of(opener))  # titled as its row
-    ours = sub['rows'][:4]
-    skip, art, imp, exp = sub['rows'][4:]
-    # stock's Folder skip, then Folder Album Cover (a row of stock's Volume and Album Display), then the
-    # Playlists page's Import and Export rows (playlists.c playlists_transfer)
-    assert skip.name == 's12' and icon(art) == 'playset_foldercover' and ui.text(label_of(art)) == 'Folder Album Cover'
-    assert [ui.text(label_of(r)) for r in (imp, exp)] == ['Import Playlists', 'Export Playlists']
+    click(ui, row(ui, view, 'Library'))
+    name, title, library = pages[-1]
+    assert name == b'playset/playset_page' and title == 'Library'
+    assert [ui.text(label_of(r)) for r in library.children] == [
+        'On-The-Go', 'Streaming Songs', 'Sorting', 'Artists: Album Artist', 'Artist View: Cover Flow', 'Playlists',
+        'Folders', 'Scan Song Durations']
+    click(ui, row(ui, library, 'Folders'))
+    _, title, folders = pages[-1]
+    root, skip, art = folders.children
+    # Folder Root, stock's Folder skip, then Folder Album Cover (a row of stock's Volume and Album Display)
+    assert title == 'Folders' and skip.name == 's12' and icon(art) == 'playset_folderjump'
+    assert ui.text(label_of(art)) == 'Folder Album Cover' and ui.text(label_of(root)).startswith('Folder Root')
     assert C.string_at(fw.calls('widget_set_tr_text')[-1][1][1]) == b'playset_foldercover'  # stock's row, stock's translation
     was = g(fw, 'g_foldercover_flag')
-    for r in ours + [art]:
-        click(ui, r)
-    # the library's rows, by the setting each saves: Artists, Artist album order, Year order, Folder Root, Folder Album Cover
-    assert [key for key, _ in settings.written] == ['ARTISTTYPE', 'ARTISTAZ', 'YEAROLD', 'FOLDERROOT', 'FOLDERCOVER']
+    click(ui, root)
+    click(ui, art)
+    assert [key for key, _ in settings.written] == ['FOLDERROOT', 'FOLDERCOVER']
     assert g(fw, 'g_foldercover_flag') == (not was) and switch(art) == ('switch_off' if was else 'switch_on')
+    click(ui, row(ui, library, 'Playlists'))
+    _, title, playlists = pages[-1]
+    assert title == 'Playlists' and [ui.text(label_of(r)) for r in playlists.children if r.kind == 'list_item'] == [
+        'Playlist View: List', 'Import Playlists', 'Export Playlists']  # the Playlists page's own rows (playlists.c)
     again = ui.add('scroll_view', ui.window('playset_page'), (0, 26, 375, 294), 'scroll_view_playset')
     playset(fw, ui, again)
     audioset(ui.top.addr, None)
-    assert len(again.children) == 20  # the next open is the main page again
+    assert len(again.children) == 19  # the next open is the main page again
 
 
 def test_artists_toggles_stocks_artist_type(fw):
@@ -1870,21 +1881,22 @@ def pod_rows(fw, win, view_name, first, n):
         win.addr, view_name.encode(), first, n, (C.c_char_p * n)(*[b'icon'] * n))
 
 
-def test_cover_flow_sort_steps_and_refresh_says_when(fw):
+def test_cover_flow_sort_opens_its_picker_and_refresh_says_when(fw):
     ui, win, view, settings, _ = settings_page(fw, 'display_page', 'scroll_view_display')
     Files(fw)
-    toasts = []
+    toasts, opened = [], []
     fw.mock('navigator_to_with_context', lambda name, info, *_: toasts.append(C.string_at(info + 8)) and 0)
+    fw.mock('navigator_to', lambda name, *_: opened.append(C.string_at(name)))
     assert POD['POD_CF_REFRESH'] == POD['POD_CF_SORT'] + 1  # one call builds both
     pod_rows(fw, win, 'scroll_view_display', POD['POD_CF_SORT'], 2)
     sort, refresh = view.children
     first, action = ui.text(label_of(sort)), ui.text(label_of(refresh))
+    assert first == 'Sort: Album' and 'list_into' in [c.props.get('image') for c in sort.walk()]
     click(ui, sort)
-    assert ui.text(label_of(sort)) != first and not toasts  # the next sort, shown
+    assert ui.text(label_of(sort)) == first and opened == [b'systemset/keylock_page'] and not toasts  # its picker
     click(ui, refresh)
     assert ui.text(label_of(refresh)) == action and fw.calls('image_manager_unload_all')
     assert len(toasts) == 1 and toasts[0]  # nothing in view changes: a toast says when
-
 
 
 def test_scan_song_durations_turned_off_cancels_a_pass(fw):

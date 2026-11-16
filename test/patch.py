@@ -10164,9 +10164,9 @@ def row_text(r):  # a row's label; a value row (OLED's settings.values text) rea
     return f'{t}: {v[0]}' if v else t
 m,main,_=display({},sub=0)
 kids=m.nodes[main]['children']
-assert len(kids)==6 and [row_text(r) for r in kids[2:]]==['Smart Awake','Night Shift: Off','Appearance','Cover Flow']  # no Lock Screen
+assert len(kids)==7 and [row_text(r) for r in kids[2:]]==['Smart Awake','Night Shift: Off','Appearance','Cover Flow','playset_covermode']  # no Lock Screen; Enlarged Album Art last
 keep_lit=kids[2]
-assert m.icons_set==['system_display','switch_off','display_backlight','list_into','system_display','list_into','playset_covermode','list_into']
+assert m.icons_set==['system_display','switch_off','display_backlight','list_into','system_display','list_into','playset_covermode','list_into','playset_covermode','switch_off']
 f,ctx=m.handler(m.nodes[kids[4]]['children'][0],O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==('systemset/display_page',None) and m.get(payload_syms['display_sub'])==0; passed()
 # Cover Flow: what changes Cover Flow alone, Sort (its picker's row, a chevron), Fast Navigation, Position Bar, then

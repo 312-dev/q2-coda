@@ -11,7 +11,8 @@
  *
  * Streaming Songs is [Q2POD] LIBRARYSOURCE (1: a card app's server songs join the Library,
  * catalogue.c). The firmware is the only writer of the key; card apps read the state from
- * LIB_FILE, written at the first read of the settings and at every change. Turning it off while
+ * LIB_FILE, written with the caps file (addon.c addon_scan, so before any app starts) and at every
+ * change. Turning it off while
  * an app has a catalogue on the card asks first, and so does a card app's needslib row while it is
  * off (addon.c), which turns it on (docs/internals.md#server-library). */
 #include "navigation.h"

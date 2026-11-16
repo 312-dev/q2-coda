@@ -1341,9 +1341,12 @@ def source_writes(fw):
     return [C.c_int(a[0]).value for _, a in fw.calls('write_int_config') if C.string_at(a[2]) == b'LIBRARYSOURCE']
 
 
-def test_the_state_file_is_written_at_the_first_read_of_the_settings(rig):
+def test_the_state_file_is_written_with_the_caps_and_not_at_the_settings_first_read(rig):
+    """Before any app starts (each start scans first, writing the caps), and never as a side effect of a read."""
     rig.source = 0
     rig.fw.fn('pod_settings', None)()
+    assert LIBRARY not in rig.files.files
+    rig.fw.fn('addon_scan', C.c_int)()
     assert rig.files.files[LIBRARY] == b'local\n'
 
 
@@ -1356,7 +1359,7 @@ def test_streaming_songs_off_asks_only_while_an_app_keeps_a_catalogue(rig, kept,
     assert asks.seen == ([('Hide streaming songs?', 'Streaming songs leave the Library, and\n'
                            'Show in Library pauses until they return.')] if kept else [])
     assert source_writes(rig.fw) == ([0] if off else [])
-    assert rig.files.files[LIBRARY] == (b'local\n' if off else b'server\n')
+    assert rig.files.files.get(LIBRARY) == (b'local\n' if off else None)  # written on a change alone
     assert rig.fw.fn('catalogue_on', C.c_int)() == (not off)
     assert C.c_char_p.in_dll(rig.fw.lib, 'feedback__confirm_foot').value is None  # the next confirm has none
 
@@ -1377,7 +1380,7 @@ def test_a_needslib_row_needs_streaming_songs_and_asks_to_turn_it_on(rig, source
     assert asks.seen == ([] if source else [('Show streaming songs?', 'Show in Library needs Streaming Songs on\n'
                                              '(Settings > Playback > Library).')])
     assert source_writes(rig.fw) == ([1] if on and not source else [])
-    assert rig.files.files[LIBRARY] == (b'server\n' if on else b'local\n')
+    assert rig.files.files.get(LIBRARY) == (b'server\n' if on and not source else None)  # written on a change alone
 
 
 # Cover Flow's empty page (cf_empty.c) and autostart: a catalogue app is signed in while its card folder holds its

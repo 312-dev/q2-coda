@@ -2885,7 +2885,6 @@ void pod_settings(void) {
             *pod_values[i] = config_value("Q2POD", pod_keys[i], pod_choices(i),
                                           i == POD_ARTIST_CF || i == POD_OTG);
     st.pod_read = 1;
-    library_source_file(); /* Streaming Songs' state for card apps, from the first read */
 }
 int ringnav_year_old(void) {
     pod_settings();
