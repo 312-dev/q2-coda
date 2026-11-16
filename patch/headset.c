@@ -22,7 +22,12 @@ static void headset_bt_status(int event, char *address, char *name, void *data) 
     }
     ((void (*)(int, char *, char *, void *))0x4fc180)(event, address, name, data);
 }
-void headset_status_register(void) { btctl_device_status_callback(headset_bt_status, 0); }
+void bt_name_apply(void); /* bt_name.c */
+/* openBluetooth's registration (BT_STATUS), at each Bluetooth on: also the Q2's name to BlueZ. */
+void headset_status_register(void) {
+    btctl_device_status_callback(headset_bt_status, 0);
+    bt_name_apply();
+}
 /* The connected (3) link, its MAC in mac[32]. */
 static int bt_connected(char *mac) {
     int status = 0;

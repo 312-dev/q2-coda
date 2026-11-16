@@ -1227,6 +1227,12 @@ def test_bluetooth_discovery_times_out():
     assert main.replace(*build.BT_DISCOVERABLE) == b'# 0 = disable timer\n#DiscoverableTimeout = 0\nDiscoverableTimeout = 180\n'
 
 
+def test_bluetooth_name_is_q2():
+    main = b"[General]\n# Defaults to 'BlueZ X.YZ'\nName = Shanling Q2\n"
+    assert main.count(build.BT_NAME[0]) == 1
+    assert main.replace(*build.BT_NAME) == b"[General]\n# Defaults to 'BlueZ X.YZ'\nName = Q2\n"
+
+
 def test_network_time_asks_the_worldwide_pool_in_place():
     servers = b'time.apple.com\0\0cn.pool.ntp.org\0time.windows.com\0'
     assert len(build.NTP_POOL[0]) == len(build.NTP_POOL[1])

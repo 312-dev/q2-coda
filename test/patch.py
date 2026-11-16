@@ -16731,8 +16731,14 @@ passed()
 # with Bluetooth on, right after its fourth row, Bluetooth Headset Volume Control, as stock's rows: no icon,
 # 78 high. Both off unless Q2POD RESUME / BTVOLLINK is 1 (docs/internals.md#resume-on-connect,
 # #headset-controls-and-volume); off, the Q2's volume is its own gain and the device keeps its own volume.
+# Stock's second row, its Bluetooth Name, is bt_name.c's Name row in its place, the name its value, as high as stock's
+# row (docs/internals.md#bluetooth-name).
 m,rows,texts,icons,click=settings_page('btrows','scroll_view_bluetooth',stock_rows=7)  # 5 rows, 2 devices
-assert len(rows)==2 and icons==[None,None] and texts()==['Resume on Connect','Control Device Volume']
+assert len(rows)==3 and icons==[None,None,None] and texts()==['Resume on Connect','Control Device Volume','Name']
+view=named(m,m.top,'scroll_view_bluetooth'); name_row=rows[2]
+assert m.nodes[view]['children'].index(name_row)==1 and m.get(name_row+O['W_H'])==78 and m.entries[1] not in m.nodes[view]['children']
+assert 'Q2' in [m.nodes[c].get('text') for c in m.nodes[m.nodes[name_row]['children'][0]]['children']]
+rows=rows[:2]
 for k,row in enumerate(rows):
     kids=m.nodes[m.nodes[row]['children'][0]]['children']  # the label and its switch
     assert len(kids)==2 and m.get(kids[0]+O['W_X'])==10 and m.get(row+O['W_H'])==78 and switch_image(m,row)=='switch_off'
@@ -16741,9 +16747,9 @@ assert click(0)==[(1,'Q2POD','RESUME')] and switch_image(m,rows[0])=='switch_on'
 assert click(0)==[(0,'Q2POD','RESUME')] and switch_image(m,rows[0])=='switch_off'
 assert click(1)==[(1,'Q2POD','BTVOLLINK')] and switch_image(m,rows[1])=='switch_on'
 assert click(1)==[(0,'Q2POD','BTVOLLINK')] and switch_image(m,rows[1])=='switch_off'
-assert texts()==['Resume on Connect','Control Device Volume']; passed()
+assert texts()==['Resume on Connect','Control Device Volume','Name']; passed()
 m,rows,texts,*_=settings_page('btrows','scroll_view_bluetooth',{'RESUME':'1','BTVOLLINK':'1'},stock_rows=7)
-assert [switch_image(m,r) for r in rows]==['switch_on','switch_on']; passed()
+assert [switch_image(m,r) for r in rows[:2]]==['switch_on','switch_on']; passed()
 m,rows,*_=settings_page('btrows','scroll_view_bluetooth',stock_rows=1,bt=0)  # just the switch
 assert rows==[]; passed()
 

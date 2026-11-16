@@ -3063,7 +3063,8 @@ int ringnav_powermanager(void *win, void *ctx) {
 /* The Bluetooth page's list (stock's local builder, btmenu_rows), rebuilt whole on every search and
  * link change: its rows, five with Bluetooth on (one, the switch, off), then the device lists.
  * With Bluetooth on, Resume on connect and Control Device Volume follow the fourth, Bluetooth
- * Headset Volume Control (bt_adjvol), each time, iconless and 78 high as stock's rows. */
+ * Headset Volume Control (bt_adjvol), each time, iconless and 78 high as stock's rows, and the
+ * second, stock's Bluetooth Name, is bt_name.c's Name row. */
 int ringnav_btrows(void *win, void *ctx) {
     static const char *const icons[] = { 0 };
     int result = stock_btrows_trampoline(win, ctx);
@@ -3078,6 +3079,7 @@ int ringnav_btrows(void *win, void *ctx) {
         widget_resize(row, I(row, W_W), 78);
         widget_restack(row, 4 + k);
     }
+    bt_name_row(view);
     return result;
 }
 /* A settings list's rows, stock's (in its table's order, each button named by its place there,

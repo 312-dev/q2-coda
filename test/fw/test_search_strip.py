@@ -26,7 +26,7 @@ OLED = b'3'
 class Ss(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'page sheet songs match kind'.split()),
                 *((k, C.c_int) for k in 'nmatch letter focus sel top nsongs tab any cur by rename pick create'.split()),
-                ('box', C.c_void_p), ('secret', C.c_int), ('set', C.c_int), ('typed_at', C.c_uint), ('show_timer', C.c_uint),
+                ('box', C.c_void_p), ('done', C.c_void_p), ('max', C.c_int), ('secret', C.c_int), ('set', C.c_int), ('typed_at', C.c_uint), ('show_timer', C.c_uint),
                 ('shown', C.c_ubyte), ('play_held', C.c_ubyte),
                 *((k, C.c_short) for k in 'down_x down_y pressed swiped'.split()), ('text', C.c_char * 65),
                 ('pop_timer', C.c_uint), ('pop_step_at', C.c_uint), ('pop', C.c_ubyte),

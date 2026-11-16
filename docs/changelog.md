@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: the Q2 shows up as **Q2** on phones, cars and speakers instead of "Shanling Q2". Rename it in **Settings → Bluetooth → Name** on the letter strip (up to 30 characters); the new name is used at once and kept through updates.
   - Status bar: while it charges, the battery shows how full it really is. It used to fill to the end the moment the cable went in.
   - Status bar (OLED): a charging battery shows a small lightning bolt inside it, in green; full on the cable, or held at **Charge Limit**, it stays green with no bolt.
   - Status bar: with **Battery** on Percent, the percentage stays on one line in the status bar; at 100% or while charging it could drop onto a second line.

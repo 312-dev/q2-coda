@@ -1793,7 +1793,8 @@ def test_bluetooth_adds_resume_and_device_volume_after_its_fourth_row(fw, bt):
         assert [r.name for r in rows] == [f's{i}' for i in range(7)]
         return
     ours = rows[4:6]
-    assert [r.name for r in rows[:4] + rows[6:]] == [f's{i}' for i in range(7)]
+    # stock's second row, its Bluetooth Name, is bt_name.c's Name row in its place (test_bt_name.py)
+    assert [r.name for r in rows[:4] + rows[6:]] == ['s0', ''] + [f's{i}' for i in range(2, 7)]
     for r in ours:
         click(ui, r)
     assert [key for key, _ in settings.written] == ['RESUME', 'BTVOLLINK']  # Resume on Connect, Control Device Volume
