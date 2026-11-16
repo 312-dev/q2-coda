@@ -314,8 +314,8 @@ def test_display_adds_smart_awake_night_shift_and_its_two_pages_among_stocks_row
 
 
 def titles(view):
-    """Each row's title (a stock row's name), its text up to any ': '."""
-    return [item.name or item.labels()[0].text.split(': ')[0] for item in view.children]
+    """Each row's title (a stock row's name), its text up to any ': '; '' for a gap (settings_gap, no label)."""
+    return [item.name or (item.labels()[0].text.split(': ')[0] if item.labels() else '') for item in view.children]
 
 
 def appearance(fw, ui, **config):
@@ -3240,8 +3240,9 @@ def test_appearance_keeps_its_own_place_not_displays(fw):
 
 
 # The empty state (feedback.c empty_state): one view over the page holding the page's glyph, title and hint for its
-# painter, and at most one action row, the whole stack centred from the status row's foot (y 40) or free_top down.
-@pytest.mark.parametrize('row, free, top', [(None, 0, 40 + (280 - 120) // 2), ('Scan Music Now', 0, 40 + (280 - 176) // 2),
+# painter, and at most one button, the whole stack centred from the status row's foot (y 40) or free_top down: the
+# 60 px glyph, 14, the title's 24 and the hint's 20 (118), then 20 and the 38 px button (176).
+@pytest.mark.parametrize('row, free, top', [(None, 0, 40 + (280 - 118) // 2), ('Scan Music Now', 0, 40 + (280 - 176) // 2),
                                             ('Scan Music Now', 90, 90 + (230 - 176) // 2)])
 def test_the_empty_state_centres_its_stack_and_its_one_row(fw, st, row, free, top):
     ui = Ui(fw)
@@ -3260,8 +3261,9 @@ def test_the_empty_state_centres_its_stack_and_its_one_row(fw, st, row, free, to
     if not row:
         assert lists == []
     else:
-        (lv,) = lists
-        assert lv.box[1] == top + 58 + 18 + 24 + 20 + 24 - 58 and lv.labels()[0].text == 'Scan Music Now'
+        (lv,) = lists  # the button's band, its words the painter's (the row's own are blank)
+        assert lv.box[1] == top + 60 + 14 + 24 + 20 + 20 - 58 and lv.box[3] == 38 and lv.labels()[0].text == ''
+        assert art.props['_es_row'] == b'Scan Music Now' and lv.props['style:normal:bg_color'] == 0
 
 
 def test_power_s_rows_carry_their_captions(fw):

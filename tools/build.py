@@ -14,7 +14,7 @@ REPO = '312-dev/q2-coda'  # whose releases Network Update fetches (--update-repo
 # The updater's identity (firmware_v20.info and demo's version literal) must be 5 characters and
 # differ from the installed one, so it packs the digits and the beta number: 1.8.0 beta 2 is V1802,
 # 1.8.0 itself V1800, so each installs over the betas before it. Releases up to 1.8.0 BETA ended in I
-# (1.0.1 was V101I). About shows the stock firmware version and a CFW. Version row with VERSION and
+# (1.0.1 was V101I). About shows the stock firmware version and a PRODUCT_NAME row with VERSION and
 # the edition instead (ringnav_about).
 TAG = 'V' + VERSION.replace('.', '') + str(BETA)
 
@@ -201,6 +201,14 @@ HOOKS = {
     'specfolder_click': (0x53f9b4, 'ringnav_specfolder_click', 'specfolder_click'),
     # The boot animation plays to its end: demo's screen shows nothing until it has (splash_hold.c)
     'lcd_linux_fb_create': (0x63a57c, 'splash_lcd', 'lcd_create'),
+    # A phone's A2DP stream events (stock's receiver page): dropped while Guest Play is on (guest.c guest_a2dp)
+    'btrecvA2dpFunc': (0x4fc72c, 'guest_a2dp', 'btrecv'),
+    # Guest Play's receivers (guest.c, docs/internals.md#guest-play-receivers): AirPlay's take-over and the DLNA
+    # renderer's actions wait for the owner's answer while Guest Play is on
+    'airplay_mainscheduling': (0x519c28, 'guest_airplay', 'airplay_sched'),
+    'dmrActionSetPlayURI': (0x51005c, 'guest_dlna_uri', 'dlna_uri'),
+    'dmrActionPlay': (0x50fd50, 'guest_dlna_play', 'dlna_play'),
+    'dmrActionStop': (0x50fe4c, 'guest_dlna_stop', 'dlna_stop'),
 }
 # The payload's stock_<name>_trampoline, the hooks' third element, resumes each hook past its 3-word PIC
 # prologue.
@@ -243,6 +251,12 @@ CODA_RC = 'usr/bin/coda-rc'
 CODA_RC_SOURCES = ['coda_rc', 'coda_rc_core', 'coda_rc_lib', 'coda_rc_ble', 'monocypher/monocypher',
                    'monocypher/monocypher-ed25519']
 CODA_RC_LIBS = ['lib/libc-2.28.so', 'usr/lib/libsqlite3.so.0.8.6', 'usr/lib/libdbus-1.so.3.19.15']
+# Guest Play's daemon (docs/internals.md#guest-play): demo starts it (patch/guest.c), libdbus talks to BlueZ,
+# bluealsa and bluetoothd's shanling.bluez; and the D-Bus policy its sink daemon needs.
+GUEST = 'usr/bin/q2-guest'
+GUEST_LIBS = ['lib/libc-2.28.so', 'usr/lib/libdbus-1.so.3.19.15']
+GUEST_DBUS = 'etc/dbus-1/system.d/bluealsa-sink.conf'
+GUEST_HOTSPOT = 'usr/bin/q2-hotspot'  # its hotspot (docs/internals.md#guest-play-hotspot), a shell script q2-guest runs
 PLAYER_STOCK_DIR = b'usr/lib/hciplayer-stock'  # --new-player: hciplayer.xz's place, player/main.c's STOCK_XZ
 S90PLAY = 'etc/init.d/S90play'
 ROCKBOX_FLAG = '/tmp/q2pod-rockbox'
@@ -424,6 +438,10 @@ BT_META_ROOM = 502  # an AVRCP PDU's parameters in one AVC frame (BlueZ's AVRCP_
 # a track change doesn't restart the stream (true-wireless buds started one ear first).
 BLUEALSA2 = 'usr/bin/bluealsa2'
 BT_KEEPALIVE = (b'bluealsa -c LDAC', b'bluealsa --keep-alive=5 -c LDAC')
+# ... and while Guest Play is on, only the source role, so a device that is both (an Echo) connects as a sink and a
+# guest's phone reaches q2-guest's own sink daemon (docs/internals.md#the-relay). Applied after BT_KEEPALIVE.
+BT_GUEST_SOURCE = (b'bluealsa --keep-alive=5', b'bluealsa $(grep -qx enabled=1 /mnt/data/q2-guest/config 2>/dev/null '
+                   b'&& echo -p a2dp-source) --keep-alive=5')
 SCROBBLE_CA = 'etc/scrobble-ca.pem'
 # BlueZ's settings. demo sets Discoverable each time it starts Bluetooth (openBluetooth), and stock's 0 kept the Q2
 # discoverable for as long as Bluetooth stayed on; 180 s gives a phone three minutes from then to find it.
@@ -852,7 +870,10 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('reset_initset', 'Reset only settings', 'Reset Settings Only'),
     ('reset_factory', 'Full factory reset', 'Full Factory Reset'),
     ('display_lighttime', 'Screen off time', 'Screen Off Time'),
-    ('about_sn', 'Serial number', 'Serial Number'), ('about_version', 'FW. Version', 'Version'),
+    ('about_sn', 'Serial number', 'Serial Number'), ('about_version', 'FW. Version', 'Firmware'),
+    # About's rows as approved (audit-2 #31, 2026-11-16): sizes with their unit, the MAC by what it is
+    ('about_cardcap', 'Card Capacity', 'Capacity'), ('about_cardremain', 'Remaining', 'Available'),
+    ('about_wifimac', 'Wi-Fi MAC', 'Wi-Fi Address'),
     ('list_baidu', 'Baidu Netdisk(BETA)', 'Baidu Netdisk'), ('msg_poweroff', 'Confirm Shutdown?', 'Shut Down?'),
     ('system_prove', '技术证明', 'Certification'),  # About's regulatory row, Chinese in stock's English
     ('genre', 'Genres', 'Genre'), ('player_era', 'Era', 'Year'), ('batch_addplaylist', 'Add to playlist', 'Add to Playlist'),
@@ -1823,6 +1844,10 @@ FUNCTIONS = {
  'btctl_device_status_callback': ('void', 'void *, void *'),
  'btctl_set_a2dp_callback': ('void', 'void *, void *'),
  'btrecvA2dpFunc': ('int', 'int, void *, void *'),
+ 'sendBtHeadsetPlayInfo': ('int', 'void'),  # the playing song to bluetoothd's AVRCP record (docs/internals.md#track-metadata)
+ 'sendBtHeadsetPlayStatus': ('int', 'void'),  # its play status, likewise
+ 'player_save_stop': ('int', 'void'),
+ 'airplaySendStop': ('int', 'void'),  # asks shairport, through its shared memory, to end the phone's session  # stops the local or Tidal queue, its position kept for player_save_start
  'mclGetCueFlag': ('int', 'void'),  # the playing record has a CUE start or end
  'mclGetPlayStatus': ('int', 'void'),  # 1 stopped, 2 playing, 3 paused (mclStop, mclSetResume, mclSetPause)
  'player_stop': ('int', 'void'),
@@ -1957,8 +1982,8 @@ CONTEXT_DATA = {'bt_showcoding': 4, 'g_memory_info': 3476, 'g_folder_path': 1024
 PAYLOAD_WINDOWS = {'searchstrip_page', 'playlistedit_page', 'playlistsongs_page', 'addsongs_page', 'chapters_page', 'coverflow_page', 'games_page', 'mostplayed_page', 'shuffle_page', 'upnext_page', 'ratings_page', 'era_page', 'era_albums_page', 'rated_page', 'longsongs_page', 'spotify_page',
                    'spotbrowse_page', 'radio_page', 'radionp_page', 'streamconf_page', 'tidal_downloads', 'apps_page',
                    'addon_page', 'app_songs', 'qrcode_page', 'battery_page', 'carremote_page', 'carpair_page', 'artistrows_page',
-                   'storage_page', 'downloads_page', 'usbchoose_page', 'usbdebug_page', 'adbauth_page',
-                   'swupdate_page', 'swconfirm_page', 'empty_page'}
+                   'storage_page', 'downloads_page', 'usbchoose_page', 'usbdebug_page',
+                   'swupdate_page', 'empty_page'}
 ICONS = [f'menu_{c}{s}.png' for c in ('coverflow', 'rockbox') for s in ('', 'down')]
 # The stock EQ preset page and the images only it and the stock equalizer page show: the PEQ
 # editor clears that page's widgets on init and never binds the preset button, so none can load.
@@ -2005,7 +2030,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'status_row.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'status_row.c', 'ui_kit.c']
 
 def compile_payload(out):  # pragma: no mutate block
     """Compile and link the payload."""
@@ -2200,6 +2225,7 @@ def patch_bluealsa(raw):
         struct.pack_into('<I', image, fileoff(raw, address), new)
     return bytes(image)
 
+PRODUCT_NAME = 'Q2 Pod'  # the product's name on screen (About); one place to rename it
 STOCK_VERSION = 'V1.36'
 
 def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
@@ -2219,8 +2245,9 @@ def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
     header.append(f'#define SETTINGS_ICON_NAMES "{names}"')
     header.append(f'#define ROCKBOX_FLAG "{ROCKBOX_FLAG}"')  # Home's Rockbox row, for S90play
     header += [f'#define {name} 0x{address:x}u' for name, (_, address) in NAME_COMPARATORS.items()]  # name_order.c
-    # About: the stock firmware's version on its own row, and this build's on the CFW. Version row.
-    header += [f'#define STOCK_VERSION "{STOCK_VERSION}"', f'#define Q2POD_VERSION "{VERSION} Pod{f" dev {dev}" if dev else f" beta {BETA}" if BETA else ""}"',
+    # About: the stock firmware's version on its own row, and this build's on a row named for the
+    # product (PRODUCT_NAME, the one place the name the screens show is spelled).
+    header += [f'#define PRODUCT_NAME "{PRODUCT_NAME}"', f'#define STOCK_VERSION "{STOCK_VERSION}"', f'#define Q2POD_VERSION "{VERSION} Pod{f" dev {dev}" if dev else f" beta {BETA}" if BETA else ""}"',
                f'#define Q2POD_TAG "{"" if dev else VERSION}"',  # netupdate.c: the release tag, none when --dev
                f'#define Q2POD_DEV {1 if dev else 0}',  # navigation.c stale_note
                # sw_update.c: the updater's identity (firmware_v20.info's version), which an equal update.tar's repeats
@@ -2628,7 +2655,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     (out/'S11logo').write_bytes(s11logo.replace(*LOGO_HOOK))
     bluealsa2 = cat(BLUEALSA2)
     check(bluealsa2.count(BT_KEEPALIVE[0]) == 1, 'Unexpected bluealsa2')
-    (out/'bluealsa2').write_bytes(bluealsa2.replace(*BT_KEEPALIVE))
+    bluealsa2 = bluealsa2.replace(*BT_KEEPALIVE)
+    check(bluealsa2.count(BT_GUEST_SOURCE[0]) == 1, 'Unexpected bluealsa2')
+    (out/'bluealsa2').write_bytes(bluealsa2.replace(*BT_GUEST_SOURCE))
     logo_data = logo.read_bytes()
     check(jpeg_size(logo_data) == (320, 375), 'Logo must be 320x375 like the stock splash')
     # Package exactly the validated bytes, even if the input is edited during compression.
@@ -2739,6 +2768,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                SPLASH: (HELPER_LIKE, compile_helper(out, cat, 'splash', 'q2splash', HELPER_LIBS[:1])),
                                **({path: (xx+'list_tidal.png', data) for path, data in anim.items()} if anim else {}),
                                CODA_RC: (HELPER_LIKE, compile_helper(out, cat, CODA_RC_SOURCES, 'coda-rc', CODA_RC_LIBS)),
+                               GUEST: (HELPER_LIKE, compile_helper(out, cat, 'q2_guest', 'q2-guest', GUEST_LIBS)),
+                               GUEST_DBUS: ('etc/dbus-1/system.d/bluealsa.conf', (ROOT/'assets/dbus/bluealsa-sink.conf').read_bytes()),
+                               GUEST_HOTSPOT: (HELPER_LIKE, (ROOT/'patch/q2_hotspot.sh').read_bytes()),
                                **({LOGO_LIGHT: (xx+'list_tidal.png', light)} if light else {}),  # the swapped logo.jpg has no stock inode left
                                **{path: (FONT, data) for path, (data, _) in fonts.items()},
                                **{FONT_DIR + n: ('etc/hosts', (ROOT/'assets/fonts'/n).read_bytes()) for n in FONT_NOTICES},
@@ -2747,7 +2779,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                    Q2EQ: (HELPER_LIKE, compile_helper(out, cat, 'q2eq', 'q2eq', HELPER_LIBS[:1]))} if dev else {})}.items():
         stock = need(inode(p, like.encode()), f'Missing stock inode for {path}')
         name = path.rsplit('/', 1)[-1]
-        if path not in (HELPER, BOOT, SPLASH, REMOTE, Q2EQ, CODA_RC): (out/name).write_bytes(data)  # package the hashed bytes, as the logo
+        if path not in (HELPER, BOOT, SPLASH, REMOTE, Q2EQ, CODA_RC, GUEST): (out/name).write_bytes(data)  # package the hashed bytes, as the logo
         if inode(p, path.encode()):  # stock has a file of that name (V1.36's own menu_coverflow*.png): ours takes its inode
             changed_assets[path] = dict(original_sha256=sha(cat(path)), sha256=sha(data))
             p = swap_inode(p, path.encode(), out/name)
@@ -2842,7 +2874,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         **({'aic_notifier': aic_notifier} if aic_notifier else {}),
         patch_bytes=len(payload), ring_step_pixels=RING_STEP,
         audio_extension_calls=[dict(address=hex(a), original='0x0320f809', replacement=hex(jal(ps['ringnav_audio_extension']))) for a in AUDIO_EXTENSION_CALLS],
-        version=version, dev=dev, update_repo=repo, signing_key=key.hex(), peq=audio, bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
+        version=version, dev=dev, update_repo=repo, signing_key=key.hex(), peq=audio, bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
         **({'rotator_clock': rotator} if rotator else {}),
         **({'adbd': adbd_record(out)} if dev else {}),
         **({'q2player_sha256': sha(q2player.read_bytes()), 'rootfs_bytes': size} if q2player else {}),

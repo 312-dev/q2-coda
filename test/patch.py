@@ -8,7 +8,7 @@ from unicorn import Uc, UcError, UC_ARCH_MIPS, UC_MODE_MIPS32, UC_MODE_LITTLE_EN
 from unicorn.unicorn_py3.unicorn import uclib, uccallback, uc_hook_h, HOOK_CODE_CFUNC  # 2.1.4's own: Machine.hooked registers a C hook
 from unicorn.mips_const import *
 sys.path.insert(0, sys.path[0] + '/../tools')  # tools/ first
-from build import jal, j, segments, load_elf, symbols, BASE, SCRATCH, HOOKS, WM_PAINT_LEAF, FUNCTIONS, GLOBALS, CONTEXT_DATA, ROOT, source_sha256, sha, PRIVATE_FUNCTIONS, TAG, VERSION, BETA, dev_tag
+from build import jal, j, segments, load_elf, symbols, BASE, SCRATCH, HOOKS, WM_PAINT_LEAF, FUNCTIONS, GLOBALS, CONTEXT_DATA, ROOT, source_sha256, sha, PRIVATE_FUNCTIONS, TAG, VERSION, BETA, PRODUCT_NAME, dev_tag
 B=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'build')
 payload_syms=symbols(B/'patch.elf')
 manifest=json.loads((B/'manifest.json').read_text())
@@ -3559,8 +3559,8 @@ class QueueMachine(Machine):
     def mcl(self,k): return signed(self.get(O[k]))
     def dialog(self):
         self.view=self.node('scroll_view','scroll_view',[self.node('list_item') for _ in range(5)])
-        self.title=self.node('hscroll_label','scrlabel_title'); self.back=self.node('image','img_return')
-        return self.node('dialog','sortselect_dialog',[self.node('view','view_navbar',[self.title,self.back]),
+        self.title=self.node('hscroll_label','scrlabel_title'); self.dlg_return=self.node('image','img_return')  # not back: a Machine's back() is Return
+        return self.node('dialog','sortselect_dialog',[self.node('view','view_navbar',[self.title,self.dlg_return]),
                                                        self.node('list_view','list_view',[self.view])])
     def bootvol(self):  # stock's Boot volume page, which crossfade.c re-dresses
         self.slider=self.node('slider','slider_bootvol'); self.vol=self.node('label','label_vol')
@@ -4126,7 +4126,7 @@ assert m.shut==1 and not opens(m),(m.shut,opens(m)); passed()
 m=QueueMachine(); page=m.top
 m.press(5000); assert m.release()==1
 m.press(6000); assert m.hold()==11 and m.nodes[m.top]['name']=='sortselect_dialog'
-assert {c[1:] for c in m.calls if c[0]=='widget_off_by_func'}=={(m.top,O['EVT_KEY_UP'],O['SORTSELECT_KEYUP']),(m.back,O['EVT_CLICK'],O['SORTSELECT_CLOSE'])}
+assert {c[1:] for c in m.calls if c[0]=='widget_off_by_func'}=={(m.top,O['EVT_KEY_UP'],O['SORTSELECT_KEYUP']),(m.dlg_return,O['EVT_CLICK'],O['SORTSELECT_CLOSE'])}
 assert m.nodes[m.title]['text']=='Row 0' and m.labels()==SONG_MENU
 assert m.hold()==0 and not any(c[0]=='navigator_to' for c in m.calls) and len(m.stack)==2
 assert m.release()==0
@@ -6253,12 +6253,14 @@ for key,want in ((O['KEY_FWD_BTN'],['B','A','C']),(O['KEY_FWD_BTN'],['B','C','A'
     assert m.call(key,gap=0)==11
     m.view=m.find('scroll_view'); assert m.selected(m.view)==want.index('A')+2
 assert m.names()==m.before_queue and not m.playback(); passed()
-# Touch actions and confirmation; cancel and Back leave the entry intact.
+# Touch actions and confirmation (Remove on the confirmation card, its answer feedback.c runs once
+# the card has closed: playlists.c ple_remove_answer); cancel and Back leave the entry intact.
+def ple_answer(m,row): m.call(address=payload_syms['ple_remove_answer'],args=(0,row,0,0),gap=0,clear=False); m.advance(0); m.view=m.find('scroll_view')
 m.choose(3); assert m.showlabels()==['Move Up','Move Down','Remove from Playlist']
-m.choose(2); assert m.showlabels()==['Remove from Playlist','Cancel']; m.choose(1)
+m.choose(2); ple_answer(m,0)
 assert m.order()==['B','A','C']; m.choose(3); m.choose(0); assert m.order()==['A','B','C']
 m.choose(2); m.choose(1); assert m.order()==['B','A','C']
-m.choose(3); m.choose(2); m.choose(0); assert m.order()==['B','C'] and m.selected(m.view)==3
+m.choose(3); m.choose(2); ple_answer(m,1); assert m.order()==['B','C'] and m.selected(m.view)==3
 assert m.order(1)==['Other']; passed()
 # The fixed destination picker stays open; failed writes never report success.
 saved=m.alloc(16); m.word(saved,0x12345678); m.word(syms['p_vector_select_record'],saved)
@@ -7860,7 +7862,7 @@ covers=m.nodes[m.slide]['children']; assert len(covers)==3
 assert all(m.nodes[c]['image'].startswith('file:///mnt/mmc/.coverflow/') for c in covers)
 assert 'Album 0' in m.texts(); passed()
 m.press(3); assert m.hold()==11 and m.nodes[m.title]['text']=='Album 0'
-f,ctx=m.handler(m.back,O['EVT_CLICK']); m.call(O['KEY_RETURN'],address=f,args=(ctx,m.event,0,0),gap=0)
+f,ctx=m.handler(m.dlg_return,O['EVT_CLICK']); m.call(O['KEY_RETURN'],address=f,args=(ctx,m.event,0,0),gap=0)
 assert m.top==page and m.release()==0; passed()
 # Covers step like Home: fast ticks retarget one animator, never stock next/previous, whose
 # scroll_to orphans the running animator.
@@ -8163,7 +8165,7 @@ class AlbumRateMachine(FileMocks,CoverflowMachine):
     def hearts(self): return [self.nodes[h]['image'] for h in self.nodes[self.panel()]['children'][1:]]
     def menu(self):  # the hold's rows, then Return closes the dialog
         self.t=getattr(self,'t',7000)+1; self.press(self.t); assert self.hold()==11 and self.release()==0
-        rows=self.labels(); f,ctx=self.handler(self.back,O['EVT_CLICK']); self.call(O['KEY_RETURN'],address=f,args=(ctx,self.event,0,0),gap=0)
+        rows=self.labels(); f,ctx=self.handler(self.dlg_return,O['EVT_CLICK']); self.call(O['KEY_RETURN'],address=f,args=(ctx,self.event,0,0),gap=0)
         return rows
     def rate(self,want):  # Rate album, wheel down to 0 then up to want, Centre
         toasts=len(self.toasts)
@@ -13683,8 +13685,14 @@ m.row(1); assert m.asked()==('repeat','off'); t=len(m.threads); m.answer('offlin
 assert m.toasts[-1][3]=="Spotify didn't answer in time" and len(m.threads)==t and m.labels()[1]=='Shuffle'; m.back(); passed()
 # Account: the name, Premium, and Sign out after a confirmation; then the pairing prompt.
 m.row(8); assert m.asked()==('account',); m.answer(*ME); assert m.labels()==['Account','Alice','Premium','Sign Out','']
-m.row(1); assert m.labels()==['Sign Out of Spotify?','Cancel','Sign Out']; m.row(0); assert m.labels()[:2]==['Account','Alice']
-t=len(m.threads); m.row(1); m.row(1); assert m.asked()==('signout',) and len(m.threads)==t+1
+# Sign Out asks on the confirmation card (feedback.c confirm); its answer (spotify.c signout_answer) runs once it has closed
+def card(m,answer,row):
+    if m.nodes[m.top].get('name')=='sortselect_dialog':  # the card closes first, as on the unit: the page is on top again
+        if m.top in m.stack: m.stack.remove(m.top)
+        m.top=m.page
+    m.call(address=payload_syms[answer],args=(0,row,0,0),gap=0,clear=False)
+m.row(1); card(m,'signout_answer',0); assert m.labels()[:2]==['Account','Alice']
+t=len(m.threads); m.row(1); card(m,'signout_answer',1); assert m.asked()==('signout',) and len(m.threads)==t+1
 m.answer(*OK,[]); assert m.labels()==PAIR
 # librespot exits on signout and its launcher restarts it: meanwhile no socket is no old add-on.
 m.serve=None; m.advance(2000); m.worker(); assert m.labels()==PAIR; m.advance(5000); m.worker(); assert m.labels()==PAIR
@@ -13798,7 +13806,7 @@ np=m.top; info,msg=m.nodes[np]['children']; requests=len(m.requests)
 m.advance(15250)
 assert texts(msg)==["Playback didn't start",'Go back and try again'] and len(m.requests)==requests
 m.state('playing',track='late'); m.poll(); m.advance(250); assert m.nodes[info]['visible']
-m.destroy(np); m.top=m.page; m.back(); m.row(8); m.answer(*ME); m.row(1); m.row(1); m.answer(*OK,[])
+m.destroy(np); m.top=m.page; m.back(); m.row(8); m.answer(*ME); m.row(1); card(m,'signout_answer',1); m.answer(*OK,[])  # Sign Out's card
 m.call(address=payload_syms['spot_np'],args=(0,0,0,0),gap=0,count=5_000_000)
 info,msg=m.nodes[m.top]['children']; assert texts(msg)==['Open Spotify on your phone','and choose Q2']
 passed()
@@ -13874,11 +13882,10 @@ m.row(2); assert m.asked()==('collections','p2')
 m.answer(*OK,[('collection','c','C','1/1','','')]); m.row(0); m.row(1)
 assert m.asked()==('remove','collections','b,c')
 m.answer('ok','Remove 2 playlists, 1 tracks?','',[])
-assert m.labels()[0]=='Remove Downloads?' and 'Remove 2 playlists, 1 tracks?' in m.labels()
-m.row(2); assert m.asked()==('remove','collections','b,c','confirm')
+card(m,'remove_answer',1); assert m.asked()==('remove','collections','b,c','confirm')
 m.answer('ok','Removed','',[]); assert m.labels()[0]=='Storage Management'
 m.row(2); assert m.asked()==('remove','all','')
-m.answer('ok','Remove 1 playlists, 3 tracks?','',[]); m.row(1)  # Cancel preserves downloads
+m.answer('ok','Remove 1 playlists, 3 tracks?','',[]); card(m,'remove_answer',0)  # Cancel preserves downloads
 assert m.labels()[0]=='Storage Management'
 # Return before Clear All's preview answers: a later action's ok reply never opens Remove Downloads?.
 m.row(2); assert m.asked()==('remove','all',''); m.back(); assert m.labels()[0]=='Downloads'
@@ -13889,7 +13896,8 @@ m.back(); m.back(); m.row(3); assert m.labels()[0]=='Storage Management'
 m.row(1); m.answer(*OK,[track('spotify:track:a','A')]); m.row(0); m.row(1)
 assert m.asked()==('remove','tracks','spotify:track:a')
 m.answer('ok','Remove 0 playlists, 1 tracks? 2 playlists may become incomplete','',[])
-assert 'Track removal can make playlists incomplete' in m.labels(); m.row(1); passed()
+assert b'Remove 0 playlists, 1 tracks? 2 playlists may become incomplete\nPlaylists can be left incomplete.\0' in bytes(m.u.mem_read(payload_syms['br'],0x2000))  # the card's body (spotify.c br.remove_note)
+card(m,'remove_answer',1); assert m.asked()==('remove','tracks','spotify:track:a','confirm'); passed()
 # caps answered after Downloads opened (asked again once the base was idle, a request having cancelled
 # it): the open level is laid out again, so its rows and what a press opens agree.
 HUB=('collections','collection','playcollection','downloadliked','jobs','job','remove','download')
@@ -14221,9 +14229,10 @@ def covers(files=(),rows=COVERS,msg='',cursor=''):
     c.pick(2); c.answer('ok',msg,cursor,rows); return c
 def heights(c): return [c.get(r+O['W_H']) for r in c.rows()]
 def cover_images(c): return [k for r in c.rows() for k in c.nodes[r]['children'] if c.nodes[k].get('image','').startswith('file://')]
-# (A list without covers has page_h(64) rows: OLED's page.rows.detail_height, 52.)
+# (A list without covers has page_h(64) rows, OLED's page.rows.detail_height, 52, for a row with a subtitle, and a
+# one-line row, 32, for one without: stack_rows.)
 for files in ((),(art_file('album','al-2'),)):
-    c=covers(files); assert c.labels()==['Downloads','One','An Artist','Two',''] and heights(c)==[52,52] and not cover_images(c),(c.labels(),heights(c))
+    c=covers(files); assert c.labels()==['Downloads','One','An Artist','Two'] and heights(c)==[52,32] and not cover_images(c),(c.labels(),heights(c))
 c=covers((art_file('album','al-1'),),[COVERS[0],('progress','','Half','','','500')])
 assert heights(c)==[52,52] and not cover_images(c); passed()
 c=covers((art_file('album','al-1'),)); x=24; tx=x+76; plain=covers()  # x: page_x, OLED's page.rows.text_x; tx: x + ART_PX + 12
@@ -14245,7 +14254,7 @@ m.nodes[edit]['text']='aphex\ttwin'; f,ctx=m.handler(edit,O['EVT_VALUE_CHANGED']
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0; m.advance(0,clear=False)
 m.answer('ok','refresh','50',[('action','download','01 Xtal.flac','bob · FLAC 16/44.1 · 31 MB · free','12.3','downloadfolder')])
 assert m.wire[-1].endswith(b'\tsearch\taphex%09twin\n'),m.wire[-1]
-assert m.labels()==['aphex\ttwin','01 Xtal.flac','bob · FLAC 16/44.1 · 31 MB · free','More…',''],m.labels()
+assert m.labels()==['aphex\ttwin','01 Xtal.flac','bob · FLAC 16/44.1 · 31 MB · free','More…'],m.labels()
 # A press downloads the file; Play/Pause held, the hold op (its whole folder); More… the next page.
 m.pick(0); m.answer('ok','Downloading 01 Xtal.flac','',[]); assert m.requests[-1]==('download','12.3') and m.toasts[-1][3]=='Downloading 01 Xtal.flac'
 m.answer('ok','refresh','50',[('action','download','01 Xtal.flac','bob','12.3','downloadfolder')])
@@ -14264,12 +14273,12 @@ m.back(); m.answer('ok','','100',[('info','','Second','','','')]); assert m.requ
 # live one as well: its 2 s refresh asks the first page alone.
 def arts(k,n=50): return [('list','artist',f'Artist {k*50+i:03}','',f'ar-{k*50+i}','playartist') for i in range(n)]
 s=SlskMachine(); s.open(); s.answer('ok','refresh','',SMENU); s.pick(2); s.answer('ok','pages','c1',arts(0))
-view=s.find('scroll_view'); rows=s.rows(); assert len(rows)==51 and s.labels()[-2:]==['Loading…',''],s.labels()[-2:]
+view=s.find('scroll_view'); rows=s.rows(); assert len(rows)==51 and s.labels()[-1:]==['Loading…'],s.labels()[-2:]
 asked=len(s.threads); s.pick(50); assert len(s.threads)==asked
-s.nodes[view]['_ringnav_index']=7; s.word(view+O['SCROLL_Y'],6*52); y=s.get(view+O['SCROLL_Y'])  # row 7 on screen (OLED's 52 px detail rows)
+s.nodes[view]['_ringnav_index']=7; s.word(view+O['SCROLL_Y'],6*32); y=s.get(view+O['SCROLL_Y'])  # row 7 on screen (one-line 32 px rows: no subtitles)
 s.answer('ok','pages','c2',arts(1)); assert s.requests[-1]==('downloads','c1') and s.rows()[:50]==rows[:50] and len(s.rows())==101,s.requests[-1]
-assert s.nodes[view]['_ringnav_index']==7 and s.get(view+O['SCROLL_Y'])==y and s.get(view+O['VIEW_CONTENT_H'])==101*52
-s.answer('ok','pages','',arts(2,20)); assert s.requests[-1]==('downloads','c2') and len(s.rows())==120 and s.labels()[-2:]==['Artist 119','']
+assert s.nodes[view]['_ringnav_index']==7 and s.get(view+O['SCROLL_Y'])==y and s.get(view+O['VIEW_CONTENT_H'])==101*32
+s.answer('ok','pages','',arts(2,20)); assert s.requests[-1]==('downloads','c2') and len(s.rows())==120 and s.labels()[-1:]==['Artist 119']
 t=len(s.threads); s.advance(2000); assert len(s.threads)==t; passed()
 # A page landing while another window is on top leaves ringnav's list state (its load) to that window's list:
 # the rows, count and selection are kept for when the page is on top again.
@@ -14299,27 +14308,27 @@ assert s.requests[-3:]==[('downloads',),('downloads','c1'),('downloads','c2')] a
 # Without "pages" (every app before it: q2-deezer, q2-soulseek, q2-filebrowser) a reply with a cursor keeps
 # More… and nothing more is asked; a later page without it ends the list at More… as well.
 s.back(); s.answer('ok','refresh','',SMENU); s.pick(2); t=len(s.threads); s.answer('ok','','c1',arts(0))
-assert len(s.threads)==t and len(s.rows())==51 and s.labels()[-2:]==['More…',''],s.labels()[-2:]
+assert len(s.threads)==t and len(s.rows())==51 and s.labels()[-1:]==['More…'],s.labels()[-2:]
 s.back(); s.answer('ok','refresh','',SMENU); s.pick(2); s.answer('ok','pages','c1',arts(0)); t=len(s.threads); s.answer('ok','','c2',arts(1))
-assert s.requests[-1]==('downloads','c1') and len(s.threads)==t and len(s.rows())==101 and s.labels()[-2:]==['More…',''],s.labels()[-2:]; passed()
+assert s.requests[-1]==('downloads','c1') and len(s.threads)==t and len(s.rows())==101 and s.labels()[-1:]==['More…'],s.labels()[-2:]; passed()
 # At ADDON_PAGES replies (500 rows, under ringnav's 512) the list stops at More…, which asks for the rest as a
 # level of its own; a page that fails ends the list at More… too, its rows kept, nothing asked again. (A fresh
 # machine: the mock's memory isn't freed.)
 s=SlskMachine(); s.open(); s.answer('ok','refresh','',SMENU); s.pick(2)
 for k in range(10): s.answer('ok','pages',f'c{k+1}',arts(k))
-assert len(s.rows())==501 and s.labels()[-2:]==['More…',''] and s.requests[-1]==('downloads','c9'); t=len(s.threads); s.advance(2000); assert len(s.threads)==t
+assert len(s.rows())==501 and s.labels()[-1:]==['More…'] and s.requests[-1]==('downloads','c9'); t=len(s.threads); s.advance(2000); assert len(s.threads)==t
 s.pick(500); s.answer('ok','pages','c11',arts(10,30)); assert s.requests[-1]==('downloads','c10')
-s.answer('error','Server down','',[]); assert s.requests[-1]==('downloads','c11') and len(s.rows())==31 and s.labels()[-2:]==['More…','']
+s.answer('error','Server down','',[]); assert s.requests[-1]==('downloads','c11') and len(s.rows())==31 and s.labels()[-1:]==['More…']
 t=len(s.threads); s.advance(2000); assert len(s.threads)==t; passed()
 # Windows (caps word "window", addon.c page_to): a page row shows the level's own list from its context's
 # cursor in the level's place, not as a level over it. Next page selects the row after Previous page,
 # Previous page the list's last row once its pages are in, and Back leaves the list (the menu asked again).
 s=SlskMachine(); s.open(); s.answer('ok','refresh','',SMENU); s.pick(2)
 s.answer('ok','pages','c1',arts(0)); s.answer('ok','','',[*arts(1,49),('page','next','Next page','','c200','')])
-assert len(s.rows())==100 and s.labels()[-2:]==['Next page',''],s.labels()[-2:]  # a plain row, its subtitle empty
+assert len(s.rows())==100 and s.labels()[-1:]==['Next page'],s.labels()[-2:]  # a plain row, its subtitle empty: one line
 s.pick(99); assert s.labels()==['Loading…'],s.labels()
 s.answer('ok','pages','c250',[('page','prev','Previous page','','c0',''),*arts(4,49)]); assert s.requests[-1]==('downloads','c200'),s.requests[-1]
-assert s.labels()[:4]==['Downloads','Previous page','','Artist 200'] and s.nodes[s.find('scroll_view')]['_ringnav_index']==1,(s.labels()[:4],s.nodes[s.find('scroll_view')]['_ringnav_index'])
+assert s.labels()[:4]==['Downloads','Previous page','Artist 200','Artist 201'] and s.nodes[s.find('scroll_view')]['_ringnav_index']==1,(s.labels()[:4],s.nodes[s.find('scroll_view')]['_ringnav_index'])
 s.answer('ok','','',arts(5,10)); assert s.requests[-1]==('downloads','c250') and len(s.rows())==60
 s.pick(0); assert s.labels()==['Loading…']
 s.answer('ok','pages','c1',arts(0)); assert s.requests[-1]==('downloads','c0'),s.requests[-1]; s.answer('ok','','',[*arts(1,49),('page','next','Next page','','c200','')])
@@ -14333,12 +14342,12 @@ page_t=page_c.nodes[page_c.rows()[1]]['children'][0]; assert page_c.nodes[page_t
 # and spoils the old block), not the request's 64 KB.
 s=SlskMachine(); s.open(); s.answer('ok','refresh','',SMENU); s.pick(2); s.resized.clear(); s.answer('ok','pages','c1',arts(0)); s.answer('ok','pages','',arts(1,3))
 assert [k[:9] for k in s.resized]==[b'Q2SPOT/1\n']*2 and s.resized[0].endswith(b'\tar-49\tplayartist\n\0') and s.resized[1].endswith(b'\tar-52\tplayartist\n\0'),s.resized
-assert s.labels()[1]=='Artist 000' and s.labels()[-2:]==['Artist 052',''],s.labels(); passed()
+assert s.labels()[1]=='Artist 000' and s.labels()[-1:]==['Artist 052'],s.labels(); passed()
 # An empty last page (offset paging: 50 rows and a cursor, then none) leaves the selection on the last row, not
 # past the end where the Loading… row was.
 s=SlskMachine(); s.open(); s.answer('ok','refresh','',SMENU); s.pick(2); s.answer('ok','pages','c1',arts(0))
 view=s.find('scroll_view'); s.nodes[view]['_ringnav_index']=50; s.answer('ok','pages','',[])
-assert s.requests[-1]==('downloads','c1') and len(s.rows())==50 and s.labels()[-2:]==['Artist 049','']
+assert s.requests[-1]==('downloads','c1') and len(s.rows())==50 and s.labels()[-1:]==['Artist 049']
 assert s.nodes[view]['_ringnav_index']==49,s.nodes[view]['_ringnav_index']; passed()
 # A reload's row comes back once: a user who moved off the Loading… row meanwhile (to row 10), then onto a later
 # one (row 100), stays there as its page comes, not pulled on toward the old row (120).
@@ -14364,7 +14373,7 @@ s.pick(0); edit=s.find('edit'); assert edit and not s.find('scroll_view')
 s.answer('ok','pages','c2',arts(1)); assert s.requests[-1]==('downloads','c1') and not s.find('scroll_view')
 s.answer('ok','pages','',arts(2)); assert s.requests[-1]==('downloads','c2') and not s.find('scroll_view')
 f,ctx=s.handler(edit,O['EVT_BLUR']); s.call(address=f,args=(ctx,s.event,0,0),gap=0,count=5_000_000); s.advance(0,clear=False)
-assert not s.find('edit') and len(s.rows())==150 and s.labels()[-2:]==['Artist 149',''] and s.nodes[s.find('scroll_view')]['_ringnav_index']==0
+assert not s.find('edit') and len(s.rows())==150 and s.labels()[-1:]==['Artist 149'] and s.nodes[s.find('scroll_view')]['_ringnav_index']==0
 assert not find_icon(s); passed()
 # A Sort row after the Search row stays a list row as well (take_sort follows a taken search only), and its press
 # opens it.
@@ -14378,7 +14387,7 @@ s.pick(1); s.answer('ok','','',[]); assert s.requests[-1]==('sorts','by'),s.requ
 s=SlskMachine(); s.open(); s.answer('ok','refresh','',SMENU); s.pick(2); s.answer('ok','pages','c1',arts(0))
 view=s.find('scroll_view'); s.top=s.page; s.status=s.alloc(0x200); s.nodes[view]['_ringnav_index']=7; s.press(80); assert s.hold()==11
 s.answer('ok','Playing Artist 007','',[]); assert s.requests[-1]==('playartist','ar-7') and s.toasts[-1][3]=='Playing Artist 007',s.requests[-1]
-s.answer('ok','pages','c1',arts(0)); assert s.requests[-1]==('downloads',) and len(s.rows())==51 and s.labels()[-2:]==['Loading…','']
+s.answer('ok','pages','c1',arts(0)); assert s.requests[-1]==('downloads',) and len(s.rows())==51 and s.labels()[-1:]==['Loading…']
 s.answer('ok','pages','',arts(1)); view=s.find('scroll_view')
 assert s.requests[-1]==('downloads','c1') and len(s.rows())==100 and s.nodes[view]['_ringnav_index']==7; passed()
 # Back twice to the menu; Phone Remote shows the QR code page from the add-on's status file.
@@ -14409,7 +14418,7 @@ said=qr_painted(); assert not m.bands and 'Connect the Q2 to Wi-Fi' in said,said
 # A step (q2-subsonic's sign-in) is a mode page: a solid circle, its glyph, the title and the line.
 m.files[SSTATE]=bytearray(f'addr=192.168.1.23:8080\npin=548001\nqr={hexed}\nqrsize=21\nstep=check\ntitle=Signing In\u2026\nline=Checking with music.example.com\n'.encode()); m.advance(1000)
 said=qr_painted(); assert said==['Signing In\u2026','Checking with music.example.com'] and len(m.rounded)==1 and not m.bands,said
-assert any(i.endswith('signin_check') for i in m.image_loads),m.image_loads[-3:]
+assert any(i.endswith('modepage_check') for i in m.image_loads),m.image_loads[-3:]
 m.destroy(qp); m.top=m.page; passed()
 # Holding standby off: while the add-on asks (hold=1), each poll resets standby and auto power-off
 # (not the screen's); once it stops by itself (its loop's pid gone), it is let go.
@@ -14508,7 +14517,7 @@ m=QobuzMachine(); m.top=m.node('window','playing_page'); m.mock('navigator_back'
 assert run(m,'addon_goto',m.string(QSONG),m.string('Record'),1)==1; m.page=m.top
 assert m.nodes[m.page]['name']=='addon_page' and m.systems==['/bin/sh /mnt/mmc/.qobuz/run'] and m.labels()==['Loading…']
 m.answer('ok','','40',[('list','artist','The Band','Artist','5',''),('action','play','First','3:20','album-a1:t1','dl:album-a1:t1')])
-assert m.requests[-1]==('goto','album',QSONG) and m.labels()==['Record','The Band','Artist','First','3:20','More…',''],m.labels()
+assert m.requests[-1]==('goto','album',QSONG) and m.labels()==['Record','The Band','Artist','First','3:20','More…'],m.labels()
 m.pick(2); m.answer(*OK,[]); assert m.requests[-1]==('goto','album',QSONG,'40'),m.requests[-1]
 m.back(); m.answer('ok','','40',[]); m.back(); assert 'navigator_back' in [c[0] for c in m.calls]; passed()
 m=QobuzMachine(); m.open(); m.answer(*OK,[]); old=m.page; m.mock('window_manager_close_window_force')
@@ -14516,7 +14525,7 @@ m.top=m.node('window','playing_page')
 assert run(m,'addon_goto',m.string(QSONG),m.string('The Band'),0)==1 and m.top!=old
 assert [c[2] for c in m.calls if c[0]=='window_manager_close_window_force']==[old]
 m.page=m.top; m.destroy(old); m.answer(*OK,[('info','','No albums','','','')])
-assert m.requests[-1]==('goto','artist',QSONG) and m.labels()==['The Band','No albums',''],(m.requests[-1],m.labels()); passed()
+assert m.requests[-1]==('goto','artist',QSONG) and m.labels()==['The Band','No albums'],(m.requests[-1],m.labels()); passed()
 m=AppMachine(); assert run(m,'addon_goto',m.string('/mnt/mmc/.soulseek/a.flac'),m.string('A'),1)==0
 m=QobuzMachine()
 for path in ('/mnt/mmc/Music/a.flac','/mnt/mmc/.qobuz','/mnt/mmc/.Bad_Id/a.flac','/mnt/mmc/.waytoolongforanidxx/a.flac',
@@ -14614,7 +14623,7 @@ SONGS='/mnt/mmc/Deezer'
 DZMENU=[('local',SONGS+'/','Downloaded Songs','2 songs on the card','',''),('list','tracks','Liked Songs','','liked','download'),
         ('search','','Search Deezer','','',''),('action','stop','Stop Deezer','Downloads carry on next time','','')]
 m.advance(2000); m.answer('ok','refresh','',DZMENU)
-assert m.labels()==['Deezer','Downloaded Songs','2 songs on the card','Liked Songs','','Search Deezer','','Stop Deezer','Downloads carry on next time'],m.labels()
+assert m.labels()==['Deezer','Downloaded Songs','2 songs on the card','Liked Songs','Search Deezer','Stop Deezer','Downloads carry on next time'],m.labels()
 assert [chevron(m,i) for i in range(4)]==[True,True,False,False]  # a folder and a list open pages; search and actions don't
 m.top=m.page; m.status=m.alloc(0x200); m.nodes[m.find('scroll_view')]['_ringnav_index']=1; m.press(80)
 assert m.hold()==11; m.answer('ok','Downloading 12 songs','',[])
@@ -14679,13 +14688,11 @@ m.tree[T]=[(n,8) for n in (*names,'13-2 C.flac.tmp','.cache-size')]; m.found=rec
 assert run(m,'tidal_downloads',0,0)==0; td=m.top; tdrows=lambda: m.nodes[m.find('scroll_view',td)]['children']
 LIST=['Tidal Downloads','B - Two','A - One','Clear All Downloads…']
 assert m.nodes[td]['name']=='tidal_downloads' and [l for l in m.labels(td) if l]==LIST,m.labels(td)
-ASK=['Remove Downloads?','2 tracks','Keeps settings','Cancel','Remove']
-m.click(tdrows()[2]); assert [l for l in m.labels(td) if l]==ASK,m.labels(td)
-m.click(tdrows()[1]); assert [l for l in m.labels(td) if l]==LIST  # Cancel, back on the Clear row
-assert m.nodes[m.find('scroll_view',td)]['_ringnav_index']==2
-m.click(tdrows()[2]); m.back(td); assert [l for l in m.labels(td) if l]==LIST and m.top==td  # Return is Cancel
+# Clear All Downloads asks on the confirmation card; its answer (library_lists.c td_answer) runs once it has closed
+def td_answer(row): m.call(address=payload_syms['td_answer'],args=(0,row,0,0),gap=0,clear=False); m.advance(1)
+m.click(tdrows()[2]); td_answer(0); assert [l for l in m.labels(td) if l]==LIST  # Cancel, back on the Clear row
 m.click(tdrows()[2]); m.found=[]  # stock's listing of the emptied folder
-m.click(tdrows()[2]); assert [p for p in m.files if p.startswith(T)]==[T+'/.cache-size'] and '/mnt/mmc/Music/keep.flac' in m.files
+td_answer(1); assert [p for p in m.files if p.startswith(T)]==[T+'/.cache-size'] and '/mnt/mmc/Music/keep.flac' in m.files
 assert [l for l in m.labels(td) if l]==['Tidal Downloads'] and empty_titles(m)[-1:]==['No Downloads Yet']; m.destroy(td); passed()  # empty_list: the name kept hidden, the empty state
 # Stream mode (q2-deezer's stream.go, addon.c stream_poll): its .play file names a session's folder; its
 # first song, once there, plays as a local album does (Now Playing opening); songs that come later join the
@@ -15238,8 +15245,8 @@ for page in ('mystery_page','apps_page','localmusic_page','app_songs','upnext_pa
     windows(m); m.poll(); assert m.files[DONE]==f'{seq} ok\n'.encode() and len(m.imports)==k+1,(page,m.files[DONE])
 windows(m,*SAFE); m.files[LIB]=bytearray(f'700\nimport {EXP}/Mix.m3u\n'.encode()); m.poll(); assert m.files[DONE]==b'700 ok\n',m.files[DONE]; passed()
 
-# About: FW. Version shows the stock firmware's version again, not the updater tag in demo's
-# literal, and a CFW. Version row follows it. Stock's own row builder (0x4c0de4) builds Model and FW.
+# About: Firmware (stock's FW. Version) shows the stock firmware's version again, not the updater tag in demo's
+# literal, and a row named for the product (tools/build.py PRODUCT_NAME) with this build's version follows it. Stock's own row builder (0x4c0de4) builds Model and FW.
 # Version, so the added row is checked against the real stock widgets, geometry and styles. A page of another
 # count of rows (V1.32's seven) is left as stock built it. Stock's thanks, V1.36's eighth child, is dropped.
 m=ShuffleMachine(); m.handlers[int(manifest['patch_symbols']['stock_about_trampoline'],16)]='stock_about'
@@ -15254,13 +15261,14 @@ for i in range(8):  # stock's seven rows and its thanks, the eighth child
     if i<2: assert m.call(address=0x4c0de4,args=(row,i,0,0),gap=0)==0
 rows=list(m.nodes[view]['children'])
 assert m.call(address=HOOKS['systemset_about_page_init'][0],args=(m.top,5,0,0),gap=0)==0 and m.calls[0][:3]==('stock_about',m.top,5)
-kids=m.nodes[view]['children']; assert kids[:2]==rows[:2] and kids[3:]==rows[2:7]
+kids=m.nodes[view]['children'][1 if manifest['dev'] else 0:]  # a --dev build's Save Diagnostics row heads it (diagnostics.c)
+assert kids[:2]==rows[:2] and kids[3:]==rows[2:7]
 fw=m.nodes[m.nodes[rows[1]]['children'][0]]['children'][1]; assert m.nodes[fw]['text']=='V1.36'
 item=kids[2]; button=m.nodes[item]['children'][0]; title,value=m.nodes[button]['children']
 # Stock's row, title and value widgets alike.
 want=tree(m.nodes[rows[1]]['children'][0])
 assert m.nodes[item]['style']=='s_listitem_black' and tree(button)==want
-assert m.nodes[title]['text']=='CFW. Version' and m.nodes[value]['text']==f"{VERSION} Pod{f" dev {manifest['dev']}" if manifest['dev'] else f' beta {BETA}' if BETA else ''}"
+assert m.nodes[title]['text']==PRODUCT_NAME and m.nodes[value]['text']==f"{VERSION}{f" dev {manifest['dev']}" if manifest['dev'] else f' beta {BETA}' if BETA else ''}"
 assert not m.nodes[button].get('handlers') and not m.nodes[button].get('name'); passed()
 m.nodes[view]['children']=rows[:7]; assert m.call(address=HOOKS['systemset_about_page_init'][0],args=(m.top,5,0,0),gap=0)==0 and m.nodes[view]['children']==rows[:7]; passed()
 
@@ -15816,10 +15824,10 @@ def switch_image(m,row):
     return m.nodes[images[0]]['image']
 assert all(switch_image(m,rows[i])=='switch_off' for i in (2,3,4))  # Charge Limit, a key/value row on the theme's switches (pod_text)
 assert not [c for c in m.nodes[m.nodes[rows[1]]['children'][0]]['children'] if m.nodes[c].get('name')=='_setting_switch']
-assert len(rows)==9 and icons==['system_powermanager','usb_chargeswitch','usb_chargeswitch','wifiset_wifi','system_carmode','system_powermanager','system_powermanager','system_powermanager','system_powermanager'] and all(m.nodes[r]['style']=='s_listitem_black' for r in rows)
-assert texts()==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox','Restart','Shut Down']
+assert len(rows)==7 and icons==['system_powermanager','usb_chargeswitch','usb_chargeswitch','wifiset_wifi','system_carmode','system_powermanager','system_powermanager'] and all(m.nodes[r]['style']=='s_listitem_black' for r in rows)
+assert texts()==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox']
 assert click(1)==[(1,'Q2POD','CHARGELIMIT')] and texts()[1]==f"Charge Limit: {O['CHARGE_STOP']}%"
-assert click(1)==[(0,'Q2POD','CHARGELIMIT')] and texts()==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox','Restart','Shut Down']; passed()
+assert click(1)==[(0,'Q2POD','CHARGELIMIT')] and texts()==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox']; passed()
 # In-Vehicle Mode, System's stock row before (0x4d34c0): its byte, its key, and the state byte cleared.
 m.byte(syms['g_carmode_state'],1)
 assert click(4)==[(1,'SYSSET','CARMODE')] and m.u.mem_read(syms['g_carmode'],1)==b'\1' and m.u.mem_read(syms['g_carmode_state'],1)==b'\0' and switch_image(m,rows[4])=='switch_on'
@@ -16226,7 +16234,7 @@ for double in ('0','1'):
     assert not press(DOWN,0) and not press(UP,50) and press(DOWN,O['WAKE_MS']) and press(UP,50),double
 passed()
 m,rows,texts,*_=settings_page('power','scroll_view_powermanager',{'CHARGELIMIT':'1','WAKEDOUBLE':'1','VOLGUARD':'1','STANDBYLIMIT':'2'})
-assert texts()==[limits[1],f"Charge Limit: {O['CHARGE_STOP']}%",'USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox','Restart','Shut Down']
+assert texts()==[limits[1],f"Charge Limit: {O['CHARGE_STOP']}%",'USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox']
 m,rows,texts,*_=settings_page('display','scroll_view_display',{'WAKEDOUBLE':'1','VOLGUARD':'1'},stock_rows=3,sub=3)
 assert texts()[4:]==['Wake: Double Press']; passed()  # VOLGUARD, Volume Guard's key in 1.8.2 and before: no row
 m,rows,texts,*_=settings_page('power','scroll_view_powermanager',{'STANDBYLIMIT':'4'})
@@ -16459,7 +16467,7 @@ assert m.call(address=payload_syms['folders_shared'],args=(m.deque([]),0,0,0),ga
 # Boot reads it too (ringnav_bootmode), so Audio settings shows it before any Library page has opened.
 for config,text in (({},'Artists: Album Artist'),({'ARTISTTYPE':'0'},'Artists: Artist')):
     shown=settings_page('audioset','scroll_view_playset',config,stock_rows=13,boot=True,sub=1)[2]
-    assert shown()[1]==text,config
+    assert shown()[3]==text,config  # Library's fourth row (library_settings.c)
 passed()
 # Mono Audio (crossfade.c mono_click): saved as Q2POD MONO, the row's text following, and the int
 # hciplayer and q2video map (MONO_FILE) set live. No file until it is first turned on.
@@ -16647,13 +16655,13 @@ for config,text in (({},'Off'),({'NIGHTSHIFT':'1'},'3400 K'),({'NIGHTSHIFT':'1',
     assert texts()[1]=='Night Shift: '+text and icons[1]=='display_backlight' and m.nodes[label]['name']=='label_night',config
     assert m.nodes[named(m,m.top,'scroll_view_display')]['children'][3]==rows[1],config  # after Smart Awake
 passed()
-# Its row opens the same page with its switch, Off. The switch turns it on and off and saves it; the
+# Its row opens the same page with its switch, Off, its value the warmth in every mode (3400 K). The switch turns it on and off and saves it; the
 # wheel, +/- and the slider step 100K, warmer to the right, a move turning it on; each change repaints
 # the whole screen at once, a drag's every step too, but a drag saves once, at its release.
 m,rows,texts,icons,click=settings_page('display','scroll_view_display',stock_rows=3)
 m.stack=[m.top]; m.nodes[m.wm]=dict(type='window_manager',name='',children=m.stack,visible=1)
 assert click(1)==[] and m.nodes[m.top]['name']=='bootvol_page' and m.nodes[m.title]['text']=='Night Shift'
-assert m.nodes[m.switch]['visible']!=0 and m.nodes[m.vol]['text']=='Off'
+assert m.nodes[m.switch]['visible']!=0 and m.nodes[m.vol]['text']=='3400 K'
 N,K=('Q2POD','NIGHTSHIFT'),('Q2POD','NIGHTK')
 def repaints(): return [c[1:3] for c in m.calls if c[0]=='widget_invalidate_force']==[(m.wm,0)]
 assert press(m.switch)==[(1,*N)] and repaints() and m.nodes[m.vol]['text']=='3400 K' and texts()[1]=='Night Shift: 3400 K'
@@ -16665,10 +16673,10 @@ m.nodes[m.slider]['value']=10; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[
 m.nodes[m.slider]['value']=0; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and repaints() and texts()[1]=='Night Shift: 5000 K'
 assert press(m.slider,O['EVT_VALUE_CHANGED'])==[(5000,*K)] and turn(O['KEY_PREV'])==[]  # the release saves, once
 # The switch cycles Off, On and Auto; a move in Auto keeps Auto.
-assert texts()[1]=='Night Shift: 5000 K' and press(m.switch)==[(2,*N)] and repaints() and m.nodes[m.vol]['text']=='Auto'
+assert texts()[1]=='Night Shift: 5000 K' and press(m.switch)==[(2,*N)] and repaints() and m.nodes[m.vol]['text']=='5000 K'
 assert texts()[1]=='Night Shift: Auto' and m.nodes[m.switch]['image']=='switch_on'
 assert turn()==[(4900,*K)] and texts()[1]=='Night Shift: Auto' and turn(O['KEY_PREV'])==[(5000,*K)]
-assert press(m.switch)==[(0,*N)] and repaints() and m.nodes[m.vol]['text']=='Off'
+assert press(m.switch)==[(0,*N)] and repaints() and m.nodes[m.vol]['text']=='5000 K'
 assert texts()[1]=='Night Shift: Off' and m.nodes[m.switch]['image']=='switch_off'
 assert turn(O['KEY_PREV'])==[(1,*N)] and texts()[1]=='Night Shift: 5000 K'  # at an end too
 assert press(m.switch)==[(2,*N)] and press(m.switch)==[(0,*N)]
@@ -16757,7 +16765,7 @@ passed()
 m,rows,texts,icons,click=settings_page('btrows','scroll_view_bluetooth',stock_rows=7)  # 5 rows, 2 devices
 assert len(rows)==3 and icons==[None,None,None] and texts()==['Resume on Connect','Control Device Volume','Name']
 view=named(m,m.top,'scroll_view_bluetooth'); name_row=rows[2]
-assert m.nodes[view]['children'].index(name_row)==1 and m.get(name_row+O['W_H'])==78 and m.entries[1] not in m.nodes[view]['children']
+assert m.nodes[view]['children'].index(name_row)==1 and m.get(name_row+O['W_H'])==m.get(m.entries[1]+O['W_H']) and m.entries[1] not in m.nodes[view]['children']
 assert 'Q2' in [m.nodes[c].get('text') for c in m.nodes[m.nodes[name_row]['children'][0]]['children']]
 rows=rows[:2]
 for k,row in enumerate(rows):
@@ -17123,7 +17131,7 @@ assert [(c[1],m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='write_int_co
 # The row, after Charge Limit: off by default and saved as SMARTWIFI. Turned off while Smart Wi-Fi has
 # the radio off, the user's Wi-Fi comes back, unsaved, and is left alone.
 m,rows,texts,icons,click=settings_page('power','scroll_view_powermanager',cls=SmartMachine,config={'SMARTWIFI':'0'})
-assert texts()==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox','Restart','Shut Down'] and icons[3]=='wifiset_wifi'
+assert texts()==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox'] and icons[3]=='wifiset_wifi'
 assert switch_image(m,rows[3])=='switch_off' and click(3)==[(1,'Q2POD','SMARTWIFI')] and switch_image(m,rows[3])=='switch_on'
 m.pass_(1); m.pass_(SW_IDLE); assert m.flag()==0
 assert click(3)==[(0,'Q2POD','SMARTWIFI')] and switch_image(m,rows[3])=='switch_off'
@@ -17165,14 +17173,18 @@ for case,setup,kept in CASES:
     assert (not m.switch())==kept and (kept or m.flag()==0),case
 passed()
 # The payload's own users hold it on while they run: librespot, a station, a card app, an upload,
-# Network Update's download or an Apps job, Get Album Lyrics and a Tidal download.
+# Network Update's download or an Apps job, Get Album Lyrics, a Tidal download and Car Remote on.
 class SmartBusy(SmartMachine):
     def __init__(self,name,busy):
         super().__init__(); self.busy=busy; self.handlers[payload_syms[name]]='b:'+name  # every address is hooked here
+        # Car Remote on: its shim's poll (test/fw/test_coda_rc_shim.py's) left out, as it would start the daemon
+        if name=='coda_rc_enabled': self.handlers[payload_syms['coda_rc_poll']]='skip'
     def hook(self,u,address,size,unused):
+        if self.handlers.get(address)=='skip': self.returns(0); return
         if self.handlers.get(address,'').startswith('b:'): self.returns(self.busy); return
         return super().hook(u,address,size,unused)
-for name in ('spot_running','radio_status','addon_running','scrobble_busy','netupdate_busy','album_lyrics_busy','tidal_busy'):
+for name in ('spot_running','radio_status','addon_running','scrobble_busy','netupdate_busy','album_lyrics_busy','tidal_busy',
+             'coda_rc_enabled'):
     for busy in (0,2):  # radio_status: 2 a station playing
         m=SmartBusy(name,busy); m.pass_(1); m.pass_(SW_IDLE); assert (not m.switch())==bool(busy),(name,busy)
 passed()
@@ -17516,9 +17528,9 @@ def boot_row(value=None,mode=0o100755):
     assert m.calls[0][:3]==('stock_power',m.top,5)
     kids=m.nodes[view]['children']
     if mode!=0o100755:  # no Boot to
-        assert len(kids)==11  # stock's two, then Standby Limit, Charge Limit, USB DAC Charging, Smart Wi-Fi, In-Vehicle and Battery History, then the gap, Restart and Shut Down
+        assert len(kids)==8  # stock's two, then Standby Limit, Charge Limit, USB DAC Charging, Smart Wi-Fi, In-Vehicle and Battery History (Restart and Shut Down are General's)
         return m,None,None
-    assert len(kids)==12  # Boot to before the gap
+    assert len(kids)==9  # Boot to last
     button=m.nodes[kids[8]]['children'][0]
     label=m.nodes[button]['children'][1]
     return m,button,label
@@ -17550,9 +17562,9 @@ m,button,label=boot_row(); view=m.nodes[m.top]['children'][0]; view=m.nodes[view
 m.paint(view)
 for _ in range(8): m.call()  # stock's two, our six, then Boot to
 assert m.confirm()==11 and m.dispatched()[0][1]==button; passed()
-# System settings: stock V1.36's nine rows, its Language (English only for now), Wheel Function, In-Vehicle, General and System hidden, which the wheel
-# skips; Car Remote, App Store, Storage and Controls added, and the four rows stock moved to its System page, opening stock's pages,
-# so the list reads as it did. Boot to is Power's now.
+# General (Settings' System page, ringnav_systemset): About, System Update, Storage, Date & Time, App Store, stock's
+# Network row, Reset Settings, then stock's other eight hidden (the wheel skips them), a 12 px gap, Restart and Shut Down
+# (power_rows.c). The rows stock moved to its System page open stock's pages; Car Remote and Controls are Settings' own.
 for mode in (0o100755,0):
     m=BootMachine({}); m.rockbox_mode=mode; m.restack=True
     m.handlers[int(manifest['patch_symbols']['stock_systemset_trampoline'],16)]='stock_systemset'
@@ -17560,18 +17572,16 @@ for mode in (0o100755,0):
     view=m.node('scroll_view','scroll_view_sysset',entries.copy())
     m.top=m.node('window','sysset_page',[m.node('list_view','list_view_sysset',[view])])
     assert m.call(address=HOOKS['systemset_sysset_page_init'][0],args=(m.top,5,0,0),gap=0)==0
-    kids=m.nodes[view]['children']; assert len(kids)==17
-    assert [kids.index(e) for e in entries]==[7,0,1,3,5,12,13,14,15]  # Language, hidden, after Date and Time; the hidden four before About
-    assert [m.nodes[e]['visible'] for e in entries]==[0,1,1,1,1,0,0,0,0]
-    car,controls,date,apps,storage,update,reset,about=(m.nodes[kids[i]]['children'][0] for i in (2,4,6,8,9,10,11,16))
-    assert m.nodes[m.nodes[car]['children'][1]]['text']=='Car Remote' and m.handler(car,O['EVT_CLICK'])[0]==payload_syms['carremote_open']
+    kids=m.nodes[view]['children']; assert len(kids)==18
+    assert [kids.index(e) for e in entries]==[7,8,5,9,10,11,12,13,14]  # Network (stock's third) in place, the rest hidden
+    assert [m.nodes[e]['visible'] for e in entries]==[0,0,1,0,0,0,0,0,0]
+    about,update,storage,date,apps,reset=(m.nodes[kids[i]]['children'][0] for i in (0,1,2,3,4,6))
     assert m.nodes[m.nodes[apps]['children'][1]]['text']=='App Store' and m.handler(apps,O['EVT_CLICK'])[0]==payload_syms['shelf_open']
     assert m.nodes[m.nodes[storage]['children'][1]]['text']=='Storage' and m.handler(storage,O['EVT_CLICK'])[0]==payload_syms['storage_open']
-    assert m.nodes[m.nodes[controls]['children'][1]]['text']=='Controls'
-    f,ctx=m.handler(controls,O['EVT_CLICK']); assert f==payload_syms['display_open'] and ctx==3
     for b,key,page in ((date,'system_time','systemset/datetime_page'),(update,'system_update','systemset/fwupdate_page'),(reset,'system_reset','systemset/reset_page'),(about,'system_about','systemset/about_page')):
         f,ctx=m.handler(b,O['EVT_CLICK']); assert m.nodes[m.nodes[b]['children'][1]]['text']==key and m.nodes[m.nodes[b]['children'][0]]['image']==key
         m.calls=[]; assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==(page,None),key
+    assert m.nodes[kids[15]]['type']=='label' and [m.nodes[m.nodes[m.nodes[k]['children'][0]]['children'][1]]['text'] for k in kids[16:]]==['Restart','Shut Down']
     passed()
 print('Boot settings: conditional row/order, restart, card removal and failed atomic writes passed.')
 
@@ -17722,7 +17732,7 @@ m.top=m.node('window','home_page'); m.stream(); view=m.nodes[m.top]['children'][
 conf=m.nodes[m.nodes[view]['children'][5]]['children'][0]; icon,label=m.nodes[conf]['children'][:2]
 assert m.nodes[icon]['image']=='stream_config' and m.nodes[label]['text']=='Configuration'
 m.click(conf); m.page=m.top; assert m.nodes[m.page]['name']=='streamconf_page'
-assert m.labels()==['Configuration','Tidal Cache: 2 GB','Spotify Cache: 2 GB','Erase Spotify Data','Stop Streaming Services','TIDAL','Spotify','Tidal Downloads','Internet Radio','AirPlay']
+assert m.labels()==['Configuration','Tidal Cache: 2 GB','Spotify Cache: 2 GB','Erase Spotify Data','Stop Streaming Services','Show in Streaming','TIDAL','Spotify','Tidal Downloads','Internet Radio','AirPlay']
 m.row(0); assert m.files[TCAP]==b'4096M' and m.labels()[1]=='Tidal Cache: 4 GB' and endpoint(m,'stream_cache',0)==3
 m.row(0); m.row(0); assert m.files[TCAP]==b'512M' and m.labels()[1]=='Tidal Cache: 512 MB'
 m.row(1); assert m.files[SCAP]==b'4096M' and m.labels()[2]=='Spotify Cache: 4 GB' and endpoint(m,'stream_cache',1)==3
@@ -17732,19 +17742,20 @@ m.row(3); m.top=m.node('window','home_page')
 assert 'killall -9 librespot aplay' in m.systems[-1] and 'player_stop' in [c[0] for c in m.calls]
 assert [m.text(c[2]+8) for c in m.calls if c[0]=='navigator_to_with_context']==['Streaming stopped']
 assert endpoint(m,'radio_status')==0 and endpoint(m,'spot_status')==0 and m.key(O['KEY_PLAY'])!=11; m.close(); passed()
-# Erase Spotify Data, under Spotify Cache, as the App Store's Remove: a first press asks for a second;
-# another row's press, or leaving the page, drops it. The second erases Spotify's login and cache (and
-# .cache-size, so Spotify Cache reads 2 GB again) on the App Store's thread, Spotify stopped first.
+# Erase Spotify Data, under Spotify Cache, asks on the confirmation card (feedback.c confirm; its answer,
+# navigation.c sc_erase_answer, run as feedback.c would once the card has closed). Erase erases Spotify's login and
+# cache (and .cache-size, so Spotify Cache reads 2 GB again) on the App Store's thread, Spotify stopped first; a press
+# while it runs says to wait.
 def conf_open(m):
     m.top=m.node('window','home_page'); m.stream(); view=m.nodes[m.top]['children'][0]
     m.click(m.nodes[m.nodes[view]['children'][5]]['children'][0]); m.page=m.top
+def erase_answer(m,row): m.call(address=payload_syms['sc_erase_answer'],args=(0,row,0,0),gap=0,clear=False)
 m=ShelfMachine({SCAP:bytearray(b'4096M')}); conf_open(m)
 assert m.labels()[2:5]==['Spotify Cache: 4 GB','Erase Spotify Data','Stop Streaming Services']
-m.row(2); assert m.labels()[3]=='Press again to erase the login and cache' and not m.threads
-m.row(0); assert m.labels()[3]=='Erase Spotify Data'  # another row's press drops it
-m.row(2); m.destroy(m.page); conf_open(m); assert m.labels()[3]=='Erase Spotify Data'  # so does leaving
-m.row(2); m.row(2); assert m.labels()[3]=='Erasing…' and len(m.threads)==1 and KILL in m.systems[-1]
-m.row(2); m.row(2); assert m.toasts[-1][3]=='Wait for the one in progress' and len(m.threads)==1
+m.row(2); assert m.labels()[3]=='Erase Spotify Data' and not m.threads  # asked, nothing erased yet
+erase_answer(m,0); assert not m.threads  # Cancel
+erase_answer(m,1); assert m.labels()[3]=='Erasing…' and len(m.threads)==1 and KILL in m.systems[-1]
+m.row(2); assert m.toasts[-1][3]=='Wait for the one in progress' and len(m.threads)==1
 worker,arg=m.threads[-1]; assert m.call(address=worker,args=(arg,0,0,0),gap=0,count=50_000_000)==0
 assert 'rm -rf /mnt/mmc/.spotify/cache /mnt/mmc/.spotify/.cache-size /mnt/mmc/.spotify/spot.log /mnt/mmc/.spotify/aplay.log /mnt/mmc/.spotify/load.log' in m.systems; del m.files[SCAP]; m.advance(500,clear=False)
 assert m.toasts[-1][3]=="Spotify's login and cache erased" and KILL in m.systems[-1]
@@ -18270,10 +18281,10 @@ class SwMachine(CoverflowMachine):
         elif name=='navigator_to': self.opened.append((self.text(a),)); ret=self.quit
         elif name=='idle_add': self.idles.append((a,b)); ret=1
         self.returns(ret,clobber=True)
-    def sw(self,field): return signed(self.get(payload_syms['swu']+{'state':4,'result':12,'frame':24}[field]))
+    def sw(self,field): return signed(self.get(payload_syms['swu']+{'state':4,'result':12,'frame':20}[field]))
     def said(self,w):
         self.letters.clear(); self.image_loads.clear(); self.paint(w,gap=0)
-        return [l['text'] for l in self.letters],[i.rsplit('_',1)[-1] if 'swspin' not in i else i.split('swspin_')[1] for i in self.image_loads if 'sw' in i]
+        return [l['text'] for l in self.letters],[i.rsplit('_',1)[-1] if 'swspin' not in i else i.split('swspin_')[1] for i in self.image_loads if 'swspin' in i or 'modepage' in i]
 def sw_open(code=1,quit=0):
     m=SwMachine(code,quit); m.call(address=syms['fwupdate_tf'],args=(0,0,0,0),gap=0); return m
 for code,result,words,glyph in ((-15,SW_LOW,['Charge to Update','Needs 16% or a charger \u00b7 now 12%'],'low'),
@@ -18293,19 +18304,16 @@ texts,images=m.said(page); assert texts==['Checking for an Update\u2026','Lookin
 m.advance(160); texts,images=m.said(page); assert images==['d_2'],images
 m.call(address=syms['fwupdate_tf'],args=(0,0,0,0),gap=0); assert len(m.threads)==1 and m.top==page  # one at a time
 passed()
-# Its answer: OK opens Install Update? over it and closes it; another, its page.
-for state,want in ((SW_OK,'swconfirm_page'),(SW_LATEST,'swupdate_page'),(SW_BAD,'swupdate_page')):
-    m=sw_open(); page=m.top; m.word(payload_syms['swu']+4,state); m.u.mem_write(payload_syms['swu']+0x40,b'V1830\0')
-    m.advance(80); assert m.joins and m.nodes[m.top]['name']==want,(state,m.nodes[m.top]['name'])
-    if state!=SW_OK: assert m.top==page and m.sw('result')==state and not m.timers; passed(); continue
-    confirm=m.top; assert not m.alive(page) and not m.timers  # Install Update? on top and still: the check's page closed under it
-    view=m.find('scroll_view',confirm); assert m.selected(view)==0  # Cancel
-    rows=m.nodes[view]['children']  # page_row_detail's list_items
-    assert [m.nodes[m.nodes[r]['children'][0]].get('text') for r in rows]==['Cancel','Install and Restart']
-    texts,_=m.said(confirm)  # this machine's fixed-pitch font cuts the longer lines with an ellipsis
-    assert texts[0]=='Q2 Pod 1.8.3 \u00b7 V1830' and texts[1].startswith(f'Installed: {manifest["version"]} \u00b7 0.0 MB') and texts[2].startswith('Takes about 2 minutes'),texts
-    f,ctx=m.handler(rows[1],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
-    assert len(m.idles)==1 and not m.alive(confirm); passed()
+# Its answer: OK asks Install Update? on the confirmation card over it (feedback.c confirm, which opens stock's
+# sortselect_dialog); another, its page. The card's answer (sw_update.c sw_answer) closes the page, Install and Restart
+# then running stock's dialog from an idle.
+for state in (SW_OK,SW_LATEST,SW_BAD):
+    m=sw_open(); page=m.top; m.word(payload_syms['swu']+4,state); m.u.mem_write(payload_syms['swu']+0x30,b'V1830\0')
+    m.advance(80); assert m.joins and not m.timers,state
+    if state!=SW_OK: assert m.top==page and m.sw('result')==state; passed(); continue
+    assert ('dialog/sortselect_dialog',) in m.opened or m.top!=page,m.opened
+    m.call(address=payload_syms['sw_answer'],args=(0,1,0,0),gap=0,clear=False)
+    assert len(m.idles)==1 and not m.alive(page); passed()
 # After the click, stock's dialog; its answer (no file 9, up to date 13, damaged 18) is a page, a success never comes back.
 for quit,result in ((9,SW_NONE),(13,SW_LATEST),(18,SW_BAD)):
     m=SwMachine(quit=quit); m.call(address=payload_syms['sw_install'],args=(0,0,0,0),gap=0)

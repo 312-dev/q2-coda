@@ -29,8 +29,8 @@ void un_bars(void *canvas, int x, int base);                            /* upnex
 #define MODAL_GAP 12             /* before a destructive row */
 #define MODAL_LEAD 26            /* a setting's or a choice's label after its leading symbol */
 #define MODAL_ICON 19            /* tools/art.py MENU_ICON_PX */
-#define MODAL_SWITCH 34          /* list_marks.c switch_mark's width */
-#define MODAL_FILL 0x1c1c1e      /* the sheet before its material is made */
+#define MODAL_SWITCH 40          /* list_marks.c switch_mark's width */
+#define MODAL_FILL RGB_RAISED    /* the sheet before its material is made */
 #define MODAL_SECONDARY 0xababab /* Text Secondary; the light half's below */
 #define MODAL_SECONDARY_L 0x5c5c5c
 
@@ -732,11 +732,11 @@ void modal_after(void *w, void *canvas) {
         } else
             fill_box(canvas, &art, RGBA(flip_if(light, 0x2c2c2e)), 6);
         int tw = right_x() - SH_NAME_X;
-        int ink = ar_text(canvas, h->title, 1, 24, 0xffffff, 0, SH_NAME_X - ox, top + 22 - oy,
+        int ink = ui_text(canvas, h->title, 1, 24, 0xffffff, 0, SH_NAME_X - ox, top + 22 - oy,
                           h->bars ? tw - 24 : tw, 2);
         if (h->bars) un_bars(canvas, SH_NAME_X - ox + ink + 7, top + 28 - oy);
         if (h->sub[0])
-            ar_text(canvas, h->sub, 0, 18, MODAL_SECONDARY, 0, SH_NAME_X - ox, top + 44 - oy, tw,
+            ui_text(canvas, h->sub, 0, 18, MODAL_SECONDARY, 0, SH_NAME_X - ox, top + 44 - oy, tw,
                     2);
     }
     canvas_set_clip_rect(canvas, (rect_t *)was);
@@ -841,8 +841,8 @@ void modal_row_paint(void *w, void *canvas, void *row, rect_t r, int selected) {
         }
         value_text(canvas, value, right, room, &r,
                    selected ? 0xffffff
-                   : light  ? MODAL_SECONDARY_L
-                            : MODAL_SECONDARY);
+                   : light  ? RGB_SECONDARY_L
+                            : RGB_SECONDARY);
         st.raw_ink = raw;
     }
     stock_canvas_set_text_color(canvas, text);
@@ -1055,10 +1055,14 @@ void modal_more(void *win) {
                 if (!tk_strcmp(image, "airplay")) icon = "airplay";
                 if (!tk_strcmp(image, "player_onlinesearch")) icon = "cloud-arrow-down";
                 if (!tk_strcmp(image, "system_about")) icon = "info";
-                if (!strncmp(image, "switch_", 7))
+                if (!strncmp(image, "switch_", 7)) {
                     sw = c;
-                else
-                    widget_set_visible(c, 0, 0); /* stock's icons; Speed's buttons */
+                } else {
+                    /* stock's icons; Speed's buttons, which a pick still clicks: stock's hit test
+                     * skips only the insensitive, so hidden they took a tap on the row (1x) */
+                    widget_set_visible(c, 0, 0);
+                    widget_set_sensitive(c, 0);
+                }
             }
         }
         if (widget_lookup(button, "img_forward_0", 1)) kind = 1; /* the speed row, unnamed */

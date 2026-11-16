@@ -1898,26 +1898,30 @@ static void paint_cover(void *w, void *canvas) {
 
 /* The selected row's long title scrolls, as an iPod's does, MARQUEE_PASSES times as soon as the
  * selection settles, through stock's scroller with every label's holds and pace
- * (ringnav_hscroll_start); every other row keeps its ellipsis. Only a title stock would scroll on
- * focus alone (only_focus; no row is focused): stock's timer stops such a label on its first tick
- * unless it is focused (0x5fb7ac), so only_focus is off while this one runs. It loops, so each pass
- * ends on its lull (ringnav_hscroll_lull), which counts it and stops it after the last, or once the
- * row isn't the selected one on a lit, usable screen: a dark screen or a covered page costs at most
- * the rest of one pass. A row is its widget and its id, as a table's pool can hold the selection in
- * one widget (paint_selection; a paint would drop hscroll_label_stop's invalidate, so marq_moved
- * stops it from a timer). */
+ * (ringnav_hscroll_start); every other row keeps its ellipsis. Only a title stock would scroll on a
+ * focus no row has under ringnav (only_focus, or only_parent_focus: set_hscroll_label_attribute's,
+ * stock's Wi-Fi networks): stock's timer stops such a label on its first tick unless it or its
+ * parent is focused (0x5fb7ac, 0x5fb7f0), so both flags are off while this one runs and back after.
+ * It loops, so each pass ends on its lull (ringnav_hscroll_lull), which counts it and stops it
+ * after the last, or once the row isn't the selected one on a lit, usable screen: a dark screen or
+ * a covered page costs at most the rest of one pass. A row is its widget and its id, as a table's
+ * pool can hold the selection in one widget (paint_selection; a paint would drop
+ * hscroll_label_stop's invalidate, so marq_moved stops it from a timer). */
 static int marq_gone(void *ctx, void *event) {
     (void)ctx, (void)event;
     st.marq_label = (void *)0;
     return 0;
 }
+/* The marquee's label's focus flags as it found them: only_focus, only_parent_focus. */
+static unsigned char marq_focus[2] __attribute__((section(".scratch")));
 static void marq_stop(void) {
     void *label = st.marq_label;
     if (!label) return;
     st.marq_label = (void *)0;
     widget_off_by_func(label, EVT_DESTROY, marq_gone, (void *)0);
     hscroll_label_stop(label);
-    hscroll_label_set_only_focus(label, 1);
+    hscroll_label_set_only_focus(label, marq_focus[0]);
+    B(label, HSCROLL_ONLY_PARENT_FOCUS) = marq_focus[1];
 }
 /* stock's two margins (2 px each by default, 0x5fb23c) count towards its ellipsis */
 static int scroller_over(void *label) { return I(label, HSCROLL_TEXT_W) + 4 - I(label, W_W); }
@@ -1963,10 +1967,17 @@ static int marq_moved(const void *info) {
     }
     void *label = row_scroller(row, 2, 1) ?: row_scroller(row, 2, 0);
     int over = label ? scroller_over(label) : 0;
-    if (over <= 0 || !B(label, HSCROLL_ONLY_FOCUS)) return 0; /* until it moves */
+    /* a label with neither flag scrolls by itself; one waiting on a focus no row has under ringnav
+     * (only_focus, or set_hscroll_label_attribute's only_parent_focus: stock's Wi-Fi networks and
+     * settings rows) scrolls here, its flags off while it runs */
+    if (over <= 0 || (!B(label, HSCROLL_ONLY_FOCUS) && !B(label, HSCROLL_ONLY_PARENT_FOCUS)))
+        return 0; /* until it moves */
     B(label, HSCROLL_LOOP) = 1;
     st.marq_label = label;
+    marq_focus[0] = B(label, HSCROLL_ONLY_FOCUS),
+    marq_focus[1] = B(label, HSCROLL_ONLY_PARENT_FOCUS);
     widget_on(label, EVT_DESTROY, marq_gone, (void *)0);
+    B(label, HSCROLL_ONLY_PARENT_FOCUS) = 0;
     hscroll_label_set_only_focus(label, 0);
     hscroll_label_start(label);
     return 0;
@@ -2101,6 +2112,11 @@ static void paint_selection(void *w, void *canvas) {
     if (i < 0 || (!shown && !home && g_menu.kind != 4)) return;
     if (st.shuffle_on && st.shuffle_on == st.action_view && st.shuffle_list == w)
         return;          /* the selection is on the Shuffle row above (shuffle_paint) */
+    if (empty_button(w)) { /* an empty state's button rings itself (feedback.c), no bar */
+        st.sel_w = w;
+        st.sel_row = i;
+        return;
+    }
     if (pair_holds(w)) { /* ... or on an artist's or album's pair (artist_page.c) */
         /* the row a fast spin passed through keeps no marquee: its timer finds no row */
         marq_stop();
@@ -2115,7 +2131,8 @@ static void paint_selection(void *w, void *canvas) {
     if (!clip_surface(canvas, &g_menu, &old)) return;
     /* A list row gets the full surface width; a grid tile keeps its own rect. */
     int tile = 2 * r.w < I(g_menu.w, W_W);
-    if (!tile && !modal_rows_of(g_menu.w)) { /* a menu sheet's rows keep their own box */
+    /* a menu sheet's rows keep their own box, the confirmation card's the card's */
+    if (!tile && !modal_rows_of(g_menu.w) && !confirm_surface(g_menu.w)) {
         r.x = 0;
         r.w = I(g_menu.w, W_W);
         /* The Library's row is a button over the top BODY of its pitch: the bar takes the whole
@@ -2164,8 +2181,9 @@ static void paint_selection(void *w, void *canvas) {
         rearm(&st.marq_timer, marq_moved, 0);
     }
     /* a pop-up button's tile: framed white on any accent. A menu sheet's row is no tile
-     * (menu_modal.c). */
-    if (g_menu.kind == 4 && r.w < I(g_menu.w, W_W) && !modal_rows_of(g_menu.w))
+     * (menu_modal.c), nor is the confirmation card's answer (feedback.c). */
+    if (g_menu.kind == 4 && r.w < I(g_menu.w, W_W) && !modal_rows_of(g_menu.w) &&
+        !confirm_surface(g_menu.w))
         frame_box(canvas, &r, 0xffffffff, SEL_RADIUS);
     /* Save/restore explicitly: this firmware's canvas_save/restore cover neither clip nor
      * either color, and the global alpha is deliberately never touched. */
@@ -2317,6 +2335,7 @@ int ringnav_paint(void *w, void *canvas) {
     coverflow_paint(w, canvas);
     keylock_paint(w, canvas);
     search_strip_overlay(w, canvas);
+    confirm_bar_dim(w, canvas);
     if (w == st.cf_letter_surface && st.cf_letter &&
         (st.cf_letter_held || (unsigned)time_now_ms() - st.cf_letter_at < LETTER_MS) &&
         P(canvas, CANVAS_LCD)) {
@@ -2503,12 +2522,10 @@ void list_toggle(void *label, const char *title, int on) {
  * trailing column, the title ending short of it. Switches read On or Off as values, except on a
  * set_switch theme (list_toggle). */
 /* On a set with a right column: the value's box ends on it, or VALUE_CHEVRON_GAP short of it on a
- * row that opens a page (its chevron is there), and the title takes the row up to the value's own
- * text, measured in its face; unmeasured (no canvas yet), the boxes stay as made. */
-#define VALUE_TITLE_GAP 12
+ * row that opens a page (its chevron is there), and the title and value split the row as a
+ * label/value row does (kv_row); unmeasured (no canvas yet), the boxes stay as made. */
 static void value_fit(void *label, void *text) {
-    void *button = P(label, W_PARENT), *canvas = widget_get_canvas(button);
-    const unsigned *s = widget_get_text(text);
+    void *button = P(label, W_PARENT);
     int into =
         drill(button); /* a drill page's row, or one with stock's list_into (list_row_into) */
     for (unsigned i = 0, n = widget_count_children(button); !into && i < n; ++i)
@@ -2517,13 +2534,8 @@ static void value_fit(void *label, void *text) {
     int right = 374 - geom_val(V_RIGHT_X) - (into ? VALUE_CHEVRON_GAP : 0) - I(button, W_X);
     int w = I(text, W_W);
     if (I(text, W_X) + w != right) widget_move_resize(text, right - w, 0, w, I(text, W_H));
-    if (!canvas || !s) return;
-    int px = theme()->font_px[ROLE_TITLE];
-    unsigned n = wide_len(s);
-    canvas_set_font(canvas, theme_face(s, (int)n, &px), (unsigned)px);
-    int ink = (int)(canvas_measure_text(canvas, s, n) + 0.5f) + 4; /* hscroll_label's margins */
-    int end = right - ink - VALUE_TITLE_GAP - I(label, W_X);
-    if (end > 0 && end != I(label, W_W)) widget_resize(label, end, I(label, W_H));
+    int kw = kv_text_w(label), vw = kv_text_w(text);
+    if (kw >= 0 && vw >= 0) kv_row(label, text, kw, vw, right);
 }
 void list_value(void *label, const char *title, const char *value) {
     void *button = P(label, W_PARENT);
@@ -3573,7 +3585,7 @@ static void clock_place(void *bar, void *top) {
     if (!geom_val(V_STATUS_Y) || !st.bar_slot || !canvas) return;
     if (!clock) {
         if (!(clock = widget_lookup(bar, "label_clock", 1))) return;
-        ink = style_get_int(P(clock, W_ASTYLE), "text_color", (int)RGBA(0xababab));
+        ink = style_get_int(P(clock, W_ASTYLE), "text_color", (int)RGBA(RGB_SECONDARY));
     }
     if (!widest) widest = clock_width(canvas, zeros); /* the face holds until a restart */
     const unsigned *text = widget_get_text(clock);
@@ -5191,14 +5203,16 @@ int ringnav_paint_bg(void *w, void *canvas) {
     void *wm = window_manager(), *bar = *(void *const *)system_bar;
     feedback_confirm_bar(w, canvas);
     modal_paint(w, canvas);
+    confirm_paint(w, canvas); /* the confirmation card (feedback.c) */
     paint_selection(w, canvas);
     grey_rows(w); /* first: paint_songs reserves the marks of the rows it greys */
     paint_songs(w, canvas);
     paint_modal_rows(w, canvas);
-    feedback_confirm_switch(w, canvas);
+    confirm_rows_paint(w, canvas);
     feedback_switch_bar(w, canvas);
     feedback_scan_bar(w, canvas);
     empty_state_paint(w, canvas); /* a page's empty state (feedback.c) */
+    marquee_fade_under(w, canvas); /* last: what stands behind a scrolling label's ends */
     coverflow_home_clip(w, canvas, 1);
     if (w && w == st.bar_slot) paint_battery(w, canvas);
     if (w && w == st.action_view && P(canvas, CANVAS_LCD) && theme()->shuffle_row) {
@@ -6619,6 +6633,10 @@ static void set_child(void *c, int row_w, int row_h, int shift) {
     widget_move_resize(c, left, y, right > left ? right - left : 0, h);
     if (tk_strcmp(widget_get_type(c), "hscroll_label")) return;
     theme_font(c, ROLE_TITLE, FONT_ROW);
+    /* a long title rests on its ellipsis and scrolls when its row is selected (marq_moved): stock's
+     * flags, which the wheel's mode leaves off (set_hscroll_label_attribute), scroll it once on
+     * every row as the page opens and never again (a Wi-Fi network's, a Bluetooth device's) */
+    hscroll_label_set_only_focus(c, 1);
     /* a set_switch theme: a stock row's text on its right side is its value (About's), in the
      * value grey as list_value's; the selection's text still wins */
     unsigned ink = T->set_switch ? T->set_value_ink[ipod_light()] : 0;
@@ -6718,6 +6736,7 @@ int ipod_list_layout(void *layout, void *view) {
     }
     if (wifi) wifi_rows_post(view);
     if (settings && about_list(list)) about_rows(view);
+    if (settings && reset_list(list)) reset_rows(view); /* settings_pages.c */
     return ret;
 }
 
@@ -6827,7 +6846,8 @@ enum {
     QA_OTG,  /* Add to On-The-Go (playlist_pages.c) */
     QA_PLAY, /* the menu sheet's playlist: Play, Rename, Delete (playlists.c) */
     QA_RENAME,
-    QA_DELETE
+    QA_DELETE,
+    QA_REMOVE /* a payload page's own last row (qm_song_hold): Remove from Playlist */
 };
 
 static char *play_key(void) {
@@ -6878,8 +6898,21 @@ unsigned queue_hash(void *q) {
     return h;
 }
 
+/* A payload page's own songs held (qm_song_hold): the page, its list, its last row's words and
+ * what that row runs. */
+static struct {
+    void *page, *list;
+    const char *extra;
+    void (*pick)(void);
+} qm_held __attribute__((section(".scratch")));
+static int qm_held_on(void *page) {
+    return st.qm_kind == QM_COVERFLOW && page && page == qm_held.page;
+}
+
 static void *qm_list(void) {
     if (st.qm_kind == QM_PLAYING) return P(mcl_pdeqplaylist, 0);
+    void *top = window_manager_get_top_window(window_manager());
+    if (qm_held_on(top)) return qm_held.list;
     if (st.qm_kind == QM_PLAYLIST) return P(p_deque_playlist, 0);
     return st.qm_kind == QM_COVERFLOW ? page_tracks(window_manager_get_top_window(window_manager()))
                                       : P(p_deque_showlist, 0);
@@ -7604,7 +7637,7 @@ static int page_closed(void *ctx, void *event) {
             st.ch = 0;
         }
     }
-    if (ctx == st.sc_page) st.sc_page = 0, st.sc_armed = 0;
+    if (ctx == st.sc_page) st.sc_page = 0;
     return 0;
 }
 
@@ -7768,11 +7801,10 @@ static void sc_text(int i) {
     char s[40];
     if (i < 2)
         tk_snprintf(s, sizeof s, "%s Cache: %s", i ? "Spotify" : "Tidal", sizes[stream_cache(i)]);
-    widget_set_text_utf8(widget_get_child(st.sc_row[i], 0),
-                         i < 2            ? s
-                         : shelf_erase(0) ? "Erasing…"
-                         : st.sc_armed    ? "Press again to erase the login and cache"
-                                          : "Erase Spotify Data");
+    widget_set_text_utf8(widget_get_child(st.sc_row[i], 0), i < 2 ? s
+                                                            : shelf_erase(0)
+                                                                ? "Erasing…"
+                                                                : "Erase Spotify Data");
 }
 
 /* netupdate.c's erase ended: .cache-size went with it, so Spotify's row reads 2 GB again. */
@@ -7832,19 +7864,34 @@ static int svc_toggle(int i) {
     return 0;
 }
 
+/* Erase Spotify Data's card (docs/oled-design.md#confirmation-card): Erase (row 1) starts it. */
+static void sc_erase_answer(void *ctx, int row, int toggle_on) {
+    if (row == 1) shelf_erase(1);
+    if (st.sc_page) sc_text(2);
+}
 /* A cache row steps to the next size and saves it: Tidal's applies at the next download's trim,
- * Spotify's when librespot next starts. Erase Spotify Data wants a second press in a row, as the
- * App Store's Remove: any other row's press or leaving the page drops the first. Stop Streaming
+ * Spotify's when librespot next starts. Erase Spotify Data asks first on the confirmation card
+ * (one running says to wait: shelf_erase's toast). Stop Streaming
  * Services ends librespot and its restart loop, a radio station, the card apps (addon.c) and a
  * stock stream (Tidal's) queue, so the keys and the output are local music's again; local music
  * already stopped is left as it is. */
 static int sc_click(void *ctx, void *event) {
     int i = (int)(long)ctx;
-    st.sc_armed = i == 2 && !st.sc_armed && !shelf_erase(0); /* erasing: says to wait */
-    if (i == 2 && !st.sc_armed) shelf_erase(1);
-    sc_text(2);
     if (i > 4) return svc_toggle(i - 5);
-    if (i == 2) return 0;
+    if (i == 2) {
+        static const char *const rows[] = { "Cancel", "Erase" };
+        if (shelf_erase(0))
+            shelf_erase(1); /* erasing already: says to wait */
+        else
+            confirm(&(confirm_t){ .title = "Erase Spotify Data?",
+                                  .body = "Its login, cache and logs go;\nsign in again to use it.",
+                                  .rows = rows,
+                                  .n_rows = 2,
+                                  .kind = CONFIRM_DESTRUCTIVE,
+                                  .back = -1,
+                                  .answer = sc_erase_answer });
+        return 0;
+    }
     if (i == 3) {
         unsigned type = (unsigned)MCL(MCL_TYPE);
         spot_stop();
@@ -7885,7 +7932,7 @@ int stream_config(void *ctx, void *event) {
     widget_set_prop_str(label, "style:normal:font_name", face ? face : "default");
     widget_set_prop_int(label, "style:normal:font_size", px);
     widget_set_prop_str(label, "style:normal:text_align_h", "left");
-    text_ink(label, RGBA(ipod_light() ? 0x6e6e6e : 0x858585), INK_LABEL);
+    text_ink(label, RGBA(tok(TOK_TERTIARY)), INK_LABEL);
     char hide[SVC_HIDE];
     svc_hidden(hide);
     for (int i = 0; i < n; ++i) {
@@ -8095,10 +8142,28 @@ int ringnav_start_player(void) {
  * list_item of wrapped text, the eighth child, dropped here: stock builds it and never reads it
  * again), each row a s_listitem_black list_item holding a 335x70 s_btn_listitem button, a 166px
  * s_scrlabel_white24l title at x 10 and a 149px s_scrlabel_white20r value at x 176, both focus-only
- * scrolling with ellipses. FW. Version (row 1) reads demo's version literal, which carries the
- * updater tag (tools/build.py TAG), so it shows the stock firmware's again; a CFW. Version row in
- * the same widgets follows it. Its button has no name, so stock's row click (atoi of the name,
- * 0x4c12f8) ignores it. A --dev build adds Save Diagnostics above them (diagnostics.c). */
+ * scrolling with ellipses. Firmware (row 1, stock's FW. Version, tools/build.py LABELS) reads
+ * demo's version literal, which carries the updater tag (tools/build.py TAG), so it shows the stock
+ * firmware's again; a row named PRODUCT_NAME, this build's version, in the same widgets follows it.
+ * Its button has no name, so stock's row click (atoi of the name, 0x4c12f8) ignores it. A --dev
+ * build adds Save Diagnostics above them (diagnostics.c). */
+/* A row's value in the approved words (audit-2 #31): stock's sizes "779.72G" with their unit,
+ * "779.72 GB", and the IP address of no network, "0.0.0.0", as "Not connected". */
+static void about_words(void *item) {
+    void *b = widget_count_children(item) ? widget_get_child(item, 0) : (void *)0;
+    void *val = b && widget_count_children(b) > 1 ? widget_get_child(b, 1) : (void *)0;
+    char t[48];
+    if (!val || tk_strcmp(widget_get_type(val), "hscroll_label")) return;
+    *t = 0;
+    widget_get_text_utf8(val, t, sizeof t - 2);
+    unsigned n = strlen(t);
+    if (n > 1 && (t[n - 1] == 'G' || t[n - 1] == 'M') && t[n - 2] >= '0' && t[n - 2] <= '9') {
+        t[n + 1] = 'B', t[n + 2] = 0, t[n] = t[n - 1], t[n - 1] = ' ';
+        widget_set_text_utf8(val, t);
+    } else if (!tk_strcmp(t, "0.0.0.0")) {
+        widget_set_text_utf8(val, "Not connected");
+    }
+}
 static void about_label(void *button, int x, int w, const char *style, const char *text) {
     void *label = hscroll_label_create(button, x, 0, w, 70);
     widget_use_style(label, style);
@@ -8116,9 +8181,16 @@ int ringnav_about(void *win, void *ctx) {
         widget_set_text_utf8(widget_get_child(widget_get_child(widget_get_child(view, 1), 0), 1),
                              STOCK_VERSION);
         void *button = list_button(view);
-        about_label(button, 10, 166, "s_scrlabel_white24l", "CFW. Version");
-        about_label(button, 176, 149, "s_scrlabel_white20r", Q2POD_VERSION);
+        char v[sizeof Q2POD_VERSION];
+        const char *pod = strstr(Q2POD_VERSION, " Pod");
+        tk_snprintf(v, sizeof v, "%s", Q2POD_VERSION);
+        if (pod) /* "1.8.2" then its " dev ..." or " beta 2": the row's name is the product's */
+            tk_snprintf(v + (pod - Q2POD_VERSION), sizeof v - (pod - Q2POD_VERSION), "%s", pod + 4);
+        about_label(button, 10, 166, "s_scrlabel_white24l", PRODUCT_NAME);
+        about_label(button, 176, 149, "s_scrlabel_white20r", v);
         widget_restack(P(button, W_PARENT), 2);
+        for (unsigned i = 0, n = widget_count_children(view); i < n; ++i)
+            about_words(widget_get_child(view, i));
         diag_about_row(view);
     }
     return result;
@@ -8284,6 +8356,8 @@ static int qm_run(const void *unused) {
         } else
             toast("Queue unchanged");
         if (add) deque_destroy(add);
+    } else if (r && a == QA_REMOVE) {
+        if (qm_held.pick) qm_held.pick(); /* its page asks first (playlist_pages.c) */
     } else if (r && a == QA_RENAME) {
         playlist_rename_open(I(r, REC_DISC), P(r, REC_TITLE));
     } else if (r && a == QA_DELETE) {
@@ -8508,7 +8582,8 @@ static int qm_open(const void *unused) {
     if (!own && (st.qm_kind < QM_COVERFLOW || st.qm_kind == QM_PLAYING)) acts[n++] = QA_PLAYLIST;
     /* a card app's song isn't in the Library: Go to only to the app's own page */
     int hidden = song && !addon_goes(P(r, REC_PATH));
-    if ((st.qm_kind == QM_SONG || st.qm_kind == QM_PLAYING) && !hidden &&
+    int held = qm_held_on(page); /* a playlist's page: a song's whole menu, then its Remove */
+    if ((st.qm_kind == QM_SONG || st.qm_kind == QM_PLAYING || held) && !hidden &&
         (cls & 0xfff0) != 0xff10 && qm_goes(r, 1))
         acts[n++] = QA_ALBUM;
     if ((song || cls == CLASS_ALBUMS) && !hidden && qm_goes(r, 0)) acts[n++] = QA_ARTIST;
@@ -8526,6 +8601,7 @@ static int qm_open(const void *unused) {
     if (st.qm_kind == QM_PLAYLIST && !list) acts[n++] = QA_MORE; /* its dots' page */
     /* the list's own New Playlist, which its covers hide */
     if (st.qm_kind == QM_PLAYLIST && !list && coverflow_playlist(page)) acts[n++] = QA_NEW_PLAYLIST;
+    if (held && qm_held.extra) acts[n++] = QA_REMOVE; /* destructive, last */
     static const char *const rows[] = { "Play Next",
                                         "Play Last",
                                         "Shuffle",
@@ -8549,7 +8625,8 @@ static int qm_open(const void *unused) {
                                         "Add to On-The-Go",
                                         "Play",
                                         "Rename",
-                                        "Delete" };
+                                        "Delete",
+                                        "Remove" };
     /* the menu sheet's symbols (tools/art.py MENU_ICONS), by row */
     static const char *const icons[] = { "arrow-bend-down-right",
                                          "queue",
@@ -8574,6 +8651,7 @@ static int qm_open(const void *unused) {
                                          "sneaker-move",
                                          "play",
                                          "pencil-simple",
+                                         "trash",
                                          "trash" };
     char rated[32];
     /* stock sortselect row styles; the menu sheet's rows */
@@ -8603,14 +8681,18 @@ static int qm_open(const void *unused) {
                              : acts[i] == QA_PLAYLIST && own ? "Add to Playlist\xe2\x80\xa6"
                              : acts[i] == QA_FAV && modal    ? "Add to Favorites"
                              : acts[i] == QA_UNFAV && modal  ? "Remove from Favorites"
+                             : acts[i] == QA_REMOVE          ? qm_held.extra
                                                              : rows[acts[i] - 1]);
+        if (acts[i] == QA_REMOVE) /* red, as the card's losing verb */
+            widget_set_prop_int(label, "style:normal:text_color", (int)RGBA(RGB_NEGATIVE));
         if (modal) {
             int kind = acts[i] - QA_ADV_SHUFFLE;
             const char *value = setting ? qm_value_name(kind, playback_option(kind)) : 0;
-            if (acts[i] == QA_DELETE) modal_gap(view); /* destructive, last after a gap */
+            if (acts[i] == QA_DELETE || acts[i] == QA_REMOVE)
+                modal_gap(view); /* destructive, last after a gap */
             widget_restack(item, widget_count_children(view) - 1);
             modal_row(item, label, icons[acts[i] - 1], value, setting ? MM_SETTING : MM_ACTION);
-            if (acts[i] == QA_DELETE) modal_red(item);
+            if (acts[i] == QA_DELETE || acts[i] == QA_REMOVE) modal_red(item);
             if (setting) {
                 char name[16];
                 tk_snprintf(name, sizeof name, "_qm_set%d", kind);
@@ -8656,11 +8738,33 @@ static int qm_list_hold(unsigned at, char *key, void *cover) {
     return 1;
 }
 
+/* A payload page's own song list held (a playlist's page, playlist_pages.c): song at of list, on
+ * page, gets the menu a Library song gets, and extra, when given, as its last row after a gap, in
+ * red, which runs pick. 1 when the menu is on its way. */
+int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*pick)(void)) {
+    char *key = play_key();
+    void *r = list && at < deque_size(list) ? deque_at(list, at) : (void *)0;
+    if (!page || !r || !key || playback_video(r) || st.qm_dialog || st.qm_timer ||
+        !(st.qm_timer = timer_add(qm_open, (void *)0, 0)))
+        return 0;
+    st.qm_choice = 0;
+    qm_held.page = page, qm_held.list = list, qm_held.extra = extra, qm_held.pick = pick;
+    st.qm_kind = QM_COVERFLOW; /* a song of a list on the top page, as Cover Flow's tracks */
+    st.qm_cls = 0xf001;
+    st.qm_idx = at;
+    st.qm_rows = deque_size(list);
+    st.qm_hash = rec_hash(r);
+    st.qm_press = *(unsigned long long *)(key + INPUT_KEY_TIME);
+    drop_input();
+    return 1;
+}
+
 /* The hold: the same gates and row as a centre press, over the stock showlist or Coverflow's
  * own tracks (row count checked), or the album at the centre of Coverflow's covers. Everything
  * else stays stock. */
 static int qm_hold(void) {
     st.qm_choice = 0;
+    qm_held.page = (void *)0; /* Cover Flow's own tracks, not a page qm_song_hold held */
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
     const char *name = top ? widget_get_prop_str(top, "name", "") : "";
     int playing = !tk_strcmp(name, "playing_page");

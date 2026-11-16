@@ -44,43 +44,23 @@ enum { USB_ASK, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_CHOICES };
 #define USB_ICON 19
 #define USB_TEXT_X 58
 #define USB_CAP_Y 37 /* the caption's centre in its row */
-#define USB_CAP_PX 17 /* Inter Regular 14 */
-#define USB_CAP_RGB 0xdce6fa
+#define USB_CAP_PX TYPE(15) /* Inter Regular 15 */
+#define USB_CAP_RGB RGB_CAPTION_ON_ACCENT
 
-/* A mode page (U2-U6): the stack, circle, title, line and the optional Stop pill, centred as one
- * between the status row's foot (MODE_TOP) and the screen's bottom. */
-#define MODE_TOP 40
-#define MODE_STACK 158
-#define MODE_STACK_PILL 204
-#define MODE_TITLE_Y 120
-#define MODE_TITLE_PX 26 /* Inter Medium 22 */
-#define MODE_LINE_Y 148
-#define MODE_LINE_PX 18 /* Inter Regular 15 */
-#define MODE_PILL_Y 172
-#define MODE_PILL_H 32
-#define MODE_PILL_PAD 22
-#define MODE_PILL_PX 20 /* Inter Medium 17 */
-#define MODE_PILL_RGB 0x2c2c2e
-#define MODE_TEXT_LINE 32
-
-/* The ADB prompt (U5) under its title: the key's lines, then Cancel, Allow, the switch and the note. */
+/* The ADB prompt (U5): adbd's socket, the keys file and a key's longest. */
 #define AUTH_SOCKET "/tmp/q2adb-ui" /* tools/adbd.patch adb_auth_client.c ADB_UI_SOCKET */
 #define AUTH_KEYS "/mnt/data/adb_keys"
 #define AUTH_KEY_MAX 1024
-#define AUTH_HEAD 52 /* "This computer's key:" and the fingerprint above the rows */
-#define AUTH_NOTE_PX 17 /* Inter Regular 14, Text Tertiary */
 
 static struct {
-    int view_ready, auth_ready;
-    const char *toast_glyph, *toast_text;
+    int view_ready;
     int det_known; /* a pass has read the cable: one in at boot is no plug-in */
     int det, probing, choice, mode_saved /* g_usbmode + 1 for this cable's, 0 none */, ejected, ejected_told, chosen, row_sel;
     unsigned probe_at;
     void *chooser, *view, *always, *debug, *mode;
     /* the ADB prompt */
-    int fd, got, auth_always;
+    int fd, asking; /* asking: the card is up for adbd's question */
     unsigned auth_at;
-    void *auth, *auth_view, *auth_switch;
     char in[AUTH_KEY_MAX + 8], key[AUTH_KEY_MAX], fp[32];
 } u __attribute__((section(".scratch")));
 
@@ -93,11 +73,10 @@ static int usb_host(void) {
     return !memcmp(s, "configured", 10);
 }
 
-/* A toast, shown by the next ringnav_sleep poll (usb_ui_poll): never inside stock's USB pass, whose
- * own loop a toast's would run again. */
+/* A toast, shown by the next loop pass (feedback.c toast_later): never inside stock's USB pass,
+ * whose own loop a toast's would run again. */
 static void usb_toast(const char *glyph, const char *text) {
-    if (!g_backlight_status) return;
-    u.toast_glyph = glyph, u.toast_text = text;
+    if (g_backlight_status) toast_later(glyph, text);
 }
 
 /* The choice this cable gets without asking, USB_ASK for none. Transfer Files and USB Audio follow
@@ -306,40 +285,6 @@ int usb_ui_key(void *top, unsigned key) {
     return 1;
 }
 
-static void usb_text(void *canvas, const char *s, int x, int w, int y, int align, const char *face, int px,
-                     unsigned rgb) {
-    unsigned buf[64], n = ar_wide(s, buf, 64);
-    sp_text(canvas, buf, n, x, w, y, align, face, px, RGBA(rgb));
-}
-static int usb_measure(void *canvas, const char *s, const char *face, int px) {
-    unsigned buf[64], n = ar_wide(s, buf, 64);
-    canvas_set_font(canvas, face, (unsigned)px);
-    return (int)(canvas_measure_text(canvas, buf, n) + 0.5f);
-}
-
-/* A mode page in w's coordinates (dy its y on screen): m's glyph on its solid circle (none for
- * MODE_BARE: a spinner), the title, the line and the optional pill. Returns the stack's top in w's
- * coordinates. Shared with sw_update.c. */
-int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
-    const char *pill = m->pill;
-    int light = ipod_light(), stack = pill ? MODE_STACK_PILL : MODE_STACK, px = m->glyph_px ? m->glyph_px : MODE_GLYPH;
-    int top = MODE_TOP + (320 - MODE_TOP - stack) / 2 - dy, cx = 375 / 2;
-    rect_t circle = { cx - MODE_R, top, 2 * MODE_R, 2 * MODE_R };
-    if (m->ring != MODE_BARE) fill_box(canvas, &circle, RGBA(m->ring), MODE_R);
-    paint_art(w, canvas, theme_art(m->glyph), cx - px / 2, top + MODE_R - px / 2);
-    usb_text(canvas, m->title, 0, 375, top + MODE_TITLE_Y, 1, "inter-medium", MODE_TITLE_PX,
-             light ? 0x000000 : 0xffffff);
-    usb_text(canvas, m->line, 0, 375, top + MODE_LINE_Y, 1, "inter", MODE_LINE_PX, light ? 0x5c5c5c : 0xababab);
-    if (pill) {
-        int pw = usb_measure(canvas, pill, "inter-medium", MODE_PILL_PX) + 2 * MODE_PILL_PAD;
-        rect_t r = { cx - pw / 2, top + MODE_PILL_Y, pw, MODE_PILL_H };
-        fill_box(canvas, &r, RGBA(light ? 0xd1d1d6 : MODE_PILL_RGB), MODE_PILL_H / 2);
-        usb_text(canvas, pill, r.x, r.w, r.y + MODE_PILL_H / 2, 1, "inter-medium", MODE_PILL_PX,
-                 light ? 0x000000 : 0xffffff);
-    }
-    return top;
-}
-
 /* A page opened from a poll, not from a key: once it is on top and settled, the wheel's list is
  * loaded on it (ringnav_select), so the first Centre presses its row. */
 static void usb_ready(void *page, void *view, int *ready, int rows) {
@@ -351,10 +296,9 @@ static void usb_ready(void *page, void *view, int *ready, int rows) {
 
 /* ringnav_paint, after w's children: the chooser's glyphs and caption, the mode pages, the ADB
  * prompt's key and note. */
-static void usb_auth_paint(void *w, void *canvas);
 void usb_ui_paint(void *w, void *canvas) {
     void *lcd = w ? P(canvas, CANVAS_LCD) : (void *)0;
-    if (!lcd || (!u.chooser && !u.debug && !u.mode && !u.auth)) return;
+    if (!lcd || (!u.chooser && !u.debug && !u.mode)) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), text = (unsigned)I(lcd, LCD_TEXT_COLOR), raw = st.raw_ink;
     void *parent = P(w, W_PARENT);
     unsigned accent = scheme()->tones[0] & 0xffffffu;
@@ -364,16 +308,17 @@ void usb_ui_paint(void *w, void *canvas) {
         usb_mode_hide(w); /* stock's face for the mode shows the DAC's switches again */
         if (u.ejected && !dac)
             mode_page_paint(w, canvas, I(w, W_Y),
-                            &(mode_page_t){ MODE_GREEN, "usbmode_ejected", 0, "OK to Disconnect", "Safe to unplug now", (const char *)0 });
+                            &(mode_page_t){ RGB_POSITIVE, "modepage_done", 0, "OK to Disconnect",
+                                            "Safe to unplug now", (const char *)0 });
         else if (dac)
             mode_page_paint(w, canvas, I(w, W_Y),
-                            &(mode_page_t){ accent, "usbmode_audio", 0, "Playing from Computer", "Wheel sets the volume", "Stop" });
+                            &(mode_page_t){ accent, "modepage_audio", 0, "Playing from Computer", "Wheel sets the volume", "Stop" });
         else
             mode_page_paint(w, canvas, I(w, W_Y),
-                            &(mode_page_t){ accent, "usbmode_files", 0, "Connected", "Eject on your computer first", "Stop" });
+                            &(mode_page_t){ accent, "modepage_files", 0, "Connected", "Eject on your computer first", "Stop" });
     } else if (w == u.debug) {
         mode_page_paint(w, canvas, I(w, W_Y),
-                        &(mode_page_t){ accent, "usbmode_debug", 0, "Debugging", "Charging and connected", "Stop" });
+                        &(mode_page_t){ accent, "modepage_debug", 0, "Debugging", "Charging and connected", "Stop" });
     } else if (u.view && parent == u.view) {
         usb_ready(u.chooser, u.view, &u.view_ready, USB_ROWS + 1);
         usb_layout();
@@ -384,12 +329,9 @@ void usb_ui_paint(void *w, void *canvas) {
             paint_art(w, canvas, theme_art(glyph), USB_ICON_X - USB_ICON / 2 - I(canvas, CANVAS_X),
                       USB_ROW / 2 - USB_ICON / 2);
             if (sel)
-                usb_text(canvas, usb_caps[i], USB_TEXT_X - I(canvas, CANVAS_X), 375 - USB_TEXT_X, USB_CAP_Y, 2,
-                         "inter", USB_CAP_PX, USB_CAP_RGB);
+                ui_line(canvas, usb_caps[i], USB_TEXT_X - I(canvas, CANVAS_X), 375 - USB_TEXT_X,
+                        USB_CAP_Y, 2, "inter", USB_CAP_PX, USB_CAP_RGB);
         }
-    } else if (w == u.auth) {
-        if (u.auth_view) usb_ready(u.auth, u.auth_view, &u.auth_ready, 3);
-        usb_auth_paint(w, canvas);
     }
     st.raw_ink = raw;
     stock_canvas_set_fill_color(canvas, fill);
@@ -472,17 +414,13 @@ static void auth_fingerprint(void) {
 static void auth_answer(const char *a) {
     if (u.fd >= 0) send(u.fd, a, 2, 0);
 }
-static int auth_closed(void *ctx, void *event) {
-    if (u.auth == ctx) {
-        u.auth = u.auth_view = u.auth_switch = (void *)0;
-        if (!u.got) auth_answer("NO"); /* Return: Cancel */
-    }
-    return 0;
-}
-static int auth_click(void *ctx, void *event) {
-    int allow = (int)(long)ctx;
-    u.got = 1;
-    if (allow && u.auth_always) { /* Always Allow This Computer: adbd reads the file before it lets it in */
+/* Allow USB Debugging? on the confirmation card (docs/oled-design.md#confirmation-card): the key's
+ * fingerprint and what allowing gives as the body, Cancel first, Always Allow the switch row. Allow
+ * (row 1) with the switch on writes the key where adbd reads it before it lets the computer in;
+ * Return is Cancel. */
+static void auth_card_answer(void *ctx, int row, int always) {
+    u.asking = 0;
+    if (row == 1 && always) {
         void *f = fopen(AUTH_KEYS, "ab");
         if (f) {
             fwrite(u.key, 1, strlen(u.key), f);
@@ -490,40 +428,24 @@ static int auth_click(void *ctx, void *event) {
             fclose(f);
         }
     }
-    auth_answer(allow ? "OK" : "NO");
-    usb_page_close(&u.auth);
-    return 0;
+    auth_answer(row == 1 ? "OK" : "NO");
 }
-static int auth_switch_click(void *ctx, void *event) {
-    u.auth_always = !u.auth_always;
-    list_toggle(u.auth_switch, "Always Allow This Computer", u.auth_always);
-    return 0;
-}
+static char auth_body[64] __attribute__((section(".scratch"))); /* the card's: the key */
 static void auth_open(void) {
-    if (u.auth) usb_page_close(&u.auth);
-    if (!(u.auth = page_open("adbauth_page", auth_closed, page_keyup))) return;
+    static const char *const rows[] = { "Cancel", "Allow" };
+    if (u.asking) confirm_close();
     awake_screen();
-    u.got = 0, u.auth_always = 0, u.auth_ready = 0;
     auth_fingerprint();
-    void *view = u.auth_view = page_list(u.auth, u.auth, 0, "Allow USB Debugging?", 3, 32);
-    void *list = P(view, W_PARENT);
-    widget_move_resize(list, I(list, W_X), I(list, W_Y) + AUTH_HEAD, I(list, W_W), I(list, W_H));
-    page_row_detail(view, 0, "Cancel", 0, auth_click);
-    widget_on(page_row_detail(view, 1, "Allow", 0, (int (*)(void *, void *))0), EVT_CLICK, auth_click, (void *)1);
-    u.auth_switch = widget_get_child(page_row_detail(view, 2, "Always Allow This Computer", 0, auth_switch_click), 0);
-    list_toggle(u.auth_switch, "Always Allow This Computer", 0);
-    ringnav_select(view, 0, 3); /* Cancel */
-}
-static void usb_auth_paint(void *w, void *canvas) {
-    int dy = I(w, W_Y), light = ipod_light(), x = geom_val(V_TEXT_X);
-    void *list = u.auth_view ? P(u.auth_view, W_PARENT) : (void *)0;
-    int top = list ? I(list, W_Y) - AUTH_HEAD : 58 - dy;
-    usb_text(canvas, "This computer's key:", x, 375 - 2 * x, top + 12, 2, "inter", MODE_LINE_PX,
-             light ? 0x5c5c5c : 0xababab);
-    usb_text(canvas, u.fp, x, 375 - 2 * x, top + 34, 2, "inter-medium", MODE_PILL_PX, light ? 0x000000 : 0xffffff);
-    if (list)
-        usb_text(canvas, "Gives full control of the Q2.", x, 375 - 2 * x, I(list, W_Y) + I(list, W_H) + 20, 2,
-                 "inter", AUTH_NOTE_PX, light ? 0x6e6e6e : 0x858585);
+    tk_snprintf(auth_body, sizeof auth_body, "Key %s\nIt gets full control of the Q2.", u.fp);
+    u.asking = confirm(&(confirm_t){ .title = "Allow USB Debugging?",
+                                     .body = auth_body,
+                                     .rows = rows,
+                                     .n_rows = 2,
+                                     .kind = CONFIRM_CONSEQUENTIAL,
+                                     .back = -1,
+                                     .toggle = "Always Allow",
+                                     .answer = auth_card_answer });
+    if (!u.asking) auth_answer("NO"); /* another card is up: this computer asks again */
 }
 
 /* adbd's UI socket, connected once a second until it is there, and its questions. */
@@ -543,14 +465,14 @@ static void auth_poll(void) {
             return;
         }
         fcntl(fd, 4 /* F_SETFL */, 0x80 /* O_NONBLOCK */);
-        u.fd = fd, u.got = 0;
+        u.fd = fd;
         return;
     }
     int n = (int)recv(u.fd, u.in, sizeof u.in - 1, 0);
     if (n == 0 || (n < 0 && *__errno_location() != 11 /* EAGAIN */)) {
         close(u.fd);
         u.fd = 0;
-        usb_page_close(&u.auth);
+        if (u.asking) u.asking = 0, confirm_close(); /* adbd went: nothing to answer */
         return;
     }
     if (n < 3 || u.in[0] != 'P' || u.in[1] != 'K') return;
@@ -559,17 +481,12 @@ static void auth_poll(void) {
     auth_open();
 }
 #else
-static void usb_auth_paint(void *w, void *canvas) {}
 static void auth_poll(void) {}
 #endif
 
-/* ringnav_sleep: a toast usb_ui_status left, charging's, and adbd's questions. */
+/* ringnav_sleep: charging's poll, a toast USB or charging left, and adbd's questions. */
 void usb_ui_poll(void) {
-    if (u.toast_text) {
-        const char *glyph = u.toast_glyph, *text = u.toast_text;
-        u.toast_glyph = u.toast_text = (const char *)0;
-        if (g_backlight_status) toast_icon(theme_art(glyph), text);
-    }
-    charging_poll(); /* charging.c's toasts */
+    charging_poll();    /* charging.c's plug-in screen and weak charger */
+    toast_later_poll(); /* a toast USB or charging left */
     auth_poll();
 }

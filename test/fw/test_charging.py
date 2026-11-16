@@ -39,6 +39,12 @@ def test_the_battery_says_its_state_in_words(fw, st, ui, key, held, text, glyph)
     assert words(fw, key) == (text, glyph)
 
 
+def loop_pass(fw):
+    """usb_ui_poll's part for charging, a loop pass: charging_poll, then the toast it left (feedback.c toast_later_poll)."""
+    charging, later = fw.fn('charging_poll', None), fw.fn('toast_later_poll', None)
+    return lambda: (charging(), later())
+
+
 class Tap:
     """The status bar's battery synced from stock's label and icon, the screen lit, toasts caught."""
     def __init__(self, fw, st, ui, text='62%', icon=b'bar_battery', battery=0):
@@ -52,7 +58,7 @@ class Tap:
         # touches in the bar's pixels (status_row.c status_touch): the slot's own plus its x on the bar
         touch = fw.fn('status_touch', None, C.c_uint, C.c_int, C.c_int)
         self.touch = lambda kind, x, y: touch(kind, x + SLOT_X, y)
-        self.poll = fw.fn('charging_poll', None)
+        self.poll = loop_pass(fw)
 
     def __call__(self, x0, y0, x1=None, y1=None):
         self.touch(TOUCH_DOWN, x0, y0)
@@ -109,7 +115,7 @@ class Plug:
         fw.mock('navigator_to_with_context', lambda page, info, *_: self.toasts.append(C.string_at(info + 8).decode()) or 0)
         fw.mock('screen_action', lambda on, *_: self.screen.append(on) or 0)
         fw.mock('toolsReadConfig', lambda path, section, key, out, default, *_: C.memmove(out, C.string_at(default) + b'\0', len(C.string_at(default)) + 1))
-        self.poll = fw.fn('charging_poll', None)
+        self.poll = loop_pass(fw)
         fw.fn('charge_plugged', None)()
 
     def frames(self, ms):

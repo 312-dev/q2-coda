@@ -88,8 +88,9 @@ static inline int ink_vgcanvas_set_fill_linear_gradient(void *vg, float sx, floa
 #define vgcanvas_set_fill_linear_gradient ink_vgcanvas_set_fill_linear_gradient
 #endif
 #endif
-#include "theme.h"
 #include "peq_types.h"
+#include "theme.h"
+#include "ui_kit.h"
 
 #define PEQ_CHANNELS 8
 #define PEQ_FILE_LIMIT 16384
@@ -303,6 +304,7 @@ typedef struct {
 int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *ctx, void *event));
 int empty_row_y(int free_top);
 int empty_shown(void *page);
+int empty_button(void *list);
 void *empty_list(void *page, void *body, const char *name, const empty_t *e,
                  int (*on_row)(void *ctx, void *event));
 void *empty_open(const char *window, const char *name, const empty_t *e,
@@ -593,6 +595,12 @@ void spot_yield(void), spot_stop(void), radio_stop(void);
 void headset_volume_reset(void);
 int vol_next(unsigned key); /* volume.c: the volume a wheel tick moves to, at the wheel's speed */
 void headset_poll(void), headset_eq_poll(void), headset_manual(void);
+/* guest.c: Guest Play's side in demo (docs/internals.md#guest-play) */
+int guest_send(const char *line), guest_active(void), guest_key(int code);
+unsigned guest_seq(void);
+void guest_field(const char *key, char *out, unsigned n), guest_poll(void), guest_bt_on(void);
+int guest_net(const char *kind, const char *id, const char *name);
+void spot_send_play(int playing);
 void q2eq_poll(void); /* peq_ui.c, --dev builds only: a q2eq request (q2eq.h) */
 int media_owner(void), media_status(void), media_playing(void), media_focused(void);
 void media_set_playing(int playing), media_key(unsigned key);
@@ -624,7 +632,6 @@ void forget_rows(void *list);   /* navigation.c: a hidden list opens at its top 
 void paint_art(void *w, void *canvas, const char *name, int x, int y);
 void final_text(void *canvas, const char *face, const unsigned *s, const void *r, unsigned px,
                 unsigned color);
-unsigned ar_wide(const char *s, unsigned *out, unsigned n); /* artist_page.c: UTF-8 to wide */
 int bar_status(void);
 void slider_label(void *w, int x, int y, int ww, int h, int px, const char *face);
 void text_ink(void *w, unsigned color, int n); /* a label's final 0xAARRGGBB, in either half */
@@ -667,9 +674,10 @@ unsigned unflip(unsigned v);          /* theme_engine.c: the grey Light Mode's f
 #define SPOT_GREY 0xffaaaaaau
 void radio_search(void);      /* radio.c */
 void toast(const char *text); /* navigation.c */
-/* smart_wifi.c: its radio woken, 1 while its link comes up; its radio off; an action
- * held for that link (fn(ctx, 0) once it is up, if page, or any page when 0, is still in use) */
-int smart_wifi_wait(void), smart_wifi_off(void);
+/* smart_wifi.c: its radio woken, 1 while its link comes up; its radio off; off or coming
+ * back; an action held for that link (fn(ctx, 0) once it is up, if page, or any page when 0,
+ * is still in use) */
+int smart_wifi_wait(void), smart_wifi_off(void), smart_wifi_back(void);
 int smart_hold(int (*fn)(void *, void *), void *ctx, const char *page);
 int need_link(int (*fn)(void *, void *), void *ctx); /* smart_hold, else "Connect to Wi-Fi first" */
 /* the work smart_wifi.c keeps the radio on for: spotify.c's, scrobble.c's, tidal.c's, addon.c's,

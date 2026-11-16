@@ -421,9 +421,9 @@ Stock's Wireless page (Wi-Fi, Bluetooth and SyncLink) is not reached from Settin
 **Car Remote** (`Q2POD CARREMOTE`, off by default) opens its own page: the switch first, then the
 paired phones by name. On, demo starts the `coda-rc` daemon, which lets a paired phone browse and play
 the library from the car ([remote-protocol](remote-protocol.md), [internals](internals.md#car-remote));
-off, it stops, and nothing listens. Centre on a phone asks `Forget "name"?` with Cancel first, then
-Forget; Return is Cancel. With none paired the page shows the empty state under the switch, "No Paired Phones", "Open the Car
-Remote app on your phone" ([oled-design](oled-design.md#empty-and-offline)).
+off, it stops, and nothing listens. Centre on a phone asks `Forget "name"?` on the [confirmation card](oled-design.md#confirmation-card), Cancel first,
+then Forget; Return is Cancel. With none paired the page shows the empty state under the switch, "No Paired Phones", "Open Q2 Muse
+Remote on your phone" ([oled-design](oled-design.md#empty-and-offline)).
 
 Every row is built natively, about 60 builders in all, one pattern throughout: a
 `list_item_create(view, 0, 0, 0, 0)` (some pass 78 as the height) holding a `button_create(item,
@@ -917,11 +917,11 @@ still finds both by name and binds its callbacks; the initial Cancel is stock's.
 still gives the discs (`confirm_ok`, `confirm_cancel`) `CONFIRM_SURFACE` (`#2B2B2B`) under every
 accent should stock draw them. Tidal's own confirm pop-up (cyan, black glyphs) keeps its look and
 its tiles, framed in white when selected.
-The confirm itself is a page of its own (`patch/feedback.c`, [oled-design](oled-design.md#dialogs-and-toasts)):
-the status row asks the question in sentence case ("Shut down?", "Delete playlist “a”?"), and the two
-rows from y 58 are **Cancel** and the action's verb ("Shut Down", "Reset", "Delete"), 32 pixels each at
-the text column; Delete Song's "Also delete source file" is a third row with a switch, which Centre
-turns. Its toasts are a pill near the screen's foot over the page, which keeps its status row and
+The confirm itself is the confirmation card over the page that asked (`patch/feedback.c`,
+[oled-design](oled-design.md#confirmation-card)): its title asks the question ("Shut Down?", "Delete Playlist
+“a”?"), and its answers are **Cancel** and the action's verb ("Shut Down", "Reset", "Delete"), a verb that
+loses something red after a gap; Delete Song's "Also delete source file" is the card's switch row, which
+Centre turns. Its toasts are a pill near the screen's foot over the page, which keeps its status row and
 selection.
 
 | Dialog                        | Buttons                                         |
@@ -988,8 +988,8 @@ in the label (260 pixels wide, to where the chevron ends) and no chevron, since 
 changes it in place.
 The build also appends **Boot to: Rockbox / Q2 Pod** to Battery when Rockbox is present; see [Boot](boot.md#rockbox).
 General ends with **Restart** and **Shut Down** (`patch/power_rows.c`), 12 px below the rows above them (an empty `label`, which
-the wheel passes) and with no chevron. Each asks first in stock's `confirminfo_dialog`, as a confirm page
-("Restart?" or "Shut down?" as the title, then Cancel, selected, and the verb); Cancel or Return leaves the page as it was.
+the wheel passes) and with no chevron. Each asks first in stock's `confirminfo_dialog`, drawn as the confirmation card
+("Restart?" or "Shut Down?" as the title, then Cancel, selected, and the verb); Cancel or Return leaves the page as it was.
 Restart reboots (`ringnav_reboot`: the queue saved, then stock's `device_reboot`), with no message first. Shut Down asks stock's own `msg_poweroff` and opens stock's `poweroff_page`, as the power key's Shut Down? and Auto
 power-off do; its `into_poweroff` saves the queue.
 The page is `CTX_FIXED`, so the wheel walks onto them like the stock rows.

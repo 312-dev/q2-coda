@@ -678,19 +678,23 @@ def test_a_song_changed_under_the_editor_is_not_moved(editor, ui):
     assert ui.toasts == ['Could not save playlist'] and editor.table.log[-1] == 'rollback'
 
 
-def test_remove_asks_then_takes_the_song_out(editor, ui):
+def ple_answer(fw, row):
+    """Remove from Playlist's confirmation card answered (feedback.c runs it once the card has closed)."""
+    fw.fn('playlists__ple_remove_answer', None, C.c_void_p, C.c_int, C.c_int)(None, row, 0)
+
+
+def test_remove_asks_on_the_card_then_takes_the_song_out(editor, ui):
     editor.pick('Two')
     editor.pick('Remove from Playlist')
-    assert editor.rows() == ['Remove from Playlist', 'Cancel'] and editor.title() == 'Remove song?: Road Trip'
-    assert ui.nodes[editor.view()].props['_ringnav_index'] == 1  # opens on Cancel: a Centre on arrival removes nothing
-    editor.pick('Remove from Playlist')
+    assert ui.went[-1] == 'dialog/sortselect_dialog' and editor.table.songs(3) == ['One', 'Two', 'Three']
+    ple_answer(editor.fw, 1)  # Remove
     assert editor.table.songs(3) == ['One', 'Three'] and editor.rows() == ['Add Songs', 'Done', 'One', 'Three']
 
 
 def test_cancel_keeps_the_song(editor):
     editor.pick('Two')
     editor.pick('Remove from Playlist')
-    editor.pick('Cancel')
+    ple_answer(editor.fw, 0)
     assert editor.table.songs(3) == ['One', 'Two', 'Three'] and editor.rows()[0] == 'Add Songs' and not editor.table.log
 
 
@@ -700,7 +704,7 @@ def test_the_last_song_removed_leaves_the_selection_on_the_list(fw, ui, recs, st
     e.open(1, None)
     e.pick('One')
     e.pick('Remove from Playlist')
-    e.pick('Remove from Playlist')
+    ple_answer(fw, 1)
     assert e.rows() == ['Add Songs', 'Done'] and e.ple.selected == 0
 
 
@@ -708,7 +712,7 @@ def test_a_remove_that_cant_be_saved_says_so(editor, ui):
     editor.table.fail = ('delete',)
     editor.pick('One')
     editor.pick('Remove from Playlist')
-    editor.pick('Remove from Playlist')
+    ple_answer(editor.fw, 1)
     assert ui.toasts == ['Could not save playlist'] and editor.table.songs(3) == ['One', 'Two', 'Three']
 
 
@@ -1091,7 +1095,7 @@ def test_no_playlists_is_the_empty_state_under_the_rows_left(rows_page, ui, fw, 
     props = ui.nodes[art].props
     assert (props['_es_glyph'], props['_es_title'], props['_es_hint']) == ('playlist', 'No Playlists', 'Make one with New Playlist')
     free = 58 + 44 * len(p.shown())  # the status row's foot (V_BAR) and the rows shown, 44 px each
-    assert free + 120 <= 320 and props['_es_top'] == free + (320 - free - 120) // 2
+    assert free + 118 <= 320 and props['_es_top'] == free + (320 - free - 118) // 2  # the 118 px stack, no button
     fw.var('fw_ctx_p_deque_playlist', C.c_uint).value = p.deques.new([recs(name='Gym', title='Gym', disc=1, id_=1)])
     fw.fn('playlists__pl_rows', None, C.c_void_p)(p.win)  # the rows again, as a rebuild or a click has them
     assert not ui.nodes[art].visible
@@ -1829,7 +1833,7 @@ def test_oled_more_shows_ab_repeat_as_the_themes_switch(fw, ui, st, image, selec
     fw.fn('modal_more', None, C.c_void_p)(win)
     right = 375 - 28  # the house grid's right column (OLED's right_x), the row the screen's width
     x, _, w, _ = ui.nodes[label].rect()
-    assert not ui.nodes[sw].visible and x + w <= right - 34
+    assert not ui.nodes[sw].visible and x + w <= right - 40
     assert ui.fn('switch_flipped') in ui.handlers(button, EVT_CLICK)  # stock flips the hidden image: the row repaints
     lcd = C.create_string_buffer(0x400)
     canvas = C.create_string_buffer(0x400)
@@ -1838,6 +1842,28 @@ def test_oled_more_shows_ab_repeat_as_the_themes_switch(fw, ui, st, image, selec
     paint = fw.fn('modal_row_paint', None, C.c_void_p, C.c_void_p, C.c_void_p, Rect, C.c_int)
     paint(view, C.addressof(canvas), button, Rect(0, 0, 375, 32), selected)
     assert len(fw.calls('vgcanvas_stroke')) == strokes and len(fw.calls('vgcanvas_fill')) == fills
+
+
+def test_oled_more_speed_rows_hidden_buttons_take_no_taps(fw, ui, st):
+    """Now Playing's More under a modal set: Speed's four stock buttons hide, and stock's hit test skips only an
+    insensitive widget, hidden or not, so a tap on the row's left half set 1x behind the picker it opened. Each is
+    made insensitive; a pick still clicks the one it names (more_speed_pick dispatches to it)."""
+    use_set(st, 'oled')
+    win = ui.window('playermore_page', 'dialog')
+    lv = ui.child(win, 'list_view', 0, 44, 375, 270)
+    ui.nodes[lv].name = 'list_view_more'
+    view = ui.child(lv, 'scroll_view', 0, 0, 375, 270)
+    ui.nodes[view].name = 'scroll_view_more'
+    button = ui.child(ui.child(view, 'list_item', 0, 0, 375, 70), 'button', 0, 0, 375, 70)
+    label = ui.child(button, 'hscroll_label', 72, 12, 40, 20)
+    ui.nodes[label].text = 'Multiple Speed'
+    speeds = []
+    for i, x in enumerate((120, 177, 231, 283)):  # as stock places them (test/patch.py's More)
+        speeds.append(ui.child(button, 'image', x, 9, 42, 61))
+        ui.nodes[speeds[-1]].name = f'img_forward_{i}'
+    fw.fn('modal_more', None, C.c_void_p)(win)
+    insensitive = {a[0] for _, a in fw.calls('widget_set_sensitive') if not C.c_int(a[1]).value}
+    assert all(not ui.nodes[s].visible for s in speeds) and set(speeds) <= insensitive
 
 
 def advanced(fw, kind, value):

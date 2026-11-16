@@ -86,11 +86,11 @@
 #define SS_ENTRIES 38  /* 26 letters, 10 digits, the space and delete */
 #define SS_SPACE 36    /* ... on Search's and a name's strip; a box's sets end in them too */
 /* AWTK sizes a face by its line, 1.21 em for Inter: the design's 20, 18, 19, 16 and 15 px */
-#define SS_PX_ROW 24
-#define SS_PX_TYPED 22
-#define SS_PX_LETTER 23
-#define SS_PX_NOTE 19
-#define SS_PX_ARTIST 18
+#define SS_PX_ROW TYPE(20)
+#define SS_PX_TYPED TYPE(18)
+#define SS_PX_LETTER TYPE(20)
+#define SS_PX_NOTE TYPE(16)
+#define SS_PX_ARTIST TYPE(15)
 /* Field OFF (a playlist's name): the run across the whole pill, faded into it at its ends, the lit
  * cell centred on the pill; the name in Inter Medium 22 centred on SS_NAME_Y of the sheet, its
  * cursor after the characters before it, the hint in 15 px Text Tertiary SS_HINT_DY under it */
@@ -101,20 +101,20 @@
 #define SS_NAME_Y 82     /* screen y 140 */
 #define SS_HINT_DY 40    /* screen y 180 */
 #define SS_NAME_ROOM 327 /* the text column to the right column */
-#define SS_PX_NAME 27    /* Inter Medium 22, AWTK's size */
-#define SS_PX_HINT 18    /* 15 */
+#define SS_PX_NAME TYPE(22) /* Inter Medium 22, AWTK's size */
+#define SS_PX_HINT TYPE(15) /* 15 */
 /* A text box's form: the set chip a #2C2C2E pill from the strip's left to x 96, its name in Inter
  * Medium 16 white; the run after it, its lit cell at x 192; a password's "Password" over it in
  * 15 px Text Tertiary on screen y 84, the value on y 128 and the hint, 13 px, on y 176 */
 #define SS_CHIP_R 96
-#define SS_CHIP_RGB 0x2c2c2e
+#define SS_CHIP_RGB RGB_RAISED_2
 #define SS_BOX_LIT_X 192
 #define SS_BOX_SIDE 6
 #define SS_LABEL_Y 26
 #define SS_SECRET_Y 70
 #define SS_SECRET_HINT_Y 118
-#define SS_PX_CHIP 19   /* 16 */
-#define SS_PX_SMALL 16  /* 13 */
+#define SS_PX_CHIP TYPE(16)  /* 16 */
+#define SS_PX_SMALL TYPE(13) /* 13 */
 #define SS_PEEK_MS 1000 /* a password's last character typed shows this long */
 #define SS_SHOW_MS 400  /* Play/Pause held this long shows a password in plain text */
 #define SS_NOTE_Y 86    /* the empty note's line (screen y 144), its hint 24 px under it */
@@ -729,7 +729,7 @@ void search_strip_overlay(void *w, void *canvas) {
     canvas_set_font(canvas, faces[FONT_INTER_MEDIUM], (unsigned)px);
     int tw = (int)(canvas_measure_text(canvas, wide, n) + 0.5f), cw = tw + 48, ch = 122,
         y0 = SS_HOLD_CARD_MID - dy - ch / 2;
-    fill_box(canvas, &(rect_t){ (375 - cw) / 2, y0, cw, ch }, RGBA(0x1c1c1e), 22);
+    fill_box(canvas, &(rect_t){ (375 - cw) / 2, y0, cw, ch }, RGBA(RGB_RAISED), 22);
     float cx = 187.5f, cy = (float)(y0 + 44),
           frac = (float)((unsigned)time_now_ms() - ss.hold_at - SS_HOLD_SHOW_MS) /
                  (SS_HOLD_MS - SS_HOLD_SHOW_MS);
@@ -741,7 +741,7 @@ void search_strip_overlay(void *w, void *canvas) {
         vgcanvas_set_line_width(vg, 4);
         vgcanvas_begin_path(vg);
         vgcanvas_arc(vg, cx, cy, SS_HOLD_RING, 0, 6.2831853f, 0);
-        vgcanvas_set_stroke_color(vg, RGBA(0x3a3a3c));
+        vgcanvas_set_stroke_color(vg, RGBA(RGB_OFF));
         vgcanvas_stroke(vg);
         if (frac > 0) {
             vgcanvas_begin_path(vg);
@@ -762,8 +762,8 @@ void search_strip_paint(void *w, void *canvas) {
     if (!ss.page || w != ss.sheet || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), raw = ui_ink_raw(1);
     int light = ipod_light();
-    unsigned primary = light ? 0x000000 : 0xffffff, secondary = light ? 0x5c5c5c : 0xababab,
-             tertiary = light ? 0x6e6e6e : 0x858585, accent = accent_tone(2);
+    unsigned primary = tok(TOK_PRIMARY), secondary = tok(TOK_SECONDARY),
+             tertiary = tok(TOK_TERTIARY), accent = accent_tone(2);
     if (ss_named()) ss_name_paint(canvas, primary, tertiary);
     if (ss_tabs()) {
         static const char *const tabs[] = { "All", "Songs", "Artists", "Albums" };
@@ -829,7 +829,7 @@ void search_strip_paint(void *w, void *canvas) {
     /* the strip: a #1C1C1E pill, the text in a black box with its cursor, the letters in
      * equal cells about the lit one, white on the accent while the strip has the wheel */
     int y0 = SS_STRIP_Y, cy = y0 + SS_STRIP_H / 2;
-    unsigned strip = flip_if(light, 0x1c1c1e);
+    unsigned strip = tok(TOK_RAISED);
     fill_box(canvas, &(rect_t){ SS_STRIP_X, y0, 375 - 2 * SS_STRIP_X, SS_STRIP_H }, RGBA(strip),
              SS_STRIP_R);
     if (!ss_named()) { /* field ON: the typed text's black box, its cursor */

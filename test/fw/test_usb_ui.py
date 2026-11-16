@@ -251,51 +251,47 @@ def test_a_remembered_usb_debugging_opens_its_page_once_a_computer_is_there(fw_d
 
 
 def adb_question(fw_dev):
+    """adbd's question on its socket: Allow USB Debugging? asked on the confirmation card (feedback.c confirm, which
+    opens stock's sortselect_dialog; this harness opens none, so the card's answer is called as feedback.c would)."""
     u = Usb(fw_dev)
     u.socket = True
     u.poll()  # connects
     u.inbox.append(b'PK' + KEY.encode() + b' user@host\0')
     u.poll()
-    page = u.page('adbauth_page')
-    assert page
-    return u, page
+    asked = [C.string_at(a[0]) for _, a in fw_dev.calls('navigator_to')]
+    assert b'dialog/sortselect_dialog' in asked
+    return u
 
 
-def test_adbd_s_question_opens_allow_usb_debugging_with_the_key_s_fingerprint(fw_dev):
-    """docs/adb.md#authorization: "PK" and the key from adbd's socket open the prompt on Cancel, with Allow and Always
-    Allow This Computer (off) under the key's fingerprint, the MD5 of the decoded key's first eight bytes."""
-    u, page = adb_question(fw_dev)
-    assert [t for t, _ in u.rows(page)] == ['Cancel', 'Allow', 'Always Allow This Computer']
-    assert u.switch(page, 'Always Allow This Computer') == 'switch_off'
-    assert u.ui[u.ui.of('scroll_view')[0]].props['_ringnav_index'] == 0  # Cancel
-    lcd, canvas = C.create_string_buffer(0x200), C.create_string_buffer(0x200)
-    C.c_void_p.from_address(C.addressof(canvas) + O['CANVAS_LCD']).value = C.addressof(lcd)
-    texts = []
-    fw_dev.mock('canvas_draw_text_in_rect', lambda c, s, n, *_: texts.append(''.join(map(chr, (C.c_uint * n).from_address(s)))) or 0)
-    fw_dev.fn('usb_ui_paint', None, C.c_void_p, C.c_void_p)(page, C.addressof(canvas))
+def card_answer(fw_dev, row, always):
+    fw_dev.fn('usb_ui__auth_card_answer', None, C.c_void_p, C.c_int, C.c_int)(None, row, always)
+
+
+def test_adbd_s_question_asks_on_the_card_with_the_key_s_fingerprint(fw_dev):
+    """docs/adb.md#authorization: "PK" and the key from adbd's socket ask Allow USB Debugging? on the card, its body the
+    key's fingerprint (the MD5 of the decoded key's first eight bytes) and what allowing gives; with no card shown (one
+    already up, as here) it answers NO, so the computer asks again."""
+    u = adb_question(fw_dev)
     fingerprint = ':'.join(f'{b:02X}' for b in hashlib.md5(base64.b64decode(KEY)).digest()[:8])
-    assert texts == ["This computer's key:", fingerprint, 'Gives full control of the Q2.']
+    body = C.string_at(C.addressof(fw_dev.var('usb_ui__auth_body', C.c_char * 64))).decode()
+    assert body == f'Key {fingerprint}\nIt gets full control of the Q2.' and u.sent == ['NO']
 
 
-@pytest.mark.parametrize('how, answer, kept', [('Cancel', 'NO', None), ('Allow', 'OK', None), ('always', 'OK', KEY),
-                                               ('return', 'NO', None)])
-def test_the_prompt_answers_adbd_and_always_allow_keeps_the_key(fw_dev, how, answer, kept):
-    """Cancel, or Return, answers NO; Allow answers OK; Allow with Always Allow This Computer on first appends the
-    key's line to /mnt/data/adb_keys, which adbd reads before it lets the computer in."""
-    u, page = adb_question(fw_dev)
-    if how == 'return':
-        u.close(page)
-    else:
-        if how == 'always':
-            u.ui.click(u.row(page, 'Always Allow This Computer'))
-            assert u.switch(page, 'Always Allow This Computer') == 'switch_on'
-        u.ui.click(u.row(page, 'Cancel' if how == 'Cancel' else 'Allow'))
-    assert u.sent == [answer] and not u.page('adbauth_page')
+@pytest.mark.parametrize('row, always, answer, kept', [(0, 0, 'NO', None), (1, 0, 'OK', None), (1, 1, 'OK', KEY),
+                                                       (0, 1, 'NO', None)])
+def test_the_card_answers_adbd_and_always_allow_keeps_the_key(fw_dev, row, always, answer, kept):
+    """Cancel (or Return, its back row) answers NO; Allow answers OK; Allow with Always Allow on first appends the key's
+    line to /mnt/data/adb_keys, which adbd reads before it lets the computer in."""
+    u = adb_question(fw_dev)
+    u.sent.clear()
+    card_answer(fw_dev, row, always)
+    assert u.sent == [answer]
     assert u.files.files.get('/mnt/data/adb_keys') == (None if kept is None else f'{kept} user@host\n'.encode())
 
 
-def test_adbd_going_away_closes_the_prompt(fw_dev):
-    u, page = adb_question(fw_dev)
+def test_adbd_going_away_answers_nothing_more(fw_dev):
+    u = adb_question(fw_dev)
+    u.sent.clear()
     fw_dev.mock('fw_recv', lambda *_: 0)  # the socket closed
     u.poll()
-    assert not u.page('adbauth_page') and not u.sent
+    assert not u.sent

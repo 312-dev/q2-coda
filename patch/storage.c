@@ -32,11 +32,11 @@
 #define ST_ICON 18     /* a download's mark (tools/art.py STORE_PX), centred at x 33 */
 #define ST_ICON_X 24
 #define ST_ICON_TEXT 52
-#define ST_FOOT_PX 16 /* 13 px, AWTK's size (oled-design.md Type) */
-#define ST_HEAD_PX 18 /* 15 px */
+#define ST_FOOT_PX TYPE(13) /* 13 px, AWTK's size (oled-design.md Type) */
+#define ST_HEAD_PX TYPE(15) /* 15 px */
 #define ST_POLL_MS 1000
 #define ST_ROW "_st_row"  /* a row's index in its list, for storage_paint */
-#define ST_TRACK 0x2c2c2e /* Free's segment and dot: the bar's track */
+#define ST_TRACK RGB_RAISED_2 /* Free's segment and dot: the bar's track */
 #define ST_CACHE 0x6e6e73 /* Stream Cache's */
 
 typedef struct {
@@ -303,13 +303,12 @@ int storage_hold(void *top) {
 
 /* ---- painting (ringnav_paint), OLED's ---- */
 
-/* s at x, its box w wide centred on y, aligned (2 left, 3 right), in the role's face at px. */
+/* s, UTF-8, at x, its box w wide centred on y, aligned (2 left, 3 right), in the role's face at
+ * px, in rgb (0xRRGGBB): ui_kit.c's ui_line. */
 static void st_text(void *canvas, const char *s, int x, int w, int y, int align, int role, int px,
-                    unsigned color) {
+                    unsigned rgb) {
     static const char *const faces[] = FONT_NAMES;
-    unsigned buf[96], n = 0;
-    while (s[n] && n < 96) buf[n] = (unsigned char)s[n], ++n;
-    sp_text(canvas, buf, n, x, w, y, align, faces[theme()->font[role]], px, color);
+    ui_line(canvas, s, x, w, y, align, faces[theme()->font[role]], px, rgb);
 }
 static void st_dot(void *canvas, int x, int y, unsigned rgb) {
     rect_t r = { x, y - ST_DOT / 2, ST_DOT, ST_DOT };
@@ -344,16 +343,16 @@ static void st_bar(void *canvas, int x0, int x1, int y) {
 /* A row's value on the right column, beside its chevron when it opens a page. */
 static void st_value(void *w, void *canvas, const char *value, int into, int sel) {
     int right = 375 - geom_val(V_RIGHT_X) - I(canvas, CANVAS_X), y = I(w, W_H) / 2;
-    unsigned ink = theme()->set_value_ink[0] ? theme()->set_value_ink[0] : 0xababab;
+    unsigned ink = theme()->set_value_ink[0] ? theme()->set_value_ink[0] : RGB_SECONDARY;
     if (into) chevron_icon(w, canvas, right, y, sel), right -= VALUE_CHEVRON_GAP;
     st_text(canvas, value, right - 160, 160, y, 3, ROLE_TITLE, theme()->font_px[ROLE_TITLE],
-            RGBA(sel ? 0xffffff : ink));
+            sel ? 0xffffff : ink);
 }
 
 static void st_foot(void *canvas, const char *a, const char *b) {
     int x = geom_val(V_TEXT_X), w = 375 - x - geom_val(V_RIGHT_X);
-    st_text(canvas, a, x, w, 10, 2, ROLE_META, ST_FOOT_PX, RGBA(scheme()->muted));
-    if (b) st_text(canvas, b, x, w, 26, 2, ROLE_META, ST_FOOT_PX, RGBA(scheme()->muted));
+    st_text(canvas, a, x, w, 10, 2, ROLE_META, ST_FOOT_PX, scheme()->muted);
+    if (b) st_text(canvas, b, x, w, 26, 2, ROLE_META, ST_FOOT_PX, scheme()->muted);
 }
 
 void storage_paint(void *w, void *canvas) {
@@ -366,15 +365,14 @@ void storage_paint(void *w, void *canvas) {
     if (w == so.head) {
         size_text(a, sizeof a, so.total - so.free);
         tk_snprintf(a + strlen(a), sizeof a - strlen(a), " of %u GB used", (so.total + 500) / 1000);
-        st_text(canvas, a, x0, x1 - x0, ST_TEXT_DY, 2, ROLE_META, ST_HEAD_PX, RGBA(0xababab));
+        st_text(canvas, a, x0, x1 - x0, ST_TEXT_DY, 2, ROLE_META, ST_HEAD_PX, RGB_SECONDARY);
         st_bar(canvas, x0, x1, ST_BAR_DY);
     } else if (w == so.foot) {
-        st_foot(canvas, "Your Music is never changed by Sync or Radio.",
+        st_foot(canvas, "Your Music is never changed by Sync.",
                 "Downloads stay under the limit you set.");
     } else if (w == so.dl_foot) {
         if (so.n)
-            st_foot(canvas, "Hold Play/Pause on an item to remove it.",
-                    "Auto items refill on the next Sync.");
+            st_foot(canvas, "Hold Play/Pause on an item to remove it.", 0);
         else
             st_foot(canvas, "Nothing downloaded yet.", 0);
     } else if (parent && (parent == so.view || parent == so.dl_view)) {

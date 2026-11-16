@@ -93,7 +93,7 @@ def test_the_page_shows_the_card_s_use_from_statfs_and_the_app_s_file(fw):
     assert rows(st, fw) == [['28.6 GB'], ['8.2 GB'], ['1.6 GB'], ['25.6 GB']]
     head, foot = st.views
     assert st.paint(head) == ['38.4 GB of 64 GB used']
-    assert st.paint(foot) == ['Your Music is never changed by Sync or Radio.', 'Downloads stay under the limit you set.']
+    assert st.paint(foot) == ['Your Music is never changed by Sync.', 'Downloads stay under the limit you set.']
 
 
 def test_without_the_app_s_file_downloads_and_the_cache_read_nothing(fw):
@@ -108,6 +108,8 @@ def test_downloads_lists_the_limit_and_each_item_its_size_escapes_undone(fw):
     st.tap(1)
     assert st.captions == ['Limit', 'Caracal (Deluxe)', 'Favorites', 'Road\tTrip']
     assert rows(st, fw) == [['16 GB'], ['1.2 GB'], ['2.1 GB'], ['3.4 GB']]
+    # its footer promises nothing the app does not do: no auto items refill yet
+    assert st.paint(st.views[-1]) == ['Hold Play/Pause on an item to remove it.']
 
 
 def test_a_limit_picked_is_asked_of_the_app_and_shown_at_once(fw):

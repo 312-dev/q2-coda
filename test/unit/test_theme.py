@@ -1211,3 +1211,39 @@ def test_resolve_rejects_an_unknown_art():
     ('<view name="list"><element name="scrollbar" w="0"/></view>', "list.scrollbar: the wheel's indicator needs w, top and bottom")])
 def test_every_theme_has_what_the_marks_draw_with(body, message):
     assert error(theme.validate, resolved(body), 't.xml') == f't.xml:1: {message}'
+
+
+def test_tokens_h_is_written_from_tokens(tmp_path):
+    assert (theme.ROOT/'patch/tokens.h').read_text() == theme.token_header(), 'run tools/theme.py write_tokens'
+    theme.write_tokens(tmp_path/'tokens.h')
+    assert (tmp_path/'tokens.h').read_text() == theme.token_header()
+    assert '#define RGB_SECONDARY_L 0x5c5c5c' in theme.token_header()
+
+
+def test_a_token_without_a_light_half_takes_its_flip():
+    assert theme.token('secondary') == 0xababab and theme.token('secondary', True) == 0x5c5c5c
+    assert theme.token('raised', True) == theme.flip(0x1c1c1e, *theme.TOKEN_PAPER) == 0xe3e3e1
+    xml = (theme.ROOT/'assets/themes/oled/theme.xml').read_text()
+    paper = re.search(r'light\.paper="#(\w+)" light\.ink="#(\w+)"', xml)
+    assert paper and (int(paper[1], 16), int(paper[2], 16)) == theme.TOKEN_PAPER
+    assert theme.token('positive') == theme.token('positive', True) == 0x34c759
+
+
+# Files with a palette of their own, not the theme's: the games' engine and boards, the EQ editor, and offsets.inc's
+# stock-facing values (test/patch.py reads them)
+OWN_PALETTE = {'games.c', 'game_bricks.c', 'engine.c', 'engine_demo.c', 'peq_ui.c', 'offsets.inc', 'tokens.h'}
+
+
+def test_patch_names_tokens_and_type_sizes_rather_than_restating_them():
+    """No colour literal equal to a token (black and white aside: they are also every image's ends) outside tokens.h
+    and the files with their own palette, and no local table of AWTK sizes (#define PX_15 18): TYPE(15) says it."""
+    values = {v for d, l in theme.TOKENS.values() for v in (d, l) if v is not None} - {0, 0xffffff}
+    hex_ = '|'.join(f'{v:06x}' for v in values)
+    bad = []
+    for p in sorted((theme.ROOT/'patch').glob('*')):
+        if p.suffix not in ('.c', '.h', '.inc') or p.name in OWN_PALETTE:
+            continue
+        for n, line in enumerate(p.read_text().splitlines(), 1):
+            if re.search(rf'\b0x(?:ff)?(?:{hex_})u?\b', line, re.I) or re.match(r'\s*#define PX_\d+\s', line):
+                bad.append(f'{p.name}:{n}: {line.strip()}')
+    assert not bad, '\n'.join(bad)

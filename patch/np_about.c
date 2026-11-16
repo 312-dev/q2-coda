@@ -41,14 +41,7 @@
 #define AB_NAME_DY 8 /* a cell's name's centre below its top, and its value's */
 #define AB_VALUE_DY 26
 #define AB_VALUE_W 150
-#define AB_SECOND 0xababab /* Text Secondary */
-#define AB_THIRD 0x858585  /* Text Tertiary */
-#define AB_MONO 0x2c2c2e   /* no cover: an artist page's placeholder grey */
-/* AWTK's sizes for the design's px (Inter's line is 1.21 em: assets/themes/oled/theme.xml) */
-#define PX_20 24
-#define PX_17 21
-#define PX_15 18
-#define PX_13 16
+#define AB_MONO RGB_RAISED_2 /* no cover: an artist page's placeholder grey */
 #define DOT " \xc2\xb7 " /* " · " */
 
 enum { CELL_ALBUM, CELL_YEAR, CELL_GENRE, CELL_KBPS, CELL_SIZE, CELL_LOCATION, AB_CELLS };
@@ -404,30 +397,31 @@ static void ab_draw(void *w, void *canvas, int oy) {
     }
     stock_canvas_set_fill_color(canvas, fill);
     int tw = right - AB_TEXT_X;
-    ar_text(canvas, ab.t.title, 1, PX_20, 0xffffff, 0, AB_TEXT_X, y + AB_TITLE_DY, tw, 2);
-    ar_text(canvas, ab.t.artist, 0, PX_15, AB_SECOND, 0, AB_TEXT_X, y + AB_ARTIST_DY, tw, 2);
-    ar_text(canvas, ab.t.len, 0, PX_13, AB_THIRD, 0, AB_TEXT_X, y + AB_LEN_DY, tw, 2);
+    ui_text(canvas, ab.t.title, 1, TYPE(20), 0xffffff, 0, AB_TEXT_X, y + AB_TITLE_DY, tw, 2);
+    ui_text(canvas, ab.t.artist, 0, TYPE(15), RGB_SECONDARY, 0, AB_TEXT_X, y + AB_ARTIST_DY, tw, 2);
+    ui_text(canvas, ab.t.len, 0, TYPE(13), RGB_TERTIARY, 0, AB_TEXT_X, y + AB_LEN_DY, tw, 2);
     int qy = AB_QUALITY_Y - oy, sx = AB_ART_X;
     if (ab.badge) {
         static const char *const badges[] = { "", "Lossless", "Hi-Res Lossless", "DSD" };
-        int bw = ar_text(canvas, badges[ab.badge], 1, PX_13, 0xffffff, 0, AB_ART_X + AB_BADGE_TEXT,
-                         qy + AB_BADGE_H / 2, 200, 2) +
+        int bw = ui_text(canvas, badges[ab.badge], 1, TYPE(13), 0xffffff, 0,
+                         AB_ART_X + AB_BADGE_TEXT, qy + AB_BADGE_H / 2, 200, 2) +
                  AB_BADGE_PAD;
         rect_t r = { AB_ART_X, qy, bw, AB_BADGE_H };
-        round_ring(canvas, &r, AB_BADGE_R, 0xff000000u | flip_if(light, AB_SECOND));
+        round_ring(canvas, &r, AB_BADGE_R, 0xff000000u | flip_if(light, RGB_SECONDARY));
         paint_art(w, canvas, theme_art(light ? "quality_l" : "quality_d"),
                   AB_ART_X + AB_GLYPH_DX - AB_GLYPH / 2, qy + (AB_BADGE_H - AB_GLYPH) / 2);
         stock_canvas_set_fill_color(canvas, fill);
         sx += bw + AB_SPEC_GAP;
     }
-    ar_text(canvas, ab.t.spec, 0, PX_13, AB_THIRD, 0, sx, qy + AB_BADGE_H / 2, right - sx, 2);
+    ui_text(canvas, ab.t.spec, 0, TYPE(13), RGB_TERTIARY, 0, sx, qy + AB_BADGE_H / 2, right - sx,
+            2);
     for (int i = 0, slot = 0; i < ab.n; ++i) {
         const ab_cell *c = &ab.t.cell[i];
         int wide = ab.wide && i == ab.n - 1;
         if (wide && slot & 1) ++slot; /* Location starts a row of its own */
         int cx = slot & 1 ? AB_COL2 : AB_ART_X, cy = AB_GRID_Y + slot / 2 * AB_ROW - oy;
-        ar_text(canvas, c->name, 0, PX_13, AB_THIRD, 0, cx, cy + AB_NAME_DY, AB_VALUE_W, 2);
-        ar_text(canvas, c->value, 0, PX_17, 0xffffff, 0, cx, cy + AB_VALUE_DY,
+        ui_text(canvas, c->name, 0, TYPE(13), RGB_TERTIARY, 0, cx, cy + AB_NAME_DY, AB_VALUE_W, 2);
+        ui_text(canvas, c->value, 0, TYPE(17), 0xffffff, 0, cx, cy + AB_VALUE_DY,
                 wide ? right - cx : AB_VALUE_W, 2);
         ++slot;
     }

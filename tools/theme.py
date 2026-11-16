@@ -451,6 +451,40 @@ def unflip(c, paper, ink):
 
 FINAL = [k for k in SCHEMA.values() if k.final]
 
+# The design's colour tokens (docs/oled-design.md#colour), 0xRRGGBB final per half: (dark, light). A light of None is
+# the dark's flip by OLED's light paper and ink (TOKEN_PAPER, assets/themes/oled/theme.xml), the colour flip_if gives. patch/tokens.h holds them for C as TOK_<NAME>
+# (ui_kit.c tok's index), RGB_<NAME> and RGB_<NAME>_L (write_tokens writes it, test/unit/test_theme.py checks it is
+# current); tools/art.py inks its glyphs from them.
+TOKENS = {'canvas': (0x000000, 0xffffff), 'primary': (0xffffff, 0x000000), 'secondary': (0xababab, 0x5c5c5c),
+          'tertiary': (0x858585, 0x6e6e6e), 'chevron': (0x999999, 0x8a8a8a), 'track': (0x333333, 0xd9d9d9),
+          'on_accent': (0xffffff, 0xffffff), 'caption_on_accent': (0xd6e2fa, 0xd6e2fa),
+          'raised': (0x1c1c1e, None), 'raised_2': (0x2c2c2e, None), 'off': (0x3a3a3c, None),
+          'positive': (0x34c759, 0x34c759), 'warning': (0xff9f0a, 0xff9f0a), 'negative': (0xff453a, 0xff453a)}
+
+
+TOKEN_PAPER = (0xffffff, 0x000000)
+
+
+def token(name, light=False):
+    """TOKENS[name]'s colour in one half."""
+    dark, lit = TOKENS[name]
+    return dark if not light else lit if lit is not None else flip(dark, *TOKEN_PAPER)
+
+
+def token_header():
+    """patch/tokens.h: TOKENS as the enum, each half's macro and the table's initialiser (ui_kit.c's)."""
+    names = [n.upper() for n in TOKENS]
+    return '\n'.join(['/* tools/theme.py write_tokens wrote this from its TOKENS; edit those, then run it again. */',
+                      'enum { ' + ', '.join(f'TOK_{n}' for n in names) + ', TOK_N };',
+                      *(f'#define RGB_{n} {token(k):#08x}' for n, k in zip(names, TOKENS)),
+                      *(f'#define RGB_{n}_L {token(k, True):#08x}' for n, k in zip(names, TOKENS)),
+                      '#define UI_TOKENS {' + ', '.join(f'{{RGB_{n}, RGB_{n}_L}}' for n in names) + '}', ''])
+
+
+def write_tokens(path=ROOT/'patch/tokens.h'):
+    """Write token_header() to path."""
+    path.write_text(token_header())
+
 
 def half(d, light, paper, ink):
     """d's final fields in one half: the stated value, else the other half's flipped (light) or unflipped

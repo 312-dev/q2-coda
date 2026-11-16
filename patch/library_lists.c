@@ -8,7 +8,6 @@
 static struct {
     void *td_page, *td_list;
     unsigned td_timer;
-    int td_asking;
     unsigned mp_gen;
     void *sp_page;
 } ll __attribute__((section(".scratch")));
@@ -266,12 +265,26 @@ static void song_label(const char *f, int tidal, char *out, unsigned size) {
         id[-1] = 0;
 }
 static int td_show(const void *unused);
-/* Clear All Downloads…, then on its confirmation Cancel or Remove (row 2: tidal_clear), each
- * through td_show, from a timer, as a row's click may not rebuild the list it is in. */
+/* Clear All Downloads…: the confirmation card asks (docs/oled-design.md#confirmation-card), and
+ * Remove (row 1) clears them (tidal_clear); the list again from a timer, as a row's click may not
+ * rebuild the list it is in. */
+static void td_answer(void *ctx, int row, int toggle_on) {
+    if (row == 1) tidal_clear();
+    if (ll.td_page) rearm(&ll.td_timer, td_show, 0);
+}
+static char td_body[48] __attribute__((section(".scratch"))); /* the card's: the count */
 static int td_clear(void *ctx, void *event) {
-    if (ll.td_asking && (long)ctx == 2) tidal_clear();
-    ll.td_asking = !ll.td_asking;
-    rearm(&ll.td_timer, td_show, 0);
+    static const char *const rows[] = { "Cancel", "Remove" };
+    unsigned n = ll.td_list ? deque_size(ll.td_list) : 0;
+    tk_snprintf(td_body, sizeof td_body,
+                n == 1 ? "%u track. Settings are kept." : "%u tracks. Settings are kept.", n);
+    confirm(&(confirm_t){ .title = "Remove Downloads?",
+                          .body = td_body,
+                          .rows = rows,
+                          .n_rows = 2,
+                          .kind = CONFIRM_DESTRUCTIVE,
+                          .back = -1,
+                          .answer = td_answer });
     return 0;
 }
 /* The page's songs, read again; Tidal's end with Clear All Downloads…, as Spotify's Storage
@@ -292,44 +305,25 @@ static void *songs_rows(const char *dir, const char *title, int tidal, int album
     if (tidal && n) page_row_detail(view, n, "Clear All Downloads…", 0, td_clear);
     return view;
 }
-/* Clear All Downloads' confirmation in the list's place, as Spotify's Remove Downloads?, on Cancel;
- * or the list again, on its Clear row. */
+/* The page's list, again after Clear All Downloads' card answered. */
 static int td_show(const void *unused) {
     ll.td_timer = 0;
     if (!ll.td_page) return 0;
+    void *view = songs_rows(TIDAL_DIR, "Tidal Downloads", 1, 0);
     unsigned n = deque_size(ll.td_list);
-    if (!ll.td_asking) {
-        void *view = songs_rows(TIDAL_DIR, "Tidal Downloads", 1, 0);
-        if ((n = deque_size(ll.td_list))) ringnav_select(view, (int)n, (int)n + 1);
-        return 0;
-    }
-    char note[32];
-    tk_snprintf(note, sizeof note, n == 1 ? "%u track" : "%u tracks", n);
-    void *view = page_list(ll.td_page, ll.td_page, 0, "Remove Downloads?", 3, 64);
-    page_row_detail(view, 0, note, "Keeps settings", 0);
-    page_row_detail(view, 1, "Cancel", "", td_clear);
-    page_row_detail(view, 2, "Remove", "", td_clear);
-    ringnav_select(view, 1, 3);
+    if (n) ringnav_select(view, (int)n, (int)n + 1);
     return 0;
 }
 static int td_closed(void *ctx, void *event) {
     ll.td_page = 0;
-    ll.td_asking = 0;
     stop_timer(&ll.td_timer);
     if (ll.td_list) deque_destroy(ll.td_list);
     ll.td_list = 0;
     return 0;
 }
-/* Return on the confirmation is its Cancel. */
-static int td_keyup(void *ctx, void *event) {
-    if (!ll.td_asking || I(event, EVENT_KEY) != KEY_RETURN) return page_keyup(ctx, event);
-    td_clear((void *)1, event);
-    return STOP;
-}
 static int songs_page(const char *window, const char *dir, const char *title, int tidal,
                       int album) {
-    if (ll.td_page || !(ll.td_page = page_open(window, td_closed, tidal ? td_keyup : page_keyup)))
-        return 0;
+    if (ll.td_page || !(ll.td_page = page_open(window, td_closed, page_keyup))) return 0;
     songs_rows(dir, title, tidal, album);
     return 0;
 }

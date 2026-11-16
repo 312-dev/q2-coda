@@ -109,12 +109,12 @@ The USB chooser on plug-in ([internals: USB pages](internals.md#usb-pages)) make
 
 adb's own RSA key authentication is always on: a computer gets nothing, not even a shell prompt, until it signs adbd's random token with a key the Q2 accepts. adbd reads, for every connection:
 
-- `/mnt/data/adb_keys`: computers remembered with **Always Allow This Computer**;
+- `/mnt/data/adb_keys`: computers remembered with **Always Allow**;
 - `/mnt/mmc/adb_keys` while the card is mounted: a developer's own, copied there by hand (one `adbkey.pub` line per computer).
 
 A key in neither is offered to the UI as Android's adbd offers it to Android's framework: adbd listens on the Unix socket `/tmp/q2adb-ui` (mode 0600, root's), one client at a time, and writes `PK` followed by the computer's `adbkey.pub` line (base64 key, a space, `user@host`, no line end). The client answers `OK` to let that computer in this once, after appending the line to `/mnt/data/adb_keys` for Always Allow, or `NO`. With no client connected the key is refused at once, and adb shows the device as `unauthorized`. A computer that disconnects before the answer is forgotten; a late `OK` lets nothing in.
 
-The Q2's side of the prompt, the **Allow USB Debugging?** dialog in demo, is not built yet. Its design: the question in the status row, "This computer's key:" over the key's fingerprint (Android's: the MD5 of the base64-decoded key as colon-separated hex pairs), the rows **Cancel** (selected) and **Allow**, the switch **Always Allow This Computer**, and the note "Gives full control of the Q2." Cancel, Return or a timeout answers `NO`. Until it is, the card's `adb_keys` is the way in.
+The Q2's side of the prompt (`patch/usb_ui.c` `auth_open`, a `--dev` build's) is **Allow USB Debugging?** on the [confirmation card](oled-design.md#confirmation-card): its body the key's fingerprint ("Key " and the first eight bytes of the MD5 of the base64-decoded key as colon-separated hex pairs, Android's) over "It gets full control of the Q2.", the switch row **Always Allow**, then **Cancel** (selected) and **Allow**. Allow answers `OK`, first appending the key's line to `/mnt/data/adb_keys` when Always Allow is on; Cancel or Return answers `NO`, and so does a question that arrives while another card is up (the computer asks again). The card's `adb_keys` is the other way in.
 
 ### q2eq's requests
 

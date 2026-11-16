@@ -503,6 +503,70 @@ def test_no_app_is_started_offline_with_local_only_or_without_a_catalogue_app(ri
     assert not started
 
 
+class RadioOff:
+    """The app's idle exit, then Smart Wi-Fi's (docs/internals.md#smart-wi-fi): Power's row on, nothing needing the
+    network for SMART_IDLE_MS, the radio off through stock's switch (a stand-in toggling g_wififlag) and no link."""
+    def __init__(self, rig, fw, st):
+        self.rig, self.wifi, self.switched, self.started = rig, fw.var('g_wififlag', C.c_ubyte), [], []
+        fw.mock('wifi_switch', self.switch)
+        C.c_int.from_address(O['NET_TYPE']).value = 2
+        config = rig.config  # SMARTWIFI as pod_settings reads it
+        fw.mock('toolsReadConfig', lambda path, section, key, out, default, *_: C.memmove(out, b'1\0', 2)
+                if C.string_at(key) == b'SMARTWIFI' else config(path, section, key, out, default))
+        fw.mock('get_wifisignal', lambda *_: 3 if rig.online else -1)  # the status bar's bars
+        st('smart_wifi').value, self.wifi.value, rig.online = 1, 1, True
+        self.smart_poll = fw.fn('smart_poll', None)
+        rig.write(1, [song_row('s1', 'Cached', 'B', 'A', 1, 100, 1, local='/mnt/mmc/.subsonic/stream/s1.flac'),
+                      song_row('s2', 'Streamed', 'B', 'A', 2, 100, 2)])
+        rig.poll()
+        rig.files.files[f'/mnt/mmc/.{APP}/q2-{APP}'] = b''  # on the card, not running
+        fw.mock('fw_system', lambda cmd, *_: self.started.append(C.string_at(cmd)) or 0)
+        self.tick(O['SMART_IDLE_MS'] // 1000 + 2)
+        rig.online = False  # networkStop's: no link
+        self.tick(2)
+        assert self.switched == [0] and fw.fn('smart_wifi_off', C.c_int)()
+        self.q = queue(rig, ['/mnt/mmc/Music/a.flac', url('s2'), url('s1')])
+
+    def switch(self, *_):
+        self.wifi.value ^= 1
+        self.switched.append(self.wifi.value)
+        return 0
+
+    def tick(self, seconds):
+        for _ in range(seconds):
+            self.smart_poll()
+            self.rig.poll(1)
+
+
+def test_a_server_song_pressed_while_smart_wi_fi_has_the_radio_off_waits_for_the_link(rig, fw, st):
+    """The radio comes back for a server row, so the row is not greyed, and a press wakes it and, once the link is
+    up, starts the app and hands it the list, as online."""
+    off = RadioOff(rig, fw, st)
+    assert not rig.unavailable(url('s2'))
+    assert load(rig, off.q, 1)[0] == 2 and b'Not available offline' not in rig.toasts
+    assert off.switched == [0, 1] and not off.started  # the radio back first, the app once there is a link
+    off.tick(3)
+    assert not off.started and not rig.played
+    rig.online = True
+    off.tick(2)
+    assert off.started == [f'/bin/sh /mnt/mmc/.{APP}/run'.encode()]
+    rig.files.files[f'/tmp/q2-{APP}'] = b'42'
+    rig.files.files[f'/tmp/q2-{APP}.browse.sock'] = b''  # it listens
+    off.tick(1)
+    assert rig.files.files[f'/tmp/q2-{APP}.catplay'] == \
+        f'1 1\n/mnt/mmc/Music/a.flac\n{url("s2")}\n{url("s1")}\n'.encode()
+
+
+def test_a_wake_that_brings_no_link_plays_the_list_offline(rig, fw, st):
+    """No link SMART_CONNECT_MS after the press: the card rows and copies play, and the app is never started."""
+    off = RadioOff(rig, fw, st)
+    assert load(rig, off.q, 1)[0] == 2 and off.switched == [0, 1]
+    off.tick(O['SMART_CONNECT_MS'] // 1000 - 2)
+    assert not rig.played
+    off.tick(4)
+    assert not off.started and rig.played == [(['/mnt/mmc/Music/a.flac'.encode(), b'/mnt/mmc/.subsonic/stream/s1.flac'], 1)]
+
+
 def test_a_listen_of_a_server_songs_offline_copy_counts_as_its_server_row(rig, fw, st):
     """A server song plays from its Stream Cache copy (the app's .play, or the offline queue), a file no Library
     row has: its play counts under the server row's key (its fileurl's listen_key), so Most Played and Cover
@@ -810,6 +874,27 @@ def test_now_playings_info_page_has_the_catalogues_genre_and_year_for_a_server_s
     assert ask(url('s1')) == ('Rock', 2001)
     assert ask('/mnt/mmc/Music/a.flac') is None
     assert ask(copy) == ('Rock', 2001)  # asked again: the kept answer
+    rig.lib.sqlite3_close(slot)
+    slot.value = 0
+
+
+def test_now_playings_info_query_ends_at_the_rows_path(rig, fw):
+    """The query is built on the stack: a shorter path asked after a longer one must not carry the longer one's
+    tail into its SQL (the query failed, so the page had no genre or year, wherever the stack held old bytes)."""
+    rig.write(1, [song_row('s1', 'Short', 'B', 'A', 1, 100, 1),
+                  song_row('s22', 'Long', 'B', 'A', 1, 100, 2, album_id='al1-with-a-long-id')])
+    rig.poll()
+    slot = C.c_void_p.from_address(STOCK_SLOT)
+    rig.lib.sqlite3_open(str(rig.tmp/'database.db').encode(), C.byref(slot))
+    fw.fn('catalogue_attach', None, C.c_void_p)(STOCK_SLOT)
+    info = fw.fn('catalogue_np_info', C.c_int, C.c_char_p, C.c_char_p, C.POINTER(C.c_int))
+
+    def ask(path):
+        genre, year = C.create_string_buffer(96), C.c_int(-1)
+        return (genre.value.decode(), year.value) if info(path.encode(), genre, C.byref(year)) else None
+    assert ask(url('s22', 'al1-with-a-long-id')) == ('Rock', 2001)
+    assert ask(url('s1')) == ('Rock', 2001)
+    assert rig.sqls[-1].endswith(b"where fileurl='" + url('s1').encode() + b"'")
     rig.lib.sqlite3_close(slot)
     slot.value = 0
 

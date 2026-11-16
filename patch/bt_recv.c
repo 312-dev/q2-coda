@@ -2,7 +2,7 @@
  * the Q2 shows while a phone plays through it. Stock opens bluetoothrecv_page when a phone's A2DP
  * stream starts (btrecvA2dpFunc), with a 170 px Bluetooth picture, the phone's title and artist
  * (btrecv_info_labels_update, from AVRCP) in plain labels, the codec as a picture, a back arrow and
- * a gear (Audio settings). Here it is a mode page, as USB Audio's (usb_ui.c mode_page_paint): the
+ * a gear (Audio settings). Here it is a mode page, as USB Audio's (feedback.c mode_page_paint): the
  * accent's solid circle with Phosphor's Bluetooth glyph, the song's title (or "Playing from Phone"
  * before the phone names one), its artist (or "Wheel sets the volume") and the codec in the pill.
  * Stock's labels and pictures stay, hidden, for stock to fill; the back arrow stays at opacity 0,
@@ -77,7 +77,7 @@ void bt_recv_paint(void *w, void *canvas) {
     if ((c = widget_lookup(w, "label_artist", 1))) widget_get_text_utf8(c, artist, sizeof artist);
     st.raw_ink = 1;
     mode_page_paint(w, canvas, I(w, W_Y),
-                    &(mode_page_t){ scheme()->tones[0] & 0xffffffu, "btmode_receive", 0,
+                    &(mode_page_t){ scheme()->tones[0] & 0xffffffu, "modepage_receive", 0,
                                     *title ? title : "Playing from Phone",
                                     *artist ? artist : "Wheel sets the volume", bt_recv_codec(w) });
     st.raw_ink = raw;
