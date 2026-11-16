@@ -156,8 +156,7 @@ SCHEMA = {k.path: k for k in (
     *(Key(f'motion.{k}.{a}', f'motion.{k}.{a}', t, 0, hi, 0, 'motion')
       for k in (*MOTION_WINDOW, *MOTION_WIDGET) for a, t, hi in (('ms', 'int', 2000), ('easing', 'easing', len(EASINGS) - 1))),
     *(Key(f'motion.{k}.anim', f'motion.{k}.anim', 'anim', 0, len(ANIMS) - 1, 0, 'motion') for k in MOTION_WINDOW),
-    Key('motion.recall.ms', 'recall_ms', 'int', 0, 2000, 0, 'motion'),
-    Key('motion.bump.px', 'bump_px', 'int', 0, 12, 0, 'motion'))}
+    Key('motion.recall.ms', 'recall_ms', 'int', 0, 2000, 0, 'motion'))}
 FIELDS = {k.field: k for k in SCHEMA.values()}
 
 
@@ -183,7 +182,7 @@ MOTION_ROLES = {'motion.page.ms': 'PAGE_SLIDE_MS', 'motion.page.easing': 'EASE_C
                 'motion.step_fast.ms': 'HOME_FAST_SLIDE_MS', 'motion.step_fast.easing': 'SLIDE_EASING',
                 'motion.coverflow_step.ms': 'HOME_SLIDE_MS', 'motion.coverflow_step.easing': 'SLIDE_EASING',
                 'motion.coverflow_step_fast.ms': 'HOME_FAST_SLIDE_MS', 'motion.coverflow_step_fast.easing': 'SLIDE_EASING',
-                'recall_ms': 'GLIDE_MS', 'bump_px': 'BUMP_PX'}
+                'recall_ms': 'GLIDE_MS'}
 # OLED's macros cover the fields its theme.xml leaves to offsets.inc: the rest it states itself, and a macro, applied
 # after the file (resolve), would override it.
 ROLE_MACROS = {
@@ -987,7 +986,7 @@ def own_tones(t):
 
 
 def motion_fields(t):
-    """theme_t.motion's rows and the recall and bump after them, as emit's (C field, value) pairs."""
+    """theme_t.motion's rows and the recall after them, as emit's (C field, value) pairs."""
     def hint(k):
         ms, anim, easing = (t[f'motion.{k}.{a}'] for a in ('ms', 'anim', 'easing'))
         tail = '' if EASINGS[easing] == 'cubic_out' else f',easing={EASINGS[easing]}'  # cubic_out: the window animator's own default
@@ -995,7 +994,7 @@ def motion_fields(t):
         return 0 if not ms or k == 'page' and h == SLIDE else json.dumps(h)  # 0: the window keeps its asset hint, page's already being SLIDE
     return [*((f'motion[MOTION_{k.upper()}].hint', hint(k)) for k in MOTION_WINDOW),
             *((f'motion[MOTION_{k.upper()}].{a}', t[f'motion.{k}.{a}']) for k in MOTION_WIDGET for a in ('ms', 'easing')),
-            ('recall_ms', t['recall_ms']), ('bump_px', t['bump_px'])]
+            ('recall_ms', t['recall_ms'])]
 
 
 def emit(themes, out, redirects={}):

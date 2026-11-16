@@ -94,9 +94,8 @@ _Static_assert(DRIFT_TEXELS >= 4 * (375 - HOME_SPLIT_W) * 320, /* a pane to the 
 #if __SIZEOF_POINTER__ == 4 /* the Q2's layout; test/fw's 64-bit build has its own */
 _Static_assert(__builtin_offsetof(theme_t, geom) == THEME_GEOM_OFF, "test/patch.py's set_geom");
 _Static_assert(__builtin_offsetof(theme_t, motion) == THEME_MOTION_OFF && sizeof(motion_t) == 8 &&
-                   __builtin_offsetof(theme_t, recall_ms) == THEME_MOTION_OFF + MOTION_N * 8 &&
-                   __builtin_offsetof(theme_t, bump_px) == THEME_MOTION_OFF + MOTION_N * 8 + 2,
-               "test/patch.py's set_motion, set_recall and set_bump");
+                   __builtin_offsetof(theme_t, recall_ms) == THEME_MOTION_OFF + MOTION_N * 8,
+               "test/patch.py's set_motion and set_recall");
 _Static_assert(__builtin_offsetof(scheme_t, mode) == SCHEME_MODE_OFF, "test/patch.py patches it");
 #endif
 /* A value of the set theme_boot wrote (st.geom), never the live theme's: V_BAR, ... */
