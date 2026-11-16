@@ -3529,6 +3529,7 @@ static struct {
 } home __attribute__((section(".scratch")));
 extern int ipod_home(void), home_shortcut_open(void *, void *), library_search(void);
 extern void ipod_shortcut_seen(void), home_sets_bind(void *win); /* theme_engine.c, navigation.c */
+extern int guest_home_click(void *ctx, void *event); /* guest_ui.c: Home's Guest Play row */
 extern void library_rows(void *list), stream_rows(void *list);
 /* home.c: Home's overflow */
 extern void home_overflow(void *list, int bottom), home_pad(void *view),
@@ -4715,6 +4716,7 @@ int coverflow_home(void *win, void *ctx) {
     widget_on(widget_lookup(win, "img_cover_flow", 1), EVT_CLICK, coverflow_open, 0);
     widget_on(widget_lookup(win, "img_settings", 1), EVT_CLICK, home_settings, 0);
     widget_on(widget_lookup(win, "img_home_search", 1), EVT_CLICK, library_search_open, 0);
+    widget_on(widget_lookup(win, "img_guest", 1), EVT_CLICK, guest_home_click, 0); /* guest_ui.c */
     home_sets_bind(win);
     home.win = win;
     void *art = widget_lookup(win, "img_homeart", 1);

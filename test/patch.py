@@ -16752,7 +16752,7 @@ passed()
 # Stock's second row, its Bluetooth Name, is bt_name.c's Name row in its place, the name its value, as high as stock's
 # row (docs/internals.md#bluetooth-name).
 m,rows,texts,icons,click=settings_page('btrows','scroll_view_bluetooth',stock_rows=7)  # 5 rows, 2 devices
-assert len(rows)==3 and icons==[None,None,None] and texts()==['Resume on Connect','Link Volume','Name']
+assert len(rows)==4 and icons==[None]*4 and texts()==['Resume on Connect','Link Volume','Name','Guest Play']  # Guest Play's row (guest_ui.c)
 view=named(m,m.top,'scroll_view_bluetooth'); name_row=rows[2]
 assert m.nodes[view]['children'].index(name_row)==1 and m.get(name_row+O['W_H'])==78 and m.entries[1] not in m.nodes[view]['children']
 assert 'Q2' in [m.nodes[c].get('text') for c in m.nodes[m.nodes[name_row]['children'][0]]['children']]
@@ -16766,7 +16766,7 @@ assert click(0)==[(1,'Q2POD','RESUME')] and switch_image(m,rows[0])=='switch_on'
 assert click(0)==[(0,'Q2POD','RESUME')] and switch_image(m,rows[0])=='switch_off'
 assert click(1)==[(1,'Q2POD','BTVOLLINK')] and switch_image(m,rows[1])=='switch_on'
 assert click(1)==[(0,'Q2POD','BTVOLLINK')] and switch_image(m,rows[1])=='switch_off'
-assert texts()==['Resume on Connect','Link Volume','Name']; passed()
+assert texts()==['Resume on Connect','Link Volume','Name','Guest Play']; passed()
 m,rows,texts,*_=settings_page('btrows','scroll_view_bluetooth',{'RESUME':'1','BTVOLLINK':'1'},stock_rows=7)
 assert [switch_image(m,r) for r in rows[:2]]==['switch_on','switch_on']; passed()
 m,rows,*_=settings_page('btrows','scroll_view_bluetooth',stock_rows=1,bt=0)  # just the switch
