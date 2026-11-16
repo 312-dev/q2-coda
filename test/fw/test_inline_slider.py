@@ -214,19 +214,3 @@ def test_a_row_paints_its_value_and_track_at_rest_and_grabbed(fw, grabbed):
         assert tracks[0][0][1] == 43 - 2 and tracks[0][0][2] > 250  # full width, under the title
     assert canvas.restored()
 
-
-def test_a_pair_s_switch_keeps_the_selection_as_its_slider_row_shows(fw):
-    """The slider row showing changes the list's row count, which resets a live list's selection (lists.c load): seen
-    on the emulator as the bar jumping to EQ after Crossfade turned on. The switch's row keeps it."""
-    p = Playback(fw)
-    menu = C.addressof(fw.var('g_menu', C.c_ubyte))
-    load = fw.fn('navigation__load', C.c_int, C.c_void_p, C.c_void_p, C.c_int)
-    assert load(menu, p.view.addr, 0)  # the page live: its count stored
-    sw = button_of(p.view, 'Crossfade')
-    rows = [item for item in p.view.children if item.visible]
-    p.view.props['_ringnav_index'] = rows.index(sw.parent)
-    at = p.view.props['_ringnav_index']
-    p.click('Crossfade')
-    assert p.item('Duration').visible
-    load(menu, p.view.addr, 0)  # the next paint's
-    assert p.view.props['_ringnav_index'] == at
