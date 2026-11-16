@@ -76,6 +76,7 @@ enum { USB_ASK, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_CHOICES };
 static struct {
     int view_ready, auth_ready;
     const char *toast_glyph, *toast_text;
+    int det_known; /* a pass has read the cable: one in at boot is no plug-in */
     int det, probing, choice, mode_saved /* g_usbmode + 1 for this cable's, 0 none */, ejected, ejected_told, chosen, row_sel;
     unsigned probe_at;
     void *chooser, *view, *always, *debug, *mode;
@@ -396,7 +397,8 @@ void usb_ui_paint(void *w, void *canvas) {
 /* Before stock's pass: a cable in or out, and the probe's answer. */
 void usb_ui_status(void) {
     int det = g_usbdet_value == 1;
-    if (det && !u.det) charge_plugged(); /* charging.c: a dark Q2 lights for it */
+    if (det && !u.det && u.det_known) charge_plugged(); /* charging.c: a dark Q2 lights for it */
+    u.det_known = 1;
     if (det && !u.det && g_usblink_status == 0) {
         u.choice = USB_ASK, u.chosen = 0;
         int pick = usb_remembered();

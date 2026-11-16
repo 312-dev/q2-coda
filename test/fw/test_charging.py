@@ -229,3 +229,24 @@ def test_on_percent_a_tap_on_the_percentage_toasts_too(fw, st, ui):
     """Battery: Percent puts the level where the battery was; the target is round the slot's centre."""
     tap = Tap(fw, st, ui, battery=1)
     assert tap(ui.box(tap.bar.slot)[2] // 2, 15) == ['Battery 62%']
+
+
+def test_a_cable_in_at_boot_is_no_plug_in(fw, st, ui):
+    """usb_ui_status's first pass finds the cable already in: no plug-in screen (whose end would turn the screen off
+    under the boot) and no chirp; one put in after a pass without it is."""
+    plug = Plug(fw, st, ui)
+    plug.poll()  # Plug's own charge_plugged
+    plug.frames(4000)
+    plug.screen.clear()
+    det = fw.var('g_usbdet_value', C.c_ubyte)
+    fw.mock('fw_system', lambda *_: 0)
+    status = fw.fn('usb_ui_status', None)
+    status()  # the first pass: in at boot
+    plug.poll()
+    assert plug.screen == []
+    det.value = 0
+    status()
+    det.value = 1
+    status()
+    plug.poll()
+    assert plug.screen == [1]
