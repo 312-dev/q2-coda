@@ -1982,11 +1982,11 @@ def test_pulled_down_the_page_shows_no_ring_and_the_now_playing_block_takes_one(
     assert boxes(control_center(fw, world, focus=CC_NOW)) == [(163, 35, 195, 130)]
 
 
-def landed(fw, world, t):
+def landed(fw, world, t, **keys):
     """Control Center painted t ms after it came to rest open: each rounded box with the canvas's y offset then."""
     now = [100000 + t]
     fw.mock('time_now_ms', lambda *_: now[0])
-    theme(fw)
+    theme(fw, **keys)
     win, _, _ = quick_window(world)
     world[win].props.update(_cc_landed=100001)
     canvas = Canvas(fw)
@@ -2004,6 +2004,13 @@ def test_landing_open_the_blocks_overshoot_8_px_and_settle_by_280_ms(fw, world, 
     drawn = landed(fw, world, t)
     blocks = [d for d in drawn if d[0] == (20, 38, 138, 124)]
     assert blocks and {y for _, _, y in drawn} == {dy}
+
+
+@pytest.mark.parametrize('t', [50, 190])
+def test_under_reduce_motion_control_center_lands_still(fw, world, t):
+    """A spring is MO_SPATIAL (ui_kit.h): with IPOD REDUCEMOTION on the blocks are at rest from the landing."""
+    drawn = landed(fw, world, t, REDUCEMOTION='1')
+    assert drawn and {y for _, _, y in drawn} == {0}
 
 
 def test_the_sliders_fill_to_their_eased_levels(fw, world):

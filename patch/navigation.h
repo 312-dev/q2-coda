@@ -261,6 +261,7 @@ typedef struct {
     int settings_read, accent, home, battery, home_rockbox, home_groovebox, shortcut, light,
         light_day,       /* light_day: Auto's answer for now (LIGHT=2) */
         keep_lit,        /* Smart Awake (#57, keep_lit_poll) */
+        reduce_motion,   /* Reduce Motion, IPOD REDUCEMOTION (ui_kit.c motion_reduced) */
         clicker,         /* the Clicker's output (clicker.c), IPOD CLICKER */
         theme_booted,    /* theme_boot ran (ringnav_ui_load) */
         raw_ink,         /* a final colour's draw: ui_ink leaves it alone */
@@ -270,7 +271,7 @@ typedef struct {
     unsigned keep_lit_at;
     void *sel_accent; /* the row on a coloured selection, for Light Mode's ink */
     int style_depth;  /* nested style hooks (a mutable style's fallback) map nothing */
-    void *setting_label[8 + THEME_KEYS]; /* SETTING_OWN + THEME_KEYS */
+    void *setting_label[9 + THEME_KEYS]; /* SETTING_OWN + THEME_KEYS */
     unsigned tone_key;  /* the wheel key whose press ringnav_keydown silenced, 0 when none */
     unsigned tick_drop; /* tick_gate: the wheel keys whose press it dropped, bits */
     unsigned tick_at;   /* tick_gate: the last tick it passed (ringnav_sleep's dark turn) */
@@ -487,7 +488,8 @@ void diag_about_row(void *view); /* diagnostics.c, --dev builds' Save Diagnostic
 int diag_row(void *item);
 void caption_row(void *label, const unsigned *text);
 const unsigned *pod_caption(int i);
-extern const unsigned *const smart_awake_caption, *const folder_skip_caption;
+extern const unsigned *const smart_awake_caption, *const folder_skip_caption,
+    *const reduce_motion_caption;
 void caption_sel(void *view, void *item);
 void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
 /* control_center.c: Quick Settings drawn as Control Center (ringnav_quick_settings, its paint and
@@ -662,6 +664,7 @@ enum {
     SETTING_CLICKER, /* the Clicker's output: stored here, its row Controls' Key Tone row
                         (clicker.c) */
     SETTING_TIMETITLE,
+    SETTING_REDUCEMOTION, /* Reduce Motion (ui_kit.c motion_reduced), Display's last row */
     SETTING_OWN
 };
 #define INK_LABEL 1

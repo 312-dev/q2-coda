@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Settings > Display: a **Reduce Motion** switch, last on the page. On, pages cross-fade instead of sliding, Control Center lands without its bounce, the selection bar no longer leans as you turn the wheel, Cover Flow stops at its ends without bouncing, switches flip at once, and the charging screen's sweep and Up Next's level bars stand still. Scrolling, progress, the volume bar and swipe back still move.
   - Car Remote's empty state names the phone app: "Open Q2 Muse Remote on your phone".
   - Display (OLED): empty pages show a large outline glyph instead of stacked tiles, and their action is a round blue button (Scan Music Now, Turn on Wi-Fi, Turn on Streaming) whose ring shows only after the wheel is used.
   - Display (OLED): switches are larger (40x24) and their knob slides when flipped.

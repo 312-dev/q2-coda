@@ -207,7 +207,7 @@ static void th_turn(void *s, int travel, unsigned now, int n, int ms) {
         float g = th.goal < lo ? lo : th.goal > hi ? hi : th.goal;
         if (g != th.goal) {
             th.goal = g;
-            if (!th.bounced && ABS(th.pos - g) < .02f)
+            if (!th.bounced && ABS(th.pos - g) < .02f && !motion_reduced()) /* MO_SPATIAL */
                 th.pos = g + (float)dir / CF_BOUNCE, th.vel = 0, th.bounced = 1;
         } else
             th.bounced = 0;

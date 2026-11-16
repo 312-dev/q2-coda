@@ -85,8 +85,8 @@ void about_rows(void *view) {
 }
 
 /* Settings rows with a caption (docs/oled-design.md#list-row, approved as S3 on 2026-11-15): the
- * caption shows only under the selected row, which grows over CAP_MS to hold its title and the
- * caption's lines inside the accent's bar; every other captioned row stays one row high. The row's
+ * caption shows only under the selected row, which grows over CAP_MS (at once under Reduce Motion)
+ * to hold its title and the caption's lines inside the accent's bar; every other captioned row stays one row high. The row's
  * button keeps its CAP_TOP px at the item's top (set_row mapped it once; a later layout leaves it
  * alone), so the title and switch stay where they were and the item's own height, which the
  * settings list stacks by and the bar spans (navigation.c paint_selection), makes the room. The
@@ -199,20 +199,20 @@ const unsigned *pod_caption(int i) {
     };
     return i >= 0 && i < POD_COUNT ? text[i] : (const unsigned *)0;
 }
-/* Smart Awake's (navigation.c keep_lit_poll) and stock's Folder skip's (playback.c ringnav_next's
- * rollover): rows that are not pod_rows'. */
+/* Smart Awake's (navigation.c keep_lit_poll), stock's Folder skip's (playback.c ringnav_next's
+ * rollover) and Reduce Motion's (ui_kit.c motion_reduced): rows that are not pod_rows'. */
 const unsigned *const smart_awake_caption =
     W("Keeps the screen on for lyrics and art while playing");
 const unsigned *const folder_skip_caption = W("Plays on into the next folder when one ends");
+const unsigned *const reduce_motion_caption = W("Fades in place of slides, zooms and bounces");
 
 /* Captioned row i's grown height, its caption measured. */
 static int cap_full(int i) { return CAP_TOP + cap.lines[i] * CAP_LINE + CAP_FOOT; }
 /* The heights for the change's progress, the list laid out again, and the grown row kept in view,
  * the view moved by whole rows so the others stay on the list's grid. */
 static int cap_step(const void *unused) {
-    unsigned t = (unsigned)time_now_ms() - cap.at;
-    int k = t >= CAP_MS ? 256 : (int)(t * 256 / CAP_MS);
-    k = 256 - (256 - k) * (256 - k) / 256; /* ease out */
+    unsigned t = (unsigned)time_now_ms() - cap.at, ms = (unsigned)motion_ms(CAP_MS, MO_SPATIAL);
+    int k = t >= ms ? 256 : motion_ease((int)(t * 1000 / ms), EASE_QUAD_OUT) * 256 / 1000;
     for (int i = 0; i < CAP_MAX; ++i) {
         void *item = cap.item[i];
         if (!item) continue;

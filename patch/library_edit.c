@@ -20,7 +20,7 @@
  * left, its words moved right of it, each row's chevron gives way to a grip, and a hint shows under
  * the rows. Home is laid out as Full while it is open (theme_engine.c ipod_home). A finger on a
  * row's grip (the last LR_GRIP_ZONE px) drags it at once, a finger held on a row drags it after
- * LR_HOLD_MS; the rows it passes slide aside over LR_SLIDE_MS, the list scrolls while the finger is
+ * LR_HOLD_MS; the rows it passes slide aside over LR_SLIDE_MS (at once under Reduce Motion), the list scrolls while the finger is
  * within LR_EDGE px of its top or bottom, and the lift puts the row in its place and saves. Center
  * lifts the selected row (drawn larger, in Inter Medium, on a raised card), the wheel carries it,
  * Center puts it down and saves; Return while it is carried puts it back where it was. Play/Pause,
@@ -397,9 +397,9 @@ void lr_edit_labels(void *view, int on) {
 static int lr_slide_step(const void *info) {
     (void)info;
     if (!lr.view) return lr.slide = 0;
-    unsigned t = (unsigned)time_now_ms() - lr.slide_at;
-    int left = t >= LR_SLIDE_MS ? 0 : 1024 - (int)(t * 1024 / LR_SLIDE_MS);
-    int ease = 1024 - left * left / 1024 * left / 1024;
+    unsigned t = (unsigned)time_now_ms() - lr.slide_at, ms = (unsigned)motion_ms(LR_SLIDE_MS, MO_SPATIAL);
+    int left = t >= ms ? 0 : 1000 - (int)(t * 1000 / ms);
+    int ease = motion_ease(1000 - left, EASE_CUBIC_OUT) * 1024 / 1000;
     for (unsigned i = 0, n = widget_count_children(lr.view); i < n; ++i) {
         void *row = widget_get_child(lr.view, i);
         if (row == lr.lifted && lr.drag) continue; /* the finger's */

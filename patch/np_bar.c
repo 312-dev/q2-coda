@@ -344,7 +344,8 @@ void np_mode_step(int repeat, int dir) {
  * under its centre while on; Repeat One has its own glyph. Radio is the antenna in Text Secondary,
  * or while the playing app plays a radio (addon.c addon_radio) an NP_PILL wide accent pill holding
  * the antenna and "Radio": turning on, the pill grows from the glyph's width over NP_GROW_MS and
- * the gaps shrink with it, the word fading in over the last part (back the same way off). While
+ * the gaps shrink with it, the word fading in over the last part (back the same way off; at once
+ * under Reduce Motion). While
  * radio is on, shuffle and repeat are NP_DIM and ignore taps and the Centre cycle: the app picks
  * the order. The one the Centre cycle's wheel sets (np_stage) stands in a Text Primary outline,
  * and a tapped one on a #2C2C2E square that fades out over NP_PRESS_MS
@@ -385,9 +386,8 @@ static int pill_w(int *word) {
     int on = addon_radio();
     unsigned now = (unsigned)time_now_ms();
     if (!rad.to) rad.from = rad.to = on ? NP_PILL : NP_BTN, rad.on = on; /* first paint: no grow */
-    int t = (int)(now - rad.at) * 100 / NP_GROW_MS;
-    if (t > 100) t = 100;
-    int e = 100 - (100 - t) * (100 - t) / 100, w = rad.from + (rad.to - rad.from) * e / 100;
+    int ms = motion_ms(NP_GROW_MS, MO_SPATIAL), t = ms ? (int)(now - rad.at) * 1000 / ms : 1000;
+    int e = motion_ease(t, EASE_QUAD_OUT) / 10, w = rad.from + (rad.to - rad.from) * e / 100;
     if (on != rad.on) /* from where it is now, towards the other end */
         rad.on = on, rad.from = w, rad.to = on ? NP_PILL : NP_BTN, rad.at = now;
     if (w != rad.to && !rad.timer) rad.timer = timer_add(row_frame, (void *)0, 16);

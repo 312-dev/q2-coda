@@ -44,8 +44,10 @@ void tilt_end(void *w, int dir) {
 
 /* The lean to draw now: the wheel's while a finger holds it, else a spring back to 0. At an end
  * (tilt_end), turning on that way holds it full: each tick there moves nothing, so the leftover
- * travel would drop it to nothing and build it again. Turning back leaves the end. */
+ * travel would drop it to nothing and build it again. Turning back leaves the end. A lean is
+ * MO_SPATIAL (ui_kit.h): under Reduce Motion there is none, the bar steps without leaning. */
 static int tilt_now(void) {
+    if (motion_reduced()) return tilt.end = 0;
     int part = wheel_part();
     if (!wheel_held || wheel_raw || tilt.end_w != tilt.w) tilt.end = 0;
     if (tilt.end && part * tilt.end >= 0) return tilt.end * 256;
@@ -54,8 +56,8 @@ static int tilt_now(void) {
     if (!tilt.at) return 0;
     unsigned t = (unsigned)time_now_ms() - tilt.at;
     if (t >= TILT_SPRING_MS) return 0;
-    int k = 256 - (int)(t * 256 / TILT_SPRING_MS); /* cubic-bezier(.2,0,0,1), near enough */
-    return tilt.from * (k * k / 256 * k / 256) / 256;
+    /* cubic out, cubic-bezier(.2,0,0,1) near enough */
+    return tilt.from * (1000 - motion_ease((int)(t * 1000 / TILT_SPRING_MS), EASE_CUBIC_OUT)) / 1000;
 }
 
 /* Each UI loop pass: the bar's box painted again while its lean changes; a lift starts a spring. */
@@ -87,8 +89,8 @@ int tilt_clip(void *canvas, int *old) {
     return 1;
 }
 
-/* a's ease, 1 - (1 - a)^2, both in 256ths */
-static int ease(int a) { return 256 - (256 - a) * (256 - a) / 256; }
+/* a's ease, 1 - (1 - a)^2 (quadratic out), both in 256ths */
+static int ease(int a) { return motion_ease(a * 1000 / 256, EASE_QUAD_OUT) * 256 / 1000; }
 
 /* Before the bar paints (navigation.c paint_selection): bar moved and grown by the lean, and the
  * shadow under it. w's bar is the one tilt_poll watches from now. */

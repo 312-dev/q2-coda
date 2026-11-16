@@ -213,11 +213,12 @@ static int cc_ring_wake(void *win) {
     return !was;
 }
 
-/* The blocks' offset from rest, in pixels down, CC_SPRING_MS from the landing (cc_springs). */
+/* The blocks' offset from rest, in pixels down, CC_SPRING_MS from the landing (cc_springs). A
+ * spring is MO_SPATIAL (ui_kit.h): under Reduce Motion the blocks land still. */
 static int cc_spring(void *win) {
     unsigned at = (unsigned)widget_get_prop_int(win, CC_LANDED, 0),
              t = (unsigned)time_now_ms() - (at - 1);
-    if (!at || t >= CC_SPRING_MS) return 0;
+    if (!at || t >= (unsigned)motion_ms(CC_SPRING_MS, MO_SPATIAL)) return 0;
     unsigned k = t / CC_SPRING_STEP, f = t % CC_SPRING_STEP;
     int q =
         (cc_springs[k] * (int)(CC_SPRING_STEP - f) + cc_springs[k + 1] * (int)f) / CC_SPRING_STEP;
