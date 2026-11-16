@@ -1586,6 +1586,21 @@ static void cat_avail(int slot) {
     fclose(f);
 }
 
+/* Autostart: with Streaming Songs on, each catalogue app signed in (catalogue_signed's test) is
+ * started in the background once, at boot or when the setting is turned on, as a catplay starts it
+ * (addon.c addon_wake), so its catalogue, covers and play reports catch up without its page opened;
+ * it idle-exits as it would from its page. A signed-out app, or Streaming Songs off, starts
+ * nothing. cat_started: done since the setting last turned on (catalogue_changed clears it). */
+static int cat_started __attribute__((section(".scratch")));
+static void cat_autostart(void) {
+    char path[64];
+    cat_started = 1;
+    for (int i = 0; i < cat.napps; ++i) {
+        tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/credentials", cat.app[i].id);
+        if (!access(path, 0)) addon_wake(cat.app[i].id);
+    }
+}
+
 static void ratings_in(int slot);
 static void catplay_poll(void);
 void catalogue_poll(void) {
@@ -1595,8 +1610,10 @@ void catalogue_poll(void) {
     cat.polled = now;
     if (!catalogue_on()) return;
     /* not while a job runs: it reads the slots */
-    if (!cat.running && (!cat.scanned || now - cat.scanned >= CAT_SCAN_MS))
+    if (!cat.running && (!cat.scanned || now - cat.scanned >= CAT_SCAN_MS)) {
         cat.scanned = now | 1, cat_scan();
+        if (!cat_started && card_mounted()) cat_autostart(); /* the first scan with the card */
+    }
     int up = 0;
     for (int i = 0; i < cat.napps; ++i) {
         char path[48], raw[256], v[8];
@@ -1662,6 +1679,7 @@ int catalogue_signed(char *id, char *name, unsigned size) {
 /* The setting, turned on or off: the union starts or stops, lists query again. */
 void catalogue_changed(void) {
     if (!catalogue_on()) cat_detach();
+    cat_started = 0; /* on again: the signed-in apps start at the next poll */
     cat.scanned = 0, cat.polled = 0;
     ++library_gen;
     cat.gen = library_gen;
@@ -1814,7 +1832,7 @@ int catalogue_load(void *q, int *at, void **own) {
     if (!server) return 0;
     void *start = *at >= 0 && (unsigned)*at < n ? deque_at(q, (unsigned)*at) : 0;
     if (start && catalogue_unavailable(start)) {
-        toast(catalogue_on() ? "Not available offline" : "Turn on Local + Server to play it");
+        toast(catalogue_on() ? "Not available offline" : "Turn on Streaming Songs to play it");
         return 2;
     }
     const char *sp = start ? P(start, REC_PATH) : 0;

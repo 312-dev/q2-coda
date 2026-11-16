@@ -1432,3 +1432,51 @@ def test_cover_flow_s_empty_page_looks_for_music_on_the_card(rig, tree, music):
     rig.fw.mock('fw_readdir', readdir)
     assert rig.fw.fn('cf_empty__card_has_music', C.c_int)() == music
     assert not [p for p in opened if '/.' in p]
+
+
+def autostart_rig(rig, fw, creds=True, source=1):
+    rig.source = source
+    rig.files.files[f'/mnt/mmc/.{APP}/q2-{APP}'] = b''
+    if creds:
+        rig.files.files[f'/mnt/mmc/.{APP}/credentials'] = b'{}'
+    started = []
+    fw.mock('fw_system', lambda cmd, *_: started.append(C.string_at(cmd)) or 0)
+    return started
+
+
+def test_a_signed_in_catalogue_app_starts_once_at_boot_with_streaming_songs_on(rig, fw):
+    """Its catalogue, covers and play reports catch up without its page opened; it idle-exits as before."""
+    started = autostart_rig(rig, fw)
+    rig.poll(1)
+    assert started == [f'/bin/sh /mnt/mmc/.{APP}/run'.encode()] and b'libsource' in rig.files.files['/tmp/q2-addon.caps']
+    assert rig.files.files['/tmp/q2-addon.library'] == b'server\n'
+    rig.poll(25)  # past the next scans: started once
+    assert len(started) == 1
+
+
+@pytest.mark.parametrize('creds, source', [(False, 1), (True, 0), (False, 0)])
+def test_a_signed_out_app_or_streaming_songs_off_starts_nothing(rig, fw, creds, source):
+    started = autostart_rig(rig, fw, creds, source)
+    rig.poll(25)
+    assert started == []
+
+
+def test_turning_streaming_songs_on_starts_the_signed_in_app(rig, fw):
+    started = autostart_rig(rig, fw, source=0)
+    rig.poll(2)
+    assert started == []
+    assert fw.fn('library_source_toggle', C.c_int)() == 1
+    rig.poll(1)
+    assert started == [f'/bin/sh /mnt/mmc/.{APP}/run'.encode()]
+
+
+def test_streaming_songs_off_and_on_again_starts_the_app_again(rig, fw):
+    """Off pauses the app (it reads the state file); on again starts it if it has exited since."""
+    started = autostart_rig(rig, fw)
+    rig.poll(1)
+    toggle = fw.fn('library_source_toggle', C.c_int)
+    assert toggle() == 1 and rig.files.files['/tmp/q2-addon.library'] == b'local\n'  # no catalogue.tsv: no ask
+    rig.poll(2)
+    assert toggle() == 1
+    rig.poll(1)
+    assert started == [f'/bin/sh /mnt/mmc/.{APP}/run'.encode()] * 2
