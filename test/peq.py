@@ -958,7 +958,7 @@ def editor_check(lib, tmp):
     assert title() == 'Band 1'
     click('Channels Left'); ui.shim_return()
     # Balance one row opens a picker, L 12 to R 12 dB in 0.5 dB steps, on the current value.
-    click('Balance Centre'); assert title() == 'Balance'
+    click('Balance Center'); assert title() == 'Balance'
     assert (ui.shim_selection(), ui.shim_offset()) == (24, 24 * 48 - 96)  # 5 rows of 48 shown
     click('R 12.0 dB'); assert title() == ''; click('Balance R 12.0 dB')
     assert (ui.shim_selection(), ui.shim_offset()) == (48, 49 * 48 - 240)  # clamped to the end
@@ -1016,7 +1016,7 @@ def editor_check(lib, tmp):
     before = active.read_bytes()
     click('Reset to defaults')
     assert told() == 'Reset; choose Apply to activate' and active.read_bytes() == before
-    assert ui.shim_click(b'Preamp Auto (0.0 dB)', 2) and ui.shim_click(b'Balance Centre', 2)
+    assert ui.shim_click(b'Preamp Auto (0.0 dB)', 2) and ui.shim_click(b'Balance Center', 2)
     assert not ui.shim_click(b'Presets ', 2)  # the draft is no longer a named preset
     click('Apply changes')
     r = read()

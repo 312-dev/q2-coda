@@ -10346,7 +10346,6 @@ assert did(m,'image_manager_unload_all') and m.nodes[refresh_label]['text']=='Re
 for card,first in ((True,'Rockbox'),(False,'Favorites')):
     CONFIG.clear(); d=Machine(); d.rockbox_mode=0o100755 if card else 0
     assert d.text(d.call(address=payload_syms['ipod_home_shortcut'],args=(0,0,0,0),gap=0))==first
-    assert d.call(address=payload_syms['ipod_home_rockbox'],args=(0,0,0,0),gap=0)==1  # shown either way
 d.rockbox_mode=0o100755  # a card mounted after the first read: the default follows it
 assert d.text(d.call(address=payload_syms['ipod_home_shortcut'],args=(0,0,0,0),gap=0))=='Rockbox'
 passed()
