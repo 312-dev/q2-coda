@@ -3559,8 +3559,8 @@ class QueueMachine(Machine):
     def mcl(self,k): return signed(self.get(O[k]))
     def dialog(self):
         self.view=self.node('scroll_view','scroll_view',[self.node('list_item') for _ in range(5)])
-        self.title=self.node('hscroll_label','scrlabel_title'); self.back=self.node('image','img_return')
-        return self.node('dialog','sortselect_dialog',[self.node('view','view_navbar',[self.title,self.back]),
+        self.title=self.node('hscroll_label','scrlabel_title'); self.dlg_return=self.node('image','img_return')  # not back: a Machine's back() is Return
+        return self.node('dialog','sortselect_dialog',[self.node('view','view_navbar',[self.title,self.dlg_return]),
                                                        self.node('list_view','list_view',[self.view])])
     def bootvol(self):  # stock's Boot volume page, which crossfade.c re-dresses
         self.slider=self.node('slider','slider_bootvol'); self.vol=self.node('label','label_vol')
@@ -4126,7 +4126,7 @@ assert m.shut==1 and not opens(m),(m.shut,opens(m)); passed()
 m=QueueMachine(); page=m.top
 m.press(5000); assert m.release()==1
 m.press(6000); assert m.hold()==11 and m.nodes[m.top]['name']=='sortselect_dialog'
-assert {c[1:] for c in m.calls if c[0]=='widget_off_by_func'}=={(m.top,O['EVT_KEY_UP'],O['SORTSELECT_KEYUP']),(m.back,O['EVT_CLICK'],O['SORTSELECT_CLOSE'])}
+assert {c[1:] for c in m.calls if c[0]=='widget_off_by_func'}=={(m.top,O['EVT_KEY_UP'],O['SORTSELECT_KEYUP']),(m.dlg_return,O['EVT_CLICK'],O['SORTSELECT_CLOSE'])}
 assert m.nodes[m.title]['text']=='Row 0' and m.labels()==SONG_MENU
 assert m.hold()==0 and not any(c[0]=='navigator_to' for c in m.calls) and len(m.stack)==2
 assert m.release()==0
@@ -7862,7 +7862,7 @@ covers=m.nodes[m.slide]['children']; assert len(covers)==3
 assert all(m.nodes[c]['image'].startswith('file:///mnt/mmc/.coverflow/') for c in covers)
 assert 'Album 0' in m.texts(); passed()
 m.press(3); assert m.hold()==11 and m.nodes[m.title]['text']=='Album 0'
-f,ctx=m.handler(m.back,O['EVT_CLICK']); m.call(O['KEY_RETURN'],address=f,args=(ctx,m.event,0,0),gap=0)
+f,ctx=m.handler(m.dlg_return,O['EVT_CLICK']); m.call(O['KEY_RETURN'],address=f,args=(ctx,m.event,0,0),gap=0)
 assert m.top==page and m.release()==0; passed()
 # Covers step like Home: fast ticks retarget one animator, never stock next/previous, whose
 # scroll_to orphans the running animator.
@@ -8165,7 +8165,7 @@ class AlbumRateMachine(FileMocks,CoverflowMachine):
     def hearts(self): return [self.nodes[h]['image'] for h in self.nodes[self.panel()]['children'][1:]]
     def menu(self):  # the hold's rows, then Return closes the dialog
         self.t=getattr(self,'t',7000)+1; self.press(self.t); assert self.hold()==11 and self.release()==0
-        rows=self.labels(); f,ctx=self.handler(self.back,O['EVT_CLICK']); self.call(O['KEY_RETURN'],address=f,args=(ctx,self.event,0,0),gap=0)
+        rows=self.labels(); f,ctx=self.handler(self.dlg_return,O['EVT_CLICK']); self.call(O['KEY_RETURN'],address=f,args=(ctx,self.event,0,0),gap=0)
         return rows
     def rate(self,want):  # Rate album, wheel down to 0 then up to want, Centre
         toasts=len(self.toasts)
