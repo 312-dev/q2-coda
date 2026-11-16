@@ -10,7 +10,8 @@
  *   Pause or Play once the player shows it;
  * - shows the pairing code while /tmp/coda-rc.pair exists, and writes /tmp/coda-rc.pair-cancel when the
  *   user closes it.
- * Settings > Car Remote is this file's page too: the switch, the paired phones, Forget.
+ * Settings > Car Remote is this file's page too: the switch, the paired phones (Connected or Not connected,
+ * kept current while the page is open), Forget.
  * Everything the protocol needs is in the daemon; here only a few words of state. */
 #include "navigation.h"
 
@@ -28,6 +29,7 @@
 #define CR_PAIR_END "/tmp/coda-rc.pair-end"
 #define CR_PAIR_CANCEL "/tmp/coda-rc.pair-cancel"
 #define CR_PEERS "/mnt/data/coda-rc/peers"
+#define CR_ONLINE "/tmp/coda-rc.online" /* coda_rc.c online_poll: the connected phones' peer ids, 8 bytes each */
 #define CR_PEER_REC 76 /* coda_rc.c crc_peers_save: id[8] ltk[32] name[32] created[4] */
 #define CR_PEERS_MAX 8
 #define CR_QUEUE_MAX 5000 /* ponytail: a longer queue lists its first 5000 to the phone */
@@ -42,7 +44,9 @@ static struct {
     unsigned want_seq, want_at;
     void *pair_page, *page; /* the code's Dialog; Settings > Car Remote */
     char pair_code[8];      /* the code the Dialog shows */
-    int forget; /* the phone row Forget asks about, + 1 */
+    void *view;     /* Settings > Car Remote's list */
+    unsigned shown; /* what it shows (cr_page_sum) */
+    int forget;     /* the phone row Forget asks about, + 1 */
     int toast_what;
     int hearts; /* the playing song's, as rate_car_hearts; read at hearts_at for hearts_id, hearts_gen */
     unsigned hearts_at, hearts_id, hearts_gen;
@@ -73,6 +77,7 @@ static void cr_stop(void) {
     unlink(CR_QUEUE);
     unlink(CR_CMD);
     unlink(CR_PAIR);
+    unlink(CR_ONLINE);
     if (cr.pair_page) window_close(cr.pair_page);
 }
 
@@ -407,11 +412,14 @@ static void cr_pairing(void) {
     }
 }
 
+static void cr_page_poll(void);
+
 /* Every UI pass (ringnav_sleep). */
 void coda_rc_poll(void) {
     unsigned now = time_now_ms();
     if (cr.at && now - cr.at < CR_POLL_MS) return;
     cr.at = now | !now;
+    cr_page_poll();
     if (!coda_rc_enabled()) return;
     if (!cr.started_at || (now - cr.started_at >= CR_RESTART_MS && !cr_running())) cr_start();
     cr_now();
@@ -424,16 +432,29 @@ void coda_rc_poll(void) {
 
 static int cr_page_show(const void *unused);
 
-/* The paired phones' names, from the daemon's file; their count */
-static int cr_peers(char names[CR_PEERS_MAX][32]) {
-    unsigned char b[CR_PEERS_MAX * CR_PEER_REC + 2];
+/* The paired phones' names, from the daemon's file, and whether each is connected now (its peer id in
+ * CR_ONLINE); their count. *sum, when asked, is a hash of all the page shows: names, ids, connections and
+ * the switch. */
+static int cr_peers(char names[CR_PEERS_MAX][32], int online[CR_PEERS_MAX], unsigned *sum) {
+    unsigned char b[CR_PEERS_MAX * CR_PEER_REC + 2], on[(CR_PEERS_MAX + 1) * 8 + 2];
     unsigned n = state_read(CR_PEERS, (char *)b, sizeof b) / CR_PEER_REC;
-    for (unsigned i = 0; i < n && i < CR_PEERS_MAX; ++i) {
-        memcpy(names[i], b + 1 + i * CR_PEER_REC + 40, 32);
+    unsigned k = state_read(CR_ONLINE, (char *)on, sizeof on) / 8;
+    int sw = coda_rc_enabled();
+    unsigned h = hash_bytes(FNV_SEED, (const unsigned char *)&sw, sizeof sw);
+    if (n > CR_PEERS_MAX) n = CR_PEERS_MAX;
+    for (unsigned i = 0; i < n; ++i) {
+        const unsigned char *id = b + 1 + i * CR_PEER_REC;
+        memcpy(names[i], id + 40, 32);
         names[i][31] = 0;
+        online[i] = 0;
+        for (unsigned j = 0; j < k; ++j) online[i] |= !memcmp(on + 1 + j * 8, id, 8);
+        h = hash_bytes(h, id, 8);
+        h = hash_bytes(h, (const unsigned char *)names[i], 32);
+        h = hash_bytes(h, (const unsigned char *)&online[i], sizeof online[i]);
     }
     memset(b, 0, sizeof b); /* the keys were in it */
-    return n > CR_PEERS_MAX ? CR_PEERS_MAX : (int)n;
+    if (sum) *sum = h;
+    return (int)n;
 }
 
 /* Forget: the phone's record out of the file (written whole, then renamed); the daemon closes its
@@ -473,10 +494,15 @@ static int cr_click(void *ctx, void *event) {
     return 0;
 }
 
-static int cr_page_show(const void *unused) {
+/* ctx 0 rebuilds the page with the switch selected; 1 (a phone paired, forgotten, connected or gone) keeps
+ * the selected row where it was. */
+static int cr_page_show(const void *ctx) {
     if (!cr.page) return 0;
     char names[CR_PEERS_MAX][32];
-    int n = cr_peers(names);
+    int online[CR_PEERS_MAX];
+    int n = cr_peers(names, online, &cr.shown);
+    int sel = ctx && cr.view ? widget_get_prop_int(cr.view, SEL, 0) : 0;
+    cr.view = 0;
     if (cr.forget) {
         char q[64];
         snprintf(q, sizeof q, "Forget \"%s\"?", cr.forget <= n ? names[cr.forget - 1] : "phone");
@@ -490,18 +516,36 @@ static int cr_page_show(const void *unused) {
     list_toggle(widget_get_child(page_row_detail(view, 0, "", 0, cr_click), 0), "Car Remote", coda_rc_enabled());
     int rh = page_h(48); /* a gap before the phones, clear as the rows */
     widget_use_style(list_item_create(view, 0, rh, 375, rh), "s_listitem_black");
-    for (int i = 0; i < n; ++i) page_row_detail(view, 2 + i, names[i], "Paired", cr_click);
+    for (int i = 0; i < n; ++i)
+        page_row_detail(view, 2 + i, names[i], online[i] ? "Connected" : "Not connected", cr_click);
     /* none: the empty state under the switch (docs/oled-design.md#empty-and-offline); a phone
      * pairs from its own app, so there is no row to press */
     static const empty_t none = { "car-profile", "No Paired Phones",
                                   "Open Q2 Muse Remote on your phone", 0 };
-    if (!n) empty_state(cr.page, feedback_below(view), &none, 0);
-    ringnav_select(view, 0, 2 + n);
+    empty_state(cr.page, feedback_below(view), n ? 0 : &none, 0);
+    if (sel >= 2 + n) sel = n ? 1 + n : 0; /* a gone last phone's row: the row above */
+    if (sel == 1) sel = 0;                 /* the gap is no stop */
+    ringnav_select(view, sel, 2 + n);
+    cr.view = view;
     return 0;
+}
+
+/* Settings > Car Remote while it is open, every poll: rebuilt when what it shows has changed, so a phone
+ * paired, forgotten, connected or gone shows at once. Not under the Forget Dialog, which rebuilds it as it
+ * goes. */
+static void cr_page_poll(void) {
+    if (!cr.page || cr.forget) return;
+    char names[CR_PEERS_MAX][32];
+    int online[CR_PEERS_MAX];
+    unsigned sum;
+    cr_peers(names, online, &sum);
+    if (sum != cr.shown) timer_add(cr_page_show, (void *)1, 0);
+    cr.shown = sum; /* one rebuild per change, however long the timer takes */
 }
 
 static int cr_page_closed(void *ctx, void *event) {
     cr.page = 0;
+    cr.view = 0;
     cr.forget = 0;
     return 0;
 }
