@@ -141,11 +141,8 @@ static void sp_text(void *canvas, const unsigned *s, unsigned n, int x, int w, i
     I(canvas, CANVAS_ALIGN_V) = align_v;
     I(canvas, CANVAS_ALIGN_H) = align_h;
 }
-static unsigned wide(unsigned *out, unsigned n, const char *s) {
-    unsigned k = 0;
-    while (k < n && s[k]) out[k] = (unsigned char)s[k], ++k;
-    return k;
-}
+/* s's UTF-8 as characters in out, n - 1 of them at most and a 0 */
+static unsigned wide(unsigned *out, unsigned n, const char *s) { return ar_wide(s, out, n); }
 
 /* ringnav_paint, after the window's children: the switch row, the value, the track and the range
  * ends, in the window's coordinates. */

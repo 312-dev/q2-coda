@@ -750,6 +750,8 @@ void modal_playlist_more(void *win);
 void album_local_load(void *win);
 int album_local_on(void *win);
 void album_local_paint(void *w, void *canvas);
+/* artist_page.c: s's UTF-8 as characters in out (at most n - 1, then 0) */
+unsigned ar_wide(const char *s, unsigned *out, unsigned n);
 /* artist_page.c: an artist's page's pair of stops and its monogram over the status bar; its
  * text painter, which Now Playing's About (np_about.c) paints with too */
 int pair_key(void *top, void *w, int dir);

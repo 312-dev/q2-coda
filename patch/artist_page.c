@@ -87,7 +87,7 @@ static int ar_gone(void *w, void *event) {
 }
 
 /* s's UTF-8 as characters in out (at most n - 1, then 0); a malformed byte stands for itself. */
-static unsigned ar_wide(const char *s, unsigned *out, unsigned n) {
+unsigned ar_wide(const char *s, unsigned *out, unsigned n) {
     unsigned k = 0;
     const unsigned char *p = (const unsigned char *)s;
     while (p && *p && k + 1 < n) {
