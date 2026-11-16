@@ -10474,11 +10474,6 @@ assert [n for n in names if n in ('fclose','save_memoryplay_info','player_stop',
 m,names=rockbox(False)
 assert not {'fopen','player_stop','system'} & set(names)
 assert [m.text(c[1]) for c in m.calls if c[0]=='navigator_to_with_context']==['dialog/msginfo_dialog']; passed()
-# ipod_home_rockbox follows the card.
-m=Machine(); m.rockbox_mode=0; m.config['SHORTCUT']='0'
-assert m.call(address=payload_syms['ipod_home_rockbox'],args=(0,0,0,0),gap=0)==0
-m.rockbox_mode=0o100755
-assert m.call(address=payload_syms['ipod_home_rockbox'],args=(0,0,0,0),gap=0)==1; passed()
 # The wheel walks onto the new rows and Centre clicks them, as any fixed settings list.
 m,view,_=display({},sub=0)
 m.paint(view)
@@ -10839,7 +10834,7 @@ passed()
 # runs the migration too; here nothing boots, so no preset is applied and Home reads as stored, Split).
 for stored in (None,'0','1','2','3','9'):
     m,view,kids=appearance({} if stored is None else {'THEME':stored})
-    assert [row_text(r) for r in kids]==['Light Mode: Off','Accent: Blue','Home: Split','Shortcut: Rockbox','Battery: Icon','Song Artist: Inline','Song Length: Albums','Track Time: Remaining'],stored
+    assert [row_text(r) for r in kids]==['Light Mode: Off','Accent: Blue','Home: Split','Battery: Icon','Song Artist: Inline','Song Length: Albums','Track Time: Remaining'],stored
 passed()
 # Songs' action bar on OLED's set (its action_row; navigation.c action_row): what stock builds in it (it does again on a
 # refresh) takes the plain row's shape: the label reads Shuffle after the theme's glyph (list.shuffle, SHUFFLE_LABEL_DX
@@ -10999,13 +10994,13 @@ assert reads[at:at+4]==[('OLED_ACCENT',str(OLED_ACCENT))]+[(o['key'],str(o['def'
 # Battery takes Icon or Percent (theme.xml's values): the row cycles those two and writes the key as usual. A stored
 # value OLED does not offer (Icon + Percent, Percent Inside) reads as Icon, OLED's default, and stays stored until the
 # row moves it on; a key that is not stored reads as Icon.
-m,view,kids=appearance({}); row=kids[4]; f,ctx=m.handler(m.nodes[row]['children'][0],O['EVT_CLICK'])
+m,view,kids=appearance({}); row=kids[3]; f,ctx=m.handler(m.nodes[row]['children'][0],O['EVT_CLICK'])
 assert row_text(row)=='Battery: Icon'
 for value,name in ((1,'Percent'),(0,'Icon'),(1,'Percent')):
     m.calls=[]; assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0
     assert [(c[1],m.text(c[3])) for c in m.calls if c[0]=='write_int_config']==[(value,'BATTERY')] and row_text(row)=='Battery: '+name
 for stored in ('2','3'):
-    m,view,kids=appearance({'BATTERY':stored}); row=kids[4]; f,ctx=m.handler(m.nodes[row]['children'][0],O['EVT_CLICK'])
+    m,view,kids=appearance({'BATTERY':stored}); row=kids[3]; f,ctx=m.handler(m.nodes[row]['children'][0],O['EVT_CLICK'])
     assert row_text(row)=='Battery: Icon' and not [c for c in m.calls if c[0]=='write_int_config'] and m.config['BATTERY']==stored
     assert m.call(address=payload_syms['ipod_battery'],args=(0,0,0,0),gap=0)==0
     m.calls=[]; m.call(address=f,args=(ctx,m.event,0,0),gap=0)  # from what it reads as: on to Percent
