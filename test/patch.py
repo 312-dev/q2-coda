@@ -15269,11 +15269,11 @@ assert m.nodes[title]['text']=='CFW. Version' and m.nodes[value]['text']==f"{VER
 assert not m.nodes[button].get('handlers') and not m.nodes[button].get('name'); passed()
 m.nodes[view]['children']=rows[:7]; assert m.call(address=HOOKS['systemset_about_page_init'][0],args=(m.top,5,0,0),gap=0)==0 and m.nodes[view]['children']==rows[:7]; passed()
 
-# Network Update (netupdate.c): System Update's second row, built by stock's own row builder
-# (0x4c8660), is renamed "2" so stock's click (atoi of the name: 0 TF card, 1 Shanling) skips it, and
-# fetches the latest GitHub release's update.tar.sig, then its update.tar over verified TLS to the card
-# (a .part, renamed once its signature checks, docs/internals.md#release-signatures), then runs stock's
-# TF card update (0x4c7eb4). A failure keeps the old update.tar.
+# Software Update's download (netupdate.c): stock's System Update page's second row, built by stock's own
+# row builder (0x4c8660), is renamed "2" so stock's click (atoi of the name: 0 TF card, 1 Shanling) skips
+# it, and opens Software Update (sw_update.c). Its download fetches the latest GitHub release's
+# update.tar.sig, then its update.tar over verified TLS to the card (a .part, renamed once its signature
+# checks, docs/internals.md#release-signatures). A failure keeps the old update.tar.
 # The payload's release key is the manifest's; these checks swap in a key made for this run, whose private half signs.
 import signing
 assert (B/'patch.bin').read_bytes()[payload_syms['release_key']-BASE:][:32].hex()==manifest['signing_key']
@@ -15301,45 +15301,42 @@ for i in range(2):
 tf,online=(m.nodes[r]['children'][0] for r in m.nodes[view]['children'])
 assert m.call(address=HOOKS['systemset_fwupdate_page_init'][0],args=(m.top,5,0,0),gap=0,count=5_000_000)==0
 assert m.calls[0][:3]==('stock_fwupdate',m.top,5) and m.nodes[tf]['name']=='0' and m.nodes[online]['name']=='2'
-label=m.nodes[online]['children'][0]; assert m.nodes[label]['type']=='hscroll_label'
-def press():
-    f,ctx=[(f,c) for t,f,c in m.nodes[online]['handlers'] if t==O['EVT_CLICK']][-1]
-    assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0; m.advance(0,clear=False)
+assert [f for t,f,c in m.nodes[online]['handlers'] if t==O['EVT_CLICK']]==[payload_syms['sw_update_open']]; passed()
 UPDATE='/mnt/mmc/update.tar'; ASSET='update.tar'
 RELEASES=f"https://github.com/{manifest['update_repo']}/releases"  # build.py --update-repo
 m.files[UPDATE]=bytearray(b'old')
-m.wifi=-1; press(); assert m.toasts[-1][3]=='Connect to Wi-Fi first' and not m.threads; m.wifi=3
-def fetch(codes,tag,reply=b'',done=500,sig=None):
-    press(); assert m.nodes[label]['text']=='Checking…'
+NU_RUNNING,NU_DONE=1,2; out=m.alloc(8)
+def poll(): return m.call(address=payload_syms['netupdate_poll'],args=(out,out+4,0,0),gap=0)
+def start(): return m.call(address=payload_syms['netupdate_start'],args=(0,0,0,0),gap=0)
+def said(state): return m.text(m.call(address=payload_syms['netupdate_said'],args=(state,0,0,0),gap=0))
+def fetch(codes,tag,reply=b'',sig=None):
+    """Software Update's Download and Install (sw_update.c drives netupdate_start and netupdate_poll): its state."""
+    assert start()==1
     m.codes=list(codes); m.location=f'{RELEASES}/tag/{tag}'; m.reply=reply; m.sig=update_sig(reply,tag) if sig is None else sig
-    m.advance(500,clear=False)  # while it runs: the percentage, and standby and auto power-off wait
-    assert m.nodes[label]['text']=='Checking…' and ('reset_poweroptions_timer',1,1,0) in [c[:4] for c in m.calls]
+    assert poll()==NU_RUNNING and ('reset_poweroptions_timer',1,1,0) in [c[:4] for c in m.calls]  # standby waits
     worker,arg=m.threads[-1]; assert m.call(address=worker,args=(arg,0,0,0),gap=0,count=200_000_000)==0
-    threads=len(m.threads); press(); assert len(m.threads)==threads  # ended, not yet joined: nothing
-    m.advance(done,clear=False)
-    assert ('widget_set_tr_text',label) in [c[:2] for c in m.calls] and UPDATE+'.part' not in m.files
-fetch([302,200,200],'9.9.9',b'TAR'*100)
+    assert start()==0  # ended, not yet joined: no second
+    state=poll(); assert UPDATE+'.part' not in m.files; return state
+assert fetch([302,200,200],'9.9.9',b'TAR'*100)==NU_DONE
 assert m.opts[10002]==f'{RELEASES}/download/9.9.9/{ASSET}' and m.opts[52]==1
 assert m.opts[10065]=='/etc/scrobble-ca.pem' and m.opts[64]==1 and m.opts[81]==2 and m.opts[99]==1 and 20108 not in m.opts
-assert bytes(m.files[UPDATE])==b'TAR'*100 and 'fwupdate_tf' in [c[0] for c in m.calls]
+assert bytes(m.files[UPDATE])==b'TAR'*100
 m.files[UPDATE]=bytearray(b'old')
-fetch([302,200,404],'9.9.9'); assert m.toasts[-1][3]=='No update for this build' and m.files[UPDATE]==b'old'
-fetch([302,404],'9.9.9'); assert m.toasts[-1][3]=='Release not signed: not installed' and m.files[UPDATE]==b'old'
-flashes=lambda: [c[0] for c in m.calls].count('fwupdate_tf'); flashed=flashes()
-fetch([302,200,200],'9.9.9',b'TAR'*100,sig=update_sig(b'TAR'*99,'9.9.9'))
-assert m.toasts[-1][3]=='Signature check failed: not installed' and m.files[UPDATE]==b'old'
-fetch([302,200,200],'9.9.9',b'TAR'*100,sig=update_sig(b'TAR'*100,'9.9.8'))  # another release's: refused
-assert m.toasts[-1][3]=='Signature check failed: not installed' and m.files[UPDATE]==b'old' and flashes()==flashed
-fetch([200],'9.9.9'); assert m.toasts[-1][3]=="Can't reach GitHub"  # no redirect: no tag
+assert said(fetch([302,200,404],'9.9.9'))=='No update for this build' and m.files[UPDATE]==b'old'
+assert said(fetch([302,404],'9.9.9'))=='Release not signed: not installed' and m.files[UPDATE]==b'old'
+assert said(fetch([302,200,200],'9.9.9',b'TAR'*100,sig=update_sig(b'TAR'*99,'9.9.9')))=='Signature check failed: not installed'
+assert m.files[UPDATE]==b'old'
+assert said(fetch([302,200,200],'9.9.9',b'TAR'*100,sig=update_sig(b'TAR'*100,'9.9.8')))=='Signature check failed: not installed'
+assert m.files[UPDATE]==b'old'  # another release's: refused
+assert said(fetch([200],'9.9.9'))=="Can't reach GitHub"  # no redirect: no tag
 if not manifest['dev']:  # --dev builds have no release tag, so always fetch
-    fetch([302],VERSION); assert m.toasts[-1][3]=='Latest firmware installed' and m.files[UPDATE]==b'old'
-    fetch([302],'1.0.0'); assert m.toasts[-1][3]=='Latest firmware installed'  # older: never a downgrade
-# Leaving the page cancels before the download starts: the card may be unmounted or shared next.
-press(); m.codes=[302,200,200]; m.location=f'{RELEASES}/tag/9.9.9'; m.reply=b'NEW'; m.sig=update_sig(b'NEW','9.9.9')
-f,ctx=m.handler(label,O['EVT_DESTROY']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
+    assert said(fetch([302],VERSION))=='Latest firmware installed' and m.files[UPDATE]==b'old'
+    assert said(fetch([302],'1.0.0'))=='Latest firmware installed'  # older: never a downgrade
+# A cancel (the page left) before the download starts: the card may be unmounted or shared next.
+assert start()==1; m.codes=[302,200,200]; m.location=f'{RELEASES}/tag/9.9.9'; m.reply=b'NEW'; m.sig=update_sig(b'NEW','9.9.9')
+m.call(address=payload_syms['netupdate_cancel'],args=(0,0,0,0),gap=0)
 worker,arg=m.threads[-1]; assert m.call(address=worker,args=(arg,0,0,0),gap=0,count=5_000_000)==0
-m.advance(500,clear=False); assert m.toasts[-1][3]=='Download canceled' and m.files[UPDATE]==b'old'
-assert 'fwupdate_tf' not in [c[0] for c in m.calls]; passed()
+assert said(poll())=='Download canceled' and m.files[UPDATE]==b'old'; passed()
 
 # Q2 Shelf (netupdate.c, docs/internals.md#q2-shelf): System settings' Apps page, Check for Updates
 # then a row per app with its state from .q2/apps/<id>.tag against the list's pin, a manual install's
@@ -17350,22 +17347,8 @@ m=SmartRadio(); m.config['TOKEN']='t'; m.poll(1); m.poll(SW_IDLE); m.windows('lo
 m.call(address=payload_syms['upload_scrobbles'],args=(0,0,0,0),gap=0); m.advance(500); m.link=1
 assert m.call(address=payload_syms['upload_scrobbles'],args=(0,0,0,0),gap=0)==0 and not m.threads and m.toasts[-1][3]==SW_WAIT
 m.advance(500); assert len(m.threads)==1 and [x[3] for x in m.toasts].count('Uploading scrobbles')==1; passed()
-# The same for the other presses that start a job: Network Update's download, an Apps install and
-# Download Album Lyrics each start once, not cancelled by the held press ("Canceling…").
-m=SmartRadio(); resume=int(manifest['patch_symbols']['stock_fwupdate_trampoline'],16); m.handlers[resume]='stock_fwupdate'
-m.u.hook_add(UC_HOOK_CODE,m.hook,begin=resume,end=resume); m.mock('strcpy@GLIBC_2.0','widget_set_tr_text')
-view=m.node('scroll_view','scroll_view_fwupdate'); m.top=m.node('window','fwupdate_page',[view])
-for i in range(2):
-    row=m.node('list_item'); m.nodes[view]['children'].append(row); assert m.call(address=0x4c8660,args=(row,i,0,0),gap=0)==0
-assert m.call(address=HOOKS['systemset_fwupdate_page_init'][0],args=(m.top,5,0,0),gap=0,count=5_000_000)==0
-online=m.nodes[m.nodes[view]['children'][1]]['children'][0]; label=m.nodes[online]['children'][0]
-m.poll(1); m.poll(SW_IDLE); assert m.flag()==0; m.nodes[m.wm]['children']=[m.top]
-def nu_press():
-    f,ctx=[(f,c) for t,f,c in m.nodes[online]['handlers'] if t==O['EVT_CLICK']][-1]
-    assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0
-nu_press(); assert m.toasts[-1][3]==SW_WAIT and not m.threads
-m.advance(500); m.link=1; nu_press(); assert m.toasts[-1][3]==SW_WAIT and not m.threads
-m.advance(500,clear=False); assert len(m.threads)==1 and m.nodes[label]['text']=='Checking…'; passed()
+# The same for the other presses that start a job: an Apps install and Download Album Lyrics each start
+# once, not cancelled by the held press ("Canceling…").
 class SmartShelf(SmartMixin,ShelfMachine): pass
 m=SmartShelf({LIST:bytearray(REPO_LIST)}); m.rockbox_mode=0
 m.poll(1); m.poll(SW_IDLE); assert m.flag()==0
@@ -17578,7 +17561,8 @@ for mode in (0o100755,0):
     assert m.nodes[m.nodes[storage]['children'][1]]['text']=='Storage' and m.handler(storage,O['EVT_CLICK'])[0]==payload_syms['storage_open']
     assert m.nodes[m.nodes[controls]['children'][1]]['text']=='Controls'
     f,ctx=m.handler(controls,O['EVT_CLICK']); assert f==payload_syms['display_open'] and ctx==3
-    for b,key,page in ((date,'system_time','systemset/datetime_page'),(update,'system_update','systemset/fwupdate_page'),(reset,'system_reset','systemset/reset_page'),(about,'system_about','systemset/about_page')):
+    assert m.nodes[m.nodes[update]['children'][1]]['text']=='Software Update' and m.handler(update,O['EVT_CLICK'])[0]==payload_syms['sw_update_open']
+    for b,key,page in ((date,'system_time','systemset/datetime_page'),(reset,'system_reset','systemset/reset_page'),(about,'system_about','systemset/about_page')):
         f,ctx=m.handler(b,O['EVT_CLICK']); assert m.nodes[m.nodes[b]['children'][1]]['text']==key and m.nodes[m.nodes[b]['children'][0]]['image']==key
         m.calls=[]; assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==(page,None),key
     passed()
