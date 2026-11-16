@@ -1127,7 +1127,10 @@ interruptible: a turn mid-run starts from where it is.
   (a `ponytail:` in `feedback.c`). Stock's own confirm, which closes itself, appears and goes at once.
 - **Menu sheet, and Up Next in it:** rises 260 ms `cubic_out` while the page behind recedes to 94% and dims and
   the frost fades in; falls 180 ms ease-in (quadratic), from where a rise left it (`menu_modal.c` `sheet_run`).
-- Under Reduce Motion each fades only: 150 ms in, 120 ms out, nothing moved or scaled.
+- Under Reduce Motion the toast and the card appear at once and fade out over 120 ms; the sheet fades only, 150 ms
+  in and 120 ms out; nothing moves or scales.
+- A toast's and the card's fade is their dialog's opacity, which the shared frame timer sets (`ovm_bind`), never the
+  dialog's own paint: stock skips painting a widget whose opacity is under 9, so a dialog at 0 would stay there.
 
 ### Gestures
 
