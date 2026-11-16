@@ -1,5 +1,5 @@
 /* Battery History: the level's falls since the charger was last unplugged, kept on the flash, and
- * Power's page that graphs and lists them and exports them to the card. */
+ * Power's page that graphs them, reads one out under the wheel and exports them to the card. */
 #include "navigation.h"
 
 /* Battery History (docs/internals.md#battery-history): charge_poll hands battery_tick the level it
@@ -24,8 +24,9 @@ static struct {
         } row[BH_ROWS];
     } rec;
     int read, cable; /* cable: in at the last tick */
-    int stale;       /* a row the open page doesn't show yet: it came while the screen was off */
-    void *page, *graph, *view;
+    int cur;         /* the reading the wheel is on, its row; -1 the newest, following new ones */
+    void *page, *graph;
+    rect_t button; /* Export Log's, on screen, as last painted (0 wide: not drawn) */
 } bh __attribute__((section(".scratch")));
 
 /* The record from the flash, once; one that isn't whole, isn't this layout or whose levels don't
@@ -40,16 +41,7 @@ static void bh_load(void) {
     if (!ok) memset(&bh.rec, 0, sizeof bh.rec);
 }
 
-static void bh_fill(void);
-/* The page is open, lit and on top: not while a toast's modal loop runs under Export Log's own
- * click, where a rebuild would free the clicked row (bh.stale keeps it for the first poll after).
- */
-static int bh_live(void) {
-    return bh.page && g_backlight_status &&
-           window_manager_get_top_window(window_manager()) == bh.page;
-}
 void battery_tick(int level, int cable) {
-    if (bh.stale && bh_live()) bh_fill();
     if (level <= 0 || level > 100) return; /* not read yet */
     bh_load();
     unsigned n = bh.rec.n;
@@ -66,8 +58,7 @@ void battery_tick(int level, int cable) {
     bh.rec.row[n].pct = (unsigned)level;
     bh.rec.n = n + 1;
     BLOB_IO(BH_FILE, bh.rec, 1);
-    bh.stale = 1;
-    if (bh_live()) bh_fill();
+    if (bh.page) widget_invalidate_force(bh.page, (void *)0); /* drawn at the next lit frame */
 }
 
 /* Row i's local time, or 0 for a clock never set. */
@@ -127,8 +118,8 @@ unsigned battery_log(char *out, unsigned size) {
 }
 
 /* Export Log: the log written whole to the card's root, temp and rename; not while a computer has
- * the card (USB storage) or without a megabyte free. */
-static int bh_export(void *ctx, void *event) {
+ * the card (USB storage) or without a megabyte free. Each result is a toast. */
+static void bh_export(void) {
     char out[BH_ROWS * 64 + 64];
     if (navigator_window_is_exist("usbmode_page"))
         toast("The card is in use over USB");
@@ -140,52 +131,84 @@ static int bh_export(void *ctx, void *event) {
         unlink(BH_LOG ".tmp"), toast("Couldn't save");
     else
         toast("Saved to battery-log.txt");
-    return 0;
+}
+
+/* The page (33 v3, docs/oled-design.md#battery-history): under the status row the reading the
+ * wheel is on, "Nov 16, 03:10 · 51%", then the graph, 100% to 0% from BH_TOP to BH_BOT on screen,
+ * then Export Log, the shared grey button. The wheel moves along the readings (Centre and a tap on
+ * the button export), so the button is the page's only action and never wears the focus ring.
+ * The toasts show in the button's place: it gives way while one is up. */
+#define BH_READ_CY 70
+#define BH_TOP 99
+#define BH_BOT 199
+#define BH_LABEL_W 48 /* the axis labels' column, right-aligned, from page_x */
+#define BH_GAP 8      /* between the labels and the plot */
+#define BH_DOT 10     /* the reading's dot, white */
+#define BH_BTN_CY 237
+
+/* The reading the wheel is on. */
+static unsigned bh_cur(void) {
+    return bh.cur >= 0 && (unsigned)bh.cur < bh.rec.n ? (unsigned)bh.cur : bh.rec.n - 1;
+}
+/* Row i as the readout's "Nov 16, 3:10 PM · 51%" (12-hour as the status bar's unless 24-hour is
+ * on), "+1:23 · 51%" for a clock never set (the time since the start), "51%" for one lost since. */
+static void bh_readout(char *s, unsigned size, unsigned i) {
+    static const char months[12][4] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    int buf[11];
+    const int *tm = bh_tm(i, buf);
+    unsigned at = bh.rec.row[i].at, from = bh.rec.row[0].at, m = (at - from) / 60,
+             pct = bh.rec.row[i].pct;
+    if (tm && (unsigned)tm[4] <= 11 && g_time24h_flag)
+        tk_snprintf(s, size, "%s %d, %02d:%02d \xc2\xb7 %u%%", months[tm[4]], tm[3], tm[2], tm[1], pct);
+    else if (tm && (unsigned)tm[4] <= 11)
+        tk_snprintf(s, size, "%s %d, %d:%02d %s \xc2\xb7 %u%%", months[tm[4]], tm[3],
+                    (tm[2] + 11) % 12 + 1, tm[1], tm[2] < 12 ? "AM" : "PM", pct);
+    else if (!tm && at >= from)
+        tk_snprintf(s, size, "+%u:%02u \xc2\xb7 %u%%", m / 60, m % 60, pct);
+    else
+        tk_snprintf(s, size, "%u%%", pct);
 }
 
 static int bh_closed(void *ctx, void *event) {
-    bh.page = bh.graph = bh.view = 0;
+    bh.page = bh.graph = 0;
+    bh.button.w = 0;
     return 0;
 }
-/* A history row's click: none, but ringnav's wheel and Centre reach only rows with one
- * (navigation.c clickable), and stock's widget_on keeps no null handler. */
-static int bh_row(void *ctx, void *event) { return 0; }
-/* The page's graph, two rows high, over the list: Export Log, then each row, a day's first with its
- * date. Built again for each new row while it is open (battery_tick; after the screen comes back
- * on, for one that came while it was off), the selected row and the scroll kept. */
-static void bh_fill(void) {
-    unsigned n = bh.rec.n;
-    int sel = bh.view ? widget_get_prop_int(bh.view, "_ringnav_index", -1) : -1,
-        offset = bh.view ? widget_get_prop_int(bh.view, "yoffset", 0) : 0;
-    bh.stale = 0;
-    bh.graph = 0;
-    void *view = bh.view = page_list_or(bh.page, bh.page, "Battery History", "Unplug to start",
-                                        n ? (int)n + 1 : 0, 48);
-    if (!n) return;
-    void *list = P(view, W_PARENT);
-    int rh = page_h(48), head = 2 * rh, y = I(list, W_Y),
-        room = widget_get_prop_int(bh.page, "h", client_h()) - y - head,
-        h = I(list, W_H) < room ? I(list, W_H) : room;
-    widget_move_resize(list, 0, y + head, 375, h);
-    widget_resize(view, 375, h);
-    bh.graph = widget_factory_create_widget(widget_factory(), "view", bh.page, 0, y, 375, head);
-    page_row_detail(view, 0, "Export Log", 0, bh_export);
-    for (unsigned i = 0; i < n; ++i) {
-        char day[16], s[64];
-        bh_text(s, sizeof s, i);
-        bh_day(day, sizeof day, i, 0);
-        if (*day) tk_snprintf(s + strlen(s), sizeof s - strlen(s), ", %s", day);
-        page_row_detail(view, (int)i + 1, s, 0, bh_row);
+/* ringnav, before the lists: the wheel along the readings (clockwise to the newer), Centre exports. */
+int battery_key(void *top, unsigned key) {
+    if (!bh.page || top != bh.page || !bh.rec.n) return 0;
+    if (key == KEY_NEXT || key == KEY_PREV) {
+        int at = clamp_step((int)bh_cur(), (int)bh.rec.n - 1, key == KEY_NEXT ? 1 : -1);
+        bh.cur = at == (int)bh.rec.n - 1 ? -1 : at;
+        widget_invalidate_force(bh.page, (void *)0);
+        return 1;
     }
-    if (sel >= 0) ringnav_select(view, sel, (int)n + 1); /* rows only ever join the end */
-    scroll_view_set_offset(view, 0, offset);
+    if (key != KEY_CENTER) return 0;
+    bh_export();
+    return 1;
 }
-/* Power's Battery History row. */
+/* A tap on the button exports. */
+static int bh_touch(void *ctx, void *event) {
+    int x = I(event, EVENT_X), y = I(event, EVENT_Y);
+    rect_t *b = &bh.button;
+    if (b->w && x >= b->x && x < b->x + b->w && y >= b->y && y < b->y + b->h) bh_export();
+    return 0;
+}
+/* Power's Battery History row. No history: "Unplug to start". Else the status row's title (a row
+ * of the page's list, which stays hidden), and the graph's view over the rest. */
 int battery_history(void *ctx, void *event) {
     if (bh.page || !(bh.page = page_open("battery_page", bh_closed, page_keyup))) return 0;
     bh_load();
-    bh.view = 0;
-    bh_fill();
+    bh.cur = -1;
+    unsigned n = bh.rec.n;
+    void *view = page_list_or(bh.page, bh.page, "Battery History", "Unplug to start", n ? 1 : 0, 48);
+    if (!n) return 0;
+    void *list = P(view, W_PARENT);
+    int y = I(list, W_Y), h = widget_get_prop_int(bh.page, "h", client_h());
+    widget_set_visible(list, 0, 0);
+    bh.graph = widget_factory_create_widget(widget_factory(), "view", bh.page, 0, y, 375, h - y);
+    widget_on(bh.page, EVT_POINTER_UP_BEFORE, bh_touch, 0);
     return 0;
 }
 
@@ -202,24 +225,31 @@ static int bh_x(unsigned i, int x0, int w, unsigned now, int forward) {
     while (span > 0xffff) span >>= 1, at >>= 1;
     return x0 + (span ? (int)(at * (unsigned)w / span) : (int)i * w / (int)n);
 }
-/* The graph (ringnav_paint): faint lines at 100%, 50% and 0%, labelled in grey, and the level as
- * steps from the start to now, a 2px line in the accent's light tone over a faint fill, as
- * peq_ui.c's curve. */
+/* The page (ringnav_paint, on the graph's view): the readout, faint lines at 100% and 50% and the
+ * axis at 0%, labelled in 15 px Text Tertiary, the level as steps from the start to now, a 2 px
+ * line in the accent's light tone over a faint fill, as peq_ui.c's curve, the reading's line and
+ * dot, and Export Log unless a toast is up. Positions are the screen's, less the view's y. */
 void battery_paint(void *w, void *canvas) {
     if (!w || w != bh.graph || !P(canvas, CANVAS_LCD) || !bh.rec.n) return;
     static const char *const labels[] = { "100%", "50%", "0%" };
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR),
-             tone = accent_tone(TONE_LIGHT);
+             tone = accent_tone(TONE_LIGHT), raw = st.raw_ink, cur = bh_cur();
     long long wall = wall_time();
-    int x0 = page_x() + 40, plot = 375 - page_x() - 8 - x0, top = 10, h = I(w, W_H) - 20;
+    int dy = I(w, W_Y), x0 = page_x() + BH_LABEL_W + BH_GAP, plot = 375 - page_x() - x0,
+        top = BH_TOP - dy, h = BH_BOT - BH_TOP;
+    char s[64];
+    st.raw_ink = 1;
+    bh_readout(s, sizeof s, cur);
+    ui_text(canvas, s, 1, TYPE(17), tok(TOK_PRIMARY), 1, 375 / 2, BH_READ_CY - dy, 375 - 48, 1);
     for (int k = 0; k < 3; ++k) {
         int y = top + k * h / 2;
         canvas_set_fill_color(canvas, rgba(k == 2 ? 0x4a4a4a : 0x262626, 255));
         canvas_fill_rect(canvas, x0, y, plot, 1);
-        caption(canvas, labels[k], page_x(), y - 7, 36, 14, 12, CF_GREY);
+        ui_text(canvas, labels[k], 0, TYPE(15), tok(TOK_TERTIARY), 1, page_x() + BH_LABEL_W, y,
+                BH_LABEL_W, 3);
     }
     unsigned now = wall == -1 ? 0 : (unsigned)wall;
-    int set = bh.rec.row[0].at >= CLOCK_SET, forward = 1;
+    int set = bh.rec.row[0].at >= CLOCK_SET, forward = 1, cx = x0, cy = top;
     for (unsigned k = 1; k < bh.rec.n; ++k)
         forward &=
             bh.rec.row[k].at >= bh.rec.row[k - 1].at && (bh.rec.row[k].at >= CLOCK_SET) == set;
@@ -234,7 +264,19 @@ void battery_paint(void *w, void *canvas) {
         if (i + 1 < bh.rec.n) /* the step down to the next row */
             canvas_fill_rect(canvas, next - 1, y - 1, 2,
                              top + h - (int)bh.rec.row[i + 1].pct * h / 100 - y + 2);
+        if (i == cur) cx = x, cy = y;
         x = next;
     }
+    /* the reading: a hairline from 100% to 0% and the dot on its level */
+    canvas_set_fill_color(canvas, rgba(tok(TOK_SECONDARY), 255));
+    canvas_fill_rect(canvas, cx, top, 1, h + 1);
+    rect_t dot = { cx - BH_DOT / 2, cy - BH_DOT / 2, BH_DOT, BH_DOT };
+    fill_box(canvas, &dot, RGBA(0xffffff), BH_DOT / 2);
+    bh.button.w = 0;
+    if (window_manager_get_top_window(window_manager()) == bh.page) {
+        int bw = ui_button(canvas, 375 / 2, BH_BTN_CY - dy, "Export Log", 0, 0, 0);
+        bh.button = (rect_t){ 375 / 2 - bw / 2, BH_BTN_CY - CTA_H / 2, bw, CTA_H };
+    }
+    st.raw_ink = raw;
     stock_canvas_set_fill_color(canvas, fill);
 }

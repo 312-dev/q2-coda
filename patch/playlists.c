@@ -1094,6 +1094,7 @@ static void pl_rows(void *win) {
     tk_snprintf(words, sizeof words,
                 marks     ? "%d Selected"
                 : marking ? "Select Playlists"
+                : add     ? "Add to Playlist"
                           : "Playlists",
                 marks);
     if (nav && widget_count_children(nav)) widget_set_text_utf8(widget_get_child(nav, 0), words);

@@ -2,11 +2,12 @@
 line), its Downloads page (Limit and the items), and the requests it appends to storage.out: a new limit, an item
 held to remove it (docs/internals.md#storage)."""
 import ctypes as C
+import struct
 
 import pytest
 
 from conftest import O, Files
-from test_battery import MOUNTS, SEL, Page
+from test_battery import MOUNTS, PAGE, SEL
 from test_peq_page import Canvas
 
 APP = '/mnt/mmc/.subsonic'
@@ -15,6 +16,77 @@ TSV = ('#Q2STORE/1\tlimit=16000\tdownloads=8200000000\tcache=1600000000\n'
        'i\tauto\tfav:all\t2100000000\t\t\tFavorites\n'
        'i\tpick\tplaylist:p1\t3400000000\tplaylist\tplaylist:p1\tRoad%09Trip\n')
 MIB = 1 << 20
+EVT_CLICK = O['EVT_CLICK']
+
+
+class Page:
+    """A list page on stubs: its rows' labels, a row's tap and the toasts (the stubs Battery History's list page had,
+    test_battery's before its graph page)."""
+    def __init__(self, fw):
+        self.fw, self.texts, self.children, self.items, self.toasts, self.boxes = fw, {}, {}, [], [], {}
+        self.buffers, self.lists = [], []
+        fw.mock('window_create', lambda *_: PAGE)
+        self.top = PAGE  # the window on top: a toast's, while its modal loop runs
+        fw.mock('window_manager_get_top_window', lambda *_: self.top)
+        fw.mock('list_view_create', lambda parent, x, y, w, h, *_: self.widget(x, y, w, h))
+        fw.mock('scroll_view_create', self.scroll)
+        fw.mock('list_item_create', lambda *_: self.items.append(self.widget()) or self.items[-1])
+        fw.mock('hscroll_label_create', self.label)
+        fw.mock('widget_set_text_utf8', lambda w, s, *_: self.texts.__setitem__(w, C.string_at(s).decode()))
+        fw.mock('widget_get_text_utf8', self.get_text)  # an empty page's note reads its caption back (page_empty)
+        self.props = {}
+        fw.mock('widget_get_prop_int', self.prop)
+        fw.mock('widget_set_prop_int', lambda w, key, v, *_: self.props.__setitem__((w, C.string_at(key)), C.c_int(v).value))
+        fw.mock('widget_move_resize', lambda w, x, y, width, h, *_: self.boxes.__setitem__(w, (x, y, width, h)))
+        fw.mock('navigator_to_with_context', lambda page, info, *_: self.toasts.append(C.string_at(info + 8).decode()))
+        fw.mock('navigator_window_is_exist', lambda *_: 0)
+        fw.mock('fw_statfs', self.statfs)
+        self.free = 64 << 20
+
+    def widget(self, x=0, y=0, w=0, h=0):
+        self.buffers.append(C.create_string_buffer(0x400))
+        p = C.addressof(self.buffers[-1])
+        struct.pack_into('<iiii', self.buffers[-1], 0, x, y, w, h)
+        self.boxes[p] = (x, y, w, h)
+        return p
+
+    def scroll(self, parent, x, y, w, h, *_):
+        self.items.clear()
+        p = self.widget(x, y, w, h)
+        self.lists.append(p)
+        C.c_void_p.from_address(p + O['W_PARENT']).value = parent
+        return p
+
+    def get_text(self, w, out, n, *_):
+        data = self.texts.get(w, '').encode()[:n - 1] + b'\0'
+        C.memmove(out, data, len(data))
+        return 0
+
+    def label(self, parent, *_):
+        p = self.widget()
+        self.children.setdefault(parent, []).append(p)
+        return p
+
+    def prop(self, w, key, default, *_):
+        name = C.string_at(key)
+        return 290 if name == b'h' else self.props.get((w, name), C.c_int(default).value)
+
+    @property
+    def view(self):
+        """The list's scroll view, the latest built."""
+        return self.lists[-1]
+
+    def statfs(self, path, out, *_):
+        C.c_uint.from_address(out + 4).value, C.c_uint.from_address(out + 28).value = 1, self.free
+        return 0
+
+    @property
+    def captions(self):
+        return [self.texts.get(self.children[item][0]) for item in self.items]
+
+    def tap(self, row):
+        (fn, ctx), = [(a[2], a[3]) for _, a in self.fw.calls('widget_on') if a[0] == self.items[row] and a[1] == EVT_CLICK]
+        return C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, None)
 
 
 class Storage(Page):

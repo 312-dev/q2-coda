@@ -804,6 +804,8 @@ int ringnav(void *ctx, void *event) {
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
     if (spot_key(top, key)) return STOP;     /* Spotify's page: Centre scrubs */
     if (np_about_key(top, key)) return STOP; /* OLED's About: the wheel scrolls it */
+    if (sw_update_key(top, key)) return STOP; /* Software Update's button and the line under it */
+    if (battery_key(top, key)) return STOP;   /* Battery History: the wheel scrubs, Centre exports */
     if (xfade_key(top, key))
         return STOP; /* Crossfade's page: Centre toggles, the wheel sets the length */
     if (eq_key(top, key))
@@ -934,9 +936,9 @@ int ringnav(void *ctx, void *event) {
             slide_menu_scroll_to_prev(w);
     } else if (g_menu.n) {
         int id = widget_get_prop_int(w, SEL, -1);
-        /* No letter over a list in an order of its own. Tested here, as at paint the top may
-         * already be the page a Return brings back. */
-        if (step > 1 && !own_order(widget_get_prop_str(top, "name", "")))
+        /* The letter only over a name-sorted list (az_index.c name_sorted). Tested here, as at
+         * paint the top may already be the page a Return brings back. */
+        if (step > 1 && name_sorted(widget_get_prop_str(top, "name", "")))
             rearm(&st.letter_timer, letter_expire, LETTER_MS);
         int next = clamp_step(id < 0 ? (cur >= 0 ? g_menu.id[cur] : 0) : id, g_menu.rows - 1,
                               id < 0 ? 0 : dir * step);

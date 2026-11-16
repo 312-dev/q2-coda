@@ -108,7 +108,7 @@ Every build replaces the built-in splash with `assets/boot-logo.jpg`, and plays 
 python3 tools/build.py 'Q2 Firmware V1.36.zip' --out /tmp/q2-logo --logo my-logo.jpg
 ```
 
-Flash `/tmp/q2-logo/update.tar` the normal way: copy it to the root of the SD card, then **System settings → System Update → SD Card Update**. The update keeps the scroll-wheel patch, and **About** still shows the build on its **CFW. Version** row (`VERSION` in `tools/build.py`).
+Flash `/tmp/q2-logo/update.tar` the normal way: copy it to the root of the SD card, then **Settings → General → Software Update**. The update keeps the scroll-wheel patch, and **About** still shows the build on its **CFW. Version** row (`VERSION` in `tools/build.py`).
 
 ### Light Mode
 

@@ -1,6 +1,7 @@
-/* Network Update (docs/internals.md#network-update): System Update's second row fetches the latest
- * q2-coda release from GitHub to the card's update.tar, checks its signature
- * (docs/internals.md#release-signatures), then hands over to stock's TF card update. */
+/* Software Update's online half (docs/internals.md#network-update; its page is sw_update.c's): the
+ * check, the latest q2-coda release's tag and size, and the download, which fetches it from GitHub
+ * to the card's update.tar, checks its signature (docs/internals.md#release-signatures), then hands
+ * over to the card's update. */
 #include "peq.h"
 
 /* The tag in a releases/latest redirect, ".../releases/tag/1.3.4": what follows the last '/', 1 to 31
@@ -357,14 +358,12 @@ void shelf_remove(int i) {
 #define NU_FILE "/mnt/mmc/update.tar"
 #define NU_SIG "/tmp/q2-update.sig"
 #define NU_CA "/etc/scrobble-ca.pem" /* scrobble.c's; github.com's and its asset host's roots */
+#define NU_CHECK_S 5L /* a check's request, connect and all: the two of them about 10 s at most */
 
-enum { NU_IDLE, NU_RUNNING, NU_DONE, NU_LATEST, NU_NET, NU_MISSING, NU_CARD, NU_CANCELLED,
-       NU_UNSIGNED, NU_FORGED };
 
 static struct {
     unsigned long thread;
     volatile int state, cancel, percent; /* cancel, percent: progress()'s pair */
-    void *label; /* the row's label while System Update is open, for the percentage */
     volatile int verifying; /* the download is whole and its signature being checked */
 } nu __attribute__((section(".scratch")));
 
@@ -382,41 +381,78 @@ static int progress(void *xfer, long long total, long long now, long long c, lon
     return x[0];
 }
 
-/* One transfer: the latest tag (url without asset, headers only, no redirect) or the asset to file. */
-static int fetch(const char *url, void *file, char *tag, unsigned n, long *code,
-                 volatile int *xfer) {
+/* A transfer of url with what every one of ours sets: off the UI thread, GitHub's roots checked, at
+ * most connect_s to connect. 0 when curl can't. */
+static void *easy(const char *url, long connect_s) {
     void *c = curl_easy_init();
-    int err = 1;
+    if (!c) return 0;
+    curl_easy_setopt(c, 10002, url);       /* CURLOPT_URL */
+    curl_easy_setopt(c, 10018, "Q2Muse");  /* USERAGENT */
+    curl_easy_setopt(c, 99, 1L);           /* NOSIGNAL: off the UI thread */
+    curl_easy_setopt(c, 78, connect_s);    /* CONNECTTIMEOUT */
+    curl_easy_setopt(c, 10065, NU_CA);     /* CAINFO */
+    curl_easy_setopt(c, 64, 1L);           /* SSL_VERIFYPEER */
+    curl_easy_setopt(c, 81, 2L);           /* SSL_VERIFYHOST */
+    return c;
+}
+
+/* The asset to file, its progress in xfer. */
+static int fetch(const char *url, void *file, long *code, volatile int *xfer) {
+    void *c = easy(url, 15);
+    if (!c) return 1;
+    curl_easy_setopt(c, 52, 1L);          /* FOLLOWLOCATION: to the asset host */
+    curl_easy_setopt(c, 20011, save);     /* WRITEFUNCTION */
+    curl_easy_setopt(c, 10001, file);     /* WRITEDATA */
+    curl_easy_setopt(c, 19, 1024L);       /* LOW_SPEED_LIMIT: a stalled transfer ends */
+    curl_easy_setopt(c, 20, 30L);         /* LOW_SPEED_TIME */
+    curl_easy_setopt(c, 20219, progress); /* XFERINFOFUNCTION */
+    curl_easy_setopt(c, 10057, xfer);     /* XFERINFODATA */
+    curl_easy_setopt(c, 43, 0L);          /* NOPROGRESS off, for it */
+    /* curl itself fails a body shorter than its Content-Length (PARTIAL_FILE). */
+    int err = curl_easy_perform(c) || curl_easy_getinfo(c, 0x200002, code); /* RESPONSE_CODE */
+    curl_easy_cleanup(c);
+    return err;
+}
+
+/* Headers alone, in at most secs: the latest release's tag from releases/latest's redirect (tag,
+ * no redirect followed), or an asset's size in KB through its redirects (kb). */
+static int head(const char *url, long secs, char *tag, unsigned n, unsigned *kb, long *code) {
+    void *c = easy(url, secs);
+    double length = -1;
     char *location = 0;
     if (!c) return 1;
-    curl_easy_setopt(c, 10002, url);          /* CURLOPT_URL */
-    curl_easy_setopt(c, 10018, "Q2Muse");      /* USERAGENT */
-    curl_easy_setopt(c, 99, 1L);              /* NOSIGNAL: off the UI thread */
-    curl_easy_setopt(c, 78, 15L);             /* CONNECTTIMEOUT */
-    curl_easy_setopt(c, 10065, NU_CA);        /* CAINFO */
-    curl_easy_setopt(c, 64, 1L);              /* SSL_VERIFYPEER */
-    curl_easy_setopt(c, 81, 2L);              /* SSL_VERIFYHOST */
-    if (file) {
-        curl_easy_setopt(c, 52, 1L);          /* FOLLOWLOCATION: to the asset host */
-        curl_easy_setopt(c, 20011, save);     /* WRITEFUNCTION */
-        curl_easy_setopt(c, 10001, file);     /* WRITEDATA */
-        curl_easy_setopt(c, 19, 1024L);       /* LOW_SPEED_LIMIT: a stalled transfer ends */
-        curl_easy_setopt(c, 20, 30L);         /* LOW_SPEED_TIME */
-        curl_easy_setopt(c, 20219, progress); /* XFERINFOFUNCTION */
-        curl_easy_setopt(c, 10057, xfer);     /* XFERINFODATA */
-        curl_easy_setopt(c, 43, 0L);          /* NOPROGRESS off, for it */
-    } else {
-        curl_easy_setopt(c, 44, 1L);          /* NOBODY */
-        curl_easy_setopt(c, 13, 30L);         /* TIMEOUT */
-    }
-    /* curl itself fails a body shorter than its Content-Length (PARTIAL_FILE). */
-    err = curl_easy_perform(c) || curl_easy_getinfo(c, 0x200002, code); /* RESPONSE_CODE */
-    if (!err && tag && !curl_easy_getinfo(c, 0x10001f, &location)) {    /* REDIRECT_URL */
+    curl_easy_setopt(c, 44, 1L);   /* NOBODY */
+    curl_easy_setopt(c, 13, secs); /* TIMEOUT */
+    if (kb) curl_easy_setopt(c, 52, 1L);
+    int err = curl_easy_perform(c) || curl_easy_getinfo(c, 0x200002, code); /* RESPONSE_CODE */
+    if (!err && tag && !curl_easy_getinfo(c, 0x10001f, &location)) {        /* REDIRECT_URL */
         const char *t = netupdate_tag(location);
         tk_snprintf(tag, n, "%s", t ? t : "");
     }
+    if (!err && kb && !curl_easy_getinfo(c, 0x30000f, &length)) /* CONTENT_LENGTH_DOWNLOAD */
+        *kb = length > 0 ? (unsigned)(length / 1024) : 0;
     curl_easy_cleanup(c);
     return err;
+}
+
+/* Tags are single-digit x.y.z, so strcmp orders them: nothing older than this build, which stock's
+ * updater would flash. Q2POD_TAG is empty in --dev builds, which take any tag.
+ * ponytail: a beta (BETA in tools/build.py) refuses its own version's release too, so its testers
+ * install that from the card; take an equal tag under a beta if they shouldn't have to. */
+static int newer(const char *tag) { return !*Q2POD_TAG || strcmp(tag, Q2POD_TAG) > 0; }
+
+/* Software Update's online check (sw_update.c), on its thread: the latest release's tag into tag
+ * and its update.tar's size in KB into *kb. NET_NEWER, NET_LATEST, or NET_FAILED (no link, no
+ * DNS, GitHub not answering in NU_CHECK_S a request, or no update.tar on the release). */
+int netupdate_check(char *tag, unsigned n, unsigned *kb) {
+    char url[160];
+    long code = 0;
+    *kb = 0;
+    if (head(NU_REPO "/latest", NU_CHECK_S, tag, n, 0, &code) || code != 302 || !*tag)
+        return NET_FAILED;
+    if (!newer(tag)) return NET_LATEST;
+    snprintf(url, sizeof url, NU_REPO "/download/%s/" NU_ASSET, tag);
+    return head(url, NU_CHECK_S, 0, 0, kb, &code) || code != 200 ? NET_FAILED : NET_NEWER;
 }
 
 /* The release's update.tar.sig into sig: NU_DONE, NU_UNSIGNED when the release has none (q2-pod's
@@ -428,7 +464,7 @@ static int signature(const char *tag, unsigned char sig[64]) {
     snprintf(url, sizeof url, NU_REPO "/download/%s/" NU_ASSET ".sig", tag);
     void *f = fopen(NU_SIG, "wb");
     if (!f) return NU_CARD;
-    int err = fetch(url, f, 0, 0, &code, &nu.cancel);
+    int err = fetch(url, f, &code, &nu.cancel);
     err = fclose(f) || err;
     unsigned char *got = err || code != 200 ? 0 : read_all(NU_SIG, 64, &n);
     unlink(NU_SIG);
@@ -444,15 +480,11 @@ static void *worker(void *unused) {
     char tag[64] = "", url[160];
     unsigned char sig[64];
     long code = 0;
-    if (fetch(NU_REPO "/latest", 0, tag, sizeof tag, &code, &nu.cancel) || code != 302 || !*tag) {
+    if (head(NU_REPO "/latest", 30, tag, sizeof tag, 0, &code) || code != 302 || !*tag) {
         nu.state = NU_NET;
         return 0;
     }
-    /* Tags are single-digit x.y.z, so strcmp orders them: nothing older than this build, which
-     * stock's updater would flash. Q2POD_TAG is empty in --dev builds, which take any tag.
-     * ponytail: a beta (BETA in tools/build.py) refuses its own version's release too, so its testers
-     * install that from the card; take an equal tag under a beta if they shouldn't have to. */
-    if (*Q2POD_TAG && strcmp(tag, Q2POD_TAG) <= 0) {
+    if (!newer(tag)) {
         nu.state = NU_LATEST;
         return 0;
     }
@@ -470,7 +502,7 @@ static void *worker(void *unused) {
     int err = !f;
     state = NU_CARD;
     if (f) {
-        err = fetch(url, f, 0, 0, &code, &nu.cancel);
+        err = fetch(url, f, &code, &nu.cancel);
         state = err ? (ferror(f) ? NU_CARD : NU_NET) : code != 200 ? NU_MISSING : NU_CARD;
         err = err || code != 200 || fflush(f) || fsync(fileno(f)) || ferror(f);
         err = fclose(f) || err;
@@ -496,11 +528,8 @@ static void *worker(void *unused) {
     return 0;
 }
 
-static void show(const char *text) {
-    if (nu.label) widget_set_text_utf8(nu.label, text);
-}
-
-static int wait_done(const void *unused) {
+/* What a download that ended without update.tar says, as a toast. */
+const char *netupdate_said(int state) {
     static const char *const said[] = {
         [NU_LATEST] = "Latest firmware installed", [NU_NET] = "Can't reach GitHub",
         [NU_MISSING] = "No update for this build", [NU_CARD] = "Can't write to the card",
@@ -508,77 +537,44 @@ static int wait_done(const void *unused) {
         [NU_UNSIGNED] = "Release not signed: not installed",
         [NU_FORGED] = "Signature check failed: not installed",
     };
-    char s[32];
-    if (nu.state == NU_RUNNING) {
-        reset_poweroptions_timer(1, 1, 0); /* standby, auto power-off; not the screen's */
-        tk_snprintf(s, sizeof s, "Downloading %d%%", nu.percent);
-        show(nu.cancel ? "Canceling…" : nu.verifying ? "Verifying…" : nu.percent ? s : "Checking…");
-        return 8; /* RET_REPEAT */
-    }
-    pthread_join(nu.thread, 0);
-    int state = nu.state;
+    return state > NU_DONE && state <= NU_FORGED ? said[state] : "";
+}
+
+/* Software Update's Download and Install (sw_update.c): the download on its thread; 0 when it
+ * can't start. netupdate_poll: NU_RUNNING (*percent and *verifying its progress) until it ends,
+ * then its state, once, joined; netupdate_cancel: the transfer ends at its next progress call. */
+int netupdate_start(void) {
+    if (nu.state != NU_IDLE) return 0;
+    nu.cancel = nu.percent = nu.verifying = 0;
+    nu.state = NU_RUNNING;
+    if (!pthread_create(&nu.thread, 0, worker, 0)) return 1;
     nu.state = NU_IDLE;
-    if (nu.label) widget_set_tr_text(nu.label, "update_online");
-    if (state != NU_DONE)
-        toast(said[state]);
-    else if (nu.label)
-        fwupdate_tf(); /* SD Card Update (sw_update.c): its checks, its confirm, stock's flash */
-    else
-        toast("Update downloaded: use SD Card Update");
     return 0;
 }
-
-/* A second press cancels: the transfer ends at its next progress call. */
-static int online_click(void *ctx, void *event) {
-    if (nu.state == NU_RUNNING) {
-        nu.cancel = 1;
-        show("Canceling…");
-    } else if (nu.state != NU_IDLE) {
-        /* ended, not yet joined by wait_done */
-    } else if (!need_link(online_click, ctx)) {
-        /* held for Smart Wi-Fi's link (a press while it waits takes its place), or none */
-    } else {
-        nu.cancel = nu.percent = nu.verifying = 0;
-        nu.state = NU_RUNNING;
-        if (pthread_create(&nu.thread, 0, worker, 0)) {
-            nu.state = NU_IDLE;
-            toast("Can't start the download");
-        } else {
-            show("Checking…");
-            timer_add(wait_done, (void *)0, 500);
-        }
-    }
-    return 0;
+int netupdate_poll(int *percent, int *verifying) {
+    int state = nu.state;
+    *percent = nu.percent, *verifying = nu.verifying;
+    if (state == NU_RUNNING) reset_poweroptions_timer(1, 1, 0); /* standby, auto power-off */
+    if (state == NU_RUNNING || state == NU_IDLE) return state;
+    pthread_join(nu.thread, 0);
+    nu.state = NU_IDLE;
+    return state;
 }
-
-/* Leaving the page cancels: the card may be unmounted or shared over USB next. */
-static int label_gone(void *ctx, void *event) {
-    if (nu.label == ctx) nu.label = 0, nu.cancel = 1;
-    return 0;
+void netupdate_cancel(void) {
+    if (nu.state == NU_RUNNING) nu.cancel = 1;
 }
 
 /* systemset_fwupdate_page_init: stock's two rows (0x4c8660), each button named by its index, which
- * stock's click (0x4c84cc) reads with atoi: 0 TF card update, 1 Shanling's server. Renamed "2", the
- * second does nothing in stock's click and ours runs. */
+ * stock's click (0x4c84cc) reads with atoi: 0 TF card update, 1 Shanling's server. General's
+ * Software Update row opens sw_update.c's page instead of this one; should stock's page open
+ * anyway, its second row, renamed "2" so stock's click does nothing, opens that page too. */
 int ringnav_fwupdate(void *win, void *ctx) {
     int result = stock_fwupdate_trampoline(win, ctx);
     void *view = win ? widget_lookup(win, "scroll_view_fwupdate", 1) : (void *)0;
     void *button = view && widget_count_children(view) == 2 ? widget_get_child(widget_get_child(view, 1), 0) : 0;
     if (button) {
         widget_set_name(button, "2");
-        widget_on(button, EVT_CLICK, online_click, 0);
-        nu.label = widget_get_child(button, 0);
-        widget_on(nu.label, EVT_DESTROY, label_gone, nu.label);
-        if (nu.state == NU_RUNNING) show("Downloading…");
-    }
-    /* SD Card Update acts (or asks) in place, so no chevron; Network Update opens its check, so
-     * it keeps stock's list_into (docs/oled-design.md#list-row) */
-    void *first = view && widget_count_children(view) == 2 ? widget_get_child(view, 0) : 0;
-    for (unsigned i = 0, n = first ? widget_count_children(first) : 0; i < n; ++i) {
-        void *b = widget_get_child(first, i);
-        for (unsigned k = 0, m = widget_count_children(b); k < m; ++k)
-            if (!tk_strcmp(widget_get_prop_str(widget_get_child(b, k), "image", ""), "list_into"))
-                widget_set_visible(widget_get_child(b, k), 0, 0);
+        widget_on(button, EVT_CLICK, sw_update_open, 0);
     }
     return result;
 }
@@ -635,7 +631,7 @@ static unsigned file_mode(const char *path) {
 /* url's body (1 MB at most) through SH_JSON, NUL-terminated, *n its bytes; 0 unless a whole 200. */
 static char *get(const char *url, long *code, unsigned *n) {
     void *f = fopen(SH_JSON, "wb");
-    int err = !f || fetch(url, f, 0, 0, code, &sh.cancel);
+    int err = !f || fetch(url, f, code, &sh.cancel);
     err = (f && fclose(f)) || err;
     char *body = err || *code != 200 ? 0 : read_all(SH_JSON, 1u << 20, n);
     unlink(SH_JSON);
@@ -745,7 +741,7 @@ static int install(int i, const shelf_app *pin) {
     void *f = fopen(part, "wb");
     if (!f) return SH_CARD;
     sh.stage = 1;
-    int err = fetch(url, f, 0, 0, &code, &sh.cancel), bad = ferror(f);
+    int err = fetch(url, f, &code, &sh.cancel), bad = ferror(f);
     bad = fclose(f) || bad;
     r = sh.cancel ? SH_CANCELLED : bad ? SH_CARD : err ? SH_NET : code != 200 ? SH_MISSING : SH_OK;
     if (!r) { /* read back from the card, as unzip will read it */
