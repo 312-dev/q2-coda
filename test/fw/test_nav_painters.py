@@ -1457,11 +1457,17 @@ def test_oleds_confirms_are_the_card_with_cancel_and_their_verb(fw, st, prompt, 
     assert confirm.cancel.box[0] == 42 + 8 - THEMES[OLED]['sel_inset']  # the bar 8 px in from the card
 
 
-@pytest.mark.parametrize('prompt, body', [('Reset Settings Only', ['Music, playlists and ratings', 'are kept.']),
-                                          ('Full Factory Reset', [])])
-def test_oleds_reset_settings_confirm_says_what_it_keeps(fw, st, prompt, body):
-    """Reset Settings Only's card (audit2 J1) says in its body what a settings reset leaves alone; the other resets,
-    which take more, have none; Reset is red, after the gap, as a destructive verb's."""
+@pytest.mark.parametrize('prompt, title, body, verb', [
+    ('Reset Settings Only', 'Reset Settings?', ['Forgets Wi-Fi, Bluetooth, EQ;', 'music and playlists stay.'],
+     'Reset Settings'),
+    ('Reset Database', 'Reset the Database?', ['Erases playlists, Favorites;', 'then restarts and rescans.'],
+     'Reset Database'),
+    ('Full Factory Reset', 'Full Factory Reset?', ['Erases settings, playlists', 'and Favorites. Music stays.'],
+     'Reset All')])
+def test_oleds_reset_settings_confirm_says_what_it_takes(fw, st, prompt, title, body, verb):
+    """30 v2: each reset's card says what stock's handler really takes (reset_page's: init_usersetting deletes the
+    settings, saved Wi-Fi networks, Bluetooth pairings and EQ presets; init_database deletes database.db, with the
+    playlists and My Fav, and restarts; the factory reset both), and its verb names it, red after the gap."""
     theme(fw)
     ui = Ui(fw)
     confirm = Confirm(fw, ui, [prompt])
@@ -1473,8 +1479,7 @@ def test_oleds_reset_settings_confirm_says_what_it_keeps(fw, st, prompt, body):
     fw.mock('widget_get_text_utf8', utf8)
     confirm.canvas = Canvas(fw, char_w=5)  # the body fits its 251 px
     texts = confirm.paint().texts
-    title = 'Reset Settings?' if 'Settings' in prompt else prompt + '?'
-    assert [t[0] for t in texts] == [title, *body, 'Cancel', 'Reset']  # the body two lines as written
+    assert [t[0] for t in texts] == [title, *body, 'Cancel', verb]  # the body two lines as written
     assert texts[-1][2] == rgba(0xff453a)  # red
     assert confirm.enter.box[1] - confirm.cancel.box[1] == 32 + 12
 
@@ -2034,6 +2039,29 @@ def caption_texts(fw, view):
     table = fw.var('settings_pages__cap', C.c_void_p * 17)  # view, item[CAP_MAX], text[CAP_MAX]
     text = {table[1 + k]: C.wstring_at(table[9 + k]) for k in range(8) if table[1 + k]} if table[0] == view.addr else {}
     return {item: text[item.addr] for item in view.children if item.addr in text}
+
+
+def test_reset_settings_rows_lose_their_chevrons_and_say_what_they_take(fw):
+    """30 v2 (settings_pages.c reset_rows): stock's three Reset rows open the confirmation card, so their list_into
+    chevrons go (insensitive too: stock's hit test skips only the insensitive), and each gets its caption once, however
+    often the list is laid out."""
+    ui = Ui(fw)
+    theme(fw)
+    win = ui.window('reset_page')
+    view = ui.add('scroll_view', win, (0, 58, 375, 262), 'scroll_view_reset')
+    chevrons = []
+    for i, title in enumerate(('Reset Settings Only', 'Reset Database', 'Full Factory Reset')):
+        button = ui.add('button', ui.add('list_item', view, (0, 32 * i, 375, 32)), (0, 0, 375, 32), str(i))
+        ui.add('hscroll_label', button, (10, 0, 280, 32), text=title)
+        chevrons.append(ui.add('image', button, (330, 0, 24, 32), image='list_into'))
+    rows = fw.fn('reset_rows', None, C.c_void_p)
+    rows(view.addr)
+    rows(view.addr)  # a second layout
+    assert not any(c.visible for c in chevrons)
+    assert {a[0] for _, a in fw.calls('widget_set_sensitive') if not C.c_int(a[1]).value} >= {c.addr for c in chevrons}
+    assert list(caption_texts(fw, view).values()) == ['Keeps your music, playlists and ratings',
+                                                      'Erases playlists and Favorites, then rescans',
+                                                      'Erases all settings and playlists; music stays']
 
 
 def test_playback_s_and_library_s_rows_carry_their_captions(fw):

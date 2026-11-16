@@ -571,11 +571,18 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   network's Forget and Disconnect, Line Out and the rest) is drawn as the card with no change to its callers
   (`feedback.c` `feedback_confirm_dress`): its prompt named as the design writes it ("Forget This Network?" for
   stock's "Delete Record?", "Use Line Out?" for its "Line Out sets max volume, continue?"), **Cancel** first and
-  selected when it opens, then the verb ("Shut Down", "Reset", "Delete"), never "OK"; a verb that loses something
+  selected when it opens, then the verb ("Shut Down", "Reset Settings", "Delete"), never "OK"; a verb that loses something
   (Delete, Reset, Forget, Unpair, Remove, Clear) red after the gap. Delete Song's "Also delete source file" is the
   card's switch row. What the answer leaves alone, or why it asks (a caller's `feedback_confirm_foot`: Streaming
-  Songs' "Show streaming songs?" and "Hide streaming songs?"), is the body: Reset Settings Only asks "Reset
-  Settings?" over "Music, playlists and ratings are kept."
+  Songs' "Show streaming songs?" and "Hide streaming songs?"), is the body.
+- **Reset Settings** (approved as 30 v2 on 2026-11-16): its three rows have no chevron, and under the selected
+  one a caption says what it takes; Center asks on the card, each body what stock's handler really does
+  (`feedback.c` `asks[]`): Reset Settings Only, "Reset Settings?", "Forgets Wi-Fi, Bluetooth, EQ; music and
+  playlists stay." (it deletes `config.ini`, the saved networks, the pairings, the EQ presets and the resume
+  points); Reset Database, "Reset the Database?", "Erases playlists, Favorites; then restarts and rescans."
+  (`database.db`); Full Factory Reset, "Erases settings, playlists and Favorites. Music stays." (both). Their
+  verbs are Reset Settings, Reset Database and Reset All, red. Ratings (`ringnav-ratings`) and the card's music
+  survive all three.
 - A toast is one line of 16 px Text Primary on a `#1C1C1E` pill, 12 px corners, 32 px tall,
   as wide as its text and 16 px each side, centred on y 252 (y 236 to 268), above the bottom
   glass curve. It is the only raised surface in the theme. The page stays in sight round it,
