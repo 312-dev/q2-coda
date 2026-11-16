@@ -534,8 +534,8 @@ the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where
   library gives similar songs. The rows are **Top Songs** (the artist's songs Most Played has
   counted, most played first; left out until one is), **Albums** and **All Songs** with their
   counts; Singles & EPs and Similar Artists are left out (no release types or similar artists in
-  the library). Albums opens Cover Flow on the artist's albums when Artist View is Cover Flow or
-  List, as before, and the Albums page above under Grid, its covers Cover Flow's cached ones (the
+  the library). Albums opens the Albums page above whatever Artist View is, and an album there its
+  [album page](#album-page) (user, 2026-11-15), its covers Cover Flow's cached ones (the
   server library's for a server album), placeholders until Cover Flow has made them (and for an album with no art). Top Songs
   and All Songs are the songs page above with their album, length and cover.
 

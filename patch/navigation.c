@@ -8294,6 +8294,9 @@ static void qm_goto(void *r, int album) {
     if (top != page) widget_on(top, EVT_WINDOW_CLOSE, qm_restore, top);
 }
 
+/* A Library artist's album (library_artist.c): its album page, as Look up Album opens it. */
+void album_page_open(void *r) { qm_goto(r, QM_LOOKUP_ALBUM); }
+
 /* Go to Album (album) or Go to Artist has somewhere to go for r: it names one, and its
  * single-instance page is not open already (nor Cover Flow showing that album alone). */
 static int qm_goes(void *r, int album) {
