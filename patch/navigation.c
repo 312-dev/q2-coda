@@ -10278,8 +10278,9 @@ int ringnav(void *ctx, void *event) {
             coverflow_home_row(w, g_menu.at[index_of(&g_menu, next)], next, 0);
         if (owned && id >= 0) buzzeer_switch(1); /* one click per row change, however far */
     } else {
-        /* no row to select: the view's own end, not the selection's list_end */
-        int top = view_top(&g_menu), end = scroll_end(&g_menu, g_menu.height);
+        /* no row to select: the content's foot on the list end, where a drag stops too (list_fade's
+         * padding), so text just past the end under the fade still comes up */
+        int top = view_top(&g_menu), end = max_top(&g_menu);
         int next = clamp_step(top, end, dir * RING_STEP * step);
         if (next == 0 || next >= end) st.wheel_run = 0;
         wheel_offset(&g_menu, next);

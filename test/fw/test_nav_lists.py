@@ -443,6 +443,28 @@ def test_a_list_fit_list_with_a_gap_ends_on_a_whole_row(fw, ui, st):
     assert page.offset == end
 
 
+@pytest.mark.parametrize('over', [1, 20, 40])
+def test_a_page_with_no_rows_just_past_the_list_end_scrolls_as_far_as_a_drag(fw, ui, st, over):
+    """A page with nothing to select (an info page's text) whose content runs `over` px past OLED's list end (y 282)
+    but not past its box, which runs on to the screen's foot: the wheel scrolls as far as a drag does, to the
+    content's foot on the list end (the user's, 2026-11-16, About on b4: the wheel showed the bar and stayed)."""
+    theme(fw)
+    st('geom').value = oled_geom(fw)
+    bar, end = 58, 282  # OLED's status row and list end on screen
+    win = ui.widget('window', ui.wm, (0, bar, 375, 320 - bar), name='about_page')  # the client, under the status row
+    view = ui.widget('scroll_view', win, (0, 0, 375, 320 - bar))
+    view.byte(O['VIEW_VERTICAL'], 1)
+    content, pad = end - bar + over, 320 - end
+    ui.widget('label', view, (0, 0, 375, content), text='A long text')
+    # as list_fade (the first paint) leaves it: the content padded by the box's rows past the end
+    view.int(O['VIEW_CONTENT_H'], content + pad)
+    view.props.update({b'_list_pad': pad, b'_list_padded': content + pad})
+    ui.top = win
+    for _ in range(4):
+        key(fw, ui, KEY_NEXT, ui.now + SLOW)
+    assert view.int(SCROLL_Y) == content + pad - (320 - bar) == over  # a drag's end: the content's foot on y 282
+
+
 def oled_geom(fw):
     """The first geometry set with list_fit: OLED's."""
     names = host.tools_theme.GEOM_VALS
