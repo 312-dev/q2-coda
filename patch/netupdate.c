@@ -823,7 +823,10 @@ static void sh_text(int r) {
     const char *t = s;
     if (i == ROW_CHECK && sh.job == JOB_CHECK)
         t = "Checking…";
-    else if (i == ROW_CHECK) { /* with no list yet, the press loads it; OLED says so under the row */
+    else if (i == ROW_CHECK) { /* with no list yet, the press loads it; OLED says so under the row,
+                                * the row alone a plain one, the list's pitch (oled-design.md Empty
+                                * and offline: one line in the list's pitch) */
+        if (!shelf_n && sh.row[r]) widget_resize(sh.row[r], 375, page_h(48)); /* full width */
         int noted = feedback_empty(sh.page, feedback_below(sh.row[r]),
                                    shelf_n ? (const char *)0 : "No apps listed",
                                    "Connect to Wi-Fi, then Check for Updates");
@@ -831,8 +834,7 @@ static void sh_text(int r) {
         void *title = noted ? widget_get_child(sh.row[r], 0) : (void *)0;
         if (title) /* OLED: one line, centred in the list's pitch, as its other rows keep it */
             widget_move_resize(title, I(title, W_X), 0, I(title, W_W), I(sh.row[r], W_H));
-    }
-    else if (busy && sh.cancel)
+    } else if (busy && sh.cancel)
         t = "Canceling…";
     else if (busy && sh.stage == 1 && sh.percent)
         snprintf(s, sizeof s, "Downloading %d%%", sh.percent);

@@ -1198,6 +1198,7 @@ class Page:
 def test_rows_say_install_under_check_for_updates(fw):
     p = Page(fw, b'me/foo', b'me/bar')
     assert p.sh.rows == 3 and p.sh.map[0] == ROW_CHECK and p.label(0) == ''
+    assert not [a for _, a in fw.calls('widget_resize') if a[0] == p.sh.row[0]]  # over apps, the two-line row
     assert p.label(1) == 'Install' and p.label(2) == 'Install'
 
 
@@ -1256,6 +1257,9 @@ def test_with_no_list_check_for_updates_loads_it(fw):
     # the row's detail blank: OLED's note under it says why (feedback_empty)
     assert p.sh.rows == 1 and p.sh.map[0] == ROW_CHECK and p.label(0) == ''
     assert {'No apps listed', 'Connect to Wi-Fi, then Check for Updates'} <= set(p.said)
+    # alone, the row is a plain one, the list's pitch, not a two-line row (audit2 J3)
+    pitch = fw.fn('page_h', C.c_int, C.c_int)(48)
+    assert [a[2] for _, a in fw.calls('widget_resize') if a[0] == p.sh.row[0]][-1:] == [pitch]
     p.click(0)
     assert p.sh.job == JOB_CHECK and p.sh.app == 0 and p.sh.manual == 1 and p.label(0) == 'Checking…'
 

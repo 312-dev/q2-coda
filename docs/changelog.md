@@ -7,6 +7,8 @@
   - Settings (OLED): the Settings list reached from Home ends like every list: Battery peeks through the fade under Controls instead of hiding until you scroll, and the highlighted row's lean as you turn the wheel is no longer cut off at the top or bottom of a list.
   - Lists (OLED): a list scrolled to its last row keeps the space under it after you open that row and press Return; the last row no longer sits on the screen's bottom edge.
   - Books is gone: the Library has no **Books** row and the Q2 no longer reads `.txt` and `.epub` books. Audiobooks are unchanged, a Library order you set yourself is kept without the row, and a `.books` folder left on the card can be deleted. Wi-Fi transfer's upload no longer lists EPUB.
+  - App Store (OLED): offline, with no apps listed, **Check for Updates** is an ordinary one-line row instead of a tall one.
+  - Settings: **SD Card Update** with no `update.tar` on the card says "No update file on the SD card" instead of asking to update; with one there, the question reads "Install the update?" over **Cancel** and **Install**.
   - Settings (OLED): **Reset Settings Only** asks "Reset settings?" (the question no longer runs off the top line) and says under its answers that your music, playlists and ratings are kept.
   - SyncLink, Shanling's phone remote, is gone from Settings and stays off.
   - Settings: this update starts every Q2 on q2-coda's own default settings, whatever it ran before (stock firmware or an earlier q2-coda), so no stock setting such as Enlarged Album Art stays on. Saved Wi-Fi networks, Bluetooth pairings, your library and ratings are kept. Later updates keep your settings.
