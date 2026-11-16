@@ -478,6 +478,27 @@ def run(rig, d):
     rig.until('net-end: the session ends', state='idle', event='left')
     spot.close()
 
+    # AirPlay and DLNA: approval alike; AirPlay's title is "AirPlay" (shairport tells none), DLNA's song is demo's
+    rig.mark()
+    rig.cmd('net airplay client AirPlay')
+    rig.until('AirPlay asks', state='asking', source='airplay', mac='airplay:client')
+    rig.cmd('allow-once')
+    rig.until('... allowed', state='playing', source='airplay', title='AirPlay')
+    want = track_record(0, 0, 0, 'AirPlay')
+    rig.wait(lambda: any(l == 'NOTIFY 0x108 ' + want for l in rig.lines()[rig.at:]), 'AirPlay to the car')
+    print('ok   ... the car shows AirPlay')
+    rig.cmd('stop')
+    s = rig.until('stop: AirPlay is the payload\'s to end', state='idle', event='stopped', netdeny='airplay')
+    rig.mark()
+    rig.cmd('net dlna renderer DLNA')
+    rig.until('DLNA asks', state='asking', source='dlna')
+    rig.cmd('allow-once')
+    rig.until('... allowed', state='playing', source='dlna')
+    time.sleep(2)
+    check('... and nothing of DLNA\'s to the car: demo sends its own song', not rig.seen('NOTIFY'))
+    rig.cmd('net-end dlna')
+    rig.until('net-end dlna', state='idle', event='left')
+
     # forget, off
     rig.mark()
     rig.cmd(f'forget {SAM}')

@@ -93,7 +93,7 @@ static void st_app(void) {
     for (struct dirent *e; d && !so.id[0] && (e = readdir(d));) {
         const char *id = e->d_name + 1;
         if (e->d_name[0] != '.' || !*id || strlen(id) >= sizeof so.id) continue;
-        tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/q2app", id);
+        addon_q2app(id, path, sizeof path);
         if (state_read(path, raw, sizeof raw) && number(raw, "storage") == 1)
             tk_snprintf(so.id, sizeof so.id, "%s", id);
     }
@@ -303,13 +303,12 @@ int storage_hold(void *top) {
 
 /* ---- painting (ringnav_paint), OLED's ---- */
 
-/* s at x, its box w wide centred on y, aligned (2 left, 3 right), in the role's face at px. */
+/* s, UTF-8, at x, its box w wide centred on y, aligned (2 left, 3 right), in the role's face at
+ * px, in rgb (0xRRGGBB): ui_kit.c's ui_line. */
 static void st_text(void *canvas, const char *s, int x, int w, int y, int align, int role, int px,
-                    unsigned color) {
+                    unsigned rgb) {
     static const char *const faces[] = FONT_NAMES;
-    unsigned buf[96], n = 0;
-    while (s[n] && n < 96) buf[n] = (unsigned char)s[n], ++n;
-    ui_line_w(canvas, buf, n, x, w, y, align, faces[theme()->font[role]], px, color);
+    ui_line(canvas, s, x, w, y, align, faces[theme()->font[role]], px, rgb);
 }
 static void st_dot(void *canvas, int x, int y, unsigned rgb) {
     rect_t r = { x, y - ST_DOT / 2, ST_DOT, ST_DOT };
@@ -347,13 +346,13 @@ static void st_value(void *w, void *canvas, const char *value, int into, int sel
     unsigned ink = theme()->set_value_ink[0] ? theme()->set_value_ink[0] : RGB_SECONDARY;
     if (into) chevron_icon(w, canvas, right, y, sel), right -= VALUE_CHEVRON_GAP;
     st_text(canvas, value, right - 160, 160, y, 3, ROLE_TITLE, theme()->font_px[ROLE_TITLE],
-            RGBA(sel ? 0xffffff : ink));
+            sel ? 0xffffff : ink);
 }
 
 static void st_foot(void *canvas, const char *a, const char *b) {
     int x = geom_val(V_TEXT_X), w = 375 - x - geom_val(V_RIGHT_X);
-    st_text(canvas, a, x, w, 10, 2, ROLE_META, ST_FOOT_PX, RGBA(scheme()->muted));
-    if (b) st_text(canvas, b, x, w, 26, 2, ROLE_META, ST_FOOT_PX, RGBA(scheme()->muted));
+    st_text(canvas, a, x, w, 10, 2, ROLE_META, ST_FOOT_PX, scheme()->muted);
+    if (b) st_text(canvas, b, x, w, 26, 2, ROLE_META, ST_FOOT_PX, scheme()->muted);
 }
 
 void storage_paint(void *w, void *canvas) {
@@ -366,15 +365,14 @@ void storage_paint(void *w, void *canvas) {
     if (w == so.head) {
         size_text(a, sizeof a, so.total - so.free);
         tk_snprintf(a + strlen(a), sizeof a - strlen(a), " of %u GB used", (so.total + 500) / 1000);
-        st_text(canvas, a, x0, x1 - x0, ST_TEXT_DY, 2, ROLE_META, ST_HEAD_PX, RGBA(RGB_SECONDARY));
+        st_text(canvas, a, x0, x1 - x0, ST_TEXT_DY, 2, ROLE_META, ST_HEAD_PX, RGB_SECONDARY);
         st_bar(canvas, x0, x1, ST_BAR_DY);
     } else if (w == so.foot) {
-        st_foot(canvas, "Your Music is never changed by Sync or Radio.",
+        st_foot(canvas, "Your Music is never changed by Sync.",
                 "Downloads stay under the limit you set.");
     } else if (w == so.dl_foot) {
         if (so.n)
-            st_foot(canvas, "Hold Play/Pause on an item to remove it.",
-                    "Auto items refill on the next Sync.");
+            st_foot(canvas, "Hold Play/Pause on an item to remove it.", 0);
         else
             st_foot(canvas, "Nothing downloaded yet.", 0);
     } else if (parent && (parent == so.view || parent == so.dl_view)) {

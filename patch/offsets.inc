@@ -319,6 +319,7 @@ static inline int arc_out(int r, int y) {
 #define MARQUEE_HOLD_MS 1500
 #define MARQUEE_PASSES 3        /* the selected row's title: navigation.c marq_moved */
 #define HSCROLL_ONLY_FOCUS 0x78 /* hscroll_label_t, a char: hscroll_label_set_only_focus */
+#define HSCROLL_ONLY_PARENT_FOCUS 0x79 /* a char: hscroll_label_set_only_parent_focus */
 #define HSCROLL_LOOP 0x7a       /* a char: a pass ends on its lull and starts again (0x5fb86c) */
 #define HSCROLL_YOYO 0x7b       /* a char: it scrolls back instead of snapping (0x5fb888) */
 #define HSCROLL_ELLIPSES 0x7c   /* a char: stopped, it ends in an ellipsis (hscroll_label_set_ellipses) */
@@ -577,6 +578,10 @@ static inline int arc_out(int r, int y) {
 #define ANIM_X_TO 0x60
 #define SLIDE_EASING 8          /* stock scroll_to easing */
 #define ANIM_EASING 0x38 /* widget_animator_init (0x679464) stores easing_get(type) here */
+#define EASE_LINEAR 0    /* AWTK easing_type_t, as ui_kit.c motion_ease reads them */
+#define EASE_QUAD_IN 1
+#define EASE_QUAD_OUT 2
+#define EASE_CUBIC_IN 4
 #define EASE_CUBIC_OUT 5 /* AWTK easing_type_t: starts at 3x the mean speed, then decelerates */
 #define EASE_FOLLOW 24 /* past AWTK's 24: coverflow.c's follow, never handed to easing_get */
 #define EVT_ANIM_END 0x125

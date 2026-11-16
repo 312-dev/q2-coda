@@ -13,14 +13,14 @@ Shanling's figures, as retailers and the launch press list them ([Audiophonics](
 | DAC          | 4 × Cirrus Logic CS43131                                                 |
 | Decoding     | PCM to 768 kHz / 32-bit, DSD512                                          |
 | Screen       | 2.09 in touchscreen, 320 × 375                                           |
-| Controls     | Touch wheel, Centre button, four side buttons                            |
+| Controls     | Touch wheel, Center button, four side buttons                            |
 | Storage      | microSD, up to 2 TB; no user storage inside                              |
 | Battery      | 1850 mAh: 13.5 h on 3.5 mm, 12.5 h on 4.4 mm, 16.5 h on Bluetooth (LDAC) |
 | Bluetooth    | 5.2, send and receive; LDAC, aptX HD, aptX, AAC, SBC                     |
 | Wi-Fi        | Yes (AirPlay, DLNA in stock firmware)                                    |
 | USB          | USB-C: charging, USB DAC to 384 kHz / 32-bit, digital out                |
 | Size, weight | 80 × 50 × 13.5 mm, 83 g; aluminium and glass                             |
-| Colours      | Smoke grey, silver, orange                                               |
+| Colors      | Smoke gray, silver, orange                                               |
 
 | Output                        | 3.5 mm               | 4.4 mm balanced      |
 | ----------------------------- | -------------------- | -------------------- |
@@ -55,13 +55,13 @@ Read off a Q2 running stock V1.36's kernel (`/proc`, `/sys`, the device tree) an
 | Clock             | The X2000's RTC (`rtc-ingenic`), with a wake alarm                                                                                  |                                |
 | Other             | Watchdog (`soc_watchdog`), SAR ADC (`soc_adc`, four aux channels), PWM, rotator (`soc_rotator`)                                     |                                |
 
-- **Serial console:** `ttyS3`, 115200 8N1, booted `quiet`. Stock runs a login there; Q2 Pod removes it and locks root ([building](building.md#what-the-rootfs-drops)), so the port shows boot messages only.
+- **Serial console:** `ttyS3`, 115200 8N1, booted `quiet`. Stock runs a login there; Q2 Muse removes it and locks root ([building](building.md#what-the-rootfs-drops)), so the port shows boot messages only.
 - **Boot:** the kernel reaches `/linuxrc` 0.57 s in, the UI drivers (screen, touch, DAC, radio) are up by 2.2 s, and the DAC's first stream opens at 44.1 kHz by 5.6 s. The RTC keeps the time across a reboot. UARTs `ttyS0`-`ttyS4` and `ttyS9` exist.
-- **Wheel:** stock reads the slider with tslib, position 1-200 a turn plus pressure; Q2 Pod makes a tick every 28 units by default ([internals.md](internals.md)).
+- **Wheel:** stock reads the slider with tslib, position 1-200 a turn plus pressure; Q2 Muse makes a tick every 28 units by default ([internals.md](internals.md)).
 - **Jacks:** headphone detect on GPIO `PA07` (3.5 mm) and `PA08` (4.4 mm). The buzzer stays quiet while either is in ([Key Tone](internals.md#key-tone)).
 - **DAC mute:** the mute line lets go 90-100 ms after an unmute, and the volume comes back on the DAC's soft ramp ([CS43131 product page](https://www.cirrus.com/products/cs43131/)).
 - **One radio module:** the RTL8733BS also holds Bluetooth's power line (`gpio_bt_dis_n`, `module_driver/rtl8733bs.sh`). If it fails, Wi-Fi and Bluetooth both go: stock shows **Bluetooth abnormal** and reboots at every start. It brings up two interfaces, `wlan0` and `wlan1`.
-- **Battery reporting:** the `battery` supply (AXP2101) reports voltage and capacity; its `energy_full_design` reads 4000, which doesn't match the 1850 mAh cell.
+- **Battery reporting:** two gauges. The CellWise CW2015 (`cw2015_driver.ko`, `/sys/devices/i2c-0/0-0062/cw2015_capacity` and `cw2015_voltage`) is the one stock and the firmware use: stock's `toolsGetBatterycapacity` (`0x5cf49c`) reads it into `g_power_capacity`, which the status row, Battery History, Charge Limit and the low-battery warning and power-off (`check_lowbattery_state`, `0x4f3b38`) all read. The AXP2101 PMIC's `battery` supply (`/sys/class/power_supply/battery`) has a gauge of its own that nothing reads and that is misconfigured: its `energy_full_design` reads 4000 against the 1850 mAh cell, and on 2026-11-16 it said 12% while the CW2015 said 61% at 3.88 V.
 - **USB:** the card is exported through the kernel's `f_mass_storage` in a configfs gadget. The stock kernel has no `hid-generic`, so USB keyboards and remotes are not seen.
 - **Manuals:** the [X2000 programming manual](https://whycan.com/files/members/3946/X2000_PM_20200515.pdf) covers the SoC's registers ([mcu-sleep.md](mcu-sleep.md#hardware-basis), [clock-gating.md](clock-gating.md)).
 
@@ -82,9 +82,9 @@ As `/proc/mtd` lists it: a second kernel and a smaller second rootfs sit beside 
 
 ## Build tolerances and warranty
 
-From Shanling, in reply to owners' reports (Q2 Pod Discord, 2026-11-13):
+From Shanling, in reply to owners' reports (Q2 Muse Discord, 2026-11-13):
 
-- **A Centre button that wiggles or rattles is normal.** The wheel and the Centre button come from two different suppliers, and the tolerance lets the button move slightly. Shaken near the ear, nearly every unit rattles a little or more. Shanling does not treat it as a warranty fault.
+- **A Center button that wiggles or rattles is normal.** The wheel and the Center button come from two different suppliers, and the tolerance lets the button move slightly. Shaken near the ear, nearly every unit rattles a little or more. Shanling does not treat it as a warranty fault.
 - **A sticking wheel is a fault.** Amazon has seen a few cases, caused by the mounting tape under the button not being aligned. It is covered under warranty.
 
 ## Opening it

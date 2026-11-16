@@ -70,7 +70,7 @@ def test_gradient_holds_the_first_stops_colour_before_it():
 
 
 def test_every_literal_corner_radius_is_in_the_table():
-    source = ''.join(p.read_text() for p in sorted((pathlib.Path(__file__).parents[2] / 'patch').glob('*.c')))
+    source = ''.join(p.read_text() for p in sorted((pathlib.Path(__file__).parents[2] / 'patch').glob('**/*.c')))
     def literal(names):
         return {int(r) for r in re.findall(rf'(?:{names})\([^;]*?,\s*(\d+)(?:,[^;]*?)?\);', source)}
     radii = literal('paint_round_rows|round_row|row_below|inset_top|round_ring')
@@ -112,7 +112,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     (each half's), the shuffle confirmation's glyph (bold) in Accent Blue, Now Playing's heart and More (regular) in
     Text Primary (each half's), More pressed in Text Secondary and the full heart (fill) in Accent Blue, and the
     Ratings rows' filled and outlined hearts and Streaming's service marks in the folder's inks, all from the vendored
-    Phosphor SVGs but TIDAL's mark, drawn in art.py, and Subsonic's, q2-coda's own SVG, and the inset modal's symbols
+    Phosphor SVGs but TIDAL's mark, drawn in art.py, and Subsonic's, q2-coda's own SVG, and the menu sheet's symbols
     (regular, 19 px) in Text Secondary (each half's) and white for the selection and the picker's check in Accent Blue,
     the volume's two speakers (fill, 16 px) in Text Secondary (each half's), an artist page's Shuffle and Radio
     (regular, 16 px) in Accent Blue and white for the lit one, About's quality badge's waveform (bold, 12 px) in Text
@@ -141,18 +141,16 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     quality = ['quality_d', 'quality_l']  # np_about.c's badge
     lives = [f'mark_{n}_{k}' for n in ('cloud', 'down') for k in ('d', 'l', 'w')]  # catalogue.c's song marks
     store = ['store_pick_a', 'store_pick_w'] + [f'store_auto_{k}' for k in ('d', 'l', 'w')]  # storage.c's Downloads
-    signin = [f'signin_{n}' for n in ('phone', 'check', 'done', 'fail', 'error')]  # addon.c's QR page steps
+    modepages = [f'modepage_{n}' for n in art.MODE_GLYPHS]  # every mode page's glyph (feedback.c mode_page_paint)
     cc = [f'cc_{n}' for n in art.CC_ICONS]  # control_center.c's glyphs
-    usb = [*(f'usb_{n}_{k}' for n in art.USB_ROWS for k in ('d', 'l', 'w')), *(f'usbmode_{n}' for n in art.USB_MODES),
-           *(f'usbtoast_{n}' for n in art.USB_TOASTS)]  # usb_ui.c's chooser rows, mode pages and toasts
-    usb += [f'empty_{n}' for n in art.EMPTY_GLYPHS]  # feedback.c empty_state's glyphs
+    usb = [*(f'usb_{n}_{k}' for n in art.USB_ROWS for k in ('d', 'l', 'w')),
+           *(f'usbtoast_{n}' for n in art.USB_TOASTS)]  # usb_ui.c's chooser rows and toasts
+    usb += [f'empty_{n}_{k}' for n in art.EMPTY_GLYPHS for k in ('d', 'l')]  # feedback.c empty_state's glyphs, per half
     upnext = [f'bump_{k}' for k in ('d', 'l', 'w')] + [f'mode_{n}' for n in ('queue_d', 'queue_l', 'radio_d', 'radio_l', 'radio_w',
                                                                               'shuffle_xd', 'shuffle_xl', 'repeat_xd', 'repeat_xl')]
     charge = {**{f'chargetoast_{n}': c for n, (_, c) in art.CHARGE_TOASTS.items()},
               'chargetoast_battery_d': 0xffffff, 'chargetoast_battery_l': 0}  # charging.c's toasts
     inset = [f'batt{n}_{k}' for n in art.BATT_GLYPHS for k in ('d', 'l')]  # list_marks.c battery_slim
-    sw = [f'swmode_{n}' for n in art.SW_MODES]  # sw_update.c's result glyphs
-    sw += [f'btmode_{n}' for n in art.BT_MODES]  # bt_recv.c's mode page glyph
     keylock = [f'keylock_{k}' for k in ('d', 'l')]  # status_row.c's padlock (the card's below)
     status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'btdim', 'headphones', 'car', 'down',
                                           *(f'sync_{f}' for f in range(art.STATUS_SPIN)))
@@ -173,9 +171,9 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     assert set(got) == {'sort_bars'} | {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality,
-                                              *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *signin, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
+                                              *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
                                               'search_pop', 'search_pop_letters', 'search_pop_echoes', 'holdback',
-                                              *(f'spin_{f}' for f in range(art.SPIN_SPOKES)), *sw,
+                                              *(f'spin_{f}' for f in range(art.SPIN_SPOKES)),
                                               *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
                                               *btdev, *btspin, *bttoast, *guest)}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
@@ -203,9 +201,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.PL_MARK_PX, c) for n, c in pmarks.items()),
                           *((n, art.MARK_PX, {'d': 0x858585, 'l': 0x6e6e6e, 'w': 0xffffff}[n[-1]]) for n in lives),
                           *((n, art.MARK_PX, {'a': blue, 'd': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in store),
-                          *((n, art.SIGNIN_PX, 0xffffff) for n in signin),
+                          *((n, art.MODE_GLYPH_PX, 0xffffff) for n in modepages),
                           *((n, art.USB_TOAST_PX, c) for n, c in charge.items()), ('chargebolt', art.CHARGE_BOLT_PX, 0x34c759),
-                          *((n, art.USB_MODE_PX, 0xffffff) for n in sw),
                           *((n, art.ROW_ICON_PX, c) for n, c in btdev.items()), *((n, art.USB_TOAST_PX, c) for n, c in bttoast.items()),
                           *((f'cc_{n}', px, c) for n, (_, px, c) in art.CC_ICONS.items())):
         w, h, at = pixels(got[f'oled_{name}'])
@@ -298,7 +295,7 @@ def test_every_empty_states_glyph_is_drawn_and_every_drawn_one_is_named():
     """The glyphs the payload's empty states name (each empty_t's first string, feedback.c empty_state) are
     EMPTY_GLYPHS' keys, no more and no fewer: a page naming one the build never drew paints no glyph."""
     named = set()
-    for c in (pathlib.Path(__file__).parents[2]/'patch').glob('*.c'):
+    for c in (pathlib.Path(__file__).parents[2]/'patch').glob('**/*.c'):
         src = c.read_text()
         for m in re.finditer(r'empty_t\b[^;(]*?=\s*\{|\(empty_t\)\s*\{', src):
             named |= set(re.findall(r'\{\s*"([a-z][a-z-]*)"', src[m.start():src.index(';', m.end())]))
@@ -379,7 +376,7 @@ def test_a_row_symbol_is_drawn_at_its_optical_size(name):
 
 def test_a_theme_draws_only_the_images_its_keys_ask_for():
     """Each optional group is its key's: a theme without Now Playing's own glyphs, the Shuffle row, the switch rows,
-    the inset modal or iPod text entry draws none of their images, and keeps the rest."""
+    the menu sheet or iPod text entry draws none of their images, and keeps the rest."""
     oled = theme.builtins()[0]
     bare = {**oled, 'np_modes': 0, 'shuffle_row': 0, 'set_switch': 0, 'entry_ipod': 0,
             'geoms': {n: dataclasses.replace(g, modal=0) for n, g in oled['geoms'].items()}}

@@ -31,24 +31,24 @@ void *window_of(void *w) {
  * window_manager_is_animating is set; nothing else paints the page under it. */
 static int slides(void *win) {
     /* Now Playing with a hint holds it as close_anim_hint, which this doesn't read. */
-    if (win && win == st.np_win && theme()->motion[MOTION_PLAYING].hint) return 1;
+    if (win && win == st.np_win && motion_row(MOTION_PLAYING)->hint) return 1;
     const char *hint = win ? widget_get_prop_str(win, "anim_hint", (void *)0) : (void *)0;
     return hint && *hint;
 }
 
-/* win's anim_hint becomes the theme's for kind, at load or open only. A theme with no hint for kind
- * reads and writes nothing. Now Playing takes it as close_anim_hint, its open stays immediate. No
- * kind reaches a dialog: a clear one's snapshot would show black under its animation. */
+/* win's anim_hint becomes the theme's for kind (Reduce Motion's fade under that flag: ui_kit.c
+ * motion_row), at load or open only. A theme with no hint for kind reads and writes nothing. Now
+ * Playing takes it as close_anim_hint, its open stays immediate. No kind reaches a dialog: a clear
+ * one's snapshot would show black under its animation. */
 static void motion_hint(void *win, int kind) {
-    const char *hint = theme()->motion[kind].hint;
+    const char *hint = motion_row(kind)->hint;
     if (!hint) return;
     const char *prop = kind == MOTION_PLAYING ? "close_anim_hint" : "anim_hint";
     if (tk_strcmp(widget_get_prop_str(win, prop, ""), hint)) widget_set_prop_str(win, prop, hint);
 }
 /* A window as it loads. Themes with no window hints read nothing. */
 static void motion_load(void *root, int np) {
-    const motion_t *M = theme()->motion;
-    if (!M[MOTION_PAGE].hint && !M[MOTION_PLAYING].hint) return;
+    if (!motion_row(MOTION_PAGE)->hint && !motion_row(MOTION_PLAYING)->hint) return;
     if (np)
         motion_hint(root, MOTION_PLAYING);
     else if (slides(root))
@@ -176,11 +176,11 @@ static void home_step(void *w, int dir, unsigned now, int jump) {
     if (coverflow_bounded(w) && (to < 0 || to >= n)) {
         goal += dir * stride * steps;
         if (a && (goal - live) * dir < 0) return; /* still arriving at the end */
-        I(w, SLIDE_OFFSET) = live = goal - dir * stride / CF_BOUNCE;
+        I(w, SLIDE_OFFSET) = live = goal - (motion_reduced() ? 0 : dir * stride / CF_BOUNCE);
     }
     coverflow_letter(w, letter, now);
     const motion_t *glide =
-        &theme()->motion[(coverflow_slide(w) ? MOTION_COVERFLOW_STEP : MOTION_STEP) + fast];
+        motion_row((coverflow_slide(w) ? MOTION_COVERFLOW_STEP : MOTION_STEP) + fast);
     if (!carousel_glide(w, goal, glide->ms, glide->easing)) {
         st.home_surface = (void *)0;
         return;

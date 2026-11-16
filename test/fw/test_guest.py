@@ -2,7 +2,6 @@
 its state read for the UI; the owner's music stopped while a guest plays and back after, as Leave says; the car's keys
 to the guest; stock's receiver page kept shut while Guest Play is on."""
 import ctypes as C
-import struct
 
 import pytest
 
@@ -25,8 +24,7 @@ class Rig:
         fw.mock('fw_close', lambda *_: 0)
         fw.mock('fw_system', lambda cmd, *_: self.commands.append(C.string_at(cmd).decode()) or 0)
         fw.mock('fw_access', lambda path, *_: 0 if C.string_at(path).decode() == '/proc/77' else -1)
-        fw.mock('fw_clock_gettime', lambda kind, ts, *_: C.memmove(ts, struct.pack('<qq', self.ms // 1000,
-                                                                                    self.ms % 1000 * 1000000), 16) and 0)
+        fw.mock('time_now_ms', lambda *_: self.ms)
         fw.mock('mclGetPlayStatus', lambda *_: self.status)
         self.handles = {}
 
@@ -288,3 +286,115 @@ def test_spot_take_holds_a_guest_session(rig, fw):
     rig.poll()
     fw.fn('spotify__spot_take', None)()
     assert spot.sent[-1] == ('/tmp/q2-librespot.sock', 'P')
+
+
+# AirPlay: stock's take-over (airplay_mainscheduling) waits for the owner.
+
+def airplay(fw, flag):
+    fw.mock('airplayGetFlag', lambda *_: flag)
+    return fw.fn('guest_airplay', C.c_int)()
+
+
+def test_airplay_without_guest_play_goes_on_as_stock(rig, fw):
+    rig.poll()
+    airplay(fw, 1)
+    assert len(rig.fw.calls('stock_airplay_sched_trampoline')) == 1 and rig.lines == []
+
+
+def test_airplay_is_held_until_allowed(rig, fw):
+    rig.fifo_up = True
+    rig.state(state='idle')
+    rig.poll()
+    assert airplay(fw, 1) == 0 and airplay(fw, 1) == 0
+    assert not rig.fw.calls('stock_airplay_sched_trampoline') and rig.lines == ['net airplay client AirPlay\n']
+    rig.state(state='playing', source='airplay')
+    rig.poll()
+    airplay(fw, 1)
+    assert len(rig.fw.calls('stock_airplay_sched_trampoline')) == 1
+
+
+def test_airplay_refused_is_stopped(rig, fw):
+    rig.fifo_up = True
+    rig.state(state='idle', netdeny_seq=0)
+    rig.poll()
+    airplay(fw, 1)
+    rig.state(state='idle', netdeny='airplay', netdeny_seq=1)
+    rig.poll()
+    assert len(rig.fw.calls('airplaySendStop')) == 1
+
+
+def test_airplays_end_ends_the_guest(rig, fw):
+    rig.fifo_up = True
+    rig.state(state='playing', source='airplay')
+    rig.poll()
+    airplay(fw, 0)
+    assert rig.lines == ['net-end airplay\n'] and len(rig.fw.calls('stock_airplay_sched_trampoline')) == 1
+
+
+def test_the_cars_keys_stay_demos_for_airplay_and_dlna(rig, fw):
+    rig.fifo_up = True
+    for source in ('airplay', 'dlna'):
+        rig.state(state='playing', source=source)
+        rig.poll()
+        assert fw.fn('guest_active', C.c_int)() == 1 and fw.fn('guest_key', C.c_int, C.c_int)(NEXT) == 0
+    assert rig.lines == []
+
+
+# DLNA: the renderer's actions wait on their own thread for the owner's answer.
+
+class States:
+    """The state file as q2-guest writes it over the wait: each read takes the next, the last stays."""
+    def __init__(self, rig, *states):
+        self.rig, self.states, self.reads = rig, list(states), 0
+        rig.fw.mock('fw_usleep', lambda *_: self.next() or 0)
+        self.next()
+
+    def next(self):
+        self.rig.state(**self.states[min(self.reads, len(self.states) - 1)])
+        self.reads += 1
+
+
+def dlna_play(fw):
+    return fw.fn('guest_dlna_play', C.c_int)()
+
+
+def test_dlna_without_guest_play_plays_at_once(rig, fw):
+    rig.poll()
+    dlna_play(fw)
+    assert len(rig.fw.calls('stock_dlna_play_trampoline')) == 1 and rig.lines == []
+
+
+def test_dlna_asks_and_plays_once_allowed(rig, fw):
+    rig.fifo_up = True
+    rig.state(state='idle')
+    rig.poll()
+    States(rig, dict(state='idle'), dict(state='asking', source='dlna'), dict(state='playing', source='dlna'))
+    dlna_play(fw)
+    assert rig.lines == ['net dlna renderer DLNA\n'] and len(rig.fw.calls('stock_dlna_play_trampoline')) == 1
+
+
+def test_dlna_refused_does_nothing(rig, fw):
+    rig.fifo_up = True
+    rig.state(state='idle')
+    rig.poll()
+    States(rig, dict(state='idle', netdeny_seq=4), dict(state='asking', source='dlna', netdeny_seq=4),
+           dict(state='idle', netdeny='dlna', netdeny_seq=5))
+    assert dlna_play(fw) == 0 and not rig.fw.calls('stock_dlna_play_trampoline')
+
+
+def test_dlna_no_answer_does_nothing_after_its_wait(rig, fw):
+    rig.fifo_up = True
+    rig.state(state='idle')
+    rig.poll()
+    s = States(rig, dict(state='asking', source='dlna'))
+    fw.fn('guest_dlna_uri', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+    assert not rig.fw.calls('stock_dlna_uri_trampoline') and s.reads == 141
+    assert rig.lines == []  # already asking about DLNA: not asked twice
+
+
+def test_dlnas_stop_ends_the_guest(rig, fw):
+    rig.fifo_up = True
+    rig.state(state='playing', source='dlna')
+    rig.poll()
+    fw.fn('guest_dlna_stop', C.c_int)()
+    assert rig.lines == ['net-end dlna\n'] and len(rig.fw.calls('stock_dlna_stop_trampoline')) == 1

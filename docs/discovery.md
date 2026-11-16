@@ -13,8 +13,8 @@ marker wins; if both markers are in the same folder, `database.unignore` wins.
 
 These tracks remain indexed, but do not appear in the normal music library's Songs,
 Albums, Artists, Album Artists, Genres, Composers, Coverflow or library shuffle.
-They are also hidden from the displayed Favourites, Recent and Frequent lists.
-Existing favourite/history records are retained.
+They are also hidden from the displayed Favorites, Recent and Frequent lists.
+Existing favorite/history records are retained.
 
 Use an explicit playlist containing those tracks, or browse their folders, to play
 them. Mixed playlists retain both regular and discovery tracks in their original order.

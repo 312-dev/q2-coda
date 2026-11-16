@@ -1,6 +1,6 @@
-/* Card apps: programs that run from the card beside Q2 Pod, installed by System
+/* Card apps: programs that run from the card beside Q2 Muse, installed by System
  * settings' Apps from their own GitHub releases (netupdate.c) or unzipped to the card by hand, as
- * Spotify's librespot is. Q2 Pod knows none of them by name: each is a card folder .<id> holding
+ * Spotify's librespot is. Q2 Muse knows none of them by name: each is a card folder .<id> holding
  *   q2app    its manifest, key=value lines: name (its Streaming row's), search (the search box's
  *            hint), qr (1: its row turns it on and shows its QR code once it answers), scrobble
  *            (0: its songs stay out of the scrobble log, addon_scrobbles), stop (0: its page has no
@@ -14,7 +14,10 @@
  *   icon-40.png, icon.png
  *            its Streaming row's icon, 40 px (SET_ICON), drawn 1:1, else 52 px, scaled to fit;
  *            one over ART_MAX px either way counts as none; without them, the shared stream_app.
- * Streaming lists those on the card (home.c ringnav_stream). A row starts its app and opens
+ * The firmware carries some apps too (tools/build.py BUNDLED_APPS), each in BUNDLED/<id> with the
+ * same files and a version file, its launcher keeping the app's data in the card's .<id> (addon_dir
+ * says which copy runs: docs/internals.md#bundled-apps).
+ * Streaming lists those on the card and those carried (home.c ringnav_stream). A row starts its app and opens
  * addon_page, a list the app draws over Q2SPOT/1 (docs/librespot.md) on /tmp/q2-<id>.browse.sock:
  * each row's kind says what a press does (a local row plays a song or folder from the card,
  * library_lists.c's songs_open). Its status file /tmp/q2-<id>.state says whether to hold standby off
@@ -61,7 +64,7 @@
 
 #define ADDON_POLL_MS 500
 /* A level's drawing (artist_view): the rows as the app sent them, or an artist's page and the
- * pages its rows open, or an album's page (album_view), under a set with the inset modal */
+ * pages its rows open, or an album's page (album_view), under a set with the menu sheet */
 enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 #define ADDON_START_MS 10000 /* no socket this long after the start: it isn't running */
 #define ADDON_LIVE_MS 2000   /* a level whose reply says "refresh" is asked again this often */
@@ -84,6 +87,8 @@ enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 #define APP_ID 16        /* an id's bytes, its NUL included */
 #define QR_RAW 1536      /* an app's status file as far as it is read (poll_one, qr_refresh) */
 #define CARD "/mnt/mmc"
+#define BUNDLED "/usr/lib/q2apps" /* the firmware's own copies (tools/build.py BUNDLED_DIR) */
+#define TAGS CARD "/.q2/apps"      /* an App Store install's tag (netupdate.c app_file) */
 #define CAPS_FILE "/tmp/q2-addon.caps"
 /* This firmware's card-app features, space-separated; a feature adds its word. */
 #define ADDON_CAPS                                                                                 \
@@ -140,43 +145,116 @@ static app_t *slot(const char *id) {
     return a;
 }
 
-/* Streaming's page (navigation.c): the card's apps found again, their names read; how many there
- * are, by name for addon_name. A slot keeps its app (and its running state) from scan to scan. */
+/* Where a version's numbers start: after its first 'v' followed by a digit ("q2-v0.9"), else at its
+ * first digit ("1.10.2"). */
+static const char *version_at(const char *s) {
+    for (const char *p = s; *p; ++p)
+        if (*p == 'v' && p[1] >= '0' && p[1] <= '9') return p + 1;
+    while (*s && (*s < '0' || *s > '9')) ++s;
+    return s;
+}
+/* A version's order against another's: "q2-v0.9", "v1.10" or "1.10.2", their dotted numbers
+ * (version_at) compared in turn, a missing one as 0; anything after them is ignored. */
+int addon_version_cmp(const char *x, const char *y) {
+    x = version_at(x), y = version_at(y);
+    while ((*x >= '0' && *x <= '9') || (*y >= '0' && *y <= '9')) {
+        unsigned a = 0, b = 0;
+        for (; *x >= '0' && *x <= '9'; ++x) a = a * 10 + (unsigned)(*x - '0');
+        for (; *y >= '0' && *y <= '9'; ++y) b = b * 10 + (unsigned)(*y - '0');
+        if (a != b) return a < b ? -1 : 1;
+        x += *x == '.' && x[1] >= '0' && x[1] <= '9';
+        y += *y == '.' && y[1] >= '0' && y[1] <= '9';
+    }
+    return 0;
+}
+
+/* The folder of app id that runs, into dir (n bytes): the card's CARD/.<id> or the firmware's
+ * BUNDLED/<id>; 1 for the firmware's. The card's runs when it holds the app (its q2-<id>) and either
+ * the firmware carries none or the card's is newer: its App Store tag (TAGS/<id>.tag) against the
+ * carried version file, by addon_version_cmp. A card copy with no tag was unzipped by hand, and
+ * counts as newer: whoever put it there chose it. Anything else runs the firmware's, when it has
+ * one; with neither, the card's folder (where an install would go). */
+int addon_dir(const char *id, char *dir, unsigned n) {
+    char path[64], card[24], mine[24];
+    tk_snprintf(path, sizeof path, BUNDLED "/%s/q2-%s", id, id);
+    int carried = !access(path, 0);
+    tk_snprintf(path, sizeof path, CARD "/.%s/q2-%s", id, id);
+    int on_card = !access(path, 0);
+    if (carried && on_card) {
+        tk_snprintf(path, sizeof path, TAGS "/%s.tag", id);
+        if (state_read(path, card, sizeof card)) {
+            tk_snprintf(path, sizeof path, BUNDLED "/%s/version", id);
+            carried = state_read(path, mine, sizeof mine) && addon_version_cmp(card, mine) <= 0;
+        } else
+            carried = 0;
+    }
+    if (carried) tk_snprintf(dir, n, BUNDLED "/%s", id);
+    else tk_snprintf(dir, n, CARD "/.%s", id);
+    return carried;
+}
+/* The q2app of app id that runs (addon_dir's folder), into path (n bytes). */
+void addon_q2app(const char *id, char *path, unsigned n) {
+    char dir[48];
+    addon_dir(id, dir, sizeof dir);
+    tk_snprintf(path, n, "%s/q2app", dir);
+}
+
+/* One app's folder at the scan: read when it is the copy of its app that runs (addon_dir). */
+static void scan_one(const char *id, const char *from) {
+    char raw[512], path[64], dir[48];
+    app_t *a;
+    addon_dir(id, dir, sizeof dir);
+    if (strcmp(dir, from)) return;
+    tk_snprintf(path, sizeof path, "%s/q2app", dir);
+    if (!state_read(path, raw, sizeof raw) || !(a = slot(id))) return;
+    tk_snprintf(a->bin, sizeof a->bin, "%s/q2-%s", dir, id);
+    tk_snprintf(a->run, sizeof a->run, "/bin/sh %s/run", dir);
+    field(raw, "name", a->name, sizeof a->name);
+    if (!a->name[0]) tk_snprintf(a->name, sizeof a->name, "%s", a->id);
+    field(raw, "search", a->tips, sizeof a->tips);
+    if (!a->tips[0]) tk_snprintf(a->tips, sizeof a->tips, "Search");
+    a->qr = number(raw, "qr") == 1;
+    a->game = number(raw, "game") == 1;
+    a->audio = number(raw, "audio") == 1;
+    a->hidden = number(raw, "hidden") == 1;
+    char stop[4]; /* as text, as scrobble: number() is 0 for a missing key too */
+    field(raw, "stop", stop, sizeof stop);
+    a->nostop = !strcmp(stop, "0") || !strcmp(stop, "0\r");
+    field(raw, "more", a->more, sizeof a->more);
+    unsigned k = strlen(a->more);
+    if (k && a->more[k - 1] == '\r') a->more[k - 1] = 0; /* a Windows editor's line end */
+    a->present = !access(a->bin, 0);
+    /* the row's size first, the other scaled to fit (navigation.c set_child), else stream_app
+     * (one over ART_MAX px either way, or whose size can't be read, counts as none: demo
+     * decodes it whole) */
+    static const char *const icons[2] = { "icon-40.png", "icon.png" };
+    tk_snprintf(a->icon, sizeof a->icon, "stream_app");
+    for (int i = 1; i >= 0; --i) {
+        int w = 0, h = 0;
+        tk_snprintf(path, sizeof path, "%s/%s", dir, icons[i]);
+        if (picture_size(path, &w, &h) && w && h && w <= ART_MAX && h <= ART_MAX)
+            tk_snprintf(a->icon, sizeof a->icon, "file://%s", path);
+    }
+}
+
+/* Streaming's page (navigation.c): the apps on the card and those the firmware carries found again,
+ * their names read; how many there are, by name for addon_name. A slot keeps its app (and its
+ * running state) from scan to scan. */
 int addon_scan(void) {
-    char raw[512], path[64];
-    void *d = opendir(CARD);
+    char dir[48];
     for (int i = 0; i < ap.n; ++i) ap.a[i].present = 0;
+    void *d = opendir(CARD);
     for (struct dirent *e; d && (e = readdir(d));) {
-        app_t *a;
         if (e->d_name[0] != '.' || !valid_id(e->d_name + 1)) continue;
-        tk_snprintf(path, sizeof path, CARD "/%s/q2app", e->d_name);
-        if (!state_read(path, raw, sizeof raw) || !(a = slot(e->d_name + 1))) continue;
-        field(raw, "name", a->name, sizeof a->name);
-        if (!a->name[0]) tk_snprintf(a->name, sizeof a->name, "%s", a->id);
-        field(raw, "search", a->tips, sizeof a->tips);
-        if (!a->tips[0]) tk_snprintf(a->tips, sizeof a->tips, "Search");
-        a->qr = number(raw, "qr") == 1;
-        a->game = number(raw, "game") == 1;
-        a->audio = number(raw, "audio") == 1;
-        a->hidden = number(raw, "hidden") == 1;
-        char stop[4]; /* as text, as scrobble: number() is 0 for a missing key too */
-        field(raw, "stop", stop, sizeof stop);
-        a->nostop = !strcmp(stop, "0") || !strcmp(stop, "0\r");
-        field(raw, "more", a->more, sizeof a->more);
-        unsigned k = strlen(a->more);
-        if (k && a->more[k - 1] == '\r') a->more[k - 1] = 0; /* a Windows editor's line end */
-        a->present = !access(a->bin, 0);
-        /* the row's size first, the other scaled to fit (navigation.c set_child), else stream_app
-         * (one over ART_MAX px either way, or whose size can't be read, counts as none: demo
-         * decodes it whole) */
-        static const char *const icons[2] = { "icon-40.png", "icon.png" };
-        tk_snprintf(a->icon, sizeof a->icon, "stream_app");
-        for (int i = 1; i >= 0; --i) {
-            int w = 0, h = 0;
-            tk_snprintf(path, sizeof path, CARD "/%s/%s", e->d_name, icons[i]);
-            if (picture_size(path, &w, &h) && w && h && w <= ART_MAX && h <= ART_MAX)
-                tk_snprintf(a->icon, sizeof a->icon, "file://%s", path);
-        }
+        tk_snprintf(dir, sizeof dir, CARD "/%s", e->d_name);
+        scan_one(e->d_name + 1, dir);
+    }
+    if (d) closedir(d);
+    d = opendir(BUNDLED);
+    for (struct dirent *e; d && (e = readdir(d));) {
+        if (!valid_id(e->d_name)) continue;
+        tk_snprintf(dir, sizeof dir, BUNDLED "/%s", e->d_name);
+        scan_one(e->d_name, dir);
     }
     if (d) closedir(d);
     ap.shown = ap.games = 0;
@@ -197,12 +275,15 @@ const char *addon_name(int k) { return k >= 0 && k < ap.shown ? ap.a[ap.order[k]
 const char *addon_id(int k) { return k >= 0 && k < ap.shown ? ap.a[ap.order[k]].id : 0; }
 const char *addon_icon(int k) { return k >= 0 && k < ap.shown ? ap.a[ap.order[k]].icon : 0; }
 
-/* Whether an image's name is a card app's Streaming icon, file:///mnt/mmc/.<id>/icon*.png
- * (navigation.c ringnav_image_add: an icons.addon_mono theme greys it as Streaming's own icons). */
+/* Whether an image's name is a card app's Streaming icon, file:///mnt/mmc/.<id>/icon*.png or a
+ * carried app's, file:///usr/lib/q2apps/<id>/icon*.png (navigation.c ringnav_image_add: an
+ * icons.addon_mono theme greys it as Streaming's own icons). */
 int addon_is_icon(const char *name) {
     static const char *const ends[] = { "/icon.png", "/icon-40.png" };
     unsigned n = name ? strlen(name) : 0;
-    if (!n || !tk_str_start_with(name, "file://" CARD "/.")) return 0;
+    if (!n || !(tk_str_start_with(name, "file://" CARD "/.") ||
+                tk_str_start_with(name, "file://" BUNDLED "/")))
+        return 0;
     for (unsigned i = 0; i < 2; ++i) {
         unsigned k = strlen(ends[i]);
         if (n > k && !strcmp(name + n - k, ends[i])) return 1;
@@ -642,7 +723,7 @@ static void stream_poll(app_t *a) {
 }
 
 /* Sleep timers (q2-podcasts' Sleep Timer): an app's /tmp/q2-<id>.sleep holds "until <time>"
- * (seconds since the epoch, at most SLEEP_MAX_S away) or "end" (the track playing now ends). Q2 Pod
+ * (seconds since the epoch, at most SLEEP_MAX_S away) or "end" (the track playing now ends). Q2 Muse
  * keeps the timer itself, so it pauses whatever plays (media_set_playing) once the app has stopped
  * too. A time is kept as the time left on the boot clock (boot_s), which counts Standby and doesn't
  * move when Wi-Fi sets the clock; one the Q2 slept through by more than SLEEP_LATE_S is let go.
@@ -1493,9 +1574,9 @@ static void row(lv_t *l, int i) {
     if (l->art) {
         char url[ART_URL];
         item = art_row(i, cell(i, 2), sub, art_file(i, url) ? url : 0, opens(i));
-    } else
-        item = (opens(i) ? page_row_detail_into : page_row_detail)(pg.view, i, cell(i, 2),
-                                                                   *sub ? sub : 0, clicked);
+    } else /* a progress row keeps its detail label, empty or not: progress_row re-dresses both */
+        item = (opens(i) ? page_row_detail_into : page_row_detail)(
+            pg.view, i, cell(i, 2), *sub || !strcmp(cell(i, 0), "progress") ? sub : 0, clicked);
     if (!strcmp(cell(i, 0), "progress")) progress_row(item, strtol(cell(i, 5), 0, 10));
 }
 
@@ -1689,7 +1770,7 @@ static void busy_row(int on) {
 }
 
 /* An artist's page (docs/oled-design.md#artist-page) from the app's reply, under a set with the
- * inset modal (OLED's); other sets keep the plain rows. A reply is an artist's when it has Shuffle
+ * menu sheet (OLED's); other sets keep the plain rows. A reply is an artist's when it has Shuffle
  * and Radio actions on an "artist:" context, as q2-subsonic's artist page does (Go to Artist's,
  * and its Artists rows'). Its other rows go where the design puts them: the album rows (list,
  * album) under an Albums row, Top Songs (list, top) as a row of its own, Add to Sync, Quality and
@@ -1799,7 +1880,7 @@ static int drill_lay(const char *uri) {
 }
 
 /* An album's page (docs/oled-design.md#album-page) from the app's reply, under a set with the
- * inset modal: a reply is an album's when it has a Play action on "album:<id> 0", a Shuffle on
+ * menu sheet: a reply is an album's when it has a Play action on "album:<id> 0", a Shuffle on
  * "album:<id>" and an info row "about", as q2-subsonic's album page has with "album" in the caps
  * (docs/librespot.md#album-rows). The header shows the level's title (the album), the about row's
  * title (its artist) and subtitle ("2015 · 18 songs · 1 hr 12 min") and the album's catalogue
@@ -1935,7 +2016,7 @@ static int artist_view(lv_t *l) {
     return n;
 }
 
-/* Play/Pause held on an artist's or album's page: the inset modal of its sync rows (Add to Sync
+/* Play/Pause held on an artist's or album's page: the menu sheet of its sync rows (Add to Sync
  * or Remove from Sync, Quality, Sync Now), each doing what its row did. */
 static void artist_pick(int k) {
     lv_t *l = top();
@@ -1970,7 +2051,7 @@ static int artist_hold(lv_t *l) {
 }
 
 /* A reply with nothing in it (an empty artist or album: its info row, "No albums", and the sync
- * toggle over nothing) under the inset modal: no rows, the house empty note instead
+ * toggle over nothing) under the menu sheet: no rows, the house empty note instead
  * (docs/oled-design.md#empty-and-offline), the info row's title over its subtitle as the hint, and
  * the toggle left out, as an action over nothing (audit2 F1). 1 when it is one. */
 static int empty_view(lv_t *l) {
@@ -2579,7 +2660,7 @@ static int card_id(const char *path, char *id) {
 static app_t *goto_app(const char *path) {
     char id[APP_ID], raw[512], file[64];
     if (catalogue_path(path) || !card_id(path, id)) return 0; /* a server row is the Library's */
-    tk_snprintf(file, sizeof file, CARD "/.%s/q2app", id);
+    addon_q2app(id, file, sizeof file);
     if (!state_read(file, raw, sizeof raw) || number(raw, "goto") != 1) return 0;
     app_t *a = slot(id);
     if (a && !a->name[0]) addon_scan(); /* not listed by Streaming since boot: its name read */
@@ -2601,7 +2682,7 @@ int addon_goes(const char *path) {
 int addon_scrobbles(const char *path) {
     char id[APP_ID], raw[512], file[64], v[4];
     if (!card_id(path, id)) return 1;
-    tk_snprintf(file, sizeof file, CARD "/.%s/q2app", id);
+    addon_q2app(id, file, sizeof file);
     state_read(file, raw, sizeof raw);
     field(raw, "scrobble", v, sizeof v);
     return strcmp(v, "0") && strcmp(v, "0\r");
@@ -2634,7 +2715,7 @@ int addon_fav_path(const char *path, int on) {
     void *d = path && card_path(path) ? opendir(CARD) : 0;
     for (struct dirent *e; d && (e = readdir(d));) {
         if (e->d_name[0] != '.' || !valid_id(e->d_name + 1)) continue;
-        tk_snprintf(file, sizeof file, CARD "/%s/q2app", e->d_name);
+        addon_q2app(e->d_name + 1, file, sizeof file);
         if (!state_read(file, raw, sizeof raw)) continue;
         field(raw, "favdir", dir, sizeof dir);
         unsigned k = strlen(dir);
@@ -2852,18 +2933,17 @@ static void plate(void *canvas, int x, int y, int w, int h, unsigned color, unsi
     }
 }
 
-/* s, UTF-8, centred on the line at y (the page's) in face at px, in a final 0xAARRGGBB. */
+/* s, UTF-8, centred on the line at y (the page's) in face at px, in a final 0xRRGGBB. */
 static void qr_text(void *canvas, const char *s, int y, const char *face, unsigned px,
-                    unsigned argb) {
-    unsigned buf[128];
-    int box[4] = { 8, y - (int)px, 375 - 16, 2 * (int)px };
-    ar_wide(s, buf, 128);
-    final_text(canvas, face, buf, box, px, argb);
+                    unsigned rgb) {
+    unsigned raw = ui_ink_raw(1);
+    ui_line(canvas, s, 8, 375 - 16, y, 1, face, (int)px, rgb);
+    ui_ink_raw(raw);
 }
 
 /* The page as qr_refresh read it, on qp.view (the page's coordinates). */
 static void qr_paint(void *w, void *canvas) {
-    unsigned ink = 0xff000000u | tok(TOK_PRIMARY), ter = 0xff000000u | tok(TOK_TERTIARY);
+    unsigned ink = tok(TOK_PRIMARY), ter = tok(TOK_TERTIARY);
     if (qp.code && !qp.step[0]) {
         int side = QR_PLATE, x0 = (375 - side) / 2, y0 = QR_PLATE_Y;
         int n = qp.size, m = side / (n + 4), o = (side - m * n) / 2, digits = (n + 3) / 4;
@@ -2900,7 +2980,7 @@ static void qr_paint(void *w, void *canvas) {
     int known = !strcmp(s, "phone") || !strcmp(s, "check") || !strcmp(s, "done") ||
                 !strcmp(s, "fail") || !strcmp(s, "error");
     char glyph[24];
-    tk_snprintf(glyph, sizeof glyph, "signin_%s", s);
+    tk_snprintf(glyph, sizeof glyph, "modepage_%s", s);
     mode_page_paint(w, canvas, widget_get_prop_int(qp.page, "y", 0),
                     &(mode_page_t){ known ? ring : MODE_BARE, known ? glyph : (const char *)0, 0,
                                     qp.title, qp.line, (const char *)0 });

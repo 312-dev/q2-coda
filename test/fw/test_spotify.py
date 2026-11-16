@@ -8,8 +8,8 @@ import ctypes as C
 import pytest
 
 from conftest import O, Files
-from test_streaming import (A_CAPS, A_DOWNLOAD, A_PLAY, A_PREVIEW, A_REMOVE, A_SIGNOUT, L_CONFIRM, L_DOWNLOADS, L_JOB,
-                            L_LIST, L_REMOVE, L_SELECT, L_STORAGE, S_OLD, S_PAIR, S_WAIT, W_NOSOCK, Br, Sp, Wk, track)
+from test_streaming import (A_CAPS, A_DOWNLOAD, A_PLAY, A_PREVIEW, A_REMOVE, A_SIGNOUT, L_DOWNLOADS, L_JOB,
+                            L_LIST, L_SELECT, L_STORAGE, S_OLD, S_PAIR, S_WAIT, W_NOSOCK, Br, Sp, Wk, track)
 
 STATE, DOWNLOAD, LOG, OUT = '/tmp/q2-librespot.state', '/tmp/q2-librespot.download', '/mnt/mmc/.spotify/spot.log', '/tmp/q2-librespot.out'
 SOCK, SINK = b'/tmp/q2-librespot.sock', b'/tmp/q2sink.sock'
@@ -995,8 +995,8 @@ def test_tracks_are_selected_previewed_and_removed_once_confirmed(fw):
     b.click(3)  # Remove Selected…
     assert b.request().endswith(b'\tremove\ttracks\tspotify:track:3\n') and b.br.act == A_PREVIEW  # a count, no deletion
     b.answer(msg=b'1 track; 2 playlists become incomplete')
-    assert b.top.kind == L_REMOVE and b.captions()[0] == '1 track; 2 playlists become incomplete' and len(b.captions()) == 3
-    b.click(2)  # Remove, after Cancel
+    assert asked_card(fw) and b.br.remove_note.startswith(b'1 track; 2 playlists become incomplete\n')  # the card's body
+    card(fw, 'remove_answer', 1)  # Remove, after Cancel
     assert b.request().endswith(b'\tremove\ttracks\tspotify:track:3\tconfirm\n') and b.br.act == A_REMOVE
     b.answer(msg=b'Removed 1 track')
     assert b.toasts == ['Removed 1 track'] and b.top.kind == L_STORAGE and b.br.selected == b''
@@ -1021,7 +1021,7 @@ def test_cancel_sends_nothing_and_keeps_the_selection(fw):
     b.click(2)  # Remove Selected…
     b.answer(msg=b'1 track')
     asked = b.wk.id
-    b.click(1)  # Cancel
+    card(fw, 'remove_answer', 0)  # Cancel
     assert b.wk.id == asked and b.top.kind == L_SELECT and b.details()[:2] == picked and picked[0] != picked[1]
 
 
@@ -1046,8 +1046,8 @@ def test_clear_all_previews_every_download_then_removes_them(fw):
     b = storage(fw, CLEAR_ALL)
     assert b.request().endswith(b'\tremove\tall\t\n') and b.br.act == A_PREVIEW
     b.answer(msg=b'All 120 tracks')
-    assert b.top.kind == L_REMOVE and b.captions()[0] == 'All 120 tracks'
-    b.click(2)  # Remove
+    assert asked_card(fw) and b.br.remove_note.startswith(b'All 120 tracks')
+    card(fw, 'remove_answer', 1)  # Remove
     assert b.request().endswith(b'\tremove\tall\t\tconfirm\n')
 
 
@@ -1105,6 +1105,16 @@ def test_liked_songs_downloads_whole_with_saved_collections(fw, caps, offered):
         assert b.toasts == ['Downloading 50 tracks']
 
 
+def asked_card(fw):
+    """Whether the confirmation card asked (feedback.c confirm opens stock's sortselect_dialog for it)."""
+    return any(C.string_at(a[0]) == b'dialog/sortselect_dialog' for _, a in fw.calls('navigator_to'))
+
+
+def card(fw, answer, row):
+    """The card's answer row, as feedback.c runs it once the card has closed."""
+    fw.fn(f'spotify__{answer}', None, C.c_void_p, C.c_int, C.c_int)(None, row, 0)
+
+
 def account(b):
     """The menu's Account, signed in as Tyler: its info row, then Sign Out."""
     b.menu()
@@ -1118,13 +1128,13 @@ def test_sign_out_asks_first_then_returns_to_pairing(fw):
     account(b)
     shown = b.listing()
     assert len(shown) == 2 and shown[0][:2] == ('Tyler', 'Premium')
-    b.click(1)  # Sign Out
-    assert b.top.kind == L_CONFIRM and len(b.captions()) == 2
+    b.click(1)  # Sign Out: the card asks
+    assert asked_card(fw)
     asked = b.wk.id
-    b.click(0)  # Cancel
+    card(fw, 'signout_answer', 0)  # Cancel
     assert b.listing() == shown and b.wk.id == asked
     b.click(1)
-    b.click(1)  # Cancel, Sign Out
+    card(fw, 'signout_answer', 1)  # Cancel, Sign Out
     assert b.request().endswith(b'\tsignout\n') and b.br.act == A_SIGNOUT
     b.answer()
     assert b.sp.auth == -1 and b.br.depth == 1 and b.top.state == S_PAIR and len(b.captions()) == 1
@@ -1136,7 +1146,7 @@ def test_after_signing_out_no_socket_is_librespot_restarting_for_15_s(fw, later,
     fw.mock('fw_access', lambda *_: 0)  # its state file: no socket after the restart is an add-on too old to browse
     account(b)
     b.click(1)
-    b.click(1)
+    card(fw, 'signout_answer', 1)
     b.answer()
     out = b.clock.now
     b.tick(2000)  # the pairing prompt asks again

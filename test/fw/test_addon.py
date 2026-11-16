@@ -302,6 +302,82 @@ def names(fw, fn):
     return [get(k) for k in range(-1, ap(fw).shown + 1)]
 
 
+BUNDLED = b'/usr/lib/q2apps'
+
+
+def carry(world, name, version=b'q2-v0.9\n', manifest=b'name=Sub\n'):
+    """The firmware's own copy of app name (tools/build.py BUNDLED_APPS), its version file holding version."""
+    d = BUNDLED + b'/' + name.encode()
+    world.files.update({d + b'/q2app': manifest, d + b'/q2-' + name.encode(): b'ELF', d + b'/version': version,
+                        d + b'/icon-40.png': png(40, 40)})
+    world.dirs.setdefault(BUNDLED, []).append(name.encode())
+    return world
+
+
+def app_dir(fw, app_id):
+    out = C.create_string_buffer(48)
+    carried = fw.fn('addon_dir', C.c_int, C.c_char_p, C.c_void_p, C.c_uint)(app_id, out, 48)
+    return carried, out.value
+
+
+def tagged(world, app_id, tag):
+    """An App Store install's tag (netupdate.c app_file) for the card's copy."""
+    world.files[b'/mnt/mmc/.q2/apps/' + app_id + b'.tag'] = tag
+    return world
+
+
+@pytest.mark.parametrize('x,y,order', [
+    (b'q2-v0.9', b'q2-v0.9\n', 0), (b'q2-v0.10', b'q2-v0.9', 1), (b'q2-v0.7', b'q2-v0.9', -1), (b'v1.2', b'1.2.0', 0),
+    (b'v1.2.1', b'v1.2', 1), (b'q2-v2', b'q2-v1.99', 1), (b'', b'v0.1', -1), (b'', b'', 0), (b'q2-v1.0-rc', b'q2-v1.0', 0),
+])
+def test_versions_compare_by_their_dotted_numbers(fw, x, y, order):
+    cmp = fw.fn('addon_version_cmp', C.c_int, C.c_char_p, C.c_char_p)
+    assert cmp(x, y) == order and cmp(y, x) == -order
+
+
+def test_a_carried_app_alone_runs_from_the_firmware(fw):
+    carry(World(fw, {}, {b'/mnt/mmc': []}), 'subsonic')
+    assert app_dir(fw, b'subsonic') == (1, BUNDLED + b'/subsonic')
+    assert scan(fw) == 1
+    a = ap(fw).a[0]
+    assert (a.id, a.name, a.present) == (b'subsonic', b'Sub', 1)
+    assert (a.bin, a.run) == (BUNDLED + b'/subsonic/q2-subsonic', b'/bin/sh ' + BUNDLED + b'/subsonic/run')
+    assert a.icon == b'file://' + BUNDLED + b'/subsonic/icon-40.png'
+    assert fw.fn('addon_is_icon', C.c_int, C.c_char_p)(a.icon) == 1
+
+
+def test_a_card_app_alone_runs_from_the_card(fw):
+    card(fw, subsonic=b'name=Card\n')
+    assert app_dir(fw, b'subsonic') == (0, b'/mnt/mmc/.subsonic')
+    assert scan(fw) == 1 and ap(fw).a[0].bin == b'/mnt/mmc/.subsonic/q2-subsonic'
+
+
+@pytest.mark.parametrize('tag,carried', [
+    (b'q2-v0.10\n', 0),  # the App Store's update is newer: the card's runs
+    (b'q2-v0.9', 1),       # the same version: the firmware's
+    (b'q2-v0.7\n', 1),    # older: the firmware's
+    (None, 0),             # no tag: unzipped by hand, chosen
+])
+def test_the_card_copy_runs_only_when_newer(fw, tag, carried):
+    world = carry(card(fw, subsonic=b'name=Card\n'), 'subsonic')
+    if tag is not None:
+        tagged(world, b'subsonic', tag)
+    assert app_dir(fw, b'subsonic') == (carried, BUNDLED + b'/subsonic' if carried else b'/mnt/mmc/.subsonic')
+    assert scan(fw) == 1  # one row either way
+    a = ap(fw).a[0]
+    assert (a.name, a.bin) == ((b'Sub', BUNDLED + b'/subsonic/q2-subsonic') if carried else
+                               (b'Card', b'/mnt/mmc/.subsonic/q2-subsonic'))
+    path = C.create_string_buffer(64)
+    fw.fn('addon_q2app', None, C.c_char_p, C.c_void_p, C.c_uint)(b'subsonic', path, 64)
+    assert path.value == (BUNDLED + b'/subsonic/q2app' if carried else b'/mnt/mmc/.subsonic/q2app')
+
+
+def test_the_carried_apps_data_folder_on_the_card_is_not_a_second_app(fw):
+    world = carry(World(fw, {b'/mnt/mmc/.subsonic/catalogue.tsv': b''}, {b'/mnt/mmc': [b'.subsonic']}), 'subsonic')
+    assert scan(fw) == 1 and ap(fw).a[0].bin == BUNDLED + b'/subsonic/q2-subsonic'
+    assert world.files  # the card's data left alone
+
+
 def test_scan_finds_apps_by_name(fw):
     card(fw, one=b'name=zed\n', two=b'name=Alpha\n', three=b'name=beta\n')
     assert scan(fw) == 3
@@ -1483,7 +1559,7 @@ SNAKE_SOCK = b'/tmp/q2-snake.input.sock'
 
 
 def settings(fw, **values):
-    """config.ini as Q2 Pod reads its settings: these keys' values, every other its default."""
+    """config.ini as Q2 Muse reads its settings: these keys' values, every other its default."""
     wanted = {k.encode(): v for k, v in values.items()}
     def read(path, section, key, out, default, *_):
         value = wanted.get(C.string_at(key), C.string_at(default))
@@ -3909,7 +3985,7 @@ def test_a_step_is_a_mode_page(fw, step):
         r, g, b = rgb >> 16, rgb >> 8 & 255, rgb & 255
         assert plates[0][4] == 0xff000000 | b << 16 | g << 8 | r
     assert q.texts == [('T', top + 120), ('L', top + 148)]
-    assert any(a.endswith(b'signin_' + step) for a in arts)
+    assert any(a.endswith(b'modepage_' + step) for a in arts)
 
 
 def test_an_unknown_step_draws_its_words_without_a_circle(fw):
@@ -5164,7 +5240,7 @@ def test_a_card_apps_first_song_waits_while_a_game_has_the_sound(fw, audio, time
     assert s.state == S_WAIT and len(fw.calls('timer_add')) == timers and s.timer == (5 if timers else 0)
 
 
-# An artist's page (addon.c artist_view, artist_page.c) under the inset modal's set.
+# An artist's page (addon.c artist_view, artist_page.c) under the menu sheet's set.
 def artist_rows(sync=b'Add to Sync', albums=((b'Settle', b'2013 \xc2\xb7 On Q2', b'al1'), (b'Alchemy', b'2023', b'al4'),
                                               (b'Tondo', b'', b'al6'), (b'Energy', b'2020', b'al3')), radio=True):
     rows = [(b'action', b'toggle', sync, b'', b'artist:ar1', b''), (b'action', b'play', b'Play', b'', b'artist:ar1 0', b''),
@@ -5182,7 +5258,7 @@ def nav_st(fw, scratch):
 
 
 def oled_page(fw, nav_st):
-    """A Page under OLED's set (the inset modal's): its list view has a list box above it, as a list_fit set fits
+    """A Page under OLED's set (the menu sheet's): its list view has a list box above it, as a list_fit set fits
     page_list's box to whole rows."""
     from test_nav_hold import use_set
     p = Page(fw)

@@ -40,7 +40,7 @@ for double in ('0','1'):
     assert not press(DOWN,0) and not press(UP,50) and press(DOWN,O['WAKE_MS']) and press(UP,50),double
 passed()
 m,rows,texts,*_=settings_page('power','scroll_view_powermanager',{'CHARGELIMIT':'1','WAKEDOUBLE':'1','VOLGUARD':'1','STANDBYLIMIT':'2'})
-assert texts()==[limits[1],f"Charge Limit: {O['CHARGE_STOP']}%",'USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox','Restart','Shut Down']
+assert texts()==[limits[1],f"Charge Limit: {O['CHARGE_STOP']}%",'USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox']
 m,rows,texts,*_=settings_page('display','scroll_view_display',{'WAKEDOUBLE':'1','VOLGUARD':'1'},stock_rows=3,sub=3)
 assert texts()[4:]==['Wake: Double Press']; passed()  # VOLGUARD, Volume Guard's key in 1.8.2 and before: no row
 m,rows,texts,*_=settings_page('power','scroll_view_powermanager',{'STANDBYLIMIT':'4'})
@@ -92,11 +92,11 @@ assert texts()==['Folder Root: Card','playset_foldercover'] and icons==['playset
 assert [(m.entries+rows).index(c) for c in m.nodes[m.settings_view]['children']]==[13,12,14]
 m.byte(syms['g_foldercover_flag'],0); assert click(1)==[(1,'PLAYSET','FOLDERCOVER')] and m.u.mem_read(syms['g_foldercover_flag'],1)==b'\1' and switch_image(m,rows[1])=='switch_on'
 assert click(1)==[(0,'PLAYSET','FOLDERCOVER')] and switch_image(m,rows[1])=='switch_off'; passed()
-# Display: Enlarged Album Art last, flipping stock's own byte and key
+# Display: Enlarged Album Art, then Reduce Motion last; Enlarged Album Art flips stock's own byte and key
 m,rows,texts,icons,click=settings_page('display','scroll_view_display',stock_rows=4)
-assert texts()[-1]=='playset_covermode'
-m.byte(syms['g_bigcovermode'],0); assert click(len(rows)-1)==[(1,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\1' and switch_image(m,rows[-1])=='switch_on'
-assert click(len(rows)-1)==[(0,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\0'; passed()
+assert texts()[-2:]==['playset_covermode','Reduce Motion'],texts()
+m.byte(syms['g_bigcovermode'],0); assert click(len(rows)-2)==[(1,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\1' and switch_image(m,rows[-2])=='switch_on'
+assert click(len(rows)-2)==[(0,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\0'; passed()
 # Artists is Album Artist until a choice is saved (read_artistype_value); a saved Artist stays.
 for config,want in (({},1),({'ARTISTTYPE':'0'},0),({'ARTISTTYPE':'1'},1)):
     a=Machine(); a.config.update(config); a.word(syms['artist_type'],7)
@@ -273,7 +273,7 @@ assert m.call(address=payload_syms['folders_shared'],args=(m.deque([]),0,0,0),ga
 # Boot reads it too (ringnav_bootmode), so Audio settings shows it before any Library page has opened.
 for config,text in (({},'Artists: Album Artist'),({'ARTISTTYPE':'0'},'Artists: Artist')):
     shown=settings_page('audioset','scroll_view_playset',config,stock_rows=13,boot=True,sub=1)[2]
-    assert shown()[1]==text,config
+    assert shown()[3]==text,config  # Library's fourth row (library_settings.c)
 passed()
 # Mono Audio (crossfade.c mono_click): saved as Q2POD MONO, the row's text following, and the int
 # hciplayer and q2video map (MONO_FILE) set live. No file until it is first turned on.
@@ -461,13 +461,13 @@ for config,text in (({},'Off'),({'NIGHTSHIFT':'1'},'3400 K'),({'NIGHTSHIFT':'1',
     assert texts()[1]=='Night Shift: '+text and icons[1]=='display_backlight' and m.nodes[label]['name']=='label_night',config
     assert m.nodes[named(m,m.top,'scroll_view_display')]['children'][3]==rows[1],config  # after Smart Awake
 passed()
-# Its row opens the same page with its switch, Off. The switch turns it on and off and saves it; the
+# Its row opens the same page with its switch, Off, its value the warmth in every mode (3400 K). The switch turns it on and off and saves it; the
 # wheel, +/- and the slider step 100K, warmer to the right, a move turning it on; each change repaints
 # the whole screen at once, a drag's every step too, but a drag saves once, at its release.
 m,rows,texts,icons,click=settings_page('display','scroll_view_display',stock_rows=3)
 m.stack=[m.top]; m.nodes[m.wm]=dict(type='window_manager',name='',children=m.stack,visible=1)
 assert click(1)==[] and m.nodes[m.top]['name']=='bootvol_page' and m.nodes[m.title]['text']=='Night Shift'
-assert m.nodes[m.switch]['visible']!=0 and m.nodes[m.vol]['text']=='Off'
+assert m.nodes[m.switch]['visible']!=0 and m.nodes[m.vol]['text']=='3400 K'
 N,K=('Q2POD','NIGHTSHIFT'),('Q2POD','NIGHTK')
 def repaints(): return [c[1:3] for c in m.calls if c[0]=='widget_invalidate_force']==[(m.wm,0)]
 assert press(m.switch)==[(1,*N)] and repaints() and m.nodes[m.vol]['text']=='3400 K' and texts()[1]=='Night Shift: 3400 K'
@@ -479,10 +479,10 @@ m.nodes[m.slider]['value']=10; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[
 m.nodes[m.slider]['value']=0; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and repaints() and texts()[1]=='Night Shift: 5000 K'
 assert press(m.slider,O['EVT_VALUE_CHANGED'])==[(5000,*K)] and turn(O['KEY_PREV'])==[]  # the release saves, once
 # The switch cycles Off, On and Auto; a move in Auto keeps Auto.
-assert texts()[1]=='Night Shift: 5000 K' and press(m.switch)==[(2,*N)] and repaints() and m.nodes[m.vol]['text']=='Auto'
+assert texts()[1]=='Night Shift: 5000 K' and press(m.switch)==[(2,*N)] and repaints() and m.nodes[m.vol]['text']=='5000 K'
 assert texts()[1]=='Night Shift: Auto' and m.nodes[m.switch]['image']=='switch_on'
 assert turn()==[(4900,*K)] and texts()[1]=='Night Shift: Auto' and turn(O['KEY_PREV'])==[(5000,*K)]
-assert press(m.switch)==[(0,*N)] and repaints() and m.nodes[m.vol]['text']=='Off'
+assert press(m.switch)==[(0,*N)] and repaints() and m.nodes[m.vol]['text']=='5000 K'
 assert texts()[1]=='Night Shift: Off' and m.nodes[m.switch]['image']=='switch_off'
 assert turn(O['KEY_PREV'])==[(1,*N)] and texts()[1]=='Night Shift: 5000 K'  # at an end too
 assert press(m.switch)==[(2,*N)] and press(m.switch)==[(0,*N)]
@@ -570,7 +570,7 @@ passed()
 m,rows,texts,icons,click=settings_page('btrows','scroll_view_bluetooth',stock_rows=7)  # 5 rows, 2 devices
 assert len(rows)==4 and icons==[None]*4 and texts()==['Resume on Connect','Link Volume','Name','Guest Play']  # Guest Play's row (guest_ui.c)
 view=named(m,m.top,'scroll_view_bluetooth'); name_row=rows[2]
-assert m.nodes[view]['children'].index(name_row)==1 and m.get(name_row+O['W_H'])==78 and m.entries[1] not in m.nodes[view]['children']
+assert m.nodes[view]['children'].index(name_row)==1 and m.get(name_row+O['W_H'])==m.get(m.entries[1]+O['W_H']) and m.entries[1] not in m.nodes[view]['children']
 assert 'Q2 Muse' in [m.nodes[c].get('text') for c in m.nodes[m.nodes[name_row]['children'][0]]['children']]
 rows=rows[:2]
 for k,row in enumerate(rows):

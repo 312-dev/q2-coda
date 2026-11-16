@@ -190,3 +190,41 @@ def test_a_guests_pairing_drops_the_glyph_rather_than_run_past_the_screen(fw, ui
     h = 18 + 24 + 4 + 2 * 19 + 6 + 40 + 14 + 3 * 32 + 8
     (box,) = [b[0] for b in canvas.boxes if b[0][0] == 42 and b[0][2] == 291]
     assert box[3] == h and 44 <= box[1] and box[1] + box[3] <= 302
+
+
+def test_a_two_line_body_stands_on_19_px_lines_under_the_title(fw, ui, st):
+    """The title's line from 18 px down, then 4 px, then each body line's 19 px: centres 9 or 10 px into each."""
+    theme(fw)
+    card = Card(fw, ui)
+    assert card.ask('Hide Streaming Songs?', ['Cancel', 'Turn Off'], kind=CONSEQUENTIAL,
+                    body='They leave the Library.\nShow in Library pauses.')
+    canvas = card.paint()
+    top = [b for b in canvas.boxes if b[0][0] == 42 and b[0][2] == 291][0][0][1]
+    centres = [r[1] + r[3] // 2 for _, r, _ in canvas.texts]
+    assert centres == [top + 18 + 12, top + 18 + 24 + 4 + 9, top + 18 + 24 + 4 + 19 + 9]
+
+
+@pytest.mark.parametrize('reduce, out_ms', [(0, 120), (1, 120)])
+def test_the_card_fades_in_over_200_ms_and_out_over_120_before_its_answer(fw, ui, st, reduce, out_ms):
+    """docs/oled-design.md#overlay-motion: the dialog (scrim and card together) at opacity 0 when asked, up cubic out
+    over 200 ms (150 under Reduce Motion), the status row's dim with it; an answer fades it out, linear, and runs once
+    that is done."""
+    theme(fw, **({'REDUCEMOTION': b'1'} if reduce else {}))
+    now = [1000]
+    card = Card(fw, ui, now)
+    assert card.ask('Scan Music?', ['Not Now', 'Scan'], kind=NEUTRAL)
+    opacity = lambda: [a[1] for _, a in fw.calls('widget_set_opacity')][-1]  # noqa: E731
+    assert opacity() == 0
+    now[0] += 75 if reduce else 100  # half way: 7/8 in
+    card.paint()
+    assert opacity() == 223
+    now[0] += 200
+    card.paint()
+    assert opacity() == 255
+    ui.key(card.dialog, KEY_RETURN)
+    assert [ms for fn, _, ms in ui.timers.values() if fn == ui.fn('feedback__card_answer')] == [out_ms]
+    now[0] += out_ms // 2
+    card.paint()
+    assert opacity() == 127 and not card.answers
+    ui.due()
+    assert card.answers == [(0, 0)]

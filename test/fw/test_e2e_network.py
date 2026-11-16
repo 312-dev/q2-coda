@@ -1333,7 +1333,7 @@ def test_an_installed_app_draws_its_page_and_its_sync_updates_the_library_once_t
     w.ui.run(3000)
     assert [e for e in w.log if e[0] in ('scan', 'import')] == steps  # a seq is done once
     w.ui.back()
-    store = AppStore(w)  # Q2 Pod's own page, not one the import may run under
+    store = AppStore(w)  # Q2 Muse's own page, not one the import may run under
     w.card.put('/tmp/q2-foo.library', f'8\nscan\nimport {LIB_DIR}Foo Mix.m3u\n'.encode())  # a sync from the phone
     w.ui.run(3000)
     assert [e for e in w.log if e[0] in ('scan', 'import')] == steps and w.card.files['/tmp/q2-foo.library.done'] == b'7 ok\n'
@@ -1541,7 +1541,7 @@ def test_a_track_key_spotify_refuses_ends_the_wait_with_one_kill_and_says_why(w)
 def test_spotify_not_on_the_card_says_so_and_runs_nothing(w):
     sp = Spotify(w, on_card=False)
     page = sp.open()
-    assert w.ui.texts(page) == ["Spotify isn't on the card", 'See the Q2 Pod guide to add it']
+    assert w.ui.texts(page) == ["Spotify isn't on the card", 'See the Q2 Muse guide to add it']
     w.ui.run(2000)
     assert RUN not in w.shell.ran and not w.card.reads.get(SPOT_STATE)
 
@@ -1858,7 +1858,7 @@ class Lyrics:
     REC_PATH runs into REC_TITLE, so REC_TITLE reads the path's high half as an address nothing maps.
     The paths here (lrc_song, ringnav_lyric_save, ringnav_lyric) read no other pointer in it. One that came
     to read REC_TITLE would crash the whole test/fw run rather than fail its test: it belongs with
-    test/patch.py, as Download Album Lyrics does (docs/building.md, Limits)."""
+    test/patch.py, as Get Album Lyrics does (docs/building.md, Limits)."""
     def __init__(self, w, mcl, low):
         self.w, self.lines, self.keep, self.stock = w, [], [], []
         w.card.put(SONG, b'fLaC', count=False)

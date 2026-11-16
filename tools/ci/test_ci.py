@@ -120,3 +120,14 @@ def test_calling_a_named_lambda_counts_as_its_body():
 def test_shard_traces_join_with_their_checks_numbered_on():
     shards = [b'draw a\n== 1\n== 2\n', b'draw b\n== 1\n']
     assert patch_shards.join_traces(shards) == b'draw a\n== 1\n== 2\ndraw b\n== 3\n'
+
+
+def test_a_suite_file_maps_its_lines_onto_the_joined_suite(tmp_path):
+    """A change to test/patch_suite/01_x.py names the joined suite's lines: its file's line 2 is joined line 9."""
+    head = PATCH.split('\n')
+    first, second = '\n'.join(head[:7]) + '\n', '\n'.join(head[7:])
+    root = tree(tmp_path, {'test/patch_suite/00_a.py': first, 'test/patch_suite/01_b.py': second,
+                           'test/patch.py': 'runner\n', 'test/suite_source.py': ''})
+    p = affected.plan_for({'test/patch_suite/01_b.py': {2}}, root, patch_source=PATCH).as_dict()
+    assert p['patch'] == sorted(affected.patch_tests_for({9}, PATCH)) and 'test/playback.py' in p['other']
+    assert affected.plan_for({'test/patch.py': {1}}, root).as_dict()['patch'] == ALL

@@ -296,14 +296,16 @@ void page_retitle(void *page, void *title, const char *caption);
 void *page_list(void *page, void *body, void **title, const char *caption, int n, int item_h);
 void *rows_view(void *parent, int y, int w, int h, int n, int item_h);
 void *page_list_or(void *page, void *body, const char *name, const char *none, int n, int item_h);
-/* feedback.c: the empty state (docs/oled-design.md#empty-and-offline), stacked tiles with a glyph
- * (tools/art.py EMPTY_GLYPHS), a title, a hint and at most one action row */
+/* feedback.c: the empty state (docs/oled-design.md#empty-and-offline), an outline glyph
+ * (tools/art.py EMPTY_GLYPHS; none in the compact form, under rows), a title, a hint and at most
+ * one button */
 typedef struct {
     const char *glyph, *title, *hint, *row;
 } empty_t;
 int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *ctx, void *event));
 int empty_row_y(int free_top);
 int empty_shown(void *page);
+int empty_button(void *list);
 void *empty_list(void *page, void *body, const char *name, const empty_t *e,
                  int (*on_row)(void *ctx, void *event));
 void *empty_open(const char *window, const char *name, const empty_t *e,
@@ -315,7 +317,7 @@ void *page_row_detail_into(void *view, int index, const char *caption, const cha
                            int (*click)(void *, void *));
 void page_row_into(void *view, int index, const char *caption, int (*click)(void *, void *));
 void row_into(void *item, int h);
-/* artist_page.c: an artist's page under the inset modal's set (docs/oled-design.md#artist-page) */
+/* artist_page.c: an artist's page under the menu sheet's set (docs/oled-design.md#artist-page) */
 void *hero_open(void *body, const char *name, const char *sub, const char *meta);
 void *hero_now(void);
 void pair_open(void *head, void *list, const char *const label[2], const char *const icon[2],
@@ -485,6 +487,9 @@ int airplay_on(void), airplay_lyrics(int *ms);
  * 0 when the card didn't take it. */
 int addon_fav(const char *id, const char *kind, const char *key, int on);
 int addon_fav_path(const char *path, int on);
+/* addon.c: which copy of a card app runs, the card's or the firmware's (docs/internals.md#bundled-apps) */
+int addon_dir(const char *id, char *dir, unsigned n), addon_version_cmp(const char *x, const char *y);
+void addon_q2app(const char *id, char *path, unsigned n);
 /* catalogue.c: the server library (docs/internals.md#server-library). catalogue_on: Local + Server;
  * catalogue_path: a server row's path; catalogue_unavailable: a record that can't play now;
  * catalogue_album_unavailable: an album list's record none of whose songs can play now, and
@@ -631,7 +636,6 @@ void forget_rows(void *list);   /* navigation.c: a hidden list opens at its top 
 void paint_art(void *w, void *canvas, const char *name, int x, int y);
 void final_text(void *canvas, const char *face, const unsigned *s, const void *r, unsigned px,
                 unsigned color);
-unsigned ar_wide(const char *s, unsigned *out, unsigned n); /* artist_page.c: UTF-8 to wide */
 int bar_status(void);
 void slider_label(void *w, int x, int y, int ww, int h, int px, const char *face);
 void text_ink(void *w, unsigned color, int n); /* a label's final 0xAARRGGBB, in either half */
@@ -674,9 +678,10 @@ unsigned unflip(unsigned v);          /* theme_engine.c: the grey Light Mode's f
 #define SPOT_GREY 0xffaaaaaau
 void radio_search(void);      /* radio.c */
 void toast(const char *text); /* navigation.c */
-/* smart_wifi.c: its radio woken, 1 while its link comes up; its radio off; an action
- * held for that link (fn(ctx, 0) once it is up, if page, or any page when 0, is still in use) */
-int smart_wifi_wait(void), smart_wifi_off(void);
+/* smart_wifi.c: its radio woken, 1 while its link comes up; its radio off; off or coming
+ * back; an action held for that link (fn(ctx, 0) once it is up, if page, or any page when 0,
+ * is still in use) */
+int smart_wifi_wait(void), smart_wifi_off(void), smart_wifi_back(void);
 int smart_hold(int (*fn)(void *, void *), void *ctx, const char *page);
 int need_link(int (*fn)(void *, void *), void *ctx); /* smart_hold, else "Connect to Wi-Fi first" */
 /* the work smart_wifi.c keeps the radio on for: spotify.c's, scrobble.c's, tidal.c's, addon.c's,
@@ -709,7 +714,7 @@ const char *shelf_busy(void);           /* netupdate.c: the app folder a job rep
 const char *shelf_moving(void);         /* netupdate.c: the app folder deleted or moved into */
 int shelf_erase(int start);             /* netupdate.c: Spotify's erase, started or running */
 void stream_erased(void);               /* navigation.c: Configuration follows a finished erase */
-void album_lyrics_stop(void); /* onlinematch.c: Download Album Lyrics before USB storage */
+void album_lyrics_stop(void); /* onlinematch.c: Get Album Lyrics before USB storage */
 /* release_sig.c (docs/internals.md#release-signatures): the release key's checks */
 enum { SIG_OK, SIG_BAD, SIG_IO, SIG_CANCELLED };
 void sig_hex(const unsigned char *in, unsigned n, char *out);

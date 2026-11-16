@@ -17,7 +17,8 @@
  * (cat_ix: by the path's 64-bit FNV-1a, each server row's or linked card file's sid, seconds and
  * offline copy), which the swap takes.
  *
- * On the UI thread: availability (an offline copy, or online: Wi-Fi up and the app's server=up),
+ * On the UI thread: availability (an offline copy, or online: Wi-Fi up, or Smart Wi-Fi bringing it
+ * back for a press, and the app's server=up),
  * catalogue.avail's changes to it, greyed rows, the play hand-off (catplay, its app started when
  * it isn't running: addon.c addon_wake), the offline queue, and the ratings channel (ratings.out,
  * ratings.in). */
@@ -115,8 +116,9 @@ static struct {
     unsigned ngrey;
     int fitted; /* a greyed row's labels were narrowed (catalogue_fit) since the Q2 started */
     /* a catplay sent: its app, when, and the list to play offline if no answer comes; cp_wake:
-     * when its app was started for it, the catplay not written until the app listens */
-    int cp_app;
+     * when its app was started for it, the catplay not written until the app listens; cp_link:
+     * Smart Wi-Fi's link awaited first (smart_wifi_wait), the app not started until it is up */
+    int cp_app, cp_link;
     unsigned cp_at, cp_seq, cp_wake;
     void *cp_list;
     int cp_start;
@@ -401,7 +403,8 @@ static char *clip(char *o, char *end, int n) {
     return o >= end ? o : n >= 0 && (unsigned)n < room(o, end) ? o + n : end;
 }
 #define PUT(o, end, ...) ((o) = clip((o), (end), tk_snprintf((o), room((o), (end)), __VA_ARGS__)))
-/* s quoted for SQL into o, as far as end. */
+/* s quoted for SQL into o, as far as end, unterminated: the caller ends the string (a PUT after
+ * it, or *o = 0). */
 static char *sq(char *o, char *end, const char *s) {
     if (o + 2 >= end) return o > end ? o : end;
     *o++ = '\'';
@@ -1213,8 +1216,8 @@ int catalogue_np_info(const char *path, char *genre, int *year) {
             PUT(o, sql + sizeof sql - CAT_SLACK,
                 "select style,year from cat.serverall where fileurl=");
             o = sq(o, sql + sizeof sql - CAT_SLACK, ix_str(&cat.ix, e->path));
-            if (o < sql + sizeof sql - CAT_SLACK)
-                np->known = !sqlite3_exec(*cat.stock_slot, sql, np_row, np, 0);
+            if (o < sql + sizeof sql - CAT_SLACK) /* sq leaves the end to its caller */
+                *o = 0, np->known = !sqlite3_exec(*cat.stock_slot, sql, np_row, np, 0);
         }
     }
     if (!np->known) return 0;
@@ -1368,7 +1371,7 @@ static int grey_of(void *w, int depth) {
 }
 /* The text colour of w, painted now, as the theme gave it: in a greyed row, CAT_GREY, or on the
  * selection that row's own ink at CAT_DIM, so it keeps its contrast with the bar or card
- * (docs/server-library.md#greyed-rows). Kept for the row's mark. */
+ * (docs/server-library.md#grayed-rows). Kept for the row's mark. */
 int catalogue_greyed(void *w, unsigned *color) {
     int i = cat.noff ? grey_of(w, 64) : -1;
     if (i < 0 || cat.grey_mark[i] != MK_OFFLINE) return 0;
@@ -1481,7 +1484,7 @@ static void cat_scan(void) {
         if (e->d_name[0] != '.' || !*id || strlen(id) >= sizeof cat.app[0].id ||
             !strcmp(id, "q2pod"))
             continue;
-        tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/q2app", id);
+        addon_q2app(id, path, sizeof path);
         if (!state_read(path, raw, sizeof raw) || number(raw, "catalogue") != 1) continue;
         cat_app_t *a = &cat.app[n++];
         memset(a, 0, sizeof *a);
@@ -1630,7 +1633,8 @@ void catalogue_poll(void) {
         if (!cat.running && !(cat_seq(cat.app[i].id, seq) && strcmp(seq, cat.app[i].seq)))
             ratings_in(i);
     }
-    cat.online = up && networkGetConnectStatus() > 0;
+    /* Smart Wi-Fi's radio off or coming back counts: a press brings the link (catalogue_load) */
+    cat.online = up && (networkGetConnectStatus() > 0 || smart_wifi_back());
     catplay_poll();
     if (cat.running || library_scanning() || !card_mounted()) return;
     for (int i = 0; i < cat.napps; ++i) {
@@ -1668,7 +1672,7 @@ int catalogue_signed(char *id, char *name, unsigned size) {
         tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/credentials", cat.app[i].id);
         if (access(path, 0)) continue;
         tk_snprintf(id, 16, "%s", cat.app[i].id);
-        tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/q2app", cat.app[i].id);
+        addon_q2app(cat.app[i].id, path, sizeof path);
         state_read(path, raw, sizeof raw);
         field(raw, "name", name, size);
         if (!*name) tk_snprintf(name, size, "%s", cat.app[i].id);
@@ -1843,15 +1847,16 @@ int catalogue_load(void *q, int *at, void **own) {
         if (catalogue_path(p)) slot = cat_app_of(p);
     }
     if (catalogue_on() && cat_online() && slot >= 0 && !cat.app[slot].down) {
-        /* its app started first when it isn't running (after a boot, or its idle exit) */
-        int woke = addon_wake(cat.app[slot].id);
+        /* Smart Wi-Fi's link first (woken now); then, or with the link up, its app started when it
+         * isn't running (after a boot, or its idle exit) */
+        int link = !smart_wifi_wait(), woke = link ? addon_wake(cat.app[slot].id) : 0;
         if (cat.cp_list) deque_destroy(cat.cp_list);
         cat.cp_list = _create_deque("stSongInfo");
         deque_init(cat.cp_list);
         deque_assign(cat.cp_list, q);
-        cat.cp_start = *at, cat.cp_app = slot, cat.cp_at = cat.cp_wake = 0;
+        cat.cp_start = *at, cat.cp_app = slot, cat.cp_at = cat.cp_wake = 0, cat.cp_link = !link;
         if (woke == 1) cat.cp_wake = time_now_ms() | 1; /* written once it listens */
-        if (cat.cp_wake || catplay_send()) {
+        if (cat.cp_link || cat.cp_wake || catplay_send()) {
             np_press(q, *at);
             return 2;
         }
@@ -1886,12 +1891,22 @@ static void catplay_offline(void) {
         toast("Not available offline");
     }
 }
-/* An app started for a catplay: the catplay written once it listens, the list played offline if
- * it doesn't within CATPLAY_START_MS. A catplay unanswered for CATPLAY_WAIT_MS: its list played
- * offline. One answered: done, the app's .play plays through addon.c's stream_poll. */
+/* A catplay waiting for Smart Wi-Fi's link: once it is up, its app started (or, running, the
+ * catplay written); no link SMART_CONNECT_MS on (smart_wifi_wait gives up), the list played
+ * offline. An app started for a catplay: the catplay written once it listens, the list played
+ * offline if it doesn't within CATPLAY_START_MS. A catplay unanswered for CATPLAY_WAIT_MS: its list
+ * played offline. One answered: done, the app's .play plays through addon.c's stream_poll. */
 static void catplay_poll(void) {
     int slot = cat.cp_app;
-    if (cat.cp_wake && slot < cat.napps && addon_ready(cat.app[slot].id)) {
+    if (cat.cp_link && !smart_wifi_wait()) {
+        cat.cp_link = 0;
+        int woke =
+            networkGetConnectStatus() > 0 && slot < cat.napps ? addon_wake(cat.app[slot].id) : -1;
+        if (woke == 1)
+            cat.cp_wake = time_now_ms() | 1;
+        else if (woke || !catplay_send())
+            catplay_offline();
+    } else if (cat.cp_wake && slot < cat.napps && addon_ready(cat.app[slot].id)) {
         cat.cp_wake = 0;
         if (!catplay_send()) catplay_offline();
     } else if (cat.cp_wake && time_now_ms() - cat.cp_wake >= CATPLAY_START_MS) {
@@ -1903,7 +1918,8 @@ static void catplay_poll(void) {
         cat.cp_at = 0;
         catplay_offline();
     }
-    if (!cat.cp_at && !cat.cp_wake && cat.cp_list) deque_destroy(cat.cp_list), cat.cp_list = 0;
+    if (!cat.cp_at && !cat.cp_wake && !cat.cp_link && cat.cp_list)
+        deque_destroy(cat.cp_list), cat.cp_list = 0;
 }
 
 /* ---- Server playlists changed on the Q2 (docs/server-library.md#playlists-from-the-q2) ---- */
@@ -2013,7 +2029,7 @@ done:
     if (db) sqlite3_close(db);
 }
 
-/* ---- Ratings (docs/server-library.md#ratings-and-favourites) ---- */
+/* ---- Ratings (docs/server-library.md#ratings-and-favorites) ---- */
 
 /* A song's hearts changed on the Q2: a line to each app with ratings=1. A server song playing
  * from its offline copy is its server row (catalogue_song_key): the row's key and sid. */

@@ -10,7 +10,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, Deques, Files, block, in_fork, libc
+from conftest import NAVIGATION_SOURCE, O, Deques, Files, block, in_fork, libc
 
 W_X, W_Y, W_W, W_H, W_PARENT = O['W_X'], O['W_Y'], O['W_W'], O['W_H'], O['W_PARENT']
 CANVAS_LCD, LCD_FILL_COLOR = O['CANVAS_LCD'], O['LCD_FILL_COLOR']
@@ -1020,6 +1020,45 @@ def test_another_dialog_s_labels_stay(fw, world):
     assert world.at(prompt) == (30, 60, 315, 40)
 
 
+def test_a_toast_rises_and_fades_in_then_sinks_and_fades_out_over_the_page(fw, world):
+    """docs/oled-design.md#overlay-motion: the pill comes up 10 px and fades in over 200 ms cubic out (the dialog's
+    opacity, its line moved with the pill), nothing on its first frame; once its dialog goes, the page under paints it
+    sinking 4 px and fading over 150 ms cubic in, then nothing."""
+    theme(fw)
+    now = [10000]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    page = world.window('settings_page')
+    win = world.window('msginfo_dialog', 'dialog')
+    line = world.add(win, 'line', 'label', box=(30, 60, 315, 40), text='Saved')
+    opacity = lambda: [a[1] for _, a in fw.calls('widget_set_opacity')][-1]  # noqa: E731
+    paint_bg(fw, win, Canvas(fw))
+    assert not world[line].visible and opacity() == 0
+    now[0] += 100  # 875 of the way in
+    paint_bg(fw, win, Canvas(fw))
+    assert world[line].visible and world.at(line)[1] == 236 + 1 and opacity() == 223
+    now[0] += 100
+    canvas = Canvas(fw)
+    paint_bg(fw, win, canvas)
+    assert world.at(line)[1] == 236 and opacity() == 255 and canvas.rounded[0][0][1] == 236
+    gone, = [(fn, ctx) for w, evt, fn, ctx in world.handlers if w == win and evt == O['EVT_DESTROY']]
+    C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(gone[0])(gone[1], None)
+    world.top = page
+    leave = fw.fn('feedback_toast_leave', None, C.c_void_p, C.c_void_p)
+    now[0] += 75  # half way out, cubic in: 1/8 gone
+    canvas = Canvas(fw)
+    leave(page, canvas.p)
+    (box, ink, _), = canvas.rounded
+    assert box[1] == 236 and ink >> 24 == 223 and [t[0] for t in canvas.texts] == ['Saved']
+    now[0] += 50  # 125 of 150 ms: 577 gone, 2 px down
+    canvas = Canvas(fw)
+    leave(page, canvas.p)
+    assert canvas.rounded[0][0][1] == 236 + 2 and canvas.rounded[0][1] >> 24 == 107
+    now[0] += 25
+    canvas = Canvas(fw)
+    leave(page, canvas.p)
+    assert canvas.rounded == [] and canvas.texts == []
+
+
 # Quick Settings.
 
 def test_named_in_a_nul_separated_list(fw):
@@ -1082,7 +1121,7 @@ def navbar_page(world, text='Albums', kind='hscroll_label'):
 
 
 def test_an_inset_modal_back_on_top_names_the_page_under_it_again(fw, world, st):
-    """A playlist's More (an inset modal) over Playlists, then Delete Playlist's confirm over it, which writes its
+    """A playlist's More (a menu sheet) over Playlists, then Delete Playlist's confirm over it, which writes its
     question into the bar (feedback.c): after Cancel the modal is on top again, and the bar names Playlists, not the
     question, while it stays open."""
     label = bar_title(fw, world, st)
@@ -1127,6 +1166,29 @@ def test_a_title_too_long_or_stock_s_null_name(fw, world, st, text, title):
     assert world[label].text == title
 
 
+class EmptyT(C.Structure):
+    _fields_ = [(k, C.c_char_p) for k in ('glyph', 'title', 'hint', 'row')]
+
+
+def test_an_empty_state_retitles_the_bar_on_a_page_already_titled(fw, world, st):
+    """Cover Flow over no albums (cf_empty.c): its page is titled first while its covers load (a status row's covers
+    show no title, so ""), then the empty state comes; the bar must look again (empty_list), or it keeps "" and the
+    status row shows only the clock (seen in the emulator, 2026-11-16) where the design names the page."""
+    label = bar_title(fw, world, st)
+    boot_set(fw, st)
+    win = world.window('coverflow_page')
+    body = world.add(win, 'view_body', box=(0, 0, 375, 290))
+    from test_coverflow import COVERS, Cf
+    cf = fw.var('cf', Cf)
+    cf.screen, cf.scoped, cf.body = COVERS, 0, body
+    sync(fw, win)
+    assert not world[label].text  # no title: the clock
+    e = EmptyT(b'cards', b'No Albums', b'Copy music to the SD card', None)
+    fw.fn('empty_list', C.c_void_p, C.c_void_p, C.c_void_p, C.c_char_p, C.c_void_p, C.c_void_p)(
+        win, body, b'Cover Flow', C.addressof(e), None)
+    assert world[label].text == 'Cover Flow'
+
+
 def shown_empty(world, win):
     """win's empty state (feedback.c empty_state) as shown: (glyph, title, hint), else None. Its view is insensitive:
     a row beside it keeps its taps."""
@@ -1137,15 +1199,16 @@ def shown_empty(world, win):
     return tuple(world[art].props[f'_es_{k}'] for k in ('glyph', 'title', 'hint'))
 
 
-# The empty state's stack with its row (58 + 18 + 24 + 20 + 24 + 32) centred under the status row (y 40): its row's y.
-EMPTY_ROW_Y = 40 + (280 - 176) // 2 + 120 + 24
+# The empty state's stack with its button (60 + 14 + 24 + 20 + 20 + 38) centred under the status row (y 40): the button's
+# y.
+EMPTY_ROW_Y = 40 + (280 - 176) // 2 + 118 + 20
 
 
 def test_an_empty_library_s_songs_page_is_the_empty_state_over_scan_music_now(fw, world, st):
     """Songs over an empty library (stock's panel "view" on show): the panel's picture and line hide, its btn_upmusic
-    becomes the empty state's one selected row, Scan Music Now, under "No Songs" and how to fill the card. The bar
-    under the row is the selection's (feedback_scan_bar). Songs back, the empty state goes and the Shuffle row
-    returns."""
+    becomes the empty state's button, Scan Music Now, under "No Songs" and how to fill the card: its band across the
+    screen with no fill or words of its own, the capsule and its label painted under it (feedback_scan_bar). Songs
+    back, the empty state goes and the Shuffle row returns."""
     theme(fw)
     deques = Deques(fw)
     showlist = fw.var('fw_ctx_p_deque_showlist', C.c_uint)
@@ -1160,14 +1223,16 @@ def test_an_empty_library_s_songs_page_is_the_empty_state_over_scan_music_now(fw
     songs = fw.fn('feedback_songs', None, C.c_void_p, C.c_void_p)
     songs(win, row)
     assert not world[row].visible and not world[picture].visible and not world[line].visible
-    assert world[btn].visible and world.at(view)[1] == EMPTY_ROW_Y and tuple(world.at(btn)) == (0, 0, 375, 32)
-    assert world[btn].text == 'Scan Music Now' and world[btn].props['style:normal:text_align_h'] == 'left'
+    assert world[btn].visible and world.at(view)[1] == EMPTY_ROW_Y and tuple(world.at(btn)) == (0, 0, 375, 38)
+    assert world[btn].text == ''
     assert all(world[btn].props[f'style:{s}:bg_color'] == 0 for s in ('normal', 'pressed', 'over', 'focused'))
     assert shown_empty(world, win) == ('music-notes', 'No Songs', 'Copy music to the SD card')
-    assert world[world.find(win, '_empty_state')].props['_es_top'] == EMPTY_ROW_Y - 144  # the stack's top
+    assert world[world.find(win, '_empty_state')].props['_es_top'] == EMPTY_ROW_Y - 138  # the stack's top
     canvas = Canvas(fw)
     fw.fn("feedback_scan_bar", None, C.c_void_p, C.c_void_p)(btn, canvas.p)
-    assert len(canvas.rounded) == 1 and st('sel_accent', C.c_void_p).value == btn
+    (box, _, radius), = canvas.rounded  # the capsule, centred, at least 140 px, its label on it
+    assert radius == 19 and (box[1], box[3]) == (0, 38) and box[2] >= 140 and box[0] * 2 + box[2] in (374, 375)
+    assert 'Scan Music Now' in [t[0] for t in canvas.texts]
     writes = len(fw.calls('widget_set_prop_str'))
     songs(win, row)
     assert len(fw.calls('widget_set_prop_str')) == writes  # unchanged: not written
@@ -1178,7 +1243,7 @@ def test_an_empty_library_s_songs_page_is_the_empty_state_over_scan_music_now(fw
 
 
 @pytest.mark.parametrize('cls, words', [
-    (0xf00a, ('heart', 'No Favorites', 'Hold Play/Pause on a song to add it')),
+    (0xf00a, ('heart-slash', 'No Favorites', 'Hold Play/Pause on a song to add it')),
     (0xf007, ('clock-counter-clockwise', 'Nothing Played Yet', 'Songs you play show up here')),
     (0xf008, ('chart-bar', 'No Plays Yet', 'Your most played songs show up here')),
     (0xf009, ('sparkle', 'No Songs Added Yet', 'New music on the card shows up here')),
@@ -1192,7 +1257,7 @@ def test_an_empty_song_list_shows_its_class_s_empty_state(fw, world, cls, words)
     row = world.add(win, 'view_navbar_allplay', box=(0, 0, 375, 32))
     fw.fn('feedback_songs', None, C.c_void_p, C.c_void_p)(win, row)
     assert not world[row].visible and shown_empty(world, win) == words
-    assert world[world.find(win, '_empty_state')].props['_es_top'] == 40 + (280 - 120) // 2  # no row: centred alone
+    assert world[world.find(win, '_empty_state')].props['_es_top'] == 40 + (280 - 118) // 2  # no button: centred alone
 
 
 def test_an_empty_library_with_no_card_in_says_so_and_drops_the_scan_row(fw, world):
@@ -1286,7 +1351,7 @@ def test_the_window_going_drops_its_title_s_source(fw, world, st):
 def test_home_s_own_list_is_q2_pod(fw, world, st):
     label = bar_title(fw, world, st)
     sync(fw, world.window('home_page'))
-    assert world[label].text == 'Q2 Pod'
+    assert world[label].text == 'Q2 Muse'
     win, _ = navbar_page(world)
     sync(fw, win)
     assert world[label].text == 'Albums'
@@ -1311,7 +1376,7 @@ def action_view(world, n):
 
 def nav_define(name):
     """A number navigation.c #defines (clang-format may break the line after its name)."""
-    found = re.search(rf'^#define {name}[\s\\]*(\d+)', (host.ROOT/'patch/navigation.c').read_text(), re.M)
+    found = re.search(rf'^#define {name}[\s\\]*(\d+)', NAVIGATION_SOURCE, re.M)
     assert found, name
     return int(found[1])
 
@@ -1409,7 +1474,7 @@ def test_painting_the_bar_keeps_its_clock_and_title_current(fw, world, st):
 
 def test_home_keeps_its_title_while_music_plays_and_the_state_sits_by_the_battery(fw, world, st):
     """Home's own list is like any page for the play state: the bar's paint shows it by the battery, as over a
-    page, and repaints the bar after it; 'Q2 Pod' stays shown."""
+    page, and repaints the bar after it; 'Q2 Muse' stays shown."""
     theme(fw)
     bar = system_bar(fw, world)
     title = world.add(bar, 'label_title', 'hscroll_label', box=(142, 0, 91, 26))
@@ -1426,13 +1491,13 @@ def test_home_keeps_its_title_while_music_plays_and_the_state_sits_by_the_batter
 
     home = world.window('home_page')
     on_home = shown()
-    assert on_home[:2] == ('Q2 Pod', 1) and on_home[2]
+    assert on_home[:2] == ('Q2 Muse', 1) and on_home[2]
     assert st('bar_timer', C.c_uint).value  # mid-paint: the bar again after this frame
     navbar_page(world)
     assert shown() == ('Albums', 1, on_home[2])  # over a page: the same image in the same img_state
     world.top = home
     status[0] = 0  # stopped
-    assert shown() == ('Q2 Pod', 1, 0)
+    assert shown() == ('Q2 Muse', 1, 0)
 
 
 def inside(r, box):
@@ -1956,11 +2021,11 @@ def test_pulled_down_the_page_shows_no_ring_and_the_now_playing_block_takes_one(
     assert boxes(control_center(fw, world, focus=CC_NOW)) == [(163, 35, 195, 130)]
 
 
-def landed(fw, world, t):
+def landed(fw, world, t, **keys):
     """Control Center painted t ms after it came to rest open: each rounded box with the canvas's y offset then."""
     now = [100000 + t]
     fw.mock('time_now_ms', lambda *_: now[0])
-    theme(fw)
+    theme(fw, **keys)
     win, _, _ = quick_window(world)
     world[win].props.update(_cc_landed=100001)
     canvas = Canvas(fw)
@@ -1978,6 +2043,13 @@ def test_landing_open_the_blocks_overshoot_8_px_and_settle_by_280_ms(fw, world, 
     drawn = landed(fw, world, t)
     blocks = [d for d in drawn if d[0] == (20, 38, 138, 124)]
     assert blocks and {y for _, _, y in drawn} == {dy}
+
+
+@pytest.mark.parametrize('t', [50, 190])
+def test_under_reduce_motion_control_center_lands_still(fw, world, t):
+    """A spring is MO_SPATIAL (ui_kit.h): with IPOD REDUCEMOTION on the blocks are at rest from the landing."""
+    drawn = landed(fw, world, t, REDUCEMOTION='1')
+    assert drawn and {y for _, _, y in drawn} == {0}
 
 
 def test_the_sliders_fill_to_their_eased_levels(fw, world):

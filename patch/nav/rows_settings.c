@@ -69,12 +69,10 @@ void list_toggle(void *label, const char *title, int on) {
  * trailing column, the title ending short of it. Switches read On or Off as values, except on a
  * set_switch theme (list_toggle). */
 /* On a set with a right column: the value's box ends on it, or VALUE_CHEVRON_GAP short of it on a
- * row that opens a page (its chevron is there), and the title takes the row up to the value's own
- * text, measured in its face; unmeasured (no canvas yet), the boxes stay as made. */
-#define VALUE_TITLE_GAP 12
+ * row that opens a page (its chevron is there), and the title and value split the row as a
+ * label/value row does (kv_row); unmeasured (no canvas yet), the boxes stay as made. */
 static void value_fit(void *label, void *text) {
-    void *button = P(label, W_PARENT), *canvas = widget_get_canvas(button);
-    const unsigned *s = widget_get_text(text);
+    void *button = P(label, W_PARENT);
     int into =
         drill(button); /* a drill page's row, or one with stock's list_into (list_row_into) */
     for (unsigned i = 0, n = widget_count_children(button); !into && i < n; ++i)
@@ -83,13 +81,8 @@ static void value_fit(void *label, void *text) {
     int right = 374 - geom_val(V_RIGHT_X) - (into ? VALUE_CHEVRON_GAP : 0) - I(button, W_X);
     int w = I(text, W_W);
     if (I(text, W_X) + w != right) widget_move_resize(text, right - w, 0, w, I(text, W_H));
-    if (!canvas || !s) return;
-    int px = theme()->font_px[ROLE_TITLE];
-    unsigned n = wide_len(s);
-    canvas_set_font(canvas, theme_face(s, (int)n, &px), (unsigned)px);
-    int ink = (int)(canvas_measure_text(canvas, s, n) + 0.5f) + 4; /* hscroll_label's margins */
-    int end = right - ink - VALUE_TITLE_GAP - I(label, W_X);
-    if (end > 0 && end != I(label, W_W)) widget_resize(label, end, I(label, W_H));
+    int kw = kv_text_w(label), vw = kv_text_w(text);
+    if (kw >= 0 && vw >= 0) kv_row(label, text, kw, vw, right);
 }
 void list_value(void *label, const char *title, const char *value) {
     void *button = P(label, W_PARENT);
@@ -675,7 +668,7 @@ static const unsigned char playset_order[] = {
 /* General, iOS's: About first, then device maintenance, Network's receivers and Reset. Stock's
  * Language, Wireless, Display, Power, Wheel Function, In-Vehicle, General and System stay hidden,
  * its page left whole: Settings on Home has Wi-Fi, Bluetooth, Display and Battery's rows itself
- * (home_sets_bind), the wheel is Q2 Pod's (tools/build.py WHEEL_MODE), Battery and Controls have
+ * (home_sets_bind), the wheel is Q2 Muse's (tools/build.py WHEEL_MODE), Battery and Controls have
  * In-Vehicle's, Key tone's and Buttons lock's rows (pod_click, keylock_open), and the rows stock
  * moved to System are here, as they were (ringnav_systemset). */
 static const unsigned char sysset_order[] = {

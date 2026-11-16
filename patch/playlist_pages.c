@@ -4,7 +4,8 @@
  * before an accent label, then the songs, each a title with its artist on the right column in
  * Text Tertiary. Centre on a song plays the list from it, as stock plays a playlist's own list
  * (class 0xff13 with its cd_num, so Now Playing's Delete takes it out of this list, not the
- * library); a hold on a song offers Remove from Playlist (or On-The-Go) in the inset modal.
+ * library); a hold on a song opens its whole menu (Play Next, Play Last, Add to Playlist, Go to
+ * Album and Artist), Remove from Playlist (or On-The-Go) last, which the confirmation card asks.
  *
  * On-The-Go's songs are playlist entries under cd_num ON_THE_GO with no header row, so stock's
  * own add (batch_add_file), read (getMusicByPlayList) and Now Playing's Delete take them as any
@@ -183,13 +184,14 @@ void playlist_page_open(int dest, const char *name) {
     pv_show();
 }
 
-/* The hold's Remove, from the modal: the song held, if it is still that row. */
+/* The hold menu's Remove (qm_song_hold): the confirmation card asks first; Remove (row 1) takes the
+ * song held out, if it is still the selected row. */
 static void *pv_held __attribute__((section(".scratch")));
-static void pv_remove(int i) {
-    int at = widget_get_prop_int(pv.view, SEL, -1) - pv.acts;
-    void *r = pv.page && at >= 0 && at < pv_size() ? deque_at(pv.songs, (unsigned)at) : 0;
-    (void)i;
-    if (!r || r != pv_held) return;
+static void pv_remove_answer(void *ctx, int row, int toggle_on) {
+    int at = pv.page ? widget_get_prop_int(pv.view, SEL, -1) - pv.acts : -1;
+    void *r = at >= 0 && at < pv_size() ? deque_at(pv.songs, (unsigned)at) : 0;
+    (void)ctx, (void)toggle_on;
+    if (row != 1 || !r || r != pv_held) return;
     if (!playlist_remove(pv.dest, r)) {
         toast("Could not save playlist");
         return;
@@ -200,16 +202,30 @@ static void pv_remove(int i) {
     pv_show();
     toast("Removed");
 }
-/* ringnav_keylong's Play/Pause hold on the page: a song's menu, Remove alone; 1 when it is ours. */
+static void pv_remove(void) {
+    static const char *const rows[] = { "Cancel", "Remove" };
+    static char name[128];
+    if (!pv.page || !pv_held) return;
+    track_name(name, sizeof name, pv_held);
+    confirm(&(confirm_t){ .title = "Remove \"%s\"?",
+                          .name = name,
+                          .body = "It stays in your library.",
+                          .rows = rows,
+                          .n_rows = 2,
+                          .kind = CONFIRM_DESTRUCTIVE,
+                          .back = -1,
+                          .answer = pv_remove_answer });
+}
+/* ringnav_keylong's Play/Pause hold on the page: a song's whole menu, as a Library song's, with
+ * Remove from Playlist (or On-The-Go) last; 1 when it is ours. */
 int playlist_page_hold(void *top) {
     if (!pv.page || top != pv.page) return 0;
     int at = widget_get_prop_int(pv.view, SEL, -1) - pv.acts;
-    if (at < 0 || at >= pv_size()) return 1;  /* an action row: nothing, its release dropped */
-    static const char *const icons[] = { 0 }; /* the words take the row */
-    const char *names[] = { pv.dest == ON_THE_GO ? "Remove from On-The-Go"
-                                                 : "Remove from Playlist" };
+    if (at < 0 || at >= pv_size()) return 1; /* an action row: nothing, its release dropped */
     pv_held = deque_at(pv.songs, (unsigned)at);
-    modal_actions(names, icons, 1, pv_remove);
+    qm_song_hold(pv.page, pv.songs, (unsigned)at,
+                 pv.dest == ON_THE_GO ? "Remove from On-The-Go" : "Remove from Playlist",
+                 pv_remove);
     return 1;
 }
 
@@ -242,7 +258,7 @@ void pv_paint(void *w, void *canvas) {
         return;
     }
     if (right && *right)
-        end -= ar_text(canvas, right, 0, PV_PX_15, muted, 1, end, h / 2, 150, 3) + PV_GAP;
+        end -= ui_text(canvas, right, 0, PV_PX_15, muted, 1, end, h / 2, 150, 3) + PV_GAP;
     if (label && I(label, W_X) + I(label, W_W) != end && end > I(label, W_X))
         widget_resize(label, end - I(label, W_X), I(label, W_H));
 }

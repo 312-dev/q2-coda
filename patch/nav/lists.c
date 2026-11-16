@@ -346,8 +346,9 @@ static int sel_height(menu_t *m) {
     int y = 0, end = geom_val(V_LIST_END), rest = home_rest(m->w, (int *)0);
     /* Home's main list rests on its rows' height, whatever runs on below (home.c home_rest) */
     if (rest) return rest < m->height ? rest : m->height;
-    /* an inset modal's rows end in its panel, clear of the glass (menu_modal.c) */
-    if (!end || m->kind == 3 || m->kind == 4 || modal_rows_of(m->w)) return m->height;
+    /* a menu sheet's rows end on the list end, the screen's top theirs (menu_modal.c) */
+    if (modal_rows_of(m->w)) return modal_sel_height(m->w, m->height);
+    if (!end || m->kind == 3 || m->kind == 4) return m->height;
     void *wm = window_manager();
     for (void *p = m->w; p && P(p, W_PARENT) != wm; p = P(p, W_PARENT)) y += I(p, W_Y);
     return end - y < m->height ? end - y : m->height;
@@ -449,7 +450,9 @@ void forget_rows(void *list) {
  * stock's own clamp (a drag's end, a relayout's) keeps it until a relayout puts the height back. */
 static int fit_top(menu_t *m, int want) {
     int top = view_top(m), best = -1, cut = 0;
-    if (m->kind != 1 || !geom_val(V_LIST_FIT)) return want;
+    /* a menu sheet's rows pass under its top fade, so its last row ends on the list end
+     * (menu_modal.c) */
+    if (m->kind != 1 || !geom_val(V_LIST_FIT) || modal_rows_of(m->w)) return want;
     for (int i = 0; i < m->n; ++i) {
         rect_t r = bounds(m, i);
         int y = r.y + top;
@@ -489,8 +492,8 @@ void reveal(menu_t *m, int id, int immediate) {
      * fit, rather than stopping a margin into it. Kind 1's ids are its row order. */
     if (m->kind == 1 && id == 0 && y + h + margin <= height) want = 0;
     want = fit_top(m, clamp_step(want, max_top(m), 0));
-    const theme_t *T = theme();
-    if (immediate || !T->recall_ms) {
+    int glide = motion_ms(theme()->recall_ms, MO_SPATIAL);
+    if (immediate || !glide) {
         wheel_offset(m, want);
         return;
     }
@@ -500,7 +503,7 @@ void reveal(menu_t *m, int id, int immediate) {
     if (m->kind == 2) {
         table_client_scroll_to(m->w, want);
     } else
-        scroll_view_scroll_delta_to(m->w, 0, want - top, T->recall_ms);
+        scroll_view_scroll_delta_to(m->w, 0, want - top, glide);
 }
 
 /* The A-Z index's jump (az_index.c): table w's row id selected and at the top of the list, as far

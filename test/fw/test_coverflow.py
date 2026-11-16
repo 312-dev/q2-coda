@@ -3028,7 +3028,7 @@ def test_settings_slides_in_over_the_list_and_return_slides_the_list_back(fw):
     theme's swap motion, the art hidden; Return slides the main list back in from the left by its own width."""
     t, ui, h, _ = home_open(fw)
     title, back = fw.fn('coverflow_home_title', C.c_char_p), fw.fn('coverflow_home_back', C.c_int, C.c_void_p)
-    assert title() == b'Q2 Pod' and not back(h.win)
+    assert title() == b'Q2 Muse' and not back(h.win)
     ui.box(h.sets, 50, 0, 375, 290)  # a list still sliding goes to its rest first
     ui.click(h.rows['img_settings'])
     assert not ui[h.main].visible and not ui[h.main].sensitive and ui[h.sets].visible and ui[h.sets].sensitive
@@ -3040,7 +3040,7 @@ def test_settings_slides_in_over_the_list_and_return_slides_the_list_back(fw):
     assert ui[h.main].visible and ui[h.main].sensitive and not ui[h.sets].visible and not ui[h.sets].sensitive
     assert ui.at(h.main)[0] == -ui.at(h.main)[2] and ui.animators[-1][0] == h.main  # in from the left
     assert ui[h.art].visible
-    assert title() == b'Q2 Pod' and not back(h.win)
+    assert title() == b'Q2 Muse' and not back(h.win)
 
 
 def test_under_home_lists_full_settings_is_a_page_and_return_brings_the_art_back(fw):
@@ -3606,6 +3606,20 @@ def test_a_dark_screen_arms_no_pan(fw, mcl):
     drifting(fw, light=0)
     fw.fn('coverflow_home_art', None, C.c_void_p)(h.win)
     assert not ui.timer(address(fw, 'coverflow__home_drift'))
+
+
+def test_the_placeholder_runs_up_under_the_status_row_as_a_cover_does(fw, mcl, library):
+    """Split's pane with no cover to show (nothing queued, or a song with no art) shows the placeholder from the
+    screen's top edge, under the status row, as a cover does (user, 2026-11-16: it started under the status row,
+    leaving a black band): it is loaded as the pane's slide, so the bar paints its top rows and inks its glyphs."""
+    _, ui, h, _ = home_open(fw)
+    row, _ = split_inset_set(fw, library, 2)  # OLED's set, whose art runs up split_art_up rows
+    assert row['split_art_up']
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    Bitmaps(fw, {'default_album_home': (290, 290, rgba(290, 290, lambda x, y: (58, 58, 58, 255)))})
+    home = fw.var('coverflow__home', Home)
+    fw.fn('coverflow_home_art', None, C.c_void_p)(h.win)
+    assert home.sl[0].tw and fw.fn('coverflow_home_split', C.c_int, C.c_void_p)(h.win) == 2
 
 
 # Stock's bitmaps and canvas

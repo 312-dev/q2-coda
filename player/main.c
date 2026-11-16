@@ -1,7 +1,7 @@
 /* q2player [-ao alsa]: demo starts it as it starts hciplayer, and the arguments are accepted and unused.
  *
  * While both players ship (docs/player-plan.md#architecture, "The fallback"), this program is installed as
- * /usr/bin/hciplayer and Q2 Pod's patched hciplayer, xz-compressed for room in the root filesystem, as STOCK_XZ.
+ * /usr/bin/hciplayer and Q2 Muse's patched hciplayer, xz-compressed for room in the root filesystem, as STOCK_XZ.
  * Without the switch file it unpacks that once a boot, with BusyBox's unxz, to STOCK_PLAYER in RAM (/tmp, a tmpfs) and
  * runs it with the same arguments: argv[0] stays "hciplayer", and since that file is named hciplayer too the kernel's
  * process name (comm) is "hciplayer" for either, so demo's `nice -n -5 hciplayer -ao alsa &` and `killall -9

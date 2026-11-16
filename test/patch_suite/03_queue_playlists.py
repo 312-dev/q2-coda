@@ -41,8 +41,8 @@ class QueueMachine(Machine):
     def mcl(self,k): return signed(self.get(O[k]))
     def dialog(self):
         self.view=self.node('scroll_view','scroll_view',[self.node('list_item') for _ in range(5)])
-        self.title=self.node('hscroll_label','scrlabel_title'); self.back=self.node('image','img_return')
-        return self.node('dialog','sortselect_dialog',[self.node('view','view_navbar',[self.title,self.back]),
+        self.title=self.node('hscroll_label','scrlabel_title'); self.dlg_return=self.node('image','img_return')  # not back: a Machine's back() is Return
+        return self.node('dialog','sortselect_dialog',[self.node('view','view_navbar',[self.title,self.dlg_return]),
                                                        self.node('list_view','list_view',[self.view])])
     def bootvol(self):  # stock's Boot volume page, which crossfade.c re-dresses
         self.slider=self.node('slider','slider_bootvol'); self.vol=self.node('label','label_vol')
@@ -244,7 +244,7 @@ m.press(6000); assert m.hold()==11 and m.labels()==SONG_MENU[:2]+['View Queue']+
 # A folder play's untagged record: the player's parsed title once it has parsed that file.
 m=playing_menu(); id3=syms['g_play_id3_info']; m.u.mem_write(id3,b'/p/B\0'); m.u.mem_write(id3+O['ID3_TITLE'],b'Parsed\0')
 m.press(6000); assert m.hold()==11 and m.nodes[m.title]['text']=='Parsed'; passed()
-# View Queue opens Up Next (upnext.c, a page of the payload's), not stock's queue page, and plays nothing
+# View Queue opens Up Next (upnext.c, in the menu sheet), not stock's queue page, and plays nothing
 m=playing_menu(); assert m.run(2) is None and not any(o[0]=='playerqueue_page' for o in m.opened) and m.names()==['A','B','C'] and not m.playback(); passed()
 # OLED says what an in-place action did (navigation.c's toasts): Playing Next, Added to Queue, the favourites' own.
 # Play Last lands at the end of Playing Next (playback.c), here empty: right after the playing song, as Play Next does
@@ -608,7 +608,7 @@ assert m.shut==1 and not opens(m),(m.shut,opens(m)); passed()
 m=QueueMachine(); page=m.top
 m.press(5000); assert m.release()==1
 m.press(6000); assert m.hold()==11 and m.nodes[m.top]['name']=='sortselect_dialog'
-assert {c[1:] for c in m.calls if c[0]=='widget_off_by_func'}=={(m.top,O['EVT_KEY_UP'],O['SORTSELECT_KEYUP']),(m.back,O['EVT_CLICK'],O['SORTSELECT_CLOSE'])}
+assert {c[1:] for c in m.calls if c[0]=='widget_off_by_func'}=={(m.top,O['EVT_KEY_UP'],O['SORTSELECT_KEYUP']),(m.dlg_return,O['EVT_CLICK'],O['SORTSELECT_CLOSE'])}
 assert m.nodes[m.title]['text']=='Row 0' and m.labels()==SONG_MENU
 assert m.hold()==0 and not any(c[0]=='navigator_to' for c in m.calls) and len(m.stack)==2
 assert m.release()==0

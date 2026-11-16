@@ -1192,7 +1192,7 @@ def test_oled_states_its_grid_type_and_colour(tmp_path):
     assert (o['np_meta_font'], o['np_modes'], o['marquee_fade'], o['reopen_top'], o['shuffle_row'], o['home_lists_full']) == (inter, 1, 1, 1, 1, 1)
     # Home's Split: rows to 204 (the bar to 188, chevrons at 176), the art from x 196 and the top edge
     assert (g.split_row, g.split_art, g.split_art_up, g.split_inset, o['home_label_end[0]']) == (204, 196, 58, 2, 44)
-    # The More pages and hold menus as the inset modal (menu_modal.c)
+    # The More pages and hold menus as the menu sheet (menu_modal.c)
     assert g.modal == 1
     # its toast and confirm (patch/feedback.c), and the confirmation's glyph
     assert 'oled_confirm_shuffle' in art.images(o) and 'oled_confirm_shadow' not in art.images(o)
@@ -1240,7 +1240,7 @@ def test_patch_names_tokens_and_type_sizes_rather_than_restating_them():
     values = {v for d, l in theme.TOKENS.values() for v in (d, l) if v is not None} - {0, 0xffffff}
     hex_ = '|'.join(f'{v:06x}' for v in values)
     bad = []
-    for p in sorted((theme.ROOT/'patch').glob('*')):
+    for p in sorted((theme.ROOT/'patch').glob('**/*')):
         if p.suffix not in ('.c', '.h', '.inc') or p.name in OWN_PALETTE:
             continue
         for n, line in enumerate(p.read_text().splitlines(), 1):

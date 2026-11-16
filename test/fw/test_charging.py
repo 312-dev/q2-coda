@@ -39,6 +39,12 @@ def test_the_battery_says_its_state_in_words(fw, st, ui, key, held, text, glyph)
     assert words(fw, key) == (text, glyph)
 
 
+def loop_pass(fw):
+    """usb_ui_poll's part for charging, a loop pass: charging_poll, then the toast it left (feedback.c toast_later_poll)."""
+    charging, later = fw.fn('charging_poll', None), fw.fn('toast_later_poll', None)
+    return lambda: (charging(), later())
+
+
 class Tap:
     """The status bar's battery synced from stock's label and icon, the screen lit, toasts caught."""
     def __init__(self, fw, st, ui, text='62%', icon=b'bar_battery', battery=0):
@@ -52,7 +58,7 @@ class Tap:
         # touches in the bar's pixels (status_row.c status_touch): the slot's own plus its x on the bar
         touch = fw.fn('status_touch', None, C.c_uint, C.c_int, C.c_int)
         self.touch = lambda kind, x, y: touch(kind, x + SLOT_X, y)
-        self.poll = fw.fn('charging_poll', None)
+        self.poll = loop_pass(fw)
 
     def __call__(self, x0, y0, x1=None, y1=None):
         self.touch(TOUCH_DOWN, x0, y0)
@@ -96,8 +102,8 @@ def test_charging_toasts_the_level_too(fw, st, ui):
 class Plug:
     """A cable in through usb_ui_status as a charger, the screen dark or lit, with the screen's calls and toasts
     caught; the plug-in screen paints over the top window."""
-    def __init__(self, fw, st, ui, lit=0, level=62, state=1):
-        theme(fw, st, BATTERY=0)
+    def __init__(self, fw, st, ui, lit=0, level=62, state=1, **keys):
+        theme(fw, st, BATTERY=0, **keys)
         self.fw, self.ui, self.toasts, self.screen = fw, ui, [], []
         self.lit = fw.var('g_backlight_status', C.c_ubyte)
         self.lit.value = lit
@@ -109,7 +115,7 @@ class Plug:
         fw.mock('navigator_to_with_context', lambda page, info, *_: self.toasts.append(C.string_at(info + 8).decode()) or 0)
         fw.mock('screen_action', lambda on, *_: self.screen.append(on) or 0)
         fw.mock('toolsReadConfig', lambda path, section, key, out, default, *_: C.memmove(out, C.string_at(default) + b'\0', len(C.string_at(default)) + 1))
-        self.poll = fw.fn('charging_poll', None)
+        self.poll = loop_pass(fw)
         fw.fn('charge_plugged', None)()
 
     def frames(self, ms):
@@ -183,6 +189,16 @@ def test_it_paints_the_battery_the_level_and_the_bolt(fw, st, ui):
     assert [name for name, *_ in canvas.images] == [b'oled_chargebolt']
     assert canvas.rects[0][:4] == (0, 0, 375, 320)  # black over the page
     assert len(fw.calls('vgcanvas_stroke')) == 1 and len(fw.calls('vgcanvas_fill')) == 3  # nub, sweep, fill
+
+
+@pytest.mark.parametrize('reduce, fills', [(0, 3), (1, 2)])
+def test_under_reduce_motion_the_fill_stands_at_the_level_with_no_sweep(fw, st, ui, reduce, fills):
+    """The sweep is MO_DECOR (ui_kit.h): with IPOD REDUCEMOTION on only the nub and the fill to the level are drawn."""
+    from test_nav_playing import Canvas
+    plug = Plug(fw, st, ui, REDUCEMOTION=reduce)
+    plug.poll()
+    fw.fn('charge_paint', None, C.c_void_p, C.c_void_p)(ui.top, Canvas(fw).p)
+    assert len(fw.calls('vgcanvas_fill')) == fills
 
 
 def test_charge_limit_toasts_charged_to_80_once_on_a_cable(fw, st, ui):

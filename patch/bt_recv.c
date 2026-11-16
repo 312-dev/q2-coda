@@ -77,7 +77,7 @@ void bt_recv_paint(void *w, void *canvas) {
     if ((c = widget_lookup(w, "label_artist", 1))) widget_get_text_utf8(c, artist, sizeof artist);
     st.raw_ink = 1;
     mode_page_paint(w, canvas, I(w, W_Y),
-                    &(mode_page_t){ scheme()->tones[0] & 0xffffffu, "btmode_receive", 0,
+                    &(mode_page_t){ scheme()->tones[0] & 0xffffffu, "modepage_receive", 0,
                                     *title ? title : "Playing from Phone",
                                     *artist ? artist : "Wheel sets the volume", bt_recv_codec(w) });
     st.raw_ink = raw;

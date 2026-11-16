@@ -504,6 +504,7 @@ def test_the_selected_rows_title_scrolls_its_passes_then_rests(fw, st):
     st('sel_w', C.c_void_p).value, st('sel_row').value = view.addr, 1
     st('marq_row', C.c_void_p).value, st('marq_id').value = rows[1].addr, 1
     st('marq_label', C.c_void_p).value = label.addr
+    fw.var('navigation__marq_focus', C.c_ubyte * 2)[0] = 1  # as marq_moved found it: only_focus
     lull = Lull(fw, label)
     for passes in range(1, PASSES + 1):
         lull.end()
@@ -653,14 +654,13 @@ def test_the_thumb_is_the_themes_in_either_half(fw, st):
     assert rgba(lists.T['sb_thumb']) in dark and dark != light
 
 
-def test_an_inset_modals_scroll_indicator_stays_in_its_panel(fw, st):
-    """OLED's wheel indicator on an inset modal's rows (menu_modal.c): inside the panel's right padding, clear of the
-    selection bar's end, so nothing lights past the panel's edge (x 58 to 317 on screen, the rows' box from 50)."""
+def test_a_menu_sheets_scroll_indicator_is_the_lists_own(fw, st):
+    """OLED's wheel indicator on a menu sheet's rows (menu_modal.c): the rows span the screen on the house grid, so the
+    indicator is a list's, in the gutter right of the rows' right column (x 347 on screen), inside the screen."""
     now = [5000]
     fw.mock('time_now_ms', lambda *_: now[0])
     ui = Ui(fw)
     theme(fw)
-    T = THEMES[OLED]
     win = ui.window('sortselect_dialog', kind='dialog')
     lv = ui.add('list_view', win, (0, 44, 375, 210), 'list_view')
     view = ui.add('scroll_view', lv, (0, 0, 375, 210), 'scroll_view')
@@ -672,17 +672,15 @@ def test_an_inset_modals_scroll_indicator_stays_in_its_panel(fw, st):
     fw.fn('modal_frame', None, C.c_void_p, C.c_void_p)(win.addr, lv.addr)
     view.int_at(O['VIEW_CONTENT_H']).value = 320
     fw.fn('wheel_sb_arm', None, C.c_void_p)(view.addr)
-    out = T['sel_inset'] - 8  # the panel's left edge in the rows' box
-    canvas = Canvas(fw, x=58 - out, y=66)
+    canvas = Canvas(fw, x=0, y=58)
     fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(lv.addr, canvas.addr)
     x0, y0, x1, y1 = thumb_box(canvas.px)
-    assert x0 >= out + 259 - 8 and x1 <= out + 259  # in the right padding, past the bar's end
-    assert y0 >= -8 and y1 <= 6 * 32 + 8
+    assert x0 >= 375 - 28 and x1 <= 375
 
 
 @pytest.mark.parametrize('rows, gap', [(5, 12), (8, 0)])
-def test_an_inset_modals_gap_stays_only_while_nothing_scrolls(fw, st, rows, gap):
-    """menu_modal.c modal_frame (audit2 E1): a destructive row's 12 px gap stands while every row shows; a panel that
+def test_a_menu_sheets_gap_stays_only_while_nothing_scrolls(fw, st, rows, gap):
+    """menu_modal.c modal_frame (audit2 E1): a destructive row's 12 px gap stands while every row shows; a sheet that
     scrolls drops it, so it scrolls and ends on whole 32 px rows, not cut by 12 px (Now Playing's More)."""
     ui = Ui(fw)
     theme(fw)
@@ -697,69 +695,94 @@ def test_an_inset_modals_gap_stays_only_while_nothing_scrolls(fw, st, rows, gap)
     assert view.props.get('virtual_h') == 32 * (rows + 1) + gap
 
 
-# A scrolling text's faded ends (list.marquee.fade, OLED's; list_marks.c marquee_fade): its own column inside stock's
-# 2 px margins, 12 columns at an end, clear inside to opaque at the end, in the colour behind the text.
+# A scrolling text's faded ends (list.marquee.fade, OLED's; list_marks.c marquee_fade_under and marquee_fade): the text
+# itself fades over 12 columns at an end, inside stock's 2 px margins, onto whatever is behind it in the canvas's
+# buffer: the end column shows exactly what was behind, the inside the text nearly whole.
 FADE = 12
+SCREEN_W, SCREEN_H = 375, 320
+BLUE, RED, WHITE = 0xff2160d8, 0xffff453a, 0xffffffff
 
 
 class Fade:
-    """An hscroll_label 200 x 24 whose text is text_w wide, scrolled off px, painted by marquee_fade into a canvas that
-    keeps each fill as (x, y, w, h, color_t)."""
-    def __init__(self, fw, st, text_w=260, off=0, timer=41, ellipses=1):
-        self.fw, self.ui = fw, Ui(fw)
+    """An hscroll_label 200 x 24 at (100, 50) whose text is text_w wide, scrolled off px, over a 375 x 320 BGRA buffer
+    filled by behind(x, y); its paint is stock's text, white over the whole label, between the two calls."""
+    def __init__(self, fw, st, text_w=260, off=0, timer=41, ellipses=1, behind=lambda x, y: 0xff000000,
+                 clip=(0, 0, SCREEN_W, SCREEN_H)):
+        self.fw, self.ui, self.behind, self.clip = fw, Ui(fw), behind, clip
         theme(fw)
         self.label = self.ui.add('hscroll_label', None, (100, 50, 200, 24), 'title')
         self.label.int_at(O['HSCROLL_TEXT_W']).value = text_w
         self.label.int_at(O['HSCROLL_XOFFSET']).value = off
         self.label.int_at(O['HSCROLL_TIMER']).value = timer
         self.label.byte_at(O['HSCROLL_ELLIPSES']).value = ellipses
+        self.fb = (C.c_uint * (SCREEN_W * SCREEN_H))()
         self.lcd, self.raw = C.create_string_buffer(0x200), C.create_string_buffer(0x100)
         struct.pack_into('<Q', self.raw, CANVAS_LCD, C.addressof(self.lcd))
-        struct.pack_into('<I', self.lcd, LCD_FILL, 0xff102030)
-        self.fills: list = []
+        struct.pack_into('<ii', self.raw, CANVAS_X, 100, 50)  # the label's origin: stock paints it there
+        struct.pack_into('<Q', self.lcd, O['LCD_OFFLINE_FB'], C.addressof(self.fb))
+        for k, v in (('LCD_W', SCREEN_W), ('LCD_H', SCREEN_H), ('LCD_LINE_LENGTH', 4 * SCREEN_W),
+                     ('LCD_FORMAT', O['LCD_BGRA8888'])):
+            struct.pack_into('<i', self.lcd, O[k], v)
         fw.mock('style_get_int', lambda style, key, default, *_: i32(default))  # stock's margins: 2 px each
-        fw.mock('canvas_set_fill_color', lambda c, color, *_: struct.pack_into('<I', self.lcd, LCD_FILL, color & 0xffffffff))
-        fw.mock('canvas_fill_rect', lambda c, x, y, w, h, *_: self.fills.append(
-            (i32(x), i32(y), i32(w), i32(h), struct.unpack_from('<I', self.lcd, LCD_FILL)[0])))
+        fw.mock('canvas_get_clip_rect', lambda c, out, *_: C.memmove(out, struct.pack('<4i', *self.clip), 16) and 0)
+
+    def px(self, x, y):
+        return self.fb[y * SCREEN_W + x]
 
     def paint(self):
-        self.fills.clear()
+        """The buffer after the label's background (its copy), stock's text and the fade."""
+        for y in range(SCREEN_H):
+            for x in range(90, 310):
+                self.fb[y * SCREEN_W + x] = self.behind(x, y)
+        self.fw.fn('marquee_fade_under', None, C.c_void_p, C.c_void_p)(self.label.addr, C.addressof(self.raw))
+        for y in range(50, 74):
+            for x in range(100, 300):
+                self.fb[y * SCREEN_W + x] = WHITE
         self.fw.fn('marquee_fade', None, C.c_void_p, C.c_void_p)(self.label.addr, C.addressof(self.raw))
-        assert struct.unpack_from('<I', self.lcd, LCD_FILL)[0] == 0xff102030  # the canvas's fill is put back
-        return self.fills
+        return self
 
-    def ends(self):
-        """{'left' | 'right': [(x, alpha), ...] from the end inwards}, every fill a 1 x 24 column of one colour."""
-        assert all(f[1:4] == (0, 1, 24) for f in self.fills) and len({f[4] & 0xffffff for f in self.fills}) <= 1
-        left = sorted((f[0], f[4] >> 24) for f in self.fills if f[0] < 100)
-        right = sorted(((f[0], f[4] >> 24) for f in self.fills if f[0] >= 100), reverse=True)
-        return {k: v for k, v in (('left', left), ('right', right)) if v}
+    def faded(self, y=60):
+        """The screen columns of row y that are not plain text."""
+        return [x for x in range(100, 300) if self.px(x, y) != WHITE]
+
+
+def fade_mix(behind, text, k):
+    """Each byte of behind moved k/12 of the way to text's, as the fade blends."""
+    return sum((((behind >> c) & 255) + ((((text >> c) & 255) - ((behind >> c) & 255)) * k // FADE)) << c
+               for c in (0, 8, 16, 24))
 
 
 def test_a_fade_needs_text_wider_than_its_column(fw, st):
-    assert Fade(fw, st, text_w=196).paint() == []  # 196 + the margins: exactly the box
-    assert Fade(fw, st, text_w=197).paint()
+    assert Fade(fw, st, text_w=196).paint().faded() == []  # 196 + the margins: exactly the box
+    assert Fade(fw, st, text_w=197).paint().faded()
 
 
-def test_text_at_its_start_fades_at_the_right_alone(fw, st):
-    fade = Fade(fw, st)
-    fade.paint()
-    ends = fade.ends()
-    assert list(ends) == ['right'] and [x for x, _ in ends['right']] == list(range(200 - 2 - 1, 200 - 2 - 1 - FADE, -1))
-    alphas = [a for _, a in ends['right']]
-    assert alphas[0] == 255 and alphas == sorted(alphas, reverse=True) and alphas[-1] < 255 // FADE + 1
-    assert fade.fills[0][4] & 0xffffff == 0  # on the page's black
+@pytest.mark.parametrize('behind', [BLUE, 0xff000000, RED], ids=['selection', 'page', 'destructive'])
+def test_text_at_its_start_fades_at_the_right_into_what_is_behind_it(fw, st, behind):
+    """The selection's blue, the page's black, a destructive answer's red: the end column is exactly the colour behind,
+    each column in from it the text by one twelfth more; no colour is guessed."""
+    fade = Fade(fw, st, behind=lambda x, y: behind).paint()
+    end = 100 + 200 - 2 - 1
+    assert fade.faded() == list(range(end - FADE + 1, end + 1))
+    assert [fade.px(end - i, 60) for i in range(FADE)] == [fade_mix(behind, WHITE, i) for i in range(FADE)]
+    assert fade.px(end - FADE // 2, 60) not in (behind, WHITE)  # mid-ramp: a blend of the two
+
+
+def test_a_fade_over_art_ends_on_each_pixel_behind_it(fw, st):
+    """Over a cover (a gradient here): every row's end column is that row's own pixel behind the text."""
+    art = lambda x, y: 0xff000000 | (x * 3 & 255) << 16 | (y * 5 & 255) << 8 | (x + y) & 255  # noqa: E731
+    fade = Fade(fw, st, behind=art).paint()
+    end = 100 + 200 - 2 - 1
+    assert all(fade.px(end, y) == art(end, y) for y in range(50, 74))
+    assert all(fade.px(end - 6, y) == fade_mix(art(end - 6, y), WHITE, 6) for y in range(50, 74))
 
 
 def test_text_scrolled_off_its_start_fades_at_both_ends_until_its_end_shows(fw, st):
-    fade = Fade(fw, st, off=30)
-    fade.paint()
-    ends = fade.ends()
-    assert [x for x, _ in ends['left']] == list(range(2, 2 + FADE)) and len(ends['right']) == FADE
-    assert [a for _, a in ends['left']] == [a for _, a in ends['right']]
-    fade = Fade(fw, st, off=260 + 4 - 200)  # its end in view: nothing past the right
-    fade.paint()
-    assert list(fade.ends()) == ['left']
+    fade = Fade(fw, st, off=30).paint()
+    assert fade.faded() == list(range(102, 102 + FADE)) + list(range(298 - FADE, 298))
+    assert fade.px(102, 60) == 0xff000000 and fade.px(297, 60) == 0xff000000
+    fade = Fade(fw, st, off=260 + 4 - 200).paint()  # its end in view: nothing past the right
+    assert fade.faded() == list(range(102, 102 + FADE))
 
 
 def test_a_fade_keeps_to_the_column_its_styles_margins_leave(fw, st):
@@ -767,11 +790,17 @@ def test_a_fade_keeps_to_the_column_its_styles_margins_leave(fw, st):
     fade = Fade(fw, st, text_w=200, off=10)
     margins = {b'margin_left': 40, b'margin_right': 6}
     fw.mock('style_get_int', lambda style, key, default, *_: margins.get(C.string_at(key), i32(default)))
-    fade.paint()
-    ends = fade.ends()  # 200 - 46 = 154 px of column: 46 over
-    assert [x for x, _ in ends['left']] == list(range(40, 40 + FADE)) and ends['right'][0][0] == 200 - 6 - 1
-    fade.label.int_at(O['HSCROLL_TEXT_W']).value = 154
-    assert fade.paint() == []
+    assert fade.paint().faded() == list(range(140, 140 + FADE)) + list(range(294 - FADE, 294))
+    fade.label.int_at(O['HSCROLL_TEXT_W']).value = 154  # 200 - 46: it fits
+    assert fade.paint().faded() == []
+
+
+def test_a_fade_touches_nothing_outside_the_frames_clip(fw, st):
+    """Pixels outside the clip are an older frame's, not this one's background: they are left alone."""
+    fade = Fade(fw, st, clip=(0, 0, 290, SCREEN_H)).paint()  # the right end's columns run past 290
+    assert fade.faded() == []
+    fade = Fade(fw, st, clip=(0, 0, SCREEN_W, 60)).paint()  # rows from 60 down are outside
+    assert fade.faded(59) and fade.faded(60) == []
 
 
 @pytest.mark.parametrize('mode, light, names', [
@@ -796,6 +825,101 @@ def test_now_playings_modes_are_the_themes_pair_lit_by_stocks_mode(fw, st, mcl, 
     half = 'l' if light else 'd'  # radio (off) and Up Next after them, in the half's ink
     assert loads == names + [f'oled_mode_radio_{half}', f'oled_mode_queue_{half}']
     assert drawn == [(64, 286), (228, 286), (146, 286), (311, 286)]  # shuffle, repeat, then radio and Up Next
+
+
+class Row:
+    """OLED's Now Playing row over glyphs whose ink is a known box: each 22 px image's opaque pixels are x 2 to 19,
+    y 4 to 17 (its faint edge, alpha 40, a pixel round them, under NP_INK_ALPHA), so drawn centred on (cx, 286) its
+    ink is (cx - 9, 279, 18, 14). Records the rounded boxes painted, as (x, y, w, h, colour)."""
+    INK = (2, 4, 18, 14)
+
+    def __init__(self, fw, st, mcl, mode=0, stage=0):
+        self.fw = fw
+        ui = Ui(fw)
+        theme(fw)
+        mcl.mode = mode
+        st('np_stage', C.c_uint).value = stage
+        self.win = ui.window('playing_page')
+        self.button = ui.add('image', self.win, (53, 264, 269, 44), 'img_playmode')
+        st('np_win', C.c_void_p).value = self.win.addr
+        fw.mock('widget_lookup', lambda w, name, deep, *_: self.button.addr if C.string_at(name) == b'img_playmode' else 0)
+        self.pixels = C.create_string_buffer(22 * 22 * 4)
+        x, y, w, h = self.INK
+        for py in range(y - 1, y + h + 1):
+            for px in range(x - 1, x + w + 1):
+                inside = x <= px < x + w and y <= py < y + h
+                self.pixels[(py * 22 + px) * 4 + 3] = b"\xff" if inside else b"\x28"
+
+        def load(w, name, bitmap, *_):
+            struct.pack_into('<II', (C.c_char * 16).from_address(bitmap), 0, 22, 22)
+            C.c_ushort.from_address(bitmap + 14).value = 1  # RGBA8888
+            return 0
+        fw.mock('widget_load_image', load)
+        fw.mock('bitmap_lock_buffer_for_read', lambda *_: C.addressof(self.pixels))
+        fw.mock('bitmap_get_line_length', lambda *_: 22 * 4)
+        self.boxes = []
+
+        def box(canvas, r, src, color, radius, *_):
+            red, green, blue = C.string_at(color, 3)  # RGBA's bytes in order
+            self.boxes.append((*struct.unpack('<4i', C.string_at(r, 16)), red << 16 | green << 8 | blue))
+            return 0
+        fw.mock('canvas_fill_rounded_rect', box)
+        self.now = 1000
+        fw.mock('time_now_ms', lambda *_: self.now)
+
+    def paint(self):
+        self.boxes.clear()
+        lcd, raw = C.create_string_buffer(0x200), C.create_string_buffer(0x100)
+        struct.pack_into('<Q', raw, CANVAS_LCD, C.addressof(lcd))
+        self.fw.fn('np_modes', None, C.c_void_p, C.c_void_p)(self.win.addr, C.addressof(raw))
+        return self.boxes
+
+    def tap(self, x):
+        event = C.create_string_buffer(0x40)
+        struct.pack_into('<i', event, 0, O['EVT_CLICK'])
+        struct.pack_into('<ii', event, O['EVENT_X'], x, 286)
+        return self.fw.fn('np_mode_click', C.c_int, C.c_void_p, C.c_void_p)(self.button.addr, C.addressof(event))
+
+
+def ink_box(cx, pad, dot=False):
+    """Row's ink centred on cx, 286, joined with the on dot (y 299 to 302) when it shows, padded pad px."""
+    x, y, w, h = cx - 9, 279, 18, (303 - 279) if dot else 14
+    return (x - pad, y - pad, w + 2 * pad, h + 2 * pad)
+
+
+@pytest.mark.parametrize('mode, dot', [(0, False), (2, True)])
+def test_now_playings_focus_outline_fits_the_glyph_and_its_dot(fw, st, mcl, mode, dot):
+    """22 v4 (docs/oled-design.md#now-playing): the Centre cycle's Shuffle stage draws a 2 px white outline 6 px clear
+    of the glyph's ink (8 px to its outer edge), the ink alone with shuffle off, the ink and the on dot with it on."""
+    row = Row(fw, st, mcl, mode, stage=1)  # NP_STAGE_SHUFFLE
+    boxes = row.paint()
+    outer, inner = ink_box(64, 8, dot), ink_box(64, 6, dot)
+    assert boxes[:2] == [(*outer, 0xffffff), (*inner, 0)]
+    # the dot after the glyph, over the outline's inside
+    assert ((62, 299, 4, 4) in [b[:4] for b in boxes[2:]]) == dot
+
+
+def test_now_playings_focus_outline_hides_while_touch_is_the_modality(fw, st, mcl):
+    """oled-design.md#focus-ring: the Centre cycle's outline is the wheel's, so after a touch (st.touch_mode,
+    ui_focus_shown 0) the stage still stands but no outline is drawn; the wheel's next turn brings it back."""
+    row = Row(fw, st, mcl, 0, stage=1)  # NP_STAGE_SHUFFLE
+    st('touch_mode', C.c_int).value = 1
+    assert row.paint() == []
+    st('touch_mode', C.c_int).value = 0
+    assert row.paint()[:2] == [(*ink_box(64, 8), 0xffffff), (*ink_box(64, 6), 0)]
+
+
+def test_now_playings_tapped_button_shows_a_square_that_fades(fw, st, mcl):
+    """22 v4: a tap puts #2C2C2E under the glyph's ink, 8 px clear on every side, fading over 250 ms; the wheel's outline
+    is not drawn for it, and Up Next, which has no dot, fits its glyph alone."""
+    row = Row(fw, st, mcl, 0)
+    assert row.paint() == []
+    assert row.tap(311) == 1  # Up Next
+    assert row.paint() == [(*ink_box(311, 8), 0x2c2c2e)]
+    row.now += 125
+    assert row.paint() == [(*ink_box(311, 8), 0x161617)]  # half way
+    row.now += 125
+    assert row.paint() == []
 
 
 def test_now_playings_heart_and_more_are_the_themes_glyphs_in_each_half(fw, st):
@@ -917,49 +1041,20 @@ def test_a_tap_that_keeps_what_was_saved_writes_nothing(fw, st, mcl):
 def test_a_label_at_rest_on_its_ellipsis_keeps_it(fw, st, timer, ellipses, faded):
     """Stock ends a stopped label with ellipses in "...": that one is left alone. Running, or stopped without an ellipsis
     (cut at its column), it fades."""
-    assert bool(Fade(fw, st, timer=timer, ellipses=ellipses).paint()) == faded
+    assert bool(Fade(fw, st, timer=timer, ellipses=ellipses).paint().faded()) == faded
 
 
-def test_the_selected_rows_marquee_fades_into_the_selection_and_light_mode_into_the_paper(fw, st, layout):
+def test_other_widgets_and_other_buffers_get_no_fade(fw, st):
+    """A plain label scrolls nothing; a canvas whose buffer is not 32-bit (an animation's own) shows the text clipped."""
     fade = Fade(fw, st)
-    st('marq_label', C.c_void_p).value = fade.label.addr
-    fade.paint()
-    tones = C.c_void_p.from_address(fw.fn('scheme', C.c_void_p)() + layout['tones']).value or 0
-    top = C.c_uint.from_address(tones).value  # the selection bar's top tone, the colour under the text
-    assert top and {f[4] & 0xffffff for f in fade.fills} == {rgba(top) & 0xffffff}
-    t = THEMES[OLED]
-    assert top == t['schemes'][t['accents'].bit_length() - 1]['tones'][0]  # OLED's Accent Blue
-    st('marq_label', C.c_void_p).value = None
-    st('light').value = 1
-    fade.paint()
-    paper = C.c_uint.from_address(fw.fn('scheme', C.c_void_p)() + layout['paper']).value  # the light half's
-    assert paper > 0xe00000 and {f[4] & 0xffffff for f in fade.fills} == {rgba(paper) & 0xffffff}
-
-
-def test_a_text_scrolling_on_its_own_inside_the_selected_row_fades_into_the_selection(fw, st, layout):
-    """A label that scrolls by its own focus, not the house marquee (audit2 H1: a page's rows that scroll themselves),
-    fades to the bar's accent when it is inside the selected row, not to the page's black."""
-    fade = Fade(fw, st)
-    row = fade.ui.add('button', None, (0, 50, 375, 32), 'row')
-    fade.label.parent = row
-    struct.pack_into('<Q', fade.label.block, W_PARENT, row.addr)
-    tones = C.c_void_p.from_address(fw.fn('scheme', C.c_void_p)() + layout['tones']).value or 0
-    accent = rgba(C.c_uint.from_address(tones).value) & 0xffffff
-    fade.paint()
-    assert {f[4] & 0xffffff for f in fade.fills} == {0}  # no row selected: the page's black
-    st('sel_accent', C.c_void_p).value = row.addr
-    fade.paint()
-    assert {f[4] & 0xffffff for f in fade.fills} == {accent}
-
-
-def test_other_widgets_get_no_fade(fw, st):
-    fade = Fade(fw, st)
-    fade.paint()
-    assert fade.fills
+    assert fade.paint().faded()
     fade.label = fade.ui.add('label', None, (100, 50, 200, 24), 'plain')
     fade.label.int_at(O['HSCROLL_TEXT_W']).value = 260
-    assert fade.paint() == []
-    assert THEMES[OLED]['marquee_fade'] == 1  # ringnav_paint asks list.marquee.fade first
+    assert fade.paint().faded() == []
+    fade = Fade(fw, st)
+    struct.pack_into('<i', fade.lcd, O['LCD_FORMAT'], 0)
+    assert fade.paint().faded() == []
+    assert THEMES[OLED]['marquee_fade'] == 1  # ringnav_paint_bg and ringnav_paint ask list.marquee.fade first
 
 
 # The status bar's play state (ringnav_showface, each second).
@@ -1347,7 +1442,7 @@ class Confirm:
 
 
 @pytest.mark.parametrize('prompt, title, verb', [('Restart?', 'Restart?', 'Restart'), ('Shut Down?', 'Shut Down?', 'Shut Down'),
-                                                  ('Line Out sets max volume,continue?', 'Use Line Out?', 'Use Line Out'),
+                                                  ('Line Out sets max volume, continue?', 'Use Line Out?', 'Use Line Out'),
                                                   ('Delete Record?', 'Forget This Network?', 'Forget')])
 def test_oleds_confirms_are_the_card_with_cancel_and_their_verb(fw, st, prompt, title, verb):
     """Stock's confirm pop-up as the confirmation card (feedback.c feedback_confirm_dress): the card at x 42, 291 wide,
@@ -1369,11 +1464,17 @@ def test_oleds_confirms_are_the_card_with_cancel_and_their_verb(fw, st, prompt, 
     assert confirm.cancel.box[0] == 42 + 8 - THEMES[OLED]['sel_inset']  # the bar 8 px in from the card
 
 
-@pytest.mark.parametrize('prompt, body', [('Reset Settings Only', 'Music, playlists and ratings are kept.'),
-                                          ('Full Factory Reset', None)])
-def test_oleds_reset_settings_confirm_says_what_it_keeps(fw, st, prompt, body):
-    """Reset Settings Only's card (audit2 J1) says in its body what a settings reset leaves alone; the other resets,
-    which take more, have none; Reset is red, after the gap, as a destructive verb's."""
+@pytest.mark.parametrize('prompt, title, body, verb', [
+    ('Reset Settings Only', 'Reset Settings?', ['Forgets Wi-Fi, Bluetooth, EQ;', 'music and playlists stay.'],
+     'Reset Settings'),
+    ('Reset Database', 'Reset the Database?', ['Erases playlists, Favorites;', 'then restarts and rescans.'],
+     'Reset Database'),
+    ('Full Factory Reset', 'Full Factory Reset?', ['Erases settings, playlists', 'and Favorites. Music stays.'],
+     'Reset All')])
+def test_oleds_reset_settings_confirm_says_what_it_takes(fw, st, prompt, title, body, verb):
+    """30 v2: each reset's card says what stock's handler really takes (reset_page's: init_usersetting deletes the
+    settings, saved Wi-Fi networks, Bluetooth pairings and EQ presets; init_database deletes database.db, with the
+    playlists and My Fav, and restarts; the factory reset both), and its verb names it, red after the gap."""
     theme(fw)
     ui = Ui(fw)
     confirm = Confirm(fw, ui, [prompt])
@@ -1385,8 +1486,7 @@ def test_oleds_reset_settings_confirm_says_what_it_keeps(fw, st, prompt, body):
     fw.mock('widget_get_text_utf8', utf8)
     confirm.canvas = Canvas(fw, char_w=5)  # the body fits its 251 px
     texts = confirm.paint().texts
-    assert [t[0] for t in texts] == [p for p in (prompt.replace(' Only', '') + '?' if 'Settings' in prompt else prompt + '?',
-                                                 body, 'Cancel', 'Reset') if p]
+    assert [t[0] for t in texts] == [title, *body, 'Cancel', verb]  # the body two lines as written
     assert texts[-1][2] == rgba(0xff453a)  # red
     assert confirm.enter.box[1] - confirm.cancel.box[1] == 32 + 12
 
@@ -1946,6 +2046,29 @@ def caption_texts(fw, view):
     table = fw.var('settings_pages__cap', C.c_void_p * 17)  # view, item[CAP_MAX], text[CAP_MAX]
     text = {table[1 + k]: C.wstring_at(table[9 + k]) for k in range(8) if table[1 + k]} if table[0] == view.addr else {}
     return {item: text[item.addr] for item in view.children if item.addr in text}
+
+
+def test_reset_settings_rows_lose_their_chevrons_and_say_what_they_take(fw):
+    """30 v2 (settings_pages.c reset_rows): stock's three Reset rows open the confirmation card, so their list_into
+    chevrons go (insensitive too: stock's hit test skips only the insensitive), and each gets its caption once, however
+    often the list is laid out."""
+    ui = Ui(fw)
+    theme(fw)
+    win = ui.window('reset_page')
+    view = ui.add('scroll_view', win, (0, 58, 375, 262), 'scroll_view_reset')
+    chevrons = []
+    for i, title in enumerate(('Reset Settings Only', 'Reset Database', 'Full Factory Reset')):
+        button = ui.add('button', ui.add('list_item', view, (0, 32 * i, 375, 32)), (0, 0, 375, 32), str(i))
+        ui.add('hscroll_label', button, (10, 0, 280, 32), text=title)
+        chevrons.append(ui.add('image', button, (330, 0, 24, 32), image='list_into'))
+    rows = fw.fn('reset_rows', None, C.c_void_p)
+    rows(view.addr)
+    rows(view.addr)  # a second layout
+    assert not any(c.visible for c in chevrons)
+    assert {a[0] for _, a in fw.calls('widget_set_sensitive') if not C.c_int(a[1]).value} >= {c.addr for c in chevrons}
+    assert list(caption_texts(fw, view).values()) == ['Keeps your music, playlists and ratings',
+                                                      'Erases playlists and Favorites, then rescans',
+                                                      'Erases all settings and playlists; music stays']
 
 
 def test_playback_s_and_library_s_rows_carry_their_captions(fw):
@@ -3051,3 +3174,256 @@ def test_about_s_rows_take_the_selection_but_open_nothing(fw, st):
     assert offs == [(button.addr, EVT_CLICK, 0x4c12f8, 0x77)]
     assert len([h for h in button.handlers if h[0] == EVT_CLICK]) == 1
     assert not [a for _, a in fw.calls('widget_set_enable') if a[0] == item.addr]
+
+
+# The menu sheet (menu_modal.c, docs/oled-design.md#menus): the page receding above it and the frosted material under
+# its rows, drawn straight into the screen's buffer once its first paint is whole.
+class Clock:
+    """time_now_ms, and the timers the sheet's motion adds (menu_modal.c sheet_tick, and ui_kit.c's shared repaint
+    through ovm_t), run by hand."""
+    def __init__(self, fw):
+        self.now, self.timers = 10_000, []
+        fw.mock('time_now_ms', lambda *_: self.now)
+        fw.mock('timer_add', lambda f, ctx, ms, *_: self.timers.append(f) or len(self.timers))
+
+    def at(self, fw, ms):
+        """ms after the motion's start: its frame taken (the tick), as the timer would."""
+        self.now = 10_000 + ms
+        return fw.fn('menu_modal__sheet_tick', C.c_int, C.c_void_p)(None)
+
+
+def sheet(fw, st, rows=10, risen=True, reduce=False):
+    """A sortselect dialog framed as the sheet on OLED's set, with a header, and the screen's buffer behind a canvas:
+    the page white above y 160 and blue below. Its first whole paint (the material, the rise from the page) is made at
+    the clock's 10 s; risen, the rise is run to its end and the buffer the page again. Returns (ui, win, view, canvas,
+    buf); the clock is fw.sheet_clock. reduce: under Reduce Motion (IPOD REDUCEMOTION)."""
+    sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
+    st('geom').value, st('settings_read').value = [g.name for g in sets].index('oled'), 1
+    fw.mock('window_manager_is_animating', lambda *_: 0)
+    ui = Ui(fw)
+    theme(fw)
+    st('reduce_motion').value = reduce  # the keys count as read (settings_read): the flag as accent() leaves it
+    win = ui.window('sortselect_dialog', kind='dialog')
+    lv = ui.add('list_view', win, (0, 44, 375, 210), 'list_view')
+    view = ui.add('scroll_view', lv, (0, 0, 375, 210), 'scroll_view')
+    for _ in range(rows):
+        ui.add('list_item', view, (0, 0, 375, 32))
+    fw.fn('modal_head', None, C.c_char_p, C.c_char_p, C.c_void_p)(b'Time', b'Pink Floyd', None)
+    fw.fn('modal_frame', None, C.c_void_p, C.c_void_p)(win.addr, lv.addr)
+    canvas = Canvas(fw)
+    buf = (C.c_uint * (375 * 320))(*([0xffffffff] * (375 * 160) + [0xff0000ff] * (375 * 160)))
+    for off, v in ((O['LCD_W'], 375), (O['LCD_H'], 320), (O['LCD_LINE_LENGTH'], 4 * 375),
+                   (O['LCD_FORMAT'], O['LCD_BGRA8888'])):
+        C.c_int.from_buffer(canvas.lcd, off).value = v
+    C.c_void_p.from_buffer(canvas.lcd, O['LCD_OFFLINE_FB']).value = C.addressof(buf)
+    fw.sheet_clock = Clock(fw)
+    if risen:
+        page = list(buf)
+        fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
+        assert fw.sheet_clock.at(fw, 1000) == 0  # done: the timer ends
+        buf[:] = page
+    return ui, win, view, canvas, buf
+
+
+class Rect(C.Structure):
+    _fields_ = [('x', C.c_int), ('y', C.c_int), ('w', C.c_int), ('h', C.c_int)]
+
+
+def rgb(buf, x, y):
+    v = buf[y * 375 + x]
+    return v >> 16 & 255, v >> 8 & 255, v & 255
+
+
+def test_a_menu_sheet_frames_its_rows_under_its_header(fw, st):
+    """The list from y 50 to the screen's foot, a 72 px header space heading the rows, each the screen's width; the
+    content padded by what lies past the list end (y 282), which list_pad takes back so the last row ends there."""
+    ui, win, view, canvas, buf = sheet(fw, st)
+    head = view.children[0]
+    assert head.name == '_mm_head' and head.box == (0, 0, 375, 72)
+    assert [k.box[1] for k in view.children[1:3]] == [72, 104] and view.children[1].box[2] == 375
+    assert view.props['virtual_h'] == 72 + 10 * 32 + 38 and view.props['_list_pad'] == 38
+
+
+def test_a_menu_sheet_recedes_the_page_and_frosts_it(fw, st):
+    """Above y 40 the page at 94% about the centre, dimmed half way; outside the sheet's 40 px top corners the same;
+    on the sheet the page blurred, its colour raised 1.6 times, 28% kept under 6% white: blue stays blue, dark. The
+    material is made once: a later paint over another page draws the same."""
+    ui, win, view, canvas, buf = sheet(fw, st)
+    fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
+    assert all(120 <= c <= 135 for c in rgb(buf, 187, 20))  # white, dimmed half way
+    assert rgb(buf, 0, 20) == (0, 0, 0)  # past the receding page's edge: black
+    assert all(120 <= c <= 135 for c in rgb(buf, 20, 41))  # outside the corner's curve
+    assert all(60 <= c <= 100 for c in rgb(buf, 187, 41))  # the sheet, over white: grey, dark
+    r, g, b = rgb(buf, 187, 300)
+    assert 70 <= b <= 95 and r <= 20 and g <= 20  # over blue
+    was = list(buf)
+    for i in range(375 * 320):
+        buf[i] = 0xff00ff00
+    fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
+    assert rgb(buf, 187, 300) == tuple((was[300 * 375 + 187] >> s) & 255 for s in (16, 8, 0))
+
+
+def test_a_menu_sheet_waits_for_a_whole_paint_to_make_its_material(fw, st):
+    """A first paint of part of the screen can't see the whole page: the flat sheet until a whole one."""
+    ui, win, view, canvas, buf = sheet(fw, st, risen=False)
+    canvas.clip = [0, 100, 375, 50]
+    fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
+    assert rgb(buf, 187, 300) == (0, 0, 255)  # the buffer untouched: drawn as rects on the canvas instead
+    assert canvas.rects
+
+
+def test_a_menu_sheets_rows_fade_into_it_past_the_list_end(fw, st):
+    """The rows' text past y 266 fades into the material, to nothing at the foot; above it untouched."""
+    ui, win, view, canvas, buf = sheet(fw, st)
+    fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
+    mat, foot = rgb(buf, 100, 300), rgb(buf, 100, 318)
+    buf[200 * 375 + 100] = buf[300 * 375 + 100] = buf[318 * 375 + 100] = 0xffffffff
+    fw.fn('modal_after', None, C.c_void_p, C.c_void_p)(view.addr, canvas.addr)
+    assert rgb(buf, 100, 200) == (255, 255, 255)
+    faded = rgb(buf, 100, 300)
+    assert all(m < f < 255 for m, f in zip(mat, faded)) and faded[0] - mat[0] < 80, (mat, faded)
+    assert all(f - 1 <= c <= f + 1 for c, f in zip(rgb(buf, 100, 318), foot))  # the material's, at the foot
+
+
+def test_a_destructive_rows_words_are_red_and_white_on_its_bar(fw, st):
+    """modal_red: the label's ink the confirm's red at rest, white while lit, set only when it changes."""
+    ui, win, view, canvas, buf = sheet(fw, st, rows=1)
+    row = view.children[1]
+    label = ui.add('hscroll_label', row, (24, 0, 300, 32))
+    fw.fn('modal_red', None, C.c_void_p)(row.addr)
+    assert fw.fn('modal_is_red', C.c_int, C.c_void_p)(row.addr)
+    paint = fw.fn('modal_row_paint', None, C.c_void_p, C.c_void_p, C.c_void_p, Rect, C.c_int)
+    paint(view.addr, canvas.addr, row.addr, Rect(0, 0, 375, 32), 0)
+    red = label.props['style:normal:text_color']
+    paint(view.addr, canvas.addr, row.addr, Rect(0, 0, 375, 32), 1)
+    white = label.props['style:normal:text_color']
+    assert red & 0xffffff == 0x303bff and white & 0xffffff == 0xffffff  # AWTK's colour: red in the low byte
+
+
+def test_a_closed_sheet_leaves_nothing_on_the_screen(fw, st):
+    """What the sheet drew straight into the screen's buffer goes when the last sheet closes: cleared to black and
+    the whole screen painted again on the next pass, so a page that paints nothing under the status row (Edit Home)
+    never shows the receding page or the sheet's top."""
+    ui, win, view, canvas, buf = sheet(fw, st)
+    timers = []
+    fw.mock('timer_add', lambda f, ctx, ms, *_: timers.append(f) or 1)
+    fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
+    assert rgb(buf, 187, 30) != (0, 0, 0)
+    fw.fn('menu_modal__modal_gone', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
+    assert all(v == 0xff000000 for v in buf) and timers
+
+
+# The sheet's motion (menu_modal.c sheet_run through ui_kit.h's ovm_t, docs/oled-design.md#menus): it rises 260 ms (cubic_out) from the
+# screen's foot while the page recedes and dims and the frost fades in; Return lets it fall 180 ms (ease-in), keys
+# taken meanwhile, then it closes.
+def list_y(ui, view):
+    return ui.nodes[view.addr].parent.box[1]
+
+
+def test_a_menu_sheet_rises_from_the_page(fw, st):
+    """Its first whole paint is the page alone, the rows a sheet's height (280 px) below their place; half way through
+    the rise (130 ms: cubic_out's 87.5%) the sheet's top is 35 px low, the page above it dimmed part way, the rows 35 px
+    low; at 260 ms it stands, its rows in place, the timer done, the page half dimmed and the frost under y 40."""
+    ui, win, view, canvas, buf = sheet(fw, st, risen=False)
+    page = list(buf)
+    clock = fw.sheet_clock
+    paint = fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)
+    assert list_y(ui, view) == 50 + 280
+    paint(win.addr, canvas.addr)
+    assert list(buf) == page and len(clock.timers) == 2  # the sheet's tick and ui_kit.c's shared repaint
+    assert clock.at(fw, 130) == 8  # RET_REPEAT
+    assert list_y(ui, view) == 50 + 35
+    buf[:] = page
+    paint(win.addr, canvas.addr)
+    assert all(130 < c < 255 for c in rgb(buf, 187, 20))  # white, dimmed part way (half way at rest)
+    assert rgb(buf, 187, 70) != rgb(buf, 187, 80)  # the sheet's top edge between them: page above, frost under
+    assert clock.at(fw, 260) == 0 and list_y(ui, view) == 50
+    buf[:] = page
+    paint(win.addr, canvas.addr)
+    assert all(120 <= c <= 135 for c in rgb(buf, 187, 20)) and all(60 <= c <= 100 for c in rgb(buf, 187, 41))
+
+
+def test_return_lets_a_menu_sheet_fall_then_closes_it(fw, st):
+    """modal_close: the sheet stays open while it falls, every key taken (modal_closing); at 90 ms (ease-in: a quarter
+    gone) its rows are 70 px low; at 180 ms it closes, and the next close is at once."""
+    ui, win, view, canvas, buf = sheet(fw, st)
+    clock = fw.sheet_clock
+    fw.fn('modal_close', None, C.c_void_p)(win.addr)
+    assert not fw.calls('window_close') and fw.fn('modal_closing', C.c_int)() == 1
+    assert clock.at(fw, 1000 + 90) == 8 and list_y(ui, view) == 50 + 70
+    assert clock.at(fw, 1000 + 180) == 0
+    assert [a[0] for _, a in fw.calls('window_close')] == [win.addr]
+
+
+def test_under_reduce_motion_a_menu_sheet_fades_in_and_out_in_place(fw, st):
+    """ovm_t under Reduce Motion (docs/oled-design.md#overlay-motion): the rows stand in their place throughout; the
+    rise is a 150 ms linear fade, the page above the rows half way back at 75 ms, and the fall a 120 ms one, the
+    window closed at its end."""
+    ui, win, view, canvas, buf = sheet(fw, st, risen=False, reduce=True)
+    page = list(buf)
+    clock = fw.sheet_clock
+    paint = fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)
+    assert list_y(ui, view) == 50
+    paint(win.addr, canvas.addr)
+    assert clock.at(fw, 75) == 8 and list_y(ui, view) == 50
+    buf[:] = page
+    paint(win.addr, canvas.addr)
+    assert all(180 <= c <= 200 for c in rgb(buf, 187, 20))  # white, half way to its dimmed half
+    assert clock.at(fw, 150) == 0 and list_y(ui, view) == 50
+    fw.fn('modal_close', None, C.c_void_p)(win.addr)
+    assert clock.at(fw, 150 + 60) == 8 and list_y(ui, view) == 50 and not fw.calls('window_close')
+    assert clock.at(fw, 150 + 120) == 0
+    assert [a[0] for _, a in fw.calls('window_close')] == [win.addr]
+
+
+def test_a_sheet_closes_at_once_before_its_first_whole_paint(fw, st):
+    """With no material yet (nothing drawn of it) there is nothing to fall: it closes at once."""
+    ui, win, view, canvas, buf = sheet(fw, st, risen=False)
+    fw.fn('modal_close', None, C.c_void_p)(win.addr)
+    assert [a[0] for _, a in fw.calls('window_close')] == [win.addr] and fw.fn('modal_closing', C.c_int)() == 0
+
+
+@pytest.mark.parametrize('key, value, key_w', [
+    ('Wi-Fi Address', 'Not connected', 13 * 7),                 # both fit: the value right-aligned in the rest
+    ('Wi-Fi Address', 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55', 13 * 7),  # the value scrolls in the rest
+    ('K' * 60, 'Q2', 321 - 16 - 2 * 7),                         # a short value keeps its width, the key scrolls
+    ('K' * 60, 'V' * 60, 321 - 16 - 96),                        # both over: the value keeps KV_VALUE_MIN
+])
+def test_a_label_value_row_keeps_the_gap_the_label_s_width_and_marquees_what_overflows(fw, st, key, value, key_w):
+    """docs/oled-design.md#labelvalue-rows (About's Wi-Fi Address, 2026-11-16): the label at its own width, at least
+    KV_GAP (16) px to the value, the value the rest; a value too wide scrolls in its box (ellipses off, so the
+    marquee fades its cut end) rather than crowding or cutting hard; a label too wide shrinks and scrolls, the value
+    keeping min(its width, KV_VALUE_MIN). The row's text spans 321 px: x 10 to 335, less the labels' 2 px margins."""
+    ui = oled(fw, st)
+    fw.mock('widget_get_canvas', lambda *_: 0x40)
+    fw.mock('canvas_measure_text', lambda c, s, n, *_: float(7 * (n & 0xffffffff)))
+    view = ui.add('scroll_view', ui.window('about_page'), (0, 26, 375, 294))
+    button = ui.add('button', ui.add('list_item', view, (0, 0, 375, 32)), (20, 0, 335, 32), '6')
+    k = ui.add('hscroll_label', button, (10, 0, 160, 32), key)
+    v = ui.add('hscroll_label', button, (176, 0, 159, 32), value)
+    ui.set_text(k, key), ui.set_text(v, value)  # their wide text, which the row measures
+    fw.fn('about_rows', None, C.c_void_p)(view.addr)
+    val_w = 321 - 16 - key_w
+    assert k.box[2] - 4 == key_w and v.box[0] + v.box[2] == 335  # the value's right edge stays on the column
+    assert v.box[2] - 4 == val_w and (v.box[0] + 2) - (k.box[0] + 2 + key_w) == 16
+    ellipses = dict((a[0], a[1]) for _, a in fw.calls('hscroll_label_set_ellipses'))
+    assert ellipses[k.addr] == (key_w >= 7 * len(key)) and ellipses[v.addr] == (val_w >= 7 * len(value))
+
+
+@pytest.mark.parametrize('prompt, selected', [('Scan music?', 1), ('Import Playlists?', 1), ('Shut Down?', None),
+                                              ('Delete Record?', None)])
+def test_a_neutral_stock_confirm_opens_on_its_verb_the_rest_on_cancel(fw, st, prompt, selected):
+    """The card's rule for the default (docs/oled-design.md#confirmation-card): Scan, Import, Export, Reconnect and
+    Turn On cost least by mistake, so their card opens on the verb; a destructive or consequential one stays on
+    Cancel, stock's first stop (no selection written)."""
+    theme(fw)
+    ui = Ui(fw)
+    confirm = Confirm(fw, ui, [prompt])
+
+    def utf8(w, out, size, *_):
+        words = ui.text(ui.nodes[w]).encode()[:size - 1] + b'\0'
+        C.memmove(out, words, len(words))
+        return 0
+    fw.mock('widget_get_text_utf8', utf8)
+    confirm.paint()
+    assert confirm.win.props.get('_ringnav_index') == selected

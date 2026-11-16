@@ -119,7 +119,6 @@ typedef struct {
     unsigned ch_timer, ch_track, ch_key;
     int ch_cue, ch_end;        /* the Chapters track's CUE start and end, file seconds */
     void *sc_page, *sc_row[3]; /* Streaming's Configuration page, its cache rows and Erase's */
-    int sc_armed;              /* Erase Spotify Data pressed once: the next press erases */
 /* Streaming's services (svc): five fixed, and at most APPS_MAX card apps. */
 #define SVC_FIXED 5
 #define SVC_MAX (SVC_FIXED + APPS_MAX)
@@ -262,6 +261,7 @@ typedef struct {
     int settings_read, accent, home, battery, home_rockbox, home_groovebox, shortcut, light,
         light_day,       /* light_day: Auto's answer for now (LIGHT=2) */
         keep_lit,        /* Smart Awake (#57, keep_lit_poll) */
+        reduce_motion,   /* Reduce Motion, IPOD REDUCEMOTION (ui_kit.c motion_reduced) */
         clicker,         /* the Clicker's output (clicker.c), IPOD CLICKER */
         theme_booted,    /* theme_boot ran (ringnav_ui_load) */
         raw_ink,         /* a final colour's draw: ui_ink leaves it alone */
@@ -271,7 +271,7 @@ typedef struct {
     unsigned keep_lit_at;
     void *sel_accent; /* the row on a coloured selection, for Light Mode's ink */
     int style_depth;  /* nested style hooks (a mutable style's fallback) map nothing */
-    void *setting_label[8 + THEME_KEYS]; /* SETTING_OWN + THEME_KEYS */
+    void *setting_label[9 + THEME_KEYS]; /* SETTING_OWN + THEME_KEYS */
     unsigned tone_key;  /* the wheel key whose press ringnav_keydown silenced, 0 when none */
     unsigned tick_drop; /* tick_gate: the wheel keys whose press it dropped, bits */
     unsigned tick_at;   /* tick_gate: the last tick it passed (ringnav_sleep's dark turn) */
@@ -397,13 +397,14 @@ int feedback_toast(void *top);
 void *feedback_under(void *toast);
 void *feedback_top(void);
 void feedback_toast_paint(void *w, void *canvas);
+void feedback_toast_leave(void *w, void *canvas); /* the toast on its way out */
 int feedback_confirm_dress(void *w);
 void feedback_confirm_foot(const char *foot);
 /* the empty state's painters (feedback.c, docs/oled-design.md#empty-and-offline): its view's, and a
  * painted page's stack at top (a y in w) */
 void empty_state_paint(void *w, void *canvas);
 void empty_paint(void *w, void *canvas, const empty_t *e, int top);
-int empty_top(int free_top, int free_end, int row);
+int empty_top(int free_top, int free_end, int row), empty_compact(int free_top);
 int empty_card(empty_t *e);
 void feedback_confirm_bar(void *w, void *canvas);
 void feedback_songs(void *top, void *row);
@@ -412,32 +413,7 @@ int feedback_offline(void);
 void feedback_switch_bar(void *w, void *canvas);
 void feedback_scan_bar(void *w, void *canvas);
 void feedback_shuffled(const char *what, int songs);
-/* The confirmation card (docs/oled-design.md#confirmation-card): a card over the dimmed page that
- * asked. title names the object ("Forget %s?": the one %s is name); body is at most two lines
- * ('\n' between); code a large line ("482 913"); rows the answers top down, the safe one first.
- * kind sets the default row and inks: CONFIRM_DESTRUCTIVE (the last row red after a gap, opens on
- * row 0), CONFIRM_CONSEQUENTIAL (opens on row 0), CONFIRM_NEUTRAL (opens on the last row, Return
- * answers row 0), CONFIRM_INFO (one row). back: the row Return and a tap off the card answer, -1
- * for row 0. toggle: a switch row's label above the answers, toggle_on its start. timeout_ms: the
- * card answers timeout_row by itself after this long, the seconds left shown on that row and a bar
- * emptying along the card's foot. answer runs once, after the card has closed, with the chosen row
- * and the switch's state. */
-enum { CONFIRM_NEUTRAL, CONFIRM_DESTRUCTIVE, CONFIRM_CONSEQUENTIAL, CONFIRM_INFO };
-typedef struct {
-    const char *title, *name, *body, *code;
-    const char *const *rows;
-    int n_rows, kind, back;
-    const char *toggle;
-    int toggle_on;
-    int timeout_ms, timeout_row;
-    void (*answer)(void *ctx, int row, int toggle_on);
-    void *ctx;
-    const char *glyph; /* a theme image's name over the title (pair_prompt's phone), or 0 */
-} confirm_t;
-int confirm(const confirm_t *c); /* 1: shown; 0: another card is up, or no dialog */
-void *confirm_dialog(void);      /* the card's dialog while one is up, else 0 */
-void confirm_close(void);        /* closes the card without an answer */
-int confirm_up(void);            /* a card is up */
+int confirm_surface(void *w); /* w holds the card's answers */
 /* pair_prompt.c: one pairing presentation, Car Remote's and Guest Play's
  * (docs/oled-design.md#pairing) */
 void *pair_prompt(const char *phone, const char *code, const char *body, const char *const *rows,
@@ -511,11 +487,16 @@ void synclink_default(void);
  * texts */
 int about_list(void *list);
 void about_rows(void *view);
+int reset_list(void *list);
+void reset_rows(void *view);     /* settings_pages.c: Reset Settings' rows */
+int kv_text_w(void *label); /* an hscroll_label's text width in its row's face; -1 unmeasured */
+void kv_row(void *key, void *val, int kw, int vw, int right); /* settings_pages.c: kv_fit's split */
 void diag_about_row(void *view); /* diagnostics.c, --dev builds' Save Diagnostics */
 int diag_row(void *item);
 void caption_row(void *label, const unsigned *text);
 const unsigned *pod_caption(int i);
-extern const unsigned *const smart_awake_caption, *const folder_skip_caption;
+extern const unsigned *const smart_awake_caption, *const folder_skip_caption,
+    *const reduce_motion_caption;
 void caption_sel(void *view, void *item);
 void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
 /* control_center.c: Quick Settings drawn as Control Center (ringnav_quick_settings, its paint and
@@ -537,7 +518,8 @@ void swipe_back_down(void *event, int allowed);
 void swipe_back_poll(void);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
-void marquee_fade(void *w, void *canvas);
+void marquee_fade(void *w, void *canvas), marquee_fade_under(void *w, void *canvas);
+void sel_bar_flat(void *canvas, int x, int y, int w, int h); /* list_marks.c: the flat bar */
 /* np_marquee.c: Now Playing's lines as one marquee under a fading theme */
 int np_marq_owns(void *w);
 void np_marq_kick(void *w), np_marq_reset(void);
@@ -689,6 +671,7 @@ enum {
     SETTING_CLICKER, /* the Clicker's output: stored here, its row Controls' Key Tone row
                         (clicker.c) */
     SETTING_TIMETITLE,
+    SETTING_REDUCEMOTION, /* Reduce Motion (ui_kit.c motion_reduced), Display's last row */
     SETTING_OWN
 };
 #define INK_LABEL 1
@@ -915,6 +898,7 @@ int add_songs_mark(void *r);
 void add_songs_toggle(void *r);
 void add_songs_search(void); /* search_strip.c: the strip over the library's songs, picking */
 int playlist_page_hold(void *top);
+int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*pick)(void));
 int otg_count(void);
 void pv_paint(void *w, void *canvas);
 int playlists_transfer(void *ctx, void *event); /* Settings: Import (ctx 0) or Export Playlists */
@@ -929,7 +913,7 @@ extern int clicker_kind; /* CLICK_KIND_*, 0 the wheel's (zero at start, as .scra
 const char *clicker_text(void);
 void clicker_step(void);
 int clicker_route(int listening);
-/* menu_modal.c: the inset modal (docs/oled-design.md#menus) */
+/* menu_modal.c: the menu sheet (docs/oled-design.md#menus) */
 enum { MM_ACTION, MM_SETTING, MM_CHOICE, MM_SWITCH }; /* modal_row's how */
 int modal_set(void);
 int modal_row_w(void);
@@ -937,33 +921,39 @@ void *modal_gap(void *view);
 void modal_row(void *row, void *label, const char *icon, const char *value, int how);
 void modal_frame(void *win, void *list);
 void modal_paint(void *w, void *canvas);
+void modal_after(void *w, void *canvas);
+void modal_head(const char *title, const char *sub, void *r);
+void modal_red(void *row);
+int modal_is_red(void *row);
+int modal_sel_height(void *view, int h);
+/* a menu's destructive row: its words and bar (the confirm card's red) */
+#define MODAL_RED 0xff3b30
 int modal_rows_of(void *w);
-int modal_sb_right(void *list, int sb_w);
 int modal_win(void *w);
 void modal_row_paint(void *w, void *canvas, void *row, rect_t r, int selected);
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
 void modal_more(void *win);
 void modal_playlist_more(void *win);
-/* library_album.c: a Library album's page under the inset modal's set (albuminfo_page,
+void *modal_sheet(int (*back)(void *dialog, void *event), int (*gone)(void *dialog, void *event));
+void modal_head_bars(void);
+void modal_close(void *win);
+int modal_closing(void);
+void modal_corners(void *canvas, const rect_t *r, int R);
+/* library_album.c: a Library album's page under the menu sheet's set (albuminfo_page,
  * playerjumpinfo_page) */
 void album_local_load(void *win);
 int album_local_on(void *win);
 void album_local_paint(void *w, void *canvas);
-/* artist_page.c: s's UTF-8 as characters in out (at most n - 1, then 0) */
-unsigned ar_wide(const char *s, unsigned *out, unsigned n);
-/* artist_page.c: an artist's page's pair of stops and its monogram over the status bar; its
- * text painter, which Now Playing's About (np_about.c) paints with too */
+/* artist_page.c: an artist's page's pair of stops and its monogram over the status bar */
 int pair_key(void *top, void *w, int dir);
 int pair_holds(void *w);
 void artist_cap(void *bar, void *canvas);
-/* library_artist.c: a Library artist's page under the inset modal's set (artistinfo_page) */
+/* library_artist.c: a Library artist's page under the menu sheet's set (artistinfo_page) */
 int artist_local(void);
 int artist_local_on(void *win);
 void artist_local_paint(void *w, void *canvas);
 int artist_songs(void *unused);  /* navigation.c: the artist page's songs query */
 void *plays_ranked(void *songs); /* library_lists.c */
-int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x, int y,
-            int w, int align);
 /* song_sort.c: Songs' order, Playback > Library > Sorting's Songs */
 enum { SORT_TITLE, SORT_ARTIST, SORT_ALBUM, SORT_ADDED, SORT_N };
 int song_sort(void);
@@ -1002,6 +992,8 @@ const char *bt_recv_title(const char *name), *bt_recv_codec(void *win);
 void sw_update_paint(void *w, void *canvas), sw_update_restarting(void *win);
 const char *sw_update_title(const char *name);
 void toast_icon(const char *glyph, const char *text); /* feedback.c */
+/* feedback.c: a toast with glyph (a theme image without its prefix) by the next loop pass */
+void toast_later(const char *glyph, const char *text), toast_later_poll(void);
 int tsv_split(char *line, char **f, int max);         /* catalogue.c */
 
 /* az_index.c: the A-Z index on a long Library list in name order (docs/oled-design.md#a-z-index):

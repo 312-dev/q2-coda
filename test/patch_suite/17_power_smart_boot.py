@@ -294,7 +294,7 @@ assert [(c[1],m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='write_int_co
 # The row, after Charge Limit: off by default and saved as SMARTWIFI. Turned off while Smart Wi-Fi has
 # the radio off, the user's Wi-Fi comes back, unsaved, and is left alone.
 m,rows,texts,icons,click=settings_page('power','scroll_view_powermanager',cls=SmartMachine,config={'SMARTWIFI':'0'})
-assert texts()==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox','Restart','Shut Down'] and icons[3]=='wifiset_wifi'
+assert texts()==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox'] and icons[3]=='wifiset_wifi'
 assert switch_image(m,rows[3])=='switch_off' and click(3)==[(1,'Q2POD','SMARTWIFI')] and switch_image(m,rows[3])=='switch_on'
 m.pass_(1); m.pass_(SW_IDLE); assert m.flag()==0
 assert click(3)==[(0,'Q2POD','SMARTWIFI')] and switch_image(m,rows[3])=='switch_off'
@@ -336,14 +336,18 @@ for case,setup,kept in CASES:
     assert (not m.switch())==kept and (kept or m.flag()==0),case
 passed()
 # The payload's own users hold it on while they run: librespot, a station, a card app, an upload,
-# Network Update's download or an Apps job, Download Album Lyrics and a Tidal download.
+# Network Update's download or an Apps job, Get Album Lyrics, a Tidal download and Car Remote on.
 class SmartBusy(SmartMachine):
     def __init__(self,name,busy):
         super().__init__(); self.busy=busy; self.handlers[payload_syms[name]]='b:'+name  # every address is hooked here
+        # Car Remote on: its shim's poll (test/fw/test_coda_rc_shim.py's) left out, as it would start the daemon
+        if name=='coda_rc_enabled': self.handlers[payload_syms['coda_rc_poll']]='skip'
     def hook(self,u,address,size,unused):
+        if self.handlers.get(address)=='skip': self.returns(0); return
         if self.handlers.get(address,'').startswith('b:'): self.returns(self.busy); return
         return super().hook(u,address,size,unused)
-for name in ('spot_running','radio_status','addon_running','scrobble_busy','netupdate_busy','album_lyrics_busy','tidal_busy'):
+for name in ('spot_running','radio_status','addon_running','scrobble_busy','netupdate_busy','album_lyrics_busy','tidal_busy',
+             'coda_rc_enabled'):
     for busy in (0,2):  # radio_status: 2 a station playing
         m=SmartBusy(name,busy); m.pass_(1); m.pass_(SW_IDLE); assert (not m.switch())==bool(busy),(name,busy)
 passed()
@@ -513,7 +517,7 @@ m.call(address=payload_syms['upload_scrobbles'],args=(0,0,0,0),gap=0); m.advance
 assert m.call(address=payload_syms['upload_scrobbles'],args=(0,0,0,0),gap=0)==0 and not m.threads and m.toasts[-1][3]==SW_WAIT
 m.advance(500); assert len(m.threads)==1 and [x[3] for x in m.toasts].count('Uploading scrobbles')==1; passed()
 # The same for the other presses that start a job: Network Update's download, an Apps install and
-# Download Album Lyrics each start once, not cancelled by the held press ("Canceling…").
+# Get Album Lyrics each start once, not cancelled by the held press ("Canceling…").
 m=SmartRadio(); resume=int(manifest['patch_symbols']['stock_fwupdate_trampoline'],16); m.handlers[resume]='stock_fwupdate'
 m.u.hook_add(UC_HOOK_CODE,m.hook,begin=resume,end=resume); m.mock('strcpy@GLIBC_2.0','widget_set_tr_text')
 view=m.node('scroll_view','scroll_view_fwupdate'); m.top=m.node('window','fwupdate_page',[view])
@@ -585,7 +589,7 @@ m.link=1; m.poll(); assert [c[0] for c in m.calls].count('fork')==1; passed()
 
 # Boot logo: a card mount (boot, USB storage's end) starts a thread that keeps the card's logo as the
 # splash's /mnt/data copy; the poll toasts its failure. The thread is run here once the poll starts it.
-LOGO_SRC,LOGO_DST,LOGO_ROT='/mnt/mmc/Q2Pod/boot/boot-logo.jpg','/mnt/data/boot-logo.jpg','/tmp/boot-logo.jpg'
+LOGO_SRC,LOGO_DST,LOGO_ROT='/mnt/mmc/Q2Muse/boot/boot-logo.jpg','/mnt/data/boot-logo.jpg','/tmp/boot-logo.jpg'
 LOGO_BAD,LOGO_FAIL='Boot logo must be a 320x375 JPEG','Could not save boot logo'
 LOGO_SEEN='/mnt/data/boot-logo.bad'  # the refused card file's size and mtime: told once
 def jpg(w,h,sof=0xc0,bits=8,n=3,pad=0):  # an APP0 behind a fill byte, then the frame header
@@ -687,23 +691,23 @@ def boot_row(value=None,mode=0o100755):
     assert m.calls[0][:3]==('stock_power',m.top,5)
     kids=m.nodes[view]['children']
     if mode!=0o100755:  # no Boot to
-        assert len(kids)==11  # stock's two, then Standby Limit, Charge Limit, USB DAC Charging, Smart Wi-Fi, In-Vehicle and Battery History, then the gap, Restart and Shut Down
+        assert len(kids)==8  # stock's two, then Standby Limit, Charge Limit, USB DAC Charging, Smart Wi-Fi, In-Vehicle and Battery History (Restart and Shut Down are General's)
         return m,None,None
-    assert len(kids)==12  # Boot to before the gap
+    assert len(kids)==9  # Boot to last
     button=m.nodes[kids[8]]['children'][0]
     label=m.nodes[button]['children'][1]
     return m,button,label
 def toggle_boot(m,button):
     f,ctx=m.handler(button,O['EVT_CLICK']); m.calls=[]
     assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0
-for value,expected in ((None,'Rockbox'),(b'bad','Rockbox'),(b'q2pod','Q2 Pod'),(b'rockbox','Rockbox'),
-                       (b'q2pod\n','Q2 Pod'),(b'q2pod\0bad','Rockbox')):
+for value,expected in ((None,'Rockbox'),(b'bad','Rockbox'),(b'q2pod','Q2 Muse'),(b'rockbox','Rockbox'),
+                       (b'q2pod\n','Q2 Muse'),(b'q2pod\0bad','Rockbox')):
     m,button,label=boot_row(value)
     assert m.nodes[label]['text']=='Boot to: '+expected
     toggle_boot(m,button)
-    next_value=b'rockbox' if expected=='Q2 Pod' else b'q2pod'
+    next_value=b'rockbox' if expected=='Q2 Muse' else b'q2pod'
     assert m.files['/mnt/data/boot-target']==next_value
-    assert m.nodes[label]['text']=='Boot to: '+('Rockbox' if next_value==b'rockbox' else 'Q2 Pod')
+    assert m.nodes[label]['text']=='Boot to: '+('Rockbox' if next_value==b'rockbox' else 'Q2 Muse')
     restarted,_,l=boot_row(next_value); assert restarted.nodes[l]['text']==m.nodes[label]['text']
     passed()
 for mode in (0,0o040755,0o020644): boot_row(mode=mode); passed()
@@ -721,9 +725,9 @@ m,button,label=boot_row(); view=m.nodes[m.top]['children'][0]; view=m.nodes[view
 m.paint(view)
 for _ in range(8): m.call()  # stock's two, our six, then Boot to
 assert m.confirm()==11 and m.dispatched()[0][1]==button; passed()
-# System settings: stock V1.36's nine rows, its Language (English only for now), Wheel Function, In-Vehicle, General and System hidden, which the wheel
-# skips; Car Remote, App Store, Storage and Controls added, and the four rows stock moved to its System page, opening stock's pages,
-# so the list reads as it did. Boot to is Power's now.
+# General (Settings' System page, ringnav_systemset): About, System Update, Storage, Date & Time, App Store, stock's
+# Network row, Reset Settings, then stock's other eight hidden (the wheel skips them), a 12 px gap, Restart and Shut Down
+# (power_rows.c). The rows stock moved to its System page open stock's pages; Car Remote and Controls are Settings' own.
 for mode in (0o100755,0):
     m=BootMachine({}); m.rockbox_mode=mode; m.restack=True
     m.handlers[int(manifest['patch_symbols']['stock_systemset_trampoline'],16)]='stock_systemset'
@@ -731,18 +735,16 @@ for mode in (0o100755,0):
     view=m.node('scroll_view','scroll_view_sysset',entries.copy())
     m.top=m.node('window','sysset_page',[m.node('list_view','list_view_sysset',[view])])
     assert m.call(address=HOOKS['systemset_sysset_page_init'][0],args=(m.top,5,0,0),gap=0)==0
-    kids=m.nodes[view]['children']; assert len(kids)==17
-    assert [kids.index(e) for e in entries]==[7,0,1,3,5,12,13,14,15]  # Language, hidden, after Date and Time; the hidden four before About
-    assert [m.nodes[e]['visible'] for e in entries]==[0,1,1,1,1,0,0,0,0]
-    car,controls,date,apps,storage,update,reset,about=(m.nodes[kids[i]]['children'][0] for i in (2,4,6,8,9,10,11,16))
-    assert m.nodes[m.nodes[car]['children'][1]]['text']=='Car Remote' and m.handler(car,O['EVT_CLICK'])[0]==payload_syms['carremote_open']
+    kids=m.nodes[view]['children']; assert len(kids)==18
+    assert [kids.index(e) for e in entries]==[7,8,5,9,10,11,12,13,14]  # Network (stock's third) in place, the rest hidden
+    assert [m.nodes[e]['visible'] for e in entries]==[0,0,1,0,0,0,0,0,0]
+    about,update,storage,date,apps,reset=(m.nodes[kids[i]]['children'][0] for i in (0,1,2,3,4,6))
     assert m.nodes[m.nodes[apps]['children'][1]]['text']=='App Store' and m.handler(apps,O['EVT_CLICK'])[0]==payload_syms['shelf_open']
     assert m.nodes[m.nodes[storage]['children'][1]]['text']=='Storage' and m.handler(storage,O['EVT_CLICK'])[0]==payload_syms['storage_open']
-    assert m.nodes[m.nodes[controls]['children'][1]]['text']=='Controls'
-    f,ctx=m.handler(controls,O['EVT_CLICK']); assert f==payload_syms['display_open'] and ctx==3
     for b,key,page in ((date,'system_time','systemset/datetime_page'),(update,'system_update','systemset/fwupdate_page'),(reset,'system_reset','systemset/reset_page'),(about,'system_about','systemset/about_page')):
         f,ctx=m.handler(b,O['EVT_CLICK']); assert m.nodes[m.nodes[b]['children'][1]]['text']==key and m.nodes[m.nodes[b]['children'][0]]['image']==key
         m.calls=[]; assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==(page,None),key
+    assert m.nodes[kids[15]]['type']=='label' and [m.nodes[m.nodes[m.nodes[k]['children'][0]]['children'][1]]['text'] for k in kids[16:]]==['Restart','Shut Down']
     passed()
 print('Boot settings: conditional row/order, restart, card removal and failed atomic writes passed.')
 

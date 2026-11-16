@@ -8,7 +8,7 @@ from unicorn import Uc, UcError, UC_ARCH_MIPS, UC_MODE_MIPS32, UC_MODE_LITTLE_EN
 from unicorn.unicorn_py3.unicorn import uclib, uccallback, uc_hook_h, HOOK_CODE_CFUNC  # 2.1.4's own: Machine.hooked registers a C hook
 from unicorn.mips_const import *
 sys.path.insert(0, sys.path[0] + '/../tools')  # tools/ first
-from build import jal, j, segments, load_elf, symbols, BASE, SCRATCH, HOOKS, WM_PAINT_LEAF, FUNCTIONS, GLOBALS, CONTEXT_DATA, ROOT, source_sha256, sha, PRIVATE_FUNCTIONS, TAG, VERSION, BETA, dev_tag
+from build import jal, j, segments, load_elf, symbols, BASE, SCRATCH, HOOKS, WM_PAINT_LEAF, FUNCTIONS, GLOBALS, CONTEXT_DATA, ROOT, source_sha256, sha, PRIVATE_FUNCTIONS, TAG, VERSION, BETA, PRODUCT_NAME, dev_tag
 B=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'build')
 payload_syms=symbols(B/'patch.elf')
 manifest=json.loads((B/'manifest.json').read_text())
@@ -22,7 +22,7 @@ assert manifest.get('compact_code')
 from ipod import INC, O  # patch/offsets.inc and its integer #defines
 from theme import MOTION_WIDGET, MOTION_WINDOW, SCHEME_MODE_OFF, THEME_GEOM_OFF, THEME_MOTION_OFF, builtins as theme_builtins, geometry_sets
 from theme import theme_keys  # tools/theme.py: the theme's own keys
-CONFIG_READS=8+len(theme_keys(theme_builtins()))  # settings_read: the payload's eight keys, then the theme's own
+CONFIG_READS=9+len(theme_keys(theme_builtins()))  # settings_read: the payload's nine keys (REDUCEMOTION last), then the theme's own
 DC=O['DOUBLE_CLICK_MS']  # centre double-press window
 # iPod accent presets: {gradient top, bottom, light tone, red tone, highlight} per Accent setting value.
 ACCENTS=[tuple(int(v,16) for v in g) for g in re.findall(r'\{ 0x(\w+), 0x(\w+), 0x(\w+), 0x(\w+), 0x(\w+) \}',INC)]

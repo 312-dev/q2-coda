@@ -116,7 +116,7 @@ void wifi_rows_post(void *view) {
             }
             widget_move_resize(c, right - w, 0, w, I(b, W_H));
             widget_set_visible(c, 1, 0);
-            /* the name ends before the glyphs */
+            /* the name ends before the glyphs (set_child made it only_focus: navigation.c) */
             for (unsigned m = 0; m < k; ++m) {
                 void *t = widget_get_child(b, m);
                 if (!tk_strcmp(widget_get_type(t), "hscroll_label") &&

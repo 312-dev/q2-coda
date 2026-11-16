@@ -640,7 +640,7 @@ static int action(void *ctx, void *event) {
     }
     else if (id == PER_OUTPUT) ringnav_eq_output_toggle();
     else if (id == ENABLE) b->enabled = !b->enabled;
-    /* The Type picker: the inset modal's under a modal set (docs/oled-design.md#menus), else a
+    /* The Type picker: the menu sheet's under a modal set (docs/oled-design.md#menus), else a
      * screen of the types; either opens on the band's own. Under the modal the band's list is
      * left as it is, no render, so a pick or Return finds it on the Type row. */
     else if (id == TYPE) {
@@ -762,7 +762,30 @@ static int action(void *ctx, void *event) {
 static void *bar(void *page, int x, int w);
 static int e3_touch(void *ctx, void *event);
 
+static int render_rows(const void *unused);
+/* Delete's and Replace's question, on the confirmation card (docs/oled-design.md#confirmation-card)
+ * over the screen that asked: CONFIRM stays the state (q2eq answers it), the rows its previous
+ * screen's; the card's answer is that screen's YES or CANCEL. */
+static void eq_answer(void *ctx, int row, int toggle_on) {
+    if (ui.page && ui.screen == CONFIRM) action((void *)(long)(row == 1 ? YES : CANCEL), 0);
+}
+static void eq_ask(void) {
+    static const char *const del[] = { "Cancel", "Delete" }, *const rep[] = { "Cancel", "Replace" };
+    int deletes = ui.previous == DELETES;
+    confirm(&(confirm_t){ .title = deletes ? "Delete \"%s\"?" : "Replace \"%s\"?", .name = deleting(),
+                          .body = deletes ? "The EQ playing now stays as it is." : "The preset of that name is saved over.",
+                          .rows = deletes ? del : rep, .n_rows = 2, .kind = CONFIRM_DESTRUCTIVE, .back = -1,
+                          .answer = eq_answer });
+}
 static int render(const void *unused) {
+    if (ui.screen != CONFIRM) return render_rows(unused);
+    ui.screen = ui.previous; /* the page that asked stays in sight under the card */
+    int r = render_rows(unused);
+    ui.screen = CONFIRM;
+    if (ui.page && !confirm_up()) eq_ask();
+    return r;
+}
+static int render_rows(const void *unused) {
     ui.timer = 0;
     if (!ui.page) return 7;
     stop_timer(&ui.keyboard_timer);
@@ -817,9 +840,7 @@ static int render(const void *unused) {
         else if (ui.pick == PREAMP && !selection) selection = 1;
         offset = selection * rh - (shown - rh) / 2;
         offset = offset < 0 ? 0 : offset > (last + 1) * rh - shown ? (last + 1) * rh - shown : offset;
-    } else if (ui.screen == CONFIRM) /* Delete's and Replace's: open on Cancel, so a Centre on
-                                      * arrival keeps the preset (docs/oled-design.md#dialogs-and-toasts) */
-        selection = 1;
+    }
     ui.rendered = ui.screen;
     ui.edit = 0;
     widget_destroy_children(ui.page);
@@ -905,13 +926,6 @@ static int render(const void *unused) {
         for (int i = 0; i < PEQ_TYPES; ++i) row(view, n++, types[i], i);
     } else if (ui.screen == NAMING) { /* the name in the edit over the title (below); the row is Done */
         row(view, n++, "Rename", NAMED);
-    } else if (ui.screen == CONFIRM && ui.previous == DELETES) {
-        snprintf(text, sizeof(text), "Delete %.100s? Confirm", deleting());
-        fit(row(view, n++, text, YES));
-        row(view, n++, "Cancel", CANCEL);
-    } else if (ui.screen == CONFIRM) {
-        fit(row(view, n++, "Replace existing preset? Confirm", YES));
-        row(view, n++, "Cancel replacement", CANCEL);
     } else if (ui.screen == STOCKS) {
         for (int i = 0; i < STOCK_N; ++i) row(view, n++, stock_names[i], i);
     } else if (ui.screen == SAVES) {

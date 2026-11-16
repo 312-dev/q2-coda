@@ -31,7 +31,7 @@ class AlbumRateMachine(FileMocks,CoverflowMachine):
     def hearts(self): return [self.nodes[h]['image'] for h in self.nodes[self.panel()]['children'][1:]]
     def menu(self):  # the hold's rows, then Return closes the dialog
         self.t=getattr(self,'t',7000)+1; self.press(self.t); assert self.hold()==11 and self.release()==0
-        rows=self.labels(); f,ctx=self.handler(self.back,O['EVT_CLICK']); self.call(O['KEY_RETURN'],address=f,args=(ctx,self.event,0,0),gap=0)
+        rows=self.labels(); f,ctx=self.handler(self.dlg_return,O['EVT_CLICK']); self.call(O['KEY_RETURN'],address=f,args=(ctx,self.event,0,0),gap=0)
         return rows
     def rate(self,want):  # Rate album, wheel down to 0 then up to want, Centre
         toasts=len(self.toasts)

@@ -91,7 +91,7 @@ void bt_stopped_paint(void *w, void *canvas) {
     st.raw_ink = 1;
     mode_page_paint(
         w, canvas, I(w, W_Y),
-        &(mode_page_t){ tok(TOK_WARNING), "swmode_bad", 0, "Bluetooth Stopped", line, "Not Now" });
+        &(mode_page_t){ tok(TOK_WARNING), "modepage_bad", 0, "Bluetooth Stopped", line, "Not Now" });
     st.raw_ink = raw;
     stock_canvas_set_fill_color(canvas, fill);
     stock_canvas_set_text_color(canvas, text);

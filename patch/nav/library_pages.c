@@ -90,9 +90,10 @@ enum {
     QA_MORE,
     QA_NEW_PLAYLIST,
     QA_OTG,  /* Add to On-The-Go (playlist_pages.c) */
-    QA_PLAY, /* the inset modal's playlist: Play, Rename, Delete (playlists.c) */
+    QA_PLAY, /* the menu sheet's playlist: Play, Rename, Delete (playlists.c) */
     QA_RENAME,
-    QA_DELETE
+    QA_DELETE,
+    QA_REMOVE /* a payload page's own last row (qm_song_hold): Remove from Playlist */
 };
 
 static char *play_key(void) {
@@ -143,8 +144,21 @@ unsigned queue_hash(void *q) {
     return h;
 }
 
+/* A payload page's own songs held (qm_song_hold): the page, its list, its last row's words and
+ * what that row runs. */
+static struct {
+    void *page, *list;
+    const char *extra;
+    void (*pick)(void);
+} qm_held __attribute__((section(".scratch")));
+static int qm_held_on(void *page) {
+    return st.qm_kind == QM_COVERFLOW && page && page == qm_held.page;
+}
+
 static void *qm_list(void) {
     if (st.qm_kind == QM_PLAYING) return P(mcl_pdeqplaylist, 0);
+    void *top = window_manager_get_top_window(window_manager());
+    if (qm_held_on(top)) return qm_held.list;
     if (st.qm_kind == QM_PLAYLIST) return P(p_deque_playlist, 0);
     return st.qm_kind == QM_COVERFLOW ? page_tracks(window_manager_get_top_window(window_manager()))
                                       : P(p_deque_showlist, 0);
@@ -198,9 +212,12 @@ static void qm_close(void) {
 
 /* Return and the title bar arrow dismiss without the stock sort-change flag. */
 static int qm_open(const void *unused);
+static void qm_values(void *dialog);
 static int qm_back(void *dialog, void *event) {
     if (I(event, EVENT_TYPE) == EVT_KEY_UP && I(event, EVENT_KEY) != KEY_RETURN) return 0;
-    qm_close();
+    void *menu = st.qm_dialog; /* forgotten at once, as qm_close: the next hold may open another */
+    st.qm_dialog = (void *)0;
+    modal_close(menu); /* a sheet falls away first (menu_modal.c) */
     return STOP;
 }
 
@@ -797,7 +814,7 @@ int np_queue(const void *unused) {
         if (queue && at < deque_size(queue) && rec_hash(deque_at(queue, at)) == st.qm_forced_hash)
             playback_move(at);
     }
-    up_next(page_keyup);
+    up_next();
     return 0;
 }
 
@@ -868,7 +885,7 @@ static int page_closed(void *ctx, void *event) {
             st.ch = 0;
         }
     }
-    if (ctx == st.sc_page) st.sc_page = 0, st.sc_armed = 0;
+    if (ctx == st.sc_page) st.sc_page = 0;
     return 0;
 }
 

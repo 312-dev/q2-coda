@@ -10,7 +10,8 @@ import pytest
 import host
 from conftest import O, Deques, libc
 
-# Up Next's window, a zeroed widget (no parent, no name): OLED's title and toast checks read the window on top
+# Up Next's sheet, stock's sortselect dialog as a zeroed widget (no parent): OLED's title and toast checks read the
+# window on top
 _PAGE = C.create_string_buffer(0x400)
 PAGE = C.addressof(_PAGE)
 EVT_CLICK, EVT_DESTROY, SEL, COUNT = O['EVT_CLICK'], O['EVT_DESTROY'], b'_ringnav_index', b'_ringnav_count'
@@ -103,12 +104,24 @@ class Queue:
 
 
 class Page:
-    """Up Next's page on stubs: widgets as zeroed blocks that keep their box, parent and children, their props, the
-    handlers, the timers and the toasts."""
+    """Up Next's sheet on stubs (menu_modal.c modal_sheet: stock's sortselect dialog, its list_view and scroll_view):
+    widgets as zeroed blocks that keep their box, parent and children, their names and props, the handlers, the timers
+    and the toasts."""
     def __init__(self, fw):
         self.fw, self.children, self.blocks, self.timers, self.toasts = fw, {}, [], [], []
-        self.props, self.handlers, self.kinds = {}, {}, {}
-        fw.mock('window_create', lambda *_: PAGE)
+        self.props, self.handlers, self.kinds, self.names, self.bound, self.strs = {}, {}, {}, {}, {}, []
+        self.opened, self.closed = 0, []
+        self._np = C.create_string_buffer(0x400)  # Now Playing, under the sheet until it opens
+        self.top = C.addressof(self._np)
+        fw.mock('window_manager_get_top_window', lambda *_: self.top)
+        fw.mock('navigator_to', lambda name, *_: self.dialog(C.string_at(name)))
+        fw.mock('widget_lookup', lambda w, name, deep, *_: self.lookup(w, C.string_at(name)))
+        fw.mock('widget_set_name', lambda w, name, *_: self.names.__setitem__(w, C.string_at(name)) or 0)
+        fw.mock('widget_get_prop_str', self.prop_str)
+        fw.mock('widget_get_type', lambda w, *_: self.cstr(self.kinds.get(w, 'dialog').replace('_create', '').encode()))
+        fw.mock('widget_get_visible', lambda w, *_: 1)
+        fw.mock('widget_move_resize', self.place)
+        fw.mock('window_close', self.close_window)
         for kind in ('scroll_view_create', 'list_view_create', 'list_item_create', 'label_create', 'image_create',
                      'hscroll_label_create'):
             fw.mock(kind, lambda parent, x=0, y=0, w=0, h=0, *_, kind=kind: self.widget(parent, kind, x, y, w, h))
@@ -119,9 +132,64 @@ class Page:
         fw.mock('widget_get_prop_int', self.prop)
         fw.mock('widget_set_prop_int', lambda w, key, v, *_: self.props.__setitem__((w, C.string_at(key)), C.c_int(v).value))
         fw.mock('widget_set_prop_str', lambda w, key, v, *_: self.props.__setitem__((w, C.string_at(key)), C.string_at(v).decode()))
-        fw.mock('widget_on', lambda w, event, fn, ctx, *_: self.handlers.__setitem__((w, event), (fn, ctx)) or 1)
+        fw.mock('widget_on', self.on)
         fw.mock('timer_add', lambda fn, ctx, ms, *_: self.timers.append((fn, ms)) or len(self.timers))
         fw.mock('navigator_to_with_context', lambda page, info, *_: self.toasts.append(C.string_at(info + 8).decode()))
+
+    def dialog(self, name):
+        """navigator_to's sortselect dialog: Up Next's window on top, its list_view and scroll_view new."""
+        if name == b'dialog/sortselect_dialog':
+            self.opened += 1
+            self.top = PAGE
+            self.names[PAGE] = b'sortselect_dialog'
+            self.children[PAGE] = []
+            lv = self.widget(PAGE, 'list_view_create', 0, 44, 375, 276)
+            self.names[lv] = b'list_view'
+            self.names[self.widget(lv, 'scroll_view_create', 0, 0, 375, 276)] = b'scroll_view'
+        return 0
+
+    def lookup(self, w, name):
+        for k in self.children.get(w, []):
+            if self.names.get(k) == name:
+                return k
+            if found := self.lookup(k, name):
+                return found
+        return 0
+
+    def cstr(self, b):
+        self.strs.append(C.create_string_buffer(b))
+        return C.addressof(self.strs[-1])
+
+    def prop_str(self, w, key, default, *_):
+        name = C.string_at(key)
+        if name == b'name':
+            return self.cstr(self.names[w]) if w in self.names else 0
+        v = self.props.get((w, name))
+        return self.cstr(v.encode()) if isinstance(v, str) else default
+
+    def place(self, w, x, y, ww, h, *_):
+        for off, v in zip(('W_X', 'W_Y', 'W_W', 'W_H'), (x, y, ww, h)):
+            C.c_int.from_address(w + O[off]).value = v
+        return 0
+
+    def box(self, w):
+        return tuple(C.c_int.from_address(w + O[k]).value for k in ('W_X', 'W_Y', 'W_W', 'W_H'))
+
+    def on(self, w, event, fn, ctx, *_):
+        """Each handler kept; the first of a kind is the one handlers[] answers (a row's click, the sheet's Return)."""
+        self.bound.setdefault((w, event), []).append((fn, ctx))
+        self.handlers.setdefault((w, event), (fn, ctx))
+        return 1
+
+    def close_window(self, w, *_):
+        """window_close: its destroy handlers, each it was given (upnext.c's own, menu_modal.c's)."""
+        self.closed.append(w)
+        if w == PAGE:
+            self.top = C.addressof(self._np)
+        for fn, ctx in self.bound.pop((w, EVT_DESTROY), []):
+            C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, None)
+        self.handlers.pop((w, EVT_DESTROY), None)
+        return 0
 
     def widget(self, parent, kind, x, y, w, h):
         self.blocks.append(C.create_string_buffer(0x400))
@@ -143,12 +211,11 @@ class Page:
         return 290 if name == b'h' else self.props.get((w, name), C.c_int(default).value)
 
     def open(self):
-        self.fw.fn('up_next', None, C.c_void_p)(None)
+        self.fw.fn('up_next', None)()
 
     def close(self):
-        """The page destroyed: the destroy handler page_open hooked on it, upnext.c's own close."""
-        fn, ctx = self.handlers[PAGE, EVT_DESTROY]
-        assert C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, None) == 0
+        """The sheet closed: its destroy handlers, upnext.c's own close and the sheet's."""
+        self.close_window(PAGE)
 
     @property
     def view(self):
@@ -178,7 +245,7 @@ class Page:
         if not any(self.kinds[w] == 'label_create' and self.children.get(w) for w in kids):
             return []
         end = [i for i, w in enumerate(kids) if self.props.get((w, b'_un_from'))]
-        return [self.props[(w, b'_un_title')] for w in kids[2:end[0] if end else len(kids)]]
+        return [self.props[(w, b'_un_title')] for w in kids[2:end[0] if end else len(kids)]]  # past the header
 
     def playing(self):
         return self.props[(self.kids()[0], b'_un_title')]
@@ -272,18 +339,28 @@ def test_up_next_stops_at_500_rows_of_a_longer_queue(fw, mcl):
     low.close()
 
 
-@pytest.mark.parametrize('set_name', ['oled', None])
-def test_up_next_s_list_runs_on_to_the_foot_under_a_list_fit_set(fw, up, st, set_name):
-    """OLED's (list_fit) list stays as page_list leaves it, on to the window's foot, its rows past the list end fading
-    (navigation.c list_fade) where a box cut at UN_BOTTOM showed them cut off; a set without one stops at UN_BOTTOM."""
+def test_up_next_opens_in_the_menu_sheet_its_rows_at_their_own_heights(fw, plain, st):
+    """Up Next is the menu sheet (menu_modal.c modal_sheet, docs/oled-design.md#up-next): stock's sortselect dialog
+    named as its page was, the list from y 50 to the screen's foot, headed by the sheet's 72 px header space (the
+    playing song, not a stop), then Playing Next's 24 px heading, its 46 px rows, "From ..." at 26 px and the rest.
+    Until its first whole paint starts the rise the list waits the sheet's height (280 px) lower."""
     sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
-    st('geom').value = [g.name for g in sets].index(set_name) if set_name else 0
-    _, page = up
-    fw.mock('widget_resize', lambda w, width, h, *_: struct.pack_into('<i', page_block(page, w), O['W_H'], h) or 0)
+    st('geom').value, st('settings_read').value = [g.name for g in sets].index('oled'), 1
+    queue, page = plain
+    queue.queue(7, 1)
     page.open()
+    assert page.names[PAGE] == b'upnext_page' and page.props[(PAGE, b'_mm_own')] == 1
     lv = C.c_uint64.from_address(page.view + O['W_PARENT']).value
-    h = C.c_int.from_address(lv + O['W_H']).value
-    assert h == (290 if set_name else 296)  # the page's own height (prop 'h'), from its top at y 0
+    assert page.box(lv)[1:] == (50 + 280, 375, 270)  # its place 50 to the foot, below the screen until it rises
+    kids = page.kids()
+    assert page.names[kids[0]] == b'_mm_head' and page.playing() == queue.name(queue.mcl.pos)
+    assert [page.box(w)[3] for w in kids[:5]] == [72, 24, 46, 26, 46]
+    assert [page.box(w)[1] for w in kids[:3]] == [0, 72, 96]
+    assert 'Clear' == page.stops[0] and queue.name(queue.mcl.pos) not in page.stops  # the header is no stop
+    clear = page.children[kids[1]][0]
+    for w in [clear] + kids[1:]:  # no paint of their own: the sheet shows round Clear's pill and under each row
+        assert page.props.get((w, b'style:normal:bg_color')) == 0, w
+    assert page.props.get((clear, b'style:normal:border_color')) == 0  # nor the row style's frame round the pill
 
 
 def page_block(page, w):
@@ -432,6 +509,8 @@ def test_centre_held_on_a_coming_row_lifts_nothing(fw, plain):
 
 def test_the_rows_follow_the_queue_as_it_plays(fw, plain):
     queue, page = plain
+    for r in queue.records:  # no artists: the header reads the playing song's album, whose cell an artist fills here
+        C.c_uint.from_address(r + O['REC_ARTIST']).value = 0
     page.open()
     before = page.captions
     assert page.run(1000) == 8  # nothing moved: the same rows
@@ -444,7 +523,24 @@ def test_up_next_opens_one_page_at_a_time_and_again_once_closed(fw, up):
     _, page = up
     page.open()
     page.open()
-    assert len(fw.calls('window_create')) == 1
+    assert page.opened == 1
     page.close()
     page.open()
-    assert len(fw.calls('window_create')) == 2 and len(page.captions) == len(NAMES) - 1
+    assert page.opened == 2 and len(page.captions) == len(NAMES) - 1
+
+
+def test_return_lets_the_sheet_go_and_up_next_opens_again(fw, up):
+    """Return on the sheet (menu_modal.c modal_close: before its first whole paint, at once) closes it and Up Next with
+    it. Any other key's release is not the sheet's."""
+    _, page = up
+    page.open()
+    fn, ctx = page.handlers[PAGE, O['EVT_KEY_UP']]
+    ev = C.create_string_buffer(0x40)
+    struct.pack_into('<i', ev, O['EVENT_TYPE'], O['EVT_KEY_UP'])
+    struct.pack_into('<i', ev, O['EVENT_KEY'], KEY_NEXT)
+    assert C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, C.addressof(ev)) == 0 and page.closed == []
+    struct.pack_into('<i', ev, O['EVENT_KEY'], KEY_RETURN)
+    C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, C.addressof(ev))
+    assert page.closed == [PAGE]
+    page.open()
+    assert page.opened == 2 and page.captions

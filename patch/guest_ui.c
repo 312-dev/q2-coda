@@ -339,36 +339,36 @@ static void np_paint(void *w, void *canvas) {
     fill_box(canvas, &art, RGBA(tok(TOK_RAISED_2)), GU_ART_R);
     paint_art(w, canvas, theme_art("empty_music-notes"), art.x + (GU_ART - 28) / 2,
               art.y + (GU_ART - 28) / 2);
-    ar_text(canvas, *title ? title : "Connecting…", 1, TYPE(22), (unsigned)primary, 1, x,
+    ui_text(canvas, *title ? title : "Connecting…", 1, TYPE(22), (unsigned)primary, 1, x,
             GU_TITLE_Y - dy, GU_TEXT_W, 2);
     if (*artist)
-        ar_text(canvas, artist, 0, TYPE(18), secondary, 1, x, GU_ARTIST_Y - dy, GU_TEXT_W, 2);
+        ui_text(canvas, artist, 0, TYPE(18), secondary, 1, x, GU_ARTIST_Y - dy, GU_TEXT_W, 2);
     paint_art(w, canvas, theme_art("guestphone_a"), x, GU_FROM_Y - dy - GU_GLYPH / 2);
     tk_snprintf(s, sizeof s, "Playing from %s", guest);
-    ar_text(canvas, s, 0, TYPE(15), secondary, 1, x + GU_GLYPH + 4, GU_FROM_Y - dy,
+    ui_text(canvas, s, 0, TYPE(15), secondary, 1, x + GU_GLYPH + 4, GU_FROM_Y - dy,
             GU_TEXT_W - GU_GLYPH - 4, 2);
     tk_snprintf(s, sizeof s, paused ? "Paused on %s's phone" : "Your music is paused", who);
-    ar_text(canvas, s, 0, TYPE(13), tertiary, 1, x, GU_PAUSED_Y - dy, GU_TEXT_W, 2);
+    ui_text(canvas, s, 0, TYPE(13), tertiary, 1, x, GU_PAUSED_Y - dy, GU_TEXT_W, 2);
     /* the path, then each leg's codec line */
     tk_snprintf(s, sizeof s, jack ? "%s → Q2 → headphone jack" : "%s → Q2 → %s", guest, out);
-    ar_text(canvas, s, 1, TYPE(17), (unsigned)primary, 1, 375 / 2, GU_PATH_Y - dy, 327, 1);
+    ui_text(canvas, s, 1, TYPE(17), (unsigned)primary, 1, 375 / 2, GU_PATH_Y - dy, 327, 1);
     char leg[48];
     leg_words(gv("in"), leg, sizeof leg);
     tk_snprintf(s, sizeof s, "%s → Q2: %s", guest, leg);
-    if (*leg) ar_text(canvas, s, 0, TYPE(14), tertiary, 1, 375 / 2, GU_LEG_Y - dy, 327, 1);
+    if (*leg) ui_text(canvas, s, 0, TYPE(14), tertiary, 1, 375 / 2, GU_LEG_Y - dy, 327, 1);
     if (!jack) {
         leg_words(gv("outcodec"), leg, sizeof leg);
         tk_snprintf(s, sizeof s, "Q2 → %s: %s", out, leg);
         if (*leg)
-            ar_text(canvas, s, 0, TYPE(14), tertiary, 1, 375 / 2, GU_LEG_Y + GU_LEG_DY - dy, 327,
+            ui_text(canvas, s, 0, TYPE(14), tertiary, 1, 375 / 2, GU_LEG_Y + GU_LEG_DY - dy, 327,
                     1);
     }
     /* Stop Guest Play, the one selectable thing: selected */
     int pw =
-        ar_text(canvas, "Stop Guest Play", 0, TYPE(18), 0, 1, -1000, 0, 327, 2) + 2 * GU_PILL_PAD;
+        ui_text(canvas, "Stop Guest Play", 0, TYPE(18), 0, 1, -1000, 0, 327, 2) + 2 * GU_PILL_PAD;
     rect_t pill = { (375 - pw) / 2, GU_PILL_Y - dy, pw, GU_PILL_H };
     fill_box(canvas, &pill, RGBA(scheme()->tones[0] & 0xffffffu), GU_PILL_H / 2);
-    ar_text(canvas, "Stop Guest Play", 0, TYPE(18), tok(TOK_ON_ACCENT), 1, 375 / 2,
+    ui_text(canvas, "Stop Guest Play", 0, TYPE(18), tok(TOK_ON_ACCENT), 1, 375 / 2,
             pill.y + GU_PILL_H / 2, pw, 1);
 }
 
@@ -377,7 +377,7 @@ static void fail_paint(void *w, void *canvas) {
     tk_snprintf(line, sizeof line, "Try again from %s's phone", gu.fail_name);
     mode_page_paint(
         w, canvas, I(w, W_Y),
-        &(mode_page_t){ tok(TOK_WARNING), "swmode_bad", 0, "Couldn't Connect", line, "Try Again" });
+        &(mode_page_t){ tok(TOK_WARNING), "modepage_bad", 0, "Couldn't Connect", line, "Try Again" });
 }
 
 /* ---- QR codes (libqrencode, which demo carries) ---- */
@@ -445,12 +445,12 @@ static void conn_paint(void *w, void *canvas) {
     unsigned secondary = tok(TOK_SECONDARY), tertiary = tok(TOK_TERTIARY),
              primary = tok(TOK_PRIMARY);
     char name[64], s[64];
-    ar_text(canvas, "On your phone, connect to", 0, TYPE(16), secondary, 1, x, GC_LEAD_Y - dy, 260,
+    ui_text(canvas, "On your phone, connect to", 0, TYPE(16), secondary, 1, x, GC_LEAD_Y - dy, 260,
             2);
-    ar_text(canvas, play_name(name, sizeof name), 1, TYPE(30), primary, 1, x, GC_NAME_Y - dy, 250,
+    ui_text(canvas, play_name(name, sizeof name), 1, TYPE(30), primary, 1, x, GC_NAME_Y - dy, 250,
             2);
     paint_art(w, canvas, theme_art("bttoast_bt_off"), x, GC_BT_Y - dy - GU_GLYPH / 2);
-    ar_text(canvas, "in Bluetooth settings", 0, TYPE(16), secondary, 1, x + GU_GLYPH + 6,
+    ui_text(canvas, "in Bluetooth settings", 0, TYPE(16), secondary, 1, x + GU_GLYPH + 6,
             GC_BT_Y - dy, 240, 2);
     /* the window's countdown: a ring emptying over its two minutes, m:ss in it */
     int left = atoi(gv("window"));
@@ -468,21 +468,21 @@ static void conn_paint(void *w, void *canvas) {
         vgcanvas_restore(vg);
     }
     tk_snprintf(s, sizeof s, "%d:%02d", left / 60, left % 60);
-    ar_text(canvas, s, 0, TYPE(16), primary, 1, GC_RING_CX, GC_RING_CY - dy, 60, 1);
+    ui_text(canvas, s, 0, TYPE(16), primary, 1, GC_RING_CX, GC_RING_CY - dy, 60, 1);
     /* AirPlay and Spotify guests: the hotspot's code, while it runs */
     if (gv_is("hotspot_up", "1")) {
         qr_paint(canvas, gv("hotspot_qr"), GC_QR_X, GC_QR_Y - dy, GC_QR);
-        ar_text(canvas, "AirPlay or Spotify?", 1, TYPE(17), primary, 1, GC_SIDE_X,
+        ui_text(canvas, "AirPlay or Spotify?", 1, TYPE(17), primary, 1, GC_SIDE_X,
                 GC_QR_Y + 14 - dy, 227, 2);
-        ar_text(canvas, "Scan to join the Q2's Wi-Fi,", 0, TYPE(14), tertiary, 1, GC_SIDE_X,
+        ui_text(canvas, "Scan to join the Q2's Wi-Fi,", 0, TYPE(14), tertiary, 1, GC_SIDE_X,
                 GC_QR_Y + 40 - dy, 227, 2);
         tk_snprintf(s, sizeof s, "then pick %s", name);
-        ar_text(canvas, s, 0, TYPE(14), tertiary, 1, GC_SIDE_X, GC_QR_Y + 58 - dy, 227, 2);
+        ui_text(canvas, s, 0, TYPE(14), tertiary, 1, GC_SIDE_X, GC_QR_Y + 58 - dy, 227, 2);
     }
     int pw = 2 * 54;
     rect_t pill = { (375 - pw) / 2, 268 - dy, pw, GU_PILL_H };
     fill_box(canvas, &pill, RGBA(scheme()->tones[0] & 0xffffffu), GU_PILL_H / 2);
-    ar_text(canvas, "Done", 0, TYPE(18), tok(TOK_ON_ACCENT), 1, 375 / 2, pill.y + GU_PILL_H / 2, pw,
+    ui_text(canvas, "Done", 0, TYPE(18), tok(TOK_ON_ACCENT), 1, 375 / 2, pill.y + GU_PILL_H / 2, pw,
             1);
 }
 
@@ -791,17 +791,17 @@ static void hot_paint(void *w, void *canvas) {
     int dy = I(w, W_Y), top = HS_QR_TOP + 58 - dy;
     unsigned primary = tok(TOK_PRIMARY), tertiary = tok(TOK_TERTIARY);
     if (!gv_is("hotspot_up", "1")) {
-        ar_text(canvas,
+        ui_text(canvas,
                 gv_is("hotspot", "1") ? "Starts while Guest Play is on"
                                       : "For AirPlay, Spotify Connect and DLNA guests",
                 0, TYPE(13), tertiary, 1, geom_val(V_TEXT_X), top + 10, 327, 2);
         return;
     }
     qr_paint(canvas, gv("hotspot_qr"), HS_QR_X, top, HS_QR);
-    ar_text(canvas, "Scan to join", 1, TYPE(17), primary, 1, HS_SIDE_X, top + 14, 227, 2);
-    ar_text(canvas, "Then play from AirPlay,", 0, TYPE(14), tertiary, 1, HS_SIDE_X, top + 38, 227,
+    ui_text(canvas, "Scan to join", 1, TYPE(17), primary, 1, HS_SIDE_X, top + 14, 227, 2);
+    ui_text(canvas, "Then play from AirPlay,", 0, TYPE(14), tertiary, 1, HS_SIDE_X, top + 38, 227,
             2);
-    ar_text(canvas, "Spotify or a DLNA app", 0, TYPE(14), tertiary, 1, HS_SIDE_X, top + 56, 227, 2);
+    ui_text(canvas, "Spotify or a DLNA app", 0, TYPE(14), tertiary, 1, HS_SIDE_X, top + 56, 227, 2);
 }
 
 /* ---- each look ---- */

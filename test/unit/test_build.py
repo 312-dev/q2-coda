@@ -8,6 +8,7 @@ import re
 import shutil
 import struct
 import subprocess
+import zipfile
 
 import pytest
 
@@ -483,8 +484,8 @@ def test_inter_faces(face):
     have = sorted(u for u in source.getBestCmap() if 0x20 <= u < 0x530 or 0x2000 <= u < 0x2200) + [build.PLAY_MARK]
     assert sorted(font.getBestCmap()) == have and 0x416 in have and 0x3a9 in have  # Cyrillic, Greek
     names = {rec.nameID: str(rec) for rec in font['name'].names}
-    assert all('Inter' not in names[i] for i in (1, 3, 4, 6)) and names[6] in ('Q2PodOLED-Regular', 'Q2PodOLED-Medium')
-    assert names[1] == ('Q2 Pod OLED' if face == 'inter' else 'Q2 Pod OLED Medium')
+    assert all('Inter' not in names[i] for i in (1, 3, 4, 6)) and names[6] in ('Q2MuseOLED-Regular', 'Q2MuseOLED-Medium')
+    assert names[1] == ('Q2 Muse OLED' if face == 'inter' else 'Q2 Muse OLED Medium')
     assert names[0] == str(source['name'].getName(0, 3, 1, 0x409))
     assert re.fullmatch(rf'#define {f.ranges_macro} \{{0x20,0x7e,[0-9a-fx,]+\}}', ranges)
     cmap, hmtx = font.getBestCmap(), font['hmtx']
@@ -1090,9 +1091,9 @@ def stock_h(dev=0, repo=build.REPO):
     return build.stock_header(context, RANGES, builtins(), dev, repo)
 
 
-@pytest.mark.parametrize('dev,beta,repo,version,tag,flag', [(0, 0, build.REPO, f'{build.VERSION} Pod', build.VERSION, '0'),
-                                                            (0, 2, build.REPO, f'{build.VERSION} Pod beta 2', build.VERSION, '0'),
-                                                            (7, 2, 'someone/q2-fork', f'{build.VERSION} Pod dev 7', '', '1')])
+@pytest.mark.parametrize('dev,beta,repo,version,tag,flag', [(0, 0, build.REPO, f'{build.VERSION} Muse', build.VERSION, '0'),
+                                                            (0, 2, build.REPO, f'{build.VERSION} Muse beta 2', build.VERSION, '0'),
+                                                            (7, 2, 'someone/q2-fork', f'{build.VERSION} Muse dev 7', '', '1')])
 def test_stock_header_versions(dev, beta, repo, version, tag, flag, monkeypatch):
     monkeypatch.setattr(build, 'BETA', beta)
     header = stock_h(dev, repo)
@@ -1103,7 +1104,7 @@ def test_stock_header_versions(dev, beta, repo, version, tag, flag, monkeypatch)
     assert macros['Q2POD_VERSION'] == f'"{version}"' and macros['Q2POD_DEV'] == flag
     assert macros['Q2POD_TAG'] == f'"{tag}"'  # a dev build has none, and takes any release
     assert macros['Q2POD_REPO'] == f'"{repo}"'
-    assert macros['Q2POD_UA'] == f'"Q2Pod/{build.VERSION} (https://github.com/{build.REPO})"'  # the project's contact, not --update-repo's
+    assert macros['Q2POD_UA'] == f'"Q2Muse/{build.VERSION} (https://github.com/{build.REPO})"'  # the project's contact, not --update-repo's
     assert macros['bt_showcoding'] == '((const unsigned char *)0x700000u)'
 
 
@@ -1142,7 +1143,7 @@ const unsigned long h_sizes[] = {{sizeof h_zones / sizeof *h_zones, sizeof h_cit
     zones, cities, order, icons, rounds, medium = array(ctypes.c_ulong, 'h_sizes', 6)
     assert array(ctypes.c_int, 'h_ints', 4) == [build.RING_STEP, len(themes), len(theme.theme_keys(themes)), 0]
     assert [s.decode() for s in array(ctypes.c_char_p, 'h_strings', 6)] == [
-        build.ROCKBOX_FLAG, 'V1.36', f'{build.VERSION} Pod', build.VERSION, build.REPO, f'Q2Pod/{build.VERSION} (https://github.com/{build.REPO})']
+        build.ROCKBOX_FLAG, 'V1.36', f'{build.VERSION} Muse', build.VERSION, build.REPO, f'Q2Muse/{build.VERSION} (https://github.com/{build.REPO})']
     assert [s.decode() for s in array(ctypes.c_char_p, 'h_zones', zones)] == [zone for _, zone in build.TIMEZONES]
     # each row's city, its label after the offset
     cities = [s.decode() for s in array(ctypes.c_char_p, 'h_cities', cities)]
@@ -1332,3 +1333,71 @@ def test_a_rootfs_over_72_mib_is_refused_and_one_at_it_fits():
         build.rootfs_fits(build.ROOTFS_ROOM + 1)
     with pytest.raises(ValueError, match=r'--new-player adds q2player'):
         build.rootfs_fits(80 << 20, new_player=True)
+
+
+LAUNCHER = ('#!/bin/sh\npid=/tmp/q2-demo\nif [ "$1" != --loop ]; then\n'
+            '    dir=$(cd "$(dirname "$0")" && pwd)\n'
+            '    cp -f "$dir/q2-demo" /tmp/q2-demo.bin && chmod 755 /tmp/q2-demo.bin || exit 1\n'
+            '    exec /bin/sh /tmp/q2-demo.run --loop "$dir"\nfi\n')
+
+
+def test_a_carried_apps_launcher_keeps_its_data_on_the_card_and_runs_the_image_copy():
+    text = build.bundled_launcher('demo', LAUNCHER)
+    assert 'dir=/mnt/mmc/.demo; mkdir -p "$dir" || exit 1\n' in text
+    assert 'ln -sf /usr/lib/q2apps/demo/q2-demo /tmp/q2-demo.bin || exit 1\n' in text
+    assert 'dirname' not in text and 'cp -f' not in text and text.endswith('--loop "$dir"\nfi\n')
+
+
+@pytest.mark.parametrize('text', [LAUNCHER.replace('dirname', 'basename'), LAUNCHER.replace('cp -f', 'cp'),
+                                  LAUNCHER + LAUNCHER])
+def test_a_launcher_not_as_expected_is_refused(text):
+    with pytest.raises(ValueError, match='Unexpected launcher in the demo app'):
+        build.bundled_launcher('demo', text)
+
+
+def app_zip(files):
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, 'w') as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    return out.getvalue()
+
+
+def pinned(monkeypatch, tmp_path, data, version='q2-v1.2'):
+    (tmp_path/'demo.zip').write_bytes(data)
+    monkeypatch.setitem(build.BUNDLED_APPS, 'demo', (version, 'demo.zip', len(data), hashlib.sha256(data).hexdigest()))
+
+
+def test_a_carried_app_is_its_pinned_zips_files_with_a_version_and_the_new_launcher(monkeypatch, tmp_path):
+    pinned(monkeypatch, tmp_path, app_zip({'.demo/q2app': 'name=Demo\n', '.demo/q2-demo': b'ELF', '.demo/run': LAUNCHER,
+                                           '.demo/icon.png': b'png', 'README': 'outside its folder'}))
+    files = build.bundled_app('demo', tmp_path)
+    assert sorted(files) == ['icon.png', 'q2-demo', 'q2app', 'run', 'version']
+    assert files['q2-demo'] == (b'ELF', True) and files['run'][1] and files['q2app'] == (b'name=Demo\n', False)
+    assert files['version'] == (b'q2-v1.2\n', False) and b'/usr/lib/q2apps/demo/q2-demo' in files['run'][0]
+
+
+def test_a_carried_app_must_be_the_pinned_zip(monkeypatch, tmp_path):
+    good = app_zip({'.demo/q2app': '', '.demo/q2-demo': b'ELF', '.demo/run': LAUNCHER})
+    with pytest.raises(ValueError, match='Missing .*demo.zip'):
+        monkeypatch.setitem(build.BUNDLED_APPS, 'demo', ('q2-v1', 'demo.zip', 1, '0' * 64))
+        build.bundled_app('demo', tmp_path)
+    pinned(monkeypatch, tmp_path, good)
+    (tmp_path/'demo.zip').write_bytes(good[:-1] + b'x')  # same size, other bytes
+    with pytest.raises(ValueError, match='is not the pinned demo q2-v1.2'):
+        build.bundled_app('demo', tmp_path)
+
+
+@pytest.mark.parametrize('files', [{'.demo/q2app': '', '.demo/run': LAUNCHER},  # no binary
+                                   {'.demo/q2app': '', '.demo/q2-demo': b'', '.demo/run': LAUNCHER, '.demo/sub/x': ''}])
+def test_a_carried_apps_zip_holds_its_app_and_nothing_nested(monkeypatch, tmp_path, files):
+    pinned(monkeypatch, tmp_path, app_zip(files))
+    with pytest.raises(ValueError, match='Unexpected files in demo.zip'):
+        build.bundled_app('demo', tmp_path)
+
+
+def test_every_carried_apps_paths_fit_addon_cs_slots():
+    for app_id, (version, name, size, digest) in build.BUNDLED_APPS.items():
+        assert len(f'/{build.BUNDLED_DIR}/{app_id}/q2-{app_id}') < 48 and len(f'/bin/sh /{build.BUNDLED_DIR}/{app_id}/run') < 48
+        assert len(f'file:///{build.BUNDLED_DIR}/{app_id}/icon-40.png') < 56 and len(version) < 24
+        assert re.fullmatch(r'[a-z0-9-]{1,15}', app_id) and size > 0 and re.fullmatch('[0-9a-f]{64}', digest)

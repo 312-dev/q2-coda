@@ -155,11 +155,10 @@ static void sc_text(int i) {
     char s[40];
     if (i < 2)
         tk_snprintf(s, sizeof s, "%s Cache: %s", i ? "Spotify" : "Tidal", sizes[stream_cache(i)]);
-    widget_set_text_utf8(widget_get_child(st.sc_row[i], 0),
-                         i < 2            ? s
-                         : shelf_erase(0) ? "Erasing…"
-                         : st.sc_armed    ? "Press again to erase the login and cache"
-                                          : "Erase Spotify Data");
+    widget_set_text_utf8(widget_get_child(st.sc_row[i], 0), i < 2 ? s
+                                                            : shelf_erase(0)
+                                                                ? "Erasing…"
+                                                                : "Erase Spotify Data");
 }
 
 /* netupdate.c's erase ended: .cache-size went with it, so Spotify's row reads 2 GB again. */
@@ -219,19 +218,34 @@ static int svc_toggle(int i) {
     return 0;
 }
 
+/* Erase Spotify Data's card (docs/oled-design.md#confirmation-card): Erase (row 1) starts it. */
+static void sc_erase_answer(void *ctx, int row, int toggle_on) {
+    if (row == 1) shelf_erase(1);
+    if (st.sc_page) sc_text(2);
+}
 /* A cache row steps to the next size and saves it: Tidal's applies at the next download's trim,
- * Spotify's when librespot next starts. Erase Spotify Data wants a second press in a row, as the
- * App Store's Remove: any other row's press or leaving the page drops the first. Stop Streaming
+ * Spotify's when librespot next starts. Erase Spotify Data asks first on the confirmation card
+ * (one running says to wait: shelf_erase's toast). Stop Streaming
  * Services ends librespot and its restart loop, a radio station, the card apps (addon.c) and a
  * stock stream (Tidal's) queue, so the keys and the output are local music's again; local music
  * already stopped is left as it is. */
 static int sc_click(void *ctx, void *event) {
     int i = (int)(long)ctx;
-    st.sc_armed = i == 2 && !st.sc_armed && !shelf_erase(0); /* erasing: says to wait */
-    if (i == 2 && !st.sc_armed) shelf_erase(1);
-    sc_text(2);
     if (i > 4) return svc_toggle(i - 5);
-    if (i == 2) return 0;
+    if (i == 2) {
+        static const char *const rows[] = { "Cancel", "Erase" };
+        if (shelf_erase(0))
+            shelf_erase(1); /* erasing already: says to wait */
+        else
+            confirm(&(confirm_t){ .title = "Erase Spotify Data?",
+                                  .body = "Its login, cache and logs go;\nsign in again to use it.",
+                                  .rows = rows,
+                                  .n_rows = 2,
+                                  .kind = CONFIRM_DESTRUCTIVE,
+                                  .back = -1,
+                                  .answer = sc_erase_answer });
+        return 0;
+    }
     if (i == 3) {
         unsigned type = (unsigned)MCL(MCL_TYPE);
         spot_stop();
@@ -417,7 +431,7 @@ void ringnav_folder_top(void) {
 
 /* A folder level's list, stock's table on the open page, pushes in as a page_list level does. */
 static void folder_push(int dir) {
-    if (!theme()->motion[MOTION_INPLACE].ms) return;
+    if (!motion_row(MOTION_INPLACE)->ms) return;
     void *table =
         widget_lookup(window_manager_get_top_window(window_manager()), "tableview_folder", 1);
     if (table) page_push(widget_get_child(table, 0), dir);
@@ -454,7 +468,7 @@ int ringnav_folder_click(void *ctx, void *event) {
 
 /* usbmode_page_init, as a cable to a computer opens USB mode, before stock unmounts the card for
  * USB storage: the card apps, which write to it (downloads, uploads), end first, so nothing of
- * theirs keeps it busy (they run from /tmp: addon.c), as do Download Album Lyrics' job, playlist
+ * theirs keeps it busy (they run from /tmp: addon.c), as do Get Album Lyrics' job, playlist
  * art's worker and the song durations' (durations.c). */
 int ringnav_usbmode(void *a, void *b, void *c, void *d) {
     addon_card_away();
@@ -482,10 +496,28 @@ int ringnav_start_player(void) {
  * list_item of wrapped text, the eighth child, dropped here: stock builds it and never reads it
  * again), each row a s_listitem_black list_item holding a 335x70 s_btn_listitem button, a 166px
  * s_scrlabel_white24l title at x 10 and a 149px s_scrlabel_white20r value at x 176, both focus-only
- * scrolling with ellipses. FW. Version (row 1) reads demo's version literal, which carries the
- * updater tag (tools/build.py TAG), so it shows the stock firmware's again; a CFW. Version row in
- * the same widgets follows it. Its button has no name, so stock's row click (atoi of the name,
- * 0x4c12f8) ignores it. A --dev build adds Save Diagnostics above them (diagnostics.c). */
+ * scrolling with ellipses. Firmware (row 1, stock's FW. Version, tools/build.py LABELS) reads
+ * demo's version literal, which carries the updater tag (tools/build.py TAG), so it shows the stock
+ * firmware's again; a row named PRODUCT_NAME, this build's version, in the same widgets follows it.
+ * Its button has no name, so stock's row click (atoi of the name, 0x4c12f8) ignores it. A --dev
+ * build adds Save Diagnostics above them (diagnostics.c). */
+/* A row's value in the approved words (audit-2 #31): stock's sizes "779.72G" with their unit,
+ * "779.72 GB", and the IP address of no network, "0.0.0.0", as "Not connected". */
+static void about_words(void *item) {
+    void *b = widget_count_children(item) ? widget_get_child(item, 0) : (void *)0;
+    void *val = b && widget_count_children(b) > 1 ? widget_get_child(b, 1) : (void *)0;
+    char t[48];
+    if (!val || tk_strcmp(widget_get_type(val), "hscroll_label")) return;
+    *t = 0;
+    widget_get_text_utf8(val, t, sizeof t - 2);
+    unsigned n = strlen(t);
+    if (n > 1 && (t[n - 1] == 'G' || t[n - 1] == 'M') && t[n - 2] >= '0' && t[n - 2] <= '9') {
+        t[n + 1] = 'B', t[n + 2] = 0, t[n] = t[n - 1], t[n - 1] = ' ';
+        widget_set_text_utf8(val, t);
+    } else if (!tk_strcmp(t, "0.0.0.0")) {
+        widget_set_text_utf8(val, "Not connected");
+    }
+}
 static void about_label(void *button, int x, int w, const char *style, const char *text) {
     void *label = hscroll_label_create(button, x, 0, w, 70);
     widget_use_style(label, style);
@@ -503,9 +535,16 @@ int ringnav_about(void *win, void *ctx) {
         widget_set_text_utf8(widget_get_child(widget_get_child(widget_get_child(view, 1), 0), 1),
                              STOCK_VERSION);
         void *button = list_button(view);
-        about_label(button, 10, 166, "s_scrlabel_white24l", "CFW. Version");
-        about_label(button, 176, 149, "s_scrlabel_white20r", Q2POD_VERSION);
+        char v[sizeof Q2POD_VERSION];
+        const char *pod = strstr(Q2POD_VERSION, " Muse");
+        tk_snprintf(v, sizeof v, "%s", Q2POD_VERSION);
+        if (pod) /* "1.8.2" then its " dev ..." or " beta 2": the row's name is the product's */
+            tk_snprintf(v + (pod - Q2POD_VERSION), sizeof v - (pod - Q2POD_VERSION), "%s", pod + sizeof " Muse" - 1);
+        about_label(button, 10, 166, "s_scrlabel_white24l", PRODUCT_NAME);
+        about_label(button, 176, 149, "s_scrlabel_white20r", v);
         widget_restack(P(button, W_PARENT), 2);
+        for (unsigned i = 0, n = widget_count_children(view); i < n; ++i)
+            about_words(widget_get_child(view, i));
         diag_about_row(view);
     }
     return result;

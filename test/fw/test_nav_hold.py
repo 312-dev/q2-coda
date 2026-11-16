@@ -391,14 +391,18 @@ class Ui:
                 return found
         return None
 
+    def items(self, view):
+        """View's rows: its kids but a menu sheet's header space (menu_modal.c MM_HEAD)."""
+        return [k for k in self.kids(view) if self.nodes[k].name != '_mm_head']
+
     def rows(self, view):
-        return [self.label(item) for item in self.kids(view)]
+        return [self.label(item) for item in self.items(view)]
 
     def find(self, w, text):
         """The row of view w whose caption is text."""
         rows = self.rows(w)
         assert text in rows, rows
-        return self.kids(w)[rows.index(text)]
+        return self.items(w)[rows.index(text)]
 
     def press(self, key=KEY_PLAY, at=0x1234567890):
         """Stock's input device status: key held, pressed at at (the Play hold's latch reads it)."""
@@ -674,19 +678,23 @@ def test_a_song_changed_under_the_editor_is_not_moved(editor, ui):
     assert ui.toasts == ['Could not save playlist'] and editor.table.log[-1] == 'rollback'
 
 
-def test_remove_asks_then_takes_the_song_out(editor, ui):
+def ple_answer(fw, row):
+    """Remove from Playlist's confirmation card answered (feedback.c runs it once the card has closed)."""
+    fw.fn('playlists__ple_remove_answer', None, C.c_void_p, C.c_int, C.c_int)(None, row, 0)
+
+
+def test_remove_asks_on_the_card_then_takes_the_song_out(editor, ui):
     editor.pick('Two')
     editor.pick('Remove from Playlist')
-    assert editor.rows() == ['Remove from Playlist', 'Cancel'] and editor.title() == 'Remove song?: Road Trip'
-    assert ui.nodes[editor.view()].props['_ringnav_index'] == 1  # opens on Cancel: a Centre on arrival removes nothing
-    editor.pick('Remove from Playlist')
+    assert ui.went[-1] == 'dialog/sortselect_dialog' and editor.table.songs(3) == ['One', 'Two', 'Three']
+    ple_answer(editor.fw, 1)  # Remove
     assert editor.table.songs(3) == ['One', 'Three'] and editor.rows() == ['Add Songs', 'Done', 'One', 'Three']
 
 
 def test_cancel_keeps_the_song(editor):
     editor.pick('Two')
     editor.pick('Remove from Playlist')
-    editor.pick('Cancel')
+    ple_answer(editor.fw, 0)
     assert editor.table.songs(3) == ['One', 'Two', 'Three'] and editor.rows()[0] == 'Add Songs' and not editor.table.log
 
 
@@ -696,7 +704,7 @@ def test_the_last_song_removed_leaves_the_selection_on_the_list(fw, ui, recs, st
     e.open(1, None)
     e.pick('One')
     e.pick('Remove from Playlist')
-    e.pick('Remove from Playlist')
+    ple_answer(fw, 1)
     assert e.rows() == ['Add Songs', 'Done'] and e.ple.selected == 0
 
 
@@ -704,7 +712,7 @@ def test_a_remove_that_cant_be_saved_says_so(editor, ui):
     editor.table.fail = ('delete',)
     editor.pick('One')
     editor.pick('Remove from Playlist')
-    editor.pick('Remove from Playlist')
+    ple_answer(editor.fw, 1)
     assert ui.toasts == ['Could not save playlist'] and editor.table.songs(3) == ['One', 'Two', 'Three']
 
 
@@ -1077,17 +1085,19 @@ def test_the_picker_offers_new_playlist_and_no_dots(rows_page, ui):
 
 
 def test_no_playlists_is_the_empty_state_under_the_rows_left(rows_page, ui, fw, recs):
-    """docs/oled-design.md#empty-and-offline: no playlists, the empty state under the rows still shown, centred in
-    what is left, with no row of its own (New Playlist is a song's hold menu's); one playlist made, it goes. The
-    picker keeps its rows alone: no room under them."""
+    """docs/oled-design.md#empty-and-offline: no playlists, the empty state under the rows still shown, in its
+    compact form (rows sit above it: no glyph, the title and hint alone, 44 px) centred in what is left, with no row of
+    its own (New Playlist is a song's hold menu's); one playlist made, it goes. The picker keeps its rows alone: no
+    room under them."""
     p = rows_page(counts=())
     p.ring(p.win)
     art = ui.lookup(p.win, '_empty_state', 0)
     assert art and ui.nodes[art].visible
     props = ui.nodes[art].props
-    assert (props['_es_glyph'], props['_es_title'], props['_es_hint']) == ('playlist', 'No Playlists', 'Make one with New Playlist')
+    assert p.shown()  # On-The-Go's row above it
+    assert (props['_es_glyph'], props['_es_title'], props['_es_hint']) == ('', 'No Playlists', 'Make one with New Playlist')
     free = 58 + 44 * len(p.shown())  # the status row's foot (V_BAR) and the rows shown, 44 px each
-    assert free + 120 <= 320 and props['_es_top'] == free + (320 - free - 120) // 2
+    assert props['_es_top'] == free + (320 - free - 44) // 2  # the title's 24 px band and the hint's 20, no button
     fw.var('fw_ctx_p_deque_playlist', C.c_uint).value = p.deques.new([recs(name='Gym', title='Gym', disc=1, id_=1)])
     fw.fn('playlists__pl_rows', None, C.c_void_p)(p.win)  # the rows again, as a rebuild or a click has them
     assert not ui.nodes[art].visible
@@ -1823,18 +1833,39 @@ def test_oled_more_shows_ab_repeat_as_the_themes_switch(fw, ui, st, image, selec
     sw = ui.child(button, 'image', 300, 10, 50, 50)
     ui.nodes[sw].image = image
     fw.fn('modal_more', None, C.c_void_p)(win)
-    inset = THEMES[0]['sel_inset']
-    right = 259 + (inset - 8) - 16  # the row's right column, in the row
+    right = 375 - 28  # the house grid's right column (OLED's right_x), the row the screen's width
     x, _, w, _ = ui.nodes[label].rect()
-    assert not ui.nodes[sw].visible and x + w <= right - 34
+    assert not ui.nodes[sw].visible and x + w <= right - 40
     assert ui.fn('switch_flipped') in ui.handlers(button, EVT_CLICK)  # stock flips the hidden image: the row repaints
     lcd = C.create_string_buffer(0x400)
     canvas = C.create_string_buffer(0x400)
     struct.pack_into('<Q', canvas, O['CANVAS_LCD'], C.addressof(lcd))
     fw.mock('canvas_get_vgcanvas', lambda *_: 1)
     paint = fw.fn('modal_row_paint', None, C.c_void_p, C.c_void_p, C.c_void_p, Rect, C.c_int)
-    paint(view, C.addressof(canvas), button, Rect(0, 0, 259 + 2 * (inset - 8), 32), selected)
+    paint(view, C.addressof(canvas), button, Rect(0, 0, 375, 32), selected)
     assert len(fw.calls('vgcanvas_stroke')) == strokes and len(fw.calls('vgcanvas_fill')) == fills
+
+
+def test_oled_more_speed_rows_hidden_buttons_take_no_taps(fw, ui, st):
+    """Now Playing's More under a modal set: Speed's four stock buttons hide, and stock's hit test skips only an
+    insensitive widget, hidden or not, so a tap on the row's left half set 1x behind the picker it opened. Each is
+    made insensitive; a pick still clicks the one it names (more_speed_pick dispatches to it)."""
+    use_set(st, 'oled')
+    win = ui.window('playermore_page', 'dialog')
+    lv = ui.child(win, 'list_view', 0, 44, 375, 270)
+    ui.nodes[lv].name = 'list_view_more'
+    view = ui.child(lv, 'scroll_view', 0, 0, 375, 270)
+    ui.nodes[view].name = 'scroll_view_more'
+    button = ui.child(ui.child(view, 'list_item', 0, 0, 375, 70), 'button', 0, 0, 375, 70)
+    label = ui.child(button, 'hscroll_label', 72, 12, 40, 20)
+    ui.nodes[label].text = 'Multiple Speed'
+    speeds = []
+    for i, x in enumerate((120, 177, 231, 283)):  # as stock places them (test/patch.py's More)
+        speeds.append(ui.child(button, 'image', x, 9, 42, 61))
+        ui.nodes[speeds[-1]].name = f'img_forward_{i}'
+    fw.fn('modal_more', None, C.c_void_p)(win)
+    insensitive = {a[0] for _, a in fw.calls('widget_set_sensitive') if not C.c_int(a[1]).value}
+    assert all(not ui.nodes[s].visible for s in speeds) and set(speeds) <= insensitive
 
 
 def advanced(fw, kind, value):
@@ -1900,7 +1931,6 @@ def ticked_rows(ui, view):
 @pytest.mark.parametrize('caption, title, rows, ticked', [
     ('Shuffle', 'Shuffle', SHUFFLE, 'Off'),
     ('Repeat', 'Repeat', REPEAT, 'Play All'),
-    ('Group by', 'Group by', ['Album', 'Folder'], 'Album'),
 ])
 def test_a_play_mode_row_opens_its_choices_on_the_current_one(hold, recs, ui, caption, title, rows, ticked):
     hold.now_playing([song(recs, i) for i in range(3)])
@@ -1909,6 +1939,26 @@ def test_a_play_mode_row_opens_its_choices_on_the_current_one(hold, recs, ui, ca
     hold.pick(caption)
     assert hold.title() == title and ui.rows(hold.view()) == rows
     assert ticked_rows(ui, hold.view()) == [ticked] and ui.nodes[hold.view()].props['_ringnav_index'] == rows.index(ticked)
+
+
+def test_settings_show_their_value_alone_and_group_by_flips_in_place(hold, recs, ui, fw):
+    """The sheet's setting rows say their value without the label's word (audit2 L3): Shuffle Off, Repeat Off (stock's
+    Play All), Group by Album. Group by, two choices, flips on Centre with the sheet left open, and the other rows'
+    values follow it (Shuffle's and Repeat's name the group)."""
+    hold.now_playing([song(recs, i) for i in range(3)])
+    hold.hold()
+    hold.menu()
+    advanced(fw, 1, REPEAT.index('Repeat Album'))
+
+    def values():
+        return {ui.label(r): ui.nodes[r].props.get('_mm_value') for r in ui.items(hold.view())
+                if ui.label(r) in ('Shuffle', 'Repeat', 'Group by')}
+    hold.pick('Group by')
+    assert hold.dialog in ui.stack and fw.fn('playback_option', C.c_int, C.c_int)(2) == 1
+    assert values() == {'Shuffle': 'Off', 'Repeat': 'Folder', 'Group by': 'Folder'}
+    hold.pick('Group by')
+    assert fw.fn('playback_option', C.c_int, C.c_int)(2) == 0
+    assert values() == {'Shuffle': 'Off', 'Repeat': 'Album', 'Group by': 'Album'}
 
 
 def test_a_choice_picked_is_played_and_ticked_next_time(hold, recs, ui, fw):
@@ -1925,19 +1975,22 @@ def test_a_choice_picked_is_played_and_ticked_next_time(hold, recs, ui, fw):
     assert ticked_rows(ui, hold.view()) == ['Repeat All']
 
 
-def test_oled_draws_the_menu_as_the_inset_modal(fw, ui, st, recs, mcl):
-    """A modal set's hold menu (menu_modal.c): no title bar, its rows the panel's (259 px from x 58, 8 px padding, so
-    the rows' boxes reach the selection inset past it), 32 px each from y 66, six in view; the settings read as
-    settings, US English, and the menu opens on its first row."""
+def test_oled_draws_the_menu_as_the_sheet(fw, ui, st, recs, mcl):
+    """A modal set's hold menu (menu_modal.c): no title bar, a sheet whose list runs from y 50 to the screen's foot
+    (280 px lower until its first paint starts the rise), the header's 72 px heading its rows, which span the screen
+    32 px each, so the first is on the house grid at y 122; the settings read as settings, US English, and the menu
+    opens on its first row."""
     use_set(st, 'oled')
     hold = Hold(fw, ui, st, recs, mcl).now_playing([song(recs, i) for i in range(3)])
     hold.hold()
     rows = hold.menu()
-    inset = THEMES[0]['sel_inset']
     lv = ui.lookup(hold.dialog, 'list_view', 1)
-    assert tuple(ui.nodes[lv].rect()) == (58 + 8 - inset, 66, 259 + 2 * (inset - 8), 6 * 32)
+    assert tuple(ui.nodes[lv].rect()) == (0, 50 + 280, 375, 270)  # below the screen until its first paint's rise
     assert not ui.nodes[ui.lookup(hold.dialog, 'view_navbar', 1)].visible
-    assert all(tuple(ui.nodes[item].rect()[2:]) == (259 + 2 * (inset - 8), 32) for item in ui.kids(hold.view()))
+    head = ui.kids(hold.view())[0]
+    assert ui.nodes[head].name == '_mm_head' and tuple(ui.nodes[head].rect()) == (0, 0, 375, 72)
+    assert ui.nodes[ui.items(hold.view())[0]].rect()[1] == 72
+    assert all(tuple(ui.nodes[item].rect()[2:]) == (375, 32) for item in ui.items(hold.view()))
     assert rows[:4] == ['Play Next', 'Play Last', 'View Queue', 'Add to Favorites'] and 'Group by' in rows
     assert ui.prop(hold.view(), '_ringnav_index', -1) == 0
 

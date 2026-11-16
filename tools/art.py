@@ -304,7 +304,7 @@ STREAM_PX = 20
 STREAM_MARKS = {'spotify': 'spotify-logo', 'app': 'app-window', 'radio': 'radio', 'airplay': 'airplay', 'config': 'sliders-horizontal',
                 'subsonic': 'q2coda/subsonic'}
 TIDAL = ''.join(f'M{x - 3.3} {y}L{x} {y - 3.3}L{x + 3.3} {y}L{x} {y + 3.3}Z' for x, y in ((3.4, 6.7), (10, 6.7), (16.6, 6.7), (10, 13.3)))
-# The inset modal's symbols (menu_modal.c, a set with modal): regular weight at MENU_ICON_PX in FOLDER_INKS, and the
+# The menu sheet's symbols (menu_modal.c, a set with modal): regular weight at MENU_ICON_PX in FOLDER_INKS, and the
 # picker's check in the accent off the bar
 MENU_ICON_PX = 19
 MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart-break', 'list-plus', 'shuffle',
@@ -345,22 +345,23 @@ CC_ICONS = {'wifi': ('wifi-high-fill', 22, 0xffffff), 'bluetooth': ('bluetooth-f
             'guest': ('device-mobile-fill', 22, 0xffffff),
             'play': ('play-fill', 30, 0xffffff)}
 
-# A card app's sign-in steps on its QR page (addon.c qr_paint, the state file's step): fill, white on the step's solid
-# circle (the done check bold), at the mode page's glyph size.
-SIGNIN_PX = 44
-SIGNIN_STEPS = {'phone': 'device-mobile-fill', 'check': 'arrows-clockwise-fill', 'done': 'check-bold',
-                'fail': 'cloud-slash-fill', 'error': 'x-bold'}
-# The USB pages (usb_ui.c): the chooser's row symbols (regular, Text Secondary per half, white on the selection),
-# a mode page's glyph (fill, white on its solid circle; the eject's check bold) and the USB toasts' glyphs (fill, 15 px
-# beside the toast's words, each in its colour: plug in Text Secondary, the check in Positive green, the speaker white).
+# Every mode page's glyph by role (feedback.c mode_page_paint, docs/oled-design.md#usb): fill, white on its solid
+# circle, MODE_GLYPH_PX: a card app's sign-in steps (addon.c qr_paint: phone, check, done, fail, error), USB's modes
+# (usb_ui.c: files, audio, debug; ejected is done), Bluetooth's receiver (bt_recv.c: receive) and SD Card Update's
+# results (sw_update.c: done for up to date, none, low, bad, restart). Each glyph is drawn once; the bold check is
+# done for all three that show it.
+MODE_GLYPH_PX = 44
+MODE_GLYPHS = {'phone': 'device-mobile-fill', 'check': 'arrows-clockwise-fill', 'done': 'check-bold',
+               'fail': 'cloud-slash-fill', 'error': 'x-bold', 'files': 'folder-simple-fill', 'audio': 'speaker-hifi-fill',
+               'debug': 'terminal-window-fill', 'receive': 'bluetooth-fill', 'none': 'file-arrow-down-fill',
+               'low': 'battery-warning-fill', 'bad': 'warning-fill', 'restart': 'arrow-clockwise-bold'}
+# The USB pages (usb_ui.c): the chooser's row symbols (regular, Text Secondary per half, white on the selection) and
+# the USB toasts' glyphs (fill, 15 px beside the toast's words, each in its colour: plug in Text Secondary, the check
+# in Positive green, the speaker white).
 USB_ROW_PX = 19
 USB_ROWS = {'charge': 'lightning', 'files': 'folder-simple', 'audio': 'speaker-hifi', 'debug': 'terminal-window'}
-USB_MODE_PX = 44
-USB_MODES = {'files': 'folder-simple-fill', 'audio': 'speaker-hifi-fill', 'debug': 'terminal-window-fill', 'ejected': 'check-bold'}
 USB_TOAST_PX = 15
 PAIR_GLYPH_PX = 28  # the pairing card's phone, over its title (pair_prompt.c, feedback.c CARD_GLYPH)
-# The Bluetooth receiver's mode page (bt_recv.c): its glyph, fill, white on the solid accent circle at the mode page's size.
-BT_MODES = {'receive': 'bluetooth-fill'}
 # Settings > Bluetooth (bt_ui.c, docs/oled-design.md#bluetooth): a device row's kind at the row symbols' size (regular,
 # Text Secondary per half, white on the selection), the scan's spinner beside Other Devices in Text Tertiary per half,
 # and the connection toasts' glyphs (fill, 15 px, white, a drop's in Text Secondary; the low headset battery's in the
@@ -372,25 +373,25 @@ BT_TOASTS = {'headphones': ('headphones-fill', 0xffffff), 'car': ('car-profile-f
              'speaker': ('speaker-hifi-fill', 0xffffff), 'phone': ('device-mobile-fill', 0xffffff),
              'bt': ('bluetooth-fill', 0xffffff), 'low': ('battery-warning-fill', 0xff453a),
              'warn': ('warning-fill', 0xff9f0a), 'no': ('prohibit-fill', 0xababab)}  # Guest Play's (guest_ui.c)
-# The software update's pages (sw_update.c, docs/oled-design.md Software Update): each result's glyph (fill, white on
-# its solid circle; the up-to-date check and the restart's arrow bold) at the mode page's size, and the check's
-# spinner, iOS's twelve spokes in the half's Text Primary (_d white, _l black) on no circle, 48 px across.
-SW_MODES = {'latest': 'check-bold', 'none': 'file-arrow-down-fill', 'low': 'battery-warning-fill', 'bad': 'warning-fill',
-            'restart': 'arrow-clockwise-bold'}
+# The software update's check (sw_update.c, docs/oled-design.md Software Update): iOS's twelve-spoke spinner in the
+# half's Text Primary (_d white, _l black) on no circle, 48 px across (its results' glyphs are MODE_GLYPHS).
 SW_SPIN_SPOKES = 12
 SW_SPIN_PX = 48
 SW_SPIN_R = (13.2, 22)  # round capped: the outer cap reaches 24, the mock-up's radius
 SW_SPIN_STROKE = 4
 SW_SPIN_FADE = 0.75 / 11  # the spoke behind the head's head a quarter as bright
 HOLD_BACK_PX = 20  # search_strip.c's Return-held card: Phosphor arrow-u-up-left, bold, white
-# The empty state (feedback.c empty_state): its glyph on the middle of its stacked tiles, fill, white at 92 %, by the
-# glyph a page names (empty_t.glyph; docs/oled-design.md#empty-and-offline has the pages). Phosphor has no sd-card: the
-# card's is its memory chip, as the mock-up's fallback (mock_placeholders.py FALLBACK).
-EMPTY_PX = 28
-EMPTY_GLYPHS = {g: f'{g}-fill' for g in (
+# The empty state (feedback.c empty_state): its glyph in outline, Phosphor's regular weight at EMPTY_PX, in Text
+# Secondary per half (_d, _l), by the glyph a page names (empty_t.glyph; docs/oled-design.md#empty-and-offline has the
+# pages; the user's outline style, 2026-11-16). Phosphor has no sd-card: the card's is its memory chip, as the
+# mock-up's fallback (mock_placeholders.py FALLBACK). Nor a heart-slash: Favorites' is q2-coda's own, traced from the
+# approved mock-up (assets/icons/q2coda/heart-slash.svg).
+EMPTY_PX = 60
+EMPTY_GLYPHS = {g: g for g in (
     'cards', 'music-notes', 'vinyl-record', 'microphone-stage', 'music-notes-simple', 'guitar', 'folder', 'playlist',
-    'heart', 'clock-counter-clockwise', 'chart-bar', 'sparkle', 'timer', 'calendar-blank', 'star', 'magnifying-glass',
-    'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile')} | {'sd-card': 'memory-fill'}
+    'clock-counter-clockwise', 'chart-bar', 'sparkle', 'timer', 'calendar-blank', 'star', 'magnifying-glass',
+    'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile')} | {'sd-card': 'memory',
+    'heart-slash': 'q2coda/heart-slash'}
 USB_TOASTS = {'unplugged': ('plug-fill', token('secondary')), 'ejected': ('check-circle-fill', token('positive')), 'audio': ('speaker-hifi-fill', 0xffffff)}
 # The status row's battery (list_marks.c battery_slim): charging, Phosphor's lightning, too weak a charger its warning,
 # fill weight at BATT_GLYPH_PX in Text Primary, with a BATT_GLYPH_GAP px gap in the Canvas cut round it (iOS's way of
@@ -619,7 +620,7 @@ def images(t):
         for name, glyph in (('wifi_3', 'wifi-high'), ('wifi_2', 'wifi-medium'), ('wifi_1', 'wifi-low'), ('lock', 'lock-simple'),
                             ('trash', 'trash')):
             out |= {f'{prefix}_{name}_{k}': phosphor(glyph, ROW_ICON_PX, c, ROW_INK) for k, c in STATE_INKS.items()}
-    if any(g.modal for g in t['geoms'].values()):  # the inset modal's symbols (menu_modal.c)
+    if any(g.modal for g in t['geoms'].values()):  # the menu sheet's symbols (menu_modal.c)
         out |= {f'{prefix}_menu_{n}_{k}': phosphor(n, MENU_ICON_PX, c) for n in MENU_ICONS for k, c in FOLDER_INKS.items()}
         out[f'{prefix}_menu_check_a'] = phosphor('check', MENU_ICON_PX, on)
         # an artist's Shuffle and Radio panels and an album's Play (artist_page.c pair_paint): the accent's top tone at rest, white lit
@@ -652,10 +653,9 @@ def images(t):
     out |= {f'{prefix}_mark_{n}_{k}': phosphor(glyph, MARK_PX, c) for n, glyph in MARKS.items() for k, c in MARK_INKS.items()}
     out |= {f'{prefix}_store_pick_{k}': phosphor('arrow-circle-down', MARK_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
     out |= {f'{prefix}_store_auto_{k}': phosphor('arrows-clockwise', MARK_PX, c) for k, c in FOLDER_INKS.items()}
-    out |= {f'{prefix}_signin_{n}': phosphor(g, SIGNIN_PX, 0xffffff) for n, g in SIGNIN_STEPS.items()}
+    out |= {f'{prefix}_modepage_{n}': phosphor(g, MODE_GLYPH_PX, 0xffffff) for n, g in MODE_GLYPHS.items()}
     out |= {f'{prefix}_cc_{n}': phosphor(g, px, c) for n, (g, px, c) in CC_ICONS.items()}
     out |= {f'{prefix}_usb_{n}_{k}': phosphor(g, USB_ROW_PX, c) for n, g in USB_ROWS.items() for k, c in FOLDER_INKS.items()}
-    out |= {f'{prefix}_usbmode_{n}': phosphor(g, USB_MODE_PX, 0xffffff) for n, g in USB_MODES.items()}
     out |= {f'{prefix}_usbtoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in USB_TOASTS.items()}
     out |= {f'{prefix}_btdev_{n}_{k}': phosphor(g, ROW_ICON_PX, c, ROW_INK) for n, g in BT_ROW_GLYPHS.items() for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_btspin_{k}_{f}': spinner(f, SPIN_SPOKES, CARET_PX, SPIN_R, SPIN_STROKE, SPIN_FADE, c)
@@ -668,13 +668,12 @@ def images(t):
     out[f'{prefix}_pairing_phone'] = phosphor('device-mobile', PAIR_GLYPH_PX, on)  # pair_prompt.c's card
     out[f'{prefix}_status_guest'] = phosphor('device-mobile-fill', STATUS_PX, on, STATUS_INK)
     out |= {f'{prefix}_status_relay_{k}': phosphor('caret-right-bold', 8, c) for k, c in STATUS_SECONDARY.items()}
-    out |= {f'{prefix}_btmode_{n}': phosphor(g, USB_MODE_PX, 0xffffff) for n, g in BT_MODES.items()}
     out |= {f'{prefix}_batt{n}_{k}': inset_glyph(g, *inks) for n, g in BATT_GLYPHS.items() for k, inks in BATT_GLYPH_INKS.items()}
     out |= {f'{prefix}_chargetoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in CHARGE_TOASTS.items()}
     out |= {f'{prefix}_chargetoast_battery_{k}': phosphor('battery-high-fill', USB_TOAST_PX, c) for k, c in CHARGE_TOAST_BATTERY.items()}
     out[f'{prefix}_chargebolt'] = phosphor('lightning-fill', CHARGE_BOLT_PX, token('positive'))
-    out |= {f'{prefix}_swmode_{n}': phosphor(g, USB_MODE_PX, 0xffffff) for n, g in SW_MODES.items()}
     out |= {f'{prefix}_swspin_{k}_{f}': spinner(f, SW_SPIN_SPOKES, SW_SPIN_PX, SW_SPIN_R, SW_SPIN_STROKE, SW_SPIN_FADE, c)
             for k, c in STATE_INKS.items() for f in range(SW_SPIN_SPOKES)}
-    out |= {f'{prefix}_empty_{n}': phosphor(g, EMPTY_PX, 0xebebeb) for n, g in EMPTY_GLYPHS.items()}
+    out |= {f'{prefix}_empty_{n}_{k}': phosphor(g, EMPTY_PX, c) for n, g in EMPTY_GLYPHS.items()
+            for k, c in inks('secondary', 'd', 'l').items()}
     return out

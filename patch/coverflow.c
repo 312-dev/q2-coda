@@ -2494,7 +2494,7 @@ static int album_offline(unsigned c) {
     return r && catalogue_album_unavailable(r);
 }
 /* The captions of an album that can't play now are greyed, as a Library row is
- * (docs/server-library.md#greyed-rows), the name narrowed CF_MARK_W a side, centred still, for
+ * (docs/server-library.md#grayed-rows), the name narrowed CF_MARK_W a side, centred still, for
  * the offline mark at its right (caption_mark); its own width again once it can. */
 #define CF_MARK_W 28
 static void caption_offline(int off) {
@@ -4119,6 +4119,9 @@ void coverflow_home_art(void *top) {
     if (cover) image_manager_unload_bitmap_by_name(image_manager(), cover);
     int moves = cover ? slide_show(cover, 0, cut) : -1;
     if (moves < 0 && r) moves = slide_show(url, 0, cut), src = url;
+    /* no cover: the placeholder as the pane's slide, so it runs up under the status row as a cover
+     * does (coverflow_home_bar) */
+    if (moves < 0) moves = slide_show(HOME_PLACEHOLDER, 0, cut), src = HOME_PLACEHOLDER;
     if (moves > 0) return;
     slides_drop();
     int shown = moves == 0 && image_show(home.art, src, size);
@@ -4287,7 +4290,8 @@ static int bar_rows(void *canvas, int *r) {
 }
 
 /* Whether top is Home in Split, its art beside the list (1), and 2 when the art runs up under the
- * status row (a split_art_up and a cover that fills the pane), where the bar's glyphs are inked
+ * status row (a split_art_up and a slide that fills the pane: a cover, or the placeholder with
+ * none), where the bar's glyphs are inked
  * over it: navigation.c's clock_place puts the clock beside them. */
 int coverflow_home_split(void *top) {
     if (!home.art || top != home.win || !widget_get_visible(home.art)) return 0;
@@ -4614,12 +4618,12 @@ static int push_x(void *w, int dx, const motion_t *m) {
  * 0, when the theme keeps levels still (push_x touches nothing), or when no animator could be made:
  * the list is at x 0. */
 int page_push(void *view, int dir) {
-    if (!theme()->motion[MOTION_INPLACE].ms) return 0;
+    if (!motion_row(MOTION_INPLACE)->ms) return 0;
     void *w = view ? P(view, W_PARENT) : (void *)0;
     if (!w || !dir) return 0;
     /* A kept level (a folder's table) still sliding goes to its rest first. */
     if (I(w, W_X)) widget_move_resize(w, 0, I(w, W_Y), I(w, W_W), I(w, W_H));
-    return push_x(w, dir * I(w, W_W), &theme()->motion[MOTION_INPLACE]);
+    return push_x(w, dir * I(w, W_W), motion_row(MOTION_INPLACE));
 }
 
 /* Home's Settings row, as an iPod's submenu: the Settings list (stock's Playback and System
@@ -4630,7 +4634,7 @@ static void home_swap(void *from, void *to, int dx) {
     home_show(from, 0); /* only the shown list takes taps */
     /* A list still sliding goes to its rest first: push_x's goal, and where no push leaves it. */
     if (I(to, W_X)) widget_move_resize(to, 0, I(to, W_Y), I(to, W_W), I(to, W_H));
-    push_x(to, dx, &theme()->motion[MOTION_SWAP]);
+    push_x(to, dx, motion_row(MOTION_SWAP));
     home_show(to, 1);
     art_beside(to);
     bar_title_sync(home.win); /* the bar's text follows the list at once, not at its next second */
@@ -4703,7 +4707,7 @@ int coverflow_home_sub(void) { return home_open() != (void *)0; }
 /* The bar's title on Home (navigation.c bar_title_sync). */
 const char *coverflow_home_title(void) {
     void *open = home_open();
-    return !open                 ? "Q2 Pod"
+    return !open                 ? "Q2 Muse"
            : open == home.lib    ? "Library"
            : open == home.stream ? "Streaming"
                                  : "Settings";

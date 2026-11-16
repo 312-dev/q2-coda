@@ -27,7 +27,7 @@
  * name, which only the Wi-Fi page reads. */
 #include "navigation.h"
 
-extern int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x,
+extern int ui_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x,
                    int y, int w, int align);
 extern void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind); /* artist_page.c */
 extern void keylock_toggle(void), coda_rc_toggle(void);     /* navigation.c, coda_rc_shim.c */
@@ -219,11 +219,12 @@ static int cc_ring_wake(void *win) {
     return !was;
 }
 
-/* The blocks' offset from rest, in pixels down, CC_SPRING_MS from the landing (cc_springs). */
+/* The blocks' offset from rest, in pixels down, CC_SPRING_MS from the landing (cc_springs). A
+ * spring is MO_SPATIAL (ui_kit.h): under Reduce Motion the blocks land still. */
 static int cc_spring(void *win) {
     unsigned at = (unsigned)widget_get_prop_int(win, CC_LANDED, 0),
              t = (unsigned)time_now_ms() - (at - 1);
-    if (!at || t >= CC_SPRING_MS) return 0;
+    if (!at || t >= (unsigned)motion_ms(CC_SPRING_MS, MO_SPATIAL)) return 0;
     unsigned k = t / CC_SPRING_STEP, f = t % CC_SPRING_STEP;
     int q =
         (cc_springs[k] * (int)(CC_SPRING_STEP - f) + cc_springs[k + 1] * (int)f) / CC_SPRING_STEP;
@@ -281,7 +282,7 @@ void cc_paint(void *win, void *canvas) {
             guest_field("guest", guest, sizeof guest);
             guest_short(guest, who, sizeof who);
         }
-        ar_text(canvas, *who ? who : cc_labels[i], 1, CC_LABEL_PX, lit ? 0xffffff : RGB_SECONDARY,
+        ui_text(canvas, *who ? who : cc_labels[i], 1, CC_LABEL_PX, lit ? 0xffffff : RGB_SECONDARY,
                 0, r.x + r.w / 2, r.y + r.h + 9, i == CC_GUEST ? CC_GUEST_W : 120, 1);
     }
     /* Now Playing: the cover, the title and artist, and the transport */
@@ -302,10 +303,10 @@ void cc_paint(void *win, void *canvas) {
     } else
         fill_box(canvas, &art, RGBA(CC_OFF), CC_ART_R);
     int tx = art.x + CC_ART + 8, tw = np.x + np.w - 12 - tx;
-    ar_text(canvas, rec ? now_tag(rec, REC_TITLE) : "Not Playing", 1, 19, 0xffffff, 0, tx,
+    ui_text(canvas, rec ? now_tag(rec, REC_TITLE) : "Not Playing", 1, 19, 0xffffff, 0, tx,
             CC_Y0 + 28, tw, 2);
     if (rec)
-        ar_text(canvas, now_tag(rec, REC_ARTIST), 0, 16, RGB_SECONDARY, 0, tx, CC_Y0 + 48, tw, 2);
+        ui_text(canvas, now_tag(rec, REC_ARTIST), 0, 16, RGB_SECONDARY, 0, tx, CC_Y0 + 48, tw, 2);
     for (int i = CC_PREV; i <= CC_NEXT; ++i) {
         rect_t r = cc_box(i);
         cc_glyph(win, canvas, i, r.x + r.w / 2, r.y + r.h / 2, i == CC_PLAY ? 30 : CC_ICON);

@@ -24,6 +24,10 @@ static const char diag_script[] =
     " echo \"$g UDC=$(cat $g/UDC)\"; ls $g/functions; ls -l $g/configs/*/ | grep -- '->';"
     " for l in $g/functions/*/lun.*/file; do [ -f \"$l\" ] && echo \"$l: $(cat $l)\"; done; done;"
     " echo '== mounts'; grep -E 'configfs|functionfs|mmc' /proc/mounts;"
+    " echo '== battery (CW2015, used; AXP2101, unused)';"
+    " for b in /sys/devices/i2c-0/0-0062/cw2015_capacity /sys/devices/i2c-0/0-0062/cw2015_voltage"
+    " /sys/class/power_supply/battery/capacity /sys/class/power_supply/battery/voltage_now;"
+    " do echo \"$b: $(cat $b)\"; done;"
     " echo '== ps'; ps; echo '== dmesg'; dmesg | tail -n 300;"
     " echo '== q2-demo.err'; tail -n 100 /tmp/q2-demo.err;"
     " echo '== q2-demo.log (demo and q2player)'; tail -n 300 /tmp/q2-demo.log;"
@@ -39,8 +43,8 @@ static int diag_save(void *ctx, void *event) {
     return 0;
 }
 
-/* ringnav_about, after stock's rows and CFW. Version: in a --dev build the Save Diagnostics row,
- * above them. */
+/* ringnav_about, after stock's rows and the product's version row: in a --dev build the Save
+ * Diagnostics row, above them. */
 void diag_about_row(void *view) {
     if (!Q2POD_DEV || !view) return;
     void *label = list_row(view, (const char *)0, diag_save, (void *)0);

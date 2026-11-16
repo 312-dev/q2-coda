@@ -107,7 +107,7 @@ def rbar_reads():  # the old caption's destroy, which the mock's unlink doesn't 
     m.call(address=payload_syms['title_gone'],args=(0,0,0,0),gap=0); m.call(address=payload_syms['bar_title_sync'],args=(m.top,0,0,0),gap=0); return m.nodes[rbar]['text']
 m.row(0); assert empty_titles(m)[-1:]==['No Stations'] and rbar_reads()=='Favorites',(m.labels(),rbar_reads())
 search('zzz'); m.reply=b'#EXTM3U\n'; m.worker(); assert empty_titles(m)[-1:]==['No Stations'] and rbar_reads()=='Internet Radio',(m.labels(),rbar_reads())
-m.back(); assert 'zzz' in m.labels() and rbar_reads()=='Internet Radio',(m.labels(),rbar_reads()); m.close(); passed()
+m.back(); assert empty_titles(m)[-1:]==['No Stations'] and rbar_reads()=='Internet Radio',(m.labels(),rbar_reads()); m.close(); passed()  # the search's empty list again
 # Favourites: favourites.m3u, then the folder's other .m3u and .pls files (a .pls's TitleN names its FileN).
 m=RadioMachine({RDIR+'/favourites.m3u':bytearray(b'#EXTM3U\r\n#EXTINF:-1,One\r\nhttp://one/a\r\nhttp://two/b\r\n'),
                 RDIR+'/x.pls':bytearray(b'[playlist]\nFile1=https://three/c?x=1\nTitle1=Three\nNumberOfEntries=1\n'),
@@ -285,7 +285,7 @@ assert m.search('Yellow','Coldplay',found,code=0)==1 and len(m.urls)==1 and not 
 assert m.search('','Coldplay',found)==1 and not m.written and not m.urls; passed()  # no title: no request
 
 # Its accept (onlinematch.c ringnav_lyric_save, at LYRIC_SAVE_CALL): stock's snprintf of cp -rf /tmp/oslyric_N
-# "/mnt/mmc/.downpic/<name>" for system() becomes a copy beside the song, through .part, as Download Album Lyrics
+# "/mnt/mmc/.downpic/<name>" for system() becomes a copy beside the song, through .part, as Get Album Lyrics
 # saves, the .downpic copy stock's loader would show first goes, and system() gets ":". The song is the queue's
 # whose file name stock turns into name. Not in the queue, a CUE track's, or a card that can't be written there: the
 # copy goes to stock's .downpic/<name> instead, never stock's command, whose name the shell would run (GHSA-qp92-mq7c-6r64).
@@ -383,6 +383,7 @@ class BrowseMachine(RadioMachine):
         if name=='socket':
             assert a==1 and b in (1,2); ret=9 if b==2 else 7
             if b==2: self.out=b''; self.pending=b''
+        elif name=='connect' and self.text(b+2)=='/tmp/q2adb-ui': ret=-1  # adbd's UI socket (a dev build's usb_ui.c auth_poll)
         elif name=='connect' and a!=9: assert self.text(b+2)==SOCK; ret=0 if self.alive else -1  # spot_alive's
         elif name=='connect': assert self.text(b+2)==self.browse; ret=0 if self.serve else -1
         elif name=='fcntl': assert (a,b,c)==(9,4,0x80)  # nonblocking before connect
@@ -559,8 +560,14 @@ m.row(1); assert m.asked()==('repeat','off'); t=len(m.threads); m.answer('offlin
 assert m.toasts[-1][3]=="Spotify didn't answer in time" and len(m.threads)==t and m.labels()[1]=='Shuffle'; m.back(); passed()
 # Account: the name, Premium, and Sign out after a confirmation; then the pairing prompt.
 m.row(8); assert m.asked()==('account',); m.answer(*ME); assert m.labels()==['Account','Alice','Premium','Sign Out','']
-m.row(1); assert m.labels()==['Sign Out of Spotify?','Cancel','Sign Out']; m.row(0); assert m.labels()[:2]==['Account','Alice']
-t=len(m.threads); m.row(1); m.row(1); assert m.asked()==('signout',) and len(m.threads)==t+1
+# Sign Out asks on the confirmation card (feedback.c confirm); its answer (spotify.c signout_answer) runs once it has closed
+def card(m,answer,row):
+    if m.nodes[m.top].get('name')=='sortselect_dialog':  # the card closes first, as on the unit: the page is on top again
+        if m.top in m.stack: m.stack.remove(m.top)
+        m.top=m.page
+    m.call(address=payload_syms[answer],args=(0,row,0,0),gap=0,clear=False)
+m.row(1); card(m,'signout_answer',0); assert m.labels()[:2]==['Account','Alice']
+t=len(m.threads); m.row(1); card(m,'signout_answer',1); assert m.asked()==('signout',) and len(m.threads)==t+1
 m.answer(*OK,[]); assert m.labels()==PAIR
 # librespot exits on signout and its launcher restarts it: meanwhile no socket is no old add-on.
 m.serve=None; m.advance(2000); m.worker(); assert m.labels()==PAIR; m.advance(5000); m.worker(); assert m.labels()==PAIR
@@ -674,7 +681,7 @@ np=m.top; info,msg=m.nodes[np]['children']; requests=len(m.requests)
 m.advance(15250)
 assert texts(msg)==["Playback didn't start",'Go back and try again'] and len(m.requests)==requests
 m.state('playing',track='late'); m.poll(); m.advance(250); assert m.nodes[info]['visible']
-m.destroy(np); m.top=m.page; m.back(); m.row(8); m.answer(*ME); m.row(1); m.row(1); m.answer(*OK,[])
+m.destroy(np); m.top=m.page; m.back(); m.row(8); m.answer(*ME); m.row(1); card(m,'signout_answer',1); m.answer(*OK,[])  # Sign Out's card
 m.call(address=payload_syms['spot_np'],args=(0,0,0,0),gap=0,count=5_000_000)
 info,msg=m.nodes[m.top]['children']; assert texts(msg)==['Open Spotify on your phone','and choose Q2']
 passed()
@@ -750,11 +757,10 @@ m.row(2); assert m.asked()==('collections','p2')
 m.answer(*OK,[('collection','c','C','1/1','','')]); m.row(0); m.row(1)
 assert m.asked()==('remove','collections','b,c')
 m.answer('ok','Remove 2 playlists, 1 tracks?','',[])
-assert m.labels()[0]=='Remove Downloads?' and 'Remove 2 playlists, 1 tracks?' in m.labels()
-m.row(2); assert m.asked()==('remove','collections','b,c','confirm')
+card(m,'remove_answer',1); assert m.asked()==('remove','collections','b,c','confirm')
 m.answer('ok','Removed','',[]); assert m.labels()[0]=='Storage Management'
 m.row(2); assert m.asked()==('remove','all','')
-m.answer('ok','Remove 1 playlists, 3 tracks?','',[]); m.row(1)  # Cancel preserves downloads
+m.answer('ok','Remove 1 playlists, 3 tracks?','',[]); card(m,'remove_answer',0)  # Cancel preserves downloads
 assert m.labels()[0]=='Storage Management'
 # Return before Clear All's preview answers: a later action's ok reply never opens Remove Downloads?.
 m.row(2); assert m.asked()==('remove','all',''); m.back(); assert m.labels()[0]=='Downloads'
@@ -765,7 +771,8 @@ m.back(); m.back(); m.row(3); assert m.labels()[0]=='Storage Management'
 m.row(1); m.answer(*OK,[track('spotify:track:a','A')]); m.row(0); m.row(1)
 assert m.asked()==('remove','tracks','spotify:track:a')
 m.answer('ok','Remove 0 playlists, 1 tracks? 2 playlists may become incomplete','',[])
-assert 'Track removal can make playlists incomplete' in m.labels(); m.row(1); passed()
+assert b'Remove 0 playlists, 1 tracks? 2 playlists may become incomplete\nPlaylists can be left incomplete.\0' in bytes(m.u.mem_read(payload_syms['br'],0x2000))  # the card's body (spotify.c br.remove_note)
+card(m,'remove_answer',1); assert m.asked()==('remove','tracks','spotify:track:a','confirm'); passed()
 # caps answered after Downloads opened (asked again once the base was idle, a request having cancelled
 # it): the open level is laid out again, so its rows and what a press opens agree.
 HUB=('collections','collection','playcollection','downloadliked','jobs','job','remove','download')
@@ -803,7 +810,7 @@ m=BrowseMachine(); m.caps=(); m.open(); m.answer(*ME); m.row(1)
 m.answer(*OK,[('playlist','spotify:playlist:a','A','','','')]); m.row(0); m.answer(*OK,[])
 assert m.labels()==['Nothing here']; passed()
 
-# Card apps (patch/addon.c): programs on the card Q2 Pod knows only by their folder, .<id> holding its
+# Card apps (patch/addon.c): programs on the card Q2 Muse knows only by their folder, .<id> holding its
 # manifest q2app, its launcher run and its binary q2-<id>; Streaming lists them after Spotify, by name,
 # and a row's page is the app's list over Q2SPOT/1 on its own socket, each row's kind saying what a
 # press does.

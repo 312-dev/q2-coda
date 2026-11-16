@@ -14,6 +14,7 @@ from test_nav_lists import ROW_H, SLOW, STOP, Canvas, Pull, Table, key, ui  # no
 # its own constants, and the three navigation.h shares with add_songs.c
 SOURCE = (ROOT / 'patch' / 'az_index.c').read_text() + (ROOT / 'patch' / 'navigation.h').read_text()
 AZ = {k: int(v) for k, v in re.findall(r'^#define (AZ_\w+) (\d+)\b', SOURCE, re.M)}
+AZ |= {k: int(v) for k, v in re.findall(r'^#define (UI_\w+) (\d+)\b', (ROOT/'patch/ui_kit.h').read_text(), re.M)}
 LETTERS = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 EVT_MOVE, EVT_UP = O['EVT_POINTER_MOVE_BEFORE'], O['EVT_POINTER_UP_BEFORE']
 KEEP = []  # the records' buffers, alive for the test
@@ -115,11 +116,11 @@ def test_a_finger_on_the_right_edge_jumps_to_the_letter_and_holds_the_touch(fw, 
     assert table.selected == 75 and table.client.int(O['TABLE_TOP']) == 78 * ROW_H - table.client.box[3]
     assert pull.send(EVT_UP, 0, 0) == STOP
     (fade,) = ui.due('az_due')
-    assert ui.timers[fade][2] == AZ['AZ_SHOW_MS'] - AZ['AZ_FADE_MS']
-    ui.now += AZ['AZ_SHOW_MS'] - AZ['AZ_FADE_MS']
+    assert ui.timers[fade][2] == AZ['UI_SHOW_MS'] - AZ['UI_FADE_MS']
+    ui.now += AZ['UI_SHOW_MS'] - AZ['UI_FADE_MS']
     ui.fire(fade)
     assert f['on'](table.client.at)  # fading
-    ui.now += AZ['AZ_FADE_MS']
+    ui.now += AZ['UI_FADE_MS']
     ui.invalidated.clear()
     ui.fire(ui.due('az_due')[0])
     assert not f['on'](table.client.at) and ui.invalidated == [table.win.at] and not ui.due('az_due')
@@ -142,7 +143,7 @@ def test_a_press_after_a_missed_lift_ends_the_hold(fw, ui):
     pull.down(100, 150)  # the lift went elsewhere; a press on the rows
     assert not fw.fn('az_held', C.c_int, C.c_void_p)(None)
     (fade,) = ui.due('az_due')
-    assert ui.timers[fade][2] == AZ['AZ_SHOW_MS'] - AZ['AZ_FADE_MS']
+    assert ui.timers[fade][2] == AZ['UI_SHOW_MS'] - AZ['UI_FADE_MS']
 
 
 @pytest.mark.parametrize('case', ['short', 'by time added', 'artists songs', 'mid list', 'settings'])

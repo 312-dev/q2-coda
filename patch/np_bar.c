@@ -1,13 +1,16 @@
 /* Now Playing's bar: the bar's title, the theme's progress bar and its fill. */
 #include "navigation.h"
+#include "ui_kit.h"
 
 static int bar_bold __attribute__((section(".scratch"))); /* the bar's title set bold (bar_title) */
 static int row_frame(const void *info);
 static struct {
-    int on;         /* radio as last painted (np_modes) */
-    int from, to;   /* the pill's width at the grow's start and its end */
-    unsigned at;    /* the grow's start, time_now_ms */
-    unsigned timer; /* the grow's next frame */
+    int on;            /* radio as last painted (np_modes) */
+    int from, to;      /* the pill's width at the grow's start and its end */
+    unsigned at;       /* the grow's start, time_now_ms */
+    unsigned timer;    /* the grow's next frame */
+    int pressed;       /* the button a tap last pressed, + 1 (np_mode_click) */
+    unsigned press_at; /* its time_now_ms: its square fades out over NP_PRESS_MS */
 } rad __attribute__((section(".scratch")));
 
 /* Now Playing's album and right-hand time: the remaining time (slider max less value,
@@ -342,22 +345,30 @@ void np_mode_step(int repeat, int dir) {
  * under its centre while on; Repeat One has its own glyph. Radio is the antenna in Text Secondary,
  * or while the playing app plays a radio (addon.c addon_radio) an NP_PILL wide accent pill holding
  * the antenna and "Radio": turning on, the pill grows from the glyph's width over NP_GROW_MS and
- * the gaps shrink with it, the word fading in over the last part (back the same way off). While
+ * the gaps shrink with it, the word fading in over the last part (back the same way off; at once
+ * under Reduce Motion). While
  * radio is on, shuffle and repeat are NP_DIM and ignore taps and the Centre cycle: the app picks
- * the order. The one the Centre cycle's wheel sets (np_stage) stands in a Text Primary ring,
- * rounded as the selection bar. */
+ * the order. The one the Centre cycle's wheel sets (np_stage) stands in a Text Primary outline,
+ * and a tapped one on a #2C2C2E square that fades out over NP_PRESS_MS
+ * (docs/oled-design.md#now-playing, approved as 22 v4 on 2026-11-16): each fits what is drawn, the
+ * glyph's ink and, while it shows, the on dot, padded NP_FOCUS_PAD to the outline's inner edge or
+ * NP_PRESS_PAD to the square's. */
 #define NP_BTN 22  /* a glyph, and a button's width in the row */
 #define NP_PILL 92 /* the radio's pill, on */
 #define NP_PILL_H 34
 #define NP_GROW_MS 200
 #define NP_WORD_FROM 60 /* the word shows past this percent of the grow, fading in */
 #define NP_DOT 4
-#define NP_DOT_DY 15      /* the on dot's centre below the glyph's: 2 px under its 22 px */
+#define NP_DOT_DY 15 /* the on dot's centre below the glyph's: 2 px under its 22 px */
 #define NP_RADIO_PX                                                                                \
     TYPE(16)              /* "Radio": Inter Medium, the design's 16 px (docs/oled-design.md#type) */
 #define NP_RADIO_GLYPH 24 /* the antenna's centre this far left of the pill's, the word 10 px */
-#define NP_RING_W 38      /* the ring round the glyph the Centre cycle's wheel sets, 2 px wide */
-#define NP_RING_H 34
+#define NP_FOCUS_PAD 6    /* the ink to the focus outline's inner edge; the outline 2 px wide */
+#define NP_PRESS_PAD 8    /* the ink to the pressed square's edge */
+#define NP_FRAME_R 9      /* both boxes' corners */
+#define NP_PRESS_MS 250   /* a tapped button's square fades out over this */
+#define NP_PRESS_INK RGB_RAISED_2
+#define NP_INK_ALPHA 64 /* a glyph's pixel this opaque or more is its ink */
 enum { NB_SHUFFLE, NB_RADIO, NB_REPEAT, NB_QUEUE, NB_N };
 
 static void *np_row_widget(void) {
@@ -376,9 +387,8 @@ static int pill_w(int *word) {
     int on = addon_radio();
     unsigned now = (unsigned)time_now_ms();
     if (!rad.to) rad.from = rad.to = on ? NP_PILL : NP_BTN, rad.on = on; /* first paint: no grow */
-    int t = (int)(now - rad.at) * 100 / NP_GROW_MS;
-    if (t > 100) t = 100;
-    int e = 100 - (100 - t) * (100 - t) / 100, w = rad.from + (rad.to - rad.from) * e / 100;
+    int ms = motion_ms(NP_GROW_MS, MO_SPATIAL), t = ms ? (int)(now - rad.at) * 1000 / ms : 1000;
+    int e = motion_ease(t, EASE_QUAD_OUT) / 10, w = rad.from + (rad.to - rad.from) * e / 100;
     if (on != rad.on) /* from where it is now, towards the other end */
         rad.on = on, rad.from = w, rad.to = on ? NP_PILL : NP_BTN, rad.at = now;
     if (w != rad.to && !rad.timer) rad.timer = timer_add(row_frame, (void *)0, 16);
@@ -408,6 +418,66 @@ static void glyph(void *win, void *canvas, const char *name, int x, int y) {
     unsigned bitmap[64]; /* bitmap_t */
     if (!widget_load_image(win, theme_art(name), bitmap)) canvas_draw_icon(canvas, bitmap, x, y);
 }
+/* The ink of bitmap as canvas_draw_icon draws it centred on x, y: the bounds of its pixels at
+ * NP_INK_ALPHA or more, into *ink; else the whole image (a format it can't read, or no ink). */
+static void glyph_ink(unsigned *bitmap, int x, int y, rect_t *ink) {
+    static const unsigned char at[4][4] = BITMAP_RGBA_AT;
+    int w = (int)bitmap[0], h = (int)bitmap[1], x0 = w, y0 = h, x1 = -1, y1 = -1;
+    unsigned format = ((unsigned short *)bitmap)[7] - 1u;
+    const unsigned char *data = format < 4 && w > 0 && h > 0 && w <= 64 && h <= 64
+                                    ? bitmap_lock_buffer_for_read(bitmap)
+                                    : 0;
+    if (data) {
+        unsigned stride = bitmap_get_line_length(bitmap), a = at[format][3];
+        for (int py = 0; py < h; ++py)
+            for (int px = 0; px < w; ++px)
+                if (data[(unsigned)py * stride + (unsigned)px * 4 + a] >= NP_INK_ALPHA) {
+                    if (px < x0) x0 = px;
+                    if (px > x1) x1 = px;
+                    if (py < y0) y0 = py;
+                    if (py > y1) y1 = py;
+                }
+        bitmap_unlock_buffer(bitmap);
+    }
+    if (x1 < 0) x0 = y0 = 0, x1 = w - 1, y1 = h - 1;
+    *ink = (rect_t){ x - w / 2 + x0, y - h / 2 + y0, x1 - x0 + 1, y1 - y0 + 1 };
+}
+/* A row button's glyph centred on x, y, with the on dot under it (dot) and its frame behind:
+ * focus, the wheel's outline; press, 1..100, the tapped square's share of its ink, fading. */
+static void glyph_framed(void *win, void *canvas, const char *name, int x, int y, int dot,
+                         int focus, int press) {
+    unsigned bitmap[64]; /* bitmap_t */
+    if (widget_load_image(win, theme_art(name), bitmap)) return;
+    rect_t ink, d = { x - NP_DOT / 2, y + NP_DOT_DY - NP_DOT / 2, NP_DOT, NP_DOT };
+    glyph_ink(bitmap, x, y, &ink);
+    if (dot) { /* the box takes the dot in */
+        int bottom = d.y + d.h > ink.y + ink.h ? d.y + d.h : ink.y + ink.h;
+        ink.h = bottom - ink.y;
+    }
+    if (press) {
+        int p = NP_PRESS_PAD;
+        rect_t sq = { ink.x - p, ink.y - p, ink.w + 2 * p, ink.h + 2 * p };
+        fill_box(canvas, &sq, RGBA(blend(NP_PRESS_INK, 0, press)), NP_FRAME_R);
+    }
+    if (focus) { /* 2 px: the ink to its inner edge NP_FOCUS_PAD */
+        int p = NP_FOCUS_PAD + 2;
+        rect_t ring = { ink.x - p, ink.y - p, ink.w + 2 * p, ink.h + 2 * p },
+               in = { ring.x + 2, ring.y + 2, ring.w - 4, ring.h - 4 };
+        fill_box(canvas, &ring, ui_ink(RGBA(0xffffff)), NP_FRAME_R);
+        fill_box(canvas, &in, ui_ink(RGBA(0)), NP_FRAME_R - 2);
+    }
+    canvas_draw_icon(canvas, bitmap, x, y);
+    if (dot) fill_box(canvas, &d, RGBA(accent_tone(TONE_LIGHT)), NP_DOT / 2);
+}
+/* The tapped button's square's share now, 100 at the tap down to 0 NP_PRESS_MS on, for button k;
+ * a fade under way asks for its next frame. */
+static int press_share(int k) {
+    if (rad.pressed != k + 1) return 0;
+    unsigned ms = (unsigned)time_now_ms() - rad.press_at;
+    if (ms >= NP_PRESS_MS) return 0;
+    if (!rad.timer) rad.timer = timer_add(row_frame, (void *)0, 16);
+    return 100 - (int)(ms * 100 / NP_PRESS_MS);
+}
 
 /* A tap on the row (the play mode's target): the button nearest it. Shuffle and repeat step as
  * the Centre cycle's wheel does, unless radio is on; radio opens the playing app's page (addon.c
@@ -426,6 +496,8 @@ int np_mode_click(void *target, void *event) {
     row_x(0, I(target, W_W), pill_w(&word), cx);
     for (int i = 1; i < NB_N; ++i) /* past the midpoint between two centres: the next */
         if (x > (cx[i - 1] + cx[i]) / 2) k = i;
+    if (k != NB_RADIO || !rad.on) /* the pill is its own press */
+        rad.pressed = k + 1, rad.press_at = (unsigned)time_now_ms(), row_frame(0);
     if (k == NB_QUEUE)
         timer_add(np_queue, (void *)0, 0);
     else if (k == NB_RADIO)
@@ -448,34 +520,30 @@ void np_modes(void *win, void *canvas) {
     char name[24];
     int lit[2] = { np_shuffle_on(m), rep != NP_REPEAT_OFF };
     for (int i = 0; i < 2; ++i) {
-        int x = cx[i ? NB_REPEAT : NB_SHUFFLE];
-        if (st.np_stage == (unsigned)(NP_STAGE_SHUFFLE + i)) { /* the wheel's: a ring round it */
-            rect_t ring = { x - NP_RING_W / 2, cy - NP_RING_H / 2, NP_RING_W, NP_RING_H },
-                   in = { ring.x + 2, ring.y + 2, NP_RING_W - 4, NP_RING_H - 4 };
-            fill_box(canvas, &ring, ui_ink(RGBA(0xffffff)), 8);
-            fill_box(canvas, &in, ui_ink(RGBA(0)), 6);
-        }
+        int k = i ? NB_REPEAT : NB_SHUFFLE, x = cx[k];
         tk_snprintf(name, sizeof name, "mode_%s%s", i ? "repeat" : "shuffle",
                     rad.on                      ? dim
                     : i && rep == NP_REPEAT_ONE ? "1_on"
                     : lit[i]                    ? "_on"
                                                 : off);
-        glyph(win, canvas, name, x, cy);
-        if (lit[i] && !rad.on) { /* on: the accent's dot under it */
-            rect_t dot = { x - NP_DOT / 2, cy + NP_DOT_DY - NP_DOT / 2, NP_DOT, NP_DOT };
-            fill_box(canvas, &dot, RGBA(accent), NP_DOT / 2);
-        }
+        /* on: the accent's dot under it; the wheel's stage: the outline round it, while the wheel is the
+         * modality (ui_focus_shown) */
+        glyph_framed(win, canvas, name, x, cy, lit[i] && !rad.on,
+                     st.np_stage == (unsigned)(NP_STAGE_SHUFFLE + i) && ui_focus_shown(),
+                     rad.on ? 0 : press_share(k));
     }
     if (w > NP_BTN) { /* the pill, the antenna and, grown past NP_WORD_FROM, the word */
         rect_t pill = { cx[NB_RADIO] - w / 2, cy - NP_PILL_H / 2, w, NP_PILL_H };
         fill_box(canvas, &pill, RGBA(accent), NP_PILL_H / 2);
         glyph(win, canvas, "mode_radio_w", word ? cx[NB_RADIO] - NP_RADIO_GLYPH : cx[NB_RADIO], cy);
         if (word)
-            ar_text(canvas, "Radio", 1, NP_RADIO_PX, blend(0xffffff, accent, word), 1,
+            ui_text(canvas, "Radio", 1, NP_RADIO_PX, blend(0xffffff, accent, word), 1,
                     cx[NB_RADIO] - 10, cy, w, 2);
     } else
-        glyph(win, canvas, ipod_light() ? "mode_radio_l" : "mode_radio_d", cx[NB_RADIO], cy);
-    glyph(win, canvas, ipod_light() ? "mode_queue_l" : "mode_queue_d", cx[NB_QUEUE], cy);
+        glyph_framed(win, canvas, ipod_light() ? "mode_radio_l" : "mode_radio_d", cx[NB_RADIO], cy,
+                     0, 0, press_share(NB_RADIO));
+    glyph_framed(win, canvas, ipod_light() ? "mode_queue_l" : "mode_queue_d", cx[NB_QUEUE], cy, 0,
+                 0, press_share(NB_QUEUE));
     stock_canvas_set_fill_color(canvas, saved);
 }
 

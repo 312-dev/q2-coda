@@ -85,7 +85,7 @@ def boot_check():
             subprocess.run(['sh', '-c', script], check=True, env=dict(os.environ, PATH=f'{r}/bin:' + os.environ['PATH']))
             return (r/'ran').read_text().split(), target.exists() and target.read_text().strip()
         (r/'proc/mounts').write_text('')
-        # the first boot over a config.ini from before the q2-defaults mark (stock's, or an earlier build's) puts Q2 Pod's
+        # the first boot over a config.ini from before the q2-defaults mark (stock's, or an earlier build's) puts Q2 Muse's
         # defaults in its place, before demo; the saved Wi-Fi stays; every later boot keeps the user's settings
         ours, config, wifi, mark = r/'release/assets/default/raw/config.ini', r/'mnt/data/config.ini', r/'mnt/data/wpa_supplicant.conf', r/'mnt/data/q2-defaults'
         ours.parent.mkdir(parents=True)
@@ -97,11 +97,11 @@ def boot_check():
         config.write_text('[PLAYSET]\nCOVERMODE=1\n')  # the user's own choice since
         assert boot(False, False) == (['demo'], False) and config.read_text() == '[PLAYSET]\nCOVERMODE=1\n'
         rockbox = [str(rb.parent), 'demo']
-        assert boot(False, False) == (['demo'], False)          # no Rockbox on the card: Q2 Pod
-        assert boot(False, True, 1) == (rockbox, False)         # Rockbox by default; a crash starts Q2 Pod
+        assert boot(False, False) == (['demo'], False)          # no Rockbox on the card: Q2 Muse
+        assert boot(False, True, 1) == (rockbox, False)         # Rockbox by default; a crash starts Q2 Muse
         assert (r/'mnt/mmc/.rockbox/rockbox.log').read_text() == 'exit 1\n'
-        assert boot(False, True) == (rockbox, False)            # Boot stock OS (0x51): Q2 Pod starts, nothing saved
-        assert boot(True, True, 1) == (['demo'], False)         # Play/Pause held: Q2 Pod, this session
+        assert boot(False, True) == (rockbox, False)            # Boot stock OS (0x51): Q2 Muse starts, nothing saved
+        assert boot(True, True, 1) == (['demo'], False)         # Play/Pause held: Q2 Muse, this session
         assert boot(False, True, 1) == (rockbox, False)         # the next power-on is Rockbox again
         target.write_text('stock\n')                            # a stale V8.4 choice is ignored
         assert boot(False, True, 1) == (rockbox, 'stock')
@@ -115,10 +115,10 @@ def boot_check():
             assert boot(False, False) == (['demo'], value.strip())
             assert boot(True, True, 81, 1) == (['demo', *rockbox], value.strip())
         target.unlink()
-        # Home's Rockbox row: Rockbox, then Q2 Pod again, as often as it is taken; the flag is gone after
+        # Home's Rockbox row: Rockbox, then Q2 Muse again, as often as it is taken; the flag is gone after
         assert boot(True, True, 81, 1) == (['demo', *rockbox], False)
         assert boot(False, True, 81, 2) == (rockbox * 3, False) and not pathlib.Path(flag).exists()
-        assert boot(True, False, 81, 1) == (['demo', 'demo'], False)  # no Rockbox on the card: Q2 Pod again
+        assert boot(True, False, 81, 1) == (['demo', 'demo'], False)  # no Rockbox on the card: Q2 Muse again
         # Wi-Fi goes off before every start of Rockbox and at no other time; demo follows Rockbox whatever its status
         def order(*args): boot(*args); return (r/'order').read_text().split()
         session = ['gpio', 'wifi', 'rockbox', 'demo']  # charging is allowed before Rockbox starts
@@ -257,62 +257,44 @@ def boot_check():
         wcopy.write_bytes(b'x' * 262143); wheel.write_text('== wheel: four\n'); boot(True, False, status=0)
         assert wcopy.read_bytes().endswith(b'== wheel: four\n') and not wheel.exists() and not (r/'mnt/data/q2-wheel.log.m').exists()
         for f in (crash, copy, wheel, wcopy): f.unlink(missing_ok=True)
-    print('Dual boot: Rockbox by default, one-session Q2 Pod, stale choice ignored, card fallback, Home Rockbox row and Wi-Fi off before Rockbox passed.')
+    print('Dual boot: Rockbox by default, one-session Q2 Muse, stale choice ignored, card fallback, Home Rockbox row and Wi-Fi off before Rockbox passed.')
 boot_check()
 
 def logo_check():
-    """S11logo_display_shell's splash choice (build.py LOGO_HOOK) under the host sh."""
+    """S11logo_display_shell's splash choice (build.py LOGO_HOOK) under the host sh: the card's logo, else the
+    boot animation, else the built-in still, in Light Mode as in dark (docs/boot.md#light-mode)."""
     import subprocess, tempfile, pathlib
-    from build import LOGO_HOOK, LOGO, LOGO_LIGHT, LOGO_ANIM, LOGO_BLACK, TIMEZONES
+    from build import LOGO_HOOK, LOGO, LOGO_ANIM, LOGO_BLACK
     with tempfile.TemporaryDirectory(prefix='q2-logo-') as tmp:
         tmp = pathlib.Path(tmp)
-        user, config, dark, light = tmp/'boot-logo.jpg', tmp/'config.ini', tmp/'logo.jpg', tmp/'logo-light.jpg'
+        user, config, dark = tmp/'boot-logo.jpg', tmp/'config.ini', tmp/'logo.jpg'
         anim, black = tmp/'logo.q2a', tmp/'logo-black.jpg'
         script = (LOGO_HOOK[1].decode().replace('/mnt/data/boot-logo.jpg', str(user)).replace('/mnt/data/config.ini', str(config))
-                  .replace('/'+LOGO_LIGHT, str(light)).replace('/'+LOGO_ANIM, str(anim)).replace('/'+LOGO_BLACK, str(black))
+                  .replace('/'+LOGO_ANIM, str(anim)).replace('/'+LOGO_BLACK, str(black))
                   .replace('/'+LOGO, str(dark)).replace('display_logo', 'echo').replace('/usr/bin/q2splash', 'q2splash'))
         def shown(): return subprocess.run(['sh', '-c', script], check=True, capture_output=True, text=True).stdout.strip()
-        assert shown() == str(dark)  # no card logo, no config: the built-in splash
-        config.write_text('[IPOD]\nLIGHT=1\n')
-        assert shown() == str(dark)  # Light Mode, but no light twin (custom --logo)
-        light.write_bytes(b'')
-        assert shown() == str(light)
-        config.write_text('[IPOD]\nLIGHT=0\nBACKLIGHT=1\n')
-        assert shown() == str(dark)
+        assert shown() == str(dark)  # no card logo, no animation (custom --logo): the built-in splash
+        for light in ('1', '2'):
+            config.write_text(f'[IPOD]\nLIGHT={light}\n')
+            assert shown() == str(dark)  # Light Mode and Auto boot dark as well
         user.write_bytes(b'')
-        config.write_text('[IPOD]\nLIGHT=1\n')
-        assert shown() == str(user)  # the card's logo wins in either mode
+        assert shown() == str(user)  # the card's logo wins
         user.unlink()
-        config.write_text('[IPOD]\nLIGHT=2\n')  # Auto: light from 07:00 to 18:59 by the clock
-        def at(hour): return subprocess.run(['sh', '-c', script.replace('$(TZ=$z date +%H)', hour)], check=True, capture_output=True, text=True).stdout.strip()
-        assert at('06') == str(dark) and at('07') == str(light) and at('18') == str(light) and at('19') == str(dark)
-        # Auto reads the hour in the saved zone: only the zone's own TZ gets a light hour
-        for i, (_, zone) in enumerate(TIMEZONES):
-            config.write_text(f'[SYSSET]\nTIMEZONE={i}\n[IPOD]\nLIGHT=2\n')
-            fake = f'''date() {{ [ "$TZ" = '{zone}' ] && echo 12 || echo 22; }}; '''
-            assert subprocess.run(['sh', '-c', fake + script], check=True, capture_output=True, text=True).stdout.strip() == str(light), zone
-        # No saved zone, or one past the list: stock's default, as the player reads it (config_init)
-        for text in ('[IPOD]\nLIGHT=2\n', f'[SYSSET]\nTIMEZONE={len(TIMEZONES)}\n[IPOD]\nLIGHT=2\n'):
-            config.write_text(text)
-            fake = f'''date() {{ [ "$TZ" = '{TIMEZONES[22][1]}' ] && echo 12 || echo 22; }}; '''
-            assert subprocess.run(['sh', '-c', fake + script], check=True, capture_output=True, text=True).stdout.strip() == str(light)
-        # The boot animation (docs/boot.md#boot-animation), on builds that ship it: in place of the built-in dark splash only
+        # The boot animation (docs/boot.md#boot-animation), on builds that ship it, in either mode
         anim.write_bytes(b'')
         def played(status=0): return subprocess.run(['sh', '-c', f'q2splash() {{ echo play $1; return {status}; }}; ' + script], check=True, capture_output=True, text=True).stdout.split('\n')[:-1]
-        config.write_text('[IPOD]\nLIGHT=0\n')
-        assert played() == [str(black), f'play {anim}']  # the black splash turns the screen on, then the animation
+        for light in ('0', '1', '2'):
+            config.write_text(f'[IPOD]\nLIGHT={light}\n')
+            assert played() == [str(black), f'play {anim}'], light  # the black splash turns the screen on, then the animation
         assert played(1) == [str(black), f'play {anim}', str(dark)]  # q2splash could not start: the still logo
-        config.write_text('[IPOD]\nLIGHT=1\n')
-        assert played() == [str(light)]
         user.write_bytes(b'')
-        config.write_text('[IPOD]\nLIGHT=0\n')
         assert played() == [str(user)]
-    print('Boot logo: the saved card logo, else the light splash under Light Mode, else the boot animation or the built-in one, passed.')
+    print('Boot logo: the saved card logo, else the boot animation or the built-in one, dark in Light Mode too, passed.')
 logo_check()
 
 def validate_assets(directory):
     import functools, json, re, struct, subprocess
-    from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, SPLASH, LOGO_ANIM, LOGO_BLACK, BOOT_HOOK, REMOTE, Q2EQ, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, LOGO_LIGHT, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, WATCHDOG, WATCHDOG_SLEEP, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, WHEEL_TS_READ, PDR
+    from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, SPLASH, LOGO_ANIM, LOGO_BLACK, BOOT_HOOK, REMOTE, Q2EQ, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, WATCHDOG, WATCHDOG_SLEEP, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, WHEEL_TS_READ, PDR
     from ipod import (ART_PLACEHOLDERS, sized_art, AUDIT, TOOLBAR_SWITCHES, BOTTOM, CONFIRM, VOLUME, BIGCOVER, BC_ART, BC_TITLE_PAD, QUICK_SETTINGS, QS_TOP, QS_LABEL_GAP, QS_LABEL_H,
                       QS_LABEL_W, QS_ROW_GAP, QS_PITCH, QS_BAR, QS_TOUCH, QS_EDGE, QS_SUN, HOME_LABEL_END, HOME_LIST_W, HOME_TEXT_X, HOME_TOP, PITCH, ARTIST_PAGE, HOME_OURS, HOME_PAGE, HOME_ROW, HOME_ROWS, HOME_SETS, NAVBAR_ONLY, PLAYING_PAGE, SET_ROW, SET_ROWS, SET_TOP, UI_ASSETS,
                       NP_BAR, NP_TOUCH, NP_MARGIN, NP_TOP, STATUS_BAR, STATUS_HIDDEN, STATUS_LEFT, STATUS_MARGIN, STATUS_RIGHT, CLOCK_MIN, CLOCK_TEXT, corner_inset, corner_x,
@@ -693,11 +675,9 @@ def validate_assets(directory):
              if ('/raw/ui/' in l or '/raw/styles/' in l) and l.endswith('.bin') or l.endswith('/config.ini')]
     names = set(run('unsquashfs', '-l', directory/'rootfs.squashfs').splitlines())
     stock_names = set(run('unsquashfs', '-l', directory/'stock.squashfs').splitlines())
-    # Light Mode's splash ships with the default logo only (build.py LOGO_HOOK)
-    light = (ROOT/'assets/boot-logo-light.jpg').read_bytes()
+    # The boot animation ships with the default logo only (build.py LOGO_HOOK), with the black splash it starts from
     default = manifest['logo_sha256'] == sha((ROOT/'assets/boot-logo.jpg').read_bytes())
-    assert ('squashfs-root/'+LOGO_LIGHT in names) == default and (not default or read('rootfs.squashfs', LOGO_LIGHT) == light)
-    # and so does the boot animation, with the black splash it starts from
+    assert 'squashfs-root/release/assets/default/raw/images/xx/logo-light.jpg' not in names  # no light splash: the boot is dark
     for path, source in ((LOGO_ANIM, 'assets/boot-anim.q2a'), (LOGO_BLACK, 'assets/boot-black.jpg')):
         assert ('squashfs-root/'+path in names) == default and (not default or read('rootfs.squashfs', path) == (ROOT/source).read_bytes())
     assert not {'squashfs-root/'+rel for rel in STOCK_EQ} & names, 'Stock EQ assets remain'
@@ -966,7 +946,7 @@ def validate_assets(directory):
             continue
         if short == PLAYING_PAGE:  # see the sketch in docs/ipod.md
             named = {n[2].get('name'): n for n in walk(root)}
-            # stock names kept, but the two buttons that open its spectrum and VU pages, which Q2 Pod does not offer
+            # stock names kept, but the two buttons that open its spectrum and VU pages, which Q2 Muse does not offer
             assert {n[2].get('name') for n in walk(decode(original))} - set(named) == {'img_spectrum', 'img_vu'}
             # the info page first and hidden: out of the swipe, for ⋯'s About (np_about.c)
             assert [n[2].get('name') for n in root[3]] == ['view_info', 'view_buttons', 'label_playtime', 'label_playlen', 'label_ipod_remain',
