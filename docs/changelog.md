@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Playlists (OLED): holding Play/Pause on a song inside a playlist opens the full song menu (Play Next, Play Last, Add to Playlist, Go to Album, Go to Artist and the rest), with Remove from Playlist last in red; it asks before removing.
   - Now Playing (OLED): the outline the wheel puts round Shuffle or Repeat now fits the button snugly, taking in its dot only while it's on, and a tapped button shows a soft grey square that fades out.
   - Now Playing's More: tapping the **Speed** row on its left half no longer sets the speed back to 1x behind the picker it opens.
   - Settings > Storage: the notes under the rows no longer mention Radio or items that refill by themselves, which the Subsonic app doesn't do yet.

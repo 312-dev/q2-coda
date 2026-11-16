@@ -8,7 +8,7 @@ import re
 import pytest
 
 from conftest import O, Files
-from test_nav_hold import TITLES, Editor, Table, recs, ui  # noqa: F401  (fixtures)
+from test_nav_hold import STOP, TITLES, Editor, Hold, Table, recs, scratch, st, ui, use_set  # noqa: F401  (fixtures)
 
 OTG = 100
 
@@ -72,8 +72,7 @@ class Lists(Table):
         return 0
 
 
-@pytest.fixture
-def pages(fw, ui, recs):  # noqa: F811
+def road_trip(fw, ui, recs):
     """Road Trip (playlist 3: One, Two, Three) and an On-The-Go of Five."""
     e = Editor(fw, ui, recs)
     lists = Lists(fw, recs, e.deques, TITLES)  # in the editor's table's place, its mocks over the table's
@@ -82,6 +81,11 @@ def pages(fw, ui, recs):  # noqa: F811
     lists.put(OTG, '/mnt/mmc/e.flac')
     e.table = lists
     return e
+
+
+@pytest.fixture
+def pages(fw, ui, recs):  # noqa: F811
+    return road_trip(fw, ui, recs)
 
 
 def open_page(fw, dest, name):
@@ -133,14 +137,47 @@ def test_clear_asks_first(fw, ui, pages, answer, left):
     assert (ui.toasts[-1:] == ['On-The-Go cleared']) == (answer == 10)
 
 
+def pv_answer(fw, row):
+    """Remove from Playlist's confirmation card answered (feedback.c runs it once the card has closed)."""
+    fw.fn('playlist_pages__pv_remove_answer', None, C.c_void_p, C.c_int, C.c_int)(None, row, 0)
+
+
 def test_remove_takes_the_held_song_out(fw, ui, pages):
     pv = open_page(fw, 3, b'Road Trip')
     view = pv.view
     ui.nodes[view].props['_ringnav_index'] = 3  # Two, under Shuffle and Add Songs
     fw.var('playlist_pages__pv_held', C.c_void_p).value = pages.deques[pv.songs][1]  # the hold's song
-    fw.fn('playlist_pages__pv_remove', None, C.c_int)(0)
+    pv_answer(fw, 0)  # Cancel
+    assert pages.table.songs(3) == ['One', 'Two', 'Three']
+    pv_answer(fw, 1)  # Remove
     assert pages.table.songs(3) == ['One', 'Three'] and ui.toasts[-1] == 'Removed'
     assert ui.rows(pv.view) == ['Shuffle', 'Add Songs', 'One', 'Three']
+
+
+def test_a_held_song_opens_its_whole_menu_with_remove_last_on_the_card(fw, ui, st, mcl, recs):
+    """The user's ruling (2026-11-16, 0plh): a song held in a playlist gets the menu a Library song gets (Play Next,
+    Play Last, Add to Playlist…, Go to Album, Go to Artist and the rest), then Remove from Playlist last, after a gap
+    and red, which asks on the confirmation card before it takes the song out."""
+    use_set(st, 'oled')
+    hold = Hold(fw, ui, st, recs, mcl)  # its deques first: the page's own take their place
+    pages = road_trip(fw, ui, recs)
+    pv = open_page(fw, 3, b'Road Trip')
+    ui.nodes[pv.view].props['_ringnav_index'] = 3  # Two
+    # Two with its album and artist, which Go to needs
+    old = pages.deques[pv.songs][1]
+    pages.deques[pv.songs][1] = recs(path='/mnt/mmc/b.flac', title='Two', album='Caracal', artist='Disclosure',
+                                     id_=C.c_int.from_address(old + O['REC_ID']).value,
+                                     disc=C.c_int.from_address(old + O['REC_DISC']).value)
+    assert hold.hold() == STOP
+    rows = hold.menu()
+    assert rows[:2] == ['Play Next', 'Play Last'] and rows[-1] == 'Remove from Playlist'
+    assert {'Add to Playlist…', 'Go to Album', 'Go to Artist'} <= set(rows)
+    assert hold.title() == 'Two'
+    asked = len(ui.went)
+    hold.pick('Remove from Playlist')
+    assert ui.went[asked:] == ['dialog/sortselect_dialog'] and pages.table.songs(3) == ['One', 'Two', 'Three']
+    pv_answer(fw, 1)
+    assert pages.table.songs(3) == ['One', 'Three'] and ui.toasts[-1] == 'Removed'
 
 
 def server(fw, files, pages):
@@ -156,7 +193,7 @@ def test_a_server_playlist_s_songs_go_to_its_app_in_their_order(fw, ui, pages):
     pv = open_page(fw, 3, b'Road Trip')
     ui.nodes[pv.view].props['_ringnav_index'] = 3
     fw.var('playlist_pages__pv_held', C.c_void_p).value = pages.deques[pv.songs][1]
-    fw.fn('playlist_pages__pv_remove', None, C.c_int)(0)
+    pv_answer(fw, 1)
     assert out() == b'set\tpl7\ts1\ts%253\n'  # Two's gone; a song with no sid (none here) is left out
 
 

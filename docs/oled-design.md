@@ -837,13 +837,14 @@ page, On-The-Go) and `patch/add_songs.c`.
 - **A playlist's page**: Shuffle (Songs' Shuffle row: the accent's glyph, 18 px, at x 26 and the
   label at x 54), Add Songs (`plus-circle`) and its songs, each one line, the artist on the right
   column in 15 px Text Tertiary; no Shuffle row over nothing. Centre plays the list from the song;
-  a hold offers **Remove from Playlist** alone. The songs are in the playlist's own order.
+  a hold opens the song's whole hold menu (below), then **Remove from Playlist** last, after a gap and red, which
+  asks on the confirmation card first (the user's ruling, 2026-11-16). The songs are in the playlist's own order.
 - **On-The-Go** (Settings > Playback > Library > On-The-Go, on by default; off hides its row and Add to On-The-Go):
   Shuffle, Add Songs, Save as Playlist (`arrow-down`), Clear (`x`), then its songs. Save as Playlist
   makes "On-The-Go N", the first number free, with its songs, empties On-The-Go and lands on the new
   playlist in the list; Clear asks first, Cancel first. Empty, it is Add Songs alone with the note
-  "Or hold Play/Pause on any song", hint "and choose Add to On-The-Go.". A hold on a song offers
-  **Remove from On-The-Go**. It lasts across a restart.
+  "Or hold Play/Pause on any song", hint "and choose Add to On-The-Go.". A hold on a song opens its
+  hold menu with **Remove from On-The-Go** last. It lasts across a restart.
 - **A song's hold menu**: Play Next, Play Last (to the end of Up Next's Playing Next), Add to
   On-The-Go (while On-The-Go is on), Add to Playlist…, Favorite (Remove from Favorites when it is one), then Go to Album, Go to Artist and Go to
   Folder. Add to Playlist… is a picker in the same panel: New Playlist (`plus`) first, which makes
