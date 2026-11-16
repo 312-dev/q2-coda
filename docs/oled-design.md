@@ -615,7 +615,7 @@ a page of their own holding only the empty state (`empty_open`). With no SD card
 | Internet Radio, a station list with none | `radio` | No Stations | Add stations from your computer | |
 | Streaming, a service with no link | `cloud-slash` | Not Connected | Turn on Wi-Fi to stream | **Turn on Wi-Fi** (opens Settings > Wi-Fi) |
 | Library, no SD card | `sd-card` (Phosphor's `memory`) | No SD Card | Insert an SD card with music | |
-| Car Remote, no phone paired | `car-profile` | No Paired Phones | Open the Car Remote app on your phone | none: under the switch; a phone pairs from its own app |
+| Car Remote, no phone paired | `car-profile` | No Paired Phones | Open Q2 Muse Remote on your phone | none: under the switch; a phone pairs from its own app |
 | Downloads (Tidal Downloads, a card app's songs) | `download-simple` | No Downloads Yet | Synced music shows up here | |
 | Chapters | `list-numbers` | No Chapters | This file has no chapter marks (or: This file's chapters couldn't be read) | |
 

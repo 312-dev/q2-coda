@@ -488,7 +488,7 @@ static int cr_page_show(const void *unused) {
     /* none: the empty state under the switch (docs/oled-design.md#empty-and-offline); a phone
      * pairs from its own app, so there is no row to press */
     static const empty_t none = { "car-profile", "No Paired Phones",
-                                  "Open the Car Remote app on your phone", 0 };
+                                  "Open Q2 Muse Remote on your phone", 0 };
     if (!n) empty_state(cr.page, feedback_below(view), &none, 0);
     ringnav_select(view, 0, 2 + n);
     return 0;

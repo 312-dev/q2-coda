@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Remote's empty state names the phone app: "Open Q2 Muse Remote on your phone".
   - Developer builds: Save Diagnostics also records both battery gauges (the CW2015 the Q2 uses and the power chip's unused one).
   - Card apps: a progress row with no subtitle (a finished download, say) no longer crashes the page.
   - Bluetooth: car stereos and smart speakers that show what's playing (an Echo, a BMW's iDrive and most headsets' apps) now get the song's title, artist, album, track number and length from the Q2. They showed nothing before.

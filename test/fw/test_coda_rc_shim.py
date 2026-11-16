@@ -178,7 +178,7 @@ def test_settings_switch_turns_it_on_and_off(fw, ui, mcl, recs):
     page = ui.top()
     # no phone: the empty state under the switch, with no row (a phone pairs from its own app)
     assert len(ui.rows(page)) == 2 and 'No paired phones' not in ui.shown(page)  # the switch and its gap
-    assert empty_state(ui, page) == ('car-profile', 'No Paired Phones', 'Open the Car Remote app on your phone', None)
+    assert empty_state(ui, page) == ('car-profile', 'No Paired Phones', 'Open Q2 Muse Remote on your phone', None)
     ui.click(page, 0)
     assert [a[:1] for _, a in fw.calls('write_int_config')][-1] == (1,) and q2.system[-1].startswith('( /usr/bin/coda-rc')
     ui.click(page, 0)
