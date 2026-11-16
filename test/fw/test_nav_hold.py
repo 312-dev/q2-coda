@@ -1372,7 +1372,7 @@ def song(recs, n, **kw):
                 artist=kw.pop('artist', 'The Beatles'), **kw)
 
 
-PLAYING_ROWS = ['Play Next', 'Add to Queue', 'View Queue', 'Add to Favorites', 'Add to Playlist', 'Go to Album',
+PLAYING_ROWS = ['Play Next', 'Play Last', 'View Queue', 'Add to Favorites', 'Add to Playlist', 'Go to Album',
                 'Go to Artist', 'Shuffle', 'Repeat', 'Group by']
 
 
@@ -1424,7 +1424,7 @@ def test_an_untagged_song_has_no_go_to(hold, recs):
 def test_now_playing_offers_a_books_chapters(hold, recs, ui):
     hold.now_playing([recs(path=f'/mnt/mmc/Music/{i}.m4b', title=f'Book {i}') for i in range(3)])
     hold.hold()
-    assert hold.menu()[:3] == ['Play Next', 'Add to Queue', 'Chapters']
+    assert hold.menu()[:3] == ['Play Next', 'Play Last', 'Chapters']
 
 
 def test_return_closes_the_menu_and_other_keys_dont(hold, recs, ui, st):
@@ -1477,12 +1477,13 @@ def test_a_favourite_from_the_menu_is_told_to_the_song_s_card_app(hold, recs, fw
     assert hold.card.files['/mnt/mmc/.jf/fav.log'] == b'\npath\t' + state + b'\t/mnt/mmc/Jellyfin/1.flac\n'
 
 
-def test_view_queue_opens_stocks_queue_in_order(hold, recs, ui):
+def test_view_queue_opens_up_next_in_queue_order(hold, recs, ui):
     hold.now_playing([song(recs, i) for i in range(3)])
     hold.hold()
     hold.menu()
     hold.pick('View Queue')
-    assert ui.went[-1] == 'playerqueue_page'
+    assert ui.nodes[ui.top()].name == 'upnext_page' and 'playerqueue_page' not in ui.went
+    assert up_next_rows(ui) == ['Song 2']  # Song 1 plays, heading it; then the queue's order
 
 
 def test_add_to_queue_appends_the_song(hold, recs, ui):
@@ -1490,8 +1491,8 @@ def test_add_to_queue_appends_the_song(hold, recs, ui):
     hold.now_playing(songs)
     hold.hold()
     hold.menu()
-    hold.pick('Add to Queue')
-    assert hold.deques[hold.queue] == songs + [songs[1]] and ui.toasts == ['Added to Queue']  # what it did, in place
+    hold.pick('Play Last')
+    assert hold.deques[hold.queue] == songs + [songs[1]] and ui.toasts == ['Playing Last']  # what it did, in place
 
 
 def test_play_next_puts_the_song_after_the_playing_one(hold, recs, ui):
@@ -1504,7 +1505,7 @@ def test_play_next_puts_the_song_after_the_playing_one(hold, recs, ui):
     assert [field(r, REC_PATH) for r in hold.deques[hold.queue]] == [field(r, REC_PATH) for r in want]
 
 
-@pytest.mark.parametrize('row, said', [('Add to Queue', 'Added to Queue'), ('Play Next', 'Playing Next')])
+@pytest.mark.parametrize('row, said', [('Play Last', 'Playing Last'), ('Play Next', 'Playing Next')])
 def test_oled_says_what_an_in_place_action_did(hold, recs, ui, st, row, said):
     """OLED's feedback (docs/oled-design.md#dialogs-and-toasts): every in-place action gets a toast."""
     use_set(st, 'oled')
@@ -1535,7 +1536,7 @@ def test_a_queue_changed_under_the_menu_is_left_alone(hold, recs, ui):
     hold.hold()
     hold.menu()
     hold.deques[hold.queue].append(song(recs, 9))
-    hold.pick('Add to Queue')
+    hold.pick('Play Last')
     assert ui.toasts == ['Queue unchanged'] and len(hold.deques[hold.queue]) == 4
 
 
@@ -1859,9 +1860,10 @@ def test_view_queue_under_advanced_shuffle_is_up_next(hold, recs, ui, fw):
 
 
 def up_next_rows(ui):
-    """Up Next's rows, its page the top window: each a track's title over its artist."""
+    """Up Next's songs after the playing one, its page the top window, by the title each row reads as."""
     lv, = [k for k in ui.kids(ui.top()) if ui.nodes[k].kind == 'list_view']
-    return ui.rows(ui.kids(lv)[0])
+    return [ui.nodes[k].props['_un_title'] for k in ui.kids(ui.kids(lv)[0])
+            if ui.nodes[k].kind == 'list_item' and '_un_title' in ui.nodes[k].props]
 
 
 @pytest.mark.parametrize('seed', [1, 0x9e3779b9, 0x2545f491])  # whatever order the shuffle draws
@@ -1928,7 +1930,7 @@ def test_oled_draws_the_menu_as_the_inset_modal(fw, ui, st, recs, mcl):
     assert tuple(ui.nodes[lv].rect()) == (58 + 8 - inset, 66, 259 + 2 * (inset - 8), 6 * 32)
     assert not ui.nodes[ui.lookup(hold.dialog, 'view_navbar', 1)].visible
     assert all(tuple(ui.nodes[item].rect()[2:]) == (259 + 2 * (inset - 8), 32) for item in ui.kids(hold.view()))
-    assert rows[:4] == ['Play Next', 'Add to Queue', 'View Queue', 'Add to Favorites'] and 'Group by' in rows
+    assert rows[:4] == ['Play Next', 'Play Last', 'View Queue', 'Add to Favorites'] and 'Group by' in rows
     assert ui.prop(hold.view(), '_ringnav_index', -1) == 0
 
 
@@ -2006,7 +2008,8 @@ def test_holding_play_on_a_song_row_opens_the_songs_menu(hold, recs, ui):
     songs = [song(recs, i) for i in range(3)]
     hold.songs_page('allmusic_page', songs, sel=2)
     assert hold.hold() == STOP
-    assert hold.menu() == ['Play Next', 'Add to On-The-Go', 'Add to Playlist…', 'Favorite', 'Go to Album', 'Go to Artist']
+    assert hold.menu() == ['Play Next', 'Play Last', 'Add to On-The-Go', 'Add to Playlist…', 'Favorite', 'Go to Album',
+                           'Go to Artist']
     assert hold.title() == 'Song 2'
 
 
@@ -2045,7 +2048,7 @@ def test_an_album_rows_menu_shuffles_rates_and_goes_to_its_artist(hold, recs, ui
     albums = [recs(album=a, artist='The Beatles', kind=4, id_=i + 1) for i, a in enumerate(('Help!', 'Revolver'))]
     hold.songs_page('localclass_page', albums, sel=1, cls=0xf003)
     hold.hold()
-    assert hold.menu() == ['Play Next', 'Add to Queue', 'Shuffle', 'Add to Favorites', 'Rate Album', 'Add to Playlist',
+    assert hold.menu() == ['Play Next', 'Play Last', 'Shuffle', 'Add to Favorites', 'Rate Album', 'Add to Playlist',
                            'Go to Artist']
     assert hold.title() == 'Revolver'
 
@@ -2098,7 +2101,7 @@ def test_an_artist_composer_or_genre_row_is_titled_by_its_own_tag(hold, recs, ui
     rows = [recs(kind=4, **{field_: f'{field_} {i}'}) for i in range(2)]
     hold.songs_page('localclass_page', rows, sel=1, cls=cls)
     hold.hold()
-    assert hold.menu() == ['Play Next', 'Add to Queue', 'Shuffle', 'Add to Playlist'] and hold.title() == f'{field_} 1'
+    assert hold.menu() == ['Play Next', 'Play Last', 'Shuffle', 'Add to Playlist'] and hold.title() == f'{field_} 1'
 
 
 def test_a_folder_rows_menu(hold, recs, ui, fw):
@@ -2106,7 +2109,7 @@ def test_a_folder_rows_menu(hold, recs, ui, fw):
     C.memmove(C.addressof(fw.var('fw_ctx_g_folder_path', C.c_char)), b'/mnt/mmc/Music\0', 15)
     hold.songs_page('folder_page', rows, sel=0)
     hold.hold()
-    assert hold.menu() == ['Play Next', 'Add to Queue', 'Shuffle', 'Add to Playlist'] and hold.title() == 'Jazz'
+    assert hold.menu() == ['Play Next', 'Play Last', 'Shuffle', 'Add to Playlist'] and hold.title() == 'Jazz'
 
 
 def test_most_playeds_tracks_hold_as_its_songs(hold, recs, ui, st, fw):

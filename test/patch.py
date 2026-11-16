@@ -3739,7 +3739,7 @@ for selected,name,navbar,played in ((1,'clip.mp4',0,True),(1,'clip.mp4',1,True),
     assert played==(not any(o[0]=='playing_page' for o in m.opened)),(name,navbar)
 passed()
 
-SONG_MENU=['Play Next','Add to Queue','Add to Favorites','Add to Playlist','Go to Album','Go to Artist']
+SONG_MENU=['Play Next','Play Last','Add to Favorites','Add to Playlist','Go to Album','Go to Artist']
 # Now Playing targets the queue even when the last browsed list has unrelated rows.
 def playing_menu(**kw):
     m=QueueMachine(page='playing_page',pos=1,**kw)
@@ -3761,7 +3761,7 @@ m=playing_menu(); id3=syms['g_play_id3_info']; m.u.mem_write(id3,b'/p/B\0'); m.u
 m.press(6000); assert m.hold()==11 and m.nodes[m.title]['text']=='Parsed'; passed()
 m=playing_menu(); assert m.run(2) is None and m.opened[-1][0]=='playerqueue_page' and m.names()==['A','B','C'] and not m.playback(); passed()
 # OLED says what an in-place action did (navigation.c's toasts): Playing Next, Added to Queue, the favourites' own.
-for action,expected,said in ((0,['A','B','B','C'],'Playing Next'),(1,['A','B','C','B'],'Added to Queue')):
+for action,expected,said in ((0,['A','B','B','C'],'Playing Next'),(1,['A','B','C','B'],'Playing Last')):
     m=playing_menu(); assert m.run(action)==said and m.names()==expected and not m.playback(); passed()
 m=playing_menu(); assert m.run(3)=='Added to Favorites'
 assert [c[2:] for c in m.calls if c[0]=='batch_add_file']==[(0xf00a,m.get(syms['mcl_pdeqplaylist']))]
@@ -4143,7 +4143,7 @@ m.call(O['KEY_CENTER']); m.press(100); m.hold(); m.release(); m.advance(300); as
 m.paint(m.view); assert m.call()==11 and m.selected(m.view)==1 and m.selected(m.surface)==2
 assert m.confirm()==11 and m.dispatched()[0][1]==m.nodes[m.view]['children'][1]
 m.pick(1); m.pick(1); m.advance(0)
-assert m.names()==['A','B','C','Row 2'] and [t[3] for t in m.toasts]==['Added to Queue']  # once, said once
+assert m.names()==['A','B','C','Row 2'] and [t[3] for t in m.toasts]==['Playing Last']  # once, said once
 assert m.top==page and m.selected(m.surface)==2 and not m.playback(); passed()
 # Play next lands after the playing track, on the logical row of a recycled table. Later tracks,
 # the shuffle pool and the previous index shift; duplicates stay; playback is never touched.
@@ -4161,7 +4161,7 @@ for cls,artist_type,page,query in ((0xff01,1,'album_page',('getMusicByAlbumAndAl
     if page=='folder_page':
         m.word(m.row(0)+O['REC_TYPE'],4); m.listings['/mnt/sd/Music/Row 0/dir']=[m.song('T3'),m.song('.hidden',4)]
     want=['A','B','C','T1','T3','T2'] if page=='folder_page' else ['A','B','C','T1','T2']
-    assert m.run(1)=='Added to Queue' and m.names()==want and m.query[:3]==query, m.query
+    assert m.run(1)=='Playing Last' and m.names()==want and m.query[:3]==query, m.query
     assert page!='folder_page' or m.loaded_dirs==['/mnt/sd/Music/Row 0','/mnt/sd/Music/Row 0/dir']  # the toast's call reuses their stack
     assert m.names(m.get(syms['tools_pdeq_directory']))==['staged'] and m.pool()==list(range(len(want)))
     passed()
@@ -4169,7 +4169,7 @@ for cls,artist_type,page,query in ((0xff01,1,'album_page',('getMusicByAlbumAndAl
 for action in (0,1):
     m=QueueMachine(page='folder_page'); m.word(m.row(0)+O['REC_TYPE'],4)
     m.found=[m.song('film.mp4'),m.song('song.flac'),m.song('film.MKV')]
-    assert m.run(action)==('Playing Next','Added to Queue')[action]
+    assert m.run(action)==('Playing Next','Playing Last')[action]
     assert m.names()==(['A','song.flac','B','C'] if action==0 else ['A','B','C','song.flac']); passed()
 m=QueueMachine(page='folder_page'); m.word(m.row(0)+O['REC_PATH'],m.string('/mnt/mmc/Videos/film.mp4'))
 m.press(100); m.hold(); assert m.nodes[m.top]['name']=='folder_page' and m.names()==['A','B','C']; passed()
@@ -4182,7 +4182,7 @@ for cls,artist_type,query in ((0xf004,0,('getMusicBySonger','Artist',None)),(0xf
         (0xff02,0,('getMusicByAlbumAndComposer','Album','Comp')),(0xff03,0,('getMusicByAlbumAndGenre','Album','Pop'))):
     m=QueueMachine(page='localclass_page',cls=cls,pos=2); m.word(syms['g_artist_type'],artist_type)
     m.word(m.row(0)+0x20,m.string('Comp')); m.word(m.row(0)+0x1c,m.string('Pop'))
-    assert m.run(1)=='Added to Queue' and m.names()==['A','B','C','T1','T2'] and m.query[:3]==query, m.query
+    assert m.run(1)=='Playing Last' and m.names()==['A','B','C','T1','T2'] and m.query[:3]==query, m.query
     assert m.query[3]==0 or cls<0xff00; passed()
 # Queue category expansion uses music scope; folder expansion still includes spoken tracks.
 class ScopedQueueMachine(QueueMachine):
@@ -4205,7 +4205,7 @@ for cls in (0xf004,0xf005,0xf006,0xff01,0xff02,0xff03,1):
             m.word(r+O['REC_PATH'],m.string(path))
         m.word(m.row(0)+0x20,m.string('Comp')); m.word(m.row(0)+0x1c,m.string('Pop'))
         if cls==1: m.word(m.row(0)+O['REC_TYPE'],4)
-        assert m.run(action)==('Playing Next','Added to Queue')[action]
+        assert m.run(action)==('Playing Next','Playing Last')[action]
         added=['Music','Episode','Book'] if cls==1 else ['Music']
         assert m.names()==(['A']+added+['B','C'] if action==0 else ['A','B','C']+added)
         assert m.get(payload_syms['library_music'])==0
@@ -4222,7 +4222,7 @@ assert m.query==('getMusicByAlbumAndSonger','Album','Artist',1); passed()
 def menu(m,setup=None):
     if setup: setup(m)
     m.press(5); assert m.hold()==11; t=m.nodes[m.title]['text']; got=m.labels(); m.release(); return t,got
-GROUP=['Play Next','Add to Queue','Shuffle','Add to Playlist']
+GROUP=['Play Next','Play Last','Shuffle','Add to Playlist']
 for kw,setup,want in (({},None,('Row 0',SONG_MENU)),
         ({},lambda m:m.favs.add('Row 0'),('Row 0',[*SONG_MENU[:2],'Remove from Favorites',*SONG_MENU[3:]])),
         ({},lambda m:m.open_pages.update({'artistinfo_page','playerjumpinfo_page'}),('Row 0',SONG_MENU[:4])),
@@ -6344,10 +6344,10 @@ def playlist_hold(steps=2):
     return m
 m=playlist_hold(0); m.press(7000); assert m.hold()!=11 and not m.opened  # Import: no dots, stock keeps the hold
 m=playlist_hold(); m.press(7100); assert m.hold()==11 and m.release()==0  # the locked hold's release never toggles playback
-assert m.labels()==['Play Next','Add to Queue','Shuffle','More…'] and m.nodes[m.title]['text']=='List 1'
+assert m.labels()==['Play Next','Play Last','Shuffle','More…'] and m.nodes[m.title]['text']=='List 1'
 m.pick(3); m.advance(0); assert m.opened[-1]==('localmusic/playlistsmore_page',1) and m.names()==['A','B','C']; passed()
 for row,want in ((0,['A','T1','T2','B','C']),(1,['A','B','C','T1','T2'])):
-    m=playlist_hold(); assert m.run(row)==('Playing Next','Added to Queue')[row] and m.names()==want and m.query[:2]==('getMusicByPlayList',8)
+    m=playlist_hold(); assert m.run(row)==('Playing Next','Playing Last')[row] and m.names()==want and m.query[:2]==('getMusicByPlayList',8)
     assert not m.playback(); passed()
 m=playlist_hold(1); m.found=[m.song('dir',4)]; assert m.run(0)=='Queue unchanged' and m.names()==['A','B','C']; passed()
 m=playlist_hold(); m.press(7100); assert m.hold()==11 and m.release()==0
@@ -7921,7 +7921,7 @@ for found,want in (((('b.mp3','/p/b.mp3',2,1),('a.mp3','/p/a.mp3',1,2),('c.mp3',
     f,ctx=m.handler(m.nodes[view]['children'][0],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
     assert [n.rsplit('.',1)[0] if n.endswith(('.mp3','.flac')) else n for n in m.names(m.plays[-1][1]&0xffffffff)]==want; passed()
 
-COVER_ALBUM=['Play Next','Add to Queue','Shuffle','Add to Favorites','Rate Album']  # a cover's menu, Go to artist aside
+COVER_ALBUM=['Play Next','Play Last','Shuffle','Add to Favorites','Rate Album']  # a cover's menu, Go to artist aside
 # Album holds use the live carousel before tracks have ever been opened, and the same ordering.
 for action,want in ((0,['A','early','late','B','C']),(1,['A','B','C','early','late'])):
     m=CoverflowMachine(); m.found=[track(m,'late','/p/z',2,1),track(m,'early','/p/a',1,2)]
@@ -7947,7 +7947,7 @@ assert m.run(2) is None and m.plays[-1][2] in (0,1) and m.plays[-1][3:]==(0xf001
 # A Library Albums row queues its own album alone, as a cover does: getMusicByAlbum finds every
 # album of the name, here T1 in another folder.
 m=CoverflowMachine(page='album_page',cls=O['CLASS_ALBUMS'],pos=2); m.word(m.found[0]+O['REC_PATH'],m.string('/q/T1'))
-assert m.run(1)=='Added to Queue' and m.names()==['A','B','C','T2'] and m.query[:3]==('getMusicByAlbum','Album',None)  # qm_run says what it did
+assert m.run(1)=='Playing Last' and m.names()==['A','B','C','T2'] and m.query[:3]==('getMusicByAlbum','Album',None)  # qm_run says what it did
 assert m.names(m.get(syms['tools_pdeq_directory']))==['staged'] and m.pool()==[0,1,2,3]; passed()
 
 # Go to artist uses the album record directly; an absent artist omits that action.
@@ -8000,7 +8000,7 @@ m.press(100); assert m.hold()==11 and m.nodes[m.title]['text']=='List 0'
 m.pick(3); m.advance(0); assert m.opened[-1]==('localmusic/playlistsmore_page',2); passed()
 for row in (0,1):  # its songs, by cd_num 10's query
     m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[::-1]))
-    assert m.run(row)==('Playing Next','Added to Queue')[row] and m.query[:2]==('getMusicByPlayList',10) and len(m.names())==5; passed()
+    assert m.run(row)==('Playing Next','Playing Last')[row] and m.query[:2]==('getMusicByPlayList',10) and len(m.names())==5; passed()
 # ... each runs once the menu's dialog is destroyed (its close may still be animating, the dialog on top, and the
 # Playlists page's own click acts only on the top page), and from the pass after: the covers never close inside the
 # dialog's destroy.
@@ -8576,7 +8576,7 @@ for action,want in ((0,['A','T2','B','C']),(1,['A','B','C','T2'])):
     m=CoverflowMachine(cls=O['CLASS_ALBUMS']); m.open(); view=m.tracks()
     m.call(); assert m.selected(view)==1
     m.press(100); assert m.hold()==11 and m.nodes[m.title]['text']=='T2' and m.release()==0
-    assert m.labels()==['Play Next','Add to Queue','Add to Favorites','Go to Artist']
+    assert m.labels()==['Play Next','Play Last','Add to Favorites','Go to Artist']
     assert m.hold()==0  # a repeated hold while the dialog is open cannot open another
     m.pick(action); m.pick(action); m.advance(0)
     assert m.names()==want and m.top==m.page and m.selected(view)==1 and not m.playback() and not m.plays
@@ -8588,7 +8588,7 @@ m=CoverflowMachine(cls=O['CLASS_ALBUMS']); m.open(); view=m.tracks(); assert m.r
 assert [c[1:3] for c in m.calls if c[0]=='batch_add_file']==[(0xf001,0xf00a)] and [c[1] for c in m.calls if c[0]=='batch_init_selectrecord']==[2]
 assert [c[3] for c in m.calls if c[0]=='batch_add_file'][0]!=m.get(syms['p_deque_showlist']); passed()
 m=CoverflowMachine(queue=0,cls=O['CLASS_ALBUMS']); m.open(); m.tracks()
-assert m.run(1)=='Added to Queue' and m.names()==['T1'] and m.mcl('MCL_TYPE')==0xff10 and not m.playback(); passed()
+assert m.run(1)=='Playing Last' and m.names()==['T1'] and m.mcl('MCL_TYPE')==0xff10 and not m.playback(); passed()
 m=CoverflowMachine(mode=2); m.open(); m.tracks(); m.run(0)
 m.call(address=syms['mclNextSong'],args=(0,0,0,0),gap=0)
 assert m.names()==['A','T1','B','C'] and m.mcl('MCL_POS')==1; passed()
@@ -11889,7 +11889,7 @@ assert m.queued==ranked and m.plays==[('playing_page',m.plays[0][1],2,0xf001,2)]
 # A Play/Pause hold on a row opens the song menu, as Coverflow's tracks do, over the ranked list.
 m.handlers[syms['navigator_to']]='q:navigator_to'; view=m.find('scroll_view'); m.paint(view); m.call()
 m.press(100); assert m.hold()==11 and m.nodes[m.title]['text']=='T7' and m.release()==0
-assert m.labels()==['Play Next','Add to Queue','Add to Favorites','Go to Artist']; passed()
+assert m.labels()==['Play Next','Play Last','Add to Favorites','Go to Artist']; passed()
 # Opened again, the kept tracks are ranked again without reading the library; a library change reads it again.
 m.close(); m.found=m.found[:8]; m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=50_000_000)==0 and not called('getAllMusic')

@@ -1,34 +1,226 @@
-/* Up Next (docs/internals.md#queue-menu): View Queue's list while a shuffle is on, the tracks
- * after the playing one in play order. navigation.c's qm_run opens it (up_next), and ringnav_keylong
- * hands a Play/Pause hold on a row to un_hold. */
-#include "offsets.inc"
-#include "peq.h"
+/* Up Next (docs/oled-design.md#up-next, docs/internals.md#queue-menu): the queue from the song
+ * playing on, as Apple Music's. The playing song heads it, its level bars after its title (moving
+ * while it plays, still while paused); then Playing Next, the songs Play Next, Play Last and a bump
+ * queued (playback.c's pending list), under a heading whose Clear pill empties it; then the rest
+ * of the queue in play order under "From <source>", the list, album or page it was played from
+ * (un_source_take). Each song is a row of its cover, its title over its artist.
+ *
+ * The wheel's stops are Clear and the songs: Centre plays a song (as stock's View Queue does,
+ * player_start_queue) and Clear empties Playing Next (playback_next_clear), no confirm. A queued
+ * song past the first has a bump arrow: a tap on it, or Play/Pause held on its row (un_hold),
+ * moves it to the top of Playing Next (playback_next_move), where an accent edge marks it a
+ * moment. Centre held on a queued row lifts it onto a raised card, as the Library's Edit Library
+ * does (library_edit.c): the wheel carries it among Playing Next's rows, each showing a grip,
+ * Centre puts it down there and Return puts it back. The rest of the queue is the queue's own
+ * order: no arrow, no lift, and Play/Pause does nothing on it. Nothing toasts.
+ *
+ * The rows are taken again whenever the queue moves on (un_poll, once a second: the song playing,
+ * the queue's size and loads, Playing Next), so songs ending leave the list as they play.
+ * ponytail: UN_ROWS rows at most, under ringnav's MAX_ENTRIES (512) stops; a table_client page for
+ * more. A touch can't drag a lifted row (Centre and the wheel only). */
+#include "navigation.h"
 #include "playback.h"
-#include "stock.h"
 
-/* Up Next's snapshot cap. ponytail: ringnav navigates at most MAX_ENTRIES (512) rows; a
- * table_client page for more */
-#define UP_NEXT_ROWS 500
-#define SEL "_ringnav_index"                               /* navigation.c's */
-unsigned queue_hash(void *q);                              /* navigation.c */
-const char *track_name(char *buf, unsigned size, void *t); /* coverflow.c */
+#define UN_ROWS 500
+#define UN_BOTTOM 296 /* the list's foot on screen, above the bottom corners' glass */
+#define UN_ROW_H 46   /* a song's row */
+#define UN_NOW_H 50   /* the playing song's, and the gap under it */
+#define UN_HEAD_H 24  /* Playing Next's heading */
+#define UN_FROM_H 26  /* "From ..." and the gap over it */
+#define UN_ART 36     /* a row's cover, UN_ART_DY down, its corners UN_ART_R */
+#define UN_ART_DY 5
+#define UN_ART_R 4
+#define UN_TEXT_DX 46 /* the words this far right of the text column */
+#define UN_TITLE_Y 15 /* the title's middle in its row, the artist's */
+#define UN_ARTIST_Y 32
+#define UN_PILL_H 22 /* Clear: a pill ending UN_PILL_END from the screen's right, as the bar */
+#define UN_PILL_END 16
+#define UN_PILL_PAD 10
+#define UN_PILL_REST 0x2c2c2e
+#define UN_PILL_INK 0x7fa6f5
+#define UN_THIRD 0x858585  /* Text Tertiary */
+#define UN_SECOND 0xababab /* Text Secondary */
+#define UN_BARS_MS 125     /* the level bars, about 8 frames a second */
+#define UN_POLL_MS 1000
+#define UN_HOLD_MS 550  /* Centre held this long on a queued row lifts it */
+#define UN_FRESH_MS 700 /* a bumped row's accent edge */
+#define UN_LIFT_RGB 0x2c2c2e
+#define UN_LIFT_ART 0x3a3a3c /* a placeholder cover on the lifted card */
+#define UN_BUMP_ZONE 64      /* a tap this near the screen's right edge is on a row's arrow */
+#define PX_17 21             /* AWTK's sizes of the design's 17, 14 and 13 px */
+#define PX_14 17
+#define PX_13 16
+#define PX_LIFT 22 /* the lifted row's title, Inter Medium, the design's 18 */
+
+void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind); /* artist_page.c */
+extern unsigned album_key(void *r);
+extern char *art_path(char *out, unsigned key, const char *suffix);
+
 static struct {
-    void *page;                 /* Up Next's page, one at a time */
-    unsigned idx[UP_NEXT_ROWS]; /* its rows' queue indices */
-    void *view;                 /* its list */
-    unsigned n, hash, row;      /* its rows, the queue_hash they were taken from, a hold's */
+    void *page, *view;        /* the page and its rows' scroll view, 0 when closed */
+    void *now, *head, *clear; /* the playing song's row, Playing Next's heading and its Clear */
+    unsigned idx[UN_ROWS];    /* the rows' queue indices: Playing Next's first, npn of them */
+    unsigned n, npn, sig;     /* the rows, how many are queued, what they were taken from */
+    unsigned poll, bars, hold, fresh_timer;
+    int lifted;       /* a lifted queued row's place + 1, 0 none */
+    int lift_from;    /* ... and where it was lifted from */
+    int centre;       /* the Centre hold that lifted one: its release is taken */
+    int fresh;        /* the bumped row's place + 1 while its edge shows */
+    int frame;        /* the level bars' frame */
+    char source[128]; /* the queue's source (un_source_take) */
 } un __attribute__((section(".scratch")));
 
-/* View Queue while a shuffle is on (Up Next): the tracks after the playing one in the order they
- * play, which a shuffle's order differs from the queue's that stock's playerqueue_page lists. A row
- * plays its track as stock's does (player_start_queue, unless Headphones required forbids it), and
- * the page closes, as its snapshot is
- * then stale. ponytail: a snapshot taken on open (and again on a hold's move, un_move), capped at
- * UP_NEXT_ROWS; the page does not follow the playing track, and a queue replaced while it is open
- * (a folder play's next folder) leaves a row's tap naming another track; a hold checks. */
-static int un_play(void *ctx, void *event) {
+/* A pick that loads a queue (playback.c ringnav_load): where it came from, for "From ...": an
+ * album's (class 0xff1x) its album, else the page in front's title as the bar shows it. */
+void un_source_take(void *q, int at, int type) {
+    void *r = q && (unsigned)at < deque_size(q) ? deque_at(q, (unsigned)at) : (void *)0;
+    const char *album = r && (type & 0xfff0) == 0xff10 ? P(r, REC_ALBUM) : (const char *)0;
+    un.source[0] = 0;
+    if (album && *album)
+        tk_snprintf(un.source, sizeof un.source, "%s", album);
+    else if (st.bar_title && st.bar_titled)
+        widget_get_text_utf8(st.bar_title, un.source, sizeof un.source);
+}
+
+/* The rows' signature: the song playing, the queue's size and loads, the mode, Playing Next. */
+static unsigned un_sig(void) {
     void *q = P(mcl_pdeqplaylist, 0);
-    unsigned at = un.idx[(long)ctx];
+    unsigned pend[64],
+        k = playback_next_rows(pend, 64),
+        v[] = { (unsigned)MCL(MCL_POS),  q ? deque_size(q) : 0,        playback_loads,
+                (unsigned)MCL(MCL_MODE), (unsigned)playback_option(0), k };
+    return hash_bytes(fnv(FNV_SEED, (const unsigned char *)""), (const unsigned char *)v,
+                      sizeof v) ^
+           hash_bytes(FNV_SEED, (const unsigned char *)pend, k * sizeof *pend);
+}
+
+/* a row's cover as a file:// URL in url (520 bytes), or 0 for the placeholder (library_artist.c's)
+ */
+static const char *un_cover(void *r, char *url) {
+    const char *path = P(r, REC_PATH);
+    if (!path) return (const char *)0; /* nothing to find it by */
+    tk_snprintf(url, 8, "file://");
+    if (catalogue_cover(path, url + 7, 513)) return url;
+    art_path(url + 7, album_key(r), "");
+    return file_size(url + 7) > 0 ? url : (const char *)0;
+}
+
+static void *un_record(unsigned at) {
+    void *q = P(mcl_pdeqplaylist, 0);
+    return q && at < deque_size(q) ? deque_at(q, at) : (void *)0;
+}
+
+/* The covers the rows loaded, let go of */
+static void un_unload(void) {
+    char url[520];
+    for (unsigned i = 0; i < un.n; ++i) {
+        void *r = un_record(un.idx[i]);
+        if (r && un_cover(r, url)) image_manager_unload_bitmap_by_name(image_manager(), url);
+    }
+}
+
+static int un_click(void *ctx, void *event);
+static int un_clear(void *ctx, void *event);
+
+/* A song's row: its cover as an image, the rest painted (upnext_paint) */
+static void *un_row(void *parent, void *r, int h, int stop, int (*click)(void *, void *)) {
+    char url[520];
+    void *item =
+        click ? list_item_create(parent, 0, 0, 375, h) : label_create(parent, 0, 0, 375, h);
+    widget_use_style(item, "s_listitem_black");
+    widget_set_prop_int(item, "_un_stop", stop);
+    char name[512];
+    const char *title = r ? now_tag(r, REC_TITLE) : (const char *)0;
+    if (r && (!title || !*title)) title = track_name(name, sizeof name, r);
+    widget_set_prop_str(item, "_un_title",
+                        title ? title : ""); /* what it reads as (tests, a reader) */
+    const char *cover = r ? un_cover(r, url) : (const char *)0;
+    if (cover) {
+        void *img = image_create(item, geom_val(V_TEXT_X), UN_ART_DY, UN_ART, UN_ART);
+        image_set_draw_type(img, 4); /* scaled to fit */
+        image_base_set_image(img, cover);
+    }
+    if (click) widget_on(item, EVT_CLICK, click, (void *)(long)stop);
+    return item;
+}
+
+/* The rows, taken again; sel the stop selected after, -1 the first song */
+static void un_fill(int sel) {
+    unsigned up[UN_ROWS], pend[64], n = playback_upcoming(up, UN_ROWS), k = 0, at, size;
+    unsigned npn = playback_next_rows(pend, 64);
+    un_unload();
+    /* Playing Next first: the upcoming rows that are its, in order, are not repeated after it */
+    while (k < n && k < npn && up[k] == pend[k]) ++k;
+    for (unsigned i = 0; i < npn; ++i) un.idx[i] = pend[i];
+    un.n = npn;
+    for (unsigned i = k; i < n && un.n < UN_ROWS; ++i) un.idx[un.n++] = up[i];
+    un.npn = npn < UN_ROWS ? npn : UN_ROWS;
+    un.sig = un_sig();
+    /* the list the page's whole height (page_list sizes it to its rows) */
+    void *view = un.view = page_list(un.page, un.page, 0, "Up Next", UN_ROWS, UN_ROW_H);
+    void *lv = P(view, W_PARENT), *wm = window_manager();
+    widget_set_prop_int(lv, "item_height", 0); /* each child its own height */
+    int y = 0; /* the list down to UN_BOTTOM on screen, rows of mixed heights cut there */
+    for (void *p = lv; p && p != wm; p = P(p, W_PARENT)) y += I(p, W_Y);
+    if (UN_BOTTOM > y)
+        widget_resize(lv, I(lv, W_W), UN_BOTTOM - y),
+            widget_resize(view, I(view, W_W), UN_BOTTOM - y);
+    void *now = queue_now(&at, &size);
+    un.now = un_row(view, now, UN_NOW_H, -1, 0);
+    un.head = un.clear = (void *)0;
+    int stop = 0, first = -1;
+    if (un.npn) {
+        un.head = label_create(view, 0, 0, 375, UN_HEAD_H);
+        widget_use_style(un.head, "s_listitem_black");
+        un.clear = list_item_create(un.head, 0, 0, 0, UN_PILL_H); /* placed when painted */
+        widget_set_prop_int(un.clear, "_un_stop", stop++);
+        widget_on(un.clear, EVT_CLICK, un_clear, (void *)0);
+    }
+    for (unsigned i = 0; i < un.n; ++i) {
+        if (i == un.npn) {
+            void *from = label_create(view, 0, 0, 375, UN_FROM_H);
+            widget_use_style(from, "s_listitem_black");
+            widget_set_prop_int(from, "_un_from", 1);
+        }
+        if (first < 0) first = stop;
+        un_row(view, un_record(un.idx[i]), UN_ROW_H, stop++, un_click);
+    }
+    int h = 0;
+    for (unsigned i = 0, c = widget_count_children(view); i < c; ++i)
+        h += I(widget_get_child(view, i), W_H);
+    widget_set_prop_int(view, "virtual_h", h);
+    widget_layout_children(view);
+    if (un.clear) { /* Clear's pill on the heading's right, ending with the selection bar */
+        int w = 0;
+        void *canvas = widget_get_canvas(un.head);
+        if (canvas) {
+            unsigned buf[8];
+            unsigned m = ar_wide("Clear", buf, 8);
+            canvas_set_font(canvas, "inter-medium", PX_14);
+            w = (int)(canvas_measure_text(canvas, buf, m) + 0.5f);
+        }
+        w = (w ? w : 38) + 2 * UN_PILL_PAD;
+        widget_move_resize(un.clear, 375 - UN_PILL_END - w, 0, w, UN_PILL_H);
+    }
+    if (stop)
+        ringnav_select(view, sel < 0 ? (first < 0 ? 0 : first) : sel < stop ? sel : stop - 1, stop);
+    widget_invalidate_force(un.page, (void *)0);
+}
+
+/* The row at stop, the place in un.idx it shows, -1 for Clear or none */
+static int un_place(int stop) { return stop - (un.npn ? 1 : 0); }
+
+/* A song's row pressed (Centre or a tap): it plays, as stock's View Queue row, and the page
+ * closes; a tap on a queued row's arrow bumps it instead. */
+static int un_bump(int k);
+static int un_click(void *ctx, void *event) {
+    int k = un_place((int)(long)ctx);
+    if (k < 0 || (unsigned)k >= un.n || un.lifted) return 0;
+    if (event && I(event, EVENT_TYPE) == EVT_CLICK && st.touch_mode && k > 0 &&
+        (unsigned)k < un.npn && I(event, EVENT_X) >= 375 - UN_BUMP_ZONE)
+        return un_bump(k), 0;
+    void *q = P(mcl_pdeqplaylist, 0);
+    unsigned at = un.idx[k];
     int keeps = q && playback_keeps(q, (int)at);
     if (!keeps && q && at < deque_size(q) && !check_forbid_play_no_headset(0))
         press_stamp(), player_start_queue((int)at);
@@ -36,48 +228,249 @@ static int un_play(void *ctx, void *event) {
     if (keeps) playback_np();
     return 0;
 }
-/* The rows, taken again; sel, if not -1, the row selected. */
-static void un_fill(int sel) {
-    void *q = P(mcl_pdeqplaylist, 0);
-    unsigned *idx = un.idx, n = un.n = playback_upcoming(idx, UP_NEXT_ROWS);
-    un.hash = q ? queue_hash(q) : 0;
-    void *view = un.view =
-        page_list_or(un.page, un.page, "View Queue", "Nothing to play next", n, 64);
-    char name[512];
-    for (unsigned i = 0; i < n; i++) { /* the title over the artist, if tagged */
-        void *t = deque_at(q, idx[i]);
-        const char *artist = P(t, REC_ARTIST);
-        page_row_detail(view, i, track_name(name, sizeof name, t), artist ? artist : "", un_play);
-    }
-    if (sel >= 0 && n) ringnav_select(view, sel, (int)n);
-}
-/* The page gone: the next View Queue opens a new one. */
-static int un_closed(void *ctx, void *event) {
-    un.page = 0;
+
+/* Clear: Playing Next empties, the selection on the first song left */
+static int un_clear(void *ctx, void *event) {
+    (void)ctx, (void)event;
+    if (!un.page || un.lifted) return 0;
+    playback_next_clear();
+    un_fill(-1);
     return 0;
 }
-void up_next(int (*keyup)(void *, void *)) {
-    if (un.page || !(un.page = page_open("upnext_page", un_closed, keyup))) return;
-    un_fill(-1);
+
+static int un_fresh_due(const void *info) {
+    (void)info;
+    un.fresh_timer = 0;
+    un.fresh = 0;
+    if (un.page) widget_invalidate_force(un.page, (void *)0);
+    return 0;
 }
-/* A Play/Pause hold on a row (un_hold, deferred out of its dispatch): the row's track plays next
- * (playback_move) and the rows are taken again with it at row 0, the selection there. A row already
- * next stays there. A queue changed under the page, or a row no longer up next (played since),
- * takes the rows again and says "Queue changed"; a page gone or a row out of range does nothing. */
-static int un_move(const void *unused) {
-    unsigned row = un.row, up[UP_NEXT_ROWS], n = playback_upcoming(up, UP_NEXT_ROWS), i = 0;
-    void *q = P(mcl_pdeqplaylist, 0);
-    if (!un.page || row >= un.n || !q) return 0;
-    unsigned at = un.idx[row];
-    while (i < n && up[i] != at) ++i;
-    int stale = queue_hash(q) != un.hash || i == n || (i && playback_move(at) < 0);
-    un_fill(0);
-    if (stale) toast("Queue changed");
+
+/* Queued row k to the top of Playing Next, its edge lit a moment; the selection stays where it is,
+ * on the row that took its place, so the next one up bumps as well */
+static int un_bump(int k) {
+    if (k <= 0 || (unsigned)k >= un.npn || !playback_next_move((unsigned)k, 0)) return 0;
+    un_fill(widget_get_prop_int(un.view, SEL, -1));
+    un.fresh = 1;
+    rearm(&un.fresh_timer, un_fresh_due, UN_FRESH_MS);
+    return 1;
+}
+
+/* A Play/Pause hold on the page (navigation.c ringnav_keylong): on a queued row past the first it
+ * bumps it; on any other row it does nothing. 1 when the page took it. */
+static int un_hold_due(const void *info) {
+    (void)info;
+    if (un.page && !un.lifted) un_bump(un_place(widget_get_prop_int(un.view, SEL, -1)));
     return 0;
 }
 int un_hold(void *top) {
-    int row = top && top == un.page ? widget_get_prop_int(un.view, SEL, -1) : -1;
-    if (row < 0 || !timer_add(un_move, (void *)0, 0)) return 0;
-    un.row = (unsigned)row;
+    if (!top || top != un.page) return 0;
+    timer_add(un_hold_due, (void *)0, 0);
     return 1;
+}
+
+/* The lifted row moved to place to of Playing Next: the view's children reordered (the row's
+ * stop index is its place), the selection with it */
+static void un_carry(int to) {
+    int from = un.lifted - 1;
+    if (to < 0 || (unsigned)to >= un.npn || to == from) return;
+    unsigned x = un.idx[from], base = 2; /* the playing row and the heading come first */
+    void *row = widget_get_child(un.view, base + (unsigned)from);
+    for (int k = from; k > to; --k) un.idx[k] = un.idx[k - 1];
+    for (int k = from; k < to; ++k) un.idx[k] = un.idx[k + 1];
+    un.idx[to] = x;
+    widget_restack(row, base + (unsigned)to);
+    for (unsigned k = 0; k < un.npn; ++k) /* each row's stop, its place again */
+        widget_set_prop_int(widget_get_child(un.view, base + k), "_un_stop", (int)k + 1);
+    widget_layout_children(un.view);
+    un.lifted = to + 1;
+    ringnav_select(un.view, to + 1, (int)un.n + 1);
+}
+
+static int un_lift_due(const void *info) {
+    (void)info;
+    un.hold = 0;
+    int k = un_place(widget_get_prop_int(un.view, SEL, -1));
+    if (!un.page || window_manager_get_top_window(window_manager()) != un.page || k < 0 ||
+        (unsigned)k >= un.npn)
+        return 0;
+    if (st.centre_hold) { /* stock's own hold, Shut Down?, never comes */
+        timer_remove(st.centre_hold);
+        st.centre_hold = 0;
+    }
+    un.centre = 1;
+    un.lifted = un.lift_from = k + 1;
+    /* the raised card: the row's own background, so its cover stays over it (un_fill's rows are
+     * new, so a drop or a cancel ends it) */
+    void *row = widget_get_child(un.view, 2 + (unsigned)k);
+    widget_set_prop_int(row, "style:normal:bg_color", (int)RGBA(UN_LIFT_RGB));
+    widget_set_prop_int(row, "style:normal:round_radius", 10);
+    widget_invalidate_force(un.page, (void *)0);
+    return 0;
+}
+
+/* navigation.c's key-down: Centre pressed on a queued row starts the hold that lifts it */
+void un_keydown(unsigned key) {
+    if (key != KEY_CENTER || !un.page || un.lifted || un.hold || st.touch_mode ||
+        window_manager_get_top_window(window_manager()) != un.page)
+        return;
+    int k = un_place(widget_get_prop_int(un.view, SEL, -1));
+    if (k >= 0 && (unsigned)k < un.npn) un.hold = timer_add(un_lift_due, (void *)0, UN_HOLD_MS);
+}
+
+/* navigation.c's key filter, a key's release on top: 1 if Up Next took it. The release of the
+ * hold that lifted a row; with one lifted, the wheel carries it (owned: its press was silenced, so
+ * a move clicks), Centre puts it down and Playing Next takes the order, Return puts it back. */
+int un_key(void *top, unsigned key, int owned) {
+    if (key == KEY_CENTER) {
+        stop_timer(&un.hold);
+        if (un.centre) {
+            un.centre = 0;
+            *(volatile unsigned char *)KEY_LOCKOUT = 0; /* the wheel at once, as a click's */
+            return 1;
+        }
+    }
+    if (!un.lifted || !top || top != un.page) return 0;
+    int at = un.lifted - 1;
+    if (key == KEY_CENTER || key == KEY_RETURN) {
+        if (key == KEY_RETURN && *(volatile unsigned char *)RETURN_RELEASE_LATCH) return 0;
+        int from = un.lift_from - 1;
+        *(volatile unsigned char *)KEY_LOCKOUT = 0;
+        un.lifted = 0;
+        if (key == KEY_CENTER && at != from) playback_next_move((unsigned)from, (unsigned)at);
+        un_fill(key == KEY_CENTER ? at + 1 : from + 1);
+        return 1;
+    }
+    int dir = key == KEY_NEXT ? 1 : key == KEY_PREV ? -1 : 0;
+    if (!dir) return 0;
+    if ((unsigned)(at + dir) < un.npn) {
+        un_carry(at + dir);
+        if (owned) buzzeer_switch(1);
+    }
+    widget_invalidate_force(un.page, (void *)0);
+    return 1;
+}
+
+/* Once a second: the queue moved on (un_sig) takes the rows again, the selection's stop kept */
+static int un_poll(const void *info) {
+    (void)info;
+    if (!un.page) return 0;
+    if (!un.lifted && !un.hold && un_sig() != un.sig)
+        un_fill(widget_get_prop_int(un.view, SEL, -1));
+    return 8; /* RET_REPEAT */
+}
+
+/* The level bars' frame, while the page is in front and the song plays */
+static int un_bars_due(const void *info) {
+    (void)info;
+    if (!un.page) return 0;
+    if (window_manager_get_top_window(window_manager()) != un.page || mclGetPlayStatus() != 2)
+        return 8; /* RET_REPEAT: still, the frame stays */
+    ++un.frame;
+    if (un.now) widget_invalidate_force(un.now, (void *)0);
+    return 8;
+}
+
+static int un_closed(void *ctx, void *event) {
+    (void)ctx, (void)event;
+    un_unload();
+    stop_timer(&un.poll);
+    stop_timer(&un.bars);
+    stop_timer(&un.hold);
+    stop_timer(&un.fresh_timer);
+    un.page = un.view = un.now = un.head = un.clear = (void *)0;
+    un.lifted = un.centre = un.fresh = 0;
+    return 0;
+}
+
+void up_next(int (*keyup)(void *, void *)) {
+    if (un.page || !(un.page = page_open("upnext_page", un_closed, keyup))) return;
+    un_fill(-1);
+    un.poll = timer_add(un_poll, (void *)0, UN_POLL_MS);
+    un.bars = timer_add(un_bars_due, (void *)0, UN_BARS_MS);
+}
+
+/* Whether w's place on the list is lit: the selection, shown */
+static int un_lit(void *w) {
+    return !st.touch_mode &&
+           widget_get_prop_int(un.view, SEL, -1) == widget_get_prop_int(w, "_un_stop", -2);
+}
+
+/* The playing song's level bars from x, standing on base: three, moving with un.frame */
+static void un_level(void *canvas, int x, int base, unsigned rgb) {
+    static const unsigned char h[4][3] = { { 7, 11, 5 }, { 10, 6, 9 }, { 5, 9, 11 }, { 9, 12, 6 } };
+    for (int i = 0; i < 3; ++i) {
+        int bh = h[un.frame & 3][i];
+        rect_t r = { x + i * 9 / 2, base - bh, 3, bh };
+        fill_box(canvas, &r, RGBA(rgb), 1);
+    }
+}
+
+/* The grip a lifted row's queue shows: three bars on the right column */
+static void un_grip(void *canvas, int y, unsigned rgb) {
+    for (int i = -1; i <= 1; ++i) {
+        rect_t r = { 375 - geom_val(V_RIGHT_X) - 17, y + i * 5 - 1, 18, 2 };
+        fill_box(canvas, &r, RGBA(rgb), 1);
+    }
+}
+
+/* ringnav_paint, after a widget's own paint: Up Next's rows, headings and Clear */
+void upnext_paint(void *w, void *canvas) {
+    if (!un.page || !w || !P(canvas, CANVAS_LCD)) return;
+    void *parent = P(w, W_PARENT);
+    if (parent != un.view && w != un.clear) return;
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR),
+             accent = scheme()->tones[0] & 0xffffffu, black = flip_if(ipod_light(), 0);
+    int x = geom_val(V_TEXT_X), tx = x + UN_TEXT_DX, end = 375 - geom_val(V_RIGHT_X), h = I(w, W_H);
+    if (w == un.clear) {
+        int on = un_lit(w);
+        rect_t r = { 0, 0, I(w, W_W), h };
+        fill_box(canvas, &r, RGBA(black), 0); /* the corners: the page's, not the row's own paint */
+        fill_box(canvas, &r, RGBA(on ? accent : UN_PILL_REST), UN_PILL_H / 2);
+        ar_text(canvas, "Clear", 1, PX_14, on ? 0xffffff : UN_PILL_INK, 1, I(w, W_W) - UN_PILL_PAD,
+                h / 2, I(w, W_W), 3);
+    } else if (w == un.head) {
+        ar_text(canvas, "Playing Next", 1, PX_13, UN_SECOND, 0, x, h / 2, 250, 2);
+    } else if (widget_get_prop_int(w, "_un_from", 0)) {
+        char from[160];
+        tk_snprintf(from, sizeof from, un.source[0] ? "From %s" : "Next in Queue", un.source);
+        ar_text(canvas, from, 1, PX_13, UN_SECOND, 0, x, 2 + (h - 2) / 2, end - x, 2);
+    } else {
+        int stop = widget_get_prop_int(w, "_un_stop", -2), k = w == un.now ? -1 : un_place(stop),
+            on = w != un.now && un_lit(w), lifted = un.lifted && k == un.lifted - 1;
+        unsigned at = 0, size = 0;
+        void *r = w == un.now                    ? queue_now(&at, &size)
+                  : k >= 0 && (unsigned)k < un.n ? un_record(un.idx[k])
+                                                 : (void *)0;
+        if (!r) return;
+        rect_t art = { x, UN_ART_DY, UN_ART, UN_ART };
+        if (!widget_count_children(w)) /* no cover: a placeholder, a shade lighter on the card */
+            fill_box(canvas, &art, RGBA(lifted ? UN_LIFT_ART : UN_PILL_REST), UN_ART_R);
+        else
+            ar_corners(canvas, &art, UN_ART_R, lifted ? UN_LIFT_RGB : on ? accent : black);
+        char name[512];
+        const char *title = now_tag(r, REC_TITLE), *artist = P(r, REC_ARTIST);
+        if (!title || !*title) title = track_name(name, sizeof name, r);
+        int queued = k >= 0 && (unsigned)k < un.npn, right = un.lifted && queued ? 30 : 0;
+        if (!right && queued && k > 0) right = 30; /* the arrow's room */
+        int tw = ar_text(canvas, title, lifted, lifted ? PX_LIFT : PX_17, 0xffffff, on, tx,
+                         UN_TITLE_Y, end - right - tx, 2);
+        if (artist && *artist)
+            ar_text(canvas, artist, 0, PX_13, on || lifted ? 0xffffff : UN_THIRD, on, tx,
+                    UN_ARTIST_Y, end - right - tx, 2);
+        if (w == un.now) un_level(canvas, tx + tw + 7, UN_TITLE_Y + 6, accent);
+        if (un.lifted && queued)
+            un_grip(canvas, h / 2, lifted || on ? 0xffffff : UN_THIRD);
+        else if (queued && k > 0) {
+            unsigned bitmap[64]; /* bitmap_t: the bump arrow */
+            const char *ink = on ? "bump_w" : ipod_light() ? "bump_l" : "bump_d";
+            if (!widget_load_image(w, theme_art(ink), bitmap))
+                canvas_draw_icon(canvas, bitmap, end - 8, h / 2);
+        }
+        if (queued && un.fresh == k + 1) { /* just bumped: an accent edge where it landed */
+            rect_t edge = { 16, 6, 3, h - 12 };
+            fill_box(canvas, &edge, RGBA(accent), 1);
+        }
+    }
+    stock_canvas_set_fill_color(canvas, fill);
 }

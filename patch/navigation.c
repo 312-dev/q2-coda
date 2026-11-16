@@ -218,7 +218,8 @@ extern int books_key(void *top, unsigned key), video_on(void), books_video(const
 extern void games_paint(void *w, void *canvas);
 extern void spot_poll(void), spot_paint(void *w, void *canvas), *spot_art(void);
 extern void up_next(int (*keyup)(void *, void *));
-extern int un_hold(void *top);
+extern int un_hold(void *top), un_key(void *top, unsigned key, int owned);
+extern void un_keydown(unsigned key), upnext_paint(void *w, void *canvas);
 extern void radio_poll(void);
 extern void xfade_row(void *label), wheel_row(void *label), resume_row(void *label),
     mono_row(void *label), swap_row(void *label), night_row(void *label);
@@ -2393,6 +2394,7 @@ int ringnav_paint(void *w, void *canvas) {
     pl_tile_paint(w, canvas);
     pv_paint(w, canvas);
     lr_edit_paint(w, canvas); /* OLED's Edit Library over the Library page (library_edit.c) */
+    upnext_paint(w, canvas);  /* Up Next's rows (upnext.c) */
     paint_cover(w, canvas);
     paint_scrubber(w, canvas);
     if (w && st.np_lrc) { /* one test on every other page's paints (the Cover Flow paint budget) */
@@ -3952,7 +3954,8 @@ static void lyric_snap(void *lrc) {
  * them as the wheel does; stock's scroll animation stops as it lands, so only the finger moves
  * them, and a swipe that brings the page in holds nothing. A swipe to another page and back keeps
  * the hold; leaving Now Playing drops it (np_gone). Another song starts at the top, its hold
- * gone. The lyrics page's rows are its lines, a tick's worth a line. */
+ * gone. The lyrics page's rows are its lines, a tick's worth a one-row line's height
+ * (lyrics_row_h), so a tick lands on a row top. */
 #define LYRIC_ROW_PX 20
 
 /* Now Playing's lyrics are the lyrics page's (lyrics.c): the rows full width after a blank
@@ -4109,7 +4112,7 @@ static void lyric_poll(void) {
         int y = I(lrc, SCROLL_Y),
             from = st.lyric_glide || (st.lyric_to + 8) >> 4 == y ? st.lyric_to : y * 16;
         /* x rises anticlockwise: back up the lyrics */
-        int row = lyrics_on(lrc) ? LYRIC_SLOT : LYRIC_ROW_PX;
+        int row = lyrics_on(lrc) ? lyrics_row_h() : LYRIC_ROW_PX;
         lyric_glide(lrc, from - travel * row * 16 * wheel_pct() / (WHEEL_TICK_UNITS * 50));
         st.lyric_spun = 1;
     }
@@ -4273,7 +4276,7 @@ static int np_centre(unsigned now) {
     }
     if (st.scrub) {
         scrub_end();
-        if (theme()->np_modes)
+        if (theme()->np_modes && !np_radio_on()) /* a radio's order is the app's: no stops */
             np_stage(NP_STAGE_SHUFFLE);
         else if (!rate_open())
             np_stage(NP_STAGE_REST);
@@ -7501,15 +7504,33 @@ void *qm_collect(void *r) {
     return add;
 }
 
-/* Insert at pos+1 or append; playback_queue_insert keeps every queue index right. Shuffle picks at
- * random, so the first inserted track is forced once (ringnav_shuffle). */
+/* Play Next (next 1) at pos+1, or Play Last (2) at the end of Playing Next; playback_queue_insert
+ * keeps every queue index right. Shuffle picks at random, so Play Next's first track is forced
+ * once (ringnav_shuffle). */
 static void qm_insert(void *queue, void *add, int next) {
     unsigned at = playback_queue_insert(queue, add, next);
-    if (next) {
+    if (next == 1) {
         /* stock Shuffle's only: advanced Shuffle Songs (also MCL_MODE 2) plays its own order */
         st.qm_forced = MCL(MCL_MODE) == 2 && !playback_option(0) ? at + 1 : 0;
         st.qm_forced_hash = rec_hash(deque_at(queue, at));
     }
+}
+
+/* Up Next (upnext.c), from the hold menu's View Queue, Now Playing's queue button and its swipe up.
+ * A shuffle's play order is not the list's, so stock's Shuffle is given one first
+ * (playback_listable), and a Play Next it was holding (ringnav_shuffle) goes first in it, as
+ * advanced play has no forced pick. A timer's: out of the dispatch that asked. */
+int np_queue(const void *unused) {
+    (void)unused;
+    if (playback_listable()) {
+        void *queue = P(mcl_pdeqplaylist, 0);
+        unsigned at = st.qm_forced - 1;
+        st.qm_forced = 0;
+        if (queue && at < deque_size(queue) && rec_hash(deque_at(queue, at)) == st.qm_forced_hash)
+            playback_move(at);
+    }
+    up_next(page_keyup);
+    return 0;
 }
 
 static int qm_apply(void *add, int next) {
@@ -8209,18 +8230,7 @@ static int qm_run(const void *unused) {
     } else if (r && a == QA_CHAPTERS) {
         chapters_open(r);
     } else if (r && a == QA_QUEUE) {
-        /* A shuffle's play order is not the list's: ours (Up Next). A Play Next stock's Shuffle was
-         * holding (ringnav_shuffle) goes first in it, as advanced play has no forced pick. */
-        if (playback_listable()) {
-            void *queue = P(mcl_pdeqplaylist, 0);
-            unsigned at = st.qm_forced - 1;
-            st.qm_forced = 0;
-            if (queue && at < deque_size(queue) &&
-                rec_hash(deque_at(queue, at)) == st.qm_forced_hash)
-                playback_move(at);
-            up_next(page_keyup);
-        } else
-            navigator_to("playerqueue_page");
+        np_queue(0);
     } else if (a == QA_MORE && st.qm_kind == QM_PLAYLIST) {
         if (r) navigator_to_with_context("localmusic/playlistsmore_page", (void *)(long)st.qm_idx);
     } else if (r && a == QA_SORT) {
@@ -8320,10 +8330,10 @@ static int qm_run(const void *unused) {
         qm_goto(r, a == QA_ALBUM);
     else {
         void *add = r ? qm_collect(r) : (void *)0;
-        if (!add || !(a == QA_SHUFFLE ? shuffle_play(add) : qm_apply(add, a == QA_NEXT)))
+        if (!add || !(a == QA_SHUFFLE ? shuffle_play(add) : qm_apply(add, a == QA_NEXT ? 1 : 2)))
             toast("Queue unchanged");
         else if (a != QA_SHUFFLE) /* OLED says what an in-place action did */
-            toast(a == QA_NEXT ? "Playing Next" : "Added to Queue");
+            toast(a == QA_NEXT ? "Playing Next" : "Playing Last");
         if (add) deque_destroy(add);
     }
     /* closed for good after a new order: Songs, already on top again, reloads in it now, as its
@@ -8469,17 +8479,14 @@ static int qm_open(const void *unused) {
     if (group_first && st.rate_win) acts[n++] = QA_RATE;
     int at, off; /* a spoken CUE book's saved place, from any of its tracks */
     if (st.qm_kind == QM_SONG && book_place(qm_list(), r, &at, &off)) acts[n++] = QA_RESUME;
-    /* the inset modal's song (OLED's, docs/oled-design.md#playlists): Play Next, Add to On-The-Go
-     * (Add to Queue while it is off), Add to Playlist…, Favorite, then the Go to rows; its
-     * playlist: Play, Shuffle, Rename and, after a gap, Delete */
+    /* the inset modal's song (OLED's, docs/oled-design.md#playlists): Play Next, Play Last, Add to
+     * On-The-Go (while it is on), Add to Playlist…, Favorite, then the Go to rows; its playlist:
+     * Play, Shuffle, Rename and, after a gap, Delete */
     int inset = modal_set(), list = inset && st.qm_kind == QM_PLAYLIST,
         own = inset && song && st.qm_kind != QM_PLAYING;
     if (list) acts[n++] = QA_PLAY;
-    if (!list) acts[n++] = QA_NEXT;
-    if (own && ringnav_otg())
-        acts[n++] = QA_OTG;
-    else if (!list)
-        acts[n++] = QA_ADD;
+    if (!list) acts[n++] = QA_NEXT, acts[n++] = QA_ADD;
+    if (own && ringnav_otg()) acts[n++] = QA_OTG;
     if (st.qm_kind == QM_PLAYING) {
         if (chapter_file(r)) acts[n++] = QA_CHAPTERS;
         acts[n++] = QA_QUEUE;
@@ -8515,7 +8522,7 @@ static int qm_open(const void *unused) {
      * review's, 2026-11-15) */
     if (st.qm_kind == QM_PLAYLIST && !list && coverflow_playlist(page)) acts[n++] = QA_NEW_PLAYLIST;
     static const char *const rows[] = { "Play Next",
-                                        "Add to Queue",
+                                        "Play Last",
                                         "Shuffle",
                                         "Add to Favorites",
                                         "Remove from Favorites",
@@ -9711,6 +9718,7 @@ int ringnav_keydown(void *ctx, void *event) {
     if (key == KEY_CENTER)
         st.center_down_at = st.centre_at ? st.centre_at : (unsigned)time_now_ms() | 1;
     lr_edit_keydown(key); /* Centre held on the Library: Edit Library (library_edit.c) */
+    un_keydown(key);      /* ... on a queued song in Up Next: it lifts (upnext.c) */
     unsigned char tone = g_keytone_flag;
     void *row = (void *)0;
     entries_t s = { &row, 0, 1, 4096 };
@@ -10044,6 +10052,7 @@ int ringnav(void *ctx, void *event) {
     if (usable() && games_key(window_manager_get_top_window(window_manager()), key)) return STOP;
     /* Edit Library's keys, and the release of the Centre hold that entered or left it */
     if (lr_edit_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
+    if (un_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
     if (usable() && search_strip_key(window_manager_get_top_window(window_manager()), key))
         return STOP;
     if (usable() && add_songs_key(window_manager_get_top_window(window_manager()), key))

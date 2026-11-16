@@ -2603,6 +2603,26 @@ int addon_more(void) {
     return page_at((int)(a - ap.a), op, "", title && title[1] ? title + 1 : a->name, 0);
 }
 
+/* Now Playing's radio button (np_bar.c): 1 while the queue playing is an app's and its status file
+ * says radio=<seed title>, as an app playing a radio writes it (Radio Mix's protocol,
+ * docs/internals.md#now-playing-ipod). Read at most once a second. */
+int addon_radio(void) {
+    static unsigned at __attribute__((section(".scratch")));
+    static int on __attribute__((section(".scratch")));
+    unsigned now = (unsigned)time_now_ms();
+    if (now - at < 1000 && at) return on;
+    at = now ? now : 1;
+    app_t *a = qa.app;
+    char raw[512], seed[8];
+    on = 0;
+    if (a && playback_loads == qa.loads && state_read(a->state, raw, sizeof raw)) {
+        field(raw, "radio", seed, sizeof seed);
+        on = seed[0] && seed[0] != '\r';
+    }
+    return on;
+}
+
+
 /* ringnav_keylong: Play/Pause held on a row with a hold op (a list: all of it downloaded) sends it;
  * 1 when it was one. */
 int addon_hold(void *w) {

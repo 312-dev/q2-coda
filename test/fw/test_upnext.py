@@ -1,17 +1,20 @@
-"""upnext.c on its device path: Up Next's rows over a shuffled queue as playback.c orders it, a row's tap, a
-Play/Pause hold's move, and a queue changed under the page."""
+"""upnext.c on its device path: Up Next's rows over a queue as playback.c orders it (a shuffle's, or the queue's
+own outside advanced play), Playing Next under its heading and Clear, a row's tap, the bump (a Play/Pause hold or a
+tap on the arrow), lifting a queued row with Centre held, and the rows following the queue as it plays."""
 import ctypes as C
 import mmap
 import struct
 
 import pytest
 
+import host
 from conftest import O, Deques, libc
 
 # Up Next's window, a zeroed widget (no parent, no name): OLED's title and toast checks read the window on top
 _PAGE = C.create_string_buffer(0x400)
 PAGE = C.addressof(_PAGE)
 EVT_CLICK, EVT_DESTROY, SEL, COUNT = O['EVT_CLICK'], O['EVT_DESTROY'], b'_ringnav_index', b'_ringnav_count'
+KEY_CENTER, KEY_NEXT, KEY_PREV, KEY_RETURN = O['KEY_CENTER'], O['KEY_NEXT'], O['KEY_PREV'], O['KEY_RETURN']
 MAP_32BIT = 0x40
 NAMES = [b'%02d Song.flac' % k for k in range(8)]
 
@@ -57,19 +60,38 @@ class Queue:
     """The playing queue in stock's deque, its player's globals, and Advanced Play's Shuffle Songs over it
     (playback.c). The odd tracks' artists go in after the order is drawn: its album grouping reads REC_ALBUM's cell
     with the artist's as its high half here."""
-    def __init__(self, fw, mcl, low, names=NAMES, pos=2, seed=0x2545f491):
+    def __init__(self, fw, mcl, low, names=NAMES, pos=2, seed=0x2545f491, shuffle=True):
         self.fw, self.mcl, self.low, self.deques = fw, mcl, low, Deques(fw)
+        fw.mock('fw_deque_pop_back', lambda q, *_: self.deques[q].pop() and 0)
         self.records = [low.record(n, cue=k) for k, n in enumerate(names)]
         self.handle = self.deques.new(self.records)
         fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = self.handle  # a 32-bit pointer's cell, as on the Q2
+        # stock's shuffle pool: a deque of ints, deque_at a pointer to one, as libcstl's
+        self.pool, self.ints = self.deques.new(), []
+        C.c_uint64.from_address(O['MCL_POOL']).value = self.pool
+        push = lambda q, v, *_: self.deques[q].append(self.cell(v) if q == self.pool else v)
+        fw.mock('fw__deque_push_back', push)
         mcl.pos = pos
         fw.var('playback__rng', C.c_uint).value = seed
-        assert fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(0, 1) == 1
+        if shuffle:
+            assert fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(0, 1) == 1
         for k in range(1, len(names), 2):
             C.c_uint.from_address(self.records[k] + O['REC_ARTIST']).value = low.take(b'Artist %d\0' % k)
 
+    def cell(self, v):
+        self.ints.append(C.c_int(v))
+        return C.addressof(self.ints[-1])
+
     def name(self, at):
         return C.string_at(C.c_uint.from_address(self.deques[self.handle][at] + O['REC_NAME']).value).decode()
+
+    def names(self):
+        return [self.name(i) for i in range(len(self.deques[self.handle]))]
+
+    def queue(self, k, next_):
+        """NAMES[k] queued again with Play Next (1) or Play Last (2), as the hold menu queues a song."""
+        add = self.deques.new([self.low.record(NAMES[k], cue=100 + k)])
+        return self.fw.fn('playback_queue_insert', C.c_uint, C.c_void_p, C.c_void_p, C.c_int)(self.handle, add, next_)
 
     def played(self, n):
         """The tracks the next n natural changes play, by name."""
@@ -81,36 +103,39 @@ class Queue:
 
 
 class Page:
-    """Up Next's page on stubs: its labels by parent, their texts, the list's rows, the timers and the toasts."""
+    """Up Next's page on stubs: widgets as zeroed blocks that keep their box, parent and children, their props, the
+    handlers, the timers and the toasts."""
     def __init__(self, fw):
-        self.fw, self.texts, self.children, self.items, self.timers, self.toasts = fw, {}, {}, [], [], []
-        self.props = {}
-        self.view = C.create_string_buffer(0x400)  # ringnav_select reads the list's fields
-        self.labels = []
+        self.fw, self.children, self.blocks, self.timers, self.toasts = fw, {}, [], [], []
+        self.props, self.handlers, self.kinds = {}, {}, {}
         fw.mock('window_create', lambda *_: PAGE)
-        fw.mock('scroll_view_create', lambda *_: self.items.clear() or C.addressof(self.view))
-        self.rows_made: list = []  # list_item_create's rows: a zeroed widget each, alive for the test
-        fw.mock('list_item_create', lambda *_: self.rows_made.append(C.create_string_buffer(0x400)) or
-                self.items.append(C.addressof(self.rows_made[-1])) or self.items[-1])
-        fw.mock('hscroll_label_create', self.label)
-        fw.mock('widget_set_text_utf8', lambda w, s, *_: self.texts.__setitem__(w, C.string_at(s).decode()))
-        fw.mock('widget_get_text_utf8', self.get_text)
+        for kind in ('scroll_view_create', 'list_view_create', 'list_item_create', 'label_create', 'image_create',
+                     'hscroll_label_create'):
+            fw.mock(kind, lambda parent, x=0, y=0, w=0, h=0, *_, kind=kind: self.widget(parent, kind, x, y, w, h))
+        fw.mock('widget_count_children', lambda w, *_: len(self.children.get(w, [])))
         fw.mock('widget_get_child', lambda w, i, *_: (self.children.get(w, []) + [0] * (i + 1))[i])
+        fw.mock('widget_restack', self.restack)
         fw.mock('widget_destroy_children', lambda w, *_: self.children.pop(w, None) and 0)
         fw.mock('widget_get_prop_int', self.prop)
         fw.mock('widget_set_prop_int', lambda w, key, v, *_: self.props.__setitem__((w, C.string_at(key)), C.c_int(v).value))
-        fw.mock('timer_add', lambda fn, ctx, ms, *_: self.timers.append(fn) or len(self.timers))
+        fw.mock('widget_set_prop_str', lambda w, key, v, *_: self.props.__setitem__((w, C.string_at(key)), C.string_at(v).decode()))
+        fw.mock('widget_on', lambda w, event, fn, ctx, *_: self.handlers.__setitem__((w, event), (fn, ctx)) or 1)
+        fw.mock('timer_add', lambda fn, ctx, ms, *_: self.timers.append((fn, ms)) or len(self.timers))
         fw.mock('navigator_to_with_context', lambda page, info, *_: self.toasts.append(C.string_at(info + 8).decode()))
 
-    def label(self, parent, *_):
-        self.labels.append(C.create_string_buffer(0x400))
-        p = C.addressof(self.labels[-1])
-        self.children.setdefault(parent, []).append(p)
-        return p
+    def widget(self, parent, kind, x, y, w, h):
+        self.blocks.append(C.create_string_buffer(0x400))
+        b = C.addressof(self.blocks[-1])
+        struct.pack_into('<iiii', self.blocks[-1], O['W_X'], x, y, w, h)
+        struct.pack_into('<Q', self.blocks[-1], O['W_PARENT'], parent)
+        self.children.setdefault(parent, []).append(b)
+        self.kinds[b] = kind
+        return b
 
-    def get_text(self, w, out, size, *_):
-        data = self.texts.get(w, '').encode()[:size - 1] + b'\0'
-        C.memmove(out, data, len(data))
+    def restack(self, w, i, *_):
+        kids = self.children[C.c_uint64.from_address(w + O['W_PARENT']).value]
+        kids.remove(w)
+        kids.insert(i, w)
         return 0
 
     def prop(self, w, key, default, *_):
@@ -122,67 +147,137 @@ class Page:
 
     def close(self):
         """The page destroyed: the destroy handler page_open hooked on it, upnext.c's own close."""
-        *_, (fn, ctx) = [(a[2], a[3]) for _, a in self.fw.calls('widget_on') if a[0] == PAGE and a[1] == EVT_DESTROY]
+        fn, ctx = self.handlers[PAGE, EVT_DESTROY]
         assert C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, None) == 0
 
     @property
-    def rows(self):
-        """Each row's caption and detail."""
-        return [tuple(self.texts.get(label) for label in self.children.get(item, [])) for item in self.items]
+    def view(self):
+        return [w for w, k in self.kinds.items() if k == 'scroll_view_create'][-1]
+
+    def kids(self):
+        return self.children.get(self.view, [])
+
+    @property
+    def stops(self):
+        """The rows the wheel stops on, in order: 'Clear', then each song's title."""
+        out = []
+        for w in self.kids():
+            for x in [w] + self.children.get(w, []):
+                if (x, EVT_CLICK) in self.handlers:
+                    out.append(self.props.get((x, b'_un_title'), 'Clear'))
+        return out
 
     @property
     def captions(self):
-        return [row[0] for row in self.rows]
+        return [s for s in self.stops if s != 'Clear']
 
     @property
-    def said(self):
-        """What the page's own labels say (its title, or an empty list's message)."""
-        return [self.texts.get(label) for label in self.children.get(PAGE, [])]
+    def queued(self):
+        """Playing Next's songs: the rows between its heading and "From"."""
+        kids = self.kids()
+        if not any(self.kinds[w] == 'label_create' and self.children.get(w) for w in kids):
+            return []
+        end = [i for i, w in enumerate(kids) if self.props.get((w, b'_un_from'))]
+        return [self.props[(w, b'_un_title')] for w in kids[2:end[0] if end else len(kids)]]
 
-    def tap(self, row):
-        (fn, ctx), = [(a[2], a[3]) for _, a in self.fw.calls('widget_on') if a[0] == self.items[row] and a[1] == EVT_CLICK]
-        return C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, None)
+    def playing(self):
+        return self.props[(self.kids()[0], b'_un_title')]
+
+    def selected(self):
+        """The selected stop and the stops' count, as ringnav_select left them."""
+        return self.props.get((self.view, SEL)), self.props.get((self.view, COUNT))
+
+    def select(self, stop):
+        self.props[(self.view, SEL)] = stop
+
+    def tap(self, stop, x=None):
+        """A stop pressed: Centre's click (no event), or a finger's at x."""
+        rows = [x for w in self.kids() for x in [w] + self.children.get(w, []) if (x, EVT_CLICK) in self.handlers]
+        fn, ctx = self.handlers[rows[stop], EVT_CLICK]
+        event = None
+        if x is not None:
+            self.ev = C.create_string_buffer(0x40)
+            struct.pack_into('<i', self.ev, O['EVENT_TYPE'], EVT_CLICK)
+            struct.pack_into('<ii', self.ev, O['EVENT_X'], x, 100)
+            event = C.addressof(self.ev)
+        return C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, event)
+
+    def run_last(self):
+        """The timer last added, run from the next loop pass."""
+        fn, _ = self.timers[-1]
+        return C.CFUNCTYPE(C.c_int, C.c_void_p)(fn)(None)
+
+    def run(self, ms):
+        """The newest timer added for ms, run."""
+        fn, _ = [t for t in self.timers if t[1] == ms][-1]
+        return C.CFUNCTYPE(C.c_int, C.c_void_p)(fn)(None)
 
     def un_hold(self, top=PAGE):
         """navigation.c's ringnav_keylong handing a Play/Pause hold to Up Next, top the page on top: 1 when taken."""
         return self.fw.fn('un_hold', C.c_int, C.c_void_p)(top)
 
-    def run(self):
-        """The timer last added, run from the next loop pass."""
-        return C.CFUNCTYPE(C.c_int, C.c_void_p)(self.timers[-1])(None)
+    def hold(self, stop):
+        """Play/Pause held on a stop, and what it defers, run from the next loop pass."""
+        self.select(stop)
+        assert self.un_hold() == 1
+        return self.run_last()
 
-    def hold(self, row):
-        """Play/Pause held on a row, and the move it defers, run from the next loop pass."""
-        self.props[C.addressof(self.view), SEL] = row
-        before = len(self.timers)
-        assert self.un_hold() == 1 and len(self.timers) == before + 1
-        return self.run()
+    def key(self, key, down=False):
+        if down:
+            return self.fw.fn('un_keydown', None, C.c_uint)(key)
+        return self.fw.fn('un_key', C.c_int, C.c_void_p, C.c_uint, C.c_int)(PAGE, key, 0)
 
-    def selected(self):
-        """The list's selected row and its row count, as ringnav_select left them."""
-        return self.props.get((C.addressof(self.view), SEL)), self.props.get((C.addressof(self.view), COUNT))
+
+@pytest.fixture(scope='module')
+def scratch(library):
+    """scratch_t's field offsets as this build lays it out."""
+    return host.offsets(library.parent/'navigation.o', 'scratch_t')
+
+
+@pytest.fixture
+def st(fw, scratch):
+    base = C.addressof(fw.var('st', C.c_char))
+    return lambda name, ctype=C.c_int: ctype.from_address(base + scratch[name])
 
 
 @pytest.fixture
 def up(fw, mcl, low):
     queue = Queue(fw, mcl, low)
+    fw.mock('window_manager_get_top_window', lambda *_: PAGE)
     return queue, Page(fw)
 
 
-def test_up_next_lists_what_then_plays_each_title_over_its_artist(fw, up):
+@pytest.fixture
+def plain(fw, mcl, low):
+    """List play, no advanced play: the queue's own order, the third track playing."""
+    queue = Queue(fw, mcl, low, shuffle=False)
+    fw.mock('window_manager_get_top_window', lambda *_: PAGE)
+    return queue, Page(fw)
+
+
+def test_up_next_lists_the_playing_song_then_what_plays_in_order(fw, up):
     queue, page = up
     page.open()
-    assert 'View Queue' in page.said and len(page.rows) == len(NAMES) - 1  # every track but the playing one
-    assert all(row[1] == ('Artist %d' % int(row[0][:2]) if int(row[0][:2]) % 2 else '') for row in page.rows)  # '' untagged
-    assert page.captions == queue.played(len(NAMES) - 1)
+    assert page.playing() == queue.name(queue.mcl.pos) and page.queued == []
+    assert len(page.captions) == len(NAMES) - 1 and page.captions == queue.played(len(NAMES) - 1)
+    assert page.selected() == (0, len(NAMES) - 1)  # the first song, no Clear
 
 
 def test_up_next_stops_at_500_rows_of_a_longer_queue(fw, mcl):
     low = Low(1 << 18)
+    fw.mock('window_manager_get_top_window', lambda *_: PAGE)
     queue, page = Queue(fw, mcl, low, names=[b'%03d Song.flac' % k for k in range(600)]), Page(fw)
     page.open()
-    assert len(page.rows) == 500 and page.captions == queue.played(500)  # the next 500, in play order
+    assert len(page.captions) == 500 and page.captions == queue.played(500)  # the next 500, in play order
     low.close()
+
+
+@pytest.mark.parametrize('mode, n', [(0, 5), (3, 8), (1, 0)])  # List, Repeat All, Repeat One
+def test_outside_advanced_play_up_next_is_the_queues_order(fw, plain, mode, n):
+    queue, page = plain
+    queue.mcl.mode = mode
+    page.open()
+    assert page.captions == (queue.names()[3:] + queue.names()[:3])[:n]
 
 
 def test_a_tapped_row_plays_its_own_track_and_the_page_closes(fw, up):
@@ -194,82 +289,144 @@ def test_a_tapped_row_plays_its_own_track_and_the_page_closes(fw, up):
     assert queue.name(at) == caption and fw.calls('navigator_back')
 
 
-def test_a_hold_makes_its_row_s_track_play_next_and_takes_the_rows_again_with_it_first(fw, up):
-    queue, page = up
-    page.open()
-    before = page.captions
-    assert page.hold(4) == 0
-    assert page.captions == [before[4]] + before[:4] + before[5:] and page.selected() == (0, len(before))
-    assert page.toasts == [] and queue.played(2) == [before[4], before[0]]  # the order then plays it
-
-
-def test_a_hold_on_the_row_already_next_keeps_the_order(fw, up):
-    queue, page = up
-    page.open()
-    before = page.captions
-    page.hold(0)
-    assert page.captions == before and page.toasts == [] and page.selected() == (0, len(before))
-    assert queue.played(len(before)) == before
-
-
-def test_a_hold_after_the_queue_changed_under_the_page_says_so_and_moves_nothing(fw, up, low):
-    queue, page = up
-    page.open()
-    before = page.captions
-    last = NAMES.index(before[-1].encode())
-    queue.deques[queue.handle][last] = low.record(b'Other.flac', cue=99)  # the queue replaced under the page
-    page.hold(3)
-    assert page.toasts == ['Queue changed'] and page.selected()[0] == 0
-    assert queue.played(1) == [before[0]]  # not the held row's
-
-
-def test_a_hold_on_a_row_played_since_says_the_queue_changed(fw, up):
-    queue, page = up
-    page.open()
-    before = page.captions
-    assert queue.played(1) == before[:1]
-    page.hold(0)
-    assert page.toasts == ['Queue changed'] and page.captions == before[1:]  # taken again, without it
-
-
-def test_a_hold_up_next_doesn_t_take_stays_stock_s_and_moves_nothing(fw, up):
-    """Another page on top, no row selected, or no timer for the move: un_hold leaves the hold to stock."""
-    queue, page = up
-    page.open()
-    before = page.captions
-    page.props[C.addressof(page.view), SEL] = 4
-    assert page.un_hold(0x7f00) == 0 and page.un_hold(None) == 0  # another page on top, or none
-    del page.props[C.addressof(page.view), SEL]
-    assert page.un_hold() == 0  # Up Next on top, no row selected
-    page.props[C.addressof(page.view), SEL] = 4
-    fw.mock('timer_add', lambda *_: 0)
-    assert page.un_hold() == 0  # nowhere to defer the move to
-    assert page.timers == [] and page.toasts == [] and queue.played(len(before)) == before
-
-
-def test_a_hold_whose_page_closed_before_the_next_pass_moves_nothing(fw, up):
-    queue, page = up
-    page.open()
-    before = page.captions
-    page.props[C.addressof(page.view), SEL] = 4
-    assert page.un_hold() == 1
-    page.close()
-    page.run()
-    assert page.toasts == [] and queue.played(len(before)) == before
-
-
-def test_nothing_to_play_next_says_so(fw, mcl, low):
-    Queue(fw, mcl, low, names=NAMES[:1], pos=0)
-    page = Page(fw)
-    page.open()
-    assert page.rows == [] and 'Nothing to play next' in page.said
-
-
-def test_a_closed_page_lets_view_queue_open_a_new_one(fw, up):
+def test_a_row_starts_nothing_while_headphones_are_required_and_absent(fw, up):
+    """As stock's queue row: its check (it toasts) comes before the start."""
     _, page = up
     page.open()
-    page.open()  # one at a time
+    fw.mock('check_forbid_play_no_headset', lambda *_: 1)
+    page.tap(1)
+    assert not fw.calls('player_start_queue') and fw.calls('navigator_back')
+
+
+@pytest.mark.parametrize('next_, order', [(1, ['00', '07']), (2, ['07', '00'])])
+def test_play_next_and_play_last_show_under_playing_next_with_clear_first(fw, plain, next_, order):
+    queue, page = plain
+    queue.queue(7, 1)  # Play Next 07
+    queue.queue(0, next_)  # 00, by Play Next (ahead of 07) or Play Last (after it)
+    page.open()
+    assert [q[:2] for q in page.queued] == order and page.stops[0] == 'Clear'
+    assert page.captions[2:] == queue.names()[5:]  # the rest of the queue after them
+    assert page.selected() == (1, len(page.stops))  # the first song, not Clear
+    assert [n[:2] for n in queue.names()[3:5]] == order  # right after the playing one: they play next, in turn
+
+
+def test_clear_takes_playing_next_out_of_the_queue(fw, plain):
+    queue, page = plain
+    before = queue.names()
+    queue.queue(7, 1)
+    queue.queue(0, 2)
+    page.open()
+    page.tap(0)  # Clear
+    assert queue.names() == before and page.queued == [] and page.captions == before[3:]
+    assert page.toasts == [] and queue.mcl.pos == 2 and page.selected() == (0, len(before) - 3)
+
+
+def test_clear_under_advanced_play_follows_the_queue(fw, up):
+    queue, page = up
+    for r in queue.records:  # no artists: the insert groups the queue again, reading REC_ALBUM's cell whole
+        C.c_uint.from_address(r + O['REC_ARTIST']).value = 0
+    page.open()
+    before = page.captions
+    page.close()
+    queue.queue(1, 1)
+    page.open()
+    assert len(page.queued) == 1
+    page.tap(0)
+    # the copy gone, every other song still to come (follow_queue draws the order again, as an insert does)
+    assert page.queued == [] and sorted(page.captions) == sorted(before) and len(queue.names()) == len(NAMES)
+
+
+def test_a_hold_bumps_a_queued_row_to_the_top_with_its_edge_lit(fw, plain):
+    queue, page = plain
+    for at in (5, 6, 7):
+        queue.queue(at, 2)  # Play Last: 05, 06, 07 in turn
+    page.open()
+    assert [q[:2] for q in page.queued] == ['05', '06', '07']
+    page.hold(3)  # 07, the third queued (Clear is stop 0)
+    assert [q[:2] for q in page.queued] == ['07', '05', '06'] and page.selected()[0] == 3  # the selection stays
+    assert [ms for _, ms in page.timers].count(700) == 1 and page.toasts == []  # the edge's time (UN_FRESH_MS)
+    assert [n[:2] for n in queue.names()[3:6]] == ['07', '05', '06']  # the rows moved: so they play
+
+
+def test_a_hold_on_the_first_queued_or_a_coming_row_moves_nothing_but_is_taken(fw, plain):
+    queue, page = plain
+    queue.queue(7, 2)
+    queue.queue(6, 2)
+    page.open()
+    before = page.stops
+    page.hold(1)  # the first queued: already next
+    page.hold(4)  # a row of the rest of the queue
+    assert page.stops == before and page.un_hold(0x7f00) == 0 and page.un_hold(None) == 0
+
+
+def test_a_tap_on_a_queued_rows_arrow_bumps_it(fw, plain, st):
+    queue, page = plain
+    queue.queue(7, 2)
+    queue.queue(6, 2)
+    page.open()
+    st('touch_mode').value = 1
+    page.tap(2, x=360)
+    assert [q[:2] for q in page.queued] == ['06', '07'] and not fw.calls('player_start_queue')
+
+
+def lift(page):
+    """Centre held on the selected row: its hold's timer run, the release taken."""
+    page.key(KEY_CENTER, down=True)
+    page.run(550)
+    assert page.key(KEY_CENTER) == 1
+
+
+def test_centre_held_lifts_a_queued_row_the_wheel_carries_it_and_centre_puts_it_down(fw, plain):
+    queue, page = plain
+    for at in (5, 6, 7):
+        queue.queue(at, 2)
+    page.open()
+    page.select(1)  # 05
+    lift(page)
+    assert page.key(KEY_NEXT) == 1 and page.key(KEY_NEXT) == 1 and page.key(KEY_NEXT) == 1  # stops at the last
+    assert page.selected()[0] == 3
+    assert page.key(KEY_CENTER) == 1
+    assert [q[:2] for q in page.queued] == ['06', '07', '05'] and page.selected()[0] == 3
+    assert [n[:2] for n in queue.names()[3:6]] == ['06', '07', '05']
+
+
+def test_return_puts_a_lifted_row_back(fw, plain):
+    queue, page = plain
+    for at in (5, 6):
+        queue.queue(at, 2)
+    page.open()
+    page.select(1)
+    lift(page)
+    page.key(KEY_NEXT)
+    assert page.key(KEY_RETURN) == 1
+    assert [q[:2] for q in page.queued] == ['05', '06'] and page.selected()[0] == 1
+
+
+def test_centre_held_on_a_coming_row_lifts_nothing(fw, plain):
+    queue, page = plain
+    queue.queue(7, 2)
+    page.open()
+    page.select(2)  # the rest of the queue
+    timers = len(page.timers)
+    page.key(KEY_CENTER, down=True)
+    assert len(page.timers) == timers and page.key(KEY_CENTER) == 0 and page.key(KEY_NEXT) == 0
+
+
+def test_the_rows_follow_the_queue_as_it_plays(fw, plain):
+    queue, page = plain
+    page.open()
+    before = page.captions
+    assert page.run(1000) == 8  # nothing moved: the same rows
+    queue.mcl.pos += 1  # the next song plays
+    page.run(1000)
+    assert page.captions == before[1:] and page.playing() == before[0]
+
+
+def test_up_next_opens_one_page_at_a_time_and_again_once_closed(fw, up):
+    _, page = up
+    page.open()
+    page.open()
     assert len(fw.calls('window_create')) == 1
     page.close()
     page.open()
-    assert len(fw.calls('window_create')) == 2 and len(page.rows) == len(NAMES) - 1
+    assert len(fw.calls('window_create')) == 2 and len(page.captions) == len(NAMES) - 1

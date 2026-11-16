@@ -373,7 +373,7 @@ clock, centred.
 | Progress bar   | 24 to 347, y 228, 6 px         | Track `#333333`, fill Accent Blue, round ends                                              |
 | Elapsed        | left on 24, centred on y 250   | 16 px, Text Primary, tabular                                                               |
 | Remaining      | right on 347, centred on y 250 | 16 px, Text Primary, with a leading minus; a tap shows the length instead (Track Time)     |
-| State row      | centred on y 276, 44 px apart  | Phosphor `shuffle` and `repeat`, bold, 22 px: Accent Blue when on, Text Secondary when off |
+| State row      | centred on y 286, x 53 to 322  | Shuffle, radio, repeat, Up Next: Phosphor bold 22 px, even gaps (below)                    |
 
 No page title, no background art blur, no reflection.
 
@@ -386,16 +386,26 @@ has no place for keeps a place of its own:
   art's page, so a swipe takes them away with it: Phosphor `dots-three` and `heart` (regular, 20 px, Text Primary;
   More pressed in Text Secondary), the dots' ink ending on the right column, the heart `fill` in
   Accent Blue while the song is a favourite.
-- **The page dots** sit under shuffle and repeat, centred on y 302; the lyrics are the swipe's other
-  page, ending 5 px above the bar. The visualizer (Field), the design's third page, is off for the
+- **The page dots** are hidden: the state row's on dots sit where they were. The lyrics are the
+  swipe's other page, ending 5 px above the bar. The visualizer (Field), the design's third page, is off for the
   battery: `NP_VISUALIZER` in `patch/offsets.inc` is 0, which leaves its code out of the payload;
   at 1 it is the last page again, over the whole screen. Now Playing shows no place in the
   queue ("1 of 10").
 - **The track's details** are not a page of the swipe: ⋯'s **About** row, last before Delete Song,
   opens them as a page titled About, an [info grid](#track-details), and Return goes back to ⋯.
-- **Shuffle and repeat** are two controls on stock's play mode button: a tap on shuffle turns it
-  on or off, a tap on repeat steps Off, All, One (repeat-once's glyph for One), and each keeps the
-  other as it was. Stock's Shuffle never ends, so shuffle with repeat Off plays on as with All.
+- **The state row** is four buttons on stock's play mode button, `shuffle`, `broadcast` (radio),
+  `repeat` and `queue`, the outer two's edges fixed at x 53 and 322 and the three gaps between them
+  even. Shuffle and repeat are Text Secondary off; on, Accent Blue with a 4 px Accent Blue dot 2 px
+  under the glyph (repeat-once's glyph for One). A tap on shuffle turns it on or off, a tap on
+  repeat steps Off, All, One, and each keeps the other as it was. Stock's Shuffle never ends, so
+  shuffle with repeat Off plays on as with All. Radio is the antenna in Text Secondary; while the
+  playing app plays a radio it is a 92 x 34 Accent Blue pill holding the antenna (18 px, white) and
+  "Radio" (Inter Medium 16 px, white): turning on, the pill grows from the glyph's width over
+  200 ms (ease out) while the gaps shrink, the word fading in over the last 40 %, and back the same
+  way off. While radio is on, shuffle and repeat are `#444446` and ignore taps and the Centre
+  cycle, as the app picks the order. A tap on radio opens the playing app's page, where a radio
+  starts and stops; with no app playing it does nothing. The queue button, and a swipe up on the
+  art's page, open [Up Next](#up-next); the hold menu's View Queue opens it too.
 - **The volume** and the scrub draw on the bar where it is. The volume (the "A: iPod speakers"
   mock-up) keeps the bar's rows, inset to x 48 to 323, white on the track, with Phosphor's
   `speaker-simple-none` and `speaker-simple-high` (fill, 16 px, Text Secondary) centred at x 32
@@ -404,6 +414,32 @@ has no place for keeps a place of its own:
   across but keep stock's row, y 308 on screen, under the page dots. ponytail: a marker within
   about 14 px of either end of the bar falls under the bottom corners' glass; moving them onto
   the bar needs the y that stock's placement (`0x53baa4`) writes made per set.
+
+### Up Next
+
+The queue from the song playing on (`patch/upnext.c`), titled Up Next. Rows are 46 px: the cover
+36 px square at the text column (4 px corners), the title (Inter Regular 17 px, Text Primary) over
+the artist (13 px, Text Tertiary), 46 px right of the text column.
+
+- **The playing song** heads it, a row that takes no selection, with three Accent Blue level bars
+  (3 px wide, 4.5 px apart, up to 12 px high) 7 px after its title, moving about 8 times a second
+  while it plays and still while paused.
+- **Playing Next** (Inter Medium 13 px, Text Secondary) heads the songs queued with Play Next, Play
+  Last and the bump, with a **Clear** pill on its right, 22 px high, ending at x 359 with the
+  selection bar: `#2C2C2E` with `#7FA6F5` Inter Medium 14 px at rest, Accent Blue with white when
+  the wheel is on it. It is a stop of its own; Centre on it empties Playing Next, no confirm.
+- **From** the list, album or page the queue was played from ("Next in Queue" when that is not
+  known) heads the rest of the queue in play order.
+- **The bump arrow**, Phosphor `arrow-up` (regular, 16 px, Text Tertiary; white on the selection),
+  stands on the right column of each queued song but the first. A tap on it, or Play/Pause held on
+  the row, moves the song to the top of Playing Next, where a 3 px Accent Blue edge marks it for
+  0.7 s. The rest of the queue has no arrow and Play/Pause does nothing on it.
+- **Moving a queued song**: Centre held on it lifts it onto a `#2C2C2E` card with 10 px corners,
+  its title in Inter Medium 18 px; Playing Next's songs show a grip (three 18 x 2 px bars) on the
+  right column in place of their arrows; the wheel carries it, Centre puts it down, Return puts it
+  back where it was.
+- Nothing toasts. Centre on a song plays it and closes Up Next. The list follows the queue as songs
+  end.
 
 ### Progress and sliders
 
@@ -456,9 +492,9 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   as wide as its text and 16 px each side, centred on y 252 (y 236 to 268), above the bottom
   glass curve. It is the only raised surface in the theme. The page stays in sight round it,
   with its status row and its selection; it lasts 1.5 s (stock's own toasts their own time).
-  Words in sentence case ("Added to Queue", "Name can't be empty").
+  Words in sentence case ("Playing Last", "Name can't be empty").
 - Every in-place action says what it did in a toast: the hold menu's Play Next ("Playing Next"),
-  Add to Queue ("Added to Queue") and Add to and Remove from Favourites ("Added to Favorites",
+  Play Last ("Playing Last") and Add to and Remove from Favourites ("Added to Favorites",
   "Removed from Favorites").
 
 ### Empty and offline
@@ -647,8 +683,8 @@ page, On-The-Go) and `patch/add_songs.c`.
   playlist in the list; Clear asks first, Cancel first. Empty, it is Add Songs alone with the note
   "Or hold Play/Pause on any song", hint "and choose Add to On-The-Go.". A hold on a song offers
   **Remove from On-The-Go**. It lasts across a restart.
-- **A song's hold menu**: Play Next, Add to On-The-Go (Add to Queue while On-The-Go is off), Add to
-  Playlist…, Favorite (Remove from Favorites when it is one), then Go to Album, Go to Artist and Go to
+- **A song's hold menu**: Play Next, Play Last (to the end of Up Next's Playing Next), Add to
+  On-The-Go (while On-The-Go is on), Add to Playlist…, Favorite (Remove from Favorites when it is one), then Go to Album, Go to Artist and Go to
   Folder. Add to Playlist… is a picker in the same panel: New Playlist (`plus`) first, which makes
   "New Playlist N" with the song in it (renamed later from its own hold), then the playlists; a
   pick adds at once and toasts "Added to name" ("Already in name").

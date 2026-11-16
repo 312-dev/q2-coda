@@ -34,7 +34,7 @@ class State(C.Structure):
                 fields('saved_elapsed save_failed resume_pending resume_elapsed resume_wait') +
                 fields('saved_pos saved_sum saved_queue', C.c_uint) + fields('next_valid next_value') +
                 fields('next_pos resume_key resume_pos', C.c_uint) + fields('order cycle', C.POINTER(Entry)) +
-                fields('groups seen history', C.POINTER(C.c_uint)) + [('poll_stamp', C.c_uint)])
+                fields('groups seen history', C.POINTER(C.c_uint)) + fields('poll_stamp plain_size', C.c_uint))
 
 
 class Player:
@@ -203,10 +203,13 @@ def test_pending_list_against_a_model(pend):
 
 
 # What plays next.
-def test_nothing_upcoming_without_advanced_play(player):
-    plan(player, [0, 1, 2])
-    player.s.active = 0
-    assert player.up_next() == []
+@pytest.mark.parametrize('mode, want', [(0, [2, 3]), (3, [2, 3, 0, 1]), (1, []), (2, [])])
+def test_without_advanced_play_up_next_is_the_queues_order(player, mode, want):
+    """List plays the rows after the playing one, Repeat All goes round to it again; Repeat One and stock Shuffle
+    have no order to show (View Queue gives Shuffle one first)."""
+    player.load(player.albums(4), 1)
+    player.mcl.mode = mode
+    assert player.up_next() == want
 
 
 def test_nothing_upcoming_past_the_queue(player):

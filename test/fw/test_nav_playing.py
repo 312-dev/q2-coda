@@ -1507,14 +1507,14 @@ def test_a_turn_takes_the_lyrics_a_line_a_ticks_worth_and_holds_them(fw, ui, mcl
     held.value = 1
     lyr.poll(1)
     held.value = 0
-    taken = snap(centre(3) + detents * SLOT)  # a tick's worth is LYRIC_SLOT, then the nearest row top
-    assert taken - centre(3) > (detents - 1) * ROW  # past the line before: as far as the ticks take
+    taken = snap(centre(3) + detents * ROW)  # a tick's worth is one row (lyrics_row_h), then the nearest row top
+    assert abs(taken - centre(3) - detents * ROW) <= ROW // 2  # as far as the ticks take, a row each
     assert lyr.settle() == taken and st.lyric_held == 1
     lyr.sec = 95
     assert lyr.settle() == taken  # held: the follow leaves them
     travel.value = (detents + 1) * tick  # anticlockwise: back up, a line a tick
     lyr.poll(1)
-    assert lyr.settle() == snap(taken - (detents + 1) * SLOT) == taken - (detents + 1) * ROW  # rows' tops
+    assert lyr.settle() == taken - (detents + 1) * ROW  # rows' tops, a row a tick
 
 
 def test_a_small_turn_only_nudges_and_springs_back_still_following(fw, ui, mcl, st, wheel):

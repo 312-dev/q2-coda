@@ -552,6 +552,8 @@ void np_mode_set(int on, int rep), np_mode_step(int repeat, int dir);
  * and the rating picker (navigation.c np_centre; np_bar.c np_modes marks shuffle's and repeat's) */
 enum { NP_STAGE_REST, NP_STAGE_SHUFFLE, NP_STAGE_REPEAT };
 int np_mode_click(void *target, void *event);
+int np_radio_on(void);            /* np_bar.c: radio on, shuffle and repeat the app's */
+int np_queue(const void *unused); /* navigation.c: Up Next, from Now Playing's row or hold menu */
 int song_list(void *w);
 int song_fit(int place, int room, int title, int gap, int artist, int *shown);
 /* A row's text and what stands at its right (a length, the offline mark): this much clear of each

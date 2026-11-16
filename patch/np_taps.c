@@ -1,4 +1,5 @@
-/* Now Playing's art, artist and album as links (docs/ipod.md#now-playing): a tap on the artist
+/* Now Playing's art, artist and album as links (docs/ipod.md#now-playing), and a swipe up there for
+ * Up Next: a tap on the artist
  * opens that artist, on the album or the art that album, as the More page's Look up Artist and
  * Look up Album do (navigation.c np_goto, which also says whether there is anywhere to go); a hold
  * on the art, ART_HOLD_MS without moving, opens stock's full-screen art (bigcover_page), whatever
@@ -17,6 +18,7 @@
 enum { NPT_NONE, NPT_ART, NPT_ARTIST, NPT_ALBUM };
 #define DIM_ALPHA 38    /* 15% black over the held art */
 #define ART_HOLD_MS 500 /* a touch held on the art this long opens it full screen */
+#define SWIPE_UP_PX 48  /* a lift this far above its press is a swipe up */
 
 static struct {
     int lit;        /* NPT_*: the link the touch came down on, while it is held there */
@@ -117,6 +119,11 @@ int np_tap(void *ctx, void *event) {
     if (type == EVT_POINTER_UP_BEFORE && k && near && !npt.held && npt_at(x, y) == k &&
         np_goto(k != NPT_ARTIST, 0) && !npt.timer)
         npt.timer = timer_add(npt_go, (void *)(long)k, 0);
+    /* a swipe up on the art's page, more up than across: Up Next (navigation.c np_queue) */
+    int up = npt.y - y, across = x > npt.x ? x - npt.x : npt.x - x;
+    if (type == EVT_POINTER_UP_BEFORE && up >= SWIPE_UP_PX && 2 * across < up && st.np_slide &&
+        !st.np_full && !widget_get_prop_int(st.np_slide, "value", 0))
+        timer_add(np_queue, (void *)0, 0);
     return 0;
 }
 

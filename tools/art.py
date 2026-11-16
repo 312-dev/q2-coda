@@ -207,6 +207,8 @@ KEYLOCK_CARD_PX = 56  # Buttons Lock's card's padlock (keylock.c CARD_GLYPH)
 # half, on in the theme's own accent's top tone in both; repeat-once is repeat's on glyph for Repeat One.
 MODE_PX = 22
 MODE_INKS = {'d': 0xababab, 'l': 0x5c5c5c}
+MODE_DIM_INKS = {'d': 0x444446, 'l': 0xc5c5c5}  # shuffle and repeat while a radio plays: the app picks the order
+MODE_PILL_PX = 18  # the antenna in the radio's pill
 # A row's leading glyph (Songs' Shuffle row, list.shuffle.row) and Now Playing's heart and More, regular weight (the
 # full heart fill) at the 20 px row type's size
 ROW_ICON_PX = 20
@@ -237,6 +239,8 @@ MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart
               'airplay', 'download-simple', 'cloud-arrow-down', 'trash', 'speedometer', 'pencil-simple',
               'caret-up', 'caret-down', 'check', 'sliders-horizontal', 'info', 'sneaker-move', 'play')
 PAIR_ICON_PX = 16  # an artist's or album's page's action pair (artist_page.c PAIR_ICON)
+BUMP_PX = 16  # Up Next's bump arrow (upnext.c)
+BUMP_INKS = {'d': 0x858585, 'l': 0x6e6e6e, 'w': 0xffffff}
 PAIR_ICONS = ('shuffle', 'radio', 'play')
 # Where a song lives (catalogue.c catalogue_row_mark, a song row's right column): the cloud for a server song that
 # streams, the arrow for one a card app downloaded, regular, in Text Tertiary (each half's) and white on the bar; and
@@ -433,6 +437,12 @@ def images(t):
         for n in ('shuffle', 'repeat'):
             out |= {f'{prefix}_mode_{n}_{k}': phosphor(f'{n}-bold', MODE_PX, c) for k, c in {**MODE_INKS, 'on': on}.items()}
         out[f'{prefix}_mode_repeat1_on'] = phosphor('repeat-once-bold', MODE_PX, on)
+        # radio's and Up Next's buttons beside them, the antenna white in the radio's pill, and shuffle and repeat
+        # dimmed while a radio plays (np_bar.c np_modes)
+        out |= {f'{prefix}_mode_{n}_{k}': phosphor(f'{g}-bold', MODE_PX, c) for n, g in (('radio', 'broadcast'), ('queue', 'queue'))
+                for k, c in MODE_INKS.items()}
+        out[f'{prefix}_mode_radio_w'] = phosphor('broadcast-bold', MODE_PILL_PX, 0xffffff)
+        out |= {f'{prefix}_mode_{n}_x{k}': phosphor(f'{n}-bold', MODE_PX, c) for n in ('shuffle', 'repeat') for k, c in MODE_DIM_INKS.items()}
         # and its heart and More (np_bar.c np_glyphs), named after stock's play_fav, play_unfav, play_more and
         # play_moredown: the empty heart and More in Text Primary, More pressed in Text Secondary, the full heart in
         # the accent, each half's but the accent's
@@ -456,6 +466,8 @@ def images(t):
         # an artist's Shuffle and Radio panels and an album's Play (artist_page.c pair_paint): the accent's top tone at rest, white lit
         out |= {f'{prefix}_pair_{n}_{k}': phosphor(n, PAIR_ICON_PX, c) for n in PAIR_ICONS for k, c in {'a': on, 'w': 0xffffff}.items()}
         out |= {f'{prefix}_quality_{k}': phosphor('waveform-bold', QUALITY_PX, c) for k, c in STATE_INKS.items()}
+        # Up Next's bump arrow on a queued song (upnext.c): Text Tertiary per half, white on the selection
+        out |= {f'{prefix}_bump_{k}': phosphor('arrow-up', BUMP_PX, c) for k, c in BUMP_INKS.items()}
         # the playlist pages' tiles, action glyphs and Add Songs' marks
         out |= {f'{prefix}_pltile_{n}_{k}': phosphor(g, TILE_PX, c) for n, g in TILE_GLYPHS.items() for k, c in TILE_INKS.items()}
         out |= {f'{prefix}_plact_{n}_{k}': phosphor(g, PL_ACTION_PX, c) for n, g in PL_ACTIONS.items()
