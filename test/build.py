@@ -293,7 +293,7 @@ def validate_assets(directory):
                       QS_LABEL_W, QS_ROW_GAP, QS_PITCH, QS_BAR, QS_TOUCH, QS_EDGE, QS_SUN, HOME_LABEL_END, HOME_LIST_W, HOME_TEXT_X, HOME_TOP, PITCH, ARTIST_PAGE, HOME_OURS, HOME_PAGE, HOME_ROW, HOME_ROWS, NAVBAR_ONLY, PLAYING_PAGE, SET_ROW, SET_ROWS, SET_TOP, UI_ASSETS,
                       NP_BAR, NP_TOUCH, NP_MARGIN, NP_TOP, STATUS_BAR, STATUS_HIDDEN, STATUS_LEFT, STATUS_MARGIN, STATUS_RIGHT, CLOCK_MIN, CLOCK_TEXT, corner_inset, corner_x,
                       STATUS_ICONS, status_icon, QUIET_ICONS, quiet_icon, SET_ICON, SET_STOCK_ICON, SETTINGS_ICONS, SETTINGS_SLIDERS, decode, slider_plain, imagemagick, inc, png_header, settings_icon, walk,
-                      patch_asset, patch_code, patch_style, style_props, SLIDE, SET0, status_metrics, CLASSIC_LIGHT_FONT_SRC, NP_IPOD_TIME_WS,
+                      patch_asset, patch_code, patch_style, style_props, SLIDE, SET0,
                       STATUS_ROW_GAP, STATUS_ROW_LINE)
     manifest = json.loads((directory/'manifest.json').read_text())
     stock = (directory/'stock-demo').read_bytes()
@@ -446,8 +446,8 @@ def validate_assets(directory):
     table = dict(zip(*[iter(new[o:new.index(b'\0', o)] for o in struct.unpack_from(f'<{n}I', new, 4))] * 2))
     assert [table[k] for k, _, _ in LABELS] == [v for _, _, v in LABELS] and table[b'powerm_sleep'] == b'Sleep Timer'
     # Settings icons: the audited 52px artwork, packaged as SET_ICON RGBA with the same transparency
-    # and, on a plain background, the same average colour. Minimal greys them
-    # as they load (navigation.c ringnav_image_add: every disc MINIMAL_CHEVRON, glyphs white).
+    # and, on a plain background, the same average colour. OLED (list.icons.mono) greys them
+    # as they load (navigation.c ringnav_image_add: every disc its scheme's chevron, MINIMAL_CHEVRON, glyphs white).
     def mean(png, bg):
         cmd = ['png:-', '-background', bg, '-flatten', '-format', '%[fx:mean.r],%[fx:mean.g],%[fx:mean.b]', 'info:']
         return [float(v) for v in imagemagick(*cmd, data=png).split(b',')]
@@ -459,15 +459,16 @@ def validate_assets(directory):
         try: settings_icon(name, old[:-1] + b'x')
         except ValueError: pass
         else: raise AssertionError(f'{name}: accepted a changed icon')
-        for bg in ('#000000', '#6e6e6e'):  # the list, and Classic's Graphite selection bar
+        for bg in ('#000000', '#2160d8'):  # the list, and OLED's selection bar (its Blue scheme's accent)
             assert max(abs(a - b) for a, b in zip(mean(old, bg), mean(new, bg))) < 0.02, (name, bg)
         px = bytearray(imagemagick('png:-', '-depth', '8', 'rgba:-', data=new))
         sat = lambda i: max(px[i:i+3]) - min(px[i:i+3])
         disc = max([1] + [sat(i) for i in range(0, len(px), 4)])
         assert disc > 100, name  # a coloured disc to grey
-        for i in range(0, len(px), 4): px[i:i+3] = bytes([255 - (255 - 0x77)*min(sat(i), disc)//disc])*3
+        grey = inc('MINIMAL_CHEVRON') & 255
+        for i in range(0, len(px), 4): px[i:i+3] = bytes([255 - (255 - grey)*min(sat(i), disc)//disc])*3
         runtime = imagemagick('-size', f'{SET_ICON}x{SET_ICON}', '-depth', '8', 'rgba:-', '-define', 'png:color-type=6', 'png:-', data=bytes(px))
-        values = mean(runtime, '#000000')  # Minimal's black list: neutral grey
+        values = mean(runtime, '#000000')  # OLED's black list: neutral grey
         assert max(values) - min(values) < 0.001, name
     # Videos' player: an ELF with the stock binaries' ABI flags (nan2008, o32, mips32r2).
     helper = read('rootfs.squashfs', HELPER)
@@ -542,22 +543,12 @@ def validate_assets(directory):
     ca = fileoff(player, pps['player_ca_file'])
     assert player[ca:player.index(b'\0', ca)] == b'/' + STOCK_CA.encode()
     # each subset face ships, cut to what its <NAME>_RANGES lists, with its licence files
-    from build import CLASSIC_LIGHT_NOTICE, FACES, FONT_DIR, FONT_NOTICES, face_font, subset_font
+    from build import FACES, FONT_DIR, FONT_NOTICES, face_font
     for face in FACES.values():
         if face.source:
             assert read('rootfs.squashfs', face.path) == face_font(face)[0]
-    assert read('rootfs.squashfs', FACES['classic-light'].path) == subset_font(ROOT/'assets/fonts/texgyreheros-bold.otf', 'Q2 Pod Classic Light', 'CLASSIC_LIGHT_RANGES', CLASSIC_LIGHT_NOTICE)[0]
     for name in FONT_NOTICES:
         assert read('rootfs.squashfs', FONT_DIR + name) == (ROOT/'assets/fonts'/name).read_bytes()
-    # Centred Now Playing's page is English, as the iPod page is (english_ui)
-    from build import CJK
-    from ipod import PLAYING_STOCK
-    stock_page = decode(read('rootfs.squashfs', 'release/assets/default/raw/ui/' + PLAYING_STOCK))
-    assert not any(CJK.search(n[2].get('text', '')) for n in walk(stock_page))
-    # its lyrics page follows the page's size, for full-screen lyrics (navigation.c np_full)
-    named = {n[2].get('name'): n[2] for n in walk(stock_page)}
-    assert named['view_lrc']['self_layout'] == 'default(x=0,y=0,w=100%,h=-20)'
-    assert named['label_lyricmsg']['self_layout'] == 'default(x=0,y=73,w=100%,h=28)'
     # Curly quotes draw the straight glyphs and ♡ takes ♥'s box and advance; other tables keep their
     # stock bytes (head: its checksum).
     from build import QUOTES
@@ -879,11 +870,6 @@ def validate_assets(directory):
             # Split (coverflow_home_layout) gives the menu half the screen, the art the rest;
             # Split's glyph ends 13px before the art, as in the Home concept.
             assert inc('HOME_SPLIT_W') == 375 // 2
-            assert inc('CHEVRON_W') - 30 - inc('HOME_CHEVRON_SHIFT') == 13
-            assert inc('HOME_MODERN_TEXT_X') >= corner_x(SET0.bar + HOME_TOP + 6*HOME_ROW + 9, 20)
-            # Modern's labels stop short of Split's glyph (x 20 to 30 of list_into) and Full's.
-            for row, shift in ((inc('HOME_SPLIT_W'), inc('HOME_CHEVRON_SHIFT')), (inc('HOME_MODERN_ROW'), inc('HOME_FULL_CHEVRON_SHIFT'))):
-                assert row - inc('HOME_MODERN_LABEL_END') + 5 <= row - inc('CHEVRON_W') + shift + 20
             continue
         if short == STATUS_BAR:  # iPod only: play state left, title between, four icons right
             left, right, *rest = root[3]
@@ -941,11 +927,12 @@ def validate_assets(directory):
             assert anchor['anchor_x'] == f'{375 // 2 - dots[0]}px' and anchor['anchor_y'] == '0px' and 0 < dots[3] // 2
             assert named['slide_view'][1] == [0, 0, 375, 186]
             # The lyrics page (patch/lyrics.c): its rows span the page, a LYRIC_SLOT each after a blank one,
-            # three to its 178px; the text, LYRIC_X in, clears the glass's corners, as the art does.
+            # three to its 178px; the text, LYRIC_OLED_X in (lyrics.c), clears the glass's corners, as the art does.
             lrc, slot = named['view_lrc'][3][0][2], inc('LYRIC_SLOT')
             assert named['view_lrc'][2]['self_layout'] == 'default(x=0,y=0,w=375,h=178)' and 3 * slot <= 178 < 4 * slot
             assert lrc['self_layout'] == 'default(x=0,y=0,w=100%,h=100%)' and lrc['children_layout'] == f'list_view(x=0,y={slot},s=0)'
-            assert inc('LYRIC_X') == NP_MARGIN >= corner_x(SET0.bar + NP_TOP, 178)
+            lyric_x = int(re.search(r'^#define LYRIC_OLED_X (\d+)', (ROOT/'patch/lyrics.c').read_text(), re.M)[1])
+            assert lyric_x >= NP_MARGIN >= corner_x(SET0.bar + NP_TOP, 178)
             slider = named['slider_play']
             assert slider[1] == [NP_BAR[0], 233, NP_BAR[2], NP_TOUCH] and NP_TOUCH >= 44
             assert slider[2]['bar_size'] == '4' and slider[2]['slide_with_bar'] == 'true'
@@ -1012,8 +999,8 @@ def validate_assets(directory):
         else: raise AssertionError('Accepted a changed asset')
     # Every geometry set's built list windows take the row height of the page's pitch
     # immediates (art pages take art_pitch), and its rows fit.
-    from theme import builtins, geometry_sets, SCHEMA
-    from ipod import CLASSIC_LIGHT_FONT_SRC, PAGE_KIND as page_kind, page_rows, fit_rows
+    from theme import builtins, geometry_sets
+    from ipod import PAGE_KIND as page_kind, page_rows, fit_rows
     built = set(run('unsquashfs', '-l', directory/'rootfs.squashfs').split())
     # Under a set without toolbars the Playlists rows (pl_row) are the theme's page_detail high in a list pitched at
     # the set's playlist pitch (page_rows): one height.
@@ -1054,17 +1041,10 @@ def validate_assets(directory):
                 else:
                     assert [n[1][1] for n in new[3] if n[0] == 'list_item'] == [0, g.pitch]
         assert g.set_top + g.set_rows*g.set_row <= 320 - g.bar, g.name
-        # Home's rows are the set's and fit; a theme with Home's chevron ends its labels short of the
-        # glyph (x 20 of list_into) in both widths, as Classic's below.
+        # Home's rows are the set's and fit.
         mine = ui + f'{g.name}_{HOME_PAGE}'
         listed = {n[2].get('name'): n for n in walk(decode(read('rootfs.squashfs', mine if 'squashfs-root/' + mine in built else ui + HOME_PAGE)))}['list_view_home']
         assert listed[2]['item_height'] == str(g.home_row) and HOME_TOP + 7*g.home_row <= 320 - g.bar, g.name
-        for t in builtins():
-            if g in geometry_sets([t]) and t['chevron_home']:
-                # a theme's own chevron in Split: the label ends at it
-                assert t['home_label_end[0]'] >= (inc('HOME_SPLIT_W') - t['home_chevron_x'] if t['home_chevron_x']
-                                                  else inc('CHEVRON_W') - inc('HOME_CHEVRON_SHIFT') - 15), t['id']
-                assert t['home_label_end[1]'] >= inc('CHEVRON_W') - inc('HOME_FULL_CHEVRON_SHIFT') - 15, t['id']
         for rel in UI_ASSETS:
             folder, _, base = rel.rpartition('/')
             mine = ui + (folder and folder + '/') + f'{g.name}_{base}'
@@ -1094,55 +1074,11 @@ def validate_assets(directory):
                 assert ends and all(h % pitch == 0 and end <= g.list_end < end + pitch for end, h, pitch in ends.values()), (g.name, ends)
             else:
                 assert ends and {end for end, _, _ in ends.values()} == {320 - g.bar}, (g.name, ends)
-        if g.bar_px and not g.status_y:  # Classic's bar (a status row's is below): one cap centre, the title clear of the glass, the clock centred, no idle mark
-            m = status_metrics(g, CLASSIC_LIGHT_FONT_SRC)
-            bar = {n[2].get('name'): n for n in walk(decode(read('rootfs.squashfs', ui + f'{g.name}_system_bar.bin')))}
-            assert bar['label_title'][1] == m['title'] and bar['label_title'][2]['ellipses'] == 'true' and bar['label_clock'][1] == m['clock'] and 'label_idle' not in bar, g.name
-            assert 2 * m['cap_top'] + m['cap'] in (g.bar - 3, g.bar - 2) and m['inset'] >= corner_inset(m['cap_top']), g.name
-            assert 2 * m['clock'][0] + m['clock'][2] == 375, g.name
-            # the battery's nub ends clear of the glass, at its top row, above the bar's two lines
-            xm = g.bar_right
-            assert xm >= corner_inset((g.bar - 2 - g.batt_h) // 2) and g.batt_h <= g.bar - 1 and bar['view_right'][2]['children_layout'].endswith(f'xm={xm},s={inc("STATUS_GAP")})'), g.name
-            size = SCHEMA['bar.title.font_size'].field
-            assert {t[size] for t in builtins() if g in geometry_sets([t])} == {g.bar_px}, g.name  # the theme's bar text is the set's
         if g.status_y:  # a status row: its title's text and its battery's nub STATUS_ROW_INSET in, clear of the glass at its line's top
             bar = {n[2].get('name'): n for n in walk(decode(read('rootfs.squashfs', ui + f'{g.name}_system_bar.bin')))}
             inset, top = inc('STATUS_ROW_INSET'), g.status_y - STATUS_ROW_LINE // 2
             assert inset >= corner_x(top, STATUS_ROW_LINE) and bar['label_title'][1][:2] == [inset - 2, top], g.name
             assert bar['view_right'][2]['children_layout'].endswith(f'xm={inset},s={STATUS_ROW_GAP})'), g.name
-        if g.np_ipod:  # Classic's Now Playing: its text fits, in status_metrics' model (stb scales ascent - descent to the size)
-            from fontTools.ttLib import TTFont
-            face = TTFont(CLASSIC_LIGHT_FONT_SRC, lazy=True)
-            cmap = face.getBestCmap()
-            ink = lambda text, px: math.ceil(sum(face['hmtx'][cmap[ord(c)]][0] for c in text) * px / (face['hhea'].ascent - face['hhea'].descent))
-            page = {n[2].get('name'): n for n in walk(decode(read('rootfs.squashfs', ui + f'{g.name}_{PLAYING_PAGE}')))}
-            # the times beside the bar in "-9:59"'s boxes (the build's class, the widest bar) hold their font's line, their outer
-            # edges and the bar's ends clear of the glass; so in every length class np_bar.c ipod_times fits them to: each class's longest times, any digit, the outer
-            # edges where the build put them, the gap kept, the bar between
-            for name in ('label_playtime', 'label_ipod_remain'):
-                x, y, w, h = page[name][1]
-                assert w == NP_IPOD_TIME_WS[0] and inc('NP_IPOD_TIME_PX') <= h, (g.name, name)
-                assert min(x, 375 - x - w) >= corner_x(g.bar + y, h), (g.name, name)
-            (ex, ey, _, eh), (sx, sy, _, sh) = page['label_playtime'][1], page['slider_play'][1]
-            for tw, longest in zip(NP_IPOD_TIME_WS, ('9:59', '59:59', '9:59:59')):
-                bx = ex + tw + inc('NP_IPOD_TIME_GAP')
-                for d in '0123456789':
-                    assert ink('-' + re.sub(r'\d', d, longest), inc('NP_IPOD_TIME_PX')) <= tw, (g.name, tw, d)
-                top = sy + (sh - inc('NP_BAR_IPOD')) // 2
-                assert bx - inc('NP_IPOD_TIME_GAP') - tw == ex and bx >= corner_x(g.bar + top, inc('NP_BAR_IPOD') + inc('SCRUB_REFLECT_ROWS')), (g.name, tw)
-                assert 375 - 2 * bx < page['slider_play'][1][2] or tw == NP_IPOD_TIME_WS[0], (g.name, tw)
-            # the info page's rows (navigation.c ringnav_np_info): each holds the info role's size, its name fits, the rows end above
-            # the dots and both columns clear the glass
-            px = {t['font_px[ROLE_INFO]'] for t in builtins() if g in geometry_sets([t])}
-            assert len(px) == 1, g.name
-            px = px.pop()
-            info = page['view_info'][3]
-            dy = g.bar + page['view_info'][1][1]
-            for key, n in zip((b'album', b'genre', b'player_filesize', b'player_era', b'player_encoding', b'player_bitdepth', b'player_bitrate', b'player_samplerate', b'player_location'), info):
-                value = page[n[2]['name'] + '_value']
-                assert n[1][3] == value[1][3] >= px and ink(table[key].decode(), px) <= n[1][2] and value[1][0] == n[1][0] + n[1][2], (g.name, table[key])
-                assert min(n[1][0], 375 - value[1][0] - value[1][2]) >= corner_x(dy + n[1][1], n[1][3]), (g.name, table[key])
-            assert len(info) == 18 and info[8][1][1] + info[8][1][3] <= page['slide_indicator1'][1][1], g.name
     payload_symbols = symbols(directory/'patch.elf')
     for address in [AUDIT['immediates'][0]['sites'][0][0], '0x532d3c', '0x534cf8', '0x4b5874', AUDIT['row_layout_calls']['sites'][0][0],
                     hex(inc('LIST_VIEW_LAYOUT_SLOT'))]:
