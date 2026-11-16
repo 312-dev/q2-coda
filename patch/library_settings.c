@@ -1,10 +1,10 @@
 /* Settings > Library (docs/ipod.md#settings): what the Library holds and how it is ordered and
  * shown, on one page with three of its own, each stock's Playback page opened again
  * (navigation.c library_open, ringnav_audioset):
- *   Library    Streaming Songs, Sorting >, Artists, Artist View, Playlists >, Folders >,
- *              Scan Song Durations
+ *   Library    On-The-Go, Streaming Songs, Sorting >, Artists, Artist View, Playlists >,
+ *              Folders >, Scan Song Durations
  *   Sorting    Songs > (a picker), Artist's Albums, Years
- *   Playlists  Playlist View, On-The-Go, then after a gap Import Playlists and Export Playlists
+ *   Playlists  Playlist View, then after a gap Import Playlists and Export Playlists
  *   Folders    Folder Root, Folder Skip (stock's own row), Folder Album Cover
  * The pickers (Songs' order here, Display > Cover Flow's Sort) are stock's Buttons Lock page
  * opened again (picker_open), its rows ours.
@@ -179,6 +179,7 @@ void library_page(void *win, void *view, int page) {
 #define INTO(text, ctx)                                                                            \
     widget_set_text_utf8(list_row_into(view, icons[0], library_open, (void *)(ctx)), text)
     if (page == LIB_LIBRARY) {
+        ROWS(POD_OTG, 1);
         ROWS(POD_LIBRARY_SOURCE, 1);
         /* a caption shows under the selected row (settings_pages.c) */
         caption_row(st.pod_label[POD_LIBRARY_SOURCE],
@@ -199,7 +200,6 @@ void library_page(void *win, void *view, int page) {
         ROWS(POD_YEAR_OLD, 1);
     } else if (page == LIB_PLAYLISTS) {
         ROWS(POD_PL_CF, 1);
-        ROWS(POD_OTG, 1);
         settings_gap(view);
         /* playlists.c: the Playlists page's own rows under the other themes */
         widget_set_text_utf8(list_row(view, icons[0], playlists_transfer, 0), "Import Playlists");

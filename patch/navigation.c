@@ -2824,7 +2824,7 @@ int ringnav_quick_settings(void *win, void *ctx) {
  */
 /* Bluetooth's Control Device Volume on: the Q2's volume is the device's own (bt_audio_ready). */
 static int bt_vol_link __attribute__((section(".scratch")));
-/* Playback's On-The-Go (OTG, playlist_pages.c): the Playlists row and the hold menu's Add to
+/* Settings > Library's On-The-Go (OTG, playlist_pages.c): the Playlists row and the hold menu's Add to
  * On-The-Go; on unless the key says 0. */
 static int otg_on __attribute__((section(".scratch")));
 #define STR_(x) #x

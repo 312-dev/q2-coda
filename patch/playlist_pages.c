@@ -9,8 +9,8 @@
  * On-The-Go's songs are playlist entries under cd_num ON_THE_GO with no header row, so stock's
  * own add (batch_add_file), read (getMusicByPlayList) and Now Playing's Delete take them as any
  * playlist's and they last across a restart in database.db; Save as Playlist gives them a header
- * of their own (playlists.c otg_save). Playback's On-The-Go switch (ringnav_otg) hides its row and
- * the hold menu's Add to On-The-Go.
+ * of their own (playlists.c otg_save). Settings > Library's On-The-Go switch (ringnav_otg) hides
+ * its row and the hold menu's Add to On-The-Go.
  *
  * Clicks run on the next loop pass (pv_run), as the queue menu's do, so a rebuild never happens
  * under its own click. The rows' glyphs and right-hand text are painted here (pv_paint); Add Songs

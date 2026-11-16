@@ -48,7 +48,7 @@ enum {
     POD_SCAN_DURATIONS,
     POD_CF_POSITION,
     POD_LIBRARY_SOURCE, /* Local Only or Local + Server (catalogue.c) */
-    POD_OTG,            /* Playback's On-The-Go (playlist_pages.c), on unless chosen */
+    POD_OTG,            /* Library's On-The-Go (playlist_pages.c), on unless chosen */
     POD_COUNT
 };
 
@@ -412,7 +412,7 @@ void feedback_switch_bar(void *w, void *canvas);
 void feedback_scan_bar(void *w, void *canvas);
 void feedback_shuffled(const char *what, int songs);
 void cf_veil(void *win, int on);              /* win unseen (1) or seen again under Coverflow */
-int ringnav_otg(void);                        /* Playback's On-The-Go switch */
+int ringnav_otg(void);                        /* Library's On-The-Go switch */
 int ringnav_playlist_coverflow(void);         /* Display's Playlist View is Cover Flow */
 int music_records(void *list, int discovery); /* list's songs less spoken (0) or hidden (1) ones */
 int search_key(unsigned key);

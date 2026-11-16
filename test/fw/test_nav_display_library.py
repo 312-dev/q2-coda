@@ -527,15 +527,15 @@ def test_settings_library_row_opens_the_library_page(fw):
     ui = Ui(fw)
     page = library(fw, ui)
     assert page.opened == ['playset/playset_page'] and page.title() == 'Library'
-    assert page.texts() == ['Streaming Songs', 'Sorting', 'Artists: Artist', 'Artist View: Cover Flow',
+    assert page.texts() == ['On-The-Go', 'Streaming Songs', 'Sorting', 'Artists: Artist', 'Artist View: Cover Flow',
                             'Playlists', 'Folders', 'Scan Song Durations']  # stock's rows gone
     into = [any(c.props.get('image') == b'list_into' for c in item.children[0].children) for item in page.view().children]
-    assert into == [False, True, False, False, True, True, False]
+    assert into == [False, False, True, False, False, True, True, False]
 
 
 @pytest.mark.parametrize('row, title, texts', [
     ('Sorting', 'Sorting', ['Songs: Title \u2191', "Artist's Albums: Year", 'Years: Newest First']),
-    ('Playlists', 'Playlists', ['Playlist View: List', 'On-The-Go', None, 'Import Playlists', 'Export Playlists']),
+    ('Playlists', 'Playlists', ['Playlist View: List', None, 'Import Playlists', 'Export Playlists']),
     ('Folders', 'Folders', ['Folder Root: Card', 'stock_12', 'playset_foldercover']),  # stock's Folder Skip kept
 ])
 def test_library_s_pages_hold_their_rows(fw, row, title, texts):
