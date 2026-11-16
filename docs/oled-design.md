@@ -679,10 +679,9 @@ page, On-The-Go) and `patch/add_songs.c`.
   is made from a song's hold menu, and Import and Export are Settings > Playback > Library & Folders
   rows. An empty list says "No playlists", hint "Hold Play/Pause on a song to add it".
 - **A playlist's hold menu** ([Menus](#menus)): Play, Shuffle, Rename, then Delete after a gap,
-  which asks "Delete playlist “name”?" with Cancel first. Rename is the [Search](ipod.md#search) letter
-  strip with the name in it, the cursor at its end (a word's first letter a capital), under one row,
-  Done: Next at the text's end moves to Done as to Search's results, Centre there saves, Return
-  goes back to the strip, and a held Return leaves the name as it was. No More menu, no Edit Playlist: reordering is the server's or the phone's.
+  which asks "Delete playlist “name”?" with Cancel first. Rename is the [letter strip](#text-entry)
+  with its field off, titled Rename Playlist, the name prefilled over it with the cursor at its end:
+  Next at the name's end saves it, and a held Return leaves the name as it was. No More menu, no Edit Playlist: reordering is the server's or the phone's.
 - **A playlist's page**: Shuffle (Songs' Shuffle row: the accent's glyph, 18 px, at x 26 and the
   label at x 54), Add Songs (`plus-circle`) and its songs, each one line, the artist on the right
   column in 15 px Text Tertiary; no Shuffle row over nothing. Centre plays the list from the song;
@@ -720,6 +719,26 @@ Recently Added, Artists, Albums and Songs, each with the chevron.
   it is, and a toast says which ("Added to name", "Removed", "Undone"); Add All adds every song not
   already in ("Added N songs", "Already added").
 - Return goes back a level; from the chooser, back to the playlist, which reads its songs again.
+
+### Text entry
+
+One letter strip for every text the wheel types (approved as 05b and 05c from the audit2 mock-ups on
+2026-11-16; `patch/search_strip.c`): a `#1C1C1E` pill from x 40 to 335 and y 254 to 288 with 17 px corners,
+its letters in equal 19 px cells about a fixed accent key, the run's ends fading into the pill's own grey.
+It has two forms, in the same place, width and corners:
+
+- **Field on** (Search, Add Songs' Search): the typed text in a black box at the pill's left with its
+  cursor, the letters from x 148; the results above the strip, and with nothing typed the
+  [empty note](#empty-and-offline) in their place, "Search your music" over "Artists, albums and songs".
+- **Field off** (New Playlist, Rename Playlist): the letters across the whole pill, the lit key centred,
+  and the name written large in the middle of the screen, Inter Medium 22 white centred on y 140 with a
+  steady cursor, over its hint in 15 px Text Tertiary on y 180, "Press Next to create" or "Press Next to
+  save". Next confirms only with the cursor at the name's end; elsewhere Previous and Next move the
+  cursor, as on Search's text.
+
+On both, the wheel walks the letters and Centre types the lit one; a short Return erases and a held Return
+leaves. The Wi-Fi password, an EQ preset's name and stock's other text boxes keep the [keyboard](ipod.md#keyboard)
+until the password's form is chosen.
 
 ### Icons
 
@@ -828,7 +847,8 @@ pattern.
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
 | Quick Settings                      | [Control Center](#control-center) | The status row's clock centred, no title                                                        |
-| Search                              | Own                         | An iPod classic's letter strip, a pill at y 254-288, under six single-line results ([ipod](ipod.md#search)) |
+| Search                              | [Text entry](#text-entry)   | The letter strip's field on, under six single-line results ([ipod](ipod.md#search))                         |
+| New Playlist, Rename Playlist       | [Text entry](#text-entry)   | The letter strip's field off, the name large over it ([ipod](ipod.md#name-strip))                          |
 | Keyboard                            | Own                         | Stock's keys as `#1C1C1E` boxes on black, the wheel's key in the accent ([ipod](ipod.md#keyboard))          |
 | Buttons locked                      | Own                         | A padlock left of the play state while Buttons Lock is on; a blocked press shows a #1C1C1E card over the page dimmed to 45%: a 56 px padlock, "Buttons Locked" 16 px Medium and the hint 13 px Secondary, for 1.5 s |
 | A card app's QR page (sign-in)      | Own                         | The status row names the app. The code on a white plate (166 px, radius 12) centred under it, the app's note ("Scan with your phone to sign in") 17 px Medium white and "or open ADDR · PIN 482 913" 14 px Text Tertiary under it. Once the app reports a step, a mode page: one solid 92 px circle (Accent for phone and check, #34C759 done, #FF453A fail and error) with a 44 px white Phosphor fill glyph (`device-mobile`, `arrows-clockwise`, `check` bold, `cloud-slash`, `x` bold), the title 22 px Medium and one line 15 px Text Secondary, the stack centred between the status row and the bottom; the wheel does nothing |

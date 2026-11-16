@@ -31,9 +31,17 @@
  * The page is one sheet painted here (search_strip_paint), not rows: the strip and the list share
  * the wheel, and only one of them shows a selection at a time.
  *
- * The strip serves two of the playlist pages too, without the tabs: a playlist's Rename
- * (playlist_rename_open), whose one row is Done, and Add Songs' Search row (add_songs_search),
- * which lists songs alone. */
+ * With nothing typed, the free area above the strip says what Search finds, as the house empty
+ * note (ss_note).
+ *
+ * One strip, two forms (docs/oled-design.md#text-entry, approved as 05b and 05c from audit2): its
+ * typed-text field ON, as above, or OFF, for naming a playlist: New Playlist (playlist_new_open)
+ * and Rename Playlist (playlist_rename_open, prefilled). Field OFF the letters run across the whole
+ * pill, the same pill in the same place, and the name is written large in the middle of the
+ * screen with its cursor over a hint, "Press Next to create" or "Press Next to save". Next with the
+ * cursor at the name's end creates or saves it; elsewhere Previous and Next move the cursor. A
+ * short Return erases, a held Return leaves without a change. Add Songs' Search row
+ * (add_songs_search) is field ON over songs alone. */
 #include "navigation.h"
 
 /* The sheet starts under the 58 px status row; on it, from the top: */
@@ -78,6 +86,19 @@
 #define SS_PX_LETTER 23
 #define SS_PX_NOTE 19
 #define SS_PX_ARTIST 18
+/* Field OFF (a playlist's name): the run across the whole pill, faded into it at its ends, the lit
+ * cell centred on the pill; the name in Inter Medium 22 centred on SS_NAME_Y of the sheet, its
+ * cursor after the characters before it, the hint in 15 px Text Tertiary SS_HINT_DY under it */
+#define SS_OPEN_RUN_L 46
+#define SS_OPEN_RUN_R 329
+#define SS_OPEN_LIT_X 178
+#define SS_OPEN_SIDE 7
+#define SS_NAME_Y 82     /* screen y 140 */
+#define SS_HINT_DY 40    /* screen y 180 */
+#define SS_NAME_ROOM 327 /* the text column to the right column */
+#define SS_PX_NAME 27    /* Inter Medium 22, AWTK's size */
+#define SS_PX_HINT 18    /* 15 */
+#define SS_NOTE_Y 86     /* the empty note's line (screen y 144), its hint 24 px under it */
 /* The key pop (tools/art.py POP_*): the bubble's image is the head's width, its foot the key's,
  * the key 18 px wide from the lit cell's left and SS_BOX_IN below the strip's top, as the lit
  * cell's accent box is; the big letters and the echoes are strips of a cell per strip character,
@@ -108,6 +129,7 @@ static struct {
     int cur, by;          /* the cursor's place in text; ss_by_name's field */
     int rename;           /* Rename's playlist + 1 (playlist_rename_open), 0 for Search */
     int pick;             /* Add Songs' (add_songs_search): songs alone, Centre adds them */
+    int create;           /* New Playlist's (playlist_new_open) */
     short down_x, down_y, pressed, swiped; /* a touch: where it went down, cells it moved */
     char text[SS_TEXT_MAX + 1];
     unsigned pop_timer, pop_step_at; /* the pop's timer; the wheel's last step on the strip */
@@ -127,6 +149,12 @@ static int ss_listed(int from, int off, void *r) {
 }
 
 static int ss_has(const char *s) { return s && *s && strcasestr(s, ss.text); }
+
+/* Field OFF: the page names a playlist (New Playlist, Rename Playlist), no field in the pill. */
+static int ss_named(void) { return ss.rename || ss.create; }
+/* The lit cell's left, and the cells each side of it in the run, by the form. */
+static int ss_lit_x(void) { return ss_named() ? SS_OPEN_LIT_X : SS_LIT_X; }
+static int ss_side(void) { return ss_named() ? SS_OPEN_SIDE : SS_SIDE; }
 
 /* Two records by their field ss.by, case aside: a tab's artists or albums A to Z. */
 static int ss_by_name(const void *a, const void *b) {
@@ -188,7 +216,7 @@ static void ss_type(int e) {
         for (int i = at - 1; i < n; ++i) ss.text[i] = ss.text[i + 1];
         --ss.cur;
     } else {
-        int cap = ss.rename && (!at || ss.text[at - 1] == ' ');
+        int cap = ss_named() && (!at || ss.text[at - 1] == ' ');
         char c = (char)(e == SS_SPACE ? ' '
                         : e < 26      ? (cap ? 'A' : 'a') + (unsigned)e
                                       : ss_char(e));
@@ -198,32 +226,39 @@ static void ss_type(int e) {
         ss.text[at] = c;
         ++ss.cur;
     }
-    if (!ss.rename) ss_filter();
+    if (!ss_named()) ss_filter();
+}
+
+/* Next at the name's end: the name, its edge spaces gone, saved (Rename) or made a playlist (New
+ * Playlist, ringnav_playlist_create, which the list it goes back to opens on), and the page
+ * closes; else a toast says why not and the name stays to edit. */
+static void ss_save(void) {
+    char name[SS_TEXT_MAX + 1];
+    unsigned a = 0, b = strlen(ss.text);
+    while (ss.text[a] == ' ') ++a;
+    while (b > a && ss.text[b - 1] == ' ') --b;
+    tk_snprintf(name, sizeof name, "%.*s", (int)(b - a), ss.text + a);
+    int r = !*name      ? 0
+            : ss.create ? ringnav_playlist_create((void *)1, name)
+                        : playlist_rename(ss.rename - 1, name);
+    toast(!*name                ? "Name can't be empty"
+          : r == -2             ? "A playlist has that name"
+          : ss.create && r >= 0 ? "Playlist created"
+          : ss.create           ? "Could not create playlist"
+          : r                   ? "Renamed"
+                                : "Could not rename playlist");
+    if (*name && (ss.create ? r >= 0 : r > 0)) {
+        g_delete_flag = 1; /* Playlists reads its rows again */
+        navigator_back();
+    }
 }
 
 /* The result at sel: a song plays, the songs found after it as the queue (a song list's class, as
  * Most Played's), which playing_page copies before it returns; an artist opens stock's artist page,
  * as Now Playing's Artist info does; an album its tracks in Cover Flow, as Era's albums do. Under
- * Rename, Done; under Add Songs, the song in or out of the playlist. */
+ * Add Songs, the song in or out of the playlist. */
 extern int coverflow_goto_album(void *r);
 static void ss_play(void) {
-    if (ss.rename) { /* Done: the name, its edge spaces gone, saved */
-        char name[SS_TEXT_MAX + 1];
-        unsigned a = 0, b = strlen(ss.text);
-        while (ss.text[a] == ' ') ++a;
-        while (b > a && ss.text[b - 1] == ' ') --b;
-        tk_snprintf(name, sizeof name, "%.*s", (int)(b - a), ss.text + a);
-        int r = *name ? playlist_rename(ss.rename - 1, name) : 0;
-        toast(!*name    ? "Name can't be empty"
-              : r == -2 ? "A playlist has that name"
-              : r       ? "Renamed"
-                        : "Could not rename playlist");
-        if (r > 0) {
-            g_delete_flag = 1; /* Playlists reads its rows again */
-            navigator_back();
-        }
-        return;
-    }
     if (ss.sel >= ss.nmatch) return;
     void *r = ss.match[ss.sel], *dq;
     if (ss.pick) { /* Add Songs: in or out of the playlist, its mark changed in place */
@@ -248,7 +283,7 @@ static void ss_play(void) {
 
 /* The pop's box on the sheet: the bubble's, whose key sits on the lit cell's accent box. */
 static rect_t ss_pop_box(void) {
-    return (rect_t){ SS_LIT_X - (SS_POP_W - SS_POP_KEY_W) / 2,
+    return (rect_t){ ss_lit_x() - (SS_POP_W - SS_POP_KEY_W) / 2,
                      SS_STRIP_Y + SS_BOX_IN + SS_POP_KEY_H - SS_POP_H, SS_POP_W, SS_POP_H };
 }
 static int ss_popping(void) { return ss.pop == 1 && !ss.focus && ss.letter < SS_SPACE; }
@@ -289,13 +324,14 @@ static void ss_pop_paint(void *canvas) {
     rect_t b = ss_pop_box();
     ss_cell(canvas, "search_pop", 0, SS_POP_W, SS_POP_H, b.x, b.y);
     ss_cell(canvas, "search_pop_letters", ss.letter, SS_POP_HEAD, SS_POP_HEAD, b.x, b.y);
-    ss_cell(canvas, "search_pop_echoes", ss.letter, SS_POP_KEY_W, SS_POP_ECHO_H, SS_LIT_X,
+    ss_cell(canvas, "search_pop_echoes", ss.letter, SS_POP_KEY_W, SS_POP_ECHO_H, ss_lit_x(),
             SS_STRIP_Y);
 }
 
-/* Whether the tabs show: while the wheel is off the strip, never under Rename or Add Songs. The
- * rows showing, and the first one's top: under the tabs while they show. */
-static int ss_tabs(void) { return ss.focus && !ss.rename && !ss.pick; }
+/* Whether the tabs show: while the wheel is off the strip, never under Add Songs (nor naming a
+ * playlist, where it never leaves the strip). The rows showing, and the first one's top: under
+ * the tabs while they show. */
+static int ss_tabs(void) { return ss.focus && !ss_named() && !ss.pick; }
 static int ss_rows(void) { return ss_tabs() ? SS_TAB_ROWS : SS_ROWS; }
 static int ss_list_y(void) { return ss_tabs() ? SS_LIST_Y : 0; }
 /* The bar's row kept in view. */
@@ -319,8 +355,7 @@ int search_strip_key(void *top, unsigned key) {
                  : key == KEY_BACK_BTN ? -1
                                        : 0;
     if (ss.focus == SS_ON_LIST && (button < 0 || (wheel < 0 && !ss.sel)))
-        ss.focus = button || ss.rename || ss.pick ? SS_ON_STRIP : SS_ON_TABS, wheel = button = 0,
-        key = 0;
+        ss.focus = button || ss.pick ? SS_ON_STRIP : SS_ON_TABS, wheel = button = 0, key = 0;
     if (ss.focus && key && !wheel && !button && key != KEY_CENTER && key != KEY_RETURN)
         return 0; /* Play/Pause, on the results too */
     if (ss.focus == SS_ON_TABS) {
@@ -346,7 +381,9 @@ int search_strip_key(void *top, unsigned key) {
     } else if (button > 0 && ss.text[ss.cur])
         ++ss.cur;
     else if (button > 0) {
-        if (ss.rename || (ss.pick && ss.nmatch)) /* Rename's Done, Add Songs' songs */
+        if (ss_named()) /* Next at the name's end: create it, or save it */
+            ss_save();
+        else if (ss.pick && ss.nmatch) /* Add Songs' songs */
             ss.focus = SS_ON_LIST;
         else if (ss.any && !ss.pick)
             ss.focus = ss.nmatch ? SS_ON_LIST : SS_ON_TABS; /* an empty tab: the tabs */
@@ -429,6 +466,56 @@ static int ss_typed(void *canvas, int x, int y, int h, int room, unsigned rgb) {
     return cw;
 }
 
+/* A line of s centred across the sheet on y, in face (0: the theme's for s) at px, in rgb; its
+ * width. */
+static int ss_centred(void *canvas, const char *face, const char *s, int y, int px, unsigned rgb) {
+    unsigned wide[96];
+    unsigned n = ss_wide(s, wide, sizeof wide / sizeof *wide);
+    int fpx = px;
+    if (!face) face = theme_face(wide, (int)n, &fpx);
+    canvas_set_font(canvas, face, (unsigned)fpx);
+    int w = (int)(canvas_measure_text(canvas, wide, n) + 0.5f);
+    rect_t r = { (375 - w) / 2, y - SS_PITCH / 2, w + 2, SS_PITCH };
+    final_text(canvas, face, wide, &r, (unsigned)fpx, 0xff000000u | rgb);
+    return w;
+}
+
+/* Search with nothing typed: the house empty note (docs/oled-design.md#empty-and-offline), its
+ * line in 16 px Text Secondary and its hint in 15 px Text Tertiary 24 px under it, in the free
+ * area above the strip. */
+static void ss_note(void *canvas, const char *line, const char *hint, unsigned secondary,
+                    unsigned tertiary) {
+    ss_centred(canvas, 0, line, SS_NOTE_Y, SS_PX_NOTE, secondary);
+    ss_centred(canvas, 0, hint, SS_NOTE_Y + 24, SS_PX_HINT, tertiary);
+}
+
+/* Field OFF: the name in Inter Medium 22, centred, and its cursor; a name wider than the text
+ * column keeps the cursor in it, from the first character that does (as ss_typed); the hint. */
+static void ss_name_paint(void *canvas, unsigned primary, unsigned tertiary) {
+    static const char *const faces[] = FONT_NAMES;
+    unsigned wide[SS_TEXT_MAX + 1];
+    unsigned n = ss_wide(ss.text, wide, sizeof wide / sizeof *wide), at = 0, end = n,
+             cur = (unsigned)ss.cur;
+    int px = SS_PX_NAME;
+    const char *face = theme_face(wide, (int)n, &px);
+    if (!face || face == faces[theme()->font[ROLE_TITLE]]) face = faces[FONT_INTER_MEDIUM];
+    canvas_set_font(canvas, face, (unsigned)px);
+#define SS_W(a, b)                                                                                 \
+    ((b) > (a) ? (int)(canvas_measure_text(canvas, wide + (a), (b) - (a)) + 0.5f) : 0)
+    while (at < cur && SS_W(at, cur) > SS_NAME_ROOM) ++at;
+    while (end > cur && SS_W(at, end) > SS_NAME_ROOM) --end;
+    int cx = SS_W(at, cur), w = SS_W(at, end);
+#undef SS_W
+    int x = (375 - w) / 2;
+    wide[end] = 0;
+    rect_t r = { x, SS_NAME_Y - SS_PITCH / 2, w + 2, SS_PITCH };
+    if (end > at) final_text(canvas, face, wide + at, &r, (unsigned)px, 0xff000000u | primary);
+    stock_canvas_set_fill_color(canvas, RGBA(primary)); /* the cursor, steady */
+    canvas_fill_rect(canvas, x + cx + 1, SS_NAME_Y - 13, 2, 26);
+    ss_centred(canvas, 0, ss.create ? "Press Next to create" : "Press Next to save",
+               SS_NAME_Y + SS_HINT_DY, SS_PX_HINT, tertiary);
+}
+
 /* ringnav_paint: the results and the strip, on the sheet. Colours are the theme's tokens
  * (docs/oled-design.md#colour), drawn as stated in each half. */
 void search_strip_paint(void *w, void *canvas) {
@@ -437,17 +524,13 @@ void search_strip_paint(void *w, void *canvas) {
     int light = ipod_light();
     unsigned primary = light ? 0x000000 : 0xffffff, secondary = light ? 0x5c5c5c : 0xababab,
              tertiary = light ? 0x6e6e6e : 0x858585, accent = accent_tone(2);
-    if (ss.rename) { /* Rename's one row: Done, the accent's, white when lit */
-        int on = ss.focus == SS_ON_LIST;
-        if (on) fill_box(canvas, &(rect_t){ 16, 0, 375 - 32, SS_PITCH }, RGBA(accent), 8);
-        ss_text(canvas, 0, "Done", 24, 0, SS_PITCH, SS_TITLE_W, SS_PX_ROW, on ? 0xffffff : accent);
-    }
+    if (ss_named()) ss_name_paint(canvas, primary, tertiary);
     if (ss_tabs()) {
         static const char *const tabs[] = { "All", "Songs", "Artists", "Albums" };
         segments_paint(canvas, tabs, SS_TABS, ss.tab, ss.focus == SS_ON_TABS, SS_TABS_X, SS_TABS_Y,
                        SS_TABS_W, SS_TABS_H);
     }
-    for (int i = 0; i < ss_rows() && ss.top + i < ss.nmatch && !ss.rename; ++i) {
+    for (int i = 0; i < ss_rows() && ss.top + i < ss.nmatch && !ss_named(); ++i) {
         void *r = ss.match[ss.top + i];
         int y = ss_list_y() + i * SS_PITCH, on = ss.focus == SS_ON_LIST && ss.top + i == ss.sel;
         char name[512];
@@ -494,7 +577,11 @@ void search_strip_paint(void *w, void *canvas) {
             ss_text(canvas, 0, artist, ax, y + 1, SS_PITCH, right - ax, SS_PX_ARTIST, note);
         if (grey) catalogue_mark_paint(canvas, SS_MARK_X, y + SS_PITCH / 2, ink);
     }
-    if (ss.text[0] && !ss.nmatch && !ss.rename) {
+    if (!ss.text[0] && !ss_named()) /* nothing typed: what Search finds */
+        ss_note(canvas, "Search your music",
+                ss.pick ? "Songs by title or artist" : "Artists, albums and songs", secondary,
+                tertiary);
+    if (ss.text[0] && !ss.nmatch && !ss_named()) {
         int px = SS_PX_NOTE;
         static const unsigned none[] = { 'N', 'o', ' ', 'r', 'e', 's', 'u', 'l', 't', 's', 0 };
         rect_t r = { 0, ss_list_y(), 375, SS_STRIP_Y - ss_list_y() };
@@ -507,16 +594,23 @@ void search_strip_paint(void *w, void *canvas) {
     unsigned strip = flip_if(light, 0x1c1c1e);
     fill_box(canvas, &(rect_t){ SS_STRIP_X, y0, 375 - 2 * SS_STRIP_X, SS_STRIP_H }, RGBA(strip),
              SS_STRIP_R);
-    fill_box(canvas,
-             &(rect_t){ SS_BOX_X, y0 + SS_BOX_IN, SS_BOX_R - SS_BOX_X, SS_STRIP_H - 2 * SS_BOX_IN },
-             RGBA(light ? 0xffffff : 0), SS_BOX_RADIUS);
-    int cx = ss_typed(canvas, SS_TYPED_X, y0, SS_STRIP_H, SS_BOX_R - 6 - SS_TYPED_X - 1, primary);
-    if (!ss.focus) { /* the cursor, steady, in the text's ink */
-        stock_canvas_set_fill_color(canvas, RGBA(primary));
-        canvas_fill_rect(canvas, SS_TYPED_X + 1 + cx, cy - 9, 2, 18);
+    if (!ss_named()) { /* field ON: the typed text's black box, its cursor */
+        fill_box(
+            canvas,
+            &(rect_t){ SS_BOX_X, y0 + SS_BOX_IN, SS_BOX_R - SS_BOX_X, SS_STRIP_H - 2 * SS_BOX_IN },
+            RGBA(light ? 0xffffff : 0), SS_BOX_RADIUS);
+        int cx =
+            ss_typed(canvas, SS_TYPED_X, y0, SS_STRIP_H, SS_BOX_R - 6 - SS_TYPED_X - 1, primary);
+        if (!ss.focus) { /* the cursor, steady, in the text's ink */
+            stock_canvas_set_fill_color(canvas, RGBA(primary));
+            canvas_fill_rect(canvas, SS_TYPED_X + 1 + cx, cy - 9, 2, 18);
+        }
     }
-    for (int k = -SS_SIDE; k <= SS_SIDE; ++k) {
-        int e = (ss.letter + k + SS_ENTRIES) % SS_ENTRIES, on = !k, x = SS_LIT_X + k * SS_STEP;
+    int lit_x = ss_lit_x(), side = ss_side();
+    int run_l = ss_named() ? SS_OPEN_RUN_L : SS_RUN_L,
+        run_r = ss_named() ? SS_OPEN_RUN_R : SS_RUN_R;
+    for (int k = -side; k <= side; ++k) {
+        int e = (ss.letter + k + SS_ENTRIES) % SS_ENTRIES, on = !k, x = lit_x + k * SS_STEP;
         unsigned ink = on && !ss.focus ? 0xffffff : on ? primary : secondary;
         if (on && ss_popping()) continue; /* ss_pop_paint draws the cell */
         if (on && !ss.focus)
@@ -547,8 +641,8 @@ void search_strip_paint(void *w, void *canvas) {
     for (int i = 0; i < SS_FADE; ++i) {
         unsigned a = (unsigned)(255 * (SS_FADE - i) / SS_FADE);
         stock_canvas_set_fill_color(canvas, a << 24 | (RGBA(strip) & 0xffffffu));
-        canvas_fill_rect(canvas, SS_RUN_L + i, y0 + 6, 1, SS_STRIP_H - 12);
-        canvas_fill_rect(canvas, SS_RUN_R - 1 - i, y0 + 6, 1, SS_STRIP_H - 12);
+        canvas_fill_rect(canvas, run_l + i, y0 + 6, 1, SS_STRIP_H - 12);
+        canvas_fill_rect(canvas, run_r - 1 - i, y0 + 6, 1, SS_STRIP_H - 12);
     }
     if (ss_popping()) ss_pop_paint(canvas);
     ui_ink_raw(raw);
@@ -591,14 +685,18 @@ static int ss_touch(void *ctx, void *event) {
     }
     ss.pressed = 0;
     if (strip) {
-        int k = (ss.down_x - SS_LIT_X + SS_SIDE * SS_STEP + SS_STEP) / SS_STEP - SS_SIDE - 1;
-        k = k < -SS_SIDE ? -SS_SIDE : k > SS_SIDE ? SS_SIDE : k; /* the run's faded ends */
+        int side = ss_side(),
+            k = (ss.down_x - ss_lit_x() + side * SS_STEP + SS_STEP) / SS_STEP - side - 1;
+        k = k < -side ? -side : k > side ? side : k; /* the run's faded ends */
         ss.focus = SS_ON_STRIP;
-        if (tap && ss.down_x >= SS_BOX_R && ss.down_x < 375 - SS_STRIP_X) {
+        if (tap && ss.down_x >= (ss_named() ? SS_STRIP_X : SS_BOX_R) &&
+            ss.down_x < 375 - SS_STRIP_X) {
             ss_slide(k);
             if (!k) ss_pop_step();
             ss_type(ss.letter);
         }
+    } else if (ss_named()) {
+        /* the name and its hint: nothing to scroll or pick */
     } else if (!tap) {
         int most = ss.nmatch > ss_rows() ? ss.nmatch - ss_rows() : 0;
         ss.top -= dy / SS_PITCH;
@@ -660,19 +758,26 @@ int library_search_open(void *ctx, void *event) {
     return 0;
 }
 
-/* A playlist's Rename (its hold menu, docs/oled-design.md#playlists): the strip with the name in
- * it, the cursor at its end (a word's first letter a capital), and one row above, Done, which Next
- * at the text's end moves to as Search's results and Centre saves (playlists.c playlist_rename);
- * a held Return closes the page and leaves the name as it was. */
+/* A playlist's Rename (its hold menu, docs/oled-design.md#playlists): the strip with its field
+ * OFF and the name large over it, prefilled, the cursor at its end (a word's first letter a
+ * capital); Next at the name's end saves it (playlists.c playlist_rename), and a held Return
+ * closes the page and leaves the name as it was. */
 void playlist_rename_open(int id, const char *name) {
     if (ss.page || id < 0 || id >= 100 ||
         !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup)))
         return;
     ss.rename = id + 1;
-    ss.nmatch = 1; /* Done */
     tk_snprintf(ss.text, sizeof ss.text, "%s", name ? name : "");
     ss.cur = (int)strlen(ss.text);
-    ss_sheet("Rename");
+    ss_sheet("Rename Playlist");
+}
+
+/* New Playlist (stock's add-playlist dialog's place, playlists.c): the same page, empty; Next at
+ * the name's end makes the playlist (ringnav_playlist_create). */
+void playlist_new_open(void) {
+    if (ss.page || !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup))) return;
+    ss.create = 1;
+    ss_sheet("New Playlist");
 }
 
 /* Add Songs' Search row (add_songs.c): the strip over the library's songs alone, each found by its

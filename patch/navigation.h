@@ -753,12 +753,15 @@ int playlist_add(void *r, int dest);
 int playlist_remove(int dest, void *r);
 void playlist_synced(int dest);
 int playlist_rename(int id, const char *name);
+/* a playlist id, -2 for a name taken, -1 when it fails */
+int ringnav_playlist_create(void *list, const char *name);
 int playlist_delete(int id);
 int otg_clear(void);
 int otg_save(char *name, unsigned size);
 int playlist_confirm(const char *question, const char *verb);
 void playlist_pick_open(void *r);
 void playlist_rename_open(int id, const char *name); /* search_strip.c: the letter strip */
+void playlist_new_open(void); /* search_strip.c: New Playlist on the strip, its field off */
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);
 /* add_songs.c: Add Songs (docs/oled-design.md#add-songs) */

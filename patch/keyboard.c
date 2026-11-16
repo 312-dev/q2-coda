@@ -1,6 +1,7 @@
 /* The on-screen keyboard by the wheel, under a list.entry.ipod theme (OLED; docs/ipod.md#keyboard):
- * stock's kb_default_t9, the input method's keyboard window (IM_KEYBOARD), which New Playlist,
- * Rename, the Wi-Fi password and the other text boxes open. Its keys sit on the page's black, each
+ * stock's kb_default_t9, the input method's keyboard window (IM_KEYBOARD), which the Wi-Fi
+ * password, an EQ preset's name and the other text boxes open (New Playlist and Rename are the
+ * letter strip's, search_strip.c). Its keys sit on the page's black, each
  * a #1C1C1E box with 8 px corners, and the one the wheel is on is the accent's. The wheel walks the
  * keys of the page showing (the candidates first when there are any), Centre presses the key as a
  * tap does (an "abc" key cycles its letters as on a phone), and Return is the box's own: it closes

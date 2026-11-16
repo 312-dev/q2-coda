@@ -25,7 +25,7 @@ OLED = b'3'
 
 class Ss(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'page sheet songs match kind'.split()),
-                *((k, C.c_int) for k in 'nmatch letter focus sel top nsongs tab any cur by rename pick'.split()),
+                *((k, C.c_int) for k in 'nmatch letter focus sel top nsongs tab any cur by rename pick create'.split()),
                 *((k, C.c_short) for k in 'down_x down_y pressed swiped'.split()), ('text', C.c_char * 49),
                 ('pop_timer', C.c_uint), ('pop_step_at', C.c_uint), ('pop', C.c_ubyte)]
 
@@ -597,19 +597,19 @@ def renaming(fw, ui, name):
 
 
 def test_rename_opens_on_the_name_typing_a_word_s_first_letter_as_a_capital(fw, ui):
-    """A playlist's Rename (its hold menu): the strip with its name, the cursor at its end, a word's first
-    letter a capital; Next at the end moves to Done, Centre there saves (name and filename, as stock's), toasts
-    and goes back."""
+    """A playlist's Rename (its hold menu): the strip with its field off and the name over it, prefilled, the
+    cursor at its end, a word's first letter a capital; Previous and Next move the cursor, and Next at the end
+    saves (name and filename, as stock's), toasts and goes back (audit2 05b)."""
     sql = Renames(fw)
     s = renaming(fw, ui, b"Road")
     ss = s.ss
-    assert ui.name[ui.top()] == 'searchstrip_page' and ss.text == b'Road' and ss.rename == 5 and ss.nmatch == 1
-    assert ss.cur == 4 and 'Rename' in ui.text.values()
+    assert ui.name[ui.top()] == 'searchstrip_page' and ss.text == b'Road' and ss.rename == 5 and ss.nmatch == 0
+    assert ss.cur == 4 and 'Rename Playlist' in ui.text.values()
     s.type(' tu')  # a space, T, then u
     assert ss.text == b'Road Tu'
-    s.key(KEY_FWD_BTN)  # to Done
-    assert ss.focus == 1 and not sql.log
-    s.key(KEY_CENTER)
+    s.key(KEY_BACK_BTN, KEY_FWD_BTN)  # the cursor back a character and on again: nothing saved
+    assert ss.cur == 7 and ss.focus == 0 and not sql.log
+    s.key(KEY_FWD_BTN)  # at the end: saved
     assert b"update playlist set name='Road Tu',filename='Road Tu' where id=4" in sql.log
     assert ui.toasts[-1] == 'Renamed' and ui.backs == 1
 
@@ -617,15 +617,50 @@ def test_rename_opens_on_the_name_typing_a_word_s_first_letter_as_a_capital(fw, 
 @pytest.mark.parametrize('taken, fail, said', [(1, False, 'A playlist has that name'), (0, True, 'Could not rename playlist')])
 def test_a_rename_refused_says_why_and_stays(fw, ui, taken, fail, said):
     sql = Renames(fw, taken, fail)
-    renaming(fw, ui, b"Rock 'n' Roll").key(KEY_FWD_BTN, KEY_CENTER)
+    renaming(fw, ui, b"Rock 'n' Roll").key(KEY_FWD_BTN)
     assert any(b"filename='Rock ''n'' Roll'" in st for st in sql.log)  # quoted
     assert ui.toasts[-1] == said and ui.backs == 0
 
 
 def test_an_empty_name_is_not_saved(fw, ui):
     sql = Renames(fw)
-    renaming(fw, ui, b' ').key(KEY_FWD_BTN, KEY_CENTER)
+    renaming(fw, ui, b' ').key(KEY_FWD_BTN)
     assert ui.toasts[-1] == "Name can't be empty" and not sql.log
+
+
+class Creates(Renames):
+    """sqlite3_exec as ringnav_playlist_create runs it: the insert's changes() 1 unless fail."""
+    def run(self, db, sql, callback, ctx, *_):
+        statement = C.string_at(sql)
+        if statement.startswith(b'insert'):
+            self.log.append(statement)
+            if self.fail:
+                return 1
+            value = (C.c_char_p * 1)(b'1')
+            return C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_int, C.c_void_p, C.c_void_p)(callback)(ctx, 1, C.addressof(value), None)
+        return super().run(db, sql, callback, ctx)
+
+
+@pytest.mark.parametrize('taken, fail, said, back', [(0, False, 'Playlist created', 1), (1, False, 'A playlist has that name', 0),
+                                                     (0, True, 'Could not create playlist', 0)])
+def test_new_playlist_names_it_on_the_strip_and_next_at_the_end_makes_it(fw, ui, taken, fail, said, back):
+    """New Playlist (audit2 05b): the strip's field off, empty; Next before the name's end moves the cursor, at its
+    end makes the playlist (ringnav_playlist_create), toasts and goes back; refused, it says why and stays."""
+    Config(fw)
+    sql = Creates(fw, taken, fail)
+    fw.fn('playlist_new_open', None)()
+    s = Strip.__new__(Strip)
+    s.fw, s.ui, s.stock = fw, ui, []
+    s.ss, s.take = fw.var('search_strip__ss', Ss), fw.fn('search_strip_key', C.c_int, C.c_void_p, C.c_uint)
+    assert s.ss.create == 1 and s.ss.text == b'' and 'New Playlist' in ui.text.values()
+    s.type('road trip')
+    assert s.ss.text == b'Road Trip'
+    s.key(KEY_BACK_BTN, KEY_FWD_BTN)
+    assert not [q for q in sql.log if q.startswith(b'insert')]
+    s.key(KEY_FWD_BTN)
+    inserts = [q for q in sql.log if q.startswith(b'insert')]
+    assert len(inserts) == (not taken) and all(b"'Road Trip'" in q for q in inserts)
+    assert ui.toasts[-1] == said and ui.backs == back
 
 
 def test_add_songs_search_lists_songs_by_title_or_artist_and_centre_adds_in_place(fw, ui, song):
