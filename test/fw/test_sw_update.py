@@ -140,8 +140,6 @@ def opened(fw):
     for name in ('list_view_create', 'scroll_view_create', 'hscroll_label_create', 'list_item_create'):
         fw.mock(name, widget)
     fw.mock('window_create', lambda *_: made.append(C.create_string_buffer(0x400)) or C.addressof(made[-1]))
-    # each window the window manager has opened (WINDOW_STAGE_OPENED); other props their default
-    fw.mock('widget_get_prop_int', lambda w, name, default, *_: 3 if C.string_at(name) == b'stage' else C.c_int(default).value)
     return lambda: [C.string_at(c[1][1]).decode() for c in fw.calls('widget_set_name')
                     if c[1][0] in {C.addressof(m) for m in made}]
 

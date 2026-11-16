@@ -270,19 +270,13 @@ static void sw_confirm_open(void) {
     ringnav_select(view, 0, 2);
 }
 
-/* Whether page is open and still: the window manager has marked it opened, after its slide in
- * (navigation.c empty_toast's test), and nothing slides. */
-static int sw_opened(void *page) {
-    return widget_get_prop_int(page, "stage", 0) == WINDOW_STAGE_OPENED &&
-           !window_manager_is_animating(window_manager());
-}
-
-/* Install Update? once it is on top and opened (it opens from a timer, as usb_ui.c usb_ready's
+/* Install Update? once it is on top and still (it opens from a timer, as usb_ui.c usb_ready's
  * pages): the wheel's list on it, Cancel selected, and the check's page under it closed only then,
- * not while its slide in runs. Whether it is. */
+ * not while its slide in runs: left under it, Return did nothing. Whether it is. */
 static int sw_settle(void) {
+    void *wm = window_manager();
     if (swu.ready || !swu.confirm) return 1;
-    if (!sw_opened(swu.confirm) || window_manager_get_top_window(window_manager()) != swu.confirm)
+    if (window_manager_get_top_window(wm) != swu.confirm || window_manager_is_animating(wm))
         return 0;
     swu.ready = 1;
     sw_close(&swu.page);
@@ -299,9 +293,9 @@ static int sw_tick(const void *unused) {
         swu.timer = 0;
         return 7; /* RET_REMOVE */
     }
-    /* and not before the check's page has opened: a page opened while it slides in is held back
-     * by the window manager until that ends, and took no input once it showed */
-    if (swu.state == SW_CHECKING || (swu.page && !sw_opened(swu.page))) {
+    /* and not while the check's page still slides in: a page opened then is held back by the
+     * window manager until that ends, and took no input once it showed */
+    if (swu.state == SW_CHECKING || (swu.page && window_manager_is_animating(window_manager()))) {
         swu.frame = (swu.frame + 1) % 12;
         if (swu.page) widget_invalidate_force(swu.page, (void *)0);
         return 8;

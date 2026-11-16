@@ -18235,12 +18235,9 @@ passed()
 # Its answer: OK opens Install Update? over it and closes it; another, its page.
 for state,want in ((SW_OK,'swconfirm_page'),(SW_LATEST,'swupdate_page'),(SW_BAD,'swupdate_page')):
     m=sw_open(); page=m.top; m.word(payload_syms['swu']+4,state); m.u.mem_write(payload_syms['swu']+0x40,b'V1830\0')
-    m.advance(80); assert not m.joins and m.nodes[m.top]['name']=='swupdate_page'  # until the window manager has opened it
-    m.nodes[page]['stage']=3; m.advance(80); assert m.joins and m.nodes[m.top]['name']==want,(state,m.nodes[m.top]['name'])
+    m.advance(80); assert m.joins and m.nodes[m.top]['name']==want,(state,m.nodes[m.top]['name'])
     if state!=SW_OK: assert m.top==page and m.sw('result')==state and not m.timers; passed(); continue
-    confirm=m.top; assert m.alive(page) and m.timers  # until Install Update? is opened too
-    m.nodes[confirm]['stage']=3; m.advance(80)
-    assert not m.alive(page) and not m.timers  # Install Update? on top and opened: the check's page closed under it
+    confirm=m.top; assert not m.alive(page) and not m.timers  # Install Update? on top and still: the check's page closed under it
     view=m.find('scroll_view',confirm); assert m.selected(view)==0  # Cancel
     rows=[k for k in m.nodes if m.nodes[k]['type']=='list_item' and m.alive(k)]
     assert [m.nodes[m.nodes[r]['children'][0]].get('text') for r in rows]==['Cancel','Install and Restart']
