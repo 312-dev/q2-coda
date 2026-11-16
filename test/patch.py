@@ -13686,7 +13686,11 @@ assert m.toasts[-1][3]=="Spotify didn't answer in time" and len(m.threads)==t an
 # Account: the name, Premium, and Sign out after a confirmation; then the pairing prompt.
 m.row(8); assert m.asked()==('account',); m.answer(*ME); assert m.labels()==['Account','Alice','Premium','Sign Out','']
 # Sign Out asks on the confirmation card (feedback.c confirm); its answer (spotify.c signout_answer) runs once it has closed
-def card(m,answer,row): m.call(address=payload_syms[answer],args=(0,row,0,0),gap=0,clear=False)
+def card(m,answer,row):
+    if m.nodes[m.top].get('name')=='sortselect_dialog':  # the card closes first, as on the unit: the page is on top again
+        if m.top in m.stack: m.stack.remove(m.top)
+        m.top=m.page
+    m.call(address=payload_syms[answer],args=(0,row,0,0),gap=0,clear=False)
 m.row(1); card(m,'signout_answer',0); assert m.labels()[:2]==['Account','Alice']
 t=len(m.threads); m.row(1); card(m,'signout_answer',1); assert m.asked()==('signout',) and len(m.threads)==t+1
 m.answer(*OK,[]); assert m.labels()==PAIR
