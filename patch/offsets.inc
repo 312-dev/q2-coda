@@ -319,8 +319,7 @@ static inline int arc_out(int r, int y) {
 #define MARQUEE_HOLD_MS 1500
 #define MARQUEE_PASSES 3        /* the selected row's title: navigation.c marq_moved */
 #define HSCROLL_ONLY_FOCUS 0x78 /* hscroll_label_t, a char: hscroll_label_set_only_focus */
-#define HSCROLL_ONLY_PARENT_FOCUS 0x79 /* a char: hscroll_label_set_only_parent_focus (0x5fb050)   \
-                                        */
+#define HSCROLL_ONLY_PARENT_FOCUS 0x79 /* a char: hscroll_label_set_only_parent_focus */
 #define HSCROLL_LOOP 0x7a       /* a char: a pass ends on its lull and starts again (0x5fb86c) */
 #define HSCROLL_YOYO 0x7b       /* a char: it scrolls back instead of snapping (0x5fb888) */
 #define HSCROLL_ELLIPSES 0x7c   /* a char: stopped, it ends in an ellipsis (hscroll_label_set_ellipses) */
